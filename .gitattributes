@@ -1,0 +1,23 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.dll binary
+*.a binary
+*.lib binary
+*.so binary
+*.dylib binary
+*.exe binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.fbx binary
+*.wasm binary
+*.zip binary
+*.bin binary
+*.flac binary
+*.syso binary
