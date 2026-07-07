@@ -266,4 +266,3 @@ func floatField(m map[string]session.FieldValue, f string) (float64, bool) {
 	}
 	return 0, false
 }
-
