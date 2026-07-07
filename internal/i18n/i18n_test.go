@@ -174,3 +174,15 @@ func TestNormalize(t *testing.T) {
 		}
 	}
 }
+
+// TestNoPrintfPlaceholders: catalog strings interpolate {name} args - a literal %d/%s means the
+// string was written printf-style and renders verbatim in the UI ("Overlays… (%d)" regression).
+func TestNoPrintfPlaceholders(t *testing.T) {
+	for code, flat := range loadRaw(t) {
+		for k, v := range flat {
+			if strings.Contains(v, "%d") || strings.Contains(v, "%s") || strings.Contains(v, "%v") {
+				t.Errorf("%s: %s contains a printf placeholder: %q", code, k, v)
+			}
+		}
+	}
+}
