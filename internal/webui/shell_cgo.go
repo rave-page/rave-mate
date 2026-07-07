@@ -114,6 +114,7 @@ func (s *cgoShell) run(initialHTML string, _ bool) {
 	defer w.Destroy()
 	w.SetTitle(s.title)
 	w.SetSize(s.w, s.h, webview.HintNone)
+	setWindowIcon(uintptr(w.Window())) // brand icon in title bar / Alt-Tab (see windowicon_windows.go)
 	// Page → Go: the single action channel. Payload is JSON ({act,val,form,id}).
 	_ = w.Bind("rave", func(payload string) {
 		if s.onAction != nil {
