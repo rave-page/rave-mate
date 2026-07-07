@@ -1,0 +1,2790 @@
+{
+  "_meta": {
+    "name": "Français"
+  },
+  "actions": {
+    "toast": {
+      "automationDeleted": "Automatisation supprimée",
+      "connecting": "Connexion…",
+      "goLiveFailed": "Échec du passage en direct : ",
+      "goingLive": "Passage en direct…",
+      "launchingGroup": "Lancement du groupe d'apps…",
+      "publishingGithub": "Publication sur GitHub…",
+      "setFinished": "Set terminé",
+      "signInBeforeLive": "Connectez-vous (Réglages ▸ Compte) avant de passer en direct",
+      "startingReceive": "Démarrage de la réception…",
+      "updatingVrcBio": "Mise à jour de la bio VRChat…",
+      "updatingVrcStatus": "Mise à jour du statut VRChat…"
+    }
+  },
+  "appgroups": {
+    "admin": "admin",
+    "empty": "Aucun groupe d'applis configuré",
+    "subtitle": "Relancer des jeux d'applis nommés après un crash",
+    "unavailable": "Groupes d'applis indisponibles",
+    "upCount": "{running}/{total} actifs"
+  },
+  "automations": {
+    "emptyList": "Aucune automatisation",
+    "manual": "(manuel)",
+    "noRuns": "Aucune exécution",
+    "noSchedules": "Aucune planification",
+    "recentRuns": "Exécutions récentes",
+    "schedules": "Planifications",
+    "subtitle": "Moteur d'automatisation média",
+    "unavailable": "Automatisations indisponibles",
+    "unnamed": "(sans nom)"
+  },
+  "brand": {
+    "tagline": "Local worker & bridge for rave.page"
+  },
+  "common": {
+    "browse": "Parcourir…",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "comingSoon": "Bientôt disponible",
+    "delete": "Supprimer",
+    "disabled": "désactivé",
+    "enabled": "activé",
+    "enabledCap": "Activé",
+    "launch": "Lancer",
+    "off": "arrêt",
+    "refresh": "Actualiser",
+    "remove": "Retirer",
+    "save": "Enregistrer",
+    "signIn": "Se connecter",
+    "signOut": "Se déconnecter"
+  },
+  "editor": {
+    "align": "Aligner",
+    "alignCenter": "centre",
+    "alignLeft": "gauche",
+    "alignRight": "droite",
+    "angle": "Angle",
+    "blend": "Fusion",
+    "canvasSize": "Canevas {w}×{h}",
+    "color": "Couleur",
+    "disabledHint": "L'éditeur média est désactivé - activez-le dans Réglages ▸ Fonctions.",
+    "docInfo": "Document {w} × {h} · {count} calques",
+    "empty": {
+      "noTemplates": "Aucun modèle."
+    },
+    "end": "Fin",
+    "exportPng": "Exporter PNG",
+    "fill": "Remplissage",
+    "fitContain": "contenir",
+    "fitCover": "couvrir",
+    "fitStretch": "étirer",
+    "font": "Police",
+    "gradient": "Dégradé",
+    "group": "Grouper",
+    "h": "H",
+    "image": "Image",
+    "imagePlaceholder": "image",
+    "label": {
+      "apply": "Appliquer",
+      "canvasSizeTitle": "Taille du canevas",
+      "component": "composant",
+      "height": "Hauteur",
+      "insert": "Insérer",
+      "insertTemplateTitle": "Insérer un modèle / composant",
+      "myComponent": "Mon composant",
+      "preset": "préréglage",
+      "saveTemplateTitle": "Enregistrer comme modèle",
+      "savesSelectedGroup": "Enregistre le groupe sélectionné.",
+      "savesWholeDoc": "Enregistre tout le document.",
+      "width": "Largeur"
+    },
+    "letterSpacing": "Interlettr.",
+    "lineHeight": "Interligne",
+    "name": "Nom",
+    "noLayerSelected": "Aucun calque sélectionné.",
+    "noLayers": "Aucun calque - ajoutez-en un depuis la barre d'outils.",
+    "opacity": "Opacité",
+    "path": "Chemin",
+    "placeholderHint": "Les variables comme {track.title} se remplissent en direct depuis la lecture. Cliquez un calque pour le sélectionner.",
+    "placeholdersList": "Variables : {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "redo": "Rétablir",
+    "rotation": "Rotation",
+    "saveTemplate": "Enregistrer comme modèle…",
+    "scaleX": "Échelle X",
+    "scaleY": "Échelle Y",
+    "sectionInspector": "Inspecteur",
+    "sectionLayers": "Calques",
+    "sectionPreview": "Aperçu",
+    "selectLayerHint": "Sélectionnez un calque pour éditer son opacité, sa fusion et ses propriétés.",
+    "selectedInfo": "· sélectionné : {name}",
+    "size": "Taille",
+    "solid": "Uni",
+    "start": "Début",
+    "subtitle": "Composez des overlays live - calques, fusion et modèles avec aperçu WYSIWYG",
+    "subtitleDisabled": "Compositeur d'overlays visuels",
+    "templates": "Modèles…",
+    "text": "Texte",
+    "title": "Éditeur",
+    "toast": {
+      "cannotResolveExportDir": "Impossible de résoudre le dossier d'export",
+      "enterTemplateName": "Saisissez un nom de modèle",
+      "exportFailed": "Échec de l'export : ",
+      "exportedTo": "Exporté : {path}",
+      "exportingPng": "Export du PNG…",
+      "invalidCanvasSize": "Taille de canevas invalide",
+      "saveFailed": "Échec de l'enregistrement : ",
+      "templateSaved": "Modèle enregistré : "
+    },
+    "undo": "Annuler",
+    "ungroup": "Dégrouper",
+    "w": "L",
+    "x": "X",
+    "y": "Y"
+  },
+  "help": {
+    "camera-paths": {
+      "body": "La caméra en jeu de VRChat enregistre des trajectoires de travelling - des séquences d'images-clés (position, orientation, vitesse, mise au point) que la caméra survole en douceur. VRChat les enregistre en fichiers JSON ; rave-mate les retrouve, les regroupe par monde d'enregistrement, et peut les sauvegarder, les organiser et les recharger.\n\nL'aperçu montre la trajectoire en 3D : chaque point est une image-clé, la petite ligne violette indique l'orientation de la caméra, et la couleur de la ligne encode la vitesse (menthe = lent, rose = rapide). Le repère ambre parcourt la trajectoire à sa vitesse réelle enregistrée.\n\n« Charger dans VRChat » envoie le fichier via OSC pour qu'il apparaisse immédiatement dans la caméra en jeu - OSC doit être activé dans VRChat (menu Action → Options → OSC). La boucle et le type de trajectoire ne sont pas stockés dans le fichier ; réglez-les une fois dans VRChat après le chargement.",
+      "title": "Trajectoires de caméra VRChat"
+    },
+    "dual-alignment": {
+      "body": "Quand un même set a été capturé deux fois - l'audio du broadcast (récepteur Icecast) ET un enregistrement vidéo OBS - les deux fichiers commencent rarement au même instant : vous lancez l'enregistrement et le broadcast à des moments différents, donc le même beat se situe à des positions différentes dans chaque fichier.\n\nL'alignement trouve ce décalage temporel en écoutant les deux enregistrements : l'enveloppe de volume de chaque fichier (la montée et la descente de l'énergie, ~50 fois par seconde) est extraite avec ffmpeg, et les deux enveloppes sont corrélées de manière croisée - glissées l'une contre l'autre jusqu'à la meilleure correspondance. Le score de confiance indique à quel point la meilleure correspondance a battu toutes les autres positions ; « élevée » signifie que les enregistrements partagent clairement le même audio.\n\nUne fois alignés, les deux formes d'onde s'affichent sur une même timeline partagée et une seule plage IN/OUT coupe les DEUX fichiers au même instant réel - ainsi l'audio et la vidéo exportés ont un contenu et une durée identiques. Si le résultat automatique semble erroné (p. ex. l'audio de la vidéo est très traité), ajustez le décalage manuellement ou saisissez-le directement ; votre valeur manuelle est conservée jusqu'à ce que vous relanciez l'alignement automatique.",
+      "title": "Alignement temporel audio ⇆ vidéo"
+    },
+    "embedded-video": {
+      "body": "La vidéo se lit ici même, dans l'app : rave-mate diffuse le fichier vers sa propre fenêtre via une connexion localhost privée (HTTP avec requêtes Range, donc la navigation est instantanée - le lecteur ne récupère que les octets nécessaires). Rien ne quitte votre machine et aucune fenêtre de lecteur supplémentaire ne s'ouvre.\n\nLa forme d'onde ci-dessous est la piste AUDIO de la vidéo, analysée exactement comme un enregistrement audio - naviguez dans une vidéo de plusieurs heures grâce à la musique : cliquez sur la forme d'onde pour vous déplacer, utilisez la liste déroulante des pistes pour sauter à une entrée de la tracklist. Quand un set dispose à la fois d'une capture audio et d'un enregistrement vidéo, la vidéo tourne comme un aperçu muet, aligné temporellement, pendant que l'audio du broadcast (généralement plus propre) est lu - changez la source avec le commutateur AUDIO/VIDÉO.\n\nLe décodage utilise le moteur web de l'app (Chromium) : le MP4 H.264/AAC - ce qu'OBS enregistre par défaut - et le WebM/VP9 se lisent nativement. Un codec ou conteneur exotique affiche une erreur honnête à la place ; exportez une coupe compatible web via les préréglages d'encodage, ou ouvrez le fichier dans votre lecteur système.",
+      "title": "Lecture vidéo intégrée"
+    },
+    "fingerprinting": {
+      "body": "Une empreinte est une signature acoustique compacte calculée à partir de l'audio lui-même - pas du nom de fichier ni des tags - de sorte qu'une piste peut être identifiée même si elle est renommée, réencodée ou issue d'un pressage différent.\n\nrave-mate utilise Chromaprint (l'outil d'empreinte derrière AcoustID) pour vérifier de quelle piste de la bibliothèque relève réellement chaque segment enregistré, ce qui rend le « correspondance ✓ » fiable dans l'historique de vos sets.",
+      "title": "Empreinte audio"
+    },
+    "icecast": {
+      "body": "Icecast est un serveur de streaming open source. rave-mate exécute un petit récepteur local qui parle le protocole Icecast, afin que la fonction Broadcasting intégrée de Traktor puisse « diffuser » votre set directement sur le disque de cette machine - sans internet.\n\nPointez Traktor sur 127.0.0.1 avec le port, le chemin de montage et le mot de passe indiqués ici, lancez le broadcast, et chaque set atterrit dans votre dossier de sets, lié temporellement à la tracklist de l'enregistreur de session - sautez à n'importe quelle piste de l'enregistrement depuis l'onglet Publier.",
+      "title": "Capture de set via Icecast"
+    },
+    "motion-studio": {
+      "body": "Rejoue les prises de mouvement VR enregistrées depuis votre casque (tête + manettes + éventuels trackers full-body, capturés depuis le menu poignet). L'aperçu montre le squelette en 3D avec le déplacement de la tête sous forme de traînée violette.\n\nDeux sorties en direct : VMC diffuse la prise sous forme de périphériques de tracking bruts vers un moteur de rendu VTuber (VSeeFace, Warudo, VNyan) qui fait l'IK et anime votre avatar - c'est le vrai chemin de lecture. Les trackers OSC alimentent le full-body tracking de VRChat, mais VRChat pilote toujours la tête et les mains depuis votre HMD et vos manettes en direct, donc une prise enregistrée ne peut pas animer votre avatar VRChat - exportez une animation Unity .anim pour cela et pilotez-la depuis l'Animator de l'avatar.\n\nLes avatars (.vrm) importés ici se répliquent automatiquement vers vos instances rave-mate appairées.",
+      "title": "Studio de mouvement"
+    },
+    "network-graph": {
+      "body": "Débits d'envoi/réception en direct sur les 2 dernières minutes.\n\nPEER est le lien LAN chiffré vers vos autres machines rave-mate appairées (sync de bibliothèque, contrôle à distance, routes média). API est le trafic vers rave.page lui-même - ingestion de set en direct, uploads, visuels. SESSION totalise tout depuis le démarrage de l'app.\n\nDes pics pendant un set en direct sont normaux : chaque piste confirmée pousse une mise à jour « en lecture », et la capture de set diffuse en continu.",
+      "title": "Débit réseau"
+    },
+    "perf-graph": {
+      "body": "CPU (haut) et RAM (bas) sur les 2 dernières minutes. APP est rave-mate seul - y compris ses sous-processus de travail - SYS est toute la machine.\n\nrave-mate garde le travail lourd (transcodage, empreinte, routes média) dans des processus enfants supervisés à tampons bornés, donc si APP reste plat pendant que SYS grimpe, c'est qu'un autre programme est en charge. Si APP lui-même grimpe et reste haut, consultez l'onglet Journaux et envisagez de désactiver les fonctions inutilisées dans les Réglages - les fonctions désactivées ne possèdent aucun port, goroutine ni sous-processus.",
+      "title": "Performance système"
+    },
+    "session-recorder": {
+      "body": "Surveille vos platines et écrit une tracklist de ce que vous avez réellement joué, avec un horodatage par piste.\n\nUne piste ne compte qu'une fois qu'elle a joué pendant le seuil de confirmation - les aperçus rapides, vérifications de tags et faux départs sont filtrés. Le résultat est l'historique des sets dans l'onglet Publier, où chaque entrée peut être liée à l'audio capturé, aux enregistrements OBS et aux identités de piste vérifiées par empreinte.",
+      "title": "Enregistreur de session"
+    },
+    "timing-graph": {
+      "body": "Temps d'aller-retour vers chaque machine appairée sur votre LAN, en millisecondes, sur les 2 dernières minutes.\n\nLe RTT est le temps qu'un message met pour atteindre le pair et revenir. Des valeurs à un chiffre sont typiques d'un LAN filaire ; le Wi-Fi reste plus haut et fluctue. Des pics soutenus signifient généralement un réseau chargé ou une machine qui se met en veille - le contrôle à distance et les routes média le ressentiront avant tout le reste.",
+      "title": "Latence des pairs (RTT)"
+    },
+    "trim-editor": {
+      "body": "Coupez les silences d'un enregistrement sans toucher à l'original : choisissez un point IN et un point OUT et exportez la plage conservée en nouveau fichier - la source n'est jamais modifiée.\n\nDéfinissez la plage en faisant glisser les bords haut (IN) / bas (OUT) de la forme d'onde, en saisissant des temps exacts, ou avec Placer IN / Placer OUT à la tête de lecture actuelle. Le menu Rognage auto le fait pour vous : Limites de la tracklist se cale sur le début de la première piste et la fin de la dernière depuis l'enregistreur de session ; Détecter la fin de la musique lance la détection de silence ffmpeg en tête et en queue ; Dernier fader baissé utilise l'instant exact où vous avez baissé le fader à la fin du set.\n\nExport : « Remux sans perte » est instantané - il copie les flux sans réencoder, mais les coupes se calent sur l'image-clé la plus proche (une coupe vidéo peut démarrer jusqu'à quelques secondes plus tôt). Choisissez un vrai préréglage d'encodage pour des coupes exactes à l'image, au prix d'un réencodage. Pour une paire audio+vidéo alignée, « Les deux (aligné) » coupe les deux fichiers au même instant réel afin qu'ils ressortent au contenu identique.",
+      "title": "Éditeur de rognage"
+    },
+    "vrchat-announcement": {
+      "body": "Un groupe VRChat a une annonce épinglée et un fil de publications. Publier une nouvelle annonce remplace l'actuelle ; les publications s'empilent en fil et peuvent être supprimées individuellement.\n\nLes deux nécessitent la permission group-announcement-manage - les propriétaires du groupe l'ont toujours, les autres membres l'obtiennent via un rôle. « Envoyer une notification » la pousse dans les notifications VRChat des membres, à utiliser donc avec parcimonie.",
+      "title": "Annonce vs. publications"
+    },
+    "vrchat-presence": {
+      "body": "Votre statut contrôle votre visibilité en jeu : rejoignez-moi laisse les amis rejoindre directement votre instance, actif est le réglage courant par défaut, demandez-moi masque votre position pour que l'on doive faire une demande, et occupé supprime entièrement invitations et notifications.\n\nLe message de statut (32 caractères) apparaît sous votre nom dans les menus - pratique pour annoncer le set de ce soir. Les changements ici s'appliquent immédiatement à votre vrai compte VRChat.",
+      "title": "Présence VRChat"
+    },
+    "wave-nav": {
+      "body": "La forme d'onde est la surface de navigation : cliquez n'importe où pour y sauter, faites défiler la molette pour zoomer autour du curseur (jusqu'à 50×), et faites glisser pour vous déplacer une fois zoomé. + / − / Ajuster font de même depuis les boutons. Les lignes violettes sont les débuts de piste de la tracklist de session, l'ambre est le dernier fader baissé, et les lignes colorées sur les pistes de la bibliothèque sont vos points de repère DJ.\n\nLes deux pastilles superposées à la forme d'onde vous informent au fil de l'écoute : celle de gauche montre l'encodage source (survolez pour le codec, la fréquence d'échantillonnage, le débit et la taille du fichier), celle de droite le volume intégré de la piste (survolez pour toute l'histoire EBU R128 - intégré vs momentané, cibles de streaming, true peak). L'affichage à côté des boutons de zoom suit votre curseur avec le temps et le volume momentané à cette position exacte.\n\nEn mode édition, la bande gagne trois couloirs de pointeur : le bord supérieur fait glisser la poignée IN, le bord inférieur fait glisser OUT, et le milieu reste clic-pour-naviguer - vous pouvez donc auditionner et rogner sans jamais quitter la forme d'onde.",
+      "title": "Navigation dans la forme d'onde"
+    }
+  },
+  "library": {
+    "addToPlaylist": "Ajouter à une playlist…",
+    "audioCap": {
+      "default": "AAC/MP3 max 320k",
+      "opus": "Opus max 510k"
+    },
+    "batch": {
+      "fingerprint": "Empreinte",
+      "tags": "Tags",
+      "transcode": "Transcoder…",
+      "waveforms": "Formes d'onde"
+    },
+    "browse": {
+      "cannotRead": "Lecture impossible de {path}",
+      "desktop": "BUREAU",
+      "downloads": "TÉLÉCHARGEMENTS",
+      "filterName": "Filtrer par nom…",
+      "folder": "Dossier",
+      "goto": "Aller à…",
+      "grid": "Grille",
+      "home": "ACCUEIL",
+      "list": "Liste",
+      "music": "MUSIQUE",
+      "pictures": "IMAGES",
+      "pin": "Épingler le dossier",
+      "unpin": "Désépingler le dossier",
+      "up": "↑ Remonter",
+      "videos": "VIDÉOS"
+    },
+    "clear": "Effacer",
+    "col": {
+      "bpm": "BPM",
+      "key": "TONALITÉ",
+      "time": "DURÉE"
+    },
+    "coll": {
+      "backup": "Sauvegarder",
+      "cleanup": "Nettoyer",
+      "desc": "Import en lecture seule depuis Traktor / Rekordbox / VirtualDJ (cues + beatgrid préservés). Cochez des lignes pour les ajouter à une playlist.",
+      "empty": "Aucune piste - importez une bibliothèque",
+      "export": "Exporter / Convertir…",
+      "import": "Importer / Actualiser",
+      "relocate": "Relocaliser…",
+      "scan": "Scanner les manquants",
+      "search": "Rechercher titre / artiste…",
+      "sync": "Sync cloud…",
+      "trackHeader": "PISTE ({count})"
+    },
+    "collsort": {
+      "artist": "Artiste",
+      "bpm": "BPM",
+      "genre": "Genre",
+      "key": "Tonalité",
+      "label": "Label",
+      "plays": "Lectures",
+      "rating": "Note",
+      "title": "Titre"
+    },
+    "confirm": {
+      "deleteFile": "Supprimer {name} du disque ? Cette action est irréversible.",
+      "deletePlaylist": "Supprimer cette playlist ? Les pistes restent dans votre collection.",
+      "moveTo": "Déplacer {name} vers :"
+    },
+    "copyPath": "Copier le chemin",
+    "crf": {
+      "av1": "28–35 typique",
+      "default": "18 visuellement sans perte · 23 défaut · 28 léger",
+      "vp9": "31–36 typique"
+    },
+    "dbUnavailable": "Base de la bibliothèque indisponible",
+    "duplicate": "Dupliquer",
+    "edit": "Modifier",
+    "enc": {
+      "accel": "Accél. matérielle",
+      "audioBitrate": "Débit audio (kbps)",
+      "audioCodec": "Codec audio",
+      "bitrateK": "Débit (kbps)",
+      "bitrateKHint": "Débit vidéo cible",
+      "channels": "Canaux",
+      "container": "Conteneur",
+      "crf": "CRF / CQ",
+      "fps": "fps",
+      "lufsHint": "−14 streaming · −23 EBU R128",
+      "lufsTarget": "Cible intégrée (LUFS)",
+      "mono": "Mono",
+      "normalize": "Normaliser le volume",
+      "preset": "Préréglage",
+      "qualityProfile": "Profil de qualité",
+      "raiseQuiet": "Remonter seulement les pistes faibles",
+      "rateBitrate": "Débit cible",
+      "rateCRF": "Qualité (CRF/CQ)",
+      "rateMode": "Mode de débit",
+      "resolution": "Résolution",
+      "sampleRate": "Fréq. d'échantillonnage",
+      "saveAsNew": "Enregistrer comme nouveau…",
+      "savePreset": "Enregistrer le préréglage",
+      "source": "Source",
+      "start": "Démarrer le transcodage",
+      "stereo": "Stéréo",
+      "trimEnd": "Rogner fin (s)",
+      "trimStart": "Rogner début (s)",
+      "truePeak": "Plafond true-peak (dBTP)",
+      "videoCodec": "Codec vidéo"
+    },
+    "favorites": {
+      "desc": "Dossiers épinglés - ouverts dans Parcourir. Épinglez le dossier courant depuis la barre d'outils Parcourir.",
+      "empty": "Aucun dossier épinglé",
+      "unpin": "Désépingler"
+    },
+    "harmonic": {
+      "clear": "Effacer le filtre de tonalité",
+      "desc": "Roue Camelot - les tonalités compatibles s'illuminent. Touchez une tonalité pour filtrer la collection.",
+      "show": "Afficher les pistes harmoniques"
+    },
+    "hints": {
+      "abitrate": "Le débit audio cible {target} kbps dépasse la source {source} kbps.",
+      "alreadyCodec": "La source est déjà en {codec} - le préréglage Remux sans perte garde la qualité et change le conteneur.",
+      "probing": "Analyse des flux…",
+      "source": "Source : {detail}",
+      "upsample": "Suréchantillonner l'audio {source} → {target} Hz n'ajoute aucune qualité.",
+      "upscale": "Mettre à l'échelle {sw}×{sh} → {dw}×{dh} n'ajoute aucune qualité.",
+      "vbitrate": "Le débit vidéo cible {target} kbps dépasse la source {source} kbps."
+    },
+    "hist": {
+      "desc": "Vos sets DJ sur Traktor + Rekordbox, du plus récent au plus ancien.",
+      "empty": "Aucun historique chargé",
+      "load": "Charger l'historique DJ"
+    },
+    "idmarks": {
+      "desc": "Les pistes/dossiers marqués n'affichent que « ID » sur chaque sortie - masque les IDs non sortis. Basculez pour révéler artiste/label par entrée.",
+      "empty": "Aucune marque ID",
+      "markFile": "Marquer un fichier…",
+      "markFolder": "Marquer un dossier…",
+      "showArtist": "Afficher l'artiste",
+      "showLabel": "Afficher le label",
+      "typePath": "Saisissez un chemin…",
+      "unavailable": "Marques ID indisponibles"
+    },
+    "insp": {
+      "actions": "Actions",
+      "details": "Détails",
+      "empty": "Sélectionnez un fichier ou une piste pour voir les détails et actions",
+      "encoding": "Encodage / transcodage",
+      "harmonic": "Tonalités harmoniques",
+      "missing": "○ fichier absent du disque",
+      "notInPlaylist": "Dans aucune playlist",
+      "player": "Lecteur",
+      "playlists": "Playlists",
+      "selected": "Sélectionné",
+      "tags": "Tags",
+      "tagsDesc": "Écrit l'analyse DJ (BPM/tonalité/genre) dans les tags du fichier. Réversible.",
+      "writeTags": "Écrire les tags → fichier"
+    },
+    "item": {
+      "few": "{count} éléments",
+      "many": "{count} éléments",
+      "one": "{count} élément",
+      "other": "{count} éléments"
+    },
+    "keyChipN": "Tonalité ({count})",
+    "kind": {
+      "all": "TOUS",
+      "audio": "AUDIO",
+      "image": "IMAGE",
+      "other": "AUTRE",
+      "video": "VIDÉO"
+    },
+    "kw": {
+      "relative": "relatif",
+      "same": "même"
+    },
+    "label": {
+      "allSources": "Toutes les sources",
+      "audioKbps": "Audio kbps",
+      "backupClean": "Sauvegarder + nettoyer",
+      "create": "Créer",
+      "createAdd": "Créer + ajouter",
+      "crf": "CRF",
+      "csvBackup": "Sauvegarde des métadonnées CSV",
+      "deleteEllipsis": "Supprimer…",
+      "description": "Description",
+      "destFolder": "Dossier de destination",
+      "export": "Exporter",
+      "filesCount": {
+        "few": "{count} fichiers",
+        "many": "{count} fichiers",
+        "one": "{count} fichier",
+        "other": "{count} fichiers"
+      },
+      "format": "Format",
+      "fullPath": "Chemin complet",
+      "genre": "Genre",
+      "id": "ID",
+      "import": "Importer",
+      "importFile": "Importer un fichier",
+      "importFromFile": "Importer depuis un fichier",
+      "importRekordboxAuto": "Rekordbox (détection auto)",
+      "importTraktorAuto": "Traktor (détection auto)",
+      "kind": "Type",
+      "label": "Label",
+      "localPlaylists": "Playlists locales",
+      "m3uPlaylist": "Playlist M3U",
+      "mark": "Marquer",
+      "markAsID": "Marquer comme ID",
+      "markPathHint": "Chemin d'une piste ou d'un dossier à marquer comme « ID »",
+      "mergeHistory": "fusionner tous les historiques détectés",
+      "move": "Déplacer",
+      "moveEllipsis": "Déplacer…",
+      "newID": "Nouvel ID",
+      "newName": "Nouveau nom",
+      "newPlaylistName": "Nom de la nouvelle playlist",
+      "orCreateManual": "Ou créer une nouvelle playlist manuelle",
+      "played": "Lu",
+      "pull": "Récupérer",
+      "push": "Envoyer",
+      "rekordboxXML": "Rekordbox XML",
+      "remoteOnly": "Distant uniquement",
+      "renameEllipsis": "Renommer…",
+      "saveAs": "Enregistrer sous…",
+      "saveAsNew": "Enregistrer comme nouveau",
+      "sort": "Trier",
+      "syncCounts": "{status} · local {local} / distant {remote}",
+      "trackCount": {
+        "few": "{count} pistes",
+        "many": "{count} pistes",
+        "one": "{count} piste",
+        "other": "{count} pistes"
+      },
+      "traktorNML": "Traktor NML",
+      "unmarkID": "Retirer le marquage ID",
+      "view": "Vue",
+      "virtualdjXML": "VirtualDJ database.xml",
+      "xmlPath": "Chemin complet du fichier .xml"
+    },
+    "meta": {
+      "album": "Album",
+      "artist": "Artiste",
+      "beatgrid": "Beatgrid",
+      "bitrate": "Débit",
+      "bpm": "BPM",
+      "cues": "Cues",
+      "duration": "Durée",
+      "genre": "Genre",
+      "kbps": "{count} kbps",
+      "key": "Tonalité",
+      "label": "Label",
+      "markers": "{count} marqueurs",
+      "path": "Chemin",
+      "plays": "Lectures",
+      "rating": "Note"
+    },
+    "metadata": "Métadonnées",
+    "modal": {
+      "addToPlaylist": "Ajouter à la playlist",
+      "batchTranscode": "Transcodage par lot",
+      "batchTranscodeDesc": "Transcode tous les fichiers sélectionnés avec un préréglage.",
+      "choosePlaylist": {
+        "few": "{count} pistes. Choisissez une playlist :",
+        "many": "{count} pistes. Choisissez une playlist :",
+        "one": "{count} piste. Choisissez une playlist :",
+        "other": "{count} pistes. Choisissez une playlist :"
+      },
+      "cleanupCollection": "Nettoyer la collection",
+      "cleanupDesc": "Retire les pistes de la collection dont les fichiers n'existent plus sur le disque (et leurs références dans les playlists). Une sauvegarde complète est prise d'abord ; la collection.nml source est aussi élaguée.",
+      "cloudSync": "Sync cloud",
+      "deleteFile": "Supprimer le fichier",
+      "deletePlaylist": "Supprimer la playlist",
+      "exportConvert": "Exporter / Convertir",
+      "exportDesc": "Convertit la bibliothèque importée vers un autre format DJ - écrit un NOUVEAU fichier ; votre source est intacte. Exporter = dossier de données de l'app · Enregistrer sous… = choisir un emplacement.",
+      "importDesc": "Importe une bibliothèque DJ (lecture seule). Repères + beatgrid préservés.",
+      "importLibrary": "Importer une bibliothèque",
+      "moveToFolder": "Déplacer vers un dossier",
+      "preset": "Préréglage",
+      "renamePlaylist": "Renommer la playlist",
+      "savePresetAs": "Enregistrer le préréglage sous"
+    },
+    "open": "Ouvrir",
+    "pl": {
+      "cloudStatus": "État cloud",
+      "dupManual": "Dupliquer en manuel",
+      "editRules": "Modifier les règles",
+      "empty": "Aucune playlist",
+      "emptyTracks": "Playlist vide",
+      "exportM3U": "Exporter M3U",
+      "exportM3UAs": "Exporter M3U…",
+      "new": "Nouvelle playlist",
+      "newSmart": "Nouvelle playlist intelligente",
+      "pull": "Récupérer ← cloud",
+      "push": "Envoyer → cloud",
+      "remote": "Playlists distantes…",
+      "rename": "Renommer",
+      "smartMatchLive": "⚡ Intelligente · {desc} · {count} correspondance (live)",
+      "smartSub": "intelligente · {count} correspondance · {desc}",
+      "syncAll": "Tout synchroniser",
+      "unlink": "Délier"
+    },
+    "playsort": {
+      "artist": "Artiste",
+      "bpm": "BPM",
+      "genre": "Genre",
+      "key": "Tonalité",
+      "playorder": "Ordre de lecture",
+      "plays": "Lectures",
+      "rating": "Note",
+      "title": "Titre"
+    },
+    "preset": {
+      "builtin": "intégré",
+      "builtins": "Préréglages intégrés",
+      "custom": "personnalisé",
+      "dupEdit": "Dupliquer + modifier",
+      "emptyCustom": "Aucun préréglage personnalisé - ajustez un intégré puis Enregistrer comme nouveau",
+      "new": "Nouveau préréglage",
+      "yours": "Vos préréglages"
+    },
+    "profile": {
+      "default": "Choisissez un profil pour remplir le débit auto depuis codec × résolution × fps.",
+      "master": "Qualité proche de la source, gros fichiers (~3× streaming).",
+      "matchsource": "Utilise le débit source mesuré comme cible.",
+      "mobile": "Débit léger, adapté à la lecture 3G/4G.",
+      "streaming": "Upload compact - ~80% de la cible YouTube.",
+      "youtubehq": "Débit recommandé YouTube par résolution + fps."
+    },
+    "queue": {
+      "desc": "Tâches de transcodage - sortie → un nouveau dossier « rave-mate-transcoded » à côté de chaque source ; originaux intacts.",
+      "empty": "Aucune tâche"
+    },
+    "reloc": {
+      "apply": "Appliquer → sauvegarde + écriture de la collection corrigée",
+      "confAmbiguous": "ambigu",
+      "confSize": "taille correspond",
+      "confUnique": "unique",
+      "desc": "Localise les fichiers déplacés ; écrit une collection CORRIGÉE dans un NOUVEAU fichier. Votre collection.nml n'est JAMAIS modifié ; une sauvegarde est faite d'abord.",
+      "find": "Trouver des candidats",
+      "missing": "{count} fichiers manquants.",
+      "rootPlaceholder": "Dossier à chercher, ex. D:\\Music",
+      "showing": "Affichage des 200 premiers sur {total}",
+      "title": "Relocaliser les fichiers manquants",
+      "working": "Traitement…"
+    },
+    "remove": "Retirer",
+    "reveal": "Révéler",
+    "revert": "Rétablir",
+    "section": {
+      "browse": "Parcourir",
+      "collection": "Collection",
+      "favorites": "Favoris",
+      "history": "Historique",
+      "idmarks": "Marques ID",
+      "playlists": "Playlists",
+      "presets": "Préréglages",
+      "queue": "File"
+    },
+    "selectedCount": "{count} sélectionnés",
+    "showingFirst": "Affichage des {shown} premiers sur {total}",
+    "sort": {
+      "modified": "Modifié",
+      "name": "Nom",
+      "size": "Taille"
+    },
+    "sortAsc": "↑ Croiss.",
+    "sortDesc": "↓ Décroiss.",
+    "sr": {
+      "bpmMax": "BPM max",
+      "bpmMin": "BPM min",
+      "countText": "{count} sur {total} pistes correspondent - {desc}",
+      "create": "Créer la playlist intelligente",
+      "desc": "Les règles se combinent en ET ; les genres sont en OU. Les correspondances se mettent à jour en direct.",
+      "feel": "Préréglage d'ambiance",
+      "feelPlaceholder": "Préréglage d'ambiance…",
+      "genres": "Genres",
+      "keyContains": "Tonalité contient",
+      "keyHint": "ex. Am ou 8A",
+      "name": "Nom",
+      "plays": "Lectures ≥",
+      "rateAny": "Toutes",
+      "rating": "Note",
+      "search": "Rechercher",
+      "searchHint": "titre / artiste / album / label / commentaire",
+      "titleEdit": "Modifier la playlist intelligente",
+      "titleNew": "Nouvelle playlist intelligente"
+    },
+    "toast": {
+      "addFailed": "Échec de l'ajout : ",
+      "addedTracks": {
+        "few": "{count} pistes ajoutées",
+        "many": "{count} pistes ajoutées",
+        "one": "{count} piste ajoutée",
+        "other": "{count} pistes ajoutées"
+      },
+      "backedUpTo": "Sauvegardé vers ",
+      "backingUp": "Sauvegarde de la collection…",
+      "backingUpCleaning": "Sauvegarde + nettoyage…",
+      "backingUpWriting": "Sauvegarde + écriture…",
+      "backupFailed": "Échec de la sauvegarde : ",
+      "batchDone": "{kind} terminé",
+      "cleanedUp": "Nettoyé : {tracks} pistes, {entries} entrées de playlist, {playlists} playlists vides (sauvegarde → {backup})",
+      "cleanupFailed": "Échec du nettoyage (abandonné) : ",
+      "cloudUnavailable": "Sync cloud indisponible",
+      "configUnavailable": "Configuration indisponible",
+      "createFailed": "Échec de la création : ",
+      "createPrefix": "Créer : ",
+      "createdName": "Créé ",
+      "deleteFailed": "Échec de la suppression : ",
+      "deleted": "Supprimé",
+      "deletedPlaylist": "Playlist supprimée",
+      "duplicateFailed": "Échec de la duplication : ",
+      "duplicatedManual": "Dupliqué en manuel",
+      "enterFilePath": "Saisissez un chemin de fichier",
+      "enterFolder": "Saisissez un dossier à rechercher",
+      "enterName": "Saisissez un nom",
+      "exportFailed": "Échec de l'export : ",
+      "exportedArrow": "Exporté → ",
+      "exportedTo": "Exporté vers ",
+      "fetchingCloud": "Récupération du statut cloud…",
+      "filesMissing": "{missing} sur {total} fichiers manquants sur le disque",
+      "findFirst": "Trouvez d'abord des candidats",
+      "idMarkRemoved": "Marquage ID retiré",
+      "importFirst": "Importez d'abord une bibliothèque",
+      "importPrefix": "Importer : ",
+      "importedRekordbox": {
+        "few": "{count} pistes importées (Rekordbox)",
+        "many": "{count} pistes importées (Rekordbox)",
+        "one": "{count} piste importée (Rekordbox)",
+        "other": "{count} pistes importées (Rekordbox)"
+      },
+      "importedRemote": "Playlist distante importée",
+      "importedTracks": {
+        "few": "{count} pistes importées",
+        "many": "{count} pistes importées",
+        "one": "{count} piste importée",
+        "other": "{count} pistes importées"
+      },
+      "importedTraktor": {
+        "few": "{count} pistes importées (Traktor)",
+        "many": "{count} pistes importées (Traktor)",
+        "one": "{count} piste importée (Traktor)",
+        "other": "{count} pistes importées (Traktor)"
+      },
+      "importingRekordbox": "Import de la bibliothèque Rekordbox…",
+      "importingTraktor": "Import de la bibliothèque Traktor…",
+      "indexError": "Erreur d'indexation : ",
+      "indexing": "Indexation…",
+      "loadedSets": {
+        "few": "{count} sets chargés",
+        "many": "{count} sets chargés",
+        "one": "{count} set chargé",
+        "other": "{count} sets chargés"
+      },
+      "loadingHistory": "Chargement de l'historique DJ…",
+      "markedAsID": "Marqué comme ID",
+      "moveFailed": "Échec du déplacement : ",
+      "moved": "Déplacé",
+      "noHistory": "Aucun historique DJ trouvé",
+      "noMissing": "Aucun fichier manquant.",
+      "noRekordboxXML": "Aucun XML Rekordbox exporté trouvé (File → Export Collection in xml)",
+      "noTraktorBackup": "Aucune collection Traktor à sauvegarder",
+      "noTraktorCollection": "Aucune collection Traktor trouvée",
+      "openPrefix": "Ouvrir : ",
+      "overviewPrefix": "Aperçu : ",
+      "parsePrefix": "Analyse : ",
+      "presetDeleted": "Préréglage supprimé",
+      "presetDuplicated": "Préréglage dupliqué",
+      "presetSaved": "Préréglage enregistré",
+      "presetSavedName": "Préréglage enregistré : ",
+      "probeOk": "Probe ok ({n} octets) - ffprobe présent",
+      "probePrefix": "Probe : ",
+      "queuedTranscodes": {
+        "few": "{count} transcodages en file",
+        "many": "{count} transcodages en file",
+        "one": "{count} transcodage en file",
+        "other": "{count} transcodages en file"
+      },
+      "rekordboxHistory": "Historique Rekordbox : ",
+      "relocBackupFailed": "Échec de la sauvegarde (abandonné) : ",
+      "relocFixed": "Corrigé {n} → {out} (collection.nml inchangé). Réimportez pour actualiser la BD.",
+      "relocFound": "Trouvé {found} sur {total}. Appliquer sauvegarde puis écrit une NOUVELLE collection - l'originale est intacte.",
+      "relocNoTraktor": "Aucune collection Traktor trouvée - la relocalisation réécrit collection.nml.",
+      "relocatedFiles": {
+        "few": "{count} fichiers relocalisés → {out}",
+        "many": "{count} fichiers relocalisés → {out}",
+        "one": "{count} fichier relocalisé → {out}",
+        "other": "{count} fichiers relocalisés → {out}"
+      },
+      "renameFailed": "Échec du renommage : ",
+      "renamed": "Renommé",
+      "revertPrefix": "Rétablir : ",
+      "saveFailed": "Échec de l'enregistrement : ",
+      "savedRules": "Règles enregistrées",
+      "scanningMissing": "Recherche de fichiers manquants…",
+      "smartNeedsName": "Une playlist intelligente a besoin d'un nom",
+      "syncOk": "Sync ok",
+      "syncPrefix": "Sync : ",
+      "tagsReverted": "Tags rétablis",
+      "tagsUnsupported": "L'écriture de tags n'est pas prise en charge pour ce type de fichier",
+      "tagsWritten": "Tags écrits → fichier",
+      "traktorHistory": "Historique Traktor : ",
+      "transcodeFailed": "Échec du transcodage : ",
+      "transcodeQueued": "Transcodage en file",
+      "transcodeWorkerUnavailable": "Worker de transcodage indisponible",
+      "transcodedTo": "Transcodé → ",
+      "workerUnavailable": "Worker indisponible",
+      "writeTagsHint": "Écrire les tags : ouvrez une piste de la collection et utilisez son panneau Tags",
+      "writeTagsPrefix": "Écrire les tags : ",
+      "wroteThenError": "Écrit {n} puis erreur : {err}"
+    },
+    "remote": {
+      "up": "Remonter",
+      "refresh": "Actualiser",
+      "empty": "Ce dossier est vide",
+      "error": "Erreur : {msg}",
+      "items": "{n} éléments",
+      "selectHint": "Sélectionne un fichier ou un morceau pour voir les détails et les actions.",
+      "browse": {
+        "actions": "Actions",
+        "copyPath": "Copier le chemin",
+        "localOnly": "Les actions sur les fichiers s'exécutent sur l'instance appairée. Copie le chemin pour l'y référencer.",
+        "preset": "Préréglage",
+        "transcode": "Transcoder",
+        "transcodeHelp": "Le transcodage s'exécute sur l'instance appairée ; la sortie est déposée à côté de la source là-bas.",
+        "details": "Détails"
+      },
+      "field": {
+        "path": "Chemin",
+        "size": "Taille",
+        "kind": "Type",
+        "modified": "Modifié",
+        "album": "Album",
+        "genre": "Genre",
+        "bpm": "BPM",
+        "key": "Tonalité",
+        "label": "Label"
+      },
+      "col": {
+        "loading": "Chargement de la collection…",
+        "noSource": "Aucune bibliothèque DJ sur l'instance appairée.",
+        "summary": "{app} {version} · {total} morceaux",
+        "search": "Rechercher dans la collection…",
+        "page": "{from}-{to} sur {total}",
+        "serverOrder": "L'ordre suit la bibliothèque de l'instance appairée.",
+        "details": "Détails",
+        "tagsTitle": "Tags",
+        "tagsHelp": "Écris les tags de la bibliothèque dans le fichier sur l'instance appairée, ou reviens aux propres tags du fichier.",
+        "write": "Écrire les tags",
+        "revert": "Rétablir les tags"
+      },
+      "degrade": {
+        "title": "{section} - indisponible pour une instance appairée",
+        "favorites": "Les dossiers épinglés sont stockés par ordinateur. Épingler les dossiers d'une instance appairée n'est pas encore pris en charge - parcours ses disques via ACCUEIL / MUSIQUE dans Parcourir.",
+        "playlists": "Les playlists résident dans la bibliothèque propre de l'instance appairée et ne peuvent pas encore être modifiées à distance. Gère-les sur cet ordinateur ; l'onglet Collection ici parcourt et tague toujours ses morceaux.",
+        "history": "L'historique des sets joués est stocké dans la bibliothèque de l'instance appairée et n'est pas encore diffusé à distance.",
+        "idmarks": "Les repères ID masquent les PROPRES sorties d'un ordinateur (overlays, stream, now-playing, enregistreur). Chaque instance garde sa propre liste - gère les repères de l'instance appairée sur cet ordinateur (Bibliothèque → Repères ID).",
+        "queue": "Les transcodages que tu lances ici s'exécutent sur l'instance appairée et se terminent sur place (un dossier 'rave-mate-transcoded' à côté de la source). Une file d'attente distante en direct n'est pas encore diffusée.",
+        "presets": "Les préréglages d'encodage sont gérés sur cet ordinateur (bascule Contrôle sur 'Cet ordinateur' → Préréglages). Ils s'appliquent quand tu lances un transcodage sur l'instance appairée."
+      },
+      "toast": {
+        "copied": "Chemin copié",
+        "pickPreset": "Choisis d'abord un préréglage",
+        "transcoding": "Transcodage de {name} sur l'instance appairée…",
+        "transcodeFail": "Échec du transcodage : {err}",
+        "transcodeDone": "Transcodé → {out}",
+        "tagsFail": "Échec de l'écriture des tags : {err}",
+        "tagsNone": "Aucun tag à écrire",
+        "tagsWrote": "Tags écrits dans {n} fichier(s)",
+        "revertFail": "Échec du rétablissement des tags : {err}",
+        "reverted": "Tags rétablis"
+      }
+    }
+  },
+  "live": {
+    "ablelink": {
+      "backend": "Ableton Link",
+      "disabled": "désactivé",
+      "enabled": "activé",
+      "phraseBeat": "temps {beat}/{quantum}",
+      "session": "Session Link",
+      "summary": "{tempo} BPM · {peers} pair(s) · {state}",
+      "title": "Sync / Ableton Link",
+      "unavailable": "Backend Link non compilé (compiler avec -tags abletonlink).",
+      "waiting": "en attente de lecture"
+    },
+    "bpm": "{bpm} BPM",
+    "cockpit": {
+      "empty": "Aucune instance OBS configurée",
+      "offline": "hors ligne",
+      "ready": "prêt",
+      "reconnecting": "reconnexion",
+      "recording": "enregistrement",
+      "startRec": "Démarrer enr.",
+      "startStream": "Démarrer stream",
+      "stopRec": "Arrêter enr.",
+      "stopStream": "Arrêter stream",
+      "streaming": "streaming · {kbps} kbps",
+      "thisPc": "(ce PC)",
+      "title": "Cockpit de streaming"
+    },
+    "deck": {
+      "name": "Deck {id}"
+    },
+    "decks": {
+      "title": "Decks (fusionnés)"
+    },
+    "network": {
+      "apiDown": "API↓ {rate}",
+      "peerDown": "PAIR↓ {rate}",
+      "session": "SESSION ↓ {down} · ↑ {up}",
+      "title": "Réseau",
+      "tooltip": "Débit, 2 dernières min - PAIR = lien pair LAN, API = rave.page ; SESSION = totaux depuis le lancement",
+      "upRate": "↑ {rate}"
+    },
+    "nowPlaying": {
+      "line2": "DECK {deck}    {elapsed} / {total}",
+      "noTrack": "- AUCUNE PISTE À L'ANTENNE -"
+    },
+    "perf": {
+      "app": "APPLI",
+      "headroom": "MARGE",
+      "headroomLine": "MARGE {gb} Go RAM · {cpu}% CPU LIBRE",
+      "sys": "SYS",
+      "tooltip": "CPU (haut) + RAM (bas), 2 dernières min - APPLI = rave-mate, SYS = machine entière"
+    },
+    "status": {
+      "accountLabel": "Compte",
+      "apiLabel": "API",
+      "idle": "inactif",
+      "idleError": "inactif · dernière erreur : {error}",
+      "notSignedIn": "non connecté",
+      "signedIn": "connecté",
+      "streamLabel": "Stream",
+      "strmLive": "LIVE · {title} · {count} en file",
+      "title": "État",
+      "traktorLabel": "Écouteur Traktor",
+      "trkListening": "écoute :{port}",
+      "trkNotBound": "non lié (:{port} occupé ?)"
+    },
+    "strip": {
+      "capBytes": "CAP {bytes}",
+      "capListening": "CAP écoute",
+      "capReconnecting": "CAP reconnexion",
+      "dmxActive": "DMX ⚡",
+      "dmxIdle": "DMX inactif",
+      "dmxOff": "DMX ✕",
+      "freeResources": "libre {cpu}% CPU · {gb} Go",
+      "obsOff": "OBS ✕",
+      "obsOk": "OBS ✓",
+      "obsRec": "OBS ⏺ {dur}",
+      "recOn": "ENR ⏺",
+      "tc": "TC {tc}",
+      "twitchConnecting": "Twitch …",
+      "twitchUser": "Twitch {login}"
+    },
+    "subtitle": "Cockpit de set - tout ce qui se passe maintenant, sur une page",
+    "sysperf": {
+      "title": "Performance système"
+    },
+    "timing": {
+      "noPeers": "aucun pair connecté",
+      "title": "Synchro",
+      "tooltip": "Latence aller-retour vers chaque pair connecté (ms), 2 dernières min"
+    },
+    "title": "Live",
+    "transport": {
+      "end": "Fin",
+      "goLive": "Passer en live",
+      "recAuto": "Synchro OBS",
+      "recLabel": "ENR",
+      "recManual": "manuel",
+      "record": "Enregistrer",
+      "start": "DÉMARRER",
+      "stopCaps": "ARRÊTER",
+      "streamLabel": "STREAM",
+      "tcLabel": "TC",
+      "titlePlaceholder": "Titre du set (ex. Vendredi Techno)"
+    }
+  },
+  "logs": {
+    "allSources": "Toutes les sources",
+    "autoscroll": "Défilement auto",
+    "busApp": "App",
+    "busMidi": "MIDI",
+    "busSession": "Session",
+    "busTraktor": "Traktor",
+    "clearView": "Vider la vue",
+    "copied": "Journaux copiés dans le presse-papiers",
+    "copyAll": "Tout copier",
+    "levelAll": "Tous",
+    "levelError": "Erreur",
+    "levelInfo": "Info+",
+    "levelLabel": "Niveau",
+    "levelWarn": "Avert.+",
+    "noEntries": "(aucune entrée de journal pour l'instant)",
+    "noLogBus": "(aucun bus de journaux)",
+    "searchLabel": "Recherche",
+    "searchPlaceholder": "Filtrer les messages…",
+    "sourceLabel": "Source",
+    "tailing": "suivi - le plus récent en bas"
+  },
+  "motion": {
+    "activeAvatar": "Avatar actif (.vrm/.glb/.fbx)",
+    "avatarCurrentInfo": "Actuel : {name} · les avatars synchronisés se répliquent automatiquement vers les instances appairées. Activez « Afficher le modèle d'avatar » dans l'aperçu pour rendre le mesh posé - il s'anime en direct pendant la lecture et suit le défilement/l'orbite (VRM/GLB/FBX binaire, textures incluses).",
+    "avatarLabel": "Avatar",
+    "avatarPhysics": "Physique de l'avatar (dynamique des ressorts : cheveux / queue / accessoires)",
+    "camPathDetail": "{name} - {where} · {count} keyframes · {duration}s",
+    "camPathHint": "Glissez pour orbiter · molette pour zoomer · le marqueur suit le chemin à sa vitesse réelle (menthe = lent, rose = rapide).",
+    "camPathMeta": "{count} keyframes · {duration}s · {saved}",
+    "copyFilePath": "Copier le chemin du fichier",
+    "exportAnim": "Exporter .anim",
+    "importAvatar": "Importer un avatar…",
+    "installDjPaths": "Installer les chemins DJ",
+    "label": {
+      "camera": "Caméra",
+      "chooseFileRender": "Choisir un fichier &amp; rendre ({w}×{h})",
+      "doubleRenderTime": "double le temps de rendu",
+      "encoding": "Encodage… finalisation du MP4",
+      "equirect": "360° (équirectangulaire)",
+      "equirectSub": "sphère complète - lecteurs 360 style VLC/YouTube + aperçus Workshop",
+      "fps": "{n} fps",
+      "frameRate": "Fréquence d'images",
+      "high": "Élevée",
+      "highSub": "orbite 1080p / équirect 4K - rendu plus lent",
+      "orbitFlatVideo": "Orbite (vidéo plate)",
+      "orbitSub": "une caméra en perspective tourne autour de la scène - se lit partout",
+      "quality": "Qualité",
+      "renderNote": "Prise : {take} · avatar : {avatar} · rendu hors-ligne dans un sous-processus worker (MP4 H.264). Les rendus 360° reçoivent automatiquement des métadonnées Spherical Video - les lecteurs de classe VLC/YouTube activent le regard libre. Les éléments Workshop attacheront cette vidéo comme aperçu public une fois la publication Workshop disponible.",
+      "renderVideoTitle": "Rendre la vidéo",
+      "renderingFrame": "Rendu… image {frame}/{total} · {pct}%",
+      "renderingNote": "Rendu… (vous recevrez une notification une fois terminé)",
+      "standard": "Standard",
+      "standardSub": "orbite 720p / équirect 2K",
+      "startingRender": "Démarrage du rendu…",
+      "stickFigureNoAvatar": "bonhomme filaire (aucun avatar sélectionné)"
+    },
+    "loadIntoVrchat": "Charger dans VRChat",
+    "loop": "Boucle",
+    "noCamPaths": "Aucun chemin de caméra trouvé - enregistrez-en un dans la caméra de VRChat, ou installez les chemins DJ ci-dessous.",
+    "noPhysBones": "Aucune chaîne d'os dynamiques détectée sur cet avatar - ajoutez un sidecar <code>&lt;avatar&gt;.physbones.json</code> (exporteur Unity) pour des paramètres PhysBone exacts.",
+    "noRecordings": "Aucun enregistrement - enregistrez du mouvement VR depuis le menu poignet du casque.",
+    "noneLabel": "(aucun)",
+    "organizeNow": "Organiser maintenant",
+    "oscTrackers": "Envoyer comme trackers OSC (FBT uniquement)",
+    "overlayTrackerPoints": "Superposer les points de trackers (comparer la prise au mesh posé)",
+    "playerRelative": "Relatif au joueur",
+    "preview": "Aperçu",
+    "reloadList": "Recharger la liste",
+    "renderVideo": "Rendre la vidéo…",
+    "restPose": "Pose de repos (référence A/T - le mesh ignore la prise, les points restent affichés)",
+    "scrub": "Défiler",
+    "selectCamPathPreview": "Sélectionnez un chemin de caméra à prévisualiser",
+    "selectPath": "Sélectionnez un chemin.",
+    "selectRecordingPreview": "Sélectionnez un enregistrement à prévisualiser",
+    "showAvatarModel": "Afficher le modèle d'avatar (mesh posé - lecture live, défilement + orbite)",
+    "streamVmc": "Diffuser vers VMC (VTuber)",
+    "studioHint": "Glissez pour orbiter · molette pour zoomer · défilez pour des images exactes.",
+    "subtitle": "Chemins de caméra VRChat & mouvement VR enregistré - aperçu 3D, chargement dans VRChat, diffusion vers apps VTuber.",
+    "syncNow": "Synchroniser maintenant",
+    "tabCamPaths": "Chemins de caméra",
+    "tabStudio": "Studio de mouvement",
+    "timeDisplay": "{cur} / {dur} s",
+    "title": "Mouvement",
+    "toast": {
+      "activeAvatar": "Avatar actif : ",
+      "avatar": "Avatar : ",
+      "avatarSyncResult": "{synced} synchronisés · {uptodate} à jour",
+      "djPaths": "Trajectoires DJ : ",
+      "export": "Export : ",
+      "exported": "Exporté ",
+      "installedPaths": {
+        "few": "{count} trajectoires de caméra pro installées vers {dst} - réglez boucle/type de trajectoire une fois dans VRChat.",
+        "many": "{count} trajectoires de caméra pro installées vers {dst} - réglez boucle/type de trajectoire une fois dans VRChat.",
+        "one": "{count} trajectoire de caméra pro installée vers {dst} - réglez boucle/type de trajectoire une fois dans VRChat.",
+        "other": "{count} trajectoires de caméra pro installées vers {dst} - réglez boucle/type de trajectoire une fois dans VRChat."
+      },
+      "load": "Charger : ",
+      "loadRecording": "Charger l'enregistrement : ",
+      "loadingAvatar": "Chargement de l'avatar…",
+      "organized": {
+        "few": "{count} trajectoires organisées.",
+        "many": "{count} trajectoires organisées.",
+        "one": "{count} trajectoire organisée.",
+        "other": "{count} trajectoires organisées."
+      },
+      "pathCopied": "Trajectoire copiée - collez-la dans l'import de caméra de VRChat.",
+      "peerSyncUnavailable": "Sync de pairs indisponible.",
+      "pickAvatarFirst": "Choisissez d'abord un avatar (Importer un avatar…).",
+      "readPathFailed": "Échec de lecture de la trajectoire : ",
+      "renderFailed": "Échec du rendu : ",
+      "renderRunning": "Un rendu est déjà en cours.",
+      "rendered": {
+        "few": "{count} images rendues → {path}",
+        "many": "{count} images rendues → {path}",
+        "one": "{count} image rendue → {path}",
+        "other": "{count} images rendues → {path}"
+      },
+      "rendering": "Rendu {mode} {w}×{h} - cela tourne en arrière-plan…",
+      "selectRecordingFirst": "Sélectionnez d'abord un enregistrement.",
+      "sentToVrchat": "Envoyé à VRChat (nécessite OSC activé).",
+      "syncErrors": {
+        "few": " · {count} erreurs",
+        "many": " · {count} erreurs",
+        "one": " · {count} erreur",
+        "other": " · {count} erreurs"
+      },
+      "syncingAvatars": "Synchronisation des avatars…",
+      "tag360Failed": " · échec du tag 360° : ",
+      "tagged360": " · tagué 360°"
+    },
+    "unknownWorld": "Monde inconnu",
+    "vmcHelp": "VMC diffuse cette prise en données brutes HMD+manettes+trackers vers un récepteur VMC (VSeeFace / Warudo / VNyan @ {addr}) - le moteur de rendu gère l'IK et anime votre avatar ; c'est le vrai chemin de lecture du mouvement. Les trackers OSC alimentent le full-body tracking de VRChat - ils ne peuvent pas rejouer une prise sur votre avatar VRChat (VRChat pilote toujours tête + mains depuis le HMD/manettes live, et le mode bureau ignore les trackers). Pour rejouer sur un avatar VRChat : Exporter .anim → pilotez-le depuis l'Animator de l'avatar.",
+    "vrchatUnavailable": "Les outils VRChat sont indisponibles - activez la fonction VRChat dans Réglages."
+  },
+  "navtitle": {
+    "appgroups": "Relancer un jeu d'applis de rig DJ ensemble",
+    "automations": "Moteur d'automatisation média - règles, planifications, exécutions",
+    "editor": "Composer des overlays live - calques, fusion & modèles",
+    "library": "Média local, collection DJ, playlists & transcodage",
+    "live": "Cockpit de set - decks, stream, enregistrement, graphes live",
+    "logs": "Journal daemon en direct",
+    "motion": "Chemins de caméra & mouvement VR enregistré - aperçu 3D, lecture OSC/VMC",
+    "overlays": "Sorties overlay navigateur/OBS, apparence & panneau de forme d'onde",
+    "peers": "Lien pair LAN - contrôle, routes média, transfert de fichiers",
+    "publish": "Sets capturés - tracklists, enregistrements, rognage & export",
+    "settings": "Bascules de fonctions - chaque capacité on/off + config",
+    "twitch": "Chat, alertes, titre de stream & modération",
+    "vrchat": "État du compte & bio, emotes, groupes",
+    "worlds": "Sync des mondes VRChat"
+  },
+  "overlays": {
+    "appearance": {
+      "note1": "Toute l'apparence - couleurs, dégradés multi-stops (forme d'onde + fond), couleurs EQ + FX par bande, et bordure/rayon des cartes - s'édite en direct dans le mode édition de l'overlay navigateur. Les changements s'enregistrent dans overlay-style.json et s'appliquent instantanément à chaque sortie.",
+      "note2": "Fondu-au-fader : l'opacité de chaque carte de deck suit son fader de canal (le deck audible reste le plus lumineux). S'applique en direct à chaque sortie. Activez l'overlay navigateur ci-dessous pour charger l'éditeur.",
+      "title": "Apparence (dégradés, couleurs, bordures)"
+    },
+    "configUnavailable": "Configuration indisponible",
+    "copyEditorUrl": "Copier l'URL de l'éditeur",
+    "copyUrl": "Copier l'URL",
+    "editColours": "Modifier couleurs & dégradés",
+    "editStyle": "Modifier le style",
+    "faderToggle": "Fondre les cartes de deck selon le niveau du fader de canal",
+    "layoutEditor": "Éditeur de disposition",
+    "np": {
+      "note": "Écrit now_playing.json + now_playing.txt à chaque changement de piste. Pointez une source Texte/Navigateur OBS dessus. Vide = dossier de config de l'appli.",
+      "title": "Fichiers now-playing (OBS)"
+    },
+    "obs": {
+      "note": "Pilote OBS directement via obs-websocket : crée des entrées texte + image « RaveMate Deck X » dans la scène courante par deck chargé. Nécessite la connexion OBS activée + OBS lancé. Activez cette sortie dans l'onglet Réglages. Désactivez pour laisser les entrées (masquées) dans OBS.",
+      "title": "OBS direct (obs-websocket)"
+    },
+    "openFolder": "Ouvrir le dossier",
+    "openOverlay": "Ouvrir l'overlay",
+    "outputFolder": "Dossier de sortie",
+    "overlayUrl": "URL de l'overlay",
+    "png": {
+      "note": "Rend deck_A.png … deck_D.png au changement (transparent, pochette + faders/EQ). Ajoutez une source Image OBS par deck. Vide = dossier de config de l'appli / overlay-png.",
+      "title": "Cartes PNG par deck (OBS)"
+    },
+    "port": "Port",
+    "spout": {
+      "install": "Télécharger & installer",
+      "installed": "Installé : {path}",
+      "notFound": "SpoutLibrary.dll introuvable - installez-le pour activer la sortie Spout (l'appli fonctionne sans).",
+      "note": "Spout nécessite SpoutLibrary.dll (fourni avec l'installeur). S'il manque - ex. après une auto-mise à jour - installez-le ici : télécharge le SDK Spout2 épinglé, vérifié SHA-256, dans le dossier bin de l'appli.",
+      "openSdk": "Ouvrir la page de téléchargement du SDK Spout",
+      "reinstall": "Re-télécharger & installer"
+    },
+    "status": {
+      "np": "écriture au changement de piste",
+      "obsDriving": "pilote les entrées OBS",
+      "obsEnableFirst": "activez d'abord la connexion OBS",
+      "obsNotConnected": "OBS non connecté",
+      "png": "rendu des cartes de deck",
+      "vsNoBackend": "aucun backend dans cette build",
+      "vsSharing": "partage via {backend}",
+      "wave": "forme d'onde active",
+      "web": "diffusion de l'overlay"
+    },
+    "strip": {
+      "files": "fichiers",
+      "hint": "les modifs de style s'appliquent en direct à chaque sortie",
+      "obs": "obs",
+      "obsDisconnected": "OBS ✕",
+      "obsOff": "OBS arrêt",
+      "obsOn": "OBS ✓",
+      "png": "png",
+      "share": "partage",
+      "waveform": "forme d'onde",
+      "web": "web"
+    },
+    "subtitle": "Stylisez une fois, sortez partout - visuels now-playing live pour OBS et au-delà",
+    "vs": {
+      "noBackend": "Cette build n'a aucun backend de partage vidéo compilé (Windows=Spout / macOS=Syphon / Linux=PipeWire) - l'activer lance le sink mais ne publie rien.",
+      "note": "Publie la carte de chaque deck chargé comme une image vidéo live nommée « {name} » … via l'API de partage native de l'OS, pour qu'OBS/Resolume/TouchDesigner/VRChat tirent les visuels de deck depuis la mémoire - sans capture de fichier ou de fenêtre.",
+      "note2": "Échelle plus haute = plus net en grand (ex. plein écran sur un canevas 4K), au prix de plus de CPU. Désactivez/activez pour appliquer.",
+      "renderScale": "Échelle de rendu",
+      "scaleOption": "{mult}× ({res})",
+      "sharesVia": "Cette build partage via {backend}.",
+      "title": "Partage vidéo (Spout/Syphon/PipeWire)"
+    },
+    "web": {
+      "autoAdd": "Ajouter & dimensionner auto la source navigateur dans OBS",
+      "nest": "Ajouter aussi cette scène à la scène programme courante",
+      "note1": "Ajoutez une source Navigateur dans OBS à l'URL ci-dessus (dimensionnez-la à votre canevas, ex. 1920×1080) ou laissez rave-mate la gérer ci-dessous. Désactivez/activez l'overlay pour appliquer un changement de port.",
+      "note2": "L'auto-gestion nécessite la connexion OBS activée + OBS lancé ; s'applique à la prochaine (re)connexion OBS.",
+      "obsScene": "Scène OBS",
+      "title": "Overlay live (navigateur)"
+    },
+    "wf": {
+      "bgColor": "Couleur de fond",
+      "bgOpacity": "Opacité du fond",
+      "note1": "Ajoute une forme d'onde défilante derrière la courbe EQ sur chaque carte de deck (HP/LP affichés en courbes de coupure). Navigateur + partage vidéo défilent en douceur ; le PNG se met à jour au changement. Pics mis en cache à la première lecture.",
+      "note2": "Les couleurs sont des défauts #rrggbb - l'éditeur navigateur (carte Apparence) les remplace pour chaque sortie avec des dégradés live + couleurs par bande. Zoom plus petit = défilement plus rapide.",
+      "playhead": "Tête de lecture",
+      "playheadCenter": "Centre (1/2)",
+      "playheadQuarter": "Quart gauche (1/4)",
+      "playheadRightQuarter": "Quart droit (3/4)",
+      "playheadThird": "Tiers gauche (1/3)",
+      "title": "Panneau de forme d'onde",
+      "waveColor": "Couleur de forme d'onde",
+      "waveOpacity": "Opacité de forme d'onde",
+      "zoom": "Zoom (visible)",
+      "zoomOptionSeconds": "{n} s"
+    }
+  },
+  "peers": {
+    "accept": "Accepter",
+    "acquiring": "acquisition",
+    "ask": "Demander",
+    "auto": "auto",
+    "autoMode": "Auto",
+    "camLive": "LIVE - {mode}",
+    "camReady": "Prêt - {device}",
+    "canceled": "annulé",
+    "clockLine": "horloge {tier} · {lock}",
+    "connect": "Connecter",
+    "connectedPaired": "connecté · appairé",
+    "connections": "Connexions",
+    "control": "Contrôle",
+    "controllingBanner": "Contrôle de {name} - votre MIDI y est routé",
+    "decline": "Refuser",
+    "defaultDir": "Défaut : {dir}",
+    "device": "Périphérique",
+    "discoveryOff": "Découverte off - activez les pairs LAN sur les deux ordinateurs",
+    "doesntMatch": "Ne correspond pas",
+    "done": "terminé",
+    "error": "erreur",
+    "fileTransfer": "Transfert de fichiers",
+    "forget": "Oublier",
+    "holdover": "MAINTIEN",
+    "interruptedRetrying": "interrompu - nouvel essai",
+    "interruptedWithError": "interrompu ({error}) - nouvel essai",
+    "jbStats": "buffer {depth}f · retard {late}% · pertes {drops}",
+    "lensImage": "Objectif / image",
+    "locked": "verrouillé",
+    "matches": "Correspond",
+    "mediaPlane": "Plan média",
+    "mode": "Mode",
+    "noActiveConnections": "Aucune connexion active",
+    "noActiveMediaRoutes": "Aucune route média active.",
+    "noCameraInstances": "Aucune instance caméra - activez Webcam sur chaque instance qui a une caméra",
+    "noCameraSelected": "Aucune caméra sélectionnée.",
+    "noTransfersYet": "Aucun transfert. Envoyez depuis la Bibliothèque, ou faites qu'une instance appairée envoie vers celle-ci.",
+    "none": "Aucun",
+    "offline": "hors ligne",
+    "offset": "décalage {value}",
+    "onThisNetwork": "Sur ce réseau",
+    "outFps": "sortie {fps} fps",
+    "pair": "Appairer",
+    "pairedInstanceLabel": "{label} - une instance appairée",
+    "pairingCode": "code {sas}",
+    "receive": "Recevoir",
+    "receiveFiles": "Recevoir des fichiers",
+    "receiveVideo": "Recevoir la vidéo",
+    "receiveVideoLine": "{name} depuis {peer} → Spout « rave-mate link {name} »",
+    "receivingFrom": "◂ réception depuis",
+    "rememberedOffline": "Mémorisé (hors ligne)",
+    "restarts": "redémarrages {n}",
+    "routeDetailNoReport": "retx {retx} · pli {pli} · aucun rapport de l'instance appairée pour l'instant",
+    "routeDetailRecv": "perte {loss} · récupéré {recovered} · gigue {jitter} · latence {p50}/{p95} p50/p95 · nack {nack}",
+    "routeDetailRemote": "rapports pair : perte {loss} ({pct}%) · gigue {jitter} · retx {retx} · pli {pli}",
+    "routeTitle": "{dir} {peer} - flux {stream} · {frames} images · {bytes}",
+    "routes": "{count} route(s)",
+    "saveTo": "Enregistrer dans",
+    "searchingHint": "Recherche… vérifiez que les pairs LAN sont activés sur les deux ordinateurs",
+    "selectCameraPlaceholder": "(sélectionnez une caméra)",
+    "sendingTo": "▸ envoi vers",
+    "sizeFpsPlaceholder": "(taille / fps)",
+    "softwareEncodeWarning": "⚠ encodage logiciel (CPU élevé)",
+    "spoutSender": "Émetteur Spout : {sender}",
+    "start": "Démarrer",
+    "statusStrip": "{connected} connectés · {found} sur ce réseau",
+    "statusStripNode": "{connected} connectés · {found} sur ce réseau · nœud {node}",
+    "stopControl": "Arrêter le contrôle",
+    "stopControlling": "Arrêter de contrôler",
+    "stopped": "arrêté",
+    "subtitle": "Lien pair LAN - now-playing relayé, miroir MIDI, routes média, transfert de fichiers",
+    "syncLine": "sync {name} : décalage {offset} · rtt {rtt} · {lock}",
+    "tcMaster": "Maître TC : {name}",
+    "tcMasterThisInstance": "Maître TC : cette instance",
+    "thisInstance": "Cette instance",
+    "tier": "{encoder} niveau {n}",
+    "title": "Pairs",
+    "unavailable": "Pairs indisponibles",
+    "waitingForPeer": "attente de l'instance appairée…",
+    "webcam": "Webcam",
+    "webcamOff": "La fonction Webcam est off - activez-la dans Réglages ▸ Média pour contrôler cette caméra ou celle d'une instance appairée.",
+    "xferDone": "✓ terminé · {files} · {size}",
+    "xferFailed": "✗ échec : {error}",
+    "xferFile": {
+      "few": "{count} fichiers",
+      "many": "{count} fichiers",
+      "one": "{count} fichier",
+      "other": "{count} fichiers"
+    },
+    "xferFrom": "{arrow} {name} - depuis {peer}",
+    "xferIncoming": "⇩ {name} ({size}, {files}) - depuis {peer}",
+    "xferTo": "{arrow} {name} - vers {peer}"
+  },
+  "picker": {
+    "selectFolder": "Sélectionnez un dossier"
+  },
+  "placeholder": {
+    "comingSoon": "Bientôt disponible - les contrôles {name} s'afficheront ici.",
+    "porting": "Cette surface est en cours de portage depuis Fyne."
+  },
+  "player": {
+    "done": "Terminé",
+    "exportCut": "Exporter le montage",
+    "fit": "Ajuster",
+    "inPreview": "IN",
+    "jumpToTrack": "Aller à une piste…",
+    "label": {
+      "after": "après",
+      "alignFailed": "Échec de l'alignement : ",
+      "alignedLine": "vidéo {offset} {rel} audio · aligné, confiance {label} ({conf})",
+      "aligning": "Alignement… ",
+      "analyzingWave": "Analyse de la forme d'onde…",
+      "audioCodec": "Codec audio",
+      "audioOnly": "Audio uniquement",
+      "autoAlign": "Alignement auto",
+      "autoTrim": "Rognage auto…",
+      "before": "avant",
+      "bothAligned": "Les deux (aligné)",
+      "bothAlignedSub": "un IN/OUT coupe audio + vidéo au même moment",
+      "cantDecode": "le lecteur intégré ne peut pas décoder ce fichier",
+      "clearRange": "Effacer la plage",
+      "clearRangeSub": "IN 0 · OUT fin",
+      "clickSeekPan": "Clic = naviguer · glisser = déplacer",
+      "clickSeekPanZoom": "Clic = naviguer · glisser = déplacer · molette = zoom",
+      "detectSilence": "Détecter la fin de la musique (silence)",
+      "detectingSilence": "Détection du silence…",
+      "dragSetIn": "Glisser pour placer IN",
+      "dragSetOut": "Glisser pour placer OUT",
+      "ebuSpecLink": "Spéc EBU R128 ↗",
+      "embeddedFailed": "Échec de la lecture intégrée - {reason}. Le codec/conteneur n'est peut-être pas pris en charge ici ; exportez une coupe compatible web (préréglage MP4 H.264/AAC) ci-dessous, ou ouvrez le fichier dans votre lecteur système.",
+      "encNote": "Les sources sans perte (FLAC/AIFF/WAV) se transcodent proprement vers n'importe quel préréglage ; réencoder de l'audio avec perte (MP3/AAC/Opus) coûte toujours un peu de qualité - préférez des cibles de débit égales ou inférieures.",
+      "encodePreset": "Préréglage d'encodage",
+      "exportDone": "Terminé → ",
+      "exportMsgFailed": "Échec : ",
+      "exportTarget": "Cible d'export",
+      "exportingPct": "Export… {pct}%",
+      "fileSize": "Taille du fichier",
+      "hoverHint": "Survolez la forme d'onde pour le temps + le volume à cette position",
+      "inField": "IN (mm:ss.s)",
+      "integrated": "Intégré",
+      "keeps": "→ conserve",
+      "kindPreset": "Préréglage {kind}",
+      "lastFader": "Dernier fader baissé",
+      "lastFaderSub": "OUT = l'instant final du fader baissé",
+      "loudNote": "Le LUFS mesure le volume perçu (EBU R128). Intégré = la piste entière ; l'affichage sous la forme d'onde montre le volume momentané (fenêtre de 400 ms) à la tête de lecture ou au curseur. Les plateformes de streaming normalisent autour de −14 LUFS intégré ; les masters de club se situent souvent entre −6 et −8. Un true peak au-dessus de −1 dBTP risque le clipping après un encodage avec perte.",
+      "loudnessRange": "Plage de volume",
+      "lufsLink": "LUFS expliqué ↗",
+      "lufsLoading": "LUFS…",
+      "manualLine": "vidéo {offset} {rel} audio · manuel",
+      "measuringLoudness": "Mesure du volume…",
+      "momAtPlayhead": "M {lufs} LUFS à la tête de lecture",
+      "noWaveform": "Aucune forme d'onde",
+      "out": "OUT",
+      "outField": "OUT (mm:ss.s ou fin)",
+      "outputFile": "Fichier de sortie",
+      "priorLine": "décalage vidéo {offset} - d'après les horodatages d'horloge ; l'alignement auto écoute les deux enregistrements",
+      "probing": "sondage…",
+      "rangeExceeds": "la plage dépasse l'enregistrement {kind} - sa coupe est bornée au média existant",
+      "reAlign": "Réaligner",
+      "silenceSub": "silencedetect ffmpeg en tête + queue",
+      "snapIn": "IN ⟸ piste actuelle",
+      "snapInSub": "caler IN sur la piste à la tête de lecture",
+      "snapOut": "OUT ⟸ piste suivante",
+      "snapOutSub": "caler OUT sur le début de la piste suivante",
+      "stageAudioEnv": "extraction de l'enveloppe audio…",
+      "stageCrossCorr": "corrélation croisée…",
+      "stageVideoEnv": "extraction de l'enveloppe audio de la vidéo…",
+      "streamUnavailable": "Flux média local indisponible - la vidéo s'affiche une fois que l'app peut la servir.",
+      "tracklistBounds": "Limites de la tracklist",
+      "tracklistBoundsSub": "IN = première piste · OUT = fin de la dernière piste",
+      "truePeak": "True peak",
+      "video": "Vidéo",
+      "videoOffsetField": "Décalage vidéo ([-]mm:ss.s)",
+      "videoOnly": "Vidéo uniquement",
+      "waveUnavailable": "Forme d'onde indisponible - "
+    },
+    "openExternally": "Ouvrir en externe",
+    "pause": "Pause",
+    "play": "Lecture",
+    "resume": "Reprendre",
+    "seek": "Naviguer",
+    "setIn": "Définir IN",
+    "setOut": "Définir OUT",
+    "stop": "Arrêter",
+    "toast": {
+      "aligned": "Aligné : décalage vidéo {offset} · confiance {conf}",
+      "captureNotFound": "Capture introuvable",
+      "cutExported": "Coupe exportée → ",
+      "export": "Export : ",
+      "exportFailed": "Échec de l'export : ",
+      "exportingCut": "Export de la coupe ({preset})…",
+      "exportingCuts": {
+        "few": "Export de {count} coupes…",
+        "many": "Export de {count} coupes…",
+        "one": "Export de {count} coupe…",
+        "other": "Export de {count} coupes…"
+      },
+      "offsetFormat": "Format de décalage : [-]mm:ss.s ou secondes",
+      "playFailed": "Échec de la lecture : ",
+      "playerUnavailable": "Lecteur indisponible",
+      "silenceFailed": "Échec de la détection de silence : ",
+      "timeFormat": "Format d'heure : mm:ss.s (ou h:mm:ss)"
+    },
+    "trimEdit": "Rogner / éditer"
+  },
+  "publish": {
+    "audio": "audio",
+    "broadcastAudio": "Diffuser l'audio",
+    "capturesCount": "Captures ({count})",
+    "capturing": "capture {format} · {bytes}",
+    "confirming": "confirmation - validé dans la tracklist dans {left}",
+    "confirmingIn": "confirmation dans {left}",
+    "connected": "connecté",
+    "deck": "deck {name}",
+    "delete": "Supprimer",
+    "export": "Exporter",
+    "finishSet": "Terminer le set",
+    "listening": "écoute {addr}",
+    "live": "live",
+    "liveSet": "Set live",
+    "looseDesc": "Média capturé qui ne chevauche aucun set enregistré.",
+    "matchHistory": "Faire correspondre l'historique",
+    "matched": "correspondance ✓",
+    "noCaptures": "Aucun média capturé lié. Diffusez vers le récepteur de capture de set ou enregistrez dans OBS pendant un set.",
+    "noRecordings": "Aucun enregistrement",
+    "noTracks": "Aucune piste - ajoutées en direct à mesure que chaque piste est confirmée, ou lues depuis le .cue du set.",
+    "notConnected": "non connecté",
+    "notListening": "pas en écoute",
+    "nothingAudible": "Rien d'audible",
+    "nowPlaying": "En cours de lecture",
+    "obsRecording": "enregistrement · {dur}",
+    "obsRecordingKind": "Enregistrement OBS",
+    "openInPlayer": "Ouvrir dans le lecteur",
+    "recActive": "{name} · {count} pistes · {dur}",
+    "recArmed": "armé - attente de la première piste",
+    "recOff": "enregistreur off",
+    "reconnecting": "reconnexion…",
+    "recorderUnavailable": "Enregistreur indisponible",
+    "selectHint": "Sélectionnez un set pour voir ses captures, sa tracklist et ses options d'export.",
+    "selectedSet": "Set sélectionné",
+    "setsCount": "Sets ({count})",
+    "showInFolder": "Afficher dans le dossier",
+    "subtitle": "Sets & enregistrements - capture, revue, export",
+    "title": "Publier",
+    "trackCount": {
+      "one": "{count} piste",
+      "other": "{count} pistes"
+    },
+    "trackInList": "✓ piste {n} dans la tracklist · lecture {dur}",
+    "tracklistCount": "Tracklist ({count})",
+    "trimEditDots": "Rogner / éditer…",
+    "unlinkedCount": "Captures non liées ({count})",
+    "untitledTrack": "Piste sans titre",
+    "via": "via {name}",
+    "video": "vidéo",
+    "remote": {
+      "hint": "Contrôle d'une instance appairée - le statut en direct et la lecture restent sur cet ordinateur. Parcours ses sets enregistrés, puis exporte ou fais correspondre une tracklist, ou supprime un set terminé.",
+      "noSets": "Aucun set enregistré sur l'instance appairée.",
+      "error": "Erreur : {msg}",
+      "showingNewest": "Affichage des {n} sets les plus récents sur {total}.",
+      "tlShowing": "Affichage des {n} premiers morceaux sur {total}.",
+      "capturesNote": "Les fichiers de capture résident sur l'instance appairée - ouvre-les ou coupe-les sur cet ordinateur.",
+      "matching": "Correspondance avec l'historique Traktor de l'instance appairée…",
+      "matched": "{n} morceaux mis en correspondance sur l'instance appairée.",
+      "matchFail": "Échec de la correspondance : {err}",
+      "deleted": "Set supprimé sur l'instance appairée",
+      "deleteFail": "Échec de la suppression : {err}",
+      "exportFail": "Échec de l'export : {err}",
+      "deleteConfirm": "Supprimer \"{name}\" sur l'instance appairée ? Action irréversible. Les fichiers de capture restent sur cet ordinateur."
+    }
+  },
+  "settings": {
+    "body": {
+      "ablelink": {
+        "note": "rave-mate publie le tempo maître du DJ fusionné + la phrase sur une session Ableton Link ; les visuels compatibles Link (Resolume, Live, VDMX) suivent automatiquement. Resolume 7 rejoint Link nativement - le clip de phrase se redéclenche à chaque limite de phrase. Le vrai backend Link nécessite la compilation cgo abletonlink ; sinon il indique « indisponible ».",
+        "ownerAlways": "Toujours piloter (ce rig possède le tempo)",
+        "ownerAuto": "Auto (piloter depuis le master DJ)",
+        "ownerFollow": "Suivre un pair (lecture seule)",
+        "phraseClipClip": "Clip de phrase - clip (base 1 ; 0 = désactivé)",
+        "phraseClipLayer": "Clip de phrase - calque (base 1 ; 0 = désactivé)",
+        "quantum": "Longueur de phrase (temps)",
+        "resolumeHost": "Hôte Resolume",
+        "resolumeOn": "Sync de phrase Resolume",
+        "resolumeOscPort": "Port OSC Resolume",
+        "resolumeRestPort": "Port REST Resolume",
+        "resync": "Resynchroniser la phrase",
+        "startStopSync": "Partager le démarrage/arrêt du transport",
+        "tempoOwner": "Propriétaire du tempo"
+      },
+      "account": {
+        "nodeName": "Nom du nœud",
+        "notSignedIn": "Non connecté. Connectez-vous via votre navigateur pour publier des sets + ouvrir le canal Studio.",
+        "reauth": "Se ré-authentifier",
+        "signInBrowser": "Se connecter avec le navigateur",
+        "signedIn": "Connecté."
+      },
+      "api": {
+        "note": "Remplacez avec RAVE_API_BASE_URL ; prod uniquement via RAVE_ENV=production."
+      },
+      "audiorec": {
+        "bitrate": "Débit kbps (mp3/aac)",
+        "device": "Périphérique",
+        "devicePlaceholder": "(sélectionnez un périphérique d'entrée audio)",
+        "folder": "Dossier des enregistrements",
+        "followObs": "Démarrer/arrêter auto avec l'enregistrement OBS",
+        "format": "Format",
+        "note": "FLAC est sans perte à la fréquence native du périphérique. Nécessite ffmpeg. Le démarrage/arrêt manuel d'enregistrement est dans l'onglet Live (ENR).",
+        "openFolder": "Ouvrir le dossier des enregistrements",
+        "refreshDevices": "Actualiser les périphériques",
+        "sampleRate": "Fréq. d'échantillonnage (0 = auto)",
+        "writeTags": "Intégrer la tracklist jouée dans l'enregistrement"
+      },
+      "common": {
+        "frameRate": "Fréquence d'images",
+        "listenAddr": "Adresse d'écoute",
+        "remove": "Retirer",
+        "systemDefault": "(défaut système)",
+        "unlink": "Délier"
+      },
+      "configUnavailable": "Configuration indisponible",
+      "dmx": {
+        "gridMode": "Mode grille",
+        "maxFps": "FPS max de la grille",
+        "reemit": "Ré-émettre le DMX reçu via Art-Net",
+        "reemitTarget": "Cible de ré-émission",
+        "renderGrid": "Rendre la grille vidéo VRSL",
+        "senderName": "Nom de l'émetteur",
+        "universes": "Univers (csv)"
+      },
+      "dmxmidi": {
+        "maxRate": "Messages max/s",
+        "port": "Port de sortie MIDI",
+        "universes": "Univers (csv, max 4)"
+      },
+      "fingerprint": {
+        "note": "Nécessite fpcalc de Chromaprint. Téléchargez une copie gérée ci-dessous et les workers d'empreinte l'utilisent automatiquement."
+      },
+      "guardian": {
+        "note": "Un petit superviseur relance l'appli si elle meurt sans arrêt propre. Les quittes délibérés ne le déclenchent jamais ; une boucle de crash s'arrête après 4 redémarrages en 10 minutes. Prend effet au prochain lancement."
+      },
+      "install": {
+        "download": "Télécharger & installer",
+        "downloadManaged": "Télécharger une copie gérée",
+        "downloadPage": " page de téléchargement",
+        "foundOnPath": "Trouvé dans le PATH : ",
+        "installedManaged": "Installé (copie gérée) : ",
+        "notFound": "Introuvable - téléchargez & installez-le, ou ajoutez-le à votre PATH.",
+        "reDownload": "Re-télécharger & installer",
+        "windowsOnly": " (Windows uniquement)"
+      },
+      "library": {
+        "embed": "Lire la vidéo dans la fenêtre de l'appli",
+        "mpvNote": "Le lecteur intégré utilise mpv pour une vidéo fluide et accélérée matériellement. Sans mpv, la vidéo bascule sur un décodeur intégré plus lent."
+      },
+      "medialink": {
+        "bitrate": "Débit (Mbps)",
+        "codec": "Codec préféré",
+        "note": "La bascule d'en-tête partage vos émetteurs Spout locaux. Créez des routes dans l'onglet Pairs.",
+        "swOnly": "Forcer l'encodage logiciel (diagnostic - CPU élevé)"
+      },
+      "midi": {
+        "customPort": "(sélectionnez un port d'entrée MIDI)",
+        "denonPort": "Port map Denon",
+        "installLoopMidi": "Actualiser les ports",
+        "mesh": "(sélectionnez un port d'entrée MIDI)",
+        "refreshPorts": "Refléter le MIDI vers toutes les instances appairées",
+        "selectPortPlaceholder": "Contrôleur MIDI"
+      },
+      "nml": {
+        "note": "Vide = détection auto de la dernière install Traktor. Désactivez/activez pour appliquer un changement de chemin.",
+        "pathLabel": "collection.nml"
+      },
+      "obs": {
+        "connectValidate": "Connecter & valider les réglages de stream",
+        "host": "Hôte",
+        "note": "Activez obs-websocket dans OBS (Outils → WebSocket Server Settings). Port par défaut 4455. Les enregistrements terminés se lient au set enregistré sur la même période. Les changements de connexion s'appliquent en désactivant/activant.",
+        "password": "Mot de passe",
+        "port": "Port",
+        "remoteObs": "OBS distant… (%d)"
+      },
+      "obssync": {
+        "deadBand": "Bande morte (images)",
+        "mediaSources": "Sources média… (%d)",
+        "note": "Garde les sources média OBS synchronisées sur une horloge partagée. Démarrage/arrêt + relevé par source sont dans l'onglet Live.",
+        "restartThreshold": "Seuil de redémarrage (ms)"
+      },
+      "recorder": {
+        "confirmAfter": "Confirmer après (secondes)",
+        "note": "Une piste doit jouer aussi longtemps avant d'être journalisée (filtre les previews rapides). Enregistre auto sur tout un stream live."
+      },
+      "rekordbox": {
+        "dbPoll": "Sondage master.db - récemment joués (sûr)",
+        "memRead": "Lecture mémoire - temps réel (Windows, peut casser aux mises à jour)"
+      },
+      "rekordboxkey": {
+        "note": "Stockée scellée au repos ; aussi réglable via RAVE_REKORDBOX_KEY.",
+        "placeholder": "collez votre clé master.db (long hex)",
+        "save": "Enregistrer la clé",
+        "test": "Tester"
+      },
+      "rekordboxmidi": {
+        "export": "Exporter le mapping CSV",
+        "openFolder": "Ouvrir le dossier"
+      },
+      "rtsp": {
+        "bitrate": "Débit (kbps)",
+        "inputFormat": "Format d'entrée",
+        "note": "Lire dans VRChat / un lecteur LAN :",
+        "passthrough": "La source est déjà en H.264 (passthrough)",
+        "streamPath": "Chemin du flux",
+        "videoSource": "Source vidéo"
+      },
+      "serato": {
+        "folder": "Dossier _Serato_",
+        "note": "Vide = détection auto de Music_Serato_.",
+        "nowPlaying": "Now-playing live (surveiller les sessions Historique)"
+      },
+      "service": {
+        "install": "Installer le service",
+        "note": "Windows : l'installation/désinstallation nécessite une invite élevée (admin). Linux/macOS : install par utilisateur. Le service tourne sans interface - pour des machines dédiées. Sur un bureau, utilisez l'auto-redémarrage au crash ci-dessus.",
+        "uninstall": "Désinstaller le service"
+      },
+      "setcapture": {
+        "metaOnly": "Métadonnées seules - analyser le now-playing, ne pas sauver l'audio Icecast",
+        "mount": "Mount",
+        "note": "Dans Traktor → Preferences → Broadcasting : Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Désactivez/activez pour appliquer les changements.",
+        "openFolder": "Ouvrir le dossier des sets",
+        "password": "Mot de passe",
+        "port": "Port",
+        "reconnectGrace": "Délai de reconnexion (s)",
+        "setsFolder": "Dossier des sets",
+        "singleFile": "Enregistrer dans un seul fichier tant que connecté (fusionner les reconnexions)",
+        "sourceUser": "Utilisateur source"
+      },
+      "stt": {
+        "autoSubmit": "Envoi auto après un silence",
+        "installWhisper": "Installer Whisper + modèle",
+        "microphone": "Microphone",
+        "model": "Modèle",
+        "modelNotDownloaded": "Modèle non téléchargé.",
+        "notInstalled": "Whisper non installé.",
+        "output": "Sortie (cues)",
+        "ready": "Prêt.",
+        "refreshMics": "Actualiser les micros",
+        "silenceTimeout": "Délai de silence (ms)"
+      },
+      "timecode": {
+        "artnetOn": "Sortie TimeCode Art-Net",
+        "artnetTarget": "Cible Art-Net (hôte:port)",
+        "clockStart": "Démarrer à l'heure du jour (caler sur l'horloge murale)",
+        "extraArtnet": "Art-Net supplémentaire (%d)",
+        "extraLtc": "LTC supplémentaire (%d)",
+        "extraMtc": "MTC supplémentaire (%d)",
+        "firstPort": "(premier port)",
+        "ltcDevice": "Périphérique audio LTC",
+        "ltcLevel": "Niveau LTC (dBFS)",
+        "ltcOn": "Sortie audio LTC",
+        "mtcOn": "Sortie MIDI MTC",
+        "mtcPort": "Port MIDI MTC",
+        "note": "START/STOP + le relevé TC live sont dans la barre de transport de l'onglet Live. Distribuez une horloge vers plusieurs appareils via les sorties Supplémentaires.",
+        "rate24": "24 (film)",
+        "rate25": "25 (PAL/EBU)",
+        "rate2997": "29,97 drop-frame",
+        "rate30": "30 (non-drop)",
+        "startPosition": "Position de départ"
+      },
+      "traktor": {
+        "listenPort": "Port d'écoute",
+        "logRaw": "Journaliser les payloads bruts (jsonl)",
+        "note": "Défaut 8080. Désactivez/activez pour appliquer un changement de port. Le client Electron utilise aussi 8080 - un seul peut se lier."
+      },
+      "traktormap": {
+        "activate": "Activer",
+        "autoNewest": "Auto (dernier)",
+        "note": "Quittez Traktor avant de changer - Settings.tsi est sauvegardé automatiquement.",
+        "unavailable": "Gestionnaire de mappings Traktor indisponible.",
+        "version": "Version"
+      },
+      "traktorqml": {
+        "install": "Installer / Ré-appliquer"
+      },
+      "transcode": {
+        "ffmpegPath": "chemin ffmpeg",
+        "maxJobs": "Tâches simultanées max",
+        "note": "Le transcodage tourne dans des sous-processus workers. FFmpeg alimente aussi les formes d'onde, les métadonnées de sonde + le segmentage d'empreinte."
+      },
+      "twitch": {
+        "connecting": "Connecté. Connexion…",
+        "signIn": "Se connecter à Twitch",
+        "signInLine": "Connectez-vous avec l'appli Twitch Rave-Mate (Device Code - sans mot de passe, sans secret).",
+        "signedInAs": "Connecté en tant que ",
+        "titlePresets": "Préréglages de titre… (%d)",
+        "unavailable": "Twitch indisponible dans cette build."
+      },
+      "unity": {
+        "addFolder": "Ajouter un dossier…",
+        "addFromVcc": "Ajouter depuis VCC",
+        "empty": "Aucun projet. Ajoutez un projet d'avatar Unity ci-dessous.",
+        "installPlugin": "Installer le plugin",
+        "notUnityProject": "⚠ pas un projet Unity",
+        "note": "Ajoute Tools → rave.page → Motion dans Unity. Port de contrôle local 127.0.0.1:47625.",
+        "pastePath": "Coller un chemin…",
+        "pluginInstalled": "✓ plugin installé",
+        "pluginNotInstalled": "plugin non installé",
+        "reinstallPlugin": "Réinstaller le plugin"
+      },
+      "updates": {
+        "available": "Mise à jour disponible : {version}",
+        "applyFailed": "Échec de la mise à jour : ",
+        "channel": "Canal",
+        "check": "Rechercher des mises à jour",
+        "checkFailed": "Échec de la vérification : ",
+        "checking": "Vérification…",
+        "devNoFeed": "Ceci est un build de développement - les mises à jour sont gérées manuellement.",
+        "feed": "build dev - aucun flux de mises à jour",
+        "install": "Installer maintenant",
+        "installedRestart": "Mise à jour installée. Redémarrez rave-mate pour l'appliquer.",
+        "note": "Les nouveaux builds sont récupérés depuis le flux de votre branche, vérifiés par somme de contrôle + signature, puis appliqués après votre confirmation.",
+        "restart": "Redémarrer maintenant",
+        "restartFailed": "Échec du redémarrage : ",
+        "upToDate": "Vous êtes à jour.",
+        "version": "Version"
+      },
+      "virtualdj": {
+        "folder": "Dossier VirtualDJ",
+        "howToEnable": "Comment activer Network Control",
+        "netCtl": "Plugin Network Control - métadonnées complètes (nécessite VDJ Pro)",
+        "os2l": "Serveur OS2L - BPM/beat live uniquement, zéro-config",
+        "pluginAuth": "Auth du plugin",
+        "pluginUrl": "URL du plugin",
+        "tracklist": "Fichier tracklist - repli titre/artiste (avec latence)"
+      },
+      "vrchat": {
+        "credsMsg": "Les identifiants vont uniquement à VRChat - jamais à rave.page.",
+        "linkedAs": "Lié en tant que {name}.",
+        "passwordPlaceholder": "mot de passe",
+        "rememberSession": "Rester connecté (session scellée au repos)",
+        "twoFactorCodePlaceholder": "code 2FA",
+        "twoFactorRequired": "Double authentification requise ({methods}) - saisissez votre code.",
+        "unavailable": "VRChat indisponible dans cette build.",
+        "uplink": "Partager la session avec rave.page (fonctions côté serveur)",
+        "usernamePlaceholder": "nom d'utilisateur / e-mail VRChat",
+        "verify": "Vérifier"
+      },
+      "vrctools": {
+        "applyPresetNow": "Appliquer le préréglage maintenant",
+        "autoBackup": "Sauvegarder les chemins de caméra à la lecture",
+        "autoRestore": "Auto-restaurer le chemin à l'arrivée dans un monde (en live)",
+        "camPathMove": "Déplacer les chemins de caméra (au lieu de copier)",
+        "camPreset": "Préréglage de caméra au chargement",
+        "installDjPaths": "Installer les chemins DJ",
+        "noneOption": "(aucun)",
+        "orgCamPaths": "Organiser les chemins de caméra par monde",
+        "orgPhotos": "Organiser les captures par monde/événement",
+        "organizeNow": "Organiser maintenant",
+        "oscTarget": "Cible OSC",
+        "photoMove": "Déplacer les captures (au lieu de copier)",
+        "preferEvent": "Préférer l'événement rave.page au monde"
+      },
+      "vrinstall": {
+        "downloadPage": "Page de téléchargement OpenVR",
+        "installRuntime": "Installer le runtime VR",
+        "installed": "Installé : ",
+        "nonVrBuild": "Build non-vr - réinstallez depuis l'installeur pour le support VR.",
+        "notFound": "openvr_api.dll introuvable à côté de l'appli - installez-le pour activer la VR."
+      },
+      "vroverlay": {
+        "autostart": "Démarrer automatiquement avec SteamVR",
+        "axButton": "Bouton A / X",
+        "byButton": "Bouton B / Y",
+        "customSteamvr": "Personnalisé (défini dans SteamVR)",
+        "editBadge": "Modifier le badge au poignet",
+        "keybindsCount": "Raccourcis… (%d)",
+        "layoutsCount": "Dispositions… (%d)",
+        "openBindings": "Ouvrir les bindings de manette",
+        "openEditor": "Ouvrir l'éditeur",
+        "overlaysCount": "Overlays… (%d)",
+        "tapHides": "Un tap court affiche / masque les overlays",
+        "viewCapture": "Autoriser les captures VR-View",
+        "vmc": "VMC (VTuber)",
+        "vmcLive": "Diffuser le mouvement VR live vers VMC (VTuber)",
+        "vrchatOsc": "OSC VRChat",
+        "worldLayoutsCount": "Dispositions de monde… (%d)",
+        "wristCount": "Boutons poignet… (%d)"
+      },
+      "webcam": {
+        "autostart": "Démarrer la caméra avec l'appli (rigs à récupération de crash)",
+        "note": "Le choix du périphérique, démarrage/arrêt + PTZ/exposition sont dans l'onglet Pairs."
+      },
+      "worldsync": {
+        "linkDeviceCode": "Lier GitHub (device code)",
+        "linkLine": "Liez un compte GitHub (scope gist uniquement). Collez un PAT classique avec le scope 'gist', ou utilisez le device code.",
+        "linkedAs": "Lié en tant que ",
+        "pasteToken": "Coller un token…",
+        "unavailable": "Lien GitHub indisponible dans cette build."
+      }
+    },
+    "card": {
+      "ablelink": {
+        "desc": "Publier le tempo + la phrase du DJ sur une session Ableton Link ; aligner les clips Resolume sur la phrase.",
+        "title": "Ableton Link"
+      },
+      "account": {
+        "desc": "La connexion se fait dans votre navigateur - aucun mot de passe n'est saisi ici.",
+        "title": "Compte"
+      },
+      "api": {
+        "title": "API"
+      },
+      "appgroups": {
+        "desc": "Relancer un jeu d'applis de rig DJ après un crash (onglet Groupes d'applis). Les applis récupérées survivent à rave-mate.",
+        "title": "Groupes d'applis"
+      },
+      "audiorecord": {
+        "desc": "Enregistrer un périphérique audio choisi sur disque (FLAC sans perte) - synchronisé à l'enregistrement OBS ou manuel. Lié à la tracklist.",
+        "title": "Enregistrement audio (natif)"
+      },
+      "dmx": {
+        "desc": "Éclairage Art-Net en entrée → grille vidéo VRSL pour les mondes VRChat (+ forward DMX optionnel).",
+        "title": "DMX / VRSL"
+      },
+      "dmxmidi": {
+        "desc": "Pont MIDI CC à débit limité pour les mondes VRChat avec écouteur MIDI.",
+        "title": "DMX → MIDI VRChat"
+      },
+      "fingerprint": {
+        "desc": "Empreinte de piste Chromaprint pour enrichir la base musicale de rave.page.",
+        "title": "Empreinte"
+      },
+      "guardian": {
+        "desc": "Relancer automatiquement après un crash dur.",
+        "title": "Auto-redémarrage au crash"
+      },
+      "library": {
+        "desc": "Navigateur de fichiers natif + lecteur média + visionneuse de métadonnées (onglet Bibliothèque).",
+        "title": "Bibliothèque"
+      },
+      "mediaeditor": {
+        "desc": "Compositeur de posters + vignettes pour sorties/réseaux (onglet Éditeur).",
+        "title": "Éditeur média"
+      },
+      "medialink": {
+        "desc": "Envoyer la vidéo OBS/webcam/Spout vers une instance appairée via le lien LAN chiffré.",
+        "title": "Vidéo media link"
+      },
+      "midi": {
+        "desc": "Port de mapping personnalisé",
+        "title": "Lire l'état deck/mixeur + les titres A/B depuis un mapping MIDI-out Traktor."
+      },
+      "nml": {
+        "desc": "Enrichir les pistes live avec des métadonnées exactes de la collection.",
+        "title": "Traktor NML (collection)"
+      },
+      "notifications": {
+        "desc": "Notifications bureau natives pour les événements de stream + tâches.",
+        "title": "Notifications"
+      },
+      "obs": {
+        "desc": "Capture d'enregistrement + validation des réglages de stream via obs-websocket.",
+        "title": "OBS"
+      },
+      "obssync": {
+        "desc": "Caler les sources média OBS sur une horloge maison partagée (OBS local + OBS appairé/LAN).",
+        "title": "Synchro média"
+      },
+      "peers": {
+        "desc": "Découvrir + appairer d'autres instances rave-mate sur le LAN (onglet Pairs).",
+        "title": "Pairs LAN"
+      },
+      "prodjlink": {
+        "desc": "Now-playing live depuis des lecteurs Pioneer en réseau.",
+        "title": "Pro DJ Link (Pioneer CDJ/XDJ)"
+      },
+      "recorder": {
+        "desc": "Capturer une tracklist automatique avec horodatage par piste (onglet Publier).",
+        "title": "Enregistreur de session"
+      },
+      "rekordbox": {
+        "desc": "Piste en temps réel ou récemment jouée depuis le logiciel rekordbox.",
+        "title": "Rekordbox (now-playing live)"
+      },
+      "rekordboxkey": {
+        "desc": "Déverrouiller la bibliothèque Rekordbox live + l'historique de lecture.",
+        "title": "Clé master.db Rekordbox"
+      },
+      "rekordboxmidi": {
+        "desc": "Sortie play/cue rekordbox → rave-mate (CSV en un clic).",
+        "title": "Mapping MIDI Rekordbox"
+      },
+      "rtsp": {
+        "desc": "Vidéo LAN basse latence dans VRChat (AVPro rtspt://) - écran, caméra ou toute source, sans chaîne de relais.",
+        "title": "Flux RTSP local"
+      },
+      "serato": {
+        "desc": "Collection + now-playing live depuis les fichiers locaux de Serato.",
+        "title": "Serato DJ"
+      },
+      "service": {
+        "desc": "Installer comme service OS pour que rave-mate tourne sans fenêtre ouverte.",
+        "title": "Exécuter en arrière-plan"
+      },
+      "setcapture": {
+        "desc": "Capturer votre set live sur disque en le diffusant depuis Traktor vers cet endpoint Icecast local. Lié dans le temps à la tracklist de l'enregistreur.",
+        "title": "Capture de set (Icecast)"
+      },
+      "streambridge": {
+        "desc": "Publier votre set live (depuis Traktor) sur rave.page. Nécessite Traktor + connexion.",
+        "title": "Pont de stream live"
+      },
+      "stt": {
+        "desc": "Speech-to-text local → chat Twitch.",
+        "title": "Parole-vers-chat (Whisper STT)"
+      },
+      "studio": {
+        "desc": "Laisser l'appli web rave.page piloter ce bureau via une connexion loopback sécurisée (127.0.0.1).",
+        "title": "Canal Local Studio"
+      },
+      "timecode": {
+        "desc": "Horloge maison que d'autres logiciels et appareils suivent - audio LTC, MIDI MTC, Art-Net.",
+        "title": "Sorties timecode (SMPTE)"
+      },
+      "traktor": {
+        "desc": "Recevoir les métadonnées deck + mixeur de Traktor Pro 4 pour les sets live.",
+        "title": "Pont Traktor / DJ"
+      },
+      "traktormap": {
+        "desc": "Ajoute/retire des périphériques contrôleur dans Traktor pour vous - sauvegarde auto de Settings.tsi ; quittez Traktor d'abord. Le périphérique Kontrol D2 charge la surface de feed QML.",
+        "title": "Mappings Traktor"
+      },
+      "traktorqml": {
+        "desc": "Données live les plus riches - patche le QML D2 de Traktor pour qu'il diffuse les données deck complètes vers :8080. Nécessite l'admin (UAC) et Traktor fermé ; réversible.",
+        "title": "Feed QML Traktor (avancé)"
+      },
+      "transcode": {
+        "desc": "Workers de conversion média basés sur ffmpeg (pour Local Studio).",
+        "title": "Transcodage"
+      },
+      "twitch": {
+        "desc": "Chat live, alertes follow/sub/bit, préréglages de titre de stream en un clic + modération.",
+        "title": "Twitch"
+      },
+      "unity": {
+        "desc": "Installer le plugin éditeur rave.page dans vos projets d'avatar.",
+        "title": "Unity"
+      },
+      "updates": {
+        "desc": "Le flux d'auto-mise à jour de cette build.",
+        "title": "Mises à jour"
+      },
+      "virtualdj": {
+        "desc": "Collection + now-playing live (Network Control / OS2L / tracklist).",
+        "title": "VirtualDJ"
+      },
+      "vrchat": {
+        "desc": "Liez votre compte VRChat : présence temps réel + un onglet VRChat. Le mot de passe sert une fois à la connexion ; seul le cookie de session est conservé.",
+        "title": "Lien VRChat"
+      },
+      "vrctools": {
+        "desc": "Organiser les captures + chemins de caméra par monde.",
+        "title": "Outils VRChat"
+      },
+      "vroverlay": {
+        "desc": "Chat + alertes Twitch dans votre casque (OpenVR).",
+        "title": "Overlays VR"
+      },
+      "webcam": {
+        "desc": "Partager une caméra comme source Spout et piloter son objectif - d'ici ou d'une instance appairée.",
+        "title": "Webcam"
+      },
+      "worldsync": {
+        "desc": "Alimenter les mondes VRChat depuis des gists : listes de permissions, panneaux posters, événements + une carte now-playing.",
+        "title": "World Sync"
+      }
+    },
+    "empty": {
+      "obsRemotes": "Aucun OBS distant pour l'instant. Ajoutez-en un (le PC OBS a besoin d'obs-websocket activé).",
+      "obsSync": "Aucune source média pour l'instant. Ajoutez-en une (son nom d'entrée OBS, p. ex. une VLC Video Source).",
+      "twPresets": "Aucun préréglage pour l'instant. Ajoutez-en un ci-dessous.",
+      "vrOverlays": "Aucun overlay pour l'instant. Ajoutez un panneau de chat ou d'alertes."
+    },
+    "label": {
+      "add": "Ajouter",
+      "addMediaSource": "Ajouter une source média",
+      "addOutput": "Ajouter une sortie",
+      "addOverlay": "Ajouter un overlay",
+      "addPreset": "Ajouter un préréglage",
+      "addRemoteObs": "Ajouter un OBS distant",
+      "alwaysVisible": "Toujours visible (ignorer le masquage global)",
+      "anchor": "Ancrage",
+      "anchorHead": "tête (visière)",
+      "anchorLeft": "manette gauche",
+      "anchorRight": "manette droite",
+      "anchorWorld": "monde",
+      "apply": "Appliquer",
+      "autoDetect": "(détection auto)",
+      "categoryOptional": "Catégorie (facultatif)",
+      "downloading": "téléchargement…",
+      "edit": "Modifier",
+      "hostIp": "Hôte / IP",
+      "inputName": "Nom d'entrée",
+      "install": "Installer",
+      "installFailed": "échec de l'installation : ",
+      "installed": "installé",
+      "levelDbfs": "Niveau (dBFS)",
+      "link": "Lier",
+      "local": "local",
+      "localThisPc": "local (ce PC)",
+      "maxMessages": "Messages max",
+      "midiPort": "Port MIDI",
+      "name": "Nom",
+      "obs": "OBS",
+      "opacity01": "Opacité 0–1",
+      "sourceKind": "Type de source",
+      "syncOffsetMs": "Décalage de sync (ms)",
+      "targetHostPort": "Cible (hôte:port)",
+      "template": "Modèle",
+      "type": "Type",
+      "uninstall": "Désinstaller",
+      "vrRuntime": "Runtime VR",
+      "widthM": "Largeur (m)",
+      "xM": "X (m)",
+      "yM": "Y (m)",
+      "yawDeg": "Lacet (°)",
+      "zM": "Z (m)"
+    },
+    "language": {
+      "desc": "Langue de l'interface rave-mate. Repli sur l'anglais pour tout non traduit ; la langue de votre OS est utilisée jusqu'à ce que vous en choisissiez une ici.",
+      "label": "Langue de l'interface",
+      "title": "Langue"
+    },
+    "modal": {
+      "addUnityProject": "Ajouter un projet Unity",
+      "editOverlay": "Modifier l'overlay",
+      "editPreset": "Modifier le préréglage",
+      "ghPatNote": "Créez-en un sur github.com/settings/tokens → classic → uniquement le scope « gist ». Stocké scellé, jamais journalisé.",
+      "ghPatPlaceholder": "ghp_… (token classic, scope « gist »)",
+      "obsRemote": "OBS distant",
+      "obsRemotes": "Instances OBS distantes",
+      "obsSync": "Sources média synchronisées",
+      "obsSyncOne": "Source média synchronisée",
+      "pasteGhToken": "Coller le token GitHub",
+      "tcExtra": "Sorties supplémentaires",
+      "tcExtraArt": "Cibles Art-Net TimeCode supplémentaires",
+      "tcExtraLtc": "Sorties audio LTC supplémentaires",
+      "tcExtraMtc": "Sorties MIDI MTC supplémentaires",
+      "twPresets": "Préréglages de titre",
+      "unityAddNote": "Collez la racine du projet (nécessite Assets/ + ProjectSettings/) - ou utilisez Ajouter un dossier… pour le sélecteur natif.",
+      "unityPathPlaceholder": "C:\\path\\to\\UnityProject"
+    },
+    "section": {
+      "account": {
+        "desc": "Connexion + l'endpoint auquel cette instance parle.",
+        "title": "Compte & API"
+      },
+      "djsources": {
+        "desc": "Données deck/mixeur live - chaque source activée fusionne dans l'onglet Live.",
+        "title": "Sources DJ"
+      },
+      "integrations": {
+        "desc": "Twitch + VRChat + overlays VR + éclairage DMX + Unity.",
+        "title": "Intégrations"
+      },
+      "libmedia": {
+        "desc": "Bibliothèque locale, éditeur de posters + workers média.",
+        "title": "Bibliothèque & média"
+      },
+      "recording": {
+        "desc": "Tracklists, capture de set, enregistrement OBS + empreinte.",
+        "title": "Enregistrement"
+      },
+      "streaming": {
+        "desc": "Publier des sets live ; laisser l'appli web ou des pairs appairés piloter cette machine. Timecode maison pour le matériel externe.",
+        "title": "Streaming & distant"
+      },
+      "system": {
+        "desc": "Notifications, service en arrière-plan + récupération de crash.",
+        "title": "Système"
+      }
+    },
+    "status": {
+      "account": {
+        "signedIn": "connecté"
+      },
+      "audiorecord": {
+        "noDeviceSelected": "aucun périphérique sélectionné"
+      },
+      "common": {
+        "armed": "armé",
+        "notListening": "pas en écoute",
+        "notRunning": "arrêté",
+        "notRunningPortBusy": "arrêté (port occupé ?)",
+        "notSignedIn": "non connecté",
+        "on": "on",
+        "ready": "prêt",
+        "receiving": "réception",
+        "recording": "enregistrement",
+        "running": "actif",
+        "unavailable": "indisponible"
+      },
+      "dmx": {
+        "idleSeen": "inactif - %d univers vus",
+        "listeningNoData": "écoute - aucun DMX encore",
+        "receiving": "réception DMX"
+      },
+      "dmxmidi": {
+        "notRunning": "arrêté (port MIDI manquant ?)",
+        "readyOn": "prêt sur ",
+        "sentMsgs": "→ %s · %d msg(s)"
+      },
+      "fingerprint": {
+        "missing": "fpcalc manquant",
+        "ready": "fpcalc prêt"
+      },
+      "library": {
+        "mpvMissing": "mpv manquant",
+        "mpvReady": "mpv prêt"
+      },
+      "medialink": {
+        "off": "plan média off (activez les pairs LAN)",
+        "receiveOnly": "réception seule (partage off)",
+        "sharing": "partage - recevez depuis l'onglet Pairs"
+      },
+      "midi": {
+        "noPortSelected": "aucun port MIDI sélectionné"
+      },
+      "obs": {
+        "connected": "connecté",
+        "notConnected": "non connecté"
+      },
+      "obssync": {
+        "clockStopped": "horloge arrêtée",
+        "syncing": "synchro de %d source(s)"
+      },
+      "peers": {
+        "discoveryOn": "découverte on"
+      },
+      "recorder": {
+        "recordingTracks": "enregistrement · %d pistes"
+      },
+      "rekordboxkey": {
+        "saveTest": "enregistrer + tester"
+      },
+      "rekordboxmidi": {
+        "generateImport": "générer + importer"
+      },
+      "rtsp": {
+        "encodingWaiting": "encodage - attente des lecteurs",
+        "startingSource": "démarrage de la source vidéo…",
+        "streamingClients": "streaming vers %d client(s)"
+      },
+      "service": {
+        "notChecked": "non vérifié"
+      },
+      "setcapture": {
+        "capturing": "capture ",
+        "listening": "écoute ",
+        "receiverError": "erreur du récepteur",
+        "sourceDropped": "source perdue - maintien"
+      },
+      "streambridge": {
+        "live": "LIVE - publication",
+        "needsTraktor": "nécessite le pont Traktor",
+        "signInRequired": "connexion requise"
+      },
+      "stt": {
+        "modelNotDownloaded": "modèle non téléchargé",
+        "notInstalled": "non installé"
+      },
+      "studio": {
+        "listeningLoopback": "écoute sur loopback"
+      },
+      "timecode": {
+        "armedPressStart": "armé - appuyez sur START",
+        "running": "EN COURS · "
+      },
+      "traktor": {
+        "listening": "écoute :%d"
+      },
+      "traktormap": {
+        "manageDevices": "gérer les périphériques"
+      },
+      "traktorqml": {
+        "checkInstall": "vérifier / installer"
+      },
+      "transcode": {
+        "ffmpegMissing": "ffmpeg manquant",
+        "ffmpegReady": "ffmpeg prêt"
+      },
+      "twitch": {
+        "connecting": "connexion…",
+        "liveAs": "en live en tant que "
+      },
+      "unity": {
+        "noProjects": "aucun projet",
+        "projectsCount": "%d projet(s)"
+      },
+      "updates": {
+        "devBuild": "build dev",
+        "onChannel": "{channel} · build {build}"
+      },
+      "vrchat": {
+        "signedInAs": "connecté en tant que ",
+        "twoFaPending": "2FA en attente"
+      },
+      "vrctools": {
+        "watching": "surveillance"
+      },
+      "vroverlay": {
+        "active": "actif - SteamVR connecté",
+        "nonVrReinstall": "build non-vr - réinstallez",
+        "waitingSteamvr": "activé - attente de SteamVR"
+      },
+      "webcam": {
+        "readyPeersTab": "prêt - onglet Pairs"
+      },
+      "worldsync": {
+        "linkedAs": "lié en tant que ",
+        "notLinked": "GitHub non lié"
+      }
+    },
+    "subtitle": "Basculez ce que vous utilisez - les fonctions désactivées ne possèdent ni port, ni goroutine, ni sous-processus.",
+    "title": "Réglages",
+    "toast": {
+      "addedFromVcc": {
+        "few": "{count} projets ajoutés depuis VCC",
+        "many": "{count} projets ajoutés depuis VCC",
+        "one": "{count} projet ajouté depuis VCC",
+        "other": "{count} projets ajoutés depuis VCC"
+      },
+      "applyPresetErr": "Appliquer le préréglage : ",
+      "applyingPreset": "Application du préréglage de titre…",
+      "camPresetApplied": "Préréglage de caméra appliqué",
+      "elevationDeclined": "Élévation refusée (UAC)",
+      "enterCodeAt": "Saisissez le code {code} sur {url}",
+      "exportFailed": "Échec de l'export : ",
+      "ghErr": "GitHub : ",
+      "ghLinkFailed": "Échec du lien GitHub : ",
+      "ghLinked": "GitHub lié",
+      "ghLinkedAs": "GitHub lié en tant que {login}",
+      "ghStarting": "Démarrage de la connexion par appareil GitHub…",
+      "installDjPathsErr": "Installer les trajectoires DJ : ",
+      "installFailed": "Échec de l'installation de {tool}",
+      "installPluginErr": "Installer le plugin : ",
+      "installedDjPaths": {
+        "few": "{count} trajectoires DJ installées → {dst}",
+        "many": "{count} trajectoires DJ installées → {dst}",
+        "one": "{count} trajectoire DJ installée → {dst}",
+        "other": "{count} trajectoires DJ installées → {dst}"
+      },
+      "installedTool": "{tool} installé",
+      "mapActivated": "{name} activé",
+      "mapRemoved": "{name} retiré",
+      "masterDbErr": "master.db : ",
+      "masterDbOk": "master.db OK - {tracks} pistes, {sessions} sessions",
+      "noMasterDb": "Aucun master.db trouvé",
+      "notUnityProject": "Pas un projet Unity (nécessite Assets/ + ProjectSettings/)",
+      "obsCheck": "Vérif OBS : ",
+      "obsConnectFailed": "Échec de la connexion OBS : ",
+      "obsConnecting": "Connexion à OBS…",
+      "obsStreamGood": "Les réglages de stream OBS semblent bons",
+      "obsValidateFailed": "Échec de la validation OBS : ",
+      "openingBindings": "Ouverture des raccourcis de contrôleur dans le casque…",
+      "organized": "{photos} photo(s), {paths} trajectoire(s) organisées",
+      "pluginInstalled": "Plugin rave.page installé",
+      "qmlExited": "L'assistant de flux QML a quitté {code}",
+      "qmlFailed": "Échec du flux QML {action} : ",
+      "qmlOk": "Flux QML {action} ok",
+      "qmlWorking": "En cours… approuvez l'invite UAC, gardez Traktor fermé",
+      "rbmidiSaved": "{path} enregistré - importez-le dans rekordbox : Preferences → Controller → MIDI → {device} → IMPORT",
+      "rekordboxKeySaved": "Clé Rekordbox enregistrée",
+      "saveKeyFailed": "Échec de l'enregistrement de la clé : ",
+      "streamTitleSet": "Titre du stream défini",
+      "svcFailed": "Échec de {action} : ",
+      "svcSucceeded": "{action} réussi",
+      "titleFailed": "Échec du titre : ",
+      "tokenRejected": "Token rejeté : ",
+      "traktorWorking": "En cours… (ne démarrez pas Traktor)",
+      "twitchErr": "Twitch : ",
+      "twitchSignInFailed": "Échec de la connexion Twitch : ",
+      "twitchSignedIn": "Connecté à Twitch",
+      "twitchSignedOut": "Déconnecté de Twitch",
+      "twitchStarting": "Démarrage de la connexion Twitch…",
+      "vrcSigningIn": "Connexion à VRChat…"
+    },
+    "toggle": {
+      "ablelink": "Ableton Link",
+      "appgroups": "Groupes d'applis (relance au crash)",
+      "audiorecord": "Capture de périphérique audio",
+      "dmx": "Plan DMX (Art-Net)",
+      "dmxmidi": "Pont DMX → MIDI",
+      "fingerprint": "Empreinte (fpcalc)",
+      "guardian": "Gardien de crash (armé)",
+      "library": "Bibliothèque",
+      "mediaeditor": "Éditeur média / poster",
+      "medialink": "Partager les émetteurs Spout (media link)",
+      "midi": "Entrée MIDI",
+      "nml": "Collection/historique Traktor (NML)",
+      "notifications": "Notifications bureau",
+      "obs": "Contrôle OBS",
+      "obssync": "Synchro média OBS",
+      "peers": "Pairs LAN",
+      "prodjlink": "Pioneer Pro DJ Link",
+      "recorder": "Enregistreur de tracklist",
+      "rekordbox": "Rekordbox (live)",
+      "rtsp": "Chaîne performer RTSP",
+      "serato": "Serato",
+      "setcapture": "Capture de set (récepteur Icecast)",
+      "streambridge": "Pont de stream live",
+      "stt": "Speech-to-text → chat",
+      "studio": "Canal Local Studio",
+      "timecode": "Timecode maison (SMPTE)",
+      "traktor": "Pont Traktor",
+      "transcode": "Workers de transcodage",
+      "twitch": "Twitch",
+      "unity": "Intégration plugin Unity",
+      "virtualdj": "VirtualDJ",
+      "vrchat": "VRChat",
+      "vrctools": "Outils VRChat (photos / chemins caméra)",
+      "vroverlay": "Overlays VR",
+      "webcam": "Webcam / source UVC",
+      "worldsync": "World sync (flux gist)"
+    },
+    "vr": {
+      "action": "Action",
+      "addBind": "Ajouter un bind",
+      "addKeybind": "Ajouter un raccourci clavier",
+      "addQuickButton": "Ajouter un bouton rapide",
+      "addQuickButtonHeader": "Ajouter un bouton rapide",
+      "appGroup": "Groupe d'applications",
+      "assignKeyOrSlot": "Assignez une touche MIDI et/ou un slot VR.",
+      "autoApplyMode": "Mode d'application auto",
+      "bind": "Bind",
+      "bindCurrentWorld": "Lier le monde actuel…",
+      "bindCurrentWorldTitle": "Lier le monde actuel",
+      "buttonLabel": "Libellé du bouton (infobulle au survol)",
+      "cameraPath": "Trajectoire de caméra",
+      "currentWorldUnknown": "Monde actuel inconnu - rejoignez d'abord un monde VRChat.",
+      "defaultLayoutName": "Disposition {n}",
+      "editBindsSteamvr": "Modifier les binds dans SteamVR…",
+      "emptyKeybinds": "Aucun raccourci clavier pour l'instant - ajoutez-en un ci-dessous.",
+      "emptyLayouts": "Aucune disposition enregistrée. Enregistrez l'arrangement actuel ci-dessous ou importez-en un.",
+      "emptyQuickButtons": "Aucun bouton rapide pour l'instant - ajoutez-en un ci-dessous. Ils apparaissent sur la bande poignet dans le casque après les boutons intégrés.",
+      "emptyWorldBindings": "Aucun lien de monde pour l'instant. Liez le monde où vous êtes ci-dessous, ou utilisez « Enregistrer la disposition pour ce monde » dans la page DISPOSITIONS du casque.",
+      "export": "Exporter",
+      "exported": "{name} exporté",
+      "glyph": "Glyphe, 1-3 caractères (vide = d'après le libellé)",
+      "import": "Importer…",
+      "importFailed": "Échec de l'import : ",
+      "importFailedNotJson": "Échec de l'import : pas un JSON de disposition - ",
+      "imported": "{name} importé",
+      "importedLayoutName": "Disposition importée",
+      "keybinds": "Raccourcis clavier",
+      "layout": "Disposition",
+      "layoutName": "Nom de la disposition",
+      "layoutPrefix": "disposition : ",
+      "layoutsTitle": "Dispositions d'overlays VR",
+      "learnMidi": "Apprendre MIDI",
+      "learnPressKey": "Appuyez sur une touche… (annuler)",
+      "load": "Charger",
+      "loadCameraPath": "Charger une trajectoire de caméra",
+      "loadOverlayLayout": "Charger une disposition d'overlay",
+      "loadedLayout": "Disposition {name} chargée",
+      "local": "(local)",
+      "midiNone": "MIDI : (aucun)",
+      "midiPrefix": "MIDI : ",
+      "midiUnavailable": "Entrée MIDI indisponible.",
+      "noSavedLayouts": "Aucune disposition enregistrée - enregistrez-en une d'abord (Dispositions…).",
+      "obsInputName": "Nom d'entrée / source OBS",
+      "obsInstance": "Instance OBS",
+      "overlay": "Overlay",
+      "overlayCount": {
+        "few": "{count} overlays",
+        "many": "{count} overlays",
+        "one": "{count} overlay",
+        "other": "{count} overlays"
+      },
+      "perWorldLayouts": "Dispositions d'overlays par monde",
+      "pickAction": "Choisissez d'abord une action.",
+      "quickButtonsNote": "Les boutons rapides sont des boutons icônes supplémentaires sur la bande poignet dans le casque (ouvrez-la via le badge poignet ou le bouton d'appel). Chacun déclenche une action - basculer un overlay, charger une disposition ou une trajectoire de caméra, enregistrer/diffuser OBS, et plus.",
+      "rename": "Renommer",
+      "renameLayout": "Renommer la disposition",
+      "saveCurrentAs": "Enregistrer l'actuel sous…",
+      "saveLayout": "Enregistrer la disposition",
+      "saveLayoutNote": "Capture les overlays actuels + le placement du menu poignet comme disposition nommée.",
+      "target": "Cible",
+      "toggleOff": "Off",
+      "toggleOn": "On",
+      "vrSlot": "Slot VR",
+      "vrSlotNote": "Les slots VR sont assignés aux entrées de manette (combos inclus) dans l'UI de binding de SteamVR ; mappez ici le slot à une action.",
+      "vrcToolsOff": "Les outils VRChat sont désactivés - le monde actuel est inconnu.",
+      "worldLayoutsNote": "Ce qui se passe quand vous rejoignez un monde VRChat avec une disposition liée : off = rien ; notifier = un avis dans le casque + une rangée d'application en un tap dans le menu poignet ; auto = la disposition est appliquée immédiatement. Le On/Off par lien désactive un seul monde.",
+      "worldModeAuto": "auto (appliquer à l'arrivée)",
+      "worldModeAutoSub": "la disposition liée est appliquée immédiatement",
+      "worldModeNotify": "notifier (suggérer en VR)",
+      "worldModeNotifySub": "avis dans le casque + rangée d'application en un tap dans le menu poignet",
+      "worldModeOffSub": "rejoindre un monde lié ne fait rien",
+      "worldPrefix": "Monde : ",
+      "wristQuickButtons": "Boutons rapides du poignet"
+    }
+  },
+  "tab": {
+    "appgroups": "Groupes d'applis",
+    "automations": "Automatisations",
+    "editor": "Éditeur",
+    "library": "Bibliothèque",
+    "live": "Live",
+    "logs": "Journaux",
+    "motion": "Mouvement",
+    "overlays": "Overlays",
+    "peers": "Pairs",
+    "publish": "Publier",
+    "settings": "Réglages",
+    "twitch": "Twitch",
+    "vrchat": "VRChat",
+    "worlds": "Mondes"
+  },
+  "track": {
+    "few": "{count} pistes",
+    "many": "{count} pistes",
+    "one": "{count} piste",
+    "other": "{count} pistes"
+  },
+  "tray": {
+    "checkUpdates": "Rechercher des mises à jour",
+    "open": "Ouvrir rave-mate",
+    "quit": "Quitter",
+    "tooltip": "rave-mate - {version}"
+  },
+  "twitch": {
+    "addPreset": "+ Ajouter",
+    "anonymous": "Anonyme",
+    "badgeCheer": "cheer",
+    "badgeHost": "host",
+    "badgeMod": "mod",
+    "badgeSub": "sub",
+    "badgeVip": "vip",
+    "bitsCount": {
+      "few": "{count} bits",
+      "many": "{count} bits",
+      "one": "{count} bit",
+      "other": "{count} bits"
+    },
+    "bitsPrefix": "({count} bits) {text}",
+    "cheered": "✦ {who} a envoyé {bits}",
+    "empty": {
+      "noPresets": "Aucun préréglage pour l'instant. Ajoutez-en un ci-dessous."
+    },
+    "followed": "★ {name} vous suit",
+    "giftedSubs": "🎁 {who} a offert {count} sub(s){tier}",
+    "label": {
+      "addPreset": "+ Ajouter un préréglage",
+      "applyPreset": "Appliquer : {name}",
+      "banUser": "Bannir l'utilisateur",
+      "category": "Catégorie",
+      "categoryPlaceholder": "Catégorie Twitch (facultatif)",
+      "deleteMessage": "Supprimer le message",
+      "edit": "Modifier",
+      "editPreset": "Modifier le préréglage",
+      "moderateUser": "Modérer {name} :",
+      "moderation": "Modération",
+      "name": "Nom",
+      "setTitle": "Définir le titre",
+      "template": "Modèle",
+      "templateHint": "Utilisez {placeholders} pour les valeurs que vous remplissez à l'application.",
+      "templatePlaceholder": "{genre} set @ {club} - {event}",
+      "timeout10": "Timeout 10 min",
+      "titlePresets": "Préréglages de titre"
+    },
+    "managePresets": "Préréglages…",
+    "moderate": "Modérer",
+    "monthsCount": {
+      "few": "{count} mois",
+      "many": "{count} mois",
+      "one": "{count} mois",
+      "other": "{count} mois"
+    },
+    "noMessagesYet": "(aucun message - chat + alertes apparaissent ici en direct)",
+    "noPresetsYet": "Aucun préréglage de titre - ajoutez-en un par genre/lieu.",
+    "offline": "hors ligne",
+    "resubscribed": "💜 {name} s'est réabonné ({months}){tier}",
+    "send": "Envoyer",
+    "sendPlaceholder": "Envoyer un message au chat…",
+    "streamTitle": "Titre du stream",
+    "streamingCockpit": "Cockpit de streaming",
+    "subscribed": "💜 {name} s'est abonné{tier}",
+    "subtitle": "Chat, alertes, titre de stream & modération",
+    "tier2": "(Palier 2)",
+    "tier3": "(Palier 3)",
+    "title": "Twitch",
+    "toast": {
+      "applyingMod": "Application de la modération…",
+      "done": "Terminé",
+      "modFailed": "Échec de la modération : ",
+      "titleUpdateFailed": "Échec de la mise à jour du titre : ",
+      "titleUpdated": "Titre du stream mis à jour",
+      "updatingTitle": "Mise à jour du titre du stream…"
+    },
+    "unavailable": "Twitch indisponible",
+    "viewersLive": "{count} spectateurs · LIVE",
+    "viewersUnknown": "- spectateurs"
+  },
+  "vrchat": {
+    "action": {
+      "copyFilePath": "Copier le chemin du fichier",
+      "loadIntoVRChat": "Charger dans VRChat",
+      "openEmojiUploadPage": "Ouvrir la page d'upload d'emoji VRChat",
+      "openFolder": "Ouvrir le dossier",
+      "openInViewer": "Ouvrir dans la visionneuse",
+      "openOutputFolder": "Ouvrir le dossier de sortie",
+      "organizeNow": "Organiser maintenant",
+      "presets": "Préréglages…",
+      "refreshEvents": "Actualiser les événements",
+      "saveBio": "Enregistrer la bio",
+      "saveStatus": "Enregistrer le statut",
+      "variables": "Variables…"
+    },
+    "campaths": {
+      "empty": "Aucun chemin de caméra trouvé - enregistrez-en un dans le menu dolly caméra de VRChat",
+      "failedToRead": "Échec de lecture du chemin.",
+      "info": "{where} · {keyframes} · {duration}s · enregistré {when}",
+      "keyframes": {
+        "few": "{count} keyframes",
+        "many": "{count} keyframes",
+        "one": "{count} keyframe",
+        "other": "{count} keyframes"
+      },
+      "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
+      "playerRelative": "Relatif au joueur",
+      "svgHint": "Aperçu isométrique statique - couleur = vitesse par segment (menthe lent → rose rapide) ; points roses = keyframes, ambre = début du chemin.",
+      "unknown": "Inconnu",
+      "unknownWorld": "Monde inconnu"
+    },
+    "card": {
+      "bio": "Bio",
+      "status": "Statut"
+    },
+    "editor": {
+      "placeholderPreview": "Aperçu de la variable"
+    },
+    "emotes": {
+      "crop": "Rogner",
+      "field": {
+        "fps": "FPS",
+        "frames": "Images",
+        "name": "Nom",
+        "outputDir": "Dossier de sortie",
+        "source": "Source (vidéo/GIF)",
+        "trimEnd": "Rogner fin (s)",
+        "trimStart": "Rogner début (s)"
+      },
+      "generate": "Générer la sprite sheet",
+      "hint": "Générez une sprite sheet d'emoji animé 1024² (nommée <name>_<N>frames_<fps>fps.png). Saisissez des chemins de fichiers absolus - les sélecteurs natifs sont un suivi webview.",
+      "pingpong": "Cuire en ping-pong (avant puis inversé)"
+    },
+    "empty": {
+      "addPlaceholders": "Ajoutez d'abord {placeholders} à votre bio.",
+      "noBioPresets": "Aucun préréglage de bio pour l'instant.",
+      "noStatusPresets": "Aucun préréglage de statut pour l'instant."
+    },
+    "field": {
+      "presence": "Présence",
+      "statusMessage": "Message de statut"
+    },
+    "groups": {
+      "about": "À propos",
+      "action": {
+        "accept": "Accepter",
+        "add": "Ajouter",
+        "ban": "Bannir",
+        "cancel": "Annuler",
+        "createPost": "Créer un post",
+        "invite": "Inviter",
+        "inviteUser": "Inviter un utilisateur…",
+        "kick": "Expulser",
+        "loadMore": "Charger plus",
+        "postAnnouncement": "Publier une annonce",
+        "reject": "Rejeter",
+        "remove": "Retirer",
+        "roles": "Rôles…",
+        "unban": "Débannir"
+      },
+      "auditLogLoadedTitle": "Journal d'audit - {count} chargés",
+      "auditPermHint": "La consultation nécessite généralement la permission group-audit-view.",
+      "backToMyGroups": "← Mes groupes",
+      "bans": {
+        "empty": "Aucun utilisateur banni."
+      },
+      "couldNotLoad": "Impossible de charger ce groupe - Actualisez pour réessayer.",
+      "currentAnnouncement": "Annonce actuelle",
+      "field": {
+        "imageId": "ID d'image (optionnel)",
+        "text": "Texte",
+        "title": "Titre"
+      },
+      "groupRules": "Règles du groupe",
+      "hint": {
+        "announcementReplace": "Remplace l'annonce actuelle du groupe ; VRChat applique ses propres limites de longueur.",
+        "postAdds": "Ajoute au fil de posts du groupe (ne remplace pas l'annonce).",
+        "signInToManage": "Connectez-vous depuis Réglages ▸ Intégrations ▸ VRChat pour gérer vos groupes."
+      },
+      "invites": {
+        "empty": "Aucune invitation en cours."
+      },
+      "joinState": "adhésion : {state}",
+      "joined": "rejoint {when}",
+      "kv": {
+        "joinState": "État d'adhésion",
+        "owner": "Propriétaire",
+        "privacy": "Confidentialité",
+        "shortCode": "Code court"
+      },
+      "loadingAuditLog": "Chargement du journal d'audit…",
+      "loadingFriends": "Chargement des amis…",
+      "loadingGeneric": "Chargement…",
+      "loadingGroup": "Chargement du groupe…",
+      "loadingGroups": "Chargement de vos groupes…",
+      "loadingMembers": "Chargement des membres…",
+      "loadingPosts": "Chargement des posts…",
+      "managementBadge": "gestion",
+      "memberCountOnline": "{count} ({online} en ligne)",
+      "memberListChanged": "Liste des membres modifiée - fermez et rouvrez.",
+      "members": {
+        "few": "{count} membres",
+        "many": "{count} membres",
+        "one": "{count} membre",
+        "other": "{count} membres"
+      },
+      "membersLoadedTitle": "Membres - {count} chargés",
+      "moreMatches": "…plus de correspondances - filtrez pour affiner",
+      "myGroupsTitle": "Mes groupes",
+      "newAnnouncement": "Nouvelle annonce",
+      "newPost": "Nouveau post",
+      "noAnnouncementSet": "Aucune annonce définie.",
+      "noAuditEntries": "Aucune entrée d'audit.",
+      "noFriendsMatch": "Aucun ami ne correspond.",
+      "noManagementPerms": "Aucune permission de gestion dans ce groupe.",
+      "noMatch": "Aucun groupe ne correspond au filtre.",
+      "noMembersVisible": "Aucun membre visible.",
+      "noPostsYet": "Aucun post pour l'instant.",
+      "noRolesVisible": "Aucun rôle visible.",
+      "noneFound": "Aucun groupe VRChat trouvé - Actualisez pour réessayer.",
+      "notLoaded": "Non chargé - Actualisez pour réessayer.",
+      "onlineCount": "{count} en ligne",
+      "order": "ordre {n}",
+      "ownerFullPermissions": "propriétaire - permissions complètes",
+      "permissionsCount": {
+        "few": "{count} permissions",
+        "many": "{count} permissions",
+        "one": "{count} permission",
+        "other": "{count} permissions"
+      },
+      "postsLoadedTitle": "Posts - {count} chargés",
+      "rawEntry": "entrée brute",
+      "representing": "représente",
+      "requests": {
+        "empty": "Aucune demande d'adhésion en attente.",
+        "title": "Demandes d'adhésion"
+      },
+      "roleManagementLabel": "{name} (gestion)",
+      "rolesNotLoaded": "Rôles pas encore chargés - Actualisez le groupe.",
+      "rolesTitle": "Rôles ({count})",
+      "selfAssignBadge": "auto-attribution",
+      "sendNotification": "Envoyer une notification aux membres",
+      "showingFirstN": "Affichage des {max} premiers.",
+      "tab": {
+        "auditLog": "Journal d'audit",
+        "bans": "Bannissements",
+        "invites": "Invitations",
+        "members": "Membres",
+        "overview": "Aperçu",
+        "posts": "Posts",
+        "requests": "Demandes"
+      },
+      "twoFARequired": "2FA requise",
+      "verified": "vérifié",
+      "you": "vous",
+      "youOwnThisGroup": "vous possédez ce groupe",
+      "yourPermissions": "Vos permissions"
+    },
+    "hint": {
+      "bioSaveInfo": "Enregistre le texte ci-dessus tel quel. Chargez un préréglage de bio pour y étendre {next_event}, {next_event_date}, {next_event_venue}… (à partir des événements actuels + Variables).",
+      "signInToEditProfile": "Connectez-vous depuis Réglages ▸ Intégrations ▸ VRChat pour éditer statut & bio."
+    },
+    "label": {
+      "addPreset": "Ajouter un préréglage",
+      "bioPresets": "Préréglages de bio",
+      "bioTemplatePlaceholder": "Modèle de bio - utilisez {next_event}, {next_event_date}, {next_event_venue}…",
+      "bioVariables": "Variables de bio",
+      "bioVarsHint": "Valeurs de repli manuelles. {next_event}/{next_event_date} se résolvent automatiquement depuis les événements rave.page quand disponibles ; {next_event_venue} vient toujours d'ici.",
+      "presetNamePlaceholder": "nom du préréglage",
+      "saveVariables": "Enregistrer les variables",
+      "statusMessagePlaceholder": "message de statut",
+      "statusPresets": "Préréglages de statut"
+    },
+    "photos": {
+      "empty": "Aucune capture VRChat trouvée - prenez des photos dans VRChat (par défaut Pictures\\VRChat)",
+      "previewFailed": "Impossible de charger l'image en pleine résolution.",
+      "showingFirst": "Affichage des {shown} premières sur {total} - Ouvrez le dossier pour le reste."
+    },
+    "pipeline": {
+      "idle": "pipeline inactif",
+      "idleWithError": "pipeline inactif · {error}",
+      "live": "pipeline live",
+      "off": "pipeline off"
+    },
+    "presence": {
+      "placeholder": "(présence)"
+    },
+    "preset": {
+      "loadBioPlaceholder": "(charger un préréglage de bio)",
+      "loadStatusPlaceholder": "(charger un préréglage de statut)"
+    },
+    "section": {
+      "cameraPaths": "Chemins de caméra",
+      "emotes": "Emotes - générateur d'emoji animé",
+      "photos": "Photos",
+      "statusBio": "Statut & bio"
+    },
+    "status": {
+      "notSignedIn": "non connecté",
+      "signedInAs": "Connecté en tant que {name}"
+    },
+    "subtab": {
+      "groups": "Groupes",
+      "profile": "Profil"
+    },
+    "subtitle": "État du compte & bio · emotes · chemins de caméra · photos · groupes",
+    "toast": {
+      "ffmpegNotFound": "ffmpeg introuvable - installez-le depuis Réglages ▸ Outils média",
+      "fpsPositive": "Les FPS doivent être un nombre positif",
+      "loadFailed": "Échec du chargement : ",
+      "needName": "Définissez un nom de préréglage",
+      "needNamePresence": "Définissez un nom de préréglage + choisissez une présence",
+      "organized": "{paths} trajectoire(s), {photos} photo(s) organisées.",
+      "pickFrameTier": "Choisissez un niveau d'image",
+      "pickSource": "Choisissez d'abord une vidéo/un GIF source",
+      "refreshingEvents": "Actualisation des événements…",
+      "sentToVrchat": "Envoyé à VRChat (nécessite OSC activé).",
+      "spriteGenerated": "Feuille de sprites générée"
+    },
+    "tools": {
+      "unavailable": "Outils VRChat indisponibles"
+    },
+    "unavailable": "VRChat indisponible"
+  },
+  "worlds": {
+    "action": {
+      "add": "Ajouter",
+      "addFriend": "Ajouter un ami…",
+      "addGroupRole": "Ajouter un rôle de groupe…",
+      "addList": "Ajouter une liste",
+      "addName": "Ajouter un nom",
+      "addPoster": "Ajouter un poster",
+      "backToList": "Retour à la liste",
+      "copyWorldUrl": "Copier l'URL du monde",
+      "edit": "Modifier",
+      "linkGithubDeviceCode": "Lier GitHub (device code)",
+      "openGist": "Ouvrir le gist",
+      "pasteToken": "Coller un token…",
+      "pin": "☆ Épingler",
+      "publishNow": "Publier maintenant",
+      "roles": "Rôles…",
+      "search": "Rechercher",
+      "unlink": "Délier",
+      "unpin": "★ Désépingler",
+      "writeSourceUrls": "Écrire les URLs sources"
+    },
+    "billboards": "Panneaux",
+    "entriesCount": {
+      "one": "{count} entrée",
+      "other": "{count} entrées"
+    },
+    "entry": {
+      "allMembers": "tous les membres",
+      "groupRoleLabel": "Rôle de groupe : {group} - {role}",
+      "userLabel": "Utilisateur : {name}"
+    },
+    "eventsBoard": "Tableau des événements",
+    "favorites": "Favoris",
+    "field": {
+      "caption": "Légende",
+      "image": "Image",
+      "link": "Lien"
+    },
+    "github": {
+      "unavailable": "Intégration GitHub indisponible dans cette build"
+    },
+    "groupMembersLabel": "{name} ({members})",
+    "help": {
+      "eventsExplainer": "Publie le titre + la date de vos événements rave.page à venir dans un gist que le prefab tableau-d'événements sonde. Les mondes voient les changements dans l'intervalle de rafraîchissement + ~5 min de cache CDN gist.",
+      "grantGroupRoleExplainer": "Accordez un groupe entier ou un rôle. L'expansion des membres ne fonctionne que là où la liste des membres est visible (groupes publics) ; les groupes privés gardent leur dernière expansion valide.",
+      "linkGithubAccount": "Liez un compte GitHub (scope gist uniquement). Le device code nécessite un client id d'appli OAuth ; coller un PAT classique avec le scope 'gist' fonctionne toujours. Scellé au repos, jamais journalisé.",
+      "listsExplainer": "Chaque liste publie un gist (noms allow.txt en lignes + enveloppe allow.json) que les mondes sondent - VideoTXL Remote Whitelist, ProTV, loaders génériques. Les entrées de rôle de groupe s'étendent aux noms de membres actuels à la publication (Udon n'a pas d'API groupe à l'exécution).",
+      "nowPlayingExplainer": "Tant qu'une session est live, publie la piste audible (artiste/titre depuis la sortie caviardée du hub de session) au plus une fois par minute. Les mondes ont 1–6 min de retard avec le cache CDN gist.",
+      "postersExplainer": "URL d'image + légende + lien fournis par gist pour le prefab poster. Les images VRChat chargent via une allowlist d'hôtes séparée (i.imgur.com, *.github.io, i.ibb.co, …) - les hôtes hors allowlist n'affichent que du texte.",
+      "roleGrantExplainer": "Les octrois de rôle publient les noms de membres de ce rôle vers le gist (URL non listée mais publique). Seuls les noms de membres de groupe/rôle entiers sont listés - jamais les ids d'utilisateur.",
+      "tokenSealed": "Token scellé au repos (scope gist). Les cibles de publication ci-dessous écrivent dans vos gists.",
+      "unityExplainer": "Écrit Assets/rave.page/WorldSync/sources.json dans le projet. Dans Unity : Tools → rave.page → World Sync liste les flux, câble un VideoTXL Remote Whitelist, ou copie les URLs. Ré-écrivez après avoir publié une nouvelle liste."
+    },
+    "hint": {
+      "allLinksConnected": "Tous les liens connectés - prêt à publier",
+      "githubNotLinked": "GitHub non lié - nécessaire pour publier des gists",
+      "hostNotAllowlistedPrefab": "Hôte hors allowlist d'images VRChat - le prefab n'affiche que du texte",
+      "imageHostNotAllowed": "Hôte d'image hors allowlist d'images VRChat",
+      "linkMissing": "Lien manquant : {list}"
+    },
+    "kv": {
+      "linkedAs": "Lié en tant que"
+    },
+    "list": {
+      "empty": "Liste vide - ajoutez des amis ou des rôles de groupe"
+    },
+    "lists": {
+      "empty": "Aucune liste de permissions - ajoutez-en une ci-dessous"
+    },
+    "liveDjCard": "Carte DJ live",
+    "loadingFriends": "Chargement des amis…",
+    "loadingGroups": "Chargement de vos groupes…",
+    "membersCount": {
+      "one": "{count} membre",
+      "other": "{count} membres"
+    },
+    "missing": {
+      "vrchatFriendsExpansion": "VRChat (navigateur d'amis + expansion de rôle de groupe)"
+    },
+    "modal": {
+      "addFriend": "Ajouter un ami",
+      "addGroupRole": "Ajouter un rôle de groupe",
+      "editList": "Modifier la liste : {name}",
+      "editPoster": "Modifier le poster"
+    },
+    "noFriendsFound": "Aucun ami trouvé",
+    "noGroupsSearchAbove": "Aucun groupe - recherchez ci-dessus",
+    "noMatch": "Aucune correspondance",
+    "posters": {
+      "empty": "Aucun poster",
+      "emptyCaption": "(vide)",
+      "hostNotAllowlisted": "⚠ hôte d'image hors allowlist VRC"
+    },
+    "publish": "Publier",
+    "publishWhileLive": "Publier en live",
+    "refineFilter": "… affinez le filtre pour en voir plus",
+    "searchResults": "Résultats de recherche",
+    "section": {
+      "nowPlaying": "En cours de lecture",
+      "permissionLists": "Listes de permissions",
+      "posterBillboards": "Panneaux posters",
+      "unityProjects": "Projets Unity",
+      "upcomingEvents": "Événements à venir"
+    },
+    "status": {
+      "lastPublishError": "Dernière publication : {error}",
+      "notPublished": "Pas encore publié.",
+      "published": "Publié {time}",
+      "ready": "Prêt"
+    },
+    "subtitle": "Alimentez les mondes VRChat depuis des gists - listes de permissions, panneaux posters, événements + une carte now-playing live. Mis à jour en direct, sans reconstruire le monde.",
+    "unavailable": "World Sync indisponible",
+    "unity": {
+      "empty": "Aucun projet Unity configuré (Réglages ▸ Intégrations ▸ Unity)"
+    },
+    "yourGroups": "Vos groupes"
+  },
+  "remote": {
+    "controlling": "Contrôle",
+    "thisComputer": "Cet ordinateur",
+    "loading": "Chargement…"
+  }
+}

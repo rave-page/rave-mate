@@ -1,0 +1,5 @@
+# The Spout2 SDK is fetched + SHA-verified by scripts/fetch-spout.ps1 (see SUPPLY_CHAIN.md),
+# never committed. Keep only this file + the README.
+*
+!.gitignore
+!README.md

@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rave-mate overlay</title>
+<style>
+  :root{
+    --bg-r:22; --bg-g:22; --bg-b:26;            /* card background RGB (alpha = --card-op) */
+    --card-op:.82;
+    --fg:#f2f2f5; --muted:#aeb0b8; --muted2:#85878f; --border:rgba(255,255,255,.10);
+    --accent:#F70864; --accent2:#08F79B;        /* primary (pink) + secondary (mint) */
+    --radius:14px; --card-w:360px; --scale:1;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;background:transparent;overflow:hidden;font-family:var(--font);color:var(--fg)}
+  #stage{position:relative;width:100%;height:100vh}
+
+  .deck{
+    position:absolute; width:var(--card-w);
+    background:var(--card-bg, rgba(var(--bg-r),var(--bg-g),var(--bg-b),var(--card-op))); backdrop-filter:blur(10px);
+    border:var(--card-bd-w,1px) var(--card-bd-style,solid) var(--card-bd-c,var(--border)); border-radius:var(--radius);
+    padding:14px; display:flex; gap:14px; align-items:stretch;
+    box-shadow:var(--card-glow, 0 10px 30px rgba(0,0,0,.45));
+    opacity:0; transform:translateY(6px) scale(var(--scale)); transform-origin:top left; transition:opacity .2s ease, transform .2s ease;
+  }
+  .deck.show{opacity:1; transform:scale(var(--scale))}
+  /* on-air keeps the custom border colour, just adds an accent glow on top of the card's own shadow */
+  .deck.onair{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),0 0 26px color-mix(in srgb,var(--accent) 28%,transparent),var(--card-glow, 0 10px 30px rgba(0,0,0,.5))}
+  .deck.dragging{transition:none; cursor:grabbing}
+  body.edit .deck{cursor:grab}
+  /* edit-mode placeholder: a deck not currently playing, shown so its position can be set */
+  body.edit .deck.placeholder{opacity:.5 !important; border-style:dashed}
+  body.edit .deck.placeholder .live{display:none}
+
+  /* smart-align guides + measurement badge (edit drag) */
+  .guide{position:absolute;z-index:40;background:var(--accent);pointer-events:none;display:none}
+  .guide.v{top:0;bottom:0;width:1px;box-shadow:0 0 6px var(--accent)}
+  .guide.h{left:0;right:0;height:1px;box-shadow:0 0 6px var(--accent)}
+  .gtag{position:absolute;z-index:41;display:none;pointer-events:none;font:600 10px var(--font);
+    color:#fff;background:var(--accent);padding:1px 5px;border-radius:5px;white-space:nowrap;transform:translate(-50%,-50%)}
+
+  /* single-deck mode: one card anchored top-left at natural height (size the OBS source to it) */
+  body.single .deck{position:absolute; top:0; left:0; width:100%; opacity:1; transform:none}
+
+  .art{position:relative;width:96px;height:96px;flex:0 0 auto;border-radius:10px;overflow:hidden;
+    background:linear-gradient(135deg,#26262c,#16161a);border:1px solid var(--border)}
+  .art img{width:100%;height:100%;object-fit:cover;display:block}
+  .art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:30px}
+  .badge{position:absolute;top:6px;left:6px;width:24px;height:24px;border-radius:7px;
+    background:var(--accent);color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,.4)}
+
+  .body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px}
+  .topline{display:flex;align-items:center;gap:8px;min-height:13px}
+  .live{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent2);display:none;align-items:center;gap:5px}
+  .deck.onair .live{display:inline-flex;color:var(--accent)}
+  .live .dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;animation:pulse 1.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  .title{font-size:17px;font-weight:700;line-height:1.15;overflow:hidden}
+  .artist{font-size:13px;color:var(--muted);overflow:hidden}
+  /* inner span carries the text; fits → ellipsis, overflows → slow ping-pong scroll (JS sets shift+dur) */
+  .title .mq,.artist .mq{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;vertical-align:bottom}
+  .title .mq.scroll,.artist .mq.scroll{max-width:none;overflow:visible;text-overflow:clip;
+    animation:marquee var(--mq-dur,9s) ease-in-out infinite alternate}
+  @keyframes marquee{0%,14%{transform:translateX(0)}86%,100%{transform:translateX(var(--mq-shift,0))}}
+  .meta{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted2)}
+  .meta b{color:var(--fg);font-weight:600}
+  .key{color:var(--accent2);font-weight:700}
+
+  .levels{margin-top:auto;display:flex;align-items:flex-end;gap:10px;padding-top:4px}
+  .eq{flex:0 0 auto;width:78px;height:34px;display:none}
+  .eq svg{width:100%;height:100%;overflow:visible}
+  .eq .area{fill:color-mix(in srgb,var(--accent2) 22%,transparent)}
+  .eq .line{fill:none;stroke:var(--accent2);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+  .eq .grid{stroke:rgba(255,255,255,.10);stroke-width:1}
+  .meters{flex:1 1 auto;display:flex;flex-direction:column;gap:5px;min-width:0}
+  .fader{height:8px;border-radius:6px;background:rgba(255,255,255,.10);overflow:hidden;position:relative}
+  .fader .fill{position:absolute;inset:0 100% 0 0;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#fff))}
+  .frow{display:flex;align-items:center;gap:8px}
+  .pct{font-size:10px;color:var(--muted2);min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+  /* filter: center-origin sweep (LP cyan center HP magenta) */
+  .filter{height:6px;border-radius:4px;background:rgba(255,255,255,.08);position:relative;display:none}
+  .filter .ffill{position:absolute;top:0;bottom:0;border-radius:4px}
+  .filter .center{position:absolute;left:50%;top:-1px;bottom:-1px;width:1px;background:rgba(255,255,255,.35)}
+  .flbl{font-size:9px;letter-spacing:.12em;color:var(--muted2);text-transform:uppercase}
+
+  /* combined scrolling-waveform + EQ/FX panel (replaces .eq + .filter when enabled).
+     Two stacked canvases: .wf (waveform, redrawn every frame) + .eqo (EQ/filter curve + dim mask,
+     redrawn only when a mixer value changes) - curve work never blocks the per-frame scroll. */
+  .wave{position:relative;width:100%;height:54px;margin-top:6px;border-radius:6px;overflow:hidden;display:none}
+  .wave canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .wave canvas.eqo{pointer-events:none}
+  .deck.wavemode .eq,.deck.wavemode .filter{display:none !important}
+  /* the fader-shifted curve now encodes the fader, so the bar + % are redundant in wave mode */
+  .deck.wavemode .frow{display:none !important}
+  .deck.wavemode .wave{display:block}
+
+  /* edit chrome - grouped, scrollable panel docked top-left */
+  #bar{position:fixed;top:10px;left:10px;z-index:50;display:none;flex-direction:column;gap:10px;width:264px;max-height:calc(100vh - 20px);overflow-y:auto;
+    background:rgba(18,18,21,.96);border:1px solid var(--border);border-radius:12px;padding:12px;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  body.nodrag-sel,body.nodrag-sel *{-webkit-user-select:none !important;user-select:none !important}  /* only while a drag is active */
+  body.edit #bar{display:flex}
+  #bar .draghandle{cursor:grab;user-select:none;touch-action:none;display:flex;align-items:center;gap:6px;margin:-4px -4px 2px;padding:5px 7px;
+    font:700 10px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--muted2);border-radius:8px;background:rgba(255,255,255,.05)}
+  #bar .draghandle:active{cursor:grabbing}
+  #bar .grp{display:flex;flex-direction:column;gap:7px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)}
+  #bar .grp:last-child{border-bottom:none;padding-bottom:0}
+  #bar h4{font:700 10px var(--font);letter-spacing:.12em;text-transform:uppercase;color:var(--accent2);margin-bottom:1px}
+  #bar label{display:flex;gap:8px;align-items:center;justify-content:space-between;color:var(--muted)}
+  #bar label>span:first-child{flex:0 0 78px}
+  #bar input[type=range]{flex:1 1 auto;min-width:0}
+  #bar input[type=color]{width:28px;height:22px;border:none;background:none;padding:0;cursor:pointer}
+  #bar b{color:var(--accent)}
+  #bar .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  #bar .hint{color:var(--muted2);font-size:10px;line-height:1.3}
+  #bar button{font:600 11px var(--font);color:var(--fg);background:rgba(255,255,255,.08);border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer}
+  #bar button:hover{background:color-mix(in srgb,var(--accent) 30%,transparent);border-color:var(--accent)}
+  #bar .seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  #bar .seg button{border:none;border-radius:0;padding:3px 7px}
+  #bar .seg button.on{background:color-mix(in srgb,var(--accent) 45%,transparent)}
+  /* multi-stop gradient editor */
+  .gred{display:flex;flex-direction:column;gap:6px}
+  .gred .bar{position:relative;height:18px;border-radius:5px;border:1px solid var(--border);cursor:copy}
+  .gred .stop{position:absolute;top:-3px;width:12px;height:24px;margin-left:-6px;border:2px solid #fff;border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:grab}
+  .gred .stop.sel{border-color:var(--accent)}
+  .gred .stoprow{display:flex;gap:6px;align-items:center}
+  /* presets: colour swatches + gradient chips */
+  .pal{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+  .pal .sw{width:18px;height:18px;border-radius:4px;border:1px solid var(--border);cursor:pointer}
+  .gpre{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:4px}
+  .gpre .gp{width:38px;height:16px;border-radius:4px;border:1px solid var(--border);cursor:pointer}
+  #bar .mini{font:600 10px var(--font);padding:2px 6px}
+  #empty{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:var(--muted2);font-size:13px}
+  body.edit #empty.on{display:flex}
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="draghandle">⠿ Overlay editor · drag</div>
+  <div class="grp">
+    <h4>Layout</h4>
+    <div class="hint">Drag decks to position. Arrange:</div>
+    <div class="row"><button data-arr="corners">corners</button><button data-arr="stack">stack</button><button data-arr="row">row</button></div>
+    <label><span>card size</span><input id="sc" type="range" min="0.4" max="2.5" step="0.05"></label>
+  </div>
+  <div class="grp">
+    <h4>Card</h4>
+    <label><span>color</span><input id="ac" type="color"></label>
+    <label><span>opacity</span><input id="op" type="range" min="0" max="1" step="0.05"></label>
+    <label><span>border</span><span class="seg" id="cbd"><button data-bd="none">none</button><button data-bd="solid">solid</button><button data-bd="glow">glow</button></span></label>
+    <label><span>border col</span><input id="cbc" type="color"></label>
+    <label><span>border w</span><input id="cbw" type="range" min="0" max="6" step="1"></label>
+    <label><span>radius</span><input id="crad" type="range" min="0" max="32" step="1"></label>
+    <label title="Fade each card out as its channel fader is pulled down (only when fader data is available - e.g. a controller). Off = cards stay full opacity."><span>fade by fader</span><input id="cfr" type="checkbox"></label>
+    <label><span>accent</span><input id="ap" type="color"></label>
+    <label><span>accent 2</span><input id="a2" type="color"></label>
+  </div>
+  <div class="grp">
+    <h4>Waveform</h4>
+    <label><span>zoom (s)</span><input id="zm" type="range" min="2" max="120" step="1"></label>
+    <label><span>playhead</span><input id="ph" type="range" min="0.1" max="0.9" step="0.05"></label>
+    <label><span>fill</span><span class="seg" id="wftype"><button data-t="solid">solid</button><button data-t="gradient">gradient</button></span></label>
+    <label id="wfcrow"><span>color</span><input id="wfc" type="color"></label>
+    <div id="wfgrad"></div>
+    <label><span>opacity</span><input id="wfo" type="range" min="0" max="1" step="0.05"></label>
+    <label><span>top dim</span><input id="wdm" type="range" min="0" max="1" step="0.05"></label>
+  </div>
+  <div class="grp">
+    <h4>EQ / FX curve</h4>
+    <label><span>low</span><input id="eql" type="color"></label>
+    <label><span>mid</span><input id="eqm" type="color"></label>
+    <label><span>high</span><input id="eqh" type="color"></label>
+    <label><span>HP cut</span><input id="eqhp" type="color"></label>
+    <label><span>LP cut</span><input id="eqlp" type="color"></label>
+  </div>
+  <div class="grp">
+    <h4>Background</h4>
+    <label><span>fill</span><span class="seg" id="bgtype"><button data-t="solid">solid</button><button data-t="gradient">gradient</button></span></label>
+    <label id="bgcrow"><span>color</span><input id="bgc" type="color"></label>
+    <div id="bggrad"></div>
+    <label><span>opacity</span><input id="wbo" type="range" min="0" max="1" step="0.05"></label>
+  </div>
+  <div class="grp">
+    <h4>Colour presets</h4>
+    <div class="row"><span id="cpal" class="pal"></span></div>
+    <div class="row"><button id="csave" class="mini">+ save focused colour</button></div>
+    <div class="hint">Click a colour field above, then a swatch to apply it. Dbl-click a swatch to remove. Gradient presets save via the “+ save” under each gradient.</div>
+  </div>
+  <div class="grp"><div class="hint">Open <b>without ?edit=1</b> in OBS. Saved to overlay-style.json.</div></div>
+</div>
+<div id="empty">No decks playing - load + fade in a track to preview.</div>
+<div id="stage"></div>
+<script>
+(function(){
+  const qp = new URLSearchParams(location.search);
+  const deckMatch = location.pathname.match(/^\/deck\/([A-Da-d])/);
+  const ONLY = deckMatch ? deckMatch[1].toUpperCase() : null;   // single-deck mode
+  const EDIT = !ONLY && qp.has("edit");
+  if (ONLY) document.body.classList.add("single");
+  if (EDIT) document.body.classList.add("edit");
+
+  const stage = document.getElementById("stage");
+  const empty = document.getElementById("empty");
+  const cards = new Map();
+  const wstate = new Map(); // deck → live waveform state {key,peaks,durSec,reqKey,playing,srcEt,srcAt,rate,dispPos,vel,low,mid,high,filter,hasMixer}
+  let WAVE = {enabled:false, zoomSeconds:20, playheadPct:0.75, waveColor:"#08F79B", waveOpacity:1, bgColor:"#0a0a0e", bgOpacity:0.78};
+  let layout = {};
+
+  function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  // Cached accent colours - getComputedStyle() per frame forces a style recalc (baseline stutter);
+  // read once here and refresh only when the style actually changes (applyStyle).
+  const CSSC={accent:"#F70864",accent2:"#08F79B"};
+  function refreshCssCache(){ CSSC.accent=cssVar("--accent")||"#F70864"; CSSC.accent2=cssVar("--accent2")||"#08F79B"; }
+  function rgba(hex,op){ const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex||""); return m?"rgba("+parseInt(m[1],16)+","+parseInt(m[2],16)+","+parseInt(m[3],16)+","+op+")":null; }
+  function hexRGB(hex){ const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex||""); return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:[8,247,155]; }
+
+  // --- styling accessors (style.* wins over WAVE.* config defaults; back-compat with old flat keys) -
+  function styleZoom(){ const z=style.zoomSeconds; return (z>0)?Math.max(2,Math.min(600,z)):WAVE.zoomSeconds; }
+  function stylePlayhead(){ const p=style.playheadPct; return (p>0&&p<1)?p:WAVE.playheadPct; }
+  function waveFillSpec(){ return style.waveFill || (style.waveColor?{type:"solid",color:style.waveColor}:{type:"solid",color:WAVE.waveColor}); }
+  function bgFillSpec(){ return style.waveBg || (style.waveBgColor?{type:"solid",color:style.waveBgColor}:{type:"solid",color:WAVE.bgColor}); }
+  function eqCols(){ const e=style.eqColors||{}; return {low:e.low||CSSC.accent2, mid:e.mid||CSSC.accent2, high:e.high||CSSC.accent2, hp:e.hp||"#e23ad0", lp:e.lp||"#22c9e0"}; }
+  function fillColorOf(spec){ return spec&&spec.color || (spec&&spec.grad&&spec.grad.stops&&spec.grad.stops[0]&&spec.grad.stops[0].c) || "#08F79B"; }
+  // fillStyleFor → a canvas fillStyle (solid rgba or CanvasGradient) for a w×h box at the given opacity.
+  function fillStyleFor(ctx,w,h,spec,op){
+    const g=spec&&spec.type==="gradient"&&spec.grad&&spec.grad.stops&&spec.grad.stops.length?spec.grad:null;
+    if(!g) return rgba(fillColorOf(spec),op)||"#08F79B";
+    let grad;
+    if(g.kind==="radial"){ grad=ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,Math.max(w,h)/2); }
+    else { const a=(g.angle||0)*Math.PI/180, cx=w/2,cy=h/2, dx=Math.cos(a)*w/2, dy=Math.sin(a)*h/2; grad=ctx.createLinearGradient(cx-dx,cy-dy,cx+dx,cy+dy); } // 0°=left→right, 90°=top→bottom
+    const st=[...g.stops].sort((a,b)=>a.p-b.p); for(const s of st) grad.addColorStop(Math.max(0,Math.min(1,s.p)), rgba(s.c,op)||s.c);
+    return grad;
+  }
+  // cssGradient → a CSS background string for DOM elements (card), or null for solid.
+  function cssGradient(spec,op){
+    const g=spec&&spec.type==="gradient"&&spec.grad&&spec.grad.stops&&spec.grad.stops.length?spec.grad:null; if(!g) return null;
+    const st=[...g.stops].sort((a,b)=>a.p-b.p).map(s=>(rgba(s.c,op==null?1:op)||s.c)+" "+Math.round(s.p*100)+"%").join(",");
+    return g.kind==="radial"?("radial-gradient(circle,"+st+")"):("linear-gradient("+(90-(g.angle||0))+"deg,"+st+")");
+  }
+
+  // fetchPeaks pulls the waveform overview for a track once (retries every ~1.5s while it's still
+  // generating server-side). Format: [uint32 LE durationMs][uint8 peaks].
+  function fetchPeaks(deck, key){
+    fetch("/peaks/"+key+".bin?k="+key).then(r=>{ if(!r.ok) throw 0; return r.arrayBuffer(); })
+      .then(buf=>{ const dv=new DataView(buf); const durMs=dv.getUint32(0,true);
+        const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ ws.key=key; ws.peaks=new Uint8Array(buf,4); ws.durSec=durMs/1000; } })
+      .catch(()=>{ const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ setTimeout(()=>{ if(ws.reqKey===key&&!ws.peaks) ws.reqKey=""; },1500); } });
+  }
+
+  // eqDispLevel maps an EQ band value (0=cut … 0.5=neutral … 1=boost) to a display level
+  // (0=bottom … 1=top); neutral sits high (DJs rarely boost) so cuts get most of the range.
+  function eqDispLevel(v){ v=Math.max(0,Math.min(1,v==null?0.5:v)); const N=0.8; return v<=0.5? v/0.5*N : N+(v-0.5)/0.5*(1-N); }
+
+  // eqCurvePts builds the low/mid/high EQ S-curve as sample points [cx 0..100, cy 0..40] (two cubic
+  // béziers). cx is monotonically increasing, so eqFilterData walks it with a single cursor.
+  function eqCurvePts(low,mid,high){
+    const yv=v=>38-36*eqDispLevel(v);
+    const y0=yv(low),y1=yv(mid),y2=yv(high);
+    const cubic=(p0,p1,p2,p3,t)=>{const u=1-t;return u*u*u*p0+3*u*u*t*p1+3*u*t*t*p2+t*t*t*p3;};
+    const pts=[]; const seg=48;
+    for(let i=0;i<=seg;i++){const t=i/seg;pts.push([cubic(0,25,25,50,t),cubic(y0,y0,y1,y1,t)]);}
+    for(let i=1;i<=seg;i++){const t=i/seg;pts.push([cubic(50,75,75,100,t),cubic(y1,y1,y2,y2,t)]);}
+    return pts;
+  }
+
+  // eqFilterData fills the caller's ys (pixel-y) + ccol (packed 0xRRGGBB colour) arrays for the merged
+  // EQ/filter curve over width W. Buffers are reused (no per-recompute GC). The base colour is
+  // interpolated across the band colours (low→mid→high, left→right) and cross-fades to the FX cut
+  // colour (ec.hp / ec.lp) by how much the filter cuts. Sampling is one monotonic pass: O(W+P).
+  // Colours are stored PACKED (ints), so drawEqLayer builds an "rgb()" string only once per run.
+  function eqFilterData(W,H,low,mid,high,filter,fader, ys, ccol, ec){
+    const pts=eqCurvePts(low,mid,high), P=pts.length;
+    const fd=Math.max(0,Math.min(1,fader==null?1:fader));
+    const dev=Math.max(0,Math.min(1,filter))-0.5, active=Math.abs(dev)>=0.02, hp=dev>0, frac=Math.abs(dev)*2, slope=0.30;
+    const cl=x=>x<0?0:x>1?1:x, ss=x=>x*x*(3-2*x);
+    const loC=hexRGB(ec.low), miC=hexRGB(ec.mid), hiC=hexRGB(ec.high), fxC=hexRGB(hp?ec.hp:ec.lp);
+    let pi=0; // monotonic cursor over pts (cx rises with i) → O(W+P), not O(W*P) per recompute
+    for(let i=0;i<=W;i++){
+      const fx=i/W, cx=fx*100;
+      while(pi<P-2 && pts[pi+1][0]<cx) pi++;
+      const a=pts[pi], b=pts[pi+1]||a, cy=(b[0]===a[0])?a[1]:a[1]+(cx-a[0])/(b[0]-a[0])*(b[1]-a[1]);
+      const eqLevel=(38-cy)/36;
+      let g=1; if(active){ let gg; if(hp){const cut=frac*0.5;gg=(fx-(cut-slope))/slope;}else{const cut=1-frac*0.5;gg=((cut+slope)-fx)/slope;} g=ss(cl(gg)); }
+      ys[i]=(38-36*eqLevel*g*fd)/40*H; // filter + fader MULTIPLY the EQ level → responsive + smooth
+      // base colour across bands: low→mid (left half), mid→high (right half)
+      let br,bg,bb; if(fx<0.5){ const t=fx*2; br=loC[0]+(miC[0]-loC[0])*t; bg=loC[1]+(miC[1]-loC[1])*t; bb=loC[2]+(miC[2]-loC[2])*t; }
+      else { const t=(fx-0.5)*2; br=miC[0]+(hiC[0]-miC[0])*t; bg=miC[1]+(hiC[1]-miC[1])*t; bb=miC[2]+(hiC[2]-miC[2])*t; }
+      const w=active?ss(cl((1-g)*1.8)):0; // cross-fade to the FX cut colour by how much it cuts
+      const r=(br+(fxC[0]-br)*w)|0, gg2=(bg+(fxC[1]-bg)*w)|0, bl=(bb+(fxC[2]-bb)*w)|0;
+      ccol[i]=(r<<16)|(gg2<<8)|bl;
+    }
+  }
+
+  // --- layered rendering ------------------------------------------------------------------------
+  // .wf (waveform) redraws every frame for a smooth scroll and does ZERO curve math. The EQ/filter
+  // curve + the above-curve dim-mask Path2D live on .eqo and are recomputed ONLY when a mixer value
+  // changes - so riding the EQ/filter/fader never enters the per-frame scroll loop and can't stall it.
+
+  // measureWave caches each canvas's backing-store size, avoiding a per-frame getBoundingClientRect
+  // (forced layout). Resizing a canvas clears it, so null the curve sig to force an .eqo redraw.
+  function measureWave(el){
+    const wrap=el.querySelector(".wave"); if(!wrap||!el._wf) return;
+    const rect=wrap.getBoundingClientRect(); const dpr=window.devicePixelRatio||1;
+    const W=Math.max(1,Math.round(rect.width*dpr)), H=Math.max(1,Math.round(rect.height*dpr));
+    for(const cv of [el._wf,el._eqo]){ if(cv.width!==W)cv.width=W; if(cv.height!==H)cv.height=H; cv._W=W; cv._H=H; cv._dpr=dpr; }
+    const ws=wstate.get(el.dataset.deck); if(ws) ws._curveSig=null;
+  }
+  const waveRO=("ResizeObserver" in window)?new ResizeObserver(es=>{ for(const e of es){ const el=e.target.closest(".deck"); if(el) measureWave(el); } }):null;
+
+  // ensureCurve recomputes the merged EQ/filter curve + dim-mask Path2D only when an input changed
+  // (mixer values, size, accent colour). Returns true → the .eqo layer must be redrawn. Neutral
+  // (0.5) until a mixer feed arrives. This is the only place eqFilterData (the per-pixel walk) runs.
+  function ensureCurve(ws, W, H){
+    const hm=ws.hasMixer;
+    const low=hm?ws.low:0.5, mid=hm?ws.mid:0.5, high=hm?ws.high:0.5,
+          filter=hm?(ws.filter==null?0.5:ws.filter):0.5, fader=ws.hasFader?ws.fader:1;
+    const ec=eqCols();
+    const sig=[low,mid,high,filter,fader,W,H,ec.low,ec.mid,ec.high,ec.hp,ec.lp].join("|");
+    if(ws._curveSig===sig && ws.curve) return false;
+    ws._curveSig=sig;
+    // Reuse the ys/ccol buffers across recomputes (realloc only on size change) so a knob sweep
+    // doesn't churn the GC - the lingering post-sweep stutter was GC catching up on that garbage.
+    if(!ws._ys || ws._ys.length!==W+1){ ws._ys=new Float32Array(W+1); ws._ccol=new Int32Array(W+1); }
+    eqFilterData(W,H,low,mid,high,filter,fader, ws._ys, ws._ccol, ec);
+    ws.curve={ys:ws._ys, ccol:ws._ccol};
+    const ys=ws._ys, p=new Path2D();
+    p.moveTo(0,ys[0]); for(let x=1;x<=W;x++)p.lineTo(x,ys[x]); p.lineTo(W,0); p.lineTo(0,0); p.closePath();
+    ws.dimPath=p; // above-curve region, reused every frame for the destination-out dim
+    return true;
+  }
+
+  // drawEqLayer paints the curve (soft shadow + cross-faded colour runs) onto .eqo. Runs only on a
+  // mixer change - its per-pixel colour-run walk is off the per-frame path. The layer persists
+  // between frames (the waveform clears only .wf), so the curve stays visible without redrawing.
+  function drawEqLayer(el, ws){
+    const cv=el._eqo, W=cv._W, H=cv._H, dpr=cv._dpr; if(!W||!ws.curve) return;
+    const ctx=cv.getContext("2d"); ctx.clearRect(0,0,W,H);
+    const ys=ws.curve.ys, ccol=ws.curve.ccol;
+    ctx.lineJoin="round"; ctx.lineCap="round";
+    ctx.save(); ctx.shadowColor="rgba(0,0,0,.7)"; ctx.shadowBlur=Math.max(2,4*dpr); // soft shadow → transparency
+    ctx.beginPath(); ctx.moveTo(0,ys[0]); for(let i=1;i<=W;i++)ctx.lineTo(i,ys[i]); ctx.strokeStyle="rgba(2,3,4,.9)"; ctx.lineWidth=2*dpr; ctx.stroke();
+    ctx.restore();
+    let i=0; while(i<W){ const c0=ccol[i]; let j=i+1; while(j<W&&ccol[j]===c0)j++; // packed-colour runs (band/FX blend)
+      ctx.beginPath(); ctx.moveTo(i,ys[i]); for(let k=i+1;k<=j;k++)ctx.lineTo(k,ys[k]);
+      ctx.strokeStyle="rgb("+((c0>>16)&255)+","+((c0>>8)&255)+","+(c0&255)+")"; ctx.lineWidth=2*dpr; ctx.stroke(); i=j; }
+  }
+
+  // buildWaveImg renders the ENTIRE track's waveform envelope into an offscreen bitmap once (per
+  // track / size / zoom / colour). Heavy smoothing is baked here (cheap one-time) for a clean, low-
+  // fidelity look. drawWaveLayer then just blits a sub-pixel-offset slice each frame → no per-frame
+  // resampling of raw peaks, so the scroll is flicker-free.
+  function buildWaveImg(ws, H, pps){
+    const n=ws.peaks.length, pk=ws.peaks, dur=ws.durSec;
+    let imgPps=pps; const maxW=16000; if(dur*imgPps>maxW) imgPps=maxW/dur;   // cap canvas width
+    const IW=Math.max(1,Math.ceil(dur*imgPps)), mid=H/2, half=H/2-1;
+    let cv=ws._img;
+    if(!cv){ cv=ws._img=(typeof OffscreenCanvas!=="undefined")?new OffscreenCanvas(IW,H):document.createElement("canvas"); }
+    cv.width=IW; cv.height=H;
+    const c=cv.getContext("2d"); c.clearRect(0,0,IW,H);
+    // per-column max-abs envelope (one peak/col when zoomed in → interpolate)
+    const amp=new Float32Array(IW), pkPerCol=(n/dur)/imgPps, span=0.5/imgPps;
+    for(let x=0;x<IW;x++){ const t=x/imgPps;
+      if(pkPerCol>=1){ let iA=((t-span)/dur*(n-1))|0, iB=Math.ceil((t+span)/dur*(n-1)); if(iA<0)iA=0; if(iB>n-1)iB=n-1;
+        let m=0; for(let i=iA;i<=iB;i++){ const v=pk[i]; if(v>m)m=v; } amp[x]=m/255; }
+      else { const f=t/dur*(n-1); let i=f|0; const fr=f-i; amp[x]=(pk[i]*(1-fr)+pk[Math.min(i+1,n-1)]*fr)/255; }
+    }
+    // heavy smoothing: 3 binomial passes → soft, low-fidelity envelope (baked once, so flicker-free)
+    for(let p=0;p<3;p++){ let prev=amp[0]; for(let x=0;x<IW;x++){ const cur=amp[x], nx=amp[x<IW-1?x+1:IW-1]; amp[x]=(prev+2*cur+nx)*0.25; prev=cur; } }
+    c.beginPath(); c.moveTo(0,mid-amp[0]*half);
+    for(let x=1;x<IW;x++)c.lineTo(x,mid-amp[x]*half);
+    for(let x=IW-1;x>=0;x--)c.lineTo(x,mid+amp[x]*half);
+    c.closePath(); c.fillStyle="#fff"; c.fill(); // WHITE MASK only - colour/gradient applied at draw time
+    ws.waveImg=cv; ws.imgPps=imgPps;
+  }
+
+  // drawWaveLayer paints bg + scrolling waveform + above-curve dim (cached Path2D) + playhead onto
+  // .wf. Per-frame, but no curve math - only the waveform path itself, which must move each frame.
+  function drawWaveLayer(el, ws){
+    const cv=el._wf, W=cv._W, H=cv._H, dpr=cv._dpr; if(!W) return;
+    const ctx=cv.getContext("2d"); ctx.clearRect(0,0,W,H);
+    // Appearance - overlay-editor overrides (style.*) win over the config defaults (WAVE.*).
+    const wfSpec=waveFillSpec(), bgSpec=bgFillSpec();
+    const wOp=(style.waveOpacity!=null?style.waveOpacity:WAVE.waveOpacity);
+    const bOp=(style.waveBgOpacity!=null?style.waveBgOpacity:WAVE.bgOpacity);
+    const wDim=(style.waveDim!=null?style.waveDim:0.22); // above-curve brightness (fill baked into the offscreen bitmap)
+    const playX=stylePlayhead()*W, pps=W/Math.max(2,styleZoom()), mid=H/2, half=H/2-1;
+    // Position = a critically-damped follower of the true-playback estimate. target advances at the
+    // measured rate from the last FRESH elapsed (Traktor sends it ~1/s); dispPos advances at that
+    // rate AND eases toward target, so the 1 Hz +1s steps + any drift smooth out with no jumps. EQ/
+    // fader floods carry stale elapsed and never reach this (update() ignores them), so they can't
+    // perturb the scroll. A real seek/beat-jump/backspin sets ws._seek → snap once.
+    const tnow=performance.now();
+    const fdt=Math.min(0.1,(tnow-(ws.dispAt||tnow))/1000); ws.dispAt=tnow;
+    const trueRate=ws.playing?(ws.rate||1):0;
+    const truePos=(ws.srcEt||0)+trueRate*((tnow-(ws.srcAt||tnow))/1000); // best estimate of real position
+    if(ws.dispPos==null||ws._seek){ ws.dispPos=truePos; ws.vel=trueRate; ws._seek=false; }
+    else {
+      const err=truePos-ws.dispPos;
+      if(Math.abs(err)>2.5){ ws.dispPos=truePos; ws.vel=trueRate; } // real seek/beat-jump/backspin → snap once
+      else {
+        // Velocity PLL: scroll at the playback rate, plus a SMALL capped proportional trim that eases
+        // drift out over seconds. Low gain → near-constant speed (no per-frame velocity ripple), which
+        // is what reads as smooth. dispPos integrates vel only, so it never jumps.
+        const Kp=0.5, maxTrim=0.2*(trueRate||1);
+        let trim=err*Kp; if(trim>maxTrim)trim=maxTrim; else if(trim<-maxTrim)trim=-maxTrim;
+        ws.vel=trueRate+(ws.playing?trim:0);
+        ws.dispPos+=ws.vel*fdt;
+      }
+    }
+    let pos=ws.dispPos;
+    const dur=ws.durSec||ws.tl||0; if(dur>0&&pos>dur) pos=dur; if(pos<0) pos=0;
+
+    if(ws.peaks&&ws.durSec>0){
+      // Render the WHOLE waveform envelope into an offscreen bitmap ONCE (buildWaveImg), then each
+      // frame just blit the visible slice with a sub-pixel source offset. A fixed bitmap translated
+      // sub-pixel resamples smoothly + consistently, so a given audio point keeps the SAME height as
+      // it scrolls → no shimmer (re-deriving per-pixel max every frame was the flicker source).
+      const sig=ws.peaks.length+"|"+H+"|"+pps+"|"+ws.durSec.toFixed(2); // mask only - colour is draw-time
+      if(ws._imgSig!==sig){ ws._imgSig=sig; buildWaveImg(ws,H,pps); }
+      const img=ws.waveImg, imgPps=ws.imgPps||pps;
+      const srcW=(W/pps)*imgPps, k=W/srcW;       // src px per view; dest px per src px
+      let sx=(pos-playX/pps)*imgPps, sw=srcW, dx=0;
+      ctx.imageSmoothingEnabled=true;
+      if(sx<0){ dx=(-sx)*k; sw+=sx; sx=0; }      // clip left edge (before track start)
+      const iw=img.width; if(sx+sw>iw) sw=iw-sx; // clip right edge (after track end)
+      if(sw>0) ctx.drawImage(img, sx,0,sw,H, dx,0,sw*k,H);   // 1) the white envelope mask (sub-pixel)
+      // 2) paint colour/gradient over the VISIBLE panel, clipped to the mask (source-in) - so the
+      //    gradient angle rotates relative to what's on screen, not the whole track.
+      ctx.save(); ctx.globalCompositeOperation="source-in"; ctx.fillStyle=fillStyleFor(ctx,W,H,wfSpec,wOp); ctx.fillRect(0,0,W,H); ctx.restore();
+      // 3) Dim ABOVE the curve by removing alpha over the cached region (destination-out).
+      if(wDim<1 && ws.dimPath){ ctx.save(); ctx.globalCompositeOperation="destination-out"; ctx.fillStyle="rgba(0,0,0,"+(1-wDim)+")"; ctx.fill(ws.dimPath); ctx.restore(); }
+    } else { ctx.fillStyle=rgba(fillColorOf(wfSpec),wOp*0.5)||"rgba(154,156,166,.5)"; ctx.fillRect(0,mid,W,Math.max(1,dpr)); } // generating baseline
+
+    ctx.fillStyle=CSSC.accent; ctx.fillRect(playX,0,Math.max(1,Math.round(1.5*dpr)),H); // playhead
+    // Background LAST, behind everything (destination-over) - dimming removed waveform alpha only,
+    // never punched a hole in the panel background. Solid or gradient per the Background fill.
+    ctx.save(); ctx.globalCompositeOperation="destination-over"; ctx.fillStyle=fillStyleFor(ctx,W,H,bgSpec,bOp); ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  function waveTick(){
+    if(WAVE.enabled){ const now=performance.now(); for(const [dk,el] of cards){ const ws=wstate.get(dk);
+      if(!ws||!el.classList.contains("wavemode")) continue;
+      const cv=el._wf; if(!cv) continue; if(!cv._W){ measureWave(el); if(!cv._W) continue; }
+      // Cap the ENTIRE curve pipeline (recompute + Path2D rebuild + repaint) at ~30fps so a knob
+      // sweep can't steal frames from the 60fps waveform. The curve reads the latest mixer values
+      // each gate, so it still tracks the knob; 30fps is imperceptible for a curve.
+      if(now-(ws._eqAt||0)>=33){ ws._eqAt=now; if(ensureCurve(ws, cv._W, cv._H)) drawEqLayer(el, ws); }
+      drawWaveLayer(el, ws);
+    } }
+    requestAnimationFrame(waveTick);
+  }
+  requestAnimationFrame(waveTick);
+  // Anchor-based defaults: {ax:l|c|r, ox, ay:t|c|b, oy} so positions are resolution-independent.
+  const DEFAULTS = {A:{ax:"l",ox:40,ay:"t",oy:40},B:{ax:"l",ox:40,ay:"t",oy:170},C:{ax:"l",ox:40,ay:"t",oy:300},D:{ax:"l",ox:40,ay:"t",oy:430}};
+
+  const root = document.documentElement.style;
+  function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+  function hexToRgb(h){ const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h||""); return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:null; }
+
+  // style (opacity + colors + scale): persisted via /style, overridable per-source via query params
+  let style = {};
+  function applyStyle(s){
+    if(s.bgOpacity!=null) root.setProperty("--card-op", s.bgOpacity);
+    if(s.cardColor){ const c=hexToRgb(s.cardColor); if(c){ root.setProperty("--bg-r",c[0]); root.setProperty("--bg-g",c[1]); root.setProperty("--bg-b",c[2]); } }
+    if(s.accent) root.setProperty("--accent", s.accent);
+    if(s.accent2) root.setProperty("--accent2", s.accent2);
+    if(s.scale!=null) root.setProperty("--scale", s.scale);
+    // Card border + radius (style.card.*; falls back to legacy s.radius). border: none|solid|glow.
+    const cd=s.card||{};
+    const rad=(cd.radius!=null?cd.radius:s.radius);
+    if(rad!=null) root.setProperty("--radius", rad+"px");
+    const bstyle=cd.border||"solid", bw=(cd.borderW!=null?cd.borderW:1), bc=cd.borderColor||"";
+    if(bstyle==="none"){ root.setProperty("--card-bd-w","0px"); root.setProperty("--card-glow","0 10px 30px rgba(0,0,0,.45)"); }
+    else { root.setProperty("--card-bd-w",bw+"px"); root.setProperty("--card-bd-style","solid"); if(bc) root.setProperty("--card-bd-c",bc);
+      root.setProperty("--card-glow", (bstyle==="glow"&&bc?("0 0 22px "+bc+","):"")+"0 10px 30px rgba(0,0,0,.5)"); }
+    refreshCssCache();                            // accent colours changed → refresh the per-frame cache
+    for(const ws of wstate.values()) ws._curveSig=null; // accent/EQ colours affect the curve → force redraw
+    requestAnimationFrame(repositionAll); // card size changed -> re-anchor
+  }
+  function styleFromQuery(){
+    const s={};
+    if(qp.has("opacity")) s.bgOpacity=parseFloat(qp.get("opacity"));
+    if(qp.has("card")) s.cardColor="#"+qp.get("card").replace(/^#/,"");
+    if(qp.has("accent")) s.accent="#"+qp.get("accent").replace(/^#/,"");
+    if(qp.has("accent2")) s.accent2="#"+qp.get("accent2").replace(/^#/,"");
+    if(qp.has("scale")) s.scale=parseFloat(qp.get("scale"));
+    return s;
+  }
+  let saveStyleT=null;
+  function saveStyle(){ clearTimeout(saveStyleT); saveStyleT=setTimeout(()=>fetch("/style",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(style)}).catch(()=>{}),250); }
+
+  // layout (anchored positions): persisted via /layout; resolution-independent + no clipping.
+  function cardSize(el){ const r=el.getBoundingClientRect(); return [r.width||parseInt(getComputedStyle(el).width)||360, r.height||120]; }
+  function layoutPx(p,W,H,w,h){
+    let l,t;
+    if(p.ax==="r") l=W-w-(p.ox||0); else if(p.ax==="c") l=(W-w)/2+(p.ox||0); else l=(p.ox||0);
+    if(p.ay==="b") t=H-h-(p.oy||0); else if(p.ay==="c") t=(H-h)/2+(p.oy||0); else t=(p.oy||0);
+    return [Math.max(0,Math.min(W-w,l)), Math.max(0,Math.min(H-h,t))]; // clamp so a card never clips
+  }
+  // anchorize: pick the nearest edge/center per axis from the card centre, so a corner card pins to
+  // its corner (same margin at any resolution) and a centred card stays centred.
+  function anchorize(l,t,w,h,W,H){
+    const cx=l+w/2, cy=t+h/2; let ax,ox,ay,oy;
+    if(cx<W/3){ax="l";ox=l;} else if(cx>2*W/3){ax="r";ox=W-w-l;} else {ax="c";ox=l-(W-w)/2;}
+    if(cy<H/3){ay="t";oy=t;} else if(cy>2*H/3){ay="b";oy=H-h-t;} else {ay="c";oy=t-(H-h)/2;}
+    return {ax,ox:Math.round(ox),ay,oy:Math.round(oy)};
+  }
+  function placeAt(el,deck){ const p=layout[deck]||DEFAULTS[deck]||{ax:"l",ox:40,ay:"t",oy:40};
+    const [w,h]=cardSize(el); const [l,t]=layoutPx(p,stage.clientWidth,stage.clientHeight,w,h);
+    el.style.left=Math.round(l)+"px"; el.style.top=Math.round(t)+"px"; }
+  function repositionAll(){ if(!ONLY) for(const [dk,el] of cards) placeAt(el,dk); refreshMarquees(); }
+  let saveLayoutT=null;
+  function saveLayout(){ clearTimeout(saveLayoutT); saveLayoutT=setTimeout(()=>fetch("/layout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(layout)}).catch(()=>{}),250); }
+
+  // guide overlays
+  const guideV=document.createElement("div"), guideH=document.createElement("div"), gtag=document.createElement("div");
+  guideV.className="guide v"; guideH.className="guide h"; gtag.className="gtag";
+  function ensureGuides(){ if(!guideV.parentNode) stage.append(guideV,guideH,gtag); }
+  function hideGuides(){ guideV.style.display="none"; guideH.style.display="none"; gtag.style.display="none"; }
+  const SNAP=7;
+  function axisLines(others,W){
+    const lines=[{v:0},{v:W/2},{v:W}];
+    for(const o of others){ lines.push({v:o.p},{v:o.p+o.s/2},{v:o.p+o.s},{v:W-o.p},{v:W-(o.p+o.s)}); }
+    return lines;
+  }
+  function snap1(near,size,lines){
+    const anchors=[near,near+size/2,near+size]; let best=null;
+    for(const ln of lines) for(const a of anchors){ const d=a-ln.v;
+      if(Math.abs(d)<=SNAP && (!best||Math.abs(d)<Math.abs(best.d))) best={d,line:ln.v}; }
+    return best;
+  }
+  function makeDraggable(el,deck){
+    let sx,sy,sl,st,drag=false;
+    el.addEventListener("pointerdown",e=>{ if(e.button)return; drag=true; el.setPointerCapture(e.pointerId);
+      el.classList.add("dragging"); sx=e.clientX; sy=e.clientY; sl=parseInt(el.style.left)||0; st=parseInt(el.style.top)||0; ensureGuides(); });
+    el.addEventListener("pointermove",e=>{ if(!drag)return;
+      const W=stage.clientWidth,H=stage.clientHeight,r=el.getBoundingClientRect(),dw=r.width,dh=r.height;
+      let nl=Math.max(0,Math.min(W-dw,sl+(e.clientX-sx))), nt=Math.max(0,Math.min(H-dh,st+(e.clientY-sy)));
+      const ox=[],oy=[]; for(const [k,c] of cards){ if(c===el)continue; const cr=c.getBoundingClientRect();
+        ox.push({p:parseInt(c.style.left)||0,s:cr.width}); oy.push({p:parseInt(c.style.top)||0,s:cr.height}); }
+      const bx=snap1(nl,dw,axisLines(ox,W)), by=snap1(nt,dh,axisLines(oy,H));
+      if(bx){ nl-=bx.d; guideV.style.left=bx.line+"px"; guideV.style.display="block"; } else guideV.style.display="none";
+      if(by){ nt-=by.d; guideH.style.top=by.line+"px"; guideH.style.display="block"; } else guideH.style.display="none";
+      el.style.left=nl+"px"; el.style.top=nt+"px";
+      gtag.style.display="block"; gtag.textContent=Math.round(nl)+", "+Math.round(nt);
+      gtag.style.left=(nl+dw/2)+"px"; gtag.style.top=Math.max(10,nt-12)+"px";
+    });
+    const end=()=>{ if(!drag)return; drag=false; el.classList.remove("dragging"); hideGuides();
+      const r=el.getBoundingClientRect();
+      layout[deck]=anchorize(parseInt(el.style.left)||0,parseInt(el.style.top)||0,r.width,r.height,stage.clientWidth,stage.clientHeight);
+      saveLayout(); };
+    el.addEventListener("pointerup",end); el.addEventListener("pointercancel",end);
+  }
+
+  // arrange: snap the decks into corners (equal margins, resolution-independent), a vertical stack,
+  // or a horizontal row. Corners is the easy "one card per corner" the brief asked for.
+  function arrange(mode){
+    const m=40,gap=14, order=["A","B","C","D"].filter(k=>cards.has(k));
+    order.forEach((k,i)=>{ const el=cards.get(k),r=el.getBoundingClientRect();
+      let p;
+      if(mode==="corners") p={ax:(i%2?"r":"l"),ox:m,ay:(i<2?"t":"b"),oy:m};
+      else if(mode==="row") p={ax:"l",ox:m+i*(r.width+gap),ay:"t",oy:m};
+      else p={ax:"l",ox:m,ay:"t",oy:m+i*(r.height+gap)};
+      layout[k]=p; placeAt(el,k); });
+    saveLayout();
+  }
+
+  function makeCard(deck){
+    const el=document.createElement("div");
+    el.className="deck"; el.dataset.deck=deck;
+    el.innerHTML=`
+      <div class="art"><div class="badge">${deck}</div><div class="ph">&#9834;</div><img alt="" hidden></div>
+      <div class="body">
+        <div class="topline"><span class="live"><span class="dot"></span>On air</span></div>
+        <div class="title"><span class="mq">-</span></div><div class="artist"><span class="mq"></span></div>
+        <div class="meta"></div>
+        <div class="levels">
+          <div class="eq"><svg viewBox="0 0 100 40" preserveAspectRatio="none">
+            <line class="grid" x1="0" y1="20" x2="100" y2="20"></line>
+            <path class="area"></path><path class="line"></path></svg></div>
+          <div class="meters">
+            <div class="filter"><div class="ffill"></div><div class="center"></div></div>
+            <div class="frow"><div class="fader"><div class="fill"></div></div><div class="pct"></div></div>
+          </div>
+        </div>
+        <div class="wave"><canvas class="wf"></canvas><canvas class="eqo"></canvas></div>
+      </div>`;
+    stage.appendChild(el);
+    el._wf=el.querySelector(".wave .wf"); el._eqo=el.querySelector(".wave .eqo");
+    if(waveRO) waveRO.observe(el.querySelector(".wave"));
+    if(!ONLY){ placeAt(el,deck); if(EDIT) makeDraggable(el,deck); }
+    requestAnimationFrame(()=>{ el.classList.add("show"); placeAt(el,deck); measureWave(el); });
+    return el;
+  }
+
+  function eqPath(low,mid,high){
+    const c=v=>Math.max(0,Math.min(1,(v==null?0.5:v)));
+    const y=v=>38-36*c(v);
+    const y0=y(low),y1=y(mid),y2=y(high);
+    const line=`M0 ${y0} C25 ${y0},25 ${y1},50 ${y1} C75 ${y1},75 ${y2},100 ${y2}`;
+    return {line, area:line+" L100 40 L0 40 Z"};
+  }
+
+  // setScroll sets a title/artist box's text and, if it overflows the card, makes it slowly
+  // ping-pong so the whole name is readable; otherwise it ellipsizes. Speed is constant px/s.
+  function setScroll(box, text){
+    let mq=box.querySelector(".mq");
+    if(!mq){ mq=document.createElement("span"); mq.className="mq"; box.replaceChildren(mq); }
+    if(mq.textContent===text && box._mqText===text) return; // unchanged + measured → skip forced reflow
+    if(mq.textContent!==text){ mq.textContent=text; mq.classList.remove("scroll"); }
+    box._mqText=null; // mark un-measured until the rAF below reads layout
+    requestAnimationFrame(()=>{
+      box._mqText=text;
+      const dist=mq.scrollWidth-box.clientWidth;
+      if(dist>2){
+        mq.style.setProperty("--mq-shift",(-dist)+"px");
+        mq.style.setProperty("--mq-dur",Math.max(6,dist/30).toFixed(1)+"s"); // ~30px/s
+        mq.classList.add("scroll");
+      } else { mq.classList.remove("scroll"); mq.style.removeProperty("--mq-shift"); mq.style.removeProperty("--mq-dur"); }
+    });
+  }
+  // refreshMarquees re-measures every card's title/artist (card size changed: scale/resize). Clears
+  // the measured-text guard so setScroll re-measures despite the text being unchanged.
+  function refreshMarquees(){ for(const [,el] of cards){
+    const tb=el.querySelector(".title"), ab=el.querySelector(".artist");
+    const t=tb&&tb.querySelector(".mq"), a=ab&&ab.querySelector(".mq");
+    if(t){ tb._mqText=null; setScroll(tb, t.textContent); }
+    if(a){ ab._mqText=null; setScroll(ab, a.textContent); } } }
+
+  let _liveStyleSig=null, _liveLayoutSig=null;
+  function update(decks, waveCfg, styleLive, layoutLive){
+    if(waveCfg) WAVE={enabled:!!waveCfg.enabled,
+      zoomSeconds:waveCfg.zoomSeconds>0?waveCfg.zoomSeconds:20,
+      playheadPct:(waveCfg.playheadPct>0&&waveCfg.playheadPct<1)?waveCfg.playheadPct:0.75,
+      waveColor:waveCfg.waveColor||"#08F79B", waveOpacity:(waveCfg.waveOpacity!=null?waveCfg.waveOpacity:1),
+      bgColor:waveCfg.bgColor||"#0a0a0e", bgOpacity:(waveCfg.bgOpacity!=null?waveCfg.bgOpacity:0.78)};
+    // Live style/layout push: a non-edit overlay (the OBS source) applies editor changes instantly,
+    // with no manual source reload. The editor tab ignores echoes (it owns style while editing).
+    if(!EDIT && styleLive){ const sj=JSON.stringify(styleLive); if(sj!==_liveStyleSig){ _liveStyleSig=sj;
+      style=styleLive; applyStyle(style); for(const ws of wstate.values()){ ws._curveSig=null; ws._imgSig=null; } } }
+    if(!EDIT && layoutLive){ const lj=JSON.stringify(layoutLive); if(lj!==_liveLayoutSig){ _liveLayoutSig=lj;
+      layout=layoutLive; for(const k in layout){ const p=layout[k]; if(p&&p.ax===undefined&&(p.x!==undefined||p.y!==undefined)) layout[k]={ax:"l",ox:p.x||0,ay:"t",oy:p.y||0}; } repositionAll(); } }
+    const seen=new Set();
+    for(const d of decks){
+      if(ONLY && d.deck!==ONLY) continue;
+      seen.add(d.deck);
+      let el=cards.get(d.deck); if(!el){ el=makeCard(d.deck); cards.set(d.deck,el); }
+      el.classList.toggle("onair", !!d.onAir);
+      // Card fader-react: fade the whole card by its channel fader (only with fader data; off → full).
+      if(!EDIT){ el.style.opacity = (style.cardFaderReact && d.hasFader) ? Math.max(0.15,Math.min(1,d.fader)).toFixed(3) : ""; }
+      // waveform panel: capture live position + mixer + kick off a peaks fetch on track change.
+      el.classList.toggle("wavemode", WAVE.enabled);
+      if(WAVE.enabled){
+        let ws=wstate.get(d.deck); if(!ws){ ws={}; wstate.set(d.deck,ws); }
+        // Playback clock - react ONLY to a FRESH elapsed value. Traktor sends elapsed ~1/s (in +1s
+        // steps); the SSE layer repeats that stale value up to 60/s, and every EQ/fader move adds
+        // more stale-elapsed messages. Acting on stale values is what let EQ/faders perturb the
+        // scroll, so we ignore them entirely here. We just record the source observation + estimate
+        // the rate over the real ~1s intervals; drawWaveLayer does all the smoothing each frame.
+        const et=d.elapsedTime||0, nowp=performance.now(), playing=!!d.isPlaying;
+        if(ws.srcEt==null){ ws.srcEt=et; ws.srcAt=nowp; ws.rate=1; }
+        else if(et!==ws.srcEt){                                  // fresh observation
+          const dtReal=(nowp-ws.srcAt)/1000, dEt=et-ws.srcEt;
+          if(playing && dtReal>0.1 && dtReal<3 && dEt>0.05 && dEt<3){
+            const r=dEt/dtReal; if(r>0.25 && r<4) ws.rate=(ws.rate||1)*0.85+r*0.15; // slow EMA → stable base speed
+          }
+          const predicted=ws.srcEt+(playing?(ws.rate||1)*dtReal:0);
+          if(!playing || Math.abs(et-predicted)>1.2) ws._seek=true; // stop/seek/beat-jump/backspin → snap once
+          ws.srcEt=et; ws.srcAt=nowp;
+        }
+        ws.playing=playing;
+        ws.tl=d.trackLength||0;
+        ws.low=d.eqLow; ws.mid=d.eqMid; ws.high=d.eqHigh; ws.filter=d.filter; ws.hasMixer=!!d.hasMixer;
+        ws.fader=d.fader; ws.hasFader=!!d.hasFader;
+        if(d.artKey && ws.key!==d.artKey && ws.reqKey!==d.artKey){ ws.reqKey=d.artKey; ws.peaks=null; ws.durSec=0; fetchPeaks(d.deck,d.artKey); }
+      }
+      // Title/artist/art change RARELY - gate the forced-layout setScroll + art swap on a text-only
+      // signature so they never run on a mere time tick (that re-measure mid-animation was the ~1/s
+      // baseline hitch). EQ/filter/fader live in the canvas, so their ~60/s updates touch no DOM.
+      const sigText=[d.title,d.artist,d.key,d.bpm,d.artKey||"",WAVE.enabled].join("|");
+      if(el._sigText!==sigText){
+        el._sigText=sigText;
+        setScroll(el.querySelector(".title"), d.title||"-");
+        setScroll(el.querySelector(".artist"), d.artist||"");
+        const img=el.querySelector(".art img"), ph=el.querySelector(".art .ph");
+        if(d.artKey){
+          if(img.dataset.k!==d.artKey && img.dataset.req!==d.artKey){
+            img.dataset.req=d.artKey;
+            img.onload=()=>{ img.dataset.k=d.artKey; img.hidden=false; ph.style.display="none"; };
+            img.onerror=()=>{ img.hidden=true; ph.style.display="flex"; if(img.dataset.req===d.artKey) img.dataset.req=""; };
+            img.src="/art/"+d.artKey+".jpg?k="+d.artKey;
+          }
+        } else { img.hidden=true; img.removeAttribute("data-k"); img.removeAttribute("data-req"); ph.style.display="flex"; }
+      }
+      // Meta line (BPM · key · elapsed/length) - the time advances each second; rebuild only when the
+      // whole-second value changes. No marquee re-measure, so no forced reflow.
+      const sigMeta=[d.bpm,d.key,Math.floor(d.elapsedTime||0),d.trackLength].join("|");
+      if(el._sigMeta!==sigMeta){
+        el._sigMeta=sigMeta;
+        const metaEl=el.querySelector(".meta"); metaEl.replaceChildren();
+        const metric=(cls,b,t)=>{const s=document.createElement("span");if(cls)s.className=cls;if(b!=null){const e=document.createElement("b");e.textContent=b;s.append(e);}if(t!=null)s.append(t);metaEl.append(s);};
+        if(d.bpm) metric(null,d.bpm.toFixed(1)," BPM");
+        if(d.key){const s=document.createElement("span");s.className="key";s.textContent=d.key;metaEl.append(s);}
+        if(d.trackLength) metric(null,fmtTime(d.elapsedTime)," / "+fmtTime(d.trackLength));
+        else if(d.elapsedTime) metric(null,fmtTime(d.elapsedTime),null);
+      }
+      // Fader → whole-card opacity (cheap, no layout) - kept every tick.
+      const f=Math.max(0,Math.min(1,d.fader||0));
+      if(!EDIT) el.style.opacity = d.hasFader ? String(f) : "";
+      // Legacy mixer widgets only when the waveform panel is OFF (they're hidden in wave mode, and
+      // the canvas shows EQ/filter/fader there - updating them every tick would jank for nothing).
+      if(!WAVE.enabled){
+        el.querySelector(".fill").style.right=(100-f*100)+"%";
+        const pct=el.querySelector(".pct"); pct.textContent=d.hasFader?Math.round(f*100)+"%":"";
+        el.querySelector(".frow").style.display=d.hasFader?"":"none";
+        const eq=el.querySelector(".eq");
+        if(d.hasMixer){ eq.style.display="block"; const pth=eqPath(d.eqLow,d.eqMid,d.eqHigh);
+          eq.querySelector(".line").setAttribute("d",pth.line); eq.querySelector(".area").setAttribute("d",pth.area); }
+        else eq.style.display="none";
+        const ft=el.querySelector(".filter"), ff=el.querySelector(".filter .ffill");
+        if(d.hasMixer && d.filter!=null){ ft.style.display="block";
+          const amt=Math.max(0,Math.min(1,d.filter)), dev=amt-0.5;
+          if(dev>=0){ ff.style.left="50%"; ff.style.right=(50-dev*100)+"%"; ff.style.background="#e23ad0"; }
+          else { ff.style.right="50%"; ff.style.left=(50+dev*100)+"%"; ff.style.background="#22c9e0"; }
+        } else ft.style.display="none";
+      }
+    }
+    if(EDIT){
+      // keep every deck on stage; decks with no live data render as dashed placeholders
+      for(const [letter,el] of cards){ const live=seen.has(letter); el.classList.toggle("placeholder",!live);
+        if(!live){ el.classList.remove("onair"); el.style.opacity="";
+          setScroll(el.querySelector(".title"),"DECK "+letter); setScroll(el.querySelector(".artist"),"(not playing)"); } }
+    } else {
+      for(const [letter,el] of cards){ if(!seen.has(letter)){ el.classList.remove("show"); setTimeout(()=>el.remove(),200); cards.delete(letter); wstate.delete(letter); } }
+    }
+    empty.classList.toggle("on", !EDIT && decks.filter(d=>!ONLY||d.deck===ONLY).length===0);
+  }
+
+  // localStorage JSON helpers (used only for the editor-panel position - a per-browser convenience).
+  function lsGet(k,def){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(_){ return def; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(_){} }
+  // Presets (gradients + colours) persist SERVER-SIDE (overlay-presets.json) so they survive cache
+  // clears + are shared across every client (the OBS source included). Loaded once at startup.
+  let PRESETS={grads:[],colors:[]};
+  let _savePresetsT=null;
+  function savePresets(){ clearTimeout(_savePresetsT); _savePresetsT=setTimeout(()=>fetch("/presets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(PRESETS)}).catch(()=>{}),200); }
+  const gradPresetRenderers=[]; // every gradient editor re-renders chips when any of them saves one
+  function refreshGradPresets(){ for(const fn of gradPresetRenderers) fn(); }
+
+  // makeGradientEditor mounts a multi-stop gradient editor into `mount`. getGrad() returns the live
+  // {kind,angle,stops} object (mutated in place); changed() persists + re-applies. Returns a repaint fn.
+  function makeGradientEditor(mount, getGrad, changed){
+    mount.className="gred";
+    mount.innerHTML='<div class="bar"></div>'
+      +'<div class="stoprow"><input type="color" class="gsc" title="selected stop"><button class="gdel">del</button>'
+      +'<span class="seg gk"><button data-k="linear">linear</button><button data-k="radial">radial</button></span></div>'
+      +'<label><span>angle</span><input type="range" class="gang" min="0" max="180" step="5"></label>'
+      +'<div class="stoprow"><div class="gpre"></div><button class="gpsave mini">+ save</button></div>';
+    const bar=mount.querySelector(".bar"), sc=mount.querySelector(".gsc"), del=mount.querySelector(".gdel"),
+          ang=mount.querySelector(".gang"), kbtns=[...mount.querySelectorAll(".gk button")],
+          preWrap=mount.querySelector(".gpre"), preSave=mount.querySelector(".gpsave");
+    let sel=0, drag=null;
+    function paint(){ const gr=getGrad();
+      bar.style.background=cssGradient({type:"gradient",grad:{kind:"linear",angle:0,stops:gr.stops}},1)||"#222";
+      [...bar.querySelectorAll(".stop")].forEach(s=>s.remove());
+      gr.stops.forEach((st,i)=>{ const d=document.createElement("div"); d.className="stop"+(i===sel?" sel":""); d.style.left=(st.p*100)+"%"; d.style.background=st.c; d.dataset.i=i; bar.append(d); });
+      if(gr.stops[sel]) sc.value=gr.stops[sel].c;
+      ang.value=gr.angle||0; kbtns.forEach(b=>b.classList.toggle("on", b.dataset.k===(gr.kind||"linear"))); }
+    // The stops array is NEVER reordered in place (gradients sort at render time), so a stop's index
+    // stays stable → selecting/editing any stop works, and a drag doesn't lose the selection.
+    // While dragging, move/up listen on WINDOW (not the bar) so the stop tracks the mouse X anywhere
+    // in the viewport - above/below/left/right of the bar - and releasing anywhere ends the drag.
+    function onDragMove(e){ if(drag==null)return; const r=bar.getBoundingClientRect();
+      getGrad().stops[drag].p=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); paint(); changed(); }
+    function onDragEnd(){ if(drag==null)return; drag=null; document.body.classList.remove("nodrag-sel"); window.removeEventListener("pointermove",onDragMove); window.removeEventListener("pointerup",onDragEnd); window.removeEventListener("pointercancel",onDragEnd); }
+    // pointerdown decides everything (no click handler - a drag's trailing synthetic click was
+    // spuriously adding stops): on a stop → select + start drag; on empty bar → add a stop there.
+    bar.addEventListener("pointerdown",e=>{
+      if(e.target.classList.contains("stop")){ sel=+e.target.dataset.i; drag=sel; document.body.classList.add("nodrag-sel"); paint();
+        window.addEventListener("pointermove",onDragMove); window.addEventListener("pointerup",onDragEnd); window.addEventListener("pointercancel",onDragEnd); return; } // select + drag (window-tracked)
+      const r=bar.getBoundingClientRect(), gr=getGrad();
+      gr.stops.push({p:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)), c:sc.value||"#ffffff"}); sel=gr.stops.length-1; paint(); changed(); // add
+    });
+    sc.oninput=()=>{ const gr=getGrad(); if(gr.stops[sel]){ gr.stops[sel].c=sc.value; paint(); changed(); } };
+    del.onclick=()=>{ const gr=getGrad(); if(gr.stops.length>2){ gr.stops.splice(sel,1); if(sel>=gr.stops.length)sel=gr.stops.length-1; paint(); changed(); } };
+    ang.oninput=()=>{ getGrad().angle=parseFloat(ang.value); changed(); };
+    kbtns.forEach(b=>b.onclick=()=>{ getGrad().kind=b.dataset.k; paint(); changed(); });
+    // gradient presets (shared across editors via localStorage): click a chip to apply, dbl-click to remove.
+    function renderPresets(){ preWrap.innerHTML=""; PRESETS.grads.forEach((g,idx)=>{
+      const c=document.createElement("div"); c.className="gp"; c.title="click: apply · dbl-click: remove";
+      c.style.background=cssGradient({type:"gradient",grad:{kind:"linear",angle:0,stops:g.stops}},1)||"#333";
+      c.onclick=()=>{ const cur=getGrad(); cur.kind=g.kind||"linear"; cur.angle=g.angle||0; cur.stops=g.stops.map(s=>({p:s.p,c:s.c})); sel=0; paint(); changed(); };
+      c.ondblclick=()=>{ PRESETS.grads.splice(idx,1); savePresets(); refreshGradPresets(); };
+      preWrap.append(c); }); }
+    preSave.onclick=()=>{ const g=getGrad();
+      PRESETS.grads.push({kind:g.kind||"linear",angle:g.angle||0,stops:g.stops.map(s=>({p:s.p,c:s.c}))}); savePresets(); refreshGradPresets(); };
+    gradPresetRenderers.push(renderPresets); renderPresets();
+    return paint;
+  }
+
+  if(EDIT){
+    const $=id=>document.getElementById(id);
+    const invalidateCurves=()=>{ for(const ws of wstate.values()) ws._curveSig=null; };
+
+    // Make the editor panel draggable by its handle (so it can be moved off the decks). Remembered.
+    (function(){ const bar=$("bar"), h=bar.querySelector(".draghandle"); if(!h) return;
+      try{ const p=JSON.parse(localStorage.getItem("ovlEditPos")||"null"); if(p){ bar.style.left=p.x+"px"; bar.style.top=p.y+"px"; } }catch(_){}
+      let sx,sy,sl,st,drag=false;
+      h.addEventListener("pointerdown",e=>{ drag=true; document.body.classList.add("nodrag-sel"); h.setPointerCapture(e.pointerId); const r=bar.getBoundingClientRect(); sl=r.left; st=r.top; sx=e.clientX; sy=e.clientY; });
+      h.addEventListener("pointermove",e=>{ if(!drag)return; const w=bar.getBoundingClientRect().width;
+        let nl=Math.max(0,Math.min(window.innerWidth-Math.min(w,60), sl+(e.clientX-sx))), nt=Math.max(0,Math.min(window.innerHeight-30, st+(e.clientY-sy)));
+        bar.style.left=nl+"px"; bar.style.top=nt+"px"; });
+      const end=()=>{ if(!drag)return; drag=false; document.body.classList.remove("nodrag-sel"); try{ localStorage.setItem("ovlEditPos",JSON.stringify({x:parseInt(bar.style.left)||0,y:parseInt(bar.style.top)||0})); }catch(_){} };
+      h.addEventListener("pointerup",end); h.addEventListener("pointercancel",end);
+    })();
+    const ensureFill=(key,defC)=>{ let s=style[key]; if(!s){ s=style[key]={type:"solid",color:defC}; }
+      if(!s.grad) s.grad={kind:"linear",angle:90,stops:[{p:0,c:s.color||defC},{p:1,c:"#000000"}]}; return s; };
+
+    // Layout / card size
+    $("sc").oninput=()=>{style.scale=parseFloat($("sc").value);applyStyle(style);saveStyle();};
+    document.querySelectorAll("#bar [data-arr]").forEach(b=>b.onclick=()=>arrange(b.dataset.arr));
+
+    // Card
+    $("ac").oninput=()=>{style.cardColor=$("ac").value;applyStyle(style);saveStyle();};
+    $("op").oninput=()=>{style.bgOpacity=parseFloat($("op").value);applyStyle(style);saveStyle();};
+    const setCard=(k,v)=>{ style.card=style.card||{}; style.card[k]=v; applyStyle(style); saveStyle(); };
+    document.querySelectorAll("#cbd button").forEach(b=>b.onclick=()=>{ setCard("border",b.dataset.bd); syncSegs(); });
+    $("cbc").oninput=()=>setCard("borderColor",$("cbc").value);
+    $("cbw").oninput=()=>setCard("borderW",parseInt($("cbw").value));
+    $("crad").oninput=()=>setCard("radius",parseInt($("crad").value));
+    $("cfr").onchange=()=>{style.cardFaderReact=$("cfr").checked;applyStyle(style);saveStyle();};
+    $("ap").oninput=()=>{style.accent=$("ap").value;applyStyle(style);saveStyle();};
+    $("a2").oninput=()=>{style.accent2=$("a2").value;applyStyle(style);saveStyle();};
+
+    // Waveform
+    $("zm").oninput=()=>{style.zoomSeconds=parseFloat($("zm").value);saveStyle();};
+    $("ph").oninput=()=>{style.playheadPct=parseFloat($("ph").value);saveStyle();};
+    $("wfo").oninput=()=>{style.waveOpacity=parseFloat($("wfo").value);saveStyle();};
+    $("wdm").oninput=()=>{style.waveDim=parseFloat($("wdm").value);saveStyle();};
+    $("wfc").oninput=()=>{ ensureFill("waveFill",WAVE.waveColor).color=$("wfc").value; saveStyle(); };
+    document.querySelectorAll("#wftype button").forEach(b=>b.onclick=()=>{ ensureFill("waveFill",WAVE.waveColor).type=b.dataset.t; syncSegs(); saveStyle(); });
+    const wfGradPaint=makeGradientEditor($("wfgrad"), ()=>ensureFill("waveFill",WAVE.waveColor).grad, saveStyle);
+
+    // EQ / FX colours
+    const setEq=(k,v)=>{ style.eqColors=style.eqColors||{}; style.eqColors[k]=v; invalidateCurves(); saveStyle(); };
+    $("eql").oninput=()=>setEq("low",$("eql").value); $("eqm").oninput=()=>setEq("mid",$("eqm").value);
+    $("eqh").oninput=()=>setEq("high",$("eqh").value); $("eqhp").oninput=()=>setEq("hp",$("eqhp").value);
+    $("eqlp").oninput=()=>setEq("lp",$("eqlp").value);
+
+    // Background
+    $("wbo").oninput=()=>{style.waveBgOpacity=parseFloat($("wbo").value);saveStyle();};
+    $("bgc").oninput=()=>{ ensureFill("waveBg",WAVE.bgColor).color=$("bgc").value; saveStyle(); };
+    document.querySelectorAll("#bgtype button").forEach(b=>b.onclick=()=>{ ensureFill("waveBg",WAVE.bgColor).type=b.dataset.t; syncSegs(); saveStyle(); });
+    const bgGradPaint=makeGradientEditor($("bggrad"), ()=>ensureFill("waveBg",WAVE.bgColor).grad, saveStyle);
+
+    // Colour presets: track the last-focused colour field; swatches apply to it. Server-persisted.
+    let activeColor=null;
+    document.querySelectorAll('#bar input[type=color]').forEach(i=>i.addEventListener("focus",()=>{ activeColor=i; }));
+    function renderCpal(){ const pal=$("cpal"); pal.innerHTML=""; PRESETS.colors.forEach((c,idx)=>{
+      const sw=document.createElement("span"); sw.className="sw"; sw.style.background=c; sw.title=c+" - click apply · dbl-click remove";
+      sw.onclick=()=>{ if(activeColor){ activeColor.value=c; activeColor.dispatchEvent(new Event("input",{bubbles:true})); } };
+      sw.ondblclick=()=>{ PRESETS.colors.splice(idx,1); savePresets(); renderCpal(); };
+      pal.append(sw); }); }
+    $("csave").onclick=()=>{ if(!activeColor)return; if(!PRESETS.colors.includes(activeColor.value)){ PRESETS.colors.push(activeColor.value); savePresets(); renderCpal(); } };
+    window._reloadPresetsUI=()=>{ refreshGradPresets(); renderCpal(); }; // called after /presets loads
+    renderCpal();
+
+    // segmented-button highlight + show/hide gradient editors per fill type
+    function syncSegs(){
+      const cb=(style.card&&style.card.border)||"solid";
+      document.querySelectorAll("#cbd button").forEach(b=>b.classList.toggle("on",b.dataset.bd===cb));
+      const wf=style.waveFill||{type:"solid"}, bg=style.waveBg||{type:"solid"};
+      document.querySelectorAll("#wftype button").forEach(b=>b.classList.toggle("on",b.dataset.t===(wf.type||"solid")));
+      document.querySelectorAll("#bgtype button").forEach(b=>b.classList.toggle("on",b.dataset.t===(bg.type||"solid")));
+      $("wfcrow").style.display=(wf.type==="gradient")?"none":""; $("wfgrad").style.display=(wf.type==="gradient")?"":"none";
+      $("bgcrow").style.display=(bg.type==="gradient")?"none":""; $("bggrad").style.display=(bg.type==="gradient")?"":"none";
+    }
+
+    window._syncControls=()=>{
+      $("sc").value=style.scale!=null?style.scale:1;
+      $("ac").value=style.cardColor||"#16161a"; $("op").value=style.bgOpacity!=null?style.bgOpacity:0.82;
+      const cd=style.card||{}; $("cbc").value=cd.borderColor||"#F70864"; $("cbw").value=cd.borderW!=null?cd.borderW:1; $("crad").value=cd.radius!=null?cd.radius:14;
+      $("cfr").checked=!!style.cardFaderReact;
+      $("ap").value=style.accent||"#F70864"; $("a2").value=style.accent2||"#08F79B";
+      $("zm").value=style.zoomSeconds>0?style.zoomSeconds:WAVE.zoomSeconds; $("ph").value=(style.playheadPct>0&&style.playheadPct<1)?style.playheadPct:WAVE.playheadPct;
+      $("wfo").value=style.waveOpacity!=null?style.waveOpacity:WAVE.waveOpacity; $("wdm").value=style.waveDim!=null?style.waveDim:0.22;
+      $("wfc").value=fillColorOf(waveFillSpec());
+      const ec=eqCols(); $("eql").value=ec.low; $("eqm").value=ec.mid; $("eqh").value=ec.high; $("eqhp").value=ec.hp; $("eqlp").value=ec.lp;
+      $("wbo").value=style.waveBgOpacity!=null?style.waveBgOpacity:WAVE.bgOpacity; $("bgc").value=fillColorOf(bgFillSpec());
+      wfGradPaint(); bgGradPaint(); syncSegs();
+    };
+  }
+  window.addEventListener("resize", repositionAll);
+
+  Promise.all([
+    fetch("/layout").then(r=>r.json()).then(j=>layout=j||{}).catch(()=>layout={}),
+    fetch("/style").then(r=>r.json()).then(j=>style=j||{}).catch(()=>style={}),
+    fetch("/presets").then(r=>r.json()).then(j=>{ PRESETS={grads:(j&&j.grads)||[], colors:(j&&j.colors)||[]}; }).catch(()=>{}),
+  ]).then(()=>{
+    // migrate legacy {x,y} px positions to top/left-anchored offsets
+    for(const k in layout){ const p=layout[k]; if(p && p.ax===undefined && (p.x!==undefined||p.y!==undefined)) layout[k]={ax:"l",ox:p.x||0,ay:"t",oy:p.y||0}; }
+    // one-time migration: import any presets still in this browser's localStorage, then persist them.
+    try{ const og=JSON.parse(localStorage.getItem("ovlGradPresets")||"[]"), oc=JSON.parse(localStorage.getItem("ovlColorPresets")||"[]");
+      let mig=false; if(og.length&&!PRESETS.grads.length){ PRESETS.grads=og; mig=true; } if(oc.length&&!PRESETS.colors.length){ PRESETS.colors=oc; mig=true; }
+      if(mig) savePresets(); }catch(_){}
+    applyStyle(style); applyStyle(styleFromQuery());
+    if(window._syncControls) window._syncControls();
+    if(window._reloadPresetsUI) window._reloadPresetsUI();
+    if(EDIT){ for(const dk of new Set(["A","B","C","D",...Object.keys(layout)])){
+      if(!cards.has(dk)){ const el=makeCard(dk); cards.set(dk,el);
+        el.classList.add("placeholder"); setScroll(el.querySelector(".title"),"DECK "+dk); setScroll(el.querySelector(".artist"),"(not playing)"); } } }
+    repositionAll();
+    let es;
+    (function connect(){ es=new EventSource("/events");
+      es.onmessage=e=>{ try{ const p=JSON.parse(e.data)||{}; update(p.decks||[], p.waveform, p.style, p.layout); }catch(_){} };
+      es.onerror=()=>{ es.close(); setTimeout(connect,1200); };
+    })();
+  });
+})();
+</script>
+</body>
+</html>

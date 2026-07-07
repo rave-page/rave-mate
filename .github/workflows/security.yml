@@ -1,0 +1,60 @@
+# Security analysis: CodeQL (static analysis) + govulncheck (known-vuln scan).
+name: Security
+
+on:
+  push:
+    branches: [main, master, development]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1" # weekly
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Linux GL/X11 deps (Fyne)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - name: Build
+        run: go build ./...
+      - uses: github/codeql-action/analyze@v3
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Linux GL/X11 deps (Fyne)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  supply-chain-soak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: 7-day release-age gate
+        run: bash scripts/check-release-age.sh

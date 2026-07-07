@@ -1,0 +1,22 @@
+/* Motion tab - camera-path browser + motion studio (3D SVG previews). */
+
+.mo-list { display:flex; flex-direction:column; gap:4px; }
+.mo-group { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--rp-muted); margin:var(--space-2) 0 2px; }
+
+/* Cap the preview so it doesn't dominate the pane on wide screens (user: "take up too
+   much space"); the pointer-transport region matches the visible preview. */
+#mo-cp-view, #mo-view { touch-action:none; cursor:grab; user-select:none; max-width:520px; }
+#mo-cp-view:active, #mo-view:active { cursor:grabbing; }
+.mo-svg { display:block; width:100%; height:auto; border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); }
+.mo-svgtext { fill:var(--rp-muted); font:12px var(--font-mono,monospace); }
+
+.mo-hint { font:10px var(--font-mono,monospace); color:var(--rp-muted); margin:4px 0; }
+.mo-info { font:12px var(--font-mono,monospace); color:var(--rp-fg); margin:4px 0 var(--space-2); }
+
+/* Playback toggles: single column on mobile, two columns from 600px so the control stack
+   stops running the pane long. */
+.mo-toggles { display:grid; grid-template-columns:1fr; gap:2px 16px; }
+@media (min-width:600px) { .mo-toggles { grid-template-columns:1fr 1fr; } }
+
+.mo-avatars { border-top:1px solid var(--rp-faint); margin-top:var(--space-3); padding-top:var(--space-2); }

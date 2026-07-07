@@ -1,0 +1,224 @@
+/* Editor tab - visual overlay compositor. Mobile-first: single column; two columns ≥900px. */
+
+.ed-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.ed-toolbar .btn-row {
+  flex-wrap: wrap;
+}
+
+.ed-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.ed-col {
+  min-width: 0;
+}
+
+/* ── preview stage ── */
+.ed-stage {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  container-type: size;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* 16px checkerboard so transparency reads clearly */
+  background-color: #202329;
+  background-image:
+    linear-gradient(45deg, #2a2d35 25%, transparent 25%, transparent 75%, #2a2d35 75%),
+    linear-gradient(45deg, #2a2d35 25%, transparent 25%, transparent 75%, #2a2d35 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.ed-layer,
+.ed-group {
+  position: absolute;
+  box-sizing: border-box;
+}
+.ed-layer {
+  pointer-events: auto;
+  cursor: pointer;
+  overflow: hidden;
+}
+.ed-group {
+  pointer-events: none;
+}
+.ed-sel {
+  outline: 2px solid var(--rp-base, #f70864);
+  outline-offset: -1px;
+}
+.ed-txt {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ed-imgph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rp-muted, #a6abb6);
+  background: rgba(124, 58, 237, 0.14);
+  border: 1px dashed rgba(124, 58, 237, 0.5);
+}
+.ed-cap {
+  margin: 0.5rem 0 0.35rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--rp-muted, #a6abb6);
+  text-align: center;
+}
+
+/* ── layers panel ── */
+.ed-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+.ed-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.ed-lr-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--rp-fg, #fafafa);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ed-lr-name:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.ed-lr-sel {
+  border-color: var(--rp-base, #f70864);
+  background: rgba(247, 8, 100, 0.12);
+}
+.ed-lr-toggles {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.ed-lr-toggles .rp-btn {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.ed-selctl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* ── inspector ── */
+.ed-insp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ed-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.ed-color-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.ed-color-row .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ed-swatch {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.ed-ta textarea.field-input {
+  resize: vertical;
+  min-height: 3.2em;
+  font-family: inherit;
+}
+
+/* ── template picker (modal) ── */
+.ed-tpl-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+.ed-tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.ed-tpl-stage,
+.ed-tpl-stage .ed-layer {
+  pointer-events: none;
+}
+.ed-tpl-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.ed-tpl-kind {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--rp-muted, #a6abb6);
+}
+
+@media (min-width: 600px) {
+  .ed-tpl-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 900px) {
+  .ed-grid {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .ed-col:first-child {
+    flex: 1.5 1 0;
+  }
+  .ed-col:last-child {
+    flex: 1 1 0;
+  }
+  .ed-stage {
+    max-width: 100%;
+  }
+}

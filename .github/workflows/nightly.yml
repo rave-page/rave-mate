@@ -1,0 +1,79 @@
+# Nightly / dev-channel builds. Every push to `development` (plus a daily schedule and
+# manual dispatch) builds the binaries and publishes them to a single rolling "nightly"
+# prerelease on the Releases page, so anyone can grab the latest dev build. These are
+# UNSTABLE alpha builds - keep backups. See README "Release channels".
+name: Nightly
+
+on:
+  push:
+    branches: [development]
+  schedule:
+    - cron: "0 5 * * *" # 05:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bin: rave-mate.exe
+            flags: -H windowsgui -extldflags '-static -static-libgcc -static-libstdc++'
+          - os: ubuntu-latest
+            bin: rave-mate-linux
+            flags: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Linux GL/X11 deps (Fyne)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - name: Build
+        shell: bash
+        run: |
+          LDFLAGS="-s -w ${{ matrix.flags }} \
+            -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
+            -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
+            -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
+            -X rave.page/mate/internal/version.Channel=nightly"
+          go build -ldflags "$LDFLAGS" -o dist/${{ matrix.bin }} ./cmd/rave-mate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin }}
+          path: dist/${{ matrix.bin }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish rolling nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Roll the single "nightly" release+tag to this commit.
+          gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+          gh release create nightly dist/* \
+            --target "${GITHUB_SHA}" \
+            --prerelease \
+            --title "Nightly (dev channel)" \
+            --notes "Rolling **nightly** build from the tip of \`development\` (commit ${GITHUB_SHA:0:7}). Unstable **alpha** - expect breakage; keep backups of your media/library/config."

@@ -1,0 +1,3 @@
+/* Per-tab CSS lives here (one file per tab renderer, e.g. settings.css, library.css).
+ * buildCSS concatenates assets/tabs/*.css in name order. This _base placeholder keeps the
+ * directory present for go:embed. */

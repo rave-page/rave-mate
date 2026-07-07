@@ -1,0 +1,77 @@
+/* Unified media player/editor (player.go) - shared by the Publish + Library hosts.
+   Dense layout: player + edit strip fit one screen; verbose help lives in tooltips.
+   Reuses .wchips/.wchip cards from library.css. */
+
+.mplayer { display: flex; flex-direction: column; gap: 6px; }
+.mp-title { font: 600 13px/1.3 var(--font-mono,monospace); color: #fafafa; }
+
+/* embedded video (loopback Range stream) */
+.mp-videobox { border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: #000;
+  display: flex; justify-content: center; }
+.mp-video { display: block; width: 100%; max-height: 300px; border-radius: 9px; background: #000; }
+.mp-viderr { display: flex; flex-direction: column; gap: 6px; }
+
+.mp-wavebox { position: relative; border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+  background: rgba(0,0,0,.25); }
+/* no overflow:hidden - the encoding/LUFS chip hover cards must escape the box */
+.mp-wavebox .mp-wave { pointer-events: none; }
+.mp-wavebox .wchips, .mp-wavebox .wchip { pointer-events: auto; }
+.mp-wrap { position: relative; }
+.mp-svg { display: block; width: 100%; height: 130px; border-radius: 9px; }
+.mp-wavebox--dual .mp-svg { height: 190px; }
+@media (min-width: 640px) {
+  .mp-svg { height: 150px; }
+  .mp-wavebox--dual .mp-svg { height: 220px; }
+}
+
+/* interaction lanes (outside the patched wave region - pointer capture survives repaints) */
+.mp-lane { position: absolute; left: 0; right: 0; cursor: crosshair; }
+.mp-lane--full { top: 0; bottom: 0; }
+.mp-lane--in { top: 0; height: 24%; cursor: ew-resize; }
+.mp-lane--mid { top: 24%; height: 52%; }
+.mp-lane--out { bottom: 0; height: 24%; cursor: ew-resize; }
+.mp-lane--in:hover, .mp-lane--out:hover { background: rgba(247,8,100,.06); }
+
+.mp-zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mp-zinfo { font: 10px var(--font-mono,monospace); color: var(--rp-muted, #B98AA0); }
+.mp-hovline { margin-left: auto; font: 10px var(--font-mono,monospace); color: var(--rp-muted, #B98AA0); }
+
+.mp-tp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mp-tp .subtabs { margin: 0; }
+.mp-time { margin-left: auto; font: 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-muted, #B98AA0); }
+.mp-trksel { min-width: 200px; flex: 1; max-width: 380px; }
+.mp-trksel .ss-field, .mp-autosel .ss-field, .mp-scopesel .ss-field, .mp-presel .ss-field { margin: 0; }
+#mp-publish-tp .slider, #mp-library-tp .slider { margin: 0; }
+
+/* edit strip - compact rows */
+.mp-editbox { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 8px; }
+.mp-erow { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; }
+.mp-erow .field { margin: 0; }
+.mp-tfield { flex: 0 1 150px; min-width: 120px; }
+.mp-tfield .field { margin: 0; }
+.mp-autosel { min-width: 190px; }
+.mp-rol { display: flex; flex-wrap: wrap; gap: 12px;
+  font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0); }
+.mp-rol b { color: #fafafa; font-weight: 600; }
+
+/* alignment row (dual pairs) */
+.mp-align { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.02); }
+.mp-align-line { flex-basis: 100%; font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #fafafa; }
+.mp-aoff { flex: 0 1 190px; }
+.mp-aoff .field { margin: 0; }
+
+/* export row */
+.mp-export { display: flex; flex-direction: column; gap: 6px; }
+.mp-presel { flex: 0 1 240px; min-width: 200px; }
+.mp-scopesel { flex: 0 1 210px; min-width: 180px; }
+.mp-outfield { flex: 1 1 240px; min-width: 180px; }
+.mp-outfield .field { margin: 0; }
+.mp-exmsg { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #fafafa;
+  word-break: break-all; }
+
+/* chip cards: click/tap pins open (checkbox pin, mirrors the tooltip primitive) */
+.wchip-x { position: absolute; opacity: 0; pointer-events: none; }
+.wchip:has(.wchip-x:checked) .wchip-card { display: block; }

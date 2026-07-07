@@ -1,0 +1,618 @@
+// Package recorder is the session-recording sink: it watches the merged now-playing track
+// and commits each one to a tracklist after it has been audibly playing long enough to
+// count as "played" (mirrors Traktor's history-commit rule). Each recording captures
+// per-track start/end times so a set can be exported as a tracklist and a recording's
+// precise span is known. Recordings persist to the local store.
+package recorder
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/session"
+	"rave.page/mate/internal/store"
+)
+
+const source = "recorder"
+
+// switchDebounce filters brief now-playing flaps (e.g. a quick cue on another deck) so a
+// momentary blip doesn't split or duplicate a track.
+const switchDebounce = 4 * time.Second
+
+// autoSegmentGap is how long the now-playing slot must stay empty before the always-on
+// recorder ends the current set (a long silence = the set is over). The next audible track
+// auto-starts a fresh set.
+const autoSegmentGap = 30 * time.Minute
+
+// candidate is the track currently occupying the now-playing slot, with its confirm timer.
+type candidate struct {
+	key       string // identity (lowercased "title|artist")
+	track     Track
+	firstSeen time.Time
+	confirmed bool
+	idx       int // index in active.Tracks once confirmed
+}
+
+// Recorder is a session.Sink plus a control surface (Start/Stop/List/Export) for the UI.
+type Recorder struct {
+	log     *logbus.Bus
+	st      *store.Store
+	lib     *libdb.DB // change-history sink for play events; may be nil
+	confirm time.Duration
+	clock   func() time.Time
+
+	mu            sync.Mutex
+	active        *Recording
+	cur           *candidate
+	pendingKey    string
+	pendingSince  time.Time
+	lastAudibleAt time.Time // last time a track was audible (drives auto-segmentation)
+	lastKey       string    // identity last observed in the now-playing slot ("" = silence)
+	suppressKey   string    // after a manual stop: don't auto-restart while this key still plays
+	seq           int       // disambiguates ids minted within the same nanosecond
+
+	subMu   sync.Mutex
+	subs    map[int]chan *Recording
+	nextSub int
+}
+
+// New constructs a recorder. confirmSeconds is how long a track must play before it counts.
+// lib (may be nil) receives a play_event in the change history on each confirmed play.
+func New(log *logbus.Bus, st *store.Store, lib *libdb.DB, confirmSeconds int) *Recorder {
+	if confirmSeconds <= 0 {
+		confirmSeconds = 30
+	}
+	return &Recorder{
+		log:     log,
+		st:      st,
+		lib:     lib,
+		confirm: time.Duration(confirmSeconds) * time.Second,
+		clock:   time.Now,
+		subs:    map[int]chan *Recording{},
+	}
+}
+
+// ID implements session.Sink.
+func (r *Recorder) ID() string { return source }
+
+// Start drives the confirm/commit state machine off merger updates + a 1s tick (so track
+// ends and confirmations fire even when updates pause). Recording itself is gated by
+// StartRecording/StopRecording (manual or stream-driven).
+func (r *Recorder) Start(ctx context.Context, m *session.Merger) error {
+	r.sweepStale() // finalize recordings left open by an unclean exit
+	ch, unsub := m.Subscribe()
+	defer unsub()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+			r.step(r.clock(), m.Snapshot())
+		case _, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			r.step(r.clock(), m.Snapshot())
+		}
+	}
+}
+
+// sweepStale finalizes persisted recordings with no end time that aren't the active one -
+// the app died (or was killed) mid-set, so they'd read as "live" forever. End = the last
+// track's end (else its start, else the set start); empty zombie sets are discarded.
+func (r *Recorder) sweepStale() {
+	r.mu.Lock()
+	activeID := ""
+	if r.active != nil {
+		activeID = r.active.ID
+	}
+	r.mu.Unlock()
+	for _, rec := range r.List() {
+		if !rec.EndedAt.IsZero() || rec.ID == activeID {
+			continue
+		}
+		if len(rec.Tracks) == 0 {
+			_ = r.st.Delete(store.BucketRecordings, rec.ID)
+			r.log.Info(source, "stale empty recording discarded", map[string]any{"id": rec.ID})
+			continue
+		}
+		last := &rec.Tracks[len(rec.Tracks)-1]
+		if last.EndedAt.IsZero() {
+			last.EndedAt = last.StartedAt
+		}
+		rec.EndedAt = last.EndedAt
+		if err := r.st.PutJSON(store.BucketRecordings, rec.ID, &rec); err != nil {
+			r.log.Warn(source, "finalize stale recording failed", map[string]any{"id": rec.ID, "error": err.Error()})
+			continue
+		}
+		r.log.Info(source, "stale recording finalized", map[string]any{"id": rec.ID, "tracks": len(rec.Tracks)})
+	}
+}
+
+// step advances the state machine for one observation of the merged state.
+func (r *Recorder) step(now time.Time, st session.UnifiedState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Explicit clock (testability) + staleness window: a dead source's leftover
+	// isPlaying=true must not keep the recorder "live" forever.
+	np, ok := st.DeriveNowPlayingAt(now, session.NowPlayingStaleAfter)
+	key := ""
+	if ok {
+		key = ident(np)
+	}
+
+	// Always-on: the first audible track auto-starts a set (no manual "start recording").
+	if r.active == nil {
+		if key == "" {
+			// The deck went quiet: the previously-playing track is no longer showing, so a
+			// fresh play is allowed to start a new set again.
+			r.suppressKey = ""
+			r.lastKey = ""
+			return
+		}
+		// After a manual stop we keep the recorder idle while the *same* track that was
+		// playing at stop time is still on a deck (track hasn't changed) - otherwise we'd
+		// immediately spin up a new set for a track the user already finished recording.
+		if key == r.suppressKey {
+			r.lastKey = key
+			return
+		}
+		r.suppressKey = ""
+		r.startLocked("", "")
+	}
+	r.lastKey = key
+
+	// Set-end tracking: while any channel fader is up, advance LastFaderAt. It stops the instant the
+	// DJ pulls the final fader down - a more accurate set end than the last track's slot (which lingers
+	// / debounces). In-memory only; persisted at the existing persist points (confirm/finalize/stop).
+	if faderActive(st) {
+		r.active.LastFaderAt = now
+	}
+
+	// Track audibility for auto-segmentation; a long silence ends the set (next play starts one).
+	if key != "" {
+		r.lastAudibleAt = now
+	} else if r.cur == nil && !r.lastAudibleAt.IsZero() && now.Sub(r.lastAudibleAt) >= autoSegmentGap {
+		r.autoFinalizeLocked(r.lastAudibleAt)
+		return
+	}
+
+	// Same track continues: cancel any pending switch; confirm once it's old enough.
+	if r.cur != nil && key == r.cur.key && key != "" {
+		r.pendingKey = ""
+		if !r.cur.confirmed {
+			r.fillCandidate(np) // late-arriving fields land before confirm commits the track
+			if now.Sub(r.cur.firstSeen) >= r.confirm {
+				r.confirmCurrent()
+			}
+		} else {
+			r.refreshCurrent(np)
+		}
+		return
+	}
+
+	// A different track (or silence): require it to persist for switchDebounce before
+	// committing the switch, so brief flaps are ignored.
+	if r.pendingKey != key {
+		r.pendingKey = key
+		r.pendingSince = now
+		return
+	}
+	if now.Sub(r.pendingSince) < switchDebounce {
+		return
+	}
+	r.finalizeCurrent(r.pendingSince) // the old track ended when the new one became audible
+	if key == "" {
+		r.cur = nil
+	} else {
+		r.cur = &candidate{key: key, firstSeen: r.pendingSince, track: trackFrom(np)}
+	}
+	r.pendingKey = ""
+}
+
+// confirmCurrent appends the current candidate to the active tracklist.
+func (r *Recorder) confirmCurrent() {
+	t := r.cur.track
+	t.StartedAt = r.cur.firstSeen
+	r.active.Tracks = append(r.active.Tracks, t)
+	r.cur.idx = len(r.active.Tracks) - 1
+	r.cur.confirmed = true
+	r.log.Info(source, "track confirmed", map[string]any{"title": t.Title, "artist": t.Artist, "deck": t.Deck})
+	r.persistLocked()
+	r.broadcastLocked()
+	r.journalPlay(t)
+	r.savePlayedLocked(r.cur.idx)
+}
+
+// savePlayedLocked upserts the consolidated play-log row for the track at idx in the active
+// recording (caller holds r.mu). Keyed by recording id + slot so confirm-time inserts and
+// later end-time / metadata updates address the same row. No-op without a DB.
+func (r *Recorder) savePlayedLocked(idx int) {
+	if r.lib == nil || r.active == nil || idx < 0 || idx >= len(r.active.Tracks) {
+		return
+	}
+	t := r.active.Tracks[idx]
+	if err := r.lib.SavePlayedTrack(libdb.PlayedTrack{
+		ID:          fmt.Sprintf("%s#%d", r.active.ID, idx),
+		RecordingID: r.active.ID,
+		Artist:      t.Artist, Title: t.Title, Album: t.Album, Key: t.Key, BPM: t.BPM,
+		Deck: t.Deck, TitleSource: t.TitleSource,
+		StartedAt: t.StartedAt, EndedAt: t.EndedAt,
+	}); err != nil {
+		r.log.Warn(source, "persist played track failed", map[string]any{"error": err.Error()})
+	}
+}
+
+// journalPlay records a confirmed play in the change history (origin recorder). Keyed by
+// artist|title only (duration 0) since the now-playing slot carries no reliable duration.
+func (r *Recorder) journalPlay(t Track) {
+	if r.lib == nil {
+		return
+	}
+	rid := ""
+	if r.active != nil {
+		rid = r.active.ID
+	}
+	nv, _ := json.Marshal(map[string]any{
+		"deck": t.Deck, "startedAt": t.StartedAt.UTC().Format(time.RFC3339), "recordingId": rid,
+	})
+	_ = r.lib.AppendChanges([]libdb.ChangeEvent{{
+		TrackHash: libdb.TrackHash(t.Artist, t.Title, 0),
+		Field:     "play_event", Op: "play", Origin: "recorder", NewValue: string(nv),
+	}})
+}
+
+// fillCandidate fills empty candidate fields from metadata arriving during the confirm
+// window (e.g. NML album/key a beat behind the deck ingest), so the confirmed track
+// carries the best-known fields from the start. Caller holds r.mu.
+func (r *Recorder) fillCandidate(np session.NowPlaying) {
+	t := &r.cur.track
+	if t.Album == "" {
+		t.Album = session.StringField(np.Fields, session.FieldAlbum)
+	}
+	if t.Key == "" {
+		t.Key = session.StringField(np.Fields, session.FieldKey)
+	}
+	if t.BPM == 0 {
+		t.BPM, _ = floatField(np.Fields, session.FieldBPM)
+	}
+	if t.TitleSource == "" {
+		if fv, ok := np.Fields[session.FieldTitle]; ok {
+			t.TitleSource = fv.Source
+		}
+	}
+}
+
+// refreshCurrent fills in fields that arrived after a track was confirmed (e.g. NML album).
+func (r *Recorder) refreshCurrent(np session.NowPlaying) {
+	if !r.cur.confirmed {
+		return
+	}
+	t := &r.active.Tracks[r.cur.idx]
+	changed := false
+	if t.Album == "" {
+		if v := session.StringField(np.Fields, session.FieldAlbum); v != "" {
+			t.Album, changed = v, true
+		}
+	}
+	if t.Key == "" {
+		if v := session.StringField(np.Fields, session.FieldKey); v != "" {
+			t.Key, changed = v, true
+		}
+	}
+	if t.BPM == 0 {
+		if v, ok := floatField(np.Fields, session.FieldBPM); ok {
+			t.BPM, changed = v, true
+		}
+	}
+	if changed {
+		r.persistLocked()
+		r.broadcastLocked()
+		r.savePlayedLocked(r.cur.idx)
+	}
+}
+
+// finalizeCurrent stamps the end time on the confirmed current track.
+func (r *Recorder) finalizeCurrent(endAt time.Time) {
+	if r.cur != nil && r.cur.confirmed {
+		r.active.Tracks[r.cur.idx].EndedAt = endAt
+		r.persistLocked()
+		r.broadcastLocked()
+		r.savePlayedLocked(r.cur.idx)
+	}
+}
+
+// ── control surface ──────────────────────────────────────────────────────────
+
+// StartRecording begins a recording (idempotent - a second call returns the active one).
+// streamID links it to a live stream when started from the stream lifecycle. Recording is
+// always-on (auto-started by the play state machine); this is for the stream link + naming.
+func (r *Recorder) StartRecording(name, streamID string) *Recording {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.startLocked(name, streamID)
+}
+
+// startLocked creates the active recording (caller holds r.mu). Idempotent.
+func (r *Recorder) startLocked(name, streamID string) *Recording {
+	if r.active != nil {
+		if streamID != "" && r.active.StreamID == "" {
+			r.active.StreamID = streamID
+		}
+		return r.active.clone()
+	}
+	now := r.clock()
+	r.seq++
+	if name == "" {
+		name = "Set " + now.Local().Format("2006-01-02 15:04")
+	}
+	r.active = &Recording{
+		ID:        fmt.Sprintf("rec_%d_%d", now.UnixNano(), r.seq),
+		Name:      name,
+		StreamID:  streamID,
+		StartedAt: now,
+	}
+	r.cur = nil
+	r.pendingKey = ""
+	r.suppressKey = "" // an explicit start clears any post-stop hold-off
+	r.lastAudibleAt = now
+	r.log.Info(source, "recording started", map[string]any{"id": r.active.ID, "name": name, "streamId": streamID})
+	r.persistLocked()
+	r.broadcastLocked()
+	return r.active.clone()
+}
+
+// autoFinalizeLocked ends the active set after a long silence (caller holds r.mu). A set with
+// no confirmed tracks (only previews) is discarded so the list isn't cluttered with empties.
+func (r *Recorder) autoFinalizeLocked(endAt time.Time) {
+	r.finalizeCurrent(endAt)
+	r.active.EndedAt = endAt
+	done := r.active
+	if len(done.Tracks) == 0 {
+		_ = r.st.Delete(store.BucketRecordings, done.ID)
+		r.log.Info(source, "empty set discarded", map[string]any{"id": done.ID})
+	} else {
+		r.persistLocked()
+		r.log.Info(source, "set auto-finalized (silence)", map[string]any{"id": done.ID, "tracks": len(done.Tracks)})
+	}
+	r.active = nil
+	r.cur = nil
+	r.pendingKey = ""
+	r.broadcastLocked()
+}
+
+// StopRecording ends the active recording and returns it (nil if none was active).
+func (r *Recorder) StopRecording() *Recording {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active == nil {
+		return nil
+	}
+	now := r.clock()
+	r.finalizeCurrent(now)
+	r.active.EndedAt = now
+	done := r.active
+	r.persistLocked()
+	r.log.Info(source, "recording stopped", map[string]any{"id": done.ID, "tracks": len(done.Tracks)})
+	// Stopping only closes the in/out window of *this* set. The recorder stays always-on, but
+	// we hold off auto-starting a new set while the track that was playing at stop is still on
+	// a deck (it hasn't changed) - a genuinely new track (or silence then a new track) resumes
+	// auto-recording. This prevents an immediate duplicate set for the same in-flight track.
+	r.suppressKey = r.lastKey
+	r.active = nil
+	r.cur = nil
+	r.pendingKey = ""
+	r.broadcastLocked()
+	return done.clone()
+}
+
+// Pending describes the unconfirmed track occupying the now-playing slot: what's playing
+// right now but hasn't met the confirm threshold yet.
+type Pending struct {
+	Track     Track
+	FirstSeen time.Time // when it became audible
+	ConfirmAt time.Time // when it commits to the tracklist (FirstSeen + confirm)
+}
+
+// Pending returns the candidate awaiting confirmation (ok=false when silent or the
+// current track is already confirmed). Drives the cockpit's "confirming…" strip.
+func (r *Recorder) Pending() (Pending, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cur == nil || r.cur.confirmed {
+		return Pending{}, false
+	}
+	return Pending{Track: r.cur.track, FirstSeen: r.cur.firstSeen, ConfirmAt: r.cur.firstSeen.Add(r.confirm)}, true
+}
+
+// Active returns a copy of the in-progress recording (nil if not recording).
+func (r *Recorder) Active() *Recording {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.active.clone()
+}
+
+// List returns all persisted recordings, newest first.
+func (r *Recorder) List() []Recording {
+	raws, err := r.st.ListJSON(store.BucketRecordings)
+	if err != nil {
+		r.log.Warn(source, "list recordings failed", map[string]any{"error": err.Error()})
+		return nil
+	}
+	out := make([]Recording, 0, len(raws))
+	for _, raw := range raws {
+		var rec Recording
+		if err := json.Unmarshal(raw, &rec); err == nil {
+			out = append(out, rec)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
+	return out
+}
+
+// Get returns one recording (active or persisted) by id.
+func (r *Recorder) Get(id string) (Recording, bool) {
+	r.mu.Lock()
+	if r.active != nil && r.active.ID == id {
+		c := r.active.clone()
+		r.mu.Unlock()
+		return *c, true
+	}
+	r.mu.Unlock()
+	var rec Recording
+	ok, err := r.st.GetJSON(store.BucketRecordings, id, &rec)
+	if err != nil || !ok {
+		return Recording{}, false
+	}
+	return rec, true
+}
+
+// Delete removes a persisted recording.
+func (r *Recorder) Delete(id string) error { return r.st.Delete(store.BucketRecordings, id) }
+
+// FindByWindow returns the recording with the most temporal overlap with [start,end] across
+// the in-progress + persisted recordings (ok=false if none overlaps). Used to link a captured
+// set-audio file to the tracklist that was recorded over the same span.
+func (r *Recorder) FindByWindow(start, end time.Time) (Recording, bool) {
+	cands := r.List()
+	if a := r.Active(); a != nil {
+		cands = append(cands, *a)
+	}
+	var best Recording
+	var bestOv time.Duration
+	for _, rec := range cands {
+		recEnd := rec.EndedAt
+		if recEnd.IsZero() { // in-progress: treat as ongoing through the capture end
+			recEnd = end
+		}
+		if ov := overlap(start, end, rec.StartedAt, recEnd); ov > bestOv {
+			bestOv, best = ov, rec
+		}
+	}
+	return best, bestOv > 0
+}
+
+// overlap is the duration two time intervals share (0 if disjoint).
+func overlap(aStart, aEnd, bStart, bEnd time.Time) time.Duration {
+	start := aStart
+	if bStart.After(start) {
+		start = bStart
+	}
+	end := aEnd
+	if bEnd.Before(end) {
+		end = bEnd
+	}
+	if d := end.Sub(start); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// Export renders a recording's tracklist in the given format.
+func (r *Recorder) Export(id, format string) (string, error) {
+	rec, ok := r.Get(id)
+	if !ok {
+		return "", fmt.Errorf("recording %s not found", id)
+	}
+	return rec.Export(format)
+}
+
+// Subscribe streams the active recording on every change (nil when recording stops).
+func (r *Recorder) Subscribe() (<-chan *Recording, func()) {
+	r.subMu.Lock()
+	defer r.subMu.Unlock()
+	id := r.nextSub
+	r.nextSub++
+	ch := make(chan *Recording, 8)
+	r.subs[id] = ch
+	return ch, func() {
+		r.subMu.Lock()
+		defer r.subMu.Unlock()
+		if c, ok := r.subs[id]; ok {
+			delete(r.subs, id)
+			close(c)
+		}
+	}
+}
+
+// persistLocked writes the active recording to the store (caller holds r.mu).
+func (r *Recorder) persistLocked() {
+	if r.active == nil {
+		return
+	}
+	if err := r.st.PutJSON(store.BucketRecordings, r.active.ID, r.active); err != nil {
+		r.log.Warn(source, "persist recording failed", map[string]any{"error": err.Error()})
+	}
+}
+
+func (r *Recorder) broadcastLocked() {
+	snap := r.active.clone()
+	r.subMu.Lock()
+	chans := make([]chan *Recording, 0, len(r.subs))
+	for _, ch := range r.subs {
+		chans = append(chans, ch)
+	}
+	r.subMu.Unlock()
+	for _, ch := range chans {
+		select {
+		case ch <- snap:
+		default:
+		}
+	}
+}
+
+// ident is a track's stable identity for now-playing comparison.
+func ident(np session.NowPlaying) string {
+	title := session.StringField(np.Fields, session.FieldTitle)
+	artist := session.StringField(np.Fields, session.FieldArtist)
+	return strings.ToLower(strings.TrimSpace(title + "|" + artist))
+}
+
+func trackFrom(np session.NowPlaying) Track {
+	bpm, _ := floatField(np.Fields, session.FieldBPM)
+	t := Track{
+		Title:  session.StringField(np.Fields, session.FieldTitle),
+		Artist: session.StringField(np.Fields, session.FieldArtist),
+		Album:  session.StringField(np.Fields, session.FieldAlbum),
+		Key:    session.StringField(np.Fields, session.FieldKey),
+		BPM:    bpm,
+		Deck:   np.Deck,
+	}
+	if fv, ok := np.Fields[session.FieldTitle]; ok {
+		t.TitleSource = fv.Source
+	}
+	return t
+}
+
+// faderActive reports whether any channel's fader sits above the on-air threshold (the mix is live).
+func faderActive(st session.UnifiedState) bool {
+	for _, ch := range st.Channels {
+		if f, ok := floatField(ch, session.FieldFader); ok && f > session.OnAirFaderThreshold {
+			return true
+		}
+	}
+	return false
+}
+
+func floatField(m map[string]session.FieldValue, f string) (float64, bool) {
+	if fv, ok := m[f]; ok {
+		switch n := fv.Value.(type) {
+		case float64:
+			return n, true
+		case int:
+			return float64(n), true
+		case int64:
+			return float64(n), true
+		}
+	}
+	return 0, false
+}

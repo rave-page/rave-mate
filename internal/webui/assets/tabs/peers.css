@@ -1,0 +1,87 @@
+/* Peers tab: control banner, bridged now-playing, media-plane telemetry, webcam PTZ, file-xfer.
+ * Mobile-first (base = 320-375px); design tokens only. */
+
+.peers-strip {
+  font: 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-muted, #B98AA0);
+  margin: 0 0 14px;
+}
+
+/* Control banner - "you're controlling the other PC" (MIDI forwarding). */
+.ctl-banner {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--rp-base, #F70864);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 16px;
+}
+.ctl-banner-tx { color: #fff; font-weight: 700; font-size: 14px; }
+
+/* Bridged now-playing under a connection row. */
+.peer-np {
+  color: var(--rp-mint, #08F79B);
+  font: 13px 'JetBrains Mono', ui-monospace, monospace;
+  padding: 0 0 8px 4px;
+}
+
+/* Media plane. */
+.media-clock {
+  font: 700 13px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-mint, #08F79B);
+  margin: 4px 0;
+}
+.media-route {
+  font: 13px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-fg, #fafafa);
+  margin: 8px 0 2px;
+}
+.media-sub {
+  font: 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-muted, #B98AA0);
+  margin: 2px 0 2px 8px;
+  overflow-wrap: anywhere;
+}
+.media-recv-head {
+  font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--rp-muted, #B98AA0); font-weight: 700; margin: 14px 0 8px;
+}
+
+/* Webcam node card. */
+.cam-node { margin: 0 0 12px; }
+.cam-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cam-title { font-weight: 700; font-size: 15px; }
+.cam-status { color: var(--rp-muted, #B98AA0); font-size: 13px; margin: 4px 0 10px; }
+.cam-ctls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.cam-ctls .field { flex: 1 1 130px; }
+.cam-sender {
+  margin-top: 10px;
+  font: 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-violet-soft, #C4A4FF);
+  overflow-wrap: anywhere;
+}
+.cam-props-h {
+  margin: 14px 0 6px;
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--rp-muted, #B98AA0); font-weight: 700;
+}
+.cam-prop { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.cam-prop-l { flex: 0 0 88px; font-size: 12px; color: var(--rp-muted, #B98AA0); }
+.cam-prop-s { flex: 1 1 auto; min-width: 0; }
+.cam-prop-v {
+  flex: 0 0 40px; text-align: right;
+  font: 12px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-fg, #fafafa);
+}
+.cam-prop-auto {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--rp-muted, #B98AA0); cursor: pointer;
+}
+
+/* File transfer. */
+.xfer-mode { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.xfer-row { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+.xfer-row:last-child { border-bottom: 0; }
+.xfer-sub { margin: 6px 0 0 4px; }
+
+@media (min-width: 640px) {
+  .cam-prop-l { flex-basis: 120px; }
+}

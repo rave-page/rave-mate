@@ -1,0 +1,32 @@
+# Build output
+/dist/
+/build/
+*.exe
+*.exe~
+# Anchor to root: bare `rave-mate` also matched the cmd/rave-mate/ package dir, so the
+# entry point was never committed and CI's `go build ./cmd/rave-mate` 404'd.
+/rave-mate
+/rave-mate-*
+*.app
+
+# Go
+*.test
+*.out
+/vendor/
+go.work
+go.work.sum
+
+# Runtime / user data
+*.log
+*.jsonl
+/.run/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+rave-mate-debug.log

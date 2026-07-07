@@ -1,0 +1,81 @@
+/* Worlds tab - VRChat world gist feeds. Builds on the shared .rp-* kit + components.css.
+ * Mobile-first (320–375px base); widen at 560px. Tokens only. */
+
+.ws-help {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--rp-muted, #B98AA0);
+}
+
+/* per-list block: itemRow + its status line */
+.ws-listrow {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+.ws-listrow:last-of-type { border-bottom: 0; }
+
+/* inline add / name form */
+.ws-addrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ws-addrow .field-input { flex: 1 1 180px; min-width: 0; }
+
+/* search form (friend/group pickers) */
+.ws-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ws-search .field-input { flex: 1 1 auto; min-width: 0; }
+
+/* publish status region under each target */
+.wsst { margin: 8px 0 4px; }
+.wsst-line { margin: 4px 0; }
+.wsst-url {
+  font: 11px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-violet-soft, #C4A4FF);
+  word-break: break-all;
+  margin: 4px 0;
+  opacity: .85;
+}
+
+/* modal entry / pick lists */
+.ws-entries { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.ws-picklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 4px 0;
+}
+.ws-caps {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--rp-muted, #B98AA0);
+  font-weight: 700;
+  margin: 10px 0 2px;
+}
+
+/* device-code display */
+.ws-devcode {
+  font: 700 24px 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: .12em;
+  color: var(--rp-mint, #08F79B);
+  text-align: center;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid rgba(8, 247, 155, .28);
+  border-radius: 10px;
+  background: rgba(8, 247, 155, .06);
+  user-select: all;
+}
+
+@media (min-width: 560px) {
+  .ws-picklist { max-height: 52vh; }
+}

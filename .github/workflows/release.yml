@@ -1,0 +1,73 @@
+# Tag-driven releases. rave-mate is in ALPHA: we cut alpha releases only right now.
+# v1.2.3-beta.N → beta; every other v* tag (incl. a plain v1.2.3) → alpha. There is
+# no production channel yet - flip the default in "Channel from tag" when leaving alpha.
+# All builds are prereleases during alpha and show the in-app development-release warning
+# (keep backups / no liability). See also nightly.yml for rolling dev-channel builds.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            bin: rave-mate.exe
+            flags: -H windowsgui -extldflags '-static -static-libgcc -static-libstdc++'
+          - os: ubuntu-latest
+            bin: rave-mate-linux
+            flags: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Linux GL/X11 deps (Fyne)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - name: Channel from tag
+        id: channel
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in
+            *-beta*)  echo "channel=beta"  >> "$GITHUB_OUTPUT" ;;
+            # Alpha phase: no production channel yet - any other v* tag is alpha.
+            *)        echo "channel=alpha" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: Build
+        shell: bash
+        run: |
+          LDFLAGS="-s -w ${{ matrix.flags }} \
+            -X rave.page/mate/internal/version.Version=${GITHUB_REF_NAME} \
+            -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
+            -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
+            -X rave.page/mate/internal/version.Channel=${{ steps.channel.outputs.channel }}"
+          go build -ldflags "$LDFLAGS" -o dist/${{ matrix.bin }} ./cmd/rave-mate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin }}
+          path: dist/${{ matrix.bin }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          prerelease: true # alpha phase: every release is a prerelease
+          generate_release_notes: true

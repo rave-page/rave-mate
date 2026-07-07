@@ -1,0 +1,1906 @@
+// Package config holds typed, versioned user config persisted as JSON under the OS config
+// dir. Every capability is an independently toggleable feature so a disabled feature has
+// zero runtime footprint (the module manager never starts it). API URL resolution mirrors
+// the web repo: explicit env override, else the development API by default.
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"rave.page/mate/internal/cameraosc"
+	"rave.page/mate/internal/transcode"
+	"rave.page/mate/internal/vrbind"
+)
+
+const (
+	appDirName = "rave-mate"
+	fileName   = "config.json"
+
+	devAPI  = "https://development.api.rave.page"
+	prodAPI = "https://api.rave.page"
+
+	// configVersion bumps when the schema changes; Load migrates older files.
+	// v2 added TranscodeFeature.Presets (additive; older files load with no custom presets).
+	// v3 added the DJ-data aggregation features (NML, MIDI, Recorder, NowPlayingFile);
+	// additive - absent keys keep their Default() values via load-over-default.
+	// v4 added the LAN peer link (Peers); additive, off by default (opt-in).
+	// v5 added the Icecast set-capture receiver (SetCapture); additive, off by default.
+	// v6 added cross-DJ-software library sync (LibrarySync); additive, off by default.
+	// v7 added the live browser overlay server (OverlayWeb); additive, off by default.
+	// v8 added the native PNG per-deck renderer (OverlayPNG) + obs-websocket renderer
+	// (OverlayOBS); both additive, off by default.
+	// v9 added the GPU/IPC video-share sink (VideoShare: Spout/Syphon/PipeWire); additive, off.
+	// v10 added native audio recording (AudioRecord) + SetCapture.MetadataOnly; additive, off.
+	// v11 added VideoShare.RenderScale (supersample for crisp 4K display); additive.
+	// v12 added cross-DJ-software live now-playing sources: Serato (History sessions),
+	// VirtualDJ (NetCtl/OS2L/tracklist), Rekordbox (db-poll/memory-read); all additive, off.
+	// v13 added the scrolling-waveform + EQ/FX overlay panel (OverlayWaveform); additive, off.
+	// v14 added Twitch integration (chat/alerts/title-control/moderation); additive, off.
+	// v15 added VR overlays (OpenVR/SteamVR: chat/alert panels in-headset); additive, off.
+	// v16 added application groups (relaunch a DJ-rig app set after a crash); additive, off.
+	// v17 added the timecode outputs (LTC audio / MTC / Art-Net TimeCode house clock); additive, off.
+	// v18 added the DMX plane (Art-Net ingest/emit + VRSL video grid); additive, off.
+	// v19 added the DMX→MIDI VRChat bridge (DMXMIDI); additive, off.
+	// v20 added the local RTSP performer chain (RTSPServe); additive, off.
+	// v21 added VR wrist quick buttons (VROverlay.QuickButtons) + per-VRChat-world layout
+	// bindings (WorldLayouts/WorldLayoutMode); additive - absent keys keep defaults.
+	// v22 added file transfer between paired instances (FileXfer); additive, off by default.
+	// v23 added World Sync (WorldSync): GitHub-gist-published VRChat world permission
+	// lists + poster/events/now-playing display channels; additive, off by default.
+	// v24 added the webcam/UVC source (Webcam: dshow capture → Spout + PTZ control);
+	// additive, off by default. Later additive at v24 (no bump - zero value = old
+	// behaviour): MediaLink (P4 video routes: codec/bitrate + Spout sharing). Also additive
+	// at v24 (zero value = OS locale→en): UI.Language (webui i18n locale; internal/i18n).
+	configVersion = 24
+
+	// ArtNetPort is the standard Art-Net UDP port (ArtTimeCode + DMX default target).
+	ArtNetPort = 6454
+
+	// IcecastPort is the default local Icecast-source receiver port (Traktor broadcast target).
+	IcecastPort = 8000
+
+	// TraktorPort is the default Traktor Pro 4 bridge port (electron/src/main/traktor.ts).
+	TraktorPort = 8080
+
+	// OverlayWebPort is the default loopback port for the browser overlay server (OBS Browser source).
+	OverlayWebPort = 47640
+
+	// OS2LPort is the default TCP port our OS2L server listens on (advertised via mDNS
+	// _os2l._tcp so VirtualDJ auto-discovers + connects).
+	OS2LPort = 47641
+
+	// DefaultTwitchClientID is the bundled "Rave-Mate" Twitch application client id. It's a public
+	// client id (NOT a secret) - Device Code Flow needs no secret. Users may override it with their
+	// own app in TwitchFeature.ClientID.
+	DefaultTwitchClientID = "l1xv1ctqoodyyiois97dbyvdij7h6x"
+)
+
+// Config is the persisted user configuration.
+type Config struct {
+	Version     int     `json:"version"`
+	APIBaseURL  string  `json:"apiBaseURL"`        // resolved rave.page API base
+	StartHidden bool    `json:"startHidden"`       // launch to tray, no window
+	WindowW     float32 `json:"windowW,omitempty"` // last user window size (Fyne units); 0 = open at 85% of screen
+	WindowH     float32 `json:"windowH,omitempty"`
+	// DisableCrashGuardian turns OFF the auto-relaunch-after-crash supervisor. Inverted so the
+	// zero value (existing + fresh configs) keeps the guardian ON without a version migration.
+	DisableCrashGuardian bool `json:"disableCrashGuardian,omitempty"`
+	// PreReleaseWarnedFor is the version string the alpha/beta launch warning was last shown
+	// for (once per version; internal dev/CI builds never warn). Additive, no version bump.
+	PreReleaseWarnedFor string `json:"preReleaseWarnedFor,omitempty"`
+	// DashboardCards is the ordered enabled dashboard card ids (ui registry);
+	// empty = registry defaults.
+	DashboardCards []string `json:"dashboardCards,omitempty"`
+	Features       Features `json:"features"`
+}
+
+// Features is the master capability switchboard. Each field gates one subsystem.
+type Features struct {
+	Traktor       TraktorFeature   `json:"traktor"`       // DJ-software (Traktor Pro 4) bridge
+	StreamBridge  Toggle           `json:"streamBridge"`  // live set → rave.page stream ingest
+	Transcode     TranscodeFeature `json:"transcode"`     // ffmpeg transcode workers
+	StudioChannel Toggle           `json:"studioChannel"` // web↔desktop Local Studio WS channel
+	OBS           OBSFeature       `json:"obs"`           // OBS obs-websocket control + settings validation
+	Library       Toggle           `json:"library"`       // native file browser + media metadata viewer
+	MediaEditor   Toggle           `json:"mediaEditor"`   // poster/thumbnail composer
+	Player        PlayerFeature    `json:"player"`        // in-app video player (mpv engine; window-embed)
+	Fingerprint   Toggle           `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc)
+	VRChat        VRChatFeature    `json:"vrchat"`        // client-side VRChat API bridge
+	VRCTools      VRCToolsFeature  `json:"vrcTools"`      // VRChat screenshot organizer + camera-path manager
+	VR            Toggle           `json:"vr"`            // VR runtime support (OpenVR/OpenXR)
+	VROverlay     VROverlayFeature `json:"vrOverlay"`     // VR overlays (OpenVR chat/alert panels in-headset)
+	Unity         UnityFeature     `json:"unity"`         // Unity-project integration: install the rave.page editor plugin + export motion takes
+	Twitch        TwitchFeature    `json:"twitch"`        // Twitch chat/alerts/title-control/moderation
+	STT           STTFeature       `json:"stt"`           // speech-to-text (Whisper) → Twitch chat
+	WorldSync     WorldSyncFeature `json:"worldSync"`     // VRChat world gist feeds (perms/posters/events/now-playing)
+	Notifications Toggle           `json:"notifications"` // native desktop notifications
+	UI            UIFeature        `json:"ui"`            // UI renderer: Fyne (default) or the HTML/CSS webview
+
+	// DJ-data aggregation sources + sinks (the session hub fuses these into one state).
+	NML            NMLFeature        `json:"nml"`            // Traktor history/collection file source
+	MIDI           MIDIFeature       `json:"midi"`           // MIDI-in source (Denon stock map + custom TSI)
+	ProDJLink      ProDJLinkFeature  `json:"proDjLink"`      // Pioneer CDJ/XDJ LAN now-playing source
+	Serato         SeratoFeature     `json:"serato"`         // Serato collection + live now-playing (History sessions)
+	VirtualDJ      VirtualDJFeature  `json:"virtualDj"`      // VirtualDJ collection + live now-playing (NetCtl/OS2L/tracklist)
+	Rekordbox      RekordboxFeature  `json:"rekordbox"`      // Rekordbox live now-playing (db-poll + memory-read)
+	Recorder       RecorderFeature   `json:"recorder"`       // confirmed-play tracklist recorder sink
+	NowPlayingFile FileSinkFeature   `json:"nowPlayingFile"` // now_playing.{json,txt} for OBS
+	OverlayWeb     OverlayWebFeature `json:"overlayWeb"`     // live multi-deck browser overlay (OBS Browser source)
+	OverlayPNG     FileSinkFeature   `json:"overlayPng"`     // native per-deck PNG cards (OBS Image source per deck)
+	OverlayOBS     OverlayOBSFeature `json:"overlayObs"`     // obs-websocket renderer (drives OBS inputs directly)
+	VideoShare     VideoShareFeature `json:"videoShare"`     // GPU/IPC video share (Spout/Syphon/PipeWire)
+
+	OverlayWaveform OverlayWaveformFeature `json:"overlayWaveform"` // scrolling waveform + EQ/FX panel in the overlays
+
+	Peers       PeersFeature       `json:"peers"`       // LAN peer link (discovery + paired connections)
+	FileXfer    FileXferFeature    `json:"fileXfer"`    // file transfer between paired instances
+	SetCapture  SetCaptureFeature  `json:"setCapture"`  // local Icecast receiver: captures Traktor's broadcast to disk
+	AudioRecord AudioRecordFeature `json:"audioRecord"` // native audio device capture (FLAC), OBS-synced + manual
+
+	LibrarySync LibrarySyncFeature `json:"librarySync"` // cross-DJ-software library sync (hub-merge → targets)
+
+	AppGroups AppGroupsFeature `json:"appGroups"` // relaunch named app sets after a crash (App Groups tab)
+
+	Timecode TimecodeFeature `json:"timecode"` // house SMPTE timecode outputs (LTC audio / MTC / Art-Net)
+
+	DMX DMXFeature `json:"dmx"` // DMX plane: Art-Net ingest/emit + VRSL video grid
+
+	DMXMIDI DMXMIDIFeature `json:"dmxMidi"` // DMX → MIDI CC bridge for VRChat --midi worlds
+
+	RTSPServe RTSPServeFeature `json:"rtspServe"` // local RTSP performer chain (ffmpeg encode → rtspt for VRChat AVPro)
+
+	Webcam WebcamFeature `json:"webcam"` // webcam/UVC source: dshow capture → Spout + PTZ/exposure control (medialink P5)
+
+	MediaLink MediaLinkFeature `json:"mediaLink"` // LAN video routes: codec/bitrate + Spout-sender sharing (medialink P4)
+
+	AbletonLink AbletonLinkFeature `json:"abletonLink"` // Ableton Link: publish fused DJ tempo/phrase onto a Link session + Resolume phrase-sync
+}
+
+// AbletonLinkFeature configures the Ableton Link bridge: rave-mate publishes the session's
+// fused master BPM + beat/phase onto a Link session (quantum = phrase length), so Link-aware
+// visuals (Resolume, Live, VDMX) follow the DJ's tempo + phrase phase. The real Link backend is
+// cgo-gated behind the `abletonlink` build tag + isolated in the featurehost "abletonlink" child;
+// the default build reports the feature unavailable. Off by default (opt-in).
+type AbletonLinkFeature struct {
+	Enabled       bool           `json:"enabled"`
+	Quantum       int            `json:"quantum"`       // phrase length in beats: 8|16|32; 0 = 16
+	TempoOwner    string         `json:"tempoOwner"`    // "auto" (elect) | "always" (this node drives) | "follow" (never drive); "" = auto
+	StartStopSync bool           `json:"startStopSync"` // share transport start/stop across Link peers
+	Resolume      ResolumeConfig `json:"resolume"`      // Resolume phrase-sync (clip-trigger-on-phrase + tempo readback)
+}
+
+// ResolumeConfig configures the Resolume Arena/Avenue 7 control channel (P3): OSC send (via
+// internal/osc) for tempo/resync/clip-connect + REST readback of tempo/beat/phase over the
+// Resolume web server. Resolume 7 joins Link natively, so this only adds phrase-aligned clip
+// triggers + offset nudges on top of Link tempo/phase sync.
+type ResolumeConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`     // "" = 127.0.0.1
+	OSCPort  int    `json:"oscPort"`  // Resolume OSC input port; 0 = 7000
+	RESTPort int    `json:"restPort"` // Resolume web-server REST port; 0 = 8080
+
+	// Phrase clip: a clip (1-based layer/clip) re-triggered on every Link phrase boundary
+	// (phase==0) for phrase-aligned visual restarts. 0/0 = off.
+	PhraseClipLayer int `json:"phraseClipLayer,omitempty"`
+	PhraseClipClip  int `json:"phraseClipClip,omitempty"`
+}
+
+// HasPhraseClip reports whether a phrase-boundary clip trigger is configured.
+func (r ResolumeConfig) HasPhraseClip() bool { return r.PhraseClipLayer > 0 && r.PhraseClipClip > 0 }
+
+// AbletonLinkQuanta are the selectable phrase lengths in beats.
+var AbletonLinkQuanta = []int{8, 16, 32}
+
+// ResolvedQuantum returns the phrase length in beats (default 16; snapped to 8/16/32).
+func (a AbletonLinkFeature) ResolvedQuantum() int {
+	switch a.Quantum {
+	case 8, 16, 32:
+		return a.Quantum
+	default:
+		return 16
+	}
+}
+
+// ResolvedTempoOwner returns the tempo-owner role ("auto"|"always"|"follow"; default "auto").
+func (a AbletonLinkFeature) ResolvedTempoOwner() string {
+	switch a.TempoOwner {
+	case "always", "follow":
+		return a.TempoOwner
+	default:
+		return "auto"
+	}
+}
+
+// ResolvedHost returns the Resolume host (default 127.0.0.1).
+func (r ResolumeConfig) ResolvedHost() string {
+	if strings.TrimSpace(r.Host) != "" {
+		return r.Host
+	}
+	return "127.0.0.1"
+}
+
+// ResolvedOSCPort returns the Resolume OSC input port (default 7000).
+func (r ResolumeConfig) ResolvedOSCPort() int {
+	if r.OSCPort > 0 {
+		return r.OSCPort
+	}
+	return 7000
+}
+
+// ResolvedRESTPort returns the Resolume web-server REST port (default 8080).
+func (r ResolumeConfig) ResolvedRESTPort() int {
+	if r.RESTPort > 0 {
+		return r.RESTPort
+	}
+	return 8080
+}
+
+// MediaLinkFeature tunes the P4 video-route pipeline (MEDIALINK_DESIGN.md §3.2). Additive at
+// v24 - zero value keeps prior behaviour (no sender sharing, auto codec, default budget).
+type MediaLinkFeature struct {
+	ShareVideo  bool   `json:"shareVideo,omitempty"`  // advertise local Spout senders to paired instances
+	PreferCodec string `json:"preferCodec,omitempty"` // "hevc"|"h264"|"mjpeg"; "" = auto (§3.2 matrix)
+	BitrateKbps int    `json:"bitrateKbps,omitempty"` // per-route video budget; 0 = 20000
+	SWOnly      bool   `json:"swOnly,omitempty"`      // advertise software encoders only (diagnostic; tier 4 + CPU warning)
+	// Subprocess opts IN to running the media plane (medialink+mediaroute+webcam) as an isolated,
+	// memory-capped featurehost child (#44), so a media RAM/CPU runaway or cgo fault can't starve the
+	// host. Default (false) = in-proc, the current behaviour. Flip on after verifying cross-PC routing
+	// on a paired rig - TCPlane + mediaClock stay daemon-side and mirror the child's clock.
+	Subprocess bool `json:"subprocess,omitempty"`
+}
+
+// MediaSubprocess reports whether the media plane should run in the isolated child (#44). Default is
+// in-proc; opt in via the Subprocess flag once routing is verified on a two-PC rig.
+func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess }
+
+// Bitrate returns the effective per-route budget (default 20 Mbps).
+func (f MediaLinkFeature) Bitrate() int {
+	if f.BitrateKbps <= 0 {
+		return 20_000
+	}
+	return f.BitrateKbps
+}
+
+// WebcamFeature configures the webcam/UVC source (MEDIALINK_DESIGN.md §5): an ffmpeg dshow
+// capture of the chosen device published as a local Spout sender, plus UVC PTZ/exposure control
+// driveable from a paired instance (media.cam.* bus). Off by default; disabled = zero footprint
+// (no ffmpeg child, no COM).
+type WebcamFeature struct {
+	Enabled   bool   `json:"enabled"`
+	Device    string `json:"device"`              // dshow video device friendly name; "" = none selected
+	Width     int    `json:"width,omitempty"`     // capture size; 0 = device default
+	Height    int    `json:"height,omitempty"`    // capture size; 0 = device default
+	FPS       int    `json:"fps,omitempty"`       // capture rate; 0 = device default
+	AutoStart bool   `json:"autoStart,omitempty"` // start capture with the module (crash-recovery rigs)
+}
+
+// DMXFeature configures the DMX plane: an Art-Net listener ingesting console DMX into the
+// universe store, the VRSL video-grid renderer (Spout/PNG), and optional re-emit of ingested
+// universes to another Art-Net target. Off by default (opt-in).
+type DMXFeature struct {
+	Enabled    bool    `json:"enabled"`
+	ListenAddr string  `json:"listenAddr"`          // Art-Net UDP bind; "" = ":6454" (the fixed Art-Net port)
+	EmitTarget string  `json:"emitTarget"`          // re-emit destination "ip:port"; "" = broadcast 255.255.255.255:6454
+	ReEmit     bool    `json:"reEmit"`              // forward ingested universes to EmitTarget
+	Universes  []int   `json:"universes,omitempty"` // Art-Net port-addresses to render (0-based); empty = defaults per grid mode
+	Grid       DMXGrid `json:"grid"`                // VRSL grid sink
+}
+
+// DMXGrid configures the VRSL video-grid sink.
+type DMXGrid struct {
+	Enabled   bool   `json:"enabled"`
+	Mode      string `json:"mode"`      // "mono" (default) | "rgb9" (extended 9-universe RGB)
+	SpoutName string `json:"spoutName"` // Spout sender name; "" = "rave-mate-vrsl"
+	FPSCap    int    `json:"fpsCap"`    // grid render cap; 0 = 30
+}
+
+// ResolvedListenAddr returns the Art-Net bind address (default ":6454").
+func (d DMXFeature) ResolvedListenAddr() string {
+	if d.ListenAddr != "" {
+		return d.ListenAddr
+	}
+	return ":6454"
+}
+
+// ResolvedEmitTarget returns the re-emit destination (default limited broadcast :6454).
+func (d DMXFeature) ResolvedEmitTarget() string {
+	if d.EmitTarget != "" {
+		return d.EmitTarget
+	}
+	return "255.255.255.255:6454"
+}
+
+// ResolvedUniverses returns the universes rendered to the grid: the configured list, else
+// universe 0 (mono) / 0..8 (rgb9 packs nine).
+func (d DMXFeature) ResolvedUniverses() []int {
+	if len(d.Universes) > 0 {
+		return d.Universes
+	}
+	if strings.EqualFold(strings.TrimSpace(d.Grid.Mode), "rgb9") {
+		return []int{0, 1, 2, 3, 4, 5, 6, 7, 8}
+	}
+	return []int{0}
+}
+
+// ResolvedSpoutName returns the grid's Spout sender name (default "rave-mate-vrsl").
+func (g DMXGrid) ResolvedSpoutName() string {
+	if g.SpoutName != "" {
+		return g.SpoutName
+	}
+	return "rave-mate-vrsl"
+}
+
+// ResolvedFPSCap returns the grid render cap (default 30, clamped 1..60).
+func (g DMXGrid) ResolvedFPSCap() int {
+	if g.FPSCap <= 0 {
+		return 30
+	}
+	if g.FPSCap > 60 {
+		return 60
+	}
+	return g.FPSCap
+}
+
+// DMXMIDIFeature configures the DMX→MIDI bridge: received DMX channels become MIDI CC
+// messages on a local MIDI output port (a loopMIDI-class virtual port VRChat is launched
+// with via --midi=<port>). Local-client-only by VRChat design. Hard rate-limited with
+// change-detection - VRChat crashes above ~128 MIDI events per frame, so the cap is
+// clamped well under that even at low headset frame rates. Off by default (opt-in).
+type DMXMIDIFeature struct {
+	Enabled      bool   `json:"enabled"`
+	Device       string `json:"device"`              // MIDI-out port name substring (loopMIDI); "" = first port
+	Universes    []int  `json:"universes,omitempty"` // bridged Art-Net universes in MIDI-address order (max 4); empty = universe 0
+	MaxPerSecond int    `json:"maxPerSecond"`        // CC messages/s cap; 0 = 400, clamped 50..1000
+}
+
+// DMXMIDIMaxUniverses caps bridged universes: 16 MIDI channels × 128 CCs = 2048 addresses
+// = 4 universes of 512 channels.
+const DMXMIDIMaxUniverses = 4
+
+// ResolvedUniverses returns the bridged universes (default {0}), capped at DMXMIDIMaxUniverses.
+func (d DMXMIDIFeature) ResolvedUniverses() []int {
+	u := d.Universes
+	if len(u) == 0 {
+		return []int{0}
+	}
+	if len(u) > DMXMIDIMaxUniverses {
+		u = u[:DMXMIDIMaxUniverses]
+	}
+	return u
+}
+
+// ResolvedRate returns the CC messages/s cap (default 400, clamped 50..1000 - 1000/s stays
+// under VRChat's ~128 events/frame crash threshold down to ~8 fps).
+func (d DMXMIDIFeature) ResolvedRate() int {
+	if d.MaxPerSecond <= 0 {
+		return 400
+	}
+	if d.MaxPerSecond < 50 {
+		return 50
+	}
+	if d.MaxPerSecond > 1000 {
+		return 1000
+	}
+	return d.MaxPerSecond
+}
+
+// RTSPServeFeature is the local performer video chain: an ffmpeg subprocess (the existing
+// worker precedent) encodes a configured source to H.264 and rave-mate serves it over
+// RTSP/TCP - VRChat's AVPro player ingests rtspt://<this-machine>:8554/<path> with
+// sub-second latency, replacing the OBS→RTMP→MediaMTX relay. Off by default (opt-in).
+type RTSPServeFeature struct {
+	Enabled     bool   `json:"enabled"`
+	Source      string `json:"source"`                // ffmpeg input: file, URL, "desktop" (with gdigrab), device…
+	InputFormat string `json:"inputFormat,omitempty"` // ffmpeg demuxer (-f): gdigrab, dshow, …; "" = auto by source
+	ListenAddr  string `json:"listenAddr"`            // RTSP TCP bind; "" = ":8554"
+	Path        string `json:"path"`                  // stream path; "" = "/live"
+	FPS         int    `json:"fps"`                   // encode + RTP timestamp rate; 0 = 30
+	BitrateKbps int    `json:"bitrateKbps"`           // H.264 bitrate; 0 = 6000
+	Passthrough bool   `json:"passthrough"`           // source is already H.264 → copy, no re-encode
+}
+
+// ResolvedListenAddr returns the RTSP bind address (default ":8554").
+func (r RTSPServeFeature) ResolvedListenAddr() string {
+	if strings.TrimSpace(r.ListenAddr) != "" {
+		return r.ListenAddr
+	}
+	return ":8554"
+}
+
+// ResolvedPath returns the stream path with a leading slash (default "/live").
+func (r RTSPServeFeature) ResolvedPath() string {
+	p := strings.TrimSpace(r.Path)
+	if p == "" {
+		return "/live"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
+}
+
+// ResolvedFPS returns the encode/timestamp frame rate (default 30, clamped 1..120).
+func (r RTSPServeFeature) ResolvedFPS() int {
+	if r.FPS <= 0 {
+		return 30
+	}
+	if r.FPS > 120 {
+		return 120
+	}
+	return r.FPS
+}
+
+// ResolvedBitrate returns the H.264 bitrate in kbps (default 6000, clamped 250..50000).
+func (r RTSPServeFeature) ResolvedBitrate() int {
+	if r.BitrateKbps <= 0 {
+		return 6000
+	}
+	if r.BitrateKbps < 250 {
+		return 250
+	}
+	if r.BitrateKbps > 50000 {
+		return 50000
+	}
+	return r.BitrateKbps
+}
+
+// TimecodeFeature configures the house SMPTE timecode generator: one master frame clock other
+// machines/software chase. Three independent sinks - LTC (audio-out, the SMPTE signal most media
+// software accepts; route the chosen device into a virtual audio cable), MTC (MIDI Time Code out a
+// virtual MIDI port), and Art-Net TimeCode (UDP for lighting consoles). Enabled arms the module;
+// the clock itself is started/stopped from the UI or `rave-mate ctl tc-start`/`tc-stop`. Off by
+// default (opt-in). Rate is the frame rate; StartAt is the initial timecode.
+type TimecodeFeature struct {
+	Enabled bool         `json:"enabled"`
+	Rate    string       `json:"rate"`    // "24"|"25"|"29.97"|"30" (29.97 = drop-frame); "" = 30
+	StartAt string       `json:"startAt"` // "hh:mm:ss:ff" | "clock" (jam to time-of-day) | "" = 00:00:00:00
+	LTC     TCLTCSink    `json:"ltc"`
+	MTC     TCMTCSink    `json:"mtc"`
+	ArtNet  TCArtNetSink `json:"artnet"`
+	// Extra outputs: the one master clock fans out to MANY destinations at once - a distinct LTC
+	// audio device (virtual cable) per receiver, a MIDI port per DAW, a host per lighting console.
+	LTCExtra    []TCLTCSink    `json:"ltcExtra,omitempty"`
+	MTCExtra    []TCMTCSink    `json:"mtcExtra,omitempty"`
+	ArtNetExtra []TCArtNetSink `json:"artnetExtra,omitempty"`
+}
+
+// LTCSinks returns every enabled LTC audio output (primary + extras) - each streams the same house
+// clock to its own device, so one generator drives many virtual cables.
+func (t TimecodeFeature) LTCSinks() []TCLTCSink {
+	out := make([]TCLTCSink, 0, 1+len(t.LTCExtra))
+	if t.LTC.On {
+		out = append(out, t.LTC)
+	}
+	for _, e := range t.LTCExtra {
+		if e.On {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// MTCSinks returns every enabled MTC MIDI output (primary + extras).
+func (t TimecodeFeature) MTCSinks() []TCMTCSink {
+	out := make([]TCMTCSink, 0, 1+len(t.MTCExtra))
+	if t.MTC.On {
+		out = append(out, t.MTC)
+	}
+	for _, e := range t.MTCExtra {
+		if e.On {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ArtNetSinks returns every enabled Art-Net TimeCode target (primary + extras).
+func (t TimecodeFeature) ArtNetSinks() []TCArtNetSink {
+	out := make([]TCArtNetSink, 0, 1+len(t.ArtNetExtra))
+	if t.ArtNet.On {
+		out = append(out, t.ArtNet)
+	}
+	for _, e := range t.ArtNetExtra {
+		if e.On {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TCLTCSink is the LTC audio output. Device = OS audio-output device name ("" = system default);
+// route it into a virtual audio cable so another app reads SMPTE on its audio input. GainDb sets
+// the peak level (default −3 dBFS ≈ 0.7 FS, per SMPTE ST 12-1 headroom).
+type TCLTCSink struct {
+	On     bool    `json:"on"`
+	Device string  `json:"device"`
+	GainDb float64 `json:"gainDb"` // 0 = default (−3 dBFS)
+}
+
+// TCMTCSink is the MIDI Time Code output. Device = OS MIDI-output port name ("" = first port);
+// point it at a virtual MIDI loopback (loopMIDI / Windows MIDI Services) another app listens on.
+type TCMTCSink struct {
+	On     bool   `json:"on"`
+	Device string `json:"device"`
+}
+
+// TCArtNetSink is the Art-Net TimeCode UDP output. Addr = destination host:port ("" = broadcast on
+// the standard Art-Net port); a lighting console on the LAN chases it.
+type TCArtNetSink struct {
+	On   bool   `json:"on"`
+	Addr string `json:"addr"` // "" = 255.255.255.255:6454
+}
+
+// ResolvedGainDb returns the LTC peak level in dBFS (default −3).
+func (l TCLTCSink) ResolvedGainDb() float64 {
+	if l.GainDb == 0 {
+		return -3
+	}
+	return l.GainDb
+}
+
+// ResolvedAddr returns the Art-Net TimeCode target or the broadcast default.
+func (a TCArtNetSink) ResolvedAddr() string {
+	if a.Addr != "" {
+		return a.Addr
+	}
+	return fmt.Sprintf("255.255.255.255:%d", ArtNetPort)
+}
+
+// ResolvedRate returns the configured frame-rate token or the "30" default.
+func (t TimecodeFeature) ResolvedRate() string {
+	if t.Rate != "" {
+		return t.Rate
+	}
+	return "30"
+}
+
+// AppGroupsFeature holds user-defined application groups: named sets of apps that can be
+// relaunched together (button / VR bind / MIDI / `rave-mate ctl launch-group`). The crash-recovery
+// use case - bring a DJ rig back up after a VR-PC crash. Enabled gates the App Groups tab only;
+// launching via ctl/keybind works regardless. Launched apps are detached (outlive rave-mate).
+type AppGroupsFeature struct {
+	Enabled bool       `json:"enabled"`
+	Groups  []AppGroup `json:"groups,omitempty"`
+}
+
+// AppGroup is one named set of apps.
+type AppGroup struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Apps []AppRef `json:"apps,omitempty"`
+}
+
+// AppRef is one launchable app. MatchName (e.g. "vrchat.exe") tests whether it's already running
+// before launch - empty falls back to the exe basename. DelayMs staggers launch after the prior
+// app. Elevated relaunches via UAC (Windows only; falls back to a normal start elsewhere).
+type AppRef struct {
+	Path      string   `json:"path"`
+	Args      []string `json:"args,omitempty"`
+	WorkDir   string   `json:"workDir,omitempty"`
+	MatchName string   `json:"matchName,omitempty"`
+	DelayMs   int      `json:"delayMs,omitempty"`
+	Elevated  bool     `json:"elevated,omitempty"`
+}
+
+// LibrarySyncFeature configures cross-DJ-software library sync. rave-mate's merged music.db
+// is the source of truth: a job groups tracks by portable hash, builds one canonical track per
+// the field-priority rules, then writes it to each target (importable file / live write-back /
+// file tags). Off by default (opt-in). Enabled gates the auto-sync scheduler only - manual runs
+// work regardless.
+type LibrarySyncFeature struct {
+	Enabled bool      `json:"enabled"`
+	Jobs    []SyncJob `json:"jobs,omitempty"`
+}
+
+// SyncJob is one user-defined sync: a scope (what), targets (where + how), rules (field merge +
+// cue conversion), and an optional schedule (auto-sync). LastRunAt/LastSummary are updated after
+// each run for the UI.
+type SyncJob struct {
+	ID          string       `json:"id"`
+	Label       string       `json:"label"`
+	Enabled     bool         `json:"enabled"` // include in auto-sync (manual run ignores this)
+	Scope       SyncScope    `json:"scope"`
+	Targets     []SyncTarget `json:"targets"`
+	Rules       SyncRules    `json:"rules"`
+	Auto        SyncSchedule `json:"auto"`
+	LastRunAt   string       `json:"lastRunAt,omitempty"`
+	LastSummary string       `json:"lastSummary,omitempty"`
+}
+
+// SyncScope selects what to sync. Kind: "all" | "dirs" | "playlists" | "tracks".
+type SyncScope struct {
+	Kind        string   `json:"kind"`
+	Dirs        []string `json:"dirs,omitempty"`        // path prefixes (Kind=="dirs")
+	Playlists   []int64  `json:"playlists,omitempty"`   // libdb playlist IDs (Kind=="playlists")
+	TrackHashes []string `json:"trackHashes,omitempty"` // portable track hashes (Kind=="tracks")
+}
+
+// SyncTarget is one destination. App: "traktor" | "rekordbox" | "virtualdj". Mode:
+// "file" (write importable NML/XML) | "writeback" (live in-place into the app's library) |
+// "tags" (embed metadata into the audio files). OutputPath: file/writeback destination
+// ("" = auto-detect the app's collection / a default next to it).
+type SyncTarget struct {
+	App        string `json:"app"`
+	Mode       string `json:"mode"`
+	OutputPath string `json:"outputPath,omitempty"`
+}
+
+// SyncRules controls the field merge + cue conversion. FieldSource maps a canonical field name
+// (beatgrid|cues|rating|key|genre|bpm|comment|playCount) to the source app whose value wins;
+// unset fields fall back to the default per-field priority. HotcuesToMemory demotes pad-assigned
+// hotcues to memory/stored cues on export (Traktor HOTCUE=-1 / Rekordbox Num=-1). WriteFileTags
+// also embeds metadata into the files (independent of a "tags" target).
+type SyncRules struct {
+	FieldSource     map[string]string `json:"fieldSource,omitempty"`
+	HotcuesToMemory bool              `json:"hotcuesToMemory,omitempty"`
+	WriteFileTags   bool              `json:"writeFileTags,omitempty"`
+}
+
+// SyncSchedule mirrors the automation Schedule shape for auto-sync. Kind: "" (off) | "interval"
+// | "daily" | "cron" | "idle". ExcludeAppsRunning blocks a write-back run while a target DJ app
+// is open (the live-write safety gate); empty defaults to the job's target apps.
+type SyncSchedule struct {
+	Enabled            bool     `json:"enabled"`
+	Kind               string   `json:"kind"`
+	IntervalMinutes    int      `json:"intervalMinutes,omitempty"`
+	AtHour             int      `json:"atHour,omitempty"`
+	AtMinute           int      `json:"atMinute,omitempty"`
+	CronExpr           string   `json:"cronExpr,omitempty"`
+	IdleMinutes        int      `json:"idleMinutes,omitempty"`
+	ExcludeAppsRunning []string `json:"excludeAppsRunning,omitempty"`
+}
+
+// SetCaptureFeature configures the local Icecast-source receiver Traktor broadcasts to.
+// The receiver authenticates the source connection, streams the encoded body to a
+// timestamped file in SetsDir, and parses the broadcast metadata for now-playing - so a
+// captured set is time-linked to the recorder's tracklist (offset = track start − capture
+// start). Audio is broadcast-quality lossy (Ogg/MP3) by design (Icecast = encoded stream).
+type SetCaptureFeature struct {
+	Enabled  bool   `json:"enabled"`
+	Port     int    `json:"port"`     // 0 = IcecastPort default
+	Mount    string `json:"mount"`    // expected mount path, e.g. "/stream"; "" = accept any
+	Username string `json:"username"` // source username; "" = "source" (Icecast default)
+	Password string `json:"password"` // source password (required to accept a connection)
+	SetsDir  string `json:"setsDir"`  // capture output dir; "" = <configDir>/sets
+
+	// SingleFile records the whole broadcast to one file for as long as the Icecast source
+	// stays connected: a brief drop + reconnect within the grace window resumes the same
+	// file instead of starting a new one (so a set isn't chopped into fragments by transient
+	// network blips or Traktor's encoder restarts). Off = one file per source connection.
+	SingleFile            bool `json:"singleFile"`
+	ReconnectGraceSeconds int  `json:"reconnectGraceSeconds"` // 0 = default (15s)
+
+	// MetadataOnly keeps the Icecast receiver running for its now-playing/metadata parsing but
+	// does NOT persist the broadcast audio to disk - use when native AudioRecord is the canonical
+	// (lossless) recording and Icecast is only the metadata source.
+	MetadataOnly bool `json:"metadataOnly"`
+}
+
+// AudioRecordFeature configures native audio-device capture (an ffmpeg dshow capture of a chosen
+// input device - an audio interface or a virtual loopback cable). Default encoding is lossless
+// FLAC at the device's native sample rate. FollowOBS auto-starts/stops the capture with OBS
+// recording; manual start/stop works regardless. Off by default (opt-in).
+type AudioRecordFeature struct {
+	Enabled    bool   `json:"enabled"`
+	Device     string `json:"device"`     // dshow audio device name; "" = none selected
+	Dir        string `json:"dir"`        // output dir; "" = <configDir>/recordings
+	Format     string `json:"format"`     // "flac" (default) | "wav" | "mp3" | "aac"
+	Bitrate    int    `json:"bitrate"`    // lossy kbps (mp3/aac); 0 = default (320)
+	SampleRate int    `json:"sampleRate"` // 0 = auto-detect device native rate
+	FollowOBS  bool   `json:"followObs"`  // auto start/stop with OBS recording
+	WriteTags  bool   `json:"writeTags"`  // embed the played tracklist into the file metadata
+}
+
+// ResolvedFormat returns the configured encoder or the FLAC default.
+func (a AudioRecordFeature) ResolvedFormat() string {
+	if a.Format != "" {
+		return a.Format
+	}
+	return "flac"
+}
+
+// ResolvedBitrate returns the lossy bitrate (kbps) or the 320 default.
+func (a AudioRecordFeature) ResolvedBitrate() int {
+	if a.Bitrate > 0 {
+		return a.Bitrate
+	}
+	return 320
+}
+
+// ResolvedDir returns the configured recordings dir or <configDir>/recordings.
+func (a AudioRecordFeature) ResolvedDir() string {
+	if a.Dir != "" {
+		return a.Dir
+	}
+	if p, err := DataPath("recordings"); err == nil {
+		return p
+	}
+	return "recordings"
+}
+
+// ResolvedPort returns the configured receiver port or the default.
+func (s SetCaptureFeature) ResolvedPort() int {
+	if s.Port > 0 {
+		return s.Port
+	}
+	return IcecastPort
+}
+
+// ResolvedReconnectGrace returns the reconnect grace window for single-file capture (the
+// configured seconds, or the 15s default). Only meaningful when SingleFile is on.
+func (s SetCaptureFeature) ResolvedReconnectGrace() time.Duration {
+	if s.ReconnectGraceSeconds > 0 {
+		return time.Duration(s.ReconnectGraceSeconds) * time.Second
+	}
+	return 15 * time.Second
+}
+
+// ResolvedUsername returns the configured source username or the Icecast default.
+func (s SetCaptureFeature) ResolvedUsername() string {
+	if s.Username != "" {
+		return s.Username
+	}
+	return "source"
+}
+
+// ResolvedSetsDir returns the configured capture dir or <configDir>/sets.
+func (s SetCaptureFeature) ResolvedSetsDir() string {
+	if s.SetsDir != "" {
+		return s.SetsDir
+	}
+	if p, err := DataPath("sets"); err == nil {
+		return p
+	}
+	return "sets"
+}
+
+// PeersFeature configures the LAN peer link. Enabled turns on mDNS discovery + the peer
+// listener (the discovery on/off button). Nickname is what other instances show for us.
+type PeersFeature struct {
+	Enabled  bool   `json:"enabled"`
+	Nickname string `json:"nickname"` // "" = derive from hostname
+}
+
+// FileXferFeature configures file transfer between paired instances (send + receive).
+// AcceptMode "ask" (default) holds incoming transfers for user confirmation; "auto" saves
+// straight into the download dir.
+type FileXferFeature struct {
+	Enabled     bool   `json:"enabled"`
+	DownloadDir string `json:"downloadDir,omitempty"` // "" = <config dir>/downloads
+	AcceptMode  string `json:"acceptMode,omitempty"`  // "ask" (default) | "auto"
+}
+
+// AutoAccept reports whether incoming transfers skip the confirmation step.
+func (f FileXferFeature) AutoAccept() bool { return f.AcceptMode == "auto" }
+
+// ResolvedDownloadDir returns the configured download dir, defaulting to a rave-mate
+// downloads dir under the user's config dir ("" only if that can't be resolved).
+func (f FileXferFeature) ResolvedDownloadDir() string {
+	if d := strings.TrimSpace(f.DownloadDir); d != "" {
+		return d
+	}
+	base, err := Dir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "downloads")
+}
+
+// NMLFeature configures the Traktor NML source (history watch + collection enrichment).
+// Empty paths auto-detect the newest Documents\Native Instruments\Traktor * install.
+type NMLFeature struct {
+	Enabled        bool   `json:"enabled"`
+	CollectionPath string `json:"collectionPath"` // "" = auto-detect collection.nml
+	HistoryDir     string `json:"historyDir"`     // "" = auto-detect History folder
+}
+
+// ProDJLinkFeature configures the passive Pro DJ Link listener (Pioneer CDJ/XDJ on the LAN).
+// Read-only: binds UDP 50002 to observe status broadcasts (no virtual device announced).
+type ProDJLinkFeature struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SeratoFeature configures the Serato source: collection (database V2 + crates) read + live
+// now-playing from the active History session file. Fully local, no Serato account / internet.
+// SeratoDir empty = auto-detect %USERPROFILE%\Music\_Serato_ (+ per-drive _Serato_ folders).
+type SeratoFeature struct {
+	Enabled    bool   `json:"enabled"`
+	SeratoDir  string `json:"seratoDir"`  // "" = auto-detect Music\_Serato_
+	NowPlaying bool   `json:"nowPlaying"` // watch History\Sessions for live now-playing (~1-2s)
+}
+
+// VirtualDJFeature configures the VirtualDJ source: collection (database.xml, per-drive merge)
+// + live now-playing via three optional channels. NetCtl = Network Control plugin HTTP poll
+// (full metadata; needs VDJ Pro 2023+ and a one-time manual plugin install). OS2L = we host an
+// mDNS+TCP OS2L server VDJ auto-connects to (live BPM/beat only, no track text, zero config).
+// Tracklist = poll the History tracklist file (title/artist, laggy fallback).
+type VirtualDJFeature struct {
+	Enabled     bool   `json:"enabled"`
+	DatabaseDir string `json:"databaseDir"` // "" = auto-detect Documents\VirtualDJ
+	NetCtl      bool   `json:"netCtl"`      // poll Network Control plugin
+	NetCtlURL   string `json:"netCtlUrl"`   // "" = http://127.0.0.1:80
+	NetCtlAuth  string `json:"netCtlAuth"`  // optional bearer token (plugin "auth" setting)
+	OS2L        bool   `json:"os2l"`        // host OS2L server (mDNS _os2l._tcp + TCP/JSON)
+	OS2LPort    int    `json:"os2lPort"`    // 0 = OS2LPort default
+	Tracklist   bool   `json:"tracklist"`   // poll History tracklist file (delayed fallback)
+}
+
+// ResolvedNetCtlURL returns the configured Network Control base URL or the localhost default.
+func (v VirtualDJFeature) ResolvedNetCtlURL() string {
+	if v.NetCtlURL != "" {
+		return v.NetCtlURL
+	}
+	return "http://127.0.0.1:80"
+}
+
+// ResolvedOS2LPort returns the configured OS2L server port or the default.
+func (v VirtualDJFeature) ResolvedOS2LPort() int {
+	if v.OS2LPort > 0 {
+		return v.OS2LPort
+	}
+	return OS2LPort
+}
+
+// RekordboxFeature configures live now-playing from rekordbox (collection read/write already
+// lives in libsync). DBPoll polls master.db djmdSongHistory for recently-played - safe, reuses
+// the existing SQLCipher decrypt, but ~60s lag (rekordbox marks "played" ~1min in). MemoryRead
+// reads the rekordbox process memory for real-time deck/BPM/track - Windows-only, accurate, but
+// fragile: it depends on per-version memory offsets and can break on a rekordbox update.
+type RekordboxFeature struct {
+	Enabled    bool   `json:"enabled"`
+	DBPath     string `json:"dbPath"`     // "" = auto-detect master.db
+	DBKey      string `json:"dbKey"`      // "" = RAVE_REKORDBOX_KEY env / built-in default
+	DBPoll     bool   `json:"dbPoll"`     // poll djmdSongHistory (safe, ~60s lag)
+	MemoryRead bool   `json:"memoryRead"` // read process memory (real-time, fragile, Windows-only)
+}
+
+// MIDIFeature configures the MIDI-in source. Port names are matched as substrings against
+// the OS input-port list (e.g. a loopMIDI virtual port). Empty = that decoder is off.
+type MIDIFeature struct {
+	Enabled     bool   `json:"enabled"`
+	DenonPort   string `json:"denonPort"`   // input port carrying the Denon HC4500 stock map
+	CustomPort  string `json:"customPort"`  // input port carrying our custom TSI CC map
+	MeshForward bool   `json:"meshForward"` // always-on mesh: mirror local MIDI to every connected peer
+}
+
+// RecorderFeature configures the session recorder. ConfirmSeconds is how long a track must
+// be audibly playing before it counts as "played" (mirrors Traktor's history commit rule).
+type RecorderFeature struct {
+	Enabled        bool `json:"enabled"`
+	ConfirmSeconds int  `json:"confirmSeconds"` // 0 = default (30)
+}
+
+// ResolvedConfirmSeconds returns the configured confirm threshold or the default.
+func (r RecorderFeature) ResolvedConfirmSeconds() int {
+	if r.ConfirmSeconds > 0 {
+		return r.ConfirmSeconds
+	}
+	return 30
+}
+
+// FileSinkFeature configures the now-playing file writer (OBS text/browser sources). Empty
+// Dir writes into the app config dir.
+type FileSinkFeature struct {
+	Enabled bool   `json:"enabled"`
+	Dir     string `json:"dir"` // "" = app config dir
+}
+
+// OverlayWebFeature configures the live multi-deck browser overlay server (an OBS Browser
+// source points at http://127.0.0.1:<port>/). Off by default (opt-in).
+type OverlayWebFeature struct {
+	Enabled   bool             `json:"enabled"`
+	Port      int              `json:"port"`      // 0 = OverlayWebPort default
+	OBSSource OverlayOBSSource `json:"obsSource"` // auto-manage the OBS browser source over obs-websocket
+}
+
+// OverlayOBSSource auto-creates + maintains the overlay browser source in OBS (requires the OBS
+// feature enabled + OBS WebSocket up). The source lives in a dedicated scene, sized to the OBS
+// canvas; optionally that scene is also nested into the current program scene.
+type OverlayOBSSource struct {
+	Enabled       bool   `json:"enabled"`
+	Scene         string `json:"scene"`         // dedicated scene name; "" = "rave-mate"
+	SourceName    string `json:"sourceName"`    // browser-source input name; "" = "rave-mate overlay"
+	Width         int    `json:"width"`         // 0 = match OBS canvas
+	Height        int    `json:"height"`        // 0 = match OBS canvas
+	NestInProgram bool   `json:"nestInProgram"` // also add the dedicated scene into the current program scene
+}
+
+// ResolvedScene returns the dedicated scene name or the default.
+func (s OverlayOBSSource) ResolvedScene() string {
+	if s.Scene != "" {
+		return s.Scene
+	}
+	return "rave-mate"
+}
+
+// ResolvedSourceName returns the browser-source name or the default.
+func (s OverlayOBSSource) ResolvedSourceName() string {
+	if s.SourceName != "" {
+		return s.SourceName
+	}
+	return "rave-mate overlay"
+}
+
+// ResolvedPort returns the configured overlay port or the default.
+func (o OverlayWebFeature) ResolvedPort() int {
+	if o.Port > 0 {
+		return o.Port
+	}
+	return OverlayWebPort
+}
+
+// VideoShareFeature toggles the GPU/IPC video-share sink: each loaded deck's card is published as
+// a live video frame over the OS-native sharing API (Windows Spout / macOS Syphon / Linux
+// PipeWire) for any compatible receiver. The transport is chosen at build time (-tags
+// spout|syphon|pipewire); the default build has no backend and this sink publishes nothing. Off
+// by default (opt-in).
+type VideoShareFeature struct {
+	Enabled bool `json:"enabled"`
+	// RenderScale supersamples the per-deck card so it stays crisp when a receiver displays it
+	// large (e.g. on a 4K canvas): the card is rendered natively at RenderScale× its base
+	// 360×120 (geometry + fonts scaled, not upscaled). 0 = default (2). Clamped 1..8.
+	RenderScale int `json:"renderScale"`
+}
+
+// ResolvedRenderScale returns the video-share supersample factor (default 2, clamped 1..8).
+func (v VideoShareFeature) ResolvedRenderScale() int {
+	if v.RenderScale <= 0 {
+		return 2
+	}
+	if v.RenderScale > 8 {
+		return 8
+	}
+	return v.RenderScale
+}
+
+// OverlayWaveformFeature configures the combined scrolling-waveform + EQ-curve + FX-cutoff panel
+// in the now-playing overlays (native PNG cards, video-share, browser). When enabled each deck
+// card gains a full-width waveform that scrolls right→left with playback (playhead fixed at
+// PlayheadPct from the left); the EQ curve + a filter-cutoff curve overlay it. Peaks are generated
+// on first play (ffmpeg) and cached. Browser + video-share scroll smoothly; PNG updates on state
+// change. Off by default (opt-in).
+type OverlayWaveformFeature struct {
+	Enabled     bool    `json:"enabled"`
+	ZoomSeconds float64 `json:"zoomSeconds"` // visible timeframe across the panel (smaller = faster scroll); 0 = 20
+	PlayheadPct float64 `json:"playheadPct"` // playhead x from the left (0..1); 0 = 3/4
+
+	// Appearance. Colors are #rrggbb; opacities 0..1. Defaults match the built-in look.
+	WaveColor   string  `json:"waveColor"`   // waveform tint (played bars full, upcoming dimmed); "" = brand mint
+	WaveOpacity float64 `json:"waveOpacity"` // waveform bar opacity (0..1)
+	BgColor     string  `json:"bgColor"`     // waveform canvas background; "" = near-black
+	BgOpacity   float64 `json:"bgOpacity"`   // canvas background opacity (0..1; 0 = transparent)
+}
+
+// Waveform appearance defaults (also the built-in look when a field is unset).
+const (
+	defWaveColor   = "#08F79B"
+	defWaveOpacity = 1.0
+	defWaveBgColor = "#0a0a0e"
+	defWaveBgOpac  = 0.78
+)
+
+// ResolvedZoomSeconds returns the visible-window seconds (default 20, clamped 2..600).
+func (o OverlayWaveformFeature) ResolvedZoomSeconds() float64 {
+	if o.ZoomSeconds <= 0 {
+		return 20
+	}
+	if o.ZoomSeconds < 2 {
+		return 2
+	}
+	if o.ZoomSeconds > 600 {
+		return 600
+	}
+	return o.ZoomSeconds
+}
+
+// ResolvedPlayheadPct returns the playhead fraction from the left (default 3/4).
+func (o OverlayWaveformFeature) ResolvedPlayheadPct() float64 {
+	if o.PlayheadPct <= 0 || o.PlayheadPct >= 1 {
+		return 0.75
+	}
+	return o.PlayheadPct
+}
+
+// ResolvedWaveColor / ResolvedBgColor return the configured hex colour or the built-in default.
+func (o OverlayWaveformFeature) ResolvedWaveColor() string { return orHex(o.WaveColor, defWaveColor) }
+func (o OverlayWaveformFeature) ResolvedBgColor() string   { return orHex(o.BgColor, defWaveBgColor) }
+
+// ResolvedWaveOpacity / ResolvedBgOpacity clamp to 0..1 (kept literal - Default sets the base, so
+// an explicit 0 means transparent, not "use default").
+func (o OverlayWaveformFeature) ResolvedWaveOpacity() float64 { return clampUnit(o.WaveOpacity) }
+func (o OverlayWaveformFeature) ResolvedBgOpacity() float64   { return clampUnit(o.BgOpacity) }
+
+// orHex returns s if it parses as #rgb/#rrggbb, else the fallback.
+func orHex(s, fallback string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 4 || len(s) == 7 {
+		if s[0] == '#' {
+			return s
+		}
+	}
+	return fallback
+}
+
+func clampUnit(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// OverlayOBSFeature configures the obs-websocket renderer: rave-mate creates/updates a text +
+// image input per loaded deck directly in OBS's current scene (no browser/file). Reuses the OBS
+// feature's connection (host/port/password) - that must be enabled too. Off by default (opt-in).
+type OverlayOBSFeature struct {
+	Enabled bool `json:"enabled"`
+}
+
+// OBSFeature configures the OBS obs-websocket v5 client.
+type OBSFeature struct {
+	Enabled  bool         `json:"enabled"`
+	Host     string       `json:"host"`              // 0 = 127.0.0.1
+	Port     int          `json:"port"`              // 0 = 4455
+	Password string       `json:"password"`          // empty if OBS auth disabled
+	Remotes  []OBSRemote  `json:"remotes,omitempty"` // additional OBS instances on the LAN, connected directly
+	Sync     OBSMediaSync `json:"sync,omitempty"`    // media-sync tier: chase OBS media sources to the house clock
+}
+
+// OBSMediaSync configures the media-sync tier: keep chosen OBS media sources locked to
+// rave-mate's house clock (across the local OBS + any LAN remotes). Off by default.
+type OBSMediaSync struct {
+	Enabled            bool            `json:"enabled"`
+	DeadBandFrames     float64         `json:"deadBandFrames,omitempty"`     // 0 = default (2)
+	Fps                float64         `json:"fps,omitempty"`                // 0 = default (30); frame rate for the dead-band
+	RestartThresholdMs int             `json:"restartThresholdMs,omitempty"` // 0 = default (1500)
+	Sources            []OBSSyncSource `json:"sources,omitempty"`
+}
+
+// OBSSyncSource is one media input to keep in sync on a chosen OBS endpoint.
+type OBSSyncSource struct {
+	Endpoint       string `json:"endpoint"`            // OBS source id: "" / "local" = local OBS; else a remote's ID() (obs@host:port)
+	InputName      string `json:"inputName"`           // OBS media input name
+	InputKind      string `json:"inputKind,omitempty"` // obs.Kind* hint (auto-detected when empty)
+	StaticOffsetMs int    `json:"staticOffsetMs,omitempty"`
+	Enabled        bool   `json:"enabled"`
+}
+
+// OBSRemote is an additional OBS instance on the LAN that rave-mate connects to directly over
+// obs-websocket (no rave-mate needed on that PC). Appears as its own instance in the cockpit + VR.
+type OBSRemote struct {
+	Name     string `json:"name"`     // friendly label (defaults to host:port)
+	Host     string `json:"host"`     // LAN IP / hostname of the OBS PC
+	Port     int    `json:"port"`     // obs-websocket port (0 = 4455)
+	Password string `json:"password"` // obs-websocket password (empty if auth disabled)
+	Enabled  bool   `json:"enabled"`
+}
+
+// ResolvedPort returns the remote's obs-websocket port or the default.
+func (r OBSRemote) ResolvedPort() int {
+	if r.Port > 0 {
+		return r.Port
+	}
+	return 4455
+}
+
+// ID is the stable identifier for a remote OBS (host:port) used for routing + status keying.
+func (r OBSRemote) ID() string {
+	return fmt.Sprintf("obs@%s:%d", r.Host, r.ResolvedPort())
+}
+
+// ResolvedName returns the remote's label (defaults to host:port).
+func (r OBSRemote) ResolvedName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return fmt.Sprintf("%s:%d", r.Host, r.ResolvedPort())
+}
+
+// ResolvedHost returns the configured OBS host or the default.
+func (o OBSFeature) ResolvedHost() string {
+	if o.Host != "" {
+		return o.Host
+	}
+	return "127.0.0.1"
+}
+
+// ResolvedPort returns the configured obs-websocket port or the default.
+func (o OBSFeature) ResolvedPort() int {
+	if o.Port > 0 {
+		return o.Port
+	}
+	return 4455
+}
+
+// VRChatFeature configures the client-side VRChat bridge. Credentials are never
+// stored - only the session cookie, DPAPI-sealed, when RememberSession is on.
+// Uplink pushes the session token to rave.page (server-side group/event features);
+// strictly opt-in.
+type VRChatFeature struct {
+	Enabled         bool `json:"enabled"`
+	RememberSession bool `json:"rememberSession"` // seal session at rest, auto-resume
+	Uplink          bool `json:"uplink"`          // share session token with rave.page
+
+	// ── VRChat tab: status/bio + emoji flipbook tools (all additive, empty/off by default) ──
+	StatusPresets []VRChatStatusPreset `json:"statusPresets,omitempty"` // quick-apply presence + status text
+	BioPresets    []VRChatBioPreset    `json:"bioPresets,omitempty"`    // quick-apply bio templates (with {vars})
+	BioVars       map[string]string    `json:"bioVars,omitempty"`       // manual fallback values for bio {variables}
+	FlipbookDir   string               `json:"flipbookDir,omitempty"`   // emoji sprite-sheet output dir ("" = <configDir>/emoji)
+}
+
+// VRChatStatusPreset is a saved presence (join me|active|ask me|busy) + status-text pair.
+type VRChatStatusPreset struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Description string `json:"description"` // statusDescription (≤32 chars)
+}
+
+// VRChatBioPreset is a saved bio template. Template may carry {placeholders} (e.g. {next_event},
+// {next_event_date}, {next_event_venue}) resolved from rave.page upcoming events or BioVars at save.
+type VRChatBioPreset struct {
+	Name     string `json:"name"`
+	Template string `json:"template"`
+}
+
+// ResolvedFlipbookDir returns the configured emoji output dir or <configDir>/emoji.
+func (v VRChatFeature) ResolvedFlipbookDir() string {
+	if v.FlipbookDir != "" {
+		return v.FlipbookDir
+	}
+	if p, err := DataPath("emoji"); err == nil {
+		return p
+	}
+	return "emoji"
+}
+
+// Toggle is a feature with no config beyond on/off.
+type Toggle struct {
+	Enabled bool `json:"enabled"`
+}
+
+// VROverlayFeature configures VR overlays (OpenVR/SteamVR). Requires SteamVR running + a build with
+// the `vr` tag. Overlays render bus-sourced content (Twitch chat, alerts) into the headset - so a
+// VR PC shows the chat from another rave-mate instance that owns the Twitch connection.
+// VRCToolsFeature configures the VRChat screenshot organizer + camera-path manager. Dirs empty =
+// VRChat defaults (Pictures\VRChat, Documents\VRChat\CameraPaths). Organize* enables automatic
+// sorting; *Move moves files (else copies). OSCAddr targets VRChat for /dolly path loading.
+type VRCToolsFeature struct {
+	Enabled          bool   `json:"enabled"`
+	PhotosDir        string `json:"photosDir,omitempty"`
+	OrganizePhotos   bool   `json:"organizePhotos"`
+	PhotoMove        bool   `json:"photoMove"`
+	OrganizeByEvent  bool   `json:"organizeByEvent"` // file photos under the rave.page event whose window contains the capture time (primary); world timeline is the fallback
+	CamPathsDir      string `json:"camPathsDir,omitempty"`
+	OrganizeCamPaths bool   `json:"organizeCamPaths"`
+	CamPathMove      bool   `json:"camPathMove"`
+	OSCAddr          string `json:"oscAddr,omitempty"` // VRChat OSC target for /dolly load (default 127.0.0.1:9000)
+
+	// Camera-path crash-resilience for live sets. AutoBackup copies every path rave-mate plays into a
+	// per-world backup slot; AutoRestore reloads that world's backup a few seconds after you rejoin it
+	// while a set is live (OBS streaming/recording or Twitch live). CamPathBackupDir empty = <dataDir>/
+	// campath_backups. Limitation: only captures paths rave-mate itself plays - not paths triggered
+	// inside VRChat's own dolly UI (VRChat exposes no OSC readback for dolly).
+	AutoBackupCamPaths  bool   `json:"autoBackupCamPaths"`
+	AutoRestoreCamPaths bool   `json:"autoRestoreCamPaths"`
+	CamPathBackupDir    string `json:"camPathBackupDir,omitempty"`
+
+	CamPresets       []cameraosc.Preset `json:"camPresets,omitempty"`       // saved camera look presets (/usercamera params)
+	DefaultCamPreset string             `json:"defaultCamPreset,omitempty"` // preset auto-applied after a path loads ("" = none)
+
+	AvatarVRM string `json:"avatarVrm,omitempty"` // .vrm/.glb/.gltf/.fbx avatar for the motion-studio preview + video render
+}
+
+// AllCamPresets returns builtin presets followed by the user's saved ones.
+func (f VRCToolsFeature) AllCamPresets() []cameraosc.Preset {
+	return append(cameraosc.BuiltinPresets(), f.CamPresets...)
+}
+
+// STTFeature configures local speech-to-text (Whisper) dictation that posts to Twitch chat.
+// Audio devices are dshow names (as ffmpeg lists them); empty = system default. Model is a ggml
+// file name (empty = the default base.en). Submit: AutoSubmit posts after SilenceMs of silence;
+// otherwise the user posts/discards via keybinds (vrbind ActSTTSend/Discard).
+type STTFeature struct {
+	Enabled      bool    `json:"enabled"`
+	InputDevice  string  `json:"inputDevice,omitempty"`  // mic (dshow name; "" = default)
+	OutputDevice string  `json:"outputDevice,omitempty"` // playback device for cues (dshow name; "" = default)
+	Model        string  `json:"model,omitempty"`        // ggml model file ("" = default base.en)
+	AutoSubmit   bool    `json:"autoSubmit"`             // post automatically after SilenceMs of silence
+	SilenceMs    int     `json:"silenceMs,omitempty"`    // trailing-silence timeout for auto-submit (default 1200)
+	Threshold    float64 `json:"threshold,omitempty"`    // VAD RMS threshold 0..1 (default 0.015)
+}
+
+// ResolvedSilenceMs returns the auto-submit silence timeout (default 1200ms).
+func (s STTFeature) ResolvedSilenceMs() int {
+	if s.SilenceMs > 0 {
+		return s.SilenceMs
+	}
+	return 1200
+}
+
+// UnityFeature configures Unity-project integration: selected project roots that rave-mate
+// installs the rave.page editor plugin into + exports motion takes (.anim) to.
+type UnityFeature struct {
+	Enabled  bool     `json:"enabled"`
+	Projects []string `json:"projects,omitempty"` // selected Unity project roots
+}
+
+type VROverlayFeature struct {
+	Enabled        bool          `json:"enabled"`
+	Overlays       []VROverlay   `json:"overlays,omitempty"`
+	MicToggle      MicToggleBind `json:"micToggle"`               // OBS mic mute toggle (VR hotkey / MIDI)
+	EditHand       string        `json:"editHand"`                // "left"|"right" - wrist hosting the edit badge
+	SummonButton   string        `json:"summonButton"`            // face button the SUMMON action binds to: "ax"|"by"|"custom" (default "ax")
+	SummonOn       bool          `json:"summonOn"`                // enable the summon button (hold = open/close editor)
+	SummonTapHides bool          `json:"summonTapHides"`          // short tap of the summon button shows/hides the overlays
+	VRViewCapture  bool          `json:"vrViewCapture"`           // allow ctl screenshot-vr to capture the SteamVR VR-View mirror window (opt-in, Windows-only)
+	OSCAddr        string        `json:"oscAddr,omitempty"`       // VRChat OSC target for motion playback (default 127.0.0.1:9000)
+	VMCAddr        string        `json:"vmcAddr,omitempty"`       // VMC-protocol receiver for VTuber motion (VSeeFace/Warudo/VNyan; default 127.0.0.1:39539)
+	VMCLive        bool          `json:"vmcLive"`                 // stream live VR motion to the VMC receiver while in the headset (VTuber)
+	AutoStart      bool          `json:"autoStart"`               // register a SteamVR .vrmanifest + auto-launch with SteamVR
+	InProc         bool          `json:"inProc,omitempty"`        // opt-OUT of the supervised VR subprocess (task #4): run OpenVR in the daemon like before
+	StickMoveOnly  bool          `json:"stickMoveOnly,omitempty"` // opt-in: disable free-hand grip-grab; move/rotate overlays only via the positioning-menu sticks/buttons (no accidental grabs)
+	WristPos       string        `json:"wristPos,omitempty"`      // edit-badge spot on the wrist/hand: "inner"(default, XSOverlay-style watch)|"top"|"back"|"above"|"out"
+	WristLarge     bool          `json:"wristLarge,omitempty"`    // edit badge at the old large size (default = small)
+	Binds          []vrbind.Bind `json:"binds,omitempty"`         // user keybinds: VR-slot and/or MIDI → app action (OBS rec/stream, overlay show/hide, …)
+
+	// Editor-menu placement (set by dragging the menu in VR). MenuSnap "" = auto (floats above the
+	// edit hand); else "left"|"right"|"head"|"world" with the offset below.
+	MenuSnap  string  `json:"menuSnap,omitempty"`
+	MenuX     float64 `json:"menuX,omitempty"`
+	MenuY     float64 `json:"menuY,omitempty"`
+	MenuZ     float64 `json:"menuZ,omitempty"`
+	MenuYaw   float64 `json:"menuYaw,omitempty"`
+	MenuPitch float64 `json:"menuPitch,omitempty"`
+	MenuWidth float64 `json:"menuWidth,omitempty"` // metres; 0 = default
+	MenuBg    float64 `json:"menuBg,omitempty"`    // menu background opacity 0..1 (0 = use default)
+
+	Layouts []VRLayout `json:"layouts,omitempty"` // named saved overlay layouts
+
+	QuickButtons    []VRQuickButton `json:"quickButtons,omitempty"`    // extra wrist-strip buttons → app actions
+	WorldLayouts    []VRWorldLayout `json:"worldLayouts,omitempty"`    // layout bound per VRChat world
+	WorldLayoutMode string          `json:"worldLayoutMode,omitempty"` // "off"|"notify"|"auto" ("" = notify)
+}
+
+// VRQuickButton is a user-configured wrist-strip button firing an app action.
+type VRQuickButton struct {
+	Label  string `json:"label"`
+	Glyph  string `json:"glyph,omitempty"`  // 1-3 chars drawn on the button ("" = derived from Label)
+	Action string `json:"action"`           // vrbind ActionID, or "layout.load" / "campath.load"
+	Target string `json:"target,omitempty"` // overlay id / layout name / camera-path file / OBS instance
+}
+
+// VRWorldLayout binds a saved layout to a VRChat world (applied per WorldLayoutMode on join).
+type VRWorldLayout struct {
+	WorldID   string `json:"worldId"`
+	WorldName string `json:"worldName,omitempty"` // display only
+	Layout    string `json:"layout"`              // VRLayout.Name
+	Enabled   bool   `json:"enabled"`
+}
+
+// SubprocessEnabled reports whether the overlay stack runs in the supervised `rave-mate feature vr`
+// child (default ON for vr-tagged builds - a cgo/OpenVR fault then kills only the child). InProc
+// opts out; non-vr builds always run the in-proc stub (no point spawning a child).
+func (v VROverlayFeature) SubprocessEnabled(vrBuild bool) bool { return vrBuild && !v.InProc }
+
+// ResolvedWorldLayoutMode returns the per-world layout auto-apply mode (default "notify" -
+// non-destructive: suggests, never overwrites, until the user opts into "auto").
+func (v VROverlayFeature) ResolvedWorldLayoutMode() string {
+	switch v.WorldLayoutMode {
+	case "off", "notify", "auto":
+		return v.WorldLayoutMode
+	}
+	return "notify"
+}
+
+// VRLayout is a named snapshot of the overlay set + menu placement (save / load / import / export).
+type VRLayout struct {
+	Name      string      `json:"name"`
+	Overlays  []VROverlay `json:"overlays"`
+	MenuSnap  string      `json:"menuSnap,omitempty"`
+	MenuX     float64     `json:"menuX,omitempty"`
+	MenuY     float64     `json:"menuY,omitempty"`
+	MenuZ     float64     `json:"menuZ,omitempty"`
+	MenuYaw   float64     `json:"menuYaw,omitempty"`
+	MenuPitch float64     `json:"menuPitch,omitempty"`
+	MenuWidth float64     `json:"menuWidth,omitempty"`
+	MenuBg    float64     `json:"menuBg,omitempty"`
+}
+
+// ResolvedMenuBg returns the editor-menu background opacity (default 0.94).
+func (v VROverlayFeature) ResolvedMenuBg() float64 {
+	if v.MenuBg > 0 {
+		return v.MenuBg
+	}
+	return 0.94
+}
+
+// ResolvedOSCAddr returns the VRChat OSC target for motion playback (default 127.0.0.1:9000).
+func (v VROverlayFeature) ResolvedOSCAddr() string {
+	if v.OSCAddr != "" {
+		return v.OSCAddr
+	}
+	return "127.0.0.1:9000"
+}
+
+// ResolvedVMCAddr returns the VMC receiver target for VTuber motion (default 127.0.0.1:39539).
+func (v VROverlayFeature) ResolvedVMCAddr() string {
+	if v.VMCAddr != "" {
+		return v.VMCAddr
+	}
+	return "127.0.0.1:39539"
+}
+
+// ResolvedSummonButton returns the face button the summon action binds to: "ax"|"by"|"custom"
+// (default "ax"). "custom" = leave summon unbound so the user assigns it in SteamVR.
+func (v VROverlayFeature) ResolvedSummonButton() string {
+	switch v.SummonButton {
+	case "ax", "by", "custom":
+		return v.SummonButton
+	}
+	return "ax"
+}
+
+// ResolvedWristPos returns the edit-badge placement preset (default "top" - the known-visible spot;
+// "inner" is the XSOverlay watch style, opt-in until its facing is tuned in-headset).
+func (v VROverlayFeature) ResolvedWristPos() string {
+	switch v.WristPos {
+	case "inner", "top", "back", "above", "out":
+		return v.WristPos
+	}
+	return "top"
+}
+
+// ResolvedEditHand returns which wrist hosts the edit toggle (default left).
+func (v VROverlayFeature) ResolvedEditHand() string {
+	if v.EditHand == "right" {
+		return "right"
+	}
+	return "left"
+}
+
+// VROverlay is one configurable overlay panel.
+type VROverlay struct {
+	ID string `json:"id"`
+	// Type: "chat" | "alerts" | "obs" | "viewers" | "viewerlist" | live-stats "perf" | "network" | "timing".
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+
+	// Placement. SnapTo "" = world-anchored (X/Y/Z in room space); "left"/"right" = parent to that
+	// controller with the offset. Angles in degrees.
+	SnapTo string  `json:"snapTo"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Z      float64 `json:"z"`
+	Yaw    float64 `json:"yaw"`
+	Pitch  float64 `json:"pitch"`
+	Roll   float64 `json:"roll"`
+
+	WidthM    float64 `json:"widthM"`              // overlay width in meters (height derives from aspect)
+	Opacity   float64 `json:"opacity"`             // overall overlay opacity 0..1
+	BgOpacity float64 `json:"bgOpacity,omitempty"` // panel background opacity 0..1, independent of Opacity (0 = default)
+
+	// Content + style.
+	MaxMessages     int     `json:"maxMessages"`               // 0 = default
+	DisplaySeconds  float64 `json:"displaySeconds"`            // per-message fade-out; 0 = persistent
+	FontScale       float64 `json:"fontScale"`                 // 0 = default
+	HidePlaceholder bool    `json:"hidePlaceholder,omitempty"` // hide the sample/placeholder content when empty (default: show)
+	AlwaysShow      bool    `json:"alwaysShow,omitempty"`      // stay visible even when overlays are globally hidden (lock)
+
+	// Toggle binds (show/hide the overlay).
+	ToggleAction string `json:"toggleAction"` // VR controller action name ("" = none)
+	ToggleMIDI   int    `json:"toggleMidi"`   // MIDI note/CC number (0 = none)
+}
+
+// MicToggleBind binds an OBS mic-mute toggle to a VR controller action and/or MIDI input. The OBS
+// input (source) is selectable.
+type MicToggleBind struct {
+	Enabled  bool   `json:"enabled"`
+	OBSInput string `json:"obsInput"` // OBS input/source name to mute-toggle
+	VRAction string `json:"vrAction"` // VR controller action ("" = none)
+	MIDINote int    `json:"midiNote"` // MIDI note/CC (0 = none)
+}
+
+// ResolvedMaxMessages returns the chat history depth for an overlay (default 8).
+func (o VROverlay) ResolvedMaxMessages() int {
+	if o.MaxMessages > 0 {
+		return o.MaxMessages
+	}
+	return 8
+}
+
+// ResolvedWidthM returns the overlay width in meters (default 0.5).
+func (o VROverlay) ResolvedWidthM() float64 {
+	if o.WidthM > 0 {
+		return o.WidthM
+	}
+	return 0.5
+}
+
+// ResolvedOpacity returns the overall overlay opacity (default 0.9).
+func (o VROverlay) ResolvedOpacity() float64 {
+	if o.Opacity > 0 {
+		return o.Opacity
+	}
+	return 0.9
+}
+
+// ResolvedBgOpacity returns the panel background opacity (default 0.82 ~ the classic card alpha).
+func (o VROverlay) ResolvedBgOpacity() float64 {
+	if o.BgOpacity > 0 {
+		return o.BgOpacity
+	}
+	return 0.82
+}
+
+// TwitchFeature configures the Twitch integration (chat, alerts, stream-title control, moderation).
+// OAuth tokens are never stored here - the access/refresh pair is sealed at rest (twitch.bin) via
+// secureseal. Device Code Flow means no client secret. ClientID defaults to the bundled rave-mate
+// app; override only to use your own Twitch application.
+type TwitchFeature struct {
+	Enabled     bool          `json:"enabled"`
+	ClientID    string        `json:"clientId"`          // "" = bundled DefaultTwitchClientID
+	AutoConnect bool          `json:"autoConnect"`       // connect on launch when a sealed token exists
+	Presets     []TitlePreset `json:"presets,omitempty"` // reusable stream-title templates
+}
+
+// ResolvedClientID returns the configured client id or the bundled default.
+func (t TwitchFeature) ResolvedClientID() string {
+	if t.ClientID != "" {
+		return t.ClientID
+	}
+	return DefaultTwitchClientID
+}
+
+// WorldSyncFeature configures VRChat world gist feeds: permission lists + display channels
+// (posters/events/now-playing) published as GitHub gists that worlds poll via VRC string
+// loading. GitHub token sealed at rest (github.bin), never here. Gist ids are pointers, not
+// secrets. Off by default (needs GitHub + VRChat links).
+type WorldSyncFeature struct {
+	Enabled        bool   `json:"enabled"`
+	GitHubClientID string `json:"githubClientId,omitempty"` // OAuth app id for Device Flow; "" = PAT paste only
+	RefreshMins    int    `json:"refreshMins,omitempty"`    // list/channel refresh interval; 0 = 10
+	NowPlayingSecs int    `json:"nowPlayingSecs,omitempty"` // min secs between now-playing writes; 0 = 60
+
+	Lists []PermList `json:"lists,omitempty"` // permission lists (one gist each)
+
+	Posters       []WorldPoster `json:"posters,omitempty"`       // poster-billboard channel content
+	PostersGistID string        `json:"postersGistId,omitempty"` // "" until first publish
+	PostersOn     bool          `json:"postersOn,omitempty"`
+
+	EventsOn     bool   `json:"eventsOn,omitempty"` // publish upcoming rave.page events
+	EventsGistID string `json:"eventsGistId,omitempty"`
+
+	NowPlayingOn     bool   `json:"nowPlayingOn,omitempty"` // publish live now-playing (redacted session output)
+	NowPlayingGistID string `json:"nowPlayingGistId,omitempty"`
+	NowPlayingLink   string `json:"nowPlayingLink,omitempty"` // rave.page profile/stream URL shown on the card
+	NowPlayingImg    string `json:"nowPlayingImg,omitempty"`  // card image URL (must be VRC image-allowlisted host)
+
+	FavoriteGroups []FavoriteGroup `json:"favoriteGroups,omitempty"` // pinned groups for quick role grants
+}
+
+// ResolvedRefresh returns the refresh interval (default 10 min).
+func (w WorldSyncFeature) ResolvedRefresh() time.Duration {
+	if w.RefreshMins > 0 {
+		return time.Duration(w.RefreshMins) * time.Minute
+	}
+	return 10 * time.Minute
+}
+
+// ResolvedNowPlayingEvery returns the min gap between now-playing writes (default 60 s).
+func (w WorldSyncFeature) ResolvedNowPlayingEvery() time.Duration {
+	if w.NowPlayingSecs > 0 {
+		return time.Duration(w.NowPlayingSecs) * time.Second
+	}
+	return time.Minute
+}
+
+// PermList is one world permission list, published as one gist (allow.txt newline
+// displayNames + allow.json envelope).
+type PermList struct {
+	ID      string      `json:"id"` // stable local id (list-<unix>)
+	Name    string      `json:"name"`
+	Entries []PermEntry `json:"entries,omitempty"`
+	GistID  string      `json:"gistId,omitempty"` // "" until first publish
+}
+
+// PermEntry kinds.
+const (
+	PermEntryUser      = "user"
+	PermEntryGroupRole = "groupRole"
+)
+
+// PermEntry grants one user or one group role (role "" = all group members).
+// Group-role entries are expanded to current member displayNames at publish time -
+// members of the chosen role become publicly listed in the gist.
+type PermEntry struct {
+	Kind      string `json:"kind"` // "user" | "groupRole"
+	UserID    string `json:"userId,omitempty"`
+	Display   string `json:"display,omitempty"` // displayName (user entries)
+	GroupID   string `json:"groupId,omitempty"`
+	GroupName string `json:"groupName,omitempty"`
+	RoleID    string `json:"roleId,omitempty"` // "" = whole group
+	RoleName  string `json:"roleName,omitempty"`
+}
+
+// WorldPoster is one billboard slot: image URL (VRC image-allowlisted host) + caption + link.
+type WorldPoster struct {
+	Img     string `json:"img,omitempty"`
+	Caption string `json:"caption,omitempty"`
+	Link    string `json:"link,omitempty"`
+}
+
+// FavoriteGroup pins a VRChat group in the World Sync UI.
+type FavoriteGroup struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// TitlePreset is a reusable stream-title template with named {variables} the user fills in, so a DJ
+// can keep one preset per genre/venue and just tweak the vars. Template uses {var} placeholders
+// resolved from Vars (e.g. "{genre} set @ {club} - {event}"). GameName optionally sets the category.
+type TitlePreset struct {
+	Name     string            `json:"name"`
+	Template string            `json:"template"`
+	Vars     map[string]string `json:"vars,omitempty"`     // last-used variable values
+	GameName string            `json:"gameName,omitempty"` // optional Twitch category to set alongside
+}
+
+// TraktorFeature configures the Traktor metadata bridge.
+type TraktorFeature struct {
+	Enabled        bool   `json:"enabled"`
+	Port           int    `json:"port"`           // 0 = TraktorPort default
+	LogPayloads    bool   `json:"logPayloads"`    // append raw payloads to jsonl
+	MappingVersion string `json:"mappingVersion"` // pinned Traktor version for controller-mapping edits; "" = auto (newest)
+}
+
+// Port returns the configured Traktor port or the default.
+func (t TraktorFeature) ResolvedPort() int {
+	if t.Port > 0 {
+		return t.Port
+	}
+	return TraktorPort
+}
+
+// TranscodeFeature configures the transcode worker pool + user-defined presets.
+type TranscodeFeature struct {
+	Enabled       bool               `json:"enabled"`
+	FfmpegPath    string             `json:"ffmpegPath"`        // "" = auto-detect on PATH
+	MaxConcurrent int                `json:"maxConcurrent"`     // 0 = default (2)
+	Presets       []transcode.Preset `json:"presets,omitempty"` // custom presets (override builtins by ID)
+}
+
+// PlayerFeature configures the in-app video player (mpv engine). Embed renders mpv INTO the app
+// window (Windows only, via --wid + a child host window) instead of mpv's own popout window - the
+// video sits inline above the transport/trim controls. VO/HWDec/Profile/ExtraArgs tune mpv for the
+// embedded present path (defaults: gpu / auto-safe, no profile). Non-Windows or Embed=false keeps
+// the popout window.
+// UIFeature selects the UI renderer. Default (empty/absent) = the Go-driven HTML/CSS webview
+// (rave.page design system, minimal JS); only an explicit "fyne" opts back into the legacy Fyne
+// native renderer. The webview needs the OS WebView2 runtime (present on Win11) and a cgo Windows
+// build; the seam falls back to Fyne at runtime if the runtime/host is unavailable. Fyne stays
+// compiled-in as the fallback until the webview reaches full parity, then it is retired.
+type UIFeature struct {
+	Renderer string `json:"renderer,omitempty"` // ""|"webview" (default) | "fyne"
+	Language string `json:"language,omitempty"` // i18n locale (e.g. "de"); ""=OS locale→en. See internal/i18n.
+}
+
+// UseWebview reports whether the HTML/CSS webview renderer is selected. Empty/absent renderer =
+// webview (the new default); only an explicit "fyne" chooses Fyne.
+func (u UIFeature) UseWebview() bool {
+	return !strings.EqualFold(strings.TrimSpace(u.Renderer), "fyne")
+}
+
+type PlayerFeature struct {
+	Embed     bool     `json:"embed"`               // embed mpv into the app window (Windows); false = popout
+	VO        string   `json:"vo"`                  // mpv --vo; "" = "gpu"
+	HWDec     string   `json:"hwdec"`               // mpv --hwdec; "" = "auto-safe"
+	Profile   string   `json:"profile"`             // optional mpv --profile (e.g. "fast"); "" = none
+	ExtraArgs []string `json:"extraArgs,omitempty"` // power-user extra mpv flags
+	GioWindow *bool    `json:"gioWindow,omitempty"` // player pop-out engine: nil/true = Gio (default), explicit false = legacy Fyne/mpv-popout
+}
+
+// UseGioWindow resolves the tri-state pop-out engine: unset = Gio (default), explicit
+// false = legacy. Callers still gate on platform (Gio aux windows unsupported on darwin).
+func (p PlayerFeature) UseGioWindow() bool { return p.GioWindow == nil || *p.GioWindow }
+
+// ResolvedVO returns the mpv video output (default "gpu").
+func (p PlayerFeature) ResolvedVO() string {
+	if strings.TrimSpace(p.VO) != "" {
+		return p.VO
+	}
+	return "gpu"
+}
+
+// ResolvedHWDec returns the mpv hardware-decode mode (default "auto-safe").
+func (p PlayerFeature) ResolvedHWDec() string {
+	if strings.TrimSpace(p.HWDec) != "" {
+		return p.HWDec
+	}
+	return "auto-safe"
+}
+
+// Default returns config with sensible defaults and a resolved API base. Traktor +
+// stream + studio + notifications on; transcode on (auto-detects ffmpeg); VRChat + VR
+// off (opt-in, need setup).
+func Default() Config {
+	return Config{
+		Version:     configVersion,
+		APIBaseURL:  resolveAPIBase(),
+		StartHidden: false,
+		Features: Features{
+			Traktor:       TraktorFeature{Enabled: true, Port: 0, LogPayloads: true},
+			StreamBridge:  Toggle{Enabled: true},
+			Transcode:     TranscodeFeature{Enabled: true, MaxConcurrent: 2},
+			StudioChannel: Toggle{Enabled: true},
+			OBS:           OBSFeature{Enabled: false, Host: "127.0.0.1", Port: 4455},
+			Library:       Toggle{Enabled: true},
+			MediaEditor:   Toggle{Enabled: true},
+			Player:        PlayerFeature{Embed: true, VO: "gpu", HWDec: "auto-safe"}, // embed mpv in-window (Windows); gpu present path
+			Fingerprint:   Toggle{Enabled: false},                                    // opt-in; needs fpcalc on PATH
+			VRChat:        VRChatFeature{Enabled: false, RememberSession: true},
+			VRCTools:      VRCToolsFeature{OrganizeByEvent: true, AutoBackupCamPaths: true, AutoRestoreCamPaths: true}, // event-match is the primary photo organize key; cam-path backup/restore default on for live-set crash-recovery
+			VR:            Toggle{Enabled: false},
+			VROverlay:     VROverlayFeature{Enabled: false, SummonOn: true, SummonButton: "ax"}, // opt-in; needs SteamVR + `vr` build. Summon = hold A/X to open editor (works OOTB).
+			Twitch:        TwitchFeature{Enabled: false, AutoConnect: true},                     // opt-in; bundled client id
+			WorldSync:     WorldSyncFeature{Enabled: false},                                     // opt-in; needs GitHub + VRChat links
+			Notifications: Toggle{Enabled: true},
+
+			NML:            NMLFeature{Enabled: true},                                       // auto-detect Traktor files
+			MIDI:           MIDIFeature{Enabled: false},                                     // opt-in; needs a virtual MIDI port (loopMIDI)
+			ProDJLink:      ProDJLinkFeature{Enabled: false},                                // opt-in; Pioneer CDJ/XDJ on the LAN
+			Serato:         SeratoFeature{Enabled: false, NowPlaying: true},                 // opt-in; auto-detect _Serato_
+			VirtualDJ:      VirtualDJFeature{Enabled: false, NetCtl: true, Tracklist: true}, // opt-in; auto-detect db
+			Rekordbox:      RekordboxFeature{Enabled: false, DBPoll: true},                  // opt-in; live now-playing
+			Recorder:       RecorderFeature{Enabled: true, ConfirmSeconds: 30},
+			NowPlayingFile: FileSinkFeature{Enabled: false},   // opt-in; for OBS
+			OverlayWeb:     OverlayWebFeature{Enabled: false}, // opt-in; browser overlay for OBS
+			OverlayPNG:     FileSinkFeature{Enabled: false},   // opt-in; per-deck PNG cards for OBS
+			OverlayOBS:     OverlayOBSFeature{Enabled: false}, // opt-in; obs-websocket renderer
+			VideoShare:     VideoShareFeature{Enabled: false}, // opt-in; Spout/Syphon/PipeWire share
+
+			OverlayWaveform: OverlayWaveformFeature{ // opt-in; appearance defaults = built-in look
+				Enabled: false, ZoomSeconds: 20, PlayheadPct: 0.75,
+				WaveColor: defWaveColor, WaveOpacity: defWaveOpacity, BgColor: defWaveBgColor, BgOpacity: defWaveBgOpac,
+			},
+
+			Peers:       PeersFeature{Enabled: false},      // opt-in; LAN peer link
+			FileXfer:    FileXferFeature{Enabled: false},   // opt-in; peer file transfer (ask before saving)
+			SetCapture:  SetCaptureFeature{Enabled: false}, // opt-in; needs Traktor broadcast setup
+			AudioRecord: AudioRecordFeature{Enabled: false, Format: "flac", FollowOBS: true, WriteTags: true},
+
+			LibrarySync: LibrarySyncFeature{Enabled: false}, // opt-in; cross-DJ-software sync
+
+			AppGroups: AppGroupsFeature{Enabled: false}, // opt-in; relaunch app sets after a crash
+
+			Timecode: TimecodeFeature{Enabled: false, Rate: "30"}, // opt-in; house SMPTE timecode outputs
+
+			DMX: DMXFeature{Enabled: false, Grid: DMXGrid{Enabled: true, Mode: "mono"}}, // opt-in; grid sink on once the plane is
+
+			DMXMIDI: DMXMIDIFeature{Enabled: false}, // opt-in; needs a virtual MIDI port + VRChat --midi
+
+			RTSPServe: RTSPServeFeature{Enabled: false}, // opt-in; needs ffmpeg + a configured source
+
+			AbletonLink: AbletonLinkFeature{ // opt-in; real Link backend needs the `abletonlink` cgo build
+				Enabled: false, Quantum: 16, TempoOwner: "auto",
+				Resolume: ResolumeConfig{Enabled: false, Host: "127.0.0.1", OSCPort: 7000, RESTPort: 8080},
+			},
+		},
+	}
+}
+
+// resolveAPIBase: RAVE_API_BASE_URL override → prod iff RAVE_ENV=production → dev.
+func resolveAPIBase() string {
+	if v := strings.TrimSpace(os.Getenv("RAVE_API_BASE_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if strings.EqualFold(os.Getenv("RAVE_ENV"), "production") {
+		return prodAPI
+	}
+	return devAPI
+}
+
+// Dir is the OS-correct per-user config dir for the app, created if absent.
+func Dir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, appDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// DataPath joins name onto the app config dir.
+func DataPath(name string) (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
+}
+
+// VRMAvatarsDir is the managed dir holding VRM/GLB avatar models replicated across paired peers.
+// Unlike motion recordings, avatars had no canonical home - picked files are imported here (ImportAvatar)
+// so they can be advertised to + pulled by peers. Empty if the config dir can't be resolved.
+func VRMAvatarsDir() string {
+	p, err := DataPath("vr_avatars.x")
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(p), "vr_avatars")
+}
+
+// ImportAvatar copies a picked avatar file into VRMAvatarsDir (so peers can replicate it) and returns
+// the managed path. A file already in that dir is returned unchanged. Best-effort: the original path is
+// returned alongside the error so callers can fall back to using it locally.
+func ImportAvatar(src string) (string, error) {
+	return importAvatarInto(VRMAvatarsDir(), src)
+}
+
+// importAvatarInto is ImportAvatar with an explicit destination dir (testable without the OS config dir).
+func importAvatarInto(dir, src string) (string, error) {
+	if dir == "" {
+		return src, errors.New("no avatars dir")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return src, err
+	}
+	dst := filepath.Join(dir, filepath.Base(src))
+	if filepath.Clean(filepath.Dir(src)) == filepath.Clean(dir) {
+		return dst, nil // already managed
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return src, err
+	}
+	defer func() { _ = in.Close() }()
+	tmp, err := os.CreateTemp(dir, ".avatar-*.tmp")
+	if err != nil {
+		return src, err
+	}
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return src, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return src, err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		_ = os.Remove(tmpName)
+		return src, err
+	}
+	copySidecar(src, dst)
+	return dst, nil
+}
+
+// copySidecar brings `<avatar>.physbones.json` (Unity-exported physbone params,
+// consumed by vrmdyn) along with an imported avatar. Best-effort.
+func copySidecar(src, dst string) {
+	scSrc := strings.TrimSuffix(src, filepath.Ext(src)) + ".physbones.json"
+	b, err := os.ReadFile(scSrc)
+	if err != nil {
+		return
+	}
+	scDst := strings.TrimSuffix(dst, filepath.Ext(dst)) + ".physbones.json"
+	_ = os.WriteFile(scDst, b, 0o644)
+}
+
+// AvatarEntry is one avatar model in the managed avatars dir.
+type AvatarEntry struct {
+	Name string // base filename incl. extension
+	Path string
+	Size int64
+}
+
+// ListAvatars enumerates synced avatar models (*.vrm/*.glb/*.gltf/*.fbx) in VRMAvatarsDir, name-sorted.
+func ListAvatars() []AvatarEntry { return listAvatarsIn(VRMAvatarsDir()) }
+
+// listAvatarsIn is ListAvatars with an explicit dir (testable without the OS config dir).
+func listAvatarsIn(dir string) []AvatarEntry {
+	if dir == "" {
+		return nil
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []AvatarEntry
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(e.Name())) {
+		case ".vrm", ".glb", ".gltf", ".fbx":
+		default:
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, AvatarEntry{Name: e.Name(), Path: filepath.Join(dir, e.Name()), Size: info.Size()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// Load reads + migrates config from disk, falling back to Default for a missing/invalid
+// file. Always returns a usable Config; err is non-nil only on unexpected IO failure.
+func Load() (Config, error) {
+	path, err := DataPath(fileName)
+	if err != nil {
+		return Default(), err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Default(), nil
+		}
+		return Default(), err
+	}
+	cfg := Default()
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return Default(), nil // corrupt file - don't block startup
+	}
+	if cfg.Version < configVersion {
+		migrate(&cfg, raw)
+	}
+	if cfg.APIBaseURL == "" {
+		cfg.APIBaseURL = resolveAPIBase()
+	}
+	return cfg, nil
+}
+
+// migrate upgrades a pre-v1 (flat) config to the feature schema. The old file had
+// top-level traktorEnable/traktorLog/notifyEnable; map them onto Features and keep the
+// other features at their defaults.
+func migrate(cfg *Config, raw []byte) {
+	var legacy struct {
+		TraktorEnable *bool `json:"traktorEnable"`
+		TraktorLog    *bool `json:"traktorLog"`
+		NotifyEnable  *bool `json:"notifyEnable"`
+	}
+	_ = json.Unmarshal(raw, &legacy)
+	if legacy.TraktorEnable != nil {
+		cfg.Features.Traktor.Enabled = *legacy.TraktorEnable
+	}
+	if legacy.TraktorLog != nil {
+		cfg.Features.Traktor.LogPayloads = *legacy.TraktorLog
+	}
+	if legacy.NotifyEnable != nil {
+		cfg.Features.Notifications.Enabled = *legacy.NotifyEnable
+	}
+	cfg.Version = configVersion
+}
+
+// Save atomically writes config to disk.
+func (c Config) Save() error {
+	path, err := DataPath(fileName)
+	if err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

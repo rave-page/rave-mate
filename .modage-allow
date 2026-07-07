@@ -1,0 +1,4 @@
+# Exact `module version` pairs exempt from the 7-day soak (urgent CVE patches only).
+# One per line. Add a dated reason as a trailing comment. See SUPPLY_CHAIN.md §7.
+# Example:
+#   golang.org/x/crypto v0.0.0  # 2026-06-01 CVE-2026-XXXX active exploit

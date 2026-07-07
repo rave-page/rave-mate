@@ -1,0 +1,43 @@
+/* Twitch tab - chat feed rows, alert accents, viewer count, preset strip, moderation. */
+
+/* OBS control bar viewer count */
+.tw-viewers { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.tw-vc { font: 700 13px/1 'JetBrains Mono', ui-monospace, monospace; letter-spacing: .04em; }
+.tw-vc--live { color: var(--rp-mint, #08F79B); }
+.tw-vc--off { color: var(--rp-muted, #B98AA0); }
+
+/* title-preset strip */
+.tw-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.tw-hint { color: var(--rp-muted, #B98AA0); font-size: 12px; }
+
+/* chat feed rows (extends .log-view/.log-line) */
+.tw-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
+.tw-name { font-weight: 700; }
+.tw-msg { color: #e6e6ec; }
+.tw-modbtn {
+  order: 99; margin-left: auto; padding: 0 6px; min-width: 0; line-height: 1.3;
+  font-size: 15px; opacity: .5; flex: 0 0 auto;
+}
+.tw-modbtn:hover { opacity: 1; }
+
+/* kind-specific alert accents */
+.tw-alert { font-weight: 700; padding: 3px 0; }
+.tw-alert--follow { color: var(--rp-violet, #7C3AED); }
+.tw-alert--sub { color: var(--rp-hot, #FF3E8A); }
+.tw-alert--cheer { color: var(--rp-mint, #08F79B); }
+
+/* send box */
+.tw-send { display: flex; gap: 8px; margin-top: 12px; }
+
+/* modal forms (apply / edit preset) */
+.tw-form { display: flex; flex-direction: column; gap: 10px; }
+.tw-tmpl {
+  font: 12px/1.5 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--rp-muted, #B98AA0); padding: 6px 8px;
+  background: rgba(255,255,255,.04); border-radius: 8px;
+}
+.tw-modacts { display: flex; flex-direction: column; gap: 8px; }
+
+@media (min-width: 640px) {
+  .tw-modacts { flex-direction: row; flex-wrap: wrap; }
+}

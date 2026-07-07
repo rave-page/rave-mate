@@ -1,0 +1,12 @@
+{
+  "name": "page.rave.mate",
+  "version": "0.1.0",
+  "displayName": "rave.page Motion",
+  "description": "Editor tooling for rave.page / rave-mate: import recorded VR motion takes (.anim) under Assets/rave.page/Motion, preview them on your real avatar in-editor, build/extend an AnimatorController, and optionally export the avatar as VRM. Includes a local control socket so rave-mate can drive the editor.",
+  "unity": "2022.3",
+  "author": {
+    "name": "rave.page",
+    "url": "https://rave.page"
+  },
+  "keywords": ["vrchat", "motion", "vrm", "avatar", "rave.page"]
+}

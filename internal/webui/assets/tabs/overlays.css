@@ -1,0 +1,28 @@
+/* Overlays tab. Reuses the shared kit (.rp-card/.card-*/.strow/.field/.slider/.livestrip);
+ * these add the responsive card grid + note/separator styling. Mobile-first: 1 col, 2 up ≥720px. */
+
+.ovl-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (min-width: 720px) {
+  .ovl-cards { grid-template-columns: 1fr 1fr; }
+}
+
+.ovl-cards .rp-card { margin: 0; }
+
+.ovl-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-muted-foreground, #9aa0a6);
+}
+
+.ovl-sep {
+  border: 0;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  margin: 12px 0;
+}

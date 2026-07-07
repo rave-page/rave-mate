@@ -1,0 +1,344 @@
+/* rave-mate webui layout - sits on top of the rave.page design-system kit (.rp-*).
+ * Layout only; all colour/type/radius tokens come from colors_and_type.css. */
+
+/* Typography: Orbitron = headings + menu chrome ONLY (same conclusion as the Fyne theme -
+ * a geometric display face reads soft/"low-DPI" at body sizes). Everything else uses a crisp
+ * monospace. Redefined here (loaded after the ds tokens) so every var()-based rule follows. */
+:root {
+  --font-body: 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
+}
+button, input, select, textarea, .rp-btn, .rp-badge { font-family: var(--font-body); }
+h1, h2, h3, h4, .page-title, .sec-title, .card-h, .card-label, .modal-title,
+#nav a, #nav .brand, .subtab { font-family: var(--font-display, 'Orbitron', sans-serif); }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  background: #0a0a0a;
+  color: var(--rp-fg, #fafafa);
+  font-family: var(--font-body);
+  overflow: hidden;
+}
+
+/* left nav rail */
+#nav {
+  width: 220px; flex: 0 0 220px; height: 100vh; overflow-y: auto;
+  border-right: 1px solid var(--rp-faint, rgba(255,255,255,.06));
+  padding: 12px 8px; background: rgba(255,255,255,.02);
+}
+#nav .brand {
+  font-weight: 800; letter-spacing: .04em; padding: 10px 12px 16px; font-size: 18px;
+  color: #fafafa;
+}
+#nav .brand b { color: var(--rp-base, #F70864); }
+#nav a {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; margin: 2px 0; border-radius: 8px;
+  color: var(--rp-muted, #B98AA0); text-decoration: none; font-size: 14px; cursor: pointer;
+  user-select: none;
+}
+#nav a:hover { background: rgba(255,255,255,.05); color: #fafafa; }
+#nav a.active {
+  background: color-mix(in srgb, var(--rp-base, #F70864) 18%, transparent);
+  color: #fff;
+}
+#nav a .nav-ic { width: 17px; height: 17px; flex: 0 0 auto; opacity: .8; }
+#nav a:hover .nav-ic, #nav a.active .nav-ic { opacity: 1; }
+
+/* main content */
+#main { flex: 1; height: 100vh; overflow-y: auto; padding: 24px; }
+.page-title { font-size: 24px; font-weight: 700; margin: 0 0 4px; }
+.page-sub { color: var(--rp-muted, #B98AA0); font-size: 13px; margin: 0 0 20px; }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+.rp-card { padding: 16px; }
+.card-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--rp-muted, #B98AA0); margin: 0 0 8px; }
+.card-value { font-size: 20px; font-weight: 700; }
+.card-value.mono { font-size: 14px; word-break: break-all; }
+
+.placeholder { color: var(--rp-muted, #B98AA0); font-size: 14px; padding: 40px 0; }
+
+/* ── shared components ── */
+.sec { margin: 0 0 24px; }
+.sec-title { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--rp-muted, #B98AA0); margin: 0 0 12px; font-weight: 700; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+.row:last-child { border-bottom: 0; }
+.row-label { font-size: 14px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.field-label { font-size: 12px; color: var(--rp-muted, #B98AA0); }
+.field-input { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 9px 12px; color: #fafafa; font: 14px var(--font-body, monospace); }
+.field-input:focus { outline: none; border-color: var(--rp-base, #F70864); box-shadow: 0 0 0 3px rgba(247,8,100,.25); }
+
+/* checkbox switch */
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 2; }
+.switch-track { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,.14); transition: background .15s; }
+.switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked + .switch-track { background: var(--rp-mint, #08F79B); }
+.switch input:checked + .switch-track::after { transform: translateX(20px); }
+
+.kv { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 14px; }
+.kv-k { color: var(--rp-muted, #B98AA0); }
+.kv-v { font-weight: 600; }
+
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.3); vertical-align: middle; }
+.dot--success { background: var(--rp-mint, #08F79B); box-shadow: 0 0 8px var(--rp-mint, #08F79B); }
+.dot--error { background: var(--rp-base, #F70864); }
+.dot--warning { background: var(--rp-amber, #FFB547); }
+.dot--muted { background: rgba(255,255,255,.25); }
+
+/* ── Live: now-playing + decks ── */
+.np { display: flex; align-items: center; gap: 16px; }
+.np-title { font-size: 22px; font-weight: 700; }
+.np-artist { color: var(--rp-muted, #B98AA0); font-size: 15px; margin-top: 2px; }
+.np-meta { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.decks { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.deck { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 12px; background: rgba(255,255,255,.02); }
+.deck--live { border-color: color-mix(in srgb, var(--rp-mint, #08F79B) 45%, transparent); }
+.deck-id { font-size: 11px; letter-spacing: .1em; color: var(--rp-muted, #B98AA0); }
+.deck-title { font-weight: 600; margin: 4px 0; font-size: 14px; }
+
+/* ── Logs viewer ── */
+.log-toolbar { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
+.log-filters { display: flex; gap: 10px; align-items: flex-end; margin: 12px 0; flex-wrap: wrap; }
+.log-filters .ss-field { min-width: 140px; }
+.log-filters .log-search { min-width: 180px; flex: 1 1 200px; }
+.log-filters .row { width: auto; margin: 0; padding: 0; gap: 8px; align-items: center; }
+.log-view { background: #060306; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 12px; height: calc(100vh - 300px); min-height: 260px; overflow-y: auto; font: 12px/1.55 'JetBrains Mono', ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+.log-line { color: #c9c9d0; }
+.log-line .lv-ERROR { color: var(--rp-base, #F70864); }
+.log-line .lv-WARN { color: var(--rp-amber, #FFB547); }
+.log-line .lv-INFO { color: #8fb8ff; }
+.log-line .lv-src { color: var(--rp-violet-soft, #C4A4FF); }
+
+/* ── Live: transport strip ── */
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin: 0 0 16px;
+  border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(255,255,255,.02); }
+.transport form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+.transport .field-input { padding: 7px 10px; }
+.tsep { width: 1px; align-self: stretch; background: rgba(255,255,255,.1); margin: 0 2px; }
+.tlabel { font-size: 10px; letter-spacing: .1em; color: var(--rp-muted, #B98AA0); font-weight: 700; }
+.tmono { font: 700 14px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-mint, #08F79B); }
+
+/* now-playing LCD */
+.lcd { background: #041008; border: 1px solid rgba(8,247,155,.18); border-radius: 12px; padding: 16px 18px; box-shadow: inset 0 0 24px rgba(0,0,0,.6); }
+.lcd-1 { font: 700 16px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-mint, #08F79B); letter-spacing: .02em; }
+.lcd-2 { font: 13px 'JetBrains Mono', ui-monospace, monospace; color: rgba(8,247,155,.8); margin-top: 6px; }
+
+/* status form rows */
+.st-row { display: grid; grid-template-columns: 140px 1fr; gap: 8px; padding: 5px 0; font-size: 14px; }
+.st-k { color: var(--rp-muted, #B98AA0); font-weight: 600; }
+
+/* decks */
+.decks-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .decks-grid { grid-template-columns: 1fr; } }
+.deckbig { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; background: rgba(255,255,255,.02); }
+.deckbig--live { border-color: color-mix(in srgb, var(--rp-mint, #08F79B) 40%, transparent); }
+.deckbig-id { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+.deckbig-t { font-size: 15px; }
+.deckbig-m { color: var(--rp-muted, #B98AA0); font-size: 12px; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+/* graphs (LCD wells) */
+.gwell { background: #050308; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px 12px; }
+.spark { width: 100%; height: 56px; display: block; margin: 6px 0; }
+.spark-grid { stroke: rgba(255,255,255,.07); stroke-width: 1; }
+.glegend { display: flex; flex-wrap: wrap; gap: 12px; font: 11px 'JetBrains Mono', ui-monospace, monospace; }
+.glegend span { white-space: nowrap; }
+
+/* bottom status strip */
+.livestrip { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  border-top: 1px solid rgba(255,255,255,.08); margin-top: 16px; padding-top: 12px;
+  font: 12px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0); }
+
+/* mobile-first: collapse the rail to a top strip on narrow viewports */
+@media (max-width: 640px) {
+  body { flex-direction: column; }
+  #nav { width: 100%; flex: none; height: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+  #nav .brand { flex-basis: 100%; }
+  #main { height: auto; padding: 16px; }
+}
+
+/* ══ Fyne-parity retheme - gunmetal surfaces, quiet metallic controls ══════════
+ * Matches internal/ui/theme.go: bg #16181d, surface #23262e, control #30343e,
+ * fg #e6e8ee, muted #a6abb6, border #3c414d. Token-level (loaded after ds/) so
+ * every var()-based rule follows. #nav .brand (rave·mate wordmark) untouched. */
+:root {
+  --rp-fg: #e6e8ee;
+  --rp-muted: #a6abb6;
+  --rp-faint: rgba(60, 65, 77, 0.55);
+  --rp-card: #23262e;
+  --rp-control: #30343e;
+  --rp-border: #3c414d;
+}
+body {
+  background: #16181d;
+  background-image: none;
+  color: var(--rp-fg);
+}
+#nav { background: rgba(255, 255, 255, 0.015); border-right-color: var(--rp-faint); }
+#main { background: transparent; }
+
+/* surfaces: raised metallic panels instead of translucent black */
+.rp-card {
+  background: var(--rp-card);
+  border-color: var(--rp-border);
+}
+.rp-card:hover { border-color: #4a505e; }
+.field-input {
+  background: var(--rp-control);
+  border-color: var(--rp-border);
+  color: var(--rp-fg);
+}
+.field-input:focus { box-shadow: 0 0 0 2px rgba(247, 8, 100, 0.22); }
+
+/* buttons: quiet brushed-metal fill, intent = text/border tint, no glow/motion */
+.rp-btn { height: 34px; border-radius: 8px; font-weight: 600; }
+.rp-btn--default,
+.rp-btn--primary,
+.rp-btn--cyan {
+  background: var(--rp-control);
+  color: var(--rp-fg);
+  border-color: var(--rp-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.rp-btn--default:hover,
+.rp-btn--primary:hover,
+.rp-btn--cyan:hover {
+  background: #3a3f4b;
+  border-color: var(--rp-base);
+  transform: none;
+}
+.rp-btn--go {
+  background: var(--rp-control);
+  color: var(--rp-mint);
+  border-color: rgba(8, 247, 155, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.rp-btn--go:hover {
+  background: #3a3f4b;
+  border-color: var(--rp-mint);
+  transform: none;
+}
+.rp-btn--outline { border-color: var(--rp-border); }
+.rp-btn--outline:hover { background: rgba(255, 255, 255, 0.04); border-color: #4a505e; }
+.rp-btn--secondary { background: var(--rp-control); border-color: var(--rp-border); }
+.rp-btn--secondary:hover { background: #3a3f4b; }
+
+/* slim futuristic scrollbars: 6px, floating metal thumb, brand shimmer on hover */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3c414d 0%, #2b2f38 100%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(247, 8, 100, 0.75) 0%, rgba(161, 19, 142, 0.6) 100%);
+}
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: #3c414d transparent; }
+
+/* ── tooltip primitive (tooltip.go) - hover/focus preview, click-to-pin ⓘ ──────
+ * Checkbox pin doubles as the ctl hook: `ctl set tt-<id> true` opens a card.
+ * Never place inside a live-ticked region (pin state is wiped each patch). */
+.tt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 6px;
+  cursor: help;
+  font-family: var(--font-body);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.tt-x { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.tt-ic {
+  width: 15px;
+  height: 15px;
+  color: var(--rp-muted);
+  opacity: 0.65;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+.tt:hover .tt-ic,
+.tt:focus-within .tt-ic { opacity: 1; color: var(--rp-fg); }
+.tt:has(.tt-x:checked) .tt-ic { opacity: 1; color: var(--rp-base); }
+.tt-card {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0; /* default; __ttplace (shell.go) clamps/flips so the card stays in-viewport */
+  z-index: 900;
+  width: max-content;
+  max-width: min(28rem, calc(100vw - 2rem));
+  /* transparent border = hover bridge across the visual gap */
+  border-top: 8px solid transparent;
+  background: transparent;
+  cursor: auto;
+  text-align: left;
+  white-space: normal;
+}
+.tt:hover .tt-card,
+.tt:focus-within .tt-card,
+.tt-x:checked ~ .tt-card { display: block; }
+/* visual panel - scrolls internally when taller than the viewport allows */
+.tt-in {
+  display: block;
+  background: #1b1e24;
+  border: 1px solid var(--rp-border);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px -14px rgba(0, 0, 0, 0.85);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tt-title,
+.tt-p,
+.tt-links { display: block; margin: 0 14px; }
+.tt-title {
+  font-family: var(--font-display, 'Orbitron', sans-serif);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--rp-fg);
+  padding: 12px 0 6px;
+}
+.tt-p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--rp-muted);
+  padding-bottom: 8px;
+}
+.tt-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--rp-faint);
+  padding: 8px 0 12px;
+}
+.tt-p:last-child { padding-bottom: 12px; }
+.tt-link {
+  font-size: 11.5px;
+  color: #A78BFA;
+  text-decoration: none;
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tt-link:hover { border-color: var(--rp-violet); background: rgba(124, 58, 237, 0.12); }
+/* edge-aware placement - __ttplace (shell.go) adds .ttp-up when there's more room
+ * above the anchor, and clamps left/max-height inline. Shared with .wchip cards. */
+.ttp-up .tt-card {
+  top: auto;
+  bottom: 100%;
+  border-top: 0;
+  border-bottom: 8px solid transparent; /* hover bridge moves below the card */
+}
+.ttp-up .wchip-card { top: auto; bottom: calc(100% + 6px); }

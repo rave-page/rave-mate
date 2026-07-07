@@ -1,0 +1,6 @@
+# The Ableton Link SDK (fetched Link + asio) is compiled by scripts/fetch-link.sh into the two
+# artifacts the cgo package needs (abl_link.h + libabl_link.a), which land under extensions/ and
+# lib/ here. None of it is committed (see SUPPLY_CHAIN.md). Keep only this file + the README.
+*
+!.gitignore
+!README.md

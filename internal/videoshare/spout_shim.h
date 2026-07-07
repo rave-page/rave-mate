@@ -1,0 +1,63 @@
+//go:build spout
+
+// Flat C API over the Spout SDK's COM-like SPOUTLIBRARY handle. Lets cgo (sender_spout.go)
+// drive Spout without touching C++ vtables. Implemented in spout_shim.cpp (compiled by g++).
+#ifndef RAVE_SPOUT_SHIM_H
+#define RAVE_SPOUT_SHIM_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Report whether SpoutLibrary.dll loaded at runtime (1) or is absent/missing GetSpout (0).
+// The DLL is LoadLibrary'd lazily (not import-linked), so a missing DLL is non-fatal.
+int rave_spout_available(void);
+
+// Create a Spout handle with its own OpenGL context for the CALLING thread.
+// Returns NULL if CreateOpenGL fails (e.g. no GPU/headless). Must be called on the
+// goroutine (LockOSThread'd) that will own all subsequent rave_spout_send calls.
+void* rave_spout_create(void);
+
+// Publish one upright RGBA frame to the named sender via the handle h.
+// pixels = tightly packed RGBA (w*h*4), GL_RGBA byte order. Returns 1 on success, 0 on failure.
+int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
+                    unsigned int w, unsigned int height, int flip);
+
+// Release the sender, close its OpenGL context, free the handle. Call on the owning thread.
+void rave_spout_release(void* h);
+
+// Test-only receiver helpers: spin up a throwaway handle just to query the global sender list.
+// No OpenGL context needed for the name registry.
+int rave_spout_sender_count(void);
+int rave_spout_find(const char* name);
+
+// Test-only orientation probe: send `in` to a throwaway sender (with the given bInvert), then
+// receive it back into `out` (no receiver flip). Lets a test see the orientation a receiver
+// gets. Returns 1 if a frame round-tripped. in/out are w*h*4 RGBA.
+int rave_spout_roundtrip(const unsigned char* in, unsigned char* out, unsigned int w, unsigned int h, int binvert);
+
+// Sender registry queries (throwaway handle, no GL): copy the idx-th sender name into out
+// (cap bytes, NUL-terminated; 1 on success) / a named sender's current dimensions.
+int rave_spout_sender_name(int idx, char* out, int cap);
+int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h);
+
+// Receiver: bind h (from rave_spout_create, on its owning thread) to the named sender.
+void rave_spout_set_receiver(void* h, const char* name);
+
+// Poll one frame into pixels (cap bytes, RGBA). Returns:
+//   2 = sender (re)connected / dimensions changed - *w/*hgt set, pixels NOT written; resize + recall
+//   1 = new frame copied into pixels (*w/*hgt set)
+//   0 = connected, no new frame
+//  -1 = no connection to the sender (yet)
+// Per the Spout SDK contract, a dimension change sets the update flag WITHOUT writing pixels,
+// so the caller reallocates before the next call. cap is a defensive double-check.
+int rave_spout_recv(void* h, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt);
+
+// Release the receiver binding + GL context + handle (owning thread).
+void rave_spout_recv_release(void* h);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // RAVE_SPOUT_SHIM_H

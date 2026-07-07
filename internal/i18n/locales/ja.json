@@ -1,0 +1,2790 @@
+{
+  "_meta": {
+    "name": "日本語"
+  },
+  "actions": {
+    "toast": {
+      "automationDeleted": "自動化を削除しました",
+      "connecting": "接続中…",
+      "goLiveFailed": "ライブ配信の開始に失敗しました: ",
+      "goingLive": "ライブ配信を開始中…",
+      "launchingGroup": "アプリグループを起動中…",
+      "publishingGithub": "GitHub に公開中…",
+      "setFinished": "セット終了",
+      "signInBeforeLive": "ライブ配信の前にサインインしてください（設定 ▸ アカウント）",
+      "startingReceive": "受信を開始中…",
+      "updatingVrcBio": "VRChat の自己紹介を更新中…",
+      "updatingVrcStatus": "VRChat のステータスを更新中…"
+    }
+  },
+  "appgroups": {
+    "admin": "管理者",
+    "empty": "アプリグループは未設定です",
+    "subtitle": "クラッシュ後に名前付きアプリ一式を再起動",
+    "unavailable": "アプリグループを利用できません",
+    "upCount": "{running}/{total} 起動中"
+  },
+  "automations": {
+    "emptyList": "オートメーションはまだありません",
+    "manual": "（手動）",
+    "noRuns": "実行履歴はまだありません",
+    "noSchedules": "スケジュールなし",
+    "recentRuns": "最近の実行",
+    "schedules": "スケジュール",
+    "subtitle": "メディアオートメーションエンジン",
+    "unavailable": "オートメーションを利用できません",
+    "unnamed": "（無名）"
+  },
+  "brand": {
+    "tagline": "Local worker & bridge for rave.page"
+  },
+  "common": {
+    "browse": "参照…",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "comingSoon": "近日公開",
+    "delete": "削除",
+    "disabled": "無効",
+    "enabled": "有効",
+    "enabledCap": "有効",
+    "launch": "起動",
+    "off": "オフ",
+    "refresh": "更新",
+    "remove": "削除",
+    "save": "保存",
+    "signIn": "サインイン",
+    "signOut": "サインアウト"
+  },
+  "editor": {
+    "align": "整列",
+    "alignCenter": "中央",
+    "alignLeft": "左",
+    "alignRight": "右",
+    "angle": "角度",
+    "blend": "ブレンド",
+    "canvasSize": "キャンバス {w}×{h}",
+    "color": "カラー",
+    "disabledHint": "メディアエディターは無効です - 設定 ▸ 機能 で有効にしてください。",
+    "docInfo": "{w} × {h} ドキュメント · {count} レイヤー",
+    "empty": {
+      "noTemplates": "テンプレートがありません。"
+    },
+    "end": "終点",
+    "exportPng": "PNG 書き出し",
+    "fill": "塗り",
+    "fitContain": "収める",
+    "fitCover": "覆う",
+    "fitStretch": "引き伸ばし",
+    "font": "フォント",
+    "gradient": "グラデーション",
+    "group": "グループ化",
+    "h": "高さ",
+    "image": "画像",
+    "imagePlaceholder": "画像",
+    "label": {
+      "apply": "適用",
+      "canvasSizeTitle": "キャンバスサイズ",
+      "component": "コンポーネント",
+      "height": "高さ",
+      "insert": "挿入",
+      "insertTemplateTitle": "テンプレート / コンポーネントを挿入",
+      "myComponent": "マイコンポーネント",
+      "preset": "プリセット",
+      "saveTemplateTitle": "テンプレートとして保存",
+      "savesSelectedGroup": "選択したグループを保存します。",
+      "savesWholeDoc": "ドキュメント全体を保存します。",
+      "width": "幅"
+    },
+    "letterSpacing": "字間",
+    "lineHeight": "行間",
+    "name": "名前",
+    "noLayerSelected": "レイヤーが選択されていません。",
+    "noLayers": "レイヤーがまだありません - ツールバーから追加してください。",
+    "opacity": "不透明度",
+    "path": "パス",
+    "placeholderHint": "{track.title} などのプレースホルダーは再生中の内容から自動で埋まります。レイヤーをクリックして選択してください。",
+    "placeholdersList": "プレースホルダー: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "redo": "やり直し",
+    "rotation": "回転",
+    "saveTemplate": "テンプレートとして保存…",
+    "scaleX": "スケール X",
+    "scaleY": "スケール Y",
+    "sectionInspector": "インスペクター",
+    "sectionLayers": "レイヤー",
+    "sectionPreview": "プレビュー",
+    "selectLayerHint": "レイヤーを選択して不透明度・ブレンド・プロパティを編集します。",
+    "selectedInfo": "· 選択中: {name}",
+    "size": "サイズ",
+    "solid": "単色",
+    "start": "始点",
+    "subtitle": "ライブオーバーレイを構成 - レイヤー・ブレンド・テンプレートを WYSIWYG プレビューで",
+    "subtitleDisabled": "ビジュアルオーバーレイコンポジター",
+    "templates": "テンプレート…",
+    "text": "テキスト",
+    "title": "エディター",
+    "toast": {
+      "cannotResolveExportDir": "エクスポート先フォルダを解決できません",
+      "enterTemplateName": "テンプレート名を入力してください",
+      "exportFailed": "エクスポートに失敗しました: ",
+      "exportedTo": "エクスポートしました: {path}",
+      "exportingPng": "PNG をエクスポート中…",
+      "invalidCanvasSize": "無効なキャンバスサイズ",
+      "saveFailed": "保存に失敗しました: ",
+      "templateSaved": "テンプレートを保存しました: "
+    },
+    "undo": "元に戻す",
+    "ungroup": "グループ解除",
+    "w": "幅",
+    "x": "X",
+    "y": "Y"
+  },
+  "help": {
+    "camera-paths": {
+      "body": "VRChat のゲーム内カメラはドリーパスを記録します。カメラが滑らかに飛行するキーフレームのシーケンス（位置、向き、速度、フォーカス）です。VRChat はこれらを JSON ファイルとして保存します。rave-mate はそれらを見つけ、記録されたワールドごとにグループ化し、バックアップ、整理、再読み込みができます。\n\nプレビューはパスを 3D で表示します。各ドットはキーフレーム、小さな紫色の線はカメラの向き、線の色は速度を示します（ミント = 遅い、ピンク = 速い）。琥珀色のマーカーは実際に記録された速度でパスを飛行します。\n\n「VRChat に読み込む」はファイルを OSC 経由で送信し、ゲーム内カメラにすぐ表示されます。VRChat で OSC を有効にする必要があります（アクションメニュー → オプション → OSC）。ループとパスの種類はファイルに保存されません。読み込み後に VRChat で一度設定してください。",
+      "title": "VRChat カメラパス"
+    },
+    "dual-alignment": {
+      "body": "1 つのセットが 2 回キャプチャされた場合、つまり配信音声（Icecast レシーバー）と OBS のビデオ録画の両方がある場合、2 つのファイルが同じ瞬間に始まることはほとんどありません。録画と配信を別々のタイミングで開始するため、同じビートが各ファイルで異なる位置に来ます。\n\nアライメントは両方の録音を聴くことでその時間オフセットを見つけます。各ファイルのラウドネスエンベロープ（エネルギーの上下、毎秒約 50 回）を ffmpeg で抽出し、2 つのエンベロープを相互相関させ、最も一致するまで互いにずらします。信頼度スコアは、最良の一致が他のすべての位置をどれだけ明確に上回ったかを示します。「高」は録音が明らかに同じ音声を共有していることを意味します。\n\nアライメント後、両方の波形が 1 つの共有タイムライン上に描画され、1 つの IN/OUT 範囲で両方のファイルを同じ実時間の瞬間でカットします。そのためエクスポートされた音声とビデオは内容も長さも同一になります。自動結果が誤っているように見える場合（例: ビデオの音声が強く加工されている場合）、オフセットを手動で微調整するか直接入力してください。手動値は自動アライメントを再実行するまで保持されます。",
+      "title": "音声 ⇆ ビデオ時間アライメント"
+    },
+    "embedded-video": {
+      "body": "ビデオはアプリ内、まさにここで再生されます。rave-mate はファイルをプライベートな localhost 接続経由で自身のウィンドウにストリーミングします（Range リクエスト付き HTTP のためシークは瞬時です。プレーヤーは必要なバイトだけを取得します）。何もマシンから出ず、別のプレーヤーウィンドウも開きません。\n\n下の波形はビデオの音声トラックで、音声録音とまったく同じように解析されます。数時間のビデオを音楽で辿れます。波形をクリックしてシークし、トラックのドロップダウンでトラックリストの項目にジャンプできます。セットに音声キャプチャとビデオ録画の両方がある場合、ビデオはミュートされた時間同期プレビューとして再生され、（通常はよりクリーンな）配信音声が流れます。AUDIO/VIDEO 切り替えでソースを切り替えます。\n\nデコードはアプリの Web エンジン（Chromium）を使用します。H.264/AAC MP4（OBS がデフォルトで録画する形式）と WebM/VP9 はネイティブに再生されます。特殊なコーデックやコンテナの場合は正直なエラーが表示されます。エンコードプリセットで Web 対応のカットをエクスポートするか、システムのプレーヤーでファイルを開いてください。",
+      "title": "埋め込みビデオ再生"
+    },
+    "fingerprinting": {
+      "body": "フィンガープリントは音声そのものから計算されるコンパクトな音響的シグネチャで、ファイル名やタグではありません。そのため、名前が変更されても、再エンコードされても、別のプレスであってもトラックを識別できます。\n\nrave-mate は Chromaprint（AcoustID の裏にあるフィンガープリンター）を使って、録音された各セグメントが実際にどのライブラリトラックなのかを検証します。これによりセット履歴の「一致 ✓」が信頼できるものになります。",
+      "title": "音声フィンガープリンティング"
+    },
+    "icecast": {
+      "body": "Icecast はオープンソースのストリーミングサーバーです。rave-mate は Icecast プロトコルを話す小さなローカルレシーバーを実行するので、Traktor の内蔵ブロードキャスト機能でセットをこのマシンのディスクに直接「ストリーミング」できます。インターネットは一切使いません。\n\nTraktor をここに表示されているポート、マウントパス、パスワードで 127.0.0.1 に向け、ブロードキャストを開始すると、すべてのセットがセッションレコーダーのトラックリストと時間連動した状態でセットフォルダに保存されます。公開タブから録音内の任意のトラックにジャンプできます。",
+      "title": "Icecast によるセットキャプチャ"
+    },
+    "motion-studio": {
+      "body": "ヘッドセットから記録した VR モーションテイク（頭 + コントローラー + 任意のフルボディトラッカー、手首メニューからキャプチャ）を再生します。プレビューは頭の移動を紫色の軌跡としてスケルトンを 3D で表示します。\n\n2 つのライブ出力: VMC はテイクを生のトラッキングデバイスとして VTuber レンダラー（VSeeFace、Warudo、VNyan）にストリーミングし、そこで IK を処理してアバターをアニメーション化します。これが本来の再生パスです。OSC トラッカーは VRChat のフルボディトラッキングに送りますが、VRChat は常にライブの HMD とコントローラーから頭と手を駆動するため、記録したテイクで VRChat のアバターを操ることはできません。そのためには Unity の .anim をエクスポートし、アバターの Animator から駆動してください。\n\nここでインポートしたアバター（.vrm）は、ペアリングされた rave-mate インスタンスに自動的にレプリケートされます。",
+      "title": "モーションスタジオ"
+    },
+    "network-graph": {
+      "body": "過去 2 分間の送受信レートをライブ表示します。\n\nPEER はペアリングされた他の rave-mate マシンへの暗号化された LAN リンク（ライブラリ同期、リモート制御、メディアルート）です。API は rave.page 本体へのトラフィック（ライブセット取り込み、アップロード、アートワーク）です。SESSION の合計はアプリ起動以降のすべてを数えます。\n\nライブセット中のスパイクは正常です。確定した各トラックが now-playing 更新をプッシュし、セットキャプチャは継続的にストリーミングします。",
+      "title": "ネットワークスループット"
+    },
+    "perf-graph": {
+      "body": "過去 2 分間の CPU（上）と RAM（下）です。APP は rave-mate 単体（ワーカーのサブプロセスを含む）、SYS はマシン全体です。\n\nrave-mate は重い処理（トランスコード、フィンガープリンティング、メディアルート）を、バッファを制限した監視下の子プロセスに保持します。そのため SYS が上昇する一方で APP が横ばいなら、負荷は別のプログラムです。APP 自体が上昇して高止まりする場合は、ログタブを確認し、設定で未使用の機能を無効化することを検討してください。無効化された機能はポート、ゴルーチン、サブプロセスを一切持ちません。",
+      "title": "システムパフォーマンス"
+    },
+    "session-recorder": {
+      "body": "デッキを監視し、実際に再生した内容のトラックリストをトラックごとのタイムスタンプ付きで書き出します。\n\nトラックは確定しきい値の間再生されて初めてカウントされます。短いプレビュー、タグ確認、フライングは除外されます。結果は公開タブのセット履歴になり、各項目はキャプチャした音声、OBS 録画、フィンガープリントで検証されたトラック識別にリンクできます。",
+      "title": "セッションレコーダー"
+    },
+    "timing-graph": {
+      "body": "過去 2 分間の、LAN 上でペアリングされた各マシンへのラウンドトリップ時間（ミリ秒）です。\n\nRTT はメッセージがピアに届いて戻ってくるまでの時間です。有線 LAN では一桁が一般的で、Wi-Fi はそれより高く、揺らぎます。持続的なスパイクは通常、混雑したネットワークかスリープに入るマシンを意味します。リモート制御とメディアルートが真っ先に影響を受けます。",
+      "title": "ピアレイテンシ（RTT）"
+    },
+    "trim-editor": {
+      "body": "元ファイルに触れずに録音の無音部分を切り落とします。IN と OUT のポイントを選び、残した範囲を新しいファイルとしてエクスポートします。ソースは一切変更されません。\n\n範囲は波形の上端（IN）/ 下端（OUT）をドラッグするか、正確な時間を入力するか、再生ヘッド位置で Set IN / Set OUT で設定します。自動トリムメニューが代わりに設定します。トラックリスト境界はセッションレコーダーの最初のトラック開始と最後のトラック終了にスナップします。音楽終了検出は先頭と末尾に ffmpeg の無音検出を実行します。最後のフェーダーダウンは、セット終了時にフェーダーを引いた正確な瞬間を使います。\n\nエクスポート: 「ロスレス再多重化」は瞬時です。再エンコードせずにストリームをコピーしますが、カットは最寄りのキーフレームにスナップします（ビデオのカットは最大で数秒早く始まることがあります）。フレーム単位で正確なカットには実際のエンコードプリセットを選んでください。再エンコードのコストがかかります。アライメント済みの音声 + ビデオのペアには「両方（アライメント済み）」が、2 つのファイルを同じ実時間の瞬間でカットするので、内容が同一のものが出力されます。",
+      "title": "トリムエディタ"
+    },
+    "vrchat-announcement": {
+      "body": "VRChat グループにはピン留めされたお知らせ 1 件と投稿のフィードがあります。新しいお知らせを投稿すると現在のものが置き換えられます。投稿はフィードとして積み重なり、個別に削除できます。\n\nどちらも group-announcement-manage 権限が必要です。グループオーナーは常に持っており、他のメンバーはロールを通じて取得します。「通知を送信」はメンバーの VRChat 通知にプッシュするので、控えめに使ってください。",
+      "title": "お知らせ vs. 投稿"
+    },
+    "vrchat-presence": {
+      "body": "ステータスはゲーム内でのあなたの見え方を制御します。join me はフレンドがあなたのインスタンスに直接参加できます。active は日常のデフォルトです。ask me は位置を隠すのでリクエストが必要になります。busy は招待と通知を完全に抑制します。\n\nステータスメッセージ（32 文字）はメニューで名前の下に表示され、今夜のセットを宣伝するのに便利です。ここでの変更は実際の VRChat アカウントに即座に反映されます。",
+      "title": "VRChat プレゼンス"
+    },
+    "wave-nav": {
+      "body": "波形はシーク面です。どこでもクリックしてジャンプし、マウスホイールでカーソル周辺をズーム（最大 50×）し、ズーム中はドラッグでパンします。+ / − / フィットはボタンで同じことをします。紫色の線はセッションのトラックリストからのトラック開始、琥珀色は最後のフェーダーダウン、ライブラリトラック上の色付きの線はあなたの DJ キューポイントです。\n\n波形に重なる 2 つのチップが操作しながら教えてくれます。左は元のエンコード（ホバーでコーデック、サンプルレート、ビットレート、ファイルサイズ）、右はトラックの統合ラウドネス（ホバーで EBU R128 の全容。統合 vs 瞬間、ストリーミングのターゲット、トゥルーピーク）を表示します。ズームボタンの隣の表示はカーソルに追従し、その正確な位置の時間と瞬間ラウドネスを示します。\n\n編集モードではストリップに 3 つのポインターレーンが追加されます。上端は IN ハンドルをドラッグ、下端は OUT をドラッグ、中央はクリックでシークのままです。波形を離れることなく試聴とトリムができます。",
+      "title": "波形ナビゲーション"
+    }
+  },
+  "library": {
+    "addToPlaylist": "プレイリストに追加…",
+    "audioCap": {
+      "default": "AAC/MP3 最大 320k",
+      "opus": "Opus 最大 510k"
+    },
+    "batch": {
+      "fingerprint": "フィンガープリント",
+      "tags": "タグ",
+      "transcode": "トランスコード…",
+      "waveforms": "波形"
+    },
+    "browse": {
+      "cannotRead": "{path} を読み取れません",
+      "desktop": "デスクトップ",
+      "downloads": "ダウンロード",
+      "filterName": "名前で絞り込み…",
+      "folder": "フォルダー",
+      "goto": "移動…",
+      "grid": "グリッド",
+      "home": "ホーム",
+      "list": "リスト",
+      "music": "ミュージック",
+      "pictures": "ピクチャ",
+      "pin": "フォルダーをピン留め",
+      "unpin": "フォルダーのピンを外す",
+      "up": "↑ 上へ",
+      "videos": "ビデオ"
+    },
+    "clear": "クリア",
+    "col": {
+      "bpm": "BPM",
+      "key": "KEY",
+      "time": "TIME"
+    },
+    "coll": {
+      "backup": "バックアップ",
+      "cleanup": "クリーンアップ",
+      "desc": "Traktor / Rekordbox / VirtualDJ からの読み取り専用インポート（キューとビートグリッドを保持）。行にチェックしてプレイリストに追加します。",
+      "empty": "トラックがありません - ライブラリをインポートしてください",
+      "export": "書き出し / 変換…",
+      "import": "インポート / 更新",
+      "relocate": "再リンク…",
+      "scan": "欠落をスキャン",
+      "search": "タイトル / アーティストを検索…",
+      "sync": "クラウド同期…",
+      "trackHeader": "トラック ({count})"
+    },
+    "collsort": {
+      "artist": "アーティスト",
+      "bpm": "BPM",
+      "genre": "ジャンル",
+      "key": "キー",
+      "label": "レーベル",
+      "plays": "再生数",
+      "rating": "レーティング",
+      "title": "タイトル"
+    },
+    "confirm": {
+      "deleteFile": "{name} をディスクから削除しますか？ この操作は元に戻せません。",
+      "deletePlaylist": "このプレイリストを削除しますか？ トラックはコレクションに残ります。",
+      "moveTo": "{name} の移動先:"
+    },
+    "copyPath": "パスをコピー",
+    "crf": {
+      "av1": "28～35 が目安",
+      "default": "18 視覚的ロスレス · 23 標準 · 28 小容量",
+      "vp9": "31～36 が目安"
+    },
+    "dbUnavailable": "ライブラリ DB を利用できません",
+    "duplicate": "複製",
+    "edit": "編集",
+    "enc": {
+      "accel": "ハードウェアアクセラレーション",
+      "audioBitrate": "オーディオビットレート (kbps)",
+      "audioCodec": "オーディオコーデック",
+      "bitrateK": "ビットレート (kbps)",
+      "bitrateKHint": "目標ビデオビットレート",
+      "channels": "チャンネル",
+      "container": "コンテナ",
+      "crf": "CRF / CQ",
+      "fps": "fps",
+      "lufsHint": "−14 ストリーミング · −23 EBU R128",
+      "lufsTarget": "統合ターゲット (LUFS)",
+      "mono": "モノラル",
+      "normalize": "ラウドネスをノーマライズ",
+      "preset": "プリセット",
+      "qualityProfile": "画質プロファイル",
+      "raiseQuiet": "音量の小さいトラックのみ引き上げ",
+      "rateBitrate": "目標ビットレート",
+      "rateCRF": "画質 (CRF/CQ)",
+      "rateMode": "レートモード",
+      "resolution": "解像度",
+      "sampleRate": "サンプルレート",
+      "saveAsNew": "新規として保存…",
+      "savePreset": "プリセットを保存",
+      "source": "ソース",
+      "start": "トランスコード開始",
+      "stereo": "ステレオ",
+      "trimEnd": "終端をトリム (秒)",
+      "trimStart": "先頭をトリム (秒)",
+      "truePeak": "トゥルーピーク上限 (dBTP)",
+      "videoCodec": "ビデオコーデック"
+    },
+    "favorites": {
+      "desc": "ピン留めしたフォルダー - 参照で開きます。現在のフォルダーは参照ツールバーからピン留めできます。",
+      "empty": "ピン留めしたフォルダーはまだありません",
+      "unpin": "ピンを外す"
+    },
+    "harmonic": {
+      "clear": "キーフィルターをクリア",
+      "desc": "Camelot ホイール - 相性の良いキーが光ります。キーをタップしてコレクションを絞り込みます。",
+      "show": "ハーモニックトラックを表示"
+    },
+    "hints": {
+      "abitrate": "目標オーディオビットレート {target} kbps はソースの {source} kbps より高くなっています。",
+      "alreadyCodec": "ソースはすでに {codec} です - ロスレスリマックスプリセットは画質を保ちコンテナのみ変更します。",
+      "probing": "ストリームを解析中…",
+      "source": "ソース: {detail}",
+      "upsample": "オーディオを {source} → {target} Hz にアップサンプリングしても画質は向上しません。",
+      "upscale": "{sw}×{sh} → {dw}×{dh} にアップスケールしても画質は向上しません。",
+      "vbitrate": "目標ビデオビットレート {target} kbps はソースの {source} kbps より高くなっています。"
+    },
+    "hist": {
+      "desc": "Traktor + Rekordbox の DJ セット履歴を新しい順に表示。",
+      "empty": "履歴が読み込まれていません",
+      "load": "DJ 履歴を読み込む"
+    },
+    "idmarks": {
+      "desc": "マークしたトラック/フォルダーはすべての出力で「ID」のみ表示します - 未リリースの ID を隠します。切り替えで各エントリのアーティスト/レーベルを表示。",
+      "empty": "ID マークなし",
+      "markFile": "ファイルをマーク…",
+      "markFolder": "フォルダーをマーク…",
+      "showArtist": "アーティストを表示",
+      "showLabel": "レーベルを表示",
+      "typePath": "パスを入力…",
+      "unavailable": "ID マークを利用できません"
+    },
+    "insp": {
+      "actions": "アクション",
+      "details": "詳細",
+      "empty": "ファイルまたはトラックを選択すると詳細とアクションが表示されます",
+      "encoding": "エンコード / トランスコード",
+      "harmonic": "ハーモニックキー",
+      "missing": "○ ディスク上にファイルがありません",
+      "notInPlaylist": "どのプレイリストにも含まれていません",
+      "player": "プレーヤー",
+      "playlists": "プレイリスト",
+      "selected": "選択中",
+      "tags": "タグ",
+      "tagsDesc": "DJ 解析結果 (BPM/キー/ジャンル) をファイルタグに書き込みます。取り消し可能。",
+      "writeTags": "タグを書き込む → ファイル"
+    },
+    "item": {
+      "few": "{count} 個",
+      "many": "{count} 個",
+      "one": "{count} 個",
+      "other": "{count} 個"
+    },
+    "keyChipN": "キー ({count})",
+    "kind": {
+      "all": "すべて",
+      "audio": "オーディオ",
+      "image": "画像",
+      "other": "その他",
+      "video": "ビデオ"
+    },
+    "kw": {
+      "relative": "相対",
+      "same": "同一"
+    },
+    "label": {
+      "allSources": "すべてのソース",
+      "audioKbps": "音声 kbps",
+      "backupClean": "バックアップ + クリーンアップ",
+      "create": "作成",
+      "createAdd": "作成 + 追加",
+      "crf": "CRF",
+      "csvBackup": "CSV メタデータバックアップ",
+      "deleteEllipsis": "削除…",
+      "description": "説明",
+      "destFolder": "保存先フォルダ",
+      "export": "エクスポート",
+      "filesCount": {
+        "few": "{count} ファイル",
+        "many": "{count} ファイル",
+        "one": "{count} ファイル",
+        "other": "{count} ファイル"
+      },
+      "format": "フォーマット",
+      "fullPath": "フルパス",
+      "genre": "ジャンル",
+      "id": "ID",
+      "import": "インポート",
+      "importFile": "ファイルをインポート",
+      "importFromFile": "ファイルからインポート",
+      "importRekordboxAuto": "Rekordbox（自動検出）",
+      "importTraktorAuto": "Traktor（自動検出）",
+      "kind": "種類",
+      "label": "レーベル",
+      "localPlaylists": "ローカルプレイリスト",
+      "m3uPlaylist": "M3U プレイリスト",
+      "mark": "マーク",
+      "markAsID": "ID としてマーク",
+      "markPathHint": "「ID」としてマークするトラックまたはフォルダのパス",
+      "mergeHistory": "検出したすべての履歴を統合",
+      "move": "移動",
+      "moveEllipsis": "移動…",
+      "newID": "新しい ID",
+      "newName": "新しい名前",
+      "newPlaylistName": "新しいプレイリスト名",
+      "orCreateManual": "または新しい手動プレイリストを作成",
+      "played": "再生日時",
+      "pull": "プル",
+      "push": "プッシュ",
+      "rekordboxXML": "Rekordbox XML",
+      "remoteOnly": "リモートのみ",
+      "renameEllipsis": "名前を変更…",
+      "saveAs": "名前を付けて保存…",
+      "saveAsNew": "新規として保存",
+      "sort": "並び替え",
+      "syncCounts": "{status} · ローカル {local} / リモート {remote}",
+      "trackCount": {
+        "few": "{count} トラック",
+        "many": "{count} トラック",
+        "one": "{count} トラック",
+        "other": "{count} トラック"
+      },
+      "traktorNML": "Traktor NML",
+      "unmarkID": "ID マークを解除",
+      "view": "表示",
+      "virtualdjXML": "VirtualDJ database.xml",
+      "xmlPath": ".xml ファイルへのフルパス"
+    },
+    "meta": {
+      "album": "アルバム",
+      "artist": "アーティスト",
+      "beatgrid": "ビートグリッド",
+      "bitrate": "ビットレート",
+      "bpm": "BPM",
+      "cues": "キュー",
+      "duration": "再生時間",
+      "genre": "ジャンル",
+      "kbps": "{count} kbps",
+      "key": "キー",
+      "label": "レーベル",
+      "markers": "{count} マーカー",
+      "path": "パス",
+      "plays": "再生数",
+      "rating": "レーティング"
+    },
+    "metadata": "メタデータ",
+    "modal": {
+      "addToPlaylist": "プレイリストに追加",
+      "batchTranscode": "一括トランスコード",
+      "batchTranscodeDesc": "選択したすべてのファイルをプリセットでトランスコードします。",
+      "choosePlaylist": {
+        "few": "{count} トラック。プレイリストを選択:",
+        "many": "{count} トラック。プレイリストを選択:",
+        "one": "{count} トラック。プレイリストを選択:",
+        "other": "{count} トラック。プレイリストを選択:"
+      },
+      "cleanupCollection": "コレクションをクリーンアップ",
+      "cleanupDesc": "ディスク上にファイルが存在しなくなったコレクショントラック（およびそのプレイリスト参照）を削除します。先に完全バックアップを取得し、元の collection.nml も整理されます。",
+      "cloudSync": "クラウド同期",
+      "deleteFile": "ファイルを削除",
+      "deletePlaylist": "プレイリストを削除",
+      "exportConvert": "エクスポート / 変換",
+      "exportDesc": "インポートしたライブラリを別の DJ フォーマットに変換します。新しいファイルを書き出し、ソースは変更しません。エクスポート = アプリデータフォルダ · 名前を付けて保存… = 場所を選択。",
+      "importDesc": "DJ ライブラリを読み取り専用でインポートします。キュー + ビートグリッドは保持されます。",
+      "importLibrary": "ライブラリをインポート",
+      "moveToFolder": "フォルダに移動",
+      "preset": "プリセット",
+      "renamePlaylist": "プレイリスト名を変更",
+      "savePresetAs": "プリセットに名前を付けて保存"
+    },
+    "open": "開く",
+    "pl": {
+      "cloudStatus": "クラウドステータス",
+      "dupManual": "手動として複製",
+      "editRules": "ルールを編集",
+      "empty": "プレイリストはまだありません",
+      "emptyTracks": "空のプレイリスト",
+      "exportM3U": "M3U を書き出し",
+      "exportM3UAs": "M3U を書き出し…",
+      "new": "新規プレイリスト",
+      "newSmart": "新規スマートプレイリスト",
+      "pull": "取得 ← クラウド",
+      "push": "送信 → クラウド",
+      "remote": "リモートプレイリスト…",
+      "rename": "名前を変更",
+      "smartMatchLive": "⚡ スマート · {desc} · {count} 件一致（ライブ）",
+      "smartSub": "スマート · {count} 件一致 · {desc}",
+      "syncAll": "すべて同期",
+      "unlink": "リンク解除"
+    },
+    "playsort": {
+      "artist": "アーティスト",
+      "bpm": "BPM",
+      "genre": "ジャンル",
+      "key": "キー",
+      "playorder": "再生順",
+      "plays": "再生数",
+      "rating": "レーティング",
+      "title": "タイトル"
+    },
+    "preset": {
+      "builtin": "内蔵",
+      "builtins": "内蔵プリセット",
+      "custom": "カスタム",
+      "dupEdit": "複製 + 編集",
+      "emptyCustom": "カスタムプリセットがありません - 内蔵を調整して新規保存してください",
+      "new": "新規プリセット",
+      "yours": "自分のプリセット"
+    },
+    "profile": {
+      "default": "プロファイルを選ぶと、コーデック × 解像度 × fps からビットレートを自動入力します。",
+      "master": "ソースに近い画質、大容量ファイル（ストリーミングの約 3 倍）。",
+      "matchsource": "計測したソースビットレートを目標に使用します。",
+      "mobile": "軽量ビットレート、3G/4G 再生に適しています。",
+      "streaming": "コンパクトなアップロード - YouTube 目標の約 80%。",
+      "youtubehq": "解像度 + fps ごとの YouTube 推奨ビットレート。"
+    },
+    "queue": {
+      "desc": "トランスコードジョブ - 出力 → 各ソースの隣に新しい「rave-mate-transcoded」フォルダーを作成。オリジナルはそのまま。",
+      "empty": "ジョブなし"
+    },
+    "reloc": {
+      "apply": "適用 → バックアップ + 修正済みコレクションを書き込み",
+      "confAmbiguous": "曖昧",
+      "confSize": "サイズ一致",
+      "confUnique": "一意",
+      "desc": "移動したファイルを探し、修正済みコレクションを新しいファイルに書き込みます。collection.nml は決して変更されず、先にバックアップを取得します。",
+      "find": "候補を検索",
+      "missing": "{count} 個のファイルが見つかりません。",
+      "rootPlaceholder": "検索するフォルダー（例: D:\\Music）",
+      "showing": "{total} 件中最初の 200 件を表示",
+      "title": "欠落ファイルを再リンク",
+      "working": "処理中…"
+    },
+    "remove": "削除",
+    "reveal": "表示",
+    "revert": "元に戻す",
+    "section": {
+      "browse": "参照",
+      "collection": "コレクション",
+      "favorites": "お気に入り",
+      "history": "履歴",
+      "idmarks": "ID マーク",
+      "playlists": "プレイリスト",
+      "presets": "プリセット",
+      "queue": "キュー"
+    },
+    "selectedCount": "{count} 件選択中",
+    "showingFirst": "{total} 件中最初の {shown} 件を表示",
+    "sort": {
+      "modified": "更新日時",
+      "name": "名前",
+      "size": "サイズ"
+    },
+    "sortAsc": "↑ 昇順",
+    "sortDesc": "↓ 降順",
+    "sr": {
+      "bpmMax": "BPM 最大",
+      "bpmMin": "BPM 最小",
+      "countText": "{total} 件中 {count} 件のトラックが一致 - {desc}",
+      "create": "スマートプレイリストを作成",
+      "desc": "ルールは AND で結合、ジャンルは OR。コレクションの変更に応じて一致がライブ更新されます。",
+      "feel": "フィールプリセット",
+      "feelPlaceholder": "フィールプリセット…",
+      "genres": "ジャンル",
+      "keyContains": "キーに含む",
+      "keyHint": "例: Am または 8A",
+      "name": "名前",
+      "plays": "再生数 ≥",
+      "rateAny": "指定なし",
+      "rating": "レーティング",
+      "search": "検索",
+      "searchHint": "タイトル / アーティスト / アルバム / レーベル / コメント",
+      "titleEdit": "スマートプレイリストを編集",
+      "titleNew": "新規スマートプレイリスト"
+    },
+    "toast": {
+      "addFailed": "追加に失敗しました: ",
+      "addedTracks": {
+        "few": "{count} トラックを追加しました",
+        "many": "{count} トラックを追加しました",
+        "one": "{count} トラックを追加しました",
+        "other": "{count} トラックを追加しました"
+      },
+      "backedUpTo": "バックアップ先: ",
+      "backingUp": "コレクションをバックアップ中…",
+      "backingUpCleaning": "バックアップ + クリーンアップ中…",
+      "backingUpWriting": "バックアップ + 書き込み中…",
+      "backupFailed": "バックアップに失敗しました: ",
+      "batchDone": "{kind} 完了",
+      "cleanedUp": "クリーンアップしました: {tracks} トラック、{entries} プレイリスト項目、{playlists} 個の空プレイリスト（バックアップ → {backup}）",
+      "cleanupFailed": "クリーンアップに失敗しました（中止）: ",
+      "cloudUnavailable": "クラウド同期を利用できません",
+      "configUnavailable": "設定を利用できません",
+      "createFailed": "作成に失敗しました: ",
+      "createPrefix": "作成: ",
+      "createdName": "作成しました ",
+      "deleteFailed": "削除に失敗しました: ",
+      "deleted": "削除しました",
+      "deletedPlaylist": "プレイリストを削除しました",
+      "duplicateFailed": "複製に失敗しました: ",
+      "duplicatedManual": "手動として複製しました",
+      "enterFilePath": "ファイルパスを入力してください",
+      "enterFolder": "検索するフォルダを入力してください",
+      "enterName": "名前を入力してください",
+      "exportFailed": "エクスポートに失敗しました: ",
+      "exportedArrow": "エクスポートしました → ",
+      "exportedTo": "エクスポート先: ",
+      "fetchingCloud": "クラウドステータスを取得中…",
+      "filesMissing": "{total} 件中 {missing} 件のファイルがディスク上にありません",
+      "findFirst": "先に候補を検索してください",
+      "idMarkRemoved": "ID マークを解除しました",
+      "importFirst": "先にライブラリをインポートしてください",
+      "importPrefix": "インポート: ",
+      "importedRekordbox": {
+        "few": "{count} トラックをインポートしました（Rekordbox）",
+        "many": "{count} トラックをインポートしました（Rekordbox）",
+        "one": "{count} トラックをインポートしました（Rekordbox）",
+        "other": "{count} トラックをインポートしました（Rekordbox）"
+      },
+      "importedRemote": "リモートプレイリストをインポートしました",
+      "importedTracks": {
+        "few": "{count} トラックをインポートしました",
+        "many": "{count} トラックをインポートしました",
+        "one": "{count} トラックをインポートしました",
+        "other": "{count} トラックをインポートしました"
+      },
+      "importedTraktor": {
+        "few": "{count} トラックをインポートしました（Traktor）",
+        "many": "{count} トラックをインポートしました（Traktor）",
+        "one": "{count} トラックをインポートしました（Traktor）",
+        "other": "{count} トラックをインポートしました（Traktor）"
+      },
+      "importingRekordbox": "Rekordbox ライブラリをインポート中…",
+      "importingTraktor": "Traktor ライブラリをインポート中…",
+      "indexError": "インデックスエラー: ",
+      "indexing": "インデックス作成中…",
+      "loadedSets": {
+        "few": "{count} セットを読み込みました",
+        "many": "{count} セットを読み込みました",
+        "one": "{count} セットを読み込みました",
+        "other": "{count} セットを読み込みました"
+      },
+      "loadingHistory": "DJ 履歴を読み込み中…",
+      "markedAsID": "ID としてマークしました",
+      "moveFailed": "移動に失敗しました: ",
+      "moved": "移動しました",
+      "noHistory": "DJ 履歴が見つかりません",
+      "noMissing": "不足しているファイルはありません。",
+      "noRekordboxXML": "エクスポートされた Rekordbox XML が見つかりません（File → Export Collection in xml）",
+      "noTraktorBackup": "バックアップする Traktor コレクションがありません",
+      "noTraktorCollection": "Traktor コレクションが見つかりません",
+      "openPrefix": "開く: ",
+      "overviewPrefix": "概要: ",
+      "parsePrefix": "解析: ",
+      "presetDeleted": "プリセットを削除しました",
+      "presetDuplicated": "プリセットを複製しました",
+      "presetSaved": "プリセットを保存しました",
+      "presetSavedName": "プリセットを保存しました: ",
+      "probeOk": "プローブ OK（{n} バイト）- ffprobe が存在します",
+      "probePrefix": "プローブ: ",
+      "queuedTranscodes": {
+        "few": "{count} 件のトランスコードをキューに追加しました",
+        "many": "{count} 件のトランスコードをキューに追加しました",
+        "one": "{count} 件のトランスコードをキューに追加しました",
+        "other": "{count} 件のトランスコードをキューに追加しました"
+      },
+      "rekordboxHistory": "Rekordbox 履歴: ",
+      "relocBackupFailed": "バックアップに失敗しました（中止）: ",
+      "relocFixed": "{n} → {out} を修正しました（collection.nml は変更なし）。DB を更新するには再インポートしてください。",
+      "relocFound": "{total} 件中 {found} 件を発見。適用するとバックアップ後に新しいコレクションを書き込みます。元は変更されません。",
+      "relocNoTraktor": "Traktor コレクションが見つかりません。再配置は collection.nml を書き換えます。",
+      "relocatedFiles": {
+        "few": "{count} ファイルを再配置しました → {out}",
+        "many": "{count} ファイルを再配置しました → {out}",
+        "one": "{count} ファイルを再配置しました → {out}",
+        "other": "{count} ファイルを再配置しました → {out}"
+      },
+      "renameFailed": "名前の変更に失敗しました: ",
+      "renamed": "名前を変更しました",
+      "revertPrefix": "元に戻す: ",
+      "saveFailed": "保存に失敗しました: ",
+      "savedRules": "ルールを保存しました",
+      "scanningMissing": "不足ファイルをスキャン中…",
+      "smartNeedsName": "スマートプレイリストには名前が必要です",
+      "syncOk": "同期 OK",
+      "syncPrefix": "同期: ",
+      "tagsReverted": "タグを元に戻しました",
+      "tagsUnsupported": "このファイル形式ではタグの書き込みはサポートされていません",
+      "tagsWritten": "タグを書き込みました → ファイル",
+      "traktorHistory": "Traktor 履歴: ",
+      "transcodeFailed": "トランスコードに失敗しました: ",
+      "transcodeQueued": "トランスコードをキューに追加しました",
+      "transcodeWorkerUnavailable": "トランスコードワーカーを利用できません",
+      "transcodedTo": "トランスコードしました → ",
+      "workerUnavailable": "ワーカーを利用できません",
+      "writeTagsHint": "タグの書き込み: コレクショントラックを開き、その Tags パネルを使用してください",
+      "writeTagsPrefix": "タグを書き込み: ",
+      "wroteThenError": "{n} を書き込んだ後にエラー: {err}"
+    },
+    "remote": {
+      "up": "上へ",
+      "refresh": "更新",
+      "empty": "このフォルダーは空です",
+      "error": "エラー: {msg}",
+      "items": "{n} 件",
+      "selectHint": "ファイルまたはトラックを選択すると、詳細と操作が表示されます。",
+      "browse": {
+        "actions": "操作",
+        "copyPath": "パスをコピー",
+        "localOnly": "ファイル操作はペア接続されたインスタンス上で実行されます。パスをコピーしてそちらで参照してください。",
+        "preset": "プリセット",
+        "transcode": "トランスコード",
+        "transcodeHelp": "トランスコードはペア接続されたインスタンス上で実行され、出力はそちらのソースの隣に生成されます。",
+        "details": "詳細"
+      },
+      "field": {
+        "path": "パス",
+        "size": "サイズ",
+        "kind": "種類",
+        "modified": "更新日時",
+        "album": "アルバム",
+        "genre": "ジャンル",
+        "bpm": "BPM",
+        "key": "キー",
+        "label": "レーベル"
+      },
+      "col": {
+        "loading": "コレクションを読み込み中…",
+        "noSource": "ペア接続されたインスタンスに DJ ライブラリがありません。",
+        "summary": "{app} {version} · {total} トラック",
+        "search": "コレクションを検索…",
+        "page": "{total} 件中 {from}-{to}",
+        "serverOrder": "並び順はペア接続されたインスタンスのライブラリに従います。",
+        "details": "詳細",
+        "tagsTitle": "タグ",
+        "tagsHelp": "ライブラリのタグをペア接続されたインスタンス上のファイルに書き込むか、ファイル自身のタグに戻します。",
+        "write": "タグを書き込む",
+        "revert": "タグを戻す"
+      },
+      "degrade": {
+        "title": "{section} - ペア接続されたインスタンスでは利用できません",
+        "favorites": "ピン留めフォルダーはコンピューターごとに保存されます。ペア接続されたインスタンスのフォルダーのピン留めはまだ対応していません - 参照タブの ホーム / ミュージック からそのドライブを参照してください。",
+        "playlists": "プレイリストはペア接続されたインスタンス自身のライブラリにあり、まだリモート編集できません。そのコンピューターで管理してください。ここのコレクションタブでは引き続きトラックの参照とタグ付けが可能です。",
+        "history": "再生セットの履歴はペア接続されたインスタンスのライブラリに保存され、まだリモートには配信されません。",
+        "idmarks": "ID マークはコンピューター自身の出力（オーバーレイ、ストリーム、now-playing、レコーダー）を秘匿します。各インスタンスは独自のリストを保持します - ペア接続されたインスタンスのマークはそのコンピューターで管理してください（ライブラリ → ID マーク）。",
+        "queue": "ここで開始したトランスコードはペア接続されたインスタンス上で実行され、その場で完了します（ソースの隣に 'rave-mate-transcoded' フォルダー）。ライブのリモートジョブキューはまだ配信されません。",
+        "presets": "エンコードプリセットはこのコンピューターで管理します（操作対象を 'このコンピューター' → プリセット に切り替え）。ペア接続されたインスタンスでトランスコードを開始すると適用されます。"
+      },
+      "toast": {
+        "copied": "パスをコピーしました",
+        "pickPreset": "先にプリセットを選択してください",
+        "transcoding": "ペア接続されたインスタンスで {name} をトランスコード中…",
+        "transcodeFail": "トランスコードに失敗しました: {err}",
+        "transcodeDone": "トランスコード完了 → {out}",
+        "tagsFail": "タグの書き込みに失敗しました: {err}",
+        "tagsNone": "書き込むタグがありません",
+        "tagsWrote": "{n} 件のファイルにタグを書き込みました",
+        "revertFail": "タグの復元に失敗しました: {err}",
+        "reverted": "タグを戻しました"
+      }
+    }
+  },
+  "live": {
+    "ablelink": {
+      "backend": "Ableton Link",
+      "disabled": "無効",
+      "enabled": "有効",
+      "phraseBeat": "拍 {beat}/{quantum}",
+      "session": "Link セッション",
+      "summary": "{tempo} BPM · {peers} ピア · {state}",
+      "title": "同期 / Ableton Link",
+      "unavailable": "Link バックエンドが未コンパイルです（-tags abletonlink でビルドしてください）。",
+      "waiting": "再生を待機中"
+    },
+    "bpm": "{bpm} BPM",
+    "cockpit": {
+      "empty": "OBS インスタンスが未設定です",
+      "offline": "オフライン",
+      "ready": "準備完了",
+      "reconnecting": "再接続中",
+      "recording": "録画中",
+      "startRec": "録画開始",
+      "startStream": "配信開始",
+      "stopRec": "録画停止",
+      "stopStream": "配信停止",
+      "streaming": "配信中 · {kbps} kbps",
+      "thisPc": "（この PC）",
+      "title": "配信コックピット"
+    },
+    "deck": {
+      "name": "デッキ {id}"
+    },
+    "decks": {
+      "title": "デッキ（統合）"
+    },
+    "network": {
+      "apiDown": "API↓ {rate}",
+      "peerDown": "PEER↓ {rate}",
+      "session": "SESSION ↓ {down} · ↑ {up}",
+      "title": "ネットワーク",
+      "tooltip": "スループット、直近 2 分 - PEER = LAN ピアリンク、API = rave.page、SESSION = 起動以降の合計",
+      "upRate": "↑ {rate}"
+    },
+    "nowPlaying": {
+      "line2": "デッキ {deck}    {elapsed} / {total}",
+      "noTrack": "- 放送中のトラックなし -"
+    },
+    "perf": {
+      "app": "アプリ",
+      "headroom": "ヘッドルーム",
+      "headroomLine": "ヘッドルーム {gb} GB RAM · {cpu}% CPU 空き",
+      "sys": "システム",
+      "tooltip": "CPU（上）+ RAM（下）、直近 2 分 - アプリ = rave-mate、システム = マシン全体"
+    },
+    "status": {
+      "accountLabel": "アカウント",
+      "apiLabel": "API",
+      "idle": "アイドル",
+      "idleError": "アイドル · 最後のエラー: {error}",
+      "notSignedIn": "サインインしていません",
+      "signedIn": "サインイン済み",
+      "streamLabel": "配信",
+      "strmLive": "LIVE · {title} · {count} 件キュー",
+      "title": "ステータス",
+      "traktorLabel": "Traktor リスナー",
+      "trkListening": "待受中 :{port}",
+      "trkNotBound": "バインドできません（:{port} 使用中？）"
+    },
+    "strip": {
+      "capBytes": "CAP {bytes}",
+      "capListening": "CAP 待受中",
+      "capReconnecting": "CAP 再接続中",
+      "dmxActive": "DMX ⚡",
+      "dmxIdle": "DMX アイドル",
+      "dmxOff": "DMX ✕",
+      "freeResources": "空き {cpu}% CPU · {gb} GB",
+      "obsOff": "OBS ✕",
+      "obsOk": "OBS ✓",
+      "obsRec": "OBS ⏺ {dur}",
+      "recOn": "REC ⏺",
+      "tc": "TC {tc}",
+      "twitchConnecting": "Twitch …",
+      "twitchUser": "Twitch {login}"
+    },
+    "subtitle": "セット中のコックピット - 今起きていることすべてを 1 ページに",
+    "sysperf": {
+      "title": "システムパフォーマンス"
+    },
+    "timing": {
+      "noPeers": "接続中のピアなし",
+      "title": "タイミング",
+      "tooltip": "接続中の各ピアへのラウンドトリップレイテンシ (ms)、直近 2 分"
+    },
+    "title": "Live",
+    "transport": {
+      "end": "終了",
+      "goLive": "配信開始",
+      "recAuto": "OBS 同期",
+      "recLabel": "REC",
+      "recManual": "手動",
+      "record": "録音",
+      "start": "開始",
+      "stopCaps": "停止",
+      "streamLabel": "STREAM",
+      "tcLabel": "TC",
+      "titlePlaceholder": "セットタイトル（例: Friday Night Techno）"
+    }
+  },
+  "logs": {
+    "allSources": "すべてのソース",
+    "autoscroll": "自動スクロール",
+    "busApp": "アプリ",
+    "busMidi": "MIDI",
+    "busSession": "セッション",
+    "busTraktor": "Traktor",
+    "clearView": "表示をクリア",
+    "copied": "ログをクリップボードにコピーしました",
+    "copyAll": "すべてコピー",
+    "levelAll": "すべて",
+    "levelError": "エラー",
+    "levelInfo": "情報+",
+    "levelLabel": "レベル",
+    "levelWarn": "警告+",
+    "noEntries": "（ログエントリはまだありません）",
+    "noLogBus": "（ログバスなし）",
+    "searchLabel": "検索",
+    "searchPlaceholder": "メッセージを絞り込み…",
+    "sourceLabel": "ソース",
+    "tailing": "追尾中 - 最新が下に表示されます"
+  },
+  "motion": {
+    "activeAvatar": "アクティブアバター (.vrm/.glb/.fbx)",
+    "avatarCurrentInfo": "現在: {name} · 同期されたアバターはペアリング済みインスタンスに自動で複製されます。プレビューの「アバターモデルを表示」を切り替えるとポーズ付きメッシュが描画され、再生中はライブでアニメーションし、スクラブ/オービットに追従します（VRM/GLB/バイナリ FBX、テクスチャ含む）。",
+    "avatarLabel": "アバター",
+    "avatarPhysics": "アバターフィジックス（髪 / 尻尾 / アクセサリのスプリング挙動）",
+    "camPathDetail": "{name} - {where} · {count} キーフレーム · {duration}s",
+    "camPathHint": "ドラッグでオービット · スクロールでズーム · マーカーは実速度でパスを飛行します（ミント = 遅い、ピンク = 速い）。",
+    "camPathMeta": "{count} キーフレーム · {duration}s · {saved}",
+    "copyFilePath": "ファイルパスをコピー",
+    "exportAnim": ".anim を書き出し",
+    "importAvatar": "アバターをインポート…",
+    "installDjPaths": "DJ パスをインストール",
+    "label": {
+      "camera": "カメラ",
+      "chooseFileRender": "ファイルを選択してレンダリング（{w}×{h}）",
+      "doubleRenderTime": "レンダリング時間 2 倍",
+      "encoding": "エンコード中… MP4 を最終処理中",
+      "equirect": "360°（正距円筒）",
+      "equirectSub": "全天球 - VLC/YouTube 形式の 360 プレーヤー + Workshop プレビュー",
+      "fps": "{n} fps",
+      "frameRate": "フレームレート",
+      "high": "高",
+      "highSub": "1080p オービット / 4K 正距円筒 - レンダリングは遅い",
+      "orbitFlatVideo": "オービット（フラットビデオ）",
+      "orbitSub": "パースペクティブカメラがシーンを周回 - どこでも再生可能",
+      "quality": "品質",
+      "renderNote": "テイク: {take} · アバター: {avatar} · ワーカーのサブプロセスでオフラインレンダリング（H.264 MP4）。360° レンダリングには Spherical Video メタデータが自動的に注入されます。VLC/YouTube クラスのプレーヤーで見回しが有効になります。Workshop アイテムは、Workshop 公開機能が実装されるとこのビデオを公開プレビューとして添付します。",
+      "renderVideoTitle": "ビデオをレンダリング",
+      "renderingFrame": "レンダリング中… フレーム {frame}/{total} · {pct}%",
+      "renderingNote": "レンダリング中…（完了時にトーストが表示されます）",
+      "standard": "標準",
+      "standardSub": "720p オービット / 2K 正距円筒",
+      "startingRender": "レンダリングを開始中…",
+      "stickFigureNoAvatar": "スティックフィギュア（アバター未選択）"
+    },
+    "loadIntoVrchat": "VRChat に読み込む",
+    "loop": "ループ",
+    "noCamPaths": "カメラパスが見つかりません - まず VRChat のカメラで保存するか、下の DJ パスをインストールしてください。",
+    "noPhysBones": "このアバターにダイナミックボーンチェーンが検出されませんでした - 正確な PhysBone パラメーターには <code>&lt;avatar&gt;.physbones.json</code> サイドカー（Unity エクスポーター）を追加してください。",
+    "noRecordings": "録画がまだありません - ヘッドセットの手首メニューから VR モーションを録画してください。",
+    "noneLabel": "（なし）",
+    "organizeNow": "今すぐ整理",
+    "oscTrackers": "OSC トラッカーとして送信（FBT のみ）",
+    "overlayTrackerPoints": "トラッカーポイントをオーバーレイ（テイクをポーズ付きメッシュと比較）",
+    "playerRelative": "プレーヤー相対",
+    "preview": "プレビュー",
+    "reloadList": "リストを再読み込み",
+    "renderVideo": "ビデオをレンダリング…",
+    "restPose": "レストポーズ（A/T リファレンス - メッシュはテイクを無視、ポイントは表示）",
+    "scrub": "スクラブ",
+    "selectCamPathPreview": "プレビューするカメラパスを選択",
+    "selectPath": "パスを選択してください。",
+    "selectRecordingPreview": "プレビューする録画を選択",
+    "showAvatarModel": "アバターモデルを表示（ポーズ付きメッシュ - ライブ再生、スクラブ + オービット）",
+    "streamVmc": "VMC にストリーム（VTuber）",
+    "studioHint": "ドラッグでオービット · スクロールでズーム · スクラブで正確なフレームへ。",
+    "subtitle": "VRChat カメラパスと録画済み VR モーション - 3D でプレビューし、VRChat に読み込み、VTuber アプリにストリーム。",
+    "syncNow": "今すぐ同期",
+    "tabCamPaths": "カメラパス",
+    "tabStudio": "モーションスタジオ",
+    "timeDisplay": "{cur} / {dur} s",
+    "title": "Motion",
+    "toast": {
+      "activeAvatar": "アクティブなアバター: ",
+      "avatar": "アバター: ",
+      "avatarSyncResult": "{synced} 件同期 · {uptodate} 件最新",
+      "djPaths": "DJ パス: ",
+      "export": "エクスポート: ",
+      "exported": "エクスポートしました ",
+      "installedPaths": {
+        "few": "{count} 個のプロカメラパスを {dst} にインストールしました。VRChat でループ/パスの種類を一度設定してください。",
+        "many": "{count} 個のプロカメラパスを {dst} にインストールしました。VRChat でループ/パスの種類を一度設定してください。",
+        "one": "{count} 個のプロカメラパスを {dst} にインストールしました。VRChat でループ/パスの種類を一度設定してください。",
+        "other": "{count} 個のプロカメラパスを {dst} にインストールしました。VRChat でループ/パスの種類を一度設定してください。"
+      },
+      "load": "読み込み: ",
+      "loadRecording": "録音を読み込み: ",
+      "loadingAvatar": "アバターを読み込み中…",
+      "organized": {
+        "few": "{count} 個のパスを整理しました。",
+        "many": "{count} 個のパスを整理しました。",
+        "one": "{count} 個のパスを整理しました。",
+        "other": "{count} 個のパスを整理しました。"
+      },
+      "pathCopied": "パスをコピーしました。VRChat のカメラインポートに貼り付けてください。",
+      "peerSyncUnavailable": "ピア同期を利用できません。",
+      "pickAvatarFirst": "先にアバターを選択してください（アバターをインポート…）。",
+      "readPathFailed": "パスの読み取りに失敗しました: ",
+      "renderFailed": "レンダリングに失敗しました: ",
+      "renderRunning": "レンダリングはすでに実行中です。",
+      "rendered": {
+        "few": "{count} フレームをレンダリングしました → {path}",
+        "many": "{count} フレームをレンダリングしました → {path}",
+        "one": "{count} フレームをレンダリングしました → {path}",
+        "other": "{count} フレームをレンダリングしました → {path}"
+      },
+      "rendering": "{mode} {w}×{h} をレンダリング中 - バックグラウンドで実行されます…",
+      "selectRecordingFirst": "先に録音を選択してください。",
+      "sentToVrchat": "VRChat に送信しました（OSC の有効化が必要）。",
+      "syncErrors": {
+        "few": " · {count} 件のエラー",
+        "many": " · {count} 件のエラー",
+        "one": " · {count} 件のエラー",
+        "other": " · {count} 件のエラー"
+      },
+      "syncingAvatars": "アバターを同期中…",
+      "tag360Failed": " · 360° タグに失敗: ",
+      "tagged360": " · 360° タグ付け済み"
+    },
+    "unknownWorld": "不明なワールド",
+    "vmcHelp": "VMC はこのテイクを生の HMD+コントローラー+トラッカーデバイスとして VMC 受信側（VSeeFace / Warudo / VNyan @ {addr}）にストリームします - レンダラーが IK を処理してアバターをアニメーションさせる、これが本来のモーション再生経路です。OSC トラッカーは VRChat のフルボディトラッキングに供給されますが、テイクを VRChat アバターに再生することはできません（VRChat は常にライブの HMD/コントローラーから頭と手を駆動し、デスクトップモードはトラッカーを無視します）。VRChat アバターに再生するには: .anim を書き出し → アバターの Animator から駆動してください。",
+    "vrchatUnavailable": "VRChat ツールを利用できません - 設定で VRChat 機能を有効にしてください。"
+  },
+  "navtitle": {
+    "appgroups": "DJ リグのアプリ一式をまとめて再起動",
+    "automations": "メディアオートメーションエンジン - ルール、スケジュール、実行",
+    "editor": "ライブオーバーレイを構成 - レイヤー、ブレンド、テンプレート",
+    "library": "ローカルメディア、DJ コレクション、プレイリスト、トランスコード",
+    "live": "セット中のコックピット - デッキ、配信、録画、ライブグラフ",
+    "logs": "ライブデーモンログ",
+    "motion": "カメラパスと録画済み VR モーション - 3D プレビュー、OSC/VMC 再生",
+    "overlays": "ブラウザー/OBS オーバーレイ出力、外観、波形パネル",
+    "peers": "LAN ピアリンク - コントロール、メディアルート、ファイル転送",
+    "publish": "キャプチャしたセット - トラックリスト、録音、トリム、書き出し",
+    "settings": "機能トグル - 各機能のオン/オフ + 設定",
+    "twitch": "チャット、アラート、配信タイトル、モデレーション",
+    "vrchat": "アカウントステータスと自己紹介、エモート、グループ",
+    "worlds": "VRChat ワールド同期"
+  },
+  "overlays": {
+    "appearance": {
+      "note1": "すべての外観 - 色、マルチストップグラデーション（波形 + 背景）、バンドごとの EQ + FX の色、カードの枠線/角丸 - はブラウザーオーバーレイの編集モードでライブ編集します。変更は overlay-style.json に保存され、すべての出力に即座に適用されます。",
+      "note2": "フェーダー連動フェード: 各デッキカードの不透明度はチャンネルフェーダーに追従します（音が出ているデッキが最も明るくなります）。すべての出力にライブで適用されます。エディターを読み込むには下のブラウザーオーバーレイを有効にしてください。",
+      "title": "外観（グラデーション、色、枠線）"
+    },
+    "configUnavailable": "設定を利用できません",
+    "copyEditorUrl": "エディター URL をコピー",
+    "copyUrl": "URL をコピー",
+    "editColours": "色とグラデーションを編集",
+    "editStyle": "スタイルを編集",
+    "faderToggle": "デッキカードをチャンネルフェーダーレベルでフェード",
+    "layoutEditor": "レイアウトエディター",
+    "np": {
+      "note": "トラック変更のたびに now_playing.json + now_playing.txt を書き込みます。OBS のテキスト/ブラウザーソースをこれに向けてください。空欄 = アプリの設定ディレクトリ。",
+      "title": "再生中ファイル (OBS)"
+    },
+    "obs": {
+      "note": "obs-websocket 経由で OBS を直接駆動: 読み込んだデッキごとに現在のシーンへ「RaveMate Deck X」テキスト + 画像入力を作成します。OBS 接続の有効化 + OBS の起動が必要です。この出力は設定タブで有効にしてください。オフにすると（非表示の）入力を OBS に残します。",
+      "title": "OBS ダイレクト (obs-websocket)"
+    },
+    "openFolder": "フォルダーを開く",
+    "openOverlay": "オーバーレイを開く",
+    "outputFolder": "出力フォルダー",
+    "overlayUrl": "オーバーレイ URL",
+    "png": {
+      "note": "変更時に deck_A.png … deck_D.png をレンダリング（透過、カバーアート + フェーダー/EQ）。デッキごとに OBS 画像ソースを 1 つ追加してください。空欄 = アプリの設定ディレクトリ / overlay-png。",
+      "title": "デッキごとの PNG カード (OBS)"
+    },
+    "port": "ポート",
+    "spout": {
+      "install": "ダウンロードしてインストール",
+      "installed": "インストール済み: {path}",
+      "notFound": "SpoutLibrary.dll が見つかりません - Spout 出力を有効にするにはインストールしてください（なくてもアプリは正常に動作します）。",
+      "note": "Spout には SpoutLibrary.dll（インストーラーに同梱）が必要です。欠けている場合 - 例えば自己更新後 - はここでインストール: 固定版の Spout2 SDK を SHA-256 検証済みでアプリの bin フォルダーにダウンロードします。",
+      "openSdk": "Spout SDK ダウンロードページを開く",
+      "reinstall": "再ダウンロードしてインストール"
+    },
+    "status": {
+      "np": "トラック変更時に書き込み",
+      "obsDriving": "OBS 入力を駆動中",
+      "obsEnableFirst": "先に OBS 接続を有効にしてください",
+      "obsNotConnected": "OBS 未接続",
+      "png": "デッキカードをレンダリング中",
+      "vsNoBackend": "このビルドにバックエンドがありません",
+      "vsSharing": "{backend} で共有中",
+      "wave": "波形オン",
+      "web": "オーバーレイを配信中"
+    },
+    "strip": {
+      "files": "ファイル",
+      "hint": "スタイル編集はすべての出力にライブ適用されます",
+      "obs": "obs",
+      "obsDisconnected": "OBS ✕",
+      "obsOff": "OBS オフ",
+      "obsOn": "OBS ✓",
+      "png": "png",
+      "share": "共有",
+      "waveform": "波形",
+      "web": "web"
+    },
+    "subtitle": "一度スタイルを整えて、どこにでも出力 - OBS ほか向けのライブ再生中ビジュアル",
+    "vs": {
+      "noBackend": "このビルドにはビデオ共有バックエンドがコンパイルされていません（Windows=Spout / macOS=Syphon / Linux=PipeWire）- オンにするとシンクは動作しますが何も配信されません。",
+      "note": "読み込んだ各デッキのカードを「{name}」という名前のライブビデオフレームとして … OS ネイティブの共有 API 経由で配信し、OBS/Resolume/TouchDesigner/VRChat がメモリからデッキビジュアルを取得できます - ファイルやウィンドウのキャプチャは不要です。",
+      "note2": "スケールが大きいほど大きく表示したとき（例: 4K キャンバスで全画面）にシャープになりますが、CPU 負荷は増えます。オフ/オンで適用します。",
+      "renderScale": "レンダースケール",
+      "scaleOption": "{mult}× ({res})",
+      "sharesVia": "このビルドは {backend} 経由で共有します。",
+      "title": "ビデオ共有 (Spout/Syphon/PipeWire)"
+    },
+    "web": {
+      "autoAdd": "OBS でブラウザーソースを自動追加してサイズ調整",
+      "nest": "そのシーンを現在のプログラムシーンにも追加",
+      "note1": "OBS で上記 URL のブラウザーソースを追加（キャンバスに合わせてサイズ調整、例: 1920×1080）するか、下で rave-mate に管理させてください。ポート変更を適用するにはオーバーレイをオフ/オンしてください。",
+      "note2": "自動管理には OBS 接続の有効化 + OBS の起動が必要です。次回の OBS（再）接続時に適用されます。",
+      "obsScene": "OBS シーン",
+      "title": "ライブオーバーレイ（ブラウザー）"
+    },
+    "wf": {
+      "bgColor": "背景色",
+      "bgOpacity": "背景の不透明度",
+      "note1": "各デッキカードの EQ カーブの背後にスクロール波形を追加します（HP/LP はカットオフカーブとして表示）。ブラウザー + ビデオ共有は滑らかにスクロールし、PNG は変更時に更新されます。ピークは初回再生時にキャッシュされます。",
+      "note2": "色は #rrggbb のデフォルトです - ブラウザーエディター（外観カード）がライブグラデーション + バンドごとの色ですべての出力を上書きします。ズームが小さいほどスクロールが速くなります。",
+      "playhead": "再生ヘッド",
+      "playheadCenter": "中央 (1/2)",
+      "playheadQuarter": "左 4 分の 1 (1/4)",
+      "playheadRightQuarter": "右 4 分の 1 (3/4)",
+      "playheadThird": "左 3 分の 1 (1/3)",
+      "title": "波形パネル",
+      "waveColor": "波形の色",
+      "waveOpacity": "波形の不透明度",
+      "zoom": "ズーム（表示範囲）",
+      "zoomOptionSeconds": "{n} s"
+    }
+  },
+  "peers": {
+    "accept": "承認",
+    "acquiring": "取得中",
+    "ask": "確認",
+    "auto": "自動",
+    "autoMode": "自動",
+    "camLive": "LIVE - {mode}",
+    "camReady": "準備完了 - {device}",
+    "canceled": "キャンセル済み",
+    "clockLine": "クロック {tier} · {lock}",
+    "connect": "接続",
+    "connectedPaired": "接続済み · ペアリング済み",
+    "connections": "接続",
+    "control": "コントロール",
+    "controllingBanner": "{name} を操作中 - あなたの MIDI がそこにルーティングされています",
+    "decline": "拒否",
+    "defaultDir": "デフォルト: {dir}",
+    "device": "デバイス",
+    "discoveryOff": "ディスカバリーオフ - 両方のコンピューターで LAN ピアをオンにしてください",
+    "doesntMatch": "一致しません",
+    "done": "完了",
+    "error": "エラー",
+    "fileTransfer": "ファイル転送",
+    "forget": "削除",
+    "holdover": "ホールドオーバー",
+    "interruptedRetrying": "中断 - 再試行中",
+    "interruptedWithError": "中断 ({error}) - 再試行中",
+    "jbStats": "バッファ {depth}f · 遅延 {late}% · ドロップ {drops}",
+    "lensImage": "レンズ / 画像",
+    "locked": "ロック済み",
+    "matches": "一致",
+    "mediaPlane": "メディアプレーン",
+    "mode": "モード",
+    "noActiveConnections": "アクティブな接続なし",
+    "noActiveMediaRoutes": "アクティブなメディアルートなし。",
+    "noCameraInstances": "カメラインスタンスなし - カメラのある各インスタンスで Webcam を有効にしてください",
+    "noCameraSelected": "カメラが選択されていません。",
+    "noTransfersYet": "転送はまだありません。ライブラリから送信するか、ペアリング済みインスタンスからこのインスタンスへ送信してください。",
+    "none": "なし",
+    "offline": "オフライン",
+    "offset": "オフセット {value}",
+    "onThisNetwork": "このネットワーク上",
+    "outFps": "出力 {fps} fps",
+    "pair": "ペアリング",
+    "pairedInstanceLabel": "{label} - ペアリング済みインスタンス",
+    "pairingCode": "コード {sas}",
+    "receive": "受信",
+    "receiveFiles": "ファイルを受信",
+    "receiveVideo": "ビデオを受信",
+    "receiveVideoLine": "{name}（{peer} から）→ Spout「rave-mate link {name}」",
+    "receivingFrom": "◂ 受信元",
+    "rememberedOffline": "記憶済み（オフライン）",
+    "restarts": "再起動 {n}",
+    "routeDetailNoReport": "retx {retx} · pli {pli} · ペアリング済みインスタンスからのレポートはまだありません",
+    "routeDetailRecv": "ロス {loss} · 回復 {recovered} · ジッター {jitter} · レイテンシ {p50}/{p95} p50/p95 · nack {nack}",
+    "routeDetailRemote": "ピアレポート: ロス {loss} ({pct}%) · ジッター {jitter} · retx {retx} · pli {pli}",
+    "routeTitle": "{dir} {peer} - ストリーム {stream} · {frames} フレーム · {bytes}",
+    "routes": "{count} ルート",
+    "saveTo": "保存先",
+    "searchingHint": "検索中… 両方のコンピューターで LAN ピアがオンになっているか確認してください",
+    "selectCameraPlaceholder": "（カメラを選択）",
+    "sendingTo": "▸ 送信先",
+    "sizeFpsPlaceholder": "（サイズ / fps）",
+    "softwareEncodeWarning": "⚠ ソフトウェアエンコード（高 CPU）",
+    "spoutSender": "Spout センダー: {sender}",
+    "start": "開始",
+    "statusStrip": "{connected} 接続中 · {found} 台がこのネットワーク上",
+    "statusStripNode": "{connected} 接続中 · {found} 台がこのネットワーク上 · ノード {node}",
+    "stopControl": "コントロールを停止",
+    "stopControlling": "操作を停止",
+    "stopped": "停止",
+    "subtitle": "LAN ピアリンク - 再生中情報のブリッジ、MIDI ミラーリング、メディアルート、ファイル転送",
+    "syncLine": "同期 {name}: オフセット {offset} · rtt {rtt} · {lock}",
+    "tcMaster": "TC マスター: {name}",
+    "tcMasterThisInstance": "TC マスター: このインスタンス",
+    "thisInstance": "このインスタンス",
+    "tier": "{encoder} ティア {n}",
+    "title": "Peers",
+    "unavailable": "ピアを利用できません",
+    "waitingForPeer": "ペアリング済みインスタンスを待機中…",
+    "webcam": "Webcam",
+    "webcamOff": "Webcam 機能はオフです - このインスタンスまたはペアリング済みインスタンスのカメラを操作するには、設定 ▸ メディア で有効にしてください。",
+    "xferDone": "✓ 完了 · {files} · {size}",
+    "xferFailed": "✗ 失敗: {error}",
+    "xferFile": {
+      "few": "{count} ファイル",
+      "many": "{count} ファイル",
+      "one": "{count} ファイル",
+      "other": "{count} ファイル"
+    },
+    "xferFrom": "{arrow} {name} - {peer} から",
+    "xferIncoming": "⇩ {name} ({size}, {files}) - {peer} から",
+    "xferTo": "{arrow} {name} - {peer} へ"
+  },
+  "picker": {
+    "selectFolder": "フォルダを選択"
+  },
+  "placeholder": {
+    "comingSoon": "近日公開 - {name} のコントロールはここに表示されます。",
+    "porting": "このサーフェスは Fyne から移植中です。"
+  },
+  "player": {
+    "done": "完了",
+    "exportCut": "カットを書き出し",
+    "fit": "フィット",
+    "inPreview": "IN",
+    "jumpToTrack": "トラックへジャンプ…",
+    "label": {
+      "after": "後",
+      "alignFailed": "アライメントに失敗しました: ",
+      "alignedLine": "ビデオが音声より {offset} {rel} · アライメント済み、信頼度 {label}（{conf}）",
+      "aligning": "アライメント中… ",
+      "analyzingWave": "波形を解析中…",
+      "audioCodec": "音声コーデック",
+      "audioOnly": "音声のみ",
+      "autoAlign": "自動アライメント",
+      "autoTrim": "自動トリム…",
+      "before": "前",
+      "bothAligned": "両方（アライメント済み）",
+      "bothAlignedSub": "1 つの IN/OUT で音声 + ビデオを同じ瞬間でカット",
+      "cantDecode": "埋め込みプレーヤーはこのファイルをデコードできません",
+      "clearRange": "範囲をクリア",
+      "clearRangeSub": "IN 0 · OUT 末尾",
+      "clickSeekPan": "クリック = シーク · ドラッグ = パン",
+      "clickSeekPanZoom": "クリック = シーク · ドラッグ = パン · ホイール = ズーム",
+      "detectSilence": "音楽終了を検出（無音）",
+      "detectingSilence": "無音を検出中…",
+      "dragSetIn": "ドラッグして IN を設定",
+      "dragSetOut": "ドラッグして OUT を設定",
+      "ebuSpecLink": "EBU R128 仕様 ↗",
+      "embeddedFailed": "埋め込み再生に失敗しました - {reason}。コーデック/コンテナがここでサポートされていない可能性があります。下の Web 対応カット（H.264/AAC MP4 プリセット）をエクスポートするか、システムのプレーヤーでファイルを開いてください。",
+      "encNote": "ロスレスソース（FLAC/AIFF/WAV）はどのプリセットにもクリーンにトランスコードされます。非可逆音声（MP3/AAC/Opus）の再エンコードは常に少し品質を損ないます。等しいかそれ以下のビットレートのターゲットを優先してください。",
+      "encodePreset": "エンコードプリセット",
+      "exportDone": "完了 → ",
+      "exportMsgFailed": "失敗: ",
+      "exportTarget": "エクスポート対象",
+      "exportingPct": "エクスポート中… {pct}%",
+      "fileSize": "ファイルサイズ",
+      "hoverHint": "波形にホバーすると、その位置の時間 + ラウドネスが表示されます",
+      "inField": "IN (mm:ss.s)",
+      "integrated": "統合",
+      "keeps": "→ 保持",
+      "kindPreset": "{kind} プリセット",
+      "lastFader": "最後のフェーダーダウン",
+      "lastFaderSub": "OUT = 最後のフェーダーダウンの瞬間",
+      "loudNote": "LUFS は知覚ラウドネス（EBU R128）を測定します。統合 = トラック全体。波形の下の表示は再生ヘッドまたはカーソル位置の瞬間ラウドネス（400 ms ウィンドウ）を示します。ストリーミングプラットフォームは統合で約 −14 LUFS に正規化します。クラブマスターはしばしば −6 〜 −8 に位置します。−1 dBTP を超えるトゥルーピークは、非可逆エンコード後にクリッピングを起こす恐れがあります。",
+      "loudnessRange": "ラウドネスレンジ",
+      "lufsLink": "LUFS の説明 ↗",
+      "lufsLoading": "LUFS…",
+      "manualLine": "ビデオが音声より {offset} {rel} · 手動",
+      "measuringLoudness": "ラウドネスを測定中…",
+      "momAtPlayhead": "再生ヘッドで M {lufs} LUFS",
+      "noWaveform": "波形なし",
+      "out": "OUT",
+      "outField": "OUT (mm:ss.s または末尾)",
+      "outputFile": "出力ファイル",
+      "priorLine": "ビデオオフセット {offset} - クロックのタイムスタンプから。自動アライメントは両方の録音を聴きます",
+      "probing": "プローブ中…",
+      "rangeExceeds": "範囲が {kind} 録音を超えています - そのカットは既存メディアにクランプされます",
+      "reAlign": "再アライメント",
+      "silenceSub": "先頭 + 末尾に ffmpeg silencedetect",
+      "snapIn": "IN ⟸ 現在のトラック",
+      "snapInSub": "IN を再生ヘッド位置のトラックにスナップ",
+      "snapOut": "OUT ⟸ 次のトラック",
+      "snapOutSub": "OUT を次のトラック開始にスナップ",
+      "stageAudioEnv": "音声エンベロープを抽出中…",
+      "stageCrossCorr": "相互相関中…",
+      "stageVideoEnv": "ビデオ音声エンベロープを抽出中…",
+      "streamUnavailable": "ローカルメディアストリームを利用できません - アプリが提供できるようになるとビデオがレンダリングされます。",
+      "tracklistBounds": "トラックリスト境界",
+      "tracklistBoundsSub": "IN = 最初のトラック · OUT = 最後のトラック終了",
+      "truePeak": "トゥルーピーク",
+      "video": "ビデオ",
+      "videoOffsetField": "ビデオオフセット ([-]mm:ss.s)",
+      "videoOnly": "ビデオのみ",
+      "waveUnavailable": "波形を利用できません - "
+    },
+    "openExternally": "外部で開く",
+    "pause": "一時停止",
+    "play": "再生",
+    "resume": "再開",
+    "seek": "シーク",
+    "setIn": "IN を設定",
+    "setOut": "OUT を設定",
+    "stop": "停止",
+    "toast": {
+      "aligned": "アライメント済み: ビデオオフセット {offset} · 信頼度 {conf}",
+      "captureNotFound": "キャプチャが見つかりません",
+      "cutExported": "カットをエクスポートしました → ",
+      "export": "エクスポート: ",
+      "exportFailed": "エクスポートに失敗しました: ",
+      "exportingCut": "カットをエクスポート中（{preset}）…",
+      "exportingCuts": {
+        "few": "{count} 件のカットをエクスポート中…",
+        "many": "{count} 件のカットをエクスポート中…",
+        "one": "{count} 件のカットをエクスポート中…",
+        "other": "{count} 件のカットをエクスポート中…"
+      },
+      "offsetFormat": "オフセット形式: [-]mm:ss.s または秒",
+      "playFailed": "再生に失敗しました: ",
+      "playerUnavailable": "プレーヤーを利用できません",
+      "silenceFailed": "無音検出に失敗しました: ",
+      "timeFormat": "時間形式: mm:ss.s（または h:mm:ss）"
+    },
+    "trimEdit": "トリム / 編集"
+  },
+  "publish": {
+    "audio": "オーディオ",
+    "broadcastAudio": "オーディオを配信",
+    "capturesCount": "キャプチャ ({count})",
+    "capturing": "キャプチャ中 {format} · {bytes}",
+    "confirming": "確定中 - {left} 後にトラックリストへコミットします",
+    "confirmingIn": "{left} 後に確定",
+    "connected": "接続済み",
+    "deck": "デッキ {name}",
+    "delete": "削除",
+    "export": "書き出し",
+    "finishSet": "セットを終了",
+    "listening": "待受中 {addr}",
+    "live": "ライブ",
+    "liveSet": "ライブセット",
+    "looseDesc": "録音済みセットと重ならないキャプチャメディア。",
+    "matchHistory": "履歴とマッチング",
+    "matched": "一致 ✓",
+    "noCaptures": "リンクされたキャプチャメディアがありません。セット実行中にセットキャプチャ受信側へ配信するか、OBS で録画してください。",
+    "noRecordings": "録音がまだありません",
+    "noTracks": "トラックがまだありません - 各トラック確定時にライブ追加されるか、セットの .cue から読み込まれます。",
+    "notConnected": "未接続",
+    "notListening": "待受していません",
+    "nothingAudible": "音が出ていません",
+    "nowPlaying": "再生中",
+    "obsRecording": "録画中 · {dur}",
+    "obsRecordingKind": "OBS 録画",
+    "openInPlayer": "プレーヤーで開く",
+    "recActive": "{name} · {count} トラック · {dur}",
+    "recArmed": "アーム済み - 最初のトラックを待機中",
+    "recOff": "レコーダーオフ",
+    "reconnecting": "再接続中…",
+    "recorderUnavailable": "レコーダーを利用できません",
+    "selectHint": "セットを選択すると、そのキャプチャ、トラックリスト、書き出しオプションが表示されます。",
+    "selectedSet": "選択中のセット",
+    "setsCount": "セット ({count})",
+    "showInFolder": "フォルダーに表示",
+    "subtitle": "セットと録音 - キャプチャ、レビュー、書き出し",
+    "title": "Publish",
+    "trackCount": {
+      "one": "{count} トラック",
+      "other": "{count} トラック"
+    },
+    "trackInList": "✓ トラックリストの {n} 番目 · {dur} 再生中",
+    "tracklistCount": "トラックリスト ({count})",
+    "trimEditDots": "トリム / 編集…",
+    "unlinkedCount": "未リンクのキャプチャ ({count})",
+    "untitledTrack": "無題のトラック",
+    "via": "{name} 経由",
+    "video": "ビデオ",
+    "remote": {
+      "hint": "ペア接続されたインスタンスを操作中 - ライブ状態と再生はそのコンピューターに残ります。録音済みセットを参照し、トラックリストをエクスポートまたは照合したり、完了したセットを削除できます。",
+      "noSets": "ペア接続されたインスタンスに録音済みセットがありません。",
+      "error": "エラー: {msg}",
+      "showingNewest": "{total} セット中、新しい {n} 件を表示しています。",
+      "tlShowing": "{total} トラック中、最初の {n} 件を表示しています。",
+      "capturesNote": "キャプチャファイルはペア接続されたインスタンスにあります - そのコンピューターで開くかトリミングしてください。",
+      "matching": "ペア接続されたインスタンスの Traktor 履歴と照合中…",
+      "matched": "ペア接続されたインスタンスで {n} トラックを照合しました。",
+      "matchFail": "照合に失敗しました: {err}",
+      "deleted": "ペア接続されたインスタンスでセットを削除しました",
+      "deleteFail": "削除に失敗しました: {err}",
+      "exportFail": "エクスポートに失敗しました: {err}",
+      "deleteConfirm": "ペア接続されたインスタンスで \"{name}\" を削除しますか? 取り消せません。キャプチャファイルはそのコンピューターに残ります。"
+    }
+  },
+  "settings": {
+    "body": {
+      "ablelink": {
+        "note": "rave-mate は統合された DJ マスターテンポとフレーズを Ableton Link セッションに公開します。Link 対応のビジュアル（Resolume、Live、VDMX）は自動的に追従します。Resolume 7 は Link にネイティブ対応し、フレーズクリップは各フレーズ境界で再トリガーされます。実際の Link バックエンドには abletonlink cgo ビルドが必要です。そうでない場合は「利用不可」と表示されます。",
+        "ownerAlways": "常に駆動（このリグがテンポを所有）",
+        "ownerAuto": "自動（DJ マスターから駆動）",
+        "ownerFollow": "ピアに追従（読み取り専用）",
+        "phraseClipClip": "フレーズクリップ - クリップ（1 始まり、0 = オフ）",
+        "phraseClipLayer": "フレーズクリップ - レイヤー（1 始まり、0 = オフ）",
+        "quantum": "フレーズ長（拍）",
+        "resolumeHost": "Resolume ホスト",
+        "resolumeOn": "Resolume フレーズ同期",
+        "resolumeOscPort": "Resolume OSC ポート",
+        "resolumeRestPort": "Resolume REST ポート",
+        "resync": "フレーズを今すぐ再同期",
+        "startStopSync": "トランスポートの開始/停止を共有",
+        "tempoOwner": "テンポの所有者"
+      },
+      "account": {
+        "nodeName": "ノード名",
+        "notSignedIn": "サインインしていません。ブラウザーでサインインしてセットを公開し、Studio チャンネルを開いてください。",
+        "reauth": "再認証",
+        "signInBrowser": "ブラウザーでサインイン",
+        "signedIn": "サインイン済み。"
+      },
+      "api": {
+        "note": "RAVE_API_BASE_URL で上書き。本番は RAVE_ENV=production でのみ。"
+      },
+      "audiorec": {
+        "bitrate": "ビットレート kbps (mp3/aac)",
+        "device": "デバイス",
+        "devicePlaceholder": "（オーディオ入力デバイスを選択）",
+        "folder": "録音フォルダー",
+        "followObs": "OBS 録画と自動で開始/停止",
+        "format": "フォーマット",
+        "note": "FLAC はデバイスのネイティブレートでロスレスです。ffmpeg が必要です。手動の録音開始/停止は Live タブ (REC) にあります。",
+        "openFolder": "録音フォルダーを開く",
+        "refreshDevices": "デバイスを更新",
+        "sampleRate": "サンプルレート（0 = 自動）",
+        "writeTags": "再生したトラックリストを録音に埋め込む"
+      },
+      "common": {
+        "frameRate": "フレームレート",
+        "listenAddr": "待受アドレス",
+        "remove": "削除",
+        "systemDefault": "（システムデフォルト）",
+        "unlink": "リンク解除"
+      },
+      "configUnavailable": "設定を利用できません",
+      "dmx": {
+        "gridMode": "グリッドモード",
+        "maxFps": "最大グリッド FPS",
+        "reemit": "受信した DMX を Art-Net で再送信",
+        "reemitTarget": "再送信ターゲット",
+        "renderGrid": "VRSL ビデオグリッドをレンダリング",
+        "senderName": "センダー名",
+        "universes": "ユニバース (csv)"
+      },
+      "dmxmidi": {
+        "maxRate": "最大メッセージ/秒",
+        "port": "MIDI 出力ポート",
+        "universes": "ユニバース (csv、最大 4)"
+      },
+      "fingerprint": {
+        "note": "Chromaprint の fpcalc が必要です。下で管理コピーをダウンロードすると、フィンガープリントワーカーが自動的に使用します。"
+      },
+      "guardian": {
+        "note": "小さなスーパーバイザーが、クリーンなシャットダウンなしにアプリが停止した場合に再起動します。意図的な終了ではトリガーされず、クラッシュループは 10 分間で 4 回再起動すると停止します。次回起動時に有効になります。"
+      },
+      "install": {
+        "download": "ダウンロードしてインストール",
+        "downloadManaged": "管理コピーをダウンロード",
+        "downloadPage": " ダウンロードページ",
+        "foundOnPath": "PATH 上に見つかりました: ",
+        "installedManaged": "インストール済み（管理コピー）: ",
+        "notFound": "見つかりません - ダウンロードしてインストールするか、PATH に追加してください。",
+        "reDownload": "再ダウンロードしてインストール",
+        "windowsOnly": "（Windows のみ）"
+      },
+      "library": {
+        "embed": "アプリウィンドウ内でビデオを再生",
+        "mpvNote": "アプリ内プレーヤーは滑らかなハードウェアアクセラレーションビデオに mpv を使用します。mpv がない場合、ビデオは低速なアプリ内デコーダーにフォールバックします。"
+      },
+      "medialink": {
+        "bitrate": "ビットレート (Mbps)",
+        "codec": "優先コーデック",
+        "note": "ヘッダーのトグルはローカルの Spout センダーを共有します。ルートは Peers タブで作成してください。",
+        "swOnly": "ソフトウェアエンコードを強制（診断用 - 高 CPU）"
+      },
+      "midi": {
+        "customPort": "（MIDI 入力ポートを選択）",
+        "denonPort": "Denon マップポート",
+        "installLoopMidi": "ポートを更新",
+        "mesh": "（MIDI 入力ポートを選択）",
+        "refreshPorts": "MIDI をすべてのペアリング済みインスタンスにミラー",
+        "selectPortPlaceholder": "MIDI コントローラー"
+      },
+      "nml": {
+        "note": "空欄 = 最新の Traktor インストールを自動検出。パス変更を適用するにはオフ/オンしてください。",
+        "pathLabel": "collection.nml"
+      },
+      "obs": {
+        "connectValidate": "接続して配信設定を検証",
+        "host": "ホスト",
+        "note": "OBS で obs-websocket を有効にしてください（ツール → WebSocket サーバー設定）。デフォルトポート 4455。完了した録画は同じ期間に録音されたセットにリンクされます。接続変更はオフ/オンで適用されます。",
+        "password": "パスワード",
+        "port": "ポート",
+        "remoteObs": "リモート OBS…（%d）"
+      },
+      "obssync": {
+        "deadBand": "デッドバンド（フレーム）",
+        "mediaSources": "メディアソース…（%d）",
+        "note": "OBS メディアソースを共有クロックに同期させます。開始/停止 + ソースごとの表示は Live タブにあります。",
+        "restartThreshold": "再起動しきい値 (ms)"
+      },
+      "recorder": {
+        "confirmAfter": "確定までの時間（秒）",
+        "note": "トラックはこの時間再生されてからログに記録されます（短いプレビューを除外）。ライブ配信全体で自動録音します。"
+      },
+      "rekordbox": {
+        "dbPoll": "master.db ポーリング - 最近再生（安全）",
+        "memRead": "メモリ読み取り - リアルタイム（Windows、更新で動作しなくなる場合あり）"
+      },
+      "rekordboxkey": {
+        "note": "保管時はシールされます。RAVE_REKORDBOX_KEY でも設定可能。",
+        "placeholder": "master.db キーを貼り付け（長い 16 進数）",
+        "save": "キーを保存",
+        "test": "テスト"
+      },
+      "rekordboxmidi": {
+        "export": "マッピング CSV を書き出し",
+        "openFolder": "フォルダーを開く"
+      },
+      "rtsp": {
+        "bitrate": "ビットレート (kbps)",
+        "inputFormat": "入力フォーマット",
+        "note": "VRChat / LAN プレーヤーで再生:",
+        "passthrough": "ソースはすでに H.264（パススルー）",
+        "streamPath": "ストリームパス",
+        "videoSource": "ビデオソース"
+      },
+      "serato": {
+        "folder": "_Serato_ フォルダー",
+        "note": "空欄 = Music_Serato_ を自動検出。",
+        "nowPlaying": "ライブ再生中（History セッションを監視）"
+      },
+      "service": {
+        "install": "サービスをインストール",
+        "note": "Windows: インストール/アンインストールには昇格（管理者）プロンプトが必要です。Linux/macOS はユーザーごとにインストール。サービスはヘッドレスで実行されます - 専用マシン向け。デスクトップでは上のクラッシュ自動再起動を使用してください。",
+        "uninstall": "サービスをアンインストール"
+      },
+      "setcapture": {
+        "metaOnly": "メタデータのみ - 再生中情報を解析し、Icecast オーディオは保存しない",
+        "mount": "マウント",
+        "note": "Traktor → Preferences → Broadcasting で: Server 127.0.0.1、Port {port}、Mount {mount}、Format Ogg Vorbis。変更を適用するにはオフ/オンしてください。",
+        "openFolder": "セットフォルダーを開く",
+        "password": "パスワード",
+        "port": "ポート",
+        "reconnectGrace": "再接続猶予（秒）",
+        "setsFolder": "セットフォルダー",
+        "singleFile": "接続中は 1 ファイルに録音（再接続を統合）",
+        "sourceUser": "ソースユーザー"
+      },
+      "stt": {
+        "autoSubmit": "無音後に自動送信",
+        "installWhisper": "Whisper + モデルをインストール",
+        "microphone": "マイク",
+        "model": "モデル",
+        "modelNotDownloaded": "モデルがダウンロードされていません。",
+        "notInstalled": "Whisper がインストールされていません。",
+        "output": "出力（キュー）",
+        "ready": "準備完了。",
+        "refreshMics": "マイクを更新",
+        "silenceTimeout": "無音タイムアウト (ms)"
+      },
+      "timecode": {
+        "artnetOn": "Art-Net タイムコード出力",
+        "artnetTarget": "Art-Net ターゲット (host:port)",
+        "clockStart": "時刻から開始（実時計にジャム）",
+        "extraArtnet": "追加 Art-Net（%d）",
+        "extraLtc": "追加 LTC（%d）",
+        "extraMtc": "追加 MTC（%d）",
+        "firstPort": "（最初のポート）",
+        "ltcDevice": "LTC オーディオデバイス",
+        "ltcLevel": "LTC レベル (dBFS)",
+        "ltcOn": "LTC オーディオ出力",
+        "mtcOn": "MTC MIDI 出力",
+        "mtcPort": "MTC MIDI ポート",
+        "note": "START/STOP + ライブ TC 表示は Live タブのトランスポートストリップにあります。追加出力で 1 つのクロックを多数のデバイスへ分配できます。",
+        "rate24": "24（フィルム）",
+        "rate25": "25 (PAL/EBU)",
+        "rate2997": "29.97 ドロップフレーム",
+        "rate30": "30（ノンドロップ）",
+        "startPosition": "開始位置"
+      },
+      "traktor": {
+        "listenPort": "待受ポート",
+        "logRaw": "生ペイロードをログ (jsonl)",
+        "note": "デフォルト 8080。ポート変更を適用するにはオフ/オンしてください。Electron クライアントも 8080 を使用します - バインドできるのは 1 つだけです。"
+      },
+      "traktormap": {
+        "activate": "有効化",
+        "autoNewest": "自動（最新）",
+        "note": "変更前に Traktor を終了してください - Settings.tsi は自動でバックアップされます。",
+        "unavailable": "Traktor マッピングマネージャーを利用できません。",
+        "version": "バージョン"
+      },
+      "traktorqml": {
+        "install": "インストール / 再適用"
+      },
+      "transcode": {
+        "ffmpegPath": "ffmpeg パス",
+        "maxJobs": "最大同時ジョブ数",
+        "note": "トランスコードはワーカーサブプロセスで実行されます。FFmpeg は波形、プローブメタデータ + フィンガープリントのセグメント化も担います。"
+      },
+      "twitch": {
+        "connecting": "サインイン済み。接続中…",
+        "signIn": "Twitch にサインイン",
+        "signInLine": "Rave-Mate Twitch アプリでサインイン（デバイスコード - パスワードもシークレットも不要）。",
+        "signedInAs": "サインイン中: ",
+        "titlePresets": "タイトルプリセット…（%d）",
+        "unavailable": "このビルドでは Twitch を利用できません。"
+      },
+      "unity": {
+        "addFolder": "フォルダーを追加…",
+        "addFromVcc": "VCC から追加",
+        "empty": "プロジェクトがありません。下に Unity アバタープロジェクトを追加してください。",
+        "installPlugin": "プラグインをインストール",
+        "notUnityProject": "⚠ Unity プロジェクトではありません",
+        "note": "Unity に ツール → rave.page → Motion を追加します。ローカルコントロールポート 127.0.0.1:47625。",
+        "pastePath": "パスを貼り付け…",
+        "pluginInstalled": "✓ プラグインインストール済み",
+        "pluginNotInstalled": "プラグイン未インストール",
+        "reinstallPlugin": "プラグインを再インストール"
+      },
+      "updates": {
+        "available": "更新が利用可能: {version}",
+        "applyFailed": "更新に失敗しました: ",
+        "channel": "チャンネル",
+        "check": "更新を確認",
+        "checkFailed": "確認に失敗しました: ",
+        "checking": "確認中…",
+        "devNoFeed": "これは開発ビルドです - 更新は手動で管理されます。",
+        "feed": "開発ビルド - 更新フィードなし",
+        "install": "今すぐインストール",
+        "installedRestart": "更新をインストールしました。適用するには rave-mate を再起動してください。",
+        "note": "新しいビルドはブランチのフィードから取得され、チェックサムと署名を検証したうえで、確認後に適用されます。",
+        "restart": "今すぐ再起動",
+        "restartFailed": "再起動に失敗しました: ",
+        "upToDate": "最新の状態です。",
+        "version": "バージョン"
+      },
+      "virtualdj": {
+        "folder": "VirtualDJ フォルダー",
+        "howToEnable": "Network Control を有効にする方法",
+        "netCtl": "Network Control プラグイン - 完全なメタデータ（VDJ Pro が必要）",
+        "os2l": "OS2L サーバー - ライブ BPM/ビートのみ、設定不要",
+        "pluginAuth": "プラグイン認証",
+        "pluginUrl": "プラグイン URL",
+        "tracklist": "トラックリストファイル - タイトル/アーティストのフォールバック（遅延あり）"
+      },
+      "vrchat": {
+        "credsMsg": "認証情報は VRChat にのみ送信されます - rave.page には送信されません。",
+        "linkedAs": "{name} としてリンク済み。",
+        "passwordPlaceholder": "パスワード",
+        "rememberSession": "サインインを維持（セッションは保管時にシール）",
+        "twoFactorCodePlaceholder": "2FA コード",
+        "twoFactorRequired": "二要素認証が必要です（{methods}）- コードを入力してください。",
+        "unavailable": "このビルドでは VRChat を利用できません。",
+        "uplink": "セッションを rave.page と共有（サーバーサイド機能）",
+        "usernamePlaceholder": "VRChat ユーザー名 / メール",
+        "verify": "検証"
+      },
+      "vrctools": {
+        "applyPresetNow": "今すぐプリセットを適用",
+        "autoBackup": "再生時にカメラパスをバックアップ",
+        "autoRestore": "ワールド参加時にパスを自動復元（ライブ中）",
+        "camPathMove": "カメラパスを移動（コピーの代わりに）",
+        "camPreset": "読み込み時のカメラプリセット",
+        "installDjPaths": "DJ パスをインストール",
+        "noneOption": "（なし）",
+        "orgCamPaths": "カメラパスをワールドごとに整理",
+        "orgPhotos": "スクリーンショットをワールド/イベントごとに整理",
+        "organizeNow": "今すぐ整理",
+        "oscTarget": "OSC ターゲット",
+        "photoMove": "スクリーンショットを移動（コピーの代わりに）",
+        "preferEvent": "ワールドより rave.page イベントを優先"
+      },
+      "vrinstall": {
+        "downloadPage": "OpenVR ダウンロードページ",
+        "installRuntime": "VR ランタイムをインストール",
+        "installed": "インストール済み: ",
+        "nonVrBuild": "非 VR ビルド - VR サポートを得るにはインストーラーから再インストールしてください。",
+        "notFound": "openvr_api.dll がアプリの隣に見つかりません - VR を有効にするにはインストールしてください。"
+      },
+      "vroverlay": {
+        "autostart": "SteamVR と自動的に起動",
+        "axButton": "A / X ボタン",
+        "byButton": "B / Y ボタン",
+        "customSteamvr": "カスタム（SteamVR で設定）",
+        "editBadge": "手首の編集バッジ",
+        "keybindsCount": "キーバインド…（%d）",
+        "layoutsCount": "レイアウト…（%d）",
+        "openBindings": "コントローラーバインディングを開く",
+        "openEditor": "エディターを開く",
+        "overlaysCount": "オーバーレイ…（%d）",
+        "tapHides": "短いタップでオーバーレイの表示/非表示",
+        "viewCapture": "VR ビューのスクリーンショットを許可",
+        "vmc": "VMC (VTuber)",
+        "vmcLive": "ライブ VR モーションを VMC にストリーム（VTuber）",
+        "vrchatOsc": "VRChat OSC",
+        "worldLayoutsCount": "ワールドレイアウト…（%d）",
+        "wristCount": "手首ボタン…（%d）"
+      },
+      "webcam": {
+        "autostart": "アプリと共にカメラを起動（クラッシュ復旧リグ）",
+        "note": "デバイス選択、開始/停止 + PTZ/露出は Peers タブにあります。"
+      },
+      "worldsync": {
+        "linkDeviceCode": "GitHub をリンク（デバイスコード）",
+        "linkLine": "GitHub アカウントをリンク（gist スコープのみ）。'gist' スコープのクラシック PAT を貼り付けるか、デバイスコードを使用してください。",
+        "linkedAs": "リンク中: ",
+        "pasteToken": "トークンを貼り付け…",
+        "unavailable": "このビルドでは GitHub リンクを利用できません。"
+      }
+    },
+    "card": {
+      "ablelink": {
+        "desc": "DJ のテンポとフレーズを Ableton Link セッションに公開し、Resolume クリップをフレーズに整列します。",
+        "title": "Ableton Link"
+      },
+      "account": {
+        "desc": "サインインはブラウザーで行われます - ここでパスワードは入力しません。",
+        "title": "アカウント"
+      },
+      "api": {
+        "title": "API"
+      },
+      "appgroups": {
+        "desc": "クラッシュ後に DJ リグのアプリ一式を再起動（App Groups タブ）。復旧したアプリは rave-mate より長く存続します。",
+        "title": "アプリグループ"
+      },
+      "audiorecord": {
+        "desc": "選択したオーディオデバイスをディスクに録音（ロスレス FLAC）- OBS 録画に同期または手動。トラックリストにリンクされます。",
+        "title": "オーディオ録音（ネイティブ）"
+      },
+      "dmx": {
+        "desc": "Art-Net ライティング入力 → VRChat ワールド向け VRSL ビデオグリッド（+ 任意で DMX 転送）。",
+        "title": "DMX / VRSL"
+      },
+      "dmxmidi": {
+        "desc": "MIDI リスナーを持つ VRChat ワールド向けのレート制限付き MIDI CC ブリッジ。",
+        "title": "DMX → VRChat MIDI"
+      },
+      "fingerprint": {
+        "desc": "rave.page 音楽データベースを支援する Chromaprint トラックフィンガープリント。",
+        "title": "フィンガープリント"
+      },
+      "guardian": {
+        "desc": "ハードクラッシュ後に自動的に再起動します。",
+        "title": "クラッシュ自動再起動"
+      },
+      "library": {
+        "desc": "ネイティブファイルブラウザー + メディアプレーヤー + メタデータビューアー（Library タブ）。",
+        "title": "ライブラリ"
+      },
+      "mediaeditor": {
+        "desc": "リリース/SNS 向けのポスター + サムネイルコンポーザー（Editor タブ）。",
+        "title": "メディアエディター"
+      },
+      "medialink": {
+        "desc": "OBS/webcam/Spout ビデオを暗号化 LAN リンク経由でペアリング済みインスタンスに送信します。",
+        "title": "メディアリンクビデオ"
+      },
+      "midi": {
+        "desc": "カスタムマップポート",
+        "title": "Traktor MIDI アウトマッピングからデッキ/ミキサー状態 + A/B タイトルを読み取ります。"
+      },
+      "nml": {
+        "desc": "コレクション準拠のメタデータでライブトラックをエンリッチします。",
+        "title": "Traktor NML（コレクション）"
+      },
+      "notifications": {
+        "desc": "配信 + ジョブイベント向けのネイティブデスクトップ通知。",
+        "title": "通知"
+      },
+      "obs": {
+        "desc": "obs-websocket 経由の録画キャプチャ + 配信設定検証。",
+        "title": "OBS"
+      },
+      "obssync": {
+        "desc": "OBS メディアソースを共有ハウスクロックに追従させます（ローカル OBS + ペアリング済み/LAN OBS）。",
+        "title": "メディア同期"
+      },
+      "peers": {
+        "desc": "LAN 上の他の rave-mate インスタンスを発見 + ペアリング（Peers タブ）。",
+        "title": "LAN ピア"
+      },
+      "prodjlink": {
+        "desc": "ネットワーク接続された Pioneer プレーヤーからのライブ再生中情報。",
+        "title": "Pro DJ Link (Pioneer CDJ/XDJ)"
+      },
+      "recorder": {
+        "desc": "トラックごとのタイムスタンプ付き自動トラックリストをキャプチャ（Publish タブ）。",
+        "title": "セッションレコーダー"
+      },
+      "rekordbox": {
+        "desc": "rekordbox ソフトウェアからのリアルタイムまたは最近再生したトラック。",
+        "title": "Rekordbox（ライブ再生中）"
+      },
+      "rekordboxkey": {
+        "desc": "ライブ Rekordbox ライブラリ + 再生履歴のロックを解除します。",
+        "title": "Rekordbox master.db キー"
+      },
+      "rekordboxmidi": {
+        "desc": "rekordbox → rave-mate 再生/キュー出力（ワンクリック CSV）。",
+        "title": "Rekordbox MIDI マッピング"
+      },
+      "rtsp": {
+        "desc": "VRChat への低レイテンシ LAN ビデオ (AVPro rtspt://) - 画面、カメラ、任意のソース、リレーチェーンなし。",
+        "title": "ローカル RTSP ストリーム"
+      },
+      "serato": {
+        "desc": "Serato のローカルファイルからのコレクション + ライブ再生中情報。",
+        "title": "Serato DJ"
+      },
+      "service": {
+        "desc": "OS サービスとしてインストールし、ウィンドウを開かずに rave-mate を実行します。",
+        "title": "バックグラウンドで実行"
+      },
+      "setcapture": {
+        "desc": "Traktor からこのローカル Icecast エンドポイントへ配信することで、ライブセットをディスクにキャプチャします。レコーダーのトラックリストに時間連動します。",
+        "title": "セットキャプチャ (Icecast)"
+      },
+      "streambridge": {
+        "desc": "ライブセット（Traktor から）を rave.page に公開します。Traktor + サインインが必要です。",
+        "title": "ライブ配信ブリッジ"
+      },
+      "stt": {
+        "desc": "ローカル音声認識 → Twitch チャット。",
+        "title": "スピーク・トゥ・チャット (Whisper STT)"
+      },
+      "studio": {
+        "desc": "rave.page ウェブアプリがセキュアなループバック接続 (127.0.0.1) 経由でこのデスクトップを駆動できるようにします。",
+        "title": "ローカル Studio チャンネル"
+      },
+      "timecode": {
+        "desc": "他のソフトウェアや機材が追従するハウスクロック - LTC オーディオ、MTC MIDI、Art-Net。",
+        "title": "タイムコード出力 (SMPTE)"
+      },
+      "traktor": {
+        "desc": "ライブセット向けに Traktor Pro 4 のデッキ + ミキサーメタデータを受信します。",
+        "title": "Traktor / DJ ブリッジ"
+      },
+      "traktormap": {
+        "desc": "Traktor のコントローラーデバイスを追加/削除します - Settings.tsi を自動バックアップ。先に Traktor を終了してください。Kontrol D2 デバイスは QML フィードサーフェスを読み込みます。",
+        "title": "Traktor マッピング"
+      },
+      "traktorqml": {
+        "desc": "最も豊富なライブデータ - Traktor の D2 QML にパッチを当て、完全なデッキデータを :8080 にストリームします。管理者 (UAC) と Traktor の終了が必要。可逆。",
+        "title": "Traktor QML フィード（上級）"
+      },
+      "transcode": {
+        "desc": "ffmpeg ベースのメディア変換ワーカー（ローカル Studio 用）。",
+        "title": "トランスコード"
+      },
+      "twitch": {
+        "desc": "ライブチャット、フォロー/サブ/ビットアラート、ワンクリック配信タイトルプリセット + モデレーション。",
+        "title": "Twitch"
+      },
+      "unity": {
+        "desc": "rave.page エディタープラグインをアバタープロジェクトにインストールします。",
+        "title": "Unity"
+      },
+      "updates": {
+        "desc": "このビルドの自己更新フィード。",
+        "title": "更新"
+      },
+      "virtualdj": {
+        "desc": "コレクション + ライブ再生中情報 (Network Control / OS2L / トラックリスト)。",
+        "title": "VirtualDJ"
+      },
+      "vrchat": {
+        "desc": "VRChat アカウントをリンク: リアルタイムプレゼンス + VRChat タブ。パスワードはサインイン時に一度使用され、セッションクッキーのみ保持されます。",
+        "title": "VRChat リンク"
+      },
+      "vrctools": {
+        "desc": "スクリーンショット + カメラパスをワールドごとに整理します。",
+        "title": "VRChat ツール"
+      },
+      "vroverlay": {
+        "desc": "ヘッドセット内の Twitch チャット + アラート (OpenVR)。",
+        "title": "VR オーバーレイ"
+      },
+      "webcam": {
+        "desc": "カメラを Spout ソースとして共有し、そのレンズを駆動します - ここまたはペアリング済みインスタンスから。",
+        "title": "Webcam"
+      },
+      "worldsync": {
+        "desc": "gist から VRChat ワールドに供給: 権限リスト、ポスター看板、イベント + 再生中カード。",
+        "title": "ワールド同期"
+      }
+    },
+    "empty": {
+      "obsRemotes": "リモート OBS がまだありません。追加してください（OBS PC で obs-websocket を有効にする必要があります）。",
+      "obsSync": "メディアソースがまだありません。追加してください（その OBS 入力名、例: VLC Video Source）。",
+      "twPresets": "プリセットがまだありません。下に追加してください。",
+      "vrOverlays": "オーバーレイがまだありません。チャットまたはアラートパネルを追加してください。"
+    },
+    "label": {
+      "add": "追加",
+      "addMediaSource": "メディアソースを追加",
+      "addOutput": "出力を追加",
+      "addOverlay": "オーバーレイを追加",
+      "addPreset": "プリセットを追加",
+      "addRemoteObs": "リモート OBS を追加",
+      "alwaysVisible": "常に表示（グローバル非表示を無視）",
+      "anchor": "アンカー",
+      "anchorHead": "頭（バイザー）",
+      "anchorLeft": "左コントローラー",
+      "anchorRight": "右コントローラー",
+      "anchorWorld": "ワールド",
+      "apply": "適用",
+      "autoDetect": "（自動検出）",
+      "categoryOptional": "カテゴリ（任意）",
+      "downloading": "ダウンロード中…",
+      "edit": "編集",
+      "hostIp": "ホスト / IP",
+      "inputName": "入力名",
+      "install": "インストール",
+      "installFailed": "インストールに失敗しました: ",
+      "installed": "インストール済み",
+      "levelDbfs": "レベル (dBFS)",
+      "link": "リンク",
+      "local": "ローカル",
+      "localThisPc": "ローカル（この PC）",
+      "maxMessages": "最大メッセージ数",
+      "midiPort": "MIDI ポート",
+      "name": "名前",
+      "obs": "OBS",
+      "opacity01": "不透明度 0–1",
+      "sourceKind": "ソースの種類",
+      "syncOffsetMs": "同期オフセット (ms)",
+      "targetHostPort": "ターゲット (host:port)",
+      "template": "テンプレート",
+      "type": "種類",
+      "uninstall": "アンインストール",
+      "vrRuntime": "VR ランタイム",
+      "widthM": "幅 (m)",
+      "xM": "X (m)",
+      "yM": "Y (m)",
+      "yawDeg": "ヨー (°)",
+      "zM": "Z (m)"
+    },
+    "language": {
+      "desc": "rave-mate インターフェースの言語。未翻訳の項目は英語にフォールバックします。ここで選択するまで OS の言語が使用されます。",
+      "label": "インターフェース言語",
+      "title": "言語"
+    },
+    "modal": {
+      "addUnityProject": "Unity プロジェクトを追加",
+      "editOverlay": "オーバーレイを編集",
+      "editPreset": "プリセットを編集",
+      "ghPatNote": "github.com/settings/tokens → classic → 'gist' スコープのみで作成してください。封印して保存され、ログには記録されません。",
+      "ghPatPlaceholder": "ghp_…（classic トークン、'gist' スコープ）",
+      "obsRemote": "リモート OBS",
+      "obsRemotes": "リモート OBS インスタンス",
+      "obsSync": "同期メディアソース",
+      "obsSyncOne": "同期メディアソース",
+      "pasteGhToken": "GitHub トークンを貼り付け",
+      "tcExtra": "追加出力",
+      "tcExtraArt": "追加の Art-Net TimeCode ターゲット",
+      "tcExtraLtc": "追加の LTC 音声出力",
+      "tcExtraMtc": "追加の MTC MIDI 出力",
+      "twPresets": "タイトルプリセット",
+      "unityAddNote": "プロジェクトのルートを貼り付けてください（Assets/ + ProjectSettings/ が必要）- またはネイティブピッカーには「フォルダを追加…」を使用してください。",
+      "unityPathPlaceholder": "C:\\path\\to\\UnityProject"
+    },
+    "section": {
+      "account": {
+        "desc": "サインイン + このインスタンスが通信するエンドポイント。",
+        "title": "アカウントと API"
+      },
+      "djsources": {
+        "desc": "ライブデッキ/ミキサーデータ - 有効な各ソースは Live タブで統合されます。",
+        "title": "DJ ソース"
+      },
+      "integrations": {
+        "desc": "Twitch + VRChat + VR オーバーレイ + DMX ライティング + Unity。",
+        "title": "連携"
+      },
+      "libmedia": {
+        "desc": "ローカルライブラリ、ポスターエディター + メディアワーカー。",
+        "title": "ライブラリとメディア"
+      },
+      "recording": {
+        "desc": "トラックリスト、セットキャプチャ、OBS 録画 + フィンガープリント。",
+        "title": "録音"
+      },
+      "streaming": {
+        "desc": "ライブセットを公開。ウェブアプリやペアリング済みピアにこのマシンを駆動させます。外部機材向けのハウスタイムコード。",
+        "title": "配信とリモート"
+      },
+      "system": {
+        "desc": "通知、バックグラウンドサービス + クラッシュ復旧。",
+        "title": "システム"
+      }
+    },
+    "status": {
+      "account": {
+        "signedIn": "サインイン済み"
+      },
+      "audiorecord": {
+        "noDeviceSelected": "デバイスが選択されていません"
+      },
+      "common": {
+        "armed": "アーム済み",
+        "notListening": "待受していません",
+        "notRunning": "実行していません",
+        "notRunningPortBusy": "実行していません（ポート使用中？）",
+        "notSignedIn": "サインインしていません",
+        "on": "オン",
+        "ready": "準備完了",
+        "receiving": "受信中",
+        "recording": "録音中",
+        "running": "実行中",
+        "unavailable": "利用不可"
+      },
+      "dmx": {
+        "idleSeen": "アイドル - %d ユニバース検出",
+        "listeningNoData": "待受中 - DMX なし",
+        "receiving": "DMX 受信中"
+      },
+      "dmxmidi": {
+        "notRunning": "実行していません（MIDI ポートなし？）",
+        "readyOn": "準備完了: ",
+        "sentMsgs": "→ %s · %d 件"
+      },
+      "fingerprint": {
+        "missing": "fpcalc がありません",
+        "ready": "fpcalc 準備完了"
+      },
+      "library": {
+        "mpvMissing": "mpv がありません",
+        "mpvReady": "mpv 準備完了"
+      },
+      "medialink": {
+        "off": "メディアプレーンオフ（LAN ピアを有効にしてください）",
+        "receiveOnly": "受信のみ（共有オフ）",
+        "sharing": "共有中 - Peers タブから受信してください"
+      },
+      "midi": {
+        "noPortSelected": "MIDI ポートが選択されていません"
+      },
+      "obs": {
+        "connected": "接続済み",
+        "notConnected": "未接続"
+      },
+      "obssync": {
+        "clockStopped": "クロック停止",
+        "syncing": "%d ソースを同期中"
+      },
+      "peers": {
+        "discoveryOn": "ディスカバリーオン"
+      },
+      "recorder": {
+        "recordingTracks": "録音中 · %d トラック"
+      },
+      "rekordboxkey": {
+        "saveTest": "保存 + テスト"
+      },
+      "rekordboxmidi": {
+        "generateImport": "生成 + インポート"
+      },
+      "rtsp": {
+        "encodingWaiting": "エンコード中 - プレーヤーを待機中",
+        "startingSource": "ビデオソースを起動中…",
+        "streamingClients": "%d クライアントに配信中"
+      },
+      "service": {
+        "notChecked": "未確認"
+      },
+      "setcapture": {
+        "capturing": "キャプチャ中 ",
+        "listening": "待受中 ",
+        "receiverError": "受信側エラー",
+        "sourceDropped": "ソース切断 - 保持中"
+      },
+      "streambridge": {
+        "live": "LIVE - 公開中",
+        "needsTraktor": "Traktor ブリッジが必要です",
+        "signInRequired": "サインインが必要です"
+      },
+      "stt": {
+        "modelNotDownloaded": "モデルがダウンロードされていません",
+        "notInstalled": "インストールされていません"
+      },
+      "studio": {
+        "listeningLoopback": "ループバックで待受中"
+      },
+      "timecode": {
+        "armedPressStart": "アーム済み - START を押してください",
+        "running": "実行中 · "
+      },
+      "traktor": {
+        "listening": "待受中 :%d"
+      },
+      "traktormap": {
+        "manageDevices": "デバイスを管理"
+      },
+      "traktorqml": {
+        "checkInstall": "確認 / インストール"
+      },
+      "transcode": {
+        "ffmpegMissing": "ffmpeg がありません",
+        "ffmpegReady": "ffmpeg 準備完了"
+      },
+      "twitch": {
+        "connecting": "接続中…",
+        "liveAs": "ライブ中: "
+      },
+      "unity": {
+        "noProjects": "プロジェクトなし",
+        "projectsCount": "%d プロジェクト"
+      },
+      "updates": {
+        "devBuild": "開発ビルド",
+        "onChannel": "{channel} · ビルド {build}"
+      },
+      "vrchat": {
+        "signedInAs": "サインイン中: ",
+        "twoFaPending": "2FA 保留中"
+      },
+      "vrctools": {
+        "watching": "監視中"
+      },
+      "vroverlay": {
+        "active": "アクティブ - SteamVR 接続済み",
+        "nonVrReinstall": "非 VR ビルド - 再インストール",
+        "waitingSteamvr": "有効 - SteamVR を待機中"
+      },
+      "webcam": {
+        "readyPeersTab": "準備完了 - Peers タブ"
+      },
+      "worldsync": {
+        "linkedAs": "リンク中: ",
+        "notLinked": "GitHub 未リンク"
+      }
+    },
+    "subtitle": "使う機能だけをオンに - 無効な機能はポート、goroutine、サブプロセスを一切保有しません。",
+    "title": "設定",
+    "toast": {
+      "addedFromVcc": {
+        "few": "VCC から {count} 件のプロジェクトを追加しました",
+        "many": "VCC から {count} 件のプロジェクトを追加しました",
+        "one": "VCC から {count} 件のプロジェクトを追加しました",
+        "other": "VCC から {count} 件のプロジェクトを追加しました"
+      },
+      "applyPresetErr": "プリセットの適用: ",
+      "applyingPreset": "タイトルプリセットを適用中…",
+      "camPresetApplied": "カメラプリセットを適用しました",
+      "elevationDeclined": "昇格が拒否されました（UAC）",
+      "enterCodeAt": "{url} でコード {code} を入力してください",
+      "exportFailed": "エクスポートに失敗しました: ",
+      "ghErr": "GitHub: ",
+      "ghLinkFailed": "GitHub のリンクに失敗しました: ",
+      "ghLinked": "GitHub をリンクしました",
+      "ghLinkedAs": "GitHub を {login} としてリンクしました",
+      "ghStarting": "GitHub デバイスサインインを開始中…",
+      "installDjPathsErr": "DJ パスのインストール: ",
+      "installFailed": "{tool} のインストールに失敗しました",
+      "installPluginErr": "プラグインのインストール: ",
+      "installedDjPaths": {
+        "few": "{count} 個の DJ パスをインストールしました → {dst}",
+        "many": "{count} 個の DJ パスをインストールしました → {dst}",
+        "one": "{count} 個の DJ パスをインストールしました → {dst}",
+        "other": "{count} 個の DJ パスをインストールしました → {dst}"
+      },
+      "installedTool": "{tool} をインストールしました",
+      "mapActivated": "{name} を有効化しました",
+      "mapRemoved": "{name} を削除しました",
+      "masterDbErr": "master.db: ",
+      "masterDbOk": "master.db OK - {tracks} トラック、{sessions} セッション",
+      "noMasterDb": "master.db が見つかりません",
+      "notUnityProject": "Unity プロジェクトではありません（Assets/ + ProjectSettings/ が必要）",
+      "obsCheck": "OBS チェック: ",
+      "obsConnectFailed": "OBS 接続に失敗しました: ",
+      "obsConnecting": "OBS に接続中…",
+      "obsStreamGood": "OBS のストリーム設定は問題ありません",
+      "obsValidateFailed": "OBS 検証に失敗しました: ",
+      "openingBindings": "ヘッドセットでコントローラーバインドを開いています…",
+      "organized": "{photos} 枚の写真、{paths} 個のパスを整理しました",
+      "pluginInstalled": "rave.page プラグインをインストールしました",
+      "qmlExited": "QML フィードヘルパーが終了しました {code}",
+      "qmlFailed": "QML フィード {action} に失敗しました: ",
+      "qmlOk": "QML フィード {action} OK",
+      "qmlWorking": "処理中… UAC プロンプトを承認し、Traktor は閉じたままにしてください",
+      "rbmidiSaved": "{path} を保存しました - rekordbox でインポートしてください: Preferences → Controller → MIDI → {device} → IMPORT",
+      "rekordboxKeySaved": "Rekordbox のキーを保存しました",
+      "saveKeyFailed": "キーの保存に失敗しました: ",
+      "streamTitleSet": "ストリームタイトルを設定しました",
+      "svcFailed": "{action} に失敗しました: ",
+      "svcSucceeded": "{action} に成功しました",
+      "titleFailed": "タイトルに失敗しました: ",
+      "tokenRejected": "トークンが拒否されました: ",
+      "traktorWorking": "処理中…（Traktor を起動しないでください）",
+      "twitchErr": "Twitch: ",
+      "twitchSignInFailed": "Twitch サインインに失敗しました: ",
+      "twitchSignedIn": "Twitch にサインインしました",
+      "twitchSignedOut": "Twitch からサインアウトしました",
+      "twitchStarting": "Twitch サインインを開始中…",
+      "vrcSigningIn": "VRChat にサインイン中…"
+    },
+    "toggle": {
+      "ablelink": "Ableton Link",
+      "appgroups": "アプリグループ（クラッシュ再起動）",
+      "audiorecord": "オーディオデバイスキャプチャ",
+      "dmx": "DMX プレーン (Art-Net)",
+      "dmxmidi": "DMX → MIDI ブリッジ",
+      "fingerprint": "フィンガープリント (fpcalc)",
+      "guardian": "クラッシュガーディアン（アーム済み）",
+      "library": "ライブラリ",
+      "mediaeditor": "メディア / ポスターエディター",
+      "medialink": "Spout センダーを共有（メディアリンク）",
+      "midi": "MIDI 入力",
+      "nml": "Traktor コレクション/履歴 (NML)",
+      "notifications": "デスクトップ通知",
+      "obs": "OBS コントロール",
+      "obssync": "OBS メディア同期",
+      "peers": "LAN ピア",
+      "prodjlink": "Pioneer Pro DJ Link",
+      "recorder": "トラックリストレコーダー",
+      "rekordbox": "Rekordbox（ライブ）",
+      "rtsp": "RTSP パフォーマーチェーン",
+      "serato": "Serato",
+      "setcapture": "セットキャプチャ (Icecast 受信側)",
+      "streambridge": "ライブ配信ブリッジ",
+      "stt": "音声認識 → チャット",
+      "studio": "ローカル Studio チャンネル",
+      "timecode": "ハウスタイムコード (SMPTE)",
+      "traktor": "Traktor ブリッジ",
+      "transcode": "トランスコードワーカー",
+      "twitch": "Twitch",
+      "unity": "Unity プラグイン連携",
+      "virtualdj": "VirtualDJ",
+      "vrchat": "VRChat",
+      "vrctools": "VRChat ツール（写真 / カメラパス）",
+      "vroverlay": "VR オーバーレイ",
+      "webcam": "Webcam / UVC ソース",
+      "worldsync": "ワールド同期（gist フィード）"
+    },
+    "vr": {
+      "action": "アクション",
+      "addBind": "バインドを追加",
+      "addKeybind": "キーバインドを追加",
+      "addQuickButton": "クイックボタンを追加",
+      "addQuickButtonHeader": "クイックボタンを追加",
+      "appGroup": "アプリケーショングループ",
+      "assignKeyOrSlot": "MIDI キーおよび/または VR スロットを割り当てます。",
+      "autoApplyMode": "自動適用モード",
+      "bind": "バインド",
+      "bindCurrentWorld": "現在のワールドをバインド…",
+      "bindCurrentWorldTitle": "現在のワールドをバインド",
+      "buttonLabel": "ボタンラベル（ホバーツールチップ）",
+      "cameraPath": "カメラパス",
+      "currentWorldUnknown": "現在のワールドが不明です - まず VRChat のワールドに参加してください。",
+      "defaultLayoutName": "レイアウト {n}",
+      "editBindsSteamvr": "SteamVR でバインドを編集…",
+      "emptyKeybinds": "キーバインドがまだありません - 下に追加してください。",
+      "emptyLayouts": "保存されたレイアウトがありません。下で現在の配置を保存するか、インポートしてください。",
+      "emptyQuickButtons": "クイックボタンがまだありません - 下に追加してください。ヘッドセット内の手首ストリップで、内蔵ボタンの後に表示されます。",
+      "emptyWorldBindings": "ワールドバインドがまだありません。下で今いるワールドをバインドするか、ヘッドセット内の LAYOUTS ページで「このワールドのレイアウトを保存」を使用してください。",
+      "export": "エクスポート",
+      "exported": "{name} をエクスポートしました",
+      "glyph": "グリフ、1-3 文字（空 = ラベルから）",
+      "import": "インポート…",
+      "importFailed": "インポートに失敗しました: ",
+      "importFailedNotJson": "インポートに失敗しました: レイアウト JSON ではありません - ",
+      "imported": "{name} をインポートしました",
+      "importedLayoutName": "インポートしたレイアウト",
+      "keybinds": "キーバインド",
+      "layout": "レイアウト",
+      "layoutName": "レイアウト名",
+      "layoutPrefix": "レイアウト: ",
+      "layoutsTitle": "VR オーバーレイレイアウト",
+      "learnMidi": "MIDI を学習",
+      "learnPressKey": "キーを押してください…（キャンセル）",
+      "load": "読み込み",
+      "loadCameraPath": "カメラパスを読み込み",
+      "loadOverlayLayout": "オーバーレイレイアウトを読み込み",
+      "loadedLayout": "レイアウト {name} を読み込みました",
+      "local": "（ローカル）",
+      "midiNone": "MIDI:（なし）",
+      "midiPrefix": "MIDI: ",
+      "midiUnavailable": "MIDI 入力を利用できません。",
+      "noSavedLayouts": "保存されたレイアウトがありません - まず 1 つ保存してください（レイアウト…）。",
+      "obsInputName": "OBS 入力 / ソース名",
+      "obsInstance": "OBS インスタンス",
+      "overlay": "オーバーレイ",
+      "overlayCount": {
+        "few": "{count} 個のオーバーレイ",
+        "many": "{count} 個のオーバーレイ",
+        "one": "{count} 個のオーバーレイ",
+        "other": "{count} 個のオーバーレイ"
+      },
+      "perWorldLayouts": "ワールドごとのオーバーレイレイアウト",
+      "pickAction": "先にアクションを選択してください。",
+      "quickButtonsNote": "クイックボタンは、ヘッドセット内の手首ストリップにある追加のアイコンボタンです（手首バッジまたは召喚ボタンから開きます）。それぞれが 1 つのアクションを実行します。オーバーレイの切り替え、レイアウトやカメラパスの読み込み、OBS の録画/配信など。",
+      "rename": "名前を変更",
+      "renameLayout": "レイアウト名を変更",
+      "saveCurrentAs": "現在の状態を名前を付けて保存…",
+      "saveLayout": "レイアウトを保存",
+      "saveLayoutNote": "現在のオーバーレイ + 手首メニューの配置を名前付きレイアウトとしてキャプチャします。",
+      "target": "ターゲット",
+      "toggleOff": "オフ",
+      "toggleOn": "オン",
+      "vrSlot": "VR スロット",
+      "vrSlotNote": "VR スロットは SteamVR のバインド UI でコントローラー入力（コンボを含む）に割り当てられます。ここでスロットをアクションにマップしてください。",
+      "vrcToolsOff": "VRChat ツールがオフです - 現在のワールドは不明です。",
+      "worldLayoutsNote": "バインドされたレイアウトのある VRChat ワールドに参加したときの動作: off = 何もしない; notify = ヘッドセット内通知 + 手首メニューのワンタップ適用行; auto = レイアウトが即座に適用されます。バインドごとの On/Off で単一のワールドを無効化できます。",
+      "worldModeAuto": "auto（参加時に適用）",
+      "worldModeAutoSub": "バインドされたレイアウトが即座に適用されます",
+      "worldModeNotify": "notify（VR で提案）",
+      "worldModeNotifySub": "ヘッドセット内通知 + 手首メニューのワンタップ適用行",
+      "worldModeOffSub": "バインドされたワールドに参加しても何も起きません",
+      "worldPrefix": "ワールド: ",
+      "wristQuickButtons": "手首クイックボタン"
+    }
+  },
+  "tab": {
+    "appgroups": "App Groups",
+    "automations": "Automations",
+    "editor": "Editor",
+    "library": "Library",
+    "live": "Live",
+    "logs": "Logs",
+    "motion": "Motion",
+    "overlays": "Overlays",
+    "peers": "Peers",
+    "publish": "Publish",
+    "settings": "Settings",
+    "twitch": "Twitch",
+    "vrchat": "VRChat",
+    "worlds": "Worlds"
+  },
+  "track": {
+    "few": "{count} 曲",
+    "many": "{count} 曲",
+    "one": "{count} 曲",
+    "other": "{count} 曲"
+  },
+  "tray": {
+    "checkUpdates": "アップデートを確認",
+    "open": "rave-mate を開く",
+    "quit": "終了",
+    "tooltip": "rave-mate - {version}"
+  },
+  "twitch": {
+    "addPreset": "+ 追加",
+    "anonymous": "匿名",
+    "badgeCheer": "cheer",
+    "badgeHost": "host",
+    "badgeMod": "mod",
+    "badgeSub": "sub",
+    "badgeVip": "vip",
+    "bitsCount": {
+      "few": "{count} bits",
+      "many": "{count} bits",
+      "one": "{count} bits",
+      "other": "{count} bits"
+    },
+    "bitsPrefix": "({count} bits) {text}",
+    "cheered": "✦ {who} が {bits} を cheer",
+    "empty": {
+      "noPresets": "プリセットがまだありません。下に追加してください。"
+    },
+    "followed": "★ {name} がフォロー",
+    "giftedSubs": "🎁 {who} が {count} 件のサブをギフト{tier}",
+    "label": {
+      "addPreset": "+ プリセットを追加",
+      "applyPreset": "適用: {name}",
+      "banUser": "ユーザーをBAN",
+      "category": "カテゴリ",
+      "categoryPlaceholder": "Twitch カテゴリ（任意）",
+      "deleteMessage": "メッセージを削除",
+      "edit": "編集",
+      "editPreset": "プリセットを編集",
+      "moderateUser": "{name} をモデレート:",
+      "moderation": "モデレーション",
+      "name": "名前",
+      "setTitle": "タイトルを設定",
+      "template": "テンプレート",
+      "templateHint": "適用時に入力する値には {placeholders} を使用してください。",
+      "templatePlaceholder": "{genre} set @ {club} - {event}",
+      "timeout10": "タイムアウト 10 分",
+      "titlePresets": "タイトルプリセット"
+    },
+    "managePresets": "プリセット…",
+    "moderate": "モデレート",
+    "monthsCount": {
+      "few": "{count} か月",
+      "many": "{count} か月",
+      "one": "{count} か月",
+      "other": "{count} か月"
+    },
+    "noMessagesYet": "（メッセージはまだありません - チャット + アラートがここにライブ表示されます）",
+    "noPresetsYet": "タイトルプリセットはまだありません - ジャンル/会場ごとに追加してください。",
+    "offline": "オフライン",
+    "resubscribed": "💜 {name} が再サブスクライブ ({months}){tier}",
+    "send": "送信",
+    "sendPlaceholder": "チャットにメッセージを送信…",
+    "streamTitle": "配信タイトル",
+    "streamingCockpit": "配信コックピット",
+    "subscribed": "💜 {name} がサブスクライブ{tier}",
+    "subtitle": "チャット、アラート、配信タイトル、モデレーション",
+    "tier2": "(Tier 2)",
+    "tier3": "(Tier 3)",
+    "title": "Twitch",
+    "toast": {
+      "applyingMod": "モデレーションを適用中…",
+      "done": "完了",
+      "modFailed": "モデレーションに失敗しました: ",
+      "titleUpdateFailed": "タイトルの更新に失敗しました: ",
+      "titleUpdated": "ストリームタイトルを更新しました",
+      "updatingTitle": "ストリームタイトルを更新中…"
+    },
+    "unavailable": "Twitch を利用できません",
+    "viewersLive": "{count} 人視聴中 · LIVE",
+    "viewersUnknown": "- 視聴者"
+  },
+  "vrchat": {
+    "action": {
+      "copyFilePath": "ファイルパスをコピー",
+      "loadIntoVRChat": "VRChat に読み込む",
+      "openEmojiUploadPage": "VRChat 絵文字アップロードページを開く",
+      "openFolder": "フォルダーを開く",
+      "openInViewer": "ビューアで開く",
+      "openOutputFolder": "出力フォルダーを開く",
+      "organizeNow": "今すぐ整理",
+      "presets": "プリセット…",
+      "refreshEvents": "イベントを更新",
+      "saveBio": "自己紹介を保存",
+      "saveStatus": "ステータスを保存",
+      "variables": "変数…"
+    },
+    "campaths": {
+      "empty": "カメラパスが見つかりません - VRChat のカメラドリーメニューで保存してください",
+      "failedToRead": "パスの読み取りに失敗しました。",
+      "info": "{where} · {keyframes} · {duration}s · 保存 {when}",
+      "keyframes": {
+        "few": "{count} キーフレーム",
+        "many": "{count} キーフレーム",
+        "one": "{count} キーフレーム",
+        "other": "{count} キーフレーム"
+      },
+      "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
+      "playerRelative": "プレーヤー相対",
+      "svgHint": "静的アイソメトリックプレビュー - 色 = セグメントごとの速度（ミント遅い → ピンク速い）、ピンクの点 = キーフレーム、アンバー = パス開始点。",
+      "unknown": "不明",
+      "unknownWorld": "不明なワールド"
+    },
+    "card": {
+      "bio": "自己紹介",
+      "status": "ステータス"
+    },
+    "editor": {
+      "placeholderPreview": "プレースホルダープレビュー"
+    },
+    "emotes": {
+      "crop": "クロップ",
+      "field": {
+        "fps": "FPS",
+        "frames": "フレーム",
+        "name": "名前",
+        "outputDir": "出力ディレクトリ",
+        "source": "ソース（ビデオ/GIF）",
+        "trimEnd": "終端をトリム (秒)",
+        "trimStart": "先頭をトリム (秒)"
+      },
+      "generate": "スプライトシートを生成",
+      "hint": "1024² のアニメーション絵文字スプライトシートを生成します（名前 <name>_<N>frames_<fps>fps.png）。絶対ファイルパスを入力してください - ネイティブピッカーは webview で後日対応します。",
+      "pingpong": "ピンポンをベイク（順再生後に逆再生）"
+    },
+    "empty": {
+      "addPlaceholders": "先に自己紹介に {placeholders} を追加してください。",
+      "noBioPresets": "自己紹介プリセットがまだありません。",
+      "noStatusPresets": "ステータスプリセットがまだありません。"
+    },
+    "field": {
+      "presence": "プレゼンス",
+      "statusMessage": "ステータスメッセージ"
+    },
+    "groups": {
+      "about": "概要",
+      "action": {
+        "accept": "承認",
+        "add": "追加",
+        "ban": "BAN",
+        "cancel": "キャンセル",
+        "createPost": "投稿を作成",
+        "invite": "招待",
+        "inviteUser": "ユーザーを招待…",
+        "kick": "キック",
+        "loadMore": "さらに読み込む",
+        "postAnnouncement": "アナウンスを投稿",
+        "reject": "却下",
+        "remove": "削除",
+        "roles": "ロール…",
+        "unban": "BAN 解除"
+      },
+      "auditLogLoadedTitle": "監査ログ - {count} 件読み込み済み",
+      "auditPermHint": "閲覧には通常 group-audit-view 権限が必要です。",
+      "backToMyGroups": "← マイグループ",
+      "bans": {
+        "empty": "BAN されたユーザーはいません。"
+      },
+      "couldNotLoad": "このグループを読み込めませんでした - 更新して再試行してください。",
+      "currentAnnouncement": "現在のアナウンス",
+      "field": {
+        "imageId": "画像 ID（任意）",
+        "text": "テキスト",
+        "title": "タイトル"
+      },
+      "groupRules": "グループルール",
+      "hint": {
+        "announcementReplace": "グループの現在のアナウンスを置き換えます。VRChat は独自の文字数制限を適用します。",
+        "postAdds": "グループの投稿フィードに追加します（アナウンスは置き換えません）。",
+        "signInToManage": "グループを管理するには 設定 ▸ 連携 ▸ VRChat からサインインしてください。"
+      },
+      "invites": {
+        "empty": "未処理の招待はありません。"
+      },
+      "joinState": "参加: {state}",
+      "joined": "参加 {when}",
+      "kv": {
+        "joinState": "参加状態",
+        "owner": "オーナー",
+        "privacy": "プライバシー",
+        "shortCode": "ショートコード"
+      },
+      "loadingAuditLog": "監査ログを読み込み中…",
+      "loadingFriends": "フレンドを読み込み中…",
+      "loadingGeneric": "読み込み中…",
+      "loadingGroup": "グループを読み込み中…",
+      "loadingGroups": "グループを読み込み中…",
+      "loadingMembers": "メンバーを読み込み中…",
+      "loadingPosts": "投稿を読み込み中…",
+      "managementBadge": "管理",
+      "memberCountOnline": "{count}（{online} オンライン）",
+      "memberListChanged": "メンバーリストが変更されました - 閉じて開き直してください。",
+      "members": {
+        "few": "{count} 人",
+        "many": "{count} 人",
+        "one": "{count} 人",
+        "other": "{count} 人"
+      },
+      "membersLoadedTitle": "メンバー - {count} 件読み込み済み",
+      "moreMatches": "…さらに一致 - フィルターで絞り込んでください",
+      "myGroupsTitle": "マイグループ",
+      "newAnnouncement": "新規アナウンス",
+      "newPost": "新規投稿",
+      "noAnnouncementSet": "アナウンスは設定されていません。",
+      "noAuditEntries": "監査エントリはありません。",
+      "noFriendsMatch": "一致するフレンドがいません。",
+      "noManagementPerms": "このグループに管理権限がありません。",
+      "noMatch": "フィルターに一致するグループがありません。",
+      "noMembersVisible": "表示できるメンバーがいません。",
+      "noPostsYet": "投稿はまだありません。",
+      "noRolesVisible": "表示できるロールがありません。",
+      "noneFound": "VRChat グループが見つかりません - 更新して再試行してください。",
+      "notLoaded": "読み込まれていません - 更新して再試行してください。",
+      "onlineCount": "{count} オンライン",
+      "order": "順序 {n}",
+      "ownerFullPermissions": "オーナー - 全権限",
+      "permissionsCount": {
+        "few": "{count} 権限",
+        "many": "{count} 権限",
+        "one": "{count} 権限",
+        "other": "{count} 権限"
+      },
+      "postsLoadedTitle": "投稿 - {count} 件読み込み済み",
+      "rawEntry": "生エントリ",
+      "representing": "代表中",
+      "requests": {
+        "empty": "保留中の参加リクエストはありません。",
+        "title": "参加リクエスト"
+      },
+      "roleManagementLabel": "{name}（管理）",
+      "rolesNotLoaded": "ロールがまだ読み込まれていません - グループを更新してください。",
+      "rolesTitle": "ロール ({count})",
+      "selfAssignBadge": "自己割り当て",
+      "sendNotification": "メンバーに通知を送信",
+      "showingFirstN": "最初の {max} 件を表示。",
+      "tab": {
+        "auditLog": "監査ログ",
+        "bans": "BAN",
+        "invites": "招待",
+        "members": "メンバー",
+        "overview": "概要",
+        "posts": "投稿",
+        "requests": "リクエスト"
+      },
+      "twoFARequired": "2FA が必要です",
+      "verified": "認証済み",
+      "you": "あなた",
+      "youOwnThisGroup": "このグループのオーナーです",
+      "yourPermissions": "あなたの権限"
+    },
+    "hint": {
+      "bioSaveInfo": "上のテキストをそのまま保存します。自己紹介プリセットを読み込むと、{next_event}、{next_event_date}、{next_event_venue} … が現在のイベント + 変数を使って展開されます。",
+      "signInToEditProfile": "ステータスと自己紹介を編集するには 設定 ▸ 連携 ▸ VRChat からサインインしてください。"
+    },
+    "label": {
+      "addPreset": "プリセットを追加",
+      "bioPresets": "自己紹介プリセット",
+      "bioTemplatePlaceholder": "自己紹介テンプレート - {next_event}、{next_event_date}、{next_event_venue} を使用…",
+      "bioVariables": "自己紹介変数",
+      "bioVarsHint": "手動フォールバック値。{next_event}/{next_event_date} は利用可能な場合 rave.page のイベントから自動解決されます。{next_event_venue} は常にここから取得されます。",
+      "presetNamePlaceholder": "プリセット名",
+      "saveVariables": "変数を保存",
+      "statusMessagePlaceholder": "ステータスメッセージ",
+      "statusPresets": "ステータスプリセット"
+    },
+    "photos": {
+      "empty": "VRChat スクリーンショットが見つかりません - VRChat で写真を撮ってください（デフォルト Pictures\\VRChat）",
+      "previewFailed": "フル解像度の画像を読み込めませんでした。",
+      "showingFirst": "{total} 件中最初の {shown} 件を表示 - 残りはフォルダーを開いてください。"
+    },
+    "pipeline": {
+      "idle": "パイプラインアイドル",
+      "idleWithError": "パイプラインアイドル · {error}",
+      "live": "パイプラインライブ",
+      "off": "パイプラインオフ"
+    },
+    "presence": {
+      "placeholder": "（プレゼンス）"
+    },
+    "preset": {
+      "loadBioPlaceholder": "（自己紹介プリセットを読み込む）",
+      "loadStatusPlaceholder": "（ステータスプリセットを読み込む）"
+    },
+    "section": {
+      "cameraPaths": "カメラパス",
+      "emotes": "エモート - アニメーション絵文字ジェネレーター",
+      "photos": "写真",
+      "statusBio": "ステータスと自己紹介"
+    },
+    "status": {
+      "notSignedIn": "サインインしていません",
+      "signedInAs": "サインイン中: {name}"
+    },
+    "subtab": {
+      "groups": "グループ",
+      "profile": "プロフィール"
+    },
+    "subtitle": "アカウントステータスと自己紹介 · エモート · カメラパス · 写真 · グループ",
+    "toast": {
+      "ffmpegNotFound": "ffmpeg が見つかりません - 設定 ▸ メディアツールからインストールしてください",
+      "fpsPositive": "FPS は正の数である必要があります",
+      "loadFailed": "読み込みに失敗しました: ",
+      "needName": "プリセット名を設定してください",
+      "needNamePresence": "プリセット名を設定し、プレゼンスを選択してください",
+      "organized": "{paths} 個のパス、{photos} 枚の写真を整理しました。",
+      "pickFrameTier": "フレームティアを選択してください",
+      "pickSource": "先にソースのビデオ/GIF を選択してください",
+      "refreshingEvents": "イベントを更新中…",
+      "sentToVrchat": "VRChat に送信しました（OSC の有効化が必要）。",
+      "spriteGenerated": "スプライトシートを生成しました"
+    },
+    "tools": {
+      "unavailable": "VRChat ツールを利用できません"
+    },
+    "unavailable": "VRChat を利用できません"
+  },
+  "worlds": {
+    "action": {
+      "add": "追加",
+      "addFriend": "フレンドを追加…",
+      "addGroupRole": "グループロールを追加…",
+      "addList": "リストを追加",
+      "addName": "名前を追加",
+      "addPoster": "ポスターを追加",
+      "backToList": "リストに戻る",
+      "copyWorldUrl": "ワールド URL をコピー",
+      "edit": "編集",
+      "linkGithubDeviceCode": "GitHub をリンク（デバイスコード）",
+      "openGist": "gist を開く",
+      "pasteToken": "トークンを貼り付け…",
+      "pin": "☆ ピン留め",
+      "publishNow": "今すぐ公開",
+      "roles": "ロール…",
+      "search": "検索",
+      "unlink": "リンク解除",
+      "unpin": "★ ピンを外す",
+      "writeSourceUrls": "ソース URL を書き込む"
+    },
+    "billboards": "看板",
+    "entriesCount": {
+      "one": "{count} 件",
+      "other": "{count} 件"
+    },
+    "entry": {
+      "allMembers": "全メンバー",
+      "groupRoleLabel": "グループロール: {group} - {role}",
+      "userLabel": "ユーザー: {name}"
+    },
+    "eventsBoard": "イベントボード",
+    "favorites": "お気に入り",
+    "field": {
+      "caption": "キャプション",
+      "image": "画像",
+      "link": "リンク"
+    },
+    "github": {
+      "unavailable": "このビルドでは GitHub 連携を利用できません"
+    },
+    "groupMembersLabel": "{name} ({members})",
+    "help": {
+      "eventsExplainer": "今後の rave.page イベントのタイトル + 日付を、イベントボードプレハブがポーリングする gist に公開します。ワールドは更新間隔 + gist CDN キャッシュの約 5 分以内に変更を反映します。",
+      "grantGroupRoleExplainer": "グループ全体またはロールに付与します。メンバー展開はメンバーリストが表示されるところ（公開グループ）でのみ機能します。非公開グループは最後の有効な展開を保持します。",
+      "linkGithubAccount": "GitHub アカウントをリンク（gist スコープのみ）。デバイスコードには OAuth アプリのクライアント ID が必要です。'gist' スコープのクラシック PAT を貼り付ければ常に機能します。保管時にシールされ、ログには記録されません。",
+      "listsExplainer": "各リストはワールドがポーリングする gist を 1 つ公開します（allow.txt の改行区切り名 + allow.json エンベロープ）- VideoTXL Remote Whitelist、ProTV、汎用ローダー。グループロールエントリは公開時に現在のメンバー名に展開されます（Udon にはランタイムグループ API がありません）。",
+      "nowPlayingExplainer": "セッションがライブの間、再生中トラック（セッションハブの秘匿化出力からのアーティスト/タイトル）を最大 1 分に 1 回公開します。ワールドは gist CDN キャッシュにより 1～6 分遅延します。",
+      "postersExplainer": "ポスタープレハブ向けの gist 供給画像 URL + キャプション + リンク。VRChat 画像は別のホスト許可リスト (i.imgur.com, *.github.io, i.ibb.co, …) を通じて読み込まれます - 許可リスト外のホストはテキストのみ表示されます。",
+      "roleGrantExplainer": "ロール付与は、そのロールのメンバー名を gist（非掲載だが公開 URL）に公開します。掲載されるのはグループ/ロール全体のメンバー名のみで、ユーザー ID は決して掲載されません。",
+      "tokenSealed": "トークンは保管時にシールされます（gist スコープ）。下の公開ターゲットがあなたの gist に書き込みます。",
+      "unityExplainer": "Assets/rave.page/WorldSync/sources.json をプロジェクトに書き込みます。Unity で: ツール → rave.page → World Sync がフィードを一覧表示し、VideoTXL Remote Whitelist を接続するか、URL をコピーします。新しいリストを公開したら再度書き込んでください。"
+    },
+    "hint": {
+      "allLinksConnected": "すべてのリンクが接続済み - 公開の準備完了",
+      "githubNotLinked": "GitHub 未リンク - gist を公開するのに必要です",
+      "hostNotAllowlistedPrefab": "ホストが VRChat の画像許可リストにありません - プレハブはテキストのみ表示します",
+      "imageHostNotAllowed": "画像ホストが VRChat の画像許可リストにありません",
+      "linkMissing": "リンクがありません: {list}"
+    },
+    "kv": {
+      "linkedAs": "リンク中"
+    },
+    "list": {
+      "empty": "空のリスト - フレンドまたはグループロールを追加してください"
+    },
+    "lists": {
+      "empty": "権限リストはまだありません - 下に追加してください"
+    },
+    "liveDjCard": "ライブ DJ カード",
+    "loadingFriends": "フレンドを読み込み中…",
+    "loadingGroups": "グループを読み込み中…",
+    "membersCount": {
+      "one": "{count} 人",
+      "other": "{count} 人"
+    },
+    "missing": {
+      "vrchatFriendsExpansion": "VRChat（フレンドブラウザー + グループロール展開）"
+    },
+    "modal": {
+      "addFriend": "フレンドを追加",
+      "addGroupRole": "グループロールを追加",
+      "editList": "リストを編集: {name}",
+      "editPoster": "ポスターを編集"
+    },
+    "noFriendsFound": "フレンドが見つかりません",
+    "noGroupsSearchAbove": "グループなし - 上で検索してください",
+    "noMatch": "一致なし",
+    "posters": {
+      "empty": "ポスターはまだありません",
+      "emptyCaption": "（空）",
+      "hostNotAllowlisted": "⚠ 画像ホストが VRC 許可リストにありません"
+    },
+    "publish": "公開",
+    "publishWhileLive": "ライブ中に公開",
+    "refineFilter": "… フィルターを絞り込むとさらに表示されます",
+    "searchResults": "検索結果",
+    "section": {
+      "nowPlaying": "再生中",
+      "permissionLists": "権限リスト",
+      "posterBillboards": "ポスター看板",
+      "unityProjects": "Unity プロジェクト",
+      "upcomingEvents": "今後のイベント"
+    },
+    "status": {
+      "lastPublishError": "最終公開: {error}",
+      "notPublished": "まだ公開されていません。",
+      "published": "公開済み {time}",
+      "ready": "準備完了"
+    },
+    "subtitle": "gist から VRChat ワールドに供給 - 権限リスト、ポスター看板、イベント + ライブ再生中カード。ライブ更新、ワールド再ビルド不要。",
+    "unavailable": "ワールド同期を利用できません",
+    "unity": {
+      "empty": "Unity プロジェクトが未設定です（設定 ▸ 連携 ▸ Unity）"
+    },
+    "yourGroups": "あなたのグループ"
+  },
+  "remote": {
+    "controlling": "操作対象",
+    "thisComputer": "このコンピューター",
+    "loading": "読み込み中…"
+  }
+}

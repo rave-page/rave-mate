@@ -1,0 +1,129 @@
+package webui
+
+// Remote Publish actions: target switch + set select, and Export / Match-history / Delete routed
+// through remotectl.Client. Every network call runs in a u.bg goroutine with a ctx timeout and
+// patches the cache in on completion (the render path never blocks). LOCAL Publish dispatch is
+// untouched; these fire only when a peer is targeted (the handlers in publish_actions.go branch to
+// them). The control target (u.remoteTarget) is shared with the Library/Automations tabs.
+
+import (
+	"context"
+	"fmt"
+	"html"
+	"time"
+
+	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/remotectl"
+)
+
+func init() {
+	onPrefix("pub-target:", func(u *UI, m actMsg) { u.pubSetTarget(m.arg("pub-target:")) })
+}
+
+// pubSetTarget flips the shared control target and re-renders (empty = this computer). Resets both
+// the publish and library remote caches so every remote tab agrees on the target.
+func (u *UI) pubSetTarget(t string) {
+	u.mu.Lock()
+	u.remoteTarget = t
+	u.mu.Unlock()
+	ps := u.pubR()
+	ps.mu.Lock()
+	ps.resetFor(t)
+	ps.mu.Unlock()
+	ls := u.libR()
+	ls.mu.Lock()
+	ls.resetFor(t)
+	ls.mu.Unlock()
+	u.pubSetSel("") // drop stale selection
+	u.patchMain()
+}
+
+// pubRemoteSelect selects a set and kicks its tracklist fetch (captures are cached list-wide).
+func (u *UI) pubRemoteSelect(id string) {
+	u.pubSetSel(id)
+	s := u.pubR()
+	s.mu.Lock()
+	s.selID = id
+	s.tl, s.tlTotal, s.tlErr, s.tlLoading = nil, 0, "", false
+	s.mu.Unlock()
+	u.pubRemoteTracklistFetch(id)
+	u.patchMain()
+}
+
+func (u *UI) pubRemoteExport(id, fmtKey string) {
+	client := u.remoteClient(u.libRemoteTarget())
+	if client == nil {
+		return
+	}
+	u.bg(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), remotectl.DefaultCallTimeout)
+		defer cancel()
+		content, err := client.RecExport(ctx, id, fmtKey)
+		if err != nil {
+			u.toast(i18n.T("publish.remote.exportFail", i18n.A{"err": err.Error()}))
+			return
+		}
+		u.openModal(pubExportModal(fmtKey, content))
+	})
+}
+
+func (u *UI) pubRemoteMatch(id string) {
+	client := u.remoteClient(u.libRemoteTarget())
+	if client == nil {
+		return
+	}
+	u.toast(i18n.T("publish.remote.matching"))
+	u.bg(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		m, err := client.RecMatchHistory(ctx, id)
+		if err != nil {
+			u.toast(i18n.T("publish.remote.matchFail", i18n.A{"err": err.Error()}))
+			return
+		}
+		u.toast(i18n.T("publish.remote.matched", i18n.A{"n": fmt.Sprint(m.TrackCount)}))
+		u.pubRemoteListFetch() // refresh summaries (matched badge + track count)
+	})
+}
+
+func (u *UI) pubRemoteDelOpen(id string) {
+	name := i18n.T("publish.liveSet")
+	s := u.pubR()
+	s.mu.Lock()
+	for i := range s.sets {
+		if s.sets[i].ID == id {
+			name = orSetName(s.sets[i].Name)
+			break
+		}
+	}
+	s.mu.Unlock()
+	body := `<div class=np-artist>` + html.EscapeString(i18n.T("publish.remote.deleteConfirm", i18n.A{"name": name})) + `</div>`
+	footer := btnRow(
+		btn(i18n.T("publish.delete"), "destructive", "pub-del-do:"+id, ""),
+		btn(i18n.T("common.cancel"), "ghost", "modal-close", ""),
+	)
+	u.openModal(modal(i18n.T("publish.delete"), body, footer))
+}
+
+func (u *UI) pubRemoteDel(id string) {
+	client := u.remoteClient(u.libRemoteTarget())
+	u.closeModal()
+	if client == nil {
+		return
+	}
+	u.bg(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), remotectl.DefaultCallTimeout)
+		defer cancel()
+		if err := client.RecDelete(ctx, id); err != nil {
+			u.toast(i18n.T("publish.remote.deleteFail", i18n.A{"err": err.Error()}))
+			return
+		}
+		s := u.pubR()
+		s.mu.Lock()
+		s.selID = ""
+		s.mu.Unlock()
+		u.pubSetSel("")
+		u.toast(i18n.T("publish.remote.deleted"))
+		u.pubRemoteListFetch()
+	})
+}

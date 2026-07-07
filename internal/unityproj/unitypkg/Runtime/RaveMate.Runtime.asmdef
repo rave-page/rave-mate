@@ -1,0 +1,20 @@
+{
+  "name": "RaveMate.Runtime",
+  "rootNamespace": "RavePage.Mate.Runtime",
+  "references": [
+    "UdonSharp.Runtime",
+    "VRC.SDKBase",
+    "VRC.SDK3",
+    "VRC.Udon",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": ["UDONSHARP"],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

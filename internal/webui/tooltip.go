@@ -1,0 +1,178 @@
+package webui
+
+// Tooltip primitive - long-form, educational hover/click help. Design rule (owner,
+// 2026-07-05): the app teaches while it's used; rich explanations of technical terms
+// live in tooltips (never trimmed), ideally with links to authoritative sources.
+//
+// Markup is a pure-CSS "checkbox pin": hover/focus previews the card, clicking the
+// ⓘ pins it open (touch-friendly), clicking again unpins. The hidden checkbox also
+// makes tooltips ctl-drivable - `ctl set tt-<id> true` pins a card for screenshots
+// (data-label carries the id). Links open in the OS browser via the open-url act.
+//
+// Do NOT place a tooltip inside a live-ticked region (live_ticks.go) - the 1 Hz
+// innerHTML patch wipes the pin state. Anchor on the static wrapper instead
+// (e.g. section titles around live-net/live-tim).
+
+import (
+	"html"
+	"strings"
+
+	"rave.page/mate/internal/i18n"
+)
+
+// ttLink is one authoritative-source reference at the card's foot.
+type ttLink struct {
+	Label string
+	URL   string
+}
+
+// helpTopic is a reusable explanation of one technical term/feature.
+type helpTopic struct {
+	Title string
+	// Body paragraphs, split on "\n\n". Plain text (escaped at render).
+	Body  string
+	Links []ttLink
+}
+
+// helpTopics - the shared glossary. One entry per term; every surface that mentions
+// the term points here so the explanation stays consistent. Write for a newcomer,
+// stay precise for the expert.
+var helpTopics = map[string]helpTopic{
+	"network-graph": {
+		Title: i18n.T("help.network-graph.title"),
+		Body:  i18n.T("help.network-graph.body"),
+	},
+	"timing-graph": {
+		Title: i18n.T("help.timing-graph.title"),
+		Body:  i18n.T("help.timing-graph.body"),
+		Links: []ttLink{{"RTT explained (Wikipedia)", "https://en.wikipedia.org/wiki/Round-trip_delay"}},
+	},
+	"perf-graph": {
+		Title: i18n.T("help.perf-graph.title"),
+		Body:  i18n.T("help.perf-graph.body"),
+	},
+	"icecast": {
+		Title: i18n.T("help.icecast.title"),
+		Body:  i18n.T("help.icecast.body"),
+		Links: []ttLink{
+			{"Icecast project", "https://icecast.org/"},
+			{"Traktor broadcasting manual", "https://support.native-instruments.com/hc/en-us/articles/209590569"},
+		},
+	},
+	"session-recorder": {
+		Title: i18n.T("help.session-recorder.title"),
+		Body:  i18n.T("help.session-recorder.body"),
+	},
+	"fingerprinting": {
+		Title: i18n.T("help.fingerprinting.title"),
+		Body:  i18n.T("help.fingerprinting.body"),
+		Links: []ttLink{
+			{"AcoustID / Chromaprint", "https://acoustid.org/chromaprint"},
+		},
+	},
+	"vrchat-announcement": {
+		Title: i18n.T("help.vrchat-announcement.title"),
+		Body:  i18n.T("help.vrchat-announcement.body"),
+		Links: []ttLink{
+			{"VRChat groups docs", "https://creators.vrchat.com/groups/"},
+		},
+	},
+	"camera-paths": {
+		Title: i18n.T("help.camera-paths.title"),
+		Body:  i18n.T("help.camera-paths.body"),
+		Links: []ttLink{
+			{"VRChat camera docs", "https://docs.vrchat.com/docs/vrchat-camera"},
+			{"VRChat OSC overview", "https://docs.vrchat.com/docs/osc-overview"},
+		},
+	},
+	"motion-studio": {
+		Title: i18n.T("help.motion-studio.title"),
+		Body:  i18n.T("help.motion-studio.body"),
+		Links: []ttLink{
+			{"VMC protocol", "https://protocol.vmc.info/english"},
+			{"VRChat OSC trackers", "https://docs.vrchat.com/docs/osc-trackers"},
+		},
+	},
+	"embedded-video": {
+		Title: i18n.T("help.embedded-video.title"),
+		Body:  i18n.T("help.embedded-video.body"),
+		Links: []ttLink{
+			{"HTTP Range requests (MDN)", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests"},
+		},
+	},
+	"wave-nav": {
+		Title: i18n.T("help.wave-nav.title"),
+		Body:  i18n.T("help.wave-nav.body"),
+	},
+	"trim-editor": {
+		Title: i18n.T("help.trim-editor.title"),
+		Body:  i18n.T("help.trim-editor.body"),
+		Links: []ttLink{
+			{"ffmpeg silencedetect", "https://ffmpeg.org/ffmpeg-filters.html#silencedetect"},
+		},
+	},
+	"dual-alignment": {
+		Title: i18n.T("help.dual-alignment.title"),
+		Body:  i18n.T("help.dual-alignment.body"),
+		Links: []ttLink{
+			{"Cross-correlation (Wikipedia)", "https://en.wikipedia.org/wiki/Cross-correlation"},
+		},
+	},
+	"vrchat-presence": {
+		Title: i18n.T("help.vrchat-presence.title"),
+		Body:  i18n.T("help.vrchat-presence.body"),
+		Links: []ttLink{
+			{"VRChat status docs", "https://docs.vrchat.com/docs/vrchat-safety-and-trust-system"},
+		},
+	},
+}
+
+// tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -
+// callers may reference topics that land later).
+func tipTopic(id string) string {
+	t, ok := helpTopics[id]
+	if !ok {
+		return ""
+	}
+	return renderTip(id, t.Title, t.Body, t.Links)
+}
+
+// tip renders an ad-hoc tooltip (id must be a unique single token - it becomes the
+// ctl data-label `tt-<id>`). Prefer tipTopic + a registry entry for anything two
+// surfaces could share.
+func tip(id, title, body string, links ...ttLink) string {
+	return renderTip(id, title, body, links)
+}
+
+func renderTip(id, title, body string, links []ttLink) string {
+	var b strings.Builder
+	b.WriteString(`<label class=tt data-label="tt-` + html.EscapeString(id) + `" aria-label="About: ` + html.EscapeString(title) + `" tabindex=0>`)
+	b.WriteString(`<input type=checkbox class=tt-x tabindex=-1>`)
+	// lucide-style info glyph; currentColor follows muted/hover/pinned states.
+	b.WriteString(`<svg class=tt-ic viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+		`<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`)
+	// tt-card = transparent positioner (+hover bridge); tt-in = visual panel, scrolls
+	// internally when the viewport is short. __ttplace (shell.go) flips/clamps both.
+	b.WriteString(`<span class=tt-card role=tooltip><span class=tt-in>`)
+	b.WriteString(`<b class=tt-title>` + html.EscapeString(title) + `</b>`)
+	for _, p := range strings.Split(body, "\n\n") {
+		if p = strings.TrimSpace(p); p != "" {
+			b.WriteString(`<span class=tt-p>` + html.EscapeString(p) + `</span>`)
+		}
+	}
+	if len(links) > 0 {
+		b.WriteString(`<span class=tt-links>`)
+		for _, l := range links {
+			b.WriteString(`<a class=tt-link data-act=open-url data-val="` + html.EscapeString(l.URL) + `">` +
+				html.EscapeString(l.Label) + ` ↗</a>`)
+		}
+		b.WriteString(`</span>`)
+	}
+	b.WriteString(`</span></span></label>`)
+	return b.String()
+}
+
+// sectionTip is section() with a tooltip beside the title (title still escaped).
+func sectionTip(title, tipHTML, bodyHTML string) string {
+	return `<section class=sec><h2 class=sec-title>` + html.EscapeString(title) + tipHTML + `</h2>` + bodyHTML + `</section>`
+}

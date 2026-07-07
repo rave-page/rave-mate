@@ -1,0 +1,166 @@
+/* Library tab - browse/collection/playlists/history/id-marks/queue/presets + inspector.
+ * Merges the Fyne studio shell with the deprecated Electron Local-Studio design language
+ * (segmented chips, label+hint fields, source-aware media hints, track columns, waveform,
+ * Camelot key-wheel). Mobile-first: base = 320–375px, wider layouts via @media. */
+
+/* ── toolbars / chips ─────────────────────────────────────────────────────── */
+.lib-toolbar { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3); }
+.lib-toolbar .field { margin:0; }
+.lib-toolbar .field-input { flex:1 1 200px; max-width:360px; }
+.lib-tlabel { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--rp-muted); }
+.lib-crumb { display:flex; flex-wrap:wrap; gap:2px; align-items:center; font-size:12px; margin-bottom:var(--space-2); }
+.lib-crumb .rp-btn { padding:2px 6px; }
+.lib-crumb .sep { color:var(--rp-muted); padding:0 1px; }
+.lib-chips { display:flex; flex-wrap:wrap; gap:var(--space-2); margin-bottom:var(--space-3); }
+
+/* segmented / filter chip (Electron Local-Studio recipe) */
+.seg { display:inline-flex; flex-wrap:wrap; gap:4px; }
+.fchip {
+  font:600 11px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.06em; text-transform:uppercase;
+  padding:5px 10px; border-radius:var(--radius-2,8px); cursor:pointer;
+  border:1px solid var(--rp-faint); background:transparent; color:var(--rp-muted); transition:.12s;
+}
+.fchip:hover { border-color:rgba(255,255,255,.14); color:var(--rp-fg); }
+.fchip.active { background:rgba(247,8,100,.12); border-color:rgba(247,8,100,.45); color:var(--rp-fg); }
+.fchip .n { opacity:.6; font-size:9px; vertical-align:super; margin-left:3px; }
+
+/* ── track rows (collection / playlist / history) ──────────────────────────── */
+/* Dense winamp-style meta line + key pill: reflows cleanly at every width
+ * (aligned pixel-columns don't survive a 320px viewport). */
+.trk-table { display:flex; flex-direction:column; }
+.trk-h { display:flex; align-items:center; gap:var(--space-2); padding:4px var(--space-2);
+  font:600 9px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.1em; text-transform:uppercase; color:var(--rp-muted);
+  border-bottom:1px solid rgba(255,255,255,.12); }
+.trk-row { display:flex; align-items:center; gap:var(--space-2); padding:6px var(--space-2); border-bottom:1px solid var(--rp-faint); cursor:pointer; }
+.trk-row:hover { background:var(--rp-card); }
+.trk-row.sel { background:rgba(247,8,100,.10); box-shadow:inset 2px 0 0 var(--rp-base); }
+.trk-ic { flex:none; opacity:.7; }
+.trk-ic.warn { color:var(--rp-amber); opacity:1; }
+.trk-main { flex:1; min-width:0; }
+/* block, not inline: inline spans ran name+meta together ("desktop.ini504 B") */
+.trk-title { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trk-sub { display:block; font:11px var(--font-mono,monospace); color:var(--rp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trk-key { flex:none; }
+.trk-row input[type=checkbox] { flex:none; accent-color:var(--rp-base); }
+.trk-pos { flex:none; font:11px var(--font-mono,monospace); color:var(--rp-muted); min-width:22px; text-align:right; }
+/* columnar BPM/TIME/KEY (collection); hidden under 480px where the sub-line carries meta */
+.trk-bpm, .trk-dur { flex:none; width:44px; text-align:right; font:12px var(--font-mono,monospace); color:var(--rp-fg); font-variant-numeric:tabular-nums; }
+.trk-dur { color:var(--rp-muted); }
+.trk-h .trk-bpm, .trk-h .trk-dur { font:inherit; color:inherit; }
+.trk-keyh { flex:none; width:44px; text-align:center; }
+.trk-row .trk-key { width:44px; text-align:center; }
+@media (max-width:480px){ .trk-bpm, .trk-dur { display:none; } }
+
+/* harmonic key pill (relation-coloured vs the selected reference key) */
+.keypill { display:inline-block; font:600 10px/1 var(--font-mono,monospace); padding:3px 6px; border-radius:var(--radius-pill,999px); background:var(--rp-faint); color:var(--rp-muted); }
+.keypill.k-same { background:rgba(8,247,155,.18); color:var(--rp-mint); }
+.keypill.k-rel  { background:rgba(124,58,237,.20); color:#c4b5fd; }
+.keypill.k-up   { background:rgba(255,62,138,.18); color:var(--rp-hot); }
+.keypill.k-down { background:rgba(255,181,71,.18); color:var(--rp-amber); }
+
+/* ── browse grid (thumbnail cards) ─────────────────────────────────────────── */
+.lib-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:var(--space-2); }
+.gcard { border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); padding:var(--space-2); cursor:pointer; background:var(--rp-card); overflow:hidden; }
+.gcard:hover { border-color:rgba(247,8,100,.4); }
+.gcard-ic { font-size:26px; text-align:center; padding:var(--space-2) 0; }
+.gcard-t { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gcard-s { font:10px var(--font-mono,monospace); color:var(--rp-muted); }
+
+/* batch bar */
+.batchbar { position:sticky; bottom:0; display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center;
+  padding:var(--space-2); margin-top:var(--space-2); border-top:1px solid var(--rp-faint); background:var(--color-bg); }
+.batchbar .cnt { font:600 12px var(--font-display,Orbitron),sans-serif; color:var(--rp-base); }
+
+/* ── inspector ─────────────────────────────────────────────────────────────── */
+.insp-hd { margin-bottom:var(--space-2); }
+.insp-eyebrow { font:600 9px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.16em; text-transform:uppercase; color:var(--rp-muted); }
+.insp-title { font:600 16px/1.2 var(--font-display,Orbitron),sans-serif; word-break:break-word; }
+.insp-sub { font:11px var(--font-mono,monospace); color:var(--rp-muted); margin-top:2px; }
+.insp-sec { border-top:1px solid var(--rp-faint); padding:var(--space-2) 0; }
+.insp-sec-h { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--rp-muted); margin-bottom:var(--space-2); }
+
+/* dynamic media hints (Electron compareQuality chips) */
+.mediahints { display:flex; flex-direction:column; gap:6px; margin:var(--space-2) 0; }
+
+/* metadata card (per-stream probe rows) */
+.metacard { border:1px solid var(--rp-faint); background:rgba(0,0,0,.2); border-radius:var(--radius-2,8px); padding:var(--space-2); font-size:11px; }
+.metacard .mrow { display:flex; gap:6px; align-items:baseline; padding:2px 0; }
+.metacard .mk { color:var(--rp-muted); min-width:52px; }
+.metacard .mv { font-family:var(--font-mono,monospace); }
+.metacard .mv.v { color:var(--rp-base); } .metacard .mv.a { color:var(--rp-mint); }
+
+/* ── preset / encode builder ───────────────────────────────────────────────── */
+.pbuilder { display:flex; flex-direction:column; gap:var(--space-2); }
+.pb-field { display:flex; flex-direction:column; gap:3px; }
+.pb-label { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--rp-muted); }
+.pb-hint { font:10px var(--font-mono,monospace); color:var(--rp-muted); }
+.pb-grp { border-top:1px dashed var(--rp-faint); padding-top:var(--space-2); }
+
+/* ── waveform (wheel = zoom at cursor, drag = pan, click = seek) ───────────── */
+#lib-wave { touch-action:none; cursor:crosshair; user-select:none; }
+.wave-wrap { position:relative; border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); background:rgba(0,0,0,.25); padding:4px; }
+svg.wave { display:block; width:100%; height:88px; }
+.wave-zoom { font:10px var(--font-mono,monospace); color:var(--rp-muted); margin-top:2px; }
+
+/* overlay chips (source encoding + loudness) - hover/focus expands the card */
+.wchips { position:absolute; top:6px; left:6px; right:6px; display:flex; justify-content:space-between; gap:var(--space-2); pointer-events:none; }
+.wchip { pointer-events:auto; position:relative; cursor:help; font:600 10px/1 var(--font-mono,monospace); letter-spacing:.04em;
+  padding:4px 8px; border-radius:var(--radius-pill,999px); color:var(--rp-fg);
+  background:color-mix(in srgb, #16181d 82%, transparent); border:1px solid var(--rp-border,#3c414d);
+  backdrop-filter:blur(4px); white-space:nowrap; }
+.wchip.loud { color:var(--rp-mint); margin-left:auto; }
+.wchip.dim { color:var(--rp-muted); cursor:default; }
+/* __ttplace (shell.go) clamps left, flips via .ttp-up, caps max-height at viewport edges */
+.wchip-card { display:none; position:absolute; top:calc(100% + 6px); z-index:30;
+  width:min(300px, calc(100vw - 2rem));
+  left:0; padding:10px 12px; border-radius:var(--radius-2,8px); white-space:normal; cursor:auto;
+  background:#1b1e24; border:1px solid var(--rp-border,#3c414d); box-shadow:0 10px 28px rgba(0,0,0,.5);
+  font:11px/1.5 var(--font-sans,sans-serif); letter-spacing:0;
+  max-height:calc(100vh - 2rem); overflow-y:auto; overscroll-behavior:contain; }
+.wchip.loud .wchip-card { left:auto; right:0; }
+.wchip:hover .wchip-card, .wchip:focus-within .wchip-card, .wchip:focus .wchip-card { display:block; }
+.wc-row { display:flex; justify-content:space-between; gap:var(--space-2); padding:2px 0; font-family:var(--font-mono,monospace); }
+.wc-row b { color:var(--rp-muted); font-weight:600; }
+.wc-note { display:block; margin-top:6px; padding-top:6px; border-top:1px solid var(--rp-faint); color:var(--rp-muted); }
+.wc-link { display:inline-block; margin:6px 6px 0 0; padding:3px 8px; border-radius:var(--radius-pill,999px); cursor:pointer;
+  font:600 10px var(--font-display,Orbitron),sans-serif; color:var(--rp-violet-soft,#C4A4FF);
+  border:1px solid rgba(196,164,255,.35); background:rgba(124,58,237,.10); }
+.wc-link:hover { border-color:rgba(196,164,255,.6); }
+
+/* hover / playhead readout line under the waveform */
+.wave-meta { font:10px var(--font-mono,monospace); color:var(--rp-muted); margin-top:3px; min-height:13px; }
+.wave-tp { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin-top:var(--space-2); }
+.wave-time { font:12px var(--font-mono,monospace); color:var(--rp-muted); margin-left:auto; }
+
+/* ── key-wheel ─────────────────────────────────────────────────────────────── */
+.kwheel-wrap { display:flex; justify-content:center; padding:var(--space-2) 0; }
+svg.kwheel { width:100%; max-width:260px; height:auto; }
+svg.kwheel .kw-seg { cursor:pointer; }
+svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); }
+.kw-legend { display:flex; flex-wrap:wrap; gap:var(--space-2); justify-content:center; font-size:10px; color:var(--rp-muted); }
+.kw-legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:3px; vertical-align:middle; }
+
+/* queue */
+.qjob { border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); padding:var(--space-2); margin-bottom:var(--space-2); }
+.qjob-h { display:flex; gap:var(--space-2); align-items:center; justify-content:space-between; }
+.qjob-t { font-size:13px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* preset catalog cards */
+.pcards { display:grid; grid-template-columns:1fr; gap:var(--space-2); }
+@media (min-width:640px){ .pcards { grid-template-columns:1fr 1fr; } }
+
+/* form grid inside modals */
+.mform { display:flex; flex-direction:column; gap:var(--space-2); }
+.mform .field, .mform .slider { margin:0; }
+
+/* smart-rules editor */
+.sr-band { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-2); }
+.sr-count { font:11px var(--font-mono,monospace); color:var(--rp-mint); border-top:1px solid var(--rp-faint); padding-top:var(--space-2); }
+
+/* relocate candidate list */
+.reloc-list { display:flex; flex-direction:column; max-height:40vh; overflow-y:auto; margin-top:var(--space-2); }
+.reloc-row { display:flex; align-items:center; gap:var(--space-2); padding:5px 0; border-bottom:1px solid var(--rp-faint); }
+.reloc-row input[type=checkbox] { flex:none; accent-color:var(--rp-base); }
+.reloc-paths { flex:1; min-width:0; }
+.reloc-old { display:block; font:11px var(--font-mono,monospace); color:var(--rp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.reloc-new { display:block; font:11px var(--font-mono,monospace); color:var(--rp-mint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
