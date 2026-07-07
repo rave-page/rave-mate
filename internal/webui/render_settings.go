@@ -916,7 +916,7 @@ type settingsProbes struct {
 	tools map[string]mediatools.Status // key ("ffmpeg"|"fpcalc"|"mpv") → last status
 	vr    vrdll.Status
 	devs  map[string][]string          // kind ("midi"|"waveout"|"midiout"|"sttmic"|"audiorec") → names
-	unity map[string]unityproj.Project    // project dir → inspect result
+	unity map[string]unityproj.Project // project dir → inspect result
 	at    time.Time
 	ready bool
 	busy  bool // a background refresh is in flight (prevents stacking on the 1 Hz tick)
