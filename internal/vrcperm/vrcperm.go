@@ -1,6 +1,6 @@
 // Package vrcperm publishes VRChat world feeds as GitHub gists: permission
 // lists (user + group-role entries, roles expanded server-side because Udon has
-// no runtime group API - see WORLD_INTEGRATIONS_RESEARCH.md) and display
+// no runtime group API - see .devnotes/WORLD_INTEGRATIONS_RESEARCH.md) and display
 // channels (posters / events / now-playing). Worlds poll the gist raw URLs via
 // VRC string loading (gist.githubusercontent.com is allowlisted).
 package vrcperm

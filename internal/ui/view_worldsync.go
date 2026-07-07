@@ -22,7 +22,7 @@ import (
 // buildWorldSync is the Worlds tab: permission lists (users + group roles → gist
 // allowlists for VideoTXL etc.) and world-display channels (posters / events /
 // now-playing). Everything publishes to gists that worlds poll - see
-// WORLD_INTEGRATIONS_RESEARCH.md.
+// .devnotes/WORLD_INTEGRATIONS_RESEARCH.md.
 func (u *UI) buildWorldSync() fyne.CanvasObject {
 	ws := u.svc.WorldSync
 	if ws == nil {
