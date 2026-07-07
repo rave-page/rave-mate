@@ -1,6 +1,6 @@
 module rave.page/mate
 
-go 1.26.3
+go 1.26.4
 
 require (
 	fyne.io/fyne/v2 v2.7.4
@@ -15,7 +15,7 @@ require (
 	github.com/oapi-codegen/runtime v1.4.1
 	github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/image v0.26.0
+	golang.org/x/image v0.43.0
 	golang.org/x/net v0.48.0
 	golang.org/x/sys v0.42.0
 	modernc.org/sqlite v1.50.1
@@ -67,7 +67,7 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	golang.org/x/exp/shiny v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
