@@ -64,14 +64,19 @@ so shipping mismatched bytes would brick the self-heal download. Bump both toget
 CI (`ci.yml`) + security analysis (`security.yml`: CodeQL, govulncheck, supply-chain soak)
 run on every push/PR.
 
-## Secrets
+## Secrets + signing
 
 | Secret | Purpose | If absent |
 |---|---|---|
-| `UPDATE_SIGNING_KEY_PEM` | Ed25519 private key (PKCS8 PEM). Publish jobs sign the exact `latest.json` bytes (`openssl pkeyutl -rawin`, base64 raw 64-byte sig → `latest.json.sig`); build jobs derive + embed the matching `UpdatePubKey`. | Unsigned feed - updater falls back to sha256 + same-origin. Workflows stay green. |
+| `UPDATE_SIGNING_KEY_PEM` | Ed25519 private key (PKCS8 PEM). Publish jobs sign the exact `latest.json` bytes (`openssl pkeyutl -rawin`, base64 raw 64-byte sig → `latest.json.sig`). | **Build + publish FAIL.** `internal/version` embeds the matching public key as default - shipped binaries reject an unsigned feed, so publishing one would brick self-update. |
+| `CODE_SIGN_PFX_B64` | base64 PKCS12 Authenticode cert (currently self-signed, `CN=rave-mate, O=Magnifica UG`). `osslsigncode` signs `rave-mate.exe` BEFORE NSIS packs it, then the installer - so the manifest sha256s cover the signed bytes. | Skipped cleanly - unsigned binaries (SmartScreen warns either way with a self-signed cert). |
+| `CODE_SIGN_PFX_PASS` | PFX password (passed via `-readpass` file, never argv). | With the cert: signing fails. |
 
-Never echo or commit the key. The GitLab pipeline holds the original; transferring it here
-needs the owner's explicit approval.
+The build jobs assert the signing key derives exactly the `UpdatePubKey` embedded in
+`internal/version/version.go` - rotate the key and that constant in lockstep. Publish jobs also
+create **SLSA build-provenance attestations** (`actions/attest-build-provenance`) for the
+versioned exe/installer/linux binary + `latest.json`; verify any downloaded artifact with
+`gh attestation verify <file> -R rave-page/rave-mate`. Never echo or commit key material.
 
 ## Self-updater
 

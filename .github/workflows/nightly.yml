@@ -44,7 +44,7 @@ jobs:
       - name: mingw toolchain + NSIS
         run: |
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
-          sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick osslsigncode
       - name: Case-sensitivity shims (camelCase Windows-SDK headers)
         run: |
           # Some C++ cgo deps #include camelCase Windows-SDK headers; mingw-w64 ships them
@@ -71,34 +71,59 @@ jobs:
           got=$(sha256sum internal/vroverlay/sdk/openvr_api.dll | awk '{print $1}')
           echo "vrdll.dllSHA=$want"; echo "vendored dll =$got"
           [ -n "$want" ] && [ "$want" = "$got" ] || { echo "::error::openvr_api.dll does not match internal/vrdll dllSHA - bump the constant in lockstep"; exit 1; }
-      - name: Build rave-mate.exe (all feature tags)
+      - name: Assert signing key matches embedded UpdatePubKey
         env:
           UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
-          # Embed the manifest-verification pubkey only when the signing key is provisioned
-          # (derive: Ed25519 SPKI DER = 12-byte header + 32-byte raw key). Never echo the key.
-          UPDATE_PUBKEY=""
-          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
-            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
-            UPDATE_PUBKEY=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
-            rm -f /tmp/upd_key.pem
-            echo "signing key present - embedding UpdatePubKey"
-          else
-            echo "signing key absent - unsigned feed (sha256 + same-origin only)"
-          fi
+          # internal/version embeds the release pubkey as its default - every shipped binary
+          # REQUIRES a manifest signed by the matching private key. Fail fast if the CI key
+          # is missing or diverges (derive: Ed25519 SPKI DER = 12-byte header + 32-byte raw
+          # key). Never echo the key material.
+          EMBEDDED=$(sed -n 's/.*UpdatePubKey = "\([A-Za-z0-9+/=]*\)".*/\1/p' internal/version/version.go)
+          [ -n "$EMBEDDED" ] || { echo "::error::no embedded UpdatePubKey in internal/version"; exit 1; }
+          [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || { echo "::error::UPDATE_SIGNING_KEY_PEM secret missing - binaries embed a pubkey and would reject an unsigned feed"; exit 1; }
+          printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
+          DERIVED=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
+          rm -f /tmp/upd_key.pem
+          [ "$DERIVED" = "$EMBEDDED" ] || { echo "::error::signing key does not derive the embedded UpdatePubKey - rotate key + internal/version in lockstep"; exit 1; }
+          echo "signing key matches embedded UpdatePubKey"
+      - name: Build rave-mate.exe (all feature tags)
+        run: |
+          # UpdatePubKey comes from its source default in internal/version (asserted above).
           LDFLAGS="-s -w -H windowsgui \
             -linkmode external -extldflags '-static -static-libgcc -static-libstdc++' \
             -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
             -X rave.page/mate/internal/version.Channel=nightly \
-            -X rave.page/mate/internal/version.FeedURL=${FEED} \
-            -X rave.page/mate/internal/version.UpdatePubKey=${UPDATE_PUBKEY}"
+            -X rave.page/mate/internal/version.FeedURL=${FEED}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
             go build -tags "spout vr abletonlink" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
           cp internal/vroverlay/sdk/openvr_api.dll dist/    # runtime-loaded by the vr backend (vendored)
           ls -la dist/
+      - name: Authenticode-sign exe
+        env:
+          CODE_SIGN_PFX_B64: ${{ secrets.CODE_SIGN_PFX_B64 }}
+          CODE_SIGN_PFX_PASS: ${{ secrets.CODE_SIGN_PFX_PASS }}
+        run: |
+          # osslsigncode = Authenticode on the Linux cross-build runner (signtool is
+          # Windows-only). Sign the exe BEFORE NSIS so the installer bundles signed bytes;
+          # RFC3161 timestamp with an un-timestamped fallback so a flaky TSA can't kill the
+          # build. Password via -readpass file, never argv. Skips cleanly if cert absent.
+          if [ -z "${CODE_SIGN_PFX_B64:-}" ]; then echo "code-sign cert absent - shipping unsigned binaries"; exit 0; fi
+          umask 077
+          printf '%s' "$CODE_SIGN_PFX_B64" | base64 -d > /tmp/cs.pfx
+          printf '%s' "$CODE_SIGN_PFX_PASS" > /tmp/cs.pass
+          sign_file() {
+            osslsigncode sign -pkcs12 /tmp/cs.pfx -readpass /tmp/cs.pass -n "rave-mate" -i "https://rave.page" \
+              -h sha256 -ts http://timestamp.digicert.com -in "$1" -out "$1.signed" \
+            || osslsigncode sign -pkcs12 /tmp/cs.pfx -readpass /tmp/cs.pass -n "rave-mate" -i "https://rave.page" \
+              -h sha256 -in "$1" -out "$1.signed"
+            mv "$1.signed" "$1"
+            osslsigncode verify -in "$1" 2>/dev/null | grep -E "Signature verification|Subject" || true
+          }
+          sign_file dist/rave-mate.exe
       - name: NSIS installer
         run: |
           convert internal/ui/assets/icon.png -define icon:auto-resize=64,48,32,16 dist/rave-mate.ico || echo "icon conversion failed; using NSIS default icon"
@@ -114,6 +139,20 @@ jobs:
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
             $ICONDEF \
             installer/rave-mate.nsi
+      - name: Authenticode-sign installer + cleanup
+        if: always()
+        env:
+          CODE_SIGN_PFX_B64: ${{ secrets.CODE_SIGN_PFX_B64 }}
+        run: |
+          if [ -f /tmp/cs.pfx ] && [ -f dist/rave-mate-setup.exe ]; then
+            osslsigncode sign -pkcs12 /tmp/cs.pfx -readpass /tmp/cs.pass -n "rave-mate installer" -i "https://rave.page" \
+              -h sha256 -ts http://timestamp.digicert.com -in dist/rave-mate-setup.exe -out dist/rave-mate-setup.exe.signed \
+            || osslsigncode sign -pkcs12 /tmp/cs.pfx -readpass /tmp/cs.pass -n "rave-mate installer" -i "https://rave.page" \
+              -h sha256 -in dist/rave-mate-setup.exe -out dist/rave-mate-setup.exe.signed
+            mv dist/rave-mate-setup.exe.signed dist/rave-mate-setup.exe
+            echo "installer signed"
+          fi
+          rm -f /tmp/cs.pfx /tmp/cs.pass
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -135,22 +174,14 @@ jobs:
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - name: Build rave-mate-linux
-        env:
-          UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
-          UPDATE_PUBKEY=""
-          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
-            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
-            UPDATE_PUBKEY=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
-            rm -f /tmp/upd_key.pem
-          fi
+          # UpdatePubKey comes from its source default in internal/version.
           LDFLAGS="-s -w \
             -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
             -X rave.page/mate/internal/version.Channel=nightly \
-            -X rave.page/mate/internal/version.FeedURL=${FEED} \
-            -X rave.page/mate/internal/version.UpdatePubKey=${UPDATE_PUBKEY}"
+            -X rave.page/mate/internal/version.FeedURL=${FEED}"
           go build -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
       - uses: actions/upload-artifact@v4
         with:
@@ -162,6 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write # SLSA build-provenance attestation (sigstore OIDC)
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -206,17 +239,21 @@ jobs:
             '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha}],released:$r,notes:$n}' \
             > dist/mate/latest.json
           cat dist/mate/latest.json
-          # Detached Ed25519 signature over the EXACT manifest bytes (skipped until the key
-          # secret is provisioned - updater then relies on sha256 + same-origin).
-          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
-            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/ed25519.pem
-            openssl pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in dist/mate/latest.json -out /tmp/sig.bin
-            base64 -w0 /tmp/sig.bin > dist/mate/latest.json.sig
-            rm -f /tmp/ed25519.pem /tmp/sig.bin
-            echo "manifest signed -> latest.json.sig"
-          else
-            echo "WARN: UPDATE_SIGNING_KEY_PEM unset - publishing UNSIGNED manifest"
-          fi
+          # Detached Ed25519 signature over the EXACT manifest bytes. REQUIRED: shipped
+          # binaries embed the verification pubkey and reject an unsigned feed.
+          [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || { echo "::error::UPDATE_SIGNING_KEY_PEM missing - refusing to publish a feed the binaries would reject"; exit 1; }
+          printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/ed25519.pem
+          openssl pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in dist/mate/latest.json -out /tmp/sig.bin
+          base64 -w0 /tmp/sig.bin > dist/mate/latest.json.sig
+          rm -f /tmp/ed25519.pem /tmp/sig.bin
+          echo "manifest signed -> latest.json.sig"
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/mate/rave-mate-*.exe
+            dist/mate/rave-mate-linux-*
+            dist/mate/latest.json
       - name: Roll nightly release
         env:
           GH_TOKEN: ${{ github.token }}

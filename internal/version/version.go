@@ -22,9 +22,11 @@ var (
 	FeedURL = ""
 	// UpdatePubKey is the base64 raw (32-byte) Ed25519 public key the updater uses to
 	// verify the signed manifest. When set, a valid manifest signature is REQUIRED - a
-	// feed-write attacker can't forge a release without the private key. Empty → signing
-	// not yet provisioned, updater falls back to sha256 + same-origin only.
-	UpdatePubKey = ""
+	// feed-write attacker can't forge a release without the private key. The default is
+	// the rave-mate release-signing public key (public value, safe in source; the private
+	// half lives only in CI secrets - CI asserts they match). -ldflags -X can still
+	// override; an empty override falls back to sha256 + same-origin only.
+	UpdatePubKey = "qLoy6xADZr/dK0kTFEbLrq++c+NnSxcbO3KrR0Qg0Cw="
 	// Channel is the release channel: "nightly" | "alpha" | "beta" | "production".
 	// Empty → derived from the Version branch prefix (see ResolvedChannel). Stamp
 	// explicitly via -X to override (nightly.yml stamps "nightly"). Anything other
