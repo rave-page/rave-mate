@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,16 @@ import (
 // lockAddr is the single-instance guard + control IPC channel. The primary holds the
 // listen for its lifetime; secondary launches forward deeplinks, and the `rave-mate ctl`
 // CLI connects here to query/drive the running daemon (status, logs, show, tab, quit).
-const lockAddr = "127.0.0.1:47620"
+// RAVE_MATE_CTL_ADDR overrides it (dev/test: isolated instance beside a real one; pair
+// with RAVE_MATE_CONFIG_DIR so state stays isolated too).
+var lockAddr = envOr("RAVE_MATE_CTL_ADDR", "127.0.0.1:47620")
+
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
 
 // Control is the daemon-side surface the IPC server exposes to CLI clients.
 type Control interface {

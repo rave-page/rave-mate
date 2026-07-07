@@ -1710,7 +1710,15 @@ func resolveAPIBase() string {
 }
 
 // Dir is the OS-correct per-user config dir for the app, created if absent.
+// RAVE_MATE_CONFIG_DIR overrides it (dev/test: isolated state beside a real instance;
+// pair with RAVE_MATE_CTL_ADDR so the control socket is isolated too).
 func Dir() (string, error) {
+	if v := strings.TrimSpace(os.Getenv("RAVE_MATE_CONFIG_DIR")); v != "" {
+		if err := os.MkdirAll(v, 0o755); err != nil {
+			return "", err
+		}
+		return v, nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
