@@ -58,6 +58,17 @@ func hasState(evs []RunEvent, s RunState) bool {
 	return false
 }
 
+// hasTerminal matches the run-level terminal event (Step == nActions), not a per-step
+// StateCompleted - only after the terminal event is the run persisted (Runs() readable).
+func hasTerminal(evs []RunEvent, nActions int) bool {
+	for _, e := range evs {
+		if e.State == StateCompleted && e.Step == nActions {
+			return true
+		}
+	}
+	return false
+}
+
 func newTestSvc(t *testing.T) *Service {
 	t.Helper()
 	st := mustStore(t)
@@ -85,7 +96,7 @@ func TestStartRunOnceEmitsEvents(t *testing.T) {
 	if runID == "" {
 		t.Fatal("empty runId")
 	}
-	evs := waitFor(t, get, func(e []RunEvent) bool { return hasState(e, StateCompleted) })
+	evs := waitFor(t, get, func(e []RunEvent) bool { return hasTerminal(e, 1) })
 	if hasState(evs, StateAwaiting) {
 		t.Fatal("once mode must not await confirmation")
 	}
