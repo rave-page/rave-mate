@@ -69,6 +69,7 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
   shots; **fix obvious visual issues you find even if your change didn't cause them.**
   Deeper states (settings sections, dialogs) via `ctl click` + `ctl screenshot`.
 - **Clean up scratch artefacts.** Delete one-off scripts/dumps; keep the tree clean.
+- **Root `.md` hygiene → `.devnotes/`.** This repo is PUBLIC: keep only user/contributor-facing docs in root (`README`, `CONTRIBUTING`, `SECURITY`, `SUPPLY_CHAIN`, `CLAUDE.md`, `AGENTS.md`). Longer-form user docs → `docs/`. Every other `.md` — `*_SUMMARY`/`*_PLAN`/`*_RESEARCH`/`*_DESIGN`/migration notes, any agent work-product — goes in `.devnotes/` (git-tracked, not user-facing). Never leave agent notes in the base dir; write new ones straight to `.devnotes/`.
 - **Commit after each patch / feature / phase.** Once a logical unit passes `go build ./... && go vet ./... && go test ./...` (and golangci-lint if present), commit it (never push) - don't batch many features into one commit. Pushing and PRs happen only when the user explicitly asks.
 
 ## Commands
@@ -123,7 +124,7 @@ internal/
               Duplex newline-JSON stdio; daemon-side proxies (TraktorProxy etc.) keep the old
               in-proc surfaces. The vr child owns ALL OpenVR (default on vr builds; state is
               re-pushed declaratively on every respawn; `inProc` config key opts out). See
-              FEATURE_ISOLATION_SUMMARY.md. DB-bound features stay in-proc, panic-guarded
+              .devnotes/FEATURE_ISOLATION_SUMMARY.md. DB-bound features stay in-proc, panic-guarded
               (debuglog.Go everywhere; UI uses goUI).
   sysexec/    Shared child-process plumbing: Hide, LowPriority, AssignToJob (Windows
               kill-on-close job object), KillTree. Used by worker + featurehost.
@@ -154,31 +155,31 @@ internal/
               wire keys (zero ingest wire-break). Recorder = confirmed-play tracklist.
   icecast/    Local Icecast2 source receiver: Traktor broadcasts a live set here; streams the
               encoded body to setsDir + parses now-playing (in-band Ogg Vorbis comments +
-              /admin/metadata). Feeds icecastsrc + the set→tracklist linker. See SET_CAPTURE_SUMMARY.md.
+              /admin/metadata). Feeds icecastsrc + the set→tracklist linker. See .devnotes/SET_CAPTURE_SUMMARY.md.
   setfp/      Per-track fingerprinting of a captured set: ffmpeg slices each track's span
               (offset = track.StartedAt − capture.StartedAt) → fpcalc → change_log (track_hash+fp).
   obs/        obs-websocket v5 client (handshake/auth, request correlator, op:5 event
               fan-out, GetRecordStatus). The featurehost "obs" child watches
               RecordStateChanged → finished recordings link to the tracklist like Icecast
-              captures (kind=obs in set_recordings). See RECORDING_COCKPIT_SUMMARY.md.
+              captures (kind=obs in set_recordings). See .devnotes/RECORDING_COCKPIT_SUMMARY.md.
   vrchat/     Client-side VRChat link (port of app/src/vrchat): stdlib http client vs
               api.vrchat.cloud (Basic-auth login + totp/otp/emailOtp 2FA + auth/twoFactorAuth
               cookie session), sealed session at rest (vrchat.bin; creds never stored),
               account state machine (Manager), + pipeline WS (wss://pipeline.vrchat.cloud).
               The pipeline runs as the featurehost "vrchat" child; opt-in uplink vaults the
-              session on rave.page (/auth/vrchat/token). See VRCHAT_SUMMARY.md.
+              session on rave.page (/auth/vrchat/token). See .devnotes/VRCHAT_SUMMARY.md.
   localmedia/ Shared local-fs browse (ListDirectory + Defaults), web-byte-exact. Backs BOTH the
               studio WS server and remotectl, so remote file-browse streams the controlled box's
               fs (no native dialog). studio/dispatch.go + remotectl both call it.
   remotectl/  LAN peer-control RPC over peerlink ChanControl - a paired instance drives this one's
               automations + library + file-browse. Mirrors the studio method system
               ({t,id,method,params} + localMedia.*/automations.*/library.*). Endpoint + typed
-              Client + handlers over automation.Manager / *libdb.DB. See REMOTE_CONTROL_SUMMARY.md.
+              Client + handlers over automation.Manager / *libdb.DB. See .devnotes/REMOTE_CONTROL_SUMMARY.md.
   midi/       MIDI input driver. Windows = winmm.dll via stdlib syscall (NO new dep);
               !windows = stub. Consumed by session/sources/midisrc (Denon + custom CC map).
   sysactivity/ OS idle + running-process detection for schedule gates. Windows = user32
               GetLastInputInfo + kernel32 Toolhelp snapshot (stdlib syscall, no dep); !windows =
-              no-op (gating fails open). Used by automation/scheduler. See SCHEDULE_CONDITIONS_SUMMARY.md.
+              no-op (gating fails open). Used by automation/scheduler. See .devnotes/SCHEDULE_CONDITIONS_SUMMARY.md.
   stream/     Live stream publisher: subscribes to the session Merger (the hub), batches
               merged updates → /streams/{id}/ingest + heartbeat (port of streamPublisher.ts).
   studio/     Local Studio control channel: loopback WS server (127.0.0.1:47615-47619)
@@ -211,7 +212,7 @@ tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-
 
 `libdb` also has an append-only `change_log` (every play_count/last_played/rating/metadata
 mutation + recorder play events) - the backbone for the future cross-machine library merge
-(Phase 3) and rollback. See `PEER_LINK_SUMMARY.md`.
+(Phase 3) and rollback. See `.devnotes/PEER_LINK_SUMMARY.md`.
 
 ### Auth (browser-deeplink, no embedded login)
 

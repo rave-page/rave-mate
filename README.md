@@ -108,7 +108,7 @@ each software can deliver and the setup trade-offs.
   per-world overlay layouts
 - **World Sync**: publish permission lists (VideoTXL-compatible), poster billboards, upcoming
   events + a live now-playing card as GitHub gists your world polls - update worlds without
-  rebuilds (see `WORLD_INTEGRATIONS_RESEARCH.md`)
+  rebuilds (see `.devnotes/WORLD_INTEGRATIONS_RESEARCH.md`)
 - **Unity plugin** (`page.rave.mate`): motion-take import + avatar preview, world-sync URL
   wiring, UdonSharp reader prefabs
 
