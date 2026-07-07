@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/shared/selfupdate"
 )
 
 const (
@@ -93,8 +94,11 @@ func Install(ctx context.Context, feedURL string, onProgress func(done, total in
 	dst := filepath.Join(filepath.Dir(exe), DLLName)
 	// Cache-bust (the feed serves a stable filename a CDN may cache) by keying on the content hash.
 	url := feedURL + "/" + DLLName + "?v=" + dllSHA
+	// Same redirect policy as the self-updater: feed origin only, plus GitHub's release-asset
+	// CDN when the feed is github.com (asset downloads 302 there). sha256 pin gates the bytes.
+	client := &http.Client{CheckRedirect: selfupdate.RedirectPolicy(feedURL)}
 	tmp := dst + ".dl"
-	if err := download(ctx, url, dllSHA, tmp, onProgress); err != nil {
+	if err := download(ctx, client, url, dllSHA, tmp, onProgress); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -111,8 +115,9 @@ func Install(ctx context.Context, feedURL string, onProgress func(done, total in
 	return nil
 }
 
-// download streams url to dst, verifying its SHA-256 equals wantHex (lowercase) before returning.
-func download(ctx context.Context, url, wantHex, dst string, onProgress func(done, total int64)) error {
+// download streams url to dst via client (redirect-pinned), verifying its SHA-256 equals
+// wantHex (lowercase) before returning.
+func download(ctx context.Context, client *http.Client, url, wantHex, dst string, onProgress func(done, total int64)) error {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
@@ -121,7 +126,7 @@ func download(ctx context.Context, url, wantHex, dst string, onProgress func(don
 	}
 	req.Header.Set("User-Agent", "rave-mate/vrdll")
 	req.Header.Set("Cache-Control", "no-cache")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

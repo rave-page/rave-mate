@@ -93,17 +93,50 @@ func New(feedURL string, current int, pubKeyB64 string) *Updater {
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 			// Refuse redirects that leave the feed origin - a 30x must not be a way around the
-			// same-origin check on the download URL.
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if feedHost != "" && !strings.EqualFold(req.URL.Host, feedHost) {
-					return fmt.Errorf("refusing cross-origin redirect to %s", req.URL.Host)
-				}
-				if len(via) >= 10 {
-					return fmt.Errorf("too many redirects")
-				}
-				return nil
-			},
+			// same-origin check on the download URL. (GitHub feeds get the CDN carve-out, see
+			// RedirectPolicy.)
+			CheckRedirect: RedirectPolicy(feedURL),
 		},
+	}
+}
+
+// githubFeedHost reports whether host (the feed's) is github.com - the ONLY feed origin
+// granted the release-asset CDN carve-out below. Any other feed stays strictly same-origin.
+func githubFeedHost(host string) bool {
+	return strings.EqualFold(host, "github.com")
+}
+
+// githubCDNURL reports whether u is an https URL on GitHub's release-asset CDN
+// (*.githubusercontent.com - the exact host has changed over the years, so match the dot-suffix,
+// never a single pinned host; https only). Consulted only when the FEED host is github.com;
+// sha256 (+ optional Ed25519 manifest signature) still gates every byte regardless of host.
+func githubCDNURL(u *url.URL) bool {
+	if !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(u.Hostname()), ".githubusercontent.com")
+}
+
+// RedirectPolicy returns a CheckRedirect that pins redirects to the feed origin, plus GitHub's
+// release-asset CDN when (and only when) the feed host is github.com - GitHub asset downloads
+// 302 from github.com to *.githubusercontent.com. Exported so other feed-root fetchers
+// (internal/vrdll) enforce the exact same policy.
+func RedirectPolicy(feedURL string) func(req *http.Request, via []*http.Request) error {
+	feedHost := ""
+	if pu, err := url.Parse(strings.TrimRight(feedURL, "/")); err == nil {
+		feedHost = pu.Host
+	}
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		if feedHost == "" || strings.EqualFold(req.URL.Host, feedHost) {
+			return nil
+		}
+		if githubFeedHost(feedHost) && githubCDNURL(req.URL) {
+			return nil
+		}
+		return fmt.Errorf("refusing cross-origin redirect to %s", req.URL.Host)
 	}
 }
 
@@ -194,6 +227,8 @@ func (u *Updater) embeddedPubKey() ed25519.PublicKey {
 // validateURL requires the download URL to share the feed's scheme+host and sit under the
 // feed's path. The real feed is https (a dev build has no feed → updater disabled), so this
 // enforces https in production while staying testable against an http test server.
+// One carve-out: a github.com feed also accepts https *.githubusercontent.com URLs (GitHub's
+// release-asset CDN - assets 302 there anyway); no path rule for CDN hosts, sha256 still gates.
 func (u *Updater) validateURL(raw string) error {
 	if raw == "" {
 		return fmt.Errorf("manifest has no download url")
@@ -206,11 +241,14 @@ func (u *Updater) validateURL(raw string) error {
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(p.Scheme, f.Scheme) || !strings.EqualFold(p.Host, f.Host) ||
-		!strings.HasPrefix(p.Path, strings.TrimSuffix(f.Path, "/")+"/") {
-		return fmt.Errorf("manifest url not on feed origin (%s)", u.feedURL)
+	if strings.EqualFold(p.Scheme, f.Scheme) && strings.EqualFold(p.Host, f.Host) &&
+		strings.HasPrefix(p.Path, strings.TrimSuffix(f.Path, "/")+"/") {
+		return nil
 	}
-	return nil
+	if githubFeedHost(f.Host) && githubCDNURL(p) {
+		return nil
+	}
+	return fmt.Errorf("manifest url not on feed origin (%s)", u.feedURL)
 }
 
 // cacheBustURL appends the content hash as a query param so a CDN/proxy keys the binary on its

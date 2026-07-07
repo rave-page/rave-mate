@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -153,6 +154,91 @@ func TestFetchAssetsRejectsUnsafe(t *testing.T) {
 	}
 	if staged := u.fetchAssets(context.Background(), exe, bad); len(staged) != 0 {
 		t.Fatalf("expected all unsafe assets rejected, got %d staged", len(staged))
+	}
+}
+
+// githubPolicyCases drive both validateURL and RedirectPolicy: the GitHub release-asset CDN
+// carve-out applies ONLY when the feed host is github.com, https only, dot-suffix only.
+var githubPolicyCases = []struct {
+	name string
+	feed string
+	url  string
+	ok   bool
+}{
+	{"github feed accepts https CDN", "https://github.com/rave-page/rave-mate/releases/download/nightly", "https://objects.githubusercontent.com/x/rave-mate.exe", true},
+	{"github feed accepts newer CDN host", "https://github.com/rave-page/rave-mate/releases/download/nightly", "https://release-assets.githubusercontent.com/x/rave-mate.exe", true},
+	{"github feed refuses http CDN", "https://github.com/rave-page/rave-mate/releases/download/nightly", "http://objects.githubusercontent.com/x/rave-mate.exe", false},
+	{"github feed refuses evil host", "https://github.com/rave-page/rave-mate/releases/download/nightly", "https://evil.example.com/rave-mate.exe", false},
+	{"github feed refuses suffix trick (no dot)", "https://github.com/rave-page/rave-mate/releases/download/nightly", "https://evilgithubusercontent.com/x", false},
+	{"non-github feed refuses CDN", "https://development.rave.page/app/mate", "https://objects.githubusercontent.com/x/rave-mate.exe", false},
+	{"non-github feed refuses evil host", "https://development.rave.page/app/mate", "https://evil.example.com/rave-mate.exe", false},
+	{"non-github feed keeps same-origin", "https://development.rave.page/app/mate", "https://development.rave.page/app/mate/rave-mate.exe", true},
+	{"github feed keeps same-origin", "https://github.com/rave-page/rave-mate/releases/download/nightly", "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate.exe", true},
+}
+
+// TestValidateURLGitHubCDN: manifest download URLs on GitHub's CDN are accepted for a
+// github.com feed only; everything else keeps the strict same-origin+path rule.
+func TestValidateURLGitHubCDN(t *testing.T) {
+	for _, c := range githubPolicyCases {
+		t.Run(c.name, func(t *testing.T) {
+			err := New(c.feed, 1, "").validateURL(c.url)
+			if c.ok && err != nil {
+				t.Fatalf("want accept, got %v", err)
+			}
+			if !c.ok && err == nil {
+				t.Fatal("want reject, got accept")
+			}
+		})
+	}
+	// Path-prefix rule still applies on the feed host itself (github or not).
+	if err := New("https://github.com/rave-page/rave-mate/releases/download/nightly", 1, "").
+		validateURL("https://github.com/other/repo/releases/download/x/evil.exe"); err == nil {
+		t.Fatal("want reject: feed-host URL outside the feed path")
+	}
+}
+
+// TestRedirectPolicyGitHubCDN: redirects follow the same table as validateURL.
+func TestRedirectPolicyGitHubCDN(t *testing.T) {
+	for _, c := range githubPolicyCases {
+		t.Run(c.name, func(t *testing.T) {
+			tu, err := url.Parse(c.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := RedirectPolicy(c.feed)(&http.Request{URL: tu}, nil)
+			if c.ok && got != nil {
+				t.Fatalf("want follow, got %v", got)
+			}
+			if !c.ok && got == nil {
+				t.Fatal("want refuse, got follow")
+			}
+		})
+	}
+	// Redirect count cap unchanged.
+	tu, _ := url.Parse("https://github.com/x")
+	if err := RedirectPolicy("https://github.com/x")(&http.Request{URL: tu}, make([]*http.Request, 10)); err == nil {
+		t.Fatal("want too-many-redirects refusal")
+	}
+}
+
+// TestDownloadRefusesCrossOriginRedirect: end-to-end, a non-github feed 302ing the binary off
+// its origin fails the download (the relaxation must not weaken non-github feeds).
+func TestDownloadRefusesCrossOriginRedirect(t *testing.T) {
+	payload := []byte("evil-bytes")
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(evil.Close)
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL+"/rave-mate.exe", http.StatusFound)
+	}))
+	t.Cleanup(feed.Close)
+
+	sum := sha256.Sum256(payload)
+	rel := &Release{URL: feed.URL + "/rave-mate.exe", SHA256: hex.EncodeToString(sum[:])}
+	err := New(feed.URL, 1, "").download(context.Background(), rel, t.TempDir()+"/out.bin", nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing cross-origin redirect") {
+		t.Fatalf("want cross-origin redirect refusal, got %v", err)
 	}
 }
 
