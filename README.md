@@ -11,26 +11,67 @@
 > breaking changes, keep backups of your media/library/config, and don't rely on it for
 > unattended production. Want the bleeding edge? Grab a **nightly** build (see below).
 
-A cross-platform native **Live-Suite for DJs, VJs and VR creators**: DJ-set capture,
-cross-software library sync, live streaming, OBS/Resolume control, and VR/VRChat tooling -
-one small Go binary that sits in your tray and fuses your DJ software, OBS, Twitch, VRChat and
-VR rig into a single control surface (one Go binary, no Electron). It integrates with
-[rave.page](https://rave.page) for stream publishing, profiles and events.
+A cross-platform native **Live-Suite for DJs, VJs and VR creators** - one small Go binary
+(no Electron) that sits in your tray next to your DJ software and handles everything
+*around* the set. It works with **Traktor, Serato, VirtualDJ and Rekordbox** (plus Pioneer
+CDJ/XDJ rigs over Pro DJ Link and generic MIDI controllers): live deck data becomes
+automatic tracklists, overlays and stream titles; sets get captured and fingerprinted; your
+library stays in sync across DJ programs; and OBS, Twitch, VRChat, VR headsets and DMX
+lighting hang off the same session. Integrates with [rave.page](https://rave.page) for
+stream publishing, profiles and events.
 
 **Why it's cool**: everything is local-first and transparent (a live log of every request that
 leaves your machine), features are independent toggles with zero footprint when off, crashes are
 isolated into supervised subprocesses, and the whole thing installs as one static exe.
 
+![The Live tab mid-set: go-live strip, record and timecode controls, merged deck cards and connection status](https://raw.githubusercontent.com/wiki/rave-page/rave-mate/img/streaming-live.png)
+
+## What it does for you
+
+- **Record every set, hands-free.** Live deck data from your DJ software becomes a
+  confirmed-play tracklist (a track counts after ~30s as the audible deck); when your DJ
+  software later writes its own history file, rave-mate auto-reconciles the tracklist
+  against that ground truth. Optional audio capture time-links the recording to the
+  tracklist. → [Recording & Tracklists](https://github.com/rave-page/rave-mate/wiki/Recording-and-Tracklists)
+- **Show what's playing.** Browser/PNG/OBS overlays, scrolling waveform + EQ panel, and a
+  now-playing text file any streaming tool can read - all fed from the merged session, so
+  they work the same whichever DJ software you run. →
+  [Overlays & Visuals](https://github.com/rave-page/rave-mate/wiki/Overlays-and-Visuals)
+- **One library, every DJ program.** Merge collections and sync ratings, cues and playlists
+  between Traktor, Rekordbox and VirtualDJ. →
+  [Library](https://github.com/rave-page/rave-mate/wiki/Library)
+- **Go live on rave.page**, run your **Twitch** channel, perform in **VR/VRChat**, pair
+  **multiple PCs**, drive **DMX lights** - see the
+  [wiki](https://github.com/rave-page/rave-mate/wiki) for a guide per feature group.
+
+Traktor is the most field-tested integration; the others are implemented and tested but have
+fewer field hours (see the status table below).
+[DJ Sources](https://github.com/rave-page/rave-mate/wiki/DJ-Sources) spells out exactly what
+each software can deliver and the setup trade-offs.
+
 ## Features (grouped)
 
 ### DJ sources → one live session
-- **Traktor Pro 4** HTTP bridge (deck/channel/master, controller mapping manager)
-- **Pioneer Pro DJ Link** (CDJ/XDJ LAN now-playing), **Serato**, **VirtualDJ**, **Rekordbox**
-- **MIDI-in** source (Denon stock map + custom mappings, MIDI learn)
-- Traktor **NML** collection/history; **Icecast set capture** (record the broadcast + in-band
-  now-playing)
-- All sources fuse in a priority **session hub** → one merged "what's playing" state
-- **Tracklist recorder** (confirmed-play), set ↔ recording linking, per-track fingerprinting
+- **Traktor, Serato, VirtualDJ, Rekordbox**, **Pioneer Pro DJ Link** (CDJ/XDJ LAN
+  now-playing), generic **MIDI-in** - each an opt-in Settings card that states its trade-off
+- **Traktor live deck state comes via controller mappings** (the primary path): the built-in
+  mapping manager one-click installs the shipped **RavePage Generic-MIDI map** (play, fader,
+  EQ, filter, cue for decks A-D) and the stock **Denon DN-HC4500** map (A/B titles) into
+  Traktor's `Settings.tsi` (auto-backup, refuses while Traktor runs); rave-mate decodes them
+  over a virtual MIDI port. **MIDI learn** binds controller presses to rave-mate actions
+- Advanced Traktor opt-in: the **QML feed** - patches a controller QML surface so Traktor
+  POSTs full 4-deck title/artist/BPM/position to a local listener (richest feed; needs admin
+  rights, re-apply after each Traktor update)
+- **Collection enrichment**: album/genre/key/BPM looked up from your DJ software's collection
+  files - e.g. Traktor's NML, a **snapshot Traktor writes on save/close**, not live in-app
+  state (fine for tags, which rarely change mid-set)
+- **Icecast set capture**: point your DJ software's broadcast (e.g. Traktor Broadcasting) at
+  rave-mate's local receiver - set audio lands on disk time-linked to the tracklist, in-band
+  now-playing included
+- All sources fuse per-field by priority + TTL in a **session hub** → one merged
+  "what's playing" state
+- **Tracklist recorder** (confirmed-play, all supported software), post-set
+  **history auto-reconcile**, set ↔ recording linking, per-track fingerprinting
 
 ### Streaming, recording & publishing
 - Live set publisher → rave.page streams (ingest + heartbeat)
@@ -47,7 +88,7 @@ isolated into supervised subprocesses, and the whole thing installs as one stati
 
 ### Library
 - Local DJ library (SQLite), browse/search/playlists, transcode workers, tag write-back,
-  **cross-DJ-software library sync** (Traktor/Serato/VirtualDJ/Rekordbox hub-merge), play-count
+  **cross-DJ-software library sync** (Traktor/Rekordbox/VirtualDJ hub-merge), play-count
   sync, append-only change log
 
 ### Multi-PC & remote
@@ -86,7 +127,7 @@ isolated into supervised subprocesses, and the whole thing installs as one stati
 
 | Area | Status |
 |---|---|
-| Traktor bridge, session hub, recorder, overlays (web/PNG/OBS), library, transcode | **Battle-tested** - used in production sets by the authors |
+| Traktor sources (controller-mapping MIDI, QML feed, NML), session hub, recorder, overlays (web/PNG/OBS), library, transcode | **Battle-tested** - used in production sets by the authors |
 | Twitch, OBS control, set capture, audio recorder, peer link (LAN) | **Used regularly**, stable |
 | VRChat account/status/emoji/photos/cam-paths, VR overlays/keybinds | **Used in real events**; VR surface still gets frequent fixes |
 | World Sync (gist perms/posters/events/now-playing) | **New** - Go side unit-tested; needs live soak |
@@ -97,6 +138,12 @@ isolated into supervised subprocesses, and the whole thing installs as one stati
 
 ## Quick start
 
+**Users**: grab a build from [Releases](https://github.com/rave-page/rave-mate/releases),
+run it (it lives in the tray - closing the window hides it), open **Settings** and switch on
+the card for your DJ software. Full walkthrough:
+[Getting Started](https://github.com/rave-page/rave-mate/wiki/Getting-Started).
+
+**From source**:
 ```
 make build                        # current OS
 go run ./cmd/rave-mate            # tray + window
@@ -128,8 +175,13 @@ files or systems (see LICENSE §15–16).
 
 ## Docs
 
-- **Users**: [`docs/user/`](docs/user/) - one guide per feature group: what it does, how to use
-  it, how it works, caveats.
+- **[Wiki](https://github.com/rave-page/rave-mate/wiki)** - workflow-first guides:
+  [Getting Started](https://github.com/rave-page/rave-mate/wiki/Getting-Started),
+  [User Guide index](https://github.com/rave-page/rave-mate/wiki/User-Guide),
+  [DJ Sources](https://github.com/rave-page/rave-mate/wiki/DJ-Sources),
+  developer + reference pages.
+- **Users (in-repo)**: [`docs/user/`](docs/user/) - one guide per feature group: what it does,
+  how to use it, how it works, caveats.
 - **Developers**: [`docs/dev/`](docs/dev/) - architecture, building, releasing;
   [`CONTRIBUTING.md`](CONTRIBUTING.md); `CLAUDE.md` (agent/dev workflow rules);
   [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md) (7-day soak policy, dependency justification).
