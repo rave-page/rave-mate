@@ -53,7 +53,9 @@ func (v *editorView) build() fyne.CanvasObject {
 		tplNames[i] = t.Name
 	}
 
-	v.tplSel = widget.NewSelect(tplNames, func(_ string) { v.scheduleRender() })
+	// OnChanged attached after all widgets exist - SetSelectedIndex would arm the
+	// render debounce mid-construction and race buildPoster against nil fields.
+	v.tplSel = widget.NewSelect(tplNames, nil)
 	v.tplSel.SetSelectedIndex(0)
 
 	v.titleEntry = widget.NewEntry()
@@ -85,6 +87,8 @@ func (v *editorView) build() fyne.CanvasObject {
 	v.previewImg = canvas.NewImageFromImage(blankImage())
 	v.previewImg.FillMode = canvas.ImageFillContain
 	v.previewImg.SetMinSize(fyne.NewSize(360, 270))
+
+	v.tplSel.OnChanged = func(_ string) { v.scheduleRender() }
 
 	previewBtn := widget.NewButtonWithIcon("Preview", theme.MediaPlayIcon(), func() {
 		v.renderPreview()
@@ -168,6 +172,9 @@ func (v *editorView) scheduleRender() {
 
 // renderPreview runs the compositor and refreshes the preview image.
 func (v *editorView) renderPreview() {
+	if v.tplSel == nil || v.djEntry == nil || v.previewImg == nil {
+		return // debounce timer fired before build() finished
+	}
 	p := v.buildPoster()
 	v.poster = p
 	img, err := p.Render()
