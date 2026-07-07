@@ -16,8 +16,8 @@ require (
 	github.com/webview/webview_go v0.0.0-20240831120633-6173450d4dd6
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/image v0.43.0
-	golang.org/x/net v0.48.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/net v0.55.0
+	golang.org/x/sys v0.45.0
 	modernc.org/sqlite v1.50.1
 )
 
