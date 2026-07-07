@@ -157,8 +157,16 @@ func (u *UI) peerConnsHTML(conns []peerlink.ConnInfo, remotes map[string]peerbri
 		actions += btn(i18n.T("peers.forget"), "ghost", "peer-forget:"+c.NodeID, "")
 		b.WriteString(`<div class=row><span class=row-label>` + dot(v) + ` ` + html.EscapeString(peerName(c.Nickname, c.NodeID)) +
 			` <span class=np-artist>` + html.EscapeString(st) + `</span></span>` + btnRow(actions) + `</div>`)
-		if np := fmtRemoteNowPlaying(remotes[c.NodeID].NowPlaying); np != "" {
-			b.WriteString(`<div class=peer-np>▶ ` + html.EscapeString(np) + `</div>`)
+		for _, ds := range remotes[c.NodeID].NowPlaying.AllDecks() {
+			line := fmtRemoteDeck(ds)
+			if line == "" {
+				continue
+			}
+			mark, cls := "▷ ", "peer-np peer-np--quiet"
+			if ds.Audible {
+				mark, cls = "▶ ", "peer-np"
+			}
+			b.WriteString(`<div class="` + cls + `">` + mark + html.EscapeString(line) + `</div>`)
 		}
 	}
 	b.WriteString(`</div>`)
@@ -523,16 +531,20 @@ func (u *UI) xferRowHTML(t filexfer.Transfer, resolve func(string) string) strin
 
 // ── ported formatters (webui copies of the Fyne view_peers_*.go pure helpers) ──
 
-func fmtRemoteNowPlaying(np peerbridge.NowPlaying) string {
-	if !np.Playing || (np.Title == "" && np.Artist == "") {
+// fmtRemoteDeck formats one remote deck line: "Deck B · Artist - Title (128 BPM)".
+func fmtRemoteDeck(ds peerbridge.DeckState) string {
+	if ds.Title == "" && ds.Artist == "" {
 		return ""
 	}
-	s := np.Title
-	if np.Artist != "" {
-		s = np.Artist + " - " + np.Title
+	s := ds.Title
+	if ds.Artist != "" {
+		s = ds.Artist + " - " + ds.Title
 	}
-	if np.BPM > 0 {
-		s += fmt.Sprintf("  (%.0f BPM)", np.BPM)
+	if ds.Deck != "" {
+		s = i18n.T("live.deck.name", i18n.A{"id": ds.Deck}) + " · " + s
+	}
+	if ds.BPM > 0 {
+		s += fmt.Sprintf("  (%.0f BPM)", ds.BPM)
 	}
 	return s
 }

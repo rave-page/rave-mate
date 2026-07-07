@@ -11,7 +11,10 @@ stable Ed25519 identity; all control traffic is authenticated + encrypted.
 
 ## What flows over the link
 
-- **Live DJ data**: the VR/stream PC sees the DJ PC's decks (peer bridge).
+- **Live DJ data**: the VR/stream PC sees every playing deck on the DJ PC - artist, title,
+  BPM, key, elapsed, fader level where the source provides one - with the audible deck
+  highlighted (peer bridge). Works with any live DJ source (Traktor, Serato, VirtualDJ,
+  Rekordbox).
 - **Remote control**: drive a paired instance's automations, library, and file browser from
   your seat (Peers tab → Remote).
 - **Media routes**: send video/audio between instances (LAN media plane) with clock sync.

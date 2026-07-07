@@ -139,6 +139,8 @@ body {
 @media (max-width: 720px) { .decks-grid { grid-template-columns: 1fr; } }
 .deckbig { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; background: rgba(255,255,255,.02); }
 .deckbig--live { border-color: color-mix(in srgb, var(--rp-mint, #08F79B) 40%, transparent); }
+.deckbig--audible { border-color: var(--rp-mint, #08F79B); box-shadow: 0 0 12px color-mix(in srgb, var(--rp-mint, #08F79B) 25%, transparent); }
+.decks-note { color: var(--rp-muted, #B98AA0); font-size: 12px; margin: 0 0 8px; }
 .deckbig-id { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
 .deckbig-t { font-size: 15px; }
 .deckbig-m { color: var(--rp-muted, #B98AA0); font-size: 12px; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }

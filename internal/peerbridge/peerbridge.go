@@ -22,7 +22,24 @@ const logTag = "peerbridge"
 // state without waiting for the next change.
 const resendInterval = 10 * time.Second
 
-// NowPlaying is the compact now-playing payload exchanged on ChanSession.
+// DeckState is one playing deck in the multi-deck payload (additive since the
+// single-track wire format; old peers ignore it).
+type DeckState struct {
+	Deck    string   `json:"deck"`
+	Title   string   `json:"title,omitempty"`
+	Artist  string   `json:"artist,omitempty"`
+	Album   string   `json:"album,omitempty"`
+	BPM     float64  `json:"bpm,omitempty"`
+	Key     string   `json:"key,omitempty"`
+	Elapsed float64  `json:"elapsed,omitempty"`
+	Length  float64  `json:"length,omitempty"`
+	Fader   *float64 `json:"fader,omitempty"` // 0..1; nil when the source has no fader data
+	Audible bool     `json:"audible,omitempty"`
+}
+
+// NowPlaying is the compact now-playing payload exchanged on ChanSession. The flat
+// single-track fields mirror the audible deck (kept populated for older peers); Decks
+// carries every playing deck.
 type NowPlaying struct {
 	Playing bool    `json:"playing"`
 	Deck    string  `json:"deck,omitempty"`
@@ -34,6 +51,21 @@ type NowPlaying struct {
 	Elapsed float64 `json:"elapsed,omitempty"`
 	Length  float64 `json:"length,omitempty"`
 	TS      int64   `json:"ts"` // sender unix-ms
+
+	Decks []DeckState `json:"decks,omitempty"` // all playing decks (audible one marked)
+}
+
+// AllDecks returns the multi-deck view, synthesizing a single audible entry from the
+// flat fields when the sender predates the decks list.
+func (np NowPlaying) AllDecks() []DeckState {
+	if len(np.Decks) > 0 {
+		return np.Decks
+	}
+	if !np.Playing || (np.Title == "" && np.Artist == "") {
+		return nil
+	}
+	return []DeckState{{Deck: np.Deck, Title: np.Title, Artist: np.Artist, Album: np.Album,
+		BPM: np.BPM, Key: np.Key, Elapsed: np.Elapsed, Length: np.Length, Audible: true}}
 }
 
 // RemoteState is a peer's last-known now-playing, as seen by this node.
@@ -190,25 +222,33 @@ func (b *Bridge) onData(peerNodeID, channel string, payload []byte) {
 	}
 }
 
-// nowPlayingFrom derives the compact payload from a merged snapshot (same fields the
-// now-playing file sink writes).
+// nowPlayingFrom derives the compact payload from a merged snapshot: every playing deck
+// in Decks, the audible one mirrored into the flat single-track fields (older peers read
+// only those).
 func nowPlayingFrom(st session.UnifiedState) NowPlaying {
-	np, ok := st.DeriveNowPlaying()
 	out := NowPlaying{TS: time.Now().UnixMilli()}
-	if !ok {
-		return out
-	}
-	out.Playing = true
-	out.Deck = np.Deck
-	out.Title = session.StringField(np.Fields, session.FieldTitle)
-	out.Artist = session.StringField(np.Fields, session.FieldArtist)
-	out.Album = session.StringField(np.Fields, session.FieldAlbum)
-	out.Key = session.StringField(np.Fields, session.FieldKey)
-	out.BPM, _ = floatField(np.Fields, session.FieldBPM)
-	out.Elapsed, _ = floatField(np.Fields, session.FieldElapsedTime)
-	out.Length, _ = floatField(np.Fields, session.FieldTrackLength)
-	if playing, ok := boolField(np.Fields, session.FieldIsPlaying); ok {
-		out.Playing = playing
+	for _, d := range st.DerivePlayingDecks() {
+		ds := DeckState{
+			Deck:    d.Deck,
+			Title:   session.StringField(d.Fields, session.FieldTitle),
+			Artist:  session.StringField(d.Fields, session.FieldArtist),
+			Album:   session.StringField(d.Fields, session.FieldAlbum),
+			Key:     session.StringField(d.Fields, session.FieldKey),
+			Audible: d.Audible,
+		}
+		ds.BPM, _ = floatField(d.Fields, session.FieldBPM)
+		ds.Elapsed, _ = floatField(d.Fields, session.FieldElapsedTime)
+		ds.Length, _ = floatField(d.Fields, session.FieldTrackLength)
+		if d.HasFader {
+			f := d.Fader
+			ds.Fader = &f
+		}
+		out.Decks = append(out.Decks, ds)
+		if d.Audible {
+			out.Playing = true
+			out.Deck, out.Title, out.Artist, out.Album, out.Key = ds.Deck, ds.Title, ds.Artist, ds.Album, ds.Key
+			out.BPM, out.Elapsed, out.Length = ds.BPM, ds.Elapsed, ds.Length
+		}
 	}
 	return out
 }
@@ -227,11 +267,3 @@ func floatField(m map[string]session.FieldValue, f string) (float64, bool) {
 	return 0, false
 }
 
-func boolField(m map[string]session.FieldValue, f string) (bool, bool) {
-	if fv, ok := m[f]; ok {
-		if v, ok := fv.Value.(bool); ok {
-			return v, true
-		}
-	}
-	return false, false
-}

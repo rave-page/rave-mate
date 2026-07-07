@@ -17,12 +17,14 @@
 }
 .ctl-banner-tx { color: #fff; font-weight: 700; font-size: 14px; }
 
-/* Bridged now-playing under a connection row. */
+/* Bridged now-playing under a connection row - one line per playing deck,
+   audible deck in mint, the rest dimmed. */
 .peer-np {
   color: var(--rp-mint, #08F79B);
   font: 13px 'JetBrains Mono', ui-monospace, monospace;
   padding: 0 0 8px 4px;
 }
+.peer-np--quiet { color: var(--rp-muted, #B98AA0); }
 
 /* Media plane. */
 .media-clock {

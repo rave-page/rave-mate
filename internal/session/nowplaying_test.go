@@ -76,3 +76,42 @@ func TestDeriveNowPlayingSkipsStaleDeck(t *testing.T) {
 		t.Fatal("maxAge=0 must disable staleness")
 	}
 }
+
+func TestDerivePlayingDecksReturnsAllWithAudibleMark(t *testing.T) {
+	st := UnifiedState{
+		Decks: map[string]map[string]FieldValue{
+			"A": {FieldIsPlaying: fv(true), FieldTitle: fv("A-track"), FieldElapsedTime: fv(10.0)},
+			"B": {FieldIsPlaying: fv(true), FieldTitle: fv("B-track"), FieldElapsedTime: fv(5.0)},
+			"C": {FieldIsPlaying: fv(false), FieldTitle: fv("C-track")},
+		},
+		Channels: map[string]map[string]FieldValue{
+			"1": {FieldFader: fv(0.2)},
+			"2": {FieldFader: fv(0.9)},
+		},
+	}
+	decks := st.DerivePlayingDecks()
+	if len(decks) != 2 || decks[0].Deck != "A" || decks[1].Deck != "B" {
+		t.Fatalf("expected sorted playing decks [A B], got %+v", decks)
+	}
+	if decks[0].Audible || !decks[1].Audible {
+		t.Fatalf("audible mark must sit on B (loudest): %+v", decks)
+	}
+	if !decks[0].HasFader || decks[0].Fader != 0.2 || decks[1].Fader != 0.9 {
+		t.Fatalf("fader levels wrong: %+v", decks)
+	}
+	// Faderless deck reports HasFader=false but stays audible-capable.
+	st.Channels = nil
+	decks = st.DerivePlayingDecks()
+	if len(decks) != 2 || decks[0].HasFader || decks[1].HasFader {
+		t.Fatalf("faderless decks must report HasFader=false: %+v", decks)
+	}
+}
+
+func TestDerivePlayingDecksEmptyWhenSilent(t *testing.T) {
+	st := UnifiedState{Decks: map[string]map[string]FieldValue{
+		"A": {FieldIsPlaying: fv(false)},
+	}}
+	if d := st.DerivePlayingDecks(); len(d) != 0 {
+		t.Fatalf("expected no playing decks, got %+v", d)
+	}
+}

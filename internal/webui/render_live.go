@@ -5,6 +5,7 @@ import (
 	"html"
 	"math"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -243,15 +244,61 @@ func (u *UI) liveStatusHTML() string {
 
 func (u *UI) decksHTML() string {
 	byDeck := map[string]session.DeckSnapshot{}
+	audible := ""
 	if u.svc.Session != nil {
 		ov := u.svc.Session.Snapshot().BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
 		for _, d := range ov.Decks {
 			byDeck[d.Deck] = d
 		}
+		audible = ov.Master.Deck
 	}
+	// No local deck playing → mirror all playing decks from the freshest linked peer.
+	note := ""
+	localLive := false
+	for _, d := range byDeck {
+		if d.IsPlaying {
+			localLive = true
+			break
+		}
+	}
+	if !localLive && u.svc.PeerBridge != nil {
+		var best *peerbridge.RemoteState
+		for _, s := range u.svc.PeerBridge.RemoteStates() {
+			s := s
+			if time.Since(s.UpdatedAt) > session.NowPlayingStaleAfter || len(s.NowPlaying.AllDecks()) == 0 {
+				continue
+			}
+			if best == nil || s.UpdatedAt.After(best.UpdatedAt) {
+				best = &s
+			}
+		}
+		if best != nil {
+			byDeck, audible = map[string]session.DeckSnapshot{}, ""
+			for _, ds := range best.NowPlaying.AllDecks() {
+				byDeck[ds.Deck] = session.DeckSnapshot{Deck: ds.Deck, Title: ds.Title, Artist: ds.Artist,
+					BPM: ds.BPM, Key: ds.Key, ElapsedTime: ds.Elapsed, TrackLength: ds.Length, IsPlaying: true}
+				if ds.Audible {
+					audible = ds.Deck
+				}
+			}
+			note = i18n.T("live.decks.fromPeer", i18n.A{"name": peerName("", best.NodeID)})
+		}
+	}
+	// A-D always render; extra peer deck ids append after.
+	ids := []string{"A", "B", "C", "D"}
+	seen := map[string]bool{"A": true, "B": true, "C": true, "D": true}
+	for id := range byDeck {
+		if !seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids[4:])
 	var b strings.Builder
+	if note != "" {
+		b.WriteString(`<div class=decks-note>` + html.EscapeString(note) + `</div>`)
+	}
 	b.WriteString(`<div class=decks-grid>`)
-	for _, id := range []string{"A", "B", "C", "D"} {
+	for _, id := range ids {
 		d, ok := byDeck[id]
 		cls := "deckbig"
 		title, meta := "–", "-"
@@ -268,6 +315,9 @@ func (u *UI) decksHTML() string {
 			}
 			if d.IsPlaying {
 				cls += " deckbig--live"
+			}
+			if id == audible && d.IsPlaying {
+				cls += " deckbig--audible"
 			}
 		}
 		b.WriteString(`<div class="` + cls + `"><div class=deckbig-id>` + html.EscapeString(i18n.T("live.deck.name", i18n.A{"id": id})) + `</div>` +

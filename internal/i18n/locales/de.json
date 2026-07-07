@@ -796,6 +796,7 @@
       "name": "Deck {id}"
     },
     "decks": {
+      "fromPeer": "Decks von {name} (Peer-Link)",
       "title": "Decks (zusammengeführt)"
     },
     "network": {

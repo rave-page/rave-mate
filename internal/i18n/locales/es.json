@@ -796,6 +796,7 @@
       "name": "Deck {id}"
     },
     "decks": {
+      "fromPeer": "Decks de {name} (enlace de par)",
       "title": "Decks (combinados)"
     },
     "network": {

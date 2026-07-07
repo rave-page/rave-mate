@@ -796,6 +796,7 @@
       "name": "デッキ {id}"
     },
     "decks": {
+      "fromPeer": "{name} のデッキ（ピアリンク）",
       "title": "デッキ（統合）"
     },
     "network": {

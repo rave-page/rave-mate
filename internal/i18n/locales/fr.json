@@ -796,6 +796,7 @@
       "name": "Deck {id}"
     },
     "decks": {
+      "fromPeer": "Platines de {name} (lien pair)",
       "title": "Decks (fusionnés)"
     },
     "network": {
