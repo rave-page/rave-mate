@@ -31,6 +31,14 @@ Every capability is an independent card with a toggle. Off = no ports, no gorout
 subprocesses. Status dots: grey off · amber attention · mint live. Hover the `?` icons - every
 non-obvious control explains itself in-app.
 
+Cards are grouped into sub-tabs (Account & API, DJ sources, Recording, Streaming & remote,
+Library & media, Integrations, System); each pill carries its group's aggregate status dot.
+Don't know where a setting lives? Type in the **search box above the pills** - it filters every
+setting across all sub-tabs (labels and help texts included) and shows matches grouped by
+section. Clear the box to get the sub-tabs back.
+
+Settings → Updates lives under **System**; sign-in and interface language under **Account & API**.
+
 ## Logs & transparency
 
 The Logs tab is a live ring buffer of everything the app does, including every HTTP request

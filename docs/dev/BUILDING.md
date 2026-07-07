@@ -44,6 +44,16 @@ Build → launch → drive the golden path via ctl → check `logs` → `quit`. 
 `report.txt` with ⚠OVERFLOW findings - eyeball the shots and fix visual issues you spot, even
 pre-existing ones. Docs screenshots come from the same commands.
 
+**Isolated instance** (verify beside a real running rave-mate without touching it):
+
+```
+RAVE_MATE_CTL_ADDR=127.0.0.1:47733 RAVE_MATE_CONFIG_DIR=/tmp/mate-test ./dist/rave-mate.exe &
+RAVE_MATE_CTL_ADDR=127.0.0.1:47733 ./dist/rave-mate.exe ctl status
+```
+
+Both env vars must be set together - the ctl addr is also the single-instance guard, and the
+config dir keeps state (config, library, secrets) out of the real instance's.
+
 ## API endpoint
 
 Defaults to the rave.page development API; override with `RAVE_API_BASE_URL`. Production only on
