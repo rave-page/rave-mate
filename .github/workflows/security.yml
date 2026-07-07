@@ -25,7 +25,7 @@ jobs:
       - name: Linux GL/X11 deps (Fyne)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - uses: github/codeql-action/init@v3
         with:
           languages: go
@@ -43,7 +43,7 @@ jobs:
       - name: Linux GL/X11 deps (Fyne)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev libxkbcommon-dev
+          sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest

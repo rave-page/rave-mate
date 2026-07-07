@@ -3,7 +3,9 @@ package overlayserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -17,7 +19,18 @@ import (
 	"rave.page/mate/internal/waveform"
 )
 
-const testPort = 47699
+// freePort grabs an ephemeral loopback port so parallel/sequential tests never collide on a
+// shared fixed port (which flaked under full-suite load when a prior server hadn't released it).
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return p
+}
 
 func startTestServer(t *testing.T) (*session.Merger, string) {
 	t.Helper()
@@ -28,13 +41,14 @@ func startTestServer(t *testing.T) (*session.Merger, string) {
 	waveFn := func() config.OverlayWaveformFeature {
 		return config.OverlayWaveformFeature{Enabled: true, ZoomSeconds: 20, PlayheadPct: 1.0 / 3.0}
 	}
-	s := New(logbus.New(16), func() int { return testPort }, art, wave, waveFn, filepath.Join(dir, "layout.json"))
+	port := freePort(t)
+	s := New(logbus.New(16), func() int { return port }, art, wave, waveFn, filepath.Join(dir, "layout.json"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = s.Start(ctx, m) }()
 
-	base := "http://127.0.0.1:47699"
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	// Wait for the listener.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
