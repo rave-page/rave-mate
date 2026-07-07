@@ -73,10 +73,28 @@ type cgoShell struct {
 	mu   sync.Mutex
 	wv   webview.WebView
 	done chan struct{}
+	acts chan string // page → Go actions, drained off the UI thread (see actWorker)
 }
 
 func newShell(title string, w, h int, onAction func(string), onReady func()) (shell, bool) {
-	return &cgoShell{title: title, w: w, h: h, onAction: onAction, onReady: onReady, done: make(chan struct{})}, true
+	return &cgoShell{title: title, w: w, h: h, onAction: onAction, onReady: onReady,
+		done: make(chan struct{}), acts: make(chan string, 64)}, true
+}
+
+// actWorker drains page actions on its own goroutine, serialized in arrival order. The webview
+// binding callback runs ON the window's UI thread - handling actions there (renders, config
+// saves, device probes) froze the message pump: the whole window stalled and dragging lagged.
+func (s *cgoShell) actWorker() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case p := <-s.acts:
+			if s.onAction != nil {
+				s.onAction(p)
+			}
+		}
+	}
 }
 
 // run creates the window on a locked OS thread and blocks on the message loop until close.
@@ -114,11 +132,15 @@ func (s *cgoShell) run(initialHTML string, _ bool) {
 	defer w.Destroy()
 	w.SetTitle(s.title)
 	w.SetSize(s.w, s.h, webview.HintNone)
-	setWindowIcon(uintptr(w.Window())) // brand icon in title bar / Alt-Tab (see windowicon_windows.go)
-	// Page → Go: the single action channel. Payload is JSON ({act,val,form,id}).
+	setWindowIcon(uintptr(w.Window()))       // brand icon in title bar / Alt-Tab (see windowicon_windows.go)
+	installSizeMoveHook(uintptr(w.Window())) // WM_ENTER/EXITSIZEMOVE → pause live ticks while dragging
+	go s.actWorker()
+	// Page → Go: the single action channel. Payload is JSON ({act,val,form,id}). The callback runs
+	// on the UI thread - enqueue only, never handle here (a slow handler freezes the message pump).
 	_ = w.Bind("rave", func(payload string) {
-		if s.onAction != nil {
-			s.onAction(payload)
+		select {
+		case s.acts <- payload:
+		default: // queue full (a handler is wedged) - drop rather than block the UI thread
 		}
 	})
 	// ctl eval round-trip result sink (see shell.go).

@@ -52,6 +52,16 @@ type UI struct {
 	logSource     string     // distinct e.Source filter; "" = all sources
 	logSearch     string     // free-text filter over msg/source/fields
 	logAutoscroll bool       // tail-follow toggle (default on)
+
+	fragMu sync.Mutex        // guards frags
+	frags  map[string]string // last HTML pushed per fragment id - ticks skip unchanged fragments
+
+	setMu       sync.Mutex      // guards the Settings-tab view state below
+	setSec      string          // active settings sub-tab (section id); "" = first
+	setQuery    string          // live settings-search text
+	setDebounce *time.Timer     // pending search re-render
+	setVisible  map[string]bool // card ids currently in the DOM (status tick patches only these)
+	setSearch   bool            // content pane is showing search results
 }
 
 // New builds the webview UI over the shared Services (identical struct the Fyne UI consumes). The
@@ -101,8 +111,11 @@ func (u *UI) startTray() {
 		CheckLabel: i18n.T("tray.checkUpdates"),
 		QuitLabel:  i18n.T("tray.quit"),
 		OnShow:     func() { u.Show() },
-		OnCheckUpdates: func() { // surface the Settings→Updates card, then run the check into it
+		OnCheckUpdates: func() { // surface the Settings→System sub-tab (Updates card), run the check into it
 			u.Show()
+			u.setMu.Lock()
+			u.setSec, u.setQuery = "system", ""
+			u.setMu.Unlock()
 			u.setTab("settings")
 			u.updateCheck()
 		},
@@ -291,7 +304,33 @@ func (u *UI) setTab(id string) {
 }
 
 func (u *UI) patchMain() {
+	u.fragMu.Lock()
+	u.frags = nil // DOM replaced - drop the tick dedup cache
+	u.fragMu.Unlock()
 	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ")")
+}
+
+// tickPatch appends a __patch call to js unless html matches the last push for id. Ticks batch
+// all fragments into ONE eval (each Eval is a cross-process ExecuteScript on the UI thread -
+// per-fragment evals made the window stutter).
+func (u *UI) tickPatch(js *strings.Builder, id, html string) {
+	u.fragMu.Lock()
+	if prev, ok := u.frags[id]; ok && prev == html {
+		u.fragMu.Unlock()
+		return
+	}
+	if u.frags == nil {
+		u.frags = map[string]string{}
+	}
+	u.frags[id] = html
+	u.fragMu.Unlock()
+	js.WriteString("window.__patch('" + id + "'," + jsQuote(html) + ");")
+}
+
+func (u *UI) flushTick(js *strings.Builder) {
+	if js.Len() > 0 {
+		u.eval(js.String())
+	}
 }
 
 // SelectTab (ctl) selects a tab by id or label (case-insensitive), returns ok + available labels.
@@ -323,7 +362,7 @@ func (u *UI) livePush() {
 		case <-u.stop:
 			return
 		case <-t.C:
-			if u.shell == nil {
+			if u.shell == nil || inSizeMove() { // dragging: keep the UI thread free
 				continue
 			}
 			if fn := liveTicks[u.activeTab()]; fn != nil {

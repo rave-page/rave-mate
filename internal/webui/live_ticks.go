@@ -1,5 +1,7 @@
 package webui
 
+import "strings"
+
 // Live-tick registry: each tab that needs a ~1 Hz DOM refresh registers a fn in its own file's
 // init() (onLiveTick) so parallel tab work never collides on the livePush switch. livePush calls
 // the fn for the active tab each tick. Registration is init-time only (no concurrent writers).
@@ -12,28 +14,32 @@ func onLiveTick(tab string, fn func(*UI)) { liveTicks[tab] = fn }
 // ── Live tab tick (owned here; parity renderer in render_live.go) ──
 
 func init() {
+	// One coalesced eval per tick (tickPatch also skips unchanged fragments) - per-fragment evals
+	// are UI-thread ExecuteScript calls and made window dragging stutter.
 	onLiveTick("live", func(u *UI) {
-		u.eval("window.__patch('live-tc'," + jsQuote(htmlEscape(u.tcText())) + ")")
+		var js strings.Builder
+		u.tickPatch(&js, "live-tc", htmlEscape(u.tcText()))
 		if u.svc.AudioRec != nil {
-			u.eval("window.__patch('live-rec-state'," + jsQuote(htmlEscape(recStateText(u.svc.AudioRec.Status()))) + ")")
+			u.tickPatch(&js, "live-rec-state", htmlEscape(recStateText(u.svc.AudioRec.Status())))
 		}
-		u.eval("window.__patch('live-np'," + jsQuote(u.nowPlayingHTML()) + ")")
-		u.eval("window.__patch('live-status'," + jsQuote(u.liveStatusHTML()) + ")")
-		u.eval("window.__patch('live-decks'," + jsQuote(u.decksHTML()) + ")")
+		u.tickPatch(&js, "live-np", u.nowPlayingHTML())
+		u.tickPatch(&js, "live-status", u.liveStatusHTML())
+		u.tickPatch(&js, "live-decks", u.decksHTML())
 		if u.svc.OBSControl != nil {
-			u.eval("window.__patch('live-cockpit'," + jsQuote(u.cockpitHTML()) + ")")
+			u.tickPatch(&js, "live-cockpit", u.cockpitHTML())
 		}
 		if u.svc.AbleLink != nil {
-			u.eval("window.__patch('live-ablelink'," + jsQuote(u.ableLinkHTML()) + ")")
+			u.tickPatch(&js, "live-ablelink", u.ableLinkHTML())
 		}
 		if u.svc.NetStats != nil {
-			u.eval("window.__patch('live-net'," + jsQuote(u.networkHTML()) + ")")
-			u.eval("window.__patch('live-tim'," + jsQuote(u.timingHTML()) + ")")
+			u.tickPatch(&js, "live-net", u.networkHTML())
+			u.tickPatch(&js, "live-tim", u.timingHTML())
 		}
 		if u.svc.Perf != nil {
-			u.eval("window.__patch('live-perf2'," + jsQuote(u.sysperfHTML()) + ")")
+			u.tickPatch(&js, "live-perf2", u.sysperfHTML())
 		}
-		u.eval("window.__patch('live-strip'," + jsQuote(u.liveStripHTML()) + ")")
+		u.tickPatch(&js, "live-strip", u.liveStripHTML())
+		u.flushTick(&js)
 	})
 
 	onLiveTick("logs", func(u *UI) {
