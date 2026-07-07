@@ -25,7 +25,7 @@ jobs:
       - name: Linux GL/X11 deps (Fyne)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
+          sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - name: Build
         run: go build ./...

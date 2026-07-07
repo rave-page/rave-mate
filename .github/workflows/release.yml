@@ -45,7 +45,7 @@ jobs:
           echo "building $VERSION -> channel $CHANNEL"
       - name: mingw toolchain + NSIS
         run: |
-          sudo apt-get update
+          sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick
       - name: Case-sensitivity shims (camelCase Windows-SDK headers)
         run: |
@@ -131,7 +131,7 @@ jobs:
           go-version-file: go.mod
       - name: Linux GL/X11 deps (Fyne)
         run: |
-          sudo apt-get update
+          sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - name: Build rave-mate-linux
         env:
