@@ -31,8 +31,9 @@ vendored (dual GPLv2+/commercial; keep it an external build-time dep). To enable
 3. `CGO_ENABLED=1 go build -tags abletonlink ./...` with the mingw static toolchain. Wire a CI
    job only once this builds.
 
-**USER TO-DO (distribution-time, non-blocking):** request Ableton's free commercial Link license
-(standard grant for Link-enabled apps). Does not block development.
+**Licensing (resolved):** rave-mate is AGPL-3.0-or-later, which is compatible with Ableton
+Link's GPLv2-or-later option, so Link may be used under the GPL option with **no separate
+commercial Link grant required** to distribute Link-enabled builds.
 
 ## Architecture
 

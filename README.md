@@ -3,7 +3,7 @@
 [![CI](https://github.com/rave-page/rave-mate/actions/workflows/ci.yml/badge.svg)](https://github.com/rave-page/rave-mate/actions/workflows/ci.yml)
 [![Security](https://github.com/rave-page/rave-mate/actions/workflows/security.yml/badge.svg)](https://github.com/rave-page/rave-mate/actions/workflows/security.yml)
 [![Release](https://github.com/rave-page/rave-mate/actions/workflows/release.yml/badge.svg)](https://github.com/rave-page/rave-mate/actions/workflows/release.yml)
-[![License: Apache-2.0 + Commons Clause](https://img.shields.io/badge/license-Apache--2.0%20%2B%20Commons%20Clause-blue)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#release-channels)
 
 > ⚠️ **Alpha software.** rave-mate is in active alpha - **every build we publish right now is
@@ -117,7 +117,7 @@ Builds are stamped `nightly` / `alpha` / `beta` / `production` (see `docs/dev/RE
 **We are in alpha - only `nightly` and `alpha` builds exist right now** (no `beta`/`production`
 channel yet). All of them are prereleases and **show a warning on launch**: they are development
 releases - always keep backups of your media/library/config; we are not liable for damage to
-files or systems (see LICENSE §7–8).
+files or systems (see LICENSE §15–16).
 
 - **[Nightly](https://github.com/rave-page/rave-mate/releases/tag/nightly)** - a single rolling
   prerelease rebuilt from the tip of `development` on every push (and daily). Bleeding edge;
@@ -136,10 +136,12 @@ files or systems (see LICENSE §7–8).
 
 ## License
 
-Apache 2.0 **with Commons Clause** - free to use, modify and redistribute **with attribution**;
-**selling** rave-mate (or a product/service whose value derives substantially from it) is not
-permitted, including modified versions. Not OSI-certified "open source" because of the
-no-selling clause; the source is all here. See [LICENSE](LICENSE) + [NOTICE](NOTICE).
+**AGPL-3.0-or-later** - an OSI-approved copyleft open-source license. Free to use, modify,
+redistribute, fork, and build commercial products or services on. The catch: any version you
+redistribute **or run as a network service** for others must also be licensed
+AGPL-3.0-or-later, with complete corresponding source made available to its users. You may not
+relicense it as proprietary or ship it as a closed product. See [LICENSE](LICENSE) +
+[NOTICE](NOTICE).
 
 ## Acknowledgements
 
@@ -157,8 +159,8 @@ those we learned from.
 **VR overlay UX - studied, not copied:** the correct approaches for laser↔overlay intersection
 (controller *tip*-pose ray + `ComputeOverlayIntersection`), overlay lifecycle, and grab/edit
 manipulation were learned from these excellent projects. They are **GPL-3.0**; rave-mate does not
-copy their source - the standard maths were reimplemented from scratch for our Apache-2.0 +
-Commons-Clause tree:
+copy their source - the standard maths were reimplemented from scratch for our
+AGPL-3.0-or-later tree:
 - [Desktop+](https://github.com/elvissteinjr/DesktopPlus) - the reference for the tip-offset ray
   and front-facing intersection test.
 - [wlx-overlay-s](https://github.com/galister/wlx-overlay-s) - the reference for ray-plane

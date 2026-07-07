@@ -107,11 +107,10 @@ mingw C++ runtime folds into the exe via `-extldflags '-static -static-libstdc++
 On Windows Link links `ws2_32`/`iphlpapi`/`winmm` (in the cgo LDFLAGS). Verified: the mingw
 `GOOS=windows … -tags abletonlink` cross-build links clean.
 
-**LICENSE (distribution gate).** Ableton Link is **dual-licensed GPLv2+/commercial** and rave-mate is
-**not** GPL. Building for dev/CI is fine, but DISTRIBUTING a Link-enabled binary requires Ableton's
-free Link license grant (https://www.ableton.com/en/link/). This is a **user action** - request the
-grant before shipping the `abletonlink`-tagged artifacts publicly. CI builds it regardless; shipping
-is gated on the license.
+**LICENSE (compatible).** Ableton Link is **dual-licensed GPLv2-or-later/commercial**, and rave-mate
+is now **AGPL-3.0-or-later**. AGPL-3.0 is compatible with Link's GPLv2-or-later option, so Link may be
+used under the GPL option with **no separate commercial Link grant required** to distribute the
+`abletonlink`-tagged artifacts. Building for dev/CI and shipping are both fine under the AGPL.
 
 | SDK | Source | Integrity anchor |
 |---|---|---|

@@ -18,7 +18,7 @@ from the `Version` branch prefix):
 alpha (not production); flip that default when leaving alpha.
 
 **Non-production builds warn on every launch**: development release, keep backups of media/
-library/config, authors not liable for file/system damage (LICENSE §7–8). Don't remove this.
+library/config, authors not liable for file/system damage (LICENSE §15–16). Don't remove this.
 
 ## GitHub releases (standalone repo)
 

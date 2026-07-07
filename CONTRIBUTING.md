@@ -67,5 +67,5 @@ ideally verify in a Unity 2022.3 VRChat project before the PR.
 
 ## Licensing of contributions
 
-By submitting a contribution you agree it's licensed under the repo license
-(Apache-2.0 + Commons Clause) per Apache-2.0 §5.
+Contributions are inbound=outbound: by submitting a contribution you agree it's licensed
+under the repo license, AGPL-3.0-or-later.
