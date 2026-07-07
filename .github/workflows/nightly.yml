@@ -1,7 +1,14 @@
 # Nightly / dev-channel builds. Every push to `development` (plus a daily schedule and
-# manual dispatch) builds the binaries and publishes them to a single rolling "nightly"
-# prerelease on the Releases page, so anyone can grab the latest dev build. These are
-# UNSTABLE alpha builds - keep backups. See README "Release channels".
+# manual dispatch) cross-builds the full-feature Windows exe (-tags spout vr abletonlink,
+# mingw - same recipe as the internal deploy pipeline), the Linux binary, and the NSIS
+# installer, then rolls the single "nightly" prerelease with the complete self-update feed:
+# versioned + stable binaries, runtime DLLs, and latest.json (Ed25519-signed when the
+# signing key secret is provisioned). The binary's updater polls
+#   https://github.com/<repo>/releases/download/nightly/latest.json
+# (release assets 302 to *.githubusercontent.com - selfupdate's github.com feed carve-out).
+# Browsers can't read release assets (no CORS) - the manifest is mirrored to the `feeds`
+# branch (raw.githubusercontent.com sends ACAO:*) as nightly.json for the download page.
+# These are UNSTABLE builds - keep backups. See docs/dev/RELEASING.md.
 name: Nightly
 
 on:
@@ -18,45 +25,140 @@ concurrency:
   group: nightly
   cancel-in-progress: true
 
+env:
+  FEED: https://github.com/${{ github.repository }}/releases/download/nightly/
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            bin: rave-mate.exe
-            flags: -H windowsgui -extldflags '-static -static-libgcc -static-libstdc++'
-          - os: ubuntu-latest
-            bin: rave-mate-linux
-            flags: ""
-    runs-on: ${{ matrix.os }}
+  # Cross-build the Windows exe on Linux via mingw (proven recipe: Fyne cross-compiles
+  # without GL dev libs; -extldflags -static folds in libgcc/libstdc++ so the exe runs on
+  # a clean machine). All feature tags on: spout (GPU video share), vr (OpenVR overlays),
+  # abletonlink (tempo/phrase sync - AGPL-3.0 is compatible with Link's GPLv2+ option).
+  # SpoutLibrary.dll + openvr_api.dll are runtime-loaded; shipped beside the exe.
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: mingw toolchain + NSIS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick
+      - name: Case-sensitivity shims (camelCase Windows-SDK headers)
+        run: |
+          # Some C++ cgo deps #include camelCase Windows-SDK headers; mingw-w64 ships them
+          # lowercase and Linux FS is case-sensitive. Must run BEFORE fetch-link.sh (Link's
+          # C++ pulls <WS2tcpip.h>/<WinSock2.h>/<Windows.h>) and the webview build (EventToken.h).
+          for inc in /usr/x86_64-w64-mingw32/include /usr/share/mingw-w64/include; do
+            [ -d "$inc" ] || continue
+            for cc in EventToken WS2tcpip WinSock2 Windows; do
+              lc=$(printf '%s' "$cc" | tr 'A-Z' 'a-z')
+              if [ -f "$inc/$lc.h" ] && [ ! -e "$inc/$cc.h" ]; then
+                sudo ln -s "$lc.h" "$inc/$cc.h" && echo "symlinked $inc/$cc.h -> $lc.h"
+              fi
+            done
+          done
+      - name: Fetch Spout SDK (SHA-pinned)
+        run: MINGW_PREFIX=x86_64-w64-mingw32 bash scripts/fetch-spout.sh
+      - name: Fetch Ableton Link SDK (SHA-pinned)
+        run: MINGW_PREFIX=x86_64-w64-mingw32 bash scripts/fetch-link.sh
+      - name: vrdll lockstep check
+        run: |
+          # The in-app "install VR runtime" button pins internal/vrdll dllSHA; the DLL we ship
+          # MUST be those exact bytes or the self-heal download bricks (checksum mismatch).
+          want=$(sed -n 's/.*dllSHA = "\([0-9a-f]\{64\}\)".*/\1/p' internal/vrdll/vrdll.go)
+          got=$(sha256sum internal/vroverlay/sdk/openvr_api.dll | awk '{print $1}')
+          echo "vrdll.dllSHA=$want"; echo "vendored dll =$got"
+          [ -n "$want" ] && [ "$want" = "$got" ] || { echo "::error::openvr_api.dll does not match internal/vrdll dllSHA - bump the constant in lockstep"; exit 1; }
+      - name: Build rave-mate.exe (all feature tags)
+        env:
+          UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
+        run: |
+          # Embed the manifest-verification pubkey only when the signing key is provisioned
+          # (derive: Ed25519 SPKI DER = 12-byte header + 32-byte raw key). Never echo the key.
+          UPDATE_PUBKEY=""
+          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
+            UPDATE_PUBKEY=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
+            rm -f /tmp/upd_key.pem
+            echo "signing key present - embedding UpdatePubKey"
+          else
+            echo "signing key absent - unsigned feed (sha256 + same-origin only)"
+          fi
+          LDFLAGS="-s -w -H windowsgui \
+            -linkmode external -extldflags '-static -static-libgcc -static-libstdc++' \
+            -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
+            -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
+            -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
+            -X rave.page/mate/internal/version.Channel=nightly \
+            -X rave.page/mate/internal/version.FeedURL=${FEED} \
+            -X rave.page/mate/internal/version.UpdatePubKey=${UPDATE_PUBKEY}"
+          GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
+            go build -tags "spout vr abletonlink" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
+          cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
+          cp internal/vroverlay/sdk/openvr_api.dll dist/    # runtime-loaded by the vr backend (vendored)
+          ls -la dist/
+      - name: NSIS installer
+        run: |
+          convert internal/ui/assets/icon.png -define icon:auto-resize=64,48,32,16 dist/rave-mate.ico || echo "icon conversion failed; using NSIS default icon"
+          ICONDEF=""
+          [ -f dist/rave-mate.ico ] && ICONDEF="-DAPP_ICON=$PWD/dist/rave-mate.ico"
+          makensis -V3 \
+            -DAPP_VERSION="nightly-${GITHUB_SHA::7}" \
+            -DAPP_BUILD="${GITHUB_RUN_NUMBER}" \
+            -DVERSION_4="0.0.${GITHUB_RUN_NUMBER}.0" \
+            -DSRC_EXE="$PWD/dist/rave-mate.exe" \
+            -DOUT_FILE="$PWD/dist/rave-mate-setup.exe" \
+            -DSPOUT_DLL="$PWD/dist/SpoutLibrary.dll" \
+            -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
+            $ICONDEF \
+            installer/rave-mate.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/rave-mate.exe
+            dist/rave-mate-setup.exe
+            dist/SpoutLibrary.dll
+            dist/openvr_api.dll
+
+  build-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: Linux GL/X11 deps (Fyne)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
-      - name: Build
-        shell: bash
+      - name: Build rave-mate-linux
+        env:
+          UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
-          LDFLAGS="-s -w ${{ matrix.flags }} \
+          UPDATE_PUBKEY=""
+          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
+            UPDATE_PUBKEY=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
+            rm -f /tmp/upd_key.pem
+          fi
+          LDFLAGS="-s -w \
             -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
-            -X rave.page/mate/internal/version.Channel=nightly"
-          go build -ldflags "$LDFLAGS" -o dist/${{ matrix.bin }} ./cmd/rave-mate
+            -X rave.page/mate/internal/version.Channel=nightly \
+            -X rave.page/mate/internal/version.FeedURL=${FEED} \
+            -X rave.page/mate/internal/version.UpdatePubKey=${UPDATE_PUBKEY}"
+          go build -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.bin }}
-          path: dist/${{ matrix.bin }}
+          name: linux
+          path: dist/rave-mate-linux
 
   publish:
-    needs: build
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,14 +168,79 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Publish rolling nightly prerelease
+      - name: Assemble feed (versioned copies + latest.json)
+        env:
+          UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
+        run: |
+          # Versioned, immutable filenames (build+date+commit) for the updater target - a
+          # fixed name could be CDN-cached stale; a never-before-seen name can't be. Stable
+          # copies stay as web/legacy fallbacks. DLLs keep stable names (assets[] entries).
+          BUILD=${GITHUB_RUN_NUMBER}; COMMIT=${GITHUB_SHA::7}; DATE=$(date -u +%Y%m%d)
+          VERSION="nightly-${COMMIT}"
+          EXE="rave-mate-${BUILD}-${DATE}-${COMMIT}.exe"
+          INST="rave-mate-setup-${BUILD}-${DATE}-${COMMIT}.exe"
+          LINBIN="rave-mate-linux-${BUILD}-${DATE}-${COMMIT}"
+          mkdir -p dist/mate
+          cp dist/rave-mate.exe        "dist/mate/${EXE}"
+          cp dist/rave-mate.exe        dist/mate/rave-mate.exe
+          cp dist/rave-mate-setup.exe  "dist/mate/${INST}"
+          cp dist/rave-mate-setup.exe  dist/mate/rave-mate-setup.exe
+          cp dist/rave-mate-linux      "dist/mate/${LINBIN}"
+          cp dist/rave-mate-linux      dist/mate/rave-mate-linux
+          cp dist/SpoutLibrary.dll     dist/mate/SpoutLibrary.dll
+          cp dist/openvr_api.dll       dist/mate/openvr_api.dll
+          SHA=$(sha256sum "dist/mate/${EXE}" | awk '{print $1}')
+          ISHA=$(sha256sum "dist/mate/${INST}" | awk '{print $1}')
+          LSHA=$(sha256sum "dist/mate/${LINBIN}" | awk '{print $1}')
+          OSHA=$(sha256sum dist/mate/openvr_api.dll | awk '{print $1}')
+          SSHA=$(sha256sum dist/mate/SpoutLibrary.dll | awk '{print $1}')
+          NOTES=$(git log -1 --pretty=%s)
+          jq -n \
+            --arg v "$VERSION" --argjson b "$BUILD" --arg c "$COMMIT" \
+            --arg u "${FEED}${EXE}" --arg s "$SHA" \
+            --arg iu "${FEED}${INST}" --arg is "$ISHA" \
+            --arg lu "${FEED}${LINBIN}" --arg ls "$LSHA" \
+            --arg ou "${FEED}openvr_api.dll" --arg osha "$OSHA" \
+            --arg su "${FEED}SpoutLibrary.dll" --arg ssha "$SSHA" \
+            --arg r "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "$NOTES" \
+            '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha}],released:$r,notes:$n}' \
+            > dist/mate/latest.json
+          cat dist/mate/latest.json
+          # Detached Ed25519 signature over the EXACT manifest bytes (skipped until the key
+          # secret is provisioned - updater then relies on sha256 + same-origin).
+          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/ed25519.pem
+            openssl pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in dist/mate/latest.json -out /tmp/sig.bin
+            base64 -w0 /tmp/sig.bin > dist/mate/latest.json.sig
+            rm -f /tmp/ed25519.pem /tmp/sig.bin
+            echo "manifest signed -> latest.json.sig"
+          else
+            echo "WARN: UPDATE_SIGNING_KEY_PEM unset - publishing UNSIGNED manifest"
+          fi
+      - name: Roll nightly release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Roll the single "nightly" release+tag to this commit.
           gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
-          gh release create nightly dist/* \
+          gh release create nightly dist/mate/* \
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Nightly (dev channel)" \
-            --notes "Rolling **nightly** build from the tip of \`development\` (commit ${GITHUB_SHA:0:7}). Unstable **alpha** - expect breakage; keep backups of your media/library/config."
+            --notes "Rolling **nightly** build from the tip of \`development\` (commit ${GITHUB_SHA:0:7}, build ${GITHUB_RUN_NUMBER}). Unstable - expect breakage; keep backups of your media/library/config. \`latest.json\` is the self-update feed manifest; installed nightlies auto-update from it."
+      - name: Mirror manifest to feeds branch (browser CORS path)
+        run: |
+          # Release assets send no CORS headers; raw.githubusercontent.com sends ACAO:* -
+          # the rave.page download page reads https://raw.githubusercontent.com/<repo>/feeds/nightly.json
+          if git fetch origin feeds 2>/dev/null; then
+            git worktree add ../feeds-wt -B feeds origin/feeds
+          else
+            git worktree add --detach ../feeds-wt
+            git -C ../feeds-wt checkout --orphan feeds
+            git -C ../feeds-wt rm -rf --quiet . || true
+          fi
+          cp dist/mate/latest.json ../feeds-wt/nightly.json
+          if [ -f dist/mate/latest.json.sig ]; then cp dist/mate/latest.json.sig ../feeds-wt/nightly.json.sig; fi
+          git -C ../feeds-wt add -A
+          git -C ../feeds-wt -c user.name=DyMattic -c user.email=dymattic@naise.io \
+            commit -m "feeds: nightly build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA:0:7})" || { echo "no feed change"; exit 0; }
+          git -C ../feeds-wt push origin feeds
