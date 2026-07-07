@@ -71,32 +71,44 @@ jobs:
           got=$(sha256sum internal/vroverlay/sdk/openvr_api.dll | awk '{print $1}')
           echo "vrdll.dllSHA=$want"; echo "vendored dll =$got"
           [ -n "$want" ] && [ "$want" = "$got" ] || { echo "::error::openvr_api.dll does not match internal/vrdll dllSHA - bump the constant in lockstep"; exit 1; }
-      - name: Assert signing key matches embedded UpdatePubKey
+      - name: Update-feed signing preflight
+        id: updkey
         env:
           UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
-          # internal/version embeds the release pubkey as its default - every shipped binary
-          # REQUIRES a manifest signed by the matching private key. Fail fast if the CI key
-          # is missing or diverges (derive: Ed25519 SPKI DER = 12-byte header + 32-byte raw
-          # key). Never echo the key material.
+          # internal/version embeds the release pubkey as its default, so a shipped binary
+          # requires a signed manifest. CONDITIONAL: without the key secret (forks/PRs) we
+          # stamp an EMPTY UpdatePubKey override so the binary keeps the designed sha256 +
+          # same-origin fallback and an unsigned feed still works. With the key, assert it
+          # derives exactly the embedded pubkey (Ed25519 SPKI DER = 12-byte header + 32-byte
+          # raw key). Never echo key material.
           EMBEDDED=$(sed -n 's/.*UpdatePubKey = "\([A-Za-z0-9+/=]*\)".*/\1/p' internal/version/version.go)
           [ -n "$EMBEDDED" ] || { echo "::error::no embedded UpdatePubKey in internal/version"; exit 1; }
-          [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || { echo "::error::UPDATE_SIGNING_KEY_PEM secret missing - binaries embed a pubkey and would reject an unsigned feed"; exit 1; }
+          if [ -z "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
+            echo "signing key absent - stamping empty UpdatePubKey (unsigned feed, sha256 + same-origin only)"
+            echo "extra_ldflags=-X rave.page/mate/internal/version.UpdatePubKey=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/upd_key.pem
           DERIVED=$(openssl pkey -in /tmp/upd_key.pem -pubout -outform DER | tail -c 32 | base64 -w0)
           rm -f /tmp/upd_key.pem
           [ "$DERIVED" = "$EMBEDDED" ] || { echo "::error::signing key does not derive the embedded UpdatePubKey - rotate key + internal/version in lockstep"; exit 1; }
           echo "signing key matches embedded UpdatePubKey"
+          echo "extra_ldflags=" >> "$GITHUB_OUTPUT"
       - name: Build rave-mate.exe (all feature tags)
+        env:
+          EXTRA_LDFLAGS: ${{ steps.updkey.outputs.extra_ldflags }}
         run: |
-          # UpdatePubKey comes from its source default in internal/version (asserted above).
+          # UpdatePubKey: source default (preflight asserted the key matches) or an empty
+          # override on unsigned builds.
           LDFLAGS="-s -w -H windowsgui \
             -linkmode external -extldflags '-static -static-libgcc -static-libstdc++' \
             -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
             -X rave.page/mate/internal/version.Channel=nightly \
-            -X rave.page/mate/internal/version.FeedURL=${FEED}"
+            -X rave.page/mate/internal/version.FeedURL=${FEED} \
+            ${EXTRA_LDFLAGS}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
             go build -tags "spout vr abletonlink" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
@@ -174,14 +186,20 @@ jobs:
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
       - name: Build rave-mate-linux
+        env:
+          UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
         run: |
-          # UpdatePubKey comes from its source default in internal/version.
+          # UpdatePubKey: source default when the signing key exists; empty override when it
+          # doesn't (fork/unsigned builds keep the sha256 + same-origin fallback).
+          EXTRA_LDFLAGS=""
+          [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || EXTRA_LDFLAGS="-X rave.page/mate/internal/version.UpdatePubKey="
           LDFLAGS="-s -w \
             -X rave.page/mate/internal/version.Version=nightly-${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Commit=${GITHUB_SHA::7} \
             -X rave.page/mate/internal/version.Build=${GITHUB_RUN_NUMBER} \
             -X rave.page/mate/internal/version.Channel=nightly \
-            -X rave.page/mate/internal/version.FeedURL=${FEED}"
+            -X rave.page/mate/internal/version.FeedURL=${FEED} \
+            ${EXTRA_LDFLAGS}"
           go build -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
       - uses: actions/upload-artifact@v4
         with:
@@ -239,14 +257,19 @@ jobs:
             '{version:$v,build:$b,commit:$c,url:$u,sha256:$s,installer_url:$iu,installer_sha256:$is,linux_url:$lu,linux_sha256:$ls,assets:[{name:"openvr_api.dll",url:$ou,sha256:$osha},{name:"SpoutLibrary.dll",url:$su,sha256:$ssha}],released:$r,notes:$n}' \
             > dist/mate/latest.json
           cat dist/mate/latest.json
-          # Detached Ed25519 signature over the EXACT manifest bytes. REQUIRED: shipped
-          # binaries embed the verification pubkey and reject an unsigned feed.
-          [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ] || { echo "::error::UPDATE_SIGNING_KEY_PEM missing - refusing to publish a feed the binaries would reject"; exit 1; }
-          printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/ed25519.pem
-          openssl pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in dist/mate/latest.json -out /tmp/sig.bin
-          base64 -w0 /tmp/sig.bin > dist/mate/latest.json.sig
-          rm -f /tmp/ed25519.pem /tmp/sig.bin
-          echo "manifest signed -> latest.json.sig"
+          # Detached Ed25519 signature over the EXACT manifest bytes. CONDITIONAL: without
+          # the key the feed publishes unsigned and the matching builds stamped an empty
+          # UpdatePubKey (sha256 + same-origin fallback). This repo has the secret, so
+          # official feeds are always signed in practice.
+          if [ -n "${UPDATE_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$UPDATE_SIGNING_KEY_PEM" > /tmp/ed25519.pem
+            openssl pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in dist/mate/latest.json -out /tmp/sig.bin
+            base64 -w0 /tmp/sig.bin > dist/mate/latest.json.sig
+            rm -f /tmp/ed25519.pem /tmp/sig.bin
+            echo "manifest signed -> latest.json.sig"
+          else
+            echo "WARN: UPDATE_SIGNING_KEY_PEM unset - publishing UNSIGNED manifest (sha256 + same-origin only)"
+          fi
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v2
         with:

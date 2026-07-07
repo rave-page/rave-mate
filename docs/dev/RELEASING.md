@@ -68,11 +68,13 @@ run on every push/PR.
 
 | Secret | Purpose | If absent |
 |---|---|---|
-| `UPDATE_SIGNING_KEY_PEM` | Ed25519 private key (PKCS8 PEM). Publish jobs sign the exact `latest.json` bytes (`openssl pkeyutl -rawin`, base64 raw 64-byte sig → `latest.json.sig`). | **Build + publish FAIL.** `internal/version` embeds the matching public key as default - shipped binaries reject an unsigned feed, so publishing one would brick self-update. |
+| `UPDATE_SIGNING_KEY_PEM` | Ed25519 private key (PKCS8 PEM). Publish jobs sign the exact `latest.json` bytes (`openssl pkeyutl -rawin`, base64 raw 64-byte sig → `latest.json.sig`). | Skipped cleanly (forks/PRs build green): builds stamp an EMPTY `UpdatePubKey` override so the binary keeps the designed sha256 + same-origin fallback, and the feed publishes unsigned. |
 | `CODE_SIGN_PFX_B64` | base64 PKCS12 Authenticode cert (currently self-signed, `CN=rave-mate, O=Magnifica UG`). `osslsigncode` signs `rave-mate.exe` BEFORE NSIS packs it, then the installer - so the manifest sha256s cover the signed bytes. | Skipped cleanly - unsigned binaries (SmartScreen warns either way with a self-signed cert). |
 | `CODE_SIGN_PFX_PASS` | PFX password (passed via `-readpass` file, never argv). | With the cert: signing fails. |
 
-The build jobs assert the signing key derives exactly the `UpdatePubKey` embedded in
+All three secrets ARE set on `rave-page/rave-mate`, so official builds always ship a signed
+feed + Authenticode-signed exe/installer in practice; the skips exist for forks. With the key
+present, the build preflight asserts it derives exactly the `UpdatePubKey` embedded in
 `internal/version/version.go` - rotate the key and that constant in lockstep. Publish jobs also
 create **SLSA build-provenance attestations** (`actions/attest-build-provenance`) for the
 versioned exe/installer/linux binary + `latest.json`; verify any downloaded artifact with
