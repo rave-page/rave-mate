@@ -1,0 +1,25 @@
+{
+  "version": "nightly-4824f35",
+  "build": 13,
+  "commit": "4824f35",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-13-20260707-4824f35.exe",
+  "sha256": "2b5834f012733c02c883f38cd4a3a79922b3a89a56b73f4498eed6adcda46375",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-13-20260707-4824f35.exe",
+  "installer_sha256": "8904354e21b721c576f856d6f2a31d5f98e5ecf327f2866a86b714d353a394df",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-13-20260707-4824f35",
+  "linux_sha256": "2e6a422ee257e09f071a6fba5d0bd6c8e0fc48f46f6d9155d81decf26c3d7973",
+  "assets": [
+    {
+      "name": "openvr_api.dll",
+      "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/openvr_api.dll",
+      "sha256": "bab8ac6ef64e68a9ca53315b0014d131088584b2efdfa6db511d67ec03cfcb4a"
+    },
+    {
+      "name": "SpoutLibrary.dll",
+      "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/SpoutLibrary.dll",
+      "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
+    }
+  ],
+  "released": "2026-07-07T21:07:57Z",
+  "notes": "ci: tolerate third-party apt repo flakes in apt-get update"
+}
