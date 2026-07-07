@@ -1,6 +1,14 @@
-/* Settings tab - section nav + per-card status, install/progress, dialogs. Mobile-first. */
+/* Settings tab - global search + sub-tab nav + per-card status, install/progress, dialogs. Mobile-first. */
 
-/* section nav: sticky pill bar (anchor links) with aggregate status dots */
+/* global settings search (filters across ALL sub-tabs) */
+.set-search { margin: 4px 0 8px; }
+.set-search .field-input {
+  width: 100%;
+  max-width: 480px;
+  font-size: 13px;
+}
+
+/* sub-tab nav: sticky pill bar (buttons) with aggregate status dots; active = current sub-tab */
 .set-nav {
   position: sticky;
   top: 0;
@@ -23,10 +31,16 @@
   background: var(--rp-surface, #141414);
   color: var(--rp-fg, #fafafa);
   font-size: 12px;
+  font-family: inherit;
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
 }
 .set-navpill:hover { border-color: var(--rp-base, #F70864); }
+.set-navpill.active {
+  border-color: var(--rp-base, #F70864);
+  background: color-mix(in srgb, var(--rp-base, #F70864) 14%, var(--rp-surface, #141414));
+}
 
 /* status dots (rank: live > warn > ok > off) */
 .dot--live { background: var(--rp-base, #F70864); box-shadow: 0 0 6px var(--rp-base, #F70864); }

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
@@ -135,7 +138,7 @@ func settingsSections() []setSection {
 	st := func(id string) string { return i18n.T("settings.section." + id + ".title") }
 	sd := func(id string) string { return i18n.T("settings.section." + id + ".desc") }
 	return []setSection{
-		{"account", st("account"), sd("account"), []string{"account", "api"}},
+		{"account", st("account"), sd("account"), []string{"uilang", "account", "api"}},
 		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi"}},
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "webcam", "medialink", "timecode", "ablelink"}},
@@ -145,19 +148,59 @@ func settingsSections() []setSection {
 	}
 }
 
+// renderSettings: header + a global search box + a patchable content pane. Only the ACTIVE
+// sub-tab's cards are in the DOM (the old render built all ~40 cards at once - the main reason
+// opening Settings froze the app); a non-empty query switches the pane to cross-section results.
 func (u *UI) renderSettings() string {
 	if u.svc.Cfg == nil {
 		return panel(i18n.T("settings.title"), "") + emptyState(i18n.T("settings.body.configUnavailable"))
 	}
-	u.maybeRefreshProbes() // async fs/PATH probe refresh - render below reads cache only (instant)
+	u.maybeRefreshProbes() // async fs/PATH/device probe refresh - render below reads cache only (instant)
+	q := u.settingsQueryText()
+	return `<div id=settings-body>` + panel(i18n.T("settings.title"), i18n.T("settings.subtitle")) +
+		`<div class=set-search data-label="settings-search"><input id=set-q class=field-input type=search value=` + attrQ(q) +
+		` placeholder=` + attrQ(i18n.T("settings.search.placeholder")) +
+		` data-actinput=settings-search autocomplete=off spellcheck=false></div>` +
+		`<div id=set-content>` + u.renderSettingsContent() + `</div></div>`
+}
+
+// renderSettingsContent renders the pane below the search box: sub-tab pills + the active
+// section's cards, or (query non-empty) matching cards across ALL sections grouped by section.
+// Patched on its own (#set-content) so the search input's DOM - and its focus - survive.
+func (u *UI) renderSettingsContent() string {
 	secs := settingsSections()
 	stats := u.settingsStatus()
-
+	visible := map[string]bool{}
 	var b strings.Builder
-	b.WriteString(panel(i18n.T("settings.title"), i18n.T("settings.subtitle")))
-	b.WriteString(u.languageCardHTML())
 
-	// section nav (sticky pills + aggregate dots)
+	if rawQ := strings.TrimSpace(u.settingsQueryText()); rawQ != "" {
+		terms := strings.Fields(foldSearch(rawQ))
+		total := 0
+		for _, s := range secs {
+			var cards strings.Builder
+			for _, id := range s.cards {
+				h := u.settingsCard(id, stats[id])
+				// match against the card's visible text (title + labels + help notes) - the
+				// registry stays single-sourced, every label is searchable for free
+				if !matchAllTerms(foldSearch(stripTags(h)), terms) {
+					continue
+				}
+				cards.WriteString(h)
+				visible[id] = true
+				total++
+			}
+			if cards.Len() > 0 {
+				b.WriteString(section(s.title, `<div class=set-sec>`+cards.String()+`</div>`))
+			}
+		}
+		if total == 0 {
+			b.WriteString(emptyState(i18n.T("settings.search.noResults", i18n.A{"query": rawQ})))
+		}
+		u.setViewState(visible, true)
+		return b.String()
+	}
+
+	active := u.settingsActiveSec(secs)
 	b.WriteString(`<nav class=set-nav>`)
 	for _, s := range secs {
 		agg := "off"
@@ -166,39 +209,104 @@ func (u *UI) renderSettings() string {
 				agg = st.v
 			}
 		}
-		b.WriteString(`<a class=set-navpill href="#set-` + s.id + `"><span id=stnav-` + s.id + `><span class="dot dot--` + agg + `"></span></span>` + html.EscapeString(s.title) + `</a>`)
+		cls := "set-navpill"
+		if s.id == active {
+			cls += " active"
+		}
+		b.WriteString(`<button class="` + cls + `" data-act=settings-sec data-val="` + s.id + `">` +
+			`<span id=stnav-` + s.id + `><span class="dot dot--` + agg + `"></span></span>` +
+			html.EscapeString(s.title) + `</button>`)
 	}
 	b.WriteString(`</nav>`)
-
 	for _, s := range secs {
+		if s.id != active {
+			continue
+		}
 		var body strings.Builder
+		body.WriteString(`<p class=page-sub>` + html.EscapeString(s.desc) + `</p>`)
 		body.WriteString(`<div id=set-` + s.id + ` class=set-sec>`)
 		for _, id := range s.cards {
 			body.WriteString(u.settingsCard(id, stats[id]))
+			visible[id] = true
 		}
 		body.WriteString(`</div>`)
-		b.WriteString(section(s.title, `<p class=page-sub>`+html.EscapeString(s.desc)+`</p>`+body.String()))
+		b.WriteString(body.String())
 	}
-	return `<div id=settings-body>` + b.String() + `</div>`
+	u.setViewState(visible, false)
+	return b.String()
 }
 
-// languageCardHTML renders the interface-language switcher (smart-select). Picking a locale
-// dispatches "ui-setlang:<code>" → persist + i18n.SetLocale + full re-render (settings_actions.go).
-func (u *UI) languageCardHTML() string {
-	cur := i18n.Current()
-	opts := func() []ssOpt {
-		locs := i18n.Available()
-		out := make([]ssOpt, 0, len(locs))
-		for _, l := range locs {
-			out = append(out, ssOpt{Val: l.Code, Label: l.Name, Badge: strings.ToUpper(l.Code)})
+// ── settings view state (guarded by setMu) ──
+
+func (u *UI) settingsQueryText() string {
+	u.setMu.Lock()
+	defer u.setMu.Unlock()
+	return u.setQuery
+}
+
+func (u *UI) settingsActiveSec(secs []setSection) string {
+	u.setMu.Lock()
+	cur := u.setSec
+	u.setMu.Unlock()
+	for _, s := range secs {
+		if s.id == cur {
+			return cur
 		}
-		return out
 	}
-	body := smartSelect("uilang", i18n.T("settings.language.label"), "ui-setlang:", cur, opts)
-	return `<div class="rp-card"><div class=set-cardhead><span class=set-title>` +
-		html.EscapeString(i18n.T("settings.language.title")) + `</span></div>` +
-		`<div class=set-note>` + html.EscapeString(i18n.T("settings.language.desc")) + `</div>` +
-		body + `</div>`
+	return secs[0].id
+}
+
+func (u *UI) setViewState(visible map[string]bool, searching bool) {
+	u.setMu.Lock()
+	u.setVisible, u.setSearch = visible, searching
+	u.setMu.Unlock()
+}
+
+func (u *UI) settingsVisible() (map[string]bool, bool) {
+	u.setMu.Lock()
+	defer u.setMu.Unlock()
+	return u.setVisible, u.setSearch
+}
+
+// ── search helpers ──
+
+// stripTags reduces card HTML to its visible text (titles, labels, help notes).
+func stripTags(h string) string {
+	var b strings.Builder
+	in := false
+	for _, r := range h {
+		switch {
+		case r == '<':
+			in = true
+			b.WriteByte(' ')
+		case r == '>':
+			in = false
+		case !in:
+			b.WriteRune(r)
+		}
+	}
+	return html.UnescapeString(b.String())
+}
+
+// foldSearch lowercases + strips diacritics ("Résolume" matches "resolume").
+func foldSearch(s string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(strings.ToLower(s)) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func matchAllTerms(hay string, terms []string) bool {
+	for _, t := range terms {
+		if !strings.Contains(hay, t) {
+			return false
+		}
+	}
+	return true
 }
 
 // settingsCard renders one feature card: header (title + toggle) + status row + body.
@@ -253,6 +361,18 @@ func (u *UI) accountCardHTML() string {
 func (u *UI) cardContent(id string) (string, string, string) {
 	f := &u.svc.Cfg.Features
 	switch id {
+	case "uilang":
+		// picking a locale dispatches "ui-setlang:<code>" → persist + i18n.SetLocale + re-render
+		opts := func() []ssOpt {
+			locs := i18n.Available()
+			out := make([]ssOpt, 0, len(locs))
+			for _, l := range locs {
+				out = append(out, ssOpt{Val: l.Code, Label: l.Name, Badge: strings.ToUpper(l.Code)})
+			}
+			return out
+		}
+		return i18n.T("settings.language.title"), i18n.T("settings.language.desc"),
+			smartSelect("uilang", i18n.T("settings.language.label"), "ui-setlang:", i18n.Current(), opts)
 	case "account":
 		return i18n.T("settings.card.account.title"), i18n.T("settings.card.account.desc"), u.accountCardHTML()
 	case "api":
@@ -273,7 +393,7 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.traktormap.title"), i18n.T("settings.card.traktormap.desc"), u.traktorMapBody()
 	case "midi":
 		mf := &f.MIDI
-		names := mustNames(midi.Ports)
+		names := u.devNamesCached("midi")
 		portPlaceholder := i18n.T("settings.body.midi.selectPortPlaceholder")
 		return i18n.T("settings.card.midi.title"), i18n.T("settings.card.midi.desc"),
 			selectBox(i18n.T("settings.body.midi.customPort"), "set:midi-custom", devOpts(names, portPlaceholder, mf.CustomPort), mf.CustomPort) +
@@ -455,10 +575,7 @@ func (u *UI) setCaptureBody() string {
 
 func (u *UI) audioRecBody() string {
 	f := &u.svc.Cfg.Features.AudioRecord
-	var devs []string
-	if u.svc.AudioRec != nil {
-		devs, _ = u.svc.AudioRec.Devices()
-	}
+	devs := u.devNamesCached("audiorec")
 	return selectBox(i18n.T("settings.body.audiorec.device"), "set:ar-device", devOpts(devs, i18n.T("settings.body.audiorec.devicePlaceholder"), f.Device), f.Device) +
 		selectBox(i18n.T("settings.body.audiorec.format"), "set:ar-format", [][2]string{{"flac", "flac"}, {"wav", "wav"}, {"mp3", "mp3"}, {"aac", "aac"}}, f.ResolvedFormat()) +
 		field(i18n.T("settings.body.audiorec.bitrate"), "set:ar-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number") +
@@ -512,8 +629,8 @@ func (u *UI) ableLinkBody() string {
 
 func (u *UI) timecodeBody() string {
 	f := &u.svc.Cfg.Features.Timecode
-	waveOut := mustNames(timecode.WaveOutDevices)
-	midiOut := mustNames(timecode.MidiOutDevices)
+	waveOut := u.devNamesCached("waveout")
+	midiOut := u.devNamesCached("midiout")
 	clock := f.StartAt == "clock"
 	body := selectBox(i18n.T("settings.body.common.frameRate"), "set:tc-rate", [][2]string{{"24", i18n.T("settings.body.timecode.rate24")}, {"25", i18n.T("settings.body.timecode.rate25")}, {"29.97", i18n.T("settings.body.timecode.rate2997")}, {"30", i18n.T("settings.body.timecode.rate30")}}, f.ResolvedRate()) +
 		toggleRow(i18n.T("settings.body.timecode.clockStart"), "set:tc-clock", clock)
@@ -556,7 +673,7 @@ func (u *UI) twitchBody() string {
 
 func (u *UI) sttBody() string {
 	f := &u.svc.Cfg.Features.STT
-	mics := mustNames(stt.InputDevices)
+	mics := u.devNamesCached("sttmic")
 	var modelOpts [][2]string
 	for _, m := range stt.Models {
 		modelOpts = append(modelOpts, [2]string{m.File, m.Display})
@@ -697,7 +814,7 @@ func (u *UI) unityBody() string {
 		rows.WriteString(emptyState(i18n.T("settings.body.unity.empty")))
 	}
 	for i, dir := range f.Projects {
-		info := unityproj.Inspect(dir)
+		info := u.unityInfoCached(dir)
 		sub := i18n.T("settings.body.unity.pluginNotInstalled")
 		switch {
 		case !info.Valid:
@@ -790,11 +907,16 @@ func (u *UI) vrInstallHTML() string {
 
 const probeTTL = 10 * time.Second // fs/PATH state rarely changes; re-probe at most this often
 
-// settingsProbes caches the slow media-tool + VR-DLL probes.
+// settingsProbes caches the slow media-tool + VR-DLL probes and the device enumerations
+// (MIDI / waveOut / STT mics / capture devices / Unity project inspects). Device enumeration
+// hits OS APIs (winmm, WASAPI) and the filesystem - synchronous calls in card bodies froze the
+// Settings tab open for seconds.
 type settingsProbes struct {
 	mu    sync.Mutex
 	tools map[string]mediatools.Status // key ("ffmpeg"|"fpcalc"|"mpv") → last status
 	vr    vrdll.Status
+	devs  map[string][]string          // kind ("midi"|"waveout"|"midiout"|"sttmic"|"audiorec") → names
+	unity map[string]unityproj.Project    // project dir → inspect result
 	at    time.Time
 	ready bool
 	busy  bool // a background refresh is in flight (prevents stacking on the 1 Hz tick)
@@ -815,6 +937,28 @@ func (u *UI) vrStatusCached() vrdll.Status {
 	return u.probes.vr
 }
 
+// devNamesCached returns the last cached device enumeration for kind (empty until the first
+// background probe lands). Never hits OS device APIs - safe on the render goroutine.
+func (u *UI) devNamesCached(kind string) []string {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	return u.probes.devs[kind]
+}
+
+// unityInfoCached returns the last cached inspect for a Unity project dir.
+func (u *UI) unityInfoCached(dir string) unityproj.Project {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	return u.probes.unity[dir]
+}
+
+// invalidateProbes forces the next maybeRefreshProbes to re-probe now (Refresh buttons).
+func (u *UI) invalidateProbes() {
+	u.probes.mu.Lock()
+	u.probes.at = time.Time{}
+	u.probes.mu.Unlock()
+}
+
 // refreshProbes recomputes the slow fs/PATH probes and caches them. MUST run off the UI goroutine
 // (called via u.bg). Cheap enough for the tick when stale.
 func (u *UI) refreshProbes() {
@@ -827,13 +971,31 @@ func (u *UI) refreshProbes() {
 	if vroverlay.BuiltWithVR() {
 		vr = vrdll.Probe()
 	}
+	devs := map[string][]string{
+		"midi":    mustNames(midi.Ports),
+		"waveout": mustNames(timecode.WaveOutDevices),
+		"midiout": mustNames(timecode.MidiOutDevices),
+		"sttmic":  mustNames(stt.InputDevices),
+	}
+	if u.svc.AudioRec != nil {
+		devs["audiorec"] = mustNames(u.svc.AudioRec.Devices)
+	}
+	unity := map[string]unityproj.Project{}
+	if u.svc.Cfg != nil {
+		for _, dir := range u.svc.Cfg.Features.Unity.Projects {
+			unity[dir] = unityproj.Inspect(dir)
+		}
+	}
 	u.probes.mu.Lock()
 	// The install-card bodies (toolInstallHTML/vrInstallHTML) only re-render on a full patchMain,
 	// not the 1 Hz status tick - so patch once when the probe first lands or its install-state
 	// changes, to flip the card from the placeholder "not installed" to the real state.
-	changed := !u.probes.ready || vr.Installed != u.probes.vr.Installed || toolInstallChanged(u.probes.tools, tools)
+	changed := !u.probes.ready || vr.Installed != u.probes.vr.Installed ||
+		toolInstallChanged(u.probes.tools, tools) || devListsChanged(u.probes.devs, devs)
 	u.probes.tools = tools
 	u.probes.vr = vr
+	u.probes.devs = devs
+	u.probes.unity = unity
 	u.probes.at = time.Now()
 	u.probes.ready = true
 	u.probes.busy = false
@@ -841,6 +1003,25 @@ func (u *UI) refreshProbes() {
 	if changed && u.activeTab() == "settings" {
 		u.patchMain()
 	}
+}
+
+// devListsChanged reports whether any device enumeration differs between snapshots.
+func devListsChanged(a, b map[string][]string) bool {
+	if len(a) != len(b) {
+		return true
+	}
+	for k, bv := range b {
+		av := a[k]
+		if len(av) != len(bv) {
+			return true
+		}
+		for i := range bv {
+			if av[i] != bv[i] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // toolInstallChanged reports whether any tool's install-state (installed/path) differs between two
@@ -881,6 +1062,13 @@ func (u *UI) settingsStatus() map[string]stv {
 	tr := i18n.T // local alias, keeps the set(...) lines below scannable
 
 	// account
+	locName := i18n.Current()
+	for _, l := range i18n.Available() {
+		if l.Code == i18n.Current() {
+			locName = l.Name
+		}
+	}
+	set("uilang", stOk(locName))
 	if u.svc.Auth != nil && u.svc.Auth.SignedIn() {
 		set("account", stOk(tr("settings.status.account.signedIn")))
 	} else {
@@ -1589,7 +1777,7 @@ func devOpts(names []string, defLabel, cur string) [][2]string {
 
 func noPortsHint(names []string) string {
 	if len(names) == 0 {
-		return `<div class=set-note>No MIDI input ports found. Install a virtual MIDI port (loopMIDI or LoopBe1), then Refresh.</div>`
+		return `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.midi.noPorts")) + `</div>`
 	}
 	return ""
 }

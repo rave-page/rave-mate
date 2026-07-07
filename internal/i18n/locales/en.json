@@ -1486,7 +1486,8 @@
         "installLoopMidi": "Refresh ports",
         "mesh": "(select MIDI input port)",
         "refreshPorts": "Mirror MIDI to all paired instances",
-        "selectPortPlaceholder": "MIDI controller"
+        "selectPortPlaceholder": "MIDI controller",
+        "noPorts": "No MIDI input ports found. Install a virtual MIDI port (loopMIDI or LoopBe1), then Refresh."
       },
       "nml": {
         "note": "Blank = auto-detect newest Traktor install. Toggle off/on to apply a path change.",
@@ -1498,11 +1499,11 @@
         "note": "Enable obs-websocket in OBS (Tools → WebSocket Server Settings). Default port 4455. Finished recordings link to the set recorded over the same span. Connection changes apply on toggle off/on.",
         "password": "Password",
         "port": "Port",
-        "remoteObs": "Remote OBS… (%d)"
+        "remoteObs": "Remote OBS… ({count})"
       },
       "obssync": {
         "deadBand": "Dead band (frames)",
-        "mediaSources": "Media sources… (%d)",
+        "mediaSources": "Media sources… ({count})",
         "note": "Keep OBS media sources in step with a shared clock. Start/stop + per-source readout live on the Live tab.",
         "restartThreshold": "Restart threshold (ms)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Art-Net TimeCode output",
         "artnetTarget": "Art-Net target (host:port)",
         "clockStart": "Start at time of day (jam to wall clock)",
-        "extraArtnet": "Extra Art-Net (%d)",
-        "extraLtc": "Extra LTC (%d)",
-        "extraMtc": "Extra MTC (%d)",
+        "extraArtnet": "Extra Art-Net ({count})",
+        "extraLtc": "Extra LTC ({count})",
+        "extraMtc": "Extra MTC ({count})",
         "firstPort": "(first port)",
         "ltcDevice": "LTC audio device",
         "ltcLevel": "LTC level (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Sign in to Twitch",
         "signInLine": "Sign in with the Rave-Mate Twitch app (Device Code - no password, no secret).",
         "signedInAs": "Signed in as ",
-        "titlePresets": "Title presets… (%d)",
+        "titlePresets": "Title presets… ({count})",
         "unavailable": "Twitch unavailable in this build."
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "B / Y button",
         "customSteamvr": "Custom (set in SteamVR)",
         "editBadge": "Edit badge on wrist",
-        "keybindsCount": "Keybinds… (%d)",
-        "layoutsCount": "Layouts… (%d)",
+        "keybindsCount": "Keybinds… ({count})",
+        "layoutsCount": "Layouts… ({count})",
         "openBindings": "Open controller bindings",
         "openEditor": "Open the editor",
-        "overlaysCount": "Overlays… (%d)",
+        "overlaysCount": "Overlays… ({count})",
         "tapHides": "Short tap shows / hides the overlays",
         "viewCapture": "Allow VR-View screenshots",
         "vmc": "VMC (VTuber)",
         "vmcLive": "Stream live VR motion to VMC (VTuber)",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "World layouts… (%d)",
-        "wristCount": "Wrist buttons… (%d)"
+        "worldLayoutsCount": "World layouts… ({count})",
+        "wristCount": "Wrist buttons… ({count})"
       },
       "webcam": {
         "autostart": "Start the camera with the app (crash-recovery rigs)",
@@ -2020,14 +2021,14 @@
         "unavailable": "unavailable"
       },
       "dmx": {
-        "idleSeen": "idle - %d universe(s) seen",
+        "idleSeen": "idle - {count} universe(s) seen",
         "listeningNoData": "listening - no DMX yet",
         "receiving": "receiving DMX"
       },
       "dmxmidi": {
         "notRunning": "not running (MIDI port missing?)",
         "readyOn": "ready on ",
-        "sentMsgs": "→ %s · %d msg(s)"
+        "sentMsgs": "→ {port} · {count} msg(s)"
       },
       "fingerprint": {
         "missing": "fpcalc missing",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "clock stopped",
-        "syncing": "syncing %d source(s)"
+        "syncing": "syncing {count} source(s)"
       },
       "peers": {
         "discoveryOn": "discovery on"
       },
       "recorder": {
-        "recordingTracks": "recording · %d tracks"
+        "recordingTracks": "recording · {count} tracks"
       },
       "rekordboxkey": {
         "saveTest": "save + test"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "encoding - waiting for players",
         "startingSource": "starting video source…",
-        "streamingClients": "streaming to %d client(s)"
+        "streamingClients": "streaming to {count} client(s)"
       },
       "service": {
         "notChecked": "not checked"
       },
       "setcapture": {
-        "capturing": "capturing ",
-        "listening": "listening ",
+        "capturing": "capturing {format}",
+        "listening": "listening {addr}",
         "receiverError": "receiver error",
         "sourceDropped": "source dropped - holding"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "armed - press START",
-        "running": "RUNNING · "
+        "running": "RUNNING · {tc}"
       },
       "traktor": {
-        "listening": "listening :%d"
+        "listening": "listening :{port}"
       },
       "traktormap": {
         "manageDevices": "manage devices"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "no projects",
-        "projectsCount": "%d project(s)"
+        "projectsCount": "{count} project(s)"
       },
       "updates": {
         "devBuild": "dev build",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "joining a bound world does nothing",
       "worldPrefix": "World: ",
       "wristQuickButtons": "Wrist quick buttons"
+    },
+    "search": {
+      "placeholder": "Search all settings…",
+      "noResults": "No settings match \"{query}\""
     }
   },
   "tab": {

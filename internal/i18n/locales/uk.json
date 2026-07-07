@@ -1486,7 +1486,8 @@
         "installLoopMidi": "Оновити порти",
         "mesh": "(виберіть порт MIDI-входу)",
         "refreshPorts": "Дзеркалити MIDI на всі спарені екземпляри",
-        "selectPortPlaceholder": "MIDI-контролер"
+        "selectPortPlaceholder": "MIDI-контролер",
+        "noPorts": "MIDI-входи не знайдено. Встановіть віртуальний MIDI-порт (loopMIDI або LoopBe1), потім оновіть."
       },
       "nml": {
         "note": "Порожньо = автовиявлення найновішого встановлення Traktor. Вимкніть/увімкніть, щоб застосувати зміну шляху.",
@@ -1498,11 +1499,11 @@
         "note": "Увімкніть obs-websocket в OBS (Tools → WebSocket Server Settings). Стандартний порт 4455. Завершені записи прив’язуються до сету, записаного за той самий проміжок. Зміни з’єднання застосовуються при вимкненні/увімкненні.",
         "password": "Пароль",
         "port": "Порт",
-        "remoteObs": "Віддалений OBS… (%d)"
+        "remoteObs": "Віддалений OBS… ({count})"
       },
       "obssync": {
         "deadBand": "Мертва зона (кадрів)",
-        "mediaSources": "Медіаджерела… (%d)",
+        "mediaSources": "Медіаджерела… ({count})",
         "note": "Тримайте медіаджерела OBS у крок зі спільним годинником. Старт/стоп + зчитування по джерелах - на вкладці Live.",
         "restartThreshold": "Поріг перезапуску (мс)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Вивід TimeCode через Art-Net",
         "artnetTarget": "Ціль Art-Net (host:port)",
         "clockStart": "Старт від часу доби (синхр. з настінним годинником)",
-        "extraArtnet": "Додатковий Art-Net (%d)",
-        "extraLtc": "Додатковий LTC (%d)",
-        "extraMtc": "Додатковий MTC (%d)",
+        "extraArtnet": "Додатковий Art-Net ({count})",
+        "extraLtc": "Додатковий LTC ({count})",
+        "extraMtc": "Додатковий MTC ({count})",
         "firstPort": "(перший порт)",
         "ltcDevice": "Аудіопристрій LTC",
         "ltcLevel": "Рівень LTC (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Увійти до Twitch",
         "signInLine": "Увійдіть через застосунок Rave-Mate Twitch (Device Code - без пароля, без секрету).",
         "signedInAs": "У системі як ",
-        "titlePresets": "Пресети назв… (%d)",
+        "titlePresets": "Пресети назв… ({count})",
         "unavailable": "Twitch недоступний у цій збірці."
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "Кнопка B / Y",
         "customSteamvr": "Власне (задати у SteamVR)",
         "editBadge": "Редагувати бейдж на зап’ясті",
-        "keybindsCount": "Прив’язки клавіш… (%d)",
-        "layoutsCount": "Макети… (%d)",
+        "keybindsCount": "Прив’язки клавіш… ({count})",
+        "layoutsCount": "Макети… ({count})",
         "openBindings": "Відкрити прив’язки контролера",
         "openEditor": "Відкрити редактор",
-        "overlaysCount": "Оверлеї… (%d)",
+        "overlaysCount": "Оверлеї… ({count})",
         "tapHides": "Короткий тап показує / приховує оверлеї",
         "viewCapture": "Дозволити скриншоти VR-View",
         "vmc": "VMC (VTuber)",
         "vmcLive": "Стримити живий VR-рух у VMC (VTuber)",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "Макети світів… (%d)",
-        "wristCount": "Кнопки на зап’ясті… (%d)"
+        "worldLayoutsCount": "Макети світів… ({count})",
+        "wristCount": "Кнопки на зап’ясті… ({count})"
       },
       "webcam": {
         "autostart": "Запускати камеру разом із застосунком (стійки з відновленням після збоїв)",
@@ -2020,14 +2021,14 @@
         "unavailable": "недоступно"
       },
       "dmx": {
-        "idleSeen": "очікування - %d всесвіт(ів) виявлено",
+        "idleSeen": "очікування - {count} всесвіт(ів) виявлено",
         "listeningNoData": "слухає - DMX ще немає",
         "receiving": "приймання DMX"
       },
       "dmxmidi": {
         "notRunning": "не запущено (порт MIDI відсутній?)",
         "readyOn": "готово на ",
-        "sentMsgs": "→ %s · %d повід."
+        "sentMsgs": "→ {port} · {count} повід."
       },
       "fingerprint": {
         "missing": "fpcalc відсутній",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "годинник зупинено",
-        "syncing": "синхронізація %d джерел(а)"
+        "syncing": "синхронізація {count} джерел(а)"
       },
       "peers": {
         "discoveryOn": "виявлення увімк."
       },
       "recorder": {
-        "recordingTracks": "запис · %d треків"
+        "recordingTracks": "запис · {count} треків"
       },
       "rekordboxkey": {
         "saveTest": "зберегти + тест"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "кодування - очікування плеєрів",
         "startingSource": "запуск відеоджерела…",
-        "streamingClients": "стримінг до %d клієнт(ів)"
+        "streamingClients": "стримінг до {count} клієнт(ів)"
       },
       "service": {
         "notChecked": "не перевірено"
       },
       "setcapture": {
-        "capturing": "захоплення ",
-        "listening": "слухає ",
+        "capturing": "захоплення {format}",
+        "listening": "слухає {addr}",
         "receiverError": "помилка приймача",
         "sourceDropped": "джерело відпало - утримання"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "готово - натисніть START",
-        "running": "ЗАПУЩЕНО · "
+        "running": "ЗАПУЩЕНО · {tc}"
       },
       "traktor": {
-        "listening": "слухає :%d"
+        "listening": "слухає :{port}"
       },
       "traktormap": {
         "manageDevices": "керувати пристроями"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "проєктів немає",
-        "projectsCount": "%d проєкт(ів)"
+        "projectsCount": "{count} проєкт(ів)"
       },
       "updates": {
         "devBuild": "dev-збірка",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "вхід у прив’язаний світ нічого не робить",
       "worldPrefix": "Світ: ",
       "wristQuickButtons": "Швидкі кнопки зап’ястя"
+    },
+    "search": {
+      "placeholder": "Пошук у всіх налаштуваннях…",
+      "noResults": "Немає налаштувань за запитом \"{query}\""
     }
   },
   "tab": {

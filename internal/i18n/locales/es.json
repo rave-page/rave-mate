@@ -1486,7 +1486,8 @@
         "installLoopMidi": "Actualizar puertos",
         "mesh": "(seleccionar puerto de entrada MIDI)",
         "refreshPorts": "Reflejar MIDI a todas las instancias emparejadas",
-        "selectPortPlaceholder": "Controlador MIDI"
+        "selectPortPlaceholder": "Controlador MIDI",
+        "noPorts": "No se encontraron puertos de entrada MIDI. Instala un puerto MIDI virtual (loopMIDI o LoopBe1) y actualiza."
       },
       "nml": {
         "note": "En blanco = detectar automáticamente la instalación de Traktor más reciente. Desactiva/activa para aplicar un cambio de ruta.",
@@ -1498,11 +1499,11 @@
         "note": "Activa obs-websocket en OBS (Herramientas → Ajustes del servidor WebSocket). Puerto predeterminado 4455. Las grabaciones finalizadas se vinculan al set grabado durante el mismo intervalo. Los cambios de conexión se aplican al desactivar/activar.",
         "password": "Contraseña",
         "port": "Puerto",
-        "remoteObs": "OBS remoto… (%d)"
+        "remoteObs": "OBS remoto… ({count})"
       },
       "obssync": {
         "deadBand": "Banda muerta (fotogramas)",
-        "mediaSources": "Fuentes de medios… (%d)",
+        "mediaSources": "Fuentes de medios… ({count})",
         "note": "Mantén las fuentes de medios de OBS en paso con un reloj compartido. Inicio/parada + lectura por fuente en la pestaña Live.",
         "restartThreshold": "Umbral de reinicio (ms)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Salida de TimeCode Art-Net",
         "artnetTarget": "Destino Art-Net (host:port)",
         "clockStart": "Iniciar a la hora del día (engancha al reloj de pared)",
-        "extraArtnet": "Art-Net extra (%d)",
-        "extraLtc": "LTC extra (%d)",
-        "extraMtc": "MTC extra (%d)",
+        "extraArtnet": "Art-Net extra ({count})",
+        "extraLtc": "LTC extra ({count})",
+        "extraMtc": "MTC extra ({count})",
         "firstPort": "(primer puerto)",
         "ltcDevice": "Dispositivo de audio LTC",
         "ltcLevel": "Nivel LTC (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Iniciar sesión en Twitch",
         "signInLine": "Inicia sesión con la app Rave-Mate de Twitch (Device Code - sin contraseña, sin secreto).",
         "signedInAs": "Sesión iniciada como ",
-        "titlePresets": "Preajustes de título… (%d)",
+        "titlePresets": "Preajustes de título… ({count})",
         "unavailable": "Twitch no disponible en esta compilación."
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "Botón B / Y",
         "customSteamvr": "Personalizado (definido en SteamVR)",
         "editBadge": "Editar insignia en la muñeca",
-        "keybindsCount": "Atajos… (%d)",
-        "layoutsCount": "Diseños… (%d)",
+        "keybindsCount": "Atajos… ({count})",
+        "layoutsCount": "Diseños… ({count})",
         "openBindings": "Abrir asignaciones del mando",
         "openEditor": "Abrir el editor",
-        "overlaysCount": "Overlays… (%d)",
+        "overlaysCount": "Overlays… ({count})",
         "tapHides": "Un toque corto muestra / oculta los overlays",
         "viewCapture": "Permitir capturas VR-View",
         "vmc": "VMC (VTuber)",
         "vmcLive": "Transmitir movimiento VR en vivo a VMC (VTuber)",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "Diseños de mundo… (%d)",
-        "wristCount": "Botones de muñeca… (%d)"
+        "worldLayoutsCount": "Diseños de mundo… ({count})",
+        "wristCount": "Botones de muñeca… ({count})"
       },
       "webcam": {
         "autostart": "Iniciar la cámara con la app (equipos con recuperación de fallos)",
@@ -2020,14 +2021,14 @@
         "unavailable": "no disponible"
       },
       "dmx": {
-        "idleSeen": "inactivo - %d universo(s) vistos",
+        "idleSeen": "inactivo - {count} universo(s) vistos",
         "listeningNoData": "escuchando - aún sin DMX",
         "receiving": "recibiendo DMX"
       },
       "dmxmidi": {
         "notRunning": "no en ejecución (¿falta puerto MIDI?)",
         "readyOn": "listo en ",
-        "sentMsgs": "→ %s · %d mensaje(s)"
+        "sentMsgs": "→ {port} · {count} mensaje(s)"
       },
       "fingerprint": {
         "missing": "falta fpcalc",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "reloj detenido",
-        "syncing": "sincronizando %d fuente(s)"
+        "syncing": "sincronizando {count} fuente(s)"
       },
       "peers": {
         "discoveryOn": "descubrimiento activo"
       },
       "recorder": {
-        "recordingTracks": "grabando · %d pistas"
+        "recordingTracks": "grabando · {count} pistas"
       },
       "rekordboxkey": {
         "saveTest": "guardar + probar"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "codificando - esperando reproductores",
         "startingSource": "iniciando fuente de vídeo…",
-        "streamingClients": "transmitiendo a %d cliente(s)"
+        "streamingClients": "transmitiendo a {count} cliente(s)"
       },
       "service": {
         "notChecked": "no comprobado"
       },
       "setcapture": {
-        "capturing": "capturando ",
-        "listening": "escuchando ",
+        "capturing": "capturando {format}",
+        "listening": "escuchando {addr}",
         "receiverError": "error del receptor",
         "sourceDropped": "origen caído - reteniendo"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "armado - pulsa START",
-        "running": "EN EJECUCIÓN · "
+        "running": "EN EJECUCIÓN · {tc}"
       },
       "traktor": {
-        "listening": "escuchando :%d"
+        "listening": "escuchando :{port}"
       },
       "traktormap": {
         "manageDevices": "gestionar dispositivos"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "sin proyectos",
-        "projectsCount": "%d proyecto(s)"
+        "projectsCount": "{count} proyecto(s)"
       },
       "updates": {
         "devBuild": "compilación dev",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "unirse a un mundo asignado no hace nada",
       "worldPrefix": "Mundo: ",
       "wristQuickButtons": "Botones rápidos de muñeca"
+    },
+    "search": {
+      "placeholder": "Buscar en todos los ajustes…",
+      "noResults": "Ningún ajuste coincide con \"{query}\""
     }
   },
   "tab": {

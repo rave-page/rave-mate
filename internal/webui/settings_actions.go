@@ -29,30 +29,52 @@ import (
 // (scalar/bool field writes go through the shared set:/toggle: path handled in ui.go + applySet).
 
 func init() {
-	// live status refresh
+	// live status refresh - only cards actually in the DOM (active sub-tab / search matches),
+	// one coalesced eval, unchanged fragments skipped (tickPatch)
 	onLiveTick("settings", func(u *UI) {
 		if u.svc.Cfg == nil {
 			return
 		}
-		u.maybeRefreshProbes() // keep the cached fs/PATH probes warm off the render path
+		u.maybeRefreshProbes() // keep the cached fs/PATH/device probes warm off the render path
 		stats := u.settingsStatus()
+		visible, searching := u.settingsVisible()
 		var js strings.Builder
 		for id, s := range stats {
-			js.WriteString("window.__patch('stset-" + id + "'," + jsQuote(renderStatus(s)) + ");")
-		}
-		for _, sec := range settingsSections() {
-			agg := "off"
-			for _, id := range sec.cards {
-				if st, ok := stats[id]; ok && stRank(st.v) > stRank(agg) {
-					agg = st.v
-				}
+			if !visible[id] {
+				continue
 			}
-			js.WriteString("window.__patch('stnav-" + sec.id + "'," + jsQuote(`<span class="dot dot--`+agg+`"></span>`) + ");")
+			u.tickPatch(&js, "stset-"+id, renderStatus(s))
 		}
-		u.eval(js.String())
+		if !searching { // sub-tab pills (with aggregate dots) only exist outside search mode
+			for _, sec := range settingsSections() {
+				agg := "off"
+				for _, id := range sec.cards {
+					if st, ok := stats[id]; ok && stRank(st.v) > stRank(agg) {
+						agg = st.v
+					}
+				}
+				u.tickPatch(&js, "stnav-"+sec.id, `<span class="dot dot--`+agg+`"></span>`)
+			}
+		}
+		u.flushTick(&js)
 	})
 
-	onExact("settings-refresh", func(u *UI, _ actMsg) { u.patchMain() })
+	onExact("settings-refresh", func(u *UI, _ actMsg) {
+		u.invalidateProbes()
+		u.maybeRefreshProbes() // async; re-patches when device lists change
+		u.patchMain()
+	})
+
+	// settings sub-tab pill
+	onExact("settings-sec", func(u *UI, m actMsg) {
+		u.setMu.Lock()
+		u.setSec = m.Val
+		u.setMu.Unlock()
+		u.patchSettingsContent()
+	})
+
+	// global settings search (per-keystroke input events, debounced Go-side)
+	onExact("settings-search", func(u *UI, m actMsg) { u.settingsSearchInput(m.Val) })
 
 	// Ableton Link: hard-realign the phrase (map beat 0 to now).
 	onExact("ablelink-resync", func(u *UI, _ actMsg) {
@@ -621,6 +643,29 @@ func init() {
 
 // setLanguage persists the chosen UI locale, switches i18n, and re-renders the shell (nav + main)
 // so every localized string updates live. Empty code = OS-locale fallback.
+// settingsSearchInput stores the query and debounces the content re-render (input events arrive
+// per keystroke). Only #set-content is patched so the search box keeps focus while typing.
+func (u *UI) settingsSearchInput(q string) {
+	u.setMu.Lock()
+	u.setQuery = q
+	if u.setDebounce != nil {
+		u.setDebounce.Stop()
+	}
+	u.setDebounce = time.AfterFunc(120*time.Millisecond, u.patchSettingsContent)
+	u.setMu.Unlock()
+}
+
+// patchSettingsContent re-renders the pane below the search box (pills + cards / results).
+func (u *UI) patchSettingsContent() {
+	if u.activeTab() != "settings" {
+		return
+	}
+	u.fragMu.Lock()
+	u.frags = nil // stset-/stnav- nodes replaced - drop the tick dedup cache
+	u.fragMu.Unlock()
+	u.eval("window.__patch('set-content'," + jsQuote(u.renderSettingsContent()) + ")")
+}
+
 func (u *UI) setLanguage(code string) {
 	active := i18n.SetLocale(code)
 	if u.svc.Cfg != nil {

@@ -1486,7 +1486,8 @@
         "installLoopMidi": "Обновить порты",
         "mesh": "(выберите порт MIDI-входа)",
         "refreshPorts": "Зеркалировать MIDI на все сопряжённые экземпляры",
-        "selectPortPlaceholder": "MIDI-контроллер"
+        "selectPortPlaceholder": "MIDI-контроллер",
+        "noPorts": "MIDI-входы не найдены. Установите виртуальный MIDI-порт (loopMIDI или LoopBe1), затем обновите."
       },
       "nml": {
         "note": "Пусто = автоопределение новейшей установки Traktor. Выключите/включите, чтобы применить смену пути.",
@@ -1498,11 +1499,11 @@
         "note": "Включите obs-websocket в OBS (Инструменты → Настройки WebSocket-сервера). Порт по умолчанию 4455. Завершённые записи связываются с сетом, записанным за тот же промежуток. Изменения подключения применяются при выключении/включении.",
         "password": "Пароль",
         "port": "Порт",
-        "remoteObs": "Удалённый OBS… (%d)"
+        "remoteObs": "Удалённый OBS… ({count})"
       },
       "obssync": {
         "deadBand": "Мёртвая зона (кадры)",
-        "mediaSources": "Медиа-источники… (%d)",
+        "mediaSources": "Медиа-источники… ({count})",
         "note": "Держите медиа-источники OBS в такт с общими часами. Старт/стоп + показания по источникам находятся на вкладке Live.",
         "restartThreshold": "Порог перезапуска (мс)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Вывод TimeCode по Art-Net",
         "artnetTarget": "Цель Art-Net (host:port)",
         "clockStart": "Стартовать по времени суток (синхр. с настенными часами)",
-        "extraArtnet": "Доп. Art-Net (%d)",
-        "extraLtc": "Доп. LTC (%d)",
-        "extraMtc": "Доп. MTC (%d)",
+        "extraArtnet": "Доп. Art-Net ({count})",
+        "extraLtc": "Доп. LTC ({count})",
+        "extraMtc": "Доп. MTC ({count})",
         "firstPort": "(первый порт)",
         "ltcDevice": "Аудиоустройство LTC",
         "ltcLevel": "Уровень LTC (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Войти в Twitch",
         "signInLine": "Войдите через приложение Rave-Mate Twitch (Device Code - без пароля, без секрета).",
         "signedInAs": "Вход выполнен как ",
-        "titlePresets": "Пресеты названий… (%d)",
+        "titlePresets": "Пресеты названий… ({count})",
         "unavailable": "Twitch недоступен в этой сборке."
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "Кнопка B / Y",
         "customSteamvr": "Пользовательская (задать в SteamVR)",
         "editBadge": "Значок правки на запястье",
-        "keybindsCount": "Клавиши… (%d)",
-        "layoutsCount": "Раскладки… (%d)",
+        "keybindsCount": "Клавиши… ({count})",
+        "layoutsCount": "Раскладки… ({count})",
         "openBindings": "Открыть привязки контроллера",
         "openEditor": "Открыть редактор",
-        "overlaysCount": "Оверлеи… (%d)",
+        "overlaysCount": "Оверлеи… ({count})",
         "tapHides": "Короткое касание показывает / скрывает оверлеи",
         "viewCapture": "Разрешить скриншоты VR-View",
         "vmc": "VMC (VTuber)",
         "vmcLive": "Стримить живое VR-движение в VMC (VTuber)",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "Раскладки миров… (%d)",
-        "wristCount": "Кнопки запястья… (%d)"
+        "worldLayoutsCount": "Раскладки миров… ({count})",
+        "wristCount": "Кнопки запястья… ({count})"
       },
       "webcam": {
         "autostart": "Запускать камеру с приложением (риги с восстановлением после сбоя)",
@@ -2020,14 +2021,14 @@
         "unavailable": "недоступно"
       },
       "dmx": {
-        "idleSeen": "простой - замечено %d вселенных",
+        "idleSeen": "простой - замечено {count} вселенных",
         "listeningNoData": "слушает - DMX пока нет",
         "receiving": "приём DMX"
       },
       "dmxmidi": {
         "notRunning": "не запущено (MIDI-порт отсутствует?)",
         "readyOn": "готов на ",
-        "sentMsgs": "→ %s · %d сообщ."
+        "sentMsgs": "→ {port} · {count} сообщ."
       },
       "fingerprint": {
         "missing": "fpcalc отсутствует",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "часы остановлены",
-        "syncing": "синхронизация %d источников"
+        "syncing": "синхронизация {count} источников"
       },
       "peers": {
         "discoveryOn": "обнаружение вкл"
       },
       "recorder": {
-        "recordingTracks": "запись · %d треков"
+        "recordingTracks": "запись · {count} треков"
       },
       "rekordboxkey": {
         "saveTest": "сохранить + проверить"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "кодирование - ожидание плееров",
         "startingSource": "запуск источника видео…",
-        "streamingClients": "стрим для %d клиентов"
+        "streamingClients": "стрим для {count} клиентов"
       },
       "service": {
         "notChecked": "не проверено"
       },
       "setcapture": {
-        "capturing": "захват ",
-        "listening": "слушает ",
+        "capturing": "захват {format}",
+        "listening": "слушает {addr}",
         "receiverError": "ошибка приёмника",
         "sourceDropped": "источник пропал - удержание"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "готов - нажмите СТАРТ",
-        "running": "РАБОТАЕТ · "
+        "running": "РАБОТАЕТ · {tc}"
       },
       "traktor": {
-        "listening": "слушает :%d"
+        "listening": "слушает :{port}"
       },
       "traktormap": {
         "manageDevices": "управлять устройствами"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "нет проектов",
-        "projectsCount": "%d проектов"
+        "projectsCount": "{count} проектов"
       },
       "updates": {
         "devBuild": "dev-сборка",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "вход в привязанный мир ничего не делает",
       "worldPrefix": "Мир: ",
       "wristQuickButtons": "Наручные быстрые кнопки"
+    },
+    "search": {
+      "placeholder": "Поиск по всем настройкам…",
+      "noResults": "Нет настроек по запросу \"{query}\""
     }
   },
   "tab": {

@@ -1486,7 +1486,8 @@
         "installLoopMidi": "Ports aktualisieren",
         "mesh": "(MIDI-Eingabeport wählen)",
         "refreshPorts": "MIDI auf alle gekoppelten Instanzen spiegeln",
-        "selectPortPlaceholder": "MIDI-Controller"
+        "selectPortPlaceholder": "MIDI-Controller",
+        "noPorts": "Keine MIDI-Eingänge gefunden. Installiere einen virtuellen MIDI-Port (loopMIDI oder LoopBe1) und aktualisiere dann."
       },
       "nml": {
         "note": "Leer = neueste Traktor-Installation automatisch erkennen. Zum Anwenden einer Pfadänderung aus-/einschalten.",
@@ -1498,11 +1499,11 @@
         "note": "Aktiviere obs-websocket in OBS (Werkzeuge → WebSocket-Servereinstellungen). Standardport 4455. Fertige Aufnahmen werden mit dem im selben Zeitraum aufgezeichneten Set verknüpft. Verbindungsänderungen wirken beim Aus-/Einschalten.",
         "password": "Passwort",
         "port": "Port",
-        "remoteObs": "Remote-OBS… (%d)"
+        "remoteObs": "Remote-OBS… ({count})"
       },
       "obssync": {
         "deadBand": "Totband (Frames)",
-        "mediaSources": "Medienquellen… (%d)",
+        "mediaSources": "Medienquellen… ({count})",
         "note": "Halte OBS-Medienquellen im Takt mit einer gemeinsamen Clock. Start/Stopp + Anzeige pro Quelle findest du im Live-Tab.",
         "restartThreshold": "Neustart-Schwelle (ms)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Art-Net-TimeCode-Ausgabe",
         "artnetTarget": "Art-Net-Ziel (host:port)",
         "clockStart": "Bei Tageszeit starten (auf Wanduhr syncen)",
-        "extraArtnet": "Zusätzliches Art-Net (%d)",
-        "extraLtc": "Zusätzliches LTC (%d)",
-        "extraMtc": "Zusätzliches MTC (%d)",
+        "extraArtnet": "Zusätzliches Art-Net ({count})",
+        "extraLtc": "Zusätzliches LTC ({count})",
+        "extraMtc": "Zusätzliches MTC ({count})",
         "firstPort": "(erster Port)",
         "ltcDevice": "LTC-Audiogerät",
         "ltcLevel": "LTC-Pegel (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Bei Twitch anmelden",
         "signInLine": "Melde dich mit der Rave-Mate-Twitch-App an (Device Code - kein Passwort, kein Secret).",
         "signedInAs": "Angemeldet als ",
-        "titlePresets": "Titel-Presets… (%d)",
+        "titlePresets": "Titel-Presets… ({count})",
         "unavailable": "Twitch in diesem Build nicht verfügbar."
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "B- / Y-Taste",
         "customSteamvr": "Benutzerdefiniert (in SteamVR festlegen)",
         "editBadge": "Edit-Badge am Handgelenk",
-        "keybindsCount": "Tastenbelegungen… (%d)",
-        "layoutsCount": "Layouts… (%d)",
+        "keybindsCount": "Tastenbelegungen… ({count})",
+        "layoutsCount": "Layouts… ({count})",
         "openBindings": "Controller-Belegungen öffnen",
         "openEditor": "Editor öffnen",
-        "overlaysCount": "Overlays… (%d)",
+        "overlaysCount": "Overlays… ({count})",
         "tapHides": "Kurzes Tippen zeigt / verbirgt die Overlays",
         "viewCapture": "VR-View-Screenshots erlauben",
         "vmc": "VMC (VTuber)",
         "vmcLive": "Live-VR-Bewegung an VMC streamen (VTuber)",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "Welt-Layouts… (%d)",
-        "wristCount": "Handgelenk-Tasten… (%d)"
+        "worldLayoutsCount": "Welt-Layouts… ({count})",
+        "wristCount": "Handgelenk-Tasten… ({count})"
       },
       "webcam": {
         "autostart": "Kamera mit der App starten (Absturz-Wiederherstellungs-Rigs)",
@@ -2020,14 +2021,14 @@
         "unavailable": "nicht verfügbar"
       },
       "dmx": {
-        "idleSeen": "inaktiv - %d Universe(s) gesehen",
+        "idleSeen": "inaktiv - {count} Universe(s) gesehen",
         "listeningNoData": "höre - noch kein DMX",
         "receiving": "empfange DMX"
       },
       "dmxmidi": {
         "notRunning": "läuft nicht (MIDI-Port fehlt?)",
         "readyOn": "bereit auf ",
-        "sentMsgs": "→ %s · %d Nachr."
+        "sentMsgs": "→ {port} · {count} Nachr."
       },
       "fingerprint": {
         "missing": "fpcalc fehlt",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "Clock gestoppt",
-        "syncing": "synchronisiere %d Quelle(n)"
+        "syncing": "synchronisiere {count} Quelle(n)"
       },
       "peers": {
         "discoveryOn": "Erkennung an"
       },
       "recorder": {
-        "recordingTracks": "nehme auf · %d Titel"
+        "recordingTracks": "nehme auf · {count} Titel"
       },
       "rekordboxkey": {
         "saveTest": "speichern + testen"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "kodiere - warte auf Player",
         "startingSource": "starte Videoquelle…",
-        "streamingClients": "streame an %d Client(s)"
+        "streamingClients": "streame an {count} Client(s)"
       },
       "service": {
         "notChecked": "nicht geprüft"
       },
       "setcapture": {
-        "capturing": "nehme auf ",
-        "listening": "höre ",
+        "capturing": "nehme auf {format}",
+        "listening": "höre {addr}",
         "receiverError": "Empfängerfehler",
         "sourceDropped": "Quelle abgebrochen - halte"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "scharf - START drücken",
-        "running": "LÄUFT · "
+        "running": "LÄUFT · {tc}"
       },
       "traktor": {
-        "listening": "höre :%d"
+        "listening": "höre :{port}"
       },
       "traktormap": {
         "manageDevices": "Geräte verwalten"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "keine Projekte",
-        "projectsCount": "%d Projekt(e)"
+        "projectsCount": "{count} Projekt(e)"
       },
       "updates": {
         "devBuild": "Dev-Build",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "einer gebundenen Welt beizutreten tut nichts",
       "worldPrefix": "Welt: ",
       "wristQuickButtons": "Handgelenk-Schnellbuttons"
+    },
+    "search": {
+      "placeholder": "Alle Einstellungen durchsuchen…",
+      "noResults": "Keine Einstellungen passen zu \"{query}\""
     }
   },
   "tab": {

@@ -1486,7 +1486,8 @@
         "installLoopMidi": "ポートを更新",
         "mesh": "（MIDI 入力ポートを選択）",
         "refreshPorts": "MIDI をすべてのペアリング済みインスタンスにミラー",
-        "selectPortPlaceholder": "MIDI コントローラー"
+        "selectPortPlaceholder": "MIDI コントローラー",
+        "noPorts": "MIDI入力ポートが見つかりません。仮想MIDIポート（loopMIDIまたはLoopBe1）をインストールしてから更新してください。"
       },
       "nml": {
         "note": "空欄 = 最新の Traktor インストールを自動検出。パス変更を適用するにはオフ/オンしてください。",
@@ -1498,11 +1499,11 @@
         "note": "OBS で obs-websocket を有効にしてください（ツール → WebSocket サーバー設定）。デフォルトポート 4455。完了した録画は同じ期間に録音されたセットにリンクされます。接続変更はオフ/オンで適用されます。",
         "password": "パスワード",
         "port": "ポート",
-        "remoteObs": "リモート OBS…（%d）"
+        "remoteObs": "リモート OBS…（{count}）"
       },
       "obssync": {
         "deadBand": "デッドバンド（フレーム）",
-        "mediaSources": "メディアソース…（%d）",
+        "mediaSources": "メディアソース…（{count}）",
         "note": "OBS メディアソースを共有クロックに同期させます。開始/停止 + ソースごとの表示は Live タブにあります。",
         "restartThreshold": "再起動しきい値 (ms)"
       },
@@ -1570,9 +1571,9 @@
         "artnetOn": "Art-Net タイムコード出力",
         "artnetTarget": "Art-Net ターゲット (host:port)",
         "clockStart": "時刻から開始（実時計にジャム）",
-        "extraArtnet": "追加 Art-Net（%d）",
-        "extraLtc": "追加 LTC（%d）",
-        "extraMtc": "追加 MTC（%d）",
+        "extraArtnet": "追加 Art-Net（{count}）",
+        "extraLtc": "追加 LTC（{count}）",
+        "extraMtc": "追加 MTC（{count}）",
         "firstPort": "（最初のポート）",
         "ltcDevice": "LTC オーディオデバイス",
         "ltcLevel": "LTC レベル (dBFS)",
@@ -1611,7 +1612,7 @@
         "signIn": "Twitch にサインイン",
         "signInLine": "Rave-Mate Twitch アプリでサインイン（デバイスコード - パスワードもシークレットも不要）。",
         "signedInAs": "サインイン中: ",
-        "titlePresets": "タイトルプリセット…（%d）",
+        "titlePresets": "タイトルプリセット…（{count}）",
         "unavailable": "このビルドでは Twitch を利用できません。"
       },
       "unity": {
@@ -1692,18 +1693,18 @@
         "byButton": "B / Y ボタン",
         "customSteamvr": "カスタム（SteamVR で設定）",
         "editBadge": "手首の編集バッジ",
-        "keybindsCount": "キーバインド…（%d）",
-        "layoutsCount": "レイアウト…（%d）",
+        "keybindsCount": "キーバインド…（{count}）",
+        "layoutsCount": "レイアウト…（{count}）",
         "openBindings": "コントローラーバインディングを開く",
         "openEditor": "エディターを開く",
-        "overlaysCount": "オーバーレイ…（%d）",
+        "overlaysCount": "オーバーレイ…（{count}）",
         "tapHides": "短いタップでオーバーレイの表示/非表示",
         "viewCapture": "VR ビューのスクリーンショットを許可",
         "vmc": "VMC (VTuber)",
         "vmcLive": "ライブ VR モーションを VMC にストリーム（VTuber）",
         "vrchatOsc": "VRChat OSC",
-        "worldLayoutsCount": "ワールドレイアウト…（%d）",
-        "wristCount": "手首ボタン…（%d）"
+        "worldLayoutsCount": "ワールドレイアウト…（{count}）",
+        "wristCount": "手首ボタン…（{count}）"
       },
       "webcam": {
         "autostart": "アプリと共にカメラを起動（クラッシュ復旧リグ）",
@@ -2020,14 +2021,14 @@
         "unavailable": "利用不可"
       },
       "dmx": {
-        "idleSeen": "アイドル - %d ユニバース検出",
+        "idleSeen": "アイドル - {count} ユニバース検出",
         "listeningNoData": "待受中 - DMX なし",
         "receiving": "DMX 受信中"
       },
       "dmxmidi": {
         "notRunning": "実行していません（MIDI ポートなし？）",
         "readyOn": "準備完了: ",
-        "sentMsgs": "→ %s · %d 件"
+        "sentMsgs": "→ {port} · {count} 件"
       },
       "fingerprint": {
         "missing": "fpcalc がありません",
@@ -2051,13 +2052,13 @@
       },
       "obssync": {
         "clockStopped": "クロック停止",
-        "syncing": "%d ソースを同期中"
+        "syncing": "{count} ソースを同期中"
       },
       "peers": {
         "discoveryOn": "ディスカバリーオン"
       },
       "recorder": {
-        "recordingTracks": "録音中 · %d トラック"
+        "recordingTracks": "録音中 · {count} トラック"
       },
       "rekordboxkey": {
         "saveTest": "保存 + テスト"
@@ -2068,14 +2069,14 @@
       "rtsp": {
         "encodingWaiting": "エンコード中 - プレーヤーを待機中",
         "startingSource": "ビデオソースを起動中…",
-        "streamingClients": "%d クライアントに配信中"
+        "streamingClients": "{count} クライアントに配信中"
       },
       "service": {
         "notChecked": "未確認"
       },
       "setcapture": {
-        "capturing": "キャプチャ中 ",
-        "listening": "待受中 ",
+        "capturing": "キャプチャ中 {format}",
+        "listening": "待受中 {addr}",
         "receiverError": "受信側エラー",
         "sourceDropped": "ソース切断 - 保持中"
       },
@@ -2093,10 +2094,10 @@
       },
       "timecode": {
         "armedPressStart": "アーム済み - START を押してください",
-        "running": "実行中 · "
+        "running": "実行中 · {tc}"
       },
       "traktor": {
-        "listening": "待受中 :%d"
+        "listening": "待受中 :{port}"
       },
       "traktormap": {
         "manageDevices": "デバイスを管理"
@@ -2114,7 +2115,7 @@
       },
       "unity": {
         "noProjects": "プロジェクトなし",
-        "projectsCount": "%d プロジェクト"
+        "projectsCount": "{count} プロジェクト"
       },
       "updates": {
         "devBuild": "開発ビルド",
@@ -2318,6 +2319,10 @@
       "worldModeOffSub": "バインドされたワールドに参加しても何も起きません",
       "worldPrefix": "ワールド: ",
       "wristQuickButtons": "手首クイックボタン"
+    },
+    "search": {
+      "placeholder": "すべての設定を検索…",
+      "noResults": "\"{query}\" に一致する設定はありません"
     }
   },
   "tab": {
