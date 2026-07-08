@@ -1,3 +1,3 @@
 module rave.page/mate/tools/winicon
 
-go 1.26.3
+go 1.26.5

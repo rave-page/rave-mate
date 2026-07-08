@@ -1,6 +1,6 @@
 module rave.page/mate
 
-go 1.26.4
+go 1.26.5
 
 require (
 	fyne.io/fyne/v2 v2.7.4
