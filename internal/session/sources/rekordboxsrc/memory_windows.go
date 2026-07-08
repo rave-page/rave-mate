@@ -59,11 +59,16 @@ var offsets = map[string]rbOffsets{
 	"7.0.5": {seeded: false, utf16: true}, // placeholder - needs real offsets from a 7.0.5 build
 }
 
-const memPollInterval = 200 * time.Millisecond
+const (
+	memPollInterval   = 200 * time.Millisecond // attached: read decks 5x/s
+	memBackoffInitial = 500 * time.Millisecond // unattached: first retry delay...
+	memBackoffMax     = 5 * time.Second        // ...capped here (rekordbox.exe not running)
+)
 
-// runMemory attaches to rekordbox.exe and emits per-deck observations every ~200ms. Never
-// fatal: a missing process, an unsupported/unseeded version, or any ReadProcessMemory failure
-// is logged once (state-change gated) and the loop backs off + retries.
+// runMemory attaches to rekordbox.exe and emits per-deck observations every ~200ms while attached.
+// Never fatal: a missing process, an unsupported/unseeded version, or any ReadProcessMemory failure
+// is logged once (state-change gated). While unattached it backs off exponentially to ~5s so it
+// doesn't enumerate the whole process table 5x/s forever when rekordbox isn't running.
 func (s *Source) runMemory(ctx context.Context, emit func(session.Observation)) {
 	s.log.Info(logSource, "rekordbox memory read started (real-time, per-version offsets)", nil)
 	var (
@@ -72,8 +77,9 @@ func (s *Source) runMemory(ctx context.Context, emit func(session.Observation)) 
 		lastKey  [4]string // title|artist per deck (Loaded boundary)
 		verState onceLog
 	)
-	tick := time.NewTicker(memPollInterval)
-	defer tick.Stop()
+	backoff := memBackoffInitial
+	timer := time.NewTimer(0) // fire immediately for the first attach attempt
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -81,85 +87,98 @@ func (s *Source) runMemory(ctx context.Context, emit func(session.Observation)) 
 				rd.close()
 			}
 			return
-		case <-tick.C:
+		case <-timer.C:
 		}
 
-		if rd == nil {
-			r, err := attach(&verState, s)
-			if err != nil {
-				if gate.changed(err.Error()) {
-					s.log.Warn(logSource, "memory attach: "+err.Error(), nil)
+		// One tick of work; returns whether we're attached to a live, seeded target (=> fast poll).
+		attached := func() bool {
+			if rd == nil {
+				r, err := attach(&verState, s)
+				if err != nil {
+					if gate.changed(err.Error()) {
+						s.log.Warn(logSource, "memory attach: "+err.Error(), nil)
+					}
+					return false
 				}
-				continue
+				gate.changed("") // attached
+				rd = r
 			}
-			gate.changed("") // attached
-			rd = r
-		}
-		if !rd.off.seeded {
-			// Version known but offsets unseeded: idle until the process restarts.
+			if !rd.off.seeded {
+				// Version known but offsets unseeded: idle (back off) until the process restarts.
+				if rd.dead() {
+					rd.close()
+					rd = nil
+				}
+				return false
+			}
 			if rd.dead() {
+				s.log.Warn(logSource, "rekordbox process gone - will re-attach", nil)
 				rd.close()
 				rd = nil
+				return false
 			}
-			continue
-		}
 
-		if rd.dead() {
-			s.log.Warn(logSource, "rekordbox process gone - will re-attach", nil)
-			rd.close()
-			rd = nil
-			continue
-		}
-
-		master := -1
-		if rd.off.masterDeck.set() {
-			if v, ok := rd.readI32(rd.off.masterDeck); ok {
-				master = int(v)
-			}
-		}
-		for i := 0; i < 4; i++ {
-			d := rd.off.decks[i]
-			fields := map[string]any{}
-			if d.bpm.set() {
-				if f, ok := rd.readF32(d.bpm); ok && f > 0 {
-					fields[session.FieldBPM] = float64(f)
+			master := -1
+			if rd.off.masterDeck.set() {
+				if v, ok := rd.readI32(rd.off.masterDeck); ok {
+					master = int(v)
 				}
 			}
-			if d.play.set() {
-				if v, ok := rd.readI32(d.play); ok {
-					fields[session.FieldIsPlaying] = v > 0
+			for i := 0; i < 4; i++ {
+				d := rd.off.decks[i]
+				fields := map[string]any{}
+				if d.bpm.set() {
+					if f, ok := rd.readF32(d.bpm); ok && f > 0 {
+						fields[session.FieldBPM] = float64(f)
+					}
 				}
-			} else if master == i {
-				fields[session.FieldIsPlaying] = true
+				if d.play.set() {
+					if v, ok := rd.readI32(d.play); ok {
+						fields[session.FieldIsPlaying] = v > 0
+					}
+				} else if master == i {
+					fields[session.FieldIsPlaying] = true
+				}
+				title, artist := "", ""
+				if d.title.set() {
+					title = rd.readString(d.title)
+				}
+				if d.artist.set() {
+					artist = rd.readString(d.artist)
+				}
+				if title != "" {
+					fields[session.FieldTitle] = title
+				}
+				if artist != "" {
+					fields[session.FieldArtist] = artist
+				}
+				if len(fields) == 0 {
+					continue
+				}
+				key := title + "\x00" + artist
+				loaded := key != lastKey[i] && (title != "" || artist != "")
+				if loaded {
+					lastKey[i] = key
+				}
+				emit(session.Observation{
+					Source:     session.SourceRekordboxMem,
+					Scope:      session.Scope{Kind: session.ScopeDeck, ID: string(rune('A' + i))},
+					Fields:     fields,
+					Confidence: confMem,
+					Loaded:     loaded,
+				})
 			}
-			title, artist := "", ""
-			if d.title.set() {
-				title = rd.readString(d.title)
+			return true
+		}()
+
+		if attached {
+			backoff = memBackoffInitial
+			timer.Reset(memPollInterval)
+		} else {
+			timer.Reset(backoff)
+			if backoff *= 2; backoff > memBackoffMax {
+				backoff = memBackoffMax
 			}
-			if d.artist.set() {
-				artist = rd.readString(d.artist)
-			}
-			if title != "" {
-				fields[session.FieldTitle] = title
-			}
-			if artist != "" {
-				fields[session.FieldArtist] = artist
-			}
-			if len(fields) == 0 {
-				continue
-			}
-			key := title + "\x00" + artist
-			loaded := key != lastKey[i] && (title != "" || artist != "")
-			if loaded {
-				lastKey[i] = key
-			}
-			emit(session.Observation{
-				Source:     session.SourceRekordboxMem,
-				Scope:      session.Scope{Kind: session.ScopeDeck, ID: string(rune('A' + i))},
-				Fields:     fields,
-				Confidence: confMem,
-				Loaded:     loaded,
-			})
 		}
 	}
 }
