@@ -27,12 +27,20 @@ When the window is unfocused, minimized, or being dragged/resized, rave-mate pau
 dashboard graph/tick refresh (nothing needs repainting when you can't see it) and drops the whole
 process to **BELOW_NORMAL** priority so it yields the CPU to your foreground app and any encoder.
 
+**Smooth window dragging.** WebView2 repaints the window on the CPU (GPU compositing is off - see
+below), so while you drag or resize the window rave-mate additionally: (a) drops to BELOW_NORMAL for
+the duration of the drag, and (b) *pauses* its heavy in-process batch loops - library sync merges,
+set fingerprinting, and the motion-preview raster - the same way it does while streaming. They resume
+the instant you let go. This keeps the window tracking the cursor even on a busy machine mid-sweep.
+(Library search boxes also coalesce keystrokes ~150ms so a big filtered list re-renders once, not per
+character.)
+
 ## Priority model
 
 | Work | Windows priority |
 |---|---|
-| Main process, focused & not streaming | NORMAL |
-| Main process, streaming OR unfocused/minimized | BELOW_NORMAL |
+| Main process, focused & idle & not streaming | NORMAL |
+| Main process, streaming OR unfocused/minimized OR mid drag/resize | BELOW_NORMAL |
 | Icecast set-capture child (background receive+write) | BELOW_NORMAL |
 | Fingerprint / transcode / waveform / backfill ffmpeg jobs | IDLE |
 | Actual audio playback decoder (the player) | NORMAL (real-time - must not starve) |

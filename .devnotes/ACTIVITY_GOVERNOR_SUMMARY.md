@@ -23,6 +23,43 @@ Problem: rave-mate degraded users' live OBS streams (AAC audio artifacts + video
    Now gated on `governor.UIAnimAllowed()` (paused when hidden/unfocused/dragging/streaming). No code
    raises the global timer resolution (verified: no `timeBeginPeriod` in rave-suite).
 
+## Window-drag lag pass (2026-07, size-move / focus throttling)
+
+The original governor only *fully* throttled when OBS was **streaming**. On a non-streaming machine a
+window drag left every in-proc module goroutine at NORMAL priority, starving the software-composited
+WebView2 window → the window trails the cursor (machine/module-dependent lag). WebView2 runs a Win32
+modal move loop on a LockOSThread'd thread and renders CPU-side (GPU compositing is OFF, see §1), so
+CPU contention alone produces visible drag lag. Fix = fold **size-move** (and focus) into the same
+throttles the streaming path already uses:
+
+- **Process priority** (`governor.apply`): below-normal now also when `sizeMove` (was: streaming ||
+  minimized || !focused). A drag drops the whole process to BELOW_NORMAL for its duration.
+- **`BackgroundAllowed()`** now returns false during `sizeMove` too (was: streaming only). So all
+  existing `WhenBackgroundAllowed`-gated work (fingerprint/identify deferral) also parks mid-drag.
+- **Heavy in-proc sweeps consult the governor per iteration.** New `governor.WaitWhileBusy(ctx)`
+  parks a loop in 150ms slices while background work is disallowed (streaming OR mid-drag). Wired at
+  the head of: libsync merge loop + tag-apply loop (`internal/libsync/engine.go`, amortized every
+  1024/256 items over the ~23k-track library) and the setfp per-track fingerprint loop
+  (`internal/setfp`). Yields the CPU to the UI thread during a drag; resumes automatically.
+- **Motion preview** (`internal/webui/motion_actions.go` `moRunPreview`): the ~15fps CPU
+  raster→JPEG→DOM-swap now skips when `inSizeMove() || !governor.UIAnimAllowed()` (mirrors livePush).
+  The OSC/VMC network output loop is left running - it's cheap UDP output, not a CPU/DOM offender.
+- **Library search debounce** (`internal/webui/library_actions.go`): `lib-search` + `lib-coll-search`
+  coalesce keystrokes ~150ms before the full filtered-list re-render, so a 23k-row innerHTML swap
+  doesn't fire per keystroke.
+
+Streaming behaviour is unchanged - size-move/focus are *additional* throttle triggers, never a
+replacement for the streaming one.
+
+## Related fail-closed hardening (media plane)
+
+Independent of drag lag but shipped alongside: when `MediaLink.Subprocess` is set but the memory-
+capped media child fails to spawn, the daemon used to silently fall back to running the
+frame-churning media route/webcam plane **in-proc, ungoverned** (the exact pattern that once OOM'd a
+host + killed Parsec). It now fails **closed**: `mediaInProc` stays false, the route/webcam ctls stay
+nil (UI renders nothing, already nil-guarded), and an error is logged. In-proc only runs when
+isolation was never requested (config default).
+
 ## Architecture
 
 `internal/governor` = single source of truth. Signals: Focused/Minimized/SizeMove (fed from the
@@ -44,9 +81,9 @@ default is the low-impact behaviour.
 ## Follow-ups / not-yet-wired
 
 - Streaming-gate is wired at the highest-value site (fingerprint/identify deferral) +
-  process-priority + GPU + UI ticks. Library sync sweeps / catalog hydration / tagsync / assetsync
-  already run their ffmpeg at IDLE priority and drop below-normal with the main process while
-  streaming; explicit `BackgroundAllowed()` gates on their schedulers are a cheap follow-up if any
-  still shows up in a stream-time CPU trace.
+  process-priority + GPU + UI ticks. Library sync sweeps + set fingerprinting now also carry
+  explicit `governor.WaitWhileBusy` gates (2026-07 pass above); catalog hydration in rave-mate is a
+  one-shot on-demand DB load (`libEnsureTracks`), not a continuous sweep, so it rides the
+  process-priority drop rather than a per-iteration gate.
 - Wiki page mirroring docs/PERFORMANCE.md to be published (separate wiki repo; not pushed from the
   sandbox).
