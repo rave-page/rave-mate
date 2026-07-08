@@ -23,7 +23,14 @@ OS / devices ──► feature modules ◄────────┘
   `configVersion` migrations keep old files loading.
 - `module` - the module manager: starts only enabled features, live `SetEnabled`.
 - `featurehost` / `worker` / `sysexec` - subprocess isolation (newline-JSON stdio, supervised
-  restart, kill-on-close job objects on Windows).
+  restart, kill-on-close job objects on Windows). `sysexec` also owns process priority
+  (`LowPriority`=idle, `BelowNormalPriority`, `SetSelfBelowNormal`).
+- `governor` - **activity governor**: the good-neighbour brain. Single source of truth for
+  "is now a bad time to spend CPU/GPU on non-essential work". Reacts to window focus/minimize/
+  size-move (fed from the webui window subclass) and to a live OBS stream (fed from `app`'s
+  `watchStreaming`). Consumers gate on `UIAnimAllowed()` (webui ~1 Hz ticks) and
+  `BackgroundAllowed()` / `WhenBackgroundAllowed()` (heavy batch work: fingerprinting deferral).
+  Also right-sizes THIS process's Windows priority class. Zero config; see docs/PERFORMANCE.md.
 - `session` (+ `session/sources/*`, `session/sinks/*`, `session/aggregator`) - the DJ-data hub:
   sources emit normalized Observations; the Merger fuses per-field by priority+TTL; sinks
   consume the unified state. Canonical field names = Traktor wire keys.

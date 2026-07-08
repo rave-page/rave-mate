@@ -19,6 +19,14 @@ Serves a local `rtspt://` stream (ffmpeg-encoded) that VRChat AVPro video player
 a performer camera or your overlay video into a VRChat world from the same box, no external
 relay. Configure source + encoder in Settings → RTSP.
 
+## Won't hurt your OBS stream
+
+rave-mate is a good neighbour by default: while an OBS stream is live it automatically drops its
+own priority, turns off UI GPU compositing, pauses heavy background work (fingerprinting/indexing),
+and keeps only stream-critical paths (Spout, peerlink media, MIDI/now-playing, overlays) running -
+no setting to enable. Your set keeps recording; deferred work runs after the stream ends. Details +
+a verification checklist: [PERFORMANCE.md](../PERFORMANCE.md).
+
 ## Caveats
 
 - Stream Bridge needs at least one DJ source live; check the Live tab signal strip.
