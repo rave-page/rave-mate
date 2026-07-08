@@ -272,9 +272,10 @@ body {
 .tt:has(.tt-x:checked) .tt-ic { opacity: 1; color: var(--rp-base); }
 .tt-card {
   display: none;
-  position: absolute;
-  top: 100%;
-  left: 0; /* default; __ttplace (shell.go) clamps/flips so the card stays in-viewport */
+  /* fixed = viewport-relative: NOT clipped by the panel's overflow box (an absolute
+   * descendant would be). __ttplace (shell.go) sets left/top from the ⓘ rect + clamps
+   * inside the window; flips above via .ttp-up. */
+  position: fixed;
   z-index: 900;
   width: max-content;
   max-width: min(28rem, calc(100vw - 2rem));
@@ -284,6 +285,8 @@ body {
   cursor: auto;
   text-align: left;
   white-space: normal;
+  overflow-wrap: anywhere; /* wrap long unbroken tokens (urls/paths) inside the clamp */
+  word-break: break-word;
 }
 .tt:hover .tt-card,
 .tt:focus-within .tt-card,
@@ -338,9 +341,8 @@ body {
 /* edge-aware placement - __ttplace (shell.go) adds .ttp-up when there's more room
  * above the anchor, and clamps left/max-height inline. Shared with .wchip cards. */
 .ttp-up .tt-card {
-  top: auto;
-  bottom: 100%;
+  /* fixed .tt-card: JS owns top/left; only swap the transparent hover bridge below the card */
   border-top: 0;
-  border-bottom: 8px solid transparent; /* hover bridge moves below the card */
+  border-bottom: 8px solid transparent;
 }
 .ttp-up .wchip-card { top: auto; bottom: calc(100% + 6px); }

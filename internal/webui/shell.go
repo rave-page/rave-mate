@@ -220,13 +220,16 @@ const runtimeJS = `(function(){
   }, true);
   // ── edge-aware card placement for the tooltip (.tt, tooltip.go) + waveform-chip
   // (.wchip, library.css) primitives. CSS shows the card (hover/focus/checkbox pin);
-  // this measures it against the viewport, then clamps horizontally, flips above the
-  // anchor when there's more room there (.ttp-up), and caps height so tall cards
-  // scroll internally - content is never trimmed, only scrolled.
+  // this measures it against the viewport, flips above the anchor when there's more
+  // room there (.ttp-up), caps height so tall cards scroll internally (never trimmed),
+  // and clamps into the window. .tt-card is position:fixed so it escapes any panel
+  // overflow clip - JS sets its left/top from the ⓘ rect. .wchip-card stays absolute
+  // (offset-parent-relative left shift; CSS owns its top/flip).
   function __ttplace(host, retried){
     var card=host.querySelector('.tt-card,.wchip-card'); if(!card) return;
     var inner=card.querySelector('.tt-in')||card;
-    card.style.left=''; card.style.right=''; inner.style.maxHeight='';
+    card.style.left=''; card.style.top=''; card.style.right=''; card.style.bottom='';
+    inner.style.maxHeight='';
     host.classList.remove('ttp-up');
     var r=card.getBoundingClientRect();
     if(!r.width && !r.height){ // not (yet) shown - hover state can lag the event
@@ -234,17 +237,27 @@ const runtimeJS = `(function(){
       return;
     }
     var M=8, vw=window.innerWidth, vh=window.innerHeight;
-    var a=host.getBoundingClientRect();
+    var a=host.getBoundingClientRect(); // the ⓘ trigger, viewport coords
+    var fixed=(getComputedStyle(card).position==='fixed');
     // vertical: below by default, flip above when it clips and above has more room
     var below=vh-M-a.bottom, above=a.top-M;
     if(r.height>below && above>below) host.classList.add('ttp-up');
-    var avail=Math.max(60, host.classList.contains('ttp-up')?above:below);
+    var up=host.classList.contains('ttp-up');
+    // cap height to the chosen side's room AND never taller than the window (tall cards
+    // scroll internally via .tt-in) - the vh-2M bound also guards a trigger scrolled off-screen
+    var avail=Math.min(vh-2*M, Math.max(60, up?above:below));
     if(r.height>avail) inner.style.maxHeight=(avail-8)+'px'; // 8 = bridge/gap
-    // horizontal: shift so the card sits inside [M, vw-M]
-    r=card.getBoundingClientRect();
+    r=card.getBoundingClientRect(); // re-measure after flip class + height cap
     var w=Math.min(r.width, vw-2*M);
-    var nl=Math.min(Math.max(r.left, M), vw-M-w);
-    if(Math.abs(nl-r.left)>0.5){ card.style.left=(nl-a.left)+'px'; card.style.right='auto'; }
+    if(fixed){ // viewport-positioned: clamp fully into the window from the trigger rect
+      var left=Math.min(Math.max(a.left, M), vw-M-w);
+      var top=up ? a.top-r.height : a.bottom;
+      top=Math.min(Math.max(top, M), Math.max(M, vh-M-r.height)); // keep the whole card in [M, vh-M]
+      card.style.left=left+'px'; card.style.top=top+'px'; card.style.right='auto';
+    } else { // absolute (.wchip-card): shift left within the offset parent to stay in-viewport
+      var nl=Math.min(Math.max(r.left, M), vw-M-w);
+      if(Math.abs(nl-r.left)>0.5){ card.style.left=(nl-a.left)+'px'; card.style.right='auto'; }
+    }
   }
   document.addEventListener('pointerover', function(e){
     var el=e.target.closest && e.target.closest('.tt,.wchip'); if(!el) return;
@@ -261,11 +274,11 @@ const runtimeJS = `(function(){
     }
   }, true);
   var __ttraf=0;
-  function __ttrepin(){ // re-place pinned cards (viewport-relative room changed)
+  function __ttrepin(){ // re-place shown cards (a fixed card must track its trigger on scroll/resize)
     if(__ttraf) return;
     __ttraf=requestAnimationFrame(function(){ __ttraf=0;
-      var xs=document.querySelectorAll('.tt-x:checked,.wchip-x:checked');
-      for(var i=0;i<xs.length;i++){ var el=xs[i].closest('.tt,.wchip'); if(el) __ttplace(el); }
+      var xs=document.querySelectorAll('.tt-x:checked,.wchip-x:checked,.tt:hover,.wchip:hover,.tt:focus-within,.wchip:focus-within');
+      for(var i=0;i<xs.length;i++){ var el=xs[i].closest('.tt,.wchip')||xs[i]; if(el) __ttplace(el); }
     });
   }
   window.addEventListener('resize', __ttrepin);
