@@ -86,7 +86,11 @@ func TestServerStateReflectsDecks(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		_ = json.Unmarshal(raw, &ov)
-		if len(ov.Decks) == 1 {
+		// Deck A (deck obs) and its fader (separate channel obs) merge via the
+		// pump independently; wait for the snapshot to CONVERGE, not just for
+		// the deck to appear - else a Linux-timing read lands before the
+		// channel fader is merged (flake). Deadline below is the real boundary.
+		if len(ov.Decks) == 1 && ov.Decks[0].Fader == 0.9 && ov.Decks[0].OnAir {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
