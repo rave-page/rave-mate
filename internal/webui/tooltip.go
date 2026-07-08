@@ -165,6 +165,93 @@ var helpTopics = map[string]helpTopic{
 			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
 		},
 	},
+	// ── Settings: Timecode card (SMPTE / LTC / MTC / Art-Net) ──
+	"tc-timecode": {
+		Title: i18n.T("help.tc-timecode.title"),
+		Body:  i18n.T("help.tc-timecode.body"),
+		Links: []ttLink{{"SMPTE timecode (Wikipedia)", "https://en.wikipedia.org/wiki/SMPTE_timecode"}},
+	},
+	"tc-rate": {
+		Title: i18n.T("help.tc-rate.title"),
+		Body:  i18n.T("help.tc-rate.body"),
+	},
+	"tc-start": {
+		Title: i18n.T("help.tc-start.title"),
+		Body:  i18n.T("help.tc-start.body"),
+	},
+	"tc-ltc": {
+		Title: i18n.T("help.tc-ltc.title"),
+		Body:  i18n.T("help.tc-ltc.body"),
+		Links: []ttLink{{"LTC (Wikipedia)", "https://en.wikipedia.org/wiki/Linear_timecode"}},
+	},
+	"tc-ltc-level": {
+		Title: i18n.T("help.tc-ltc-level.title"),
+		Body:  i18n.T("help.tc-ltc-level.body"),
+	},
+	"tc-mtc": {
+		Title: i18n.T("help.tc-mtc.title"),
+		Body:  i18n.T("help.tc-mtc.body"),
+		Links: []ttLink{{"MIDI Time Code (Wikipedia)", "https://en.wikipedia.org/wiki/MIDI_timecode"}},
+	},
+	"tc-artnet": {
+		Title: i18n.T("help.tc-artnet.title"),
+		Body:  i18n.T("help.tc-artnet.body"),
+		Links: []ttLink{{"Art-Net (Wikipedia)", "https://en.wikipedia.org/wiki/Art-Net"}},
+	},
+	// ── Settings: OBS media-sync card ──
+	"obssync-mediasync": {
+		Title: i18n.T("help.obssync-mediasync.title"),
+		Body:  i18n.T("help.obssync-mediasync.body"),
+	},
+	"obssync-fps": {
+		Title: i18n.T("help.obssync-fps.title"),
+		Body:  i18n.T("help.obssync-fps.body"),
+	},
+	"obssync-deadband": {
+		Title: i18n.T("help.obssync-deadband.title"),
+		Body:  i18n.T("help.obssync-deadband.body"),
+	},
+	"obssync-restart": {
+		Title: i18n.T("help.obssync-restart.title"),
+		Body:  i18n.T("help.obssync-restart.body"),
+	},
+	// ── Settings: DMX / VRSL card ──
+	"dmx-connect": {
+		Title: i18n.T("help.dmx-connect.title"),
+		Body:  i18n.T("help.dmx-connect.body"),
+		Links: []ttLink{
+			{"DMX512 (Wikipedia)", "https://en.wikipedia.org/wiki/DMX512"},
+			{"Art-Net (Wikipedia)", "https://en.wikipedia.org/wiki/Art-Net"},
+		},
+	},
+	"dmx-vrsl": {
+		Title: i18n.T("help.dmx-vrsl.title"),
+		Body:  i18n.T("help.dmx-vrsl.body"),
+		Links: []ttLink{{"VR Stage Lighting (GitHub)", "https://github.com/AcChosen/VR-Stage-Lighting"}},
+	},
+	"dmx-reemit": {
+		Title: i18n.T("help.dmx-reemit.title"),
+		Body:  i18n.T("help.dmx-reemit.body"),
+	},
+	// ── Settings: RTSP card ──
+	"rtsp-why": {
+		Title: i18n.T("help.rtsp-why.title"),
+		Body:  i18n.T("help.rtsp-why.body"),
+		Links: []ttLink{{"RTSP (Wikipedia)", "https://en.wikipedia.org/wiki/Real_Time_Streaming_Protocol"}},
+	},
+	"rtsp-passthrough": {
+		Title: i18n.T("help.rtsp-passthrough.title"),
+		Body:  i18n.T("help.rtsp-passthrough.body"),
+	},
+	// ── Settings: Media-link card ──
+	"ml-accel": {
+		Title: i18n.T("help.ml-accel.title"),
+		Body:  i18n.T("help.ml-accel.body"),
+	},
+	"ml-budget": {
+		Title: i18n.T("help.ml-budget.title"),
+		Body:  i18n.T("help.ml-budget.body"),
+	},
 }
 
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -

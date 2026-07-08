@@ -91,6 +91,29 @@ func field(label, act, value, inputType string) string {
 		attrQ(strings.ToLower(label)), html.EscapeString(label), inputType, attrQ(value), attrQ(value), attrQ(act))
 }
 
+// fieldTip is field with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
+func fieldTip(label, act, value, inputType, tipHTML string) string {
+	if inputType == "" {
+		inputType = "text"
+	}
+	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
+		`<input class=field-input type=%s value=%s data-value=%s data-act=%s></label>`,
+		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act))
+}
+
+// selectBoxTip is selectBox with a tooltip (topic id) beside the label.
+func selectBoxTip(label, act string, options [][2]string, current, topic string) string {
+	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
+	lbl := `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
+	return smartSelectRaw(id, lbl, act, current, func() []ssOpt {
+		out := make([]ssOpt, 0, len(options))
+		for _, op := range options {
+			out = append(out, ssOpt{Val: op[0], Label: op[1]})
+		}
+		return out
+	})
+}
+
 // emptyState renders the rp-empty placeholder.
 func emptyState(msg string) string {
 	return `<div class="rp-empty"><div class="rp-empty__title">` + html.EscapeString(msg) + `</div></div>`

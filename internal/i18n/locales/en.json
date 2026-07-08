@@ -142,6 +142,18 @@
       "body": "VRChat's in-game camera records dolly paths - keyframe sequences (position, facing, speed, focus) the camera flies through smoothly. VRChat saves them as JSON files; rave-mate finds them, groups them by the world they were recorded in, and can back them up, organize them and re-load them.\n\nThe preview shows the path in 3D: each dot is a keyframe, the small violet line is the camera's facing, and the line colour encodes speed (mint = slow, pink = fast). The amber marker flies the path at its real recorded speed.\n\n\"Load into VRChat\" sends the file over OSC so it appears in the in-game camera immediately - OSC must be enabled in VRChat (Action menu → Options → OSC). Loop and path-type aren't stored in the file; set them once in VRChat after loading.",
       "title": "VRChat camera paths"
     },
+    "dmx-connect": {
+      "body": "DMX is the standard lighting-control protocol: 512 dimmer values (channels) per 'universe'. Art-Net carries those universes over the network as UDP on port 6454.\n\nIn your lighting software (a console, QLC+, xLights, ...) add an Art-Net output node, point it at this machine's IP address (or broadcast), universe number as below, and start sending. rave-mate also answers Art-Net discovery polls, so many consoles list it automatically.",
+      "title": "DMX / Art-Net"
+    },
+    "dmx-reemit": {
+      "body": "Forwards every universe received here back out over Art-Net - chain rave-mate in front of another machine or lighting tool that also needs the DMX feed. Sent at max 44 packets/s per universe with a 1/s keep-alive, per the Art-Net spec.",
+      "title": "Art-Net re-emit"
+    },
+    "dmx-vrsl": {
+      "body": "VRSL (VR Stage Lighting) is the standard for club lighting in VRChat: light values are encoded as pixel blocks in the video stream, and the world's shaders decode them back into lights. rave-mate renders that pixel grid directly - no extra grid tool needed. Capture it in OBS, stream it, and a VRSL-enabled world lights up.",
+      "title": "VRSL pixel grid"
+    },
     "dual-alignment": {
       "body": "When one set was captured twice - the broadcast audio (Icecast receiver) AND an OBS video recording - the two files rarely start at the same moment: you hit record and broadcast at different times, so the same beat sits at different positions in each file.\n\nAlignment finds that time offset by listening to both recordings: each file's loudness envelope (how the energy rises and falls, ~50 times a second) is extracted with ffmpeg, and the two envelopes are cross-correlated - slid against each other until they match best. The confidence score says how decisively the best match beat every other position; \"high\" means the recordings clearly share the same audio.\n\nOnce aligned, both waveforms render on one shared timeline and a single IN/OUT range cuts BOTH files at the same real-world moment - so the exported audio and video have identical content and length. If the automatic result looks wrong (e.g. the video's audio is heavily processed), nudge the offset manually or type it directly; your manual value is kept until you re-run Auto-align.",
       "title": "Audio ⇆ video time alignment"
@@ -178,6 +190,14 @@
       "body": "Icecast is an open-source streaming server. rave-mate runs a tiny local receiver that speaks the Icecast protocol, so Traktor's built-in Broadcasting feature can \"stream\" your set straight to disk on this machine - no internet involved.\n\nPoint Traktor at 127.0.0.1 with the port, mount path and password shown here, hit broadcast, and every set lands in your sets folder time-linked to the session recorder's tracklist - jump to any track in the recording from the Publish tab.",
       "title": "Set capture via Icecast"
     },
+    "ml-accel": {
+      "body": "auto negotiates the best common hardware tier (AV1/HEVC/H.264 -> software fallback). Pinning a codec only applies when the sending instance can encode it.",
+      "title": "Codec / hardware tier"
+    },
+    "ml-budget": {
+      "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.",
+      "title": "Per-route bitrate"
+    },
     "motion-studio": {
       "body": "Plays back VR motion takes recorded from your headset (head + controllers + any full-body trackers, captured from the wrist menu). The preview shows the skeleton in 3D with the head's travel as a violet trail.\n\nTwo live outputs: VMC streams the take as raw tracking devices to a VTuber renderer (VSeeFace, Warudo, VNyan) which does the IK and animates your avatar - this is the real playback path. OSC trackers feed VRChat's full-body tracking, but VRChat always drives head and hands from your live HMD and controllers, so a recorded take cannot puppet your VRChat avatar - export a Unity .anim for that and drive it from the avatar's Animator.\n\nAvatars (.vrm) imported here replicate automatically to your paired rave-mate instances.",
       "title": "Motion studio"
@@ -186,13 +206,65 @@
       "body": "Live send/receive rates over the last 2 minutes.\n\nPEER is the encrypted LAN link to your other paired rave-mate machines (library sync, remote control, media routes). API is traffic to rave.page itself - live-set ingest, uploads, artwork. SESSION totals count everything since the app started.\n\nSpikes during a live set are normal: each confirmed track pushes a now-playing update, and set capture streams continuously.",
       "title": "Network throughput"
     },
+    "obssync-deadband": {
+      "body": "How far out of step (in frames) a source may drift before rave-mate corrects it. A small dead band avoids constant micro-jumps that look like stutter. ~2 frames is a good start.",
+      "title": "Dead band"
+    },
+    "obssync-fps": {
+      "body": "Your project frame rate. Used only to turn the dead band from frames into milliseconds.",
+      "title": "Project frame rate"
+    },
+    "obssync-mediasync": {
+      "body": "Locks a video/media source in OBS to a shared clock so it plays in step across machines. Start the clock, pick the media source(s), and rave-mate nudges each one to stay on time.",
+      "title": "OBS media sync"
+    },
+    "obssync-restart": {
+      "body": "If a source is more than this many ms off, rave-mate restarts it and seeks straight to the target instead of nudging - for big jumps (a source that ended, or was just enabled).",
+      "title": "Restart threshold"
+    },
     "perf-graph": {
       "body": "CPU (top) and RAM (bottom) over the last 2 minutes. APP is rave-mate alone - including its worker subprocesses - SYS is the whole machine.\n\nrave-mate keeps heavy work (transcoding, fingerprinting, media routes) in supervised child processes with bounded buffers, so APP staying flat while SYS climbs means some other program is the load. If APP itself climbs and stays high, check the Logs tab and consider disabling unused features in Settings - disabled features own no ports, goroutines, or subprocesses.",
       "title": "System performance"
     },
+    "rtsp-passthrough": {
+      "body": "If the source already delivers H.264 (many IP cams, an OBS RTMP feed), copy it through untouched - zero quality loss and near-zero CPU. Leave off for screen capture or non-H.264 sources; they are encoded with zero-latency x264.",
+      "title": "H.264 pass-through"
+    },
+    "rtsp-why": {
+      "body": "VRChat can't receive Spout or NDI, but its AVPro video player accepts rtspt:// (RTSP over TCP) with roughly half a second of delay - the fastest local path into a world. This replaces the usual OBS -> RTMP -> MediaMTX relay chain with one built-in server. Needs ffmpeg (install it under Library & media).",
+      "title": "Why RTSP?"
+    },
     "session-recorder": {
       "body": "Watches your decks and writes a tracklist of what you actually played, with per-track timestamps.\n\nA track only counts once it has played for the confirm threshold - quick previews, tag checks and false starts are filtered out. The result is the set history in the Publish tab, where each entry can be linked to captured audio, OBS recordings, and fingerprint-verified track identities.",
       "title": "Session recorder"
+    },
+    "tc-artnet": {
+      "body": "Art-Net TimeCode is timecode over the network (UDP) for lighting consoles and nodes - grandMA-class desks chase it directly. Default sends to everyone on the LAN (broadcast, port 6454); enter host:port to target one console. Resolume ignores this - use LTC for Resolume.",
+      "title": "Art-Net TimeCode"
+    },
+    "tc-ltc": {
+      "body": "LTC (Linear TimeCode) is timecode as an AUDIO signal - the classic SMPTE format. Pick an audio output here, route it into a virtual audio cable (e.g. VB-CABLE), and select that cable as the timecode input in the receiver. Resolume Arena's SMPTE input only accepts LTC, so this is the output to use for it. Over a real cable it also feeds hardware on another machine.",
+      "title": "LTC (Linear TimeCode)"
+    },
+    "tc-ltc-level": {
+      "body": "Output level in dBFS (decibels below digital full scale). -3 dBFS is the broadcast norm for LTC - loud enough to decode reliably, with headroom against clipping. Lower it if the receiver's input meters clip.",
+      "title": "LTC output level"
+    },
+    "tc-mtc": {
+      "body": "MTC (MIDI Time Code) is timecode over MIDI - for sequencers, DAWs and show-control software that chase MIDI (e.g. Reaper, Cubase, QLab). Create a virtual MIDI port with loopMIDI (or Windows MIDI Services loopback), pick it here, and set the receiver to sync to MTC on that port.",
+      "title": "MTC (MIDI Time Code)"
+    },
+    "tc-rate": {
+      "body": "Frames per second of the clock. Pick what the RECEIVER is configured for - both sides must match. 25 is the norm in PAL/EBU regions, 30 and 29.97 drop-frame in NTSC regions, 24 for film. 29.97 drop-frame skips two frame NUMBERS each minute (except every 10th) so the display stays true to the wall clock - no audio/video is dropped.",
+      "title": "Frame rate"
+    },
+    "tc-start": {
+      "body": "Where the clock starts counting. A fixed timecode (e.g. 00:00:00:00) is normal for shows; 'time of day' jams the clock to your wall time, handy when several systems should agree on real-world time.",
+      "title": "Start position"
+    },
+    "tc-timecode": {
+      "body": "SMPTE timecode is a running clock (HH:MM:SS:FF - FF = frame number) that keeps separate software and gear in sync. rave-mate generates one master 'house' clock and sends it out in up to three formats at once; anything listening chases it, on this machine or another one on the network.",
+      "title": "SMPTE timecode"
     },
     "timing-graph": {
       "body": "Round-trip time to each paired machine on your LAN, in milliseconds, over the last 2 minutes.\n\nRTT is how long a message takes to reach the peer and come back. Single-digit values are typical for wired LAN; Wi-Fi hovers higher and jitters. Sustained spikes usually mean a busy network or a machine going to sleep - remote control and media routes will feel it before anything else.",
