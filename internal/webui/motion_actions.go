@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/motionrender"
 	"rave.page/mate/internal/osc"
@@ -708,6 +709,11 @@ func (u *UI) moRunPreview(stop chan struct{}) {
 		case now := <-tk.C:
 			dt := now.Sub(last).Seconds()
 			last = now
+			// Skip the CPU-heavy raster+JPEG+DOM-swap while the window is mid drag/resize, unfocused,
+			// minimized, or a stream is live - the preview only competes for CPU then (mirrors livePush).
+			if inSizeMove() || !governor.UIAnimAllowed() {
+				continue
+			}
 			s := u.mo()
 			s.mu.Lock()
 			if !s.playing || s.player == nil || !s.modelOn || s.model == nil || s.rec == nil {

@@ -42,10 +42,11 @@ type UI struct {
 	probes settingsProbes // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
 
 	twMu         sync.Mutex
-	twitchRows   []string // rolling twitch chat/alert feed (cap 250)
-	libSection   string   // Library active sub-section: "browse" | "collection"
-	libDir       string   // Library browse cwd
-	remoteTarget string   // Library/Automations control target: "" = this computer, else a peer nodeID
+	twitchRows   []string    // rolling twitch chat/alert feed (cap 250)
+	libSection   string      // Library active sub-section: "browse" | "collection"
+	libDir       string      // Library browse cwd
+	libSearchDeb *time.Timer // pending debounced library/collection search re-render (guarded by mu)
+	remoteTarget string      // Library/Automations control target: "" = this computer, else a peer nodeID
 
 	logMu         sync.Mutex // guards the logs-tab filter state below
 	logBus        string     // active bus: "app"|"midi"|"traktor"|"session" ("" = app)

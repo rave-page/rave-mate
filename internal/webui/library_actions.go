@@ -32,7 +32,7 @@ func init() {
 	onPrefix("lib-view:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.view = m.arg("lib-view:") }) })
 	onPrefix("lib-kind:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.kindFilter = m.arg("lib-kind:") }) })
 	onPrefix("lib-sort:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.sortBy = m.arg("lib-sort:") }) })
-	onExact("lib-search", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.nameFilter = m.Val }) })
+	onExact("lib-search", func(u *UI, m actMsg) { u.libSearchDebounced(func(s *libSt) { s.nameFilter = m.Val }) })
 	onExact("lib-pin", func(u *UI, m actMsg) { u.libPin() })
 	onPrefix("lib-unpin:", func(u *UI, m actMsg) { u.libUnpin(m.arg("lib-unpin:")) })
 	onExact("lib-nav-to", func(u *UI, m actMsg) { // pick-dir target: browse to picked folder
@@ -63,7 +63,7 @@ func init() {
 	onPrefix("lib-unmark:", func(u *UI, m actMsg) { u.libMark(m.arg("lib-unmark:"), false) })
 
 	// collection
-	onExact("lib-coll-search", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collSearch = m.Val }) })
+	onExact("lib-coll-search", func(u *UI, m actMsg) { u.libSearchDebounced(func(s *libSt) { s.collSearch = m.Val }) })
 	onPrefix("lib-coll-sort:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collSort = m.arg("lib-coll-sort:") }) })
 	onExact("lib-coll-dir", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collDesc = !s.collDesc }) })
 	onPrefix("lib-genre:", func(u *UI, m actMsg) {
@@ -241,6 +241,19 @@ func (u *UI) libSetQuiet(mut func(*libSt)) {
 	s.mu.Lock()
 	mut(s)
 	s.mu.Unlock()
+}
+
+// libSearchDebounced stores a search-filter mutation and debounces the full body re-render. Search
+// input fires per keystroke; a full filtered-list innerHTML swap over the ~23k-track collection per
+// keystroke is expensive, so coalesce (~150ms) and render once the user pauses.
+func (u *UI) libSearchDebounced(mut func(*libSt)) {
+	u.libSetQuiet(mut)
+	u.mu.Lock()
+	if u.libSearchDeb != nil {
+		u.libSearchDeb.Stop()
+	}
+	u.libSearchDeb = time.AfterFunc(150*time.Millisecond, u.libPatchBody)
+	u.mu.Unlock()
 }
 
 func (u *UI) libToggle(get func(*libSt) map[string]bool, key string, on bool) {
