@@ -164,3 +164,9 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .reloc-paths { flex:1; min-width:0; }
 .reloc-old { display:block; font:11px var(--font-mono,monospace); color:var(--rp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .reloc-new { display:block; font:11px var(--font-mono,monospace); color:var(--rp-mint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* cross-DJ sync editor (library_djsync.go) */
+.dj-fields { display:grid; grid-template-columns:1fr; gap:var(--space-2); margin-top:var(--space-2); }
+@media (min-width:560px){ .dj-fields { grid-template-columns:1fr 1fr; } }
+.dj-fieldrow .ss-field { margin:0; }
+.dj-target { margin-top:var(--space-2); display:flex; flex-direction:column; gap:var(--space-2); }

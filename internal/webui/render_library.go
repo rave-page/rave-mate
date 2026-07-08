@@ -104,6 +104,12 @@ type libSt struct {
 	impPath, impFormat string
 	movePath, moveDir  string
 
+	// cross-DJ sync (libsync) editor draft
+	djDraft   config.SyncJob
+	djIdx     int  // -1 = new job, else index into cfg.Features.LibrarySync.Jobs
+	djEditing bool // editor modal open (vs. the job list)
+	djRunning bool // a run is in flight (guards double-run)
+
 	jobsMu sync.Mutex
 	jobs   []*libJob
 }
@@ -471,7 +477,10 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	b.WriteString(btn(i18n.T("library.coll.cleanup"), "outline", "lib-cleanup", ""))
 	b.WriteString(btn(i18n.T("library.coll.relocate"), "outline", "lib-relocate", ""))
 	b.WriteString(btn(i18n.T("library.coll.export"), "outline", "lib-export", ""))
-	b.WriteString(btn(i18n.T("library.coll.sync"), "outline", "lib-sync", ""))
+	b.WriteString(btn(i18n.T("library.coll.djsync"), "primary", "lib-djsync", ""))
+	if u.svc.Syncer != nil {
+		b.WriteString(btn(i18n.T("library.coll.sync"), "outline", "lib-sync", ""))
+	}
 	b.WriteString(`</div>`)
 	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.coll.desc")) + `</p>`)
 

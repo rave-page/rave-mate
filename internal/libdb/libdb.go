@@ -247,6 +247,33 @@ func (d *DB) FirstSource() (SourceRow, bool, error) {
 	return r, err == nil, err
 }
 
+// AppCount is one source app plus how many tracks it contributes.
+type AppCount struct {
+	App   string
+	Count int
+}
+
+// SourceApps returns the distinct source apps present (with track counts), most tracks first.
+// Feeds the cross-DJ sync UI's per-field source pickers.
+func (d *DB) SourceApps() ([]AppCount, error) {
+	rows, err := d.db.Query(`SELECT s.app, COUNT(t.id) FROM sources s
+		JOIN tracks t ON t.source_id = s.id
+		GROUP BY s.app ORDER BY COUNT(t.id) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []AppCount
+	for rows.Next() {
+		var a AppCount
+		if err := rows.Scan(&a.App, &a.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // SyncResult reports what an incremental refresh changed.
 type SyncResult struct {
 	Added, Updated, Removed, Total int
