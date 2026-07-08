@@ -91,6 +91,21 @@ func field(label, act, value, inputType string) string {
 		attrQ(strings.ToLower(label)), html.EscapeString(label), inputType, attrQ(value), attrQ(value), attrQ(act))
 }
 
+// fieldPH is field with a placeholder (shown greyed when the value is empty - e.g. a detected
+// default path the user can accept by leaving the field blank).
+func fieldPH(label, act, value, inputType, placeholder string) string {
+	if inputType == "" {
+		inputType = "text"
+	}
+	ph := ""
+	if placeholder != "" {
+		ph = ` placeholder=` + attrQ(placeholder)
+	}
+	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s</span>`+
+		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
+		attrQ(strings.ToLower(label)), html.EscapeString(label), inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+}
+
 // fieldTip is field with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
 func fieldTip(label, act, value, inputType, tipHTML string) string {
 	if inputType == "" {

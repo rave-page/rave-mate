@@ -14,6 +14,8 @@ import (
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/midi"
+	"rave.page/mate/internal/musiclib"
+	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/stt"
 	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/traktormap"
@@ -413,14 +415,24 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.prodjlink.title"), i18n.T("settings.card.prodjlink.desc"), ""
 	case "serato":
 		sf := &f.Serato
+		// pre-fill the dir field with the redirection-aware detected _Serato_ dir (registry-resolved
+		// Music known folder) so the user needn't browse. Only probe when unset.
+		seratoPH := ""
+		if sf.SeratoDir == "" {
+			seratoPH = serato.SuggestedDir()
+		}
 		return i18n.T("settings.card.serato.title"), i18n.T("settings.card.serato.desc"),
-			pathField(i18n.T("settings.body.serato.folder"), "set:serato-dir", sf.SeratoDir, "dir") +
+			pathFieldPH(i18n.T("settings.body.serato.folder"), "set:serato-dir", sf.SeratoDir, "dir", seratoPH) +
 				toggleRow(i18n.T("settings.body.serato.nowPlaying"), "set:serato-np", sf.NowPlaying) +
 				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.note")) + `</div>`
 	case "virtualdj":
 		vf := &f.VirtualDJ
+		vdjPH := ""
+		if vf.DatabaseDir == "" {
+			vdjPH = musiclib.DefaultVirtualDJDir()
+		}
 		return i18n.T("settings.card.virtualdj.title"), i18n.T("settings.card.virtualdj.desc"),
-			pathField(i18n.T("settings.body.virtualdj.folder"), "set:vdj-dir", vf.DatabaseDir, "dir") +
+			pathFieldPH(i18n.T("settings.body.virtualdj.folder"), "set:vdj-dir", vf.DatabaseDir, "dir", vdjPH) +
 				toggleRow(i18n.T("settings.body.virtualdj.netCtl"), "set:vdj-netctl", vf.NetCtl) +
 				field(i18n.T("settings.body.virtualdj.pluginUrl"), "set:vdj-netctlurl", vf.NetCtlURL, "text") +
 				field(i18n.T("settings.body.virtualdj.pluginAuth"), "set:vdj-netctlauth", vf.NetCtlAuth, "password") +
@@ -1758,6 +1770,13 @@ func onOff(b bool) string {
 // kind ∈ dir|file). The pick handler re-dispatches act with the chosen path.
 func pathField(label, act, value, kind string) string {
 	return `<div class=set-pathrow>` + field(label, act, value, "text") +
+		btn("Browse…", "ghost", "pick-"+kind+":"+act, "") + `</div>`
+}
+
+// pathFieldPH is pathField pre-filled with a placeholder (detected default path). placeholder is
+// only meaningful when value is empty - shows the user the auto-detected dir so they needn't browse.
+func pathFieldPH(label, act, value, kind, placeholder string) string {
+	return `<div class=set-pathrow>` + fieldPH(label, act, value, "text", placeholder) +
 		btn("Browse…", "ghost", "pick-"+kind+":"+act, "") + `</div>`
 }
 

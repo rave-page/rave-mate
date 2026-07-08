@@ -164,6 +164,16 @@ func ExportVirtualDJ(tracks []Track, w io.Writer) error {
 	return enc.Close()
 }
 
+// DefaultVirtualDJDir returns the conventional VirtualDJ database folder (~/Documents/VirtualDJ),
+// whether or not it exists - a pre-fill hint for the settings dir field. "" if home is unknown.
+func DefaultVirtualDJDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Documents", "VirtualDJ")
+}
+
 // DiscoverVirtualDJ locates the default VirtualDJ database.xml. Returns "" (no error) when
 // absent so the UI can offer a Browse… fallback.
 func DiscoverVirtualDJ() (string, error) {
