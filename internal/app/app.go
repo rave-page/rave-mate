@@ -602,6 +602,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// mediaCtl/mediaRoutesCtl/webcamCtl point at the child proxies or the in-proc managers, so the
 	// rest of app + UI is agnostic.
 	useMediaChild := cfg.Features.MediaLink.Subprocess
+	mediaChildFailed := false // config wanted the isolated child but it wouldn't spawn -> fail CLOSED
 	var mediaCapsMu sync.Mutex
 	var mediaEnc, mediaDec []string
 	var mediaSyncPeer string
@@ -626,8 +627,12 @@ func run(parent context.Context, serviceMode bool) error {
 			MemLimitMB: mediaChildMemMB,
 		})
 		if err != nil {
-			log.Warn("medialink", "media child unavailable - using in-proc", map[string]any{"error": err.Error()})
+			// FAIL CLOSED. The memory-capped child is the ONLY sanctioned home for the frame-churning
+			// media route/webcam plane (a raw 720p30 in-proc route once ate 75% RAM + killed Parsec).
+			// If it won't spawn we DISABLE the plane - never silently run it ungoverned in the daemon.
+			log.Error("medialink", "media isolation child failed to spawn - media routes + webcam DISABLED (they will not run in-proc)", map[string]any{"error": err.Error()})
 			useMediaChild = false
+			mediaChildFailed = true
 		} else {
 			mediaChild = mh
 			mediaCtl = mh.Media()
@@ -636,6 +641,10 @@ func run(parent context.Context, serviceMode bool) error {
 			peerMgr.AddListener(nil, func() { mediaChild.PushSecrets(connectedMediaSecrets(peerMgr)) }) // per-peer media keys on connect/disconnect
 		}
 	}
+	// mediaInProc: run the media route/webcam plane IN this process. True only when isolation was
+	// never requested (config default). When the requested child failed to spawn it stays FALSE, so
+	// the frame plane is left off (fail-closed) rather than falling back to the ungoverned in-proc path.
+	mediaInProc := !useMediaChild && !mediaChildFailed
 	peerMgr.AddListener(nil, func() { mediaCtl.Advertise() }) // re-advertise media on peer connect/disconnect
 	// §3.2 codec probe (test encodes take seconds - off the startup path). SWOnly keeps only the
 	// software tiers advertised (diagnostic: forces tier 4 + the CPU warning on routes we source).
@@ -816,10 +825,10 @@ func run(parent context.Context, serviceMode bool) error {
 	// UVC PTZ/exposure control, driveable from a paired instance over media.cam.* on the bus.
 	webcamMgr := webcam.New(log, bus, ident.NodeID, obsLabel, func() config.WebcamFeature { return cfg.Features.Webcam })
 	webcamMgr.SetRouter(mediaRouter) // P4: a running camera advertises as routable source "webcam"
-	if !useMediaChild {              // in-proc: the UI drives the managers directly (child path set them above)
+	if mediaInProc {                 // in-proc: the UI drives the managers directly (child path set them above)
 		mediaRoutesCtl = mediaRoutes
 		webcamCtl = webcamMgr
-	}
+	} // else: child mode (proxies set above) OR child-spawn failed -> ctls stay nil = plane disabled
 
 	// VR perf/debug telemetry collector - receives vr.perf samples from any instance (incl. this one),
 	// for the UI monitor + `rave-mate ctl vrperf`. Always on (cheap; works even with no local VR), so a
@@ -1326,7 +1335,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// Webcam/UVC source (medialink P5). Disabled = zero footprint (no ffmpeg child, no COM).
 	mods.Add(&module.Service{
 		Name:    "webcam",
-		Enabled: func() bool { return !useMediaChild && cfg.Features.Webcam.Enabled }, // child hosts the cam when isolated
+		Enabled: func() bool { return mediaInProc && cfg.Features.Webcam.Enabled }, // child hosts the cam when isolated; off if isolation was requested but failed
 		Start:   webcamMgr.Start,
 		Stop:    webcamMgr.Stop,
 	})
@@ -1385,7 +1394,7 @@ func run(parent context.Context, serviceMode bool) error {
 			// LAN media plane (medialink): bind the media listener + negotiation. Non-fatal -
 			// a busy port range only disables the media plane, never the peer link. When the plane runs
 			// in the isolated child (#44) the "mediaplane" module owns its lifecycle instead.
-			if !useMediaChild {
+			if mediaInProc {
 				if err := mediaRouter.Start(c); err != nil {
 					log.Warn("medialink", "media plane disabled", map[string]any{"error": err.Error()})
 				} else {
@@ -1401,7 +1410,7 @@ func run(parent context.Context, serviceMode bool) error {
 				peerUnsub = nil
 			}
 			tcPlane.Stop()
-			if !useMediaChild {
+			if mediaInProc {
 				mediaRouter.Stop()
 			}
 			disc.Stop()
