@@ -11,33 +11,50 @@ import (
 	"time"
 )
 
-// DefaultDir returns the per-user Serato dir (%USERPROFILE%\Music\_Serato_ on Windows,
-// ~/Music/_Serato_ elsewhere).
+// DefaultDir returns the per-user Serato dir: <Music>\_Serato_, where <Music> is the resolved
+// Music known folder (redirection-aware on Windows - handles Music moved to another drive or
+// OneDrive), ~/Music elsewhere. Serato's own Windows default is C:\Users\<user>\Music\_Serato_.
 func DefaultDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, "Music", "_Serato_"), nil
+	return filepath.Join(musicDir(), "_Serato_"), nil
 }
 
-// DrivesSeratoDirs returns existing Serato dirs: the per-user default plus, on Windows,
-// every <drive>:\_Serato_ root (external-drive libraries). Non-Windows = just the default.
-func DrivesSeratoDirs() []string {
+// DetectSeratoDirs returns every EXISTING _Serato_ dir, deduped, default first: the Music-folder
+// default plus, on Windows, each <drive>:\_Serato_ root (Serato writes one at the root of every
+// external drive it imports music from). Empty when Serato has never run.
+func DetectSeratoDirs() []string {
 	var dirs []string
-	if def, err := DefaultDir(); err == nil && isDir(def) {
-		dirs = append(dirs, def)
+	seen := map[string]bool{}
+	add := func(p string) {
+		key := strings.ToLower(filepath.Clean(p))
+		if p != "" && !seen[key] && isDir(p) {
+			seen[key] = true
+			dirs = append(dirs, p)
+		}
+	}
+	if def, err := DefaultDir(); err == nil {
+		add(def)
 	}
 	if runtime.GOOS == "windows" {
 		for c := 'A'; c <= 'Z'; c++ {
-			d := string(c) + `:\_Serato_`
-			if isDir(d) {
-				dirs = append(dirs, d)
-			}
+			add(string(c) + `:\_Serato_`)
 		}
 	}
 	return dirs
 }
+
+// SuggestedDir is the pre-select value for the Serato-dir setting: the first existing _Serato_
+// dir, else the Music-folder default path (which Serato creates on first run). Never empty.
+func SuggestedDir() string {
+	if dirs := DetectSeratoDirs(); len(dirs) > 0 {
+		return dirs[0]
+	}
+	def, _ := DefaultDir()
+	return def
+}
+
+// DrivesSeratoDirs returns existing Serato dirs (default + external-drive roots). Alias of
+// DetectSeratoDirs kept for the libsync collection loader.
+func DrivesSeratoDirs() []string { return DetectSeratoDirs() }
 
 // LoadCollection reads `database V2` + every `Subcrates\*.crate` under seratoDir.
 func LoadCollection(seratoDir string) ([]Track, []Crate, error) {

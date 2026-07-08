@@ -3,9 +3,23 @@ package serato
 import (
 	"bytes"
 	"encoding/binary"
+	"path/filepath"
 	"testing"
 	"unicode/utf16"
 )
+
+// TestSuggestedDirResolves checks the pre-select resolver: DefaultDir ends in _Serato_ and
+// SuggestedDir is never empty. Logs the real resolution on this host.
+func TestSuggestedDirResolves(t *testing.T) {
+	def, err := DefaultDir()
+	if err != nil || filepath.Base(def) != "_Serato_" {
+		t.Fatalf("DefaultDir=%q err=%v", def, err)
+	}
+	if SuggestedDir() == "" {
+		t.Fatal("SuggestedDir empty")
+	}
+	t.Logf("DefaultDir=%q SuggestedDir=%q detected=%v", def, SuggestedDir(), DetectSeratoDirs())
+}
 
 // enc16 encodes s as UTF-16BE (Serato text payload).
 func enc16(s string) []byte {
