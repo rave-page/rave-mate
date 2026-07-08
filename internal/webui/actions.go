@@ -8,7 +8,6 @@ import (
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/obscontrol"
-	"rave.page/mate/internal/stream"
 )
 
 // Parameterized action handlers (dispatched from onAction by act-prefix). Long/blocking backend
@@ -189,39 +188,24 @@ func (u *UI) wsPublish(kind, key string) {
 
 // ── Live transport ──
 
-func (u *UI) streamGoLive(form string) {
-	if u.svc.Stream == nil || u.svc.Auth == nil {
+// streamPause toggles StreamBridge.PauseLiveSignal (private / non-DJ streams). Server-authoritative
+// flip: the switch is a momentary signal, so we invert the persisted flag rather than trust the
+// round-tripped checkbox state, then re-render from config (the switch always mirrors the flag).
+// Auto-live itself is OBS-driven in the daemon; the driver's 3s reconcile ends a live broadcast once
+// paused. on is ignored (kept for the dispatch signature).
+func (u *UI) streamPause(_ bool) {
+	if u.svc.Cfg == nil {
 		return
 	}
-	tok := u.svc.Auth.Token()
-	if tok == "" {
-		u.toast(i18n.T("actions.toast.signInBeforeLive"))
-		return
+	now := !u.svc.Cfg.Features.StreamBridge.PauseLiveSignal
+	u.svc.Cfg.Features.StreamBridge.PauseLiveSignal = now
+	u.saveCfg()
+	u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")")
+	key := "actions.toast.liveResumed"
+	if now {
+		key = "actions.toast.livePaused"
 	}
-	title := strings.TrimSpace(parseForm(form)["title"])
-	if title == "" {
-		title = "Live set"
-	}
-	u.toast(i18n.T("actions.toast.goingLive"))
-	u.bg(func() {
-		ctx, cancel := u.actx()
-		defer cancel()
-		if _, err := u.svc.Stream.Start(ctx, stream.StartArgs{Title: title, UserToken: tok}); err != nil {
-			u.logErr("stream start", err)
-			u.toast(i18n.T("actions.toast.goLiveFailed") + err.Error())
-		}
-	})
-}
-
-func (u *UI) streamEnd() {
-	if u.svc.Stream == nil {
-		return
-	}
-	u.bg(func() {
-		ctx, cancel := u.actx()
-		defer cancel()
-		_, _ = u.svc.Stream.End(ctx)
-	})
+	u.toast(i18n.T(key))
 }
 
 func (u *UI) arecToggle() {

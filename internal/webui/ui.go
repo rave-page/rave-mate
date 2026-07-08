@@ -264,10 +264,8 @@ func (u *UI) onAction(payload string) {
 		u.libSetSection(strings.TrimPrefix(m.Act, "lib-section:"))
 	case strings.HasPrefix(m.Act, "lib-nav:"):
 		u.libNav(strings.TrimPrefix(m.Act, "lib-nav:"))
-	case m.Act == "stream-golive":
-		u.streamGoLive(m.Form)
-	case m.Act == "stream-end":
-		u.streamEnd()
+	case m.Act == "stream-pause":
+		u.streamPause(m.Val == "true")
 	case m.Act == "arec-toggle":
 		u.arecToggle()
 	case m.Act == "tc-start":

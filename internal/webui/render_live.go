@@ -48,29 +48,57 @@ func (u *UI) renderLive() string {
 // ── transport ──
 
 func (u *UI) liveTransportHTML() string {
+	var b strings.Builder
+	// Auto-live: OBS stream drives the now-playing broadcast (no manual go-live). Read-only status +
+	// a pause switch for private / non-DJ streams.
 	signedIn := u.svc.Auth != nil && u.svc.Auth.SignedIn()
 	isLive := u.svc.Stream != nil && u.svc.Stream.Status().IsLive
-	goliveDis, endDis := "", " disabled"
-	if !signedIn || isLive {
-		goliveDis = " disabled"
+	paused := u.svc.Cfg != nil && u.svc.Cfg.Features.StreamBridge.PauseLiveSignal
+	streaming := false
+	if u.svc.OBSControl != nil {
+		for _, in := range u.svc.OBSControl.Statuses() {
+			if in.Local && in.Streaming {
+				streaming = true
+			}
+		}
 	}
-	if isLive {
-		endDis = ""
+	dotVar, stateKey := "muted", "live.transport.autoIdle"
+	switch {
+	case isLive:
+		dotVar, stateKey = "success", "live.transport.autoLive"
+	case paused:
+		dotVar, stateKey = "warning", "live.transport.autoPaused"
+	case streaming && !signedIn:
+		dotVar, stateKey = "warning", "live.transport.autoSignIn"
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=transport><span class=tlabel>` + html.EscapeString(i18n.T("live.transport.streamLabel")) + `</span>`)
-	b.WriteString(`<form data-act=stream-golive><input class=field-input name=title placeholder=` + attrQ(i18n.T("live.transport.titlePlaceholder")) + ` style="width:220px" autocomplete=off>`)
-	b.WriteString(`<button class="rp-btn rp-btn--go" type=submit` + goliveDis + `>` + html.EscapeString(i18n.T("live.transport.goLive")) + `</button></form>`)
-	b.WriteString(`<button class="rp-btn rp-btn--destructive" data-act=stream-end` + endDis + `>` + html.EscapeString(i18n.T("live.transport.end")) + `</button>`)
+	// STREAM label carries the full "metadata only, no A/V" explanation as a tooltip.
+	b.WriteString(`<div class=transport><span class=tlabel title=` + attrQ(i18n.T("live.transport.streamHint")) + `>` +
+		html.EscapeString(i18n.T("live.transport.streamLabel")) + `</span>`)
+	b.WriteString(`<span class=np-artist id=live-stream-state title=` + attrQ(i18n.T("live.transport.streamHint")) + `>` +
+		dot(dotVar) + ` ` + html.EscapeString(i18n.T(stateKey)) + `</span>`)
+	// Always-visible clarifier: "live" = now-playing metadata, never audio/video.
+	b.WriteString(`<span class=tlabel style="opacity:.7">` + html.EscapeString(i18n.T("live.transport.metaOnly")) + `</span>`)
+	pauseChecked := ""
+	if paused {
+		pauseChecked = " checked"
+	}
+	b.WriteString(`<span class=tlabel>` + html.EscapeString(i18n.T("live.transport.pauseLabel")) + `</span>`)
+	b.WriteString(`<label class=switch data-label="private stream" title=` + attrQ(i18n.T("live.transport.pauseHint")) +
+		`><input type=checkbox` + pauseChecked + ` data-act=stream-pause data-value=` + attrQ(boolStr(paused)) +
+		`><span class=switch-track></span></label>`)
 	if u.svc.AudioRec != nil {
 		rec := u.svc.AudioRec.Status()
-		label := i18n.T("live.transport.record")
+		label := i18n.T("live.transport.recordAudio")
 		if rec.Recording {
 			label = i18n.T("player.stop")
 		}
-		b.WriteString(`<span class=tsep></span><span class=tlabel>` + html.EscapeString(i18n.T("live.transport.recLabel")) + `</span>`)
-		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=arec-toggle>` + html.EscapeString(label) + `</button>`)
-		b.WriteString(`<span class=np-artist id=live-rec-state>` + html.EscapeString(recStateText(rec)) + `</span>`)
+		b.WriteString(`<span class=tsep></span><span class=tlabel title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
+			html.EscapeString(i18n.T("live.transport.recLabel")) + `</span>`)
+		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=arec-toggle title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
+			html.EscapeString(label) + `</button>`)
+		// Idle: name the destination; recording: recStateText shows the live file.
+		b.WriteString(`<span class=np-artist id=live-rec-state title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
+			html.EscapeString(recSideText(rec)) + `</span>`)
 	}
 	if u.svc.Timecode != nil {
 		b.WriteString(`<span class=tsep></span><span class=tlabel>` + html.EscapeString(i18n.T("live.transport.tcLabel")) + `</span>`)
@@ -80,6 +108,15 @@ func (u *UI) liveTransportHTML() string {
 	}
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// recSideText is the record-state readout: the live file while recording, else the idle
+// destination hint (so the button always says WHAT it records + WHERE it lands).
+func recSideText(s audiorec.Status) string {
+	if t := recStateText(s); t != "" {
+		return t
+	}
+	return i18n.T("live.transport.recTarget")
 }
 
 func recStateText(s audiorec.Status) string {
@@ -335,6 +372,8 @@ func (u *UI) cockpitHTML() string {
 		return emptyState(i18n.T("live.cockpit.empty"))
 	}
 	var b strings.Builder
+	// Caption: what the OBS controls below do + where recordings land + auto tracklist capture.
+	b.WriteString(`<div class=decks-note>` + html.EscapeString(i18n.T("live.cockpit.caption")) + `</div>`)
 	b.WriteString(`<div class="rp-card">`)
 	for _, in := range insts {
 		name := in.Label

@@ -104,25 +104,25 @@ type Config struct {
 
 // Features is the master capability switchboard. Each field gates one subsystem.
 type Features struct {
-	Traktor       TraktorFeature   `json:"traktor"`       // DJ-software (Traktor Pro 4) bridge
-	StreamBridge  Toggle           `json:"streamBridge"`  // live set → rave.page stream ingest
-	Transcode     TranscodeFeature `json:"transcode"`     // ffmpeg transcode workers
-	StudioChannel Toggle           `json:"studioChannel"` // web↔desktop Local Studio WS channel
-	OBS           OBSFeature       `json:"obs"`           // OBS obs-websocket control + settings validation
-	Library       Toggle           `json:"library"`       // native file browser + media metadata viewer
-	MediaEditor   Toggle           `json:"mediaEditor"`   // poster/thumbnail composer
-	Player        PlayerFeature    `json:"player"`        // in-app video player (mpv engine; window-embed)
-	Fingerprint   Toggle           `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc)
-	VRChat        VRChatFeature    `json:"vrchat"`        // client-side VRChat API bridge
-	VRCTools      VRCToolsFeature  `json:"vrcTools"`      // VRChat screenshot organizer + camera-path manager
-	VR            Toggle           `json:"vr"`            // VR runtime support (OpenVR/OpenXR)
-	VROverlay     VROverlayFeature `json:"vrOverlay"`     // VR overlays (OpenVR chat/alert panels in-headset)
-	Unity         UnityFeature     `json:"unity"`         // Unity-project integration: install the rave.page editor plugin + export motion takes
-	Twitch        TwitchFeature    `json:"twitch"`        // Twitch chat/alerts/title-control/moderation
-	STT           STTFeature       `json:"stt"`           // speech-to-text (Whisper) → Twitch chat
-	WorldSync     WorldSyncFeature `json:"worldSync"`     // VRChat world gist feeds (perms/posters/events/now-playing)
-	Notifications Toggle           `json:"notifications"` // native desktop notifications
-	UI            UIFeature        `json:"ui"`            // UI renderer: Fyne (default) or the HTML/CSS webview
+	Traktor       TraktorFeature      `json:"traktor"`       // DJ-software (Traktor Pro 4) bridge
+	StreamBridge  StreamBridgeFeature `json:"streamBridge"`  // live set → rave.page stream ingest (auto-driven by OBS)
+	Transcode     TranscodeFeature    `json:"transcode"`     // ffmpeg transcode workers
+	StudioChannel Toggle              `json:"studioChannel"` // web↔desktop Local Studio WS channel
+	OBS           OBSFeature          `json:"obs"`           // OBS obs-websocket control + settings validation
+	Library       Toggle              `json:"library"`       // native file browser + media metadata viewer
+	MediaEditor   Toggle              `json:"mediaEditor"`   // poster/thumbnail composer
+	Player        PlayerFeature       `json:"player"`        // in-app video player (mpv engine; window-embed)
+	Fingerprint   Toggle              `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc)
+	VRChat        VRChatFeature       `json:"vrchat"`        // client-side VRChat API bridge
+	VRCTools      VRCToolsFeature     `json:"vrcTools"`      // VRChat screenshot organizer + camera-path manager
+	VR            Toggle              `json:"vr"`            // VR runtime support (OpenVR/OpenXR)
+	VROverlay     VROverlayFeature    `json:"vrOverlay"`     // VR overlays (OpenVR chat/alert panels in-headset)
+	Unity         UnityFeature        `json:"unity"`         // Unity-project integration: install the rave.page editor plugin + export motion takes
+	Twitch        TwitchFeature       `json:"twitch"`        // Twitch chat/alerts/title-control/moderation
+	STT           STTFeature          `json:"stt"`           // speech-to-text (Whisper) → Twitch chat
+	WorldSync     WorldSyncFeature    `json:"worldSync"`     // VRChat world gist feeds (perms/posters/events/now-playing)
+	Notifications Toggle              `json:"notifications"` // native desktop notifications
+	UI            UIFeature           `json:"ui"`            // UI renderer: Fyne (default) or the HTML/CSS webview
 
 	// DJ-data aggregation sources + sinks (the session hub fuses these into one state).
 	NML            NMLFeature        `json:"nml"`            // Traktor history/collection file source
@@ -1168,6 +1168,14 @@ type Toggle struct {
 	Enabled bool `json:"enabled"`
 }
 
+// StreamBridgeFeature gates the live set → rave.page now-playing broadcast. Publishing is automatic,
+// driven by the OBS stream signal (no manual go-live). PauseLiveSignal suppresses that auto-broadcast
+// for private / non-DJ streams. Additive + inverted: zero value = broadcast-on, no version migration.
+type StreamBridgeFeature struct {
+	Enabled         bool `json:"enabled"`
+	PauseLiveSignal bool `json:"pauseLiveSignal,omitempty"`
+}
+
 // VROverlayFeature configures VR overlays (OpenVR/SteamVR). Requires SteamVR running + a build with
 // the `vr` tag. Overlays render bus-sourced content (Twitch chat, alerts) into the headset - so a
 // VR PC shows the chat from another rave-mate instance that owns the Twitch connection.
@@ -1647,8 +1655,9 @@ func Default() Config {
 		APIBaseURL:  resolveAPIBase(),
 		StartHidden: false,
 		Features: Features{
-			Traktor:       TraktorFeature{Enabled: true, Port: 0, LogPayloads: true},
-			StreamBridge:  Toggle{Enabled: true},
+			Traktor:      TraktorFeature{Enabled: true, Port: 0, LogPayloads: true},
+			StreamBridge: StreamBridgeFeature{Enabled: true}, // PauseLiveSignal=false ⇒ auto-broadcast on
+
 			Transcode:     TranscodeFeature{Enabled: true, MaxConcurrent: 2},
 			StudioChannel: Toggle{Enabled: true},
 			OBS:           OBSFeature{Enabled: false, Host: "127.0.0.1", Port: 4455},

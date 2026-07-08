@@ -20,7 +20,7 @@ func init() {
 		var js strings.Builder
 		u.tickPatch(&js, "live-tc", htmlEscape(u.tcText()))
 		if u.svc.AudioRec != nil {
-			u.tickPatch(&js, "live-rec-state", htmlEscape(recStateText(u.svc.AudioRec.Status())))
+			u.tickPatch(&js, "live-rec-state", htmlEscape(recSideText(u.svc.AudioRec.Status())))
 		}
 		u.tickPatch(&js, "live-np", u.nowPlayingHTML())
 		u.tickPatch(&js, "live-status", u.liveStatusHTML())

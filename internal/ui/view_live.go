@@ -8,7 +8,6 @@ package ui
 // used to sit on Settings cards land here.
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -24,8 +23,9 @@ import (
 )
 
 const (
-	helpLiveStream = "Publish your set as a live stream on your rave.page profile. Set a title and hit " +
-		"Go Live (needs sign-in + the stream bridge enabled in Settings); End stops publishing."
+	helpLiveStream = "Your live now-playing is published automatically whenever an OBS stream goes live " +
+		"on this machine (needs sign-in + the stream bridge enabled in Settings). Flip Private to pause the " +
+		"broadcast for non-DJ / private streams; it resumes when you turn Private off."
 	helpLiveRec = "Record the configured audio device to disk (lossless FLAC by default), linked to the " +
 		"live tracklist. Device, format + folders: Settings ▸ Recording ▸ Audio recording. It can also " +
 		"auto-follow OBS recording."
@@ -96,57 +96,23 @@ func (u *UI) buildLiveTransport() fyne.CanvasObject {
 	return kitToolStrip(items...)
 }
 
-// liveStreamGroup is the Go Live / End transport (moved off the old Dashboard card).
+// liveStreamGroup is the read-only auto-live status + the private-stream pause switch. Publishing is
+// automatic (the OBS stream signal drives it in the daemon) - there is no manual go-live/end.
 func (u *UI) liveStreamGroup() []fyne.CanvasObject {
-	titleEntry := newEntry()
-	titleEntry.SetPlaceHolder("Set title (e.g. Friday Night Techno)")
-
-	var liveBtn *kitButton
-	endBtn := newKitButtonWithIcon("End", theme.MediaStopIcon(), func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = u.svc.Stream.End(ctx)
-	})
-	endBtn.SetVariant(kitBtnDanger)
-	endBtn.Disable()
-
-	// Go Live is gated on BOTH sign-in and not-already-live.
+	state := widget.NewLabel("")
 	var isLive, signedIn bool
 	refresh := func() {
-		if isLive {
-			liveBtn.Disable()
-			endBtn.Enable()
-			return
-		}
-		endBtn.Disable()
-		if signedIn {
-			liveBtn.Enable()
-		} else {
-			liveBtn.Disable()
+		switch {
+		case isLive:
+			state.SetText("● Broadcasting now-playing to rave.page (metadata only)")
+		case u.svc.Cfg != nil && u.svc.Cfg.Features.StreamBridge.PauseLiveSignal:
+			state.SetText("Paused - not broadcasting (private stream)")
+		case !signedIn:
+			state.SetText("Sign in to broadcast now-playing")
+		default:
+			state.SetText("Not streaming - auto-broadcasts when OBS goes live")
 		}
 	}
-	liveBtn = newKitButtonWithIcon("Go Live", theme.MediaPlayIcon(), func() {
-		tok := u.getToken()
-		if tok == "" {
-			u.Notify("rave-mate", "Sign in (Settings ▸ Account) before going live.")
-			return
-		}
-		t := titleEntry.Text
-		if t == "" {
-			t = "Live set"
-		}
-		goUI("live", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			if _, err := u.svc.Stream.Start(ctx, stream.StartArgs{Title: t, UserToken: tok}); err != nil {
-				u.Notify("rave-mate", "Failed to go live: "+err.Error())
-			} else {
-				u.Notify("rave-mate", "You're live: "+t)
-			}
-		})
-	})
-	liveBtn.SetVariant(kitBtnBrand)
-
 	applyStream := func(s stream.Status) {
 		isLive = s.IsLive
 		refresh()
@@ -156,6 +122,7 @@ func (u *UI) liveStreamGroup() []fyne.CanvasObject {
 	u.closers = append(u.closers, unsub)
 	goUI("live", func() {
 		for s := range stCh {
+			s := s
 			fyne.Do(func() { applyStream(s) })
 		}
 	})
@@ -169,11 +136,23 @@ func (u *UI) liveStreamGroup() []fyne.CanvasObject {
 			})
 		})
 	}
+	pause := widget.NewCheck("Private (pause broadcast)", func(on bool) {
+		if u.svc.Cfg == nil {
+			return
+		}
+		u.svc.Cfg.Features.StreamBridge.PauseLiveSignal = on
+		u.saveCfg()
+		refresh()
+	})
+	if u.svc.Cfg != nil {
+		pause.SetChecked(u.svc.Cfg.Features.StreamBridge.PauseLiveSignal)
+	}
 
 	return []fyne.CanvasObject{
 		smallCaps("STREAM"),
-		container.NewGridWrap(fyne.NewSize(230, titleEntry.MinSize().Height), titleEntry),
-		liveBtn, endBtn,
+		state,
+		mutedInline("now-playing metadata only - no audio/video"),
+		pause,
 		helpIcon(helpLiveStream),
 	}
 }
@@ -185,8 +164,8 @@ func (u *UI) liveRecordGroup() []fyne.CanvasObject {
 	if ar == nil {
 		return nil
 	}
-	recBtn := newKitButtonWithIcon("Record", theme.MediaRecordIcon(), nil)
-	state := mutedInline("")
+	recBtn := newKitButtonWithIcon("Record audio", theme.MediaRecordIcon(), nil)
+	state := mutedInline("-> local FLAC file")
 	apply := func() {
 		s := ar.Status()
 		if s.Recording {
@@ -199,11 +178,11 @@ func (u *UI) liveRecordGroup() []fyne.CanvasObject {
 			if s.Path != "" {
 				src += " · " + filepath.Base(s.Path)
 			}
-			state.SetText("● " + src)
+			state.SetText("● recording audio " + src)
 		} else {
 			recBtn.SetIcon(theme.MediaRecordIcon())
-			recBtn.SetText("Record")
-			state.SetText("")
+			recBtn.SetText("Record audio")
+			state.SetText("-> local FLAC file")
 		}
 	}
 	recBtn.OnTapped = func() {

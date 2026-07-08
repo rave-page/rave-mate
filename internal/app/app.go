@@ -504,7 +504,6 @@ func run(parent context.Context, serviceMode bool) error {
 	// this machine and pause non-essential heavy work (fingerprinting/indexing) while it runs -
 	// stream-critical paths (Spout, peerlink media, MIDI/now-playing, overlays) keep feeding it.
 	governor.SetLog(log)
-	debuglog.Go(log, "governor-stream", func() { watchStreaming(ctx, obsW, log) })
 	// Live-stream publisher runs in a child process (spawned lazily on go-live); merged
 	// updates stream over IPC, the publish token never enters the daemon.
 	pub, perr := featurehost.NewStreamProxy(log, merger, func() featurehost.StreamConfig {
@@ -514,6 +513,17 @@ func run(parent context.Context, serviceMode bool) error {
 		return perr
 	}
 	pub.Bind(ctx)
+	// Auto-live: the OBS stream signal (streamLive) drives the now-playing broadcast - publish while a
+	// stream is live here (signed in + not paused), end when it stops. No manual go-live. The same 3s
+	// sampler also feeds the activity governor (good-neighbour: pause heavy work while streaming).
+	autoLive := &autoLiveDriver{pub: pub, log: log}
+	autoLiveIn := autoLiveInputs{
+		signedIn: authMgr.SignedIn,
+		paused:   func() bool { return cfg.Features.StreamBridge.PauseLiveSignal },
+		token:    authMgr.Token,
+		title:    func() string { return nowPlayingTitle(merger) },
+	}
+	debuglog.Go(log, "governor-stream", func() { watchStreaming(ctx, obsW, log, autoLive, autoLiveIn) })
 	// Subprocessed audio player: the beep/oto engine runs in the `player` child (a decode/codec/
 	// oto fault kills only it). Shared by every player panel; pre-warmed by Bind for instant play.
 	player, plerr := featurehost.NewPlayerProxy(log)
@@ -1687,8 +1697,10 @@ func linkCaptures(ctx context.Context, rcv *featurehost.IcecastProxy, obsW *feat
 //     up we assume a stream may be live and defer non-essential heavy work (it's only deferred, not
 //     dropped, and resumes when OBS closes).
 //
-// Cheap + event-driven: a 3s poll, no busy loop. Only flips the governor on real transitions.
-func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus.Bus) {
+// Cheap + event-driven: a 3s poll, no busy loop. Only flips the governor on real transitions. The
+// same sample also drives the auto-live broadcast (drv): OBS stream ⇒ publish now-playing (no manual
+// go-live). drv/in may be nil (governor-only).
+func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus.Bus, drv *autoLiveDriver, in autoLiveInputs) {
 	defer debuglog.Recover(log, "governor", false)
 	act := sysactivity.New()
 	t := time.NewTicker(3 * time.Second)
@@ -1698,7 +1710,15 @@ func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			governor.SetStreaming(streamLive(ctx, obsW, act))
+			live := streamLive(ctx, obsW, act)
+			governor.SetStreaming(live)
+			if drv != nil {
+				// Start spawns the stream child + hits the API; cap it so a stuck call can't wedge
+				// the sampler (governor keeps flipping next tick).
+				sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+				drv.tick(sctx, live, in.signedIn(), in.paused(), in.token(), in.title())
+				cancel()
+			}
 		}
 	}
 }
