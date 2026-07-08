@@ -150,6 +150,26 @@
       "body": "Das Video spielt direkt hier ab, in der App: rave-mate streamt die Datei über eine private localhost-Verbindung an ihr eigenes Fenster (HTTP mit Range-Requests, sodass Springen sofort funktioniert - der Player holt nur die Bytes, die er braucht). Nichts verlässt deinen Rechner und es öffnet sich kein zusätzliches Player-Fenster.\n\nDie Wellenform darunter ist die AUDIO-Spur des Videos, genau wie eine Audioaufnahme analysiert - navigiere ein mehrstündiges Video über die Musik: klicke auf die Wellenform zum Springen, nutze das Track-Dropdown, um zu einem Tracklisten-Eintrag zu springen. Wenn ein Set sowohl einen Audio-Mitschnitt als auch eine Videoaufnahme hat, läuft das Video als stummgeschaltete, zeitlich ausgerichtete Vorschau, während das (meist sauberere) Broadcast-Audio spielt - wechsle die Quelle mit dem AUDIO/VIDEO-Umschalter.\n\nDas Dekodieren nutzt die Web-Engine der App (Chromium): H.264/AAC MP4 - was OBS standardmäßig aufnimmt - und WebM/VP9 spielen nativ. Ein exotischer Codec oder Container zeigt stattdessen eine ehrliche Fehlermeldung; exportiere einen web-freundlichen Schnitt über die Encode-Presets oder öffne die Datei in deinem Systemplayer.",
       "title": "Eingebettete Videowiedergabe"
     },
+    "enc-audio-codec": {
+      "body": "Kopieren behält den originalen Audio-Stream (Bitrate, Sample-Rate, Kanal- und Lautheitsänderungen greifen nicht); Kein deaktiviert Audio.\n\nVerlustfrei: FLAC bewahrt die Qualität, seine Bitrate richtet sich nach Quelle und Kompressionsgrad; PCM ist unkomprimiert und ignoriert Bitraten-Einstellungen. Verlustbehaftet: AAC ist breit kompatibel mit einer praktischen Obergrenze um 320 kbps; Opus ist am effizientesten und großzügig für Stereomusik bei moderaten Bitraten; Vorbis kann höher gehen als AAC; MP3 CBR endet bei 320 kbps, während V0 VBR bei kleineren Dateien oft transparent klingt.\n\nJeder Codec hat eine empfohlene Bitrate für die Quelle und eine sinnvolle Obergrenze - oberhalb der Obergrenze bringen größere Dateien keine hörbare Qualität mehr.",
+      "title": "Audio-Codec"
+    },
+    "enc-container": {
+      "body": "Der Container ist die Datei-Hülle - er entscheidet, welche Video-/Audio-Codec-Kombinationen gültig sind.\n\nMP4 ist der sicherste Auslieferungs-Container: H.264/H.265/AV1-Video mit AAC-typischer Audio-Kompatibilität. WebM ist browserfreundlich für offene Codecs: VP9- oder AV1-Video mit Opus-/Vorbis-Audio. MKV akzeptiert nahezu jeden Codec; nützlich für Archive und Remuxes, weniger universell für die Wiedergabe.\n\nReine Audio-Container: Ogg ist meist Vorbis oder Opus und erlaubt höhere verlustbehaftete Audio-Obergrenzen als AAC. MP3 ist universell abspielbar, bei CBR auf 320 kbps begrenzt. M4A/AAC ist breit kompatibel; die praktische Spitzen-Bitrate von AAC liegt bei 320 kbps. WAV/AIFF sind unkomprimiertes PCM: große Dateien, keine verlustbehaftete Bitratensteuerung. FLAC ist verlustfreie Kompression: kleiner als WAV, dennoch bit-genau. Opus ist bei niedrigen Bitraten sehr effizient.",
+      "title": "Containerformat"
+    },
+    "enc-loudness": {
+      "body": "Lautheit normalisieren wendet eine einzige Lautstärkeänderung über den ganzen Track an - keine Kompression. Es ist ein Zwei-Pass-Verfahren und völlig transparent: Pass 1 misst den ganzen Track (EBU-R128-Integrated-Loudness + True Peak), Pass 2 wendet EINEN konstanten Gain auf den gesamten Track an - keine Kompression, kein Limiting, keine Dynamikbearbeitung, sodass Mix und Transienten unangetastet bleiben. Der Gain nach oben ist gedeckelt, sodass der True Peak die Obergrenze nie überschreitet (ein Track, der das Ziel ohne Clipping nicht erreicht, bekommt weniger Gain, nie einen Limiter).\n\nBranchen-Ziele: Spotify / YouTube / Tidal / Amazon normalisieren die Wiedergabe auf -14 LUFS, Apple Music -16, Deezer -15, EBU R128 Broadcast -23. Club- / DJ-Pool-Master laufen typischerweise bei -8 bis -9 LUFS. Eine -1-dBTP-Obergrenze ist die Streaming-Norm; nutze -2 dBTP für verlustbehaftete Encodes bei 128 kbps oder darunter.\n\n„Nur leise Tracks anheben“ dreht einen lauten Track nie herunter. Normalisierung braucht ein Audio-Re-Encode - wähle einen Audio-Codec außer Kopieren/Kein. Aus behält die Quell-Lautheit exakt bei.",
+      "title": "Lautheits-Normalisierung (EBU R128)"
+    },
+    "enc-rate": {
+      "body": "CRF / CQ (konstante Qualität) verteilt Bits dorthin, wo das Bild sie braucht; niedrigere Werte sind größer und sauberer. Typisches CRF ist 18-23 für H.264 / H.265, 24-34 für AV1, 28-34 für VP9. Der Bitraten-Modus zielt stattdessen auf ein Auslieferungslimit und vorhersehbare Dateigröße.\n\nNicht-Master-Profile vermeiden Up-Encoding über die Quell-Bitrate hinaus: ein Re-Encode oberhalb des Originals kann keine Details zurückholen, die nie da waren - es verschwendet nur Platz.",
+      "title": "Ratensteuerung: CRF/CQ vs. Bitrate"
+    },
+    "enc-video-codec": {
+      "body": "Wähle einen Codec nach Wiedergabe-Unterstützung, Dateigröße und Encode-Zeit. Kopieren behält die originalen Video-Bytes (CRF, Bitrate, Skalierung, Speed und Tune greifen nicht); Kein deaktiviert Video, sodass die Ausgabe reines Audio ist.\n\nH.264 ist der Kompatibilitäts-Standard - größer als neuere Codecs, spielt aber fast überall. H.265 / HEVC ist effizienter als H.264, besonders bei 4K, aber ältere Geräte brauchen evtl. Hilfe. VP9 passt gut zu WebM und spart Bitrate gegenüber H.264, meist mit langsamerer Software-Kodierung. AV1 ist hier die effizienteste Option; erwarte langsamere Encodes, außer Hardware ist verfügbar.",
+      "title": "Video-Codec"
+    },
     "fingerprinting": {
       "body": "Ein Fingerabdruck ist eine kompakte akustische Signatur, die aus dem Audio selbst berechnet wird - nicht aus dem Dateinamen oder den Tags - sodass ein Track auch dann identifiziert werden kann, wenn er umbenannt, neu kodiert oder eine andere Pressung ist.\n\nrave-mate nutzt Chromaprint (den Fingerprinter hinter AcoustID), um zu verifizieren, welcher Library-Track jedes aufgenommene Segment wirklich ist, was „gematcht ✓“ in deiner Set-History vertrauenswürdig macht.",
       "title": "Audio-Fingerabdruck"
@@ -281,6 +301,7 @@
       "lufsTarget": "Integriertes Ziel (LUFS)",
       "mono": "Mono",
       "normalize": "Lautheit normalisieren",
+      "outputNote": "Die Ausgabe landet in einem neuen Ordner 'rave-mate-transcoded' neben der Quelle - das Original bleibt unangetastet.",
       "preset": "Preset",
       "qualityProfile": "Qualitätsprofil",
       "raiseQuiet": "Nur leise Titel anheben",

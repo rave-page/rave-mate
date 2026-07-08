@@ -44,17 +44,23 @@ func init() {
 // smartSelect renders the control. label "" = bare (caller renders its own).
 // act receives the picked Val exactly like a selectBox change would.
 func smartSelect(id, label, act, cur string, opts func() []ssOpt) string {
+	lbl := ""
+	if label != "" {
+		lbl = `<span class=ss-label>` + html.EscapeString(label) + `</span>`
+	}
+	return smartSelectRaw(id, lbl, act, cur, opts)
+}
+
+// smartSelectRaw is smartSelect with a pre-rendered label (caller escapes) - lets a
+// tooltip/badge sit beside the label text.
+func smartSelectRaw(id, labelHTML, act, cur string, opts func() []ssOpt) string {
 	ssMu.Lock()
 	if ssSts[id] == nil {
 		ssSts[id] = &ssSt{}
 	}
 	ssOpts[id], ssActs[id], ssCurs[id] = opts, act, cur
 	ssMu.Unlock()
-	lbl := ""
-	if label != "" {
-		lbl = `<span class=ss-label>` + html.EscapeString(label) + `</span>`
-	}
-	return `<div class=ss-field>` + lbl + `<div class=ss id="ss-` + html.EscapeString(id) + `">` + ssInner(id) + `</div></div>`
+	return `<div class=ss-field>` + labelHTML + `<div class=ss id="ss-` + html.EscapeString(id) + `">` + ssInner(id) + `</div></div>`
 }
 
 func ssInner(id string) string {

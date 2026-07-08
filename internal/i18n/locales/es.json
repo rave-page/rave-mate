@@ -150,6 +150,26 @@
       "body": "El vídeo se reproduce aquí mismo, dentro de la app: rave-mate transmite el archivo a su propia ventana por una conexión localhost privada (HTTP con solicitudes Range, así que el desplazamiento es instantáneo - el reproductor solo obtiene los bytes que necesita). Nada sale de tu equipo y no se abre ninguna ventana de reproductor adicional.\n\nLa forma de onda de abajo es la pista de AUDIO del vídeo, analizada exactamente como una grabación de audio - navega por un vídeo de varias horas según la música: haz clic en la forma de onda para desplazarte, usa el desplegable de pistas para saltar a una entrada del tracklist. Cuando un set tiene tanto una captura de audio como una grabación de vídeo, el vídeo se reproduce como vista previa silenciada y alineada en el tiempo mientras suena el audio de emisión (normalmente más limpio) - cambia la fuente con el conmutador AUDIO/VÍDEO.\n\nLa decodificación usa el motor web de la app (Chromium): MP4 H.264/AAC - lo que OBS graba por defecto - y WebM/VP9 se reproducen de forma nativa. Un códec o contenedor exótico muestra un error honesto en su lugar; exporta un corte apto para web mediante los preajustes de codificación, o abre el archivo en el reproductor de tu sistema.",
       "title": "Reproducción de vídeo integrada"
     },
+    "enc-audio-codec": {
+      "body": "Copiar conserva el flujo de audio original (los cambios de bitrate, frecuencia de muestreo, canales y sonoridad no se aplican); Ninguno desactiva el audio.\n\nSin pérdidas: FLAC conserva la calidad, su bitrate depende de la fuente y del nivel de compresión; PCM es sin comprimir e ignora los ajustes de bitrate. Con pérdidas: AAC es ampliamente compatible con un techo práctico en torno a 320 kbps; Opus es el más eficiente y generoso para música estéreo a bitrates moderados; Vorbis puede subir más que AAC; MP3 CBR llega hasta 320 kbps, mientras que V0 VBR suele sonar transparente con archivos más pequeños.\n\nCada códec tiene un bitrate sugerido para la fuente y un techo útil: por encima del techo, los archivos más grandes no añaden calidad audible.",
+      "title": "Códec de audio"
+    },
+    "enc-container": {
+      "body": "El contenedor es la envoltura del archivo: decide qué combinaciones de códec de vídeo/audio son válidas.\n\nMP4 es el contenedor de entrega más seguro: vídeo H.264/H.265/AV1 con compatibilidad de audio tipo AAC. WebM es amigable para el navegador con códecs abiertos: vídeo VP9 o AV1 con audio Opus/Vorbis. MKV acepta casi cualquier códec; útil para archivos y remuxes, menos universal para reproducción.\n\nContenedores solo de audio: Ogg suele ser Vorbis u Opus y permite techos de audio con pérdidas más altos que AAC. MP3 se reproduce en todas partes, limitado a 320 kbps en CBR. M4A/AAC es ampliamente compatible; el bitrate máximo práctico de AAC es 320 kbps. WAV/AIFF son PCM sin comprimir: archivos grandes, sin control de bitrate con pérdidas. FLAC es compresión sin pérdidas: más pequeño que WAV, aún bit a bit exacto. Opus es muy eficiente a bitrates bajos.",
+      "title": "Formato de contenedor"
+    },
+    "enc-loudness": {
+      "body": "Normalizar la sonoridad aplica un único cambio de volumen a toda la pista, sin compresión. Es en dos pasadas y totalmente transparente: la pasada 1 mide toda la pista (sonoridad integrada EBU R128 + pico real), la pasada 2 aplica UNA ganancia constante a toda la pista, sin compresión, limitación ni procesamiento de dinámica, de modo que la mezcla y los transitorios quedan intactos. La ganancia hacia arriba está limitada para que el pico real nunca supere el techo (una pista que no puede alcanzar el objetivo sin recortar recibe menos ganancia, nunca un limitador).\n\nObjetivos de la industria: Spotify / YouTube / Tidal / Amazon normalizan la reproducción a -14 LUFS, Apple Music -16, Deezer -15, EBU R128 de difusión -23. Los másteres de club / DJ-pool suelen rondar -8 a -9 LUFS. Un techo de -1 dBTP es la norma en streaming; usa -2 dBTP para codificaciones con pérdidas de 128 kbps o menos.\n\n«Subir solo las pistas bajas» nunca baja una pista alta. La normalización requiere recodificar el audio: elige un códec de audio distinto de copiar/ninguno. Desactivado conserva la sonoridad de la fuente tal cual.",
+      "title": "Normalización de sonoridad (EBU R128)"
+    },
+    "enc-rate": {
+      "body": "CRF / CQ (calidad constante) reparte los bits donde la imagen los necesita; los valores más bajos son más grandes y más limpios. Un CRF típico es 18-23 para H.264 / H.265, 24-34 para AV1, 28-34 para VP9. El modo de bitrate, en cambio, apunta a un límite de entrega y a un tamaño de archivo predecible.\n\nLos perfiles que no son máster evitan re-codificar por encima del bitrate de origen: recodificar por encima del original no puede recuperar detalle que nunca existió, solo desperdicia espacio.",
+      "title": "Control de tasa: CRF/CQ vs bitrate"
+    },
+    "enc-video-codec": {
+      "body": "Elige un códec según el soporte de reproducción, el tamaño del archivo y el tiempo de codificación. Copiar conserva los bytes de vídeo originales (CRF, bitrate, escalado, velocidad y tune no se aplican); Ninguno desactiva el vídeo, de modo que la salida es solo audio.\n\nH.264 es el estándar de compatibilidad: más grande que los códecs más nuevos, pero se reproduce casi en todas partes. H.265 / HEVC es más eficiente que H.264, sobre todo en 4K, pero los dispositivos antiguos pueden necesitar ayuda. VP9 encaja bien en WebM y ahorra bitrate frente a H.264, normalmente con codificación por software más lenta. AV1 es la opción más eficiente aquí; espera codificaciones más lentas salvo que haya hardware disponible.",
+      "title": "Códec de vídeo"
+    },
     "fingerprinting": {
       "body": "Una huella acústica es una firma compacta calculada a partir del propio audio - no del nombre del archivo ni de las etiquetas - así que una pista puede identificarse aunque se renombre, se recodifique o sea otra edición.\n\nrave-mate usa Chromaprint (el generador de huellas detrás de AcoustID) para verificar qué pista de la biblioteca es realmente cada segmento grabado, lo que hace que \"emparejado ✓\" sea fiable en el historial de tus sets.",
       "title": "Huella acústica de audio"
@@ -281,6 +301,7 @@
       "lufsTarget": "Objetivo integrado (LUFS)",
       "mono": "Mono",
       "normalize": "Normalizar sonoridad",
+      "outputNote": "La salida va a una nueva carpeta 'rave-mate-transcoded' junto a la fuente - el original queda intacto.",
       "preset": "Preajuste",
       "qualityProfile": "Perfil de calidad",
       "raiseQuiet": "Subir solo pistas silenciosas",

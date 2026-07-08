@@ -150,6 +150,26 @@
       "body": "The video plays right here, inside the app: rave-mate streams the file to its own window over a private localhost connection (HTTP with Range requests, so seeking is instant - the player fetches only the bytes it needs). Nothing leaves your machine and no extra player window opens.\n\nThe waveform below is the video's AUDIO track, analyzed exactly like an audio recording - navigate a multi-hour video by the music: click the waveform to seek, use the track dropdown to jump to a tracklist entry. When a set has both an audio capture and a video recording, the video runs as a muted, time-aligned preview while the (usually cleaner) broadcast audio plays - switch the source with the AUDIO/VIDEO toggle.\n\nDecoding uses the app's web engine (Chromium): H.264/AAC MP4 - what OBS records by default - and WebM/VP9 play natively. An exotic codec or container shows an honest error instead; export a web-friendly cut via the encode presets, or open the file in your system player.",
       "title": "Embedded video playback"
     },
+    "enc-audio-codec": {
+      "body": "Copy keeps the original audio stream (bitrate, sample-rate, channel and loudness changes do not apply); None disables audio.\n\nLossless: FLAC preserves quality, its bitrate follows the source and compression level; PCM is uncompressed and ignores bitrate settings. Lossy: AAC is broadly compatible with a practical ceiling around 320 kbps; Opus is the most efficient, generous for stereo music at modest bitrates; Vorbis can go higher than AAC; MP3 CBR tops out at 320 kbps, while V0 VBR often sounds transparent with smaller files.\n\nEach codec has a suggested bitrate for the source and a useful ceiling - above the ceiling, bigger files add no audible quality.",
+      "title": "Audio codec"
+    },
+    "enc-container": {
+      "body": "The container is the file wrapper - it decides which video/audio codec combinations are valid.\n\nMP4 is the safest delivery container: H.264/H.265/AV1 video with AAC-style audio compatibility. WebM is browser-friendly for open codecs: VP9 or AV1 video with Opus/Vorbis audio. MKV accepts nearly every codec; useful for archives and remuxes, less universal for playback.\n\nAudio-only containers: Ogg is usually Vorbis or Opus and allows higher lossy audio ceilings than AAC. MP3 is universally playable, capped at 320 kbps for CBR. M4A/AAC is broadly compatible; AAC's practical top bitrate is 320 kbps. WAV/AIFF are uncompressed PCM: large files, no lossy bitrate control. FLAC is lossless compression: smaller than WAV, still bit-perfect. Opus is very efficient at lower bitrates.",
+      "title": "Container format"
+    },
+    "enc-loudness": {
+      "body": "Normalize loudness applies one whole-track volume change - no compression. It is two-pass and fully transparent: pass 1 measures the whole track (EBU R128 integrated loudness + true peak), pass 2 applies ONE constant gain to the entire track - no compression, limiting or dynamics processing, so the mix and transients stay untouched. Gain up is capped so the true peak never exceeds the ceiling (a track that cannot reach the target without clipping gets less gain, never a limiter).\n\nIndustry targets: Spotify / YouTube / Tidal / Amazon normalize playback to -14 LUFS, Apple Music -16, Deezer -15, EBU R128 broadcast -23. Club / DJ-pool masters typically run -8 to -9 LUFS. A -1 dBTP ceiling is the streaming norm; use -2 dBTP for lossy encodes at or below 128 kbps.\n\n\"Only raise quiet tracks\" never turns a loud track down. Normalization needs an audio re-encode - pick an audio codec other than copy/none. Off keeps the source loudness exactly as it is.",
+      "title": "Loudness normalization (EBU R128)"
+    },
+    "enc-rate": {
+      "body": "CRF / CQ (constant quality) spends bits where the picture needs them; lower values are larger and cleaner. Typical CRF is 18-23 for H.264 / H.265, 24-34 for AV1, 28-34 for VP9. Bitrate mode instead targets a delivery cap and predictable file size.\n\nNon-master profiles avoid up-encoding beyond the source bitrate: re-encoding above the original cannot recover detail that was never there, it only wastes space.",
+      "title": "Rate control: CRF/CQ vs bitrate"
+    },
+    "enc-video-codec": {
+      "body": "Choose a codec based on playback support, file size, and encode time. Copy keeps the original video bytes (CRF, bitrate, scaling, speed and tune do not apply); None disables video so the output is audio-only.\n\nH.264 is the compatibility default - larger than newer codecs, but plays almost everywhere. H.265 / HEVC is more efficient than H.264, especially at 4K, but older devices may need help. VP9 fits WebM well and saves bitrate versus H.264, usually with slower software encoding. AV1 is the most efficient option here; expect slower encodes unless hardware is available.",
+      "title": "Video codec"
+    },
     "fingerprinting": {
       "body": "A fingerprint is a compact acoustic signature computed from the audio itself - not the file name or tags - so a track can be identified even if it's renamed, re-encoded, or a different pressing.\n\nrave-mate uses Chromaprint (the fingerprinter behind AcoustID) to verify which library track each recorded segment really is, which is what makes \"matched ✓\" trustworthy on your set history.",
       "title": "Audio fingerprinting"
@@ -281,6 +301,7 @@
       "lufsTarget": "Integrated target (LUFS)",
       "mono": "Mono",
       "normalize": "Normalize loudness",
+      "outputNote": "Output goes to a new 'rave-mate-transcoded' folder next to the source - the original is untouched.",
       "preset": "Preset",
       "qualityProfile": "Quality profile",
       "raiseQuiet": "Only raise quiet tracks",

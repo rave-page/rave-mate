@@ -125,6 +125,46 @@ var helpTopics = map[string]helpTopic{
 			{"VRChat status docs", "https://docs.vrchat.com/docs/vrchat-safety-and-trust-system"},
 		},
 	},
+	// ── Transcode / encoding builder (Library) ──
+	"enc-container": {
+		Title: i18n.T("help.enc-container.title"),
+		Body:  i18n.T("help.enc-container.body"),
+		Links: []ttLink{
+			{"FFmpeg formats/muxers", "https://ffmpeg.org/ffmpeg-formats.html"},
+		},
+	},
+	"enc-video-codec": {
+		Title: i18n.T("help.enc-video-codec.title"),
+		Body:  i18n.T("help.enc-video-codec.body"),
+		Links: []ttLink{
+			{"H.264 / AVC (Wikipedia)", "https://en.wikipedia.org/wiki/Advanced_Video_Coding"},
+			{"H.265 / HEVC (Wikipedia)", "https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding"},
+			{"AV1 (AOMedia)", "https://aomedia.org/av1/"},
+		},
+	},
+	"enc-rate": {
+		Title: i18n.T("help.enc-rate.title"),
+		Body:  i18n.T("help.enc-rate.body"),
+		Links: []ttLink{
+			{"FFmpeg CRF guide", "https://trac.ffmpeg.org/wiki/Encode/H.264#crf"},
+		},
+	},
+	"enc-audio-codec": {
+		Title: i18n.T("help.enc-audio-codec.title"),
+		Body:  i18n.T("help.enc-audio-codec.body"),
+		Links: []ttLink{
+			{"Opus codec", "https://opus-codec.org/"},
+			{"AAC (Wikipedia)", "https://en.wikipedia.org/wiki/Advanced_Audio_Coding"},
+		},
+	},
+	"enc-loudness": {
+		Title: i18n.T("help.enc-loudness.title"),
+		Body:  i18n.T("help.enc-loudness.body"),
+		Links: []ttLink{
+			{"EBU R128 loudness", "https://tech.ebu.ch/publications/r128"},
+			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
+		},
+	},
 }
 
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -

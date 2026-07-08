@@ -150,6 +150,26 @@
       "body": "La vidéo se lit ici même, dans l'app : rave-mate diffuse le fichier vers sa propre fenêtre via une connexion localhost privée (HTTP avec requêtes Range, donc la navigation est instantanée - le lecteur ne récupère que les octets nécessaires). Rien ne quitte votre machine et aucune fenêtre de lecteur supplémentaire ne s'ouvre.\n\nLa forme d'onde ci-dessous est la piste AUDIO de la vidéo, analysée exactement comme un enregistrement audio - naviguez dans une vidéo de plusieurs heures grâce à la musique : cliquez sur la forme d'onde pour vous déplacer, utilisez la liste déroulante des pistes pour sauter à une entrée de la tracklist. Quand un set dispose à la fois d'une capture audio et d'un enregistrement vidéo, la vidéo tourne comme un aperçu muet, aligné temporellement, pendant que l'audio du broadcast (généralement plus propre) est lu - changez la source avec le commutateur AUDIO/VIDÉO.\n\nLe décodage utilise le moteur web de l'app (Chromium) : le MP4 H.264/AAC - ce qu'OBS enregistre par défaut - et le WebM/VP9 se lisent nativement. Un codec ou conteneur exotique affiche une erreur honnête à la place ; exportez une coupe compatible web via les préréglages d'encodage, ou ouvrez le fichier dans votre lecteur système.",
       "title": "Lecture vidéo intégrée"
     },
+    "enc-audio-codec": {
+      "body": "Copier conserve le flux audio d'origine (les changements de débit, de fréquence d'échantillonnage, de canaux et de sonie ne s'appliquent pas) ; Aucun désactive l'audio.\n\nSans perte : FLAC préserve la qualité, son débit dépend de la source et du niveau de compression ; PCM est non compressé et ignore les réglages de débit. Avec perte : AAC est largement compatible avec un plafond pratique autour de 320 kbps ; Opus est le plus efficace et généreux pour la musique stéréo à des débits modérés ; Vorbis peut monter plus haut qu'AAC ; le MP3 CBR plafonne à 320 kbps, tandis que le V0 VBR sonne souvent transparent avec des fichiers plus petits.\n\nChaque codec a un débit suggéré pour la source et un plafond utile - au-delà du plafond, des fichiers plus gros n'ajoutent aucune qualité audible.",
+      "title": "Codec audio"
+    },
+    "enc-container": {
+      "body": "Le conteneur est l'enveloppe du fichier - il décide quelles combinaisons de codecs vidéo/audio sont valides.\n\nMP4 est le conteneur de diffusion le plus sûr : vidéo H.264/H.265/AV1 avec une compatibilité audio de type AAC. WebM est adapté au navigateur pour les codecs ouverts : vidéo VP9 ou AV1 avec audio Opus/Vorbis. MKV accepte presque tous les codecs ; utile pour les archives et les remux, moins universel pour la lecture.\n\nConteneurs audio seuls : Ogg est généralement du Vorbis ou de l'Opus et autorise des plafonds audio avec perte plus élevés qu'AAC. MP3 se lit partout, limité à 320 kbps en CBR. M4A/AAC est largement compatible ; le débit maximal pratique d'AAC est de 320 kbps. WAV/AIFF sont du PCM non compressé : gros fichiers, pas de contrôle de débit avec perte. FLAC est une compression sans perte : plus petit que WAV, toujours exact au bit près. Opus est très efficace à bas débit.",
+      "title": "Format de conteneur"
+    },
+    "enc-loudness": {
+      "body": "Normaliser la sonie applique un seul changement de volume sur toute la piste - aucune compression. C'est en deux passes et totalement transparent : la passe 1 mesure toute la piste (sonie intégrée EBU R128 + vrai crête), la passe 2 applique UN gain constant à toute la piste - aucune compression, limitation ni traitement de dynamique, de sorte que le mix et les transitoires restent intacts. Le gain vers le haut est plafonné pour que le vrai crête ne dépasse jamais le plafond (une piste qui ne peut pas atteindre la cible sans écrêter reçoit moins de gain, jamais un limiteur).\n\nCibles de l'industrie : Spotify / YouTube / Tidal / Amazon normalisent la lecture à -14 LUFS, Apple Music -16, Deezer -15, EBU R128 diffusion -23. Les masters club / DJ-pool tournent typiquement à -8 à -9 LUFS. Un plafond de -1 dBTP est la norme en streaming ; utilisez -2 dBTP pour les encodages avec perte à 128 kbps ou moins.\n\n« Ne remonter que les pistes basses » ne baisse jamais une piste forte. La normalisation nécessite un ré-encodage audio - choisissez un codec audio autre que copier/aucun. Désactivé conserve la sonie de la source telle quelle.",
+      "title": "Normalisation de sonie (EBU R128)"
+    },
+    "enc-rate": {
+      "body": "CRF / CQ (qualité constante) répartit les bits là où l'image en a besoin ; les valeurs plus basses sont plus lourdes et plus propres. Un CRF typique est 18-23 pour H.264 / H.265, 24-34 pour AV1, 28-34 pour VP9. Le mode débit vise plutôt un plafond de diffusion et une taille de fichier prévisible.\n\nLes profils non-master évitent le sur-encodage au-delà du débit source : ré-encoder au-dessus de l'original ne peut pas récupérer un détail qui n'a jamais existé, cela ne fait que gaspiller de l'espace.",
+      "title": "Contrôle du débit : CRF/CQ vs débit"
+    },
+    "enc-video-codec": {
+      "body": "Choisissez un codec selon le support de lecture, la taille du fichier et le temps d'encodage. Copier conserve les octets vidéo d'origine (CRF, débit, mise à l'échelle, vitesse et tune ne s'appliquent pas) ; Aucun désactive la vidéo, la sortie est alors uniquement audio.\n\nH.264 est le choix de compatibilité par défaut - plus lourd que les codecs récents, mais se lit presque partout. H.265 / HEVC est plus efficace qu'H.264, surtout en 4K, mais les appareils anciens peuvent avoir besoin d'aide. VP9 s'intègre bien à WebM et économise du débit face à H.264, généralement avec un encodage logiciel plus lent. AV1 est l'option la plus efficace ici ; attendez-vous à des encodages plus lents sauf si du matériel est disponible.",
+      "title": "Codec vidéo"
+    },
     "fingerprinting": {
       "body": "Une empreinte est une signature acoustique compacte calculée à partir de l'audio lui-même - pas du nom de fichier ni des tags - de sorte qu'une piste peut être identifiée même si elle est renommée, réencodée ou issue d'un pressage différent.\n\nrave-mate utilise Chromaprint (l'outil d'empreinte derrière AcoustID) pour vérifier de quelle piste de la bibliothèque relève réellement chaque segment enregistré, ce qui rend le « correspondance ✓ » fiable dans l'historique de vos sets.",
       "title": "Empreinte audio"
@@ -281,6 +301,7 @@
       "lufsTarget": "Cible intégrée (LUFS)",
       "mono": "Mono",
       "normalize": "Normaliser le volume",
+      "outputNote": "La sortie va dans un nouveau dossier 'rave-mate-transcoded' à côté de la source - l'original reste intact.",
       "preset": "Préréglage",
       "qualityProfile": "Profil de qualité",
       "raiseQuiet": "Remonter seulement les pistes faibles",

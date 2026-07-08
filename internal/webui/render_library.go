@@ -1010,10 +1010,10 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	}
 
 	b.WriteString(`<div class=pbuilder>`)
-	b.WriteString(pbSelect(i18n.T("library.enc.container"), "lib-pf:container", containerOpts, d.Container))
+	b.WriteString(pbSelectTip(i18n.T("library.enc.container"), "lib-pf:container", containerOpts, d.Container, "enc-container"))
 	if !audioOnly {
 		b.WriteString(`<div class=pb-grp>`)
-		b.WriteString(pbSelect(i18n.T("library.enc.videoCodec"), "lib-pf:vcodec", videoCodecOpts, d.VideoCodec))
+		b.WriteString(pbSelectTip(i18n.T("library.enc.videoCodec"), "lib-pf:vcodec", videoCodecOpts, d.VideoCodec, "enc-video-codec"))
 		b.WriteString(pbSelect(i18n.T("library.enc.accel"), "lib-pf:accel", accelOpts(), d.Accel))
 		// quality profiles
 		b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(i18n.T("library.enc.qualityProfile")) + `</div><div class=seg>`)
@@ -1021,7 +1021,7 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 			b.WriteString(fchip(pr, pr, "lib-pf:profile", false))
 		}
 		b.WriteString(`</div><div class=pb-hint>` + html.EscapeString(profileHint(profileOfDraft(d))) + `</div></div>`)
-		b.WriteString(pbSelect(i18n.T("library.enc.rateMode"), "lib-pf:ratemode", [][2]string{{"crf", i18n.T("library.enc.rateCRF")}, {"bitrate", i18n.T("library.enc.rateBitrate")}}, d.RateMode))
+		b.WriteString(pbSelectTip(i18n.T("library.enc.rateMode"), "lib-pf:ratemode", [][2]string{{"crf", i18n.T("library.enc.rateCRF")}, {"bitrate", i18n.T("library.enc.rateBitrate")}}, d.RateMode, "enc-rate"))
 		if d.RateMode == "bitrate" {
 			b.WriteString(pbField(i18n.T("library.enc.bitrateK"), "lib-pf:bitratek", strconv.Itoa(d.BitrateK), "number", i18n.T("library.enc.bitrateKHint")))
 		} else {
@@ -1033,14 +1033,14 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	}
 	// audio section
 	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(pbSelect(i18n.T("library.enc.audioCodec"), "lib-pf:acodec", audioCodecOpts, d.AudioCodec))
+	b.WriteString(pbSelectTip(i18n.T("library.enc.audioCodec"), "lib-pf:acodec", audioCodecOpts, d.AudioCodec, "enc-audio-codec"))
 	b.WriteString(pbField(i18n.T("library.enc.audioBitrate"), "lib-pf:abitratek", strconv.Itoa(d.AudioBitrateK), "number", audioCapHint(d.AudioCodec)))
 	b.WriteString(pbSelect(i18n.T("library.enc.channels"), "lib-pf:channels", [][2]string{{"0", i18n.T("library.enc.source")}, {"1", i18n.T("library.enc.mono")}, {"2", i18n.T("library.enc.stereo")}}, strconv.Itoa(d.Channels)))
 	b.WriteString(pbSelect(i18n.T("library.enc.sampleRate"), "lib-pf:samplerate", [][2]string{{"0", i18n.T("library.enc.source")}, {"44100", "44.1 kHz"}, {"48000", "48 kHz"}, {"96000", "96 kHz"}}, strconv.Itoa(d.SampleRate)))
 	b.WriteString(`</div>`)
 	// loudness
 	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(toggleRow(i18n.T("library.enc.normalize"), "lib-pf:loudon", d.LoudnessOn))
+	b.WriteString(toggleRowTip(i18n.T("library.enc.normalize"), "lib-pf:loudon", d.LoudnessOn, tipTopic("enc-loudness")))
 	if d.LoudnessOn {
 		b.WriteString(pbField(i18n.T("library.enc.lufsTarget"), "lib-pf:loudi", trimNum(d.LoudnessI), "number", i18n.T("library.enc.lufsHint")))
 		b.WriteString(pbField(i18n.T("library.enc.truePeak"), "lib-pf:loudtp", trimNum(d.LoudnessTP), "number", ""))
@@ -1051,6 +1051,7 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	b.WriteString(pbField(i18n.T("library.enc.trimStart"), "lib-trim-s", s.trimS, "number", ""))
 	b.WriteString(pbField(i18n.T("library.enc.trimEnd"), "lib-trim-e", s.trimE, "number", ""))
 	b.WriteString(`</div>`)
+	b.WriteString(`<div class=pb-hint>` + html.EscapeString(i18n.T("library.enc.outputNote")) + `</div>`)
 	b.WriteString(`<div class=btn-row>` + btn(i18n.T("library.enc.start"), "primary", "lib-transcode", "") +
 		btn(i18n.T("library.enc.savePreset"), "outline", "lib-pset-save", "") + btn(i18n.T("library.enc.saveAsNew"), "ghost", "lib-pset-saveas", "") + `</div>`)
 	return b.String()
@@ -1432,6 +1433,19 @@ func pbField(label, act, value, typ, hintTx string) string {
 func pbSelect(label, act string, opts [][2]string, current string) string {
 	id := strings.ReplaceAll(act, ":", "-")
 	return smartSelect(id, label, act, current, func() []ssOpt {
+		out := make([]ssOpt, 0, len(opts))
+		for _, op := range opts {
+			out = append(out, ssOpt{Val: op[0], Label: op[1]})
+		}
+		return out
+	})
+}
+
+// pbSelectTip = pbSelect with a shared-glossary tooltip (tooltip.go topic) beside the label.
+func pbSelectTip(label, act string, opts [][2]string, current, topic string) string {
+	id := strings.ReplaceAll(act, ":", "-")
+	lbl := `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
+	return smartSelectRaw(id, lbl, act, current, func() []ssOpt {
 		out := make([]ssOpt, 0, len(opts))
 		for _, op := range opts {
 			out = append(out, ssOpt{Val: op[0], Label: op[1]})

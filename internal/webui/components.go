@@ -69,6 +69,18 @@ func toggleRow(label, act string, on bool) string {
 		attrQ(strings.ToLower(label)), html.EscapeString(label), checked, attrQ(act), attrQ(boolStr(on)))
 }
 
+// toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
+func toggleRowTip(label, act string, on bool, tipHTML string) string {
+	checked := ""
+	if on {
+		checked = " checked"
+	}
+	return fmt.Sprintf(`<label class=row data-label=%s><span class=row-label>%s%s</span>`+
+		`<span class=switch><input type=checkbox%s data-act=%s data-value=%s>`+
+		`<span class=switch-track></span></span></label>`,
+		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
+}
+
 // field renders a labelled text/number input inside a form-less row (dispatch on change via act).
 func field(label, act, value, inputType string) string {
 	if inputType == "" {
