@@ -110,6 +110,43 @@ func TestParseSessionADAT(t *testing.T) {
 	}
 }
 
+// TestParseSessionPlayed4Byte covers the width-robust played flag (Serato writes the flag
+// as a BE int whose width varies: a 4-byte 1 is 00 00 00 01, so reading only byte 0 misses
+// it) plus starttime/endtime decode driving live-vs-idle.
+func TestParseSessionPlayed4Byte(t *testing.T) {
+	mk := func(title string, deck, played, start, end uint32) []byte {
+		fields := [][]byte{
+			field(numTag(adatTitle), enc16(title)),
+			field(numTag(adatDeck), u32(deck)),
+			field(numTag(adatPlayed), u32(played)), // 4-byte int, not a single byte
+			field(numTag(adatStart), u32(start)),
+		}
+		if end != 0 {
+			fields = append(fields, field(numTag(adatEnd), u32(end)))
+		}
+		return field([]byte("oent"), field([]byte("adat"), bytes.Join(fields, nil)))
+	}
+	buf := bytes.Join([][]byte{
+		field([]byte("vrsn"), enc16("1.0")),
+		mk("Ended", 1, 1, 1000, 1100), // played, has endtime => idle
+		mk("Live", 1, 1, 1200, 0),     // played, no endtime => on the deck
+	}, nil)
+
+	tracks, err := ParseSession(bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("ParseSession: %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("want 2, got %d", len(tracks))
+	}
+	if !tracks[0].Played || tracks[0].EndedAt != 1100 || tracks[0].StartedAt != 1000 {
+		t.Errorf("ended entry: %+v", tracks[0])
+	}
+	if !tracks[1].Played || tracks[1].EndedAt != 0 || tracks[1].StartedAt != 1200 {
+		t.Errorf("live entry (4-byte played must decode true, no endtime): %+v", tracks[1])
+	}
+}
+
 func TestParseCrate(t *testing.T) {
 	buf := bytes.Join([][]byte{
 		field([]byte("vrsn"), enc16("1.0/Serato ScratchLive Crate")),

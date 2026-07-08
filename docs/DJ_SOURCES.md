@@ -51,6 +51,10 @@ differently, so the cards surface the **trade-offs** plainly:
 - **Serato** - fully local, no setup. Collection from `_Serato_/database V2` + crates (one
   shared TLV envelope; `internal/serato`); live now-playing by watching the active
   `History/Sessions/*.session`. No Serato account, no internet, no "Start Live Playlist".
+  **Per-deck:** Serato logs a history entry per played track carrying its deck; the live
+  track on each deck is its latest entry with no `endtime`, so concurrent decks surface
+  independently with `isPlaying` (deck idle once Serato writes an `endtime`). No mixer/EQ/
+  fader state - Serato exposes none in the history file (see MIDI note below for EQ).
 - **VirtualDJ** - collection from `database.xml` (per-drive merge; BPM stored as seconds/beat →
   `60/x`). Three live channels, pick any: **Network Control** (full metadata, needs Pro +
   manual plugin), **OS2L** (zero-config but BPM/beat only - we host the mDNS+TCP server), and

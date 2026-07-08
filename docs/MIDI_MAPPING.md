@@ -50,6 +50,30 @@ Notes:
 - To extend: add a row here, add the CC to `customCC` in `custom.go`, add the matching
   Add-Out assignment in the TSI.
 
+## Serato EQ over MIDI (exploration)
+
+Serato's data files (`database V2`, `History/Sessions/*.session`) carry **no mixer state** -
+no EQ, no fader. Serato also has no software mixer panel in external-mixer mode, so it does
+**not** broadcast EQ out over MIDI the way Traktor's Add-Out does; the Traktor "Add Out →
+virtual port" recipe above has no Serato equivalent. The only way to observe Serato EQ is to
+tap the **controller's MIDI input** stream (the CC the hardware sends *into* Serato):
+
+- **Controller / internal-mixer setup (capturable).** EQ low/mid/high are software knobs
+  driven by controller CC. Feed those same CC into rave-mate and map them to the existing
+  channel EQ fields (`eqLow`/`eqMid`/`eqHigh`, CC 24/25/26 in the custom contract) - the whole
+  `midisrc` pipeline is reused, only the per-controller CC numbers differ. Getting the stream
+  into rave-mate needs one of: a **multi-client** controller driver (both Serato and rave-mate
+  open the port - many vendor drivers allow this; Windows `winmm` MIDI-IN is otherwise
+  **exclusive**, so a second opener fails), or a **MIDI splitter/router** (loopMIDI + MIDI-OX
+  through) fanning the controller to both apps.
+- **DVS / external hardware mixer (NOT capturable).** EQ is analog on the mixer; it never
+  reaches software or MIDI. No capture is possible - document the limitation, don't fake it.
+
+**Status:** ingest exists (channel EQ fields land on the merger and flow to the overlay/peer
+link today via `midi.custom`). **Missing:** per-controller CC maps for popular Serato
+controllers (DDJ-FLX4/SB3, Rane One, …) + a Serato-specific setup guide, each validated
+against real hardware before shipping (per the Denon caveat - untested CC layouts lie).
+
 ## Denon HC4500 decoder (best-effort)
 
 The stock Denon mapping streams LCD text over CC: **channel 0 → deck A, channel 1 → deck B**,

@@ -24,6 +24,8 @@ type Track struct {
 	LengthSec                                       int
 	Deck                                            int
 	Played                                          bool
+	StartedAt                                       int64 // unix secs, 0 = unknown (history only)
+	EndedAt                                         int64 // unix secs, 0 = still on the deck (history only)
 }
 
 // Crate is a named subcrate referencing tracks by (drive-relative) path.
@@ -43,11 +45,12 @@ const (
 	adatGenre    = 0x09
 	adatBPM      = 0x0f // uint32
 	adatComment  = 0x11
-	adatStart    = 0x1c // uint32 unix secs (start of play) - decoded but unused in Track
+	adatStart    = 0x1c // uint32 unix secs (start of play)
+	adatEnd      = 0x1d // uint32 unix secs (end of play); absent/0 => track still on the deck
 	adatDeck     = 0x1f // uint32 deck number
-	adatPlayTime = 0x2d // uint32 unix secs (played-at) - unused; nhcarter reads this id as duration
+	adatPlayTime = 0x2d // uint32 secs the track was played - unused
 	adatNotes    = 0x31 // UTF-16BE notes - unused
-	adatPlayed   = 0x32 // single byte: actually-played flag
+	adatPlayed   = 0x32 // actually-played flag (BE int, width varies by Serato version: 1 or 4 bytes)
 	adatKey      = 0x33
 	adatDeckStr  = 0x3f // nhcarter's deck id (UTF-16BE text) - older Serato; fallback only
 )
@@ -207,6 +210,10 @@ func trackFromADAT(fields []node) Track {
 			t.Key = decText(f.payload)
 		case adatBPM:
 			t.BPM = float64(decU32(f.payload))
+		case adatStart:
+			t.StartedAt = int64(decU32(f.payload))
+		case adatEnd:
+			t.EndedAt = int64(decU32(f.payload))
 		case adatDeck:
 			t.Deck = int(decU32(f.payload))
 		case adatDeckStr:
@@ -216,7 +223,7 @@ func trackFromADAT(fields []node) Track {
 				}
 			}
 		case adatPlayed:
-			t.Played = decByte(f.payload) != 0
+			t.Played = anyNonZero(f.payload)
 		}
 	}
 	return t
@@ -242,12 +249,16 @@ func decU32(b []byte) uint32 {
 	return binary.BigEndian.Uint32(b)
 }
 
-// decByte reads the first byte of b (0 if empty).
-func decByte(b []byte) byte {
-	if len(b) == 0 {
-		return 0
+// anyNonZero reports whether b has any non-zero byte. Serato stores the played flag as a
+// BE int whose width varies by version (1 or 4 bytes); a 4-byte `1` is 00 00 00 01, so
+// reading only b[0] would miss it. Any set byte => played.
+func anyNonZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return true
+		}
 	}
-	return b[0]
+	return false
 }
 
 // parseLen converts a Serato length string ("m:ss.cc" / "h:mm:ss") to whole seconds.
