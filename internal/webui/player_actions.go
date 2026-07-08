@@ -457,6 +457,20 @@ func (u *UI) mpLoadCap(s libdb.SetRecording, edit bool) {
 	u.mpMut("publish", func(t *mpSt) { t.pinned, t.edit = true, edit })
 }
 
+// trackInCapture reports whether a played track's span intersects the capture window
+// [capStart, capEnd]. A zero track EndedAt (still playing / open last track) or zero capEnd
+// (open capture) counts as unbounded. The lower bound is the one that matters when the DJ
+// armed the recorder late: a track that already ended before capStart isn't in the media.
+func trackInCapture(tr recorder.Track, capStart, capEnd time.Time) bool {
+	if !tr.EndedAt.IsZero() && !tr.EndedAt.After(capStart) {
+		return false // ended at/before the capture began
+	}
+	if !capEnd.IsZero() && !tr.StartedAt.Before(capEnd) {
+		return false // started at/after the capture ended
+	}
+	return true
+}
+
 // mpLoadCaptures resets + binds captures; markers/auto-trim hints come from the recording,
 // anchored to the PRIMARY capture's start (axis 0).
 func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.SetRecording) {
@@ -475,13 +489,21 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 	first, lastEnd, lastFader := -1.0, -1.0, -1.0
 	var marks []mpMark
 	if len(r.Tracks) > 0 && !primary.StartedAt.IsZero() {
-		first = math.Max(r.Tracks[0].StartedAt.Sub(primary.StartedAt).Seconds(), 0)
+		// Only tracks whose play-span intersects the capture window belong in this media - the
+		// recording can start well after the set (DJ armed OBS late). A track that ended before
+		// the capture started isn't in the media; the one still playing when it started maps to 0.
 		var le time.Time
 		for _, tr := range r.Tracks {
+			if !trackInCapture(tr, primary.StartedAt, primary.EndedAt) {
+				continue
+			}
 			if tr.EndedAt.After(le) {
 				le = tr.EndedAt
 			}
 			off := math.Max(tr.StartedAt.Sub(primary.StartedAt).Seconds(), 0)
+			if first < 0 || off < first {
+				first = off
+			}
 			marks = append(marks, mpMark{off, orTrackLine(pubTrackLine(tr))})
 		}
 		if !le.IsZero() {
