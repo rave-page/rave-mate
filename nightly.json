@@ -1,13 +1,13 @@
 {
-  "version": "nightly-272bcf9",
-  "build": 23,
-  "commit": "272bcf9",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-23-20260708-272bcf9.exe",
-  "sha256": "df837258e8412866b8e0eed995c16426e38fe7a76785aeaf55d0462902b8927a",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-23-20260708-272bcf9.exe",
-  "installer_sha256": "217f72f2fbba567d9b4dc7086eac1ae067aefa727c9a675b6ecc6e15bdda9cf0",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-23-20260708-272bcf9",
-  "linux_sha256": "68a3f3d7c045346caf8098e52194cf0191b35924f7a96f5f983c711a825dfa0a",
+  "version": "nightly-cc1dd79",
+  "build": 24,
+  "commit": "cc1dd79",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-24-20260708-cc1dd79.exe",
+  "sha256": "63421a3a19851863ea63eb5486448f2f28cf2918c2d0f372b781779540870531",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-24-20260708-cc1dd79.exe",
+  "installer_sha256": "164630509a1262e8c47d8252a1d23f1202cf159fd8bea28309b6f93e199c3b3c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-24-20260708-cc1dd79",
+  "linux_sha256": "569faae5c5a2a58414030bd06798cb74fe50ec79a76d4c5c4e38fbd188a38c9b",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-08T19:16:00Z",
-  "notes": "feat(live): auto go-live driven by OBS stream; remove manual Go Live; clarify Live-tab controls"
+  "released": "2026-07-08T20:17:38Z",
+  "notes": "docs(perf): document size-move/focus throttling + media fail-closed"
 }
