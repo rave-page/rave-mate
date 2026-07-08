@@ -37,6 +37,7 @@ import (
 	"rave.page/mate/internal/filexfer"
 	"rave.page/mate/internal/giokit"
 	ghlink "rave.page/mate/internal/github"
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/gpuwatch"
 	"rave.page/mate/internal/guardian"
 	"rave.page/mate/internal/i18n"
@@ -83,6 +84,7 @@ import (
 	"rave.page/mate/internal/store"
 	"rave.page/mate/internal/stt"
 	"rave.page/mate/internal/studio"
+	"rave.page/mate/internal/sysactivity"
 	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/traktormap"
 	"rave.page/mate/internal/transcode"
@@ -498,6 +500,11 @@ func run(parent context.Context, serviceMode bool) error {
 	debuglog.Go(log, "setcapture-link", func() {
 		linkCaptures(ctx, icecastRcv, obsW, rec, lib, setFp, syncer, fpEnabled, log)
 	})
+	// Activity governor: makes rave-mate a good neighbour by default. Detect a live OBS stream on
+	// this machine and pause non-essential heavy work (fingerprinting/indexing) while it runs -
+	// stream-critical paths (Spout, peerlink media, MIDI/now-playing, overlays) keep feeding it.
+	governor.SetLog(log)
+	debuglog.Go(log, "governor-stream", func() { watchStreaming(ctx, obsW, log) })
 	// Live-stream publisher runs in a child process (spawned lazily on go-live); merged
 	// updates stream over IPC, the publish token never enters the daemon.
 	pub, perr := featurehost.NewStreamProxy(log, merger, func() featurehost.StreamConfig {
@@ -1658,11 +1665,60 @@ func linkCaptures(ctx context.Context, rcv *featurehost.IcecastProxy, obsW *feat
 				// audio + sync the set-log to the play layer (off the event loop - slow work).
 				id := lastActiveID
 				relink()
-				debuglog.Go(log, "playsync", func() { syncFinishedSet(ctx, id, rec, lib, setFp, syncer, fpEnabled, log) })
+				// Defer the CPU-heavy fingerprint+identify while an OBS stream is live - it would
+				// starve the encoder. The Icecast/OBS capture itself already finished; the recording
+				// is kept and processed when the stream ends (governor releases parked work then).
+				debuglog.Go(log, "playsync", func() {
+					governor.WhenBackgroundAllowed("playsync-fp:"+id, func() {
+						syncFinishedSet(ctx, id, rec, lib, setFp, syncer, fpEnabled, log)
+					})
+				})
 			}
 			wasActive = r != nil
 		}
 	}
+}
+
+// watchStreaming polls for a live OBS stream and feeds the activity governor (governor.SetStreaming).
+// Detection is two-tier, preferring real streaming-state over mere process presence:
+//  1. If obs-websocket is connected, GetStreamStatus().Active is authoritative (OBS open but idle
+//     → not streaming → nothing suspended).
+//  2. Otherwise fall back to OBS process presence (obs64/obs running) - conservative: while OBS is
+//     up we assume a stream may be live and defer non-essential heavy work (it's only deferred, not
+//     dropped, and resumes when OBS closes).
+//
+// Cheap + event-driven: a 3s poll, no busy loop. Only flips the governor on real transitions.
+func watchStreaming(ctx context.Context, obsW *featurehost.ObsProxy, log *logbus.Bus) {
+	defer debuglog.Recover(log, "governor", false)
+	act := sysactivity.New()
+	t := time.NewTicker(3 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			governor.SetStreaming(streamLive(ctx, obsW, act))
+		}
+	}
+}
+
+// streamLive reports whether a stream is live now (see watchStreaming for the two-tier logic).
+func streamLive(ctx context.Context, obsW *featurehost.ObsProxy, act sysactivity.Activity) bool {
+	if obsW != nil {
+		sctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		st, err := obsW.GetStreamStatus(sctx)
+		cancel()
+		if err == nil {
+			return st.Active // authoritative when obs-websocket is reachable
+		}
+	}
+	// Fallback: OBS process presence.
+	set, ok := act.RunningProcesses()
+	if !ok {
+		return false
+	}
+	return sysactivity.Running(set, "obs64") || sysactivity.Running(set, "obs")
 }
 
 // syncFinishedSet fingerprints a finished recording's linked capture audio (per-track spans,

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/shared/selfupdate"
@@ -69,6 +70,9 @@ type UI struct {
 func New(svc ui.Services) *UI {
 	u := &UI{svc: svc, log: svc.Log, active: "live", started: time.Now(), stop: make(chan struct{}),
 		logBus: "app", logLevel: "all", logAutoscroll: true}
+	if svc.Cfg != nil {
+		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
+	}
 	if sh, ok := newShell("rave-mate", 1280, 820, u.onAction, u.onReady); ok {
 		u.shell = sh
 	}
@@ -362,7 +366,10 @@ func (u *UI) livePush() {
 		case <-u.stop:
 			return
 		case <-t.C:
-			if u.shell == nil || inSizeMove() { // dragging: keep the UI thread free
+			// Skip the ~1 Hz DOM refresh whenever the window isn't being looked at (dragging,
+			// unfocused, minimized) or a stream is live - repainting rave-mate's own graphs then
+			// only competes with the encoder for CPU/GPU. governor.UIAnimAllowed covers all four.
+			if u.shell == nil || inSizeMove() || !governor.UIAnimAllowed() {
 				continue
 			}
 			if fn := liveTicks[u.activeTab()]; fn != nil {

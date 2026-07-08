@@ -6,6 +6,11 @@ import (
 	"sync/atomic"
 )
 
+// webviewAllowGPU mirrors config UIFeature.AllowWebviewGPU(), set once in New before the shell is
+// constructed. Default false = WebView2 GPU compositing OFF so rave-mate never contends with a live
+// GPU encoder (OBS/NVENC). Read by the cgo shell when creating the WebView2 environment.
+var webviewAllowGPU bool
+
 // shell is the native webview window host. The cgo build provides a real WebView2/WebKit window;
 // the nocgo build returns unavailable so the daemon falls back to Fyne. Go owns all rendering -
 // the shell only loads a document, patches the DOM (eval), and forwards page events (onAction).

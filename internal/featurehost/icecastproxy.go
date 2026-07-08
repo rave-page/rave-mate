@@ -31,9 +31,10 @@ type IcecastProxy struct {
 func NewIcecastProxy(log *logbus.Bus, initFn func() icecast.Config) (*IcecastProxy, error) {
 	p := &IcecastProxy{obs: make(chan session.Observation, 64), capSubs: map[int]chan icecast.Capture{}}
 	h, err := New(Options{
-		Name: "icecast",
-		Log:  log,
-		Init: func() any { return initFn() },
+		Name:        "icecast",
+		Log:         log,
+		LowPriority: true, // background set-capture: receive+write only, always yield to encoder/foreground
+		Init:        func() any { return initFn() },
 		OnEvent: map[string]func(json.RawMessage){
 			"obs": func(data json.RawMessage) {
 				var o session.Observation

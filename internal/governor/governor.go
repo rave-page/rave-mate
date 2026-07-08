@@ -1,0 +1,160 @@
+// Package governor is rave-mate's activity governor: the single source of truth for "is now a bad
+// time to spend CPU/GPU on non-essential work". It exists so rave-mate is a GOOD NEIGHBOUR by
+// DEFAULT - it must never impair other apps on the machine (notably a live OBS/NVENC stream), with
+// zero configuration.
+//
+// It reacts to two signal families:
+//   - UI visibility: the window is focused / minimized / mid size-move (drag/resize).
+//   - Streaming: an OBS stream is live on this machine (detected elsewhere; fed via SetStreaming).
+//
+// Consumers gate on it:
+//   - UIAnimAllowed()   -> run the ~1 Hz webui graph/tick refresh? (paused when hidden/dragging/streaming)
+//   - BackgroundAllowed()-> run heavy non-essential batch work? (fingerprinting/indexing/hydration:
+//     paused while a stream is live; deferred work is re-run when the stream ends)
+//
+// It also right-sizes THIS process's Windows priority class: below-normal whenever a stream is live
+// or the window isn't the user's focus, normal otherwise - so an in-proc worker goroutine can never
+// out-schedule OBS's (elevated) audio-encoder thread. Stream-critical paths (Spout out, peerlink
+// media, MIDI/now-playing, overlays) are NOT gated here - they run in their own children and keep
+// feeding the stream.
+package governor
+
+import (
+	"sync"
+
+	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/sysexec"
+)
+
+// Signals is an immutable snapshot of the governor's inputs.
+type Signals struct {
+	Focused   bool // rave-mate window is the foreground/active window
+	Minimized bool // rave-mate window is minimized (iconic)
+	SizeMove  bool // user is dragging/resizing the window right now
+	Streaming bool // an OBS stream is live on this machine
+}
+
+type gov struct {
+	mu        sync.Mutex
+	focused   bool
+	minimized bool
+	sizeMove  bool
+	streaming bool
+
+	deferred map[string]func() // background work parked while streaming, keyed for dedup
+	log      *logbus.Bus
+	lastPrio bool // last applied "below-normal?" decision (avoid redundant syscalls)
+	prioSet  bool
+}
+
+// g is the process-wide singleton. Window starts focused (the app opens in the foreground).
+var g = &gov{focused: true, deferred: map[string]func(){}}
+
+// SetLog wires a logbus for state-transition logging (optional; safe if never called).
+func SetLog(l *logbus.Bus) {
+	g.mu.Lock()
+	g.log = l
+	g.mu.Unlock()
+}
+
+func (s *gov) apply() {
+	// Below-normal whenever a stream is live OR the window isn't the user's focus (minimized/backgrounded).
+	// Normal only when the user is actively looking at rave-mate and nothing is streaming.
+	below := s.streaming || s.minimized || !s.focused
+	if s.prioSet && below == s.lastPrio {
+		return
+	}
+	s.lastPrio, s.prioSet = below, true
+	sysexec.SetSelfBelowNormal(below)
+}
+
+func (s *gov) drainDeferred() []func() {
+	if len(s.deferred) == 0 {
+		return nil
+	}
+	out := make([]func(), 0, len(s.deferred))
+	for _, fn := range s.deferred {
+		out = append(out, fn)
+	}
+	s.deferred = map[string]func(){}
+	return out
+}
+
+func set(field *bool, v bool, name string) {
+	g.mu.Lock()
+	if *field == v {
+		g.mu.Unlock()
+		return
+	}
+	wasStreaming := g.streaming // capture BEFORE mutating (field may alias &g.streaming)
+	*field = v
+	g.apply()
+	var resume []func()
+	if name == "streaming" && wasStreaming && !v {
+		resume = g.drainDeferred() // stream ended - release parked background work
+	}
+	log := g.log
+	g.mu.Unlock()
+	if log != nil {
+		log.Info("governor", name+" changed", map[string]any{"value": v})
+	}
+	for _, fn := range resume {
+		go fn()
+	}
+}
+
+// SetFocused reports the rave-mate window gained/lost foreground focus.
+func SetFocused(b bool) { set(&g.focused, b, "focused") }
+
+// SetMinimized reports the window was minimized/restored.
+func SetMinimized(b bool) { set(&g.minimized, b, "minimized") }
+
+// SetSizeMove reports a window drag/resize started/ended.
+func SetSizeMove(b bool) { set(&g.sizeMove, b, "sizemove") }
+
+// SetStreaming reports an OBS stream on this machine went live/ended. On end, any background work
+// parked via WhenBackgroundAllowed is released.
+func SetStreaming(b bool) { set(&g.streaming, b, "streaming") }
+
+// Snapshot returns the current signals.
+func Snapshot() Signals {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming}
+}
+
+// UIAnimAllowed reports whether the ~1 Hz webui graph/tick refresh should run. Paused when the
+// window is hidden (minimized), not focused, mid drag/resize, or a stream is live - none of those
+// need rave-mate's own graphs repainting, and repainting competes with the encoder for GPU/CPU.
+func UIAnimAllowed() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.focused && !g.minimized && !g.sizeMove && !g.streaming
+}
+
+// BackgroundAllowed reports whether heavy, non-essential batch work (audio fingerprinting, library
+// indexing/sync sweeps, catalog hydration) may run now. False while a stream is live - that work is
+// the CPU offender that starves OBS's audio encoder, and none of it is stream-critical.
+func BackgroundAllowed() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return !g.streaming
+}
+
+// WhenBackgroundAllowed runs fn now if background work is allowed; otherwise parks it (deduped by
+// key - a repeated key overwrites the pending fn) and runs it when the stream ends. Use for
+// deferrable heavy work (e.g. fingerprinting a just-finished capture while a stream is still live).
+func WhenBackgroundAllowed(key string, fn func()) {
+	g.mu.Lock()
+	if !g.streaming {
+		g.mu.Unlock()
+		fn()
+		return
+	}
+	g.deferred[key] = fn
+	log := g.log
+	g.mu.Unlock()
+	if log != nil {
+		log.Info("governor", "background work deferred (stream live)", map[string]any{"key": key})
+	}
+}

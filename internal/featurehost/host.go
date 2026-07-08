@@ -52,6 +52,10 @@ type Options struct {
 	// cap (kill-on-close). A runaway heap fails its next allocation → child dies → Host restarts it.
 	// For resource-bearing children (media plane); leave 0 for the plain kill-on-close job.
 	MemLimitMB int
+	// LowPriority spawns the child in BELOW_NORMAL_PRIORITY_CLASS so a background feature (e.g.
+	// Icecast set-capture receiving+writing a live broadcast) always yields to the user's
+	// foreground app and any active encoder. Leave false for latency-sensitive children.
+	LowPriority bool
 }
 
 // Host supervises one feature child process: spawn → init handshake → event pump, with
@@ -572,5 +576,8 @@ func (h *Host) newCmd() *exec.Cmd {
 	cmd := exec.Command(h.exePath, "feature", h.opt.Name)
 	sysexec.Hide(cmd)                         // no console window (Windows GUI subsystem)
 	sysexec.Named(cmd, "feature-"+h.opt.Name) // distinct image name in task managers / ps
+	if h.opt.LowPriority {
+		sysexec.BelowNormalPriority(cmd) // background feature - always yield to foreground/encoder
+	}
 	return cmd
 }

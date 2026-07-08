@@ -1592,7 +1592,16 @@ type TranscodeFeature struct {
 type UIFeature struct {
 	Renderer string `json:"renderer,omitempty"` // ""|"webview" (default) | "fyne"
 	Language string `json:"language,omitempty"` // i18n locale (e.g. "de"); ""=OS locale→en. See internal/i18n.
+	// WebviewGPU is an ADVANCED escape hatch for WebView2 GPU compositing. Tri-state: unset/false
+	// (default) = GPU compositing OFF (software compositing) so rave-mate's window never contends
+	// with a live NVENC/GPU encoder (OBS); explicit true re-enables GPU acceleration for a
+	// power user who prefers snappier UI over guaranteed non-interference. Safe-by-default is off.
+	WebviewGPU *bool `json:"webviewGpu,omitempty"`
 }
+
+// AllowWebviewGPU resolves the escape hatch: false by default (software compositing = low-impact),
+// true only when the user explicitly opts back into GPU acceleration.
+func (u UIFeature) AllowWebviewGPU() bool { return u.WebviewGPU != nil && *u.WebviewGPU }
 
 // UseWebview reports whether the HTML/CSS webview renderer is selected. Empty/absent renderer =
 // webview (the new default); only an explicit "fyne" chooses Fyne.

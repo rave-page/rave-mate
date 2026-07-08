@@ -9,3 +9,6 @@ func Hide(c *exec.Cmd) {}
 
 // LowPriority is a no-op off Windows for now.
 func LowPriority(c *exec.Cmd) {}
+
+// BelowNormalPriority is a no-op off Windows for now.
+func BelowNormalPriority(c *exec.Cmd) {}

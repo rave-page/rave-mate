@@ -107,6 +107,18 @@ func (s *cgoShell) run(initialHTML string, _ bool) {
 			_ = os.Setenv("WEBVIEW2_USER_DATA_FOLDER", dir)
 		}
 	}
+	// Good-neighbour default: run WebView2 (Chromium/Edge) WITHOUT GPU compositing so rave-mate's
+	// window never competes with a live NVENC/GPU encoder (OBS) for GPU/VRAM/PCIe bandwidth - the
+	// prime suspect for a stream's bitrate collapsing while rave-mate is open. The UI is a light,
+	// Go-patched DOM (no video, cheap SVG), so software compositing is imperceptible here. The
+	// WebView2 loader reads WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS when the app passes default env
+	// options (we do). A power user can opt back into GPU via features.ui.webviewGpu=true.
+	if !webviewAllowGPU {
+		if os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") == "" {
+			_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+				"--disable-gpu --disable-gpu-compositing --disable-software-rasterizer")
+		}
+	}
 	// Runtime safety net: even past the seam's probeWebview() check, WebView2 creation can still
 	// fail (broken/partial runtime). webview.New surfaces that as a panic or a nil handle - recover
 	// so a missing runtime degrades to "no window, daemon survives in the tray" instead of a crash.
