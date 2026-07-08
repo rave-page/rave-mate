@@ -67,6 +67,7 @@ func init() {
 
 	// settings sub-tab pill
 	onExact("settings-sec", func(u *UI, m actMsg) {
+		u.navRecord()
 		u.setMu.Lock()
 		u.setSec = m.Val
 		u.setMu.Unlock()

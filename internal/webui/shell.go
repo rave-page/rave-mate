@@ -72,6 +72,19 @@ const runtimeJS = `(function(){
     var v = el.type==='checkbox' ? String(el.checked) : (el.value||'');
     send({act: el.getAttribute('data-act'), val: v, id: el.id||''});
   });
+  // browser-style history: mouse X1/X2 (back/forward, e.button 3/4) + Alt+←/→ → Go nav stack.
+  // preventDefault on down/aux so WebView2's own (empty) history navigation never fires.
+  document.addEventListener('mousedown', function(e){ if(e.button===3||e.button===4) e.preventDefault(); });
+  document.addEventListener('auxclick', function(e){ if(e.button===3||e.button===4) e.preventDefault(); });
+  document.addEventListener('mouseup', function(e){
+    if(e.button===3){ e.preventDefault(); send({act:'nav-back'}); }
+    else if(e.button===4){ e.preventDefault(); send({act:'nav-fwd'}); }
+  });
+  document.addEventListener('keydown', function(e){
+    if(!e.altKey || e.ctrlKey || e.metaKey) return;
+    if(e.key==='ArrowLeft'){ e.preventDefault(); send({act:'nav-back'}); }
+    else if(e.key==='ArrowRight'){ e.preventDefault(); send({act:'nav-fwd'}); }
+  });
   document.addEventListener('input', function(e){
     var el = e.target;
     if(!el || !el.getAttribute) return;

@@ -170,6 +170,7 @@ func (u *UI) libDirOr() string {
 
 // libSetSection flips the active sub-section (called from ui.go dispatch).
 func (u *UI) libSetSection(s string) {
+	u.navRecord()
 	u.mu.Lock()
 	u.libSection = s
 	u.mu.Unlock()
@@ -178,6 +179,7 @@ func (u *UI) libSetSection(s string) {
 
 // libNav changes the Browse cwd (called from ui.go dispatch).
 func (u *UI) libNav(path string) {
+	u.navRecord()
 	u.mu.Lock()
 	u.libDir = path
 	u.mu.Unlock()

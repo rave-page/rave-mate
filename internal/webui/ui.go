@@ -64,6 +64,8 @@ type UI struct {
 	setDebounce *time.Timer     // pending search re-render
 	setVisible  map[string]bool // card ids currently in the DOM (status tick patches only these)
 	setSearch   bool            // content pane is showing search results
+
+	nav navHist // browser-style back/forward stack (mouse X1/X2 + Alt+←/→)
 }
 
 // New builds the webview UI over the shared Services (identical struct the Fyne UI consumes). The
@@ -204,6 +206,10 @@ func (u *UI) onAction(payload string) {
 	switch {
 	case m.Act == "tab":
 		u.setTab(m.Val)
+	case m.Act == "nav-back":
+		u.navBack()
+	case m.Act == "nav-fwd":
+		u.navFwd()
 	case m.Act == "logs-clear":
 		u.eval("var lv=document.getElementById('log-view');if(lv)lv.innerHTML='';")
 	case m.Act == "auth-login":
@@ -299,6 +305,9 @@ func (u *UI) activeTab() string {
 
 // setTab switches the active tab and patches the main + nav fragments (Go-driven DOM update).
 func (u *UI) setTab(id string) {
+	if id != u.activeTab() {
+		u.navRecord() // record the pre-switch view for mouse-back
+	}
 	u.mu.Lock()
 	u.active = id
 	u.mu.Unlock()
