@@ -1,8 +1,10 @@
 package governor
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 // reset returns the singleton to its default (focused, nothing streaming) between tests.
@@ -45,12 +47,85 @@ func TestBackgroundGating(t *testing.T) {
 	if BackgroundAllowed() {
 		t.Fatal("background work must be blocked while streaming")
 	}
-	// Unfocused/minimized alone must NOT block background work (only streaming does).
+	// Size-move (window drag/resize) must also block background work - a heavy in-proc sweep then
+	// starves the software WebView2 compositor and the window trails the cursor.
+	reset()
+	SetSizeMove(true)
+	if BackgroundAllowed() {
+		t.Fatal("background work must be blocked while dragging/resizing")
+	}
+	// Unfocused/minimized alone must NOT block background work (only streaming + size-move do).
 	reset()
 	SetFocused(false)
 	if !BackgroundAllowed() {
 		t.Fatal("unfocused should not block background work")
 	}
+	reset()
+	SetMinimized(true)
+	if !BackgroundAllowed() {
+		t.Fatal("minimized should not block background work")
+	}
+}
+
+// TestPriorityFollowsSizeMove exercises apply(): a drag drops the process to below-normal; an idle
+// focused non-streaming window is normal priority.
+func TestPriorityFollowsSizeMove(t *testing.T) {
+	reset()
+	SetSizeMove(true) // transition -> apply() runs
+	g.mu.Lock()
+	below, set := g.lastPrio, g.prioSet
+	g.mu.Unlock()
+	if !set || !below {
+		t.Fatal("size-move should drop the process to below-normal")
+	}
+	SetSizeMove(false) // back to focused + idle + not streaming
+	g.mu.Lock()
+	below = g.lastPrio
+	g.mu.Unlock()
+	if below {
+		t.Fatal("focused + idle + not streaming should be normal priority")
+	}
+
+	// Streaming still forces below-normal even when focused + idle.
+	reset()
+	SetStreaming(true)
+	g.mu.Lock()
+	below = g.lastPrio
+	g.mu.Unlock()
+	if !below {
+		t.Fatal("streaming should drop the process to below-normal")
+	}
+	SetStreaming(false)
+}
+
+// TestWaitWhileBusy_ReturnsWhenAllowed: not busy -> returns immediately; ctx cancel unblocks.
+func TestWaitWhileBusy_ReturnsWhenAllowed(t *testing.T) {
+	reset()
+	done := make(chan struct{})
+	go func() { WaitWhileBusy(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("WaitWhileBusy should return at once when work is allowed")
+	}
+
+	reset()
+	SetStreaming(true) // busy -> WaitWhileBusy parks until ctx cancels
+	ctx, cancel := context.WithCancel(context.Background())
+	done = make(chan struct{})
+	go func() { WaitWhileBusy(ctx); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("WaitWhileBusy must block while streaming")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("WaitWhileBusy should return when ctx is cancelled")
+	}
+	SetStreaming(false)
 }
 
 func TestWhenBackgroundAllowed_RunsImmediatelyWhenIdle(t *testing.T) {

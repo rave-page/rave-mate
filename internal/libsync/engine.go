@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/tagsync"
@@ -72,8 +73,13 @@ func Run(db *libdb.DB, job config.SyncJob, dry bool) (Result, error) {
 		return res, err
 	}
 
+	// This merge scans the whole library (~23k tracks). Yield to the UI/encoder while a stream is
+	// live or the window is mid drag/resize (amortized - the per-item work is cheap).
 	var canonical []musiclib.Track
-	for _, h := range order {
+	for i, h := range order {
+		if i&1023 == 0 {
+			governor.WaitWhileBusy(nil)
+		}
 		cands := groups[h]
 		if !inScope(h, cands) {
 			continue
@@ -111,7 +117,10 @@ func Run(db *libdb.DB, job config.SyncJob, dry bool) (Result, error) {
 	}
 
 	if wantTags {
-		for _, t := range canonical {
+		for i, t := range canonical {
+			if i&255 == 0 {
+				governor.WaitWhileBusy(nil) // tag writes hit the disk per track - yield mid-sweep
+			}
 			_, err := tagsync.Apply(db, t)
 			if err != nil {
 				if !errors.Is(err, tagsync.ErrUnsupported) {

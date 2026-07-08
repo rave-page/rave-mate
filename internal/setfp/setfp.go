@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/worker"
 )
@@ -51,6 +52,7 @@ func (f *Fingerprinter) FingerprintSet(ctx context.Context, audioPath string, sp
 		if ctx.Err() != nil {
 			break
 		}
+		governor.WaitWhileBusy(ctx) // defer per-track fingerprinting while streaming / mid window-drag
 		params := map[string]any{"path": audioPath, "offsetSeconds": sp.OffsetSeconds, "lengthSeconds": sp.LengthSeconds}
 		if raw, err := f.w.RunStream(ctx, "fingerprint", "fingerprint.segment", params, nil); err == nil {
 			var res struct {

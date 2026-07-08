@@ -10,17 +10,22 @@
 // Consumers gate on it:
 //   - UIAnimAllowed()   -> run the ~1 Hz webui graph/tick refresh? (paused when hidden/dragging/streaming)
 //   - BackgroundAllowed()-> run heavy non-essential batch work? (fingerprinting/indexing/hydration:
-//     paused while a stream is live; deferred work is re-run when the stream ends)
+//     paused while a stream is live OR the window is mid drag/resize; deferred work is re-run once
+//     it's allowed again)
+//   - WaitWhileBusy(ctx) -> block a long in-proc sweep loop in short slices while the above is false.
 //
-// It also right-sizes THIS process's Windows priority class: below-normal whenever a stream is live
-// or the window isn't the user's focus, normal otherwise - so an in-proc worker goroutine can never
-// out-schedule OBS's (elevated) audio-encoder thread. Stream-critical paths (Spout out, peerlink
+// It also right-sizes THIS process's Windows priority class: below-normal whenever a stream is live,
+// the window isn't the user's focus, OR the user is mid drag/resize, normal otherwise - so an in-proc
+// worker goroutine can never out-schedule OBS's (elevated) audio-encoder thread, nor starve the
+// (software-composited) WebView2 window during a drag. Stream-critical paths (Spout out, peerlink
 // media, MIDI/now-playing, overlays) are NOT gated here - they run in their own children and keep
 // feeding the stream.
 package governor
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/sysexec"
@@ -58,9 +63,11 @@ func SetLog(l *logbus.Bus) {
 }
 
 func (s *gov) apply() {
-	// Below-normal whenever a stream is live OR the window isn't the user's focus (minimized/backgrounded).
-	// Normal only when the user is actively looking at rave-mate and nothing is streaming.
-	below := s.streaming || s.minimized || !s.focused
+	// Below-normal whenever a stream is live, the window isn't the user's focus (minimized/
+	// backgrounded), OR the user is mid drag/resize - during a size-move WebView2 repaints on the
+	// CPU and an in-proc worker at NORMAL starves the UI thread (window trails the cursor).
+	// Normal only when the user is actively looking at an idle rave-mate and nothing is streaming.
+	below := s.streaming || s.minimized || !s.focused || s.sizeMove
 	if s.prioSet && below == s.lastPrio {
 		return
 	}
@@ -133,12 +140,36 @@ func UIAnimAllowed() bool {
 }
 
 // BackgroundAllowed reports whether heavy, non-essential batch work (audio fingerprinting, library
-// indexing/sync sweeps, catalog hydration) may run now. False while a stream is live - that work is
-// the CPU offender that starves OBS's audio encoder, and none of it is stream-critical.
+// indexing/sync sweeps, catalog hydration) may run now. False while a stream is live (that work is
+// the CPU offender that starves OBS's audio encoder) OR while the user is dragging/resizing the
+// window (a heavy in-proc loop then starves the software WebView2 compositor -> visible drag lag).
+// None of the gated work is stream- or UI-critical, so deferring it is always safe.
 func BackgroundAllowed() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return !g.streaming
+	return !g.streaming && !g.sizeMove
+}
+
+// busyPollInterval is how often WaitWhileBusy re-checks BackgroundAllowed while parked.
+const busyPollInterval = 150 * time.Millisecond
+
+// WaitWhileBusy blocks in short slices while heavy background work is disallowed (a stream is live
+// or the window is mid drag/resize), so a long in-proc sweep yields the CPU to the UI/encoder
+// instead of starving them. Returns immediately once work is allowed again, or promptly when ctx is
+// done (a nil ctx never cancels). Call at the head of each heavy sweep iteration - amortize (every N
+// items) on very tight loops so the check itself is negligible.
+func WaitWhileBusy(ctx context.Context) {
+	for !BackgroundAllowed() {
+		if ctx == nil {
+			time.Sleep(busyPollInterval)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(busyPollInterval):
+		}
+	}
 }
 
 // WhenBackgroundAllowed runs fn now if background work is allowed; otherwise parks it (deduped by
