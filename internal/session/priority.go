@@ -44,7 +44,7 @@ var fieldPriority = map[string][]string{
 	FieldGenre:     {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
 	FieldKey:       {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceProDJLink, SourceRekordboxDB, SourceNML, SourceMIDICustom},
 	FieldBPM:       {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceVDJOS2L, SourceRekordboxMem, SourceProDJLink, SourceSerato, SourceMIDICustom, SourceRekordboxDB, SourceNML},
-	FieldIsPlaying: {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom},
+	FieldIsPlaying: {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceSerato},
 	FieldPath:      {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
 	// Fader: the MIDI-custom map (RavePage Volume Adjust CC) reports the true channel-fader
 	// POSITION; Traktor's HTTP feed only gives onAirLevel (post fader×crossfader, ~0.85 at
