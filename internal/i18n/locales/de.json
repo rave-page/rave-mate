@@ -142,6 +142,18 @@
       "body": "Die In-Game-Kamera von VRChat nimmt Dolly-Pfade auf - Keyframe-Sequenzen (Position, Blickrichtung, Geschwindigkeit, Fokus), durch die die Kamera flüssig gleitet. VRChat speichert sie als JSON-Dateien; rave-mate findet sie, gruppiert sie nach der Welt, in der sie aufgenommen wurden, und kann sie sichern, organisieren und wieder laden.\n\nDie Vorschau zeigt den Pfad in 3D: jeder Punkt ist ein Keyframe, die kleine violette Linie ist die Blickrichtung der Kamera, und die Linienfarbe kodiert die Geschwindigkeit (Mint = langsam, Pink = schnell). Der bernsteinfarbene Marker fliegt den Pfad mit seiner echten aufgenommenen Geschwindigkeit ab.\n\n„In VRChat laden“ sendet die Datei über OSC, sodass sie sofort in der In-Game-Kamera erscheint - OSC muss in VRChat aktiviert sein (Action-Menü → Options → OSC). Loop und Pfadtyp werden nicht in der Datei gespeichert; stelle sie nach dem Laden einmalig in VRChat ein.",
       "title": "VRChat-Kamerapfade"
     },
+    "dmx-connect": {
+      "body": "DMX ist das Standard-Protokoll zur Lichtsteuerung: 512 Dimmer-Werte (Kanäle) pro „Universe“. Art-Net überträgt diese Universes über das Netzwerk als UDP auf Port 6454.\n\nFüge in deiner Lichtsoftware (Konsole, QLC+, xLights, ...) einen Art-Net-Ausgabeknoten hinzu, richte ihn auf die IP-Adresse dieses Rechners (oder Broadcast), setze die Universe-Nummer wie unten und starte das Senden. rave-mate beantwortet auch Art-Net-Discovery-Anfragen, sodass viele Konsolen es automatisch auflisten.",
+      "title": "DMX / Art-Net"
+    },
+    "dmx-reemit": {
+      "body": "Leitet jedes hier empfangene Universe wieder über Art-Net hinaus - reihe rave-mate vor einen anderen Rechner oder ein Lichttool, das den DMX-Feed ebenfalls braucht. Gesendet mit max. 44 Paketen/s pro Universe und einem Keep-Alive von 1/s, gemäß Art-Net-Spezifikation.",
+      "title": "Art-Net weiterleiten"
+    },
+    "dmx-vrsl": {
+      "body": "VRSL (VR Stage Lighting) ist der Standard für Clublicht in VRChat: Lichtwerte werden als Pixelblöcke im Videostream kodiert, und die Shader der Welt dekodieren sie zurück in Licht. rave-mate rendert dieses Pixelgitter direkt - kein zusätzliches Gitter-Tool nötig. Nimm es in OBS auf, streame es, und eine VRSL-fähige Welt leuchtet auf.",
+      "title": "VRSL-Pixelgitter"
+    },
     "dual-alignment": {
       "body": "Wenn ein Set zweimal aufgenommen wurde - das Broadcast-Audio (Icecast-Empfänger) UND eine OBS-Videoaufnahme - starten die beiden Dateien selten im selben Moment: du drückst Aufnahme und Broadcast zu unterschiedlichen Zeiten, sodass derselbe Beat in jeder Datei an anderer Position sitzt.\n\nDie Ausrichtung findet diesen Zeitversatz, indem sie beide Aufnahmen abhört: die Lautstärke-Hüllkurve jeder Datei (wie die Energie ansteigt und abfällt, ~50-mal pro Sekunde) wird mit ffmpeg extrahiert, und die beiden Hüllkurven werden kreuzkorreliert - so lange gegeneinander verschoben, bis sie am besten übereinstimmen. Der Konfidenzwert sagt aus, wie eindeutig die beste Übereinstimmung jede andere Position geschlagen hat; „hoch“ bedeutet, dass die Aufnahmen klar dasselbe Audio teilen.\n\nNach der Ausrichtung werden beide Wellenformen auf einer gemeinsamen Zeitleiste gerendert, und ein einziger IN/OUT-Bereich schneidet BEIDE Dateien im selben realen Moment - so haben das exportierte Audio und Video identischen Inhalt und identische Länge. Wenn das automatische Ergebnis falsch aussieht (z. B. wenn das Video-Audio stark bearbeitet ist), verschiebe den Versatz manuell oder gib ihn direkt ein; dein manueller Wert bleibt erhalten, bis du Auto-Ausrichtung erneut ausführst.",
       "title": "Audio ⇆ Video Zeitausrichtung"
@@ -178,6 +190,14 @@
       "body": "Icecast ist ein quelloffener Streaming-Server. rave-mate betreibt einen winzigen lokalen Empfänger, der das Icecast-Protokoll spricht, sodass die eingebaute Broadcasting-Funktion von Traktor dein Set direkt auf die Festplatte dieses Rechners „streamen“ kann - ohne Internet.\n\nRichte Traktor auf 127.0.0.1 mit dem hier angezeigten Port, Mount-Pfad und Passwort, starte den Broadcast, und jedes Set landet in deinem Sets-Ordner, zeitlich verknüpft mit der Trackliste des Session-Recorders - springe im Publish-Tab zu jedem Track der Aufnahme.",
       "title": "Set-Mitschnitt über Icecast"
     },
+    "ml-accel": {
+      "body": "auto verhandelt die beste gemeinsame Hardware-Stufe (AV1/HEVC/H.264 -> Software-Fallback). Einen Codec festzulegen greift nur, wenn die sendende Instanz ihn kodieren kann.",
+      "title": "Codec / Hardware-Stufe"
+    },
+    "ml-budget": {
+      "body": "Video-Budget pro Route. 20 Mbit/s reichen für 1080p60 HEVC mit Reserve im Gigabit-LAN.",
+      "title": "Bitrate pro Route"
+    },
     "motion-studio": {
       "body": "Spielt VR-Motion-Takes ab, die von deinem Headset aufgenommen wurden (Kopf + Controller + beliebige Full-Body-Tracker, aufgenommen über das Handgelenk-Menü). Die Vorschau zeigt das Skelett in 3D mit der Kopfbewegung als violette Spur.\n\nZwei Live-Ausgänge: VMC streamt den Take als rohe Tracking-Geräte an einen VTuber-Renderer (VSeeFace, Warudo, VNyan), der die IK übernimmt und deinen Avatar animiert - das ist der eigentliche Wiedergabepfad. OSC-Tracker speisen VRChats Full-Body-Tracking, aber VRChat steuert Kopf und Hände immer von deinem Live-HMD und den Controllern, sodass ein aufgenommener Take deinen VRChat-Avatar nicht steuern kann - exportiere dafür eine Unity-.anim und treibe sie über den Animator des Avatars.\n\nHier importierte Avatare (.vrm) replizieren automatisch zu deinen gekoppelten rave-mate-Instanzen.",
       "title": "Motion Studio"
@@ -186,13 +206,65 @@
       "body": "Live-Sende-/Empfangsraten der letzten 2 Minuten.\n\nPEER ist die verschlüsselte LAN-Verbindung zu deinen anderen gekoppelten rave-mate-Rechnern (Library-Sync, Fernsteuerung, Media-Routen). API ist der Traffic zu rave.page selbst - Live-Set-Ingest, Uploads, Artwork. SESSION-Summen zählen alles seit dem Start der App.\n\nSpitzen während eines Live-Sets sind normal: jeder bestätigte Track schickt ein Now-Playing-Update, und der Set-Mitschnitt streamt durchgehend.",
       "title": "Netzwerkdurchsatz"
     },
+    "obssync-deadband": {
+      "body": "Wie weit (in Frames) eine Quelle aus dem Takt driften darf, bevor rave-mate korrigiert. Ein kleines Totband vermeidet ständige Mikro-Sprünge, die wie Ruckeln aussehen. ~2 Frames sind ein guter Start.",
+      "title": "Totband"
+    },
+    "obssync-fps": {
+      "body": "Deine Projekt-Framerate. Wird nur genutzt, um das Totband von Frames in Millisekunden umzurechnen.",
+      "title": "Projekt-Framerate"
+    },
+    "obssync-mediasync": {
+      "body": "Bindet eine Video-/Medienquelle in OBS an eine gemeinsame Uhr, sodass sie über Rechner hinweg im Takt läuft. Starte die Uhr, wähle die Medienquelle(n), und rave-mate schiebt jede sanft auf Kurs.",
+      "title": "OBS-Mediensync"
+    },
+    "obssync-restart": {
+      "body": "Ist eine Quelle mehr als so viele ms daneben, startet rave-mate sie neu und springt direkt zum Ziel, statt nachzuschieben - für große Sprünge (eine beendete oder gerade aktivierte Quelle).",
+      "title": "Neustart-Schwelle"
+    },
     "perf-graph": {
       "body": "CPU (oben) und RAM (unten) der letzten 2 Minuten. APP ist rave-mate allein - einschließlich seiner Worker-Subprozesse - SYS ist der ganze Rechner.\n\nrave-mate hält schwere Arbeit (Transcoding, Fingerprinting, Media-Routen) in überwachten Kindprozessen mit begrenzten Puffern, sodass ein flaches APP bei steigendem SYS bedeutet, dass ein anderes Programm die Last verursacht. Wenn APP selbst hochklettert und hoch bleibt, prüfe den Logs-Tab und erwäge, ungenutzte Features in den Einstellungen zu deaktivieren - deaktivierte Features besitzen keine Ports, Goroutinen oder Subprozesse.",
       "title": "Systemleistung"
     },
+    "rtsp-passthrough": {
+      "body": "Liefert die Quelle bereits H.264 (viele IP-Kameras, ein OBS-RTMP-Feed), wird es unverändert durchgereicht - null Qualitätsverlust und nahezu keine CPU-Last. Für Bildschirmaufnahme oder Nicht-H.264-Quellen aus lassen; sie werden mit latenzfreiem x264 kodiert.",
+      "title": "H.264-Durchleitung"
+    },
+    "rtsp-why": {
+      "body": "VRChat kann kein Spout oder NDI empfangen, aber sein AVPro-Videoplayer akzeptiert rtspt:// (RTSP über TCP) mit etwa einer halben Sekunde Verzögerung - der schnellste lokale Weg in eine Welt. Das ersetzt die übliche Kette OBS -> RTMP -> MediaMTX durch einen eingebauten Server. Benötigt ffmpeg (unter Library & Medien installieren).",
+      "title": "Warum RTSP?"
+    },
     "session-recorder": {
       "body": "Beobachtet deine Decks und schreibt eine Trackliste dessen, was du tatsächlich gespielt hast, mit Zeitstempeln pro Track.\n\nEin Track zählt erst, wenn er die Bestätigungsschwelle lang gespielt wurde - kurze Previews, Tag-Checks und Fehlstarts werden herausgefiltert. Das Ergebnis ist die Set-History im Publish-Tab, wo jeder Eintrag mit mitgeschnittenem Audio, OBS-Aufnahmen und per Fingerabdruck verifizierten Track-Identitäten verknüpft werden kann.",
       "title": "Session-Recorder"
+    },
+    "tc-artnet": {
+      "body": "Art-Net TimeCode ist Timecode über das Netzwerk (UDP) für Lichtkonsolen und -knoten - Pulte der grandMA-Klasse folgen ihm direkt. Standardmäßig an alle im LAN (Broadcast, Port 6454); gib host:port ein, um eine Konsole gezielt anzusprechen. Resolume ignoriert dies - nutze LTC für Resolume.",
+      "title": "Art-Net TimeCode"
+    },
+    "tc-ltc": {
+      "body": "LTC (Linear TimeCode) ist Timecode als AUDIO-Signal - das klassische SMPTE-Format. Wähle hier einen Audio-Ausgang, leite ihn in ein virtuelles Audiokabel (z. B. VB-CABLE) und wähle dieses Kabel als Timecode-Eingang im Empfänger. Der SMPTE-Eingang von Resolume Arena akzeptiert nur LTC, also ist dies der passende Ausgang dafür. Über ein echtes Kabel versorgt es auch Hardware auf einem anderen Rechner.",
+      "title": "LTC (Linear TimeCode)"
+    },
+    "tc-ltc-level": {
+      "body": "Ausgangspegel in dBFS (Dezibel unter digitaler Vollaussteuerung). -3 dBFS ist die Broadcast-Norm für LTC - laut genug für zuverlässiges Dekodieren, mit Reserve gegen Clipping. Senke ihn, wenn die Eingangsanzeigen des Empfängers clippen.",
+      "title": "LTC-Ausgangspegel"
+    },
+    "tc-mtc": {
+      "body": "MTC (MIDI Time Code) ist Timecode über MIDI - für Sequenzer, DAWs und Show-Control-Software, die MIDI folgen (z. B. Reaper, Cubase, QLab). Erstelle mit loopMIDI (oder dem Loopback der Windows MIDI Services) einen virtuellen MIDI-Port, wähle ihn hier und stelle den Empfänger auf MTC-Sync an diesem Port.",
+      "title": "MTC (MIDI Time Code)"
+    },
+    "tc-rate": {
+      "body": "Frames pro Sekunde der Uhr. Wähle, worauf der EMPFÄNGER eingestellt ist - beide Seiten müssen übereinstimmen. 25 ist die Norm in PAL/EBU-Regionen, 30 und 29,97 Drop-Frame in NTSC-Regionen, 24 für Film. 29,97 Drop-Frame überspringt zwei Frame-NUMMERN pro Minute (außer jede 10.), damit die Anzeige zur Wanduhr passt - es wird kein Audio/Video verworfen.",
+      "title": "Framerate"
+    },
+    "tc-start": {
+      "body": "Wo die Uhr zu zählen beginnt. Ein fester Timecode (z. B. 00:00:00:00) ist bei Shows üblich; „Tageszeit“ koppelt die Uhr an deine Wandzeit - praktisch, wenn sich mehrere Systeme auf die reale Uhrzeit einigen sollen.",
+      "title": "Startposition"
+    },
+    "tc-timecode": {
+      "body": "SMPTE-Timecode ist eine laufende Uhr (HH:MM:SS:FF - FF = Framenummer), die getrennte Software und Geräte synchron hält. rave-mate erzeugt eine Master-„House“-Uhr und sendet sie in bis zu drei Formaten gleichzeitig aus; alles, was mithört, folgt ihr - auf diesem Rechner oder einem anderen im Netzwerk.",
+      "title": "SMPTE-Timecode"
     },
     "timing-graph": {
       "body": "Roundtrip-Zeit zu jedem gekoppelten Rechner in deinem LAN, in Millisekunden, über die letzten 2 Minuten.\n\nRTT ist, wie lange eine Nachricht braucht, um den Peer zu erreichen und zurückzukommen. Einstellige Werte sind typisch für kabelgebundenes LAN; WLAN liegt höher und schwankt. Anhaltende Spitzen bedeuten meist ein ausgelastetes Netzwerk oder einen Rechner, der in den Ruhezustand geht - Fernsteuerung und Media-Routen spüren es zuerst.",

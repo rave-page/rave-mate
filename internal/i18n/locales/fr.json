@@ -142,6 +142,18 @@
       "body": "La caméra en jeu de VRChat enregistre des trajectoires de travelling - des séquences d'images-clés (position, orientation, vitesse, mise au point) que la caméra survole en douceur. VRChat les enregistre en fichiers JSON ; rave-mate les retrouve, les regroupe par monde d'enregistrement, et peut les sauvegarder, les organiser et les recharger.\n\nL'aperçu montre la trajectoire en 3D : chaque point est une image-clé, la petite ligne violette indique l'orientation de la caméra, et la couleur de la ligne encode la vitesse (menthe = lent, rose = rapide). Le repère ambre parcourt la trajectoire à sa vitesse réelle enregistrée.\n\n« Charger dans VRChat » envoie le fichier via OSC pour qu'il apparaisse immédiatement dans la caméra en jeu - OSC doit être activé dans VRChat (menu Action → Options → OSC). La boucle et le type de trajectoire ne sont pas stockés dans le fichier ; réglez-les une fois dans VRChat après le chargement.",
       "title": "Trajectoires de caméra VRChat"
     },
+    "dmx-connect": {
+      "body": "DMX est le protocole standard de commande d'éclairage : 512 valeurs de gradation (canaux) par « univers ». Art-Net transporte ces univers sur le réseau en UDP sur le port 6454.\n\nDans votre logiciel d'éclairage (console, QLC+, xLights, ...) ajoutez un nœud de sortie Art-Net, pointez-le vers l'adresse IP de cette machine (ou diffusion), mettez le numéro d'univers comme ci-dessous et commencez à envoyer. rave-mate répond aussi aux sondages de découverte Art-Net, donc de nombreuses consoles le listent automatiquement.",
+      "title": "DMX / Art-Net"
+    },
+    "dmx-reemit": {
+      "body": "Renvoie par Art-Net chaque univers reçu ici - chaînez rave-mate devant une autre machine ou un outil d'éclairage qui a aussi besoin du flux DMX. Envoyé à 44 paquets/s max par univers avec un keep-alive de 1/s, selon la spécification Art-Net.",
+      "title": "Réémission Art-Net"
+    },
+    "dmx-vrsl": {
+      "body": "VRSL (VR Stage Lighting) est le standard d'éclairage de club dans VRChat : les valeurs de lumière sont encodées en blocs de pixels dans le flux vidéo, et les shaders du monde les redécodent en lumières. rave-mate rend cette grille de pixels directement - aucun outil de grille supplémentaire. Capturez-la dans OBS, diffusez-la, et un monde compatible VRSL s'illumine.",
+      "title": "Grille de pixels VRSL"
+    },
     "dual-alignment": {
       "body": "Quand un même set a été capturé deux fois - l'audio du broadcast (récepteur Icecast) ET un enregistrement vidéo OBS - les deux fichiers commencent rarement au même instant : vous lancez l'enregistrement et le broadcast à des moments différents, donc le même beat se situe à des positions différentes dans chaque fichier.\n\nL'alignement trouve ce décalage temporel en écoutant les deux enregistrements : l'enveloppe de volume de chaque fichier (la montée et la descente de l'énergie, ~50 fois par seconde) est extraite avec ffmpeg, et les deux enveloppes sont corrélées de manière croisée - glissées l'une contre l'autre jusqu'à la meilleure correspondance. Le score de confiance indique à quel point la meilleure correspondance a battu toutes les autres positions ; « élevée » signifie que les enregistrements partagent clairement le même audio.\n\nUne fois alignés, les deux formes d'onde s'affichent sur une même timeline partagée et une seule plage IN/OUT coupe les DEUX fichiers au même instant réel - ainsi l'audio et la vidéo exportés ont un contenu et une durée identiques. Si le résultat automatique semble erroné (p. ex. l'audio de la vidéo est très traité), ajustez le décalage manuellement ou saisissez-le directement ; votre valeur manuelle est conservée jusqu'à ce que vous relanciez l'alignement automatique.",
       "title": "Alignement temporel audio ⇆ vidéo"
@@ -178,6 +190,14 @@
       "body": "Icecast est un serveur de streaming open source. rave-mate exécute un petit récepteur local qui parle le protocole Icecast, afin que la fonction Broadcasting intégrée de Traktor puisse « diffuser » votre set directement sur le disque de cette machine - sans internet.\n\nPointez Traktor sur 127.0.0.1 avec le port, le chemin de montage et le mot de passe indiqués ici, lancez le broadcast, et chaque set atterrit dans votre dossier de sets, lié temporellement à la tracklist de l'enregistreur de session - sautez à n'importe quelle piste de l'enregistrement depuis l'onglet Publier.",
       "title": "Capture de set via Icecast"
     },
+    "ml-accel": {
+      "body": "auto négocie le meilleur niveau matériel commun (AV1/HEVC/H.264 -> repli logiciel). Fixer un codec ne s'applique que si l'instance émettrice sait l'encoder.",
+      "title": "Codec / niveau matériel"
+    },
+    "ml-budget": {
+      "body": "Budget vidéo par route. 20 Mbps suffisent pour du 1080p60 HEVC avec de la marge sur un LAN gigabit.",
+      "title": "Débit par route"
+    },
     "motion-studio": {
       "body": "Rejoue les prises de mouvement VR enregistrées depuis votre casque (tête + manettes + éventuels trackers full-body, capturés depuis le menu poignet). L'aperçu montre le squelette en 3D avec le déplacement de la tête sous forme de traînée violette.\n\nDeux sorties en direct : VMC diffuse la prise sous forme de périphériques de tracking bruts vers un moteur de rendu VTuber (VSeeFace, Warudo, VNyan) qui fait l'IK et anime votre avatar - c'est le vrai chemin de lecture. Les trackers OSC alimentent le full-body tracking de VRChat, mais VRChat pilote toujours la tête et les mains depuis votre HMD et vos manettes en direct, donc une prise enregistrée ne peut pas animer votre avatar VRChat - exportez une animation Unity .anim pour cela et pilotez-la depuis l'Animator de l'avatar.\n\nLes avatars (.vrm) importés ici se répliquent automatiquement vers vos instances rave-mate appairées.",
       "title": "Studio de mouvement"
@@ -186,13 +206,65 @@
       "body": "Débits d'envoi/réception en direct sur les 2 dernières minutes.\n\nPEER est le lien LAN chiffré vers vos autres machines rave-mate appairées (sync de bibliothèque, contrôle à distance, routes média). API est le trafic vers rave.page lui-même - ingestion de set en direct, uploads, visuels. SESSION totalise tout depuis le démarrage de l'app.\n\nDes pics pendant un set en direct sont normaux : chaque piste confirmée pousse une mise à jour « en lecture », et la capture de set diffuse en continu.",
       "title": "Débit réseau"
     },
+    "obssync-deadband": {
+      "body": "De combien (en images) une source peut dériver hors cadence avant que rave-mate corrige. Une petite bande morte évite des micro-sauts constants qui ressemblent à des saccades. ~2 images est un bon départ.",
+      "title": "Bande morte"
+    },
+    "obssync-fps": {
+      "body": "La cadence de votre projet. Sert uniquement à convertir la bande morte d'images en millisecondes.",
+      "title": "Cadence du projet"
+    },
+    "obssync-mediasync": {
+      "body": "Verrouille une source vidéo/média dans OBS sur une horloge partagée pour qu'elle joue en cadence entre machines. Démarrez l'horloge, choisissez la ou les sources média, et rave-mate pousse chacune pour la garder à l'heure.",
+      "title": "Synchro média OBS"
+    },
+    "obssync-restart": {
+      "body": "Si une source est décalée de plus de ce nombre de ms, rave-mate la redémarre et saute directement à la cible au lieu de la pousser - pour les grands sauts (une source terminée, ou tout juste activée).",
+      "title": "Seuil de redémarrage"
+    },
     "perf-graph": {
       "body": "CPU (haut) et RAM (bas) sur les 2 dernières minutes. APP est rave-mate seul - y compris ses sous-processus de travail - SYS est toute la machine.\n\nrave-mate garde le travail lourd (transcodage, empreinte, routes média) dans des processus enfants supervisés à tampons bornés, donc si APP reste plat pendant que SYS grimpe, c'est qu'un autre programme est en charge. Si APP lui-même grimpe et reste haut, consultez l'onglet Journaux et envisagez de désactiver les fonctions inutilisées dans les Réglages - les fonctions désactivées ne possèdent aucun port, goroutine ni sous-processus.",
       "title": "Performance système"
     },
+    "rtsp-passthrough": {
+      "body": "Si la source fournit déjà du H.264 (nombre de caméras IP, un flux RTMP d'OBS), il est copié tel quel - aucune perte de qualité et un CPU quasi nul. Laissez désactivé pour la capture d'écran ou les sources non-H.264 ; elles sont encodées en x264 à latence nulle.",
+      "title": "Passe-plat H.264"
+    },
+    "rtsp-why": {
+      "body": "VRChat ne peut pas recevoir Spout ni NDI, mais son lecteur vidéo AVPro accepte rtspt:// (RTSP sur TCP) avec environ une demi-seconde de délai - la voie locale la plus rapide vers un monde. Cela remplace la chaîne habituelle OBS -> RTMP -> MediaMTX par un serveur intégré. Nécessite ffmpeg (installez-le sous Bibliothèque et médias).",
+      "title": "Pourquoi RTSP ?"
+    },
     "session-recorder": {
       "body": "Surveille vos platines et écrit une tracklist de ce que vous avez réellement joué, avec un horodatage par piste.\n\nUne piste ne compte qu'une fois qu'elle a joué pendant le seuil de confirmation - les aperçus rapides, vérifications de tags et faux départs sont filtrés. Le résultat est l'historique des sets dans l'onglet Publier, où chaque entrée peut être liée à l'audio capturé, aux enregistrements OBS et aux identités de piste vérifiées par empreinte.",
       "title": "Enregistreur de session"
+    },
+    "tc-artnet": {
+      "body": "Art-Net TimeCode est du timecode sur le réseau (UDP) pour consoles et nœuds d'éclairage - les pupitres de classe grandMA le suivent directement. Par défaut il envoie à tout le LAN (diffusion, port 6454) ; saisissez hôte:port pour viser une console. Resolume l'ignore - utilisez LTC pour Resolume.",
+      "title": "Art-Net TimeCode"
+    },
+    "tc-ltc": {
+      "body": "LTC (Linear TimeCode) est du timecode sous forme de signal AUDIO - le format SMPTE classique. Choisissez ici une sortie audio, routez-la dans un câble audio virtuel (p. ex. VB-CABLE) et sélectionnez ce câble comme entrée de timecode dans le récepteur. L'entrée SMPTE de Resolume Arena n'accepte que le LTC, c'est donc la sortie à utiliser pour lui. Par un vrai câble, il alimente aussi du matériel sur une autre machine.",
+      "title": "LTC (Linear TimeCode)"
+    },
+    "tc-ltc-level": {
+      "body": "Niveau de sortie en dBFS (décibels sous le plein niveau numérique). -3 dBFS est la norme broadcast pour le LTC - assez fort pour un décodage fiable, avec de la marge contre l'écrêtage. Baissez-le si les vumètres d'entrée du récepteur écrêtent.",
+      "title": "Niveau de sortie LTC"
+    },
+    "tc-mtc": {
+      "body": "MTC (MIDI Time Code) est du timecode via MIDI - pour les séquenceurs, DAW et logiciels de conduite de spectacle qui suivent le MIDI (p. ex. Reaper, Cubase, QLab). Créez un port MIDI virtuel avec loopMIDI (ou le loopback de Windows MIDI Services), choisissez-le ici et réglez le récepteur pour se synchroniser au MTC sur ce port.",
+      "title": "MTC (MIDI Time Code)"
+    },
+    "tc-rate": {
+      "body": "Images par seconde de l'horloge. Choisissez ce pour quoi le RÉCEPTEUR est configuré - les deux côtés doivent correspondre. 25 est la norme en régions PAL/EBU, 30 et 29,97 drop-frame en régions NTSC, 24 pour le cinéma. 29,97 drop-frame saute deux NUMÉROS d'image chaque minute (sauf toutes les 10) pour que l'affichage reste fidèle à l'horloge murale - aucun audio/vidéo n'est perdu.",
+      "title": "Cadence"
+    },
+    "tc-start": {
+      "body": "Où l'horloge commence à compter. Un timecode fixe (p. ex. 00:00:00:00) est normal pour les spectacles ; « heure du jour » cale l'horloge sur votre heure murale, pratique quand plusieurs systèmes doivent s'accorder sur l'heure réelle.",
+      "title": "Position de départ"
+    },
+    "tc-timecode": {
+      "body": "Le timecode SMPTE est une horloge qui tourne (HH:MM:SS:FF - FF = numéro d'image) et garde des logiciels et du matériel séparés synchronisés. rave-mate génère une horloge « maison » maîtresse et l'envoie dans jusqu'à trois formats à la fois ; tout ce qui écoute la suit, sur cette machine ou une autre du réseau.",
+      "title": "Timecode SMPTE"
     },
     "timing-graph": {
       "body": "Temps d'aller-retour vers chaque machine appairée sur votre LAN, en millisecondes, sur les 2 dernières minutes.\n\nLe RTT est le temps qu'un message met pour atteindre le pair et revenir. Des valeurs à un chiffre sont typiques d'un LAN filaire ; le Wi-Fi reste plus haut et fluctue. Des pics soutenus signifient généralement un réseau chargé ou une machine qui se met en veille - le contrôle à distance et les routes média le ressentiront avant tout le reste.",
