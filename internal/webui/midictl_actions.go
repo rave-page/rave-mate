@@ -1,8 +1,10 @@
 package webui
 
 import (
+	"strconv"
 	"strings"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/midimap"
 )
@@ -100,13 +102,22 @@ func init() {
 		u.toast(i18n.T("midictl.panicked"))
 	})
 
-	// ~1 Hz refresh of the active-port line (resolves after the first send opens the port).
+	// ~1 Hz refresh of the active-port line (resolves after the first send opens the port) + each
+	// controller's port status (flips to "reading" when auto-retry recovers a released port).
 	onLiveTick("midictl", func(u *UI) {
 		if u.svc.MIDIEmit == nil {
 			return
 		}
 		var js strings.Builder
 		u.tickPatch(&js, "midi-active", midiActiveRow(u.svc.MIDIEmit.ActivePort()))
+		if u.svc.Cfg != nil && u.svc.MIDISource != nil {
+			midiCfgMu.Lock()
+			cs := append([]config.MIDIControllerMap(nil), u.svc.Cfg.Features.MIDI.Controllers...)
+			midiCfgMu.Unlock()
+			for i, c := range cs {
+				u.tickPatch(&js, "midi-ctlstat-"+strconv.Itoa(i), u.midiCtlPortStatusInner(c))
+			}
+		}
 		u.flushTick(&js)
 	})
 }

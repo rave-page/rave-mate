@@ -405,6 +405,14 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 		s.onPorts(opened, failed)
 	}
 
+	// Auto-retry ports that were held by another app (winmm single-client): when that app
+	// releases the port (e.g. OBS/Rekordbox closes its MIDI mapping), we pick it up without a
+	// manual toggle. Only INPUT ports; reuses the already-opened THRU output on the binding.
+	if len(failed) > 0 {
+		wg.Add(1)
+		debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.retryFailed(ctx, bindings, failed, emit, &wg) })
+	}
+
 	<-ctx.Done()
 	// Wait for pumps to close their inputs BEFORE returning, so a reconfigure rebuild doesn't
 	// race the old pump for an exclusive hardware port (would spuriously fail to reopen).
@@ -413,6 +421,62 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 		o.Close()
 	}
 	return nil
+}
+
+// retryFailed re-attempts each still-failed input port every few seconds until ctx ends. On
+// success it launches the port's pump and flips its status to open (fires onPorts so the UI can
+// show "reading"). Its own wg count is held for the goroutine's life, so pumps it adds are always
+// awaited by Start's wg.Wait().
+func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBinding, failed []string, emit func(session.Observation), wg *sync.WaitGroup) {
+	pending := make(map[string]bool, len(failed))
+	for _, f := range failed {
+		pending[f] = true
+	}
+	t := time.NewTicker(4 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			for name := range pending {
+				b := bindings[name]
+				if b == nil {
+					delete(pending, name)
+					continue
+				}
+				in, err := midi.Open(name)
+				if err != nil {
+					continue // still held / absent - try again next tick
+				}
+				s.log.Info(srcLog, "MIDI port recovered", map[string]any{"port": in.Name, "thru": b.thruOut != nil})
+				delete(pending, name)
+				binding := *b
+				binding.name = in.Name
+				input := in
+				wg.Add(1)
+				debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
+				s.portMu.Lock()
+				s.openIn = append(s.openIn, in.Name)
+				kept := s.failedIn[:0]
+				for _, f := range s.failedIn {
+					if f != name {
+						kept = append(kept, f)
+					}
+				}
+				s.failedIn = kept
+				open := append([]string(nil), s.openIn...)
+				fl := append([]string(nil), s.failedIn...)
+				s.portMu.Unlock()
+				if s.onPorts != nil {
+					s.onPorts(open, fl)
+				}
+			}
+			if len(pending) == 0 {
+				return
+			}
+		}
+	}
 }
 
 // handleLocal dispatches a locally-received port message: THRU, monitor, learn-capture,

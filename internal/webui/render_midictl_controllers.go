@@ -50,7 +50,7 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		}
 	}
 	head := selectBoxTip(i18n.T("midictl.in.port"), "midi-ctl-port:"+idx, portOpts, c.Port, "midi-in-port") +
-		u.midiCtlPortStatus(c) +
+		`<div id="midi-ctlstat-` + idx + `">` + u.midiCtlPortStatusInner(c) + `</div>` +
 		toggleRow(i18n.T("midictl.in.enabled"), "midi-ctl-enable:"+idx, c.Enabled) +
 		selectBoxTip(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort, "midi-thru") +
 		btnRow(btn(i18n.T("midictl.in.remove"), "warn", "midi-ctl-remove:"+idx, ""))
@@ -63,11 +63,14 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		u.midiLearnGrid(i, c) + `</div>`
 }
 
-// midiCtlPortStatus renders a live open/failed status line for the controller's input port. Only
+// midiCtlPortStatusInner renders the open/failed status for the controller's input port. Only
 // shown once the MIDI child has reported (some port opened or failed); "in use" points at the
-// exact fix (Windows single-client MIDI: close the other app, or route via loopMIDI THRU).
-func (u *UI) midiCtlPortStatus(c config.MIDIControllerMap) string {
-	if c.Port == "" || !c.Enabled {
+// exact fix (Windows single-client MIDI: close the other app, or route via loopMIDI THRU). No
+// tooltip here - this region is live-patched (~1 Hz), which would wipe a pinned tooltip; the
+// full explanation lives on the port select's ⓘ. It flips to "reading" when auto-retry recovers
+// the port after the holding app releases it.
+func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap) string {
+	if c.Port == "" || !c.Enabled || u.svc.MIDISource == nil {
 		return ""
 	}
 	open := u.svc.MIDISource.OpenInputPorts()
@@ -79,7 +82,7 @@ func (u *UI) midiCtlPortStatus(c config.MIDIControllerMap) string {
 		return statusRow("ok", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portReading"))
 	}
 	return statusRow("warn", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portInUseShort")) +
-		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + ` ` + tipTopic("midi-in-port") + `</p>`
+		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + `</p>`
 }
 
 // midiLearnGrid renders a controls×channels grid of learn chips (rows = controls, cols = channels).
