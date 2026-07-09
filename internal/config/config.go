@@ -62,7 +62,10 @@ const (
 	// v25 added the Serato Live Playlist remote scrape (Serato.LivePlaylist*); additive, off.
 	// v26 added the MIDI mixer channel count (MIDIController.Channels, 1..8); additive
 	// (zero value normalized to DefaultMIDIChannels on load).
-	configVersion = 26
+	// v27 added native multi-controller MIDI-learn (MIDI.Controllers: per-controller input
+	// port + learned bindings, optional THRU) + the two-port loopMIDI DJ router
+	// (MIDI.Bridge); all additive, absent = off/empty.
+	configVersion = 27
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -906,6 +909,49 @@ type MIDIFeature struct {
 	DenonPort   string `json:"denonPort"`   // input port carrying the Denon HC4500 stock map
 	CustomPort  string `json:"customPort"`  // input port carrying our custom TSI CC map
 	MeshForward bool   `json:"meshForward"` // always-on mesh: mirror local MIDI to every connected peer
+
+	// Controllers = native MIDI-learn maps (v27): each is a physical controller read
+	// directly (or via a virtual port), with per-control learned bindings that all feed the
+	// shared deck/channel model. Multiple controllers may be open at once on different ports.
+	Controllers []MIDIControllerMap `json:"controllers,omitempty"`
+	// Bridge = two-port loopMIDI router to a DJ app (v27): peer control + optional controller
+	// THRU flow out ToDJPort (the DJ reads it); the DJ's own output (indicators/VU) is read
+	// back on FromDJPort. Off unless Enabled + a port is set.
+	Bridge MIDIBridge `json:"bridge,omitempty"`
+}
+
+// MIDIBinding maps one learned MIDI message to a control on a deck/channel. Status carries the
+// type nibble + MIDI channel captured at learn time; a CC binding matches CC, a Note binding
+// matches Note-On/Off. Control is a midimap.Control ID (eqHigh/eqMid/eqLow/filter/trim/fader/
+// cue/play). Channel is the 1-based deck/mixer channel the value is applied to.
+type MIDIBinding struct {
+	Control string `json:"control"`
+	Channel int    `json:"channel"`
+	Status  byte   `json:"status"`
+	Data1   byte   `json:"data1"`
+	Invert  bool   `json:"invert,omitempty"` // reverse a continuous value (min<->max)
+}
+
+// MIDIControllerMap = one physical controller: an input port + its learned bindings. ThruPort
+// (optional) forwards every raw message on to a MIDI-OUT port (a loopMIDI cable the DJ app
+// reads) so rave-mate can read the controller AND the DJ app still gets it on single-client
+// Windows MIDI - built-in split, no MIDI-OX needed. Empty ThruPort = direct read only (works
+// when the driver is multi-client or on Windows MIDI Services).
+type MIDIControllerMap struct {
+	Name     string        `json:"name"`
+	Port     string        `json:"port"`
+	ThruPort string        `json:"thruPort,omitempty"`
+	Enabled  bool          `json:"enabled"`
+	Bindings []MIDIBinding `json:"bindings,omitempty"`
+}
+
+// MIDIBridge is the two-port loopMIDI DJ router. ToDJPort = MIDI-OUT the DJ app reads (peer
+// control lands here, so a paired instance can drive this DJ rig); FromDJPort = MIDI-IN the DJ
+// app writes (its own indicator/VU output, fed into the decoders). Either port may be empty.
+type MIDIBridge struct {
+	Enabled    bool   `json:"enabled"`
+	ToDJPort   string `json:"toDjPort,omitempty"`
+	FromDJPort string `json:"fromDjPort,omitempty"`
 }
 
 // RecorderFeature configures the session recorder. ConfirmSeconds is how long a track must
