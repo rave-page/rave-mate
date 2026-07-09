@@ -427,7 +427,11 @@ func (u *UI) cardContent(id string) (string, string, string) {
 				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.note")) + `</div>` +
 				toggleRow(i18n.T("settings.body.serato.remote"), "set:serato-remote", sf.Remote) +
 				toggleRow(i18n.T("settings.body.serato.remoteDebug"), "set:serato-remotedebug", sf.RemoteDebug) +
-				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.remoteNote")) + `</div>`
+				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.remoteNote")) + `</div>` +
+				toggleRow(i18n.T("settings.body.serato.livePlaylist"), "set:serato-live", sf.LivePlaylist) +
+				fieldPH(i18n.T("settings.body.serato.livePlaylistUrl"), "set:serato-liveurl", sf.LivePlaylistURL, "text", "https://serato.com/playlists/<username>/live") +
+				fieldPH(i18n.T("settings.body.serato.livePlaylistInterval"), "set:serato-liveinterval", liveIntervalStr(sf.LivePlaylistInterval), "number", "10") +
+				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.livePlaylistNote")) + `</div>`
 	case "virtualdj":
 		vf := &f.VirtualDJ
 		vdjPH := ""
@@ -1504,6 +1508,12 @@ func (u *UI) applySet(id, val string) {
 		f.Serato.Remote = b
 	case "serato-remotedebug":
 		f.Serato.RemoteDebug = b
+	case "serato-live":
+		f.Serato.LivePlaylist = b
+	case "serato-liveurl":
+		f.Serato.LivePlaylistURL = v
+	case "serato-liveinterval":
+		toInt(&f.Serato.LivePlaylistInterval, 3, 300)
 	case "vdj-dir":
 		f.VirtualDJ.DatabaseDir = v
 	case "vdj-netctl":
@@ -1785,6 +1795,14 @@ func pathField(label, act, value, kind string) string {
 func pathFieldPH(label, act, value, kind, placeholder string) string {
 	return `<div class=set-pathrow>` + fieldPH(label, act, value, "text", placeholder) +
 		btn("Browse…", "ghost", "pick-"+kind+":"+act, "") + `</div>`
+}
+
+// liveIntervalStr renders a poll interval for the number field: 0 → "" (placeholder default).
+func liveIntervalStr(sec int) string {
+	if sec <= 0 {
+		return ""
+	}
+	return strconv.Itoa(sec)
 }
 
 func mustNames(fn func() ([]string, error)) []string {

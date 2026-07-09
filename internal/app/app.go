@@ -77,6 +77,7 @@ import (
 	"rave.page/mate/internal/session/sources/prodjlinksrc"
 	"rave.page/mate/internal/session/sources/qmlsrc"
 	"rave.page/mate/internal/session/sources/rekordboxsrc"
+	"rave.page/mate/internal/session/sources/seratolivesrc"
 	"rave.page/mate/internal/session/sources/seratoremotesrc"
 	"rave.page/mate/internal/session/sources/seratosrc"
 	"rave.page/mate/internal/session/sources/virtualdjsrc"
@@ -319,6 +320,14 @@ func run(parent context.Context, serviceMode bool) error {
 	// media frames); enable-gate drives lifecycle. Debug flag logs every frame for the handshake RE.
 	agg.AddSource(seratoremotesrc.New(log, seratoremotesrc.Config{Debug: cfg.Features.Serato.RemoteDebug}),
 		func() bool { return cfg.Features.Serato.Remote })
+	// Serato Live Playlist: remote scrape of serato.com/playlists/<user>/live (master now-playing).
+	// Independent opt-in (works with no local Serato install - controllers/all decks). In-proc +
+	// bounded (a ~10s HTTP poll, capped body, no media); enable-gate drives lifecycle. Emits only
+	// on track CHANGE so a stale past-session page isn't re-asserted as fresh now-playing.
+	agg.AddSource(seratolivesrc.New(log, seratolivesrc.Config{
+		URL:      cfg.Features.Serato.LivePlaylistURL,
+		Interval: time.Duration(cfg.Features.Serato.LivePlaylistInterval) * time.Second,
+	}), func() bool { return cfg.Features.Serato.LivePlaylist })
 	// VirtualDJ: collection (database.xml) + live now-playing via Network Control (full metadata),
 	// our OS2L server (BPM/beat), and/or the tracklist file. In-proc; enable-gate drives lifecycle.
 	vdj := cfg.Features.VirtualDJ
@@ -1441,7 +1450,7 @@ func run(parent context.Context, serviceMode bool) error {
 
 	shutdown := func() {
 		mods.StopAll()
-		midiEmit.Close() // release the MIDI-out loopback port if the test controller opened it
+		midiEmit.Close()  // release the MIDI-out loopback port if the test controller opened it
 		tcSvc.StopClock() // module Stop only fires if it ran; belt-and-braces for a ctl-started clock
 		if workers != nil {
 			workers.Stop()

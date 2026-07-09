@@ -59,7 +59,8 @@ const (
 	// additive, off by default. Later additive at v24 (no bump - zero value = old
 	// behaviour): MediaLink (P4 video routes: codec/bitrate + Spout sharing). Also additive
 	// at v24 (zero value = OS locale→en): UI.Language (webui i18n locale; internal/i18n).
-	configVersion = 24
+	// v25 added the Serato Live Playlist remote scrape (Serato.LivePlaylist*); additive, off.
+	configVersion = 25
 
 	// ArtNetPort is the standard Art-Net UDP port (ArtTimeCode + DMX default target).
 	ArtNetPort = 6454
@@ -827,6 +828,12 @@ type SeratoFeature struct {
 	NowPlaying  bool   `json:"nowPlaying"`  // watch History\Sessions for live now-playing (~1-2s)
 	Remote      bool   `json:"remote"`      // real-time Serato Remote OSC-over-TCP source (opt-in)
 	RemoteDebug bool   `json:"remoteDebug"` // log every inbound Remote frame (handshake capture)
+	// Live Playlist: remote scrape of serato.com/playlists/<user>/live. Independent opt-in
+	// (works without a local Serato install). LivePlaylistURL = full /live URL or a bare
+	// username. Zero value = disabled.
+	LivePlaylist         bool   `json:"livePlaylist"`
+	LivePlaylistURL      string `json:"livePlaylistUrl"`
+	LivePlaylistInterval int    `json:"livePlaylistIntervalSec"` // poll cadence seconds (0 = 10s default)
 }
 
 // VirtualDJFeature configures the VirtualDJ source: collection (database.xml, per-drive merge)

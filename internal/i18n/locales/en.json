@@ -1705,7 +1705,11 @@
         "nowPlaying": "Live now-playing (watch History sessions)",
         "remote": "Serato Remote - real-time deck stream (OSC-over-TCP, experimental)",
         "remoteDebug": "Log every Remote frame (handshake capture)",
-        "remoteNote": "Serato Remote (experimental): advertises this PC to Serato DJ Pro over the LAN for a real-time per-deck stream. The pairing handshake is still being reverse-engineered - enable 'Log every Remote frame' and share the Logs tab so it can be finished. Serato Remote may need enabling in Serato Setup -> Expansion Packs."
+        "remoteNote": "Serato Remote (experimental): advertises this PC to Serato DJ Pro over the LAN for a real-time per-deck stream. The pairing handshake is still being reverse-engineered - enable 'Log every Remote frame' and share the Logs tab so it can be finished. Serato Remote may need enabling in Serato Setup -> Expansion Packs.",
+        "livePlaylist": "Live Playlist (remote, works with any Serato setup)",
+        "livePlaylistUrl": "Live Playlist URL (or username)",
+        "livePlaylistInterval": "Poll interval (seconds)",
+        "livePlaylistNote": "Scrapes your public Serato Live Playlist page for the current track - no local Serato install needed, works with controllers and all 4 decks. Setup in Serato: Settings -> Expansion Packs -> enable 'Serato Playlists' and 'Live Playlists', then click 'Start Live Playlist' and set the playlist to PUBLIC. Paste the .../live URL (or just your Serato username) above. Note: a private page shows no tracks, and the page keeps showing your LAST session when you're not broadcasting - we only publish a track when it actually changes, so stale sessions won't be re-announced as live."
       },
       "service": {
         "install": "Install service",
