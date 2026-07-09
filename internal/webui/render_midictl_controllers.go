@@ -26,6 +26,7 @@ func (u *UI) midiControllersCard() string {
 	ctrls := u.svc.Cfg.Features.MIDI.Controllers
 	var b strings.Builder
 	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.intro")) + ` ` + tipTopic("midi-learn-controllers") + `</p>`)
+	b.WriteString(virtualMIDILinksRow())
 	if len(ctrls) == 0 {
 		b.WriteString(emptyState(i18n.T("midictl.in.empty")))
 	}
@@ -34,6 +35,21 @@ func (u *UI) midiControllersCard() string {
 	}
 	b.WriteString(btnRow(btn(i18n.T("midictl.in.add"), "primary", "midi-ctl-add", "")))
 	return card(i18n.T("midictl.in.card"), badge(i18n.T("midictl.in.badge"), "info"), b.String())
+}
+
+// virtualMIDILinksRow renders the "need a virtual MIDI port?" line with the driver download
+// links (same list as the tooltips). Gives users flexibility over which loopback driver to use.
+func virtualMIDILinksRow() string {
+	var b strings.Builder
+	b.WriteString(`<p class=midi-driver-links><span class=midi-driver-lbl>` + htmlEscape(i18n.T("midictl.in.getPort")) + `</span> `)
+	for i, l := range virtualMIDILinks() {
+		if i > 0 {
+			b.WriteString(` · `)
+		}
+		b.WriteString(`<a href=` + attrQ(l.URL) + ` target=_blank rel=noopener>` + htmlEscape(l.Label) + `</a>`)
+	}
+	b.WriteString(`</p>`)
+	return b.String()
 }
 
 // midiControllerBlock renders one controller: port + enable + THRU + remove, then the learn grid.

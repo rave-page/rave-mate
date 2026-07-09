@@ -296,3 +296,18 @@
   line-height: 1;
 }
 .mlg-clear:hover { color: var(--rp-base, #F70864); }
+
+/* virtual-MIDI driver download links (user driver choice / flexibility) */
+.midi-driver-links {
+  font-size: 12px;
+  margin: 4px 0 10px;
+  line-height: 1.6;
+  color: var(--rp-fg-dim, #b7b7b7);
+}
+.midi-driver-lbl { opacity: 0.85; margin-right: 4px; }
+.midi-driver-links a {
+  color: var(--rp-violet, #7C3AED);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.midi-driver-links a:hover { text-decoration: underline; }

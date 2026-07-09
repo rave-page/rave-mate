@@ -3040,6 +3040,7 @@
       "portInUseShort": "Not open - in use by another app",
       "portInUseHint": "Another program (your DJ software, or the controller's own software such as NI Komplete Kontrol) already holds this MIDI port - Windows allows only one app to read a MIDI input at a time. Close that program, or route the controller through a loopMIDI port: set that port as this controller's THRU and point the other app at loopMIDI instead of the hardware.",
       "portInUse": "'{port}' is in use by another app - close it, or route the controller through loopMIDI (set it as THRU).",
+      "getPort": "Need a virtual MIDI port? Install one (your choice):",
       "thru": "THRU to (so the DJ app still gets it)",
       "thruNone": "None",
       "thruClash": "THRU port conflict",

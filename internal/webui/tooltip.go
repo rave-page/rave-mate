@@ -256,25 +256,17 @@ var helpTopics = map[string]helpTopic{
 	"midi-learn-controllers": {
 		Title: i18n.T("help.midi-learn-controllers.title"),
 		Body:  i18n.T("help.midi-learn-controllers.body"),
-		Links: []ttLink{
-			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
-			{"Rekordbox MIDI LEARN guide", "https://rekordbox.com/en/support/faq/mapping-6/"},
-		},
+		Links: append(virtualMIDILinks(), ttLink{"Rekordbox MIDI LEARN guide", "https://rekordbox.com/en/support/faq/mapping-6/"}),
 	},
 	"midi-in-port": {
 		Title: i18n.T("help.midi-in-port.title"),
 		Body:  i18n.T("help.midi-in-port.body"),
-		Links: []ttLink{
-			{"Windows MIDI Services (multi-client)", "https://github.com/microsoft/MIDI"},
-		},
+		Links: virtualMIDILinks(),
 	},
 	"midi-thru": {
 		Title: i18n.T("help.midi-thru.title"),
 		Body:  i18n.T("help.midi-thru.body"),
-		Links: []ttLink{
-			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
-			{"MIDI-OX (router/splitter)", "http://www.midiox.com/"},
-		},
+		Links: append(virtualMIDILinks(), ttLink{"MIDI-OX (router/splitter)", "http://www.midiox.com/"}),
 	},
 	"midi-learn-grid": {
 		Title: i18n.T("help.midi-learn-grid.title"),
@@ -283,10 +275,20 @@ var helpTopics = map[string]helpTopic{
 	"midi-bridge": {
 		Title: i18n.T("help.midi-bridge.title"),
 		Body:  i18n.T("help.midi-bridge.body"),
-		Links: []ttLink{
-			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
-		},
+		Links: virtualMIDILinks(),
 	},
+}
+
+// virtualMIDILinks is the shared list of virtual-MIDI-port drivers a user can install to create
+// loopback ports (freeware default first, then the open-source option, then the single-port
+// incumbent). Windows MIDI Services is MIT-licensed and also multi-client, so on it two apps can
+// open one hardware controller directly - no loopback/THRU needed at all.
+func virtualMIDILinks() []ttLink {
+	return []ttLink{
+		{"loopMIDI - unlimited named ports (freeware)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
+		{"Windows MIDI Services - open source (MIT), multi-client + loopback", "https://microsoft.github.io/MIDI/get-latest/"},
+		{"LoopBe1 - single port (freeware)", "https://www.nerds.de/en/loopbe1.html"},
+	}
 }
 
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -

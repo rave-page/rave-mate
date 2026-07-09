@@ -10,9 +10,20 @@ the configured port(s):
 Source: `internal/session/sources/midisrc/`. Driver: `internal/midi/` (Windows = `winmm.dll`
 via stdlib `syscall`, **no third-party dependency**; other OSes report unsupported).
 
+## Virtual MIDI port drivers (your choice)
+
+rave-mate never bundles a driver - pick whichever virtual-MIDI backend you prefer. The MIDI tab
+links all three:
+
+| Driver | Ports | License | Notes |
+|---|---|---|---|
+| [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) | unlimited, named | freeware | Default recommendation - create as many named cables as you need. |
+| [Windows MIDI Services](https://microsoft.github.io/MIDI/get-latest/) | loopback A/B + **multi-client** | **open source (MIT)** | Microsoft's new stack. Multi-client means two apps can open one hardware controller directly - **no loopback/THRU needed at all**. Win10 22H2+/Win11. |
+| [LoopBe1](https://www.nerds.de/en/loopbe1.html) | 1 (LoopBe30 = 30) | freeware | Single port; fine for a one-app map, but you'll need a second port to read a controller AND feed a DJ app. |
+
 ## Setup (Windows)
 
-1. Install a virtual MIDI port - **loopMIDI** (Tobias Erichsen). Create one port, e.g.
+1. Install a virtual MIDI port - **loopMIDI** (or any driver above). Create one port, e.g.
    `RavePage`. Traktor can't send MIDI to an app directly; the virtual port bridges them.
 2. In Traktor → Preferences → Controller Manager:
    - **Custom state:** import `RavePage-State.tsi` (or build the Generic-MIDI device per the
