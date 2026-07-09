@@ -279,15 +279,19 @@ var helpTopics = map[string]helpTopic{
 	},
 }
 
-// virtualMIDILinks is the shared list of virtual-MIDI-port drivers a user can install to create
-// loopback ports (freeware default first, then the open-source option, then the single-port
-// incumbent). Windows MIDI Services is MIT-licensed and also multi-client, so on it two apps can
-// open one hardware controller directly - no loopback/THRU needed at all.
+// virtualMIDILinks is the shared list of virtual-MIDI-port options. loopMIDI is the recommended
+// default (no admin, no registry, unlimited ports, works on every Windows). LoopBe1 is a simple
+// single-port option. Windows MIDI Services is listed INFORMATIONALLY only: it's the open-source
+// (MIT) future stack with native multi-client (both apps read one controller directly - no
+// loopback needed), but it ships to a PC via Windows Update and rave-mate uses it AUTOMATICALLY
+// once present. We deliberately do NOT link its enablement/SDK page or mention the winmm
+// registry fix - forcing it on a PC where the OS stack isn't delivered yet breaks ALL classic
+// MIDI (every port vanishes). So: point at the info page, no call to action.
 func virtualMIDILinks() []ttLink {
 	return []ttLink{
-		{"loopMIDI - unlimited named ports (freeware)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
-		{"Windows MIDI Services - open source (MIT), multi-client + loopback", "https://microsoft.github.io/MIDI/get-latest/"},
+		{"loopMIDI - unlimited named ports, no admin (freeware, recommended)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
 		{"LoopBe1 - single port (freeware)", "https://www.nerds.de/en/loopbe1.html"},
+		{"Windows MIDI Services - future built-in option; used automatically once Windows ships it", "https://microsoft.github.io/MIDI/"},
 	}
 }
 

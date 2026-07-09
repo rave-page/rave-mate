@@ -17,9 +17,9 @@ links all three:
 
 | Driver | Ports | License | Notes |
 |---|---|---|---|
-| [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) | unlimited, named | freeware | Default recommendation - create as many named cables as you need. |
-| [Windows MIDI Services](https://microsoft.github.io/MIDI/get-latest/) | loopback A/B + **multi-client** | **open source (MIT)** | Microsoft's new stack. Multi-client means two apps can open one hardware controller directly - **no loopback/THRU needed at all**. Win10 22H2+/Win11. |
+| [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) | unlimited, named | freeware | **Recommended.** No admin, no registry, works on every Windows. Create as many named cables as you need. |
 | [LoopBe1](https://www.nerds.de/en/loopbe1.html) | 1 (LoopBe30 = 30) | freeware | Single port; fine for a one-app map, but you'll need a second port to read a controller AND feed a DJ app. |
+| [Windows MIDI Services](https://microsoft.github.io/MIDI/) | loopback A/B + **multi-client** | **open source (MIT)** | The future built-in stack. Multi-client = two apps open one controller directly, **no loopback/THRU at all**. rave-mate uses it **automatically** once Windows delivers it (via Windows Update). ⚠️ **Do not force-enable it** (the SDK's `midifixreg` winmm shim) on a PC where the OS stack hasn't shipped yet - it repoints classic MIDI at a backend that isn't running and **every MIDI port disappears**. Just wait for the Windows rollout. |
 
 ## Setup (Windows)
 
