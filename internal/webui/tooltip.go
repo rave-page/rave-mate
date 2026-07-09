@@ -283,10 +283,12 @@ var helpTopics = map[string]helpTopic{
 // default (no admin, no registry, unlimited ports, works on every Windows). LoopBe1 is a simple
 // single-port option. Windows MIDI Services is listed INFORMATIONALLY only: it's the open-source
 // (MIT) future stack with native multi-client (both apps read one controller directly - no
-// loopback needed), but it ships to a PC via Windows Update and rave-mate uses it AUTOMATICALLY
-// once present. We deliberately do NOT link its enablement/SDK page or mention the winmm
-// registry fix - forcing it on a PC where the OS stack isn't delivered yet breaks ALL classic
-// MIDI (every port vanishes). So: point at the info page, no call to action.
+// loopback needed), and rave-mate uses it AUTOMATICALLY once Windows enables it. We deliberately
+// do NOT link its enablement/SDK page or mention the winmm registry fix (midifixreg): the service
+// ships in-box, but the classic-app (winmm) handoff is staged-rollout-gated - Windows reverts a
+// forced Drivers32 rewiring on the next boot while the device-transfer flag stays set, a
+// half-state where EVERY winmm MIDI port vanishes (verified 2026-07: winmm=0 ports, WinRT fine;
+// recovery = registry restore + reboot). So: point at the info page, no call to action.
 func virtualMIDILinks() []ttLink {
 	return []ttLink{
 		{"loopMIDI - unlimited named ports, no admin (freeware, recommended)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
