@@ -74,6 +74,43 @@ link today via `midi.custom`). **Missing:** per-controller CC maps for popular S
 controllers (DDJ-FLX4/SB3, Rane One, …) + a Serato-specific setup guide, each validated
 against real hardware before shipping (per the Denon caveat - untested CC layouts lie).
 
+## Native MIDI-learn (read any controller) — shipped
+
+The MIDI tab's **Controllers (MIDI-learn)** card reads a physical DJ controller directly and
+learns each control, so EQ/trim/filter/fader/play/cue reach the overlays even when the DJ
+software can't emit them (e.g. Rekordbox can't push play state over a loopback port — a Button
+LED mirrors its own input code, so on a virtual loopback it self-loops; read the controller
+instead). Config: `MIDI.Controllers []MIDIControllerMap`, each with a `Port`, `Enabled`, an
+optional `ThruPort`, and learned `Bindings`. Applies live (the midi child rebuilds on
+`configure`; no restart).
+
+**Workflow:** add a controller → pick its MIDI input port → per control, per channel, click
+**Learn** and move that control on the hardware; the first active-edge message (Note-On, or a
+CC with a nonzero value) binds. Bindings match on `(status type-nibble, MIDI channel, data1)`;
+a CC binding matches CC, a Note binding matches Note-On/Off. All controllers emit under
+`midi.custom`, so several controllers fuse into one deck/channel model. Learned `trim` maps to
+`FieldTrim` (Traktor's map keeps it send-only). Implementation: `learnedDecoder` +
+`ControllerSpec` in `midisrc`, learn capture via `ArmLearn` proxied through the midi child.
+
+**Sharing one controller with the DJ app (Windows single-client MIDI).** `winmm` MIDI-IN is
+exclusive, so two apps can't open the same hardware port. Options, in order:
+
+1. **Multi-client driver / Windows MIDI Services.** Some vendor drivers (and Microsoft's new
+   MIDI 2.0 stack) allow multiple readers — then rave-mate opens the port directly alongside
+   the DJ app, no extra setup.
+2. **Built-in THRU (no MIDI-OX needed).** Set the controller's **THRU** to a loopMIDI port and
+   point the DJ app at that virtual port. rave-mate owns the hardware and re-emits every message
+   to the loopMIDI cable, so the DJ app still gets it — rave-mate *is* the splitter.
+3. **External splitter.** loopMIDI + MIDI-OX fanning the hardware to both apps.
+
+## Two-port loopMIDI DJ bridge — shipped
+
+`MIDI.Bridge` (**DJ bridge** card) routes a paired instance's control out to your DJ software.
+Peer-injected MIDI is written to `ToDJPort` (a loopMIDI port the DJ app reads); the DJ app's own
+output — where it has any — is read back on `FromDJPort`. Two ports keep the DJ app's read and
+write on **different** loopback cables so nothing self-loops. Peer MIDI never hits the local
+forward tap (mesh-loop safety); locally rave-mate never re-transmits to the port it reads.
+
 ## Denon HC4500 decoder (best-effort)
 
 The stock Denon mapping streams LCD text over CC: **channel 0 → deck A, channel 1 → deck B**,
