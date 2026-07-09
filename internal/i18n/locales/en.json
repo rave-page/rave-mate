@@ -1701,7 +1701,10 @@
       "serato": {
         "folder": "_Serato_ folder",
         "note": "Blank = auto-detect Music_Serato_.",
-        "nowPlaying": "Live now-playing (watch History sessions)"
+        "nowPlaying": "Live now-playing (watch History sessions)",
+        "remote": "Serato Remote - real-time deck stream (OSC-over-TCP, experimental)",
+        "remoteDebug": "Log every Remote frame (handshake capture)",
+        "remoteNote": "Serato Remote (experimental): advertises this PC to Serato DJ Pro over the LAN for a real-time per-deck stream. The pairing handshake is still being reverse-engineered - enable 'Log every Remote frame' and share the Logs tab so it can be finished. Serato Remote may need enabling in Serato Setup -> Expansion Packs."
       },
       "service": {
         "install": "Install service",

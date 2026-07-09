@@ -424,7 +424,10 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.serato.title"), i18n.T("settings.card.serato.desc"),
 			pathFieldPH(i18n.T("settings.body.serato.folder"), "set:serato-dir", sf.SeratoDir, "dir", seratoPH) +
 				toggleRow(i18n.T("settings.body.serato.nowPlaying"), "set:serato-np", sf.NowPlaying) +
-				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.note")) + `</div>`
+				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.note")) + `</div>` +
+				toggleRow(i18n.T("settings.body.serato.remote"), "set:serato-remote", sf.Remote) +
+				toggleRow(i18n.T("settings.body.serato.remoteDebug"), "set:serato-remotedebug", sf.RemoteDebug) +
+				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.serato.remoteNote")) + `</div>`
 	case "virtualdj":
 		vf := &f.VirtualDJ
 		vdjPH := ""
@@ -1497,6 +1500,10 @@ func (u *UI) applySet(id, val string) {
 		f.Serato.SeratoDir = v
 	case "serato-np":
 		f.Serato.NowPlaying = b
+	case "serato-remote":
+		f.Serato.Remote = b
+	case "serato-remotedebug":
+		f.Serato.RemoteDebug = b
 	case "vdj-dir":
 		f.VirtualDJ.DatabaseDir = v
 	case "vdj-netctl":
