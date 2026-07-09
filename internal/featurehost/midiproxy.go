@@ -83,11 +83,63 @@ func (p *MidiProxy) SetForwarder(fn func(m midi.Message)) {
 	p.mu.Unlock()
 }
 
-// Inject feeds a peer-bridged MIDI message into the child's decoders (best-effort).
+// Inject feeds a peer-bridged MIDI message into the child's decoders (best-effort). When the
+// DJ bridge is on the child also writes it out to ToDJPort (a paired instance driving the DJ rig).
 func (p *MidiProxy) Inject(m midi.Message) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, _ = p.host.Call(ctx, "inject", midiMsg{S: m.Status, D1: m.Data1, D2: m.Data2})
+}
+
+// Reconfigure re-reads the init config (fresh Controllers/Bridge/ports) and pushes it to the
+// running child, which rebuilds its source in place - applies a new learned mapping live, no
+// respawn. No-op if the child is down (the next spawn reads the fresh config anyway).
+func (p *MidiProxy) Reconfigure() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = p.host.Call(ctx, "configure", p.initFn())
+}
+
+// ArmLearn arms a one-shot native MIDI-learn capture on port (substring; "" = any open port).
+// cb fires with the captured status+data1 (ok=true) or ok=false on timeout/error. Async - the
+// child blocks until an active-edge message arrives or timeout elapses.
+func (p *MidiProxy) ArmLearn(port string, timeout time.Duration, cb func(port string, status, data1 byte, ok bool)) {
+	ms := int(timeout / time.Millisecond)
+	if ms <= 0 {
+		ms = 15000
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ms)*time.Millisecond+3*time.Second)
+		defer cancel()
+		raw, err := p.host.Call(ctx, "learn", learnReq{Port: port, TimeoutMs: ms})
+		if err != nil {
+			cb("", 0, 0, false)
+			return
+		}
+		var r learnRes
+		if json.Unmarshal(raw, &r) != nil {
+			cb("", 0, 0, false)
+			return
+		}
+		cb(r.Port, r.Status, r.Data1, r.OK)
+	}()
+}
+
+// CancelLearn disarms a pending capture in the child.
+func (p *MidiProxy) CancelLearn() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = p.host.Call(ctx, "learn-cancel", nil)
+}
+
+// InputPorts lists available MIDI input ports (for the learn UI). Enumeration is a cheap winmm
+// call (no callback/streaming), so it runs in-daemon like the emitter's OutPorts.
+func (p *MidiProxy) InputPorts() []string {
+	ports, err := midi.Ports()
+	if err != nil {
+		return nil
+	}
+	return ports
 }
 
 // ── session.Source ───────────────────────────────────────────────────────────
@@ -95,10 +147,13 @@ func (p *MidiProxy) Inject(m midi.Message) {
 // ID implements session.Source.
 func (p *MidiProxy) ID() string { return session.SourceMIDI }
 
-// Capabilities implements session.Source (same port-derived logic as the in-proc source).
+// Capabilities implements session.Source (same port-derived logic as the in-proc source),
+// including any learned controllers so the aggregator advertises their deck/channel fields.
 func (p *MidiProxy) Capabilities() []session.Capability {
 	c := p.initFn()
-	return midisrc.New(nil, c.DenonPort, c.CustomPort).Capabilities()
+	src := midisrc.New(nil, c.DenonPort, c.CustomPort)
+	src.SetControllers(toControllerSpecs(c.Controllers))
+	return src.Capabilities()
 }
 
 // Start implements session.Source: spawns the child for the duration of the source slot

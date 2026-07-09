@@ -292,7 +292,16 @@ func run(parent context.Context, serviceMode bool) error {
 	// MIDI driver runs in a child process (winmm callback faults can't touch the daemon);
 	// its host lifecycle rides the source slot, so the enable-gate + Reconcile drive it.
 	midiSrc, merr := featurehost.NewMidiProxy(log, midiMon, func() featurehost.MidiConfig {
-		return featurehost.MidiConfig{DenonPort: cfg.Features.MIDI.DenonPort, CustomPort: cfg.Features.MIDI.CustomPort}
+		return featurehost.MidiConfig{
+			DenonPort:   cfg.Features.MIDI.DenonPort,
+			CustomPort:  cfg.Features.MIDI.CustomPort,
+			Controllers: midiControllerInits(cfg.Features.MIDI.Controllers),
+			Bridge: featurehost.MidiBridgeInit{
+				Enabled:    cfg.Features.MIDI.Bridge.Enabled,
+				ToDJPort:   cfg.Features.MIDI.Bridge.ToDJPort,
+				FromDJPort: cfg.Features.MIDI.Bridge.FromDJPort,
+			},
+		}
 	})
 	if merr != nil {
 		return merr
@@ -1623,6 +1632,24 @@ func run(parent context.Context, serviceMode bool) error {
 func traktorLogPath() string {
 	p, _ := config.DataPath("traktor-payloads.jsonl")
 	return p
+}
+
+// midiControllerInits maps enabled native-learn controllers to the midi child's init wire.
+// Disabled controllers are dropped (their ports stay closed); an enabled controller with no
+// bindings still opens its port so it can be learned.
+func midiControllerInits(cs []config.MIDIControllerMap) []featurehost.MidiControllerInit {
+	out := make([]featurehost.MidiControllerInit, 0, len(cs))
+	for _, c := range cs {
+		if !c.Enabled {
+			continue
+		}
+		bs := make([]featurehost.MidiBindingInit, 0, len(c.Bindings))
+		for _, b := range c.Bindings {
+			bs = append(bs, featurehost.MidiBindingInit{Control: b.Control, Channel: b.Channel, Status: b.Status, Data1: b.Data1, Invert: b.Invert})
+		}
+		out = append(out, featurehost.MidiControllerInit{Name: c.Name, Port: c.Port, ThruPort: c.ThruPort, Bindings: bs})
+	}
+	return out
 }
 
 // linkCaptures persists captured set files and time-links each to the recorder tracklist
