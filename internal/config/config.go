@@ -162,6 +162,16 @@ type Features struct {
 	MediaLink MediaLinkFeature `json:"mediaLink"` // LAN video routes: codec/bitrate + Spout-sender sharing (medialink P4)
 
 	AbletonLink AbletonLinkFeature `json:"abletonLink"` // Ableton Link: publish fused DJ tempo/phrase onto a Link session + Resolume phrase-sync
+
+	MIDIController MIDIControllerFeature `json:"midiController"` // software MIDI test controller (pad/CC surface → loopback port for DJ-app MIDI-learn)
+}
+
+// MIDIControllerFeature configures the software MIDI test controller panel: a virtual pad/CC/knob
+// surface that emits MIDI to a loopback port so a DJ app (Serato DJ Pro etc.) can MIDI-learn
+// custom mappings. Device = MIDI-out port-name substring; "" = auto (match "loopbe"/LoopBe1, else
+// the first available port). Additive at v24 (zero value = auto port).
+type MIDIControllerFeature struct {
+	Device string `json:"device"`
 }
 
 // AbletonLinkFeature configures the Ableton Link bridge: rave-mate publishes the session's
@@ -1714,6 +1724,8 @@ func Default() Config {
 				Enabled: false, Quantum: 16, TempoOwner: "auto",
 				Resolume: ResolumeConfig{Enabled: false, Host: "127.0.0.1", OSCPort: 7000, RESTPort: 8080},
 			},
+
+			MIDIController: MIDIControllerFeature{}, // auto port (loopbe/first) until the user picks one
 		},
 	}
 }

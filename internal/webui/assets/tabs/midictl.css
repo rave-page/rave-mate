@@ -1,0 +1,55 @@
+/* MIDI Controller (test) tab - software pad/CC surface. Mobile-first: base = 320-375px
+ * (4-col pad grid, single-col faders); wider grids via @media. Tokens only, no hardcoded hex. */
+
+.midi-pads {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+.midi-pad {
+  aspect-ratio: 1 / 1;
+  font: 600 15px/1 var(--font-mono, monospace);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+.midi-pad:active {
+  border-color: var(--rp-mint);
+  color: var(--rp-mint);
+  background: var(--rp-control);
+}
+
+.midi-faders {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+.midi-faders .slider {
+  margin: 0;
+}
+.midi-faders .slider-val {
+  font-family: var(--font-mono, monospace);
+  color: var(--rp-mint);
+}
+
+.midi-help {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--rp-muted);
+  font-size: 13px;
+}
+
+@media (min-width: 640px) {
+  .midi-pads {
+    grid-template-columns: repeat(8, 1fr);
+  }
+  .midi-faders {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2) var(--space-4);
+  }
+}

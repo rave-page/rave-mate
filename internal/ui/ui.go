@@ -33,6 +33,7 @@ import (
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/midiemit"
 	"rave.page/mate/internal/module"
 	"rave.page/mate/internal/netstats"
 	"rave.page/mate/internal/obscontrol"
@@ -136,6 +137,7 @@ type Services struct {
 	AppGroups    *appgroups.Service            // application-group launcher (crash recovery); may be nil
 	DMX          *dmx.Router                   // DMX plane (Art-Net ingest + VRSL grid); may be nil
 	DMXMIDI      *vrcmidi.Bridge               // DMX→MIDI VRChat bridge (rate-limited CC out); may be nil
+	MIDIEmit     *midiemit.Emitter             // software MIDI test controller (pad/CC surface → loopback); may be nil
 	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
 	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
 	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil

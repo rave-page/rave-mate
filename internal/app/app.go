@@ -52,6 +52,7 @@ import (
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mediasync"
 	"rave.page/mate/internal/midi"
+	"rave.page/mate/internal/midiemit"
 	"rave.page/mate/internal/module"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/netstats"
@@ -924,6 +925,11 @@ func run(parent context.Context, serviceMode bool) error {
 	// VRChat --midi worlds (change-detected + hard-capped under the ~128 events/frame crash bug).
 	vrcMidiBridge := vrcmidi.New(log, dmxRouter.Store(), func() config.DMXMIDIFeature { return cfg.Features.DMXMIDI })
 
+	// Software MIDI test controller: a pad/CC surface (webui "MIDI Controller" tab) emitting MIDI
+	// to a loopback port (LoopBe1) so a DJ app can MIDI-learn custom mappings. Lazily opens the port
+	// on first send; the panel persists a port change to cfg + calls SetPort.
+	midiEmit := midiemit.New(log, cfg.Features.MIDIController.Device)
+
 	// Local RTSP performer chain: supervised ffmpeg encode of a configured source →
 	// RTSP/TCP for VRChat AVPro (rtspt://) - no OBS/MediaMTX relay.
 	rtspSrv := rtspserve.New(log, func() config.RTSPServeFeature { return cfg.Features.RTSPServe })
@@ -1435,6 +1441,7 @@ func run(parent context.Context, serviceMode bool) error {
 
 	shutdown := func() {
 		mods.StopAll()
+		midiEmit.Close() // release the MIDI-out loopback port if the test controller opened it
 		tcSvc.StopClock() // module Stop only fires if it ran; belt-and-braces for a ctl-started clock
 		if workers != nil {
 			workers.Stop()
@@ -1491,6 +1498,7 @@ func run(parent context.Context, serviceMode bool) error {
 		AppGroups:   appGroups,
 		DMX:         dmxRouter,
 		DMXMIDI:     vrcMidiBridge,
+		MIDIEmit:    midiEmit,
 		RTSP:        rtspSrv,
 		Timecode:    tcSvc,
 		Media:       mediaCtl,

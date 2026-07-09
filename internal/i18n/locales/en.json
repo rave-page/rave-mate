@@ -1186,7 +1186,8 @@
     "settings": "Feature toggles - every capability on/off + config",
     "twitch": "Chat, alerts, stream title & moderation",
     "vrchat": "Account status & bio, emotes, groups",
-    "worlds": "VRChat world sync"
+    "worlds": "VRChat world sync",
+    "midictl": "Software MIDI test controller (test)"
   },
   "overlays": {
     "appearance": {
@@ -2507,7 +2508,8 @@
     "settings": "Settings",
     "twitch": "Twitch",
     "vrchat": "VRChat",
-    "worlds": "Worlds"
+    "worlds": "Worlds",
+    "midictl": "MIDI Controller"
   },
   "track": {
     "few": "{count} tracks",
@@ -2960,5 +2962,25 @@
     "controlling": "Controlling",
     "thisComputer": "This computer",
     "loading": "Loading…"
+  },
+  "midictl": {
+    "subtitle": "Software MIDI test controller - emit MIDI to a virtual port so a DJ app can MIDI-learn custom mappings.",
+    "outputCard": "Output",
+    "port": "Output port",
+    "autoPort": "Auto (LoopBe1 / first port)",
+    "activePort": "Active port",
+    "portNotOpen": "Not open yet - trigger a control to open",
+    "panic": "Panic / All Notes Off",
+    "panicked": "Sent All Notes Off",
+    "noPort": "No MIDI output port - install loopMIDI or connect a device",
+    "padsCard": "Pads",
+    "fadersCard": "Faders",
+    "knobsCard": "Knobs",
+    "helpCard": "How to MIDI-learn in Serato",
+    "help": {
+      "step1": "In Serato DJ Pro (signed in), open Setup then the MIDI tab.",
+      "step2": "Click MIDI to arm learn, then select the target control in Serato.",
+      "step3": "Trigger a pad, fader or knob here - Serato learns it. Repeat per control, then Save."
+    }
   }
 }

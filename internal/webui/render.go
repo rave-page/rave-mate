@@ -80,6 +80,7 @@ func (u *UI) tabs() []tabDef {
 		{"twitch", t("twitch"), f.Twitch.Enabled},
 		{"vrchat", t("vrchat"), f.VRChat.Enabled},
 		{"motion", t("motion"), u.svc.VRCTools != nil || u.svc.VROverlay != nil},
+		{"midictl", t("midictl"), u.svc.MIDIEmit != nil},
 		{"worlds", t("worlds"), f.WorldSync.Enabled},
 		{"appgroups", t("appgroups"), f.AppGroups.Enabled},
 		{"logs", t("logs"), true},
@@ -153,6 +154,7 @@ var navIcons = map[string]string{
 	"twitch":      `<path d="M21 2H3v16h5v4l4-4h5l4-4V2z"/><path d="M11 11V7"/><path d="M16 11V7"/>`,
 	"vrchat":      `<path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3.6a2 2 0 0 1-1.6-.8l-.8-1.1a1.25 1.25 0 0 0-2 0l-.8 1.1a2 2 0 0 1-1.6.8H5a2 2 0 0 1-2-2Z"/><circle cx="8" cy="11" r="1"/><circle cx="16" cy="11" r="1"/>`,
 	"motion":      `<circle cx="12" cy="5" r="2"/><path d="M12 7v5"/><path d="m8 21 4-9 4 9"/><path d="M7 10.5 12 12l5-1.5"/>`,
+	"midictl":     `<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10v4"/><path d="M10 10v4"/><path d="M14 10v4"/><path d="M18 10v4"/>`,
 	"worlds":      `<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>`,
 	"appgroups":   `<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>`,
 	"logs":        `<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`,
@@ -191,6 +193,8 @@ func (u *UI) mainHTML() string {
 	case "motion":
 		u.moEnsure()
 		return u.renderMotion()
+	case "midictl":
+		return u.renderMIDICtl()
 	case "worlds":
 		return u.renderWorlds()
 	case "twitch":
