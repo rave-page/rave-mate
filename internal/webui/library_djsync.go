@@ -53,12 +53,20 @@ func init() {
 	onPrefix("lib-dj-pl:", func(u *UI, m actMsg) { u.djTogglePlaylist(atoi64(m.arg("lib-dj-pl:")), m.Val == "true") })
 	onPrefix("lib-dj-fs:", func(u *UI, m actMsg) { u.djSetField(m.arg("lib-dj-fs:"), m.Val) })
 	onExact("lib-dj-tgt-add", func(u *UI, _ actMsg) {
-		u.djSetRender(func(j *config.SyncJob) { j.Targets = append(j.Targets, config.SyncTarget{App: "traktor", Mode: libsync.ModeFile}) })
+		u.djSetRender(func(j *config.SyncJob) {
+			j.Targets = append(j.Targets, config.SyncTarget{App: "traktor", Mode: libsync.ModeFile})
+		})
 	})
-	onPrefix("lib-dj-tgt-app:", func(u *UI, m actMsg) { u.djSetTarget(atoi(m.arg("lib-dj-tgt-app:")), func(t *config.SyncTarget) { t.App = m.Val }) })
-	onPrefix("lib-dj-tgt-mode:", func(u *UI, m actMsg) { u.djSetTarget(atoi(m.arg("lib-dj-tgt-mode:")), func(t *config.SyncTarget) { t.Mode = m.Val }) })
+	onPrefix("lib-dj-tgt-app:", func(u *UI, m actMsg) {
+		u.djSetTarget(atoi(m.arg("lib-dj-tgt-app:")), func(t *config.SyncTarget) { t.App = m.Val })
+	})
+	onPrefix("lib-dj-tgt-mode:", func(u *UI, m actMsg) {
+		u.djSetTarget(atoi(m.arg("lib-dj-tgt-mode:")), func(t *config.SyncTarget) { t.Mode = m.Val })
+	})
 	onPrefix("lib-dj-tgt-path:", func(u *UI, m actMsg) {
-		u.djSet(func(j *config.SyncJob) { u.djTargetSet(j, atoi(m.arg("lib-dj-tgt-path:")), func(t *config.SyncTarget) { t.OutputPath = strings.TrimSpace(m.Val) }) })
+		u.djSet(func(j *config.SyncJob) {
+			u.djTargetSet(j, atoi(m.arg("lib-dj-tgt-path:")), func(t *config.SyncTarget) { t.OutputPath = strings.TrimSpace(m.Val) })
+		})
 	})
 	onPrefix("lib-dj-tgt-del:", func(u *UI, m actMsg) { u.djDelTarget(atoi(m.arg("lib-dj-tgt-del:"))) })
 	onExact("lib-dj-hotcues", func(u *UI, m actMsg) { u.djSet(func(j *config.SyncJob) { j.Rules.HotcuesToMemory = m.Val == "true" }) })

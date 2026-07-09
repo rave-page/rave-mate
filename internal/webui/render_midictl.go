@@ -22,8 +22,10 @@ func (u *UI) renderMIDICtl() string {
 	}
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
+	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
 	b.WriteString(u.midiPortCard())
 	b.WriteString(u.midiRackCard())
+	b.WriteString(u.midiBridgeCard()) // two-port loopMIDI DJ router (peer control)
 	b.WriteString(u.midiHelpCard())
 	return b.String()
 }

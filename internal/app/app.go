@@ -1517,6 +1517,7 @@ func run(parent context.Context, serviceMode bool) error {
 		DMX:         dmxRouter,
 		DMXMIDI:     vrcMidiBridge,
 		MIDIEmit:    midiEmit,
+		MIDISource:  midiSrc,
 		RTSP:        rtspSrv,
 		Timecode:    tcSvc,
 		Media:       mediaCtl,

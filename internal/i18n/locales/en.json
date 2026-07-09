@@ -3003,6 +3003,37 @@
       "feedback": "For LIVE overlay values, point that same software control's OUTPUT / feedback at the SAME CC. It then echoes its position back on that CC and rave-mate reads it straight into your deck overlays - no extra setup.",
       "caveat": "Rekordbox supports output/feedback mapping well. Serato's per-control output is limited, and Serato will not treat a generic virtual MIDI port as a Serato controller, so live feedback there is partial.",
       "link": "Rekordbox MIDI mapping guide"
+    },
+    "in": {
+      "card": "Controllers (MIDI-learn)",
+      "badge": "Reads your controller",
+      "intro": "Connect a physical DJ controller and learn each control here - EQ, trim, filter, fader, play, cue - straight off the controller's MIDI. This is how EQ/fader/play state reach the overlays; your DJ software can't emit them over a virtual port. Add more than one controller and they all drive the same decks.",
+      "empty": "No controllers yet - add one, pick its MIDI port, then learn its controls.",
+      "add": "+ Add controller",
+      "newCtl": "New controller",
+      "ctlN": "Controller {n}",
+      "port": "MIDI input port",
+      "pickPort": "Pick a MIDI port...",
+      "enabled": "Enabled",
+      "thru": "THRU to (so the DJ app still gets it)",
+      "thruNone": "None",
+      "remove": "Remove",
+      "chShort": "CH{n}",
+      "learn": "Learn",
+      "relearn": "Click, then move the control to re-learn",
+      "clear": "Clear",
+      "needPort": "Pick this controller's MIDI port first",
+      "listening": "Listening - move {control} for CH{ch} on your controller...",
+      "learnTimeout": "No input captured - try again and move the control",
+      "learned": "Learned {midi}"
+    },
+    "bridge": {
+      "card": "DJ bridge (peer control)",
+      "badge": "Two loopMIDI ports",
+      "intro": "Optional: route a paired instance's control out to your DJ software. Peer MIDI is written to the OUT port your DJ app reads; the DJ app's own output (where supported) is read back on the IN port. Needs two loopMIDI ports so the DJ app's read and write never share a port (no self-loop).",
+      "enable": "Enable DJ bridge",
+      "todj": "OUT: rave-mate -> DJ app (peer control)",
+      "fromdj": "IN: DJ app -> rave-mate (feedback)"
     }
   }
 }

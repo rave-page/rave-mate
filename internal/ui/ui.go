@@ -138,6 +138,7 @@ type Services struct {
 	DMX          *dmx.Router                   // DMX plane (Art-Net ingest + VRSL grid); may be nil
 	DMXMIDI      *vrcmidi.Bridge               // DMX→MIDI VRChat bridge (rate-limited CC out); may be nil
 	MIDIEmit     *midiemit.Emitter             // software MIDI test controller (pad/CC surface → loopback); may be nil
+	MIDISource   *featurehost.MidiProxy        // native MIDI-in: learned controllers + DJ bridge (learn/reconfigure/port enum); may be nil
 	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
 	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
 	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
