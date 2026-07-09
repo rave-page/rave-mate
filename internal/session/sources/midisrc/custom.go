@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/midi"
+	"rave.page/mate/internal/midimap"
 	"rave.page/mate/internal/session"
 )
 
@@ -23,32 +24,47 @@ type ccSpec struct {
 	boolean bool
 }
 
-// customCC is the canonical custom map. MIDI channels 1..4 (index 0..3) = decks A..D.
-var customCC = map[byte]ccSpec{
-	20: {session.FieldIsPlaying, session.ScopeDeck, true},
-	23: {session.FieldFader, session.ScopeChannel, false},
-	24: {session.FieldEQHigh, session.ScopeChannel, false},
-	25: {session.FieldEQMid, session.ScopeChannel, false},
-	26: {session.FieldEQLow, session.ScopeChannel, false},
-	27: {session.FieldFilter, session.ScopeChannel, false},
-	28: {session.FieldCue, session.ScopeChannel, true},
+// customCC is the canonical custom map, derived from the shared midimap so send (mixer UI) and
+// receive (this decoder) can never drift. Send-only controls (Trim) have no field and are skipped.
+// MIDI channels 1..N (index 0..N-1) = decks A..H (see deckLetters / midimap.Letters).
+var customCC = buildCustomCC()
+
+func buildCustomCC() map[byte]ccSpec {
+	m := make(map[byte]ccSpec, len(midimap.Controls))
+	for _, c := range midimap.Controls {
+		if c.Field == "" {
+			continue // send-only (Trim): no overlay field consumes it
+		}
+		scope := session.ScopeChannel
+		if c.DeckScope {
+			scope = session.ScopeDeck
+		}
+		m[c.CC] = ccSpec{field: c.Field, scope: scope, boolean: c.Kind == midimap.Momentary}
+	}
+	return m
 }
 
-var deckLetters = []string{"A", "B", "C", "D"}
+// deckLetters names decks by 0-based MIDI channel (shared with the mixer UI + denon decoder).
+var deckLetters = midimap.Letters
 
-// customDecoder decodes our custom CC map into per-deck/channel state observations.
-type customDecoder struct{}
+// customDecoder decodes our custom CC map into per-deck/channel state observations. maxCh caps the
+// accepted MIDI channel count (1..len(deckLetters)); 0 = accept every mapped deck (A..H).
+type customDecoder struct{ maxCh int }
 
 func (customDecoder) id() string { return "custom" }
 
 // handle decodes one message and emits an observation if it matches the custom map.
-func (customDecoder) handle(_ time.Time, m midi.Message, emit func(session.Observation)) {
+func (d customDecoder) handle(_ time.Time, m midi.Message, emit func(session.Observation)) {
 	if !m.IsCC() {
 		return
 	}
-	ch := m.Channel()
-	if ch > 3 {
-		return // we only map decks A..D
+	ch := int(m.Channel())
+	mc := d.maxCh
+	if mc <= 0 || mc > len(deckLetters) {
+		mc = len(deckLetters)
+	}
+	if ch >= mc {
+		return // channel beyond the addressable deck range (A..H)
 	}
 	spec, ok := customCC[m.Controller()]
 	if !ok {

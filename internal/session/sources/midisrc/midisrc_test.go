@@ -47,10 +47,44 @@ func TestCustomDecoderIgnoresUnmappedAndHighChannels(t *testing.T) {
 	d := customDecoder{}
 	now := time.Now()
 	d.handle(now, cc(0, 99, 127), emit)                                    // unmapped CC
-	d.handle(now, cc(5, 20, 127), emit)                                    // channel out of deck range
+	d.handle(now, cc(8, 20, 127), emit)                                    // channel beyond A..H (0..7)
 	d.handle(now, midi.Message{Status: 0x90, Data1: 60, Data2: 100}, emit) // note-on, not CC
 	if len(got) != 0 {
 		t.Fatalf("expected no observations, got %+v", got)
+	}
+}
+
+// Extended decks E..H (channels 4..7) decode after the A..H range extension; ch1..4 unchanged.
+func TestCustomDecoderExtendedChannels(t *testing.T) {
+	var got []session.Observation
+	emit := func(o session.Observation) { got = append(got, o) }
+	d := customDecoder{}
+	now := time.Now()
+	// Deck F = channel 5: play on (CC20) -> deck-scope isPlaying=true, ID "F".
+	d.handle(now, cc(5, 20, 127), emit)
+	// Channel 8 filter (CC27) -> channel-scope filter, ID "8".
+	d.handle(now, cc(7, 27, 127), emit)
+	if len(got) != 2 {
+		t.Fatalf("want 2 observations, got %d: %+v", len(got), got)
+	}
+	if got[0].Scope.Kind != session.ScopeDeck || got[0].Scope.ID != "F" || got[0].Fields[session.FieldIsPlaying] != true {
+		t.Fatalf("deck F obs wrong: %+v", got[0])
+	}
+	if got[1].Scope.Kind != session.ScopeChannel || got[1].Scope.ID != "8" {
+		t.Fatalf("channel 8 obs wrong: %+v", got[1])
+	}
+}
+
+// A custom decoder with maxCh set rejects channels at/above the cap.
+func TestCustomDecoderMaxChannelsCap(t *testing.T) {
+	var got []session.Observation
+	emit := func(o session.Observation) { got = append(got, o) }
+	d := customDecoder{maxCh: 4}
+	now := time.Now()
+	d.handle(now, cc(3, 23, 64), emit) // deck D (index 3) accepted
+	d.handle(now, cc(4, 23, 64), emit) // deck E (index 4) rejected by the cap
+	if len(got) != 1 || got[0].Scope.ID != "4" {
+		t.Fatalf("expected one channel-4 obs, got %+v", got)
 	}
 }
 

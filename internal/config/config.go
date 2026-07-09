@@ -60,7 +60,14 @@ const (
 	// behaviour): MediaLink (P4 video routes: codec/bitrate + Spout sharing). Also additive
 	// at v24 (zero value = OS locale→en): UI.Language (webui i18n locale; internal/i18n).
 	// v25 added the Serato Live Playlist remote scrape (Serato.LivePlaylist*); additive, off.
-	configVersion = 25
+	// v26 added the MIDI mixer channel count (MIDIController.Channels, 1..8); additive
+	// (zero value normalized to DefaultMIDIChannels on load).
+	configVersion = 26
+
+	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
+	DefaultMIDIChannels = 4
+	// MaxMIDIChannels caps the MIDI-mixer channel/deck count (decks A..H = wire channels 0..7).
+	MaxMIDIChannels = 8
 
 	// ArtNetPort is the standard Art-Net UDP port (ArtTimeCode + DMX default target).
 	ArtNetPort = 6454
@@ -167,12 +174,23 @@ type Features struct {
 	MIDIController MIDIControllerFeature `json:"midiController"` // software MIDI test controller (pad/CC surface → loopback port for DJ-app MIDI-learn)
 }
 
-// MIDIControllerFeature configures the software MIDI test controller panel: a virtual pad/CC/knob
-// surface that emits MIDI to a loopback port so a DJ app (Serato DJ Pro etc.) can MIDI-learn
-// custom mappings. Device = MIDI-out port-name substring; "" = auto (match "loopbe"/LoopBe1, else
-// the first available port). Additive at v24 (zero value = auto port).
+// MIDIControllerFeature configures the software MIDI mixer surface: a virtual channel rack (EQ /
+// filter / trim / fader knobs + play/cue) that emits MIDI to a loopback port so a DJ app
+// (Rekordbox / Serato etc.) can MIDI-learn custom mappings. Device = MIDI-out port-name substring;
+// "" = auto (match "loopbe"/LoopBe1, else the first available port). Channels = mixer channel/deck
+// count 1..MaxMIDIChannels (0 -> DefaultMIDIChannels on load). Additive at v24 (Device) + v26 (Channels).
 type MIDIControllerFeature struct {
-	Device string `json:"device"`
+	Device   string `json:"device"`
+	Channels int    `json:"channels"` // mixer channel/deck count 1..8; 0 = DefaultMIDIChannels
+}
+
+// normalize clamps the channel count into 1..MaxMIDIChannels (0/negative -> DefaultMIDIChannels).
+func (m *MIDIControllerFeature) normalize() {
+	if m.Channels <= 0 {
+		m.Channels = DefaultMIDIChannels
+	} else if m.Channels > MaxMIDIChannels {
+		m.Channels = MaxMIDIChannels
+	}
 }
 
 // AbletonLinkFeature configures the Ableton Link bridge: rave-mate publishes the session's
@@ -1732,7 +1750,7 @@ func Default() Config {
 				Resolume: ResolumeConfig{Enabled: false, Host: "127.0.0.1", OSCPort: 7000, RESTPort: 8080},
 			},
 
-			MIDIController: MIDIControllerFeature{}, // auto port (loopbe/first) until the user picks one
+			MIDIController: MIDIControllerFeature{Channels: DefaultMIDIChannels}, // auto port (loopbe/first) until the user picks one
 		},
 	}
 }
@@ -1907,6 +1925,7 @@ func Load() (Config, error) {
 	if cfg.Version < configVersion {
 		migrate(&cfg, raw)
 	}
+	cfg.Features.MIDIController.normalize() // pre-v26 files have no channels key -> default
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = resolveAPIBase()
 	}
