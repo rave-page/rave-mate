@@ -17,5 +17,8 @@ func Open(string) (*Input, error) { return nil, ErrUnsupported }
 // Messages returns a nil channel (never delivers).
 func (in *Input) Messages() <-chan Message { return nil }
 
+// SetThru is a no-op on unsupported platforms.
+func (in *Input) SetThru(func(Message)) {}
+
 // Close is a no-op.
 func (in *Input) Close() error { return nil }

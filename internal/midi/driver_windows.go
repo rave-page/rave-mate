@@ -66,6 +66,7 @@ type Input struct {
 	handle uintptr
 	ch     chan Message
 	closed atomic.Bool
+	thru   atomic.Pointer[func(Message)] // synchronous THRU forward, run in the winmm callback; nil = off
 }
 
 // Open opens the first input port whose name contains substr (case-insensitive); substr ""
@@ -95,6 +96,14 @@ func Open(substr string) (*Input, error) {
 	cb := syscall.NewCallback(func(_ uintptr, wMsg uintptr, _ uintptr, p1 uintptr, _ uintptr) uintptr {
 		if wMsg == mimData && !in.closed.Load() {
 			m := Message{Status: byte(p1), Data1: byte(p1 >> 8), Data2: byte(p1 >> 16)}
+			// THRU FIRST, on the winmm callback thread, before the decode/channel hop - the
+			// lowest-latency controller→DJ-app path (no goroutine-scheduling delay). midiOutShortMsg
+			// is non-blocking (driver-queued) and safe to call here for a *different* device (the
+			// loopback output), which is the classic MIDI-thru pattern. Keep the forward trivial -
+			// no allocations, no locks beyond Output's own - so the OS MIDI thread never stalls.
+			if fn := in.thru.Load(); fn != nil {
+				(*fn)(m)
+			}
 			select {
 			case in.ch <- m:
 			default: // drop if the consumer is behind - never block the MIDI thread
@@ -118,6 +127,18 @@ func Open(substr string) (*Input, error) {
 // Messages returns the stream of incoming messages. The channel is never closed (the
 // callback may fire briefly after Close); range over it via a ctx-bounded select instead.
 func (in *Input) Messages() <-chan Message { return in.ch }
+
+// SetThru installs a forward run synchronously in the MIDI-in callback for every incoming
+// message, before it's queued to Messages() - the lowest-latency THRU (controller → DJ app).
+// nil disables. Set once right after Open; a handful of messages in the microseconds before
+// the store just take the normal channel path.
+func (in *Input) SetThru(fn func(Message)) {
+	if fn == nil {
+		in.thru.Store(nil)
+		return
+	}
+	in.thru.Store(&fn)
+}
 
 // Close stops and releases the port. After Close the callback drops any late messages.
 func (in *Input) Close() error {

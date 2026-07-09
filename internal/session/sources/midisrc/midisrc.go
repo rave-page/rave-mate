@@ -395,6 +395,10 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 		binding := *b
 		binding.name = in.Name
 		input := in
+		if b.thruOut != nil {
+			to := b.thruOut
+			input.SetThru(func(m midi.Message) { to.Send(m.Status, m.Data1, m.Data2) })
+		}
 		wg.Add(1)
 		debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
 	}
@@ -454,6 +458,10 @@ func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBindi
 				binding := *b
 				binding.name = in.Name
 				input := in
+				if b.thruOut != nil {
+					to := b.thruOut
+					input.SetThru(func(m midi.Message) { to.Send(m.Status, m.Data1, m.Data2) })
+				}
 				wg.Add(1)
 				debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
 				s.portMu.Lock()
@@ -479,12 +487,10 @@ func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBindi
 	}
 }
 
-// handleLocal dispatches a locally-received port message: THRU, monitor, learn-capture,
-// peer-forward tap, decoders.
+// handleLocal dispatches a locally-received port message: monitor, learn-capture, peer-forward
+// tap, decoders. THRU is NOT here - it's re-emitted in the winmm input callback (Input.SetThru)
+// before this runs, so the DJ app sees the control at the lowest possible latency.
 func (s *Source) handleLocal(b portBinding, now time.Time, m midi.Message, emit func(session.Observation)) {
-	if b.thruOut != nil {
-		b.thruOut.Send(m.Status, m.Data1, m.Data2) // THRU: controller → DJ app (built-in split)
-	}
 	if s.mon != nil {
 		// Every raw message - even ones no decoder maps - so the debugger shows exactly
 		// what the controller emits (the key signal when a mapping is missing/misrouted).

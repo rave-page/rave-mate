@@ -53,6 +53,7 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		`<div id="midi-ctlstat-` + idx + `">` + u.midiCtlPortStatusInner(c) + `</div>` +
 		toggleRow(i18n.T("midictl.in.enabled"), "midi-ctl-enable:"+idx, c.Enabled) +
 		selectBoxTip(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort, "midi-thru") +
+		u.midiThruWarn(i, c) +
 		btnRow(btn(i18n.T("midictl.in.remove"), "warn", "midi-ctl-remove:"+idx, ""))
 	title := c.Name
 	if title == "" {
@@ -83,6 +84,40 @@ func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap) string {
 	}
 	return statusRow("warn", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portInUseShort")) +
 		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + `</p>`
+}
+
+// midiThruWarn warns when a controller's THRU port is one rave-mate itself reads (its Traktor
+// custom-map / Denon input, this or another controller's input, or the bridge from-DJ port).
+// Windows MIDI-in is single-client, so a port rave-mate holds can't ALSO be opened by the DJ
+// app - the THRU lands somewhere the DJ app can never read, and MIDI-learn silently sees
+// nothing. The fix is a DEDICATED virtual cable for the THRU. Empty = no clash.
+func (u *UI) midiThruWarn(self int, c config.MIDIControllerMap) string {
+	if c.ThruPort == "" || u.svc.Cfg == nil {
+		return ""
+	}
+	tp := strings.ToLower(strings.TrimSpace(c.ThruPort))
+	if tp == "" {
+		return ""
+	}
+	same := func(p string) bool {
+		p = strings.ToLower(strings.TrimSpace(p))
+		return p != "" && p == tp
+	}
+	m := u.svc.Cfg.Features.MIDI
+	clash := same(m.CustomPort) || same(m.DenonPort) || same(m.Bridge.FromDJPort) || same(c.Port)
+	if !clash {
+		for i, o := range m.Controllers {
+			if i != self && same(o.Port) {
+				clash = true
+				break
+			}
+		}
+	}
+	if !clash {
+		return ""
+	}
+	return statusRow("warn", i18n.T("midictl.in.thruClash"), i18n.T("midictl.in.thruClashShort")) +
+		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.thruClashHint")) + `</p>`
 }
 
 // midiLearnGrid renders a controls×channels grid of learn chips (rows = controls, cols = channels).
