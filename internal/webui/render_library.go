@@ -390,10 +390,12 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 				sub = humanBytes(uint64(it.size)) + " · " + strings.ToUpper(it.kind)
 			}
 			act := "lib-nav:" + it.path
+			ctxAct := "lib-dirctx:" + it.path
 			if !it.isDir {
 				act = "lib-open:" + it.path
+				ctxAct = "lib-ctx:" + it.path
 			}
-			b.WriteString(`<div class=gcard data-act="` + html.EscapeString(act) + `"><div class=gcard-ic>` + libGlyph(it.kind, it.isDir) +
+			b.WriteString(`<div class=gcard data-act="` + html.EscapeString(act) + `" data-ctx="` + html.EscapeString(ctxAct) + `"><div class=gcard-ic>` + libGlyph(it.kind, it.isDir) +
 				`</div><div class=gcard-t>` + html.EscapeString(it.name) + `</div><div class=gcard-s>` + html.EscapeString(sub) + `</div></div>`)
 		}
 		b.WriteString(`</div>`)
@@ -402,7 +404,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 		for _, e := range clampFE(len(fs)) {
 			it := fs[e]
 			if it.isDir {
-				b.WriteString(`<div class=trk-row data-act="lib-nav:` + html.EscapeString(it.path) + `"><span class=trk-ic>📁</span>` +
+				b.WriteString(`<div class=trk-row data-act="lib-nav:` + html.EscapeString(it.path) + `" data-ctx="lib-dirctx:` + html.EscapeString(it.path) + `"><span class=trk-ic>📁</span>` +
 					`<span class=trk-main><span class=trk-title>` + html.EscapeString(it.name) + `</span></span></div>`)
 				continue
 			}
@@ -418,7 +420,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 			if s.sel != nil && s.sel.path == it.path {
 				selCls = " sel"
 			}
-			b.WriteString(`<div class="trk-row` + selCls + `">` +
+			b.WriteString(`<div class="trk-row` + selCls + `" data-ctx="lib-ctx:` + html.EscapeString(it.path) + `">` +
 				`<input type=checkbox data-act="lib-batch:` + html.EscapeString(it.path) + `"` + chk + `>` +
 				`<span class=trk-ic data-act="lib-open:` + html.EscapeString(it.path) + `">` + libGlyph(it.kind, false) + `</span>` +
 				`<span class=trk-main data-act="lib-open:` + html.EscapeString(it.path) + `"><span class=trk-title>` + html.EscapeString(it.name) +
@@ -541,7 +543,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		if t.DurationSec > 0 {
 			dur = mmss(t.DurationSec)
 		}
-		b.WriteString(`<div class="trk-row` + selCls + `">` +
+		b.WriteString(`<div class="trk-row` + selCls + `" data-ctx="lib-ctx:` + html.EscapeString(t.Path) + `">` +
 			`<input type=checkbox data-act="lib-collsel:` + html.EscapeString(t.Path) + `"` + chk + `>` + ic +
 			`<span class=trk-main data-act="lib-track:` + html.EscapeString(t.Path) + `"><span class=trk-title>` +
 			html.EscapeString(trackTitle(t)) + `</span><span class=trk-sub>` +

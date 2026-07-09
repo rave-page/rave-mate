@@ -189,6 +189,19 @@ const runtimeJS = `(function(){
     return true;
   };
   window.__tap = function(x,y){ var el=document.elementFromPoint(x,y); if(el){ el.click(); return true; } return false; };
+  // right-click context menu: an element with [data-ctx] forwards its act on contextmenu (Go opens
+  // the menu modal). __ctx(x,y) is the ctl equivalent (TapSecondary) for verification.
+  document.addEventListener('contextmenu', function(e){
+    var el=e.target.closest && e.target.closest('[data-ctx]'); if(!el) return;
+    e.preventDefault();
+    send({act: el.getAttribute('data-ctx')});
+  });
+  window.__ctx = function(x,y){
+    var el=document.elementFromPoint(x,y);
+    el = el && el.closest ? el.closest('[data-ctx]') : null;
+    if(el){ send({act: el.getAttribute('data-ctx')}); return true; }
+    return false;
+  };
   // pointer-position transport: [data-actpos] forwards down/move/up with fractional in-element
   // coords ("down:0.4321,0.5000"); [data-actwheel] forwards wheel steps ("in:fx,fy"/"out:fx,fy").
   // Pure transport (rAF-throttled) - Go interprets the fractions (trim handles, waveform pan/zoom).

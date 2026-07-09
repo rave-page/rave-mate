@@ -49,6 +49,9 @@ func init() {
 	onPrefix("lib-batch-run:", func(u *UI, m actMsg) { u.libBatchRun(m.arg("lib-batch-run:")) })
 	onPrefix("lib-batch-tc:", func(u *UI, m actMsg) { u.libBatchTranscode(m.arg("lib-batch-tc:")) })
 	onPrefix("lib-ctx:", func(u *UI, m actMsg) { u.libCtxModal(m.arg("lib-ctx:")) })
+	onPrefix("lib-dirctx:", func(u *UI, m actMsg) { u.libDirCtxModal(m.arg("lib-dirctx:")) })
+	onPrefix("lib-opendir:", func(u *UI, m actMsg) { u.closeModal(); _ = openURL(m.arg("lib-opendir:")) })
+	onPrefix("lib-dirnav:", func(u *UI, m actMsg) { u.closeModal(); u.libNav(m.arg("lib-dirnav:")) })
 	onPrefix("lib-reveal:", func(u *UI, m actMsg) { _ = openURL(filepath.Dir(m.arg("lib-reveal:"))) })
 	onPrefix("lib-openext:", func(u *UI, m actMsg) { _ = openURL(m.arg("lib-openext:")) })
 	onPrefix("lib-probe:", func(u *UI, m actMsg) { u.libProbeToast(m.arg("lib-probe:")) })
@@ -1945,6 +1948,22 @@ func (u *UI) libCtxModal(path string) {
 	body := btnRow(btn(i18n.T("library.label.renameEllipsis"), "outline", "lib-rename:"+path, ""), btn(i18n.T("library.label.moveEllipsis"), "outline", "lib-move:"+path, ""),
 		btn(i18n.T("library.label.deleteEllipsis"), "destructive", "lib-del:"+path, "")) +
 		btnRow(btn(i18n.T("library.copyPath"), "ghost", "copy", ""), btn(i18n.T("library.reveal"), "ghost", "lib-reveal:"+path, ""), markBtn)
+	u.openModal(modal(filepath.Base(path), body, ""))
+}
+
+// libDirCtxModal is the right-click menu for a folder row: open in the OS file manager, browse
+// into it, or mark/unmark the whole folder as an ID source.
+func (u *UI) libDirCtxModal(path string) {
+	marked := u.svc.IDMarks != nil && u.svc.IDMarks.IsMarked(path)
+	markBtn := btn(i18n.T("library.label.markAsID"), "outline", "lib-mark:"+path, "")
+	if marked {
+		markBtn = btn(i18n.T("library.label.unmarkID"), "outline", "lib-unmark:"+path, "")
+	}
+	body := btnRow(
+		btn(i18n.T("library.reveal"), "primary", "lib-opendir:"+path, ""),
+		btn(i18n.T("library.open"), "outline", "lib-dirnav:"+path, ""),
+		markBtn,
+	) + btnRow(btn(i18n.T("library.copyPath"), "ghost", "copy", ""))
 	u.openModal(modal(filepath.Base(path), body, ""))
 }
 

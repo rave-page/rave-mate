@@ -91,8 +91,13 @@ func (u *UI) Tap(x, y float32) bool {
 	return u.evalBool(fmt.Sprintf("return window.__tap(%g,%g)", x, y))
 }
 
-// TapSecondary has no right-click equivalent yet (context menus are a later port); no-op.
-func (u *UI) TapSecondary(x, y float32) bool { return false }
+// TapSecondary right-clicks at (x,y): fires the context menu for the [data-ctx] element there.
+func (u *UI) TapSecondary(x, y float32) bool {
+	if u.shell == nil {
+		return false
+	}
+	return u.evalBool(fmt.Sprintf("return window.__ctx(%g,%g)", x, y))
+}
 
 func (u *UI) Type(text string) bool {
 	if u.shell == nil {
