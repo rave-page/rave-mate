@@ -1,13 +1,13 @@
 {
-  "version": "nightly-28b6428",
-  "build": 27,
-  "commit": "28b6428",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-27-20260708-28b6428.exe",
-  "sha256": "d8dda7e20456aaa122b02f5a2efc0e3923b20dee49545620be8d8b3eaa9bf4a9",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-27-20260708-28b6428.exe",
-  "installer_sha256": "9c585b444f85719c741526f76efd02c9866975f8356ead6be5e5c8620c55c664",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-27-20260708-28b6428",
-  "linux_sha256": "9a195d01d13f1a451d1aa3adb2ca77f48774c64bb104460362c265d49ff3bea0",
+  "version": "nightly-49a9e93",
+  "build": 28,
+  "commit": "49a9e93",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-28-20260709-49a9e93.exe",
+  "sha256": "535925ccd9698b957c25bb6a60755e086d6c2faf4fdac2f4594bf34d642d8741",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-28-20260709-49a9e93.exe",
+  "installer_sha256": "d3d87590ccdca9ff6d2e0a008c82a9b6595188a54757b83441b21183e511a4d6",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-28-20260709-49a9e93",
+  "linux_sha256": "9832ac2ed7316eb01e425694b3cb8433149963e16777fce4b8d28de01993dcec",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-08T23:01:51Z",
-  "notes": "test(overlayserver): wait for deck+fader convergence (fix Linux CI flake)"
+  "released": "2026-07-09T13:42:09Z",
+  "notes": "feat(midi): rework MIDI tab into a visual DJ-mixer send surface"
 }
