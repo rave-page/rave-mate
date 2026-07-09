@@ -70,7 +70,7 @@ func newTestSession(t *testing.T, cb Callbacks, topics []string) (client net.Con
 	t.Helper()
 	cl, srv := net.Pipe()
 	ctx, cxl := context.WithCancel(context.Background())
-	sess := newSession(srv, topics, 0, false, cb, nil, logbus.New(64), "test")
+	sess := newSession(srv, topics, "rave-mate", "test-uuid", 0, false, cb, nil, logbus.New(64), "test")
 	go sess.run(ctx)
 	return cl, func() { cl.Close(); cxl() }
 }

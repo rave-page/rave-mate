@@ -20,6 +20,8 @@ import (
 type server struct {
 	ln       net.Listener
 	topics   []string
+	peerName string
+	peerUUID string
 	maxFrame int
 	debug    bool
 	cb       Callbacks
@@ -32,13 +34,13 @@ type server struct {
 }
 
 // listen binds host:port and returns the running server plus the actually-bound port.
-func listen(ctx context.Context, host string, port int, topics []string, maxFrame int, debug bool, cb Callbacks, route func(osc.Message), log *logbus.Bus) (*server, int, error) {
+func listen(ctx context.Context, host string, port int, topics []string, peerName, peerUUID string, maxFrame int, debug bool, cb Callbacks, route func(osc.Message), log *logbus.Bus) (*server, int, error) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return nil, 0, err
 	}
-	s := &server{ln: ln, topics: topics, maxFrame: maxFrame, debug: debug, cb: cb, route: route, log: log, tag: "seratoremote", sessions: map[*session]struct{}{}}
+	s := &server{ln: ln, topics: topics, peerName: peerName, peerUUID: peerUUID, maxFrame: maxFrame, debug: debug, cb: cb, route: route, log: log, tag: "seratoremote", sessions: map[*session]struct{}{}}
 	bound := ln.Addr().(*net.TCPAddr).Port
 	debuglog.Go(log, s.tag, func() { s.acceptLoop(ctx) })
 	return s, bound, nil
@@ -54,7 +56,7 @@ func (s *server) acceptLoop(ctx context.Context) {
 		if tc, ok := conn.(*net.TCPConn); ok {
 			_ = tc.SetNoDelay(true)
 		}
-		sess := newSession(conn, s.topics, s.maxFrame, s.debug, s.cb, s.route, s.log, s.tag)
+		sess := newSession(conn, s.topics, s.peerName, s.peerUUID, s.maxFrame, s.debug, s.cb, s.route, s.log, s.tag)
 		s.mu.Lock()
 		s.sessions[sess] = struct{}{}
 		s.mu.Unlock()
@@ -79,32 +81,36 @@ func (s *server) close() {
 
 // session drives one accepted TCP connection: framing, handshake, ping, and status dispatch.
 type session struct {
-	conn   net.Conn
-	reader *frameReader
-	topics []string
-	debug  bool
-	cb     Callbacks
-	route  func(osc.Message)
-	log    *logbus.Bus
-	tag    string
-	addr   string
+	conn     net.Conn
+	reader   *frameReader
+	topics   []string
+	peerName string
+	peerUUID string
+	debug    bool
+	cb       Callbacks
+	route    func(osc.Message)
+	log      *logbus.Bus
+	tag      string
+	addr     string
 
 	writeMu sync.Mutex
 	paired  bool
 	closed  bool
 }
 
-func newSession(conn net.Conn, topics []string, maxFrame int, debug bool, cb Callbacks, route func(osc.Message), log *logbus.Bus, tag string) *session {
+func newSession(conn net.Conn, topics []string, peerName, peerUUID string, maxFrame int, debug bool, cb Callbacks, route func(osc.Message), log *logbus.Bus, tag string) *session {
 	return &session{
-		conn:   conn,
-		reader: newFrameReader(maxFrame),
-		topics: topics,
-		debug:  debug,
-		cb:     cb,
-		route:  route,
-		log:    log,
-		tag:    tag,
-		addr:   conn.RemoteAddr().String(),
+		conn:     conn,
+		reader:   newFrameReader(maxFrame),
+		topics:   topics,
+		peerName: peerName,
+		peerUUID: peerUUID,
+		debug:    debug,
+		cb:       cb,
+		route:    route,
+		log:      log,
+		tag:      tag,
+		addr:     conn.RemoteAddr().String(),
 	}
 }
 
@@ -145,10 +151,22 @@ func (s *session) dispatch(m osc.Message) {
 	}
 	switch {
 	case m.Address == pathAuthorizeRequest:
-		// UNVERIFIED handshake: mirror the request shape back. Best current hypothesis
-		// (serato-connect open-questions.md); the live capture may require different int
-		// status codes or a transformed blob. Kept faithful to serato-connect server.ts.
-		s.write(osc.Msg(pathAuthorizeResponse))
+		// EXPERIMENTAL handshake completion. serato-connect stalled here: both the argless
+		// Response and the (blob,1,1) mirror left Serato silent. Untested-upstream permutations,
+		// combined in one drive: (1) echo the session blob with 0,0 status codes (their notes
+		// flag 0,0 as the likely "ok" pair, never tried), (2) proactively send Pair
+		// (peerName,peerUUID,isActive=1) since Pair direction is unverified and Serato never
+		// initiated it, (3) immediately Register the status topics. If Serato now emits
+		// /Status/*, this cracked it; if it stays silent the blob needs a derived transform.
+		var blob []byte
+		if len(m.Args) > 0 && m.Args[0].Kind == osc.KindBlob {
+			blob = m.Args[0].Blob
+		}
+		s.write(osc.Msg(pathAuthorizeResponse, osc.ArgBlob(blob), osc.ArgInt(0), osc.ArgInt(0)))
+		s.write(osc.Msg(pathPairingPair, osc.ArgString(s.peerName), osc.ArgString(s.peerUUID), osc.ArgInt(1)))
+		for _, t := range s.topics {
+			s.write(osc.Msg(t))
+		}
 	case m.Address == pathPairingPair:
 		s.write(osc.Msg(pathPairingStatus, osc.ArgInt(1))) // StatusChanged shape UNVERIFIED
 		for _, t := range s.topics {

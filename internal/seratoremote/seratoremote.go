@@ -39,6 +39,7 @@ import (
 // Options configures a Receiver.
 type Options struct {
 	PeerName        string   // Bonjour instance label; default "rave-mate"
+	PeerUUID        string   // Pair peerUUID (,ssi arg 2); default a fixed rave-mate UUID
 	Host            string   // TCP bind host; default "0.0.0.0"
 	Port            int      // TCP port; 0 = OS-assigned (advertised via SRV)
 	SubscribeTopics []string // default DefaultSubscriptionTopics
@@ -70,6 +71,9 @@ func New(opts Options, cb Callbacks, log *logbus.Bus) *Receiver {
 	if opts.PeerName == "" {
 		opts.PeerName = "rave-mate"
 	}
+	if opts.PeerUUID == "" {
+		opts.PeerUUID = defaultPeerUUID
+	}
 	if opts.Host == "" {
 		opts.Host = "0.0.0.0"
 	}
@@ -86,7 +90,7 @@ func New(opts Options, cb Callbacks, log *logbus.Bus) *Receiver {
 // cancelled. It returns after setup; the accept + read loops run in panic-guarded
 // goroutines. Blocks on ctx.Done() then tears everything down.
 func (r *Receiver) Start(ctx context.Context) error {
-	srv, port, err := listen(ctx, r.opts.Host, r.opts.Port, r.opts.SubscribeTopics, r.opts.MaxFrameBytes, r.opts.Debug, r.cb, r.routeStatus, r.log)
+	srv, port, err := listen(ctx, r.opts.Host, r.opts.Port, r.opts.SubscribeTopics, r.opts.PeerName, r.opts.PeerUUID, r.opts.MaxFrameBytes, r.opts.Debug, r.cb, r.routeStatus, r.log)
 	if err != nil {
 		return err
 	}

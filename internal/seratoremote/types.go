@@ -17,6 +17,9 @@ const (
 	pathPairingUnpair     = "/StreamMgmt/Pairing/UnPair"
 	pathPing              = "/Ping"
 
+	// defaultPeerUUID is the peerUUID sent in Pair (,ssi). Fixed so re-pairs are stable.
+	defaultPeerUUID = "5241564d-4154-4500-0000-000000000001"
+
 	pathSongTitle    = "/Status/Deck/Song/Title"
 	pathSongArtist   = "/Status/Deck/Song/Artist"
 	pathSongFilepath = "/Status/Deck/Song/Filepath"
