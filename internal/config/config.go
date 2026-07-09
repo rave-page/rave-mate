@@ -812,9 +812,11 @@ type ProDJLinkFeature struct {
 // now-playing from the active History session file. Fully local, no Serato account / internet.
 // SeratoDir empty = auto-detect %USERPROFILE%\Music\_Serato_ (+ per-drive _Serato_ folders).
 type SeratoFeature struct {
-	Enabled    bool   `json:"enabled"`
-	SeratoDir  string `json:"seratoDir"`  // "" = auto-detect Music\_Serato_
-	NowPlaying bool   `json:"nowPlaying"` // watch History\Sessions for live now-playing (~1-2s)
+	Enabled     bool   `json:"enabled"`
+	SeratoDir   string `json:"seratoDir"`   // "" = auto-detect Music\_Serato_
+	NowPlaying  bool   `json:"nowPlaying"`  // watch History\Sessions for live now-playing (~1-2s)
+	Remote      bool   `json:"remote"`      // real-time Serato Remote OSC-over-TCP source (opt-in)
+	RemoteDebug bool   `json:"remoteDebug"` // log every inbound Remote frame (handshake capture)
 }
 
 // VirtualDJFeature configures the VirtualDJ source: collection (database.xml, per-drive merge)

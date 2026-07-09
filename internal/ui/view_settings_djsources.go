@@ -37,6 +37,8 @@ func (u *UI) seratoCard() fyne.CanvasObject {
 	dir.SetText(f.SeratoDir)
 	dir.OnChanged = func(s string) { f.SeratoDir = s; u.saveCfg() }
 	nowPlaying := u.chk("Live now-playing (watch History sessions)", &f.NowPlaying, nil)
+	remote := u.chk("Serato Remote - real-time deck stream (OSC-over-TCP, experimental)", &f.Remote, nil)
+	remoteDebug := u.chk("  └ Log every Remote frame (handshake capture)", &f.RemoteDebug, nil)
 
 	st := u.newStatus(func(s *cardStatus) {
 		if !f.Enabled {
@@ -57,7 +59,10 @@ func (u *UI) seratoCard() fyne.CanvasObject {
 	body := container.NewVBox(
 		container.NewBorder(nil, nil, widget.NewLabel("_Serato_ folder"), nil, folderPickerRow(dir)),
 		nowPlaying,
+		remote,
+		remoteDebug,
 		mutedLabel("Reads your Serato library + crates, and tracks the live set from the active History session (~1–2s after a track plays - Serato logs it once it's been playing a moment). Fully local: no Serato account, no internet, no \"Start Live Playlist\" needed. Toggle off/on to apply a folder change."),
+		mutedLabel("Serato Remote (experimental): advertises this PC to Serato DJ Pro over the LAN for a real-time per-deck stream. The pairing handshake is still being reverse-engineered - enable \"Log every Remote frame\" and share the Logs so it can be finished. Serato Remote may need enabling in Serato's Setup → Expansion Packs."),
 	)
 	return featureCard("Serato DJ", "Collection + live now-playing from Serato's local files.", toggle, st, body)
 }

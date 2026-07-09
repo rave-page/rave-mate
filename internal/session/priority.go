@@ -18,6 +18,11 @@ const (
 	// from the active History session file.
 	SourceSerato = "serato"
 
+	// Serato Remote - real-time OSC-over-TCP (the Serato Remote / SoundSwitch channel): live
+	// per-deck title/artist/path/isPlaying + playhead + mixer faders, pushed by Serato itself.
+	// Richer + faster than the file-tail SourceSerato, so it ranks at the real-time tier.
+	SourceSeratoRemote = "serato.remote"
+
 	// VirtualDJ - one source (liveness key "virtualdj"), three live decoders distinguished by
 	// provenance for field ranking: Network Control plugin (full metadata), OS2L (beat/BPM only),
 	// History tracklist file (title/artist, laggy).
@@ -38,24 +43,24 @@ const (
 // Mirrors the brainstorm: title prefers richest text source (QML/Traktor) over the
 // delayed MIDI/Icecast feeds; descriptive metadata prefers NML (collection-accurate).
 var fieldPriority = map[string][]string{
-	FieldTitle:     {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceMIDIDenon, SourceProDJLink, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying},
-	FieldArtist:    {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceMIDIDenon, SourceProDJLink, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying},
+	FieldTitle:     {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceMIDIDenon, SourceProDJLink, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying},
+	FieldArtist:    {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceMIDIDenon, SourceProDJLink, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying},
 	FieldAlbum:     {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
 	FieldGenre:     {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
 	FieldKey:       {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceProDJLink, SourceRekordboxDB, SourceNML, SourceMIDICustom},
-	FieldBPM:       {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceVDJOS2L, SourceRekordboxMem, SourceProDJLink, SourceSerato, SourceMIDICustom, SourceRekordboxDB, SourceNML},
-	FieldIsPlaying: {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceSerato},
-	FieldPath:      {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
+	FieldBPM:       {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceVDJOS2L, SourceRekordboxMem, SourceProDJLink, SourceSerato, SourceMIDICustom, SourceRekordboxDB, SourceNML},
+	FieldIsPlaying: {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceSerato},
+	FieldPath:      {SourceNML, SourceQML, SourceTraktor, SourceSeratoRemote, SourceSerato, SourceRekordboxDB},
 	// Fader: the MIDI-custom map (RavePage Volume Adjust CC) reports the true channel-fader
 	// POSITION; Traktor's HTTP feed only gives onAirLevel (post fader×crossfader, ~0.85 at
 	// full). Prefer the real position so the meter reads 100% at 100%. onAirLevel→fader stays
 	// the fallback for HTTP-only setups (lowest here).
-	FieldFader: {SourceQML, SourceMIDICustom, SourceTraktor, SourceProDJLink, SourceNML},
+	FieldFader: {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
 }
 
 // defaultPriority ranks sources for any field without an explicit table entry
 // (the live numeric/boolean mixer state).
-var defaultPriority = []string{SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceVDJOS2L, SourceSerato, SourceMIDIDenon, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying}
+var defaultPriority = []string{SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceVDJOS2L, SourceSerato, SourceMIDIDenon, SourceRekordboxDB, SourceVDJHistory, SourceNML, SourceIcecast, SourceNowPlaying}
 
 // rank returns the priority index of src for field (lower = wins). Unknown = lowest.
 func rank(src, field string) int {

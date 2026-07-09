@@ -76,6 +76,7 @@ import (
 	"rave.page/mate/internal/session/sources/prodjlinksrc"
 	"rave.page/mate/internal/session/sources/qmlsrc"
 	"rave.page/mate/internal/session/sources/rekordboxsrc"
+	"rave.page/mate/internal/session/sources/seratoremotesrc"
 	"rave.page/mate/internal/session/sources/seratosrc"
 	"rave.page/mate/internal/session/sources/virtualdjsrc"
 	"rave.page/mate/internal/setfp"
@@ -312,6 +313,11 @@ func run(parent context.Context, serviceMode bool) error {
 	// no account/internet). In-proc (stdlib file watch); the enable-gate drives its lifecycle.
 	agg.AddSource(seratosrc.New(log, cfg.Features.Serato.SeratoDir, cfg.Features.Serato.NowPlaying),
 		func() bool { return cfg.Features.Serato.Enabled })
+	// Serato Remote: real-time OSC-over-TCP - we advertise _SeratoIOSRemote._tcp and Serato DJ
+	// Pro connects in and streams per-deck state. In-proc + bounded (tiny control messages, no
+	// media frames); enable-gate drives lifecycle. Debug flag logs every frame for the handshake RE.
+	agg.AddSource(seratoremotesrc.New(log, seratoremotesrc.Config{Debug: cfg.Features.Serato.RemoteDebug}),
+		func() bool { return cfg.Features.Serato.Remote })
 	// VirtualDJ: collection (database.xml) + live now-playing via Network Control (full metadata),
 	// our OS2L server (BPM/beat), and/or the tracklist file. In-proc; enable-gate drives lifecycle.
 	vdj := cfg.Features.VirtualDJ

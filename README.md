@@ -208,6 +208,13 @@ those we learned from.
 - [FFmpeg](https://ffmpeg.org) - media probe / encode / decode across the media plane.
 - Plus the Go modules justified in [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md).
 
+**Protocols we ported:**
+- [chrisle/serato-connect](https://github.com/chrisle/serato-connect) (MIT) - the Serato
+  Remote real-time OSC-over-TCP protocol (`internal/seratoremote`) and the Serato History
+  `adat` field ids are derived from its `docs/protocol.md` spec + implementation; the framing
+  and OSC parity tests are ports of its test vectors. Full license in
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 **VR overlay UX - studied, not copied:** the correct approaches for laser↔overlay intersection
 (controller *tip*-pose ray + `ComputeOverlayIntersection`), overlay lifecycle, and grab/edit
 manipulation were learned from these excellent projects. They are **GPL-3.0**; rave-mate does not
