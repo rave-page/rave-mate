@@ -26,6 +26,7 @@ const (
 	FieldEQMid  = "eqMid"
 	FieldEQLow  = "eqLow"
 	FieldFilter = "filter"
+	FieldTrim   = "trim" // channel gain/trim 0..1 (learned controllers; Traktor send-only)
 	FieldCue    = "cue"
 
 	// master

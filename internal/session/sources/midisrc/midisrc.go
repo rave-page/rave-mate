@@ -1,9 +1,12 @@
 // Package midisrc is the MIDI-controller session source. It reads MIDI input (via
-// internal/midi) and runs two decoders: the Denon HC4500 stock-mapping decoder (decks A/B
-// track text) and our custom RavePage-State.tsi decoder (per-deck/channel transport + mixer
-// state). Each decoder's observations carry their own source ID so the merger ranks them
-// independently. Typical setup uses a virtual MIDI port (e.g. loopMIDI) that Traktor's
-// Controller Manager sends to - see docs/MIDI_MAPPING.md.
+// internal/midi) and runs decoders: the Denon HC4500 stock-mapping decoder (decks A/B track
+// text), our custom RavePage-State.tsi decoder (per-deck/channel transport + mixer state), and
+// N learned decoders (native MIDI-learn: one per physical controller, each with its own port +
+// learned bindings, all feeding the shared deck/channel model). Optional per-controller THRU
+// re-emits raw input to a MIDI-OUT (a loopMIDI cable the DJ app reads) so rave-mate can read a
+// controller AND the DJ app still gets it on single-client Windows MIDI. An optional two-port
+// bridge routes peer control out to the DJ app and reads the DJ app's own output back in.
+// See docs/MIDI_MAPPING.md.
 package midisrc
 
 import (
@@ -11,6 +14,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/debuglog"
@@ -122,17 +126,47 @@ type decoder interface {
 	tick(now time.Time, emit func(session.Observation))
 }
 
-// Source opens the configured MIDI input port(s) and runs the decoders.
-type Source struct {
-	log        *logbus.Bus
-	mon        *logbus.Bus          // raw-message monitor (MIDI debugger tab); nil = off
-	forward    func(m midi.Message) // tap for the peer-link MIDI bridge; nil = off
-	injectCh   chan midi.Message    // peer-bridged MIDI fed into the local decoders
-	denonPort  string
-	customPort string
+// ControllerSpec is one native-learn controller: an input port, its learned bindings, and an
+// optional THRU MIDI-OUT (loopMIDI cable the DJ app reads).
+type ControllerSpec struct {
+	Name     string
+	Port     string
+	ThruPort string
+	Bindings []LearnedBinding
 }
 
-// New constructs the MIDI source. Empty port name = that decoder is disabled.
+// BridgeSpec is the two-port loopMIDI DJ router. ToDJPort = MIDI-OUT the DJ app reads (peer
+// control lands here); FromDJPort = MIDI-IN the DJ app writes (its own indicator/VU output).
+type BridgeSpec struct {
+	Enabled    bool
+	ToDJPort   string
+	FromDJPort string
+}
+
+// Source opens the configured MIDI input port(s) and runs the decoders.
+type Source struct {
+	log         *logbus.Bus
+	mon         *logbus.Bus          // raw-message monitor (MIDI debugger tab); nil = off
+	forward     func(m midi.Message) // tap for the peer-link MIDI bridge; nil = off
+	injectCh    chan midi.Message    // peer-bridged MIDI fed into the local decoders + DJ bridge
+	denonPort   string
+	customPort  string
+	controllers []ControllerSpec
+	bridge      BridgeSpec
+
+	// Opened in Start (single goroutine, before pumps launch), read by pumps/injectPump.
+	outs      map[string]*midi.Output
+	bridgeOut *midi.Output
+
+	// Native MIDI-learn one-shot capture. Armed by ArmLearn; the next active-edge message on
+	// the target port (or any, if learnPort=="") fires the callback and disarms.
+	learnMu   sync.Mutex
+	learnPort string
+	learnCB   func(port string, status, data1 byte)
+}
+
+// New constructs the MIDI source. Empty port name = that decoder is disabled. Learned
+// controllers + the DJ bridge are added via SetControllers / SetBridge before Start.
 func New(log *logbus.Bus, denonPort, customPort string) *Source {
 	return &Source{log: log, denonPort: denonPort, customPort: customPort, injectCh: make(chan midi.Message, 64)}
 }
@@ -144,9 +178,54 @@ func (s *Source) SetMonitor(mon *logbus.Bus) { s.mon = mon }
 // Start (set-once); nil disables.
 func (s *Source) SetForwarder(fn func(m midi.Message)) { s.forward = fn }
 
+// SetControllers sets the native-learn controllers. Call before Start.
+func (s *Source) SetControllers(cs []ControllerSpec) { s.controllers = cs }
+
+// SetBridge sets the two-port DJ router. Call before Start.
+func (s *Source) SetBridge(b BridgeSpec) { s.bridge = b }
+
+// ArmLearn arms a one-shot capture: the next active-edge message (Note-On, or CC with a
+// nonzero value) on port (substring-matched against the opened port name; "" = any port) fires
+// cb with the learned status+data1, then disarms. Re-arming replaces a pending capture.
+func (s *Source) ArmLearn(port string, cb func(port string, status, data1 byte)) {
+	s.learnMu.Lock()
+	s.learnPort = port
+	s.learnCB = cb
+	s.learnMu.Unlock()
+}
+
+// CancelLearn disarms a pending capture.
+func (s *Source) CancelLearn() {
+	s.learnMu.Lock()
+	s.learnCB = nil
+	s.learnMu.Unlock()
+}
+
+// takeLearn returns + disarms the capture callback if this message is a learnable active edge
+// on the armed port, else nil. Kept short so the pump stays hot.
+func (s *Source) takeLearn(m midi.Message, port string) func(string, byte, byte) {
+	if m.IsSystem() {
+		return nil
+	}
+	if !(m.IsNoteOn() || (m.IsCC() && m.Value() > 0)) {
+		return nil // capture the press/turn edge, not release/zero
+	}
+	s.learnMu.Lock()
+	defer s.learnMu.Unlock()
+	if s.learnCB == nil {
+		return nil
+	}
+	if s.learnPort != "" && !strings.Contains(strings.ToLower(port), strings.ToLower(s.learnPort)) {
+		return nil
+	}
+	cb := s.learnCB
+	s.learnCB = nil
+	return cb
+}
+
 // Inject feeds a peer-bridged MIDI message into the local decoders (so a linked instance's
-// controller drives this session). Non-blocking - drops if the buffer is full. The message is
-// processed by the custom-port pump goroutine, so decoder state stays single-threaded.
+// controller drives this session) and, when the DJ bridge is on, out to the DJ app. Non-blocking
+// - drops if the buffer is full. Processed by the inject pump, so decoder state stays isolated.
 func (s *Source) Inject(m midi.Message) {
 	select {
 	case s.injectCh <- m:
@@ -158,69 +237,138 @@ func (s *Source) Inject(m midi.Message) {
 // provenance tags (midi.custom/midi.denon) live on the observations, not here.
 func (s *Source) ID() string { return session.SourceMIDI }
 
-// Capabilities implements session.Source: Denon gives A/B text; the custom map gives
-// per-deck transport + per-channel mixer state.
+// Capabilities implements session.Source: Denon gives A/B text; the custom map + any learned
+// controllers give per-deck transport + per-channel mixer state.
 func (s *Source) Capabilities() []session.Capability {
 	var caps []session.Capability
 	if s.denonPort != "" {
 		caps = append(caps, session.Capability{Scope: session.ScopeDeck, IDs: []string{"A", "B"},
 			Fields: []string{session.FieldTitle, session.FieldArtist}})
 	}
-	if s.customPort != "" {
+	if s.customPort != "" || len(s.controllers) > 0 {
 		caps = append(caps,
 			session.Capability{Scope: session.ScopeDeck, IDs: []string{"A", "B", "C", "D"}, Fields: []string{session.FieldIsPlaying}},
 			session.Capability{Scope: session.ScopeChannel, IDs: []string{"1", "2", "3", "4"},
-				Fields: []string{session.FieldFader, session.FieldEQHigh, session.FieldEQMid, session.FieldEQLow, session.FieldFilter, session.FieldCue}})
+				Fields: []string{session.FieldFader, session.FieldEQHigh, session.FieldEQMid, session.FieldEQLow, session.FieldFilter, session.FieldTrim, session.FieldCue}})
 	}
 	return caps
 }
 
-// portBinding is one opened port plus the decoders that consume it.
+// portBinding is one opened port plus the decoders that consume it and an optional THRU output.
 type portBinding struct {
-	name          string
-	decoders      []decoder
-	acceptsInject bool // this pump drains the peer-bridge inject channel (the custom port)
+	name     string
+	decoders []decoder
+	thruOut  *midi.Output // forward raw input here (THRU: controller → DJ app); nil = off
 }
 
-// Start opens the port(s) and pumps messages into the decoders until ctx is cancelled.
+// Start opens the port(s) + output(s) and pumps messages into the decoders until ctx is
+// cancelled.
 func (s *Source) Start(ctx context.Context, emit func(session.Observation)) error {
-	// Group decoders by port (Denon + custom may share one virtual port or use two).
-	byPort := map[string][]decoder{}
+	s.outs = map[string]*midi.Output{}
+	openOut := func(name string) *midi.Output {
+		if name == "" {
+			return nil
+		}
+		if o, ok := s.outs[name]; ok {
+			return o
+		}
+		o, err := midi.OpenOutput(name)
+		if err != nil {
+			s.log.Warn(srcLog, "open MIDI-out failed", map[string]any{"port": name, "error": err.Error()})
+			return nil
+		}
+		s.outs[name] = o
+		s.log.Info(srcLog, "MIDI-out open", map[string]any{"port": o.Name})
+		return o
+	}
+
+	// One binding per input port; stack decoders that share a port. injectDecs = the stateless
+	// decoders the inject pump feeds (custom + learned; denon is stateful/text-only, excluded).
+	order := []string{}
+	bindings := map[string]*portBinding{}
+	var injectDecs []decoder
+	get := func(port string) *portBinding {
+		b := bindings[port]
+		if b == nil {
+			b = &portBinding{name: port}
+			bindings[port] = b
+			order = append(order, port)
+		}
+		return b
+	}
 	if s.customPort != "" {
-		byPort[s.customPort] = append(byPort[s.customPort], customDecoder{})
+		cd := customDecoder{}
+		b := get(s.customPort)
+		b.decoders = append(b.decoders, cd)
+		injectDecs = append(injectDecs, cd)
 	}
 	if s.denonPort != "" {
-		byPort[s.denonPort] = append(byPort[s.denonPort], newDenonDecoder())
+		get(s.denonPort).decoders = append(get(s.denonPort).decoders, newDenonDecoder())
 	}
-	if len(byPort) == 0 {
+	for _, c := range s.controllers {
+		if c.Port == "" {
+			continue
+		}
+		ld := &learnedDecoder{name: c.Name, bindings: c.Bindings}
+		b := get(c.Port)
+		b.decoders = append(b.decoders, ld)
+		if c.ThruPort != "" {
+			b.thruOut = openOut(c.ThruPort)
+		}
+		injectDecs = append(injectDecs, ld)
+	}
+	if s.bridge.Enabled {
+		s.bridgeOut = openOut(s.bridge.ToDJPort)
+		if s.bridge.FromDJPort != "" {
+			b := get(s.bridge.FromDJPort)
+			b.decoders = append(b.decoders, customDecoder{})
+		}
+	}
+
+	if len(bindings) == 0 && !s.bridge.Enabled {
 		s.log.Warn(srcLog, "no MIDI ports configured; source idle", nil)
 		<-ctx.Done()
 		return nil
 	}
 
-	for name, decs := range byPort {
+	// Inject pump: peer MIDI → drive the DJ (bridge out) + mirror into the stateless decoders.
+	debuglog.Go(s.log, srcLog, func() { s.injectPump(ctx, injectDecs, emit) })
+
+	for _, name := range order {
+		b := bindings[name]
 		in, err := midi.Open(name)
 		if err != nil {
 			s.log.Warn(srcLog, "open port failed", map[string]any{"port": name, "error": err.Error()})
 			continue
 		}
-		s.log.Info(srcLog, "MIDI port open", map[string]any{"port": in.Name, "decoders": len(decs)})
-		binding := portBinding{name: in.Name, decoders: decs, acceptsInject: name == s.customPort}
+		s.log.Info(srcLog, "MIDI port open", map[string]any{"port": in.Name, "decoders": len(b.decoders), "thru": b.thruOut != nil})
+		binding := *b
+		binding.name = in.Name
 		input := in
 		debuglog.Go(s.log, srcLog, func() { s.pump(ctx, binding, input, emit) })
 	}
 	<-ctx.Done()
+	for _, o := range s.outs {
+		o.Close()
+	}
 	return nil
 }
 
-// handleLocal dispatches a locally-received port message: monitor, peer-forward tap, decoders.
+// handleLocal dispatches a locally-received port message: THRU, monitor, learn-capture,
+// peer-forward tap, decoders.
 func (s *Source) handleLocal(b portBinding, now time.Time, m midi.Message, emit func(session.Observation)) {
+	if b.thruOut != nil {
+		b.thruOut.Send(m.Status, m.Data1, m.Data2) // THRU: controller → DJ app (built-in split)
+	}
 	if s.mon != nil {
 		// Every raw message - even ones no decoder maps - so the debugger shows exactly
-		// what Traktor emits (the key signal when a mapping is missing/misrouted).
+		// what the controller emits (the key signal when a mapping is missing/misrouted).
 		s.mon.Info(b.name, m.Describe(), map[string]any{
 			"status": m.Status, "d1": m.Data1, "d2": m.Data2,
 		})
+	}
+	if cb := s.takeLearn(m, b.name); cb != nil {
+		cb(b.name, m.Status, m.Data1)
 	}
 	if s.forward != nil && !m.IsSystem() {
 		s.forward(m) // tap for the peer-link MIDI bridge
@@ -230,15 +378,33 @@ func (s *Source) handleLocal(b portBinding, now time.Time, m midi.Message, emit 
 	}
 }
 
-// handleInjected dispatches a peer-bridged message to the decoders only - NEVER the forward
-// tap, so bridged-in MIDI can't echo back onto the peer link (mesh loop safety).
-func (s *Source) handleInjected(b portBinding, now time.Time, m midi.Message, emit func(session.Observation)) {
+// injectPump drains peer-bridged MIDI: writes it to the DJ bridge out (so a paired instance can
+// drive this DJ rig) and mirrors it into the stateless decoders. NEVER touches the forward tap
+// (bridged-in MIDI must not echo back onto the peer link - mesh-loop safety).
+func (s *Source) injectPump(ctx context.Context, decs []decoder, emit func(session.Observation)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case m := <-s.injectCh:
+			s.applyInjected(decs, m, emit)
+		}
+	}
+}
+
+// applyInjected handles one peer-bridged message: DJ bridge out + decoder mirror. It NEVER
+// calls the forward tap (s.forward) - that omission is the structural mesh-loop guarantee.
+func (s *Source) applyInjected(decs []decoder, m midi.Message, emit func(session.Observation)) {
+	if s.bridge.Enabled && s.bridgeOut != nil {
+		s.bridgeOut.Send(m.Status, m.Data1, m.Data2)
+	}
 	if s.mon != nil {
-		s.mon.Info(b.name, "⇆ peer "+m.Describe(), map[string]any{
+		s.mon.Info("peer", "⇆ peer "+m.Describe(), map[string]any{
 			"status": m.Status, "d1": m.Data1, "d2": m.Data2, "peer": true,
 		})
 	}
-	for _, d := range b.decoders {
+	now := time.Now()
+	for _, d := range decs {
 		d.handle(now, m, emit)
 	}
 }
@@ -253,12 +419,6 @@ func (s *Source) pump(ctx context.Context, b portBinding, in *midi.Input, emit f
 	summary := time.NewTicker(summaryRate)
 	defer summary.Stop()
 	act := newActivity()
-	// nil channel never fires → only the custom-port pump drains injected peer MIDI, keeping
-	// each decoder set single-threaded.
-	injectCh := s.injectCh
-	if !b.acceptsInject {
-		injectCh = nil
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -266,8 +426,6 @@ func (s *Source) pump(ctx context.Context, b portBinding, in *midi.Input, emit f
 		case m := <-msgs:
 			act.add(m)
 			s.handleLocal(b, time.Now(), m, emit)
-		case m := <-injectCh:
-			s.handleInjected(b, time.Now(), m, emit)
 		case now := <-tick.C:
 			for _, d := range b.decoders {
 				d.tick(now, emit)

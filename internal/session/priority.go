@@ -89,7 +89,7 @@ func ttl(field string) time.Duration {
 		return 90 * time.Second
 	case FieldIsPlaying, FieldElapsedTime, FieldCue:
 		return 5 * time.Second
-	case FieldBPM, FieldPhase, FieldFader, FieldEQHigh, FieldEQMid, FieldEQLow, FieldFilter:
+	case FieldBPM, FieldPhase, FieldFader, FieldEQHigh, FieldEQMid, FieldEQLow, FieldFilter, FieldTrim:
 		return 10 * time.Second
 	default:
 		return 30 * time.Second

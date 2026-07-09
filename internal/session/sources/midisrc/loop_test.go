@@ -38,7 +38,7 @@ func TestHandleLocalFiresForwardTap(t *testing.T) {
 	var tapped []midi.Message
 	s.SetForwarder(func(m midi.Message) { tapped = append(tapped, m) })
 	dec := &recDecoder{}
-	b := portBinding{name: "custom", decoders: []decoder{dec}, acceptsInject: true}
+	b := portBinding{name: "custom", decoders: []decoder{dec}}
 
 	s.handleLocal(b, time.Now(), midi.Message{Status: 0x90, Data1: 60, Data2: 100}, noEmit)
 	if len(tapped) != 1 || dec.count() != 1 {
@@ -59,9 +59,8 @@ func TestHandleInjectedNeverFiresForwardTap(t *testing.T) {
 	tapCount := 0
 	s.SetForwarder(func(midi.Message) { tapCount++ })
 	dec := &recDecoder{}
-	b := portBinding{name: "custom", decoders: []decoder{dec}, acceptsInject: true}
 
-	s.handleInjected(b, time.Now(), midi.Message{Status: 0x90, Data1: 64, Data2: 127}, noEmit)
+	s.applyInjected([]decoder{dec}, midi.Message{Status: 0x90, Data1: 64, Data2: 127}, noEmit)
 	if tapCount != 0 {
 		t.Fatalf("injected msg hit the forward tap %d times (loop path!)", tapCount)
 	}
@@ -102,7 +101,7 @@ func (l *loopLink) count() int {
 
 // Full mesh chain, wired like app.go on BOTH instances: local port msg on A → forward tap →
 // bridge A broadcast → transport → B receives it as injected MIDI (peerbridge delivers inbound
-// ChanMIDI to the app sink, which Injects into midisrc; the inject drain is handleInjected).
+// ChanMIDI to the app sink, which Injects into midisrc; the inject drain is applyInjected).
 // The message must reach B's decoders exactly once and must never echo back to A. A wrong
 // wiring (injected feeding the tap) would recurse A→B→A… - the send counters catch it.
 func TestMeshNoEchoLoopAcrossInstances(t *testing.T) {
@@ -113,7 +112,7 @@ func TestMeshNoEchoLoopAcrossInstances(t *testing.T) {
 		br.SetMIDIMesh(true)
 		s.SetForwarder(func(m midi.Message) { br.ForwardMIDI(m.Status, m.Data1, m.Data2) })
 		dec := &recDecoder{}
-		return s, link, br, dec, portBinding{name: "custom", decoders: []decoder{dec}, acceptsInject: true}
+		return s, link, br, dec, portBinding{name: "custom", decoders: []decoder{dec}}
 	}
 	srcA, linkA, _, decA, bindA := mk()
 	srcB, linkB, _, decB, bindB := mk()
@@ -122,7 +121,7 @@ func TestMeshNoEchoLoopAcrossInstances(t *testing.T) {
 		return func(payload []byte) {
 			var mm peerbridge.MIDIMsg
 			if json.Unmarshal(payload, &mm) == nil {
-				s.handleInjected(b, time.Now(), midi.Message{Status: mm.S, Data1: mm.D1, Data2: mm.D2}, noEmit)
+				s.applyInjected(b.decoders, midi.Message{Status: mm.S, Data1: mm.D1, Data2: mm.D2}, noEmit)
 			}
 		}
 	}
