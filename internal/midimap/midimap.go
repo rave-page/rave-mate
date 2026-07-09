@@ -5,9 +5,12 @@
 // rave-mate's outgoing CC; they then point that software control's output/feedback at the SAME
 // CC, so its value echoes back and the decoder drives the live overlay.
 //
-// All controls are Control Change (not note) messages - the decoder only reads CC, so a note
-// would never round-trip. MIDI wire channel = deck index (channel 1 / deck A = wire 0). Trim is
-// send-only (no overlay field yet): the software can learn it, nothing consumes it.
+// Continuous controls (EQ/filter/trim/fader) are Control Change; momentary buttons (Play/Cue) are
+// Note On/Off - a DJ app's MIDI-learn treats a Note as a Button (learns on Note-On, the Note-Off is
+// the release), one clean learn event, vs a CC value-toggle (127 then 0) that fires learn twice. The
+// receive decoder reads BOTH: CC for the Traktor RavePage-State.tsi, and the same-numbered Note for a
+// mixer-learned Rekordbox/Serato feedback. MIDI wire channel = deck index (channel 1 / deck A = wire
+// 0). Trim is send-only (no overlay field yet): the software can learn it, nothing consumes it.
 package midimap
 
 import "rave.page/mate/internal/session"
@@ -38,10 +41,11 @@ const (
 type Control struct {
 	ID        string // stable UI id (eqHigh, eqMid, eqLow, filter, trim, fader, cue, play)
 	LabelKey  string // i18n key suffix -> midictl.ctl.<LabelKey>
-	CC        byte
+	CC        byte   // CC number, or (when Note) the note number - same value both ways
 	Field     string // session.Field* the receive decoder writes; "" = send-only (no overlay)
 	Kind      Kind
 	DeckScope bool // true = deck-scope boolean (Play); false = channel scope
+	Note      bool // true = send/learn as Note On/Off (buttons); false = Control Change
 }
 
 // Controls is the ordered mixer strip (top -> bottom). SINGLE SOURCE OF TRUTH for send + receive.
@@ -53,8 +57,8 @@ var Controls = []Control{
 	{ID: "filter", LabelKey: "filter", CC: 27, Field: session.FieldFilter, Kind: Continuous},
 	{ID: "trim", LabelKey: "trim", CC: 29, Field: "", Kind: Continuous}, // send-only: no overlay field
 	{ID: "fader", LabelKey: "fader", CC: 23, Field: session.FieldFader, Kind: Continuous},
-	{ID: "cue", LabelKey: "cue", CC: 28, Field: session.FieldCue, Kind: Momentary},
-	{ID: "play", LabelKey: "play", CC: 20, Field: session.FieldIsPlaying, Kind: Momentary, DeckScope: true},
+	{ID: "cue", LabelKey: "cue", CC: 28, Field: session.FieldCue, Kind: Momentary, Note: true},
+	{ID: "play", LabelKey: "play", CC: 20, Field: session.FieldIsPlaying, Kind: Momentary, DeckScope: true, Note: true},
 }
 
 // WireChannel maps a 1-based mixer channel to its 0-based MIDI wire channel (ch 1 -> 0). Values

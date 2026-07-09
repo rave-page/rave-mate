@@ -131,7 +131,7 @@ func knobInitial(id string) int {
 func midiKnob(ch, wire int, c midimap.Control) string {
 	val := knobInitial(c.ID)
 	label := i18n.T("midictl.ctl." + c.LabelKey)
-	cc := ccReadout(int(c.CC), ch)
+	cc := ctlReadout(c, ch)
 	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
 	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
 	rot := float64(val)/127*270 - 135
@@ -156,7 +156,7 @@ func midiKnob(ch, wire int, c midimap.Control) string {
 func midiFader(ch, wire int, c midimap.Control) string {
 	val := knobInitial(c.ID)
 	label := i18n.T("midictl.ctl." + c.LabelKey)
-	cc := ccReadout(int(c.CC), ch)
+	cc := ctlReadout(c, ch)
 	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
 	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
 	oninput := `oninput="this.closest('.midi-vfader').style.setProperty('--v',this.value/127)"`
@@ -175,22 +175,27 @@ func midiFader(ch, wire int, c midimap.Control) string {
 		attrQ(i18n.T("midictl.sweep")+" "+label), htmlEscape(i18n.T("midictl.sweepGlyph")))
 }
 
-// midiMomBtn renders a Play/Cue pill: a press sends a momentary CC pulse (127 then 0).
+// midiMomBtn renders a Play/Cue pill: a press sends a momentary Note On + Note Off (a DJ app learns
+// a Note as a Button on the Note-On; the Note-Off is the release - one clean learn event).
 func midiMomBtn(ch, wire int, c midimap.Control) string {
 	label := i18n.T("midictl.ctl." + c.LabelKey)
-	cc := ccReadout(int(c.CC), ch)
+	cc := ctlReadout(c, ch)
 	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
 	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
 	cls := "midi-btn midi-btn--" + c.ID
 	return fmt.Sprintf(`<button class=%s data-act=%s data-testid=%s data-label=%s aria-label=%s>`+
 		`<span class=midi-btn-lbl>%s</span><span class=midi-btn-cc>%s</span></button>`,
-		attrQ(cls), attrQ(fmt.Sprintf("midi-mom:%d:%d", wire, c.CC)), attrQ(tid), attrQ(dl),
+		attrQ(cls), attrQ(fmt.Sprintf("midi-note:%d:%d", wire, c.CC)), attrQ(tid), attrQ(dl),
 		attrQ(label+" "+cc), htmlEscape(label), htmlEscape(cc))
 }
 
-// ccReadout formats a control's assigned MIDI as "CC24·ch1" (1-based channel).
-func ccReadout(cc, ch int) string {
-	return "CC" + strconv.Itoa(cc) + "·ch" + strconv.Itoa(ch)
+// ctlReadout formats a control's assigned MIDI as "CC24·ch1" (continuous) or "Note20·ch1" (button).
+func ctlReadout(c midimap.Control, ch int) string {
+	kind := "CC"
+	if c.Note {
+		kind = "Note"
+	}
+	return kind + strconv.Itoa(int(c.CC)) + "·ch" + strconv.Itoa(ch)
 }
 
 // midiHelpCard explains the send-to-learn round-trip + honest software caveats.

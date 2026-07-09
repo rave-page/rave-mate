@@ -53,29 +53,48 @@ type customDecoder struct{ maxCh int }
 
 func (customDecoder) id() string { return "custom" }
 
-// handle decodes one message and emits an observation if it matches the custom map.
+// handle decodes one message and emits an observation if it matches the custom map. CC feeds every
+// mapped field (Traktor RavePage-State.tsi + any CC feedback); Note On/Off feeds the momentary
+// booleans (Play/Cue) - the mixer sends buttons as notes, and a mixer-learned Rekordbox/Serato echoes
+// them back as notes. The send/receive numbers are identical (midimap), so notes and CC round-trip.
 func (d customDecoder) handle(_ time.Time, m midi.Message, emit func(session.Observation)) {
-	if !m.IsCC() {
-		return
-	}
 	ch := int(m.Channel())
 	mc := d.maxCh
 	if mc <= 0 || mc > len(deckLetters) {
 		mc = len(deckLetters)
 	}
-	if ch >= mc {
+	if ch < 0 || ch >= mc {
 		return // channel beyond the addressable deck range (A..H)
 	}
-	spec, ok := customCC[m.Controller()]
-	if !ok {
+
+	var (
+		spec  ccSpec
+		ok    bool
+		value any
+	)
+	switch {
+	case m.IsCC():
+		spec, ok = customCC[m.Controller()]
+		if !ok {
+			return
+		}
+		if spec.boolean {
+			value = m.Value() > 0
+		} else {
+			value = float64(m.Value()) / 127.0
+		}
+	case m.IsNoteOn() || m.IsNoteOff():
+		// Only the boolean button controls (Play/Cue) map from notes; a note on a continuous
+		// control's number is ignored (EQ/filter/fader are CC-only).
+		spec, ok = customCC[m.Note()]
+		if !ok || !spec.boolean {
+			return
+		}
+		value = m.IsNoteOn()
+	default:
 		return
 	}
-	var value any
-	if spec.boolean {
-		value = m.Value() > 0
-	} else {
-		value = float64(m.Value()) / 127.0
-	}
+
 	scope := session.Scope{Kind: spec.scope}
 	switch spec.scope {
 	case session.ScopeDeck:

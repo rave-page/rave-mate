@@ -32,6 +32,17 @@ func (m Message) Controller() byte { return m.Data1 }
 // Value returns the CC value 0..127 (valid when IsCC).
 func (m Message) Value() byte { return m.Data2 }
 
+// IsNoteOn reports a Note On with non-zero velocity (status nibble 0x9, vel > 0).
+func (m Message) IsNoteOn() bool { return m.Status&0xF0 == 0x90 && m.Data2 > 0 }
+
+// IsNoteOff reports a Note Off: status 0x8, or a Note On with zero velocity (running-status off).
+func (m Message) IsNoteOff() bool {
+	return m.Status&0xF0 == 0x80 || (m.Status&0xF0 == 0x90 && m.Data2 == 0)
+}
+
+// Note returns the note number (valid when IsNoteOn/IsNoteOff).
+func (m Message) Note() byte { return m.Data1 }
+
 // IsSystem reports a System/real-time message (status 0xF0–0xFF) - clock, active-sensing,
 // start/stop, SysEx, etc. These carry no per-deck data; a port that only ever shows these is
 // effectively silent for our purposes (just Traktor's MIDI clock / keep-alive).

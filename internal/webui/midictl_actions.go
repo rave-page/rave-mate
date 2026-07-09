@@ -11,10 +11,10 @@ import (
 // app can MIDI-learn them. Nothing sends unless the user interacts. Registered in init() so
 // parallel tab work never collides on a central switch (dispatch.go convention).
 //
-// Action encoding (arg = "<wireCh>:<cc>"):
-//   midi-send:<wireCh>:<cc>   live continuous CC (val = 0..127) - knob/fader drag
-//   midi-sweep:<wireCh>:<cc>  0->127->0 ramp so learn catches the control
-//   midi-mom:<wireCh>:<cc>    momentary CC pulse (127 then 0) - Play/Cue
+// Action encoding (arg = "<wireCh>:<num>"):
+//   midi-send:<wireCh>:<cc>    live continuous CC (val = 0..127) - knob/fader drag
+//   midi-sweep:<wireCh>:<cc>   0->127->0 ramp so learn catches the control
+//   midi-note:<wireCh>:<note>  momentary Note On (127) then Note Off - Play/Cue (buttons)
 
 func init() {
 	// port selector: reopen on the picked port (or "" = auto) + persist to config.
@@ -71,17 +71,19 @@ func init() {
 		}
 	})
 
-	// momentary Play/Cue: CC 127 then 0 (round-trips as a boolean on the receive side).
-	onPrefix("midi-mom:", func(u *UI, m actMsg) {
+	// momentary Play/Cue: Note On (127) then Note Off after a bounded delay. A DJ app learns a Note
+	// as a Button on the Note-On; the Note-Off (a distinct status byte) is the release, not a second
+	// learn event - so the learn dialog fires once, not twice like a CC 127/0 value-toggle.
+	onPrefix("midi-note:", func(u *UI, m actMsg) {
 		e := u.svc.MIDIEmit
 		if e == nil {
 			return
 		}
-		ch, cc, ok := parseChCC(m.arg("midi-mom:"))
+		ch, note, ok := parseChCC(m.arg("midi-note:"))
 		if !ok {
 			return
 		}
-		if err := e.PulseCC(ch, cc); err != nil {
+		if err := e.TriggerPad(ch, note, 127); err != nil {
 			u.toast(i18n.T("midictl.noPort"))
 		}
 	})
