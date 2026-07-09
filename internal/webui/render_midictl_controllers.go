@@ -50,6 +50,7 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		}
 	}
 	head := selectBoxTip(i18n.T("midictl.in.port"), "midi-ctl-port:"+idx, portOpts, c.Port, "midi-in-port") +
+		u.midiCtlPortStatus(c) +
 		toggleRow(i18n.T("midictl.in.enabled"), "midi-ctl-enable:"+idx, c.Enabled) +
 		selectBoxTip(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort, "midi-thru") +
 		btnRow(btn(i18n.T("midictl.in.remove"), "warn", "midi-ctl-remove:"+idx, ""))
@@ -60,6 +61,25 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 	return `<div class=midi-ctlblock data-testid=` + attrQ("midi-ctl-"+idx) + `>` +
 		`<div class=midi-ctlhead>` + htmlEscape(title) + `</div>` + head +
 		u.midiLearnGrid(i, c) + `</div>`
+}
+
+// midiCtlPortStatus renders a live open/failed status line for the controller's input port. Only
+// shown once the MIDI child has reported (some port opened or failed); "in use" points at the
+// exact fix (Windows single-client MIDI: close the other app, or route via loopMIDI THRU).
+func (u *UI) midiCtlPortStatus(c config.MIDIControllerMap) string {
+	if c.Port == "" || !c.Enabled {
+		return ""
+	}
+	open := u.svc.MIDISource.OpenInputPorts()
+	failed := u.svc.MIDISource.FailedInputPorts()
+	if len(open) == 0 && len(failed) == 0 {
+		return "" // child hasn't reported yet - don't guess
+	}
+	if portContains(open, c.Port) {
+		return statusRow("ok", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portReading"))
+	}
+	return statusRow("warn", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portInUseShort")) +
+		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + ` ` + tipTopic("midi-in-port") + `</p>`
 }
 
 // midiLearnGrid renders a controls×channels grid of learn chips (rows = controls, cols = channels).

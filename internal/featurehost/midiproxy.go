@@ -20,8 +20,10 @@ type MidiProxy struct {
 	initFn func() MidiConfig
 	obs    chan session.Observation
 
-	mu      sync.Mutex
-	forward func(m midi.Message)
+	mu          sync.Mutex
+	forward     func(m midi.Message)
+	openPorts   []string // last-reported opened INPUT ports (from the child's "ports" event)
+	failedPorts []string // last-reported input ports that failed to open (allocated/missing)
 }
 
 // MidiConfig builds the child's init params (re-read live on every restart).
@@ -64,6 +66,15 @@ func NewMidiProxy(log, mon *logbus.Bus, initFn func() MidiConfig) (*MidiProxy, e
 					fn(midi.Message{Status: m.S, Data1: m.D1, Data2: m.D2})
 				}
 			},
+			"ports": func(data json.RawMessage) {
+				var ev portsEvent
+				if json.Unmarshal(data, &ev) != nil {
+					return
+				}
+				p.mu.Lock()
+				p.openPorts, p.failedPorts = ev.Open, ev.Failed
+				p.mu.Unlock()
+			},
 		},
 	})
 	if err != nil {
@@ -101,9 +112,10 @@ func (p *MidiProxy) Reconfigure() {
 }
 
 // ArmLearn arms a one-shot native MIDI-learn capture on port (substring; "" = any open port).
-// cb fires with the captured status+data1 (ok=true) or ok=false on timeout/error. Async - the
-// child blocks until an active-edge message arrives or timeout elapses.
-func (p *MidiProxy) ArmLearn(port string, timeout time.Duration, cb func(port string, status, data1 byte, ok bool)) {
+// cb fires with the captured status+data1 (ok=true), or ok=false with a reason ("port-not-open"
+// = held by another app / gone; "" = timeout/error). Async - the child blocks until an
+// active-edge message arrives, the port is found closed, or timeout elapses.
+func (p *MidiProxy) ArmLearn(port string, timeout time.Duration, cb func(port string, status, data1 byte, ok bool, reason string)) {
 	ms := int(timeout / time.Millisecond)
 	if ms <= 0 {
 		ms = 15000
@@ -113,16 +125,31 @@ func (p *MidiProxy) ArmLearn(port string, timeout time.Duration, cb func(port st
 		defer cancel()
 		raw, err := p.host.Call(ctx, "learn", learnReq{Port: port, TimeoutMs: ms})
 		if err != nil {
-			cb("", 0, 0, false)
+			cb("", 0, 0, false, "")
 			return
 		}
 		var r learnRes
 		if json.Unmarshal(raw, &r) != nil {
-			cb("", 0, 0, false)
+			cb("", 0, 0, false, "")
 			return
 		}
-		cb(r.Port, r.Status, r.Data1, r.OK)
+		cb(r.Port, r.Status, r.Data1, r.OK, r.Reason)
 	}()
+}
+
+// OpenInputPorts returns the controller INPUT ports the child currently has open.
+func (p *MidiProxy) OpenInputPorts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.openPorts...)
+}
+
+// FailedInputPorts returns the controller INPUT ports that failed to open (held by another app,
+// or missing). These are the ports to warn the user about.
+func (p *MidiProxy) FailedInputPorts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.failedPorts...)
 }
 
 // CancelLearn disarms a pending capture in the child.

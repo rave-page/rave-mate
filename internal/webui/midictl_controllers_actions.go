@@ -89,10 +89,20 @@ func init() {
 			u.toast(i18n.T("midictl.in.needPort"))
 			return
 		}
+		// Fast feedback: if the port isn't open (held by another app / gone), say so now instead
+		// of arming a capture that would silently time out.
+		if !portContains(u.svc.MIDISource.OpenInputPorts(), port) {
+			u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+			return
+		}
 		u.toast(i18n.T("midictl.in.listening", i18n.A{"control": i18n.T("midictl.ctl." + control), "ch": strconv.Itoa(ch)}))
-		u.svc.MIDISource.ArmLearn(port, learnTimeout, func(_ string, status, data1 byte, okc bool) {
+		u.svc.MIDISource.ArmLearn(port, learnTimeout, func(_ string, status, data1 byte, okc bool, reason string) {
 			if !okc {
-				u.toast(i18n.T("midictl.in.learnTimeout"))
+				if reason == "port-not-open" {
+					u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+				} else {
+					u.toast(i18n.T("midictl.in.learnTimeout"))
+				}
 				return
 			}
 			u.withCtl(ctlIdx, func(c *config.MIDIControllerMap) { setBinding(c, control, ch, status, data1) })
@@ -188,6 +198,21 @@ func clearBinding(c *config.MIDIControllerMap, control string, ch int) {
 		out = append(out, b)
 	}
 	c.Bindings = out
+}
+
+// portContains reports whether any port name in list contains want (case-insensitive) - the
+// same substring rule midi.Open uses, so "open" here means the same port the child opened.
+func portContains(list []string, want string) bool {
+	w := strings.ToLower(strings.TrimSpace(want))
+	if w == "" {
+		return false
+	}
+	for _, p := range list {
+		if strings.Contains(strings.ToLower(p), w) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseLearnArg parses "<ctlIdx>:<control>:<channel>".

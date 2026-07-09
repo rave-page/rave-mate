@@ -163,6 +163,13 @@ type Source struct {
 	learnMu   sync.Mutex
 	learnPort string
 	learnCB   func(port string, status, data1 byte)
+
+	// Port-open outcome of the last Start build (so the UI can show which controller ports
+	// actually opened vs failed - e.g. a hardware input already held by another app).
+	portMu   sync.Mutex
+	openIn   []string // successfully-opened INPUT port display names
+	failedIn []string // input port names that failed to open (allocated/missing)
+	onPorts  func(open, failed []string)
 }
 
 // New constructs the MIDI source. Empty port name = that decoder is disabled. Learned
@@ -183,6 +190,42 @@ func (s *Source) SetControllers(cs []ControllerSpec) { s.controllers = cs }
 
 // SetBridge sets the two-port DJ router. Call before Start.
 func (s *Source) SetBridge(b BridgeSpec) { s.bridge = b }
+
+// SetOnPorts registers a callback fired after each Start build with the opened + failed INPUT
+// port names, so the host can report which controllers are actually being read.
+func (s *Source) SetOnPorts(fn func(open, failed []string)) { s.onPorts = fn }
+
+// OpenInputPorts returns the INPUT ports opened by the last build.
+func (s *Source) OpenInputPorts() []string {
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+	return append([]string(nil), s.openIn...)
+}
+
+// FailedInputPorts returns the INPUT ports that failed to open (allocated by another app / gone).
+func (s *Source) FailedInputPorts() []string {
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+	return append([]string(nil), s.failedIn...)
+}
+
+// PortOpen reports whether an opened input port name contains substr (case-insensitive).
+func (s *Source) PortOpen(substr string) bool {
+	if substr == "" {
+		s.portMu.Lock()
+		defer s.portMu.Unlock()
+		return len(s.openIn) > 0
+	}
+	want := strings.ToLower(substr)
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+	for _, p := range s.openIn {
+		if strings.Contains(strings.ToLower(p), want) {
+			return true
+		}
+	}
+	return false
+}
 
 // ArmLearn arms a one-shot capture: the next active-edge message (Note-On, or CC with a
 // nonzero value) on port (substring-matched against the opened port name; "" = any port) fires
@@ -332,22 +375,40 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 	}
 
 	// Inject pump: peer MIDI → drive the DJ (bridge out) + mirror into the stateless decoders.
-	debuglog.Go(s.log, srcLog, func() { s.injectPump(ctx, injectDecs, emit) })
+	var wg sync.WaitGroup
+	wg.Add(1)
+	debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.injectPump(ctx, injectDecs, emit) })
 
+	var opened, failed []string
 	for _, name := range order {
 		b := bindings[name]
 		in, err := midi.Open(name)
 		if err != nil {
+			// mmresult=7 (MMSYSERR_ALLOCATED) = another app already holds this input (winmm
+			// MIDI-IN is single-client). Record it so the UI can say so instead of failing silent.
 			s.log.Warn(srcLog, "open port failed", map[string]any{"port": name, "error": err.Error()})
+			failed = append(failed, name)
 			continue
 		}
 		s.log.Info(srcLog, "MIDI port open", map[string]any{"port": in.Name, "decoders": len(b.decoders), "thru": b.thruOut != nil})
+		opened = append(opened, in.Name)
 		binding := *b
 		binding.name = in.Name
 		input := in
-		debuglog.Go(s.log, srcLog, func() { s.pump(ctx, binding, input, emit) })
+		wg.Add(1)
+		debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
 	}
+	s.portMu.Lock()
+	s.openIn, s.failedIn = opened, failed
+	s.portMu.Unlock()
+	if s.onPorts != nil {
+		s.onPorts(opened, failed)
+	}
+
 	<-ctx.Done()
+	// Wait for pumps to close their inputs BEFORE returning, so a reconfigure rebuild doesn't
+	// race the old pump for an exclusive hardware port (would spuriously fail to reopen).
+	wg.Wait()
 	for _, o := range s.outs {
 		o.Close()
 	}

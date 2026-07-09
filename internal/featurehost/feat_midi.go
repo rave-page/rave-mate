@@ -64,6 +64,14 @@ type learnRes struct {
 	Status byte   `json:"status"`
 	Data1  byte   `json:"data1"`
 	OK     bool   `json:"ok"`
+	Reason string `json:"reason,omitempty"` // e.g. "port-not-open" (in use by another app / missing)
+}
+
+// portsEvent reports which controller INPUT ports opened vs failed (child → daemon), so the UI
+// can flag a port that's held exclusively by another app.
+type portsEvent struct {
+	Open   []string `json:"open"`
+	Failed []string `json:"failed"`
 }
 
 func toControllerSpecs(in []MidiControllerInit) []midisrc.ControllerSpec {
@@ -113,6 +121,9 @@ func (f *midiFeature) build(cfg midiInit) *midisrc.Source {
 	})
 	src.SetControllers(toControllerSpecs(cfg.Controllers))
 	src.SetBridge(midisrc.BridgeSpec{Enabled: cfg.Bridge.Enabled, ToDJPort: cfg.Bridge.ToDJPort, FromDJPort: cfg.Bridge.FromDJPort})
+	src.SetOnPorts(func(open, failed []string) {
+		f.rt.Emit("ports", portsEvent{Open: open, Failed: failed})
+	})
 	return src
 }
 
@@ -179,6 +190,11 @@ func (f *midiFeature) Handle(ctx context.Context, method string, params json.Raw
 		src := f.current()
 		if src == nil {
 			return json.Marshal(learnRes{})
+		}
+		if !src.PortOpen(p.Port) {
+			// The port never opened (held by another app, or gone) - fail fast so the UI can
+			// explain, instead of arming a capture that would silently time out.
+			return json.Marshal(learnRes{Reason: "port-not-open"})
 		}
 		resCh := make(chan learnRes, 1)
 		src.ArmLearn(p.Port, func(port string, status, data1 byte) {
