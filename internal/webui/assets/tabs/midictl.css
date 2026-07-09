@@ -1,55 +1,233 @@
-/* MIDI Controller (test) tab - software pad/CC surface. Mobile-first: base = 320-375px
- * (4-col pad grid, single-col faders); wider grids via @media. Tokens only, no hardcoded hex. */
+/* MIDI Mixer tab - a virtual DJ-mixer surface that SENDS MIDI for the DJ-software learn round-trip.
+ * Tokens only, no hardcoded hex. Mobile-first: strips scroll horizontally; 4 fit at ~900px. */
 
-.midi-pads {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+/* ── channel-count stepper (card header slot) ── */
+.midi-stepper {
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-2);
 }
-.midi-pad {
-  aspect-ratio: 1 / 1;
-  font: 600 15px/1 var(--font-mono, monospace);
-  padding: 0;
+.midi-steplbl {
+  font: 11px/1 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rp-muted, #B98AA0);
+}
+.midi-stepper .rp-btn {
+  min-width: 30px;
+  padding: 4px 8px;
+}
+.midi-chcount {
+  min-width: 22px;
+  text-align: center;
+  font: 700 15px/1 var(--font-display);
+  color: var(--rp-mint, #08F79B);
+}
+
+/* ── the rack: one strip per channel, scrolls horizontally when it overflows ── */
+.midi-mixer {
   display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+.midi-strip {
+  flex: 0 0 auto;
+  width: 128px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border: 1px solid var(--rp-border, #262626);
+  border-radius: var(--radius-2, 12px);
+  background: var(--rp-surface, #141414);
+}
+.midi-striphead {
+  width: 100%;
+  text-align: center;
+  font: 700 11px/1.2 var(--font-display);
+  letter-spacing: 0.04em;
+  color: var(--rp-fg, #fafafa);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--rp-faint, #201a1d);
+}
+
+/* ── knobs (EQ / filter / trim) ── */
+.midi-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  align-items: center;
+}
+.midi-knob {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0 var(--space-2);
+  width: 100%;
+}
+.mk-dial {
+  grid-row: 1 / 3;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-pill, 999px);
+  background:
+    conic-gradient(from -135deg, var(--rp-mint, #08F79B) calc(var(--v, 0.5) * 270deg), transparent 0) border-box,
+    var(--rp-bg, #0a0a0a);
+  border: 2px solid var(--rp-border, #262626);
+  box-shadow: inset 0 0 0 3px var(--rp-surface, #141414);
+}
+.mk-ptr {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 42%;
+  background: var(--rp-mint, #08F79B);
+  border-radius: 2px;
+  transform-origin: bottom center;
+  transform: translate(-50%, -100%) rotate(var(--rot, 0deg));
+}
+.mk-cap {
+  grid-column: 2;
+  font: 700 11px/1 var(--font-display);
+  color: var(--rp-fg, #fafafa);
+}
+.mk-cc {
+  grid-column: 2;
+  font: 10px/1.2 var(--font-mono, monospace);
+  color: var(--rp-muted, #B98AA0);
+}
+/* overlaid vertical range - the actual control (drag = live send). Kept invisible over the dial. */
+.mk-in {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  opacity: 0;
+  cursor: ns-resize;
+}
+.mk-sweep,
+.mf-sweep {
+  grid-column: 2;
+  justify-self: start;
+  min-width: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+.midi-knob .mk-sweep { grid-row: 2; align-self: end; }
+
+/* ── vertical fader ── */
+.midi-vfader {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: 132px auto auto;
+  align-items: stretch;
+  gap: 0 var(--space-2);
+  width: 100%;
+}
+.mf-track {
+  grid-row: 1 / 4;
+  position: relative;
+  width: 12px;
+  justify-self: center;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--rp-bg, #0a0a0a);
+  border: 1px solid var(--rp-border, #262626);
+  overflow: hidden;
+}
+.mf-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--v, 0) * 100%);
+  background: var(--rp-mint, #08F79B);
+}
+.mf-in {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 34px;
+  height: 132px;
+  margin: 0;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  opacity: 0;
+  cursor: ns-resize;
+}
+.mf-cap {
+  grid-column: 2;
+  align-self: start;
+  font: 700 11px/1 var(--font-display);
+  color: var(--rp-fg, #fafafa);
+}
+.mf-cc {
+  grid-column: 2;
+  font: 10px/1.2 var(--font-mono, monospace);
+  color: var(--rp-muted, #B98AA0);
+}
+
+/* ── Play / Cue pills ── */
+.midi-btns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+.midi-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--rp-border, #262626);
+  background: var(--rp-surface, #141414);
+  color: var(--rp-fg, #fafafa);
+  cursor: pointer;
+  font-family: var(--font-display);
   user-select: none;
 }
-.midi-pad:active {
-  border-color: var(--rp-mint);
-  color: var(--rp-mint);
-  background: var(--rp-control);
+.midi-btn:active { transform: translateY(1px); }
+.midi-btn--play:active {
+  border-color: var(--rp-mint, #08F79B);
+  color: var(--rp-mint, #08F79B);
+  box-shadow: 0 0 0 1px var(--rp-mint, #08F79B) inset;
 }
+.midi-btn--cue:active {
+  border-color: var(--rp-base, #F70864);
+  color: var(--rp-base, #F70864);
+  box-shadow: 0 0 0 1px var(--rp-base, #F70864) inset;
+}
+.midi-btn-lbl { font: 700 12px/1 var(--font-display); }
+.midi-btn-cc { font: 10px/1 var(--font-mono, monospace); color: var(--rp-muted, #B98AA0); }
 
-.midi-faders {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-2);
-}
-.midi-faders .slider {
-  margin: 0;
-}
-.midi-faders .slider-val {
-  font-family: var(--font-mono, monospace);
-  color: var(--rp-mint);
-}
-
+/* ── verbose help ── */
 .midi-help {
   margin: 0;
   padding-left: 1.2rem;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  color: var(--rp-muted);
+  color: var(--rp-fg, #fafafa);
   font-size: 13px;
 }
-
-@media (min-width: 640px) {
-  .midi-pads {
-    grid-template-columns: repeat(8, 1fr);
-  }
-  .midi-faders {
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-2) var(--space-4);
-  }
+.midi-help-note {
+  margin: var(--space-3) 0 0;
+  color: var(--rp-muted, #B98AA0);
+  font-size: 13px;
+  line-height: 1.5;
 }
+.midi-help-note a { color: var(--rp-violet, #7C3AED); }

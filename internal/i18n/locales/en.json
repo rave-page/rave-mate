@@ -2513,7 +2513,7 @@
     "twitch": "Twitch",
     "vrchat": "VRChat",
     "worlds": "Worlds",
-    "midictl": "MIDI Controller"
+    "midictl": "MIDI Mixer"
   },
   "track": {
     "few": "{count} tracks",
@@ -2968,23 +2968,41 @@
     "loading": "Loading…"
   },
   "midictl": {
-    "subtitle": "Software MIDI test controller - emit MIDI to a virtual port so a DJ app can MIDI-learn custom mappings.",
+    "subtitle": "A virtual DJ mixer - move a control here to SEND its MIDI so your DJ software can MIDI-learn it. Nothing is sent unless you touch a control.",
     "outputCard": "Output",
     "port": "Output port",
     "autoPort": "Auto (LoopBe1 / first port)",
     "activePort": "Active port",
-    "portNotOpen": "Not open yet - trigger a control to open",
+    "portNotOpen": "Not open yet - move a control to open",
     "panic": "Panic / All Notes Off",
     "panicked": "Sent All Notes Off",
     "noPort": "No MIDI output port - install loopMIDI or connect a device",
-    "padsCard": "Pads",
-    "fadersCard": "Faders",
-    "knobsCard": "Knobs",
-    "helpCard": "How to MIDI-learn in Serato",
+    "rackCard": "Mixer",
+    "channelLabel": "CH {n} / Deck {letter}",
+    "sweep": "Sweep",
+    "sweepGlyph": "↻",
+    "channels": {
+      "label": "Channels"
+    },
+    "ctl": {
+      "eqHigh": "EQ Hi",
+      "eqMid": "EQ Mid",
+      "eqLow": "EQ Low",
+      "filter": "Filter",
+      "trim": "Trim",
+      "fader": "Fader",
+      "cue": "Cue",
+      "play": "Play"
+    },
+    "helpCard": "How the MIDI-learn round-trip works",
     "help": {
-      "step1": "In Serato DJ Pro (signed in), open Setup then the MIDI tab.",
-      "step2": "Click MIDI to arm learn, then select the target control in Serato.",
-      "step3": "Trigger a pad, fader or knob here - Serato learns it. Repeat per control, then Save."
+      "badge": "Send-to-learn",
+      "step1": "In your DJ software (Rekordbox, Serato, etc.) open its MIDI-mapping screen and enable learn on the control you want to map.",
+      "step2": "Move the matching control here (drag a knob or fader, or hit Sweep for a full 0-127 pass) - your software captures rave-mate's outgoing MIDI and maps it. Repeat per control.",
+      "step3": "Save the mapping in your software. Trim has no overlay yet - it is send-only, there so you can pre-learn it.",
+      "feedback": "For LIVE overlay values, point that same software control's OUTPUT / feedback at the SAME CC. It then echoes its position back on that CC and rave-mate reads it straight into your deck overlays - no extra setup.",
+      "caveat": "Rekordbox supports output/feedback mapping well. Serato's per-control output is limited, and Serato will not treat a generic virtual MIDI port as a Serato controller, so live feedback there is partial.",
+      "link": "Rekordbox MIDI mapping guide"
     }
   }
 }

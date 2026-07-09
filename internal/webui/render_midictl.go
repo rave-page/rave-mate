@@ -6,22 +6,15 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midimap"
 )
 
-// MIDI Controller (test) panel: a software pad/CC/knob surface that emits MIDI to a loopback port
-// (LoopBe1) so a DJ app (Serato DJ Pro etc.) can MIDI-learn custom mappings. Controls dispatch to
-// the emitter via the midi-* action handlers (midictl_actions.go). ctl-drivable: pads carry
-// data-testid=midi-pad-<note>, faders/knobs data-testid=midi-cc-<cc>.
-
-const (
-	midiChannel  = 0  // MIDI channel 1 (0-based on the wire)
-	midiPadLo    = 36 // first pad note (16 pads → 36..51)
-	midiPadCount = 16
-	midiFaderLo  = 20 // first fader CC (8 faders → CC 20..27)
-	midiFaderN   = 8
-	midiKnobLo   = 28 // first knob CC (8 knobs → CC 28..35; non-overlapping with faders)
-	midiKnobN    = 8
-)
+// MIDI Mixer panel: a visual DJ-mixer surface (per-channel EQ Hi/Mid/Low, Filter, Trim knobs +
+// a vertical Fader + Play/Cue) that SENDS MIDI to a loopback port so a DJ app (Rekordbox / Serato
+// etc.) can MIDI-learn custom mappings. Send-on-interaction only - never a continuous stream. The
+// send CCs are the shared midimap contract, byte-identical to the receive decoder
+// (session/sources/midisrc/custom.go), so a learned mapping's output/feedback echoes back on the
+// same CC and drives the overlays. ctl-drivable: every control carries data-testid=midi-ch<n>-<id>.
 
 func (u *UI) renderMIDICtl() string {
 	if u.svc.MIDIEmit == nil {
@@ -30,8 +23,7 @@ func (u *UI) renderMIDICtl() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
 	b.WriteString(u.midiPortCard())
-	b.WriteString(u.midiPadsCard())
-	b.WriteString(u.midiFadersCard())
+	b.WriteString(u.midiRackCard())
 	b.WriteString(u.midiHelpCard())
 	return b.String()
 }
@@ -58,56 +50,157 @@ func midiActiveRow(active string) string {
 	return statusRow(variant, i18n.T("midictl.activePort"), active)
 }
 
-// midiPadsCard renders the 16-pad grid (Note On + momentary Note Off, velocity 127).
-func (u *UI) midiPadsCard() string {
-	var g strings.Builder
-	g.WriteString(`<div class=midi-pads>`)
-	for i := 0; i < midiPadCount; i++ {
-		note := midiPadLo + i
-		g.WriteString(fmt.Sprintf(`<button class="rp-btn rp-btn--outline midi-pad" data-act=midi-pad data-val=%d data-testid=midi-pad-%d>%d</button>`, note, note, note))
+// midiRackCard renders the channel-count stepper + the horizontally-scrollable channel rack.
+func (u *UI) midiRackCard() string {
+	n := u.midiChannels()
+	trail := u.midiChannelStepper(n)
+	var rack strings.Builder
+	rack.WriteString(`<div class="midi-mixer" data-testid=midi-mixer>`)
+	for ch := 1; ch <= n; ch++ {
+		rack.WriteString(midiStrip(ch))
 	}
-	g.WriteString(`</div>`)
-	trail := badge(fmt.Sprintf("Notes %d-%d", midiPadLo, midiPadLo+midiPadCount-1), "secondary")
-	return card(i18n.T("midictl.padsCard"), trail, g.String())
+	rack.WriteString(`</div>`)
+	return card(i18n.T("midictl.rackCard"), trail, rack.String())
 }
 
-// midiFadersCard renders the fader + knob CC sliders (value 0-127, emit on release).
-func (u *UI) midiFadersCard() string {
-	faders := card(i18n.T("midictl.fadersCard"),
-		badge(fmt.Sprintf("CC %d-%d", midiFaderLo, midiFaderLo+midiFaderN-1), "secondary"),
-		midiCCGrid(midiFaderLo, midiFaderN))
-	knobs := card(i18n.T("midictl.knobsCard"),
-		badge(fmt.Sprintf("CC %d-%d", midiKnobLo, midiKnobLo+midiKnobN-1), "secondary"),
-		midiCCGrid(midiKnobLo, midiKnobN))
-	return faders + knobs
-}
-
-// midiCCGrid renders n labelled CC sliders starting at cc lo.
-func midiCCGrid(lo, n int) string {
-	var s strings.Builder
-	s.WriteString(`<div class=midi-faders>`)
-	for i := 0; i < n; i++ {
-		cc := lo + i
-		s.WriteString(midiCCSlider(cc))
+// midiChannelStepper renders the -/+ channel-count control (1..MaxChannels).
+func (u *UI) midiChannelStepper(n int) string {
+	dec, inc := n-1, n+1
+	minus := btn("-", "outline", "midi-channels", strconv.Itoa(dec))
+	plus := btn("+", "outline", "midi-channels", strconv.Itoa(inc))
+	if n <= 1 {
+		minus = `<button class="rp-btn rp-btn--outline" disabled>-</button>`
 	}
-	s.WriteString(`</div>`)
-	return s.String()
+	if n >= midimap.MaxChannels {
+		plus = `<button class="rp-btn rp-btn--outline" disabled>+</button>`
+	}
+	count := `<span class=midi-chcount data-testid=midi-channels data-label=` + attrQ(i18n.T("midictl.channels.label")) +
+		` data-value=` + attrQ(strconv.Itoa(n)) + `>` + strconv.Itoa(n) + `</span>`
+	return `<span class=midi-stepper><span class=midi-steplbl>` + htmlEscape(i18n.T("midictl.channels.label")) +
+		`</span>` + minus + count + plus + `</span>`
 }
 
-// midiCCSlider is a labelled 0-127 range whose release dispatches midi-cc:<cc> with the value.
-// (Mirrors the slider() primitive but stamps a stable data-testid for ctl.)
-func midiCCSlider(cc int) string {
-	label := "CC " + strconv.Itoa(cc)
-	act := "midi-cc:" + strconv.Itoa(cc)
-	oninput := `oninput='var b=this.parentNode.querySelector(".slider-val");if(b)b.textContent=this.value'`
-	return fmt.Sprintf(`<label class=slider data-label=%s><span class=field-label>%s <b class=slider-val>0</b></span>`+
-		`<input class=slider-input type=range min=0 max=127 step=1 value=0 data-act=%s data-value=0 data-testid=midi-cc-%d %s></label>`,
-		attrQ(strings.ToLower(label)), htmlEscape(label), attrQ(act), cc, oninput)
+// midiStrip renders one channel strip (1-based ch): label, EQ/filter/trim knobs, a vertical fader,
+// then Play + Cue. Every control's assigned CC is shown and stamped for ctl.
+func midiStrip(ch int) string {
+	wire := int(midimap.WireChannel(ch))
+	letter := midimap.Letters[wire]
+	var b strings.Builder
+	b.WriteString(`<div class=midi-strip>`)
+	b.WriteString(`<div class=midi-striphead>` + htmlEscape(i18n.T("midictl.channelLabel", i18n.A{"n": strconv.Itoa(ch), "letter": letter})) + `</div>`)
+	b.WriteString(`<div class=midi-knobs>`)
+	for _, c := range midimap.Controls {
+		switch {
+		case c.Kind == midimap.Momentary:
+			continue // Play/Cue rendered below the fader
+		case c.ID == "fader":
+			continue // rendered after the knobs
+		default:
+			b.WriteString(midiKnob(ch, wire, c))
+		}
+	}
+	b.WriteString(`</div>`)
+	// Fader.
+	for _, c := range midimap.Controls {
+		if c.ID == "fader" {
+			b.WriteString(midiFader(ch, wire, c))
+		}
+	}
+	// Play + Cue.
+	b.WriteString(`<div class=midi-btns>`)
+	for _, c := range midimap.Controls {
+		if c.Kind == midimap.Momentary {
+			b.WriteString(midiMomBtn(ch, wire, c))
+		}
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(`</div>`)
+	return b.String()
 }
 
-// midiHelpCard explains the Serato MIDI-learn workflow.
+// knobInitial is the starting value for a continuous control (EQ/filter/trim centred; fader down).
+func knobInitial(id string) int {
+	if id == "fader" {
+		return 0
+	}
+	return 64
+}
+
+// midiKnob renders a rotary knob: an SVG-free circular dial whose pointer rotates with the value,
+// an overlaid vertical range input (drag = live CC send), a caption, the CC readout, and a Sweep.
+func midiKnob(ch, wire int, c midimap.Control) string {
+	val := knobInitial(c.ID)
+	label := i18n.T("midictl.ctl." + c.LabelKey)
+	cc := ccReadout(int(c.CC), ch)
+	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
+	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
+	rot := float64(val)/127*270 - 135
+	oninput := `oninput="var l=this.closest('.midi-knob');var v=this.value/127;l.style.setProperty('--v',v);l.style.setProperty('--rot',(v*270-135)+'deg')"`
+	return fmt.Sprintf(`<label class=midi-knob data-label=%s style="--v:%s;--rot:%sdeg">`+
+		`<span class=mk-dial aria-hidden=true><span class=mk-ptr></span></span>`+
+		`<input class=mk-in type=range min=0 max=127 step=1 value=%d data-value=%d `+
+		`data-actinput=%s data-testid=%s aria-label=%s %s>`+
+		`<span class=mk-cap>%s</span><span class=mk-cc>%s</span>`+
+		`<button class="mk-sweep rp-btn rp-btn--ghost" data-act=%s title=%s aria-label=%s>%s</button>`+
+		`</label>`,
+		attrQ(dl), trimNum(float64(val)/127), trimNum(rot),
+		val, val,
+		attrQ(fmt.Sprintf("midi-send:%d:%d", wire, c.CC)), attrQ(tid), attrQ(label+" "+cc), oninput,
+		htmlEscape(label), htmlEscape(cc),
+		attrQ(fmt.Sprintf("midi-sweep:%d:%d", wire, c.CC)), attrQ(i18n.T("midictl.sweep")),
+		attrQ(i18n.T("midictl.sweep")+" "+label), htmlEscape(i18n.T("midictl.sweepGlyph")))
+}
+
+// midiFader renders a vertical fader: a track + level fill (mint, driven by --v) with an overlaid
+// vertical range input (drag = live CC send), a caption, the CC readout, and a Sweep.
+func midiFader(ch, wire int, c midimap.Control) string {
+	val := knobInitial(c.ID)
+	label := i18n.T("midictl.ctl." + c.LabelKey)
+	cc := ccReadout(int(c.CC), ch)
+	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
+	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
+	oninput := `oninput="this.closest('.midi-vfader').style.setProperty('--v',this.value/127)"`
+	return fmt.Sprintf(`<label class=midi-vfader data-label=%s style="--v:%s">`+
+		`<span class=mf-track aria-hidden=true><span class=mf-fill></span></span>`+
+		`<input class=mf-in type=range min=0 max=127 step=1 value=%d data-value=%d `+
+		`data-actinput=%s data-testid=%s aria-label=%s %s>`+
+		`<span class=mf-cap>%s</span><span class=mf-cc>%s</span>`+
+		`<button class="mf-sweep rp-btn rp-btn--ghost" data-act=%s title=%s aria-label=%s>%s</button>`+
+		`</label>`,
+		attrQ(dl), trimNum(float64(val)/127),
+		val, val,
+		attrQ(fmt.Sprintf("midi-send:%d:%d", wire, c.CC)), attrQ(tid), attrQ(label+" "+cc), oninput,
+		htmlEscape(label), htmlEscape(cc),
+		attrQ(fmt.Sprintf("midi-sweep:%d:%d", wire, c.CC)), attrQ(i18n.T("midictl.sweep")),
+		attrQ(i18n.T("midictl.sweep")+" "+label), htmlEscape(i18n.T("midictl.sweepGlyph")))
+}
+
+// midiMomBtn renders a Play/Cue pill: a press sends a momentary CC pulse (127 then 0).
+func midiMomBtn(ch, wire int, c midimap.Control) string {
+	label := i18n.T("midictl.ctl." + c.LabelKey)
+	cc := ccReadout(int(c.CC), ch)
+	tid := fmt.Sprintf("midi-ch%d-%s", ch, c.ID)
+	dl := strings.ToLower(fmt.Sprintf("ch%d %s", ch, label))
+	cls := "midi-btn midi-btn--" + c.ID
+	return fmt.Sprintf(`<button class=%s data-act=%s data-testid=%s data-label=%s aria-label=%s>`+
+		`<span class=midi-btn-lbl>%s</span><span class=midi-btn-cc>%s</span></button>`,
+		attrQ(cls), attrQ(fmt.Sprintf("midi-mom:%d:%d", wire, c.CC)), attrQ(tid), attrQ(dl),
+		attrQ(label+" "+cc), htmlEscape(label), htmlEscape(cc))
+}
+
+// ccReadout formats a control's assigned MIDI as "CC24·ch1" (1-based channel).
+func ccReadout(cc, ch int) string {
+	return "CC" + strconv.Itoa(cc) + "·ch" + strconv.Itoa(ch)
+}
+
+// midiHelpCard explains the send-to-learn round-trip + honest software caveats.
 func (u *UI) midiHelpCard() string {
-	steps := `<ol class=midi-help><li>` + i18n.T("midictl.help.step1") + `</li><li>` +
-		i18n.T("midictl.help.step2") + `</li><li>` + i18n.T("midictl.help.step3") + `</li></ol>`
-	return card(i18n.T("midictl.helpCard"), "", steps)
+	steps := `<ol class=midi-help><li>` + htmlEscape(i18n.T("midictl.help.step1")) + `</li><li>` +
+		htmlEscape(i18n.T("midictl.help.step2")) + `</li><li>` +
+		htmlEscape(i18n.T("midictl.help.step3")) + `</li></ol>` +
+		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.help.feedback")) + `</p>` +
+		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.help.caveat")) + ` ` +
+		`<a href="https://rekordbox.com/en/support/faq/mapping-6/" target=_blank rel=noopener>` +
+		htmlEscape(i18n.T("midictl.help.link")) + `</a></p>`
+	return card(i18n.T("midictl.helpCard"), badge(i18n.T("midictl.help.badge"), "info"), steps)
 }

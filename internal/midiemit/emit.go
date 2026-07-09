@@ -171,6 +171,40 @@ func (e *Emitter) TriggerPad(ch, note, vel byte) error {
 	return nil
 }
 
+// sweepStep is the delay between the ramp values a Sweep sends (so a DJ app's MIDI-learn reliably
+// catches the movement of a control it's arming).
+const sweepStep = 18 * time.Millisecond
+
+// PulseCC emits a momentary CC hit: value 127 now, value 0 after a bounded delay. Used for the
+// mixer Play/Cue controls, which round-trip as booleans on the receive side (custom.go).
+func (e *Emitter) PulseCC(ch, cc byte) error {
+	if err := e.SendCC(ch, cc, 127); err != nil {
+		return err
+	}
+	debuglog.Go(e.log, source, func() {
+		time.Sleep(noteOffDelay)
+		_ = e.SendCC(ch, cc, 0)
+	})
+	return nil
+}
+
+// SweepCC ramps a CC 0 -> 127 -> 0 in bounded steps so a DJ app arming MIDI-learn on the target
+// control catches the movement. The first step sends synchronously (surfacing a no-port error);
+// the rest run on a background ticker.
+func (e *Emitter) SweepCC(ch, cc byte) error {
+	ramp := []byte{0, 21, 42, 64, 85, 106, 127, 106, 85, 64, 42, 21, 0}
+	if err := e.SendCC(ch, cc, ramp[0]); err != nil {
+		return err
+	}
+	debuglog.Go(e.log, source, func() {
+		for _, v := range ramp[1:] {
+			time.Sleep(sweepStep)
+			_ = e.SendCC(ch, cc, v)
+		}
+	})
+	return nil
+}
+
 // Panic silences everything: All-Notes-Off (CC 123) on channel ch + a Note Off across [lo,hi].
 func (e *Emitter) Panic(ch, lo, hi byte) {
 	_ = e.SendCC(ch, 123, 0)

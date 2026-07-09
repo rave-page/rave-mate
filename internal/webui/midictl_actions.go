@@ -4,10 +4,17 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midimap"
 )
 
-// MIDI Controller (test) action handlers: pad/CC/knob controls → the emitter. Registered in init()
-// so parallel tab work never collides on a central switch (dispatch.go convention).
+// MIDI mixer action handlers: the virtual-mixer controls SEND MIDI to the loopback port so a DJ
+// app can MIDI-learn them. Nothing sends unless the user interacts. Registered in init() so
+// parallel tab work never collides on a central switch (dispatch.go convention).
+//
+// Action encoding (arg = "<wireCh>:<cc>"):
+//   midi-send:<wireCh>:<cc>   live continuous CC (val = 0..127) - knob/fader drag
+//   midi-sweep:<wireCh>:<cc>  0->127->0 ramp so learn catches the control
+//   midi-mom:<wireCh>:<cc>    momentary CC pulse (127 then 0) - Play/Cue
 
 func init() {
 	// port selector: reopen on the picked port (or "" = auto) + persist to config.
@@ -23,41 +30,72 @@ func init() {
 		u.patchMain()
 	})
 
-	// pad: momentary Note On (velocity 127) + auto Note Off (val = note number).
-	onExact("midi-pad", func(u *UI, m actMsg) {
-		e := u.svc.MIDIEmit
-		if e == nil {
+	// channel-count stepper: clamp 1..8, persist, re-render the rack.
+	onExact("midi-channels", func(u *UI, m actMsg) {
+		if u.svc.Cfg == nil {
 			return
 		}
-		if note, ok := midiByte(m.Val); ok {
-			if err := e.TriggerPad(midiChannel, note, 127); err != nil {
-				u.toast(i18n.T("midictl.noPort"))
-			}
-		}
+		u.svc.Cfg.Features.MIDIController.Channels = midimap.ClampChannels(atoiSafe(strings.TrimSpace(m.Val)))
+		u.saveCfg()
+		u.patchMain()
 	})
 
-	// fader/knob: Control Change (val = 0-127); act = "midi-cc:<cc>".
-	onPrefix("midi-cc:", func(u *UI, m actMsg) {
+	// continuous control drag: live CC (val = 0..127).
+	onPrefix("midi-send:", func(u *UI, m actMsg) {
 		e := u.svc.MIDIEmit
 		if e == nil {
 			return
 		}
-		cc, okc := midiByte(m.arg("midi-cc:"))
+		ch, cc, ok := parseChCC(m.arg("midi-send:"))
 		val, okv := midiByte(m.Val)
-		if !okc || !okv {
+		if !ok || !okv {
 			return
 		}
-		if err := e.SendCC(midiChannel, cc, val); err != nil {
+		if err := e.SendCC(ch, cc, val); err != nil {
 			u.toast(i18n.T("midictl.noPort"))
 		}
 	})
 
-	// Panic / All Notes Off: CC 123 + Note Off across the pad range.
-	onExact("midi-panic", func(u *UI, _ actMsg) {
-		if e := u.svc.MIDIEmit; e != nil {
-			e.Panic(midiChannel, midiPadLo, midiPadLo+midiPadCount-1)
-			u.toast(i18n.T("midictl.panicked"))
+	// sweep affordance: 0->127->0 ramp so a DJ app arming learn catches the control.
+	onPrefix("midi-sweep:", func(u *UI, m actMsg) {
+		e := u.svc.MIDIEmit
+		if e == nil {
+			return
 		}
+		ch, cc, ok := parseChCC(m.arg("midi-sweep:"))
+		if !ok {
+			return
+		}
+		if err := e.SweepCC(ch, cc); err != nil {
+			u.toast(i18n.T("midictl.noPort"))
+		}
+	})
+
+	// momentary Play/Cue: CC 127 then 0 (round-trips as a boolean on the receive side).
+	onPrefix("midi-mom:", func(u *UI, m actMsg) {
+		e := u.svc.MIDIEmit
+		if e == nil {
+			return
+		}
+		ch, cc, ok := parseChCC(m.arg("midi-mom:"))
+		if !ok {
+			return
+		}
+		if err := e.PulseCC(ch, cc); err != nil {
+			u.toast(i18n.T("midictl.noPort"))
+		}
+	})
+
+	// Panic / All Notes Off across every configured channel.
+	onExact("midi-panic", func(u *UI, _ actMsg) {
+		e := u.svc.MIDIEmit
+		if e == nil {
+			return
+		}
+		for ch := 0; ch < u.midiChannels(); ch++ {
+			e.Panic(byte(ch), 0, 0)
+		}
+		u.toast(i18n.T("midictl.panicked"))
 	})
 
 	// ~1 Hz refresh of the active-port line (resolves after the first send opens the port).
@@ -71,6 +109,15 @@ func init() {
 	})
 }
 
+// midiChannels returns the configured mixer channel/deck count clamped to 1..MaxChannels.
+func (u *UI) midiChannels() int {
+	n := midimap.DefaultChannels
+	if u.svc.Cfg != nil {
+		n = u.svc.Cfg.Features.MIDIController.Channels
+	}
+	return midimap.ClampChannels(n)
+}
+
 // midiByte parses a 0-127 MIDI data byte from s. ok=false on parse error / out of range.
 func midiByte(s string) (byte, bool) {
 	n := atoiSafe(strings.TrimSpace(s))
@@ -78,4 +125,21 @@ func midiByte(s string) (byte, bool) {
 		return 0, false
 	}
 	return byte(n), true
+}
+
+// parseChCC parses a "<wireCh>:<cc>" arg into a MIDI wire channel (0-15) + controller (0-127).
+func parseChCC(arg string) (ch, cc byte, ok bool) {
+	chs, ccs, found := strings.Cut(arg, ":")
+	if !found {
+		return 0, 0, false
+	}
+	c := atoiSafe(strings.TrimSpace(chs))
+	if c < 0 || c > 15 {
+		return 0, 0, false
+	}
+	cv, okv := midiByte(ccs)
+	if !okv {
+		return 0, 0, false
+	}
+	return byte(c), cv, true
 }
