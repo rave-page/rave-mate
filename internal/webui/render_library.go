@@ -474,7 +474,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	// management toolbar
 	b.WriteString(`<div class=lib-toolbar>`)
 	b.WriteString(btn(i18n.T("library.coll.import"), "primary", "lib-import", ""))
-	b.WriteString(btn(i18n.T("library.coll.backup"), "outline", "lib-backup", ""))
+	b.WriteString(btn(i18n.T("library.coll.backup"), "outline", "lib-backups", ""))
 	b.WriteString(btn(i18n.T("library.coll.scan"), "outline", "lib-scan", ""))
 	b.WriteString(btn(i18n.T("library.coll.cleanup"), "outline", "lib-cleanup", ""))
 	b.WriteString(btn(i18n.T("library.coll.relocate"), "outline", "lib-relocate", ""))

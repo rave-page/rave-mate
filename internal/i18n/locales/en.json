@@ -289,6 +289,25 @@
   },
   "library": {
     "addToPlaylist": "Add to playlist…",
+    "backups": {
+      "title": "Backups",
+      "desc": "Library + settings backups. Locate, open, or restore. A restore overwrites the live file - the current version is backed up first.",
+      "createTraktor": "Back up Traktor collection",
+      "createSettings": "Back up rave-mate settings",
+      "libraryBackups": "Library backups",
+      "settingsBackups": "Settings backups",
+      "none": "No backups yet",
+      "open": "Open folder",
+      "restore": "Restore",
+      "restoreConfirm": "Restore this backup over your live library? The current file is backed up first, then overwritten.",
+      "restoreConfirmSettings": "Restore these settings? Restart rave-mate to apply.",
+      "restored": "Restored from backup",
+      "settingsRestored": "Settings restored - restart rave-mate to apply.",
+      "restoreFailed": "Restore failed: ",
+      "created": "Backup created",
+      "createFailed": "Backup failed: ",
+      "noDest": "No live Traktor collection found to restore into."
+    },
     "audioCap": {
       "default": "AAC/MP3 max 320k",
       "opus": "Opus max 510k"
