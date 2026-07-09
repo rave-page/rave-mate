@@ -1,13 +1,13 @@
 {
-  "version": "nightly-85488e3",
-  "build": 31,
-  "commit": "85488e3",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-31-20260709-85488e3.exe",
-  "sha256": "c39a5a1ad205894f1be795f1b7c092401f1446db1238f9009c81c150f7731d45",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-31-20260709-85488e3.exe",
-  "installer_sha256": "6b4181cecdf98be83342a2b584252a319e7bf0484bf8d4de7ec963a9226c7137",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-31-20260709-85488e3",
-  "linux_sha256": "45c2e3ce2a990616ef563126c43fb3309816cda5c9e522d4468d25715b44d900",
+  "version": "nightly-144aada",
+  "build": 33,
+  "commit": "144aada",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-33-20260709-144aada.exe",
+  "sha256": "91c6af8f3051df76ed0f5ebc4a7be42c572d268a06035b96c8a5cf7bc1c960e3",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-33-20260709-144aada.exe",
+  "installer_sha256": "4c4793bfe836f47e2d2aafa8e3a841bfc69f78cc37befc06bc961088f0d0dc74",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-33-20260709-144aada",
+  "linux_sha256": "0a10f68765b853642a50535d0d37aa8f2b047cb26c5932c66699331fde2569c6",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-09T18:32:18Z",
-  "notes": "feat(midi): extensive educational tooltips on the MIDI-learn + DJ-bridge cards"
+  "released": "2026-07-09T19:01:35Z",
+  "notes": "feat(midi): auto-retry held controller ports + live port-status refresh"
 }
