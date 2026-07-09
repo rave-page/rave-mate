@@ -198,6 +198,26 @@
       "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.",
       "title": "Per-route bitrate"
     },
+    "midi-learn-controllers": {
+      "title": "Reading your controller (MIDI-learn)",
+      "body": "rave-mate listens to your DJ controller's MIDI and maps each knob, fader and button to a deck or channel, so the overlays show real EQ, filter, trim, fader and play/cue state.\n\nWhy learn it from the controller instead of the DJ software? Because most DJ software can't send its mixer state back out. Traktor can (its Add-Out feature), but Rekordbox and Serato can't emit EQ or fader over a virtual MIDI port at all. And Rekordbox can't even emit play/pause cleanly: its play control is a two-way 'Button' whose LED is sent on the SAME MIDI code it listens on, so on a virtual loopback cable the LED feeds straight back into its own input and the deck toggles itself - the play flicker. Your controller has none of these limits: every knob and button already sends MIDI, so we read it at the source.\n\nAdd a controller, pick its MIDI input port, then click Learn on a control and move it once."
+    },
+    "midi-in-port": {
+      "title": "MIDI input port",
+      "body": "The controller (or virtual port) rave-mate reads.\n\nOn Windows a hardware MIDI input can normally be opened by only ONE application at a time (the legacy winmm MIDI stack is exclusive). So if your DJ software already has the controller open, rave-mate can't also open it here - and vice versa. Three ways around it: use a controller whose driver is multi-client, use the new open-source Windows MIDI Services (MIDI 2.0, native multi-client), or open the controller in rave-mate and route it onward with THRU (below)."
+    },
+    "midi-thru": {
+      "title": "THRU - share one controller with your DJ software",
+      "body": "Because Windows lets only one app open a hardware MIDI input, opening the controller in rave-mate would normally lock your DJ software out of it.\n\nTHRU solves that: rave-mate opens the controller and re-sends every message it receives to a loopMIDI port. Point your DJ software's controller mapping at that loopMIDI port and it still gets everything, exactly as before, while rave-mate reads it too. In other words rave-mate becomes the splitter - you do NOT need MIDI-OX or any other router.\n\nLeave THRU off if your controller's driver is multi-client, or if you're on Windows MIDI Services - then both apps can open the hardware directly and no re-routing is needed."
+    },
+    "midi-learn-grid": {
+      "title": "The learn grid",
+      "body": "One row per control, one column per channel/deck. Click a cell, then move that exact control on your hardware - the first knob-turn or button-press binds it, and the cell then shows the captured MIDI (e.g. CC24). Click the x to clear it, or click a bound cell to re-learn.\n\nContinuous controls (EQ, filter, trim, fader) are captured as Control Change and scaled to 0-100%. Buttons (play, cue) are captured as Notes. A binding remembers the exact MIDI channel and code, so two different controllers can reuse the same numbers without clashing, and all of them feed the same set of decks."
+    },
+    "midi-bridge": {
+      "title": "DJ bridge (control from a paired PC)",
+      "body": "Optional. Lets a paired rave-mate instance drive THIS machine's DJ software over MIDI - e.g. a booth operator nudging the DJ's EQ from another PC.\n\nIt uses TWO loopMIDI ports on purpose. A paired instance's control is written to the OUT port your DJ software reads; the DJ software's own output (where it has any) is read back on the IN port. Keeping the DJ app's read and write on two DIFFERENT loopback cables is what prevents a self-loop - the same single-port feedback that makes Rekordbox's play button flicker. Your own instance never re-sends MIDI to the port it reads; the bridge only ever carries a peer's control."
+    },
     "motion-studio": {
       "body": "Plays back VR motion takes recorded from your headset (head + controllers + any full-body trackers, captured from the wrist menu). The preview shows the skeleton in 3D with the head's travel as a violet trail.\n\nTwo live outputs: VMC streams the take as raw tracking devices to a VTuber renderer (VSeeFace, Warudo, VNyan) which does the IK and animates your avatar - this is the real playback path. OSC trackers feed VRChat's full-body tracking, but VRChat always drives head and hands from your live HMD and controllers, so a recorded take cannot puppet your VRChat avatar - export a Unity .anim for that and drive it from the avatar's Animator.\n\nAvatars (.vrm) imported here replicate automatically to your paired rave-mate instances.",
       "title": "Motion studio"
@@ -3019,6 +3039,7 @@
       "thruNone": "None",
       "remove": "Remove",
       "chShort": "CH{n}",
+      "learnHdr": "Learn each control:",
       "learn": "Learn",
       "relearn": "Click, then move the control to re-learn",
       "clear": "Clear",

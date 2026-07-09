@@ -25,7 +25,7 @@ func (u *UI) midiControllersCard() string {
 	}
 	ctrls := u.svc.Cfg.Features.MIDI.Controllers
 	var b strings.Builder
-	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.intro")) + `</p>`)
+	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.intro")) + ` ` + tipTopic("midi-learn-controllers") + `</p>`)
 	if len(ctrls) == 0 {
 		b.WriteString(emptyState(i18n.T("midictl.in.empty")))
 	}
@@ -49,9 +49,9 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 			thruOpts = append(thruOpts, [2]string{p, p})
 		}
 	}
-	head := selectBox(i18n.T("midictl.in.port"), "midi-ctl-port:"+idx, portOpts, c.Port) +
+	head := selectBoxTip(i18n.T("midictl.in.port"), "midi-ctl-port:"+idx, portOpts, c.Port, "midi-in-port") +
 		toggleRow(i18n.T("midictl.in.enabled"), "midi-ctl-enable:"+idx, c.Enabled) +
-		selectBox(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort) +
+		selectBoxTip(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort, "midi-thru") +
 		btnRow(btn(i18n.T("midictl.in.remove"), "warn", "midi-ctl-remove:"+idx, ""))
 	title := c.Name
 	if title == "" {
@@ -66,6 +66,7 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 func (u *UI) midiLearnGrid(ctlIdx int, c config.MIDIControllerMap) string {
 	n := u.midiChannels()
 	var b strings.Builder
+	b.WriteString(`<div class=midi-learnhdr>` + htmlEscape(i18n.T("midictl.in.learnHdr")) + ` ` + tipTopic("midi-learn-grid") + `</div>`)
 	b.WriteString(`<div class=midi-learngrid style="--cols:` + strconv.Itoa(n) + `">`)
 	b.WriteString(`<div class=mlg-h></div>`)
 	for ch := 1; ch <= n; ch++ {
@@ -130,9 +131,9 @@ func (u *UI) midiBridgeCard() string {
 			outOpts = append(outOpts, [2]string{p, p})
 		}
 	}
-	body := `<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.bridge.intro")) + `</p>` +
-		toggleRow(i18n.T("midictl.bridge.enable"), "midi-bridge-enable", br.Enabled) +
-		selectBox(i18n.T("midictl.bridge.todj"), "midi-bridge-todj", outOpts, br.ToDJPort) +
-		selectBox(i18n.T("midictl.bridge.fromdj"), "midi-bridge-fromdj", inOpts, br.FromDJPort)
+	body := `<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.bridge.intro")) + ` ` + tipTopic("midi-bridge") + `</p>` +
+		toggleRowTip(i18n.T("midictl.bridge.enable"), "midi-bridge-enable", br.Enabled, tipTopic("midi-bridge")) +
+		selectBoxTip(i18n.T("midictl.bridge.todj"), "midi-bridge-todj", outOpts, br.ToDJPort, "midi-bridge") +
+		selectBoxTip(i18n.T("midictl.bridge.fromdj"), "midi-bridge-fromdj", inOpts, br.FromDJPort, "midi-bridge")
 	return card(i18n.T("midictl.bridge.card"), badge(i18n.T("midictl.bridge.badge"), "info"), body)
 }

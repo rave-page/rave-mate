@@ -252,6 +252,41 @@ var helpTopics = map[string]helpTopic{
 		Title: i18n.T("help.ml-budget.title"),
 		Body:  i18n.T("help.ml-budget.body"),
 	},
+	// ── MIDI tab: native MIDI-learn + DJ bridge ──
+	"midi-learn-controllers": {
+		Title: i18n.T("help.midi-learn-controllers.title"),
+		Body:  i18n.T("help.midi-learn-controllers.body"),
+		Links: []ttLink{
+			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
+			{"Rekordbox MIDI LEARN guide", "https://rekordbox.com/en/support/faq/mapping-6/"},
+		},
+	},
+	"midi-in-port": {
+		Title: i18n.T("help.midi-in-port.title"),
+		Body:  i18n.T("help.midi-in-port.body"),
+		Links: []ttLink{
+			{"Windows MIDI Services (multi-client)", "https://github.com/microsoft/MIDI"},
+		},
+	},
+	"midi-thru": {
+		Title: i18n.T("help.midi-thru.title"),
+		Body:  i18n.T("help.midi-thru.body"),
+		Links: []ttLink{
+			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
+			{"MIDI-OX (router/splitter)", "http://www.midiox.com/"},
+		},
+	},
+	"midi-learn-grid": {
+		Title: i18n.T("help.midi-learn-grid.title"),
+		Body:  i18n.T("help.midi-learn-grid.body"),
+	},
+	"midi-bridge": {
+		Title: i18n.T("help.midi-bridge.title"),
+		Body:  i18n.T("help.midi-bridge.body"),
+		Links: []ttLink{
+			{"loopMIDI (virtual MIDI ports)", "https://www.tobias-erichsen.de/software/loopmidi.html"},
+		},
+	},
 }
 
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -
