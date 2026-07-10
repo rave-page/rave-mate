@@ -14,15 +14,19 @@ import (
 //	  <Song FilePath="C:\Music\x.mp3" FileSize="…">
 //	    <Tags Author Title Album Genre Bpm Key Year/>
 //	    <Infos SongLength Bitrate PlayCount FirstSeen LastPlay/>
+//	    <Scan Bpm="0.468750" Key="Am"/>
 //	    <Poi Pos="12.3" Type="cue" Num="1" Name="Drop"/>
 //	  </Song>
 //	</VirtualDJ_Database>
 //
 // Bpm is stored as seconds-per-beat (e.g. "0.461538" = 130 BPM); we convert defensively.
+// The analyzed tempo lives in Scan@Bpm; Tags@Bpm is the user-editable tag (either may be
+// absent, so the reader prefers Tags and falls back to Scan).
 
 type vdjSong struct {
-	FilePath string `xml:"FilePath,attr"`
-	FileSize int    `xml:"FileSize,attr"`
+	XMLName  xml.Name `xml:"Song"`
+	FilePath string   `xml:"FilePath,attr"`
+	FileSize int      `xml:"FileSize,attr"`
 	Tags     struct {
 		Author string `xml:"Author,attr"`
 		Title  string `xml:"Title,attr"`
@@ -40,7 +44,14 @@ type vdjSong struct {
 		FirstSeen  string  `xml:"FirstSeen,attr"`
 		LastPlay   string  `xml:"LastPlay,attr"`
 	} `xml:"Infos"`
+	Scan *vdjScan `xml:"Scan"`
 	Pois []vdjPoi `xml:"Poi"`
+}
+
+// vdjScan is the analysis result element; Bpm is seconds-per-beat (the value VirtualDJ shows).
+type vdjScan struct {
+	Bpm string `xml:"Bpm,attr,omitempty"`
+	Key string `xml:"Key,attr,omitempty"`
 }
 
 type vdjPoi struct {
@@ -75,13 +86,21 @@ func (s *vdjSong) toTrack() Track {
 		Key:         s.Tags.Key,
 		BPM:         vdjBPM(s.Tags.Bpm),
 		DurationSec: s.Infos.SongLength,
-		BitrateBps:  s.Infos.Bitrate * 1000,
-		FileSizeKB:  s.FileSize / 1024,
-		PlayCount:   s.Infos.PlayCount,
-		ImportDate:  s.Infos.FirstSeen,
-		ReleaseDate: s.Tags.Year,
-		LastPlayed:  s.Infos.LastPlay,
 	}
+	if s.Scan != nil {
+		if t.BPM == 0 {
+			t.BPM = vdjBPM(s.Scan.Bpm)
+		}
+		if t.Key == "" {
+			t.Key = s.Scan.Key
+		}
+	}
+	t.BitrateBps = s.Infos.Bitrate * 1000
+	t.FileSizeKB = s.FileSize / 1024
+	t.PlayCount = s.Infos.PlayCount
+	t.ImportDate = s.Infos.FirstSeen
+	t.ReleaseDate = s.Tags.Year
+	t.LastPlayed = s.Infos.LastPlay
 	for _, p := range s.Pois {
 		kind := virtualdjCueKind(p.Type)
 		if kind == CueGrid {
@@ -136,32 +155,46 @@ func ExportVirtualDJ(tracks []Track, w io.Writer) error {
 		Songs   []vdjSong `xml:"Song"`
 	}{Version: "8.5"}
 	for _, t := range tracks {
-		s := vdjSong{FilePath: t.Path, FileSize: t.FileSizeKB * 1024}
-		s.Tags.Author, s.Tags.Title, s.Tags.Album = t.Artist, t.Title, t.Album
-		s.Tags.Genre, s.Tags.Label, s.Tags.Key, s.Tags.Year = t.Genre, t.Label, t.Key, t.ReleaseDate
-		if t.BPM > 0 {
-			s.Tags.Bpm = strconv.FormatFloat(60/t.BPM, 'f', 6, 64)
-		}
-		s.Infos.SongLength = t.DurationSec
-		s.Infos.Bitrate = t.BitrateBps / 1000
-		s.Infos.PlayCount = t.PlayCount
-		s.Infos.FirstSeen, s.Infos.LastPlay = t.ImportDate, t.LastPlayed
-		for _, g := range t.Beatgrid {
-			bpm := ""
-			if g.BPM > 0 {
-				bpm = strconv.FormatFloat(60/g.BPM, 'f', 6, 64)
-			}
-			s.Pois = append(s.Pois, vdjPoi{Pos: g.PositionMs / 1000, Type: "beatgrid", Bpm: bpm})
-		}
-		for _, c := range t.Cues {
-			s.Pois = append(s.Pois, vdjPoi{Pos: c.StartMs / 1000, Type: virtualdjPoiType(c.Kind), Num: c.Hotcue, Name: c.Name})
-		}
-		root.Songs = append(root.Songs, s)
+		root.Songs = append(root.Songs, trackToVDJSong(t))
 	}
 	if err := enc.Encode(root); err != nil {
 		return err
 	}
 	return enc.Close()
+}
+
+// trackToVDJSong builds a full vdjSong (Tags, Infos, Scan, Pois) from a normalized track.
+func trackToVDJSong(t Track) vdjSong {
+	s := vdjSong{FilePath: t.Path, FileSize: t.FileSizeKB * 1024}
+	s.Tags.Author, s.Tags.Title, s.Tags.Album = t.Artist, t.Title, t.Album
+	s.Tags.Genre, s.Tags.Label, s.Tags.Key, s.Tags.Year = t.Genre, t.Label, t.Key, t.ReleaseDate
+	if t.BPM > 0 {
+		spb := strconv.FormatFloat(60/t.BPM, 'f', 6, 64)
+		s.Tags.Bpm = spb
+		s.Scan = &vdjScan{Bpm: spb, Key: t.Key} // VDJ reads the analyzed tempo from Scan@Bpm
+	}
+	s.Infos.SongLength = t.DurationSec
+	s.Infos.Bitrate = t.BitrateBps / 1000
+	s.Infos.PlayCount = t.PlayCount
+	s.Infos.FirstSeen, s.Infos.LastPlay = t.ImportDate, t.LastPlayed
+	s.Pois = vdjPois(t)
+	return s
+}
+
+// vdjPois builds the Poi list (beatgrid anchors + cues) for a track.
+func vdjPois(t Track) []vdjPoi {
+	var pois []vdjPoi
+	for _, g := range t.Beatgrid {
+		bpm := ""
+		if g.BPM > 0 {
+			bpm = strconv.FormatFloat(60/g.BPM, 'f', 6, 64)
+		}
+		pois = append(pois, vdjPoi{Pos: g.PositionMs / 1000, Type: "beatgrid", Bpm: bpm})
+	}
+	for _, c := range t.Cues {
+		pois = append(pois, vdjPoi{Pos: c.StartMs / 1000, Type: virtualdjPoiType(c.Kind), Num: c.Hotcue, Name: c.Name})
+	}
+	return pois
 }
 
 // DefaultVirtualDJDir returns the conventional VirtualDJ database folder (~/Documents/VirtualDJ),
