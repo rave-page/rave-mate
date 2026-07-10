@@ -52,11 +52,17 @@ func ApplyGridFixes(path string, fixes []GridFixUpdate) (WritebackResult, error)
 // rewriteNMLFile streams path through fn into a same-dir temp file and renames over the original
 // only on a fully-clean rewrite (mirrors MergeIntoCollectionFile).
 func rewriteNMLFile(path string, fn func(src io.Reader, dst io.Writer) error) error {
+	return rewriteFileAtomic(path, "collection-*.nml.tmp", fn)
+}
+
+// rewriteFileAtomic streams path through fn into a same-dir temp file (named per tmpPattern)
+// and renames over the original only on a fully-clean rewrite.
+func rewriteFileAtomic(path, tmpPattern string, fn func(src io.Reader, dst io.Writer) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "collection-*.nml.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), tmpPattern)
 	if err != nil {
 		_ = f.Close()
 		return err
