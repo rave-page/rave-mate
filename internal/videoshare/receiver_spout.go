@@ -20,7 +20,9 @@ import (
 )
 
 const (
-	recvPollEvery = 4 * time.Millisecond // ~250 Hz poll; IsFrameNew gates actual work
+	recvPollEvery = 4 * time.Millisecond  // ~250 Hz poll while frames flow; IsFrameNew gates actual work
+	recvPollIdle  = 50 * time.Millisecond // backed-off poll once the sender goes quiet (no frame for recvIdleAfter)
+	recvIdleAfter = 2 * time.Second       // quiet period before backing off (reconnect latency ≤ recvPollIdle)
 	recvNameCap   = 256
 )
 
@@ -97,7 +99,11 @@ func (r *spoutReceiver) run(name string) {
 
 	var buf []byte
 	var w, hgt C.uint
-	t := time.NewTicker(recvPollEvery)
+	// Adaptive poll: 4ms while frames flow (latency), 50ms once the sender goes quiet -
+	// a 250 Hz busy-poll against an idle/closed sender is pure wakeup churn.
+	interval := recvPollEvery
+	lastFrame := time.Now()
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -109,15 +115,28 @@ func (r *spoutReceiver) run(name string) {
 		if len(buf) > 0 {
 			px = (*C.uchar)(unsafe.Pointer(&buf[0]))
 		}
+		got := false
 		switch C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt) {
 		case 2: // (re)connected / resized: size the buffer, frame arrives on the next poll
 			if w > 0 && hgt > 0 {
 				buf = make([]byte, int(w)*int(hgt)*4)
 			}
+			got = true // activity - stay/return to the fast poll
 		case 1:
 			img := &image.NRGBA{Pix: append([]byte(nil), buf...), Stride: int(w) * 4,
 				Rect: image.Rect(0, 0, int(w), int(hgt))}
 			deliver(r.frames, img) // newest-wins, never blocks the poller
+			got = true
+		}
+		if got {
+			lastFrame = time.Now()
+			if interval != recvPollEvery {
+				interval = recvPollEvery
+				t.Reset(interval)
+			}
+		} else if interval != recvPollIdle && time.Since(lastFrame) > recvIdleAfter {
+			interval = recvPollIdle
+			t.Reset(interval)
 		}
 	}
 }

@@ -52,6 +52,10 @@ func (d *directOBS) client(ctx context.Context) *obs.Client {
 	return c
 }
 
+// ensureConnected (re)connects if needed (throttled by nextTry) - the poll drives this
+// source's lifecycle (see obscontrol.ensureConnector).
+func (d *directOBS) ensureConnected(ctx context.Context) bool { return d.client(ctx) != nil }
+
 // Connected reports a live session without forcing a (re)connect.
 func (d *directOBS) Connected() bool {
 	d.mu.Lock()

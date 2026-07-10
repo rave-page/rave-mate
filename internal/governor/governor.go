@@ -103,7 +103,13 @@ func set(field *bool, v bool, name string) {
 	log := g.log
 	g.mu.Unlock()
 	if log != nil {
-		log.Info("governor", name+" changed", map[string]any{"value": v})
+		// streaming transitions are rare + meaningful (Info); focus/minimize/drag flap
+		// with normal window use - Debug keeps them out of the main view.
+		if name == "streaming" {
+			log.Info("governor", name+" changed", map[string]any{"value": v})
+		} else {
+			log.Debug("governor", name+" changed", map[string]any{"value": v})
+		}
 	}
 	for _, fn := range resume {
 		go fn()

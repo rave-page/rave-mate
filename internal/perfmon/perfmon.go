@@ -16,7 +16,13 @@ import (
 
 const (
 	sampleEvery = time.Second
-	ringCap     = 600 // ~10 min at 1 Hz
+	// Unobserved sampling: nobody has read a Snapshot/Report recently → sample at the
+	// slow rate. The PDH system probe + metrics.Read at 1 Hz 24/7 buys nothing when no
+	// perf card / ctl perf is watching; the ring's T field keeps charts correct across
+	// uneven spacing.
+	sampleIdle  = 5 * time.Second
+	observedFor = 2 * time.Minute
+	ringCap     = 600 // ~10 min at 1 Hz (longer when idle-sampled)
 )
 
 // runtime/metrics keys sampled each tick (all O(1) reads, no stop-the-world).
@@ -66,7 +72,10 @@ type Monitor struct {
 	mu         sync.Mutex
 	ring       [ringCap]Sample
 	n, next    int
-	prevPauses []uint64 // last-seen pause-histogram counts (per-sample max-bucket delta)
+	prevPauses []uint64  // last-seen pause-histogram counts (per-sample max-bucket delta)
+	lastSeen   time.Time // last Snapshot() read (drives the observed/idle sample rate)
+
+	rms []metrics.Sample // reused per-tick metrics.Read buffer (Run goroutine only)
 
 	children func() []ChildProc // optional supervised-children lister (SetChildren)
 }
@@ -81,9 +90,11 @@ func (m *Monitor) SetChildren(fn func() []ChildProc) {
 	m.mu.Unlock()
 }
 
-// Run samples at 1 Hz until ctx is done.
+// Run samples until ctx is done: 1 Hz while observed (a Snapshot read within
+// observedFor), sampleIdle otherwise.
 func (m *Monitor) Run(ctx context.Context) {
-	t := time.NewTicker(sampleEvery)
+	interval := sampleEvery
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -91,6 +102,16 @@ func (m *Monitor) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			m.add(m.sample())
+			want := sampleIdle
+			m.mu.Lock()
+			if time.Since(m.lastSeen) < observedFor {
+				want = sampleEvery
+			}
+			m.mu.Unlock()
+			if want != interval {
+				interval = want
+				t.Reset(interval)
+			}
 		}
 	}
 }
@@ -108,10 +129,13 @@ func (m *Monitor) sample() Sample {
 	prev := m.prevPauses
 	m.mu.Unlock()
 
-	rms := []metrics.Sample{
-		{Name: mGoroutines}, {Name: mHeapLive}, {Name: mRTTotal},
-		{Name: mHeapObjs}, {Name: mGCCycles}, {Name: mGCPauses},
+	if m.rms == nil {
+		m.rms = []metrics.Sample{
+			{Name: mGoroutines}, {Name: mHeapLive}, {Name: mRTTotal},
+			{Name: mHeapObjs}, {Name: mGCCycles}, {Name: mGCPauses},
+		}
 	}
+	rms := m.rms
 	metrics.Read(rms)
 	for _, r := range rms {
 		switch r.Name {
@@ -208,9 +232,11 @@ func (m *Monitor) add(s Sample) {
 }
 
 // Snapshot returns the retained samples oldest→newest (feeds the UI perf card).
+// Reading marks the monitor observed → Run switches to the 1 Hz rate.
 func (m *Monitor) Snapshot() []Sample {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastSeen = time.Now()
 	out := make([]Sample, 0, m.n)
 	start := 0
 	if m.n == ringCap {

@@ -72,6 +72,8 @@ type Manager struct {
 	onViewers  func(ViewerInfo)  // UI hook for polled viewer count/state
 	onChatters func(ChatterInfo) // UI hook for the polled chatter list
 	kick       chan struct{}
+
+	viewerGate logbus.Gate // 15s poll: don't re-log the same failure every tick
 }
 
 // New builds the Twitch manager. bus may be nil (then cross-PC routing + publish are no-ops).
@@ -133,9 +135,16 @@ func (m *Manager) pollStats(ctx context.Context, broadcasterID string) {
 func (m *Manager) pollViewers(ctx context.Context, broadcasterID string) {
 	s, err := m.helix.GetStream(ctx, broadcasterID)
 	if err != nil {
-		m.log.Debug(source, "viewer poll failed", map[string]any{"error": err.Error()})
+		if n, ok := m.viewerGate.Should(err.Error(), 10*time.Minute); ok {
+			f := map[string]any{"error": err.Error()}
+			if n > 0 {
+				f["suppressed"] = n
+			}
+			m.log.Debug(source, "viewer poll failed", f)
+		}
 		return
 	}
+	m.viewerGate.Reset()
 	info := ViewerInfo{Live: s.Live, ViewerCount: s.ViewerCount, GameName: s.GameName, Title: s.Title}
 	m.mu.Lock()
 	cb := m.onViewers

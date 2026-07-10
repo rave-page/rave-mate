@@ -70,11 +70,12 @@ type Manager struct {
 	store *peers.Store
 	log   *logbus.Bus
 
-	mu      sync.Mutex
-	conns   map[string]*connState // by peer node id
-	port    int
-	httpSrv *http.Server
-	ln      net.Listener
+	mu        sync.Mutex
+	conns     map[string]*connState   // by peer node id
+	dialGates map[string]*logbus.Gate // by peer node id: don't re-warn every re-discovery of an unreachable peer
+	port      int
+	httpSrv   *http.Server
+	ln        net.Listener
 
 	onSAS   []func(SASRequest)
 	onState []func()
@@ -85,7 +86,7 @@ type Manager struct {
 
 // New builds the manager. id is this node's identity; store remembers paired peers.
 func New(id *identity.Identity, store *peers.Store, log *logbus.Bus) *Manager {
-	return &Manager{id: id, store: store, log: log, conns: map[string]*connState{}}
+	return &Manager{id: id, store: store, log: log, conns: map[string]*connState{}, dialGates: map[string]*logbus.Gate{}}
 }
 
 // AddListener registers peer-event hooks (additive - both the Fyne UI and the studio peer
@@ -202,11 +203,31 @@ func (m *Manager) Connect(p discovery.Peer) {
 		defer cancel()
 		ws, _, err := websocket.Dial(dctx, "ws://"+addr+"/", nil)
 		if err != nil {
-			m.log.Warn(logTag, "dial failed", map[string]any{"peer": p.NodeID, "error": err.Error()})
+			// Re-warned on every discovery re-advert of an unreachable peer otherwise.
+			if n, ok := m.dialGate(p.NodeID).Should(err.Error(), 10*time.Minute); ok {
+				f := map[string]any{"peer": p.NodeID, "error": err.Error()}
+				if n > 0 {
+					f["suppressed"] = n
+				}
+				m.log.Warn(logTag, "dial failed", f)
+			}
 			return
 		}
+		m.dialGate(p.NodeID).Reset()
 		m.runHandshake(newWSConn(ws), roleInitiator, p.Name, addr)
 	})
+}
+
+// dialGate returns (lazily creating) the per-peer dial-failure log gate.
+func (m *Manager) dialGate(nodeID string) *logbus.Gate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.dialGates[nodeID]
+	if !ok {
+		g = &logbus.Gate{}
+		m.dialGates[nodeID] = g
+	}
+	return g
 }
 
 // ── handshake → connection ───────────────────────────────────────────────────

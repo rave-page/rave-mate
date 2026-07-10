@@ -17,10 +17,11 @@ const (
 	Error = slog.Error
 )
 
-// Entry + Bus are the shared types.
+// Entry + Bus + Gate are the shared types.
 type (
 	Entry = slog.Entry
 	Bus   = slog.Bus
+	Gate  = slog.Gate
 )
 
 // New returns a Bus retaining the last capacity entries.

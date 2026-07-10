@@ -138,15 +138,17 @@ func (s *Source) poll(ctx context.Context, emit func(session.Observation)) {
 		if ctx.Err() != nil {
 			return // shutting down - not an error
 		}
-		s.setStatus("error: " + err.Error())
-		s.log.Debug(session.SourceSeratoLive, "fetch failed", map[string]any{"err": err.Error()})
+		if s.setStatus("error: " + err.Error()) {
+			s.log.Debug(session.SourceSeratoLive, "fetch failed", map[string]any{"err": err.Error()})
+		}
 		return // retry next tick; never crash the source
 	}
 	artist, title, raw, ok := parseCurrentTrack(body)
 	if !ok {
-		// No trackname divs = empty or Private page. Don't emit; hint once-ish via Debug.
-		s.setStatus("private")
-		s.log.Debug(session.SourceSeratoLive, "no tracks on page (Private, or not live yet?)", map[string]any{"url": s.url})
+		// No trackname divs = empty or Private page. Don't emit; log the transition only.
+		if s.setStatus("private") {
+			s.log.Debug(session.SourceSeratoLive, "no tracks on page (Private, or not live yet?)", map[string]any{"url": s.url})
+		}
 		return
 	}
 	s.mu.Lock()
@@ -205,10 +207,14 @@ func (s *Source) fetch(ctx context.Context) (string, error) {
 	return string(b), nil
 }
 
-func (s *Source) setStatus(v string) {
+// setStatus stores the status and reports whether it changed (callers gate
+// per-tick logs on the transition so a Private/idle page doesn't spam).
+func (s *Source) setStatus(v string) bool {
 	s.mu.Lock()
+	changed := s.status != v
 	s.status = v
 	s.mu.Unlock()
+	return changed
 }
 
 // httpError carries a non-200 status for the status line.

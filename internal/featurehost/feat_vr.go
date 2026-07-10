@@ -28,9 +28,10 @@ type vrInit struct {
 // NOT fatal: the Manager's own supervise loop waits and re-inits inside the child. On a non-vr build
 // the stub runtime keeps the manager idle ("waiting for SteamVR / non-vr build") instead of crashing.
 type vrFeature struct {
-	rt  *Runtime
-	mgr *vroverlay.Manager
-	bus *vrChildBus
+	rt      *Runtime
+	mgr     *vroverlay.Manager
+	bus     *vrChildBus
+	dirtyCh chan struct{} // cap 1: wakes flushConfig on the clean→dirty transition
 
 	mu       sync.Mutex
 	snap     config.VROverlayFeature
@@ -51,6 +52,7 @@ func (f *vrFeature) Init(params json.RawMessage, rt *Runtime) error {
 	}
 	f.rt = rt
 	f.snap = p.Config
+	f.dirtyCh = make(chan struct{}, 1)
 	f.bus = &vrChildBus{emit: func(topic string, data json.RawMessage) {
 		rt.Emit(vrEvBus, vrBusEvent{Topic: topic, Data: data})
 	}}
@@ -103,36 +105,51 @@ func (f *vrFeature) cfgSnap() config.VROverlayFeature {
 func (f *vrFeature) mutate(fn func(*config.VROverlayFeature)) {
 	f.mu.Lock()
 	fn(&f.snap)
+	first := !f.cfgDirty
 	f.cfgDirty = true
 	f.mu.Unlock()
+	if first { // wake the flusher on the clean→dirty transition only
+		select {
+		case f.dirtyCh <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // flushConfig emits the coalesced config to the daemon at ≤10 Hz plus a trailing flush on shutdown, so
 // a burst of in-VR edits costs at most one full-config write per 100 ms (was one per 90 Hz frame).
+// Event-armed: the ticker runs only while edits are in flight - no 10 Hz idle wakeups.
 func (f *vrFeature) flushConfig(ctx context.Context) {
 	t := time.NewTicker(100 * time.Millisecond)
+	t.Stop() // armed by the first edit
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			f.flushConfigOnce() // trailing flush - don't drop the last edit of a drag
 			return
+		case <-f.dirtyCh: // burst started: open a 100 ms coalescing window
+			t.Reset(100 * time.Millisecond)
 		case <-t.C:
-			f.flushConfigOnce()
+			if !f.flushConfigOnce() {
+				t.Stop() // burst over - idle until the next edit
+			}
 		}
 	}
 }
 
-func (f *vrFeature) flushConfigOnce() {
+// flushConfigOnce emits the snapshot if dirty; reports whether it flushed.
+func (f *vrFeature) flushConfigOnce() bool {
 	f.mu.Lock()
 	if !f.cfgDirty {
 		f.mu.Unlock()
-		return
+		return false
 	}
 	cp := f.snap
 	f.cfgDirty = false
 	f.mu.Unlock()
 	f.rt.Emit(vrEvConfig, cp)
+	return true
 }
 
 func (f *vrFeature) camList() []vroverlay.CamPathItem {

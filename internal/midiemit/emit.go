@@ -42,6 +42,8 @@ type Emitter struct {
 	out    Out
 	name   string // resolved active port name
 	closed bool
+
+	noOutGate logbus.Gate // suppress repeated "no MIDI output" while the port stays absent
 }
 
 // New builds an emitter. want is the initial port substring ("" = auto: LoopBe1/first port).
@@ -118,6 +120,7 @@ func (e *Emitter) ensure() (Out, error) {
 		return nil, err
 	}
 	e.out, e.name = out, name
+	e.noOutGate.Reset() // port is back - next absence logs again
 	if e.log != nil {
 		e.log.Info(source, "MIDI output open", map[string]any{"port": name})
 	}
@@ -130,16 +133,23 @@ func (e *Emitter) send(status, d1, d2 byte, tag string) error {
 	out, err := e.ensure()
 	if err != nil {
 		e.mu.Unlock()
-		if e.log != nil {
-			e.log.Warn(source, "no MIDI output", map[string]any{"error": err.Error()})
+		// A missing port fails EVERY send (sweeps fire 13 in a row) - warn on the
+		// transition + every 10 min, not per message.
+		if n, ok := e.noOutGate.Should(err.Error(), 10*time.Minute); ok && e.log != nil {
+			f := map[string]any{"error": err.Error()}
+			if n > 0 {
+				f["suppressed"] = n
+			}
+			e.log.Warn(source, "no MIDI output", f)
 		}
 		return err
 	}
 	port := e.name
 	out.Send(status, d1, d2)
 	e.mu.Unlock()
+	// Debug: per-message confirmation is a firehose at INFO (a single sweep = 13 lines).
 	if e.log != nil {
-		e.log.Info(source, tag, map[string]any{"port": port, "status": status, "d1": d1, "d2": d2})
+		e.log.Debug(source, tag, map[string]any{"port": port, "status": status, "d1": d1, "d2": d2})
 	}
 	return nil
 }

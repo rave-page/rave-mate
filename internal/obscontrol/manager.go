@@ -75,8 +75,9 @@ type Manager struct {
 	// media-sync tier (chase OBS media sources to the house clock)
 	syncClock *mediasync.WallClock         // house clock (v1: wall-clock, "start sync now")
 	syncCfg   func() SyncConfig            // live sync config (nil = disabled)
-	syncMu    sync.Mutex                   // guards chasers
+	syncMu    sync.Mutex                   // guards chasers + syncGates
 	chasers   map[string]*mediasync.Chaser // "endpoint\x00input" → chaser
+	syncGates map[string]*logbus.Gate      // per-chaser "sync tick" failure log gate
 }
 
 // New builds the manager. local may be nil (render/route only). bus may be nil (local-only). remotes
@@ -89,6 +90,7 @@ func New(log *logbus.Bus, bus *eventbus.Bus, local OBS, label, selfNodeID string
 		insts:     map[string]entry{},
 		syncClock: mediasync.NewWallClock(),
 		chasers:   map[string]*mediasync.Chaser{},
+		syncGates: map[string]*logbus.Gate{},
 	}
 }
 
@@ -298,9 +300,28 @@ func (m *Manager) srcOrNew(id, label string, o OBS) *srcState {
 	return &srcState{id: id, label: label, obs: o}
 }
 
+// ensureConnector marks owned sources whose (re)connect is DRIVEN by the poll (directOBS,
+// which dials lazily + throttled). The featurehost local proxy reconnects itself in the
+// child, so a cheap Connected()=false skips its status request entirely - no per-second
+// IPC round-trip while OBS is closed or the feature is off.
+type ensureConnector interface {
+	ensureConnected(ctx context.Context) bool
+}
+
 // pollSource samples one source and broadcasts its status (bitrate from the byte delta). Returns
 // whether it's connected.
 func (m *Manager) pollSource(ctx context.Context, s *srcState) bool {
+	if !s.obs.Connected() {
+		ec, ok := s.obs.(ensureConnector)
+		if !ok || !ec.ensureConnected(ctx) {
+			if s.wasConnected {
+				m.publish(Status{ID: s.id, Label: s.label})
+				s.wasConnected = false
+			}
+			s.lastBytes, s.lastAt = 0, time.Time{}
+			return false
+		}
+	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	ss, serr := s.obs.GetStreamStatus(cctx)

@@ -550,6 +550,7 @@ func (s *Source) pump(ctx context.Context, b portBinding, in *midi.Input, emit f
 	summary := time.NewTicker(summaryRate)
 	defer summary.Stop()
 	act := newActivity()
+	var gate logbus.Gate // an idle clock/keepalive device repeats the same digest forever
 	for {
 		select {
 		case <-ctx.Done():
@@ -564,8 +565,15 @@ func (s *Source) pump(ctx context.Context, b portBinding, in *midi.Input, emit f
 		case <-summary.C:
 			// Periodic activity digest to the MAIN log (so `rave-mate ctl logs` shows whether a
 			// port carries usable data or only clock/keepalive - the Denon-out diagnosis).
+			// Gated: re-log only when the digest CHANGES or every 5 min.
 			if line, ok := act.flush(); ok {
-				s.log.Info(srcLog, "MIDI activity", map[string]any{"port": b.name, "detail": line})
+				if n, emitNow := gate.Should(line, 5*time.Minute); emitNow {
+					f := map[string]any{"port": b.name, "detail": line}
+					if n > 0 {
+						f["repeats"] = n
+					}
+					s.log.Info(srcLog, "MIDI activity", f)
+				}
 			}
 		}
 	}

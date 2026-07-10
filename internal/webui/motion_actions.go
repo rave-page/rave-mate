@@ -141,8 +141,12 @@ func init() {
 		u.moCPRefresh(true)
 	})
 	// motion studio
-	onExact("mo-rec-refresh", func(u *UI, m actMsg) { u.moRecRefresh(true) })
-	onPrefix("mo-rec-sel:", func(u *UI, m actMsg) { u.moRecSelect(strings.TrimPrefix(m.Act, "mo-rec-sel:")) })
+	// bg: dir scan + mocap JSON parse must not block the action goroutine (big recordings).
+	onExact("mo-rec-refresh", func(u *UI, m actMsg) { u.bg(func() { u.moRecRefresh(true) }) })
+	onPrefix("mo-rec-sel:", func(u *UI, m actMsg) {
+		name := strings.TrimPrefix(m.Act, "mo-rec-sel:")
+		u.bg(func() { u.moRecSelect(name) })
+	})
 	onExact("mo-orbit", func(u *UI, m actMsg) { u.moOrbit(m.Val, false) })
 	onExact("mo-zoom", func(u *UI, m actMsg) { u.moZoom(m.Val, false) })
 	onExact("mo-scrub", func(u *UI, m actMsg) { u.moScrub(m.Val) })
@@ -246,7 +250,8 @@ func (u *UI) moEnsure() {
 		u.moCPRefresh(false)
 	}
 	if sec == "studio" && recEmpty {
-		u.moRecRefresh(false)
+		// bg + patch: the first render shows the empty section, the scan re-patches it in.
+		u.bg(func() { u.moRecRefresh(true) })
 	}
 }
 

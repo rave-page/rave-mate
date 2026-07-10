@@ -355,8 +355,13 @@ func (h *Host) supervise(ctx context.Context) {
 		h.lastErr = msg
 		notify := h.notify
 		h.mu.Unlock()
-		h.opt.Log.Error(h.src(), msg+" - restarting", map[string]any{"delay": delay.String()})
-		// Toast the first crash of a streak, then every 5th, so a crash-loop doesn't spam.
+		// First crash of a streak + every 5th at ERROR; the rest at Debug so a
+		// crash-loop doesn't flood the ring (restart count stays in Status()).
+		if attempt == 0 || attempt%5 == 0 {
+			h.opt.Log.Error(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt + 1})
+		} else {
+			h.opt.Log.Debug(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt + 1})
+		}
 		if notify != nil && (attempt == 0 || attempt%5 == 0) {
 			notify("Feature crashed", h.opt.Name+" restarting in "+delay.String()+" - other features unaffected")
 		}

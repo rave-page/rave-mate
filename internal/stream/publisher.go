@@ -68,6 +68,7 @@ type Publisher struct {
 	lastFlushOK                        bool
 	cancel                             context.CancelFunc
 	wg                                 sync.WaitGroup
+	hbGate                             logbus.Gate // heartbeat-failure log gate (30s cadence)
 
 	statusMu   sync.Mutex
 	statusSubs map[int]chan Status
@@ -223,8 +224,17 @@ func (p *Publisher) heartbeat(ctx context.Context) {
 		return
 	}
 	if err := p.api.Heartbeat(ctx, id, token); err != nil {
-		p.log.Warn(source, "heartbeat failed", map[string]any{"error": err.Error()})
+		// 30s cadence: a down backend would warn every beat for the whole set.
+		if n, ok := p.hbGate.Should(err.Error(), 5*time.Minute); ok {
+			f := map[string]any{"error": err.Error()}
+			if n > 0 {
+				f["suppressed"] = n
+			}
+			p.log.Warn(source, "heartbeat failed", f)
+		}
+		return
 	}
+	p.hbGate.Reset()
 }
 
 // End stops publishing and ends the stream server-side (best effort).

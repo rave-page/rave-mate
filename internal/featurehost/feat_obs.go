@@ -100,8 +100,11 @@ func (f *obsFeature) Start(ctx context.Context) error {
 	fails := 0 // consecutive attempts that never connected
 	for {
 		connected, err := f.session(ctx)
-		if err != nil && ctx.Err() == nil {
-			f.rt.Log.Debug("obs", "session ended", map[string]any{"error": err.Error()})
+		// Log a real session drop, or the FIRST failed dial of a streak - a closed
+		// OBS retries forever and would otherwise spam an identical refused-dial
+		// line every cycle.
+		if err != nil && ctx.Err() == nil && (connected || fails == 0) {
+			f.rt.Log.Debug("obs", "session ended", map[string]any{"error": err.Error(), "note": "will retry quietly"})
 		}
 		f.emitState(obsState{}) // disconnected
 		if connected {

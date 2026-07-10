@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/vrchat"
 )
 
@@ -41,7 +42,8 @@ type vrchatFeature struct {
 	token string
 	kick  chan struct{} // closed+replaced on token change
 
-	last vrchatPipeState
+	last    vrchatPipeState
+	endGate logbus.Gate // reconnect-loop "session ended" log gate
 }
 
 func (f *vrchatFeature) Init(params json.RawMessage, rt *Runtime) error {
@@ -95,7 +97,16 @@ func (f *vrchatFeature) Start(ctx context.Context) error {
 		st := vrchatPipeState{}
 		if err != nil {
 			st.LastError = err.Error()
-			f.rt.Log.Debug("vrchat", "pipeline session ended", map[string]any{"error": err.Error()})
+			// Reconnect loop: same failure repeats every delay - log transitions only.
+			if n, ok := f.endGate.Should(err.Error(), 10*time.Minute); ok {
+				fl := map[string]any{"error": err.Error()}
+				if n > 0 {
+					fl["suppressed"] = n
+				}
+				f.rt.Log.Debug("vrchat", "pipeline session ended", fl)
+			}
+		} else {
+			f.endGate.Reset()
 		}
 		f.emitState(st)
 		select {

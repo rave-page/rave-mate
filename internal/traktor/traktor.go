@@ -187,17 +187,32 @@ func (s *Server) monEmit(route string, payload map[string]any, coalesced int) {
 	s.mon.Info(route, summarizePayload(payload), fields)
 }
 
-// Start binds the listener and serves until ctx is cancelled. The bind happens
-// synchronously so a port-in-use error is reported deterministically (the Electron
-// client also uses :8080 - only one Traktor bridge can own it). Blocks until shutdown.
+// bindRetryEvery paces re-binds while another process holds the port.
+const bindRetryEvery = 15 * time.Second
+
+// Start binds the listener and serves until ctx is cancelled. A held port (another
+// Traktor bridge owns :8080 - only one can) is WAITED OUT in-process: erroring out would
+// make the featurehost supervisor crash-loop the child (ERROR restart every backoff tick,
+// forever). The failure logs once, then the bind retries quietly and auto-recovers when
+// the holder exits. Blocks until shutdown.
 func (s *Server) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		s.log.Error(source, "listener bind failed (port in use? Electron client may own it)", map[string]any{"addr": s.addr, "error": err.Error()})
+		s.log.Error(source, "listener bind failed (port in use? another Traktor bridge may own it) - retrying quietly", map[string]any{"addr": s.addr, "error": err.Error(), "retryEvery": bindRetryEvery.String()})
 		if s.mon != nil {
-			s.mon.Error("bind", "listener bind failed - "+s.addr+" in use (Electron client owns it?). No Traktor HTTP data will arrive.", map[string]any{"error": err.Error()})
+			s.mon.Error("bind", "listener bind failed - "+s.addr+" in use (another Traktor bridge owns it?). No Traktor HTTP data will arrive; retrying.", map[string]any{"error": err.Error()})
 		}
-		return err
+		t := time.NewTicker(bindRetryEvery)
+		for ln == nil {
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return nil
+			case <-t.C:
+				ln, _ = net.Listen("tcp", s.addr)
+			}
+		}
+		t.Stop()
 	}
 	s.listening.Store(true)
 	s.log.Info(source, "listening", map[string]any{"addr": s.addr, "logging": s.logging.Load(), "logFile": s.logPath})

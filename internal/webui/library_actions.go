@@ -876,6 +876,7 @@ func (u *UI) libReload() {
 	s := u.lib()
 	s.mu.Lock()
 	s.loaded = false
+	s.loadGen++ // invalidate any in-flight hydrate (it may predate the import)
 	s.mu.Unlock()
 	u.patchMain()
 }
@@ -947,10 +948,7 @@ func (u *UI) libCleanup() {
 
 func (u *UI) libRelocate() {
 	s := u.lib()
-	s.mu.Lock()
-	u.libEnsureTracks(s)
-	tracks := s.tracks
-	s.mu.Unlock()
+	tracks := u.libTracksBlocking(s)
 	if len(tracks) == 0 {
 		u.toast(i18n.T("library.toast.importFirst"))
 		return
@@ -1198,10 +1196,7 @@ func (u *UI) libAddToDo(idStr string) {
 func (u *UI) libPlaylistItems(row libdb.PlaylistRow) []libdb.PlaylistItemRow {
 	if row.Kind == libdb.PlaylistSmart {
 		s := u.lib()
-		s.mu.Lock()
-		u.libEnsureTracks(s)
-		tracks := s.tracks
-		s.mu.Unlock()
+		tracks := u.libTracksBlocking(s)
 		rules, ok := libParseRules(row.Rules)
 		if !ok {
 			return nil
@@ -1450,8 +1445,8 @@ func (u *UI) libSmartOpen(id int64) {
 	}
 	rules, _ := libParseRules(row.Rules)
 	s := u.lib()
+	u.libTracksBlocking(s) // smart modal shows live match counts against the collection
 	s.mu.Lock()
-	u.libEnsureTracks(s)
 	s.srID, s.srName, s.srRules = id, row.Name, rules
 	s.srGenres = map[string]bool{}
 	for _, g := range rules.Genres {

@@ -12,6 +12,7 @@ import (
 	"context"
 	"time"
 
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mediasync"
 )
 
@@ -92,6 +93,16 @@ func (m *Manager) tickSync(ctx context.Context) {
 	if m.syncCfg != nil {
 		cfg = m.syncCfg()
 	}
+	if !cfg.Enabled {
+		// Idle fast path: this ticks 2x/s forever - skip the reconcile allocs unless
+		// there are chasers left to drop.
+		m.syncMu.Lock()
+		n := len(m.chasers)
+		m.syncMu.Unlock()
+		if n == 0 {
+			return
+		}
+	}
 	m.reconcileChasers(cfg)
 	if !cfg.Enabled {
 		return
@@ -99,19 +110,36 @@ func (m *Manager) tickSync(ctx context.Context) {
 
 	m.syncMu.Lock()
 	chasers := make([]*mediasync.Chaser, 0, len(m.chasers))
-	for _, c := range m.chasers {
+	gates := make([]*logbus.Gate, 0, len(m.chasers))
+	for key, c := range m.chasers {
 		chasers = append(chasers, c)
+		g, ok := m.syncGates[key]
+		if !ok {
+			g = &logbus.Gate{}
+			m.syncGates[key] = g
+		}
+		gates = append(gates, g)
 	}
 	m.syncMu.Unlock()
 
-	for _, c := range chasers {
-		go func(ch *mediasync.Chaser) {
+	for i, c := range chasers {
+		go func(ch *mediasync.Chaser, gate *logbus.Gate) {
 			cctx, cancel := context.WithTimeout(ctx, syncTimeout)
 			defer cancel()
+			// 2 ticks/s per chaser: an erroring OBS media source would log the same
+			// failure 120x/min - gate on transition + 5 min refresh.
 			if err := ch.Tick(cctx); err != nil {
-				m.log.Debug(logTag, "sync tick", map[string]any{"source": ch.Config().InputName, "error": err.Error()})
+				if n, ok := gate.Should(err.Error(), 5*time.Minute); ok {
+					f := map[string]any{"source": ch.Config().InputName, "error": err.Error()}
+					if n > 0 {
+						f["suppressed"] = n
+					}
+					m.log.Debug(logTag, "sync tick", f)
+				}
+			} else {
+				gate.Reset()
 			}
-		}(c)
+		}(c, gates[i])
 	}
 }
 
@@ -139,10 +167,11 @@ func (m *Manager) reconcileChasers(cfg SyncConfig) {
 
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
-	// Drop chasers no longer wanted.
+	// Drop chasers no longer wanted (+ their log gates).
 	for key := range m.chasers {
 		if _, ok := want[key]; !ok {
 			delete(m.chasers, key)
+			delete(m.syncGates, key)
 		}
 	}
 	// Add / rebuild chasers.

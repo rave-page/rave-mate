@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,10 +82,22 @@ type libSt struct {
 	histSrc   string   // "" = all, "traktor", or a master.db path
 	selSess   int
 
-	tracks []musiclib.Track
-	byPath map[string]musiclib.Track
-	loaded bool
-	marks  *library.Bookmarks
+	tracks   []musiclib.Track
+	byPath   map[string]musiclib.Track
+	loaded   bool
+	loading  bool          // background hydrate in flight (render a loading placeholder)
+	loadDone chan struct{} // closed when the in-flight hydrate finishes
+	loadGen  int           // bumped by libReload: an in-flight hydrate from a prior gen is discarded
+	marks    *library.Bookmarks
+
+	// Browse listing cache: os.ReadDir + per-entry stat run in the BACKGROUND (a network
+	// share / spun-down drive would otherwise wedge the single action goroutine); renders
+	// come from the cache and a stale cache refreshes async + re-patches.
+	browseDir  string  // dir the cache belongs to
+	browseFes  []libFe // cached entries (unfiltered; treat as immutable - copy before filter/sort)
+	browseErr  bool    // last read failed
+	browseBusy bool    // a background read is in flight
+	browseAt   time.Time
 
 	// smart-playlist rules editor draft
 	srID     int64 // 0 = create
@@ -216,13 +229,19 @@ func (u *UI) libBody() string {
 	case "favorites":
 		return u.libFavoritesHTML(s)
 	case "collection":
-		u.libEnsureTracks(s)
+		if !u.libEnsureTracks(s) {
+			return emptyState(i18n.T("library.remote.col.loading"))
+		}
 		return masterDetailWide(u.libCollectionHTML(s), u.libDetailWrap(s))
 	case "playlists":
-		u.libEnsureTracks(s)
+		if !u.libEnsureTracks(s) {
+			return emptyState(i18n.T("library.remote.col.loading"))
+		}
 		return masterDetail(u.libPlaylistsHTML(s), u.libDetailWrap(s))
 	case "history":
-		u.libEnsureTracks(s)
+		if !u.libEnsureTracks(s) {
+			return emptyState(i18n.T("library.remote.col.loading"))
+		}
 		return masterDetailWide(u.libHistoryHTML(s), u.libDetailWrap(s))
 	case "idmarks":
 		return u.libIDMarksHTML(s)
@@ -231,6 +250,8 @@ func (u *UI) libBody() string {
 	case "presets":
 		return u.libPresetsHTML(s)
 	default:
+		// Browse renders the dir listing regardless; the collection (metadata enrichment)
+		// hydrates in the background and re-patches when ready.
 		u.libEnsureTracks(s)
 		return masterDetailWide(u.libBrowseHTML(s), u.libDetailWrap(s))
 	}
@@ -240,23 +261,66 @@ func (u *UI) libDetailWrap(s *libSt) string {
 	return `<div id=lib-detail>` + u.libDetailHTML(s) + `</div>`
 }
 
-// libEnsureTracks lazily hydrates the collection from the persisted DB (once).
-func (u *UI) libEnsureTracks(s *libSt) {
+// libEnsureTracks lazily hydrates the collection from the persisted DB, in the
+// BACKGROUND: a big library would otherwise block the single action goroutine on first
+// open (frozen tab, dropped clicks). Returns whether the collection is ready; while the
+// load is in flight the caller renders a loading placeholder and the completion re-patches
+// the body. Caller holds s.mu.
+func (u *UI) libEnsureTracks(s *libSt) bool {
 	if s.loaded || u.svc.Lib == nil {
-		return
+		return true
 	}
-	s.loaded = true
-	tr, err := u.svc.Lib.LoadAllTracks()
-	if err != nil {
-		return
+	if s.loading {
+		return false
 	}
-	s.tracks = tr
-	s.byPath = make(map[string]musiclib.Track, len(tr))
-	for _, t := range tr {
-		if t.Path != "" {
-			s.byPath[t.Path] = t
+	s.loading = true
+	s.loadDone = make(chan struct{})
+	done, gen := s.loadDone, s.loadGen
+	u.bg(func() {
+		defer close(done)
+		tr, err := u.svc.Lib.LoadAllTracks()
+		var byPath map[string]musiclib.Track
+		if err == nil { // index built off the action goroutine too
+			byPath = make(map[string]musiclib.Track, len(tr))
+			for _, t := range tr {
+				if t.Path != "" {
+					byPath[t.Path] = t
+				}
+			}
 		}
+		s.mu.Lock()
+		s.loading = false
+		if s.loadGen == gen { // a libReload mid-load discards this read (next render re-hydrates)
+			s.loaded = true
+			if err == nil {
+				s.tracks, s.byPath = tr, byPath
+			}
+		}
+		s.mu.Unlock()
+		u.libPatchBody()
+	})
+	return false
+}
+
+// libTracksBlocking returns the hydrated collection, waiting (bounded) for the background
+// load - for explicit actions (relocate, smart-playlist eval) that need the data NOW.
+func (u *UI) libTracksBlocking(s *libSt) []musiclib.Track {
+	s.mu.Lock()
+	if u.libEnsureTracks(s) {
+		tr := s.tracks
+		s.mu.Unlock()
+		return tr
 	}
+	done := s.loadDone
+	s.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+	}
+	s.mu.Lock()
+	tr := s.tracks
+	s.mu.Unlock()
+	return tr
 }
 
 func (u *UI) libMarks(s *libSt) *library.Bookmarks {
@@ -269,31 +333,66 @@ func (u *UI) libMarks(s *libSt) *library.Bookmarks {
 
 // ── Browse ────────────────────────────────────────────────────────────────────
 
+// libFe is one cached browse entry.
+type libFe struct {
+	name, path, kind string
+	isDir            bool
+	size             int64
+	mod              time.Time
+}
+
+// browseFresh is how long a cached listing serves without a background re-read.
+const browseFresh = 2 * time.Second
+
+// libBrowseEntries returns the (possibly stale) cached listing for dir, kicking a
+// background read when the cache is missing or stale. ok=false → nothing cached yet for
+// this dir (render a loading placeholder; the read completion re-patches). Caller holds s.mu.
+func (u *UI) libBrowseEntries(s *libSt, dir string) (fes []libFe, errRead, ok bool) {
+	cached := s.browseDir == dir
+	if (!cached || time.Since(s.browseAt) > browseFresh) && !s.browseBusy {
+		s.browseBusy = true
+		u.bg(func() {
+			entries, err := os.ReadDir(dir)
+			var out []libFe
+			for _, e := range entries {
+				name := e.Name()
+				if strings.HasPrefix(name, ".") {
+					continue
+				}
+				fi, serr := e.Info()
+				if serr != nil {
+					continue
+				}
+				out = append(out, libFe{name, filepath.Join(dir, name), libKind(name, fi.IsDir()), fi.IsDir(), fi.Size(), fi.ModTime()})
+			}
+			s.mu.Lock()
+			changed := s.browseDir != dir || s.browseErr != (err != nil) || !slices.Equal(s.browseFes, out)
+			s.browseBusy = false
+			s.browseDir, s.browseAt = dir, time.Now()
+			s.browseErr = err != nil
+			s.browseFes = out
+			s.mu.Unlock()
+			if changed { // replace the loading placeholder / refresh a listing that changed on disk
+				u.libPatchBody()
+			}
+		})
+	}
+	if !cached {
+		return nil, false, false
+	}
+	return s.browseFes, s.browseErr, true
+}
+
 func (u *UI) libBrowseHTML(s *libSt) string {
 	dir := u.libDirOr()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	cachedFes, errRead, ok := u.libBrowseEntries(s, dir)
+	if !ok {
+		return emptyState(i18n.T("library.remote.col.loading"))
+	}
+	if errRead {
 		return emptyState(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
 	}
-	type fe struct {
-		name, path, kind string
-		isDir            bool
-		size             int64
-		mod              time.Time
-	}
-	var fs []fe
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		full := filepath.Join(dir, name)
-		fi, serr := e.Info()
-		if serr != nil {
-			continue
-		}
-		fs = append(fs, fe{name, full, libKind(name, fi.IsDir()), fi.IsDir(), fi.Size(), fi.ModTime()})
-	}
+	fs := append([]libFe(nil), cachedFes...) // cache is immutable - copy before filter/sort
 	// filter
 	q := strings.ToLower(strings.TrimSpace(s.nameFilter))
 	keyed := len(s.keySel) > 0
