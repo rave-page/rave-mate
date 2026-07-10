@@ -1,13 +1,13 @@
 {
-  "version": "nightly-aa52956",
-  "build": 44,
-  "commit": "aa52956",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-44-20260710-aa52956.exe",
-  "sha256": "a90acf6e3ba0556e3a5a38e7e8ca6617b4e09a2ea708ff48dfb43c4b74f1e61e",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-44-20260710-aa52956.exe",
-  "installer_sha256": "b9dc11586524e3e3dd880a25ac27e464c922e5259a5aaaa2592051e8e01ddb37",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-44-20260710-aa52956",
-  "linux_sha256": "4023ff8d64c0a67ff9b38bbcc711e9cf675a136b6f05f1bb499df08afe5888c0",
+  "version": "nightly-3dd4e01",
+  "build": 46,
+  "commit": "3dd4e01",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-46-20260710-3dd4e01.exe",
+  "sha256": "1cd84b218cb12ba1b226230334230bb69097f7eddc68aa64a7b365df192eca7d",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-46-20260710-3dd4e01.exe",
+  "installer_sha256": "5fccd86a4175413b60b6a4c24dc2ef5f8ef028fad252db07c4d402872775f505",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-46-20260710-3dd4e01",
+  "linux_sha256": "6d9026e206a5b79879520a18f705e332c502ae8e722db8d81a6d277b929f57fb",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-10T14:29:15Z",
-  "notes": "fix(driver): emit DEVPKEY_DeviceInterface_FriendlyName storage (INITGUID TU)"
+  "released": "2026-07-10T14:49:10Z",
+  "notes": "test(midi): ravemidi on-hardware bring-up test (manual tag)"
 }
