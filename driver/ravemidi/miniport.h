@@ -6,6 +6,7 @@
 
 #include <portcls.h>
 #include <stdunk.h>
+#include "kalloc.h"
 #include "ioctl.h"
 #include "fifo.h"
 

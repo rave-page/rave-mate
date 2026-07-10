@@ -29,6 +29,17 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
       - name: Build ravemidi (x64 ${{ matrix.configuration }})
         run: msbuild driver\ravemidi\ravemidi.vcxproj /m /p:Configuration=${{ matrix.configuration }} /p:Platform=x64 /warnaserror
+      - name: InfVerif (declarative/DCH gate)
+        shell: pwsh
+        run: |
+          $iv = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter InfVerif.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if (-not $iv) { throw "InfVerif.exe not found in WDK bin" }
+          $staged = Get-ChildItem "driver\ravemidi\build\${{ matrix.configuration }}\x64" -Recurse -Filter ravemidi.inf -ErrorAction SilentlyContinue | Select-Object -First 1
+          $inf = if ($staged) { $staged.FullName } else { "driver\ravemidi\ravemidi.inf" }
+          Write-Host "InfVerif: $($iv.FullName) /h $inf"
+          & $iv.FullName /h $inf
+          if ($LASTEXITCODE -ne 0) { throw "InfVerif failed ($LASTEXITCODE)" }
       - name: Package artifacts
         if: matrix.configuration == 'Release'
         shell: pwsh
