@@ -23,6 +23,8 @@ func init() {
 		}
 		u.runPick("save", container, target)
 	})
+	// post-pick re-render, queued behind the redispatched target act so inputs show the new value
+	onExact("pick-rerender", func(u *UI, _ actMsg) { u.patchMain() })
 }
 
 // runPick shows the native dialog off-thread, then re-dispatches target with the chosen path.
@@ -56,16 +58,18 @@ func (u *UI) runPick(kind, container, target string) {
 			return
 		}
 		u.redispatch(target, p)
-		u.patchMain() // re-render so path inputs show the chosen value
+		u.redispatch("pick-rerender", "") // re-render so path inputs show the chosen value
 	})
 }
 
-// redispatch re-enters onAction exactly as a page event would (covers the set:/toggle: built-ins
-// and every registry handler) without touching ui.go.
+// redispatch re-enters the action pipeline exactly as a page event would (covers the set:/toggle:
+// built-ins and every registry handler). It routes through the page's bound rave() so the act is
+// queued on the shell's acts chan and executes serialized on actWorker - never calls onAction from
+// this background goroutine (concurrent handlers would race unsynchronized state, e.g. *config.Config).
 func (u *UI) redispatch(act, val string) {
 	b, err := json.Marshal(actMsg{Act: act, Val: val})
 	if err != nil {
 		return
 	}
-	u.onAction(string(b))
+	u.eval("window.rave&&window.rave(" + jsQuote(string(b)) + ")")
 }

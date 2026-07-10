@@ -1,6 +1,9 @@
 package webui
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Live-tick registry: each tab that needs a ~1 Hz DOM refresh registers a fn in its own file's
 // init() (onLiveTick) so parallel tab work never collides on the livePush switch. livePush calls
@@ -43,13 +46,46 @@ func init() {
 	})
 
 	onLiveTick("logs", func(u *UI) {
+		// Rebuild only when the ring advanced (dedup keyed on bus+last-seq in the frags cache, so
+		// patchMain's cache drop forces a repaint after DOM replace) - the unconditional 400-line
+		// innerHTML swap each tick wiped text selection and burned CPU with nothing new. Filter
+		// changes + logs-clear repaint #log-view themselves, so seq-only keying stays correct.
+		u.logMu.Lock()
+		sel := u.logBus
+		u.logMu.Unlock()
+		var seq uint64
+		if bus := u.busFor(sel); bus != nil {
+			if es := bus.Snapshot(); len(es) > 0 { // no exported Bus.Seq(); tail copy is cheap vs the HTML rebuild
+				seq = es[len(es)-1].Seq
+			}
+		}
+		key := sel + ":" + strconv.FormatUint(seq, 10)
+		u.fragMu.Lock()
+		if u.frags["log-seq"] == key {
+			u.fragMu.Unlock()
+			return
+		}
+		if u.frags == nil {
+			u.frags = map[string]string{}
+		}
+		u.frags["log-seq"] = key
+		u.fragMu.Unlock()
 		// tail-follow: keep scroll unless already at bottom; autoscroll gates the follow entirely
 		u.eval("var lv=document.getElementById('log-view');if(lv){var ab=" + u.logAutoscrollJS() +
 			"&&(lv.scrollHeight-lv.scrollTop-lv.clientHeight<40);lv.innerHTML=" +
 			jsQuote(u.logLinesHTML(logTailN)) + ";if(ab)lv.scrollTop=lv.scrollHeight;}")
 	})
 
-	// Automations + App Groups keep their v1 body refresh (not part of the parity fan-out).
-	onLiveTick("automations", func(u *UI) { u.eval("window.__patch('auto-body'," + jsQuote(u.autoBody()) + ")") })
-	onLiveTick("appgroups", func(u *UI) { u.eval("window.__patch('appgroups-body'," + jsQuote(u.appGroupsBody()) + ")") })
+	// Automations + App Groups keep their v1 body refresh (not part of the parity fan-out);
+	// tickPatch skips the eval when the body is unchanged.
+	onLiveTick("automations", func(u *UI) {
+		var js strings.Builder
+		u.tickPatch(&js, "auto-body", u.autoBody())
+		u.flushTick(&js)
+	})
+	onLiveTick("appgroups", func(u *UI) {
+		var js strings.Builder
+		u.tickPatch(&js, "appgroups-body", u.appGroupsBody())
+		u.flushTick(&js)
+	})
 }

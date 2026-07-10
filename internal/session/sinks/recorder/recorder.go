@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/session"
@@ -61,6 +62,21 @@ type Recorder struct {
 	subMu   sync.Mutex
 	subs    map[int]chan *Recording
 	nextSub int
+
+	// persist plumbing: store writes (bbolt fsync) run off r.mu on a single flusher
+	// goroutine, so render-facing Active()/Get()/Pending() never wait on disk. FIFO
+	// order preserved; consecutive same-id puts coalesce (newest wins), bounding the
+	// queue by distinct ids in flight, not write rate.
+	pmu   sync.Mutex
+	pcond *sync.Cond // signaled when the flusher drains (drainPersist)
+	pq    []persistOp
+	pbusy bool
+}
+
+// persistOp is one queued store write: rec != nil → put snapshot, else delete id.
+type persistOp struct {
+	id  string
+	rec *Recording
 }
 
 // New constructs a recorder. confirmSeconds is how long a track must play before it counts.
@@ -69,7 +85,7 @@ func New(log *logbus.Bus, st *store.Store, lib *libdb.DB, confirmSeconds int) *R
 	if confirmSeconds <= 0 {
 		confirmSeconds = 30
 	}
-	return &Recorder{
+	r := &Recorder{
 		log:     log,
 		st:      st,
 		lib:     lib,
@@ -77,6 +93,8 @@ func New(log *logbus.Bus, st *store.Store, lib *libdb.DB, confirmSeconds int) *R
 		clock:   time.Now,
 		subs:    map[int]chan *Recording{},
 	}
+	r.pcond = sync.NewCond(&r.pmu)
+	return r
 }
 
 // ID implements session.Sink.
@@ -378,7 +396,7 @@ func (r *Recorder) autoFinalizeLocked(endAt time.Time) {
 	r.active.EndedAt = endAt
 	done := r.active
 	if len(done.Tracks) == 0 {
-		_ = r.st.Delete(store.BucketRecordings, done.ID)
+		r.queuePersist(done.ID, nil) // via queue: ordered after the start-time put, so the empty set can't resurrect
 		r.log.Info(source, "empty set discarded", map[string]any{"id": done.ID})
 	} else {
 		r.persistLocked()
@@ -393,8 +411,8 @@ func (r *Recorder) autoFinalizeLocked(endAt time.Time) {
 // StopRecording ends the active recording and returns it (nil if none was active).
 func (r *Recorder) StopRecording() *Recording {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.active == nil {
+		r.mu.Unlock()
 		return nil
 	}
 	now := r.clock()
@@ -412,6 +430,8 @@ func (r *Recorder) StopRecording() *Recording {
 	r.cur = nil
 	r.pendingKey = ""
 	r.broadcastLocked()
+	r.mu.Unlock()
+	r.drainPersist() // stopped set durable + visible to List() before return; fsync waits off r.mu
 	return done.clone()
 }
 
@@ -459,7 +479,7 @@ func (r *Recorder) List() []Recording {
 	return out
 }
 
-// Get returns one recording (active or persisted) by id.
+// Get returns one recording (active, queued-for-persist, or persisted) by id.
 func (r *Recorder) Get(id string) (Recording, bool) {
 	r.mu.Lock()
 	if r.active != nil && r.active.ID == id {
@@ -468,6 +488,19 @@ func (r *Recorder) Get(id string) (Recording, bool) {
 		return *c, true
 	}
 	r.mu.Unlock()
+	// Pending store writes: newest queued snapshot beats the (stale) on-disk copy.
+	r.pmu.Lock()
+	for i := len(r.pq) - 1; i >= 0; i-- {
+		if r.pq[i].id == id {
+			op := r.pq[i]
+			r.pmu.Unlock()
+			if op.rec == nil {
+				return Recording{}, false // queued delete
+			}
+			return *op.rec.clone(), true
+		}
+	}
+	r.pmu.Unlock()
 	var rec Recording
 	ok, err := r.st.GetJSON(store.BucketRecordings, id, &rec)
 	if err != nil || !ok {
@@ -544,14 +577,76 @@ func (r *Recorder) Subscribe() (<-chan *Recording, func()) {
 	}
 }
 
-// persistLocked writes the active recording to the store (caller holds r.mu).
+// persistLocked queues a snapshot of the active recording for persistence (caller holds
+// r.mu). The bbolt write (fsync) happens on the flusher goroutine outside r.mu.
 func (r *Recorder) persistLocked() {
 	if r.active == nil {
 		return
 	}
-	if err := r.st.PutJSON(store.BucketRecordings, r.active.ID, r.active); err != nil {
-		r.log.Warn(source, "persist recording failed", map[string]any{"error": err.Error()})
+	r.queuePersist(r.active.ID, r.active.clone())
+}
+
+// queuePersist appends a store write (put when rec != nil, delete otherwise) and starts
+// the flusher if idle. Consecutive puts for the same id coalesce (newest wins).
+func (r *Recorder) queuePersist(id string, rec *Recording) {
+	r.pmu.Lock()
+	if n := len(r.pq); n > 0 && rec != nil && r.pq[n-1].rec != nil && r.pq[n-1].id == id {
+		r.pq[n-1].rec = rec
+	} else {
+		r.pq = append(r.pq, persistOp{id: id, rec: rec})
 	}
+	spawn := !r.pbusy
+	r.pbusy = true
+	r.pmu.Unlock()
+	if spawn {
+		debuglog.Go(r.log, source, r.flushPersist)
+	}
+}
+
+// flushPersist drains the persist queue serially (single flusher at a time preserves
+// put/delete ordering per id).
+func (r *Recorder) flushPersist() {
+	defer func() { // on panic: release drainers before debuglog.Recover logs it
+		if p := recover(); p != nil {
+			r.pmu.Lock()
+			r.pbusy = false
+			r.pcond.Broadcast()
+			r.pmu.Unlock()
+			panic(p)
+		}
+	}()
+	for {
+		r.pmu.Lock()
+		if len(r.pq) == 0 {
+			r.pbusy = false
+			r.pcond.Broadcast()
+			r.pmu.Unlock()
+			return
+		}
+		op := r.pq[0]
+		r.pq = r.pq[1:]
+		r.pmu.Unlock()
+		var err error
+		msg := "persist recording failed"
+		if op.rec != nil {
+			err = r.st.PutJSON(store.BucketRecordings, op.id, op.rec)
+		} else {
+			err = r.st.Delete(store.BucketRecordings, op.id)
+			msg = "delete recording failed"
+		}
+		if err != nil {
+			r.log.Warn(source, msg, map[string]any{"id": op.id, "error": err.Error()})
+		}
+	}
+}
+
+// drainPersist blocks until every queued store write has flushed. Caller must NOT hold r.mu.
+func (r *Recorder) drainPersist() {
+	r.pmu.Lock()
+	for r.pbusy || len(r.pq) > 0 {
+		r.pcond.Wait()
+	}
+	r.pmu.Unlock()
 }
 
 func (r *Recorder) broadcastLocked() {

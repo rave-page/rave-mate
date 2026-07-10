@@ -581,11 +581,26 @@ func init() {
 	})
 
 	// ── Unity ──
+	// VCC discovery = fs scans; run off actWorker, apply results back on it via redispatch
+	// (config writes stay serialized).
 	onExact("settings-unity-vcc", func(u *UI, _ actMsg) {
+		u.toast(i18n.T("remote.loading"))
+		u.bg(func() {
+			var found []string
+			for _, p := range unityproj.DiscoverVCCProjects() {
+				if unityproj.IsUnityProject(p) {
+					found = append(found, p)
+				}
+			}
+			u.redispatch("settings-unity-vccadd", strings.Join(found, "\n"))
+		})
+	})
+	// settings-unity-vccadd applies a finished VCC scan (Val = newline-joined project dirs)
+	onExact("settings-unity-vccadd", func(u *UI, m actMsg) {
 		f := &u.svc.Cfg.Features.Unity
 		added := 0
-		for _, p := range unityproj.DiscoverVCCProjects() {
-			if unityproj.IsUnityProject(p) && !hasStrWeb(f.Projects, p) {
+		for _, p := range strings.Split(m.Val, "\n") {
+			if p != "" && !hasStrWeb(f.Projects, p) {
 				f.Projects = append(f.Projects, p)
 				added++
 			}
@@ -994,14 +1009,50 @@ func (u *UI) obsSyncEditModal(i int) {
 
 // ── modals: timecode extra sinks ──
 
+// tcExtraModal opens the extra-sinks editor. Device enumeration (winmm syscalls) never runs on
+// actWorker: a warm settingsProbes cache (≤probeTTL stale) serves names directly; on a cold cache
+// the modal opens with a loading body and a bg goroutine enumerates + patches it.
 func (u *UI) tcExtraModal(kind string) {
-	f := &u.svc.Cfg.Features.Timecode
-	var rows strings.Builder
-	title := i18n.T("settings.modal.tcExtra")
+	u.probes.mu.Lock()
+	ready := u.probes.ready
+	u.probes.mu.Unlock()
+	if ready || (kind != "ltc" && kind != "mtc") { // art/unknown need no device list
+		u.openModal(u.tcExtraModalHTML(kind, u.devNamesCached("waveout"), u.devNamesCached("midiout")))
+		return
+	}
+	u.openModal(modal(tcExtraTitle(kind), `<div id=tcx-wait>`+emptyState(i18n.T("remote.loading"))+`</div>`,
+		btn(i18n.T("common.close"), "outline", "modal-close", "")))
+	u.maybeRefreshProbes() // warm the shared cache too
+	u.bg(func() {
+		var waveOut, midiOut []string
+		if kind == "ltc" {
+			waveOut = mustNames(timecode.WaveOutDevices)
+		} else {
+			midiOut = mustNames(timecode.MidiOutDevices)
+		}
+		// patch only while the loading body is still up (user may have closed / replaced the modal)
+		u.eval("if(document.getElementById('tcx-wait'))window.__patch('__modal'," + jsQuote(u.tcExtraModalHTML(kind, waveOut, midiOut)) + ")")
+	})
+}
+
+func tcExtraTitle(kind string) string {
 	switch kind {
 	case "ltc":
-		title = i18n.T("settings.modal.tcExtraLtc")
-		waveOut := mustNames(timecode.WaveOutDevices)
+		return i18n.T("settings.modal.tcExtraLtc")
+	case "mtc":
+		return i18n.T("settings.modal.tcExtraMtc")
+	case "art":
+		return i18n.T("settings.modal.tcExtraArt")
+	}
+	return i18n.T("settings.modal.tcExtra")
+}
+
+// tcExtraModalHTML renders the full modal from pre-enumerated device names (no syscalls).
+func (u *UI) tcExtraModalHTML(kind string, waveOut, midiOut []string) string {
+	f := &u.svc.Cfg.Features.Timecode
+	var rows strings.Builder
+	switch kind {
+	case "ltc":
 		for i, s := range f.LTCExtra {
 			rows.WriteString(`<div class=set-listrow><div class=set-listmain>` +
 				tcxToggle("ltc", i, s.On) +
@@ -1010,8 +1061,6 @@ func (u *UI) tcExtraModal(kind string) {
 				`</div><div class=irow-actions>` + btn(i18n.T("common.delete"), "ghost", "settings-tcx-del:ltc:"+strconv.Itoa(i), "") + `</div></div>`)
 		}
 	case "mtc":
-		title = i18n.T("settings.modal.tcExtraMtc")
-		midiOut := mustNames(timecode.MidiOutDevices)
 		for i, s := range f.MTCExtra {
 			rows.WriteString(`<div class=set-listrow><div class=set-listmain>` +
 				tcxToggle("mtc", i, s.On) +
@@ -1019,7 +1068,6 @@ func (u *UI) tcExtraModal(kind string) {
 				`</div><div class=irow-actions>` + btn(i18n.T("common.delete"), "ghost", "settings-tcx-del:mtc:"+strconv.Itoa(i), "") + `</div></div>`)
 		}
 	case "art":
-		title = i18n.T("settings.modal.tcExtraArt")
 		for i, s := range f.ArtNetExtra {
 			rows.WriteString(`<div class=set-listrow><div class=set-listmain>` +
 				tcxToggle("art", i, s.On) +
@@ -1027,8 +1075,8 @@ func (u *UI) tcExtraModal(kind string) {
 				`</div><div class=irow-actions>` + btn(i18n.T("common.delete"), "ghost", "settings-tcx-del:art:"+strconv.Itoa(i), "") + `</div></div>`)
 		}
 	}
-	u.openModal(modal(title, rows.String(),
-		btn(i18n.T("settings.label.addOutput"), "primary", "settings-tcx-add:"+kind, "")+btn(i18n.T("common.close"), "outline", "modal-close", "")))
+	return modal(tcExtraTitle(kind), rows.String(),
+		btn(i18n.T("settings.label.addOutput"), "primary", "settings-tcx-add:"+kind, "")+btn(i18n.T("common.close"), "outline", "modal-close", ""))
 }
 
 // tcxToggle renders an on/off switch for an extra sink (dispatches settings-tcx-set:<kind>:on:<idx>).

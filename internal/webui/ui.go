@@ -55,8 +55,15 @@ type UI struct {
 	logSearch     string     // free-text filter over msg/source/fields
 	logAutoscroll bool       // tail-follow toggle (default on)
 
-	fragMu sync.Mutex        // guards frags
-	frags  map[string]string // last HTML pushed per fragment id - ticks skip unchanged fragments
+	fragMu   sync.Mutex                       // guards frags + tickPend
+	frags    map[string]string                // last HTML pushed per fragment id - ticks skip unchanged fragments
+	tickPend map[*strings.Builder][]evalEntry // per-batch (id,patch) pairs tickPatch records for flushTick
+
+	evalMu   sync.Mutex     // guards the eval queue below
+	evalQ    []evalEntry    // pending page evals, insertion-ordered; keyed entries update in place
+	evalIdx  map[string]int // coalescing key -> absolute seq (index = seq-evalBase)
+	evalBase int            // seq of evalQ[0] (advances on overflow drop)
+	evalKick chan struct{}  // cap-1 flusher wakeup
 
 	setMu       sync.Mutex      // guards the Settings-tab view state below
 	setSec      string          // active settings sub-tab (section id); "" = first
@@ -72,12 +79,13 @@ type UI struct {
 // window is not created until Run (it must own a locked OS thread).
 func New(svc ui.Services) *UI {
 	u := &UI{svc: svc, log: svc.Log, active: "live", started: time.Now(), stop: make(chan struct{}),
-		logBus: "app", logLevel: "all", logAutoscroll: true}
+		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1)}
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
 	}
 	if sh, ok := newShell("rave-mate", 1280, 820, u.onAction, u.onReady); ok {
 		u.shell = sh
+		go u.evalFlusher()
 	}
 	return u
 }
@@ -184,11 +192,14 @@ func (u *UI) Notify(title, body string) {
 	go func() { _ = sysnotify.Send(title, body) }()
 }
 
-// RefreshRecordings re-renders the Publish tab if it is showing (recorder list changed).
+// RefreshRecordings re-renders the Publish tab if it is showing (recorder list changed). Async so
+// the caller (AutoReconciler goroutine) never renders inline; bursts coalesce in the eval queue.
 func (u *UI) RefreshRecordings() {
-	if u.activeTab() == "publish" {
-		u.patchMain()
-	}
+	go func() {
+		if u.activeTab() == "publish" {
+			u.patchMain()
+		}
+	}()
 }
 
 // ── action dispatch (page → Go) ──
@@ -322,9 +333,10 @@ func (u *UI) patchMain() {
 	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ")")
 }
 
-// tickPatch appends a __patch call to js unless html matches the last push for id. Ticks batch
-// all fragments into ONE eval (each Eval is a cross-process ExecuteScript on the UI thread -
-// per-fragment evals made the window stutter).
+// tickPatch records a __patch call for id unless html matches the last push (dedup). Pairs are
+// keyed per batch builder and enqueued by flushTick; the eval flusher batches everything queued
+// into ONE Eval (each Eval is a cross-process ExecuteScript on the UI thread - per-fragment evals
+// made the window stutter). js still receives the call for len()>0 checks + tests.
 func (u *UI) tickPatch(js *strings.Builder, id, html string) {
 	u.fragMu.Lock()
 	if prev, ok := u.frags[id]; ok && prev == html {
@@ -335,13 +347,22 @@ func (u *UI) tickPatch(js *strings.Builder, id, html string) {
 		u.frags = map[string]string{}
 	}
 	u.frags[id] = html
+	call := "window.__patch('" + id + "'," + jsQuote(html) + ");"
+	if u.tickPend == nil {
+		u.tickPend = map[*strings.Builder][]evalEntry{}
+	}
+	u.tickPend[js] = append(u.tickPend[js], evalEntry{key: id, js: call})
 	u.fragMu.Unlock()
-	js.WriteString("window.__patch('" + id + "'," + jsQuote(html) + ");")
+	js.WriteString(call)
 }
 
 func (u *UI) flushTick(js *strings.Builder) {
-	if js.Len() > 0 {
-		u.eval(js.String())
+	u.fragMu.Lock()
+	pend := u.tickPend[js]
+	delete(u.tickPend, js)
+	u.fragMu.Unlock()
+	for _, e := range pend {
+		u.enqueueEval(e.key, e.js)
 	}
 }
 
@@ -397,9 +418,155 @@ func (u *UI) toast(msg string) {
 	}
 }
 
-func (u *UI) eval(js string) {
-	if u.shell != nil {
-		u.shell.eval(js)
+// ── eval queue ──
+// "eval" = webview ExecuteScript on our own page; every script is Go-generated (or local-operator
+// ctl, loopback-only) - never remote/untrusted input (see control.go).
+// All Go-driven page evals funnel through one bounded, coalescing queue drained by evalFlusher.
+// Direct shell.eval from every producer piled Dispatch closures on the WebView2 UI thread: evals
+// processed inside the Windows size-move modal loop made the window trail the cursor, and a hung
+// UI thread grew daemon RSS without bound. ctl round-trips (control.go evalValue) stay direct.
+
+// evalEntry is one queued page eval; key!="" coalesces newest-wins per fragment id.
+type evalEntry struct{ key, js string }
+
+const (
+	maxEvalQueue   = 512                   // queue cap; overflow drops oldest + wipes tick dedup so nothing sticks stale
+	evalGatePoll   = 50 * time.Millisecond // exit-size-move detection latency while gated
+	evalAckTimeout = 3 * time.Second       // hung-UI-thread guard: ≤1 un-acked batch per this window
+)
+
+// eval enqueues js for the page. Fragment patches (leading window.__patch('id'…) coalesce
+// newest-wins per id; everything else is FIFO.
+func (u *UI) eval(js string) { u.enqueueEval(evalKey(js), js) }
+
+// evalKey extracts the fragment id from a leading window.__patch('id'…/("id"… call - the
+// coalescing key. "" (no coalescing) for any other JS.
+func evalKey(js string) string {
+	const p = "window.__patch("
+	if !strings.HasPrefix(js, p) || len(js) < len(p)+2 {
+		return ""
+	}
+	rest := js[len(p):]
+	q := rest[0]
+	if q != '\'' && q != '"' {
+		return ""
+	}
+	if i := strings.IndexByte(rest[1:], q); i >= 0 {
+		return rest[1 : 1+i]
+	}
+	return ""
+}
+
+// enqueueEval queues js for the flusher. A keyed entry replaces (newest-wins, position kept) any
+// queued entry with the same key; cap policy = drop-oldest + frags wipe (a dropped patch re-emits
+// on the next tick instead of sticking stale).
+func (u *UI) enqueueEval(key, js string) {
+	if u.shell == nil {
+		return
+	}
+	wipe := false
+	u.evalMu.Lock()
+	if key != "" {
+		if seq, ok := u.evalIdx[key]; ok {
+			u.evalQ[seq-u.evalBase].js = js
+			u.evalMu.Unlock()
+			u.kickEval()
+			return
+		}
+	}
+	if len(u.evalQ) >= maxEvalQueue {
+		old := u.evalQ[0]
+		u.evalQ = u.evalQ[1:]
+		u.evalBase++
+		if old.key != "" {
+			delete(u.evalIdx, old.key)
+		}
+		wipe = true
+	}
+	u.evalQ = append(u.evalQ, evalEntry{key: key, js: js})
+	if key != "" {
+		if u.evalIdx == nil {
+			u.evalIdx = map[string]int{}
+		}
+		u.evalIdx[key] = u.evalBase + len(u.evalQ) - 1
+	}
+	u.evalMu.Unlock()
+	if wipe {
+		u.fragMu.Lock()
+		u.frags = nil
+		u.fragMu.Unlock()
+	}
+	u.kickEval()
+}
+
+func (u *UI) kickEval() {
+	select {
+	case u.evalKick <- struct{}{}:
+	default:
+	}
+}
+
+// drainEvals empties the queue into one script; each entry is isolated in an IIFE+try so one
+// failing eval can't kill the rest (matches the old one-Eval-per-call isolation).
+func (u *UI) drainEvals() string {
+	u.evalMu.Lock()
+	q := u.evalQ
+	u.evalQ, u.evalIdx, u.evalBase = nil, nil, 0
+	u.evalMu.Unlock()
+	if len(q) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range q {
+		b.WriteString(";(function(){try{")
+		b.WriteString(e.js)
+		b.WriteString("}catch(e){}})();")
+	}
+	return b.String()
+}
+
+// evalFlusher is the single dispatcher of page evals: coalesces the queue into one batched Eval,
+// holds everything while the user drags/resizes (evals processed inside the size-move modal loop
+// make the window trail the cursor) and flushes right after WM_EXITSIZEMOVE. NOT gated on
+// governor.UIAnimAllowed: that predicate includes focused/!streaming, which must never stall
+// interactive renders (tab clicks while streaming, ctl verification against an unfocused window) -
+// livePush gates its tick producers on it at the source instead.
+func (u *UI) evalFlusher() {
+	for {
+		select {
+		case <-u.stop:
+			return
+		case <-u.evalKick:
+		}
+		for {
+			for inSizeMove() {
+				select {
+				case <-u.stop:
+					return
+				case <-time.After(evalGatePoll):
+				}
+			}
+			js := u.drainEvals()
+			if js == "" {
+				break
+			}
+			u.dispatchEvals(js)
+		}
+	}
+}
+
+// dispatchEvals sends one batch to the page and waits for its ack (bounded): ≤1 un-acked Dispatch
+// per evalAckTimeout, so a wedged UI thread accumulates coalesced fragments here - never closures.
+func (u *UI) dispatchEvals(js string) {
+	id := nextEvalID()
+	ch := make(chan string, 1)
+	evalWaiters.Store(id, ch)
+	defer evalWaiters.Delete(id)
+	u.shell.eval(js + "window.__rave_evalResult(" + jsQuote(id) + ",'1');")
+	select {
+	case <-ch:
+	case <-time.After(evalAckTimeout):
+	case <-u.stop:
 	}
 }
 

@@ -64,6 +64,25 @@ func probeWebview() bool {
 // the process alive). Guarantee close after this grace, like rave-app.
 const forceExitGrace = 1500 * time.Millisecond
 
+// forceExitBackstop bounds the graceful-shutdown hook once the webview wedged - hard exit after.
+const forceExitBackstop = 10 * time.Second
+
+// shutdownHook runs before the watchdog's forced exit so daemon state is flushed (module stop,
+// bbolt close, stream end) instead of cut mid-write. Must be idempotent - the normal shutdown
+// path may race it if the webview unwinds late.
+var (
+	shutdownHookMu sync.Mutex
+	shutdownHook   func()
+)
+
+// SetShutdownHook registers the graceful-shutdown routine the force-exit watchdog invokes.
+// app.go wires its shutdown() here.
+func SetShutdownHook(fn func()) {
+	shutdownHookMu.Lock()
+	shutdownHook = fn
+	shutdownHookMu.Unlock()
+}
+
 type cgoShell struct {
 	title    string
 	w, h     int
@@ -183,7 +202,19 @@ func (s *cgoShell) terminate() {
 		select {
 		case <-s.done:
 		case <-time.After(forceExitGrace):
-			os.Exit(0) // webview didn't unwind - guarantee close
+			// Webview didn't unwind, so the daemon's normal shutdown (blocked in w.Run) never
+			// runs. Flush state via the injected hook before exiting; hard backstop if it wedges.
+			shutdownHookMu.Lock()
+			hook := shutdownHook
+			shutdownHookMu.Unlock()
+			if hook != nil {
+				go func() {
+					time.Sleep(forceExitBackstop)
+					os.Exit(0) // shutdown wedged - guarantee close
+				}()
+				hook()
+			}
+			os.Exit(0) // guarantee close
 		}
 	}()
 }
