@@ -98,9 +98,6 @@ func TestDropsPreservesOtherTXXX(t *testing.T) {
 		t.Fatal(err)
 	}
 	// simulate a foreign TXXX (e.g. serato/MIK) that must survive our writes
-	if err := writeDropsMP3(path, ""); err != nil { // creates a tag
-		t.Fatal(err)
-	}
 	addForeignTXXX(t, path)
 	if err := WriteDrops(path, []float64{1000}); err != nil {
 		t.Fatal(err)

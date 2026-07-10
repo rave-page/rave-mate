@@ -26,6 +26,7 @@ const (
 	FieldYear    = "year"   // MP3 TDRC (v2.4) / TYER (v2.3), FLAC DATE
 	FieldLabel   = "label"  // MP3 TPUB, FLAC LABEL (read fallback ORGANIZATION)
 	FieldRating  = "rating" // canonical "0".."255" (Traktor scale); MP3 POPM, FLAC RATING (0-100 on disk)
+	FieldDrops   = "drops"  // rave-mate drop markers: JSON []float64 ms; MP3 TXXX / FLAC RAVEMATE_DROPS
 )
 
 // Tags maps a canonical field → value. Presence means "set this field"; "" means "clear it".

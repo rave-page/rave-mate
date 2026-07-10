@@ -24,6 +24,7 @@ var flacKeys = map[string][]string{
 	FieldKey:     {"INITIALKEY", "KEY"},
 	FieldYear:    {"DATE"},
 	FieldLabel:   {"LABEL", "ORGANIZATION"},
+	FieldDrops:   {"RAVEMATE_DROPS"},
 }
 
 func readFLAC(path string) (Tags, error) {

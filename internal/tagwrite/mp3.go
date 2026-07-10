@@ -45,6 +45,12 @@ func readMP3(path string) (Tags, error) {
 	if r, ok := popmRating(tag); ok {
 		t[FieldRating] = strconv.Itoa(int(r))
 	}
+	for _, f := range tag.GetFrames("TXXX") {
+		if udf, ok := f.(id3v2.UserDefinedTextFrame); ok && udf.Description == dropsKey && udf.Value != "" {
+			t[FieldDrops] = udf.Value
+			break
+		}
+	}
 	if frames := tag.GetFrames("COMM"); len(frames) > 0 {
 		if c, ok := frames[0].(id3v2.CommentFrame); ok && c.Text != "" {
 			t[FieldComment] = c.Text
@@ -113,6 +119,9 @@ func writeMP3(path string, vals Tags) error {
 				_ = tag.Close()
 				return err
 			}
+			continue
+		case FieldDrops:
+			setDropsTXXX(tag, v)
 			continue
 		}
 		id, ok := mp3Frame[field]
