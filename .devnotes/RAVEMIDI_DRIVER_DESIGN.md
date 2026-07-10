@@ -115,6 +115,24 @@ winmm single-client: N apps each get their own mirror port.
   mirror groups (kernel KS-client tap is the riskiest new surface: format negotiation,
   pin arrival/removal races, IRP streaming at DISPATCH).
 
+## Implementation status
+
+Virtual-port core + mirror-tap implemented; builds green in CI (compile + link +
+InfVerif DCH gate). Files: adapter.cpp (control plane, dynamic subdevice register/
+unregister, winmm FriendlyName stamp via IoSetDeviceInterfacePropertyData, cancel-safe
+IOCTL_READ IO_CSQ, IRP_MJ_CLEANUP), miniport.cpp (per-kind PCFILTER_DESCRIPTOR +
+IMiniportMidi/Stream + FIFO data path), mirror.cpp (KS-client controller tap),
+fifo.cpp (NX ring), kalloc.cpp (ExAllocatePool2 operators), guids.cpp (INITGUID).
+
+**Needs on-hardware bring-up before trusted** (cannot be unit-tested): the whole thing
+requires a test-signed load on a real machine. Specifically validate — (a) a created
+port appears in winmm `midiInGetDevCaps`/`midiOutGetDevCaps` with the given name;
+(b) OUT_ONLY shows input-only (no echo endpoint); (c) BIDI carries LED feedback without
+self-echo; (d) the mirror KS-client actually instantiates a hardware controller's
+capture pin (KSPIN_CONNECT/format may need per-device tweaks — open-time failures return
+cleanly, so this is safe to iterate) and fans MIDI to its output ports with rave-mate
+killed. Dev loop = Hyper-V, Secure Boot off, testsigning on, `devgen /add /bus ROOT`.
+
 ## HVCI + INF gates (release-blocking, per 2026 policy)
 
 - `NonPagedPoolNx` everywhere (POOL_NX_OPTIN), no W^X, no dynamic code, `MdlMappingNoExecute`.
