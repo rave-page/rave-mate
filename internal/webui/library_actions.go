@@ -99,6 +99,18 @@ func init() {
 	onPrefix("lib-label:", func(u *UI, m actMsg) {
 		u.libToggle(func(s *libSt) map[string]bool { return s.collLabel }, m.arg("lib-label:"), !u.libHas("label", m.arg("lib-label:")))
 	})
+	onPrefix("lib-plfilter:", func(u *UI, m actMsg) {
+		id := int64(atoi(m.arg("lib-plfilter:")))
+		u.libSetQuiet(func(s *libSt) {
+			if s.collPl[id] {
+				delete(s.collPl, id)
+			} else {
+				s.collPl[id] = true
+			}
+		})
+		u.libRebuildPlFilter()
+		u.libPatchBody()
+	})
 	onPrefix("lib-key:", func(u *UI, m actMsg) {
 		u.libToggle(func(s *libSt) map[string]bool { return s.keySel }, m.arg("lib-key:"), !u.libHas("key", m.arg("lib-key:")))
 	})
@@ -108,6 +120,7 @@ func init() {
 		u.libSet(func(s *libSt) {
 			s.collSearch, s.collGenre, s.collLabel, s.keySel = "", map[string]bool{}, map[string]bool{}, map[string]bool{}
 			s.collNoDrops = false
+			s.collPl, s.collPlSet, s.collPlNames = map[int64]bool{}, nil, nil
 		})
 	})
 	onPrefix("lib-collsel:", func(u *UI, m actMsg) {

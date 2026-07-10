@@ -533,7 +533,8 @@
       "virtualdjXML": "VirtualDJ database.xml",
       "xmlPath": ".xml ファイルへのフルパス",
       "importVirtualDJAuto": "VirtualDJ（自動検出）",
-      "importSeratoAuto": "Serato（自動検出）"
+      "importSeratoAuto": "Serato（自動検出）",
+      "playlist": "プレイリスト"
     },
     "meta": {
       "album": "アルバム",

@@ -167,10 +167,15 @@ const runtimeJS = `(function(){
     // two passes: real controls first, then [data-act] containers - a form[data-act]'s
     // textContent contains its submit button's label and precedes it in DOM order, so a
     // single pass would "click" the form (a no-op) instead of the button.
+    // byAct: query matches data-act (the exact snapshot {act} token) - deterministic
+    // where labels are ambiguous ("Playlist" facet vs "Playlists" tab).
+    var byAct=q.indexOf(':')>=0||q.indexOf('=')>=0;
     function scan(sel){
       var els=document.querySelectorAll(sel);
       for(var i=0;i<els.length;i++){
-        var t=(els[i].textContent||els[i].value||els[i].getAttribute('aria-label')||'').toLowerCase().replace(/\s+/g,' ').trim();
+        var t;
+        if(byAct){ t=(els[i].getAttribute('data-act')||'').toLowerCase(); }
+        else { t=(els[i].textContent||els[i].value||els[i].getAttribute('aria-label')||'').toLowerCase().replace(/\s+/g,' ').trim(); }
         if(t.indexOf(q)>=0 && vis(els[i])){
           if(els[i].tagName==='FORM'){
             if(els[i].requestSubmit) els[i].requestSubmit();

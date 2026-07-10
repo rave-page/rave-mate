@@ -533,7 +533,8 @@
       "virtualdjXML": "VirtualDJ database.xml",
       "xmlPath": "Полный путь к файлу .xml",
       "importVirtualDJAuto": "VirtualDJ (автоопределение)",
-      "importSeratoAuto": "Serato (автоопределение)"
+      "importSeratoAuto": "Serato (автоопределение)",
+      "playlist": "Плейлист"
     },
     "meta": {
       "album": "Альбом",

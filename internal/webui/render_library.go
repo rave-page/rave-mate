@@ -61,6 +61,9 @@ type libSt struct {
 	collGenre, collLabel, keySel         map[string]bool
 	collSel                              map[string]bool      // add-to-playlist multi-select
 	collNoDrops                          bool                 // facet: only tracks WITHOUT drop markers
+	collPl                               map[int64]bool       // facet: playlist membership (OR union)
+	collPlSet                            map[string]bool      // union of the selected playlists' track paths
+	collPlNames                          map[int64]string     // active playlist-facet id -> name (chips)
 	dropsIdx                             map[string][]float64 // path -> drop markers (cue-prepare enrichment)
 	batch                                map[string]bool      // browse batch multi-select
 
@@ -148,6 +151,7 @@ func (u *UI) lib() *libSt {
 		s = &libSt{
 			kindFilter: "ALL", sortBy: "Modified", view: "list", collSort: "Artist",
 			collGenre: map[string]bool{}, collLabel: map[string]bool{}, keySel: map[string]bool{},
+			collPl:  map[int64]bool{},
 			collSel: map[string]bool{}, batch: map[string]bool{},
 			byPath: map[string]musiclib.Track{},
 		}
@@ -605,9 +609,10 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		func(t musiclib.Track) string { return musiclib.GenreFamily(t.Genre) }))
 	b.WriteString(u.libFacetSelect(s, "label", i18n.T("library.label.label"), s.collLabel,
 		func(t musiclib.Track) string { return strings.TrimSpace(t.Label) }))
+	b.WriteString(u.libPlaylistFacet(s))
 	b.WriteString(u.libKeyChip(s))
 	b.WriteString(fchip(i18n.T("library.ce.noDropsChip"), "", "lib-nodrops", s.collNoDrops))
-	if len(s.collGenre)+len(s.collLabel)+len(s.keySel) > 0 || s.collSearch != "" || s.collNoDrops {
+	if len(s.collGenre)+len(s.collLabel)+len(s.keySel)+len(s.collPl) > 0 || s.collSearch != "" || s.collNoDrops {
 		b.WriteString(btn(i18n.T("library.clear"), "ghost", "lib-clearfilters", ""))
 	}
 	b.WriteString(`</div>`)
@@ -616,6 +621,9 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	}
 	for l := range s.collLabel {
 		b.WriteString(fchip(l+" ×", "", "lib-label:"+l, true))
+	}
+	for _, id := range sortedPlIDs(s.collPlNames) {
+		b.WriteString(fchip(s.collPlNames[id]+" ×", "", fmt.Sprintf("lib-plfilter:%d", id), true))
 	}
 
 	// batch results replace the list while a fixer's results view is on
@@ -781,6 +789,88 @@ func (u *UI) libFacetSelect(s *libSt, kind, label string, active map[string]bool
 	})
 }
 
+// libPlaylistFacet: filterable playlist dropdown - filters the collection to tracks
+// that are members of any picked playlist (smart playlists eval live).
+func (u *UI) libPlaylistFacet(s *libSt) string {
+	if u.svc.Lib == nil {
+		return ""
+	}
+	rows, _ := u.svc.Lib.ListPlaylists()
+	if len(rows) == 0 {
+		return ""
+	}
+	lbl := i18n.T("library.label.playlist")
+	if n := len(s.collPl); n > 0 {
+		lbl = fmt.Sprintf("%s (%d)", lbl, n)
+	}
+	tracks := s.tracks
+	active := s.collPl
+	return smartSelect("libfacet-pl", "", "lib-plfilter:", lbl, func() []ssOpt {
+		opts := make([]ssOpt, 0, len(rows))
+		for _, p := range rows {
+			n := p.TrackCount
+			if p.Kind == libdb.PlaylistSmart {
+				if r, ok := libParseRules(p.Rules); ok {
+					n = len(musiclib.FilterSmart(tracks, r))
+				}
+			}
+			o := ssOpt{Val: fmt.Sprint(p.ID), Label: p.Name, Badge: fmt.Sprint(n)}
+			if active[p.ID] {
+				o.Label = "✓ " + o.Label
+			}
+			opts = append(opts, o)
+		}
+		return opts
+	})
+}
+
+// libRebuildPlFilter recomputes the playlist-facet membership union: stored paths for
+// manual/imported playlists, live rule eval for smart ones.
+func (u *UI) libRebuildPlFilter() {
+	s := u.lib()
+	s.mu.Lock()
+	want := make(map[int64]bool, len(s.collPl))
+	for id := range s.collPl {
+		want[id] = true
+	}
+	tracks := s.tracks
+	s.mu.Unlock()
+	set, names := map[string]bool{}, map[int64]string{}
+	if u.svc.Lib != nil && len(want) > 0 {
+		rows, _ := u.svc.Lib.ListPlaylists()
+		for _, p := range rows {
+			if !want[p.ID] {
+				continue
+			}
+			names[p.ID] = p.Name
+			if p.Kind == libdb.PlaylistSmart {
+				if r, ok := libParseRules(p.Rules); ok {
+					for _, t := range musiclib.FilterSmart(tracks, r) {
+						set[t.Path] = true
+					}
+				}
+				continue
+			}
+			paths, _ := u.svc.Lib.PlaylistTracks(p.ID)
+			for _, pth := range paths {
+				set[pth] = true
+			}
+		}
+	}
+	s.mu.Lock()
+	s.collPlSet, s.collPlNames = set, names
+	s.mu.Unlock()
+}
+
+func sortedPlIDs(m map[int64]string) []int64 {
+	ids := make([]int64, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
 // collView returns filtered+sorted indices into s.tracks.
 func (s *libSt) collView() []int {
 	q := strings.ToLower(strings.TrimSpace(s.collSearch))
@@ -799,6 +889,9 @@ func (s *libSt) collView() []int {
 			continue
 		}
 		if s.collNoDrops && len(s.dropsIdx[t.Path]) > 0 {
+			continue
+		}
+		if len(s.collPl) > 0 && !s.collPlSet[t.Path] {
 			continue
 		}
 		out = append(out, i)

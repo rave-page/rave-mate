@@ -14,6 +14,13 @@ The Library tab is a native browser + relational store (SQLite) for your DJ medi
 - **Change log**: every mutation (plays/ratings/metadata) is append-only recorded - the basis
   for cross-machine merge and rollback.
 
+## Collection filters
+
+Collection combines free-text search (title/artist) with facet dropdowns - **Genre**,
+**Label**, **Playlist** (membership in any picked playlist, smart playlists evaluate
+live), plus the key wheel and the NO DROPS chip. Facets are filterable dropdowns; active
+picks show as removable chips and combine (search AND genre AND playlist …).
+
 ## Cross-DJ-software library sync
 
 Hub-merge model: rave-mate reads Traktor / Serato / VirtualDJ / Rekordbox collections, merges
