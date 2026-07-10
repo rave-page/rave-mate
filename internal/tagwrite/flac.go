@@ -1,7 +1,9 @@
 package tagwrite
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	flacvorbis "github.com/go-flac/flacvorbis"
@@ -9,7 +11,9 @@ import (
 )
 
 // Vorbis-comment keys for the canonical fields. Key writes BOTH INITIALKEY (Mixed-In-Key /
-// Serato convention) and KEY for max reader compatibility.
+// Serato convention) and KEY, label writes BOTH LABEL and ORGANIZATION (official field),
+// for max reader compatibility; reads prefer the first key. Rating is special-cased
+// (0-255 canonical ↔ 0-100 on disk).
 var flacKeys = map[string][]string{
 	FieldTitle:   {"TITLE"},
 	FieldArtist:  {"ARTIST"},
@@ -18,6 +22,9 @@ var flacKeys = map[string][]string{
 	FieldComment: {"COMMENT"},
 	FieldBPM:     {"BPM"},
 	FieldKey:     {"INITIALKEY", "KEY"},
+	FieldYear:    {"DATE"},
+	FieldLabel:   {"LABEL", "ORGANIZATION"},
+	FieldDrops:   {"RAVEMATE_DROPS"},
 }
 
 func readFLAC(path string) (Tags, error) {
@@ -44,7 +51,24 @@ func readFLAC(path string) (Tags, error) {
 			}
 		}
 	}
+	if v := get("RATING"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			t[FieldRating] = strconv.Itoa(ratingTo255(n))
+		}
+	}
 	return t, nil
+}
+
+// ratingTo255 normalizes a FLAC RATING to canonical 0-255: values ≤100 are the
+// conventional 0-100 scale (scaled up), >100 are already 0-255 (capped).
+func ratingTo255(n int) int {
+	if n > 100 {
+		if n > 255 {
+			return 255
+		}
+		return n
+	}
+	return (n*255 + 50) / 100
 }
 
 func writeFLAC(path string, vals Tags) error {
@@ -58,6 +82,18 @@ func writeFLAC(path string, vals Tags) error {
 		idx = -1
 	}
 	for field, v := range vals {
+		if field == FieldRating {
+			out := ""
+			if v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 || n > 255 {
+					return fmt.Errorf("tagwrite: rating %q not in 0-255", v)
+				}
+				out = strconv.Itoa((n*100 + 127) / 255) // 0-255 → conventional 0-100
+			}
+			setVorbis(cmt, "RATING", out)
+			continue
+		}
 		for _, k := range flacKeys[field] {
 			setVorbis(cmt, k, v)
 		}

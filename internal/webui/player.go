@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"sort"
 	"strings"
 
 	"rave.page/mate/internal/i18n"
@@ -131,7 +132,11 @@ func (u *UI) mpVideoHTML(t mpSt) string {
 func (u *UI) mpWaveInner(t mpSt) string {
 	var b strings.Builder
 	b.WriteString(`<div class=mp-wrap>`)
-	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t)))
+	var ov *ceOverlay
+	if len(t.media) > 0 {
+		ov = u.ceSnapOverlay(t.host, t.media[0].path)
+	}
+	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov))
 	if m := t.activeMedia(); m != nil {
 		b.WriteString(`<div class=wchips>` + mpEncChip(m) + mpLoudChip(m) + `</div>`)
 	}
@@ -159,7 +164,9 @@ func (u *UI) mpWaveInner(t mpSt) string {
 
 // mpWaveSVG draws every media band on the shared axis in the visible zoom window, with
 // trim dim/handles (edit), track/fader/cue markers, playhead (mint) and click cursor.
-func mpWaveSVG(t *mpSt, playAxis float64) string {
+// ce (nil = off) adds the cue-editor layer: beatgrid lines, drop markers, beat cursor,
+// cue selection + rubber band.
+func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 	const w = 1000.0
 	n := len(t.media)
 	if n == 0 {
@@ -185,6 +192,33 @@ func mpWaveSVG(t *mpSt, playAxis float64) string {
 	playX := -1e9
 	if mpIsSet(playAxis) {
 		playX = toX(playAxis)
+	}
+
+	// cue editor: beatgrid lines (only when beats are ≥5px apart at this zoom)
+	if ce != nil && ce.grid != nil && ln > 0 && t.viewSpan > 0 {
+		a0 := (lo + t.viewStart*ln) * 1000
+		a1 := (lo + (t.viewStart+t.viewSpan)*ln) * 1000
+		anchor := ce.grid.SnapMs(0)
+		ms := ce.grid.SnapMs(a0)
+		if ms > a0 {
+			ms = ce.grid.StepMs(ms, -1)
+		}
+		guard := 0
+		for ms <= a1 && guard < 4000 {
+			guard++
+			bl := ce.grid.BeatLenMs(ms)
+			if bl/1000/(t.viewSpan*ln)*w < 5 { // too dense to read - skip grid at this zoom
+				break
+			}
+			if x := toX(ms / 1000); x >= 0 && x <= w {
+				op, sw := 0.10, 1.0
+				if int(math.Round(ce.grid.BeatsBetween(anchor, ms)))%4 == 0 {
+					op, sw = 0.28, 1.0 // downbeat
+				}
+				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,%.2f)" stroke-width="%.0f"/>`, x, x, h, op, sw)
+			}
+			ms = ce.grid.StepMs(ms, 1)
+		}
 	}
 
 	for i := 0; i < n; i++ {
@@ -240,6 +274,15 @@ func mpWaveSVG(t *mpSt, playAxis float64) string {
 					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.5"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind))
 				}
 			}
+			// drop markers (libdb enrichment); the editor layer draws them when active
+			if ce == nil {
+				for di, dms := range m.drops {
+					if x := toX(start + dms/1000); x >= 0 && x <= w {
+						fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#FFB547" stroke-width="1.5"/><text x="%.1f" y="%.1f" fill="#FFB547" font-size="10" font-family="monospace" text-anchor="middle">D%d</text>`,
+							x, y0, x, y0+bandH, x, y0+11, di+1)
+					}
+				}
+			}
 		}
 		if n > 1 {
 			fmt.Fprintf(&b, `<text x="6" y="%.1f" fill="rgba(250,250,250,0.55)" font-size="11" font-family="monospace">%s</text>`, y0+13, strings.ToUpper(m.kind))
@@ -272,6 +315,89 @@ func mpWaveSVG(t *mpSt, playAxis float64) string {
 		}
 		if outX >= 0 && outX <= w {
 			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#FF3E8A" stroke-width="2"/><path d="M %.1f %.0f l -9 0 l 9 -12 z" fill="#FF3E8A"/>`, outX, outX, h, outX, h)
+		}
+	}
+
+	// cue editor: selected-cue glow, rubber band, drop markers, beat cursor
+	if ce != nil {
+		for i, cue := range ce.cues {
+			if !ce.sel[i] {
+				continue
+			}
+			if x := toX(cue.StartMs / 1000); x >= 0 && x <= w {
+				fmt.Fprintf(&b, `<rect x="%.1f" y="0" width="5" height="%.0f" fill="%s" opacity="0.35"/>`, x-2.5, h, cueColor(cue.Kind))
+			}
+		}
+		if ce.dragA >= 0 {
+			xa, xb := toX(ce.dragA/1000), toX(ce.dragB/1000)
+			if xb < xa {
+				xa, xb = xb, xa
+			}
+			xa, xb = math.Max(xa, 0), math.Min(xb, w)
+			if xb > xa {
+				fmt.Fprintf(&b, `<rect x="%.1f" y="0" width="%.1f" height="%.0f" fill="rgba(247,8,100,0.12)" stroke="rgba(247,8,100,0.5)" stroke-width="1"/>`, xa, xb-xa, h)
+			}
+		}
+		for i, d := range ce.drops {
+			if x := toX(d / 1000); x >= 0 && x <= w {
+				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#FFB547" stroke-width="2"/>`, x, x, h)
+				fmt.Fprintf(&b, `<path d="M %.1f 8 l 7 -8 l -14 0 z" fill="#FFB547"/>`, x)
+				fmt.Fprintf(&b, `<text x="%.1f" y="22" fill="#FFB547" font-size="11" font-family="monospace" text-anchor="middle">D%d</text>`, x, i+1)
+			}
+		}
+		// cue flags: pad slot (or M = memory cue) atop each cue line; hover = name + time
+		for _, cue := range ce.cues {
+			if cue.Kind == musiclib.CueGrid {
+				continue
+			}
+			x := toX(cue.StartMs / 1000)
+			if x < 0 || x > w {
+				continue
+			}
+			lbl := "M"
+			if cue.Hotcue >= 0 {
+				lbl = fmt.Sprint(cue.Hotcue + 1)
+			}
+			tip := strings.TrimSpace(cue.Name)
+			if tip != "" {
+				tip += " · "
+			}
+			tip += pubClock(cue.StartMs / 1000)
+			fmt.Fprintf(&b, `<g><title>%s</title><rect x="%.1f" y="%.0f" width="15" height="13" rx="2" fill="%s" opacity="0.92"/><text x="%.1f" y="%.0f" fill="#0a0a0a" font-size="10" font-weight="700" font-family="monospace" text-anchor="middle">%s</text></g>`,
+				html.EscapeString(tip), x-7.5, h-13, cueColor(cue.Kind), x, h-3, html.EscapeString(lbl))
+		}
+		// beat distances between neighbouring markers (cues + drops)
+		if ce.grid != nil {
+			var pos []float64
+			for _, cue := range ce.cues {
+				if cue.Kind != musiclib.CueGrid {
+					pos = append(pos, cue.StartMs)
+				}
+			}
+			pos = append(pos, ce.drops...)
+			sort.Float64s(pos)
+			for k := 0; k+1 < len(pos); k++ {
+				a, z := pos[k], pos[k+1]
+				if z-a < 1 { // coincident (drop sitting on a cue)
+					continue
+				}
+				xa, xb := toX(a/1000), toX(z/1000)
+				if xb < 0 || xa > w || xb-xa < 36 {
+					continue
+				}
+				xa, xb = math.Max(xa, 0), math.Min(xb, w)
+				beats := ce.grid.BeatsBetween(a, z)
+				lbl := fmt.Sprintf("%.1f", beats)
+				if math.Abs(beats-math.Round(beats)) < 0.05 {
+					lbl = fmt.Sprintf("%.0f", math.Round(beats))
+				}
+				fmt.Fprintf(&b, `<g><title>%s</title><path d="M %.1f 30 v 4 h %.1f v -4" fill="none" stroke="rgba(250,250,250,0.25)" stroke-width="1"/><text x="%.1f" y="27" fill="rgba(250,250,250,0.75)" font-size="10" font-family="monospace" text-anchor="middle">%s</text></g>`,
+					html.EscapeString(i18n.Tn("library.ce.beatsBetween", int(math.Round(beats)))), xa+1, xb-xa-2, (xa+xb)/2, lbl)
+			}
+		}
+		if x := toX(ce.cursorMs / 1000); x >= 0 && x <= w {
+			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#fafafa" stroke-width="1.5"/>`, x, x, h)
+			fmt.Fprintf(&b, `<path d="M %.1f %.0f l 6 8 l -12 0 z" fill="#fafafa" transform="rotate(180 %.1f %.0f)"/>`, x, h-8, x, h-4)
 		}
 	}
 
@@ -454,7 +580,14 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	if t.edit {
 		editLbl, editVar = i18n.T("player.done"), "outline"
 	}
-	row = append(row, btn(editLbl, editVar, "mp-edit:"+host, ""))
+	if u.mpTrimDemoted(&t) {
+		// collection/playlist context: trim/cut is occasional - lives in the ⋯ menu
+		opts := []ssOpt{{Val: "", Label: "⋯ " + i18n.T("player.more")},
+			{Val: "edit", Label: "✎ " + i18n.T("player.trimEdit"), Sub: i18n.T("player.trimEditSub")}}
+		row = append(row, `<span class=mp-moresel>`+smartSelect("mp-more-"+host, "", "mp-more:"+host, "", func() []ssOpt { return opts })+`</span>`)
+	} else {
+		row = append(row, btn(editLbl, editVar, "mp-edit:"+host, ""))
+	}
 	if m.kind == "video" {
 		row = append(row, btn(i18n.T("player.openExternally"), "ghost", "mp-openext:"+host, ""), tipTopic("embedded-video"))
 	}
@@ -479,6 +612,19 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	}
 	b.WriteString(slider(i18n.T("player.seek"), "mp-seek:"+host, 0, 1000, 1, math.Round(1000*frac), ""))
 	return b.String()
+}
+
+// mpTrimDemoted: in library collection/playlist context trim/cut is an occasional
+// operation - it hides behind the ⋯ menu until edit mode is on.
+func (u *UI) mpTrimDemoted(t *mpSt) bool {
+	if t.host != "library" || t.edit {
+		return false
+	}
+	switch u.libSectionOr() {
+	case "collection", "playlists", "history":
+		return true
+	}
+	return false
 }
 
 // mpTimeText is the transport clock (tick-patched separately from the buttons).

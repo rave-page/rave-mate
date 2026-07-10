@@ -288,6 +288,10 @@
     },
     "midi-thru": {
       "body": "\n\nMejor destino THRU (requiere el driver de loopMIDI): el puerto unidireccional de rave-mate. Tu software de DJ ve un puerto de solo entrada llamado 'rave-mate' - NO existe un punto de salida correspondiente, así que el eco LED automático (rekordbox reenvía el código MIDI IN de cada indicador) no tiene por dónde volver y el software nunca reacciona a su propia respuesta. Selecciona 'rave-mate' como dispositivo MIDI en el software de DJ."
+    },
+    "cue-edit": {
+      "title": "Editor de cues: teclado y ratón",
+      "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat. Los números en la parte superior de la forma de onda muestran la distancia en beats entre cues y drops vecinos. Marca pistas en la lista para aplicar en masa los patrones asignados desde la barra inferior. Ratón: clic izquierdo mueve el cursor de beat, clic derecho añade un memory cue, Mayús+clic derecho un drop, Ctrl+clic derecho elimina los marcadores en ese beat. Al desplazar la rejilla, los cues y drops se mueven con ella."
     }
   },
   "library": {
@@ -323,7 +327,8 @@
     "col": {
       "bpm": "BPM",
       "key": "TONO",
-      "time": "TIEMPO"
+      "time": "TIEMPO",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Copia de seguridad",
@@ -933,6 +938,58 @@
       "rbNote": "Rekordbox: las cuadrículas se escriben en el XML de la colección; cárgalo en Rekordbox mediante Archivo → Importar colección.",
       "seratoNote": "Serato: las cuadrículas se escriben directamente en los archivos de audio (escritura temporal verificada; cierra Serato antes).",
       "vdjRunning": "VirtualDJ está abierto: ciérralo antes de aplicar."
+    },
+    "ce": {
+      "open": "Preparar cues",
+      "eyebrow": "Editor de cues",
+      "cursor": "Cursor",
+      "bar": "compás",
+      "jump": "salto de beats: {n}",
+      "noDropsHint": "Aún no hay drops: ve al primer drop con las flechas y pulsa T o Intro.",
+      "addDrop": "Añadir drop en el cursor",
+      "removeDrop": "Quitar drop en el cursor",
+      "noFileTag": "Este formato de archivo no puede llevar la etiqueta de drops: los drops solo se guardan en la biblioteca (MP3/FLAC también los guardan en el archivo).",
+      "selection": "{n} cues seleccionados",
+      "patternName": "Nombre del patrón…",
+      "savePattern": "Guardar como patrón",
+      "applyHot": "Aplicar patrones (hotcues)",
+      "applyMem": "Aplicar como memory cues",
+      "convertAll": "Convertir todos los hotcues → memory cues",
+      "reportHint": "{added} añadidos · {cut} recortados (fuera del tramo del drop) · {skipped} omitidos (cue existente) · {demoted} sin pad",
+      "notInCollection": "La pista no está en la colección.",
+      "noGrid": "La pista no tiene beatgrid: analiza o corrige la cuadrícula primero.",
+      "fileTagFailed": "No se pudieron escribir los drops en la etiqueta del archivo: ",
+      "nameNeeded": "Ponle nombre al patrón primero.",
+      "saveFailed": "No se pudo guardar el patrón: ",
+      "patternSaved": "Patrón «{name}» guardado ({n} cues).",
+      "noPatternPicked": "Elige un patrón para al menos un drop.",
+      "applyFailed": "Error al aplicar: ",
+      "appliedToast": "{n} cues escritos",
+      "convertedToast": "Todos los hotcues convertidos a memory cues.",
+      "noDropsChip": "Sin drops",
+      "drops": {
+        "one": "{count} marcador de drop",
+        "few": "{count} marcadores de drop",
+        "many": "{count} marcadores de drop",
+        "other": "{count} marcadores de drop"
+      },
+      "patternCues": {
+        "one": "{count} cue",
+        "few": "{count} cues",
+        "many": "{count} cues",
+        "other": "{count} cues"
+      },
+      "noDropsBadge": "Sin marcadores de drop",
+      "noCuesBadge": "Sin cues",
+      "applySelHot": "Aplicar patrones → hotcues",
+      "applySelMem": "Aplicar patrones → memory cues",
+      "batchToast": "Patrones aplicados a {applied} pistas · {skipped} omitidas",
+      "beatsBetween": {
+        "one": "{count} beat entre marcadores",
+        "few": "{count} beats entre marcadores",
+        "many": "{count} beats entre marcadores",
+        "other": "{count} beats entre marcadores"
+      }
     }
   },
   "live": {
@@ -1502,7 +1559,9 @@
       "silenceFailed": "Error en la detección de silencio: ",
       "timeFormat": "Formato de tiempo: mm:ss.s (o h:mm:ss)"
     },
-    "trimEdit": "Recortar / editar"
+    "trimEdit": "Recortar / editar",
+    "more": "Más",
+    "trimEditSub": "Cortar una sección o exportar una copia recortada"
   },
   "publish": {
     "audio": "audio",

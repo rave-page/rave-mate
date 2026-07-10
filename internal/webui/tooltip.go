@@ -104,6 +104,10 @@ var helpTopics = map[string]helpTopic{
 		Title: i18n.T("help.wave-nav.title"),
 		Body:  i18n.T("help.wave-nav.body"),
 	},
+	"cue-edit": {
+		Title: i18n.T("help.cue-edit.title"),
+		Body:  i18n.T("help.cue-edit.body"),
+	},
 	"trim-editor": {
 		Title: i18n.T("help.trim-editor.title"),
 		Body:  i18n.T("help.trim-editor.body"),

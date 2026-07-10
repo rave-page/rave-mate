@@ -288,6 +288,10 @@
     },
     "midi-thru": {
       "body": "\n\nBestes THRU-Ziel (loopMIDI-Treiber nötig): der rave-mate Einweg-Port. Deine DJ-Software sieht einen reinen Eingangs-Port namens 'rave-mate' - es gibt KEINEN passenden Ausgangs-Endpunkt, also kann ihr automatisches LED-Echo (rekordbox spiegelt jeden Indicator-Code zurück) nirgends zurücklaufen und sie reagiert nie auf ihr eigenes Feedback. In der DJ-Software 'rave-mate' als MIDI-Gerät wählen."
+    },
+    "cue-edit": {
+      "title": "Cue-Editor – Tasten & Maus",
+      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit."
     }
   },
   "library": {
@@ -323,7 +327,8 @@
     "col": {
       "bpm": "BPM",
       "key": "KEY",
-      "time": "ZEIT"
+      "time": "ZEIT",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Sicherung",
@@ -933,6 +938,58 @@
       "rbNote": "Rekordbox: Grids werden in die Sammlungs-XML geschrieben – in Rekordbox über Datei → Sammlung importieren laden.",
       "seratoNote": "Serato: Grids werden direkt in die Audiodateien geschrieben (verifizierter Temp-Write; Serato vorher schließen).",
       "vdjRunning": "VirtualDJ ist geöffnet – vor dem Übernehmen schließen."
+    },
+    "ce": {
+      "open": "Cues vorbereiten",
+      "eyebrow": "Cue-Editor",
+      "cursor": "Cursor",
+      "bar": "Takt",
+      "jump": "Beat-Jump: {n}",
+      "noDropsHint": "Noch keine Drops – mit den Pfeiltasten zum ersten Drop laufen und T oder Enter drücken.",
+      "addDrop": "Drop am Cursor setzen",
+      "removeDrop": "Drop am Cursor entfernen",
+      "noFileTag": "Dieses Dateiformat kann den Drop-Tag nicht tragen – Drops liegen nur in der Bibliothek (MP3/FLAC speichern sie auch in der Datei).",
+      "selection": "{n} Cues ausgewählt",
+      "patternName": "Pattern-Name…",
+      "savePattern": "Als Pattern speichern",
+      "applyHot": "Patterns anwenden (Hotcues)",
+      "applyMem": "Als Memory-Cues anwenden",
+      "convertAll": "Alle Hotcues → Memory-Cues umwandeln",
+      "reportHint": "{added} gesetzt · {cut} gekappt (außerhalb der Drop-Spanne) · {skipped} übersprungen (Cue vorhanden) · {demoted} ohne Pad",
+      "notInCollection": "Track ist nicht in der Sammlung.",
+      "noGrid": "Track hat kein Beatgrid – Grid zuerst analysieren oder fixen.",
+      "fileTagFailed": "Drops konnten nicht in den Datei-Tag geschrieben werden: ",
+      "nameNeeded": "Pattern zuerst benennen.",
+      "saveFailed": "Pattern konnte nicht gespeichert werden: ",
+      "patternSaved": "Pattern „{name}“ gespeichert ({n} Cues).",
+      "noPatternPicked": "Für mindestens einen Drop ein Pattern wählen.",
+      "applyFailed": "Anwenden fehlgeschlagen: ",
+      "appliedToast": "{n} Cues geschrieben",
+      "convertedToast": "Alle Hotcues in Memory-Cues umgewandelt.",
+      "noDropsChip": "Ohne Drops",
+      "drops": {
+        "one": "{count} Drop-Marker",
+        "few": "{count} Drop-Marker",
+        "many": "{count} Drop-Marker",
+        "other": "{count} Drop-Marker"
+      },
+      "patternCues": {
+        "one": "{count} Cue",
+        "few": "{count} Cues",
+        "many": "{count} Cues",
+        "other": "{count} Cues"
+      },
+      "noDropsBadge": "Noch keine Drop-Marker",
+      "noCuesBadge": "Keine Cues",
+      "applySelHot": "Patterns anwenden → Hotcues",
+      "applySelMem": "Patterns anwenden → Memory-Cues",
+      "batchToast": "Patterns auf {applied} Tracks angewendet · {skipped} übersprungen",
+      "beatsBetween": {
+        "one": "{count} Beat zwischen Markern",
+        "few": "{count} Beats zwischen Markern",
+        "many": "{count} Beats zwischen Markern",
+        "other": "{count} Beats zwischen Markern"
+      }
     }
   },
   "live": {
@@ -1502,7 +1559,9 @@
       "silenceFailed": "Stille-Erkennung fehlgeschlagen: ",
       "timeFormat": "Zeitformat: mm:ss.s (oder h:mm:ss)"
     },
-    "trimEdit": "Zuschneiden / bearbeiten"
+    "trimEdit": "Zuschneiden / bearbeiten",
+    "more": "Mehr",
+    "trimEditSub": "Abschnitt schneiden oder gekürzte Kopie exportieren"
   },
   "publish": {
     "audio": "Audio",
