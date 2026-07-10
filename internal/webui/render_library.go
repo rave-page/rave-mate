@@ -59,10 +59,10 @@ type libSt struct {
 	collSearch, collSort                 string
 	collDesc                             bool
 	collGenre, collLabel, keySel         map[string]bool
-	collSel                              map[string]bool // add-to-playlist multi-select
-	collNoDrops                          bool            // facet: only tracks WITHOUT drop markers
+	collSel                              map[string]bool      // add-to-playlist multi-select
+	collNoDrops                          bool                 // facet: only tracks WITHOUT drop markers
 	dropsIdx                             map[string][]float64 // path -> drop markers (cue-prepare enrichment)
-	batch                                map[string]bool // browse batch multi-select
+	batch                                map[string]bool      // browse batch multi-select
 
 	sel       *libSel
 	draft     transcode.Preset
