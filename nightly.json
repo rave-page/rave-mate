@@ -1,13 +1,13 @@
 {
   "version": "nightly-144aada",
-  "build": 33,
+  "build": 34,
   "commit": "144aada",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-33-20260709-144aada.exe",
-  "sha256": "91c6af8f3051df76ed0f5ebc4a7be42c572d268a06035b96c8a5cf7bc1c960e3",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-33-20260709-144aada.exe",
-  "installer_sha256": "4c4793bfe836f47e2d2aafa8e3a841bfc69f78cc37befc06bc961088f0d0dc74",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-33-20260709-144aada",
-  "linux_sha256": "0a10f68765b853642a50535d0d37aa8f2b047cb26c5932c66699331fde2569c6",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-34-20260710-144aada.exe",
+  "sha256": "34f25502df5b7a8be76c4f4e5784289454e77668fc7166c7fa3536fedd5171a3",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-34-20260710-144aada.exe",
+  "installer_sha256": "395758f71b636b5bf6a9d277f676066bb4eba14bcbcc5688345d2b3158380799",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-34-20260710-144aada",
+  "linux_sha256": "1fca81a54b68f183c9759ad3c8e3059c508be954fcc19b18866ed2dab439a3fb",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-09T19:01:35Z",
+  "released": "2026-07-10T13:25:52Z",
   "notes": "feat(midi): auto-retry held controller ports + live port-status refresh"
 }
