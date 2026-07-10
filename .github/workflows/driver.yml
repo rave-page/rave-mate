@@ -1,0 +1,53 @@
+# ravemidi kernel driver build. windows-2022 = the WDK-equipped runner image
+# (WDK + VS kernel-mode toolset preinstalled; windows-latest has NO WDK).
+# Reference: microsoft/Windows-driver-samples CI.
+name: Driver
+
+on:
+  push:
+    branches: [main, master, development]
+    paths:
+      - "driver/**"
+      - ".github/workflows/driver.yml"
+  pull_request:
+    paths:
+      - "driver/**"
+      - ".github/workflows/driver.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build ravemidi (x64 ${{ matrix.configuration }})
+        run: msbuild driver\ravemidi\ravemidi.vcxproj /m /p:Configuration=${{ matrix.configuration }} /p:Platform=x64 /warnaserror
+      - name: Package artifacts
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          $out = "driver\ravemidi\build\Release\x64"
+          Get-ChildItem -Recurse $out | Select-Object FullName, Length
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item "$out\ravemidi\ravemidi.sys" artifact\ -ErrorAction SilentlyContinue
+          Copy-Item "$out\ravemidi\ravemidi.inf" artifact\ -ErrorAction SilentlyContinue
+          Copy-Item "$out\ravemidi\ravemidi.cat" artifact\ -ErrorAction SilentlyContinue
+          Copy-Item "$out\ravemidi.pdb" artifact\ -ErrorAction SilentlyContinue
+          if (-not (Test-Path artifact\ravemidi.sys)) {
+            # layout differs between WDK versions; fall back to a sweep
+            Get-ChildItem -Recurse $out -Include ravemidi.sys,ravemidi.inf,ravemidi.cat,ravemidi.pdb | Copy-Item -Destination artifact\
+          }
+          if (-not (Test-Path artifact\ravemidi.sys)) { throw "ravemidi.sys not produced" }
+      - uses: actions/upload-artifact@v4
+        if: matrix.configuration == 'Release'
+        with:
+          name: ravemidi-x64-testsigned
+          path: artifact/
+          retention-days: 14

@@ -30,3 +30,6 @@ Thumbs.db
 .vscode/
 *.swp
 rave-mate-debug.log
+
+# ravemidi driver build output
+/driver/ravemidi/build/

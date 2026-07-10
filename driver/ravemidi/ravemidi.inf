@@ -1,0 +1,51 @@
+; ravemidi.inf — rave-mate virtual MIDI adapter (root-enumerated, PortCls/WDM).
+; DCH/declarative: must stay InfVerif /h clean (attestation gate since Apr 2025).
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+CatalogFile = ravemidi.cat
+DriverVer   = ; stamped by build (stampinf)
+PnpLockdown = 1
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+ravemidi.sys = 1
+
+[DestinationDirs]
+DefaultDestDir = 13 ; driver-store (DCH requirement; no System32 copies)
+
+[Manufacturer]
+%ProviderName% = RaveMidi,NTamd64.10.0
+
+[RaveMidi.NTamd64.10.0]
+%RaveMidi.DeviceDesc% = RaveMidi_Device, Root\ravemidi
+
+[RaveMidi_Device.NT]
+Include = ks.inf, wdmaudio.inf
+Needs   = KS.Registration, WDMAUDIO.Registration
+CopyFiles = RaveMidi_CopyFiles
+
+[RaveMidi_CopyFiles]
+ravemidi.sys
+
+[RaveMidi_Device.NT.Services]
+AddService = ravemidi, 0x00000002, RaveMidi_Service ; SPSVCINST_ASSOCSERVICE
+
+[RaveMidi_Service]
+DisplayName    = %RaveMidi.ServiceDesc%
+ServiceType    = 1  ; SERVICE_KERNEL_DRIVER
+StartType      = 3  ; SERVICE_DEMAND_START
+ErrorControl   = 1  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\ravemidi.sys
+
+[Strings]
+ProviderName          = "rave.page"
+DiskName              = "ravemidi install disk"
+RaveMidi.DeviceDesc   = "rave-mate virtual MIDI adapter"
+RaveMidi.ServiceDesc  = "rave-mate virtual MIDI driver"
