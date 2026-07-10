@@ -399,7 +399,9 @@
       "trimEnd": "Recorte final (s)",
       "trimStart": "Recorte inicial (s)",
       "truePeak": "Techo de pico real (dBTP)",
-      "videoCodec": "Códec de vídeo"
+      "videoCodec": "Códec de vídeo",
+      "demotedNote": "Los flujos de colección y playlist re-codifican carpetas o playlists enteras a un directorio duplicado (barra de Browse / vista de playlist) — así tus originales quedan organizados. ¿Conversión puntual de solo este archivo? Abre el codificador abajo.",
+      "show": "Mostrar codificador para este archivo"
     },
     "favorites": {
       "desc": "Carpetas fijadas - ábrelas en Examinar. Fija la carpeta actual desde la barra de Examinar.",
@@ -990,6 +992,64 @@
         "many": "{count} beats entre marcadores",
         "other": "{count} beats entre marcadores"
       }
+    },
+    "tf": {
+      "menu": "Reparar tags…",
+      "eyebrow": "Mantenimiento",
+      "title": "Reparador de tags",
+      "desc": "Analiza los archivos de tu colección en busca de tags rotos o incompletos y propone reparaciones campo a campo. Cada escritura es atómica por archivo, registrada y reversible; los archivos modificados desde el análisis se omiten.",
+      "scanning": "Analizando archivos… {done}/{total}",
+      "apply": "Aplicar {n} reparaciones seleccionadas",
+      "rescan": "Reanalizar",
+      "applying": "Escribiendo reparaciones…",
+      "skipped": "{n} archivos omitidos (formato no soportado o ilegible — solo MP3 y FLAC llevan tags reparables).",
+      "clean": "Sin problemas de tags — tus archivos coinciden con la biblioteca.",
+      "nonePicked": "Nada seleccionado.",
+      "appliedToast": "{n} reparaciones escritas",
+      "all": "Todo",
+      "none": "Nada",
+      "kind": {
+        "v1_only": "Solo ID3v1",
+        "mojibake": "Caracteres rotos",
+        "missing": "Campos faltantes",
+        "mismatch": "Discrepancia con la biblioteca",
+        "no_basics": "Básicos faltantes"
+      },
+      "kindDesc": {
+        "v1_only": "Archivos con solo el trailer ID3v1 antiguo — propone los frames ID3v2 modernos equivalentes para que cualquier reproductor los lea.",
+        "mojibake": "Texto mal codificado (Ã©, â€™, â€¦) de rippers antiguos — propone la cadena reparada.",
+        "missing": "La biblioteca conoce BPM / tonalidad / género que faltan en el tag — propone escribir el valor de la biblioteca en el archivo.",
+        "mismatch": "El BPM o la tonalidad del archivo contradicen la biblioteca — propone el valor de la biblioteca. Desmarca las filas donde el archivo tenga razón.",
+        "no_basics": "Al archivo le faltan el título / artista que la biblioteca tiene."
+      },
+      "editTags": "Editar tags…",
+      "editDesc": "Los cambios se escriben en el tag del ARCHIVO (atómico, reversible, registrado). Los valores de la biblioteca quedan como se importaron.",
+      "f": {
+        "title": "Título",
+        "artist": "Artista",
+        "album": "Álbum",
+        "genre": "Género",
+        "label": "Sello",
+        "year": "Año",
+        "rating": "Valoración (0-5)"
+      },
+      "readFailed": "No se pueden leer los tags: ",
+      "writeFailed": "Fallo al escribir el tag: ",
+      "savedToast": "Tags escritos en el archivo"
+    },
+    "re": {
+      "title": "Re-codificar a una carpeta nueva",
+      "desc": "Duplica cada archivo de audio en la carpeta de destino con el formato elegido — nombres conservados, subcarpetas reflejadas, archivos ya presentes omitidos. Los originales nunca se tocan.",
+      "source": "Origen",
+      "dest": "Carpeta de destino",
+      "note": "Caso típico: biblioteca FLAC → copia apta para CDJ en un USB.",
+      "start": "Iniciar re-codificación",
+      "noFiles": "No se encontraron archivos de audio.",
+      "queuedToast": "{queued} archivos en cola · {skipped} ya existían",
+      "dirBtn": "Re-codificar carpeta…",
+      "plBtn": "Re-codificar playlist…",
+      "markBtn": "Marcar carpeta como playlist",
+      "markedToast": "«{name}» creada como playlist ({n} pistas)"
     }
   },
   "live": {

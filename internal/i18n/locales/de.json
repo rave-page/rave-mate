@@ -399,7 +399,9 @@
       "trimEnd": "Ende kürzen (s)",
       "trimStart": "Anfang kürzen (s)",
       "truePeak": "True-Peak-Grenze (dBTP)",
-      "videoCodec": "Video-Codec"
+      "videoCodec": "Video-Codec",
+      "demotedNote": "Collection- & Playlist-Workflows re-encodieren ganze Ordner oder Playlists in ein Duplikat-Verzeichnis (Browse-Toolbar / Playlist-Ansicht) — so bleiben Originale sortiert. Einmalige Konvertierung nur dieser Datei? Encoder unten öffnen.",
+      "show": "Encoder für diese Datei anzeigen"
     },
     "favorites": {
       "desc": "Angeheftete Ordner - im Durchsuchen-Tab öffnen. Hefte den aktuellen Ordner über die Durchsuchen-Werkzeugleiste an.",
@@ -990,6 +992,64 @@
         "many": "{count} Beats zwischen Markern",
         "other": "{count} Beats zwischen Markern"
       }
+    },
+    "tf": {
+      "menu": "Tags reparieren…",
+      "eyebrow": "Wartung",
+      "title": "Tag-Fixer",
+      "desc": "Durchsucht die Dateien deiner Collection nach kaputten oder unvollständigen Tags und schlägt Einzelfeld-Reparaturen vor. Jeder Schreibvorgang ist pro Datei atomar, journaliert und umkehrbar; seit dem Scan geänderte Dateien werden übersprungen.",
+      "scanning": "Scanne Dateien… {done}/{total}",
+      "apply": "{n} ausgewählte Reparaturen anwenden",
+      "rescan": "Neu scannen",
+      "applying": "Schreibe Reparaturen…",
+      "skipped": "{n} Dateien übersprungen (nicht unterstütztes Format oder unlesbar — nur MP3 und FLAC tragen reparierbare Tags).",
+      "clean": "Keine Tag-Probleme gefunden — deine Dateien stimmen mit der Library überein.",
+      "nonePicked": "Nichts ausgewählt.",
+      "appliedToast": "{n} Reparaturen geschrieben",
+      "all": "Alle",
+      "none": "Keine",
+      "kind": {
+        "v1_only": "Nur ID3v1",
+        "mojibake": "Kaputte Zeichen",
+        "missing": "Fehlende Felder",
+        "mismatch": "Library-Abweichung",
+        "no_basics": "Fehlende Basisdaten"
+      },
+      "kindDesc": {
+        "v1_only": "Dateien mit nur dem alten ID3v1-Trailer — schlägt äquivalente moderne ID3v2-Frames vor, damit jeder Player sie liest.",
+        "mojibake": "Zeichensatz-zerhackter Text (Ã©, â€™, â€¦) alter Ripper — schlägt den reparierten String vor.",
+        "missing": "Die Library kennt BPM / Key / Genre, die dem Datei-Tag fehlen — schlägt vor, den Library-Wert in die Datei zu schreiben.",
+        "mismatch": "BPM oder Key der Datei widersprechen der Library — schlägt den Library-Wert vor. Zeilen abwählen, wo die Datei recht hat.",
+        "no_basics": "Der Datei fehlen Titel / Artist, die die Library hat."
+      },
+      "editTags": "Tags bearbeiten…",
+      "editDesc": "Änderungen schreiben in das DATEI-Tag (atomar, umkehrbar, journaliert). Library-Werte bleiben wie aus der DJ-Software importiert.",
+      "f": {
+        "title": "Titel",
+        "artist": "Artist",
+        "album": "Album",
+        "genre": "Genre",
+        "label": "Label",
+        "year": "Jahr",
+        "rating": "Bewertung (0-5)"
+      },
+      "readFailed": "Tags nicht lesbar: ",
+      "writeFailed": "Tag-Schreiben fehlgeschlagen: ",
+      "savedToast": "Tags in Datei geschrieben"
+    },
+    "re": {
+      "title": "In neuen Ordner re-encodieren",
+      "desc": "Dupliziert jede Audiodatei im gewählten Format in den Zielordner — Dateinamen bleiben, Unterordner werden gespiegelt, vorhandene Dateien übersprungen. Originale werden nie angefasst.",
+      "source": "Quelle",
+      "dest": "Zielordner",
+      "note": "Typischer Fall: FLAC-Library → CDJ-sichere Kopie für den USB-Stick.",
+      "start": "Re-Encode starten",
+      "noFiles": "Keine Audiodateien gefunden.",
+      "queuedToast": "{queued} Dateien eingereiht · {skipped} existierten bereits",
+      "dirBtn": "Ordner re-encodieren…",
+      "plBtn": "Playlist re-encodieren…",
+      "markBtn": "Ordner als Playlist markieren",
+      "markedToast": "„{name}“ als Playlist angelegt ({n} Tracks)"
     }
   },
   "live": {

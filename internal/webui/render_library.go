@@ -69,6 +69,9 @@ type libSt struct {
 	draftInit bool
 	trimS     string
 	trimE     string
+	encOpen   bool              // per-file encoder expanded despite collection/playlist demotion
+	tagEdit   bool              // per-track tag editor open (library_tagfix.go)
+	tagDraft  map[string]string // tag editor draft values
 
 	plSel   int64
 	plCur   libdb.PlaylistRow
@@ -480,6 +483,8 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid"))
 	b.WriteString(fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid"))
 	b.WriteString(u.libKeyChip(s))
+	b.WriteString(btn(i18n.T("library.re.dirBtn"), "ghost", "lib-reenc-dir", ""))
+	b.WriteString(btn(i18n.T("library.re.markBtn"), "ghost", "lib-markpl", ""))
 	pinLabel := i18n.T("library.browse.pin")
 	for _, bm := range u.libMarks(s).List() {
 		if bm.Path == dir {
@@ -613,7 +618,13 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		b.WriteString(fchip(l+" ×", "", "lib-label:"+l, true))
 	}
 
-	// batch results replace the list while the fixer's results view is on
+	// batch results replace the list while a fixer's results view is on
+	u.tf.mu.Lock()
+	tfView := u.tf.resView
+	u.tf.mu.Unlock()
+	if tfView {
+		return b.String() + u.tfResultsHTML()
+	}
 	u.gf.mu.Lock()
 	resView := u.gf.resView && u.gf.stage == "done"
 	u.gf.mu.Unlock()
@@ -737,6 +748,7 @@ func (u *UI) libMoreMenuHTML(s *libSt) string {
 		{"lib-cleanup", i18n.T("library.coll.cleanup")},
 		{"lib-relocate", i18n.T("library.coll.relocate")},
 		{"lib-export", i18n.T("library.coll.export")},
+		{"lib-tagfix", i18n.T("library.tf.menu")},
 	}
 	if u.svc.Syncer != nil {
 		items = append(items, [2]string{"lib-sync", i18n.T("library.coll.sync")})
@@ -864,6 +876,7 @@ func (u *UI) libPlaylistOpenHTML(s *libSt) string {
 	}
 	b.WriteString(btn(i18n.T("library.pl.exportM3U"), "outline", fmt.Sprintf("lib-pl-export:%d", p.ID), ""))
 	b.WriteString(btn(i18n.T("library.pl.exportM3UAs"), "ghost", fmt.Sprintf("pick-save:m3u8:lib-pl-exportas:%d", p.ID), ""))
+	b.WriteString(btn(i18n.T("library.re.plBtn"), "outline", fmt.Sprintf("lib-reenc-pl:%d", p.ID), ""))
 	if !manual {
 		b.WriteString(btn(i18n.T("library.pl.dupManual"), "outline", fmt.Sprintf("lib-pl-dup:%d", p.ID), ""))
 	}
@@ -1135,9 +1148,17 @@ func (u *UI) libDetailHTML(s *libSt) string {
 		u.mpSetDrops("library", sel.path, s.dropsIdx[sel.path])
 		b.WriteString(inspSec(i18n.T("library.insp.player"), u.mpHTML("library")))
 	}
-	// ENCODE builder (audio + video)
+	// ENCODE builder (audio + video). In collection/playlist context (incl. files
+	// living in a playlist-marked folder) the per-file encoder folds away - whole
+	// dirs/playlists re-encode via the batch flow; recordings + video keep it up front.
 	if sel.kind == "audio" || sel.kind == "video" {
-		b.WriteString(inspSec(i18n.T("library.insp.encoding"), u.libEncodeHTML(s, sel)))
+		if sel.kind == "audio" && !s.encOpen && u.libEncDemoted(sel.path) {
+			b.WriteString(inspSec(i18n.T("library.insp.encoding"),
+				`<p class=page-sub>`+html.EscapeString(i18n.T("library.enc.demotedNote"))+`</p>`+
+					btnRow(btn(i18n.T("library.enc.show"), "ghost", "lib-enc-open", ""))))
+		} else {
+			b.WriteString(inspSec(i18n.T("library.insp.encoding"), u.libEncodeHTML(s, sel)))
+		}
 	}
 	// HARMONIC key-wheel (audio with a key)
 	if sel.kind == "audio" {
@@ -1145,10 +1166,11 @@ func (u *UI) libDetailHTML(s *libSt) string {
 			b.WriteString(inspSec(i18n.T("library.insp.harmonic"), u.libHarmonicHTML(s, sel)))
 		}
 	}
-	// TAGS (collection audio)
+	// TAGS (collection audio): library→file sync buttons + the manual tag editor
 	if sel.inColl && sel.kind == "audio" {
 		b.WriteString(inspSec(i18n.T("library.insp.tags"), `<p class=page-sub>`+html.EscapeString(i18n.T("library.insp.tagsDesc"))+`</p>`+
-			btnRow(btn(i18n.T("library.insp.writeTags"), "primary", "lib-tags-write:"+sel.path, ""), btn(i18n.T("library.revert"), "ghost", "lib-tags-revert:"+sel.path, ""))))
+			btnRow(btn(i18n.T("library.insp.writeTags"), "primary", "lib-tags-write:"+sel.path, ""), btn(i18n.T("library.revert"), "ghost", "lib-tags-revert:"+sel.path, ""))+
+			u.tfEditorHTML(s, sel)))
 	}
 	// PLAYLISTS membership
 	if sel.kind == "audio" {

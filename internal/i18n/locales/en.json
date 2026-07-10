@@ -480,7 +480,9 @@
       "trimEnd": "Trim end (s)",
       "trimStart": "Trim start (s)",
       "truePeak": "True-peak ceiling (dBTP)",
-      "videoCodec": "Video codec"
+      "videoCodec": "Video codec",
+      "demotedNote": "Collection & playlist workflows re-encode whole folders or playlists into a duplicate directory (Browse toolbar / playlist view) — that keeps your originals organized. Need a one-off conversion of just this file? Open the encoder below.",
+      "show": "Show encoder for this file"
     },
     "favorites": {
       "desc": "Pinned folders - open in Browse. Pin the current folder from the Browse toolbar.",
@@ -1071,6 +1073,64 @@
         "many": "{count} beats between markers",
         "other": "{count} beats between markers"
       }
+    },
+    "tf": {
+      "menu": "Fix tags…",
+      "eyebrow": "Maintenance",
+      "title": "Tag fixer",
+      "desc": "Scans your collection's files for broken or incomplete tags and proposes single-field repairs. Every write is atomic per file, journaled, and revertible; files changed since the scan are skipped.",
+      "scanning": "Scanning files… {done}/{total}",
+      "apply": "Apply {n} selected repairs",
+      "rescan": "Rescan",
+      "applying": "Writing repairs…",
+      "skipped": "{n} files skipped (unsupported format or unreadable — only MP3 and FLAC carry tags we can fix).",
+      "clean": "No tag problems found — your files agree with the library.",
+      "nonePicked": "Nothing selected.",
+      "appliedToast": "{n} repairs written",
+      "all": "All",
+      "none": "None",
+      "kind": {
+        "v1_only": "ID3v1 only",
+        "mojibake": "Broken characters",
+        "missing": "Missing fields",
+        "mismatch": "Library mismatch",
+        "no_basics": "Missing basics"
+      },
+      "kindDesc": {
+        "v1_only": "Files carrying only the legacy ID3v1 trailer — proposes equivalent modern ID3v2 frames so every player reads them.",
+        "mojibake": "Charset-mangled text (Ã©, â€™, â€¦) from old rippers — proposes the repaired string.",
+        "missing": "The library knows BPM / key / genre that the file tag lacks — proposes writing the library value into the file.",
+        "mismatch": "The file's BPM or key disagrees with the library — proposes the library value. Deselect rows where the file is right.",
+        "no_basics": "The file lacks the title / artist the library has."
+      },
+      "editTags": "Edit tags…",
+      "editDesc": "Edits write to the FILE tag (atomic, revertible, journaled). Library values stay as imported from your DJ software.",
+      "f": {
+        "title": "Title",
+        "artist": "Artist",
+        "album": "Album",
+        "genre": "Genre",
+        "label": "Label",
+        "year": "Year",
+        "rating": "Rating (0-5)"
+      },
+      "readFailed": "Can't read tags: ",
+      "writeFailed": "Tag write failed: ",
+      "savedToast": "Tags written to file"
+    },
+    "re": {
+      "title": "Re-encode into a new folder",
+      "desc": "Duplicates every audio file into the destination folder in the chosen format — file names kept, subfolders mirrored, already-present files skipped. Originals are never touched.",
+      "source": "Source",
+      "dest": "Destination folder",
+      "note": "Typical use: FLAC library → CDJ-safe copy for a USB stick.",
+      "start": "Start re-encode",
+      "noFiles": "No audio files found.",
+      "queuedToast": "{queued} files queued · {skipped} already existed",
+      "dirBtn": "Re-encode folder…",
+      "plBtn": "Re-encode playlist…",
+      "markBtn": "Mark folder as playlist",
+      "markedToast": "“{name}” created as playlist ({n} tracks)"
     }
   },
   "live": {

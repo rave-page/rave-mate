@@ -22,6 +22,26 @@ consistent across software. Configure sync jobs in Settings; an auto-sync schedu
 them. **Back up your collections before first sync** (the app also keeps its own backups of
 touched files).
 
+## Batch re-encode (duplicate folder / playlist)
+
+The everyday "FLAC library → CDJ-safe USB copy" move: **Browse toolbar → Re-encode
+folder…** (recursive, subfolders mirrored) or **playlist view → Re-encode playlist…**.
+Pick an audio preset + destination folder (defaults to `<source>-<preset>`); file names
+are kept, already-present outputs skipped, originals never touched. Jobs land in the
+Queue section.
+
+Because of this flow, the per-file encoder panel folds away when a selected audio file
+sits in a collection/playlist context (or a folder marked as a playlist — **Browse
+toolbar → Mark folder as playlist**); *Show encoder for this file* brings it back for
+one-offs. Set recordings and video keep the full panel up front.
+
+## Tag fixing & editing
+
+**Collection → Maintenance → Fix tags…** scans files for broken/incomplete tags
+(ID3v1-only, mojibake, missing/mismatched fields vs the library) with selectable
+per-field repairs; the detail rail's **Edit tags…** edits a single file's tag
+directly. Both write atomically, journaled + revertible. See `docs/TAG_TOOLS.md`.
+
 ## Caveats
 
 - Rekordbox database formats are version-sensitive; sync is read-heavy and conservative on

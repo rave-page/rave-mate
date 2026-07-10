@@ -371,6 +371,7 @@ func (u *UI) libSelect(path string, _ *musiclib.Track) {
 	s.sel = sel
 	s.draftInit = false
 	s.trimS, s.trimE = "", ""
+	s.encOpen, s.tagEdit = false, false // per-selection panel states
 	needProbe := (kind == "audio" || kind == "video") && u.svc.Workers != nil && pathOnDisk(path)
 	track := sel.track
 	s.mu.Unlock()
@@ -524,17 +525,21 @@ func (u *UI) libTranscodeSel() {
 }
 
 func (u *UI) libStartTranscode(path string, pre transcode.Preset, ts, te string) {
-	hub := u.svc.Hub
-	if hub == nil {
-		u.toast(i18n.T("library.toast.transcodeWorkerUnavailable"))
-		return
-	}
 	id := pre.ID
 	if id == "" {
 		id = "custom"
 	}
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	out := filepath.Join(filepath.Dir(path), "rave-mate-transcoded", base+"-"+id+pre.Ext())
+	u.libStartTranscodeTo(path, filepath.Join(filepath.Dir(path), "rave-mate-transcoded", base+"-"+id+pre.Ext()), pre, ts, te)
+}
+
+// libStartTranscodeTo enqueues one transcode job with an explicit output path.
+func (u *UI) libStartTranscodeTo(path, out string, pre transcode.Preset, ts, te string) {
+	hub := u.svc.Hub
+	if hub == nil {
+		u.toast(i18n.T("library.toast.transcodeWorkerUnavailable"))
+		return
+	}
 	tsF, _ := strconv.ParseFloat(strings.TrimSpace(ts), 64)
 	teF, _ := strconv.ParseFloat(strings.TrimSpace(te), 64)
 	jid := fmt.Sprintf("libui-%d", time.Now().UnixNano())

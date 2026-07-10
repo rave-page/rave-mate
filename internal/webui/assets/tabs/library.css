@@ -245,3 +245,15 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .trk-row.ce-marked{background:rgba(255,181,71,.07);box-shadow:inset -2px 0 0 var(--color-brand-amber,#FFB547)}
 .trk-row.sel.ce-marked{background:rgba(247,8,100,.10);box-shadow:inset 2px 0 0 var(--rp-base),inset -2px 0 0 var(--color-brand-amber,#FFB547)}
 @media (max-width:480px){ .trk-cell-ce{display:none} .trk-h .trk-cell-ce{display:none} }
+
+/* tag fixer (library_tagfix.go) */
+.tf-grp{margin:var(--space-3) 0;padding:var(--space-2);background:var(--rp-card);border:1px solid var(--rp-faint);border-radius:var(--radius,8px)}
+.tf-grphead{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.tf-grptitle{font:600 12px var(--font-display,Orbitron),sans-serif}
+.tf-row{display:flex;align-items:baseline;gap:var(--space-2);padding:3px 0;border-bottom:1px solid var(--rp-faint);cursor:pointer}
+.tf-row input[type=checkbox]{flex:none;accent-color:var(--rp-base)}
+.tf-file{flex:none;max-width:34%;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tf-field{flex:none;font:600 10px var(--font-mono,monospace);color:var(--rp-violet);text-transform:uppercase}
+.tf-diff{flex:1;min-width:200px;font:12px var(--font-mono,monospace);color:var(--rp-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tf-diff b{color:var(--rp-mint)}
+.tf-diff s{opacity:.6}

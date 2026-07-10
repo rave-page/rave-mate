@@ -53,3 +53,17 @@ no charset dependency.
 
 Unsupported/unreadable files are skipped silently (count via `Options.Skipped`);
 `Options.Kinds` filters, `Options.Progress` reports per-file progress.
+
+## Fix tags UI (Library → Collection → Maintenance → Fix tags…)
+
+Scans every on-disk collection file and shows proposed repairs grouped by kind
+(ID3v1-only upgrade, mojibake repair, missing fields, library mismatch, missing
+basics), each row a `current → proposed` diff with a checkbox (per-kind All/None).
+Apply writes atomically per file through tagsync (revertible + journaled); files
+changed since the scan are skipped. Rescan runs automatically after an apply.
+
+## Per-track tag editor (detail rail → Tags → Edit tags…)
+
+Edits title / artist / album / genre / label / year / rating (0-5 stars) straight in
+the FILE tag — atomic, revertible, journaled. Library values stay as imported from
+your DJ software; use the library-sync buttons above it to push those instead.

@@ -62,6 +62,28 @@ func (d *DB) CreatePlaylist(name, kind, rules string) (int64, error) {
 	return res.LastInsertId()
 }
 
+// CreateFolderPlaylist creates a manual playlist bound to a source folder (the
+// "mark directory as playlist" gesture) and fills it with the given tracks.
+func (d *DB) CreateFolderPlaylist(name, folder string, paths []string) (int64, error) {
+	if name == "" || folder == "" {
+		return 0, fmt.Errorf("playlist name/folder empty")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := d.db.Exec(`INSERT INTO playlists (name, kind, folder, created_at, updated_at) VALUES (?,?,?,?,?)`,
+		name, PlaylistManual, folder, now, now)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := d.AddToPlaylist(id, paths...); err != nil {
+		return id, err
+	}
+	return id, nil
+}
+
 // RenamePlaylist updates a playlist's name.
 func (d *DB) RenamePlaylist(id int64, name string) error {
 	if name == "" {

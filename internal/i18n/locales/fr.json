@@ -399,7 +399,9 @@
       "trimEnd": "Rogner fin (s)",
       "trimStart": "Rogner début (s)",
       "truePeak": "Plafond true-peak (dBTP)",
-      "videoCodec": "Codec vidéo"
+      "videoCodec": "Codec vidéo",
+      "demotedNote": "Les workflows collection & playlist ré-encodent des dossiers ou playlists entiers vers un répertoire dupliqué (barre Browse / vue playlist) — vos originaux restent organisés. Conversion ponctuelle de ce seul fichier ? Ouvrez l'encodeur ci-dessous.",
+      "show": "Afficher l'encodeur pour ce fichier"
     },
     "favorites": {
       "desc": "Dossiers épinglés - ouverts dans Parcourir. Épinglez le dossier courant depuis la barre d'outils Parcourir.",
@@ -990,6 +992,64 @@
         "many": "{count} temps entre les marqueurs",
         "other": "{count} temps entre les marqueurs"
       }
+    },
+    "tf": {
+      "menu": "Réparer les tags…",
+      "eyebrow": "Maintenance",
+      "title": "Réparateur de tags",
+      "desc": "Analyse les fichiers de votre collection à la recherche de tags cassés ou incomplets et propose des réparations champ par champ. Chaque écriture est atomique par fichier, journalisée et réversible ; les fichiers modifiés depuis l'analyse sont ignorés.",
+      "scanning": "Analyse des fichiers… {done}/{total}",
+      "apply": "Appliquer {n} réparations sélectionnées",
+      "rescan": "Réanalyser",
+      "applying": "Écriture des réparations…",
+      "skipped": "{n} fichiers ignorés (format non pris en charge ou illisible — seuls MP3 et FLAC portent des tags réparables).",
+      "clean": "Aucun problème de tag — vos fichiers concordent avec la bibliothèque.",
+      "nonePicked": "Rien de sélectionné.",
+      "appliedToast": "{n} réparations écrites",
+      "all": "Tout",
+      "none": "Aucun",
+      "kind": {
+        "v1_only": "ID3v1 uniquement",
+        "mojibake": "Caractères cassés",
+        "missing": "Champs manquants",
+        "mismatch": "Désaccord bibliothèque",
+        "no_basics": "Bases manquantes"
+      },
+      "kindDesc": {
+        "v1_only": "Fichiers ne portant que l'ancien trailer ID3v1 — propose les frames ID3v2 modernes équivalentes pour que tous les lecteurs les lisent.",
+        "mojibake": "Texte mal encodé (Ã©, â€™, â€¦) issu d'anciens rippers — propose la chaîne réparée.",
+        "missing": "La bibliothèque connaît le BPM / la tonalité / le genre absents du tag — propose d'écrire la valeur de la bibliothèque dans le fichier.",
+        "mismatch": "Le BPM ou la tonalité du fichier contredit la bibliothèque — propose la valeur de la bibliothèque. Décochez les lignes où le fichier a raison.",
+        "no_basics": "Le fichier n'a pas le titre / l'artiste que la bibliothèque connaît."
+      },
+      "editTags": "Modifier les tags…",
+      "editDesc": "Les modifications écrivent dans le tag du FICHIER (atomique, réversible, journalisé). Les valeurs de la bibliothèque restent telles qu'importées.",
+      "f": {
+        "title": "Titre",
+        "artist": "Artiste",
+        "album": "Album",
+        "genre": "Genre",
+        "label": "Label",
+        "year": "Année",
+        "rating": "Note (0-5)"
+      },
+      "readFailed": "Tags illisibles : ",
+      "writeFailed": "Échec d'écriture du tag : ",
+      "savedToast": "Tags écrits dans le fichier"
+    },
+    "re": {
+      "title": "Ré-encoder vers un nouveau dossier",
+      "desc": "Duplique chaque fichier audio dans le dossier de destination au format choisi — noms conservés, sous-dossiers reproduits, fichiers déjà présents ignorés. Les originaux ne sont jamais touchés.",
+      "source": "Source",
+      "dest": "Dossier de destination",
+      "note": "Cas typique : bibliothèque FLAC → copie compatible CDJ pour une clé USB.",
+      "start": "Lancer le ré-encodage",
+      "noFiles": "Aucun fichier audio trouvé.",
+      "queuedToast": "{queued} fichiers en file · {skipped} existaient déjà",
+      "dirBtn": "Ré-encoder le dossier…",
+      "plBtn": "Ré-encoder la playlist…",
+      "markBtn": "Marquer le dossier comme playlist",
+      "markedToast": "« {name} » créée comme playlist ({n} pistes)"
     }
   },
   "live": {

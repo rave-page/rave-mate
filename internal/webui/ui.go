@@ -45,6 +45,8 @@ type UI struct {
 	gfProbe gridfixProbe   // beatgrid-engine env probe (spawns Python; own long TTL)
 
 	gf       gfState    // beatgrid-fixer cockpit run state (library_gridfix.go)
+	tf       tfState    // tag-fixer scan/apply state (library_tagfix.go)
+	re       reencSt    // batch re-encode modal state (library_reencode.go)
 	gfVMu    sync.Mutex // guards gfVStore lazy-open
 	gfVStore *gridfix.VerifiedStore
 	gfTrain  gfTrainState // model fine-tuning state (settings_gridfix_model.go)
