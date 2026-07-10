@@ -67,6 +67,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "library", label: i18n.T("settings.toggle.library"), retab: true, get: func() bool { return f.Library.Enabled }, set: func(b bool) { f.Library.Enabled = b }},
 		{id: "mediaeditor", label: i18n.T("settings.toggle.mediaeditor"), retab: true, get: func() bool { return f.MediaEditor.Enabled }, set: func(b bool) { f.MediaEditor.Enabled = b }},
 		{id: "transcode", label: i18n.T("settings.toggle.transcode"), get: func() bool { return f.Transcode.Enabled }, set: func(b bool) { f.Transcode.Enabled = b }},
+		{id: "gridfix", label: i18n.T("settings.toggle.gridfix"), get: func() bool { return f.GridFix.Enabled }, set: func(b bool) { f.GridFix.Enabled = b }},
 		// Integrations
 		{id: "twitch", label: i18n.T("settings.toggle.twitch"), module: "twitch", retab: true, get: func() bool { return f.Twitch.Enabled }, set: func(b bool) { f.Twitch.Enabled = b }},
 		{id: "stt", label: i18n.T("settings.toggle.stt"), get: func() bool { return f.STT.Enabled }, set: func(b bool) { f.STT.Enabled = b }},
@@ -144,7 +145,7 @@ func settingsSections() []setSection {
 		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi"}},
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "webcam", "medialink", "timecode", "ablelink"}},
-		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode"}},
+		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix"}},
 		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
 	}
@@ -522,6 +523,10 @@ func (u *UI) cardContent(id string) (string, string, string) {
 				field(i18n.T("settings.body.transcode.maxJobs"), "set:trans-conc", strconv.Itoa(conc), "number") +
 				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.transcode.note")) + `</div>` +
 				u.toolInstallHTML(mediatools.FFmpeg, "ffmpeg")
+
+	case "gridfix":
+		return i18n.T("settings.card.gridfix.title"), i18n.T("settings.card.gridfix.desc"),
+			u.gridfixCardBody()
 
 	// ── Integrations ──
 	case "twitch":
@@ -1284,6 +1289,13 @@ func (u *UI) settingsStatus() map[string]stv {
 	} else {
 		set("transcode", stOk(tr("settings.status.transcode.ffmpegReady")))
 	}
+	if gf, gfReady := u.gridfixStatusCached(); !f.GridFix.Enabled {
+		set("gridfix", stOff(""))
+	} else if gfReady && gf.EngineOK {
+		set("gridfix", stOk(tr("settings.status.gridfix.ready")))
+	} else {
+		set("gridfix", stWarn(tr("settings.status.gridfix.engineMissing")))
+	}
 
 	// Integrations
 	if u.svc.Twitch == nil {
@@ -1489,6 +1501,18 @@ func (u *UI) applySet(id, val string) {
 	switch id {
 	case "peer-nick":
 		f.Peers.Nickname = v
+	// Beatgrid fixer
+	case "gridfix-python":
+		f.GridFix.PythonPath = v
+		u.invalidateGridfixProbe()
+	case "gridfix-cuda":
+		f.GridFix.CUDA = b
+	case "gridfix-minq":
+		toFloat(&f.GridFix.MinQuality, 0.5)
+	case "gridfix-thresh":
+		toFloat(&f.GridFix.ThresholdMS, 1)
+	case "gridfix-lock":
+		f.GridFix.LockFixed = b
 	// Traktor
 	case "traktor-port":
 		toInt(&f.Traktor.Port, 1, 65535)

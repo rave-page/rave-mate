@@ -39,7 +39,8 @@ type UI struct {
 	updater *selfupdate.Updater // self-update poller (disabled on a dev build); lazily built
 	updRel  *selfupdate.Release // last "available" release, staged for apply
 
-	probes settingsProbes // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
+	probes  settingsProbes // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
+	gfProbe gridfixProbe   // beatgrid-engine env probe (spawns Python; own long TTL)
 
 	twMu         sync.Mutex
 	twitchRows   []string    // rolling twitch chat/alert feed (cap 250)

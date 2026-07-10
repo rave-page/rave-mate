@@ -56,7 +56,7 @@ func (m *EnvManager) EnvPython() string {
 var pyVersionRe = regexp.MustCompile(`Python (\d+)\.(\d+)\.(\d+)`)
 
 // FindPython discovers a usable base interpreter: the override first, then the
-// Windows launcher, then PATH names. Needs >=3.10 <3.14 (torch wheel range).
+// Windows launcher, then PATH names. Needs 3.10-3.14 (torch cp310-cp314 wheels).
 func (m *EnvManager) FindPython(ctx context.Context) (path, version string) {
 	type cand struct {
 		exe  string
@@ -83,7 +83,7 @@ func (m *EnvManager) FindPython(ctx context.Context) (path, version string) {
 		}
 		major, _ := strconv.Atoi(mm[1])
 		minor, _ := strconv.Atoi(mm[2])
-		if major != 3 || minor < 10 || minor > 13 {
+		if major != 3 || minor < 10 || minor > 14 {
 			continue
 		}
 		// resolve the launcher/name to the real exe so the venv module runs on it
@@ -119,7 +119,7 @@ func (m *EnvManager) Status(ctx context.Context) EnvStatus {
 func (m *EnvManager) Install(ctx context.Context, cuda bool, progress func(string)) error {
 	base, ver := m.FindPython(ctx)
 	if base == "" {
-		return fmt.Errorf("no Python 3.10-3.13 found - install it from python.org (or the Microsoft Store) first")
+		return fmt.Errorf("no Python 3.10-3.14 found - install it from python.org (or the Microsoft Store) first")
 	}
 	emit := func(s string) {
 		if progress != nil {

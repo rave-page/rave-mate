@@ -175,6 +175,48 @@ type Features struct {
 	AbletonLink AbletonLinkFeature `json:"abletonLink"` // Ableton Link: publish fused DJ tempo/phrase onto a Link session + Resolume phrase-sync
 
 	MIDIController MIDIControllerFeature `json:"midiController"` // software MIDI test controller (pad/CC surface → loopback port for DJ-app MIDI-learn)
+
+	GridFix GridFixFeature `json:"gridFix"` // neural beatgrid fixer (managed Python beat_this engine + grid-fit writeback)
+}
+
+// GridFixFeature configures the beatgrid fixer: a Beat This! neural beat tracker in a
+// rave-mate-managed Python venv (installed from Settings, or PythonPath points at a
+// user-managed interpreter whose env already has beat-this) + the Go grid-fit engine
+// (internal/gridfix) that snaps/creates grid markers in DJ-software collections.
+// Additive at v27 (zero value = disabled, no migration).
+type GridFixFeature struct {
+	Enabled     bool    `json:"enabled"`
+	PythonPath  string  `json:"pythonPath,omitempty"`  // base interpreter override ("" = auto-discover py/-3, python3, python)
+	Device      string  `json:"device,omitempty"`      // "auto" (default) | "cpu" | "cuda"
+	CUDA        bool    `json:"cuda,omitempty"`        // install the CUDA torch build (multi-GB; default CPU)
+	MinQuality  float64 `json:"minQuality,omitempty"`  // min grid coverage to auto-fix; 0 = default 0.85
+	ThresholdMS float64 `json:"thresholdMs,omitempty"` // ignore marker corrections below this; 0 = default 12
+	BiasS       float64 `json:"biasS,omitempty"`       // calibrated systematic detector offset (s)
+	LockFixed   bool    `json:"lockFixed,omitempty"`   // set the Traktor LOCK flag on fixed entries
+}
+
+// ResolvedMinQuality returns the coverage gate (default 0.85).
+func (f GridFixFeature) ResolvedMinQuality() float64 {
+	if f.MinQuality > 0 {
+		return f.MinQuality
+	}
+	return 0.85
+}
+
+// ResolvedThresholdMS returns the ignore-below correction size (default 12ms).
+func (f GridFixFeature) ResolvedThresholdMS() float64 {
+	if f.ThresholdMS > 0 {
+		return f.ThresholdMS
+	}
+	return 12.0
+}
+
+// ResolvedDevice returns the inference device request (default "auto").
+func (f GridFixFeature) ResolvedDevice() string {
+	if f.Device != "" {
+		return f.Device
+	}
+	return "auto"
 }
 
 // MIDIControllerFeature configures the software MIDI mixer surface: a virtual channel rack (EQ /
@@ -1780,6 +1822,8 @@ func Default() Config {
 			AudioRecord: AudioRecordFeature{Enabled: false, Format: "flac", FollowOBS: true, WriteTags: true},
 
 			LibrarySync: LibrarySyncFeature{Enabled: false}, // opt-in; cross-DJ-software sync
+
+			GridFix: GridFixFeature{Enabled: false}, // opt-in; needs the Python beat engine installed
 
 			AppGroups: AppGroupsFeature{Enabled: false}, // opt-in; relaunch app sets after a crash
 

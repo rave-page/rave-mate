@@ -1820,6 +1820,23 @@
         "linkedAs": "リンク中: ",
         "pasteToken": "トークンを貼り付け…",
         "unavailable": "このビルドでは GitHub リンクを利用できません。"
+      },
+      "gridfix": {
+        "probing": "エンジンを確認中…",
+        "engineReady": "ビートエンジン準備完了",
+        "engineBroken": "エンジン環境は存在しますが壊れています。削除してから再インストールしてください。",
+        "noPython": "Python 3.10–3.14 が見つかりません。python.org（または Microsoft Store）から Python をインストールし、再確認を押してください。",
+        "notInstalled": "Python {version} を検出 — ビートエンジンは未インストールです。インストールすると PyTorch と Beat This! モデルを rave-mate 専用環境にダウンロードします。システムの Python には影響しません。",
+        "install": "ビートエンジンをインストール",
+        "uninstall": "削除",
+        "recheck": "再確認",
+        "installing": "インストール中…",
+        "pythonPath": "Python 実行ファイル（任意の上書き）",
+        "cuda": "NVIDIA GPU ビルド（CUDA）を使用 — 解析が大幅に高速化、数GBのダウンロード",
+        "minQuality": "自動修正する最小グリッドカバレッジ（0.5–1）",
+        "thresholdMs": "この値未満の補正を無視（ms）",
+        "lockFixed": "修正したトラックを Traktor でロック（LOCK フラグ）",
+        "note": "この機能は各トラックを Beat This! ニューラルビートトラッカー（https://github.com/CPJKU/beat_this）で解析し、検出ビートに一定グリッドをフィットさせ、信頼できる場合のみグリッドを書き換えます。確信が持てないトラックは MANUAL_GRIDDING_PREP プレイリストに集められ、手動グリッド用になります。書き込み前には必ずコレクションをバックアップします。解析は低優先度で実行され、デッキ・OBS・録音を妨げません。CPU では 1 曲あたり約 10–40 秒、CUDA ビルドは NVIDIA GPU で大幅に高速です。"
       }
     },
     "card": {
@@ -1997,6 +2014,10 @@
       "worldsync": {
         "desc": "gist から VRChat ワールドに供給: 権限リスト、ポスター看板、イベント + 再生中カード。",
         "title": "ワールド同期"
+      },
+      "gridfix": {
+        "title": "ビートグリッド修正（AI）",
+        "desc": "ニューラルネットによるビートグリッド補正：Beat This! モデルで実際のビートを検出し、コレクションのグリッドマーカーを調整・作成します。"
       }
     },
     "empty": {
@@ -2243,6 +2264,10 @@
       "worldsync": {
         "linkedAs": "リンク中: ",
         "notLinked": "GitHub 未リンク"
+      },
+      "gridfix": {
+        "ready": "エンジン準備完了",
+        "engineMissing": "エンジン未インストール"
       }
     },
     "subtitle": "使う機能だけをオンに - 無効な機能はポート、goroutine、サブプロセスを一切保有しません。",
@@ -2307,7 +2332,9 @@
       "twitchSignedIn": "Twitch にサインインしました",
       "twitchSignedOut": "Twitch からサインアウトしました",
       "twitchStarting": "Twitch サインインを開始中…",
-      "vrcSigningIn": "VRChat にサインイン中…"
+      "vrcSigningIn": "VRChat にサインイン中…",
+      "gridfixUninstalled": "ビートエンジンを削除しました",
+      "gridfixUninstallFailed": "削除に失敗: "
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2345,7 +2372,8 @@
       "vrctools": "VRChat ツール（写真 / カメラパス）",
       "vroverlay": "VR オーバーレイ",
       "webcam": "Webcam / UVC ソース",
-      "worldsync": "ワールド同期（gist フィード）"
+      "worldsync": "ワールド同期（gist フィード）",
+      "gridfix": "ビートグリッド修正"
     },
     "vr": {
       "action": "アクション",

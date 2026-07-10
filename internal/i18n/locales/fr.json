@@ -1820,6 +1820,23 @@
         "linkedAs": "Lié en tant que ",
         "pasteToken": "Coller un token…",
         "unavailable": "Lien GitHub indisponible dans cette build."
+      },
+      "gridfix": {
+        "probing": "vérification du moteur…",
+        "engineReady": "Moteur de beats prêt",
+        "engineBroken": "L'environnement du moteur existe mais est cassé — supprimez-le puis réinstallez.",
+        "noPython": "Aucun Python 3.10–3.14 trouvé. Installez Python depuis python.org (ou le Microsoft Store), puis cliquez sur Revérifier.",
+        "notInstalled": "Python {version} trouvé — le moteur de beats n'est pas encore installé. Installer télécharge PyTorch et le modèle Beat This! dans un environnement propre à rave-mate ; votre Python système n'est pas modifié.",
+        "install": "Installer le moteur de beats",
+        "uninstall": "Supprimer",
+        "recheck": "Revérifier",
+        "installing": "installation…",
+        "pythonPath": "Exécutable Python (remplacement optionnel)",
+        "cuda": "Utiliser le build GPU NVIDIA (CUDA) — analyse bien plus rapide, téléchargement de plusieurs Go",
+        "minQuality": "Couverture de grid minimale pour l'auto-correction (0,5–1)",
+        "thresholdMs": "Ignorer les corrections inférieures à (ms)",
+        "lockFixed": "Verrouiller les pistes corrigées dans Traktor (LOCK)",
+        "note": "Le correcteur analyse chaque piste avec le tracker neuronal Beat This! (https://github.com/CPJKU/beat_this), ajuste un grid constant sur les beats détectés et ne réécrit que si l'ajustement est fiable — les pistes douteuses sont regroupées dans une playlist MANUAL_GRIDDING_PREP pour un griddage manuel. La collection est sauvegardée avant toute écriture. L'analyse tourne en priorité basse pour ne jamais gêner les decks, OBS ou les enregistrements. Comptez environ 10–40 s par piste en CPU ; le build CUDA est bien plus rapide sur GPU NVIDIA."
       }
     },
     "card": {
@@ -1997,6 +2014,10 @@
       "worldsync": {
         "desc": "Alimenter les mondes VRChat depuis des gists : listes de permissions, panneaux posters, événements + une carte now-playing.",
         "title": "World Sync"
+      },
+      "gridfix": {
+        "title": "Correcteur de beatgrid (IA)",
+        "desc": "Correction neuronale du beatgrid : détecte les vrais beats avec le modèle Beat This! et cale ou crée les marqueurs de grid de votre collection."
       }
     },
     "empty": {
@@ -2243,6 +2264,10 @@
       "worldsync": {
         "linkedAs": "lié en tant que ",
         "notLinked": "GitHub non lié"
+      },
+      "gridfix": {
+        "ready": "moteur prêt",
+        "engineMissing": "moteur non installé"
       }
     },
     "subtitle": "Basculez ce que vous utilisez - les fonctions désactivées ne possèdent ni port, ni goroutine, ni sous-processus.",
@@ -2307,7 +2332,9 @@
       "twitchSignedIn": "Connecté à Twitch",
       "twitchSignedOut": "Déconnecté de Twitch",
       "twitchStarting": "Démarrage de la connexion Twitch…",
-      "vrcSigningIn": "Connexion à VRChat…"
+      "vrcSigningIn": "Connexion à VRChat…",
+      "gridfixUninstalled": "Moteur de beats supprimé",
+      "gridfixUninstallFailed": "Échec de la suppression : "
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2345,7 +2372,8 @@
       "vrctools": "Outils VRChat (photos / chemins caméra)",
       "vroverlay": "Overlays VR",
       "webcam": "Webcam / source UVC",
-      "worldsync": "World sync (flux gist)"
+      "worldsync": "World sync (flux gist)",
+      "gridfix": "Correcteur de beatgrid"
     },
     "vr": {
       "action": "Action",
