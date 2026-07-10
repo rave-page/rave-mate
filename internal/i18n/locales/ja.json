@@ -336,7 +336,8 @@
       "scan": "欠落をスキャン",
       "search": "タイトル / アーティストを検索…",
       "sync": "クラウド同期…",
-      "trackHeader": "トラック ({count})"
+      "trackHeader": "トラック ({count})",
+      "more": "メンテナンス ▾"
     },
     "collsort": {
       "artist": "アーティスト",
@@ -858,6 +859,58 @@
         "revertFail": "タグの復元に失敗しました: {err}",
         "reverted": "タグを戻しました"
       }
+    },
+    "gf": {
+      "healthEyebrow": "コレクション",
+      "healthTitle": "ビートグリッドの状態",
+      "statTracks": "トラック",
+      "statVerified": "検証済み",
+      "statNoGrid": "グリッドなし",
+      "statManual": "複数マーカー",
+      "disabledHint": "設定 → ライブラリとメディア でビートグリッド修正を有効にすると、ここでグリッドを解析・修復できます。",
+      "noEngineHint": "ビートエンジンが未インストールです。設定 → ライブラリとメディア → ビートグリッド修正 からインストールしてください。",
+      "openSettings": "設定を開く",
+      "start": "ビートグリッドを修正",
+      "eyebrow": "ビートグリッド修正",
+      "confirmTitle": "解析対象を選択",
+      "confirmNote": "解析は読み取り専用です。各トラックをニューラルエンジンで検出し、FIX / OK / 手動 の判定を付けます。「適用」を押すまで何も書き込みません。",
+      "scopeAll": "コレクション全体",
+      "scopeFiltered": "フィルター中のトラック",
+      "scopeSelected": "選択中のトラック",
+      "runningTitle": "解析中…",
+      "eta": "残り ≈ {eta}",
+      "stop": "停止",
+      "doneTitle": "解析完了",
+      "cancelledTitle": "解析を停止しました",
+      "cachedNote": "{n} 件は解析キャッシュから取得（未変更ファイルは再解析しません）。",
+      "apply": "{n} 件の修正を適用",
+      "appliedHint": "{n} 件のグリッドを Traktor コレクションに書き込みました。",
+      "prep": "{n} 件を準備プレイリストへ",
+      "preppedHint": "{n} 件を {playlist} に追加しました。",
+      "viewResults": "結果をリストに表示",
+      "viewTracks": "トラックを表示",
+      "applyNote": "適用は先にコレクションをバックアップし、修正対象のグリッドマーカー・BPM・（任意で）ロックのみを書き換えます。ホットキューやループには触れません。確信が持てないトラックは手動グリッド用の準備プレイリストへ — 適用前に Traktor を終了してください。",
+      "fltAll": "すべて",
+      "tileFix": "FIX",
+      "tileOk": "OK",
+      "tileManual": "手動",
+      "tileErr": "エラー",
+      "newMarker": "新規マーカー",
+      "noResults": "このフィルターに一致する結果はありません。",
+      "nothingToDo": "対象トラックがありません。",
+      "cacheErr": "解析キャッシュを利用できません: ",
+      "noNml": "書き込み先の Traktor コレクションが見つかりません。",
+      "backupFailed": "バックアップ失敗 — 何も書き込みませんでした: ",
+      "appliedToast": "{n} 件のグリッドを修正",
+      "prepFailed": "準備プレイリストに失敗: ",
+      "preppedToast": "{n} 件を {playlist} へ送信",
+      "trayLabel": "ビートグリッド修正中",
+      "doneNotifyTitle": "ビートグリッド解析が完了",
+      "doneNotifyBody": "修正 {fix} · 整列済み {ok} · 手動 {manual}",
+      "verifiedBadge": "グリッド検証済み",
+      "markVerified": "グリッドを検証済みにする",
+      "verifiedToast": "{n} 件を検証済みにしました",
+      "unverifiedToast": "{n} 件の検証を解除"
     }
   },
   "live": {
@@ -1836,7 +1889,24 @@
         "minQuality": "自動修正する最小グリッドカバレッジ（0.5–1）",
         "thresholdMs": "この値未満の補正を無視（ms）",
         "lockFixed": "修正したトラックを Traktor でロック（LOCK フラグ）",
-        "note": "この機能は各トラックを Beat This! ニューラルビートトラッカー（https://github.com/CPJKU/beat_this）で解析し、検出ビートに一定グリッドをフィットさせ、信頼できる場合のみグリッドを書き換えます。確信が持てないトラックは MANUAL_GRIDDING_PREP プレイリストに集められ、手動グリッド用になります。書き込み前には必ずコレクションをバックアップします。解析は低優先度で実行され、デッキ・OBS・録音を妨げません。CPU では 1 曲あたり約 10–40 秒、CUDA ビルドは NVIDIA GPU で大幅に高速です。"
+        "note": "この機能は各トラックを Beat This! ニューラルビートトラッカー（https://github.com/CPJKU/beat_this）で解析し、検出ビートに一定グリッドをフィットさせ、信頼できる場合のみグリッドを書き換えます。確信が持てないトラックは MANUAL_GRIDDING_PREP プレイリストに集められ、手動グリッド用になります。書き込み前には必ずコレクションをバックアップします。解析は低優先度で実行され、デッキ・OBS・録音を妨げません。CPU では 1 曲あたり約 10–40 秒、CUDA ビルドは NVIDIA GPU で大幅に高速です。",
+        "cudaReady": "CUDA アクセラレーション導入済み",
+        "useGpu": "解析に NVIDIA GPU を使用（大幅に高速）",
+        "installCuda": "CUDA アクセラレーションをインストール",
+        "cudaHint": "NVIDIA GPU を検出しました。PyTorch の CUDA ビルド（数GB）を導入すると解析と学習が大幅に高速化します。導入後に GPU スイッチが表示されます。"
+      },
+      "gridfixmodel": {
+        "active": "使用中のモデル",
+        "builtin": "内蔵 (Beat This! final0)",
+        "dataset": "学習データ: 検証済みトラック {n} 件。ライブラリ → コレクション で「グリッド検証済み」を付けると増えます。",
+        "preparing": "データセットを準備中…",
+        "epoch": "エポック",
+        "started": "{n} トラックで学習中 ({device})…",
+        "improved": "ファインチューニングで検証用トラックの精度が向上: F {before} → {after}。上で新しいチェックポイントを選ぶと使用できます。",
+        "notImproved": "ファインチューニングで精度は向上しませんでした (F {before} → {after}) — 以前のモデルを使い続けてください。",
+        "train": "モデルを学習",
+        "fewHint": "ヒント: モデルは修正に失敗したトラックから最も学びます。MANUAL_GRIDDING_PREP のトラックを手動グリッドして検証し、学習してください。推奨: 20 件以上。",
+        "note": "学習は rave-mate 専用の Python 環境内で、低優先度でニューラルビートトラッカーをファインチューニングします。ホールドアウト検証で前後の精度を測るため、悪い学習結果は捨てるだけで済みます。使用モデルはあなたが選択したときだけ切り替わります。"
       }
     },
     "card": {
@@ -2018,6 +2088,10 @@
       "gridfix": {
         "title": "ビートグリッド修正（AI）",
         "desc": "ニューラルネットによるビートグリッド補正：Beat This! モデルで実際のビートを検出し、コレクションのグリッドマーカーを調整・作成します。"
+      },
+      "gridfixmodel": {
+        "title": "ビートグリッドモデル",
+        "desc": "どの Beat This! チェックポイントで解析するか — 検証済みグリッドで独自モデルも学習できます。"
       }
     },
     "empty": {
@@ -2334,7 +2408,11 @@
       "twitchStarting": "Twitch サインインを開始中…",
       "vrcSigningIn": "VRChat にサインイン中…",
       "gridfixUninstalled": "ビートエンジンを削除しました",
-      "gridfixUninstallFailed": "削除に失敗: "
+      "gridfixUninstallFailed": "削除に失敗: ",
+      "gfTrainFailed": "学習に失敗: ",
+      "gfTrainSkipped": "検証済みトラック {n} 件をスキップ（ファイルなし）",
+      "gfTrainDoneTitle": "モデル学習が完了",
+      "gfTrainDoneBody": "ビート精度 (ホールドアウト): F {before} → {after}"
     },
     "toggle": {
       "ablelink": "Ableton Link",

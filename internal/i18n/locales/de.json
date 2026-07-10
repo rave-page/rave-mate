@@ -336,7 +336,8 @@
       "scan": "Fehlende suchen",
       "search": "Titel / Künstler suchen…",
       "sync": "Cloud-Sync…",
-      "trackHeader": "TITEL ({count})"
+      "trackHeader": "TITEL ({count})",
+      "more": "Wartung ▾"
     },
     "collsort": {
       "artist": "Künstler",
@@ -858,6 +859,58 @@
         "revertFail": "Zurücksetzen der Tags fehlgeschlagen: {err}",
         "reverted": "Tags zurückgesetzt"
       }
+    },
+    "gf": {
+      "healthEyebrow": "Collection",
+      "healthTitle": "Beatgrid-Zustand",
+      "statTracks": "Tracks",
+      "statVerified": "verifiziert",
+      "statNoGrid": "ohne Grid",
+      "statManual": "Multi-Marker",
+      "disabledHint": "Aktiviere den Beatgrid-Fixer unter Einstellungen → Bibliothek & Medien, um Grids hier zu analysieren und zu reparieren.",
+      "noEngineHint": "Die Beat-Engine ist nicht installiert. Installiere sie unter Einstellungen → Bibliothek & Medien → Beatgrid-Fixer.",
+      "openSettings": "Einstellungen öffnen",
+      "start": "Beatgrids fixen",
+      "eyebrow": "Beatgrid-Fixer",
+      "confirmTitle": "Was soll analysiert werden?",
+      "confirmNote": "Die Analyse ist rein lesend: jeder Track wird mit der neuronalen Engine erkannt und erhält ein FIX-/OK-/MANUELL-Urteil. Geschrieben wird erst, wenn du danach auf Anwenden klickst.",
+      "scopeAll": "Gesamte Collection",
+      "scopeFiltered": "Gefilterte Tracks",
+      "scopeSelected": "Ausgewählte Tracks",
+      "runningTitle": "Analysiere…",
+      "eta": "≈ {eta} übrig",
+      "stop": "Stopp",
+      "doneTitle": "Analyse abgeschlossen",
+      "cancelledTitle": "Analyse gestoppt",
+      "cachedNote": "{n} Tracks kamen aus dem Analyse-Cache (unveränderte Dateien werden nicht erneut analysiert).",
+      "apply": "{n} Fixes anwenden",
+      "appliedHint": "{n} Grids in die Traktor-Collection geschrieben.",
+      "prep": "{n} in Vorbereitungs-Playlist",
+      "preppedHint": "{n} Tracks zu {playlist} hinzugefügt.",
+      "viewResults": "Ergebnisse in Liste zeigen",
+      "viewTracks": "Tracks zeigen",
+      "applyNote": "Anwenden sichert zuerst deine Collection und schreibt dann nur Grid-Marker, BPM und (optional) die Sperr-Flag der gefixten Tracks. Hotcues und Loops bleiben unangetastet. Tracks ohne sichere Analyse landen in der Vorbereitungs-Playlist zum manuellen Gridden — schließe Traktor vor dem Anwenden.",
+      "fltAll": "Alle",
+      "tileFix": "FIX",
+      "tileOk": "OK",
+      "tileManual": "MANUELL",
+      "tileErr": "FEHLER",
+      "newMarker": "neuer Marker",
+      "noResults": "Keine Ergebnisse für diesen Filter.",
+      "nothingToDo": "Keine Tracks in diesem Umfang.",
+      "cacheErr": "Analyse-Cache nicht verfügbar: ",
+      "noNml": "Keine Traktor-Collection zum Schreiben gefunden.",
+      "backupFailed": "Backup fehlgeschlagen — nichts geschrieben: ",
+      "appliedToast": "{n} Grids gefixt",
+      "prepFailed": "Vorbereitungs-Playlist fehlgeschlagen: ",
+      "preppedToast": "{n} Tracks zu {playlist} geschickt",
+      "trayLabel": "Beatgrids werden gefixt",
+      "doneNotifyTitle": "Beatgrid-Analyse fertig",
+      "doneNotifyBody": "{fix} zu fixen · {ok} bereits korrekt · {manual} brauchen manuelles Gridden",
+      "verifiedBadge": "Grid verifiziert",
+      "markVerified": "Grid als verifiziert markieren",
+      "verifiedToast": "{n} Tracks als grid-verifiziert markiert",
+      "unverifiedToast": "{n} Tracks demarkiert"
     }
   },
   "live": {
@@ -1836,7 +1889,24 @@
         "minQuality": "Mindest-Grid-Abdeckung für Auto-Fix (0,5–1)",
         "thresholdMs": "Korrekturen ignorieren unter (ms)",
         "lockFixed": "Korrigierte Tracks in Traktor sperren (LOCK)",
-        "note": "Der Fixer analysiert jeden Track mit dem neuronalen Beat-Tracker Beat This! (https://github.com/CPJKU/beat_this), passt ein konstantes Grid an die erkannten Beats an und schreibt nur dann, wenn die Anpassung vertrauenswürdig ist — unsichere Tracks landen stattdessen in einer MANUAL_GRIDDING_PREP-Playlist zum manuellen Gridden. Vor jedem Schreiben wird die Collection gesichert. Die Analyse läuft mit niedriger Priorität, damit Decks, OBS und Aufnahmen nie beeinträchtigt werden. Rechne mit ca. 10–40 s pro Track auf der CPU; der CUDA-Build ist auf einer NVIDIA-GPU um ein Vielfaches schneller."
+        "note": "Der Fixer analysiert jeden Track mit dem neuronalen Beat-Tracker Beat This! (https://github.com/CPJKU/beat_this), passt ein konstantes Grid an die erkannten Beats an und schreibt nur dann, wenn die Anpassung vertrauenswürdig ist — unsichere Tracks landen stattdessen in einer MANUAL_GRIDDING_PREP-Playlist zum manuellen Gridden. Vor jedem Schreiben wird die Collection gesichert. Die Analyse läuft mit niedriger Priorität, damit Decks, OBS und Aufnahmen nie beeinträchtigt werden. Rechne mit ca. 10–40 s pro Track auf der CPU; der CUDA-Build ist auf einer NVIDIA-GPU um ein Vielfaches schneller.",
+        "cudaReady": "CUDA-Beschleunigung installiert",
+        "useGpu": "NVIDIA-GPU für Analyse nutzen (deutlich schneller)",
+        "installCuda": "CUDA-Beschleunigung installieren",
+        "cudaHint": "Eine NVIDIA-GPU wurde erkannt. Der CUDA-Build von PyTorch (mehrere GB) macht Analyse und Training um ein Vielfaches schneller. Der GPU-Schalter erscheint nach der Installation."
+      },
+      "gridfixmodel": {
+        "active": "Aktives Modell",
+        "builtin": "Eingebaut (Beat This! final0)",
+        "dataset": "Trainingsdaten: {n} verifizierte Tracks. Markiere Tracks in Bibliothek → Collection als „Grid verifiziert“, um sie zu erweitern.",
+        "preparing": "Datensatz wird vorbereitet…",
+        "epoch": "Epoche",
+        "started": "Training auf {n} Tracks ({device})…",
+        "improved": "Fine-Tuning hat die Beat-Genauigkeit auf zurückgehaltenen Tracks verbessert: F {before} → {after}. Wähle den neuen Checkpoint oben aus, um ihn zu nutzen.",
+        "notImproved": "Fine-Tuning hat die Genauigkeit NICHT verbessert (F {before} → {after}) — behalte das bisherige Modell.",
+        "train": "Modell trainieren",
+        "fewHint": "Tipp: Modelle lernen am meisten von Tracks, die der Fixer falsch hatte — gridde Tracks aus der MANUAL_GRIDDING_PREP-Playlist von Hand, verifiziere sie und trainiere dann. Empfohlen: 20+ verifizierte Tracks.",
+        "note": "Das Training fine-tuned den neuronalen Beat-Tracker auf deinen verifizierten Grids in rave-mates eigener Python-Umgebung, mit niedriger Priorität. Ein zurückgehaltener Validierungs-Split misst die Genauigkeit vorher/nachher — ein schlechter Lauf wird einfach verworfen; das aktive Modell wechselt nur, wenn du es auswählst."
       }
     },
     "card": {
@@ -2018,6 +2088,10 @@
       "gridfix": {
         "title": "Beatgrid-Fixer (KI)",
         "desc": "Neuronale Beatgrid-Korrektur: erkennt echte Beats mit dem Beat-This!-Modell und richtet Grid-Marker in deiner Collection aus oder legt sie an."
+      },
+      "gridfixmodel": {
+        "title": "Beatgrid-Modell",
+        "desc": "Welcher Beat-This!-Checkpoint deine Tracks analysiert — und trainiere ein eigenes Modell auf verifizierten Grids."
       }
     },
     "empty": {
@@ -2334,7 +2408,11 @@
       "twitchStarting": "Twitch-Anmeldung wird gestartet…",
       "vrcSigningIn": "Anmeldung bei VRChat…",
       "gridfixUninstalled": "Beat-Engine entfernt",
-      "gridfixUninstallFailed": "Entfernen fehlgeschlagen: "
+      "gridfixUninstallFailed": "Entfernen fehlgeschlagen: ",
+      "gfTrainFailed": "Training fehlgeschlagen: ",
+      "gfTrainSkipped": "{n} verifizierte Tracks übersprungen (Datei fehlt)",
+      "gfTrainDoneTitle": "Modell-Training fertig",
+      "gfTrainDoneBody": "Beat-Genauigkeit (Holdout): F {before} → {after}"
     },
     "toggle": {
       "ablelink": "Ableton Link",

@@ -99,6 +99,8 @@ type libSt struct {
 	browseBusy bool    // a background read is in flight
 	browseAt   time.Time
 
+	moreOpen bool // Maintenance popover (collection toolbar) open
+
 	// smart-playlist rules editor draft
 	srID     int64 // 0 = create
 	srName   string
@@ -570,53 +572,64 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		return emptyState(i18n.T("library.dbUnavailable"))
 	}
 	var b strings.Builder
-	// management toolbar
+	// actions: the two everyday operations + the fixer up front; everything
+	// occasional lives behind Maintenance so the list gets the vertical space
 	b.WriteString(`<div class=lib-toolbar>`)
 	b.WriteString(btn(i18n.T("library.coll.import"), "primary", "lib-import", ""))
-	b.WriteString(btn(i18n.T("library.coll.backup"), "outline", "lib-backups", ""))
-	b.WriteString(btn(i18n.T("library.coll.scan"), "outline", "lib-scan", ""))
-	b.WriteString(btn(i18n.T("library.coll.cleanup"), "outline", "lib-cleanup", ""))
-	b.WriteString(btn(i18n.T("library.coll.relocate"), "outline", "lib-relocate", ""))
-	b.WriteString(btn(i18n.T("library.coll.export"), "outline", "lib-export", ""))
 	b.WriteString(btn(i18n.T("library.coll.djsync"), "primary", "lib-djsync", ""))
-	if u.svc.Syncer != nil {
-		b.WriteString(btn(i18n.T("library.coll.sync"), "outline", "lib-sync", ""))
+	if u.svc.Cfg.Features.GridFix.Enabled {
+		b.WriteString(btn(i18n.T("library.gf.start"), "outline", "gf-open", ""))
 	}
+	b.WriteString(`<span class=lib-more>` + btn(i18n.T("library.coll.more"), "ghost", "lib-more", "") + u.libMoreMenuHTML(s) + `</span>`)
 	b.WriteString(`</div>`)
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.coll.desc")) + `</p>`)
 
-	// filters
+	// filters: search + facet dropdowns; active facets render as removable chips
 	b.WriteString(`<div class=lib-toolbar>`)
 	b.WriteString(fieldRaw("lib-coll-search", s.collSearch, i18n.T("library.coll.search")))
+	b.WriteString(u.libFacetSelect(s, "genre", i18n.T("library.label.genre"), s.collGenre,
+		func(t musiclib.Track) string { return musiclib.GenreFamily(t.Genre) }))
+	b.WriteString(u.libFacetSelect(s, "label", i18n.T("library.label.label"), s.collLabel,
+		func(t musiclib.Track) string { return strings.TrimSpace(t.Label) }))
 	b.WriteString(u.libKeyChip(s))
-	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.sort")) + `</span>`)
-	for _, so := range []string{"Artist", "Title", "BPM", "Key", "Genre", "Label", "Rating", "Plays"} {
-		b.WriteString(fchip(i18n.T("library.collsort."+strings.ToLower(so)), "", "lib-coll-sort:"+so, s.collSort == so))
-	}
-	b.WriteString(fchip(sortDir(s.collDesc), "", "lib-coll-dir", false))
 	if len(s.collGenre)+len(s.collLabel)+len(s.keySel) > 0 || s.collSearch != "" {
 		b.WriteString(btn(i18n.T("library.clear"), "ghost", "lib-clearfilters", ""))
 	}
 	b.WriteString(`</div>`)
-	// genre / label chips (top families)
-	b.WriteString(`<div class=lib-toolbar><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.genre")) + `</span>`)
-	for _, gc := range distinctCounts(s.tracks, func(t musiclib.Track) string { return musiclib.GenreFamily(t.Genre) }, 8) {
-		b.WriteString(fchipN(gc[0], gc[1], "lib-genre:"+gc[0], s.collGenre[gc[0]]))
+	for g := range s.collGenre {
+		b.WriteString(fchip(g+" ×", "", "lib-genre:"+g, true))
 	}
-	b.WriteString(`</div>`)
-	b.WriteString(`<div class=lib-toolbar><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.label")) + `</span>`)
-	for _, lc := range distinctCounts(s.tracks, func(t musiclib.Track) string { return strings.TrimSpace(t.Label) }, 8) {
-		b.WriteString(fchipN(lc[0], lc[1], "lib-label:"+lc[0], s.collLabel[lc[0]]))
+	for l := range s.collLabel {
+		b.WriteString(fchip(l+" ×", "", "lib-label:"+l, true))
 	}
-	b.WriteString(`</div>`)
 
-	// filtered + sorted view
+	// batch results replace the list while the fixer's results view is on
+	u.gf.mu.Lock()
+	resView := u.gf.resView && u.gf.stage == "done"
+	u.gf.mu.Unlock()
+	if resView {
+		return b.String() + u.gfResultsHTML(&u.gf)
+	}
+
+	// filtered + sorted view; column headers sort (click again flips direction)
 	shown := s.collView()
 	total := len(shown)
-	b.WriteString(`<div class=trk-h><span style="flex:1">` + html.EscapeString(i18n.T("library.coll.trackHeader", i18n.A{"count": fmt.Sprint(total)})) + `</span>` +
-		`<span class=trk-bpm>` + html.EscapeString(i18n.T("library.col.bpm")) + `</span><span class=trk-dur>` + html.EscapeString(i18n.T("library.col.time")) + `</span><span class=trk-keyh>` + html.EscapeString(i18n.T("library.col.key")) + `</span></div>`)
+	hdr := func(key, label, cls string) string {
+		arrow := ""
+		if s.collSort == key {
+			arrow = " ▲"
+			if s.collDesc {
+				arrow = " ▼"
+			}
+		}
+		return `<span class="` + cls + ` trk-sortable" data-act="lib-coll-hsort:` + key + `">` + html.EscapeString(label) + arrow + `</span>`
+	}
+	b.WriteString(`<div class=trk-h>` + hdr("Artist", i18n.T("library.coll.trackHeader", i18n.A{"count": fmt.Sprint(total)}), "trk-hmain") +
+		hdr("BPM", i18n.T("library.col.bpm"), "trk-bpm") +
+		`<span class=trk-dur>` + html.EscapeString(i18n.T("library.col.time")) + `</span>` +
+		hdr("Key", i18n.T("library.col.key"), "trk-keyh") + `</div>`)
 	b.WriteString(`<div class=trk-table>`)
 	ref := s.selRef()
+	vs := u.gfVerified()
 	for i, ti := range shown {
 		if i >= libMaxRows {
 			break
@@ -642,11 +655,15 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		if t.DurationSec > 0 {
 			dur = mmss(t.DurationSec)
 		}
+		ver := ""
+		if vs != nil && vs.Has(t.Path) {
+			ver = `<span class=trk-verified title="` + html.EscapeString(i18n.T("library.gf.verifiedBadge")) + `">✓</span>`
+		}
 		b.WriteString(`<div class="trk-row` + selCls + `" data-ctx="lib-ctx:` + html.EscapeString(t.Path) + `">` +
 			`<input type=checkbox data-act="lib-collsel:` + html.EscapeString(t.Path) + `"` + chk + `>` + ic +
 			`<span class=trk-main data-act="lib-track:` + html.EscapeString(t.Path) + `"><span class=trk-title>` +
 			html.EscapeString(trackTitle(t)) + `</span><span class=trk-sub>` +
-			html.EscapeString(trackMetaSub(t)) + `</span></span>` +
+			html.EscapeString(trackMetaSub(t)) + `</span></span>` + ver +
 			`<span class=trk-bpm>` + bpm + `</span><span class=trk-dur>` + dur + `</span>` +
 			`<span class=trk-key>` + keyPillHTML(t.Key, ref) + `</span></div>`)
 	}
@@ -656,12 +673,59 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	} else if total > libMaxRows {
 		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.showingFirst", i18n.A{"shown": fmt.Sprint(libMaxRows), "total": fmt.Sprint(total)})) + `</p>`)
 	}
-	// add-to-playlist bar
+	// selection bar: playlist add + verified-grid marking
 	if len(s.collSel) > 0 {
 		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(s.collSel))})) + `</span>` +
-			btn(i18n.T("library.addToPlaylist"), "primary", "lib-addto", "") + btn(i18n.T("library.clear"), "ghost", "lib-collsel-clear", "") + `</div>`)
+			btn(i18n.T("library.addToPlaylist"), "primary", "lib-addto", "") +
+			btn(i18n.T("library.gf.markVerified"), "outline", "gf-verify-sel", "") +
+			btn(i18n.T("library.clear"), "ghost", "lib-collsel-clear", "") + `</div>`)
 	}
 	return b.String()
+}
+
+// libMoreMenuHTML is the Maintenance popover (occasional collection operations).
+func (u *UI) libMoreMenuHTML(s *libSt) string {
+	if !s.moreOpen {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=lib-popmenu>`)
+	items := [][2]string{
+		{"lib-backups", i18n.T("library.coll.backup")},
+		{"lib-scan", i18n.T("library.coll.scan")},
+		{"lib-cleanup", i18n.T("library.coll.cleanup")},
+		{"lib-relocate", i18n.T("library.coll.relocate")},
+		{"lib-export", i18n.T("library.coll.export")},
+	}
+	if u.svc.Syncer != nil {
+		items = append(items, [2]string{"lib-sync", i18n.T("library.coll.sync")})
+	}
+	for _, it := range items {
+		b.WriteString(`<button class=lib-popitem data-act="lib-morego:` + it[0] + `">` + html.EscapeString(it[1]) + `</button>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// libFacetSelect renders a filterable multi-facet dropdown (SmartSelect) whose
+// label summarizes the active picks - replaces the old always-open chip clouds.
+func (u *UI) libFacetSelect(s *libSt, kind, label string, active map[string]bool, keyOf func(musiclib.Track) string) string {
+	lbl := label
+	if n := len(active); n > 0 {
+		lbl = fmt.Sprintf("%s (%d)", label, n)
+	}
+	tracks := s.tracks
+	return smartSelect("libfacet-"+kind, "", "lib-"+kind+":", lbl, func() []ssOpt {
+		opts := make([]ssOpt, 0, 32)
+		for _, gc := range distinctCounts(tracks, keyOf, 200) {
+			o := ssOpt{Val: gc[0], Label: gc[0], Badge: gc[1]}
+			if active[gc[0]] {
+				o.Label = "✓ " + o.Label
+			}
+			opts = append(opts, o)
+		}
+		return opts
+	})
 }
 
 // collView returns filtered+sorted indices into s.tracks.
@@ -971,6 +1035,10 @@ func (u *UI) libPresetsHTML(s *libSt) string {
 func (u *UI) libDetailHTML(s *libSt) string {
 	sel := s.sel
 	if sel == nil {
+		// Collection rail without a selection = the beatgrid cockpit / health card
+		if u.libSectionOr() == "collection" {
+			return u.gfRailHTML(s)
+		}
 		return emptyState(i18n.T("library.insp.empty"))
 	}
 	var b strings.Builder
@@ -992,7 +1060,18 @@ func (u *UI) libDetailHTML(s *libSt) string {
 
 	onDisk := pathOnDisk(sel.path)
 	// ACTIONS
+	verifyBtn := ""
+	if u.libSectionOr() == "collection" && u.svc.Cfg.Features.GridFix.Enabled {
+		if vs := u.gfVerified(); vs != nil {
+			lbl, variant := i18n.T("library.gf.markVerified"), "outline"
+			if vs.Has(sel.path) {
+				lbl, variant = "✓ "+i18n.T("library.gf.verifiedBadge"), "primary"
+			}
+			verifyBtn = btn(lbl, variant, "gf-verify:"+sel.path, "")
+		}
+	}
 	act := `<div class=btn-row>` + btn(i18n.T("library.open"), "outline", "lib-openext:"+sel.path, "") + btn(i18n.T("library.reveal"), "outline", "lib-reveal:"+sel.path, "") +
+		verifyBtn +
 		btn(i18n.T("library.metadata"), "ghost", "lib-probe:"+sel.path, "") + btn(i18n.T("library.copyPath"), "ghost", "copy", "") + `</div>`
 	if !onDisk {
 		act = `<p class=page-sub>` + html.EscapeString(i18n.T("library.insp.missing")) + `</p>` + act

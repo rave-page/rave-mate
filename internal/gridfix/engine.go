@@ -56,6 +56,7 @@ type Engine struct {
 type runnerReply struct {
 	ID        int       `json:"id"`
 	OK        bool      `json:"ok"`
+	Engine    bool      `json:"engine"` // beat_this + deps actually importable
 	Error     string    `json:"error"`
 	Beats     []float64 `json:"beats"`
 	Downbeats []float64 `json:"downbeats"`
@@ -232,12 +233,16 @@ func (e *Engine) roundTrip(ctx context.Context, req map[string]any) (*runnerRepl
 	}
 }
 
-// Ping verifies the engine imports cleanly; loadModel also warms the checkpoint
+// Ping verifies the engine imports cleanly (find_spec on beat_this + deps - metadata
+// alone lies after a half-finished install); loadModel also warms the checkpoint
 // (first call downloads it into DataDir/cache).
 func (e *Engine) Ping(ctx context.Context, loadModel bool) (*Versions, string, error) {
 	r, err := e.roundTrip(ctx, map[string]any{"op": "ping", "load_model": loadModel})
 	if err != nil {
 		return nil, "", err
+	}
+	if !r.Engine {
+		return r.Versions, r.Device, fmt.Errorf("gridfix engine: beat_this not importable (incomplete install)")
 	}
 	return r.Versions, r.Device, nil
 }

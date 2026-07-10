@@ -145,7 +145,7 @@ func settingsSections() []setSection {
 		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi"}},
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "webcam", "medialink", "timecode", "ablelink"}},
-		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix"}},
+		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
 		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
 	}
@@ -527,6 +527,10 @@ func (u *UI) cardContent(id string) (string, string, string) {
 	case "gridfix":
 		return i18n.T("settings.card.gridfix.title"), i18n.T("settings.card.gridfix.desc"),
 			u.gridfixCardBody()
+
+	case "gridfixmodel":
+		return i18n.T("settings.card.gridfixmodel.title"), i18n.T("settings.card.gridfixmodel.desc"),
+			u.gridfixModelCardBody()
 
 	// ── Integrations ──
 	case "twitch":
@@ -1505,6 +1509,12 @@ func (u *UI) applySet(id, val string) {
 	case "gridfix-python":
 		f.GridFix.PythonPath = v
 		u.invalidateGridfixProbe()
+	case "gridfix-gpu":
+		if b {
+			f.GridFix.Device = "auto" // cuda when available (the toggle only shows once it is)
+		} else {
+			f.GridFix.Device = "cpu"
+		}
 	case "gridfix-minq":
 		toFloat(&f.GridFix.MinQuality, 0.5)
 	case "gridfix-thresh":

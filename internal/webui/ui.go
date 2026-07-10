@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/governor"
+	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/shared/selfupdate"
@@ -41,6 +42,11 @@ type UI struct {
 
 	probes  settingsProbes // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
 	gfProbe gridfixProbe   // beatgrid-engine env probe (spawns Python; own long TTL)
+
+	gf       gfState    // beatgrid-fixer cockpit run state (library_gridfix.go)
+	gfVMu    sync.Mutex // guards gfVStore lazy-open
+	gfVStore *gridfix.VerifiedStore
+	gfTrain  gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
 	twMu         sync.Mutex
 	twitchRows   []string    // rolling twitch chat/alert feed (cap 250)

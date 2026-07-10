@@ -70,6 +70,23 @@ func init() {
 	onExact("lib-coll-search", func(u *UI, m actMsg) { u.libSearchDebounced(func(s *libSt) { s.collSearch = m.Val }) })
 	onPrefix("lib-coll-sort:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collSort = m.arg("lib-coll-sort:") }) })
 	onExact("lib-coll-dir", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collDesc = !s.collDesc }) })
+	// column-header sort: click = sort by column, click again = flip direction
+	onPrefix("lib-coll-hsort:", func(u *UI, m actMsg) {
+		key := m.arg("lib-coll-hsort:")
+		u.libSet(func(s *libSt) {
+			if s.collSort == key {
+				s.collDesc = !s.collDesc
+			} else {
+				s.collSort, s.collDesc = key, false
+			}
+		})
+	})
+	onExact("lib-more", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.moreOpen = !s.moreOpen }) })
+	// popover item: close the menu, then run the wrapped action
+	onPrefix("lib-morego:", func(u *UI, m actMsg) {
+		u.libSetQuiet(func(s *libSt) { s.moreOpen = false })
+		u.dispatch(actMsg{Act: m.arg("lib-morego:")})
+	})
 	onPrefix("lib-genre:", func(u *UI, m actMsg) {
 		u.libToggle(func(s *libSt) map[string]bool { return s.collGenre }, m.arg("lib-genre:"), !u.libHas("genre", m.arg("lib-genre:")))
 	})

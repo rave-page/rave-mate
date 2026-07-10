@@ -336,7 +336,8 @@
       "scan": "Scanner les manquants",
       "search": "Rechercher titre / artiste…",
       "sync": "Sync cloud…",
-      "trackHeader": "PISTE ({count})"
+      "trackHeader": "PISTE ({count})",
+      "more": "Maintenance ▾"
     },
     "collsort": {
       "artist": "Artiste",
@@ -858,6 +859,58 @@
         "revertFail": "Échec du rétablissement des tags : {err}",
         "reverted": "Tags rétablis"
       }
+    },
+    "gf": {
+      "healthEyebrow": "Collection",
+      "healthTitle": "État des beatgrids",
+      "statTracks": "pistes",
+      "statVerified": "vérifiées",
+      "statNoGrid": "sans grid",
+      "statManual": "multi-marqueur",
+      "disabledHint": "Activez le correcteur de beatgrid dans Réglages → Bibliothèque et médias pour analyser et réparer les grids ici.",
+      "noEngineHint": "Le moteur de beats n'est pas installé. Installez-le dans Réglages → Bibliothèque et médias → Correcteur de beatgrid.",
+      "openSettings": "Ouvrir les réglages",
+      "start": "Corriger les beatgrids",
+      "eyebrow": "Correcteur de beatgrid",
+      "confirmTitle": "Choisissez quoi analyser",
+      "confirmNote": "L'analyse est en lecture seule : chaque piste est détectée par le moteur neuronal et reçoit un verdict FIX / OK / MANUEL. Rien n'est écrit avant que vous cliquiez sur Appliquer.",
+      "scopeAll": "Toute la collection",
+      "scopeFiltered": "Pistes filtrées",
+      "scopeSelected": "Pistes sélectionnées",
+      "runningTitle": "Analyse…",
+      "eta": "≈ {eta} restant",
+      "stop": "Arrêter",
+      "doneTitle": "Analyse terminée",
+      "cancelledTitle": "Analyse arrêtée",
+      "cachedNote": "{n} pistes servies depuis le cache (les fichiers inchangés ne sont pas réanalysés).",
+      "apply": "Appliquer {n} corrections",
+      "appliedHint": "{n} grids écrits dans la collection Traktor.",
+      "prep": "Envoyer {n} vers la playlist de préparation",
+      "preppedHint": "{n} pistes ajoutées à {playlist}.",
+      "viewResults": "Voir les résultats dans la liste",
+      "viewTracks": "Voir les pistes",
+      "applyNote": "Appliquer sauvegarde d'abord votre collection, puis réécrit uniquement le marqueur de grid, le BPM et (en option) le verrou des pistes corrigées. Les hotcues et loops ne sont jamais touchés. Les pistes sans analyse fiable vont dans la playlist de préparation pour un griddage manuel — fermez Traktor avant d'appliquer.",
+      "fltAll": "Toutes",
+      "tileFix": "FIX",
+      "tileOk": "OK",
+      "tileManual": "MANUEL",
+      "tileErr": "ERREUR",
+      "newMarker": "nouveau marqueur",
+      "noResults": "Aucun résultat pour ce filtre.",
+      "nothingToDo": "Aucune piste dans ce périmètre.",
+      "cacheErr": "Cache d'analyse indisponible : ",
+      "noNml": "Aucune collection Traktor trouvée pour l'écriture.",
+      "backupFailed": "Échec de la sauvegarde — rien n'a été écrit : ",
+      "appliedToast": "{n} grids corrigés",
+      "prepFailed": "Échec de la playlist de préparation : ",
+      "preppedToast": "{n} pistes envoyées vers {playlist}",
+      "trayLabel": "correction des beatgrids",
+      "doneNotifyTitle": "Analyse des beatgrids terminée",
+      "doneNotifyBody": "{fix} à corriger · {ok} déjà alignées · {manual} à gridder à la main",
+      "verifiedBadge": "Grid vérifié",
+      "markVerified": "Marquer le grid comme vérifié",
+      "verifiedToast": "{n} pistes marquées vérifiées",
+      "unverifiedToast": "{n} pistes démarquées"
     }
   },
   "live": {
@@ -1836,7 +1889,24 @@
         "minQuality": "Couverture de grid minimale pour l'auto-correction (0,5–1)",
         "thresholdMs": "Ignorer les corrections inférieures à (ms)",
         "lockFixed": "Verrouiller les pistes corrigées dans Traktor (LOCK)",
-        "note": "Le correcteur analyse chaque piste avec le tracker neuronal Beat This! (https://github.com/CPJKU/beat_this), ajuste un grid constant sur les beats détectés et ne réécrit que si l'ajustement est fiable — les pistes douteuses sont regroupées dans une playlist MANUAL_GRIDDING_PREP pour un griddage manuel. La collection est sauvegardée avant toute écriture. L'analyse tourne en priorité basse pour ne jamais gêner les decks, OBS ou les enregistrements. Comptez environ 10–40 s par piste en CPU ; le build CUDA est bien plus rapide sur GPU NVIDIA."
+        "note": "Le correcteur analyse chaque piste avec le tracker neuronal Beat This! (https://github.com/CPJKU/beat_this), ajuste un grid constant sur les beats détectés et ne réécrit que si l'ajustement est fiable — les pistes douteuses sont regroupées dans une playlist MANUAL_GRIDDING_PREP pour un griddage manuel. La collection est sauvegardée avant toute écriture. L'analyse tourne en priorité basse pour ne jamais gêner les decks, OBS ou les enregistrements. Comptez environ 10–40 s par piste en CPU ; le build CUDA est bien plus rapide sur GPU NVIDIA.",
+        "cudaReady": "Accélération CUDA installée",
+        "useGpu": "Utiliser le GPU NVIDIA pour l'analyse (bien plus rapide)",
+        "installCuda": "Installer l'accélération CUDA",
+        "cudaHint": "Un GPU NVIDIA a été détecté. Installer le build CUDA de PyTorch (plusieurs Go) rend l'analyse et l'entraînement bien plus rapides. L'interrupteur GPU apparaît une fois installé."
+      },
+      "gridfixmodel": {
+        "active": "Modèle actif",
+        "builtin": "Intégré (Beat This! final0)",
+        "dataset": "Jeu d'entraînement : {n} pistes vérifiées. Marquez des pistes « grid vérifié » dans Bibliothèque → Collection pour l'agrandir.",
+        "preparing": "préparation du dataset…",
+        "epoch": "Époque",
+        "started": "entraînement sur {n} pistes ({device})…",
+        "improved": "Le fine-tuning a amélioré la précision sur les pistes réservées : F {before} → {after}. Sélectionnez le nouveau checkpoint ci-dessus pour l'utiliser.",
+        "notImproved": "Le fine-tuning n'a PAS amélioré la précision (F {before} → {after}) — gardez le modèle précédent.",
+        "train": "Entraîner le modèle",
+        "fewHint": "Astuce : les modèles apprennent surtout des pistes que le correcteur a ratées — griddez à la main des pistes de MANUAL_GRIDDING_PREP, vérifiez-les, puis entraînez. Recommandé : 20+ pistes vérifiées.",
+        "note": "L'entraînement affine le tracker neuronal sur vos grids vérifiés dans l'environnement Python propre à rave-mate, en priorité basse. Un split de validation mesure la précision avant/après — un mauvais entraînement se jette simplement ; le modèle actif ne change que si vous le sélectionnez."
       }
     },
     "card": {
@@ -2018,6 +2088,10 @@
       "gridfix": {
         "title": "Correcteur de beatgrid (IA)",
         "desc": "Correction neuronale du beatgrid : détecte les vrais beats avec le modèle Beat This! et cale ou crée les marqueurs de grid de votre collection."
+      },
+      "gridfixmodel": {
+        "title": "Modèle de beatgrid",
+        "desc": "Quel checkpoint Beat This! analyse vos pistes — et entraînez le vôtre sur des grids vérifiés."
       }
     },
     "empty": {
@@ -2334,7 +2408,11 @@
       "twitchStarting": "Démarrage de la connexion Twitch…",
       "vrcSigningIn": "Connexion à VRChat…",
       "gridfixUninstalled": "Moteur de beats supprimé",
-      "gridfixUninstallFailed": "Échec de la suppression : "
+      "gridfixUninstallFailed": "Échec de la suppression : ",
+      "gfTrainFailed": "Échec de l'entraînement : ",
+      "gfTrainSkipped": "{n} pistes vérifiées ignorées (fichier manquant)",
+      "gfTrainDoneTitle": "Entraînement du modèle terminé",
+      "gfTrainDoneBody": "Précision des beats (holdout) : F {before} → {after}"
     },
     "toggle": {
       "ablelink": "Ableton Link",

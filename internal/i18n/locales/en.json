@@ -373,7 +373,8 @@
       "scan": "Scan missing",
       "search": "Search title / artist…",
       "sync": "Cloud sync…",
-      "trackHeader": "TRACK ({count})"
+      "trackHeader": "TRACK ({count})",
+      "more": "Maintenance ▾"
     },
     "collsort": {
       "artist": "Artist",
@@ -939,6 +940,58 @@
         "revertFail": "Tag revert failed: {err}",
         "reverted": "Tags reverted"
       }
+    },
+    "gf": {
+      "healthEyebrow": "Collection",
+      "healthTitle": "Beatgrid health",
+      "statTracks": "tracks",
+      "statVerified": "verified",
+      "statNoGrid": "no grid",
+      "statManual": "multi-marker",
+      "disabledHint": "Enable the Beatgrid Fixer in Settings → Library & media to analyze and repair grids here.",
+      "noEngineHint": "The beat engine is not installed. Install it in Settings → Library & media → Beatgrid Fixer.",
+      "openSettings": "Open settings",
+      "start": "Fix beatgrids",
+      "eyebrow": "Beatgrid fixer",
+      "confirmTitle": "Choose what to analyze",
+      "confirmNote": "Analysis is read-only: every track is detected with the neural engine and gets a FIX / OK / MANUAL verdict. Nothing is written until you press Apply afterwards.",
+      "scopeAll": "Whole collection",
+      "scopeFiltered": "Filtered tracks",
+      "scopeSelected": "Selected tracks",
+      "runningTitle": "Analyzing…",
+      "eta": "≈ {eta} left",
+      "stop": "Stop",
+      "doneTitle": "Analysis complete",
+      "cancelledTitle": "Analysis stopped",
+      "cachedNote": "{n} tracks served from the analysis cache (unchanged files are not re-analyzed).",
+      "apply": "Apply {n} fixes",
+      "appliedHint": "{n} grids written to the Traktor collection.",
+      "prep": "Send {n} to prep playlist",
+      "preppedHint": "{n} tracks added to {playlist}.",
+      "viewResults": "Show results in list",
+      "viewTracks": "Show tracks",
+      "applyNote": "Apply backs up your collection first, then rewrites only the grid marker, BPM and (optionally) the lock flag of fixed tracks. Hotcues and loops are never touched. Tracks the engine could not fix confidently go to the prep playlist for hand-gridding — close Traktor before applying.",
+      "fltAll": "All",
+      "tileFix": "FIX",
+      "tileOk": "OK",
+      "tileManual": "MANUAL",
+      "tileErr": "ERROR",
+      "newMarker": "new marker",
+      "noResults": "No results match this filter.",
+      "nothingToDo": "No tracks in this scope.",
+      "cacheErr": "Analysis cache unavailable: ",
+      "noNml": "No Traktor collection found to write to.",
+      "backupFailed": "Backup failed - nothing was written: ",
+      "appliedToast": "{n} grids fixed",
+      "prepFailed": "Prep playlist failed: ",
+      "preppedToast": "{n} tracks sent to {playlist}",
+      "trayLabel": "fixing beatgrids",
+      "doneNotifyTitle": "Beatgrid analysis finished",
+      "doneNotifyBody": "{fix} to fix · {ok} already aligned · {manual} need manual gridding",
+      "verifiedBadge": "Grid verified",
+      "markVerified": "Mark grid verified",
+      "verifiedToast": "{n} tracks marked grid-verified",
+      "unverifiedToast": "{n} tracks unmarked"
     }
   },
   "live": {
@@ -1925,7 +1978,24 @@
         "minQuality": "Min grid coverage to auto-fix (0.5–1)",
         "thresholdMs": "Ignore corrections smaller than (ms)",
         "lockFixed": "Lock fixed tracks in Traktor (LOCK flag)",
-        "note": "The fixer analyzes each track with the Beat This! neural beat tracker (https://github.com/CPJKU/beat_this), fits a constant grid to the detected beats, and only rewrites a grid when the fit is trustworthy — tracks it cannot fix confidently are collected in a MANUAL_GRIDDING_PREP playlist for hand-gridding instead. Your collection is backed up before any write. Analysis runs at below-normal priority so decks, OBS and recordings are never impaired. Expect roughly 10–40 s per track on CPU; the CUDA build is many times faster on an NVIDIA GPU."
+        "note": "The fixer analyzes each track with the Beat This! neural beat tracker (https://github.com/CPJKU/beat_this), fits a constant grid to the detected beats, and only rewrites a grid when the fit is trustworthy — tracks it cannot fix confidently are collected in a MANUAL_GRIDDING_PREP playlist for hand-gridding instead. Your collection is backed up before any write. Analysis runs at below-normal priority so decks, OBS and recordings are never impaired. Expect roughly 10–40 s per track on CPU; the CUDA build is many times faster on an NVIDIA GPU.",
+        "cudaReady": "CUDA acceleration installed",
+        "useGpu": "Use NVIDIA GPU for analysis (much faster)",
+        "installCuda": "Install CUDA acceleration",
+        "cudaHint": "An NVIDIA GPU was detected. Installing the CUDA build of PyTorch (several GB) makes analysis and training many times faster. The GPU toggle appears once it is installed."
+      },
+      "gridfixmodel": {
+        "active": "Active model",
+        "builtin": "Built-in (Beat This! final0)",
+        "dataset": "Training set: {n} verified tracks. Mark tracks as “grid verified” in Library → Collection to grow it.",
+        "preparing": "preparing dataset…",
+        "epoch": "Epoch",
+        "started": "training on {n} tracks ({device})…",
+        "improved": "Fine-tune improved beat accuracy on held-out tracks: F {before} → {after}. Pick the new checkpoint above to use it.",
+        "notImproved": "Fine-tune did NOT improve held-out accuracy (F {before} → {after}) — keep the previous model.",
+        "train": "Train model",
+        "fewHint": "Tip: models learn most from tracks the fixer got wrong — hand-grid tracks from the MANUAL_GRIDDING_PREP playlist, verify them, then train. 20+ verified tracks recommended.",
+        "note": "Training fine-tunes the neural beat tracker on your verified grids in rave-mate's own Python environment, at low priority. A held-out validation split measures accuracy before vs after, so a bad training run can simply be discarded — the active model only changes when you select it."
       }
     },
     "card": {
@@ -2107,6 +2177,10 @@
       "gridfix": {
         "title": "Beatgrid Fixer (AI)",
         "desc": "Neural beatgrid correction: detects true beats with the Beat This! model and snaps or creates grid markers in your collection."
+      },
+      "gridfixmodel": {
+        "title": "Beatgrid Model",
+        "desc": "Which Beat This! checkpoint analyzes your tracks — and train your own on grids you verified."
       }
     },
     "empty": {
@@ -2423,7 +2497,11 @@
       "twitchStarting": "Starting Twitch sign-in…",
       "vrcSigningIn": "Signing in to VRChat…",
       "gridfixUninstalled": "Beat engine removed",
-      "gridfixUninstallFailed": "Remove failed: "
+      "gridfixUninstallFailed": "Remove failed: ",
+      "gfTrainFailed": "Training failed: ",
+      "gfTrainSkipped": "{n} verified tracks skipped (file missing)",
+      "gfTrainDoneTitle": "Model training finished",
+      "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}"
     },
     "toggle": {
       "ablelink": "Ableton Link",

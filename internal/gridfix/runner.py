@@ -74,6 +74,16 @@ def versions():
     return out
 
 
+def engine_importable():
+    """Module actually resolvable (metadata alone lies after a half-finished install)."""
+    import importlib.util
+    try:
+        return all(importlib.util.find_spec(m) is not None
+                   for m in ("beat_this", "torch", "numpy", "soundfile"))
+    except Exception:
+        return False
+
+
 def main():
     tracker = Tracker()
     for line in sys.stdin:
@@ -86,7 +96,8 @@ def main():
             rid = req.get("id")
             op = req.get("op")
             if op == "ping":
-                reply = {"id": rid, "ok": True, "versions": versions()}
+                reply = {"id": rid, "ok": True, "versions": versions(),
+                         "engine": engine_importable()}
                 if req.get("load_model"):
                     tracker.ensure()
                     reply["device"] = tracker.device

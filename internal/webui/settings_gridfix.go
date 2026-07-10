@@ -112,6 +112,22 @@ func (u *UI) gridfixCardBody() string {
 	b.WriteString(btnRow(buttons))
 	b.WriteString(`<div id=inst-gridfix></div>`)
 
+	// CUDA is an explicit capability install; the GPU toggle only exists once the
+	// installed torch is verifiably a CUDA build (never a pre-toggle that changes a
+	// later install).
+	if ready && st.EngineOK {
+		switch {
+		case st.TorchCUDA:
+			b.WriteString(hint("ok", i18n.T("settings.body.gridfix.cudaReady")))
+			b.WriteString(toggleRow(i18n.T("settings.body.gridfix.useGpu"), "set:gridfix-gpu",
+				f.ResolvedDevice() != "cpu"))
+		case st.GPUPresent:
+			b.WriteString(btnRow(btn(i18n.T("settings.body.gridfix.installCuda"), "outline", "gridfix-install-cuda", "")))
+			b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.cudaHint")) + `</div>`)
+		}
+		b.WriteString(`<div id=inst-gridfixcuda></div>`)
+	}
+
 	b.WriteString(pathField(i18n.T("settings.body.gridfix.pythonPath"), "set:gridfix-python", f.PythonPath, "file"))
 	b.WriteString(field(i18n.T("settings.body.gridfix.minQuality"), "set:gridfix-minq",
 		strconv.FormatFloat(f.ResolvedMinQuality(), 'f', -1, 64), "number"))
@@ -149,6 +165,34 @@ func init() {
 			}
 			patch(hint("ok", i18n.T("settings.label.installed")))
 			u.toast(i18n.T("settings.toast.installedTool", i18n.A{"tool": "Beat This!"}))
+			u.invalidateGridfixProbe()
+			u.refreshGridfixProbe()
+		})
+	})
+
+	// explicit CUDA capability upgrade (multi-GB torch build into the existing venv)
+	onExact("gridfix-install-cuda", func(u *UI, _ actMsg) {
+		patch := func(inner string) { u.eval("window.__patch('inst-gridfixcuda'," + jsQuote(inner) + ")") }
+		patch(progressBar(0, i18n.T("settings.body.gridfix.installing")))
+		u.bg(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+			defer cancel()
+			var lastPatch time.Time
+			err := u.gridfixEnvMgr().InstallCUDA(ctx, func(line string) {
+				if time.Since(lastPatch) < 300*time.Millisecond {
+					return
+				}
+				lastPatch = time.Now()
+				if len(line) > 120 {
+					line = line[:120] + "…"
+				}
+				patch(progressBar(0, line))
+			})
+			if err != nil {
+				patch(hint("bad", i18n.T("settings.label.installFailed")+err.Error()))
+				return
+			}
+			patch(hint("ok", i18n.T("settings.label.installed")))
 			u.invalidateGridfixProbe()
 			u.refreshGridfixProbe()
 		})
