@@ -99,6 +99,10 @@ func Available() bool { return shellAvailable }
 // runtime, so the seam picks Fyne instead of a blank window. No-op (false) on non-webview builds.
 func ProbeWebview() bool { return probeWebview() }
 
+// onWindowHidden fires from the window subclass when close-to-tray hides the window (Windows).
+// Set before the window exists (Run) - read on the UI thread only.
+var onWindowHidden func()
+
 // Run creates the window and blocks on its message loop until close (mirrors ui.UI.Run).
 func (u *UI) Run(startHidden bool) {
 	if u.shell == nil {
@@ -106,6 +110,11 @@ func (u *UI) Run(startHidden bool) {
 			u.log.Error("webui", "no webview host (nocgo build) - cannot render", nil)
 		}
 		return
+	}
+	onWindowHidden = func() {
+		if u.log != nil {
+			u.log.Info("webui", "window hidden to tray", nil)
+		}
 	}
 	u.shell.run(u.shellHTML(), startHidden)
 }

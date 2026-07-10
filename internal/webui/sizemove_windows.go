@@ -26,9 +26,12 @@ const (
 	wmExitSizeMove  = 0x0232
 	wmActivate      = 0x0006
 	wmSize          = 0x0005
+	wmClose         = 0x0010
+	wmShowWindow    = 0x0018
 	sizeMinimized   = 1 // SIZE_MINIMIZED (wParam of WM_SIZE)
 	sizeRestored    = 0 // SIZE_RESTORED
 	sizeMaximized   = 2 // SIZE_MAXIMIZED
+	swHide          = 0 // SW_HIDE
 )
 
 var uiSizeMove atomic.Bool
@@ -53,6 +56,16 @@ var sizeMoveProc = syscall.NewCallback(func(hwnd, msg, wp, lp, _, _ uintptr) uin
 		case sizeRestored, sizeMaximized:
 			governor.SetMinimized(false)
 		}
+	case wmShowWindow:
+		governor.SetMinimized(wp == 0) // hidden-to-tray = not being looked at
+	case wmClose:
+		// Tray app, not quit-on-close (CLAUDE.md): X/Alt+F4 hides the window; only tray
+		// Quit / service stop exits. terminate() uses PostQuitMessage, so quit is unaffected.
+		_, _, _ = procShowWindow.Call(hwnd, swHide)
+		if onWindowHidden != nil {
+			onWindowHidden()
+		}
+		return 0 // swallow - never reaches DefWindowProc's DestroyWindow
 	}
 	r, _, _ := procDefSubclassProc.Call(hwnd, msg, wp, lp)
 	return r
