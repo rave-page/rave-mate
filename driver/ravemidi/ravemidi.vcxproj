@@ -37,6 +37,9 @@
          signs out-of-band per the design doc. -->
     <SignMode>Off</SignMode>
     <EnableTestSign>false</EnableTestSign>
+    <!-- No in-build .cat: the loadable catalog comes from Microsoft attestation
+         (which regenerates it), not inf2cat here. Dev-test builds Inf2Cat locally. -->
+    <EnableInf2cat>false</EnableInf2cat>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
