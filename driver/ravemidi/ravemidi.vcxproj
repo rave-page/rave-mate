@@ -67,7 +67,7 @@
       <PreprocessorDefinitions>POOL_NX_OPTIN=1;_NEW_DELETE_OPERATORS_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>$(DDK_LIB_PATH)portcls.lib;$(DDK_LIB_PATH)stdunk.lib;$(DDK_LIB_PATH)wdmsec.lib;$(DDK_LIB_PATH)ntstrsafe.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(DDK_LIB_PATH)portcls.lib;$(DDK_LIB_PATH)stdunk.lib;$(DDK_LIB_PATH)wdmsec.lib;$(DDK_LIB_PATH)ntstrsafe.lib;$(DDK_LIB_PATH)ks.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Inf>
       <TimeStamp>*</TimeStamp>
@@ -79,10 +79,12 @@
     <ClCompile Include="fifo.cpp" />
     <ClCompile Include="kalloc.cpp" />
     <ClCompile Include="guids.cpp" />
+    <ClCompile Include="mirror.cpp" />
     <ClInclude Include="ioctl.h" />
     <ClInclude Include="miniport.h" />
     <ClInclude Include="fifo.h" />
     <ClInclude Include="kalloc.h" />
+    <ClInclude Include="mirror.h" />
     <Inf Include="ravemidi.inf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

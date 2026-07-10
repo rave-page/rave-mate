@@ -12,6 +12,7 @@
 #include <devpkey.h>
 #include "ioctl.h"
 #include "miniport.h"
+#include "mirror.h"
 
 #ifndef LOCALE_NEUTRAL
 #define LOCALE_NEUTRAL 0
@@ -30,6 +31,7 @@ typedef struct _RAVE_ADAPTER {
 } RAVE_ADAPTER;
 
 static RAVE_ADAPTER* g_Adapter;       // single root devnode
+static PDEVICE_OBJECT g_Pdo;          // adapter PDO from AddDevice (outlives our FDO)
 
 // -------- forward decls ----------
 DRIVER_ADD_DEVICE RaveAddDevice;
@@ -80,9 +82,6 @@ VOID RaveUnload(PDRIVER_OBJECT DriverObject)
         }
         // Ports are torn down by handle cleanup before unload (driver can't unload
         // with open handles); the list is empty here in the normal path.
-        if (a->Pdo) {
-            ObDereferenceObject(a->Pdo);
-        }
         ExFreePoolWithTag(a, RAVE_TAG);
     }
     if (g_PcUnload) {
@@ -95,6 +94,7 @@ VOID RaveUnload(PDRIVER_OBJECT DriverObject)
 NTSTATUS RaveAddDevice(PDRIVER_OBJECT DriverObject, PDEVICE_OBJECT PhysicalDeviceObject)
 {
     PAGED_CODE();
+    g_Pdo = PhysicalDeviceObject;  // for interface enum; PDO outlives our FDO
     // maxObjects=RAVEMIDI_MAX_PORTS subdevices under this FDO.
     return PcAddAdapterDevice(DriverObject, PhysicalDeviceObject, RaveStartDevice,
                               RAVEMIDI_MAX_PORTS, 0);
@@ -116,21 +116,19 @@ static NTSTATUS RaveStartDevice(PDEVICE_OBJECT DeviceObject, PIRP Irp, PRESOURCE
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     a->Fdo = DeviceObject;
-    a->Pdo = IoGetLowerDeviceObject(DeviceObject);  // PDO for interface enum; deref in unload
+    a->Pdo = g_Pdo;  // captured in AddDevice; no ref needed (PDO outlives the FDO)
     a->IdSeq = 0;
     ExInitializeFastMutex(&a->PortsLock);
     InitializeListHead(&a->Ports);
     NTSTATUS st = RaveCreateCtlDevice(a);
     if (!NT_SUCCESS(st)) {
-        if (a->Pdo) {
-            ObDereferenceObject(a->Pdo);
-        }
         ExFreePoolWithTag(a, RAVE_TAG);
         return st;
     }
     g_Adapter = a;
-    // TODO(mirror v1.1): re-arm persisted mirror groups from Parameters\Mirrors,
-    // register IoRegisterPlugPlayNotification(KSCATEGORY_CAPTURE).
+    RaveMirrorInit();
+    // Future: re-arm persisted mirror groups from Parameters\Mirrors + register
+    // IoRegisterPlugPlayNotification(KSCATEGORY_CAPTURE) for controller hot-plug.
     return STATUS_SUCCESS;
 }
 #pragma code_seg()
@@ -392,9 +390,9 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
         ExReleaseFastMutex(&a->PortsLock);
         return STATUS_ACCESS_DENIED;  // only the creator (or cleanup) tears down
     }
-    if (p->StreamCount > 0) {
+    if (p->StreamCount > 0 || p->MirrorRefs > 0) {
         ExReleaseFastMutex(&a->PortsLock);
-        return STATUS_DEVICE_BUSY;    // park: a winmm client still holds a pin
+        return STATUS_DEVICE_BUSY;    // park: a winmm client holds a pin, or a mirror feeds it
     }
     RemoveEntryList(&p->Link);
     ExReleaseFastMutex(&a->PortsLock);
@@ -410,7 +408,7 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
     if (p->PortUnknown) {
         PUNREGISTERSUBDEVICE unreg = nullptr;
         if (NT_SUCCESS(p->PortUnknown->QueryInterface(IID_IUnregisterSubdevice, (PVOID*)&unreg))) {
-            unreg->UnregisterSubdevice();
+            unreg->UnregisterSubdevice(a->Fdo, p->PortUnknown);
             unreg->Release();
         }
         if (p->PortMidi) {
@@ -470,6 +468,7 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
         break;
     case IRP_MJ_CLOSE:
         if (a) {
+            RaveMirrorDestroyForFile(s->FileObject);  // stop taps first (they hold port refs)
             DestroyPortsForFile(a, s->FileObject);
         }
         break;
@@ -544,6 +543,27 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             RavePortDeliverFromApp(p);
             return STATUS_PENDING;  // owns the IRP now — skip shared completion
         }
+        case IOCTL_RAVEMIDI_CREATE_MIRROR: {
+            if (inLen < sizeof(RAVEMIDI_CREATE_MIRROR_IN) || outLen < sizeof(RAVEMIDI_CREATE_MIRROR_OUT)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            ULONG mid = 0;
+            st = RaveMirrorCreate(s->FileObject, (RAVEMIDI_CREATE_MIRROR_IN*)buf, inLen, &mid);
+            if (NT_SUCCESS(st)) {
+                ((RAVEMIDI_CREATE_MIRROR_OUT*)buf)->MirrorId = mid;
+                info = sizeof(RAVEMIDI_CREATE_MIRROR_OUT);
+            }
+            break;
+        }
+        case IOCTL_RAVEMIDI_DESTROY_MIRROR: {
+            if (inLen < sizeof(RAVEMIDI_MIRROR_REF)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            st = RaveMirrorDestroy(s->FileObject, ((RAVEMIDI_MIRROR_REF*)buf)->MirrorId);
+            break;
+        }
         default:
             st = STATUS_INVALID_DEVICE_REQUEST;
             break;
@@ -559,4 +579,31 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     Irp->IoStatus.Information = info;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
     return st;
+}
+
+// -------- cross-TU: port refs for mirror.cpp --------
+// A mirror fans into a port whose capture pin apps read (OUT_ONLY or BIDI). The
+// ref blocks that port's destroy until the mirror releases it.
+RAVE_PORT* RaveRefOutputPort(ULONG id)
+{
+    RAVE_ADAPTER* a = g_Adapter;
+    if (!a) {
+        return nullptr;
+    }
+    ExAcquireFastMutex(&a->PortsLock);
+    RAVE_PORT* p = FindPortLocked(a, id);
+    if (p && (p->Kind == RaveMidiPortOutOnly || p->Kind == RaveMidiPortBidi)) {
+        InterlockedIncrement(&p->MirrorRefs);
+    } else {
+        p = nullptr;
+    }
+    ExReleaseFastMutex(&a->PortsLock);
+    return p;
+}
+
+VOID RaveUnrefOutputPort(RAVE_PORT* p)
+{
+    if (p) {
+        InterlockedDecrement(&p->MirrorRefs);
+    }
 }

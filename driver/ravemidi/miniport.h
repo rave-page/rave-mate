@@ -33,7 +33,13 @@ typedef struct _RAVE_PORT {
     LIST_ENTRY ReadIrps;
     volatile LONG CaptureRunning;     // a capture stream is in KSSTATE_RUN
     volatile LONG StreamCount;        // open pin instances (blocks destroy)
+    volatile LONG MirrorRefs;         // mirror groups fanning into this port (blocks destroy)
 } RAVE_PORT;
+
+// Cross-TU (mirror.cpp): reference an OUT_ONLY/BIDI port by id so a mirror can fan
+// into it; the ref blocks the port's destroy until released.
+RAVE_PORT* RaveRefOutputPort(ULONG id);
+VOID RaveUnrefOutputPort(RAVE_PORT* p);
 
 // Adapter-side helpers implemented in adapter.cpp, called from miniport streams.
 VOID RavePortDeliverFromApp(RAVE_PORT* port);   // drain FromApp into pended READs
