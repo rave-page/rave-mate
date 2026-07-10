@@ -46,4 +46,9 @@ tracks from `MANUAL_GRIDDING_PREP`, verify them, then train (20+ recommended).
   file path+size+mtime; capped at 100k entries).
 - The write path normalizes XML self-closing tags (`<TEMPO/>` → `<TEMPO></TEMPO>`);
   Traktor reads both and re-canonicalizes the file on its next save.
+- **Serato** grid writeback is supported: Serato stores beatgrids in the audio files
+  themselves (MP3 GEOB tag / FLAC comment), so fixes are written per file — atomic
+  temp+verify+rename, all other tags preserved byte-exact. Close Serato before applying.
+  MP4/M4A, AIFF and Ogg files are skipped (unsafe to rewrite). Serato also appears as a
+  library-sync writeback target (constant grids only; variable grids are never collapsed).
 - Rekordbox / VirtualDJ grid writeback: planned (analysis already works for any files).

@@ -697,8 +697,9 @@ type SyncScope struct {
 	TrackHashes []string `json:"trackHashes,omitempty"` // portable track hashes (Kind=="tracks")
 }
 
-// SyncTarget is one destination. App: "traktor" | "rekordbox" | "virtualdj". Mode:
-// "file" (write importable NML/XML) | "writeback" (live in-place into the app's library) |
+// SyncTarget is one destination. App: "traktor" | "rekordbox" | "virtualdj" | "serato". Mode:
+// "file" (write importable NML/XML) | "writeback" (live in-place into the app's library;
+// serato = constant beatgrids into the audio files' tags, OutputPath = the _Serato_ dir) |
 // "tags" (embed metadata into the audio files). OutputPath: file/writeback destination
 // ("" = auto-detect the app's collection / a default next to it).
 type SyncTarget struct {

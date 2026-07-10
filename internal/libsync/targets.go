@@ -9,6 +9,8 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/rekordboxdb"
+	"rave.page/mate/internal/serato"
+	"rave.page/mate/internal/seratolib"
 	"rave.page/mate/internal/sysactivity"
 )
 
@@ -21,6 +23,7 @@ const (
 	AppTraktor   = "traktor"
 	AppRekordbox = "rekordbox"
 	AppVirtualDJ = "virtualdj"
+	AppSerato    = "serato"
 )
 
 // TargetOutcome reports what writing one target did.
@@ -75,6 +78,7 @@ func writeImportableFile(t config.SyncTarget, tracks []musiclib.Track) (TargetOu
 // writeBack writes the canonical tracks into the app's live library. Traktor = in-place
 // collection.nml merge (backed up first). Rekordbox master.db can't be re-encrypted, so it falls
 // back to dropping an importable XML next to the user's library + a note to import it.
+// Serato = constant beatgrids written into the audio files' own tags (that IS its library).
 func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, error) {
 	out := TargetOutcome{App: t.App, Mode: ModeWriteback}
 	switch t.App {
@@ -124,8 +128,56 @@ func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, err
 		out.Added = res.Inserted
 		out.Note = fmt.Sprintf("master.db: %d added, %d already present (backed up first)", res.Inserted, res.Skipped)
 		return out, nil
+	case AppSerato:
+		// Serato reads beatgrids from the audio FILES (GEOB / vorbis comment), not from
+		// database V2 - write-back = per-file constant-grid writes. seratolib refuses while
+		// Serato runs and does temp+verify+rename per file, so no library backup is needed.
+		dir := t.OutputPath
+		if dir == "" {
+			if dirs := serato.DetectSeratoDirs(); len(dirs) > 0 {
+				dir = dirs[0]
+			}
+		}
+		if dir == "" {
+			return out, fmt.Errorf("no _Serato_ dir found (set an output path)")
+		}
+		out.Path = dir
+		fixes, skipped := seratoGridFixes(tracks)
+		if len(fixes) == 0 {
+			out.Note = fmt.Sprintf("no constant-grid tracks to write (%d skipped)", skipped)
+			return out, nil
+		}
+		res, err := seratolib.ApplyGridFixesSerato(dir, fixes)
+		out.Updated = res.Updated
+		if err != nil {
+			return out, err
+		}
+		out.Note = fmt.Sprintf("wrote beatgrids into %d files (%d skipped: no constant grid)", res.Updated, skipped)
+		return out, nil
 	}
 	return out, fmt.Errorf("live write-back not supported for %q", t.App)
+}
+
+// seratoGridFixes converts canonical tracks into per-file constant-grid fixes. Only tracks
+// with exactly ONE grid marker qualify - collapsing a variable grid to a constant one would
+// corrupt it; those are skipped (counted).
+func seratoGridFixes(tracks []musiclib.Track) (fixes []musiclib.GridFixUpdate, skipped int) {
+	for _, tr := range tracks {
+		if len(tr.Beatgrid) != 1 || tr.Path == "" {
+			skipped++
+			continue
+		}
+		bpm := tr.Beatgrid[0].BPM
+		if bpm <= 0 {
+			bpm = tr.BPM
+		}
+		if bpm <= 0 {
+			skipped++
+			continue
+		}
+		fixes = append(fixes, musiclib.GridFixUpdate{Path: tr.Path, BPM: bpm, StartMs: tr.Beatgrid[0].PositionMs})
+	}
+	return fixes, skipped
 }
 
 // rekordboxRunning reports whether Rekordbox appears to be running (refuse a live write then).
