@@ -1,13 +1,13 @@
 {
-  "version": "nightly-18615d9",
-  "build": 52,
-  "commit": "18615d9",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-52-20260710-18615d9.exe",
-  "sha256": "b8e24b2f15320963d8589b56eb9eb7ce9ac1db6a6d6f1ef42aa6fbc311de5cf2",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-52-20260710-18615d9.exe",
-  "installer_sha256": "01b045b78c143cfcb0880ed503c4597c1d763e1655f320c0e9a57e47f808306c",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-52-20260710-18615d9",
-  "linux_sha256": "6aa33bcd1f779b232b541e7e0725c12404d515ea4ac54c31729aabd2937bfbf5",
+  "version": "nightly-5603cd4",
+  "build": 53,
+  "commit": "5603cd4",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-53-20260710-5603cd4.exe",
+  "sha256": "5c3d8406fb2357d4d31af0dd388d96f73c52d34d1e346a24520a0ac664034447",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-53-20260710-5603cd4.exe",
+  "installer_sha256": "06bce039716168c472c289228ddf52ff0be508ae6ca3a25ec1f05d136cf70f41",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-53-20260710-5603cd4",
+  "linux_sha256": "955d1d2a4889672d909071ff9adfe0c975e80c241535a8aa3fd1ad57c4835d46",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-10T21:43:22Z",
-  "notes": "Merge branch 'cue-editor' into development"
+  "released": "2026-07-10T22:12:31Z",
+  "notes": "feat(library): tag-fixer UI + per-track tag editor + batch re-encode to duplicate folder"
 }
