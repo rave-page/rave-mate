@@ -19,6 +19,7 @@ import (
 	"rave.page/mate/internal/service"
 	"rave.page/mate/internal/shared/selfupdate"
 	"rave.page/mate/internal/stt"
+	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/version"
@@ -759,6 +760,46 @@ func (u *UI) upd() *selfupdate.Updater {
 
 // patchUpd patches the #inst-update region (check/apply progress + result).
 func (u *UI) patchUpd(inner string) { u.eval("window.__patch('inst-update'," + jsQuote(inner) + ")") }
+
+// updateNotifyLoop polls the feed in the background (first check after 2min, then every 6h) and
+// raises a clickable tray notification once per newly-seen release; the click lands on
+// Settings→System (Updates card). No-op on dev builds (no feed).
+func (u *UI) updateNotifyLoop() {
+	up := u.upd()
+	if !up.Enabled() {
+		return
+	}
+	notified := ""
+	check := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		rel, avail, err := up.Available(ctx)
+		if err != nil || !avail || rel.Version == notified {
+			return // offline/up-to-date/already announced - stay quiet
+		}
+		notified = rel.Version
+		u.updMu.Lock()
+		u.updRel = rel // stage so Install in settings skips the re-fetch
+		u.updMu.Unlock()
+		if u.log != nil {
+			u.log.Info("webui", "update available", map[string]any{"version": rel.Version, "build": rel.Build})
+		}
+		_ = sysnotify.SendAction(
+			i18n.T("tray.updateNotifyTitle"),
+			i18n.T("tray.updateNotifyBody", i18n.A{"version": rel.Version}),
+			func() { u.showUpdateSettings() })
+	}
+	delay := 2 * time.Minute
+	for {
+		select {
+		case <-u.stop:
+			return
+		case <-time.After(delay):
+			check()
+			delay = 6 * time.Hour
+		}
+	}
+}
 
 // updateCheck polls the feed and renders up-to-date / available / error into #inst-update.
 func (u *UI) updateCheck() {

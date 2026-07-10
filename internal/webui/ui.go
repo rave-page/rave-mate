@@ -113,28 +113,33 @@ func (u *UI) Run(startHidden bool) {
 // onReady fires once the window + bindings exist; start the live pusher + event feeds + tray.
 func (u *UI) onReady() {
 	go u.livePush()
+	go u.updateNotifyLoop()
 	u.subscribeTwitch()
 	u.startTray()
+}
+
+// showUpdateSettings raises the window on Settings→System (Updates card) and runs a check into
+// it. Shared by the tray "Check for updates" menu item and the update-available balloon click.
+func (u *UI) showUpdateSettings() {
+	u.Show()
+	u.setMu.Lock()
+	u.setSec, u.setQuery = "system", ""
+	u.setMu.Unlock()
+	u.setTab("settings")
+	u.updateCheck()
 }
 
 // startTray installs the native system-tray icon + menu (Fyne owns its own tray on the Fyne
 // renderer; this covers the webview renderer). No-op off Windows. Stop() removes the icon.
 func (u *UI) startTray() {
 	stop, err := tray.Start(tray.Options{
-		Tooltip:    i18n.T("tray.tooltip", i18n.A{"version": version.String()}),
-		OpenLabel:  i18n.T("tray.open"),
-		CheckLabel: i18n.T("tray.checkUpdates"),
-		QuitLabel:  i18n.T("tray.quit"),
-		OnShow:     func() { u.Show() },
-		OnCheckUpdates: func() { // surface the Settings→System sub-tab (Updates card), run the check into it
-			u.Show()
-			u.setMu.Lock()
-			u.setSec, u.setQuery = "system", ""
-			u.setMu.Unlock()
-			u.setTab("settings")
-			u.updateCheck()
-		},
-		OnQuit: func() { u.Stop() },
+		Tooltip:        i18n.T("tray.tooltip", i18n.A{"version": version.String()}),
+		OpenLabel:      i18n.T("tray.open"),
+		CheckLabel:     i18n.T("tray.checkUpdates"),
+		QuitLabel:      i18n.T("tray.quit"),
+		OnShow:         func() { u.Show() },
+		OnCheckUpdates: func() { u.showUpdateSettings() },
+		OnQuit:         func() { u.Stop() },
 	})
 	if err != nil {
 		if u.log != nil {

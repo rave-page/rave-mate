@@ -2455,7 +2455,9 @@
     "checkUpdates": "アップデートを確認",
     "open": "rave-mate を開く",
     "quit": "終了",
-    "tooltip": "rave-mate - {version}"
+    "tooltip": "rave-mate - {version}",
+    "updateNotifyBody": "rave-mate {version} をインストールできます。クリックすると更新設定が開きます。",
+    "updateNotifyTitle": "アップデートがあります"
   },
   "twitch": {
     "addPreset": "+ 追加",

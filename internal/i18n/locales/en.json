@@ -2545,7 +2545,9 @@
     "checkUpdates": "Check for updates",
     "open": "Open rave-mate",
     "quit": "Quit",
-    "tooltip": "rave-mate - {version}"
+    "tooltip": "rave-mate - {version}",
+    "updateNotifyBody": "rave-mate {version} is ready to install. Click to open update settings.",
+    "updateNotifyTitle": "Update available"
   },
   "twitch": {
     "addPreset": "+ Add",

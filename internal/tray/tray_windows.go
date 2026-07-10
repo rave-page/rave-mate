@@ -56,14 +56,22 @@ const (
 	wmRButtonUp = 0x0205
 	wmLButtonUp = 0x0202
 
-	nimAdd     = 0x0
-	nimModify  = 0x1
-	nimDelete  = 0x2
-	nifMessage = 0x1
-	nifIcon    = 0x2
-	nifTip     = 0x4
-	nifInfo    = 0x10 // balloon (szInfo/szInfoTitle) present
-	niifInfo   = 0x1  // NIIF_INFO: info-icon glyph on the balloon
+	nimAdd        = 0x0
+	nimModify     = 0x1
+	nimDelete     = 0x2
+	nimSetVersion = 0x4
+	nifMessage    = 0x1
+	nifIcon       = 0x2
+	nifTip        = 0x4
+	nifInfo       = 0x10 // balloon (szInfo/szInfoTitle) present
+	niifInfo      = 0x1  // NIIF_INFO: info-icon glyph on the balloon
+
+	// NOTIFYICON_VERSION (3, NOT _4): keeps WM_L/RBUTTONUP mouse semantics AND delivers the
+	// NIN_BALLOON* callbacks below. _4 would switch mouse events to NIN_SELECT/WM_CONTEXTMENU.
+	notifyIconVersion   = 3
+	ninBalloonHide      = 0x403 // WM_USER+3
+	ninBalloonTimeout   = 0x404
+	ninBalloonUserClick = 0x405
 
 	mfString     = 0x0
 	mfSeparator  = 0x800
@@ -126,9 +134,11 @@ type tray struct {
 	hwnd syscall.Handle
 	nid  notifyIconData
 
-	balloonMu sync.Mutex // guards the pending balloon payload (WM_BALLOON carries no data)
+	balloonMu sync.Mutex // guards the balloon payloads (WM_BALLOON carries no data)
 	pendTitle string
 	pendBody  string
+	pendClick func() // onClick staged with the pending balloon (nil = plain)
+	liveClick func() // onClick of the currently-shown balloon (fires on NIN_BALLOONUSERCLICK)
 }
 
 // Start installs the tray icon + menu and runs its message loop on a dedicated OS thread. The
@@ -186,8 +196,13 @@ func (t *tray) run(ready chan<- error) {
 		return
 	}
 
-	// Register the reliable native-notification path (Shell_NotifyIcon balloon) for sysnotify.Send.
+	// Opt into NOTIFYICON_VERSION so the shell delivers NIN_BALLOON* callbacks (balloon click).
+	t.nid.uVersion = notifyIconVersion
+	procShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&t.nid)))
+
+	// Register the reliable native-notification paths (Shell_NotifyIcon balloon) for sysnotify.
 	sysnotify.SetNative(t.notify)
+	sysnotify.SetNativeAction(t.notifyAction)
 
 	ready <- nil
 
@@ -201,17 +216,21 @@ func (t *tray) run(ready chan<- error) {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 	sysnotify.SetNative(nil) // tray gone - fall back to the generic path
+	sysnotify.SetNativeAction(nil)
 	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 }
 
 // notify queues a balloon payload and posts WM_BALLOON so the icon-owning thread fires it
 // (Shell_NotifyIcon must be driven from that thread). Safe to call from any goroutine.
-func (t *tray) notify(title, body string) error {
+func (t *tray) notify(title, body string) error { return t.notifyAction(title, body, nil) }
+
+// notifyAction is notify with an optional click handler, fired on NIN_BALLOONUSERCLICK.
+func (t *tray) notifyAction(title, body string, onClick func()) error {
 	if t.hwnd == 0 {
 		return fmt.Errorf("tray: no window")
 	}
 	t.balloonMu.Lock()
-	t.pendTitle, t.pendBody = title, body
+	t.pendTitle, t.pendBody, t.pendClick = title, body, onClick
 	t.balloonMu.Unlock()
 	if r, _, err := procPostMessageW.Call(uintptr(t.hwnd), wmBalloon, 0, 0); r == 0 {
 		return fmt.Errorf("tray: PostMessage(WM_BALLOON): %v", err)
@@ -225,6 +244,8 @@ func (t *tray) notify(title, body string) error {
 func (t *tray) showBalloon() {
 	t.balloonMu.Lock()
 	title, body := t.pendTitle, t.pendBody
+	t.liveClick = t.pendClick // the balloon about to show owns the click
+	t.pendClick = nil
 	t.balloonMu.Unlock()
 
 	copyField(t.nid.szInfoTitle[:], title)
@@ -250,6 +271,18 @@ func (t *tray) wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintp
 			t.showMenu()
 		case wmLButtonUp:
 			t.dispatch(idShow)
+		case ninBalloonUserClick:
+			t.balloonMu.Lock()
+			fn := t.liveClick
+			t.liveClick = nil
+			t.balloonMu.Unlock()
+			if fn != nil {
+				go fn() // off the tray thread, like dispatch
+			}
+		case ninBalloonHide, ninBalloonTimeout:
+			t.balloonMu.Lock()
+			t.liveClick = nil
+			t.balloonMu.Unlock()
 		}
 		return 0
 	case wmBalloon:

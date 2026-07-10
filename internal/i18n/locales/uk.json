@@ -2455,7 +2455,9 @@
     "checkUpdates": "Перевірити оновлення",
     "open": "Відкрити rave-mate",
     "quit": "Вийти",
-    "tooltip": "rave-mate - {version}"
+    "tooltip": "rave-mate - {version}",
+    "updateNotifyBody": "rave-mate {version} готовий до встановлення. Натисніть, щоб відкрити налаштування оновлень.",
+    "updateNotifyTitle": "Доступне оновлення"
   },
   "twitch": {
     "addPreset": "+ Додати",

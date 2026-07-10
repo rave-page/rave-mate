@@ -5,8 +5,9 @@ package sysnotify
 import "sync"
 
 var (
-	mu     sync.RWMutex
-	native func(title, body string) error // reliable platform path (e.g. Windows tray balloon)
+	mu           sync.RWMutex
+	native       func(title, body string) error                 // reliable platform path (e.g. Windows tray balloon)
+	nativeAction func(title, body string, onClick func()) error // click-capable platform path
 )
 
 // SetNative registers a platform-reliable notification path, overriding the generic osSend
@@ -14,6 +15,14 @@ var (
 func SetNative(fn func(title, body string) error) {
 	mu.Lock()
 	native = fn
+	mu.Unlock()
+}
+
+// SetNativeAction registers a click-capable notification path (Windows tray balloon +
+// NIN_BALLOONUSERCLICK). Pass nil to clear.
+func SetNativeAction(fn func(title, body string, onClick func()) error) {
+	mu.Lock()
+	nativeAction = fn
 	mu.Unlock()
 }
 
@@ -27,4 +36,16 @@ func Send(title, body string) error {
 		return fn(title, body)
 	}
 	return osSend(title, body)
+}
+
+// SendAction shows a notification that runs onClick when the user clicks it. Platforms without a
+// click-capable path degrade to Send (the click is dropped, never an error).
+func SendAction(title, body string, onClick func()) error {
+	mu.RLock()
+	fn := nativeAction
+	mu.RUnlock()
+	if fn != nil && onClick != nil {
+		return fn(title, body, onClick)
+	}
+	return Send(title, body)
 }
