@@ -480,7 +480,90 @@ func (u *UI) ceKey(val string) {
 		u.ceToggleDrop(false)
 	case "senter", "st":
 		u.ceToggleDrop(true)
+	case "space", "sspace":
+		u.ceAudition(true)
+	case "spaceup":
+		u.ceAudition(false)
+	case "cleft": // Ctrl: shift the whole beatgrid for manual alignment (10ms steps,
+		u.ceGridShift(-10) // key-repeat gives continuous travel)
+	case "cright":
+		u.ceGridShift(10)
+	case "csleft": // Ctrl+Shift: 1ms ultra-fine
+		u.ceGridShift(-1)
+	case "csright":
+		u.ceGridShift(1)
 	}
+}
+
+// ceGridShift nudges every grid marker by deltaMs (manual alignment), rebuilds the
+// beat math, and persists the new grid to the library (journaled).
+func (u *UI) ceGridShift(deltaMs float64) {
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active || len(c.track.Beatgrid) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	grid := append([]musiclib.GridMarker(nil), c.track.Beatgrid...)
+	for i := range grid {
+		grid[i].PositionMs += deltaMs
+	}
+	c.track.Beatgrid = grid
+	if g, err := cuepattern.NewGrid(grid, c.track.DurationSec*1000); err == nil {
+		c.grid = g
+		c.cursorMs = g.SnapMs(c.cursorMs)
+	}
+	tr := c.track
+	c.mu.Unlock()
+	// mirror into the collection view + persist (coalescing writes is not worth the
+	// complexity: one UPDATE per press on a single-writer sqlite is cheap)
+	s := u.lib()
+	s.mu.Lock()
+	if t, ok := s.byPath[tr.Path]; ok {
+		t.Beatgrid = grid
+		s.byPath[tr.Path] = t
+		for i := range s.tracks {
+			if s.tracks[i].Path == tr.Path {
+				s.tracks[i].Beatgrid = grid
+			}
+		}
+	}
+	s.mu.Unlock()
+	u.bg(func() {
+		if err := u.svc.Lib.UpdateTrackBeatgrid(tr, grid); err != nil {
+			u.logErr("save beatgrid", err)
+		}
+	})
+	u.cePatchWave()
+}
+
+// ceAudition: hold Space = play from the beat cursor, release = stop (press again
+// restarts from the cursor).
+func (u *UI) ceAudition(down bool) {
+	const host = "library"
+	t := u.mpSnap(host)
+	m := t.activeMedia()
+	if m == nil {
+		return
+	}
+	if !down {
+		u.mpStop(host)
+		return
+	}
+	c := u.ce()
+	c.mu.Lock()
+	cur := c.cursorMs / 1000
+	c.mu.Unlock()
+	local := clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
+	if tr := u.mpEngineState(&t, m); tr.loaded {
+		u.svc.Player.Seek(local)
+		if tr.paused {
+			u.mpAudCall(host, "play", func() { u.svc.Player.TogglePause() })
+		}
+		u.mpPatchTransport(u.mpSnap(host))
+		return
+	}
+	u.mpStartPlayback(host, *m, local)
 }
 
 // libKeyNav moves the collection selection with the arrow keys (library scope).
@@ -562,15 +645,20 @@ func ceBarBeat(g *cuepattern.Grid, ms float64) string {
 	return fmt.Sprintf("%d.%d", bar, beat+1)
 }
 
-// ceDetailHTML is the whole detail rail while the editor is active: the player
-// (waveform + overlay) on top, the editor card below.
+// ceDetailHTML is the detail rail while the editor is active: controls only - the
+// waveform renders full-tab-width above the list (ceWaveHTML via libBody).
 func (u *UI) ceDetailHTML() string {
+	return u.ceRailHTML()
+}
+
+// ceWaveHTML is the full-width player strip (waveform + beatgrid + markers + transport).
+func (u *UI) ceWaveHTML() string {
 	c := u.ce()
 	c.mu.Lock()
 	path, tr := c.path, c.track
 	c.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
-	return inspSec(i18n.T("library.insp.player"), u.mpHTML("library")) + u.ceRailHTML()
+	return u.mpHTML("library")
 }
 
 // ceRailHTML is the cue-editor card in the library detail rail.

@@ -220,3 +220,6 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .ce-drop{display:flex;align-items:center;gap:var(--space-2);padding:2px 0}
 .ce-dropname{font-family:var(--font-mono,monospace);color:var(--color-brand-amber,#FFB547);cursor:pointer;white-space:nowrap}
 .ce-dropname:hover{text-decoration:underline}
+.ce-fullwave{margin-bottom:var(--space-3)}
+.ce-fullwave .mplayer{max-width:none}
+.ce-fullwave .mp-wavebox{height:190px}

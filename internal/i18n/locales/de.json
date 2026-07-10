@@ -291,7 +291,7 @@
     },
     "cue-edit": {
       "title": "Cue-Editor – Tasten & Maus",
-      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks."
+      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen."
     }
   },
   "library": {

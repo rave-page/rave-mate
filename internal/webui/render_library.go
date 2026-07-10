@@ -236,6 +236,12 @@ func (u *UI) libBody() string {
 		if !u.libEnsureTracks(s) {
 			return emptyState(i18n.T("library.remote.col.loading"))
 		}
+		if u.ceActiveFor("library") {
+			// cue-edit mode: the waveform (grid + markers) spans the full tab width
+			// above the list; the rail keeps only the editor controls.
+			return `<div class=ce-fullwave>` + u.ceWaveHTML() + `</div>` +
+				masterDetailWide(u.libCollectionHTML(s), u.libDetailWrap(s))
+		}
 		return masterDetailWide(u.libCollectionHTML(s), u.libDetailWrap(s))
 	case "playlists":
 		if !u.libEnsureTracks(s) {
@@ -474,7 +480,6 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid"))
 	b.WriteString(fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid"))
 	b.WriteString(u.libKeyChip(s))
-	b.WriteString(fchip(i18n.T("library.ce.noDropsChip"), "", "lib-nodrops", s.collNoDrops))
 	pinLabel := i18n.T("library.browse.pin")
 	for _, bm := range u.libMarks(s).List() {
 		if bm.Path == dir {
@@ -596,6 +601,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	b.WriteString(u.libFacetSelect(s, "label", i18n.T("library.label.label"), s.collLabel,
 		func(t musiclib.Track) string { return strings.TrimSpace(t.Label) }))
 	b.WriteString(u.libKeyChip(s))
+	b.WriteString(fchip(i18n.T("library.ce.noDropsChip"), "", "lib-nodrops", s.collNoDrops))
 	if len(s.collGenre)+len(s.collLabel)+len(s.keySel) > 0 || s.collSearch != "" || s.collNoDrops {
 		b.WriteString(btn(i18n.T("library.clear"), "ghost", "lib-clearfilters", ""))
 	}

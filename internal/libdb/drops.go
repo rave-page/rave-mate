@@ -114,3 +114,25 @@ func (d *DB) UpdateTrackCues(t musiclib.Track, cues []musiclib.CuePoint) error {
 		OldValue: string(oldRaw), NewValue: string(raw), Origin: "manual",
 	}})
 }
+
+// UpdateTrackBeatgrid replaces a track's grid markers on every source row carrying the
+// path (manual grid alignment from the cue editor) and journals old→new.
+func (d *DB) UpdateTrackBeatgrid(t musiclib.Track, grid []musiclib.GridMarker) error {
+	if d == nil || d.db == nil {
+		return nil
+	}
+	raw, err := json.Marshal(grid)
+	if err != nil {
+		return err
+	}
+	oldRaw, _ := json.Marshal(t.Beatgrid)
+	if _, err := d.db.Exec(`UPDATE tracks SET beatgrid=?, updated_at=? WHERE path=?`,
+		string(raw), time.Now().UTC().Format(time.RFC3339), t.Path); err != nil {
+		return err
+	}
+	return d.AppendChanges([]ChangeEvent{{
+		TrackHash: TrackHash(t.Artist, t.Title, t.DurationSec),
+		Path:      t.Path, Field: "beatgrid", Op: "set",
+		OldValue: string(oldRaw), NewValue: string(raw), Origin: "manual",
+	}})
+}

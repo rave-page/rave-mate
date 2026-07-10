@@ -88,15 +88,25 @@ const runtimeJS = `(function(){
   // scoped editing keys (library list nav + cue editor). Guards: window focused, a
   // key-scope stamped on <body> by Go for the current view, no editable element focused.
   document.addEventListener('keydown', function(e){
-    if(e.ctrlKey||e.metaKey||e.altKey) return;
+    if(e.metaKey||e.altKey) return;
     if(!document.hasFocus()) return;
     var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
-    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t'};
+    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space'};
     var name=map[e.key]; if(!name) return;
+    if(e.ctrlKey && name!=='left' && name!=='right') return; // Ctrl reserved for grid nudge only
+    if(name==='space'&&e.repeat){ e.preventDefault(); return; } // hold = one down, one up
     e.preventDefault();
-    send({act:'key:'+scope, val:(e.shiftKey?'s':'')+name});
+    send({act:'key:'+scope, val:(e.ctrlKey?'c':'')+(e.shiftKey?'s':'')+name});
+  });
+  document.addEventListener('keyup', function(e){
+    if(e.key!==' ') return;
+    var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
+    var a=document.activeElement;
+    if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
+    e.preventDefault();
+    send({act:'key:'+scope, val:'spaceup'});
   });
   document.addEventListener('input', function(e){
     var el = e.target;
