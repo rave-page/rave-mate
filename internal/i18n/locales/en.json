@@ -3333,7 +3333,19 @@
       "testsign": "Current builds are self-signed (test-signed): Windows loads them only with test-signing boot mode on and Secure Boot off. A Microsoft-attestation-signed release (no special steps) is in the pipeline.",
       "steps": "Install (elevated PowerShell, from the driver package folder — full walkthrough in the driver README):",
       "smartscreen": "Windows may warn about self-signed components (SmartScreen / unknown publisher). Expected for open-source builds without an EV certificate — the source and CI builds are public; see the README before proceeding.",
-      "docs": "Driver README & source"
+      "docs": "Driver README & source",
+      "managedHdr": "Driver-managed forwarding",
+      "managedSub": "The driver binds your controllers itself and keeps forwarding MIDI (both directions) even when rave-mate is closed — the config is stored kernel-side and survives reboots. Per input it creates a reserved \"(rave-mate)\" port for seamless reconnection plus a one-way THRU port for your DJ software. Sync writes every enabled controller above into the driver; the driver auto-binds at startup, on device arrival, and retries while the device is busy.",
+      "sync": "Sync controllers → driver",
+      "reload": "Reload driver config",
+      "bound": "forwarding",
+      "retrying": "waiting for device (retry {n})",
+      "feedback": "LED feedback",
+      "noneManaged": "No managed inputs yet — add controllers above, then sync.",
+      "syncedToast": "{n} managed inputs written to the driver",
+      "reloadedToast": "Driver config reloaded",
+      "needControllers": "No enabled controllers with a port to sync.",
+      "queryFailed": "This driver build has no config plane yet — update the driver to enable managed forwarding."
     },
     "sw": {
       "hdr": "DJ software status",

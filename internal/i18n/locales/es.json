@@ -3168,7 +3168,19 @@
       "testsign": "Los builds actuales van autofirmados (test-signed): Windows solo los carga con el modo test-signing activado y Secure Boot desactivado. Una versión firmada por atestación de Microsoft (sin pasos especiales) está en camino.",
       "steps": "Instalación (PowerShell elevado, en la carpeta del paquete del driver — guía completa en el README del driver):",
       "smartscreen": "Windows puede avisar sobre componentes autofirmados (SmartScreen / editor desconocido). Normal en builds open source sin certificado EV — el código y los builds de CI son públicos; lee el README antes de continuar.",
-      "docs": "README y código del driver"
+      "docs": "README y código del driver",
+      "managedHdr": "Reenvío gestionado por el driver",
+      "managedSub": "El driver vincula tus controladores por sí mismo y sigue reenviando MIDI (en ambos sentidos) aunque rave-mate esté cerrado — la configuración vive en el kernel y sobrevive a reinicios. Por entrada crea un puerto reservado \"(rave-mate)\" para reconectar sin cortes más un puerto THRU unidireccional para tu software DJ. Sync escribe cada controlador activado arriba en el driver; este se vincula al arrancar, al llegar el dispositivo y reintenta mientras esté ocupado.",
+      "sync": "Sincronizar controladores → driver",
+      "reload": "Recargar config del driver",
+      "bound": "reenviando",
+      "retrying": "esperando dispositivo (intento {n})",
+      "feedback": "feedback LED",
+      "noneManaged": "Sin entradas gestionadas — añade controladores arriba y sincroniza.",
+      "syncedToast": "{n} entradas gestionadas escritas en el driver",
+      "reloadedToast": "Config del driver recargada",
+      "needControllers": "No hay controladores activados con puerto que sincronizar.",
+      "queryFailed": "Este build del driver aún no tiene plano de config — actualiza el driver para el reenvío gestionado."
     },
     "sw": {
       "hdr": "Estado del software DJ",

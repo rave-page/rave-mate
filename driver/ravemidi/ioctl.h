@@ -97,6 +97,53 @@ typedef struct _RAVEMIDI_PORT_STATS {
     ULONGLONG ReadBytesTotal;
 } RAVEMIDI_PORT_STATS;
 
+// ── Managed inputs (persistent, driver-owned) ─────────────────────────────────
+// A managed input = one hardware controller the DRIVER binds autonomously: it
+// creates the ports, taps the device, and keeps forwarding even when rave-mate is
+// closed. rave-mate only edits this config (SET_CONFIG persists it kernel-side to
+// the service Parameters key - no admin rights needed in userland - and applies it
+// live). The driver re-applies it at StartDevice, re-binds on PnP arrival, and
+// retries with backoff while the device is absent or busy.
+//
+// Per input the driver creates:
+//   - ONE reserved BIDI port "<Name> (rave-mate)" - rave-mate reconnects here
+//     seamlessly after a relaunch; with Feedback=1 its app-bound writes are also
+//     forwarded to the device's render pin (LED feedback).
+//   - OutCount extra OUT_ONLY ports (the DJ-software-facing one-way ports).
+// Managed ports/taps have NO owner file object: handle close never tears them down.
+
+#define RAVEMIDI_MAX_INPUTS 8
+
+typedef struct _RAVEMIDI_INPUT_CFG {
+    WCHAR Id[RAVEMIDI_MAX_NAME];           // stable id assigned by rave-mate
+    WCHAR Name[RAVEMIDI_MAX_NAME];         // friendly base name (port naming)
+    WCHAR SourceMatch[RAVEMIDI_MAX_NAME];  // case-insensitive substring vs device FriendlyName
+    WCHAR SourceIface[RAVEMIDI_MAX_IFACE]; // optional exact KS symlink ("" = use SourceMatch)
+    ULONG Thru;                            // 1 = device capture -> all out ports
+    ULONG Feedback;                        // 1 = reserved-port writes -> device render pin
+    ULONG OutCount;                        // extra OUT_ONLY ports (0..RAVEMIDI_MAX_MIRROR_OUT)
+    WCHAR OutNames[RAVEMIDI_MAX_MIRROR_OUT][RAVEMIDI_MAX_NAME];
+} RAVEMIDI_INPUT_CFG;
+
+typedef struct _RAVEMIDI_CONFIG {
+    ULONG Version;                         // RAVEMIDI_PROTOCOL_VERSION
+    ULONG InputCount;                      // 0..RAVEMIDI_MAX_INPUTS
+    RAVEMIDI_INPUT_CFG Inputs[RAVEMIDI_MAX_INPUTS];
+} RAVEMIDI_CONFIG;
+
+// QUERY_INPUT: in ULONG index (0..InputCount-1); STATUS_NO_MORE_ENTRIES past end.
+typedef struct _RAVEMIDI_INPUT_STATUS {
+    WCHAR Id[RAVEMIDI_MAX_NAME];
+    WCHAR Name[RAVEMIDI_MAX_NAME];
+    ULONG Bound;                           // capture tap open + running
+    ULONG FeedbackBound;                   // render pin open (Feedback=1 inputs)
+    ULONG RetryCount;                      // bind attempts since last success
+    WCHAR BoundIface[RAVEMIDI_MAX_IFACE];  // "" while unbound
+    ULONG ReservedPortId;
+    ULONG OutCount;
+    ULONG OutPortIds[RAVEMIDI_MAX_MIRROR_OUT];
+} RAVEMIDI_INPUT_STATUS;
+
 #pragma pack(pop)
 
 #define RAVEMIDI_DEVICE_TYPE 0x8F63u  // arbitrary, > 0x8000 per FILE_DEVICE_* rules
@@ -115,3 +162,14 @@ typedef struct _RAVEMIDI_PORT_STATS {
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x805, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 #define IOCTL_RAVEMIDI_QUERY_PORT \
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x806, METHOD_BUFFERED, FILE_READ_DATA)
+// managed-input config: SET validates + persists (service Parameters key, written
+// kernel-side) + applies live; GET returns the persisted blob; QUERY_INPUT = live
+// bind status; RELOAD re-reads the persisted blob (manual "reload driver config").
+#define IOCTL_RAVEMIDI_SET_CONFIG \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x807, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+#define IOCTL_RAVEMIDI_GET_CONFIG \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x808, METHOD_BUFFERED, FILE_READ_DATA)
+#define IOCTL_RAVEMIDI_QUERY_INPUT \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x809, METHOD_BUFFERED, FILE_READ_DATA)
+#define IOCTL_RAVEMIDI_RELOAD_CONFIG \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x80A, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)

@@ -3168,7 +3168,19 @@
       "testsign": "Les builds actuels sont auto-signés (test-signed) : Windows ne les charge qu'avec le mode test-signing activé et Secure Boot désactivé. Une version signée par attestation Microsoft (sans étapes spéciales) est en préparation.",
       "steps": "Installation (PowerShell élevé, dans le dossier du paquet pilote — guide complet dans le README du pilote) :",
       "smartscreen": "Windows peut avertir sur les composants auto-signés (SmartScreen / éditeur inconnu). Normal pour un build open source sans certificat EV — sources et builds CI publics ; lisez le README avant de continuer.",
-      "docs": "README & source du pilote"
+      "docs": "README & source du pilote",
+      "managedHdr": "Transfert géré par le pilote",
+      "managedSub": "Le pilote lie lui-même vos contrôleurs et continue de transférer le MIDI (dans les deux sens) même quand rave-mate est fermé — la configuration vit côté noyau et survit aux redémarrages. Par entrée, il crée un port réservé « (rave-mate) » pour une reconnexion transparente plus un port THRU unidirectionnel pour votre logiciel DJ. Sync écrit chaque contrôleur activé ci-dessus dans le pilote ; celui-ci se lie au démarrage, à l'arrivée du périphérique, et réessaie tant qu'il est occupé.",
+      "sync": "Synchroniser contrôleurs → pilote",
+      "reload": "Recharger la config du pilote",
+      "bound": "transfert actif",
+      "retrying": "en attente du périphérique (essai {n})",
+      "feedback": "retour LED",
+      "noneManaged": "Aucune entrée gérée — ajoutez des contrôleurs ci-dessus, puis synchronisez.",
+      "syncedToast": "{n} entrées gérées écrites dans le pilote",
+      "reloadedToast": "Config du pilote rechargée",
+      "needControllers": "Aucun contrôleur activé avec un port à synchroniser.",
+      "queryFailed": "Ce build du pilote n'a pas encore de plan de config — mettez le pilote à jour pour le transfert géré."
     },
     "sw": {
       "hdr": "État des logiciels DJ",

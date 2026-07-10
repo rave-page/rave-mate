@@ -74,6 +74,8 @@ func (u *UI) midiDriverCard() string {
 		b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.drv.steps")) + `</p>`)
 		b.WriteString(`<pre class=midi-cmds>` + htmlEscape(driverInstallCmds) + `</pre>`)
 		b.WriteString(hint("warn", i18n.T("midictl.drv.smartscreen")))
+	} else {
+		b.WriteString(u.midiDriverManagedHTML())
 	}
 	b.WriteString(btnRow(btn(i18n.T("midictl.drv.docs"), "outline", "open-url",
 		"https://github.com/rave-page/rave-mate/tree/development/driver/ravemidi")))
@@ -82,6 +84,38 @@ func (u *UI) midiDriverCard() string {
 		badgeTx, badgeVar = i18n.T("midictl.drv.badgeOn"), "success"
 	}
 	return card(i18n.T("midictl.drv.card"), badge(badgeTx, badgeVar), b.String())
+}
+
+// midiDriverManagedHTML: managed-input live status + sync/reload. Forwarding lives
+// IN the driver (persisted kernel-side) - it survives rave-mate exit and reboots;
+// rave-mate only writes the config and reconnects via the reserved per-device port.
+func (u *UI) midiDriverManagedHTML() string {
+	var b strings.Builder
+	b.WriteString(`<div class=pb-label>` + htmlEscape(i18n.T("midictl.drv.managedHdr")) + `</div>`)
+	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.managedSub")) + `</p>`)
+	sts, err := midi.QueryDriverInputs()
+	switch {
+	case err != nil:
+		// older driver build without the config plane - honest degradation
+		b.WriteString(hint("warn", i18n.T("midictl.drv.queryFailed")))
+	case len(sts) == 0:
+		b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.noneManaged")) + `</p>`)
+	default:
+		for _, st := range sts {
+			variant, line := "warning", i18n.T("midictl.drv.retrying", i18n.A{"n": strconv.Itoa(int(st.RetryCount))})
+			if st.Bound {
+				variant, line = "success", i18n.T("midictl.drv.bound")
+				if st.FeedbackBound {
+					line += " · " + i18n.T("midictl.drv.feedback")
+				}
+			}
+			b.WriteString(statusRow(variant, st.Name, line))
+		}
+	}
+	b.WriteString(btnRow(
+		btn(i18n.T("midictl.drv.sync"), "primary", "midi-drv-sync", ""),
+		btn(i18n.T("midictl.drv.reload"), "ghost", "midi-drv-reload", "")))
+	return b.String()
 }
 
 // driverInstallCmds: dev/test-signed install, mirrors driver/ravemidi/README.md.

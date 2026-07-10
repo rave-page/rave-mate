@@ -3168,7 +3168,19 @@
       "testsign": "Aktuelle Builds sind selbstsigniert (test-signed): Windows lädt sie nur mit aktiviertem Test-Signing-Bootmodus und deaktiviertem Secure Boot. Ein Microsoft-attestierter Release (ohne Sonderschritte) ist in Arbeit.",
       "steps": "Installation (PowerShell als Administrator, im Treiber-Paketordner — komplette Anleitung im Treiber-README):",
       "smartscreen": "Windows warnt ggf. vor selbstsignierten Komponenten (SmartScreen / unbekannter Herausgeber). Bei Open-Source-Builds ohne EV-Zertifikat normal — Quellcode und CI-Builds sind öffentlich; vor dem Fortfahren README lesen.",
-      "docs": "Treiber-README & Quellcode"
+      "docs": "Treiber-README & Quellcode",
+      "managedHdr": "Treiber-verwaltete Weiterleitung",
+      "managedSub": "Der Treiber bindet deine Controller selbst und leitet MIDI (beide Richtungen) auch bei geschlossenem rave-mate weiter — die Konfiguration liegt kernelseitig und übersteht Neustarts. Pro Eingang entsteht ein reservierter \"(rave-mate)\"-Port für nahtloses Wiederverbinden plus ein Einweg-THRU-Port für die DJ-Software. Sync schreibt jeden aktivierten Controller oben in den Treiber; der Treiber bindet beim Start, bei Geräteankunft und versucht es weiter, solange das Gerät belegt ist.",
+      "sync": "Controller → Treiber synchronisieren",
+      "reload": "Treiber-Konfig neu laden",
+      "bound": "leitet weiter",
+      "retrying": "wartet auf Gerät (Versuch {n})",
+      "feedback": "LED-Feedback",
+      "noneManaged": "Noch keine verwalteten Eingänge — oben Controller anlegen, dann synchronisieren.",
+      "syncedToast": "{n} verwaltete Eingänge in den Treiber geschrieben",
+      "reloadedToast": "Treiber-Konfig neu geladen",
+      "needControllers": "Keine aktivierten Controller mit Port zum Synchronisieren.",
+      "queryFailed": "Dieser Treiber-Build hat noch keine Konfig-Ebene — Treiber aktualisieren für verwaltete Weiterleitung."
     },
     "sw": {
       "hdr": "DJ-Software-Status",

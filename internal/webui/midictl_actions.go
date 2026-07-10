@@ -1,11 +1,13 @@
 package webui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/midimap"
 )
 
@@ -19,6 +21,16 @@ import (
 //   midi-note:<wireCh>:<note>  momentary Note On (127) then Note Off - Play/Cue (buttons)
 
 func init() {
+	// driver-managed forwarding (ravemidi config plane)
+	onExact("midi-drv-sync", func(u *UI, _ actMsg) { u.midiDrvSync() })
+	onExact("midi-drv-reload", func(u *UI, _ actMsg) {
+		if err := midi.ReloadDriverConfig(); err != nil {
+			u.toast(err.Error())
+			return
+		}
+		u.toast(i18n.T("midictl.drv.reloadedToast"))
+		u.patchMain()
+	})
 	// port selector: reopen on the picked port (or "" = auto) + persist to config.
 	onExact("midi-port", func(u *UI, m actMsg) {
 		if u.svc.MIDIEmit == nil {
@@ -155,4 +167,35 @@ func parseChCC(arg string) (ch, cc byte, ok bool) {
 		return 0, 0, false
 	}
 	return byte(c), cv, true
+}
+
+// midiDrvSync writes every enabled controller mapping as a driver-managed input:
+// the driver binds the hardware itself and keeps forwarding without rave-mate.
+func (u *UI) midiDrvSync() {
+	midiCfgMu.Lock()
+	var ins []midi.DriverInputCfg
+	for _, c := range u.svc.Cfg.Features.MIDI.Controllers {
+		if !c.Enabled || c.Port == "" {
+			continue
+		}
+		ins = append(ins, midi.DriverInputCfg{
+			ID: c.Name, Name: c.Name, SourceMatch: c.Port,
+			Thru: true, Feedback: true,
+			OutNames: []string{c.Name + " THRU"},
+		})
+		if len(ins) == 8 { // RAVEMIDI_MAX_INPUTS
+			break
+		}
+	}
+	midiCfgMu.Unlock()
+	if len(ins) == 0 {
+		u.toast(i18n.T("midictl.drv.needControllers"))
+		return
+	}
+	if err := midi.SetDriverConfig(ins); err != nil {
+		u.toast(err.Error())
+		return
+	}
+	u.toast(i18n.T("midictl.drv.syncedToast", i18n.A{"n": fmt.Sprint(len(ins))}))
+	u.patchMain()
 }
