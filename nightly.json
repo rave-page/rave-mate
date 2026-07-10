@@ -1,13 +1,13 @@
 {
-  "version": "nightly-9898933",
-  "build": 51,
-  "commit": "9898933",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-51-20260710-9898933.exe",
-  "sha256": "50d902eefa5c49fd244ee633107ae457aba90e095cec98e18da44195970aecac",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-51-20260710-9898933.exe",
-  "installer_sha256": "cc1ec66ef0562a4d109393254c4f60728ee8308939b074ead6148989b9147dba",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-51-20260710-9898933",
-  "linux_sha256": "4121aba3714d80eece926d58a5e607ce9957e02d4fcda6b159026efeb6195183",
+  "version": "nightly-18615d9",
+  "build": 52,
+  "commit": "18615d9",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-52-20260710-18615d9.exe",
+  "sha256": "b8e24b2f15320963d8589b56eb9eb7ce9ac1db6a6d6f1ef42aa6fbc311de5cf2",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-52-20260710-18615d9.exe",
+  "installer_sha256": "01b045b78c143cfcb0880ed503c4597c1d763e1655f320c0e9a57e47f808306c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-52-20260710-18615d9",
+  "linux_sha256": "6aa33bcd1f779b232b541e7e0725c12404d515ea4ac54c31729aabd2937bfbf5",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-10T21:17:05Z",
-  "notes": "feat(midi): tab clarity pass - driver card w/ install steps, per-card explainers, honest software matrix"
+  "released": "2026-07-10T21:43:22Z",
+  "notes": "Merge branch 'cue-editor' into development"
 }
