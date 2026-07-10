@@ -113,7 +113,9 @@ const runtimeJS = `(function(){
       for(var i=0;i<el.children.length;i++){
         var c=el.children[i];
         if(c.id==='__toasts') continue;
-        if(!vis(c)) continue;
+        // #__modal's wrapper has zero rect (its scrim is position:fixed) - never prune it,
+        // or open dialogs vanish from ctl snapshot/click.
+        if(!vis(c) && c.id!=='__modal') continue;
         var tag=c.tagName.toLowerCase();
         var role=c.getAttribute('data-role')||c.getAttribute('role')||'';
         var own='';
