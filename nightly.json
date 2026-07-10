@@ -1,13 +1,13 @@
 {
-  "version": "nightly-3dd4e01",
-  "build": 46,
-  "commit": "3dd4e01",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-46-20260710-3dd4e01.exe",
-  "sha256": "1cd84b218cb12ba1b226230334230bb69097f7eddc68aa64a7b365df192eca7d",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-46-20260710-3dd4e01.exe",
-  "installer_sha256": "5fccd86a4175413b60b6a4c24dc2ef5f8ef028fad252db07c4d402872775f505",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-46-20260710-3dd4e01",
-  "linux_sha256": "6d9026e206a5b79879520a18f705e332c502ae8e722db8d81a6d277b929f57fb",
+  "version": "nightly-f4769f1",
+  "build": 47,
+  "commit": "f4769f1",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-47-20260710-f4769f1.exe",
+  "sha256": "d50b858198471103c9e0d630e38ae648c3b447632688cdc3f83720c53a3b2bff",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-47-20260710-f4769f1.exe",
+  "installer_sha256": "c8df4e19b77c296b306e2ab4b5906edfdffcb8179a0ae9437053cf9c33a4a689",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-47-20260710-f4769f1",
+  "linux_sha256": "d4148ed57a0cba1417bf15bdd13e1be83c64483c1f997c765f11cc998b9b535f",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-10T14:49:10Z",
-  "notes": "test(midi): ravemidi on-hardware bring-up test (manual tag)"
+  "released": "2026-07-10T15:34:20Z",
+  "notes": "docs(driver): on-hardware bring-up log — stack green to KS interface; wdmaud last-mile bug isolated"
 }
