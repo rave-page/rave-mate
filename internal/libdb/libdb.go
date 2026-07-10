@@ -169,6 +169,10 @@ func Open(path string) (*DB, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("apply track-art schema: %w", err)
 	}
+	if _, err := sdb.Exec(dropsSchema); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("apply drops schema: %w", err)
+	}
 	// Additive migrations for pre-existing DBs (CREATE IF NOT EXISTS skips new columns).
 	// "duplicate column" = already migrated; ignored.
 	for _, m := range []string{
