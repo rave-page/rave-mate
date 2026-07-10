@@ -8,6 +8,12 @@ package midi
 // VirtualAvailable reports false: no teVirtualMIDI driver here.
 func VirtualAvailable() bool { return false }
 
+// OneWayAvailable reports false: no one-way virtual-port backend here.
+func OneWayAvailable() bool { return false }
+
+// OpenOneWayOut always fails on unsupported platforms.
+func OpenOneWayOut(string) (OutPort, error) { return nil, ErrUnsupported }
+
 // VirtualOut is the stub one-way port type.
 type VirtualOut struct{ name string }
 

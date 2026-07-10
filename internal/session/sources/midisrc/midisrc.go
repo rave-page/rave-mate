@@ -315,11 +315,11 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 		if o, ok := s.outs[name]; ok {
 			return o
 		}
-		// Built-in one-way virtual port (teVirtualMIDI): DJ apps see an INPUT-only
-		// "rave-mate" port with no output endpoint, so their automatic LED echo can't
-		// loop back (rekordbox mirrors every indicator's MIDI IN code to MIDI OUT).
+		// Built-in one-way virtual port (ravemidi driver, else teVirtualMIDI): DJ apps see
+		// an INPUT-only "rave-mate" port with no output endpoint, so their automatic LED
+		// echo can't loop back (rekordbox mirrors every indicator's MIDI IN code to OUT).
 		if name == midi.VirtualDJSentinel {
-			v, err := midi.OpenVirtualOut(midi.VirtualDJPortName)
+			v, err := midi.OpenOneWayOut(midi.VirtualDJPortName)
 			if err != nil {
 				s.log.Warn(srcLog, "one-way virtual port failed", map[string]any{"error": err.Error()})
 				return nil

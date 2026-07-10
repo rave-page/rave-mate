@@ -148,10 +148,11 @@ static NTSTATUS RaveCreateCtlDevice(RAVE_ADAPTER* a)
     RtlInitUnicodeString(&dos, RAVEMIDI_CTL_DOSNAME);
 
     PDEVICE_OBJECT dev = nullptr;
-    // SDDL: SYSTEM + Administrators full; no world access (control plane is admin-only,
-    // matching the rave-mate service running elevated). Tightened further at install
-    // via INF to also grant the service SID.
-    DECLARE_CONST_UNICODE_STRING(sddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
+    // SDDL: SYSTEM + Administrators full; INTERACTIVE read/write (all IOCTLs demand at
+    // most FILE_READ_DATA|FILE_WRITE_DATA) so the unelevated rave-mate desktop app can
+    // create ports - same posture as teVirtualMIDI. No network/service-account access;
+    // RAVEMIDI_MAX_PORTS / _MAX_MIRROR cap pool an abusive local user could pin.
+    DECLARE_CONST_UNICODE_STRING(sddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
     static const GUID clsGuid = RAVEMIDI_CTL_GUID;
     NTSTATUS st = IoCreateDeviceSecure(a->Fdo->DriverObject, sizeof(RAVE_CTL_EXT), &nt,
                                        RAVEMIDI_DEVICE_TYPE, FILE_DEVICE_SECURE_OPEN,

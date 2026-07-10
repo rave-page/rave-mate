@@ -66,7 +66,7 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 	thruOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
 	// Built-in one-way port first (recommended): the DJ app sees an input-only port, so
 	// its automatic LED echo has no output endpoint to loop back through.
-	if midi.VirtualAvailable() {
+	if midi.OneWayAvailable() {
 		thruOpts = append(thruOpts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
 	}
 	if u.svc.MIDIEmit != nil {
@@ -221,7 +221,7 @@ func (u *UI) midiBridgeCard() string {
 		inOpts = append(inOpts, [2]string{p, p})
 	}
 	outOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
-	if midi.VirtualAvailable() { // same one-way port as THRU (shared instance in the child)
+	if midi.OneWayAvailable() { // same one-way port as THRU (shared instance in the child)
 		outOpts = append(outOpts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
 	}
 	if u.svc.MIDIEmit != nil {

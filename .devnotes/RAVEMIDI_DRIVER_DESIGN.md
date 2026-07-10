@@ -67,8 +67,9 @@ WRITE → FIFO → `IPortMidi::Notify` → port pulls via stream `Read` → wdma
 client. Loopback = render FIFO wired to sibling capture. For rave-mate's one-way use, only
 CREATE_PORT(OUT_ONLY→apps-see-input) + WRITE matter; READ enables future bidi/learn.
 
-Security: control device ACL'd to admins + the rave-mate service SID (SDDL in INF
-AddReg/registry); ports created per-session; names sanitized (len ≤31, no control chars).
+Security: control device SDDL = SYSTEM/Admins full + INTERACTIVE read/write (all IOCTLs
+demand ≤ FILE_READ|WRITE_DATA), so the unelevated desktop app can create ports — same
+posture as teVirtualMIDI; port/mirror caps bound pool. Names sanitized (len ≤31).
 Multi-client on the winmm side: raise pin instance cap >1, merge at **message granularity**
 (parse running status/sysex before interleave).
 

@@ -35,8 +35,9 @@ func (u *UI) renderMIDICtl() string {
 func (u *UI) midiPortCard() string {
 	e := u.svc.MIDIEmit
 	opts := [][2]string{{"", i18n.T("midictl.autoPort")}}
-	// Built-in one-way port first: kills the DJ app's LED-echo self-loop (see midi.VirtualOut).
-	if midi.VirtualAvailable() {
+	// Built-in one-way port first: kills the DJ app's LED-echo self-loop (ravemidi driver
+	// preferred, teVirtualMIDI fallback - see midi.OpenOneWayOut).
+	if midi.OneWayAvailable() {
 		opts = append(opts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
 	}
 	for _, p := range e.Ports() {

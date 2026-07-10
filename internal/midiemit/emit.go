@@ -56,9 +56,9 @@ func New(log *logbus.Bus, want string) *Emitter {
 // (LoopBe1), then the first available port.
 func openMidiOut(substr string) (Out, string, error) {
 	if substr == midi.VirtualDJSentinel {
-		// One-way teVirtualMIDI port: the DJ app sees an INPUT-only port, so its
-		// automatic LED echo has no output endpoint to loop back through.
-		v, err := midi.OpenVirtualOut(midi.VirtualMixerPortName)
+		// One-way virtual port (ravemidi driver, else teVirtualMIDI): the DJ app sees an
+		// INPUT-only port, so its automatic LED echo has no output endpoint to loop through.
+		v, err := midi.OpenOneWayOut(midi.VirtualMixerPortName)
 		if err != nil {
 			return nil, "", err
 		}
