@@ -21,13 +21,15 @@ var tagFieldColumn = map[string]string{
 	tagwrite.FieldKey:     "key",
 	tagwrite.FieldGenre:   "genre",
 	tagwrite.FieldComment: "comment",
+	tagwrite.FieldRating:  "rating",
 }
 
 // ErrUnsupported is returned for a file format tagwrite can't write yet (m4a/wav/aiff/…).
 var ErrUnsupported = errors.New("tag write unsupported for this format")
 
 // desiredFromTrack builds the tag set to write from a track's analysis (non-empty only).
-// Fields: BPM, key, genre, comment - analysis/curation only; title/artist/album untouched.
+// Fields: BPM, key, genre, comment, rating - analysis/curation only; title/artist/album
+// stay untouched (those flow only through tagfix / an explicit editor).
 func desiredFromTrack(t musiclib.Track) tagwrite.Tags {
 	d := tagwrite.Tags{}
 	if t.BPM > 0 {
@@ -42,16 +44,36 @@ func desiredFromTrack(t musiclib.Track) tagwrite.Tags {
 	if t.Comment != "" {
 		d[tagwrite.FieldComment] = t.Comment
 	}
+	if t.Rating > 0 {
+		d[tagwrite.FieldRating] = strconv.Itoa(rating255(t.Rating))
+	}
 	return d
+}
+
+// rating255 normalizes a library rating to the canonical tag scale: sources store either
+// 0-5 stars (Rekordbox/VirtualDJ) or Traktor's raw 0-255 (musiclib.Track.Rating comment).
+func rating255(r int) int {
+	if r <= 5 {
+		return r * 51
+	}
+	if r > 255 {
+		return 255
+	}
+	return r
 }
 
 // Apply writes the track's analysis into its file and records a revertible edit. Returns
 // the fields written. A no-op (empty map) if the track has no analysis to write.
 func Apply(db *libdb.DB, t musiclib.Track) (tagwrite.Tags, error) {
+	return ApplyTags(db, t, desiredFromTrack(t))
+}
+
+// ApplyTags writes an explicit tag set (e.g. tagfix repairs) into t's file with the same
+// revertible snapshot + change_log mirror as Apply. One atomic write per call.
+func ApplyTags(db *libdb.DB, t musiclib.Track, desired tagwrite.Tags) (tagwrite.Tags, error) {
 	if !tagwrite.Supported(t.Path) {
 		return nil, ErrUnsupported
 	}
-	desired := desiredFromTrack(t)
 	if len(desired) == 0 {
 		return desired, nil
 	}
