@@ -52,8 +52,18 @@ func New(log *logbus.Bus, want string) *Emitter {
 }
 
 // openMidiOut is the production Out factory (winmm on Windows; ErrUnsupported elsewhere): the
-// requested substring first, then "loopbe" (LoopBe1), then the first available port.
+// built-in one-way virtual port when selected, else the requested substring, then "loopbe"
+// (LoopBe1), then the first available port.
 func openMidiOut(substr string) (Out, string, error) {
+	if substr == midi.VirtualDJSentinel {
+		// One-way teVirtualMIDI port: the DJ app sees an INPUT-only port, so its
+		// automatic LED echo has no output endpoint to loop back through.
+		v, err := midi.OpenVirtualOut(midi.VirtualMixerPortName)
+		if err != nil {
+			return nil, "", err
+		}
+		return v, v.PortName(), nil
+	}
 	if want := strings.TrimSpace(substr); want != "" {
 		if o, err := midi.OpenOutput(want); err == nil {
 			return o, o.Name, nil

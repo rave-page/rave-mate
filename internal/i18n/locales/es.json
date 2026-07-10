@@ -285,6 +285,9 @@
     "wave-nav": {
       "body": "La forma de onda es la superficie de desplazamiento: haz clic en cualquier punto para saltar ahí, desplaza la rueda del ratón para acercar el zoom alrededor del cursor (hasta 50×), y arrastra para desplazarte con el zoom activo. + / − / Ajustar hacen lo mismo desde los botones. Las líneas violeta son inicios de pista del tracklist de la sesión, el ámbar es el último fader abajo, y las líneas de color en las pistas de la biblioteca son tus puntos de cue de DJ.\n\nLos dos chips superpuestos sobre la forma de onda enseñan a medida que avanzas: el de la izquierda muestra la codificación de la fuente (pasa el cursor para ver códec, frecuencia de muestreo, bitrate y tamaño de archivo), el de la derecha el volumen integrado de la pista (pasa el cursor para ver toda la explicación de EBU R128 - integrado vs momentáneo, objetivos de streaming, pico real). La lectura junto a los botones de zoom sigue tu cursor con el tiempo y el volumen momentáneo en esa posición exacta.\n\nEn modo de edición la tira gana tres carriles de puntero: el borde superior arrastra el tirador IN, el borde inferior arrastra OUT, y el medio se mantiene como clic para desplazar - así puedes escuchar y recortar sin salir nunca de la forma de onda.",
       "title": "Navegación por la forma de onda"
+    },
+    "midi-thru": {
+      "body": "\n\nMejor destino THRU (requiere el driver de loopMIDI): el puerto unidireccional de rave-mate. Tu software de DJ ve un puerto de solo entrada llamado 'rave-mate' - NO existe un punto de salida correspondiente, así que el eco LED automático (rekordbox reenvía el código MIDI IN de cada indicador) no tiene por dónde volver y el software nunca reacciona a su propia respuesta. Selecciona 'rave-mate' como dispositivo MIDI en el software de DJ."
     }
   },
   "library": {
@@ -2893,5 +2896,10 @@
     "controlling": "Controlando",
     "thisComputer": "Este equipo",
     "loading": "Cargando…"
+  },
+  "midictl": {
+    "in": {
+      "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)"
+    }
   }
 }

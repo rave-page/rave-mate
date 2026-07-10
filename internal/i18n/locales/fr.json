@@ -285,6 +285,9 @@
     "wave-nav": {
       "body": "La forme d'onde est la surface de navigation : cliquez n'importe où pour y sauter, faites défiler la molette pour zoomer autour du curseur (jusqu'à 50×), et faites glisser pour vous déplacer une fois zoomé. + / − / Ajuster font de même depuis les boutons. Les lignes violettes sont les débuts de piste de la tracklist de session, l'ambre est le dernier fader baissé, et les lignes colorées sur les pistes de la bibliothèque sont vos points de repère DJ.\n\nLes deux pastilles superposées à la forme d'onde vous informent au fil de l'écoute : celle de gauche montre l'encodage source (survolez pour le codec, la fréquence d'échantillonnage, le débit et la taille du fichier), celle de droite le volume intégré de la piste (survolez pour toute l'histoire EBU R128 - intégré vs momentané, cibles de streaming, true peak). L'affichage à côté des boutons de zoom suit votre curseur avec le temps et le volume momentané à cette position exacte.\n\nEn mode édition, la bande gagne trois couloirs de pointeur : le bord supérieur fait glisser la poignée IN, le bord inférieur fait glisser OUT, et le milieu reste clic-pour-naviguer - vous pouvez donc auditionner et rogner sans jamais quitter la forme d'onde.",
       "title": "Navigation dans la forme d'onde"
+    },
+    "midi-thru": {
+      "body": "\n\nMeilleure cible THRU (pilote loopMIDI requis) : le port unidirectionnel rave-mate. Votre logiciel DJ voit un port d'entrée seul nommé 'rave-mate' - il n'existe AUCUN point de sortie correspondant, donc l'écho LED automatique (rekordbox renvoie le code MIDI IN de chaque indicateur) ne peut pas boucler et le logiciel ne réagit jamais à son propre retour. Sélectionnez 'rave-mate' comme périphérique MIDI dans le logiciel DJ."
     }
   },
   "library": {
@@ -2893,5 +2896,10 @@
     "controlling": "Contrôle",
     "thisComputer": "Cet ordinateur",
     "loading": "Chargement…"
+  },
+  "midictl": {
+    "in": {
+      "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)"
+    }
   }
 }

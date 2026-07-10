@@ -7,6 +7,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/midimap"
 )
 
@@ -57,9 +58,17 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 	idx := strconv.Itoa(i)
 	portOpts := [][2]string{{"", i18n.T("midictl.in.pickPort")}}
 	for _, p := range u.svc.MIDISource.InputPorts() {
+		if p == midi.VirtualDJPortName || p == midi.VirtualMixerPortName {
+			continue // our own one-way ports - reading them back would loop through rave-mate
+		}
 		portOpts = append(portOpts, [2]string{p, p})
 	}
 	thruOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
+	// Built-in one-way port first (recommended): the DJ app sees an input-only port, so
+	// its automatic LED echo has no output endpoint to loop back through.
+	if midi.VirtualAvailable() {
+		thruOpts = append(thruOpts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
+	}
 	if u.svc.MIDIEmit != nil {
 		for _, p := range u.svc.MIDIEmit.Ports() {
 			thruOpts = append(thruOpts, [2]string{p, p})
@@ -114,6 +123,15 @@ func (u *UI) midiThruWarn(self int, c config.MIDIControllerMap) string {
 	tp := strings.ToLower(strings.TrimSpace(c.ThruPort))
 	if tp == "" {
 		return ""
+	}
+	if tp == strings.ToLower(midi.VirtualDJSentinel) {
+		// One-way port: no output endpoint exists, so nothing can loop - unless the
+		// controller INPUT is (hand-configured to) our own virtual port.
+		if !strings.EqualFold(strings.TrimSpace(c.Port), midi.VirtualDJPortName) {
+			return ""
+		}
+		return statusRow("warn", i18n.T("midictl.in.thruClash"), i18n.T("midictl.in.thruClashShort")) +
+			`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.thruClashHint")) + `</p>`
 	}
 	same := func(p string) bool {
 		p = strings.ToLower(strings.TrimSpace(p))
@@ -197,9 +215,15 @@ func (u *UI) midiBridgeCard() string {
 	br := u.svc.Cfg.Features.MIDI.Bridge
 	inOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
 	for _, p := range u.svc.MIDISource.InputPorts() {
+		if p == midi.VirtualDJPortName || p == midi.VirtualMixerPortName {
+			continue // our own one-way ports - reading them back would loop through rave-mate
+		}
 		inOpts = append(inOpts, [2]string{p, p})
 	}
 	outOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
+	if midi.VirtualAvailable() { // same one-way port as THRU (shared instance in the child)
+		outOpts = append(outOpts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
+	}
 	if u.svc.MIDIEmit != nil {
 		for _, p := range u.svc.MIDIEmit.Ports() {
 			outOpts = append(outOpts, [2]string{p, p})

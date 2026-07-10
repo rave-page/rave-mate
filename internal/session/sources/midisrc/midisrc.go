@@ -155,8 +155,8 @@ type Source struct {
 	bridge      BridgeSpec
 
 	// Opened in Start (single goroutine, before pumps launch), read by pumps/injectPump.
-	outs      map[string]*midi.Output
-	bridgeOut *midi.Output
+	outs      map[string]midi.OutPort
+	bridgeOut midi.OutPort
 
 	// Native MIDI-learn one-shot capture. Armed by ArmLearn; the next active-edge message on
 	// the target port (or any, if learnPort=="") fires the callback and disarms.
@@ -301,19 +301,32 @@ func (s *Source) Capabilities() []session.Capability {
 type portBinding struct {
 	name     string
 	decoders []decoder
-	thruOut  *midi.Output // forward raw input here (THRU: controller → DJ app); nil = off
+	thruOut  midi.OutPort // forward raw input here (THRU: controller → DJ app); nil = off
 }
 
 // Start opens the port(s) + output(s) and pumps messages into the decoders until ctx is
 // cancelled.
 func (s *Source) Start(ctx context.Context, emit func(session.Observation)) error {
-	s.outs = map[string]*midi.Output{}
-	openOut := func(name string) *midi.Output {
+	s.outs = map[string]midi.OutPort{}
+	openOut := func(name string) midi.OutPort {
 		if name == "" {
 			return nil
 		}
 		if o, ok := s.outs[name]; ok {
 			return o
+		}
+		// Built-in one-way virtual port (teVirtualMIDI): DJ apps see an INPUT-only
+		// "rave-mate" port with no output endpoint, so their automatic LED echo can't
+		// loop back (rekordbox mirrors every indicator's MIDI IN code to MIDI OUT).
+		if name == midi.VirtualDJSentinel {
+			v, err := midi.OpenVirtualOut(midi.VirtualDJPortName)
+			if err != nil {
+				s.log.Warn(srcLog, "one-way virtual port failed", map[string]any{"error": err.Error()})
+				return nil
+			}
+			s.outs[name] = v
+			s.log.Info(srcLog, "MIDI-out open (one-way virtual)", map[string]any{"port": v.PortName()})
+			return v
 		}
 		o, err := midi.OpenOutput(name)
 		if err != nil {

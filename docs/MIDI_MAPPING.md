@@ -21,6 +21,32 @@ links all three:
 | [LoopBe1](https://www.nerds.de/en/loopbe1.html) | 1 (LoopBe30 = 30) | freeware | Single port; fine for a one-app map, but you'll need a second port to read a controller AND feed a DJ app. |
 | [Windows MIDI Services](https://microsoft.github.io/MIDI/) | loopback A/B + **multi-client** | **open source (MIT)** | The future built-in stack. Multi-client = two apps open one controller directly, **no loopback/THRU at all**. rave-mate uses it **automatically** once Windows enables it. ⚠️ **Do not force-enable the classic-app switch** (the SDK's `midifixreg`): the service itself already ships in-box, but the winmm handoff is staged-rollout-gated - Windows **reverts** the forced `Drivers32` rewiring on the next boot while leaving the device-transfer flag set, a half-state where **every classic MIDI port disappears** (new-API apps keep working; winmm apps - most DJ software and rave-mate - see nothing). Recovery needs a registry restore + reboot. Just wait for the rollout to flip it. |
 
+## One-way port: stop the DJ app reacting to its own LED echo — shipped
+
+A loopMIDI/LoopBe cable is **bidirectional**: the DJ app opens both ends, and rekordbox
+auto-mirrors every indicator function's MIDI IN code back out the same-named output (its
+MIDI LEARN guide: *"the same code as the MIDI IN will be sent automatically to the MIDI
+OUT"* — not disableable). On a cable that echo loops straight back into the app: play
+flickers, buttons re-trigger.
+
+Fix: with the **loopMIDI driver installed**, rave-mate creates its own **one-way virtual
+port** via the driver's `teVirtualMIDI` API (`TE_VM_FLAGS_INSTANTIATE_TX_ONLY` — only the
+"midi-in" half exists). The DJ app sees an **input-only** port named `rave-mate`; there is
+no matching output endpoint, so the echo has nowhere to go. Structural — no filtering, no
+timing heuristics.
+
+Use it: MIDI tab → controller **THRU** (or DJ-bridge **to DJ** / mixer **output port**) →
+pick **"rave-mate one-way port - no echo (recommended)"**, then select `rave-mate` as the
+MIDI device in the DJ software. The option only appears when the loopMIDI driver is
+present (`teVirtualMIDI64.dll` in System32); the DLL is loaded at runtime and never
+bundled.
+
+> Licensing note (maintainers): the virtualMIDI SDK requires clearance from Tobias
+> Erichsen before distributing software that integrates it — see
+> [virtualMIDI SDK](https://www.tobias-erichsen.de/software/virtualmidi/virtualmidi-sdk.html).
+> rave-mate ships nothing of the SDK (it calls the DLL the user installed with loopMIDI),
+> but request clearance (info@tobias-erichsen.de) before a release that advertises this.
+
 ## Setup (Windows)
 
 1. Install a virtual MIDI port - **loopMIDI** (or any driver above). Create one port, e.g.

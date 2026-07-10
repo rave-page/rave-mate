@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/midimap"
 )
 
@@ -34,6 +35,10 @@ func (u *UI) renderMIDICtl() string {
 func (u *UI) midiPortCard() string {
 	e := u.svc.MIDIEmit
 	opts := [][2]string{{"", i18n.T("midictl.autoPort")}}
+	// Built-in one-way port first: kills the DJ app's LED-echo self-loop (see midi.VirtualOut).
+	if midi.VirtualAvailable() {
+		opts = append(opts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
+	}
 	for _, p := range e.Ports() {
 		opts = append(opts, [2]string{p, p})
 	}

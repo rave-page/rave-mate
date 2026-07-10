@@ -208,7 +208,7 @@
     },
     "midi-thru": {
       "title": "THRU - share one controller with your DJ software",
-      "body": "Because Windows lets only one app open a hardware MIDI input, opening the controller in rave-mate would normally lock your DJ software out of it.\n\nTHRU solves that: rave-mate opens the controller and re-sends every message it receives to a loopMIDI port. Point your DJ software's controller mapping at that loopMIDI port and it still gets everything, exactly as before, while rave-mate reads it too. In other words rave-mate becomes the splitter - you do NOT need MIDI-OX or any other router.\n\nLeave THRU off if your controller's driver is multi-client, or if you're on Windows MIDI Services - then both apps can open the hardware directly and no re-routing is needed."
+      "body": "Because Windows lets only one app open a hardware MIDI input, opening the controller in rave-mate would normally lock your DJ software out of it.\n\nTHRU solves that: rave-mate opens the controller and re-sends every message it receives to a loopMIDI port. Point your DJ software's controller mapping at that loopMIDI port and it still gets everything, exactly as before, while rave-mate reads it too. In other words rave-mate becomes the splitter - you do NOT need MIDI-OX or any other router.\n\nLeave THRU off if your controller's driver is multi-client, or if you're on Windows MIDI Services - then both apps can open the hardware directly and no re-routing is needed.\n\nBest THRU target (needs the loopMIDI driver): the rave-mate one-way port. Your DJ software sees an input-only port named 'rave-mate' - there is NO matching output endpoint, so the app's automatic LED echo (rekordbox mirrors every indicator's MIDI IN code back out) has nowhere to loop and it can never react to its own feedback. Select 'rave-mate' as the MIDI device in the DJ software."
     },
     "midi-learn-grid": {
       "title": "The learn grid",
@@ -3055,7 +3055,8 @@
       "needPort": "Pick this controller's MIDI port first",
       "listening": "Listening - move {control} for CH{ch} on your controller...",
       "learnTimeout": "No input captured - try again and move the control",
-      "learned": "Learned {midi}"
+      "learned": "Learned {midi}",
+      "thruVirtual": "rave-mate one-way port - no echo (recommended)"
     },
     "bridge": {
       "card": "DJ bridge (peer control)",

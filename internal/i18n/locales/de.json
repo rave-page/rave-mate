@@ -285,6 +285,9 @@
     "wave-nav": {
       "body": "Die Wellenform ist die Springfläche: klicke irgendwo, um dorthin zu springen, scrolle mit dem Mausrad, um um den Cursor zu zoomen (bis zu 50×), und ziehe, um im gezoomten Zustand zu schwenken. + / − / Anpassen tun dasselbe über die Buttons. Violette Linien sind Track-Starts aus der Session-Trackliste, Bernstein ist der letzte Fader-Down, und farbige Linien auf Library-Tracks sind deine DJ-Cue-Punkte.\n\nDie zwei Chips über der Wellenform lehren dich unterwegs: der linke zeigt die Quellkodierung (Hover für Codec, Sample-Rate, Bitrate und Dateigröße), der rechte die integrierte Lautheit des Tracks (Hover für die volle EBU-R128-Geschichte - integriert vs. momentan, Streaming-Ziele, True Peak). Die Anzeige neben den Zoom-Buttons folgt deinem Cursor mit der Zeit und der momentanen Lautheit an genau dieser Position.\n\nIm Bearbeitungsmodus erhält der Streifen drei Zeiger-Bahnen: die obere Kante zieht den IN-Griff, die untere Kante zieht OUT, und die Mitte bleibt Klick-zum-Springen - so kannst du vorhören und trimmen, ohne je die Wellenform zu verlassen.",
       "title": "Wellenform-Navigation"
+    },
+    "midi-thru": {
+      "body": "\n\nBestes THRU-Ziel (loopMIDI-Treiber nötig): der rave-mate Einweg-Port. Deine DJ-Software sieht einen reinen Eingangs-Port namens 'rave-mate' - es gibt KEINEN passenden Ausgangs-Endpunkt, also kann ihr automatisches LED-Echo (rekordbox spiegelt jeden Indicator-Code zurück) nirgends zurücklaufen und sie reagiert nie auf ihr eigenes Feedback. In der DJ-Software 'rave-mate' als MIDI-Gerät wählen."
     }
   },
   "library": {
@@ -2893,5 +2896,10 @@
     "controlling": "Steuert",
     "thisComputer": "Dieser Computer",
     "loading": "Wird geladen…"
+  },
+  "midictl": {
+    "in": {
+      "thruVirtual": "rave-mate Einweg-Port - kein Echo (empfohlen)"
+    }
   }
 }
