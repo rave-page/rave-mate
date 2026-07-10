@@ -13,6 +13,14 @@ import (
 	"rave.page/mate/internal/musiclib"
 )
 
+// NOTE - no UpdateGridFixes here, on purpose. master.db has NO beatgrid table: grids live in
+// the per-track binary ANLZ analysis files (ANLZnnnn.DAT "PQTZ" beat list, .EXT "PQT2")
+// referenced by djmdContent's analysis path; djmdContent only carries an integer BPM (x100)
+// display value. Updating that column alone would desync the shown BPM from the grid decks
+// actually quantize to, and a correct write means rewriting BOTH ANLZ binaries in lockstep -
+// a separate format implementation with real corruption risk. Grid fixes therefore go through
+// rekordbox.xml (musiclib.ApplyGridFixesRekordboxXML) - Rekordbox's supported import path.
+
 // InsertResult reports a master.db insert.
 type InsertResult struct {
 	Inserted int `json:"inserted"`
