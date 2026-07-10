@@ -1,22 +1,28 @@
 // ravemidi adapter: DriverEntry, PortCls AddDevice, control device + IOCTL
 // dispatch, dynamic-port manager. SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// SCAFFOLD: structure + control-plane + port lifecycle are here; the KS streaming
-// internals (capture Notify drain, mirror KS-client tap) are marked TODO and land
-// with the miniport data path. Not yet buildable end-to-end. See
-// ../../.devnotes/RAVEMIDI_DRIVER_DESIGN.md.
+// Virtual-port core is complete: control plane, dynamic subdevice register/
+// unregister, winmm FriendlyName stamp, and the cancel-safe IOCTL_READ pend.
+// Mirror-tap (driver-level controller splitter) lives in mirror.cpp.
+// See ../../.devnotes/RAVEMIDI_DRIVER_DESIGN.md.
 
 #include <portcls.h>
 #include <ntstrsafe.h>
 #include <wdmsec.h>
+#include <devpkey.h>
 #include "ioctl.h"
 #include "miniport.h"
+
+#ifndef LOCALE_NEUTRAL
+#define LOCALE_NEUTRAL 0
+#endif
 
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 
 // -------- global port registry (one adapter devnode, N virtual ports) ----------
 typedef struct _RAVE_ADAPTER {
     PDEVICE_OBJECT Fdo;
+    PDEVICE_OBJECT Pdo;               // for IoGetDeviceInterfaces (FriendlyName stamp)
     FAST_MUTEX PortsLock;             // guards Ports list + IdSeq
     LIST_ENTRY Ports;                 // RAVE_PORT.Link
     ULONG IdSeq;
@@ -51,6 +57,7 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
     // for our control device (routed by DeviceExtension tag in RaveCtlDispatch).
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RaveCtlDispatch;
     DriverObject->MajorFunction[IRP_MJ_CREATE] = RaveCtlDispatch;
+    DriverObject->MajorFunction[IRP_MJ_CLEANUP] = RaveCtlDispatch;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = RaveCtlDispatch;
     g_PcUnload = DriverObject->DriverUnload;
     DriverObject->DriverUnload = RaveUnload;
@@ -73,6 +80,9 @@ VOID RaveUnload(PDRIVER_OBJECT DriverObject)
         }
         // Ports are torn down by handle cleanup before unload (driver can't unload
         // with open handles); the list is empty here in the normal path.
+        if (a->Pdo) {
+            ObDereferenceObject(a->Pdo);
+        }
         ExFreePoolWithTag(a, RAVE_TAG);
     }
     if (g_PcUnload) {
@@ -106,11 +116,15 @@ static NTSTATUS RaveStartDevice(PDEVICE_OBJECT DeviceObject, PIRP Irp, PRESOURCE
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     a->Fdo = DeviceObject;
+    a->Pdo = IoGetLowerDeviceObject(DeviceObject);  // PDO for interface enum; deref in unload
     a->IdSeq = 0;
     ExInitializeFastMutex(&a->PortsLock);
     InitializeListHead(&a->Ports);
     NTSTATUS st = RaveCreateCtlDevice(a);
     if (!NT_SUCCESS(st)) {
+        if (a->Pdo) {
+            ObDereferenceObject(a->Pdo);
+        }
         ExFreePoolWithTag(a, RAVE_TAG);
         return st;
     }
@@ -187,6 +201,130 @@ static BOOLEAN NameSane(const WCHAR* n)
     return (len > 0 && len < RAVEMIDI_MAX_NAME) ? TRUE : FALSE;  // non-empty, NUL-terminated in-bounds
 }
 
+// -------- winmm FriendlyName stamp --------
+// After PcRegisterSubdevice, set DEVPKEY_DeviceInterface_FriendlyName on the port's
+// KSCATEGORY_AUDIO interface so wdmaud reports p->Name in MIDIINCAPS.szPname (else it
+// falls back to a generic default). Best-effort: the port still works if this fails.
+static SIZE_T RaveWcsLen(PCWSTR s)  // no CRT dep (NODEFAULTLIB kernel link)
+{
+    SIZE_T n = 0;
+    while (s[n]) {
+        n++;
+    }
+    return n;
+}
+
+#pragma code_seg("PAGE")
+static VOID StampFriendlyName(RAVE_ADAPTER* a, PCWSTR refString, PCWSTR name)
+{
+    PAGED_CODE();
+    if (!a->Pdo) {
+        return;
+    }
+    PWSTR list = nullptr;
+    NTSTATUS st = IoGetDeviceInterfaces(&KSCATEGORY_AUDIO, a->Pdo,
+                                        DEVICE_INTERFACE_INCLUDE_NONACTIVE, &list);
+    if (!NT_SUCCESS(st) || !list) {
+        return;
+    }
+    UNICODE_STRING ref;
+    RtlInitUnicodeString(&ref, refString);
+    ULONG nameBytes = (ULONG)((RaveWcsLen(name) + 1) * sizeof(WCHAR));
+    for (PWSTR sym = list; *sym; sym += RaveWcsLen(sym) + 1) {
+        // The interface symlink ends with "\<refString>" — match the tail exactly so
+        // "RavePort1" doesn't match "RavePort10".
+        PCWSTR tail = nullptr;
+        for (PCWSTR c = sym; *c; c++) {
+            if (*c == L'\\') {
+                tail = c + 1;
+            }
+        }
+        if (!tail) {
+            continue;
+        }
+        UNICODE_STRING t;
+        RtlInitUnicodeString(&t, tail);
+        if (!RtlEqualUnicodeString(&t, &ref, TRUE)) {
+            continue;
+        }
+        UNICODE_STRING symU;
+        RtlInitUnicodeString(&symU, sym);
+        IoSetDeviceInterfacePropertyData(&symU, &DEVPKEY_DeviceInterface_FriendlyName,
+            LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING,
+            nameBytes, (PVOID)name);
+    }
+    ExFreePool(list);
+}
+#pragma code_seg()
+
+// -------- cancel-safe queue for pended IOCTL_RAVEMIDI_READ IRPs --------
+// IRPs park here until an app render stream Writes (miniport -> RavePortDeliverFromApp
+// dequeues + completes). Cancellation + handle-close are handled by the CSQ / CLEANUP.
+static IO_CSQ_INSERT_IRP RaveCsqInsert;
+static IO_CSQ_REMOVE_IRP RaveCsqRemove;
+static IO_CSQ_PEEK_NEXT_IRP RaveCsqPeek;
+static IO_CSQ_ACQUIRE_LOCK RaveCsqAcquireLock;
+static IO_CSQ_RELEASE_LOCK RaveCsqReleaseLock;
+static IO_CSQ_COMPLETE_CANCELED_IRP RaveCsqCompleteCanceled;
+
+static VOID RaveCsqInsert(PIO_CSQ Csq, PIRP Irp)
+{
+    RAVE_PORT* p = CONTAINING_RECORD(Csq, RAVE_PORT, ReadCsq);
+    InsertTailList(&p->ReadIrps, &Irp->Tail.Overlay.ListEntry);
+}
+static VOID RaveCsqRemove(PIO_CSQ, PIRP Irp)
+{
+    RemoveEntryList(&Irp->Tail.Overlay.ListEntry);
+}
+static PIRP RaveCsqPeek(PIO_CSQ Csq, PIRP Irp, PVOID Context)
+{
+    UNREFERENCED_PARAMETER(Context);
+    RAVE_PORT* p = CONTAINING_RECORD(Csq, RAVE_PORT, ReadCsq);
+    PLIST_ENTRY next = Irp ? Irp->Tail.Overlay.ListEntry.Flink : p->ReadIrps.Flink;
+    if (next == &p->ReadIrps) {
+        return nullptr;
+    }
+    return CONTAINING_RECORD(next, IRP, Tail.Overlay.ListEntry);
+}
+_IRQL_raises_(DISPATCH_LEVEL)
+static VOID RaveCsqAcquireLock(PIO_CSQ Csq, PKIRQL Irql)
+{
+    RAVE_PORT* p = CONTAINING_RECORD(Csq, RAVE_PORT, ReadCsq);
+    KeAcquireSpinLock(&p->ReadLock, Irql);
+}
+_IRQL_requires_(DISPATCH_LEVEL)
+static VOID RaveCsqReleaseLock(PIO_CSQ Csq, KIRQL Irql)
+{
+    RAVE_PORT* p = CONTAINING_RECORD(Csq, RAVE_PORT, ReadCsq);
+    KeReleaseSpinLock(&p->ReadLock, Irql);
+}
+static VOID RaveCsqCompleteCanceled(PIO_CSQ, PIRP Irp)
+{
+    Irp->IoStatus.Status = STATUS_CANCELLED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+}
+
+// Complete (cancel) every pended READ owned by a closing file handle. Called on
+// IRP_MJ_CLEANUP so the handle can close, and again on port destroy (then empty).
+static VOID FlushReadsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
+{
+    ExAcquireFastMutex(&a->PortsLock);
+    for (PLIST_ENTRY e = a->Ports.Flink; e != &a->Ports; e = e->Flink) {
+        RAVE_PORT* p = CONTAINING_RECORD(e, RAVE_PORT, Link);
+        if (p->CreatorFile != f) {
+            continue;
+        }
+        PIRP irp;
+        while ((irp = IoCsqRemoveNextIrp(&p->ReadCsq, nullptr)) != nullptr) {
+            irp->IoStatus.Status = STATUS_CANCELLED;
+            irp->IoStatus.Information = 0;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+        }
+    }
+    ExReleaseFastMutex(&a->PortsLock);
+}
+
 #pragma code_seg("PAGE")
 static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI_CREATE_PORT_IN* in, ULONG* outId)
 {
@@ -206,6 +344,8 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     RaveFifoInit(&p->FromApp);
     KeInitializeSpinLock(&p->ReadLock);
     InitializeListHead(&p->ReadIrps);
+    IoCsqInitialize(&p->ReadCsq, RaveCsqInsert, RaveCsqRemove, RaveCsqPeek,
+                    RaveCsqAcquireLock, RaveCsqReleaseLock, RaveCsqCompleteCanceled);
     p->CaptureRunning = 0;
     p->StreamCount = 0;
 
@@ -222,9 +362,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
         st = PcRegisterSubdevice(a->Fdo, p->RefString, p->PortUnknown);
     }
     if (NT_SUCCESS(st)) {
-        // TODO: resolve the subdevice's KSCATEGORY_AUDIO interface symlink and
-        // IoSetDeviceInterfacePropertyData(DEVPKEY_DeviceInterface_FriendlyName, p->Name)
-        // (sysvad BthhfpDevice.cpp:3049 pattern) so szPname shows p->Name not the default.
+        StampFriendlyName(a, p->RefString, p->Name);  // winmm szPname = p->Name
         *outId = p->Id;
         return STATUS_SUCCESS;
     }
@@ -261,10 +399,26 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
     RemoveEntryList(&p->Link);
     ExReleaseFastMutex(&a->PortsLock);
 
-    // TODO: IUnregisterSubdevice on p->PortUnknown before freeing; complete any
-    // pended READ IRPs with STATUS_CANCELLED.
+    // Cancel any still-pended READs (normally already flushed on CLEANUP).
+    PIRP irp;
+    while ((irp = IoCsqRemoveNextIrp(&p->ReadCsq, nullptr)) != nullptr) {
+        irp->IoStatus.Status = STATUS_CANCELLED;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+    // Tear down the winmm-visible subdevice, then drop our port refs.
     if (p->PortUnknown) {
+        PUNREGISTERSUBDEVICE unreg = nullptr;
+        if (NT_SUCCESS(p->PortUnknown->QueryInterface(IID_IUnregisterSubdevice, (PVOID*)&unreg))) {
+            unreg->UnregisterSubdevice();
+            unreg->Release();
+        }
+        if (p->PortMidi) {
+            p->PortMidi->Release();
+            p->PortMidi = nullptr;
+        }
         p->PortUnknown->Release();
+        p->PortUnknown = nullptr;
     }
     ExFreePoolWithTag(p, RAVE_TAG);
     return STATUS_SUCCESS;
@@ -307,6 +461,12 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
     switch (s->MajorFunction) {
     case IRP_MJ_CREATE:
+        break;
+    case IRP_MJ_CLEANUP:
+        // Handle closing: cancel its pended READs so CLOSE can proceed.
+        if (a) {
+            FlushReadsForFile(a, s->FileObject);
+        }
         break;
     case IRP_MJ_CLOSE:
         if (a) {
@@ -365,11 +525,25 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             RavePortNotifyToApp(p);  // kick capture service if a stream is running
             break;
         }
-        case IOCTL_RAVEMIDI_READ:
-            // TODO: pend on p->ReadCsq; completed by RavePortDeliverFromApp when
-            // an app render stream Writes. Inverted-call pattern.
-            st = STATUS_NOT_IMPLEMENTED;
-            break;
+        case IOCTL_RAVEMIDI_READ: {
+            if (inLen < sizeof(RAVEMIDI_PORT_REF) || outLen == 0) {
+                st = STATUS_INVALID_PARAMETER;
+                break;
+            }
+            ExAcquireFastMutex(&a->PortsLock);
+            RAVE_PORT* p = FindPortLocked(a, ((RAVEMIDI_PORT_REF*)buf)->PortId);
+            ExReleaseFastMutex(&a->PortsLock);
+            if (!p) {
+                st = STATUS_NOT_FOUND;
+                break;
+            }
+            // Pend cancel-safely, then try to satisfy immediately if data already
+            // waits (avoids the lost-wakeup race with a concurrent app Write).
+            IoMarkIrpPending(Irp);
+            IoCsqInsertIrp(&p->ReadCsq, Irp, nullptr);
+            RavePortDeliverFromApp(p);
+            return STATUS_PENDING;  // owns the IRP now — skip shared completion
+        }
         default:
             st = STATUS_INVALID_DEVICE_REQUEST;
             break;

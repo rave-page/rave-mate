@@ -106,7 +106,8 @@ static PCFILTER_DESCRIPTOR FilterBidi    = RAVE_FILTER(PinsBidi,    ConnBidi,   
 // -------- shared-state helpers -------------------------------------------------
 VOID RavePortNotifyToApp(RAVE_PORT* port)
 {
-    // DISPATCH-safe: Notify is documented callable at <= DISPATCH_LEVEL.
+    // DISPATCH-safe: Notify is documented callable at <= DISPATCH_LEVEL. The port
+    // then calls RaveStream::Read to drain ToApp into the winmm client's buffer.
     if (port->CaptureRunning && port->PortMidi && port->ServiceGroup) {
         port->PortMidi->Notify(port->ServiceGroup);
     }
@@ -114,9 +115,24 @@ VOID RavePortNotifyToApp(RAVE_PORT* port)
 
 VOID RavePortDeliverFromApp(RAVE_PORT* port)
 {
-    // Inverted-call drain into pended IOCTL_RAVEMIDI_READ IRPs lands with the
-    // READ implementation; until then data waits in FromApp (bounded ring).
-    UNREFERENCED_PARAMETER(port);
+    // Pair app-render bytes (FromApp ring) with pended IOCTL_RAVEMIDI_READ IRPs.
+    // Runs from the miniport stream Write (<= DISPATCH_LEVEL) and from the READ
+    // path; IoCsqRemoveNextIrp + IoCompleteRequest are both DISPATCH-safe.
+    for (;;) {
+        if (RaveFifoCount(&port->FromApp) == 0) {
+            break;
+        }
+        PIRP irp = IoCsqRemoveNextIrp(&port->ReadCsq, nullptr);
+        if (!irp) {
+            break;  // no waiter; bytes stay buffered for the next READ
+        }
+        PIO_STACK_LOCATION s = IoGetCurrentIrpStackLocation(irp);
+        ULONG cap = s->Parameters.DeviceIoControl.OutputBufferLength;
+        ULONG n = RaveFifoPop(&port->FromApp, (UCHAR*)irp->AssociatedIrp.SystemBuffer, cap);
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        irp->IoStatus.Information = n;  // may be 0 if a concurrent drain won the race
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
 }
 
 // -------- RaveMiniport ---------------------------------------------------------
