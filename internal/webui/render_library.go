@@ -635,12 +635,14 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		return `<span class="` + cls + ` trk-sortable" data-act="lib-coll-hsort:` + key + `">` + html.EscapeString(label) + arrow + `</span>`
 	}
 	b.WriteString(`<div class=trk-h>` + hdr("Artist", i18n.T("library.coll.trackHeader", i18n.A{"count": fmt.Sprint(total)}), "trk-hmain") +
+		`<span class=trk-cell-ce>` + html.EscapeString(i18n.T("library.col.cues")) + `</span>` +
 		hdr("BPM", i18n.T("library.col.bpm"), "trk-bpm") +
 		`<span class=trk-dur>` + html.EscapeString(i18n.T("library.col.time")) + `</span>` +
 		hdr("Key", i18n.T("library.col.key"), "trk-keyh") + `</div>`)
 	b.WriteString(`<div class=trk-table>`)
 	ref := s.selRef()
 	vs := u.gfVerified()
+	ceOn := u.ceActiveFor("library")
 	for i, ti := range shown {
 		if i >= libMaxRows {
 			break
@@ -654,6 +656,9 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		selCls := ""
 		if s.sel != nil && s.sel.path == t.Path {
 			selCls = " sel"
+		}
+		if ceOn && s.collSel[t.Path] {
+			selCls += " ce-marked" // in the mass-apply set (batch bar below)
 		}
 		ic := `<span class=trk-ic>🎵</span>`
 		if !onDisk {
@@ -675,6 +680,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 			`<span class=trk-main data-act="lib-track:` + html.EscapeString(t.Path) + `"><span class=trk-title>` +
 			html.EscapeString(trackTitle(t)) + `</span><span class=trk-sub>` +
 			html.EscapeString(trackMetaSub(t)) + `</span></span>` + ver +
+			`<span class=trk-cell-ce>` + libCueCellHTML(s, t) + `</span>` +
 			`<span class=trk-bpm>` + bpm + `</span><span class=trk-dur>` + dur + `</span>` +
 			`<span class=trk-key>` + keyPillHTML(t.Key, ref) + `</span></div>`)
 	}
@@ -684,12 +690,36 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	} else if total > libMaxRows {
 		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.showingFirst", i18n.A{"shown": fmt.Sprint(libMaxRows), "total": fmt.Sprint(total)})) + `</p>`)
 	}
-	// selection bar: playlist add + verified-grid marking
+	// selection bar: playlist add + verified-grid marking; in cue-edit mode the checked
+	// rows are the mass-apply set for the assigned patterns
 	if len(s.collSel) > 0 {
+		ceBtns, addVar := "", "primary"
+		if ceOn {
+			ceBtns = btn(i18n.T("library.ce.applySelHot"), "primary", "ce-apply-sel:hot", "") +
+				btn(i18n.T("library.ce.applySelMem"), "outline", "ce-apply-sel:mem", "")
+			addVar = "outline"
+		}
 		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(s.collSel))})) + `</span>` +
-			btn(i18n.T("library.addToPlaylist"), "primary", "lib-addto", "") +
+			ceBtns + btn(i18n.T("library.addToPlaylist"), addVar, "lib-addto", "") +
 			btn(i18n.T("library.gf.markVerified"), "outline", "gf-verify-sel", "") +
 			btn(i18n.T("library.clear"), "ghost", "lib-collsel-clear", "") + `</div>`)
+	}
+	return b.String()
+}
+
+// libCueCellHTML: compact drops/cues census - ◆n amber = drop markers, ⚑n = cues;
+// dim glyphs mark absence so prepared vs unprepared scans at a glance.
+func libCueCellHTML(s *libSt, t musiclib.Track) string {
+	var b strings.Builder
+	if nd := len(s.dropsIdx[t.Path]); nd > 0 {
+		b.WriteString(`<span class=trk-drops title="` + html.EscapeString(i18n.Tn("library.ce.drops", nd)) + `">◆` + fmt.Sprint(nd) + `</span>`)
+	} else {
+		b.WriteString(`<span class="trk-drops none" title="` + html.EscapeString(i18n.T("library.ce.noDropsBadge")) + `">◇</span>`)
+	}
+	if nc := ceCueCount(t.Cues); nc > 0 {
+		b.WriteString(`<span class=trk-cuen title="` + html.EscapeString(i18n.Tn("library.ce.patternCues", nc)) + `">⚑` + fmt.Sprint(nc) + `</span>`)
+	} else {
+		b.WriteString(`<span class="trk-cuen none" title="` + html.EscapeString(i18n.T("library.ce.noCuesBadge")) + `">⚑</span>`)
 	}
 	return b.String()
 }
@@ -1102,6 +1132,7 @@ func (u *UI) libDetailHTML(s *libSt) string {
 	// PLAYER + waveform (audio on disk) - the unified media player/editor (player.go)
 	if onDisk && sel.kind == "audio" {
 		u.mpEnsureFile("library", sel.path, sel.track)
+		u.mpSetDrops("library", sel.path, s.dropsIdx[sel.path])
 		b.WriteString(inspSec(i18n.T("library.insp.player"), u.mpHTML("library")))
 	}
 	// ENCODE builder (audio + video)

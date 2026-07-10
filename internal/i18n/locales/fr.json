@@ -291,7 +291,7 @@
     },
     "cue-edit": {
       "title": "Éditeur de cues — clavier & souris",
-      "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat."
+      "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat. Les nombres en haut de la forme d'onde indiquent la distance en temps entre cues et drops voisins. Cochez des pistes dans la liste pour appliquer en masse les patterns assignés via la barre en bas. Souris : clic gauche déplace le curseur de beat, clic droit ajoute un cue mémoire, Maj+clic droit un drop, Ctrl+clic droit supprime les marqueurs sur ce temps. Le décalage de la grille déplace aussi les cues et les drops."
     }
   },
   "library": {
@@ -327,7 +327,8 @@
     "col": {
       "bpm": "BPM",
       "key": "TONALITÉ",
-      "time": "DURÉE"
+      "time": "DURÉE",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Sauvegarder",
@@ -977,6 +978,17 @@
         "few": "{count} cues",
         "many": "{count} cues",
         "other": "{count} cues"
+      },
+      "noDropsBadge": "Aucun marqueur de drop",
+      "noCuesBadge": "Aucun cue",
+      "applySelHot": "Appliquer les patterns → hotcues",
+      "applySelMem": "Appliquer les patterns → cues mémoire",
+      "batchToast": "Patterns appliqués à {applied} pistes · {skipped} ignorées",
+      "beatsBetween": {
+        "one": "{count} temps entre les marqueurs",
+        "few": "{count} temps entre les marqueurs",
+        "many": "{count} temps entre les marqueurs",
+        "other": "{count} temps entre les marqueurs"
       }
     }
   },
@@ -1547,7 +1559,9 @@
       "silenceFailed": "Échec de la détection de silence : ",
       "timeFormat": "Format d'heure : mm:ss.s (ou h:mm:ss)"
     },
-    "trimEdit": "Rogner / éditer"
+    "trimEdit": "Rogner / éditer",
+    "more": "Plus",
+    "trimEditSub": "Couper une section ou exporter une copie rognée"
   },
   "publish": {
     "audio": "audio",

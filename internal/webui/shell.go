@@ -223,6 +223,7 @@ const runtimeJS = `(function(){
   // right-click context menu: an element with [data-ctx] forwards its act on contextmenu (Go opens
   // the menu modal). __ctx(x,y) is the ctl equivalent (TapSecondary) for verification.
   document.addEventListener('contextmenu', function(e){
+    if(e.target.closest && e.target.closest('[data-actpos]')){ e.preventDefault(); return; } // right-click is a marker action there
     var el=e.target.closest && e.target.closest('[data-ctx]'); if(!el) return;
     e.preventDefault();
     send({act: el.getAttribute('data-ctx')});
@@ -243,6 +244,12 @@ const runtimeJS = `(function(){
   function __pflush(){ __praf=0; if(__ppend){ send(__ppend); __ppend=null; } }
   document.addEventListener('pointerdown', function(e){
     var el=e.target.closest && e.target.closest('[data-actpos]'); if(!el) return;
+    if(e.button===2){ // right button: modifier-tagged one-shot, no drag capture
+      e.preventDefault();
+      var ph=e.ctrlKey?'crdown':(e.shiftKey?'srdown':'rdown');
+      send({act: el.getAttribute('data-actpos'), val: ph+':'+__pfrac(el,e)});
+      return;
+    }
     __pcur=el; try{ el.setPointerCapture(e.pointerId); }catch(_){}
     e.preventDefault();
     send({act: el.getAttribute('data-actpos'), val: 'down:'+__pfrac(el,e)});

@@ -291,7 +291,7 @@
     },
     "cue-edit": {
       "title": "Editor de cues: teclado y ratón",
-      "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat."
+      "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat. Los números en la parte superior de la forma de onda muestran la distancia en beats entre cues y drops vecinos. Marca pistas en la lista para aplicar en masa los patrones asignados desde la barra inferior. Ratón: clic izquierdo mueve el cursor de beat, clic derecho añade un memory cue, Mayús+clic derecho un drop, Ctrl+clic derecho elimina los marcadores en ese beat. Al desplazar la rejilla, los cues y drops se mueven con ella."
     }
   },
   "library": {
@@ -327,7 +327,8 @@
     "col": {
       "bpm": "BPM",
       "key": "TONO",
-      "time": "TIEMPO"
+      "time": "TIEMPO",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Copia de seguridad",
@@ -977,6 +978,17 @@
         "few": "{count} cues",
         "many": "{count} cues",
         "other": "{count} cues"
+      },
+      "noDropsBadge": "Sin marcadores de drop",
+      "noCuesBadge": "Sin cues",
+      "applySelHot": "Aplicar patrones → hotcues",
+      "applySelMem": "Aplicar patrones → memory cues",
+      "batchToast": "Patrones aplicados a {applied} pistas · {skipped} omitidas",
+      "beatsBetween": {
+        "one": "{count} beat entre marcadores",
+        "few": "{count} beats entre marcadores",
+        "many": "{count} beats entre marcadores",
+        "other": "{count} beats entre marcadores"
       }
     }
   },
@@ -1547,7 +1559,9 @@
       "silenceFailed": "Error en la detección de silencio: ",
       "timeFormat": "Formato de tiempo: mm:ss.s (o h:mm:ss)"
     },
-    "trimEdit": "Recortar / editar"
+    "trimEdit": "Recortar / editar",
+    "more": "Más",
+    "trimEditSub": "Cortar una sección o exportar una copia recortada"
   },
   "publish": {
     "audio": "audio",

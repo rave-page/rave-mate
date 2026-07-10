@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/cuepattern"
@@ -43,7 +44,8 @@ type ceSt struct {
 	toMem    bool           // last apply wrote memory cues (render hint only)
 	report   *cuepattern.ApplyReport
 	lastErr  string
-	fileTag  bool // drops also written to the file tag (format supported)
+	fileTag  bool        // drops also written to the file tag (format supported)
+	tagTimer *time.Timer // debounced file-tag drop write during grid nudges
 }
 
 // ceOverlay is the render snapshot mpWaveSVG draws (nil = mode off).
@@ -234,19 +236,31 @@ func (u *UI) ceJumpAdjust(up bool) {
 	u.cePatchRail()
 }
 
-// ceToggleDrop adds (or with remove=true deletes) a drop at the cursor and persists it
-// to libdb + the file tag.
+// ceToggleDrop adds (or with remove=true deletes) a drop at the cursor.
 func (u *UI) ceToggleDrop(remove bool) {
+	c := u.ce()
+	c.mu.Lock()
+	ms := c.cursorMs
+	c.mu.Unlock()
+	u.ceDropAt(ms, remove)
+}
+
+// ceDropAt adds/removes a drop at ms (grid-snapped) and persists it to libdb + the
+// file tag.
+func (u *UI) ceDropAt(ms float64, remove bool) {
 	c := u.ce()
 	c.mu.Lock()
 	if !c.active {
 		c.mu.Unlock()
 		return
 	}
+	if c.grid != nil {
+		ms = c.grid.SnapMs(ms)
+	}
 	if remove {
-		c.drops = cuepattern.RemoveDrop(c.drops, c.cursorMs)
+		c.drops = cuepattern.RemoveDrop(c.drops, ms)
 	} else {
-		c.drops = cuepattern.AddDrop(c.drops, c.cursorMs)
+		c.drops = cuepattern.AddDrop(c.drops, ms)
 	}
 	path, tr := c.path, c.track
 	drops := append([]float64(nil), c.drops...)
@@ -265,6 +279,111 @@ func (u *UI) ceToggleDrop(remove bool) {
 	u.libDropsChanged(path, drops)
 	u.cePatchWave()
 	u.cePatchRail()
+	u.libPatchBody() // row census (◆n) follows the drop set
+}
+
+// ceSetCues persists a cue list for the open track and mirrors the collection state.
+func (u *UI) ceSetCues(tr musiclib.Track, cues []musiclib.CuePoint) {
+	u.bg(func() {
+		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
+			u.toast(i18n.T("library.ce.applyFailed") + err.Error())
+			return
+		}
+		s := u.lib()
+		s.mu.Lock()
+		if t, ok := s.byPath[tr.Path]; ok {
+			t.Cues = cues
+			s.byPath[tr.Path] = t
+			for i := range s.tracks {
+				if s.tracks[i].Path == tr.Path {
+					s.tracks[i].Cues = cues
+				}
+			}
+		}
+		s.mu.Unlock()
+		u.ceReloadTrack()
+		u.patchMain()
+	})
+}
+
+// ceAddCueAt inserts a memory cue at ms (grid-snapped; 25ms dedup). Right-click.
+func (u *UI) ceAddCueAt(ms float64) {
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active {
+		c.mu.Unlock()
+		return
+	}
+	if c.grid != nil {
+		ms = c.grid.SnapMs(ms)
+	}
+	tr := c.track
+	c.mu.Unlock()
+	for _, q := range tr.Cues {
+		if q.Kind != musiclib.CueGrid && math.Abs(q.StartMs-ms) < 25 {
+			return // marker already here
+		}
+	}
+	cues := append(append([]musiclib.CuePoint(nil), tr.Cues...),
+		musiclib.CuePoint{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: ms})
+	sort.Slice(cues, func(i, j int) bool { return cues[i].StartMs < cues[j].StartMs })
+	u.ceSetCues(tr, cues)
+}
+
+// ceRemoveAt deletes cue AND drop markers within eps of ms. Ctrl+right-click.
+func (u *UI) ceRemoveAt(ms, eps float64) {
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active {
+		c.mu.Unlock()
+		return
+	}
+	tr, path, fileTag := c.track, c.path, c.fileTag
+	dropsChanged := false
+	kept := c.drops[:0:0]
+	for _, d := range c.drops {
+		if math.Abs(d-ms) < eps {
+			dropsChanged = true
+			continue
+		}
+		kept = append(kept, d)
+	}
+	if dropsChanged {
+		c.drops = kept
+	}
+	drops := append([]float64(nil), c.drops...)
+	c.mu.Unlock()
+
+	var cues []musiclib.CuePoint
+	cuesChanged := false
+	for _, q := range tr.Cues {
+		if q.Kind != musiclib.CueGrid && math.Abs(q.StartMs-ms) < eps {
+			cuesChanged = true
+			continue
+		}
+		cues = append(cues, q)
+	}
+	if dropsChanged {
+		u.bg(func() {
+			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
+				u.logErr("save drops", err)
+			}
+			if fileTag {
+				if err := tagwrite.WriteDrops(path, drops); err != nil {
+					u.toast(i18n.T("library.ce.fileTagFailed") + err.Error())
+				}
+			}
+		})
+		u.libDropsChanged(path, drops)
+	}
+	switch {
+	case cuesChanged:
+		u.ceSetCues(tr, cues) // repaints everything
+	case dropsChanged:
+		u.cePatchWave()
+		u.cePatchRail()
+		u.libPatchBody()
+	}
 }
 
 // ceSurf handles the waveform pointer stream while the editor owns it: click = move
@@ -280,6 +399,24 @@ func (u *UI) ceSurf(host, val string) {
 	}
 	axisMs := t.mpAxisAt(fx) * 1000
 	c := u.ce()
+	// right-button one-shots (see shell.go pointer transport)
+	switch phase {
+	case "rdown": // right-click: memory cue at the beat
+		u.ceAddCueAt(axisMs)
+		return
+	case "srdown": // Shift+right: drop marker
+		u.ceDropAt(axisMs, false)
+		return
+	case "crdown": // Ctrl+right: remove cue + drop markers at the beat
+		beatMs := 500.0
+		c.mu.Lock()
+		if c.grid != nil {
+			beatMs = c.grid.BeatLenMs(axisMs)
+		}
+		c.mu.Unlock()
+		u.ceRemoveAt(axisMs, beatMs/2)
+		return
+	}
 	c.mu.Lock()
 	switch phase {
 	case "down":
@@ -419,6 +556,76 @@ func (u *UI) ceApply(toMemory bool) {
 	})
 }
 
+// ceApplySelected mass-applies the editor's per-drop pattern assignment to every
+// checked collection row: each track's own drops anchor the same pattern set; tracks
+// without drops or a beatgrid are skipped and counted.
+func (u *UI) ceApplySelected(toMemory bool) {
+	st := u.cePatterns()
+	if st == nil {
+		return
+	}
+	c := u.ce()
+	c.mu.Lock()
+	pats := map[int]cuepattern.Pattern{}
+	for di, pid := range c.assign {
+		if p, ok := st.Get(pid); ok && pid != "" {
+			pats[di] = p
+		}
+	}
+	c.mu.Unlock()
+	if len(pats) == 0 {
+		u.toast(i18n.T("library.ce.noPatternPicked"))
+		return
+	}
+	type job struct {
+		tr    musiclib.Track
+		drops []float64
+	}
+	s := u.lib()
+	s.mu.Lock()
+	jobs := make([]job, 0, len(s.collSel))
+	for p := range s.collSel {
+		if tr, ok := s.byPath[p]; ok {
+			jobs = append(jobs, job{tr, append([]float64(nil), s.dropsIdx[p]...)})
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].tr.Path < jobs[j].tr.Path })
+	u.bg(func() {
+		applied, skipped := 0, 0
+		for _, j := range jobs {
+			if len(j.drops) == 0 || len(j.tr.Beatgrid) == 0 {
+				skipped++
+				continue
+			}
+			cues, _, err := cuepattern.Apply(j.tr, j.drops, pats, cuepattern.ApplyOptions{ToMemory: toMemory, SnapDrop: true})
+			if err != nil {
+				skipped++
+				continue
+			}
+			if err := u.svc.Lib.UpdateTrackCues(j.tr, cues); err != nil {
+				skipped++
+				continue
+			}
+			s.mu.Lock()
+			if t, ok := s.byPath[j.tr.Path]; ok {
+				t.Cues = cues
+				s.byPath[j.tr.Path] = t
+				for i := range s.tracks {
+					if s.tracks[i].Path == j.tr.Path {
+						s.tracks[i].Cues = cues
+					}
+				}
+			}
+			s.mu.Unlock()
+			applied++
+		}
+		u.ceReloadTrack()
+		u.toast(i18n.T("library.ce.batchToast", i18n.A{"applied": fmt.Sprint(applied), "skipped": fmt.Sprint(skipped)}))
+		u.patchMain()
+	})
+}
+
 // ceConvertAll demotes every hotcue on the track to a memory cue.
 func (u *UI) ceConvertAll() {
 	c := u.ce()
@@ -495,8 +702,10 @@ func (u *UI) ceKey(val string) {
 	}
 }
 
-// ceGridShift nudges every grid marker by deltaMs (manual alignment), rebuilds the
-// beat math, and persists the new grid to the library (journaled).
+// ceGridShift nudges the whole grid AND every cue/drop marker by deltaMs - manual
+// alignment must keep markers glued to their beats. Rebuilds the beat math and
+// persists grid + cues + drops (journaled). The file-tag drop write is debounced:
+// key-repeat would otherwise rewrite the tag dozens of times a second.
 func (u *UI) ceGridShift(deltaMs float64) {
 	c := u.ce()
 	c.mu.Lock()
@@ -508,33 +717,60 @@ func (u *UI) ceGridShift(deltaMs float64) {
 	for i := range grid {
 		grid[i].PositionMs += deltaMs
 	}
-	c.track.Beatgrid = grid
+	cues := append([]musiclib.CuePoint(nil), c.track.Cues...)
+	for i := range cues {
+		cues[i].StartMs += deltaMs
+	}
+	drops := make([]float64, len(c.drops))
+	for i, d := range c.drops {
+		drops[i] = d + deltaMs
+	}
+	c.track.Beatgrid, c.track.Cues, c.drops = grid, cues, drops
 	if g, err := cuepattern.NewGrid(grid, c.track.DurationSec*1000); err == nil {
 		c.grid = g
-		c.cursorMs = g.SnapMs(c.cursorMs)
+		c.cursorMs = g.SnapMs(c.cursorMs + deltaMs)
 	}
-	tr := c.track
+	tr, path, fileTag := c.track, c.path, c.fileTag
+	dropsCopy := append([]float64(nil), drops...)
+	if c.tagTimer != nil {
+		c.tagTimer.Stop()
+	}
+	if fileTag {
+		c.tagTimer = time.AfterFunc(800*time.Millisecond, func() {
+			if err := tagwrite.WriteDrops(path, dropsCopy); err != nil {
+				u.logErr("drops file tag", err)
+			}
+		})
+	}
 	c.mu.Unlock()
-	// mirror into the collection view + persist (coalescing writes is not worth the
-	// complexity: one UPDATE per press on a single-writer sqlite is cheap)
+	// mirror into the collection view + persist (one UPDATE per press on a
+	// single-writer sqlite is cheap; only the file tag is debounced)
 	s := u.lib()
 	s.mu.Lock()
-	if t, ok := s.byPath[tr.Path]; ok {
-		t.Beatgrid = grid
-		s.byPath[tr.Path] = t
+	if t, ok := s.byPath[path]; ok {
+		t.Beatgrid, t.Cues = grid, cues
+		s.byPath[path] = t
 		for i := range s.tracks {
-			if s.tracks[i].Path == tr.Path {
-				s.tracks[i].Beatgrid = grid
+			if s.tracks[i].Path == path {
+				s.tracks[i].Beatgrid, s.tracks[i].Cues = grid, cues
 			}
 		}
 	}
 	s.mu.Unlock()
+	u.libDropsChanged(path, dropsCopy)
 	u.bg(func() {
 		if err := u.svc.Lib.UpdateTrackBeatgrid(tr, grid); err != nil {
 			u.logErr("save beatgrid", err)
 		}
+		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
+			u.logErr("save cues", err)
+		}
+		if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, dropsCopy); err != nil {
+			u.logErr("save drops", err)
+		}
 	})
 	u.cePatchWave()
+	u.cePatchRail()
 }
 
 // ceAudition: hold Space = play from the beat cursor, release = stop (press again
@@ -626,9 +862,10 @@ func (u *UI) cePatchWave() {
 	}
 }
 
-// cePatchRail re-renders the detail rail (cursor readout, drops list, selection).
+// cePatchRail re-renders the detail rail + the topbar readout above the waveform.
 func (u *UI) cePatchRail() {
 	u.libPatchDetail()
+	u.eval("window.__patch('ce-topbar'," + jsQuote(u.ceTopbarHTML()) + ")")
 }
 
 // ceBarBeat formats a cursor position as "bar.beat" from the first grid anchor.
@@ -651,14 +888,69 @@ func (u *UI) ceDetailHTML() string {
 	return u.ceRailHTML()
 }
 
-// ceWaveHTML is the full-width player strip (waveform + beatgrid + markers + transport).
+// ceWaveHTML is the full-width player strip: info topbar + waveform (beatgrid +
+// markers + beat distances) + transport. The editor's readouts live HERE, on the wave.
 func (u *UI) ceWaveHTML() string {
 	c := u.ce()
 	c.mu.Lock()
 	path, tr := c.path, c.track
 	c.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
-	return u.mpHTML("library")
+	return `<div id=ce-topbar>` + u.ceTopbarHTML() + `</div>` + u.mpHTML("library")
+}
+
+// ceTopbarHTML: track identity, cursor position (time + bar.beat), jump size, drops
+// (clickable = jump) and cue census in one strip above the waveform.
+func (u *UI) ceTopbarHTML() string {
+	c := u.ce()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=ce-topbar>`)
+	b.WriteString(`<span class=ce-tb-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</span>`)
+	b.WriteString(`<span class=ce-tb-title>` + esc(trackTitle(c.track)) + `</span>`)
+	meta := ""
+	if c.track.BPM > 0 {
+		meta = fmt.Sprintf("%.1f BPM", c.track.BPM)
+	}
+	if k := strings.TrimSpace(c.track.Key); k != "" {
+		if meta != "" {
+			meta += " · "
+		}
+		meta += k
+	}
+	if meta != "" {
+		b.WriteString(`<span class=ce-tb-meta>` + esc(meta) + `</span>`)
+	}
+	b.WriteString(`<span class=ce-tb-cursor>▸ ` + pubClock(c.cursorMs/1000) + ` · ` +
+		esc(i18n.T("library.ce.bar")) + ` ` + ceBarBeat(c.grid, c.cursorMs) + `</span>`)
+	b.WriteString(`<span class=ce-jump>` + esc(i18n.T("library.ce.jump", i18n.A{"n": fmt.Sprint(int(c.jump))})) + `</span>`)
+	for i, d := range c.drops {
+		b.WriteString(`<span class=ce-tb-drop data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) +
+			`>D` + fmt.Sprint(i+1) + ` ` + pubClock(d/1000) + `</span>`)
+	}
+	b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.Tn("library.ce.patternCues", ceCueCount(c.track.Cues))) + `</span>`)
+	if !c.fileTag {
+		b.WriteString(`<span class=ce-tb-warn title=` + attrQ(i18n.T("library.ce.noFileTag")) + `>⚠</span>`)
+	}
+	b.WriteString(`<span class=ce-tb-spacer></span>` + tipTopic("cue-edit") +
+		btn("✕ "+i18n.T("common.close"), "ghost", "ce-close", ""))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// ceCueCount counts non-grid cues (what the waveform flags show).
+func ceCueCount(cues []musiclib.CuePoint) int {
+	n := 0
+	for _, c := range cues {
+		if c.Kind != musiclib.CueGrid {
+			n++
+		}
+	}
+	return n
 }
 
 // ceRailHTML is the cue-editor card in the library detail rail.
@@ -669,36 +961,28 @@ func (u *UI) ceRailHTML() string {
 	if !c.active {
 		return ""
 	}
+	// controls only - the readouts (cursor, drop times, cue census) live in the
+	// ce-topbar on the waveform strip
 	var b strings.Builder
 	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</div><div class=insp-title>` +
 		esc(trackTitle(c.track)) + `</div></div>`)
 
-	// cursor + jump readout
-	b.WriteString(`<div class=ce-status><span class=ce-pos>` + esc(i18n.T("library.ce.cursor")) + ` ` +
-		pubClock(c.cursorMs/1000) + ` · ` + esc(i18n.T("library.ce.bar")) + ` ` + ceBarBeat(c.grid, c.cursorMs) + `</span>` +
-		`<span class=ce-jump>` + esc(i18n.T("library.ce.jump", i18n.A{"n": fmt.Sprint(int(c.jump))})) + `</span>` +
-		tipTopic("cue-edit") + `</div>`)
-
-	// drops
+	// drops → pattern assignment
 	b.WriteString(`<div class=pb-label>` + esc(i18n.Tn("library.ce.drops", len(c.drops))) + `</div>`)
 	if len(c.drops) == 0 {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.noDropsHint")) + `</div>`)
 	}
+	st := u.cePatterns() // ensure the store is open so the pickers render on first use
 	for i, d := range c.drops {
-		b.WriteString(`<div class=ce-drop><span class=ce-dropname data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) + `>DROP ` + fmt.Sprint(i+1) +
-			` · ` + pubClock(d/1000) + `</span>`)
-		if st := u.ceStore; st != nil {
-			cur := c.assign[i]
-			b.WriteString(ceAssignSelect(i, cur, st))
+		b.WriteString(`<div class=ce-drop><span class=ce-dropname data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) + `>DROP ` + fmt.Sprint(i+1) + `</span>`)
+		if st != nil {
+			b.WriteString(ceAssignSelect(i, c.assign[i], st))
 		}
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(btnRow(
 		btn(i18n.T("library.ce.addDrop"), "outline", "ce-drop-add", ""),
 		btn(i18n.T("library.ce.removeDrop"), "ghost", "ce-drop-del", "")))
-	if !c.fileTag {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.noFileTag")) + `</div>`)
-	}
 
 	// selection → pattern
 	nsel := 0
@@ -798,6 +1082,7 @@ func init() {
 		u.cePatchRail()
 	})
 	onPrefix("ce-apply:", func(u *UI, m actMsg) { u.ceApply(m.arg("ce-apply:") == "mem") })
+	onPrefix("ce-apply-sel:", func(u *UI, m actMsg) { u.ceApplySelected(m.arg("ce-apply-sel:") == "mem") })
 	onExact("ce-convert", func(u *UI, _ actMsg) { u.ceConvertAll() })
 	// keyboard scopes (shell.go keydown transport; scope-gated + focus-gated in JS)
 	onPrefix("key:", func(u *UI, m actMsg) {

@@ -308,7 +308,7 @@
     },
     "cue-edit": {
       "title": "Cue editor — keys & mouse",
-      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat."
+      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid."
     }
   },
   "library": {
@@ -363,7 +363,8 @@
     "col": {
       "bpm": "BPM",
       "key": "KEY",
-      "time": "TIME"
+      "time": "TIME",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Backup",
@@ -1058,6 +1059,17 @@
         "few": "{count} cues",
         "many": "{count} cues",
         "other": "{count} cues"
+      },
+      "noDropsBadge": "No drop markers yet",
+      "noCuesBadge": "No cues",
+      "applySelHot": "Apply patterns → hotcues",
+      "applySelMem": "Apply patterns → memory cues",
+      "batchToast": "Patterns applied to {applied} tracks · {skipped} skipped",
+      "beatsBetween": {
+        "one": "{count} beat between markers",
+        "few": "{count} beats between markers",
+        "many": "{count} beats between markers",
+        "other": "{count} beats between markers"
       }
     }
   },
@@ -1629,7 +1641,9 @@
       "silenceFailed": "Silence detection failed: ",
       "timeFormat": "Time format: mm:ss.s (or h:mm:ss)"
     },
-    "trimEdit": "Trim / edit"
+    "trimEdit": "Trim / edit",
+    "more": "More",
+    "trimEditSub": "Cut a section or export a trimmed copy"
   },
   "publish": {
     "audio": "audio",

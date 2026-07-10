@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"sort"
 	"strings"
 
 	"rave.page/mate/internal/i18n"
@@ -273,6 +274,15 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.5"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind))
 				}
 			}
+			// drop markers (libdb enrichment); the editor layer draws them when active
+			if ce == nil {
+				for di, dms := range m.drops {
+					if x := toX(start + dms/1000); x >= 0 && x <= w {
+						fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#FFB547" stroke-width="1.5"/><text x="%.1f" y="%.1f" fill="#FFB547" font-size="10" font-family="monospace" text-anchor="middle">D%d</text>`,
+							x, y0, x, y0+bandH, x, y0+11, di+1)
+					}
+				}
+			}
 		}
 		if n > 1 {
 			fmt.Fprintf(&b, `<text x="6" y="%.1f" fill="rgba(250,250,250,0.55)" font-size="11" font-family="monospace">%s</text>`, y0+13, strings.ToUpper(m.kind))
@@ -333,6 +343,56 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#FFB547" stroke-width="2"/>`, x, x, h)
 				fmt.Fprintf(&b, `<path d="M %.1f 8 l 7 -8 l -14 0 z" fill="#FFB547"/>`, x)
 				fmt.Fprintf(&b, `<text x="%.1f" y="22" fill="#FFB547" font-size="11" font-family="monospace" text-anchor="middle">D%d</text>`, x, i+1)
+			}
+		}
+		// cue flags: pad slot (or M = memory cue) atop each cue line; hover = name + time
+		for _, cue := range ce.cues {
+			if cue.Kind == musiclib.CueGrid {
+				continue
+			}
+			x := toX(cue.StartMs / 1000)
+			if x < 0 || x > w {
+				continue
+			}
+			lbl := "M"
+			if cue.Hotcue >= 0 {
+				lbl = fmt.Sprint(cue.Hotcue + 1)
+			}
+			tip := strings.TrimSpace(cue.Name)
+			if tip != "" {
+				tip += " · "
+			}
+			tip += pubClock(cue.StartMs / 1000)
+			fmt.Fprintf(&b, `<g><title>%s</title><rect x="%.1f" y="%.0f" width="15" height="13" rx="2" fill="%s" opacity="0.92"/><text x="%.1f" y="%.0f" fill="#0a0a0a" font-size="10" font-weight="700" font-family="monospace" text-anchor="middle">%s</text></g>`,
+				html.EscapeString(tip), x-7.5, h-13, cueColor(cue.Kind), x, h-3, html.EscapeString(lbl))
+		}
+		// beat distances between neighbouring markers (cues + drops)
+		if ce.grid != nil {
+			var pos []float64
+			for _, cue := range ce.cues {
+				if cue.Kind != musiclib.CueGrid {
+					pos = append(pos, cue.StartMs)
+				}
+			}
+			pos = append(pos, ce.drops...)
+			sort.Float64s(pos)
+			for k := 0; k+1 < len(pos); k++ {
+				a, z := pos[k], pos[k+1]
+				if z-a < 1 { // coincident (drop sitting on a cue)
+					continue
+				}
+				xa, xb := toX(a/1000), toX(z/1000)
+				if xb < 0 || xa > w || xb-xa < 36 {
+					continue
+				}
+				xa, xb = math.Max(xa, 0), math.Min(xb, w)
+				beats := ce.grid.BeatsBetween(a, z)
+				lbl := fmt.Sprintf("%.1f", beats)
+				if math.Abs(beats-math.Round(beats)) < 0.05 {
+					lbl = fmt.Sprintf("%.0f", math.Round(beats))
+				}
+				fmt.Fprintf(&b, `<g><title>%s</title><path d="M %.1f 30 v 4 h %.1f v -4" fill="none" stroke="rgba(250,250,250,0.25)" stroke-width="1"/><text x="%.1f" y="27" fill="rgba(250,250,250,0.75)" font-size="10" font-family="monospace" text-anchor="middle">%s</text></g>`,
+					html.EscapeString(i18n.Tn("library.ce.beatsBetween", int(math.Round(beats)))), xa+1, xb-xa-2, (xa+xb)/2, lbl)
 			}
 		}
 		if x := toX(ce.cursorMs / 1000); x >= 0 && x <= w {
@@ -520,7 +580,14 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	if t.edit {
 		editLbl, editVar = i18n.T("player.done"), "outline"
 	}
-	row = append(row, btn(editLbl, editVar, "mp-edit:"+host, ""))
+	if u.mpTrimDemoted(&t) {
+		// collection/playlist context: trim/cut is occasional - lives in the ⋯ menu
+		opts := []ssOpt{{Val: "", Label: "⋯ " + i18n.T("player.more")},
+			{Val: "edit", Label: "✎ " + i18n.T("player.trimEdit"), Sub: i18n.T("player.trimEditSub")}}
+		row = append(row, `<span class=mp-moresel>`+smartSelect("mp-more-"+host, "", "mp-more:"+host, "", func() []ssOpt { return opts })+`</span>`)
+	} else {
+		row = append(row, btn(editLbl, editVar, "mp-edit:"+host, ""))
+	}
 	if m.kind == "video" {
 		row = append(row, btn(i18n.T("player.openExternally"), "ghost", "mp-openext:"+host, ""), tipTopic("embedded-video"))
 	}
@@ -545,6 +612,19 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	}
 	b.WriteString(slider(i18n.T("player.seek"), "mp-seek:"+host, 0, 1000, 1, math.Round(1000*frac), ""))
 	return b.String()
+}
+
+// mpTrimDemoted: in library collection/playlist context trim/cut is an occasional
+// operation - it hides behind the ⋯ menu until edit mode is on.
+func (u *UI) mpTrimDemoted(t *mpSt) bool {
+	if t.host != "library" || t.edit {
+		return false
+	}
+	switch u.libSectionOr() {
+	case "collection", "playlists", "history":
+		return true
+	}
+	return false
 }
 
 // mpTimeText is the transport clock (tick-patched separately from the buttons).

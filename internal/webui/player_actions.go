@@ -45,6 +45,7 @@ type mpMedia struct {
 	kind      string // "audio" | "video"
 	startedAt time.Time
 	cues      []musiclib.CuePoint // library track cue markers
+	drops     []float64           // drop markers (libdb enrichment; render-only)
 
 	size         int64
 	peaks        []byte
@@ -437,6 +438,17 @@ func (u *UI) mpEnsureFile(host, path string, tr musiclib.Track) {
 			size: fileSize(path), presetID: "remux", peaksLoading: true}}
 	})
 	u.mpKickAnalyses(host)
+}
+
+// mpSetDrops mirrors libdb drop markers onto the bound media (render-only).
+func (u *UI) mpSetDrops(host, path string, drops []float64) {
+	u.mpMut(host, func(v *mpSt) {
+		for i := range v.media {
+			if v.media[i].path == path {
+				v.media[i].drops = append([]float64(nil), drops...)
+			}
+		}
+	})
 }
 
 // mpEnsureSet binds the publish instance to a recording's captures (first audio +
@@ -941,6 +953,15 @@ func init() {
 		if t.edit {
 			u.mpMaybeAlign(t.host, false)
 		}
+	})
+	// transport ⋯ menu (collection context; smart-select action menu)
+	onPrefix("mp-more:", func(u *UI, m actMsg) {
+		if m.Val != "edit" {
+			return
+		}
+		t := u.mpMut(m.arg("mp-more:"), func(v *mpSt) { v.edit = true })
+		u.mpPatchAll(t)
+		u.mpMaybeAlign(t.host, false)
 	})
 
 	// trim fields + set/snap/clear

@@ -291,7 +291,7 @@
     },
     "cue-edit": {
       "title": "Cue-Editor – Tasten & Maus",
-      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen."
+      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit."
     }
   },
   "library": {
@@ -327,7 +327,8 @@
     "col": {
       "bpm": "BPM",
       "key": "KEY",
-      "time": "ZEIT"
+      "time": "ZEIT",
+      "cues": "Cues"
     },
     "coll": {
       "backup": "Sicherung",
@@ -977,6 +978,17 @@
         "few": "{count} Cues",
         "many": "{count} Cues",
         "other": "{count} Cues"
+      },
+      "noDropsBadge": "Noch keine Drop-Marker",
+      "noCuesBadge": "Keine Cues",
+      "applySelHot": "Patterns anwenden → Hotcues",
+      "applySelMem": "Patterns anwenden → Memory-Cues",
+      "batchToast": "Patterns auf {applied} Tracks angewendet · {skipped} übersprungen",
+      "beatsBetween": {
+        "one": "{count} Beat zwischen Markern",
+        "few": "{count} Beats zwischen Markern",
+        "many": "{count} Beats zwischen Markern",
+        "other": "{count} Beats zwischen Markern"
       }
     }
   },
@@ -1547,7 +1559,9 @@
       "silenceFailed": "Stille-Erkennung fehlgeschlagen: ",
       "timeFormat": "Zeitformat: mm:ss.s (oder h:mm:ss)"
     },
-    "trimEdit": "Zuschneiden / bearbeiten"
+    "trimEdit": "Zuschneiden / bearbeiten",
+    "more": "Mehr",
+    "trimEditSub": "Abschnitt schneiden oder gekürzte Kopie exportieren"
   },
   "publish": {
     "audio": "Audio",
