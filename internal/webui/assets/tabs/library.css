@@ -257,3 +257,6 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .tf-diff{flex:1;min-width:200px;font:12px var(--font-mono,monospace);color:var(--rp-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tf-diff b{color:var(--rp-mint)}
 .tf-diff s{opacity:.6}
+
+/* select-all checkbox (collection header + browse toolbar) */
+.trk-selall{flex:0 0 auto;accent-color:var(--rp-brand,#F70864);cursor:pointer}

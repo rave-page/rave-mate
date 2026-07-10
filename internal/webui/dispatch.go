@@ -10,7 +10,12 @@ import (
 // work never collides on a central switch. onAction consults exact handlers first, then the
 // longest-matching prefix handler (so "peer-connect:" wins over a hypothetical "peer-").
 
-type actMsg struct{ Act, Val, Form, ID string }
+// Mods carries the originating click's modifier state ("s"=Shift, "c"=Ctrl/Cmd) -
+// range/toggle multi-select in list views.
+type actMsg struct{ Act, Val, Form, ID, Mods string }
+
+func (m actMsg) shift() bool { return strings.Contains(m.Mods, "s") }
+func (m actMsg) ctrl() bool  { return strings.Contains(m.Mods, "c") }
 
 type actHandler func(u *UI, m actMsg)
 

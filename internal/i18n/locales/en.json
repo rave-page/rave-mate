@@ -677,7 +677,9 @@
       "smartMatchLive": "⚡ Smart · {desc} · {count} match (live)",
       "smartSub": "smart · {count} match · {desc}",
       "syncAll": "Sync all",
-      "unlink": "Unlink"
+      "unlink": "Unlink",
+      "viewInColl": "View in Collection",
+      "folderBound": "This folder is the playlist \"{name}\""
     },
     "playsort": {
       "artist": "Artist",
@@ -1073,7 +1075,11 @@
         "few": "{count} beats between markers",
         "many": "{count} beats between markers",
         "other": "{count} beats between markers"
-      }
+      },
+      "openPl": "Prepare cues (playlist)",
+      "openDir": "Prepare cues (folder)",
+      "setToast": "{n} tracks in the cue-prep set · {skipped} skipped (no beatgrid)",
+      "setNone": "No tracks with a beatgrid here - analyze or import first."
     },
     "tf": {
       "menu": "Fix tags…",
@@ -1132,7 +1138,8 @@
       "plBtn": "Re-encode playlist…",
       "markBtn": "Mark folder as playlist",
       "markedToast": "“{name}” created as playlist ({n} tracks)"
-    }
+    },
+    "selectAll": "Select all (filtered)"
   },
   "live": {
     "ablelink": {

@@ -596,7 +596,9 @@
       "smartMatchLive": "⚡ スマート · {desc} · {count} 件一致（ライブ）",
       "smartSub": "スマート · {count} 件一致 · {desc}",
       "syncAll": "すべて同期",
-      "unlink": "リンク解除"
+      "unlink": "リンク解除",
+      "viewInColl": "コレクションで表示",
+      "folderBound": "このフォルダーはプレイリスト「{name}」です"
     },
     "playsort": {
       "artist": "アーティスト",
@@ -992,7 +994,11 @@
         "few": "マーカー間 {count} 拍",
         "many": "マーカー間 {count} 拍",
         "other": "マーカー間 {count} 拍"
-      }
+      },
+      "openPl": "キュー準備（プレイリスト）",
+      "openDir": "キュー準備（フォルダー）",
+      "setToast": "キュー準備セットに {n} 曲 · {skipped} 曲スキップ（ビートグリッドなし）",
+      "setNone": "ビートグリッド付きのトラックがありません - まず解析かインポートを。"
     },
     "tf": {
       "menu": "タグを修復…",
@@ -1051,7 +1057,8 @@
       "plBtn": "プレイリストを再エンコード…",
       "markBtn": "フォルダーをプレイリストとして登録",
       "markedToast": "「{name}」をプレイリストとして作成（{n} 曲）"
-    }
+    },
+    "selectAll": "すべて選択（フィルター後）"
   },
   "live": {
     "ablelink": {

@@ -54,6 +54,10 @@ func deliverEval(id, result string) {
 //     live viewport measurement CSS can't do).
 const runtimeJS = `(function(){
   function send(p){ try{ if(window.rave) window.rave(JSON.stringify(p)); }catch(e){} }
+  function mods(e){ return (e.shiftKey?'s':'')+((e.ctrlKey||e.metaKey)?'c':''); }
+  // change events carry no modifier state - remember the last pointerdown's (checkbox flows)
+  var lastMods='';
+  document.addEventListener('pointerdown', function(e){ lastMods=mods(e); }, true);
   document.addEventListener('click', function(e){
     var t = e.target;
     if(t && (t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA')) return; // 'change' handles form controls
@@ -64,13 +68,17 @@ const runtimeJS = `(function(){
     var b = t.closest && t.closest('button');
     if(el.tagName==='FORM' && b && !b.getAttribute('data-act')) return;
     e.preventDefault();
-    send({act: el.getAttribute('data-act'), val: el.getAttribute('data-val')||'', id: el.id||''});
+    send({act: el.getAttribute('data-act'), val: el.getAttribute('data-val')||'', id: el.id||'', mods: mods(e)});
   });
   document.addEventListener('change', function(e){
     var el = e.target;
     if(!el || !el.getAttribute || !el.getAttribute('data-act')) return;
     var v = el.type==='checkbox' ? String(el.checked) : (el.value||'');
-    send({act: el.getAttribute('data-act'), val: v, id: el.id||''});
+    send({act: el.getAttribute('data-act'), val: v, id: el.id||'', mods: el.type==='checkbox'?lastMods:''});
+  });
+  // shift+click on a list row must never smear a text selection over the range
+  document.addEventListener('selectstart', function(e){
+    if(lastMods.indexOf('s')>=0 && e.target.closest && e.target.closest('.trk-table')) e.preventDefault();
   });
   // browser-style history: mouse X1/X2 (back/forward, e.button 3/4) + Alt+←/→ → Go nav stack.
   // preventDefault on down/aux so WebView2's own (empty) history navigation never fires.
@@ -167,26 +175,41 @@ const runtimeJS = `(function(){
     // two passes: real controls first, then [data-act] containers - a form[data-act]'s
     // textContent contains its submit button's label and precedes it in DOM order, so a
     // single pass would "click" the form (a no-op) instead of the button.
-    // byAct: query matches data-act (the exact snapshot {act} token) - deterministic
-    // where labels are ambiguous ("Playlist" facet vs "Playlists" tab).
-    var byAct=q.indexOf(':')>=0||q.indexOf('=')>=0;
-    function scan(sel){
+    // act mode: query matches data-act (the exact snapshot {act} token) - deterministic
+    // where labels are ambiguous ("Playlist" facet vs "Playlists" tab). ':'/'=' queries
+    // are act-only; plain queries match labels first, then fall back to acts.
+    var actOnly=q.indexOf(':')>=0||q.indexOf('=')>=0;
+    function fire(el){
+      if(el.tagName==='FORM'){
+        if(el.requestSubmit) el.requestSubmit();
+        else el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+      } else el.click();
+      return true;
+    }
+    // act token = data-act, or data-act=data-val (the exact snapshot form). Exact match
+    // wins over substring so "...=50" can't land on "...=509".
+    function scanAct(sel,exact){
       var els=document.querySelectorAll(sel);
       for(var i=0;i<els.length;i++){
-        var t;
-        if(byAct){ t=(els[i].getAttribute('data-act')||'').toLowerCase(); }
-        else { t=(els[i].textContent||els[i].value||els[i].getAttribute('aria-label')||'').toLowerCase().replace(/\s+/g,' ').trim(); }
-        if(t.indexOf(q)>=0 && vis(els[i])){
-          if(els[i].tagName==='FORM'){
-            if(els[i].requestSubmit) els[i].requestSubmit();
-            else els[i].dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
-          } else els[i].click();
-          return true;
-        }
+        var a=(els[i].getAttribute&&els[i].getAttribute('data-act')||'').toLowerCase();
+        if(!a) continue;
+        var v=(els[i].getAttribute('data-val')||'').toLowerCase();
+        var tok=v?(a+'='+v):a;
+        var hit=exact?(tok===q||a===q):(tok.indexOf(q)>=0);
+        if(hit && vis(els[i])) return fire(els[i]);
       }
       return false;
     }
-    return scan('button,a,input[type=checkbox]') || scan('[data-act]');
+    function scanText(sel){
+      var els=document.querySelectorAll(sel);
+      for(var i=0;i<els.length;i++){
+        var t=(els[i].textContent||els[i].value||els[i].getAttribute('aria-label')||'').toLowerCase().replace(/\s+/g,' ').trim();
+        if(t.indexOf(q)>=0 && vis(els[i])) return fire(els[i]);
+      }
+      return false;
+    }
+    if(actOnly) return scanAct('button,a,input[type=checkbox],[data-act]',true) || scanAct('[data-act]',false);
+    return scanText('button,a,input[type=checkbox]') || scanText('[data-act]') || scanAct('[data-act]',true) || scanAct('[data-act]',false);
   };
   window.__read = function(q){
     q=(q||'').toLowerCase();

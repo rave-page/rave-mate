@@ -596,7 +596,9 @@
       "smartMatchLive": "⚡ Smart · {desc} · {count} Treffer (live)",
       "smartSub": "smart · {count} Treffer · {desc}",
       "syncAll": "Alle synchronisieren",
-      "unlink": "Trennen"
+      "unlink": "Trennen",
+      "viewInColl": "In Collection zeigen",
+      "folderBound": "Dieser Ordner ist die Playlist \"{name}\""
     },
     "playsort": {
       "artist": "Künstler",
@@ -992,7 +994,11 @@
         "few": "{count} Beats zwischen Markern",
         "many": "{count} Beats zwischen Markern",
         "other": "{count} Beats zwischen Markern"
-      }
+      },
+      "openPl": "Cues vorbereiten (Playlist)",
+      "openDir": "Cues vorbereiten (Ordner)",
+      "setToast": "{n} Tracks im Cue-Prep-Set · {skipped} übersprungen (kein Beatgrid)",
+      "setNone": "Keine Tracks mit Beatgrid hier - erst analysieren oder importieren."
     },
     "tf": {
       "menu": "Tags reparieren…",
@@ -1051,7 +1057,8 @@
       "plBtn": "Playlist re-encodieren…",
       "markBtn": "Ordner als Playlist markieren",
       "markedToast": "„{name}“ als Playlist angelegt ({n} Tracks)"
-    }
+    },
+    "selectAll": "Alle auswählen (gefiltert)"
   },
   "live": {
     "ablelink": {

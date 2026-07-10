@@ -60,6 +60,7 @@ type libSt struct {
 	collDesc                             bool
 	collGenre, collLabel, keySel         map[string]bool
 	collSel                              map[string]bool      // add-to-playlist multi-select
+	collAnchor, batchAnchor              string               // last plain-clicked row (Shift-range anchor)
 	collNoDrops                          bool                 // facet: only tracks WITHOUT drop markers
 	collPl                               map[int64]bool       // facet: playlist membership (OR union)
 	collPlSet                            map[string]bool      // union of the selected playlists' track paths
@@ -402,17 +403,10 @@ func (u *UI) libBrowseEntries(s *libSt, dir string) (fes []libFe, errRead, ok bo
 	return s.browseFes, s.browseErr, true
 }
 
-func (u *UI) libBrowseHTML(s *libSt) string {
-	dir := u.libDirOr()
-	cachedFes, errRead, ok := u.libBrowseEntries(s, dir)
-	if !ok {
-		return emptyState(i18n.T("library.remote.col.loading"))
-	}
-	if errRead {
-		return emptyState(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
-	}
-	fs := append([]libFe(nil), cachedFes...) // cache is immutable - copy before filter/sort
-	// filter
+// libBrowseViewOf filters+sorts the cached dir entries per the current controls -
+// the single source of row ORDER for rendering and Shift-range selection.
+func libBrowseViewOf(s *libSt, fes []libFe) []libFe {
+	fs := append([]libFe(nil), fes...) // cache is immutable - copy before filter/sort
 	q := strings.ToLower(strings.TrimSpace(s.nameFilter))
 	keyed := len(s.keySel) > 0
 	out := fs[:0]
@@ -445,6 +439,19 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 			return a.mod.After(b.mod)
 		}
 	})
+	return fs
+}
+
+func (u *UI) libBrowseHTML(s *libSt) string {
+	dir := u.libDirOr()
+	cachedFes, errRead, ok := u.libBrowseEntries(s, dir)
+	if !ok {
+		return emptyState(i18n.T("library.remote.col.loading"))
+	}
+	if errRead {
+		return emptyState(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
+	}
+	fs := libBrowseViewOf(s, cachedFes)
 
 	var b strings.Builder
 	// breadcrumb
@@ -487,6 +494,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid"))
 	b.WriteString(fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid"))
 	b.WriteString(u.libKeyChip(s))
+	b.WriteString(btn(i18n.T("library.ce.openDir"), "ghost", "ce-open-dir", ""))
 	b.WriteString(btn(i18n.T("library.re.dirBtn"), "ghost", "lib-reenc-dir", ""))
 	b.WriteString(btn(i18n.T("library.re.markBtn"), "ghost", "lib-markpl", ""))
 	pinLabel := i18n.T("library.browse.pin")
@@ -497,8 +505,30 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 		}
 	}
 	b.WriteString(btn(pinLabel, "ghost", "lib-pin", ""))
+	nf, allB := 0, true
+	for _, e := range fs {
+		if e.isDir {
+			continue
+		}
+		nf++
+		if !s.batch[e.path] {
+			allB = false
+		}
+	}
+	chkAllB := ""
+	if nf > 0 && allB {
+		chkAllB = " checked"
+	}
+	if nf > 0 {
+		b.WriteString(`<input type=checkbox class=trk-selall data-act=lib-batch-all title="` + html.EscapeString(i18n.T("library.selectAll")) + `"` + chkAllB + `>`)
+	}
 	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.Tn("library.item", len(fs))) + `</span>`)
 	b.WriteString(`</div>`)
+	// folder bound to a playlist -> its actions live right here
+	if pl := u.libFolderPlaylist(dir); pl != nil {
+		b.WriteString(`<p class=page-sub>🎵 ` + html.EscapeString(i18n.T("library.pl.folderBound", i18n.A{"name": pl.Name})) + `</p>`)
+		b.WriteString(u.libPlaylistActionsHTML(*pl, false))
+	}
 
 	ref := s.selRef()
 	if s.view == "grid" {
@@ -625,6 +655,22 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	for _, id := range sortedPlIDs(s.collPlNames) {
 		b.WriteString(fchip(s.collPlNames[id]+" ×", "", fmt.Sprintf("lib-plfilter:%d", id), true))
 	}
+	// exactly one playlist facet active -> the collection IS that playlist's view:
+	// surface its full action row inline (no Playlists-tab round-trip)
+	if len(s.collPl) == 1 && u.svc.Lib != nil {
+		var id int64
+		for k := range s.collPl {
+			id = k
+		}
+		if rows, _ := u.svc.Lib.ListPlaylists(); rows != nil {
+			for _, p := range rows {
+				if p.ID == id {
+					b.WriteString(u.libPlaylistActionsHTML(p, true))
+					break
+				}
+			}
+		}
+	}
 
 	// batch results replace the list while a fixer's results view is on
 	u.tf.mu.Lock()
@@ -653,7 +699,20 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		}
 		return `<span class="` + cls + ` trk-sortable" data-act="lib-coll-hsort:` + key + `">` + html.EscapeString(label) + arrow + `</span>`
 	}
-	b.WriteString(`<div class=trk-h>` + hdr("Artist", i18n.T("library.coll.trackHeader", i18n.A{"count": fmt.Sprint(total)}), "trk-hmain") +
+	allSel := total > 0
+	for _, ti := range shown {
+		if !s.collSel[s.tracks[ti].Path] {
+			allSel = false
+			break
+		}
+	}
+	chkAll := ""
+	if allSel {
+		chkAll = " checked"
+	}
+	b.WriteString(`<div class=trk-h>` +
+		`<input type=checkbox class=trk-selall data-act=lib-collsel-all title="` + html.EscapeString(i18n.T("library.selectAll")) + `"` + chkAll + `>` +
+		hdr("Artist", i18n.T("library.coll.trackHeader", i18n.A{"count": fmt.Sprint(total)}), "trk-hmain") +
 		`<span class=trk-cell-ce>` + html.EscapeString(i18n.T("library.col.cues")) + `</span>` +
 		hdr("BPM", i18n.T("library.col.bpm"), "trk-bpm") +
 		`<span class=trk-dur>` + html.EscapeString(i18n.T("library.col.time")) + `</span>` +
@@ -751,6 +810,8 @@ func (u *UI) libMoreMenuHTML(s *libSt) string {
 	var b strings.Builder
 	b.WriteString(`<div class=lib-popmenu>`)
 	items := [][2]string{
+		{"lib-pl-new", i18n.T("library.pl.new")},
+		{"lib-pl-newsmart", i18n.T("library.pl.newSmart")},
 		{"lib-backups", i18n.T("library.coll.backup")},
 		{"lib-scan", i18n.T("library.coll.scan")},
 		{"lib-cleanup", i18n.T("library.coll.cleanup")},
@@ -950,17 +1011,17 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 	return b.String()
 }
 
-func (u *UI) libPlaylistOpenHTML(s *libSt) string {
-	p := s.plCur
+// libPlaylistActionsHTML: one playlist's full action row - shared by the Playlists
+// open view, the Collection inline panel (single playlist facet), and Browse (a
+// playlist-bound folder). inColl hides the "View in Collection" jump.
+func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	manual := p.Kind == libdb.PlaylistManual
 	var b strings.Builder
-	b.WriteString(section(p.Name, ""))
-	if p.Kind == libdb.PlaylistSmart {
-		if r, ok := libParseRules(p.Rules); ok {
-			b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.pl.smartMatchLive", i18n.A{"desc": r.Describe(), "count": fmt.Sprint(len(s.plItems))})) + `</p>`)
-		}
-	}
 	b.WriteString(`<div class=lib-toolbar>`)
+	if !inColl {
+		b.WriteString(btn(i18n.T("library.pl.viewInColl"), "primary", fmt.Sprintf("lib-plgoto:%d", p.ID), ""))
+	}
+	b.WriteString(btn(i18n.T("library.ce.openPl"), "outline", fmt.Sprintf("ce-open-pl:%d", p.ID), ""))
 	if p.Kind != libdb.PlaylistImported {
 		b.WriteString(btn(i18n.T("library.pl.rename"), "outline", fmt.Sprintf("lib-pl-rename:%d", p.ID), ""))
 	}
@@ -980,6 +1041,35 @@ func (u *UI) libPlaylistOpenHTML(s *libSt) string {
 		b.WriteString(btn(i18n.T("library.pl.unlink"), "ghost", fmt.Sprintf("lib-pl-unlink:%d", p.ID), ""))
 	}
 	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// libFolderPlaylist returns the playlist bound to dir (imported folder / manual mark).
+func (u *UI) libFolderPlaylist(dir string) *libdb.PlaylistRow {
+	if u.svc.Lib == nil {
+		return nil
+	}
+	d := filepath.Clean(dir)
+	rows, _ := u.svc.Lib.ListPlaylists()
+	for i := range rows {
+		if rows[i].Folder != "" && filepath.Clean(rows[i].Folder) == d {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func (u *UI) libPlaylistOpenHTML(s *libSt) string {
+	p := s.plCur
+	manual := p.Kind == libdb.PlaylistManual
+	var b strings.Builder
+	b.WriteString(section(p.Name, ""))
+	if p.Kind == libdb.PlaylistSmart {
+		if r, ok := libParseRules(p.Rules); ok {
+			b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.pl.smartMatchLive", i18n.A{"desc": r.Describe(), "count": fmt.Sprint(len(s.plItems))})) + `</p>`)
+		}
+	}
+	b.WriteString(u.libPlaylistActionsHTML(p, false))
 	b.WriteString(`<div class=trk-table>`)
 	ref := s.selRef()
 	for i, it := range s.plItems {
@@ -1224,7 +1314,7 @@ func (u *UI) libDetailHTML(s *libSt) string {
 		}
 	}
 	ceBtn := ""
-	if sel.inColl && sel.kind == "audio" && len(sel.track.Beatgrid) > 0 && u.libSectionOr() == "collection" {
+	if sel.inColl && sel.kind == "audio" && len(sel.track.Beatgrid) > 0 {
 		ceBtn = btn(i18n.T("library.ce.open"), "outline", "ce-open:"+sel.path, "")
 	}
 	act := `<div class=btn-row>` + btn(i18n.T("library.open"), "outline", "lib-openext:"+sel.path, "") + btn(i18n.T("library.reveal"), "outline", "lib-reveal:"+sel.path, "") +
@@ -1289,7 +1379,7 @@ func (u *UI) libTrackPlaylistsHTML(path string) string {
 	pls, _ := u.svc.Lib.PlaylistsForTrack(path)
 	var chips string
 	for _, p := range pls {
-		chips += badge(p.Name, "secondary")
+		chips += fchip(p.Name, "", fmt.Sprintf("lib-plgoto:%d", p.ID), false)
 	}
 	if chips == "" {
 		chips = `<span class=page-sub>` + html.EscapeString(i18n.T("library.insp.notInPlaylist")) + `</span>`

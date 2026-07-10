@@ -234,7 +234,7 @@ func (u *UI) RefreshRecordings() {
 
 func (u *UI) onAction(payload string) {
 	var m struct {
-		Act, Val, Form, ID string
+		Act, Val, Form, ID, Mods string
 	}
 	if json.Unmarshal([]byte(payload), &m) != nil {
 		return
@@ -323,7 +323,7 @@ func (u *UI) onAction(payload string) {
 	case strings.HasPrefix(m.Act, "obs-record:"):
 		u.obsCmd(strings.TrimPrefix(m.Act, "obs-record:"), "record")
 	default:
-		if u.dispatch(actMsg{Act: m.Act, Val: m.Val, Form: m.Form, ID: m.ID}) {
+		if u.dispatch(actMsg{Act: m.Act, Val: m.Val, Form: m.Form, ID: m.ID, Mods: m.Mods}) {
 			return
 		}
 		if u.log != nil {

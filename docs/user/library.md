@@ -21,6 +21,19 @@ Collection combines free-text search (title/artist) with facet dropdowns - **Gen
 live), plus the key wheel and the NO DROPS chip. Facets are filterable dropdowns; active
 picks show as removable chips and combine (search AND genre AND playlist …).
 
+Playlists are integrated here: filter to exactly one playlist and its full action row
+(prepare cues, export M3U, re-encode, rename, sync, delete) appears inline - Collection
+*is* the playlist view. A track's playlist chips in the detail rail jump straight to
+that filtered view; a Browse folder bound to a playlist shows the same actions in place.
+New playlists live under **Maintenance**. The Playlists tab remains for ordering/reorder.
+
+## Multi-select
+
+Both Collection and Browse: header **select-all** checkbox (applies to the filtered
+set), **Shift+click** selects a consecutive range (on a checkbox, the range follows the
+checkbox's new state - so Shift also deselects), **Ctrl+click** adds/removes individual
+rows.
+
 ## Cross-DJ-software library sync
 
 Hub-merge model: rave-mate reads Traktor / Serato / VirtualDJ / Rekordbox collections, merges

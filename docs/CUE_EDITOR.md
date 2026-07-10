@@ -7,11 +7,16 @@ apply it to any number of prepared tracks.
 
 ## Opening
 
-Library → Collection → select a track (needs a beatgrid) → **Prepare cues**. The
-waveform expands to full tab width above the browser with the beatgrid, cue flags,
-drop markers and beat cursor rendered on it. The strip above the wave shows track
-identity, cursor position (time + bar.beat), beat-jump size, each drop (click = jump)
-and the cue count; the right rail holds the actions.
+Library → select a track with a beatgrid → **Prepare cues** (the button shows in
+Collection, Browse and Playlists once the track is in the collection). Whole-set entry:
+**Prepare cues (playlist)** in a playlist's action row, or **Prepare cues (folder)** in
+the Browse toolbar - eligible tracks (in collection + beatgrid) become the mass-apply
+selection, the collection focuses on that playlist, and the editor opens on the first
+track; tracks without a grid are skipped with a count. The waveform expands to full tab
+width above the browser with the beatgrid, cue flags, drop markers and beat cursor
+rendered on it. The strip above the wave shows track identity, cursor position (time +
+bar.beat), beat-jump size, each drop (click = jump) and the cue count; the right rail
+holds the actions.
 
 ## Marking
 

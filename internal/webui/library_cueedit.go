@@ -12,6 +12,8 @@ package webui
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -155,8 +157,49 @@ func (u *UI) ceEnter(path string) {
 	c.report, c.lastErr = nil, ""
 	c.fileTag = tagwrite.Supported(path)
 	c.mu.Unlock()
+	// the editing surface (full-width wave + batch bar) mounts in Collection
+	u.mu.Lock()
+	u.libSection = "collection"
+	u.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
 	u.patchMain()
+}
+
+// ceEnterSet enters cue-prep for a whole set of paths (playlist / folder): eligible
+// tracks (in collection + beatgrid) become the mass-apply selection, plID (if not 0)
+// focuses the collection's playlist facet, and the editor opens on the first track.
+// The editing surface lives in the Collection section, so entry switches there.
+func (u *UI) ceEnterSet(paths []string, plID int64) {
+	s := u.lib()
+	s.mu.Lock()
+	sel, first, skipped := map[string]bool{}, "", 0
+	for _, p := range paths {
+		tr, ok := s.byPath[p]
+		if !ok || len(tr.Beatgrid) == 0 {
+			skipped++
+			continue
+		}
+		sel[p] = true
+		if first == "" {
+			first = p
+		}
+	}
+	if first != "" {
+		s.collSel = sel
+		if plID != 0 {
+			s.collPl = map[int64]bool{plID: true}
+		}
+	}
+	s.mu.Unlock()
+	if first == "" {
+		u.toast(i18n.T("library.ce.setNone"))
+		return
+	}
+	if plID != 0 {
+		u.libRebuildPlFilter()
+	}
+	u.ceEnter(first)
+	u.toast(i18n.T("library.ce.setToast", i18n.A{"n": fmt.Sprint(len(sel)), "skipped": fmt.Sprint(skipped)}))
 }
 
 func (u *UI) ceClose() {
@@ -1038,6 +1081,28 @@ func ceAssignSelect(dropIdx int, cur string, st *cuepattern.Store) string {
 
 func init() {
 	onPrefix("ce-open:", func(u *UI, m actMsg) { u.ceEnter(m.arg("ce-open:")) })
+	onPrefix("ce-open-pl:", func(u *UI, m actMsg) {
+		id := int64(atoi(m.arg("ce-open-pl:")))
+		paths, _ := u.svc.Lib.PlaylistTracks(id)
+		u.ceEnterSet(paths, id)
+	})
+	onExact("ce-open-dir", func(u *UI, m actMsg) {
+		dir := u.libDirOr()
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			u.toast(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
+			return
+		}
+		var paths []string
+		for _, e := range ents {
+			if !e.IsDir() {
+				if p := filepath.Join(dir, e.Name()); pubIsAudio(p) {
+					paths = append(paths, p)
+				}
+			}
+		}
+		u.ceEnterSet(paths, 0)
+	})
 	onExact("ce-close", func(u *UI, _ actMsg) { u.ceClose() })
 	onExact("ce-drop-add", func(u *UI, _ actMsg) { u.ceToggleDrop(false) })
 	onExact("ce-drop-del", func(u *UI, _ actMsg) { u.ceToggleDrop(true) })

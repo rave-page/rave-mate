@@ -596,7 +596,9 @@
       "smartMatchLive": "⚡ Inteligente · {desc} · {count} coincidencia (en vivo)",
       "smartSub": "inteligente · {count} coincidencia · {desc}",
       "syncAll": "Sincronizar todo",
-      "unlink": "Desvincular"
+      "unlink": "Desvincular",
+      "viewInColl": "Ver en la Colección",
+      "folderBound": "Esta carpeta es la playlist \"{name}\""
     },
     "playsort": {
       "artist": "Artista",
@@ -992,7 +994,11 @@
         "few": "{count} beats entre marcadores",
         "many": "{count} beats entre marcadores",
         "other": "{count} beats entre marcadores"
-      }
+      },
+      "openPl": "Preparar cues (playlist)",
+      "openDir": "Preparar cues (carpeta)",
+      "setToast": "{n} pistas en el set de preparación · {skipped} omitidas (sin beatgrid)",
+      "setNone": "No hay pistas con beatgrid aquí - analiza o importa primero."
     },
     "tf": {
       "menu": "Reparar tags…",
@@ -1051,7 +1057,8 @@
       "plBtn": "Re-codificar playlist…",
       "markBtn": "Marcar carpeta como playlist",
       "markedToast": "«{name}» creada como playlist ({n} pistas)"
-    }
+    },
+    "selectAll": "Seleccionar todo (filtrado)"
   },
   "live": {
     "ablelink": {

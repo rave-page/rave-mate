@@ -43,10 +43,44 @@ func init() {
 			u.libNav(m.Val)
 		}
 	})
-	onPrefix("lib-open:", func(u *UI, m actMsg) { u.libSelect(m.arg("lib-open:"), nil) })
-	onPrefix("lib-track:", func(u *UI, m actMsg) { u.libSelect(m.arg("lib-track:"), nil) })
+	onPrefix("lib-open:", func(u *UI, m actMsg) {
+		p := m.arg("lib-open:")
+		if m.shift() || m.ctrl() {
+			u.libBatchSelMod(p, m, "")
+			return
+		}
+		u.libSetQuiet(func(s *libSt) { s.batchAnchor = p })
+		u.libSelect(p, nil)
+	})
+	onPrefix("lib-track:", func(u *UI, m actMsg) {
+		p := m.arg("lib-track:")
+		if m.shift() || m.ctrl() {
+			u.libCollSelMod(p, m, "")
+			return
+		}
+		u.libSetQuiet(func(s *libSt) { s.collAnchor = p })
+		u.libSelect(p, nil)
+	})
 	onPrefix("lib-batch:", func(u *UI, m actMsg) {
-		u.libToggle(func(s *libSt) map[string]bool { return s.batch }, m.arg("lib-batch:"), m.Val == "true")
+		p := m.arg("lib-batch:")
+		if m.shift() {
+			u.libBatchSelMod(p, m, m.Val)
+			return
+		}
+		u.libSetQuiet(func(s *libSt) { s.batchAnchor = p })
+		u.libToggle(func(s *libSt) map[string]bool { return s.batch }, p, m.Val == "true")
+	})
+	onExact("lib-batch-all", func(u *UI, m actMsg) {
+		on := m.Val == "true"
+		u.libSet(func(s *libSt) {
+			for _, p := range u.libBrowseFilePathsLocked(s) {
+				if on {
+					s.batch[p] = true
+				} else {
+					delete(s.batch, p)
+				}
+			}
+		})
 	})
 	onExact("lib-batch-clear", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.batch = map[string]bool{} }) })
 	onPrefix("lib-batch-run:", func(u *UI, m actMsg) { u.libBatchRun(m.arg("lib-batch-run:")) })
@@ -99,6 +133,12 @@ func init() {
 	onPrefix("lib-label:", func(u *UI, m actMsg) {
 		u.libToggle(func(s *libSt) map[string]bool { return s.collLabel }, m.arg("lib-label:"), !u.libHas("label", m.arg("lib-label:")))
 	})
+	onPrefix("lib-plgoto:", func(u *UI, m actMsg) {
+		id := int64(atoi(m.arg("lib-plgoto:")))
+		u.libSetQuiet(func(s *libSt) { s.collPl = map[int64]bool{id: true} })
+		u.libRebuildPlFilter()
+		u.libSetSection("collection")
+	})
 	onPrefix("lib-plfilter:", func(u *UI, m actMsg) {
 		id := int64(atoi(m.arg("lib-plfilter:")))
 		u.libSetQuiet(func(s *libSt) {
@@ -124,7 +164,25 @@ func init() {
 		})
 	})
 	onPrefix("lib-collsel:", func(u *UI, m actMsg) {
-		u.libToggle(func(s *libSt) map[string]bool { return s.collSel }, m.arg("lib-collsel:"), m.Val == "true")
+		p := m.arg("lib-collsel:")
+		if m.shift() {
+			u.libCollSelMod(p, m, m.Val)
+			return
+		}
+		u.libSetQuiet(func(s *libSt) { s.collAnchor = p })
+		u.libToggle(func(s *libSt) map[string]bool { return s.collSel }, p, m.Val == "true")
+	})
+	onExact("lib-collsel-all", func(u *UI, m actMsg) {
+		on := m.Val == "true"
+		u.libSet(func(s *libSt) {
+			for _, ti := range s.collView() {
+				if on {
+					s.collSel[s.tracks[ti].Path] = true
+				} else {
+					delete(s.collSel, s.tracks[ti].Path)
+				}
+			}
+		})
 	})
 	onExact("lib-collsel-clear", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collSel = map[string]bool{} }) })
 	onExact("lib-import", func(u *UI, m actMsg) { u.libImportModal() })
@@ -267,6 +325,94 @@ func init() {
 }
 
 // ── state mutation helpers ──
+
+// libRangeApply marks the contiguous run anchor..path in row order (on=false clears).
+// No anchor (or anchor filtered away) degrades to the single clicked row.
+func libRangeApply(order []string, sel map[string]bool, anchor, path string, on bool) {
+	ai, pi := -1, -1
+	for i, p := range order {
+		if p == anchor {
+			ai = i
+		}
+		if p == path {
+			pi = i
+		}
+	}
+	if pi < 0 {
+		return
+	}
+	if ai < 0 {
+		ai = pi
+	}
+	if ai > pi {
+		ai, pi = pi, ai
+	}
+	for _, p := range order[ai : pi+1] {
+		if on {
+			sel[p] = true
+		} else {
+			delete(sel, p)
+		}
+	}
+}
+
+// libCollSelMod: Shift = range anchor→row (checkbox state wins; row clicks select);
+// Ctrl = toggle the one row. Collection multi-select (collSel).
+func (u *UI) libCollSelMod(path string, m actMsg, chkVal string) {
+	s := u.lib()
+	s.mu.Lock()
+	if m.shift() {
+		on := chkVal == "" || chkVal == "true"
+		order := make([]string, 0, len(s.tracks))
+		for _, ti := range s.collView() {
+			order = append(order, s.tracks[ti].Path)
+		}
+		libRangeApply(order, s.collSel, s.collAnchor, path, on)
+	} else {
+		if s.collSel[path] {
+			delete(s.collSel, path)
+		} else {
+			s.collSel[path] = true
+		}
+		s.collAnchor = path
+	}
+	s.mu.Unlock()
+	u.libPatchBody()
+}
+
+// libBatchSelMod: same semantics for the Browse batch selection.
+func (u *UI) libBatchSelMod(path string, m actMsg, chkVal string) {
+	s := u.lib()
+	s.mu.Lock()
+	if m.shift() {
+		on := chkVal == "" || chkVal == "true"
+		libRangeApply(u.libBrowseFilePathsLocked(s), s.batch, s.batchAnchor, path, on)
+	} else {
+		if s.batch[path] {
+			delete(s.batch, path)
+		} else {
+			s.batch[path] = true
+		}
+		s.batchAnchor = path
+	}
+	s.mu.Unlock()
+	u.libPatchBody()
+}
+
+// libBrowseFilePathsLocked: current Browse row order, files only (caller holds s.mu).
+func (u *UI) libBrowseFilePathsLocked(s *libSt) []string {
+	fes, errRead, ok := u.libBrowseEntries(s, u.libDirOr())
+	if !ok || errRead {
+		return nil
+	}
+	var out []string
+	for _, e := range libBrowseViewOf(s, fes) {
+		if !e.isDir {
+			out = append(out, e.path)
+		}
+	}
+	return out
+}
 
 func (u *UI) libSet(mut func(*libSt)) {
 	s := u.lib()

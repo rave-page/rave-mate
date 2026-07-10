@@ -596,7 +596,9 @@
       "smartMatchLive": "⚡ Intelligente · {desc} · {count} correspondance (live)",
       "smartSub": "intelligente · {count} correspondance · {desc}",
       "syncAll": "Tout synchroniser",
-      "unlink": "Délier"
+      "unlink": "Délier",
+      "viewInColl": "Voir dans la Collection",
+      "folderBound": "Ce dossier est la playlist \"{name}\""
     },
     "playsort": {
       "artist": "Artiste",
@@ -992,7 +994,11 @@
         "few": "{count} temps entre les marqueurs",
         "many": "{count} temps entre les marqueurs",
         "other": "{count} temps entre les marqueurs"
-      }
+      },
+      "openPl": "Préparer les cues (playlist)",
+      "openDir": "Préparer les cues (dossier)",
+      "setToast": "{n} pistes dans le set de préparation · {skipped} ignorées (pas de grille)",
+      "setNone": "Aucune piste avec grille ici - analysez ou importez d'abord."
     },
     "tf": {
       "menu": "Réparer les tags…",
@@ -1051,7 +1057,8 @@
       "plBtn": "Ré-encoder la playlist…",
       "markBtn": "Marquer le dossier comme playlist",
       "markedToast": "« {name} » créée comme playlist ({n} pistes)"
-    }
+    },
+    "selectAll": "Tout sélectionner (filtré)"
   },
   "live": {
     "ablelink": {
