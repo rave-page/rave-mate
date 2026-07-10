@@ -19,13 +19,14 @@ const (
 
 // PlaylistRow is one stored playlist (TrackCount filled by ListPlaylists).
 type PlaylistRow struct {
-	ID         int64
-	Name       string
-	Kind       string // manual|imported|smart
-	Folder     string // imported: source folder path
-	Rules      string // smart: JSON musiclib.SmartRules
-	PulledAt   string // RFC3339 of last remote→local sync apply ("" = never)
-	TrackCount int
+	ID          int64
+	Name        string
+	Kind        string // manual|imported|smart
+	Folder      string // imported: source folder path
+	Rules       string // smart: JSON musiclib.SmartRules
+	PulledAt    string // RFC3339 of last remote→local sync apply ("" = never)
+	AutoRefresh bool   // folder-bound: pick up new folder files automatically
+	TrackCount  int
 }
 
 const playlistSchema = `
@@ -122,7 +123,7 @@ func (d *DB) DeletePlaylist(id int64) error {
 // imported (grouped by folder), each name-sorted.
 func (d *DB) ListPlaylists() ([]PlaylistRow, error) {
 	rows, err := d.db.Query(`
-		SELECT p.id, p.name, p.kind, p.folder, p.rules, COALESCE(p.pulled_at,''),
+		SELECT p.id, p.name, p.kind, p.folder, p.rules, COALESCE(p.pulled_at,''), COALESCE(p.auto_refresh,0),
 		       (SELECT COUNT(*) FROM playlist_tracks t WHERE t.playlist_id = p.id)
 		FROM playlists p
 		ORDER BY CASE p.kind WHEN 'manual' THEN 0 WHEN 'smart' THEN 1 ELSE 2 END,
@@ -134,22 +135,35 @@ func (d *DB) ListPlaylists() ([]PlaylistRow, error) {
 	var out []PlaylistRow
 	for rows.Next() {
 		var r PlaylistRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &r.Folder, &r.Rules, &r.PulledAt, &r.TrackCount); err != nil {
+		var ar int
+		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &r.Folder, &r.Rules, &r.PulledAt, &ar, &r.TrackCount); err != nil {
 			return nil, err
 		}
+		r.AutoRefresh = ar != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
+// SetPlaylistAutoRefresh flags a folder-bound playlist for automatic folder pickup.
+func (d *DB) SetPlaylistAutoRefresh(id int64, on bool) error {
+	v := 0
+	if on {
+		v = 1
+	}
+	return d.touchPlaylist(id, `auto_refresh=?`, v)
+}
+
 // PlaylistByID returns one playlist, ok=false if absent.
 func (d *DB) PlaylistByID(id int64) (PlaylistRow, bool, error) {
 	var r PlaylistRow
-	err := d.db.QueryRow(`SELECT id, name, kind, folder, rules, COALESCE(pulled_at,'') FROM playlists WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.Kind, &r.Folder, &r.Rules, &r.PulledAt)
+	var ar int
+	err := d.db.QueryRow(`SELECT id, name, kind, folder, rules, COALESCE(pulled_at,''), COALESCE(auto_refresh,0) FROM playlists WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.Kind, &r.Folder, &r.Rules, &r.PulledAt, &ar)
 	if err == sql.ErrNoRows {
 		return PlaylistRow{}, false, nil
 	}
+	r.AutoRefresh = ar != 0
 	return r, err == nil, err
 }
 

@@ -598,7 +598,15 @@
       "syncAll": "すべて同期",
       "unlink": "リンク解除",
       "viewInColl": "コレクションで表示",
-      "folderBound": "このフォルダーはプレイリスト「{name}」です"
+      "folderBound": "このフォルダーはプレイリスト「{name}」です",
+      "refreshFolder": "フォルダーから更新",
+      "autoOn": "自動更新：オン",
+      "autoOff": "自動更新：オフ",
+      "refreshAll": "フォルダープレイリストを更新…",
+      "refreshedToast": "{name} に {n} 曲を追加しました",
+      "refreshAllToast": "{m} 件のフォルダープレイリストに {n} 曲を追加",
+      "refreshNone": "フォルダーに新しいファイルはありません",
+      "noFolder": "更新元フォルダーがありません（空のプレイリスト・バインド解決不可）"
     },
     "playsort": {
       "artist": "アーティスト",
@@ -1058,7 +1066,14 @@
       "markBtn": "フォルダーをプレイリストとして登録",
       "markedToast": "「{name}」をプレイリストとして作成（{n} 曲）"
     },
-    "selectAll": "すべて選択（フィルター後）"
+    "selectAll": "すべて選択（フィルター後）",
+    "nav": {
+      "allTracks": "すべてのトラック",
+      "places": "場所",
+      "pinned": "ピン留め",
+      "drives": "ドライブ",
+      "folders": "フォルダー"
+    }
   },
   "live": {
     "ablelink": {

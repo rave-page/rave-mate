@@ -598,7 +598,15 @@
       "syncAll": "Tout synchroniser",
       "unlink": "Délier",
       "viewInColl": "Voir dans la Collection",
-      "folderBound": "Ce dossier est la playlist \"{name}\""
+      "folderBound": "Ce dossier est la playlist \"{name}\"",
+      "refreshFolder": "Actualiser depuis le dossier",
+      "autoOn": "Auto-actualisation : on",
+      "autoOff": "Auto-actualisation : off",
+      "refreshAll": "Actualiser les playlists-dossiers…",
+      "refreshedToast": "{n} nouvelles pistes ajoutées à {name}",
+      "refreshAllToast": "{n} pistes ajoutées sur {m} playlists-dossiers",
+      "refreshNone": "Aucun nouveau fichier dans le dossier",
+      "noFolder": "aucun dossier à actualiser (playlist vide, liaison introuvable)"
     },
     "playsort": {
       "artist": "Artiste",
@@ -1058,7 +1066,14 @@
       "markBtn": "Marquer le dossier comme playlist",
       "markedToast": "« {name} » créée comme playlist ({n} pistes)"
     },
-    "selectAll": "Tout sélectionner (filtré)"
+    "selectAll": "Tout sélectionner (filtré)",
+    "nav": {
+      "allTracks": "Toutes les pistes",
+      "places": "Emplacements",
+      "pinned": "Épinglés",
+      "drives": "Disques",
+      "folders": "Dossiers"
+    }
   },
   "live": {
     "ablelink": {

@@ -260,3 +260,13 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 
 /* select-all checkbox (collection header + browse toolbar) */
 .trk-selall{flex:0 0 auto;accent-color:var(--rp-brand,#F70864);cursor:pointer}
+
+/* left nav rail (tri-pane) */
+.libnav{display:flex;flex-direction:column;gap:1px;padding-right:4px}
+.libnav-hd{font:600 10px/1 var(--font-display,Orbitron),sans-serif;letter-spacing:.08em;color:var(--rp-muted,#B98AA0);text-transform:uppercase;margin:10px 4px 4px}
+.libnav-it{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;cursor:pointer;color:#ddd;font-size:13px;min-width:0}
+.libnav-it:hover{background:rgba(255,255,255,.06)}
+.libnav-it.on{background:color-mix(in srgb,var(--rp-base,#F70864) 20%,transparent);color:#fff}
+.libnav-ic{flex:0 0 auto}
+.libnav-t{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.libnav-n{flex:0 0 auto;font-size:11px;color:var(--rp-muted,#B98AA0);font-variant-numeric:tabular-nums}

@@ -27,6 +27,21 @@ Playlists are integrated here: filter to exactly one playlist and its full actio
 that filtered view; a Browse folder bound to a playlist shows the same actions in place.
 New playlists live under **Maintenance**. The Playlists tab remains for ordering/reorder.
 
+## Layout
+
+Collection and Browse use a DJ-software tri-pane layout: a narrow **left rail**
+(Collection = All tracks + playlist tree; Browse = places, pinned, drives, folders),
+the track/file list, and the detail inspector. Drag the dividers to resize; widths
+persist across restarts.
+
+## Folder-playlist refresh
+
+DJ software never re-scans a "folder as playlist" - files added later stay missing.
+Any file-backed playlist's action row has **Refresh from folder** (uses the stored
+folder binding, or the members' dominant directory for Traktor imports) and an
+**Auto-refresh** toggle (applied once per app run). **Maintenance → Refresh folder
+playlists…** sweeps them all.
+
 ## Multi-select
 
 Both Collection and Browse: header **select-all** checkbox (applies to the filtered

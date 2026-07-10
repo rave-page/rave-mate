@@ -108,7 +108,8 @@ type libSt struct {
 	browseBusy bool    // a background read is in flight
 	browseAt   time.Time
 
-	moreOpen bool // Maintenance popover (collection toolbar) open
+	moreOpen      bool // Maintenance popover (collection toolbar) open
+	autoRefreshed bool // once-per-run auto folder-playlist sweep kicked
 
 	// smart-playlist rules editor draft
 	srID     int64 // 0 = create
@@ -237,6 +238,10 @@ func (u *UI) libBody() string {
 	s := u.lib()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.autoRefreshed && u.svc.Lib != nil {
+		s.autoRefreshed = true
+		u.bg(u.libAutoRefreshFolders)
+	}
 	switch sec {
 	case "favorites":
 		return u.libFavoritesHTML(s)
@@ -248,9 +253,9 @@ func (u *UI) libBody() string {
 			// cue-edit mode: the waveform (grid + markers) spans the full tab width
 			// above the list; the rail keeps only the editor controls.
 			return `<div class=ce-fullwave>` + u.ceWaveHTML() + `</div>` +
-				masterDetailWide(u.libCollectionHTML(s), u.libDetailWrap(s))
+				triPane(u.libNavRailHTML(s, "collection"), u.libCollectionHTML(s), u.libDetailWrap(s), "lib-nav-w", "lib-det-w")
 		}
-		return masterDetailWide(u.libCollectionHTML(s), u.libDetailWrap(s))
+		return triPane(u.libNavRailHTML(s, "collection"), u.libCollectionHTML(s), u.libDetailWrap(s), "lib-nav-w", "lib-det-w")
 	case "playlists":
 		if !u.libEnsureTracks(s) {
 			return emptyState(i18n.T("library.remote.col.loading"))
@@ -271,7 +276,7 @@ func (u *UI) libBody() string {
 		// Browse renders the dir listing regardless; the collection (metadata enrichment)
 		// hydrates in the background and re-patches when ready.
 		u.libEnsureTracks(s)
-		return masterDetailWide(u.libBrowseHTML(s), u.libDetailWrap(s))
+		return triPane(u.libNavRailHTML(s, "browse"), u.libBrowseHTML(s), u.libDetailWrap(s), "lib-nav-w", "lib-det-w")
 	}
 }
 
@@ -463,20 +468,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 		}
 	}
 	b.WriteString(`</div>`)
-	// quick-access + pinned chips
-	b.WriteString(`<div class=lib-chips>`)
-	home, _ := os.UserHomeDir()
-	for _, q := range [][2]string{{"home", ""}, {"desktop", "Desktop"}, {"downloads", "Downloads"}, {"music", "Music"}, {"videos", "Videos"}, {"pictures", "Pictures"}} {
-		p := home
-		if q[1] != "" {
-			p = filepath.Join(home, q[1])
-		}
-		b.WriteString(fchip(i18n.T("library.browse."+q[0]), "", "lib-nav:"+p, p == dir))
-	}
-	for _, bm := range u.libMarks(s).List() {
-		b.WriteString(fchip("★ "+bm.Label, "", "lib-nav:"+bm.Path, bm.Path == dir))
-	}
-	b.WriteString(`</div>`)
+	// quick-access + pinned live in the left nav rail (libNavRailHTML)
 	// toolbar
 	b.WriteString(`<div class=lib-toolbar>`)
 	b.WriteString(btn(i18n.T("library.browse.up"), "outline", "lib-nav:"+filepath.Dir(dir), ""))
@@ -812,6 +804,7 @@ func (u *UI) libMoreMenuHTML(s *libSt) string {
 	items := [][2]string{
 		{"lib-pl-new", i18n.T("library.pl.new")},
 		{"lib-pl-newsmart", i18n.T("library.pl.newSmart")},
+		{"lib-pl-refresh-all", i18n.T("library.pl.refreshAll")},
 		{"lib-backups", i18n.T("library.coll.backup")},
 		{"lib-scan", i18n.T("library.coll.scan")},
 		{"lib-cleanup", i18n.T("library.coll.cleanup")},
@@ -1031,6 +1024,16 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	b.WriteString(btn(i18n.T("library.pl.exportM3U"), "outline", fmt.Sprintf("lib-pl-export:%d", p.ID), ""))
 	b.WriteString(btn(i18n.T("library.pl.exportM3UAs"), "ghost", fmt.Sprintf("pick-save:m3u8:lib-pl-exportas:%d", p.ID), ""))
 	b.WriteString(btn(i18n.T("library.re.plBtn"), "outline", fmt.Sprintf("lib-reenc-pl:%d", p.ID), ""))
+	if p.Kind != libdb.PlaylistSmart {
+		// refresh works for any file-backed playlist: stored folder binding, or the
+		// members' dominant dir (Traktor folder imports store tree names, not paths)
+		b.WriteString(btn(i18n.T("library.pl.refreshFolder"), "outline", fmt.Sprintf("lib-pl-refresh:%d", p.ID), ""))
+		arLbl, arVar := i18n.T("library.pl.autoOff"), "ghost"
+		if p.AutoRefresh {
+			arLbl, arVar = i18n.T("library.pl.autoOn"), "primary"
+		}
+		b.WriteString(btn(arLbl, arVar, fmt.Sprintf("lib-pl-autorefresh:%d", p.ID), ""))
+	}
 	if !manual {
 		b.WriteString(btn(i18n.T("library.pl.dupManual"), "outline", fmt.Sprintf("lib-pl-dup:%d", p.ID), ""))
 	}

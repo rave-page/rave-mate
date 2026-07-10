@@ -80,6 +80,37 @@ const runtimeJS = `(function(){
   document.addEventListener('selectstart', function(e){
     if(lastMods.indexOf('s')>=0 && e.target.closest && e.target.closest('.trk-table')) e.preventDefault();
   });
+  // draggable pane splitters: [data-splitvar] handles write a :root CSS var (the grid
+  // column width), persisted in localStorage - layouts survive re-renders + restarts.
+  (function(){
+    function apply(k,v){ document.documentElement.style.setProperty('--'+k, v+'px'); }
+    try{ var st=JSON.parse(localStorage.getItem('rp-splits')||'{}'); for(var k in st){ apply(k,st[k]); } }catch(e){}
+    var d=null;
+    document.addEventListener('pointerdown', function(e){
+      var h=e.target.closest && e.target.closest('[data-splitvar]');
+      if(!h || e.button!==0) return;
+      e.preventDefault();
+      var v=h.getAttribute('data-splitvar');
+      var cur=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--'+v));
+      if(!cur){ cur=parseFloat(h.getAttribute('data-splitdef'))||240; }
+      d={v:v, x:e.clientX, w:cur, r:h.hasAttribute('data-splitdir')};
+      h.classList.add('on');
+      if(h.setPointerCapture) h.setPointerCapture(e.pointerId);
+    }, true);
+    document.addEventListener('pointermove', function(e){
+      if(!d) return;
+      var dx=e.clientX-d.x; if(d.r) dx=-dx;
+      apply(d.v, Math.max(150, Math.min(640, d.w+dx)));
+    }, true);
+    document.addEventListener('pointerup', function(){
+      if(!d) return;
+      var el=document.querySelector('[data-splitvar="'+d.v+'"]'); if(el) el.classList.remove('on');
+      try{ var st=JSON.parse(localStorage.getItem('rp-splits')||'{}');
+        st[d.v]=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--'+d.v))||d.w;
+        localStorage.setItem('rp-splits', JSON.stringify(st)); }catch(e){}
+      d=null;
+    }, true);
+  })();
   // browser-style history: mouse X1/X2 (back/forward, e.button 3/4) + Alt+←/→ → Go nav stack.
   // preventDefault on down/aux so WebView2's own (empty) history navigation never fires.
   document.addEventListener('mousedown', function(e){ if(e.button===3||e.button===4) e.preventDefault(); });

@@ -236,6 +236,18 @@ func masterDetailWide(listHTML, detailHTML string) string {
 	return `<div class="mdsplit wide"><div class=md-list>` + listHTML + `</div><div class=md-detail>` + detailHTML + `</div></div>`
 }
 
+// triPane: nav rail | primary list | detail inspector with user-draggable dividers.
+// navVar/detailVar are :root CSS custom-property names the splitter JS (shell.go)
+// writes + persists in localStorage, so widths survive re-renders and restarts.
+func triPane(navHTML, listHTML, detailHTML, navVar, detailVar string) string {
+	return `<div class="mdsplit wide tri" style="grid-template-columns:var(--` + navVar + `,220px) 6px minmax(0,1fr) 6px var(--` + detailVar + `,clamp(300px,28vw,400px))">` +
+		`<div class=md-nav>` + navHTML + `</div>` +
+		`<div class=split-h data-splitvar="` + navVar + `" data-splitdef=220></div>` +
+		`<div class=md-list>` + listHTML + `</div>` +
+		`<div class=split-h data-splitvar="` + detailVar + `" data-splitdef=340 data-splitdir=r></div>` +
+		`<div class=md-detail>` + detailHTML + `</div></div>`
+}
+
 // itemRow renders a list row: title + optional sub-line on the left, trailing action buttons right.
 func itemRow(title, sub string, trailing ...string) string {
 	s := ""

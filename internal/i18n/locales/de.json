@@ -598,7 +598,15 @@
       "syncAll": "Alle synchronisieren",
       "unlink": "Trennen",
       "viewInColl": "In Collection zeigen",
-      "folderBound": "Dieser Ordner ist die Playlist \"{name}\""
+      "folderBound": "Dieser Ordner ist die Playlist \"{name}\"",
+      "refreshFolder": "Aus Ordner auffrischen",
+      "autoOn": "Auto-Refresh: an",
+      "autoOff": "Auto-Refresh: aus",
+      "refreshAll": "Ordner-Playlists auffrischen…",
+      "refreshedToast": "{n} neue Tracks zu {name} hinzugefügt",
+      "refreshAllToast": "{n} Tracks über {m} Ordner-Playlists hinzugefügt",
+      "refreshNone": "Keine neuen Dateien im Ordner",
+      "noFolder": "kein Ordner zum Auffrischen (leere Playlist, Bindung nicht auflösbar)"
     },
     "playsort": {
       "artist": "Künstler",
@@ -1058,7 +1066,14 @@
       "markBtn": "Ordner als Playlist markieren",
       "markedToast": "„{name}“ als Playlist angelegt ({n} Tracks)"
     },
-    "selectAll": "Alle auswählen (gefiltert)"
+    "selectAll": "Alle auswählen (gefiltert)",
+    "nav": {
+      "allTracks": "Alle Tracks",
+      "places": "Orte",
+      "pinned": "Angeheftet",
+      "drives": "Laufwerke",
+      "folders": "Ordner"
+    }
   },
   "live": {
     "ablelink": {

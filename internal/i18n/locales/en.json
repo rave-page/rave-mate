@@ -679,7 +679,15 @@
       "syncAll": "Sync all",
       "unlink": "Unlink",
       "viewInColl": "View in Collection",
-      "folderBound": "This folder is the playlist \"{name}\""
+      "folderBound": "This folder is the playlist \"{name}\"",
+      "refreshFolder": "Refresh from folder",
+      "autoOn": "Auto-refresh: on",
+      "autoOff": "Auto-refresh: off",
+      "refreshAll": "Refresh folder playlists…",
+      "refreshedToast": "{n} new tracks added to {name}",
+      "refreshAllToast": "{n} tracks added across {m} folder playlists",
+      "refreshNone": "No new files in the folder",
+      "noFolder": "no folder to refresh from (empty playlist, unresolvable binding)"
     },
     "playsort": {
       "artist": "Artist",
@@ -1139,7 +1147,14 @@
       "markBtn": "Mark folder as playlist",
       "markedToast": "“{name}” created as playlist ({n} tracks)"
     },
-    "selectAll": "Select all (filtered)"
+    "selectAll": "Select all (filtered)",
+    "nav": {
+      "allTracks": "All tracks",
+      "places": "Places",
+      "pinned": "Pinned",
+      "drives": "Drives",
+      "folders": "Folders"
+    }
   },
   "live": {
     "ablelink": {

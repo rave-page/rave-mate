@@ -183,6 +183,7 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE playlists ADD COLUMN pulled_at TEXT`,    // last remote→local apply (NML untouched)
 		`ALTER TABLE track_art ADD COLUMN artist TEXT`,       // name-based cover resolution
 		`ALTER TABLE track_art ADD COLUMN title TEXT`,
+		`ALTER TABLE playlists ADD COLUMN auto_refresh INTEGER NOT NULL DEFAULT 0`, // folder-bound: pick up new files automatically
 		// Index AFTER the columns exist (an existing track_art predates them; an in-schema index
 		// would fail to open the DB → whole library store disabled).
 		`CREATE INDEX IF NOT EXISTS idx_track_art_meta ON track_art(artist, title)`,
