@@ -61,6 +61,10 @@ func writeImportableFile(t config.SyncTarget, tracks []musiclib.Track) (TargetOu
 		err = atomicWriteFile(path, func(w io.Writer) error {
 			return musiclib.ExportRekordboxXML(tracks, w)
 		})
+	case AppVirtualDJ:
+		err = atomicWriteFile(path, func(w io.Writer) error {
+			return musiclib.ExportVirtualDJ(tracks, w)
+		})
 	default:
 		return out, fmt.Errorf("importable-file export not supported for %q", t.App)
 	}
@@ -68,7 +72,12 @@ func writeImportableFile(t config.SyncTarget, tracks []musiclib.Track) (TargetOu
 		return out, err
 	}
 	out.Added = len(tracks)
-	out.Note = fmt.Sprintf("wrote %d tracks → %s (Import Collection in %s)", len(tracks), filepath.Base(path), t.App)
+	if t.App == AppVirtualDJ {
+		// VDJ has no import dialog: it auto-merges a database.xml found in a drive root / its home dir.
+		out.Note = fmt.Sprintf("wrote %d tracks → %s (place as database.xml in a drive root or the VirtualDJ folder to merge)", len(tracks), filepath.Base(path))
+	} else {
+		out.Note = fmt.Sprintf("wrote %d tracks → %s (Import Collection in %s)", len(tracks), filepath.Base(path), t.App)
+	}
 	return out, nil
 }
 
@@ -124,8 +133,44 @@ func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, err
 		out.Added = res.Inserted
 		out.Note = fmt.Sprintf("master.db: %d added, %d already present (backed up first)", res.Inserted, res.Skipped)
 		return out, nil
+	case AppVirtualDJ:
+		path := t.OutputPath
+		if path == "" {
+			p, derr := musiclib.DiscoverVirtualDJ()
+			if derr != nil {
+				return out, derr
+			}
+			path = p
+		}
+		if path == "" {
+			return out, fmt.Errorf("no VirtualDJ database.xml found (set an output path)")
+		}
+		out.Path = path
+		if virtualdjRunning() {
+			// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
+			return out, fmt.Errorf("VirtualDJ is open - close it before live write-back")
+		}
+		if err := backupBeforeWrite(path); err != nil {
+			return out, fmt.Errorf("backup: %w", err)
+		}
+		res, err := musiclib.MergeIntoVirtualDJFile(path, tracks)
+		if err != nil {
+			return out, err
+		}
+		out.Updated, out.Added = res.Updated, res.Added
+		out.Note = fmt.Sprintf("database.xml: %d updated, %d added (backed up first)", res.Updated, res.Added)
+		return out, nil
 	}
 	return out, fmt.Errorf("live write-back not supported for %q", t.App)
+}
+
+// virtualdjRunning reports whether VirtualDJ appears to be running (refuse a live write then;
+// same fail-open posture as rekordboxRunning).
+func virtualdjRunning() bool {
+	if set, ok := sysactivity.New().RunningProcesses(); ok {
+		return sysactivity.Running(set, "virtualdj")
+	}
+	return false
 }
 
 // rekordboxRunning reports whether Rekordbox appears to be running (refuse a live write then).
@@ -151,10 +196,13 @@ func resolveFileOutput(t config.SyncTarget) (string, error) {
 		return "", err
 	}
 	name := "rave-sync.xml"
-	if t.App == AppTraktor {
+	switch t.App {
+	case AppTraktor:
 		name = "rave-sync-collection.nml"
-	} else if t.App == AppRekordbox {
+	case AppRekordbox:
 		name = "rave-sync-rekordbox.xml"
+	case AppVirtualDJ:
+		name = "rave-sync-virtualdj-database.xml"
 	}
 	return filepath.Join(dir, name), nil
 }
