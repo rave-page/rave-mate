@@ -83,6 +83,10 @@ func init() {
 			}
 		})
 	})
+	onExact("lib-nodrops", func(u *UI, m actMsg) {
+		u.libSetQuiet(func(s *libSt) { s.collNoDrops = !s.collNoDrops })
+		u.libPatchBody()
+	})
 	onExact("lib-more", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.moreOpen = !s.moreOpen }) })
 	// popover item: close the menu, then run the wrapped action
 	onPrefix("lib-morego:", func(u *UI, m actMsg) {
@@ -103,6 +107,7 @@ func init() {
 	onExact("lib-clearfilters", func(u *UI, m actMsg) {
 		u.libSet(func(s *libSt) {
 			s.collSearch, s.collGenre, s.collLabel, s.keySel = "", map[string]bool{}, map[string]bool{}, map[string]bool{}
+			s.collNoDrops = false
 		})
 	})
 	onPrefix("lib-collsel:", func(u *UI, m actMsg) {

@@ -305,6 +305,10 @@
     "wave-nav": {
       "body": "The waveform is the seek surface: click anywhere to jump there, scroll the mouse wheel to zoom around the cursor (up to 50×), and drag to pan while zoomed. + / − / Fit do the same from the buttons. Violet lines are track starts from the session tracklist, amber is the last fader-down, and colored lines on library tracks are your DJ cue points.\n\nThe two chips overlaying the waveform teach as you go: the left one shows the source encoding (hover for codec, sample rate, bitrate and file size), the right one the track's integrated loudness (hover for the full EBU R128 story - integrated vs momentary, streaming targets, true peak). The readout next to the zoom buttons follows your cursor with the time and the momentary loudness at that exact position.\n\nIn edit mode the strip gains three pointer lanes: the top edge drags the IN handle, the bottom edge drags OUT, and the middle stays click-to-seek - so you can audition and trim without ever leaving the waveform.",
       "title": "Waveform navigation"
+    },
+    "cue-edit": {
+      "title": "Cue editor — keys & mouse",
+      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks."
     }
   },
   "library": {
@@ -1014,6 +1018,47 @@
       "rbNote": "Rekordbox: grids are written to the collection XML — load it in Rekordbox via File → Import Collection.",
       "seratoNote": "Serato: grids are written directly into the audio files (verified temp-write; close Serato first).",
       "vdjRunning": "VirtualDJ is open — close it before applying."
+    },
+    "ce": {
+      "open": "Prepare cues",
+      "eyebrow": "Cue editor",
+      "cursor": "Cursor",
+      "bar": "bar",
+      "jump": "beat-jump: {n}",
+      "noDropsHint": "No drops yet — walk to the first drop with the arrow keys and press T or Enter.",
+      "addDrop": "Add drop at cursor",
+      "removeDrop": "Remove drop at cursor",
+      "noFileTag": "This file format can't carry the drop tag — drops are stored in the library only (MP3/FLAC also store them in the file).",
+      "selection": "{n} cues selected",
+      "patternName": "Pattern name…",
+      "savePattern": "Save as pattern",
+      "applyHot": "Apply patterns (hotcues)",
+      "applyMem": "Apply as memory cues",
+      "convertAll": "Convert all hotcues → memory cues",
+      "reportHint": "{added} added · {cut} cut (outside the drop's span) · {skipped} skipped (existing cue) · {demoted} without a pad",
+      "notInCollection": "Track is not in the collection.",
+      "noGrid": "Track has no beatgrid — analyze or fix the grid first.",
+      "fileTagFailed": "Could not write drops to the file tag: ",
+      "nameNeeded": "Name the pattern first.",
+      "saveFailed": "Could not save pattern: ",
+      "patternSaved": "Pattern “{name}” saved ({n} cues).",
+      "noPatternPicked": "Pick a pattern for at least one drop.",
+      "applyFailed": "Apply failed: ",
+      "appliedToast": "{n} cues written",
+      "convertedToast": "All hotcues converted to memory cues.",
+      "noDropsChip": "No drops",
+      "drops": {
+        "one": "{count} drop marker",
+        "few": "{count} drop markers",
+        "many": "{count} drop markers",
+        "other": "{count} drop markers"
+      },
+      "patternCues": {
+        "one": "{count} cue",
+        "few": "{count} cues",
+        "many": "{count} cues",
+        "other": "{count} cues"
+      }
     }
   },
   "live": {

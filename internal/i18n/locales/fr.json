@@ -288,6 +288,10 @@
     },
     "midi-thru": {
       "body": "\n\nMeilleure cible THRU (pilote loopMIDI requis) : le port unidirectionnel rave-mate. Votre logiciel DJ voit un port d'entrée seul nommé 'rave-mate' - il n'existe AUCUN point de sortie correspondant, donc l'écho LED automatique (rekordbox renvoie le code MIDI IN de chaque indicateur) ne peut pas boucler et le logiciel ne réagit jamais à son propre retour. Sélectionnez 'rave-mate' comme périphérique MIDI dans le logiciel DJ."
+    },
+    "cue-edit": {
+      "title": "Éditeur de cues — clavier & souris",
+      "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux."
     }
   },
   "library": {
@@ -933,6 +937,47 @@
       "rbNote": "Rekordbox : les grilles sont écrites dans le XML de la collection — chargez-le dans Rekordbox via Fichier → Importer la collection.",
       "seratoNote": "Serato : les grilles sont écrites directement dans les fichiers audio (écriture temporaire vérifiée ; fermez Serato d'abord).",
       "vdjRunning": "VirtualDJ est ouvert — fermez-le avant d'appliquer."
+    },
+    "ce": {
+      "open": "Préparer les cues",
+      "eyebrow": "Éditeur de cues",
+      "cursor": "Curseur",
+      "bar": "mesure",
+      "jump": "saut de beats : {n}",
+      "noDropsHint": "Pas encore de drop — naviguez jusqu'au premier drop avec les flèches puis appuyez sur T ou Entrée.",
+      "addDrop": "Ajouter un drop au curseur",
+      "removeDrop": "Supprimer le drop au curseur",
+      "noFileTag": "Ce format de fichier ne peut pas porter le tag de drop — les drops ne sont stockés que dans la bibliothèque (MP3/FLAC les stockent aussi dans le fichier).",
+      "selection": "{n} cues sélectionnés",
+      "patternName": "Nom du pattern…",
+      "savePattern": "Enregistrer comme pattern",
+      "applyHot": "Appliquer les patterns (hotcues)",
+      "applyMem": "Appliquer en memory cues",
+      "convertAll": "Convertir tous les hotcues → memory cues",
+      "reportHint": "{added} ajoutés · {cut} coupés (hors de la plage du drop) · {skipped} ignorés (cue existant) · {demoted} sans pad",
+      "notInCollection": "Le morceau n'est pas dans la collection.",
+      "noGrid": "Le morceau n'a pas de beatgrid — analysez ou corrigez la grille d'abord.",
+      "fileTagFailed": "Impossible d'écrire les drops dans le tag du fichier : ",
+      "nameNeeded": "Nommez d'abord le pattern.",
+      "saveFailed": "Impossible d'enregistrer le pattern : ",
+      "patternSaved": "Pattern « {name} » enregistré ({n} cues).",
+      "noPatternPicked": "Choisissez un pattern pour au moins un drop.",
+      "applyFailed": "Échec de l'application : ",
+      "appliedToast": "{n} cues écrits",
+      "convertedToast": "Tous les hotcues convertis en memory cues.",
+      "noDropsChip": "Sans drops",
+      "drops": {
+        "one": "{count} marqueur de drop",
+        "few": "{count} marqueurs de drop",
+        "many": "{count} marqueurs de drop",
+        "other": "{count} marqueurs de drop"
+      },
+      "patternCues": {
+        "one": "{count} cue",
+        "few": "{count} cues",
+        "many": "{count} cues",
+        "other": "{count} cues"
+      }
     }
   },
   "live": {

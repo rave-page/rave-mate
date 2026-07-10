@@ -85,6 +85,19 @@ const runtimeJS = `(function(){
     if(e.key==='ArrowLeft'){ e.preventDefault(); send({act:'nav-back'}); }
     else if(e.key==='ArrowRight'){ e.preventDefault(); send({act:'nav-fwd'}); }
   });
+  // scoped editing keys (library list nav + cue editor). Guards: window focused, a
+  // key-scope stamped on <body> by Go for the current view, no editable element focused.
+  document.addEventListener('keydown', function(e){
+    if(e.ctrlKey||e.metaKey||e.altKey) return;
+    if(!document.hasFocus()) return;
+    var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
+    var a=document.activeElement;
+    if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
+    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t'};
+    var name=map[e.key]; if(!name) return;
+    e.preventDefault();
+    send({act:'key:'+scope, val:(e.shiftKey?'s':'')+name});
+  });
   document.addEventListener('input', function(e){
     var el = e.target;
     if(!el || !el.getAttribute) return;

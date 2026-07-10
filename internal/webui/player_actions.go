@@ -1229,6 +1229,10 @@ func (u *UI) mpHandleMove(host, which string, fx float64, gen int) {
 
 // mpSurf handles the middle lane: click = seek, drag = pan when zoomed.
 func (u *UI) mpSurf(host, val string) {
+	if u.ceActiveFor(host) {
+		u.ceSurf(host, val)
+		return
+	}
 	phase, fx, ok := mpPos(val)
 	if !ok {
 		return

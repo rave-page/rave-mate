@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/cuepattern"
 	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/i18n"
@@ -47,6 +48,10 @@ type UI struct {
 	gfVMu    sync.Mutex // guards gfVStore lazy-open
 	gfVStore *gridfix.VerifiedStore
 	gfTrain  gfTrainState // model fine-tuning state (settings_gridfix_model.go)
+
+	ceMu    sync.Mutex // guards ceState/ceStore lazy-init (library_cueedit.go)
+	ceState *ceSt
+	ceStore *cuepattern.Store
 
 	twMu         sync.Mutex
 	twitchRows   []string    // rolling twitch chat/alert feed (cap 250)
@@ -351,7 +356,21 @@ func (u *UI) patchMain() {
 	u.fragMu.Lock()
 	u.frags = nil // DOM replaced - drop the tick dedup cache
 	u.fragMu.Unlock()
-	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ")")
+	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ");document.body.setAttribute('data-keyscope'," + jsQuote(u.keyScope()) + ")")
+}
+
+// keyScope names the active editing-key surface ("" = none; see shell.go keydown).
+func (u *UI) keyScope() string {
+	if u.activeTab() != "library" {
+		return ""
+	}
+	if u.ceActiveFor("library") {
+		return "cueedit"
+	}
+	if u.libSectionOr() == "collection" {
+		return "library"
+	}
+	return ""
 }
 
 // tickPatch records a __patch call for id unless html matches the last push (dedup). Pairs are

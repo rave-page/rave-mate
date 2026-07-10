@@ -60,6 +60,8 @@ type libSt struct {
 	collDesc                             bool
 	collGenre, collLabel, keySel         map[string]bool
 	collSel                              map[string]bool // add-to-playlist multi-select
+	collNoDrops                          bool            // facet: only tracks WITHOUT drop markers
+	dropsIdx                             map[string][]float64 // path -> drop markers (cue-prepare enrichment)
 	batch                                map[string]bool // browse batch multi-select
 
 	sel       *libSel
@@ -281,6 +283,7 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 	u.bg(func() {
 		defer close(done)
 		tr, err := u.svc.Lib.LoadAllTracks()
+		drops, _ := u.svc.Lib.AllDrops()
 		var byPath map[string]musiclib.Track
 		if err == nil { // index built off the action goroutine too
 			byPath = make(map[string]musiclib.Track, len(tr))
@@ -296,6 +299,7 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 			s.loaded = true
 			if err == nil {
 				s.tracks, s.byPath = tr, byPath
+				s.dropsIdx = drops
 			}
 		}
 		s.mu.Unlock()
@@ -470,6 +474,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid"))
 	b.WriteString(fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid"))
 	b.WriteString(u.libKeyChip(s))
+	b.WriteString(fchip(i18n.T("library.ce.noDropsChip"), "", "lib-nodrops", s.collNoDrops))
 	pinLabel := i18n.T("library.browse.pin")
 	for _, bm := range u.libMarks(s).List() {
 		if bm.Path == dir {
@@ -591,7 +596,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	b.WriteString(u.libFacetSelect(s, "label", i18n.T("library.label.label"), s.collLabel,
 		func(t musiclib.Track) string { return strings.TrimSpace(t.Label) }))
 	b.WriteString(u.libKeyChip(s))
-	if len(s.collGenre)+len(s.collLabel)+len(s.keySel) > 0 || s.collSearch != "" {
+	if len(s.collGenre)+len(s.collLabel)+len(s.keySel) > 0 || s.collSearch != "" || s.collNoDrops {
 		b.WriteString(btn(i18n.T("library.clear"), "ghost", "lib-clearfilters", ""))
 	}
 	b.WriteString(`</div>`)
@@ -743,6 +748,9 @@ func (s *libSt) collView() []int {
 			continue
 		}
 		if !inFilter(strings.TrimSpace(t.Label), s.collLabel) {
+			continue
+		}
+		if s.collNoDrops && len(s.dropsIdx[t.Path]) > 0 {
 			continue
 		}
 		out = append(out, i)
@@ -1033,6 +1041,9 @@ func (u *UI) libPresetsHTML(s *libSt) string {
 // ── Inspector (detail pane) ─────────────────────────────────────────────────
 
 func (u *UI) libDetailHTML(s *libSt) string {
+	if u.ceActiveFor("library") {
+		return u.ceDetailHTML()
+	}
 	sel := s.sel
 	if sel == nil {
 		// Collection rail without a selection = the beatgrid cockpit / health card
@@ -1070,8 +1081,12 @@ func (u *UI) libDetailHTML(s *libSt) string {
 			verifyBtn = btn(lbl, variant, "gf-verify:"+sel.path, "")
 		}
 	}
+	ceBtn := ""
+	if sel.inColl && sel.kind == "audio" && len(sel.track.Beatgrid) > 0 && u.libSectionOr() == "collection" {
+		ceBtn = btn(i18n.T("library.ce.open"), "outline", "ce-open:"+sel.path, "")
+	}
 	act := `<div class=btn-row>` + btn(i18n.T("library.open"), "outline", "lib-openext:"+sel.path, "") + btn(i18n.T("library.reveal"), "outline", "lib-reveal:"+sel.path, "") +
-		verifyBtn +
+		verifyBtn + ceBtn +
 		btn(i18n.T("library.metadata"), "ghost", "lib-probe:"+sel.path, "") + btn(i18n.T("library.copyPath"), "ghost", "copy", "") + `</div>`
 	if !onDisk {
 		act = `<p class=page-sub>` + html.EscapeString(i18n.T("library.insp.missing")) + `</p>` + act
