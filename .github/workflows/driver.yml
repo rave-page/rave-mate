@@ -59,6 +59,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.configuration == 'Release'
         with:
-          name: ravemidi-x64-testsigned
+          name: ravemidi-x64-unsigned
           path: artifact/
           retention-days: 14

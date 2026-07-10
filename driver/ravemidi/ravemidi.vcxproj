@@ -32,6 +32,11 @@
          x86\InfVerif.dll on the CI runner. CI runs InfVerif.exe as an explicit
          step so the DCH/declarative gate is preserved. -->
     <SkipPackageVerification>true</SkipPackageVerification>
+    <!-- No in-build signing: CI has no cert, and release signing is Microsoft
+         attestation (Partner Center), not a local test-cert. Install/dev-test
+         signs out-of-band per the design doc. -->
+    <SignMode>Off</SignMode>
+    <EnableTestSign>false</EnableTestSign>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
