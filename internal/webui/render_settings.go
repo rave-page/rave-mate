@@ -35,7 +35,7 @@ type setToggle struct {
 }
 
 // toggleRegistry is the full Settings feature-toggle set (mirrors the Fyne cards' toggle semantics:
-// simple/module/session/tab/moduleTab). All persist via saveCfg (which also Session.Reconcile()s).
+// simple/module/session/tab/moduleTab). All persist via saveCfgBG (async saveCfg off the actWorker).
 func (u *UI) toggleRegistry() []setToggle {
 	f := &u.svc.Cfg.Features
 	c := u.svc.Cfg
@@ -1435,21 +1435,33 @@ func boolStat(on bool, onText string) stv {
 
 // ── apply (from onAction) ──
 
+// applyToggle flips a feature toggle: optimistic in-memory flip + instant re-render, then persist +
+// module start/stop via saveCfgBG (disk write, Session.Reconcile and featurehost spawn/exit-wait
+// would stall the serial actWorker). A failed save reverts the flip.
 func (u *UI) applyToggle(id string, on bool) {
 	for _, t := range u.toggleRegistry() {
 		if t.id != id {
 			continue
 		}
-		t.set(on)
-		u.saveCfg()
-		if t.module != "" && u.svc.Modules != nil {
-			u.svc.Modules.SetEnabled(t.module, on)
+		prev := t.get()
+		t.set(on) // optimistic - the switch re-renders before any disk/module work
+		refresh := func() {
+			if t.retab {
+				u.eval("window.__patch('nav-list'," + jsQuote(u.navListHTML()) + ")")
+			}
+			u.patchMain()
 		}
-		if t.retab {
-			u.eval("window.__patch('nav-list'," + jsQuote(u.navListHTML()) + ")")
-		}
-		u.patchMain()
+		refresh()
 		u.toast(t.label + onOff(on))
+		u.saveCfgBG("toggle:"+id, func() {
+			if t.module != "" && u.svc.Modules != nil {
+				u.svc.Modules.SetEnabled(t.module, on)
+			}
+		}, func() {
+			t.set(prev) // save failed - revert the optimistic flip
+			refresh()
+			u.toast(t.label + " - save failed")
+		})
 		return
 	}
 }
@@ -1748,7 +1760,7 @@ func (u *UI) applySet(id, val string) {
 		save = false
 	}
 	if save {
-		u.saveCfg()
+		u.saveCfgBG("set:"+id, nil, nil) // disk write + Reconcile off the actWorker
 	}
 }
 
@@ -1772,6 +1784,72 @@ func (u *UI) saveCfg() {
 	if u.svc.Session != nil {
 		u.svc.Session.Reconcile()
 	}
+}
+
+// ── async persist (keeps disk + module churn off the serial actWorker) ──
+
+// cfgSaveMu serializes background config writes (full-config marshal - last writer wins).
+var cfgSaveMu sync.Mutex
+
+// cfgJobs coalesces per-control background persist jobs: one in flight per key; a repeat while busy
+// queues ONE rerun with the latest callbacks (optimistic flip + reconcile, mpv tap-freeze
+// precedent). Package-level (the UI struct lives in ui.go); one webview UI per process.
+var (
+	cfgJobMu sync.Mutex
+	cfgJobs  = map[string]*cfgJob{}
+)
+
+type cfgJob struct {
+	rerun         bool
+	apply, onFail func()
+}
+
+// saveCfgBG persists config + reconciles the session in a background job keyed by control key, then
+// runs apply (module start/stop etc.); onFail runs instead when the write fails so the caller can
+// revert its optimistic patch. Both callbacks may be nil and run off the actWorker.
+func (u *UI) saveCfgBG(key string, apply, onFail func()) {
+	cfgJobMu.Lock()
+	if j, ok := cfgJobs[key]; ok {
+		j.rerun, j.apply, j.onFail = true, apply, onFail
+		cfgJobMu.Unlock()
+		return
+	}
+	cfgJobs[key] = &cfgJob{apply: apply, onFail: onFail}
+	cfgJobMu.Unlock()
+	u.bg(func() {
+		for {
+			var err error
+			if u.svc.Cfg != nil {
+				cfgSaveMu.Lock()
+				err = u.svc.Cfg.Save()
+				cfgSaveMu.Unlock()
+			}
+			if err != nil {
+				if u.log != nil {
+					u.log.Error("webui", "config save", map[string]any{"key": key, "error": err.Error()})
+				}
+				if onFail != nil {
+					onFail()
+				}
+			} else {
+				if u.svc.Session != nil {
+					u.svc.Session.Reconcile()
+				}
+				if apply != nil {
+					apply()
+				}
+			}
+			cfgJobMu.Lock()
+			j := cfgJobs[key]
+			if !j.rerun {
+				delete(cfgJobs, key)
+				cfgJobMu.Unlock()
+				return
+			}
+			j.rerun, apply, onFail = false, j.apply, j.onFail
+			cfgJobMu.Unlock()
+		}
+	})
 }
 
 func onOff(b bool) string {

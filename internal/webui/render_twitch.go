@@ -121,12 +121,15 @@ func (u *UI) twitchPresetsHTML() string {
 // ── feed ──
 
 func (u *UI) twitchFeedHTML() string {
+	// snapshot under twMu, join outside - the 250-row string build must not block eventbus
+	// publishers appending in push (strings immutable; appends never write into the snapshot)
 	u.twMu.Lock()
-	defer u.twMu.Unlock()
-	if len(u.twitchRows) == 0 {
+	rows := u.twitchRows
+	u.twMu.Unlock()
+	if len(rows) == 0 {
 		return `<div class=log-line>` + html.EscapeString(i18n.T("twitch.noMessagesYet")) + `</div>`
 	}
-	return strings.Join(u.twitchRows, "")
+	return strings.Join(rows, "")
 }
 
 func twitchName(e twitch.Event) string {

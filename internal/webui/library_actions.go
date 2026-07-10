@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
@@ -942,29 +943,95 @@ func (u *UI) libCleanup() {
 	})
 }
 
+// ── async collection access ──
+
+// libWaiters: one pending hydration waiter per (state, flow key) — repeat clicks while
+// the collection loads are dropped instead of stacking duplicate actions.
+var (
+	libWaitMu  sync.Mutex
+	libWaiters = map[*libSt]map[string]bool{}
+)
+
+// libTracksAsync hands the hydrated collection to then() without parking the action
+// goroutine (libTracksBlocking on actWorker froze every tab for up to 30s on a cold
+// library): loaded → then runs inline; hydrating → loading toast + guarded waiter re-runs
+// then on completion. A libReload mid-wait (loadGen bump) drops the callback — libReload's
+// own patch re-renders from fresh state.
+func (u *UI) libTracksAsync(s *libSt, key string, then func(tracks []musiclib.Track)) {
+	s.mu.Lock()
+	if u.libEnsureTracks(s) {
+		tr := s.tracks
+		s.mu.Unlock()
+		then(tr)
+		return
+	}
+	done, gen := s.loadDone, s.loadGen
+	s.mu.Unlock()
+	libWaitMu.Lock()
+	if libWaiters[s] == nil {
+		libWaiters[s] = map[string]bool{}
+	}
+	if libWaiters[s][key] {
+		libWaitMu.Unlock()
+		return
+	}
+	libWaiters[s][key] = true
+	libWaitMu.Unlock()
+	u.toast(i18n.T("library.remote.col.loading"))
+	u.bg(func() {
+		select { // bounded like libTracksBlocking was: a wedged load must not leak the waiter
+		case <-done:
+		case <-time.After(30 * time.Second):
+		}
+		libWaitMu.Lock()
+		delete(libWaiters[s], key)
+		libWaitMu.Unlock()
+		s.mu.Lock()
+		stale := s.loadGen != gen
+		tr := s.tracks
+		s.mu.Unlock()
+		if !stale {
+			then(tr)
+		}
+	})
+}
+
+// libItemsAsync resolves row's items then hands them to then(): manual/imported inline,
+// smart via libTracksAsync (rule eval needs the collection).
+func (u *UI) libItemsAsync(row libdb.PlaylistRow, key string, then func([]libdb.PlaylistItemRow)) {
+	if row.Kind != libdb.PlaylistSmart {
+		then(u.libPlaylistItems(row, nil))
+		return
+	}
+	u.libTracksAsync(u.lib(), key, func(tracks []musiclib.Track) {
+		then(u.libPlaylistItems(row, tracks))
+	})
+}
+
 // ── relocate missing files (Fyne doRelocate parity) ──
 // Scan missing → index a search root → candidates (confidence-scored, per-row opt-out) →
 // backup + write a NEW collection.fixed.nml. The source collection.nml is never modified.
 
 func (u *UI) libRelocate() {
 	s := u.lib()
-	tracks := u.libTracksBlocking(s)
-	if len(tracks) == 0 {
-		u.toast(i18n.T("library.toast.importFirst"))
-		return
-	}
-	u.toast(i18n.T("library.toast.scanningMissing"))
-	u.bg(func() {
-		_, missing := musiclib.ScanMissing(tracks)
-		if len(missing) == 0 {
-			u.toast(i18n.T("library.toast.noMissing"))
+	u.libTracksAsync(s, "relocate", func(tracks []musiclib.Track) {
+		if len(tracks) == 0 {
+			u.toast(i18n.T("library.toast.importFirst"))
 			return
 		}
-		s.mu.Lock()
-		s.relocMiss, s.relocCands, s.relocSkip, s.relocMsg, s.relocBusy = missing, nil, map[int]bool{}, "", false
-		h := u.libRelocModalHTML(s)
-		s.mu.Unlock()
-		u.openModal(h)
+		u.toast(i18n.T("library.toast.scanningMissing"))
+		u.bg(func() {
+			_, missing := musiclib.ScanMissing(tracks)
+			if len(missing) == 0 {
+				u.toast(i18n.T("library.toast.noMissing"))
+				return
+			}
+			s.mu.Lock()
+			s.relocMiss, s.relocCands, s.relocSkip, s.relocMsg, s.relocBusy = missing, nil, map[int]bool{}, "", false
+			h := u.libRelocModalHTML(s)
+			s.mu.Unlock()
+			u.openModal(h)
+		})
 	})
 }
 
@@ -1191,12 +1258,11 @@ func (u *UI) libAddToDo(idStr string) {
 
 // ── playlists ──
 
-// libPlaylistItems resolves a playlist's rows: smart = live rule evaluation against the
-// loaded collection (Fyne openPlaylist parity); others from the DB.
-func (u *UI) libPlaylistItems(row libdb.PlaylistRow) []libdb.PlaylistItemRow {
+// libPlaylistItems resolves a playlist's rows: smart = live rule evaluation against
+// tracks (Fyne openPlaylist parity); others from the DB. Get tracks via libTracksAsync /
+// libItemsAsync — never block the action goroutine on hydration.
+func (u *UI) libPlaylistItems(row libdb.PlaylistRow, tracks []musiclib.Track) []libdb.PlaylistItemRow {
 	if row.Kind == libdb.PlaylistSmart {
-		s := u.lib()
-		tracks := u.libTracksBlocking(s)
 		rules, ok := libParseRules(row.Rules)
 		if !ok {
 			return nil
@@ -1222,12 +1288,18 @@ func (u *UI) libOpenPlaylist(id int64) {
 	if !ok {
 		return
 	}
-	items := u.libPlaylistItems(row)
 	s := u.lib()
 	s.mu.Lock()
-	s.plSel, s.plCur, s.plItems = id, row, items
+	s.plSel, s.plCur, s.plItems = id, row, nil
 	s.mu.Unlock()
-	u.libPatchBody()
+	u.libItemsAsync(row, fmt.Sprintf("pl-open:%d", id), func(items []libdb.PlaylistItemRow) {
+		s.mu.Lock()
+		if s.plSel == id { // selection may have moved mid-wait
+			s.plItems = items
+		}
+		s.mu.Unlock()
+		u.libPatchBody()
+	})
 }
 
 func (u *UI) libNewPlaylistModal() {
@@ -1321,33 +1393,34 @@ func (u *UI) libExportPlaylist(id int64, out string) {
 	if !ok {
 		return
 	}
-	items := u.libPlaylistItems(row)
-	s := u.lib()
-	s.mu.Lock()
-	var tracks []musiclib.Track
-	for _, it := range items {
-		if t, tok := s.byPath[it.Path]; tok {
-			tracks = append(tracks, t)
-		} else {
-			tracks = append(tracks, musiclib.Track{Path: it.Path, Title: filepath.Base(it.Path)})
+	u.libItemsAsync(row, fmt.Sprintf("pl-export:%d", id), func(items []libdb.PlaylistItemRow) {
+		s := u.lib()
+		s.mu.Lock()
+		var tracks []musiclib.Track
+		for _, it := range items {
+			if t, tok := s.byPath[it.Path]; tok {
+				tracks = append(tracks, t)
+			} else {
+				tracks = append(tracks, musiclib.Track{Path: it.Path, Title: filepath.Base(it.Path)})
+			}
 		}
-	}
-	s.mu.Unlock()
-	if out == "" {
-		out, _ = config.DataPath(fmt.Sprintf("playlist-%d.m3u8", id))
-	}
-	u.bg(func() {
-		fh, err := os.Create(out)
-		if err != nil {
-			u.toast(i18n.T("library.toast.exportFailed") + err.Error())
-			return
+		s.mu.Unlock()
+		if out == "" {
+			out, _ = config.DataPath(fmt.Sprintf("playlist-%d.m3u8", id))
 		}
-		defer func() { _ = fh.Close() }()
-		if e := musiclib.ExportM3U(tracks, fh); e != nil {
-			u.toast(i18n.T("library.toast.exportFailed") + e.Error())
-			return
-		}
-		u.toast(i18n.T("library.toast.exportedArrow") + out)
+		u.bg(func() {
+			fh, err := os.Create(out)
+			if err != nil {
+				u.toast(i18n.T("library.toast.exportFailed") + err.Error())
+				return
+			}
+			defer func() { _ = fh.Close() }()
+			if e := musiclib.ExportM3U(tracks, fh); e != nil {
+				u.toast(i18n.T("library.toast.exportFailed") + e.Error())
+				return
+			}
+			u.toast(i18n.T("library.toast.exportedArrow") + out)
+		})
 	})
 }
 
@@ -1360,22 +1433,24 @@ func (u *UI) libDupPlaylist(id int64) {
 	if !ok {
 		return
 	}
-	var paths []string
-	for _, it := range u.libPlaylistItems(row) {
-		if it.Path != "" {
-			paths = append(paths, it.Path)
+	u.libItemsAsync(row, fmt.Sprintf("pl-dup:%d", id), func(items []libdb.PlaylistItemRow) {
+		var paths []string
+		for _, it := range items {
+			if it.Path != "" {
+				paths = append(paths, it.Path)
+			}
 		}
-	}
-	newID, err := u.svc.Lib.CreatePlaylist(row.Name+" (manual)", "manual", "")
-	if err != nil {
-		u.toast(i18n.T("library.toast.duplicateFailed") + err.Error())
-		return
-	}
-	if len(paths) > 0 {
-		_ = u.svc.Lib.ReplacePlaylistTracks(newID, paths)
-	}
-	u.toast(i18n.T("library.toast.duplicatedManual"))
-	u.patchMain()
+		newID, err := u.svc.Lib.CreatePlaylist(row.Name+" (manual)", "manual", "")
+		if err != nil {
+			u.toast(i18n.T("library.toast.duplicateFailed") + err.Error())
+			return
+		}
+		if len(paths) > 0 {
+			_ = u.svc.Lib.ReplacePlaylistTracks(newID, paths)
+		}
+		u.toast(i18n.T("library.toast.duplicatedManual"))
+		u.patchMain()
+	})
 }
 
 func (u *UI) libMovePlItem(idx, dir int) {
@@ -1420,12 +1495,13 @@ func (u *UI) libReloadPlaylist(id int64) {
 		return
 	}
 	row, _, _ := u.svc.Lib.PlaylistByID(id)
-	items := u.libPlaylistItems(row)
-	s := u.lib()
-	s.mu.Lock()
-	s.plCur, s.plItems = row, items
-	s.mu.Unlock()
-	u.patchMain()
+	u.libItemsAsync(row, fmt.Sprintf("pl-reload:%d", id), func(items []libdb.PlaylistItemRow) {
+		s := u.lib()
+		s.mu.Lock()
+		s.plCur, s.plItems = row, items
+		s.mu.Unlock()
+		u.patchMain()
+	})
 }
 
 // ── smart-rules editor ──
@@ -1445,16 +1521,21 @@ func (u *UI) libSmartOpen(id int64) {
 	}
 	rules, _ := libParseRules(row.Rules)
 	s := u.lib()
-	u.libTracksBlocking(s) // smart modal shows live match counts against the collection
 	s.mu.Lock()
 	s.srID, s.srName, s.srRules = id, row.Name, rules
 	s.srGenres = map[string]bool{}
 	for _, g := range rules.Genres {
 		s.srGenres[g] = true
 	}
-	h := u.libSmartModalHTML(s)
 	s.mu.Unlock()
-	u.openModal(h)
+	// modal shows live match counts + genre chips from the collection: open once hydrated
+	// (inline when loaded; renders from the draft seeded above so a re-click stays coherent)
+	u.libTracksAsync(s, "smart-modal", func([]musiclib.Track) {
+		s.mu.Lock()
+		h := u.libSmartModalHTML(s)
+		s.mu.Unlock()
+		u.openModal(h)
+	})
 }
 
 // libSRQuiet mutates the draft and live-patches only the match-count line (keeps input focus).

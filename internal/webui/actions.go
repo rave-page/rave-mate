@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/i18n"
@@ -15,8 +16,58 @@ import (
 
 func (u *UI) bg(fn func()) { go fn() }
 
+// actx returns a 30s-bounded ctx also cancelled by Stop(), so in-flight bg work (and its
+// post-destroy Dispatch evals) dies with the window.
 func (u *UI) actx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	go func() { // watcher exits with the ctx (callers defer cancel)
+		select {
+		case <-u.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
+// stopped reports Stop() ran - bg completions skip DOM patches on a destroyed webview.
+func (u *UI) stopped() bool {
+	select {
+	case <-u.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// actBusy guards slow one-shot bg actions (ffmpeg stop, bbolt fsync): one in flight per key,
+// repeats dropped. Package-level like cfgJobs - one webview UI per process.
+var (
+	actBusyMu sync.Mutex
+	actBusy   = map[string]bool{}
+)
+
+// actStart marks key in-flight; false if already running.
+func actStart(key string) bool {
+	actBusyMu.Lock()
+	defer actBusyMu.Unlock()
+	if actBusy[key] {
+		return false
+	}
+	actBusy[key] = true
+	return true
+}
+
+func actEnd(key string) {
+	actBusyMu.Lock()
+	delete(actBusy, key)
+	actBusyMu.Unlock()
+}
+
+// pendingAct disables the control bound to act until the completion re-patch rebuilds it -
+// immediate feedback while a slow bg job runs.
+func (u *UI) pendingAct(act string) {
+	u.eval("var b=document.querySelector(" + jsQuote("[data-act="+jsQuote(act)+"]") + ");if(b)b.disabled=true")
 }
 
 func (u *UI) logErr(what string, err error) {
@@ -36,27 +87,43 @@ func (u *UI) launchAppGroup(id string) {
 	})
 }
 
+// autoToggle flips an automation's enabled flag. Save fsyncs bbolt - off the actWorker.
 func (u *UI) autoToggle(id string, on bool) {
-	if u.svc.Automations == nil {
+	if u.svc.Automations == nil || !actStart("auto:"+id) {
 		return
 	}
-	for _, a := range u.svc.Automations.List() {
-		if a.ID == id {
-			a.Enabled = on
-			_, err := u.svc.Automations.Save(a)
-			u.logErr("automation save", err)
-			break
+	u.pendingAct("auto-toggle:" + id)
+	u.bg(func() {
+		defer actEnd("auto:" + id)
+		for _, a := range u.svc.Automations.List() {
+			if a.ID == id {
+				a.Enabled = on
+				_, err := u.svc.Automations.Save(a)
+				u.logErr("automation save", err)
+				break
+			}
 		}
-	}
-	u.patchMain()
+		if !u.stopped() {
+			u.patchMain()
+		}
+	})
 }
 
+// autoDelete removes an automation. Delete fsyncs bbolt - off the actWorker.
 func (u *UI) autoDelete(id string) {
-	if u.svc.Automations != nil {
-		u.logErr("automation delete", u.svc.Automations.Delete(id))
+	if u.svc.Automations == nil || !actStart("auto:"+id) {
+		return
 	}
-	u.patchMain()
-	u.toast(i18n.T("actions.toast.automationDeleted"))
+	u.pendingAct("auto-del:" + id)
+	u.bg(func() {
+		defer actEnd("auto:" + id)
+		u.logErr("automation delete", u.svc.Automations.Delete(id))
+		if u.stopped() {
+			return
+		}
+		u.patchMain()
+		u.toast(i18n.T("actions.toast.automationDeleted"))
+	})
 }
 
 func (u *UI) peerConnect(node string) {
@@ -122,12 +189,21 @@ func (u *UI) xferCancel(id string) {
 	u.patchMain()
 }
 
+// recFinish closes the recorder set (two bbolt fsyncs) - off the actWorker.
 func (u *UI) recFinish() {
-	if u.svc.Recorder != nil {
-		u.svc.Recorder.StopRecording()
+	if u.svc.Recorder == nil || !actStart("rec-finish") {
+		return
 	}
-	u.patchMain()
-	u.toast(i18n.T("actions.toast.setFinished"))
+	u.pendingAct("rec-finish")
+	u.bg(func() {
+		defer actEnd("rec-finish")
+		u.svc.Recorder.StopRecording()
+		if u.stopped() {
+			return
+		}
+		u.patchMain()
+		u.toast(i18n.T("actions.toast.setFinished"))
+	})
 }
 
 func (u *UI) vrcStatus(form string) {
@@ -208,18 +284,26 @@ func (u *UI) streamPause(_ bool) {
 	u.toast(i18n.T(key))
 }
 
+// arecToggle starts/stops manual audio capture. Stop waits on ffmpeg's graceful exit (≤6s) +
+// finalize - off the actWorker; button stays disabled until the completion re-patch.
 func (u *UI) arecToggle() {
-	if u.svc.AudioRec == nil {
+	if u.svc.AudioRec == nil || !actStart("arec-toggle") {
 		return
 	}
-	var err error
-	if u.svc.AudioRec.Status().Recording {
-		err = u.svc.AudioRec.StopManual()
-	} else {
-		err = u.svc.AudioRec.StartManual()
-	}
-	u.logErr("audio record", err)
-	u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")")
+	u.pendingAct("arec-toggle")
+	u.bg(func() {
+		defer actEnd("arec-toggle")
+		var err error
+		if u.svc.AudioRec.Status().Recording {
+			err = u.svc.AudioRec.StopManual()
+		} else {
+			err = u.svc.AudioRec.StartManual()
+		}
+		u.logErr("audio record", err)
+		if !u.stopped() {
+			u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")")
+		}
+	})
 }
 
 func (u *UI) tcStart() {

@@ -115,6 +115,14 @@ type mpSt struct {
 
 	vid          mpVid // embedded <video> transport mirror
 	lastTrackIdx int   // marker index at playhead (transport current-track display)
+
+	dragGen int // bumped on drag down/up (+ reset); queued coalesced moves from an older gen are stale
+
+	// audio transport RPC guard: blocking PlayerProxy calls run off the act worker with an
+	// optimistic engine-state override until the proxy mirror reconciles (mpAudCall).
+	audBusy     bool      // one in-flight transport RPC per host; re-entrant presses drop
+	audOpt      string    // "" none | "play" | "pause" | "stop" (mpEngineState override)
+	audOptUntil time.Time // override expiry (belt-and-braces if the RPC hangs)
 }
 
 // mpVid mirrors the embedded <video> element (updated by its mp-vtick events).
@@ -256,7 +264,39 @@ func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
 	if st.Path != m.path || !st.Playing {
 		return mpTr{}
 	}
+	if t.audOpt != "" && time.Now().Before(t.audOptUntil) { // optimistic while an RPC is in flight
+		if t.audOpt == "stop" {
+			return mpTr{}
+		}
+		paused := t.audOpt == "pause"
+		return mpTr{loaded: true, playing: !paused, paused: paused, cur: st.Cur, total: st.Total}
+	}
 	return mpTr{loaded: true, playing: !st.Paused, paused: st.Paused, cur: st.Cur, total: st.Total}
+}
+
+// mpAudCall runs one blocking PlayerProxy RPC off the act worker (a wedged child stalls them up
+// to 3-10s - inline they froze the whole acts lane). opt = optimistic mpEngineState override
+// while in flight ("" = none); the proxy mirror reconciles on completion. Busy = presses drop.
+func (u *UI) mpAudCall(host, opt string, fn func()) {
+	ok := false
+	u.mpMut(host, func(v *mpSt) {
+		if v.audBusy {
+			return
+		}
+		v.audBusy, v.audOpt, v.audOptUntil = true, opt, time.Now().Add(15*time.Second)
+		ok = true
+	})
+	if !ok {
+		return
+	}
+	u.bg(func() {
+		fn()
+		t := u.mpMut(host, func(v *mpSt) { v.audBusy, v.audOpt = false, "" })
+		if len(t.media) > 0 {
+			u.mpPatchTransport(t)
+			u.mpPatchWave(t)
+		}
+	})
 }
 
 // mpVidEval runs js with `v` bound to the host's <video> element (no-op when absent).
@@ -287,7 +327,11 @@ func (u *UI) mpPlayToggle(host string) {
 			u.mpVidEval(host, "if(v.paused){v.play().catch(function(){})}else{v.pause()}")
 			u.mpMut(host, func(v *mpSt) { v.vid.paused = !v.vid.paused }) // optimistic; vtick reconciles
 		} else {
-			u.svc.Player.TogglePause()
+			opt := "pause" // optimistic flip; blocking toggle RPC off the act worker
+			if tr.paused {
+				opt = "play"
+			}
+			u.mpAudCall(host, opt, func() { u.svc.Player.TogglePause() })
 		}
 		u.mpPatchTransport(u.mpSnap(host))
 		return
@@ -315,7 +359,7 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		return
 	}
 	path := m.path
-	u.bg(func() {
+	u.mpAudCall(host, "", func() { // guarded: double-press can't stack Play RPCs
 		if err := u.svc.Player.Play(path); err != nil {
 			u.logErr("player play", err)
 			u.toast(i18n.T("player.toast.playFailed") + err.Error())
@@ -324,7 +368,6 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		if seekTo > 0 {
 			u.svc.Player.Seek(seekTo)
 		}
-		u.mpPatchTransport(u.mpSnap(host))
 	})
 }
 
@@ -338,7 +381,7 @@ func (u *UI) mpStop(host string) {
 		u.mpVidEval(host, "v.pause();v.currentTime=0;")
 		u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, 0 })
 	} else if u.svc.Player != nil {
-		u.svc.Player.Stop()
+		u.mpAudCall(host, "stop", func() { u.svc.Player.Stop() }) // optimistic idle; async halt
 	}
 	t = u.mpSnap(host)
 	u.mpPatchTransport(t)
@@ -545,10 +588,11 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 	u.mpKickAnalyses(host)
 }
 
-// reset clears everything except the host key (gen advances so stale async results drop).
+// reset clears everything except the host key (gen advances so stale async results drop;
+// dragGen advances so queued coalesced moves drop too).
 func (t *mpSt) reset() {
-	g := t.gen + 1
-	*t = mpSt{host: t.host, gen: g, outSec: -1, viewSpan: 1, cursorSec: mpNone, hovT: mpNone,
+	g, dg := t.gen+1, t.dragGen+1
+	*t = mpSt{host: t.host, gen: g, dragGen: dg, outSec: -1, viewSpan: 1, cursorSec: mpNone, hovT: mpNone,
 		firstTrackSec: -1, lastTrackEndSec: -1, lastFaderSec: -1}
 }
 
@@ -837,7 +881,7 @@ func init() {
 		if t.active != prev { // silence the side that lost focus - never double-play
 			if t.media[t.active].kind == "video" {
 				if u.svc.Player != nil {
-					u.svc.Player.Stop()
+					u.bg(func() { u.svc.Player.Stop() }) // blocking halt off the act worker
 				}
 				u.mpVidEval(host, "v.muted=false;")
 			} else {
@@ -1046,35 +1090,89 @@ func (t *mpSt) mpAxisAt(fx float64) float64 {
 	return lo + (t.viewStart+fx*t.viewSpan)*ln
 }
 
+// ── drag-move coalescing ────────────────────────────────────────────────────────
+//
+// actpos 'move' events arrive far faster than an SVG rebuild+eval renders; handling each on the
+// act worker queued a repaint per event and lagged the whole acts lane. Moves collapse into a
+// latest-wins mailbox (cap 1/host, newest wins) with ONE render goroutine in flight; down/up
+// (and reset) bump dragGen, so a pending move from a finished drag is stale + skipped - it can
+// never re-latch v.drag after a dropped 'up' (acts channel is cap-64 drop-newest).
+
+// mpMoveEv is one pending coalesced move.
+type mpMoveEv struct {
+	lane string // "pan" | "in" | "out"
+	fx   float64
+	gen  int // mpSt.dragGen at enqueue
+}
+
+var (
+	mpMoveMu   sync.Mutex
+	mpMovePend = map[string]mpMoveEv{} // host → newest pending move
+	mpMoveBusy = map[string]bool{}     // host → render in flight
+)
+
+// mpMoveCoalesce enqueues a move (newest wins) and starts the per-host render worker if idle.
+func (u *UI) mpMoveCoalesce(host, lane string, fx float64) {
+	t := u.mp(host)
+	mpMu.Lock()
+	gen := t.dragGen
+	// click-vs-pan classification must not lag the coalescer: mark moved at enqueue, not render
+	if lane == "pan" && t.drag == "pan" && math.Abs(fx-t.dragAnchor) > 0.01 {
+		t.dragMoved = true
+	}
+	mpMu.Unlock()
+	mpMoveMu.Lock()
+	mpMovePend[host] = mpMoveEv{lane, fx, gen}
+	if mpMoveBusy[host] {
+		mpMoveMu.Unlock()
+		return
+	}
+	mpMoveBusy[host] = true
+	mpMoveMu.Unlock()
+	u.bg(func() {
+		for {
+			mpMoveMu.Lock()
+			ev, ok := mpMovePend[host]
+			delete(mpMovePend, host)
+			if !ok {
+				mpMoveBusy[host] = false
+				mpMoveMu.Unlock()
+				return
+			}
+			mpMoveMu.Unlock()
+			if ev.lane == "pan" {
+				u.mpSurfMove(host, ev.fx, ev.gen)
+			} else {
+				u.mpHandleMove(host, ev.lane, ev.fx, ev.gen)
+			}
+		}
+	})
+}
+
+// mpMoveCancel drops any pending coalesced move (a down/up landed - it is stale).
+func mpMoveCancel(host string) {
+	mpMoveMu.Lock()
+	delete(mpMovePend, host)
+	mpMoveMu.Unlock()
+}
+
 // mpHandle drags the IN (top lane) / OUT (bottom lane) trim bound to the pointer.
 func (u *UI) mpHandle(host, which, val string) {
 	phase, fx, ok := mpPos(val)
 	if !ok {
 		return
 	}
+	if phase == "move" { // coalesced: latest-wins, one render in flight
+		u.mpMoveCoalesce(host, which, fx)
+		return
+	}
+	mpMoveCancel(host)
 	t := u.mpMut(host, func(v *mpSt) {
-		lo, ln := v.axis()
-		if len(v.media) == 0 || ln <= 0 {
-			return
+		v.dragGen++ // invalidate queued moves
+		if phase == "down" {
+			v.drag = "" // defensive: a dropped 'up' must never leave drag latched (mpTick freeze)
 		}
-		sec := clampF(v.mpAxisAt(fx), lo, lo+ln)
-		if which == "in" {
-			v.drag = "in"
-			v.inSec = sec
-			if v.outSec >= 0 && v.inSec > v.outSec-0.1 {
-				v.inSec = math.Max(v.outSec-0.1, lo)
-			}
-		} else {
-			v.drag = "out"
-			if sec >= lo+ln-0.05 {
-				v.outSec = -1 // dragged to the far right = "to end"
-			} else {
-				v.outSec = math.Max(sec, v.inSec+0.1)
-			}
-		}
-		if phase == "up" {
-			v.drag = ""
-		}
+		v.mpHandleTo(which, fx, phase == "up")
 	})
 	if len(t.media) == 0 {
 		return
@@ -1086,30 +1184,72 @@ func (u *UI) mpHandle(host, which, val string) {
 	}
 }
 
+// mpHandleTo moves the in/out bound to fx (shared by direct down/up and coalesced moves).
+func (v *mpSt) mpHandleTo(which string, fx float64, up bool) {
+	lo, ln := v.axis()
+	if len(v.media) == 0 || ln <= 0 {
+		return
+	}
+	sec := clampF(v.mpAxisAt(fx), lo, lo+ln)
+	if which == "in" {
+		v.drag = "in"
+		v.inSec = sec
+		if v.outSec >= 0 && v.inSec > v.outSec-0.1 {
+			v.inSec = math.Max(v.outSec-0.1, lo)
+		}
+	} else {
+		v.drag = "out"
+		if sec >= lo+ln-0.05 {
+			v.outSec = -1 // dragged to the far right = "to end"
+		} else {
+			v.outSec = math.Max(sec, v.inSec+0.1)
+		}
+	}
+	if up {
+		v.drag = ""
+	}
+}
+
+// mpHandleMove applies one coalesced handle move (skipped when stale: down/up bumped dragGen).
+func (u *UI) mpHandleMove(host, which string, fx float64, gen int) {
+	stale := false
+	t := u.mpMut(host, func(v *mpSt) {
+		if v.dragGen != gen {
+			stale = true
+			return
+		}
+		v.mpHandleTo(which, fx, false)
+	})
+	if stale || len(t.media) == 0 {
+		return
+	}
+	u.mpPatchWave(t)
+	u.mpPatchRO(t)
+}
+
 // mpSurf handles the middle lane: click = seek, drag = pan when zoomed.
 func (u *UI) mpSurf(host, val string) {
 	phase, fx, ok := mpPos(val)
 	if !ok {
 		return
 	}
+	if phase == "move" { // coalesced: latest-wins, one render in flight
+		u.mpMoveCoalesce(host, "pan", fx)
+		return
+	}
+	mpMoveCancel(host)
 	seekSec := math.Inf(-1)
 	t := u.mpMut(host, func(v *mpSt) {
+		v.dragGen++ // invalidate queued moves
+		if phase == "down" {
+			v.drag = "" // defensive: a dropped 'up' must never leave drag latched (mpTick freeze)
+		}
 		if len(v.media) == 0 {
 			return
 		}
 		switch phase {
 		case "down":
 			v.drag, v.dragAnchor, v.dragView, v.dragMoved = "pan", fx, v.viewStart, false
-		case "move":
-			if v.drag != "pan" {
-				return
-			}
-			if math.Abs(fx-v.dragAnchor) > 0.01 {
-				v.dragMoved = true
-			}
-			if v.viewSpan < 1 {
-				v.viewStart = clampF(v.dragView-(fx-v.dragAnchor)*v.viewSpan, 0, 1-v.viewSpan)
-			}
 		case "up":
 			if v.drag != "pan" {
 				return
@@ -1124,15 +1264,25 @@ func (u *UI) mpSurf(host, val string) {
 	if len(t.media) == 0 {
 		return
 	}
-	switch phase {
-	case "move":
-		if t.viewSpan < 1 {
-			u.mpPatchWave(t)
-		}
-	case "up":
+	if phase == "up" {
 		if !math.IsInf(seekSec, -1) {
 			u.mpSeekAxis(host, seekSec)
 		}
+		u.mpPatchWave(t)
+	}
+}
+
+// mpSurfMove applies one coalesced pan move (skipped when stale or not panning).
+func (u *UI) mpSurfMove(host string, fx float64, gen int) {
+	render := false
+	t := u.mpMut(host, func(v *mpSt) {
+		if v.dragGen != gen || v.drag != "pan" || v.viewSpan >= 1 || len(v.media) == 0 {
+			return
+		}
+		v.viewStart = clampF(v.dragView-(fx-v.dragAnchor)*v.viewSpan, 0, 1-v.viewSpan)
+		render = true
+	})
+	if render {
 		u.mpPatchWave(t)
 	}
 }

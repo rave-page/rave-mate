@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -141,8 +142,41 @@ func (u *UI) ScreenshotRegion(path string, x, y, w, h float32) error {
 	return u.captureRegion(path, int(x), int(y), int(w), int(h))
 }
 
+// ── ctl tab intents ──
+// ctl tab switches post through the page act pipeline (eval → window.rave → acts chan →
+// actWorker) so the render runs serialized on the act worker, not on the ctl connection
+// goroutine (was one of the concurrent render families). Reply chan = settle barrier.
+
+var ctlTabWaiters sync.Map // string id -> chan struct{}, closed once setTab returned
+
+func init() {
+	onExact("__ctl-tab", func(u *UI, m actMsg) {
+		u.setTab(m.Val)
+		if ch, ok := ctlTabWaiters.LoadAndDelete(m.ID); ok {
+			close(ch.(chan struct{}))
+		}
+	})
+}
+
+// setTabViaActs posts a tab-select intent and waits until the act worker finished the switch.
+// Timeout (binding not up yet / a wedged handler) degrades to the old direct setTab so ctl
+// keeps working during startup.
+func (u *UI) setTabViaActs(id string) {
+	waitID := nextEvalID()
+	ch := make(chan struct{})
+	ctlTabWaiters.Store(waitID, ch)
+	defer ctlTabWaiters.Delete(waitID)
+	payload := `{"act":"__ctl-tab","val":` + jsQuote(id) + `,"id":` + jsQuote(waitID) + `}`
+	u.eval("window.rave&&window.rave(" + jsQuote(payload) + ")")
+	select {
+	case <-ch:
+	case <-time.After(evalTimeout):
+		u.setTab(id)
+	}
+}
+
 // ScreenshotAll sweeps every enabled tab to a PNG + writes report.txt (the whole-UI verification
-// pass). First line = totals (appControl prefixes "ok ").
+// pass), then restores the user's prior tab. First line = totals (appControl prefixes "ok ").
 func (u *UI) ScreenshotAll(dir string) (string, error) {
 	if u.shell == nil {
 		return "", fmt.Errorf("no UI (service mode)")
@@ -157,7 +191,7 @@ func (u *UI) ScreenshotAll(dir string) (string, error) {
 		if !t.enabled {
 			continue
 		}
-		u.setTab(t.id)
+		u.setTabViaActs(t.id)
 		time.Sleep(300 * time.Millisecond) // let the fragment render + fonts settle
 		p := filepath.Join(dir, "tab-"+t.id+".png")
 		status := "ok"
@@ -171,7 +205,7 @@ func (u *UI) ScreenshotAll(dir string) (string, error) {
 		fmt.Fprintf(&rep, "%-12s %s  %s\n", t.id, p, status)
 		n++
 	}
-	u.setTab(prev)
+	u.setTabViaActs(prev)
 	head := fmt.Sprintf("%d tabs, %d errors\n", n, errs)
 	_ = os.WriteFile(filepath.Join(dir, "report.txt"), []byte(head+rep.String()), 0o644)
 	return head, nil
