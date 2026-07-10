@@ -35,6 +35,23 @@ the instant you let go. This keeps the window tracking the cursor even on a busy
 (Library search boxes also coalesce keystrokes ~150ms so a big filtered list re-renders once, not per
 character.)
 
+## Idle CPU discipline
+
+Beyond the governor, every polling loop backs off when its target is absent or nobody is
+watching:
+
+- **OBS control** skips its per-second status poll while OBS is disconnected (the obs child
+  keeps its own slow reconnect; direct LAN remotes redial throttled). Media-sync ticks are a
+  no-op while sync is off.
+- **Spout receive** polls at 4 ms only while frames flow; a quiet sender drops it to 50 ms.
+- **Perf monitor** samples at 1 Hz only while a perf card / `ctl perf` was read in the last
+  2 min, else every 5 s.
+- **In-VR config flush** wakes only while edits are in flight (no idle ticking).
+
+Absent services also don't spam the log: retry loops (OBS, Serato Live page, Twitch polls,
+VRChat pipeline, peer dials, MIDI output) log the first failure and state changes only,
+with a `suppressed` count on the next line. Log volume when idle ≈ startup lines only.
+
 ## Priority model
 
 | Work | Windows priority |
