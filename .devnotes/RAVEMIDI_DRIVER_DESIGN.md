@@ -134,6 +134,36 @@ capture pin (KSPIN_CONNECT/format may need per-device tweaks — open-time failu
 cleanly, so this is safe to iterate) and fans MIDI to its output ports with rave-mate
 killed. Dev loop = Hyper-V, Secure Boot off, testsigning on, `devgen /add /bus ROOT`.
 
+### On-hardware bring-up log (2026-07-10, dev box, test-signed, Secure Boot OFF, HVCI off)
+
+VERIFIED WORKING end-to-end up to the KS interface:
+- Driver test-signed (self-cert), staged (`pnputil /add-driver`), devnode created. `devgen`
+  alone leaves an INERT node (Class/Service empty, no driver bind) — must use `devcon install
+  ravemidi.inf Root\ravemidi` which both creates the node AND runs driver matching. After that:
+  PnP status OK, service=ravemidi running, FriendlyName "rave-mate virtual MIDI adapter".
+- StartDevice ran: `\Device\RaveMidiCtl` + `\GLOBAL??\RaveMidiCtl` symlink exist (verified via
+  NtQueryDirectoryObject). Go IOCTL client opens `\\.\RaveMidiCtl` OK.
+- `IOCTL_RAVEMIDI_CREATE_PORT` (OUT_ONLY) SUCCEEDS → returns a port id.
+- `PcRegisterSubdevice` correctly registers the subdevice's KS device interfaces with the
+  RIGHT categories: our devnode `ROOT#MEDIA#0006` gains `#{6994ad04…}` (KSCATEGORY_AUDIO) +
+  `#{65e8773d…}` (KSCATEGORY_CAPTURE) while a port is held open, matching FilterOutOnly's
+  Cats={AUDIO,CAPTURE}. (No RENDER interface — correct for out-only. Gotcha: 65e8773**d**=CAPTURE,
+  65e8773**e**=RENDER, 6994ad04=AUDIO — easy to swap.)
+
+REMAINING BUG (the actual last mile): despite the correctly-registered CAPTURE KS filter,
+**wdmaud does NOT create a winmm midiIn device from it** — `midiInGetNumDevs()` unchanged, port
+name absent from the midiIn list. So the break is wdmaud's KS-filter→winmm-MIDI enumeration, one
+layer BELOW our code. Everything WE register is right; wdmaud is rejecting/ignoring the filter's
+MIDI pin. Diagnose with a KERNEL DEBUGGER (WinDbg `!ks`, wdmaud WPP trace) or compare the live
+filter's pin/property responses against teVirtualMIDI's (which surfaces fine on the same box) —
+NOT with blind CI rebuild+resign+reinstall cycles. Leading hypotheses to check on the target:
+(1) wdmaud probes KSPROPERTY_PIN_CTYPES / pin factory and our miniport's answer or NewStream
+init fails, so wdmaud drops the filter; (2) the MIDI data-range/pin-communication combo isn't
+what wdmaud accepts for a MIDI capture pin; (3) dynamic (post-StartDevice) subdevice needs an
+extra kick for wdmaud (which attached at start) to re-enumerate the new filter. Local install
+scripts + bring-up test live in driver/ravemidi/build/testsign/ (gitignored) and
+internal/midi/ravemidi_manual_test.go (`-tags manual`).
+
 ## HVCI + INF gates (release-blocking, per 2026 policy)
 
 - `NonPagedPoolNx` everywhere (POOL_NX_OPTIN), no W^X, no dynamic code, `MdlMappingNoExecute`.
