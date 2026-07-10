@@ -3030,6 +3030,37 @@
   "midictl": {
     "in": {
       "thruVirtual": "rave-mate Einweg-Port - kein Echo (empfohlen)"
+    },
+    "out": {
+      "sub": "Wohin rave-mate MIDI SENDET. Den eingebauten Einweg-Port wählen (DJ-Software kann sich nicht selbst zurücklesen) oder einen beliebigen Loopback-Port, auf den deine DJ-App hört."
+    },
+    "rack": {
+      "sub": "Send-to-learn: DJ-Software in den MIDI-Learn-Modus schalten, dann hier einen Regler bewegen — es wird genau ein sauberes CC/Note zum Lernen gesendet. Nichts streamt dauerhaft."
+    },
+    "drv": {
+      "card": "ravemidi-Treiber (Einweg-Virtualports)",
+      "status": "Kerneltreiber",
+      "badgePreview": "Developer-Preview",
+      "badgeOn": "aktiv",
+      "why": "Unser Open-Source-Kerneltreiber erzeugt Einweg-Virtual-MIDI-Ports: Die DJ-Software sieht einen reinen Eingangsport und kann ihr eigenes LED-/Feedback-Signal nie zurücklesen (der klassische Loopback-Selbst-Echo-Bug). Optional — ohne ihn nutzt rave-mate teVirtualMIDI oder loopMIDI (beidseitig).",
+      "installed": "Installiert und aktiv — Einweg-Ports kommen von ravemidi.",
+      "fallback": "Nicht installiert — teVirtualMIDI-Fallback aktiv (beidseitig; DJ-Apps können sich selbst echoen).",
+      "none": "Nicht installiert, kein teVirtualMIDI gefunden — Einweg-Ports nicht verfügbar (loopMIDI geht weiterhin, beidseitig).",
+      "testsign": "Aktuelle Builds sind selbstsigniert (test-signed): Windows lädt sie nur mit aktiviertem Test-Signing-Bootmodus und deaktiviertem Secure Boot. Ein Microsoft-attestierter Release (ohne Sonderschritte) ist in Arbeit.",
+      "steps": "Installation (PowerShell als Administrator, im Treiber-Paketordner — komplette Anleitung im Treiber-README):",
+      "smartscreen": "Windows warnt ggf. vor selbstsignierten Komponenten (SmartScreen / unbekannter Herausgeber). Bei Open-Source-Builds ohne EV-Zertifikat normal — Quellcode und CI-Builds sind öffentlich; vor dem Fortfahren README lesen.",
+      "docs": "Treiber-README & Quellcode"
+    },
+    "sw": {
+      "hdr": "DJ-Software-Status",
+      "stable": "unterstützt",
+      "experimental": "WIP · experimentell",
+      "untested": "WIP · ungetestet",
+      "unfinished": "unfertig",
+      "traktor": "Kompletter Pfad: Mapping-Installation, Live-Decks, Library-Sync, Beatgrid- + Cue-Writeback. Praxiserprobt.",
+      "rekordbox": "Rekordbox kann Play nicht über ein Loopback-Mapping auslösen (App-Limit — Controller oder Bridge nutzen). Grid-/Cue-Writeback läuft über XML-Import; vor dem Übernehmen prüfen.",
+      "virtualdj": "Mapping + Datenbank-Writeback implementiert, aber noch nicht im Feld getestet. Vorher die VirtualDJ-Datenbank sichern.",
+      "serato": "Integration unfertig: Library-Import funktioniert, die Schreibseite ist brandneu. Backups behalten; mit Ecken und Kanten rechnen."
     }
   }
 }

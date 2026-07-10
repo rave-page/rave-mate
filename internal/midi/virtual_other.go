@@ -11,6 +11,9 @@ func VirtualAvailable() bool { return false }
 // OneWayAvailable reports false: no one-way virtual-port backend here.
 func OneWayAvailable() bool { return false }
 
+// DriverInstalled reports false: the ravemidi driver is Windows-only.
+func DriverInstalled() bool { return false }
+
 // OpenOneWayOut always fails on unsupported platforms.
 func OpenOneWayOut(string) (OutPort, error) { return nil, ErrUnsupported }
 

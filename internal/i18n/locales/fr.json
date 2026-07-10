@@ -3030,6 +3030,37 @@
   "midictl": {
     "in": {
       "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)"
+    },
+    "out": {
+      "sub": "Là où rave-mate ENVOIE le MIDI. Choisissez le port unidirectionnel intégré (le logiciel DJ ne peut pas se relire lui-même) ou n'importe quel port loopback écouté par votre appli DJ."
+    },
+    "rack": {
+      "sub": "Send-to-learn : passez votre logiciel DJ en mode apprentissage MIDI, puis bougez un contrôle ici — un seul CC/Note propre est envoyé pour l'apprentissage. Rien ne diffuse en continu."
+    },
+    "drv": {
+      "card": "Pilote ravemidi (ports virtuels unidirectionnels)",
+      "status": "Pilote noyau",
+      "badgePreview": "aperçu développeur",
+      "badgeOn": "actif",
+      "why": "Notre pilote noyau open source crée des ports MIDI virtuels unidirectionnels : le logiciel DJ voit un port entrée seule et ne peut jamais relire son propre retour LED (le classique écho loopback). Optionnel — sans lui, rave-mate retombe sur teVirtualMIDI ou loopMIDI (bidirectionnels).",
+      "installed": "Installé et actif — les ports unidirectionnels sont servis par ravemidi.",
+      "fallback": "Non installé — repli teVirtualMIDI (bidirectionnel ; les applis DJ peuvent s'auto-échoer).",
+      "none": "Non installé et pas de teVirtualMIDI — ports unidirectionnels indisponibles (loopMIDI fonctionne toujours, bidirectionnel).",
+      "testsign": "Les builds actuels sont auto-signés (test-signed) : Windows ne les charge qu'avec le mode test-signing activé et Secure Boot désactivé. Une version signée par attestation Microsoft (sans étapes spéciales) est en préparation.",
+      "steps": "Installation (PowerShell élevé, dans le dossier du paquet pilote — guide complet dans le README du pilote) :",
+      "smartscreen": "Windows peut avertir sur les composants auto-signés (SmartScreen / éditeur inconnu). Normal pour un build open source sans certificat EV — sources et builds CI publics ; lisez le README avant de continuer.",
+      "docs": "README & source du pilote"
+    },
+    "sw": {
+      "hdr": "État des logiciels DJ",
+      "stable": "pris en charge",
+      "experimental": "WIP · expérimental",
+      "untested": "WIP · non testé",
+      "unfinished": "inachevé",
+      "traktor": "Chaîne complète : installation du mapping, decks live, sync de bibliothèque, écriture beatgrid + cues. Éprouvé en conditions réelles.",
+      "rekordbox": "Rekordbox ne peut pas déclencher Play depuis un mapping loopback (limite de l'appli — utilisez un contrôleur ou le pont). L'écriture grid/cues passe par import XML ; vérifiez avant de valider.",
+      "virtualdj": "Mapping + écriture base implémentés mais pas encore testés sur le terrain. Sauvegardez d'abord votre base VirtualDJ.",
+      "serato": "Intégration inachevée : l'import de bibliothèque fonctionne, l'écriture est toute neuve. Gardez des sauvegardes ; attendez-vous à des aspérités."
     }
   }
 }

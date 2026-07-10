@@ -61,6 +61,9 @@ func openRaveMIDICtl() (syscall.Handle, error) {
 	return h, nil
 }
 
+// DriverInstalled reports whether the ravemidi kernel driver is present + openable.
+func DriverInstalled() bool { return raveMIDIAvailable() }
+
 // raveMIDIAvailable reports whether the ravemidi control device exists AND this process
 // can open it (driver installed + running + sufficient rights). Safe for UI gating.
 func raveMIDIAvailable() bool {

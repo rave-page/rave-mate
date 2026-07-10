@@ -311,3 +311,10 @@
   white-space: nowrap;
 }
 .midi-driver-links a:hover { text-decoration: underline; }
+
+/* ravemidi driver card + per-software status matrix */
+.midi-cmds{background:var(--rp-card);border:1px solid var(--rp-faint);border-radius:var(--radius,8px);
+  padding:var(--space-2);font:11px/1.6 var(--font-mono,monospace);overflow-x:auto;white-space:pre;user-select:text}
+.midi-sw{display:flex;align-items:baseline;gap:var(--space-2);padding:3px 0;flex-wrap:wrap}
+.midi-sw-name{font:600 12px var(--font-display,Orbitron),sans-serif;min-width:96px}
+.midi-sw-note{color:var(--rp-muted);font-size:12px;flex:1;min-width:220px}

@@ -3195,6 +3195,37 @@
       "enable": "Enable DJ bridge",
       "todj": "OUT: rave-mate -> DJ app (peer control)",
       "fromdj": "IN: DJ app -> rave-mate (feedback)"
+    },
+    "out": {
+      "sub": "Where rave-mate SENDS MIDI. Pick the built-in one-way port (DJ software can't echo itself back) or any loopback port your DJ app listens on."
+    },
+    "rack": {
+      "sub": "Send-to-learn: put your DJ software into MIDI-learn mode, then wiggle a control here — it sends one clean CC/Note for the app to learn. Nothing streams continuously."
+    },
+    "drv": {
+      "card": "ravemidi driver (one-way virtual ports)",
+      "status": "Kernel driver",
+      "badgePreview": "developer preview",
+      "badgeOn": "active",
+      "why": "Our open-source kernel driver creates one-way virtual MIDI ports: your DJ software sees an input-only port, so it can never re-read its own LED/feedback output (the classic loopback self-echo bug). Optional — without it rave-mate falls back to teVirtualMIDI or loopMIDI two-way ports.",
+      "installed": "Installed and running — one-way ports are served by ravemidi.",
+      "fallback": "Not installed — using the teVirtualMIDI fallback (two-way; DJ apps can self-echo).",
+      "none": "Not installed and no teVirtualMIDI found — one-way ports unavailable (loopMIDI still works, two-way).",
+      "testsign": "Current builds are self-signed (test-signed): Windows loads them only with test-signing boot mode on and Secure Boot off. A Microsoft-attestation-signed release (no special steps) is in the pipeline.",
+      "steps": "Install (elevated PowerShell, from the driver package folder — full walkthrough in the driver README):",
+      "smartscreen": "Windows may warn about self-signed components (SmartScreen / unknown publisher). Expected for open-source builds without an EV certificate — the source and CI builds are public; see the README before proceeding.",
+      "docs": "Driver README & source"
+    },
+    "sw": {
+      "hdr": "DJ software status",
+      "stable": "supported",
+      "experimental": "WIP · experimental",
+      "untested": "WIP · untested",
+      "unfinished": "unfinished",
+      "traktor": "Full pipeline: mapping install, live decks, library sync, beatgrid + cue writeback. Battle-tested.",
+      "rekordbox": "Rekordbox can't trigger Play from a loopback mapping (app limitation — use a controller or the bridge). Grid/cue writeback goes via XML import; verify before committing.",
+      "virtualdj": "Mapping + database writeback implemented but not field-tested yet. Back up your VirtualDJ database first.",
+      "serato": "Integration unfinished: library import works, write-side is brand-new. Keep backups; expect rough edges."
     }
   }
 }

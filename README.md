@@ -132,7 +132,10 @@ each software can deliver and the setup trade-offs.
 | VRChat account/status/emoji/photos/cam-paths, VR overlays/keybinds | **Used in real events**; VR surface still gets frequent fixes |
 | World Sync (gist perms/posters/events/now-playing) | **New** - Go side unit-tested; needs live soak |
 | Unity plugin C# (motion window, world-sync window, UdonSharp readers) | **Unverified in Unity** - written to compile, not yet exercised in-editor; treat as beta |
-| Serato/VirtualDJ/Rekordbox live sources | Implemented + tested against local installs; fewer field hours than Traktor |
+| Rekordbox integration (live source, XML writeback) | **WIP / experimental** - tested against local installs; XML grid/cue writeback is fresh, back up + verify imports |
+| VirtualDJ integration (live source, database writeback) | **WIP / untested** - implemented, not yet field-tested; back up your VirtualDJ database first |
+| Serato integration (library import, grid writeback) | **Unfinished** - read-side works, write-side is new byte-splicing code; treat as preview and keep backups |
+| ravemidi kernel driver (one-way virtual MIDI ports) | **Developer preview** - self-signed/test-signed builds only; attestation-signed release pending (see MIDI Mixer tab) |
 | macOS/Linux builds | Compile + basic runs; Windows is the primary tested platform |
 | Motion studio FBX avatars | Binary FBX loads + renders textured/smooth-shaded (ASCII FBX + blend shapes not supported) |
 
@@ -172,6 +175,27 @@ files or systems (see LICENSE §15–16).
 - **Alpha** - tagged snapshots (`vX.Y.Z-alpha.N`) on the
   [Releases](https://github.com/rave-page/rave-mate/releases) page; a little more settled than
   nightly, still alpha.
+
+## Windows SmartScreen & the self-signed driver — don't be scared
+
+Downloading a rave-mate build can trigger **Microsoft Defender SmartScreen**
+("Windows protected your PC") or a browser warning. That's expected, and it is **not** a
+malware verdict: SmartScreen flags executables that are new and not signed with an expensive
+EV code-signing certificate — the default state of most young open-source projects. Every
+release binary is built by public GitHub Actions CI from the source in this repo, and the
+self-updater verifies a signed release feed. To proceed: **More info → Run anyway** (or
+right-click the file → Properties → Unblock). If in doubt, build from source — that's the
+point of open source.
+
+The optional **ravemidi virtual MIDI kernel driver** (one-way ports so DJ software can't
+echo its own LED feedback back into itself) is currently distributed **self-signed
+(test-signed)**. Windows only loads kernel drivers signed via Microsoft attestation, so the
+preview requires developer mode steps: trust our test certificate, enable test-signing boot
+mode (Secure Boot off), reboot, install the INF — the **MIDI Mixer tab** in the app shows
+the exact commands, and [`driver/ravemidi/README.md`](driver/ravemidi/README.md) has the
+full walkthrough. A Microsoft-attestation-signed release (loads normally, Secure Boot on,
+no warnings) is in the pipeline. You never need the driver for rave-mate to work — without
+it, one-way ports fall back to teVirtualMIDI, or use loopMIDI two-way ports.
 
 ## Docs
 

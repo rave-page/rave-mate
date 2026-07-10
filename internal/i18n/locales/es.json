@@ -3030,6 +3030,37 @@
   "midictl": {
     "in": {
       "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)"
+    },
+    "out": {
+      "sub": "Adónde ENVÍA MIDI rave-mate. Elige el puerto unidireccional integrado (el software DJ no puede re-leerse a sí mismo) o cualquier puerto loopback que escuche tu app DJ."
+    },
+    "rack": {
+      "sub": "Send-to-learn: pon tu software DJ en modo aprendizaje MIDI y mueve un control aquí — se envía un único CC/Note limpio para aprender. Nada emite de forma continua."
+    },
+    "drv": {
+      "card": "Driver ravemidi (puertos virtuales unidireccionales)",
+      "status": "Driver de kernel",
+      "badgePreview": "vista previa dev",
+      "badgeOn": "activo",
+      "why": "Nuestro driver de kernel open source crea puertos MIDI virtuales unidireccionales: el software DJ ve un puerto solo-entrada y nunca puede re-leer su propio feedback LED (el clásico auto-eco de loopback). Opcional — sin él, rave-mate usa teVirtualMIDI o loopMIDI (bidireccionales).",
+      "installed": "Instalado y en marcha — los puertos unidireccionales los sirve ravemidi.",
+      "fallback": "No instalado — usando el fallback teVirtualMIDI (bidireccional; las apps DJ pueden auto-ecoarse).",
+      "none": "No instalado y sin teVirtualMIDI — puertos unidireccionales no disponibles (loopMIDI sigue funcionando, bidireccional).",
+      "testsign": "Los builds actuales van autofirmados (test-signed): Windows solo los carga con el modo test-signing activado y Secure Boot desactivado. Una versión firmada por atestación de Microsoft (sin pasos especiales) está en camino.",
+      "steps": "Instalación (PowerShell elevado, en la carpeta del paquete del driver — guía completa en el README del driver):",
+      "smartscreen": "Windows puede avisar sobre componentes autofirmados (SmartScreen / editor desconocido). Normal en builds open source sin certificado EV — el código y los builds de CI son públicos; lee el README antes de continuar.",
+      "docs": "README y código del driver"
+    },
+    "sw": {
+      "hdr": "Estado del software DJ",
+      "stable": "soportado",
+      "experimental": "WIP · experimental",
+      "untested": "WIP · sin probar",
+      "unfinished": "sin terminar",
+      "traktor": "Cadena completa: instalación de mapping, decks en vivo, sync de biblioteca, escritura de beatgrid + cues. Probado en producción.",
+      "rekordbox": "Rekordbox no puede disparar Play desde un mapping loopback (límite de la app — usa un controlador o el puente). La escritura de grid/cues va por importación XML; verifica antes de aplicar.",
+      "virtualdj": "Mapping + escritura de base implementados pero aún sin pruebas de campo. Haz copia de tu base de VirtualDJ primero.",
+      "serato": "Integración sin terminar: la importación de biblioteca funciona, la escritura es nueva. Mantén copias; espera asperezas."
     }
   }
 }

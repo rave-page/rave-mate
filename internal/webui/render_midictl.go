@@ -2,6 +2,7 @@ package webui
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,7 @@ func (u *UI) renderMIDICtl() string {
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
 	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
 	b.WriteString(u.midiPortCard())
+	b.WriteString(u.midiDriverCard()) // ravemidi kernel driver status + install walkthrough
 	b.WriteString(u.midiRackCard())
 	b.WriteString(u.midiBridgeCard()) // two-port loopMIDI DJ router (peer control)
 	b.WriteString(u.midiHelpCard())
@@ -43,11 +45,54 @@ func (u *UI) midiPortCard() string {
 	for _, p := range e.Ports() {
 		opts = append(opts, [2]string{p, p})
 	}
-	body := selectBox(i18n.T("midictl.port"), "midi-port", opts, e.Want()) +
+	body := `<p class=page-sub>` + htmlEscape(i18n.T("midictl.out.sub")) + `</p>` +
+		selectBox(i18n.T("midictl.port"), "midi-port", opts, e.Want()) +
 		`<div id=midi-active>` + midiActiveRow(e.ActivePort()) + `</div>` +
 		btnRow(btn(i18n.T("midictl.panic"), "warn", "midi-panic", ""))
 	return card(i18n.T("midictl.outputCard"), "", body)
 }
+
+// midiDriverCard: ravemidi kernel-driver status + the self-signed install walkthrough.
+// Only rendered on Windows (the driver is a Windows WDM/PortCls component).
+func (u *UI) midiDriverCard() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	installed := midi.DriverInstalled()
+	var b strings.Builder
+	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.why")) + `</p>`)
+	switch {
+	case installed:
+		b.WriteString(statusRow("success", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.installed")))
+	case midi.VirtualAvailable():
+		b.WriteString(statusRow("warning", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.fallback")))
+	default:
+		b.WriteString(statusRow("muted", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.none")))
+	}
+	if !installed {
+		b.WriteString(hint("info", i18n.T("midictl.drv.testsign")))
+		b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.drv.steps")) + `</p>`)
+		b.WriteString(`<pre class=midi-cmds>` + htmlEscape(driverInstallCmds) + `</pre>`)
+		b.WriteString(hint("warn", i18n.T("midictl.drv.smartscreen")))
+	}
+	b.WriteString(btnRow(btn(i18n.T("midictl.drv.docs"), "outline", "open-url",
+		"https://github.com/rave-page/rave-mate/tree/development/driver/ravemidi")))
+	badgeTx, badgeVar := i18n.T("midictl.drv.badgePreview"), "warning"
+	if installed {
+		badgeTx, badgeVar = i18n.T("midictl.drv.badgeOn"), "success"
+	}
+	return card(i18n.T("midictl.drv.card"), badge(badgeTx, badgeVar), b.String())
+}
+
+// driverInstallCmds: dev/test-signed install, mirrors driver/ravemidi/README.md.
+const driverInstallCmds = `# 1  elevated PowerShell, inside the driver package folder
+certutil -addstore Root ravemidi-test.cer
+certutil -addstore TrustedPublisher ravemidi-test.cer
+bcdedit /set testsigning on
+#    reboot Windows now
+# 2  after the reboot (elevated again)
+pnputil /add-driver ravemidi.inf /install
+devcon install ravemidi.inf Root\ravemidi`
 
 // midiActiveRow renders the resolved active-port status line (patched ~1 Hz via #midi-active).
 func midiActiveRow(active string) string {
@@ -68,7 +113,8 @@ func (u *UI) midiRackCard() string {
 		rack.WriteString(midiStrip(ch))
 	}
 	rack.WriteString(`</div>`)
-	return card(i18n.T("midictl.rackCard"), trail, rack.String())
+	return card(i18n.T("midictl.rackCard"), trail,
+		`<p class=page-sub>`+htmlEscape(i18n.T("midictl.rack.sub"))+`</p>`+rack.String())
 }
 
 // midiChannelStepper renders the -/+ channel-count control (1..MaxChannels).
@@ -206,7 +252,7 @@ func ctlReadout(c midimap.Control, ch int) string {
 	return kind + strconv.Itoa(int(c.CC)) + "·ch" + strconv.Itoa(ch)
 }
 
-// midiHelpCard explains the send-to-learn round-trip + honest software caveats.
+// midiHelpCard explains the send-to-learn round-trip + honest per-software status.
 func (u *UI) midiHelpCard() string {
 	steps := `<ol class=midi-help><li>` + htmlEscape(i18n.T("midictl.help.step1")) + `</li><li>` +
 		htmlEscape(i18n.T("midictl.help.step2")) + `</li><li>` +
@@ -215,5 +261,20 @@ func (u *UI) midiHelpCard() string {
 		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.help.caveat")) + ` ` +
 		`<a href="https://rekordbox.com/en/support/faq/mapping-6/" target=_blank rel=noopener>` +
 		htmlEscape(i18n.T("midictl.help.link")) + `</a></p>`
-	return card(i18n.T("midictl.helpCard"), badge(i18n.T("midictl.help.badge"), "info"), steps)
+	return card(i18n.T("midictl.helpCard"), badge(i18n.T("midictl.help.badge"), "info"),
+		steps+midiSoftwareMatrix())
+}
+
+// midiSoftwareMatrix: honest per-DJ-software maturity + caveats (mirrors the README).
+func midiSoftwareMatrix() string {
+	row := func(name, badgeKey, badgeVar, noteKey string) string {
+		return `<div class=midi-sw><span class=midi-sw-name>` + htmlEscape(name) + `</span>` +
+			badge(i18n.T("midictl.sw."+badgeKey), badgeVar) +
+			`<span class=midi-sw-note>` + htmlEscape(i18n.T("midictl.sw."+noteKey)) + `</span></div>`
+	}
+	return `<div class=pb-label>` + htmlEscape(i18n.T("midictl.sw.hdr")) + `</div>` +
+		row("Traktor Pro", "stable", "success", "traktor") +
+		row("Rekordbox", "experimental", "warning", "rekordbox") +
+		row("VirtualDJ", "untested", "warning", "virtualdj") +
+		row("Serato", "unfinished", "error", "serato")
 }
