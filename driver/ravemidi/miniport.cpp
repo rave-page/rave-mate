@@ -1,6 +1,7 @@
 // ravemidi IMiniportMidi implementation: per-kind filter descriptors + streams.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "miniport.h"
+#include "managed.h"
 
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 
@@ -423,6 +424,12 @@ STDMETHODIMP_(NTSTATUS) RaveStream::Write(PVOID BufferAddress, ULONG BytesToWrit
         RavePortNotifyToApp(p);
     } else {
         RaveFifoPush(&p->FromApp, (const UCHAR*)BufferAddress, BytesToWrite);
+        if (p->FeedbackArm) {
+            // managed reserved port: tee to the device render pin (IOCTL_READ
+            // still sees FromApp — the tee never consumes)
+            RaveFifoPush(&p->Feedback, (const UCHAR*)BufferAddress, BytesToWrite);
+            RaveManagedKickFeedback();
+        }
         RavePortDeliverFromApp(p);
     }
     return STATUS_SUCCESS;

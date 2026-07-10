@@ -3,7 +3,8 @@
 //
 // Virtual-port core is complete: control plane, dynamic subdevice register/
 // unregister, winmm FriendlyName stamp, and the cancel-safe IOCTL_READ pend.
-// Mirror-tap (driver-level controller splitter) lives in mirror.cpp.
+// Mirror-tap + KS client live in mirror.cpp; managed-input autonomy (persisted
+// config, driver-owned ports, bind/retry engine) in managed.cpp + config.cpp.
 // See ../../.devnotes/RAVEMIDI_DRIVER_DESIGN.md.
 
 #include <portcls.h>
@@ -13,6 +14,8 @@
 #include "ioctl.h"
 #include "miniport.h"
 #include "mirror.h"
+#include "config.h"
+#include "managed.h"
 
 #ifndef LOCALE_NEUTRAL
 #define LOCALE_NEUTRAL 0
@@ -38,6 +41,7 @@ DRIVER_ADD_DEVICE RaveAddDevice;
 static NTSTATUS RaveStartDevice(PDEVICE_OBJECT, PIRP, PRESOURCELIST);
 static NTSTATUS RaveCreateCtlDevice(RAVE_ADAPTER*);
 DRIVER_DISPATCH RaveCtlDispatch;
+DRIVER_DISPATCH RavePnpDispatch;
 DRIVER_UNLOAD RaveUnload;
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
@@ -56,13 +60,16 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
         return st;
     }
     // Keep PortCls's dispatch for its devices, but tap CREATE/CLOSE/DEVICE_CONTROL
-    // for our control device (routed by DeviceExtension tag in RaveCtlDispatch).
+    // for our control device (routed by DeviceExtension tag in RaveCtlDispatch)
+    // and PNP for managed-engine teardown on STOP/REMOVE.
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RaveCtlDispatch;
     DriverObject->MajorFunction[IRP_MJ_CREATE] = RaveCtlDispatch;
     DriverObject->MajorFunction[IRP_MJ_CLEANUP] = RaveCtlDispatch;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = RaveCtlDispatch;
+    DriverObject->MajorFunction[IRP_MJ_PNP] = RavePnpDispatch;
     g_PcUnload = DriverObject->DriverUnload;
     DriverObject->DriverUnload = RaveUnload;
+    RaveConfigInit(RegistryPath);  // best-effort: without it managed config won't persist
     return STATUS_SUCCESS;
 }
 #pragma code_seg()
@@ -71,6 +78,7 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
 VOID RaveUnload(PDRIVER_OBJECT DriverObject)
 {
     PAGED_CODE();
+    RaveManagedStop();  // idempotent fallback — normally already stopped at REMOVE
     RAVE_ADAPTER* a = g_Adapter;
     if (a) {
         g_Adapter = nullptr;
@@ -80,10 +88,16 @@ VOID RaveUnload(PDRIVER_OBJECT DriverObject)
             IoDeleteSymbolicLink(&dos);
             IoDeleteDevice(a->CtlDevice);
         }
-        // Ports are torn down by handle cleanup before unload (driver can't unload
-        // with open handles); the list is empty here in the normal path.
+        // Owned ports die with their handles, managed ports with RaveManagedStop.
+        // Safety net: free any block that survived (was pinned at REMOVE) — the
+        // portcls objects are gone by unload, only our pool block remains.
+        while (!IsListEmpty(&a->Ports)) {
+            PLIST_ENTRY e = RemoveHeadList(&a->Ports);
+            ExFreePoolWithTag(CONTAINING_RECORD(e, RAVE_PORT, Link), RAVE_TAG);
+        }
         ExFreePoolWithTag(a, RAVE_TAG);
     }
+    RaveConfigRelease();
     if (g_PcUnload) {
         g_PcUnload(DriverObject);
     }
@@ -109,7 +123,10 @@ static NTSTATUS RaveStartDevice(PDEVICE_OBJECT DeviceObject, PIRP Irp, PRESOURCE
     UNREFERENCED_PARAMETER(ResourceList);
 
     if (g_Adapter) {
-        return STATUS_SUCCESS;  // already started (surprise-restart)
+        // already started (surprise-restart / re-START after STOP): re-arm the
+        // managed engine — RavePnpDispatch stopped it on IRP_MN_STOP_DEVICE
+        RaveManagedBoot(g_Adapter->Fdo);
+        return STATUS_SUCCESS;
     }
     RAVE_ADAPTER* a = (RAVE_ADAPTER*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(*a), RAVE_TAG);
     if (!a) {
@@ -127,8 +144,9 @@ static NTSTATUS RaveStartDevice(PDEVICE_OBJECT DeviceObject, PIRP Irp, PRESOURCE
     }
     g_Adapter = a;
     RaveMirrorInit();
-    // Future: re-arm persisted mirror groups from Parameters\Mirrors + register
-    // IoRegisterPlugPlayNotification(KSCATEGORY_CAPTURE) for controller hot-plug.
+    // Driver autonomy: start the managed engine + apply the persisted config, so
+    // controller forwarding resumes at boot with rave-mate never launched.
+    RaveManagedBoot(a->Fdo);
     return STATUS_SUCCESS;
 }
 #pragma code_seg()
@@ -170,6 +188,32 @@ static NTSTATUS RaveCreateCtlDevice(RAVE_ADAPTER* a)
     a->CtlDevice = dev;
     dev->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
+}
+#pragma code_seg()
+
+// -------- PNP tap ----------
+// PortCls owns PnP; we only stop the managed engine (worker, PnP notification,
+// taps, driver-owned ports) BEFORE the stack tears down. StartDevice re-arms it.
+#pragma code_seg("PAGE")
+NTSTATUS RavePnpDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    PAGED_CODE();
+    RAVE_CTL_EXT* ext = (RAVE_CTL_EXT*)DeviceObject->DeviceExtension;
+    if (ext && ext->Tag == kCtlTag) {
+        // non-PnP control device never legitimately sees PNP — complete untouched
+        NTSTATUS st = Irp->IoStatus.Status;
+        IoCompleteRequest(Irp, IO_NO_INCREMENT);
+        return st;
+    }
+    RAVE_ADAPTER* a = g_Adapter;
+    PIO_STACK_LOCATION s = IoGetCurrentIrpStackLocation(Irp);
+    if (a && DeviceObject == a->Fdo &&
+        (s->MinorFunction == IRP_MN_STOP_DEVICE ||
+         s->MinorFunction == IRP_MN_SURPRISE_REMOVAL ||
+         s->MinorFunction == IRP_MN_REMOVE_DEVICE)) {
+        RaveManagedStop();
+    }
+    return PcDispatchIrp(DeviceObject, Irp);
 }
 #pragma code_seg()
 
@@ -277,13 +321,18 @@ static VOID RaveCsqRemove(PIO_CSQ, PIRP Irp)
 }
 static PIRP RaveCsqPeek(PIO_CSQ Csq, PIRP Irp, PVOID Context)
 {
-    UNREFERENCED_PARAMETER(Context);
+    // Context (optional) = PFILE_OBJECT filter: CLEANUP cancels only the closing
+    // handle's READs — required for managed ports, which outlive any handle.
     RAVE_PORT* p = CONTAINING_RECORD(Csq, RAVE_PORT, ReadCsq);
-    PLIST_ENTRY next = Irp ? Irp->Tail.Overlay.ListEntry.Flink : p->ReadIrps.Flink;
-    if (next == &p->ReadIrps) {
-        return nullptr;
+    PLIST_ENTRY e = Irp ? Irp->Tail.Overlay.ListEntry.Flink : p->ReadIrps.Flink;
+    for (; e != &p->ReadIrps; e = e->Flink) {
+        PIRP next = CONTAINING_RECORD(e, IRP, Tail.Overlay.ListEntry);
+        if (!Context ||
+            IoGetCurrentIrpStackLocation(next)->FileObject == (PFILE_OBJECT)Context) {
+            return next;
+        }
     }
-    return CONTAINING_RECORD(next, IRP, Tail.Overlay.ListEntry);
+    return nullptr;
 }
 _IRQL_raises_(DISPATCH_LEVEL)
 static VOID RaveCsqAcquireLock(PIO_CSQ Csq, PKIRQL Irql)
@@ -304,18 +353,17 @@ static VOID RaveCsqCompleteCanceled(PIO_CSQ, PIRP Irp)
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 }
 
-// Complete (cancel) every pended READ owned by a closing file handle. Called on
+// Complete (cancel) every pended READ issued on a closing file handle. Called on
 // IRP_MJ_CLEANUP so the handle can close, and again on port destroy (then empty).
+// Matches by the IRP's FILE_OBJECT (CSQ peek context), not by port ownership —
+// rave-mate pends READs on managed ports it doesn't own.
 static VOID FlushReadsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
 {
     ExAcquireFastMutex(&a->PortsLock);
     for (PLIST_ENTRY e = a->Ports.Flink; e != &a->Ports; e = e->Flink) {
         RAVE_PORT* p = CONTAINING_RECORD(e, RAVE_PORT, Link);
-        if (p->CreatorFile != f) {
-            continue;
-        }
         PIRP irp;
-        while ((irp = IoCsqRemoveNextIrp(&p->ReadCsq, nullptr)) != nullptr) {
+        while ((irp = IoCsqRemoveNextIrp(&p->ReadCsq, f)) != nullptr) {
             irp->IoStatus.Status = STATUS_CANCELLED;
             irp->IoStatus.Information = 0;
             IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -325,7 +373,8 @@ static VOID FlushReadsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
 }
 
 #pragma code_seg("PAGE")
-static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI_CREATE_PORT_IN* in, ULONG* outId)
+static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI_CREATE_PORT_IN* in,
+                           ULONG* outId, RAVE_PORT** outPort)
 {
     PAGED_CODE();
     if (in->Version != RAVEMIDI_PROTOCOL_VERSION || in->Kind > RaveMidiPortLoopback || !NameSane(in->Name)) {
@@ -336,11 +385,13 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     p->Kind = in->Kind;
-    p->CreatorFile = creator;
+    p->CreatorFile = creator;  // NULL = driver-owned (managed): survives handle close
     RtlCopyMemory(p->Name, in->Name, sizeof(p->Name));
     p->Name[RAVEMIDI_MAX_NAME - 1] = 0;
     RaveFifoInit(&p->ToApp);
     RaveFifoInit(&p->FromApp);
+    RaveFifoInit(&p->Feedback);
+    p->FeedbackArm = 0;
     KeInitializeSpinLock(&p->ReadLock);
     InitializeListHead(&p->ReadIrps);
     IoCsqInitialize(&p->ReadCsq, RaveCsqInsert, RaveCsqRemove, RaveCsqPeek,
@@ -364,6 +415,9 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     if (NT_SUCCESS(st)) {
         StampFriendlyName(a, p->RefString, p->Name);  // winmm szPname = p->Name
         *outId = p->Id;
+        if (outPort) {
+            *outPort = p;
+        }
         return STATUS_SUCCESS;
     }
     // rollback
@@ -425,7 +479,9 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
 }
 #pragma code_seg()
 
-// Drop every port a closing control handle created (crash-safety).
+// Drop every port a closing control handle created (crash-safety). f is never
+// NULL here, so managed ports (CreatorFile == NULL) are skipped — they belong
+// to the driver, not to any handle.
 static VOID DestroyPortsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
 {
     for (;;) {
@@ -445,6 +501,35 @@ static VOID DestroyPortsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
         DestroyPort(a, f, victim->Id);
     }
 }
+
+// -------- managed-engine port helpers (managed.cpp) ----------
+#pragma code_seg("PAGE")
+NTSTATUS RavePortCreateOwnerless(ULONG kind, PCWSTR name, RAVE_PORT** outPort)
+{
+    PAGED_CODE();
+    RAVE_ADAPTER* a = g_Adapter;
+    if (!a) {
+        return STATUS_DEVICE_NOT_READY;
+    }
+    RAVEMIDI_CREATE_PORT_IN in;
+    RtlZeroMemory(&in, sizeof(in));
+    in.Version = RAVEMIDI_PROTOCOL_VERSION;
+    in.Kind = kind;
+    RtlStringCchCopyW(in.Name, RTL_NUMBER_OF(in.Name), name);  // truncation OK (winmm caps at 31)
+    ULONG id = 0;
+    return CreatePort(a, nullptr, &in, &id, outPort);
+}
+
+NTSTATUS RavePortDestroyById(ULONG id)
+{
+    PAGED_CODE();
+    RAVE_ADAPTER* a = g_Adapter;
+    if (!a) {
+        return STATUS_DEVICE_NOT_READY;
+    }
+    return DestroyPort(a, nullptr, id);
+}
+#pragma code_seg()
 
 // -------- IOCTL dispatch ----------
 NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
@@ -490,7 +575,7 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
                 break;
             }
             ULONG id = 0;
-            st = CreatePort(a, s->FileObject, (RAVEMIDI_CREATE_PORT_IN*)buf, &id);
+            st = CreatePort(a, s->FileObject, (RAVEMIDI_CREATE_PORT_IN*)buf, &id, nullptr);
             if (NT_SUCCESS(st)) {
                 ((RAVEMIDI_CREATE_PORT_OUT*)buf)->PortId = id;
                 info = sizeof(RAVEMIDI_CREATE_PORT_OUT);
@@ -600,6 +685,61 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
                 break;
             }
             st = RaveMirrorDestroy(s->FileObject, ((RAVEMIDI_MIRROR_REF*)buf)->MirrorId);
+            break;
+        }
+        case IOCTL_RAVEMIDI_SET_CONFIG: {
+            if (inLen < sizeof(RAVEMIDI_CONFIG)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            RAVEMIDI_CONFIG* c = (RAVEMIDI_CONFIG*)buf;
+            if (!RaveConfigSanitize(c)) {
+                st = STATUS_INVALID_PARAMETER;
+                break;
+            }
+            st = RaveConfigSave(c);          // persist first: reboot-safe even if apply hiccups
+            if (NT_SUCCESS(st)) {
+                st = RaveManagedApply(c);
+            }
+            break;
+        }
+        case IOCTL_RAVEMIDI_GET_CONFIG: {
+            if (outLen < sizeof(RAVEMIDI_CONFIG)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            RAVEMIDI_CONFIG* c = (RAVEMIDI_CONFIG*)buf;
+            if (!NT_SUCCESS(RaveConfigLoad(c))) {   // nothing persisted: zero-inputs blob
+                RtlZeroMemory(c, sizeof(*c));
+                c->Version = RAVEMIDI_PROTOCOL_VERSION;
+            }
+            info = sizeof(RAVEMIDI_CONFIG);
+            break;
+        }
+        case IOCTL_RAVEMIDI_QUERY_INPUT: {
+            if (inLen < sizeof(ULONG) || outLen < sizeof(RAVEMIDI_INPUT_STATUS)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            ULONG idx = *(ULONG*)buf;
+            st = RaveManagedQuery(idx, (RAVEMIDI_INPUT_STATUS*)buf);
+            if (NT_SUCCESS(st)) {
+                info = sizeof(RAVEMIDI_INPUT_STATUS);
+            }
+            break;
+        }
+        case IOCTL_RAVEMIDI_RELOAD_CONFIG: {
+            RAVEMIDI_CONFIG* c = (RAVEMIDI_CONFIG*)ExAllocatePool2(POOL_FLAG_PAGED, sizeof(*c), RAVE_TAG);
+            if (!c) {
+                st = STATUS_INSUFFICIENT_RESOURCES;
+                break;
+            }
+            if (!NT_SUCCESS(RaveConfigLoad(c))) {   // nothing persisted = empty config
+                RtlZeroMemory(c, sizeof(*c));
+                c->Version = RAVEMIDI_PROTOCOL_VERSION;
+            }
+            st = RaveManagedApply(c);
+            ExFreePoolWithTag(c, RAVE_TAG);
             break;
         }
         default:

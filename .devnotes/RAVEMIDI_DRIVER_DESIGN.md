@@ -223,3 +223,65 @@ no cgo — DeviceIoControl via syscall).
 Estimate: 4–7k LOC kernel C++; weeks to prototype, months to harden. Riskiest: signing ops,
 WMS 25H2 coexistence (dynamic KS subdevice visibility bug had a 2026-04 controlled-rollout
 fix — test early), unregister-while-open races, multi-client merge.
+
+## Managed-input autonomy — implementation notes (2026-07-11, task #78)
+
+Fixes the "forwarding dies with rave-mate" bug: taps/ports used to be owned by the
+creating control handle (`RaveMirrorDestroyForFile` on CLOSE). Managed inputs are
+driver-owned and persist.
+
+Kernel-side pieces (`driver/ravemidi/`):
+
+- `config.{h,cpp}` — `RAVEMIDI_CONFIG` persisted as REG_BINARY `"Config"` under
+  `<RegistryPath>\Parameters` (path captured in DriverEntry, pool copy). ZwCreateKey/
+  ZwSetValueKey/ZwQueryValueKey at PASSIVE. `RaveConfigSanitize` hard-validates:
+  version, `InputCount<=8`, `OutCount<=4`, NUL-pads every WCHAR field (blobs become
+  bytewise-comparable → config diff is `RtlCompareMemory`), clamps Thru/Feedback to
+  0/1, rejects empty/dup Ids and inputs with neither SourceMatch nor SourceIface,
+  zeroes trailing inputs (no stack garbage to registry).
+- `managed.{h,cpp}` — engine. One passive system worker owns all state (KMUTEX; KMUTEX
+  not FAST_MUTEX because binding does Zw* file/registry I/O which needs PASSIVE).
+  `RaveManagedApply` diffs desired vs live by `Id`: unchanged inputs keep their live
+  tap (zero interruption), changed recreate, removed tear down. Inputs are pool
+  allocations behind a pointer array so the tap dead-callback ctx stays stable across
+  reorders. Worker wakes on: PnP interface-change notification
+  (KSCATEGORY_CAPTURE + INCLUDE_EXISTING), feedback tee kicks, apply, and the nearest
+  retry deadline (idle engine blocks indefinitely — no polling). Backoff 1s/2s/5s/10s∞.
+  Ports whose destroy returns DEVICE_BUSY (open winmm pin, legacy mirror ref) go to a
+  graveyard reaped by the worker. Engine stops on IRP_MN_STOP/SURPRISE_REMOVAL/
+  REMOVE_DEVICE (new `RavePnpDispatch` hook chains to `PcDispatchIrp`) and re-arms in
+  StartDevice via `RaveManagedBoot` (init + load + apply).
+- `mirror.{h,cpp}` refactor — KS client split into an owner-less `RAVE_TAP`
+  (open filter → probe MIDI capture pin → RUN → read-pump thread) reused by legacy
+  mirrors (OnDead=NULL → retry reads forever, exact old behavior) and managed inputs
+  (OnDead → 3 consecutive read failures mark the tap dead; worker closes + rebinds).
+  Added render-pin client for feedback: `RaveKsOpenRenderPin` (KSPIN_DATAFLOW_IN,
+  GENERIC_WRITE, stepped to RUN) + `RaveKsWriteMidi` (one KSMUSICFORMAT record per
+  write, ≤512B, DWORD-padded, IOCTL_KS_WRITE_STREAM header in the "out" buffer like
+  the read path).
+- Feedback tee: `RAVE_PORT` grew a third bounded FIFO `Feedback` + `FeedbackArm`.
+  The reserved port's render-stream `Write` (≤DISPATCH) pushes FromApp as before AND,
+  when armed, into `Feedback` + `RaveManagedKickFeedback()` (KeSetEvent, DISPATCH-safe).
+  Worker drains to the render pin at PASSIVE. Arm only while the render pin is bound;
+  stale bytes are discarded before arming (no LED-state replay). IOCTL_READ still sees
+  FromApp — the tee never consumes.
+- Ownerless ports: `CreatePort` takes `creator=NULL` (`RavePortCreateOwnerless`);
+  `DestroyPortsForFile`/`RaveMirrorDestroyForFile` naturally skip them (f never NULL);
+  IOCTL DESTROY_PORT on them → ACCESS_DENIED (CreatorFile NULL ≠ caller).
+  CSQ peek now honors a PFILE_OBJECT context so IRP_MJ_CLEANUP cancels exactly the
+  closing handle's pended READs — including READs rave-mate pended on managed ports it
+  doesn't own (else the file object never fully closes).
+- Self-tap guard: FriendlyName matching skips interfaces whose symlink tail starts
+  with `RavePort` (our own stamped names would otherwise match a SourceMatch and loop).
+
+Known limits / bring-up list:
+- All KS streaming paths (tap read, render write) still need on-hardware verification;
+  feedback (render-pin) path is entirely untested on hardware.
+- Feedback drain shares the bind worker: a long bind attempt (ZwCreateFile on a wedged
+  device) can add latency to LED feedback. Split to a second thread if it matters.
+- `RaveFifoPop` isn't message-aligned: a >512B sysex chunk can split across two
+  KSMUSICFORMAT records on the render pin. Most devices tolerate byte-stream records.
+- 8 inputs × up to 5 ports > RAVEMIDI_MAX_PORTS(16) subdevices: port creation for
+  late inputs parks in the retry loop until slots free up.
+- Local build needs the WDK VS toolset shim (see build notes in session summary); CI
+  (windows-2022) unaffected.

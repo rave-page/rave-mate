@@ -1,17 +1,17 @@
-// Mirror-tap implementation: open a hardware MIDI capture pin as a kernel KS
-// client, run a system thread that reads it, and fan the bytes into virtual ports.
+// KS-client implementation: capture taps (open a hardware MIDI capture pin as a
+// kernel KS client, pump reads on a system thread, fan bytes into virtual ports),
+// render-pin writes (managed feedback), and the legacy IOCTL mirror groups.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// NOTE: the KS streaming client (pin instantiation, IOCTL_KS_READ_STREAM loop)
+// NOTE: the KS streaming client (pin instantiation, IOCTL_KS_READ/WRITE_STREAM)
 // is DDI-correct but needs on-hardware bring-up (a physical controller + a
 // test-signed load) before it's trusted — it cannot be unit-tested. Failures at
-// open time return cleanly to rave-mate; the read loop only runs after a pin is up.
+// open time return cleanly; the pump only runs after a pin is up.
 //
-// Trust boundary: the control device is SDDL-restricted to SYSTEM+Administrators,
-// so only elevated rave-mate can create a mirror. As defense-in-depth we still
-// reject any SourceInterface that isn't a currently-enumerated KS capture/audio
-// interface (no arbitrary \Device\... or file paths), and all record parsing uses
-// subtractive, overflow-free bounds checks.
+// Trust boundary: mirror sources come through the (SDDL-restricted) control
+// device and managed sources from the driver's own enumeration; both are vetted
+// against currently-enumerated KS interfaces (no arbitrary \Device\... paths),
+// and all record parsing uses subtractive, overflow-free bounds checks.
 
 #include <portcls.h>
 #include <ksmedia.h>
@@ -22,19 +22,29 @@
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 #define MIRROR_READ_BUF 1024   // per-read MIDI byte buffer (bounded)
 #define MIRROR_MAX_REC  256    // sane cap on a single KSMUSICFORMAT record
+#define TAP_MAX_OUT (RAVEMIDI_MAX_MIRROR_OUT + 1)  // managed: reserved + outs
+#define TAP_FAIL_LIMIT 3       // consecutive read failures before OnDead fires
+
+typedef struct _RAVE_TAP {
+    HANDLE FilterHandle;             // needed by KsCreatePin
+    PFILE_OBJECT FilterFileObj;      // for filter property IOCTLs
+    HANDLE PinHandle;
+    PFILE_OBJECT PinFileObj;         // for pin state + streaming reads
+    PVOID ThreadObj;                 // PKTHREAD (referenced), joined in RaveTapClose
+    volatile LONG Stop;
+    ULONG OutCount;
+    RAVE_PORT* Outs[TAP_MAX_OUT];    // borrowed (caller owns lifetime)
+    RAVE_TAP_DEAD_CB OnDead;
+    PVOID DeadCtx;
+} RAVE_TAP;
 
 typedef struct _RAVE_MIRROR {
     LIST_ENTRY Link;
     ULONG Id;
     PFILE_OBJECT Creator;
-    HANDLE FilterHandle;             // needed by KsCreatePin
-    PFILE_OBJECT FilterFileObj;      // for filter property IOCTLs
-    HANDLE PinHandle;
-    PFILE_OBJECT PinFileObj;         // for pin state + streaming reads
-    PVOID ThreadObj;                 // PKTHREAD (referenced), waited on at destroy
-    volatile LONG Stop;
+    RAVE_TAP* Tap;
     ULONG OutCount;
-    RAVE_PORT* Outs[RAVEMIDI_MAX_MIRROR_OUT];
+    RAVE_PORT* Outs[RAVEMIDI_MAX_MIRROR_OUT];  // ref'd (MirrorRefs blocks destroy)
 } RAVE_MIRROR;
 
 static FAST_MUTEX g_MirrorLock;
@@ -66,15 +76,15 @@ static PCWSTR NormIface(PCWSTR s)
     return s;
 }
 
-// True only if `name` is a currently-enumerated KS capture/audio interface — blocks
-// opening arbitrary NT paths through the (admin-only) control device.
 #pragma code_seg("PAGE")
-static BOOLEAN IsKnownCaptureIface(PCWSTR name)
+BOOLEAN RaveIsKnownIface(PCWSTR Name, BOOLEAN Render)
 {
     PAGED_CODE();
     UNICODE_STRING want;
-    RtlInitUnicodeString(&want, NormIface(name));
-    const GUID* cats[2] = { &KSCATEGORY_CAPTURE, &KSCATEGORY_AUDIO };
+    RtlInitUnicodeString(&want, NormIface(Name));
+    const GUID* cats[2];
+    cats[0] = Render ? &KSCATEGORY_RENDER : &KSCATEGORY_CAPTURE;
+    cats[1] = &KSCATEGORY_AUDIO;
     for (int c = 0; c < 2; c++) {
         PWSTR list = nullptr;
         if (!NT_SUCCESS(IoGetDeviceInterfaces(cats[c], nullptr, 0, &list)) || !list) {
@@ -117,7 +127,7 @@ static NTSTATUS KsGetPinProp(PFILE_OBJECT filter, ULONG propId, ULONG pinId, PVO
     return KsProp(filter, &kp, sizeof(kp), out, outSize);
 }
 
-static NTSTATUS OpenMidiCapturePin(HANDLE filter, ULONG pinId, PHANDLE pinHandle)
+static NTSTATUS OpenMidiPin(HANDLE filter, ULONG pinId, ACCESS_MASK access, PHANDLE pinHandle)
 {
     struct {
         KSPIN_CONNECT c;
@@ -136,7 +146,7 @@ static NTSTATUS OpenMidiCapturePin(HANDLE filter, ULONG pinId, PHANDLE pinHandle
     conn.f.MajorFormat = KSDATAFORMAT_TYPE_MUSIC;
     conn.f.SubFormat = KSDATAFORMAT_SUBTYPE_MIDI;
     conn.f.Specifier = KSDATAFORMAT_SPECIFIER_NONE;
-    return KsCreatePin(filter, &conn.c, GENERIC_READ, pinHandle);
+    return KsCreatePin(filter, &conn.c, access, pinHandle);
 }
 
 static NTSTATUS SetPinState(PFILE_OBJECT pin, KSSTATE state)
@@ -149,16 +159,104 @@ static NTSTATUS SetPinState(PFILE_OBJECT pin, KSSTATE state)
     return KsProp(pin, &prop, sizeof(prop), &state, sizeof(state));
 }
 
-// -------- read-pump worker --------
-static KSTART_ROUTINE MirrorThread;
-static VOID MirrorThread(PVOID ctx)
+// Open filter + find a MIDI pin of the wanted dataflow, step it to RUN.
+#pragma code_seg("PAGE")
+static NTSTATUS OpenMidiFilterPin(PCWSTR iface, KSPIN_DATAFLOW flow, ACCESS_MASK pinAccess,
+                                  HANDLE* fh, PFILE_OBJECT* ffo, HANDLE* ph, PFILE_OBJECT* pfo)
 {
-    RAVE_MIRROR* m = (RAVE_MIRROR*)ctx;
+    PAGED_CODE();
+    *fh = nullptr;
+    *ffo = nullptr;
+    *ph = nullptr;
+    *pfo = nullptr;
+
+    UNICODE_STRING path;
+    RtlInitUnicodeString(&path, iface);
+    OBJECT_ATTRIBUTES oa;
+    InitializeObjectAttributes(&oa, &path, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, nullptr, nullptr);
+    IO_STATUS_BLOCK iosb;
+    HANDLE filter = nullptr;
+    ACCESS_MASK facc = GENERIC_READ | SYNCHRONIZE;
+    if (flow == KSPIN_DATAFLOW_IN) {
+        facc |= GENERIC_WRITE;  // render pins are created for writing
+    }
+    NTSTATUS st = ZwCreateFile(&filter, facc, &oa, &iosb,
+                               nullptr, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0);
+    if (!NT_SUCCESS(st)) {
+        return st;
+    }
+    PFILE_OBJECT filterFo = nullptr;
+    st = ObReferenceObjectByHandle(filter, 0, *IoFileObjectType, KernelMode, (PVOID*)&filterFo, nullptr);
+    if (!NT_SUCCESS(st)) {
+        ZwClose(filter);
+        return st;
+    }
+
+    // Probe each pin of the wanted flow with the MIDI format; first accept wins.
+    ULONG pinCount = 0;
+    st = KsGetPinProp(filterFo, KSPROPERTY_PIN_CTYPES, 0, &pinCount, sizeof(pinCount));
+    HANDLE pin = nullptr;
+    for (ULONG i = 0; NT_SUCCESS(st) && i < pinCount && !pin; i++) {
+        KSPIN_DATAFLOW f;
+        if (!NT_SUCCESS(KsGetPinProp(filterFo, KSPROPERTY_PIN_DATAFLOW, i, &f, sizeof(f)))) {
+            continue;
+        }
+        if (f != flow) {
+            continue;
+        }
+        HANDLE h = nullptr;
+        if (NT_SUCCESS(OpenMidiPin(filter, i, pinAccess, &h)) && h) {
+            pin = h;
+        }
+    }
+    PFILE_OBJECT pinFo = nullptr;
+    if (pin) {
+        if (!NT_SUCCESS(ObReferenceObjectByHandle(pin, 0, *IoFileObjectType, KernelMode,
+                                                  (PVOID*)&pinFo, nullptr))) {
+            ZwClose(pin);
+            pin = nullptr;
+        }
+    }
+    if (!pin) {
+        ObDereferenceObject(filterFo);
+        ZwClose(filter);
+        return STATUS_NOT_FOUND;
+    }
+
+    // STOP -> ACQUIRE -> PAUSE -> RUN.
+    SetPinState(pinFo, KSSTATE_ACQUIRE);
+    SetPinState(pinFo, KSSTATE_PAUSE);
+    st = SetPinState(pinFo, KSSTATE_RUN);
+    if (!NT_SUCCESS(st)) {
+        ObDereferenceObject(pinFo);
+        ZwClose(pin);
+        ObDereferenceObject(filterFo);
+        ZwClose(filter);
+        return st;
+    }
+    *fh = filter;
+    *ffo = filterFo;
+    *ph = pin;
+    *pfo = pinFo;
+    return STATUS_SUCCESS;
+}
+#pragma code_seg()
+
+// -------- capture-tap read pump --------
+static KSTART_ROUTINE TapThread;
+static VOID TapThread(PVOID ctx)
+{
+    RAVE_TAP* t = (RAVE_TAP*)ctx;
     PUCHAR buf = (PUCHAR)ExAllocatePool2(POOL_FLAG_NON_PAGED, MIRROR_READ_BUF, RAVE_TAG);
     if (!buf) {
+        if (t->OnDead && !t->Stop) {
+            t->OnDead(t->DeadCtx);
+        }
         return;
     }
-    while (!m->Stop) {
+    ULONG fails = 0;
+    while (!t->Stop) {
         KSSTREAM_HEADER hdr;
         RtlZeroMemory(&hdr, sizeof(hdr));
         hdr.Size = sizeof(hdr);
@@ -168,17 +266,24 @@ static VOID MirrorThread(PVOID ctx)
         hdr.Data = buf;
 
         ULONG br = 0;
-        NTSTATUS st = KsSynchronousIoControlDevice(m->PinFileObj, KernelMode, IOCTL_KS_READ_STREAM,
+        NTSTATUS st = KsSynchronousIoControlDevice(t->PinFileObj, KernelMode, IOCTL_KS_READ_STREAM,
                                                    nullptr, 0, &hdr, sizeof(hdr), &br);
         if (!NT_SUCCESS(st)) {
-            if (m->Stop) {
+            if (t->Stop) {
                 break;  // pin STOP completed our read — normal teardown
+            }
+            // Managed taps die after TAP_FAIL_LIMIT strikes (device pulled) so the
+            // engine can rebind; legacy mirrors (no OnDead) retry forever.
+            if (t->OnDead && ++fails >= TAP_FAIL_LIMIT) {
+                t->OnDead(t->DeadCtx);
+                break;
             }
             LARGE_INTEGER dt;
             dt.QuadPart = -10 * 1000 * 10;  // 10ms back-off on transient error
             KeDelayExecutionThread(KernelMode, FALSE, &dt);
             continue;
         }
+        fails = 0;
         // Parse KSMUSICFORMAT records: {TimeDeltaMs, ByteCount} + bytes, DWORD-padded.
         // Subtractive checks only (no off+bc that could wrap); records capped.
         ULONG used = (ULONG)hdr.DataUsed;
@@ -193,9 +298,9 @@ static VOID MirrorThread(PVOID ctx)
             if (bc == 0 || bc > MIRROR_MAX_REC || bc > used - off) {
                 break;
             }
-            for (ULONG i = 0; i < m->OutCount; i++) {
-                RaveFifoPush(&m->Outs[i]->ToApp, buf + off, bc);
-                RavePortNotifyToApp(m->Outs[i]);
+            for (ULONG i = 0; i < t->OutCount; i++) {
+                RaveFifoPush(&t->Outs[i]->ToApp, buf + off, bc);
+                RavePortNotifyToApp(t->Outs[i]);
             }
             ULONG pad = (bc + 3u) & ~3u;
             if (pad < bc || pad > used - off) {
@@ -207,28 +312,153 @@ static VOID MirrorThread(PVOID ctx)
     ExFreePoolWithTag(buf, RAVE_TAG);
 }
 
-// -------- lifecycle --------
-static VOID TeardownMirror(RAVE_MIRROR* m)  // not under g_MirrorLock (waits on thread)
+#pragma code_seg("PAGE")
+NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
+                     RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap)
 {
-    InterlockedExchange(&m->Stop, 1);
-    if (m->PinFileObj) {
-        SetPinState(m->PinFileObj, KSSTATE_STOP);  // completes the worker's pending read
+    PAGED_CODE();
+    *OutTap = nullptr;
+    if (OutCount == 0 || OutCount > TAP_MAX_OUT) {
+        return STATUS_INVALID_PARAMETER;
     }
-    if (m->ThreadObj) {
-        KeWaitForSingleObject(m->ThreadObj, Executive, KernelMode, FALSE, nullptr);
-        ObDereferenceObject(m->ThreadObj);
+    RAVE_TAP* t = (RAVE_TAP*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(*t), RAVE_TAG);
+    if (!t) {
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
-    if (m->PinFileObj) {
-        ObDereferenceObject(m->PinFileObj);
+    t->OutCount = OutCount;
+    for (ULONG i = 0; i < OutCount; i++) {
+        t->Outs[i] = Outs[i];
     }
-    if (m->PinHandle) {
-        ZwClose(m->PinHandle);
+    t->OnDead = OnDead;
+    t->DeadCtx = DeadCtx;
+
+    NTSTATUS st = OpenMidiFilterPin(Iface, KSPIN_DATAFLOW_OUT, GENERIC_READ,
+                                    &t->FilterHandle, &t->FilterFileObj,
+                                    &t->PinHandle, &t->PinFileObj);
+    if (!NT_SUCCESS(st)) {
+        ExFreePoolWithTag(t, RAVE_TAG);
+        return st;
     }
-    if (m->FilterFileObj) {
-        ObDereferenceObject(m->FilterFileObj);
+
+    t->Stop = 0;
+    t->ThreadObj = nullptr;
+    HANDLE threadHandle = nullptr;
+    st = PsCreateSystemThread(&threadHandle, THREAD_ALL_ACCESS, nullptr, nullptr, nullptr,
+                              TapThread, t);
+    if (!NT_SUCCESS(st)) {
+        SetPinState(t->PinFileObj, KSSTATE_STOP);
+        ObDereferenceObject(t->PinFileObj);
+        ZwClose(t->PinHandle);
+        ObDereferenceObject(t->FilterFileObj);
+        ZwClose(t->FilterHandle);
+        ExFreePoolWithTag(t, RAVE_TAG);
+        return st;
     }
-    if (m->FilterHandle) {
-        ZwClose(m->FilterHandle);
+    ObReferenceObjectByHandle(threadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
+                              &t->ThreadObj, nullptr);
+    ZwClose(threadHandle);
+    *OutTap = t;
+    return STATUS_SUCCESS;
+}
+#pragma code_seg()
+
+#pragma code_seg("PAGE")
+VOID RaveTapClose(RAVE_TAP* Tap)  // waits on the pump thread — PASSIVE, no locks held
+{
+    PAGED_CODE();
+    InterlockedExchange(&Tap->Stop, 1);
+    if (Tap->PinFileObj) {
+        SetPinState(Tap->PinFileObj, KSSTATE_STOP);  // completes the pump's pending read
+    }
+    if (Tap->ThreadObj) {
+        KeWaitForSingleObject(Tap->ThreadObj, Executive, KernelMode, FALSE, nullptr);
+        ObDereferenceObject(Tap->ThreadObj);
+    }
+    if (Tap->PinFileObj) {
+        ObDereferenceObject(Tap->PinFileObj);
+    }
+    if (Tap->PinHandle) {
+        ZwClose(Tap->PinHandle);
+    }
+    if (Tap->FilterFileObj) {
+        ObDereferenceObject(Tap->FilterFileObj);
+    }
+    if (Tap->FilterHandle) {
+        ZwClose(Tap->FilterHandle);
+    }
+    ExFreePoolWithTag(Tap, RAVE_TAG);
+}
+#pragma code_seg()
+
+// -------- render-pin client (managed feedback) --------
+#pragma code_seg("PAGE")
+NTSTATUS RaveKsOpenRenderPin(PCWSTR Iface, HANDLE* FilterH, PFILE_OBJECT* FilterFo,
+                             HANDLE* PinH, PFILE_OBJECT* PinFo)
+{
+    PAGED_CODE();
+    return OpenMidiFilterPin(Iface, KSPIN_DATAFLOW_IN, GENERIC_WRITE,
+                             FilterH, FilterFo, PinH, PinFo);
+}
+#pragma code_seg()
+
+#pragma code_seg("PAGE")
+VOID RaveKsCloseRenderPin(HANDLE FilterH, PFILE_OBJECT FilterFo, HANDLE PinH, PFILE_OBJECT PinFo)
+{
+    PAGED_CODE();
+    if (PinFo) {
+        SetPinState(PinFo, KSSTATE_STOP);
+        ObDereferenceObject(PinFo);
+    }
+    if (PinH) {
+        ZwClose(PinH);
+    }
+    if (FilterFo) {
+        ObDereferenceObject(FilterFo);
+    }
+    if (FilterH) {
+        ZwClose(FilterH);
+    }
+}
+#pragma code_seg()
+
+#pragma code_seg("PAGE")
+NTSTATUS RaveKsWriteMidi(PFILE_OBJECT Pin, const UCHAR* Bytes, ULONG Len)
+{
+    PAGED_CODE();
+    if (Len == 0 || Len > RAVEMIDI_FEEDBACK_CHUNK) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    // One KSMUSICFORMAT record: {TimeDeltaMs=0, ByteCount} + bytes, DWORD-padded.
+    union {
+        KSMUSICFORMAT mf;  // alignment anchor
+        UCHAR raw[sizeof(KSMUSICFORMAT) + ((RAVEMIDI_FEEDBACK_CHUNK + 3u) & ~3u)];
+    } pkt;
+    RtlZeroMemory(&pkt.mf, sizeof(pkt.mf));
+    pkt.mf.ByteCount = Len;
+    ULONG pad = (Len + 3u) & ~3u;
+    RtlCopyMemory(pkt.raw + sizeof(KSMUSICFORMAT), Bytes, Len);
+    for (ULONG i = Len; i < pad; i++) {
+        pkt.raw[sizeof(KSMUSICFORMAT) + i] = 0;
+    }
+    KSSTREAM_HEADER hdr;
+    RtlZeroMemory(&hdr, sizeof(hdr));
+    hdr.Size = sizeof(hdr);
+    hdr.PresentationTime.Numerator = 1;
+    hdr.PresentationTime.Denominator = 1;
+    hdr.Data = pkt.raw;
+    hdr.FrameExtent = sizeof(KSMUSICFORMAT) + pad;
+    hdr.DataUsed = sizeof(KSMUSICFORMAT) + pad;
+    ULONG br = 0;
+    return KsSynchronousIoControlDevice(Pin, KernelMode, IOCTL_KS_WRITE_STREAM,
+                                        nullptr, 0, &hdr, sizeof(hdr), &br);
+}
+#pragma code_seg()
+
+// -------- legacy mirror lifecycle --------
+static VOID TeardownMirror(RAVE_MIRROR* m)  // not under g_MirrorLock (tap close joins a thread)
+{
+    if (m->Tap) {
+        RaveTapClose(m->Tap);
     }
     for (ULONG i = 0; i < m->OutCount; i++) {
         RaveUnrefOutputPort(m->Outs[i]);
@@ -258,7 +488,7 @@ NTSTATUS RaveMirrorCreate(PFILE_OBJECT creator, const RAVEMIDI_CREATE_MIRROR_IN*
         return STATUS_INVALID_PARAMETER;
     }
     // ...and be a real KS capture/audio interface (no arbitrary NT paths).
-    if (!IsKnownCaptureIface(in->SourceInterface)) {
+    if (!RaveIsKnownIface(in->SourceInterface, FALSE)) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -281,103 +511,14 @@ NTSTATUS RaveMirrorCreate(PFILE_OBJECT creator, const RAVEMIDI_CREATE_MIRROR_IN*
         }
     }
 
-    // Open the source filter + get its FILE_OBJECT for property IOCTLs.
-    UNICODE_STRING path;
-    RtlInitUnicodeString(&path, in->SourceInterface);
-    OBJECT_ATTRIBUTES oa;
-    InitializeObjectAttributes(&oa, &path, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, nullptr, nullptr);
-    IO_STATUS_BLOCK iosb;
-    NTSTATUS st = ZwCreateFile(&m->FilterHandle, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, nullptr,
-                               FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0);
-    if (NT_SUCCESS(st)) {
-        st = ObReferenceObjectByHandle(m->FilterHandle, 0, *IoFileObjectType, KernelMode,
-                                       (PVOID*)&m->FilterFileObj, nullptr);
-    }
+    NTSTATUS st = RaveTapOpen(in->SourceInterface, m->Outs, m->OutCount, nullptr, nullptr, &m->Tap);
     if (!NT_SUCCESS(st)) {
-        if (m->FilterHandle) {
-            ZwClose(m->FilterHandle);
-        }
         for (ULONG i = 0; i < m->OutCount; i++) {
             RaveUnrefOutputPort(m->Outs[i]);
         }
         ExFreePoolWithTag(m, RAVE_TAG);
         return st;
     }
-
-    // Find + open a MIDI capture pin (probe each capture pin with the MIDI format).
-    ULONG pinCount = 0;
-    st = KsGetPinProp(m->FilterFileObj, KSPROPERTY_PIN_CTYPES, 0, &pinCount, sizeof(pinCount));
-    m->PinHandle = nullptr;
-    m->PinFileObj = nullptr;
-    for (ULONG i = 0; NT_SUCCESS(st) && i < pinCount && !m->PinHandle; i++) {
-        KSPIN_DATAFLOW flow;
-        if (!NT_SUCCESS(KsGetPinProp(m->FilterFileObj, KSPROPERTY_PIN_DATAFLOW, i, &flow, sizeof(flow)))) {
-            continue;
-        }
-        if (flow != KSPIN_DATAFLOW_OUT) {
-            continue;  // capture pin data flows out of the filter, toward us
-        }
-        HANDLE pin = nullptr;
-        if (NT_SUCCESS(OpenMidiCapturePin(m->FilterHandle, i, &pin)) && pin) {
-            m->PinHandle = pin;  // this pin accepted the MIDI format
-        }
-    }
-    if (m->PinHandle) {
-        st = ObReferenceObjectByHandle(m->PinHandle, 0, *IoFileObjectType, KernelMode,
-                                       (PVOID*)&m->PinFileObj, nullptr);
-        if (!NT_SUCCESS(st)) {
-            ZwClose(m->PinHandle);
-            m->PinHandle = nullptr;
-        }
-    }
-    if (!m->PinHandle) {
-        ObDereferenceObject(m->FilterFileObj);
-        ZwClose(m->FilterHandle);
-        for (ULONG i = 0; i < m->OutCount; i++) {
-            RaveUnrefOutputPort(m->Outs[i]);
-        }
-        ExFreePoolWithTag(m, RAVE_TAG);
-        return STATUS_NOT_FOUND;
-    }
-
-    // Step the pin to RUN (STOP -> ACQUIRE -> PAUSE -> RUN).
-    SetPinState(m->PinFileObj, KSSTATE_ACQUIRE);
-    SetPinState(m->PinFileObj, KSSTATE_PAUSE);
-    st = SetPinState(m->PinFileObj, KSSTATE_RUN);
-    if (!NT_SUCCESS(st)) {
-        ObDereferenceObject(m->PinFileObj);
-        ZwClose(m->PinHandle);
-        ObDereferenceObject(m->FilterFileObj);
-        ZwClose(m->FilterHandle);
-        for (ULONG i = 0; i < m->OutCount; i++) {
-            RaveUnrefOutputPort(m->Outs[i]);
-        }
-        ExFreePoolWithTag(m, RAVE_TAG);
-        return st;
-    }
-
-    // Spawn the read-pump.
-    m->Stop = 0;
-    m->ThreadObj = nullptr;
-    HANDLE threadHandle = nullptr;
-    st = PsCreateSystemThread(&threadHandle, THREAD_ALL_ACCESS, nullptr, nullptr, nullptr,
-                              MirrorThread, m);
-    if (!NT_SUCCESS(st)) {
-        SetPinState(m->PinFileObj, KSSTATE_STOP);
-        ObDereferenceObject(m->PinFileObj);
-        ZwClose(m->PinHandle);
-        ObDereferenceObject(m->FilterFileObj);
-        ZwClose(m->FilterHandle);
-        for (ULONG i = 0; i < m->OutCount; i++) {
-            RaveUnrefOutputPort(m->Outs[i]);
-        }
-        ExFreePoolWithTag(m, RAVE_TAG);
-        return st;
-    }
-    ObReferenceObjectByHandle(threadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
-                              &m->ThreadObj, nullptr);
-    ZwClose(threadHandle);
 
     ExAcquireFastMutex(&g_MirrorLock);
     m->Id = ++g_MirrorSeq;
@@ -411,7 +552,7 @@ NTSTATUS RaveMirrorDestroy(PFILE_OBJECT caller, ULONG id)
     if (!victim) {
         return STATUS_NOT_FOUND;
     }
-    TeardownMirror(victim);  // waits on the worker thread — outside the lock
+    TeardownMirror(victim);  // waits on the pump thread — outside the lock
     return STATUS_SUCCESS;
 }
 #pragma code_seg()
@@ -420,6 +561,8 @@ NTSTATUS RaveMirrorDestroy(PFILE_OBJECT caller, ULONG id)
 VOID RaveMirrorDestroyForFile(PFILE_OBJECT f)
 {
     PAGED_CODE();
+    // Managed taps are not in this list — only creator-owned mirrors die with
+    // their handle; driver autonomy is unaffected by rave-mate exit.
     for (;;) {
         RAVE_MIRROR* victim = nullptr;
         ExAcquireFastMutex(&g_MirrorLock);

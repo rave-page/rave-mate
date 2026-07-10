@@ -28,6 +28,8 @@ typedef struct _RAVE_PORT {
     PSERVICEGROUP ServiceGroup;       // capture notify target (miniport's, weak)
     RAVEMIDI_FIFO ToApp;              // IOCTL_WRITE -> app capture pin
     RAVEMIDI_FIFO FromApp;            // app render pin -> IOCTL_READ
+    RAVEMIDI_FIFO Feedback;           // tee of FromApp -> device render pin (managed reserved port)
+    volatile LONG FeedbackArm;        // managed engine arms while its render pin is bound
     IO_CSQ ReadCsq;                   // pended IOCTL_READ IRPs (cancel-safe)
     KSPIN_LOCK ReadLock;
     LIST_ENTRY ReadIrps;
@@ -50,6 +52,11 @@ typedef struct _RAVE_PORT {
 // into it; the ref blocks the port's destroy until released.
 RAVE_PORT* RaveRefOutputPort(ULONG id);
 VOID RaveUnrefOutputPort(RAVE_PORT* p);
+
+// Cross-TU (managed.cpp): driver-owned ports with NO creator file object —
+// handle-close cleanup skips them, only the managed engine destroys them.
+NTSTATUS RavePortCreateOwnerless(ULONG kind, PCWSTR name, RAVE_PORT** outPort);
+NTSTATUS RavePortDestroyById(ULONG id);   // NULL-caller destroy; STATUS_DEVICE_BUSY while pinned
 
 // Adapter-side helpers implemented in adapter.cpp, called from miniport streams.
 VOID RavePortDeliverFromApp(RAVE_PORT* port);   // drain FromApp into pended READs
