@@ -2,9 +2,9 @@
 
 Neural beatgrid correction for your DJ collection: rave-mate detects the true beats of
 each track with the [Beat This!](https://github.com/CPJKU/beat_this) model, fits a
-constant grid, and snaps (or creates) the grid marker in your Traktor collection.
-Tracks it can't fix confidently go to a `MANUAL_GRIDDING_PREP` playlist instead of
-being guessed at.
+constant grid, and snaps (or creates) the grid marker in your DJ library — Traktor,
+Rekordbox, VirtualDJ and Serato are all supported write targets. Tracks it can't fix
+confidently go to a `MANUAL_GRIDDING_PREP` playlist (Traktor) instead of being guessed at.
 
 ## Setup (Settings → Library & media → Beatgrid Fixer)
 
@@ -23,10 +23,24 @@ pick scope (whole collection / filtered / selected) → watch the live FIX / OK 
 MANUAL / ERROR counters. Analysis is read-only and cached (unchanged files are never
 re-analyzed); the tray tooltip mirrors progress.
 
-When done: **Apply** backs up your collection, then rewrites only the grid marker,
-BPM and (optionally, see settings) the lock flag of FIX tracks — hotcues and loops
-are never touched. **Send to prep playlist** collects MANUAL tracks for hand-gridding.
-Close Traktor before applying; Traktor re-reads the collection on start.
+When done: one **Apply** button appears per DJ library detected on your machine —
+each backs up its target first (except Serato, whose per-file writes verify themselves),
+then rewrites only the grid marker, BPM and (optionally, see settings) the lock flag of
+FIX tracks. Hotcues and loops are never touched. Close the DJ software before applying.
+Per software:
+
+- **Traktor** — writes `collection.nml` in place; Traktor re-reads it on start.
+  **Send to prep playlist** collects MANUAL tracks for hand-gridding.
+- **Rekordbox** — writes the exported collection XML; load it back via
+  *File → Import Collection*. The native `master.db` is deliberately not touched:
+  Rekordbox keeps grids in binary per-track analysis files, and a partial write
+  would desync them.
+- **VirtualDJ** — writes `database.xml` in place (refused while VirtualDJ runs,
+  since VDJ rewrites the file from memory on exit).
+- **Serato** — writes the grid into each audio file's Serato tag (see Notes).
+
+The import dialog auto-detects all four libraries too (Serato import also reads each
+file's grid), so you can import, fix and write back whichever software you use.
 
 Quality knobs (settings): min grid coverage (default 0.85), minimum correction size
 (default 12 ms), calibrated detector bias.
@@ -51,4 +65,5 @@ tracks from `MANUAL_GRIDDING_PREP`, verify them, then train (20+ recommended).
   temp+verify+rename, all other tags preserved byte-exact. Close Serato before applying.
   MP4/M4A, AIFF and Ogg files are skipped (unsafe to rewrite). Serato also appears as a
   library-sync writeback target (constant grids only; variable grids are never collapsed).
-- Rekordbox / VirtualDJ grid writeback: planned (analysis already works for any files).
+- Library sync (Settings → Library sync) can also write grids: VirtualDJ has file +
+  live writeback modes, Serato a per-file writeback target, Rekordbox XML export.

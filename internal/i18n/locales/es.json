@@ -524,7 +524,9 @@
       "unmarkID": "Desmarcar ID",
       "view": "Vista",
       "virtualdjXML": "VirtualDJ database.xml",
-      "xmlPath": "Ruta completa al archivo .xml"
+      "xmlPath": "Ruta completa al archivo .xml",
+      "importVirtualDJAuto": "VirtualDJ (autodetección)",
+      "importSeratoAuto": "Serato (autodetección)"
     },
     "meta": {
       "album": "Álbum",
@@ -796,7 +798,23 @@
       "workerUnavailable": "Proceso no disponible",
       "writeTagsHint": "Escribir etiquetas: abre una pista de la colección y usa su panel Etiquetas",
       "writeTagsPrefix": "Escribir etiquetas: ",
-      "wroteThenError": "Se escribieron {n} y luego hubo un error: {err}"
+      "wroteThenError": "Se escribieron {n} y luego hubo un error: {err}",
+      "importingVirtualDJ": "Importando biblioteca de VirtualDJ…",
+      "noVirtualDJ": "No se encontró database.xml de VirtualDJ",
+      "importingSerato": "Importando biblioteca de Serato… (lee la cuadrícula de cada archivo)",
+      "noSerato": "No se encontró la carpeta _Serato_",
+      "importedVirtualDJ": {
+        "few": "Se importaron {count} pistas (VirtualDJ)",
+        "many": "Se importaron {count} pistas (VirtualDJ)",
+        "one": "Se importó {count} pista (VirtualDJ)",
+        "other": "Se importaron {count} pistas (VirtualDJ)"
+      },
+      "importedSerato": {
+        "few": "Se importaron {count} pistas (Serato)",
+        "many": "Se importaron {count} pistas (Serato)",
+        "one": "Se importó {count} pista (Serato)",
+        "other": "Se importaron {count} pistas (Serato)"
+      }
     },
     "remote": {
       "up": "Subir",
@@ -883,13 +901,11 @@
       "doneTitle": "Análisis completado",
       "cancelledTitle": "Análisis detenido",
       "cachedNote": "{n} pistas servidas desde la caché (los archivos sin cambios no se reanalizan).",
-      "apply": "Aplicar {n} correcciones",
-      "appliedHint": "{n} grids escritos en la colección de Traktor.",
       "prep": "Enviar {n} a la playlist de preparación",
       "preppedHint": "{n} pistas añadidas a {playlist}.",
       "viewResults": "Ver resultados en la lista",
       "viewTracks": "Ver pistas",
-      "applyNote": "Aplicar respalda primero tu colección y luego reescribe solo el marcador de grid, el BPM y (opcionalmente) el bloqueo de las pistas corregidas. Los hotcues y loops no se tocan. Las pistas sin análisis fiable van a la playlist de preparación para griddearlas a mano — cierra Traktor antes de aplicar.",
+      "applyNote": "Aplicar primero hace una copia de seguridad de la biblioteca de destino y luego reescribe solo el marcador de cuadrícula, el BPM y (opcionalmente) el bloqueo de las pistas corregidas. Los hotcues y loops nunca se tocan. Cierra el software de DJ antes de aplicar; las pistas que el motor no pudo corregir con confianza van a la playlist de preparación para ajustarlas a mano.",
       "fltAll": "Todas",
       "tileFix": "FIX",
       "tileOk": "OK",
@@ -910,7 +926,13 @@
       "verifiedBadge": "Grid verificado",
       "markVerified": "Marcar grid como verificado",
       "verifiedToast": "{n} pistas marcadas como verificadas",
-      "unverifiedToast": "{n} pistas desmarcadas"
+      "unverifiedToast": "{n} pistas desmarcadas",
+      "applyTo": "Aplicar a {app} ({n})",
+      "appliedToHint": "{app}: {n} cuadrículas actualizadas.",
+      "noTargets": "No se encontró ninguna biblioteca de DJ donde escribir: no se detectó Traktor, Rekordbox, VirtualDJ ni Serato.",
+      "rbNote": "Rekordbox: las cuadrículas se escriben en el XML de la colección; cárgalo en Rekordbox mediante Archivo → Importar colección.",
+      "seratoNote": "Serato: las cuadrículas se escriben directamente en los archivos de audio (escritura temporal verificada; cierra Serato antes).",
+      "vdjRunning": "VirtualDJ está abierto: ciérralo antes de aplicar."
     }
   },
   "live": {

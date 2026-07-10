@@ -524,7 +524,9 @@
       "unmarkID": "ID マークを解除",
       "view": "表示",
       "virtualdjXML": "VirtualDJ database.xml",
-      "xmlPath": ".xml ファイルへのフルパス"
+      "xmlPath": ".xml ファイルへのフルパス",
+      "importVirtualDJAuto": "VirtualDJ（自動検出）",
+      "importSeratoAuto": "Serato（自動検出）"
     },
     "meta": {
       "album": "アルバム",
@@ -796,7 +798,23 @@
       "workerUnavailable": "ワーカーを利用できません",
       "writeTagsHint": "タグの書き込み: コレクショントラックを開き、その Tags パネルを使用してください",
       "writeTagsPrefix": "タグを書き込み: ",
-      "wroteThenError": "{n} を書き込んだ後にエラー: {err}"
+      "wroteThenError": "{n} を書き込んだ後にエラー: {err}",
+      "importingVirtualDJ": "VirtualDJ ライブラリをインポート中…",
+      "noVirtualDJ": "VirtualDJ の database.xml が見つかりません",
+      "importingSerato": "Serato ライブラリをインポート中…（各ファイルのグリッドを読み取ります）",
+      "noSerato": "_Serato_ フォルダーが見つかりません",
+      "importedVirtualDJ": {
+        "few": "{count} トラックをインポートしました（VirtualDJ）",
+        "many": "{count} トラックをインポートしました（VirtualDJ）",
+        "one": "{count} トラックをインポートしました（VirtualDJ）",
+        "other": "{count} トラックをインポートしました（VirtualDJ）"
+      },
+      "importedSerato": {
+        "few": "{count} トラックをインポートしました（Serato）",
+        "many": "{count} トラックをインポートしました（Serato）",
+        "one": "{count} トラックをインポートしました（Serato）",
+        "other": "{count} トラックをインポートしました（Serato）"
+      }
     },
     "remote": {
       "up": "上へ",
@@ -883,13 +901,11 @@
       "doneTitle": "解析完了",
       "cancelledTitle": "解析を停止しました",
       "cachedNote": "{n} 件は解析キャッシュから取得（未変更ファイルは再解析しません）。",
-      "apply": "{n} 件の修正を適用",
-      "appliedHint": "{n} 件のグリッドを Traktor コレクションに書き込みました。",
       "prep": "{n} 件を準備プレイリストへ",
       "preppedHint": "{n} 件を {playlist} に追加しました。",
       "viewResults": "結果をリストに表示",
       "viewTracks": "トラックを表示",
-      "applyNote": "適用は先にコレクションをバックアップし、修正対象のグリッドマーカー・BPM・（任意で）ロックのみを書き換えます。ホットキューやループには触れません。確信が持てないトラックは手動グリッド用の準備プレイリストへ — 適用前に Traktor を終了してください。",
+      "applyNote": "適用はまず対象ライブラリをバックアップし、修正トラックのグリッドマーカー・BPM・（オプションで）ロックフラグのみを書き換えます。ホットキューとループには一切触れません。適用前に DJ ソフトを終了してください。エンジンが確信を持って修正できなかったトラックは、手動グリッド用の準備プレイリストに入ります。",
       "fltAll": "すべて",
       "tileFix": "FIX",
       "tileOk": "OK",
@@ -910,7 +926,13 @@
       "verifiedBadge": "グリッド検証済み",
       "markVerified": "グリッドを検証済みにする",
       "verifiedToast": "{n} 件を検証済みにしました",
-      "unverifiedToast": "{n} 件の検証を解除"
+      "unverifiedToast": "{n} 件の検証を解除",
+      "applyTo": "{app} に適用（{n}）",
+      "appliedToHint": "{app}: {n} 件のグリッドを更新しました。",
+      "noTargets": "書き込み先の DJ ライブラリが見つかりません（Traktor / Rekordbox / VirtualDJ / Serato を検出できませんでした）。",
+      "rbNote": "Rekordbox: グリッドはコレクション XML に書き込まれます。Rekordbox の「ファイル → コレクションを読み込む」で取り込んでください。",
+      "seratoNote": "Serato: グリッドはオーディオファイルに直接書き込まれます（検証付き一時書き込み。先に Serato を終了してください）。",
+      "vdjRunning": "VirtualDJ が起動中です。適用する前に終了してください。"
     }
   },
   "live": {

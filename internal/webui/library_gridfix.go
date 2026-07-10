@@ -3,13 +3,17 @@ package webui
 // Beatgrid-fixer cockpit: lives in the Collection right rail. States: idle (entry
 // button) -> scope confirm -> running (live FIX/OK/MANUAL tiles + tray tooltip) ->
 // done (summary + Apply / prep-playlist) -> results view swaps the track list.
-// The batch itself is READ-ONLY (gridfix.Batch); Apply is the only write, goes
-// through musiclib.ApplyGridFixes after a library backup.
+// The batch itself is READ-ONLY (gridfix.Batch); Apply is the only write, routed
+// per detected DJ software (Traktor NML / Rekordbox XML / VirtualDJ database.xml /
+// Serato file tags), each after a backup of its target.
 
 import (
 	"context"
 	"fmt"
 	"html"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -20,25 +24,29 @@ import (
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/musiclib"
+	"rave.page/mate/internal/serato"
+	"rave.page/mate/internal/seratolib"
+	"rave.page/mate/internal/sysactivity"
 	"rave.page/mate/internal/tray"
 )
 
 const gridfixPrepPlaylist = "MANUAL_GRIDDING_PREP"
 
 type gfState struct {
-	mu       sync.Mutex
-	stage    string // "" idle | "confirm" | "running" | "done"
-	scope    string // "all" | "filtered" | "selected"
-	prog     gridfix.BatchProgress
-	results  []gridfix.TrackResult
-	applied  int    // entries written on Apply (-1 = not applied yet)
-	applyErr string // last apply error ("" = none)
-	prepped  int    // tracks pushed to the prep playlist (-1 = not yet)
-	resView  bool   // main list shows batch results instead of tracks
-	resFlt   string // results filter: "" all | FIX | OK | SKIP | ERR
-	cancel   context.CancelFunc
-	cache    *gridfix.DetectionCache
-	eng      *gridfix.Engine
+	mu        sync.Mutex
+	stage     string // "" idle | "confirm" | "running" | "done"
+	scope     string // "all" | "filtered" | "selected"
+	prog      gridfix.BatchProgress
+	results   []gridfix.TrackResult
+	applied   map[string]int // per-software entries written on Apply (key absent = not applied)
+	applyBusy bool           // an apply is in flight (serialize writes)
+	applyErr  string         // last apply error ("" = none)
+	prepped   int            // tracks pushed to the prep playlist (-1 = not yet)
+	resView   bool           // main list shows batch results instead of tracks
+	resFlt    string         // results filter: "" all | FIX | OK | SKIP | ERR
+	cancel    context.CancelFunc
+	cache     *gridfix.DetectionCache
+	eng       *gridfix.Engine
 }
 
 // gfVerified lazily opens the verified-grid store (nil on error - marking disabled).
@@ -193,16 +201,41 @@ func (u *UI) gfDoneHTML(g *gfState) string {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.cachedNote", i18n.A{"n": fmt.Sprint(p.Cached)})) + `</div>`)
 	}
 	var acts []string
-	if p.Fixed > 0 && g.applied < 0 {
-		acts = append(acts, btn(i18n.T("library.gf.apply", i18n.A{"n": fmt.Sprint(p.Fixed)}), "primary", "gf-apply", ""))
-	}
-	if g.applied >= 0 {
-		b.WriteString(hint("ok", i18n.T("library.gf.appliedHint", i18n.A{"n": fmt.Sprint(g.applied)})))
+	var notes []string
+	targets := u.gfTargets()
+	if p.Fixed > 0 {
+		if len(targets) == 0 {
+			b.WriteString(hint("bad", i18n.T("library.gf.noTargets")))
+		}
+		variant := "primary"
+		for _, t := range targets {
+			if n, ok := g.applied[t.key]; ok {
+				b.WriteString(hint("ok", i18n.T("library.gf.appliedToHint", i18n.A{"app": t.label, "n": fmt.Sprint(n)})))
+				continue
+			}
+			if g.applyBusy {
+				continue // one write at a time; rail re-renders when it lands
+			}
+			acts = append(acts, btn(i18n.T("library.gf.applyTo", i18n.A{"app": t.label, "n": fmt.Sprint(p.Fixed)}), variant, "gf-apply:"+t.key, ""))
+			variant = "outline"
+			switch t.key {
+			case "rekordbox":
+				notes = append(notes, i18n.T("library.gf.rbNote"))
+			case "serato":
+				notes = append(notes, i18n.T("library.gf.seratoNote"))
+			}
+		}
 	}
 	if g.applyErr != "" {
 		b.WriteString(hint("bad", g.applyErr))
 	}
-	if p.Skipped > 0 && g.prepped < 0 {
+	hasTraktor := false
+	for _, t := range targets {
+		if t.key == "traktor" {
+			hasTraktor = true
+		}
+	}
+	if p.Skipped > 0 && g.prepped < 0 && hasTraktor {
 		acts = append(acts, btn(i18n.T("library.gf.prep", i18n.A{"n": fmt.Sprint(p.Skipped)}), "outline", "gf-prep", ""))
 	}
 	if g.prepped >= 0 {
@@ -214,6 +247,9 @@ func (u *UI) gfDoneHTML(g *gfState) string {
 	}
 	acts = append(acts, btn(resLbl, "outline", "gf-results", ""), btn(i18n.T("common.close"), "ghost", "gf-close", ""))
 	b.WriteString(`<div class=btn-col>` + strings.Join(acts, "") + `</div>`)
+	for _, n := range notes {
+		b.WriteString(`<div class=set-note>` + esc(n) + `</div>`)
+	}
 	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.applyNote")) + `</div>`)
 	return b.String()
 }
@@ -374,7 +410,8 @@ func (u *UI) gfStart(scope string) {
 	}
 	g.stage, g.scope = "running", scope
 	g.prog = gridfix.BatchProgress{Phase: gridfix.PhaseScanning, Total: len(bts)}
-	g.results, g.applied, g.applyErr, g.prepped, g.resView, g.resFlt = nil, -1, "", -1, false, ""
+	g.results, g.applied, g.applyErr, g.prepped, g.resView, g.resFlt = nil, nil, "", -1, false, ""
+	g.applyBusy = false
 	g.cancel, g.cache, g.eng = cancel, cache, eng
 	g.mu.Unlock()
 	u.patchMain()
@@ -419,12 +456,42 @@ func (u *UI) gfStart(scope string) {
 	})
 }
 
-// gfApply writes the FIX plans into the Traktor collection (backup first), prunes
-// applied tracks from the prep playlist, and refreshes the imported library.
-func (u *UI) gfApply() {
+// gfTarget is one detected DJ-software write destination.
+type gfTarget struct {
+	key   string // "traktor" | "rekordbox" | "virtualdj" | "serato"
+	label string // product name (not translated)
+	path  string // file (NML/XML) or _Serato_ dir the write hits
+}
+
+// gfTargets detects which DJ libraries exist on this machine (cheap fs probes).
+func (u *UI) gfTargets() []gfTarget {
+	var out []gfTarget
+	if p := u.gfNMLPath(); p != "" {
+		out = append(out, gfTarget{"traktor", "Traktor", p})
+	}
+	if installs, err := musiclib.DiscoverRekordbox(); err == nil && len(installs) > 0 {
+		out = append(out, gfTarget{"rekordbox", "Rekordbox", installs[0].XML})
+	}
+	if p, err := musiclib.DiscoverVirtualDJ(); err == nil && p != "" {
+		out = append(out, gfTarget{"virtualdj", "VirtualDJ", p})
+	}
+	if dirs := serato.DetectSeratoDirs(); len(dirs) > 0 {
+		out = append(out, gfTarget{"serato", "Serato", dirs[0]})
+	}
+	return out
+}
+
+// gfApply routes the FIX plans into the chosen software's library (backup first).
+// Traktor additionally prunes applied tracks from the prep playlist; Traktor +
+// Rekordbox re-import afterwards so the collection view reflects the new grids.
+func (u *UI) gfApply(sw string) {
 	g := &u.gf
 	g.mu.Lock()
-	if g.stage != "done" || g.applied >= 0 {
+	if g.stage != "done" || g.applyBusy {
+		g.mu.Unlock()
+		return
+	}
+	if _, done := g.applied[sw]; done {
 		g.mu.Unlock()
 		return
 	}
@@ -438,40 +505,115 @@ func (u *UI) gfApply() {
 			fixedPaths = append(fixedPaths, r.Path)
 		}
 	}
-	g.mu.Unlock()
-	nml := u.gfNMLPath()
-	if nml == "" {
+	if len(fixes) == 0 {
+		g.mu.Unlock()
+		return
+	}
+	var target *gfTarget
+	for _, t := range u.gfTargets() {
+		if t.key == sw {
+			tc := t
+			target = &tc
+			break
+		}
+	}
+	if target == nil {
+		g.mu.Unlock()
 		u.gfApplyFail(i18n.T("library.gf.noNml"))
 		return
 	}
-	if len(fixes) == 0 {
-		return
-	}
+	g.applyBusy = true
+	g.mu.Unlock()
+	u.patchMain()
 	u.bg(func() {
-		// safety: full collection backup before the only write this feature does
-		if installs, err := musiclib.DiscoverTraktor(); err == nil && len(installs) > 0 && installs[0].Collection != "" {
-			if _, berr := musiclib.BackupCollection(installs[0], libBackupRoot()); berr != nil {
-				u.gfApplyFail(i18n.T("library.gf.backupFailed") + berr.Error())
-				return
-			}
-		} else {
-			u.gfApplyFail(i18n.T("library.gf.backupFailed") + "no Traktor install found")
-			return
-		}
-		res, err := musiclib.ApplyGridFixes(nml, fixes)
+		res, err := u.gfApplyTo(*target, fixes, fixedPaths)
+		g.mu.Lock()
+		g.applyBusy = false
+		g.mu.Unlock()
 		if err != nil {
 			u.gfApplyFail(err.Error())
 			return
 		}
-		// fixed tracks no longer need manual gridding
-		_, _ = musiclib.RemoveFromNMLPlaylist(nml, gridfixPrepPlaylist, fixedPaths)
 		g.mu.Lock()
-		g.applied = res.Updated
+		if g.applied == nil {
+			g.applied = map[string]int{}
+		}
+		g.applied[sw] = res.Updated
 		g.mu.Unlock()
 		u.toast(i18n.T("library.gf.appliedToast", i18n.A{"n": fmt.Sprint(res.Updated)}))
-		u.libImport("traktor") // re-import so the collection view reflects the new grids
+		switch sw {
+		case "traktor", "rekordbox":
+			u.libImport(sw) // re-import so the collection view reflects the new grids
+		}
 		u.patchMain()
 	})
+}
+
+// gfApplyTo performs the per-software write (called off the action goroutine).
+func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []string) (musiclib.WritebackResult, error) {
+	var zero musiclib.WritebackResult
+	switch t.key {
+	case "traktor":
+		// safety: full collection backup before the write
+		if installs, err := musiclib.DiscoverTraktor(); err == nil && len(installs) > 0 && installs[0].Collection != "" {
+			if _, berr := musiclib.BackupCollection(installs[0], libBackupRoot()); berr != nil {
+				return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), berr.Error())
+			}
+		} else if err := gfBackupFile("traktor", t.path); err != nil {
+			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
+		}
+		res, err := musiclib.ApplyGridFixes(t.path, fixes)
+		if err != nil {
+			return zero, err
+		}
+		// fixed tracks no longer need manual gridding
+		_, _ = musiclib.RemoveFromNMLPlaylist(t.path, gridfixPrepPlaylist, fixedPaths)
+		return res, nil
+	case "rekordbox":
+		if err := gfBackupFile("rekordbox", t.path); err != nil {
+			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
+		}
+		return musiclib.ApplyGridFixesRekordboxXML(t.path, fixes)
+	case "virtualdj":
+		// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
+		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "virtualdj") {
+			return zero, fmt.Errorf("%s", i18n.T("library.gf.vdjRunning"))
+		}
+		if err := gfBackupFile("virtualdj", t.path); err != nil {
+			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
+		}
+		return musiclib.ApplyGridFixesVirtualDJ(t.path, fixes)
+	case "serato":
+		// per-file temp+verify+rename with its own Serato-running refusal; no library backup needed
+		return seratolib.ApplyGridFixesSerato(t.path, fixes)
+	}
+	return zero, fmt.Errorf("unknown apply target %q", t.key)
+}
+
+// gfBackupFile copies a library file into the backup root before a write.
+func gfBackupFile(app, path string) error {
+	root := libBackupRoot()
+	if root == "" {
+		return fmt.Errorf("no backup dir")
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	name := fmt.Sprintf("%s-%s-%s", app, time.Now().Format("20060102-150405"), filepath.Base(path))
+	dst, err := os.Create(filepath.Join(root, name))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		return err
+	}
+	return dst.Close()
 }
 
 func (u *UI) gfApplyFail(msg string) {
@@ -552,7 +694,7 @@ func init() {
 			c()
 		}
 	})
-	onExact("gf-apply", func(u *UI, _ actMsg) { u.gfApply() })
+	onPrefix("gf-apply:", func(u *UI, m actMsg) { u.gfApply(m.arg("gf-apply:")) })
 	onExact("gf-prep", func(u *UI, _ actMsg) { u.gfPrep() })
 	onExact("gf-results", func(u *UI, _ actMsg) {
 		g := &u.gf

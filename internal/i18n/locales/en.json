@@ -605,7 +605,9 @@
       "unmarkID": "Unmark ID",
       "view": "View",
       "virtualdjXML": "VirtualDJ database.xml",
-      "xmlPath": "Full path to the .xml file"
+      "xmlPath": "Full path to the .xml file",
+      "importVirtualDJAuto": "VirtualDJ (auto-detect)",
+      "importSeratoAuto": "Serato (auto-detect)"
     },
     "meta": {
       "album": "Album",
@@ -877,7 +879,23 @@
       "workerUnavailable": "Worker unavailable",
       "writeTagsHint": "Write tags: open a collection track and use its Tags panel",
       "writeTagsPrefix": "Write tags: ",
-      "wroteThenError": "Wrote {n} then errored: {err}"
+      "wroteThenError": "Wrote {n} then errored: {err}",
+      "importingVirtualDJ": "Importing VirtualDJ library…",
+      "noVirtualDJ": "No VirtualDJ database.xml found",
+      "importingSerato": "Importing Serato library… (reads each file's grid)",
+      "noSerato": "No _Serato_ folder found",
+      "importedVirtualDJ": {
+        "few": "Imported {count} tracks (VirtualDJ)",
+        "many": "Imported {count} tracks (VirtualDJ)",
+        "one": "Imported {count} track (VirtualDJ)",
+        "other": "Imported {count} tracks (VirtualDJ)"
+      },
+      "importedSerato": {
+        "few": "Imported {count} tracks (Serato)",
+        "many": "Imported {count} tracks (Serato)",
+        "one": "Imported {count} track (Serato)",
+        "other": "Imported {count} tracks (Serato)"
+      }
     },
     "remote": {
       "up": "Up",
@@ -964,13 +982,11 @@
       "doneTitle": "Analysis complete",
       "cancelledTitle": "Analysis stopped",
       "cachedNote": "{n} tracks served from the analysis cache (unchanged files are not re-analyzed).",
-      "apply": "Apply {n} fixes",
-      "appliedHint": "{n} grids written to the Traktor collection.",
       "prep": "Send {n} to prep playlist",
       "preppedHint": "{n} tracks added to {playlist}.",
       "viewResults": "Show results in list",
       "viewTracks": "Show tracks",
-      "applyNote": "Apply backs up your collection first, then rewrites only the grid marker, BPM and (optionally) the lock flag of fixed tracks. Hotcues and loops are never touched. Tracks the engine could not fix confidently go to the prep playlist for hand-gridding — close Traktor before applying.",
+      "applyNote": "Apply backs up the target library first, then rewrites only the grid marker, BPM and (optionally) the lock flag of fixed tracks. Hotcues and loops are never touched. Close the DJ software before applying — tracks the engine could not fix confidently go to the prep playlist for hand-gridding.",
       "fltAll": "All",
       "tileFix": "FIX",
       "tileOk": "OK",
@@ -991,7 +1007,13 @@
       "verifiedBadge": "Grid verified",
       "markVerified": "Mark grid verified",
       "verifiedToast": "{n} tracks marked grid-verified",
-      "unverifiedToast": "{n} tracks unmarked"
+      "unverifiedToast": "{n} tracks unmarked",
+      "applyTo": "Apply to {app} ({n})",
+      "appliedToHint": "{app}: {n} grids updated.",
+      "noTargets": "No DJ library found to write to — nothing detected for Traktor, Rekordbox, VirtualDJ or Serato.",
+      "rbNote": "Rekordbox: grids are written to the collection XML — load it in Rekordbox via File → Import Collection.",
+      "seratoNote": "Serato: grids are written directly into the audio files (verified temp-write; close Serato first).",
+      "vdjRunning": "VirtualDJ is open — close it before applying."
     }
   },
   "live": {

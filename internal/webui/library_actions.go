@@ -21,6 +21,8 @@ import (
 	"rave.page/mate/internal/maintenance"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/rekordboxdb"
+	"rave.page/mate/internal/serato"
+	"rave.page/mate/internal/seratolib"
 	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/tagwrite"
 	"rave.page/mate/internal/transcode"
@@ -742,6 +744,7 @@ func (u *UI) libImportModal() {
 	}
 	body := `<p class=page-sub>` + html.EscapeString(i18n.T("library.modal.importDesc")) + `</p>` +
 		btnRow(btn(i18n.T("library.label.importTraktorAuto"), "primary", "lib-import-do:traktor", ""), btn(i18n.T("library.label.importRekordboxAuto"), "outline", "lib-import-do:rekordbox", "")) +
+		btnRow(btn(i18n.T("library.label.importVirtualDJAuto"), "outline", "lib-import-do:virtualdj", ""), btn(i18n.T("library.label.importSeratoAuto"), "outline", "lib-import-do:serato", "")) +
 		`<div class=mform><div class=pb-label>` + html.EscapeString(i18n.T("library.label.importFromFile")) + `</div>` +
 		`<div class=lib-toolbar>` + fieldRaw("lib-import-path", path, i18n.T("library.label.xmlPath")) +
 		btn(i18n.T("common.browse"), "ghost", "pick-file:lib-import-path", "") + `</div>` +
@@ -818,6 +821,49 @@ func (u *UI) libImport(kind string) {
 			lib.Source.Path = installs[0].XML
 			u.libPersist(lib.Source, lib.Tracks, lib.Playlists, lib.Sessions)
 			u.toast(i18n.Tn("library.toast.importedRekordbox", len(lib.Tracks)))
+			u.libReload()
+		})
+	case "virtualdj":
+		u.toast(i18n.T("library.toast.importingVirtualDJ"))
+		u.bg(func() {
+			path, err := musiclib.DiscoverVirtualDJ()
+			if err != nil || path == "" {
+				u.toast(i18n.T("library.toast.noVirtualDJ"))
+				return
+			}
+			f, oerr := os.Open(path)
+			if oerr != nil {
+				u.toast(i18n.T("library.toast.openPrefix") + oerr.Error())
+				return
+			}
+			lib, ierr := musiclib.Import(musiclib.FormatVirtualDJ, f)
+			_ = f.Close()
+			if ierr != nil {
+				u.toast(i18n.T("library.toast.parsePrefix") + ierr.Error())
+				return
+			}
+			lib.Source.Path = path
+			u.libPersist(lib.Source, lib.Tracks, lib.Playlists, lib.Sessions)
+			u.toast(i18n.Tn("library.toast.importedVirtualDJ", len(lib.Tracks)))
+			u.libReload()
+		})
+	case "serato":
+		u.toast(i18n.T("library.toast.importingSerato"))
+		u.bg(func() {
+			dirs := serato.DetectSeratoDirs()
+			if len(dirs) == 0 {
+				u.toast(i18n.T("library.toast.noSerato"))
+				return
+			}
+			lib, ierr := seratolib.ReadLibrary(dirs[0])
+			if ierr != nil {
+				u.toast(i18n.T("library.toast.parsePrefix") + ierr.Error())
+				return
+			}
+			// grids live in the audio files, not database V2 - hydrate them (opens every file)
+			seratolib.AttachBeatgrids(lib.Tracks)
+			u.libPersist(lib.Source, lib.Tracks, lib.Playlists, lib.Sessions)
+			u.toast(i18n.Tn("library.toast.importedSerato", len(lib.Tracks)))
 			u.libReload()
 		})
 	}
