@@ -76,6 +76,27 @@ typedef struct _RAVEMIDI_MIRROR_REF {
     ULONG MirrorId;
 } RAVEMIDI_MIRROR_REF;
 
+// QUERY_PORT: live counters for bring-up + health surfacing (in: RAVEMIDI_PORT_REF).
+typedef struct _RAVEMIDI_PORT_STATS {
+    ULONG PortId;
+    ULONG Kind;
+    ULONG StreamCount;      // open pin instances
+    ULONG CaptureRunning;   // capture stream in KSSTATE_RUN
+    ULONG ToAppBytes;       // buffered toward app capture pin
+    ULONG FromAppBytes;     // buffered from app render pin
+    ULONG ToAppDropped;
+    ULONG FromAppDropped;
+    ULONG NewStreamCalls;
+    ULONG LastSetState;     // last KSSTATE seen (0xFFFFFFFF = never)
+    ULONG ReadCalls;        // miniport stream Read invocations
+    ULONG ReadZeroCalls;    // Reads answered with 0 bytes
+    ULONG LastReadBufLen;   // BufferLength portcls passed to the last Read
+    ULONG NotifyCalls;      // IPortMidi->Notify kicks
+    ULONG WriteIoctls;      // IOCTL_RAVEMIDI_WRITE count
+    ULONG StreamWriteCalls; // app render-pin Write invocations
+    ULONGLONG ReadBytesTotal;
+} RAVEMIDI_PORT_STATS;
+
 #pragma pack(pop)
 
 #define RAVEMIDI_DEVICE_TYPE 0x8F63u  // arbitrary, > 0x8000 per FILE_DEVICE_* rules
@@ -92,3 +113,5 @@ typedef struct _RAVEMIDI_MIRROR_REF {
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x804, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 #define IOCTL_RAVEMIDI_DESTROY_MIRROR \
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x805, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+#define IOCTL_RAVEMIDI_QUERY_PORT \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x806, METHOD_BUFFERED, FILE_READ_DATA)

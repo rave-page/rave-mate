@@ -347,6 +347,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
                     RaveCsqAcquireLock, RaveCsqReleaseLock, RaveCsqCompleteCanceled);
     p->CaptureRunning = 0;
     p->StreamCount = 0;
+    p->LastSetState = -1;  // never; rest of the counters are pool-zeroed
 
     ExAcquireFastMutex(&a->PortsLock);
     p->Id = ++a->IdSeq;
@@ -521,6 +522,7 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
                 st = STATUS_NOT_FOUND;
                 break;
             }
+            InterlockedIncrement(&p->WriteIoctls);
             RaveFifoPush(&p->ToApp, (UCHAR*)(w + 1), w->ByteCount);
             RavePortNotifyToApp(p);  // kick capture service if a stream is running
             break;
@@ -543,6 +545,41 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             IoCsqInsertIrp(&p->ReadCsq, Irp, nullptr);
             RavePortDeliverFromApp(p);
             return STATUS_PENDING;  // owns the IRP now — skip shared completion
+        }
+        case IOCTL_RAVEMIDI_QUERY_PORT: {
+            if (inLen < sizeof(RAVEMIDI_PORT_REF) || outLen < sizeof(RAVEMIDI_PORT_STATS)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            ULONG qid = ((RAVEMIDI_PORT_REF*)buf)->PortId;
+            ExAcquireFastMutex(&a->PortsLock);
+            RAVE_PORT* p = FindPortLocked(a, qid);
+            if (!p) {
+                ExReleaseFastMutex(&a->PortsLock);
+                st = STATUS_NOT_FOUND;
+                break;
+            }
+            RAVEMIDI_PORT_STATS* o = (RAVEMIDI_PORT_STATS*)buf;
+            o->PortId = p->Id;
+            o->Kind = p->Kind;
+            o->StreamCount = (ULONG)p->StreamCount;
+            o->CaptureRunning = (ULONG)p->CaptureRunning;
+            o->ToAppBytes = RaveFifoCount(&p->ToApp);
+            o->FromAppBytes = RaveFifoCount(&p->FromApp);
+            o->ToAppDropped = p->ToApp.Dropped;
+            o->FromAppDropped = p->FromApp.Dropped;
+            o->NewStreamCalls = (ULONG)p->NewStreamCalls;
+            o->LastSetState = (ULONG)p->LastSetState;
+            o->ReadCalls = (ULONG)p->ReadCalls;
+            o->ReadZeroCalls = (ULONG)p->ReadZeroCalls;
+            o->LastReadBufLen = (ULONG)p->LastReadBufLen;
+            o->NotifyCalls = (ULONG)p->NotifyCalls;
+            o->WriteIoctls = (ULONG)p->WriteIoctls;
+            o->StreamWriteCalls = (ULONG)p->StreamWriteCalls;
+            o->ReadBytesTotal = (ULONGLONG)p->ReadBytesTotal;
+            ExReleaseFastMutex(&a->PortsLock);
+            info = sizeof(RAVEMIDI_PORT_STATS);
+            break;
         }
         case IOCTL_RAVEMIDI_CREATE_MIRROR: {
             if (inLen < sizeof(RAVEMIDI_CREATE_MIRROR_IN) || outLen < sizeof(RAVEMIDI_CREATE_MIRROR_OUT)) {

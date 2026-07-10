@@ -34,6 +34,16 @@ typedef struct _RAVE_PORT {
     volatile LONG CaptureRunning;     // a capture stream is in KSSTATE_RUN
     volatile LONG StreamCount;        // open pin instances (blocks destroy)
     volatile LONG MirrorRefs;         // mirror groups fanning into this port (blocks destroy)
+    // live counters for IOCTL_RAVEMIDI_QUERY_PORT (bring-up + health)
+    volatile LONG NewStreamCalls;
+    volatile LONG LastSetState;       // -1 = never
+    volatile LONG ReadCalls;
+    volatile LONG ReadZeroCalls;
+    volatile LONG LastReadBufLen;
+    volatile LONG NotifyCalls;
+    volatile LONG WriteIoctls;
+    volatile LONG StreamWriteCalls;
+    volatile LONG64 ReadBytesTotal;
 } RAVE_PORT;
 
 // Cross-TU (mirror.cpp): reference an OUT_ONLY/BIDI port by id so a mirror can fan

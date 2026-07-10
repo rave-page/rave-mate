@@ -109,6 +109,7 @@ VOID RavePortNotifyToApp(RAVE_PORT* port)
     // DISPATCH-safe: Notify is documented callable at <= DISPATCH_LEVEL. The port
     // then calls RaveStream::Read to drain ToApp into the winmm client's buffer.
     if (port->CaptureRunning && port->PortMidi && port->ServiceGroup) {
+        InterlockedIncrement(&port->NotifyCalls);
         port->PortMidi->Notify(port->ServiceGroup);
     }
 }
@@ -288,6 +289,7 @@ STDMETHODIMP_(NTSTATUS) RaveMiniport::NewStream(
         return STATUS_INVALID_PARAMETER;
     }
 
+    InterlockedIncrement(&m_Ctx->NewStreamCalls);
     RaveStream* s = new (NonPagedPoolNx, RAVE_TAG) RaveStream(OuterUnknown);
     if (!s) {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -364,6 +366,9 @@ STDMETHODIMP_(NTSTATUS) RaveStream::SetState(KSSTATE State)
 {
     // Runs at <= DISPATCH_LEVEL; keep nonpaged.
     m_State = State;
+    if (m_Miniport && m_Miniport->Ctx()) {
+        InterlockedExchange(&m_Miniport->Ctx()->LastSetState, (LONG)State);
+    }
     if (m_Capture && m_Miniport) {
         RAVE_PORT* p = m_Miniport->Ctx();
         if (p) {
@@ -385,7 +390,14 @@ STDMETHODIMP_(NTSTATUS) RaveStream::Read(PVOID BufferAddress, ULONG BufferLength
     }
     RAVE_PORT* p = m_Miniport->Ctx();
     if (p) {
+        InterlockedIncrement(&p->ReadCalls);
+        InterlockedExchange(&p->LastReadBufLen, (LONG)BufferLength);
         *BytesRead = RaveFifoPop(&p->ToApp, (UCHAR*)BufferAddress, BufferLength);
+        if (*BytesRead == 0) {
+            InterlockedIncrement(&p->ReadZeroCalls);
+        } else {
+            InterlockedAdd64(&p->ReadBytesTotal, (LONG64)*BytesRead);
+        }
     }
     return STATUS_SUCCESS;
 }
@@ -405,6 +417,7 @@ STDMETHODIMP_(NTSTATUS) RaveStream::Write(PVOID BufferAddress, ULONG BytesToWrit
     if (!p) {
         return STATUS_SUCCESS;
     }
+    InterlockedIncrement(&p->StreamWriteCalls);
     if (p->Kind == RaveMidiPortLoopback) {
         RaveFifoPush(&p->ToApp, (const UCHAR*)BufferAddress, BytesToWrite);
         RavePortNotifyToApp(p);
