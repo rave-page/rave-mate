@@ -39,11 +39,12 @@ type Versions struct {
 // loads once, requests stream over newline-JSON stdio. Not safe for concurrent
 // Analyze calls by design (one model, serial GPU/CPU inference) - a mutex serializes.
 type Engine struct {
-	Python  string // venv python executable
-	DataDir string // dir holding runner.py + model cache (HF_HOME etc. kept inside)
-	Device  string // "auto" | "cpu" | "cuda"
-	FFmpeg  string // ffmpeg path for decode fallback ("" = PATH)
-	OnLog   func(line string)
+	Python     string // venv python executable
+	DataDir    string // dir holding runner.py + model cache (HF_HOME etc. kept inside)
+	Device     string // "auto" | "cpu" | "cuda"
+	FFmpeg     string // ffmpeg path for decode fallback ("" = PATH)
+	Checkpoint string // fine-tuned checkpoint path ("" = builtin final0)
+	OnLog      func(line string)
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd
@@ -111,6 +112,9 @@ func (e *Engine) startLocked() error {
 	}
 	if e.FFmpeg != "" {
 		env = append(env, "GRIDFIX_FFMPEG="+e.FFmpeg)
+	}
+	if e.Checkpoint != "" {
+		env = append(env, "GRIDFIX_CHECKPOINT="+e.Checkpoint)
 	}
 	cmd.Env = env
 	sysexec.Hide(cmd)

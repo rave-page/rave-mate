@@ -53,6 +53,7 @@ const (
 	wmApp       = 0x8000
 	wmTrayCB    = wmApp + 1 // our NOTIFYICONDATA callback message
 	wmBalloon   = wmApp + 2 // "fire a balloon from the pending title/body" (posted to the msg window)
+	wmSetTip    = wmApp + 3 // "apply the pending tooltip" (posted to the msg window)
 	wmRButtonUp = 0x0205
 	wmLButtonUp = 0x0202
 
@@ -139,6 +140,41 @@ type tray struct {
 	pendBody  string
 	pendClick func() // onClick staged with the pending balloon (nil = plain)
 	liveClick func() // onClick of the currently-shown balloon (fires on NIN_BALLOONUSERCLICK)
+	pendTip   string // tooltip staged for WM_SETTIP ("" = restore Options.Tooltip)
+}
+
+// current is the running tray (set while run()'s loop is alive) for package-level SetTooltip.
+var (
+	currentMu sync.Mutex
+	current   *tray
+)
+
+// SetTooltip updates the tray icon's hover tooltip at runtime (progress readout). text=""
+// restores the Options.Tooltip baseline. No-op when no tray is running. Any-goroutine safe:
+// the change is marshalled onto the icon-owning thread (Shell_NotifyIcon requirement).
+func SetTooltip(text string) {
+	currentMu.Lock()
+	t := current
+	currentMu.Unlock()
+	if t == nil || t.hwnd == 0 {
+		return
+	}
+	t.balloonMu.Lock()
+	t.pendTip = text
+	t.balloonMu.Unlock()
+	procPostMessageW.Call(uintptr(t.hwnd), wmSetTip, 0, 0)
+}
+
+// applyTip runs on the tray thread (WM_SETTIP): copy the pending tooltip into szTip + NIM_MODIFY.
+func (t *tray) applyTip() {
+	t.balloonMu.Lock()
+	tip := t.pendTip
+	t.balloonMu.Unlock()
+	if tip == "" {
+		tip = t.opt.Tooltip
+	}
+	copyTip(&t.nid.szTip, tip)
+	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&t.nid)))
 }
 
 // Start installs the tray icon + menu and runs its message loop on a dedicated OS thread. The
@@ -203,6 +239,9 @@ func (t *tray) run(ready chan<- error) {
 	// Register the reliable native-notification paths (Shell_NotifyIcon balloon) for sysnotify.
 	sysnotify.SetNative(t.notify)
 	sysnotify.SetNativeAction(t.notifyAction)
+	currentMu.Lock()
+	current = t
+	currentMu.Unlock()
 
 	ready <- nil
 
@@ -217,6 +256,9 @@ func (t *tray) run(ready chan<- error) {
 	}
 	sysnotify.SetNative(nil) // tray gone - fall back to the generic path
 	sysnotify.SetNativeAction(nil)
+	currentMu.Lock()
+	current = nil
+	currentMu.Unlock()
 	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 }
 
@@ -287,6 +329,9 @@ func (t *tray) wndProc(hwnd syscall.Handle, message uint32, wParam, lParam uintp
 		return 0
 	case wmBalloon:
 		t.showBalloon()
+		return 0
+	case wmSetTip:
+		t.applyTip()
 		return 0
 	case wmCommand:
 		t.dispatch(uint32(wParam & 0xffff))

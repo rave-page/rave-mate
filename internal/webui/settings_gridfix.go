@@ -113,7 +113,6 @@ func (u *UI) gridfixCardBody() string {
 	b.WriteString(`<div id=inst-gridfix></div>`)
 
 	b.WriteString(pathField(i18n.T("settings.body.gridfix.pythonPath"), "set:gridfix-python", f.PythonPath, "file"))
-	b.WriteString(toggleRow(i18n.T("settings.body.gridfix.cuda"), "set:gridfix-cuda", f.CUDA))
 	b.WriteString(field(i18n.T("settings.body.gridfix.minQuality"), "set:gridfix-minq",
 		strconv.FormatFloat(f.ResolvedMinQuality(), 'f', -1, 64), "number"))
 	b.WriteString(field(i18n.T("settings.body.gridfix.thresholdMs"), "set:gridfix-thresh",
@@ -127,14 +126,13 @@ func init() {
 	// one-click engine install: venv + pinned beat-this + torch, pip lines streamed
 	// into the card (#inst-gridfix)
 	onExact("gridfix-install", func(u *UI, _ actMsg) {
-		f := u.svc.Cfg.Features.GridFix
 		patch := func(inner string) { u.eval("window.__patch('inst-gridfix'," + jsQuote(inner) + ")") }
 		patch(progressBar(0, i18n.T("settings.body.gridfix.installing")))
 		u.bg(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 			defer cancel()
 			var lastPatch time.Time
-			err := u.gridfixEnvMgr().Install(ctx, f.CUDA, func(line string) {
+			err := u.gridfixEnvMgr().Install(ctx, func(line string) {
 				if time.Since(lastPatch) < 300*time.Millisecond {
 					return // pip is chatty - throttle DOM patches
 				}

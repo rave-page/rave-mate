@@ -40,6 +40,7 @@ class Tracker:
     def __init__(self):
         self.a2b = None
         self.device = None
+        self.checkpoint = None
 
     def ensure(self):
         if self.a2b is not None:
@@ -51,7 +52,9 @@ class Tracker:
         else:
             self.device = want
         from beat_this.inference import Audio2Beats
-        self.a2b = Audio2Beats(checkpoint_path="final0", device=self.device)
+        ckpt = os.environ.get("GRIDFIX_CHECKPOINT") or "final0"
+        self.a2b = Audio2Beats(checkpoint_path=ckpt, device=self.device)
+        self.checkpoint = ckpt
 
     def analyze(self, path: Path):
         self.ensure()

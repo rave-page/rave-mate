@@ -1505,8 +1505,6 @@ func (u *UI) applySet(id, val string) {
 	case "gridfix-python":
 		f.GridFix.PythonPath = v
 		u.invalidateGridfixProbe()
-	case "gridfix-cuda":
-		f.GridFix.CUDA = b
 	case "gridfix-minq":
 		toFloat(&f.GridFix.MinQuality, 0.5)
 	case "gridfix-thresh":

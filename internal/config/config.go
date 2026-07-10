@@ -187,12 +187,12 @@ type Features struct {
 type GridFixFeature struct {
 	Enabled     bool    `json:"enabled"`
 	PythonPath  string  `json:"pythonPath,omitempty"`  // base interpreter override ("" = auto-discover py/-3, python3, python)
-	Device      string  `json:"device,omitempty"`      // "auto" (default) | "cpu" | "cuda"
-	CUDA        bool    `json:"cuda,omitempty"`        // install the CUDA torch build (multi-GB; default CPU)
+	Device      string  `json:"device,omitempty"`      // "auto" (default) | "cpu" | "cuda"; cuda only meaningful once the CUDA torch build is installed
 	MinQuality  float64 `json:"minQuality,omitempty"`  // min grid coverage to auto-fix; 0 = default 0.85
 	ThresholdMS float64 `json:"thresholdMs,omitempty"` // ignore marker corrections below this; 0 = default 12
 	BiasS       float64 `json:"biasS,omitempty"`       // calibrated systematic detector offset (s)
 	LockFixed   bool    `json:"lockFixed,omitempty"`   // set the Traktor LOCK flag on fixed entries
+	ActiveModel string  `json:"activeModel,omitempty"` // fine-tuned checkpoint path ("" = builtin final0)
 }
 
 // ResolvedMinQuality returns the coverage gate (default 0.85).
