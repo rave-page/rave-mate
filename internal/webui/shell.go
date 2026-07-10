@@ -187,10 +187,16 @@ const runtimeJS = `(function(){
   window.__type = function(text){
     var f=document.activeElement;
     if(!f || !f.matches || !f.matches('input,textarea')) return false;
-    f.value=(f.value||'')+text; f.dispatchEvent(new Event('input',{bubbles:true}));
+    f.value=(f.value||'')+text;
+    f.dispatchEvent(new Event('input',{bubbles:true}));
+    f.dispatchEvent(new Event('change',{bubbles:true})); // change-wired fields (search) apply too
     return true;
   };
-  window.__tap = function(x,y){ var el=document.elementFromPoint(x,y); if(el){ el.click(); return true; } return false; };
+  window.__tap = function(x,y){ var el=document.elementFromPoint(x,y); if(el){
+    el.click();
+    // synthetic click() never focuses - focus editable targets so a following ctl type works
+    if(el.matches && el.matches('input,textarea')) el.focus();
+    return true; } return false; };
   // right-click context menu: an element with [data-ctx] forwards its act on contextmenu (Go opens
   // the menu modal). __ctx(x,y) is the ctl equivalent (TapSecondary) for verification.
   document.addEventListener('contextmenu', function(e){
