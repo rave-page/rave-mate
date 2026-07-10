@@ -70,6 +70,7 @@
     <ClCompile Include="miniport.cpp" />
     <ClCompile Include="fifo.cpp" />
     <ClCompile Include="kalloc.cpp" />
+    <ClCompile Include="guids.cpp" />
     <ClInclude Include="ioctl.h" />
     <ClInclude Include="miniport.h" />
     <ClInclude Include="fifo.h" />

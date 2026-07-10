@@ -13,13 +13,6 @@ void* __cdecl operator new(size_t sz, POOL_TYPE pool, ULONG tag)
     return ExAllocatePool2(flags, sz ? sz : 1, tag);
 }
 
-void __cdecl operator delete(void* p)
-{
-    if (p) {
-        ExFreePool(p);
-    }
-}
-
 void __cdecl operator delete(void* p, size_t sz)
 {
     UNREFERENCED_PARAMETER(sz);
