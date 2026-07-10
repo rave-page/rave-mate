@@ -7,3 +7,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include <initguid.h>
 #include <portcls.h>
+#include <devpkey.h>  // INITGUID also emits DEVPKEY_* storage (DEFINE_DEVPROPKEY)
