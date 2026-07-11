@@ -57,9 +57,10 @@ type vdjScan struct {
 type vdjPoi struct {
 	Pos  float64 `xml:"Pos,attr"` // seconds
 	Type string  `xml:"Type,attr"`
-	Num  int     `xml:"Num,attr"`
+	Num  int     `xml:"Num,attr"` // hot-cue pad, 1-based; 0/absent = no pad
 	Name string  `xml:"Name,attr"`
-	Bpm  string  `xml:"Bpm,attr"` // present on beatgrid POIs
+	Bpm  string  `xml:"Bpm,attr"`  // present on beatgrid POIs
+	Size string  `xml:"Size,attr"` // loop length in beats (loop POIs)
 }
 
 // vdjBPM converts VirtualDJ's seconds-per-beat (or raw BPM) to BPM. Values <10 are treated
@@ -107,7 +108,16 @@ func (s *vdjSong) toTrack() Track {
 			t.Beatgrid = append(t.Beatgrid, GridMarker{PositionMs: p.Pos * 1000, BPM: vdjBPM(p.Bpm)})
 			continue
 		}
-		t.Cues = append(t.Cues, CuePoint{Name: p.Name, Kind: kind, StartMs: p.Pos * 1000, Hotcue: p.Num})
+		c := CuePoint{Name: p.Name, Kind: kind, StartMs: p.Pos * 1000, Hotcue: p.Num - 1} // VDJ pads are 1-based
+		if c.Hotcue < 0 {
+			c.Hotcue = -1
+		}
+		if kind == CueLoop && t.BPM > 0 {
+			if beats, err := strconv.ParseFloat(p.Size, 64); err == nil && beats > 0 {
+				c.LenMs = beats * 60000 / t.BPM
+			}
+		}
+		t.Cues = append(t.Cues, c)
 	}
 	return t
 }
@@ -191,8 +201,25 @@ func vdjPois(t Track) []vdjPoi {
 		}
 		pois = append(pois, vdjPoi{Pos: g.PositionMs / 1000, Type: "beatgrid", Bpm: bpm})
 	}
-	for _, c := range t.Cues {
-		pois = append(pois, vdjPoi{Pos: c.StartMs / 1000, Type: virtualdjPoiType(c.Kind), Num: c.Hotcue, Name: c.Name})
+	return append(pois, vdjCuePois(t.Cues, t.BPM)...)
+}
+
+// vdjCuePois builds the musical (non-grid) Pois: hotcues Type="cue" Num 1-based, memory
+// cues Type="remix", loops Type="loop" with Size in beats (when bpm known).
+func vdjCuePois(cues []CuePoint, bpm float64) []vdjPoi {
+	var pois []vdjPoi
+	for _, c := range cues {
+		if c.Kind == CueGrid {
+			continue
+		}
+		p := vdjPoi{Pos: c.StartMs / 1000, Type: virtualdjPoiType(c.Kind), Name: c.Name}
+		if c.Hotcue >= 0 {
+			p.Num = c.Hotcue + 1 // VDJ pads are 1-based
+		}
+		if c.Kind == CueLoop && c.LenMs > 0 && bpm > 0 {
+			p.Size = strconv.FormatFloat(c.LenMs*bpm/60000, 'f', 3, 64)
+		}
+		pois = append(pois, p)
 	}
 	return pois
 }
