@@ -311,3 +311,14 @@ func card(title, trailing, bodyHTML string) string {
 
 // trimNum formats a float with the least digits needed (no trailing zeros).
 func trimNum(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+
+// fpair puts two short fields/selects side by side (.fpair grid; stacks <560px).
+func fpair(a, b string) string { return `<div class=fpair>` + a + b + `</div>` }
+
+// actionMenu renders a compact "⋯ label" smart-select whose options dispatch their Val as an
+// act (button-wall → dropdown). Handled by the shared "settings-menu" dispatcher; the first
+// (placeholder) row is a no-op. id must be colon-free.
+func actionMenu(id, label string, items []ssOpt) string {
+	opts := append([]ssOpt{{Val: "", Label: "⋯ " + label}}, items...)
+	return `<span class=act-menu>` + smartSelect(id, "", "settings-menu", "", func() []ssOpt { return opts }) + `</span>`
+}

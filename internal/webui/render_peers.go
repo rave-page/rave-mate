@@ -59,8 +59,9 @@ func (u *UI) peersBody() string {
 	if u.svc.FileXfer != nil {
 		b.WriteString(section(i18n.T("peers.fileTransfer"), u.peerXferHTML(resolve)))
 	}
-	b.WriteString(section(i18n.T("peers.onThisNetwork"), u.peerDiscoveredHTML(byNode)))
-	b.WriteString(section(i18n.T("peers.rememberedOffline"), u.peerRememberedHTML(byNode)))
+	// two sibling lists share a row ≥1100px (.peers-2col)
+	b.WriteString(`<div class=peers-2col>` + section(i18n.T("peers.onThisNetwork"), u.peerDiscoveredHTML(byNode)) +
+		section(i18n.T("peers.rememberedOffline"), u.peerRememberedHTML(byNode)) + `</div>`)
 	return b.String()
 }
 
@@ -414,16 +415,16 @@ func camPropRowHTML(node string, p webcam.PropState) string {
 	oninput := `oninput="var v=this.parentNode.querySelector('.cam-prop-v');if(v)v.textContent=this.value"`
 	var b strings.Builder
 	b.WriteString(`<div class=cam-prop><span class=cam-prop-l>` + html.EscapeString(p.Label) + `</span>`)
-	b.WriteString(fmt.Sprintf(`<input class="slider-input cam-prop-s" type=range min=%d max=%d step=%d value=%d data-act=%s data-value=%d%s %s>`,
-		p.Min, p.Max, step, p.Value, attrQ(act), p.Value, dis, oninput))
+	fmt.Fprintf(&b, `<input class="slider-input cam-prop-s" type=range min=%d max=%d step=%d value=%d data-act=%s data-value=%d%s %s>`,
+		p.Min, p.Max, step, p.Value, attrQ(act), p.Value, dis, oninput)
 	b.WriteString(`<span class=cam-prop-v>` + fmt.Sprintf("%d", p.Value) + `</span>`)
 	if p.CanAuto {
 		checked := ""
 		if p.Auto {
 			checked = " checked"
 		}
-		b.WriteString(fmt.Sprintf(`<label class=cam-prop-auto><input type=checkbox%s data-act=%s data-value=%s>%s</label>`,
-			checked, attrQ("peers-cam-auto:"+node+"\x1f"+p.ID), attrQ(boolStr(p.Auto)), html.EscapeString(i18n.T("peers.auto"))))
+		fmt.Fprintf(&b, `<label class=cam-prop-auto><input type=checkbox%s data-act=%s data-value=%s>%s</label>`,
+			checked, attrQ("peers-cam-auto:"+node+"\x1f"+p.ID), attrQ(boolStr(p.Auto)), html.EscapeString(i18n.T("peers.auto")))
 	}
 	b.WriteString(`</div>`)
 	return b.String()

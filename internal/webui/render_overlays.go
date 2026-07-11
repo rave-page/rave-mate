@@ -89,11 +89,11 @@ func (u *UI) overlayWaveformCardHTML() string {
 		{"0.25", i18n.T("overlays.wf.playheadQuarter")}, {"0.333", i18n.T("overlays.wf.playheadThird")}, {"0.5", i18n.T("overlays.wf.playheadCenter")}, {"0.75", i18n.T("overlays.wf.playheadRightQuarter")},
 	}, ovlPlayheadBucket(f.ResolvedPlayheadPct()))
 	body := `<p class=ovl-note>` + htmlEscape(i18n.T("overlays.wf.note1")) + `</p>` +
-		zoom + playhead +
-		field(i18n.T("overlays.wf.waveColor"), "ovl-wf-wavecolor", f.ResolvedWaveColor(), "text") +
-		slider(i18n.T("overlays.wf.waveOpacity"), "ovl-wf-waveopac", 0, 1, 0.05, f.ResolvedWaveOpacity(), "") +
-		field(i18n.T("overlays.wf.bgColor"), "ovl-wf-bgcolor", f.ResolvedBgColor(), "text") +
-		slider(i18n.T("overlays.wf.bgOpacity"), "ovl-wf-bgopac", 0, 1, 0.05, f.ResolvedBgOpacity(), "") +
+		fpair(zoom, playhead) +
+		fpair(field(i18n.T("overlays.wf.waveColor"), "ovl-wf-wavecolor", f.ResolvedWaveColor(), "text"),
+			slider(i18n.T("overlays.wf.waveOpacity"), "ovl-wf-waveopac", 0, 1, 0.05, f.ResolvedWaveOpacity(), "")) +
+		fpair(field(i18n.T("overlays.wf.bgColor"), "ovl-wf-bgcolor", f.ResolvedBgColor(), "text"),
+			slider(i18n.T("overlays.wf.bgOpacity"), "ovl-wf-bgopac", 0, 1, 0.05, f.ResolvedBgOpacity(), "")) +
 		`<p class=ovl-note>` + htmlEscape(i18n.T("overlays.wf.note2")) + `</p>`
 	return ovlCard(i18n.T("overlays.wf.title"), "ovl-st-wave", u.ovlStatus("wave"), body)
 }

@@ -26,11 +26,10 @@ func (u *UI) renderMIDICtl() string {
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
 	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
 	b.WriteString(u.midiMonitorCard())     // live input monitor ("which device is which")
-	b.WriteString(u.midiPortCard())
-	b.WriteString(u.midiDriverCard()) // ravemidi kernel driver status + install walkthrough
+	// output + driver / bridge + help: small cards pair up ≥1100px (.midi-2col)
+	b.WriteString(`<div class=midi-2col>` + u.midiPortCard() + u.midiDriverCard() + `</div>`)
 	b.WriteString(u.midiRackCard())
-	b.WriteString(u.midiBridgeCard()) // two-port loopMIDI DJ router (peer control)
-	b.WriteString(u.midiHelpCard())
+	b.WriteString(`<div class=midi-2col>` + u.midiBridgeCard() + u.midiHelpCard() + `</div>`)
 	return b.String()
 }
 

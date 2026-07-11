@@ -57,6 +57,13 @@ func init() {
 		u.flushTick(&js)
 	})
 
+	// actionMenu dispatcher: picked option's Val is itself an act name ("" = placeholder no-op)
+	onExact("settings-menu", func(u *UI, m actMsg) {
+		if m.Val != "" {
+			u.dispatch(actMsg{Act: m.Val})
+		}
+	})
+
 	onExact("settings-refresh", func(u *UI, _ actMsg) {
 		u.invalidateProbes()
 		u.maybeRefreshProbes() // async; re-patches when device lists change

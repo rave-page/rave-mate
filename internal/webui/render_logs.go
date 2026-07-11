@@ -67,17 +67,17 @@ func (u *UI) logFiltersHTML() string {
 		`<input class=field-input type=text placeholder=` + attrQ(i18n.T("logs.searchPlaceholder")) +
 		` value=` + attrQ(q) + ` data-actinput="logs-search"></label>`
 
+	// one wrap-row: filters + autoscroll + copy/clear + tailing note (was two rows)
 	var b strings.Builder
 	b.WriteString(`<div class=log-filters>`)
 	b.WriteString(selectBox(i18n.T("logs.levelLabel"), "logs-level", levelOpts, lvl))
 	b.WriteString(selectBox(i18n.T("logs.sourceLabel"), "logs-source", u.logSources(), src))
 	b.WriteString(search)
 	b.WriteString(toggleRow(i18n.T("logs.autoscroll"), "logs-autoscroll", as))
-	b.WriteString(`</div>`)
-	b.WriteString(`<div class=log-toolbar>` +
-		btn(i18n.T("logs.copyAll"), "outline", "logs-copy", "") +
+	b.WriteString(btn(i18n.T("logs.copyAll"), "outline", "logs-copy", "") +
 		btn(i18n.T("logs.clearView"), "outline", "logs-clear", "") +
-		`<span class=page-sub style="margin:0">` + html.EscapeString(i18n.T("logs.tailing")) + `</span></div>`)
+		`<span class=page-sub style="margin:0">` + html.EscapeString(i18n.T("logs.tailing")) + `</span>`)
+	b.WriteString(`</div>`)
 	return b.String()
 }
 
