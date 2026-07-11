@@ -8,6 +8,9 @@
 .lib-toolbar .field { margin:0; }
 .lib-toolbar .field-input { flex:1 1 200px; max-width:360px; }
 .lib-tlabel { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--rp-muted); }
+/* label + control glued as one flex-wrap unit (toolbar dropdowns) */
+.lib-ctl { display:inline-flex; align-items:center; gap:var(--space-2); }
+.lib-ctl .ss-field { margin:0; }
 .lib-crumb { display:flex; flex-wrap:wrap; gap:2px; align-items:center; font-size:12px; margin-bottom:var(--space-2); }
 .lib-crumb .rp-btn { padding:2px 6px; }
 .lib-crumb .sep { color:var(--rp-muted); padding:0 1px; }
@@ -268,5 +271,7 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .libnav-it:hover{background:rgba(255,255,255,.06)}
 .libnav-it.on{background:color-mix(in srgb,var(--rp-base,#F70864) 20%,transparent);color:#fff}
 .libnav-ic{flex:0 0 auto}
-.libnav-t{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* wrap, don't clip: long folder/playlist names stay fully readable (and the row
+ * never overflows - fixes the ctl-snapshot ⚠OVERFLOW flag on folder rows) */
+.libnav-t{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
 .libnav-n{flex:0 0 auto;font-size:11px;color:var(--rp-muted,#B98AA0);font-variant-numeric:tabular-nums}

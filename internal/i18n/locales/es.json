@@ -362,7 +362,8 @@
       "pin": "Fijar carpeta",
       "unpin": "Desfijar carpeta",
       "up": "↑ Subir",
-      "videos": "VÍDEOS"
+      "videos": "VÍDEOS",
+      "folderMenu": "Carpeta"
     },
     "clear": "Limpiar",
     "col": {
@@ -675,7 +676,12 @@
       "refreshedToast": "{n} pistas nuevas añadidas a {name}",
       "refreshAllToast": "{n} pistas añadidas en {m} playlists de carpeta",
       "refreshNone": "No hay archivos nuevos en la carpeta",
-      "noFolder": "sin carpeta desde la que actualizar (playlist vacía, vínculo no resoluble)"
+      "noFolder": "sin carpeta desde la que actualizar (playlist vacía, vínculo no resoluble)",
+      "menu": {
+        "cloud": "Nube",
+        "reencSub": "Recodifica cada pista en una carpeta duplicada - los originales quedan intactos.",
+        "autoSub": "Si está activo, vuelve a escanear la carpeta vinculada en cada inicio."
+      }
     },
     "playsort": {
       "artist": "Artista",

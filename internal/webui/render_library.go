@@ -275,11 +275,11 @@ func (u *UI) libBody() string {
 		}
 		return masterDetailWide(u.libHistoryHTML(s), u.libDetailWrap(s))
 	case "idmarks":
-		return u.libIDMarksHTML(s)
+		return u.libIDMarksHTML()
 	case "queue":
 		return `<div id=lib-queue-body>` + u.libQueueHTML() + `</div>`
 	case "presets":
-		return u.libPresetsHTML(s)
+		return u.libPresetsHTML()
 	default:
 		// Browse renders the dir listing regardless; the collection (metadata enrichment)
 		// hydrates in the background and re-patches when ready.
@@ -491,21 +491,29 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(btn(i18n.T("library.browse.up"), "outline", "lib-nav:"+filepath.Dir(dir), ""))
 	b.WriteString(btn(i18n.T("library.browse.goto"), "ghost", "pick-dir:lib-nav-to", ""))
 	b.WriteString(fieldRaw("lib-search", s.nameFilter, i18n.T("library.browse.filterName")))
-	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.kind")) + `</span>`)
-	for _, k := range []string{"ALL", "VIDEO", "AUDIO", "IMAGE", "OTHER"} {
-		b.WriteString(fchip(i18n.T("library.kind."+strings.ToLower(k)), "", "lib-kind:"+k, s.kindFilter == k))
-	}
-	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.sort")) + `</span>`)
-	for _, so := range []string{"Name", "Modified", "Size"} {
-		b.WriteString(fchip(i18n.T("library.sort."+strings.ToLower(so)), "", "lib-sort:"+so, s.sortBy == so))
-	}
-	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.view")) + `</span>`)
-	b.WriteString(fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid"))
-	b.WriteString(fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid"))
+	// kind + sort: one dropdown each (was 8 chips + 2 labels across two wrapped rows);
+	// .lib-ctl glues each label to its control across flex-wrap
+	b.WriteString(`<span class=lib-ctl><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.kind")) + `</span>`)
+	b.WriteString(smartSelect("libkind", "", "lib-kind:", s.kindFilter, func() []ssOpt {
+		opts := make([]ssOpt, 0, 5)
+		for _, k := range []string{"ALL", "VIDEO", "AUDIO", "IMAGE", "OTHER"} {
+			opts = append(opts, ssOpt{Val: k, Label: i18n.T("library.kind." + strings.ToLower(k))})
+		}
+		return opts
+	}) + `</span>`)
+	b.WriteString(`<span class=lib-ctl><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.sort")) + `</span>`)
+	b.WriteString(smartSelect("libsort", "", "lib-sort:", s.sortBy, func() []ssOpt {
+		opts := make([]ssOpt, 0, 3)
+		for _, so := range []string{"Name", "Modified", "Size"} {
+			opts = append(opts, ssOpt{Val: so, Label: i18n.T("library.sort." + strings.ToLower(so))})
+		}
+		return opts
+	}) + `</span>`)
+	// view: segmented mode switch (mutually exclusive)
+	b.WriteString(`<span class=seg>` + fchip(i18n.T("library.browse.list"), "", "lib-view:list", s.view != "grid") +
+		fchip(i18n.T("library.browse.grid"), "", "lib-view:grid", s.view == "grid") + `</span>`)
 	b.WriteString(u.libKeyChip(s))
-	b.WriteString(btn(i18n.T("library.ce.openDir"), "ghost", "ce-open-dir", ""))
-	b.WriteString(btn(i18n.T("library.re.dirBtn"), "ghost", "lib-reenc-dir", ""))
-	b.WriteString(btn(i18n.T("library.re.markBtn"), "ghost", "lib-markpl", ""))
+	// folder ops: one ⋯ menu (was four ghost buttons)
 	pinLabel := i18n.T("library.browse.pin")
 	for _, bm := range u.libMarks(s).List() {
 		if bm.Path == dir {
@@ -513,7 +521,12 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 			break
 		}
 	}
-	b.WriteString(btn(pinLabel, "ghost", "lib-pin", ""))
+	b.WriteString(actionMenu("libfoldermenu", "📁 "+i18n.T("library.browse.folderMenu"), []ssOpt{
+		{Val: "ce-open-dir", Label: i18n.T("library.ce.openDir")},
+		{Val: "lib-reenc-dir", Label: i18n.T("library.re.dirBtn")},
+		{Val: "lib-markpl", Label: i18n.T("library.re.markBtn")},
+		{Val: "lib-pin", Label: pinLabel},
+	}))
 	nf, allB := 0, true
 	for _, e := range fs {
 		if e.isDir {
@@ -643,10 +656,8 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		b.WriteString(btn(i18n.T("library.gf.start"), "outline", "gf-open", ""))
 	}
 	b.WriteString(`<span class=lib-more>` + btn(i18n.T("library.coll.more"), "ghost", "lib-more", "") + u.libMoreMenuHTML(s) + `</span>`)
-	b.WriteString(`</div>`)
-
-	// filters: search + facet dropdowns; active facets render as removable chips
-	b.WriteString(`<div class=lib-toolbar>`)
+	// filters flow in the SAME wrap row: search + facet dropdowns; active facets
+	// render as removable chips (one toolbar = one less stacked row above the list)
 	b.WriteString(fieldRaw("lib-coll-search", s.collSearch, i18n.T("library.coll.search")))
 	b.WriteString(u.libFacetSelect(s, "genre", i18n.T("library.label.genre"), s.collGenre,
 		func(t musiclib.Track) string { return musiclib.GenreFamily(t.Genre) }))
@@ -946,7 +957,7 @@ func sortedPlIDs(m map[int64]string) []int64 {
 	for id := range m {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids
 }
 
@@ -991,15 +1002,19 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 	b.WriteString(btn(i18n.T("library.pl.new"), "primary", "lib-pl-new", ""))
 	b.WriteString(btn(i18n.T("library.pl.newSmart"), "outline", "lib-pl-newsmart", ""))
 	if u.svc.Syncer != nil {
-		b.WriteString(btn(i18n.T("library.pl.cloudStatus"), "ghost", "lib-pl-cloud", ""))
-		b.WriteString(btn(i18n.T("library.pl.syncAll"), "ghost", "lib-pl-syncall", ""))
-		b.WriteString(btn(i18n.T("library.pl.remote"), "ghost", "lib-pl-remote", ""))
+		// cloud ops are occasional - one ⋯ menu instead of three toolbar buttons
+		b.WriteString(actionMenu("plcloudmenu", "☁ "+i18n.T("library.pl.menu.cloud"), []ssOpt{
+			{Val: "lib-pl-cloud", Label: i18n.T("library.pl.cloudStatus")},
+			{Val: "lib-pl-syncall", Label: i18n.T("library.pl.syncAll")},
+			{Val: "lib-pl-remote", Label: i18n.T("library.pl.remote")},
+		}))
 	}
 	b.WriteString(`</div>`)
 	if len(rows) == 0 {
 		b.WriteString(emptyState(i18n.T("library.pl.empty")))
 	}
-	b.WriteString(`<div class="rp-card">`)
+	// dense rows: the row itself opens (no per-row Open button)
+	b.WriteString(`<div class=trk-table>`)
 	for _, p := range rows {
 		ic := "🎵"
 		sub := fmt.Sprint(p.Kind) + " · " + i18n.Tn("track", p.TrackCount)
@@ -1014,11 +1029,12 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 		}
 		selCls := ""
 		if p.ID == s.plSel {
-			selCls = "primary"
-		} else {
-			selCls = "outline"
+			selCls = " sel"
 		}
-		b.WriteString(itemRow(ic+" "+p.Name, sub, btn(i18n.T("library.open"), selCls, fmt.Sprintf("lib-pl:%d", p.ID), "")))
+		b.WriteString(`<div class="trk-row` + selCls + `" data-act="lib-pl:` + fmt.Sprint(p.ID) + `">` +
+			`<span class=trk-ic>` + ic + `</span>` +
+			`<span class=trk-main><span class=trk-title>` + html.EscapeString(p.Name) + `</span>` +
+			`<span class=trk-sub>` + html.EscapeString(sub) + `</span></span></div>`)
 	}
 	b.WriteString(`</div>`)
 
@@ -1029,9 +1045,11 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 	return b.String()
 }
 
-// libPlaylistActionsHTML: one playlist's full action row - shared by the Playlists
+// libPlaylistActionsHTML: one playlist's action row - shared by the Playlists
 // open view, the Collection inline panel (single playlist facet), and Browse (a
 // playlist-bound folder). inColl hides the "View in Collection" jump.
+// Density: everyday actions stay as buttons; occasional ones demote into a ⋯
+// actionMenu (full labels + Sub hints keep them discoverable).
 func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	manual := p.Kind == libdb.PlaylistManual
 	var b strings.Builder
@@ -1040,35 +1058,39 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 		b.WriteString(btn(i18n.T("library.pl.viewInColl"), "primary", fmt.Sprintf("lib-plgoto:%d", p.ID), ""))
 	}
 	b.WriteString(btn(i18n.T("library.ce.openPl"), "outline", fmt.Sprintf("ce-open-pl:%d", p.ID), ""))
-	if p.Kind != libdb.PlaylistImported {
-		b.WriteString(btn(i18n.T("library.pl.rename"), "outline", fmt.Sprintf("lib-pl-rename:%d", p.ID), ""))
-	}
 	if p.Kind == libdb.PlaylistSmart {
 		b.WriteString(btn(i18n.T("library.pl.editRules"), "outline", fmt.Sprintf("lib-sr-edit:%d", p.ID), ""))
 	}
 	b.WriteString(btn(i18n.T("library.pl.exportM3U"), "outline", fmt.Sprintf("lib-pl-export:%d", p.ID), ""))
-	b.WriteString(btn(i18n.T("library.pl.exportM3UAs"), "ghost", fmt.Sprintf("pick-save:m3u8:lib-pl-exportas:%d", p.ID), ""))
-	b.WriteString(btn(i18n.T("library.re.plBtn"), "outline", fmt.Sprintf("lib-reenc-pl:%d", p.ID), ""))
+
+	var items []ssOpt
+	add := func(label, act, sub string) { items = append(items, ssOpt{Val: act, Label: label, Sub: sub}) }
+	if p.Kind != libdb.PlaylistImported {
+		add(i18n.T("library.pl.rename"), fmt.Sprintf("lib-pl-rename:%d", p.ID), "")
+	}
+	add(i18n.T("library.pl.exportM3UAs"), fmt.Sprintf("pick-save:m3u8:lib-pl-exportas:%d", p.ID), "")
+	add(i18n.T("library.re.plBtn"), fmt.Sprintf("lib-reenc-pl:%d", p.ID), i18n.T("library.pl.menu.reencSub"))
 	if p.Kind != libdb.PlaylistSmart {
 		// refresh works for any file-backed playlist: stored folder binding, or the
 		// members' dominant dir (Traktor folder imports store tree names, not paths)
-		b.WriteString(btn(i18n.T("library.pl.refreshFolder"), "outline", fmt.Sprintf("lib-pl-refresh:%d", p.ID), ""))
-		arLbl, arVar := i18n.T("library.pl.autoOff"), "ghost"
+		add(i18n.T("library.pl.refreshFolder"), fmt.Sprintf("lib-pl-refresh:%d", p.ID), "")
+		arLbl := i18n.T("library.pl.autoOff")
 		if p.AutoRefresh {
-			arLbl, arVar = i18n.T("library.pl.autoOn"), "primary"
+			arLbl = i18n.T("library.pl.autoOn")
 		}
-		b.WriteString(btn(arLbl, arVar, fmt.Sprintf("lib-pl-autorefresh:%d", p.ID), ""))
+		add(arLbl, fmt.Sprintf("lib-pl-autorefresh:%d", p.ID), i18n.T("library.pl.menu.autoSub"))
 	}
 	if !manual {
-		b.WriteString(btn(i18n.T("library.pl.dupManual"), "outline", fmt.Sprintf("lib-pl-dup:%d", p.ID), ""))
+		add(i18n.T("library.pl.dupManual"), fmt.Sprintf("lib-pl-dup:%d", p.ID), "")
 	}
-	b.WriteString(btn(i18n.T("library.plsort.btn"), "outline", fmt.Sprintf("lib-plsort:%d", p.ID), ""))
-	b.WriteString(btn(i18n.T("common.delete"), "destructive", fmt.Sprintf("lib-pl-del:%d", p.ID), ""))
+	add(i18n.T("library.plsort.btn"), fmt.Sprintf("lib-plsort:%d", p.ID), "")
 	if u.svc.Syncer != nil {
-		b.WriteString(btn(i18n.T("library.pl.push"), "ghost", fmt.Sprintf("lib-pl-push:%d", p.ID), ""))
-		b.WriteString(btn(i18n.T("library.pl.pull"), "ghost", fmt.Sprintf("lib-pl-pull:%d", p.ID), ""))
-		b.WriteString(btn(i18n.T("library.pl.unlink"), "ghost", fmt.Sprintf("lib-pl-unlink:%d", p.ID), ""))
+		add(i18n.T("library.pl.push"), fmt.Sprintf("lib-pl-push:%d", p.ID), "")
+		add(i18n.T("library.pl.pull"), fmt.Sprintf("lib-pl-pull:%d", p.ID), "")
+		add(i18n.T("library.pl.unlink"), fmt.Sprintf("lib-pl-unlink:%d", p.ID), "")
 	}
+	add(i18n.T("common.delete"), fmt.Sprintf("lib-pl-del:%d", p.ID), "")
+	b.WriteString(actionMenu(fmt.Sprintf("plmenu-%d", p.ID), "⋯ "+i18n.T("player.more"), items))
 	b.WriteString(`</div>`)
 	return b.String()
 }
@@ -1146,30 +1168,40 @@ func (u *UI) libHistoryHTML(s *libSt) string {
 	if len(s.summaries) == 0 {
 		b.WriteString(emptyState(i18n.T("library.hist.empty")))
 	} else {
-		b.WriteString(`<div class="rp-card">`)
+		// dense rows: the row itself opens the session (no per-row Open button)
+		b.WriteString(`<div class=trk-table>`)
 		for i, sm := range s.summaries {
-			v := "outline"
+			selCls := ""
 			if i == s.selSess {
-				v = "primary"
+				selCls = " sel"
 			}
 			sub := i18n.Tn("track", sm.TrackCount) + " · " + fmtDurCoarse(sm.TotalDurationSec)
 			if i < len(s.histApps) && s.histApps[i] != "" {
 				sub = s.histApps[i] + " · " + sub
 			}
-			b.WriteString(itemRow(sm.StartedAt.Format("2006-01-02 15:04"), sub,
-				btn(i18n.T("library.open"), v, fmt.Sprintf("lib-session:%d", i), "")))
+			b.WriteString(`<div class="trk-row` + selCls + `" data-act="lib-session:` + fmt.Sprint(i) + `">` +
+				`<span class=trk-ic>🗓</span>` +
+				`<span class=trk-main><span class=trk-title>` + html.EscapeString(sm.StartedAt.Format("2006-01-02 15:04")) + `</span>` +
+				`<span class=trk-sub>` + html.EscapeString(sub) + `</span></span></div>`)
 		}
 		b.WriteString(`</div>`)
 	}
 	if len(s.played) > 0 {
-		b.WriteString(`<div class=lib-toolbar><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.played")) + `</span>`)
-		for _, so := range []string{"Play order", "Artist", "Title", "BPM", "Key", "Genre", "Rating", "Plays"} {
-			cur := s.playSort
-			if cur == "" {
-				cur = "Play order"
-			}
-			b.WriteString(fchip(i18n.T("library.playsort."+strings.ToLower(strings.ReplaceAll(so, " ", ""))), "", "lib-play-sort:"+so, cur == so))
+		// sort: one dropdown + direction chip (was a 9-chip wall)
+		cur := s.playSort
+		if cur == "" {
+			cur = "Play order"
 		}
+		sortOpts := func() []ssOpt {
+			opts := make([]ssOpt, 0, 8)
+			for _, so := range []string{"Play order", "Artist", "Title", "BPM", "Key", "Genre", "Rating", "Plays"} {
+				opts = append(opts, ssOpt{Val: so, Label: i18n.T("library.playsort." + strings.ToLower(strings.ReplaceAll(so, " ", "")))})
+			}
+			return opts
+		}
+		b.WriteString(`<div class=lib-toolbar><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.played")) + `</span>` +
+			`<span class=lib-ctl><span class=lib-tlabel>` + html.EscapeString(i18n.T("library.label.sort")) + `</span>` +
+			smartSelect("libplaysort", "", "lib-play-sort:", cur, sortOpts) + `</span>`)
 		b.WriteString(fchip(sortDir(s.playDesc), "", "lib-play-dir", false))
 		b.WriteString(`</div>`)
 		b.WriteString(`<div class=trk-table>`)
@@ -1203,7 +1235,7 @@ func (s *libSt) playView() []int {
 
 // ── ID Marks ────────────────────────────────────────────────────────────────
 
-func (u *UI) libIDMarksHTML(s *libSt) string {
+func (u *UI) libIDMarksHTML() string {
 	st := u.svc.IDMarks
 	if st == nil {
 		return emptyState(i18n.T("library.idmarks.unavailable"))
@@ -1270,7 +1302,7 @@ func jobBadge(st string) string {
 
 // ── Presets catalog ─────────────────────────────────────────────────────────
 
-func (u *UI) libPresetsHTML(s *libSt) string {
+func (u *UI) libPresetsHTML() string {
 	var custom []transcode.Preset
 	if u.svc.Cfg != nil {
 		custom = u.svc.Cfg.Features.Transcode.Presets
@@ -1934,15 +1966,6 @@ func fchip(label, val, act string, active bool) string {
 		v = ` data-val="` + html.EscapeString(val) + `"`
 	}
 	return `<button class="` + cls + `" data-act="` + html.EscapeString(act) + `"` + v + `>` + html.EscapeString(label) + `</button>`
-}
-
-func fchipN(label, n, act string, active bool) string {
-	cls := "fchip"
-	if active {
-		cls += " active"
-	}
-	return `<button class="` + cls + `" data-act="` + html.EscapeString(act) + `">` + html.EscapeString(label) +
-		`<span class=n>` + html.EscapeString(n) + `</span></button>`
 }
 
 // fieldRaw is a bare input that dispatches act with its value on change.

@@ -398,7 +398,8 @@
       "pin": "Pin folder",
       "unpin": "Unpin folder",
       "up": "↑ Up",
-      "videos": "VIDEOS"
+      "videos": "VIDEOS",
+      "folderMenu": "Folder"
     },
     "clear": "Clear",
     "col": {
@@ -756,7 +757,12 @@
       "refreshedToast": "{n} new tracks added to {name}",
       "refreshAllToast": "{n} tracks added across {m} folder playlists",
       "refreshNone": "No new files in the folder",
-      "noFolder": "no folder to refresh from (empty playlist, unresolvable binding)"
+      "noFolder": "no folder to refresh from (empty playlist, unresolvable binding)",
+      "menu": {
+        "cloud": "Cloud",
+        "reencSub": "Re-encode every track into a duplicate folder - originals untouched.",
+        "autoSub": "When on, re-scans the bound folder once per launch."
+      }
     },
     "playsort": {
       "artist": "Artist",

@@ -362,7 +362,8 @@
       "pin": "Épingler le dossier",
       "unpin": "Désépingler le dossier",
       "up": "↑ Remonter",
-      "videos": "VIDÉOS"
+      "videos": "VIDÉOS",
+      "folderMenu": "Dossier"
     },
     "clear": "Effacer",
     "col": {
@@ -675,7 +676,12 @@
       "refreshedToast": "{n} nouvelles pistes ajoutées à {name}",
       "refreshAllToast": "{n} pistes ajoutées sur {m} playlists-dossiers",
       "refreshNone": "Aucun nouveau fichier dans le dossier",
-      "noFolder": "aucun dossier à actualiser (playlist vide, liaison introuvable)"
+      "noFolder": "aucun dossier à actualiser (playlist vide, liaison introuvable)",
+      "menu": {
+        "cloud": "Cloud",
+        "reencSub": "Ré-encode chaque piste dans un dossier dupliqué - les originaux restent intacts.",
+        "autoSub": "Si actif, réanalyse le dossier lié à chaque lancement."
+      }
     },
     "playsort": {
       "artist": "Artiste",

@@ -363,10 +363,12 @@ func (u *UI) pubCaptureBlock(s libdb.SetRecording, loose bool) string {
 			btn(i18n.T("publish.openInPlayer"), "go", "mp-loadcap:"+s.ID, ""),
 			btn(i18n.T("publish.trimEditDots"), "secondary", "mp-loadcap:"+s.ID+"\x1fedit", ""))
 	}
-	btns = append(btns,
-		btn(i18n.T("player.openExternally"), "ghost", "pub-open:"+s.ID, ""),
-		btn(i18n.T("publish.showInFolder"), "ghost", "pub-reveal:"+s.ID, ""),
-		btn(i18n.T("common.remove"), "destructive", "pub-capdel:"+s.ID, ""))
+	// file ops are occasional - one ⋯ menu instead of three buttons per capture row
+	btns = append(btns, actionMenu("capmenu-"+strings.Map(menuIDSafe, s.ID), "⋯ "+i18n.T("player.more"), []ssOpt{
+		{Val: "pub-open:" + s.ID, Label: i18n.T("player.openExternally")},
+		{Val: "pub-reveal:" + s.ID, Label: i18n.T("publish.showInFolder")},
+		{Val: "pub-capdel:" + s.ID, Label: i18n.T("common.remove")},
+	}))
 
 	return `<div class=pub-cap><div class=pub-cap-cap>` + html.EscapeString(strings.Join(capParts, " · ")) + `</div>` +
 		btnRow(btns...) + `</div>`
@@ -496,6 +498,14 @@ func orTrackLine(s string) string {
 		return i18n.T("publish.untitledTrack")
 	}
 	return s
+}
+
+// menuIDSafe maps capture IDs onto smartSelect's colon-free id token space.
+func menuIDSafe(r rune) rune {
+	if r == ':' || r == ' ' {
+		return '_'
+	}
+	return r
 }
 
 // pubClock formats seconds as m:ss (or h:mm:ss past an hour).
