@@ -1424,17 +1424,40 @@ func run(parent context.Context, serviceMode bool) error {
 				return err
 			}
 			disc.SetPort(peerMgr.Port())
-			if err := disc.Start(c); err != nil {
-				peerMgr.Stop()
-				return err
-			}
-			ch, unsub := disc.Subscribe()
-			peerUnsub = unsub
-			debuglog.Go(log, "peers", func() {
-				for found := range ch {
-					peerMgr.OnDiscovered(found)
+			// Loopback-bound rigs (RAVE_MATE_PEER_BIND) skip mDNS: the listener isn't
+			// LAN-reachable and discovery only advertises LAN IPs. RAVE_MATE_PEER_SEED
+			// dials literal addresses instead (also useful on multicast-less networks).
+			if peerlink.BindIsLoopback() {
+				log.Info("peers", "loopback bind - discovery skipped", map[string]any{"port": peerMgr.Port()})
+			} else {
+				if err := disc.Start(c); err != nil {
+					peerMgr.Stop()
+					return err
 				}
-			})
+				ch, unsub := disc.Subscribe()
+				peerUnsub = unsub
+				debuglog.Go(log, "peers", func() {
+					for found := range ch {
+						peerMgr.OnDiscovered(found)
+					}
+				})
+			}
+			if seeds := peerlink.SeedAddrs(); len(seeds) > 0 {
+				debuglog.Go(log, "peers", func() {
+					t := time.NewTicker(5 * time.Second)
+					defer t.Stop()
+					for {
+						for _, a := range seeds {
+							peerMgr.ConnectAddr(a) // no-op while connected to a
+						}
+						select {
+						case <-c.Done():
+							return
+						case <-t.C:
+						}
+					}
+				})
+			}
 			// Bridge now-playing/MIDI/control over the link while peers are enabled.
 			debuglog.Go(log, "peerbridge", func() { peerBridge.Start(c, merger) })
 			// LAN media plane (medialink): bind the media listener + negotiation. Non-fatal -
