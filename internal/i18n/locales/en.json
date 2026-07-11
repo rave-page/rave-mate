@@ -2804,7 +2804,9 @@
         "error": "Bridge problem",
         "enrolled": "Authenticator linked - this PC can be reached with a code",
         "notPersisted": "Session-only on this OS",
-        "notPersistedHint": "This OS has no secret store rave-mate can use, so the authenticator secret is kept in memory and is lost when rave-mate quits. It is never written to disk unencrypted. Re-link after a restart."
+        "notPersistedHint": "This OS has no secret store rave-mate can use, so the authenticator secret is kept in memory and is lost when rave-mate quits. It is never written to disk unencrypted. Re-link after a restart.",
+        "signedOut": "Not signed in",
+        "signedOutHint": "The bridge meets your devices inside your rave.page account, so it stays idle until you sign in. Nothing is wrong."
       }
     },
     "subtitle": "Toggle what you use - disabled features own no ports, goroutines, or subprocesses.",

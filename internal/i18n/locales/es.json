@@ -2715,7 +2715,9 @@
         "error": "Problema con el puente",
         "enrolled": "Autenticador vinculado: se puede llegar a este PC con un código",
         "notPersisted": "Solo durante esta sesión",
-        "notPersistedHint": "Este sistema operativo no ofrece un almacén de secretos que rave-mate pueda usar, así que la clave del autenticador se guarda en memoria y se pierde al cerrar rave-mate. Nunca se escribe sin cifrar en el disco. Vuelve a vincularla tras reiniciar."
+        "notPersistedHint": "Este sistema operativo no ofrece un almacén de secretos que rave-mate pueda usar, así que la clave del autenticador se guarda en memoria y se pierde al cerrar rave-mate. Nunca se escribe sin cifrar en el disco. Vuelve a vincularla tras reiniciar.",
+        "signedOut": "Sesión no iniciada",
+        "signedOutHint": "El puente reúne tus dispositivos dentro de tu cuenta de rave.page, así que permanece inactivo hasta que inicies sesión. No pasa nada malo."
       }
     },
     "subtitle": "Activa lo que uses - las funciones desactivadas no ocupan puertos, goroutines ni subprocesos.",

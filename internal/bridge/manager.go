@@ -28,14 +28,15 @@ type Manager struct {
 	tunnel   Tunnel
 	onChange func() // UI repaint hook
 
-	mu       sync.Mutex
-	sid      string
-	sessions map[string]Session          // account devices by sid (presence)
-	conns    map[string]*Conn            // live conns by PEER sid
-	dialing  map[string]bool             // peer sids we have an in-flight dial to
-	dialWait map[string]chan signalFrame // in-flight dials awaiting a dial-ok/dial-no
-	running  bool
-	lastErr  string
+	mu        sync.Mutex
+	sid       string
+	sessions  map[string]Session          // account devices by sid (presence)
+	conns     map[string]*Conn            // live conns by PEER sid
+	dialing   map[string]bool             // peer sids we have an in-flight dial to
+	dialWait  map[string]chan signalFrame // in-flight dials awaiting a dial-ok/dial-no
+	running   bool
+	signedOut bool
+	lastErr   string
 }
 
 // Tunnel is what the bridge hands a fresh Conn to. Implemented by the app wiring over
@@ -149,7 +150,10 @@ func (m *Manager) run(ctx context.Context) {
 				}
 				m.log.Info(logTag, "not signed in; the account bridge is idle", f)
 			}
-			m.setErr("not signed in")
+			m.mu.Lock()
+			m.signedOut, m.lastErr = true, ""
+			m.mu.Unlock()
+			m.fireChange()
 			backoff = 30 * time.Second // no point hammering; OnChange will kick us on sign-in
 		case err != nil:
 			authGate.Reset()
@@ -176,8 +180,7 @@ func (m *Manager) session(ctx context.Context) error {
 		return err
 	}
 	m.mu.Lock()
-	m.sid = sess.SID
-	m.lastErr = ""
+	m.sid, m.lastErr, m.signedOut = sess.SID, "", false
 	m.mu.Unlock()
 	m.log.Info(logTag, "registered on the account bridge", map[string]any{
 		"sid": sess.SID, "caps": sess.Capabilities,
@@ -495,6 +498,7 @@ func (m *Manager) Devices() []Device {
 // State is the bridge's connection state for the UI.
 type State struct {
 	Registered bool
+	SignedOut  bool // not signed in - an ordinary state, NOT an error the user should worry about
 	SID        string
 	Error      string
 	Devices    int
@@ -506,12 +510,17 @@ func (m *Manager) State() State {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return State{
-		Registered: m.sid != "", SID: m.sid, Error: m.lastErr,
+		Registered: m.sid != "", SignedOut: m.signedOut, SID: m.sid, Error: m.lastErr,
 		Devices: len(m.sessions), Links: len(m.conns),
 	}
 }
 
-func (m *Manager) setErr(s string) { m.mu.Lock(); m.lastErr = s; m.mu.Unlock(); m.fireChange() }
+func (m *Manager) setErr(s string) {
+	m.mu.Lock()
+	m.lastErr, m.signedOut = s, false
+	m.mu.Unlock()
+	m.fireChange()
+}
 
 func (m *Manager) fireChange() {
 	m.mu.Lock()

@@ -34,6 +34,15 @@ func init() {
 		})
 	})
 
+	// Stash the code as it's typed. A settings re-render (live tick, toast, toggle) replaces
+	// the input element, so relying on the DOM still holding the value at submit time is
+	// fragile - keep the truth in Go.
+	onExact("bridge-code", func(u *UI, m actMsg) {
+		u.mu.Lock()
+		u.bridgeCode = strings.TrimSpace(m.Val)
+		u.mu.Unlock()
+	})
+
 	// Confirm the code typed back from the authenticator → arm the gate.
 	onExact("bridge-confirm", func(u *UI, m actMsg) {
 		g := u.svc.AuthGate
@@ -44,13 +53,18 @@ func init() {
 		if code == "" {
 			code = strings.TrimSpace(m.Val)
 		}
+		if code == "" {
+			u.mu.Lock()
+			code = u.bridgeCode
+			u.mu.Unlock()
+		}
 		u.bg(func() {
 			if err := g.ConfirmEnrolment(code); err != nil {
 				u.toast(i18n.T("settings.toast.bridgeCodeRejected"))
 				return
 			}
 			u.mu.Lock()
-			u.bridgeURI, u.bridgeSecret = "", "" // stop showing the secret the moment it's confirmed
+			u.bridgeURI, u.bridgeSecret, u.bridgeCode = "", "", "" // stop showing the secret the moment it's confirmed
 			u.mu.Unlock()
 			u.toast(i18n.T("settings.toast.bridgeEnrolled"))
 			u.patchMain()
@@ -70,7 +84,7 @@ func init() {
 				return
 			}
 			u.mu.Lock()
-			u.bridgeURI, u.bridgeSecret = "", ""
+			u.bridgeURI, u.bridgeSecret, u.bridgeCode = "", "", ""
 			u.mu.Unlock()
 			u.toast(i18n.T("settings.toast.bridgeUnenrolled"))
 			u.patchMain()
@@ -80,7 +94,7 @@ func init() {
 	// Dismiss the enrolment panel without confirming (the secret stays pending, unarmed).
 	onExact("bridge-enrol-cancel", func(u *UI, _ actMsg) {
 		u.mu.Lock()
-		u.bridgeURI, u.bridgeSecret = "", ""
+		u.bridgeURI, u.bridgeSecret, u.bridgeCode = "", "", ""
 		u.mu.Unlock()
 		u.patchMain()
 	})
@@ -129,6 +143,10 @@ func (u *UI) bridgeCardBody() string {
 	if u.svc.Bridge != nil && f.Enabled {
 		s := u.svc.Bridge.State()
 		switch {
+		case s.SignedOut:
+			// Being signed out is an ordinary state, not a fault - don't alarm the user.
+			b.WriteString(statusRow("idle", i18n.T("settings.status.bridge.signedOut"),
+				i18n.T("settings.status.bridge.signedOutHint")))
 		case s.Error != "":
 			b.WriteString(statusRow("warn", i18n.T("settings.status.bridge.error"), s.Error))
 		case s.Registered:
@@ -168,12 +186,18 @@ func (u *UI) bridgeGateBody(g *authz.Gate) string {
 		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.bridge.enrolHelp")) + `</div>`)
 		b.WriteString(`<div class="bridge-secret mono">` + html.EscapeString(secret) + `</div>`)
 		b.WriteString(`<div class="bridge-uri mono">` + html.EscapeString(uri) + `</div>`)
-		b.WriteString(`<form data-act=bridge-confirm>` +
-			field(i18n.T("settings.body.bridge.codeLabel"), "", "", "text") +
-			btnRow(
-				btn(i18n.T("settings.body.bridge.confirm"), "primary", "bridge-confirm", ""),
-				btn(i18n.T("common.cancel"), "ghost", "bridge-enrol-cancel", ""),
-			) + `</form>`)
+		// Raw named input + submit: the field() helper emits no name attribute, so parseForm
+		// would see nothing.
+		b.WriteString(`<form data-act=bridge-confirm class=bridge-confirm>` +
+			`<label class=field data-label=` + attrQ(strings.ToLower(i18n.T("settings.body.bridge.codeLabel"))) +
+			`><span class=field-label>` + html.EscapeString(i18n.T("settings.body.bridge.codeLabel")) + `</span>` +
+			`<input class=field-input type=text name=code data-act=bridge-code data-label=` +
+			attrQ(strings.ToLower(i18n.T("settings.body.bridge.codeLabel"))) +
+			` inputmode=numeric autocomplete=one-time-code maxlength=6 value=""></label>` +
+			`<div class=btn-row>` +
+			`<button class="rp-btn rp-btn--primary" type=submit>` + html.EscapeString(i18n.T("settings.body.bridge.confirm")) + `</button>` +
+			btn(i18n.T("common.cancel"), "ghost", "bridge-enrol-cancel", "") +
+			`</div></form>`)
 		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.bridge.burnNote")) + `</div>`)
 
 	case g.Enrolled():

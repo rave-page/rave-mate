@@ -2715,7 +2715,9 @@
         "error": "Problème de passerelle",
         "enrolled": "Authentificateur lié - ce PC est joignable avec un code",
         "notPersisted": "Valable pour cette session uniquement",
-        "notPersistedHint": "Ce système d'exploitation n'offre pas de coffre à secrets utilisable par rave-mate : la clé de l'authentificateur reste en mémoire et disparaît à la fermeture. Elle n'est jamais écrite en clair sur le disque. Reliez-la à nouveau après un redémarrage."
+        "notPersistedHint": "Ce système d'exploitation n'offre pas de coffre à secrets utilisable par rave-mate : la clé de l'authentificateur reste en mémoire et disparaît à la fermeture. Elle n'est jamais écrite en clair sur le disque. Reliez-la à nouveau après un redémarrage.",
+        "signedOut": "Non connecté",
+        "signedOutHint": "La passerelle réunit vos appareils au sein de votre compte rave.page : elle reste donc en veille tant que vous n'êtes pas connecté. Rien d'anormal."
       }
     },
     "subtitle": "Basculez ce que vous utilisez - les fonctions désactivées ne possèdent ni port, ni goroutine, ni sous-processus.",

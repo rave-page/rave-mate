@@ -39,6 +39,7 @@ type UI struct {
 	// only, cleared the moment a code confirms it. NEVER logged, never persisted here.
 	bridgeURI    string
 	bridgeSecret string
+	bridgeCode   string // the code being typed back; kept in Go so a re-render can't drop it
 	stop         chan struct{}
 	closed       bool
 	trayStop     func() // system-tray teardown (webview renderer only); nil off Windows / before ready
