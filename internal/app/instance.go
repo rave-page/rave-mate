@@ -38,6 +38,7 @@ type Control interface {
 	Snapshot() string                                            // text tree of the rendered UI (empty in service mode)
 	Resize(w, h float32) bool                                    // set the window size (viewport); false in service mode
 	Click(query string) bool                                     // tap a button/check/tab by label; false if no match / service mode
+	Act(act, val string) bool                                    // post a raw UI action through the page act pipeline (webview renderer only)
 	Tap(x, y float32) bool                                       // tap the topmost leaf at canvas coords; false if no hit / service mode
 	TapSecondary(x, y float32) bool                              // right-click: fire the deepest SecondaryTappable (context menus); false if no hit / service
 	Type(text string) bool                                       // append text to the focused Entry; false if no entry / service mode
@@ -164,6 +165,18 @@ func handleConn(conn net.Conn, ctrl Control) {
 			fmt.Fprintln(conn, "ok")
 		} else {
 			fmt.Fprintln(conn, "no match")
+		}
+	case strings.HasPrefix(cmd, "ACT "):
+		// ACT <act> [val] - post through the page act pipeline (what a page event sends)
+		rest := strings.TrimSpace(cmd[len("ACT "):])
+		act, val := rest, ""
+		if sp := strings.IndexAny(rest, " \t"); sp >= 0 {
+			act, val = rest[:sp], strings.TrimSpace(rest[sp:])
+		}
+		if ctrl.Act(act, val) {
+			fmt.Fprintln(conn, "ok")
+		} else {
+			fmt.Fprintln(conn, "unsupported (webview renderer only)")
 		}
 	case strings.HasPrefix(cmd, "TAP2 "):
 		var x, y float32

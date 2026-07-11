@@ -30,11 +30,21 @@ type ttLink struct {
 	URL   string
 }
 
+// kbRow is one keybind→action row of a topic's key grid (rendered atop the card).
+// Combo entries are key-cap chips; "+" and "/" render as separators, an "@<i18n key>"
+// entry resolves at render time (localized mouse-gesture words like "Right-click"),
+// anything else is a literal, locale-independent key label (←, Shift, Del, T).
+type kbRow struct {
+	Combo []string
+	Act   string // i18n key of the action description (resolved at render)
+}
+
 // helpTopic is a reusable explanation of one technical term/feature.
 type helpTopic struct {
 	Title string
 	// Body paragraphs, split on "\n\n". Plain text (escaped at render).
 	Body  string
+	Keys  []kbRow // optional keybind grid, shown between title and body
 	Links []ttLink
 }
 
@@ -114,10 +124,12 @@ var helpTopics = map[string]helpTopic{
 	"wave-nav": {
 		Title: i18n.T("help.wave-nav.title"),
 		Body:  i18n.T("help.wave-nav.body"),
+		Keys:  waveNavKeys,
 	},
 	"cue-edit": {
 		Title: i18n.T("help.cue-edit.title"),
 		Body:  i18n.T("help.cue-edit.body"),
+		Keys:  cueEditKeys,
 	},
 	"trim-editor": {
 		Title: i18n.T("help.trim-editor.title"),
@@ -308,6 +320,35 @@ var helpTopics = map[string]helpTopic{
 	},
 }
 
+// cueEditKeys - every cue-editor binding (keyboard, then mouse gestures), the grid
+// atop the cue-edit tooltip. Order mirrors the workflow: navigate → mark → select →
+// delete → audition → grid alignment.
+var cueEditKeys = []kbRow{
+	{[]string{"←", "/", "→"}, "help.cue-edit.k.step"},
+	{[]string{"Shift", "+", "←", "/", "→"}, "help.cue-edit.k.jump"},
+	{[]string{"Shift", "+", "↑", "/", "↓"}, "help.cue-edit.k.jumpSize"},
+	{[]string{"T", "/", "Enter"}, "help.cue-edit.k.addDrop"},
+	{[]string{"Shift", "+", "T", "/", "Enter"}, "help.cue-edit.k.removeDrop"},
+	{[]string{"Del", "/", "Backspace"}, "help.cue-edit.k.deleteSel"},
+	{[]string{"Space"}, "help.cue-edit.k.audition"},
+	{[]string{"Ctrl", "+", "←", "/", "→"}, "help.cue-edit.k.nudge"},
+	{[]string{"Ctrl", "+", "Shift", "+", "←", "/", "→"}, "help.cue-edit.k.nudgeFine"},
+	{[]string{"↑", "/", "↓"}, "help.cue-edit.k.listNav"},
+	{[]string{"@help.kb.click"}, "help.cue-edit.k.click"},
+	{[]string{"@help.kb.drag"}, "help.cue-edit.k.drag"},
+	{[]string{"Ctrl", "+", "@help.kb.click"}, "help.cue-edit.k.ctrlClick"},
+	{[]string{"@help.kb.rclick"}, "help.cue-edit.k.rclick"},
+	{[]string{"Shift", "+", "@help.kb.rclick"}, "help.cue-edit.k.srclick"},
+	{[]string{"Ctrl", "+", "@help.kb.rclick"}, "help.cue-edit.k.crclick"},
+}
+
+// waveNavKeys - the waveform pointer gestures (wave-nav tooltip grid).
+var waveNavKeys = []kbRow{
+	{[]string{"@help.kb.click"}, "help.wave-nav.k.click"},
+	{[]string{"@help.kb.wheel"}, "help.wave-nav.k.wheel"},
+	{[]string{"@help.kb.drag"}, "help.wave-nav.k.drag"},
+}
+
 // virtualMIDILinks is the shared list of virtual-MIDI-port options. loopMIDI is the recommended
 // default (no admin, no registry, unlimited ports, works on every Windows). LoopBe1 is a simple
 // single-port option. Windows MIDI Services is listed INFORMATIONALLY only: it's the open-source
@@ -333,17 +374,33 @@ func tipTopic(id string) string {
 	if !ok {
 		return ""
 	}
-	return renderTip(id, t.Title, t.Body, t.Links)
+	return renderTip(id, t.Title, t.Body, t.Keys, t.Links)
 }
 
 // tip renders an ad-hoc tooltip (id must be a unique single token - it becomes the
 // ctl data-label `tt-<id>`). Prefer tipTopic + a registry entry for anything two
 // surfaces could share.
 func tip(id, title, body string, links ...ttLink) string {
-	return renderTip(id, title, body, links)
+	return renderTip(id, title, body, nil, links)
 }
 
-func renderTip(id, title, body string, links []ttLink) string {
+// kbChips renders a combo spec as key-cap chips + separators (see kbRow).
+func kbChips(combo []string) string {
+	var b strings.Builder
+	for _, tok := range combo {
+		switch {
+		case tok == "+" || tok == "/":
+			b.WriteString(`<span class=tt-kb-sep>` + tok + `</span>`)
+		case strings.HasPrefix(tok, "@"):
+			b.WriteString(`<kbd class=tt-kbd>` + html.EscapeString(i18n.T(tok[1:])) + `</kbd>`)
+		default:
+			b.WriteString(`<kbd class=tt-kbd>` + html.EscapeString(tok) + `</kbd>`)
+		}
+	}
+	return b.String()
+}
+
+func renderTip(id, title, body string, keys []kbRow, links []ttLink) string {
 	var b strings.Builder
 	b.WriteString(`<label class=tt data-label="tt-` + html.EscapeString(id) + `" aria-label="About: ` + html.EscapeString(title) + `" tabindex=0>`)
 	b.WriteString(`<input type=checkbox class=tt-x tabindex=-1>`)
@@ -355,6 +412,14 @@ func renderTip(id, title, body string, links []ttLink) string {
 	// (shell.go) flips/clamps both.
 	b.WriteString(`<span class=tt-card role=tooltip><span class=tt-in>`)
 	b.WriteString(`<b class=tt-title>` + html.EscapeString(title) + `</b>`)
+	if len(keys) > 0 { // keybind grid: combo chips → action, two columns
+		b.WriteString(`<span class=tt-kb>`)
+		for _, r := range keys {
+			b.WriteString(`<span class=tt-kb-keys>` + kbChips(r.Combo) + `</span>` +
+				`<span class=tt-kb-act>` + html.EscapeString(i18n.T(r.Act)) + `</span>`)
+		}
+		b.WriteString(`</span>`)
+	}
 	for _, p := range strings.Split(body, "\n\n") {
 		if p = strings.TrimSpace(p); p != "" {
 			b.WriteString(`<span class=tt-p>` + html.EscapeString(p) + `</span>`)

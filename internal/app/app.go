@@ -2291,6 +2291,16 @@ func (c *appControl) Click(query string) bool {
 	return c.ui.Click(query)
 }
 
+// Act posts a raw UI action through the page act pipeline - a webview-renderer
+// capability (interface assertion; Fyne/service mode = unsupported).
+func (c *appControl) Act(act, val string) bool {
+	type acter interface{ Act(act, val string) bool }
+	if a, ok := c.ui.(acter); ok {
+		return a.Act(act, val)
+	}
+	return false
+}
+
 func (c *appControl) Tap(x, y float32) bool {
 	if c.ui == nil {
 		return false

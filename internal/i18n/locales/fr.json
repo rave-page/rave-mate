@@ -138,6 +138,12 @@
     "y": "Y"
   },
   "help": {
+    "kb": {
+      "click": "Clic",
+      "drag": "Glisser",
+      "rclick": "Clic droit",
+      "wheel": "Molette"
+    },
     "camera-paths": {
       "body": "La caméra en jeu de VRChat enregistre des trajectoires de travelling - des séquences d'images-clés (position, orientation, vitesse, mise au point) que la caméra survole en douceur. VRChat les enregistre en fichiers JSON ; rave-mate les retrouve, les regroupe par monde d'enregistrement, et peut les sauvegarder, les organiser et les recharger.\n\nL'aperçu montre la trajectoire en 3D : chaque point est une image-clé, la petite ligne violette indique l'orientation de la caméra, et la couleur de la ligne encode la vitesse (menthe = lent, rose = rapide). Le repère ambre parcourt la trajectoire à sa vitesse réelle enregistrée.\n\n« Charger dans VRChat » envoie le fichier via OSC pour qu'il apparaisse immédiatement dans la caméra en jeu - OSC doit être activé dans VRChat (menu Action → Options → OSC). La boucle et le type de trajectoire ne sont pas stockés dans le fichier ; réglez-les une fois dans VRChat après le chargement.",
       "title": "Trajectoires de caméra VRChat"
@@ -284,6 +290,11 @@
     },
     "wave-nav": {
       "body": "La forme d'onde est la surface de navigation : cliquez n'importe où pour y sauter, faites défiler la molette pour zoomer autour du curseur (jusqu'à 50×), et faites glisser pour vous déplacer une fois zoomé. + / − / Ajuster font de même depuis les boutons. Les lignes violettes sont les débuts de piste de la tracklist de session, l'ambre est le dernier fader baissé, et les lignes colorées sur les pistes de la bibliothèque sont vos points de repère DJ.\n\nLes deux pastilles superposées à la forme d'onde vous informent au fil de l'écoute : celle de gauche montre l'encodage source (survolez pour le codec, la fréquence d'échantillonnage, le débit et la taille du fichier), celle de droite le volume intégré de la piste (survolez pour toute l'histoire EBU R128 - intégré vs momentané, cibles de streaming, true peak). L'affichage à côté des boutons de zoom suit votre curseur avec le temps et le volume momentané à cette position exacte.\n\nEn mode édition, la bande gagne trois couloirs de pointeur : le bord supérieur fait glisser la poignée IN, le bord inférieur fait glisser OUT, et le milieu reste clic-pour-naviguer - vous pouvez donc auditionner et rogner sans jamais quitter la forme d'onde.",
+      "k": {
+        "click": "Aller à cette position",
+        "wheel": "Zoomer autour du curseur (jusqu'à 50×)",
+        "drag": "Déplacer la vue en zoom"
+      },
       "title": "Navigation dans la forme d'onde"
     },
     "midi-thru": {
@@ -291,7 +302,25 @@
     },
     "cue-edit": {
       "title": "Éditeur de cues — clavier & souris",
-      "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat. Les nombres en haut de la forme d'onde indiquent la distance en temps entre cues et drops voisins. Cochez des pistes dans la liste pour appliquer en masse les patterns assignés via la barre en bas. Souris : clic gauche déplace le curseur de beat, clic droit ajoute un cue mémoire, Maj+clic droit un drop, Ctrl+clic droit supprime les marqueurs sur ce temps. Le décalage de la grille déplace aussi les cues et les drops."
+      "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat. Les nombres en haut de la forme d'onde indiquent la distance en temps entre cues et drops voisins. Cochez des pistes dans la liste pour appliquer en masse les patterns assignés via la barre en bas. Souris : clic gauche déplace le curseur de beat, clic droit ajoute un cue mémoire, Maj+clic droit un drop, Ctrl+clic droit supprime les marqueurs sur ce temps. Le décalage de la grille déplace aussi les cues et les drops. Le lasso sélectionne aussi les drops en plus des cues ; un clic sur un marqueur ne sélectionne que lui, Ctrl+clic ajoute ou retire des marqueurs individuels de la sélection, et Suppr (ou Retour arrière) supprime d'un coup tous les cues et drops sélectionnés — bibliothèque, journal des modifications et tag du fichier suivent.",
+      "k": {
+        "step": "Déplacer le curseur de beat d'un temps",
+        "jump": "Saut de beats selon la taille de saut",
+        "jumpSize": "Changer la taille de saut (1–64 temps)",
+        "addDrop": "Ajouter un marqueur DROP au curseur",
+        "removeDrop": "Supprimer le drop le plus proche",
+        "deleteSel": "Supprimer tous les cues et drops sélectionnés",
+        "audition": "Maintenir pour pré-écouter depuis le curseur ; relâcher arrête",
+        "nudge": "Décaler toute la grille de 10 ms (cues + drops suivent)",
+        "nudgeFine": "Décaler la grille de 1 ms (ultra-fin)",
+        "listNav": "Parcourir les pistes de la liste Collection",
+        "click": "Déplacer le curseur de beat (calé sur le beat) ; sur un marqueur : le sélectionner",
+        "drag": "Sélection au lasso des cues et des drops",
+        "ctrlClick": "Ajouter/retirer un cue ou un drop de la sélection",
+        "rclick": "Ajouter un cue mémoire sur ce temps",
+        "srclick": "Ajouter un marqueur de drop",
+        "crclick": "Supprimer les marqueurs cue + drop sur ce temps"
+      }
     },
     "midi-drv-filter": {
       "title": "Filtre de messages fan-out",
@@ -1037,6 +1066,9 @@
       "removeDrop": "Supprimer le drop au curseur",
       "noFileTag": "Ce format de fichier ne peut pas porter le tag de drop — les drops ne sont stockés que dans la bibliothèque (MP3/FLAC les stockent aussi dans le fichier).",
       "selection": "{n} cues sélectionnés",
+      "selDrops": "{n} marqueurs de drop sélectionnés",
+      "delHint": "Suppr / Retour arrière supprime tous les cues et drops sélectionnés en une seule étape.",
+      "deletedToast": "{cues} cues + {drops} drops supprimés",
       "patternName": "Nom du pattern…",
       "savePattern": "Enregistrer comme pattern",
       "applyHot": "Appliquer les patterns (hotcues)",

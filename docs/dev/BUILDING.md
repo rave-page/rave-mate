@@ -37,6 +37,10 @@ The single-instance guard doubles as a control socket (`127.0.0.1:47620`):
 ```
 rave-mate ctl status | tab <name> | click <text> | read <id> | snapshot
 rave-mate ctl screenshot out.png | screenshot-all <dir> | logs | quit
+rave-mate ctl act <act> [val]   # post a raw UI action through the page act pipeline
+                                # (webview renderer) - drives keyboard scopes / pointer
+                                # lanes with no clickable element, e.g.
+                                # `act key:cueedit del`, `act mp-surf:library down:0.3,0.5`
 ```
 
 Build → launch → drive the golden path via ctl → check `logs` → `quit`. Then run

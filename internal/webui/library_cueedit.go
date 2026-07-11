@@ -39,8 +39,10 @@ type ceSt struct {
 	cursorMs float64
 	jump     float64      // Shift+arrow beat-jump size
 	sel      map[int]bool // selected indexes into track.Cues
+	dsel     map[int]bool // selected indexes into drops
 	dragA    float64      // rubber band anchor (axis ms; <0 idle)
 	dragB    float64
+	dragMods string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
 	assign   map[int]string // drop index -> pattern id (apply flow)
 	patName  string         // save-pattern name input
 	toMem    bool           // last apply wrote memory cues (render hint only)
@@ -61,6 +63,7 @@ type ceOverlay struct {
 	drops    []float64
 	cursorMs float64
 	sel      map[int]bool
+	dsel     map[int]bool
 	dragA    float64 // rubber band (axis ms; dragA<0 = none)
 	dragB    float64
 }
@@ -100,8 +103,12 @@ func (u *UI) ceSnapOverlay(host, mediaPath string) *ceOverlay {
 	for k, v := range c.sel {
 		sel[k] = v
 	}
+	dsel := make(map[int]bool, len(c.dsel))
+	for k, v := range c.dsel {
+		dsel[k] = v
+	}
 	return &ceOverlay{grid: c.grid, cues: c.track.Cues, drops: append([]float64(nil), c.drops...),
-		cursorMs: c.cursorMs, sel: sel, dragA: c.dragA, dragB: c.dragB}
+		cursorMs: c.cursorMs, sel: sel, dsel: dsel, dragA: c.dragA, dragB: c.dragB}
 }
 
 // cePatterns lazily opens the pattern store (nil on error - saving disabled).
@@ -155,7 +162,7 @@ func (u *UI) ceEnter(path string) {
 	c.mu.Lock()
 	c.active, c.path, c.track, c.grid = true, path, tr, grid
 	c.drops, c.cursorMs = drops, cursor
-	c.sel = map[int]bool{}
+	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
 	c.dragA, c.dragB = -1, -1
 	c.assign = map[int]string{}
 	c.report, c.lastErr = nil, ""
@@ -235,7 +242,7 @@ func (u *UI) ceReloadTrack() {
 	}
 	c.mu.Lock()
 	c.track = tr
-	c.sel = map[int]bool{}
+	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
 	c.mu.Unlock()
 }
 
@@ -312,6 +319,7 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	} else {
 		c.drops = cuepattern.AddDrop(c.drops, ms)
 	}
+	c.dsel = map[int]bool{} // drop indexes shifted
 	path, tr := c.path, c.track
 	drops := append([]float64(nil), c.drops...)
 	fileTag := c.fileTag
@@ -400,6 +408,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	}
 	if dropsChanged {
 		c.drops = kept
+		c.dsel = map[int]bool{} // drop indexes shifted
 	}
 	drops := append([]float64(nil), c.drops...)
 	c.mu.Unlock()
@@ -437,11 +446,16 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 }
 
 // ceSurf handles the waveform pointer stream while the editor owns it: click = move
-// cursor (beat-snapped), drag = rubber-band select cues.
+// cursor (beat-snapped) or select the marker under it, Ctrl+click = toggle a marker
+// in/out of the selection, drag = rubber-band select cues + drops.
 func (u *UI) ceSurf(host, val string) {
 	phase, fx, ok := mpPos(val)
 	if !ok {
 		return
+	}
+	mods := "" // 3rd CSV field of the left-down value ("down:fx,fy,cs"; shell.go)
+	if p := strings.SplitN(val, ",", 3); len(p) == 3 {
+		mods = p[2]
 	}
 	t := u.mpSnap(host)
 	if len(t.media) == 0 {
@@ -470,14 +484,15 @@ func (u *UI) ceSurf(host, val string) {
 	c.mu.Lock()
 	switch phase {
 	case "down":
-		c.dragA, c.dragB = axisMs, axisMs
+		c.dragA, c.dragB, c.dragMods = axisMs, axisMs, mods
 	case "move":
 		if c.dragA >= 0 {
 			c.dragB = axisMs
 		}
 	case "up":
 		a, b := c.dragA, c.dragB
-		c.dragA, c.dragB = -1, -1
+		downMods := c.dragMods
+		c.dragA, c.dragB, c.dragMods = -1, -1, ""
 		if a < 0 {
 			break
 		}
@@ -488,17 +503,40 @@ func (u *UI) ceSurf(host, val string) {
 		if c.grid != nil {
 			beatMs = c.grid.BeatLenMs(axisMs)
 		}
-		if b-a < beatMs/2 { // click: move the cursor
-			if c.grid != nil {
-				c.cursorMs = c.grid.SnapMs(axisMs)
+		if b-a < beatMs/2 { // click: marker select / toggle, else move the cursor
+			ci, di, dist := ceNearestMarker(c, axisMs)
+			hit := dist <= beatMs/2
+			switch {
+			case strings.Contains(downMods, "c"): // Ctrl+click: toggle marker in/out
+				if hit && ci >= 0 {
+					c.sel[ci] = !c.sel[ci]
+				} else if hit {
+					c.dsel[di] = !c.dsel[di]
+				}
+			case hit: // click on a marker: select it, replacing the selection
+				c.sel, c.dsel = map[int]bool{}, map[int]bool{}
+				if ci >= 0 {
+					c.sel[ci] = true
+				} else {
+					c.dsel[di] = true
+				}
+			default:
+				if c.grid != nil {
+					c.cursorMs = c.grid.SnapMs(axisMs)
+				}
 			}
 			break
 		}
-		// drag: select cues inside [a,b]
-		c.sel = map[int]bool{}
+		// drag: select cues + drops inside [a,b]
+		c.sel, c.dsel = map[int]bool{}, map[int]bool{}
 		for i, cue := range c.track.Cues {
 			if cue.StartMs >= a && cue.StartMs <= b && cue.Kind != musiclib.CueGrid {
 				c.sel[i] = true
+			}
+		}
+		for i, d := range c.drops {
+			if d >= a && d <= b {
+				c.dsel[i] = true
 			}
 		}
 	}
@@ -507,6 +545,99 @@ func (u *UI) ceSurf(host, val string) {
 	if phase == "up" {
 		u.cePatchRail()
 	}
+}
+
+// ceNearestMarker finds the marker closest to ms: cue (ci≥0) or drop (di≥0), never
+// both. dist=+Inf when the track has no markers. c is LOCKED by the caller.
+func ceNearestMarker(c *ceSt, ms float64) (ci, di int, dist float64) {
+	ci, di, dist = -1, -1, math.Inf(1)
+	for i, q := range c.track.Cues {
+		if q.Kind == musiclib.CueGrid {
+			continue
+		}
+		if d := math.Abs(q.StartMs - ms); d < dist {
+			ci, di, dist = i, -1, d
+		}
+	}
+	for i, dm := range c.drops {
+		if d := math.Abs(dm - ms); d < dist {
+			ci, di, dist = -1, i, d
+		}
+	}
+	return ci, di, dist
+}
+
+// ceDeleteSelected removes every selected cue AND drop in one action (Del/Backspace).
+// Cues persist via UpdateTrackCues, drops via SetDrops (both journaled); the file-tag
+// drop write is debounced so the keypress causes at most one tag rewrite. Empty
+// selection = no-op (no toast spam).
+func (u *UI) ceDeleteSelected() {
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active {
+		c.mu.Unlock()
+		return
+	}
+	nc, nd := 0, 0
+	for _, on := range c.sel {
+		if on {
+			nc++
+		}
+	}
+	for _, on := range c.dsel {
+		if on {
+			nd++
+		}
+	}
+	if nc == 0 && nd == 0 {
+		c.mu.Unlock()
+		return
+	}
+	tr, path, fileTag := c.track, c.path, c.fileTag
+	var cues []musiclib.CuePoint
+	for i, q := range tr.Cues {
+		if c.sel[i] {
+			continue
+		}
+		cues = append(cues, q)
+	}
+	drops := c.drops[:0:0]
+	for i, d := range c.drops {
+		if c.dsel[i] {
+			continue
+		}
+		drops = append(drops, d)
+	}
+	c.drops = drops
+	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
+	dropsCopy := append([]float64(nil), drops...)
+	if nd > 0 && fileTag {
+		if c.tagTimer != nil {
+			c.tagTimer.Stop()
+		}
+		c.tagTimer = time.AfterFunc(800*time.Millisecond, func() {
+			if err := tagwrite.WriteDrops(path, dropsCopy); err != nil {
+				u.logErr("drops file tag", err)
+			}
+		})
+	}
+	c.mu.Unlock()
+	if nd > 0 {
+		u.bg(func() {
+			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, dropsCopy); err != nil {
+				u.logErr("save drops", err)
+			}
+		})
+		u.libDropsChanged(path, dropsCopy)
+	}
+	if nc > 0 {
+		u.ceSetCues(tr, cues) // repaints wave + rail + census
+	} else {
+		u.cePatchWave()
+		u.cePatchRail()
+		u.libPatchBody()
+	}
+	u.toast(i18n.T("library.ce.deletedToast", i18n.A{"cues": fmt.Sprint(nc), "drops": fmt.Sprint(nd)}))
 }
 
 // ceSavePattern exports the selected cues as a named pattern anchored at the cursor.
@@ -737,6 +868,8 @@ func (u *UI) ceKey(val string) {
 		u.ceToggleDrop(false)
 	case "senter", "st":
 		u.ceToggleDrop(true)
+	case "del":
+		u.ceDeleteSelected()
 	case "space", "sspace":
 		u.ceAudition(true)
 	case "spaceup":
@@ -1038,17 +1171,28 @@ func (u *UI) ceRailHTML(s *libSt) string {
 		btn(i18n.T("library.ce.addDrop"), "outline", "ce-drop-add", ""),
 		btn(i18n.T("library.ce.removeDrop"), "ghost", "ce-drop-del", "")))
 
-	// selection → pattern
-	nsel := 0
+	// selection → pattern (cues) / delete (cues + drops)
+	nsel, ndsel := 0, 0
 	for _, on := range c.sel {
 		if on {
 			nsel++
+		}
+	}
+	for _, on := range c.dsel {
+		if on {
+			ndsel++
 		}
 	}
 	if nsel > 0 {
 		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.selection", i18n.A{"n": fmt.Sprint(nsel)})) + `</div>`)
 		b.WriteString(`<div class=lib-toolbar>` + fieldRaw("ce-pat-name", "", i18n.T("library.ce.patternName")) +
 			btn(i18n.T("library.ce.savePattern"), "outline", "ce-pat-save", "") + `</div>`)
+	}
+	if ndsel > 0 {
+		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.selDrops", i18n.A{"n": fmt.Sprint(ndsel)})) + `</div>`)
+	}
+	if nsel+ndsel > 0 {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.delHint")) + `</div>`)
 	}
 
 	// apply
