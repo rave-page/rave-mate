@@ -23,6 +23,7 @@ func init() {
 // pubSetTarget flips the shared control target and re-renders (empty = this computer). Resets both
 // the publish and library remote caches so every remote tab agrees on the target.
 func (u *UI) pubSetTarget(t string) {
+	u.mirrorShutdown() // the Library mirror follows the shared target
 	u.mu.Lock()
 	u.remoteTarget = t
 	u.mu.Unlock()
@@ -30,10 +31,6 @@ func (u *UI) pubSetTarget(t string) {
 	ps.mu.Lock()
 	ps.resetFor(t)
 	ps.mu.Unlock()
-	ls := u.libR()
-	ls.mu.Lock()
-	ls.resetFor(t)
-	ls.mu.Unlock()
 	u.pubSetSel("") // drop stale selection
 	u.patchMain()
 }

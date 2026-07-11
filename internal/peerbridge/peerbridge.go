@@ -94,10 +94,11 @@ type Bridge struct {
 
 	midi midiState // outbound MIDI-forward gate + control target
 
-	// midi/control/bus sinks, set by their respective modules (nil = drop inbound).
-	onMIDI    func(peerNodeID string, payload []byte)
-	onControl func(peerNodeID string, payload []byte)
-	onBus     func(peerNodeID string, payload []byte)
+	// midi/control/bus/remote-ui sinks, set by their respective modules (nil = drop inbound).
+	onMIDI     func(peerNodeID string, payload []byte)
+	onControl  func(peerNodeID string, payload []byte)
+	onBus      func(peerNodeID string, payload []byte)
+	onRemoteUI func(peerNodeID string, payload []byte)
 }
 
 // New builds a bridge over the given peer manager.
@@ -126,6 +127,13 @@ func (b *Bridge) SetControlSink(fn func(peerNodeID string, payload []byte)) {
 func (b *Bridge) SetBusSink(fn func(peerNodeID string, payload []byte)) {
 	b.mu.Lock()
 	b.onBus = fn
+	b.mu.Unlock()
+}
+
+// SetRemoteUISink routes inbound ChanRemoteUI (remote Library session) payloads to fn.
+func (b *Bridge) SetRemoteUISink(fn func(peerNodeID string, payload []byte)) {
+	b.mu.Lock()
+	b.onRemoteUI = fn
 	b.mu.Unlock()
 }
 
@@ -215,6 +223,13 @@ func (b *Bridge) onData(peerNodeID, channel string, payload []byte) {
 	case peerlink.ChanBus:
 		b.mu.Lock()
 		fn := b.onBus
+		b.mu.Unlock()
+		if fn != nil {
+			fn(peerNodeID, payload)
+		}
+	case peerlink.ChanRemoteUI:
+		b.mu.Lock()
+		fn := b.onRemoteUI
 		b.mu.Unlock()
 		if fn != nil {
 			fn(peerNodeID, payload)

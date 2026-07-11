@@ -14,6 +14,12 @@ The Library tab is a native browser + relational store (SQLite) for your DJ medi
 - **Change log**: every mutation (plays/ratings/metadata) is append-only recorded - the basis
   for cross-machine merge and rollback.
 
+## Remote library (paired instance)
+
+The whole tab works against a paired instance: Controlling switcher → pick the peer. Its own
+rendered Library streams here and every action executes over there - see
+[multi-pc.md](multi-pc.md#remote-library).
+
 ## Collection filters
 
 Collection combines free-text search (title/artist) with facet dropdowns - **Genre**,

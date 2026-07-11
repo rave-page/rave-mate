@@ -1,6 +1,9 @@
 package webui
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // Latest-wins render mailbox for pointer-drag surfaces. actpos 'move' events arrive
 // faster than a render+eval round-trip; running each render on the serial actWorker
@@ -15,7 +18,10 @@ var (
 )
 
 // renderCoalesce schedules fn under key; a pending schedule is replaced (newest wins).
+// Keys are namespaced per *UI: a headless remote session and the window UI may use the
+// same fragment keys and must never collapse into each other's mailbox slot.
 func (u *UI) renderCoalesce(key string, fn func()) {
+	key = fmt.Sprintf("%p\x00%s", u, key)
 	rmMu.Lock()
 	rmPend[key] = fn
 	if rmBusy[key] {

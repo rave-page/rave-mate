@@ -5,7 +5,9 @@ import (
 	"crypto/ed25519"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,14 +161,98 @@ func (m *Manager) Stop() {
 
 func listenRange() (net.Listener, int, error) {
 	var lastErr error
-	for _, p := range portRange {
-		ln, err := net.Listen("tcp", "0.0.0.0:"+strconv.Itoa(p))
+	host := bindHost()
+	for _, p := range listenPorts() {
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(p)))
 		if err == nil {
 			return ln, p, nil
 		}
 		lastErr = err
 	}
 	return nil, 0, lastErr
+}
+
+// listenPorts returns the listener port candidates. RAVE_MATE_PEER_PORTS (comma-separated)
+// overrides portRange - isolated rigs sharing a host with a real instance must not race it
+// for 47631-47635.
+func listenPorts() []int {
+	v := strings.TrimSpace(os.Getenv("RAVE_MATE_PEER_PORTS"))
+	if v == "" {
+		return portRange
+	}
+	var out []int
+	for _, f := range strings.Split(v, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(f)); err == nil && n > 0 && n < 65536 {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return portRange
+	}
+	return out
+}
+
+// bindHost is the listener bind address. RAVE_MATE_PEER_BIND overrides the default
+// all-interfaces bind - e.g. 127.0.0.1 for same-host rigs (no LAN exposure, no firewall
+// prompt) or one NIC's address on multi-homed boxes.
+func bindHost() string {
+	if v := strings.TrimSpace(os.Getenv("RAVE_MATE_PEER_BIND")); v != "" {
+		return v
+	}
+	return "0.0.0.0"
+}
+
+// BindIsLoopback reports a loopback-only listener bind (RAVE_MATE_PEER_BIND). The app skips
+// mDNS then: a loopback listener isn't LAN-reachable and discovery only advertises LAN IPs.
+func BindIsLoopback() bool {
+	ip := net.ParseIP(bindHost())
+	return ip != nil && ip.IsLoopback()
+}
+
+// SeedAddrs returns static peer addresses ("host:port", comma-separated) from
+// RAVE_MATE_PEER_SEED - direct dial for same-host rigs and multicast-less networks.
+func SeedAddrs() []string {
+	var out []string
+	for _, a := range strings.Split(os.Getenv("RAVE_MATE_PEER_SEED"), ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// ConnectAddr dials a peer at a literal address (seed / manual connect - no discovery
+// record). No-op while any connection already uses addr; trust + SAS flow are identical to
+// a discovered dial.
+func (m *Manager) ConnectAddr(addr string) {
+	if addr == "" {
+		return
+	}
+	m.mu.Lock()
+	for _, c := range m.conns {
+		if c.info.Address == addr {
+			m.mu.Unlock()
+			return
+		}
+	}
+	m.mu.Unlock()
+	debuglog.Go(m.log, logTag, func() {
+		dctx, cancel := context.WithTimeout(m.ctx, 8*time.Second)
+		defer cancel()
+		ws, _, err := websocket.Dial(dctx, "ws://"+addr+"/", nil)
+		if err != nil {
+			if n, ok := m.dialGate("addr:"+addr).Should(err.Error(), 10*time.Minute); ok {
+				f := map[string]any{"addr": addr, "error": err.Error()}
+				if n > 0 {
+					f["suppressed"] = n
+				}
+				m.log.Warn(logTag, "seed dial failed", f)
+			}
+			return
+		}
+		m.dialGate("addr:" + addr).Reset()
+		m.runHandshake(newWSConn(ws), roleInitiator, "", addr)
+	})
 }
 
 // ── inbound ──────────────────────────────────────────────────────────────────

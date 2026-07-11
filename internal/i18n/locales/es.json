@@ -143,6 +143,10 @@
     "y": "Y"
   },
   "help": {
+    "remote-library": {
+      "title": "Biblioteca remota (instancia emparejada)",
+      "body": "Estás viendo la pestaña Library del OTRO equipo: la instancia emparejada renderiza su propia biblioteca exactamente igual que en su ventana y transmite la imagen aquí; cada clic, tecla y edición se envía de vuelta y se ejecuta allí. Su ventana visible no se toca ni se mueve mientras trabajas.\n\nComo los comandos se ejecutan en la máquina remota, todo opera sobre SUS archivos de música y su base de datos: el análisis de beatgrid (gridfix), la edición de cues y drops, la escritura de tags, los transcodificados y los cambios de playlists leen y escriben la biblioteca remota, usando la CPU/GPU y el disco del equipo remoto. A esta máquina no se copia nada salvo la imagen en pantalla e imágenes pequeñas como portadas y formas de onda.\n\nLa preescucha de audio (play/cue) arranca el reproductor REMOTO: el sonido sale por el dispositivo de audio del equipo remoto, no por este. Es intencional: un portátil de cabina puede preparar la biblioteca del PC de estudio mientras los monitores del estudio siguen mandando. Las previsualizaciones de vídeo integradas pueden no estar disponibles en modo remoto.\n\nSi el enlace cae a mitad de sesión, este banner se vuelve ámbar y la vista se congela; el lado remoto limpia su sesión automáticamente. Reconecta (o vuelve a elegir el par en el selector Controlando) para continuar. El emparejamiento y el transporte usan el mismo enlace LAN autenticado de extremo a extremo que el resto de rave-mate (Ed25519 + MAC por trama): nada pasa por Internet."
+    },
     "kb": {
       "click": "Clic",
       "drag": "Arrastrar",
@@ -341,6 +345,17 @@
     }
   },
   "library": {
+    "mirror": {
+      "banner": "Controlando {name}",
+      "connecting": "Conectando con la biblioteca remota…",
+      "audioNote": "Todo lo de abajo se ejecuta en el equipo remoto: la preescucha de audio suena allí.",
+      "closed": "Sesión remota finalizada.",
+      "disconnected": "Par desconectado.",
+      "timeout": "El par no respondió: puede que ejecute una versión antigua de rave-mate sin biblioteca remota.",
+      "reconnect": "Reconectar",
+      "noLink": "Enlace de pares no disponible: activa Peers para controlar una instancia emparejada.",
+      "noPicker": "Los diálogos de archivos no pueden abrirse en remoto: aparecerían en el equipo controlado. Navega con la lista de carpetas."
+    },
     "addToPlaylist": "Añadir a lista…",
     "audioCap": {
       "default": "AAC/MP3 máx. 320k",

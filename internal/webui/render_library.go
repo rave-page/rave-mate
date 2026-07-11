@@ -177,6 +177,12 @@ func (u *UI) renderLibrary() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.library"), i18n.T("navtitle.library")))
 	b.WriteString(u.targetSwitcherHTML("libtarget", "lib-target:"))
+	if u.libRemoteTarget() != "" {
+		// remote mirror: the embedded peer view carries its OWN section tabs - a local
+		// duplicate row would be dead weight and shadow ctl clicks aimed at the mirror
+		b.WriteString(`<div id=lib-body>` + u.libBody() + `</div>`)
+		return b.String()
+	}
 	b.WriteString(subTabs("lib-section:", sec,
 		[2]string{"browse", i18n.T("library.section.browse")}, [2]string{"favorites", i18n.T("library.section.favorites")},
 		[2]string{"collection", i18n.T("library.section.collection")}, [2]string{"playlists", i18n.T("library.section.playlists")},
@@ -237,10 +243,11 @@ func (u *UI) libPatchDetail() {
 }
 
 // libBody builds the active section (locks state; sub-builders are lock-free). When a peer is
-// targeted it routes to the remote renderer; the local path below is byte-behaviour-unchanged.
+// targeted it routes to the live mirror (library_mirror.go) - the peer's own rendered Library
+// tab, remote-driven; the local path below is byte-behaviour-unchanged.
 func (u *UI) libBody() string {
 	if tgt := u.libRemoteTarget(); tgt != "" {
-		return u.libRemoteBody(tgt)
+		return u.libMirrorBody(tgt)
 	}
 	sec := u.libSectionOr()
 	s := u.lib()

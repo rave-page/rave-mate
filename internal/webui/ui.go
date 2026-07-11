@@ -31,13 +31,16 @@ type UI struct {
 	shell   shell
 	started time.Time
 
-	mu       sync.Mutex
-	active   string
-	stop     chan struct{}
-	closed   bool
-	trayStop func() // system-tray teardown (webview renderer only); nil off Windows / before ready
+	mu        sync.Mutex
+	active    string
+	pinnedTab string // non-"" locks setTab to this tab (headless remote-library sessions)
+	stop      chan struct{}
+	closed    bool
+	trayStop  func() // system-tray teardown (webview renderer only); nil off Windows / before ready
 
 	updMgr *updater.Manager // self-update state machine (5-min poll; nil until onReady; disabled on dev builds)
+
+	rui *ruiHub // remote Library sessions over the peer link (host + mirror mux); nil without peers
 
 	probes   settingsProbes  // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
 	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
@@ -104,6 +107,7 @@ func New(svc ui.Services) *UI {
 		u.shell = sh
 		go u.evalFlusher()
 	}
+	u.ruiInit() // remote Library sessions over the peer link (no-op without peers)
 	return u
 }
 
@@ -187,6 +191,7 @@ func (u *UI) startTray() {
 
 // Stop tears the window down (idempotent).
 func (u *UI) Stop() {
+	u.mirrorShutdown() // best-effort close of a live remote-library session
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
@@ -348,7 +353,15 @@ func (u *UI) activeTab() string {
 }
 
 // setTab switches the active tab and patches the main + nav fragments (Go-driven DOM update).
+// A pinned (headless) UI ignores switches away from its pinned tab - the mirror surface has no
+// nav, but nav-back/fwd or stray acts must never walk the session off the Library tab.
 func (u *UI) setTab(id string) {
+	u.mu.Lock()
+	pinned := u.pinnedTab
+	u.mu.Unlock()
+	if pinned != "" && id != pinned {
+		return
+	}
 	if id != u.activeTab() {
 		u.navRecord() // record the pre-switch view for mouse-back
 	}
@@ -586,7 +599,9 @@ func (u *UI) evalFlusher() {
 		case <-u.evalKick:
 		}
 		for {
-			for inSizeMove() {
+			// The size-move gate protects the REAL window's UI thread; a virtual shell has no
+			// window and must keep streaming while the local user drags theirs.
+			for !u.virtual() && inSizeMove() {
 				select {
 				case <-u.stop:
 					return
@@ -605,6 +620,10 @@ func (u *UI) evalFlusher() {
 // dispatchEvals sends one batch to the page and waits for its ack (bounded): ≤1 un-acked Dispatch
 // per evalAckTimeout, so a wedged UI thread accumulates coalesced fragments here - never closures.
 func (u *UI) dispatchEvals(js string) {
+	if vs, ok := u.shell.(*virtualShell); ok {
+		vs.eval(js) // synchronous sink - no UI thread, no ack round-trip needed
+		return
+	}
 	id := nextEvalID()
 	ch := make(chan string, 1)
 	evalWaiters.Store(id, ch)

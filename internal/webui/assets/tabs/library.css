@@ -275,3 +275,18 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
  * never overflows - fixes the ctl-snapshot ⚠OVERFLOW flag on folder rows) */
 .libnav-t{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
 .libnav-n{flex:0 0 auto;font-size:11px;color:var(--rp-muted,#B98AA0);font-variant-numeric:tabular-nums}
+
+/* ── remote-library mirror (library_mirror.go) ──
+ * The iframe hosts the PEER's rendered Library tab; it must fill the tab viewport so the
+ * mirrored layout matches the peer's own window. */
+.rmirror-frame{height:calc(100vh - 200px);min-height:360px;border:1px solid var(--rp-border,#3c414d);border-radius:8px;overflow:hidden;background:#0a0a0a}
+.rmirror-frame iframe{width:100%;height:100%;border:0;display:block;background:#0a0a0a}
+.rmirror-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;margin:8px 0;border:1px solid var(--rp-border,#3c414d);border-radius:8px;background:var(--rp-card,#23262e);font-size:12px}
+.rmirror-title{font:600 12px var(--font-display,Orbitron),sans-serif;color:var(--rp-hot,#FF3E8A)}
+.rmirror-note{color:var(--rp-muted,#B98AA0)}
+.rmirror-note.rmirror-err{color:var(--rp-amber,#FFB547)}
+.rmirror-dot{width:8px;height:8px;border-radius:50%;background:var(--rp-muted,#B98AA0);flex:0 0 auto}
+.rmirror-live .rmirror-dot{background:var(--rp-mint,#08F79B)}
+.rmirror-connecting .rmirror-dot{background:var(--rp-amber,#FFB547);animation:rmirror-pulse 1s infinite alternate}
+.rmirror-error .rmirror-dot,.rmirror-closed .rmirror-dot{background:var(--rp-amber,#FFB547)}
+@keyframes rmirror-pulse{from{opacity:.4}to{opacity:1}}
