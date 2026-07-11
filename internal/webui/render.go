@@ -117,7 +117,9 @@ func (u *UI) shellHTML() string {
 }
 
 func (u *UI) navHTML() string {
-	return `<div class=brand>rave·<b>mate</b></div><div id=nav-list>` + u.navListHTML() + `</div>`
+	// #nav-update: bottom-pinned self-update block (update_actions.go); empty when up to date.
+	return `<div class=brand>rave·<b>mate</b></div><div id=nav-list>` + u.navListHTML() + `</div>` +
+		`<div id=nav-update>` + u.navUpdateHTML() + `</div>`
 }
 
 func (u *UI) navListHTML() string {

@@ -300,6 +300,10 @@
     "led-feedback": {
       "title": "Test du retour LED",
       "body": "Envoie une courte rafale reconnaissable vers votre contrôleur : des messages Note-On balaient les notes 36–51 avec une vélocité croissante (environ un toutes les 50 ms), puis tout est éteint — moins de deux secondes au total. Observez le matériel : les pads, touches ou boutons de cette plage devraient s'allumer puis s'éteindre.\n\nLe décompte affiché provient de la trace filaire du pilote noyau : chaque entrée « feedback out » est un message que le pilote a réellement écrit vers l'entrée MIDI de l'appareil. Un décompte complet prouve que tout le chemin (application → pilote → appareil) fonctionne. Remarque : certains contrôleurs ignorent les LED via de simples Note-On MIDI — ils attendent un mode propriétaire, un canal ou une correspondance de vélocité spécifique, voire du HID — des LED éteintes avec un décompte complet signifient donc quand même que le transport fonctionne."
+    },
+    "app-updates": {
+      "title": "Comment rave-mate se met à jour",
+      "body": "rave-mate vérifie son flux de versions toutes les 5 minutes - un minuscule téléchargement de manifeste ; la requête n'envoie aucune donnée vous concernant, elle ne récupère qu'un fichier JSON. Quand une nouvelle version apparaît, vous êtes notifié exactement une fois par version, ici et via une bulle de la zone de notification.\n\nCanaux : chaque build est lié au canal depuis lequel il a été construit - nightly (build roulant de la pointe de development), alpha (tags de pré-version), beta (staging) et production. Un build ne se met à jour que dans son propre canal ; une installation nightly reste nightly.\n\nVérification : le manifeste du flux est signé avec la clé de publication Ed25519 du projet, intégrée dans ce binaire - un manifeste non signé par cette clé est rejeté d'emblée. Chaque fichier téléchargé doit en plus correspondre à sa somme SHA-256 du manifeste signé, et les binaires Windows officiels sont signés Authenticode. Si un contrôle échoue, le téléchargement est rejeté et rien n'est installé - sans exception.\n\nÉtapes : « Télécharger » récupère le nouveau build à côté de l'actuel et le vérifie (rien n'est encore remplacé). « Installer » remplace atomiquement le programme en cours par le build vérifié - vous continuez d'utiliser l'ancienne version jusqu'au redémarrage. « Redémarrer pour appliquer » relance rave-mate sur la nouvelle version ; une copie de secours (.old) est conservée jusqu'au prochain démarrage réussi."
     }
   },
   "library": {
@@ -1389,6 +1393,22 @@
     "unknownWorld": "Monde inconnu",
     "vmcHelp": "VMC diffuse cette prise en données brutes HMD+manettes+trackers vers un récepteur VMC (VSeeFace / Warudo / VNyan @ {addr}) - le moteur de rendu gère l'IK et anime votre avatar ; c'est le vrai chemin de lecture du mouvement. Les trackers OSC alimentent le full-body tracking de VRChat - ils ne peuvent pas rejouer une prise sur votre avatar VRChat (VRChat pilote toujours tête + mains depuis le HMD/manettes live, et le mode bureau ignore les trackers). Pour rejouer sur un avatar VRChat : Exporter .anim → pilotez-le depuis l'Animator de l'avatar.",
     "vrchatUnavailable": "Les outils VRChat sont indisponibles - activez la fonction VRChat dans Réglages."
+  },
+  "nav": {
+    "update": {
+      "download": "Télécharger {version}",
+      "downloading": "Téléchargement… {pct}%",
+      "failed": "Échec de la mise à jour : ",
+      "headAvailable": "Mise à jour disponible",
+      "headStaged": "Redémarrage requis",
+      "headVerified": "Mise à jour vérifiée",
+      "install": "Installer la mise à jour",
+      "meta": "{version} · canal {channel}",
+      "restart": "Redémarrer pour appliquer",
+      "retry": "Réessayer le téléchargement",
+      "stagedNote": "Installée sur le disque. Un redémarrage termine la mise à jour.",
+      "verifiedNote": "Téléchargée et vérifiée - prête à installer."
+    }
   },
   "navtitle": {
     "appgroups": "Relancer un jeu d'applis de rig DJ ensemble",
@@ -2818,7 +2838,13 @@
     "open": "Ouvrir rave-mate",
     "quit": "Quitter",
     "tooltip": "rave-mate - {version}",
-    "updateNotifyBody": "rave-mate {version} est prêt à être installé. Cliquez pour ouvrir les paramètres de mise à jour.",
+    "update": {
+      "download": "Télécharger la mise à jour {version}",
+      "downloading": "Téléchargement de la mise à jour… {pct}%",
+      "install": "Installer la mise à jour",
+      "restart": "Redémarrer pour terminer la mise à jour"
+    },
+    "updateNotifyBody": "rave-mate {version} est disponible. Cliquez pour ouvrir rave-mate et lancer le téléchargement depuis le panneau de mise à jour.",
     "updateNotifyTitle": "Mise à jour disponible"
   },
   "twitch": {

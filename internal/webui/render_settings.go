@@ -944,7 +944,7 @@ func (u *UI) updatesBody() string {
 	}
 	return head +
 		btnRow(btn(i18n.T("settings.body.updates.check"), "primary", "settings-update-check", "")) +
-		`<div id=inst-update></div>` +
+		`<div id=inst-update>` + u.updateFlowHTML() + `</div>` +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.updates.note")) + `</div>`
 }
 

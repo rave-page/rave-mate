@@ -27,7 +27,25 @@ body {
   width: 220px; flex: 0 0 220px; height: 100vh; overflow-y: auto;
   border-right: 1px solid var(--rp-faint, rgba(255,255,255,.06));
   padding: 12px 8px; background: rgba(255,255,255,.02);
+  display: flex; flex-direction: column;
 }
+/* bottom-pinned self-update block (empty + invisible when up to date) */
+#nav-update { margin-top: auto; padding-top: 10px; }
+.nav-upd {
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--rp-border, #3c414d); border-radius: 8px; padding: 10px;
+  background: var(--rp-card, #23262e); font-size: 12px;
+}
+.nav-upd-head {
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 700; font-size: 12px; color: var(--rp-fg, #fafafa);
+}
+.nav-upd-head .tt { margin-left: auto; }
+.nav-upd-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--rp-base, #F70864); }
+.nav-upd-meta { color: var(--rp-muted, #B98AA0); font-size: 11px; word-break: break-word; }
+.nav-upd-note { color: var(--rp-muted, #B98AA0); font-size: 11px; }
+.nav-upd .rp-btn { width: 100%; }
+.nav-upd .hint { font-size: 11px; }
 #nav .brand {
   font-weight: 800; letter-spacing: .04em; padding: 10px 12px 16px; font-size: 18px;
   color: #fafafa;
@@ -165,8 +183,9 @@ body {
 /* mobile-first: collapse the rail to a top strip on narrow viewports */
 @media (max-width: 640px) {
   body { flex-direction: column; }
-  #nav { width: 100%; flex: none; height: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+  #nav { width: 100%; flex: none; height: auto; display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; }
   #nav .brand { flex-basis: 100%; }
+  #nav-update { flex-basis: 100%; margin-top: 0; padding-top: 4px; }
   #main { height: auto; padding: 16px; }
 }
 

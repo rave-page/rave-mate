@@ -81,9 +81,10 @@ const (
 
 	idiApplication = 32512
 
-	idShow  = 1
-	idCheck = 2
-	idQuit  = 3
+	idShow   = 1
+	idCheck  = 2
+	idQuit   = 3
+	idUpdate = 4
 )
 
 type point struct{ x, y int32 }
@@ -354,6 +355,13 @@ func (t *tray) showMenu() {
 	}
 	defer procDestroyMenu.Call(menu)
 	appendItem(menu, idShow, or(t.opt.OpenLabel, "Open rave-mate"))
+	// State-dependent update item (label re-read on every open; "" = up to date → omitted).
+	if t.opt.UpdateLabel != nil && t.opt.OnUpdate != nil {
+		if l := t.opt.UpdateLabel(); l != "" {
+			appendSep(menu)
+			appendItem(menu, idUpdate, l)
+		}
+	}
 	if t.opt.OnCheckUpdates != nil {
 		appendSep(menu)
 		appendItem(menu, idCheck, or(t.opt.CheckLabel, "Check for updates"))
@@ -380,6 +388,8 @@ func (t *tray) dispatch(id uint32) {
 		fn = t.opt.OnShow
 	case idCheck:
 		fn = t.opt.OnCheckUpdates
+	case idUpdate:
+		fn = t.opt.OnUpdate
 	case idQuit:
 		fn = t.opt.OnQuit
 	}

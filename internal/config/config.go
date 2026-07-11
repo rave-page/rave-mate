@@ -107,6 +107,10 @@ type Config struct {
 	// PreReleaseWarnedFor is the version string the alpha/beta launch warning was last shown
 	// for (once per version; internal dev/CI builds never warn). Additive, no version bump.
 	PreReleaseWarnedFor string `json:"preReleaseWarnedFor,omitempty"`
+	// UpdateNotifiedFor is the release version the update-available notification (tray balloon +
+	// toast) last fired for - each new version notifies exactly once, surviving restarts.
+	// Additive, no version bump.
+	UpdateNotifiedFor string `json:"updateNotifiedFor,omitempty"`
 	// DashboardCards is the ordered enabled dashboard card ids (ui registry);
 	// empty = registry defaults.
 	DashboardCards []string `json:"dashboardCards,omitempty"`

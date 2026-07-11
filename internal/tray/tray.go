@@ -15,4 +15,10 @@ type Options struct {
 	OnShow         func()
 	OnCheckUpdates func()
 	OnQuit         func()
+	// UpdateLabel is consulted each time the menu opens: a non-empty return adds a
+	// state-dependent update item ("Download update X", "Install update", "Restart to finish
+	// update") wired to OnUpdate. "" (or nil func) omits the item - no dead chrome when
+	// up to date.
+	UpdateLabel func() string
+	OnUpdate    func()
 }

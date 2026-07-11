@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
-	"rave.page/mate/internal/coord"
 	"rave.page/mate/internal/elevate"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
@@ -17,9 +16,7 @@ import (
 	"rave.page/mate/internal/rekordboxdb"
 	"rave.page/mate/internal/rekordboxmap"
 	"rave.page/mate/internal/service"
-	"rave.page/mate/internal/shared/selfupdate"
 	"rave.page/mate/internal/stt"
-	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/version"
@@ -652,10 +649,7 @@ func init() {
 	onExact("settings-svc-install", func(u *UI, _ actMsg) { u.svcRun(i18n.T("settings.label.install"), service.InstallInteractive) })
 	onExact("settings-svc-uninstall", func(u *UI, _ actMsg) { u.svcRun(i18n.T("settings.label.uninstall"), service.UninstallInteractive) })
 
-	// ── Updates (shared selfupdate flow; #inst-update carries progress/result) ──
-	onExact("settings-update-check", func(u *UI, _ actMsg) { u.updateCheck() })
-	onExact("settings-update-apply", func(u *UI, _ actMsg) { u.updateApply() })
-	onExact("settings-update-restart", func(u *UI, _ actMsg) { u.updateRestart() })
+	// Updates: see update_actions.go (settings-update-check + upd-download/install/restart).
 }
 
 // setLanguage persists the chosen UI locale, switches i18n, and re-renders the shell (nav + main)
@@ -743,155 +737,6 @@ func (u *UI) runInstall(id, label string, fn func(context.Context, func(int64, i
 		u.refreshProbes() // a tool/DLL just landed - refresh the cache so patchMain shows it (off UI thread)
 		u.patchMain()
 	})
-}
-
-// ── updates (shared selfupdate; same seam the Fyne view_updates.go + app.go SelfUpdate use) ──
-
-// upd lazily builds this build's updater over the shared selfupdate package. Enabled() is false
-// on a dev build (empty FeedURL) - the same seam the Fyne UI + ctl self-update use, no duplicate.
-func (u *UI) upd() *selfupdate.Updater {
-	u.updMu.Lock()
-	defer u.updMu.Unlock()
-	if u.updater == nil {
-		u.updater = selfupdate.New(version.FeedURL, version.BuildNum(), version.UpdatePubKey)
-	}
-	return u.updater
-}
-
-// patchUpd patches the #inst-update region (check/apply progress + result).
-func (u *UI) patchUpd(inner string) { u.eval("window.__patch('inst-update'," + jsQuote(inner) + ")") }
-
-// updateNotifyLoop polls the feed in the background (first check after 2min, then every 6h) and
-// raises a clickable tray notification once per newly-seen release; the click lands on
-// Settings→System (Updates card). No-op on dev builds (no feed).
-func (u *UI) updateNotifyLoop() {
-	up := u.upd()
-	if !up.Enabled() {
-		return
-	}
-	notified := ""
-	check := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		rel, avail, err := up.Available(ctx)
-		if err != nil || !avail || rel.Version == notified {
-			return // offline/up-to-date/already announced - stay quiet
-		}
-		notified = rel.Version
-		u.updMu.Lock()
-		u.updRel = rel // stage so Install in settings skips the re-fetch
-		u.updMu.Unlock()
-		if u.log != nil {
-			u.log.Info("webui", "update available", map[string]any{"version": rel.Version, "build": rel.Build})
-		}
-		_ = sysnotify.SendAction(
-			i18n.T("tray.updateNotifyTitle"),
-			i18n.T("tray.updateNotifyBody", i18n.A{"version": rel.Version}),
-			func() { u.showUpdateSettings() })
-	}
-	delay := 2 * time.Minute
-	for {
-		select {
-		case <-u.stop:
-			return
-		case <-time.After(delay):
-			check()
-			delay = 6 * time.Hour
-		}
-	}
-}
-
-// updateCheck polls the feed and renders up-to-date / available / error into #inst-update.
-func (u *UI) updateCheck() {
-	up := u.upd()
-	if !up.Enabled() {
-		u.patchUpd(hint("info", i18n.T("settings.body.updates.devNoFeed")))
-		return
-	}
-	u.patchUpd(hint("info", i18n.T("settings.body.updates.checking")))
-	u.bg(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		rel, avail, err := up.Available(ctx)
-		switch {
-		case err != nil: // offline / feed unreachable
-			u.patchUpd(hint("bad", i18n.T("settings.body.updates.checkFailed")+err.Error()))
-		case !avail:
-			u.patchUpd(hint("ok", i18n.T("settings.body.updates.upToDate")))
-		default:
-			u.updMu.Lock()
-			u.updRel = rel
-			u.updMu.Unlock()
-			body := hint("warn", i18n.T("settings.body.updates.available", i18n.A{"version": rel.Version}))
-			if rel.Notes != "" {
-				body += `<div class=set-note>` + html.EscapeString(rel.Notes) + `</div>`
-			}
-			body += btnRow(btn(i18n.T("settings.body.updates.install"), "primary", "settings-update-apply", ""))
-			u.patchUpd(body)
-		}
-	})
-}
-
-// updateApply downloads + verifies (sha256 + Ed25519 when a key is baked in) + swaps the new
-// build, then offers a restart. Reuses the staged release from updateCheck, re-fetching if absent.
-func (u *UI) updateApply() {
-	up := u.upd()
-	if !up.Enabled() {
-		return
-	}
-	u.updMu.Lock()
-	rel := u.updRel
-	u.updMu.Unlock()
-	u.patchUpd(progressBar(0, i18n.T("settings.label.downloading")))
-	u.bg(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		if rel == nil {
-			r, avail, err := up.Available(ctx)
-			switch {
-			case err != nil:
-				u.patchUpd(hint("bad", i18n.T("settings.body.updates.checkFailed")+err.Error()))
-				return
-			case !avail:
-				u.patchUpd(hint("ok", i18n.T("settings.body.updates.upToDate")))
-				return
-			}
-			rel = r
-		}
-		last := -1
-		err := up.Apply(ctx, rel, func(done, total int64) {
-			if total <= 0 {
-				return
-			}
-			pct := int(float64(done) / float64(total) * 100)
-			if pct == last {
-				return
-			}
-			last = pct
-			u.patchUpd(progressBar(float64(pct)/100, ""))
-		})
-		if err != nil {
-			u.patchUpd(hint("bad", i18n.T("settings.body.updates.applyFailed")+err.Error()))
-			u.toast(i18n.T("settings.body.updates.applyFailed"))
-			return
-		}
-		if u.log != nil {
-			u.log.Info("webui", "update installed", map[string]any{"version": rel.Version, "build": rel.Build})
-		}
-		u.patchUpd(hint("ok", i18n.T("settings.body.updates.installedRestart")) +
-			btnRow(btn(i18n.T("settings.body.updates.restart"), "primary", "settings-update-restart", "")))
-	})
-}
-
-// updateRestart tells a co-located rave-app to update too, then relaunches the swapped exe.
-func (u *UI) updateRestart() {
-	coord.NotifyRaveApp() // user-initiated → keep a co-located rave-app in lockstep
-	if err := selfupdate.Relaunch(); err != nil {
-		u.logErr("relaunch", err)
-		u.toast(i18n.T("settings.body.updates.restartFailed") + err.Error())
-		return
-	}
-	u.Stop()
 }
 
 // ── traktor helpers ──

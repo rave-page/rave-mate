@@ -286,62 +286,86 @@ func (u *Updater) Available(ctx context.Context) (*Release, bool, error) {
 	return rel, rel.Build > u.current, nil
 }
 
-// Apply downloads rel's binary, verifies its SHA-256, and atomically swaps it over the running
-// executable (rename current → .old, move new into place). It does NOT relaunch; call Relaunch
-// after, or prompt the user. onProgress (optional) gets bytes-downloaded / total (total 0 if
-// the server sent no Content-Length).
-func (u *Updater) Apply(ctx context.Context, rel *Release, onProgress func(done, total int64)) error {
+// Staged is a downloaded, checksum-verified update parked next to the live exe (exe+".new" +
+// sidecar "<name>.new" files). Install swaps it in; Discard removes it. Produced by Download.
+type Staged struct {
+	Rel    *Release
+	exe    string   // running executable path
+	tmp    string   // exe+".new" verified payload
+	assets []string // staged sidecar .new paths
+}
+
+// Download fetches rel's binary (+ sidecar assets), verifies every SHA-256, and stages the
+// files next to the running exe WITHOUT touching it - the verified/ready-to-install phase.
+// onProgress (optional) gets bytes-downloaded / total (total 0 if no Content-Length).
+func (u *Updater) Download(ctx context.Context, rel *Release, onProgress func(done, total int64)) (*Staged, error) {
 	if runtime.GOOS != "windows" {
-		return fmt.Errorf("auto-update is Windows-only on this build; download the new binary manually")
+		return nil, fmt.Errorf("auto-update is Windows-only on this build; download the new binary manually")
 	}
 	if !isHex64(rel.SHA256) {
-		return fmt.Errorf("refusing update: manifest sha256 missing/invalid")
+		return nil, fmt.Errorf("refusing update: manifest sha256 missing/invalid")
 	}
 	if err := u.validateURL(rel.URL); err != nil {
-		return err
+		return nil, err
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("locate executable: %w", err)
+		return nil, fmt.Errorf("locate executable: %w", err)
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
 	tmp := exe + ".new"
 	if err := u.download(ctx, rel, tmp, onProgress); err != nil {
 		_ = os.Remove(tmp)
-		return err
+		return nil, err
 	}
 
 	// Pre-fetch sidecar assets (runtime-loaded DLLs) to <name>.new next to the exe BEFORE the swap,
 	// so the swap window touches local files only. Best-effort: a failed/locked asset must never
 	// abort the exe update (the exe is the critical payload; a DLL just gates one feature).
-	staged := u.fetchAssets(ctx, exe, rel.Assets)
+	return &Staged{Rel: rel, exe: exe, tmp: tmp, assets: u.fetchAssets(ctx, exe, rel.Assets)}, nil
+}
 
-	// Swap. On Windows a running .exe can be renamed (not deleted/overwritten), so move the
-	// live binary aside, then move the new one into its place. The .old is cleaned next startup.
-	old := exe + ".old"
+// Install atomically swaps the staged binary over the running executable (rename current →
+// .old, move new into place), then places sidecar assets. On Windows a running .exe can be
+// renamed (not deleted/overwritten). Does NOT relaunch; call Relaunch after, or prompt the
+// user. The .old is cleaned next startup (CleanupOld).
+func (s *Staged) Install() error {
+	old := s.exe + ".old"
 	_ = os.Remove(old)
-	if err := os.Rename(exe, old); err != nil {
-		_ = os.Remove(tmp)
-		for _, s := range staged {
-			_ = os.Remove(s)
-		}
+	if err := os.Rename(s.exe, old); err != nil {
+		s.Discard()
 		return fmt.Errorf("move current binary aside: %w", err)
 	}
-	if err := os.Rename(tmp, exe); err != nil {
-		_ = os.Rename(old, exe) // roll back
-		_ = os.Remove(tmp)
-		for _, s := range staged {
-			_ = os.Remove(s)
-		}
+	if err := os.Rename(s.tmp, s.exe); err != nil {
+		_ = os.Rename(old, s.exe) // roll back
+		s.Discard()
 		return fmt.Errorf("install new binary: %w", err)
 	}
 	// Move staged assets into place AFTER the exe swap (so a crash mid-update never leaves newer
 	// DLLs paired with an older exe). Best-effort per asset.
-	for _, s := range staged {
-		placeAsset(s)
+	for _, a := range s.assets {
+		placeAsset(a)
 	}
 	return nil
+}
+
+// Discard removes the staged files (download superseded or aborted).
+func (s *Staged) Discard() {
+	_ = os.Remove(s.tmp)
+	for _, a := range s.assets {
+		_ = os.Remove(a)
+	}
+}
+
+// Apply is Download + Install in one step (kept for one-shot callers: ctl SELF-UPDATE,
+// remote peer update).
+func (u *Updater) Apply(ctx context.Context, rel *Release, onProgress func(done, total int64)) error {
+	st, err := u.Download(ctx, rel, onProgress)
+	if err != nil {
+		return err
+	}
+	return st.Install()
 }
 
 // fetchAssets downloads each sidecar asset to "<dir>/<name>.new" (sha-verified), returning the
