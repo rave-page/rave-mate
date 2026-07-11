@@ -1434,6 +1434,7 @@
     "spout": {
       "install": "Descargar e instalar",
       "installed": "Instalado: {path}",
+      "installedToast": "Runtime de Spout instalado - un video share en ejecución lo detecta automáticamente; si no, activa Video share arriba",
       "notFound": "No se encontró SpoutLibrary.dll - instálalo para activar la salida Spout (la app funciona bien sin él).",
       "note": "Spout necesita SpoutLibrary.dll (incluido con el instalador). Si falta - p. ej. tras una autoactualización - instálalo aquí: descarga el SDK Spout2 fijado, verificado por SHA-256, en la carpeta bin de la app.",
       "openSdk": "Abrir la página de descarga del SDK de Spout",
@@ -1463,10 +1464,13 @@
       "web": "web"
     },
     "subtitle": "Estiliza una vez, sal en todas partes - visuales de now-playing en vivo para OBS y más allá",
+    "toast": {
+      "restartDeferred": "{name}: guardado - se aplica automáticamente cuando ningún deck esté en vivo"
+    },
     "vs": {
       "noBackend": "Esta compilación no tiene backend de video-share compilado (Windows=Spout / macOS=Syphon / Linux=PipeWire) - al activarlo se ejecuta el sink pero no se publica nada.",
       "note": "Publica la tarjeta de cada deck cargado como un fotograma de vídeo en vivo llamado \"{name}\" … sobre la API de compartición nativa del SO, para que OBS/Resolume/TouchDesigner/VRChat puedan extraer los visuales de deck desde memoria - sin captura de archivo ni de ventana.",
-      "note2": "Escala mayor = más nítido al mostrarse en grande (p. ej. pantalla completa en un lienzo 4K), con más CPU. Desactiva/activa para aplicar.",
+      "note2": "Escala mayor = más nítido al mostrarse en grande (p. ej. pantalla completa en un lienzo 4K), con más CPU. Un cambio de escala se aplica automáticamente - el share se reinicia y los receptores se reconectan; espera hasta que ningún deck esté en vivo.",
       "renderScale": "Escala de render",
       "scaleOption": "{mult}× ({res})",
       "sharesVia": "Esta compilación comparte vía {backend}.",
@@ -1475,8 +1479,8 @@
     "web": {
       "autoAdd": "Añadir y dimensionar automáticamente la fuente de navegador en OBS",
       "nest": "Añadir también esa escena a la escena de programa actual",
-      "note1": "Añade una fuente de Navegador en OBS con la URL de arriba (ajústala a tu lienzo, p. ej. 1920×1080) o deja que rave-mate la gestione abajo. Desactiva/activa el overlay para aplicar un cambio de puerto.",
-      "note2": "La gestión automática necesita la conexión de OBS activada + OBS en ejecución; se aplica en la próxima (re)conexión de OBS.",
+      "note1": "Añade una fuente de Navegador en OBS con la URL de arriba (ajústala a tu lienzo, p. ej. 1920×1080) o deja que rave-mate la gestione abajo. Un cambio de puerto se aplica automáticamente: el servidor se reinicia en el nuevo puerto y una fuente OBS autogestionada se reapunta sola - solo una fuente de Navegador añadida manualmente necesita actualizar su URL.",
+      "note2": "La gestión automática necesita la conexión de OBS activada + OBS en ejecución. Los cambios se aplican automáticamente - el enlace OBS se reconecta; una grabación en curso termina primero.",
       "obsScene": "Escena de OBS",
       "title": "Overlay en vivo (navegador)"
     },

@@ -35,6 +35,14 @@ type snkEntry struct {
 	enabled func() bool
 }
 
+// runToken identifies one component run: its cancel + a done channel closed when the
+// goroutine exits. Restart waits on done so a rebuilt component never races the old one
+// (listener rebind), and a stale goroutine can't clear a successor's registration.
+type runToken struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 // Aggregator wires sources → merger → sinks under one supervised lifecycle.
 type Aggregator struct {
 	log    *logbus.Bus
@@ -46,15 +54,15 @@ type Aggregator struct {
 
 	mu       sync.Mutex
 	parent   context.Context
-	running  map[string]context.CancelFunc // component name → cancel
-	lastSeen map[string]time.Time          // source ID → last observation time (liveness)
+	running  map[string]*runToken // component name → current run
+	lastSeen map[string]time.Time // source ID → last observation time (liveness)
 }
 
 // New builds an aggregator around a merger.
 func New(log *logbus.Bus, merger *session.Merger) *Aggregator {
 	return &Aggregator{
 		log: log, merger: merger,
-		running:  map[string]context.CancelFunc{},
+		running:  map[string]*runToken{},
 		lastSeen: map[string]time.Time{},
 	}
 }
@@ -82,22 +90,35 @@ func (a *Aggregator) AddSourceFn(build func() session.Source, enabled func() boo
 
 // RestartSource stops + restarts one running source so it re-reads config (settings
 // auto-apply). Reports whether a restart happened (false = source wasn't running).
-func (a *Aggregator) RestartSource(id string) bool {
-	name := "src:" + id
-	a.mu.Lock()
-	_, isRunning := a.running[name]
-	a.mu.Unlock()
-	if !isRunning {
-		return false
-	}
-	a.stop(name)
-	a.Reconcile()
-	return true
-}
+func (a *Aggregator) RestartSource(id string) bool { return a.restart("src:" + id) }
 
 // AddSink registers a sink with a live-enabled predicate.
 func (a *Aggregator) AddSink(sink session.Sink, enabled func() bool) {
 	a.snks = append(a.snks, snkEntry{sink: sink, enabled: enabled})
+}
+
+// RestartSink stops + restarts one running sink so it re-reads config (settings
+// auto-apply). Reports whether a restart happened (false = sink wasn't running).
+func (a *Aggregator) RestartSink(id string) bool { return a.restart("sink:" + id) }
+
+// restartDrain bounds how long a restart waits for the old run to exit (listener release)
+// before starting the successor anyway.
+const restartDrain = 5 * time.Second
+
+// restart stops one running component, waits (bounded) for its goroutine to exit so a
+// successor never races it (port rebind), then reconciles to start it fresh.
+func (a *Aggregator) restart(name string) bool {
+	tok := a.stop(name)
+	if tok == nil {
+		return false
+	}
+	select {
+	case <-tok.done:
+	case <-time.After(restartDrain):
+		a.log.Warn(source, "restart: old component slow to exit", map[string]any{"component": name})
+	}
+	a.Reconcile()
+	return true
 }
 
 // Start binds the aggregator to ctx and starts every currently-enabled component.
@@ -148,10 +169,12 @@ func (a *Aggregator) apply(name string, desired bool, run func(context.Context))
 	parent := a.parent
 	if desired && !isRunning && parent != nil {
 		ctx, cancel := context.WithCancel(parent)
-		a.running[name] = cancel
+		tok := &runToken{cancel: cancel, done: make(chan struct{})}
+		a.running[name] = tok
 		a.mu.Unlock()
 		go func() {
-			defer a.clearRunning(name)
+			defer close(tok.done)
+			defer a.clearRunning(name, tok)
 			defer a.guard("component", name) // runs before clearRunning on panic: logs + contains
 			run(ctx)
 		}()
@@ -164,25 +187,32 @@ func (a *Aggregator) apply(name string, desired bool, run func(context.Context))
 	}
 }
 
-func (a *Aggregator) stop(name string) {
+// stop cancels a running component; returns its token (nil = wasn't running) so callers
+// can wait for the goroutine to exit.
+func (a *Aggregator) stop(name string) *runToken {
 	a.mu.Lock()
-	cancel, ok := a.running[name]
-	if ok {
+	tok := a.running[name]
+	if tok != nil {
 		delete(a.running, name)
 		if id, isSrc := strings.CutPrefix(name, "src:"); isSrc {
 			delete(a.lastSeen, id) // a stopped source isn't "receiving"
 		}
 	}
 	a.mu.Unlock()
-	if ok {
-		cancel()
+	if tok != nil {
+		tok.cancel()
 		a.log.Info(source, "component stopped", map[string]any{"component": name})
 	}
+	return tok
 }
 
-func (a *Aggregator) clearRunning(name string) {
+// clearRunning removes name only when it still maps to this run - a stale goroutine
+// exiting after a restart must not clear its successor's registration.
+func (a *Aggregator) clearRunning(name string, tok *runToken) {
 	a.mu.Lock()
-	delete(a.running, name)
+	if a.running[name] == tok {
+		delete(a.running, name)
+	}
 	a.mu.Unlock()
 }
 

@@ -1434,6 +1434,7 @@
     "spout": {
       "install": "Télécharger & installer",
       "installed": "Installé : {path}",
+      "installedToast": "Runtime Spout installé - un partage vidéo en cours le prend en compte automatiquement ; sinon activez le partage vidéo ci-dessus",
       "notFound": "SpoutLibrary.dll introuvable - installez-le pour activer la sortie Spout (l'appli fonctionne sans).",
       "note": "Spout nécessite SpoutLibrary.dll (fourni avec l'installeur). S'il manque - ex. après une auto-mise à jour - installez-le ici : télécharge le SDK Spout2 épinglé, vérifié SHA-256, dans le dossier bin de l'appli.",
       "openSdk": "Ouvrir la page de téléchargement du SDK Spout",
@@ -1463,10 +1464,13 @@
       "web": "web"
     },
     "subtitle": "Stylisez une fois, sortez partout - visuels now-playing live pour OBS et au-delà",
+    "toast": {
+      "restartDeferred": "{name} : enregistré - s'applique automatiquement dès qu'aucun deck n'est en direct"
+    },
     "vs": {
       "noBackend": "Cette build n'a aucun backend de partage vidéo compilé (Windows=Spout / macOS=Syphon / Linux=PipeWire) - l'activer lance le sink mais ne publie rien.",
       "note": "Publie la carte de chaque deck chargé comme une image vidéo live nommée « {name} » … via l'API de partage native de l'OS, pour qu'OBS/Resolume/TouchDesigner/VRChat tirent les visuels de deck depuis la mémoire - sans capture de fichier ou de fenêtre.",
-      "note2": "Échelle plus haute = plus net en grand (ex. plein écran sur un canevas 4K), au prix de plus de CPU. Désactivez/activez pour appliquer.",
+      "note2": "Échelle plus haute = plus net en grand (ex. plein écran sur un canevas 4K), au prix de plus de CPU. Un changement d'échelle s'applique automatiquement - le partage redémarre et les récepteurs se rattachent ; il attend qu'aucun deck ne soit en direct.",
       "renderScale": "Échelle de rendu",
       "scaleOption": "{mult}× ({res})",
       "sharesVia": "Cette build partage via {backend}.",
@@ -1475,8 +1479,8 @@
     "web": {
       "autoAdd": "Ajouter & dimensionner auto la source navigateur dans OBS",
       "nest": "Ajouter aussi cette scène à la scène programme courante",
-      "note1": "Ajoutez une source Navigateur dans OBS à l'URL ci-dessus (dimensionnez-la à votre canevas, ex. 1920×1080) ou laissez rave-mate la gérer ci-dessous. Désactivez/activez l'overlay pour appliquer un changement de port.",
-      "note2": "L'auto-gestion nécessite la connexion OBS activée + OBS lancé ; s'applique à la prochaine (re)connexion OBS.",
+      "note1": "Ajoutez une source Navigateur dans OBS à l'URL ci-dessus (dimensionnez-la à votre canevas, ex. 1920×1080) ou laissez rave-mate la gérer ci-dessous. Un changement de port s'applique automatiquement : le serveur redémarre sur le nouveau port et une source OBS auto-gérée se repointe d'elle-même - seule une source Navigateur ajoutée manuellement nécessite une mise à jour de son URL.",
+      "note2": "L'auto-gestion nécessite la connexion OBS activée + OBS lancé. Les changements s'appliquent automatiquement - la liaison OBS se reconnecte ; un enregistrement en cours se termine d'abord.",
       "obsScene": "Scène OBS",
       "title": "Overlay live (navigateur)"
     },

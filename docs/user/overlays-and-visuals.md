@@ -16,6 +16,11 @@ Styling (colors, opacity, layout) lives in the overlay settings cards; overlays 
 brand-token look by default. Per-VRChat-world overlay layouts can auto-apply when you travel
 (see the VRChat guide).
 
+Overlay server settings apply automatically - a port or render-scale change restarts the
+affected output in place (no feature off/on), and the auto-managed OBS browser source
+re-points itself. While a deck is live with an overlay attached, the restart waits until
+the set goes idle so a stream never flickers mid-set.
+
 ## Video share (Spout)
 
 Windows GPU texture share: rave-mate publishes overlay/grid video as a Spout sender that OBS,

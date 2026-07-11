@@ -1852,6 +1852,9 @@ func (u *UI) applySet(id, val string) {
 		toInt(&f.RTSPServe.FPS, 1, 120)
 	case "rtsp-bitrate":
 		toInt(&f.RTSPServe.BitrateKbps, 250, 50000)
+	// Overlays (rendered on the Overlays tab; port is read at overlay-server start)
+	case "overlay-port":
+		toInt(&f.OverlayWeb.Port, 1, 65535)
 	// key hold (not persisted here - Save button reads it via form)
 	case "rb-key-hold":
 		save = false
@@ -1867,6 +1870,8 @@ func (u *UI) applySet(id, val string) {
 			apply = func() { u.scheduleModuleRestart(mod) }
 		} else if src := settingSource(id); src != "" {
 			apply = func() { u.scheduleSourceRestart(src) }
+		} else if snk := settingSink(id); snk != "" {
+			apply = func() { u.scheduleSinkRestart(snk) }
 		}
 		u.saveCfgBG("set:"+id, apply, nil) // disk write + Reconcile off the actWorker
 	}

@@ -38,6 +38,7 @@ import (
 	"rave.page/mate/internal/netstats"
 	"rave.page/mate/internal/obscontrol"
 	"rave.page/mate/internal/overlayart"
+	"rave.page/mate/internal/overlayserver"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/peerlink"
 	"rave.page/mate/internal/perfmon"
@@ -107,6 +108,7 @@ type Services struct {
 	Store        *store.Store                  // local persistence (analysis cache, automations, jobs); may be nil
 	Lib          *libdb.DB                     // relational DJ-library store (tracks/sessions); may be nil
 	OverlayArt   *overlayart.Resolver          // cover-art resolver (extract → DB store + disk cache); may be nil
+	OverlayWeb   *overlayserver.Sink           // browser overlay server sink (busy check for settings auto-apply); may be nil
 	Syncer       *playsync.Syncer              // play-layer + playlist backend sync; may be nil
 	Automations  automation.Manager            // media-automation engine facade; may be nil
 	Session      *aggregator.Aggregator        // DJ-data aggregation hub (sources → merger → sinks); may be nil
