@@ -70,6 +70,13 @@ var helpTopics = map[string]helpTopic{
 			{"AcoustID / Chromaprint", "https://acoustid.org/chromaprint"},
 		},
 	},
+	"led-feedback": {
+		Title: i18n.T("help.led-feedback.title"),
+		Body:  i18n.T("help.led-feedback.body"),
+		Links: []ttLink{
+			{"MIDI 1.0 message summary (midi.org)", "https://midi.org/summary-of-midi-1-0-messages"},
+		},
+	},
 	"vrchat-announcement": {
 		Title: i18n.T("help.vrchat-announcement.title"),
 		Body:  i18n.T("help.vrchat-announcement.body"),

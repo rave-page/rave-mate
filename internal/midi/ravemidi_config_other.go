@@ -13,3 +13,5 @@ func QueryDriverInputs() ([]DriverInputStatus, error) { return nil, ErrUnsupport
 func ReloadDriverConfig() error { return ErrUnsupported }
 
 func QueryDriverTrace(uint32) ([]TraceEntry, error) { return nil, ErrUnsupported }
+
+func WriteDriverPort(uint32, []byte) error { return ErrUnsupported }

@@ -57,12 +57,15 @@ type UI struct {
 	ceStore *cuepattern.Store
 
 	twMu         sync.Mutex
-	twitchRows   []string    // rolling twitch chat/alert feed (cap 250)
-	libSection   string      // Library active sub-section: "browse" | "collection"
-	libDir       string      // Library browse cwd
-	midiTrace    uint32      // ravemidi wire-trace viewer: port id (0 = closed)
-	libSearchDeb *time.Timer // pending debounced library/collection search re-render (guarded by mu)
-	remoteTarget string      // Library/Automations control target: "" = this computer, else a peer nodeID
+	twitchRows   []string             // rolling twitch chat/alert feed (cap 250)
+	libSection   string               // Library active sub-section: "browse" | "collection"
+	libDir       string               // Library browse cwd
+	midiTrace    uint32               // ravemidi wire-trace viewer: port id (0 = closed)
+	fbtMu        sync.Mutex           // guards the LED-feedback test state (midictl_fbtest.go)
+	fbtBusy      bool                 // one in-flight test (re-click guard)
+	fbtRes       map[uint32]fbtResult // reserved-port id → last outcome line
+	libSearchDeb *time.Timer          // pending debounced library/collection search re-render (guarded by mu)
+	remoteTarget string               // Library/Automations control target: "" = this computer, else a peer nodeID
 
 	logMu         sync.Mutex // guards the logs-tab filter state below
 	logBus        string     // active bus: "app"|"midi"|"traktor"|"session" ("" = app)

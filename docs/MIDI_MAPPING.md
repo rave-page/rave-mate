@@ -79,6 +79,20 @@ first — press a control to see which port belongs to which device. **Wire trac
 (device raw / to app / app read / app wrote / feedback out / loop drop) for
 on-hardware diagnosis.
 
+### Testing LED feedback
+
+Each managed input whose device render pin is bound (status shows "LED feedback") gets a
+**Test LED feedback** button in the driver card. It sends a short burst toward the
+hardware — Note-On messages sweep notes 36–51 with rising velocity (~50 ms apart), then
+note-offs; under 2 s total — through the reserved port's feedback tee, i.e. the exact
+path DJ-software LED output takes. Watch the controller: pads/keys/buttons in that range
+should flash. Afterwards the driver's wire trace is diffed and the card reports how many
+`feedback out` entries appeared vs messages sent — a full count proves the kernel wrote
+every message to the device's MIDI input, even if the device shows nothing (some
+controllers ignore plain MIDI note LEDs and want a proprietary mode / specific
+channel/velocity map). If the render pin isn't bound the card says so instead (device has
+no MIDI input, or another app holds it exclusively; the driver keeps retrying).
+
 ## Setup (Windows)
 
 1. Install a virtual MIDI port - **loopMIDI** (or any driver above). Create one port, e.g.

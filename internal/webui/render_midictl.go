@@ -115,9 +115,21 @@ func (u *UI) midiDriverManagedHTML() string {
 				}
 			}
 			b.WriteString(statusRow(variant, st.Name, line))
+			if st.Bound && !st.FeedbackBound {
+				// name WHY the LED test is absent: device render pin not bound
+				b.WriteString(hint("info", i18n.T("midictl.drv.fbNotBound")))
+			}
 			if st.ReservedPortID != 0 {
-				b.WriteString(btnRow(btn(i18n.T("midictl.trace.open"), "ghost",
-					"midi-drv-trace:"+strconv.Itoa(int(st.ReservedPortID)), "")))
+				id := strconv.Itoa(int(st.ReservedPortID))
+				btns := []string{btn(i18n.T("midictl.trace.open"), "ghost", "midi-drv-trace:"+id, "")}
+				if st.Bound && st.FeedbackBound {
+					btns = append(btns, btn(i18n.T("midictl.drv.fbTest"), "ghost", "midi-fbtest:"+id, "")+
+						tipTopic("led-feedback"))
+				}
+				b.WriteString(btnRow(btns...))
+				if r := u.fbtResultFor(st.ReservedPortID); r.line != "" {
+					b.WriteString(statusRow(r.variant, i18n.T("midictl.drv.fbLabel"), r.line))
+				}
 			}
 		}
 	}

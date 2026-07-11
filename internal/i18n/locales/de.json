@@ -296,6 +296,10 @@
     "midi-drv-filter": {
       "title": "Fan-out-Nachrichtenfilter",
       "body": "Nachrichtenklassen, die der Treiber nur auf dem DJ-Port verwirft (rave-mate sieht weiterhin alles). Keyboards senden Aftertouch (Channel Pressure) bei jedem Tastendruck auf jeder Taste - fängt das MIDI-Learn deiner DJ-Software das statt der Note, feuert die Belegung bei JEDER Taste und nochmal beim Loslassen. Aftertouch, Active Sensing und Clock zu filtern hält Learn sauber; Pitch Bend und Poly Pressure anlassen, wenn du Tempo-Fader oder Druck-Pads mappst."
+    },
+    "led-feedback": {
+      "title": "LED-Feedback-Test",
+      "body": "Sendet einen kurzen, wiedererkennbaren Burst an den Controller: Note-On-Nachrichten laufen mit steigender Velocity über die Noten 36–51 (etwa eine alle 50 ms), danach wird alles wieder ausgeschaltet — insgesamt unter zwei Sekunden. Auf die Hardware achten: Pads, Tasten oder Buttons in diesem Bereich sollten aufleuchten und wieder erlöschen.\n\nDie gemeldete Zahl stammt aus dem Wire-Trace des Kernel-Treibers: jeder 'feedback out'-Eintrag ist eine Nachricht, die der Treiber tatsächlich an den MIDI-Eingang des Geräts geschrieben hat. Eine vollständige Zählung beweist den kompletten Pfad (App → Treiber → Gerät). Hinweis: manche Controller ignorieren einfache MIDI-Note-On-LEDs — sie erwarten einen proprietären Modus, einen bestimmten Kanal bzw. eine Velocity-Zuordnung oder HID. Dunkle LEDs bei voller Zählung bedeuten also trotzdem: der Transport funktioniert."
     }
   },
   "library": {
@@ -3287,7 +3291,14 @@
       "needControllers": "Keine aktivierten Controller mit Port zum Synchronisieren.",
       "queryFailed": "Dieser Treiber-Build hat noch keine Konfig-Ebene — Treiber aktualisieren für verwaltete Weiterleitung.",
       "reapply": "Erneut an Treiber übertragen",
-      "syncFailed": "Konfiguration nicht an den Treiber übertragen: {err} - nach einem rave-mate-Update auch den ravemidi-Treiber aktualisieren/neu installieren und neu starten."
+      "syncFailed": "Konfiguration nicht an den Treiber übertragen: {err} - nach einem rave-mate-Update auch den ravemidi-Treiber aktualisieren/neu installieren und neu starten.",
+      "fbTest": "LED-Feedback testen",
+      "fbLabel": "LED-Test",
+      "fbBusy": "Ein LED-Feedback-Test läuft bereits.",
+      "fbRunning": "LED-Test läuft — Controller beobachten…",
+      "fbNotBound": "LED-Feedback nicht verfügbar: der MIDI-IN-(Render-)Pin des Geräts ist noch nicht gebunden — das Gerät hat evtl. keinen MIDI-Eingang, oder eine andere App hält ihn exklusiv. Der Treiber versucht es im Hintergrund weiter.",
+      "fbResult": "{out} von {sent} Testnachrichten haben den Render-Pin des Geräts erreicht",
+      "fbWriteErr": "LED-Test-Schreibvorgang fehlgeschlagen: {err}"
     },
     "sw": {
       "hdr": "DJ-Software-Status",
