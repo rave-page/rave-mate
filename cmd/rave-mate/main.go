@@ -421,7 +421,7 @@ func remotePprofArgs(args []string, name string) (path string, seconds int, node
 func runCtl(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: rave-mate ctl <status|snapshot|logs|show|tab NAME|quit|\n"+
-			"                       resize WxH|click LABEL|tap X Y|type TEXT|read LABEL|\n"+
+			"                       resize WxH|click LABEL|act ACT [VAL]|tap X Y|type TEXT|read LABEL|\n"+
 			"                       set LABEL VALUE|screenshot PATH|screenshot-all DIR|screenshot-region PATH X Y W H|screenshot-vr PATH|\n"+
 			"                       gio-snapshot [WINDOWID]|gio-tap WINDOWID CONTROLID|\n"+
 			"                       sync-library|library-sync-status|sync-media [BUDGET]|media-sync-status|\n"+
@@ -645,6 +645,17 @@ func runCtl(args []string) int {
 			return 2
 		}
 		resp, err := app.Send("CLICK " + strings.Join(args[1:], " "))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "act": // post a raw UI action through the page act pipeline (webview renderer)
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl act <act> [val]")
+			return 2
+		}
+		resp, err := app.Send("ACT " + strings.Join(args[1:], " "))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

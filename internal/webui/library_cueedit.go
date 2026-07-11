@@ -42,7 +42,7 @@ type ceSt struct {
 	dsel     map[int]bool // selected indexes into drops
 	dragA    float64      // rubber band anchor (axis ms; <0 idle)
 	dragB    float64
-	dragMods string // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
+	dragMods string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
 	assign   map[int]string // drop index -> pattern id (apply flow)
 	patName  string         // save-pattern name input
 	toMem    bool           // last apply wrote memory cues (render hint only)

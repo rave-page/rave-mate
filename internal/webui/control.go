@@ -100,6 +100,18 @@ func (u *UI) TapSecondary(x, y float32) bool {
 	return u.evalBool(fmt.Sprintf("return window.__ctx(%g,%g)", x, y))
 }
 
+// Act posts an action through the page transport (window.rave), exactly as a page
+// event would - lets ctl drive act-level surfaces (keyboard scopes, pointer lanes)
+// that have no clickable DOM element. Local-operator verification use.
+func (u *UI) Act(act, val string) bool {
+	if u.shell == nil || act == "" {
+		return false
+	}
+	payload := `{"act":` + jsQuote(act) + `,"val":` + jsQuote(val) + `}`
+	u.eval("window.rave&&window.rave(" + jsQuote(payload) + ")")
+	return true
+}
+
 func (u *UI) Type(text string) bool {
 	if u.shell == nil {
 		return false
