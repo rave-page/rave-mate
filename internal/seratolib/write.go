@@ -121,9 +121,9 @@ func verifySplice(path string, orig, built []byte, want []musiclib.GridMarker) e
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp3":
-		return verifyID3Untouched(orig, built)
+		return verifyID3Untouched(orig, built, map[string]bool{beatgridDesc: true})
 	case ".flac":
-		return verifyFLACUntouched(orig, built)
+		return verifyFLACUntouched(orig, built, []string{"SERATO_BEATGRID="})
 	}
 	return nil
 }
@@ -134,8 +134,9 @@ func f32Close(a, b float64) bool {
 	return math.Abs(fa-fb) <= 1e-6*math.Max(1, math.Abs(fb))
 }
 
-// verifyID3Untouched checks every non-beatgrid frame and the audio region carried over.
-func verifyID3Untouched(orig, built []byte) error {
+// verifyID3Untouched checks every unmanaged frame and the audio region carried over
+// (managed = GEOB descriptions the splice is allowed to rewrite or drop).
+func verifyID3Untouched(orig, built []byte, managed map[string]bool) error {
 	ot, oAudio, err := parseID3(orig)
 	if err != nil {
 		return err
@@ -153,7 +154,7 @@ func verifyID3Untouched(orig, built []byte) error {
 	var oFrames []id3Frame
 	if ot != nil {
 		for _, f := range ot.frames {
-			if f.id == "GEOB" && geobDescription(ot.major, f) == beatgridDesc {
+			if f.id == "GEOB" && managed[geobDescription(ot.major, f)] {
 				continue
 			}
 			oFrames = append(oFrames, f)
@@ -161,7 +162,7 @@ func verifyID3Untouched(orig, built []byte) error {
 	}
 	var bFrames []id3Frame
 	for _, f := range bt.frames {
-		if f.id == "GEOB" && geobDescription(bt.major, f) == beatgridDesc {
+		if f.id == "GEOB" && managed[geobDescription(bt.major, f)] {
 			continue
 		}
 		bFrames = append(bFrames, f)
@@ -177,8 +178,9 @@ func verifyID3Untouched(orig, built []byte) error {
 	return nil
 }
 
-// verifyFLACUntouched checks every non-vorbis block, non-beatgrid comments, and the audio.
-func verifyFLACUntouched(orig, built []byte) error {
+// verifyFLACUntouched checks every non-vorbis block, unmanaged comments, and the audio
+// (managedKeys = "KEY=" prefixes the splice is allowed to rewrite).
+func verifyFLACUntouched(orig, built []byte, managedKeys []string) error {
 	oBlocks, oAudio, err := parseFLAC(orig)
 	if err != nil {
 		return err
@@ -189,6 +191,15 @@ func verifyFLACUntouched(orig, built []byte) error {
 	}
 	if !bytes.Equal(orig[oAudio:], built[bAudio:]) {
 		return errors.New("audio region changed")
+	}
+	isManaged := func(c string) bool {
+		u := strings.ToUpper(c)
+		for _, k := range managedKeys {
+			if strings.HasPrefix(u, k) {
+				return true
+			}
+		}
+		return false
 	}
 	filter := func(blocks []flacBlock) (rest []flacBlock, comments []string, err error) {
 		for _, b := range blocks {
@@ -201,7 +212,7 @@ func verifyFLACUntouched(orig, built []byte) error {
 				return nil, nil, verr
 			}
 			for _, c := range cs {
-				if !strings.HasPrefix(strings.ToUpper(c), "SERATO_BEATGRID=") {
+				if !isManaged(c) {
 					comments = append(comments, c)
 				}
 			}
