@@ -119,9 +119,10 @@ each software can deliver and the setup trade-offs.
 - VR perf telemetry (local or from a paired headset PC)
 
 ### Platform
-- Tray app or headless OS service, **signed self-updater** with release channels, crash
-  guardian + GPU watchdog, subprocess feature isolation, versioned config with migrations,
-  `rave-mate ctl` control socket for scripting/automation
+- Tray app or headless OS service, **signed self-updater** with release channels (5-min feed
+  check, once-per-version notification, download → verify → install → restart flow in the nav
+  rail + tray menu), crash guardian + GPU watchdog, subprocess feature isolation, versioned
+  config with migrations, `rave-mate ctl` control socket for scripting/automation
 
 ## Honest status: tested vs untested
 

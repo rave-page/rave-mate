@@ -90,6 +90,20 @@ Settings page. GitHub feeds get one carve-out: asset downloads may 302 to
 `*.rave.page/app/mate/` keep polling that GitLab-published feed - they migrate to the GitHub
 feed only via one more GitLab-feed update whose binary bakes the new `FeedURL`.
 
+### In-app update flow (`internal/updater` + webview surfaces)
+
+`internal/updater.Manager` wraps `shared/selfupdate` in an explicit state machine:
+`idle → available → downloading → downloaded(verified) → staged(needs-restart)`. It polls
+every 5 min (first check 30 s after launch; failures back off doubling to 80 min, logged via
+`logbus.Gate` so an offline box never spams). First detection of a version notifies once -
+tray balloon + toast - persisted in `config.UpdateNotifiedFor`. Three surfaces render from the
+one Manager: the nav-rail bottom block (`#nav-update`, one state-dependent action button,
+nothing when up to date), the tray menu's dynamic item ("Download update X" / "Install
+update" / "Restart to finish update"), and Settings → System → Updates. `selfupdate.Apply` is
+split into `Download` (stage + verify next to the exe, exe untouched) and `Staged.Install`
+(atomic rename swap); one-shot callers (ctl `SELF-UPDATE`, peer remote update) still use
+`Apply`. Signature/checksum failures surface in the UI verbatim and never advance the machine.
+
 ## Exporting rave-mate from the rave-suite monorepo → GitHub
 
 The upstream home is the private rave-suite monorepo (GitLab); the GitHub repo is the exported

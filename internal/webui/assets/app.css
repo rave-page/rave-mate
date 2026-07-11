@@ -44,8 +44,9 @@ body {
 .nav-upd-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--rp-base, #F70864); }
 .nav-upd-meta { color: var(--rp-muted, #B98AA0); font-size: 11px; word-break: break-word; }
 .nav-upd-note { color: var(--rp-muted, #B98AA0); font-size: 11px; }
-.nav-upd .rp-btn { width: 100%; }
-.nav-upd .hint { font-size: 11px; }
+/* long version labels ("Download development-abc1234") must wrap inside the 220px rail */
+.nav-upd .rp-btn { width: 100%; white-space: normal; word-break: break-word; }
+.nav-upd .hint { font-size: 11px; white-space: normal; word-break: break-word; }
 #nav .brand {
   font-weight: 800; letter-spacing: .04em; padding: 10px 12px 16px; font-size: 18px;
   color: #fafafa;

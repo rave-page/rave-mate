@@ -47,9 +47,21 @@ monitor tabs (MIDI, Traktor, session) show raw event firehoses when debugging.
 
 ## Updates
 
-Release builds self-update from their channel feed (Settings → Updates). Manifests are
-Ed25519-signature-verified. The updater swaps only the exe; helper DLLs can self-heal from the
-same page.
+Release builds poll their channel feed every 5 minutes (a tiny manifest fetch; backs off while
+offline). The first time a new version is seen you get one notification - tray balloon + in-app
+toast - exactly once per version, surviving restarts.
+
+When an update is known, a block appears at the bottom of the navigation rail (and a matching
+item in the tray menu) with ONE state-dependent action: **Download vX** → progress →
+**Install update** (only after verification) → **Restart to apply**. Nothing is rendered when
+you're up to date. The ⓘ tooltip on the block explains channels + verification in depth.
+Settings → System → Updates offers the same flow plus a manual check.
+
+Verification: manifests are Ed25519-signature-verified against the key baked into the binary;
+every download must match its SHA-256 from the signed manifest; official Windows binaries are
+Authenticode-signed. Any failed check discards the download - unverified builds are never
+installed. Install swaps only the exe (a `.old` rollback copy is kept until the next good
+start); helper DLLs ship as manifest assets or self-heal from the same Settings page.
 
 ## Config & data
 
