@@ -20,9 +20,14 @@ const (
 	rmMaxInputs    = 8
 	rmMaxMirrorOut = 4
 
-	rmInputCfgSize = (rmMaxName*3+rmMaxIface)*2 + 3*4 + rmMaxMirrorOut*rmMaxName*2 // 972
-	rmConfigSize   = 8 + rmMaxInputs*rmInputCfgSize                                // 7784
+	rmInputCfgSize = (rmMaxName*3+rmMaxIface)*2 + 4*4 + rmMaxMirrorOut*rmMaxName*2 // 976 (v2: +Filter)
+	rmConfigSize   = 8 + rmMaxInputs*rmInputCfgSize                                // 7816
 	rmStatusSize   = rmMaxName*2*2 + 3*4 + rmMaxIface*2 + 2*4 + rmMaxMirrorOut*4   // 676
+
+	rmTraceEntries   = 128
+	rmTraceBytes     = 12
+	rmTraceEntrySize = 8 + 8 + 4 + 4 + rmTraceBytes + 4 // 40 (pack(1) + Pad[4])
+	rmTraceOutSize   = 16 + rmTraceEntries*rmTraceEntrySize
 )
 
 var (
@@ -30,6 +35,7 @@ var (
 	ioctlRaveMIDIGetConfig  = raveMIDICtl(0x808, fileReadData)
 	ioctlRaveMIDIQueryInput = raveMIDICtl(0x809, fileReadData)
 	ioctlRaveMIDIReloadCfg  = raveMIDICtl(0x80A, fileReadData|fileWriteData)
+	ioctlRaveMIDIQueryTrace = raveMIDICtl(0x80B, fileReadData)
 )
 
 func rmPutWstr(b []byte, off, maxW int, s string) {
@@ -60,7 +66,7 @@ func SetDriverConfig(inputs []DriverInputCfg) error {
 		return fmt.Errorf("too many managed inputs (max %d)", rmMaxInputs)
 	}
 	buf := make([]byte, rmConfigSize)
-	binary.LittleEndian.PutUint32(buf[0:], 1) // RAVEMIDI_PROTOCOL_VERSION
+	binary.LittleEndian.PutUint32(buf[0:], raveMIDIProtocolVersion)
 	binary.LittleEndian.PutUint32(buf[4:], uint32(len(inputs)))
 	for i, in := range inputs {
 		if len(in.OutNames) > rmMaxMirrorOut {
@@ -74,9 +80,10 @@ func SetDriverConfig(inputs []DriverInputCfg) error {
 		n := o + rmMaxName*6 + rmMaxIface*2
 		binary.LittleEndian.PutUint32(buf[n:], b2u(in.Thru))
 		binary.LittleEndian.PutUint32(buf[n+4:], b2u(in.Feedback))
-		binary.LittleEndian.PutUint32(buf[n+8:], uint32(len(in.OutNames)))
+		binary.LittleEndian.PutUint32(buf[n+8:], in.Filter)
+		binary.LittleEndian.PutUint32(buf[n+12:], uint32(len(in.OutNames)))
 		for j, on := range in.OutNames {
-			rmPutWstr(buf, n+12+j*rmMaxName*2, rmMaxName, on)
+			rmPutWstr(buf, n+16+j*rmMaxName*2, rmMaxName, on)
 		}
 	}
 	return rmIoctl(ioctlRaveMIDISetConfig, buf, nil)
@@ -103,13 +110,14 @@ func GetDriverConfig() ([]DriverInputCfg, error) {
 			SourceIface: rmGetWstr(buf, o+rmMaxName*6, rmMaxIface),
 			Thru:        binary.LittleEndian.Uint32(buf[f:]) != 0,
 			Feedback:    binary.LittleEndian.Uint32(buf[f+4:]) != 0,
+			Filter:      binary.LittleEndian.Uint32(buf[f+8:]),
 		}
-		oc := int(binary.LittleEndian.Uint32(buf[f+8:]))
+		oc := int(binary.LittleEndian.Uint32(buf[f+12:]))
 		if oc > rmMaxMirrorOut {
 			oc = rmMaxMirrorOut
 		}
 		for j := 0; j < oc; j++ {
-			in.OutNames = append(in.OutNames, rmGetWstr(buf, f+12+j*rmMaxName*2, rmMaxName))
+			in.OutNames = append(in.OutNames, rmGetWstr(buf, f+16+j*rmMaxName*2, rmMaxName))
 		}
 		out = append(out, in)
 	}
@@ -157,6 +165,37 @@ func QueryDriverInputs() ([]DriverInputStatus, error) {
 
 // ReloadDriverConfig re-applies the persisted config (manual reload).
 func ReloadDriverConfig() error { return rmIoctl(ioctlRaveMIDIReloadCfg, nil, nil) }
+
+// QueryDriverTrace snapshots a port's wire-diagnosis ring (oldest-first).
+func QueryDriverTrace(portID uint32) ([]TraceEntry, error) {
+	in := make([]byte, 4)
+	binary.LittleEndian.PutUint32(in, portID)
+	buf := make([]byte, rmTraceOutSize)
+	if err := rmIoctl(ioctlRaveMIDIQueryTrace, in, buf); err != nil {
+		return nil, err
+	}
+	n := int(binary.LittleEndian.Uint32(buf[4:]))
+	if n > rmTraceEntries {
+		n = rmTraceEntries
+	}
+	out := make([]TraceEntry, 0, n)
+	for i := 0; i < n; i++ {
+		o := 16 + i*rmTraceEntrySize
+		e := TraceEntry{
+			Seq:       binary.LittleEndian.Uint64(buf[o:]),
+			Time100ns: binary.LittleEndian.Uint64(buf[o+8:]),
+			Dir:       binary.LittleEndian.Uint32(buf[o+16:]),
+			Len:       binary.LittleEndian.Uint32(buf[o+20:]),
+		}
+		nb := int(e.Len)
+		if nb > rmTraceBytes {
+			nb = rmTraceBytes
+		}
+		e.Bytes = append([]byte(nil), buf[o+24:o+24+nb]...)
+		out = append(out, e)
+	}
+	return out, nil
+}
 
 // rmIoctl issues one DeviceIoControl against the ravemidi control device.
 func rmIoctl(code uint32, in, out []byte) error {

@@ -292,6 +292,10 @@
     "cue-edit": {
       "title": "Éditeur de cues — clavier & souris",
       "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat. Les nombres en haut de la forme d'onde indiquent la distance en temps entre cues et drops voisins. Cochez des pistes dans la liste pour appliquer en masse les patterns assignés via la barre en bas. Souris : clic gauche déplace le curseur de beat, clic droit ajoute un cue mémoire, Maj+clic droit un drop, Ctrl+clic droit supprime les marqueurs sur ce temps. Le décalage de la grille déplace aussi les cues et les drops."
+    },
+    "midi-drv-filter": {
+      "title": "Filtre de messages fan-out",
+      "body": "Classes de messages que le pilote supprime uniquement sur le port côté DJ (rave-mate voit tout). Les claviers envoient de l'aftertouch (channel pressure) à chaque frappe sur chaque touche - si le MIDI-learn de votre logiciel DJ capte ça au lieu de la note, le mapping se déclenche sur N'IMPORTE quelle touche et encore au relâchement. Filtrer aftertouch, active sensing et horloge garde le learn propre ; laissez pitch bend et pression poly si vous mappez des faders de tempo ou des pads sensibles."
     }
   },
   "library": {
@@ -3171,7 +3175,14 @@
   },
   "midictl": {
     "in": {
-      "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)"
+      "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)",
+      "thruDriver": "pilote ravemidi (recommandé)",
+      "useInDJ": "Dans votre logiciel DJ, sélectionnez :",
+      "driverNote": "Le pilote noyau lit le contrôleur directement et continue de transférer même quand rave-mate est fermé ou après un redémarrage. rave-mate écoute sur « {reserved} » - ne sélectionnez jamais ce port ailleurs.",
+      "driverState": "Transfert pilote",
+      "driverPending": "en attente de la synchro pilote…",
+      "lastInput": "dernière entrée il y a {ago} :",
+      "filterLbl": "Filtrer"
     },
     "out": {
       "sub": "Là où rave-mate ENVOIE le MIDI. Choisissez le port unidirectionnel intégré (le logiciel DJ ne peut pas se relire lui-même) ou n'importe quel port loopback écouté par votre appli DJ."
@@ -3193,7 +3204,7 @@
       "smartscreen": "Windows peut avertir sur les composants auto-signés (SmartScreen / éditeur inconnu). Normal pour un build open source sans certificat EV — sources et builds CI publics ; lisez le README avant de continuer.",
       "docs": "README & source du pilote",
       "managedHdr": "Transfert géré par le pilote",
-      "managedSub": "Le pilote lie lui-même vos contrôleurs et continue de transférer le MIDI (dans les deux sens) même quand rave-mate est fermé — la configuration vit côté noyau et survit aux redémarrages. Par entrée, il crée un port réservé « (rave-mate) » pour une reconnexion transparente plus un port THRU unidirectionnel pour votre logiciel DJ. Sync écrit chaque contrôleur activé ci-dessus dans le pilote ; celui-ci se lie au démarrage, à l'arrivée du périphérique, et réessaie tant qu'il est occupé.",
+      "managedSub": "Le transfert vit dans le pilote et se synchronise automatiquement à chaque modification de contrôleur - aucune synchro manuelle. Ces boutons sont des secours.",
       "sync": "Synchroniser contrôleurs → pilote",
       "reload": "Recharger la config du pilote",
       "bound": "transfert actif",
@@ -3203,7 +3214,9 @@
       "syncedToast": "{n} entrées gérées écrites dans le pilote",
       "reloadedToast": "Config du pilote rechargée",
       "needControllers": "Aucun contrôleur activé avec un port à synchroniser.",
-      "queryFailed": "Ce build du pilote n'a pas encore de plan de config — mettez le pilote à jour pour le transfert géré."
+      "queryFailed": "Ce build du pilote n'a pas encore de plan de config — mettez le pilote à jour pour le transfert géré.",
+      "reapply": "Réappliquer au pilote",
+      "syncFailed": "Configuration non appliquée au pilote : {err} - après une mise à jour de rave-mate, mettez aussi à jour/réinstallez le pilote ravemidi puis redémarrez."
     },
     "sw": {
       "hdr": "État des logiciels DJ",
@@ -3215,6 +3228,34 @@
       "rekordbox": "Rekordbox ne peut pas déclencher Play depuis un mapping loopback (limite de l'appli — utilisez un contrôleur ou le pont). L'écriture grid/cues passe par import XML ; vérifiez avant de valider.",
       "virtualdj": "Mapping + écriture base implémentés mais pas encore testés sur le terrain. Sauvegardez d'abord votre base VirtualDJ.",
       "serato": "Intégration inachevée : l'import de bibliothèque fonctionne, l'écriture est toute neuve. Gardez des sauvegardes ; attendez-vous à des aspérités."
+    },
+    "filter": {
+      "aftertouch": "Aftertouch",
+      "poly": "Pression poly",
+      "bend": "Pitch bend",
+      "sense": "Active sensing",
+      "clock": "Horloge"
+    },
+    "mon": {
+      "card": "Moniteur d'entrée",
+      "badge": "Live",
+      "sub": "Chaque message entrant, le plus récent d'abord. Appuyez sur une commande pour voir quelle ligne s'allume - vous savez ainsi quel port correspond à quel appareil.",
+      "empty": "Aucun MIDI reçu - appuyez sur une touche ou bougez une commande d'un contrôleur connecté.",
+      "now": "maintenant"
+    },
+    "trace": {
+      "hdr": "Trace filaire - port {id}",
+      "empty": "Aucun événement capturé sur ce port.",
+      "refresh": "Actualiser",
+      "close": "Fermer",
+      "open": "Trace filaire",
+      "tapraw": "appareil brut",
+      "toapp": "→ app",
+      "readpop": "lecture app",
+      "fromapp": "écriture app",
+      "feedback": "→ appareil",
+      "loopdrop": "boucle rejetée",
+      "unknown": "?"
     }
   }
 }

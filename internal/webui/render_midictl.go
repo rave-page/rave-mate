@@ -25,6 +25,7 @@ func (u *UI) renderMIDICtl() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
 	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
+	b.WriteString(u.midiMonitorCard())     // live input monitor ("which device is which")
 	b.WriteString(u.midiPortCard())
 	b.WriteString(u.midiDriverCard()) // ravemidi kernel driver status + install walkthrough
 	b.WriteString(u.midiRackCard())
@@ -86,13 +87,17 @@ func (u *UI) midiDriverCard() string {
 	return card(i18n.T("midictl.drv.card"), badge(badgeTx, badgeVar), b.String())
 }
 
-// midiDriverManagedHTML: managed-input live status + sync/reload. Forwarding lives
-// IN the driver (persisted kernel-side) - it survives rave-mate exit and reboots;
-// rave-mate only writes the config and reconnects via the reserved per-device port.
+// midiDriverManagedHTML: managed-input live status + wire trace + re-apply/reload.
+// Forwarding lives IN the driver (persisted kernel-side) - it survives rave-mate exit
+// and reboots. Config sync is AUTOMATIC (driver-managed THRU on a controller +
+// every MIDI config change re-syncs); the buttons are manual fallbacks.
 func (u *UI) midiDriverManagedHTML() string {
 	var b strings.Builder
 	b.WriteString(`<div class=pb-label>` + htmlEscape(i18n.T("midictl.drv.managedHdr")) + `</div>`)
 	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.managedSub")) + `</p>`)
+	if u.midiSyncErr != "" {
+		b.WriteString(hint("warn", i18n.T("midictl.drv.syncFailed", i18n.A{"err": u.midiSyncErr})))
+	}
 	sts, err := midi.QueryDriverInputs()
 	switch {
 	case err != nil:
@@ -110,10 +115,15 @@ func (u *UI) midiDriverManagedHTML() string {
 				}
 			}
 			b.WriteString(statusRow(variant, st.Name, line))
+			if st.ReservedPortID != 0 {
+				b.WriteString(btnRow(btn(i18n.T("midictl.trace.open"), "ghost",
+					"midi-drv-trace:"+strconv.Itoa(int(st.ReservedPortID)), "")))
+			}
 		}
 	}
+	b.WriteString(u.midiDrvTraceHTML())
 	b.WriteString(btnRow(
-		btn(i18n.T("midictl.drv.sync"), "primary", "midi-drv-sync", ""),
+		btn(i18n.T("midictl.drv.reapply"), "outline", "midi-drv-sync", ""),
 		btn(i18n.T("midictl.drv.reload"), "ghost", "midi-drv-reload", "")))
 	return b.String()
 }

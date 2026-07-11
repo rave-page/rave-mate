@@ -69,8 +69,10 @@ type Input struct {
 	thru   atomic.Pointer[func(Message)] // synchronous THRU forward, run in the winmm callback; nil = off
 }
 
-// Open opens the first input port whose name contains substr (case-insensitive); substr ""
-// opens the first available port. The returned Input streams messages via Messages().
+// Open opens the input port matching substr (case-insensitive): an exact name match
+// wins over the first substring match, so "A 61" prefers the hardware device over a
+// derived virtual port like "A 61 (rave-mate)". substr "" opens the first available
+// port. The returned Input streams messages via Messages().
 func Open(substr string) (*Input, error) {
 	n, _, _ := procInGetNumDevs.Call()
 	dev := -1
@@ -81,9 +83,16 @@ func Open(substr string) (*Input, error) {
 		if !ok {
 			continue
 		}
-		if want == "" || strings.Contains(strings.ToLower(nm), want) {
+		lnm := strings.ToLower(nm)
+		if lnm == want {
 			dev, name = int(i), nm
 			break
+		}
+		if dev < 0 && (want == "" || strings.Contains(lnm, want)) {
+			dev, name = int(i), nm
+			if want == "" {
+				break
+			}
 		}
 	}
 	if dev < 0 {

@@ -1648,7 +1648,17 @@ func midiControllerInits(cs []config.MIDIControllerMap) []featurehost.MidiContro
 		for _, b := range c.Bindings {
 			bs = append(bs, featurehost.MidiBindingInit{Control: b.Control, Channel: b.Channel, Status: b.Status, Data1: b.Data1, Invert: b.Invert})
 		}
-		out = append(out, featurehost.MidiControllerInit{Name: c.Name, Port: c.Port, ThruPort: c.ThruPort, Bindings: bs})
+		port, thru := c.Port, c.ThruPort
+		if thru == midi.DriverSentinel {
+			// Driver-managed: the ravemidi driver taps the hardware itself. Read the
+			// reserved per-input port and NEVER open the device - releasing our hold is
+			// what lets the driver (re)bind it. No app-side THRU (the driver fans out).
+			thru = ""
+			if midi.DriverInstalled() {
+				port = midi.ReservedPortName(c.Name)
+			}
+		}
+		out = append(out, featurehost.MidiControllerInit{Name: c.Name, Port: port, ThruPort: thru, Bindings: bs})
 	}
 	return out
 }

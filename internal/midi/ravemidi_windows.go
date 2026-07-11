@@ -21,7 +21,7 @@ const raveMIDICtlPath = `\\.\RaveMidiCtl`
 
 // ioctl.h constants (RAVEMIDI_*).
 const (
-	raveMIDIProtocolVersion = 1
+	raveMIDIProtocolVersion = 2  // v2: INPUT_CFG.Filter + BIDI fan-outs + trace
 	raveMIDIMaxName         = 32 // WCHARs incl NUL
 	raveMIDIDeviceType      = 0x8F63
 

@@ -309,6 +309,10 @@
     "cue-edit": {
       "title": "Cue editor — keys & mouse",
       "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid."
+    },
+    "midi-drv-filter": {
+      "title": "Fan-out message filter",
+      "body": "Message classes the driver drops on the DJ-facing port only (rave-mate still sees everything). Keyboards send aftertouch (channel pressure) with every keypress on every key - if your DJ software's MIDI-learn catches that instead of the note, the binding fires on ANY key and again on release. Filtering aftertouch, active sensing and clock keeps learn clean; leave pitch bend and poly pressure on if you map tempo sliders or pressure pads."
     }
   },
   "library": {
@@ -3328,7 +3332,14 @@
       "listening": "Listening - move {control} for CH{ch} on your controller...",
       "learnTimeout": "No input captured - try again and move the control",
       "learned": "Learned {midi}",
-      "thruVirtual": "rave-mate one-way port - no echo (recommended)"
+      "thruVirtual": "rave-mate one-way port - no echo (recommended)",
+      "thruDriver": "ravemidi driver (recommended)",
+      "useInDJ": "In your DJ software select:",
+      "driverNote": "The kernel driver reads the controller directly and keeps forwarding even when rave-mate is closed or after a reboot. rave-mate listens on “{reserved}” - never select that port in other apps.",
+      "driverState": "Driver forwarding",
+      "driverPending": "waiting for driver sync…",
+      "lastInput": "last input {ago} ago:",
+      "filterLbl": "Filter out"
     },
     "bridge": {
       "card": "DJ bridge (peer control)",
@@ -3358,7 +3369,7 @@
       "smartscreen": "Windows may warn about self-signed components (SmartScreen / unknown publisher). Expected for open-source builds without an EV certificate — the source and CI builds are public; see the README before proceeding.",
       "docs": "Driver README & source",
       "managedHdr": "Driver-managed forwarding",
-      "managedSub": "The driver binds your controllers itself and keeps forwarding MIDI (both directions) even when rave-mate is closed — the config is stored kernel-side and survives reboots. Per input it creates a reserved \"(rave-mate)\" port for seamless reconnection plus a one-way THRU port for your DJ software. Sync writes every enabled controller above into the driver; the driver auto-binds at startup, on device arrival, and retries while the device is busy.",
+      "managedSub": "Forwarding lives in the driver and is synced automatically whenever you change a controller here - no manual sync needed. These buttons are fallbacks.",
       "sync": "Sync controllers → driver",
       "reload": "Reload driver config",
       "bound": "forwarding",
@@ -3368,7 +3379,9 @@
       "syncedToast": "{n} managed inputs written to the driver",
       "reloadedToast": "Driver config reloaded",
       "needControllers": "No enabled controllers with a port to sync.",
-      "queryFailed": "This driver build has no config plane yet — update the driver to enable managed forwarding."
+      "queryFailed": "This driver build has no config plane yet — update the driver to enable managed forwarding.",
+      "reapply": "Re-apply to driver",
+      "syncFailed": "Config not applied to the driver: {err} - if you just updated rave-mate, update/reinstall the ravemidi driver too, then reboot."
     },
     "sw": {
       "hdr": "DJ software status",
@@ -3380,6 +3393,34 @@
       "rekordbox": "Rekordbox can't trigger Play from a loopback mapping (app limitation — use a controller or the bridge). Grid/cue writeback goes via XML import; verify before committing.",
       "virtualdj": "Mapping + database writeback implemented but not field-tested yet. Back up your VirtualDJ database first.",
       "serato": "Integration unfinished: library import works, write-side is brand-new. Keep backups; expect rough edges."
+    },
+    "filter": {
+      "aftertouch": "Aftertouch",
+      "poly": "Poly pressure",
+      "bend": "Pitch bend",
+      "sense": "Active sensing",
+      "clock": "Clock"
+    },
+    "mon": {
+      "card": "Input monitor",
+      "badge": "Live",
+      "sub": "Every incoming controller message, newest first. Press a control on a device to see which entry lights up - that answers “which port is which device”.",
+      "empty": "No MIDI received yet - press a key or move a control on a connected controller.",
+      "now": "now"
+    },
+    "trace": {
+      "hdr": "Wire trace - port {id}",
+      "empty": "No events captured yet on this port.",
+      "refresh": "Refresh",
+      "close": "Close",
+      "open": "Wire trace",
+      "tapraw": "device raw",
+      "toapp": "→ app",
+      "readpop": "app read",
+      "fromapp": "app wrote",
+      "feedback": "→ device",
+      "loopdrop": "loop drop",
+      "unknown": "?"
     }
   }
 }

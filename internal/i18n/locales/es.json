@@ -292,6 +292,10 @@
     "cue-edit": {
       "title": "Editor de cues: teclado y ratón",
       "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat. Los números en la parte superior de la forma de onda muestran la distancia en beats entre cues y drops vecinos. Marca pistas en la lista para aplicar en masa los patrones asignados desde la barra inferior. Ratón: clic izquierdo mueve el cursor de beat, clic derecho añade un memory cue, Mayús+clic derecho un drop, Ctrl+clic derecho elimina los marcadores en ese beat. Al desplazar la rejilla, los cues y drops se mueven con ella."
+    },
+    "midi-drv-filter": {
+      "title": "Filtro de mensajes fan-out",
+      "body": "Clases de mensajes que el controlador descarta solo en el puerto del DJ (rave-mate sigue viendo todo). Los teclados envían aftertouch (channel pressure) con cada pulsación en cada tecla - si el MIDI-learn de tu software captura eso en vez de la nota, el mapeo se dispara con CUALQUIER tecla y otra vez al soltar. Filtrar aftertouch, active sensing y reloj mantiene el learn limpio; deja pitch bend y presión polifónica si mapeas faders de tempo o pads de presión."
     }
   },
   "library": {
@@ -3171,7 +3175,14 @@
   },
   "midictl": {
     "in": {
-      "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)"
+      "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)",
+      "thruDriver": "controlador ravemidi (recomendado)",
+      "useInDJ": "En tu software de DJ selecciona:",
+      "driverNote": "El controlador de kernel lee el dispositivo directamente y sigue reenviando aunque rave-mate esté cerrado o tras un reinicio. rave-mate escucha en “{reserved}” - nunca selecciones ese puerto en otras apps.",
+      "driverState": "Reenvío del controlador",
+      "driverPending": "esperando la sincronización del controlador…",
+      "lastInput": "última entrada hace {ago}:",
+      "filterLbl": "Filtrar"
     },
     "out": {
       "sub": "Adónde ENVÍA MIDI rave-mate. Elige el puerto unidireccional integrado (el software DJ no puede re-leerse a sí mismo) o cualquier puerto loopback que escuche tu app DJ."
@@ -3193,7 +3204,7 @@
       "smartscreen": "Windows puede avisar sobre componentes autofirmados (SmartScreen / editor desconocido). Normal en builds open source sin certificado EV — el código y los builds de CI son públicos; lee el README antes de continuar.",
       "docs": "README y código del driver",
       "managedHdr": "Reenvío gestionado por el driver",
-      "managedSub": "El driver vincula tus controladores por sí mismo y sigue reenviando MIDI (en ambos sentidos) aunque rave-mate esté cerrado — la configuración vive en el kernel y sobrevive a reinicios. Por entrada crea un puerto reservado \"(rave-mate)\" para reconectar sin cortes más un puerto THRU unidireccional para tu software DJ. Sync escribe cada controlador activado arriba en el driver; este se vincula al arrancar, al llegar el dispositivo y reintenta mientras esté ocupado.",
+      "managedSub": "El reenvío vive en el controlador y se sincroniza automáticamente con cada cambio - sin sincronización manual. Estos botones son de respaldo.",
       "sync": "Sincronizar controladores → driver",
       "reload": "Recargar config del driver",
       "bound": "reenviando",
@@ -3203,7 +3214,9 @@
       "syncedToast": "{n} entradas gestionadas escritas en el driver",
       "reloadedToast": "Config del driver recargada",
       "needControllers": "No hay controladores activados con puerto que sincronizar.",
-      "queryFailed": "Este build del driver aún no tiene plano de config — actualiza el driver para el reenvío gestionado."
+      "queryFailed": "Este build del driver aún no tiene plano de config — actualiza el driver para el reenvío gestionado.",
+      "reapply": "Reaplicar al controlador",
+      "syncFailed": "Configuración no aplicada al controlador: {err} - tras actualizar rave-mate, actualiza/reinstala también el controlador ravemidi y reinicia."
     },
     "sw": {
       "hdr": "Estado del software DJ",
@@ -3215,6 +3228,34 @@
       "rekordbox": "Rekordbox no puede disparar Play desde un mapping loopback (límite de la app — usa un controlador o el puente). La escritura de grid/cues va por importación XML; verifica antes de aplicar.",
       "virtualdj": "Mapping + escritura de base implementados pero aún sin pruebas de campo. Haz copia de tu base de VirtualDJ primero.",
       "serato": "Integración sin terminar: la importación de biblioteca funciona, la escritura es nueva. Mantén copias; espera asperezas."
+    },
+    "filter": {
+      "aftertouch": "Aftertouch",
+      "poly": "Presión polifónica",
+      "bend": "Pitch bend",
+      "sense": "Active sensing",
+      "clock": "Reloj"
+    },
+    "mon": {
+      "card": "Monitor de entrada",
+      "badge": "En vivo",
+      "sub": "Cada mensaje entrante, el más reciente primero. Pulsa un control para ver qué fila se ilumina - así sabes qué puerto es cada dispositivo.",
+      "empty": "Aún no llega MIDI - pulsa una tecla o mueve un control de un controlador conectado.",
+      "now": "ahora"
+    },
+    "trace": {
+      "hdr": "Traza de cable - puerto {id}",
+      "empty": "Sin eventos capturados en este puerto.",
+      "refresh": "Actualizar",
+      "close": "Cerrar",
+      "open": "Traza de cable",
+      "tapraw": "dispositivo crudo",
+      "toapp": "→ app",
+      "readpop": "lectura app",
+      "fromapp": "escritura app",
+      "feedback": "→ dispositivo",
+      "loopdrop": "bucle descartado",
+      "unknown": "?"
     }
   }
 }

@@ -986,6 +986,10 @@ type MIDIControllerMap struct {
 	ThruPort string        `json:"thruPort,omitempty"`
 	Enabled  bool          `json:"enabled"`
 	Bindings []MIDIBinding `json:"bindings,omitempty"`
+	// DriverFilter: message classes the ravemidi driver drops on the DJ-facing
+	// fan-out (keys per midi.FilterKeys). nil = midi.DefaultDriverFilter();
+	// empty non-nil = filter nothing. No omitempty: [] must persist.
+	DriverFilter []string `json:"driverFilter"`
 }
 
 // MIDIBridge is the two-port loopMIDI DJ router. ToDJPort = MIDI-OUT the DJ app reads (peer

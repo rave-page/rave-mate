@@ -47,6 +47,32 @@ bundled.
 > rave-mate ships nothing of the SDK (it calls the DLL the user installed with loopMIDI),
 > but request clearance (info@tobias-erichsen.de) before a release that advertises this.
 
+## Driver-managed forwarding (ravemidi) — shipped
+
+With the ravemidi kernel driver installed, pick **"ravemidi driver (recommended)"** as a
+controller's THRU. The DRIVER then taps the hardware and fans it out — forwarding keeps
+running when rave-mate is closed and comes back after a reboot on its own:
+
+- your DJ software selects the **`<Name> THRU`** port (shown in the UI). It is
+  bidirectional: controller MIDI down, LED feedback up (message-framed, teed to the
+  device) — loop-free by construction, the port has no internal render→capture path
+- rave-mate reads **`<Name> (rave-mate)`** instead of the device (never select that
+  port elsewhere); the hardware hold is released so the driver can bind it
+- driver config **syncs automatically** on every controller change (add/remove/port/
+  filter) — no manual sync; "Re-apply"/"Reload" in the driver card are fallbacks. A
+  version-mismatched (older) installed driver shows a persistent "update the driver"
+  hint instead of failing silently
+- per-controller **Filter out** chips drop aftertouch / poly pressure / pitch bend /
+  active sensing / clock on the DJ-facing port only (rave-mate still sees everything).
+  Default drops aftertouch+sensing+clock: keybed aftertouch is what MIDI-learn loves
+  to latch onto ("every key triggers the binding, again on release")
+
+**Input monitor** (MIDI tab): live decoded feed of every incoming message, newest
+first — press a control to see which port belongs to which device. **Wire trace**
+(driver card, per input): the driver's per-port ring of raw events at every hop
+(device raw / to app / app read / app wrote / feedback out / loop drop) for
+on-hardware diagnosis.
+
 ## Setup (Windows)
 
 1. Install a virtual MIDI port - **loopMIDI** (or any driver above). Create one port, e.g.

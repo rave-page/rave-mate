@@ -8,6 +8,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 )
 
 // Native MIDI-learn action handlers: connect physical controllers, learn each control per
@@ -68,6 +69,35 @@ func init() {
 
 	onPrefix("midi-ctl-thru:", func(u *UI, m actMsg) {
 		if u.withCtl(atoiSafe(m.arg("midi-ctl-thru:")), func(c *config.MIDIControllerMap) { c.ThruPort = m.Val }) {
+			u.midiApply()
+		}
+	})
+
+	// driver fan-out message-filter chips (driver-managed controllers only)
+	onPrefix("midi-ctl-filter:", func(u *UI, m actMsg) {
+		idxs, key, ok := strings.Cut(m.arg("midi-ctl-filter:"), ":")
+		if !ok {
+			return
+		}
+		if u.withCtl(atoiSafe(idxs), func(c *config.MIDIControllerMap) {
+			fl := c.DriverFilter
+			if fl == nil {
+				fl = append([]string(nil), midi.DefaultDriverFilter()...)
+			}
+			out := fl[:0]
+			found := false
+			for _, k := range fl {
+				if k == key {
+					found = true
+					continue
+				}
+				out = append(out, k)
+			}
+			if !found {
+				out = append(out, key)
+			}
+			c.DriverFilter = out // non-nil from here: [] = filter nothing
+		}) {
 			u.midiApply()
 		}
 	})
@@ -152,9 +182,12 @@ func init() {
 	})
 }
 
-// midiApply persists config, pushes it to the running MIDI child (live reconfigure), re-renders.
+// midiApply persists config, pushes it to the running MIDI child (live reconfigure),
+// mirrors driver-managed controllers into the ravemidi driver, re-renders. One entry
+// point = zero manual sync/reload friction.
 func (u *UI) midiApply() {
 	u.saveCfg()
+	u.midiDrvSync(false) // BEFORE child reconfigure: reserved ports must exist when it opens them
 	if u.svc.MIDISource != nil {
 		u.svc.MIDISource.Reconfigure()
 	}
