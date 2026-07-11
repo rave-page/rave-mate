@@ -9,9 +9,13 @@ package webui
 // makes tooltips ctl-drivable - `ctl set tt-<id> true` pins a card for screenshots
 // (data-label carries the id). Links open in the OS browser via the open-url act.
 //
-// Do NOT place a tooltip inside a live-ticked region (live_ticks.go) - the 1 Hz
-// innerHTML patch wipes the pin state. Anchor on the static wrapper instead
-// (e.g. section titles around live-net/live-tim).
+// Shown cards portal into the body-level #__ttlayer (shell.go) so ancestor overflow
+// panels / stacking contexts can't clip them; hidden cards return to the trigger.
+//
+// Avoid anchoring inside a live-ticked region (live_ticks.go): a PINNED card survives
+// the 1 Hz innerHTML patch (the layer sweep re-pins the replacement trigger by
+// data-label), but an unpinned hover preview closes on every tick. Prefer the static
+// wrapper (e.g. section titles around live-net/live-tim).
 
 import (
 	"html"
@@ -336,8 +340,9 @@ func renderTip(id, title, body string, links []ttLink) string {
 	// lucide-style info glyph; currentColor follows muted/hover/pinned states.
 	b.WriteString(`<svg class=tt-ic viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
 		`<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`)
-	// tt-card = transparent positioner (+hover bridge); tt-in = visual panel, scrolls
-	// internally when the viewport is short. __ttplace (shell.go) flips/clamps both.
+	// tt-card = transparent positioner (+hover bridge), portaled to #__ttlayer while
+	// shown; tt-in = visual panel, scrolls internally when tall (~60vh cap). __ttplace
+	// (shell.go) flips/clamps both.
 	b.WriteString(`<span class=tt-card role=tooltip><span class=tt-in>`)
 	b.WriteString(`<b class=tt-title>` + html.EscapeString(title) + `</b>`)
 	for _, p := range strings.Split(body, "\n\n") {

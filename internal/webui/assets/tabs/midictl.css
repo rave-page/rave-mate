@@ -308,7 +308,7 @@
 .midi-driver-links a {
   color: var(--rp-violet, #7C3AED);
   text-decoration: none;
-  white-space: nowrap;
+  /* labels are long - nowrap overflowed the card at narrow widths */
 }
 .midi-driver-links a:hover { text-decoration: underline; }
 
