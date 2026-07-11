@@ -159,7 +159,8 @@ const runtimeJS = `(function(){
     var d={}; new FormData(f).forEach(function(v,k){ d[k]=v; });
     send({act: f.getAttribute('data-act'), form: JSON.stringify(d), id: f.id||''});
   });
-  window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html; } };
+  window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html;
+    if(html.indexOf('ss-panel')>=0) __ssplace(); } };
   window.__toast = function(msg){
     var t=document.getElementById('__toasts');
     if(!t){ t=document.createElement('div'); t.id='__toasts';
@@ -485,4 +486,37 @@ const runtimeJS = `(function(){
       if(t!==__ttlayer && !__ttlayer.contains(t)){ __ttrepin(); return; }
     }
   }).observe(document, {childList:true, subtree:true});
+  // ── smartSelect panel placement (.ss-panel, smartselect.go) ──
+  // Absolute panels clip against overflow ancestors (pane scroll containers). On open,
+  // promote the panel to viewport-fixed anchored to its trigger + clamped into the
+  // window (flip up when below lacks room). Panels under a transformed ancestor (modal
+  // translate) are skipped: fixed would resolve against it, and those never clip anyway.
+  var __ssraf=0;
+  function __ssxf(el){ // any ancestor forming a fixed-position containing block?
+    for(var n=el.parentElement; n; n=n.parentElement){
+      var cs=getComputedStyle(n);
+      if(cs.transform!=='none' || cs.perspective!=='none' || cs.filter!=='none') return true;
+    }
+    return false;
+  }
+  function __ssplace(){
+    if(__ssraf) return;
+    __ssraf=requestAnimationFrame(function(){ __ssraf=0;
+      var ps=document.querySelectorAll('.ss-panel');
+      for(var i=0;i<ps.length;i++){
+        var p=ps[i], host=p.closest('.ss'); if(!host || __ssxf(p)) continue;
+        var a=host.getBoundingClientRect(); if(!a.width && !a.height) continue;
+        var M=8, vw=window.innerWidth, vh=window.innerHeight;
+        var w=Math.min(Math.max(a.width, parseFloat(getComputedStyle(p).minWidth)||0), vw-2*M);
+        p.style.position='fixed'; p.style.width=w+'px'; p.style.minWidth='0'; p.style.right='auto';
+        var r=p.getBoundingClientRect();
+        var below=vh-M-(a.bottom+4), above=a.top-4-M;
+        var top=(r.height>below && above>below) ? Math.max(M, a.top-4-r.height) : a.bottom+4;
+        p.style.left=Math.min(Math.max(a.left, M), vw-M-w)+'px';
+        p.style.top=Math.min(top, Math.max(M, vh-M-r.height))+'px';
+      }
+    });
+  }
+  window.addEventListener('resize', __ssplace);
+  document.addEventListener('scroll', __ssplace, true);
 })();`
