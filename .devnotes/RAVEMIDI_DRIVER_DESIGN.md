@@ -84,7 +84,7 @@ opens) and **mate side** (IOCTL) — and data only crosses sides, never reflects
 | OUT_ONLY | input only | — | mate WRITE | impossible (no app output) |
 | IN_ONLY | output only | mate READ | — | impossible (no app input) |
 | BIDI | in + out | mate READ (→ rave-mate → physical controller LEDs) | mate WRITE (controller input) | never — sides are distinct emitters |
-| LOOPBACK | in + out | its own capture | its own render | yes, by design (classic cable) |
+| LOOPBACK | in + out | its own capture | its own render | cross-process only (v2: self-echo suppressed by owning pid) |
 
 So "one-way" generalizes to "knows the emitter": BIDI is the echo-free duplex cable —
 DJ software never re-hears its own output, rave-mate never re-reads its own WRITE, yet
@@ -285,3 +285,32 @@ Known limits / bring-up list:
   late inputs parks in the retry loop until slots free up.
 - Local build needs the WDK VS toolset shim (see build notes in session summary); CI
   (windows-2022) unaffected.
+
+## Protocol v2 (2026-07-11): loop-free duplex fan-outs + filter + trace
+
+User correction of intent: the driver's job is bidirectional MIDI WITHOUT loops -
+no client (device or app) may receive its own bytes back. Changes:
+
+- **Managed fan-outs are BIDI** (were OUT_ONLY): DJ software gets controller MIDI
+  down AND sends LED feedback up. Every armed port's render bytes tee into its own
+  `Feedback` FIFO; the worker drains all of an input's FIFOs through **per-port MIDI
+  framers** (`framer.cpp` - short-message/running-status/sysex/realtime state machine)
+  so interleaved writers never split a message, one `RaveKsWriteMidi` per complete
+  message. Loop-free structurally: BIDI has no internal render->capture path.
+- **LOOPBACK self-echo suppression**: streams record `PsGetCurrentProcessId()` at
+  NewStream (pin creation runs in the opener's context); a loopback render write from
+  the capture-owning pid is dropped + counted (`LoopSuppressed`, traced as LoopDrop).
+  Caveat: if Windows MIDI Services (midisrv) proxies clients, all pins share midisrv's
+  pid - loopback suppression then over-drops; managed BIDI ports are the supported
+  path there.
+- **`RAVEMIDI_INPUT_CFG.Filter`** (bump to PROTOCOL_VERSION 2, persisted blob size
+  changes - old blobs load as NOT_FOUND, rave-mate re-syncs): per-input mask dropping
+  aftertouch/poly-pressure/pitch-bend/active-sensing/clock on the tap->fan-out path
+  only (reserved port unfiltered). Motivation: Rekordbox MIDI-learn latches onto
+  keybed channel pressure -> "any key fires the binding" + "play only while held"
+  (press fires it, release-pressure fires it again).
+- **`IOCTL_RAVEMIDI_QUERY_TRACE` (0x80B)**: per-port 128-entry ring (seq, interrupt
+  time, dir, len, first 12 bytes) - dirs TapRaw(0, raw KS read pre-parse, lands in the
+  tap's first fan-in port)/ToApp/ReadPop/FromApp/FeedbackOut/LoopDrop. Purpose: pin
+  down on-hardware wire bugs (e.g. wrong bytes at which hop) live from rave-mate's
+  MIDI monitor without KD.

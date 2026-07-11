@@ -34,9 +34,27 @@ typedef struct _RAVE_TAP {
     volatile LONG Stop;
     ULONG OutCount;
     RAVE_PORT* Outs[TAP_MAX_OUT];    // borrowed (caller owns lifetime)
+    ULONG FilterMask;                // RAVEMIDI_FILTER_*: drop classes for Outs[1..]
     RAVE_TAP_DEAD_CB OnDead;
     PVOID DeadCtx;
 } RAVE_TAP;
+
+// TRUE if a message with this status byte is dropped under the mask.
+static BOOLEAN FilteredMsg(ULONG mask, UCHAR status)
+{
+    if (status >= 0xF8) {
+        if (status == 0xFE) {
+            return (mask & RAVEMIDI_FILTER_ACTIVESENSE) != 0;
+        }
+        return (status <= 0xF9) && (mask & RAVEMIDI_FILTER_CLOCK) != 0;
+    }
+    switch (status & 0xF0) {
+    case 0xA0: return (mask & RAVEMIDI_FILTER_POLYPRESSURE) != 0;
+    case 0xD0: return (mask & RAVEMIDI_FILTER_CHANPRESSURE) != 0;
+    case 0xE0: return (mask & RAVEMIDI_FILTER_PITCHBEND) != 0;
+    default:   return FALSE;
+    }
+}
 
 typedef struct _RAVE_MIRROR {
     LIST_ENTRY Link;
@@ -290,6 +308,10 @@ static VOID TapThread(PVOID ctx)
         if (used > MIRROR_READ_BUF) {
             used = MIRROR_READ_BUF;  // never trust DataUsed past the buffer
         }
+        if (used) {
+            // raw pre-parse view -> first fan-in port's ring (diagnosis anchor)
+            RaveTracePush(t->Outs[0], RaveTraceTapRaw, buf, used);
+        }
         ULONG off = 0;
         while (used - off >= sizeof(KSMUSICFORMAT)) {
             KSMUSICFORMAT* mf = (KSMUSICFORMAT*)(buf + off);
@@ -298,8 +320,14 @@ static VOID TapThread(PVOID ctx)
             if (bc == 0 || bc > MIRROR_MAX_REC || bc > used - off) {
                 break;
             }
+            // fan-out filter: reserved port (index 0) always sees everything
+            BOOLEAN drop = (t->FilterMask && FilteredMsg(t->FilterMask, buf[off])) ? TRUE : FALSE;
             for (ULONG i = 0; i < t->OutCount; i++) {
+                if (drop && i > 0) {
+                    continue;
+                }
                 RaveFifoPush(&t->Outs[i]->ToApp, buf + off, bc);
+                RaveTracePush(t->Outs[i], RaveTraceToApp, buf + off, bc);
                 RavePortNotifyToApp(t->Outs[i]);
             }
             ULONG pad = (bc + 3u) & ~3u;
@@ -314,7 +342,7 @@ static VOID TapThread(PVOID ctx)
 
 #pragma code_seg("PAGE")
 NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
-                     RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap)
+                     ULONG FilterMask, RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap)
 {
     PAGED_CODE();
     *OutTap = nullptr;
@@ -329,6 +357,7 @@ NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
     for (ULONG i = 0; i < OutCount; i++) {
         t->Outs[i] = Outs[i];
     }
+    t->FilterMask = FilterMask;
     t->OnDead = OnDead;
     t->DeadCtx = DeadCtx;
 
@@ -511,7 +540,7 @@ NTSTATUS RaveMirrorCreate(PFILE_OBJECT creator, const RAVEMIDI_CREATE_MIRROR_IN*
         }
     }
 
-    NTSTATUS st = RaveTapOpen(in->SourceInterface, m->Outs, m->OutCount, nullptr, nullptr, &m->Tap);
+    NTSTATUS st = RaveTapOpen(in->SourceInterface, m->Outs, m->OutCount, 0, nullptr, nullptr, &m->Tap);
     if (!NT_SUCCESS(st)) {
         for (ULONG i = 0; i < m->OutCount; i++) {
             RaveUnrefOutputPort(m->Outs[i]);

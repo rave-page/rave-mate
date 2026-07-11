@@ -82,6 +82,7 @@
     <ClCompile Include="mirror.cpp" />
     <ClCompile Include="config.cpp" />
     <ClCompile Include="managed.cpp" />
+    <ClCompile Include="framer.cpp" />
     <ClInclude Include="ioctl.h" />
     <ClInclude Include="miniport.h" />
     <ClInclude Include="fifo.h" />
@@ -89,6 +90,7 @@
     <ClInclude Include="mirror.h" />
     <ClInclude Include="config.h" />
     <ClInclude Include="managed.h" />
+    <ClInclude Include="framer.h" />
     <Inf Include="ravemidi.inf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

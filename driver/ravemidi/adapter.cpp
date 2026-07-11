@@ -392,6 +392,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     RaveFifoInit(&p->FromApp);
     RaveFifoInit(&p->Feedback);
     p->FeedbackArm = 0;
+    KeInitializeSpinLock(&p->TraceLock);  // ring itself is pool-zeroed
     KeInitializeSpinLock(&p->ReadLock);
     InitializeListHead(&p->ReadIrps);
     IoCsqInitialize(&p->ReadCsq, RaveCsqInsert, RaveCsqRemove, RaveCsqPeek,
@@ -609,6 +610,7 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             }
             InterlockedIncrement(&p->WriteIoctls);
             RaveFifoPush(&p->ToApp, (UCHAR*)(w + 1), w->ByteCount);
+            RaveTracePush(p, RaveTraceToApp, (UCHAR*)(w + 1), w->ByteCount);
             RavePortNotifyToApp(p);  // kick capture service if a stream is running
             break;
         }
@@ -726,6 +728,37 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             if (NT_SUCCESS(st)) {
                 info = sizeof(RAVEMIDI_INPUT_STATUS);
             }
+            break;
+        }
+        case IOCTL_RAVEMIDI_QUERY_TRACE: {
+            if (inLen < sizeof(RAVEMIDI_PORT_REF) || outLen < sizeof(RAVEMIDI_TRACE_OUT)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            ULONG tid = ((RAVEMIDI_PORT_REF*)buf)->PortId;
+            ExAcquireFastMutex(&a->PortsLock);
+            RAVE_PORT* p = FindPortLocked(a, tid);
+            if (!p) {
+                ExReleaseFastMutex(&a->PortsLock);
+                st = STATUS_NOT_FOUND;
+                break;
+            }
+            RAVEMIDI_TRACE_OUT* o = (RAVEMIDI_TRACE_OUT*)buf;
+            KIRQL irql;
+            KeAcquireSpinLock(&p->TraceLock, &irql);
+            ULONGLONG next = p->TraceSeq;
+            ULONG count = (next < RAVEMIDI_TRACE_ENTRIES) ? (ULONG)next : RAVEMIDI_TRACE_ENTRIES;
+            // oldest-first copy out of the ring
+            for (ULONG i = 0; i < count; i++) {
+                ULONGLONG seq = next - count + i;
+                o->E[i] = p->Trace[seq % RAVEMIDI_TRACE_ENTRIES];
+            }
+            KeReleaseSpinLock(&p->TraceLock, irql);
+            ExReleaseFastMutex(&a->PortsLock);
+            o->PortId = tid;
+            o->Count = count;
+            o->NextSeq = next;
+            info = sizeof(RAVEMIDI_TRACE_OUT);
             break;
         }
         case IOCTL_RAVEMIDI_RELOAD_CONFIG: {

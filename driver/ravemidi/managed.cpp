@@ -14,6 +14,7 @@
 #include "mirror.h"
 #include "config.h"
 #include "managed.h"
+#include "framer.h"
 
 #ifndef LOCALE_NEUTRAL
 #define LOCALE_NEUTRAL 0
@@ -28,7 +29,9 @@ typedef struct _RAVE_MINPUT {
     RAVEMIDI_INPUT_CFG Cfg;               // sanitized copy (bytewise-comparable)
     BOOLEAN PortsReady;
     RAVE_PORT* Reserved;                  // BIDI "<Name> (rave-mate)"
-    RAVE_PORT* Outs[RAVEMIDI_MAX_MIRROR_OUT];
+    RAVE_PORT* Outs[RAVEMIDI_MAX_MIRROR_OUT];  // BIDI fan-outs (DJ software; render -> device)
+    RAVE_FRAMER Framers[RAVEMIDI_MAX_MIRROR_OUT + 1];  // [0]=Reserved; per-port so
+                                          // interleaved chunks never split a message
     RAVE_TAP* Tap;
     volatile LONG TapDead;                // set by tap thread; worker rebinds
     BOOLEAN Bound;
@@ -219,7 +222,9 @@ static NTSTATUS CreateInputPorts(RAVE_MINPUT* in)
             RtlStringCchPrintfW(nm, RTL_NUMBER_OF(nm), L"%s Out %lu", in->Cfg.Name, i + 1);
             name = nm;
         }
-        st = RavePortCreateOwnerless(RaveMidiPortOutOnly, name, &in->Outs[i]);
+        // BIDI: DJ software receives the controller AND can send LED feedback back
+        // (render -> device tee). No internal render->capture path = loop-free.
+        st = RavePortCreateOwnerless(RaveMidiPortBidi, name, &in->Outs[i]);
         if (!NT_SUCCESS(st)) {  // rollback (e.g. RAVEMIDI_MAX_PORTS exhausted) — retried later
             for (ULONG j = 0; j < i; j++) {
                 GraveOrDestroy(in->Outs[j]->Id);
@@ -235,12 +240,30 @@ static NTSTATUS CreateInputPorts(RAVE_MINPUT* in)
 #pragma code_seg()
 
 // -------- binding ----------------------------------------------------------------
+// Feedback sources: every port whose app-render bytes tee to the device render pin.
+// Index 0 = Reserved (rave-mate), 1.. = fan-outs (DJ software LED feedback).
+static ULONG FeedbackSrcs(RAVE_MINPUT* in, RAVE_PORT** srcs)
+{
+    ULONG n = 0;
+    if (in->Reserved) {
+        srcs[n++] = in->Reserved;
+    }
+    for (ULONG i = 0; i < in->Cfg.OutCount; i++) {
+        if (in->Outs[i]) {
+            srcs[n++] = in->Outs[i];
+        }
+    }
+    return n;
+}
+
 #pragma code_seg("PAGE")
 static VOID DropRender(RAVE_MINPUT* in)
 {
     PAGED_CODE();
-    if (in->Reserved) {
-        InterlockedExchange(&in->Reserved->FeedbackArm, 0);
+    RAVE_PORT* srcs[RAVEMIDI_MAX_MIRROR_OUT + 1];
+    ULONG n = FeedbackSrcs(in, srcs);
+    for (ULONG i = 0; i < n; i++) {
+        InterlockedExchange(&srcs[i]->FeedbackArm, 0);
     }
     if (in->RPinFo || in->RFilterFo) {
         RaveKsCloseRenderPin(in->RFilter, in->RFilterFo, in->RPin, in->RPinFo);
@@ -267,7 +290,7 @@ static NTSTATUS OpenTapOn(RAVE_MINPUT* in, PCWSTR iface)
         }
     }
     InterlockedExchange(&in->TapDead, 0);
-    NTSTATUS st = RaveTapOpen(iface, outs, n, MTapDead, in, &in->Tap);
+    NTSTATUS st = RaveTapOpen(iface, outs, n, in->Cfg.Filter, MTapDead, in, &in->Tap);
     if (NT_SUCCESS(st)) {
         RtlStringCchCopyW(in->BoundIface, RTL_NUMBER_OF(in->BoundIface), iface);
         in->Bound = TRUE;
@@ -343,11 +366,16 @@ static VOID TryBindRender(RAVE_MINPUT* in)
             }
             if (NT_SUCCESS(RaveKsOpenRenderPin(sym, &in->RFilter, &in->RFilterFo,
                                                &in->RPin, &in->RPinFo))) {
-                // discard stale feedback queued while unbound, then arm the tee
+                // discard stale feedback queued while unbound, then arm the tees
                 UCHAR sink[RAVEMIDI_FEEDBACK_CHUNK];
-                while (RaveFifoPop(&in->Reserved->Feedback, sink, sizeof(sink)) != 0) {
+                RAVE_PORT* srcs[RAVEMIDI_MAX_MIRROR_OUT + 1];
+                ULONG ns = FeedbackSrcs(in, srcs);
+                for (ULONG k = 0; k < ns; k++) {
+                    while (RaveFifoPop(&srcs[k]->Feedback, sink, sizeof(sink)) != 0) {
+                    }
+                    RaveFramerInit(&in->Framers[k]);
+                    InterlockedExchange(&srcs[k]->FeedbackArm, 1);
                 }
-                InterlockedExchange(&in->Reserved->FeedbackArm, 1);
                 in->FeedbackBound = TRUE;
             }
         }
@@ -361,18 +389,49 @@ static VOID TryBindRender(RAVE_MINPUT* in)
     }
 }
 
+typedef struct _FB_EMIT_CTX {
+    RAVE_MINPUT* In;
+    BOOLEAN Ok;
+} FB_EMIT_CTX;
+
+// Framer emit: one message-aligned KS write per complete MIDI message.
+static VOID FbEmit(PVOID ctx, const UCHAR* msg, ULONG len)
+{
+    FB_EMIT_CTX* e = (FB_EMIT_CTX*)ctx;
+    if (!e->Ok) {
+        return;
+    }
+    if (e->In->Reserved) {
+        RaveTracePush(e->In->Reserved, RaveTraceFeedbackOut, msg, len);
+    }
+    if (!NT_SUCCESS(RaveKsWriteMidi(e->In->RPinFo, msg, len))) {
+        e->Ok = FALSE;
+    }
+}
+
 static VOID DrainFeedback(RAVE_MINPUT* in)
 {
     PAGED_CODE();
     UCHAR buf[RAVEMIDI_FEEDBACK_CHUNK];
     ULONG n;
-    while (in->FeedbackBound &&
-           (n = RaveFifoPop(&in->Reserved->Feedback, buf, sizeof(buf))) != 0) {
-        if (!NT_SUCCESS(RaveKsWriteMidi(in->RPinFo, buf, n))) {
-            DropRender(in);  // render pin died — resume retrying
-            in->BackoffIdx = 0;
-            ScheduleRetry(in);
+    FB_EMIT_CTX e;
+    e.In = in;
+    e.Ok = TRUE;
+    RAVE_PORT* srcs[RAVEMIDI_MAX_MIRROR_OUT + 1];
+    ULONG ns = FeedbackSrcs(in, srcs);
+    for (ULONG k = 0; k < ns && e.Ok && in->FeedbackBound; k++) {
+        while ((n = RaveFifoPop(&srcs[k]->Feedback, buf, sizeof(buf))) != 0) {
+            // per-source framer: interleaved app writes never split a message
+            RaveFramerFeed(&in->Framers[k], buf, n, FbEmit, &e);
+            if (!e.Ok) {
+                break;
+            }
         }
+    }
+    if (!e.Ok) {
+        DropRender(in);  // render pin died — resume retrying
+        in->BackoffIdx = 0;
+        ScheduleRetry(in);
     }
 }
 

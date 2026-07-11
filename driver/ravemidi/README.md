@@ -32,8 +32,19 @@ handle close never tears them down):
   seamlessly after relaunch; with `Feedback=1` its app-bound writes are teed to
   the hardware device's render pin (LED feedback) while staying readable via
   `IOCTL_RAVEMIDI_READ`
-- `OutCount` extra **OUT_ONLY** ports with the configured names (empty name →
-  `"<Name> Out N"`); with `Thru=1` device capture fans into them
+- `OutCount` extra **BIDI** fan-out ports with the configured names (empty name →
+  `"<Name> Out N"`); with `Thru=1` device capture fans into them, and with
+  `Feedback=1` the DJ software's writes on them are message-framed and teed to
+  the device render pin (LED feedback) — loop-free: a BIDI port has no internal
+  render→capture path, so an app never re-hears its own output
+- `Filter` (protocol v2) drops message classes (aftertouch / poly pressure /
+  pitch bend / active sensing / clock) on the fan-out path only; the reserved
+  port always carries the full stream. Fixes DJ-software MIDI-learn latching
+  onto keybed aftertouch ("every key triggers the binding")
+- `IOCTL_RAVEMIDI_QUERY_TRACE` snapshots a per-port ring of the last 128 data
+  events (tap-raw / to-app / read-pop / from-app / feedback-out / loop-drop)
+  for live wire diagnosis from rave-mate; LOOPBACK ports suppress self-echo by
+  owning-process identity (an app holding both ends never hears itself)
 
 Binding: a passive worker + PnP interface-change notification (KSCATEGORY_CAPTURE,
 existing interfaces included). Source = exact `SourceIface` symlink, else the first

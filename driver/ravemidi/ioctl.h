@@ -10,7 +10,7 @@
 #define RAVEMIDI_CTL_DOSNAME L"\\DosDevices\\RaveMidiCtl"
 #define RAVEMIDI_CTL_NTNAME  L"\\Device\\RaveMidiCtl"
 
-#define RAVEMIDI_PROTOCOL_VERSION 1
+#define RAVEMIDI_PROTOCOL_VERSION 2  // v2: INPUT_CFG.Filter + BIDI fan-outs + trace
 #define RAVEMIDI_MAX_NAME 32   // WCHARs incl NUL; winmm szPname caps at 31+NUL
 #define RAVEMIDI_MAX_PORTS 16
 #define RAVEMIDI_MAX_MIRROR 8            // concurrent mirror groups
@@ -20,8 +20,14 @@
 // Port kind = which winmm endpoints the port exposes.
 // OUT_ONLY: apps see an INPUT-only port; rave-mate writes into it (the LED-echo killer).
 // IN_ONLY:  apps see an OUTPUT-only port; rave-mate reads what apps send.
-// BIDI:     both endpoints, app<->rave-mate.
-// LOOPBACK: classic cable — app render echoed to app capture (no rave-mate in path).
+// BIDI:     both endpoints. There is NO internal render->capture path: capture is fed
+//           by the driver (tap/IOCTL_WRITE), render drains to IOCTL_READ + the device
+//           feedback tee. An app on a BIDI port can never receive its own output —
+//           loop-free by construction. Managed fan-outs are BIDI so DJ software gets
+//           controller MIDI down AND can light LEDs up.
+// LOOPBACK: classic cable — app render echoed to app capture, EXCEPT back to the
+//           writing process itself (self-echo suppression: the loopMIDI feedback-loop
+//           killer — an app holding both ends never hears itself).
 typedef enum _RAVEMIDI_PORT_KIND {
     RaveMidiPortOutOnly  = 0,
     RaveMidiPortInOnly   = 1,
@@ -114,14 +120,26 @@ typedef struct _RAVEMIDI_PORT_STATS {
 
 #define RAVEMIDI_MAX_INPUTS 8
 
+// Filter bits: message classes dropped on the tap -> FAN-OUT path (the reserved
+// rave-mate port always receives everything, so learn/monitor stay complete).
+// Kills the "MIDI-learn caught aftertouch, now every key fires the binding" class
+// of mapping bugs without touching the controller.
+#define RAVEMIDI_FILTER_CHANPRESSURE 0x01  // Dn channel pressure (keybed aftertouch)
+#define RAVEMIDI_FILTER_POLYPRESSURE 0x02  // An polyphonic aftertouch
+#define RAVEMIDI_FILTER_PITCHBEND    0x04  // En pitch bend
+#define RAVEMIDI_FILTER_ACTIVESENSE  0x08  // FE active sensing
+#define RAVEMIDI_FILTER_CLOCK        0x10  // F8/F9 timing tick
+#define RAVEMIDI_FILTER_VALID        0x1F
+
 typedef struct _RAVEMIDI_INPUT_CFG {
     WCHAR Id[RAVEMIDI_MAX_NAME];           // stable id assigned by rave-mate
     WCHAR Name[RAVEMIDI_MAX_NAME];         // friendly base name (port naming)
     WCHAR SourceMatch[RAVEMIDI_MAX_NAME];  // case-insensitive substring vs device FriendlyName
     WCHAR SourceIface[RAVEMIDI_MAX_IFACE]; // optional exact KS symlink ("" = use SourceMatch)
     ULONG Thru;                            // 1 = device capture -> all out ports
-    ULONG Feedback;                        // 1 = reserved-port writes -> device render pin
-    ULONG OutCount;                        // extra OUT_ONLY ports (0..RAVEMIDI_MAX_MIRROR_OUT)
+    ULONG Feedback;                        // 1 = app render on reserved/fan-out ports -> device render pin
+    ULONG Filter;                          // RAVEMIDI_FILTER_* mask (fan-outs only)
+    ULONG OutCount;                        // extra BIDI fan-out ports (0..RAVEMIDI_MAX_MIRROR_OUT)
     WCHAR OutNames[RAVEMIDI_MAX_MIRROR_OUT][RAVEMIDI_MAX_NAME];
 } RAVEMIDI_INPUT_CFG;
 
@@ -143,6 +161,40 @@ typedef struct _RAVEMIDI_INPUT_STATUS {
     ULONG OutCount;
     ULONG OutPortIds[RAVEMIDI_MAX_MIRROR_OUT];
 } RAVEMIDI_INPUT_STATUS;
+
+// ── Trace (bring-up + live diagnosis) ─────────────────────────────────────────
+// Per-port ring of the last RAVEMIDI_TRACE_ENTRIES data events. Snapshot via
+// QUERY_TRACE (in: RAVEMIDI_PORT_REF); Seq is monotonic per port so pollers dedupe.
+// TAP_RAW entries (raw KS reads off the tapped hardware pin, pre-parse) land in the
+// tap's FIRST fan-in port ring (managed: the reserved port).
+
+#define RAVEMIDI_TRACE_ENTRIES 128
+#define RAVEMIDI_TRACE_BYTES 12
+
+typedef enum _RAVEMIDI_TRACE_DIR {
+    RaveTraceTapRaw      = 0,  // raw KS read completion from the tapped device
+    RaveTraceToApp       = 1,  // bytes pushed toward the app capture pin
+    RaveTraceReadPop     = 2,  // bytes handed to portcls via miniport Read
+    RaveTraceFromApp     = 3,  // bytes the app wrote on the render pin
+    RaveTraceFeedbackOut = 4,  // framed message written to the device render pin
+    RaveTraceLoopDrop    = 5,  // loopback write suppressed (self-echo)
+} RAVEMIDI_TRACE_DIR;
+
+typedef struct _RAVEMIDI_TRACE_ENTRY {
+    ULONGLONG Seq;
+    ULONGLONG Time100ns;               // KeQueryInterruptTime at capture
+    ULONG Dir;                         // RAVEMIDI_TRACE_DIR
+    ULONG Len;                         // full event length (may exceed TRACE_BYTES)
+    UCHAR Bytes[RAVEMIDI_TRACE_BYTES]; // first bytes of the event
+    UCHAR Pad[4];
+} RAVEMIDI_TRACE_ENTRY;                // 40 bytes
+
+typedef struct _RAVEMIDI_TRACE_OUT {
+    ULONG PortId;
+    ULONG Count;                       // valid entries in E (oldest-first)
+    ULONGLONG NextSeq;                 // next Seq the port will assign
+    RAVEMIDI_TRACE_ENTRY E[RAVEMIDI_TRACE_ENTRIES];
+} RAVEMIDI_TRACE_OUT;
 
 #pragma pack(pop)
 
@@ -173,3 +225,5 @@ typedef struct _RAVEMIDI_INPUT_STATUS {
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x809, METHOD_BUFFERED, FILE_READ_DATA)
 #define IOCTL_RAVEMIDI_RELOAD_CONFIG \
     CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x80A, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+#define IOCTL_RAVEMIDI_QUERY_TRACE \
+    CTL_CODE(RAVEMIDI_DEVICE_TYPE, 0x80B, METHOD_BUFFERED, FILE_READ_DATA)
