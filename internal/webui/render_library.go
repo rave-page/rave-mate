@@ -177,6 +177,12 @@ func (u *UI) renderLibrary() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.library"), i18n.T("navtitle.library")))
 	b.WriteString(u.targetSwitcherHTML("libtarget", "lib-target:"))
+	if u.libRemoteTarget() != "" {
+		// remote mirror: the embedded peer view carries its OWN section tabs - a local
+		// duplicate row would be dead weight and shadow ctl clicks aimed at the mirror
+		b.WriteString(`<div id=lib-body>` + u.libBody() + `</div>`)
+		return b.String()
+	}
 	b.WriteString(subTabs("lib-section:", sec,
 		[2]string{"browse", i18n.T("library.section.browse")}, [2]string{"favorites", i18n.T("library.section.favorites")},
 		[2]string{"collection", i18n.T("library.section.collection")}, [2]string{"playlists", i18n.T("library.section.playlists")},

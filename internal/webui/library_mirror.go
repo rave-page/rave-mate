@@ -55,8 +55,15 @@ func (u *UI) mirror() *mirrorSt {
 }
 
 func init() {
-	// rmirror-post carries the mirrored page's original window.rave payload in Form.
-	onExact("rmirror-post", func(u *UI, m actMsg) { u.mirrorForwardAct(m.Form) })
+	// rmirror-post carries the mirrored page's original window.rave payload in Form
+	// (Val fallback = ctl `act rmirror-post <payload>` drives the mirror act-level).
+	onExact("rmirror-post", func(u *UI, m actMsg) {
+		if m.Form != "" {
+			u.mirrorForwardAct(m.Form)
+		} else {
+			u.mirrorForwardAct(m.Val)
+		}
+	})
 	onExact("rmirror-reconnect", func(u *UI, _ actMsg) { u.patchMain() }) // re-render reopens
 }
 

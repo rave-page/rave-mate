@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"rave.page/mate/internal/i18n"
 )
 
 // Generic native-picker contract (see WEBUI brief): any tab renders
@@ -28,8 +30,14 @@ func init() {
 }
 
 // runPick shows the native dialog off-thread, then re-dispatches target with the chosen path.
+// Headless remote sessions refuse: a native dialog would pop on the CONTROLLED machine's
+// desktop - the one surface remote mode must never touch.
 func (u *UI) runPick(kind, container, target string) {
 	if target == "" {
+		return
+	}
+	if u.virtual() {
+		u.toast(i18n.T("library.mirror.noPicker"))
 		return
 	}
 	u.bg(func() {
