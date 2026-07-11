@@ -208,7 +208,7 @@
     },
     "midi-thru": {
       "title": "THRU - share one controller with your DJ software",
-      "body": "Because Windows lets only one app open a hardware MIDI input, opening the controller in rave-mate would normally lock your DJ software out of it.\n\nTHRU solves that: rave-mate opens the controller and re-sends every message it receives to a loopMIDI port. Point your DJ software's controller mapping at that loopMIDI port and it still gets everything, exactly as before, while rave-mate reads it too. In other words rave-mate becomes the splitter - you do NOT need MIDI-OX or any other router.\n\nLeave THRU off if your controller's driver is multi-client, or if you're on Windows MIDI Services - then both apps can open the hardware directly and no re-routing is needed.\n\nBest THRU target (needs the loopMIDI driver): the rave-mate one-way port. Your DJ software sees an input-only port named 'rave-mate' - there is NO matching output endpoint, so the app's automatic LED echo (rekordbox mirrors every indicator's MIDI IN code back out) has nowhere to loop and it can never react to its own feedback. Select 'rave-mate' as the MIDI device in the DJ software."
+      "body": "Because Windows lets only one app open a hardware MIDI input, opening the controller in rave-mate would normally lock your DJ software out of it.\n\nTHRU solves that: rave-mate opens the controller and re-sends every message it receives to a loopMIDI port. Point your DJ software's controller mapping at that loopMIDI port and it still gets everything, exactly as before, while rave-mate reads it too. In other words rave-mate becomes the splitter - you do NOT need MIDI-OX or any other router.\n\nLeave THRU off if your controller's driver is multi-client, or if you're on Windows MIDI Services - then both apps can open the hardware directly and no re-routing is needed.\n\nBest THRU target (needs the loopMIDI driver): the rave-mate one-way port. Your DJ software sees an input-only port named 'rave-mate' - there is NO matching output endpoint, so the app's automatic LED echo (rekordbox mirrors every indicator's MIDI IN code back out) has nowhere to loop and it can never react to its own feedback. Select 'rave-mate' as the MIDI device in the DJ software.\n\nWith the ravemidi kernel driver installed, 'ravemidi driver' is the best THRU choice: the driver taps the controller in the kernel (forwarding survives rave-mate closing and reboots) and it repairs misbehaving devices - some controllers, e.g. NI Komplete Kontrol keyboards, re-deliver their whole MIDI history with every event, breaking MIDI-learn in any app reading them directly. The driver forwards each message exactly once, so even those controllers work cleanly."
     },
     "midi-learn-grid": {
       "title": "The learn grid",
@@ -3316,6 +3316,7 @@
       "portInUseShort": "Not open - in use by another app",
       "portInUseHint": "Another program (your DJ software, or the controller's own software such as NI Komplete Kontrol) already holds this MIDI port - Windows allows only one app to read a MIDI input at a time. Close that program, or route the controller through a loopMIDI port: set that port as this controller's THRU and point the other app at loopMIDI instead of the hardware.",
       "portInUse": "'{port}' is in use by another app - close it, or route the controller through loopMIDI (set it as THRU).",
+      "drvNotReady": "The ravemidi driver hasn't bound the controller yet - wait for the driver status above to show forwarding, then try learning again.",
       "getPort": "Need a virtual MIDI port? Install one (your choice):",
       "thru": "THRU to (so the DJ app still gets it)",
       "thruNone": "None",
@@ -3335,7 +3336,7 @@
       "thruVirtual": "rave-mate one-way port - no echo (recommended)",
       "thruDriver": "ravemidi driver (recommended)",
       "useInDJ": "In your DJ software select:",
-      "driverNote": "The kernel driver reads the controller directly and keeps forwarding even when rave-mate is closed or after a reboot. Other apps only ever see the THRU port above - rave-mate reads the controller through the driver internally and holds no MIDI port at all.",
+      "driverNote": "The kernel driver reads the controller directly and keeps forwarding even when rave-mate is closed or after a reboot. Other apps only ever see the THRU port above - rave-mate reads the controller through the driver internally and holds no MIDI port at all. It also repairs misbehaving hardware: some controllers (NI Komplete Kontrol keyboards, for example) re-deliver their entire MIDI history with every new event, which breaks MIDI-learn in DJ software - the driver detects the replay and forwards every message exactly once, so such devices stay fully usable.",
       "driverState": "Driver forwarding",
       "driverPending": "waiting for driver sync…",
       "lastInput": "last input {ago} ago:",
@@ -3360,7 +3361,7 @@
       "status": "Kernel driver",
       "badgePreview": "developer preview",
       "badgeOn": "active",
-      "why": "Our open-source kernel driver creates one-way virtual MIDI ports: your DJ software sees an input-only port, so it can never re-read its own LED/feedback output (the classic loopback self-echo bug). Optional — without it rave-mate falls back to teVirtualMIDI or loopMIDI two-way ports.",
+      "why": "Our open-source kernel driver creates one-way virtual MIDI ports: your DJ software sees an input-only port, so it can never re-read its own LED/feedback output (the classic loopback self-echo bug). Optional — without it rave-mate falls back to teVirtualMIDI or loopMIDI two-way ports. It also cleans up quirky hardware: some controllers (e.g. NI Komplete Kontrol keyboards) re-deliver their full MIDI history on every event - the driver dedups the stream so every app gets each message exactly once.",
       "installed": "Installed and running — one-way ports are served by ravemidi.",
       "fallback": "Not installed — using the teVirtualMIDI fallback (two-way; DJ apps can self-echo).",
       "none": "Not installed and no teVirtualMIDI found — one-way ports unavailable (loopMIDI still works, two-way).",

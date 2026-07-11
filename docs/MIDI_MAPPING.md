@@ -67,6 +67,11 @@ running when rave-mate is closed and comes back after a reboot on its own:
   active sensing / clock on the DJ-facing port only (rave-mate still sees everything).
   Default drops aftertouch+sensing+clock: keybed aftertouch is what MIDI-learn loves
   to latch onto ("every key triggers the binding, again on release")
+- it **repairs misbehaving controllers**: some devices re-deliver their entire MIDI
+  history with every new event (seen on NI Komplete Kontrol keyboards) — MIDI-learn
+  then fires on every key and the stream eventually goes silent, in ANY app reading
+  the device directly. The driver detects the replay and forwards each message exactly
+  once, so such controllers stay fully usable through the THRU port
 
 **Input monitor** (MIDI tab): live decoded feed of every incoming message, newest
 first — press a control to see which port belongs to which device. **Wire trace**

@@ -178,6 +178,17 @@ func (u *UI) midiDriverThruHTML(i int, c config.MIDIControllerMap, ctx midiCtlRe
 	return b.String()
 }
 
+// midiChildPort is the input the midi child actually opens for c: the driver's hidden
+// reserved endpoint when driver-managed (the kernel holds the hardware), else the
+// configured port. Every UI surface that talks to the child about "this controller's
+// port" (status, learn) MUST use this - the raw hardware name never matches.
+func midiChildPort(c config.MIDIControllerMap) string {
+	if c.ThruPort == midi.DriverSentinel && midi.DriverInstalled() {
+		return midi.ReservedPortName(c.Name)
+	}
+	return c.Port
+}
+
 // midiCtlPortStatusInner renders the open/failed status for the controller's input port. Only
 // shown once the MIDI child has reported (some port opened or failed); "in use" points at the
 // exact fix (Windows single-client MIDI: close the other app, or route via loopMIDI THRU). No
@@ -190,10 +201,7 @@ func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap, ctx midiCtlRende
 	if c.Port == "" || !c.Enabled || u.svc.MIDISource == nil {
 		return ""
 	}
-	want := c.Port
-	if c.ThruPort == midi.DriverSentinel && midi.DriverInstalled() {
-		want = midi.ReservedPortName(c.Name)
-	}
+	want := midiChildPort(c)
 	var out string
 	open := u.svc.MIDISource.OpenInputPorts()
 	failed := u.svc.MIDISource.FailedInputPorts()

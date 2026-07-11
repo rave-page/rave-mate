@@ -103,6 +103,8 @@ func init() {
 	})
 
 	// learn: arm a one-shot capture on this controller's port; the first control moved binds.
+	// Driver-managed controllers learn off the driver's hidden reserved endpoint (the child
+	// reads it over IOCTL) - the raw hardware name would never match what the child opened.
 	onPrefix("midi-learn:", func(u *UI, m actMsg) {
 		ctlIdx, control, ch, ok := parseLearnArg(m.arg("midi-learn:"))
 		if !ok || u.svc.MIDISource == nil || u.svc.Cfg == nil {
@@ -110,26 +112,34 @@ func init() {
 		}
 		midiCfgMu.Lock()
 		cs := u.svc.Cfg.Features.MIDI.Controllers
-		port := ""
+		var ctl config.MIDIControllerMap
 		if ctlIdx >= 0 && ctlIdx < len(cs) {
-			port = cs[ctlIdx].Port
+			ctl = cs[ctlIdx]
 		}
 		midiCfgMu.Unlock()
-		if port == "" {
+		if ctl.Port == "" {
 			u.toast(i18n.T("midictl.in.needPort"))
 			return
+		}
+		port := midiChildPort(ctl)
+		notOpen := func() {
+			if port != ctl.Port { // driver-managed: "close the other app" would be wrong advice
+				u.toast(i18n.T("midictl.in.drvNotReady"))
+			} else {
+				u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": ctl.Port}))
+			}
 		}
 		// Fast feedback: if the port isn't open (held by another app / gone), say so now instead
 		// of arming a capture that would silently time out.
 		if !portContains(u.svc.MIDISource.OpenInputPorts(), port) {
-			u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+			notOpen()
 			return
 		}
 		u.toast(i18n.T("midictl.in.listening", i18n.A{"control": i18n.T("midictl.ctl." + control), "ch": strconv.Itoa(ch)}))
 		u.svc.MIDISource.ArmLearn(port, learnTimeout, func(_ string, status, data1 byte, okc bool, reason string) {
 			if !okc {
 				if reason == "port-not-open" {
-					u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+					notOpen()
 				} else {
 					u.toast(i18n.T("midictl.in.learnTimeout"))
 				}

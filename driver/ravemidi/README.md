@@ -46,6 +46,11 @@ handle close never tears them down):
   events (tap-raw / to-app / read-pop / from-app / feedback-out / loop-drop)
   for live wire diagnosis from rave-mate; LOOPBACK ports suppress self-echo by
   owning-process identity (an app holding both ends never hears itself)
+- the tap defends against **replaying capture pins** (seen on NI Komplete Kontrol
+  A61): pins whose record re-delivers the full history + new bytes on every
+  completion are strict-prefix-deduped (only the tail is forwarded), and the pin
+  is PAUSE→RUN-cycled before its frame saturates (OnDead rebind as fallback) —
+  downstream apps always receive each message exactly once
 
 Binding: a passive worker + PnP interface-change notification (KSCATEGORY_CAPTURE,
 existing interfaces included). Source = exact `SourceIface` symlink, else the first

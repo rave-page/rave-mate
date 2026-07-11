@@ -287,7 +287,7 @@
       "title": "Navegación por la forma de onda"
     },
     "midi-thru": {
-      "body": "\n\nMejor destino THRU (requiere el driver de loopMIDI): el puerto unidireccional de rave-mate. Tu software de DJ ve un puerto de solo entrada llamado 'rave-mate' - NO existe un punto de salida correspondiente, así que el eco LED automático (rekordbox reenvía el código MIDI IN de cada indicador) no tiene por dónde volver y el software nunca reacciona a su propia respuesta. Selecciona 'rave-mate' como dispositivo MIDI en el software de DJ."
+      "body": "\n\nMejor destino THRU (requiere el driver de loopMIDI): el puerto unidireccional de rave-mate. Tu software de DJ ve un puerto de solo entrada llamado 'rave-mate' - NO existe un punto de salida correspondiente, así que el eco LED automático (rekordbox reenvía el código MIDI IN de cada indicador) no tiene por dónde volver y el software nunca reacciona a su propia respuesta. Selecciona 'rave-mate' como dispositivo MIDI en el software de DJ.\n\nCon el driver de núcleo ravemidi instalado, 'ravemidi driver' es la mejor opción de THRU: el driver capta el controlador en el núcleo (el reenvío sobrevive al cierre de rave-mate y a los reinicios) y repara dispositivos defectuosos - algunos controladores, p. ej. los teclados NI Komplete Kontrol, reenvían todo su historial MIDI con cada evento y rompen el MIDI-learn de cualquier aplicación que los lea directamente. El driver reenvía cada mensaje exactamente una vez, de modo que incluso esos controladores funcionan limpiamente."
     },
     "cue-edit": {
       "title": "Editor de cues: teclado y ratón",
@@ -3178,11 +3178,12 @@
       "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)",
       "thruDriver": "controlador ravemidi (recomendado)",
       "useInDJ": "En tu software de DJ selecciona:",
-      "driverNote": "El driver del núcleo lee el controlador directamente y sigue reenviando aunque rave-mate esté cerrado o tras un reinicio. Las demás aplicaciones solo ven el puerto THRU de arriba - rave-mate lee el controlador internamente a través del driver y no ocupa ningún puerto MIDI.",
+      "driverNote": "El driver del núcleo lee el controlador directamente y sigue reenviando aunque rave-mate esté cerrado o tras un reinicio. Las demás aplicaciones solo ven el puerto THRU de arriba - rave-mate lee el controlador internamente a través del driver y no ocupa ningún puerto MIDI. También repara hardware defectuoso: algunos controladores (los teclados NI Komplete Kontrol, por ejemplo) reenvían todo su historial MIDI con cada nuevo evento, lo que rompe el MIDI-learn del software de DJ - el driver detecta la repetición y reenvía cada mensaje exactamente una vez, así esos dispositivos siguen siendo plenamente utilizables.",
       "driverState": "Reenvío del controlador",
       "driverPending": "esperando la sincronización del controlador…",
       "lastInput": "última entrada hace {ago}:",
-      "filterLbl": "Filtrar"
+      "filterLbl": "Filtrar",
+      "drvNotReady": "El driver ravemidi aún no ha vinculado el controlador - espera a que el estado del driver de arriba muestre el reenvío y vuelve a intentar el aprendizaje."
     },
     "out": {
       "sub": "Adónde ENVÍA MIDI rave-mate. Elige el puerto unidireccional integrado (el software DJ no puede re-leerse a sí mismo) o cualquier puerto loopback que escuche tu app DJ."
@@ -3195,7 +3196,7 @@
       "status": "Driver de kernel",
       "badgePreview": "vista previa dev",
       "badgeOn": "activo",
-      "why": "Nuestro driver de kernel open source crea puertos MIDI virtuales unidireccionales: el software DJ ve un puerto solo-entrada y nunca puede re-leer su propio feedback LED (el clásico auto-eco de loopback). Opcional — sin él, rave-mate usa teVirtualMIDI o loopMIDI (bidireccionales).",
+      "why": "Nuestro driver de kernel open source crea puertos MIDI virtuales unidireccionales: el software DJ ve un puerto solo-entrada y nunca puede re-leer su propio feedback LED (el clásico auto-eco de loopback). Opcional — sin él, rave-mate usa teVirtualMIDI o loopMIDI (bidireccionales). También limpia hardware problemático: algunos controladores (p. ej. los teclados NI Komplete Kontrol) reenvían todo su historial MIDI en cada evento - el driver deduplica el flujo para que cada aplicación reciba cada mensaje exactamente una vez.",
       "installed": "Instalado y en marcha — los puertos unidireccionales los sirve ravemidi.",
       "fallback": "No instalado — usando el fallback teVirtualMIDI (bidireccional; las apps DJ pueden auto-ecoarse).",
       "none": "No instalado y sin teVirtualMIDI — puertos unidireccionales no disponibles (loopMIDI sigue funcionando, bidireccional).",

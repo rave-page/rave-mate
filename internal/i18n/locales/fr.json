@@ -287,7 +287,7 @@
       "title": "Navigation dans la forme d'onde"
     },
     "midi-thru": {
-      "body": "\n\nMeilleure cible THRU (pilote loopMIDI requis) : le port unidirectionnel rave-mate. Votre logiciel DJ voit un port d'entrée seul nommé 'rave-mate' - il n'existe AUCUN point de sortie correspondant, donc l'écho LED automatique (rekordbox renvoie le code MIDI IN de chaque indicateur) ne peut pas boucler et le logiciel ne réagit jamais à son propre retour. Sélectionnez 'rave-mate' comme périphérique MIDI dans le logiciel DJ."
+      "body": "\n\nMeilleure cible THRU (pilote loopMIDI requis) : le port unidirectionnel rave-mate. Votre logiciel DJ voit un port d'entrée seul nommé 'rave-mate' - il n'existe AUCUN point de sortie correspondant, donc l'écho LED automatique (rekordbox renvoie le code MIDI IN de chaque indicateur) ne peut pas boucler et le logiciel ne réagit jamais à son propre retour. Sélectionnez 'rave-mate' comme périphérique MIDI dans le logiciel DJ.\n\nAvec le pilote noyau ravemidi installé, « ravemidi driver » est le meilleur choix de THRU : le pilote capte le contrôleur dans le noyau (le transfert survit à la fermeture de rave-mate et aux redémarrages) et répare les appareils défaillants - certains contrôleurs, p. ex. les claviers NI Komplete Kontrol, renvoient tout leur historique MIDI à chaque événement et cassent le MIDI-learn de toute application qui les lit directement. Le pilote transmet chaque message exactement une fois, même ces contrôleurs fonctionnent donc proprement."
     },
     "cue-edit": {
       "title": "Éditeur de cues — clavier & souris",
@@ -3178,11 +3178,12 @@
       "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)",
       "thruDriver": "pilote ravemidi (recommandé)",
       "useInDJ": "Dans votre logiciel DJ, sélectionnez :",
-      "driverNote": "Le pilote noyau lit le contrôleur directement et continue de transférer même quand rave-mate est fermé ou après un redémarrage. Les autres applications ne voient que le port THRU ci-dessus - rave-mate lit le contrôleur en interne via le pilote et n'occupe aucun port MIDI.",
+      "driverNote": "Le pilote noyau lit le contrôleur directement et continue de transférer même quand rave-mate est fermé ou après un redémarrage. Les autres applications ne voient que le port THRU ci-dessus - rave-mate lit le contrôleur en interne via le pilote et n'occupe aucun port MIDI. Il répare aussi le matériel défaillant : certains contrôleurs (les claviers NI Komplete Kontrol, par exemple) renvoient tout leur historique MIDI à chaque nouvel événement, ce qui casse le MIDI-learn des logiciels DJ - le pilote détecte la répétition et transmet chaque message exactement une fois, ces appareils restent donc pleinement utilisables.",
       "driverState": "Transfert pilote",
       "driverPending": "en attente de la synchro pilote…",
       "lastInput": "dernière entrée il y a {ago} :",
-      "filterLbl": "Filtrer"
+      "filterLbl": "Filtrer",
+      "drvNotReady": "Le pilote ravemidi n'a pas encore lié le contrôleur - attendez que l'état du pilote ci-dessus indique le transfert, puis relancez l'apprentissage."
     },
     "out": {
       "sub": "Là où rave-mate ENVOIE le MIDI. Choisissez le port unidirectionnel intégré (le logiciel DJ ne peut pas se relire lui-même) ou n'importe quel port loopback écouté par votre appli DJ."
@@ -3195,7 +3196,7 @@
       "status": "Pilote noyau",
       "badgePreview": "aperçu développeur",
       "badgeOn": "actif",
-      "why": "Notre pilote noyau open source crée des ports MIDI virtuels unidirectionnels : le logiciel DJ voit un port entrée seule et ne peut jamais relire son propre retour LED (le classique écho loopback). Optionnel — sans lui, rave-mate retombe sur teVirtualMIDI ou loopMIDI (bidirectionnels).",
+      "why": "Notre pilote noyau open source crée des ports MIDI virtuels unidirectionnels : le logiciel DJ voit un port entrée seule et ne peut jamais relire son propre retour LED (le classique écho loopback). Optionnel — sans lui, rave-mate retombe sur teVirtualMIDI ou loopMIDI (bidirectionnels). Il nettoie aussi le matériel capricieux : certains contrôleurs (p. ex. les claviers NI Komplete Kontrol) renvoient tout leur historique MIDI à chaque événement - le pilote déduplique le flux pour que chaque application reçoive chaque message exactement une fois.",
       "installed": "Installé et actif — les ports unidirectionnels sont servis par ravemidi.",
       "fallback": "Non installé — repli teVirtualMIDI (bidirectionnel ; les applis DJ peuvent s'auto-échoer).",
       "none": "Non installé et pas de teVirtualMIDI — ports unidirectionnels indisponibles (loopMIDI fonctionne toujours, bidirectionnel).",
