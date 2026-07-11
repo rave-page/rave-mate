@@ -296,6 +296,16 @@ var helpTopics = map[string]helpTopic{
 		Body:  i18n.T("help.midi-bridge.body"),
 		Links: virtualMIDILinks(),
 	},
+	// ── Self-update (nav-rail block + settings Updates card) ──
+	"app-updates": {
+		Title: i18n.T("help.app-updates.title"),
+		Body:  i18n.T("help.app-updates.body"),
+		Links: []ttLink{
+			{"rave-mate releases (the update feed)", "https://github.com/rave-page/rave-mate/releases"},
+			{"Ed25519 signatures (Wikipedia)", "https://en.wikipedia.org/wiki/EdDSA"},
+			{"Authenticode code signing (Microsoft)", "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/authenticode"},
+		},
+	},
 }
 
 // virtualMIDILinks is the shared list of virtual-MIDI-port options. loopMIDI is the recommended

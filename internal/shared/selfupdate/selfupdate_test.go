@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -239,6 +242,48 @@ func TestDownloadRefusesCrossOriginRedirect(t *testing.T) {
 	err := New(feed.URL, 1, "").download(context.Background(), rel, t.TempDir()+"/out.bin", nil)
 	if err == nil || !strings.Contains(err.Error(), "refusing cross-origin redirect") {
 		t.Fatalf("want cross-origin redirect refusal, got %v", err)
+	}
+}
+
+// TestDownloadStagesWithoutTouchingExe: Download verifies + stages to .new only; Install swaps;
+// Discard cleans. Windows-only (the swap dance targets the running exe semantics).
+func TestDownloadStagesWithoutTouchingExe(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Download/Install are Windows-only")
+	}
+	payload := []byte("rave-mate-binary-v2")
+	sum := sha256.Sum256(payload)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(srv.Close)
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe, _ = filepath.EvalSymlinks(exe)
+	rel := &Release{Version: "v2", Build: 2, URL: srv.URL + "/rave-mate.exe", SHA256: hex.EncodeToString(sum[:])}
+
+	st, err := New(srv.URL, 1, "").Download(context.Background(), rel, nil)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	t.Cleanup(st.Discard)
+	if st.tmp != exe+".new" {
+		t.Fatalf("staged at %q, want %q", st.tmp, exe+".new")
+	}
+	if got, err := fileSHA(st.tmp); err != nil || got != rel.SHA256 {
+		t.Fatalf("staged sha %q err=%v, want %s", got, err, rel.SHA256)
+	}
+	// The running exe is untouched by Download (Install does the swap; not exercised here -
+	// swapping the test binary under the running `go test` would break the process).
+	if _, err := os.Stat(exe); err != nil {
+		t.Fatalf("running exe touched: %v", err)
+	}
+	st.Discard()
+	if _, err := os.Stat(st.tmp); err == nil {
+		t.Fatal("Discard left the staged payload behind")
 	}
 }
 

@@ -17,10 +17,10 @@ import (
 	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
-	"rave.page/mate/internal/shared/selfupdate"
 	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/tray"
 	"rave.page/mate/internal/ui"
+	"rave.page/mate/internal/updater"
 	"rave.page/mate/internal/version"
 )
 
@@ -37,9 +37,7 @@ type UI struct {
 	closed   bool
 	trayStop func() // system-tray teardown (webview renderer only); nil off Windows / before ready
 
-	updMu   sync.Mutex          // guards updater + updRel
-	updater *selfupdate.Updater // self-update poller (disabled on a dev build); lazily built
-	updRel  *selfupdate.Release // last "available" release, staged for apply
+	updMgr *updater.Manager // self-update state machine (5-min poll; nil until onReady; disabled on dev builds)
 
 	probes   settingsProbes  // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
 	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
@@ -141,7 +139,7 @@ func (u *UI) Run(startHidden bool) {
 // onReady fires once the window + bindings exist; start the live pusher + event feeds + tray.
 func (u *UI) onReady() {
 	go u.livePush()
-	go u.updateNotifyLoop()
+	u.initUpdater()
 	u.subscribeTwitch()
 	u.startTray()
 }
@@ -168,6 +166,8 @@ func (u *UI) startTray() {
 		OnShow:         func() { u.Show() },
 		OnCheckUpdates: func() { u.showUpdateSettings() },
 		OnQuit:         func() { u.Stop() },
+		UpdateLabel:    u.trayUpdateLabel, // state-dependent item; "" (up to date) = omitted
+		OnUpdate:       u.trayUpdateAction,
 	})
 	if err != nil {
 		if u.log != nil {

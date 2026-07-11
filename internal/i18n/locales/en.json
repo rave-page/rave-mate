@@ -218,6 +218,10 @@
       "title": "DJ bridge (control from a paired PC)",
       "body": "Optional. Lets a paired rave-mate instance drive THIS machine's DJ software over MIDI - e.g. a booth operator nudging the DJ's EQ from another PC.\n\nIt uses TWO loopMIDI ports on purpose. A paired instance's control is written to the OUT port your DJ software reads; the DJ software's own output (where it has any) is read back on the IN port. Keeping the DJ app's read and write on two DIFFERENT loopback cables is what prevents a self-loop - the same single-port feedback that makes Rekordbox's play button flicker. Your own instance never re-sends MIDI to the port it reads; the bridge only ever carries a peer's control."
     },
+    "app-updates": {
+      "title": "How rave-mate updates itself",
+      "body": "rave-mate checks its release feed for a newer build every 5 minutes - a tiny manifest download; the request sends no data about you, it only fetches a JSON file. When a new version appears you are notified exactly once per version, here and via a tray balloon.\n\nChannels: every build is locked to the channel it was built from - nightly (rolling build of the latest development tip), alpha (pre-release tags), beta (staging) and production. A build only ever updates within its own channel, so a nightly install stays nightly.\n\nVerification: the feed manifest is signed with the project's Ed25519 release key embedded in this binary - a manifest not signed by that key is rejected outright. Every downloaded file must additionally match its SHA-256 checksum from the signed manifest, and official Windows binaries are Authenticode code-signed. If any check fails the download is discarded and nothing is installed - there is no override.\n\nSteps: 'Download' fetches the new build next to the current one and verifies it (nothing is replaced yet). 'Install' atomically swaps the verified build over the running program - you keep using the old version until you restart. 'Restart to apply' relaunches rave-mate on the new version; a rollback copy (.old) is kept until the next successful start."
+    },
     "motion-studio": {
       "body": "Plays back VR motion takes recorded from your headset (head + controllers + any full-body trackers, captured from the wrist menu). The preview shows the skeleton in 3D with the head's travel as a violet trail.\n\nTwo live outputs: VMC streams the take as raw tracking devices to a VTuber renderer (VSeeFace, Warudo, VNyan) which does the IK and animates your avatar - this is the real playback path. OSC trackers feed VRChat's full-body tracking, but VRChat always drives head and hands from your live HMD and controllers, so a recorded take cannot puppet your VRChat avatar - export a Unity .anim for that and drive it from the avatar's Animator.\n\nAvatars (.vrm) imported here replicate automatically to your paired rave-mate instances.",
       "title": "Motion studio"
@@ -1485,6 +1489,22 @@
     "unknownWorld": "Unknown world",
     "vmcHelp": "VMC streams this take as raw HMD+controller+tracker devices to a VMC receiver (VSeeFace / Warudo / VNyan @ {addr}) - the renderer does the IK and animates your avatar; this is the real motion-playback path. OSC trackers feed VRChat's full-body tracking - they cannot replay a take onto your VRChat avatar (VRChat always drives head + hands from the live HMD/controllers, and desktop mode ignores trackers). To replay onto a VRChat avatar: Export .anim → drive it from the avatar's Animator.",
     "vrchatUnavailable": "VRChat tools are unavailable - enable the VRChat feature in Settings."
+  },
+  "nav": {
+    "update": {
+      "download": "Download {version}",
+      "downloading": "Downloading… {pct}%",
+      "failed": "Update failed: ",
+      "headAvailable": "Update available",
+      "headStaged": "Restart needed",
+      "headVerified": "Update verified",
+      "install": "Install update",
+      "meta": "{version} · {channel} channel",
+      "restart": "Restart to apply",
+      "retry": "Retry download",
+      "stagedNote": "Installed on disk. A restart finishes the update.",
+      "verifiedNote": "Downloaded and verified - ready to install."
+    }
   },
   "navtitle": {
     "appgroups": "Relaunch a set of DJ-rig apps together",
@@ -2925,7 +2945,13 @@
     "open": "Open rave-mate",
     "quit": "Quit",
     "tooltip": "rave-mate - {version}",
-    "updateNotifyBody": "rave-mate {version} is ready to install. Click to open update settings.",
+    "update": {
+      "download": "Download update {version}",
+      "downloading": "Downloading update… {pct}%",
+      "install": "Install update",
+      "restart": "Restart to finish update"
+    },
+    "updateNotifyBody": "rave-mate {version} is available. Click to open rave-mate and start the download from the update panel.",
     "updateNotifyTitle": "Update available"
   },
   "twitch": {
