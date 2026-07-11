@@ -191,6 +191,7 @@ func (u *UI) startTray() {
 
 // Stop tears the window down (idempotent).
 func (u *UI) Stop() {
+	u.mirrorShutdown() // best-effort close of a live remote-library session
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()

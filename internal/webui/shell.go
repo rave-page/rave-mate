@@ -181,6 +181,19 @@ const runtimeJS = `(function(){
         // never prune them, or open dialogs/pinned tooltips vanish from ctl snapshot.
         if(!vis(c) && c.id!=='__modal' && c.id!=='__ttlayer') continue;
         var tag=c.tagName.toLowerCase();
+        // same-origin iframe (remote-library mirror): splice its own snapshot in, indented,
+        // so ctl sees the mirrored peer UI as part of this page.
+        if(tag==='iframe'){
+          try{ var w=c.contentWindow;
+            if(w && w.__snapshot){
+              var pad=new Array(depth+1).join('  ');
+              out.push(pad+'iframe [mirror]');
+              var sub=w.__snapshot().split('\n');
+              for(var k=0;k<sub.length;k++){ if(sub[k]) out.push(pad+'  '+sub[k]); }
+            }
+          }catch(e){}
+          continue;
+        }
         var role=c.getAttribute('data-role')||c.getAttribute('role')||'';
         var own='';
         for(var j=0;j<c.childNodes.length;j++){ if(c.childNodes[j].nodeType===3){ own+=c.childNodes[j].textContent; } }
@@ -241,9 +254,25 @@ const runtimeJS = `(function(){
       }
       return false;
     }
-    if(actOnly) return scanAct('button,a,input[type=checkbox],[data-act]',true) || scanAct('[data-act]',false);
-    return scanText('button,a,input[type=checkbox]') || scanText('[data-act]') || scanAct('[data-act]',true) || scanAct('[data-act]',false);
+    // last resort: forward into same-origin iframes (remote-library mirror runs its own __click)
+    function scanFrames(){
+      var fs=document.querySelectorAll('iframe');
+      for(var i=0;i<fs.length;i++){ try{ var w=fs[i].contentWindow; if(w&&w.__click&&w.__click(q)) return true; }catch(e){} }
+      return false;
+    }
+    if(actOnly) return scanAct('button,a,input[type=checkbox],[data-act]',true) || scanAct('[data-act]',false) || scanFrames();
+    return scanText('button,a,input[type=checkbox]') || scanText('[data-act]') || scanAct('[data-act]',true) || scanAct('[data-act]',false) || scanFrames();
   };
+  // forward a ctl primitive into same-origin iframes when the main document misses
+  function __frameCall(name,args,miss){
+    var fs=document.querySelectorAll('iframe');
+    for(var i=0;i<fs.length;i++){
+      try{ var w=fs[i].contentWindow;
+        if(w && w[name]){ var r=w[name].apply(null,args); if(r!==miss && r!==null && r!==false) return r; }
+      }catch(e){}
+    }
+    return miss;
+  }
   window.__read = function(q){
     q=(q||'').toLowerCase();
     var els=document.querySelectorAll('[data-label]');
@@ -252,7 +281,7 @@ const runtimeJS = `(function(){
         return els[i].getAttribute('data-value') || els[i].textContent.replace(/\s+/g,' ').trim();
       }
     }
-    return null;
+    return __frameCall('__read',[q],null);
   };
   window.__set = function(q,val){
     q=(q||'').toLowerCase();
@@ -266,17 +295,26 @@ const runtimeJS = `(function(){
       f.dispatchEvent(new Event('input',{bubbles:true})); f.dispatchEvent(new Event('change',{bubbles:true}));
       return true;
     }
-    return false;
+    return __frameCall('__set',[q,val],false);
   };
   window.__type = function(text){
     var f=document.activeElement;
+    if(f && f.tagName==='IFRAME'){ // focus sits inside the mirror - type there
+      try{ var w=f.contentWindow; if(w&&w.__type) return w.__type(text); }catch(e){}
+      return false;
+    }
     if(!f || !f.matches || !f.matches('input,textarea')) return false;
     f.value=(f.value||'')+text;
     f.dispatchEvent(new Event('input',{bubbles:true}));
     f.dispatchEvent(new Event('change',{bubbles:true})); // change-wired fields (search) apply too
     return true;
   };
-  window.__tap = function(x,y){ var el=document.elementFromPoint(x,y); if(el){
+  window.__tap = function(x,y){ var el=document.elementFromPoint(x,y);
+    if(el && el.tagName==='IFRAME'){ // translate into the mirror's coordinate space
+      try{ var w=el.contentWindow; if(w&&w.__tap){ var fr=el.getBoundingClientRect(); return w.__tap(x-fr.left,y-fr.top); } }catch(e){}
+      return false;
+    }
+    if(el){
     el.click();
     // synthetic click() never focuses - focus editable targets so a following ctl type works
     if(el.matches && el.matches('input,textarea')) el.focus();

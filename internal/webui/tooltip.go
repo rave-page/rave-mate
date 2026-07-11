@@ -308,6 +308,11 @@ var helpTopics = map[string]helpTopic{
 		Body:  i18n.T("help.midi-bridge.body"),
 		Links: virtualMIDILinks(),
 	},
+	// ── Remote library (mirror banner, library_mirror.go) ──
+	"remote-library": {
+		Title: i18n.T("help.remote-library.title"),
+		Body:  i18n.T("help.remote-library.body"),
+	},
 	// ── Self-update (nav-rail block + settings Updates card) ──
 	"app-updates": {
 		Title: i18n.T("help.app-updates.title"),

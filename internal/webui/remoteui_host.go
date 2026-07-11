@@ -51,6 +51,7 @@ func (u *UI) ruiInit() {
 		return
 	}
 	u.rui = newRuiHub(u)
+	u.rui.setMirrorSink(u.onMirrorMsg)
 	u.svc.PeerBridge.SetRemoteUISink(u.rui.onInbound)
 	u.svc.Peers.AddListener(nil, u.rui.onPeerState)
 }
@@ -212,7 +213,3 @@ func (h *ruiHub) rewriteMediaOut(payload string) string { return payload }
 
 // handleFetch answers a controller's media byte-range request (media proxy phase).
 func (h *ruiHub) handleFetch(peer string, m ruiMsg) { _ = peer }
-
-// mirrorPeerState lets the mirror side react to peer connect/disconnect (implemented with the
-// mirror in library_mirror.go; stub keeps the hub self-contained until then).
-func (u *UI) mirrorPeerState(connected map[string]bool) { _ = connected }
