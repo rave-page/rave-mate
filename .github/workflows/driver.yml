@@ -86,12 +86,22 @@ jobs:
       - name: InfVerif (declarative/DCH gate — attestation rejects non-DCH INFs)
         shell: pwsh
         run: |
+          # Current windows-2022 image ships the WDK build toolset but NOT InfVerif.exe;
+          # fall back to the pinned WDK tools NuGet (same 26100 kit line as the build).
           $roots = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") | Where-Object { Test-Path $_ }
           $iv = Get-ChildItem $roots -Recurse -Filter InfVerif.exe -ErrorAction SilentlyContinue |
                 Sort-Object { $_.FullName -match '\\x64\\' } -Descending | Select-Object -First 1
+          if (-not $iv) {
+            Write-Host "InfVerif.exe not in installed Kits — fetching Microsoft.Windows.WDK.x64 10.0.26100.4204"
+            nuget install Microsoft.Windows.WDK.x64 -Version 10.0.26100.4204 -ExcludeVersion -OutputDirectory wdk-nuget -NonInteractive | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "nuget install WDK failed ($LASTEXITCODE)" }
+            $iv = Get-ChildItem wdk-nuget -Recurse -Filter InfVerif.exe -ErrorAction SilentlyContinue |
+                  Sort-Object { $_.FullName -match '\\x64\\' } -Descending | Select-Object -First 1
+          }
           if (-not $iv) { throw "InfVerif.exe not found — cannot gate an attestation package without it" }
           $staged = Get-ChildItem "driver\ravemidi\build\Release\x64" -Recurse -Filter ravemidi.inf -ErrorAction SilentlyContinue | Select-Object -First 1
           $inf = if ($staged) { $staged.FullName } else { "driver\ravemidi\ravemidi.inf" }
+          Write-Host "InfVerif: $($iv.FullName) /h $inf"
           & $iv.FullName /h $inf
           if ($LASTEXITCODE -ne 0) { throw "InfVerif failed ($LASTEXITCODE)" }
       - name: Stage package + make submission cab
