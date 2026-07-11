@@ -90,11 +90,25 @@ pnputil /add-driver ravemidi.inf /install
 devgen /add /bus ROOT /hardwareid Root\ravemidi
 ```
 
-## Release signing
+## Release signing / distribution status
 
-Microsoft attestation via Partner Center (EV cert required for account registration;
-plain Authenticode on the .sys will NOT load on Secure Boot systems). Windows Server is
-not supported (attestation excludes it). See the design doc for the full pipeline.
+**Current reality: test-signing only.** No Microsoft-trusted release exists yet — installing
+ravemidi today requires a test-signed dev setup (Secure Boot off + testsigning on, above).
+Attestation prerequisites (Partner Center account + EV cert) are pending; see
+`../../.devnotes/DRIVER_TRUST_PLAN.md` for the decision doc + user action list.
+
+Planned pipeline (tooling already in-repo):
+
+1. CI `attestation-package` job (`.github/workflows/driver.yml`, manual dispatch) → artifact
+   `ravemidi-attestation-cab-unsigned` (`disk1/ravemidi.cab` = inf+sys+pdb).
+2. EV-sign the cab locally: `build/sign-cab.ps1` (CI never holds the token).
+3. Submit to Partner Center for **attestation** (checklist + API skeleton in `build/attest/`)
+   → Microsoft embeds its signature in the .sys + returns an MS-signed .cat — that MS
+   signature is what Secure Boot systems load; plain EV Authenticode on the .sys will NOT.
+
+Attestation covers Win10/11 client only: no Windows Server (≥2016 rejects attested
+drivers), no Windows Update retail publishing, not "Windows Certified" — WHCP/HLK would be
+needed for those, and is deliberately deferred.
 
 ## License
 

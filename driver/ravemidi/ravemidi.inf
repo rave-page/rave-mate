@@ -21,9 +21,10 @@ ravemidi.sys = 1
 DefaultDestDir = 13 ; driver-store (DCH requirement; no System32 copies)
 
 [Manufacturer]
-%ProviderName% = RaveMidi,NTamd64.10.0
+; 10.0...16299 floor: DIRID 13 (driver-store copy) exists only on 1709+ (InfVerif 1199)
+%ProviderName% = RaveMidi,NTamd64.10.0...16299
 
-[RaveMidi.NTamd64.10.0]
+[RaveMidi.NTamd64.10.0...16299]
 %RaveMidi.DeviceDesc% = RaveMidi_Device, Root\ravemidi
 
 [RaveMidi_Device.NT]
