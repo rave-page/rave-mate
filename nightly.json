@@ -1,13 +1,13 @@
 {
-  "version": "nightly-0a1345c",
-  "build": 60,
-  "commit": "0a1345c",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-60-20260711-0a1345c.exe",
-  "sha256": "ce35ae97af1445052ca237da699d4220a2622c498c5913796e9d9edae4228a45",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-60-20260711-0a1345c.exe",
-  "installer_sha256": "776ecfe1b545f285a8b715134063105c7f3cce1fe636b225b1b97b40eef6bc82",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-60-20260711-0a1345c",
-  "linux_sha256": "402584b882ddd8172db98c9c7c82eb02221c77ce3ff0707d912428b51a6af67b",
+  "version": "nightly-ef0429b",
+  "build": 61,
+  "commit": "ef0429b",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-61-20260711-ef0429b.exe",
+  "sha256": "caaa7fdeb9e51cc6e1aede6e9e3f5b052f634f02ab84d8ee53f9ba504d637a24",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-61-20260711-ef0429b.exe",
+  "installer_sha256": "864a97c2a0a6f90ea93af454ee4b45b5af0473ae4ebe607f4d6ab1c886658962",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-61-20260711-ef0429b",
+  "linux_sha256": "cfaa8fcedeb0177789d009e202b3f30d9e70585669072c495b45ee6eddc6f7e2",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-11T13:20:35Z",
-  "notes": "Merge branch 'cue-addenda' into development"
+  "released": "2026-07-11T15:26:16Z",
+  "notes": "fix(webui): unify duplicate actionMenu primitives from parallel density lanes"
 }
