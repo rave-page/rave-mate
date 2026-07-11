@@ -296,6 +296,10 @@
     "midi-drv-filter": {
       "title": "Filtro de mensajes fan-out",
       "body": "Clases de mensajes que el controlador descarta solo en el puerto del DJ (rave-mate sigue viendo todo). Los teclados envían aftertouch (channel pressure) con cada pulsación en cada tecla - si el MIDI-learn de tu software captura eso en vez de la nota, el mapeo se dispara con CUALQUIER tecla y otra vez al soltar. Filtrar aftertouch, active sensing y reloj mantiene el learn limpio; deja pitch bend y presión polifónica si mapeas faders de tempo o pads de presión."
+    },
+    "led-feedback": {
+      "title": "Prueba de retorno LED",
+      "body": "Envía una ráfaga corta y reconocible hacia tu controlador: mensajes Note-On recorren las notas 36–51 con velocidad creciente (una cada ~50 ms) y después todo se apaga — menos de dos segundos en total. Observa el hardware: los pads, teclas o botones de ese rango deberían iluminarse y apagarse.\n\nEl recuento mostrado sale de la traza del driver de kernel: cada entrada 'feedback out' es un mensaje que el driver escribió realmente hacia la entrada MIDI del dispositivo. Un recuento completo demuestra que toda la ruta (app → driver → dispositivo) funciona. Nota: algunos controladores ignoran los LED por Note-On MIDI simples — esperan un modo propietario, un canal o mapa de velocidad concreto, o HID — así que LEDs apagados con recuento completo siguen significando que el transporte funciona."
     }
   },
   "library": {
@@ -3287,7 +3291,14 @@
       "needControllers": "No hay controladores activados con puerto que sincronizar.",
       "queryFailed": "Este build del driver aún no tiene plano de config — actualiza el driver para el reenvío gestionado.",
       "reapply": "Reaplicar al controlador",
-      "syncFailed": "Configuración no aplicada al controlador: {err} - tras actualizar rave-mate, actualiza/reinstala también el controlador ravemidi y reinicia."
+      "syncFailed": "Configuración no aplicada al controlador: {err} - tras actualizar rave-mate, actualiza/reinstala también el controlador ravemidi y reinicia.",
+      "fbTest": "Probar retorno LED",
+      "fbLabel": "Prueba LED",
+      "fbBusy": "Ya hay una prueba de retorno LED en curso.",
+      "fbRunning": "Prueba LED en curso — observa tu controlador…",
+      "fbNotBound": "Retorno LED no disponible: el pin MIDI-IN (render) del dispositivo aún no está vinculado — puede que el dispositivo no tenga entrada MIDI o que otra aplicación lo retenga en exclusiva. El driver sigue reintentando en segundo plano.",
+      "fbResult": "{out} de {sent} mensajes de prueba llegaron al pin de render del dispositivo",
+      "fbWriteErr": "Falló la escritura de la prueba LED: {err}"
     },
     "sw": {
       "hdr": "Estado del software DJ",

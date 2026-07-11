@@ -168,6 +168,36 @@ func (r *RaveMIDIOut) Close() {
 // PortName implements OutPort.
 func (r *RaveMIDIOut) PortName() string { return r.name }
 
+// maxDriverWrite bounds one WriteDriverPort message (driver FIFOs are chunked;
+// short channel messages are the intended payload).
+const maxDriverWrite = 512
+
+// WriteDriverPort injects one raw MIDI message on an existing driver port by id.
+// On a managed input's reserved (internal) port the driver tees the write into the
+// device-feedback drain when armed - the LED-feedback path toward the hardware.
+// One control-device open per call; wire layout mirrors RaveMIDIOut.Send.
+func WriteDriverPort(portID uint32, msg []byte) error {
+	if len(msg) == 0 || len(msg) > maxDriverWrite {
+		return fmt.Errorf("ravemidi: write of %d bytes out of range", len(msg))
+	}
+	h, err := openRaveMIDICtl()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = syscall.CloseHandle(h) }()
+	// RAVEMIDI_WRITE_IN: ULONG PortId, ULONG ByteCount, then raw MIDI bytes.
+	buf := make([]byte, 8+len(msg))
+	binary.LittleEndian.PutUint32(buf[0:], portID)
+	binary.LittleEndian.PutUint32(buf[4:], uint32(len(msg)))
+	copy(buf[8:], msg)
+	var ret uint32
+	if err := syscall.DeviceIoControl(h, ioctlRaveMIDIWrite,
+		&buf[0], uint32(len(buf)), nil, 0, &ret, nil); err != nil {
+		return fmt.Errorf("ravemidi: write port %d: %v", portID, err)
+	}
+	return nil
+}
+
 // OneWayAvailable reports whether ANY one-way virtual-port backend is usable
 // (ravemidi driver preferred, teVirtualMIDI fallback).
 func OneWayAvailable() bool { return raveMIDIAvailable() || VirtualAvailable() }

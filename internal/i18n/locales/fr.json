@@ -296,6 +296,10 @@
     "midi-drv-filter": {
       "title": "Filtre de messages fan-out",
       "body": "Classes de messages que le pilote supprime uniquement sur le port côté DJ (rave-mate voit tout). Les claviers envoient de l'aftertouch (channel pressure) à chaque frappe sur chaque touche - si le MIDI-learn de votre logiciel DJ capte ça au lieu de la note, le mapping se déclenche sur N'IMPORTE quelle touche et encore au relâchement. Filtrer aftertouch, active sensing et horloge garde le learn propre ; laissez pitch bend et pression poly si vous mappez des faders de tempo ou des pads sensibles."
+    },
+    "led-feedback": {
+      "title": "Test du retour LED",
+      "body": "Envoie une courte rafale reconnaissable vers votre contrôleur : des messages Note-On balaient les notes 36–51 avec une vélocité croissante (environ un toutes les 50 ms), puis tout est éteint — moins de deux secondes au total. Observez le matériel : les pads, touches ou boutons de cette plage devraient s'allumer puis s'éteindre.\n\nLe décompte affiché provient de la trace filaire du pilote noyau : chaque entrée « feedback out » est un message que le pilote a réellement écrit vers l'entrée MIDI de l'appareil. Un décompte complet prouve que tout le chemin (application → pilote → appareil) fonctionne. Remarque : certains contrôleurs ignorent les LED via de simples Note-On MIDI — ils attendent un mode propriétaire, un canal ou une correspondance de vélocité spécifique, voire du HID — des LED éteintes avec un décompte complet signifient donc quand même que le transport fonctionne."
     }
   },
   "library": {
@@ -3287,7 +3291,14 @@
       "needControllers": "Aucun contrôleur activé avec un port à synchroniser.",
       "queryFailed": "Ce build du pilote n'a pas encore de plan de config — mettez le pilote à jour pour le transfert géré.",
       "reapply": "Réappliquer au pilote",
-      "syncFailed": "Configuration non appliquée au pilote : {err} - après une mise à jour de rave-mate, mettez aussi à jour/réinstallez le pilote ravemidi puis redémarrez."
+      "syncFailed": "Configuration non appliquée au pilote : {err} - après une mise à jour de rave-mate, mettez aussi à jour/réinstallez le pilote ravemidi puis redémarrez.",
+      "fbTest": "Tester le retour LED",
+      "fbLabel": "Test LED",
+      "fbBusy": "Un test de retour LED est déjà en cours.",
+      "fbRunning": "Test LED en cours — observez votre contrôleur…",
+      "fbNotBound": "Retour LED indisponible : la broche MIDI-IN (rendu) de l'appareil n'est pas encore liée — l'appareil n'a peut-être pas d'entrée MIDI, ou une autre application la détient en exclusivité. Le pilote réessaie en arrière-plan.",
+      "fbResult": "{out} sur {sent} messages de test ont atteint la broche de rendu de l'appareil",
+      "fbWriteErr": "Échec d'écriture du test LED : {err}"
     },
     "sw": {
       "hdr": "État des logiciels DJ",

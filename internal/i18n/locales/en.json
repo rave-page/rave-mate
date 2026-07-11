@@ -313,6 +313,10 @@
     "midi-drv-filter": {
       "title": "Fan-out message filter",
       "body": "Message classes the driver drops on the DJ-facing port only (rave-mate still sees everything). Keyboards send aftertouch (channel pressure) with every keypress on every key - if your DJ software's MIDI-learn catches that instead of the note, the binding fires on ANY key and again on release. Filtering aftertouch, active sensing and clock keeps learn clean; leave pitch bend and poly pressure on if you map tempo sliders or pressure pads."
+    },
+    "led-feedback": {
+      "title": "LED-feedback test",
+      "body": "Sends a short, recognizable burst toward your controller: Note-On messages sweep across notes 36–51 with rising velocity (about one every 50 ms), then everything is switched off again — under two seconds total. Watch the hardware: pads, keys or buttons in that range should light up and go dark again.\n\nThe reported count comes from the kernel driver's wire trace: each 'feedback out' entry is one message the driver actually wrote to the device's MIDI input. A full count proves the whole path (app → driver → device) works. Note: some controllers ignore plain MIDI Note-On LEDs — they expect a proprietary mode, a specific channel or velocity map, or HID — so dark LEDs with a full count still mean the transport is fine."
     }
   },
   "library": {
@@ -3452,7 +3456,14 @@
       "needControllers": "No enabled controllers with a port to sync.",
       "queryFailed": "This driver build has no config plane yet — update the driver to enable managed forwarding.",
       "reapply": "Re-apply to driver",
-      "syncFailed": "Config not applied to the driver: {err} - if you just updated rave-mate, update/reinstall the ravemidi driver too, then reboot."
+      "syncFailed": "Config not applied to the driver: {err} - if you just updated rave-mate, update/reinstall the ravemidi driver too, then reboot.",
+      "fbTest": "Test LED feedback",
+      "fbLabel": "LED test",
+      "fbBusy": "An LED-feedback test is already running.",
+      "fbRunning": "LED test running — watch your controller…",
+      "fbNotBound": "LED feedback unavailable: the device's MIDI-IN (render) pin isn't bound yet — the device may have no MIDI input, or another app holds it exclusively. The driver keeps retrying in the background.",
+      "fbResult": "{out} of {sent} test messages reached the device render pin",
+      "fbWriteErr": "LED test write failed: {err}"
     },
     "sw": {
       "hdr": "DJ software status",
