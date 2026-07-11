@@ -505,7 +505,20 @@ static VOID DestroyPortsForFile(RAVE_ADAPTER* a, PFILE_OBJECT f)
         if (!victim) {
             break;
         }
-        DestroyPort(a, f, victim->Id);
+        ULONG id = victim->Id;
+        if (!NT_SUCCESS(DestroyPort(a, f, id))) {
+            // Pinned (open winmm pin / mirror ref / in-flight IOCTL): retrying here
+            // would spin IRP_MJ_CLOSE forever. Orphan it (driver-owned) and hand it
+            // to the managed graveyard — reaped once the pin closes. victim may be
+            // gone on NOT_FOUND races, so re-find by id before touching it.
+            ExAcquireFastMutex(&a->PortsLock);
+            RAVE_PORT* p = FindPortLocked(a, id);
+            if (p && p->CreatorFile == f) {
+                p->CreatorFile = nullptr;
+            }
+            ExReleaseFastMutex(&a->PortsLock);
+            RaveManagedGraveOrphan(id);
+        }
     }
 }
 

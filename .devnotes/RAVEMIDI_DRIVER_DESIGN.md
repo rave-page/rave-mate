@@ -315,6 +315,79 @@ no client (device or app) may receive its own bytes back. Changes:
   down on-hardware wire bugs (e.g. wrong bytes at which hop) live from rave-mate's
   MIDI monitor without KD.
 
+## Raw-KS user-mode reader quirks (2026-07-11, kernel-quirks branch)
+
+Two dormant oddities investigated with user-mode probes against the INSTALLED v3
+driver (`internal/midi/ravemidi_ksprobe_manual_test.go`, `-tags manual`). Evidence
+matrix (same pin, same IOCTL_KS_READ_STREAM wire protocol, standard streaming):
+
+| reader | result |
+|---|---|
+| winmm -> wdmaud (kernel) | correct bytes (`TestRaveMIDIWinmmDelivery`) |
+| kernel KS client (our own mirror tap) | correct KSMUSICFORMAT records (`TestRaveMIDIKernelTapDelivery`) |
+| user-mode KS client (midisrv KSA style) | reads pend while the RUN pin is virgin; after the FIRST byte ever flows, EVERY read completes instantly with DataUsed=FrameExtent and an untouched zero buffer (`TestRaveMIDIKsReadSemantics`: 5/5 requeues, no data anywhere in the frame) |
+| user-mode KS client vs teVirtualMIDI | byte-identical broken behavior |
+
+### Quirk 1 — empty-frame firehose (midisrv reader hang)
+
+Root cause: **portcls CPortPinMidi (CLSID_PortMidi) only materializes capture
+data for kernel-mode requestors.** QUERY_PORT counters prove our
+`RaveStream::Read` obeys the DMusUART contract (returns 0 when empty — the pend
+works; hands portcls the bytes on Notify — portcls read them in 8-byte chunks),
+yet the user buffer stays untouched and DataUsed=FrameExtent. teVirtualMIDI
+reproduces it exactly => OS-level, NOT fixable from IMiniportMidi (the miniport
+never sees the KS IRPs). midisrv's KSA client (microsoft/MIDI
+`MidiKs.cpp`) parses one KSMUSICFORMAT record per completion and drops
+ByteCount==0 frames, then immediately re-issues — against this pin behavior that
+is a hot loop of empty completions (the observed "firehose"/hang) and total
+input loss.
+
+What shipped instead of a (impossible) miniport fix:
+- the probe suite above as regression documentation + post-install verification;
+- `DestroyPortsForFile` orphan-on-busy (see below) — an adjacent real hang;
+- strategic fix documented: **migrate to CLSID_PortDMus / IMiniportDMus**
+  (DMusUART/usbaudio model). usbaudio devices are what midisrv KSA works with in
+  the field, so CPortPinDMus's user-mode read path is proven. Big rework
+  (stream layer becomes MXF sinks), needs on-hardware bring-up — separate epic.
+  Until then: winmm (wdmaud) + our IOCTL plane are the supported surfaces;
+  Windows MIDI Services sees dead (but enumerable) MIDI1 pins.
+
+### Quirk 2 — midisrv names UMP endpoints after the HOSTNAME
+
+Two independent causes found:
+
+1. **Pin factory name**: midisrv names MIDI1 ports via `KSPROPERTY_PIN_NAME`
+   (+ `KSPROPERTY_GENERAL_COMPONENTID` -> `MediaCategories\{GUID}\Name` for the
+   legacy name, + filter name = interface FriendlyName). Our descriptors had no
+   Name GUID and no handler -> the query failed (teVirtualMIDI: same). FIXED:
+   filter automation table (`RaveFilterAutomation`, miniport.cpp) intercepts
+   `KSPROPSETID_Pin/KSPROPERTY_PIN_NAME` and answers the PORT name for every
+   pin. Safe with midisrv's combiner (`GenerateFilterPlusPinNameBasedMidi1PortName`
+   strips the filter name from the pin name, so "name + name" never duplicates).
+   KSCOMPONENTID deliberately NOT implemented: wdmaud's szPname fallback chain
+   currently lands on our stamped interface FriendlyName (hardware-verified);
+   adding COMPONENTID would re-route wdmaud through MediaCategories registry
+   entries we'd have to create/maintain kernel-side for zero naming gain.
+2. **Endpoint display name**: midisrv KSA names the UMP endpoint after the
+   PARENT DEVICE (`DeviceInformation(kind=Device).Name()`), which resolves
+   through the device CONTAINER. Verified locally: every root-enumerated MEDIA
+   devnode (ours, teVirtualMIDI, LoopBe, VB-Audio) sits in the null/computer
+   container `{00000000-0000-0000-FFFF-FFFFFFFFFFFF}` -> display name = the
+   computer name. NOT fixable from the miniport. Real fix: create the devnode
+   via `SwDeviceCreate` with a dedicated ContainerId (+
+   `DEVPKEY_DeviceContainer_FriendlyName`) instead of devcon/devgen — tracked
+   for the rave-mate-side installer flow.
+
+### DestroyPortsForFile orphan-on-busy (hang fix)
+
+Found while probing: `IRP_MJ_CLOSE` on a control handle destroy-loops the
+handle's ports; `DestroyPort` returning `STATUS_DEVICE_BUSY` (DJ app still holds
+the winmm pin / mirror ref / in-flight IOCTL) left the port listed with
+`CreatorFile == f`, so the loop re-found it forever — kernel spin, unkillable
+process. Now: on destroy failure the port is orphaned (`CreatorFile = nullptr`,
+same semantics as managed leftovers) and parked in the managed graveyard
+(`RaveManagedGraveOrphan`), reaped by the worker once the pin closes.
+
 ## Protocol v3 (2026-07-11): hidden INTERNAL reserved ports
 
 User ask: hide the reserved `"<Name> (rave-mate)"` port from DJ software while

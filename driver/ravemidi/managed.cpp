@@ -204,6 +204,23 @@ static VOID ReapGraveyard()
     }
 }
 
+// Adapter CLOSE path: a creator-owned port couldn't be destroyed (open pin /
+// mirror ref) and was orphaned so the CLOSE doesn't spin. Park it here; the
+// worker reaps once released. Engine down = unload safety net frees the block.
+VOID RaveManagedGraveOrphan(ULONG portId)
+{
+    PAGED_CODE();
+    if (!g_M.Started) {
+        return;
+    }
+    MLock();
+    if (!g_M.Dead && g_M.GraveCount < M_GRAVE_MAX) {
+        g_M.Grave[g_M.GraveCount++] = portId;
+    }
+    MUnlock();
+    KeSetEvent(&g_M.Wake, IO_NO_INCREMENT, FALSE);
+}
+
 static NTSTATUS CreateInputPorts(RAVE_MINPUT* in)
 {
     PAGED_CODE();

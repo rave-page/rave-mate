@@ -67,7 +67,24 @@ port removed from config while a DJ app still holds its pin stays alive until th
 pin closes, then is reaped.
 
 Legacy IOCTL ports/mirrors are unchanged: still owned by the creating handle and
-cleaned up when it closes.
+cleaned up when it closes. A creator-owned port that is still pinned at handle
+close (open winmm pin / mirror ref) is orphaned into the managed graveyard and
+reaped once released — never blocks the close.
+
+## Windows MIDI Services (midisrv) status
+
+- Each pin answers `KSPROPERTY_PIN_NAME` with its port name (filter automation
+  table), so WMS MIDI 1 port naming matches the winmm FriendlyName naming.
+- WMS UMP endpoint display names may still show the computer name: root-enumerated
+  devnodes live in the machine's device container and midisrv names endpoints
+  after the parent device. Installer-side fix (dedicated ContainerId via
+  `SwDeviceCreate`) is tracked.
+- WMS cannot receive MIDI *data* from classic PortCls MIDI pins: portcls only
+  materializes capture frames for kernel-mode readers (wdmaud); user-mode KS
+  readers like midisrv get empty full-frame completions (teVirtualMIDI behaves
+  identically). Classic winmm apps are unaffected. Evidence + analysis:
+  `../../.devnotes/RAVEMIDI_DRIVER_DESIGN.md` ("Raw-KS user-mode reader quirks")
+  and the manual probes in `internal/midi/ravemidi_ksprobe_manual_test.go`.
 
 ## Build
 
