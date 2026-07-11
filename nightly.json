@@ -1,13 +1,13 @@
 {
-  "version": "nightly-f1dd743",
-  "build": 63,
-  "commit": "f1dd743",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-63-20260711-f1dd743.exe",
-  "sha256": "44b9b3307c83db255e294d505eaaea75f02e5ff53a57251eba28010c8efe0d85",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-63-20260711-f1dd743.exe",
-  "installer_sha256": "b36b2d1c4bc76e57a6c64ac010be3b082293fc22eee88d5ca7057c3f750bf079",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-63-20260711-f1dd743",
-  "linux_sha256": "317e092926b1bb5745e418d867ec1ad12842e92effd6cdce114464e5205f7f53",
+  "version": "nightly-de69df1",
+  "build": 64,
+  "commit": "de69df1",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-64-20260711-de69df1.exe",
+  "sha256": "702f35a59058b13ffcdedfd21f5af0558692d728afc145bd964eb32fed9ca25b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-64-20260711-de69df1.exe",
+  "installer_sha256": "e96ed692df5c6f6965ae87569f4629304c7f3324f284208d605da14730f4711c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-64-20260711-de69df1",
+  "linux_sha256": "fbe321ff04b2476abb49b3a3cc00d2c28b3be239969c245ec7c2dfc36affb987",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-11T18:58:15Z",
-  "notes": "fix(webui): TestMirrorLoopback raced on a stale banner eval"
+  "released": "2026-07-11T21:00:29Z",
+  "notes": "Merge branch 'acct-bridge' into development"
 }
