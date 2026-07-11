@@ -22,14 +22,50 @@ import (
 // crash or runaway encode can't take down the daemon. Output is always a NEW file.
 func transcodeHandlers() map[string]Handler {
 	return map[string]Handler{
-		"transcode.ping":     tcPing,
-		"transcode.encoders": tcEncoders,
-		"transcode.detect":   tcDetect,
-		"transcode.silence":  tcSilence,
-		"transcode.measure":  tcMeasure,
-		"transcode.loudtl":   tcLoudTimeline,
-		"transcode.run":      tcRun,
+		"transcode.ping":       tcPing,
+		"transcode.encoders":   tcEncoders,
+		"transcode.detect":     tcDetect,
+		"transcode.silence":    tcSilence,
+		"transcode.measure":    tcMeasure,
+		"transcode.loudtl":     tcLoudTimeline,
+		"transcode.run":        tcRun,
+		"transcode.gendivider": tcGenDivider,
 	}
+}
+
+type tcGenDividerIn struct {
+	Output  string  `json:"output"`
+	Seconds float64 `json:"seconds"`
+}
+
+// tcGenDivider synthesizes a short quiet white-noise clip (playlist group divider) via
+// ffmpeg lavfi anoisesrc. Faded in/out to avoid clicks; MP3 for maximum DJ-software compat.
+func tcGenDivider(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
+	var in tcGenDividerIn
+	if err := json.Unmarshal(params, &in); err != nil || in.Output == "" {
+		return nil, fmt.Errorf("missing output")
+	}
+	if in.Seconds <= 0 || in.Seconds > 10 {
+		in.Seconds = 2
+	}
+	bin, err := ffmpegBin()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(in.Output), 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir output: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-hide_banner", "-nostats", "-y",
+		"-f", "lavfi", "-i", fmt.Sprintf("anoisesrc=d=%.2f:c=white:a=0.05:r=44100", in.Seconds),
+		"-af", fmt.Sprintf("volume=-24dB,afade=t=in:d=0.05,afade=t=out:st=%.2f:d=0.05", in.Seconds-0.05),
+		"-c:a", "libmp3lame", "-b:a", "96k", in.Output)
+	prepareCmd(cmd)
+	if out, rerr := cmd.CombinedOutput(); rerr != nil {
+		return nil, fmt.Errorf("ffmpeg divider: %v: %s", rerr, lastLine(string(out)))
+	}
+	return json.Marshal(map[string]any{"ok": true, "output": in.Output})
 }
 
 func tcPing(_ json.RawMessage, _ EmitFunc) (json.RawMessage, error) {

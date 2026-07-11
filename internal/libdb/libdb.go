@@ -173,6 +173,10 @@ func Open(path string) (*DB, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("apply drops schema: %w", err)
 	}
+	if _, err := sdb.Exec(trackCompatSchema); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("apply track-compat schema: %w", err)
+	}
 	// Additive migrations for pre-existing DBs (CREATE IF NOT EXISTS skips new columns).
 	// "duplicate column" = already migrated; ignored.
 	for _, m := range []string{
@@ -236,6 +240,24 @@ func (d *DB) SourceByAppPath(app, path string) (SourceRow, error) {
 		return SourceRow{}, nil
 	}
 	return r, err
+}
+
+// EnsureSource returns the source id for (app, path), inserting if absent WITHOUT touching
+// imported_at (NULL sorts last in FirstSource) - synthetic sources like set-builder dividers
+// must never become the "most recent import".
+func (d *DB) EnsureSource(app, path string) (int64, error) {
+	r, err := d.SourceByAppPath(app, path)
+	if err != nil {
+		return 0, err
+	}
+	if r.ID != 0 {
+		return r.ID, nil
+	}
+	res, err := d.db.Exec(`INSERT INTO sources (app, path) VALUES (?,?)`, app, path)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 // FirstSource returns the most-recently-imported source (the one the UI loads on launch),

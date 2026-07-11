@@ -194,7 +194,8 @@ func (s *TrackSync) Rollback() { _ = s.tx.Rollback() }
 func (d *DB) LoadAllTracks() ([]musiclib.Track, error) {
 	rows, err := d.db.Query(`
 		SELECT path, title, artist, album, genre, label, comment, key, bpm, duration_sec,
-			play_count, rating, release_date, last_played, COALESCE(cues,''), COALESCE(beatgrid,'')
+			play_count, rating, COALESCE(import_date,''), release_date, last_played,
+			COALESCE(cues,''), COALESCE(beatgrid,'')
 		FROM tracks ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -207,7 +208,7 @@ func (d *DB) LoadAllTracks() ([]musiclib.Track, error) {
 		var cues, grid string
 		if err := rows.Scan(&t.Path, &t.Title, &t.Artist, &t.Album, &t.Genre, &t.Label,
 			&t.Comment, &t.Key, &t.BPM, &t.DurationSec, &t.PlayCount, &t.Rating,
-			&t.ReleaseDate, &t.LastPlayed, &cues, &grid); err != nil {
+			&t.ImportDate, &t.ReleaseDate, &t.LastPlayed, &cues, &grid); err != nil {
 			return nil, err
 		}
 		if cues != "" {
@@ -296,4 +297,27 @@ func (d *DB) LoadTracks(sourceID int64) ([]musiclib.Track, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// UpsertTrack inserts/updates one track under sourceID outside a sync (synthetic rows
+// like set-builder dividers; no change_log - these aren't user library mutations).
+func (d *DB) UpsertTrack(sourceID int64, t musiclib.Track) error {
+	if t.Path == "" {
+		return nil
+	}
+	cues, _ := json.Marshal(t.Cues)
+	grid, _ := json.Marshal(t.Beatgrid)
+	_, err := d.db.Exec(`
+		INSERT INTO tracks (source_id, path, title, artist, album, genre, label, comment,
+			key, bpm, duration_sec, bitrate_bps, file_size_kb, play_count, rating,
+			import_date, release_date, last_played, cues, beatgrid, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(source_id, path) DO UPDATE SET
+			title=excluded.title, artist=excluded.artist, duration_sec=excluded.duration_sec,
+			updated_at=excluded.updated_at`,
+		sourceID, t.Path, t.Title, t.Artist, t.Album, t.Genre, t.Label, t.Comment,
+		t.Key, t.BPM, t.DurationSec, t.BitrateBps, t.FileSizeKB, t.PlayCount, t.Rating,
+		t.ImportDate, t.ReleaseDate, t.LastPlayed, string(cues), string(grid),
+		time.Now().UTC().Format(time.RFC3339))
+	return err
 }
