@@ -48,6 +48,10 @@ type ceSt struct {
 	lastErr  string
 	fileTag  bool        // drops also written to the file tag (format supported)
 	tagTimer *time.Timer // debounced file-tag drop write during grid nudges
+	// cue write-back router (library_cuewrite.go)
+	wbApplied map[string]int // per-software tracks written (key absent = not written)
+	wbBusy    bool           // a write is in flight (serialize)
+	wbErr     string         // last write error ("" = none)
 }
 
 // ceOverlay is the render snapshot mpWaveSVG draws (nil = mode off).
@@ -155,6 +159,7 @@ func (u *UI) ceEnter(path string) {
 	c.dragA, c.dragB = -1, -1
 	c.assign = map[int]string{}
 	c.report, c.lastErr = nil, ""
+	c.wbApplied, c.wbBusy, c.wbErr = nil, false, ""
 	c.fileTag = tagwrite.Supported(path)
 	c.mu.Unlock()
 	// the editing surface (full-width wave + batch bar) mounts in Collection
@@ -210,11 +215,13 @@ func (u *UI) ceClose() {
 	u.patchMain()
 }
 
-// ceReloadTrack re-reads the track from the collection after a cue write.
+// ceReloadTrack re-reads the track from the collection after a cue write. Cues changed,
+// so earlier per-software cue writes are stale - the write-back router re-arms.
 func (u *UI) ceReloadTrack() {
 	c := u.ce()
 	c.mu.Lock()
 	path, active := c.path, c.active
+	c.wbApplied, c.wbErr = nil, ""
 	c.mu.Unlock()
 	if !active {
 		return
@@ -769,6 +776,7 @@ func (u *UI) ceGridShift(deltaMs float64) {
 		drops[i] = d + deltaMs
 	}
 	c.track.Beatgrid, c.track.Cues, c.drops = grid, cues, drops
+	c.wbApplied, c.wbErr = nil, "" // cue positions moved - earlier software writes are stale
 	if g, err := cuepattern.NewGrid(grid, c.track.DurationSec*1000); err == nil {
 		c.grid = g
 		c.cursorMs = g.SnapMs(c.cursorMs + deltaMs)
@@ -998,6 +1006,7 @@ func ceCueCount(cues []musiclib.CuePoint) int {
 
 // ceRailHTML is the cue-editor card in the library detail rail.
 func (u *UI) ceRailHTML() string {
+	wb := u.ceWriteHTML() // built first - takes its own locks (never nested under c.mu)
 	c := u.ce()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1056,6 +1065,7 @@ func (u *UI) ceRailHTML() string {
 	if c.lastErr != "" {
 		b.WriteString(hint("bad", c.lastErr))
 	}
+	b.WriteString(wb)
 	b.WriteString(btnRow(btn(i18n.T("common.close"), "ghost", "ce-close", "")))
 	return b.String()
 }
