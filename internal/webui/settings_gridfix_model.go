@@ -90,7 +90,7 @@ func (u *UI) gridfixModelCardBody() string {
 		if terr != "" {
 			b.WriteString(hint("bad", terr))
 		}
-		canTrain := ready && st.EngineOK && verified >= 2
+		canTrain := ready && (st.CPU.EngineOK || st.CUDA.EngineOK) && verified >= 2
 		if canTrain {
 			b.WriteString(btnRow(btn(i18n.T("settings.body.gridfixmodel.train"), "primary", "gfm-train", "")))
 		}
@@ -127,7 +127,7 @@ func (u *UI) gfmTrain() {
 		return
 	}
 	mgr := u.gridfixEnvMgr()
-	py := mgr.EnvPython()
+	py, dev := u.gridfixEngine()
 	if py == "" {
 		u.toast(i18n.T("library.gf.noEngineHint"))
 		return
@@ -160,7 +160,7 @@ func (u *UI) gfmTrain() {
 		if skipped > 0 {
 			u.toast(i18n.T("settings.toast.gfTrainSkipped", i18n.A{"n": fmt.Sprint(skipped)}))
 		}
-		tr := &train.Trainer{Device: u.svc.Cfg.Features.GridFix.ResolvedDevice(),
+		tr := &train.Trainer{Device: dev,
 			OnLog: func(line string) {
 				if u.log != nil {
 					u.log.Debug("gridfix-train", line, nil)

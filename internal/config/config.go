@@ -187,7 +187,7 @@ type Features struct {
 type GridFixFeature struct {
 	Enabled     bool    `json:"enabled"`
 	PythonPath  string  `json:"pythonPath,omitempty"`  // base interpreter override ("" = auto-discover py/-3, python3, python)
-	Device      string  `json:"device,omitempty"`      // "auto" (default) | "cpu" | "cuda"; cuda only meaningful once the CUDA torch build is installed
+	Device      string  `json:"device,omitempty"`      // engine preference: "auto" (default: CUDA if installed+working, else CPU) | "cpu" | "cuda"
 	MinQuality  float64 `json:"minQuality,omitempty"`  // min grid coverage to auto-fix; 0 = default 0.85
 	ThresholdMS float64 `json:"thresholdMs,omitempty"` // ignore marker corrections below this; 0 = default 12
 	BiasS       float64 `json:"biasS,omitempty"`       // calibrated systematic detector offset (s)

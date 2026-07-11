@@ -81,6 +81,11 @@ body {
 .switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
 .switch input:checked + .switch-track { background: var(--rp-mint, #08F79B); }
 .switch input:checked + .switch-track::after { transform: translateX(20px); }
+/* gated (dependency missing): greyed, not hidden */
+.switch input:disabled { cursor: not-allowed; }
+.switch input:disabled + .switch-track { opacity: .35; }
+.row--gated .row-label { opacity: .55; }
+.set-gate { margin: 2px 0 8px; }
 
 .kv { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 14px; }
 .kv-k { color: var(--rp-muted, #B98AA0); }

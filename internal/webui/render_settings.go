@@ -1295,7 +1295,7 @@ func (u *UI) settingsStatus() map[string]stv {
 	}
 	if gf, gfReady := u.gridfixStatusCached(); !f.GridFix.Enabled {
 		set("gridfix", stOff(""))
-	} else if gfReady && gf.EngineOK {
+	} else if gfReady && (gf.CPU.EngineOK || gf.CUDA.EngineOK) {
 		set("gridfix", stOk(tr("settings.status.gridfix.ready")))
 	} else {
 		set("gridfix", stWarn(tr("settings.status.gridfix.engineMissing")))
@@ -1509,11 +1509,9 @@ func (u *UI) applySet(id, val string) {
 	case "gridfix-python":
 		f.GridFix.PythonPath = v
 		u.invalidateGridfixProbe()
-	case "gridfix-gpu":
-		if b {
-			f.GridFix.Device = "auto" // cuda when available (the toggle only shows once it is)
-		} else {
-			f.GridFix.Device = "cpu"
+	case "gridfix-device":
+		if v == "auto" || v == "cpu" || v == "cuda" {
+			f.GridFix.Device = v
 		}
 	case "gridfix-minq":
 		toFloat(&f.GridFix.MinQuality, 0.5)
