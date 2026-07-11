@@ -1893,13 +1893,13 @@
         "noPorts": "No MIDI input ports found. Install a virtual MIDI port (loopMIDI or LoopBe1), then Refresh."
       },
       "nml": {
-        "note": "Blank = auto-detect newest Traktor install. Toggle off/on to apply a path change.",
+        "note": "Blank = auto-detect newest Traktor install. Path changes apply automatically.",
         "pathLabel": "collection.nml"
       },
       "obs": {
         "connectValidate": "Connect & validate stream settings",
         "host": "Host",
-        "note": "Enable obs-websocket in OBS (Tools → WebSocket Server Settings). Default port 4455. Finished recordings link to the set recorded over the same span. Connection changes apply on toggle off/on.",
+        "note": "Enable obs-websocket in OBS (Tools → WebSocket Server Settings). Default port 4455. Finished recordings link to the set recorded over the same span. Connection changes apply automatically (deferred while recording).",
         "password": "Password",
         "port": "Port",
         "remoteObs": "Remote OBS… ({count})"
@@ -1956,7 +1956,7 @@
       "setcapture": {
         "metaOnly": "Metadata only - parse now-playing, don't save Icecast audio",
         "mount": "Mount",
-        "note": "In Traktor → Preferences → Broadcasting: Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Toggle off/on to apply changes.",
+        "note": "In Traktor → Preferences → Broadcasting: Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Changes apply automatically (deferred while a capture is running).",
         "openFolder": "Open sets folder",
         "password": "Password",
         "port": "Port",
@@ -2000,7 +2000,7 @@
       "traktor": {
         "listenPort": "Listen port",
         "logRaw": "Log raw payloads (jsonl)",
-        "note": "Default 8080. Toggle off/on to apply a port change. The Electron client also uses 8080 - only one can bind."
+        "note": "Default 8080. Port changes apply automatically (the listener restarts itself). The Electron client also uses 8080 - only one can bind."
       },
       "traktormap": {
         "activate": "Activate",

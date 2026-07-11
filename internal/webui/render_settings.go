@@ -1859,12 +1859,14 @@ func (u *UI) applySet(id, val string) {
 		save = false
 	}
 	if save {
+		// module/source reads this field only at (re)start - restart it automatically
+		// (debounced; deferred while capturing/recording) instead of making the user
+		// toggle the feature off/on
 		var apply func()
 		if mod := settingModule(id); mod != "" {
-			// module reads this field only at (re)start - restart it automatically
-			// (debounced; deferred while capturing/recording) instead of making the
-			// user toggle the feature off/on
 			apply = func() { u.scheduleModuleRestart(mod) }
+		} else if src := settingSource(id); src != "" {
+			apply = func() { u.scheduleSourceRestart(src) }
 		}
 		u.saveCfgBG("set:"+id, apply, nil) // disk write + Reconcile off the actWorker
 	}

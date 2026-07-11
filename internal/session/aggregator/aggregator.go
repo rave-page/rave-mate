@@ -24,7 +24,9 @@ const source = "session"
 const liveTTL = 10 * time.Second
 
 type srcEntry struct {
-	src     session.Source
+	id      string                // stable source ID (build must preserve it)
+	src     session.Source        // current instance (rebuilt per start when build is set)
+	build   func() session.Source // non-nil = rebuild from live config on every (re)start
 	enabled func() bool
 }
 
@@ -39,7 +41,7 @@ type Aggregator struct {
 	mon    *logbus.Bus // per-observation monitor (Session monitor view); nil = off
 	merger *session.Merger
 
-	srcs []srcEntry
+	srcs []*srcEntry
 	snks []snkEntry
 
 	mu       sync.Mutex
@@ -67,7 +69,30 @@ func (a *Aggregator) SetMonitor(mon *logbus.Bus) { a.mon = mon }
 
 // AddSource registers a source with a live-enabled predicate (reads config).
 func (a *Aggregator) AddSource(src session.Source, enabled func() bool) {
-	a.srcs = append(a.srcs, srcEntry{src: src, enabled: enabled})
+	a.srcs = append(a.srcs, &srcEntry{id: src.ID(), src: src, enabled: enabled})
+}
+
+// AddSourceFn registers a source rebuilt from live config on every (re)start, so a
+// settings change applies via RestartSource instead of an app restart. build must
+// return the same source ID every time.
+func (a *Aggregator) AddSourceFn(build func() session.Source, enabled func() bool) {
+	src := build()
+	a.srcs = append(a.srcs, &srcEntry{id: src.ID(), src: src, build: build, enabled: enabled})
+}
+
+// RestartSource stops + restarts one running source so it re-reads config (settings
+// auto-apply). Reports whether a restart happened (false = source wasn't running).
+func (a *Aggregator) RestartSource(id string) bool {
+	name := "src:" + id
+	a.mu.Lock()
+	_, isRunning := a.running[name]
+	a.mu.Unlock()
+	if !isRunning {
+		return false
+	}
+	a.stop(name)
+	a.Reconcile()
+	return true
 }
 
 // AddSink registers a sink with a live-enabled predicate.
@@ -108,7 +133,8 @@ func (a *Aggregator) Reconcile() {
 	}
 	a.mu.Unlock()
 	for _, e := range a.srcs {
-		a.apply("src:"+e.src.ID(), e.enabled(), func(ctx context.Context) { a.runSource(ctx, e.src) })
+		e := e
+		a.apply("src:"+e.id, e.enabled(), func(ctx context.Context) { a.runSource(ctx, e) })
 	}
 	for _, e := range a.snks {
 		a.apply("sink:"+e.sink.ID(), e.enabled(), func(ctx context.Context) { a.runSink(ctx, e.sink) })
@@ -163,9 +189,15 @@ func (a *Aggregator) clearRunning(name string) {
 // runSource runs a source under a panic guard so one source can't crash the daemon. The
 // emit is wrapped to stamp the source's last-observation time, so the UI can distinguish
 // "running but silent" from "actually receiving data".
-func (a *Aggregator) runSource(ctx context.Context, src session.Source) {
-	defer a.guard("source", src.ID())
-	id := src.ID()
+func (a *Aggregator) runSource(ctx context.Context, e *srcEntry) {
+	id := e.id
+	defer a.guard("source", id)
+	a.mu.Lock()
+	if e.build != nil {
+		e.src = e.build() // fresh instance over live config
+	}
+	src := e.src
+	a.mu.Unlock()
 	emit := func(o session.Observation) {
 		a.mu.Lock()
 		a.lastSeen[id] = time.Now()
@@ -244,7 +276,7 @@ func (a *Aggregator) Sources() []SourceInfo {
 	now := time.Now()
 	out := make([]SourceInfo, 0, len(a.srcs))
 	for _, e := range a.srcs {
-		id := e.src.ID()
+		id := e.id
 		_, running := a.running["src:"+id]
 		seen := a.lastSeen[id]
 		out = append(out, SourceInfo{

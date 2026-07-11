@@ -1811,13 +1811,13 @@
         "noPorts": "Aucun port d'entrée MIDI trouvé. Installez un port MIDI virtuel (loopMIDI ou LoopBe1), puis actualisez."
       },
       "nml": {
-        "note": "Vide = détection auto de la dernière install Traktor. Désactivez/activez pour appliquer un changement de chemin.",
+        "note": "Vide = détection auto de la dernière install Traktor. Les changements de chemin s'appliquent automatiquement.",
         "pathLabel": "collection.nml"
       },
       "obs": {
         "connectValidate": "Connecter & valider les réglages de stream",
         "host": "Hôte",
-        "note": "Activez obs-websocket dans OBS (Outils → WebSocket Server Settings). Port par défaut 4455. Les enregistrements terminés se lient au set enregistré sur la même période. Les changements de connexion s'appliquent en désactivant/activant.",
+        "note": "Activez obs-websocket dans OBS (Outils → WebSocket Server Settings). Port par défaut 4455. Les enregistrements terminés se lient au set enregistré sur la même période. Les changements de connexion s'appliquent automatiquement (différés pendant un enregistrement).",
         "password": "Mot de passe",
         "port": "Port",
         "remoteObs": "OBS distant… ({count})"
@@ -1867,7 +1867,7 @@
       "setcapture": {
         "metaOnly": "Métadonnées seules - analyser le now-playing, ne pas sauver l'audio Icecast",
         "mount": "Mount",
-        "note": "Dans Traktor → Preferences → Broadcasting : Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Désactivez/activez pour appliquer les changements.",
+        "note": "Dans Traktor → Preferences → Broadcasting : Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Les changements s'appliquent automatiquement (différés pendant une capture).",
         "openFolder": "Ouvrir le dossier des sets",
         "password": "Mot de passe",
         "port": "Port",
@@ -1911,7 +1911,7 @@
       "traktor": {
         "listenPort": "Port d'écoute",
         "logRaw": "Journaliser les payloads bruts (jsonl)",
-        "note": "Défaut 8080. Désactivez/activez pour appliquer un changement de port. Le client Electron utilise aussi 8080 - un seul peut se lier."
+        "note": "Défaut 8080. Les changements de port s'appliquent automatiquement (le listener redémarre tout seul). Le client Electron utilise aussi 8080 - un seul peut se lier."
       },
       "traktormap": {
         "activate": "Activer",

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/session"
 )
 
 const (
@@ -50,6 +51,70 @@ func settingModule(id string) string {
 		}
 	}
 	return ""
+}
+
+// settingSource maps a set:<id> field to the session source that must restart to apply
+// it ("" = none). These sources are registered via aggregator.AddSourceFn, so a restart
+// rebuilds them from live config.
+func settingSource(id string) string {
+	switch id {
+	case "nml-path":
+		return session.SourceNML
+	case "serato-dir", "serato-np":
+		return session.SourceSerato
+	case "serato-remotedebug":
+		return session.SourceSeratoRemote
+	case "serato-liveurl", "serato-liveinterval":
+		return session.SourceSeratoLive
+	case "vdj-dir", "vdj-netctl", "vdj-netctlurl", "vdj-netctlauth", "vdj-os2l", "vdj-tracklist":
+		return session.SourceVirtualDJ
+	case "rb-dbpoll", "rb-memread":
+		return session.SourceRekordbox
+	}
+	return ""
+}
+
+// sourceToggleKey maps a source ID → settings.toggle.<key> for the restart toast.
+var sourceToggleKey = map[string]string{
+	session.SourceNML:          "nml",
+	session.SourceSerato:       "serato",
+	session.SourceSeratoRemote: "serato",
+	session.SourceSeratoLive:   "serato",
+	session.SourceVirtualDJ:    "virtualdj",
+	session.SourceRekordbox:    "rekordbox",
+}
+
+// scheduleSourceRestart debounces a rebuild-restart of a session source (nml/serato/
+// virtualdj/rekordbox) so its new config applies without a manual feature off/on.
+func (u *UI) scheduleSourceRestart(sid string) {
+	if u.svc.Session == nil {
+		return
+	}
+	key := "src:" + sid
+	u.restarts.mu.Lock()
+	if u.restarts.timers == nil {
+		u.restarts.timers = map[string]*time.Timer{}
+	}
+	if t := u.restarts.timers[key]; t != nil {
+		t.Stop()
+	}
+	u.restarts.timers[key] = time.AfterFunc(settingRestartDebounce, func() { u.sourceRestart(sid) })
+	u.restarts.mu.Unlock()
+}
+
+func (u *UI) sourceRestart(sid string) {
+	u.clearRestart("src:" + sid)
+	if u.svc.Session == nil || !u.svc.Session.RestartSource(sid) {
+		return // not running - next start reads fresh config anyway
+	}
+	name := sid
+	if k, ok := sourceToggleKey[sid]; ok {
+		name = i18n.T("settings.toggle." + k)
+	}
+	u.toast(i18n.T("settings.toast.moduleRestarted", i18n.A{"name": name}))
+	if u.activeTab() == "settings" {
+		u.patchMain()
+	}
 }
 
 // moduleBusy reports a module in a state an automatic restart would damage (live

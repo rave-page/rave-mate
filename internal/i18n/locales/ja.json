@@ -1811,13 +1811,13 @@
         "noPorts": "MIDI入力ポートが見つかりません。仮想MIDIポート（loopMIDIまたはLoopBe1）をインストールしてから更新してください。"
       },
       "nml": {
-        "note": "空欄 = 最新の Traktor インストールを自動検出。パス変更を適用するにはオフ/オンしてください。",
+        "note": "空欄 = 最新の Traktor インストールを自動検出。パス変更は自動的に適用されます。",
         "pathLabel": "collection.nml"
       },
       "obs": {
         "connectValidate": "接続して配信設定を検証",
         "host": "ホスト",
-        "note": "OBS で obs-websocket を有効にしてください（ツール → WebSocket サーバー設定）。デフォルトポート 4455。完了した録画は同じ期間に録音されたセットにリンクされます。接続変更はオフ/オンで適用されます。",
+        "note": "OBS で obs-websocket を有効にしてください（ツール → WebSocket サーバー設定）。デフォルトポート 4455。完了した録画は同じ期間に録音されたセットにリンクされます。接続変更は自動的に適用されます（録画中は延期されます）。",
         "password": "パスワード",
         "port": "ポート",
         "remoteObs": "リモート OBS…（{count}）"
@@ -1867,7 +1867,7 @@
       "setcapture": {
         "metaOnly": "メタデータのみ - 再生中情報を解析し、Icecast オーディオは保存しない",
         "mount": "マウント",
-        "note": "Traktor → Preferences → Broadcasting で: Server 127.0.0.1、Port {port}、Mount {mount}、Format Ogg Vorbis。変更を適用するにはオフ/オンしてください。",
+        "note": "Traktor → Preferences → Broadcasting で: Server 127.0.0.1、Port {port}、Mount {mount}、Format Ogg Vorbis。変更は自動的に適用されます（キャプチャ中は延期されます）。",
         "openFolder": "セットフォルダーを開く",
         "password": "パスワード",
         "port": "ポート",
@@ -1911,7 +1911,7 @@
       "traktor": {
         "listenPort": "待受ポート",
         "logRaw": "生ペイロードをログ (jsonl)",
-        "note": "デフォルト 8080。ポート変更を適用するにはオフ/オンしてください。Electron クライアントも 8080 を使用します - バインドできるのは 1 つだけです。"
+        "note": "デフォルト 8080。ポート変更は自動的に適用されます（リスナーが自動で再起動します）。Electron クライアントも 8080 を使用します - バインドできるのは 1 つだけです。"
       },
       "traktormap": {
         "activate": "有効化",
