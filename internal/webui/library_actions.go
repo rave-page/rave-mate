@@ -229,6 +229,12 @@ func init() {
 	onExact("lib-sr-rating", func(u *UI, m actMsg) { u.libSRQuiet(func(s *libSt) { s.srRules.RatingMin = atoi(m.Val) }) })
 	onExact("lib-sr-plays", func(u *UI, m actMsg) { u.libSRQuiet(func(s *libSt) { s.srRules.PlayCountMin = atoi(m.Val) }) })
 	onExact("lib-sr-search", func(u *UI, m actMsg) { u.libSRQuiet(func(s *libSt) { s.srRules.Search = strings.TrimSpace(m.Val) }) })
+	onPrefix("lib-sr-compat:", func(u *UI, m actMsg) {
+		u.libSRRerender(func(s *libSt) { s.srRules.CompatWith = m.arg("lib-sr-compat:") })
+	})
+	onPrefix("lib-sr-depth:", func(u *UI, m actMsg) {
+		u.libSRRerender(func(s *libSt) { s.srRules.CompatDepth = atoi(m.arg("lib-sr-depth:")) })
+	})
 	onExact("lib-sr-save", func(u *UI, m actMsg) { u.libSmartSave() })
 	onPrefix("lib-pl-rename:", func(u *UI, m actMsg) { u.libRenamePlaylistModal(atoi64(m.arg("lib-pl-rename:"))) })
 	onExact("lib-pl-rename-do", func(u *UI, m actMsg) { u.libRenamePlaylist(parseForm(m.Form)) })
@@ -1500,7 +1506,7 @@ func (u *UI) libPlaylistItems(row libdb.PlaylistRow, tracks []musiclib.Track) []
 			return nil
 		}
 		var items []libdb.PlaylistItemRow
-		for _, t := range musiclib.FilterSmart(tracks, rules) {
+		for _, t := range u.filterSmartDB(tracks, rules) {
 			items = append(items, libdb.PlaylistItemRow{Path: t.Path})
 		}
 		return items
@@ -1775,9 +1781,20 @@ func (u *UI) libSRQuiet(mut func(*libSt)) {
 	s := u.lib()
 	s.mu.Lock()
 	mut(s)
-	txt := libSRCountText(s)
+	txt := u.libSRCountText(s)
 	s.mu.Unlock()
 	u.eval("var c=document.getElementById('lib-sr-count');if(c)c.textContent=" + jsQuote(txt) + ";")
+}
+
+// libSRRerender mutates the draft and re-renders the whole modal (structure changed:
+// compat picker label / depth-chip visibility).
+func (u *UI) libSRRerender(mut func(*libSt)) {
+	s := u.lib()
+	s.mu.Lock()
+	mut(s)
+	h := u.libSmartModalHTML(s)
+	s.mu.Unlock()
+	u.openModal(h)
 }
 
 // libSRGenre toggles a genre chip (re-renders the modal for the active state).

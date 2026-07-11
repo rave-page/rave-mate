@@ -270,14 +270,47 @@ func (u *UI) pubTracklistHTML(rows []pubRow) string {
 	if len(rows) == 0 {
 		return hint("info", i18n.T("publish.noTracks"))
 	}
+	sel := u.pubTSel()
 	var b strings.Builder
 	b.WriteString(`<div class=pub-tracklist>`)
+	unresolved := 0
 	for i, row := range rows {
-		b.WriteString(`<div class=pub-track><span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
+		lead, ctx := "", ""
+		if row.path == "" {
+			unresolved++
+			lead = `<span class="pub-track-chk none" title=` + attrQ(i18n.T("publish.compat.unresolved")) + `>·</span>`
+		} else {
+			chk := ""
+			if sel[row.path] {
+				chk = " checked"
+			}
+			lead = `<span class=pub-track-chk><input type=checkbox data-act="pub-tsel:` + html.EscapeString(row.path) + `"` + chk + `></span>`
+			ctx = ` data-ctx="pub-tctx:` + html.EscapeString(row.path) + `"`
+		}
+		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +
+			`<span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
 			`<span class=pub-track-o>[` + pubClock(row.offset.Seconds()) + `]</span>` +
 			`<span class=pub-track-l>` + html.EscapeString(row.label) + `</span></div>`)
 	}
 	b.WriteString(`</div>`)
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.help")) + `</p>`)
+	if unresolved > 0 {
+		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.unresolvedCount", i18n.A{"count": fmt.Sprint(unresolved)})) + `</p>`)
+	}
+	if len(sel) > 0 {
+		btns := []string{}
+		if len(sel) >= 2 {
+			btns = append(btns, btn(i18n.T("library.compat.markBtn"), "primary", "lib-compat-mark:pub", ""))
+		}
+		if len(sel) == 1 {
+			for p := range sel {
+				btns = append(btns, btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+p, ""))
+			}
+		}
+		btns = append(btns, btn(i18n.T("library.clear"), "ghost", "pub-tsel-clear", ""))
+		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(sel))})) + `</span>` +
+			strings.Join(btns, "") + `</div>`)
+	}
 	return b.String()
 }
 
@@ -392,19 +425,37 @@ func (u *UI) pubSelected(recs []recorder.Recording) *recorder.Recording {
 	return &recs[0]
 }
 
-// pubRow is one tracklist entry (offset into the set + label).
+// pubRow is one tracklist entry (offset into the set + label + resolved library path;
+// "" = no library identity, row can't carry works-together marks).
 type pubRow struct {
 	offset time.Duration
 	label  string
+	path   string
 }
 
 // pubTrackRows builds the tracklist from the live session tracks (offset = StartedAt − set start).
+// Each row resolves to a library path: the track's own recorded/reconciled path when present,
+// else a UNIQUE artist+title match against the library DB.
 func (u *UI) pubTrackRows(r recorder.Recording, _ []libdb.SetRecording) []pubRow {
 	rows := make([]pubRow, len(r.Tracks))
 	for i, t := range r.Tracks {
-		rows[i] = pubRow{offset: t.StartedAt.Sub(r.StartedAt), label: orTrackLine(pubTrackLine(t))}
+		rows[i] = pubRow{offset: t.StartedAt.Sub(r.StartedAt), label: orTrackLine(pubTrackLine(t)), path: u.pubResolvePath(t)}
 	}
 	return rows
+}
+
+// pubResolvePath maps a recorder track to its library path (existing link first, then
+// exact-meta fallback; "" = unresolved).
+func (u *UI) pubResolvePath(t recorder.Track) string {
+	if t.Path != "" {
+		return t.Path
+	}
+	if u.svc.Lib != nil {
+		if p, ok := u.svc.Lib.TrackPathByMeta(t.Artist, t.Title); ok {
+			return p
+		}
+	}
+	return ""
 }
 
 // ── small formatters ────────────────────────────────────────────────────────────

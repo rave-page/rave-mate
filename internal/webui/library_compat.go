@@ -14,6 +14,7 @@ import (
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/musiclib"
 )
 
 const (
@@ -35,6 +36,12 @@ func init() {
 
 func compatKindLabel(kind string) string { return i18n.T("library.compat.kind." + kind) }
 
+// filterSmartDB is FilterSmart with DB-prepped inputs - REQUIRED for any rules that may
+// carry a compat anchor (plain FilterSmart fails a compat rule closed).
+func (u *UI) filterSmartDB(tracks []musiclib.Track, r musiclib.SmartRules) []musiclib.Track {
+	return musiclib.FilterSmartPrep(tracks, r, u.svc.Lib.SmartPrep(r))
+}
+
 // compatKindsLabel joins one partner's (possibly multiple) mark kinds for display.
 func compatKindsLabel(kinds []string) string {
 	out := make([]string, 0, len(kinds))
@@ -44,7 +51,8 @@ func compatKindsLabel(kinds []string) string {
 	return strings.Join(out, " · ")
 }
 
-// libCompatMarkModal opens the kind picker over the active selection. src ∈ coll|browse.
+// libCompatMarkModal opens the kind picker over the active selection. src ∈ coll|browse|pub
+// (pub = the Publish tab's resolved tracklist selection).
 func (u *UI) libCompatMarkModal(src string) {
 	if u.svc.Lib == nil {
 		u.toast(i18n.T("library.dbUnavailable"))
@@ -53,13 +61,18 @@ func (u *UI) libCompatMarkModal(src string) {
 	s := u.lib()
 	s.mu.Lock()
 	var paths []string
-	if src == "browse" {
+	switch src {
+	case "browse":
 		for p := range s.batch {
 			if libKind(p, false) == "audio" {
 				paths = append(paths, p)
 			}
 		}
-	} else {
+	case "pub":
+		for p := range u.pubTSel() {
+			paths = append(paths, p)
+		}
+	default:
 		for p := range s.collSel {
 			paths = append(paths, p)
 		}

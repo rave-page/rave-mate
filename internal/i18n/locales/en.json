@@ -813,6 +813,11 @@
     "sr": {
       "bpmMax": "BPM max",
       "bpmMin": "BPM min",
+      "compat": "Compatible with track",
+      "compatDepth2": "Include friends-of-friends",
+      "compatDirect": "Direct marks only",
+      "compatHint": "Matches tracks you marked as works-together with the anchor track (the anchor itself is included). “Include friends-of-friends” also pulls in tracks compatible with those direct partners - a wider pool for drafting a set. Mark pairs in the Collection or on a Publish tracklist (select 2+ rows → Works together…).",
+      "compatNone": "(none - rule inactive)",
       "countText": "{count} of {total} tracks match - {desc}",
       "create": "Create smart playlist",
       "desc": "Rules combine with AND; genres are OR. Matches update live as your collection changes.",
@@ -1788,6 +1793,11 @@
     "broadcastAudio": "Broadcast audio",
     "capturesCount": "Captures ({count})",
     "capturing": "capturing {format} · {bytes}",
+    "compat": {
+      "help": "Rows with a checkbox are matched to your library. Select two or more and mark them as works-together (blend / double drop / energy) - the marks land in the same store the Collection uses, so discovery, smart playlists and the set builder all see them.",
+      "unresolved": "No library match - this row can't carry works-together marks. It links up once the file is in your library (or after a Traktor history match).",
+      "unresolvedCount": "{count} row(s) without a library match can't be marked - hover the dot for details."
+    },
     "confirming": "confirming - commits to the tracklist in {left}",
     "confirmingIn": "confirming in {left}",
     "connected": "connected",

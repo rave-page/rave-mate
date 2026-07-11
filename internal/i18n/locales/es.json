@@ -732,6 +732,11 @@
     "sr": {
       "bpmMax": "BPM máx.",
       "bpmMin": "BPM mín.",
+      "compat": "Compatible con la pista",
+      "compatDepth2": "Incluir amigos de amigos",
+      "compatDirect": "Solo marcas directas",
+      "compatHint": "Coincide con las pistas que marcaste como que funcionan juntas con la pista ancla (la propia ancla se incluye). «Incluir amigos de amigos» añade además las pistas compatibles con esos socios directos: un grupo más amplio para bocetar un set. Marca pares en la Colección o en una tracklist de Publish (selecciona 2+ filas → Funcionan juntas…).",
+      "compatNone": "(ninguna - regla inactiva)",
       "countText": "{count} de {total} pistas coinciden - {desc}",
       "create": "Crear lista inteligente",
       "desc": "Las reglas se combinan con Y; los géneros con O. Las coincidencias se actualizan en vivo al cambiar tu colección.",
@@ -1706,6 +1711,11 @@
     "broadcastAudio": "Audio de emisión",
     "capturesCount": "Capturas ({count})",
     "capturing": "capturando {format} · {bytes}",
+    "compat": {
+      "help": "Las filas con casilla están vinculadas a tu biblioteca. Selecciona dos o más y márcalas como que funcionan juntas (blend / double drop / energía): las marcas van al mismo almacén que usa la Colección, así que el descubrimiento, las listas inteligentes y el constructor de sets también las ven.",
+      "unresolved": "Sin coincidencia en la biblioteca: esta fila no puede llevar marcas de compatibilidad. Se vinculará cuando el archivo esté en tu biblioteca (o tras un cotejo con el historial de Traktor).",
+      "unresolvedCount": "{count} fila(s) sin coincidencia en la biblioteca no se pueden marcar; pasa el cursor sobre el punto para ver detalles."
+    },
     "confirming": "confirmando - se añade a la tracklist en {left}",
     "confirmingIn": "confirmando en {left}",
     "connected": "conectado",

@@ -732,6 +732,11 @@
     "sr": {
       "bpmMax": "BPM max",
       "bpmMin": "BPM min",
+      "compat": "Compatible avec le morceau",
+      "compatDepth2": "Inclure les amis d'amis",
+      "compatDirect": "Marques directes uniquement",
+      "compatHint": "Sélectionne les morceaux marqués comme allant ensemble avec le morceau d'ancrage (l'ancre elle-même est incluse). « Inclure les amis d'amis » ajoute aussi les morceaux compatibles avec ces partenaires directs - un vivier plus large pour ébaucher un set. Marquez des paires dans la Collection ou sur une tracklist Publish (sélectionnez 2+ lignes → Vont ensemble…).",
+      "compatNone": "(aucun - règle inactive)",
       "countText": "{count} sur {total} pistes correspondent - {desc}",
       "create": "Créer la playlist intelligente",
       "desc": "Les règles se combinent en ET ; les genres sont en OU. Les correspondances se mettent à jour en direct.",
@@ -1706,6 +1711,11 @@
     "broadcastAudio": "Diffuser l'audio",
     "capturesCount": "Captures ({count})",
     "capturing": "capture {format} · {bytes}",
+    "compat": {
+      "help": "Les lignes avec une case à cocher sont reliées à votre bibliothèque. Sélectionnez-en deux ou plus et marquez-les comme allant ensemble (blend / double drop / énergie) - les marques sont stockées au même endroit que dans la Collection : découverte, playlists intelligentes et set builder les voient aussi.",
+      "unresolved": "Aucune correspondance en bibliothèque - cette ligne ne peut pas porter de marques « vont ensemble ». Elle se reliera dès que le fichier sera dans votre bibliothèque (ou après un rapprochement avec l'historique Traktor).",
+      "unresolvedCount": "{count} ligne(s) sans correspondance en bibliothèque ne peuvent pas être marquées - survolez le point pour les détails."
+    },
     "confirming": "confirmation - validé dans la tracklist dans {left}",
     "confirmingIn": "confirmation dans {left}",
     "connected": "connecté",

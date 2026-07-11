@@ -151,8 +151,9 @@ func (sv *studioView) smartCount(r libdb.PlaylistRow) int {
 		return 0
 	}
 	n := 0
+	prep := sv.u.svc.Lib.SmartPrep(rules)
 	for _, t := range sv.tracks {
-		if rules.Match(t) {
+		if rules.MatchPrep(t, prep) {
 			n++
 		}
 	}
@@ -177,7 +178,7 @@ func (sv *studioView) openPlaylist(r libdb.PlaylistRow) {
 	sv.plCur = r
 	if r.Kind == libdb.PlaylistSmart {
 		rules, _ := parseRules(r.Rules)
-		sv.plTracks = musiclib.FilterSmart(sv.tracks, rules)
+		sv.plTracks = musiclib.FilterSmartPrep(sv.tracks, rules, db.SmartPrep(rules))
 		sv.plPaths = nil
 	} else {
 		items, err := db.PlaylistItems(r.ID)

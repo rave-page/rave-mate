@@ -63,6 +63,17 @@ func smartSelectRaw(id, labelHTML, act, cur string, opts func() []ssOpt) string 
 	return `<div class=ss-field>` + labelHTML + `<div class=ss id="ss-` + html.EscapeString(id) + `">` + ssInner(id) + `</div></div>`
 }
 
+// ssFilter returns id's live filter text - opts fns over huge lists (track pickers)
+// pre-filter + cap server-side so an unfiltered open never renders thousands of rows.
+func ssFilter(id string) string {
+	ssMu.Lock()
+	defer ssMu.Unlock()
+	if st := ssSts[id]; st != nil {
+		return st.filter
+	}
+	return ""
+}
+
 func ssInner(id string) string {
 	ssMu.Lock()
 	st := ssSts[id]
