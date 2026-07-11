@@ -84,14 +84,23 @@ func TestMirrorLoopback(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// host-side teardown degrades the controller banner
+	// host-side teardown degrades the controller banner.
+	// Poll the state, not an eval substring: the live transition already emitted an
+	// rmirror-banner eval, so waitEval would match that stale one and race the close.
 	hubB.closeHost("nodeA", "", "peer gone", true)
-	capA.waitEval(t, "rmirror-banner")
-	st.mu.Lock()
-	status, msg := st.status, st.errMsg
-	st.mu.Unlock()
-	if status != mirrorError || msg != "peer gone" {
-		t.Fatalf("status=%q msg=%q, want error/peer gone", status, msg)
+	var msg string
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		st.mu.Lock()
+		status, msg = st.status, st.errMsg
+		st.mu.Unlock()
+		if status == mirrorError && msg == "peer gone" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status=%q msg=%q, want error/peer gone", status, msg)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
