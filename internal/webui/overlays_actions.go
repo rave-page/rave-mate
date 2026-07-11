@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/overlaystyle"
 	"rave.page/mate/internal/spoutdll"
+	"rave.page/mate/internal/videoshare"
 )
 
 // Overlays tab action handlers + live-status tick. All actions are namespaced ovl-* so they never
@@ -32,13 +34,15 @@ func init() {
 		}
 	})
 
-	// Browser overlay: OBS auto-manage source.
+	// Browser overlay: OBS auto-manage source. The OBS bridge reads these at (re)spawn, so
+	// apply via a debounced module restart (busy-deferred while recording) - no manual off/on.
 	onExact("ovl-obssrc", func(u *UI, m actMsg) {
 		if u.svc.Cfg == nil {
 			return
 		}
 		u.svc.Cfg.Features.OverlayWeb.OBSSource.Enabled = m.Val == "true"
 		u.saveCfg()
+		u.scheduleModuleRestart("obs")
 	})
 	onExact("ovl-obsnest", func(u *UI, m actMsg) {
 		if u.svc.Cfg == nil {
@@ -46,6 +50,7 @@ func init() {
 		}
 		u.svc.Cfg.Features.OverlayWeb.OBSSource.NestInProgram = m.Val == "true"
 		u.saveCfg()
+		u.scheduleModuleRestart("obs")
 	})
 	onExact("ovl-obsscene", func(u *UI, m actMsg) {
 		if u.svc.Cfg == nil {
@@ -53,6 +58,7 @@ func init() {
 		}
 		u.svc.Cfg.Features.OverlayWeb.OBSSource.Scene = strings.TrimSpace(m.Val)
 		u.saveCfg()
+		u.scheduleModuleRestart("obs")
 	})
 
 	// Waveform panel.
@@ -129,11 +135,13 @@ func init() {
 		u.ovlOpenDir(dir)
 	})
 
-	// Video share.
+	// Video share. Render scale is read at sink start - debounced restart applies it live
+	// (deferred while a deck is on-air so a live share isn't cut mid-set).
 	onExact("ovl-vs-scale", func(u *UI, m actMsg) {
 		if n, err := strconv.Atoi(m.Val); err == nil && u.svc.Cfg != nil {
 			u.svc.Cfg.Features.VideoShare.RenderScale = n
 			u.saveCfg()
+			u.scheduleSinkRestart(videoshare.SinkID)
 		}
 	})
 	onExact("ovl-spout-install", func(u *UI, _ actMsg) { u.spoutInstall() })
@@ -176,7 +184,8 @@ func (u *UI) spoutInstall() {
 			u.logErr("spout install", err)
 			u.toast("Spout runtime install failed: " + err.Error())
 		} else {
-			u.toast("Spout runtime installed - toggle Video share off/on to use it")
+			u.toast(i18n.T("overlays.spout.installedToast"))
+			u.scheduleSinkRestart(videoshare.SinkID) // running share reloads the DLL; off = next start finds it
 		}
 		u.eval("window.__patch('ovl-spout'," + jsQuote(u.spoutControlsHTML()) + ")")
 	})

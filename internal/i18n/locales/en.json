@@ -1512,6 +1512,7 @@
     "spout": {
       "install": "Download & install",
       "installed": "Installed: {path}",
+      "installedToast": "Spout runtime installed - a running video share picks it up automatically; otherwise enable Video share above",
       "notFound": "SpoutLibrary.dll not found - install it to enable Spout output (the app runs fine without it).",
       "note": "Spout needs SpoutLibrary.dll (bundled with the installer). If missing - e.g. after a self-update - install it here: downloads the pinned Spout2 SDK, SHA-256-verified, into the app's bin folder.",
       "openSdk": "Open the Spout SDK download page",
@@ -1541,10 +1542,13 @@
       "web": "web"
     },
     "subtitle": "Style once, output everywhere - live now-playing visuals for OBS and beyond",
+    "toast": {
+      "restartDeferred": "{name}: saved - applies automatically once no deck is live"
+    },
     "vs": {
       "noBackend": "This build has no video-share backend compiled in (Windows=Spout / macOS=Syphon / Linux=PipeWire) - toggling on runs the sink but publishes nothing.",
       "note": "Publishes each loaded deck's card as a live video frame named \"{name}\" … over the OS-native sharing API, so OBS/Resolume/TouchDesigner/VRChat can pull deck visuals from memory - no file or window capture.",
-      "note2": "Higher scale = sharper when shown large (e.g. full-screen on a 4K canvas), at more CPU. Toggle off/on to apply.",
+      "note2": "Higher scale = sharper when shown large (e.g. full-screen on a 4K canvas), at more CPU. A scale change applies automatically - the share restarts and receivers re-attach; it waits until no deck is live.",
       "renderScale": "Render scale",
       "scaleOption": "{mult}× ({res})",
       "sharesVia": "This build shares via {backend}.",
@@ -1553,8 +1557,8 @@
     "web": {
       "autoAdd": "Auto-add & size the browser source in OBS",
       "nest": "Also add that scene to the current program scene",
-      "note1": "Add a Browser source in OBS at the URL above (size it to your canvas, e.g. 1920×1080) or let rave-mate manage it below. Toggle the overlay off/on to apply a port change.",
-      "note2": "Auto-manage needs the OBS connection enabled + OBS running; applies on the next OBS (re)connect.",
+      "note1": "Add a Browser source in OBS at the URL above (size it to your canvas, e.g. 1920×1080) or let rave-mate manage it below. A port change applies automatically: the server restarts on the new port and an auto-managed OBS source re-points itself - only a manually added Browser source needs its URL updated.",
+      "note2": "Auto-manage needs the OBS connection enabled + OBS running. Changes apply automatically - the OBS link reconnects; a running recording finishes first.",
       "obsScene": "OBS scene",
       "title": "Live overlay (browser)"
     },

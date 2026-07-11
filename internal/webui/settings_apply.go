@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/overlayserver"
 	"rave.page/mate/internal/session"
+	"rave.page/mate/internal/videoshare"
 )
 
 const (
@@ -72,6 +74,107 @@ func settingSource(id string) string {
 		return session.SourceRekordbox
 	}
 	return ""
+}
+
+// settingSink maps a set:<id> field to the session sink whose (re)start consumes it
+// ("" = none). Sinks restart via Session.RestartSink (busy-safe: a watched live overlay
+// defers like busy modules).
+func settingSink(id string) string {
+	switch id {
+	case "overlay-port":
+		return overlayserver.SinkID
+	}
+	return ""
+}
+
+// sinkTitleKey maps a sink ID → i18n key of its Overlays-card title for restart toasts.
+var sinkTitleKey = map[string]string{
+	overlayserver.SinkID: "overlays.web.title",
+	videoshare.SinkID:    "overlays.vs.title",
+}
+
+// sinkDisplayName resolves the localized output name for restart toasts.
+func sinkDisplayName(sid string) string {
+	if k, ok := sinkTitleKey[sid]; ok {
+		return i18n.T(k)
+	}
+	return sid
+}
+
+// sinkBusy reports a sink in a state an automatic restart would visibly damage (a live
+// overlay someone is watching). The scheduler retries until idle instead of cutting it.
+func (u *UI) sinkBusy(sid string) bool {
+	switch sid {
+	case overlayserver.SinkID:
+		return u.svc.OverlayWeb != nil && u.svc.OverlayWeb.Busy()
+	case videoshare.SinkID:
+		return videoshare.Backend() != "none" && u.liveOnAir()
+	}
+	return false
+}
+
+// liveOnAir reports ≥1 deck currently on-air (a restart would cut visible live output).
+func (u *UI) liveOnAir() bool {
+	if u.svc.Session == nil {
+		return false
+	}
+	ov := u.svc.Session.Snapshot().BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
+	for _, d := range ov.Decks {
+		if d.OnAir {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleSinkRestart debounces a restart of a session sink (overlay web server /
+// video share) so its new config applies without a manual feature off/on.
+func (u *UI) scheduleSinkRestart(sid string) {
+	if u.svc.Session == nil {
+		return
+	}
+	key := "snk:" + sid
+	u.restarts.mu.Lock()
+	if u.restarts.timers == nil {
+		u.restarts.timers = map[string]*time.Timer{}
+	}
+	if t := u.restarts.timers[key]; t != nil {
+		t.Stop()
+	}
+	u.restarts.timers[key] = time.AfterFunc(settingRestartDebounce, func() { u.sinkRestart(sid, true) })
+	u.restarts.mu.Unlock()
+}
+
+// sinkRestart executes a due sink restart; a busy sink re-arms the timer (toast once).
+func (u *UI) sinkRestart(sid string, notifyDefer bool) {
+	key := "snk:" + sid
+	if u.svc.Session == nil {
+		u.clearRestart(key)
+		return
+	}
+	if u.sinkBusy(sid) {
+		if notifyDefer {
+			u.toast(i18n.T("overlays.toast.restartDeferred", i18n.A{"name": sinkDisplayName(sid)}))
+		}
+		u.restarts.mu.Lock()
+		u.restarts.timers[key] = time.AfterFunc(settingRestartRetry, func() { u.sinkRestart(sid, false) })
+		u.restarts.mu.Unlock()
+		return
+	}
+	u.clearRestart(key)
+	if !u.svc.Session.RestartSink(sid) {
+		return // not running - next start reads fresh config anyway
+	}
+	u.toast(i18n.T("settings.toast.moduleRestarted", i18n.A{"name": sinkDisplayName(sid)}))
+	// The auto-managed OBS browser source embeds the overlay URL - re-point it at the new
+	// port by restarting the OBS bridge (its init closure re-reads config; busy-deferred
+	// while recording; no-op when the module isn't running).
+	if sid == overlayserver.SinkID && u.svc.Cfg != nil && u.svc.Cfg.Features.OverlayWeb.OBSSource.Enabled {
+		u.scheduleModuleRestart("obs")
+	}
+	if t := u.activeTab(); t == "overlays" || t == "settings" {
+		u.patchMain() // URLs/status reflect the fresh state immediately
+	}
 }
 
 // sourceToggleKey maps a source ID → settings.toggle.<key> for the restart toast.

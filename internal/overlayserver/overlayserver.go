@@ -38,6 +38,9 @@ const (
 	clientBuf = 8
 )
 
+// SinkID is the aggregator sink ID (settings auto-apply restarts address it).
+const SinkID = source
+
 // gateEntry tracks whether a deck's current track has ever been on-air (faded in). A track
 // that's only cued (loaded, fader down) stays hidden until it goes on-air once.
 type gateEntry struct {
@@ -105,9 +108,9 @@ func (s *Sink) Start(ctx context.Context, m *session.Merger) error {
 	mux.HandleFunc("/presets", s.handlePresets)
 
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	ln, err := s.listen(ctx, port)
 	if err != nil {
-		return fmt.Errorf("overlay listen :%d: %w", port, err)
+		return err
 	}
 	s.log.Info(source, "overlay server up", map[string]any{"url": fmt.Sprintf("http://127.0.0.1:%d/", port)})
 
@@ -118,9 +121,11 @@ func (s *Sink) Start(ctx context.Context, m *session.Merger) error {
 
 	select {
 	case <-ctx.Done():
+		s.closeAllSubs() // SSE handlers exit so Shutdown isn't held open by live streams
 		sh, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sh)
+		_ = srv.Close() // hard-close stragglers so a settings restart can rebind promptly
 		return nil
 	case err := <-errc:
 		if err == http.ErrServerClosed {
@@ -128,6 +133,43 @@ func (s *Sink) Start(ctx context.Context, m *session.Merger) error {
 		}
 		return err
 	}
+}
+
+// listen binds the loopback port, retrying briefly - a settings-triggered restart on the
+// same port can land while the old server's connections are still draining.
+func (s *Sink) listen(ctx context.Context, port int) (net.Listener, error) {
+	var err error
+	for i := 0; i < 10; i++ {
+		var ln net.Listener
+		if ln, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+			return ln, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("overlay listen :%d: %w", port, err)
+}
+
+// Busy reports an actively-watched live overlay (≥1 SSE client + ≥1 on-air deck) so
+// settings auto-apply defers a restart instead of flickering a live stream.
+func (s *Sink) Busy() bool {
+	s.subMu.Lock()
+	clients := len(s.subs)
+	s.subMu.Unlock()
+	if clients == 0 {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.latest.Decks {
+		if d.OnAir {
+			return true
+		}
+	}
+	return false
 }
 
 // pump pushes the latest overlay to SSE clients with low latency: it flushes immediately on a
@@ -460,6 +502,17 @@ func (s *Sink) addSub() (int, chan []byte) {
 	ch := make(chan []byte, clientBuf)
 	s.subs[id] = ch
 	return id, ch
+}
+
+// closeAllSubs drops every SSE subscriber (server shutdown) - handlers see the channel
+// close and return, releasing their connections.
+func (s *Sink) closeAllSubs() {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	for id, ch := range s.subs {
+		delete(s.subs, id)
+		close(ch)
+	}
 }
 
 func (s *Sink) removeSub(id int) {

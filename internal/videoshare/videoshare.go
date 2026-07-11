@@ -36,6 +36,9 @@ import (
 
 const source = "videoshare"
 
+// SinkID is the aggregator sink ID (settings auto-apply restarts address it).
+const SinkID = source
+
 // SenderName is the published name for a deck's video sender (what a receiver selects).
 func SenderName(deck string) string { return "RaveMate Deck " + deck }
 

@@ -490,10 +490,8 @@ func run(parent context.Context, serviceMode bool) error {
 		overlayWave.SetPathResolver(lib.TrackPathByMeta)
 	}
 	waveFn := func() config.OverlayWaveformFeature { return cfg.Features.OverlayWaveform }
-	agg.AddSink(
-		overlayserver.New(log, func() int { return cfg.Features.OverlayWeb.ResolvedPort() }, overlayArt, overlayWave, waveFn, overlayLayoutPath()),
-		func() bool { return cfg.Features.OverlayWeb.Enabled },
-	)
+	overlayWebSink := overlayserver.New(log, func() int { return cfg.Features.OverlayWeb.ResolvedPort() }, overlayArt, overlayWave, waveFn, overlayLayoutPath())
+	agg.AddSink(overlayWebSink, func() bool { return cfg.Features.OverlayWeb.Enabled })
 	// Native per-deck PNG cards (OBS Image source per deck) - same data + cued-not-played gate
 	// + shared cover-art resolver, but flat files instead of a live page (no browser, no cgo).
 	agg.AddSink(
@@ -1523,7 +1521,7 @@ func run(parent context.Context, serviceMode bool) error {
 		},
 		SyncVRMAvatars: reconcileVRMNow,
 		Traktor:        trk, Stream: pub, Player: player, Modules: mods, Workers: workers, Hub: transcodeHub, Store: st,
-		Lib: lib, OverlayArt: overlayArt, Syncer: syncer, Automations: autoIface, Session: agg, Recorder: rec, SetCapture: icecastRcv, OBS: obsW,
+		Lib: lib, OverlayArt: overlayArt, OverlayWeb: overlayWebSink, Syncer: syncer, Automations: autoIface, Session: agg, Recorder: rec, SetCapture: icecastRcv, OBS: obsW,
 		AbleLink:   linkW,
 		AudioRec:   audioRec,
 		TraktorMap: tmap, Identity: ident, Peers: peerMgr, Discovery: disc, PeerBridge: peerBridge, NetStats: netSampler, Perf: perfMon,

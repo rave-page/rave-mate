@@ -1430,6 +1430,7 @@
     "spout": {
       "install": "Herunterladen & installieren",
       "installed": "Installiert: {path}",
+      "installedToast": "Spout-Runtime installiert - ein laufender Video-Share übernimmt sie automatisch; andernfalls Video-Share oben aktivieren",
       "notFound": "SpoutLibrary.dll nicht gefunden - installiere sie, um die Spout-Ausgabe zu aktivieren (die App läuft auch ohne einwandfrei).",
       "note": "Spout benötigt SpoutLibrary.dll (im Installer enthalten). Falls sie fehlt - z. B. nach einem Selbst-Update - hier installieren: lädt das fixierte Spout2 SDK, SHA-256-verifiziert, in den bin-Ordner der App.",
       "openSdk": "Spout-SDK-Downloadseite öffnen",
@@ -1459,10 +1460,13 @@
       "web": "web"
     },
     "subtitle": "Einmal gestalten, überall ausgeben - Live-Now-Playing-Visuals für OBS und mehr",
+    "toast": {
+      "restartDeferred": "{name}: gespeichert - wird automatisch übernommen, sobald kein Deck live ist"
+    },
     "vs": {
       "noBackend": "In diesem Build ist kein Video-Share-Backend einkompiliert (Windows=Spout / macOS=Syphon / Linux=PipeWire) - beim Einschalten läuft der Sink, veröffentlicht aber nichts.",
       "note": "Veröffentlicht die Karte jedes geladenen Decks als Live-Videoframe namens „{name}“ … über die OS-native Sharing-API, sodass OBS/Resolume/TouchDesigner/VRChat Deck-Visuals aus dem Speicher abrufen können - keine Datei- oder Fensteraufnahme.",
-      "note2": "Höhere Skalierung = schärfer bei großer Anzeige (z. B. Vollbild auf einer 4K-Leinwand), bei mehr CPU-Last. Zum Anwenden aus-/einschalten.",
+      "note2": "Höhere Skalierung = schärfer bei großer Anzeige (z. B. Vollbild auf einer 4K-Leinwand), bei mehr CPU-Last. Eine Skalierungsänderung wird automatisch übernommen - der Video-Share startet neu und Empfänger verbinden sich wieder; gewartet wird, bis kein Deck live ist.",
       "renderScale": "Render-Skalierung",
       "scaleOption": "{mult}× ({res})",
       "sharesVia": "Dieser Build teilt über {backend}.",
@@ -1471,8 +1475,8 @@
     "web": {
       "autoAdd": "Browser-Quelle in OBS automatisch hinzufügen & dimensionieren",
       "nest": "Diese Szene auch zur aktuellen Programmszene hinzufügen",
-      "note1": "Füge in OBS eine Browser-Quelle mit der obigen URL hinzu (auf deine Leinwand dimensionieren, z. B. 1920×1080) oder lass rave-mate sie unten verwalten. Schalte das Overlay aus/ein, um eine Portänderung anzuwenden.",
-      "note2": "Die automatische Verwaltung benötigt eine aktivierte OBS-Verbindung + laufendes OBS; wird bei der nächsten OBS-(Neu-)Verbindung angewendet.",
+      "note1": "Füge in OBS eine Browser-Quelle mit der obigen URL hinzu (auf deine Leinwand dimensionieren, z. B. 1920×1080) oder lass rave-mate sie unten verwalten. Eine Portänderung wird automatisch übernommen: Der Server startet auf dem neuen Port neu, und eine automatisch verwaltete OBS-Quelle zeigt von selbst auf die neue URL - nur bei einer manuell hinzugefügten Browser-Quelle muss die URL aktualisiert werden.",
+      "note2": "Die automatische Verwaltung benötigt eine aktivierte OBS-Verbindung + laufendes OBS. Änderungen werden automatisch übernommen - die OBS-Verbindung verbindet sich neu; eine laufende Aufnahme wird zuerst abgeschlossen.",
       "obsScene": "OBS-Szene",
       "title": "Live-Overlay (Browser)"
     },
