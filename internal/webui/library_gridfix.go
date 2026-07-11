@@ -81,6 +81,8 @@ func (u *UI) gfRailHTML(s *libSt) string {
 	switch g.stage {
 	case "running":
 		return u.gfRunningHTML(g)
+	case "cal":
+		return u.gfCalRunningHTML(g)
 	case "done":
 		return u.gfDoneHTML(g)
 	case "confirm":
@@ -125,8 +127,52 @@ func (u *UI) gfHealthHTML(s *libSt) string {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.noEngineHint")) + `</div>` +
 			btnRow(btn(i18n.T("library.gf.openSettings"), "outline", "gf-settings", "")))
 	} else {
-		b.WriteString(btnRow(btn(i18n.T("library.gf.start"), "primary", "gf-open", "")))
+		buttons := btn(i18n.T("library.gf.start"), "primary", "gf-open", "")
+		if verified > 0 {
+			buttons += btn(i18n.T("library.gf.calibrate"), "outline", "gf-cal", "")
+		}
+		b.WriteString(btnRow(buttons))
+		if bias := u.svc.Cfg.Features.GridFix.BiasExt; len(bias) > 0 {
+			b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.calBias", i18n.A{"vals": gfBiasSummary(bias)})) + `</div>`)
+		} else if verified > 0 {
+			b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.calHint")) + `</div>`)
+		}
 	}
+	return b.String()
+}
+
+// gfBiasSummary formats a bias map for display: ".mp3 +42.7 ms · * −2.9 ms" ("*" last).
+func gfBiasSummary(bias map[string]float64) string {
+	exts := make([]string, 0, len(bias))
+	for ext := range bias {
+		if ext != "*" {
+			exts = append(exts, ext)
+		}
+	}
+	sort.Strings(exts)
+	if _, ok := bias["*"]; ok {
+		exts = append(exts, "*")
+	}
+	parts := make([]string, 0, len(exts))
+	for _, ext := range exts {
+		parts = append(parts, fmt.Sprintf("%s %+.1f ms", ext, bias[ext]*1000))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// gfCalRunningHTML: live calibration progress (reuses prog + gf-cancel).
+func (u *UI) gfCalRunningHTML(g *gfState) string {
+	p := g.prog
+	frac := 0.0
+	if p.Total > 0 {
+		frac = float64(p.Done) / float64(p.Total)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
+		esc(i18n.T("library.gf.calibratingTitle")) + `</div></div>`)
+	b.WriteString(`<div id=gf-live>` + progressBar(frac, fmt.Sprintf("%d / %d", p.Done, p.Total)) +
+		`<div class=gf-current>` + esc(p.Current) + `</div></div>`)
+	b.WriteString(btnRow(btn(i18n.T("library.gf.stop"), "outline", "gf-cancel", "")))
 	return b.String()
 }
 
@@ -388,7 +434,7 @@ func (u *UI) gfStart(scope string) {
 		}}
 	batch := gridfix.NewBatch(eng, cache, gridfix.BatchOptions{
 		MinQuality: f.ResolvedMinQuality(), ThresholdMS: f.ResolvedThresholdMS(),
-		BiasS: f.BiasS, Checkpoint: f.ActiveModel})
+		BiasS: f.BiasS, Bias: gridfix.Calibration(f.BiasExt), Checkpoint: f.ActiveModel})
 	bts := make([]gridfix.BatchTrack, 0, len(tracks))
 	for _, t := range tracks {
 		bt := gridfix.BatchTrack{Path: t.Path, Title: trackTitle(t), OldBPM: t.BPM,
@@ -452,6 +498,139 @@ func (u *UI) gfStart(scope string) {
 		g.mu.Unlock()
 		u.Notify(i18n.T("library.gf.doneNotifyTitle"),
 			i18n.T("library.gf.doneNotifyBody", i18n.A{"fix": fmt.Sprint(p.Fixed), "ok": fmt.Sprint(p.OK), "manual": fmt.Sprint(p.Skipped)}))
+		u.patchMain()
+	})
+}
+
+// gfCalTarget is the default calibration sample size (Python --calibrate 60).
+const gfCalTarget = 60
+
+// gfCalibrate measures the detector's systematic phase bias against verified
+// grids (per file extension, stride-sampled) and stores it in config — the
+// rave-mate mirror of fix_grids --calibrate (which used locked grids).
+func (u *UI) gfCalibrate() {
+	vs := u.gfVerified()
+	if vs == nil {
+		return
+	}
+	byExt := map[string][]gridfix.VerifiedGrid{}
+	for _, v := range vs.All() {
+		if v.BPM > 0 {
+			byExt[strings.ToLower(filepath.Ext(v.Path))] = append(byExt[strings.ToLower(filepath.Ext(v.Path))], v)
+		}
+	}
+	if len(byExt) == 0 {
+		u.toast(i18n.T("library.gf.calFailedToast"))
+		return
+	}
+	quota := gridfix.CalibrationQuota(len(byExt), gfCalTarget)
+	var sample []gridfix.VerifiedGrid
+	exts := make([]string, 0, len(byExt))
+	for ext := range byExt {
+		exts = append(exts, ext)
+	}
+	sort.Strings(exts)
+	for _, ext := range exts {
+		v := byExt[ext]
+		for _, i := range gridfix.StrideIndices(len(v), quota) {
+			sample = append(sample, v[i])
+		}
+	}
+	mgr := u.gridfixEnvMgr()
+	py, dev := u.gridfixEngine()
+	if py == "" {
+		u.toast(i18n.T("library.gf.noEngineHint"))
+		return
+	}
+	cache, err := gridfix.OpenDetectionCache(mgr.DataDir)
+	if err != nil {
+		u.toast(i18n.T("library.gf.cacheErr") + err.Error())
+		return
+	}
+	ffmpeg := ""
+	if p, ok := mediatools.Resolve("ffmpeg"); ok {
+		ffmpeg = p
+	}
+	f := u.svc.Cfg.Features.GridFix
+	eng := &gridfix.Engine{Python: py, DataDir: mgr.DataDir, Device: dev,
+		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg,
+		OnLog: func(line string) {
+			if u.log != nil {
+				u.log.Debug("gridfix", line, nil)
+			}
+		}}
+	ctx, cancel := context.WithCancel(context.Background())
+	g := &u.gf
+	g.mu.Lock()
+	if g.stage != "" { // only from idle
+		g.mu.Unlock()
+		cancel()
+		_ = cache.Close()
+		return
+	}
+	g.stage = "cal"
+	g.prog = gridfix.BatchProgress{Total: len(sample)}
+	g.cancel, g.cache, g.eng = cancel, cache, eng
+	g.mu.Unlock()
+	u.patchMain()
+	u.bg(func() {
+		defer cancel()
+		offsets := map[string][]float64{}
+		var lastPatch time.Time
+		cancelled := false
+		for _, v := range sample {
+			if ctx.Err() != nil {
+				cancelled = true
+				break
+			}
+			det, hit := cache.Get(v.Path)
+			if !hit {
+				d, err := eng.Analyze(ctx, v.Path)
+				if err != nil {
+					if ctx.Err() != nil {
+						cancelled = true
+						break
+					}
+					if u.log != nil {
+						u.log.Warn("gridfix", "calibrate analyze failed", map[string]any{"path": v.Path, "err": err.Error()})
+					}
+					continue
+				}
+				det = d
+				_ = cache.Put(v.Path, det, f.ActiveModel) // cache persist failure is non-fatal
+			}
+			if off, ok := gridfix.CalibrationOffset(det.Beats, det.Downbeats, v.BPM, v.StartMs/1000.0); ok {
+				ext := strings.ToLower(filepath.Ext(v.Path))
+				offsets[ext] = append(offsets[ext], off)
+			}
+			g.mu.Lock()
+			g.prog.Done++
+			g.prog.Current = filepath.Base(v.Path)
+			p := g.prog
+			g.mu.Unlock()
+			if time.Since(lastPatch) > 500*time.Millisecond {
+				lastPatch = time.Now()
+				frac := float64(p.Done) / float64(p.Total)
+				u.eval("window.__patch('gf-live'," + jsQuote(progressBar(frac, fmt.Sprintf("%d / %d", p.Done, p.Total))+
+					`<div class=gf-current>`+esc(p.Current)+`</div>`) + ")")
+			}
+		}
+		eng.Stop()
+		_ = cache.Close()
+		g.mu.Lock()
+		g.stage = ""
+		g.cancel, g.cache, g.eng = nil, nil, nil
+		g.mu.Unlock()
+		if !cancelled {
+			bias, _ := gridfix.SummarizeCalibration(offsets)
+			if len(bias) == 0 {
+				u.toast(i18n.T("library.gf.calFailedToast"))
+			} else {
+				u.svc.Cfg.Features.GridFix.BiasExt = map[string]float64(bias)
+				u.saveCfg()
+				u.toast(i18n.T("library.gf.calDoneToast", i18n.A{"vals": gfBiasSummary(bias)}))
+			}
+		}
 		u.patchMain()
 	})
 }
@@ -680,11 +859,16 @@ func init() {
 	onExact("gf-close", func(u *UI, _ actMsg) {
 		g := &u.gf
 		g.mu.Lock()
+		if g.stage == "running" || g.stage == "cal" { // live runs end via gf-cancel
+			g.mu.Unlock()
+			return
+		}
 		g.stage, g.resView = "", false
 		g.mu.Unlock()
 		u.patchMain()
 	})
 	onPrefix("gf-run:", func(u *UI, m actMsg) { u.gfStart(m.arg("gf-run:")) })
+	onExact("gf-cal", func(u *UI, _ actMsg) { u.gfCalibrate() })
 	onExact("gf-cancel", func(u *UI, _ actMsg) {
 		g := &u.gf
 		g.mu.Lock()
@@ -734,7 +918,7 @@ func init() {
 func (u *UI) gfSetStage(st string) {
 	g := &u.gf
 	g.mu.Lock()
-	if g.stage == "running" { // never clobber a live run
+	if g.stage == "running" || g.stage == "cal" { // never clobber a live run
 		g.mu.Unlock()
 		return
 	}

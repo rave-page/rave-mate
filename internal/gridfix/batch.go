@@ -23,10 +23,11 @@ type analyzer interface {
 
 // BatchOptions tune per-track planning for a run.
 type BatchOptions struct {
-	MinQuality  float64 // min grid coverage to auto-fix (0 = default 0.85)
-	ThresholdMS float64 // ignore corrections smaller than this (0 = default 12)
-	BiasS       float64 // calibrated systematic detector offset (s)
-	Checkpoint  string  // model checkpoint id recorded on cache entries
+	MinQuality  float64     // min grid coverage to auto-fix (0 = default 0.85)
+	ThresholdMS float64     // ignore corrections smaller than this (0 = default 12)
+	BiasS       float64     // manual detector offset (s); Bias wins when non-empty
+	Bias        Calibration // per-extension measured detector bias (nil = use BiasS)
+	Checkpoint  string      // model checkpoint id recorded on cache entries
 }
 
 // Batch is the READ-ONLY run orchestrator: detect → fit → plan per track,
@@ -124,7 +125,11 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 					Detail: "no stable constant grid found - fix manually", OldBPM: t.OldBPM}
 				break
 			}
-			in := PlanInput{OldBPM: t.OldBPM, BiasS: b.opts.BiasS,
+			bias := b.opts.BiasS
+			if len(b.opts.Bias) > 0 {
+				bias = b.opts.Bias.ForPath(t.Path) // calibrated per-ext bias wins
+			}
+			in := PlanInput{OldBPM: t.OldBPM, BiasS: bias,
 				MinQuality: b.opts.MinQuality, ThresholdMS: b.opts.ThresholdMS}
 			if t.OldStartMs != nil {
 				s := *t.OldStartMs / 1000.0

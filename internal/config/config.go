@@ -190,9 +190,13 @@ type GridFixFeature struct {
 	Device      string  `json:"device,omitempty"`      // engine preference: "auto" (default: CUDA if installed+working, else CPU) | "cpu" | "cuda"
 	MinQuality  float64 `json:"minQuality,omitempty"`  // min grid coverage to auto-fix; 0 = default 0.85
 	ThresholdMS float64 `json:"thresholdMs,omitempty"` // ignore marker corrections below this; 0 = default 12
-	BiasS       float64 `json:"biasS,omitempty"`       // calibrated systematic detector offset (s)
-	LockFixed   bool    `json:"lockFixed,omitempty"`   // set the Traktor LOCK flag on fixed entries
-	ActiveModel string  `json:"activeModel,omitempty"` // fine-tuned checkpoint path ("" = builtin final0)
+	BiasS       float64 `json:"biasS,omitempty"`       // manual systematic detector offset (s); overridden by BiasExt when calibrated
+	// BiasExt is the measured detector bias (s) per lowercase file extension incl.
+	// dot, "*" = overall fallback — written by the Collection-tab Calibrate action
+	// (gridfix.SummarizeCalibration). Additive; empty = fall back to BiasS.
+	BiasExt     map[string]float64 `json:"biasExt,omitempty"`
+	LockFixed   bool               `json:"lockFixed,omitempty"`   // set the Traktor LOCK flag on fixed entries
+	ActiveModel string             `json:"activeModel,omitempty"` // fine-tuned checkpoint path ("" = builtin final0)
 }
 
 // ResolvedMinQuality returns the coverage gate (default 0.85).
