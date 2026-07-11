@@ -98,8 +98,89 @@ static GUID CatsBidi[] =
     STATICGUIDOF(KSCATEGORY_CAPTURE),
 };
 
+// -------- filter automation: per-pin factory name ------------------------------
+// Windows MIDI Services (midisrv) names MIDI1 ports from KSPROPERTY_PIN_NAME.
+// portcls has no default answer for descriptors without a Name GUID (the query
+// fails), so WMS fell back to generic endpoint naming. One static handler serves
+// every port: the target miniport resolves its own RAVE_PORT at request time.
+static NTSTATUS RavePinNameHandler(PPCPROPERTY_REQUEST req);
+
+static PCPROPERTY_ITEM RaveFilterPropItems[] =
+{
+    {
+        &KSPROPSETID_Pin,
+        KSPROPERTY_PIN_NAME,
+        PCPROPERTY_ITEM_FLAG_GET | PCPROPERTY_ITEM_FLAG_BASICSUPPORT,
+        RavePinNameHandler
+    },
+};
+DEFINE_PCAUTOMATION_TABLE_PROP(RaveFilterAutomation, RaveFilterPropItems);
+
+#pragma code_seg("PAGE")
+static NTSTATUS RavePinNameHandler(PPCPROPERTY_REQUEST req)
+{
+    PAGED_CODE();
+    if (!req || !req->MajorTarget) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (req->Verb & KSPROPERTY_TYPE_BASICSUPPORT) {
+        if (req->ValueSize < sizeof(ULONG)) {
+            req->ValueSize = sizeof(ULONG);
+            return STATUS_BUFFER_OVERFLOW;
+        }
+        *(PULONG)req->Value = KSPROPERTY_TYPE_BASICSUPPORT | KSPROPERTY_TYPE_GET;
+        req->ValueSize = sizeof(ULONG);
+        return STATUS_SUCCESS;
+    }
+    if (!(req->Verb & KSPROPERTY_TYPE_GET)) {
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+    if (req->InstanceSize < sizeof(ULONG)) {  // KSP_PIN tail: PinId (+ Reserved)
+        return STATUS_INVALID_PARAMETER;
+    }
+    // Filter-scoped request: MajorTarget is the miniport. QI pins the object and
+    // yields our exact PMINIPORTMIDI, so the downcast is safe.
+    PMINIPORTMIDI mm = nullptr;
+    if (!NT_SUCCESS(req->MajorTarget->QueryInterface(IID_IMiniportMidi, (PVOID*)&mm))) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    RaveMiniport* mp = static_cast<RaveMiniport*>(mm);
+    RAVE_PORT* p = mp->Ctx();
+    NTSTATUS st;
+    if (!p) {
+        st = STATUS_DEVICE_NOT_READY;
+    } else {
+        ULONG pinId = *(PULONG)req->Instance;
+        ULONG pinCount = (p->Kind == RaveMidiPortOutOnly || p->Kind == RaveMidiPortInOnly) ? 2u : 4u;
+        if (pinId >= pinCount) {
+            st = STATUS_INVALID_PARAMETER;
+        } else {
+            // Every pin carries the port name; WMS strips the (identical) filter
+            // name from it, so combined names never duplicate.
+            SIZE_T chars = 0;
+            while (p->Name[chars]) {
+                chars++;
+            }
+            ULONG bytes = (ULONG)((chars + 1) * sizeof(WCHAR));
+            if (req->ValueSize == 0) {
+                req->ValueSize = bytes;
+                st = STATUS_BUFFER_OVERFLOW;
+            } else if (req->ValueSize < bytes) {
+                st = STATUS_BUFFER_TOO_SMALL;
+            } else {
+                RtlCopyMemory(req->Value, p->Name, bytes);  // Name immutable post-create
+                req->ValueSize = bytes;
+                st = STATUS_SUCCESS;
+            }
+        }
+    }
+    mm->Release();
+    return st;
+}
+#pragma code_seg()
+
 #define RAVE_FILTER(pins, conns, cats) \
-    { 0, nullptr, sizeof(PCPIN_DESCRIPTOR), RTL_NUMBER_OF(pins), (pins), \
+    { 0, &RaveFilterAutomation, sizeof(PCPIN_DESCRIPTOR), RTL_NUMBER_OF(pins), (pins), \
       sizeof(PCNODE_DESCRIPTOR), 0, nullptr, \
       RTL_NUMBER_OF(conns), (conns), RTL_NUMBER_OF(cats), (cats) }
 

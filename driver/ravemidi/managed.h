@@ -12,3 +12,4 @@ VOID RaveManagedStop();                    // PnP STOP/REMOVE + unload fallback 
 NTSTATUS RaveManagedApply(const RAVEMIDI_CONFIG* cfg);   // cfg pre-sanitized (config.h)
 NTSTATUS RaveManagedQuery(ULONG index, RAVEMIDI_INPUT_STATUS* out);
 VOID RaveManagedKickFeedback();            // DISPATCH-safe: wake worker to drain feedback tees
+VOID RaveManagedGraveOrphan(ULONG portId); // adopt a pinned creator-owned port for later reap
