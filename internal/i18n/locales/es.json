@@ -37,6 +37,11 @@
   "brand": {
     "tagline": "Local worker & bridge for rave.page"
   },
+  "campath": {
+    "empty": "Selecciona una ruta de cámara para previsualizar",
+    "hint": "Arrastra para orbitar · desplaza para hacer zoom · el marcador recorre la ruta a su velocidad real (menta = lento, rosa = rápido).",
+    "play": "Reproducir ruta"
+  },
   "common": {
     "browse": "Examinar…",
     "cancel": "Cancelar",
@@ -145,7 +150,7 @@
       "wheel": "Rueda del ratón"
     },
     "camera-paths": {
-      "body": "La cámara integrada de VRChat graba trayectorias de dolly: secuencias de fotogramas clave (posición, orientación, velocidad, foco) por las que la cámara vuela con suavidad. VRChat las guarda como archivos JSON; rave-mate las encuentra, las agrupa por el mundo en el que se grabaron, y puede respaldarlas, organizarlas y volver a cargarlas.\n\nLa vista previa muestra la trayectoria en 3D: cada punto es un fotograma clave, la pequeña línea violeta es la orientación de la cámara, y el color de la línea codifica la velocidad (menta = lenta, rosa = rápida). El marcador ámbar recorre la trayectoria a su velocidad real grabada.\n\n\"Cargar en VRChat\" envía el archivo por OSC para que aparezca en la cámara del juego al instante: OSC debe estar habilitado en VRChat (menú de acción → Opciones → OSC). El bucle y el tipo de trayectoria no se guardan en el archivo; configúralos una vez en VRChat tras cargarlos.",
+      "body": "La cámara integrada de VRChat graba trayectorias de dolly: secuencias de fotogramas clave (posición, orientación, velocidad, foco) por las que la cámara vuela con suavidad. VRChat las guarda como archivos JSON; rave-mate las encuentra, las agrupa por el mundo en el que se grabaron, y puede respaldarlas, organizarlas y volver a cargarlas.\n\nLa vista previa muestra la trayectoria en 3D: cada punto es un fotograma clave, la pequeña línea violeta es la orientación de la cámara, y el color de la línea codifica la velocidad (menta = lenta, rosa = rápida). El marcador ámbar recorre la trayectoria a su velocidad real grabada.\n\n\"Cargar en VRChat\" envía el archivo por OSC para que aparezca en la cámara del juego al instante: OSC debe estar habilitado en VRChat (menú de acción → Opciones → OSC). El bucle y el tipo de trayectoria no se guardan en el archivo; configúralos una vez en VRChat tras cargarlos.\n\n“Reproducir ruta” previsualiza el recorrido aquí mismo: la cámara del visor recorre la ruta en primera persona con el timing grabado de cada segmento.",
       "title": "Trayectorias de cámara de VRChat"
     },
     "dmx-connect": {
@@ -1334,7 +1339,6 @@
     "avatarLabel": "Avatar",
     "avatarPhysics": "Física del avatar (dinámica de muelles de pelo / cola / accesorios)",
     "camPathDetail": "{name} - {where} · {count} fotogramas clave · {duration}s",
-    "camPathHint": "Arrastra para orbitar · desplaza para hacer zoom · el marcador recorre la ruta a su velocidad real (menta = lento, rosa = rápido).",
     "camPathMeta": "{count} fotogramas clave · {duration}s · {saved}",
     "copyFilePath": "Copiar ruta del archivo",
     "exportAnim": "Exportar .anim",
@@ -1378,7 +1382,6 @@
     "renderVideo": "Renderizar vídeo…",
     "restPose": "Pose de reposo (referencia A/T - la malla ignora la toma, los puntos siguen visibles)",
     "scrub": "Desplazar",
-    "selectCamPathPreview": "Selecciona una ruta de cámara para previsualizar",
     "selectPath": "Selecciona una ruta.",
     "selectRecordingPreview": "Selecciona una grabación para previsualizar",
     "showAvatarModel": "Mostrar modelo de avatar (malla posada - reproducción en vivo, desplazamiento + órbita)",
@@ -2996,7 +2999,6 @@
       },
       "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
       "playerRelative": "Relativo al jugador",
-      "svgHint": "Vista previa isométrica estática - color = velocidad por segmento (menta lento → rosa rápido); puntos rosas = fotogramas clave, ámbar = inicio de ruta.",
       "unknown": "Desconocido",
       "unknownWorld": "Mundo desconocido"
     },

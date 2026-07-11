@@ -37,6 +37,11 @@
   "brand": {
     "tagline": "Local worker & bridge for rave.page"
   },
+  "campath": {
+    "empty": "Select a camera path to preview",
+    "hint": "Drag to orbit · scroll to zoom · the marker flies the path at its real speed (mint = slow, pink = fast).",
+    "play": "Play path"
+  },
   "common": {
     "browse": "Browse…",
     "cancel": "Cancel",
@@ -145,7 +150,7 @@
       "wheel": "Scroll wheel"
     },
     "camera-paths": {
-      "body": "VRChat's in-game camera records dolly paths - keyframe sequences (position, facing, speed, focus) the camera flies through smoothly. VRChat saves them as JSON files; rave-mate finds them, groups them by the world they were recorded in, and can back them up, organize them and re-load them.\n\nThe preview shows the path in 3D: each dot is a keyframe, the small violet line is the camera's facing, and the line colour encodes speed (mint = slow, pink = fast). The amber marker flies the path at its real recorded speed.\n\n\"Load into VRChat\" sends the file over OSC so it appears in the in-game camera immediately - OSC must be enabled in VRChat (Action menu → Options → OSC). Loop and path-type aren't stored in the file; set them once in VRChat after loading.",
+      "body": "VRChat's in-game camera records dolly paths - keyframe sequences (position, facing, speed, focus) the camera flies through smoothly. VRChat saves them as JSON files; rave-mate finds them, groups them by the world they were recorded in, and can back them up, organize them and re-load them.\n\nThe preview shows the path in 3D: each dot is a keyframe, the small violet line is the camera's facing, and the line colour encodes speed (mint = slow, pink = fast). The amber marker flies the path at its real recorded speed.\n\n\"Load into VRChat\" sends the file over OSC so it appears in the in-game camera immediately - OSC must be enabled in VRChat (Action menu → Options → OSC). Loop and path-type aren't stored in the file; set them once in VRChat after loading.\n\n“Play path” previews the flythrough right here: the viewer camera rides the path first-person at its recorded per-segment timing.",
       "title": "VRChat camera paths"
     },
     "dmx-connect": {
@@ -1415,7 +1420,6 @@
     "avatarLabel": "Avatar",
     "avatarPhysics": "Avatar physics (hair / tail / accessory spring dynamics)",
     "camPathDetail": "{name} - {where} · {count} keyframes · {duration}s",
-    "camPathHint": "Drag to orbit · scroll to zoom · the marker flies the path at its real speed (mint = slow, pink = fast).",
     "camPathMeta": "{count} keyframes · {duration}s · {saved}",
     "copyFilePath": "Copy file path",
     "exportAnim": "Export .anim",
@@ -1459,7 +1463,6 @@
     "renderVideo": "Render video…",
     "restPose": "Rest pose (A/T reference - mesh ignores the take, points still shown)",
     "scrub": "Scrub",
-    "selectCamPathPreview": "Select a camera path to preview",
     "selectPath": "Select a path.",
     "selectRecordingPreview": "Select a recording to preview",
     "showAvatarModel": "Show avatar model (posed mesh - live playback, scrub + orbit)",
@@ -3086,7 +3089,6 @@
       },
       "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
       "playerRelative": "Player-relative",
-      "svgHint": "Static isometric preview - colour = per-segment speed (mint slow → pink fast); pink dots = keyframes, amber = path start.",
       "unknown": "Unknown",
       "unknownWorld": "Unknown world"
     },

@@ -2,9 +2,9 @@ package webui
 
 // Motion tab - webview port of the Fyne VR tools the rewrite missed (parity gap,
 // user-reported 2026-07-06): camera-path browser (view_campaths.go) + motion studio
-// (view_motion.go). 3D previews render as Go-built SVG on the shared orbitCam;
-// the camera-path marker flies the path at real per-segment speed via SMIL
-// animateMotion (no JS). Motion playback streams OSC/VMC from a daemon goroutine
+// (view_motion.go). The camera-path preview is the shared campathview.go component
+// (also hosted by the VRChat tab). The skeleton preview renders as Go-built SVG on
+// the shared orbitCam. Motion playback streams OSC/VMC from a daemon goroutine
 // (the real playback path); the preview scrubs exact frames and plays smoothly via
 // SMIL values-list animation (moSkeletonAnim) - the live tick only updates the clock.
 // VRM mesh preview stays with C5 (subprocess render) - stick figure here.
@@ -12,7 +12,6 @@ package webui
 import (
 	"fmt"
 	"html"
-	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/motionrender"
-	"rave.page/mate/internal/vrccampaths"
 	"rave.page/mate/internal/vrmotion"
 )
 
@@ -97,10 +95,16 @@ func (u *UI) moCamPathsHTML() string {
 		btn(i18n.T("motion.organizeNow"), "outline", "mo-cp-organize", ""),
 		btn(i18n.T("motion.installDjPaths"), "outline", "mo-cp-dj", "")))
 
-	detail := `<div id=mo-cp-view data-actpos="mo-cp-orbit" data-actwheel="mo-cp-zoom">` + u.moCamPathSVG() + `</div>` +
-		`<div class=mo-hint>` + html.EscapeString(i18n.T("motion.camPathHint")) + `</div>` +
+	file := ""
+	if sel >= 0 && sel < len(paths) {
+		file = paths[sel].File
+	}
+	u.cpvEnsure("mo", file)
+	detail := u.cpvView("mo") +
+		`<div class=mo-hint>` + html.EscapeString(i18n.T("campath.hint")) + `</div>` +
 		`<div id=mo-cp-info class=mo-info>` + u.moCamPathInfo() + `</div>` +
 		btnRow(
+			u.cpvPlayBtn("mo"),
 			btn(i18n.T("motion.loadIntoVrchat"), "primary", "mo-cp-load", ""),
 			btn(i18n.T("motion.copyFilePath"), "outline", "mo-cp-copy", ""))
 	head := `<div class=card-label>` + html.EscapeString(i18n.T("motion.preview")) + tipTopic("camera-paths") + `</div>`
@@ -124,102 +128,6 @@ func (u *UI) moCamPathInfo() string {
 	return html.EscapeString(i18n.T("motion.camPathDetail", i18n.A{
 		"name": p.Name, "where": where, "count": fmt.Sprint(p.Points), "duration": fmt.Sprintf("%.1f", p.DurationSec),
 	}))
-}
-
-// moCamPathSVG renders the selected path: floor grid, speed-coloured polyline,
-// keyframe dots + facing arrows, SMIL marker flying at real per-segment speed.
-func (u *UI) moCamPathSVG() string {
-	const w, h = 640, 400
-	s := u.mo()
-	s.mu.Lock()
-	pts := s.cpPts
-	cam := s.cpCam
-	s.mu.Unlock()
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`<svg class=mo-svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet">`, w, h))
-	b.WriteString(`<rect width="100%" height="100%" fill="rgba(0,0,0,.25)"/>`)
-	if len(pts) == 0 {
-		b.WriteString(`<text x="20" y="200" class=mo-svgtext>` + html.EscapeString(i18n.T("motion.selectCamPathPreview")) + `</text></svg>`)
-		return b.String()
-	}
-	b.WriteString(cam.gridSVG(w, h))
-	// project nodes; track max speed for the colour ramp + cumulative duration/arc.
-	type nd struct {
-		x, y float32
-		spd  float32
-		dur  float64
-	}
-	nodes := make([]nd, len(pts))
-	maxSpd := float32(0.1)
-	for i, p := range pts {
-		pos := [3]float32{float32(p.Position.X), float32(p.Position.Y), float32(p.Position.Z)}
-		x, y := cam.project(pos, w, h)
-		spd := float32(p.Speed)
-		if spd > maxSpd {
-			maxSpd = spd
-		}
-		dur := p.Duration
-		if dur < 0.05 {
-			dur = 0.05
-		}
-		nodes[i] = nd{x, y, spd, dur}
-		// facing arrow
-		fwd := cpEulerForward(p.Rotation)
-		tip := [3]float32{pos[0] + fwd[0]*0.4, pos[1] + fwd[1]*0.4, pos[2] + fwd[2]*0.4}
-		tx, ty := cam.project(tip, w, h)
-		b.WriteString(svgLine(x, y, tx, ty, "rgba(196,164,255,.8)", 1))
-	}
-	for i := 1; i < len(nodes); i++ {
-		b.WriteString(svgLine(nodes[i-1].x, nodes[i-1].y, nodes[i].x, nodes[i].y, speedHex(nodes[i-1].spd/maxSpd), 2))
-	}
-	for _, n := range nodes {
-		b.WriteString(svgDisc(n.x, n.y, 3, "var(--rp-fg,#e6e8ee)"))
-	}
-	// SMIL marker: keyTimes = normalized cumulative duration, keyPoints = normalized arc length.
-	if len(nodes) > 1 {
-		var path strings.Builder
-		fmt.Fprintf(&path, "M %.1f %.1f", nodes[0].x, nodes[0].y)
-		total, arc := 0.0, float64(0)
-		arcs := make([]float64, len(nodes))
-		for i := 1; i < len(nodes); i++ {
-			fmt.Fprintf(&path, " L %.1f %.1f", nodes[i].x, nodes[i].y)
-			dx, dy := float64(nodes[i].x-nodes[i-1].x), float64(nodes[i].y-nodes[i-1].y)
-			arc += math.Hypot(dx, dy)
-			arcs[i] = arc
-			total += nodes[i-1].dur
-		}
-		if total <= 0 || arc <= 0 {
-			b.WriteString(`</svg>`)
-			return b.String()
-		}
-		var kt, kp strings.Builder
-		acc := 0.0
-		for i := range nodes {
-			if i > 0 {
-				kt.WriteString(";")
-				kp.WriteString(";")
-			}
-			fmt.Fprintf(&kt, "%.4f", acc/total)
-			fmt.Fprintf(&kp, "%.4f", arcs[i]/arc)
-			if i < len(nodes)-1 {
-				acc += nodes[i].dur
-			}
-		}
-		b.WriteString(fmt.Sprintf(`<circle r="6" fill="var(--rp-amber,#FFB547)"><animateMotion dur="%.2fs" repeatCount="indefinite" calcMode="linear" keyTimes="%s" keyPoints="%s" path="%s"/></circle>`,
-			total, kt.String(), kp.String(), path.String()))
-	}
-	b.WriteString(`</svg>`)
-	return b.String()
-}
-
-func cpEulerForward(r vrccampaths.Vec3) [3]float32 {
-	const d2r = math.Pi / 180
-	yaw, pitch := r.Y*d2r, r.X*d2r
-	return [3]float32{
-		float32(math.Sin(yaw) * math.Cos(pitch)),
-		float32(-math.Sin(pitch)),
-		float32(math.Cos(yaw) * math.Cos(pitch)),
-	}
 }
 
 // ── motion studio ────────────────────────────────────────────────────────────
@@ -347,18 +255,24 @@ const moPrevW, moPrevH = 640, 400
 // stream (moRunPreview) stays at moPrevW/H for playback throughput.
 const moStaticW, moStaticH = 1280, 800
 
-func (u *UI) moSkeletonSVG() string {
+func (u *UI) moSkeletonSVG() string { return u.moSkeletonSVGOpt(false) }
+
+// moSkeletonSVGOpt: drag=true renders the cheap mid-drag frame - static skeleton at
+// the current time (no SMIL values-lists: rebuilding them per pointermove cost ~8ms
+// Go + ~450KB innerHTML per event) and, with the model on, a preview-res raster
+// (moPrevW/H, not the 2x static). The full view re-renders once on pointer release.
+func (u *UI) moSkeletonSVGOpt(drag bool) string {
 	const w, h = moPrevW, moPrevH
 	s := u.mo()
 	s.mu.Lock()
 	rec, cam, name := s.rec, s.cam, s.recName
 	player, t0, loop := s.player, s.t, s.loop
-	animate := s.playing && s.player != nil
+	animate := s.playing && s.player != nil && !drag
 	model := s.model
 	modelOn := s.modelOn && model != nil
 	dyn, rt := s.dyn, s.rt
 	restPose, marks := s.restPose, s.marks
-	if !s.physOn || animate {
+	if !s.physOn || animate || s.playing {
 		dyn = nil // while playing moRunPreview is the sole Stepper (no race on State)
 	}
 	s.mu.Unlock()
@@ -384,8 +298,12 @@ func (u *UI) moSkeletonSVG() string {
 		if marks || restPose {
 			markSample = sample
 		}
+		rw, rh := moStaticW, moStaticH
+		if drag {
+			rw, rh = moPrevW, moPrevH // 4x cheaper raster per drag frame
+		}
 		fr := motionrender.Frame{
-			W: moStaticW, H: moStaticH,
+			W: rw, H: rh,
 			Cam: motionrender.Camera{Yaw: cam.yaw, Pitch: cam.pitch, Dist: cam.dist,
 				Center: cam.center, FloorY: cam.floorY, GridR: cam.gridR},
 			Model: model, Sample: frameSample, Trail: trail, Name: name,

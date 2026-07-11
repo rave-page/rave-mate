@@ -46,12 +46,6 @@ func (c *orbitCam) project(p [3]float32, w, h float32) (float32, float32) {
 	return w/2 + f*x1/depth, h/2 - f*y2/depth
 }
 
-// orbitBy applies drag deltas (fractions of the viewport) + clamps pitch.
-func (c *orbitCam) orbitBy(dfx, dfy float32) {
-	c.yaw -= dfx * 6
-	c.pitch = clampf32(c.pitch+dfy*6, -1.45, 1.45)
-}
-
 // zoomBy applies one wheel step (in = closer).
 func (c *orbitCam) zoomBy(in bool, lo, hi float32) {
 	f := float32(1.12)
@@ -63,16 +57,22 @@ func (c *orbitCam) zoomBy(in bool, lo, hi float32) {
 
 // gridSVG draws the X-Z floor grid at floorY (spatial reference).
 func (c *orbitCam) gridSVG(w, h float32) string {
+	return gridLinesSVG(func(p [3]float32) (float32, float32) { return c.project(p, w, h) },
+		c.center, c.floorY, c.gridR)
+}
+
+// gridLinesSVG draws the X-Z floor grid through any projection (orbit or flight cam).
+func gridLinesSVG(proj func([3]float32) (float32, float32), center [3]float32, floorY, gridR float32) string {
 	var b strings.Builder
 	const n = 6
-	step := (2 * c.gridR) / n
+	step := (2 * gridR) / n
 	for i := 0; i <= n; i++ {
-		d := -c.gridR + step*float32(i)
-		x1, y1 := c.project([3]float32{c.center[0] - c.gridR, c.floorY, c.center[2] + d}, w, h)
-		x2, y2 := c.project([3]float32{c.center[0] + c.gridR, c.floorY, c.center[2] + d}, w, h)
+		d := -gridR + step*float32(i)
+		x1, y1 := proj([3]float32{center[0] - gridR, floorY, center[2] + d})
+		x2, y2 := proj([3]float32{center[0] + gridR, floorY, center[2] + d})
 		b.WriteString(svgLine(x1, y1, x2, y2, "var(--rp-faint,#3c414d)", 1))
-		x3, y3 := c.project([3]float32{c.center[0] + d, c.floorY, c.center[2] - c.gridR}, w, h)
-		x4, y4 := c.project([3]float32{c.center[0] + d, c.floorY, c.center[2] + c.gridR}, w, h)
+		x3, y3 := proj([3]float32{center[0] + d, floorY, center[2] - gridR})
+		x4, y4 := proj([3]float32{center[0] + d, floorY, center[2] + gridR})
 		b.WriteString(svgLine(x3, y3, x4, y4, "var(--rp-faint,#3c414d)", 1))
 	}
 	return b.String()

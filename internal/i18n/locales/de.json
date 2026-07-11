@@ -37,6 +37,11 @@
   "brand": {
     "tagline": "Local worker & bridge for rave.page"
   },
+  "campath": {
+    "empty": "Wähle einen Kamerapfad für die Vorschau",
+    "hint": "Ziehen zum Orbit · Scrollen zum Zoomen · der Marker fliegt den Pfad in Echtgeschwindigkeit ab (Mint = langsam, Pink = schnell).",
+    "play": "Pfad abspielen"
+  },
   "common": {
     "browse": "Durchsuchen…",
     "cancel": "Abbrechen",
@@ -145,7 +150,7 @@
       "wheel": "Mausrad"
     },
     "camera-paths": {
-      "body": "Die In-Game-Kamera von VRChat nimmt Dolly-Pfade auf - Keyframe-Sequenzen (Position, Blickrichtung, Geschwindigkeit, Fokus), durch die die Kamera flüssig gleitet. VRChat speichert sie als JSON-Dateien; rave-mate findet sie, gruppiert sie nach der Welt, in der sie aufgenommen wurden, und kann sie sichern, organisieren und wieder laden.\n\nDie Vorschau zeigt den Pfad in 3D: jeder Punkt ist ein Keyframe, die kleine violette Linie ist die Blickrichtung der Kamera, und die Linienfarbe kodiert die Geschwindigkeit (Mint = langsam, Pink = schnell). Der bernsteinfarbene Marker fliegt den Pfad mit seiner echten aufgenommenen Geschwindigkeit ab.\n\n„In VRChat laden“ sendet die Datei über OSC, sodass sie sofort in der In-Game-Kamera erscheint - OSC muss in VRChat aktiviert sein (Action-Menü → Options → OSC). Loop und Pfadtyp werden nicht in der Datei gespeichert; stelle sie nach dem Laden einmalig in VRChat ein.",
+      "body": "Die In-Game-Kamera von VRChat nimmt Dolly-Pfade auf - Keyframe-Sequenzen (Position, Blickrichtung, Geschwindigkeit, Fokus), durch die die Kamera flüssig gleitet. VRChat speichert sie als JSON-Dateien; rave-mate findet sie, gruppiert sie nach der Welt, in der sie aufgenommen wurden, und kann sie sichern, organisieren und wieder laden.\n\nDie Vorschau zeigt den Pfad in 3D: jeder Punkt ist ein Keyframe, die kleine violette Linie ist die Blickrichtung der Kamera, und die Linienfarbe kodiert die Geschwindigkeit (Mint = langsam, Pink = schnell). Der bernsteinfarbene Marker fliegt den Pfad mit seiner echten aufgenommenen Geschwindigkeit ab.\n\n„In VRChat laden“ sendet die Datei über OSC, sodass sie sofort in der In-Game-Kamera erscheint - OSC muss in VRChat aktiviert sein (Action-Menü → Options → OSC). Loop und Pfadtyp werden nicht in der Datei gespeichert; stelle sie nach dem Laden einmalig in VRChat ein.\n\n„Pfad abspielen“ zeigt den Durchflug direkt hier: die Vorschaukamera fliegt den Pfad in Ego-Perspektive mit dem aufgezeichneten Timing pro Segment ab.",
       "title": "VRChat-Kamerapfade"
     },
     "dmx-connect": {
@@ -1334,7 +1339,6 @@
     "avatarLabel": "Avatar",
     "avatarPhysics": "Avatar-Physik (Haar- / Schweif- / Accessoire-Federdynamik)",
     "camPathDetail": "{name} - {where} · {count} Keyframes · {duration}s",
-    "camPathHint": "Ziehen zum Orbit · Scrollen zum Zoomen · der Marker fliegt den Pfad in Echtgeschwindigkeit ab (Mint = langsam, Pink = schnell).",
     "camPathMeta": "{count} Keyframes · {duration}s · {saved}",
     "copyFilePath": "Dateipfad kopieren",
     "exportAnim": ".anim exportieren",
@@ -1378,7 +1382,6 @@
     "renderVideo": "Video rendern…",
     "restPose": "Ruhepose (A/T-Referenz - Mesh ignoriert den Take, Punkte werden weiterhin angezeigt)",
     "scrub": "Scrubben",
-    "selectCamPathPreview": "Wähle einen Kamerapfad für die Vorschau",
     "selectPath": "Wähle einen Pfad.",
     "selectRecordingPreview": "Wähle eine Aufnahme für die Vorschau",
     "showAvatarModel": "Avatar-Modell anzeigen (posiertes Mesh - Live-Wiedergabe, Scrub + Orbit)",
@@ -2996,7 +2999,6 @@
       },
       "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
       "playerRelative": "Spielerrelativ",
-      "svgHint": "Statische isometrische Vorschau - Farbe = Geschwindigkeit pro Segment (Mint langsam → Pink schnell); pinke Punkte = Keyframes, Bernstein = Pfadstart.",
       "unknown": "Unbekannt",
       "unknownWorld": "Unbekannte Welt"
     },

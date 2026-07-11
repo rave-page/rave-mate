@@ -1,0 +1,6 @@
+/* Shared camera-path 3D viewer (campathview.go) - hosted by the Motion + VRChat tabs. */
+
+.cpv-view { touch-action:none; cursor:grab; user-select:none; max-width:520px; }
+.cpv-view:active { cursor:grabbing; }
+.cpv-svg { display:block; width:100%; height:auto; border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); }
+.cpv-svgtext { fill:var(--rp-muted); font:12px var(--font-mono,monospace); }
