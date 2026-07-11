@@ -2707,6 +2707,15 @@
     },
     "hint": {
       "appRestart": "Wird beim nächsten App-Start wirksam"
+    },
+    "gate": {
+      "fpcalc": "Benötigt fpcalc (Chromaprint) — unten installieren, dann aktivieren.",
+      "ffmpeg": "Benötigt FFmpeg — unten installieren (oder Pfad setzen), dann aktivieren.",
+      "whisper": "Benötigt die Whisper-Engine — unten installieren, dann aktivieren.",
+      "vrBuild": "Dieser Build enthält kein OpenVR — installiere den VR-Build von rave-mate, um Overlays zu aktivieren.",
+      "vrRuntime": "Benötigt die OpenVR-Runtime-DLL — unten installieren, dann aktivieren.",
+      "gridfix": "Benötigt eine Beat-Engine — unten CPU- oder CUDA-Engine installieren, dann aktivieren.",
+      "mpv": "Benötigt mpv — oben installieren, um den eingebetteten Player zu aktivieren."
     }
   },
   "tab": {

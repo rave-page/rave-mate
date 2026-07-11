@@ -331,13 +331,21 @@ func (u *UI) settingsCard(id string, st stv) string {
 	if topic := settingsCardTips[id]; topic != "" {
 		head += tipTopic(topic)
 	}
+	gateHTML := ""
 	if t, ok := m[id]; ok {
-		checked := ""
-		if t.get() {
-			checked = " checked"
+		if gate := u.cardGate(id); gate != "" && !t.get() {
+			// dependency missing: grey the enable switch + name what to install
+			// (an already-on feature is never gated - it must stay turn-off-able)
+			head += `<label class=switch title="` + html.EscapeString(gate) + `"><input type=checkbox disabled><span class=switch-track></span></label>`
+			gateHTML = `<div class=set-gate>` + hint("warn", gate) + `</div>`
+		} else {
+			checked := ""
+			if t.get() {
+				checked = " checked"
+			}
+			head += `<label class=switch title="` + html.EscapeString(t.label) + `"><input type=checkbox` + checked +
+				` data-act="toggle:` + id + `" data-value="` + boolStr(t.get()) + `"><span class=switch-track></span></label>`
 		}
-		head += `<label class=switch title="` + html.EscapeString(t.label) + `"><input type=checkbox` + checked +
-			` data-act="toggle:` + id + `" data-value="` + boolStr(t.get()) + `"><span class=switch-track></span></label>`
 	}
 	descHTML := ""
 	if desc != "" {
@@ -345,7 +353,48 @@ func (u *UI) settingsCard(id string, st stv) string {
 	}
 	return `<div class="rp-card"><div class=set-cardhead>` + head + `</div>` +
 		`<div class=set-st id=stset-` + id + `>` + renderStatus(st) + `</div>` +
-		descHTML + body + `</div>`
+		gateHTML + descHTML + body + `</div>`
+}
+
+// cardGate names the missing component that blocks ENABLING card id ("" = not gated).
+// Reads cached probes only (never the filesystem beyond the cheap stt/vr checks the
+// status map already makes) - gated controls render greyed with this hint, never hidden.
+func (u *UI) cardGate(id string) string {
+	switch id {
+	case "fingerprint":
+		if u.probesReady() && !u.toolStatusCached("fpcalc").Installed {
+			return i18n.T("settings.gate.fpcalc")
+		}
+	case "transcode":
+		if u.probesReady() && !u.toolStatusCached("ffmpeg").Installed &&
+			strings.TrimSpace(u.svc.Cfg.Features.Transcode.FfmpegPath) == "" {
+			return i18n.T("settings.gate.ffmpeg")
+		}
+	case "stt":
+		if !stt.BinInstalled() {
+			return i18n.T("settings.gate.whisper")
+		}
+	case "vroverlay":
+		if !vroverlay.BuiltWithVR() {
+			return i18n.T("settings.gate.vrBuild")
+		}
+		if u.probesReady() && !u.vrStatusCached().Installed {
+			return i18n.T("settings.gate.vrRuntime")
+		}
+	case "gridfix":
+		if st, ok := u.gridfixStatusCached(); ok && !st.CPU.EngineOK && !st.CUDA.EngineOK {
+			return i18n.T("settings.gate.gridfix")
+		}
+	}
+	return ""
+}
+
+// probesReady reports whether the first background probe refresh has landed (gates
+// only render from real probe data - never flash on the placeholder zero state).
+func (u *UI) probesReady() bool {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	return u.probes.ready
 }
 
 // ── account / api ──
@@ -506,10 +555,14 @@ func (u *UI) cardContent(id string) (string, string, string) {
 
 	// ── Library & media ──
 	case "library":
+		embedRow := toggleRow(i18n.T("settings.body.library.embed"), "set:player-embed", f.Player.Embed)
+		if u.probesReady() && !u.toolStatusCached("mpv").Installed {
+			embedRow = toggleRowGated(i18n.T("settings.body.library.embed"), f.Player.Embed, i18n.T("settings.gate.mpv"))
+		}
 		return i18n.T("settings.card.library.title"), i18n.T("settings.card.library.desc"),
 			`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.library.mpvNote")) + `</div>` +
 				u.toolInstallHTML(mediatools.MPV, "mpv") +
-				toggleRow(i18n.T("settings.body.library.embed"), "set:player-embed", f.Player.Embed)
+				embedRow
 	case "mediaeditor":
 		return i18n.T("settings.card.mediaeditor.title"), i18n.T("settings.card.mediaeditor.desc"), ""
 	case "transcode":

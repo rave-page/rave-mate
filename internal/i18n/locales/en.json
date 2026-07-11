@@ -2796,6 +2796,15 @@
     },
     "hint": {
       "appRestart": "Takes effect on next app start"
+    },
+    "gate": {
+      "fpcalc": "Requires fpcalc (Chromaprint) — install it below, then enable.",
+      "ffmpeg": "Requires FFmpeg — install it below (or set a path), then enable.",
+      "whisper": "Requires the Whisper engine — install it below, then enable.",
+      "vrBuild": "This build ships without OpenVR — install the VR build of rave-mate to enable overlays.",
+      "vrRuntime": "Requires the OpenVR runtime DLL — install it below, then enable.",
+      "gridfix": "Requires a beat engine — install the CPU or CUDA engine below, then enable.",
+      "mpv": "Requires mpv — install it above to enable the embedded player."
     }
   },
   "tab": {

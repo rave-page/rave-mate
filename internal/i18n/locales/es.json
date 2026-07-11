@@ -2707,6 +2707,15 @@
     },
     "hint": {
       "appRestart": "Surte efecto en el próximo inicio de la app"
+    },
+    "gate": {
+      "fpcalc": "Requiere fpcalc (Chromaprint): instálalo abajo y luego activa.",
+      "ffmpeg": "Requiere FFmpeg: instálalo abajo (o define una ruta) y luego activa.",
+      "whisper": "Requiere el motor Whisper: instálalo abajo y luego activa.",
+      "vrBuild": "Este build no incluye OpenVR: instala el build VR de rave-mate para activar los overlays.",
+      "vrRuntime": "Requiere la DLL del runtime OpenVR: instálala abajo y luego activa.",
+      "gridfix": "Requiere un motor de beats: instala el motor CPU o CUDA abajo y luego activa.",
+      "mpv": "Requiere mpv: instálalo arriba para activar el reproductor integrado."
     }
   },
   "tab": {
