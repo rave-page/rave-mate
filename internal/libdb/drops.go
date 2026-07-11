@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS track_drops (
   updated_at TEXT NOT NULL
 );`
 
-// SetDrops stores a track's drop markers (ms, sorted by caller; empty = delete) and
-// journals the mutation.
+// SetDrops stores a track's drop markers (ms, sorted by caller) and journals the mutation.
+// Clearing keeps a `[]` tombstone row (never deletes): library sync sends drops_ms for
+// exactly the rows in track_drops, so the tombstone propagates the clear to the server;
+// clearing a track that never had a row is a no-op (no tombstone, no journal).
 func (d *DB) SetDrops(path, artist, title string, durationSec float64, drops []float64) error {
 	if d == nil || d.db == nil {
 		return nil
@@ -28,7 +30,14 @@ func (d *DB) SetDrops(path, artist, title string, durationSec float64, drops []f
 	old, _ := d.Drops(path)
 	var err error
 	if len(drops) == 0 {
-		_, err = d.db.Exec(`DELETE FROM track_drops WHERE path=?`, path)
+		res, uerr := d.db.Exec(`UPDATE track_drops SET drops='[]', updated_at=? WHERE path=?`,
+			time.Now().UTC().Format(time.RFC3339), path)
+		if uerr != nil {
+			return uerr
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil
+		}
 	} else {
 		raw, jerr := json.Marshal(drops)
 		if jerr != nil {
@@ -49,7 +58,8 @@ func (d *DB) SetDrops(path, artist, title string, durationSec float64, drops []f
 	}})
 }
 
-// Drops returns a track's drop markers (nil when none).
+// Drops returns a track's drop markers (nil when no row; empty non-nil for a cleared
+// tombstone - callers gate on len).
 func (d *DB) Drops(path string) ([]float64, error) {
 	if d == nil || d.db == nil {
 		return nil, nil
@@ -69,7 +79,34 @@ func (d *DB) Drops(path string) ([]float64, error) {
 	return out, nil
 }
 
-// AllDrops returns every path that has drop markers (for the collection filter).
+// DropRows returns every track_drops row keyed by path, INCLUDING cleared `[]` tombstones.
+// Library sync's send rule: drops_ms goes on the wire for exactly these rows (empty array
+// = explicit server-side clear); tracks without a row omit the field.
+func (d *DB) DropRows() (map[string][]float64, error) {
+	if d == nil || d.db == nil {
+		return nil, nil
+	}
+	rows, err := d.db.Query(`SELECT path, drops FROM track_drops`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]float64{}
+	for rows.Next() {
+		var p, raw string
+		if err := rows.Scan(&p, &raw); err != nil {
+			return nil, err
+		}
+		var ds []float64
+		if json.Unmarshal([]byte(raw), &ds) == nil {
+			out[p] = ds
+		}
+	}
+	return out, rows.Err()
+}
+
+// AllDrops returns every path with ≥1 drop marker (for the collection filter; tombstones
+// excluded - use DropRows for sync).
 func (d *DB) AllDrops() (map[string][]float64, error) {
 	if d == nil || d.db == nil {
 		return nil, nil

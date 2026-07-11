@@ -39,12 +39,30 @@ func TestDropsCRUD(t *testing.T) {
 	if err != nil || len(evs) == 0 || evs[0].Field != "drops" {
 		t.Fatalf("journal: %v %v", evs, err)
 	}
-	// delete
+	// clear → `[]` tombstone row stays (library sync propagates the clear)
 	if err := d.SetDrops(p, "art", "tit", 300, nil); err != nil {
 		t.Fatal(err)
 	}
-	if ds, _ := d.Drops(p); ds != nil {
+	if ds, _ := d.Drops(p); len(ds) != 0 {
 		t.Fatalf("still present: %v", ds)
+	}
+	if all, _ := d.AllDrops(); len(all) != 0 {
+		t.Fatalf("tombstone leaked into AllDrops: %v", all)
+	}
+	rows, err := d.DropRows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ds, ok := rows[p]; !ok || len(ds) != 0 {
+		t.Fatalf("tombstone missing from DropRows: %v", rows)
+	}
+	// clearing a never-marked track is a no-op: no tombstone
+	if err := d.SetDrops(`C:\m\never.flac`, "a", "t", 100, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = d.DropRows()
+	if _, ok := rows[`C:\m\never.flac`]; ok {
+		t.Fatalf("no-op clear created a tombstone: %v", rows)
 	}
 }
 
