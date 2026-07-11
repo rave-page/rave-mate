@@ -935,8 +935,9 @@ func ceBarBeat(g *cuepattern.Grid, ms float64) string {
 
 // ceDetailHTML is the detail rail while the editor is active: controls only - the
 // waveform renders full-tab-width above the list (ceWaveHTML via libBody).
-func (u *UI) ceDetailHTML() string {
-	return u.ceRailHTML()
+// s = the library state, LOCKED by the caller (libDetailHTML render path).
+func (u *UI) ceDetailHTML(s *libSt) string {
+	return u.ceRailHTML(s)
 }
 
 // ceWaveHTML is the full-width player strip: info topbar + waveform (beatgrid +
@@ -1004,9 +1005,10 @@ func ceCueCount(cues []musiclib.CuePoint) int {
 	return n
 }
 
-// ceRailHTML is the cue-editor card in the library detail rail.
-func (u *UI) ceRailHTML() string {
-	wb := u.ceWriteHTML() // built first - takes its own locks (never nested under c.mu)
+// ceRailHTML is the cue-editor card in the library detail rail. s is LOCKED by the
+// caller - never re-lock it below (deadlock).
+func (u *UI) ceRailHTML(s *libSt) string {
+	wb := u.ceWriteHTML(s) // built first - locks ceSt itself (never nested under c.mu)
 	c := u.ce()
 	c.mu.Lock()
 	defer c.mu.Unlock()

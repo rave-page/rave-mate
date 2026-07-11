@@ -1303,7 +1303,7 @@ func (u *UI) libPresetsHTML(s *libSt) string {
 
 func (u *UI) libDetailHTML(s *libSt) string {
 	if u.ceActiveFor("library") {
-		return u.ceDetailHTML()
+		return u.ceDetailHTML(s)
 	}
 	sel := s.sel
 	if sel == nil {

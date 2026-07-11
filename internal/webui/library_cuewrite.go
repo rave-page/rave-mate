@@ -18,19 +18,9 @@ import (
 	"rave.page/mate/internal/sysactivity"
 )
 
-// ceWriteJobs builds the CueUpdate set the router would write (checked rows, else the
-// open track; tracks without musical cues are dropped).
-func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
-	c := u.ce()
-	c.mu.Lock()
-	path, active := c.path, c.active
-	c.mu.Unlock()
-	if !active {
-		return nil
-	}
-	s := u.lib()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// ceWriteJobsLocked builds the CueUpdate set the router would write (checked rows, else
+// openPath; tracks without musical cues are dropped). Caller holds s.mu.
+func ceWriteJobsLocked(s *libSt, openPath string) []musiclib.CueUpdate {
 	var paths []string
 	if len(s.collSel) > 0 {
 		for p := range s.collSel {
@@ -38,7 +28,7 @@ func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
 		}
 		sort.Strings(paths)
 	} else {
-		paths = []string{path}
+		paths = []string{openPath}
 	}
 	var out []musiclib.CueUpdate
 	for _, p := range paths {
@@ -51,12 +41,27 @@ func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
 	return out
 }
 
-// ceWriteHTML renders the write-back section of the cue-editor rail. Takes its own locks -
-// call it BEFORE locking ceSt (ceRailHTML does).
-func (u *UI) ceWriteHTML() string {
+// ceWriteJobs is the self-locking variant for action handlers (no locks held).
+func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
 	c := u.ce()
 	c.mu.Lock()
-	active, busy, errStr := c.active, c.wbBusy, c.wbErr
+	path, active := c.path, c.active
+	c.mu.Unlock()
+	if !active {
+		return nil
+	}
+	s := u.lib()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return ceWriteJobsLocked(s, path)
+}
+
+// ceWriteHTML renders the write-back section of the cue-editor rail. s is LOCKED by the
+// caller (render path); ceSt is locked briefly here - call BEFORE locking it (ceRailHTML).
+func (u *UI) ceWriteHTML(s *libSt) string {
+	c := u.ce()
+	c.mu.Lock()
+	active, busy, errStr, openPath := c.active, c.wbBusy, c.wbErr, c.path
 	applied := make(map[string]int, len(c.wbApplied))
 	for k, v := range c.wbApplied {
 		applied[k] = v
@@ -67,7 +72,7 @@ func (u *UI) ceWriteHTML() string {
 	}
 	var b strings.Builder
 	b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.writeHeader")) + `</div>`)
-	updates := u.ceWriteJobs()
+	updates := ceWriteJobsLocked(s, openPath)
 	if len(updates) == 0 {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.writeNone")) + `</div>`)
 		return b.String()
