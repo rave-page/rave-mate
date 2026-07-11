@@ -189,14 +189,16 @@ func (s *TrackSync) Commit() (SyncResult, error) {
 // Rollback aborts the sync (e.g. on a parse error mid-stream).
 func (s *TrackSync) Rollback() { _ = s.tx.Rollback() }
 
-// LoadAllTracks returns every track across all sources incl. cues/beatgrid -
-// the library metadata uploader's working set.
+// LoadAllTracks returns every real track across all sources incl. cues/beatgrid -
+// the library metadata uploader's working set. Divider marker rows are excluded HERE so
+// every caller (collection view, cloud sync, media sync, cleanup) inherits the exclusion.
 func (d *DB) LoadAllTracks() ([]musiclib.Track, error) {
 	rows, err := d.db.Query(`
 		SELECT path, title, artist, album, genre, label, comment, key, bpm, duration_sec,
 			play_count, rating, COALESCE(import_date,''), release_date, last_played,
 			COALESCE(cues,''), COALESCE(beatgrid,'')
-		FROM tracks ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE`)
+		FROM tracks WHERE is_divider=0
+		ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -229,14 +231,16 @@ type SourcedTrack struct {
 	Track musiclib.Track
 }
 
-// AllSourcedTracks returns every stored track across all sources, each tagged with its source
-// app. The sync engine groups these by portable hash and merges them into one canonical track.
+// AllSourcedTracks returns every real stored track across all sources, each tagged with its
+// source app. The sync engine groups these by portable hash and merges them into one canonical
+// track. Divider rows are excluded - they must never be merge/match/enrichment candidates.
 func (d *DB) AllSourcedTracks() ([]SourcedTrack, error) {
 	rows, err := d.db.Query(`
 		SELECT s.app, t.path, t.title, t.artist, t.album, t.genre, t.label, t.comment, t.key,
 			t.bpm, t.duration_sec, t.bitrate_bps, t.file_size_kb, t.play_count, t.rating,
 			t.import_date, t.release_date, t.last_played, COALESCE(t.cues,''), COALESCE(t.beatgrid,'')
 		FROM tracks t JOIN sources s ON s.id = t.source_id
+		WHERE t.is_divider=0
 		ORDER BY t.artist COLLATE NOCASE, t.title COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -299,25 +303,52 @@ func (d *DB) LoadTracks(sourceID int64) ([]musiclib.Track, error) {
 	return out, rows.Err()
 }
 
-// UpsertTrack inserts/updates one track under sourceID outside a sync (synthetic rows
-// like set-builder dividers; no change_log - these aren't user library mutations).
-func (d *DB) UpsertTrack(sourceID int64, t musiclib.Track) error {
+// UpsertDividerTrack inserts/updates one set-builder divider row under sourceID
+// (is_divider=1, no change_log). Dividers exist for playlist display/export only:
+// LoadAllTracks/AllSourcedTracks and every outbound sync exclude them.
+func (d *DB) UpsertDividerTrack(sourceID int64, t musiclib.Track) error {
 	if t.Path == "" {
 		return nil
 	}
-	cues, _ := json.Marshal(t.Cues)
-	grid, _ := json.Marshal(t.Beatgrid)
 	_, err := d.db.Exec(`
-		INSERT INTO tracks (source_id, path, title, artist, album, genre, label, comment,
-			key, bpm, duration_sec, bitrate_bps, file_size_kb, play_count, rating,
-			import_date, release_date, last_played, cues, beatgrid, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO tracks (source_id, path, title, artist, duration_sec, is_divider, updated_at)
+		VALUES (?,?,?,?,?,1,?)
 		ON CONFLICT(source_id, path) DO UPDATE SET
 			title=excluded.title, artist=excluded.artist, duration_sec=excluded.duration_sec,
-			updated_at=excluded.updated_at`,
-		sourceID, t.Path, t.Title, t.Artist, t.Album, t.Genre, t.Label, t.Comment,
-		t.Key, t.BPM, t.DurationSec, t.BitrateBps, t.FileSizeKB, t.PlayCount, t.Rating,
-		t.ImportDate, t.ReleaseDate, t.LastPlayed, string(cues), string(grid),
+			is_divider=1, updated_at=excluded.updated_at`,
+		sourceID, t.Path, t.Title, t.Artist, t.DurationSec,
 		time.Now().UTC().Format(time.RFC3339))
 	return err
+}
+
+// DividerTracks returns the divider marker rows (playlist views resolve their display
+// titles from these; they never enter the collection working set).
+func (d *DB) DividerTracks() ([]musiclib.Track, error) {
+	rows, err := d.db.Query(`SELECT path, COALESCE(title,''), COALESCE(duration_sec,0) FROM tracks WHERE is_divider=1`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []musiclib.Track
+	for rows.Next() {
+		var t musiclib.Track
+		if err := rows.Scan(&t.Path, &t.Title, &t.DurationSec); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// DividerPaths returns the divider paths as a set (outbound playlist sync filters on it).
+func (d *DB) DividerPaths() (map[string]bool, error) {
+	ts, err := d.DividerTracks()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(ts))
+	for _, t := range ts {
+		out[t.Path] = true
+	}
+	return out, nil
 }

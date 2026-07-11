@@ -188,6 +188,12 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE track_art ADD COLUMN artist TEXT`,       // name-based cover resolution
 		`ALTER TABLE track_art ADD COLUMN title TEXT`,
 		`ALTER TABLE playlists ADD COLUMN auto_refresh INTEGER NOT NULL DEFAULT 0`, // folder-bound: pick up new files automatically
+		// set-builder divider marker rows: excluded from collection/sync/enrichment at query
+		// level (LoadAllTracks/AllSourcedTracks); they exist only inside playlists
+		`ALTER TABLE tracks ADD COLUMN is_divider INTEGER NOT NULL DEFAULT 0`,
+		// backfill dividers created by pre-flag dev builds (name+title double-match = safe)
+		`UPDATE tracks SET is_divider=1 WHERE is_divider=0 AND path LIKE '%divider-%'
+		   AND title IN ('............','---------------','________________')`,
 		// Index AFTER the columns exist (an existing track_art predates them; an in-schema index
 		// would fail to open the DB → whole library store disabled).
 		`CREATE INDEX IF NOT EXISTS idx_track_art_meta ON track_art(artist, title)`,

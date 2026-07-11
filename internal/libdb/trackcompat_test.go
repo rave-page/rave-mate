@@ -1,8 +1,11 @@
 package libdb
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
+
+	"rave.page/mate/internal/musiclib"
 )
 
 func openTestCompatDB(t *testing.T) *DB {
@@ -106,5 +109,80 @@ func TestRemoveCompat(t *testing.T) {
 	}
 	if rows, _ := d.CompatFor("a.mp3"); len(rows) != 0 {
 		t.Fatalf("after full delete: %+v", rows)
+	}
+}
+
+func TestCompatForManyChunked(t *testing.T) {
+	d := openTestCompatDB(t)
+	_, _ = d.AddCompatPairs("blend", []string{"a.mp3", "z9999.mp3"}) // ends land in different chunks
+	paths := make([]string, 0, 900)
+	paths = append(paths, "a.mp3")
+	for i := 0; i < 898; i++ { // unique fillers force multiple chunks
+		paths = append(paths, fmt.Sprintf("x%04d.mp3", i))
+	}
+	paths = append(paths, "z9999.mp3", "a.mp3") // dup input must not double-record
+	m, err := d.CompatForMany(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m["a.mp3"]) != 1 || m["a.mp3"][0].Path != "z9999.mp3" {
+		t.Fatalf("a: %+v", m["a.mp3"])
+	}
+	if len(m["z9999.mp3"]) != 1 || m["z9999.mp3"][0].Path != "a.mp3" {
+		t.Fatalf("z: %+v", m["z9999.mp3"])
+	}
+}
+
+func TestDividerExclusion(t *testing.T) {
+	d := openTestCompatDB(t)
+	src, err := d.EnsureSource("rave-mate", "C:/data/dividers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, err := d.EnsureSource("traktor", "C:/traktor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sy, err := d.BeginTrackSync(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sy.Add(musiclib.Track{Path: "C:/music/a.mp3", Title: "Real Track"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sy.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	div := musiclib.Track{Path: "C:/data/dividers/divider-dots-1.mp3", Title: "............", DurationSec: 2}
+	if err := d.UpsertDividerTrack(src, div); err != nil {
+		t.Fatal(err)
+	}
+	// collection working set excludes the divider (collection view, cloud/media sync, cleanup)
+	all, err := d.LoadAllTracks()
+	if err != nil || len(all) != 1 || all[0].Title != "Real Track" {
+		t.Fatalf("LoadAllTracks: %+v %v", all, err)
+	}
+	// cross-software merge candidates exclude it too
+	sourced, err := d.AllSourcedTracks()
+	if err != nil || len(sourced) != 1 || sourced[0].Track.Title != "Real Track" {
+		t.Fatalf("AllSourcedTracks: %+v %v", sourced, err)
+	}
+	// but it stays resolvable for playlist display + outbound filters
+	divs, err := d.DividerTracks()
+	if err != nil || len(divs) != 1 || divs[0].Title != "............" {
+		t.Fatalf("DividerTracks: %+v %v", divs, err)
+	}
+	dp, _ := d.DividerPaths()
+	if !dp[div.Path] {
+		t.Fatalf("DividerPaths: %+v", dp)
+	}
+	// and lives inside a playlist like any entry
+	pid, _ := d.CreatePlaylist("sorted", PlaylistManual, "")
+	if _, err := d.AddToPlaylist(pid, "C:/music/a.mp3", div.Path); err != nil {
+		t.Fatal(err)
+	}
+	paths, _ := d.PlaylistTracks(pid)
+	if len(paths) != 2 || paths[1] != div.Path {
+		t.Fatalf("playlist: %v", paths)
 	}
 }

@@ -132,12 +132,13 @@ func playlistHash(title string, items []PlaylistItemRef) string {
 
 // plResolver maps between local paths and backend identities (built once per operation).
 type plResolver struct {
-	byPath  map[string]plTrack // local path → track meta
-	byHash  map[string]string  // TrackHash → path
-	byCanon map[string]string  // canonical trk_… → path
-	byLib   map[string]string  // library lib_… → path
-	links   map[string]string  // TrackHash → canonical trk_…
-	libIDs  map[string]string  // TrackHash → library lib_…
+	byPath   map[string]plTrack // local path → track meta
+	byHash   map[string]string  // TrackHash → path
+	byCanon  map[string]string  // canonical trk_… → path
+	byLib    map[string]string  // library lib_… → path
+	links    map[string]string  // TrackHash → canonical trk_…
+	libIDs   map[string]string  // TrackHash → library lib_…
+	dividers map[string]bool    // set-builder divider paths: local-only, never pushed
 }
 
 type plTrack struct{ title, artist string }
@@ -155,10 +156,14 @@ func (s *Syncer) plResolver() (*plResolver, error) {
 	if err != nil {
 		return nil, err
 	}
+	dividers, err := s.lib.DividerPaths()
+	if err != nil {
+		return nil, err
+	}
 	r := &plResolver{
 		byPath: make(map[string]plTrack, len(tracks)), byHash: make(map[string]string, len(tracks)),
 		byCanon: map[string]string{}, byLib: map[string]string{},
-		links: make(map[string]string, len(links)), libIDs: libIDs,
+		links: make(map[string]string, len(links)), libIDs: libIDs, dividers: dividers,
 	}
 	for h, l := range links {
 		r.links[h] = l.TrackID
@@ -191,6 +196,9 @@ func (s *Syncer) localPlaylistItems(r *plResolver, localID int64) ([]PlaylistIte
 	}
 	out := make([]PlaylistItemRef, 0, len(rows))
 	for _, row := range rows {
+		if r.dividers[row.Path] { // divider markers are local playlist furniture - never pushed
+			continue
+		}
 		ref := PlaylistItemRef{Path: row.Path}
 		switch {
 		case row.Unresolved():

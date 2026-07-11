@@ -119,46 +119,63 @@ func (d *DB) CompatFor(path string) ([]CompatRow, error) {
 	return out, rows.Err()
 }
 
-// CompatForMany maps each input path to its direct marks (one IN query; input capped
-// at 500 paths - callers pass bounded neighbor sets, not whole collections).
+// CompatForMany maps each input path to its direct marks (chunked IN queries so a
+// whole playlist works; both indexes serve each chunk).
 func (d *DB) CompatForMany(paths []string) (map[string][]CompatRow, error) {
 	out := map[string][]CompatRow{}
+	seen := make(map[string]bool, len(paths))
+	uniq := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			uniq = append(uniq, p)
+		}
+	}
+	paths = uniq
 	if len(paths) == 0 {
 		return out, nil
 	}
-	if len(paths) > 500 {
-		paths = paths[:500]
-	}
-	ph := strings.Repeat("?,", len(paths))
-	ph = ph[:len(ph)-1]
-	args := make([]any, 0, 2*len(paths))
-	for _, p := range paths {
-		args = append(args, p)
-	}
-	for _, p := range paths {
-		args = append(args, p)
-	}
-	rows, err := d.db.Query(`SELECT a_path, b_path, kind, created_at FROM track_compat
-		WHERE a_path IN (`+ph+`) OR b_path IN (`+ph+`)`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	want := make(map[string]bool, len(paths))
-	for _, p := range paths {
-		want[p] = true
-	}
-	for rows.Next() {
-		var a, b, kind, at string
-		if err := rows.Scan(&a, &b, &kind, &at); err != nil {
+	const chunk = 400
+	for i := 0; i < len(paths); i += chunk {
+		part := paths[i:min(i+chunk, len(paths))]
+		inPart := make(map[string]bool, len(part))
+		for _, p := range part {
+			inPart[p] = true
+		}
+		ph := strings.Repeat("?,", len(part))
+		ph = ph[:len(ph)-1]
+		args := make([]any, 0, 2*len(part))
+		for _, p := range part {
+			args = append(args, p)
+		}
+		for _, p := range part {
+			args = append(args, p)
+		}
+		rows, err := d.db.Query(`SELECT a_path, b_path, kind, created_at FROM track_compat
+			WHERE a_path IN (`+ph+`) OR b_path IN (`+ph+`)`, args...)
+		if err != nil {
 			return nil, err
 		}
-		if want[a] {
-			out[a] = append(out[a], CompatRow{Path: b, Kind: kind, CreatedAt: at})
+		for rows.Next() {
+			var a, b, kind, at string
+			if err := rows.Scan(&a, &b, &kind, &at); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			// a row can match several chunks (both ends requested); attribute each end to
+			// the chunk that contains it so nothing records twice
+			if inPart[a] {
+				out[a] = append(out[a], CompatRow{Path: b, Kind: kind, CreatedAt: at})
+			}
+			if inPart[b] {
+				out[b] = append(out[b], CompatRow{Path: a, Kind: kind, CreatedAt: at})
+			}
 		}
-		if want[b] {
-			out[b] = append(out[b], CompatRow{Path: a, Kind: kind, CreatedAt: at})
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
 		}
+		_ = rows.Close()
 	}
-	return out, rows.Err()
+	return out, nil
 }

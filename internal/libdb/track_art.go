@@ -81,7 +81,8 @@ func (d *DB) GetTrackArtByMeta(artist, title string) ([]byte, bool) {
 		 WHERE ta.mime!='none' AND length(COALESCE(ta.data,''))>0
 		   AND ( (lower(COALESCE(ta.artist,''))=lower(?1) AND lower(COALESCE(ta.title,''))=lower(?2))
 		      OR ta.path IN (SELECT t.path FROM tracks t
-		                      WHERE lower(COALESCE(t.artist,''))=lower(?1)
+		                      WHERE t.is_divider=0
+		                        AND lower(COALESCE(t.artist,''))=lower(?1)
 		                        AND lower(COALESCE(t.title,''))=lower(?2)) )
 		 LIMIT 2`, artist, title)
 	if err != nil {
@@ -121,7 +122,8 @@ func (d *DB) TrackPathByMeta(artist, title string) (string, bool) {
 	rows, err := d.db.Query(`
 		SELECT DISTINCT path FROM (
 		  SELECT path FROM tracks
-		    WHERE path<>'' AND lower(COALESCE(artist,''))=lower(?1) AND lower(title)=lower(?2)
+		    WHERE path<>'' AND is_divider=0
+		      AND lower(COALESCE(artist,''))=lower(?1) AND lower(title)=lower(?2)
 		  UNION
 		  SELECT path FROM track_art
 		    WHERE path<>'' AND lower(COALESCE(artist,''))=lower(?1) AND lower(COALESCE(title,''))=lower(?2)
