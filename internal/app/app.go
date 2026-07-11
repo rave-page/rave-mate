@@ -26,7 +26,9 @@ import (
 	"rave.page/mate/internal/appgroups"
 	"rave.page/mate/internal/assetsync"
 	"rave.page/mate/internal/audiorec"
+	"rave.page/mate/internal/authz"
 	"rave.page/mate/internal/automation"
+	"rave.page/mate/internal/bridge"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/discovery"
@@ -1217,7 +1219,39 @@ func run(parent context.Context, serviceMode bool) error {
 		func() bool { return cfg.Features.AppGroups.Enabled },
 		func() []config.AppGroup { return cfg.Features.AppGroups.Groups }))
 
+	// ── rave.page account bridge ────────────────────────────────────────────────
+	// Reaches THIS instance from off-LAN through the account's blind relay. The relay is a
+	// transport only: peerlink authenticates + encrypts + gates every tunnel, so rave.page
+	// never sees a payload, a code or a token.
+	authGate := authz.New(st, log, "rave-mate", peerNick)
+	authGate.SetSelfID(ident.NodeID) // the challenge advertises the Ed25519 node id
+	bridgePrompt := &codePrompt{}
+	peerMgr.SetAuthorizer(authGate, instanceLabel(cfg), bridgePrompt.ask)
+
+	bridgeCfg := func() config.AccountBridgeFeature { return cfg.Features.AccountBridge }
+	bridgeCl := bridge.NewClient(cfg.APIBaseURL, authMgr, log)
+	bridgeMgr := bridge.NewManager(bridgeCl, log, ident.NodeID, peerNick, bridgeCaps(bridgeCfg),
+		&bridgeTunnel{peers: peerMgr, studio: studioSrv, log: log, cfg: bridgeCfg})
+	// Sign-in/out flips the bridge: the relay is account-scoped, so a signed-out instance has
+	// nothing to register against.
+	authMgr.OnChange(func(s auth.State) {
+		if !cfg.Features.AccountBridge.Enabled {
+			return
+		}
+		if s.SignedIn {
+			_ = bridgeMgr.Start(ctx)
+		} else {
+			bridgeMgr.Stop()
+		}
+	})
+
 	mods := module.NewManager(log, ctx)
+	mods.Add(&module.Service{
+		Name:    "accountbridge",
+		Enabled: func() bool { return cfg.Features.AccountBridge.Enabled },
+		Start:   func(c context.Context) error { return bridgeMgr.Start(c) },
+		Stop:    bridgeMgr.Stop,
+	})
 	mods.Add(&module.Service{
 		Name:    "automation",
 		Enabled: func() bool { return autoMgr != nil },

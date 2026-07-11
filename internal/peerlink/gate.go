@@ -70,6 +70,28 @@ func (m *Manager) AdoptConn(conn Conn, initiator bool, nickname, addr string) {
 	m.runHandshake(conn, r, nickname, addr)
 }
 
+// Authenticate establishes the SECURE TUNNEL over conn - mutual Ed25519 AKE, AEAD upgrade, and
+// the access gate for an untrusted peer - and returns the peer's verified node id WITHOUT
+// starting a peerlink Link.
+//
+// It exists so a DIFFERENT protocol can ride inside the same authenticated, encrypted tunnel:
+// the Local Studio channel over the account bridge does exactly this, then hands the conn to
+// studio.ServeConn. Everything the tunnel guarantees (identity pinning, confidentiality from
+// the relay, TOTP/token authorization) applies to it unchanged.
+//
+// Blocking: call it on your own goroutine.
+func (m *Manager) Authenticate(ctx context.Context, conn Conn, initiator bool, nickname, addr string) (string, error) {
+	r := roleResponder
+	if initiator {
+		r = roleInitiator
+	}
+	res, err := m.secureTunnel(ctx, conn, r, nickname, addr)
+	if err != nil {
+		return "", err
+	}
+	return res.PeerNodeID, nil
+}
+
 // upgradeTransport switches a capable transport to AEAD, keyed from the completed handshake.
 // No-op on transports that don't implement Upgrader (the LAN listener).
 func upgradeTransport(conn Conn, res *Result) error {

@@ -65,7 +65,11 @@ const (
 	// v27 added native multi-controller MIDI-learn (MIDI.Controllers: per-controller input
 	// port + learned bindings, optional THRU) + the two-port loopMIDI DJ router
 	// (MIDI.Bridge); all additive, absent = off/empty.
-	configVersion = 27
+	// v28 added the rave.page account bridge (AccountBridge: reach this instance from off-LAN
+	// through the account relay; LocalStudio sub-toggle serves the Local Studio channel over
+	// it). Additive, off by default. The TOTP secret + trusted-session tokens do NOT live here -
+	// they are sealed in the bbolt authz bucket (config.json is plaintext 0600).
+	configVersion = 28
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -155,10 +159,11 @@ type Features struct {
 
 	OverlayWaveform OverlayWaveformFeature `json:"overlayWaveform"` // scrolling waveform + EQ/FX panel in the overlays
 
-	Peers       PeersFeature       `json:"peers"`       // LAN peer link (discovery + paired connections)
-	FileXfer    FileXferFeature    `json:"fileXfer"`    // file transfer between paired instances
-	SetCapture  SetCaptureFeature  `json:"setCapture"`  // local Icecast receiver: captures Traktor's broadcast to disk
-	AudioRecord AudioRecordFeature `json:"audioRecord"` // native audio device capture (FLAC), OBS-synced + manual
+	Peers         PeersFeature         `json:"peers"`         // LAN peer link (discovery + paired connections)
+	AccountBridge AccountBridgeFeature `json:"accountBridge"` // reach this instance off-LAN via the rave.page account relay
+	FileXfer      FileXferFeature      `json:"fileXfer"`      // file transfer between paired instances
+	SetCapture    SetCaptureFeature    `json:"setCapture"`    // local Icecast receiver: captures Traktor's broadcast to disk
+	AudioRecord   AudioRecordFeature   `json:"audioRecord"`   // native audio device capture (FLAC), OBS-synced + manual
 
 	LibrarySync LibrarySyncFeature `json:"librarySync"` // cross-DJ-software library sync (hub-merge → targets)
 
@@ -850,6 +855,20 @@ func (s SetCaptureFeature) ResolvedSetsDir() string {
 type PeersFeature struct {
 	Enabled  bool   `json:"enabled"`
 	Nickname string `json:"nickname"` // "" = derive from hostname
+}
+
+// AccountBridgeFeature configures the rave.page account bridge: reaching THIS instance from
+// outside the LAN, through the account's blind relay.
+//
+// Enabled registers this device on the account so your other devices (and the web Local Studio)
+// can find it. LocalStudio additionally serves the Local Studio control channel over the bridge,
+// so the web app can drive this machine from anywhere - not only from a browser on this box.
+//
+// The access gate (TOTP enrolment + trusted-session tokens) is NOT configured here: it lives in
+// the sealed authz store, because config.json is plaintext.
+type AccountBridgeFeature struct {
+	Enabled     bool `json:"enabled"`
+	LocalStudio bool `json:"localStudio,omitempty"` // serve the Local Studio channel over the bridge
 }
 
 // FileXferFeature configures file transfer between paired instances (send + receive).
@@ -1829,10 +1848,11 @@ func Default() Config {
 				WaveColor: defWaveColor, WaveOpacity: defWaveOpacity, BgColor: defWaveBgColor, BgOpacity: defWaveBgOpac,
 			},
 
-			Peers:       PeersFeature{Enabled: false},      // opt-in; LAN peer link
-			FileXfer:    FileXferFeature{Enabled: false},   // opt-in; peer file transfer (ask before saving)
-			SetCapture:  SetCaptureFeature{Enabled: false}, // opt-in; needs Traktor broadcast setup
-			AudioRecord: AudioRecordFeature{Enabled: false, Format: "flac", FollowOBS: true, WriteTags: true},
+			Peers:         PeersFeature{Enabled: false},         // opt-in; LAN peer link
+			AccountBridge: AccountBridgeFeature{Enabled: false}, // opt-in; reaches this box from off-LAN
+			FileXfer:      FileXferFeature{Enabled: false},      // opt-in; peer file transfer (ask before saving)
+			SetCapture:    SetCaptureFeature{Enabled: false},    // opt-in; needs Traktor broadcast setup
+			AudioRecord:   AudioRecordFeature{Enabled: false, Format: "flac", FollowOBS: true, WriteTags: true},
 
 			LibrarySync: LibrarySyncFeature{Enabled: false}, // opt-in; cross-DJ-software sync
 

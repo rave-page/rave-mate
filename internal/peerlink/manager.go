@@ -330,14 +330,20 @@ func (m *Manager) dialGate(nodeID string) *logbus.Gate {
 
 // ── handshake → connection ───────────────────────────────────────────────────
 
-func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
-	hctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+// secureTunnel runs the AKE, upgrades the transport to AEAD where the transport supports it,
+// and puts an untrusted peer on a gated transport through the access gate. On success the conn
+// is mutually authenticated, confidential, and its peer is trusted. Closes conn on failure.
+//
+// Shared by runHandshake (which then builds a peerlink Link on top) and Authenticate (which
+// hands the tunnel to a different protocol - the studio channel over the bridge).
+func (m *Manager) secureTunnel(ctx context.Context, conn Conn, r role, nickname, addr string) (*Result, error) {
+	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	res, err := doHandshake(hctx, conn, r, m.id, m.trustLookup)
 	cancel()
 	if err != nil {
 		m.log.Warn(logTag, "handshake failed", map[string]any{"error": err.Error(), "addr": addr})
 		conn.Close()
-		return
+		return nil, err
 	}
 
 	// Transports that cross a third party switch to AEAD here, keyed from the handshake we just
@@ -346,15 +352,15 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 	if err := upgradeTransport(conn, res); err != nil {
 		m.log.Warn(logTag, "transport upgrade failed", map[string]any{"error": err.Error(), "addr": addr})
 		conn.Close()
-		return
+		return nil, err
 	}
 
 	// Gated transport (no human at the far end to compare an SAS): an untrusted peer must pass
 	// the authz gate instead - a TOTP code proves possession of the enrolled authenticator, which
-	// authorizes the pairing and pins the identities. Runs BEFORE the read loop starts, so it has
+	// authorizes the pairing and pins the identities. Runs BEFORE any read loop starts, so it has
 	// the conn to itself. Fails closed: no authorizer ⇒ no connection.
 	if tr, gated := gateTransport(conn); gated && !res.Trusted {
-		gctx, gcancel := context.WithTimeout(m.ctx, 60*time.Second)
+		gctx, gcancel := context.WithTimeout(ctx, 60*time.Second)
 		err := m.authorize(gctx, conn, res, tr)
 		gcancel()
 		if err != nil {
@@ -362,7 +368,7 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 				"peer": res.PeerNodeID, "transport": string(tr), "error": err.Error(),
 			})
 			conn.Close()
-			return
+			return nil, err
 		}
 		// Authorized → pin the peer's identity, exactly as a confirmed SAS would.
 		now := time.Now().UTC()
@@ -374,6 +380,14 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 		m.log.Info(logTag, "peer paired via the access gate", map[string]any{
 			"peer": res.PeerNodeID, "transport": string(tr),
 		})
+	}
+	return res, nil
+}
+
+func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
+	res, err := m.secureTunnel(m.ctx, conn, r, nickname, addr)
+	if err != nil {
+		return // secureTunnel logged + closed
 	}
 
 	cctx, ccancel := context.WithCancel(m.ctx)
