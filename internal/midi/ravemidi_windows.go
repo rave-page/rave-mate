@@ -21,7 +21,7 @@ const raveMIDICtlPath = `\\.\RaveMidiCtl`
 
 // ioctl.h constants (RAVEMIDI_*).
 const (
-	raveMIDIProtocolVersion = 1
+	raveMIDIProtocolVersion = 3  // v3: hidden INTERNAL reserved ports; v2: Filter + BIDI fan-outs + trace
 	raveMIDIMaxName         = 32 // WCHARs incl NUL
 	raveMIDIDeviceType      = 0x8F63
 
@@ -40,13 +40,14 @@ var (
 	ioctlRaveMIDICreatePort  = raveMIDICtl(0x800, fileReadData|fileWriteData)
 	ioctlRaveMIDIDestroyPort = raveMIDICtl(0x801, fileReadData|fileWriteData)
 	ioctlRaveMIDIWrite       = raveMIDICtl(0x802, fileWriteData)
+	ioctlRaveMIDIRead        = raveMIDICtl(0x803, fileReadData)
 )
 
 // errRaveMIDIUnavailable marks the ravemidi driver as not installed/running.
 var errRaveMIDIUnavailable = errors.New("ravemidi driver not installed")
 
-// openRaveMIDICtl opens the control device (admin-only SDDL in the driver - fails
-// ERROR_ACCESS_DENIED unelevated, which the caller treats as unavailable).
+// openRaveMIDICtl opens the control device (driver SDDL grants INTERACTIVE
+// read/write, so the unelevated desktop app + featurehost children can open it).
 func openRaveMIDICtl() (syscall.Handle, error) {
 	p, err := syscall.UTF16PtrFromString(raveMIDICtlPath)
 	if err != nil {

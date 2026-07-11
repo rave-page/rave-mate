@@ -28,12 +28,29 @@ live bind status per input, `RELOAD_CONFIG` re-reads the blob.
 Per managed input the driver creates driver-owned ports (no owner file object —
 handle close never tears them down):
 
-- one reserved **BIDI** port `"<Name> (rave-mate)"` — rave-mate reconnects here
-  seamlessly after relaunch; with `Feedback=1` its app-bound writes are teed to
-  the hardware device's render pin (LED feedback) while staying readable via
-  `IOCTL_RAVEMIDI_READ`
-- `OutCount` extra **OUT_ONLY** ports with the configured names (empty name →
-  `"<Name> Out N"`); with `Thru=1` device capture fans into them
+- one reserved **INTERNAL** port `"<Name> (rave-mate)"` (protocol v3) — no
+  winmm/KS presence, so it never appears in any app's MIDI list; rave-mate reads
+  it via pended `IOCTL_RAVEMIDI_READ` (reconnects seamlessly after relaunch) and
+  with `Feedback=1` its `IOCTL_RAVEMIDI_WRITE`s are teed to the hardware device's
+  render pin (LED feedback). DJ software only ever sees the fan-outs below
+- `OutCount` extra **BIDI** fan-out ports with the configured names (empty name →
+  `"<Name> Out N"`); with `Thru=1` device capture fans into them, and with
+  `Feedback=1` the DJ software's writes on them are message-framed and teed to
+  the device render pin (LED feedback) — loop-free: a BIDI port has no internal
+  render→capture path, so an app never re-hears its own output
+- `Filter` (protocol v2) drops message classes (aftertouch / poly pressure /
+  pitch bend / active sensing / clock) on the fan-out path only; the reserved
+  port always carries the full stream. Fixes DJ-software MIDI-learn latching
+  onto keybed aftertouch ("every key triggers the binding")
+- `IOCTL_RAVEMIDI_QUERY_TRACE` snapshots a per-port ring of the last 128 data
+  events (tap-raw / to-app / read-pop / from-app / feedback-out / loop-drop)
+  for live wire diagnosis from rave-mate; LOOPBACK ports suppress self-echo by
+  owning-process identity (an app holding both ends never hears itself)
+- the tap defends against **replaying capture pins** (seen on NI Komplete Kontrol
+  A61): pins whose record re-delivers the full history + new bytes on every
+  completion are strict-prefix-deduped (only the tail is forwarded), and the pin
+  is PAUSE→RUN-cycled before its frame saturates (OnDead rebind as fallback) —
+  downstream apps always receive each message exactly once
 
 Binding: a passive worker + PnP interface-change notification (KSCATEGORY_CAPTURE,
 existing interfaces included). Source = exact `SourceIface` symlink, else the first

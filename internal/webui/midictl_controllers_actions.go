@@ -8,6 +8,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 )
 
 // Native MIDI-learn action handlers: connect physical controllers, learn each control per
@@ -72,7 +73,38 @@ func init() {
 		}
 	})
 
+	// driver fan-out message-filter chips (driver-managed controllers only)
+	onPrefix("midi-ctl-filter:", func(u *UI, m actMsg) {
+		idxs, key, ok := strings.Cut(m.arg("midi-ctl-filter:"), ":")
+		if !ok {
+			return
+		}
+		if u.withCtl(atoiSafe(idxs), func(c *config.MIDIControllerMap) {
+			fl := c.DriverFilter
+			if fl == nil {
+				fl = append([]string(nil), midi.DefaultDriverFilter()...)
+			}
+			out := fl[:0]
+			found := false
+			for _, k := range fl {
+				if k == key {
+					found = true
+					continue
+				}
+				out = append(out, k)
+			}
+			if !found {
+				out = append(out, key)
+			}
+			c.DriverFilter = out // non-nil from here: [] = filter nothing
+		}) {
+			u.midiApply()
+		}
+	})
+
 	// learn: arm a one-shot capture on this controller's port; the first control moved binds.
+	// Driver-managed controllers learn off the driver's hidden reserved endpoint (the child
+	// reads it over IOCTL) - the raw hardware name would never match what the child opened.
 	onPrefix("midi-learn:", func(u *UI, m actMsg) {
 		ctlIdx, control, ch, ok := parseLearnArg(m.arg("midi-learn:"))
 		if !ok || u.svc.MIDISource == nil || u.svc.Cfg == nil {
@@ -80,26 +112,34 @@ func init() {
 		}
 		midiCfgMu.Lock()
 		cs := u.svc.Cfg.Features.MIDI.Controllers
-		port := ""
+		var ctl config.MIDIControllerMap
 		if ctlIdx >= 0 && ctlIdx < len(cs) {
-			port = cs[ctlIdx].Port
+			ctl = cs[ctlIdx]
 		}
 		midiCfgMu.Unlock()
-		if port == "" {
+		if ctl.Port == "" {
 			u.toast(i18n.T("midictl.in.needPort"))
 			return
+		}
+		port := midiChildPort(ctl)
+		notOpen := func() {
+			if port != ctl.Port { // driver-managed: "close the other app" would be wrong advice
+				u.toast(i18n.T("midictl.in.drvNotReady"))
+			} else {
+				u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": ctl.Port}))
+			}
 		}
 		// Fast feedback: if the port isn't open (held by another app / gone), say so now instead
 		// of arming a capture that would silently time out.
 		if !portContains(u.svc.MIDISource.OpenInputPorts(), port) {
-			u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+			notOpen()
 			return
 		}
 		u.toast(i18n.T("midictl.in.listening", i18n.A{"control": i18n.T("midictl.ctl." + control), "ch": strconv.Itoa(ch)}))
 		u.svc.MIDISource.ArmLearn(port, learnTimeout, func(_ string, status, data1 byte, okc bool, reason string) {
 			if !okc {
 				if reason == "port-not-open" {
-					u.toast(i18n.T("midictl.in.portInUse", i18n.A{"port": port}))
+					notOpen()
 				} else {
 					u.toast(i18n.T("midictl.in.learnTimeout"))
 				}
@@ -152,9 +192,12 @@ func init() {
 	})
 }
 
-// midiApply persists config, pushes it to the running MIDI child (live reconfigure), re-renders.
+// midiApply persists config, pushes it to the running MIDI child (live reconfigure),
+// mirrors driver-managed controllers into the ravemidi driver, re-renders. One entry
+// point = zero manual sync/reload friction.
 func (u *UI) midiApply() {
 	u.saveCfg()
+	u.midiDrvSync(false) // BEFORE child reconfigure: reserved ports must exist when it opens them
 	if u.svc.MIDISource != nil {
 		u.svc.MIDISource.Reconfigure()
 	}

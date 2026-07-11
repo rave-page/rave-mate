@@ -36,6 +36,14 @@ typedef struct _RAVE_PORT {
     volatile LONG CaptureRunning;     // a capture stream is in KSSTATE_RUN
     volatile LONG StreamCount;        // open pin instances (blocks destroy)
     volatile LONG MirrorRefs;         // mirror groups fanning into this port (blocks destroy)
+    volatile LONG IoctlBusy;          // in-flight WRITE/READ dispatch on this port (blocks destroy;
+                                      // taken under PortsLock, so find+pin is atomic vs teardown)
+    HANDLE CapturePid;                // process that opened the capture stream (loopback self-echo)
+    volatile LONG LoopSuppressed;     // loopback writes dropped as self-echo
+    // trace ring (IOCTL_RAVEMIDI_QUERY_TRACE): bounded, overwrite-oldest
+    KSPIN_LOCK TraceLock;
+    ULONGLONG TraceSeq;
+    RAVEMIDI_TRACE_ENTRY Trace[RAVEMIDI_TRACE_ENTRIES];
     // live counters for IOCTL_RAVEMIDI_QUERY_PORT (bring-up + health)
     volatile LONG NewStreamCalls;
     volatile LONG LastSetState;       // -1 = never
@@ -61,6 +69,8 @@ NTSTATUS RavePortDestroyById(ULONG id);   // NULL-caller destroy; STATUS_DEVICE_
 // Adapter-side helpers implemented in adapter.cpp, called from miniport streams.
 VOID RavePortDeliverFromApp(RAVE_PORT* port);   // drain FromApp into pended READs
 VOID RavePortNotifyToApp(RAVE_PORT* port);      // kick capture service if running
+VOID RaveTracePush(RAVE_PORT* port, ULONG dir,  // DISPATCH-safe ring append
+                   const UCHAR* bytes, ULONG len);
 
 NTSTATUS CreateRaveMiniport(PDEVICE_OBJECT Fdo, RAVE_PORT* ctx, PUNKNOWN* OutUnknown);
 
@@ -101,11 +111,13 @@ private:
     RaveMiniport* m_Miniport;     // ref held (AddRef in Init)
     BOOLEAN m_Capture;
     KSSTATE m_State;
+    HANDLE m_Pid;                 // creating process (NewStream runs in app context)
 
 public:
     DECLARE_STD_UNKNOWN();
     RaveStream(PUNKNOWN OuterUnknown)
-        : CUnknown(OuterUnknown), m_Miniport(nullptr), m_Capture(FALSE), m_State(KSSTATE_STOP) {}
+        : CUnknown(OuterUnknown), m_Miniport(nullptr), m_Capture(FALSE), m_State(KSSTATE_STOP),
+          m_Pid(nullptr) {}
     ~RaveStream();
 
     NTSTATUS Init(RaveMiniport* Miniport, BOOLEAN Capture);

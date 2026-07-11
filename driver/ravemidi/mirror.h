@@ -18,8 +18,10 @@ typedef VOID (*RAVE_TAP_DEAD_CB)(PVOID Ctx);
 
 // Iface must be a vetted/enumerated KS interface symlink (callers validate).
 // Outs are borrowed — caller guarantees they outlive the tap (refs or ownership).
+// FilterMask (RAVEMIDI_FILTER_*) drops matching messages for Outs[1..] only —
+// Outs[0] (managed: the reserved rave-mate port) always gets the full stream.
 NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
-                     RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap);
+                     ULONG FilterMask, RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap);
 VOID RaveTapClose(RAVE_TAP* Tap);  // stop + join thread + release KS handles (ports untouched)
 
 // TRUE only if Name is a currently-enumerated KS (Render?RENDER:CAPTURE)/AUDIO

@@ -3,6 +3,9 @@
 #include "miniport.h"
 #include "managed.h"
 
+// ntddk-only export (portcls pulls wdm.h); prototype matches ntddk.h exactly.
+extern "C" NTKERNELAPI HANDLE NTAPI PsGetCurrentProcessId(VOID);
+
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 
 // -------- data ranges (layout dictated by KSDATARANGE_MUSIC / KSDATAFORMAT) ----
@@ -115,6 +118,24 @@ VOID RavePortNotifyToApp(RAVE_PORT* port)
     }
 }
 
+VOID RaveTracePush(RAVE_PORT* port, ULONG dir, const UCHAR* bytes, ULONG len)
+{
+    // Bounded ring, overwrite-oldest; spinlock so DISPATCH-level writers serialize.
+    KIRQL irql;
+    KeAcquireSpinLock(&port->TraceLock, &irql);
+    RAVEMIDI_TRACE_ENTRY* e = &port->Trace[port->TraceSeq % RAVEMIDI_TRACE_ENTRIES];
+    e->Seq = port->TraceSeq++;
+    e->Time100ns = KeQueryInterruptTime();
+    e->Dir = dir;
+    e->Len = len;
+    ULONG n = (len < RAVEMIDI_TRACE_BYTES) ? len : RAVEMIDI_TRACE_BYTES;
+    RtlZeroMemory(e->Bytes, RAVEMIDI_TRACE_BYTES);
+    if (n && bytes) {
+        RtlCopyMemory(e->Bytes, bytes, n);
+    }
+    KeReleaseSpinLock(&port->TraceLock, irql);
+}
+
 VOID RavePortDeliverFromApp(RAVE_PORT* port)
 {
     // Pair app-render bytes (FromApp ring) with pended IOCTL_RAVEMIDI_READ IRPs.
@@ -131,6 +152,9 @@ VOID RavePortDeliverFromApp(RAVE_PORT* port)
         PIO_STACK_LOCATION s = IoGetCurrentIrpStackLocation(irp);
         ULONG cap = s->Parameters.DeviceIoControl.OutputBufferLength;
         ULONG n = RaveFifoPop(&port->FromApp, (UCHAR*)irp->AssociatedIrp.SystemBuffer, cap);
+        if (n) {
+            RaveTracePush(port, RaveTraceReadPop, (UCHAR*)irp->AssociatedIrp.SystemBuffer, n);
+        }
         irp->IoStatus.Status = STATUS_SUCCESS;
         irp->IoStatus.Information = n;  // may be 0 if a concurrent drain won the race
         IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -316,7 +340,14 @@ NTSTATUS RaveStream::Init(RaveMiniport* Miniport, BOOLEAN Capture)
     m_Miniport->AddRef();
     m_Capture = Capture;
     m_State = KSSTATE_STOP;
-    InterlockedIncrement(&Miniport->Ctx()->StreamCount);
+    // Pin creation runs in the opening app's context — this pid identifies the
+    // client for loopback self-echo suppression.
+    m_Pid = PsGetCurrentProcessId();
+    RAVE_PORT* p = Miniport->Ctx();
+    if (Capture) {
+        p->CapturePid = m_Pid;
+    }
+    InterlockedIncrement(&p->StreamCount);
     return STATUS_SUCCESS;
 }
 
@@ -327,6 +358,9 @@ RaveStream::~RaveStream()
         if (p) {
             if (m_Capture) {
                 InterlockedExchange(&p->CaptureRunning, 0);
+                if (p->CapturePid == m_Pid) {
+                    p->CapturePid = nullptr;
+                }
             }
             InterlockedDecrement(&p->StreamCount);
         }
@@ -398,6 +432,7 @@ STDMETHODIMP_(NTSTATUS) RaveStream::Read(PVOID BufferAddress, ULONG BufferLength
             InterlockedIncrement(&p->ReadZeroCalls);
         } else {
             InterlockedAdd64(&p->ReadBytesTotal, (LONG64)*BytesRead);
+            RaveTracePush(p, RaveTraceReadPop, (UCHAR*)BufferAddress, *BytesRead);
         }
     }
     return STATUS_SUCCESS;
@@ -419,8 +454,17 @@ STDMETHODIMP_(NTSTATUS) RaveStream::Write(PVOID BufferAddress, ULONG BytesToWrit
         return STATUS_SUCCESS;
     }
     InterlockedIncrement(&p->StreamWriteCalls);
+    RaveTracePush(p, RaveTraceFromApp, (const UCHAR*)BufferAddress, BytesToWrite);
     if (p->Kind == RaveMidiPortLoopback) {
+        // Self-echo suppression: never hand a process back its own bytes. An app
+        // holding both ends of the cable (Rekordbox in+out) cannot loop itself.
+        if (p->CapturePid && p->CapturePid == m_Pid) {
+            InterlockedIncrement(&p->LoopSuppressed);
+            RaveTracePush(p, RaveTraceLoopDrop, (const UCHAR*)BufferAddress, BytesToWrite);
+            return STATUS_SUCCESS;
+        }
         RaveFifoPush(&p->ToApp, (const UCHAR*)BufferAddress, BytesToWrite);
+        RaveTracePush(p, RaveTraceToApp, (const UCHAR*)BufferAddress, BytesToWrite);
         RavePortNotifyToApp(p);
     } else {
         RaveFifoPush(&p->FromApp, (const UCHAR*)BufferAddress, BytesToWrite);

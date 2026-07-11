@@ -11,3 +11,5 @@ func GetDriverConfig() ([]DriverInputCfg, error) { return nil, ErrUnsupported }
 func QueryDriverInputs() ([]DriverInputStatus, error) { return nil, ErrUnsupported }
 
 func ReloadDriverConfig() error { return ErrUnsupported }
+
+func QueryDriverTrace(uint32) ([]TraceEntry, error) { return nil, ErrUnsupported }

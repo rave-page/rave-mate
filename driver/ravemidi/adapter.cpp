@@ -377,7 +377,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
                            ULONG* outId, RAVE_PORT** outPort)
 {
     PAGED_CODE();
-    if (in->Version != RAVEMIDI_PROTOCOL_VERSION || in->Kind > RaveMidiPortLoopback || !NameSane(in->Name)) {
+    if (in->Version != RAVEMIDI_PROTOCOL_VERSION || in->Kind > RaveMidiPortInternal || !NameSane(in->Name)) {
         return STATUS_INVALID_PARAMETER;
     }
     RAVE_PORT* p = (RAVE_PORT*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(*p), RAVE_TAG);
@@ -392,6 +392,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     RaveFifoInit(&p->FromApp);
     RaveFifoInit(&p->Feedback);
     p->FeedbackArm = 0;
+    KeInitializeSpinLock(&p->TraceLock);  // ring itself is pool-zeroed
     KeInitializeSpinLock(&p->ReadLock);
     InitializeListHead(&p->ReadIrps);
     IoCsqInitialize(&p->ReadCsq, RaveCsqInsert, RaveCsqRemove, RaveCsqPeek,
@@ -407,13 +408,19 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     ExReleaseFastMutex(&a->PortsLock);
 
     // Register the PortCls subdevice for this port's direction, then stamp the
-    // winmm-visible name onto its device interface.
-    NTSTATUS st = CreateRaveMiniport(a->Fdo, p, &p->PortUnknown);  // builds IMiniportMidi w/ per-kind filter
-    if (NT_SUCCESS(st)) {
-        st = PcRegisterSubdevice(a->Fdo, p->RefString, p->PortUnknown);
+    // winmm-visible name onto its device interface. INTERNAL ports skip all of it:
+    // no subdevice = invisible to winmm/WinRT enumeration, IOCTL access only.
+    NTSTATUS st = STATUS_SUCCESS;
+    if (in->Kind != RaveMidiPortInternal) {
+        st = CreateRaveMiniport(a->Fdo, p, &p->PortUnknown);  // builds IMiniportMidi w/ per-kind filter
+        if (NT_SUCCESS(st)) {
+            st = PcRegisterSubdevice(a->Fdo, p->RefString, p->PortUnknown);
+        }
+        if (NT_SUCCESS(st)) {
+            StampFriendlyName(a, p->RefString, p->Name);  // winmm szPname = p->Name
+        }
     }
     if (NT_SUCCESS(st)) {
-        StampFriendlyName(a, p->RefString, p->Name);  // winmm szPname = p->Name
         *outId = p->Id;
         if (outPort) {
             *outPort = p;
@@ -446,9 +453,9 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
         ExReleaseFastMutex(&a->PortsLock);
         return STATUS_ACCESS_DENIED;  // only the creator (or cleanup) tears down
     }
-    if (p->StreamCount > 0 || p->MirrorRefs > 0) {
+    if (p->StreamCount > 0 || p->MirrorRefs > 0 || p->IoctlBusy > 0) {
         ExReleaseFastMutex(&a->PortsLock);
-        return STATUS_DEVICE_BUSY;    // park: a winmm client holds a pin, or a mirror feeds it
+        return STATUS_DEVICE_BUSY;    // park: a pin/mirror holds it, or a WRITE/READ is mid-dispatch
     }
     RemoveEntryList(&p->Link);
     ExReleaseFastMutex(&a->PortsLock);
@@ -602,14 +609,30 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             }
             ExAcquireFastMutex(&a->PortsLock);
             RAVE_PORT* p = FindPortLocked(a, w->PortId);
+            if (p) {
+                InterlockedIncrement(&p->IoctlBusy);  // pin vs concurrent destroy (managed reapply)
+            }
             ExReleaseFastMutex(&a->PortsLock);
             if (!p) {
                 st = STATUS_NOT_FOUND;
                 break;
             }
             InterlockedIncrement(&p->WriteIoctls);
-            RaveFifoPush(&p->ToApp, (UCHAR*)(w + 1), w->ByteCount);
-            RavePortNotifyToApp(p);  // kick capture service if a stream is running
+            if (p->Kind == RaveMidiPortInternal) {
+                // internal (managed reserved) port: the write is rave-mate speaking
+                // TOWARD the device - tee to the feedback drain, never to FromApp
+                // (that ring carries tap data back to rave-mate's own IOCTL_READ).
+                RaveTracePush(p, RaveTraceFromApp, (UCHAR*)(w + 1), w->ByteCount);
+                if (p->FeedbackArm) {
+                    RaveFifoPush(&p->Feedback, (UCHAR*)(w + 1), w->ByteCount);
+                    RaveManagedKickFeedback();
+                }
+            } else {
+                RaveFifoPush(&p->ToApp, (UCHAR*)(w + 1), w->ByteCount);
+                RaveTracePush(p, RaveTraceToApp, (UCHAR*)(w + 1), w->ByteCount);
+                RavePortNotifyToApp(p);  // kick capture service if a stream is running
+            }
+            InterlockedDecrement(&p->IoctlBusy);
             break;
         }
         case IOCTL_RAVEMIDI_READ: {
@@ -619,6 +642,9 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             }
             ExAcquireFastMutex(&a->PortsLock);
             RAVE_PORT* p = FindPortLocked(a, ((RAVEMIDI_PORT_REF*)buf)->PortId);
+            if (p) {
+                InterlockedIncrement(&p->IoctlBusy);  // pin vs concurrent destroy (managed reapply)
+            }
             ExReleaseFastMutex(&a->PortsLock);
             if (!p) {
                 st = STATUS_NOT_FOUND;
@@ -629,6 +655,9 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             IoMarkIrpPending(Irp);
             IoCsqInsertIrp(&p->ReadCsq, Irp, nullptr);
             RavePortDeliverFromApp(p);
+            // Unpin AFTER the CSQ insert: from here the IRP is destroy-safe (DestroyPort
+            // cancels parked READs before freeing the port).
+            InterlockedDecrement(&p->IoctlBusy);
             return STATUS_PENDING;  // owns the IRP now — skip shared completion
         }
         case IOCTL_RAVEMIDI_QUERY_PORT: {
@@ -726,6 +755,37 @@ NTSTATUS RaveCtlDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             if (NT_SUCCESS(st)) {
                 info = sizeof(RAVEMIDI_INPUT_STATUS);
             }
+            break;
+        }
+        case IOCTL_RAVEMIDI_QUERY_TRACE: {
+            if (inLen < sizeof(RAVEMIDI_PORT_REF) || outLen < sizeof(RAVEMIDI_TRACE_OUT)) {
+                st = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            ULONG tid = ((RAVEMIDI_PORT_REF*)buf)->PortId;
+            ExAcquireFastMutex(&a->PortsLock);
+            RAVE_PORT* p = FindPortLocked(a, tid);
+            if (!p) {
+                ExReleaseFastMutex(&a->PortsLock);
+                st = STATUS_NOT_FOUND;
+                break;
+            }
+            RAVEMIDI_TRACE_OUT* o = (RAVEMIDI_TRACE_OUT*)buf;
+            KIRQL irql;
+            KeAcquireSpinLock(&p->TraceLock, &irql);
+            ULONGLONG next = p->TraceSeq;
+            ULONG count = (next < RAVEMIDI_TRACE_ENTRIES) ? (ULONG)next : RAVEMIDI_TRACE_ENTRIES;
+            // oldest-first copy out of the ring
+            for (ULONG i = 0; i < count; i++) {
+                ULONGLONG seq = next - count + i;
+                o->E[i] = p->Trace[seq % RAVEMIDI_TRACE_ENTRIES];
+            }
+            KeReleaseSpinLock(&p->TraceLock, irql);
+            ExReleaseFastMutex(&a->PortsLock);
+            o->PortId = tid;
+            o->Count = count;
+            o->NextSeq = next;
+            info = sizeof(RAVEMIDI_TRACE_OUT);
             break;
         }
         case IOCTL_RAVEMIDI_RELOAD_CONFIG: {

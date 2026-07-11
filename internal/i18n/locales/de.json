@@ -287,11 +287,15 @@
       "title": "Wellenform-Navigation"
     },
     "midi-thru": {
-      "body": "\n\nBestes THRU-Ziel (loopMIDI-Treiber nötig): der rave-mate Einweg-Port. Deine DJ-Software sieht einen reinen Eingangs-Port namens 'rave-mate' - es gibt KEINEN passenden Ausgangs-Endpunkt, also kann ihr automatisches LED-Echo (rekordbox spiegelt jeden Indicator-Code zurück) nirgends zurücklaufen und sie reagiert nie auf ihr eigenes Feedback. In der DJ-Software 'rave-mate' als MIDI-Gerät wählen."
+      "body": "\n\nBestes THRU-Ziel (loopMIDI-Treiber nötig): der rave-mate Einweg-Port. Deine DJ-Software sieht einen reinen Eingangs-Port namens 'rave-mate' - es gibt KEINEN passenden Ausgangs-Endpunkt, also kann ihr automatisches LED-Echo (rekordbox spiegelt jeden Indicator-Code zurück) nirgends zurücklaufen und sie reagiert nie auf ihr eigenes Feedback. In der DJ-Software 'rave-mate' als MIDI-Gerät wählen.\n\nMit installiertem ravemidi-Kerneltreiber ist 'ravemidi driver' die beste THRU-Wahl: der Treiber greift den Controller im Kernel ab (die Weiterleitung überlebt das Schließen von rave-mate und Neustarts) und repariert fehlerhafte Geräte - manche Controller, z. B. NI-Komplete-Kontrol-Keyboards, liefern bei jedem Event ihre gesamte MIDI-Historie erneut und brechen damit MIDI-Learn in jeder App, die sie direkt liest. Der Treiber leitet jede Nachricht genau einmal weiter, damit auch solche Controller sauber funktionieren."
     },
     "cue-edit": {
       "title": "Cue-Editor – Tasten & Maus",
       "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit."
+    },
+    "midi-drv-filter": {
+      "title": "Fan-out-Nachrichtenfilter",
+      "body": "Nachrichtenklassen, die der Treiber nur auf dem DJ-Port verwirft (rave-mate sieht weiterhin alles). Keyboards senden Aftertouch (Channel Pressure) bei jedem Tastendruck auf jeder Taste - fängt das MIDI-Learn deiner DJ-Software das statt der Note, feuert die Belegung bei JEDER Taste und nochmal beim Loslassen. Aftertouch, Active Sensing und Clock zu filtern hält Learn sauber; Pitch Bend und Poly Pressure anlassen, wenn du Tempo-Fader oder Druck-Pads mappst."
     }
   },
   "library": {
@@ -3222,7 +3226,15 @@
   },
   "midictl": {
     "in": {
-      "thruVirtual": "rave-mate Einweg-Port - kein Echo (empfohlen)"
+      "thruVirtual": "rave-mate Einweg-Port - kein Echo (empfohlen)",
+      "thruDriver": "ravemidi-Treiber (empfohlen)",
+      "useInDJ": "In deiner DJ-Software wähle:",
+      "driverNote": "Der Kernel-Treiber liest den Controller direkt und leitet auch dann weiter, wenn rave-mate geschlossen ist oder nach einem Neustart. Andere Apps sehen nur den THRU-Port oben - rave-mate liest den Controller intern über den Treiber und belegt selbst keinen MIDI-Port. Er repariert außerdem fehlerhafte Hardware: manche Controller (z. B. NI-Komplete-Kontrol-Keyboards) liefern bei jedem neuen Event ihre komplette MIDI-Historie erneut, was MIDI-Learn in DJ-Software zerstört - der Treiber erkennt die Wiederholung und leitet jede Nachricht genau einmal weiter, sodass auch solche Geräte voll nutzbar bleiben.",
+      "driverState": "Treiber-Weiterleitung",
+      "driverPending": "warte auf Treiber-Sync…",
+      "lastInput": "letzte Eingabe vor {ago}:",
+      "filterLbl": "Herausfiltern",
+      "drvNotReady": "Der ravemidi-Treiber hat den Controller noch nicht gebunden - warte, bis der Treiberstatus oben Weiterleitung anzeigt, und versuche das Lernen dann erneut."
     },
     "out": {
       "sub": "Wohin rave-mate MIDI SENDET. Den eingebauten Einweg-Port wählen (DJ-Software kann sich nicht selbst zurücklesen) oder einen beliebigen Loopback-Port, auf den deine DJ-App hört."
@@ -3235,7 +3247,7 @@
       "status": "Kerneltreiber",
       "badgePreview": "Developer-Preview",
       "badgeOn": "aktiv",
-      "why": "Unser Open-Source-Kerneltreiber erzeugt Einweg-Virtual-MIDI-Ports: Die DJ-Software sieht einen reinen Eingangsport und kann ihr eigenes LED-/Feedback-Signal nie zurücklesen (der klassische Loopback-Selbst-Echo-Bug). Optional — ohne ihn nutzt rave-mate teVirtualMIDI oder loopMIDI (beidseitig).",
+      "why": "Unser Open-Source-Kerneltreiber erzeugt Einweg-Virtual-MIDI-Ports: Die DJ-Software sieht einen reinen Eingangsport und kann ihr eigenes LED-/Feedback-Signal nie zurücklesen (der klassische Loopback-Selbst-Echo-Bug). Optional — ohne ihn nutzt rave-mate teVirtualMIDI oder loopMIDI (beidseitig). Zusätzlich bereinigt er eigenwillige Hardware: manche Controller (z. B. NI-Komplete-Kontrol-Keyboards) liefern bei jedem Event ihre komplette MIDI-Historie erneut - der Treiber dedupliziert den Stream, sodass jede App jede Nachricht genau einmal erhält.",
       "installed": "Installiert und aktiv — Einweg-Ports kommen von ravemidi.",
       "fallback": "Nicht installiert — teVirtualMIDI-Fallback aktiv (beidseitig; DJ-Apps können sich selbst echoen).",
       "none": "Nicht installiert, kein teVirtualMIDI gefunden — Einweg-Ports nicht verfügbar (loopMIDI geht weiterhin, beidseitig).",
@@ -3244,7 +3256,7 @@
       "smartscreen": "Windows warnt ggf. vor selbstsignierten Komponenten (SmartScreen / unbekannter Herausgeber). Bei Open-Source-Builds ohne EV-Zertifikat normal — Quellcode und CI-Builds sind öffentlich; vor dem Fortfahren README lesen.",
       "docs": "Treiber-README & Quellcode",
       "managedHdr": "Treiber-verwaltete Weiterleitung",
-      "managedSub": "Der Treiber bindet deine Controller selbst und leitet MIDI (beide Richtungen) auch bei geschlossenem rave-mate weiter — die Konfiguration liegt kernelseitig und übersteht Neustarts. Pro Eingang entsteht ein reservierter \"(rave-mate)\"-Port für nahtloses Wiederverbinden plus ein Einweg-THRU-Port für die DJ-Software. Sync schreibt jeden aktivierten Controller oben in den Treiber; der Treiber bindet beim Start, bei Geräteankunft und versucht es weiter, solange das Gerät belegt ist.",
+      "managedSub": "Die Weiterleitung lebt im Treiber und wird bei jeder Controller-Änderung automatisch synchronisiert - kein manueller Sync nötig. Diese Buttons sind Fallbacks.",
       "sync": "Controller → Treiber synchronisieren",
       "reload": "Treiber-Konfig neu laden",
       "bound": "leitet weiter",
@@ -3254,7 +3266,9 @@
       "syncedToast": "{n} verwaltete Eingänge in den Treiber geschrieben",
       "reloadedToast": "Treiber-Konfig neu geladen",
       "needControllers": "Keine aktivierten Controller mit Port zum Synchronisieren.",
-      "queryFailed": "Dieser Treiber-Build hat noch keine Konfig-Ebene — Treiber aktualisieren für verwaltete Weiterleitung."
+      "queryFailed": "Dieser Treiber-Build hat noch keine Konfig-Ebene — Treiber aktualisieren für verwaltete Weiterleitung.",
+      "reapply": "Erneut an Treiber übertragen",
+      "syncFailed": "Konfiguration nicht an den Treiber übertragen: {err} - nach einem rave-mate-Update auch den ravemidi-Treiber aktualisieren/neu installieren und neu starten."
     },
     "sw": {
       "hdr": "DJ-Software-Status",
@@ -3266,6 +3280,34 @@
       "rekordbox": "Rekordbox kann Play nicht über ein Loopback-Mapping auslösen (App-Limit — Controller oder Bridge nutzen). Grid-/Cue-Writeback läuft über XML-Import; vor dem Übernehmen prüfen.",
       "virtualdj": "Mapping + Datenbank-Writeback implementiert, aber noch nicht im Feld getestet. Vorher die VirtualDJ-Datenbank sichern.",
       "serato": "Integration unfertig: Library-Import funktioniert, die Schreibseite ist brandneu. Backups behalten; mit Ecken und Kanten rechnen."
+    },
+    "filter": {
+      "aftertouch": "Aftertouch",
+      "poly": "Poly-Pressure",
+      "bend": "Pitch Bend",
+      "sense": "Active Sensing",
+      "clock": "Clock"
+    },
+    "mon": {
+      "card": "Eingangs-Monitor",
+      "badge": "Live",
+      "sub": "Jede eingehende Controller-Nachricht, neueste zuerst. Drücke ein Bedienelement, um zu sehen, welcher Eintrag aufleuchtet - so erkennst du, welcher Port welches Gerät ist.",
+      "empty": "Noch kein MIDI empfangen - drücke eine Taste oder bewege einen Regler an einem verbundenen Controller.",
+      "now": "jetzt"
+    },
+    "trace": {
+      "hdr": "Wire-Trace - Port {id}",
+      "empty": "Noch keine Ereignisse auf diesem Port.",
+      "refresh": "Aktualisieren",
+      "close": "Schließen",
+      "open": "Wire-Trace",
+      "tapraw": "Gerät roh",
+      "toapp": "→ App",
+      "readpop": "App las",
+      "fromapp": "App schrieb",
+      "feedback": "→ Gerät",
+      "loopdrop": "Loop verworfen",
+      "unknown": "?"
     }
   }
 }

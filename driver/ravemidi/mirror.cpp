@@ -18,10 +18,13 @@
 #include "ioctl.h"
 #include "miniport.h"
 #include "mirror.h"
+#include "framer.h"
 
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 #define MIRROR_READ_BUF 1024   // per-read MIDI byte buffer (bounded)
-#define MIRROR_MAX_REC  256    // sane cap on a single KSMUSICFORMAT record
+#define MIRROR_MAX_REC  (MIRROR_READ_BUF - 8)  // cap on one KSMUSICFORMAT record's payload
+#define MIRROR_REC_HIGHWATER (MIRROR_MAX_REC - 64)  // replaying pin near frame cap: reset it
+#define TAP_SAT_LIMIT 8        // consecutive no-growth resets before the tap gives up
 #define TAP_MAX_OUT (RAVEMIDI_MAX_MIRROR_OUT + 1)  // managed: reserved + outs
 #define TAP_FAIL_LIMIT 3       // consecutive read failures before OnDead fires
 
@@ -34,9 +37,61 @@ typedef struct _RAVE_TAP {
     volatile LONG Stop;
     ULONG OutCount;
     RAVE_PORT* Outs[TAP_MAX_OUT];    // borrowed (caller owns lifetime)
+    ULONG FilterMask;                // RAVEMIDI_FILTER_*: drop classes for Outs[1..]
     RAVE_TAP_DEAD_CB OnDead;
     PVOID DeadCtx;
+    // Replaying-pin defense (seen live on NI Komplete Kontrol A61): the device pin
+    // never consumes its record - every completion re-delivers the full record-so-far
+    // plus the new bytes. LastRec/LastLen detect the replayed prefix so only the tail
+    // is forwarded; SatCount counts no-growth completions at the frame cap.
+    UCHAR LastRec[MIRROR_READ_BUF];
+    ULONG LastLen;
+    ULONG SatCount;
+    RAVE_FRAMER Framer;              // splits forwarded bytes into messages (per-message filter)
 } RAVE_TAP;
+
+// TRUE if a message with this status byte is dropped under the mask.
+static BOOLEAN FilteredMsg(ULONG mask, UCHAR status)
+{
+    if (status >= 0xF8) {
+        if (status == 0xFE) {
+            return (mask & RAVEMIDI_FILTER_ACTIVESENSE) != 0;
+        }
+        return (status <= 0xF9) && (mask & RAVEMIDI_FILTER_CLOCK) != 0;
+    }
+    switch (status & 0xF0) {
+    case 0xA0: return (mask & RAVEMIDI_FILTER_POLYPRESSURE) != 0;
+    case 0xD0: return (mask & RAVEMIDI_FILTER_CHANPRESSURE) != 0;
+    case 0xE0: return (mask & RAVEMIDI_FILTER_PITCHBEND) != 0;
+    default:   return FALSE;
+    }
+}
+
+// Framer emit: fan one complete MIDI message into the tap's out ports. The filter
+// classifies per MESSAGE (a record may interleave classes); reserved (index 0)
+// always receives everything.
+static VOID TapEmit(PVOID ctx, const UCHAR* msg, ULONG len)
+{
+    RAVE_TAP* t = (RAVE_TAP*)ctx;
+    BOOLEAN drop = (t->FilterMask && FilteredMsg(t->FilterMask, msg[0])) ? TRUE : FALSE;
+    for (ULONG i = 0; i < t->OutCount; i++) {
+        if (drop && i > 0) {
+            continue;
+        }
+        RAVE_PORT* o = t->Outs[i];
+        if (o->Kind == RaveMidiPortInternal) {
+            // hidden reserved port: no capture pin exists - hand the bytes
+            // to rave-mate's pended IOCTL_READ via the FromApp ring instead
+            RaveFifoPush(&o->FromApp, msg, len);
+            RaveTracePush(o, RaveTraceToApp, msg, len);
+            RavePortDeliverFromApp(o);
+        } else {
+            RaveFifoPush(&o->ToApp, msg, len);
+            RaveTracePush(o, RaveTraceToApp, msg, len);
+            RavePortNotifyToApp(o);
+        }
+    }
+}
 
 typedef struct _RAVE_MIRROR {
     LIST_ENTRY Link;
@@ -290,6 +345,12 @@ static VOID TapThread(PVOID ctx)
         if (used > MIRROR_READ_BUF) {
             used = MIRROR_READ_BUF;  // never trust DataUsed past the buffer
         }
+        if (used) {
+            // raw pre-parse view -> first fan-in port's ring (diagnosis anchor)
+            RaveTracePush(t->Outs[0], RaveTraceTapRaw, buf, used);
+        }
+        BOOLEAN grew = FALSE;
+        BOOLEAN highwater = FALSE;
         ULONG off = 0;
         while (used - off >= sizeof(KSMUSICFORMAT)) {
             KSMUSICFORMAT* mf = (KSMUSICFORMAT*)(buf + off);
@@ -298,9 +359,25 @@ static VOID TapThread(PVOID ctx)
             if (bc == 0 || bc > MIRROR_MAX_REC || bc > used - off) {
                 break;
             }
-            for (ULONG i = 0; i < t->OutCount; i++) {
-                RaveFifoPush(&t->Outs[i]->ToApp, buf + off, bc);
-                RavePortNotifyToApp(t->Outs[i]);
+            // Replaying-pin dedup: if this record strictly extends the previous one
+            // (same bytes + a tail), only the tail is new. Normal pins deliver fresh
+            // records each read (no strict-prefix growth) and pass through whole.
+            const UCHAR* p = buf + off;
+            ULONG start = 0;
+            if (t->LastLen && bc > t->LastLen &&
+                RtlCompareMemory(p, t->LastRec, t->LastLen) == t->LastLen) {
+                start = t->LastLen;
+            }
+            RtlCopyMemory(t->LastRec, p, bc);  // bc <= MIRROR_MAX_REC < sizeof(LastRec)
+            t->LastLen = bc;
+            if (start < bc) {
+                grew = TRUE;
+                // per-message split so the fan-out filter never misclassifies a
+                // multi-message tail by its first byte only
+                RaveFramerFeed(&t->Framer, p + start, bc - start, TapEmit, t);
+            }
+            if (bc >= MIRROR_REC_HIGHWATER) {
+                highwater = TRUE;
             }
             ULONG pad = (bc + 3u) & ~3u;
             if (pad < bc || pad > used - off) {
@@ -308,13 +385,30 @@ static VOID TapThread(PVOID ctx)
             }
             off += pad;
         }
+        if (highwater && !t->Stop) {
+            // The replaying pin is about to saturate its frame (a full frame stops
+            // completing = dead MIDI). Cycle PAUSE->RUN to reset its record; if the
+            // pin never yields new bytes across TAP_SAT_LIMIT resets, rebind fully.
+            t->SatCount = grew ? 0 : t->SatCount + 1;
+            if (t->SatCount >= TAP_SAT_LIMIT) {
+                if (t->OnDead) {
+                    t->OnDead(t->DeadCtx);
+                }
+                break;
+            }
+            SetPinState(t->PinFileObj, KSSTATE_PAUSE);
+            SetPinState(t->PinFileObj, KSSTATE_RUN);
+            t->LastLen = 0;
+        } else if (grew) {
+            t->SatCount = 0;
+        }
     }
     ExFreePoolWithTag(buf, RAVE_TAG);
 }
 
 #pragma code_seg("PAGE")
 NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
-                     RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap)
+                     ULONG FilterMask, RAVE_TAP_DEAD_CB OnDead, PVOID DeadCtx, RAVE_TAP** OutTap)
 {
     PAGED_CODE();
     *OutTap = nullptr;
@@ -329,6 +423,7 @@ NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
     for (ULONG i = 0; i < OutCount; i++) {
         t->Outs[i] = Outs[i];
     }
+    t->FilterMask = FilterMask;
     t->OnDead = OnDead;
     t->DeadCtx = DeadCtx;
 
@@ -511,7 +606,7 @@ NTSTATUS RaveMirrorCreate(PFILE_OBJECT creator, const RAVEMIDI_CREATE_MIRROR_IN*
         }
     }
 
-    NTSTATUS st = RaveTapOpen(in->SourceInterface, m->Outs, m->OutCount, nullptr, nullptr, &m->Tap);
+    NTSTATUS st = RaveTapOpen(in->SourceInterface, m->Outs, m->OutCount, 0, nullptr, nullptr, &m->Tap);
     if (!NT_SUCCESS(st)) {
         for (ULONG i = 0; i < m->OutCount; i++) {
             RaveUnrefOutputPort(m->Outs[i]);

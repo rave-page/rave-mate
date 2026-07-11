@@ -103,6 +103,7 @@ BOOLEAN RaveConfigSanitize(RAVEMIDI_CONFIG* cfg)
         }
         in->Thru = in->Thru ? 1 : 0;
         in->Feedback = in->Feedback ? 1 : 0;
+        in->Filter &= RAVEMIDI_FILTER_VALID;
         for (ULONG k = 0; k < i; k++) {  // Ids drive the live diff — must be unique
             if (RtlCompareMemory(cfg->Inputs[k].Id, in->Id, sizeof(in->Id)) == sizeof(in->Id)) {
                 return FALSE;

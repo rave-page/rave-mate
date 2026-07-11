@@ -84,7 +84,7 @@ opens) and **mate side** (IOCTL) — and data only crosses sides, never reflects
 | OUT_ONLY | input only | — | mate WRITE | impossible (no app output) |
 | IN_ONLY | output only | mate READ | — | impossible (no app input) |
 | BIDI | in + out | mate READ (→ rave-mate → physical controller LEDs) | mate WRITE (controller input) | never — sides are distinct emitters |
-| LOOPBACK | in + out | its own capture | its own render | yes, by design (classic cable) |
+| LOOPBACK | in + out | its own capture | its own render | cross-process only (v2: self-echo suppressed by owning pid) |
 
 So "one-way" generalizes to "knows the emitter": BIDI is the echo-free duplex cable —
 DJ software never re-hears its own output, rave-mate never re-reads its own WRITE, yet
@@ -285,3 +285,62 @@ Known limits / bring-up list:
   late inputs parks in the retry loop until slots free up.
 - Local build needs the WDK VS toolset shim (see build notes in session summary); CI
   (windows-2022) unaffected.
+
+## Protocol v2 (2026-07-11): loop-free duplex fan-outs + filter + trace
+
+User correction of intent: the driver's job is bidirectional MIDI WITHOUT loops -
+no client (device or app) may receive its own bytes back. Changes:
+
+- **Managed fan-outs are BIDI** (were OUT_ONLY): DJ software gets controller MIDI
+  down AND sends LED feedback up. Every armed port's render bytes tee into its own
+  `Feedback` FIFO; the worker drains all of an input's FIFOs through **per-port MIDI
+  framers** (`framer.cpp` - short-message/running-status/sysex/realtime state machine)
+  so interleaved writers never split a message, one `RaveKsWriteMidi` per complete
+  message. Loop-free structurally: BIDI has no internal render->capture path.
+- **LOOPBACK self-echo suppression**: streams record `PsGetCurrentProcessId()` at
+  NewStream (pin creation runs in the opener's context); a loopback render write from
+  the capture-owning pid is dropped + counted (`LoopSuppressed`, traced as LoopDrop).
+  Caveat: if Windows MIDI Services (midisrv) proxies clients, all pins share midisrv's
+  pid - loopback suppression then over-drops; managed BIDI ports are the supported
+  path there.
+- **`RAVEMIDI_INPUT_CFG.Filter`** (bump to PROTOCOL_VERSION 2, persisted blob size
+  changes - old blobs load as NOT_FOUND, rave-mate re-syncs): per-input mask dropping
+  aftertouch/poly-pressure/pitch-bend/active-sensing/clock on the tap->fan-out path
+  only (reserved port unfiltered). Motivation: Rekordbox MIDI-learn latches onto
+  keybed channel pressure -> "any key fires the binding" + "play only while held"
+  (press fires it, release-pressure fires it again).
+- **`IOCTL_RAVEMIDI_QUERY_TRACE` (0x80B)**: per-port 128-entry ring (seq, interrupt
+  time, dir, len, first 12 bytes) - dirs TapRaw(0, raw KS read pre-parse, lands in the
+  tap's first fan-in port)/ToApp/ReadPop/FromApp/FeedbackOut/LoopDrop. Purpose: pin
+  down on-hardware wire bugs (e.g. wrong bytes at which hop) live from rave-mate's
+  MIDI monitor without KD.
+
+## Protocol v3 (2026-07-11): hidden INTERNAL reserved ports
+
+User ask: hide the reserved `"<Name> (rave-mate)"` port from DJ software while
+rave-mate keeps full access. winmm/WinRT have no per-port hidden flag, so the port
+stops being a MIDI port entirely:
+
+- **`RaveMidiPortInternal` (kind 4)**: `CreatePort` skips miniport +
+  `PcRegisterSubdevice` + FriendlyName stamp - no KS filter exists, nothing to
+  enumerate. Managed reserved ports use it; DJ software sees ONLY the THRU fan-outs.
+- **Data path**: tap pushes internal ports' bytes into `FromApp` +
+  `RavePortDeliverFromApp` (pended `IOCTL_READ`, pre-existing inverted-call plumbing)
+  instead of `ToApp`+Notify. `IOCTL_WRITE` on an internal port = rave-mate speaking
+  toward the device: tees `Feedback` (when armed) + kicks the drain, traced FromApp;
+  never touches FromApp (that ring now carries tap->rave-mate data).
+- **`RavePortDeliverFromApp`** also traces ReadPop, so the trace ring shows the full
+  hop chain for IOCTL readers too.
+- **`IoctlBusy` pin**: WRITE/READ dispatch pins the port under `PortsLock`
+  (find+pin atomic); `DestroyPort` returns BUSY while pinned (graveyard reaps).
+  Closes a find->use UAF window that got hot once managed reapply destroys ports
+  rave-mate is actively IOCTL-reading.
+- **Go**: `midi.Open` resolves managed reserved names to a `driverReader`
+  (own ctl handle, blocking `IOCTL_READ` loop, `CancelIoEx` on Close, re-resolves
+  port id on error - self-heals across config reapplies) feeding the existing
+  `Input` channel through `framer.go` (Go mirror of framer.cpp; sysex skipped for
+  winmm parity). winmm enumeration stays as fallback for older installed drivers.
+- PROTOCOL_VERSION 3: same blob layout as v2, but bump forces app+driver lockstep -
+  a v2 driver with a v3 app would otherwise accept SET_CONFIG yet leave the app
+  IOCTL-reading a Bidi reserved port whose tap data lands in ToApp (silent dead
+  monitor). Mismatch now fails loudly into the existing "update the driver" hint.

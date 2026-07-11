@@ -21,8 +21,9 @@ import (
 //   midi-note:<wireCh>:<note>  momentary Note On (127) then Note Off - Play/Cue (buttons)
 
 func init() {
-	// driver-managed forwarding (ravemidi config plane)
-	onExact("midi-drv-sync", func(u *UI, _ actMsg) { u.midiDrvSync() })
+	// driver-managed forwarding (ravemidi config plane). Sync is AUTOMATIC on every
+	// MIDI config change (midiApply); the button is a manual re-apply fallback.
+	onExact("midi-drv-sync", func(u *UI, _ actMsg) { u.midiDrvSync(true) })
 	onExact("midi-drv-reload", func(u *UI, _ actMsg) {
 		if err := midi.ReloadDriverConfig(); err != nil {
 			u.toast(err.Error())
@@ -31,6 +32,16 @@ func init() {
 		u.toast(i18n.T("midictl.drv.reloadedToast"))
 		u.patchMain()
 	})
+	// per-port wire-trace viewer (driver diagnosis)
+	onPrefix("midi-drv-trace:", func(u *UI, m actMsg) {
+		id := uint32(atoiSafe(m.arg("midi-drv-trace:")))
+		if u.midiTrace == id {
+			id = 0 // toggle off
+		}
+		u.midiTrace = id
+		u.patchMain()
+	})
+	onExact("midi-drv-trace-refresh", func(u *UI, _ actMsg) { u.patchMain() })
 	// port selector: reopen on the picked port (or "" = auto) + persist to config.
 	onExact("midi-port", func(u *UI, m actMsg) {
 		if u.svc.MIDIEmit == nil {
@@ -114,8 +125,8 @@ func init() {
 		u.toast(i18n.T("midictl.panicked"))
 	})
 
-	// ~1 Hz refresh of the active-port line (resolves after the first send opens the port) + each
-	// controller's port status (flips to "reading" when auto-retry recovers a released port).
+	// ~1 Hz refresh of the active-port line (resolves after the first send opens the port), each
+	// controller's port status + activity, and the live input monitor.
 	onLiveTick("midictl", func(u *UI) {
 		if u.svc.MIDIEmit == nil {
 			return
@@ -126,9 +137,13 @@ func init() {
 			midiCfgMu.Lock()
 			cs := append([]config.MIDIControllerMap(nil), u.svc.Cfg.Features.MIDI.Controllers...)
 			midiCfgMu.Unlock()
+			ctx := u.midiCtlCtx()
 			for i, c := range cs {
-				u.tickPatch(&js, "midi-ctlstat-"+strconv.Itoa(i), u.midiCtlPortStatusInner(c))
+				u.tickPatch(&js, "midi-ctlstat-"+strconv.Itoa(i), u.midiCtlPortStatusInner(c, ctx))
 			}
+		}
+		if u.svc.MIDIMon != nil {
+			u.tickPatch(&js, "midi-monitor", u.midiMonitorInner())
 		}
 		u.flushTick(&js)
 	})
@@ -169,33 +184,43 @@ func parseChCC(arg string) (ch, cc byte, ok bool) {
 	return byte(c), cv, true
 }
 
-// midiDrvSync writes every enabled controller mapping as a driver-managed input:
-// the driver binds the hardware itself and keeps forwarding without rave-mate.
-func (u *UI) midiDrvSync() {
+// midiDrvSync mirrors the driver-managed controllers (THRU = ravemidi) into the
+// driver's persisted config. Runs automatically on every MIDI config change - the
+// driver diffs by Id, so unchanged inputs keep their live taps (zero interruption).
+// manual=true adds toasts + re-render (the "Re-apply" button path).
+func (u *UI) midiDrvSync(manual bool) {
+	if !midi.DriverInstalled() {
+		if manual {
+			u.toast(i18n.T("midictl.drv.none"))
+		}
+		return
+	}
 	midiCfgMu.Lock()
-	var ins []midi.DriverInputCfg
+	var ins []midi.ManagedInput
 	for _, c := range u.svc.Cfg.Features.MIDI.Controllers {
-		if !c.Enabled || c.Port == "" {
+		if !c.Enabled || c.Port == "" || c.ThruPort != midi.DriverSentinel {
 			continue
 		}
-		ins = append(ins, midi.DriverInputCfg{
-			ID: c.Name, Name: c.Name, SourceMatch: c.Port,
-			Thru: true, Feedback: true,
-			OutNames: []string{c.Name + " THRU"},
-		})
-		if len(ins) == 8 { // RAVEMIDI_MAX_INPUTS
-			break
-		}
+		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter})
 	}
 	midiCfgMu.Unlock()
-	if len(ins) == 0 {
-		u.toast(i18n.T("midictl.drv.needControllers"))
+	// empty set is a valid sync: clears managed forwarding when the last
+	// driver-managed controller is removed/switched away
+	// outcome lands in midi.DriverSyncErr() - rendered as a persistent driver-card hint
+	if err := midi.SetDriverConfig(midi.ManagedCfgs(ins)); err != nil {
+		if manual {
+			u.toast(err.Error())
+			u.patchMain() // render the persistent sync-failed hint
+		} else if u.log != nil {
+			// auto path stays quiet: an older installed driver rejects the v2 blob
+			// until it's updated - a toast on every config change would be noise
+			u.log.Warn("midi", "ravemidi config sync failed (driver update needed?)",
+				map[string]any{"err": err.Error()})
+		}
 		return
 	}
-	if err := midi.SetDriverConfig(ins); err != nil {
-		u.toast(err.Error())
-		return
+	if manual {
+		u.toast(i18n.T("midictl.drv.syncedToast", i18n.A{"n": fmt.Sprint(len(ins))}))
+		u.patchMain()
 	}
-	u.toast(i18n.T("midictl.drv.syncedToast", i18n.A{"n": fmt.Sprint(len(ins))}))
-	u.patchMain()
 }

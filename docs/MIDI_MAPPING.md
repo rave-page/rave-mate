@@ -47,6 +47,38 @@ bundled.
 > rave-mate ships nothing of the SDK (it calls the DLL the user installed with loopMIDI),
 > but request clearance (info@tobias-erichsen.de) before a release that advertises this.
 
+## Driver-managed forwarding (ravemidi) — shipped
+
+With the ravemidi kernel driver installed, pick **"ravemidi driver (recommended)"** as a
+controller's THRU. The DRIVER then taps the hardware and fans it out — forwarding keeps
+running when rave-mate is closed and comes back after a reboot on its own:
+
+- your DJ software selects the **`<Name> THRU`** port (shown in the UI). It is
+  bidirectional: controller MIDI down, LED feedback up (message-framed, teed to the
+  device) — loop-free by construction, the port has no internal render→capture path
+- rave-mate reads the controller **through the driver directly** instead of the device
+  (its internal endpoint is hidden from every app's MIDI list, so there is nothing to
+  select by mistake); the hardware hold is released so the driver can bind it
+- driver config **syncs automatically** on every controller change (add/remove/port/
+  filter) — no manual sync; "Re-apply"/"Reload" in the driver card are fallbacks. A
+  version-mismatched (older) installed driver shows a persistent "update the driver"
+  hint instead of failing silently
+- per-controller **Filter out** chips drop aftertouch / poly pressure / pitch bend /
+  active sensing / clock on the DJ-facing port only (rave-mate still sees everything).
+  Default drops aftertouch+sensing+clock: keybed aftertouch is what MIDI-learn loves
+  to latch onto ("every key triggers the binding, again on release")
+- it **repairs misbehaving controllers**: some devices re-deliver their entire MIDI
+  history with every new event (seen on NI Komplete Kontrol keyboards) — MIDI-learn
+  then fires on every key and the stream eventually goes silent, in ANY app reading
+  the device directly. The driver detects the replay and forwards each message exactly
+  once, so such controllers stay fully usable through the THRU port
+
+**Input monitor** (MIDI tab): live decoded feed of every incoming message, newest
+first — press a control to see which port belongs to which device. **Wire trace**
+(driver card, per input): the driver's per-port ring of raw events at every hop
+(device raw / to app / app read / app wrote / feedback out / loop drop) for
+on-hardware diagnosis.
+
 ## Setup (Windows)
 
 1. Install a virtual MIDI port - **loopMIDI** (or any driver above). Create one port, e.g.

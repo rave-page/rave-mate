@@ -7,6 +7,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/midimap"
 )
@@ -19,12 +20,34 @@ import (
 // DJ app. Rekordbox can't emit play/cue state over a loopback (Button LED == input → self-loop),
 // so we read it straight from the controller instead.
 
+// midiCtlRenderCtx is per-render shared state: driver bind status by input id +
+// latest monitor activity by source (one query/snapshot per render, not per block).
+type midiCtlRenderCtx struct {
+	drv map[string]midi.DriverInputStatus
+	act map[string]logbus.Entry
+}
+
+// midiCtlCtx builds the shared render context.
+func (u *UI) midiCtlCtx() midiCtlRenderCtx {
+	ctx := midiCtlRenderCtx{act: u.midiLastActivity()}
+	if midi.DriverInstalled() {
+		if sts, err := midi.QueryDriverInputs(); err == nil {
+			ctx.drv = map[string]midi.DriverInputStatus{}
+			for _, st := range sts {
+				ctx.drv[st.ID] = st
+			}
+		}
+	}
+	return ctx
+}
+
 // midiControllersCard renders the connect + learn surface for physical controllers.
 func (u *UI) midiControllersCard() string {
 	if u.svc.MIDISource == nil || u.svc.Cfg == nil {
 		return ""
 	}
 	ctrls := u.svc.Cfg.Features.MIDI.Controllers
+	ctx := u.midiCtlCtx()
 	var b strings.Builder
 	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.intro")) + ` ` + tipTopic("midi-learn-controllers") + `</p>`)
 	b.WriteString(virtualMIDILinksRow())
@@ -32,7 +55,7 @@ func (u *UI) midiControllersCard() string {
 		b.WriteString(emptyState(i18n.T("midictl.in.empty")))
 	}
 	for i := range ctrls {
-		b.WriteString(u.midiControllerBlock(i, ctrls[i]))
+		b.WriteString(u.midiControllerBlock(i, ctrls[i], ctx))
 	}
 	b.WriteString(btnRow(btn(i18n.T("midictl.in.add"), "primary", "midi-ctl-add", "")))
 	return card(i18n.T("midictl.in.card"), badge(i18n.T("midictl.in.badge"), "info"), b.String())
@@ -53,19 +76,39 @@ func virtualMIDILinksRow() string {
 	return b.String()
 }
 
-// midiControllerBlock renders one controller: port + enable + THRU + remove, then the learn grid.
-func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
+// midiOwnDriverPorts collects the names of ports the ravemidi driver derives from the
+// current config (reserved + fan-outs) - internal/DJ-facing, never controller INPUTs.
+func (u *UI) midiOwnDriverPorts() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range u.svc.Cfg.Features.MIDI.Controllers {
+		if c.ThruPort == midi.DriverSentinel && c.Name != "" {
+			out[strings.ToLower(midi.ReservedPortName(c.Name))] = true
+			out[strings.ToLower(midi.DJPortName(c.Name))] = true
+		}
+	}
+	return out
+}
+
+// midiControllerBlock renders one controller: port + enable + routing + remove, then the learn grid.
+func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap, ctx midiCtlRenderCtx) string {
 	idx := strconv.Itoa(i)
+	own := u.midiOwnDriverPorts()
 	portOpts := [][2]string{{"", i18n.T("midictl.in.pickPort")}}
 	for _, p := range u.svc.MIDISource.InputPorts() {
-		if p == midi.VirtualDJPortName || p == midi.VirtualMixerPortName {
-			continue // our own one-way ports - reading them back would loop through rave-mate
+		if p == midi.VirtualDJPortName || p == midi.VirtualMixerPortName ||
+			own[strings.ToLower(p)] || strings.Contains(p, "(rave-mate)") {
+			continue // our own virtual ports - reading them back would loop through rave-mate
 		}
 		portOpts = append(portOpts, [2]string{p, p})
 	}
 	thruOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
-	// Built-in one-way port first (recommended): the DJ app sees an input-only port, so
-	// its automatic LED echo has no output endpoint to loop back through.
+	// ravemidi driver first (recommended): the DRIVER taps the hardware and fans it
+	// out loop-free; forwarding survives rave-mate exit and reboots.
+	if midi.DriverInstalled() {
+		thruOpts = append(thruOpts, [2]string{midi.DriverSentinel, i18n.T("midictl.in.thruDriver")})
+	}
+	// Built-in one-way port: the DJ app sees an input-only port, so its automatic
+	// LED echo has no output endpoint to loop back through.
 	if midi.OneWayAvailable() {
 		thruOpts = append(thruOpts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
 	}
@@ -75,9 +118,10 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		}
 	}
 	head := selectBoxTip(i18n.T("midictl.in.port"), "midi-ctl-port:"+idx, portOpts, c.Port, "midi-in-port") +
-		`<div id="midi-ctlstat-` + idx + `">` + u.midiCtlPortStatusInner(c) + `</div>` +
+		`<div id="midi-ctlstat-` + idx + `">` + u.midiCtlPortStatusInner(c, ctx) + `</div>` +
 		toggleRow(i18n.T("midictl.in.enabled"), "midi-ctl-enable:"+idx, c.Enabled) +
 		selectBoxTip(i18n.T("midictl.in.thru"), "midi-ctl-thru:"+idx, thruOpts, c.ThruPort, "midi-thru") +
+		u.midiDriverThruHTML(i, c, ctx) +
 		u.midiThruWarn(i, c) +
 		btnRow(btn(i18n.T("midictl.in.remove"), "warn", "midi-ctl-remove:"+idx, ""))
 	title := c.Name
@@ -89,26 +133,93 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap) string {
 		u.midiLearnGrid(i, c) + `</div>`
 }
 
+// midiDriverThruHTML renders the driver-managed routing block for a controller whose
+// THRU is the ravemidi driver: which port the DJ software must use, live bind state,
+// and the fan-out message-filter chips. Empty for other THRU modes.
+func (u *UI) midiDriverThruHTML(i int, c config.MIDIControllerMap, ctx midiCtlRenderCtx) string {
+	if c.ThruPort != midi.DriverSentinel {
+		return ""
+	}
+	idx := strconv.Itoa(i)
+	var b strings.Builder
+	b.WriteString(`<div class=midi-drvthru>`)
+	// the ONE port to select in the DJ software - the core "which device do I use" answer
+	b.WriteString(`<div class=midi-drvuse>` + htmlEscape(i18n.T("midictl.in.useInDJ")) +
+		` <code>` + htmlEscape(midi.DJPortName(c.Name)) + `</code></div>`)
+	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.driverNote")) + `</p>`)
+	if st, ok := ctx.drv[c.Name]; ok {
+		variant, line := "warning", i18n.T("midictl.drv.retrying", i18n.A{"n": strconv.Itoa(int(st.RetryCount))})
+		if st.Bound {
+			variant, line = "success", i18n.T("midictl.drv.bound")
+			if st.FeedbackBound {
+				line += " · " + i18n.T("midictl.drv.feedback")
+			}
+		}
+		b.WriteString(statusRow(variant, i18n.T("midictl.in.driverState"), line))
+	} else if midi.DriverInstalled() {
+		b.WriteString(statusRow("muted", i18n.T("midictl.in.driverState"), i18n.T("midictl.in.driverPending")))
+	}
+	// fan-out filter chips: default drops mapping-hostile clutter (aftertouch caught by
+	// MIDI-learn = "every key fires the binding")
+	fl := c.DriverFilter
+	if fl == nil {
+		fl = midi.DefaultDriverFilter()
+	}
+	on := map[string]bool{}
+	for _, k := range fl {
+		on[k] = true
+	}
+	b.WriteString(`<div class=midi-drvfilters><span class=midi-steplbl>` +
+		htmlEscape(i18n.T("midictl.in.filterLbl")) + ` ` + tipTopic("midi-drv-filter") + `</span>`)
+	for _, f := range midi.FilterKeys {
+		b.WriteString(fchip(i18n.T("midictl.filter."+f.Key), "", "midi-ctl-filter:"+idx+":"+f.Key, on[f.Key]))
+	}
+	b.WriteString(`</div></div>`)
+	return b.String()
+}
+
+// midiChildPort is the input the midi child actually opens for c: the driver's hidden
+// reserved endpoint when driver-managed (the kernel holds the hardware), else the
+// configured port. Every UI surface that talks to the child about "this controller's
+// port" (status, learn) MUST use this - the raw hardware name never matches.
+func midiChildPort(c config.MIDIControllerMap) string {
+	if c.ThruPort == midi.DriverSentinel && midi.DriverInstalled() {
+		return midi.ReservedPortName(c.Name)
+	}
+	return c.Port
+}
+
 // midiCtlPortStatusInner renders the open/failed status for the controller's input port. Only
 // shown once the MIDI child has reported (some port opened or failed); "in use" points at the
 // exact fix (Windows single-client MIDI: close the other app, or route via loopMIDI THRU). No
 // tooltip here - this region is live-patched (~1 Hz), which would wipe a pinned tooltip; the
 // full explanation lives on the port select's ⓘ. It flips to "reading" when auto-retry recovers
-// the port after the holding app releases it.
-func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap) string {
+// the port after the holding app releases it. Driver-managed controllers read the reserved
+// per-input port (the driver holds the hardware), so status checks that port instead.
+// A live activity line (latest decoded message + age) answers "which device is THIS one".
+func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap, ctx midiCtlRenderCtx) string {
 	if c.Port == "" || !c.Enabled || u.svc.MIDISource == nil {
 		return ""
 	}
+	want := midiChildPort(c)
+	var out string
 	open := u.svc.MIDISource.OpenInputPorts()
 	failed := u.svc.MIDISource.FailedInputPorts()
-	if len(open) == 0 && len(failed) == 0 {
-		return "" // child hasn't reported yet - don't guess
+	switch {
+	case len(open) == 0 && len(failed) == 0:
+		// child hasn't reported yet - don't guess
+	case portContains(open, want):
+		out = statusRow("ok", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portReading"))
+	default:
+		out = statusRow("warn", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portInUseShort")) +
+			`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + `</p>`
 	}
-	if portContains(open, c.Port) {
-		return statusRow("ok", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portReading"))
+	if e, ok := ctx.act[c.Name]; ok {
+		out += `<div class=midi-activity><span class=midi-actdot></span>` +
+			htmlEscape(i18n.T("midictl.in.lastInput", i18n.A{"ago": agoShort(e.Time)})) +
+			` <span class=midi-actmsg>` + htmlEscape(e.Msg) + `</span></div>`
 	}
-	return statusRow("warn", i18n.T("midictl.in.portStatus"), i18n.T("midictl.in.portInUseShort")) +
-		`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.portInUseHint")) + `</p>`
+	return out
 }
 
 // midiThruWarn warns when a controller's THRU port is one rave-mate itself reads (its Traktor

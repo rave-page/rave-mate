@@ -318,3 +318,40 @@
 .midi-sw{display:flex;align-items:baseline;gap:var(--space-2);padding:3px 0;flex-wrap:wrap}
 .midi-sw-name{font:600 12px var(--font-display,Orbitron),sans-serif;min-width:96px}
 .midi-sw-note{color:var(--rp-muted);font-size:12px;flex:1;min-width:220px}
+
+/* driver-managed routing block (per controller) */
+.midi-drvthru{border-left:2px solid var(--rp-violet,#7C3AED);padding:var(--space-1) var(--space-2);
+  margin:var(--space-1) 0 var(--space-2)}
+.midi-drvuse{font-size:12px;color:var(--rp-fg-dim,#b7b7b7)}
+.midi-drvuse code{color:var(--rp-mint,#08F79B);font:600 12px var(--font-mono,monospace);user-select:text}
+.midi-drvfilters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:var(--space-1)}
+
+/* live activity line under a controller's port status */
+.midi-activity{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--rp-fg-dim,#b7b7b7);
+  margin-top:2px;min-width:0}
+.midi-actdot{width:7px;height:7px;border-radius:50%;background:var(--rp-mint,#08F79B);flex:none}
+.midi-actmsg{font:11px var(--font-mono,monospace);color:var(--rp-muted);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+
+/* input monitor rows */
+.midi-monrows{display:flex;flex-direction:column;gap:1px;font:11px/1.7 var(--font-mono,monospace);
+  overflow-x:auto}
+.midi-monrow{display:flex;gap:var(--space-2);min-width:0;white-space:nowrap}
+.midi-mont{color:var(--rp-muted);min-width:34px;text-align:right;flex:none}
+.midi-monsrc{color:var(--rp-violet,#7C3AED);min-width:90px;flex:none;overflow:hidden;text-overflow:ellipsis}
+.midi-monmsg{color:var(--rp-fg-dim,#b7b7b7);overflow:hidden;text-overflow:ellipsis}
+
+/* wire-trace table */
+.midi-trace{margin-top:var(--space-2)}
+.midi-tracerows{display:flex;flex-direction:column;gap:1px;font:11px/1.7 var(--font-mono,monospace);
+  overflow-x:auto;max-height:280px;overflow-y:auto}
+.midi-tracerow{display:flex;gap:var(--space-2);white-space:nowrap}
+.midi-tracedt{color:var(--rp-muted);min-width:56px;text-align:right;flex:none}
+.midi-tracedir{min-width:84px;flex:none}
+.midi-tracedir--0{color:var(--rp-amber,#FFB547)}
+.midi-tracedir--1,.midi-tracedir--2{color:var(--rp-mint,#08F79B)}
+.midi-tracedir--3,.midi-tracedir--4{color:var(--rp-violet,#7C3AED)}
+.midi-tracedir--5{color:var(--rp-base,#F70864)}
+.midi-tracehex{color:var(--rp-fg,#fafafa);min-width:120px;user-select:text}
+.midi-tracelen{color:var(--rp-muted);min-width:36px}
+.midi-tracedec{color:var(--rp-fg-dim,#b7b7b7)}

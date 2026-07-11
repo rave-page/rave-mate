@@ -276,6 +276,10 @@ var helpTopics = map[string]helpTopic{
 		Title: i18n.T("help.midi-learn-grid.title"),
 		Body:  i18n.T("help.midi-learn-grid.body"),
 	},
+	"midi-drv-filter": {
+		Title: i18n.T("help.midi-drv-filter.title"),
+		Body:  i18n.T("help.midi-drv-filter.body"),
+	},
 	"midi-bridge": {
 		Title: i18n.T("help.midi-bridge.title"),
 		Body:  i18n.T("help.midi-bridge.body"),
