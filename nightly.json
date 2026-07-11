@@ -1,13 +1,13 @@
 {
-  "version": "nightly-de69df1",
-  "build": 64,
-  "commit": "de69df1",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-64-20260711-de69df1.exe",
-  "sha256": "702f35a59058b13ffcdedfd21f5af0558692d728afc145bd964eb32fed9ca25b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-64-20260711-de69df1.exe",
-  "installer_sha256": "e96ed692df5c6f6965ae87569f4629304c7f3324f284208d605da14730f4711c",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-64-20260711-de69df1",
-  "linux_sha256": "fbe321ff04b2476abb49b3a3cc00d2c28b3be239969c245ec7c2dfc36affb987",
+  "version": "nightly-9c9e359",
+  "build": 65,
+  "commit": "9c9e359",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-65-20260711-9c9e359.exe",
+  "sha256": "76fdb84bbad546f39032d98515f665c1d89eb6e32973243d322ca4d7f455e312",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-65-20260711-9c9e359.exe",
+  "installer_sha256": "01d84e82da9069474523a9177ec09d1e8a34ecdc9bb183e73c028984eea933b9",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-65-20260711-9c9e359",
+  "linux_sha256": "b75452e9bb0d889036149c5dfe53338eb5eeb2aeff81ef973faf1917de9cce52",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-11T21:00:29Z",
-  "notes": "Merge branch 'acct-bridge' into development"
+  "released": "2026-07-11T23:32:15Z",
+  "notes": "fix(gridfix): refuse beatgrid write while Traktor/Rekordbox open; clear locked-file error"
 }
