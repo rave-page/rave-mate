@@ -177,6 +177,10 @@ func (u *UI) gridfixCardBody() string {
 	b.WriteString(field(i18n.T("settings.body.gridfix.thresholdMs"), "set:gridfix-thresh",
 		strconv.FormatFloat(f.ResolvedThresholdMS(), 'f', -1, 64), "number"))
 	b.WriteString(toggleRow(i18n.T("settings.body.gridfix.lockFixed"), "set:gridfix-lock", f.LockFixed))
+	if len(f.BiasExt) > 0 {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.calibrated", i18n.A{"vals": gfBiasSummary(f.BiasExt)})) + `</div>`)
+	}
+	b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.calNote")) + `</div>`)
 	b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.note")) + `</div>`)
 	return b.String()
 }

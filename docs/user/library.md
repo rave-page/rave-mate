@@ -57,6 +57,17 @@ consistent across software. Configure sync jobs in Settings; an auto-sync schedu
 them. **Back up your collections before first sync** (the app also keeps its own backups of
 touched files).
 
+## AI beatgrid fixer
+
+**Collection → Fix beatgrids** (or the Beatgrid health card in the right rail): the
+Beat This! neural model detects each track's true beats, a constant grid is fitted,
+and off/missing grid markers are snapped or created — with backup-first Apply into
+Traktor, Rekordbox (XML), VirtualDJ and Serato. Tracks it can't fix confidently go to
+a `MANUAL_GRIDDING_PREP` playlist instead of being guessed at. Mark trusted grids as
+**grid verified** to calibrate the detector's per-format bias and to fine-tune your
+own model. Engine install (CPU or CUDA), calibration, training and per-software
+caveats: see `docs/BEATGRID_FIXER.md`.
+
 ## Batch re-encode (duplicate folder / playlist)
 
 The everyday "FLAC library → CDJ-safe USB copy" move: **Browse toolbar → Re-encode

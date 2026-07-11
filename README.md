@@ -90,6 +90,11 @@ each software can deliver and the setup trade-offs.
 - Local DJ library (SQLite), browse/search/playlists, transcode workers, tag write-back,
   **cross-DJ-software library sync** (Traktor/Rekordbox/VirtualDJ hub-merge), play-count
   sync, append-only change log
+- **AI beatgrid fixer**: [Beat This!](https://github.com/CPJKU/beat_this) neural beat
+  detection in managed CPU/CUDA engines, batch cockpit that snaps/creates grid markers
+  across **Traktor / Rekordbox / VirtualDJ / Serato** (backup-first writes), per-format
+  detector calibration, and fine-tuning on grids you verified →
+  [Beatgrid Fixer](https://github.com/rave-page/rave-mate/wiki/Beatgrid-Fixer)
 
 ### Multi-PC & remote
 - **Peer link**: LAN discovery (mDNS) + SAS-paired encrypted connections between rave-mate
