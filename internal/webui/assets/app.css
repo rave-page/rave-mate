@@ -275,11 +275,22 @@ body {
 .tt:hover .tt-ic,
 .tt:focus-within .tt-ic { opacity: 1; color: var(--rp-fg); }
 .tt:has(.tt-x:checked) .tt-ic { opacity: 1; color: var(--rp-base); }
+/* body-level portal layer (shell.go __ttL) - shown .tt cards re-parent here so no
+ * ancestor overflow container / stacking context can clip or cover them. Zero-size
+ * (children are position:fixed); z above modals (1001), below toasts (9999). */
+#__ttlayer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 1200;
+}
 .tt-card {
   display: none;
-  /* fixed = viewport-relative: NOT clipped by the panel's overflow box (an absolute
-   * descendant would be). __ttplace (shell.go) sets left/top from the ⓘ rect + clamps
-   * inside the window; flips above via .ttp-up. */
+  /* fixed = viewport-relative; __ttplace (shell.go) sets left/top from the ⓘ rect +
+   * clamps inside the window; flips above via .ttp-up (class set on the card - a
+   * portaled card is no longer a .tt descendant). */
   position: fixed;
   z-index: 900;
   width: max-content;
@@ -293,17 +304,18 @@ body {
   overflow-wrap: anywhere; /* wrap long unbroken tokens (urls/paths) inside the clamp */
   word-break: break-word;
 }
-.tt:hover .tt-card,
-.tt:focus-within .tt-card,
-.tt-x:checked ~ .tt-card { display: block; }
-/* visual panel - scrolls internally when taller than the viewport allows */
+/* JS-owned show (shell.go __ttshow/__tthide) - sibling/descendant selectors can't
+ * reach the card once it's portaled into #__ttlayer */
+.tt-card.tt-open { display: block; }
+/* visual panel - long bodies scroll internally: ~60vh cap, tighter when the window
+ * is short; __ttplace caps further to the flip side's actual room */
 .tt-in {
   display: block;
   background: #1b1e24;
   border: 1px solid var(--rp-border);
   border-radius: 10px;
   box-shadow: 0 14px 36px -14px rgba(0, 0, 0, 0.85);
-  max-height: calc(100vh - 2rem);
+  max-height: min(60vh, calc(100vh - 2rem));
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -340,12 +352,12 @@ body {
   border-radius: 999px;
   padding: 2px 9px;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal; /* long labels wrap inside the pill - nowrap clipped at the card edge */
 }
 .tt-link:hover { border-color: var(--rp-violet); background: rgba(124, 58, 237, 0.12); }
 /* edge-aware placement - __ttplace (shell.go) adds .ttp-up when there's more room
  * above the anchor, and clamps left/max-height inline. Shared with .wchip cards. */
-.ttp-up .tt-card {
+.tt-card.ttp-up {
   /* fixed .tt-card: JS owns top/left; only swap the transparent hover bridge below the card */
   border-top: 0;
   border-bottom: 8px solid transparent;

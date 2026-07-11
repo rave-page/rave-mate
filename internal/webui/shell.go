@@ -50,8 +50,9 @@ func deliverEval(id, result string) {
 //   - forwards clicks/submits on [data-act] elements to the bound Go `rave(...)` function,
 //   - exposes __patch(id,html) so Go can mutate the DOM like JS would,
 //   - exposes __snapshot/__click/__read/__set/__type/__tap for the ctl control plane,
-//   - positions the shared tooltip/chip-card primitives (__ttplace - view-agnostic, needs
-//     live viewport measurement CSS can't do).
+//   - shows/positions the shared tooltip/chip-card primitives (__ttshow/__ttplace -
+//     view-agnostic; portals .tt cards to a body-level layer + needs live viewport
+//     measurement CSS can't do).
 const runtimeJS = `(function(){
   function send(p){ try{ if(window.rave) window.rave(JSON.stringify(p)); }catch(e){} }
   function mods(e){ return (e.shiftKey?'s':'')+((e.ctrlKey||e.metaKey)?'c':''); }
@@ -175,9 +176,9 @@ const runtimeJS = `(function(){
       for(var i=0;i<el.children.length;i++){
         var c=el.children[i];
         if(c.id==='__toasts') continue;
-        // #__modal's wrapper has zero rect (its scrim is position:fixed) - never prune it,
-        // or open dialogs vanish from ctl snapshot/click.
-        if(!vis(c) && c.id!=='__modal') continue;
+        // #__modal / #__ttlayer wrappers have zero rect (children are position:fixed) -
+        // never prune them, or open dialogs/pinned tooltips vanish from ctl snapshot.
+        if(!vis(c) && c.id!=='__modal' && c.id!=='__ttlayer') continue;
         var tag=c.tagName.toLowerCase();
         var role=c.getAttribute('data-role')||c.getAttribute('role')||'';
         var own='';
@@ -341,19 +342,55 @@ const runtimeJS = `(function(){
     var to=e.relatedTarget; if(to && el.contains(to)) return;
     send({act: el.getAttribute('data-acthover'), val: 'off'});
   }, true);
-  // ── edge-aware card placement for the tooltip (.tt, tooltip.go) + waveform-chip
-  // (.wchip, library.css) primitives. CSS shows the card (hover/focus/checkbox pin);
-  // this measures it against the viewport, flips above the anchor when there's more
-  // room there (.ttp-up), caps height so tall cards scroll internally (never trimmed),
-  // and clamps into the window. .tt-card is position:fixed so it escapes any panel
-  // overflow clip - JS sets its left/top from the ⓘ rect. .wchip-card stays absolute
-  // (offset-parent-relative left shift; CSS owns its top/flip).
+  // ── tooltip (.tt, tooltip.go) + waveform-chip (.wchip, library.css) card layer ──
+  // .tt cards PORTAL: while shown they re-parent into one fixed body-level layer
+  // (#__ttlayer, above modals) so no ancestor overflow container or stacking context
+  // can clip or cover them - same fix as the web SmartSelect body-portal. JS owns
+  // .tt show/hide (CSS sibling selectors can't reach a portaled card); a hidden card
+  // returns to its trigger so renders/ctl stay consistent. .wchip cards stay absolute
+  // in place (offset-parent-relative; CSS owns show + top/flip), JS only clamps left.
+  var __ttlayer=null;
+  function __ttL(){
+    if(!__ttlayer || !document.body.contains(__ttlayer)){
+      __ttlayer=document.createElement('div'); __ttlayer.id='__ttlayer';
+      document.body.appendChild(__ttlayer);
+    }
+    return __ttlayer;
+  }
+  function __ttcardOf(host){ return host.__ttcard || host.querySelector('.tt-card,.wchip-card'); }
+  function __ttpin(host){ var x=host.querySelector('.tt-x,.wchip-x'); return !!(x&&x.checked); }
+  function __tthostOf(n){ // trigger for an event target: the .tt itself or its portaled card
+    if(!n || !n.closest) return null;
+    var h=n.closest('.tt'); if(h) return h;
+    var c=n.closest('.tt-card'); return c ? (c.__tthost||null) : null;
+  }
+  function __ttinside(host, n){ // n within the trigger or its (portaled) card
+    return !!(n && (host.contains(n) || (host.__ttcard && host.__ttcard.contains(n))));
+  }
+  function __ttshow(host){
+    var card=__ttcardOf(host); if(!card) return;
+    if(card.classList.contains('tt-card')){
+      if(card.parentNode!==__ttL()){ host.__ttcard=card; card.__tthost=host; __ttL().appendChild(card); }
+      card.classList.add('tt-open');
+    }
+    __ttplace(host);
+  }
+  function __tthide(host){
+    var card=host.__ttcard;
+    if(card){
+      card.classList.remove('tt-open','ttp-up');
+      card.style.left=''; card.style.top='';
+      card.__tthost=null; host.__ttcard=null;
+      host.appendChild(card); // un-portal: card travels with future host re-renders
+    }
+    host.classList.remove('ttp-up');
+  }
   function __ttplace(host, retried){
-    var card=host.querySelector('.tt-card,.wchip-card'); if(!card) return;
+    var card=__ttcardOf(host); if(!card) return;
     var inner=card.querySelector('.tt-in')||card;
     card.style.left=''; card.style.top=''; card.style.right=''; card.style.bottom='';
     inner.style.maxHeight='';
-    host.classList.remove('ttp-up');
+    host.classList.remove('ttp-up'); card.classList.remove('ttp-up');
     var r=card.getBoundingClientRect();
     if(!r.width && !r.height){ // not (yet) shown - hover state can lag the event
       if(!retried) requestAnimationFrame(function(){ __ttplace(host, 1); });
@@ -364,8 +401,8 @@ const runtimeJS = `(function(){
     var fixed=(getComputedStyle(card).position==='fixed');
     // vertical: below by default, flip above when it clips and above has more room
     var below=vh-M-a.bottom, above=a.top-M;
-    if(r.height>below && above>below) host.classList.add('ttp-up');
-    var up=host.classList.contains('ttp-up');
+    var up=(r.height>below && above>below);
+    if(up){ host.classList.add('ttp-up'); card.classList.add('ttp-up'); }
     // cap height to the chosen side's room AND never taller than the window (tall cards
     // scroll internally via .tt-in) - the vh-2M bound also guards a trigger scrolled off-screen
     var avail=Math.min(vh-2*M, Math.max(60, up?above:below));
@@ -385,25 +422,66 @@ const runtimeJS = `(function(){
   document.addEventListener('pointerover', function(e){
     var el=e.target.closest && e.target.closest('.tt,.wchip'); if(!el) return;
     var from=e.relatedTarget; if(from && el.contains(from)) return; // already inside
-    __ttplace(el);
+    __ttshow(el);
+  }, true);
+  document.addEventListener('pointerout', function(e){ // close unpinned .tt on true leave
+    var host=__tthostOf(e.target); if(!host) return;
+    if(__ttinside(host, e.relatedTarget)) return; // trigger↔card move, not a leave
+    if(!__ttpin(host) && !host.matches(':focus-within')) __tthide(host);
   }, true);
   document.addEventListener('focusin', function(e){
-    var el=e.target.closest && e.target.closest('.tt,.wchip'); if(el) __ttplace(el);
+    var el=e.target.closest && e.target.closest('.tt,.wchip'); if(el) __ttshow(el);
+  }, true);
+  document.addEventListener('focusout', function(e){
+    var host=__tthostOf(e.target); if(!host) return;
+    if(__ttinside(host, e.relatedTarget)) return;
+    if(!__ttpin(host) && !host.matches(':hover') &&
+       !(host.__ttcard && host.__ttcard.matches(':hover'))) __tthide(host);
   }, true);
   document.addEventListener('change', function(e){ // checkbox pin, incl. ctl __set
     var x=e.target;
-    if(x && x.matches && x.matches('.tt-x,.wchip-x') && x.checked){
-      var el=x.closest('.tt,.wchip'); if(el) __ttplace(el);
+    if(!x || !x.matches) return;
+    if(x.matches('.tt-x')){
+      var el=x.closest('.tt'); if(!el) return;
+      if(x.checked){ __ttshow(el); }
+      else if(!el.matches(':hover') && !(el.__ttcard && el.__ttcard.matches(':hover'))){ __tthide(el); }
+    } else if(x.matches('.wchip-x') && x.checked){
+      var el2=x.closest('.wchip'); if(el2) __ttplace(el2);
     }
   }, true);
   var __ttraf=0;
   function __ttrepin(){ // re-place shown cards (a fixed card must track its trigger on scroll/resize)
     if(__ttraf) return;
     __ttraf=requestAnimationFrame(function(){ __ttraf=0;
-      var xs=document.querySelectorAll('.tt-x:checked,.wchip-x:checked,.tt:hover,.wchip:hover,.tt:focus-within,.wchip:focus-within');
-      for(var i=0;i<xs.length;i++){ var el=xs[i].closest('.tt,.wchip')||xs[i]; if(el) __ttplace(el); }
+      var L=__ttlayer;
+      if(L) for(var i=L.children.length-1;i>=0;i--){
+        var card=L.children[i], host=card.__tthost;
+        if(host && document.contains(host)){ __ttplace(host); continue; }
+        // trigger re-rendered under an open card (live tick / __patch): re-pin the
+        // replacement trigger (same data-label) if pinned, else close - never orphan.
+        var lbl=host&&host.getAttribute ? host.getAttribute('data-label') : '';
+        var pin=host ? __ttpin(host) : false;
+        card.__tthost=null; if(host) host.__ttcard=null;
+        card.remove();
+        if(pin && lbl){
+          var nh=document.querySelector('.tt[data-label="'+lbl+'"]');
+          if(nh){ var nx=nh.querySelector('.tt-x'); if(nx) nx.checked=true; __ttshow(nh); }
+        }
+      }
+      var xs=document.querySelectorAll('.wchip-x:checked,.wchip:hover,.wchip:focus-within');
+      for(var j=0;j<xs.length;j++){ var el=xs[j].closest('.wchip')||xs[j]; if(el) __ttplace(el); }
     });
   }
   window.addEventListener('resize', __ttrepin);
   document.addEventListener('scroll', __ttrepin, true);
+  // DOM patches (__patch / live-tick innerHTML) can detach an open card's trigger -
+  // sweep the layer on any childList change outside it (rAF-debounced, no-op when empty).
+  // Observe the Document node: this runs at document-start, documentElement is still null.
+  new MutationObserver(function(ms){
+    if(!__ttlayer || !__ttlayer.children.length) return;
+    for(var i=0;i<ms.length;i++){
+      var t=ms[i].target;
+      if(t!==__ttlayer && !__ttlayer.contains(t)){ __ttrepin(); return; }
+    }
+  }).observe(document, {childList:true, subtree:true});
 })();`
