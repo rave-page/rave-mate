@@ -207,6 +207,10 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveImg(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/rmt/") { // remote-library media proxy (remoteui_media.go)
+		ruiProxyServe(w, r)
+		return
+	}
 	tok := strings.TrimPrefix(r.URL.Path, "/m/")
 	s.mu.Lock()
 	path, ok := s.tokens[tok]

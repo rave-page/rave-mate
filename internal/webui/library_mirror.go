@@ -8,6 +8,7 @@ package webui
 // against its files). The peer's visible window is untouched (headless session, remoteui_host).
 
 import (
+	"fmt"
 	"html"
 	"strings"
 	"sync"
@@ -75,6 +76,9 @@ func (u *UI) libMirrorBody(target string) string {
 	st.target, st.sid, st.status, st.errMsg = target, sid, mirrorConnecting, ""
 	st.mu.Unlock()
 	hub := u.rui
+	if prevSid != "" {
+		unregisterRuiProxy(prevSid)
+	}
 	u.bg(func() {
 		if prevSid != "" {
 			_ = hub.send(prevTarget, ruiMsg{T: ruiKindClose, SID: prevSid})
@@ -165,6 +169,7 @@ func (u *UI) onMirrorMsg(peer string, m ruiMsg) {
 		st.mu.Lock()
 		st.status, st.errMsg, st.docSize = mirrorLive, "", len(m.Data)
 		st.mu.Unlock()
+		u.mirrorRegisterProxy(peer, m.SID)
 		u.mirrorApplyDoc(m.Data)
 		u.mirrorPatchBanner()
 	case ruiKindEval:
@@ -249,6 +254,7 @@ func (u *UI) mirrorShutdown() {
 	if target == "" || sid == "" {
 		return
 	}
+	unregisterRuiProxy(sid)
 	hub := u.rui
 	u.bg(func() { _ = hub.send(target, ruiMsg{T: ruiKindClose, SID: sid}) })
 }
@@ -268,9 +274,41 @@ func (u *UI) mirrorPeerState(connected map[string]bool) {
 	}
 }
 
-// mirrorRewriteMediaIn maps the peer's media placeholder to this side's loopback proxy
-// (media proxy phase); identity until then.
-func (u *UI) mirrorRewriteMediaIn(payload string) string { return payload }
+// mirrorRegisterProxy binds the session to the local loopback media proxy: /rmt/<sid>/…
+// fetches the peer's token-guarded media bytes over the link (remoteui_media.go).
+func (u *UI) mirrorRegisterProxy(peer, sid string) {
+	hub := u.rui
+	if hub == nil || u.mpProxyPort() == 0 {
+		return
+	}
+	registerRuiProxy(sid, &ruiProxy{
+		fetch: func(path string, off int64, ln int) (ruiMsg, error) {
+			return hub.fetchRemote(peer, sid, path, off, ln)
+		},
+		cache: map[string][]byte{}, cacheCT: map[string]string{},
+	})
+}
 
-// mirrorFetchRes delivers a media proxy reply (media proxy phase).
-func (u *UI) mirrorFetchRes(m ruiMsg) { _ = m }
+// mirrorRewriteMediaIn maps the peer's media placeholder to this side's loopback proxy so
+// covers/thumbnails (and ranged media streams) resolve locally.
+func (u *UI) mirrorRewriteMediaIn(payload string) string {
+	if !strings.Contains(payload, ruiMediaPlaceholder) {
+		return payload
+	}
+	st := u.mirror()
+	st.mu.Lock()
+	sid := st.sid
+	st.mu.Unlock()
+	port := u.mpProxyPort()
+	if port == 0 || sid == "" {
+		return payload
+	}
+	return strings.ReplaceAll(payload, ruiMediaPlaceholder, fmt.Sprintf("http://127.0.0.1:%d/rmt/%s/", port, sid))
+}
+
+// mirrorFetchRes routes a media-fetch reply to its blocked proxy request.
+func (u *UI) mirrorFetchRes(m ruiMsg) {
+	if u.rui != nil {
+		u.rui.deliverFetch(m)
+	}
+}

@@ -128,16 +128,27 @@ func TestHostCloseTearsDown(t *testing.T) {
 
 func TestHostReplacesSessionPerPeer(t *testing.T) {
 	h, w := newTestHub(t)
+	waitSID := func(sid string) {
+		deadline := time.Now().Add(3 * time.Second)
+		for { // opens run async - poll until this sid owns the slot
+			h.mu.Lock()
+			n, s := len(h.host), h.host["peerB"]
+			h.mu.Unlock()
+			if n == 1 && s != nil && s.sid == sid {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("expected single session sid=%s, have %d", sid, n)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	for _, sid := range []string{"a", "b"} {
 		open, _ := ruiEncode(ruiMsg{T: ruiKindOpen, SID: sid})
 		h.onInbound("peerB", open)
-		w.wait(t, ruiKindDoc, "lib-body")
+		waitSID(sid)
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if len(h.host) != 1 || h.host["peerB"].sid != "b" {
-		t.Fatalf("expected single replaced session, got %+v", h.host)
-	}
+	w.wait(t, ruiKindDoc, "lib-body")
 }
 
 func TestChunkRoundTrip(t *testing.T) {

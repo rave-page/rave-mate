@@ -26,9 +26,10 @@ type ruiHub struct {
 	u      *UI                                       // owning window UI (Services + log)
 	sendTo func(nodeID string, payload []byte) error // peerlink SendTo (seam for tests)
 
-	mu    sync.Mutex
-	host  map[string]*ruiSession // peer nodeID → serving session (≤1 per paired peer)
-	reasm map[string]*ruiReasm   // peer nodeID → inbound doc/eval reassembly (1 in flight, ≤ruiReasmMax)
+	mu        sync.Mutex
+	host      map[string]*ruiSession // peer nodeID → serving session (≤1 per paired peer)
+	reasm     map[string]*ruiReasm   // peer nodeID → inbound doc/eval reassembly (1 in flight, ≤ruiReasmMax)
+	fetchPend map[string]chan ruiMsg // fid → media-fetch waiter (cap ruiFetchPendMax; excess errors)
 
 	// onMirror receives complete controller-side messages (doc/eval/closed/fetchres);
 	// set by the mirror (library_mirror.go). Nil = drop.
@@ -206,10 +207,3 @@ func (h *ruiHub) setMirrorSink(fn func(peer string, m ruiMsg)) {
 	h.onMirror = fn
 	h.mu.Unlock()
 }
-
-// rewriteMediaOut rewrites this host's loopback media URLs to the wire placeholder so the
-// controller can point them at its proxy (media proxy phase); identity until then.
-func (h *ruiHub) rewriteMediaOut(payload string) string { return payload }
-
-// handleFetch answers a controller's media byte-range request (media proxy phase).
-func (h *ruiHub) handleFetch(peer string, m ruiMsg) { _ = peer }
