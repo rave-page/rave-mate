@@ -174,6 +174,11 @@ func (u *UI) ceEnter(path string) {
 	u.libSection = "collection"
 	u.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
+	// keep the collection selection in sync with the editor target: the row
+	// highlights and cue-edit ↑/↓ (ceNav) anchor on s.sel.
+	s.mu.Lock()
+	s.sel = &libSel{path: path, kind: "audio", track: tr, inColl: true}
+	s.mu.Unlock()
 	u.patchMain()
 }
 
@@ -852,6 +857,10 @@ func (u *UI) ceKey(val string) {
 		return
 	}
 	switch val {
+	case "up": // move the editor to the prev/next collection track (list nav)
+		u.ceNav(false)
+	case "down":
+		u.ceNav(true)
 	case "left":
 		u.ceStep(-1)
 	case "right":
@@ -1019,6 +1028,46 @@ func (u *UI) libKeyNav(down bool) {
 	if next != "" {
 		u.libSelect(next, nil)
 	}
+}
+
+// ceNav (cue-edit ↑/↓) moves the collection selection to the prev/next track and
+// re-targets the open editor to it. libKeyNav moves the selection + row highlight;
+// ceFollow then swaps the waveform/grid/cursor to the newly selected track.
+func (u *UI) ceNav(down bool) {
+	u.libKeyNav(down)
+	s := u.lib()
+	s.mu.Lock()
+	p := ""
+	if s.sel != nil {
+		p = s.sel.path
+	}
+	s.mu.Unlock()
+	u.ceFollow(p)
+}
+
+// ceFollow re-targets the OPEN cue editor to path when a different collection track
+// is selected (row click or ↑/↓). Silent no-op if the editor is closed, already on
+// this track, or the track has no beatgrid - list nav must not toast-spam across
+// gridless rows (explicit ce-open still toasts the "no grid" hint via ceEnter).
+func (u *UI) ceFollow(path string) {
+	if path == "" {
+		return
+	}
+	c := u.ce()
+	c.mu.Lock()
+	active, same := c.active, c.path == path
+	c.mu.Unlock()
+	if !active || same {
+		return
+	}
+	s := u.lib()
+	s.mu.Lock()
+	tr, ok := s.byPath[path]
+	s.mu.Unlock()
+	if !ok || len(tr.Beatgrid) == 0 {
+		return
+	}
+	u.ceEnter(path)
 }
 
 // libDropsChanged updates the collection's drops index (the "no drops" facet).

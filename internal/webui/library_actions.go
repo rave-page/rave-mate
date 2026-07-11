@@ -60,6 +60,7 @@ func init() {
 		}
 		u.libSetQuiet(func(s *libSt) { s.collAnchor = p })
 		u.libSelect(p, nil)
+		u.ceFollow(p) // in cue-edit mode, clicking a row re-targets the editor
 	})
 	onPrefix("lib-batch:", func(u *UI, m actMsg) {
 		p := m.arg("lib-batch:")
