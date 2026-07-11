@@ -342,6 +342,14 @@
     "app-updates": {
       "title": "Wie sich rave-mate aktualisiert",
       "body": "rave-mate prüft alle 5 Minuten den Release-Feed auf einen neueren Build - ein winziger Manifest-Download; die Anfrage sendet keine Daten über dich, sie lädt nur eine JSON-Datei. Erscheint eine neue Version, wirst du genau einmal pro Version benachrichtigt - hier und per Tray-Hinweis.\n\nKanäle: Jeder Build ist an den Kanal gebunden, aus dem er gebaut wurde - nightly (rollierender Build des aktuellen development-Stands), alpha (Vorab-Tags), beta (Staging) und production. Ein Build aktualisiert sich nur innerhalb seines eigenen Kanals; eine nightly-Installation bleibt nightly.\n\nVerifizierung: Das Feed-Manifest ist mit dem Ed25519-Release-Schlüssel des Projekts signiert, der in dieser Binärdatei eingebettet ist - ein nicht damit signiertes Manifest wird rundweg abgelehnt. Jede heruntergeladene Datei muss zusätzlich ihrer SHA-256-Prüfsumme aus dem signierten Manifest entsprechen, und offizielle Windows-Binaries sind Authenticode-signiert. Schlägt eine Prüfung fehl, wird der Download verworfen und nichts installiert - ohne Ausnahme.\n\nSchritte: 'Herunterladen' lädt den neuen Build neben den aktuellen und verifiziert ihn (noch wird nichts ersetzt). 'Installieren' tauscht den verifizierten Build atomar gegen das laufende Programm - bis zum Neustart nutzt du weiter die alte Version. 'Neu starten und anwenden' startet rave-mate mit der neuen Version; eine Rollback-Kopie (.old) bleibt bis zum nächsten erfolgreichen Start erhalten."
+    },
+    "account-bridge": {
+      "title": "rave.page-Konto-Bridge",
+      "body": "Der LAN-Peer-Link erreicht nur Rechner im selben Netzwerk. Diese Bridge erreicht diesen PC von überall - ein Laptop auf Tour, die rave.page-Web-App auf deinem Handy - indem sie sich über dein rave.page-Konto treffen.\n\nrave.page ist dabei nur ein Treffpunkt. Der Dienst weiß, welche deiner Geräte online sind, und reicht versiegelte Blobs weiter; lesen kann er sie nicht. Die beiden Geräte führen ihren eigenen Schlüsselaustausch durch, weisen sich mit ihren lokal erzeugten Langzeitschlüsseln gegenseitig aus und verschlüsseln danach alles Ende-zu-Ende (AES-256-GCM). Der Server sieht Chiffrat und Bytezahlen, nie einen Tracknamen, einen Befehl oder ein Token.\n\nDer Zugang wird von einer Authenticator-App bewacht, nicht von deinem rave.page-Passwort. Du verknüpfst einen Authenticator mit DIESEM PC; der Schlüssel wird hier erzeugt, hier versiegelt und hier geprüft. rave.page sieht ihn nie - ein Einbruch bei rave.page kann also niemanden hereinlassen. Beim ersten Verbinden muss ein Gerät einen gültigen 6-stelligen Code vorlegen. Das beweist, dass du den Authenticator in der Hand hast, und autorisiert die Kopplung - das Gegenstück dazu, zwei Kopplungscodes nebeneinander auf zwei Bildschirmen zu vergleichen.\n\nNach diesem ersten Code merken sich beide Geräte die Schlüssel des anderen, und dieser PC übergibt dem Aufrufer einen eigenen Einmalschlüssel, damit du nicht ständig Codes tippst. Dieser Schlüssel wird bei jeder Nutzung erneuert, verfällt nach 7 Tagen ohne Nutzung und kann hier jederzeit widerrufen werden. Ein Widerruf zwingt das Gerät wieder zum Code.\n\nDie Sperre ist bewusst unabhängig von rave.page: derselbe Ablauf aus Code und Schlüssel trägt später auch eine direkte PC-zu-PC-Verbindung ganz ohne Konto."
+    },
+    "bridge-local-studio": {
+      "title": "Local Studio über die Bridge",
+      "body": "Local Studio ist der Kanal, über den die rave.page-Web-App diesen Rechner steuert - Laufwerke durchsuchen, transkodieren, Automationen starten, OBS bedienen. Normalerweise muss der Browser AUF diesem PC laufen, denn der Kanal ist eine Loopback-Verbindung, die den Rechner nie verlässt.\n\nSchaltest du dies ein, wird genau derselbe Kanal zusätzlich über die Konto-Bridge angeboten, sodass die Web-App diesen PC aus jedem Browser steuern kann, in dem du angemeldet bist. Das Protokoll wird dafür nicht geändert oder abgeschwächt: derselbe Schlüsselaustausch, dieselbe Signatur pro Nachricht, dieselbe Prüfung, dass beide Seiten zum selben rave.page-Konto gehören.\n\nHinzu kommt eine Schicht darunter. Bevor Local Studio ein Wort sagt, baut die Bridge einen verschlüsselten Tunnel und lässt den Aufrufer die Zugangssperre passieren. Diese Reihenfolge ist entscheidend: Der Handshake von Local Studio trägt ein Zugriffstoken. Auf einem Loopback-Socket ist das harmlos, über ein Relay würdest du damit dem Server dein Token aushändigen. Im Tunnel ist es Chiffrat.\n\nLass dies aus, wenn du die Web-App ohnehin nur auf diesem PC nutzt - dafür genügt der Loopback-Kanal, und es gibt keinen Grund, von außen erreichbar zu sein."
     }
   },
   "library": {
@@ -2244,6 +2252,21 @@
         "train": "Modell trainieren",
         "fewHint": "Tipp: Modelle lernen am meisten von Tracks, die der Fixer falsch hatte — gridde Tracks aus der MANUAL_GRIDDING_PREP-Playlist von Hand, verifiziere sie und trainiere dann. Empfohlen: 20+ verifizierte Tracks.",
         "note": "Das Training fine-tuned den neuronalen Beat-Tracker auf deinen verifizierten Grids in rave-mates eigener Python-Umgebung, mit niedriger Priorität. Ein zurückgehaltener Validierungs-Split misst die Genauigkeit vorher/nachher — ein schlechter Lauf wird einfach verworfen; das aktive Modell wechselt nur, wenn du es auswählst."
+      },
+      "bridge": {
+        "localStudio": "Local Studio über die Bridge bereitstellen",
+        "gateTitle": "Zugangssperre",
+        "enrolHelp": "Scanne dies in eine Authenticator-App (oder tippe den Schlüssel von Hand ein) und bestätige danach mit dem 6-stelligen Code. Dieser Schlüssel verlässt diesen PC nie - rave.page sieht ihn nicht und kann deine Codes nicht prüfen.",
+        "codeLabel": "6-stelliger Code",
+        "confirm": "Code bestätigen",
+        "burnNote": "Der Code, mit dem du bestätigst, ist danach verbraucht. Wenn du in denselben 30 Sekunden ein Gerät koppelst, nimm den NÄCHSTEN Code aus deiner App.",
+        "enrol": "Authenticator verknüpfen",
+        "unenrol": "Authenticator entfernen",
+        "noAuthenticator": "Kein Authenticator verknüpft. Solange keiner verknüpft ist, erreicht nichts von außerhalb diesen PC - es gibt keinen Weg zu beweisen, dass du es bist.",
+        "sessionsTitle": "Vertraute Sitzungen",
+        "sessionSub": "über {transport} - läuft {expires} ab, wenn ungenutzt",
+        "revoke": "Widerrufen",
+        "revokeAll": "Alle widerrufen"
       }
     },
     "card": {
@@ -2429,13 +2452,18 @@
       "gridfixmodel": {
         "title": "Beatgrid-Modell",
         "desc": "Welcher Beat-This!-Checkpoint deine Tracks analysiert — und trainiere ein eigenes Modell auf verifizierten Grids."
+      },
+      "accountbridge": {
+        "title": "rave.page-Konto-Bridge",
+        "desc": "Diesen PC über dein rave.page-Konto von überall erreichen - nicht nur aus diesem Netzwerk."
       }
     },
     "empty": {
       "obsRemotes": "Noch kein Remote-OBS. Füge eins hinzu (der OBS-PC braucht obs-websocket aktiviert).",
       "obsSync": "Noch keine Media-Quellen. Füge eine hinzu (ihr OBS-Input-Name, z. B. eine VLC Video Source).",
       "twPresets": "Noch keine Presets. Füge unten eins hinzu.",
-      "vrOverlays": "Noch keine Overlays. Füge ein Chat- oder Alerts-Panel hinzu."
+      "vrOverlays": "Noch keine Overlays. Füge ein Chat- oder Alerts-Panel hinzu.",
+      "bridgeSessions": "Noch keinem Gerät wird vertraut. Das erste, das einen Code besteht, bekommt einen wiederverwendbaren Schlüssel."
     },
     "label": {
       "add": "Hinzufügen",
@@ -2679,6 +2707,17 @@
       "gridfix": {
         "ready": "Engine bereit",
         "engineMissing": "Engine nicht installiert"
+      },
+      "bridge": {
+        "online": "Bridge online",
+        "devices": "{devices} weitere(s) Gerät(e) im Konto, {links} verbunden",
+        "connecting": "Verbinde mit der Bridge...",
+        "error": "Bridge-Problem",
+        "enrolled": "Authenticator verknüpft - dieser PC ist per Code erreichbar",
+        "notPersisted": "Nur für diese Sitzung",
+        "notPersistedHint": "Dieses Betriebssystem bietet keinen Schlüsselspeicher, den rave-mate nutzen kann. Der Authenticator-Schlüssel bleibt daher im Arbeitsspeicher und geht beim Beenden verloren. Er wird nie unverschlüsselt auf die Festplatte geschrieben. Nach einem Neustart neu verknüpfen.",
+        "signedOut": "Nicht angemeldet",
+        "signedOutHint": "Die Bridge führt deine Geräte innerhalb deines rave.page-Kontos zusammen und bleibt daher untätig, bis du dich anmeldest. Es ist nichts kaputt."
       }
     },
     "subtitle": "Aktiviere nur, was du nutzt - deaktivierte Funktionen belegen keine Ports, Goroutinen oder Subprozesse.",
@@ -2751,7 +2790,13 @@
       "gfTrainDoneTitle": "Modell-Training fertig",
       "gfTrainDoneBody": "Beat-Genauigkeit (Holdout): F {before} → {after}",
       "moduleRestarted": "{name} neu gestartet — neue Einstellungen aktiv",
-      "restartDeferred": "{name}: gespeichert — wird automatisch übernommen, sobald die laufende Aufnahme endet"
+      "restartDeferred": "{name}: gespeichert — wird automatisch übernommen, sobald die laufende Aufnahme endet",
+      "bridgeEnrolled": "Authenticator verknüpft",
+      "bridgeEnrolFailed": "Authenticator konnte nicht verknüpft werden: {error}",
+      "bridgeCodeRejected": "Dieser Code wurde nicht akzeptiert",
+      "bridgeUnenrolled": "Authenticator entfernt",
+      "bridgeRevoked": "Vertraute Sitzung widerrufen",
+      "bridgeRevokedAll": "Alle vertrauten Sitzungen widerrufen"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2790,7 +2835,8 @@
       "vroverlay": "VR-Overlays",
       "webcam": "Webcam / UVC-Quelle",
       "worldsync": "World Sync (Gist-Feeds)",
-      "gridfix": "Beatgrid-Fixer"
+      "gridfix": "Beatgrid-Fixer",
+      "accountbridge": "rave.page-Konto-Bridge"
     },
     "vr": {
       "action": "Aktion",

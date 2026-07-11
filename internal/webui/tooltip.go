@@ -243,6 +243,22 @@ var helpTopics = map[string]helpTopic{
 		Body:  i18n.T("help.obssync-restart.body"),
 	},
 	// ── Settings: DMX / VRSL card ──
+	"account-bridge": {
+		Title: i18n.T("help.account-bridge.title"),
+		Body:  i18n.T("help.account-bridge.body"),
+		Links: []ttLink{
+			{"Time-Based One-Time Password (RFC 6238)", "https://datatracker.ietf.org/doc/html/rfc6238"},
+			{"End-to-end encryption (Wikipedia)", "https://en.wikipedia.org/wiki/End-to-end_encryption"},
+			{"Authenticated key exchange (Wikipedia)", "https://en.wikipedia.org/wiki/Authenticated_Key_Exchange"},
+		},
+	},
+	"bridge-local-studio": {
+		Title: i18n.T("help.bridge-local-studio.title"),
+		Body:  i18n.T("help.bridge-local-studio.body"),
+		Links: []ttLink{
+			{"AES-GCM (Wikipedia)", "https://en.wikipedia.org/wiki/Galois/Counter_Mode"},
+		},
+	},
 	"dmx-connect": {
 		Title: i18n.T("help.dmx-connect.title"),
 		Body:  i18n.T("help.dmx-connect.body"),

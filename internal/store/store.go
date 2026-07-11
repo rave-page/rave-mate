@@ -26,9 +26,10 @@ const (
 	BucketStudioFav   = "studio_favorites" // Local Studio browser favorites (id-keyed)
 	BucketStudioPre   = "studio_presets"   // Local Studio custom transcode presets (id-keyed)
 	BucketStudioRec   = "studio_recents"   // Local Studio recent paths (path-keyed)
+	BucketAuthz       = "authz"            // access gate: TOTP enrolment + trusted-session tokens (sealed)
 )
 
-var buckets = []string{bucketAnalysis, BucketAutomations, BucketSchedules, BucketJobs, BucketRuns, BucketRecordings, BucketIdentity, BucketPeers, BucketStudioFav, BucketStudioPre, BucketStudioRec}
+var buckets = []string{bucketAnalysis, BucketAutomations, BucketSchedules, BucketJobs, BucketRuns, BucketRecordings, BucketIdentity, BucketPeers, BucketStudioFav, BucketStudioPre, BucketStudioRec, BucketAuthz}
 
 // Analysis kinds (path-keyed cache namespaces).
 const (

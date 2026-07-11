@@ -359,6 +359,14 @@
     "led-feedback": {
       "title": "LED-feedback test",
       "body": "Sends a short, recognizable burst toward your controller: Note-On messages sweep across notes 36–51 with rising velocity (about one every 50 ms), then everything is switched off again — under two seconds total. Watch the hardware: pads, keys or buttons in that range should light up and go dark again.\n\nThe reported count comes from the kernel driver's wire trace: each 'feedback out' entry is one message the driver actually wrote to the device's MIDI input. A full count proves the whole path (app → driver → device) works. Note: some controllers ignore plain MIDI Note-On LEDs — they expect a proprietary mode, a specific channel or velocity map, or HID — so dark LEDs with a full count still mean the transport is fine."
+    },
+    "account-bridge": {
+      "title": "rave.page account bridge",
+      "body": "The LAN peer link only reaches machines on the same network. This bridge reaches this PC from anywhere - a laptop on tour, the rave.page web app on your phone - by meeting through your rave.page account.\n\nrave.page is only a meeting point. It knows which of your devices are online and passes sealed blobs between them; it cannot read them. The two devices run their own key exchange, prove their identities to each other with the long-term keys they generated locally, and then encrypt everything end-to-end (AES-256-GCM). The server sees ciphertext and byte counts, never a track name, a command, or a token.\n\nGetting in is gated by an authenticator app, not by your rave.page password. You link an authenticator to THIS PC; the secret is generated here, sealed here, and checked here. rave.page never sees it, so a breach of rave.page cannot let anyone in. The first time a device connects it must present a valid 6-digit code. That proves you are holding the authenticator, which authorizes the pairing - it is the remote equivalent of comparing the pairing digits on two screens side by side.\n\nAfter that first code, the two devices remember each other's keys and this PC hands the caller a one-time key of its own, so you are not typing codes all day. That key is rotated every time it is used, expires after 7 days of not being used, and can be revoked from this screen at any moment. Revoking it forces that device to present a code again.\n\nThe gate is deliberately independent of rave.page: the same code-then-key flow is what a future direct PC-to-PC link will use, with no account involved at all."
+    },
+    "bridge-local-studio": {
+      "title": "Local Studio over the bridge",
+      "body": "Local Studio is the channel that lets the rave.page web app drive this machine - browse your drives, transcode, run automations, control OBS. Normally the browser must be running ON this PC, because the channel is a loopback connection that never leaves the machine.\n\nTurn this on and the exact same channel is offered over the account bridge instead, so the web app can drive this PC from any browser you are signed in on. The protocol is not changed or weakened for this: it is the same key exchange, the same per-message signature, and the same check that both ends belong to the same rave.page account.\n\nWhat is added is a layer underneath. Before Local Studio says a word, the bridge builds an encrypted tunnel and makes the caller pass the access gate above. That ordering matters: Local Studio's handshake carries an access token, and on a loopback socket that is harmless, but across a relay it would be handing your token to the server. Inside the tunnel it is ciphertext.\n\nLeave this off if you only ever use the web app on this PC - the loopback channel already covers that, and there is no reason to be reachable from outside."
     }
   },
   "library": {
@@ -2333,6 +2341,21 @@
         "train": "Train model",
         "fewHint": "Tip: models learn most from tracks the fixer got wrong — hand-grid tracks from the MANUAL_GRIDDING_PREP playlist, verify them, then train. 20+ verified tracks recommended.",
         "note": "Training fine-tunes the neural beat tracker on your verified grids in rave-mate's own Python environment, at low priority. A held-out validation split measures accuracy before vs after, so a bad training run can simply be discarded — the active model only changes when you select it."
+      },
+      "bridge": {
+        "localStudio": "Serve Local Studio over the bridge",
+        "gateTitle": "Access gate",
+        "enrolHelp": "Scan this into an authenticator app (or type the secret in by hand), then enter the 6-digit code it shows to confirm. This secret never leaves this PC - rave.page never sees it and cannot check your codes.",
+        "codeLabel": "6-digit code",
+        "confirm": "Confirm code",
+        "burnNote": "The code you confirm with is used up. If you pair a device in the same 30 seconds, use the NEXT code your app shows.",
+        "enrol": "Link an authenticator",
+        "unenrol": "Remove authenticator",
+        "noAuthenticator": "No authenticator linked. Until you link one, nothing off this network can reach this PC - there is no way to prove it is you.",
+        "sessionsTitle": "Trusted sessions",
+        "sessionSub": "via {transport} - expires {expires} if unused",
+        "revoke": "Revoke",
+        "revokeAll": "Revoke all"
       }
     },
     "card": {
@@ -2518,13 +2541,18 @@
       "gridfixmodel": {
         "title": "Beatgrid Model",
         "desc": "Which Beat This! checkpoint analyzes your tracks — and train your own on grids you verified."
+      },
+      "accountbridge": {
+        "title": "rave.page account bridge",
+        "desc": "Reach this PC from anywhere through your rave.page account - not only from this network."
       }
     },
     "empty": {
       "obsRemotes": "No remote OBS yet. Add one (the OBS PC needs obs-websocket enabled).",
       "obsSync": "No media sources yet. Add one (its OBS input name, e.g. a VLC Video Source).",
       "twPresets": "No presets yet. Add one below.",
-      "vrOverlays": "No overlays yet. Add a chat or alerts panel."
+      "vrOverlays": "No overlays yet. Add a chat or alerts panel.",
+      "bridgeSessions": "No device has been trusted yet. The first one to pass a code gets a key it can reuse."
     },
     "label": {
       "add": "Add",
@@ -2768,6 +2796,17 @@
       "gridfix": {
         "ready": "engine ready",
         "engineMissing": "engine not installed"
+      },
+      "bridge": {
+        "online": "Bridge online",
+        "devices": "{devices} other device(s) on the account, {links} linked",
+        "connecting": "Connecting to the bridge...",
+        "error": "Bridge problem",
+        "enrolled": "Authenticator linked - this PC can be reached with a code",
+        "notPersisted": "Session-only on this OS",
+        "notPersistedHint": "This OS has no secret store rave-mate can use, so the authenticator secret is kept in memory and is lost when rave-mate quits. It is never written to disk unencrypted. Re-link after a restart.",
+        "signedOut": "Not signed in",
+        "signedOutHint": "The bridge meets your devices inside your rave.page account, so it stays idle until you sign in. Nothing is wrong."
       }
     },
     "subtitle": "Toggle what you use - disabled features own no ports, goroutines, or subprocesses.",
@@ -2840,7 +2879,13 @@
       "gfTrainDoneTitle": "Model training finished",
       "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}",
       "moduleRestarted": "{name} restarted — new settings applied",
-      "restartDeferred": "{name}: saved — applies automatically once the current capture/recording ends"
+      "restartDeferred": "{name}: saved — applies automatically once the current capture/recording ends",
+      "bridgeEnrolled": "Authenticator linked",
+      "bridgeEnrolFailed": "Could not link an authenticator: {error}",
+      "bridgeCodeRejected": "That code was not accepted",
+      "bridgeUnenrolled": "Authenticator removed",
+      "bridgeRevoked": "Trusted session revoked",
+      "bridgeRevokedAll": "All trusted sessions revoked"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2879,7 +2924,8 @@
       "vroverlay": "VR overlays",
       "webcam": "Webcam / UVC source",
       "worldsync": "World sync (gist feeds)",
-      "gridfix": "Beatgrid fixer"
+      "gridfix": "Beatgrid fixer",
+      "accountbridge": "rave.page account bridge"
     },
     "vr": {
       "action": "Action",

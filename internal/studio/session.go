@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
-
 	"rave.page/mate/internal/jobs"
 )
 
@@ -19,8 +17,11 @@ import (
 // post-handshake frames carry a monotonic seq + HMAC bound to the token pair.
 type session struct {
 	srv    *Server
-	ws     *websocket.Conn
+	conn   Conn
 	origin string
+	// transport is echoed in handshake-ok: "loopback" for the local WS, "bridge" when the
+	// session arrived over the rave.page account relay.
+	transport string
 
 	state string // "await-hello" | "await-auth" | "open"
 
@@ -88,7 +89,7 @@ func (s *session) writeJSON(v any) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = s.ws.Write(ctx, websocket.MessageText, raw)
+	_ = s.conn.Send(ctx, raw)
 }
 
 // macOf computes b64url(HMAC(jtiBindKey, `${seq}.${canonicalJSON(frameNoMac)}`)). The
@@ -278,7 +279,7 @@ func (s *session) onClientAuth(ctx context.Context, raw []byte, auth clientAuth)
 		"sessionId":    s.sessionID,
 		"sub":          s.sub,
 		"expiresAt":    s.expiresAt,
-		"transport":    "loopback",
+		"transport":    s.transport,
 		"fileBridge":   map[string]any{"baseUrl": "", "token": encB64url(fileToken)},
 		"capabilities": s.srv.capabilities(),
 	})
@@ -422,7 +423,7 @@ func (s *session) notifyStream(forID, event string, payload any) {
 
 func (s *session) closeWS(code int, reason string) {
 	s.closeOnce.Do(func() {
-		_ = s.ws.Close(websocket.StatusCode(code), reason)
+		s.conn.Close(code, reason)
 	})
 }
 

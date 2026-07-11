@@ -275,22 +275,32 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	c.SetReadLimit(maxPayload)
-	s.onConnection(c, origin)
+	s.ServeConn(s.ctx, newWSConn(c), origin, TransportLoopback)
 }
 
-func (s *Server) onConnection(c *websocket.Conn, origin string) {
-	sess := &session{srv: s, ws: c, origin: origin, state: "await-hello", recvSeq: -1}
+// ServeConn runs one studio session over any Conn until it closes. The loopback listener wraps
+// its websocket; the account bridge hands us a relay-backed Conn (already E2E-encrypted and
+// bound to a gate-authorized peer). The protocol is identical either way - do not fork it.
+//
+// origin is the claimed web origin; it is still checked against the allowlist in the
+// client-hello (isAllowedOrigin). Over the bridge there is no HTTP Origin header, so the caller
+// supplies the origin the peer claims - which is advisory there: the real guarantees are the
+// ECDH+HMAC channel, the mutual /auth/me identity match, and the authz gate that let the peer
+// reach us at all.
+//
+// Blocking: call it on your own goroutine.
+func (s *Server) ServeConn(ctx context.Context, c Conn, origin, transport string) {
+	sess := &session{
+		srv: s, conn: c, origin: origin, transport: transport,
+		state: "await-hello", recvSeq: -1,
+	}
 	sess.lastSeen.Store(nowMS())
 	for {
-		typ, data, err := c.Read(s.ctx)
+		data, err := c.Recv(ctx)
 		if err != nil {
 			break
 		}
-		if typ != websocket.MessageText {
-			continue
-		}
-		s.route(s.ctx, sess, data)
+		s.route(ctx, sess, data)
 	}
 	s.removeSession(sess)
 	sess.detachAllSubs()

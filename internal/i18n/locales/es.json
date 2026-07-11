@@ -342,6 +342,14 @@
     "app-updates": {
       "title": "Cómo se actualiza rave-mate",
       "body": "rave-mate comprueba su feed de versiones cada 5 minutos - una descarga mínima del manifiesto; la petición no envía datos sobre ti, solo obtiene un archivo JSON. Cuando aparece una versión nueva se te notifica exactamente una vez por versión, aquí y mediante un globo en la bandeja.\n\nCanales: cada build queda ligado al canal desde el que se construyó - nightly (build continuo de la punta de development), alpha (tags de prelanzamiento), beta (staging) y production. Un build solo se actualiza dentro de su propio canal; una instalación nightly sigue siendo nightly.\n\nVerificación: el manifiesto del feed está firmado con la clave Ed25519 de publicación del proyecto, incrustada en este binario - un manifiesto no firmado con esa clave se rechaza de plano. Cada archivo descargado debe además coincidir con su suma SHA-256 del manifiesto firmado, y los binarios oficiales de Windows van firmados con Authenticode. Si falla cualquier comprobación, la descarga se descarta y no se instala nada - sin excepciones.\n\nPasos: 'Descargar' obtiene el build nuevo junto al actual y lo verifica (todavía no se reemplaza nada). 'Instalar' intercambia atómicamente el build verificado por el programa en ejecución - sigues usando la versión antigua hasta reiniciar. 'Reiniciar para aplicar' relanza rave-mate con la versión nueva; se conserva una copia de reversión (.old) hasta el siguiente arranque correcto."
+    },
+    "account-bridge": {
+      "title": "Puente de cuenta de rave.page",
+      "body": "El enlace entre pares por LAN solo alcanza máquinas de la misma red. Este puente alcanza este PC desde cualquier lugar - un portátil de gira, la aplicación web de rave.page en tu móvil - encontrándose a través de tu cuenta de rave.page.\n\nrave.page es solo un punto de encuentro. Sabe cuáles de tus dispositivos están en línea y pasa bloques sellados entre ellos; no puede leerlos. Los dos dispositivos ejecutan su propio intercambio de claves, se demuestran mutuamente su identidad con las claves de largo plazo que generaron localmente y luego lo cifran todo de extremo a extremo (AES-256-GCM). El servidor ve texto cifrado y recuentos de bytes, nunca el nombre de un tema, una orden ni un token.\n\nLa entrada la guarda una aplicación de autenticación, no tu contraseña de rave.page. Vinculas un autenticador a ESTE PC; la clave se genera aquí, se sella aquí y se comprueba aquí. rave.page nunca la ve, así que una brecha en rave.page no puede dejar entrar a nadie. La primera vez que un dispositivo se conecta debe presentar un código válido de 6 dígitos. Eso demuestra que tienes el autenticador en la mano, lo que autoriza el emparejamiento: es el equivalente remoto de comparar los dígitos de emparejamiento en dos pantallas, una al lado de la otra.\n\nTras ese primer código, ambos dispositivos recuerdan las claves del otro y este PC entrega a quien llama una llave propia de un solo uso, para que no estés tecleando códigos todo el día. Esa llave se renueva cada vez que se usa, caduca tras 7 días sin usarse y se puede revocar desde esta pantalla en cualquier momento. Revocarla obliga a ese dispositivo a presentar un código de nuevo.\n\nEl control de acceso es deliberadamente independiente de rave.page: el mismo flujo de código y luego llave es el que usará un futuro enlace directo de PC a PC, sin ninguna cuenta de por medio."
+    },
+    "bridge-local-studio": {
+      "title": "Local Studio por el puente",
+      "body": "Local Studio es el canal que permite a la aplicación web de rave.page manejar esta máquina: explorar tus discos, transcodificar, ejecutar automatizaciones, controlar OBS. Normalmente el navegador tiene que estar EN este PC, porque el canal es una conexión de bucle local que nunca sale de la máquina.\n\nActiva esto y ese mismo canal se ofrece además por el puente de cuenta, de modo que la aplicación web puede manejar este PC desde cualquier navegador en el que hayas iniciado sesión. El protocolo no se cambia ni se debilita para ello: el mismo intercambio de claves, la misma firma por mensaje y la misma comprobación de que ambos extremos pertenecen a la misma cuenta de rave.page.\n\nLo que se añade es una capa por debajo. Antes de que Local Studio diga una palabra, el puente construye un túnel cifrado y obliga a quien llama a superar el control de acceso. Ese orden importa: el saludo de Local Studio lleva un token de acceso; en un socket de bucle local eso es inofensivo, pero a través de un relé equivaldría a entregarle tu token al servidor. Dentro del túnel es texto cifrado.\n\nDéjalo desactivado si solo usas la aplicación web en este PC: el canal de bucle local ya lo cubre y no hay motivo para ser alcanzable desde fuera."
     }
   },
   "library": {
@@ -2244,6 +2252,21 @@
         "train": "Entrenar modelo",
         "fewHint": "Consejo: los modelos aprenden más de las pistas que el corrector falló — griddea a mano pistas de MANUAL_GRIDDING_PREP, verifícalas y entrena. Recomendado: 20+ pistas verificadas.",
         "note": "El entrenamiento afina el tracker neuronal con tus grids verificados en el entorno Python propio de rave-mate, con prioridad baja. Un split de validación mide la precisión antes/después — un mal entrenamiento se descarta sin más; el modelo activo solo cambia cuando tú lo seleccionas."
+      },
+      "bridge": {
+        "localStudio": "Servir Local Studio por el puente",
+        "gateTitle": "Control de acceso",
+        "enrolHelp": "Escanea esto en una aplicación de autenticación (o escribe la clave a mano) y confirma con el código de 6 dígitos que muestre. Esta clave nunca sale de este PC: rave.page no la ve y no puede comprobar tus códigos.",
+        "codeLabel": "Código de 6 dígitos",
+        "confirm": "Confirmar código",
+        "burnNote": "El código con el que confirmas queda consumido. Si emparejas un dispositivo en esos mismos 30 segundos, usa el SIGUIENTE código que muestre tu aplicación.",
+        "enrol": "Vincular una aplicación de autenticación",
+        "unenrol": "Quitar el autenticador",
+        "noAuthenticator": "No hay ningún autenticador vinculado. Hasta que vincules uno, nada fuera de esta red puede alcanzar este PC: no hay forma de demostrar que eres tú.",
+        "sessionsTitle": "Sesiones de confianza",
+        "sessionSub": "vía {transport} - caduca el {expires} si no se usa",
+        "revoke": "Revocar",
+        "revokeAll": "Revocar todas"
       }
     },
     "card": {
@@ -2429,13 +2452,18 @@
       "gridfixmodel": {
         "title": "Modelo de beatgrid",
         "desc": "Qué checkpoint de Beat This! analiza tus pistas — y entrena el tuyo con grids verificados."
+      },
+      "accountbridge": {
+        "title": "Puente de cuenta de rave.page",
+        "desc": "Alcanza este PC desde cualquier lugar a través de tu cuenta de rave.page, no solo desde esta red."
       }
     },
     "empty": {
       "obsRemotes": "Aún no hay OBS remoto. Añade uno (el PC con OBS necesita obs-websocket habilitado).",
       "obsSync": "Aún no hay fuentes de medios. Añade una (su nombre de entrada de OBS, p. ej. una VLC Video Source).",
       "twPresets": "Aún no hay preajustes. Añade uno abajo.",
-      "vrOverlays": "Aún no hay overlays. Añade un panel de chat o de alertas."
+      "vrOverlays": "Aún no hay overlays. Añade un panel de chat o de alertas.",
+      "bridgeSessions": "Todavía no se confía en ningún dispositivo. El primero que supere un código recibirá una llave reutilizable."
     },
     "label": {
       "add": "Añadir",
@@ -2679,6 +2707,17 @@
       "gridfix": {
         "ready": "motor listo",
         "engineMissing": "motor no instalado"
+      },
+      "bridge": {
+        "online": "Puente en línea",
+        "devices": "{devices} dispositivo(s) más en la cuenta, {links} enlazados",
+        "connecting": "Conectando con el puente...",
+        "error": "Problema con el puente",
+        "enrolled": "Autenticador vinculado: se puede llegar a este PC con un código",
+        "notPersisted": "Solo durante esta sesión",
+        "notPersistedHint": "Este sistema operativo no ofrece un almacén de secretos que rave-mate pueda usar, así que la clave del autenticador se guarda en memoria y se pierde al cerrar rave-mate. Nunca se escribe sin cifrar en el disco. Vuelve a vincularla tras reiniciar.",
+        "signedOut": "Sesión no iniciada",
+        "signedOutHint": "El puente reúne tus dispositivos dentro de tu cuenta de rave.page, así que permanece inactivo hasta que inicies sesión. No pasa nada malo."
       }
     },
     "subtitle": "Activa lo que uses - las funciones desactivadas no ocupan puertos, goroutines ni subprocesos.",
@@ -2751,7 +2790,13 @@
       "gfTrainDoneTitle": "Entrenamiento del modelo terminado",
       "gfTrainDoneBody": "Precisión de beats (holdout): F {before} → {after}",
       "moduleRestarted": "{name} reiniciado: nuevos ajustes aplicados",
-      "restartDeferred": "{name}: guardado — se aplicará automáticamente cuando termine la captura/grabación actual"
+      "restartDeferred": "{name}: guardado — se aplicará automáticamente cuando termine la captura/grabación actual",
+      "bridgeEnrolled": "Autenticador vinculado",
+      "bridgeEnrolFailed": "No se pudo vincular un autenticador: {error}",
+      "bridgeCodeRejected": "Ese código no se aceptó",
+      "bridgeUnenrolled": "Autenticador eliminado",
+      "bridgeRevoked": "Sesión de confianza revocada",
+      "bridgeRevokedAll": "Todas las sesiones de confianza revocadas"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2790,7 +2835,8 @@
       "vroverlay": "Overlays de VR",
       "webcam": "Webcam / fuente UVC",
       "worldsync": "Sincronización de mundos (feeds de gist)",
-      "gridfix": "Corrector de beatgrid"
+      "gridfix": "Corrector de beatgrid",
+      "accountbridge": "Puente de cuenta de rave.page"
     },
     "vr": {
       "action": "Acción",
