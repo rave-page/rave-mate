@@ -22,8 +22,8 @@ live), plus the key wheel and the NO DROPS chip. Facets are filterable dropdowns
 picks show as removable chips and combine (search AND genre AND playlist …).
 
 Playlists are integrated here: filter to exactly one playlist and its full action row
-(prepare cues, export M3U, re-encode, rename, sync, delete) appears inline - Collection
-*is* the playlist view. A track's playlist chips in the detail rail jump straight to
+(prepare cues + export M3U as buttons; rename, re-encode, refresh, sync, delete in the
+**⋯ More** menu) appears inline - Collection *is* the playlist view. A track's playlist chips in the detail rail jump straight to
 that filtered view; a Browse folder bound to a playlist shows the same actions in place.
 New playlists live under **Maintenance**. The Playlists tab remains for ordering/reorder.
 
@@ -37,7 +37,7 @@ persist across restarts.
 ## Folder-playlist refresh
 
 DJ software never re-scans a "folder as playlist" - files added later stay missing.
-Any file-backed playlist's action row has **Refresh from folder** (uses the stored
+Any file-backed playlist's **⋯ More** menu has **Refresh from folder** (uses the stored
 folder binding, or the members' dominant directory for Traktor imports) and an
 **Auto-refresh** toggle (applied once per app run). **Maintenance → Refresh folder
 playlists…** sweeps them all.
@@ -70,15 +70,17 @@ caveats: see `docs/BEATGRID_FIXER.md`.
 
 ## Batch re-encode (duplicate folder / playlist)
 
-The everyday "FLAC library → CDJ-safe USB copy" move: **Browse toolbar → Re-encode
-folder…** (recursive, subfolders mirrored) or **playlist view → Re-encode playlist…**.
+The everyday "FLAC library → CDJ-safe USB copy" move: **Browse toolbar → 📁 Folder →
+Re-encode folder…** (recursive, subfolders mirrored) or **playlist ⋯ More → Re-encode
+playlist…**.
 Pick an audio preset + destination folder (defaults to `<source>-<preset>`); file names
 are kept, already-present outputs skipped, originals never touched. Jobs land in the
 Queue section.
 
 Because of this flow, the per-file encoder panel folds away when a selected audio file
 sits in a collection/playlist context (or a folder marked as a playlist — **Browse
-toolbar → Mark folder as playlist**); *Show encoder for this file* brings it back for
+toolbar → 📁 Folder → Mark folder as playlist**); *Show encoder for this file* brings
+it back for
 one-offs. Set recordings and video keep the full panel up front.
 
 ## Works-together marks (track compatibility)
@@ -108,7 +110,7 @@ compatible with the direct partners. Combines (AND) with the other rules, so
 
 ## Sorted-copy set builder
 
-Any playlist's action row has **Sorted copy…**: builds a NEW playlist (original never
+Any playlist's **⋯ More** menu has **Sorted copy…**: builds a NEW playlist (original never
 modified) grouped by works-together clusters, energy (BPM bands), key (harmonic
 Camelot order), last played, date added, or release date.
 

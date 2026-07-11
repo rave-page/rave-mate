@@ -1,0 +1,9 @@
+/* actionMenu (actionmenu.go) - compact ⋯ dropdown of demoted secondary actions.
+ * Rides smartSelect; this only compacts the trigger + widens the panel for Sub lines. */
+.amenu { display:inline-flex; }
+.amenu .ss-field { margin:0; }
+.amenu .ss-btn { padding:5px 10px; min-width:0; width:auto; }
+.amenu .ss-panel { min-width:260px; right:0; left:auto; }
+.amenu .ss-filter { display:none; } /* short fixed lists - filter row is noise */
+/* hints are intentional help text - wrap fully, never ellipsize */
+.amenu .ss-sub { white-space:normal; overflow:visible; text-overflow:clip; line-height:1.35; }

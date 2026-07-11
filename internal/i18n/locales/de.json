@@ -367,7 +367,8 @@
       "pin": "Ordner anheften",
       "unpin": "Ordner lösen",
       "up": "↑ Aufwärts",
-      "videos": "VIDEOS"
+      "videos": "VIDEOS",
+      "folderMenu": "Ordner"
     },
     "clear": "Leeren",
     "col": {
@@ -680,7 +681,12 @@
       "refreshedToast": "{n} neue Tracks zu {name} hinzugefügt",
       "refreshAllToast": "{n} Tracks über {m} Ordner-Playlists hinzugefügt",
       "refreshNone": "Keine neuen Dateien im Ordner",
-      "noFolder": "kein Ordner zum Auffrischen (leere Playlist, Bindung nicht auflösbar)"
+      "noFolder": "kein Ordner zum Auffrischen (leere Playlist, Bindung nicht auflösbar)",
+      "menu": {
+        "cloud": "Cloud",
+        "reencSub": "Alle Tracks in einen Duplikat-Ordner umkodieren - Originale bleiben unangetastet.",
+        "autoSub": "Wenn aktiv, wird der verknüpfte Ordner bei jedem Start neu eingelesen."
+      }
     },
     "playsort": {
       "artist": "Künstler",
