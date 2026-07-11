@@ -736,6 +736,11 @@
     "sr": {
       "bpmMax": "BPM max.",
       "bpmMin": "BPM min.",
+      "compat": "Kompatibel mit Track",
+      "compatDepth2": "Freunde von Freunden einbeziehen",
+      "compatDirect": "Nur direkte Markierungen",
+      "compatHint": "Findet Tracks, die du als passend zum Anker-Track markiert hast (der Anker selbst zählt mit). „Freunde von Freunden einbeziehen“ nimmt zusätzlich Tracks auf, die zu diesen direkten Partnern passen - ein größerer Pool für den Set-Entwurf. Paare markierst du in der Collection oder in einer Publish-Trackliste (2+ Zeilen wählen → Passt zusammen…).",
+      "compatNone": "(keiner - Regel inaktiv)",
       "countText": "{count} von {total} Titeln passen - {desc}",
       "create": "Smart-Playlist erstellen",
       "desc": "Regeln werden mit UND verknüpft; Genres mit ODER. Treffer aktualisieren sich live, wenn sich deine Sammlung ändert.",
@@ -1714,6 +1719,11 @@
     "broadcastAudio": "Audio broadcasten",
     "capturesCount": "Mitschnitte ({count})",
     "capturing": "nehme auf {format} · {bytes}",
+    "compat": {
+      "help": "Zeilen mit Checkbox sind deiner Library zugeordnet. Wähle zwei oder mehr und markiere sie als zusammenpassend (Blend / Double Drop / Energie) - die Markierungen landen im selben Speicher wie in der Collection, Discovery, Smart-Playlists und der Set-Builder sehen sie also ebenfalls.",
+      "unresolved": "Kein Library-Treffer - diese Zeile kann keine Passt-zusammen-Markierungen tragen. Sie wird verknüpft, sobald die Datei in deiner Library ist (oder nach einem Traktor-History-Abgleich).",
+      "unresolvedCount": "{count} Zeile(n) ohne Library-Treffer sind nicht markierbar - Details per Hover über den Punkt."
+    },
     "confirming": "bestätige - wird in {left} in die Trackliste übernommen",
     "confirmingIn": "bestätige in {left}",
     "connected": "verbunden",

@@ -34,6 +34,10 @@
   font: 13px 'JetBrains Mono', ui-monospace, monospace; }
 .pub-track:nth-child(odd) { background: rgba(255,255,255,.025); }
 .pub-track-n { color: var(--rp-muted, #B98AA0); flex: 0 0 auto; min-width: 26px; text-align: right; }
+/* Works-together select cell: checkbox for library-resolved rows, dim dot for unresolved. */
+.pub-track-chk { flex: 0 0 auto; width: 18px; display: inline-flex; justify-content: center; align-self: center; }
+.pub-track-chk input { margin: 0; }
+.pub-track-chk.none { color: var(--rp-muted, #B98AA0); opacity: .45; cursor: help; }
 .pub-track-o { color: var(--rp-violet-soft, #C4A4FF); flex: 0 0 auto; }
 .pub-track-l { color: #fafafa; min-width: 0; word-break: break-word; }
 

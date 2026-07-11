@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/session/sinks/recorder"
@@ -21,6 +22,7 @@ var (
 	pubStateMu sync.Mutex
 	pubSelIDv  string
 	pubSubtabv = "captures"
+	pubTSelv   = map[string]bool{} // works-together selection over resolved tracklist paths
 )
 
 func (u *UI) pubSelID() string {
@@ -31,7 +33,37 @@ func (u *UI) pubSelID() string {
 
 func (u *UI) pubSetSel(id string) {
 	pubStateMu.Lock()
+	if id != pubSelIDv {
+		pubTSelv = map[string]bool{} // selection is per set
+	}
 	pubSelIDv = id
+	pubStateMu.Unlock()
+}
+
+// pubTSel returns a copy of the tracklist works-together selection.
+func (u *UI) pubTSel() map[string]bool {
+	pubStateMu.Lock()
+	defer pubStateMu.Unlock()
+	out := make(map[string]bool, len(pubTSelv))
+	for p := range pubTSelv {
+		out[p] = true
+	}
+	return out
+}
+
+func (u *UI) pubTSelToggle(path string) {
+	pubStateMu.Lock()
+	if pubTSelv[path] {
+		delete(pubTSelv, path)
+	} else {
+		pubTSelv[path] = true
+	}
+	pubStateMu.Unlock()
+}
+
+func (u *UI) pubTSelClear() {
+	pubStateMu.Lock()
+	pubTSelv = map[string]bool{}
 	pubStateMu.Unlock()
 }
 
@@ -70,6 +102,11 @@ func init() {
 	})
 	onPrefix("pub-tab:", func(u *UI, m actMsg) { u.pubSetSubtab(m.arg("pub-tab:")); u.patchMain() })
 
+	// tracklist works-together marking (paths resolved to the library; store = libdb track_compat)
+	onPrefix("pub-tsel:", func(u *UI, m actMsg) { u.pubTSelToggle(m.arg("pub-tsel:")); u.patchMain() })
+	onExact("pub-tsel-clear", func(u *UI, m actMsg) { u.pubTSelClear(); u.patchMain() })
+	onPrefix("pub-tctx:", func(u *UI, m actMsg) { u.pubTrackCtxModal(m.arg("pub-tctx:")) })
+
 	// capture file ops
 	onPrefix("pub-reveal:", func(u *UI, m actMsg) { u.pubOpenCap(m.arg("pub-reveal:"), true) })
 	onPrefix("pub-open:", func(u *UI, m actMsg) { u.pubOpenCap(m.arg("pub-open:"), false) })
@@ -101,6 +138,20 @@ func init() {
 		}
 		u.pubDel(m.arg("pub-del-do:"))
 	})
+}
+
+// pubTrackCtxModal: right-click on a resolved tracklist row - mark the selection /
+// discover compatible tracks (same store + flows as the Collection).
+func (u *UI) pubTrackCtxModal(path string) {
+	sel := u.pubTSel()
+	var row []string
+	if sel[path] && len(sel) >= 2 {
+		row = append(row, btn(i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(len(sel))}), "primary", "lib-compat-mark:pub", ""))
+	}
+	row = append(row,
+		btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+path, ""),
+		btn(i18n.T("library.copyPath"), "ghost", "copy", path))
+	u.openModal(modal(filepath.Base(path), btnRow(row...), ""))
 }
 
 // ── capture file ops ──────────────────────────────────────────────────────────────

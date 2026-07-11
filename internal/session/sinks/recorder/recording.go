@@ -16,6 +16,7 @@ type Track struct {
 	Key         string    `json:"key,omitempty"`
 	BPM         float64   `json:"bpm,omitempty"`
 	Deck        string    `json:"deck,omitempty"`
+	Path        string    `json:"path,omitempty"` // local file path (deck/NML-reported or history reconcile) - library identity
 	StartedAt   time.Time `json:"startedAt"`
 	EndedAt     time.Time `json:"endedAt,omitzero"`
 	TitleSource string    `json:"titleSource,omitempty"` // provenance of the title/artist

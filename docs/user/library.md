@@ -83,6 +83,18 @@ A selected track's detail rail shows its **Works well together** partners;
 plus friends-of-friends (depth 2, "via <track>", capped at 200) - built for set
 building. ✕ on a direct partner removes that pair's marks.
 
+Marks can also be made straight from a recorded set's tracklist on the **Publish**
+tab (see `recording-and-tracklists.md`) - same store, so Collection discovery, smart
+playlists and the set builder see them immediately.
+
+### Smart-playlist compat rule
+
+The smart-playlist editor has a **Compatible with track** rule: pick an anchor track
+(filterable picker) and the playlist matches everything marked works-together with it
+(the anchor is included). **Include friends-of-friends** widens it to depth 2 - tracks
+compatible with the direct partners. Combines (AND) with the other rules, so
+"compatible with X, 138-150 BPM, ≥4★" is one playlist.
+
 ## Sorted-copy set builder
 
 Any playlist's action row has **Sorted copy…**: builds a NEW playlist (original never

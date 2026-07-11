@@ -890,7 +890,7 @@ func (u *UI) libPlaylistFacet(s *libSt) string {
 			n := p.TrackCount
 			if p.Kind == libdb.PlaylistSmart {
 				if r, ok := libParseRules(p.Rules); ok {
-					n = len(musiclib.FilterSmart(tracks, r))
+					n = len(u.filterSmartDB(tracks, r))
 				}
 			}
 			o := ssOpt{Val: fmt.Sprint(p.ID), Label: p.Name, Badge: fmt.Sprint(n)}
@@ -924,7 +924,7 @@ func (u *UI) libRebuildPlFilter() {
 			names[p.ID] = p.Name
 			if p.Kind == libdb.PlaylistSmart {
 				if r, ok := libParseRules(p.Rules); ok {
-					for _, t := range musiclib.FilterSmart(tracks, r) {
+					for _, t := range u.filterSmartDB(tracks, r) {
 						set[t.Path] = true
 					}
 				}
@@ -1007,7 +1007,7 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 		case libdb.PlaylistSmart:
 			ic = "⚡"
 			if r, ok := libParseRules(p.Rules); ok {
-				sub = i18n.T("library.pl.smartSub", i18n.A{"count": fmt.Sprint(len(musiclib.FilterSmart(s.tracks, r))), "desc": r.Describe()})
+				sub = i18n.T("library.pl.smartSub", i18n.A{"count": fmt.Sprint(len(u.filterSmartDB(s.tracks, r))), "desc": r.Describe()})
 			}
 		case libdb.PlaylistImported:
 			ic = "⤓"
@@ -1687,7 +1687,8 @@ func libParseRules(s string) (musiclib.SmartRules, bool) {
 	return r, json.Unmarshal([]byte(s), &r) == nil
 }
 
-// srCurrent assembles the draft rules (Genres from the chip map, sorted). Caller holds s.mu.
+// srCurrent assembles the draft rules (Genres from the chip map, sorted; compat depth
+// normalized). Caller holds s.mu.
 func (s *libSt) srCurrent() musiclib.SmartRules {
 	out := s.srRules
 	out.Genres = nil
@@ -1697,13 +1698,19 @@ func (s *libSt) srCurrent() musiclib.SmartRules {
 		}
 	}
 	sort.Strings(out.Genres)
+	switch {
+	case out.CompatWith == "":
+		out.CompatDepth = 0
+	case out.CompatDepth < 1:
+		out.CompatDepth = 1
+	}
 	return out
 }
 
 // libSRCountText is the live match-count line. Caller holds s.mu (tracks hydrated).
-func libSRCountText(s *libSt) string {
+func (u *UI) libSRCountText(s *libSt) string {
 	cur := s.srCurrent()
-	return i18n.T("library.sr.countText", i18n.A{"count": fmt.Sprint(len(musiclib.FilterSmart(s.tracks, cur))), "total": fmt.Sprint(len(s.tracks)), "desc": cur.Describe()})
+	return i18n.T("library.sr.countText", i18n.A{"count": fmt.Sprint(len(u.filterSmartDB(s.tracks, cur))), "total": fmt.Sprint(len(s.tracks)), "desc": cur.Describe()})
 }
 
 // libGenres returns distinct collection genres (display form), name-sorted, capped.
@@ -1755,7 +1762,16 @@ func (u *UI) libSmartModalHTML(s *libSt) string {
 	b.WriteString(`<div class=sr-band>` + pbSelect(i18n.T("library.sr.rating"), "lib-sr-rating", rateOpts, strconv.Itoa(r.RatingMin)) +
 		pbField(i18n.T("library.sr.plays"), "lib-sr-plays", libTrimI0(r.PlayCountMin), "number", "") + `</div>`)
 	b.WriteString(pbField(i18n.T("library.sr.search"), "lib-sr-search", r.Search, "text", i18n.T("library.sr.searchHint")))
-	b.WriteString(`<div id=lib-sr-count class=sr-count>` + html.EscapeString(libSRCountText(s)) + `</div>`)
+	// works-together anchor: caller-prepped compat set becomes the rule predicate
+	b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(i18n.T("library.sr.compat")) + `</div>` +
+		libSRCompatPicker(s.tracks, r.CompatWith))
+	if r.CompatWith != "" {
+		depth2 := r.CompatDepth >= 2
+		b.WriteString(`<div class=seg>` + fchip(i18n.T("library.sr.compatDirect"), "", "lib-sr-depth:1", !depth2) +
+			fchip(i18n.T("library.sr.compatDepth2"), "", "lib-sr-depth:2", depth2) + `</div>`)
+	}
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.sr.compatHint")) + `</p></div>`)
+	b.WriteString(`<div id=lib-sr-count class=sr-count>` + html.EscapeString(u.libSRCountText(s)) + `</div>`)
 	confirm := i18n.T("library.sr.create")
 	if s.srID != 0 {
 		confirm = i18n.T("common.save")
@@ -1767,6 +1783,44 @@ func (u *UI) libSmartModalHTML(s *libSt) string {
 		title = i18n.T("library.sr.titleEdit")
 	}
 	return modal(title, b.String(), "")
+}
+
+// libSRCompatPicker: filterable anchor-track picker for the compat rule. Captures the
+// tracks slice (NOT s - the opts closure runs off the render path, no s.mu). Unfiltered
+// open shows a capped slice; the filter pre-filters server-side via ssFilter.
+func libSRCompatPicker(tracks []musiclib.Track, cur string) string {
+	const capRows = 60
+	return smartSelect("lib-sr-compat", "", "lib-sr-compat:", cur, func() []ssOpt {
+		q := strings.ToLower(strings.TrimSpace(ssFilter("lib-sr-compat")))
+		opts := []ssOpt{{Val: "", Label: i18n.T("library.sr.compatNone")}}
+		if cur != "" { // anchor always listed so the closed control shows its label
+			opts = append(opts, ssOpt{Val: cur, Label: libSRTrackLabel(tracks, cur), Sub: cur})
+		}
+		for _, t := range tracks {
+			if len(opts) >= capRows {
+				break
+			}
+			if t.Path == cur {
+				continue
+			}
+			label := trackTitle(t)
+			if q != "" && !strings.Contains(strings.ToLower(label+" "+t.Path), q) {
+				continue
+			}
+			opts = append(opts, ssOpt{Val: t.Path, Label: label, Sub: t.Path})
+		}
+		return opts
+	})
+}
+
+// libSRTrackLabel resolves a path's display title from the collection (else file name).
+func libSRTrackLabel(tracks []musiclib.Track, path string) string {
+	for _, t := range tracks {
+		if t.Path == path {
+			return trackTitle(t)
+		}
+	}
+	return filepath.Base(path)
 }
 
 func libTrimI0(n int) string {

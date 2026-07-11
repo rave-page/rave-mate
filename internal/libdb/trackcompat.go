@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"rave.page/mate/internal/musiclib"
 )
 
 const trackCompatSchema = `
@@ -117,6 +119,58 @@ func (d *DB) CompatFor(path string) ([]CompatRow, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// compatSetCap bounds CompatSet (a pathological mark graph must not balloon a
+// smart-playlist eval); overflow keeps the first cap partners found.
+const compatSetCap = 4000
+
+// CompatSet is the anchor's compat path-set for the smart-playlist rule: anchor + direct
+// partners, plus friends-of-friends when depth ≥2. Nil on no anchor / DB error.
+func (d *DB) CompatSet(anchor string, depth int) map[string]bool {
+	if d == nil || anchor == "" {
+		return nil
+	}
+	direct, err := d.CompatFor(anchor)
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{anchor: true}
+	for _, r := range direct {
+		if len(set) >= compatSetCap {
+			return set
+		}
+		set[r.Path] = true
+	}
+	if depth < 2 {
+		return set
+	}
+	neighbors := make([]string, 0, len(direct))
+	for _, r := range direct {
+		neighbors = append(neighbors, r.Path)
+	}
+	second, err := d.CompatForMany(neighbors)
+	if err != nil {
+		return set
+	}
+	for _, rows := range second {
+		for _, r := range rows {
+			if len(set) >= compatSetCap {
+				return set
+			}
+			set[r.Path] = true
+		}
+	}
+	return set
+}
+
+// SmartPrep precomputes r's DB-derived inputs (compat set) for musiclib.FilterSmartPrep -
+// the DB-free rule engine's one seam. Zero prep when the rule has no anchor or d is nil.
+func (d *DB) SmartPrep(r musiclib.SmartRules) musiclib.SmartPrep {
+	if d == nil || r.CompatWith == "" {
+		return musiclib.SmartPrep{}
+	}
+	return musiclib.SmartPrep{Compat: d.CompatSet(r.CompatWith, r.CompatDepth)}
 }
 
 // CompatForMany maps each input path to its direct marks (chunked IN queries so a

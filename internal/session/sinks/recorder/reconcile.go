@@ -57,6 +57,7 @@ func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Sessi
 		t := Track{
 			StartedAt:   rec.StartedAt.Add(mt.Offset),
 			Deck:        deckLetter(mt.Deck),
+			Path:        mt.Path, // authoritative played-file path - library identity
 			TitleSource: "traktor.history",
 			// The history file's own embedded metadata - present for every played track, incl. ones a
 			// deck loaded from a folder never imported into the library (the "unknown track" case).

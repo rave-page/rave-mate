@@ -34,3 +34,14 @@ in worker subprocesses.
 
 When Traktor writes its history NML (on close), rave-mate auto-reconciles it against captures/
 recordings - no manual step.
+
+## Works-together marks from the tracklist
+
+A set you played IS compatibility data - the Publish tracklist lets you keep it. Rows that
+resolve to your library (the deck-reported file path, the reconciled history path, or a unique
+artist+title match) get a checkbox: select 2+ and mark them **works-together**
+(blend / double drop / energy) from the selection bar or the right-click menu. Marks land in
+the same store as the Library tab's, so Find-compatible discovery, the smart-playlist
+"Compatible with track" rule and the sorted-copy set builder all see them. Rows without a
+library match show a dim dot instead (hover it for why) - they become markable once the file
+is in your library or the set is history-matched.

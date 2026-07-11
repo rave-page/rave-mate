@@ -303,6 +303,9 @@ func (r *Recorder) fillCandidate(np session.NowPlaying) {
 	if t.BPM == 0 {
 		t.BPM, _ = floatField(np.Fields, session.FieldBPM)
 	}
+	if t.Path == "" {
+		t.Path = session.StringField(np.Fields, session.FieldPath)
+	}
 	if t.TitleSource == "" {
 		if fv, ok := np.Fields[session.FieldTitle]; ok {
 			t.TitleSource = fv.Source
@@ -330,6 +333,11 @@ func (r *Recorder) refreshCurrent(np session.NowPlaying) {
 	if t.BPM == 0 {
 		if v, ok := floatField(np.Fields, session.FieldBPM); ok {
 			t.BPM, changed = v, true
+		}
+	}
+	if t.Path == "" {
+		if v := session.StringField(np.Fields, session.FieldPath); v != "" {
+			t.Path, changed = v, true
 		}
 	}
 	if changed {
@@ -681,6 +689,7 @@ func trackFrom(np session.NowPlaying) Track {
 		Key:    session.StringField(np.Fields, session.FieldKey),
 		BPM:    bpm,
 		Deck:   np.Deck,
+		Path:   session.StringField(np.Fields, session.FieldPath),
 	}
 	if fv, ok := np.Fields[session.FieldTitle]; ok {
 		t.TitleSource = fv.Source

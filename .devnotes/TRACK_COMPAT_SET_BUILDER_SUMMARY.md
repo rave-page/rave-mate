@@ -36,13 +36,31 @@ re-evals graph; sorted copy by key + dots → 30 tracks + 17 dividers interleave
 untouched; dividers absent from collection (12835) + present in playlist + in M3U (17);
 `is_divider` backfill on existing db; right-click ctx menu via `ctl tap2`.
 
+## Shipped follow-up (publish-compat branch)
+
+- **Publish-tab marking**: `recorder.Track.Path` now captured live (merged deck `path`
+  field via `trackFrom`/`fillCandidate`/`refreshCurrent`) + set from `mt.Path` on
+  history reconcile. `pubTrackRows` resolves each row (Track.Path, else
+  `libdb.TrackPathByMeta` unique artist+title); resolved rows get checkbox +
+  `data-ctx` → mark selection (`lib-compat-mark:pub` src) / find-compatible; batchbar
+  reused; unresolved rows = dim dot + tooltip. Selection = `pubTSelv` (per set, path-
+  keyed), same `track_compat` store.
+- **Smart-rule compat term**: kept `FilterSmart` DB-free via a prep seam -
+  `SmartRules.CompatWith`+`CompatDepth` (JSON `compatWith`/`compatDepth`),
+  `SmartPrep{Compat map[string]bool}` + `MatchPrep`/`FilterSmartPrep`; membership is
+  the predicate, **fail-closed** (anchor set + nil prep = zero matches, never wrong
+  matches). `libdb.CompatSet(anchor,depth)` (anchor incl., cap 4000) +
+  `DB.SmartPrep(rules)` bridge; every eval site goes through webui
+  `filterSmartDB` (playlist items, facet badges, list counts, editor count) + Fyne
+  `smartCount`/`openPlaylist`. Editor UI: `libSRCompatPicker` smartSelect (server-side
+  pre-filter via new `ssFilter(id)`, cap 60, anchor pinned) + direct/depth-2 fchips;
+  depth normalized in `srCurrent`.
+
 ## Deferred
 
-- **Publish-tab tracklist selection**: recorder tracks carry artist/title only, no
-  library path identity → marking needs fuzzy resolution first; not cheap, deferred.
-- **Smart-rule `compat` term**: `musiclib.FilterSmart` is pure (no DB); a compat rule
-  needs `track_compat` access → doesn't extend cleanly. Playlist facet + sorted-copy
-  cover the discovery use today.
+- Fyne smart-rules dialog has no compat-anchor picker (webview is the strategic UI);
+  Fyne *evaluation* is prep-wired, so compat playlists render correctly there.
+- Publish rows: no shift-range selection (plain toggle only).
 
 ## Gotchas
 
