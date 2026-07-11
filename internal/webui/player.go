@@ -340,6 +340,9 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		}
 		for i, d := range ce.drops {
 			if x := toX(d / 1000); x >= 0 && x <= w {
+				if ce.dsel[i] { // selected drop: same glow treatment as selected cues
+					fmt.Fprintf(&b, `<rect x="%.1f" y="0" width="5" height="%.0f" fill="#FFB547" opacity="0.35"/>`, x-2.5, h)
+				}
 				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#FFB547" stroke-width="2"/>`, x, x, h)
 				fmt.Fprintf(&b, `<path d="M %.1f 8 l 7 -8 l -14 0 z" fill="#FFB547"/>`, x)
 				fmt.Fprintf(&b, `<text x="%.1f" y="22" fill="#FFB547" font-size="11" font-family="monospace" text-anchor="middle">D%d</text>`, x, i+1)

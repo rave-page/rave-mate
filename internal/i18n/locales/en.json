@@ -312,7 +312,7 @@
     },
     "cue-edit": {
       "title": "Cue editor — keys & mouse",
-      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid."
+      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid. Drag selects drops as well as cues; click a marker to select just it, Ctrl+click toggles single markers in and out of the selection, and Del (or Backspace) deletes every selected cue and drop in one go — library, change journal and file tag all follow."
     },
     "midi-drv-filter": {
       "title": "Fan-out message filter",
@@ -1118,6 +1118,9 @@
       "removeDrop": "Remove drop at cursor",
       "noFileTag": "This file format can't carry the drop tag — drops are stored in the library only (MP3/FLAC also store them in the file).",
       "selection": "{n} cues selected",
+      "selDrops": "{n} drop markers selected",
+      "delHint": "Del / Backspace removes every selected cue and drop in one step.",
+      "deletedToast": "Removed {cues} cues + {drops} drops",
       "patternName": "Pattern name…",
       "savePattern": "Save as pattern",
       "applyHot": "Apply patterns (hotcues)",

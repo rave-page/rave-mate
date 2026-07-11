@@ -133,7 +133,7 @@ const runtimeJS = `(function(){
     var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
-    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space'};
+    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del'};
     var name=map[e.key]; if(!name) return;
     if(e.ctrlKey && name!=='left' && name!=='right') return; // Ctrl reserved for grid nudge only
     if(name==='space'&&e.repeat){ e.preventDefault(); return; } // hold = one down, one up
@@ -312,7 +312,8 @@ const runtimeJS = `(function(){
     }
     __pcur=el; try{ el.setPointerCapture(e.pointerId); }catch(_){}
     e.preventDefault();
-    send({act: el.getAttribute('data-actpos'), val: 'down:'+__pfrac(el,e)});
+    // mods ride as a 3rd CSV field ("down:fx,fy,cs") - mpPos ignores it, ceSurf reads it
+    send({act: el.getAttribute('data-actpos'), val: 'down:'+__pfrac(el,e)+','+mods(e)});
   });
   document.addEventListener('pointermove', function(e){
     if(!__pcur) return;

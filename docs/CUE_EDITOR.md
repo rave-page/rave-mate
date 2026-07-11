@@ -22,17 +22,28 @@ holds the actions.
 
 | Input | Action |
 |---|---|
-| Left-click wave | move beat cursor (snaps to nearest beat) |
+| Left-click wave | move beat cursor (snaps to nearest beat) — on a marker: select just it |
+| Ctrl+click | toggle a cue/drop marker in or out of the selection |
 | Right-click | add **memory cue** at that beat |
 | Shift+right-click | add **drop marker** |
 | Ctrl+right-click | remove cue + drop markers at that beat |
-| Drag | rubber-band-select cues (for saving a pattern) |
+| Drag | rubber-band-select cues **and drops** (pattern save / bulk delete) |
 | ← / → | walk beats · Shift = beat-jump (size: Shift+↑/↓, 1–64) |
 | T / Enter | add drop at cursor · +Shift removes |
+| Del / Backspace | delete **every selected cue and drop** in one action |
 | Hold Space | audition from cursor (release stops) |
 | Ctrl+← / → | nudge the whole beatgrid 10 ms (Ctrl+Shift: 1 ms) — **cues and drops move with the grid** |
 
-Keys work only while the Library tab has focus and no input field is active.
+Keys work only while the Library tab has focus and no input field is active. The ⓘ
+tooltip in the strip above the wave shows this table as a key-cap grid.
+
+### Selection
+
+The rubber band selects cues **and drops** — selected cues glow in their color, drops
+in amber. Click a marker to select only it; Ctrl+click adds/removes single markers.
+**Del** (or Backspace) removes the whole selection at once: cues from the library,
+drops from library + file tag (one debounced tag write), all journaled in the change
+log. Empty selection = Del is a no-op.
 
 Numbers along the top of the waveform show the **beat distance between neighbouring
 markers** (cues + drops); flags at the bottom carry the hotcue pad number (or `M` for
