@@ -196,29 +196,18 @@ func (u *UI) midiDrvSync(manual bool) {
 		return
 	}
 	midiCfgMu.Lock()
-	var ins []midi.DriverInputCfg
+	var ins []midi.ManagedInput
 	for _, c := range u.svc.Cfg.Features.MIDI.Controllers {
 		if !c.Enabled || c.Port == "" || c.ThruPort != midi.DriverSentinel {
 			continue
 		}
-		fl := c.DriverFilter
-		if fl == nil {
-			fl = midi.DefaultDriverFilter()
-		}
-		ins = append(ins, midi.DriverInputCfg{
-			ID: c.Name, Name: c.Name, SourceMatch: c.Port,
-			Thru: true, Feedback: true, Filter: midi.FilterMask(fl),
-			OutNames: []string{midi.DJPortName(c.Name)},
-		})
-		if len(ins) == 8 { // RAVEMIDI_MAX_INPUTS
-			break
-		}
+		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter})
 	}
 	midiCfgMu.Unlock()
 	// empty set is a valid sync: clears managed forwarding when the last
 	// driver-managed controller is removed/switched away
-	if err := midi.SetDriverConfig(ins); err != nil {
-		u.midiSyncErr = err.Error() // surfaced as a persistent driver-card hint
+	// outcome lands in midi.DriverSyncErr() - rendered as a persistent driver-card hint
+	if err := midi.SetDriverConfig(midi.ManagedCfgs(ins)); err != nil {
 		if manual {
 			u.toast(err.Error())
 			u.patchMain() // render the persistent sync-failed hint
@@ -230,7 +219,6 @@ func (u *UI) midiDrvSync(manual bool) {
 		}
 		return
 	}
-	u.midiSyncErr = ""
 	if manual {
 		u.toast(i18n.T("midictl.drv.syncedToast", i18n.A{"n": fmt.Sprint(len(ins))}))
 		u.patchMain()

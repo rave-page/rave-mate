@@ -1,7 +1,21 @@
 package midi
 
+import "sync/atomic"
+
 // Managed-input config types for the ravemidi driver (portable; the Windows wire
 // codec lives in ravemidi_config_windows.go).
+
+// driverSyncErr holds the last SetDriverConfig outcome ("" = ok) so both sync
+// paths (app boot + webui apply) surface the same persistent UI hint.
+var driverSyncErr atomic.Value
+
+// DriverSyncErr returns the last driver config-sync failure ("" = last sync ok).
+func DriverSyncErr() string {
+	if v, ok := driverSyncErr.Load().(string); ok {
+		return v
+	}
+	return ""
+}
 
 // Filter bits (RAVEMIDI_FILTER_*): message classes dropped on the fan-out path.
 const (
@@ -52,6 +66,35 @@ func FilterMask(keys []string) uint32 {
 		}
 	}
 	return m
+}
+
+// ManagedInput describes one driver-managed controller (config-decoupled input
+// to ManagedCfgs; shared by the app's boot sync + the webui's apply sync).
+type ManagedInput struct {
+	Name        string   // stable id + port base name
+	SourceMatch string   // hardware device FriendlyName substring (config Port)
+	Filter      []string // FilterKeys keys; nil = DefaultDriverFilter(), empty = none
+}
+
+// ManagedCfgs maps managed inputs to driver input configs (thru+feedback on,
+// one DJ-facing fan-out per input, capped at the driver's 8-input limit).
+func ManagedCfgs(ins []ManagedInput) []DriverInputCfg {
+	out := make([]DriverInputCfg, 0, len(ins))
+	for _, m := range ins {
+		fl := m.Filter
+		if fl == nil {
+			fl = DefaultDriverFilter()
+		}
+		out = append(out, DriverInputCfg{
+			ID: m.Name, Name: m.Name, SourceMatch: m.SourceMatch,
+			Thru: true, Feedback: true, Filter: FilterMask(fl),
+			OutNames: []string{DJPortName(m.Name)},
+		})
+		if len(out) == 8 { // RAVEMIDI_MAX_INPUTS
+			break
+		}
+	}
+	return out
 }
 
 // DriverInputCfg mirrors RAVEMIDI_INPUT_CFG (protocol v3).

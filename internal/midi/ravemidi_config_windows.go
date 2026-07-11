@@ -60,8 +60,16 @@ func rmGetWstr(b []byte, off, maxW int) string {
 	return string(utf16.Decode(u))
 }
 
-// SetDriverConfig persists + applies the managed-input set.
-func SetDriverConfig(inputs []DriverInputCfg) error {
+// SetDriverConfig persists + applies the managed-input set (outcome recorded
+// for DriverSyncErr).
+func SetDriverConfig(inputs []DriverInputCfg) (err error) {
+	defer func() {
+		if err != nil {
+			driverSyncErr.Store(err.Error())
+		} else {
+			driverSyncErr.Store("")
+		}
+	}()
 	if len(inputs) > rmMaxInputs {
 		return fmt.Errorf("too many managed inputs (max %d)", rmMaxInputs)
 	}

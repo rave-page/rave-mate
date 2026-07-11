@@ -95,8 +95,8 @@ func (u *UI) midiDriverManagedHTML() string {
 	var b strings.Builder
 	b.WriteString(`<div class=pb-label>` + htmlEscape(i18n.T("midictl.drv.managedHdr")) + `</div>`)
 	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.managedSub")) + `</p>`)
-	if u.midiSyncErr != "" {
-		b.WriteString(hint("warn", i18n.T("midictl.drv.syncFailed", i18n.A{"err": u.midiSyncErr})))
+	if e := midi.DriverSyncErr(); e != "" { // covers boot sync AND webui apply sync
+		b.WriteString(hint("warn", i18n.T("midictl.drv.syncFailed", i18n.A{"err": e})))
 	}
 	sts, err := midi.QueryDriverInputs()
 	switch {

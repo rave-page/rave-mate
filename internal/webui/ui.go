@@ -60,7 +60,6 @@ type UI struct {
 	libSection   string      // Library active sub-section: "browse" | "collection"
 	libDir       string      // Library browse cwd
 	midiTrace    uint32      // ravemidi wire-trace viewer: port id (0 = closed)
-	midiSyncErr  string      // last auto driver-sync failure ("" = ok); rendered as a card hint
 	libSearchDeb *time.Timer // pending debounced library/collection search re-render (guarded by mu)
 	remoteTarget string      // Library/Automations control target: "" = this computer, else a peer nodeID
 

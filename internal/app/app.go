@@ -292,6 +292,9 @@ func run(parent context.Context, serviceMode bool) error {
 	// MIDI driver runs in a child process (winmm callback faults can't touch the daemon);
 	// its host lifecycle rides the source slot, so the enable-gate + Reconcile drive it.
 	midiSrc, merr := featurehost.NewMidiProxy(log, midiMon, func() featurehost.MidiConfig {
+		// driver sync BEFORE the child (re)opens ports: covers boot + driver-update
+		// reboots, where no config edit would otherwise trigger the webui sync
+		syncMIDIDriver(cfg.Features.MIDI.Controllers, log)
 		return featurehost.MidiConfig{
 			DenonPort:   cfg.Features.MIDI.DenonPort,
 			CustomPort:  cfg.Features.MIDI.CustomPort,
@@ -1633,6 +1636,30 @@ func run(parent context.Context, serviceMode bool) error {
 func traktorLogPath() string {
 	p, _ := config.DataPath("traktor-payloads.jsonl")
 	return p
+}
+
+// syncMIDIDriver mirrors driver-managed controllers into the ravemidi driver. Runs from
+// the midi child's config provider (boot + every reconfigure); the webui re-syncs on
+// config edits with error surfacing. An empty set is skipped here (never wipe the
+// driver's persisted config from a mere restart - clearing is an explicit webui apply).
+func syncMIDIDriver(cs []config.MIDIControllerMap, log *logbus.Bus) {
+	if !midi.DriverInstalled() {
+		return
+	}
+	var ins []midi.ManagedInput
+	for _, c := range cs {
+		if !c.Enabled || c.Port == "" || c.ThruPort != midi.DriverSentinel {
+			continue
+		}
+		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter})
+	}
+	if len(ins) == 0 {
+		return
+	}
+	if err := midi.SetDriverConfig(midi.ManagedCfgs(ins)); err != nil && log != nil {
+		log.Warn("midi", "ravemidi driver sync failed (driver update needed?)",
+			map[string]any{"err": err.Error()})
+	}
 }
 
 // midiControllerInits maps enabled native-learn controllers to the midi child's init wire.
