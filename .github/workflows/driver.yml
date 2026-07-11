@@ -68,3 +68,64 @@ jobs:
           name: ravemidi-x64-unsigned
           path: artifact/
           retention-days: 14
+
+  # Partner Center attestation submission package (manual dispatch only).
+  # Produces disk1/ravemidi.cab (inf+sys+pdb in a `ravemidi\` subfolder — the layout
+  # the dashboard expects; pdb required for MS crash analysis). The cab is UNSIGNED:
+  # EV-sign it locally with driver/ravemidi/build/sign-cab.ps1 before upload — CI
+  # never holds the EV token. Flow: .devnotes/DRIVER_TRUST_PLAN.md +
+  # driver/ravemidi/build/attest/CHECKLIST.md.
+  attestation-package:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build ravemidi (x64 Release)
+        run: msbuild driver\ravemidi\ravemidi.vcxproj /m /p:Configuration=Release /p:Platform=x64 /warnaserror
+      - name: InfVerif (declarative/DCH gate — attestation rejects non-DCH INFs)
+        shell: pwsh
+        run: |
+          $roots = @("C:\Program Files (x86)\Windows Kits\10\bin", "C:\Program Files\Windows Kits\10\bin") | Where-Object { Test-Path $_ }
+          $iv = Get-ChildItem $roots -Recurse -Filter InfVerif.exe -ErrorAction SilentlyContinue |
+                Sort-Object { $_.FullName -match '\\x64\\' } -Descending | Select-Object -First 1
+          if (-not $iv) { throw "InfVerif.exe not found — cannot gate an attestation package without it" }
+          $staged = Get-ChildItem "driver\ravemidi\build\Release\x64" -Recurse -Filter ravemidi.inf -ErrorAction SilentlyContinue | Select-Object -First 1
+          $inf = if ($staged) { $staged.FullName } else { "driver\ravemidi\ravemidi.inf" }
+          & $iv.FullName /h $inf
+          if ($LASTEXITCODE -ne 0) { throw "InfVerif failed ($LASTEXITCODE)" }
+      - name: Stage package + make submission cab
+        shell: pwsh
+        run: |
+          $out = "driver\ravemidi\build\Release\x64"
+          # stage: flat dir with the three files the ddf references
+          New-Item -ItemType Directory -Force stage | Out-Null
+          foreach ($f in "ravemidi.sys", "ravemidi.inf") {
+            $src = Get-ChildItem -Recurse $out -Filter $f | Select-Object -First 1
+            if (-not $src) { throw "$f not found under $out" }
+            Copy-Item $src.FullName stage\
+          }
+          $pdb = Get-ChildItem -Recurse $out -Filter ravemidi.pdb | Select-Object -First 1
+          if (-not $pdb) { throw "ravemidi.pdb not found (required by Partner Center)" }
+          Copy-Item $pdb.FullName stage\
+          Copy-Item driver\ravemidi\ravemidi.ddf stage\
+          # makecab writes disk1\ravemidi.cab relative to cwd
+          Push-Location stage
+          makecab /f ravemidi.ddf
+          if ($LASTEXITCODE -ne 0) { throw "makecab failed ($LASTEXITCODE)" }
+          Pop-Location
+          if (-not (Test-Path stage\disk1\ravemidi.cab)) { throw "disk1\ravemidi.cab not produced" }
+          # assemble artifact: cab + loose package files + hash manifest
+          New-Item -ItemType Directory -Force submission\disk1, submission\package | Out-Null
+          Copy-Item stage\disk1\ravemidi.cab submission\disk1\
+          Copy-Item stage\ravemidi.sys, stage\ravemidi.inf, stage\ravemidi.pdb submission\package\
+          Copy-Item stage\ravemidi.ddf submission\
+          Get-FileHash submission\disk1\ravemidi.cab, submission\package\* -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash, (Split-Path $_.Path -Leaf) } |
+            Set-Content submission\manifest.txt
+          Get-Content submission\manifest.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ravemidi-attestation-cab-unsigned
+          path: submission/
+          retention-days: 30
