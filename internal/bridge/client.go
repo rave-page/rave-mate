@@ -91,16 +91,27 @@ var (
 	ErrTooLarge    = errors.New("bridge: frame too large")
 )
 
-// APIError is a decoded RFC7807 problem detail.
+// APIError is a decoded API error body.
 type APIError struct {
 	Status     int
-	Code       string
-	Detail     string
+	Code       string // details.code - the stable machine-readable verdict
+	Detail     string // human text (the API's `message`)
+	TraceID    string // trace_id - quote it when reporting a backend problem
 	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("bridge: %d %s: %s", e.Status, e.Code, e.Detail)
+}
+
+// firstNonEmpty returns the first non-empty string.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Unwrap maps the server's code onto the sentinel errors so callers can errors.Is on them.
@@ -218,23 +229,32 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	return nil
 }
 
-// decodeProblem turns a 4xx/5xx into an APIError. The body is a problem detail; we read a
-// bounded prefix (a hostile/bugged upstream must not stream us out of memory).
+// decodeProblem turns a 4xx/5xx into an APIError. We read a bounded prefix - a hostile or
+// bugged upstream must not stream us out of memory.
+//
+// The live API does NOT emit textbook RFC7807: a real 401 from development.api.rave.page is
+//
+//	{"status":"error","trace_id":"...","message":"Could not validate credentials",
+//	 "details":{"code":"UNAUTHORIZED"}}
+//
+// - the human text is `message`, not `detail`/`title`. `details.code` IS as documented, and
+// that's what we branch on, so read all three spellings and take whichever is present.
 func decodeProblem(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 	e := &APIError{Status: resp.StatusCode}
 	var p struct {
-		Detail  string `json:"detail"`
-		Title   string `json:"title"`
+		Message string `json:"message"` // what the API actually sends
+		Detail  string `json:"detail"`  // RFC7807 spelling
+		Title   string `json:"title"`   // RFC7807 fallback
+		TraceID string `json:"trace_id"`
 		Details struct {
 			Code string `json:"code"`
 		} `json:"details"`
 	}
 	if json.Unmarshal(raw, &p) == nil {
-		e.Code, e.Detail = p.Details.Code, p.Detail
-		if e.Detail == "" {
-			e.Detail = p.Title
-		}
+		e.Code = p.Details.Code
+		e.TraceID = p.TraceID
+		e.Detail = firstNonEmpty(p.Message, p.Detail, p.Title)
 	}
 	if ra := resp.Header.Get("Retry-After"); ra != "" {
 		if secs, err := strconv.Atoi(ra); err == nil {
