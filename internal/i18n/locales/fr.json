@@ -37,6 +37,11 @@
   "brand": {
     "tagline": "Local worker & bridge for rave.page"
   },
+  "campath": {
+    "empty": "Sélectionnez un chemin de caméra à prévisualiser",
+    "hint": "Glissez pour orbiter · molette pour zoomer · le marqueur suit le chemin à sa vitesse réelle (menthe = lent, rose = rapide).",
+    "play": "Lire le chemin"
+  },
   "common": {
     "browse": "Parcourir…",
     "cancel": "Annuler",
@@ -145,7 +150,7 @@
       "wheel": "Molette"
     },
     "camera-paths": {
-      "body": "La caméra en jeu de VRChat enregistre des trajectoires de travelling - des séquences d'images-clés (position, orientation, vitesse, mise au point) que la caméra survole en douceur. VRChat les enregistre en fichiers JSON ; rave-mate les retrouve, les regroupe par monde d'enregistrement, et peut les sauvegarder, les organiser et les recharger.\n\nL'aperçu montre la trajectoire en 3D : chaque point est une image-clé, la petite ligne violette indique l'orientation de la caméra, et la couleur de la ligne encode la vitesse (menthe = lent, rose = rapide). Le repère ambre parcourt la trajectoire à sa vitesse réelle enregistrée.\n\n« Charger dans VRChat » envoie le fichier via OSC pour qu'il apparaisse immédiatement dans la caméra en jeu - OSC doit être activé dans VRChat (menu Action → Options → OSC). La boucle et le type de trajectoire ne sont pas stockés dans le fichier ; réglez-les une fois dans VRChat après le chargement.",
+      "body": "La caméra en jeu de VRChat enregistre des trajectoires de travelling - des séquences d'images-clés (position, orientation, vitesse, mise au point) que la caméra survole en douceur. VRChat les enregistre en fichiers JSON ; rave-mate les retrouve, les regroupe par monde d'enregistrement, et peut les sauvegarder, les organiser et les recharger.\n\nL'aperçu montre la trajectoire en 3D : chaque point est une image-clé, la petite ligne violette indique l'orientation de la caméra, et la couleur de la ligne encode la vitesse (menthe = lent, rose = rapide). Le repère ambre parcourt la trajectoire à sa vitesse réelle enregistrée.\n\n« Charger dans VRChat » envoie le fichier via OSC pour qu'il apparaisse immédiatement dans la caméra en jeu - OSC doit être activé dans VRChat (menu Action → Options → OSC). La boucle et le type de trajectoire ne sont pas stockés dans le fichier ; réglez-les une fois dans VRChat après le chargement.\n\n« Lire le chemin » prévisualise le survol ici même : la caméra de l'aperçu parcourt le chemin en vue subjective au timing enregistré de chaque segment.",
       "title": "Trajectoires de caméra VRChat"
     },
     "dmx-connect": {
@@ -1334,7 +1339,6 @@
     "avatarLabel": "Avatar",
     "avatarPhysics": "Physique de l'avatar (dynamique des ressorts : cheveux / queue / accessoires)",
     "camPathDetail": "{name} - {where} · {count} keyframes · {duration}s",
-    "camPathHint": "Glissez pour orbiter · molette pour zoomer · le marqueur suit le chemin à sa vitesse réelle (menthe = lent, rose = rapide).",
     "camPathMeta": "{count} keyframes · {duration}s · {saved}",
     "copyFilePath": "Copier le chemin du fichier",
     "exportAnim": "Exporter .anim",
@@ -1378,7 +1382,6 @@
     "renderVideo": "Rendre la vidéo…",
     "restPose": "Pose de repos (référence A/T - le mesh ignore la prise, les points restent affichés)",
     "scrub": "Défiler",
-    "selectCamPathPreview": "Sélectionnez un chemin de caméra à prévisualiser",
     "selectPath": "Sélectionnez un chemin.",
     "selectRecordingPreview": "Sélectionnez un enregistrement à prévisualiser",
     "showAvatarModel": "Afficher le modèle d'avatar (mesh posé - lecture live, défilement + orbite)",
@@ -2996,7 +2999,6 @@
       },
       "pathLabel": "{where} - {name} ({points}kf, {duration}s)",
       "playerRelative": "Relatif au joueur",
-      "svgHint": "Aperçu isométrique statique - couleur = vitesse par segment (menthe lent → rose rapide) ; points roses = keyframes, ambre = début du chemin.",
       "unknown": "Inconnu",
       "unknownWorld": "Monde inconnu"
     },

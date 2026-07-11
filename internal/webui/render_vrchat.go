@@ -3,7 +3,6 @@ package webui
 import (
 	"fmt"
 	"html"
-	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -226,10 +225,8 @@ func (u *UI) vrcCampathsBody() string {
 	list.WriteString(`</div>`)
 
 	p := paths[sel]
-	svg := `<div class=vrc-preview>` + html.EscapeString(i18n.T("vrchat.campaths.failedToRead")) + `</div>`
-	if pts, err := vrccampaths.LoadPoints(p.File); err == nil {
-		svg = campathSVG(pts, 600, 340)
-	}
+	u.cpvEnsure("vrc", p.File)
+	svg := u.cpvView("vrc")
 	where := p.WorldName
 	if p.Local {
 		where = i18n.T("vrchat.campaths.playerRelative")
@@ -244,126 +241,14 @@ func (u *UI) vrcCampathsBody() string {
 			"when":      p.SavedAt.Format("2006-01-02 15:04"),
 		})))
 	buttons := btnRow(
+		u.cpvPlayBtn("vrc"),
 		btn(i18n.T("vrchat.action.loadIntoVRChat"), "primary", "vrc-campath-load", ""),
 		vrcPathBtn(i18n.T("vrchat.action.copyFilePath"), "ghost", "copy", p.File),
 		btn(i18n.T("vrchat.action.organizeNow"), "outline", "vrc-campath-organize", ""),
 	)
-	detail := svg + info + buttons + hint("info", i18n.T("vrchat.campaths.svgHint"))
+	detail := svg + info + buttons + hint("info", i18n.T("campath.hint"))
 	return masterDetail(list.String(), detail)
 }
-
-// campathSVG renders a static 3-D (fixed isometric) preview of a camera path as inline SVG: floor
-// grid, speed-coloured polyline, keyframe dots + facing arrows, and a start marker. Own projection
-// (does not touch graph.go).
-func campathSVG(pts []vrccampaths.Point, w, h int) string {
-	if len(pts) == 0 {
-		return `<div class=vrc-preview>Empty path.</div>`
-	}
-	type node struct {
-		pos, fwd [3]float64
-		spd      float64
-	}
-	nodes := make([]node, len(pts))
-	lo := [3]float64{1e9, 1e9, 1e9}
-	hi := [3]float64{-1e9, -1e9, -1e9}
-	for i, p := range pts {
-		pos := [3]float64{p.Position.X, p.Position.Y, p.Position.Z}
-		for k := 0; k < 3; k++ {
-			if pos[k] < lo[k] {
-				lo[k] = pos[k]
-			}
-			if pos[k] > hi[k] {
-				hi[k] = pos[k]
-			}
-		}
-		nodes[i] = node{pos: pos, fwd: vrcEulerFwd(p.Rotation), spd: p.Speed}
-	}
-	center := [3]float64{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2}
-	floorY := lo[1]
-	diag := math.Sqrt(vrcSq(hi[0]-lo[0]) + vrcSq(hi[1]-lo[1]) + vrcSq(hi[2]-lo[2]))
-	gridR := math.Max(1, (hi[0]-lo[0]+hi[2]-lo[2])/2)
-	dist := diag*1.3 + 1.5
-	const yaw, pitch = 0.6, 0.35
-	cy, sy := math.Cos(yaw), math.Sin(yaw)
-	cp, sp := math.Cos(pitch), math.Sin(pitch)
-	fl := float64(h) * 0.9
-	proj := func(p [3]float64) (float64, float64) {
-		dx, dy, dz := p[0]-center[0], p[1]-center[1], p[2]-center[2]
-		x1 := dx*cy + dz*sy
-		z1 := -dx*sy + dz*cy
-		y2 := dy*cp - z1*sp
-		z2 := dy*sp + z1*cp
-		depth := dist - z2
-		if depth < 0.15 {
-			depth = 0.15
-		}
-		return float64(w)/2 + fl*x1/depth, float64(h)/2 - fl*y2/depth
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, `<svg viewBox="0 0 %d %d" class="vrc-svg" preserveAspectRatio="xMidYMid meet">`, w, h)
-	// quote attr values before /> - unquoted eats the "/" and unclosed graphics elements
-	// swallow the rest of the SVG (see graph.go)
-	b.WriteString(`<rect width="100%" height="100%" class="vrc-svg-bg"/>`)
-	const n = 6
-	step := (2 * gridR) / n
-	for i := 0; i <= n; i++ {
-		d := -gridR + step*float64(i)
-		ax, ay := proj([3]float64{center[0] - gridR, floorY, center[2] + d})
-		bx, by := proj([3]float64{center[0] + gridR, floorY, center[2] + d})
-		vrcLine(&b, ax, ay, bx, by, "vrc-grid", "")
-		cx, cyy := proj([3]float64{center[0] + d, floorY, center[2] - gridR})
-		dx2, dy2 := proj([3]float64{center[0] + d, floorY, center[2] + gridR})
-		vrcLine(&b, cx, cyy, dx2, dy2, "vrc-grid", "")
-	}
-	maxSpd := 0.1
-	for _, nd := range nodes {
-		if nd.spd > maxSpd {
-			maxSpd = nd.spd
-		}
-	}
-	for i := 1; i < len(nodes); i++ {
-		ax, ay := proj(nodes[i-1].pos)
-		bx, by := proj(nodes[i].pos)
-		fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="2"/>`,
-			ax, ay, bx, by, vrcSpeedColor(nodes[i-1].spd/maxSpd))
-	}
-	for _, nd := range nodes {
-		px, py := proj(nd.pos)
-		tip := [3]float64{nd.pos[0] + nd.fwd[0]*0.4, nd.pos[1] + nd.fwd[1]*0.4, nd.pos[2] + nd.fwd[2]*0.4}
-		tx, ty := proj(tip)
-		vrcLine(&b, px, py, tx, ty, "vrc-facing", "")
-		fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="3" class="vrc-kf"/>`, px, py)
-	}
-	sx, syy := proj(nodes[0].pos)
-	fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="6" class="vrc-marker"/>`, sx, syy)
-	b.WriteString(`</svg>`)
-	return b.String()
-}
-
-func vrcLine(b *strings.Builder, ax, ay, bx, by float64, class, _ string) {
-	fmt.Fprintf(b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" class="%s"/>`, ax, ay, bx, by, class)
-}
-
-// vrcEulerFwd converts a VRChat euler (degrees) into a unit world-forward vector.
-func vrcEulerFwd(r vrccampaths.Vec3) [3]float64 {
-	const d2r = math.Pi / 180
-	yaw, pitch := r.Y*d2r, r.X*d2r
-	return [3]float64{math.Sin(yaw) * math.Cos(pitch), -math.Sin(pitch), math.Cos(yaw) * math.Cos(pitch)}
-}
-
-// vrcSpeedColor maps 0..1 → mint (slow) → pink (fast).
-func vrcSpeedColor(fr float64) string {
-	if fr < 0 {
-		fr = 0
-	}
-	if fr > 1 {
-		fr = 1
-	}
-	return fmt.Sprintf("rgb(%d,%d,%d)", int(8+247*fr), int(247-100*fr), int(155-100*fr))
-}
-
-func vrcSq(v float64) float64 { return v * v }
 
 func vrcPathLabel(p vrccampaths.Path) string {
 	where := p.WorldName

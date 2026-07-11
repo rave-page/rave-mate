@@ -32,7 +32,9 @@ between paired instances.
 ## VRChat camera OSC
 
 Dolly/camera path presets + control via VRChat's OSC interface, camera-path files managed by
-VRC tools (backup/restore per world).
+VRC tools (backup/restore per world). The Motion and VRChat tabs share an interactive 3D
+path preview - drag to orbit, scroll to zoom, speed-coloured segments; **Play path** flies
+the preview camera along the path first-person at its recorded per-segment timing.
 
 ## Perf telemetry
 

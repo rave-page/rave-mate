@@ -5,9 +5,10 @@
   color:var(--rp-muted); margin:var(--space-2) 0 2px; }
 
 /* Cap the preview so it doesn't dominate the pane on wide screens (user: "take up too
-   much space"); the pointer-transport region matches the visible preview. */
-#mo-cp-view, #mo-view { touch-action:none; cursor:grab; user-select:none; max-width:520px; }
-#mo-cp-view:active, #mo-view:active { cursor:grabbing; }
+   much space"); the pointer-transport region matches the visible preview. The camera-path
+   preview is the shared .cpv-view (campath.css). */
+#mo-view { touch-action:none; cursor:grab; user-select:none; max-width:520px; }
+#mo-view:active { cursor:grabbing; }
 .mo-svg { display:block; width:100%; height:auto; border:1px solid var(--rp-faint); border-radius:var(--radius-2,8px); }
 .mo-svgtext { fill:var(--rp-muted); font:12px var(--font-mono,monospace); }
 

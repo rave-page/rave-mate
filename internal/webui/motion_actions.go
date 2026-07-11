@@ -41,15 +41,9 @@ type moSt struct {
 	mu      sync.Mutex
 	section string // "campaths" | "studio"
 
-	// camera paths
+	// camera paths (viewer state lives in the shared campathview host "mo")
 	cpPaths  []vrccampaths.Path
 	cpSel    int
-	cpPts    []vrccampaths.Point
-	cpCam    orbitCam
-	cpDnYaw  float32
-	cpDnPit  float32
-	cpDnX    float32
-	cpDnY    float32
 	cpLoaded bool
 
 	// motion studio
@@ -100,7 +94,7 @@ func (u *UI) mo() *moSt {
 	defer moMu.Unlock()
 	s := moMap[u]
 	if s == nil {
-		s = &moSt{section: "campaths", cpSel: -1, cpCam: newOrbitCam(), cam: newOrbitCam()}
+		s = &moSt{section: "campaths", cpSel: -1, cam: newOrbitCam()}
 		moMap[u] = s
 	}
 	return s
@@ -117,8 +111,6 @@ func init() {
 			u.moCPSelect(i)
 		}
 	})
-	onExact("mo-cp-orbit", func(u *UI, m actMsg) { u.moOrbit(m.Val, true) })
-	onExact("mo-cp-zoom", func(u *UI, m actMsg) { u.moZoom(m.Val, true) })
 	onExact("mo-cp-load", func(u *UI, m actMsg) { u.moCPLoad() })
 	onExact("mo-cp-copy", func(u *UI, m actMsg) { u.moCPCopy() })
 	onExact("mo-cp-organize", func(u *UI, m actMsg) {
@@ -147,8 +139,8 @@ func init() {
 		name := strings.TrimPrefix(m.Act, "mo-rec-sel:")
 		u.bg(func() { u.moRecSelect(name) })
 	})
-	onExact("mo-orbit", func(u *UI, m actMsg) { u.moOrbit(m.Val, false) })
-	onExact("mo-zoom", func(u *UI, m actMsg) { u.moZoom(m.Val, false) })
+	onExact("mo-orbit", func(u *UI, m actMsg) { u.moOrbit(m.Val) })
+	onExact("mo-zoom", func(u *UI, m actMsg) { u.moZoom(m.Val) })
 	onExact("mo-scrub", func(u *UI, m actMsg) { u.moScrub(m.Val) })
 	onExact("mo-play", func(u *UI, m actMsg) { u.moPlayPause() })
 	onExact("mo-stop", func(u *UI, m actMsg) { u.moStop() })
@@ -281,15 +273,17 @@ func (u *UI) moCPRefresh(patch bool) {
 	if s.cpSel >= len(paths) {
 		s.cpSel = -1
 	}
+	sel := s.cpSel
 	s.mu.Unlock()
 	if patch {
 		u.moPatchBody()
 	}
-	if len(paths) > 0 && s.cpSel < 0 {
+	if len(paths) > 0 && sel < 0 {
 		u.moCPSelect(0)
 	}
 }
 
+// moCPSelect sets the selection; the render path hydrates the shared viewer (cpvEnsure).
 func (u *UI) moCPSelect(i int) {
 	s := u.mo()
 	s.mu.Lock()
@@ -297,27 +291,7 @@ func (u *UI) moCPSelect(i int) {
 		s.mu.Unlock()
 		return
 	}
-	p := s.cpPaths[i]
-	s.mu.Unlock()
-	pts, err := vrccampaths.LoadPoints(p.File)
-	if err != nil {
-		u.toast(i18n.T("motion.toast.readPathFailed") + err.Error())
-		return
-	}
-	s.mu.Lock()
-	s.cpSel, s.cpPts = i, pts
-	lo := [3]float32{1e9, 1e9, 1e9}
-	hi := [3]float32{-1e9, -1e9, -1e9}
-	for _, pt := range pts {
-		pos := [3]float32{float32(pt.Position.X), float32(pt.Position.Y), float32(pt.Position.Z)}
-		for k := 0; k < 3; k++ {
-			lo[k] = float32(math.Min(float64(lo[k]), float64(pos[k])))
-			hi[k] = float32(math.Max(float64(hi[k]), float64(pos[k])))
-		}
-	}
-	if len(pts) > 0 {
-		s.cpCam.frame(lo, hi, 1.3, 1.5)
-	}
+	s.cpSel = i
 	s.mu.Unlock()
 	u.moPatchBody()
 }
@@ -355,67 +329,73 @@ func (u *UI) moCPCopy() {
 	u.toast(i18n.T("motion.toast.pathCopied"))
 }
 
-// ── shared orbit handlers (cp=true → camera-path view) ──
+// ── skeleton orbit handlers (the camera-path viewer lives in campathview.go) ──
 
-func (u *UI) moOrbit(val string, cp bool) {
+// moOrbit drags the studio orbit camera. Moves render via renderCoalesce (latest-wins,
+// off the serial actWorker) as cheap drag frames (moSkeletonSVGOpt(true)); release
+// re-renders the full view (SMIL anim + full-res raster) once.
+func (u *UI) moOrbit(val string) {
 	kind, fx, fy, ok := moPosParse(val)
 	if !ok {
 		return
 	}
 	s := u.mo()
 	s.mu.Lock()
-	cam := &s.cam
-	dnYaw, dnPit, dnX, dnY := &s.dnYaw, &s.dnPit, &s.dnX, &s.dnY
-	if cp {
-		cam, dnYaw, dnPit, dnX, dnY = &s.cpCam, &s.cpDnYaw, &s.cpDnPit, &s.cpDnX, &s.cpDnY
-	}
 	switch kind {
 	case "down":
-		*dnYaw, *dnPit, *dnX, *dnY = cam.yaw, cam.pitch, fx, fy
+		s.dnYaw, s.dnPit, s.dnX, s.dnY = s.cam.yaw, s.cam.pitch, fx, fy
 		s.mu.Unlock()
 		return
 	case "move", "up":
-		cam.yaw = *dnYaw - (fx-*dnX)*6
-		cam.pitch = clampf32(*dnPit+(fy-*dnY)*6, -1.45, 1.45)
+		s.cam.yaw = s.dnYaw - (fx-s.dnX)*6
+		s.cam.pitch = clampf32(s.dnPit+(fy-s.dnY)*6, -1.45, 1.45)
+	default:
+		s.mu.Unlock()
+		return
 	}
 	s.mu.Unlock()
-	u.moPatchView(cp)
+	if kind == "move" {
+		u.renderCoalesce("mo-view", func() { u.moPatchDragFrame() })
+		return
+	}
+	u.renderCoalesce("mo-view", func() { u.moPatchView() })
 }
 
-func (u *UI) moZoom(val string, cp bool) {
+func (u *UI) moZoom(val string) {
 	in := strings.HasPrefix(val, "in:")
 	s := u.mo()
 	s.mu.Lock()
-	if cp {
-		s.cpCam.zoomBy(in, 0.8, 30)
-	} else {
-		s.cam.zoomBy(in, 0.8, 14)
-	}
+	s.cam.zoomBy(in, 0.8, 14)
 	s.mu.Unlock()
-	u.moPatchView(cp)
+	u.renderCoalesce("mo-view", func() { u.moPatchView() })
 }
 
-// moPosParse parses "kind:fx,fy" pointer-transport values.
+// moPosParse parses "kind:fx,fy[,mods]" pointer-transport values (down carries a
+// trailing mods field - splitting on the first comma only would fail the y parse).
 func moPosParse(val string) (kind string, fx, fy float32, ok bool) {
 	k, rest, found := strings.Cut(val, ":")
 	if !found {
 		return "", 0, 0, false
 	}
-	xs, ys, _ := strings.Cut(rest, ",")
-	x, err1 := strconv.ParseFloat(xs, 32)
-	y, err2 := strconv.ParseFloat(ys, 32)
+	f := strings.SplitN(rest, ",", 3)
+	if len(f) < 2 {
+		return "", 0, 0, false
+	}
+	x, err1 := strconv.ParseFloat(f[0], 32)
+	y, err2 := strconv.ParseFloat(f[1], 32)
 	if err1 != nil || err2 != nil {
 		return "", 0, 0, false
 	}
 	return k, float32(x), float32(y), true
 }
 
-func (u *UI) moPatchView(cp bool) {
-	if cp {
-		u.eval("window.__patch('mo-cp-view'," + jsQuote(u.moCamPathSVG()) + ")")
-		return
-	}
+func (u *UI) moPatchView() {
 	u.eval("window.__patch('mo-view'," + jsQuote(u.moSkeletonSVG()) + ")" + u.moAnimClockJS())
+}
+
+// moPatchDragFrame paints the cheap mid-drag frame (static skeleton / preview-res raster).
+func (u *UI) moPatchDragFrame() {
+	u.eval("window.__patch('mo-view'," + jsQuote(u.moSkeletonSVGOpt(true)) + ")")
 }
 
 func (u *UI) moPatchBody() {
