@@ -1948,13 +1948,13 @@
         "noPorts": "No MIDI input ports found. Install a virtual MIDI port (loopMIDI or LoopBe1), then Refresh."
       },
       "nml": {
-        "note": "Blank = auto-detect newest Traktor install. Toggle off/on to apply a path change.",
+        "note": "Blank = auto-detect newest Traktor install. Path changes apply automatically.",
         "pathLabel": "collection.nml"
       },
       "obs": {
         "connectValidate": "Connect & validate stream settings",
         "host": "Host",
-        "note": "Enable obs-websocket in OBS (Tools → WebSocket Server Settings). Default port 4455. Finished recordings link to the set recorded over the same span. Connection changes apply on toggle off/on.",
+        "note": "Enable obs-websocket in OBS (Tools → WebSocket Server Settings). Default port 4455. Finished recordings link to the set recorded over the same span. Connection changes apply automatically (deferred while recording).",
         "password": "Password",
         "port": "Port",
         "remoteObs": "Remote OBS… ({count})"
@@ -2011,7 +2011,7 @@
       "setcapture": {
         "metaOnly": "Metadata only - parse now-playing, don't save Icecast audio",
         "mount": "Mount",
-        "note": "In Traktor → Preferences → Broadcasting: Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Toggle off/on to apply changes.",
+        "note": "In Traktor → Preferences → Broadcasting: Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Changes apply automatically (deferred while a capture is running).",
         "openFolder": "Open sets folder",
         "password": "Password",
         "port": "Port",
@@ -2055,7 +2055,7 @@
       "traktor": {
         "listenPort": "Listen port",
         "logRaw": "Log raw payloads (jsonl)",
-        "note": "Default 8080. Toggle off/on to apply a port change. The Electron client also uses 8080 - only one can bind."
+        "note": "Default 8080. Port changes apply automatically (the listener restarts itself). The Electron client also uses 8080 - only one can bind."
       },
       "traktormap": {
         "activate": "Activate",
@@ -2184,24 +2184,29 @@
       },
       "gridfix": {
         "probing": "checking engine…",
-        "engineReady": "Beat engine ready",
-        "engineBroken": "Engine environment exists but is broken — remove it, then install again.",
         "noPython": "No Python 3.10–3.14 found. Install Python from python.org (or the Microsoft Store), then hit Re-check.",
         "notInstalled": "Python {version} found — the beat engine is not installed yet. Install downloads PyTorch and the Beat This! model into rave-mate's own environment; your system Python is not touched.",
-        "install": "Install beat engine",
-        "uninstall": "Remove",
         "recheck": "Re-check",
         "installing": "installing…",
         "pythonPath": "Python executable (optional override)",
-        "cuda": "Use NVIDIA GPU build (CUDA) — much faster analysis, multi-GB download",
         "minQuality": "Min grid coverage to auto-fix (0.5–1)",
         "thresholdMs": "Ignore corrections smaller than (ms)",
         "lockFixed": "Lock fixed tracks in Traktor (LOCK flag)",
         "note": "The fixer analyzes each track with the Beat This! neural beat tracker (https://github.com/CPJKU/beat_this), fits a constant grid to the detected beats, and only rewrites a grid when the fit is trustworthy — tracks it cannot fix confidently are collected in a MANUAL_GRIDDING_PREP playlist for hand-gridding instead. Your collection is backed up before any write. Analysis runs at below-normal priority so decks, OBS and recordings are never impaired. Expect roughly 10–40 s per track on CPU; the CUDA build is many times faster on an NVIDIA GPU.",
-        "cudaReady": "CUDA acceleration installed",
-        "useGpu": "Use NVIDIA GPU for analysis (much faster)",
-        "installCuda": "Install CUDA acceleration",
-        "cudaHint": "An NVIDIA GPU was detected. Installing the CUDA build of PyTorch (several GB) makes analysis and training many times faster. The GPU toggle appears once it is installed."
+        "installCuda": "Install CUDA engine (multi-GB)",
+        "cudaHint": "The CUDA build of PyTorch (several GB) makes analysis and training many times faster on an NVIDIA GPU. It installs into its own environment, independent of the CPU engine — either can be installed first, and both can coexist.",
+        "variantReady": "{name} engine ready",
+        "variantBroken": "{name} engine environment is broken — remove it, then install again.",
+        "variantMissing": "{name} engine not installed",
+        "cpuName": "CPU",
+        "cudaName": "CUDA (NVIDIA GPU)",
+        "installCpu": "Install CPU engine",
+        "remove": "Remove {name} engine",
+        "noGpu": "No NVIDIA GPU/driver detected — the CUDA engine needs an NVIDIA card. Use the CPU engine instead.",
+        "enginePref": "Engine used for analysis & training",
+        "engineAuto": "Auto — CUDA when installed & working, else CPU",
+        "engineCpu": "CPU",
+        "engineCuda": "CUDA (NVIDIA GPU)"
       },
       "gridfixmodel": {
         "active": "Active model",
@@ -2720,7 +2725,9 @@
       "gfTrainFailed": "Training failed: ",
       "gfTrainSkipped": "{n} verified tracks skipped (file missing)",
       "gfTrainDoneTitle": "Model training finished",
-      "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}"
+      "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}",
+      "moduleRestarted": "{name} restarted — new settings applied",
+      "restartDeferred": "{name}: saved — applies automatically once the current capture/recording ends"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2841,6 +2848,18 @@
     "search": {
       "placeholder": "Search all settings…",
       "noResults": "No settings match \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Takes effect on next app start"
+    },
+    "gate": {
+      "fpcalc": "Requires fpcalc (Chromaprint) — install it below, then enable.",
+      "ffmpeg": "Requires FFmpeg — install it below (or set a path), then enable.",
+      "whisper": "Requires the Whisper engine — install it below, then enable.",
+      "vrBuild": "This build ships without OpenVR — install the VR build of rave-mate to enable overlays.",
+      "vrRuntime": "Requires the OpenVR runtime DLL — install it below, then enable.",
+      "gridfix": "Requires a beat engine — install the CPU or CUDA engine below, then enable.",
+      "mpv": "Requires mpv — install it above to enable the embedded player."
     }
   },
   "tab": {

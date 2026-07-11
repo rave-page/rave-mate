@@ -139,6 +139,20 @@ func (m *Manager) SetEnabled(name string, on bool) {
 	}
 }
 
+// Restart stops + starts a running module so it re-reads config (settings auto-apply).
+// No-op when the module isn't running; skips the start if its feature was disabled
+// meanwhile (the toggle path owns that transition).
+func (m *Manager) Restart(name string) {
+	svc := m.find(name)
+	if svc == nil || !m.IsRunning(name) {
+		return
+	}
+	m.stop(name)
+	if svc.Enabled == nil || svc.Enabled() {
+		m.startLocked(svc)
+	}
+}
+
 // IsRunning reports whether a module currently holds a live context.
 func (m *Manager) IsRunning(name string) bool {
 	m.mu.Lock()

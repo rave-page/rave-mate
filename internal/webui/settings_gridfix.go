@@ -1,8 +1,10 @@
 package webui
 
 // Beatgrid-fixer settings card: probe + one-click install of the managed Python
-// beat_this engine (internal/gridfix.EnvManager). The env probe spawns Python, so it
-// gets its own long-TTL cache instead of the 10s settingsProbes cycle.
+// beat_this engine (internal/gridfix.EnvManager). CPU and CUDA engines are independent
+// installs (any order, both may coexist); an engine-preference select (auto/CPU/CUDA)
+// picks which one runs. The env probe spawns Python, so it gets its own long-TTL cache
+// instead of the 10s settingsProbes cycle.
 
 import (
 	"context"
@@ -33,6 +35,27 @@ func (u *UI) gridfixEnvMgr() *gridfix.EnvManager {
 		dir = "gridfix"
 	}
 	return &gridfix.EnvManager{DataDir: dir, PythonPath: u.svc.Cfg.Features.GridFix.PythonPath}
+}
+
+// gridfixEngine resolves interpreter + inference device per the engine preference
+// (auto = CUDA when installed+working, else CPU). Prefers the cached probe; before the
+// first probe lands it falls back to fs existence (device "auto" lets torch decide).
+func (u *UI) gridfixEngine() (py, device string) {
+	pref := u.svc.Cfg.Features.GridFix.ResolvedDevice()
+	if st, ready := u.gridfixStatusCached(); ready {
+		return st.SelectEngine(pref)
+	}
+	mgr := u.gridfixEnvMgr()
+	if p := mgr.EnvPython(true); p != "" && pref != "cpu" {
+		return p, "cuda"
+	}
+	if p := mgr.EnvPython(false); p != "" {
+		return p, "auto" // legacy env may carry CUDA torch - let torch decide
+	}
+	if p := mgr.EnvPython(true); p != "" {
+		return p, "cpu"
+	}
+	return "", ""
 }
 
 // gridfixStatusCached returns the last env probe and kicks a background refresh when
@@ -74,6 +97,50 @@ func (u *UI) invalidateGridfixProbe() {
 	u.gfProbe.mu.Unlock()
 }
 
+// gridfixVariantHTML renders one engine variant's status line + install/remove buttons
+// + its progress target. key ∈ {"cpu","cuda"}.
+func (u *UI) gridfixVariantHTML(key string, v gridfix.VariantStatus, gpuPresent bool) string {
+	esc := html.EscapeString
+	name := i18n.T("settings.body.gridfix." + key + "Name")
+	var line string
+	switch {
+	case v.EngineOK:
+		ver := ""
+		if v.Versions != nil {
+			ver = " (beat-this " + v.Versions.BeatThis + ", torch " + v.Versions.Torch + ")"
+		}
+		line = hint("ok", i18n.T("settings.body.gridfix.variantReady", i18n.A{"name": name})+esc(ver))
+	case v.Python != "":
+		line = hint("bad", i18n.T("settings.body.gridfix.variantBroken", i18n.A{"name": name}))
+	default:
+		line = hint("", i18n.T("settings.body.gridfix.variantMissing", i18n.A{"name": name}))
+	}
+	var buttons string
+	installLabel := i18n.T("settings.body.gridfix.installCpu")
+	if key == "cuda" {
+		installLabel = i18n.T("settings.body.gridfix.installCuda")
+	}
+	if !v.EngineOK {
+		if key == "cuda" && !gpuPresent {
+			// gated, never hidden: name what's missing instead of failing later
+			buttons += btnGated(installLabel, i18n.T("settings.body.gridfix.noGpu"))
+		} else {
+			buttons += btn(installLabel, "primary", "gridfix-install:"+key, "")
+		}
+	}
+	if v.Python != "" {
+		buttons += btn(i18n.T("settings.body.gridfix.remove", i18n.A{"name": name}), "", "gridfix-uninstall:"+key, "")
+	}
+	out := line
+	if buttons != "" {
+		out += btnRow(buttons)
+	}
+	if key == "cuda" && !v.EngineOK && gpuPresent {
+		out += `<div class=set-note>` + esc(i18n.T("settings.body.gridfix.cudaHint")) + `</div>`
+	}
+	return out + `<div id=inst-gridfix-` + key + `></div>`
+}
+
 // gridfixCardBody renders the engine state + install/uninstall controls + knobs.
 func (u *UI) gridfixCardBody() string {
 	f := &u.svc.Cfg.Features.GridFix
@@ -81,52 +148,28 @@ func (u *UI) gridfixCardBody() string {
 	var b strings.Builder
 	esc := html.EscapeString
 
-	var envLine string
 	switch {
 	case !ready:
-		envLine = hint("", i18n.T("settings.body.gridfix.probing"))
-	case st.EngineOK:
-		v := ""
-		if st.Versions != nil {
-			v = " (beat-this " + st.Versions.BeatThis + ", torch " + st.Versions.Torch + ")"
-		}
-		envLine = hint("ok", i18n.T("settings.body.gridfix.engineReady")+esc(v))
-	case st.EnvPython != "":
-		envLine = hint("bad", i18n.T("settings.body.gridfix.engineBroken"))
+		b.WriteString(hint("", i18n.T("settings.body.gridfix.probing")))
 	case st.BasePython == "":
-		envLine = hint("bad", i18n.T("settings.body.gridfix.noPython"))
-	default:
-		envLine = hint("", i18n.T("settings.body.gridfix.notInstalled", i18n.A{"version": st.BaseVersion}))
+		b.WriteString(hint("bad", i18n.T("settings.body.gridfix.noPython")))
+	case st.CPU.Python == "" && st.CUDA.Python == "":
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.notInstalled", i18n.A{"version": st.BaseVersion})) + `</div>`)
 	}
-	b.WriteString(envLine)
 
-	// install / uninstall row + streamed progress target
-	var buttons string
-	if ready && st.BasePython != "" && !st.EngineOK {
-		buttons += btn(i18n.T("settings.body.gridfix.install"), "primary", "gridfix-install", "")
+	if ready && st.BasePython != "" {
+		b.WriteString(u.gridfixVariantHTML("cpu", st.CPU, st.GPUPresent))
+		b.WriteString(u.gridfixVariantHTML("cuda", st.CUDA, st.GPUPresent))
 	}
-	if ready && st.EnvPython != "" {
-		buttons += btn(i18n.T("settings.body.gridfix.uninstall"), "", "gridfix-uninstall", "")
-	}
-	buttons += btn(i18n.T("settings.body.gridfix.recheck"), "", "gridfix-recheck", "")
-	b.WriteString(btnRow(buttons))
-	b.WriteString(`<div id=inst-gridfix></div>`)
+	b.WriteString(btnRow(btn(i18n.T("settings.body.gridfix.recheck"), "", "gridfix-recheck", "")))
 
-	// CUDA is an explicit capability install; the GPU toggle only exists once the
-	// installed torch is verifiably a CUDA build (never a pre-toggle that changes a
-	// later install).
-	if ready && st.EngineOK {
-		switch {
-		case st.TorchCUDA:
-			b.WriteString(hint("ok", i18n.T("settings.body.gridfix.cudaReady")))
-			b.WriteString(toggleRow(i18n.T("settings.body.gridfix.useGpu"), "set:gridfix-gpu",
-				f.ResolvedDevice() != "cpu"))
-		case st.GPUPresent:
-			b.WriteString(btnRow(btn(i18n.T("settings.body.gridfix.installCuda"), "outline", "gridfix-install-cuda", "")))
-			b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.cudaHint")) + `</div>`)
-		}
-		b.WriteString(`<div id=inst-gridfixcuda></div>`)
-	}
+	// engine preference - honored at run time; auto = CUDA if installed+working else CPU
+	b.WriteString(selectBox(i18n.T("settings.body.gridfix.enginePref"), "set:gridfix-device",
+		[][2]string{
+			{"auto", i18n.T("settings.body.gridfix.engineAuto")},
+			{"cpu", i18n.T("settings.body.gridfix.engineCpu")},
+			{"cuda", i18n.T("settings.body.gridfix.engineCuda")},
+		}, f.ResolvedDevice()))
 
 	b.WriteString(pathField(i18n.T("settings.body.gridfix.pythonPath"), "set:gridfix-python", f.PythonPath, "file"))
 	b.WriteString(field(i18n.T("settings.body.gridfix.minQuality"), "set:gridfix-minq",
@@ -138,69 +181,57 @@ func (u *UI) gridfixCardBody() string {
 	return b.String()
 }
 
+// gridfixInstall runs one variant's engine install, pip lines streamed into the card
+// (#inst-gridfix-<key>).
+func (u *UI) gridfixInstall(key string) {
+	cuda := key == "cuda"
+	patch := func(inner string) { u.eval("window.__patch('inst-gridfix-" + key + "'," + jsQuote(inner) + ")") }
+	patch(progressBar(0, i18n.T("settings.body.gridfix.installing")))
+	u.bg(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+		defer cancel()
+		var lastPatch time.Time
+		err := u.gridfixEnvMgr().Install(ctx, cuda, func(line string) {
+			if time.Since(lastPatch) < 300*time.Millisecond {
+				return // pip is chatty - throttle DOM patches
+			}
+			lastPatch = time.Now()
+			if len(line) > 120 {
+				line = line[:120] + "…"
+			}
+			patch(progressBar(0, line))
+		})
+		if err != nil {
+			patch(hint("bad", i18n.T("settings.label.installFailed")+err.Error()))
+			u.toast(i18n.T("settings.toast.installFailed", i18n.A{"tool": "Beat This!"}))
+			return
+		}
+		patch(hint("ok", i18n.T("settings.label.installed")))
+		u.toast(i18n.T("settings.toast.installedTool", i18n.A{"tool": "Beat This!"}))
+		u.invalidateGridfixProbe()
+		u.refreshGridfixProbe()
+	})
+}
+
 func init() {
-	// one-click engine install: venv + pinned beat-this + torch, pip lines streamed
-	// into the card (#inst-gridfix)
-	onExact("gridfix-install", func(u *UI, _ actMsg) {
-		patch := func(inner string) { u.eval("window.__patch('inst-gridfix'," + jsQuote(inner) + ")") }
-		patch(progressBar(0, i18n.T("settings.body.gridfix.installing")))
-		u.bg(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
-			defer cancel()
-			var lastPatch time.Time
-			err := u.gridfixEnvMgr().Install(ctx, func(line string) {
-				if time.Since(lastPatch) < 300*time.Millisecond {
-					return // pip is chatty - throttle DOM patches
-				}
-				lastPatch = time.Now()
-				if len(line) > 120 {
-					line = line[:120] + "…"
-				}
-				patch(progressBar(0, line))
-			})
-			if err != nil {
-				patch(hint("bad", i18n.T("settings.label.installFailed")+err.Error()))
-				u.toast(i18n.T("settings.toast.installFailed", i18n.A{"tool": "Beat This!"}))
-				return
-			}
-			patch(hint("ok", i18n.T("settings.label.installed")))
-			u.toast(i18n.T("settings.toast.installedTool", i18n.A{"tool": "Beat This!"}))
-			u.invalidateGridfixProbe()
-			u.refreshGridfixProbe()
-		})
+	onPrefix("gridfix-install:", func(u *UI, m actMsg) {
+		if key := m.arg("gridfix-install:"); key == "cpu" || key == "cuda" {
+			u.gridfixInstall(key)
+		}
 	})
 
-	// explicit CUDA capability upgrade (multi-GB torch build into the existing venv)
-	onExact("gridfix-install-cuda", func(u *UI, _ actMsg) {
-		patch := func(inner string) { u.eval("window.__patch('inst-gridfixcuda'," + jsQuote(inner) + ")") }
-		patch(progressBar(0, i18n.T("settings.body.gridfix.installing")))
+	onPrefix("gridfix-uninstall:", func(u *UI, m actMsg) {
+		key := m.arg("gridfix-uninstall:")
+		st, ready := u.gridfixStatusCached()
+		if !ready {
+			return
+		}
+		root := st.CPU.Root
+		if key == "cuda" {
+			root = st.CUDA.Root // legacy single-env CUDA installs report their root here too
+		}
 		u.bg(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-			defer cancel()
-			var lastPatch time.Time
-			err := u.gridfixEnvMgr().InstallCUDA(ctx, func(line string) {
-				if time.Since(lastPatch) < 300*time.Millisecond {
-					return
-				}
-				lastPatch = time.Now()
-				if len(line) > 120 {
-					line = line[:120] + "…"
-				}
-				patch(progressBar(0, line))
-			})
-			if err != nil {
-				patch(hint("bad", i18n.T("settings.label.installFailed")+err.Error()))
-				return
-			}
-			patch(hint("ok", i18n.T("settings.label.installed")))
-			u.invalidateGridfixProbe()
-			u.refreshGridfixProbe()
-		})
-	})
-
-	onExact("gridfix-uninstall", func(u *UI, _ actMsg) {
-		u.bg(func() {
-			if err := u.gridfixEnvMgr().Uninstall(); err != nil {
+			if err := u.gridfixEnvMgr().Uninstall(root); err != nil {
 				u.toast(i18n.T("settings.toast.gridfixUninstallFailed") + err.Error())
 				return
 			}

@@ -41,8 +41,9 @@ type UI struct {
 	updater *selfupdate.Updater // self-update poller (disabled on a dev build); lazily built
 	updRel  *selfupdate.Release // last "available" release, staged for apply
 
-	probes  settingsProbes // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
-	gfProbe gridfixProbe   // beatgrid-engine env probe (spawns Python; own long TTL)
+	probes   settingsProbes  // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
+	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
+	restarts settingRestarts // debounced auto module restarts on settings change (settings_apply.go)
 
 	gf       gfState    // beatgrid-fixer cockpit run state (library_gridfix.go)
 	tf       tfState    // tag-fixer scan/apply state (library_tagfix.go)

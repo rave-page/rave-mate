@@ -29,6 +29,13 @@ func btn(label, variant, act, val string) string {
 	return fmt.Sprintf(`<button class="rp-btn rp-btn--%s"%s>%s</button>`, v, attrs, html.EscapeString(label))
 }
 
+// btnGated renders a disabled button whose title names the missing dependency. Use for
+// controls gated on a component install - grey them out with a hint, never hide them.
+func btnGated(label, why string) string {
+	return `<button class="rp-btn rp-btn--outline" disabled title=` + attrQ(why) + `>` +
+		html.EscapeString(label) + `</button>`
+}
+
 // badge renders an rp-badge. variant ∈ {default,success,info,warning,error,secondary,outline}.
 func badge(text, variant string) string {
 	if variant == "" {
@@ -67,6 +74,19 @@ func toggleRow(label, act string, on bool) string {
 		`<span class=switch><input type=checkbox%s data-act=%s data-value=%s>`+
 		`<span class=switch-track></span></span></label>`,
 		attrQ(strings.ToLower(label)), html.EscapeString(label), checked, attrQ(act), attrQ(boolStr(on)))
+}
+
+// toggleRowGated renders a disabled switch + a warn hint naming what to install to
+// unlock it. Same rule as btnGated: gated controls stay visible, greyed, explained.
+func toggleRowGated(label string, on bool, gateHint string) string {
+	checked := ""
+	if on {
+		checked = " checked"
+	}
+	return fmt.Sprintf(`<label class="row row--gated" data-label=%s><span class=row-label>%s</span>`+
+		`<span class=switch><input type=checkbox%s disabled><span class=switch-track></span></span></label>`,
+		attrQ(strings.ToLower(label)), html.EscapeString(label), checked) +
+		`<div class=set-gate>` + hint("warn", gateHint) + `</div>`
 }
 
 // toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.

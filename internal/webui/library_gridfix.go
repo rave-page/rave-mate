@@ -116,7 +116,7 @@ func (u *UI) gfHealthHTML(s *libSt) string {
 		gfStat(fmt.Sprint(noGrid), i18n.T("library.gf.statNoGrid"), "amber") +
 		gfStat(fmt.Sprint(multi), i18n.T("library.gf.statManual"), "") + `</div>`)
 	engineOK := false
-	if st, ready := u.gridfixStatusCached(); ready && st.EngineOK {
+	if st, ready := u.gridfixStatusCached(); ready && (st.CPU.EngineOK || st.CUDA.EngineOK) {
 		engineOK = true
 	}
 	if !u.svc.Cfg.Features.GridFix.Enabled {
@@ -364,7 +364,7 @@ func (u *UI) gfStart(scope string) {
 	}
 	f := u.svc.Cfg.Features.GridFix
 	mgr := u.gridfixEnvMgr()
-	py := mgr.EnvPython()
+	py, dev := u.gridfixEngine() // honors the engine preference (auto/cpu/cuda)
 	if py == "" {
 		u.toast(i18n.T("library.gf.noEngineHint"))
 		return
@@ -379,7 +379,7 @@ func (u *UI) gfStart(scope string) {
 	if p, ok := mediatools.Resolve("ffmpeg"); ok {
 		ffmpeg = p
 	}
-	eng := &gridfix.Engine{Python: py, DataDir: dir, Device: f.ResolvedDevice(),
+	eng := &gridfix.Engine{Python: py, DataDir: dir, Device: dev,
 		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg,
 		OnLog: func(line string) {
 			if u.log != nil {

@@ -331,13 +331,21 @@ func (u *UI) settingsCard(id string, st stv) string {
 	if topic := settingsCardTips[id]; topic != "" {
 		head += tipTopic(topic)
 	}
+	gateHTML := ""
 	if t, ok := m[id]; ok {
-		checked := ""
-		if t.get() {
-			checked = " checked"
+		if gate := u.cardGate(id); gate != "" && !t.get() {
+			// dependency missing: grey the enable switch + name what to install
+			// (an already-on feature is never gated - it must stay turn-off-able)
+			head += `<label class=switch title="` + html.EscapeString(gate) + `"><input type=checkbox disabled><span class=switch-track></span></label>`
+			gateHTML = `<div class=set-gate>` + hint("warn", gate) + `</div>`
+		} else {
+			checked := ""
+			if t.get() {
+				checked = " checked"
+			}
+			head += `<label class=switch title="` + html.EscapeString(t.label) + `"><input type=checkbox` + checked +
+				` data-act="toggle:` + id + `" data-value="` + boolStr(t.get()) + `"><span class=switch-track></span></label>`
 		}
-		head += `<label class=switch title="` + html.EscapeString(t.label) + `"><input type=checkbox` + checked +
-			` data-act="toggle:` + id + `" data-value="` + boolStr(t.get()) + `"><span class=switch-track></span></label>`
 	}
 	descHTML := ""
 	if desc != "" {
@@ -345,7 +353,48 @@ func (u *UI) settingsCard(id string, st stv) string {
 	}
 	return `<div class="rp-card"><div class=set-cardhead>` + head + `</div>` +
 		`<div class=set-st id=stset-` + id + `>` + renderStatus(st) + `</div>` +
-		descHTML + body + `</div>`
+		gateHTML + descHTML + body + `</div>`
+}
+
+// cardGate names the missing component that blocks ENABLING card id ("" = not gated).
+// Reads cached probes only (never the filesystem beyond the cheap stt/vr checks the
+// status map already makes) - gated controls render greyed with this hint, never hidden.
+func (u *UI) cardGate(id string) string {
+	switch id {
+	case "fingerprint":
+		if u.probesReady() && !u.toolStatusCached("fpcalc").Installed {
+			return i18n.T("settings.gate.fpcalc")
+		}
+	case "transcode":
+		if u.probesReady() && !u.toolStatusCached("ffmpeg").Installed &&
+			strings.TrimSpace(u.svc.Cfg.Features.Transcode.FfmpegPath) == "" {
+			return i18n.T("settings.gate.ffmpeg")
+		}
+	case "stt":
+		if !stt.BinInstalled() {
+			return i18n.T("settings.gate.whisper")
+		}
+	case "vroverlay":
+		if !vroverlay.BuiltWithVR() {
+			return i18n.T("settings.gate.vrBuild")
+		}
+		if u.probesReady() && !u.vrStatusCached().Installed {
+			return i18n.T("settings.gate.vrRuntime")
+		}
+	case "gridfix":
+		if st, ok := u.gridfixStatusCached(); ok && !st.CPU.EngineOK && !st.CUDA.EngineOK {
+			return i18n.T("settings.gate.gridfix")
+		}
+	}
+	return ""
+}
+
+// probesReady reports whether the first background probe refresh has landed (gates
+// only render from real probe data - never flash on the placeholder zero state).
+func (u *UI) probesReady() bool {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	return u.probes.ready
 }
 
 // ── account / api ──
@@ -506,10 +555,14 @@ func (u *UI) cardContent(id string) (string, string, string) {
 
 	// ── Library & media ──
 	case "library":
+		embedRow := toggleRow(i18n.T("settings.body.library.embed"), "set:player-embed", f.Player.Embed)
+		if u.probesReady() && !u.toolStatusCached("mpv").Installed {
+			embedRow = toggleRowGated(i18n.T("settings.body.library.embed"), f.Player.Embed, i18n.T("settings.gate.mpv"))
+		}
 		return i18n.T("settings.card.library.title"), i18n.T("settings.card.library.desc"),
 			`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.library.mpvNote")) + `</div>` +
 				u.toolInstallHTML(mediatools.MPV, "mpv") +
-				toggleRow(i18n.T("settings.body.library.embed"), "set:player-embed", f.Player.Embed)
+				embedRow
 	case "mediaeditor":
 		return i18n.T("settings.card.mediaeditor.title"), i18n.T("settings.card.mediaeditor.desc"), ""
 	case "transcode":
@@ -560,8 +613,14 @@ func (u *UI) cardContent(id string) (string, string, string) {
 	case "notifications":
 		return i18n.T("settings.card.notifications.title"), i18n.T("settings.card.notifications.desc"), ""
 	case "guardian":
-		return i18n.T("settings.card.guardian.title"), i18n.T("settings.card.guardian.desc"),
-			`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.guardian.note")) + `</div>`
+		// the supervisor only (dis)arms at process start - show a restart hint only while
+		// the toggle differs from the state this process launched with (dirty tracking)
+		guardianAtStart.once.Do(func() { guardianAtStart.disabled = u.svc.Cfg.DisableCrashGuardian })
+		body := `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.guardian.note")) + `</div>`
+		if u.svc.Cfg.DisableCrashGuardian != guardianAtStart.disabled {
+			body += hint("warn", i18n.T("settings.hint.appRestart"))
+		}
+		return i18n.T("settings.card.guardian.title"), i18n.T("settings.card.guardian.desc"), body
 	case "service":
 		return i18n.T("settings.card.service.title"), i18n.T("settings.card.service.desc"),
 			btnRow(btn(i18n.T("settings.body.service.install"), "primary", "settings-svc-install", ""), btn(i18n.T("settings.body.service.uninstall"), "outline", "settings-svc-uninstall", ""), btn(i18n.T("common.refresh"), "ghost", "settings-refresh", "")) +
@@ -1295,7 +1354,7 @@ func (u *UI) settingsStatus() map[string]stv {
 	}
 	if gf, gfReady := u.gridfixStatusCached(); !f.GridFix.Enabled {
 		set("gridfix", stOff(""))
-	} else if gfReady && gf.EngineOK {
+	} else if gfReady && (gf.CPU.EngineOK || gf.CUDA.EngineOK) {
 		set("gridfix", stOk(tr("settings.status.gridfix.ready")))
 	} else {
 		set("gridfix", stWarn(tr("settings.status.gridfix.engineMissing")))
@@ -1449,6 +1508,13 @@ func boolStat(on bool, onText string) stv {
 	return stOff("")
 }
 
+// guardianAtStart snapshots the crash-guardian state this process launched with (the
+// supervisor only arms at startup; first settings render precedes any toggle).
+var guardianAtStart struct {
+	once     sync.Once
+	disabled bool
+}
+
 // ── apply (from onAction) ──
 
 // applyToggle flips a feature toggle: optimistic in-memory flip + instant re-render, then persist +
@@ -1509,11 +1575,9 @@ func (u *UI) applySet(id, val string) {
 	case "gridfix-python":
 		f.GridFix.PythonPath = v
 		u.invalidateGridfixProbe()
-	case "gridfix-gpu":
-		if b {
-			f.GridFix.Device = "auto" // cuda when available (the toggle only shows once it is)
-		} else {
-			f.GridFix.Device = "cpu"
+	case "gridfix-device":
+		if v == "auto" || v == "cpu" || v == "cuda" {
+			f.GridFix.Device = v
 		}
 	case "gridfix-minq":
 		toFloat(&f.GridFix.MinQuality, 0.5)
@@ -1526,6 +1590,9 @@ func (u *UI) applySet(id, val string) {
 		toInt(&f.Traktor.Port, 1, 65535)
 	case "traktor-log":
 		f.Traktor.LogPayloads = b
+		if u.svc.Traktor != nil {
+			u.svc.Traktor.SetLogging(b) // live reconfigure - no listener restart needed
+		}
 	case "traktor-mapver":
 		f.Traktor.MappingVersion = v
 		if u.svc.TraktorMap != nil {
@@ -1792,7 +1859,16 @@ func (u *UI) applySet(id, val string) {
 		save = false
 	}
 	if save {
-		u.saveCfgBG("set:"+id, nil, nil) // disk write + Reconcile off the actWorker
+		// module/source reads this field only at (re)start - restart it automatically
+		// (debounced; deferred while capturing/recording) instead of making the user
+		// toggle the feature off/on
+		var apply func()
+		if mod := settingModule(id); mod != "" {
+			apply = func() { u.scheduleModuleRestart(mod) }
+		} else if src := settingSource(id); src != "" {
+			apply = func() { u.scheduleSourceRestart(src) }
+		}
+		u.saveCfgBG("set:"+id, apply, nil) // disk write + Reconcile off the actWorker
 	}
 }
 

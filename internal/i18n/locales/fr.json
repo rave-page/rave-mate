@@ -1866,13 +1866,13 @@
         "noPorts": "Aucun port d'entrée MIDI trouvé. Installez un port MIDI virtuel (loopMIDI ou LoopBe1), puis actualisez."
       },
       "nml": {
-        "note": "Vide = détection auto de la dernière install Traktor. Désactivez/activez pour appliquer un changement de chemin.",
+        "note": "Vide = détection auto de la dernière install Traktor. Les changements de chemin s'appliquent automatiquement.",
         "pathLabel": "collection.nml"
       },
       "obs": {
         "connectValidate": "Connecter & valider les réglages de stream",
         "host": "Hôte",
-        "note": "Activez obs-websocket dans OBS (Outils → WebSocket Server Settings). Port par défaut 4455. Les enregistrements terminés se lient au set enregistré sur la même période. Les changements de connexion s'appliquent en désactivant/activant.",
+        "note": "Activez obs-websocket dans OBS (Outils → WebSocket Server Settings). Port par défaut 4455. Les enregistrements terminés se lient au set enregistré sur la même période. Les changements de connexion s'appliquent automatiquement (différés pendant un enregistrement).",
         "password": "Mot de passe",
         "port": "Port",
         "remoteObs": "OBS distant… ({count})"
@@ -1922,7 +1922,7 @@
       "setcapture": {
         "metaOnly": "Métadonnées seules - analyser le now-playing, ne pas sauver l'audio Icecast",
         "mount": "Mount",
-        "note": "Dans Traktor → Preferences → Broadcasting : Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Désactivez/activez pour appliquer les changements.",
+        "note": "Dans Traktor → Preferences → Broadcasting : Server 127.0.0.1, Port {port}, Mount {mount}, Format Ogg Vorbis. Les changements s'appliquent automatiquement (différés pendant une capture).",
         "openFolder": "Ouvrir le dossier des sets",
         "password": "Mot de passe",
         "port": "Port",
@@ -1966,7 +1966,7 @@
       "traktor": {
         "listenPort": "Port d'écoute",
         "logRaw": "Journaliser les payloads bruts (jsonl)",
-        "note": "Défaut 8080. Désactivez/activez pour appliquer un changement de port. Le client Electron utilise aussi 8080 - un seul peut se lier."
+        "note": "Défaut 8080. Les changements de port s'appliquent automatiquement (le listener redémarre tout seul). Le client Electron utilise aussi 8080 - un seul peut se lier."
       },
       "traktormap": {
         "activate": "Activer",
@@ -2095,24 +2095,29 @@
       },
       "gridfix": {
         "probing": "vérification du moteur…",
-        "engineReady": "Moteur de beats prêt",
-        "engineBroken": "L'environnement du moteur existe mais est cassé — supprimez-le puis réinstallez.",
         "noPython": "Aucun Python 3.10–3.14 trouvé. Installez Python depuis python.org (ou le Microsoft Store), puis cliquez sur Revérifier.",
         "notInstalled": "Python {version} trouvé — le moteur de beats n'est pas encore installé. Installer télécharge PyTorch et le modèle Beat This! dans un environnement propre à rave-mate ; votre Python système n'est pas modifié.",
-        "install": "Installer le moteur de beats",
-        "uninstall": "Supprimer",
         "recheck": "Revérifier",
         "installing": "installation…",
         "pythonPath": "Exécutable Python (remplacement optionnel)",
-        "cuda": "Utiliser le build GPU NVIDIA (CUDA) — analyse bien plus rapide, téléchargement de plusieurs Go",
         "minQuality": "Couverture de grid minimale pour l'auto-correction (0,5–1)",
         "thresholdMs": "Ignorer les corrections inférieures à (ms)",
         "lockFixed": "Verrouiller les pistes corrigées dans Traktor (LOCK)",
         "note": "Le correcteur analyse chaque piste avec le tracker neuronal Beat This! (https://github.com/CPJKU/beat_this), ajuste un grid constant sur les beats détectés et ne réécrit que si l'ajustement est fiable — les pistes douteuses sont regroupées dans une playlist MANUAL_GRIDDING_PREP pour un griddage manuel. La collection est sauvegardée avant toute écriture. L'analyse tourne en priorité basse pour ne jamais gêner les decks, OBS ou les enregistrements. Comptez environ 10–40 s par piste en CPU ; le build CUDA est bien plus rapide sur GPU NVIDIA.",
-        "cudaReady": "Accélération CUDA installée",
-        "useGpu": "Utiliser le GPU NVIDIA pour l'analyse (bien plus rapide)",
-        "installCuda": "Installer l'accélération CUDA",
-        "cudaHint": "Un GPU NVIDIA a été détecté. Installer le build CUDA de PyTorch (plusieurs Go) rend l'analyse et l'entraînement bien plus rapides. L'interrupteur GPU apparaît une fois installé."
+        "installCuda": "Installer le moteur CUDA (plusieurs Go)",
+        "cudaHint": "Le build CUDA de PyTorch (plusieurs Go) accélère considérablement l'analyse et l'entraînement sur GPU NVIDIA. Il s'installe dans son propre environnement, indépendamment du moteur CPU — dans n'importe quel ordre, les deux peuvent coexister.",
+        "variantReady": "Moteur {name} prêt",
+        "variantBroken": "L'environnement du moteur {name} est cassé — supprimez-le puis réinstallez.",
+        "variantMissing": "Moteur {name} non installé",
+        "cpuName": "CPU",
+        "cudaName": "CUDA (GPU NVIDIA)",
+        "installCpu": "Installer le moteur CPU",
+        "remove": "Supprimer le moteur {name}",
+        "noGpu": "Aucun GPU/pilote NVIDIA détecté — le moteur CUDA nécessite une carte NVIDIA. Utilisez le moteur CPU.",
+        "enginePref": "Moteur utilisé pour l'analyse et l'entraînement",
+        "engineAuto": "Auto — CUDA si installé et fonctionnel, sinon CPU",
+        "engineCpu": "CPU",
+        "engineCuda": "CUDA (GPU NVIDIA)"
       },
       "gridfixmodel": {
         "active": "Modèle actif",
@@ -2631,7 +2636,9 @@
       "gfTrainFailed": "Échec de l'entraînement : ",
       "gfTrainSkipped": "{n} pistes vérifiées ignorées (fichier manquant)",
       "gfTrainDoneTitle": "Entraînement du modèle terminé",
-      "gfTrainDoneBody": "Précision des beats (holdout) : F {before} → {after}"
+      "gfTrainDoneBody": "Précision des beats (holdout) : F {before} → {after}",
+      "moduleRestarted": "{name} redémarré — nouveaux réglages appliqués",
+      "restartDeferred": "{name} : enregistré — appliqué automatiquement dès la fin de la capture/l'enregistrement en cours"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2752,6 +2759,18 @@
     "search": {
       "placeholder": "Rechercher dans tous les réglages…",
       "noResults": "Aucun réglage ne correspond à \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Prend effet au prochain démarrage de l'application"
+    },
+    "gate": {
+      "fpcalc": "Nécessite fpcalc (Chromaprint) — installez-le ci-dessous, puis activez.",
+      "ffmpeg": "Nécessite FFmpeg — installez-le ci-dessous (ou définissez un chemin), puis activez.",
+      "whisper": "Nécessite le moteur Whisper — installez-le ci-dessous, puis activez.",
+      "vrBuild": "Ce build est livré sans OpenVR — installez le build VR de rave-mate pour activer les overlays.",
+      "vrRuntime": "Nécessite la DLL du runtime OpenVR — installez-la ci-dessous, puis activez.",
+      "gridfix": "Nécessite un moteur de beats — installez le moteur CPU ou CUDA ci-dessous, puis activez.",
+      "mpv": "Nécessite mpv — installez-le ci-dessus pour activer le lecteur intégré."
     }
   },
   "tab": {

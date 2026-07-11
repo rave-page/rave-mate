@@ -287,8 +287,12 @@ func run(parent context.Context, serviceMode bool) error {
 	agg := aggregator.New(log, merger)
 	agg.SetMonitor(sessionMon)
 	agg.AddSource(trk, func() bool { return cfg.Features.Traktor.Enabled })
-	agg.AddSource(nmlsrc.New(log, merger, cfg.Features.NML.CollectionPath, cfg.Features.NML.HistoryDir),
-		func() bool { return cfg.Features.NML.Enabled })
+	// Sources built via AddSourceFn are reconstructed from live config on every (re)start,
+	// so settings edits apply through agg.RestartSource (webui settings_apply.go) - no app
+	// restart, no manual feature off/on.
+	agg.AddSourceFn(func() session.Source {
+		return nmlsrc.New(log, merger, cfg.Features.NML.CollectionPath, cfg.Features.NML.HistoryDir)
+	}, func() bool { return cfg.Features.NML.Enabled })
 	// MIDI driver runs in a child process (winmm callback faults can't touch the daemon);
 	// its host lifecycle rides the source slot, so the enable-gate + Reconcile drive it.
 	midiSrc, merr := featurehost.NewMidiProxy(log, midiMon, func() featurehost.MidiConfig {
@@ -325,35 +329,43 @@ func run(parent context.Context, serviceMode bool) error {
 	agg.AddSource(pdl, func() bool { return cfg.Features.ProDJLink.Enabled })
 	// Serato: collection + live now-playing from the active History session file (local files,
 	// no account/internet). In-proc (stdlib file watch); the enable-gate drives its lifecycle.
-	agg.AddSource(seratosrc.New(log, cfg.Features.Serato.SeratoDir, cfg.Features.Serato.NowPlaying),
-		func() bool { return cfg.Features.Serato.Enabled })
+	agg.AddSourceFn(func() session.Source {
+		return seratosrc.New(log, cfg.Features.Serato.SeratoDir, cfg.Features.Serato.NowPlaying)
+	}, func() bool { return cfg.Features.Serato.Enabled })
 	// Serato Remote: real-time OSC-over-TCP - we advertise _SeratoIOSRemote._tcp and Serato DJ
 	// Pro connects in and streams per-deck state. In-proc + bounded (tiny control messages, no
 	// media frames); enable-gate drives lifecycle. Debug flag logs every frame for the handshake RE.
-	agg.AddSource(seratoremotesrc.New(log, seratoremotesrc.Config{Debug: cfg.Features.Serato.RemoteDebug}),
-		func() bool { return cfg.Features.Serato.Remote })
+	agg.AddSourceFn(func() session.Source {
+		return seratoremotesrc.New(log, seratoremotesrc.Config{Debug: cfg.Features.Serato.RemoteDebug})
+	}, func() bool { return cfg.Features.Serato.Remote })
 	// Serato Live Playlist: remote scrape of serato.com/playlists/<user>/live (master now-playing).
 	// Independent opt-in (works with no local Serato install - controllers/all decks). In-proc +
 	// bounded (a ~10s HTTP poll, capped body, no media); enable-gate drives lifecycle. Emits only
 	// on track CHANGE so a stale past-session page isn't re-asserted as fresh now-playing.
-	agg.AddSource(seratolivesrc.New(log, seratolivesrc.Config{
-		URL:      cfg.Features.Serato.LivePlaylistURL,
-		Interval: time.Duration(cfg.Features.Serato.LivePlaylistInterval) * time.Second,
-	}), func() bool { return cfg.Features.Serato.LivePlaylist })
+	agg.AddSourceFn(func() session.Source {
+		return seratolivesrc.New(log, seratolivesrc.Config{
+			URL:      cfg.Features.Serato.LivePlaylistURL,
+			Interval: time.Duration(cfg.Features.Serato.LivePlaylistInterval) * time.Second,
+		})
+	}, func() bool { return cfg.Features.Serato.LivePlaylist })
 	// VirtualDJ: collection (database.xml) + live now-playing via Network Control (full metadata),
 	// our OS2L server (BPM/beat), and/or the tracklist file. In-proc; enable-gate drives lifecycle.
-	vdj := cfg.Features.VirtualDJ
-	agg.AddSource(virtualdjsrc.New(log, virtualdjsrc.Config{
-		NetCtl: vdj.NetCtl, NetCtlURL: vdj.ResolvedNetCtlURL(), NetCtlAuth: vdj.NetCtlAuth,
-		OS2L: vdj.OS2L, OS2LPort: vdj.ResolvedOS2LPort(),
-		Tracklist: vdj.Tracklist, DatabaseDir: vdj.DatabaseDir,
-	}), func() bool { return cfg.Features.VirtualDJ.Enabled })
+	agg.AddSourceFn(func() session.Source {
+		vdj := cfg.Features.VirtualDJ
+		return virtualdjsrc.New(log, virtualdjsrc.Config{
+			NetCtl: vdj.NetCtl, NetCtlURL: vdj.ResolvedNetCtlURL(), NetCtlAuth: vdj.NetCtlAuth,
+			OS2L: vdj.OS2L, OS2LPort: vdj.ResolvedOS2LPort(),
+			Tracklist: vdj.Tracklist, DatabaseDir: vdj.DatabaseDir,
+		})
+	}, func() bool { return cfg.Features.VirtualDJ.Enabled })
 	// Rekordbox live now-playing: master.db history poll (recently-played, ~60s lag) + process
 	// memory read (real-time, Windows-only, offset-seeded). In-proc; enable-gate drives lifecycle.
-	rb := cfg.Features.Rekordbox
-	agg.AddSource(rekordboxsrc.New(log, rekordboxsrc.Config{
-		DBPath: rb.DBPath, DBKey: rb.DBKey, DBPoll: rb.DBPoll, MemoryRead: rb.MemoryRead,
-	}), func() bool { return cfg.Features.Rekordbox.Enabled })
+	agg.AddSourceFn(func() session.Source {
+		rb := cfg.Features.Rekordbox
+		return rekordboxsrc.New(log, rekordboxsrc.Config{
+			DBPath: rb.DBPath, DBKey: rb.DBKey, DBPoll: rb.DBPoll, MemoryRead: rb.MemoryRead,
+		})
+	}, func() bool { return cfg.Features.Rekordbox.Enabled })
 	// Icecast set-capture receiver: Traktor broadcasts a live set to this local Icecast
 	// source endpoint. Runs in a child process - the TCP listener, source-protocol parsing,
 	// and capture-file writing are isolated; the daemon gets metadata observations, capture
@@ -1229,16 +1241,17 @@ func run(parent context.Context, serviceMode bool) error {
 		Stop:    studioSrv.Stop,
 	})
 	// Icecast set-capture receiver - the local endpoint Traktor's Broadcasting streams to.
-	// Child process; the init closure re-reads config on every (re)spawn, so a settings
-	// edit (port/mount/password/dir) takes effect on module restart.
+	// Child process; the init closure re-reads config on every (re)spawn. Settings edits
+	// auto-restart the module (webui settings_apply.go; deferred while capturing).
 	mods.Add(&module.Service{
 		Name:    "setcapture",
 		Enabled: func() bool { return cfg.Features.SetCapture.Enabled },
 		Start:   func(c context.Context) error { return icecastRcv.Host().Start(c) },
 		Stop:    icecastRcv.Host().Stop,
 	})
-	// OBS bridge - child process maintaining the obs-websocket connection. Settings edits
-	// apply on module restart (init closure re-reads config per (re)spawn).
+	// OBS bridge - child process maintaining the obs-websocket connection. Init closure
+	// re-reads config per (re)spawn; settings edits auto-restart the module (webui
+	// settings_apply.go; deferred while recording).
 	mods.Add(&module.Service{
 		Name:    "obs",
 		Enabled: func() bool { return cfg.Features.OBS.Enabled },
@@ -1247,7 +1260,8 @@ func run(parent context.Context, serviceMode bool) error {
 	})
 	// Ableton Link - child process publishing the fused DJ tempo/phrase onto a Link session.
 	// Start spawns the child then runs the DJ→Link bridge loop (reads the session Merger master
-	// BPM/phase and drives Link when this node owns the tempo). Settings edits apply on restart.
+	// BPM/phase and drives Link when this node owns the tempo). Quantum/start-stop-sync edits
+	// auto-restart the module (webui settings_apply.go); owner/Resolume fields are read live.
 	mods.Add(&module.Service{
 		Name:    "abletonlink",
 		Enabled: func() bool { return cfg.Features.AbletonLink.Enabled },
@@ -1347,7 +1361,8 @@ func run(parent context.Context, serviceMode bool) error {
 		Start:   func(c context.Context) error { return agg.Start(c) },
 		Stop:    agg.Stop,
 	})
-	// DMX plane (Art-Net listener + VRSL grid + re-emit). Settings edits apply on toggle off/on.
+	// DMX plane (Art-Net listener + VRSL grid + re-emit). Settings edits auto-restart the
+	// module (webui settings_apply.go).
 	mods.Add(&module.Service{
 		Name:    "dmx",
 		Enabled: func() bool { return cfg.Features.DMX.Enabled },

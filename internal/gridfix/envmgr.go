@@ -23,31 +23,82 @@ const (
 	torchIndexCUDA = "https://download.pytorch.org/whl/cu126"
 )
 
-// EnvStatus is the settings-card probe result.
+// VariantStatus is one engine variant's probe result (CPU or CUDA venv).
+type VariantStatus struct {
+	Root     string // venv root dir ("" = not installed)
+	Python   string // venv interpreter ("" = not installed)
+	EngineOK bool   // beat_this imports in the venv
+	Versions *Versions
+	Device   string
+	CUDA     bool // installed torch is a CUDA build ("+cuNNN" version)
+}
+
+// EnvStatus is the settings-card probe result. CPU and CUDA are independent installs
+// (either, both, or neither may exist).
 type EnvStatus struct {
 	BasePython  string // discovered system python ("" = none found)
 	BaseVersion string // e.g. "3.12.10"
-	EnvPython   string // managed venv python ("" = not installed)
-	EngineOK    bool   // beat_this imports in the venv
-	Versions    *Versions
-	Device      string
-	TorchCUDA   bool // installed torch is a CUDA build ("+cuNNN" version)
-	GPUPresent  bool // an NVIDIA GPU/driver is present on this host
+	CPU         VariantStatus
+	CUDA        VariantStatus // env-cuda; a legacy single env carrying CUDA torch reports here
+	GPUPresent  bool          // an NVIDIA GPU/driver is present on this host
 }
 
-// EnvManager creates + probes the managed Python environment for the beat engine.
+// SelectEngine picks interpreter + inference device for pref ("auto"|"cpu"|"cuda").
+// auto = CUDA when installed and working, else CPU. A missing preferred variant falls
+// back to the other one so a stale preference never bricks the fixer.
+func (st EnvStatus) SelectEngine(pref string) (python, device string) {
+	switch pref {
+	case "cpu":
+		if st.CPU.Python != "" {
+			return st.CPU.Python, "cpu"
+		}
+		if st.CUDA.Python != "" {
+			return st.CUDA.Python, "cpu" // CUDA build forced onto CPU
+		}
+	case "cuda":
+		if st.CUDA.Python != "" {
+			return st.CUDA.Python, "cuda"
+		}
+		if st.CPU.Python != "" {
+			return st.CPU.Python, "cpu"
+		}
+	default: // auto
+		if st.CUDA.EngineOK {
+			return st.CUDA.Python, "cuda"
+		}
+		if st.CPU.Python != "" {
+			return st.CPU.Python, "cpu"
+		}
+		if st.CUDA.Python != "" {
+			return st.CUDA.Python, "cuda"
+		}
+	}
+	return "", ""
+}
+
+// EnvManager creates + probes the managed Python environments for the beat engine.
 type EnvManager struct {
 	DataDir    string // config.DataPath("gridfix")
 	PythonPath string // user override for the base interpreter ("" = auto-discover)
 }
 
-func (m *EnvManager) envDir() string { return filepath.Join(m.DataDir, "env") }
+// envDir returns the variant venv root: env (CPU) / env-cuda.
+func (m *EnvManager) envDir(cuda bool) string {
+	if cuda {
+		return filepath.Join(m.DataDir, "env-cuda")
+	}
+	return filepath.Join(m.DataDir, "env")
+}
 
-// EnvPython returns the venv interpreter path if the venv exists ("" otherwise).
-func (m *EnvManager) EnvPython() string {
-	p := filepath.Join(m.envDir(), "Scripts", "python.exe")
+// EnvPython returns the variant venv interpreter path if it exists ("" otherwise).
+func (m *EnvManager) EnvPython(cuda bool) string {
+	return venvPython(m.envDir(cuda))
+}
+
+func venvPython(root string) string {
+	p := filepath.Join(root, "Scripts", "python.exe")
 	if runtime.GOOS != "windows" {
-		p = filepath.Join(m.envDir(), "bin", "python")
+		p = filepath.Join(root, "bin", "python")
 	}
 	if _, err := os.Stat(p); err != nil {
 		return ""
@@ -100,26 +151,40 @@ func (m *EnvManager) FindPython(ctx context.Context) (path, version string) {
 	return "", ""
 }
 
-// Status probes base python + venv + engine importability (no model load).
+// Status probes base python + both variant venvs + engine importability (no model load).
 func (m *EnvManager) Status(ctx context.Context) EnvStatus {
 	var st EnvStatus
 	st.BasePython, st.BaseVersion = m.FindPython(ctx)
-	st.EnvPython = m.EnvPython()
-	if st.EnvPython == "" {
-		return st
-	}
-	eng := &Engine{Python: st.EnvPython, DataDir: m.DataDir}
-	defer eng.Stop()
-	if v, dev, err := eng.Ping(ctx, false); err == nil {
-		st.EngineOK, st.Versions, st.Device = true, v, dev
-		st.TorchCUDA = v != nil && strings.Contains(v.Torch, "+cu")
+	st.CPU = m.probeVariant(ctx, false)
+	st.CUDA = m.probeVariant(ctx, true)
+	// legacy single-env installs upgraded torch in place - report a CUDA-torch "env" as
+	// the CUDA engine (env-cuda wins when both exist)
+	if st.CPU.CUDA && st.CUDA.Python == "" {
+		st.CUDA, st.CPU = st.CPU, VariantStatus{}
 	}
 	st.GPUPresent = nvidiaPresent()
 	return st
 }
 
-// nvidiaPresent reports an NVIDIA driver on this host (nvml.dll / nvidia-smi) - the gate
-// for offering the CUDA-acceleration install.
+// probeVariant pings one variant venv (spawns Python; ~seconds).
+func (m *EnvManager) probeVariant(ctx context.Context, cuda bool) VariantStatus {
+	var v VariantStatus
+	v.Python = m.EnvPython(cuda)
+	if v.Python == "" {
+		return v
+	}
+	v.Root = m.envDir(cuda)
+	eng := &Engine{Python: v.Python, DataDir: m.DataDir}
+	defer eng.Stop()
+	if vers, dev, err := eng.Ping(ctx, false); err == nil {
+		v.EngineOK, v.Versions, v.Device = true, vers, dev
+		v.CUDA = vers != nil && strings.Contains(vers.Torch, "+cu")
+	}
+	return v
+}
+
+// nvidiaPresent reports an NVIDIA driver on this host (nvml.dll / nvidia-smi) - drives
+// the hint on the CUDA install (greyed out without one, never hidden).
 func nvidiaPresent() bool {
 	if runtime.GOOS == "windows" {
 		if sysRoot := os.Getenv("SystemRoot"); sysRoot != "" {
@@ -132,42 +197,10 @@ func nvidiaPresent() bool {
 	return err == nil
 }
 
-// InstallCUDA upgrades the managed env's torch to the CUDA build (multi-GB download).
-// Requires the engine to be installed first; the GPU toggle gates on the resulting
-// TorchCUDA status, never on this having been merely attempted.
-func (m *EnvManager) InstallCUDA(ctx context.Context, progress func(string)) error {
-	py := m.EnvPython()
-	if py == "" {
-		return fmt.Errorf("beat engine not installed - install it first")
-	}
-	emit := func(s string) {
-		if progress != nil {
-			progress(s)
-		}
-	}
-	emit("installing CUDA PyTorch build - this downloads several GB...")
-	pip := []string{"-m", "pip", "install", "--no-input", "--disable-pip-version-check",
-		"--progress-bar", "off", "--upgrade", "--index-url", torchIndexCUDA, "torch"}
-	if err := m.stream(ctx, emit, py, pip...); err != nil {
-		return fmt.Errorf("CUDA torch install failed: %w", err)
-	}
-	emit("verifying CUDA engine...")
-	eng := &Engine{Python: py, DataDir: m.DataDir}
-	defer eng.Stop()
-	v, _, err := eng.Ping(ctx, false)
-	if err != nil {
-		return fmt.Errorf("engine verification failed: %w", err)
-	}
-	if v == nil || !strings.Contains(v.Torch, "+cu") {
-		return fmt.Errorf("torch is still the CPU build after install")
-	}
-	emit("CUDA acceleration installed")
-	return nil
-}
-
-// Install creates the venv and installs the pinned engine (CPU torch baseline - CUDA
-// is a separate explicit upgrade via InstallCUDA), streaming tool output to progress.
-func (m *EnvManager) Install(ctx context.Context, progress func(string)) error {
+// Install creates the variant venv and installs the pinned engine, streaming tool output
+// to progress. CPU and CUDA are independent: either can be installed first, both can
+// coexist (CUDA = multi-GB torch build, explicit opt-in).
+func (m *EnvManager) Install(ctx context.Context, cuda bool, progress func(string)) error {
 	base, ver := m.FindPython(ctx)
 	if base == "" {
 		return fmt.Errorf("no Python 3.10-3.14 found - install it from python.org (or the Microsoft Store) first")
@@ -181,17 +214,24 @@ func (m *EnvManager) Install(ctx context.Context, progress func(string)) error {
 	if err := os.MkdirAll(m.DataDir, 0o700); err != nil {
 		return err
 	}
+	dir := m.envDir(cuda)
 	emit("creating virtual environment...")
-	if err := m.stream(ctx, emit, base, "-m", "venv", m.envDir()); err != nil {
+	if err := m.stream(ctx, emit, base, "-m", "venv", dir); err != nil {
 		return fmt.Errorf("venv creation failed: %w", err)
 	}
-	py := m.EnvPython()
+	py := venvPython(dir)
 	if py == "" {
 		return fmt.Errorf("venv created but interpreter missing")
 	}
 	pip := []string{"-m", "pip", "install", "--no-input", "--disable-pip-version-check", "--progress-bar", "off"}
-	emit("installing PyTorch (CPU build) - this downloads a large package...")
-	if err := m.stream(ctx, emit, py, append(pip, "--index-url", torchIndexCPU, "torch")...); err != nil {
+	torchIndex := torchIndexCPU
+	if cuda {
+		torchIndex = torchIndexCUDA
+		emit("installing PyTorch (CUDA build) - this downloads several GB...")
+	} else {
+		emit("installing PyTorch (CPU build) - this downloads a large package...")
+	}
+	if err := m.stream(ctx, emit, py, append(pip, "--index-url", torchIndex, "torch")...); err != nil {
 		return fmt.Errorf("torch install failed: %w", err)
 	}
 	emit("installing Beat This! beat tracker...")
@@ -201,19 +241,34 @@ func (m *EnvManager) Install(ctx context.Context, progress func(string)) error {
 	emit("verifying engine...")
 	eng := &Engine{Python: py, DataDir: m.DataDir}
 	defer eng.Stop()
-	if _, _, err := eng.Ping(ctx, false); err != nil {
+	v, _, err := eng.Ping(ctx, false)
+	if err != nil {
 		return fmt.Errorf("engine verification failed: %w", err)
+	}
+	if cuda && (v == nil || !strings.Contains(v.Torch, "+cu")) {
+		return fmt.Errorf("torch is not a CUDA build after install")
 	}
 	emit("engine installed")
 	return nil
 }
 
-// Uninstall removes the managed venv + model cache.
-func (m *EnvManager) Uninstall() error {
-	if err := os.RemoveAll(m.envDir()); err != nil {
+// Uninstall removes a variant venv by its root dir (must live under DataDir); the shared
+// model cache is removed once no variant remains.
+func (m *EnvManager) Uninstall(root string) error {
+	if root == "" {
+		return fmt.Errorf("nothing to remove")
+	}
+	rel, err := filepath.Rel(m.DataDir, root)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("refusing to remove %s: outside the managed dir", root)
+	}
+	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(m.DataDir, "cache"))
+	if m.EnvPython(false) == "" && m.EnvPython(true) == "" {
+		return os.RemoveAll(filepath.Join(m.DataDir, "cache"))
+	}
+	return nil
 }
 
 // stream runs a command and forwards each stdout/stderr line to emit.

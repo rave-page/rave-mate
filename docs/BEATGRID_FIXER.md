@@ -9,11 +9,15 @@ confidently go to a `MANUAL_GRIDDING_PREP` playlist (Traktor) instead of being g
 ## Setup (Settings → Library & media → Beatgrid Fixer)
 
 1. Install Python 3.10–3.14 (python.org or Microsoft Store) if you don't have it.
-2. **Install beat engine** — creates rave-mate's own Python environment (pinned
-   `beat-this` + CPU PyTorch). Your system Python is not touched.
-3. NVIDIA GPU? **Install CUDA acceleration** appears — a several-GB PyTorch build that
-   makes analysis many times faster. The **Use GPU** toggle shows once it's verified
-   installed.
+2. Install an engine — CPU and CUDA are independent installs, in any order, and can
+   coexist. Each creates rave-mate's own Python environment (pinned `beat-this` +
+   PyTorch); your system Python is not touched.
+   - **Install CPU engine** — works everywhere.
+   - **Install CUDA engine** — a several-GB PyTorch build, many times faster analysis
+     and training. Needs an NVIDIA GPU (the button is greyed out with a hint when no
+     NVIDIA driver is detected).
+3. **Engine used for analysis & training** picks which one runs: Auto (CUDA when
+   installed & working, else CPU), CPU, or CUDA.
 4. Enable the feature toggle.
 
 ## Fixing grids (Library → Collection)
