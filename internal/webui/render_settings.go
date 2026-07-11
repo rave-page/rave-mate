@@ -59,6 +59,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "streambridge", label: i18n.T("settings.toggle.streambridge"), get: func() bool { return f.StreamBridge.Enabled }, set: func(b bool) { f.StreamBridge.Enabled = b }},
 		{id: "studio", label: i18n.T("settings.toggle.studio"), module: "studio", get: func() bool { return f.StudioChannel.Enabled }, set: func(b bool) { f.StudioChannel.Enabled = b }},
 		{id: "peers", label: i18n.T("settings.toggle.peers"), module: "peers", retab: true, get: func() bool { return f.Peers.Enabled }, set: func(b bool) { f.Peers.Enabled = b }},
+		{id: "accountbridge", label: i18n.T("settings.toggle.accountbridge"), module: "accountbridge", get: func() bool { return f.AccountBridge.Enabled }, set: func(b bool) { f.AccountBridge.Enabled = b }},
 		{id: "webcam", label: i18n.T("settings.toggle.webcam"), module: "webcam", get: func() bool { return f.Webcam.Enabled }, set: func(b bool) { f.Webcam.Enabled = b }},
 		{id: "medialink", label: i18n.T("settings.toggle.medialink"), get: func() bool { return f.MediaLink.ShareVideo }, set: func(b bool) { f.MediaLink.ShareVideo = b }},
 		{id: "timecode", label: i18n.T("settings.toggle.timecode"), module: "timecode", get: func() bool { return f.Timecode.Enabled }, set: func(b bool) { f.Timecode.Enabled = b }},
@@ -144,7 +145,7 @@ func settingsSections() []setSection {
 		{"account", st("account"), sd("account"), []string{"uilang", "account", "api"}},
 		{"djsources", st("djsources"), sd("djsources"), []string{"traktor", "traktorqml", "traktormap", "midi", "nml", "prodjlink", "serato", "virtualdj", "rekordbox", "rekordboxkey", "rekordboxmidi"}},
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
-		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "webcam", "medialink", "timecode", "ablelink"}},
+		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "accountbridge", "webcam", "medialink", "timecode", "ablelink"}},
 		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
 		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
@@ -315,13 +316,14 @@ func matchAllTerms(hay string, terms []string) bool {
 // settingsCard renders one feature card: header (title + toggle) + status row + body.
 // settingsCardTips maps a card id to its helpTopics glossary entry (tooltip.go).
 var settingsCardTips = map[string]string{
-	"recorder":    "session-recorder",
-	"setcapture":  "icecast",
-	"fingerprint": "fingerprinting",
-	"timecode":    "tc-timecode",
-	"obssync":     "obssync-mediasync",
-	"dmx":         "dmx-connect",
-	"rtsp":        "rtsp-why",
+	"accountbridge": "account-bridge",
+	"recorder":      "session-recorder",
+	"setcapture":    "icecast",
+	"fingerprint":   "fingerprinting",
+	"timecode":      "tc-timecode",
+	"obssync":       "obssync-mediasync",
+	"dmx":           "dmx-connect",
+	"rtsp":          "rtsp-why",
 }
 
 func (u *UI) settingsCard(id string, st stv) string {
@@ -537,6 +539,9 @@ func (u *UI) cardContent(id string) (string, string, string) {
 	case "peers":
 		return i18n.T("settings.card.peers.title"), i18n.T("settings.card.peers.desc"),
 			field(i18n.T("settings.body.account.nodeName"), "set:peer-nick", f.Peers.Nickname, "text")
+	case "accountbridge":
+		return i18n.T("settings.card.accountbridge.title"), i18n.T("settings.card.accountbridge.desc"),
+			u.bridgeCardBody()
 	case "webcam":
 		return i18n.T("settings.card.webcam.title"), i18n.T("settings.card.webcam.desc"),
 			toggleRow(i18n.T("settings.body.webcam.autostart"), "set:webcam-autostart", f.Webcam.AutoStart) +
@@ -1561,6 +1566,14 @@ func (u *UI) applySet(id, val string) {
 	f := &cfg.Features
 	v := strings.TrimSpace(val)
 	b := val == "true"
+	if id == "bridge-studio" {
+		// Serving the Local Studio channel over the relay - a browser ANYWHERE can then drive
+		// this machine (still gated by TOTP + the mutual identity match).
+		f.AccountBridge.LocalStudio = b
+		u.saveCfg()
+		u.patchMain()
+		return
+	}
 	toInt := func(dst *int, min, max int) {
 		if n, err := strconv.Atoi(v); err == nil && n >= min && n <= max {
 			*dst = n

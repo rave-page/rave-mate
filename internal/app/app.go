@@ -1582,6 +1582,7 @@ func run(parent context.Context, serviceMode bool) error {
 		AbleLink:   linkW,
 		AudioRec:   audioRec,
 		TraktorMap: tmap, Identity: ident, Peers: peerMgr, Discovery: disc, PeerBridge: peerBridge, NetStats: netSampler, Perf: perfMon,
+		Bridge: bridgeMgr, AuthGate: authGate,
 		EventBus:  bus,
 		RemoteCtl: remoteCtl, Vrchat: vrcMgr, VrchatPipe: vrcW, Twitch: twitchMgr, VROverlay: vrSurf, OBSControl: obsControl, VRStats: vrPerf, VRCTools: vrcTools,
 		GitHub: ghAuth, WorldSync: worldSync,

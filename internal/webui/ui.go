@@ -34,9 +34,14 @@ type UI struct {
 	mu        sync.Mutex
 	active    string
 	pinnedTab string // non-"" locks setTab to this tab (headless remote-library sessions)
-	stop      chan struct{}
-	closed    bool
-	trayStop  func() // system-tray teardown (webview renderer only); nil off Windows / before ready
+
+	// Pending account-bridge enrolment, shown ONCE while the user scans it. Held in memory
+	// only, cleared the moment a code confirms it. NEVER logged, never persisted here.
+	bridgeURI    string
+	bridgeSecret string
+	stop         chan struct{}
+	closed       bool
+	trayStop     func() // system-tray teardown (webview renderer only); nil off Windows / before ready
 
 	updMgr *updater.Manager // self-update state machine (5-min poll; nil until onReady; disabled on dev builds)
 

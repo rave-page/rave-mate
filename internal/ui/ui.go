@@ -17,7 +17,9 @@ import (
 	"rave.page/mate/internal/api"
 	"rave.page/mate/internal/appgroups"
 	"rave.page/mate/internal/audiorec"
+	"rave.page/mate/internal/authz"
 	"rave.page/mate/internal/automation"
+	"rave.page/mate/internal/bridge"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/discovery"
@@ -120,6 +122,8 @@ type Services struct {
 	TraktorMap   *traktormap.Manager           // activate/deactivate Traktor controller mappings; may be nil
 	Identity     *identity.Identity            // stable node identity for the LAN peer link; may be nil
 	Peers        *peerlink.Manager             // LAN peer-link connections; may be nil
+	Bridge       *bridge.Manager               // rave.page account bridge (off-LAN reach); may be nil
+	AuthGate     *authz.Gate                   // access gate for the bridge (TOTP + trusted sessions); may be nil
 	Discovery    *discovery.Discovery          // LAN mDNS discovery; may be nil
 	PeerBridge   *peerbridge.Bridge            // live DJ-data bridge over the peerlink; may be nil
 	NetStats     *netstats.Sampler             // 1 Hz network rate/RTT sampler (dashboard graphs); may be nil
