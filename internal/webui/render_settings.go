@@ -735,7 +735,7 @@ func (u *UI) timecodeBody() string {
 		selectBox(i18n.T("settings.body.timecode.mtcPort"), "set:tc-mtc-dev", devOpts(midiOut, i18n.T("settings.body.timecode.firstPort"), f.MTC.Device), f.MTC.Device) +
 		toggleRowTip(i18n.T("settings.body.timecode.artnetOn"), "set:tc-art-on", f.ArtNet.On, tipTopic("tc-artnet")) +
 		field(i18n.T("settings.body.timecode.artnetTarget"), "set:tc-art-addr", f.ArtNet.Addr, "text") +
-		btnRow(actionMenu("tcextras", i18n.T("settings.body.timecode.extraMenu"), []ssOpt{
+		btnRow(actionMenu("tcextras", "⋯ "+i18n.T("settings.body.timecode.extraMenu"), []ssOpt{
 			{Val: "settings-tcextra:ltc", Label: i18n.T("settings.body.timecode.extraLtc", i18n.A{"count": fmt.Sprint(len(f.LTCExtra))})},
 			{Val: "settings-tcextra:mtc", Label: i18n.T("settings.body.timecode.extraMtc", i18n.A{"count": fmt.Sprint(len(f.MTCExtra))})},
 			{Val: "settings-tcextra:art", Label: i18n.T("settings.body.timecode.extraArtnet", i18n.A{"count": fmt.Sprint(len(f.ArtNetExtra))})},
@@ -860,7 +860,7 @@ func (u *UI) vrOverlayBody() string {
 			field(i18n.T("settings.body.vroverlay.vmc"), "set:vr-vmc", f.VMCAddr, "text")) +
 		toggleRow(i18n.T("settings.body.vroverlay.vmcLive"), "set:vr-vmclive", f.VMCLive) +
 		// 6-button wall → one manage menu (every entry keeps its live count)
-		btnRow(actionMenu("vrovmanage", i18n.T("settings.body.vroverlay.manageMenu"), []ssOpt{
+		btnRow(actionMenu("vrovmanage", "⋯ "+i18n.T("settings.body.vroverlay.manageMenu"), []ssOpt{
 			{Val: "settings-vrov", Label: i18n.T("settings.body.vroverlay.overlaysCount", i18n.A{"count": fmt.Sprint(len(f.Overlays))})},
 			{Val: "settings-vr-bindings", Label: i18n.T("settings.body.vroverlay.openBindings")},
 			{Val: "settings-vr-keybinds", Label: i18n.T("settings.body.vroverlay.keybindsCount", i18n.A{"count": fmt.Sprint(len(f.Binds))})},

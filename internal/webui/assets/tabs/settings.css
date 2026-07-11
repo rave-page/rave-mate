@@ -57,10 +57,6 @@
   .set-sec > .rp-card { break-inside: avoid; }
 }
 
-/* action menu (button-wall → dropdown): size to content, not full card width */
-.act-menu { display: inline-block; min-width: 220px; }
-.act-menu .ss-field { margin: 6px 0; }
-
 .set-cardhead {
   display: flex;
   align-items: center;
