@@ -2256,6 +2256,33 @@ func (u *UI) libCtxModal(path string) {
 	body := btnRow(btn(i18n.T("library.label.renameEllipsis"), "outline", "lib-rename:"+path, ""), btn(i18n.T("library.label.moveEllipsis"), "outline", "lib-move:"+path, ""),
 		btn(i18n.T("library.label.deleteEllipsis"), "destructive", "lib-del:"+path, "")) +
 		btnRow(btn(i18n.T("library.copyPath"), "ghost", "copy", ""), btn(i18n.T("library.reveal"), "ghost", "lib-reveal:"+path, ""), markBtn)
+	// works-together: mark the active multi-selection (when this row is part of it) + discovery
+	if u.svc.Lib != nil {
+		s := u.lib()
+		s.mu.Lock()
+		nColl, nBatch := 0, 0
+		if s.collSel[path] {
+			nColl = len(s.collSel)
+		}
+		if s.batch[path] {
+			nBatch = len(s.batch)
+		}
+		_, inColl := s.byPath[path]
+		s.mu.Unlock()
+		var row []string
+		switch {
+		case nColl >= 2:
+			row = append(row, btn(i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(nColl)}), "primary", "lib-compat-mark:coll", ""))
+		case nBatch >= 2:
+			row = append(row, btn(i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(nBatch)}), "primary", "lib-compat-mark:browse", ""))
+		}
+		if inColl {
+			row = append(row, btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+path, ""))
+		}
+		if len(row) > 0 {
+			body += btnRow(row...)
+		}
+	}
 	u.openModal(modal(filepath.Base(path), body, ""))
 }
 

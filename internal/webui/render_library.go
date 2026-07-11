@@ -82,6 +82,14 @@ type libSt struct {
 	plItems []libdb.PlaylistItemRow
 	addto   []string // pending paths for the add-to-playlist modal
 
+	compatPaths []string // pending paths for the works-together kind modal
+	compatFind  string   // discovery modal subject path
+
+	// sorted-copy set builder draft
+	plsortID  int64
+	plsortBy  string
+	plsortDiv string
+
 	played    []libPlay
 	playSort  string
 	playDesc  bool
@@ -301,7 +309,7 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 	done, gen := s.loadDone, s.loadGen
 	u.bg(func() {
 		defer close(done)
-		tr, err := u.svc.Lib.LoadAllTracks()
+		tr, err := u.svc.Lib.LoadAllTracks() // excludes divider rows (collection stays clean)
 		drops, _ := u.svc.Lib.AllDrops()
 		var byPath map[string]musiclib.Track
 		if err == nil { // index built off the action goroutine too
@@ -309,6 +317,15 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 			for _, t := range tr {
 				if t.Path != "" {
 					byPath[t.Path] = t
+				}
+			}
+			// dividers hydrate into byPath ONLY: playlist rows show their title,
+			// the collection list/facets never see them
+			if divs, derr := u.svc.Lib.DividerTracks(); derr == nil {
+				for _, t := range divs {
+					if t.Path != "" {
+						byPath[t.Path] = t
+					}
 				}
 			}
 		}
@@ -583,10 +600,14 @@ func (u *UI) libBatchBar(s *libSt) string {
 	if len(s.batch) == 0 {
 		return ""
 	}
+	compatBtn := ""
+	if len(s.batch) >= 2 {
+		compatBtn = btn(i18n.T("library.compat.markBtn"), "outline", "lib-compat-mark:browse", "")
+	}
 	return `<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(s.batch))})) + `</span>` +
 		btn(i18n.T("library.batch.waveforms"), "outline", "lib-batch-run:peaks", "") + btn(i18n.T("library.batch.tags"), "outline", "lib-batch-run:tags", "") +
 		btn(i18n.T("library.batch.fingerprint"), "outline", "lib-batch-run:fingerprint", "") + btn(i18n.T("library.batch.transcode"), "primary", "lib-batch-run:transcode", "") +
-		btn(i18n.T("library.clear"), "ghost", "lib-batch-clear", "") + `</div>`
+		compatBtn + btn(i18n.T("library.clear"), "ghost", "lib-batch-clear", "") + `</div>`
 }
 
 // ── Favorites ───────────────────────────────────────────────────────────────
@@ -769,8 +790,12 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 				btn(i18n.T("library.ce.applySelMem"), "outline", "ce-apply-sel:mem", "")
 			addVar = "outline"
 		}
+		compatBtn := ""
+		if len(s.collSel) >= 2 {
+			compatBtn = btn(i18n.T("library.compat.markBtn"), "outline", "lib-compat-mark:coll", "")
+		}
 		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(s.collSel))})) + `</span>` +
-			ceBtns + btn(i18n.T("library.addToPlaylist"), addVar, "lib-addto", "") +
+			ceBtns + btn(i18n.T("library.addToPlaylist"), addVar, "lib-addto", "") + compatBtn +
 			btn(i18n.T("library.gf.markVerified"), "outline", "gf-verify-sel", "") +
 			btn(i18n.T("library.clear"), "ghost", "lib-collsel-clear", "") + `</div>`)
 	}
@@ -1037,6 +1062,7 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	if !manual {
 		b.WriteString(btn(i18n.T("library.pl.dupManual"), "outline", fmt.Sprintf("lib-pl-dup:%d", p.ID), ""))
 	}
+	b.WriteString(btn(i18n.T("library.plsort.btn"), "outline", fmt.Sprintf("lib-plsort:%d", p.ID), ""))
 	b.WriteString(btn(i18n.T("common.delete"), "destructive", fmt.Sprintf("lib-pl-del:%d", p.ID), ""))
 	if u.svc.Syncer != nil {
 		b.WriteString(btn(i18n.T("library.pl.push"), "ghost", fmt.Sprintf("lib-pl-push:%d", p.ID), ""))
@@ -1079,7 +1105,7 @@ func (u *UI) libPlaylistOpenHTML(s *libSt) string {
 		title := it.Title + " - " + it.Artist
 		if it.Path != "" {
 			if t, ok := s.byPath[it.Path]; ok {
-				title = strOrDash(t.Artist) + " - " + strOrDash(t.Title)
+				title = trackTitle(t) // skips a missing artist (divider rows, loose files)
 			} else if title == " - " {
 				title = filepath.Base(it.Path)
 			}
@@ -1361,6 +1387,10 @@ func (u *UI) libDetailHTML(s *libSt) string {
 	// PLAYLISTS membership
 	if sel.kind == "audio" {
 		b.WriteString(inspSec(i18n.T("library.insp.playlists"), u.libTrackPlaylistsHTML(sel.path)))
+	}
+	// WORKS WELL TOGETHER (compat marks + discovery)
+	if sel.inColl && sel.kind == "audio" && u.svc.Lib != nil {
+		b.WriteString(inspSec(i18n.T("library.compat.section"), u.libCompatSectionHTML(s, sel.path)))
 	}
 	// DETAILS
 	b.WriteString(inspSec(i18n.T("library.insp.details"), u.libDetailsMeta(sel.track)))

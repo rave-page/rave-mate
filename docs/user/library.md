@@ -70,6 +70,36 @@ sits in a collection/playlist context (or a folder marked as a playlist — **Br
 toolbar → Mark folder as playlist**); *Show encoder for this file* brings it back for
 one-offs. Set recordings and video keep the full panel up front.
 
+## Works-together marks (track compatibility)
+
+Mark tracks that work well together - three kinds: **Blend** (mix smoothly), **Double
+drop** (drops align), **Energy match** (same energy level). Select 2+ tracks in
+Collection or Browse, then right-click a selected row (or use **Works together…** in
+the selection bar) and pick the kind - every pair among the selection is marked
+(symmetric, stored once per pair; marking caps at 100 tracks per action).
+
+A selected track's detail rail shows its **Works well together** partners;
+**Find compatible…** (also on the right-click menu) opens discovery: direct partners
+plus friends-of-friends (depth 2, "via <track>", capped at 200) - built for set
+building. ✕ on a direct partner removes that pair's marks.
+
+## Sorted-copy set builder
+
+Any playlist's action row has **Sorted copy…**: builds a NEW playlist (original never
+modified) grouped by works-together clusters, energy (BPM bands), key (harmonic
+Camelot order), last played, date added, or release date.
+
+Optional **divider tracks** between groups: short quiet noise clips (generated once
+per name style via ffmpeg, reused after) titled `............`, `---------------`, or
+`________________` - group boundaries stay visible in any DJ software after
+export/sync. If ffmpeg is unavailable the copy is created without dividers.
+
+Dividers are flagged rows (`is_divider`) that exist **only inside playlists**: they
+never appear in the Collection view, never upload to rave.page (library bulk sync,
+media sync, cloud playlist push all skip them), and are never fingerprint/enrichment
+or cross-software merge candidates. Playlist M3U export and folder-based flows keep
+them - that visibility in your DJ software is their purpose.
+
 ## Tag fixing & editing
 
 **Collection → Maintenance → Fix tags…** scans files for broken/incomplete tags

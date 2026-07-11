@@ -391,6 +391,34 @@
       "rating": "Rating",
       "title": "Title"
     },
+    "compat": {
+      "ctxMark": "Mark {count} selected as works-together…",
+      "findBtn": "Find compatible…",
+      "findTitle": "Compatible with {name}",
+      "hint": {
+        "blend": "The tracks mix smoothly into each other - harmonics and groove line up.",
+        "double_drop": "Drops align - layer both tracks for a double drop.",
+        "energy": "Same energy level - interchangeable in the set arc."
+      },
+      "kind": {
+        "blend": "Blend",
+        "double_drop": "Double drop",
+        "energy": "Energy match"
+      },
+      "markAction": "Mark",
+      "markBtn": "Works together…",
+      "markFailed": "Mark failed: ",
+      "markedToast": "Marked {n} new pairs ({kind})",
+      "modalDesc": "Marks every pair among the {count} selected tracks. How do they work together?",
+      "modalTitle": "Mark works-together",
+      "needTwo": "Select at least 2 tracks",
+      "none": "No compatible tracks found (depth 2).",
+      "removed": "Mark removed",
+      "section": "Works well together",
+      "sectionEmpty": "No marks yet - select 2+ tracks and mark them as works-together.",
+      "tooMany": "{count} tracks selected - pair marking caps at {max}",
+      "via": "via {name} · {kind}"
+    },
     "confirm": {
       "deleteFile": "Delete {name} from disk? This cannot be undone.",
       "deletePlaylist": "Delete this playlist? Tracks stay in your collection.",
@@ -698,6 +726,29 @@
       "plays": "Plays",
       "rating": "Rating",
       "title": "Title"
+    },
+    "plsort": {
+      "btn": "Sorted copy…",
+      "by": {
+        "added": "Date added",
+        "compat": "Works-together clusters",
+        "energy": "Energy (BPM bands)",
+        "key": "Key (harmonic order)",
+        "lastplayed": "Last played",
+        "released": "Release date"
+      },
+      "create": "Create sorted copy",
+      "createdToast": "Created “{name}” - {tracks} entries in {groups} groups",
+      "desc": "Builds a NEW playlist grouped by the chosen criterion - the original playlist is never modified.",
+      "div": {
+        "none": "No dividers"
+      },
+      "divHint": "Dividers are short quiet noise tracks inserted between groups so the boundaries are visible in any DJ software. Generated once per style and reused.",
+      "dividers": "Divider tracks",
+      "groupBy": "Group by",
+      "noFfmpeg": "ffmpeg unavailable - sorted copy created without dividers",
+      "sortedName": "{name} · by {by}",
+      "title": "Create sorted copy"
     },
     "preset": {
       "builtin": "built-in",

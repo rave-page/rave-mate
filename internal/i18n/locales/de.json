@@ -354,6 +354,34 @@
       "rating": "Bewertung",
       "title": "Titel"
     },
+    "compat": {
+      "ctxMark": "{count} ausgewählte als „passt zusammen“ markieren…",
+      "findBtn": "Passende finden…",
+      "findTitle": "Passt zu {name}",
+      "hint": {
+        "blend": "Die Tracks mischen sich nahtlos ineinander - Harmonie und Groove passen.",
+        "double_drop": "Drops liegen übereinander - beide Tracks für einen Double Drop schichten.",
+        "energy": "Gleiches Energielevel - im Set-Verlauf austauschbar."
+      },
+      "kind": {
+        "blend": "Blend",
+        "double_drop": "Double Drop",
+        "energy": "Energie-Match"
+      },
+      "markAction": "Markieren",
+      "markBtn": "Passt zusammen…",
+      "markFailed": "Markieren fehlgeschlagen: ",
+      "markedToast": "{n} neue Paare markiert ({kind})",
+      "modalDesc": "Markiert jedes Paar der {count} ausgewählten Tracks. Wie passen sie zusammen?",
+      "modalTitle": "Als „passt zusammen“ markieren",
+      "needTwo": "Mindestens 2 Tracks auswählen",
+      "none": "Keine passenden Tracks gefunden (Tiefe 2).",
+      "removed": "Markierung entfernt",
+      "section": "Passt gut zusammen",
+      "sectionEmpty": "Noch keine Markierungen - 2+ Tracks auswählen und als „passt zusammen“ markieren.",
+      "tooMany": "{count} Tracks ausgewählt - Paar-Markierung maximal {max}",
+      "via": "über {name} · {kind}"
+    },
     "confirm": {
       "deleteFile": "{name} von der Festplatte löschen? Dies kann nicht rückgängig gemacht werden.",
       "deletePlaylist": "Diese Playlist löschen? Tracks bleiben in deiner Sammlung.",
@@ -617,6 +645,29 @@
       "plays": "Wiedergaben",
       "rating": "Bewertung",
       "title": "Titel"
+    },
+    "plsort": {
+      "btn": "Sortierte Kopie…",
+      "by": {
+        "added": "Hinzugefügt am",
+        "compat": "Passt-zusammen-Cluster",
+        "energy": "Energie (BPM-Bänder)",
+        "key": "Tonart (harmonische Reihenfolge)",
+        "lastplayed": "Zuletzt gespielt",
+        "released": "Erscheinungsdatum"
+      },
+      "create": "Sortierte Kopie erstellen",
+      "createdToast": "„{name}“ erstellt - {tracks} Einträge in {groups} Gruppen",
+      "desc": "Erstellt eine NEUE Playlist, gruppiert nach dem gewählten Kriterium - die Original-Playlist bleibt unverändert.",
+      "div": {
+        "none": "Keine Trenner"
+      },
+      "divHint": "Trenner sind kurze, leise Rausch-Tracks zwischen den Gruppen, damit die Grenzen in jeder DJ-Software sichtbar sind. Pro Stil einmal erzeugt und wiederverwendet.",
+      "dividers": "Trenner-Tracks",
+      "groupBy": "Gruppieren nach",
+      "noFfmpeg": "ffmpeg nicht verfügbar - sortierte Kopie ohne Trenner erstellt",
+      "sortedName": "{name} · nach {by}",
+      "title": "Sortierte Kopie erstellen"
     },
     "preset": {
       "builtin": "integriert",

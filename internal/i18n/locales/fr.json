@@ -354,6 +354,34 @@
       "rating": "Note",
       "title": "Titre"
     },
+    "compat": {
+      "ctxMark": "Marquer les {count} sélectionnés comme « vont ensemble »…",
+      "findBtn": "Trouver compatibles…",
+      "findTitle": "Compatible avec {name}",
+      "hint": {
+        "blend": "Les pistes se mixent en douceur - harmonie et groove s'accordent.",
+        "double_drop": "Les drops s’alignent - superposez les deux pour un double drop.",
+        "energy": "Même niveau d’énergie - interchangeables dans l’arc du set."
+      },
+      "kind": {
+        "blend": "Blend",
+        "double_drop": "Double drop",
+        "energy": "Énergie équivalente"
+      },
+      "markAction": "Marquer",
+      "markBtn": "Vont ensemble…",
+      "markFailed": "Échec du marquage : ",
+      "markedToast": "{n} nouvelles paires marquées ({kind})",
+      "modalDesc": "Marque chaque paire parmi les {count} pistes sélectionnées. Comment vont-elles ensemble ?",
+      "modalTitle": "Marquer « vont ensemble »",
+      "needTwo": "Sélectionnez au moins 2 pistes",
+      "none": "Aucune piste compatible trouvée (profondeur 2).",
+      "removed": "Marque supprimée",
+      "section": "Vont bien ensemble",
+      "sectionEmpty": "Aucune marque - sélectionnez 2+ pistes et marquez-les comme « vont ensemble ».",
+      "tooMany": "{count} pistes sélectionnées - marquage limité à {max}",
+      "via": "via {name} · {kind}"
+    },
     "confirm": {
       "deleteFile": "Supprimer {name} du disque ? Cette action est irréversible.",
       "deletePlaylist": "Supprimer cette playlist ? Les pistes restent dans votre collection.",
@@ -617,6 +645,29 @@
       "plays": "Lectures",
       "rating": "Note",
       "title": "Titre"
+    },
+    "plsort": {
+      "btn": "Copie triée…",
+      "by": {
+        "added": "Date d'ajout",
+        "compat": "Clusters « vont ensemble »",
+        "energy": "Énergie (bandes BPM)",
+        "key": "Tonalité (ordre harmonique)",
+        "lastplayed": "Dernière lecture",
+        "released": "Date de sortie"
+      },
+      "create": "Créer la copie triée",
+      "createdToast": "« {name} » créée - {tracks} entrées en {groups} groupes",
+      "desc": "Crée une NOUVELLE playlist groupée selon le critère choisi - la playlist d'origine n'est jamais modifiée.",
+      "div": {
+        "none": "Sans séparateurs"
+      },
+      "divHint": "Les séparateurs sont de courtes pistes de bruit discret insérées entre les groupes pour rendre les limites visibles dans tout logiciel DJ. Générés une fois par style puis réutilisés.",
+      "dividers": "Pistes séparatrices",
+      "groupBy": "Grouper par",
+      "noFfmpeg": "ffmpeg indisponible - copie triée créée sans séparateurs",
+      "sortedName": "{name} · par {by}",
+      "title": "Créer une copie triée"
     },
     "preset": {
       "builtin": "intégré",

@@ -354,6 +354,34 @@
       "rating": "Valoración",
       "title": "Título"
     },
+    "compat": {
+      "ctxMark": "Marcar {count} seleccionadas como «funcionan juntas»…",
+      "findBtn": "Buscar compatibles…",
+      "findTitle": "Compatible con {name}",
+      "hint": {
+        "blend": "Las pistas se mezclan con suavidad: armonía y groove encajan.",
+        "double_drop": "Los drops se alinean: superpón ambas para un double drop.",
+        "energy": "Mismo nivel de energía: intercambiables en el arco del set."
+      },
+      "kind": {
+        "blend": "Blend",
+        "double_drop": "Double drop",
+        "energy": "Misma energía"
+      },
+      "markAction": "Marcar",
+      "markBtn": "Funcionan juntas…",
+      "markFailed": "Error al marcar: ",
+      "markedToast": "{n} pares nuevos marcados ({kind})",
+      "modalDesc": "Marca cada par entre las {count} pistas seleccionadas. ¿Cómo funcionan juntas?",
+      "modalTitle": "Marcar «funcionan juntas»",
+      "needTwo": "Selecciona al menos 2 pistas",
+      "none": "No se encontraron pistas compatibles (profundidad 2).",
+      "removed": "Marca eliminada",
+      "section": "Funcionan bien juntas",
+      "sectionEmpty": "Sin marcas aún: selecciona 2+ pistas y márcalas como «funcionan juntas».",
+      "tooMany": "{count} pistas seleccionadas: el marcado de pares admite máx. {max}",
+      "via": "vía {name} · {kind}"
+    },
     "confirm": {
       "deleteFile": "¿Eliminar {name} del disco? Esto no se puede deshacer.",
       "deletePlaylist": "¿Eliminar esta lista de reproducción? Las pistas permanecen en tu colección.",
@@ -617,6 +645,29 @@
       "plays": "Reproducciones",
       "rating": "Valoración",
       "title": "Título"
+    },
+    "plsort": {
+      "btn": "Copia ordenada…",
+      "by": {
+        "added": "Fecha de adición",
+        "compat": "Clústeres «funcionan juntas»",
+        "energy": "Energía (bandas de BPM)",
+        "key": "Tonalidad (orden armónico)",
+        "lastplayed": "Última reproducción",
+        "released": "Fecha de lanzamiento"
+      },
+      "create": "Crear copia ordenada",
+      "createdToast": "«{name}» creada: {tracks} entradas en {groups} grupos",
+      "desc": "Crea una lista NUEVA agrupada por el criterio elegido; la lista original no se modifica nunca.",
+      "div": {
+        "none": "Sin separadores"
+      },
+      "divHint": "Los separadores son pistas cortas de ruido tenue insertadas entre grupos para que los límites se vean en cualquier software de DJ. Se generan una vez por estilo y se reutilizan.",
+      "dividers": "Pistas separadoras",
+      "groupBy": "Agrupar por",
+      "noFfmpeg": "ffmpeg no disponible: copia ordenada creada sin separadores",
+      "sortedName": "{name} · por {by}",
+      "title": "Crear copia ordenada"
     },
     "preset": {
       "builtin": "integrado",
