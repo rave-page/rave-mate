@@ -6,7 +6,7 @@ One guide per feature group: what it does, how to use it, how it works, caveats.
 - [DJ sources](dj-sources.md) - Traktor, Pioneer Pro DJ Link, Serato, VirtualDJ, Rekordbox, MIDI, session hub
 - [Recording & tracklists](recording-and-tracklists.md) - recorder, set capture, audio recording, OBS link, fingerprinting
 - [Overlays & visuals](overlays-and-visuals.md) - browser/PNG/OBS overlays, waveform, video share, editors
-- [Library](library.md) - local library, transcode, cross-DJ-software sync, works-together marks, sorted-copy set builder
+- [Library](library.md) - local library, transcode, cross-DJ-software sync, AI beatgrid fixer, works-together marks, sorted-copy set builder
 - [Streaming & studio](streaming-and-studio.md) - rave.page live publishing, web-app studio channel, RTSP
 - [Multi-PC](multi-pc.md) - peer link, remote control, media routes, OBS control, timecode, app groups
 - [Twitch](twitch.md) - sign-in, chat, alerts, title presets, moderation, speech-to-text

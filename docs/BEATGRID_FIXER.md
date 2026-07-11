@@ -47,7 +47,27 @@ The import dialog auto-detects all four libraries too (Serato import also reads 
 file's grid), so you can import, fix and write back whichever software you use.
 
 Quality knobs (settings): min grid coverage (default 0.85), minimum correction size
-(default 12 ms), calibrated detector bias.
+(default 12 ms), calibrated detector bias (below).
+
+## Detector calibration (Library → Collection)
+
+The neural detector carries a small systematic phase offset against your DJ software's
+grids that **differs per file format** (decoder delay: an MP3 decoder pads the start,
+FLAC doesn't, etc. — typically tens of ms). Uncalibrated, every "fix" would shift
+correct grids by that bias.
+
+1. Mark tracks whose grid you KNOW is right as **grid verified** (a handful per file
+   type you use — the same marks feed model training).
+2. Press **Calibrate detector** in the Beatgrid health card. rave-mate samples the
+   verified tracks evenly per extension, measures each track's detector-vs-grid offset
+   (only trusts tracks with a stable-tempo fit whose BPM matches the stored one), and
+   stores the per-format median.
+3. The measured bias (shown in the health card and the settings card, e.g.
+   `.mp3 +42.7 ms · .flac −6.8 ms · * −2.9 ms`) is subtracted from every planned fix;
+   `*` covers formats you didn't calibrate.
+
+Re-calibrate after switching the active model — a fine-tuned checkpoint can shift the
+detector's phase. Analysis results are cached, so re-runs are quick.
 
 ## Training your own model (Settings → Beatgrid Model)
 
