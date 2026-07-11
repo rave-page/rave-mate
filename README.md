@@ -38,7 +38,8 @@ isolated into supervised subprocesses, and the whole thing installs as one stati
   they work the same whichever DJ software you run. →
   [Overlays & Visuals](https://github.com/rave-page/rave-mate/wiki/Overlays-and-Visuals)
 - **One library, every DJ program.** Merge collections and sync ratings, cues and playlists
-  between Traktor, Rekordbox and VirtualDJ. →
+  between Traktor, Rekordbox and VirtualDJ; write edited cues back to Traktor, Rekordbox,
+  VirtualDJ and Serato. →
   [Library](https://github.com/rave-page/rave-mate/wiki/Library)
 - **Go live on rave.page**, run your **Twitch** channel, perform in **VR/VRChat**, pair
   **multiple PCs**, drive **DMX lights** - see the
@@ -139,7 +140,7 @@ each software can deliver and the setup trade-offs.
 | Unity plugin C# (motion window, world-sync window, UdonSharp readers) | **Unverified in Unity** - written to compile, not yet exercised in-editor; treat as beta |
 | Rekordbox integration (live source, XML writeback) | **WIP / experimental** - tested against local installs; XML grid/cue writeback is fresh, back up + verify imports |
 | VirtualDJ integration (live source, database writeback) | **WIP / untested** - implemented, not yet field-tested; back up your VirtualDJ database first |
-| Serato integration (library import, grid writeback) | **Unfinished** - read-side works, write-side is new byte-splicing code; treat as preview and keep backups |
+| Serato integration (library import, grid + cue writeback) | **Unfinished** - read-side works, write-side is new byte-splicing code; treat as preview and keep backups |
 | ravemidi kernel driver (one-way virtual MIDI ports) | **Developer preview** - self-signed/test-signed builds only; attestation-signed release pending (see MIDI Mixer tab) |
 | macOS/Linux builds | Compile + basic runs; Windows is the primary tested platform |
 | Motion studio FBX avatars | Binary FBX loads + renders textured/smooth-shaded (ASCII FBX + blend shapes not supported) |

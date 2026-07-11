@@ -65,3 +65,29 @@ column shows each track's census — ◆n drop markers, ⚑n cues.
 
 **Convert all hotcues → memory cues** demotes a track's pads in one step (positions +
 names kept) for software that supports memory cues.
+
+## Write cues to your DJ software
+
+Cue edits persist to the rave-mate library (and drops to the file tag) immediately.
+Pushing them into your DJ software is a separate, explicit step: the rail's **Write cues
+to DJ software** section detects installed libraries and shows one **Write cues to
+{app} (n)** button per target — the same backup-first router the beatgrid fixer uses.
+
+Scope: the checked collection rows (the mass-apply selection), or just the open track
+when nothing is checked. Only tracks with at least one musical cue are written; each
+write **replaces** that software's hotcues/memory cues/loops for those tracks with the
+cues shown in rave-mate. Beatgrids are never touched (that's the [beatgrid
+fixer](BEATGRID_FIXER.md)'s job), and drop markers are **not** exported — they only
+become cues via an applied pattern.
+
+Per software:
+
+| Target | Written to | Notes |
+|---|---|---|
+| **Traktor** | `collection.nml` (backup first) | non-grid `CUE_V2` replaced; grid cues + TEMPO untouched. Restart Traktor to pick it up. |
+| **Rekordbox** | exported collection XML (backup first) | `POSITION_MARK` hotcues (Num ≥ 0) + memory cues (Num = -1) + loops; import via **File → Import Collection**. The live `master.db` is deliberately not written — cues there are tied to ANLZ analysis data and a partial write would desync the library. |
+| **VirtualDJ** | `database.xml` (backup first) | hotcues → `<Poi Type="cue" Num="1..8">`, memory cues → remix points (`Type="remix"`), loops carry `Size` in beats. Refused while VirtualDJ runs (it rewrites the database on exit). |
+| **Serato** | the audio files ("Serato Markers2" tag, MP3 GEOB / FLAC vorbis) | verified temp-write per file, refused while Serato runs; a stale legacy `Serato Markers_` tag is removed (it would shadow the new cues). Memory cues have no Serato equivalent and are skipped — pad cues + saved loops only. MP4/AIFF/Ogg/WAV are left alone. |
+
+Library-file targets are backed up into the standard backup folder before every write.
+After a write the button turns into a "written" note; changing any cue re-arms it.

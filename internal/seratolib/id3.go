@@ -141,6 +141,13 @@ func (t *id3Tag) render() ([]byte, error) {
 // replaced by payload (inserted when absent; a fresh ID3v2.3 tag is created when the file has
 // none). Everything else - other frames, padding length, audio - is preserved.
 func spliceID3Beatgrid(data, payload []byte) ([]byte, error) {
+	return spliceID3Geob(data, payload, beatgridDesc, nil)
+}
+
+// spliceID3Geob returns a copy of data with its GEOB frame of description desc replaced by
+// payload (inserted when absent; a fresh ID3v2.3 tag is created when the file has none).
+// GEOBs whose description is in drop are removed. Everything else is preserved.
+func spliceID3Geob(data, payload []byte, desc string, drop map[string]bool) ([]byte, error) {
 	tag, audioOff, err := parseID3(data)
 	if err != nil {
 		return nil, err
@@ -150,12 +157,14 @@ func spliceID3Beatgrid(data, payload []byte) ([]byte, error) {
 	}
 	frames := make([]id3Frame, 0, len(tag.frames)+1)
 	for _, f := range tag.frames {
-		if f.id == "GEOB" && geobDescription(tag.major, f) == beatgridDesc {
-			continue
+		if f.id == "GEOB" {
+			if d := geobDescription(tag.major, f); d == desc || drop[d] {
+				continue
+			}
 		}
 		frames = append(frames, f)
 	}
-	frames = append(frames, buildGeobFrame(tag.major, payload))
+	frames = append(frames, buildGeobFrame(tag.major, desc, payload))
 	tag.frames = frames
 	rendered, err := tag.render()
 	if err != nil {
@@ -169,17 +178,23 @@ func spliceID3Beatgrid(data, payload []byte) ([]byte, error) {
 // readID3Beatgrid extracts the "Serato BeatGrid" GEOB payload from data.
 // found=false when the file has no tag / no beatgrid frame.
 func readID3Beatgrid(data []byte) ([]byte, bool, error) {
+	return readID3Geob(data, beatgridDesc)
+}
+
+// readID3Geob extracts the payload of the GEOB frame with description desc.
+// found=false when the file has no tag / no such frame.
+func readID3Geob(data []byte, desc string) ([]byte, bool, error) {
 	tag, _, err := parseID3(data)
 	if err != nil || tag == nil {
 		return nil, false, err
 	}
 	for _, f := range tag.frames {
-		if f.id != "GEOB" || geobDescription(tag.major, f) != beatgridDesc {
+		if f.id != "GEOB" || geobDescription(tag.major, f) != desc {
 			continue
 		}
 		body, ok := geobBody(tag.major, f)
 		if !ok {
-			return nil, false, errors.New("seratolib: undecodable Serato BeatGrid GEOB")
+			return nil, false, fmt.Errorf("seratolib: undecodable %q GEOB", desc)
 		}
 		_, _, _, payload, perr := splitGeob(body)
 		if perr != nil {
@@ -190,15 +205,15 @@ func readID3Beatgrid(data []byte) ([]byte, bool, error) {
 	return nil, false, nil
 }
 
-// buildGeobFrame renders a fresh GEOB "Serato BeatGrid" frame for the given tag major
-// (size encoding differs), flags zero, encoding latin1 (Serato's own convention).
-func buildGeobFrame(major byte, payload []byte) id3Frame {
-	body := make([]byte, 0, 1+len(octetStream)+1+1+len(beatgridDesc)+1+len(payload))
-	body = append(body, 0x00)            // text encoding latin1
-	body = append(body, octetStream...)  // MIME
-	body = append(body, 0x00, 0x00)      // MIME NUL + empty filename NUL
-	body = append(body, beatgridDesc...) // description
-	body = append(body, 0x00)            // description NUL
+// buildGeobFrame renders a fresh GEOB frame for the given tag major (size encoding
+// differs), flags zero, encoding latin1 (Serato's own convention).
+func buildGeobFrame(major byte, desc string, payload []byte) id3Frame {
+	body := make([]byte, 0, 1+len(octetStream)+1+1+len(desc)+1+len(payload))
+	body = append(body, 0x00)           // text encoding latin1
+	body = append(body, octetStream...) // MIME
+	body = append(body, 0x00, 0x00)     // MIME NUL + empty filename NUL
+	body = append(body, desc...)        // description
+	body = append(body, 0x00)           // description NUL
 	body = append(body, payload...)
 	raw := make([]byte, 0, id3Header+len(body))
 	raw = append(raw, 'G', 'E', 'O', 'B')

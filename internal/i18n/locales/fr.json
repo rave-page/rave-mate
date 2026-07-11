@@ -1076,7 +1076,16 @@
       "openPl": "Préparer les cues (playlist)",
       "openDir": "Préparer les cues (dossier)",
       "setToast": "{n} pistes dans le set de préparation · {skipped} ignorées (pas de grille)",
-      "setNone": "Aucune piste avec grille ici - analysez ou importez d'abord."
+      "setNone": "Aucune piste avec grille ici - analysez ou importez d'abord.",
+      "writeHeader": "Écrire les cues dans le logiciel DJ",
+      "writeTo": "Écrire les cues vers {app} ({n})",
+      "writeNone": "Aucune piste avec des cues à écrire — appliquez d'abord des patterns ou ajoutez des cues.",
+      "wroteHint": "{app} : cues écrits pour {n} pistes",
+      "writeFailed": "Échec de l'écriture des cues : ",
+      "writeNote": "L'écriture sauvegarde d'abord le fichier de bibliothèque cible, puis remplace les hotcues, memory cues et boucles des pistes écrites dans ce logiciel par les cues affichés dans rave-mate. Les beatgrids ne sont jamais touchés. Fermez le logiciel DJ avant d'écrire — sinon il peut écraser le changement en quittant. Portée : les lignes cochées de la collection, sinon uniquement la piste ouverte.",
+      "writeRbNote": "Rekordbox : les cues sont écrits dans le XML de collection — chargez-les via Fichier → Importer la collection (les hotcues gardent leur pad, les memory cues deviennent des memory cues Rekordbox).",
+      "writeVdjNote": "VirtualDJ : les hotcues deviennent des pads 1–8, les memory cues des points remix ; les boucles enregistrées portent leur longueur en beats.",
+      "writeSeratoNote": "Serato : les cues sont écrits directement dans les fichiers audio (MP3/FLAC, écriture temporaire vérifiée ; fermez Serato d'abord). Les memory cues n'ont pas d'équivalent Serato et sont ignorés — pads et boucles enregistrées uniquement."
     },
     "tf": {
       "menu": "Réparer les tags…",

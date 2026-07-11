@@ -74,7 +74,8 @@ func rekordboxCueType(k CueKind) int {
 }
 
 // ── VirtualDJ POI Type (string) ───────────────────────────────────────────────
-// "cue" | "loop" | "automix" | "beatgrid" | "remix".
+// "cue" (or absent) | "remix" | "loop" | "automix" | "beatgrid". Hot cues carry a 1-based
+// Num (pad 1-8); remix points are pad-less markers - our memory-cue equivalent.
 
 func virtualdjCueKind(typ string) CueKind {
 	switch typ {
@@ -84,6 +85,8 @@ func virtualdjCueKind(typ string) CueKind {
 		return CueGrid
 	case "automix":
 		return CueLoad
+	case "remix":
+		return CuePlain
 	default:
 		return CueHot
 	}
@@ -97,6 +100,8 @@ func virtualdjPoiType(k CueKind) string {
 		return "beatgrid"
 	case CueLoad:
 		return "automix"
+	case CuePlain:
+		return "remix"
 	default:
 		return "cue"
 	}

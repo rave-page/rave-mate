@@ -122,11 +122,18 @@ func renderVorbis(vendor string, comments []string) []byte {
 // vorbis comment replaced by the encoded payload (the comment block is created after
 // STREAMINFO when the file has none). All other blocks/comments/audio pass through.
 func spliceFLACBeatgrid(data, payload []byte) ([]byte, error) {
+	return spliceFLACComment(data, "SERATO_BEATGRID", beatgridDesc, payload)
+}
+
+// spliceFLACComment returns a copy of data with the key vorbis comment replaced by the
+// Serato-b64-wrapped payload (desc = embedded tag description). The comment block is
+// created after STREAMINFO when the file has none. All other blocks/comments/audio pass.
+func spliceFLACComment(data []byte, key, desc string, payload []byte) ([]byte, error) {
 	blocks, audioOff, err := parseFLAC(data)
 	if err != nil {
 		return nil, err
 	}
-	value := "SERATO_BEATGRID=" + encodeSeratoB64(beatgridDesc, payload)
+	value := key + "=" + encodeSeratoB64(desc, payload)
 	idx := -1
 	for i, b := range blocks {
 		if b.typ == flacVorbisType {
@@ -145,7 +152,7 @@ func spliceFLACBeatgrid(data, payload []byte) ([]byte, error) {
 	}
 	kept := make([]string, 0, len(comments)+1)
 	for _, c := range comments {
-		if !strings.HasPrefix(strings.ToUpper(c), "SERATO_BEATGRID=") {
+		if !strings.HasPrefix(strings.ToUpper(c), key+"=") {
 			kept = append(kept, c)
 		}
 	}
@@ -155,6 +162,11 @@ func spliceFLACBeatgrid(data, payload []byte) ([]byte, error) {
 
 // readFLACBeatgrid extracts the SERATO_BEATGRID payload from data (found=false when absent).
 func readFLACBeatgrid(data []byte) ([]byte, bool, error) {
+	return readFLACComment(data, "SERATO_BEATGRID", beatgridDesc)
+}
+
+// readFLACComment extracts the key comment's Serato-b64 payload (found=false when absent).
+func readFLACComment(data []byte, key, desc string) ([]byte, bool, error) {
 	blocks, _, err := parseFLAC(data)
 	if err != nil {
 		return nil, false, err
@@ -168,10 +180,10 @@ func readFLACBeatgrid(data []byte) ([]byte, bool, error) {
 			return nil, false, err
 		}
 		for _, c := range comments {
-			if !strings.HasPrefix(strings.ToUpper(c), "SERATO_BEATGRID=") {
+			if !strings.HasPrefix(strings.ToUpper(c), key+"=") {
 				continue
 			}
-			payload, err := decodeSeratoB64(beatgridDesc, c[len("SERATO_BEATGRID="):])
+			payload, err := decodeSeratoB64(desc, c[len(key)+1:])
 			if err != nil {
 				return nil, false, err
 			}
@@ -202,9 +214,22 @@ func encodeSeratoB64(desc string, payload []byte) string {
 	return out.String()
 }
 
-// decodeSeratoB64 reverses encodeSeratoB64 tolerantly: whitespace/NULs stripped, padding
-// optional, and one trailing junk char (Serato's buggy encoder emits a stray 'A') retried.
+// decodeSeratoB64 reverses encodeSeratoB64 tolerantly (see tolerantB64).
 func decodeSeratoB64(desc, s string) ([]byte, error) {
+	blob, err := tolerantB64(s)
+	if err != nil {
+		return nil, fmt.Errorf("seratolib: bad base64 in serato comment: %w", err)
+	}
+	prefix := append(append(append([]byte(octetStream), 0x00, 0x00), desc...), 0x00)
+	if !bytes.HasPrefix(blob, prefix) {
+		return nil, errors.New("seratolib: serato comment lacks expected header")
+	}
+	return blob[len(prefix):], nil
+}
+
+// tolerantB64 decodes Serato base64: whitespace/NULs stripped, padding optional, and one
+// trailing junk char (Serato's buggy encoder emits a stray 'A') retried.
+func tolerantB64(s string) ([]byte, error) {
 	clean := strings.Map(func(r rune) rune {
 		switch r {
 		case '\n', '\r', ' ', '\x00', '=':
@@ -217,12 +242,5 @@ func decodeSeratoB64(desc, s string) ([]byte, error) {
 	if err != nil && len(clean) > 0 {
 		blob, err = enc.DecodeString(clean[:len(clean)-1]) // stray trailing char quirk
 	}
-	if err != nil {
-		return nil, fmt.Errorf("seratolib: bad base64 in serato comment: %w", err)
-	}
-	prefix := append(append(append([]byte(octetStream), 0x00, 0x00), desc...), 0x00)
-	if !bytes.HasPrefix(blob, prefix) {
-		return nil, errors.New("seratolib: serato comment lacks expected header")
-	}
-	return blob[len(prefix):], nil
+	return blob, err
 }

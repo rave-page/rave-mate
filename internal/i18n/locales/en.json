@@ -1157,7 +1157,16 @@
       "openPl": "Prepare cues (playlist)",
       "openDir": "Prepare cues (folder)",
       "setToast": "{n} tracks in the cue-prep set · {skipped} skipped (no beatgrid)",
-      "setNone": "No tracks with a beatgrid here - analyze or import first."
+      "setNone": "No tracks with a beatgrid here - analyze or import first.",
+      "writeHeader": "Write cues to DJ software",
+      "writeTo": "Write cues to {app} ({n})",
+      "writeNone": "No tracks with cues to write yet — apply patterns or add cues first.",
+      "wroteHint": "{app}: cues written for {n} tracks",
+      "writeFailed": "Cue write failed: ",
+      "writeNote": "Writing backs up the target library file first, then replaces that software's hotcues, memory cues and loops for the written tracks with the cues shown in rave-mate. Beatgrids are never touched. Close the DJ software before writing — otherwise it may overwrite the change on exit. Scope: the checked collection rows, or just the open track when nothing is checked.",
+      "writeRbNote": "Rekordbox: cues are written to the collection XML — load them via File → Import Collection (hotcues keep their pad, memory cues become Rekordbox memory cues).",
+      "writeVdjNote": "VirtualDJ: hotcues become pad cues 1–8, memory cues become remix points; saved loops carry their length in beats.",
+      "writeSeratoNote": "Serato: cues are written directly into the audio files (MP3/FLAC, verified temp-write; close Serato first). Memory cues have no Serato equivalent and are skipped — pad cues and saved loops only."
     },
     "tf": {
       "menu": "Fix tags…",

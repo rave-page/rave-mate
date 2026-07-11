@@ -366,6 +366,9 @@ func emitVDJPoi(enc *xml.Encoder, p vdjPoi) error {
 	if p.Num != 0 {
 		attrs = append(attrs, [2]string{"Num", strconv.Itoa(p.Num)})
 	}
+	if p.Size != "" {
+		attrs = append(attrs, [2]string{"Size", p.Size})
+	}
 	if p.Name != "" {
 		attrs = append(attrs, [2]string{"Name", p.Name})
 	}
