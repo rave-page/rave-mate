@@ -143,6 +143,10 @@
     "y": "Y"
   },
   "help": {
+    "remote-library": {
+      "title": "Bibliothèque distante (instance appairée)",
+      "body": "Vous regardez l'onglet Library de L'AUTRE ordinateur - l'instance appairée rend sa propre bibliothèque exactement comme dans sa fenêtre et diffuse l'image ici ; chaque clic, touche et modification est renvoyé et exécuté là-bas. Sa fenêtre visible n'est ni touchée ni déplacée pendant que vous travaillez.\n\nComme les commandes s'exécutent sur la machine distante, tout opère sur SES fichiers musicaux et sa base : analyse de beatgrid (gridfix), édition de cues et de drops, écriture de tags, transcodages et modifications de playlists lisent et écrivent la bibliothèque distante, avec le CPU/GPU et le disque de l'ordinateur distant. Rien n'est copié sur cette machine hormis l'image à l'écran et de petites images (pochettes, formes d'onde).\n\nLa pré-écoute audio (play/cue) démarre le lecteur DISTANT - le son sort du périphérique audio de l'ordinateur distant, pas de celui-ci. C'est voulu : un portable de cabine peut préparer la bibliothèque du PC studio pendant que les enceintes du studio restent de référence. Les aperçus vidéo intégrés peuvent être indisponibles en mode distant.\n\nSi le lien tombe en pleine session, cette bannière devient ambre et la vue se fige ; le côté distant nettoie sa session automatiquement. Reconnectez (ou re-sélectionnez le pair dans le sélecteur Contrôle) pour reprendre. L'appairage et le transport passent par le même lien LAN authentifié de bout en bout que le reste de rave-mate (Ed25519 + MAC par trame) - rien ne transite par Internet."
+    },
     "kb": {
       "click": "Clic",
       "drag": "Glisser",
@@ -341,6 +345,17 @@
     }
   },
   "library": {
+    "mirror": {
+      "banner": "Contrôle de {name}",
+      "connecting": "Connexion à la bibliothèque distante…",
+      "audioNote": "Tout ce qui suit s'exécute sur l'ordinateur distant - la pré-écoute audio y est jouée.",
+      "closed": "Session distante terminée.",
+      "disconnected": "Pair déconnecté.",
+      "timeout": "Le pair n'a pas répondu - il utilise peut-être une version de rave-mate sans bibliothèque distante.",
+      "reconnect": "Reconnecter",
+      "noLink": "Lien pair indisponible - activez Peers pour contrôler une instance appairée.",
+      "noPicker": "Les boîtes de dialogue de fichiers ne peuvent pas s'ouvrir à distance - elles apparaîtraient sur l'ordinateur contrôlé. Naviguez plutôt via la liste des dossiers."
+    },
     "addToPlaylist": "Ajouter à une playlist…",
     "audioCap": {
       "default": "AAC/MP3 max 320k",

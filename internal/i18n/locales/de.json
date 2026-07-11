@@ -143,6 +143,10 @@
     "y": "Y"
   },
   "help": {
+    "remote-library": {
+      "title": "Remote-Bibliothek (gekoppelte Instanz)",
+      "body": "Du siehst den Library-Tab des ANDEREN Computers - die gekoppelte Instanz rendert ihre eigene Bibliothek exakt wie im eigenen Fenster und streamt das Bild hierher; jeder Klick, jede Taste und jede Änderung wird zurückgeschickt und dort ausgeführt. Ihr eigenes sichtbares Fenster wird dabei weder berührt noch bewegt.\n\nWeil Befehle auf der entfernten Maschine ausgeführt werden, arbeitet alles auf DEREN Musikdateien und Datenbank: Beatgrid-Analyse (gridfix), Cue- und Drop-Bearbeitung, Tag-Schreiben, Transcodes und Playlist-Änderungen lesen und schreiben die entfernte Bibliothek - mit CPU/GPU und Festplatte des entfernten Computers. Auf diese Maschine wird nichts kopiert außer dem Bildschirmbild und kleinen Bildern wie Covern und Wellenformen.\n\nAudio-Vorhören (Play/Cue-Preview) startet den ENTFERNTEN Player - der Ton kommt aus dem Audiogerät des entfernten Computers, nicht aus diesem. Das ist Absicht: ein Booth-Laptop kann die Bibliothek des Studio-PCs vorbereiten, während dessen Monitore maßgeblich bleiben. Eingebettete Video-Vorschauen sind im Remote-Modus ggf. nicht verfügbar.\n\nBricht die Verbindung mitten in der Sitzung ab, wird dieses Banner gelb und die Ansicht friert ein; die Gegenseite räumt ihre Sitzung automatisch auf. Zum Fortsetzen neu verbinden (oder den Peer im Steuert-Umschalter erneut wählen). Kopplung und Transport laufen über denselben Ende-zu-Ende-authentifizierten LAN-Peer-Link wie der Rest von rave-mate (Ed25519 + MACs pro Frame) - nichts geht durchs Internet."
+    },
     "kb": {
       "click": "Klick",
       "drag": "Ziehen",
@@ -341,6 +345,17 @@
     }
   },
   "library": {
+    "mirror": {
+      "banner": "Steuert {name}",
+      "connecting": "Verbinde mit der entfernten Bibliothek…",
+      "audioNote": "Alles hier läuft auf dem entfernten Computer - Audio-Vorhören spielt dort ab.",
+      "closed": "Remote-Sitzung beendet.",
+      "disconnected": "Peer getrennt.",
+      "timeout": "Der Peer hat nicht geantwortet - er läuft womöglich mit einer älteren rave-mate-Version ohne Remote-Bibliothek.",
+      "reconnect": "Neu verbinden",
+      "noLink": "Peer-Link nicht verfügbar - aktiviere Peers, um eine gekoppelte Instanz zu steuern.",
+      "noPicker": "Dateidialoge können nicht remote geöffnet werden - sie würden auf dem gesteuerten Computer aufpoppen. Navigiere stattdessen über die Ordnerliste."
+    },
     "addToPlaylist": "Zur Playlist hinzufügen…",
     "audioCap": {
       "default": "AAC/MP3 max. 320k",
