@@ -71,6 +71,9 @@ func (u *UI) remoteClient(nodeID string) *remotectl.Client {
 // targetSwitcherHTML renders the "Controlling [This computer ▾]" row. "" when no peer is
 // connected (caller omits it). id = smartSelect id, act = dispatch prefix (trailing colon).
 func (u *UI) targetSwitcherHTML(id, act string) string {
+	if u.virtual() {
+		return "" // headless remote session: no chained control from inside a mirror
+	}
 	peers := u.controllablePeers()
 	if len(peers) == 0 {
 		return ""

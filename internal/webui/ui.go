@@ -40,6 +40,8 @@ type UI struct {
 
 	updMgr *updater.Manager // self-update state machine (5-min poll; nil until onReady; disabled on dev builds)
 
+	rui *ruiHub // remote Library sessions over the peer link (host + mirror mux); nil without peers
+
 	probes   settingsProbes  // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
 	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
 	restarts settingRestarts // debounced auto module restarts on settings change (settings_apply.go)
@@ -105,6 +107,7 @@ func New(svc ui.Services) *UI {
 		u.shell = sh
 		go u.evalFlusher()
 	}
+	u.ruiInit() // remote Library sessions over the peer link (no-op without peers)
 	return u
 }
 

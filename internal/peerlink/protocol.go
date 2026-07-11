@@ -52,6 +52,10 @@ const (
 	ChanMIDI    = "midi"    // bridged MIDI messages
 	ChanControl = "control" // remote-control commands (control-the-other-PC)
 	ChanBus     = "bus"     // generic pub/sub event bus (twitch, vr, obs.mic, capability ads)
+	// ChanRemoteUI streams a headless Library-tab session between paired instances: the
+	// controlled side sends its Go-rendered document + eval/patch stream; the controller
+	// sends back page input + media-fetch requests (internal/webui remoteui).
+	ChanRemoteUI = "remoteui"
 )
 
 type role string
