@@ -3178,7 +3178,7 @@
       "thruVirtual": "rave-mate 一方向ポート - エコーなし（推奨）",
       "thruDriver": "ravemidi ドライバ（推奨）",
       "useInDJ": "DJ ソフトで選択:",
-      "driverNote": "カーネルドライバがコントローラーを直接読み取り、rave-mate が閉じていても再起動後でも転送を続けます。rave-mate は「{reserved}」を監聴します - 他のアプリでは選択しないでください。",
+      "driverNote": "カーネルドライバーはコントローラーを直接読み取り、rave-mate が閉じていても再起動後も転送を続けます。他のアプリに見えるのは上記の THRU ポートだけです。rave-mate はドライバー経由で内部的にコントローラーを読み取り、MIDI ポートを一切占有しません。",
       "driverState": "ドライバ転送",
       "driverPending": "ドライバ同期待ち…",
       "lastInput": "最終入力 {ago} 前:",

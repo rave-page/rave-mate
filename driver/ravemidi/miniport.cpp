@@ -152,6 +152,9 @@ VOID RavePortDeliverFromApp(RAVE_PORT* port)
         PIO_STACK_LOCATION s = IoGetCurrentIrpStackLocation(irp);
         ULONG cap = s->Parameters.DeviceIoControl.OutputBufferLength;
         ULONG n = RaveFifoPop(&port->FromApp, (UCHAR*)irp->AssociatedIrp.SystemBuffer, cap);
+        if (n) {
+            RaveTracePush(port, RaveTraceReadPop, (UCHAR*)irp->AssociatedIrp.SystemBuffer, n);
+        }
         irp->IoStatus.Status = STATUS_SUCCESS;
         irp->IoStatus.Information = n;  // may be 0 if a concurrent drain won the race
         IoCompleteRequest(irp, IO_NO_INCREMENT);

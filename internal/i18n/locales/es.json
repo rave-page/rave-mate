@@ -3178,7 +3178,7 @@
       "thruVirtual": "Puerto unidireccional de rave-mate - sin eco (recomendado)",
       "thruDriver": "controlador ravemidi (recomendado)",
       "useInDJ": "En tu software de DJ selecciona:",
-      "driverNote": "El controlador de kernel lee el dispositivo directamente y sigue reenviando aunque rave-mate esté cerrado o tras un reinicio. rave-mate escucha en “{reserved}” - nunca selecciones ese puerto en otras apps.",
+      "driverNote": "El driver del núcleo lee el controlador directamente y sigue reenviando aunque rave-mate esté cerrado o tras un reinicio. Las demás aplicaciones solo ven el puerto THRU de arriba - rave-mate lee el controlador internamente a través del driver y no ocupa ningún puerto MIDI.",
       "driverState": "Reenvío del controlador",
       "driverPending": "esperando la sincronización del controlador…",
       "lastInput": "última entrada hace {ago}:",

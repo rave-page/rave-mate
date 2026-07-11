@@ -67,13 +67,22 @@ type Input struct {
 	ch     chan Message
 	closed atomic.Bool
 	thru   atomic.Pointer[func(Message)] // synchronous THRU forward, run in the winmm callback; nil = off
+	stop   func()                        // non-winmm backend teardown (driver IOCTL reader); nil = winmm
 }
 
 // Open opens the input port matching substr (case-insensitive): an exact name match
 // wins over the first substring match, so "A 61" prefers the hardware device over a
 // derived virtual port like "A 61 (rave-mate)". substr "" opens the first available
 // port. The returned Input streams messages via Messages().
+//
+// A managed reserved port ("<Name> (rave-mate)") is INTERNAL in driver protocol v3 —
+// hidden from winmm — so it resolves to a direct driver IOCTL reader first; winmm
+// enumeration is the fallback (covers an older installed driver whose reserved
+// ports are still winmm-visible).
 func Open(substr string) (*Input, error) {
+	if in, ok := tryOpenDriverInput(substr); ok {
+		return in, nil
+	}
 	n, _, _ := procInGetNumDevs.Call()
 	dev := -1
 	name := ""
@@ -152,6 +161,10 @@ func (in *Input) SetThru(fn func(Message)) {
 // Close stops and releases the port. After Close the callback drops any late messages.
 func (in *Input) Close() error {
 	if in.closed.Swap(true) {
+		return nil
+	}
+	if in.stop != nil { // driver-backed reader: cancel the pended IOCTL_READ
+		in.stop()
 		return nil
 	}
 	// Stop → reset → close; ignore MMRESULTs (teardown is best-effort, nothing to recover).

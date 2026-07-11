@@ -3178,7 +3178,7 @@
       "thruVirtual": "Port unidirectionnel rave-mate - pas d'écho (recommandé)",
       "thruDriver": "pilote ravemidi (recommandé)",
       "useInDJ": "Dans votre logiciel DJ, sélectionnez :",
-      "driverNote": "Le pilote noyau lit le contrôleur directement et continue de transférer même quand rave-mate est fermé ou après un redémarrage. rave-mate écoute sur « {reserved} » - ne sélectionnez jamais ce port ailleurs.",
+      "driverNote": "Le pilote noyau lit le contrôleur directement et continue de transférer même quand rave-mate est fermé ou après un redémarrage. Les autres applications ne voient que le port THRU ci-dessus - rave-mate lit le contrôleur en interne via le pilote et n'occupe aucun port MIDI.",
       "driverState": "Transfert pilote",
       "driverPending": "en attente de la synchro pilote…",
       "lastInput": "dernière entrée il y a {ago} :",

@@ -36,6 +36,8 @@ typedef struct _RAVE_PORT {
     volatile LONG CaptureRunning;     // a capture stream is in KSSTATE_RUN
     volatile LONG StreamCount;        // open pin instances (blocks destroy)
     volatile LONG MirrorRefs;         // mirror groups fanning into this port (blocks destroy)
+    volatile LONG IoctlBusy;          // in-flight WRITE/READ dispatch on this port (blocks destroy;
+                                      // taken under PortsLock, so find+pin is atomic vs teardown)
     HANDLE CapturePid;                // process that opened the capture stream (loopback self-echo)
     volatile LONG LoopSuppressed;     // loopback writes dropped as self-echo
     // trace ring (IOCTL_RAVEMIDI_QUERY_TRACE): bounded, overwrite-oldest

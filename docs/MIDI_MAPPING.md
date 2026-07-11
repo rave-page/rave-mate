@@ -56,8 +56,9 @@ running when rave-mate is closed and comes back after a reboot on its own:
 - your DJ software selects the **`<Name> THRU`** port (shown in the UI). It is
   bidirectional: controller MIDI down, LED feedback up (message-framed, teed to the
   device) — loop-free by construction, the port has no internal render→capture path
-- rave-mate reads **`<Name> (rave-mate)`** instead of the device (never select that
-  port elsewhere); the hardware hold is released so the driver can bind it
+- rave-mate reads the controller **through the driver directly** instead of the device
+  (its internal endpoint is hidden from every app's MIDI list, so there is nothing to
+  select by mistake); the hardware hold is released so the driver can bind it
 - driver config **syncs automatically** on every controller change (add/remove/port/
   filter) — no manual sync; "Re-apply"/"Reload" in the driver card are fallbacks. A
   version-mismatched (older) installed driver shows a persistent "update the driver"

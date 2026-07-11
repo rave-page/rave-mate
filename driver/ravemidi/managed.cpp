@@ -28,7 +28,7 @@
 typedef struct _RAVE_MINPUT {
     RAVEMIDI_INPUT_CFG Cfg;               // sanitized copy (bytewise-comparable)
     BOOLEAN PortsReady;
-    RAVE_PORT* Reserved;                  // BIDI "<Name> (rave-mate)"
+    RAVE_PORT* Reserved;                  // INTERNAL "<Name> (rave-mate)" - hidden, IOCTL-only
     RAVE_PORT* Outs[RAVEMIDI_MAX_MIRROR_OUT];  // BIDI fan-outs (DJ software; render -> device)
     RAVE_FRAMER Framers[RAVEMIDI_MAX_MIRROR_OUT + 1];  // [0]=Reserved; per-port so
                                           // interleaved chunks never split a message
@@ -212,7 +212,9 @@ static NTSTATUS CreateInputPorts(RAVE_MINPUT* in)
     if (st != STATUS_SUCCESS && st != STATUS_BUFFER_OVERFLOW) {  // overflow = truncated, fine
         return st;
     }
-    st = RavePortCreateOwnerless(RaveMidiPortBidi, nm, &in->Reserved);
+    // INTERNAL: invisible to every app's MIDI list - rave-mate reads it over
+    // IOCTL_READ, so DJ software only ever sees the THRU fan-outs below.
+    st = RavePortCreateOwnerless(RaveMidiPortInternal, nm, &in->Reserved);
     if (!NT_SUCCESS(st)) {
         return st;
     }

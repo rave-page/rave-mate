@@ -28,10 +28,11 @@ live bind status per input, `RELOAD_CONFIG` re-reads the blob.
 Per managed input the driver creates driver-owned ports (no owner file object —
 handle close never tears them down):
 
-- one reserved **BIDI** port `"<Name> (rave-mate)"` — rave-mate reconnects here
-  seamlessly after relaunch; with `Feedback=1` its app-bound writes are teed to
-  the hardware device's render pin (LED feedback) while staying readable via
-  `IOCTL_RAVEMIDI_READ`
+- one reserved **INTERNAL** port `"<Name> (rave-mate)"` (protocol v3) — no
+  winmm/KS presence, so it never appears in any app's MIDI list; rave-mate reads
+  it via pended `IOCTL_RAVEMIDI_READ` (reconnects seamlessly after relaunch) and
+  with `Feedback=1` its `IOCTL_RAVEMIDI_WRITE`s are teed to the hardware device's
+  render pin (LED feedback). DJ software only ever sees the fan-outs below
 - `OutCount` extra **BIDI** fan-out ports with the configured names (empty name →
   `"<Name> Out N"`); with `Thru=1` device capture fans into them, and with
   `Feedback=1` the DJ software's writes on them are message-framed and teed to

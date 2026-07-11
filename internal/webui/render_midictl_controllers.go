@@ -146,8 +146,7 @@ func (u *UI) midiDriverThruHTML(i int, c config.MIDIControllerMap, ctx midiCtlRe
 	// the ONE port to select in the DJ software - the core "which device do I use" answer
 	b.WriteString(`<div class=midi-drvuse>` + htmlEscape(i18n.T("midictl.in.useInDJ")) +
 		` <code>` + htmlEscape(midi.DJPortName(c.Name)) + `</code></div>`)
-	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.driverNote",
-		i18n.A{"reserved": midi.ReservedPortName(c.Name)})) + `</p>`)
+	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.driverNote")) + `</p>`)
 	if st, ok := ctx.drv[c.Name]; ok {
 		variant, line := "warning", i18n.T("midictl.drv.retrying", i18n.A{"n": strconv.Itoa(int(st.RetryCount))})
 		if st.Bound {

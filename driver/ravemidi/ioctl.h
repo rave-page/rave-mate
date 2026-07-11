@@ -10,7 +10,7 @@
 #define RAVEMIDI_CTL_DOSNAME L"\\DosDevices\\RaveMidiCtl"
 #define RAVEMIDI_CTL_NTNAME  L"\\Device\\RaveMidiCtl"
 
-#define RAVEMIDI_PROTOCOL_VERSION 2  // v2: INPUT_CFG.Filter + BIDI fan-outs + trace
+#define RAVEMIDI_PROTOCOL_VERSION 3  // v3: INTERNAL (hidden) reserved ports; v2: Filter + BIDI fan-outs + trace
 #define RAVEMIDI_MAX_NAME 32   // WCHARs incl NUL; winmm szPname caps at 31+NUL
 #define RAVEMIDI_MAX_PORTS 16
 #define RAVEMIDI_MAX_MIRROR 8            // concurrent mirror groups
@@ -28,11 +28,17 @@
 // LOOPBACK: classic cable — app render echoed to app capture, EXCEPT back to the
 //           writing process itself (self-echo suppression: the loopMIDI feedback-loop
 //           killer — an app holding both ends never hears itself).
+// INTERNAL: NO winmm/KS presence at all — the port never appears in any app's MIDI
+//           list. Pure IOCTL endpoint: the tap fans controller data into FromApp
+//           (drained by pended IOCTL_READ), IOCTL_WRITE feeds the device-feedback
+//           tee. Managed reserved ports use this so DJ software sees exactly ONE
+//           port per controller (the THRU fan-out).
 typedef enum _RAVEMIDI_PORT_KIND {
     RaveMidiPortOutOnly  = 0,
     RaveMidiPortInOnly   = 1,
     RaveMidiPortBidi     = 2,
     RaveMidiPortLoopback = 3,
+    RaveMidiPortInternal = 4,
 } RAVEMIDI_PORT_KIND;
 
 #pragma pack(push, 1)
@@ -112,10 +118,12 @@ typedef struct _RAVEMIDI_PORT_STATS {
 // retries with backoff while the device is absent or busy.
 //
 // Per input the driver creates:
-//   - ONE reserved BIDI port "<Name> (rave-mate)" - rave-mate reconnects here
-//     seamlessly after a relaunch; with Feedback=1 its app-bound writes are also
-//     forwarded to the device's render pin (LED feedback).
-//   - OutCount extra OUT_ONLY ports (the DJ-software-facing one-way ports).
+//   - ONE reserved INTERNAL port "<Name> (rave-mate)" - hidden from every app's
+//     MIDI list; rave-mate reads it via pended IOCTL_READ (reconnects seamlessly
+//     after a relaunch) and with Feedback=1 its IOCTL_WRITEs tee to the device's
+//     render pin (LED feedback).
+//   - OutCount BIDI fan-out ports (the DJ-software-facing THRU ports) - the ONLY
+//     ports other apps ever see.
 // Managed ports/taps have NO owner file object: handle close never tears them down.
 
 #define RAVEMIDI_MAX_INPUTS 8
@@ -174,7 +182,7 @@ typedef struct _RAVEMIDI_INPUT_STATUS {
 typedef enum _RAVEMIDI_TRACE_DIR {
     RaveTraceTapRaw      = 0,  // raw KS read completion from the tapped device
     RaveTraceToApp       = 1,  // bytes pushed toward the app capture pin
-    RaveTraceReadPop     = 2,  // bytes handed to portcls via miniport Read
+    RaveTraceReadPop     = 2,  // bytes handed to the reader (miniport Read / pended IOCTL_READ)
     RaveTraceFromApp     = 3,  // bytes the app wrote on the render pin
     RaveTraceFeedbackOut = 4,  // framed message written to the device render pin
     RaveTraceLoopDrop    = 5,  // loopback write suppressed (self-echo)

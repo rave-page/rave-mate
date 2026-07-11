@@ -18,6 +18,8 @@ const (
 const DriverSentinel = "@rave-mate:ravemidi-managed"
 
 // ReservedPortName is the driver's per-input rave-mate port (managed.cpp naming).
+// Protocol v3 makes it INTERNAL: hidden from every app's MIDI list (incl. winmm
+// enumeration here) — read via IOCTL (ravemidi_reader_windows.go), never midiInOpen.
 func ReservedPortName(name string) string { return name + " (rave-mate)" }
 
 // DJPortName is the driver fan-out port DJ software should select.
@@ -52,7 +54,7 @@ func FilterMask(keys []string) uint32 {
 	return m
 }
 
-// DriverInputCfg mirrors RAVEMIDI_INPUT_CFG (protocol v2).
+// DriverInputCfg mirrors RAVEMIDI_INPUT_CFG (protocol v3).
 type DriverInputCfg struct {
 	ID          string
 	Name        string

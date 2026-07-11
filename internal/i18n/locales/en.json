@@ -3335,7 +3335,7 @@
       "thruVirtual": "rave-mate one-way port - no echo (recommended)",
       "thruDriver": "ravemidi driver (recommended)",
       "useInDJ": "In your DJ software select:",
-      "driverNote": "The kernel driver reads the controller directly and keeps forwarding even when rave-mate is closed or after a reboot. rave-mate listens on “{reserved}” - never select that port in other apps.",
+      "driverNote": "The kernel driver reads the controller directly and keeps forwarding even when rave-mate is closed or after a reboot. Other apps only ever see the THRU port above - rave-mate reads the controller through the driver internally and holds no MIDI port at all.",
       "driverState": "Driver forwarding",
       "driverPending": "waiting for driver sync…",
       "lastInput": "last input {ago} ago:",

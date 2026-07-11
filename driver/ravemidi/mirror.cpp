@@ -326,9 +326,18 @@ static VOID TapThread(PVOID ctx)
                 if (drop && i > 0) {
                     continue;
                 }
-                RaveFifoPush(&t->Outs[i]->ToApp, buf + off, bc);
-                RaveTracePush(t->Outs[i], RaveTraceToApp, buf + off, bc);
-                RavePortNotifyToApp(t->Outs[i]);
+                RAVE_PORT* o = t->Outs[i];
+                if (o->Kind == RaveMidiPortInternal) {
+                    // hidden reserved port: no capture pin exists - hand the bytes
+                    // to rave-mate's pended IOCTL_READ via the FromApp ring instead
+                    RaveFifoPush(&o->FromApp, buf + off, bc);
+                    RaveTracePush(o, RaveTraceToApp, buf + off, bc);
+                    RavePortDeliverFromApp(o);
+                    continue;
+                }
+                RaveFifoPush(&o->ToApp, buf + off, bc);
+                RaveTracePush(o, RaveTraceToApp, buf + off, bc);
+                RavePortNotifyToApp(o);
             }
             ULONG pad = (bc + 3u) & ~3u;
             if (pad < bc || pad > used - off) {

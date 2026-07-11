@@ -314,3 +314,33 @@ no client (device or app) may receive its own bytes back. Changes:
   tap's first fan-in port)/ToApp/ReadPop/FromApp/FeedbackOut/LoopDrop. Purpose: pin
   down on-hardware wire bugs (e.g. wrong bytes at which hop) live from rave-mate's
   MIDI monitor without KD.
+
+## Protocol v3 (2026-07-11): hidden INTERNAL reserved ports
+
+User ask: hide the reserved `"<Name> (rave-mate)"` port from DJ software while
+rave-mate keeps full access. winmm/WinRT have no per-port hidden flag, so the port
+stops being a MIDI port entirely:
+
+- **`RaveMidiPortInternal` (kind 4)**: `CreatePort` skips miniport +
+  `PcRegisterSubdevice` + FriendlyName stamp - no KS filter exists, nothing to
+  enumerate. Managed reserved ports use it; DJ software sees ONLY the THRU fan-outs.
+- **Data path**: tap pushes internal ports' bytes into `FromApp` +
+  `RavePortDeliverFromApp` (pended `IOCTL_READ`, pre-existing inverted-call plumbing)
+  instead of `ToApp`+Notify. `IOCTL_WRITE` on an internal port = rave-mate speaking
+  toward the device: tees `Feedback` (when armed) + kicks the drain, traced FromApp;
+  never touches FromApp (that ring now carries tap->rave-mate data).
+- **`RavePortDeliverFromApp`** also traces ReadPop, so the trace ring shows the full
+  hop chain for IOCTL readers too.
+- **`IoctlBusy` pin**: WRITE/READ dispatch pins the port under `PortsLock`
+  (find+pin atomic); `DestroyPort` returns BUSY while pinned (graveyard reaps).
+  Closes a find->use UAF window that got hot once managed reapply destroys ports
+  rave-mate is actively IOCTL-reading.
+- **Go**: `midi.Open` resolves managed reserved names to a `driverReader`
+  (own ctl handle, blocking `IOCTL_READ` loop, `CancelIoEx` on Close, re-resolves
+  port id on error - self-heals across config reapplies) feeding the existing
+  `Input` channel through `framer.go` (Go mirror of framer.cpp; sysex skipped for
+  winmm parity). winmm enumeration stays as fallback for older installed drivers.
+- PROTOCOL_VERSION 3: same blob layout as v2, but bump forces app+driver lockstep -
+  a v2 driver with a v3 app would otherwise accept SET_CONFIG yet leave the app
+  IOCTL-reading a Bidi reserved port whose tap data lands in ToApp (silent dead
+  monitor). Mismatch now fails loudly into the existing "update the driver" hint.
