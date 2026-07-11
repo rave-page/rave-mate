@@ -421,3 +421,14 @@ body {
   border-bottom: 8px solid transparent;
 }
 .ttp-up .wchip-card { top: auto; bottom: calc(100% + 6px); }
+
+/* ── density sweep (append-only): kv wrapping + paired-field grid ──
+ * .kv-v: long values (overlay URLs, paths) wrap instead of overflowing the card.
+ * .fpair: two short fields/selects share one row ≥560px (stacks below). */
+.kv { align-items: baseline; }
+.kv-v { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+.fpair { display: grid; grid-template-columns: 1fr; gap: 0 12px; align-items: end; }
+@media (min-width: 560px) { .fpair { grid-template-columns: 1fr 1fr; } }
+/* columns must shrink below input intrinsic width (else pair overflows narrow cards) */
+.fpair > * { min-width: 0; }
+.fpair .field-input { min-width: 0; width: 100%; }

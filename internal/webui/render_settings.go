@@ -544,8 +544,8 @@ func (u *UI) cardContent(id string) (string, string, string) {
 	case "medialink":
 		mf := &f.MediaLink
 		return i18n.T("settings.card.medialink.title"), i18n.T("settings.card.medialink.desc"),
-			selectBoxTip(i18n.T("settings.body.medialink.codec"), "set:ml-codec", [][2]string{{"", "auto"}, {"hevc", "hevc"}, {"h264", "h264"}, {"mjpeg", "mjpeg"}}, mf.PreferCodec, "ml-accel") +
-				selectBoxTip(i18n.T("settings.body.medialink.bitrate"), "set:ml-bitrate", [][2]string{{"8", "8"}, {"12", "12"}, {"20", "20"}, {"30", "30"}, {"50", "50"}}, strconv.Itoa(mf.Bitrate()/1000), "ml-budget") +
+			fpair(selectBoxTip(i18n.T("settings.body.medialink.codec"), "set:ml-codec", [][2]string{{"", "auto"}, {"hevc", "hevc"}, {"h264", "h264"}, {"mjpeg", "mjpeg"}}, mf.PreferCodec, "ml-accel"),
+				selectBoxTip(i18n.T("settings.body.medialink.bitrate"), "set:ml-bitrate", [][2]string{{"8", "8"}, {"12", "12"}, {"20", "20"}, {"30", "30"}, {"50", "50"}}, strconv.Itoa(mf.Bitrate()/1000), "ml-budget")) +
 				toggleRow(i18n.T("settings.body.medialink.swOnly"), "set:ml-swonly", mf.SWOnly) +
 				`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.medialink.note")) + `</div>`
 	case "timecode":
@@ -652,10 +652,10 @@ func (u *UI) traktorMapBody() string {
 
 func (u *UI) setCaptureBody() string {
 	f := &u.svc.Cfg.Features.SetCapture
-	return field(i18n.T("settings.body.setcapture.port"), "set:sc-port", strconv.Itoa(f.ResolvedPort()), "number") +
-		field(i18n.T("settings.body.setcapture.mount"), "set:sc-mount", f.Mount, "text") +
-		field(i18n.T("settings.body.setcapture.sourceUser"), "set:sc-user", f.Username, "text") +
-		field(i18n.T("settings.body.setcapture.password"), "set:sc-pass", f.Password, "password") +
+	return fpair(field(i18n.T("settings.body.setcapture.port"), "set:sc-port", strconv.Itoa(f.ResolvedPort()), "number"),
+		field(i18n.T("settings.body.setcapture.mount"), "set:sc-mount", f.Mount, "text")) +
+		fpair(field(i18n.T("settings.body.setcapture.sourceUser"), "set:sc-user", f.Username, "text"),
+			field(i18n.T("settings.body.setcapture.password"), "set:sc-pass", f.Password, "password")) +
 		pathField(i18n.T("settings.body.setcapture.setsFolder"), "set:sc-dir", f.SetsDir, "dir") +
 		field(i18n.T("settings.body.setcapture.reconnectGrace"), "set:sc-grace", strconv.Itoa(int(f.ResolvedReconnectGrace().Seconds())), "number") +
 		toggleRow(i18n.T("settings.body.setcapture.singleFile"), "set:sc-single", f.SingleFile) +
@@ -669,8 +669,8 @@ func (u *UI) audioRecBody() string {
 	devs := u.devNamesCached("audiorec")
 	return selectBox(i18n.T("settings.body.audiorec.device"), "set:ar-device", devOpts(devs, i18n.T("settings.body.audiorec.devicePlaceholder"), f.Device), f.Device) +
 		selectBox(i18n.T("settings.body.audiorec.format"), "set:ar-format", [][2]string{{"flac", "flac"}, {"wav", "wav"}, {"mp3", "mp3"}, {"aac", "aac"}}, f.ResolvedFormat()) +
-		field(i18n.T("settings.body.audiorec.bitrate"), "set:ar-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number") +
-		field(i18n.T("settings.body.audiorec.sampleRate"), "set:ar-samplerate", strconv.Itoa(f.SampleRate), "number") +
+		fpair(field(i18n.T("settings.body.audiorec.bitrate"), "set:ar-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number"),
+			field(i18n.T("settings.body.audiorec.sampleRate"), "set:ar-samplerate", strconv.Itoa(f.SampleRate), "number")) +
 		pathField(i18n.T("settings.body.audiorec.folder"), "set:ar-dir", f.Dir, "dir") +
 		toggleRow(i18n.T("settings.body.audiorec.followObs"), "set:ar-followobs", f.FollowOBS) +
 		toggleRow(i18n.T("settings.body.audiorec.writeTags"), "set:ar-writetags", f.WriteTags) +
@@ -680,8 +680,8 @@ func (u *UI) audioRecBody() string {
 
 func (u *UI) obsBody() string {
 	f := &u.svc.Cfg.Features.OBS
-	return field(i18n.T("settings.body.obs.host"), "set:obs-host", f.ResolvedHost(), "text") +
-		field(i18n.T("settings.body.obs.port"), "set:obs-port", strconv.Itoa(f.ResolvedPort()), "number") +
+	return fpair(field(i18n.T("settings.body.obs.host"), "set:obs-host", f.ResolvedHost(), "text"),
+		field(i18n.T("settings.body.obs.port"), "set:obs-port", strconv.Itoa(f.ResolvedPort()), "number")) +
 		field(i18n.T("settings.body.obs.password"), "set:obs-pass", f.Password, "password") +
 		btnRow(btn(i18n.T("settings.body.obs.connectValidate"), "outline", "settings-obs-validate", ""),
 			btn(i18n.T("settings.body.obs.remoteObs", i18n.A{"count": fmt.Sprint(len(f.Remotes))}), "outline", "settings-obsrem", "")) +
@@ -690,8 +690,8 @@ func (u *UI) obsBody() string {
 
 func (u *UI) obsSyncBody() string {
 	f := &u.svc.Cfg.Features.OBS.Sync
-	return fieldTip(i18n.T("settings.body.common.frameRate"), "set:obssync-fps", trimNum(orFloat(f.Fps, 30)), "number", tipTopic("obssync-fps")) +
-		fieldTip(i18n.T("settings.body.obssync.deadBand"), "set:obssync-deadband", trimNum(orFloat(f.DeadBandFrames, 2)), "number", tipTopic("obssync-deadband")) +
+	return fpair(fieldTip(i18n.T("settings.body.common.frameRate"), "set:obssync-fps", trimNum(orFloat(f.Fps, 30)), "number", tipTopic("obssync-fps")),
+		fieldTip(i18n.T("settings.body.obssync.deadBand"), "set:obssync-deadband", trimNum(orFloat(f.DeadBandFrames, 2)), "number", tipTopic("obssync-deadband"))) +
 		fieldTip(i18n.T("settings.body.obssync.restartThreshold"), "set:obssync-restart", strconv.Itoa(orInt(f.RestartThresholdMs, 1500)), "number", tipTopic("obssync-restart")) +
 		btnRow(btn(i18n.T("settings.body.obssync.mediaSources", i18n.A{"count": fmt.Sprint(len(f.Sources))}), "outline", "settings-obssync-src", "")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.obssync.note")) + `</div>`
@@ -700,18 +700,18 @@ func (u *UI) obsSyncBody() string {
 func (u *UI) ableLinkBody() string {
 	f := &u.svc.Cfg.Features.AbletonLink
 	r := &f.Resolume
-	body := selectBox(i18n.T("settings.body.ablelink.quantum"), "set:ablelink-quantum",
-		[][2]string{{"8", "8"}, {"16", "16"}, {"32", "32"}}, strconv.Itoa(f.ResolvedQuantum())) +
+	body := fpair(selectBox(i18n.T("settings.body.ablelink.quantum"), "set:ablelink-quantum",
+		[][2]string{{"8", "8"}, {"16", "16"}, {"32", "32"}}, strconv.Itoa(f.ResolvedQuantum())),
 		selectBox(i18n.T("settings.body.ablelink.tempoOwner"), "set:ablelink-owner",
-			[][2]string{{"auto", i18n.T("settings.body.ablelink.ownerAuto")}, {"always", i18n.T("settings.body.ablelink.ownerAlways")}, {"follow", i18n.T("settings.body.ablelink.ownerFollow")}}, f.ResolvedTempoOwner()) +
+			[][2]string{{"auto", i18n.T("settings.body.ablelink.ownerAuto")}, {"always", i18n.T("settings.body.ablelink.ownerAlways")}, {"follow", i18n.T("settings.body.ablelink.ownerFollow")}}, f.ResolvedTempoOwner())) +
 		toggleRow(i18n.T("settings.body.ablelink.startStopSync"), "set:ablelink-sss", f.StartStopSync) +
 		toggleRow(i18n.T("settings.body.ablelink.resolumeOn"), "set:ablelink-res-on", r.Enabled)
 	if r.Enabled {
 		body += field(i18n.T("settings.body.ablelink.resolumeHost"), "set:ablelink-res-host", r.ResolvedHost(), "text") +
-			field(i18n.T("settings.body.ablelink.resolumeOscPort"), "set:ablelink-res-osc", strconv.Itoa(r.ResolvedOSCPort()), "number") +
-			field(i18n.T("settings.body.ablelink.resolumeRestPort"), "set:ablelink-res-rest", strconv.Itoa(r.ResolvedRESTPort()), "number") +
-			field(i18n.T("settings.body.ablelink.phraseClipLayer"), "set:ablelink-res-layer", strconv.Itoa(r.PhraseClipLayer), "number") +
-			field(i18n.T("settings.body.ablelink.phraseClipClip"), "set:ablelink-res-clip", strconv.Itoa(r.PhraseClipClip), "number")
+			fpair(field(i18n.T("settings.body.ablelink.resolumeOscPort"), "set:ablelink-res-osc", strconv.Itoa(r.ResolvedOSCPort()), "number"),
+				field(i18n.T("settings.body.ablelink.resolumeRestPort"), "set:ablelink-res-rest", strconv.Itoa(r.ResolvedRESTPort()), "number")) +
+			fpair(field(i18n.T("settings.body.ablelink.phraseClipLayer"), "set:ablelink-res-layer", strconv.Itoa(r.PhraseClipLayer), "number"),
+				field(i18n.T("settings.body.ablelink.phraseClipClip"), "set:ablelink-res-clip", strconv.Itoa(r.PhraseClipClip), "number"))
 	}
 	body += btnRow(btn(i18n.T("settings.body.ablelink.resync"), "outline", "ablelink-resync", "")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.ablelink.note")) + `</div>`
@@ -729,16 +729,17 @@ func (u *UI) timecodeBody() string {
 		body += fieldTip(i18n.T("settings.body.timecode.startPosition"), "set:tc-startat", f.StartAt, "text", tipTopic("tc-start"))
 	}
 	body += toggleRowTip(i18n.T("settings.body.timecode.ltcOn"), "set:tc-ltc-on", f.LTC.On, tipTopic("tc-ltc")) +
-		selectBox(i18n.T("settings.body.timecode.ltcDevice"), "set:tc-ltc-dev", devOpts(waveOut, i18n.T("settings.body.common.systemDefault"), f.LTC.Device), f.LTC.Device) +
-		fieldTip(i18n.T("settings.body.timecode.ltcLevel"), "set:tc-ltc-gain", trimNum(f.LTC.ResolvedGainDb()), "number", tipTopic("tc-ltc-level")) +
+		fpair(selectBox(i18n.T("settings.body.timecode.ltcDevice"), "set:tc-ltc-dev", devOpts(waveOut, i18n.T("settings.body.common.systemDefault"), f.LTC.Device), f.LTC.Device),
+			fieldTip(i18n.T("settings.body.timecode.ltcLevel"), "set:tc-ltc-gain", trimNum(f.LTC.ResolvedGainDb()), "number", tipTopic("tc-ltc-level"))) +
 		toggleRowTip(i18n.T("settings.body.timecode.mtcOn"), "set:tc-mtc-on", f.MTC.On, tipTopic("tc-mtc")) +
 		selectBox(i18n.T("settings.body.timecode.mtcPort"), "set:tc-mtc-dev", devOpts(midiOut, i18n.T("settings.body.timecode.firstPort"), f.MTC.Device), f.MTC.Device) +
 		toggleRowTip(i18n.T("settings.body.timecode.artnetOn"), "set:tc-art-on", f.ArtNet.On, tipTopic("tc-artnet")) +
 		field(i18n.T("settings.body.timecode.artnetTarget"), "set:tc-art-addr", f.ArtNet.Addr, "text") +
-		btnRow(btn(i18n.T("settings.body.timecode.extraLtc", i18n.A{"count": fmt.Sprint(len(f.LTCExtra))}), "outline", "settings-tcextra:ltc", ""),
-			btn(i18n.T("settings.body.timecode.extraMtc", i18n.A{"count": fmt.Sprint(len(f.MTCExtra))}), "outline", "settings-tcextra:mtc", ""),
-			btn(i18n.T("settings.body.timecode.extraArtnet", i18n.A{"count": fmt.Sprint(len(f.ArtNetExtra))}), "outline", "settings-tcextra:art", ""),
-			btn(i18n.T("common.refresh"), "ghost", "settings-refresh", "")) +
+		btnRow(actionMenu("tcextras", i18n.T("settings.body.timecode.extraMenu"), []ssOpt{
+			{Val: "settings-tcextra:ltc", Label: i18n.T("settings.body.timecode.extraLtc", i18n.A{"count": fmt.Sprint(len(f.LTCExtra))})},
+			{Val: "settings-tcextra:mtc", Label: i18n.T("settings.body.timecode.extraMtc", i18n.A{"count": fmt.Sprint(len(f.MTCExtra))})},
+			{Val: "settings-tcextra:art", Label: i18n.T("settings.body.timecode.extraArtnet", i18n.A{"count": fmt.Sprint(len(f.ArtNetExtra))})},
+		}), btn(i18n.T("common.refresh"), "ghost", "settings-refresh", "")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.timecode.note")) + `</div>`
 	return body
 }
@@ -775,11 +776,11 @@ func (u *UI) sttBody() string {
 	} else if stt.BinInstalled() {
 		installLine = i18n.T("settings.body.stt.modelNotDownloaded")
 	}
-	return selectBox(i18n.T("settings.body.stt.microphone"), "set:stt-input", devOpts(mics, i18n.T("settings.body.common.systemDefault"), f.InputDevice), f.InputDevice) +
-		field(i18n.T("settings.body.stt.output"), "set:stt-output", f.OutputDevice, "text") +
-		selectBox(i18n.T("settings.body.stt.model"), "set:stt-model", modelOpts, stt.ResolvedModel(f.Model).File) +
+	return fpair(selectBox(i18n.T("settings.body.stt.microphone"), "set:stt-input", devOpts(mics, i18n.T("settings.body.common.systemDefault"), f.InputDevice), f.InputDevice),
+		field(i18n.T("settings.body.stt.output"), "set:stt-output", f.OutputDevice, "text")) +
+		fpair(selectBox(i18n.T("settings.body.stt.model"), "set:stt-model", modelOpts, stt.ResolvedModel(f.Model).File),
+			field(i18n.T("settings.body.stt.silenceTimeout"), "set:stt-silence", strconv.Itoa(f.ResolvedSilenceMs()), "number")) +
 		toggleRow(i18n.T("settings.body.stt.autoSubmit"), "set:stt-autosubmit", f.AutoSubmit) +
-		field(i18n.T("settings.body.stt.silenceTimeout"), "set:stt-silence", strconv.Itoa(f.ResolvedSilenceMs()), "number") +
 		`<div class=set-note>` + html.EscapeString(installLine) + `</div>` +
 		btnRow(btn(i18n.T("settings.body.stt.refreshMics"), "ghost", "settings-refresh", ""), btn(i18n.T("settings.body.stt.installWhisper"), "primary", "settings-stt-install", ""))
 }
@@ -850,31 +851,34 @@ func (u *UI) worldSyncBody() string {
 
 func (u *UI) vrOverlayBody() string {
 	f := &u.svc.Cfg.Features.VROverlay
-	return selectBox(i18n.T("settings.body.vroverlay.editBadge"), "set:vr-edithand", [][2]string{{"left", "left"}, {"right", "right"}}, f.ResolvedEditHand()) +
-		selectBox(i18n.T("settings.body.vroverlay.openEditor"), "set:vr-summon", [][2]string{{"ax", i18n.T("settings.body.vroverlay.axButton")}, {"by", i18n.T("settings.body.vroverlay.byButton")}, {"custom", i18n.T("settings.body.vroverlay.customSteamvr")}}, f.ResolvedSummonButton()) +
+	return fpair(selectBox(i18n.T("settings.body.vroverlay.editBadge"), "set:vr-edithand", [][2]string{{"left", "left"}, {"right", "right"}}, f.ResolvedEditHand()),
+		selectBox(i18n.T("settings.body.vroverlay.openEditor"), "set:vr-summon", [][2]string{{"ax", i18n.T("settings.body.vroverlay.axButton")}, {"by", i18n.T("settings.body.vroverlay.byButton")}, {"custom", i18n.T("settings.body.vroverlay.customSteamvr")}}, f.ResolvedSummonButton())) +
 		toggleRow(i18n.T("settings.body.vroverlay.tapHides"), "set:vr-taphides", f.SummonTapHides) +
 		toggleRow(i18n.T("settings.body.vroverlay.autostart"), "set:vr-autostart", f.AutoStart) +
 		toggleRow(i18n.T("settings.body.vroverlay.viewCapture"), "set:vr-viewcapture", f.VRViewCapture) +
-		field(i18n.T("settings.body.vroverlay.vrchatOsc"), "set:vr-osc", f.OSCAddr, "text") +
-		field(i18n.T("settings.body.vroverlay.vmc"), "set:vr-vmc", f.VMCAddr, "text") +
+		fpair(field(i18n.T("settings.body.vroverlay.vrchatOsc"), "set:vr-osc", f.OSCAddr, "text"),
+			field(i18n.T("settings.body.vroverlay.vmc"), "set:vr-vmc", f.VMCAddr, "text")) +
 		toggleRow(i18n.T("settings.body.vroverlay.vmcLive"), "set:vr-vmclive", f.VMCLive) +
-		btnRow(btn(i18n.T("settings.body.vroverlay.overlaysCount", i18n.A{"count": fmt.Sprint(len(f.Overlays))}), "outline", "settings-vrov", ""),
-			btn(i18n.T("settings.body.vroverlay.openBindings"), "outline", "settings-vr-bindings", "")) +
-		btnRow(btn(i18n.T("settings.body.vroverlay.keybindsCount", i18n.A{"count": fmt.Sprint(len(f.Binds))}), "outline", "settings-vr-keybinds", ""),
-			btn(i18n.T("settings.body.vroverlay.layoutsCount", i18n.A{"count": fmt.Sprint(len(f.Layouts))}), "outline", "settings-vr-layouts", ""),
-			btn(i18n.T("settings.body.vroverlay.wristCount", i18n.A{"count": fmt.Sprint(len(f.QuickButtons))}), "outline", "settings-vr-wrist", ""),
-			btn(i18n.T("settings.body.vroverlay.worldLayoutsCount", i18n.A{"count": fmt.Sprint(len(f.WorldLayouts))}), "outline", "settings-vr-worldlay", "")) +
+		// 6-button wall → one manage menu (every entry keeps its live count)
+		btnRow(actionMenu("vrovmanage", i18n.T("settings.body.vroverlay.manageMenu"), []ssOpt{
+			{Val: "settings-vrov", Label: i18n.T("settings.body.vroverlay.overlaysCount", i18n.A{"count": fmt.Sprint(len(f.Overlays))})},
+			{Val: "settings-vr-bindings", Label: i18n.T("settings.body.vroverlay.openBindings")},
+			{Val: "settings-vr-keybinds", Label: i18n.T("settings.body.vroverlay.keybindsCount", i18n.A{"count": fmt.Sprint(len(f.Binds))})},
+			{Val: "settings-vr-layouts", Label: i18n.T("settings.body.vroverlay.layoutsCount", i18n.A{"count": fmt.Sprint(len(f.Layouts))})},
+			{Val: "settings-vr-wrist", Label: i18n.T("settings.body.vroverlay.wristCount", i18n.A{"count": fmt.Sprint(len(f.QuickButtons))})},
+			{Val: "settings-vr-worldlay", Label: i18n.T("settings.body.vroverlay.worldLayoutsCount", i18n.A{"count": fmt.Sprint(len(f.WorldLayouts))})},
+		})) +
 		u.vrInstallHTML()
 }
 
 func (u *UI) dmxBody() string {
 	f := &u.svc.Cfg.Features.DMX
-	return field(i18n.T("settings.body.common.listenAddr"), "set:dmx-listen", f.ListenAddr, "text") +
-		field(i18n.T("settings.body.dmx.universes"), "set:dmx-universes", intsToCSVWeb(f.Universes), "text") +
+	return fpair(field(i18n.T("settings.body.common.listenAddr"), "set:dmx-listen", f.ListenAddr, "text"),
+		field(i18n.T("settings.body.dmx.universes"), "set:dmx-universes", intsToCSVWeb(f.Universes), "text")) +
 		toggleRowTip(i18n.T("settings.body.dmx.renderGrid"), "set:dmx-grid", f.Grid.Enabled, tipTopic("dmx-vrsl")) +
-		selectBox(i18n.T("settings.body.dmx.gridMode"), "set:dmx-mode", [][2]string{{"mono", "mono"}, {"rgb9", "rgb9"}}, or(f.Grid.Mode, "mono")) +
+		fpair(selectBox(i18n.T("settings.body.dmx.gridMode"), "set:dmx-mode", [][2]string{{"mono", "mono"}, {"rgb9", "rgb9"}}, or(f.Grid.Mode, "mono")),
+			field(i18n.T("settings.body.dmx.maxFps"), "set:dmx-fpscap", strconv.Itoa(f.Grid.ResolvedFPSCap()), "number")) +
 		field(i18n.T("settings.body.dmx.senderName"), "set:dmx-spout", f.Grid.SpoutName, "text") +
-		field(i18n.T("settings.body.dmx.maxFps"), "set:dmx-fpscap", strconv.Itoa(f.Grid.ResolvedFPSCap()), "number") +
 		toggleRowTip(i18n.T("settings.body.dmx.reemit"), "set:dmx-reemit", f.ReEmit, tipTopic("dmx-reemit")) +
 		field(i18n.T("settings.body.dmx.reemitTarget"), "set:dmx-emittarget", f.EmitTarget, "text")
 }
@@ -882,19 +886,19 @@ func (u *UI) dmxBody() string {
 func (u *UI) dmxMidiBody() string {
 	f := &u.svc.Cfg.Features.DMXMIDI
 	return field(i18n.T("settings.body.dmxmidi.port"), "set:dmxmidi-device", f.Device, "text") +
-		field(i18n.T("settings.body.dmxmidi.universes"), "set:dmxmidi-universes", intsToCSVWeb(f.Universes), "text") +
-		field(i18n.T("settings.body.dmxmidi.maxRate"), "set:dmxmidi-rate", strconv.Itoa(f.ResolvedRate()), "number")
+		fpair(field(i18n.T("settings.body.dmxmidi.universes"), "set:dmxmidi-universes", intsToCSVWeb(f.Universes), "text"),
+			field(i18n.T("settings.body.dmxmidi.maxRate"), "set:dmxmidi-rate", strconv.Itoa(f.ResolvedRate()), "number"))
 }
 
 func (u *UI) rtspBody() string {
 	f := &u.svc.Cfg.Features.RTSPServe
-	return field(i18n.T("settings.body.rtsp.videoSource"), "set:rtsp-source", f.Source, "text") +
-		field(i18n.T("settings.body.rtsp.inputFormat"), "set:rtsp-format", f.InputFormat, "text") +
+	return fpair(field(i18n.T("settings.body.rtsp.videoSource"), "set:rtsp-source", f.Source, "text"),
+		field(i18n.T("settings.body.rtsp.inputFormat"), "set:rtsp-format", f.InputFormat, "text")) +
 		toggleRowTip(i18n.T("settings.body.rtsp.passthrough"), "set:rtsp-passthrough", f.Passthrough, tipTopic("rtsp-passthrough")) +
-		field(i18n.T("settings.body.common.listenAddr"), "set:rtsp-listen", f.ListenAddr, "text") +
-		field(i18n.T("settings.body.rtsp.streamPath"), "set:rtsp-path", f.Path, "text") +
-		field(i18n.T("settings.body.common.frameRate"), "set:rtsp-fps", strconv.Itoa(f.ResolvedFPS()), "number") +
-		field(i18n.T("settings.body.rtsp.bitrate"), "set:rtsp-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number") +
+		fpair(field(i18n.T("settings.body.common.listenAddr"), "set:rtsp-listen", f.ListenAddr, "text"),
+			field(i18n.T("settings.body.rtsp.streamPath"), "set:rtsp-path", f.Path, "text")) +
+		fpair(field(i18n.T("settings.body.common.frameRate"), "set:rtsp-fps", strconv.Itoa(f.ResolvedFPS()), "number"),
+			field(i18n.T("settings.body.rtsp.bitrate"), "set:rtsp-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.rtsp.note")) + ` rtspt://&lt;this machine's IP&gt;` + html.EscapeString(f.ResolvedListenAddr()) + html.EscapeString(f.ResolvedPath()) + `</div>`
 }
 
@@ -2045,7 +2049,7 @@ func intsToCSVWeb(xs []int) string {
 
 func csvToIntsWeb(s string) []int {
 	var out []int
-	for _, p := range strings.Split(s, ",") {
+	for p := range strings.SplitSeq(s, ",") {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue

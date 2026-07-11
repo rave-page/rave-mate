@@ -49,6 +49,17 @@
 .dot--off  { background: var(--rp-muted, #555); }
 
 .set-sec { scroll-margin-top: 60px; }
+.set-sec > .rp-card { margin: 0 0 12px; }
+
+/* 2-col card masonry ≥1000px: halves scroll length; cards flow top-down per column */
+@media (min-width: 1000px) {
+  .set-sec { columns: 2; column-gap: 12px; }
+  .set-sec > .rp-card { break-inside: avoid; }
+}
+
+/* action menu (button-wall → dropdown): size to content, not full card width */
+.act-menu { display: inline-block; min-width: 220px; }
+.act-menu .ss-field { margin: 6px 0; }
 
 .set-cardhead {
   display: flex;

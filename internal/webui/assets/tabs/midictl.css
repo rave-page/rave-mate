@@ -355,3 +355,9 @@
 .midi-tracehex{color:var(--rp-fg,#fafafa);min-width:120px;user-select:text}
 .midi-tracelen{color:var(--rp-muted);min-width:36px}
 .midi-tracedec{color:var(--rp-fg-dim,#b7b7b7)}
+
+/* ── density: small cards pair up (output+driver, bridge+help) ── */
+.midi-2col { display: grid; grid-template-columns: 1fr; gap: 0; align-items: start; }
+@media (min-width: 1100px) {
+  .midi-2col { grid-template-columns: 1fr 1fr; gap: 0 12px; }
+}

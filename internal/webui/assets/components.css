@@ -10,10 +10,14 @@
 /* slider */
 .slider { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
 .slider-val { color: var(--rp-mint,#08F79B); font-family: 'JetBrains Mono', ui-monospace, monospace; }
-.slider-input { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px;
-  background: rgba(255,255,255,.14); outline: none; }
+/* input is 16px tall (thumb height) so the thumb never clips (scrollHeight overflow);
+ * the visible 6px track is drawn on the ::-webkit-slider-runnable-track pseudo. */
+.slider-input { -webkit-appearance: none; appearance: none; width: 100%; height: 16px;
+  background: transparent; outline: none; }
+.slider-input::-webkit-slider-runnable-track { height: 6px; border-radius: 999px;
+  background: rgba(255,255,255,.14); }
 .slider-input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--rp-base,#F70864); box-shadow: 0 0 10px rgba(247,8,100,.6); cursor: pointer; }
+  margin-top: -5px; background: var(--rp-base,#F70864); box-shadow: 0 0 10px rgba(247,8,100,.6); cursor: pointer; }
 
 /* progress */
 .pbar { position: relative; height: 22px; border-radius: 8px; background: rgba(255,255,255,.06); overflow: hidden; border: 1px solid rgba(255,255,255,.08); }

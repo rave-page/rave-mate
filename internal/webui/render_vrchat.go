@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"html"
+	"maps"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -80,9 +81,7 @@ func (u *UI) vrcEditorHTML() string {
 	vrcMu.Lock()
 	status, desc, bio := vrcEd.status, vrcEd.desc, vrcEd.bio
 	ev := map[string]string{}
-	for k, v := range vrcEd.eventVars {
-		ev[k] = v
-	}
+	maps.Copy(ev, vrcEd.eventVars)
 	vrcMu.Unlock()
 
 	resolved := vrcResolveBio(bio, f.BioVars, ev)
@@ -141,21 +140,22 @@ func vrcPathBtn(label, variant, act, path string) string {
 }
 
 func vrcPresenceOptions(cur string) string {
-	out := `<option value="">` + html.EscapeString(i18n.T("vrchat.presence.placeholder")) + `</option>`
+	var out strings.Builder
+	out.WriteString(`<option value="">` + html.EscapeString(i18n.T("vrchat.presence.placeholder")) + `</option>`)
 	for _, s := range vrchat.Statuses {
 		sel := ""
 		if s == cur {
 			sel = " selected"
 		}
-		out += fmt.Sprintf(`<option value=%s%s>%s</option>`, attrQ(s), sel, html.EscapeString(s))
+		fmt.Fprintf(&out, `<option value=%s%s>%s</option>`, attrQ(s), sel, html.EscapeString(s))
 	}
-	return out
+	return out.String()
 }
 
 // vrcPresetSelect builds a name-picker <select> that dispatches act (val = chosen name) on change.
 func vrcPresetSelect(act, placeholder string, names []string) string {
 	var o strings.Builder
-	o.WriteString(fmt.Sprintf(`<select class="field-input select-input" data-act=%s><option value="">%s</option>`, attrQ(act), html.EscapeString(placeholder)))
+	fmt.Fprintf(&o, `<select class="field-input select-input" data-act=%s><option value="">%s</option>`, attrQ(act), html.EscapeString(placeholder))
 	for _, n := range names {
 		fmt.Fprintf(&o, `<option value=%s>%s</option>`, attrQ(n), html.EscapeString(n))
 	}
@@ -173,11 +173,11 @@ func (u *UI) vrcEmotesHTML() string {
 	b.WriteString(`<form data-act=vrc-emote-gen>`)
 	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.source")) + `</span><input class=field-input name=source placeholder="C:\path\clip.mp4"></label>`)
 	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.name")) + `</span><input class=field-input name=name placeholder="emoji name"></label>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.frames")) + `</span><select class="field-input select-input" name=frames>` +
-		vrcFrameOptions() + `</select></label>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.fps")) + `</span><input class=field-input name=fps type=number value=20 min=1 max=120></label>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.trimStart")) + `</span><input class=field-input name=trimStart placeholder="optional"></label>`)
-	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.trimEnd")) + `</span><input class=field-input name=trimEnd placeholder="optional"></label>`)
+	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(i18n.T("vrchat.emotes.field.frames"))+`</span><select class="field-input select-input" name=frames>`+
+		vrcFrameOptions()+`</select></label>`,
+		`<label class=field><span class=field-label>`+html.EscapeString(i18n.T("vrchat.emotes.field.fps"))+`</span><input class=field-input name=fps type=number value=20 min=1 max=120></label>`))
+	b.WriteString(fpair(`<label class=field><span class=field-label>`+html.EscapeString(i18n.T("vrchat.emotes.field.trimStart"))+`</span><input class=field-input name=trimStart placeholder="optional"></label>`,
+		`<label class=field><span class=field-label>`+html.EscapeString(i18n.T("vrchat.emotes.field.trimEnd"))+`</span><input class=field-input name=trimEnd placeholder="optional"></label>`))
 	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(i18n.T("vrchat.emotes.field.outputDir")) + `</span><input class=field-input name=outdir value="` + html.EscapeString(f.ResolvedFlipbookDir()) + `"></label>`)
 	b.WriteString(`<label class=row><span class=row-label>` + html.EscapeString(i18n.T("vrchat.emotes.pingpong")) + `</span>` +
 		`<span class=switch><input type=checkbox name=pingpong value=1><span class=switch-track></span></span></label>`)
@@ -268,7 +268,7 @@ func campathSVG(pts []vrccampaths.Point, w, h int) string {
 	hi := [3]float64{-1e9, -1e9, -1e9}
 	for i, p := range pts {
 		pos := [3]float64{p.Position.X, p.Position.Y, p.Position.Z}
-		for k := 0; k < 3; k++ {
+		for k := range 3 {
 			if pos[k] < lo[k] {
 				lo[k] = pos[k]
 			}
