@@ -186,3 +186,40 @@ func TestDividerExclusion(t *testing.T) {
 		t.Fatalf("playlist: %v", paths)
 	}
 }
+
+func TestCompatSetAndSmartPrep(t *testing.T) {
+	d := openTestCompatDB(t)
+	// a—b, a—c direct; c—d second hop
+	if _, err := d.AddCompatPairs("blend", []string{"a.mp3", "b.mp3", "c.mp3"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.AddCompatPairs("energy", []string{"c.mp3", "d.mp3"}); err != nil {
+		t.Fatal(err)
+	}
+	set := d.CompatSet("a.mp3", 1)
+	if !set["a.mp3"] || !set["b.mp3"] || !set["c.mp3"] || set["d.mp3"] || len(set) != 3 {
+		t.Fatalf("depth1: %v", set)
+	}
+	set = d.CompatSet("a.mp3", 2)
+	if !set["d.mp3"] || len(set) != 4 {
+		t.Fatalf("depth2: %v", set)
+	}
+	if d.CompatSet("", 1) != nil {
+		t.Fatal("no anchor → nil")
+	}
+	var nilDB *DB
+	if nilDB.CompatSet("a.mp3", 1) != nil {
+		t.Fatal("nil db → nil")
+	}
+	// SmartPrep bridges the rule to the set; zero prep without an anchor
+	p := d.SmartPrep(musiclib.SmartRules{CompatWith: "a.mp3", CompatDepth: 2})
+	if !p.Compat["d.mp3"] {
+		t.Fatalf("prep: %v", p.Compat)
+	}
+	if p := d.SmartPrep(musiclib.SmartRules{}); p.Compat != nil {
+		t.Fatalf("empty rule prep: %v", p.Compat)
+	}
+	if p := nilDB.SmartPrep(musiclib.SmartRules{CompatWith: "a.mp3"}); p.Compat != nil {
+		t.Fatalf("nil db prep: %v", p.Compat)
+	}
+}

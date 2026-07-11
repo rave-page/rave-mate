@@ -2,12 +2,21 @@ package musiclib
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// baseNoExt is a path's file name without extension (compat-rule display).
+func baseNoExt(p string) string {
+	b := filepath.Base(p)
+	return strings.TrimSuffix(b, filepath.Ext(b))
+}
 
 // SmartRules filters the loaded collection live - a rave-mate smart playlist. Zero fields
 // don't constrain. Genre matching is case-insensitive substring per selected genre (so
 // "Techno" also catches "Hard Techno"); Search spans title/artist/album/label/comment.
+// CompatWith anchors a works-together rule: the caller precomputes the compat path-set
+// (SmartPrep) because rule evaluation is deliberately DB-free.
 type SmartRules struct {
 	Genres       []string `json:"genres,omitempty"`
 	BPMMin       float64  `json:"bpmMin,omitempty"`
@@ -16,16 +25,32 @@ type SmartRules struct {
 	RatingMin    int      `json:"ratingMin,omitempty"`
 	PlayCountMin int      `json:"playCountMin,omitempty"`
 	Search       string   `json:"search,omitempty"`
+	CompatWith   string   `json:"compatWith,omitempty"`  // anchor track path (works-together rule)
+	CompatDepth  int      `json:"compatDepth,omitempty"` // ≤1 direct pairs; 2 adds friends-of-friends
+}
+
+// SmartPrep carries caller-precomputed, DB-derived rule inputs. Compat is the path-set
+// compatible with CompatWith (anchor included). Fail-closed: a set CompatWith with a nil
+// Compat matches nothing - a missed prep shows as an empty playlist, never a wrong one.
+type SmartPrep struct {
+	Compat map[string]bool
 }
 
 // Empty reports whether no rule constrains (matches everything).
 func (r SmartRules) Empty() bool {
 	return len(r.Genres) == 0 && r.BPMMin == 0 && r.BPMMax == 0 &&
-		r.KeyContains == "" && r.RatingMin == 0 && r.PlayCountMin == 0 && r.Search == ""
+		r.KeyContains == "" && r.RatingMin == 0 && r.PlayCountMin == 0 && r.Search == "" &&
+		r.CompatWith == ""
 }
 
-// Match reports whether t satisfies every set rule (AND across rules, OR within genres).
-func (r SmartRules) Match(t Track) bool {
+// Match is MatchPrep with no prepared inputs (a CompatWith rule then matches nothing).
+func (r SmartRules) Match(t Track) bool { return r.MatchPrep(t, SmartPrep{}) }
+
+// MatchPrep reports whether t satisfies every set rule (AND across rules, OR within genres).
+func (r SmartRules) MatchPrep(t Track, p SmartPrep) bool {
+	if r.CompatWith != "" && !p.Compat[t.Path] {
+		return false
+	}
 	if len(r.Genres) > 0 {
 		g := strings.ToLower(t.Genre)
 		hit := false
@@ -78,11 +103,16 @@ func StarRating(r int) int {
 	return r
 }
 
-// FilterSmart returns the tracks matching r, in input order.
+// FilterSmart returns the tracks matching r, in input order (no prepared inputs).
 func FilterSmart(tracks []Track, r SmartRules) []Track {
+	return FilterSmartPrep(tracks, r, SmartPrep{})
+}
+
+// FilterSmartPrep is FilterSmart with caller-prepared DB-derived inputs (compat set).
+func FilterSmartPrep(tracks []Track, r SmartRules, p SmartPrep) []Track {
 	var out []Track
 	for _, t := range tracks {
-		if r.Match(t) {
+		if r.MatchPrep(t, p) {
 			out = append(out, t)
 		}
 	}
@@ -114,6 +144,13 @@ func (r SmartRules) Describe() string {
 	}
 	if r.Search != "" {
 		parts = append(parts, "“"+r.Search+"”")
+	}
+	if r.CompatWith != "" {
+		d := "Works with " + baseNoExt(r.CompatWith)
+		if r.CompatDepth >= 2 {
+			d += " (+depth 2)"
+		}
+		parts = append(parts, d)
 	}
 	if len(parts) == 0 {
 		return "All tracks (no rules yet)"
