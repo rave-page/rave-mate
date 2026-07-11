@@ -55,7 +55,7 @@ func TestLibraryPayloadMapping(t *testing.T) {
 		PlayCount: 7, Rating: 4, ReleaseDate: "2021/3/10", LastPlayed: "2024/3/10",
 		Cues:     []musiclib.CuePoint{{Name: "Drop", Kind: "cue", Type: 0, StartMs: 31250.5, Hotcue: 1}},
 		Beatgrid: []musiclib.GridMarker{{PositionMs: 312.4, BPM: 128}},
-	}, "FPB64")
+	}, "FPB64", nil, false)
 	if len(p.Cues) != 1 || p.Cues[0].StartMs != 31250.5 || p.Cues[0].Hotcue != 1 {
 		t.Fatalf("cues wrong: %+v", p.Cues)
 	}
@@ -131,17 +131,99 @@ func TestNormRating(t *testing.T) {
 
 func TestPayloadHashStability(t *testing.T) {
 	tr := musiclib.Track{Title: "T", Artist: "A", BPM: 128, DurationSec: 100}
-	h1, h2 := payloadHash(libraryPayload(tr, "")), payloadHash(libraryPayload(tr, ""))
+	h1, h2 := payloadHash(libraryPayload(tr, "", nil, false)), payloadHash(libraryPayload(tr, "", nil, false))
 	if h1 != h2 {
 		t.Fatalf("equal payloads hash differently")
 	}
 	tr2 := tr
 	tr2.PlayCount = 1
-	if payloadHash(libraryPayload(tr, "")) == payloadHash(libraryPayload(tr2, "")) {
+	if payloadHash(libraryPayload(tr, "", nil, false)) == payloadHash(libraryPayload(tr2, "", nil, false)) {
 		t.Fatalf("changed payload hashes equal")
 	}
-	if payloadHash(libraryPayload(tr, "")) == payloadHash(libraryPayload(tr, "FP")) {
+	if payloadHash(libraryPayload(tr, "", nil, false)) == payloadHash(libraryPayload(tr, "FP", nil, false)) {
 		t.Fatalf("fingerprint change not detected")
+	}
+	// drop edits must flip the hash: add, change, clear (tombstone) are all distinct
+	none := payloadHash(libraryPayload(tr, "", nil, false))
+	set := payloadHash(libraryPayload(tr, "", []float64{61000}, true))
+	moved := payloadHash(libraryPayload(tr, "", []float64{62000}, true))
+	cleared := payloadHash(libraryPayload(tr, "", nil, true))
+	if none == set || set == moved || set == cleared || none == cleared {
+		t.Fatalf("drop change not detected: none=%s set=%s moved=%s cleared=%s", none, set, moved, cleared)
+	}
+}
+
+// Golden wire JSON: drops_ms present+sorted+deduped with a row, `[]` for a cleared
+// tombstone, absent without a row.
+func TestLibraryPayloadDropsGolden(t *testing.T) {
+	tr := musiclib.Track{Title: "T", Artist: "A", DurationSec: 2}
+	for name, tc := range map[string]struct {
+		drops []float64
+		has   bool
+		want  string
+	}{
+		"with drops": {[]float64{183000.4, 61000.2, 61000, -5}, true,
+			`{"title":"T","artist_text":"A","duration_ms":2000,"drops_ms":[61000,183000]}`},
+		"cleared tombstone": {nil, true,
+			`{"title":"T","artist_text":"A","duration_ms":2000,"drops_ms":[]}`},
+		"no row": {nil, false,
+			`{"title":"T","artist_text":"A","duration_ms":2000}`},
+	} {
+		b, err := json.Marshal(libraryPayload(tr, "", tc.drops, tc.has))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if string(b) != tc.want {
+			t.Fatalf("%s:\n got  %s\n want %s", name, b, tc.want)
+		}
+	}
+}
+
+func TestSyncLibraryUploadsDrops(t *testing.T) {
+	d := openDB(t)
+	seedLibrary(t, d,
+		musiclib.Track{Path: "a.mp3", Title: "T1", Artist: "A1", DurationSec: 200},
+		musiclib.Track{Path: "b.mp3", Title: "T2", Artist: "A2", DurationSec: 300},
+	)
+	if err := d.SetDrops("a.mp3", "A1", "T1", 200, []float64{61000, 183000}); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeAPI{}
+	s := New(f, d, nil, tokenFn("tok"))
+	if _, err := s.SyncLibrary(context.Background()); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	byTitle := map[string]api.LibraryTrack{}
+	for _, p := range f.libTracks {
+		byTitle[p.Title] = p
+	}
+	if got := byTitle["T1"].DropsMs; len(got) != 2 || got[0] != 61000 || got[1] != 183000 {
+		t.Fatalf("T1 drops_ms = %v", got)
+	}
+	if byTitle["T2"].DropsMs != nil {
+		t.Fatalf("T2 should omit drops_ms: %v", byTitle["T2"].DropsMs)
+	}
+
+	// clear → tombstone → only T1 re-uploads, with explicit []
+	if err := d.SetDrops("a.mp3", "A1", "T1", 200, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.libTracks = nil
+	res, err := s.SyncLibrary(context.Background())
+	if err != nil {
+		t.Fatalf("re-sync: %v", err)
+	}
+	if res.Uploaded != 1 || res.Skipped != 1 {
+		t.Fatalf("clear re-sync wrong: %+v", res)
+	}
+	if len(f.libTracks) != 1 || f.libTracks[0].Title != "T1" {
+		t.Fatalf("wrong track re-uploaded: %+v", f.libTracks)
+	}
+	if ds := f.libTracks[0].DropsMs; ds == nil || len(ds) != 0 {
+		t.Fatalf("cleared drops must wire as []: %v", ds)
+	}
+	if b, _ := json.Marshal(f.libTracks[0]); !strings.Contains(string(b), `"drops_ms":[]`) {
+		t.Fatalf("clear not explicit on the wire: %s", b)
 	}
 }
 

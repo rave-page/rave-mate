@@ -52,6 +52,9 @@ type LibraryTrack struct {
 	LastPlayedAt   string              `json:"last_played_at,omitempty"` // RFC3339
 	Cues           []LibraryCue        `json:"cues,omitempty"`
 	Beatgrid       []LibraryGridMarker `json:"beatgrid,omitempty"`
+	// DropsMs = DJ-marked drop points (ms from track start, sorted asc, deduped).
+	// nil = field omitted (server keeps stored drops); non-nil empty = explicit clear.
+	DropsMs []int64 `json:"drops_ms,omitzero"`
 }
 
 // LibraryBulkResult is the per-row outcome; Index points into the request batch. JSON nulls

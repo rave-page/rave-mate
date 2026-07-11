@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,10 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 	if err != nil {
 		return LibraryResult{}, err
 	}
+	dropRows, err := s.lib.DropRows() // incl. cleared tombstones - see libraryPayload send rule
+	if err != nil {
+		return LibraryResult{}, err
+	}
 
 	type item struct {
 		hash, payloadHash string
@@ -70,7 +75,8 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 		}
 		seen[hash] = true
 		fp, _, _ := s.lib.FingerprintForTrack(hash)
-		p := libraryPayload(t, fp)
+		drops, hasDrops := dropRows[t.Path]
+		p := libraryPayload(t, fp, drops, hasDrops)
 		ph := payloadHash(p)
 		if synced[hash] == ph {
 			res.Skipped++
@@ -146,7 +152,12 @@ func (s *Syncer) SyncLibrary(ctx context.Context) (LibraryResult, error) {
 }
 
 // libraryPayload maps a local track to its wire payload. fp may be "" (omitted).
-func libraryPayload(t musiclib.Track, fp string) api.LibraryTrack {
+// Drops send rule: drops_ms goes on the wire iff the track has a track_drops row
+// (hasDrops) - including a cleared `[]` tombstone, which the API treats as "remove all
+// drops"; tracks without a row omit the field (server keeps whatever it has). Drop edits
+// need no change-log plumbing: drops are part of this payload, so the payload-hash ledger
+// re-uploads the track on any drop change.
+func libraryPayload(t musiclib.Track, fp string, drops []float64, hasDrops bool) api.LibraryTrack {
 	p := api.LibraryTrack{
 		Title: t.Title, ArtistText: t.Artist, Album: t.Album, Label: t.Label, Genre: t.Genre,
 		BPM: t.BPM, Key: t.Key, FingerprintB64: fp, // path stays local - too personal for the wire
@@ -154,6 +165,9 @@ func libraryPayload(t musiclib.Track, fp string) api.LibraryTrack {
 		Rating: normRating(t.Rating), PlayCount: t.PlayCount, Comment: t.Comment,
 		ReleaseYear: releaseYear(t.ReleaseDate),
 		// no ISRC in local libraries - omitted
+	}
+	if hasDrops {
+		p.DropsMs = wireDrops(drops)
 	}
 	if t.DurationSec > 0 {
 		p.DurationMs = int(math.Round(t.DurationSec * 1000))
@@ -177,6 +191,20 @@ func wireCues(cs []musiclib.CuePoint) []api.LibraryCue {
 		}
 	}
 	return out
+}
+
+// wireDrops maps local drop markers (float ms) to wire ints: rounded, negatives dropped,
+// sorted asc, deduped. Always non-nil - callers gate on track_drops row presence, so an
+// empty result marshals as `[]` (explicit clear) rather than being omitted.
+func wireDrops(ds []float64) []int64 {
+	out := make([]int64, 0, len(ds))
+	for _, d := range ds {
+		if v := int64(math.Round(d)); v >= 0 {
+			out = append(out, v)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // wireGrid maps local grid markers to the wire shape. Beat=1: Traktor grid markers anchor downbeats.

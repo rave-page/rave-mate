@@ -38,13 +38,18 @@ Numbers along the top of the waveform show the **beat distance between neighbour
 markers** (cues + drops); flags at the bottom carry the hotcue pad number (or `M` for
 memory cues) — hover for name + time.
 
-## Drops: stored twice
+## Drops: stored twice (synced thrice)
 
 Drop markers are a rave-mate enrichment: they live in the library database (keyed by
 file path — they survive collection re-imports) **and** in the file itself
 (`RAVEMATE_DROPS` ID3 TXXX frame / FLAC Vorbis comment), so they travel with your
 music. Formats without tag support show a ⚠ in the strip (database-only). Every
 change is journaled in the change log.
+
+Library sync to rave.page carries them too: each uploaded track includes its drop
+markers (`drops_ms`, integer ms), so waveforms on your rave.page profile show your
+drops. Edits and clears propagate on the next sync — cleared tracks send an explicit
+empty list; tracks you never marked leave the server untouched.
 
 The **NO DROPS** filter chip (collection toolbar) lists unprepared tracks; the CUES
 column shows each track's census — ◆n drop markers, ⚑n cues.
