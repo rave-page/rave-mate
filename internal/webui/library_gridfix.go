@@ -9,6 +9,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -733,6 +734,12 @@ func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []
 	var zero musiclib.WritebackResult
 	switch t.key {
 	case "traktor":
+		// Traktor holds collection.nml open (and rewrites it on exit); a live write
+		// fails the atomic rename with a cryptic OS "permission denied". Refuse early
+		// with a clear message instead.
+		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "traktor") {
+			return zero, errors.New(i18n.T("library.gf.traktorRunning"))
+		}
 		// safety: full collection backup before the write
 		if installs, err := musiclib.DiscoverTraktor(); err == nil && len(installs) > 0 && installs[0].Collection != "" {
 			if _, berr := musiclib.BackupCollection(installs[0], libBackupRoot()); berr != nil {
@@ -743,16 +750,23 @@ func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []
 		}
 		res, err := musiclib.ApplyGridFixes(t.path, fixes)
 		if err != nil {
-			return zero, err
+			return zero, gfWriteErr(err)
 		}
 		// fixed tracks no longer need manual gridding
 		_, _ = musiclib.RemoveFromNMLPlaylist(t.path, gridfixPrepPlaylist, fixedPaths)
 		return res, nil
 	case "rekordbox":
+		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "rekordbox") {
+			return zero, errors.New(i18n.T("library.gf.rekordboxRunning"))
+		}
 		if err := gfBackupFile("rekordbox", t.path); err != nil {
 			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
 		}
-		return musiclib.ApplyGridFixesRekordboxXML(t.path, fixes)
+		res, err := musiclib.ApplyGridFixesRekordboxXML(t.path, fixes)
+		if err != nil {
+			return zero, gfWriteErr(err)
+		}
+		return res, nil
 	case "virtualdj":
 		// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
 		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "virtualdj") {
@@ -767,6 +781,16 @@ func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []
 		return seratolib.ApplyGridFixesSerato(t.path, fixes)
 	}
 	return zero, fmt.Errorf("unknown apply target %q", t.key)
+}
+
+// gfWriteErr turns a raw OS permission error from a library write into an actionable
+// message (locked / read-only file) instead of the cryptic "permission denied" the
+// atomic rename surfaces when the DJ software still holds the file (or it's read-only).
+func gfWriteErr(err error) error {
+	if errors.Is(err, os.ErrPermission) {
+		return errors.New(i18n.T("library.gf.writeDenied"))
+	}
+	return err
 }
 
 // gfBackupFile copies a library file into the backup root before a write.

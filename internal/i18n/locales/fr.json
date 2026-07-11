@@ -1087,7 +1087,10 @@
       "noTargets": "Aucune bibliothèque DJ détectée pour l'écriture — ni Traktor, ni Rekordbox, ni VirtualDJ, ni Serato.",
       "rbNote": "Rekordbox : les grilles sont écrites dans le XML de la collection — chargez-le dans Rekordbox via Fichier → Importer la collection.",
       "seratoNote": "Serato : les grilles sont écrites directement dans les fichiers audio (écriture temporaire vérifiée ; fermez Serato d'abord).",
-      "vdjRunning": "VirtualDJ est ouvert — fermez-le avant d'appliquer."
+      "vdjRunning": "VirtualDJ est ouvert — fermez-le avant d'appliquer.",
+      "traktorRunning": "Traktor est ouvert — fermez-le avant d'appliquer les beatgrids corrigés.",
+      "rekordboxRunning": "Rekordbox est ouvert — fermez-le avant d'appliquer.",
+      "writeDenied": "Impossible d'écrire dans la collection — le fichier est verrouillé ou en lecture seule. Fermez votre logiciel DJ (et vérifiez que le fichier n'est pas en lecture seule), puis réessayez."
     },
     "ce": {
       "open": "Préparer les cues",

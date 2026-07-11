@@ -1087,7 +1087,10 @@
       "noTargets": "No se encontró ninguna biblioteca de DJ donde escribir: no se detectó Traktor, Rekordbox, VirtualDJ ni Serato.",
       "rbNote": "Rekordbox: las cuadrículas se escriben en el XML de la colección; cárgalo en Rekordbox mediante Archivo → Importar colección.",
       "seratoNote": "Serato: las cuadrículas se escriben directamente en los archivos de audio (escritura temporal verificada; cierra Serato antes).",
-      "vdjRunning": "VirtualDJ está abierto: ciérralo antes de aplicar."
+      "vdjRunning": "VirtualDJ está abierto: ciérralo antes de aplicar.",
+      "traktorRunning": "Traktor está abierto: ciérralo antes de aplicar los beatgrids corregidos.",
+      "rekordboxRunning": "Rekordbox está abierto: ciérralo antes de aplicar.",
+      "writeDenied": "No se pudo escribir en la colección: el archivo está bloqueado o es de solo lectura. Cierra tu software DJ (y asegúrate de que el archivo no sea de solo lectura) e inténtalo de nuevo."
     },
     "ce": {
       "open": "Preparar cues",

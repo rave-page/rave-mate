@@ -1168,7 +1168,10 @@
       "noTargets": "No DJ library found to write to — nothing detected for Traktor, Rekordbox, VirtualDJ or Serato.",
       "rbNote": "Rekordbox: grids are written to the collection XML — load it in Rekordbox via File → Import Collection.",
       "seratoNote": "Serato: grids are written directly into the audio files (verified temp-write; close Serato first).",
-      "vdjRunning": "VirtualDJ is open — close it before applying."
+      "vdjRunning": "VirtualDJ is open — close it before applying.",
+      "traktorRunning": "Traktor is open — close it before applying the fixed beatgrids.",
+      "rekordboxRunning": "Rekordbox is open — close it before applying.",
+      "writeDenied": "Could not write to the collection — the file is locked or read-only. Close your DJ software (and make sure the file isn't read-only), then try again."
     },
     "ce": {
       "open": "Prepare cues",

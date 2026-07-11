@@ -1087,7 +1087,10 @@
       "noTargets": "書き込み先の DJ ライブラリが見つかりません（Traktor / Rekordbox / VirtualDJ / Serato を検出できませんでした）。",
       "rbNote": "Rekordbox: グリッドはコレクション XML に書き込まれます。Rekordbox の「ファイル → コレクションを読み込む」で取り込んでください。",
       "seratoNote": "Serato: グリッドはオーディオファイルに直接書き込まれます（検証付き一時書き込み。先に Serato を終了してください）。",
-      "vdjRunning": "VirtualDJ が起動中です。適用する前に終了してください。"
+      "vdjRunning": "VirtualDJ が起動中です。適用する前に終了してください。",
+      "traktorRunning": "Traktor が起動中です。修正したビートグリッドを適用する前に閉じてください。",
+      "rekordboxRunning": "Rekordbox が起動中です。適用する前に閉じてください。",
+      "writeDenied": "コレクションに書き込めませんでした。ファイルがロックされているか読み取り専用です。DJ ソフトを閉じ（ファイルが読み取り専用でないことを確認して）から、もう一度お試しください。"
     },
     "ce": {
       "open": "キューを準備",
