@@ -2581,7 +2581,9 @@
       "gfTrainFailed": "学習に失敗: ",
       "gfTrainSkipped": "検証済みトラック {n} 件をスキップ（ファイルなし）",
       "gfTrainDoneTitle": "モデル学習が完了",
-      "gfTrainDoneBody": "ビート精度 (ホールドアウト): F {before} → {after}"
+      "gfTrainDoneBody": "ビート精度 (ホールドアウト): F {before} → {after}",
+      "moduleRestarted": "{name} を再起動しました — 新しい設定を適用済み",
+      "restartDeferred": "{name}: 保存しました — 進行中のキャプチャ/録音が終わり次第、自動的に適用されます"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2702,6 +2704,9 @@
     "search": {
       "placeholder": "すべての設定を検索…",
       "noResults": "\"{query}\" に一致する設定はありません"
+    },
+    "hint": {
+      "appRestart": "次回のアプリ起動時に有効になります"
     }
   },
   "tab": {

@@ -1226,16 +1226,17 @@ func run(parent context.Context, serviceMode bool) error {
 		Stop:    studioSrv.Stop,
 	})
 	// Icecast set-capture receiver - the local endpoint Traktor's Broadcasting streams to.
-	// Child process; the init closure re-reads config on every (re)spawn, so a settings
-	// edit (port/mount/password/dir) takes effect on module restart.
+	// Child process; the init closure re-reads config on every (re)spawn. Settings edits
+	// auto-restart the module (webui settings_apply.go; deferred while capturing).
 	mods.Add(&module.Service{
 		Name:    "setcapture",
 		Enabled: func() bool { return cfg.Features.SetCapture.Enabled },
 		Start:   func(c context.Context) error { return icecastRcv.Host().Start(c) },
 		Stop:    icecastRcv.Host().Stop,
 	})
-	// OBS bridge - child process maintaining the obs-websocket connection. Settings edits
-	// apply on module restart (init closure re-reads config per (re)spawn).
+	// OBS bridge - child process maintaining the obs-websocket connection. Init closure
+	// re-reads config per (re)spawn; settings edits auto-restart the module (webui
+	// settings_apply.go; deferred while recording).
 	mods.Add(&module.Service{
 		Name:    "obs",
 		Enabled: func() bool { return cfg.Features.OBS.Enabled },
@@ -1244,7 +1245,8 @@ func run(parent context.Context, serviceMode bool) error {
 	})
 	// Ableton Link - child process publishing the fused DJ tempo/phrase onto a Link session.
 	// Start spawns the child then runs the DJ→Link bridge loop (reads the session Merger master
-	// BPM/phase and drives Link when this node owns the tempo). Settings edits apply on restart.
+	// BPM/phase and drives Link when this node owns the tempo). Quantum/start-stop-sync edits
+	// auto-restart the module (webui settings_apply.go); owner/Resolume fields are read live.
 	mods.Add(&module.Service{
 		Name:    "abletonlink",
 		Enabled: func() bool { return cfg.Features.AbletonLink.Enabled },
@@ -1344,7 +1346,8 @@ func run(parent context.Context, serviceMode bool) error {
 		Start:   func(c context.Context) error { return agg.Start(c) },
 		Stop:    agg.Stop,
 	})
-	// DMX plane (Art-Net listener + VRSL grid + re-emit). Settings edits apply on toggle off/on.
+	// DMX plane (Art-Net listener + VRSL grid + re-emit). Settings edits auto-restart the
+	// module (webui settings_apply.go).
 	mods.Add(&module.Service{
 		Name:    "dmx",
 		Enabled: func() bool { return cfg.Features.DMX.Enabled },

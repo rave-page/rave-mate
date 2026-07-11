@@ -2670,7 +2670,9 @@
       "gfTrainFailed": "Training failed: ",
       "gfTrainSkipped": "{n} verified tracks skipped (file missing)",
       "gfTrainDoneTitle": "Model training finished",
-      "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}"
+      "gfTrainDoneBody": "Held-out beat accuracy: F {before} → {after}",
+      "moduleRestarted": "{name} restarted — new settings applied",
+      "restartDeferred": "{name}: saved — applies automatically once the current capture/recording ends"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2791,6 +2793,9 @@
     "search": {
       "placeholder": "Search all settings…",
       "noResults": "No settings match \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Takes effect on next app start"
     }
   },
   "tab": {

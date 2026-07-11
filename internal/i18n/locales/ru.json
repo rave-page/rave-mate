@@ -2581,7 +2581,9 @@
       "gfTrainFailed": "Сбой обучения: ",
       "gfTrainSkipped": "Пропущено проверенных треков: {n} (файл отсутствует)",
       "gfTrainDoneTitle": "Обучение модели завершено",
-      "gfTrainDoneBody": "Точность битов (holdout): F {before} → {after}"
+      "gfTrainDoneBody": "Точность битов (holdout): F {before} → {after}",
+      "moduleRestarted": "{name} перезапущен — новые настройки применены",
+      "restartDeferred": "{name}: сохранено — применится автоматически после завершения текущей записи/захвата"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2702,6 +2704,9 @@
     "search": {
       "placeholder": "Поиск по всем настройкам…",
       "noResults": "Нет настроек по запросу \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Вступит в силу при следующем запуске приложения"
     }
   },
   "tab": {

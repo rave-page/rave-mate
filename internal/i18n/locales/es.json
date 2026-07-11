@@ -2581,7 +2581,9 @@
       "gfTrainFailed": "Falló el entrenamiento: ",
       "gfTrainSkipped": "{n} pistas verificadas omitidas (archivo ausente)",
       "gfTrainDoneTitle": "Entrenamiento del modelo terminado",
-      "gfTrainDoneBody": "Precisión de beats (holdout): F {before} → {after}"
+      "gfTrainDoneBody": "Precisión de beats (holdout): F {before} → {after}",
+      "moduleRestarted": "{name} reiniciado: nuevos ajustes aplicados",
+      "restartDeferred": "{name}: guardado — se aplicará automáticamente cuando termine la captura/grabación actual"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2702,6 +2704,9 @@
     "search": {
       "placeholder": "Buscar en todos los ajustes…",
       "noResults": "Ningún ajuste coincide con \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Surte efecto en el próximo inicio de la app"
     }
   },
   "tab": {

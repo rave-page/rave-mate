@@ -2581,7 +2581,9 @@
       "gfTrainFailed": "Збій навчання: ",
       "gfTrainSkipped": "Пропущено перевірених треків: {n} (файл відсутній)",
       "gfTrainDoneTitle": "Навчання моделі завершено",
-      "gfTrainDoneBody": "Точність бітів (holdout): F {before} → {after}"
+      "gfTrainDoneBody": "Точність бітів (holdout): F {before} → {after}",
+      "moduleRestarted": "{name} перезапущено — нові налаштування застосовано",
+      "restartDeferred": "{name}: збережено — застосується автоматично після завершення поточного запису/захоплення"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2702,6 +2704,9 @@
     "search": {
       "placeholder": "Пошук у всіх налаштуваннях…",
       "noResults": "Немає налаштувань за запитом \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Набуде чинності після наступного запуску застосунку"
     }
   },
   "tab": {

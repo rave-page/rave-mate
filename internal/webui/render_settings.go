@@ -560,8 +560,14 @@ func (u *UI) cardContent(id string) (string, string, string) {
 	case "notifications":
 		return i18n.T("settings.card.notifications.title"), i18n.T("settings.card.notifications.desc"), ""
 	case "guardian":
-		return i18n.T("settings.card.guardian.title"), i18n.T("settings.card.guardian.desc"),
-			`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.guardian.note")) + `</div>`
+		// the supervisor only (dis)arms at process start - show a restart hint only while
+		// the toggle differs from the state this process launched with (dirty tracking)
+		guardianAtStart.once.Do(func() { guardianAtStart.disabled = u.svc.Cfg.DisableCrashGuardian })
+		body := `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.guardian.note")) + `</div>`
+		if u.svc.Cfg.DisableCrashGuardian != guardianAtStart.disabled {
+			body += hint("warn", i18n.T("settings.hint.appRestart"))
+		}
+		return i18n.T("settings.card.guardian.title"), i18n.T("settings.card.guardian.desc"), body
 	case "service":
 		return i18n.T("settings.card.service.title"), i18n.T("settings.card.service.desc"),
 			btnRow(btn(i18n.T("settings.body.service.install"), "primary", "settings-svc-install", ""), btn(i18n.T("settings.body.service.uninstall"), "outline", "settings-svc-uninstall", ""), btn(i18n.T("common.refresh"), "ghost", "settings-refresh", "")) +
@@ -1449,6 +1455,13 @@ func boolStat(on bool, onText string) stv {
 	return stOff("")
 }
 
+// guardianAtStart snapshots the crash-guardian state this process launched with (the
+// supervisor only arms at startup; first settings render precedes any toggle).
+var guardianAtStart struct {
+	once     sync.Once
+	disabled bool
+}
+
 // ── apply (from onAction) ──
 
 // applyToggle flips a feature toggle: optimistic in-memory flip + instant re-render, then persist +
@@ -1524,6 +1537,9 @@ func (u *UI) applySet(id, val string) {
 		toInt(&f.Traktor.Port, 1, 65535)
 	case "traktor-log":
 		f.Traktor.LogPayloads = b
+		if u.svc.Traktor != nil {
+			u.svc.Traktor.SetLogging(b) // live reconfigure - no listener restart needed
+		}
 	case "traktor-mapver":
 		f.Traktor.MappingVersion = v
 		if u.svc.TraktorMap != nil {
@@ -1790,7 +1806,14 @@ func (u *UI) applySet(id, val string) {
 		save = false
 	}
 	if save {
-		u.saveCfgBG("set:"+id, nil, nil) // disk write + Reconcile off the actWorker
+		var apply func()
+		if mod := settingModule(id); mod != "" {
+			// module reads this field only at (re)start - restart it automatically
+			// (debounced; deferred while capturing/recording) instead of making the
+			// user toggle the feature off/on
+			apply = func() { u.scheduleModuleRestart(mod) }
+		}
+		u.saveCfgBG("set:"+id, apply, nil) // disk write + Reconcile off the actWorker
 	}
 }
 

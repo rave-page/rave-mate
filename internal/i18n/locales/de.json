@@ -2581,7 +2581,9 @@
       "gfTrainFailed": "Training fehlgeschlagen: ",
       "gfTrainSkipped": "{n} verifizierte Tracks übersprungen (Datei fehlt)",
       "gfTrainDoneTitle": "Modell-Training fertig",
-      "gfTrainDoneBody": "Beat-Genauigkeit (Holdout): F {before} → {after}"
+      "gfTrainDoneBody": "Beat-Genauigkeit (Holdout): F {before} → {after}",
+      "moduleRestarted": "{name} neu gestartet — neue Einstellungen aktiv",
+      "restartDeferred": "{name}: gespeichert — wird automatisch übernommen, sobald die laufende Aufnahme endet"
     },
     "toggle": {
       "ablelink": "Ableton Link",
@@ -2702,6 +2704,9 @@
     "search": {
       "placeholder": "Alle Einstellungen durchsuchen…",
       "noResults": "Keine Einstellungen passen zu \"{query}\""
+    },
+    "hint": {
+      "appRestart": "Wird beim nächsten App-Start wirksam"
     }
   },
   "tab": {
