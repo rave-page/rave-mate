@@ -3,6 +3,7 @@ package peerlink
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"rave.page/mate/internal/authz"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/discovery"
 	"rave.page/mate/internal/identity"
@@ -22,6 +24,10 @@ import (
 )
 
 const logTag = "peerlink"
+
+// errNoAuthorizer - an untrusted peer arrived on a gated transport with no gate installed.
+// Fail closed: without the gate there is nothing to authorize it with.
+var errNoAuthorizer = errors.New("peerlink: no authorizer for a gated transport")
 
 // portRange is the LAN-facing listener range. Kept clear of studio's loopback (47615-47619)
 // AND the single-instance control socket (127.0.0.1:47620, see internal/app/instance.go) -
@@ -82,6 +88,12 @@ type Manager struct {
 	onSAS   []func(SASRequest)
 	onState []func()
 	onData  func(peerNodeID, channel string, payload []byte)
+
+	// Access gate for untrusted peers on GATED transports (no human to compare an SAS).
+	// See gate.go. Nil → such peers are refused.
+	authz      Authorizer
+	authzLabel string
+	authzCode  authz.CredentialFunc
 
 	ctx context.Context
 }
@@ -326,6 +338,42 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 		m.log.Warn(logTag, "handshake failed", map[string]any{"error": err.Error(), "addr": addr})
 		conn.Close()
 		return
+	}
+
+	// Transports that cross a third party switch to AEAD here, keyed from the handshake we just
+	// completed. Both ends reach this point with the same Result, so they upgrade in lockstep.
+	// No-op on the LAN listener (plaintext + frame MAC, as documented).
+	if err := upgradeTransport(conn, res); err != nil {
+		m.log.Warn(logTag, "transport upgrade failed", map[string]any{"error": err.Error(), "addr": addr})
+		conn.Close()
+		return
+	}
+
+	// Gated transport (no human at the far end to compare an SAS): an untrusted peer must pass
+	// the authz gate instead - a TOTP code proves possession of the enrolled authenticator, which
+	// authorizes the pairing and pins the identities. Runs BEFORE the read loop starts, so it has
+	// the conn to itself. Fails closed: no authorizer ⇒ no connection.
+	if tr, gated := gateTransport(conn); gated && !res.Trusted {
+		gctx, gcancel := context.WithTimeout(m.ctx, 60*time.Second)
+		err := m.authorize(gctx, conn, res, tr)
+		gcancel()
+		if err != nil {
+			m.log.Warn(logTag, "peer refused by the access gate", map[string]any{
+				"peer": res.PeerNodeID, "transport": string(tr), "error": err.Error(),
+			})
+			conn.Close()
+			return
+		}
+		// Authorized → pin the peer's identity, exactly as a confirmed SAS would.
+		now := time.Now().UTC()
+		_ = m.store.Save(peers.Peer{
+			NodeID: res.PeerNodeID, IdentityPub: res.PeerIdentityPub, Nickname: nickname,
+			LastAddress: addr, LastSeen: now, PairedAt: now, Trusted: true,
+		})
+		res.Trusted = true
+		m.log.Info(logTag, "peer paired via the access gate", map[string]any{
+			"peer": res.PeerNodeID, "transport": string(tr),
+		})
 	}
 
 	cctx, ccancel := context.WithCancel(m.ctx)
