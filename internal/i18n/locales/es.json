@@ -138,6 +138,12 @@
     "y": "Y"
   },
   "help": {
+    "kb": {
+      "click": "Clic",
+      "drag": "Arrastrar",
+      "rclick": "Clic derecho",
+      "wheel": "Rueda del ratón"
+    },
     "camera-paths": {
       "body": "La cámara integrada de VRChat graba trayectorias de dolly: secuencias de fotogramas clave (posición, orientación, velocidad, foco) por las que la cámara vuela con suavidad. VRChat las guarda como archivos JSON; rave-mate las encuentra, las agrupa por el mundo en el que se grabaron, y puede respaldarlas, organizarlas y volver a cargarlas.\n\nLa vista previa muestra la trayectoria en 3D: cada punto es un fotograma clave, la pequeña línea violeta es la orientación de la cámara, y el color de la línea codifica la velocidad (menta = lenta, rosa = rápida). El marcador ámbar recorre la trayectoria a su velocidad real grabada.\n\n\"Cargar en VRChat\" envía el archivo por OSC para que aparezca en la cámara del juego al instante: OSC debe estar habilitado en VRChat (menú de acción → Opciones → OSC). El bucle y el tipo de trayectoria no se guardan en el archivo; configúralos una vez en VRChat tras cargarlos.",
       "title": "Trayectorias de cámara de VRChat"
@@ -284,6 +290,11 @@
     },
     "wave-nav": {
       "body": "La forma de onda es la superficie de desplazamiento: haz clic en cualquier punto para saltar ahí, desplaza la rueda del ratón para acercar el zoom alrededor del cursor (hasta 50×), y arrastra para desplazarte con el zoom activo. + / − / Ajustar hacen lo mismo desde los botones. Las líneas violeta son inicios de pista del tracklist de la sesión, el ámbar es el último fader abajo, y las líneas de color en las pistas de la biblioteca son tus puntos de cue de DJ.\n\nLos dos chips superpuestos sobre la forma de onda enseñan a medida que avanzas: el de la izquierda muestra la codificación de la fuente (pasa el cursor para ver códec, frecuencia de muestreo, bitrate y tamaño de archivo), el de la derecha el volumen integrado de la pista (pasa el cursor para ver toda la explicación de EBU R128 - integrado vs momentáneo, objetivos de streaming, pico real). La lectura junto a los botones de zoom sigue tu cursor con el tiempo y el volumen momentáneo en esa posición exacta.\n\nEn modo de edición la tira gana tres carriles de puntero: el borde superior arrastra el tirador IN, el borde inferior arrastra OUT, y el medio se mantiene como clic para desplazar - así puedes escuchar y recortar sin salir nunca de la forma de onda.",
+      "k": {
+        "click": "Saltar a esa posición",
+        "wheel": "Zoom alrededor del cursor (hasta 50×)",
+        "drag": "Desplazar la vista con zoom"
+      },
       "title": "Navegación por la forma de onda"
     },
     "midi-thru": {
@@ -291,7 +302,25 @@
     },
     "cue-edit": {
       "title": "Editor de cues: teclado y ratón",
-      "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat. Los números en la parte superior de la forma de onda muestran la distancia en beats entre cues y drops vecinos. Marca pistas en la lista para aplicar en masa los patrones asignados desde la barra inferior. Ratón: clic izquierdo mueve el cursor de beat, clic derecho añade un memory cue, Mayús+clic derecho un drop, Ctrl+clic derecho elimina los marcadores en ese beat. Al desplazar la rejilla, los cues y drops se mueven con ella. El recuadro de selección abarca también los drops además de los cues; un clic sobre un marcador selecciona solo ese, Ctrl+clic añade o quita marcadores individuales de la selección, y Supr (o Retroceso) elimina de una vez todos los cues y drops seleccionados — biblioteca, diario de cambios y tag del archivo se actualizan a la par."
+      "body": "←/→ mueve el cursor un beat; Mayús+←/→ salta según el tamaño de beat-jump; Mayús+↑/↓ cambia ese tamaño (1–64 beats). T o Intro pone un marcador DROP en el cursor; Mayús+T / Mayús+Intro quita el más cercano. Los drops se guardan en la biblioteca Y en la etiqueta del archivo (MP3/FLAC), así sobreviven reimportaciones y cambios de equipo. Ratón: clic en la forma de onda mueve el cursor (ajustado al beat); arrastra para seleccionar cues con lazo; una selección se guarda como patrón con nombre, anclado al drop más cercano. Las teclas solo actúan en esta vista con la ventana enfocada, nunca al escribir en un campo. En la lista de la colección, ↑/↓ recorre las pistas. Mantén ESPACIO para pre-escuchar desde el cursor: al soltar se detiene y al volver a pulsar arranca de nuevo desde el cursor. Ctrl+←/→ desplaza toda la beatgrid 10 ms para alinearla a mano (Ctrl+Mayús = 1 ms; mantén pulsado para un desplazamiento continuo), lo bastante fino para clavar la cuadrícula en un beat. Los números en la parte superior de la forma de onda muestran la distancia en beats entre cues y drops vecinos. Marca pistas en la lista para aplicar en masa los patrones asignados desde la barra inferior. Ratón: clic izquierdo mueve el cursor de beat, clic derecho añade un memory cue, Mayús+clic derecho un drop, Ctrl+clic derecho elimina los marcadores en ese beat. Al desplazar la rejilla, los cues y drops se mueven con ella. El recuadro de selección abarca también los drops además de los cues; un clic sobre un marcador selecciona solo ese, Ctrl+clic añade o quita marcadores individuales de la selección, y Supr (o Retroceso) elimina de una vez todos los cues y drops seleccionados — biblioteca, diario de cambios y tag del archivo se actualizan a la par.",
+      "k": {
+        "step": "Mover el cursor de beat un beat",
+        "jump": "Salto de beats según el tamaño de salto",
+        "jumpSize": "Cambiar el tamaño de salto (1–64 beats)",
+        "addDrop": "Añadir un marcador DROP en el cursor",
+        "removeDrop": "Eliminar el drop más cercano",
+        "deleteSel": "Eliminar todos los cues y drops seleccionados",
+        "audition": "Mantener para escuchar desde el cursor; soltar detiene",
+        "nudge": "Desplazar toda la rejilla 10 ms (cues + drops la siguen)",
+        "nudgeFine": "Desplazar la rejilla 1 ms (ultrafino)",
+        "listNav": "Recorrer las pistas de la lista Colección",
+        "click": "Mover el cursor de beat (ajustado al beat); sobre un marcador: seleccionarlo",
+        "drag": "Selección con recuadro de cues y drops",
+        "ctrlClick": "Añadir/quitar un cue o drop de la selección",
+        "rclick": "Añadir un memory cue en ese beat",
+        "srclick": "Añadir un marcador de drop",
+        "crclick": "Eliminar los marcadores cue + drop en ese beat"
+      }
     },
     "midi-drv-filter": {
       "title": "Filtro de mensajes fan-out",

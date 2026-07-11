@@ -138,6 +138,12 @@
     "y": "Y"
   },
   "help": {
+    "kb": {
+      "click": "Klick",
+      "drag": "Ziehen",
+      "rclick": "Rechtsklick",
+      "wheel": "Mausrad"
+    },
     "camera-paths": {
       "body": "Die In-Game-Kamera von VRChat nimmt Dolly-Pfade auf - Keyframe-Sequenzen (Position, Blickrichtung, Geschwindigkeit, Fokus), durch die die Kamera flüssig gleitet. VRChat speichert sie als JSON-Dateien; rave-mate findet sie, gruppiert sie nach der Welt, in der sie aufgenommen wurden, und kann sie sichern, organisieren und wieder laden.\n\nDie Vorschau zeigt den Pfad in 3D: jeder Punkt ist ein Keyframe, die kleine violette Linie ist die Blickrichtung der Kamera, und die Linienfarbe kodiert die Geschwindigkeit (Mint = langsam, Pink = schnell). Der bernsteinfarbene Marker fliegt den Pfad mit seiner echten aufgenommenen Geschwindigkeit ab.\n\n„In VRChat laden“ sendet die Datei über OSC, sodass sie sofort in der In-Game-Kamera erscheint - OSC muss in VRChat aktiviert sein (Action-Menü → Options → OSC). Loop und Pfadtyp werden nicht in der Datei gespeichert; stelle sie nach dem Laden einmalig in VRChat ein.",
       "title": "VRChat-Kamerapfade"
@@ -284,6 +290,11 @@
     },
     "wave-nav": {
       "body": "Die Wellenform ist die Springfläche: klicke irgendwo, um dorthin zu springen, scrolle mit dem Mausrad, um um den Cursor zu zoomen (bis zu 50×), und ziehe, um im gezoomten Zustand zu schwenken. + / − / Anpassen tun dasselbe über die Buttons. Violette Linien sind Track-Starts aus der Session-Trackliste, Bernstein ist der letzte Fader-Down, und farbige Linien auf Library-Tracks sind deine DJ-Cue-Punkte.\n\nDie zwei Chips über der Wellenform lehren dich unterwegs: der linke zeigt die Quellkodierung (Hover für Codec, Sample-Rate, Bitrate und Dateigröße), der rechte die integrierte Lautheit des Tracks (Hover für die volle EBU-R128-Geschichte - integriert vs. momentan, Streaming-Ziele, True Peak). Die Anzeige neben den Zoom-Buttons folgt deinem Cursor mit der Zeit und der momentanen Lautheit an genau dieser Position.\n\nIm Bearbeitungsmodus erhält der Streifen drei Zeiger-Bahnen: die obere Kante zieht den IN-Griff, die untere Kante zieht OUT, und die Mitte bleibt Klick-zum-Springen - so kannst du vorhören und trimmen, ohne je die Wellenform zu verlassen.",
+      "k": {
+        "click": "Zu dieser Position springen",
+        "wheel": "Um den Cursor zoomen (bis 50×)",
+        "drag": "Im Zoom verschieben"
+      },
       "title": "Wellenform-Navigation"
     },
     "midi-thru": {
@@ -291,7 +302,25 @@
     },
     "cue-edit": {
       "title": "Cue-Editor – Tasten & Maus",
-      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit. Der Auswahlrahmen erfasst neben Cues auch Drops; ein Klick auf einen Marker wählt nur ihn aus, Strg+Klick nimmt einzelne Marker in die Auswahl auf oder heraus, und Entf (oder Rücktaste) löscht alle ausgewählten Cues und Drops auf einmal — Bibliothek, Änderungsjournal und Datei-Tag ziehen mit."
+      "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit. Der Auswahlrahmen erfasst neben Cues auch Drops; ein Klick auf einen Marker wählt nur ihn aus, Strg+Klick nimmt einzelne Marker in die Auswahl auf oder heraus, und Entf (oder Rücktaste) löscht alle ausgewählten Cues und Drops auf einmal — Bibliothek, Änderungsjournal und Datei-Tag ziehen mit.",
+      "k": {
+        "step": "Beat-Cursor um einen Beat bewegen",
+        "jump": "Beat-Jump um die Sprunggröße",
+        "jumpSize": "Sprunggröße ändern (1–64 Beats)",
+        "addDrop": "DROP-Marker am Cursor setzen",
+        "removeDrop": "Nächstgelegenen Drop entfernen",
+        "deleteSel": "Alle ausgewählten Cues und Drops löschen",
+        "audition": "Halten = Vorhören ab Cursor; Loslassen stoppt",
+        "nudge": "Beatgrid um 10 ms verschieben (Cues + Drops wandern mit)",
+        "nudgeFine": "Beatgrid um 1 ms verschieben (ultrafein)",
+        "listNav": "Tracks in der Collection-Liste durchgehen",
+        "click": "Beat-Cursor bewegen (beat-genau); auf einem Marker: auswählen",
+        "drag": "Cues und Drops per Auswahlrahmen markieren",
+        "ctrlClick": "Cue/Drop zur Auswahl hinzufügen oder entfernen",
+        "rclick": "Memory-Cue an diesem Beat setzen",
+        "srclick": "Drop-Marker setzen",
+        "crclick": "Cue- und Drop-Marker an diesem Beat entfernen"
+      }
     },
     "midi-drv-filter": {
       "title": "Fan-out-Nachrichtenfilter",

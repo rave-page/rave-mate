@@ -138,6 +138,12 @@
     "y": "Y"
   },
   "help": {
+    "kb": {
+      "click": "Click",
+      "drag": "Drag",
+      "rclick": "Right-click",
+      "wheel": "Scroll wheel"
+    },
     "camera-paths": {
       "body": "VRChat's in-game camera records dolly paths - keyframe sequences (position, facing, speed, focus) the camera flies through smoothly. VRChat saves them as JSON files; rave-mate finds them, groups them by the world they were recorded in, and can back them up, organize them and re-load them.\n\nThe preview shows the path in 3D: each dot is a keyframe, the small violet line is the camera's facing, and the line colour encodes speed (mint = slow, pink = fast). The amber marker flies the path at its real recorded speed.\n\n\"Load into VRChat\" sends the file over OSC so it appears in the in-game camera immediately - OSC must be enabled in VRChat (Action menu → Options → OSC). Loop and path-type aren't stored in the file; set them once in VRChat after loading.",
       "title": "VRChat camera paths"
@@ -308,11 +314,34 @@
     },
     "wave-nav": {
       "body": "The waveform is the seek surface: click anywhere to jump there, scroll the mouse wheel to zoom around the cursor (up to 50×), and drag to pan while zoomed. + / − / Fit do the same from the buttons. Violet lines are track starts from the session tracklist, amber is the last fader-down, and colored lines on library tracks are your DJ cue points.\n\nThe two chips overlaying the waveform teach as you go: the left one shows the source encoding (hover for codec, sample rate, bitrate and file size), the right one the track's integrated loudness (hover for the full EBU R128 story - integrated vs momentary, streaming targets, true peak). The readout next to the zoom buttons follows your cursor with the time and the momentary loudness at that exact position.\n\nIn edit mode the strip gains three pointer lanes: the top edge drags the IN handle, the bottom edge drags OUT, and the middle stays click-to-seek - so you can audition and trim without ever leaving the waveform.",
+      "k": {
+        "click": "Jump / seek to that position",
+        "wheel": "Zoom around the cursor (up to 50×)",
+        "drag": "Pan while zoomed"
+      },
       "title": "Waveform navigation"
     },
     "cue-edit": {
       "title": "Cue editor — keys & mouse",
-      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid. Drag selects drops as well as cues; click a marker to select just it, Ctrl+click toggles single markers in and out of the selection, and Del (or Backspace) deletes every selected cue and drop in one go — library, change journal and file tag all follow."
+      "body": "←/→ move the beat cursor by one beat; Shift+←/→ jump by the beat-jump size; Shift+↑/↓ change that size (1–64 beats). T or Enter drops a DROP marker at the cursor; Shift+T / Shift+Enter removes the nearest one. Drops persist to the library AND into the file tag (MP3/FLAC), so they survive re-imports and machine moves. Mouse: click the waveform to move the cursor (beat-snapped); drag to rubber-band-select cues — save a selection as a named pattern, anchored at the nearest drop. Keys work only in this view while the window is focused, never while typing in a field. In the Collection list, ↑/↓ walk tracks. Hold SPACE to audition from the cursor — release stops, press again restarts from the cursor. Ctrl+←/→ shifts the whole beatgrid by 10 ms for manual alignment (Ctrl+Shift = 1 ms; hold for continuous travel) — slow enough to land the grid exactly on a beat. Numbers along the top of the waveform show the beat distance between neighbouring cues and drops. Tick checkboxes in the list to mass-apply the assigned patterns via the bar below. Mouse: left-click moves the beat cursor, right-click adds a memory cue, Shift+right-click adds a drop, Ctrl+right-click removes markers at that beat. Grid nudges move cues and drops along with the grid. Drag selects drops as well as cues; click a marker to select just it, Ctrl+click toggles single markers in and out of the selection, and Del (or Backspace) deletes every selected cue and drop in one go — library, change journal and file tag all follow.",
+      "k": {
+        "step": "Move the beat cursor one beat",
+        "jump": "Beat-jump by the jump size",
+        "jumpSize": "Change the beat-jump size (1–64 beats)",
+        "addDrop": "Add a DROP marker at the cursor",
+        "removeDrop": "Remove the nearest drop",
+        "deleteSel": "Delete every selected cue and drop",
+        "audition": "Hold to audition from the cursor; release stops",
+        "nudge": "Nudge the whole beatgrid 10 ms (cues + drops follow)",
+        "nudgeFine": "Nudge the beatgrid 1 ms (ultra-fine)",
+        "listNav": "Walk tracks in the Collection list",
+        "click": "Move the beat cursor (beat-snapped); on a marker: select it",
+        "drag": "Rubber-band-select cues and drops",
+        "ctrlClick": "Toggle a cue/drop in or out of the selection",
+        "rclick": "Add a memory cue at that beat",
+        "srclick": "Add a drop marker",
+        "crclick": "Remove cue + drop markers at that beat"
+      }
     },
     "midi-drv-filter": {
       "title": "Fan-out message filter",

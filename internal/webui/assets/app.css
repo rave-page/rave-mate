@@ -356,6 +356,44 @@ body {
   color: var(--rp-muted);
   padding-bottom: 8px;
 }
+/* ── keybind grid (tooltip.go kbRow) - key-cap chips → action, two columns ── */
+.tt-kb {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: baseline;
+  margin: 2px 14px 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rp-faint);
+}
+.tt-kb-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.tt-kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--rp-fg);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--rp-border, #3c414d);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+.tt-kb-sep {
+  font-size: 10px;
+  color: var(--rp-muted);
+}
+.tt-kb-act {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--rp-muted);
+}
 .tt-links {
   display: flex;
   flex-wrap: wrap;
