@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include <ntddk.h>
 #include "framer.h"
 
 VOID RaveFramerInit(_Out_ RAVE_FRAMER* f)

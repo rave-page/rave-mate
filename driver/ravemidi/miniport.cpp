@@ -3,6 +3,9 @@
 #include "miniport.h"
 #include "managed.h"
 
+// ntddk-only export (portcls pulls wdm.h); prototype matches ntddk.h exactly.
+extern "C" NTKERNELAPI HANDLE NTAPI PsGetCurrentProcessId(VOID);
+
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 
 // -------- data ranges (layout dictated by KSDATARANGE_MUSIC / KSDATAFORMAT) ----
