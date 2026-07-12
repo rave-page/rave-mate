@@ -38,8 +38,10 @@ type ceSt struct {
 	drops    []float64
 	cursorMs float64
 	jump     float64      // Shift+arrow beat-jump size
-	sel      map[int]bool // selected indexes into track.Cues
-	dsel     map[int]bool // selected indexes into drops
+	sel      map[int]bool   // DERIVED index view of selMs (into track.Cues) - rebuilt by syncSel
+	dsel     map[int]bool   // DERIVED index view of dselMs (into drops)
+	selMs    map[int64]bool // persistent cue selection by rounded ms (survives reload + track nav)
+	dselMs   map[int64]bool // persistent drop selection by rounded ms
 	dragA    float64      // rubber band anchor (axis ms; <0 idle)
 	dragB    float64
 	dragMods string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
@@ -72,9 +74,54 @@ func (u *UI) ce() *ceSt {
 	u.ceMu.Lock()
 	defer u.ceMu.Unlock()
 	if u.ceState == nil {
-		u.ceState = &ceSt{jump: 4, dragA: -1, dragB: -1}
+		u.ceState = &ceSt{jump: 4, dragA: -1, dragB: -1,
+			sel: map[int]bool{}, dsel: map[int]bool{}, selMs: map[int64]bool{}, dselMs: map[int64]bool{},
+			assign: map[int]string{}}
 	}
 	return u.ceState
+}
+
+// ceKeyMs rounds a position to a stable ms key for the persistent selection sets.
+func ceKeyMs(ms float64) int64 { return int64(math.Round(ms)) }
+
+// syncSel rebuilds the derived index selection (sel/dsel) from the persistent ms sets against
+// the current track - so a selection survives reload, drop add/remove and track nav. c LOCKED.
+func (c *ceSt) syncSel() {
+	sel := map[int]bool{}
+	for i, q := range c.track.Cues {
+		if q.Kind != musiclib.CueGrid && c.selMs[ceKeyMs(q.StartMs)] {
+			sel[i] = true
+		}
+	}
+	dsel := map[int]bool{}
+	for i, d := range c.drops {
+		if c.dselMs[ceKeyMs(d)] {
+			dsel[i] = true
+		}
+	}
+	c.sel, c.dsel = sel, dsel
+}
+
+// selectOnly replaces the persistent selection with one marker (cueMs OR dropMs; pass <0 for the
+// unused kind). c LOCKED.
+func (c *ceSt) selectOnly(cueMs, dropMs float64) {
+	c.selMs, c.dselMs = map[int64]bool{}, map[int64]bool{}
+	if cueMs >= 0 {
+		c.selMs[ceKeyMs(cueMs)] = true
+	}
+	if dropMs >= 0 {
+		c.dselMs[ceKeyMs(dropMs)] = true
+	}
+	c.syncSel()
+}
+
+// ceToggleKey flips a key in a selection set (delete when turning off, so stale keys don't linger).
+func ceToggleKey(m map[int64]bool, k int64) {
+	if m[k] {
+		delete(m, k)
+	} else {
+		m[k] = true
+	}
 }
 
 // ceActiveFor reports whether the cue editor owns the host's pointer surface.
@@ -162,12 +209,14 @@ func (u *UI) ceEnter(path string) {
 	c.mu.Lock()
 	c.active, c.path, c.track, c.grid = true, path, tr, grid
 	c.drops, c.cursorMs = drops, cursor
-	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
 	c.dragA, c.dragB = -1, -1
-	c.assign = map[int]string{}
+	if c.assign == nil {
+		c.assign = map[int]string{}
+	}
 	c.report, c.lastErr = nil, ""
 	c.wbApplied, c.wbBusy, c.wbErr = nil, false, ""
 	c.fileTag = tagwrite.Supported(path)
+	c.syncSel() // keep the persistent selection + drop→pattern assignment; re-derive vs the new track
 	c.mu.Unlock()
 	// the editing surface (full-width wave + batch bar) mounts in Collection
 	u.mu.Lock()
@@ -247,7 +296,7 @@ func (u *UI) ceReloadTrack() {
 	}
 	c.mu.Lock()
 	c.track = tr
-	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
+	c.syncSel()
 	c.mu.Unlock()
 }
 
@@ -321,10 +370,11 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	}
 	if remove {
 		c.drops = cuepattern.RemoveDrop(c.drops, ms)
+		delete(c.dselMs, ceKeyMs(ms)) // drop gone from the persistent selection
 	} else {
 		c.drops = cuepattern.AddDrop(c.drops, ms)
 	}
-	c.dsel = map[int]bool{} // drop indexes shifted
+	c.syncSel() // drop indexes shifted - re-derive from the ms sets
 	path, tr := c.path, c.track
 	drops := append([]float64(nil), c.drops...)
 	fileTag := c.fileTag
@@ -413,7 +463,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	}
 	if dropsChanged {
 		c.drops = kept
-		c.dsel = map[int]bool{} // drop indexes shifted
+		c.syncSel() // drop indexes shifted - re-derive from the ms sets
 	}
 	drops := append([]float64(nil), c.drops...)
 	c.mu.Unlock()
@@ -450,15 +500,17 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	}
 }
 
-// ceSurf handles the waveform pointer stream while the editor owns it: click = move
-// cursor (beat-snapped) or select the marker under it, Ctrl+click = toggle a marker
-// in/out of the selection, drag = rubber-band select cues + drops.
+// ceSurf handles the waveform pointer stream while the editor owns it. Plain left-drag PANS
+// the waveform (scroll only - never moves the cursor/playhead); a plain click positions the
+// beat cursor or selects the marker under it (Ctrl+click toggles it in/out of the selection).
+// SHIFT+drag rubber-band-selects cues + drops. Right button = memory cue / drop (Shift) /
+// remove (Ctrl). Selection is held by ms (survives track nav + drop edits) via selMs/dselMs.
 func (u *UI) ceSurf(host, val string) {
 	phase, fx, ok := mpPos(val)
 	if !ok {
 		return
 	}
-	mods := "" // 3rd CSV field of the left-down value ("down:fx,fy,cs"; shell.go)
+	mods := "" // 3rd CSV field of the left-down value ("down:fx,fy,cs"; shell.go) - press only
 	if p := strings.SplitN(val, ",", 3); len(p) == 3 {
 		mods = p[2]
 	}
@@ -486,68 +538,102 @@ func (u *UI) ceSurf(host, val string) {
 		u.ceRemoveAt(axisMs, beatMs/2)
 		return
 	}
+
+	// classify the gesture: SHIFT at press = rubber-band select; anything else = pan.
 	c.mu.Lock()
+	selecting := c.dragA >= 0
+	if phase == "down" {
+		selecting = strings.Contains(mods, "s")
+		c.dragMods = mods
+		if !selecting {
+			c.dragA, c.dragB = -1, -1 // plain press: clear any stale rubber-band
+		}
+	}
+	c.mu.Unlock()
+
+	if selecting { // SHIFT+drag: rubber-band select (cursor untouched)
+		c.mu.Lock()
+		switch phase {
+		case "down":
+			c.dragA, c.dragB = axisMs, axisMs
+		case "move":
+			if c.dragA >= 0 {
+				c.dragB = axisMs
+			}
+		case "up":
+			a, b := c.dragA, c.dragB
+			c.dragA, c.dragB = -1, -1
+			if a >= 0 {
+				if b < a {
+					a, b = b, a
+				}
+				c.selMs, c.dselMs = map[int64]bool{}, map[int64]bool{}
+				for _, cue := range c.track.Cues {
+					if cue.Kind != musiclib.CueGrid && cue.StartMs >= a && cue.StartMs <= b {
+						c.selMs[ceKeyMs(cue.StartMs)] = true
+					}
+				}
+				for _, d := range c.drops {
+					if d >= a && d <= b {
+						c.dselMs[ceKeyMs(d)] = true
+					}
+				}
+				c.syncSel()
+			}
+		}
+		c.mu.Unlock()
+		u.cePatchWave()
+		if phase == "up" {
+			u.cePatchRail()
+		}
+		return
+	}
+
+	// plain: drag pans the view (cursor untouched); a click positions the cursor / selects a marker
 	switch phase {
-	case "down":
-		c.dragA, c.dragB, c.dragMods = axisMs, axisMs, mods
 	case "move":
-		if c.dragA >= 0 {
-			c.dragB = axisMs
-		}
+		u.mpMoveCoalesce(host, "pan", fx)
+	case "down":
+		mpMoveCancel(host)
+		u.mpMut(host, func(v *mpSt) {
+			v.dragGen++
+			v.drag, v.dragAnchor, v.dragView, v.dragMoved = "pan", fx, v.viewStart, false
+		})
 	case "up":
-		a, b := c.dragA, c.dragB
-		downMods := c.dragMods
-		c.dragA, c.dragB, c.dragMods = -1, -1, ""
-		if a < 0 {
-			break
+		mpMoveCancel(host)
+		moved := false
+		nt := u.mpMut(host, func(v *mpSt) { moved = v.dragMoved; v.drag = "" })
+		if moved { // it was a pan - leave the cursor where it was
+			u.mpPatchWave(nt)
+			return
 		}
-		if b < a {
-			a, b = b, a
-		}
+		// click: marker select / cursor move (Ctrl+click toggles the marker under the pointer)
+		c.mu.Lock()
+		ctrl := strings.Contains(c.dragMods, "c")
 		beatMs := 500.0
 		if c.grid != nil {
 			beatMs = c.grid.BeatLenMs(axisMs)
 		}
-		if b-a < beatMs/2 { // click: marker select / toggle, else move the cursor
-			ci, di, dist := ceNearestMarker(c, axisMs)
-			hit := dist <= beatMs/2
-			switch {
-			case strings.Contains(downMods, "c"): // Ctrl+click: toggle marker in/out
-				if hit && ci >= 0 {
-					c.sel[ci] = !c.sel[ci]
-				} else if hit {
-					c.dsel[di] = !c.dsel[di]
-				}
-			case hit: // click on a marker: select it, replacing the selection
-				c.sel, c.dsel = map[int]bool{}, map[int]bool{}
-				if ci >= 0 {
-					c.sel[ci] = true
-				} else {
-					c.dsel[di] = true
-				}
-			default:
-				if c.grid != nil {
-					c.cursorMs = c.grid.SnapMs(axisMs)
-				}
-			}
-			break
-		}
-		// drag: select cues + drops inside [a,b]
-		c.sel, c.dsel = map[int]bool{}, map[int]bool{}
-		for i, cue := range c.track.Cues {
-			if cue.StartMs >= a && cue.StartMs <= b && cue.Kind != musiclib.CueGrid {
-				c.sel[i] = true
+		ci, di, dist := ceNearestMarker(c, axisMs)
+		hit := dist <= beatMs/2
+		switch {
+		case ctrl && hit && ci >= 0:
+			ceToggleKey(c.selMs, ceKeyMs(c.track.Cues[ci].StartMs))
+			c.syncSel()
+		case ctrl && hit && di >= 0:
+			ceToggleKey(c.dselMs, ceKeyMs(c.drops[di]))
+			c.syncSel()
+		case hit && ci >= 0:
+			c.selectOnly(c.track.Cues[ci].StartMs, -1)
+		case hit:
+			c.selectOnly(-1, c.drops[di])
+		default:
+			if c.grid != nil {
+				c.cursorMs = c.grid.SnapMs(axisMs)
 			}
 		}
-		for i, d := range c.drops {
-			if d >= a && d <= b {
-				c.dsel[i] = true
-			}
-		}
-	}
-	c.mu.Unlock()
-	u.cePatchWave()
-	if phase == "up" {
+		c.mu.Unlock()
+		u.cePatchWave()
 		u.cePatchRail()
 	}
 }
@@ -602,6 +688,7 @@ func (u *UI) ceDeleteSelected() {
 	var cues []musiclib.CuePoint
 	for i, q := range tr.Cues {
 		if c.sel[i] {
+			delete(c.selMs, ceKeyMs(q.StartMs))
 			continue
 		}
 		cues = append(cues, q)
@@ -609,12 +696,13 @@ func (u *UI) ceDeleteSelected() {
 	drops := c.drops[:0:0]
 	for i, d := range c.drops {
 		if c.dsel[i] {
+			delete(c.dselMs, ceKeyMs(d))
 			continue
 		}
 		drops = append(drops, d)
 	}
 	c.drops = drops
-	c.sel, c.dsel = map[int]bool{}, map[int]bool{}
+	c.syncSel()
 	dropsCopy := append([]float64(nil), drops...)
 	if nd > 0 && fileTag {
 		if c.tagTimer != nil {
@@ -645,13 +733,11 @@ func (u *UI) ceDeleteSelected() {
 	u.toast(i18n.T("library.ce.deletedToast", i18n.A{"cues": fmt.Sprint(nc), "drops": fmt.Sprint(nd)}))
 }
 
-// ceSavePattern exports the selected cues as a named pattern anchored at the cursor.
+// ceSavePattern exports the selected cues as a reusable pattern, anchored at the nearest drop
+// (else the cursor). Frictionless: an empty name is auto-generated from the track, and the saved
+// pattern is assigned to its anchor drop so it's immediately ready to apply.
 func (u *UI) ceSavePattern(name string) {
 	name = strings.TrimSpace(name)
-	if name == "" {
-		u.toast(i18n.T("library.ce.nameNeeded"))
-		return
-	}
 	st := u.cePatterns()
 	if st == nil {
 		return
@@ -665,23 +751,61 @@ func (u *UI) ceSavePattern(name string) {
 		}
 	}
 	sort.Ints(idx)
+	if len(idx) == 0 {
+		c.mu.Unlock()
+		u.toast(i18n.T("library.ce.noCuesSel"))
+		return
+	}
 	anchor := c.cursorMs
-	if di := cuepattern.NearestDrop(c.drops, anchor); di >= 0 {
-		anchor = c.drops[di] // prefer the nearest drop as the anchor
+	dropIdx := cuepattern.NearestDrop(c.drops, anchor)
+	if dropIdx >= 0 {
+		anchor = c.drops[dropIdx] // prefer the nearest drop as the anchor
 	}
 	tr := c.track
+	if name == "" {
+		name = ceDefaultPatternName(tr, st)
+	}
 	c.mu.Unlock()
 	p, err := cuepattern.Extract(tr, idx, anchor, name)
 	if err != nil {
 		u.toast(err.Error())
 		return
 	}
-	if _, err := st.Save(p); err != nil {
+	saved, err := st.Save(p)
+	if err != nil {
 		u.toast(i18n.T("library.ce.saveFailed") + err.Error())
 		return
 	}
-	u.toast(i18n.T("library.ce.patternSaved", i18n.A{"name": name, "n": fmt.Sprint(len(p.Cues))}))
+	// frictionless: assign the just-saved pattern to its anchor drop, ready to apply
+	c.mu.Lock()
+	if dropIdx >= 0 {
+		if c.assign == nil {
+			c.assign = map[int]string{}
+		}
+		c.assign[dropIdx] = saved.ID
+	}
+	c.patName = ""
+	c.mu.Unlock()
+	u.toast(i18n.T("library.ce.patternSaved", i18n.A{"name": name, "n": fmt.Sprint(len(saved.Cues))}))
 	u.cePatchRail()
+}
+
+// ceDefaultPatternName auto-names a pattern from its source track, de-duped against existing
+// names so re-saving from the same track stays distinct.
+func ceDefaultPatternName(tr musiclib.Track, st *cuepattern.Store) string {
+	base := strings.TrimSpace(trackTitle(tr))
+	if base == "" {
+		base = i18n.T("library.ce.patternFallback")
+	}
+	existing := map[string]bool{}
+	for _, p := range st.List() {
+		existing[p.Name] = true
+	}
+	name := base
+	for i := 2; existing[name]; i++ {
+		name = fmt.Sprintf("%s (%d)", base, i)
+	}
+	return name
 }
 
 // ceApply lays the assigned patterns around the drops and persists the cue list.
@@ -918,11 +1042,22 @@ func (u *UI) ceGridShift(deltaMs float64) {
 		drops[i] = d + deltaMs
 	}
 	c.track.Beatgrid, c.track.Cues, c.drops = grid, cues, drops
+	// the persistent selection is keyed by ms - shift it with the markers so it stays glued
+	d := int64(math.Round(deltaMs))
+	shiftKeys := func(m map[int64]bool) map[int64]bool {
+		ns := make(map[int64]bool, len(m))
+		for k := range m {
+			ns[k+d] = true
+		}
+		return ns
+	}
+	c.selMs, c.dselMs = shiftKeys(c.selMs), shiftKeys(c.dselMs)
 	c.wbApplied, c.wbErr = nil, "" // cue positions moved - earlier software writes are stale
 	if g, err := cuepattern.NewGrid(grid, c.track.DurationSec*1000); err == nil {
 		c.grid = g
 		c.cursorMs = g.SnapMs(c.cursorMs + deltaMs)
 	}
+	c.syncSel()
 	tr, path, fileTag := c.track, c.path, c.fileTag
 	dropsCopy := append([]float64(nil), drops...)
 	if c.tagTimer != nil {

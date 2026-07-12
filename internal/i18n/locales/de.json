@@ -312,8 +312,19 @@
     "cue-edit": {
       "title": "Cue-Editor – Tasten & Maus",
       "body": "←/→ bewegt den Beat-Cursor um einen Beat; Shift+←/→ springt um die Beat-Jump-Größe; Shift+↑/↓ ändert diese Größe (1–64 Beats). T oder Enter setzt einen DROP-Marker am Cursor; Shift+T / Shift+Enter entfernt den nächstgelegenen. Drops landen in der Bibliothek UND im Datei-Tag (MP3/FLAC) und überleben so Re-Importe und Rechnerwechsel. Maus: Klick auf die Wellenform bewegt den Cursor (beat-genau); Ziehen wählt Cues per Gummiband aus – eine Auswahl lässt sich als benanntes Pattern speichern, verankert am nächsten Drop. Die Tasten wirken nur in dieser Ansicht bei fokussiertem Fenster, nie beim Tippen in ein Feld. In der Sammlungsliste laufen ↑/↓ durch die Tracks. SPACE gedrückt halten spielt ab dem Cursor vor – Loslassen stoppt, erneutes Drücken startet wieder am Cursor. Strg+←/→ verschiebt das gesamte Beatgrid um 10 ms zur manuellen Ausrichtung (Strg+Umschalt = 1 ms; gedrückt halten für kontinuierliche Bewegung) – fein genug, um das Grid exakt auf einen Beat zu legen. Zahlen am oberen Rand der Wellenform zeigen den Beat-Abstand zwischen benachbarten Cues und Drops. Haken in der Liste setzen, um die zugewiesenen Patterns über die Leiste unten massenhaft anzuwenden. Maus: Linksklick bewegt den Beat-Cursor, Rechtsklick setzt einen Memory-Cue, Shift+Rechtsklick einen Drop, Strg+Rechtsklick entfernt Marker an diesem Beat. Beim Verschieben des Grids wandern Cues und Drops mit. Der Auswahlrahmen erfasst neben Cues auch Drops; ein Klick auf einen Marker wählt nur ihn aus, Strg+Klick nimmt einzelne Marker in die Auswahl auf oder heraus, und Entf (oder Rücktaste) löscht alle ausgewählten Cues und Drops auf einmal — Bibliothek, Änderungsjournal und Datei-Tag ziehen mit.",
+      "g": {
+        "nav": "Navigieren",
+        "wave": "Wellenform",
+        "drops": "Drops",
+        "cues": "Cues",
+        "select": "Auswaehlen",
+        "grid": "Grid-Ausrichtung",
+        "audition": "Vorhoeren"
+      },
       "k": {
         "step": "Beat-Cursor um einen Beat bewegen",
+        "pan": "Wellenform scrollen (ziehen)",
+        "zoom": "Auf den Playhead zoomen",
         "jump": "Beat-Jump um die Sprunggröße",
         "jumpSize": "Sprunggröße ändern (1–64 Beats)",
         "addDrop": "DROP-Marker am Cursor setzen",
@@ -1108,6 +1119,8 @@
       "deletedToast": "{cues} Cues + {drops} Drops entfernt",
       "patternName": "Pattern-Name…",
       "savePattern": "Als Pattern speichern",
+      "noCuesSel": "Zuerst Cues auswaehlen - Shift-ziehen ueber sie in der Welle.",
+      "patternFallback": "Muster",
       "applyHot": "Patterns anwenden (Hotcues)",
       "applyMem": "Als Memory-Cues anwenden",
       "convertAll": "Alle Hotcues → Memory-Cues umwandeln",

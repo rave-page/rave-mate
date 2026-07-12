@@ -939,13 +939,13 @@ func init() {
 	onPrefix("mp-hout:", func(u *UI, m actMsg) { u.mpHandle(m.arg("mp-hout:"), "out", m.Val) })
 	onPrefix("mp-zoomw:", func(u *UI, m actMsg) {
 		host := m.arg("mp-zoomw:")
-		dir, fx, ok := mpPos(m.Val)
+		dir, _, ok := mpPos(m.Val)
 		if ok {
-			u.mpZoomAt(host, dir == "in", fx)
+			u.mpZoomAtPlayhead(host, dir == "in") // zoom on the playhead, not the mouse
 		}
 	})
-	onPrefix("mp-zin:", func(u *UI, m actMsg) { u.mpZoomAt(m.arg("mp-zin:"), true, 0.5) })
-	onPrefix("mp-zout:", func(u *UI, m actMsg) { u.mpZoomAt(m.arg("mp-zout:"), false, 0.5) })
+	onPrefix("mp-zin:", func(u *UI, m actMsg) { u.mpZoomAtPlayhead(m.arg("mp-zin:"), true) })
+	onPrefix("mp-zout:", func(u *UI, m actMsg) { u.mpZoomAtPlayhead(m.arg("mp-zout:"), false) })
 	onPrefix("mp-fit:", func(u *UI, m actMsg) {
 		t := u.mpMut(m.arg("mp-fit:"), func(v *mpSt) { v.viewStart, v.viewSpan = 0, 1 })
 		u.mpPatchWave(t)
@@ -1333,6 +1333,32 @@ func (u *UI) mpZoomAt(host string, zoomIn bool, fx float64) {
 	if len(t.media) > 0 {
 		u.mpPatchWave(t)
 	}
+}
+
+// mpZoomAtPlayhead zooms keeping the playhead stationary (in cue-edit the beat cursor, else the
+// last click, else the view centre) rather than the mouse - so +/-/wheel zoom in on where you're
+// working, not where the pointer happens to be.
+func (u *UI) mpZoomAtPlayhead(host string, zoomIn bool) {
+	t := u.mpSnap(host)
+	fx := 0.5
+	if lo, ln := t.axis(); ln > 0 && t.viewSpan > 0 {
+		anchorSec := math.Inf(-1)
+		switch {
+		case mpIsSet(u.mpPlayheadAxis(&t)):
+			anchorSec = u.mpPlayheadAxis(&t)
+		case u.ceActiveFor(host):
+			c := u.ce()
+			c.mu.Lock()
+			anchorSec = c.cursorMs / 1000
+			c.mu.Unlock()
+		case mpIsSet(t.cursorSec):
+			anchorSec = t.cursorSec
+		}
+		if !math.IsInf(anchorSec, -1) {
+			fx = clampF(((anchorSec-lo)/ln-t.viewStart)/t.viewSpan, 0, 1)
+		}
+	}
+	u.mpZoomAt(host, zoomIn, fx)
 }
 
 // mpHover updates the time + momentary-LUFS readout ("at:fx,fy" / "off").

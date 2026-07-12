@@ -312,8 +312,19 @@
     "cue-edit": {
       "title": "Éditeur de cues — clavier & souris",
       "body": "←/→ déplace le curseur d'un beat ; Maj+←/→ saute de la taille du beat-jump ; Maj+↑/↓ modifie cette taille (1–64 beats). T ou Entrée pose un marqueur DROP au curseur ; Maj+T / Maj+Entrée supprime le plus proche. Les drops sont conservés dans la bibliothèque ET dans le tag du fichier (MP3/FLAC) : ils survivent aux réimports et aux changements de machine. Souris : cliquez sur la forme d'onde pour déplacer le curseur (calé sur les beats) ; faites glisser pour sélectionner des cues au lasso — une sélection peut être enregistrée comme pattern nommé, ancré au drop le plus proche. Les touches n'agissent que dans cette vue, fenêtre au premier plan, jamais pendant la saisie. Dans la liste de la collection, ↑/↓ parcourt les morceaux. Maintenez ESPACE pour pré-écouter depuis le curseur — relâcher arrête, rappuyer repart du curseur. Ctrl+←/→ décale toute la beatgrid de 10 ms pour l'alignement manuel (Ctrl+Maj = 1 ms ; maintenir pour un déplacement continu) — assez fin pour poser la grille exactement sur un beat. Les nombres en haut de la forme d'onde indiquent la distance en temps entre cues et drops voisins. Cochez des pistes dans la liste pour appliquer en masse les patterns assignés via la barre en bas. Souris : clic gauche déplace le curseur de beat, clic droit ajoute un cue mémoire, Maj+clic droit un drop, Ctrl+clic droit supprime les marqueurs sur ce temps. Le décalage de la grille déplace aussi les cues et les drops. Le lasso sélectionne aussi les drops en plus des cues ; un clic sur un marqueur ne sélectionne que lui, Ctrl+clic ajoute ou retire des marqueurs individuels de la sélection, et Suppr (ou Retour arrière) supprime d'un coup tous les cues et drops sélectionnés — bibliothèque, journal des modifications et tag du fichier suivent.",
+      "g": {
+        "nav": "Naviguer",
+        "wave": "Onde",
+        "drops": "Drops",
+        "cues": "Cues",
+        "select": "Selection",
+        "grid": "Alignement grille",
+        "audition": "Ecoute"
+      },
       "k": {
         "step": "Déplacer le curseur de beat d'un temps",
+        "pan": "Faire defiler l'onde (glisser)",
+        "zoom": "Zoomer sur la tete de lecture",
         "jump": "Saut de beats selon la taille de saut",
         "jumpSize": "Changer la taille de saut (1–64 temps)",
         "addDrop": "Ajouter un marqueur DROP au curseur",
@@ -1108,6 +1119,8 @@
       "deletedToast": "{cues} cues + {drops} drops supprimés",
       "patternName": "Nom du pattern…",
       "savePattern": "Enregistrer comme pattern",
+      "noCuesSel": "Selectionnez d'abord des cues - Maj+glisser dessus sur l'onde.",
+      "patternFallback": "Motif",
       "applyHot": "Appliquer les patterns (hotcues)",
       "applyMem": "Appliquer en memory cues",
       "convertAll": "Convertir tous les hotcues → memory cues",

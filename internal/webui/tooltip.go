@@ -35,6 +35,7 @@ type ttLink struct {
 // entry resolves at render time (localized mouse-gesture words like "Right-click"),
 // anything else is a literal, locale-independent key label (←, Shift, Del, T).
 type kbRow struct {
+	Group string   // i18n key of the section header, shown when it changes ("" = same section)
 	Combo []string
 	Act   string // i18n key of the action description (resolved at render)
 }
@@ -345,29 +346,32 @@ var helpTopics = map[string]helpTopic{
 // atop the cue-edit tooltip. Order mirrors the workflow: navigate → mark → select →
 // delete → audition → grid alignment.
 var cueEditKeys = []kbRow{
-	{[]string{"←", "/", "→"}, "help.cue-edit.k.step"},
-	{[]string{"Shift", "+", "←", "/", "→"}, "help.cue-edit.k.jump"},
-	{[]string{"Shift", "+", "↑", "/", "↓"}, "help.cue-edit.k.jumpSize"},
-	{[]string{"T", "/", "Enter"}, "help.cue-edit.k.addDrop"},
-	{[]string{"Shift", "+", "T", "/", "Enter"}, "help.cue-edit.k.removeDrop"},
-	{[]string{"Del", "/", "Backspace"}, "help.cue-edit.k.deleteSel"},
-	{[]string{"Space"}, "help.cue-edit.k.audition"},
-	{[]string{"Ctrl", "+", "←", "/", "→"}, "help.cue-edit.k.nudge"},
-	{[]string{"Ctrl", "+", "Shift", "+", "←", "/", "→"}, "help.cue-edit.k.nudgeFine"},
-	{[]string{"↑", "/", "↓"}, "help.cue-edit.k.listNav"},
-	{[]string{"@help.kb.click"}, "help.cue-edit.k.click"},
-	{[]string{"@help.kb.drag"}, "help.cue-edit.k.drag"},
-	{[]string{"Ctrl", "+", "@help.kb.click"}, "help.cue-edit.k.ctrlClick"},
-	{[]string{"@help.kb.rclick"}, "help.cue-edit.k.rclick"},
-	{[]string{"Shift", "+", "@help.kb.rclick"}, "help.cue-edit.k.srclick"},
-	{[]string{"Ctrl", "+", "@help.kb.rclick"}, "help.cue-edit.k.crclick"},
+	// grouped by use context; the first row of each group carries the section header
+	{"help.cue-edit.g.nav", []string{"←", "/", "→"}, "help.cue-edit.k.step"},
+	{"", []string{"Shift", "+", "←", "/", "→"}, "help.cue-edit.k.jump"},
+	{"", []string{"Shift", "+", "↑", "/", "↓"}, "help.cue-edit.k.jumpSize"},
+	{"", []string{"↑", "/", "↓"}, "help.cue-edit.k.listNav"},
+	{"help.cue-edit.g.wave", []string{"@help.kb.drag"}, "help.cue-edit.k.pan"},
+	{"", []string{"@help.kb.wheel"}, "help.cue-edit.k.zoom"},
+	{"", []string{"@help.kb.click"}, "help.cue-edit.k.click"},
+	{"help.cue-edit.g.drops", []string{"T", "/", "Enter"}, "help.cue-edit.k.addDrop"},
+	{"", []string{"Shift", "+", "T", "/", "Enter"}, "help.cue-edit.k.removeDrop"},
+	{"", []string{"Shift", "+", "@help.kb.rclick"}, "help.cue-edit.k.srclick"},
+	{"help.cue-edit.g.cues", []string{"@help.kb.rclick"}, "help.cue-edit.k.rclick"},
+	{"", []string{"Ctrl", "+", "@help.kb.rclick"}, "help.cue-edit.k.crclick"},
+	{"help.cue-edit.g.select", []string{"Shift", "+", "@help.kb.drag"}, "help.cue-edit.k.drag"},
+	{"", []string{"Ctrl", "+", "@help.kb.click"}, "help.cue-edit.k.ctrlClick"},
+	{"", []string{"Del", "/", "Backspace"}, "help.cue-edit.k.deleteSel"},
+	{"help.cue-edit.g.grid", []string{"Ctrl", "+", "←", "/", "→"}, "help.cue-edit.k.nudge"},
+	{"", []string{"Ctrl", "+", "Shift", "+", "←", "/", "→"}, "help.cue-edit.k.nudgeFine"},
+	{"help.cue-edit.g.audition", []string{"Space"}, "help.cue-edit.k.audition"},
 }
 
 // waveNavKeys - the waveform pointer gestures (wave-nav tooltip grid).
 var waveNavKeys = []kbRow{
-	{[]string{"@help.kb.click"}, "help.wave-nav.k.click"},
-	{[]string{"@help.kb.wheel"}, "help.wave-nav.k.wheel"},
-	{[]string{"@help.kb.drag"}, "help.wave-nav.k.drag"},
+	{"", []string{"@help.kb.click"}, "help.wave-nav.k.click"},
+	{"", []string{"@help.kb.wheel"}, "help.wave-nav.k.wheel"},
+	{"", []string{"@help.kb.drag"}, "help.wave-nav.k.drag"},
 }
 
 // virtualMIDILinks is the shared list of virtual-MIDI-port options. loopMIDI is the recommended
@@ -421,6 +425,16 @@ func kbChips(combo []string) string {
 	return b.String()
 }
 
+// kbEmph emphasises the leading keyword (the verb) of an action label - language-agnostic, so
+// no per-string markup is needed in the catalogs.
+func kbEmph(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, " \t"); i > 0 {
+		return `<b class=tt-kb-verb>` + html.EscapeString(s[:i]) + `</b>` + html.EscapeString(s[i:])
+	}
+	return `<b class=tt-kb-verb>` + html.EscapeString(s) + `</b>`
+}
+
 func renderTip(id, title, body string, keys []kbRow, links []ttLink) string {
 	var b strings.Builder
 	b.WriteString(`<label class=tt data-label="tt-` + html.EscapeString(id) + `" aria-label="About: ` + html.EscapeString(title) + `" tabindex=0>`)
@@ -433,11 +447,16 @@ func renderTip(id, title, body string, keys []kbRow, links []ttLink) string {
 	// (shell.go) flips/clamps both.
 	b.WriteString(`<span class=tt-card role=tooltip><span class=tt-in>`)
 	b.WriteString(`<b class=tt-title>` + html.EscapeString(title) + `</b>`)
-	if len(keys) > 0 { // keybind grid: combo chips → action, two columns
+	if len(keys) > 0 { // keybind grid: section header + (combo chips → action) rows, two columns
 		b.WriteString(`<span class=tt-kb>`)
+		curGroup := ""
 		for _, r := range keys {
+			if r.Group != "" && r.Group != curGroup {
+				curGroup = r.Group
+				b.WriteString(`<span class=tt-kb-group>` + html.EscapeString(i18n.T(r.Group)) + `</span>`)
+			}
 			b.WriteString(`<span class=tt-kb-keys>` + kbChips(r.Combo) + `</span>` +
-				`<span class=tt-kb-act>` + html.EscapeString(i18n.T(r.Act)) + `</span>`)
+				`<span class=tt-kb-act>` + kbEmph(i18n.T(r.Act)) + `</span>`)
 		}
 		b.WriteString(`</span>`)
 	}
