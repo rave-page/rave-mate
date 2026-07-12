@@ -111,3 +111,14 @@ Per software:
 
 Library-file targets are backed up into the standard backup folder before every write.
 After a write the button turns into a "written" note; changing any cue re-arms it.
+
+## Remote tracks (paired peer)
+
+"Prepare cues" inside a remote-controlled Library (Multi-PC → Remote Library) runs the editor
+**locally**: the peer's audio file is copied to this computer once (cached; progress dialog with
+cancel) and waveform, beat-walking, edits and audition audio all happen here — the link can even
+drop mid-edit without losing anything. Edits stay local until **Save cues to \<peer\>**, which
+writes cues + beatgrid + drops back into the peer's library and file tags. If the peer's cue
+data changed since you fetched the track, saving raises a conflict dialog (overwrite / re-fetch
+& discard / cancel). After a save, the write-back buttons target the DJ software installed on
+the **peer**. Playlist/folder cue-prep still executes on the peer.

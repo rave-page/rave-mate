@@ -555,7 +555,7 @@ func (u *UI) rceBody() string {
 	detail := u.libDetailWrap(s)
 	s.mu.Unlock()
 	return `<div class=ce-fullwave>` + u.ceWaveHTML() + `</div>` +
-		masterDetailWide(u.rceInfoHTML(), detail)
+		masterDetailWide(`<div id=rce-info>`+u.rceInfoHTML()+`</div>`, detail)
 }
 
 // rceInfoHTML is the left pane: whose track is being edited, where audio runs, session status.

@@ -41,6 +41,14 @@ database with the peer's CPU/GPU. Same layout, same features as sitting at that 
 
 - Audio auditioning is disabled remotely: nothing plays out loud on the peer, and its own
   player/inspector state is never touched by your session.
+- **Prepare cues is local-first**: opening the cue editor on a peer track copies the audio to
+  this computer (progress dialog; copies are cached, so a re-open is instant) and the full
+  editor runs HERE - waveform, beat-walking, drop/cue edits and audition audio all local,
+  surviving a link drop mid-edit. **Save cues to \<peer\>** writes the result back into the
+  peer's library and file tags; if the peer's cue data changed underneath you, a conflict
+  dialog offers overwrite / re-fetch / cancel. After a save you can push the cues into the DJ
+  software installed on the peer, same as the local write-back. (Playlist/folder cue-prep
+  still runs on the peer for now.)
 - Covers/thumbnails stream through a token-guarded media proxy; embedded video previews may
   be unavailable remotely. Native file dialogs - and anything else that would open on the
   peer's desktop (file/folder openers, external apps, browser sign-ins) - are refused.

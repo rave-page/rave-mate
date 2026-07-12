@@ -1700,10 +1700,14 @@ func (u *UI) cePatchWave() {
 	}
 }
 
-// cePatchRail re-renders the detail rail + the topbar readout above the waveform.
+// cePatchRail re-renders the detail rail + the topbar readout above the waveform
+// (+ the remote-session info card while in rce mode - its dirty chip tracks every edit).
 func (u *UI) cePatchRail() {
 	u.libPatchDetail()
 	u.eval("window.__patch('ce-topbar'," + jsQuote(u.ceTopbarHTML()) + ")")
+	if u.rceActive() {
+		u.eval("window.__patch('rce-info'," + jsQuote(u.rceInfoHTML()) + ")")
+	}
 }
 
 // ceBarBeat formats a cursor position as "bar.beat" from the first grid anchor.

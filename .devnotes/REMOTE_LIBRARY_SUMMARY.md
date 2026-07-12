@@ -48,6 +48,23 @@ webui ruiHub ── headless UI (virtualShell) ──── ruiHub ── Librar
   (UI,key); media tokens owner-tagged (per-owner evict, cap 128, purge on release).
 - **Rig/test seams** (`peerlink`): `RAVE_MATE_PEER_BIND` (loopback bind skips mDNS),
   `RAVE_MATE_PEER_PORTS`, `RAVE_MATE_PEER_SEED` (direct dial, 5s tick, same SAS trust flow).
+- **Local-first remote cue editing** (#89 P2, `webui/library_remotecue.go` +
+  `internal/remotecache`): `ce-open:<path>` from the mirror is the ONE act A intercepts instead
+  of forwarding (set flows ce-open-pl:/ce-open-dir stay forwarded, P3). Flow:
+  `library.trackDetail` → cache hit on (peer, path, mtime) or chunked `library.fileChunk` pull
+  (8 MiB, verbatim bytes - never transcode, so codec + CodecLeadSkipMs match; completion by
+  offset>=Total, EOF flag unreliable on exact-boundary ReadAt; mtime drift → restart once) into
+  `remote_cache/<peer[:8]>/<sha16(path)>-<mtime>-<base>` (.part+rename, LRU-by-mtime, 4 GiB cap,
+  knob = P3) → the NORMAL cue editor binds the CACHED path (`ceEnterRemote`) holding
+  `ceSt.rce{peer, remotePath, baseSHA}` - waveform/peaks/audition local via `mpEnsureFile`.
+  Every persistence hook branches on `c.rce` (drop add/remove, ceSetCues, delete-selected,
+  pattern apply, convert-all, grid shift, undo): mutations stay in ceSt, dirty = live
+  `CueStateSHA` vs baseline. Save rail → `library.writeCueData{BaseSHA}`; Conflict →
+  overwrite/re-fetch/cancel dialog; transport error keeps dirty + Retry; after save
+  `cueWriteTargets`/`writeCuesTo` buttons (gated while dirty). Peer trackchanged (mesh bus)
+  flags "peer state moved" (own-save echo filtered by Origin `peer:<selfNodeID>`), never
+  clobbers local edits; dirty close/target-switch confirm-discard; link drop loses nothing.
+  Track nav (↑/↓) + mass-apply inert in rce mode (local-collection concepts).
 
 ## Bounded buffers (cap + policy)
 
@@ -84,3 +101,6 @@ goroutines on B). Native pickers + chained control blocked in sessions.
 - Non-webview (Fyne) hosts don't serve sessions - controller shows the timeout hint.
 - gridfix engine not installed on the test rig: cockpit renders remotely, engine run not
   exercised (same code path as local run over B's Services).
+- P2 local-first cue editing is unit-tested (rce persistence branching, intercept, cache) but
+  not yet live-verified on the two-instance rig; P3 = set flows (ce-open-pl/ce-open-dir)
+  local-first + cache-size Settings knob (+ purge button over `remotecache.Purge`).
