@@ -27,9 +27,16 @@ and the Library inspector player. Host-keyed instances ("publish"/"library"), ac
 
 ## Waveform player (track detail → PLAYER)
 
-- `internal/worker/probe.go` `probe.peaks` - ffmpeg decodes audio to mono s16le 8 kHz,
-  folds into N uint8 max-abs buckets (default 8192). Cached per path+mtime
-  (`store.KindPeaks`, JSON `{d: durSec, p: peaks}`); batch "Waveforms" prerender uses it.
+- `internal/worker/probe.go` `probe.peaks` - ffmpeg decodes audio to mono s16le 16 kHz,
+  folds into N uint8 max-abs buckets + 3-byte spectral bands. `binRateHz>0` (webview passes
+  100) sizes N to the decoded duration → ~10 ms bins, capped `peaksMaxBuckets`=60000 (past
+  ~10 min the rate drops so a long set stays bounded); else fixed `buckets` (default 8192).
+  Cached per path+mtime (`store.KindPeaks`, `mpPeakBlob{d,p,b,rate,samp,lead,ver}`; ver=2).
+- Webview render `internal/webui/player.go` `mpWaveSVG` decimates the ~10 ms bins to
+  `mpWaveCols`(=800) columns (min/max per column; one-column-per-bin when zoomed past that →
+  razor-sharp) - O(viewport), not O(bins). Spectral bands = contiguous coloured columns (no
+  inter-bar gap); mono fallback = one filled envelope `<path>` split at the playhead by a
+  hard-stop gradient. Origin/scale (dur=samp/rate) unchanged → beatgrid alignment intact.
 - `internal/ui/waveform.go` `waveformView` - canvas.Raster widget:
   - peaks mirrored around center; played part brand-pink, playhead line follows ticks
   - **cue overlays** colored by `CueKind`: hot=pink, loop=violet (region shaded by LenMs),

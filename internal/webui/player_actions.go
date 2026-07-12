@@ -674,8 +674,9 @@ type mpPeakBlob struct {
 }
 
 // mpPeakContractVer bumps when the peaks decode contract changes (rate/format/added fields) so
-// blobs written by an older build are a cache-miss and re-decoded. 1 = rate/samp/lead added.
-const mpPeakContractVer = 1
+// blobs written by an older build are a cache-miss and re-decoded. 1 = rate/samp/lead added;
+// 2 = 10 ms duration-proportional binning (binRateHz) - old ~8192-bucket blobs re-decode fine.
+const mpPeakContractVer = 2
 
 func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, err error) {
 	var mtime int64
@@ -699,7 +700,9 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, e
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	raw, rerr := u.svc.Workers.RunBackground(ctx, "probe", "probe.peaks", map[string]any{"path": path, "buckets": 8192})
+	// binRateHz=100 → ~10 ms min/max bins (worker sizes the count to the decoded duration, capped
+	// at peaksMaxBuckets so a long set stays memory-safe). Fine detail for the zoomable strip.
+	raw, rerr := u.svc.Workers.RunBackground(ctx, "probe", "probe.peaks", map[string]any{"path": path, "binRateHz": 100})
 	if rerr != nil {
 		return 0, nil, nil, rerr
 	}

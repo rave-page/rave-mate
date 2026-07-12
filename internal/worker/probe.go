@@ -103,23 +103,29 @@ func waveformHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error
 // still cheap on multi-hour files.
 const peaksRate = 16000
 
+// peaksBinRateHz is the default waveform bin resolution when a caller passes binRateHz>0:
+// 100 bins/s = one max-abs bucket per 10 ms of audio (fine detail for the interactive strip,
+// zoomed to per-bin at high magnification). peaksMaxBuckets bounds the buffer so a multi-hour
+// set can't blow memory: caps the blob at peaksMaxBuckets peak bytes + 3× band bytes (~240 KB)
+// per track. Past ~peaksMaxBuckets/peaksBinRateHz s (10 min) the effective rate drops below
+// 10 ms - the bins spread over the whole file instead of growing (see peaksHandler).
+const (
+	peaksBinRateHz  = 100
+	peaksMaxBuckets = 60000
+)
+
 // peaksHandler decodes the audio to mono s16le PCM via ffmpeg and reduces it to N
 // uint8 peak buckets (max |sample| per bucket, scaled to 0-255) - the raw material
 // for the interactive waveform widget (zoom/scroll re-renders client-side without
 // touching ffmpeg again). Returns base64 buckets + the exact decoded duration.
 func peaksHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	var p struct {
-		Path    string `json:"path"`
-		Buckets int    `json:"buckets"`
+		Path      string  `json:"path"`
+		Buckets   int     `json:"buckets"`
+		BinRateHz float64 `json:"binRateHz"` // >0 → size the bucket count to the decoded duration (bins/s)
 	}
 	if err := json.Unmarshal(params, &p); err != nil || p.Path == "" {
 		return nil, fmt.Errorf("missing path")
-	}
-	if p.Buckets <= 0 {
-		p.Buckets = 8192
-	}
-	if p.Buckets > 1<<16 {
-		p.Buckets = 1 << 16
 	}
 	bin, err := ffmpegBin()
 	if err != nil {
@@ -138,8 +144,23 @@ func peaksHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	if samples == 0 {
 		return nil, fmt.Errorf("no audio decoded")
 	}
-	peaks := bucketPeaks(pcm, p.Buckets)
-	bands := bucketBands(pcm, p.Buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
+	// Resolve bucket count: an explicit binRateHz sizes it to the decoded duration
+	// (dur = samples/peaksRate) for a fixed TIME resolution (~10 ms at 100 Hz); else the caller's
+	// fixed Buckets (default 8192). Bounded by peaksMaxBuckets so a multi-hour set stays
+	// memory-safe - past the cap the bins just spread over the whole file (coarser) rather than
+	// growing the buffer. bucketPeaks/bucketBands further clamp to <= sample count.
+	buckets := p.Buckets
+	if p.BinRateHz > 0 {
+		buckets = int(math.Round(float64(samples) / peaksRate * p.BinRateHz))
+	}
+	if buckets <= 0 {
+		buckets = 8192
+	}
+	if buckets > peaksMaxBuckets {
+		buckets = peaksMaxBuckets
+	}
+	peaks := bucketPeaks(pcm, buckets)
+	bands := bucketBands(pcm, buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
 	// Decode contract: rate/samples pin the waveform origin+scale (dur = samples/rate); leadSkipMs =
 	// the gapless encoder priming this from=0 decode drops (0 for lossless). Lets the player detect +
 	// reconcile waveform↔audio origin/scale drift instead of it being silent.

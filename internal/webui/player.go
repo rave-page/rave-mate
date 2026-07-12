@@ -166,6 +166,12 @@ func (u *UI) mpWaveInner(t mpSt) string {
 	return b.String()
 }
 
+// mpWaveCols caps the vertical columns the waveform decimates to (≈ one per viewport pixel).
+// Peaks are ~10 ms bins (tens of thousands on a long set); the render only ever emits this many
+// columns - each the min/max of the bins it spans - so SVG size is O(viewport), not O(bins).
+// Zoomed in past this many visible bins we fall to one column per bin (razor-sharp).
+const mpWaveCols = 800
+
 // mpWaveSVG draws every media band on the shared axis in the visible zoom window, with
 // trim dim/handles (edit), track/fader/cue markers, playhead (mint) and click cursor.
 // ce (nil = off) adds the cue-editor layer: beatgrid lines, drop markers, beat cursor,
@@ -213,50 +219,88 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		}
 
 		if len(m.peaks) > 0 && dur > 0 && ln > 0 {
-			cols := 500
-			bw := w / float64(cols)
-			nn := float64(len(m.peaks))
-			hasBands := len(m.bands) >= 3*len(m.peaks) // spectral colour available
-			for c := 0; c < cols; c++ {
-				// axis span of this column → media-local bucket range
-				a0 := lo + (t.viewStart+(float64(c)/float64(cols))*t.viewSpan)*ln
-				a1 := lo + (t.viewStart+(float64(c+1)/float64(cols))*t.viewSpan)*ln
-				m0, m1 := (a0-start)/dur, (a1-start)/dur
-				if m1 <= 0 || m0 >= 1 {
-					continue
+			nn := len(m.peaks)
+			hasBands := len(m.bands) >= 3*nn // spectral colour available
+			half := bandH/2 - 4
+
+			// Column count = min(mpWaveCols, visible bins): zoomed out we aggregate many bins per
+			// column (min/max); zoomed in past mpWaveCols visible bins we draw one column per bin
+			// (razor-sharp). Columns always span the full view width, so partial-media placement stays
+			// correct (off-media columns skip below). O(viewport), not O(bins).
+			visLo := clampF((lo+t.viewStart*ln-start)/dur, 0, 1)
+			visHi := clampF((lo+(t.viewStart+t.viewSpan)*ln-start)/dur, 0, 1)
+			if visHi > visLo {
+				cols := mpWaveCols
+				if vb := (visHi - visLo) * float64(nn); vb > 0 && vb < float64(cols) {
+					cols = int(math.Ceil(vb))
 				}
-				i0 := clampInt(int(m0*nn), 0, len(m.peaks)-1)
-				i1 := clampInt(int(m1*nn), i0, len(m.peaks)-1)
-				var mx, loB, miB, hiB byte
-				for k := i0; k <= i1; k++ {
-					if m.peaks[k] > mx {
-						mx = m.peaks[k]
+				if cols < 1 {
+					cols = 1
+				}
+				bw := w / float64(cols)
+				var top, bot []string // mono-fallback min/max envelope points (top L→R; bot reversed on close)
+				for c := 0; c < cols; c++ {
+					// axis span of this column → media-local bucket range
+					a0 := lo + (t.viewStart+(float64(c)/float64(cols))*t.viewSpan)*ln
+					a1 := lo + (t.viewStart+(float64(c+1)/float64(cols))*t.viewSpan)*ln
+					m0, m1 := (a0-start)/dur, (a1-start)/dur
+					if m1 <= 0 || m0 >= 1 {
+						continue
 					}
+					i0 := clampInt(int(m0*float64(nn)), 0, nn-1)
+					i1 := clampInt(int(m1*float64(nn)), i0, nn-1)
+					var mx, loB, miB, hiB byte
+					for k := i0; k <= i1; k++ {
+						if m.peaks[k] > mx {
+							mx = m.peaks[k]
+						}
+						if hasBands {
+							if v := m.bands[3*k]; v > loB {
+								loB = v
+							}
+							if v := m.bands[3*k+1]; v > miB {
+								miB = v
+							}
+							if v := m.bands[3*k+2]; v > hiB {
+								hiB = v
+							}
+						}
+					}
+					x := float64(c) * bw
+					amp := (float64(mx) / 255.0) * half
 					if hasBands {
-						if v := m.bands[3*k]; v > loB {
-							loB = v
-						}
-						if v := m.bands[3*k+1]; v > miB {
-							miB = v
-						}
-						if v := m.bands[3*k+2]; v > hiB {
-							hiB = v
-						}
+						// contiguous coloured column (full width, no inter-bar gap → one filled envelope
+						// not "bars"; +0.6 closes sub-pixel seams). Colour = dominant band, brighter played.
+						played := x+bw*0.5 < playX
+						fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>`,
+							x, mid-amp, bw+0.6, amp*2, bandColor(loB, miB, hiB, played))
+						continue
+					}
+					cx := x + bw*0.5
+					top = append(top, fmt.Sprintf("%.2f %.2f", cx, mid-amp))
+					bot = append(bot, fmt.Sprintf("%.2f %.2f", cx, mid+amp))
+				}
+				// mono fallback (bands unavailable): one filled min/max envelope <path>, split at the
+				// playhead by a hard-stop gradient - a single element whatever the column count.
+				if !hasBands && len(top) > 0 {
+					var d strings.Builder
+					d.WriteString("M" + top[0])
+					for _, pt := range top[1:] {
+						d.WriteString(" L" + pt)
+					}
+					for k := len(bot) - 1; k >= 0; k-- {
+						d.WriteString(" L" + bot[k])
+					}
+					d.WriteString(" Z")
+					if playX >= 0 && playX <= w {
+						gid := fmt.Sprintf("mpwenv-%s-%d", t.host, i)
+						gf := clampF(playX/w, 0, 1)
+						fmt.Fprintf(&b, `<defs><linearGradient id="%s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="%.0f" y2="0"><stop offset="%.4f" stop-color="#F70864"/><stop offset="%.4f" stop-color="#fafafa" stop-opacity="0.45"/></linearGradient></defs>`, gid, w, gf, gf)
+						fmt.Fprintf(&b, `<path d="%s" fill="url(#%s)"/>`, d.String(), gid)
+					} else {
+						fmt.Fprintf(&b, `<path d="%s" fill="#fafafa" fill-opacity="0.45"/>`, d.String())
 					}
 				}
-				x := float64(c) * bw
-				bh := (float64(mx) / 255.0) * (bandH/2 - 4)
-				played := x+bw*0.5 < playX
-				var col string
-				switch {
-				case hasBands:
-					col = bandColor(loB, miB, hiB, played) // Traktor-style frequency colour
-				case played:
-					col = "#F70864"
-				default:
-					col = "rgba(250,250,250,0.45)"
-				}
-				fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>`, x, mid-bh, bw*0.8, bh*2, col)
 			}
 		} else {
 			fmt.Fprintf(&b, `<line x1="0" y1="%.0f" x2="%.0f" y2="%.0f" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>`, mid, w, mid)
