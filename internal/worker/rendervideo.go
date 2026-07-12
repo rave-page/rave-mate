@@ -28,6 +28,7 @@ func renderHandlers() map[string]Handler {
 	return map[string]Handler{
 		"render.ping":        tcPing,
 		"render.motionvideo": rvMotionVideo,
+		"render.pointcloud":  rpcPointCloud,
 	}
 }
 

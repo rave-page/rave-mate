@@ -29,6 +29,7 @@ import (
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/motionrender"
 	"rave.page/mate/internal/osc"
+	"rave.page/mate/internal/pointcloud"
 	"rave.page/mate/internal/vmc"
 	"rave.page/mate/internal/vrccampaths"
 	"rave.page/mate/internal/vrm"
@@ -65,6 +66,12 @@ type moSt struct {
 	marks    bool            // overlay raw tracker points on the mesh (compare take vs pose)
 	cam      orbitCam
 
+	// point cloud (RMPC animated point-cloud preview + export, task #83)
+	pcOn      bool                  // preview shows the point cloud instead of skeleton/mesh
+	pcDensity string                // export density: "low" | "med" | "high"
+	pcColor   bool                  // sample per-point albedo (avatar textures)
+	pcSel     *pointcloud.Selection // cached preview selection (preview-capped)
+
 	// render-video modal + job
 	rMode     string // "orbit" | "equirect"
 	rHigh     bool
@@ -94,7 +101,7 @@ func (u *UI) mo() *moSt {
 	defer moMu.Unlock()
 	s := moMap[u]
 	if s == nil {
-		s = &moSt{section: "campaths", cpSel: -1, cam: newOrbitCam()}
+		s = &moSt{section: "campaths", cpSel: -1, cam: newOrbitCam(), pcColor: true, pcDensity: "med"}
 		moMap[u] = s
 	}
 	return s
@@ -185,6 +192,18 @@ func init() {
 		u.moRenderModal()
 	})
 	onExact("mo-render-go", func(u *UI, m actMsg) { u.moRenderGo(m.Val) })
+	// point cloud (RMPC preview + export)
+	onExact("mo-pc", func(u *UI, m actMsg) { u.moPCToggle(m.Val == "true") })
+	onPrefix("mo-pc-density:", func(u *UI, m actMsg) {
+		u.moSetQuiet(func(s *moSt) { s.pcDensity = m.arg("mo-pc-density:") })
+		u.moPatchBody()
+	})
+	onExact("mo-pc-color", func(u *UI, m actMsg) {
+		u.moSetQuiet(func(s *moSt) { s.pcColor = m.Val == "true" })
+		u.moRebuildPCSel()
+		u.moPatchView()
+	})
+	onExact("mo-pc-export", func(u *UI, m actMsg) { u.moPCExport(m.Val) })
 	onExact("mo-export", func(u *UI, m actMsg) { u.moExport(m.Val) })
 	onExact("mo-avatar-set", func(u *UI, m actMsg) { u.moAvatarSet(m.Val) })
 	onExact("mo-avatar-import", func(u *UI, m actMsg) { u.moAvatarImport(m.Val) })
@@ -390,12 +409,12 @@ func moPosParse(val string) (kind string, fx, fy float32, ok bool) {
 }
 
 func (u *UI) moPatchView() {
-	u.eval("window.__patch('mo-view'," + jsQuote(u.moSkeletonSVG()) + ")" + u.moAnimClockJS())
+	u.eval("window.__patch('mo-view'," + jsQuote(u.moViewHTML()) + ")" + u.moAnimClockJS())
 }
 
-// moPatchDragFrame paints the cheap mid-drag frame (static skeleton / preview-res raster).
+// moPatchDragFrame paints the cheap mid-drag frame (static skeleton / preview-res raster / points).
 func (u *UI) moPatchDragFrame() {
-	u.eval("window.__patch('mo-view'," + jsQuote(u.moSkeletonSVGOpt(true)) + ")")
+	u.eval("window.__patch('mo-view'," + jsQuote(u.moViewDragHTML()) + ")")
 }
 
 func (u *UI) moPatchBody() {
@@ -508,6 +527,7 @@ func (u *UI) moModelToggle(on bool) {
 	if !on {
 		s.mu.Lock()
 		s.modelOn = false
+		s.pcOn, s.pcSel = false, nil // point cloud needs the mesh
 		rec := s.rec
 		if rec != nil {
 			moFrameRec(&s.cam, rec)
@@ -540,7 +560,11 @@ func (u *UI) moModelToggle(on bool) {
 		}
 		lo, hi := m.Bounds()
 		s.cam.frame(lo, hi, 1.6, 1.0)
+		pcOn := s.pcOn
 		s.mu.Unlock()
+		if pcOn { // avatar swap while previewing points: rebuild for the new mesh
+			u.moRebuildPCSel()
+		}
 		u.moPatchBody()
 	})
 }
@@ -560,7 +584,7 @@ func (u *UI) moScrub(val string) {
 		dur = s.player.Duration()
 	}
 	s.mu.Unlock()
-	u.eval("window.__patch('mo-view'," + jsQuote(u.moSkeletonSVG()) + ");" +
+	u.eval("window.__patch('mo-view'," + jsQuote(u.moViewHTML()) + ");" +
 		"window.__patch('mo-time'," + jsQuote(htmlEscape(fmt.Sprintf("%.1f / %.1f s", t, dur))) + ");" +
 		u.moAnimClockJS())
 }
@@ -701,9 +725,9 @@ func (u *UI) moRunPreview(stop chan struct{}) {
 			}
 			s := u.mo()
 			s.mu.Lock()
-			if !s.playing || s.player == nil || !s.modelOn || s.model == nil || s.rec == nil {
+			if !s.playing || s.player == nil || !s.modelOn || s.model == nil || s.rec == nil || s.pcOn {
 				s.mu.Unlock()
-				continue // paused or stick-figure mode (SMIL handles that)
+				continue // paused, stick-figure (SMIL), or point-cloud mode (scrub-driven preview)
 			}
 			rec, cam, name := s.rec, s.cam, s.recName
 			model, player, t := s.model, s.player, s.t

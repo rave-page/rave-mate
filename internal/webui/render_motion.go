@@ -140,6 +140,7 @@ func (u *UI) moStudioHTML() string {
 	modelOn := s.modelOn && s.model != nil
 	physOn, hasDyn := s.physOn, s.dyn != nil && len(s.dyn.Chains()) > 0
 	restPose, marks := s.restPose, s.marks
+	pcOn, pcColor, pcDensity := s.pcOn, s.pcColor, s.pcDensity
 	t, dur := s.t, 0.0
 	if s.player != nil {
 		dur = s.player.Duration()
@@ -171,7 +172,7 @@ func (u *UI) moStudioHTML() string {
 	if playing {
 		playLbl = "⏸ " + i18n.T("player.pause")
 	}
-	detail := `<div id=mo-view data-actpos="mo-orbit" data-actwheel="mo-zoom">` + u.moSkeletonSVG() + `</div>` +
+	detail := `<div id=mo-view data-actpos="mo-orbit" data-actwheel="mo-zoom">` + u.moViewHTML() + `</div>` +
 		`<div class=mo-hint>` + html.EscapeString(i18n.T("motion.studioHint")) + `</div>` +
 		`<div id=mo-time class=mo-info>` + html.EscapeString(i18n.T("motion.timeDisplay", i18n.A{"cur": fmt.Sprintf("%.1f", t), "dur": fmt.Sprintf("%.1f", dur)})) + `</div>` +
 		slider(i18n.T("motion.scrub"), "mo-scrub", 0, 1000, 1, scrubVal(t, dur), "") +
@@ -183,6 +184,7 @@ func (u *UI) moStudioHTML() string {
 		toggleRow(i18n.T("motion.showAvatarModel"), "mo-model", modelOn) +
 		moPhysRow(modelOn, physOn, hasDyn) +
 		moCompareRows(modelOn, restPose, marks) +
+		moPointCloudRows(modelOn, pcOn, pcColor, pcDensity) +
 		`</div>` +
 		`<p class=page-sub>` + html.EscapeString(i18n.T("motion.vmcHelp", i18n.A{"addr": u.svc.Cfg.Features.VROverlay.ResolvedVMCAddr()})) + `</p>`
 	head := `<div class=card-label>` + html.EscapeString(i18n.T("motion.preview")) + tipTopic("motion-studio") + `</div>`
@@ -212,6 +214,32 @@ func moCompareRows(modelOn, restPose, marks bool) string {
 	}
 	return toggleRow(i18n.T("motion.restPose"), "mo-rest", restPose) +
 		toggleRow(i18n.T("motion.overlayTrackerPoints"), "mo-marks", marks)
+}
+
+// moPointCloudRows: point-cloud preview toggle + (when on) export density / colour / .rmpc
+// export. Shown only with the model on (the cloud IS the posed mesh's surface).
+func moPointCloudRows(modelOn, pcOn, pcColor bool, density string) string {
+	if !modelOn {
+		return ""
+	}
+	out := toggleRow(i18n.T("motion.pointCloud"), "mo-pc", pcOn)
+	if !pcOn {
+		return out
+	}
+	if density == "" {
+		density = "med"
+	}
+	out += smartSelect("mo-pc-density", i18n.T("motion.pcDensity"), "mo-pc-density:", density, func() []ssOpt {
+		return []ssOpt{
+			{Val: "low", Label: i18n.T("motion.pcLow"), Sub: i18n.T("motion.pcLowSub")},
+			{Val: "med", Label: i18n.T("motion.pcMed"), Sub: i18n.T("motion.pcMedSub")},
+			{Val: "high", Label: i18n.T("motion.pcHigh"), Sub: i18n.T("motion.pcHighSub")},
+		}
+	}) +
+		toggleRow(i18n.T("motion.pcColor"), "mo-pc-color", pcColor) +
+		`<div class=mo-info>` + html.EscapeString(i18n.T("motion.pcNote")) + `</div>` +
+		btnRow(btn(i18n.T("motion.pcExport"), "primary", "pick-save:rmpc:mo-pc-export", ""))
+	return out
 }
 
 func scrubVal(t, dur float64) float64 {
