@@ -267,6 +267,7 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 			cols := 500
 			bw := w / float64(cols)
 			nn := float64(len(m.peaks))
+			hasBands := len(m.bands) >= 3*len(m.peaks) // spectral colour available
 			for c := 0; c < cols; c++ {
 				// axis span of this column → media-local bucket range
 				a0 := lo + (t.viewStart+(float64(c)/float64(cols))*t.viewSpan)*ln
@@ -277,17 +278,34 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 				}
 				i0 := clampInt(int(m0*nn), 0, len(m.peaks)-1)
 				i1 := clampInt(int(m1*nn), i0, len(m.peaks)-1)
-				var mx byte
+				var mx, loB, miB, hiB byte
 				for k := i0; k <= i1; k++ {
 					if m.peaks[k] > mx {
 						mx = m.peaks[k]
 					}
+					if hasBands {
+						if v := m.bands[3*k]; v > loB {
+							loB = v
+						}
+						if v := m.bands[3*k+1]; v > miB {
+							miB = v
+						}
+						if v := m.bands[3*k+2]; v > hiB {
+							hiB = v
+						}
+					}
 				}
 				x := float64(c) * bw
 				bh := (float64(mx) / 255.0) * (bandH/2 - 4)
-				col := "rgba(250,250,250,0.45)"
-				if x+bw*0.5 < playX {
+				played := x+bw*0.5 < playX
+				var col string
+				switch {
+				case hasBands:
+					col = bandColor(loB, miB, hiB, played) // Traktor-style frequency colour
+				case played:
 					col = "#F70864"
+				default:
+					col = "rgba(250,250,250,0.45)"
 				}
 				fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>`, x, mid-bh, bw*0.8, bh*2, col)
 			}
@@ -442,6 +460,27 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 	}
 	b.WriteString(`</svg>`)
 	return b.String()
+}
+
+// bandColor maps a bucket's low/mid/high energy to a Traktor-style spectral colour: hue from
+// the frequency centroid (low→red, mid→green, high→blue; blends give orange/magenta/cyan),
+// lightness from whether the playhead has passed (played reads brighter). Near-silent = faint.
+func bandColor(lo, mid, hi byte, played bool) string {
+	l, m, h := float64(lo), float64(mid), float64(hi)
+	if l+m+h < 6 {
+		return "rgba(250,250,250,0.28)"
+	}
+	// centroid on the hue wheel: 0°=red (low), 120°=green (mid), 240°=blue (high)
+	x := l + m*math.Cos(2.0943951) + h*math.Cos(4.1887902)
+	y := m*math.Sin(2.0943951) + h*math.Sin(4.1887902)
+	hue := math.Atan2(y, x) * 57.29578 // rad → deg
+	if hue < 0 {
+		hue += 360
+	}
+	if played {
+		return fmt.Sprintf("hsl(%.0f,85%%,62%%)", hue)
+	}
+	return fmt.Sprintf("hsl(%.0f,70%%,47%%)", hue)
 }
 
 func cueColor(k musiclib.CueKind) string {

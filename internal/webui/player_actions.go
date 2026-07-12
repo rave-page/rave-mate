@@ -49,6 +49,7 @@ type mpMedia struct {
 
 	size         int64
 	peaks        []byte
+	bands        []byte // 3 uint8 (low,mid,high) per peak bucket - spectral waveform colour
 	dur          float64
 	peaksLoading bool
 	peaksErr     string
@@ -637,14 +638,14 @@ func (u *UI) mpApply(host string, gen, idx int, fn func(*mpMedia)) bool {
 
 func (u *UI) mpLoadPeaks(host string, gen, idx int, path string) {
 	u.bg(func() {
-		dur, data, err := u.mpResolvePeaks(path)
+		dur, data, bands, err := u.mpResolvePeaks(path)
 		applied := u.mpApply(host, gen, idx, func(m *mpMedia) {
 			m.peaksLoading = false
 			if err != nil {
 				m.peaksErr = err.Error()
 				return
 			}
-			m.peaks = data
+			m.peaks, m.bands = data, bands
 			if dur > 0 {
 				m.dur = dur
 			}
@@ -657,13 +658,15 @@ func (u *UI) mpLoadPeaks(host string, gen, idx int, path string) {
 	})
 }
 
-// mpPeakBlob is the persisted peaks payload - same {d,p} shape the Fyne cache used.
+// mpPeakBlob is the persisted peaks payload. b = 3-byte-per-bucket band colour (added
+// later; a blob without it is re-analysed so old caches gain the spectral waveform).
 type mpPeakBlob struct {
 	D float64 `json:"d"`
 	P []byte  `json:"p"`
+	B []byte  `json:"b,omitempty"`
 }
 
-func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks []byte, err error) {
+func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, err error) {
 	var mtime int64
 	if fi, serr := os.Stat(path); serr == nil {
 		mtime = fi.ModTime().Unix()
@@ -671,37 +674,40 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks []byte, err erro
 	if u.svc.Store != nil {
 		if data, ok := u.svc.Store.GetAnalysis(store.KindPeaks, path, mtime); ok {
 			var tp mpPeakBlob
-			if json.Unmarshal(data, &tp) == nil && len(tp.P) > 0 {
-				return tp.D, tp.P, nil
+			// require band data too: a pre-band cache re-analyses so the spectral waveform fills in
+			if json.Unmarshal(data, &tp) == nil && len(tp.P) > 0 && len(tp.B) >= 3*len(tp.P) {
+				return tp.D, tp.P, tp.B, nil
 			}
 		}
 	}
 	if u.svc.Workers == nil {
-		return 0, nil, errors.New("no worker runtime")
+		return 0, nil, nil, errors.New("no worker runtime")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	raw, rerr := u.svc.Workers.RunBackground(ctx, "probe", "probe.peaks", map[string]any{"path": path, "buckets": 8192})
 	if rerr != nil {
-		return 0, nil, rerr
+		return 0, nil, nil, rerr
 	}
 	var r struct {
 		Peaks  string  `json:"peaks"`
+		Bands  string  `json:"bands"`
 		DurSec float64 `json:"durationSeconds"`
 	}
 	if json.Unmarshal(raw, &r) != nil || r.Peaks == "" || r.DurSec <= 0 {
-		return 0, nil, errors.New("empty analysis")
+		return 0, nil, nil, errors.New("empty analysis")
 	}
 	data, derr := base64.StdEncoding.DecodeString(r.Peaks)
 	if derr != nil || len(data) == 0 {
-		return 0, nil, errors.New("bad peaks payload")
+		return 0, nil, nil, errors.New("bad peaks payload")
 	}
+	bandData, _ := base64.StdEncoding.DecodeString(r.Bands) // best-effort; nil → mono fallback render
 	if u.svc.Store != nil {
-		if b, merr := json.Marshal(mpPeakBlob{r.DurSec, data}); merr == nil {
+		if b, merr := json.Marshal(mpPeakBlob{D: r.DurSec, P: data, B: bandData}); merr == nil {
 			u.svc.Store.PutAnalysis(store.KindPeaks, path, mtime, b)
 		}
 	}
-	return r.DurSec, data, nil
+	return r.DurSec, data, bandData, nil
 }
 
 // mpLoadLoud fetches the EBU R128 timeline (LUFS chip + momentary readout). Works for

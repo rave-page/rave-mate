@@ -97,9 +97,10 @@ func waveformHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error
 	return json.Marshal(map[string]any{"png": base64.StdEncoding.EncodeToString(data)})
 }
 
-// peaksRate is the decode sample rate for waveform peaks - low enough to keep the
-// ffmpeg pass fast on multi-hour files, high enough for per-pixel zoom detail.
-const peaksRate = 8000
+// peaksRate is the decode sample rate for waveform peaks + band colouring - high enough
+// (Nyquist 8 kHz) to carry the "high" band (hats/cymbals/air) for the spectral waveform,
+// still cheap on multi-hour files.
+const peaksRate = 16000
 
 // peaksHandler decodes the audio to mono s16le PCM via ffmpeg and reduces it to N
 // uint8 peak buckets (max |sample| per bucket, scaled to 0-255) - the raw material
@@ -137,8 +138,10 @@ func peaksHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 		return nil, fmt.Errorf("no audio decoded")
 	}
 	peaks := bucketPeaks(pcm, p.Buckets)
+	bands := bucketBands(pcm, p.Buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
 	return json.Marshal(map[string]any{
 		"peaks":           base64.StdEncoding.EncodeToString(peaks),
+		"bands":           base64.StdEncoding.EncodeToString(bands),
 		"durationSeconds": float64(samples) / peaksRate,
 	})
 }
