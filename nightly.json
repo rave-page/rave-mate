@@ -1,13 +1,13 @@
 {
-  "version": "nightly-523bbd5",
-  "build": 70,
-  "commit": "523bbd5",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-70-20260712-523bbd5.exe",
-  "sha256": "47c711022ef5480e9f9ff6f55113bb21ae36ad2b352629d13ae39d2733ce36ff",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-70-20260712-523bbd5.exe",
-  "installer_sha256": "1b2ea9507a78854d6f521948ace2b273f6b5bfb5450fd7c4045a574711174e80",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-70-20260712-523bbd5",
-  "linux_sha256": "db1e9fb6daad2e597864d6fb143180e9dacffcbcf503a3eb6c37738e7e9a8fb4",
+  "version": "nightly-014db32",
+  "build": 71,
+  "commit": "014db32",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-71-20260712-014db32.exe",
+  "sha256": "78309b184b50c7ca3bee90479dec24a3c375263bcb0606fee29a44501fdb4c0b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-71-20260712-014db32.exe",
+  "installer_sha256": "82981b38ba925edb5c7bea47c3a81629a4f481d27c8f01bc6378757316b6be30",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-71-20260712-014db32",
+  "linux_sha256": "bd3f4b68c137695f9c3843fb5d3ba87b1d66cf8537e96f5a89abfa29816f9371",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-12T16:10:32Z",
-  "notes": "i18n(motion): backfill point-cloud keys into de/es/fr/ja/ru/uk"
+  "released": "2026-07-12T17:57:35Z",
+  "notes": "i18n(motion): backfill point-cloud viewer + GPU-prompt keys into 6 locales"
 }
