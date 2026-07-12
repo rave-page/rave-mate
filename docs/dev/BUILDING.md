@@ -40,7 +40,10 @@ rave-mate ctl screenshot out.png | screenshot-all <dir> | logs | quit
 rave-mate ctl act <act> [val]   # post a raw UI action through the page act pipeline
                                 # (webview renderer) - drives keyboard scopes / pointer
                                 # lanes with no clickable element, e.g.
-                                # `act key:cueedit del`, `act mp-surf:library down:0.3,0.5`
+                                # `act key:cueedit del`, `act mp-surf:library down:0.3,0.5`.
+                                # An act with embedded whitespace (paths) must be quoted:
+                                # `act '"ce-open:C:\My Music\track.flac"' [val]` - \" is a
+                                # literal quote, other backslashes verbatim (no doubling)
 ```
 
 Build → launch → drive the golden path via ctl → check `logs` → `quit`. Then run

@@ -652,7 +652,7 @@ func runCtl(args []string) int {
 		fmt.Println(resp)
 	case "act": // post a raw UI action through the page act pipeline (webview renderer)
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl act <act> [val]")
+			fmt.Fprintln(os.Stderr, `usage: rave-mate ctl act <act> [val]  (act with spaces: quote it - act '"ce-open:C:\My Music\a.flac"' [val]; \" = literal quote, other backslashes verbatim)`)
 			return 2
 		}
 		resp, err := app.Send("ACT " + strings.Join(args[1:], " "))

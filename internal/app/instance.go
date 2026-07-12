@@ -139,6 +139,35 @@ func (i *instance) serve(ctrl Control, bus *logbus.Bus) {
 	}
 }
 
+// parseActPayload splits an `ACT <act> [val]` payload. Unquoted payloads keep the legacy
+// first-whitespace split (every existing caller/script unchanged). A leading `"` quotes the
+// act so it can carry embedded whitespace - prefix-acts embedding paths, e.g.
+// `"ce-open:C:\My Music\track.flac" 0.5`: the act runs to the next unescaped `"`; `\"`
+// yields a literal quote, every other byte (backslashes included - Windows/UNC paths need
+// no doubling) is verbatim; the trimmed remainder is val. No closing quote = malformed ->
+// legacy raw split.
+func parseActPayload(rest string) (act, val string) {
+	if len(rest) > 1 && rest[0] == '"' {
+		var b strings.Builder
+		for i := 1; i < len(rest); i++ {
+			switch {
+			case rest[i] == '\\' && i+1 < len(rest) && rest[i+1] == '"':
+				b.WriteByte('"')
+				i++
+			case rest[i] == '"':
+				return b.String(), strings.TrimSpace(rest[i+1:])
+			default:
+				b.WriteByte(rest[i])
+			}
+		}
+	}
+	act, val = rest, ""
+	if sp := strings.IndexAny(rest, " \t"); sp >= 0 {
+		act, val = rest[:sp], strings.TrimSpace(rest[sp:])
+	}
+	return act, val
+}
+
 func handleConn(conn net.Conn, ctrl Control) {
 	defer func() { _ = conn.Close() }()
 	r := bufio.NewReader(conn)
@@ -168,11 +197,7 @@ func handleConn(conn net.Conn, ctrl Control) {
 		}
 	case strings.HasPrefix(cmd, "ACT "):
 		// ACT <act> [val] - post through the page act pipeline (what a page event sends)
-		rest := strings.TrimSpace(cmd[len("ACT "):])
-		act, val := rest, ""
-		if sp := strings.IndexAny(rest, " \t"); sp >= 0 {
-			act, val = rest[:sp], strings.TrimSpace(rest[sp:])
-		}
+		act, val := parseActPayload(strings.TrimSpace(cmd[len("ACT "):]))
 		if ctrl.Act(act, val) {
 			fmt.Fprintln(conn, "ok")
 		} else {
