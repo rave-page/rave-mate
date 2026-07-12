@@ -1,6 +1,9 @@
 package remotectl
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"rave.page/mate/internal/libdb"
@@ -8,6 +11,30 @@ import (
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/transcode"
 )
+
+// CueStateSHA is the TrackDetail.StateSHA canonicalization - BOTH ends must reproduce it.
+// sha256 hex over the compact JSON of {"cues":[…],"beatgrid":[…],"drops":[…]} with nil
+// slices normalized to [] (field order fixed by this struct; Go's json.Marshal emits
+// floats shortest-round-trip, so ms values survive bit-exact across peers).
+func CueStateSHA(cues []musiclib.CuePoint, grid []musiclib.GridMarker, drops []float64) string {
+	s := struct {
+		Cues     []musiclib.CuePoint   `json:"cues"`
+		Beatgrid []musiclib.GridMarker `json:"beatgrid"`
+		Drops    []float64             `json:"drops"`
+	}{cues, grid, drops}
+	if s.Cues == nil {
+		s.Cues = []musiclib.CuePoint{}
+	}
+	if s.Beatgrid == nil {
+		s.Beatgrid = []musiclib.GridMarker{}
+	}
+	if s.Drops == nil {
+		s.Drops = []float64{}
+	}
+	b, _ := json.Marshal(s)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
 // ── app.logs ──────────────────────────────────────────────────────────────────
 
@@ -98,6 +125,92 @@ type PathParam struct {
 // WriteResult reports how many tag fields were written into the file.
 type WriteResult struct {
 	Written int `json:"written"`
+}
+
+// ── library cue editing (remote cue/beatgrid/drop editing over the link) ────────
+
+// TrackDetailParams selects one collection track by exact path.
+type TrackDetailParams struct {
+	Path string `json:"path"`
+}
+
+// TrackDetail is one track's full cue-edit state: the collection row (cues+beatgrid
+// included), its drop markers, the audio file's size/mtime (for the chunked pull), and
+// StateSHA - the optimistic-concurrency baseline a controller echoes back as BaseSHA.
+type TrackDetail struct {
+	Track     musiclib.Track `json:"track"`
+	Drops     []float64      `json:"drops"`
+	SizeBytes int64          `json:"sizeBytes"`
+	MTimeUnix int64          `json:"mtimeUnix"`
+	StateSHA  string         `json:"stateSha"`
+}
+
+// FileChunkParams reads [Offset, Offset+Len) of a library track's audio file. The path
+// MUST be a known library track (TrackByPath) - never an arbitrary filesystem path.
+type FileChunkParams struct {
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
+	Len    int    `json:"len"`
+}
+
+// FileChunkResult carries one chunk (base64) + EOF on the last read, plus the file's
+// total size + mtime so the controller can verify the pull stayed coherent.
+type FileChunkResult struct {
+	DataBase64 string `json:"dataBase64"`
+	EOF        bool   `json:"eof"`
+	Total      int64  `json:"total"`
+	MTimeUnix  int64  `json:"mtimeUnix"`
+}
+
+// WriteCueDataParams replaces a track's cue data on the peer. Cues is the full
+// replacement list; Beatgrid nil = leave unchanged; Drops applies only when DropsSet
+// (nil+set = clear). BaseSHA is the TrackDetail.StateSHA the edit was based on - a
+// mismatch returns Conflict (no write) unless Force.
+type WriteCueDataParams struct {
+	Path     string                `json:"path"`
+	Cues     []musiclib.CuePoint   `json:"cues"`
+	Beatgrid []musiclib.GridMarker `json:"beatgrid,omitempty"`
+	Drops    []float64             `json:"drops"`
+	DropsSet bool                  `json:"dropsSet"`
+	BaseSHA  string                `json:"baseSha"`
+	Force    bool                  `json:"force"`
+}
+
+// WriteCueDataResult: OK on a landed write, Conflict when BaseSHA was stale (nothing
+// written). Detail is the peer's fresh state either way - the controller rebases on it.
+type WriteCueDataResult struct {
+	OK       bool        `json:"ok"`
+	Conflict bool        `json:"conflict"`
+	Detail   TrackDetail `json:"detail"`
+}
+
+// CueTarget is one DJ software detected on the peer as a cue write-back destination.
+type CueTarget struct {
+	Key   string `json:"key"`   // "traktor" | "rekordbox" | "virtualdj" | "serato"
+	Label string `json:"label"` // product name (not translated)
+	Path  string `json:"path"`  // file (NML/XML) or _Serato_ dir on the PEER
+}
+
+// CueTargetsResult enumerates the peer's detected write-back targets.
+type CueTargetsResult struct {
+	Targets []CueTarget `json:"targets"`
+}
+
+// WriteCuesToParams routes the named tracks' cue sets into Software's library ON THE
+// PEER (backup-first; tracks without musical cues are skipped like the local router).
+type WriteCuesToParams struct {
+	Software string   `json:"software"`
+	Paths    []string `json:"paths"`
+}
+
+// PlaylistTracksParams selects one peer playlist by id.
+type PlaylistTracksParams struct {
+	ID int64 `json:"id"`
+}
+
+// PlaylistTracksResult is the playlist's track paths in order.
+type PlaylistTracksResult struct {
+	Paths []string `json:"paths"`
 }
 
 // ── recorder (drive the peer's publish cockpit) ─────────────────────────────────

@@ -62,6 +62,17 @@ type CuePoint struct {
 	Hotcue  int     `json:"hotcue"`          // pad/slot index; -1 = not a hotcue
 }
 
+// MusicalCues counts non-grid cues (hotcues / memory cues / loops - what the editors flag).
+func MusicalCues(cues []CuePoint) int {
+	n := 0
+	for _, c := range cues {
+		if c.Kind != CueGrid {
+			n++
+		}
+	}
+	return n
+}
+
 // GridMarker is one beatgrid anchor: a downbeat position + the tempo from there. A single
 // marker plus a constant BPM describes Traktor's usual fixed grid; multiple markers handle
 // variable-tempo grids (Rekordbox TEMPO nodes).

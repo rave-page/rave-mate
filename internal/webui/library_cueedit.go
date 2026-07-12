@@ -1681,15 +1681,7 @@ func (u *UI) ceTopbarHTML() string {
 }
 
 // ceCueCount counts non-grid cues (what the waveform flags show).
-func ceCueCount(cues []musiclib.CuePoint) int {
-	n := 0
-	for _, c := range cues {
-		if c.Kind != musiclib.CueGrid {
-			n++
-		}
-	}
-	return n
-}
+func ceCueCount(cues []musiclib.CuePoint) int { return musiclib.MusicalCues(cues) }
 
 // ceRailHTML is the cue-editor card in the library detail rail. s is LOCKED by the
 // caller - never re-lock it below (deadlock).

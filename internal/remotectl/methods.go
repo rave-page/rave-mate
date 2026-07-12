@@ -33,6 +33,20 @@ const (
 	MethodLibWriteTags  = "library.writeTags"
 	MethodLibRevertTags = "library.revertTags"
 
+	// library cue editing - a controller edits a peer's track cues/beatgrid/drops LOCALLY
+	// (it pulls the audio via fileChunk, renders its own waveform) and writes the result
+	// back. trackDetail carries a StateSHA (see CueStateSHA) as the optimistic-concurrency
+	// baseline: writeCueData refuses (Conflict + fresh detail) when the peer's state moved
+	// under the controller, unless Force. cueWriteTargets/writeCuesTo route the result into
+	// the PEER's installed DJ software (cuewriteback, backup-first). playlistTracks resolves
+	// a peer playlist to paths for whole-set cue prep.
+	MethodLibTrackDetail    = "library.trackDetail"
+	MethodLibFileChunk      = "library.fileChunk"
+	MethodLibWriteCueData   = "library.writeCueData"
+	MethodLibCueTargets     = "library.cueWriteTargets"
+	MethodLibWriteCuesTo    = "library.writeCuesTo"
+	MethodLibPlaylistTracks = "library.playlistTracks"
+
 	// recorder - drive the peer's recording/publish cockpit: list its recorded sets (summaries,
 	// paged), page one set's tracklist, list its captured audio/video files, export a tracklist,
 	// delete a finished set. Read + export/delete only; no live start/finish over the link. Sets

@@ -1114,6 +1114,12 @@ func run(parent context.Context, serviceMode bool) error {
 	remotectl.RegisterBrowse(remoteCtl)
 	remotectl.RegisterAutomations(remoteCtl, autoIface)
 	remotectl.RegisterLibrary(remoteCtl, lib)
+	// Remote cue/beatgrid/drop editing: a paired controller pulls a track's audio + edits
+	// locally, then writes back here. Writes publish library.trackchanged so every open UI
+	// (and the controller, via the bus's peer broadcast) refreshes.
+	cueBackupRoot, _ := config.DataPath("library-backups")
+	remotectl.RegisterLibraryCueEdit(remoteCtl, lib, bus.Publish,
+		func() string { return strings.TrimSpace(cfg.Features.NML.CollectionPath) }, cueBackupRoot)
 	remotectl.RegisterMedia(remoteCtl, transcodeHub)
 	remotectl.RegisterRecorder(remoteCtl, rec, lib) // peer-driven Publish cockpit (list/tracklist/captures/export/delete)
 	if rec != nil {

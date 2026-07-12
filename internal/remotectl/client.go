@@ -120,6 +120,43 @@ func (c *Client) RevertTags(ctx context.Context, path string) error {
 	return err
 }
 
+// ── library cue editing (remote cue/beatgrid/drop editing) ──────────────────────
+
+// LibraryTrackDetail fetches one track's cue-edit state + the StateSHA write baseline.
+func (c *Client) LibraryTrackDetail(ctx context.Context, path string) (TrackDetail, error) {
+	return Do[TrackDetail](ctx, c.e, c.nodeID, MethodLibTrackDetail, TrackDetailParams{Path: path})
+}
+
+// LibraryFileChunk pulls [offset, offset+n) of a library track's audio file (base64;
+// server clamps n to its max). Loop until EOF to replicate the file.
+func (c *Client) LibraryFileChunk(ctx context.Context, path string, offset int64, n int) (FileChunkResult, error) {
+	return Do[FileChunkResult](ctx, c.e, c.nodeID, MethodLibFileChunk, FileChunkParams{Path: path, Offset: offset, Len: n})
+}
+
+// WriteCueData writes an edited cue/beatgrid/drop set back to the peer. Check
+// result.Conflict: the peer's state moved under the edit (rebase on result.Detail).
+func (c *Client) WriteCueData(ctx context.Context, p WriteCueDataParams) (WriteCueDataResult, error) {
+	return Do[WriteCueDataResult](ctx, c.e, c.nodeID, MethodLibWriteCueData, p)
+}
+
+// CueWriteTargets lists the DJ softwares detected on the peer as write-back destinations.
+func (c *Client) CueWriteTargets(ctx context.Context) ([]CueTarget, error) {
+	r, err := Do[CueTargetsResult](ctx, c.e, c.nodeID, MethodLibCueTargets, nil)
+	return r.Targets, err
+}
+
+// WriteCuesTo routes the named tracks' cues into software's library ON THE PEER
+// (backup-first there); returns how many tracks the write updated.
+func (c *Client) WriteCuesTo(ctx context.Context, software string, paths []string) (WriteResult, error) {
+	return Do[WriteResult](ctx, c.e, c.nodeID, MethodLibWriteCuesTo, WriteCuesToParams{Software: software, Paths: paths})
+}
+
+// LibraryPlaylistTracks resolves a peer playlist to its track paths in order.
+func (c *Client) LibraryPlaylistTracks(ctx context.Context, id int64) ([]string, error) {
+	r, err := Do[PlaylistTracksResult](ctx, c.e, c.nodeID, MethodLibPlaylistTracks, PlaylistTracksParams{ID: id})
+	return r.Paths, err
+}
+
 // ── recorder (drive the peer's publish cockpit) ─────────────────────────────────
 
 // RecList pages the peer's recorded-set summaries (newest first).

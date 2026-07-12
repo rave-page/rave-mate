@@ -16,12 +16,14 @@ import (
 	"sync/atomic"
 
 	"rave.page/mate/internal/automation"
+	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/jobs"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/tagsync"
+	"rave.page/mate/internal/tagwrite"
 )
 
 // remoteJobSeq names peer-driven transcode jobs uniquely on the controlled machine.
@@ -240,6 +242,197 @@ func registerLibrary(e *Endpoint, lib *libdb.DB, apply tagApplier, revert tagRev
 		}
 		return OK{OK: true}, nil
 	})
+}
+
+// PublishFunc emits an eventbus topic (eventbus.Bus.Publish; nil = no bus). Decoupled so
+// the cue-edit handlers stay testable without a bus.
+type PublishFunc func(topic string, data json.RawMessage)
+
+// RegisterLibraryCueEdit exposes remote cue/beatgrid/drop editing of the peer's collection:
+// trackDetail (state + StateSHA baseline), fileChunk (chunked audio pull, library tracks
+// only), writeCueData (optimistic-concurrency write, mirrors the local cue editor's
+// persistence), cueWriteTargets/writeCuesTo (route cues into THIS machine's DJ software via
+// cuewriteback), playlistTracks. nmlOverride = configured Traktor collection path getter
+// ("" = auto-discover); backupRoot receives pre-write library backups.
+func RegisterLibraryCueEdit(e *Endpoint, lib *libdb.DB, pub PublishFunc, nmlOverride func() string, backupRoot string) {
+	if e == nil || lib == nil {
+		return
+	}
+	if nmlOverride == nil {
+		nmlOverride = func() string { return "" }
+	}
+	e.Register(MethodLibTrackDetail, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p TrackDetailParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		return libTrackDetail(lib, p.Path)
+	})
+	e.Register(MethodLibFileChunk, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p FileChunkParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		// SECURITY: serve only known library tracks - never arbitrary filesystem paths.
+		if _, ok, err := lib.TrackByPath(p.Path); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, errors.New("track not found")
+		}
+		return readLibChunk(p)
+	})
+	e.Register(MethodLibWriteCueData, func(_ context.Context, peerNodeID string, raw json.RawMessage) (any, error) {
+		var p WriteCueDataParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		cur, err := libTrackDetail(lib, p.Path)
+		if err != nil {
+			return nil, err
+		}
+		if !p.Force && cur.StateSHA != p.BaseSHA {
+			return WriteCueDataResult{Conflict: true, Detail: cur}, nil // state moved - no write
+		}
+		// Same sequence the local cue editor persists (webui library_cueedit.go):
+		// cues → beatgrid (only when sent) → drops (only when sent, + file-tag mirror).
+		t := cur.Track
+		if err := lib.UpdateTrackCues(t, p.Cues); err != nil {
+			return nil, err
+		}
+		if p.Beatgrid != nil {
+			if err := lib.UpdateTrackBeatgrid(t, p.Beatgrid); err != nil {
+				return nil, err
+			}
+		}
+		if p.DropsSet {
+			if err := lib.SetDrops(p.Path, t.Artist, t.Title, t.DurationSec, p.Drops); err != nil {
+				return nil, err
+			}
+			if tagwrite.Supported(p.Path) {
+				_ = tagwrite.WriteDrops(p.Path, p.Drops) // best-effort, like the local editor (toast + continue)
+			}
+		}
+		fresh, err := libTrackDetail(lib, p.Path)
+		if err != nil {
+			return nil, err
+		}
+		if pub != nil {
+			data, _ := json.Marshal(libdb.TrackChangedEvent{Path: p.Path, Origin: "peer:" + peerNodeID})
+			pub(libdb.TopicTrackChanged, data)
+		}
+		return WriteCueDataResult{OK: true, Detail: fresh}, nil
+	})
+	e.Register(MethodLibCueTargets, func(context.Context, string, json.RawMessage) (any, error) {
+		det := cuewriteback.DetectTargets(nmlOverride())
+		out := make([]CueTarget, len(det))
+		for i, t := range det {
+			out[i] = CueTarget{Key: t.Key, Label: t.Label, Path: t.Path}
+		}
+		return CueTargetsResult{Targets: out}, nil
+	})
+	e.Register(MethodLibWriteCuesTo, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p WriteCuesToParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		var target *cuewriteback.Target
+		for _, t := range cuewriteback.DetectTargets(nmlOverride()) {
+			if t.Key == p.Software {
+				tc := t
+				target = &tc
+				break
+			}
+		}
+		if target == nil {
+			return nil, fmt.Errorf("write target not detected: %q", p.Software)
+		}
+		var updates []musiclib.CueUpdate
+		for _, path := range p.Paths {
+			t, ok, err := lib.TrackByPath(path)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || musiclib.MusicalCues(t.Cues) == 0 {
+				continue // mirror the local router: only tracks with ≥1 musical cue
+			}
+			updates = append(updates, musiclib.CueUpdate{Path: path, BPM: t.BPM, Cues: t.Cues})
+		}
+		if len(updates) == 0 {
+			return nil, errors.New("no tracks with musical cues")
+		}
+		res, err := cuewriteback.ApplyCues(*target, updates, backupRoot)
+		if err != nil {
+			return nil, err
+		}
+		return WriteResult{Written: res.Updated}, nil
+	})
+	e.Register(MethodLibPlaylistTracks, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p PlaylistTracksParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		paths, err := lib.PlaylistTracks(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		if paths == nil {
+			paths = []string{}
+		}
+		return PlaylistTracksResult{Paths: paths}, nil
+	})
+}
+
+// libTrackDetail assembles a track's cue-edit state + StateSHA. File size/mtime are
+// best-effort (zero when the audio is offline - cue-only edits still work).
+func libTrackDetail(lib *libdb.DB, path string) (TrackDetail, error) {
+	t, ok, err := lib.TrackByPath(path)
+	if err != nil {
+		return TrackDetail{}, err
+	}
+	if !ok {
+		return TrackDetail{}, errors.New("track not found")
+	}
+	drops, err := lib.Drops(path)
+	if err != nil {
+		return TrackDetail{}, err
+	}
+	if drops == nil {
+		drops = []float64{}
+	}
+	d := TrackDetail{Track: t, Drops: drops, StateSHA: CueStateSHA(t.Cues, t.Beatgrid, drops)}
+	if fi, serr := os.Stat(path); serr == nil {
+		d.SizeBytes, d.MTimeUnix = fi.Size(), fi.ModTime().Unix()
+	}
+	return d, nil
+}
+
+// readLibChunk reads [Offset, Offset+min(Len,vrmChunkMax)) of the track's audio file,
+// base64. Same frame math as vrm.getChunk (8 MiB raw stays under maxControlFrame).
+func readLibChunk(p FileChunkParams) (FileChunkResult, error) {
+	if p.Offset < 0 || p.Len <= 0 {
+		return FileChunkResult{}, errors.New("invalid chunk range")
+	}
+	f, err := os.Open(p.Path)
+	if err != nil {
+		return FileChunkResult{}, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return FileChunkResult{}, err
+	}
+	buf := make([]byte, min(p.Len, vrmChunkMax))
+	read, err := f.ReadAt(buf, p.Offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return FileChunkResult{}, err
+	}
+	// ReadAt reports io.EOF when it fills fewer than len(buf) bytes at end-of-file → last chunk.
+	return FileChunkResult{
+		DataBase64: base64.StdEncoding.EncodeToString(buf[:read]),
+		EOF:        errors.Is(err, io.EOF),
+		Total:      fi.Size(),
+		MTimeUnix:  fi.ModTime().Unix(),
+	}, nil
 }
 
 // RecorderSource is the subset of *recorder.Recorder a controller drives over the link:
