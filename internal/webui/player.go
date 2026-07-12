@@ -120,8 +120,12 @@ func (u *UI) mpVideoHTML(t mpSt) string {
 	if t.dual() && t.active == 0 { // audio recording is the source - video is a silent preview
 		muted = " muted"
 	}
+	// preload=none: load NOTHING on mount - a large OBS mp4 (often no faststart, moov at EOF)
+	// would otherwise make WebView2 scan the whole multi-GB file just to read metadata. The
+	// loopback server is Range-capable (mediahttp.go http.ServeContent), so playback/seek buffer
+	// progressively on demand instead of pulling the whole file.
 	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video src=` + attrQ(url) +
-		` preload=metadata playsinline` + muted +
+		` preload=none playsinline` + muted +
 		` ontimeupdate=` + attrQ(ev) + ` onplay=` + attrQ(ev) + ` onpause=` + attrQ(ev) +
 		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(ev+`;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`) + ` onerror=` + attrQ(onerr) +
 		`></video></div>`
