@@ -13,10 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/musiclib"
-	"rave.page/mate/internal/seratolib"
-	"rave.page/mate/internal/sysactivity"
 )
 
 // ceTargets returns the detected DJ-software write targets, cached ~30s in ceSt: rail
@@ -193,40 +192,10 @@ func (u *UI) ceWriteTo(sw string) {
 	})
 }
 
-// ceWriteApply performs the per-software cue write (off the action goroutine). Same
-// backup + refuse-while-running discipline as gfApplyTo.
+// ceWriteApply performs the per-software cue write (off the action goroutine). Backup +
+// refuse-while-running discipline lives in cuewriteback (shared with the remotectl peer RPC).
 func (u *UI) ceWriteApply(t gfTarget, updates []musiclib.CueUpdate) (musiclib.WritebackResult, error) {
-	var zero musiclib.WritebackResult
-	switch t.key {
-	case "traktor":
-		// safety: full collection backup before the write
-		if installs, err := musiclib.DiscoverTraktor(); err == nil && len(installs) > 0 && installs[0].Collection != "" {
-			if _, berr := musiclib.BackupCollection(installs[0], libBackupRoot()); berr != nil {
-				return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), berr.Error())
-			}
-		} else if err := gfBackupFile("traktor", t.path); err != nil {
-			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
-		}
-		return musiclib.ApplyCuesNML(t.path, updates)
-	case "rekordbox":
-		if err := gfBackupFile("rekordbox", t.path); err != nil {
-			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
-		}
-		return musiclib.ApplyCuesRekordboxXML(t.path, updates)
-	case "virtualdj":
-		// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
-		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "virtualdj") {
-			return zero, fmt.Errorf("%s", i18n.T("library.gf.vdjRunning"))
-		}
-		if err := gfBackupFile("virtualdj", t.path); err != nil {
-			return zero, fmt.Errorf("%s%s", i18n.T("library.gf.backupFailed"), err.Error())
-		}
-		return musiclib.ApplyCuesVirtualDJ(t.path, updates)
-	case "serato":
-		// per-file temp+verify+rename with its own Serato-running refusal; no library backup needed
-		return seratolib.ApplyCuesSerato(t.path, updates)
-	}
-	return zero, fmt.Errorf("unknown write target %q", t.key)
+	return cuewriteback.ApplyCues(cuewriteback.Target{Key: t.key, Label: t.label, Path: t.path}, updates, libBackupRoot())
 }
 
 func init() {

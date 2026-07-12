@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,11 +20,11 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/musiclib"
-	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/seratolib"
 	"rave.page/mate/internal/sysactivity"
 	"rave.page/mate/internal/tray"
@@ -644,27 +643,18 @@ func (u *UI) gfCalibrate() {
 	})
 }
 
-// gfTarget is one detected DJ-software write destination.
+// gfTarget is one detected DJ-software write destination (cuewriteback.Target, webui view).
 type gfTarget struct {
 	key   string // "traktor" | "rekordbox" | "virtualdj" | "serato"
 	label string // product name (not translated)
 	path  string // file (NML/XML) or _Serato_ dir the write hits
 }
 
-// gfTargets detects which DJ libraries exist on this machine (cheap fs probes).
+// gfTargets detects which DJ libraries exist on this machine (cuewriteback probes).
 func (u *UI) gfTargets() []gfTarget {
 	var out []gfTarget
-	if p := u.gfNMLPath(); p != "" {
-		out = append(out, gfTarget{"traktor", "Traktor", p})
-	}
-	if installs, err := musiclib.DiscoverRekordbox(); err == nil && len(installs) > 0 {
-		out = append(out, gfTarget{"rekordbox", "Rekordbox", installs[0].XML})
-	}
-	if p, err := musiclib.DiscoverVirtualDJ(); err == nil && p != "" {
-		out = append(out, gfTarget{"virtualdj", "VirtualDJ", p})
-	}
-	if dirs := serato.DetectSeratoDirs(); len(dirs) > 0 {
-		out = append(out, gfTarget{"serato", "Serato", dirs[0]})
+	for _, t := range cuewriteback.DetectTargets(strings.TrimSpace(u.svc.Cfg.Features.NML.CollectionPath)) {
+		out = append(out, gfTarget{t.Key, t.Label, t.Path})
 	}
 	return out
 }
@@ -803,28 +793,7 @@ func gfWriteErr(err error) error {
 
 // gfBackupFile copies a library file into the backup root before a write.
 func gfBackupFile(app, path string) error {
-	root := libBackupRoot()
-	if root == "" {
-		return fmt.Errorf("no backup dir")
-	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return err
-	}
-	src, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = src.Close() }()
-	name := fmt.Sprintf("%s-%s-%s", app, time.Now().Format("20060102-150405"), filepath.Base(path))
-	dst, err := os.Create(filepath.Join(root, name))
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = dst.Close()
-		return err
-	}
-	return dst.Close()
+	return cuewriteback.BackupFile(libBackupRoot(), app, path)
 }
 
 func (u *UI) gfApplyFail(msg string) {
