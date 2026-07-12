@@ -378,7 +378,11 @@ func RegisterLibraryCueEdit(e *Endpoint, lib *libdb.DB, pub PublishFunc, nmlOver
 		if paths == nil {
 			paths = []string{}
 		}
-		return PlaylistTracksResult{Paths: paths}, nil
+		name := ""
+		if row, ok, _ := lib.PlaylistByID(p.ID); ok {
+			name = row.Name
+		}
+		return PlaylistTracksResult{Paths: paths, Name: name}, nil
 	})
 }
 

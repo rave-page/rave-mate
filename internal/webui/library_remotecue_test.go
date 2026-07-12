@@ -1,10 +1,14 @@
 package webui
 
-// rce-mode state-machine tests (#89): mirror-act interception + the persistence-hook
-// branching - in a remote session every editor mutation must stay in ceSt (svc.Lib is nil
-// here, so any local persist path would nil-deref) and never arm the tag/DB write-behind.
+// rce-mode state-machine tests (#89 + #90 sets): mirror-act interception + the
+// persistence-hook branching - in a remote session every editor mutation must stay in ceSt
+// (svc.Lib is nil here, so any local persist path would nil-deref) and never arm the tag/DB
+// write-behind - plus set-session nav (dirty guard, bounds), gridless scan filtering and
+// the next-track-ready flag.
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,29 +19,33 @@ import (
 	"rave.page/mate/internal/ui"
 )
 
-func TestRceInterceptOpen(t *testing.T) {
+func TestRceIntercept(t *testing.T) {
 	for _, tc := range []struct {
-		payload string
-		path    string
-		ok      bool
+		payload   string
+		kind, arg string
+		ok        bool
 	}{
-		{`{"act":"ce-open:C:\\music\\a.mp3"}`, `C:\music\a.mp3`, true},
-		{`{"act":"ce-open:/home/dj/a.flac","val":"x"}`, "/home/dj/a.flac", true},
-		{`{"act":"ce-open:"}`, "", false},         // empty path
-		{`{"act":"ce-open-pl:12"}`, "", false},    // set flow forwards (P3)
-		{`{"act":"ce-open-dir"}`, "", false},      // set flow forwards (P3)
-		{`{"act":"mp-surf:down:0.5"}`, "", false}, // unrelated act
-		{`not json`, "", false},
+		{`{"act":"ce-open:C:\\music\\a.mp3"}`, "track", `C:\music\a.mp3`, true},
+		{`{"act":"ce-open:/home/dj/a.flac","val":"x"}`, "track", "/home/dj/a.flac", true},
+		{`{"act":"ce-open:"}`, "", "", false}, // empty path
+		{`{"act":"ce-open-pl:12"}`, "pl", "12", true},
+		{`{"act":"ce-open-pl:"}`, "", "", false},
+		{`{"act":"ce-open-dir:/mnt/music"}`, "dir", "/mnt/music", true},
+		{`{"act":"menugo:ce-open-dir:D:\\crates"}`, "dir", `D:\crates`, true}, // actionMenu wrap
+		{`{"act":"ce-open-dir"}`, "", "", false},                              // old peer render: forwards, runs peer-side
+		{`{"act":"mp-surf:down:0.5"}`, "", "", false},                         // unrelated act
+		{`not json`, "", "", false},
 	} {
-		path, ok := rceInterceptOpen(tc.payload)
-		if ok != tc.ok || path != tc.path {
-			t.Errorf("rceInterceptOpen(%q) = (%q,%v), want (%q,%v)", tc.payload, path, ok, tc.path, tc.ok)
+		kind, arg, ok := rceIntercept(tc.payload)
+		if ok != tc.ok || kind != tc.kind || arg != tc.arg {
+			t.Errorf("rceIntercept(%q) = (%q,%q,%v), want (%q,%q,%v)",
+				tc.payload, kind, arg, ok, tc.kind, tc.arg, tc.ok)
 		}
 	}
 }
 
 // rceTestUI: headless UI (no window, no Lib) with an rce cue-edit session seeded.
-func rceTestUI(t *testing.T) (*UI, *ceSt) {
+func rceTestUI(t *testing.T) (*UI, *ceSt, *capture) {
 	t.Helper()
 	cap := &capture{}
 	u := newHeadlessUI(ui.Services{Cfg: &config.Config{}}, cap.html, cap.eval)
@@ -64,7 +72,20 @@ func rceTestUI(t *testing.T) (*UI, *ceSt) {
 		baseSHA: remotectl.CueStateSHA(tr.Cues, tr.Beatgrid, drops)}
 	c.syncSel()
 	c.mu.Unlock()
-	return u, c
+	return u, c, cap
+}
+
+// rceSeedSet attaches a set context (pos = index of the open track among paths).
+func rceSeedSet(c *ceSt, pos int, paths ...string) {
+	c.mu.Lock()
+	c.rce.set = &rceSet{label: "Peer Crate", paths: paths, pos: pos}
+	c.mu.Unlock()
+}
+
+func setSnap(c *ceSt) (pos int, nextOK bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rce.set.pos, c.rce.set.nextOK
 }
 
 func (c *ceSt) snap(t *testing.T) (dirty bool, cues, drops int, tagT, dbT bool) {
@@ -75,7 +96,7 @@ func (c *ceSt) snap(t *testing.T) (dirty bool, cues, drops int, tagT, dbT bool) 
 }
 
 func TestRceMutationsStayLocal(t *testing.T) {
-	u, c := rceTestUI(t)
+	u, c, _ := rceTestUI(t)
 
 	if dirty, _, _, _, _ := c.snap(t); dirty {
 		t.Fatal("fresh session must be clean")
@@ -130,7 +151,7 @@ func TestRceMutationsStayLocal(t *testing.T) {
 }
 
 func TestRceDirtyTracksBaseline(t *testing.T) {
-	u, c := rceTestUI(t)
+	u, c, _ := rceTestUI(t)
 	u.ceDropAt(8000, false)
 	if dirty, _, _, _, _ := c.snap(t); !dirty {
 		t.Fatal("mutation must dirty the session")
@@ -142,7 +163,7 @@ func TestRceDirtyTracksBaseline(t *testing.T) {
 }
 
 func TestRceCloseGuardsDirty(t *testing.T) {
-	u, c := rceTestUI(t)
+	u, c, _ := rceTestUI(t)
 	u.ceDropAt(8000, false) // dirty
 	u.ceClose()             // must NOT end the session - confirm modal instead
 	c.mu.Lock()
@@ -162,8 +183,8 @@ func TestRceCloseGuardsDirty(t *testing.T) {
 }
 
 func TestRceNavAndMassApplyGated(t *testing.T) {
-	u, c := rceTestUI(t)
-	u.ceKey("down") // rce: track nav is a local-collection concept - must be inert
+	u, c, _ := rceTestUI(t)
+	u.ceKey("down") // single-track rce (no set): nav must be inert
 	u.ceKey("up")
 	u.ceApplySelected(false)
 	c.mu.Lock()
@@ -173,4 +194,102 @@ func TestRceNavAndMassApplyGated(t *testing.T) {
 		t.Fatalf("nav/mass-apply must be inert in rce mode: active=%v path=%q", active, path)
 	}
 	time.Sleep(50 * time.Millisecond) // surface stray bg persists (nil svc.Lib would panic)
+}
+
+func TestRceSetNavDirtyGuardAndBounds(t *testing.T) {
+	u, c, cap := rceTestUI(t)
+	rceSeedSet(c, 1, `P:\peer\a.mp3`, `P:\peer\track.mp3`, `P:\peer\c.mp3`)
+
+	// bounds: nav past either end is a silent no-op
+	u.rceNavSet(2)
+	u.rceNavSet(-2)
+	if pos, _ := setSnap(c); pos != 1 {
+		t.Fatalf("OOB nav moved pos: %d", pos)
+	}
+
+	// dirty: nav must confirm-discard (targeting the next index), not move
+	u.ceDropAt(8000, false)
+	u.rceNavSet(1)
+	if pos, _ := setSnap(c); pos != 1 {
+		t.Fatalf("dirty nav moved pos: %d", pos)
+	}
+	c.mu.Lock()
+	active, hasRce := c.active, c.rce != nil
+	c.mu.Unlock()
+	if !active || !hasRce {
+		t.Fatal("dirty nav must keep the session")
+	}
+	cap.waitEval(t, "rce-set-go:2")   // confirm-discard modal targets the next index
+	time.Sleep(50 * time.Millisecond) // surface stray bg persists (nil svc.Lib would panic)
+}
+
+func TestRceKeyNavRoutesToSet(t *testing.T) {
+	u, c, cap := rceTestUI(t)
+	rceSeedSet(c, 0, `P:\peer\track.mp3`, `P:\peer\b.mp3`)
+	u.ceDropAt(8000, false) // dirty → key nav must raise the guard, proving the set route
+	u.ceKey("down")
+	cap.waitEval(t, "rce-set-go:1") // ↓ routed to set nav (dirty guard modal)
+	u.ceKey("up")                   // pos 0: silent bounds no-op
+	if pos, _ := setSnap(c); pos != 0 {
+		t.Fatalf("↑ at set start moved pos: %d", pos)
+	}
+}
+
+func TestRceMarkNextReady(t *testing.T) {
+	u, c, _ := rceTestUI(t)
+	rceSeedSet(c, 0, `P:\peer\track.mp3`, `P:\peer\b.mp3`)
+	u.rceMarkNextReady(1, `P:\peer\b.mp3`) // wrong pos
+	if _, ok := setSnap(c); ok {
+		t.Fatal("wrong pos must not flag next-ready")
+	}
+	u.rceMarkNextReady(0, `P:\peer\zzz.mp3`) // wrong path (set changed under the prefetch)
+	if _, ok := setSnap(c); ok {
+		t.Fatal("wrong path must not flag next-ready")
+	}
+	u.rceMarkNextReady(0, `P:\peer\b.mp3`)
+	if _, ok := setSnap(c); !ok {
+		t.Fatal("matching prefetch must flag next-ready")
+	}
+}
+
+func TestRceScanSet(t *testing.T) {
+	grid := []musiclib.GridMarker{{PositionMs: 0, BPM: 128}}
+	mk := func(withGrid bool) remotectl.TrackDetail {
+		d := remotectl.TrackDetail{}
+		d.Track.DurationSec = 120
+		if withGrid {
+			d.Track.Beatgrid = grid
+		}
+		return d
+	}
+	fetch := func(p string) (remotectl.TrackDetail, error) {
+		switch p {
+		case "b":
+			return remotectl.TrackDetail{}, errors.New("not in collection")
+		case "c":
+			return mk(false), nil // gridless
+		default:
+			return mk(true), nil
+		}
+	}
+	eligible, first, skipped, err := rceScanSet(context.Background(), []string{"a", "b", "c", "d"}, fetch, nil)
+	if err != nil || skipped != 2 || len(eligible) != 2 || eligible[0] != "a" || eligible[1] != "d" {
+		t.Fatalf("scan: eligible=%v skipped=%d err=%v", eligible, skipped, err)
+	}
+	if len(first.Track.Beatgrid) != 1 {
+		t.Fatal("first must carry the first eligible track's detail")
+	}
+
+	// canceled ctx aborts
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, _, err := rceScanSet(ctx, []string{"a"}, fetch, nil); err == nil {
+		t.Fatal("canceled ctx must abort the scan")
+	}
+
+	// a dead link (call timeout) aborts instead of burning a timeout per remaining path
+	dead := func(string) (remotectl.TrackDetail, error) { return remotectl.TrackDetail{}, context.DeadlineExceeded }
+	if _, _, _, err := rceScanSet(context.Background(), []string{"a", "b"}, dead, nil); err == nil {
+		t.Fatal("call timeout must abort the scan")
+	}
 }

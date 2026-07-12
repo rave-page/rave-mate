@@ -208,9 +208,11 @@ type PlaylistTracksParams struct {
 	ID int64 `json:"id"`
 }
 
-// PlaylistTracksResult is the playlist's track paths in order.
+// PlaylistTracksResult is the playlist's track paths in order + its display name (empty
+// from peers predating the set-session header, #90).
 type PlaylistTracksResult struct {
 	Paths []string `json:"paths"`
+	Name  string   `json:"name,omitempty"`
 }
 
 // ── recorder (drive the peer's publish cockpit) ─────────────────────────────────

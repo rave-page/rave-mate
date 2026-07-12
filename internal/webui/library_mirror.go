@@ -233,9 +233,9 @@ func injectMirrorBridge(doc string) string {
 // ── input + lifecycle ───────────────────────────────────────────────────────────
 
 // mirrorForwardAct relays the mirrored page's input payload to the peer (executes there).
-// Exception: `ce-open:<path>` never forwards - it launches the LOCAL cue editor on a cached
-// copy of the peer track (library_remotecue.go, #89). Set flows (ce-open-pl:/ce-open-dir)
-// still forward (P3).
+// Exception: the cue-prep opens never forward - `ce-open:<path>` (#89), `ce-open-pl:<id>` +
+// `ce-open-dir:<dir>` (#90) launch the LOCAL cue editor on cached copies of the peer's
+// files (library_remotecue.go). Bare ce-open-dir (older peer render) still forwards.
 func (u *UI) mirrorForwardAct(payload string) {
 	if payload == "" || u.rui == nil {
 		return
@@ -247,8 +247,15 @@ func (u *UI) mirrorForwardAct(payload string) {
 	if target == "" || (status != mirrorLive && status != mirrorConnecting) {
 		return
 	}
-	if path, ok := rceInterceptOpen(payload); ok {
-		u.rceOpen(target, path)
+	if kind, arg, ok := rceIntercept(payload); ok {
+		switch kind {
+		case "track":
+			u.rceOpen(target, arg)
+		case "pl":
+			u.rceOpenPlaylist(target, atoi64(arg))
+		case "dir":
+			u.rceOpenDir(target, arg)
+		}
 		return
 	}
 	hub := u.rui

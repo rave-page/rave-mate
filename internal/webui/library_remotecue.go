@@ -7,6 +7,12 @@ package webui
 // mutations stay in ceSt (never local libdb/file tags - see the c.rce branches in
 // library_cueedit.go); Save ships them back over remotectl library.writeCueData with
 // optimistic concurrency (Conflict → overwrite / re-fetch / cancel).
+//
+// Set flows (#90): ce-open-pl:<id> / ce-open-dir:<dir> are intercepted too - the playlist /
+// remote dir resolves to paths, each trackDetail-gated for a beatgrid, and the editor walks
+// the eligible list one track at a time (rceSet): ↑/↓ + prev/next re-bind via the same
+// single-track machinery (per-track baseSHA + Save), dirty nav confirm-discards like close,
+// and the NEXT track prefetches silently (one ahead, canceled on nav/exit).
 
 import (
 	"context"
@@ -22,6 +28,7 @@ import (
 	"rave.page/mate/internal/cuepattern"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/remotecache"
 	"rave.page/mate/internal/remotectl"
@@ -37,6 +44,16 @@ type ceRemote struct {
 	peerMoved  bool   // peer's cue state changed since fetch/save - Save will conflict
 	savedOnce  bool   // ≥1 successful save (gates the peer DJ-software write-back rail)
 	targets    []remotectl.CueTarget
+	set        *rceSet // non-nil = playlist/folder set session (#90)
+}
+
+// rceSet is the remote set context: the eligible (grid-bearing) peer paths in source order
+// + the open position. paths is read-only after build; nav copies the struct forward.
+type rceSet struct {
+	label  string   // playlist name / folder base ("" = unnamed)
+	paths  []string // peer paths, source order
+	pos    int      // index of the open track
+	nextOK bool     // paths[pos+1] is cached (prefetch landed)
 }
 
 // remote reports rce mode. Caller holds c.mu.
@@ -62,20 +79,31 @@ func (u *UI) selfNodeID() string {
 	return ""
 }
 
-// rceInterceptOpen returns the track path when payload (the mirror's forwarded act JSON) is
-// `ce-open:<path>` - the ONE act the controller handles locally. Set flows
-// (ce-open-pl:/ce-open-dir) still forward and run on the peer (P3).
-func rceInterceptOpen(payload string) (string, bool) {
+// rceIntercept classifies a forwarded mirror act the controller handles locally instead of
+// forwarding: kind "track" (arg = peer path), "pl" (arg = playlist id) or "dir" (arg = peer
+// dir). actionMenu picks arrive wrapped as menugo:<act> - unwrap first. Bare ce-open-dir
+// (older peer render without the dir in the act) is NOT intercepted: it forwards and runs
+// on the peer as before.
+func rceIntercept(payload string) (kind, arg string, ok bool) {
 	var m struct {
 		Act string `json:"act"`
 	}
 	if json.Unmarshal([]byte(payload), &m) != nil {
-		return "", false
+		return "", "", false
 	}
-	if p, ok := strings.CutPrefix(m.Act, "ce-open:"); ok && p != "" {
-		return p, true
+	act := strings.TrimPrefix(m.Act, "menugo:")
+	switch {
+	case strings.HasPrefix(act, "ce-open:"):
+		kind, arg = "track", act[len("ce-open:"):]
+	case strings.HasPrefix(act, "ce-open-pl:"):
+		kind, arg = "pl", act[len("ce-open-pl:"):]
+	case strings.HasPrefix(act, "ce-open-dir:"):
+		kind, arg = "dir", act[len("ce-open-dir:"):]
 	}
-	return "", false
+	if arg == "" {
+		return "", "", false
+	}
+	return kind, arg, true
 }
 
 // ── cache (process-wide; the config data dir is shared by every UI) ──
@@ -142,57 +170,96 @@ func (u *UI) rceCancelPull() {
 	u.rceMu.Unlock()
 }
 
-// rceOpen launches the local-first flow for a peer track: fetch detail + audio (cache-aware,
-// progress modal), then bind the local editor. Runs the network off the act worker.
-func (u *UI) rceOpen(peer, remotePath string) {
+// rceProgModal opens the fetch progress modal (rce-cancel fires the armed pull ctx).
+func (u *UI) rceProgModal() {
+	u.openModal(modal(i18n.T("library.rce.fetchTitle"),
+		`<div id=rce-prog>`+progressBar(0, i18n.T("library.rce.connecting"))+`</div>`,
+		btn(i18n.T("common.cancel"), "outline", "rce-cancel", "")))
+}
+
+// rceFail closes the progress modal (if shown) + toasts, unless the user canceled (the
+// cancel handler already closed it - closing again could kill a newer modal).
+func (u *UI) rceFail(ctx context.Context, err error, shown bool) {
+	if ctx.Err() != nil {
+		return
+	}
+	if shown {
+		u.closeModal()
+	}
+	u.toast(i18n.T("library.rce.fetchFailed") + err.Error())
+}
+
+// rceOpen launches the local-first flow for one peer track (single-track entry, #89).
+func (u *UI) rceOpen(peer, remotePath string) { u.rceLaunch(peer, remotePath, nil) }
+
+// rceLaunch runs the fetch flow with the progress modal up-front; set (nil = single-track)
+// binds on entry. Runs the network off the act worker.
+func (u *UI) rceLaunch(peer, remotePath string, set *rceSet) {
 	client := u.remoteClient(peer)
 	if client == nil {
 		u.toast(i18n.T("library.mirror.noLink"))
 		return
 	}
 	ctx := u.rceArmPull()
-	u.openModal(modal(i18n.T("library.rce.fetchTitle"),
-		`<div id=rce-prog>`+progressBar(0, i18n.T("library.rce.connecting"))+`</div>`,
-		btn(i18n.T("common.cancel"), "outline", "rce-cancel", "")))
-	u.bg(func() { u.rceFetch(ctx, client, peer, remotePath) })
+	u.rceProgModal()
+	u.bg(func() { u.rceFetch(ctx, client, peer, remotePath, set, true) })
 }
 
-// rceFetch: trackDetail → cache lookup / chunked pull → ceEnterRemote. Any error closes the
-// modal with a toast (cancel closes silently).
-func (u *UI) rceFetch(ctx context.Context, client *remotectl.Client, peer, remotePath string) {
-	fail := func(err error) {
-		u.closeModal()
-		if ctx.Err() == nil { // user cancel already closed the modal - stay quiet
-			u.toast(i18n.T("library.rce.fetchFailed") + err.Error())
-		}
-	}
+// rceFetch: trackDetail → rceBind. shown = the progress modal is already open (else it
+// opens lazily on a cache miss - set nav from cache is modal-free). Reports entry.
+func (u *UI) rceFetch(ctx context.Context, client *remotectl.Client, peer, remotePath string,
+	set *rceSet, shown bool) bool {
 	detail, err := rceCall(ctx, func(c2 context.Context) (remotectl.TrackDetail, error) {
 		return client.LibraryTrackDetail(c2, remotePath)
 	})
 	if err != nil {
-		fail(err)
-		return
+		u.rceFail(ctx, err, shown)
+		return false
 	}
+	return u.rceBind(ctx, client, peer, remotePath, detail, set, shown)
+}
+
+// rceBind: grid gate → cache lookup / chunked pull → ceEnterRemote → write-back targets +
+// next-track prefetch. Any error closes the modal with a toast (cancel stays silent).
+func (u *UI) rceBind(ctx context.Context, client *remotectl.Client, peer, remotePath string,
+	detail remotectl.TrackDetail, set *rceSet, shown bool) bool {
 	if _, gerr := cuepattern.NewGrid(detail.Track.Beatgrid, detail.Track.DurationSec*1000); gerr != nil {
-		u.closeModal()
+		if shown {
+			u.closeModal()
+		}
 		u.toast(i18n.T("library.ce.noGrid"))
-		return
+		return false
 	}
 	cache := u.rceCacheStore()
 	if cache == nil {
-		fail(errors.New(i18n.T("library.rce.cacheFail")))
-		return
+		u.rceFail(ctx, errors.New(i18n.T("library.rce.cacheFail")), shown)
+		return false
 	}
 	local, ok := cache.Lookup(peer, remotePath, detail.MTimeUnix)
 	if !ok {
-		local, err = u.rcePullFile(ctx, client, cache, peer, remotePath, &detail)
-		if err != nil {
-			fail(err)
-			return
+		if !shown {
+			u.rceProgModal()
+			shown = true
+		}
+		name := baseNameAny(remotePath)
+		progress := func(done, total int64) {
+			frac := 0.0
+			if total > 0 {
+				frac = float64(done) / float64(total)
+			}
+			cap := fmt.Sprintf("%s · %s / %s", name, humanBytes(uint64(done)), humanBytes(uint64(total)))
+			u.eval("window.__patch('rce-prog'," + jsQuote(progressBar(frac, cap)) + ")")
+		}
+		var err error
+		if local, err = u.rcePullFile(ctx, client, cache, peer, remotePath, &detail, progress); err != nil {
+			u.rceFail(ctx, err, shown)
+			return false
 		}
 	}
-	u.ceEnterRemote(peer, u.rcePeerName(peer), remotePath, detail, local)
-	u.closeModal()
+	u.ceEnterRemote(peer, u.rcePeerName(peer), remotePath, detail, local, set)
+	if shown {
+		u.closeModal()
+	}
 	// peer DJ-software write-back targets, best-effort off the open path
 	u.bg(func() {
 		targets, terr := rceCall(context.Background(), client.CueWriteTargets)
@@ -207,6 +274,10 @@ func (u *UI) rceFetch(ctx context.Context, client *remotectl.Client, peer, remot
 		c.mu.Unlock()
 		u.cePatchRail()
 	})
+	if set != nil {
+		u.rcePrefetchNext(peer, *set)
+	}
+	return true
 }
 
 // rceCall runs one client RPC under the default per-call timeout, honoring the pull ctx.
@@ -217,6 +288,7 @@ func rceCall[T any](ctx context.Context, fn func(context.Context) (T, error)) (T
 }
 
 // rcePullFile replicates the peer's audio file into the cache via sequential fileChunk reads.
+// progress (nil = silent prefetch) reports (done, total) bytes.
 // Bytes are copied VERBATIM - never transcode the pull: the cached copy keeps the peer file's
 // exact codec, so CodecLeadSkipMs and every ms-domain cue/grid/drop value line up 1:1 with the
 // peer's own playback (#89 lead-skip correctness).
@@ -224,16 +296,7 @@ func rceCall[T any](ctx context.Context, fn func(context.Context) (T, error)) (T
 // exact-boundary read, so the last full-size chunk can arrive without EOF. A MTimeUnix change
 // mid-pull means the peer file was rewritten: restart once (fresh detail), then give up.
 func (u *UI) rcePullFile(ctx context.Context, client *remotectl.Client, cache *remotecache.Cache,
-	peer, remotePath string, detail *remotectl.TrackDetail) (string, error) {
-	name := baseNameAny(remotePath)
-	progress := func(done, total int64) {
-		frac := 0.0
-		if total > 0 {
-			frac = float64(done) / float64(total)
-		}
-		cap := fmt.Sprintf("%s · %s / %s", name, humanBytes(uint64(done)), humanBytes(uint64(total)))
-		u.eval("window.__patch('rce-prog'," + jsQuote(progressBar(frac, cap)) + ")")
-	}
+	peer, remotePath string, detail *remotectl.TrackDetail, progress func(done, total int64)) (string, error) {
 	w, err := cache.Writer(peer, remotePath, detail.MTimeUnix)
 	if err != nil {
 		return "", err
@@ -289,7 +352,9 @@ func (u *UI) rcePullFile(ctx context.Context, client *remotectl.Client, cache *r
 			return "", werr
 		}
 		off += int64(len(data))
-		progress(off, total)
+		if progress != nil {
+			progress(off, total)
+		}
 		if off >= total && total > 0 {
 			break
 		}
@@ -309,12 +374,250 @@ func baseNameAny(p string) string {
 	return p
 }
 
+// ── set flows (playlist / folder cue prep, #90) ──
+
+// rceOpenPlaylist: local-first cue prep for a whole peer playlist.
+func (u *UI) rceOpenPlaylist(peer string, id int64) {
+	client := u.remoteClient(peer)
+	if client == nil {
+		u.toast(i18n.T("library.mirror.noLink"))
+		return
+	}
+	ctx := u.rceArmPull()
+	u.rceProgModal()
+	u.bg(func() {
+		res, err := rceCall(ctx, func(c2 context.Context) (remotectl.PlaylistTracksResult, error) {
+			return client.LibraryPlaylistTracksInfo(c2, id)
+		})
+		if err != nil {
+			u.rceFail(ctx, err, true)
+			return
+		}
+		u.rceOpenSet(ctx, client, peer, res.Name, res.Paths)
+	})
+}
+
+// rceOpenDir: local-first cue prep for a peer directory's audio files (non-recursive,
+// same scope as the local ce-open-dir flow) via localMedia.listDirectory.
+func (u *UI) rceOpenDir(peer, dir string) {
+	client := u.remoteClient(peer)
+	if client == nil {
+		u.toast(i18n.T("library.mirror.noLink"))
+		return
+	}
+	ctx := u.rceArmPull()
+	u.rceProgModal()
+	u.bg(func() {
+		l, err := rceCall(ctx, func(c2 context.Context) (localmedia.Listing, error) {
+			return client.ListDirectory(c2, dir, false)
+		})
+		if err == nil && l.Error != "" {
+			err = errors.New(l.Error)
+		}
+		if err != nil {
+			u.rceFail(ctx, err, true)
+			return
+		}
+		var paths []string
+		for _, e := range l.Entries {
+			if !e.IsDirectory && pubIsAudio(e.Name) {
+				paths = append(paths, e.Path)
+			}
+		}
+		u.rceOpenSet(ctx, client, peer, baseNameAny(dir), paths)
+	})
+}
+
+// rceOpenSet scans paths for grid-bearing peer tracks and enters the first as a set
+// session. Caller shows the progress modal + runs on a bg goroutine.
+func (u *UI) rceOpenSet(ctx context.Context, client *remotectl.Client, peer, label string, paths []string) {
+	n := len(paths)
+	eligible, first, skipped, err := rceScanSet(ctx, paths, func(p string) (remotectl.TrackDetail, error) {
+		return rceCall(ctx, func(c2 context.Context) (remotectl.TrackDetail, error) {
+			return client.LibraryTrackDetail(c2, p)
+		})
+	}, func(done int) {
+		u.eval("window.__patch('rce-prog'," + jsQuote(progressBar(float64(done)/float64(n),
+			i18n.T("library.rce.scanSet", i18n.A{"i": fmt.Sprint(done), "n": fmt.Sprint(n)}))) + ")")
+	})
+	if err != nil {
+		u.rceFail(ctx, err, true)
+		return
+	}
+	if len(eligible) == 0 {
+		if ctx.Err() == nil {
+			u.closeModal()
+			u.toast(i18n.T("library.ce.setNone"))
+		}
+		return
+	}
+	set := &rceSet{label: label, paths: eligible}
+	if u.rceBind(ctx, client, peer, eligible[0], first, set, true) {
+		u.toast(i18n.T("library.ce.setToast", i18n.A{"n": fmt.Sprint(len(eligible)), "skipped": fmt.Sprint(skipped)}))
+	}
+}
+
+// rceScanSet resolves a candidate path list to its grid-bearing subset (one detail per
+// path, sequential). Per-track failures (not in collection, gridless) skip like the local
+// flow; a dead link (ctx done / call timeout) aborts - otherwise a lost peer burns one
+// timeout per remaining path. first = the first eligible track's detail (saves a re-fetch).
+func rceScanSet(ctx context.Context, paths []string, fetch func(string) (remotectl.TrackDetail, error),
+	progress func(done int)) (eligible []string, first remotectl.TrackDetail, skipped int, err error) {
+	for i, p := range paths {
+		if ctx.Err() != nil {
+			return nil, remotectl.TrackDetail{}, 0, ctx.Err()
+		}
+		d, ferr := fetch(p)
+		if progress != nil {
+			progress(i + 1)
+		}
+		if ferr != nil {
+			if ctx.Err() != nil || errors.Is(ferr, context.DeadlineExceeded) {
+				return nil, remotectl.TrackDetail{}, 0, ferr
+			}
+			skipped++
+			continue
+		}
+		if _, gerr := cuepattern.NewGrid(d.Track.Beatgrid, d.Track.DurationSec*1000); gerr != nil {
+			skipped++
+			continue
+		}
+		if len(eligible) == 0 {
+			first = d
+		}
+		eligible = append(eligible, p)
+	}
+	return eligible, first, skipped, nil
+}
+
+// rceNavSet moves the set session by delta (↑/↓, prev/next buttons). Dirty edits guard
+// with the same confirm-discard the close flow uses (P2 semantics); bounds are silent
+// no-ops like local list nav. No-op for single-track sessions.
+func (u *UI) rceNavSet(delta int) {
+	c := u.ce()
+	c.mu.Lock()
+	r := c.rce
+	if r == nil || !c.active || r.set == nil {
+		c.mu.Unlock()
+		return
+	}
+	tgt := r.set.pos + delta
+	if tgt < 0 || tgt >= len(r.set.paths) {
+		c.mu.Unlock()
+		return
+	}
+	dirty := c.rceDirtyLocked()
+	name := r.peerName
+	c.mu.Unlock()
+	if dirty {
+		u.rceConfirmDiscard(name, fmt.Sprintf("rce-set-go:%d", tgt))
+		return
+	}
+	u.rceSetGo(tgt)
+}
+
+// rceSetGo jumps the set session to index idx (dirty already resolved by the caller). The
+// set pointer only advances when the target actually enters - a failed fetch keeps the
+// current track bound. Progress modal appears only when the target needs a pull.
+func (u *UI) rceSetGo(idx int) {
+	c := u.ce()
+	c.mu.Lock()
+	r := c.rce
+	if r == nil || !c.active || r.set == nil || idx < 0 || idx >= len(r.set.paths) {
+		c.mu.Unlock()
+		return
+	}
+	peer := r.peer
+	set := *r.set
+	set.pos, set.nextOK = idx, false
+	path := set.paths[idx]
+	c.mu.Unlock()
+	u.rceCancelPrefetch() // the foreground pull owns the link now; re-armed after entry
+	client := u.remoteClient(peer)
+	if client == nil {
+		u.toast(i18n.T("library.mirror.noLink"))
+		return
+	}
+	ctx := u.rceArmPull()
+	u.bg(func() { u.rceFetch(ctx, client, peer, path, &set, false) })
+}
+
+// ── next-track prefetch (one ahead, silent, canceled on nav/exit) ──
+
+// rceArmPrefetch cancels any in-flight prefetch and arms a fresh cancellable ctx.
+func (u *UI) rceArmPrefetch() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	u.rceMu.Lock()
+	if u.rcePre != nil {
+		u.rcePre()
+	}
+	u.rcePre = cancel
+	u.rceMu.Unlock()
+	return ctx
+}
+
+func (u *UI) rceCancelPrefetch() {
+	u.rceMu.Lock()
+	if u.rcePre != nil {
+		u.rcePre()
+		u.rcePre = nil
+	}
+	u.rceMu.Unlock()
+}
+
+// rcePrefetchNext warms set.paths[pos+1] into the cache so the next nav is instant. Silent
+// (no modal, no error toasts); strictly one ahead.
+func (u *UI) rcePrefetchNext(peer string, set rceSet) {
+	next := set.pos + 1
+	if next >= len(set.paths) {
+		return
+	}
+	client := u.remoteClient(peer)
+	cache := u.rceCacheStore()
+	if client == nil || cache == nil {
+		return
+	}
+	path := set.paths[next]
+	ctx := u.rceArmPrefetch()
+	u.bg(func() {
+		detail, err := rceCall(ctx, func(c2 context.Context) (remotectl.TrackDetail, error) {
+			return client.LibraryTrackDetail(c2, path)
+		})
+		if err != nil {
+			return
+		}
+		if _, ok := cache.Lookup(peer, path, detail.MTimeUnix); !ok {
+			if _, perr := u.rcePullFile(ctx, client, cache, peer, path, &detail, nil); perr != nil {
+				return
+			}
+		}
+		u.rceMarkNextReady(set.pos, path)
+	})
+}
+
+// rceMarkNextReady flips the "next ready" note if the session still sits one before path.
+func (u *UI) rceMarkNextReady(pos int, path string) {
+	c := u.ce()
+	c.mu.Lock()
+	r := c.rce
+	ok := r != nil && c.active && r.set != nil && r.set.pos == pos &&
+		pos+1 < len(r.set.paths) && r.set.paths[pos+1] == path
+	if ok {
+		r.set.nextOK = true
+	}
+	c.mu.Unlock()
+	if ok {
+		u.eval("window.__patch('rce-info'," + jsQuote(u.rceInfoHTML()) + ")")
+	}
+}
+
 // ── session lifecycle ──
 
 // ceEnterRemote binds the cue editor to the cached copy of a peer track: same machinery as
-// ceEnter (waveform/peaks/audition run locally through mpEnsureFile), plus the rce context.
+// ceEnter (waveform/peaks/audition run locally through mpEnsureFile), plus the rce context
+// (set non-nil = playlist/folder session; nav re-enters here per track).
 // Never touches libSection or the local collection selection - the local library is not involved.
-func (u *UI) ceEnterRemote(peer, peerName, remotePath string, detail remotectl.TrackDetail, cachedPath string) {
+func (u *UI) ceEnterRemote(peer, peerName, remotePath string, detail remotectl.TrackDetail, cachedPath string, set *rceSet) {
 	tr := detail.Track
 	grid, err := cuepattern.NewGrid(tr.Beatgrid, tr.DurationSec*1000)
 	if err != nil {
@@ -339,7 +642,7 @@ func (u *UI) ceEnterRemote(peer, peerName, remotePath string, detail remotectl.T
 	c.report, c.lastErr = nil, ""
 	c.wbApplied, c.wbBusy, c.wbErr = nil, false, ""
 	c.fileTag = false // NEVER tag-write the cached copy - bytes must stay verbatim
-	c.rce = &ceRemote{peer: peer, peerName: peerName, remotePath: remotePath, baseSHA: detail.StateSHA}
+	c.rce = &ceRemote{peer: peer, peerName: peerName, remotePath: remotePath, baseSHA: detail.StateSHA, set: set}
 	c.syncSel()
 	c.mu.Unlock()
 	u.mirrorShutdown() // the rce surface replaces the mirror; a fresh session opens on return
@@ -355,6 +658,8 @@ func (u *UI) ceEnterRemote(peer, peerName, remotePath string, detail remotectl.T
 // rceEnd leaves the remote session (saved or explicitly discarded): unbind the editor and stop
 // cached-copy audio - the mirror that returns has no local transport to reach it.
 func (u *UI) rceEnd() {
+	u.rceCancelPull()
+	u.rceCancelPrefetch()
 	c := u.ce()
 	c.mu.Lock()
 	path := c.path
@@ -486,7 +791,7 @@ func (u *UI) rceConflictModal(peerName string) {
 }
 
 // rceReload re-runs the fetch flow for the current session (discards local edits; cache makes
-// an unchanged file instant).
+// an unchanged file instant). A set session keeps its position.
 func (u *UI) rceReload() {
 	c := u.ce()
 	c.mu.Lock()
@@ -496,8 +801,14 @@ func (u *UI) rceReload() {
 		return
 	}
 	peer, path := r.peer, r.remotePath
+	var set *rceSet
+	if r.set != nil {
+		s2 := *r.set
+		s2.nextOK = false
+		set = &s2
+	}
 	c.mu.Unlock()
-	u.rceOpen(peer, path)
+	u.rceLaunch(peer, path, set)
 }
 
 // ── peer-side DJ-software write-back (after a successful save) ──
@@ -578,11 +889,38 @@ func (u *UI) rceInfoHTML() string {
 	title := trackTitle(c.track)
 	name, remotePath := r.peerName, r.remotePath
 	dirty, moved := c.rceDirtyLocked(), r.peerMoved
+	var setPos, setN int
+	var setLabel string
+	var setNext bool
+	hasSet := r.set != nil
+	if hasSet {
+		setPos, setN, setLabel, setNext = r.set.pos, len(r.set.paths), r.set.label, r.set.nextOK
+	}
 	c.mu.Unlock()
 	var b strings.Builder
 	b.WriteString(`<div class=rp-card>`)
 	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.rce.eyebrow", i18n.A{"name": name})) +
 		`</div><div class=insp-title>` + esc(title) + `</div><div class=insp-sub>` + esc(remotePath) + `</div></div>`)
+	if hasSet { // set header: position + prev/next (mirrors ↑/↓ key nav)
+		args := i18n.A{"i": fmt.Sprint(setPos + 1), "n": fmt.Sprint(setN), "name": setLabel}
+		line := i18n.T("library.rce.setPos", args)
+		if setLabel != "" {
+			line = i18n.T("library.rce.setPosIn", args)
+		}
+		if setNext {
+			line += " · " + i18n.T("library.rce.nextReady")
+		}
+		b.WriteString(`<div class=set-note>` + esc(line) + `</div>`)
+		prev := btnGated(i18n.T("library.rce.setPrev"), i18n.T("library.rce.setEdge"))
+		next := btnGated(i18n.T("library.rce.setNext"), i18n.T("library.rce.setEdge"))
+		if setPos > 0 {
+			prev = btn(i18n.T("library.rce.setPrev"), "outline", "rce-set-prev", "")
+		}
+		if setPos < setN-1 {
+			next = btn(i18n.T("library.rce.setNext"), "outline", "rce-set-next", "")
+		}
+		b.WriteString(btnRow(prev, next))
+	}
 	b.WriteString(`<p class=page-sub>` + esc(i18n.T("library.rce.localNote", i18n.A{"name": name})) + `</p>`)
 	if moved {
 		b.WriteString(hint("warn", i18n.T("library.rce.peerMoved", i18n.A{"name": name})))
@@ -705,4 +1043,11 @@ func init() {
 		u.rceReload()
 	})
 	onPrefix("rce-write:", func(u *UI, m actMsg) { u.rceWriteTo(m.arg("rce-write:")) })
+	// set nav (#90): buttons mirror ↑/↓; rce-set-go = confirm-discard's "proceed" target
+	onExact("rce-set-prev", func(u *UI, _ actMsg) { u.rceNavSet(-1) })
+	onExact("rce-set-next", func(u *UI, _ actMsg) { u.rceNavSet(1) })
+	onPrefix("rce-set-go:", func(u *UI, m actMsg) {
+		u.closeModal()
+		u.rceSetGo(atoi(m.arg("rce-set-go:")))
+	})
 }

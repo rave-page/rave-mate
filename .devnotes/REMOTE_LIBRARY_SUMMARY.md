@@ -49,8 +49,8 @@ webui ruiHub ── headless UI (virtualShell) ──── ruiHub ── Librar
 - **Rig/test seams** (`peerlink`): `RAVE_MATE_PEER_BIND` (loopback bind skips mDNS),
   `RAVE_MATE_PEER_PORTS`, `RAVE_MATE_PEER_SEED` (direct dial, 5s tick, same SAS trust flow).
 - **Local-first remote cue editing** (#89 P2, `webui/library_remotecue.go` +
-  `internal/remotecache`): `ce-open:<path>` from the mirror is the ONE act A intercepts instead
-  of forwarding (set flows ce-open-pl:/ce-open-dir stay forwarded, P3). Flow:
+  `internal/remotecache`): `ce-open:<path>` from the mirror is intercepted instead of
+  forwarded (set flows: next bullet). Flow:
   `library.trackDetail` → cache hit on (peer, path, mtime) or chunked `library.fileChunk` pull
   (8 MiB, verbatim bytes - never transcode, so codec + CodecLeadSkipMs match; completion by
   offset>=Total, EOF flag unreliable on exact-boundary ReadAt; mtime drift → restart once) into
@@ -65,7 +65,23 @@ webui ruiHub ── headless UI (virtualShell) ──── ruiHub ── Librar
   `cueWriteTargets`/`writeCuesTo` buttons (gated while dirty). Peer trackchanged (mesh bus)
   flags "peer state moved" (own-save echo filtered by Origin `peer:<selfNodeID>`), never
   clobbers local edits; dirty close/target-switch confirm-discard; link drop loses nothing.
-  Track nav (↑/↓) + mass-apply inert in rce mode (local-collection concepts).
+  Mass-apply stays inert in rce mode (local-collection concept); ↑/↓ = set nav (next bullet),
+  inert for single-track sessions.
+- **Local-first SET flows** (#90 item 1, same files): `ce-open-pl:<id>` + `ce-open-dir:<dir>`
+  (incl. `menugo:`-wrapped actionMenu picks) intercept too. The dir rides IN the act
+  (`render_library.go` folder menu emits `ce-open-dir:<dir>`; bare `ce-open-dir` from an older
+  peer render still forwards + runs peer-side; the local handler keeps both forms). Resolve:
+  `library.playlistTracks` (result gained additive `name` for the header) /
+  `localMedia.listDirectory` → audio paths → sequential `trackDetail` scan (`rceScanSet`:
+  not-in-collection/gridless skip + toast census like local; ctx-done/call-timeout ABORTS so a
+  dead link doesn't burn one timeout per remaining path) → enter first eligible with
+  `rceSet{label, paths, pos}` on the rce context. Nav (↑/↓ + prev/next buttons in the rce info
+  card, "Track i/N · label"): re-fetch detail (fresh per-track baseSHA) + cache-or-pull through
+  the same single-track machinery; progress modal only on a cache miss; dirty nav = the SAME
+  confirm-discard as close (`rce-set-go:<idx>` proceeds); the set pointer advances only on
+  successful entry. One-ahead prefetch: after entry, N+1 silently pulls into the cache (own
+  cancel ctx, canceled on nav/exit; "next track ready" note). Save stays per-track (P2
+  rail/baseSHA); reload keeps the set position.
 
 ## Bounded buffers (cap + policy)
 
@@ -102,6 +118,11 @@ goroutines on B). Native pickers + chained control blocked in sessions.
 - Non-webview (Fyne) hosts don't serve sessions - controller shows the timeout hint.
 - gridfix engine not installed on the test rig: cockpit renders remotely, engine run not
   exercised (same code path as local run over B's Services).
-- P2 local-first cue editing is unit-tested (rce persistence branching, intercept, cache) but
-  not yet live-verified on the two-instance rig; P3 = set flows (ce-open-pl/ce-open-dir)
-  local-first. Cache-size Settings knob + purge/usage/open-folder shipped (#90, LAN peers card).
+- P2 single-track local-first cue editing is LIVE-VERIFIED on the two-instance rig (fetch →
+  local edit → save-back writes drops into the peer's own library; peer-moved warn; conflict
+  dialog Overwrite/Re-fetch/Cancel; force-overwrite resolves; both instances stay responsive).
+- #90 set flows (ce-open-pl/ce-open-dir local-first, set nav dirty-guard/bounds, one-ahead
+  prefetch) are unit-tested; set-flow live rig verify still pending.
+- Cache-size Settings knob + usage/purge/open-folder shipped (#90, LAN peers card); verified.
+- Set scan is one `trackDetail` RPC per playlist path (sequential, cancellable, progress) - a
+  monster playlist takes a while before the first track opens; batch detail verb if it hurts.

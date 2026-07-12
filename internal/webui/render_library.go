@@ -512,8 +512,9 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 			break
 		}
 	}
+	// dir rides in the act so a mirror controller can resolve THIS (remote) folder (#90)
 	b.WriteString(actionMenu("libfoldermenu", "📁 "+i18n.T("library.browse.folderMenu"), []ssOpt{
-		{Val: "ce-open-dir", Label: i18n.T("library.ce.openDir")},
+		{Val: "ce-open-dir:" + dir, Label: i18n.T("library.ce.openDir")},
 		{Val: "lib-reenc-dir", Label: i18n.T("library.re.dirBtn")},
 		{Val: "lib-markpl", Label: i18n.T("library.re.markBtn")},
 		{Val: "lib-pin", Label: pinLabel},

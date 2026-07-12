@@ -153,8 +153,13 @@ func (c *Client) WriteCuesTo(ctx context.Context, software string, paths []strin
 
 // LibraryPlaylistTracks resolves a peer playlist to its track paths in order.
 func (c *Client) LibraryPlaylistTracks(ctx context.Context, id int64) ([]string, error) {
-	r, err := Do[PlaylistTracksResult](ctx, c.e, c.nodeID, MethodLibPlaylistTracks, PlaylistTracksParams{ID: id})
+	r, err := c.LibraryPlaylistTracksInfo(ctx, id)
 	return r.Paths, err
+}
+
+// LibraryPlaylistTracksInfo: ordered paths + display name (Name empty from older peers).
+func (c *Client) LibraryPlaylistTracksInfo(ctx context.Context, id int64) (PlaylistTracksResult, error) {
+	return Do[PlaylistTracksResult](ctx, c.e, c.nodeID, MethodLibPlaylistTracks, PlaylistTracksParams{ID: id})
 }
 
 // ── recorder (drive the peer's publish cockpit) ─────────────────────────────────

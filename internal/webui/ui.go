@@ -61,8 +61,9 @@ type UI struct {
 	ceState *ceSt
 	ceStore *cuepattern.Store
 
-	rceMu   sync.Mutex         // guards rcePull (remote-track fetch, library_remotecue.go)
+	rceMu   sync.Mutex         // guards rcePull/rcePre (remote-track fetch, library_remotecue.go)
 	rcePull context.CancelFunc // active peer-file pull (nil = none); rce-cancel invokes it
+	rcePre  context.CancelFunc // active next-set-track prefetch (nil = none); nav/exit cancels
 
 	twMu         sync.Mutex
 	twitchRows   []string             // rolling twitch chat/alert feed (cap 250)

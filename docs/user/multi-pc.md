@@ -47,8 +47,12 @@ database with the peer's CPU/GPU. Same layout, same features as sitting at that 
   surviving a link drop mid-edit. **Save cues to \<peer\>** writes the result back into the
   peer's library and file tags; if the peer's cue data changed underneath you, a conflict
   dialog offers overwrite / re-fetch / cancel. After a save you can push the cues into the DJ
-  software installed on the peer, same as the local write-back. (Playlist/folder cue-prep
-  still runs on the peer for now.)
+  software installed on the peer, same as the local write-back.
+- **Playlist/folder cue-prep is local-first too**: “Prepare cues” on a peer playlist or folder
+  checks each track for a beatgrid (skipped ones are counted), then walks the eligible list
+  one track at a time. ↑/↓ or the Prev/Next buttons move through the set - unsaved edits ask
+  before they are discarded - and the next track is quietly pre-copied in the background, so
+  moving on is usually instant. Saving stays per-track.
 - Covers/thumbnails stream through a token-guarded media proxy; embedded video previews may
   be unavailable remotely. Native file dialogs - and anything else that would open on the
   peer's desktop (file/folder openers, external apps, browser sign-ins) - are refused.

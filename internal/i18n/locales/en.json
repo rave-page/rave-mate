@@ -431,7 +431,14 @@
       "discard": "Discard edits",
       "back": "Back to remote library",
       "writeHeader": "Write cues into DJ software on {name}",
-      "writeGate": "Save to the peer first - the DJ-software write-back on the peer uses its saved library state."
+      "writeGate": "Save to the peer first - the DJ-software write-back on the peer uses its saved library state.",
+      "scanSet": "Checking beatgrids · {i} / {n}",
+      "setPos": "Track {i} / {n}",
+      "setPosIn": "Track {i} / {n} · {name}",
+      "setPrev": "‹ Previous",
+      "setNext": "Next ›",
+      "setEdge": "No further tracks in this set.",
+      "nextReady": "next track ready"
     },
     "addToPlaylist": "Add to playlist…",
     "backups": {

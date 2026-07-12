@@ -307,6 +307,24 @@ func (u *UI) ceEnterSet(paths []string, plID int64) {
 	u.toast(i18n.T("library.ce.setToast", i18n.A{"n": fmt.Sprint(len(sel)), "skipped": fmt.Sprint(skipped)}))
 }
 
+// ceOpenDirLocal enters cue prep for dir's audio files (local Browse folder flow).
+func (u *UI) ceOpenDirLocal(dir string) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		u.toast(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
+		return
+	}
+	var paths []string
+	for _, e := range ents {
+		if !e.IsDir() {
+			if p := filepath.Join(dir, e.Name()); pubIsAudio(p) {
+				paths = append(paths, p)
+			}
+		}
+	}
+	u.ceEnterSet(paths, 0)
+}
+
 func (u *UI) ceClose() {
 	c := u.ce()
 	c.mu.Lock()
@@ -1319,13 +1337,15 @@ func (u *UI) ceKey(val string) {
 		return
 	}
 	switch val {
-	case "up": // move the editor to the prev/next collection track (list nav)
+	case "up": // move the editor to the prev/next track (collection list / remote set)
 		if remote {
-			return // rce: one peer track per session - the local collection is unrelated
+			u.rceNavSet(-1) // no-op for single-track remote sessions
+			return
 		}
 		u.ceNav(false)
 	case "down":
 		if remote {
+			u.rceNavSet(1)
 			return
 		}
 		u.ceNav(true)
@@ -1950,23 +1970,11 @@ func init() {
 		paths, _ := u.svc.Lib.PlaylistTracks(id)
 		u.ceEnterSet(paths, id)
 	})
-	onExact("ce-open-dir", func(u *UI, m actMsg) {
-		dir := u.libDirOr()
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			u.toast(i18n.T("library.browse.cannotRead", i18n.A{"path": dir}))
-			return
-		}
-		var paths []string
-		for _, e := range ents {
-			if !e.IsDir() {
-				if p := filepath.Join(dir, e.Name()); pubIsAudio(p) {
-					paths = append(paths, p)
-				}
-			}
-		}
-		u.ceEnterSet(paths, 0)
-	})
+	// the render embeds the folder in the act (ce-open-dir:<dir>) so a mirror controller can
+	// resolve the REMOTE folder locally (#90); bare ce-open-dir (ctl scripts, older renders)
+	// falls back to the current browse dir.
+	onExact("ce-open-dir", func(u *UI, _ actMsg) { u.ceOpenDirLocal(u.libDirOr()) })
+	onPrefix("ce-open-dir:", func(u *UI, m actMsg) { u.ceOpenDirLocal(m.arg("ce-open-dir:")) })
 	onExact("ce-close", func(u *UI, _ actMsg) { u.ceClose() })
 	onExact("ce-drop-add", func(u *UI, _ actMsg) { u.ceToggleDrop(false) })
 	onExact("ce-drop-del", func(u *UI, _ actMsg) { u.ceToggleDrop(true) })
