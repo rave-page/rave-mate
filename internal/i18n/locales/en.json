@@ -1203,6 +1203,7 @@
       "selDrops": "{n} drop markers selected",
       "delHint": "Del / Backspace removes every selected cue and drop in one step.",
       "deletedToast": "Removed {cues} cues + {drops} drops",
+      "remoteReloaded": "Cue data changed by a paired peer — editor reloaded",
       "patternName": "Pattern name…",
       "savePattern": "Save as pattern",
       "noCuesSel": "Select cues first - Shift-drag over them on the wave.",

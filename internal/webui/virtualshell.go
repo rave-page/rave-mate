@@ -94,6 +94,7 @@ func newHeadlessUI(svc ui.Services, emitHTML, emitEval func(string)) *UI {
 	vs := newVirtualShell(u.onAction, emitHTML, emitEval)
 	u.shell = vs
 	go u.evalFlusher()
+	u.libWatchStart() // mirrors track peer/local cue edits too (Stop() unsubscribes)
 	return u
 }
 

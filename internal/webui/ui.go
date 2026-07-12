@@ -42,6 +42,7 @@ type UI struct {
 	stop         chan struct{}
 	closed       bool
 	trayStop     func() // system-tray teardown (webview renderer only); nil off Windows / before ready
+	libWatchStop func() // library.trackchanged unsubscribe (library_libwatch.go); nil before start
 
 	updMgr *updater.Manager // self-update state machine (5-min poll; nil until onReady; disabled on dev builds)
 
@@ -148,6 +149,7 @@ func (u *UI) onReady() {
 	go u.livePush()
 	u.initUpdater()
 	u.subscribeTwitch()
+	u.libWatchStart()
 	u.startTray()
 }
 
@@ -202,11 +204,14 @@ func (u *UI) Stop() {
 	}
 	u.closed = true
 	close(u.stop)
-	trayStop := u.trayStop
-	u.trayStop = nil
+	trayStop, libWatchStop := u.trayStop, u.libWatchStop
+	u.trayStop, u.libWatchStop = nil, nil
 	u.mu.Unlock()
 	if trayStop != nil {
 		trayStop()
+	}
+	if libWatchStop != nil {
+		libWatchStop()
 	}
 	if u.shell != nil {
 		u.shell.terminate()

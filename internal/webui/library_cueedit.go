@@ -565,7 +565,9 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	u.bg(func() {
 		if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 			u.logErr("save drops", err)
+			return
 		}
+		u.libNotifyTrackChanged(path) // file-tag mirror rides the write-behind (file ≠ libdb)
 	})
 	u.libDropsChanged(path, drops)
 	u.cePatchWave()
@@ -592,6 +594,7 @@ func (u *UI) ceSetCues(tr musiclib.Track, cues []musiclib.CuePoint) {
 			}
 		}
 		s.mu.Unlock()
+		u.libNotifyTrackChanged(tr.Path)
 		u.ceReloadTrack()
 		u.patchMain()
 	})
@@ -668,7 +671,9 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		u.bg(func() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 				u.logErr("save drops", err)
+				return
 			}
+			u.libNotifyTrackChanged(path) // file-tag mirror rides the write-behind (file ≠ libdb)
 		})
 		u.libDropsChanged(path, drops)
 	}
@@ -903,6 +908,7 @@ func (u *UI) ceDeleteSelected() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, dropsCopy); err != nil {
 				u.logErr("save drops", err)
 			}
+			u.libNotifyTrackChanged(path)
 		})
 		u.libDropsChanged(path, dropsCopy)
 	}
@@ -1044,6 +1050,7 @@ func (u *UI) ceApply(toMemory bool) {
 		c.mu.Lock()
 		c.report, c.toMem, c.lastErr = &rep, toMemory, ""
 		c.mu.Unlock()
+		u.libNotifyTrackChanged(tr.Path)
 		u.ceReloadTrack()
 		u.toast(i18n.T("library.ce.appliedToast", i18n.A{"n": fmt.Sprint(rep.Added)}))
 		u.patchMain()
@@ -1112,6 +1119,7 @@ func (u *UI) ceApplySelected(toMemory bool) {
 				}
 			}
 			s.mu.Unlock()
+			u.libNotifyTrackChanged(j.tr.Path)
 			applied++
 		}
 		u.ceReloadTrack()
@@ -1151,6 +1159,7 @@ func (u *UI) ceConvertAll() {
 			}
 		}
 		s.mu.Unlock()
+		u.libNotifyTrackChanged(tr.Path)
 		u.ceReloadTrack()
 		u.toast(i18n.T("library.ce.convertedToast"))
 		u.patchMain()
@@ -1381,6 +1390,7 @@ func (u *UI) ceGridPersist(path string) {
 	if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 		u.logErr("save drops", err)
 	}
+	u.libNotifyTrackChanged(path) // debounce fired = the libdb write for this nudge run landed
 }
 
 // ceAudition: hold Space = play from the beat cursor, release = PAUSE + re-seek to the

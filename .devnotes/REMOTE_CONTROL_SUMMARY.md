@@ -25,6 +25,23 @@ Request/response over `ChanControl`, mirroring the studio wire body (`{t,id,meth
 `*libdb.DB`. Wired in `app.go`: `peerBridge.SetControlSink(ep.OnControl)`, `SendTo` on ChanControl.
 Library tracks are server-side **paged + filtered** (a page at a time under the 768 KB frame cap).
 
+### Remote cue editing - host capabilities (#88 P1)
+`library.trackDetail / fileChunk / writeCueData / cueWriteTargets / writeCuesTo /
+playlistTracks` (`RegisterLibraryCueEdit`): a controller pulls a peer track's cue state +
+audio (chunked, 8 MiB clamp, **library tracks only** - never arbitrary paths), edits
+locally, writes back with optimistic concurrency. `TrackDetail.StateSHA` =
+`CueStateSHA(cues, beatgrid, drops)` - sha256 hex over compact JSON
+`{"cues":[…],"beatgrid":[…],"drops":[…]}`, nil→`[]`; a stale `BaseSHA` returns
+`Conflict` + fresh detail (no write) unless `Force`. Writes mirror the local editor
+(cues → beatgrid when sent → drops when sent + best-effort file tag) and publish
+`libdb.TopicTrackChanged` on the eventbus (local fan-out + peer broadcast). Every webui
+UI (window + headless mirrors) subscribes (`library_libwatch.go`): patches its `libSt`,
+repaints library fragments, re-arms an open cue editor on the same path (+toast) -
+never switches tabs or moves selection. DJ-software write-back detection/apply lives in
+`internal/cuewriteback` (extracted from webui gridfix/cuewrite; backup-first,
+VirtualDJ-running refusal), shared by the webui router and `library.writeCuesTo`.
+Controller-side UI = P2.
+
 ### Native UI
 - `view_remote.go`: the switcher + `remoteBrowser` (streamed in-app directory picker fed by
   `localMedia.listDirectory` - never a native dialog on either box).
