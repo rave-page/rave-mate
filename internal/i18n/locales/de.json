@@ -367,7 +367,7 @@
     "mirror": {
       "banner": "Steuert {name}",
       "connecting": "Verbinde mit der entfernten Bibliothek…",
-      "audioNote": "Alles hier läuft auf dem entfernten Computer - Audio-Vorhören spielt dort ab.",
+      "audioNote": "Alles hier läuft auf dem entfernten Computer - Audio-Vorhören ist dort deaktiviert, es wird also nichts laut abgespielt.",
       "closed": "Remote-Sitzung beendet.",
       "disconnected": "Peer getrennt.",
       "timeout": "Der Peer hat nicht geantwortet - er läuft womöglich mit einer älteren rave-mate-Version ohne Remote-Bibliothek.",
@@ -1856,6 +1856,7 @@
       "offsetFormat": "Versatz-Format: [-]mm:ss.s oder Sekunden",
       "playFailed": "Wiedergabe fehlgeschlagen: ",
       "playerUnavailable": "Player nicht verfügbar",
+      "remoteAudioOff": "In einer Remote-Sitzung wird kein Audio abgespielt - es würde auf dem gesteuerten Computer erklingen. Spiele die Datei stattdessen lokal ab.",
       "silenceFailed": "Stille-Erkennung fehlgeschlagen: ",
       "timeFormat": "Zeitformat: mm:ss.s (oder h:mm:ss)"
     },

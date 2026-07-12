@@ -252,9 +252,9 @@ func (u *UI) ceEnter(path string) {
 	u.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
 	// track nav must not leave the previous file playing with no transport bound to it
-	if u.svc.Player != nil {
-		if st := u.svc.Player.State(); st.Playing && st.Path != path {
-			u.mpAudCall("library", "stop", func() { u.svc.Player.Stop() })
+	if pl := u.player(); pl != nil {
+		if st := pl.State(); st.Playing && st.Path != path {
+			u.mpAudCall("library", "stop", func() { pl.Stop() })
 		}
 	}
 	// keep the collection selection in sync with the editor target: the row
@@ -433,10 +433,11 @@ func (u *UI) ceTagWriter(path string) {
 
 // ceEngineHolds reports whether the audio engine has path open (playing OR paused decoder).
 func (u *UI) ceEngineHolds(path string) bool {
-	if u.svc.Player == nil {
+	pl := u.player()
+	if pl == nil {
 		return false
 	}
-	st := u.svc.Player.State()
+	st := pl.State()
 	return st.Playing && st.Path == path
 }
 
@@ -1400,11 +1401,12 @@ func (u *UI) ceAudition(down bool) {
 	local := clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 	if !down {
 		tr := u.mpEngineState(&t, m)
-		if m.kind != "video" && tr.loaded && !tr.paused && u.svc.Player != nil {
+		pl := u.player()
+		if m.kind != "video" && tr.loaded && !tr.paused && pl != nil {
 			path := m.path
 			u.mpAudCall(host, "pause", func() {
-				u.svc.Player.TogglePause()
-				u.svc.Player.SeekExplicit(local) // pre-position for the next press
+				pl.TogglePause()
+				pl.SeekExplicit(local) // pre-position for the next press
 			})
 			u.ceArmIdleStop(path)
 			u.mpPatchTransport(u.mpSnap(host))
@@ -1415,9 +1417,11 @@ func (u *UI) ceAudition(down bool) {
 	}
 	u.ceCancelIdleStop()
 	if tr := u.mpEngineState(&t, m); tr.loaded {
-		u.svc.Player.SeekExplicit(local) // beat-precise: bypass the 0.5s seek-noop guard
-		if tr.paused {
-			u.mpAudCall(host, "play", func() { u.svc.Player.TogglePause() })
+		if pl := u.player(); pl != nil {
+			pl.SeekExplicit(local) // beat-precise: bypass the 0.5s seek-noop guard
+			if tr.paused {
+				u.mpAudCall(host, "play", func() { pl.TogglePause() })
+			}
 		}
 		u.mpPatchTransport(u.mpSnap(host))
 		return
@@ -1436,11 +1440,12 @@ func (u *UI) ceArmIdleStop(path string) {
 		c.idleTimer.Stop()
 	}
 	c.idleTimer = time.AfterFunc(ceIdleStop, func() {
-		if u.svc.Player == nil {
+		pl := u.player()
+		if pl == nil {
 			return
 		}
-		if st := u.svc.Player.State(); st.Path == path && st.Playing && st.Paused {
-			u.svc.Player.Stop()
+		if st := pl.State(); st.Path == path && st.Playing && st.Paused {
+			pl.Stop()
 			u.mpPatchTransport(u.mpSnap("library"))
 		}
 	})
@@ -1471,10 +1476,11 @@ func (u *UI) cePrewarmSeek() {
 		c.prewarmTimer.Stop()
 	}
 	c.prewarmTimer = time.AfterFunc(150*time.Millisecond, func() {
-		if u.svc.Player == nil {
+		pl := u.player()
+		if pl == nil {
 			return
 		}
-		if st := u.svc.Player.State(); st.Path != path || !st.Playing || !st.Paused {
+		if st := pl.State(); st.Path != path || !st.Playing || !st.Paused {
 			return
 		}
 		c.mu.Lock()
@@ -1488,7 +1494,7 @@ func (u *UI) cePrewarmSeek() {
 		if m == nil || m.path != path {
 			return
 		}
-		u.svc.Player.SeekExplicit(clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0)))
+		pl.SeekExplicit(clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0)))
 	})
 	c.mu.Unlock()
 }

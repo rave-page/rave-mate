@@ -367,7 +367,7 @@
     "mirror": {
       "banner": "Controlando {name}",
       "connecting": "Conectando con la biblioteca remota…",
-      "audioNote": "Todo lo de abajo se ejecuta en el equipo remoto: la preescucha de audio suena allí.",
+      "audioNote": "Todo lo de abajo se ejecuta en el equipo remoto: la preescucha de audio está desactivada allí, así que nada suena en él.",
       "closed": "Sesión remota finalizada.",
       "disconnected": "Par desconectado.",
       "timeout": "El par no respondió: puede que ejecute una versión antigua de rave-mate sin biblioteca remota.",
@@ -1856,6 +1856,7 @@
       "offsetFormat": "Formato de desfase: [-]mm:ss.s o segundos",
       "playFailed": "Error de reproducción: ",
       "playerUnavailable": "Reproductor no disponible",
+      "remoteAudioOff": "El audio no se reproduce en una sesión remota: sonaría en el equipo controlado. Reproduce el archivo localmente.",
       "silenceFailed": "Error en la detección de silencio: ",
       "timeFormat": "Formato de tiempo: mm:ss.s (o h:mm:ss)"
     },

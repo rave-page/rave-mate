@@ -367,7 +367,7 @@
     "mirror": {
       "banner": "Contrôle de {name}",
       "connecting": "Connexion à la bibliothèque distante…",
-      "audioNote": "Tout ce qui suit s'exécute sur l'ordinateur distant - la pré-écoute audio y est jouée.",
+      "audioNote": "Tout ce qui suit s'exécute sur l'ordinateur distant - la pré-écoute audio y est désactivée, rien n'y est donc diffusé.",
       "closed": "Session distante terminée.",
       "disconnected": "Pair déconnecté.",
       "timeout": "Le pair n'a pas répondu - il utilise peut-être une version de rave-mate sans bibliothèque distante.",
@@ -1856,6 +1856,7 @@
       "offsetFormat": "Format de décalage : [-]mm:ss.s ou secondes",
       "playFailed": "Échec de la lecture : ",
       "playerUnavailable": "Lecteur indisponible",
+      "remoteAudioOff": "L'audio ne joue pas dans une session distante - il retentirait sur l'ordinateur contrôlé. Lisez le fichier en local à la place.",
       "silenceFailed": "Échec de la détection de silence : ",
       "timeFormat": "Format d'heure : mm:ss.s (ou h:mm:ss)"
     },

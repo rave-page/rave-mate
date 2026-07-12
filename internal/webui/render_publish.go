@@ -158,10 +158,11 @@ func (u *UI) pubNowPlayingHTML() string {
 // pubPlayerHTML shows the shared audio player's live position (tick-patched via pub-hero) so
 // the transport readout stays fresh without rebuilding the detail pane's seek control.
 func (u *UI) pubPlayerHTML() string {
-	if u.svc.Player == nil {
+	pl := u.player() // gated read: a remote mirror must not leak this machine's playback
+	if pl == nil {
 		return ""
 	}
-	st := u.svc.Player.State()
+	st := pl.State()
 	if !st.Playing || st.Path == "" {
 		return ""
 	}

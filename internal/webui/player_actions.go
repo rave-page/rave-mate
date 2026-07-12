@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/jobs"
 	"rave.page/mate/internal/libdb"
@@ -245,6 +246,23 @@ func (t *mpSt) axisOutEff() float64 {
 
 // ── engines (audio: featurehost player · video: embedded <video> mirror) ────────
 
+// player is the ONE choke point for the shared audio engine: nil for a headless (remote-
+// mirror) session - remote control must never start/stop/seek audio on THIS machine.
+func (u *UI) player() *featurehost.PlayerProxy {
+	if u.virtual() {
+		return nil
+	}
+	return u.svc.Player
+}
+
+// playerGateKey picks the "no audio" toast: headless sessions gate audio by design.
+func (u *UI) playerGateKey() string {
+	if u.virtual() {
+		return "player.toast.remoteAudioOff"
+	}
+	return "player.toast.playerUnavailable"
+}
+
 // mpTr is a media-local transport snapshot.
 type mpTr struct {
 	loaded          bool // the engine currently has this file
@@ -267,10 +285,11 @@ func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
 		}
 		return mpTr{loaded: true, playing: !v.paused, paused: v.paused, cur: v.cur, total: total}
 	}
-	if u.svc.Player == nil {
+	pl := u.player()
+	if pl == nil {
 		return mpTr{}
 	}
-	st := u.svc.Player.State()
+	st := pl.State()
 	if st.Path != m.path || !st.Playing {
 		return mpTr{}
 	}
@@ -359,7 +378,11 @@ func (u *UI) mpPlayToggle(host string) {
 			if tr.paused {
 				opt = "play"
 			}
-			u.mpAudCall(host, opt, func() { u.svc.Player.TogglePause() })
+			u.mpAudCall(host, opt, func() {
+				if pl := u.player(); pl != nil {
+					pl.TogglePause()
+				}
+			})
 		}
 		u.mpPatchTransport(u.mpSnap(host))
 		return
@@ -382,15 +405,16 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		u.mpPatchTransport(u.mpSnap(host))
 		return
 	}
-	if u.svc.Player == nil {
-		u.toast(i18n.T("player.toast.playerUnavailable"))
+	pl := u.player()
+	if pl == nil {
+		u.toast(i18n.T(u.playerGateKey()))
 		return
 	}
 	path := m.path
 	u.mpAudCall(host, "", func() { // guarded: double-press can't stack Play RPCs
 		// start offset rides the play RPC: the engine decodes at seekTo directly (no
 		// position-0 blip, no seek respawn)
-		if err := u.svc.Player.PlayFrom(path, math.Max(seekTo, 0)); err != nil {
+		if err := pl.PlayFrom(path, math.Max(seekTo, 0)); err != nil {
 			u.logErr("player play", err)
 			u.toast(i18n.T("player.toast.playFailed") + err.Error())
 		}
@@ -406,8 +430,8 @@ func (u *UI) mpStop(host string) {
 	if m.kind == "video" {
 		u.mpVidEval(host, "v.pause();v.currentTime=0;")
 		u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, 0 })
-	} else if u.svc.Player != nil {
-		u.mpAudCall(host, "stop", func() { u.svc.Player.Stop() }) // optimistic idle; async halt
+	} else if pl := u.player(); pl != nil {
+		u.mpAudCall(host, "stop", func() { pl.Stop() }) // optimistic idle; async halt
 	}
 	t = u.mpSnap(host)
 	u.mpPatchTransport(t)
@@ -429,7 +453,9 @@ func (u *UI) mpSeekAxis(host string, axisSec float64) {
 		return
 	}
 	if tr := u.mpEngineState(&t, m); tr.loaded {
-		u.svc.Player.SeekExplicit(local) // user click = real intent; bypass the noop guard
+		if pl := u.player(); pl != nil {
+			pl.SeekExplicit(local) // user click = real intent; bypass the noop guard
+		}
 	}
 }
 
@@ -960,8 +986,8 @@ func init() {
 		})
 		if t.active != prev { // silence the side that lost focus - never double-play
 			if t.media[t.active].kind == "video" {
-				if u.svc.Player != nil {
-					u.bg(func() { u.svc.Player.Stop() }) // blocking halt off the act worker
+				if pl := u.player(); pl != nil {
+					u.bg(func() { pl.Stop() }) // blocking halt off the act worker
 				}
 				u.mpVidEval(host, "v.muted=false;")
 			} else {
