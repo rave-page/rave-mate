@@ -199,6 +199,18 @@ func (s *mpMediaSrv) evictImgLocked() {
 }
 
 func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
+	// Cross-origin fetch support: the webview page has an opaque origin (loaded via SetHtml), so
+	// reading loopback bytes with fetch() (the point-cloud viewer) is a CORS request. Loopback-only
+	// + unguessable per-file token, so ACAO:* is safe. Also satisfy Chromium's Private-Network
+	// preflight (public/opaque → localhost). Media elements (<video>/<img>) don't need this; fetch does.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Range")
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

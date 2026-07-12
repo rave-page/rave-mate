@@ -1,0 +1,21 @@
+/* RMPC point-cloud viewer modal (motion_pcviewer.go + pc_viewer.js). */
+
+.pcv-modal { width: min(1024px, calc(100vw - 32px)); }
+.pcv-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+.pcv-stage { position: relative; width: 100%; height: min(60vh, 560px);
+  background: #0a0a0a; border: 1px solid var(--rp-faint,#3c414d); border-radius: var(--radius-2,8px); overflow: hidden; }
+.pcv-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.pcv-canvas:active { cursor: grabbing; }
+
+/* status / load / error message centered over the stage (hidden while rendering). */
+.pcv-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px; font: 13px var(--font-mono,monospace); color: var(--rp-muted,#B98AA0);
+  background: rgba(10,10,10,.6); }
+
+.pcv-transport { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pcv-transport .pcv-play { flex: 0 0 auto; }
+.pcv-transport .slider-input { flex: 1 1 200px; }
+.pcv-time { flex: 0 0 auto; font: 12px var(--font-mono,monospace); color: var(--rp-mint,#08F79B); }
+.pcv-info { font: 12px var(--font-mono,monospace); color: var(--rp-muted,#B98AA0); }
+.pcv-hint { font: 10px var(--font-mono,monospace); color: var(--rp-muted,#B98AA0); }

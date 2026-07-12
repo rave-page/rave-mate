@@ -164,7 +164,9 @@ func (u *UI) moStudioHTML() string {
 	list.WriteString(btnRow(
 		btn(i18n.T("common.refresh"), "ghost", "mo-rec-refresh", ""),
 		btn(i18n.T("motion.exportAnim"), "outline", "pick-save:anim:mo-export", ""),
-		btn(i18n.T("motion.renderVideo"), "outline", "mo-render", "")))
+		btn(i18n.T("motion.renderVideo"), "outline", "mo-render", ""),
+		// View any exported .rmpc in the raw-WebGL point-cloud viewer (needs no avatar loaded).
+		btn(i18n.T("motion.pcView"), "outline", "pick-file:mo-pc-view", "")))
 	list.WriteString(`<div id=mo-render-prog>` + u.moRenderProgHTML() + `</div>`)
 	list.WriteString(u.moAvatarHTML())
 
