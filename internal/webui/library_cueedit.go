@@ -30,32 +30,36 @@ import (
 var ceJumpSizes = []float64{1, 2, 4, 8, 16, 32, 64}
 
 type ceSt struct {
-	mu       sync.Mutex
-	active   bool
-	path     string
-	track    musiclib.Track
-	grid     *cuepattern.Grid
-	drops    []float64
-	cursorMs float64
-	jump     float64        // Shift+arrow beat-jump size
-	sel      map[int]bool   // DERIVED index view of selMs (into track.Cues) - rebuilt by syncSel
-	dsel     map[int]bool   // DERIVED index view of dselMs (into drops)
-	selMs    map[int64]bool // persistent cue selection by rounded ms (survives reload + track nav)
-	dselMs   map[int64]bool // persistent drop selection by rounded ms
-	dragA    float64        // rubber band anchor (axis ms; <0 idle)
-	dragB    float64
-	dragMods string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
-	assign   map[int]string // drop index -> pattern id (apply flow)
-	patName  string         // save-pattern name input
-	toMem    bool           // last apply wrote memory cues (render hint only)
-	report   *cuepattern.ApplyReport
-	lastErr  string
-	fileTag  bool        // drops also written to the file tag (format supported)
-	tagTimer *time.Timer // debounced file-tag drop write during grid nudges
+	mu           sync.Mutex
+	active       bool
+	path         string
+	track        musiclib.Track
+	grid         *cuepattern.Grid
+	drops        []float64
+	cursorMs     float64
+	jump         float64        // Shift+arrow beat-jump size
+	sel          map[int]bool   // DERIVED index view of selMs (into track.Cues) - rebuilt by syncSel
+	dsel         map[int]bool   // DERIVED index view of dselMs (into drops)
+	selMs        map[int64]bool // persistent cue selection by rounded ms (survives reload + track nav)
+	dselMs       map[int64]bool // persistent drop selection by rounded ms
+	dragA        float64        // rubber band anchor (axis ms; <0 idle)
+	dragB        float64
+	dragMods     string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
+	assign       map[int]string // drop index -> pattern id (apply flow)
+	patName      string         // save-pattern name input
+	toMem        bool           // last apply wrote memory cues (render hint only)
+	report       *cuepattern.ApplyReport
+	lastErr      string
+	fileTag      bool        // drops also written to the file tag (format supported)
+	tagTimer     *time.Timer // debounced file-tag drop write during grid nudges
+	idleTimer    *time.Timer // stops the engine after idling paused in cue-edit (releases the file)
+	prewarmTimer *time.Timer // debounced paused-decoder reposition on cursor moves (press = unpause-only)
 	// cue write-back router (library_cuewrite.go)
-	wbApplied map[string]int // per-software tracks written (key absent = not written)
-	wbBusy    bool           // a write is in flight (serialize)
-	wbErr     string         // last write error ("" = none)
+	wbApplied   map[string]int // per-software tracks written (key absent = not written)
+	wbBusy      bool           // a write is in flight (serialize)
+	wbErr       string         // last write error ("" = none)
+	wbTargets   []gfTarget     // cached DJ-software discovery (fs probes must not run per repaint)
+	wbTargetsAt time.Time      // last discovery (zero = never)
 }
 
 // ceOverlay is the render snapshot mpWaveSVG draws (nil = mode off).
@@ -310,6 +314,8 @@ func (u *UI) ceSetCursor(ms float64) {
 		c.cursorMs = c.grid.SnapMs(ms)
 	}
 	c.mu.Unlock()
+	u.ceEnsureCursorVisible()
+	u.cePrewarmSeek()
 	u.cePatchWave()
 	u.cePatchRail()
 }
@@ -322,8 +328,38 @@ func (u *UI) ceStep(beats float64) {
 		c.cursorMs = c.grid.StepMs(c.cursorMs, beats)
 	}
 	c.mu.Unlock()
+	u.ceEnsureCursorVisible()
+	u.cePrewarmSeek()
 	u.cePatchWave()
 	u.cePatchRail()
+}
+
+// ceEnsureCursorVisible pans a zoomed wave view so the beat cursor stays within
+// ~[10%,90%] of the visible span (arrow-walking must not run the cursor off-screen).
+func (u *UI) ceEnsureCursorVisible() {
+	c := u.ce()
+	c.mu.Lock()
+	ms, active := c.cursorMs, c.active
+	c.mu.Unlock()
+	if !active {
+		return
+	}
+	t := u.mpSnap("library")
+	lo, ln := t.axis()
+	if ln <= 0 || t.viewSpan >= 1 {
+		return
+	}
+	f := (ms/1000 - lo) / ln // cursor as axis fraction
+	var ns float64
+	switch {
+	case f < t.viewStart+0.1*t.viewSpan:
+		ns = f - 0.1*t.viewSpan
+	case f > t.viewStart+0.9*t.viewSpan:
+		ns = f - 0.9*t.viewSpan
+	default:
+		return
+	}
+	u.mpMut("library", func(v *mpSt) { v.viewStart = clampF(ns, 0, 1-v.viewSpan) })
 }
 
 // ceJumpAdjust bumps the beat-jump size up/down the ceJumpSizes ladder.
@@ -1101,8 +1137,10 @@ func (u *UI) ceGridShift(deltaMs float64) {
 	u.cePatchRail()
 }
 
-// ceAudition: hold Space = play from the beat cursor, release = stop (press again
-// restarts from the cursor).
+// ceAudition: hold Space = play from the beat cursor, release = PAUSE + re-seek to the
+// cursor (decoder stays positioned + read-ahead primed - the next press is unpause-only,
+// no engine reload, no ffprobe). An idle timer stops the engine after a while paused so
+// the child doesn't hold the file open forever (tag writes need the rename).
 func (u *UI) ceAudition(down bool) {
 	const host = "library"
 	t := u.mpSnap(host)
@@ -1110,17 +1148,29 @@ func (u *UI) ceAudition(down bool) {
 	if m == nil {
 		return
 	}
-	if !down {
-		u.mpStop(host)
-		return
-	}
 	c := u.ce()
 	c.mu.Lock()
 	cur := c.cursorMs / 1000
 	c.mu.Unlock()
 	local := clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
+	if !down {
+		tr := u.mpEngineState(&t, m)
+		if m.kind != "video" && tr.loaded && !tr.paused && u.svc.Player != nil {
+			path := m.path
+			u.mpAudCall(host, "pause", func() {
+				u.svc.Player.TogglePause()
+				u.svc.Player.SeekExplicit(local) // pre-position for the next press
+			})
+			u.ceArmIdleStop(path)
+			u.mpPatchTransport(u.mpSnap(host))
+			return
+		}
+		u.mpStop(host)
+		return
+	}
+	u.ceCancelIdleStop()
 	if tr := u.mpEngineState(&t, m); tr.loaded {
-		u.svc.Player.Seek(local)
+		u.svc.Player.SeekExplicit(local) // beat-precise: bypass the 0.5s seek-noop guard
 		if tr.paused {
 			u.mpAudCall(host, "play", func() { u.svc.Player.TogglePause() })
 		}
@@ -1128,6 +1178,74 @@ func (u *UI) ceAudition(down bool) {
 		return
 	}
 	u.mpStartPlayback(host, *m, local)
+}
+
+// ceIdleStop: how long a paused cue-edit audition may hold the engine (and the open file).
+const ceIdleStop = 90 * time.Second
+
+// ceArmIdleStop schedules an engine stop if still paused on path when it fires.
+func (u *UI) ceArmIdleStop(path string) {
+	c := u.ce()
+	c.mu.Lock()
+	if c.idleTimer != nil {
+		c.idleTimer.Stop()
+	}
+	c.idleTimer = time.AfterFunc(ceIdleStop, func() {
+		if u.svc.Player == nil {
+			return
+		}
+		if st := u.svc.Player.State(); st.Path == path && st.Playing && st.Paused {
+			u.svc.Player.Stop()
+			u.mpPatchTransport(u.mpSnap("library"))
+		}
+	})
+	c.mu.Unlock()
+}
+
+func (u *UI) ceCancelIdleStop() {
+	c := u.ce()
+	c.mu.Lock()
+	if c.idleTimer != nil {
+		c.idleTimer.Stop()
+		c.idleTimer = nil
+	}
+	c.mu.Unlock()
+}
+
+// cePrewarmSeek (debounced ~150ms after the last cursor move) repositions the PAUSED
+// decoder at the beat cursor, so any audition press is unpause-only. No-op while playing.
+func (u *UI) cePrewarmSeek() {
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active {
+		c.mu.Unlock()
+		return
+	}
+	path := c.path
+	if c.prewarmTimer != nil {
+		c.prewarmTimer.Stop()
+	}
+	c.prewarmTimer = time.AfterFunc(150*time.Millisecond, func() {
+		if u.svc.Player == nil {
+			return
+		}
+		if st := u.svc.Player.State(); st.Path != path || !st.Playing || !st.Paused {
+			return
+		}
+		c.mu.Lock()
+		cur, active, p := c.cursorMs/1000, c.active, c.path
+		c.mu.Unlock()
+		if !active || p != path {
+			return
+		}
+		t := u.mpSnap("library")
+		m := t.activeMedia()
+		if m == nil || m.path != path {
+			return
+		}
+		u.svc.Player.SeekExplicit(clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0)))
+	})
+	c.mu.Unlock()
 }
 
 // libKeyNav moves the collection selection with the arrow keys (library scope).

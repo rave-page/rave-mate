@@ -122,9 +122,11 @@ type mpSt struct {
 
 	// audio transport RPC guard: blocking PlayerProxy calls run off the act worker with an
 	// optimistic engine-state override until the proxy mirror reconciles (mpAudCall).
-	audBusy     bool      // one in-flight transport RPC per host; re-entrant presses drop
+	audBusy     bool      // one in-flight transport RPC per host
 	audOpt      string    // "" none | "play" | "pause" | "stop" (mpEngineState override)
 	audOptUntil time.Time // override expiry (belt-and-braces if the RPC hangs)
+	audPend     func()    // one-slot latest-wins queued intent (runs when the in-flight RPC lands)
+	audPendOpt  string
 }
 
 // mpVid mirrors the embedded <video> element (updated by its mp-vtick events).
@@ -278,25 +280,43 @@ func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
 
 // mpAudCall runs one blocking PlayerProxy RPC off the act worker (a wedged child stalls them up
 // to 3-10s - inline they froze the whole acts lane). opt = optimistic mpEngineState override
-// while in flight ("" = none); the proxy mirror reconciles on completion. Busy = presses drop.
+// while in flight ("" = none); the proxy mirror reconciles on completion. Busy = the press
+// parks in a one-slot latest-wins pending intent (no stacking; a rapid re-tap during the
+// ~250ms halt window used to be silently dropped) executed when the in-flight RPC lands.
 func (u *UI) mpAudCall(host, opt string, fn func()) {
-	ok := false
+	queued := false
 	u.mpMut(host, func(v *mpSt) {
 		if v.audBusy {
+			v.audPend, v.audPendOpt = fn, opt // newest wins
+			queued = true
 			return
 		}
 		v.audBusy, v.audOpt, v.audOptUntil = true, opt, time.Now().Add(15*time.Second)
-		ok = true
 	})
-	if !ok {
+	if queued {
 		return
 	}
 	u.bg(func() {
-		fn()
-		t := u.mpMut(host, func(v *mpSt) { v.audBusy, v.audOpt = false, "" })
-		if len(t.media) > 0 {
-			u.mpPatchTransport(t)
-			u.mpPatchWave(t)
+		for {
+			fn()
+			var next func()
+			t := u.mpMut(host, func(v *mpSt) {
+				if v.audPend != nil { // chain the parked intent (same busy slot, no stacking)
+					next, v.audPend = v.audPend, nil
+					v.audOpt, v.audOptUntil = v.audPendOpt, time.Now().Add(15*time.Second)
+					v.audPendOpt = ""
+					return
+				}
+				v.audBusy, v.audOpt = false, ""
+			})
+			if next == nil {
+				if len(t.media) > 0 {
+					u.mpPatchTransport(t)
+					u.mpPatchWave(t)
+				}
+				return
+			}
+			fn = next
 		}
 	})
 }
@@ -362,13 +382,11 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 	}
 	path := m.path
 	u.mpAudCall(host, "", func() { // guarded: double-press can't stack Play RPCs
-		if err := u.svc.Player.Play(path); err != nil {
+		// start offset rides the play RPC: the engine decodes at seekTo directly (no
+		// position-0 blip, no seek respawn)
+		if err := u.svc.Player.PlayFrom(path, math.Max(seekTo, 0)); err != nil {
 			u.logErr("player play", err)
 			u.toast(i18n.T("player.toast.playFailed") + err.Error())
-			return
-		}
-		if seekTo > 0 {
-			u.svc.Player.Seek(seekTo)
 		}
 	})
 }
@@ -405,7 +423,7 @@ func (u *UI) mpSeekAxis(host string, axisSec float64) {
 		return
 	}
 	if tr := u.mpEngineState(&t, m); tr.loaded {
-		u.svc.Player.Seek(local)
+		u.svc.Player.SeekExplicit(local) // user click = real intent; bypass the noop guard
 	}
 }
 

@@ -11,12 +11,32 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/seratolib"
 	"rave.page/mate/internal/sysactivity"
 )
+
+// ceTargets returns the detected DJ-software write targets, cached ~30s in ceSt: rail
+// repaints run per cursor move on the serial act worker, and gfTargets stats 26 drive
+// roots (Serato) + probes installs - never per repaint. force = refresh now (write click).
+func (u *UI) ceTargets(force bool) []gfTarget {
+	c := u.ce()
+	c.mu.Lock()
+	if !force && !c.wbTargetsAt.IsZero() && time.Since(c.wbTargetsAt) < 30*time.Second {
+		t := c.wbTargets
+		c.mu.Unlock()
+		return t
+	}
+	c.mu.Unlock()
+	t := u.gfTargets()
+	c.mu.Lock()
+	c.wbTargets, c.wbTargetsAt = t, time.Now()
+	c.mu.Unlock()
+	return t
+}
 
 // ceWriteJobsLocked builds the CueUpdate set the router would write (checked rows, else
 // openPath; tracks without musical cues are dropped). Caller holds s.mu.
@@ -77,7 +97,7 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.writeNone")) + `</div>`)
 		return b.String()
 	}
-	targets := u.gfTargets()
+	targets := u.ceTargets(false) // cached: discovery fs-probes must not run per repaint
 	if len(targets) == 0 {
 		b.WriteString(hint("bad", i18n.T("library.gf.noTargets")))
 		return b.String()
@@ -136,7 +156,7 @@ func (u *UI) ceWriteTo(sw string) {
 		return
 	}
 	var target *gfTarget
-	for _, t := range u.gfTargets() {
+	for _, t := range u.ceTargets(true) { // write click: re-verify targets now
 		if t.key == sw {
 			tc := t
 			target = &tc

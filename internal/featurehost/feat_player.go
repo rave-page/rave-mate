@@ -50,10 +50,11 @@ func (f *playerFeature) Start(ctx context.Context) error {
 func (f *playerFeature) HandleEvent(event string, data json.RawMessage) {
 	if event == "seek" {
 		var p struct {
-			Sec float64 `json:"sec"`
+			Sec      float64 `json:"sec"`
+			Explicit bool    `json:"explicit"` // user intent: bypass the near-position noop guard
 		}
 		if json.Unmarshal(data, &p) == nil {
-			f.eng.Seek(p.Sec)
+			f.eng.SeekTo(p.Sec, p.Explicit)
 		}
 	}
 }
@@ -62,12 +63,13 @@ func (f *playerFeature) Handle(_ context.Context, method string, params json.Raw
 	switch method {
 	case "play":
 		var p struct {
-			Path string `json:"path"`
+			Path     string  `json:"path"`
+			StartSec float64 `json:"startSec"` // optional start offset (0 = beginning)
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		if err := f.eng.Play(p.Path); err != nil {
+		if err := f.eng.PlayFrom(p.Path, p.StartSec); err != nil {
 			return nil, err
 		}
 		return json.Marshal(f.eng.State())

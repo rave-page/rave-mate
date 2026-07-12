@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -59,14 +60,23 @@ type ffmpegSource struct {
 	closed bool
 }
 
-func newFFmpegSource(path string) (beep.StreamSeekCloser, beep.Format, error) {
+// newFFmpegSource opens path decoding from fromFrame (0 = start): the child spawns at -ss
+// directly, so a cue audition never plays position-0 audio before its seek.
+func newFFmpegSource(path string, fromFrame int) (beep.StreamSeekCloser, beep.Format, error) {
 	ffmpeg, ok := mediatools.Resolve("ffmpeg")
 	if !ok {
 		return nil, beep.Format{}, fmt.Errorf("ffmpeg not found (install it from Settings → Transcode)")
 	}
-	s := &ffmpegSource{ffmpeg: ffmpeg, path: path, total: ffprobeFrames(path)}
-	s.leadSkipSec = mediatools.CodecLeadSkipMs(ffprobeAudioCodec(path)) / 1000
-	if err := s.start(0); err != nil {
+	frames, codec := ffprobeInfo(path)
+	s := &ffmpegSource{ffmpeg: ffmpeg, path: path, total: frames}
+	s.leadSkipSec = mediatools.CodecLeadSkipMs(codec) / 1000
+	if fromFrame < 0 {
+		fromFrame = 0
+	}
+	if s.total > 0 && fromFrame > s.total {
+		fromFrame = s.total
+	}
+	if err := s.start(fromFrame); err != nil {
 		return nil, beep.Format{}, err
 	}
 	return s, beep.Format{SampleRate: ffRate, NumChannels: ffChannels, Precision: ffSampleSize}, nil
@@ -220,6 +230,18 @@ const seekNoopFrames = ffRate / 2 // 0.5s
 func (s *ffmpegSource) Seek(p int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.seekLocked(p, false)
+}
+
+// SeekExplicit is a user-intent seek: bypasses the seekNoopFrames guard so beat-precise cue
+// auditions land exactly (the guard exists for the Fyne slider's follow-reseek only).
+func (s *ffmpegSource) SeekExplicit(p int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seekLocked(p, true)
+}
+
+func (s *ffmpegSource) seekLocked(p int, explicit bool) error {
 	if s.closed {
 		return errors.New("seek on closed decoder")
 	}
@@ -229,8 +251,13 @@ func (s *ffmpegSource) Seek(p int) error {
 	if s.total > 0 && p > s.total {
 		p = s.total
 	}
-	if s.out != nil && abs(p-s.pos) < seekNoopFrames {
-		return nil // already essentially here - don't churn a restart (kills playhead-follow choppiness)
+	if s.out != nil {
+		if !explicit && abs(p-s.pos) < seekNoopFrames {
+			return nil // already essentially here - don't churn a restart (kills playhead-follow choppiness)
+		}
+		if explicit && p == s.pos {
+			return nil // exact position (paused re-audition) - nothing to respawn
+		}
 	}
 	return s.start(p)
 }
@@ -253,43 +280,63 @@ func (s *ffmpegSource) Close() error {
 	return nil
 }
 
-// ffprobeAudioCodec returns the first audio stream's codec_name (lowercased; "" if unknown).
-// Feeds mediatools.CodecLeadSkipMs so SEEK can compensate the gapless encoder priming.
-func ffprobeAudioCodec(path string) string {
+// ffprobe result cache: an audition restart must not pay probe spawns per Play. Keyed by
+// path, validated by mtime; entries are ~100B and a session touches few files (unbounded OK).
+type ffprobeEntry struct {
+	mtime  int64
+	frames int
+	codec  string
+}
+
+var (
+	ffprobeMu    sync.Mutex
+	ffprobeCache = map[string]ffprobeEntry{}
+)
+
+// ffprobeInfo returns total frames (sec*rate; 0 unknown) + first audio codec_name
+// (lowercased; "" unknown) in ONE ffprobe invocation, cached by path+mtime. The codec feeds
+// mediatools.CodecLeadSkipMs so SEEK can compensate the gapless encoder priming.
+func ffprobeInfo(path string) (frames int, codec string) {
+	var mtime int64
+	if fi, err := os.Stat(path); err == nil {
+		mtime = fi.ModTime().UnixNano()
+	}
+	ffprobeMu.Lock()
+	if e, ok := ffprobeCache[path]; ok && e.mtime == mtime {
+		ffprobeMu.Unlock()
+		return e.frames, e.codec
+	}
+	ffprobeMu.Unlock()
 	probe, ok := mediatools.Resolve("ffprobe")
 	if !ok {
-		return ""
+		return 0, ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "a:0",
-		"-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", path)
+		"-show_entries", "format=duration:stream=codec_name",
+		"-of", "default=noprint_wrappers=1", path)
 	sysexec.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return 0, ""
 	}
-	return strings.ToLower(strings.TrimSpace(string(out)))
-}
-
-// ffprobeFrames returns the file's duration in frames (sec*rate), 0 if unknown.
-func ffprobeFrames(path string) int {
-	probe, ok := mediatools.Resolve("ffprobe")
-	if !ok {
-		return 0
+	for _, ln := range strings.Split(string(out), "\n") {
+		k, v, found := strings.Cut(strings.TrimSpace(ln), "=")
+		if !found {
+			continue
+		}
+		switch k {
+		case "codec_name":
+			codec = strings.ToLower(v)
+		case "duration":
+			if sec, perr := strconv.ParseFloat(v, 64); perr == nil && sec > 0 {
+				frames = int(sec * float64(ffRate))
+			}
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, probe, "-v", "error", "-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1", path)
-	sysexec.Hide(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-	sec, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil || sec <= 0 {
-		return 0
-	}
-	return int(sec * float64(ffRate))
+	ffprobeMu.Lock()
+	ffprobeCache[path] = ffprobeEntry{mtime: mtime, frames: frames, codec: codec}
+	ffprobeMu.Unlock()
+	return frames, codec
 }

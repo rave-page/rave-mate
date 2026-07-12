@@ -207,14 +207,30 @@ func (p *PlayerProxy) ensureUp() error {
 	return nil
 }
 
+// playParams / seekParams are the wire bodies (typed; new optional fields keep old children
+// compatible - they ignore what they don't parse).
+type playParams struct {
+	Path     string  `json:"path"`
+	StartSec float64 `json:"startSec,omitempty"`
+}
+
+type seekParams struct {
+	Sec      float64 `json:"sec"`
+	Explicit bool    `json:"explicit,omitempty"`
+}
+
 // Play decodes + starts path in the child, replacing any current playback.
-func (p *PlayerProxy) Play(path string) error {
+func (p *PlayerProxy) Play(path string) error { return p.PlayFrom(path, 0) }
+
+// PlayFrom starts path at startSec: the child decodes at the offset directly, so there is
+// no position-0 blip and no seek respawn (instant cue audition).
+func (p *PlayerProxy) PlayFrom(path string, startSec float64) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := p.host.Call(ctx, "play", map[string]string{"path": path})
+	raw, err := p.host.Call(ctx, "play", playParams{Path: path, StartSec: startSec})
 	if err != nil {
 		return err
 	}
@@ -250,7 +266,15 @@ func (p *PlayerProxy) TogglePause() bool {
 // Seek jumps to sec - fire-and-forget so a slow decoder Seek never reaches the UI thread.
 func (p *PlayerProxy) Seek(sec float64) {
 	if p.host.Running() {
-		_ = p.host.Send("seek", map[string]float64{"sec": sec})
+		_ = p.host.Send("seek", seekParams{Sec: sec})
+	}
+}
+
+// SeekExplicit is a user-intent seek (cue audition / waveform click): bypasses the
+// decoder's near-position noop guard so beat-precise seeks land exactly. Fire-and-forget.
+func (p *PlayerProxy) SeekExplicit(sec float64) {
+	if p.host.Running() {
+		_ = p.host.Send("seek", seekParams{Sec: sec, Explicit: true})
 	}
 }
 

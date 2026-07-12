@@ -32,7 +32,7 @@ func TestFFmpegDecodeRealAAC(t *testing.T) {
 	if !IsPlayable(aac) {
 		t.Fatal("IsPlayable(aac) = false with ffmpeg present")
 	}
-	s, format, err := decodeAudio(aac)
+	s, format, err := decodeAudio(aac, 0)
 	if err != nil {
 		t.Fatalf("decodeAudio: %v", err)
 	}

@@ -50,7 +50,9 @@ func IsPlayable(path string) bool {
 	return playableExt[ext] || (ffmpegPlayable[ext] && ffmpegAvailable())
 }
 
-func decodeAudio(path string) (s beep.StreamSeekCloser, format beep.Format, err error) {
+// decodeAudio opens path decoding from startSec (0 = beginning; ffmpeg spawns at -ss
+// directly, beep decoders seek after open).
+func decodeAudio(path string, startSec float64) (s beep.StreamSeekCloser, format beep.Format, err error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	// Prefer ffmpeg for anything it can decode: it streams and input-seeks (-ss) in ~0.2s even on a
 	// large recording with no seek table, decoding straight to the 48k speaker rate (no resample).
@@ -58,7 +60,7 @@ func decodeAudio(path string) (s beep.StreamSeekCloser, format beep.Format, err 
 	// - a raw device-capture FLAC (recorder writes no SEEKTABLE) froze playback ~15s per seek, on the
 	// speaker lock. beep is the fallback only when ffmpeg isn't resolvable (WAV/MP3/FLAC/OGG still play).
 	if (playableExt[ext] || ffmpegPlayable[ext]) && ffmpegAvailable() {
-		return newFFmpegSource(path)
+		return newFFmpegSource(path, int(startSec*float64(ffRate)))
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -89,6 +91,10 @@ func decodeAudio(path string) (s beep.StreamSeekCloser, format beep.Format, err 
 	}
 	if err != nil {
 		_ = f.Close() // decoder doesn't own the file on error - close it ourselves (no leak)
+		return s, format, err
+	}
+	if startSec > 0 { // beep fallback: position after open (best-effort; panic → recover above)
+		_ = s.Seek(format.SampleRate.N(time.Duration(startSec * float64(time.Second))))
 	}
 	return s, format, err
 }
@@ -178,12 +184,16 @@ func safeLen(s beep.StreamSeekCloser) (n int) {
 }
 
 // Play decodes + starts path, replacing any current playback.
-func (e *Engine) Play(path string) error {
+func (e *Engine) Play(path string) error { return e.PlayFrom(path, 0) }
+
+// PlayFrom decodes + starts path at startSec (0 = beginning). The decoder opens at the
+// offset directly - no position-0 audio leaks before an audition's seek lands.
+func (e *Engine) PlayFrom(path string, startSec float64) error {
 	if err := initSpeaker(); err != nil {
 		return err
 	}
 	e.Stop()
-	s, format, err := decodeAudio(path)
+	s, format, err := decodeAudio(path, startSec)
 	if err != nil {
 		return err
 	}
@@ -275,8 +285,16 @@ func (e *Engine) State() State {
 	return State{Path: e.path, Playing: ok && e.streamer != nil, Paused: e.paused, Cur: cur, Total: total}
 }
 
+// explicitSeeker is a decoder that can bypass its seek-noop guard for user-intent seeks.
+type explicitSeeker interface{ SeekExplicit(p int) error }
+
 // Seek jumps to sec seconds into the current track. Uses the cached length (no s.Len() here).
-func (e *Engine) Seek(sec float64) {
+func (e *Engine) Seek(sec float64) { e.SeekTo(sec, false) }
+
+// SeekTo jumps to sec; explicit = user intent (cue audition), bypassing the decoder's
+// near-position noop guard so beat-precise seeks land exactly. The guard stays for the
+// Fyne slider's playhead-follow reseek (explicit=false).
+func (e *Engine) SeekTo(sec float64, explicit bool) {
 	defer func() {
 		if r := recover(); r != nil && e.log != nil {
 			e.log.Warn("player", "seek failed", map[string]any{"panic": fmt.Sprintf("%v", r)})
@@ -301,7 +319,11 @@ func (e *Engine) Seek(sec float64) {
 	speaker.Lock()
 	e.mu.Lock()
 	if e.streamer == s {
-		_ = s.Seek(n)
+		if es, ok := s.(explicitSeeker); ok && explicit {
+			_ = es.SeekExplicit(n)
+		} else {
+			_ = s.Seek(n)
+		}
 	}
 	e.mu.Unlock()
 	speaker.Unlock()
