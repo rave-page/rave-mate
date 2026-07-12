@@ -80,6 +80,15 @@ func (g *Grid) segAt(ms float64) *seg {
 // BeatLenMs is the beat length at position ms.
 func (g *Grid) BeatLenMs(ms float64) float64 { return g.segAt(ms).beatMs }
 
+// AnchorMs is the first grid marker's position - the grid's pinned anchor ("beat 1").
+// Beats extend backward from here, so it's the true reference for rendering the anchor.
+func (g *Grid) AnchorMs() float64 {
+	if len(g.segs) == 0 {
+		return 0
+	}
+	return g.segs[0].anchorMs
+}
+
 // SnapMs returns the nearest beat line to ms.
 func (g *Grid) SnapMs(ms float64) float64 {
 	s := g.segAt(ms)

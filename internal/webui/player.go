@@ -194,30 +194,54 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		playX = toX(playAxis)
 	}
 
-	// cue editor: beatgrid lines (only when beats are ≥5px apart at this zoom)
+	// cue editor: beatgrid. Traktor-style - beats are short top/bottom ticks (never
+	// full-height), bars are taller, every 16 bars is a full-height phrase accent, and
+	// the grid anchor gets a distinct mint handle. Phrase counting aligns to the nearest
+	// preceding drop when drops exist, so phrase lines land on the drop (else beat 1).
 	if ce != nil && ce.grid != nil && ln > 0 && t.viewSpan > 0 {
+		g := ce.grid
 		a0 := (lo + t.viewStart*ln) * 1000
 		a1 := (lo + (t.viewStart+t.viewSpan)*ln) * 1000
-		anchor := ce.grid.SnapMs(0)
-		ms := ce.grid.SnapMs(a0)
-		if ms > a0 {
-			ms = ce.grid.StepMs(ms, -1)
+		anchor := g.SnapMs(0)
+		var dropBeats []int // beat index of each drop, sorted - phrase alignment refs
+		for _, d := range ce.drops {
+			dropBeats = append(dropBeats, int(math.Round(g.BeatsBetween(anchor, d))))
 		}
-		guard := 0
-		for ms <= a1 && guard < 4000 {
-			guard++
-			bl := ce.grid.BeatLenMs(ms)
-			if bl/1000/(t.viewSpan*ln)*w < 5 { // too dense to read - skip grid at this zoom
+		sort.Ints(dropBeats)
+		ms := g.SnapMs(a0)
+		if ms > a0 {
+			ms = g.StepMs(ms, -1)
+		}
+		k := int(math.Round(g.BeatsBetween(anchor, ms)))
+		for guard := 0; ms <= a1 && guard < 4200; guard++ {
+			beatPx := g.BeatLenMs(ms) / 1000 / (t.viewSpan * ln) * w
+			if beatPx < 0.3 { // absurd zoom-out: nothing readable
 				break
 			}
 			if x := toX(ms / 1000); x >= 0 && x <= w {
-				op, sw := 0.10, 1.0
-				if int(math.Round(ce.grid.BeatsBetween(anchor, ms)))%4 == 0 {
-					op, sw = 0.28, 1.0 // downbeat
+				ref := 0 // phrase origin = nearest preceding drop, else the grid anchor
+				for _, db := range dropBeats {
+					if db <= k {
+						ref = db
+					} else {
+						break
+					}
 				}
-				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,%.2f)" stroke-width="%.0f"/>`, x, x, h, op, sw)
+				switch {
+				case (k-ref)%64 == 0 && beatPx*64 >= 8: // every 16 bars: phrase accent
+					fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(124,58,237,0.6)" stroke-width="1.5"/>`, x, x, h)
+				case k%4 == 0 && beatPx*4 >= 6: // bar / downbeat: taller top+bottom ticks
+					fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="15" stroke="rgba(250,250,250,0.36)" stroke-width="1"/><line x1="%.1f" y1="%.0f" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,0.36)" stroke-width="1"/>`, x, x, x, h-15, x, h)
+				case beatPx >= 5: // beat: short ticks, top + bottom (not through)
+					fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="7" stroke="rgba(250,250,250,0.17)" stroke-width="1"/><line x1="%.1f" y1="%.0f" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,0.17)" stroke-width="1"/>`, x, x, x, h-7, x, h)
+				}
 			}
-			ms = ce.grid.StepMs(ms, 1)
+			ms = g.StepMs(ms, 1)
+			k++
+		}
+		// grid anchor handle (mint) - the pinned "beat 1" reference the grid extends from
+		if x := toX(g.AnchorMs() / 1000); x >= 0 && x <= w {
+			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#08F79B" stroke-width="1.5" opacity="0.85"/><path d="M %.1f 0 h 9 v 6 l -9 6 z" fill="#08F79B"/>`, x, x, h, x)
 		}
 	}
 
