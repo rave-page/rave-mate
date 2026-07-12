@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"rave.page/mate/internal/mediatools"
@@ -139,10 +140,21 @@ func peaksHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	}
 	peaks := bucketPeaks(pcm, p.Buckets)
 	bands := bucketBands(pcm, p.Buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
+	// Decode contract: rate/samples pin the waveform origin+scale (dur = samples/rate); leadSkipMs =
+	// the gapless encoder priming this from=0 decode drops (0 for lossless). Lets the player detect +
+	// reconcile waveform↔audio origin/scale drift instead of it being silent.
+	codec := ""
+	if out, cerr := ffprobe("-select_streams", "a:0", "-show_entries", "stream=codec_name",
+		"-of", "default=noprint_wrappers=1:nokey=1", p.Path); cerr == nil {
+		codec = strings.ToLower(trimLine(out))
+	}
 	return json.Marshal(map[string]any{
 		"peaks":           base64.StdEncoding.EncodeToString(peaks),
 		"bands":           base64.StdEncoding.EncodeToString(bands),
 		"durationSeconds": float64(samples) / peaksRate,
+		"rate":            peaksRate,
+		"samples":         samples,
+		"leadSkipMs":      mediatools.CodecLeadSkipMs(codec),
 	})
 }
 

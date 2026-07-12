@@ -143,6 +143,25 @@ func (t Tool) Status() Status {
 // pinned URLs are the Windows archives).
 func CanInstall() bool { return runtime.GOOS == "windows" }
 
+// CodecLeadSkipMs approximates the encoder-delay/priming ffmpeg's gapless trim drops at the start
+// of a from=0 decode for lossy codecs. A SEEK targets file-PTS (priming intact), so it must add
+// this back to land on the SAME origin the from=0 waveform/peaks use - else an auditioned cue
+// plays ~priming early. 0 for lossless/unknown (no priming). Approximate: exact priming is per-file
+// (container metadata); the residual few-ms error is inaudible vs the ~25-48ms it removes. codec =
+// ffprobe stream.codec_name.
+func CodecLeadSkipMs(codec string) float64 {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "aac":
+		return 45 // ~2112-sample AAC-LC priming @ 44.1-48k
+	case "mp3":
+		return 25 // ~1104-sample LAME encoder+decoder delay @ 44.1k
+	case "opus":
+		return 6 // ~312-sample Opus pre-skip @ 48k
+	default:
+		return 0 // flac/pcm(wav)/alac/vorbis/wma - lossless or ffmpeg-precise
+	}
+}
+
 // Install downloads the tool's archive over HTTPS, verifies its SHA-256, and unpacks the
 // requested executables into the managed bin dir. onProgress (optional) receives
 // bytes-downloaded / total (total 0 when the server sends no Content-Length).

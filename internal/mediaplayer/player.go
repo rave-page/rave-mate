@@ -312,9 +312,16 @@ func (p *Player) startLocked(offset float64) error {
 				p.log.Warn("player", "audio init failed - video-only", map[string]any{"err": err.Error()})
 			}
 		} else {
+			// audio-only: add the gapless encoder priming back so a SEEK lands on the from=0 origin
+			// (the waveform/grid) - else the cue plays ~priming early. With video present, leave it
+			// uncompensated so audio + video stay in lockstep (both target file-PTS offset).
+			aSeek := offset
+			if !hasVideo {
+				aSeek += mediatools.CodecLeadSkipMs(p.info.AudioCodec) / 1000
+			}
 			acmd := exec.CommandContext(ctx, bin,
 				"-hide_banner", "-loglevel", "error",
-				"-ss", ftoa(offset), "-i", p.path,
+				"-ss", ftoa(aSeek), "-i", p.path,
 				"-vn", "-f", "s16le", "-ar", fmt.Sprintf("%d", sampleRate), "-ac", "2", "pipe:1")
 			sysexec.Hide(acmd)
 			// NOT LowPriority: audio is the master clock - a starved audio decoder underruns, which

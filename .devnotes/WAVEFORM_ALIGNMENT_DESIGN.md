@@ -29,13 +29,23 @@ sits correctly over the audio and the grid anchor is on the beat. Grids are NOT 
   on the display/nudge path.
 
 ## Gaps → plan
-1. **Seek origin** (`ffmpegdecode.go:79`, `mediaplayer/player.go:315`): input `-ss` after gapless-trim
-   lands ~encoder-delay early → auditioned cue drifts from the shown grid line. Fix: accurate seek for
-   audition (output-seek or `-copyts` normalise), or compensate by the known lead-skip.
-2. **No stored contract**: extend `mpPeakBlob` with `{rate, samples, leadSkipMs, contractVer}`; optional
-   `AnalysisRef` alongside the grid. Makes origin drift detectable/reconcilable instead of silent.
+1. **Seek origin** — DONE (#80): SEEK now adds the gapless encoder priming back so an auditioned cue
+   lands on the from=0 origin. `mediatools.CodecLeadSkipMs(codec)` (aac 45 / mp3 25 / opus 6 / else 0)
+   fed by a codec probe. `audioengine/ffmpegdecode.go start()` (the audition path via PlayerProxy) adds
+   `leadSkipSec` to the input `-ss`; `mediaplayer/player.go startLocked` adds it to the audio `-ss` only
+   when audio-only (video present → left uncompensated to keep A/V in lockstep). from=0 unchanged →
+   peaks/playback origin preserved. Chose lead-skip compensation over output-seek: output-seek-from-0 is
+   O(T) decode → unusable on multi-hour sets; modern ffmpeg input `-ss` is already decode-accurate to
+   file-PTS, so priming was the only residual. Approximate constant (per-file priming is exact but buried
+   in container metadata); residual few-ms << the ~25-48ms removed; lossless stays 0 (no regression).
+2. **Stored contract** — DONE (#80): `mpPeakBlob` extended with `{Rate, Samp, Lead(ms), Ver}`; worker
+   `probe.peaks` now returns `rate/samples/leadSkipMs`. Cache-miss check gained `Ver>=mpPeakContractVer
+   && Rate>0 && Samp>0` (mirrors the band check) → pre-contract blobs re-decode. Tags `d/p` stay
+   compatible with the Fyne `trackPeaks` blob sharing the same cache key.
 3. **Anchor render** — DONE: `Grid.AnchorMs()` + mint anchor handle in `player.go mpWaveSVG`.
-4. **BPM verify overlay (optional nicety)**: overlay gridfix detected beats/downbeats faintly under the
+4. **Sanity check** — DONE (#80): `mpPeaksSanity` logs one terse line at peak load/decode
+   (`samples/rate ≈ dur`, `drift` flag on >1%/>0.5s mismatch) via the run logger.
+5. **BPM verify overlay (optional nicety)**: overlay gridfix detected beats/downbeats faintly under the
    grid; residual metric. Constant residual → phase (nudge); linear-growing → tempo (re-grid). De-scoped
    unless the render contract proves insufficient in practice.
 

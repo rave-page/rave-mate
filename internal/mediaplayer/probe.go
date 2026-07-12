@@ -18,12 +18,13 @@ import (
 
 // Info is the probed shape of a media file (ffprobe).
 type Info struct {
-	Duration float64 // seconds (0 if unknown)
-	HasVideo bool
-	HasAudio bool
-	Width    int // video pixel size (0 if audio-only)
-	Height   int
-	FPS      float64 // video frame rate (0 if unknown / audio-only)
+	Duration   float64 // seconds (0 if unknown)
+	HasVideo   bool
+	HasAudio   bool
+	Width      int // video pixel size (0 if audio-only)
+	Height     int
+	FPS        float64 // video frame rate (0 if unknown / audio-only)
+	AudioCodec string  // first audio stream codec_name (gapless lead-skip on SEEK)
 }
 
 // Probe runs ffprobe on file and returns its media Info.
@@ -48,6 +49,7 @@ func Probe(ctx context.Context, file string) (Info, error) {
 type probeJSON struct {
 	Streams []struct {
 		CodecType    string `json:"codec_type"`
+		CodecName    string `json:"codec_name"`
 		Width        int    `json:"width"`
 		Height       int    `json:"height"`
 		RFrameRate   string `json:"r_frame_rate"`   // "30000/1001"
@@ -86,6 +88,9 @@ func parseProbe(b []byte) (Info, error) {
 			}
 		case "audio":
 			in.HasAudio = true
+			if in.AudioCodec == "" {
+				in.AudioCodec = s.CodecName // first audio stream
+			}
 			if in.Duration == 0 {
 				in.Duration = atof(s.Duration)
 			}

@@ -658,13 +658,24 @@ func (u *UI) mpLoadPeaks(host string, gen, idx int, path string) {
 	})
 }
 
-// mpPeakBlob is the persisted peaks payload. b = 3-byte-per-bucket band colour (added
-// later; a blob without it is re-analysed so old caches gain the spectral waveform).
+// mpPeakBlob is the persisted peaks payload + decode contract. b = 3-byte-per-bucket band colour.
+// rate/samp/lead/ver capture the decode origin+scale (dur = samp/rate; lead = gapless encoder
+// priming in ms) so waveform↔audio drift is detectable/reconcilable, not silent. A blob missing
+// bands, or below the current contract ver, is treated as a cache-miss and re-analysed. Tags d/p
+// stay compatible with the Fyne trackPeaks blob (view_studio_player.go) sharing the same cache key.
 type mpPeakBlob struct {
-	D float64 `json:"d"`
-	P []byte  `json:"p"`
-	B []byte  `json:"b,omitempty"`
+	D    float64 `json:"d"`
+	P    []byte  `json:"p"`
+	B    []byte  `json:"b,omitempty"`
+	Rate int     `json:"rate,omitempty"`
+	Samp int64   `json:"samp,omitempty"`
+	Lead float64 `json:"lead,omitempty"` // gapless lead-skip (ms)
+	Ver  int     `json:"ver,omitempty"`
 }
+
+// mpPeakContractVer bumps when the peaks decode contract changes (rate/format/added fields) so
+// blobs written by an older build are a cache-miss and re-decoded. 1 = rate/samp/lead added.
+const mpPeakContractVer = 1
 
 func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, err error) {
 	var mtime int64
@@ -674,8 +685,11 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, e
 	if u.svc.Store != nil {
 		if data, ok := u.svc.Store.GetAnalysis(store.KindPeaks, path, mtime); ok {
 			var tp mpPeakBlob
-			// require band data too: a pre-band cache re-analyses so the spectral waveform fills in
-			if json.Unmarshal(data, &tp) == nil && len(tp.P) > 0 && len(tp.B) >= 3*len(tp.P) {
+			// require band data AND the current contract ver: a pre-band / pre-contract cache
+			// re-analyses so the spectral waveform + decode-contract fields fill in.
+			if json.Unmarshal(data, &tp) == nil && len(tp.P) > 0 && len(tp.B) >= 3*len(tp.P) &&
+				tp.Ver >= mpPeakContractVer && tp.Rate > 0 && tp.Samp > 0 {
+				u.mpPeaksSanity(path, "cache", tp.D, len(tp.P), tp.Rate, tp.Samp, tp.Lead)
 				return tp.D, tp.P, tp.B, nil
 			}
 		}
@@ -693,6 +707,9 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, e
 		Peaks  string  `json:"peaks"`
 		Bands  string  `json:"bands"`
 		DurSec float64 `json:"durationSeconds"`
+		Rate   int     `json:"rate"`
+		Samp   int64   `json:"samples"`
+		Lead   float64 `json:"leadSkipMs"`
 	}
 	if json.Unmarshal(raw, &r) != nil || r.Peaks == "" || r.DurSec <= 0 {
 		return 0, nil, nil, errors.New("empty analysis")
@@ -703,11 +720,29 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, e
 	}
 	bandData, _ := base64.StdEncoding.DecodeString(r.Bands) // best-effort; nil → mono fallback render
 	if u.svc.Store != nil {
-		if b, merr := json.Marshal(mpPeakBlob{D: r.DurSec, P: data, B: bandData}); merr == nil {
+		if b, merr := json.Marshal(mpPeakBlob{D: r.DurSec, P: data, B: bandData,
+			Rate: r.Rate, Samp: r.Samp, Lead: r.Lead, Ver: mpPeakContractVer}); merr == nil {
 			u.svc.Store.PutAnalysis(store.KindPeaks, path, mtime, b)
 		}
 	}
+	u.mpPeaksSanity(path, "decode", r.DurSec, len(data), r.Rate, r.Samp, r.Lead)
 	return r.DurSec, data, bandData, nil
+}
+
+// mpPeaksSanity logs a one-line origin/scale assertion for a loaded peaks blob: the decoded
+// samples/rate must ≈ the stored duration (peaks*bucketDur ≈ dur). A >1% (or >0.5s) mismatch
+// (drift=true) means the waveform's time-scale is diverging from the audio - visible in the logs.
+func (u *UI) mpPeaksSanity(path, src string, dur float64, nPeaks, rate int, samples int64, leadMs float64) {
+	if u.log == nil || nPeaks == 0 || rate == 0 {
+		return
+	}
+	recon := float64(samples) / float64(rate) // duration implied by the decode contract
+	drift := math.Abs(recon-dur) > math.Max(0.5, dur*0.01)
+	u.log.Debug("player", "peaks sanity", map[string]any{
+		"file": filepath.Base(path), "src": src,
+		"dur": fmt.Sprintf("%.2f", dur), "recon": fmt.Sprintf("%.2f", recon),
+		"rate": rate, "samples": samples, "leadMs": leadMs, "drift": drift,
+	})
 }
 
 // mpLoadLoud fetches the EBU R128 timeline (LUFS chip + momentary readout). Works for

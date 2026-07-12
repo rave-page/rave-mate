@@ -45,9 +45,10 @@ func ffmpegAvailable() bool { _, ok := mediatools.Resolve("ffmpeg"); return ok }
 // beep.StreamSeekCloser. Stream/Seek are serialized by beep's speaker lock; the mutex only guards
 // the child lifecycle against Close.
 type ffmpegSource struct {
-	ffmpeg string
-	path   string
-	total  int // total frames/channel from ffprobe (0 = unknown)
+	ffmpeg      string
+	path        string
+	total       int     // total frames/channel from ffprobe (0 = unknown)
+	leadSkipSec float64 // gapless encoder priming (s) to add back on SEEK; 0 for lossless
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd
@@ -64,6 +65,7 @@ func newFFmpegSource(path string) (beep.StreamSeekCloser, beep.Format, error) {
 		return nil, beep.Format{}, fmt.Errorf("ffmpeg not found (install it from Settings → Transcode)")
 	}
 	s := &ffmpegSource{ffmpeg: ffmpeg, path: path, total: ffprobeFrames(path)}
+	s.leadSkipSec = mediatools.CodecLeadSkipMs(ffprobeAudioCodec(path)) / 1000
 	if err := s.start(0); err != nil {
 		return nil, beep.Format{}, err
 	}
@@ -76,7 +78,12 @@ func (s *ffmpegSource) start(from int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	args := []string{"-nostdin", "-v", "error"}
 	if from > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(float64(from)/float64(ffRate), 'f', 6, 64))
+		// Input seek targets file-PTS, but the from=0 decode dropped the gapless encoder priming;
+		// add it back so an auditioned SEEK lands on the SAME origin the peaks/waveform use (else
+		// the cue plays ~priming early). leadSkipSec=0 for lossless → no shift. pos stays `from`
+		// (displayed frame): the first emitted sample now ≈ displayed time from/ffRate.
+		seekSec := float64(from)/float64(ffRate) + s.leadSkipSec
+		args = append(args, "-ss", strconv.FormatFloat(seekSec, 'f', 6, 64))
 	}
 	args = append(args, "-i", s.path, "-vn",
 		"-f", "f32le", "-acodec", "pcm_f32le", "-ac", strconv.Itoa(ffChannels), "-ar", strconv.Itoa(ffRate), "pipe:1")
@@ -244,6 +251,25 @@ func (s *ffmpegSource) Close() error {
 	s.closed = true
 	s.stopChild()
 	return nil
+}
+
+// ffprobeAudioCodec returns the first audio stream's codec_name (lowercased; "" if unknown).
+// Feeds mediatools.CodecLeadSkipMs so SEEK can compensate the gapless encoder priming.
+func ffprobeAudioCodec(path string) string {
+	probe, ok := mediatools.Resolve("ffprobe")
+	if !ok {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "a:0",
+		"-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	sysexec.Hide(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(string(out)))
 }
 
 // ffprobeFrames returns the file's duration in frames (sec*rate), 0 if unknown.
