@@ -132,8 +132,8 @@ func (u *UI) peerConnect(node string) {
 	}
 	for _, p := range u.svc.Discovery.Peers() {
 		if p.NodeID == node {
-			u.svc.Peers.Connect(p)
 			u.toast(i18n.T("actions.toast.connecting"))
+			u.bg(func() { u.svc.Peers.Connect(p) }) // network handshake off the serial actWorker
 			return
 		}
 	}
@@ -275,13 +275,16 @@ func (u *UI) streamPause(_ bool) {
 	}
 	now := !u.svc.Cfg.Features.StreamBridge.PauseLiveSignal
 	u.svc.Cfg.Features.StreamBridge.PauseLiveSignal = now
-	u.saveCfg()
-	u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")")
+	u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")") // optimistic
 	key := "actions.toast.liveResumed"
 	if now {
 		key = "actions.toast.livePaused"
 	}
 	u.toast(i18n.T(key))
+	u.saveCfgBG("stream-pause", nil, func() { // persist+reconcile off the actWorker; revert on write fail
+		u.svc.Cfg.Features.StreamBridge.PauseLiveSignal = !now
+		u.eval("window.__patch('live-transport'," + jsQuote(u.liveTransportHTML()) + ")")
+	})
 }
 
 // arecToggle starts/stops manual audio capture. Stop waits on ffmpeg's graceful exit (≤6s) +

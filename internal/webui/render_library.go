@@ -351,27 +351,6 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 	return false
 }
 
-// libTracksBlocking returns the hydrated collection, waiting (bounded) for the background
-// load - for explicit actions (relocate, smart-playlist eval) that need the data NOW.
-func (u *UI) libTracksBlocking(s *libSt) []musiclib.Track {
-	s.mu.Lock()
-	if u.libEnsureTracks(s) {
-		tr := s.tracks
-		s.mu.Unlock()
-		return tr
-	}
-	done := s.loadDone
-	s.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-	}
-	s.mu.Lock()
-	tr := s.tracks
-	s.mu.Unlock()
-	return tr
-}
-
 func (u *UI) libMarks(s *libSt) *library.Bookmarks {
 	if s.marks == nil {
 		mf, _ := config.DataPath("bookmarks.json")

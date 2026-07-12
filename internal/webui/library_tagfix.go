@@ -54,43 +54,44 @@ func (u *UI) tfStart() {
 	t.done, t.total, t.skipped = 0, 0, 0
 	t.probs, t.sel, t.lastErr = nil, map[int]bool{}, ""
 	t.mu.Unlock()
-	s := u.lib()
-	tracks := u.libTracksBlocking(s)
-	var onDisk []musiclib.Track
-	for _, tr := range tracks {
-		if tr.Path != "" && pathOnDisk(tr.Path) {
-			onDisk = append(onDisk, tr)
-		}
-	}
 	u.mu.Lock()
 	u.libSection = "collection"
 	u.mu.Unlock()
-	u.patchMain()
-	u.bg(func() {
-		skipped := 0
-		lastPatch := 0
-		probs, err := tagfix.Scan(onDisk, tagfix.Options{Skipped: &skipped,
-			Progress: func(done, total int) {
-				t.mu.Lock()
-				t.done, t.total = done, total
-				t.mu.Unlock()
-				if done-lastPatch >= 100 || done == total {
-					lastPatch = done
-					u.libPatchBody()
+	u.patchMain() // open the scanning view immediately; hydrate + scan off-thread (never block the actWorker)
+	// libTracksBlocking parked the actWorker up to 30s on a cold library (froze every tab); async instead.
+	u.libTracksAsync(u.lib(), "tagfix", func(tracks []musiclib.Track) {
+		u.bg(func() {
+			var onDisk []musiclib.Track
+			for _, tr := range tracks { // fs stat loop stays off the actWorker
+				if tr.Path != "" && pathOnDisk(tr.Path) {
+					onDisk = append(onDisk, tr)
 				}
-			}})
-		t.mu.Lock()
-		t.stage, t.skipped = "done", skipped
-		t.probs = probs
-		t.sel = map[int]bool{}
-		for i := range probs {
-			t.sel[i] = true // everything proposed is safe + revertible - default all on
-		}
-		if err != nil {
-			t.lastErr = err.Error()
-		}
-		t.mu.Unlock()
-		u.libPatchBody()
+			}
+			skipped := 0
+			lastPatch := 0
+			probs, err := tagfix.Scan(onDisk, tagfix.Options{Skipped: &skipped,
+				Progress: func(done, total int) {
+					t.mu.Lock()
+					t.done, t.total = done, total
+					t.mu.Unlock()
+					if done-lastPatch >= 100 || done == total {
+						lastPatch = done
+						u.libPatchBody()
+					}
+				}})
+			t.mu.Lock()
+			t.stage, t.skipped = "done", skipped
+			t.probs = probs
+			t.sel = map[int]bool{}
+			for i := range probs {
+				t.sel[i] = true // everything proposed is safe + revertible - default all on
+			}
+			if err != nil {
+				t.lastErr = err.Error()
+			}
+			t.mu.Unlock()
+			u.libPatchBody()
+		})
 	})
 }
 
