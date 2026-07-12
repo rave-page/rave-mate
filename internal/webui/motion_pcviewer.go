@@ -49,12 +49,21 @@ func init() {
 		u.eval("window.__pcv&&window.__pcv.close()")
 		u.closeModal()
 	})
+	// enable the webview GPU escape hatch so WebGL is available after a restart.
+	onExact("pcv-enablegpu", func(u *UI, _ actMsg) { u.pcvEnableGPU() })
 }
 
 // moPCView validates the picked .rmpc, registers a loopback URL, and opens the WebGL viewer.
 // Off-thread: file stat + header decode must not block the act worker.
 func (u *UI) moPCView(path string) {
 	if path == "" {
+		return
+	}
+	// The viewer renders on the GPU (WebGL). rave-mate keeps GPU compositing off by default to stay
+	// out of a live stream's way, so intercept the common case with a native prompt (nicer than the
+	// JS "edit config + restart" fallback, which only shows when GPU is on but still unavailable).
+	if u.svc.Cfg != nil && !u.svc.Cfg.Features.UI.AllowWebviewGPU() {
+		u.openModal(u.moPCGpuModal(false))
 		return
 	}
 	u.bg(func() {
@@ -116,4 +125,41 @@ func (u *UI) moPCViewerModal(name string, h pointcloud.Header) string {
 		html.EscapeString(title) + `</h3>` +
 		`<button class=modal-x data-act=pcv-close aria-label=Close>✕</button></div>` +
 		`<div class=modal-body>` + body + `</div><div class=modal-foot>` + foot + `</div></div>`
+}
+
+// moPCGpuModal is the "viewer needs GPU" prompt. enabled=false: explain the streaming-safe default
+// + offer one-click enable; enabled=true: confirm + tell the user to restart. We never auto-restart
+// - GPU-off is what keeps rave-mate off a live encoder, so the user restarts when they're not on air.
+func (u *UI) moPCGpuModal(enabled bool) string {
+	var body, foot string
+	if enabled {
+		body = `<p class=pcv-gpu-msg>` + html.EscapeString(i18n.T("motion.pcGpuEnabled")) + `</p>`
+		foot = btn(i18n.T("common.close"), "outline", "pcv-close", "")
+	} else {
+		body = `<p class=pcv-gpu-msg>` + html.EscapeString(i18n.T("motion.pcGpuWhy")) + `</p>`
+		foot = btn(i18n.T("motion.pcGpuEnable"), "go", "pcv-enablegpu", "") +
+			btn(i18n.T("common.close"), "outline", "pcv-close", "")
+	}
+	title := i18n.T("motion.pcGpuTitle")
+	return `<div class=modal-scrim data-act=pcv-close></div>` +
+		`<div class="modal pcv-modal" role=dialog><div class=modal-head><h3 class=modal-title>` +
+		html.EscapeString(title) + `</h3>` +
+		`<button class=modal-x data-act=pcv-close aria-label=Close>✕</button></div>` +
+		`<div class=modal-body>` + body + `</div><div class=modal-foot>` + foot + `</div></div>`
+}
+
+// pcvEnableGPU flips the webview-GPU escape hatch on + persists it, then swaps the prompt to the
+// "restart to apply" confirmation. Takes effect on next launch (the flag is read once at shell
+// creation); reverts on save failure.
+func (u *UI) pcvEnableGPU() {
+	if u.svc.Cfg == nil {
+		return
+	}
+	on := true
+	u.svc.Cfg.Features.UI.WebviewGPU = &on
+	u.openModal(u.moPCGpuModal(true)) // optimistic - confirm before the disk write returns
+	u.saveCfgBG("ui-webview-gpu", nil, func() {
+		u.svc.Cfg.Features.UI.WebviewGPU = nil // save failed - revert the flip
+		u.toast(i18n.T("motion.toast.pcGpuSaveFail"))
+	})
 }

@@ -19,3 +19,6 @@
 .pcv-time { flex: 0 0 auto; font: 12px var(--font-mono,monospace); color: var(--rp-mint,#08F79B); }
 .pcv-info { font: 12px var(--font-mono,monospace); color: var(--rp-muted,#B98AA0); }
 .pcv-hint { font: 10px var(--font-mono,monospace); color: var(--rp-muted,#B98AA0); }
+
+/* GPU-required prompt (motion_pcviewer.go moPCGpuModal). */
+.pcv-gpu-msg { max-width: 52ch; margin: 0; line-height: 1.5; color: var(--rp-fg,#fafafa); }
