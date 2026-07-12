@@ -5,6 +5,7 @@ package webui
 import (
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"rave.page/mate/internal/governor"
 )
@@ -22,31 +23,65 @@ var (
 )
 
 const (
-	wmEnterSizeMove = 0x0231
-	wmExitSizeMove  = 0x0232
-	wmActivate      = 0x0006
-	wmSize          = 0x0005
-	wmClose         = 0x0010
-	wmShowWindow    = 0x0018
-	sizeMinimized   = 1 // SIZE_MINIMIZED (wParam of WM_SIZE)
-	sizeRestored    = 0 // SIZE_RESTORED
-	sizeMaximized   = 2 // SIZE_MAXIMIZED
-	swHide          = 0 // SW_HIDE
+	wmEnterSizeMove  = 0x0231
+	wmExitSizeMove   = 0x0232
+	wmSizing         = 0x0214 // fires continuously during a resize drag
+	wmMoving         = 0x0216 // fires continuously during a move drag
+	wmCaptureChanged = 0x0215 // mouse capture lost - a size-move can't continue past it
+	wmActivate       = 0x0006
+	wmSize           = 0x0005
+	wmClose          = 0x0010
+	wmShowWindow     = 0x0018
+	sizeMinimized    = 1 // SIZE_MINIMIZED (wParam of WM_SIZE)
+	sizeRestored     = 0 // SIZE_RESTORED
+	sizeMaximized    = 2 // SIZE_MAXIMIZED
+	swHide           = 0 // SW_HIDE
 )
 
-var uiSizeMove atomic.Bool
+// sizeMoveStale self-heals a size-move latch left set by a swallowed WM_EXITSIZEMOVE (lost mouse
+// capture, focus stolen mid-drag, Aero-snap/keyboard move). A real drag emits WM_MOVING/WM_SIZING
+// many times/sec so the stamp stays fresh; once the messages stop the stamp goes stale and
+// inSizeMove clears the latch - otherwise a missed EXIT wedges evalFlusher forever (Go→JS patches
+// die while the page stays client-side responsive: tabs go dead, current tab still works).
+const sizeMoveStale = 1500 * time.Millisecond
 
-// inSizeMove reports the user is currently dragging/resizing the window.
-func inSizeMove() bool { return uiSizeMove.Load() }
+var (
+	uiSizeMove   atomic.Bool
+	sizeMoveSeen atomic.Int64 // UnixNano of last enter/move/size message; 0 = none
+)
+
+// inSizeMove reports the user is currently dragging/resizing the window. Self-clears a latch left
+// set by a missed WM_EXITSIZEMOVE (no drag message for sizeMoveStale) so the eval flusher can't wedge.
+func inSizeMove() bool {
+	if !uiSizeMove.Load() {
+		return false
+	}
+	if seen := sizeMoveSeen.Load(); seen == 0 || time.Since(time.Unix(0, seen)) > sizeMoveStale {
+		uiSizeMove.Store(false)
+		governor.SetSizeMove(false)
+		return false
+	}
+	return true
+}
 
 var sizeMoveProc = syscall.NewCallback(func(hwnd, msg, wp, lp, _, _ uintptr) uintptr {
 	switch msg {
 	case wmEnterSizeMove:
+		sizeMoveSeen.Store(time.Now().UnixNano()) // stamp BEFORE the latch so inSizeMove never sees true+seen==0
 		uiSizeMove.Store(true)
 		governor.SetSizeMove(true)
+	case wmSizing, wmMoving:
+		if uiSizeMove.Load() {
+			sizeMoveSeen.Store(time.Now().UnixNano()) // keep a live drag fresh
+		}
 	case wmExitSizeMove:
 		uiSizeMove.Store(false)
 		governor.SetSizeMove(false)
+	case wmCaptureChanged:
+		if uiSizeMove.Load() { // capture loss ends any drag - don't wait for a maybe-missing EXIT
+			uiSizeMove.Store(false)
+			governor.SetSizeMove(false)
+		}
 	case wmActivate:
 		governor.SetFocused((wp & 0xffff) != 0) // WA_INACTIVE==0 -> lost focus
 	case wmSize:
