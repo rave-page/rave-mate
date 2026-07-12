@@ -435,7 +435,7 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 				}
 				fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#FFB547" stroke-width="2"/>`, x, x, h)
 				fmt.Fprintf(&b, `<path d="M %.1f 8 l 7 -8 l -14 0 z" fill="#FFB547"/>`, x)
-				fmt.Fprintf(&b, `<text x="%.1f" y="22" fill="#FFB547" font-size="11" font-family="monospace" text-anchor="middle">D%d</text>`, x, i+1)
+				fmt.Fprintf(&b, `<text x="%.1f" y="22" fill="#FFB547" font-size="11" font-family="monospace" text-anchor="middle">D%s</text>`, x, ceDropLabel(i)) // matches topbar/assign-grid naming (5th = X)
 			}
 		}
 		// cue flags: pad slot (or M = memory cue) atop each cue line; hover = name + time

@@ -40,7 +40,7 @@ type ceSt struct {
 	jump         float64        // Shift+arrow beat-jump size
 	sel          map[int]bool   // DERIVED index view of selMs (into track.Cues) - rebuilt by syncSel
 	dsel         map[int]bool   // DERIVED index view of dselMs (into drops)
-	selMs        map[int64]bool // persistent cue selection by rounded ms (survives reload + track nav)
+	selMs        map[int64]bool // persistent cue selection by rounded ms (survives same-track reload; wiped on track nav)
 	dselMs       map[int64]bool // persistent drop selection by rounded ms
 	dragA        float64        // rubber band anchor (axis ms; <0 idle)
 	dragB        float64
@@ -55,12 +55,31 @@ type ceSt struct {
 	dbTimer      *time.Timer // debounced grid-shift DB persist (latest state wins; key-repeat safe)
 	idleTimer    *time.Timer // stops the engine after idling paused in cue-edit (releases the file)
 	prewarmTimer *time.Timer // debounced paused-decoder reposition on cursor moves (press = unpause-only)
+	undo         *ceUndoSt   // one-deep undo snapshot (Ctrl+Z swaps = press again to redo)
+	undoShiftAt  time.Time   // last grid-nudge (coalesces a nudge run into one undo unit)
 	// cue write-back router (library_cuewrite.go)
 	wbApplied   map[string]int // per-software tracks written (key absent = not written)
 	wbBusy      bool           // a write is in flight (serialize)
 	wbErr       string         // last write error ("" = none)
 	wbTargets   []gfTarget     // cached DJ-software discovery (fs probes must not run per repaint)
 	wbTargetsAt time.Time      // last discovery (zero = never)
+}
+
+// ceUndoSt is a one-deep snapshot of the mutable track state (grid + cues + drops).
+type ceUndoSt struct {
+	path  string
+	grid  []musiclib.GridMarker
+	cues  []musiclib.CuePoint
+	drops []float64
+}
+
+// captureUndoLocked snapshots the pre-mutation state (assign to c.undo once the mutation
+// really changed something). c LOCKED.
+func (c *ceSt) captureUndoLocked() *ceUndoSt {
+	return &ceUndoSt{path: c.path,
+		grid:  append([]musiclib.GridMarker(nil), c.track.Beatgrid...),
+		cues:  append([]musiclib.CuePoint(nil), c.track.Cues...),
+		drops: append([]float64(nil), c.drops...)}
 }
 
 // ceOverlay is the render snapshot mpWaveSVG draws (nil = mode off).
@@ -90,7 +109,7 @@ func (u *UI) ce() *ceSt {
 func ceKeyMs(ms float64) int64 { return int64(math.Round(ms)) }
 
 // syncSel rebuilds the derived index selection (sel/dsel) from the persistent ms sets against
-// the current track - so a selection survives reload, drop add/remove and track nav. c LOCKED.
+// the current track - so a selection survives reload and drop add/remove. c LOCKED.
 func (c *ceSt) syncSel() {
 	sel := map[int]bool{}
 	for i, q := range c.track.Cues {
@@ -212,6 +231,10 @@ func (u *UI) ceEnter(path string) {
 	}
 	c := u.ce()
 	c.mu.Lock()
+	if c.path != path { // fresh track: an ms-keyed selection would ghost onto it; undo too
+		c.selMs, c.dselMs = map[int64]bool{}, map[int64]bool{}
+		c.undo = nil
+	}
 	c.active, c.path, c.track, c.grid = true, path, tr, grid
 	c.drops, c.cursorMs = drops, cursor
 	c.dragA, c.dragB = -1, -1
@@ -221,13 +244,19 @@ func (u *UI) ceEnter(path string) {
 	c.report, c.lastErr = nil, ""
 	c.wbApplied, c.wbBusy, c.wbErr = nil, false, ""
 	c.fileTag = tagwrite.Supported(path)
-	c.syncSel() // keep the persistent selection + drop→pattern assignment; re-derive vs the new track
+	c.syncSel() // keep the drop→pattern assignment; re-derive the selection vs the new track
 	c.mu.Unlock()
 	// the editing surface (full-width wave + batch bar) mounts in Collection
 	u.mu.Lock()
 	u.libSection = "collection"
 	u.mu.Unlock()
 	u.mpEnsureFile("library", path, tr)
+	// track nav must not leave the previous file playing with no transport bound to it
+	if u.svc.Player != nil {
+		if st := u.svc.Player.State(); st.Playing && st.Path != path {
+			u.mpAudCall("library", "stop", func() { u.svc.Player.Stop() })
+		}
+	}
 	// keep the collection selection in sync with the editor target: the row
 	// highlights and cue-edit ↑/↓ (ceNav) anchor on s.sel.
 	s.mu.Lock()
@@ -512,6 +541,7 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	if c.grid != nil {
 		ms = c.grid.SnapMs(ms)
 	}
+	prev := c.captureUndoLocked()
 	before := len(c.drops)
 	if remove {
 		c.drops = cuepattern.RemoveDrop(c.drops, ms)
@@ -523,6 +553,7 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 		c.mu.Unlock()
 		return
 	}
+	c.undo, c.undoShiftAt = prev, time.Time{}
 	c.syncSel() // drop indexes shifted - re-derive from the ms sets
 	path, tr := c.path, c.track
 	drops := append([]float64(nil), c.drops...)
@@ -538,7 +569,7 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	u.libDropsChanged(path, drops)
 	u.cePatchWave()
 	u.cePatchRail()
-	u.libPatchBody() // row census (◆n) follows the drop set
+	u.libPatchCueCell(path) // row census (◆n) follows the drop set - one cell, not the body
 }
 
 // ceSetCues persists a cue list for the open track and mirrors the collection state.
@@ -577,12 +608,14 @@ func (u *UI) ceAddCueAt(ms float64) {
 		ms = c.grid.SnapMs(ms)
 	}
 	tr := c.track
+	prev := c.captureUndoLocked()
 	c.mu.Unlock()
 	for _, q := range tr.Cues {
 		if q.Kind != musiclib.CueGrid && math.Abs(q.StartMs-ms) < 25 {
 			return // marker already here
 		}
 	}
+	u.ceCommitUndo(prev)
 	cues := append(append([]musiclib.CuePoint(nil), tr.Cues...),
 		musiclib.CuePoint{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: ms})
 	sort.Slice(cues, func(i, j int) bool { return cues[i].StartMs < cues[j].StartMs })
@@ -598,6 +631,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		return
 	}
 	tr, path := c.track, c.path
+	prev := c.captureUndoLocked()
 	dropsChanged := false
 	kept := c.drops[:0:0]
 	for _, d := range c.drops {
@@ -626,6 +660,9 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		}
 		cues = append(cues, q)
 	}
+	if dropsChanged || cuesChanged {
+		u.ceCommitUndo(prev)
+	}
 	if dropsChanged {
 		u.bg(func() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
@@ -640,7 +677,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	case dropsChanged:
 		u.cePatchWave()
 		u.cePatchRail()
-		u.libPatchBody()
+		u.libPatchCueCell(path)
 	}
 }
 
@@ -648,7 +685,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 // the waveform (scroll only - never moves the cursor/playhead); a plain click positions the
 // beat cursor or selects the marker under it (Ctrl+click toggles it in/out of the selection).
 // SHIFT+drag rubber-band-selects cues + drops. Right button = memory cue / drop (Shift) /
-// remove (Ctrl). Selection is held by ms (survives track nav + drop edits) via selMs/dselMs.
+// remove (Ctrl). Selection is held by ms (survives reload + drop edits) via selMs/dselMs.
 func (u *UI) ceSurf(host, val string) {
 	phase, fx, ok := mpPos(val)
 	if !ok {
@@ -679,7 +716,7 @@ func (u *UI) ceSurf(host, val string) {
 			beatMs = c.grid.BeatLenMs(axisMs)
 		}
 		c.mu.Unlock()
-		u.ceRemoveAt(axisMs, beatMs/2)
+		u.ceRemoveAt(axisMs, math.Max(beatMs/2, ceHitPxMs(&t)))
 		return
 	}
 
@@ -759,7 +796,7 @@ func (u *UI) ceSurf(host, val string) {
 			beatMs = c.grid.BeatLenMs(axisMs)
 		}
 		ci, di, dist := ceNearestMarker(c, axisMs)
-		hit := dist <= beatMs/2
+		hit := dist <= math.Max(beatMs/2, ceHitPxMs(&t)) // beat-based alone goes sub-pixel zoomed out
 		switch {
 		case ctrl && hit && ci >= 0:
 			ceToggleKey(c.selMs, ceKeyMs(c.track.Cues[ci].StartMs))
@@ -780,6 +817,13 @@ func (u *UI) ceSurf(host, val string) {
 		u.cePatchWave()
 		u.cePatchRail()
 	}
+}
+
+// ceHitPxMs converts ~6 on-screen px (waveform SVG viewBox = 1000 units wide) to ms at
+// the current zoom - the minimum marker hit radius.
+func ceHitPxMs(t *mpSt) float64 {
+	_, ln := t.axis()
+	return 6.0 * t.viewSpan * ln // (6/1000 view-widths) × axis-sec × 1000ms
 }
 
 // ceNearestMarker finds the marker closest to ms: cue (ci≥0) or drop (di≥0), never
@@ -828,6 +872,7 @@ func (u *UI) ceDeleteSelected() {
 		c.mu.Unlock()
 		return
 	}
+	c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
 	tr, path, fileTag := c.track, c.path, c.fileTag
 	var cues []musiclib.CuePoint
 	for i, q := range tr.Cues {
@@ -865,7 +910,7 @@ func (u *UI) ceDeleteSelected() {
 	} else {
 		u.cePatchWave()
 		u.cePatchRail()
-		u.libPatchBody()
+		u.libPatchCueCell(path)
 	}
 	u.toast(i18n.T("library.ce.deletedToast", i18n.A{"cues": fmt.Sprint(nc), "drops": fmt.Sprint(nd)}))
 }
@@ -963,6 +1008,7 @@ func (u *UI) ceApply(toMemory bool) {
 			pats[di] = p
 		}
 	}
+	c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
 	tr, drops := c.track, append([]float64(nil), c.drops...)
 	c.mu.Unlock()
 	if len(pats) == 0 {
@@ -1079,6 +1125,9 @@ func (u *UI) ceConvertAll() {
 	c.mu.Lock()
 	tr := c.track
 	active := c.active
+	if active {
+		c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
+	}
 	c.mu.Unlock()
 	if !active {
 		return
@@ -1105,6 +1154,69 @@ func (u *UI) ceConvertAll() {
 		u.toast(i18n.T("library.ce.convertedToast"))
 		u.patchMain()
 	})
+}
+
+// ceCommitUndo stores snap as the undo target if the editor is still on its track.
+func (u *UI) ceCommitUndo(snap *ceUndoSt) {
+	c := u.ce()
+	c.mu.Lock()
+	if c.active && c.path == snap.path {
+		c.undo, c.undoShiftAt = snap, time.Time{}
+	}
+	c.mu.Unlock()
+}
+
+// ceUndo (Ctrl+Z) swaps the editor state with the one-deep snapshot - pressing again
+// redoes. Restores grid + cues + drops, mirrors the collection, and persists through the
+// same write-behind paths as live edits.
+func (u *UI) ceUndo() {
+	c := u.ce()
+	c.mu.Lock()
+	un := c.undo
+	if !c.active || un == nil || un.path != c.path {
+		c.mu.Unlock()
+		return
+	}
+	c.undo = c.captureUndoLocked() // current state becomes the redo target
+	c.undoShiftAt = time.Time{}
+	c.track.Beatgrid = append([]musiclib.GridMarker(nil), un.grid...)
+	c.track.Cues = append([]musiclib.CuePoint(nil), un.cues...)
+	c.drops = append([]float64(nil), un.drops...)
+	if g, err := cuepattern.NewGrid(c.track.Beatgrid, c.track.DurationSec*1000); err == nil {
+		c.grid = g
+		c.cursorMs = g.SnapMs(c.cursorMs)
+	}
+	c.wbApplied, c.wbErr = nil, "" // markers moved - earlier software writes are stale
+	c.syncSel()
+	path := c.path
+	grid := c.track.Beatgrid
+	cues := c.track.Cues
+	drops := append([]float64(nil), c.drops...)
+	if c.fileTag {
+		u.ceScheduleTagLocked(c, path, drops)
+	}
+	if c.dbTimer != nil {
+		c.dbTimer.Stop()
+	}
+	c.dbTimer = time.AfterFunc(300*time.Millisecond, func() { u.ceGridPersist(path) })
+	c.mu.Unlock()
+	s := u.lib()
+	s.mu.Lock()
+	if t, ok := s.byPath[path]; ok {
+		t.Beatgrid, t.Cues = grid, cues
+		s.byPath[path] = t
+		for i := range s.tracks {
+			if s.tracks[i].Path == path {
+				s.tracks[i].Beatgrid, s.tracks[i].Cues = grid, cues
+			}
+		}
+	}
+	s.mu.Unlock()
+	u.libDropsChanged(path, drops)
+	u.cePatchWave()
+	u.cePatchRail()
+	u.libPatchCueCell(path)
+	u.toast(i18n.T("library.ce.undoneToast"))
 }
 
 // ceKey handles the cue-edit keyboard scope (see shell.go keydown transport).
@@ -1152,6 +1264,8 @@ func (u *UI) ceKey(val string) {
 		u.ceGridShift(-1)
 	case "csright":
 		u.ceGridShift(1)
+	case "cz": // Ctrl+Z: one-deep undo (again = redo)
+		u.ceUndo()
 	}
 }
 
@@ -1166,6 +1280,12 @@ func (u *UI) ceGridShift(deltaMs float64) {
 		c.mu.Unlock()
 		return
 	}
+	// coalesce a nudge run into ONE undo unit (per-step snapshots would make Ctrl+Z
+	// revert a single 1-10ms step)
+	if c.undo == nil || c.undo.path != c.path || time.Since(c.undoShiftAt) > 2*time.Second {
+		c.undo = c.captureUndoLocked()
+	}
+	c.undoShiftAt = time.Now()
 	grid := append([]musiclib.GridMarker(nil), c.track.Beatgrid...)
 	for i := range grid {
 		grid[i].PositionMs += deltaMs

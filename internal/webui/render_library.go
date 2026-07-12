@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"html"
 	"math"
 	"os"
@@ -769,7 +770,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 			`<span class=trk-main data-act="lib-track:` + html.EscapeString(t.Path) + `"><span class=trk-title>` +
 			html.EscapeString(trackTitle(t)) + `</span><span class=trk-sub>` +
 			html.EscapeString(trackMetaSub(t)) + `</span></span>` + ver +
-			`<span class=trk-cell-ce>` + libCueCellHTML(s, t) + `</span>` +
+			`<span class=trk-cell-ce id=` + ceCellID(t.Path) + `>` + libCueCellHTML(s, t) + `</span>` +
 			`<span class=trk-bpm>` + bpm + `</span><span class=trk-dur>` + dur + `</span>` +
 			`<span class=trk-key>` + keyPillHTML(t.Key, ref) + `</span></div>`)
 	}
@@ -798,6 +799,35 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 			btn(i18n.T("library.clear"), "ghost", "lib-collsel-clear", "") + `</div>`)
 	}
 	return b.String()
+}
+
+// ceCellID is the stable DOM id of a row's cue-census cell (targeted drop-toggle patch).
+func ceCellID(path string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(path))
+	return fmt.Sprintf("ce-cell-%08x", h.Sum32())
+}
+
+// libPatchCueCell patches one row's ◆/⚑ census cell in place - a drop toggle must not
+// rebuild the whole collection body. Falls back to the full body when the "no drops"
+// facet is active (row membership itself changes).
+func (u *UI) libPatchCueCell(path string) {
+	s := u.lib()
+	s.mu.Lock()
+	if s.collNoDrops {
+		s.mu.Unlock()
+		u.libPatchBody()
+		return
+	}
+	tr, ok := s.byPath[path]
+	cell := ""
+	if ok {
+		cell = libCueCellHTML(s, tr)
+	}
+	s.mu.Unlock()
+	if ok {
+		u.eval("window.__patch(" + jsQuote(ceCellID(path)) + "," + jsQuote(cell) + ")")
+	}
 }
 
 // libCueCellHTML: compact drops/cues census - ◆n amber = drop markers, ⚑n = cues;

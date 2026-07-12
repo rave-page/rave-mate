@@ -133,9 +133,10 @@ const runtimeJS = `(function(){
     var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
-    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del'};
+    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del','z':'z','Z':'z'};
     var name=map[e.key]; if(!name) return;
-    if(e.ctrlKey && name!=='left' && name!=='right') return; // Ctrl reserved for grid nudge only
+    if(e.ctrlKey && name!=='left' && name!=='right' && name!=='z') return; // Ctrl: grid nudge + undo only
+    if(name==='z' && !e.ctrlKey) return; // plain z is not bound
     // hold = one action: auto-repeat on one-shot keys hammered full-file tag rewrites (enter/t)
     if(e.repeat&&(name==='space'||name==='enter'||name==='t')){ e.preventDefault(); return; }
     e.preventDefault();

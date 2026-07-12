@@ -464,7 +464,15 @@ func (u *UI) livePush() {
 			// Skip the ~1 Hz DOM refresh whenever the window isn't being looked at (dragging,
 			// unfocused, minimized) or a stream is live - repainting rave-mate's own graphs then
 			// only competes with the encoder for CPU/GPU. governor.UIAnimAllowed covers all four.
-			if u.shell == nil || inSizeMove() || !governor.UIAnimAllowed() {
+			if u.shell == nil || inSizeMove() {
+				continue
+			}
+			if !governor.UIAnimAllowed() {
+				// cue-edit exemption: the audition playhead must keep moving while
+				// streaming/unfocused (mpTick no-ops unless actually playing)
+				if u.activeTab() == "library" && u.ceActiveFor("library") {
+					mpTick(u, "library")
+				}
 				continue
 			}
 			if fn := liveTicks[u.activeTab()]; fn != nil {
