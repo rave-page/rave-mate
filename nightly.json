@@ -1,13 +1,13 @@
 {
-  "version": "nightly-e0f7a68",
-  "build": 72,
-  "commit": "e0f7a68",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-72-20260712-e0f7a68.exe",
-  "sha256": "b86a78def94be985c8db9699b60b75a9c9e9552e46c5531d312ebfdcd4ae4e4f",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-72-20260712-e0f7a68.exe",
-  "installer_sha256": "982240c6f00fdeb312bf62a6edff59801574f4a0880d8d8441a873808aaa7a66",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-72-20260712-e0f7a68",
-  "linux_sha256": "a3a0c2c38baaf1f073739899b5178418958b34cee1a04c7e77dfb4be22fdc8e7",
+  "version": "nightly-d4a7591",
+  "build": 73,
+  "commit": "d4a7591",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-73-20260712-d4a7591.exe",
+  "sha256": "001bfc7858b15d782b7804f02a2f525c7695dc1a20cd34e473d931e4bd7193cd",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-73-20260712-d4a7591.exe",
+  "installer_sha256": "a34f1ec5f6631bd750bd9cd3c37844a785a7f8cae850fbeb87ff51bf15974859",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-73-20260712-d4a7591",
+  "linux_sha256": "f5da8268a4d14cb6f295426df2fbea5fd2d8e7312bae1a1269dcdb942dc670df",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-12T19:37:36Z",
-  "notes": "feat(webui): passive library refresh on library.trackchanged (#88)"
+  "released": "2026-07-12T20:18:51Z",
+  "notes": "docs(webui): remote cue-edit P2 docs + live rce-info repaint (#89)"
 }
