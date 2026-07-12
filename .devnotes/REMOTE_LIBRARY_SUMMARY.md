@@ -36,7 +36,16 @@ webui ruiHub ── headless UI (virtualShell) ──── ruiHub ── Librar
 - **Media proxy** (`webui/remoteui_media.go`): B rewrites `http://127.0.0.1:<port>/` →
   placeholder; A rewrites → `http://127.0.0.1:<aport>/rmt/<sid>/`, served by the existing
   loopback media server via byte-range fetch RPC. Only B's token-guarded /m/ + /img/ routes
-  reachable. Audio auditions intentionally play on B (PlayerProxy).
+  reachable.
+- **Host non-interference** (#89 P4, `player_actions.go`/`virtualshell.go`): headless sessions
+  must never disturb B's own use of B. `mpInstances`/`mpMovePend`/`mpMoveBusy` keyed per *UI
+  (released in `releaseUIState`) - a session can't clobber the window inspector's
+  file/markers/trim. `u.player()` = single audio choke point, nil for virtual UIs: remote acts
+  never play/stop/seek B's PlayerProxy (toast `player.toast.remoteAudioOff`; audioNote retold).
+  onAction deny-list `virtualDenied` refuses desktop-surface acts (open-url, openext/reveal,
+  folder openers, browser sign-in/device-auth) with `library.mirror.noDesktop` - picker
+  precedent generalized. gridfix VerifiedStore process-shared per data dir; actBusy keyed per
+  (UI,key); media tokens owner-tagged (per-owner evict, cap 128, purge on release).
 - **Rig/test seams** (`peerlink`): `RAVE_MATE_PEER_BIND` (loopback bind skips mDNS),
   `RAVE_MATE_PEER_PORTS`, `RAVE_MATE_PEER_SEED` (direct dial, 5s tick, same SAS trust flow).
 

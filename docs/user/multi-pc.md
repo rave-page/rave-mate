@@ -39,9 +39,11 @@ every click/key/edit is sent back and **executes on the peer** - beatgrid analys
 cue/drop edits, tag writes, transcodes, playlist changes all read/write the peer's files and
 database with the peer's CPU/GPU. Same layout, same features as sitting at that machine.
 
-- Audio auditions play on the **peer's** audio device (by design - commands execute there).
+- Audio auditioning is disabled remotely: nothing plays out loud on the peer, and its own
+  player/inspector state is never touched by your session.
 - Covers/thumbnails stream through a token-guarded media proxy; embedded video previews may
-  be unavailable remotely. Native file dialogs are refused (they'd pop on the peer's desktop).
+  be unavailable remotely. Native file dialogs - and anything else that would open on the
+  peer's desktop (file/folder openers, external apps, browser sign-ins) - are refused.
 - Link drop mid-session: the banner turns amber and the view freezes; the peer cleans its
   session up automatically. Reconnect resumes.
 - Transport: the `remoteui` sub-channel of the same Ed25519-authenticated, per-frame-MAC'd
