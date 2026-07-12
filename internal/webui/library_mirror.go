@@ -233,6 +233,9 @@ func injectMirrorBridge(doc string) string {
 // ── input + lifecycle ───────────────────────────────────────────────────────────
 
 // mirrorForwardAct relays the mirrored page's input payload to the peer (executes there).
+// Exception: `ce-open:<path>` never forwards - it launches the LOCAL cue editor on a cached
+// copy of the peer track (library_remotecue.go, #89). Set flows (ce-open-pl:/ce-open-dir)
+// still forward (P3).
 func (u *UI) mirrorForwardAct(payload string) {
 	if payload == "" || u.rui == nil {
 		return
@@ -242,6 +245,10 @@ func (u *UI) mirrorForwardAct(payload string) {
 	target, sid, status := st.target, st.sid, st.status
 	st.mu.Unlock()
 	if target == "" || (status != mirrorLive && status != mirrorConnecting) {
+		return
+	}
+	if path, ok := rceInterceptOpen(payload); ok {
+		u.rceOpen(target, path)
 		return
 	}
 	hub := u.rui

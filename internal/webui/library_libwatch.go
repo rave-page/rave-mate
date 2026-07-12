@@ -42,7 +42,10 @@ func (u *UI) libWatchStart() {
 		if json.Unmarshal(ev.Data, &e) != nil || e.Path == "" || e.Origin == u.libWatchOrigin() {
 			return
 		}
-		u.bg(func() { u.libWatchApply(e.Path) }) // fn runs on the publisher's goroutine - hand off
+		u.bg(func() { // fn runs on the publisher's goroutine - hand off
+			u.rceTrackChanged(e) // remote-edit session: flag "peer state moved" (never clobbers local edits)
+			u.libWatchApply(e.Path)
+		})
 	})
 	u.mu.Lock()
 	u.libWatchStop = unsub

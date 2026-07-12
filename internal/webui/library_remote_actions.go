@@ -7,7 +7,13 @@ package webui
 import "strings"
 
 func init() {
-	onPrefix("lib-target:", func(u *UI, m actMsg) { u.libSetTarget(strings.TrimPrefix(m.Act, "lib-target:")) })
+	onPrefix("lib-target:", func(u *UI, m actMsg) {
+		t := strings.TrimPrefix(m.Act, "lib-target:")
+		if u.rceGuardTarget(t) { // unsaved remote cue edits: confirm-discard first
+			return
+		}
+		u.libSetTarget(t)
+	})
 }
 
 // libSetTarget flips the shared control target and re-renders the tab (empty = this computer).

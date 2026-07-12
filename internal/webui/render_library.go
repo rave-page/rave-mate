@@ -178,9 +178,9 @@ func (u *UI) renderLibrary() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.library"), i18n.T("navtitle.library")))
 	b.WriteString(u.targetSwitcherHTML("libtarget", "lib-target:"))
-	if u.libRemoteTarget() != "" {
-		// remote mirror: the embedded peer view carries its OWN section tabs - a local
-		// duplicate row would be dead weight and shadow ctl clicks aimed at the mirror
+	if u.rceActive() || u.libRemoteTarget() != "" {
+		// remote mirror / remote cue edit: the embedded peer view carries its OWN section
+		// tabs - a local duplicate row would be dead weight and shadow ctl clicks
 		b.WriteString(`<div id=lib-body>` + u.libBody() + `</div>`)
 		return b.String()
 	}
@@ -247,6 +247,9 @@ func (u *UI) libPatchDetail() {
 // targeted it routes to the live mirror (library_mirror.go) - the peer's own rendered Library
 // tab, remote-driven; the local path below is byte-behaviour-unchanged.
 func (u *UI) libBody() string {
+	if u.rceActive() { // remote cue edit owns the surface (survives a link drop - edits are local)
+		return u.rceBody()
+	}
 	if tgt := u.libRemoteTarget(); tgt != "" {
 		return u.libMirrorBody(tgt)
 	}

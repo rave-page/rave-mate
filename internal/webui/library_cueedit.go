@@ -57,6 +57,10 @@ type ceSt struct {
 	prewarmTimer *time.Timer // debounced paused-decoder reposition on cursor moves (press = unpause-only)
 	undo         *ceUndoSt   // one-deep undo snapshot (Ctrl+Z swaps = press again to redo)
 	undoShiftAt  time.Time   // last grid-nudge (coalesces a nudge run into one undo unit)
+	// rce: non-nil while editing a CACHED copy of a peer's track (library_remotecue.go) -
+	// every persistence site below branches on it: mutations stay in ceSt, Save ships them
+	// to the peer over remotectl. path = the cached copy; rce.remotePath = the peer's file.
+	rce *ceRemote
 	// cue write-back router (library_cuewrite.go)
 	wbApplied   map[string]int // per-software tracks written (key absent = not written)
 	wbBusy      bool           // a write is in flight (serialize)
@@ -235,6 +239,7 @@ func (u *UI) ceEnter(path string) {
 		c.selMs, c.dselMs = map[int64]bool{}, map[int64]bool{}
 		c.undo = nil
 	}
+	c.rce = nil // local entry ends any remote session (guarded upstream when dirty)
 	c.active, c.path, c.track, c.grid = true, path, tr, grid
 	c.drops, c.cursorMs = drops, cursor
 	c.dragA, c.dragB = -1, -1
@@ -305,6 +310,17 @@ func (u *UI) ceEnterSet(paths []string, plID int64) {
 func (u *UI) ceClose() {
 	c := u.ce()
 	c.mu.Lock()
+	if r := c.rce; r != nil { // remote session: unsaved edits need an explicit discard
+		dirty := c.rceDirtyLocked()
+		name := r.peerName
+		c.mu.Unlock()
+		if dirty {
+			u.rceConfirmDiscard(name, "rce-discard")
+			return
+		}
+		u.rceEnd()
+		return
+	}
 	c.active = false
 	c.mu.Unlock()
 	u.patchMain()
@@ -317,9 +333,9 @@ func (u *UI) ceClose() {
 func (u *UI) ceReloadTrack() {
 	c := u.ce()
 	c.mu.Lock()
-	path, active := c.path, c.active
+	path, active, remote := c.path, c.active, c.remote()
 	c.mu.Unlock()
-	if !active {
+	if !active || remote { // rce: no local collection row to re-read
 		return
 	}
 	s := u.lib()
@@ -561,7 +577,13 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	if c.fileTag {
 		u.ceScheduleTagLocked(c, path, drops)
 	}
+	remote := c.remote()
 	c.mu.Unlock()
+	if remote { // rce: edits live in ceSt only - Save ships them to the peer
+		u.cePatchWave()
+		u.cePatchRail()
+		return
+	}
 	u.bg(func() {
 		if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 			u.logErr("save drops", err)
@@ -576,7 +598,21 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 }
 
 // ceSetCues persists a cue list for the open track and mirrors the collection state.
+// rce mode: the cue list only mutates ceSt (Save ships it to the peer) - synchronous, no I/O.
 func (u *UI) ceSetCues(tr musiclib.Track, cues []musiclib.CuePoint) {
+	c := u.ce()
+	c.mu.Lock()
+	if c.remote() {
+		if c.active && c.track.Path == tr.Path {
+			c.track.Cues = cues
+			c.syncSel()
+		}
+		c.mu.Unlock()
+		u.cePatchWave()
+		u.cePatchRail()
+		return
+	}
+	c.mu.Unlock()
 	u.bg(func() {
 		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
 			u.toast(i18n.T("library.ce.applyFailed") + err.Error())
@@ -653,6 +689,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	if dropsChanged && c.fileTag {
 		u.ceScheduleTagLocked(c, path, drops) // write-behind (latest wins)
 	}
+	remote := c.remote()
 	c.mu.Unlock()
 
 	var cues []musiclib.CuePoint
@@ -667,7 +704,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	if dropsChanged || cuesChanged {
 		u.ceCommitUndo(prev)
 	}
-	if dropsChanged {
+	if dropsChanged && !remote { // rce: drops stay in ceSt until Save
 		u.bg(func() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 				u.logErr("save drops", err)
@@ -683,7 +720,9 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 	case dropsChanged:
 		u.cePatchWave()
 		u.cePatchRail()
-		u.libPatchCueCell(path)
+		if !remote {
+			u.libPatchCueCell(path)
+		}
 	}
 }
 
@@ -902,8 +941,9 @@ func (u *UI) ceDeleteSelected() {
 	if nd > 0 && fileTag {
 		u.ceScheduleTagLocked(c, path, dropsCopy) // write-behind (latest wins)
 	}
+	remote := c.remote()
 	c.mu.Unlock()
-	if nd > 0 {
+	if nd > 0 && !remote { // rce: drops stay in ceSt until Save
 		u.bg(func() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, dropsCopy); err != nil {
 				u.logErr("save drops", err)
@@ -917,7 +957,9 @@ func (u *UI) ceDeleteSelected() {
 	} else {
 		u.cePatchWave()
 		u.cePatchRail()
-		u.libPatchCueCell(path)
+		if !remote {
+			u.libPatchCueCell(path)
+		}
 	}
 	u.toast(i18n.T("library.ce.deletedToast", i18n.A{"cues": fmt.Sprint(nc), "drops": fmt.Sprint(nd)}))
 }
@@ -1017,6 +1059,7 @@ func (u *UI) ceApply(toMemory bool) {
 	}
 	c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
 	tr, drops := c.track, append([]float64(nil), c.drops...)
+	remote := c.remote()
 	c.mu.Unlock()
 	if len(pats) == 0 {
 		u.toast(i18n.T("library.ce.noPatternPicked"))
@@ -1025,6 +1068,18 @@ func (u *UI) ceApply(toMemory bool) {
 	cues, rep, err := cuepattern.Apply(tr, drops, pats, cuepattern.ApplyOptions{ToMemory: toMemory, SnapDrop: true})
 	if err != nil {
 		u.toast(err.Error())
+		return
+	}
+	if remote { // rce: apply into ceSt only - Save ships it to the peer
+		c.mu.Lock()
+		if c.active && c.remote() && c.track.Path == tr.Path {
+			c.track.Cues = cues
+			c.report, c.toMem, c.lastErr = &rep, toMemory, ""
+			c.syncSel()
+		}
+		c.mu.Unlock()
+		u.toast(i18n.T("library.ce.appliedToast", i18n.A{"n": fmt.Sprint(rep.Added)}))
+		u.patchMain()
 		return
 	}
 	u.bg(func() {
@@ -1067,6 +1122,10 @@ func (u *UI) ceApplySelected(toMemory bool) {
 	}
 	c := u.ce()
 	c.mu.Lock()
+	if c.remote() { // rce: mass-apply targets the LOCAL collection - a peer set flow is P3
+		c.mu.Unlock()
+		return
+	}
 	pats := map[int]cuepattern.Pattern{}
 	for di, pid := range c.assign {
 		if p, ok := st.Get(pid); ok && pid != "" {
@@ -1134,6 +1193,7 @@ func (u *UI) ceConvertAll() {
 	c.mu.Lock()
 	tr := c.track
 	active := c.active
+	remote := c.remote()
 	if active {
 		c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
 	}
@@ -1142,6 +1202,17 @@ func (u *UI) ceConvertAll() {
 		return
 	}
 	cues := cuepattern.ConvertHotcuesToMemory(tr.Cues)
+	if remote { // rce: convert in ceSt only - Save ships it to the peer
+		c.mu.Lock()
+		if c.active && c.remote() && c.track.Path == tr.Path {
+			c.track.Cues = cues
+			c.syncSel()
+		}
+		c.mu.Unlock()
+		u.toast(i18n.T("library.ce.convertedToast"))
+		u.patchMain()
+		return
+	}
 	u.bg(func() {
 		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
 			u.toast(i18n.T("library.ce.applyFailed") + err.Error())
@@ -1205,6 +1276,13 @@ func (u *UI) ceUndo() {
 	if c.fileTag {
 		u.ceScheduleTagLocked(c, path, drops)
 	}
+	if c.remote() { // rce: the swap stays in ceSt - no DB persist, no collection mirror
+		c.mu.Unlock()
+		u.cePatchWave()
+		u.cePatchRail()
+		u.toast(i18n.T("library.ce.undoneToast"))
+		return
+	}
 	if c.dbTimer != nil {
 		c.dbTimer.Stop()
 	}
@@ -1235,14 +1313,21 @@ func (u *UI) ceKey(val string) {
 	c.mu.Lock()
 	jump := c.jump
 	active := c.active
+	remote := c.remote()
 	c.mu.Unlock()
 	if !active {
 		return
 	}
 	switch val {
 	case "up": // move the editor to the prev/next collection track (list nav)
+		if remote {
+			return // rce: one peer track per session - the local collection is unrelated
+		}
 		u.ceNav(false)
 	case "down":
+		if remote {
+			return
+		}
 		u.ceNav(true)
 	case "left":
 		u.ceStep(-1)
@@ -1329,6 +1414,12 @@ func (u *UI) ceGridShift(deltaMs float64) {
 	dropsCopy := append([]float64(nil), drops...)
 	if c.fileTag {
 		u.ceScheduleTagLocked(c, path, dropsCopy) // write-behind (latest wins)
+	}
+	if c.remote() { // rce: the nudge stays in ceSt - no DB persist, no collection mirror
+		c.mu.Unlock()
+		u.cePatchWave()
+		u.cePatchRail()
+		return
 	}
 	// debounced DB persist: one unserialized goroutine per press could land out of order
 	// (an early slow write last) and persist a torn intermediate state - write the LATEST
@@ -1660,6 +1751,12 @@ func (u *UI) ceTopbarHTML() string {
 	b.WriteString(`<div class=ce-topbar>`)
 	b.WriteString(`<span class=ce-tb-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</span>`)
 	b.WriteString(`<span class=ce-tb-title>` + esc(trackTitle(c.track)) + `</span>`)
+	if r := c.rce; r != nil { // remote session: whose track + unsaved marker
+		b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.T("library.rce.topbarOn", i18n.A{"name": r.peerName})) + `</span>`)
+		if c.rceDirtyLocked() {
+			b.WriteString(`<span class=ce-tb-warn title=` + attrQ(i18n.T("library.rce.unsaved")) + `>●</span>`)
+		}
+	}
 	meta := ""
 	if c.track.BPM > 0 {
 		meta = fmt.Sprintf("%.1f BPM", c.track.BPM)
@@ -1697,6 +1794,9 @@ func ceCueCount(cues []musiclib.CuePoint) int { return musiclib.MusicalCues(cues
 // caller - never re-lock it below (deadlock).
 func (u *UI) ceRailHTML(s *libSt) string {
 	wb := u.ceWriteHTML(s) // built first - locks ceSt itself (never nested under c.mu)
+	if rs := u.rceSaveHTML(); rs != "" {
+		wb = rs // rce mode: save-to-peer rail replaces the local write-back router
+	}
 	c := u.ce()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1705,8 +1805,12 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	}
 	// controls only - the readouts (cursor, drop times, cue census) live in the
 	// ce-topbar on the waveform strip
+	eyebrow := i18n.T("library.ce.eyebrow")
+	if r := c.rce; r != nil {
+		eyebrow = i18n.T("library.rce.eyebrow", i18n.A{"name": r.peerName}) // editing the PEER's track
+	}
 	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</div><div class=insp-title>` +
+	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(eyebrow) + `</div><div class=insp-title>` +
 		esc(trackTitle(c.track)) + `</div></div>`)
 
 	// drops → pattern assign grid (fixed rows drop 1-4 + X; unplaced rows still show)

@@ -81,12 +81,13 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 	c := u.ce()
 	c.mu.Lock()
 	active, busy, errStr, openPath := c.active, c.wbBusy, c.wbErr, c.path
+	remote := c.remote()
 	applied := make(map[string]int, len(c.wbApplied))
 	for k, v := range c.wbApplied {
 		applied[k] = v
 	}
 	c.mu.Unlock()
-	if !active {
+	if !active || remote { // rce mode: the remote save rail replaces the local router
 		return ""
 	}
 	var b strings.Builder
@@ -140,7 +141,7 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 func (u *UI) ceWriteTo(sw string) {
 	c := u.ce()
 	c.mu.Lock()
-	if !c.active || c.wbBusy {
+	if !c.active || c.wbBusy || c.remote() { // rce: peer write-back goes through rce-write:
 		c.mu.Unlock()
 		return
 	}

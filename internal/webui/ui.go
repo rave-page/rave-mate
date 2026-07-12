@@ -61,6 +61,9 @@ type UI struct {
 	ceState *ceSt
 	ceStore *cuepattern.Store
 
+	rceMu   sync.Mutex         // guards rcePull (remote-track fetch, library_remotecue.go)
+	rcePull context.CancelFunc // active peer-file pull (nil = none); rce-cancel invokes it
+
 	twMu         sync.Mutex
 	twitchRows   []string             // rolling twitch chat/alert feed (cap 250)
 	libSection   string               // Library active sub-section: "browse" | "collection"
@@ -197,6 +200,7 @@ func (u *UI) startTray() {
 // Stop tears the window down (idempotent).
 func (u *UI) Stop() {
 	u.mirrorShutdown() // best-effort close of a live remote-library session
+	u.rceCancelPull()  // abort an in-flight remote-track pull
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
@@ -664,5 +668,3 @@ func jsQuote(s string) string {
 	}
 	return string(b)
 }
-
-var _ = context.Background // reserved for picker ctx use
