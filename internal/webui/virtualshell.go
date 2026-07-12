@@ -8,6 +8,7 @@ package webui
 // no forked renderers.
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -148,4 +149,39 @@ func releaseUIState(u *UI) {
 func (u *UI) virtual() bool {
 	_, ok := u.shell.(*virtualShell)
 	return ok
+}
+
+// Acts a headless session refuses (picker precedent, pick_actions.go): each opens an OS
+// surface - file/folder in Explorer, external app, browser window/sign-in - which would land
+// on the CONTROLLED machine's desktop, not the controller's.
+var (
+	virtualDeniedExact = map[string]bool{
+		"open-url":               true,
+		"auth-login":             true, // browser sign-in
+		"settings-rbmidi-folder": true,
+		"ovl-png-open":           true,
+		"ovl-np-open":            true,
+		"settings-twitch-signin": true, // device-auth: opens verification URL
+		"settings-gh-device":     true,
+		"world-gh-device":        true,
+	}
+	virtualDeniedPrefix = []string{
+		"mp-openext:", "mp-reveal:",
+		"lib-opendir:", "lib-reveal:", "lib-openext:", "lib-bk-open:",
+		"pub-open:", "pub-reveal:",
+		"settings-open:",
+	}
+)
+
+// virtualDenied reports whether a headless session must refuse act.
+func virtualDenied(act string) bool {
+	if virtualDeniedExact[act] {
+		return true
+	}
+	for _, p := range virtualDeniedPrefix {
+		if strings.HasPrefix(act, p) {
+			return true
+		}
+	}
+	return false
 }

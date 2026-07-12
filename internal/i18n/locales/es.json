@@ -373,7 +373,8 @@
       "timeout": "El par no respondió: puede que ejecute una versión antigua de rave-mate sin biblioteca remota.",
       "reconnect": "Reconectar",
       "noLink": "Enlace de pares no disponible: activa Peers para controlar una instancia emparejada.",
-      "noPicker": "Los diálogos de archivos no pueden abrirse en remoto: aparecerían en el equipo controlado. Navega con la lista de carpetas."
+      "noPicker": "Los diálogos de archivos no pueden abrirse en remoto: aparecerían en el equipo controlado. Navega con la lista de carpetas.",
+      "noDesktop": "No se pueden abrir archivos, carpetas o un navegador en remoto: aparecerían en el escritorio del equipo controlado."
     },
     "addToPlaylist": "Añadir a lista…",
     "audioCap": {

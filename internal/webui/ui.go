@@ -258,6 +258,10 @@ func (u *UI) onAction(payload string) {
 	if u.log != nil { // every incoming act at debug - the first thing to check when a control is dead
 		u.log.Debug("webui", "act", map[string]any{"act": m.Act, "val": m.Val, "form": len(m.Form) > 0})
 	}
+	if u.virtual() && virtualDenied(m.Act) { // headless: never open desktop surfaces on the host
+		u.toast(i18n.T("library.mirror.noDesktop"))
+		return
+	}
 	switch {
 	case m.Act == "tab":
 		u.setTab(m.Val)

@@ -391,7 +391,8 @@
       "timeout": "The peer didn't answer - it may be running an older rave-mate without remote-library support.",
       "reconnect": "Reconnect",
       "noLink": "Peer link unavailable - enable Peers to control a paired instance.",
-      "noPicker": "File dialogs can't open remotely - they would pop up on the controlled computer. Navigate with the folder list instead."
+      "noPicker": "File dialogs can't open remotely - they would pop up on the controlled computer. Navigate with the folder list instead.",
+      "noDesktop": "Can't open files, folders, or a browser remotely - they would appear on the controlled computer's desktop."
     },
     "addToPlaylist": "Add to playlist…",
     "backups": {

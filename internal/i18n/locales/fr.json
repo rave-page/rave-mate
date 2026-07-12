@@ -373,7 +373,8 @@
       "timeout": "Le pair n'a pas répondu - il utilise peut-être une version de rave-mate sans bibliothèque distante.",
       "reconnect": "Reconnecter",
       "noLink": "Lien pair indisponible - activez Peers pour contrôler une instance appairée.",
-      "noPicker": "Les boîtes de dialogue de fichiers ne peuvent pas s'ouvrir à distance - elles apparaîtraient sur l'ordinateur contrôlé. Naviguez plutôt via la liste des dossiers."
+      "noPicker": "Les boîtes de dialogue de fichiers ne peuvent pas s'ouvrir à distance - elles apparaîtraient sur l'ordinateur contrôlé. Naviguez plutôt via la liste des dossiers.",
+      "noDesktop": "Impossible d'ouvrir des fichiers, dossiers ou un navigateur à distance - ils apparaîtraient sur le bureau de l'ordinateur contrôlé."
     },
     "addToPlaylist": "Ajouter à une playlist…",
     "audioCap": {

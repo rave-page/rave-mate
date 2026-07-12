@@ -373,7 +373,8 @@
       "timeout": "Der Peer hat nicht geantwortet - er läuft womöglich mit einer älteren rave-mate-Version ohne Remote-Bibliothek.",
       "reconnect": "Neu verbinden",
       "noLink": "Peer-Link nicht verfügbar - aktiviere Peers, um eine gekoppelte Instanz zu steuern.",
-      "noPicker": "Dateidialoge können nicht remote geöffnet werden - sie würden auf dem gesteuerten Computer aufpoppen. Navigiere stattdessen über die Ordnerliste."
+      "noPicker": "Dateidialoge können nicht remote geöffnet werden - sie würden auf dem gesteuerten Computer aufpoppen. Navigiere stattdessen über die Ordnerliste.",
+      "noDesktop": "Dateien, Ordner oder ein Browser lassen sich nicht remote öffnen - sie würden auf dem Desktop des gesteuerten Computers erscheinen."
     },
     "addToPlaylist": "Zur Playlist hinzufügen…",
     "audioCap": {
