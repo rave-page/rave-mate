@@ -4,11 +4,14 @@
 // per-frame surface points (quantized positions + frame-invariant colour) instead of the
 // raw FBX/VRM, which never leaves. Pure Go + stdlib; depends only on the vrm data package.
 //
-// Per-frame positions come from vrm.Model.PosedPositions (the same CPU-skinning primitive
-// the C5 video renderer uses). A Selection is a fixed density-strided vertex subset chosen
-// once and reused every frame, so point count AND colour stay frame-invariant (skinning
-// moves positions, not albedo) - that keeps frames fixed-size (O(1) seek) and lets colour
-// ride once in the header.
+// Sampling is area-weighted over the mesh SURFACE (triangles), so the point count is a free
+// parameter independent of the model's vertex count - at high density the cloud reads as a
+// solid surface, not a scatter (you can't tell it was a point cloud). Each sample is a
+// triangle + barycentric weights; per frame its position is the barycentric blend of the
+// triangle's 3 CPU-skinned world verts (exactly the GPU's face interpolation), so point
+// count AND colour stay frame-invariant (skinning moves positions, not albedo) - frames stay
+// fixed-size (O(1) seek) and colour rides once in the header. A triangle-less model (raw
+// point mesh) falls back to a density-strided vertex subset.
 package pointcloud
 
 import (
@@ -56,26 +59,117 @@ func (b *Bounds) Pad(m float32) {
 	}
 }
 
-// sampleRef identifies one selected mesh vertex.
-type sampleRef struct{ mesh, vert int }
+// surfSample is one surface point: a triangle (3 vertex indices in mesh `mesh`) + barycentric
+// weights. Vertex-fallback samples set i0=i1=i2 and a=1 (b=c=0) → the vertex position.
+type surfSample struct {
+	mesh       int
+	i0, i1, i2 int
+	a, b, c    float32
+}
 
-// Selection is a fixed subset of mesh vertices, ordered by mesh so Positions can pose one
-// mesh at a time. Reused for every frame of a take.
+// Selection is a fixed set of surface samples, grouped by mesh so Positions poses one mesh at
+// a time. Reused for every frame of a take.
 type Selection struct {
-	refs   []sampleRef
-	Colors []byte // 3*len(refs) RGB, frame-invariant; nil when colour not requested
+	samples []surfSample
+	Colors  []byte // 3*len(samples) RGB, frame-invariant; nil when colour not requested
 }
 
 // Count returns the number of points per frame.
-func (s *Selection) Count() int { return len(s.refs) }
+func (s *Selection) Count() int { return len(s.samples) }
 
 // defaultRGB is the fallback point colour (brand-violet, matches the mesh renderer default).
 var defaultRGB = [3]byte{0x9A, 0x7A, 0xE0}
 
-// Select picks ~target vertices across all meshes at a deterministic per-mesh stride. When
-// withColor is set it samples each point's albedo once (texture at its UV, else the mesh
-// diffuse, else the default) into Colors. target<1 clamps to 1.
+// Select picks ~target surface samples across all meshes, area-weighted so coverage is even
+// and independent of vertex count. When withColor is set it samples each point's albedo once
+// (texture at its interpolated UV, else the mesh diffuse, else the default) into Colors.
+// Triangle-less meshes fall back to a deterministic per-mesh vertex stride. target<1 → 1.
 func Select(m *vrm.Model, target int, withColor bool) *Selection {
+	if target < 1 {
+		target = 1
+	}
+	tris := 0
+	for mi := range m.Meshes {
+		tris += len(m.Meshes[mi].Indices) / 3
+	}
+	if tris == 0 {
+		return selectVertices(m, target, withColor)
+	}
+	return selectSurface(m, target, withColor)
+}
+
+// selectSurface area-weight samples triangles. Per-mesh allocation (∝ mesh surface area)
+// keeps samples mesh-grouped so Positions poses each mesh once per frame.
+func selectSurface(m *vrm.Model, target int, withColor bool) *Selection {
+	// Per-mesh triangle table + cumulative area.
+	type meshTris struct {
+		i0, i1, i2 []int
+		cum        []float32
+		area       float32
+	}
+	mts := make([]meshTris, len(m.Meshes))
+	var totalArea float32
+	for mi := range m.Meshes {
+		mesh := &m.Meshes[mi]
+		idx := mesh.Indices
+		mt := &mts[mi]
+		for t := 0; t+2 < len(idx); t += 3 {
+			a, b, c := int(idx[t]), int(idx[t+1]), int(idx[t+2])
+			ar := triArea(mesh.Verts[a].Pos, mesh.Verts[b].Pos, mesh.Verts[c].Pos)
+			if ar <= 0 {
+				continue
+			}
+			mt.area += ar
+			totalArea += ar
+			mt.i0 = append(mt.i0, a)
+			mt.i1 = append(mt.i1, b)
+			mt.i2 = append(mt.i2, c)
+			mt.cum = append(mt.cum, mt.area)
+		}
+	}
+	if totalArea <= 0 {
+		return selectVertices(m, target, withColor)
+	}
+
+	sel := &Selection{samples: make([]surfSample, 0, target)}
+	if withColor {
+		sel.Colors = make([]byte, 0, 3*target)
+	}
+	var rng uint64 = 0x9E3779B97F4A7C15 // fixed seed → reproducible exports
+	for mi := range mts {
+		mt := &mts[mi]
+		if len(mt.cum) == 0 {
+			continue
+		}
+		n := int(math.Round(float64(target) * float64(mt.area/totalArea)))
+		if n < 1 {
+			n = 1
+		}
+		mesh := &m.Meshes[mi]
+		for k := 0; k < n; k++ {
+			tr := pickTri(mt.cum, mt.area, &rng)
+			i0, i1, i2 := mt.i0[tr], mt.i1[tr], mt.i2[tr]
+			wu, wv := nextFloat(&rng), nextFloat(&rng)
+			if wu+wv > 1 {
+				wu, wv = 1-wu, 1-wv
+			}
+			ww := 1 - wu - wv
+			sel.samples = append(sel.samples, surfSample{mi, i0, i1, i2, ww, wu, wv})
+			if withColor {
+				c0, c1, c2 := vertColorF(mesh, i0), vertColorF(mesh, i1), vertColorF(mesh, i2)
+				sel.Colors = append(sel.Colors,
+					clampByte(c0[0]*ww+c1[0]*wu+c2[0]*wv),
+					clampByte(c0[1]*ww+c1[1]*wu+c2[1]*wv),
+					clampByte(c0[2]*ww+c1[2]*wu+c2[2]*wv))
+			}
+		}
+	}
+	return sel
+}
+
+// selectVertices: fallback for triangle-less geometry - a deterministic per-mesh vertex
+// stride (degenerate samples with a=1 → the vertex position verbatim).
+func selectVertices(m *vrm.Model, target int, withColor bool) *Selection {
 	total := 0
 	for mi := range m.Meshes {
 		total += len(m.Meshes[mi].Verts)
@@ -83,21 +177,18 @@ func Select(m *vrm.Model, target int, withColor bool) *Selection {
 	if total == 0 {
 		return &Selection{}
 	}
-	if target < 1 {
-		target = 1
-	}
 	stride := total / target
 	if stride < 1 {
 		stride = 1
 	}
-	sel := &Selection{refs: make([]sampleRef, 0, total/stride+1)}
+	sel := &Selection{samples: make([]surfSample, 0, total/stride+1)}
 	if withColor {
 		sel.Colors = make([]byte, 0, 3*(total/stride+1))
 	}
 	for mi := range m.Meshes {
 		mesh := &m.Meshes[mi]
 		for vi := 0; vi < len(mesh.Verts); vi += stride {
-			sel.refs = append(sel.refs, sampleRef{mi, vi})
+			sel.samples = append(sel.samples, surfSample{mesh: mi, i0: vi, i1: vi, i2: vi, a: 1})
 			if withColor {
 				c := vertColor(mesh, vi)
 				sel.Colors = append(sel.Colors, c[0], c[1], c[2])
@@ -109,24 +200,66 @@ func Select(m *vrm.Model, target int, withColor bool) *Selection {
 
 // Positions extracts the selection's world-space positions for one posed frame. world/skin
 // come from the caller's pose chain (vrmik.PoseRT → WorldFrom → SkinMatrices). dst is reused
-// when it has room, else a new slice is allocated - the returned slice is valid until the
-// next call that reuses it. One mesh is posed at a time (refs are mesh-ordered).
+// when it has room, else a new slice is allocated - valid until the next call that reuses it.
+// One mesh is posed at a time (samples are mesh-grouped); each point = barycentric blend of
+// its triangle's 3 posed verts.
 func (s *Selection) Positions(m *vrm.Model, world, skin []vrm.Mat4, dst [][3]float32) [][3]float32 {
-	n := len(s.refs)
+	n := len(s.samples)
 	if cap(dst) < n {
 		dst = make([][3]float32, n)
 	}
 	dst = dst[:n]
 	curMesh := -1
 	var posed [][3]float32
-	for i, r := range s.refs {
-		if r.mesh != curMesh {
-			posed = m.PosedPositions(r.mesh, world, skin)
-			curMesh = r.mesh
+	for i, sp := range s.samples {
+		if sp.mesh != curMesh {
+			posed = m.PosedPositions(sp.mesh, world, skin)
+			curMesh = sp.mesh
 		}
-		dst[i] = posed[r.vert]
+		p0, p1, p2 := posed[sp.i0], posed[sp.i1], posed[sp.i2]
+		dst[i] = [3]float32{
+			p0[0]*sp.a + p1[0]*sp.b + p2[0]*sp.c,
+			p0[1]*sp.a + p1[1]*sp.b + p2[1]*sp.c,
+			p0[2]*sp.a + p1[2]*sp.b + p2[2]*sp.c,
+		}
 	}
 	return dst
+}
+
+// pickTri binary-searches the cumulative-area table for a uniform [0,area) draw.
+func pickTri(cum []float32, area float32, rng *uint64) int {
+	r := nextFloat(rng) * area
+	lo, hi := 0, len(cum)-1
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if cum[mid] < r {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
+}
+
+// triArea is half the cross-product magnitude of the triangle edges.
+func triArea(a, b, c [3]float32) float32 {
+	e1 := [3]float32{b[0] - a[0], b[1] - a[1], b[2] - a[2]}
+	e2 := [3]float32{c[0] - a[0], c[1] - a[1], c[2] - a[2]}
+	cx := e1[1]*e2[2] - e1[2]*e2[1]
+	cy := e1[2]*e2[0] - e1[0]*e2[2]
+	cz := e1[0]*e2[1] - e1[1]*e2[0]
+	return 0.5 * float32(math.Sqrt(float64(cx*cx+cy*cy+cz*cz)))
+}
+
+// nextFloat is a deterministic splitmix64 draw in [0,1) (24-bit mantissa). Fixed-seeded per
+// export → reproducible clouds without depending on math/rand global state.
+func nextFloat(s *uint64) float32 {
+	*s += 0x9E3779B97F4A7C15
+	z := *s
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
+	z ^= z >> 31
+	return float32(z>>40) / float32(1<<24)
 }
 
 // vertColor samples a vertex's albedo: texture at its UV (nearest), else mesh diffuse, else
@@ -146,6 +279,22 @@ func vertColor(mesh *vrm.Mesh, vi int) [3]byte {
 		return [3]byte{mesh.Diffuse.R, mesh.Diffuse.G, mesh.Diffuse.B}
 	}
 	return defaultRGB
+}
+
+// vertColorF is vertColor as float32 RGB (0-255) for barycentric colour blending.
+func vertColorF(mesh *vrm.Mesh, vi int) [3]float32 {
+	c := vertColor(mesh, vi)
+	return [3]float32{float32(c[0]), float32(c[1]), float32(c[2])}
+}
+
+func clampByte(f float32) byte {
+	if f <= 0 {
+		return 0
+	}
+	if f >= 255 {
+		return 255
+	}
+	return byte(f + 0.5)
 }
 
 // fracf returns the fractional part of x in [0,1) (UV wrap).

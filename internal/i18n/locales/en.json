@@ -1517,6 +1517,8 @@
     "pcNoModel": "Load an avatar model to preview its point cloud.",
     "pcNote": "Exports the posed mesh as an animated point cloud (.rmpc) in a worker subprocess - a compact, quantized surface-point stream the rave.page web + VR viewers load. The raw avatar file never leaves. Higher density = crisper surface + bigger file.",
     "pcPreviewCaption": "{name} · {count} preview points",
+    "pcUltra": "Ultra",
+    "pcUltraSub": "~200k points/frame - solid surface, largest file",
     "pointCloud": "Point cloud (animated .rmpc export + preview)",
     "playerRelative": "Player-relative",
     "preview": "Preview",

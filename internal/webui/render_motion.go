@@ -234,6 +234,7 @@ func moPointCloudRows(modelOn, pcOn, pcColor bool, density string) string {
 			{Val: "low", Label: i18n.T("motion.pcLow"), Sub: i18n.T("motion.pcLowSub")},
 			{Val: "med", Label: i18n.T("motion.pcMed"), Sub: i18n.T("motion.pcMedSub")},
 			{Val: "high", Label: i18n.T("motion.pcHigh"), Sub: i18n.T("motion.pcHighSub")},
+			{Val: "ultra", Label: i18n.T("motion.pcUltra"), Sub: i18n.T("motion.pcUltraSub")},
 		}
 	}) +
 		toggleRow(i18n.T("motion.pcColor"), "mo-pc-color", pcColor) +

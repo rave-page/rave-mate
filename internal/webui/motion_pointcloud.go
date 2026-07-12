@@ -135,13 +135,17 @@ func (u *UI) moRebuildPCSel() {
 	s.mu.Unlock()
 }
 
-// moPCPoints maps the density choice to a target point count for the export.
+// moPCPoints maps the density choice to a target point count for the export. Surface
+// sampling means these aren't capped by the model's vertex count - "ultra" reads as a solid
+// surface, not a point cloud.
 func moPCPoints(density string) int {
 	switch density {
 	case "low":
 		return 8000
 	case "high":
 		return 80000
+	case "ultra":
+		return 200000
 	default:
 		return 24000
 	}

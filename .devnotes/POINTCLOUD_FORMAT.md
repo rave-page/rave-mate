@@ -9,9 +9,12 @@ Producer: `internal/pointcloud` (encode) + `internal/worker/renderpointcloud.go`
 
 ## Design
 
-- **Point count is constant across frames.** A fixed density-strided vertex subset is chosen
-  once and reused every frame (skinning moves positions, not topology). So each frame is a
-  fixed-size block → **O(1) seek to frame i**.
+- **Point count is constant across frames.** A fixed set of area-weighted SURFACE samples
+  (triangle + barycentric weights) is chosen once and reused every frame; per frame each
+  point is the barycentric blend of its triangle's 3 CPU-skinned verts (skinning moves
+  positions, not topology). Density decouples from vertex count, so high tiers read as a
+  solid surface. Each frame is a fixed-size block → **O(1) seek to frame i**. (Triangle-less
+  meshes fall back to a density-strided vertex subset.)
 - **Colour is frame-invariant** (albedo doesn't change with pose) → stored **once**, not per
   frame.
 - **Positions are 16-bit fixed-point** within a global AABB → 6 B/point/frame (¼ of float32),
@@ -81,5 +84,5 @@ Playback: advance frame at `fps`; interpolate positions between adjacent frames 
 - Optional **normals** block (for lit splatting / VR) — same frame-invariant-vs-per-frame
   split as colour; normals rotate with pose so they'd be per-frame (add a `has_normals` +
   a quantized-octahedral normals block per frame).
-- Higher-fidelity sampling: surface-area-weighted / Poisson-disk instead of vertex-stride;
-  triangle-interior samples for dense meshes.
+- Even-higher-fidelity sampling: Poisson-disk / blue-noise instead of uniform-random
+  triangle-interior samples (area-weighted surface sampling itself is now the default).

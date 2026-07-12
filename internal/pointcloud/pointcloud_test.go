@@ -74,6 +74,40 @@ func TestSelectStride(t *testing.T) {
 	}
 }
 
+func TestSelectSurfaceDensity(t *testing.T) {
+	// Unit quad in the XY plane (4 verts, 2 triangles) → surface sampling; target far
+	// exceeds vertex count, so the export can't be told apart from a solid surface.
+	verts := [][3]float32{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}
+	m, world := oneMeshModel(verts, color.NRGBA{R: 5, G: 6, B: 7, A: 255})
+	m.Meshes[0].Indices = []uint32{0, 1, 2, 0, 2, 3}
+
+	const target = 5000
+	sel := Select(m, target, true)
+	if sel.Count() <= len(verts) {
+		t.Fatalf("surface sampling should exceed vertex count %d, got %d", len(verts), sel.Count())
+	}
+	if sel.Count() < target/2 || sel.Count() > target*2 {
+		t.Fatalf("surface count=%d, want ~%d", sel.Count(), target)
+	}
+	if len(sel.Colors) != 3*sel.Count() {
+		t.Fatalf("colours len=%d want %d", len(sel.Colors), 3*sel.Count())
+	}
+	pts := sel.Positions(m, world, nil, nil)
+	for i, p := range pts {
+		if p[0] < -1e-4 || p[0] > 1+1e-4 || p[1] < -1e-4 || p[1] > 1+1e-4 || p[2] < -1e-4 || p[2] > 1e-4 {
+			t.Fatalf("point %d = %v outside the unit quad", i, p)
+		}
+	}
+	// Deterministic: fixed seed → identical selection + positions.
+	sel2 := Select(m, target, true)
+	if sel2.Count() != sel.Count() {
+		t.Fatalf("nondeterministic count %d vs %d", sel2.Count(), sel.Count())
+	}
+	if p2 := sel2.Positions(m, world, nil, nil); p2[0] != pts[0] {
+		t.Fatalf("nondeterministic first point %v vs %v", p2[0], pts[0])
+	}
+}
+
 func TestVertColorTexture(t *testing.T) {
 	tex := image.NewNRGBA(image.Rect(0, 0, 2, 2))
 	tex.SetNRGBA(0, 1, color.NRGBA{R: 200, G: 100, B: 50, A: 255}) // bottom-left (v=0 -> row 1)
