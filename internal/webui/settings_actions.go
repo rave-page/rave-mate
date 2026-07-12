@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -99,10 +100,43 @@ func init() {
 			p = u.svc.Cfg.Features.SetCapture.ResolvedSetsDir()
 		case "recordings":
 			p = u.svc.Cfg.Features.AudioRecord.ResolvedDir()
+		case "remotecache":
+			if c := u.rceCacheStore(); c != nil {
+				p = c.Root()
+				_ = os.MkdirAll(p, 0o755) // created lazily on first pull - ensure it opens
+			}
 		}
 		if p != "" {
 			_ = openURL(p)
 		}
+	})
+
+	// ── remote cue-edit cache (LAN peers card) ──
+	onExact("settings-rcecache-clear", func(u *UI, _ actMsg) {
+		body := `<p class=page-sub>` + html.EscapeString(i18n.T("settings.body.peers.cacheClearConfirm")) + `</p>` +
+			btnRow(btn(i18n.T("settings.body.peers.cacheClear"), "destructive", "settings-rcecache-purge", ""),
+				btn(i18n.T("common.cancel"), "outline", "modal-close", ""))
+		u.openModal(modal(i18n.T("settings.body.peers.cacheClearTitle"), body, ""))
+	})
+	onExact("settings-rcecache-purge", func(u *UI, _ actMsg) {
+		u.closeModal()
+		if u.rceActive() { // editor holds a cached copy open - deleting under it breaks audition
+			u.toast(i18n.T("settings.body.peers.cacheBusy"))
+			return
+		}
+		u.bg(func() {
+			c := u.rceCacheStore()
+			if c == nil {
+				u.toast(i18n.T("library.rce.cacheFail"))
+				return
+			}
+			if err := c.Purge(); err != nil {
+				u.toast(i18n.T("settings.body.peers.cacheClearFailed") + err.Error())
+				return
+			}
+			u.toast(i18n.T("settings.body.peers.cacheCleared"))
+			u.patchMain() // usage line refresh
+		})
 	})
 
 	// media-tool installs (progress patched into #inst-<key>)

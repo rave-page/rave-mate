@@ -15,6 +15,7 @@ import (
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/musiclib"
+	"rave.page/mate/internal/remotecache"
 	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/stt"
 	"rave.page/mate/internal/timecode"
@@ -538,7 +539,8 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.studio.title"), i18n.T("settings.card.studio.desc"), ""
 	case "peers":
 		return i18n.T("settings.card.peers.title"), i18n.T("settings.card.peers.desc"),
-			field(i18n.T("settings.body.account.nodeName"), "set:peer-nick", f.Peers.Nickname, "text")
+			field(i18n.T("settings.body.account.nodeName"), "set:peer-nick", f.Peers.Nickname, "text") +
+				u.peersCacheHTML()
 	case "accountbridge":
 		return i18n.T("settings.card.accountbridge.title"), i18n.T("settings.card.accountbridge.desc"),
 			u.bridgeCardBody()
@@ -653,6 +655,27 @@ func (u *UI) traktorMapBody() string {
 	return verSel + rows.String() +
 		btnRow(btn(i18n.T("common.refresh"), "ghost", "settings-refresh", "")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.traktormap.note")) + `</div>`
+}
+
+// peersCacheHTML - remote cue-edit content cache (internal/remotecache): live usage, MiB cap
+// (0 in config = DefaultCap; the field always shows the effective value), clear + open-folder.
+// Usage() is two ReadDir levels over a handful of audio copies - cheap enough for the render path.
+func (u *UI) peersCacheHTML() string {
+	f := &u.svc.Cfg.Features.Peers
+	body := `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.peers.cacheNote")) + `</div>`
+	if c := u.rceCacheStore(); c != nil {
+		bytes, files := c.Usage()
+		body += kv(i18n.T("settings.body.peers.cacheUsage"),
+			i18n.T("settings.body.peers.cacheUsageVal", i18n.A{"size": humanBytes(uint64(bytes)), "count": strconv.Itoa(files)}))
+	}
+	mb := f.RemoteCacheMaxMB
+	if mb <= 0 {
+		mb = int(remotecache.DefaultCap >> 20)
+	}
+	return body +
+		fieldTip(i18n.T("settings.body.peers.cacheSize"), "set:peer-cachemb", strconv.Itoa(mb), "number", tipTopic("remote-cache")) +
+		btnRow(btn(i18n.T("settings.body.peers.cacheClear"), "destructive", "settings-rcecache-clear", ""),
+			btn(i18n.T("settings.body.peers.cacheOpen"), "ghost", "settings-open:remotecache", ""))
 }
 
 func (u *UI) setCaptureBody() string {
@@ -1588,6 +1611,11 @@ func (u *UI) applySet(id, val string) {
 	switch id {
 	case "peer-nick":
 		f.Peers.Nickname = v
+	case "peer-cachemb":
+		toInt(&f.Peers.RemoteCacheMaxMB, 0, 1<<20) // 0 = default cap; ceiling 1 TiB
+		if c := u.rceCacheStore(); c != nil {      // SetCap already applied by the store accessor
+			u.bg(c.EvictNow) // a shrink deletes files - keep the disk sweep off the actWorker
+		}
 	// Beatgrid fixer
 	case "gridfix-python":
 		f.GridFix.PythonPath = v

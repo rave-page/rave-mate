@@ -855,7 +855,13 @@ func (s SetCaptureFeature) ResolvedSetsDir() string {
 type PeersFeature struct {
 	Enabled  bool   `json:"enabled"`
 	Nickname string `json:"nickname"` // "" = derive from hostname
+	// RemoteCacheMaxMB caps the remote cue-edit content cache (<config dir>/remote_cache,
+	// pulled copies of peers' tracks) in MiB. 0 = built-in default (remotecache.DefaultCap).
+	RemoteCacheMaxMB int `json:"remoteCacheMaxMB,omitempty"`
 }
+
+// RemoteCacheBytes converts the MiB cap to bytes; 0 = caller default.
+func (p PeersFeature) RemoteCacheBytes() int64 { return int64(p.RemoteCacheMaxMB) << 20 }
 
 // AccountBridgeFeature configures the rave.page account bridge: reaching THIS instance from
 // outside the LAN, through the account's blind relay.

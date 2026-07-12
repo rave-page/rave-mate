@@ -54,8 +54,9 @@ webui ruiHub ── headless UI (virtualShell) ──── ruiHub ── Librar
   `library.trackDetail` → cache hit on (peer, path, mtime) or chunked `library.fileChunk` pull
   (8 MiB, verbatim bytes - never transcode, so codec + CodecLeadSkipMs match; completion by
   offset>=Total, EOF flag unreliable on exact-boundary ReadAt; mtime drift → restart once) into
-  `remote_cache/<peer[:8]>/<sha16(path)>-<mtime>-<base>` (.part+rename, LRU-by-mtime, 4 GiB cap,
-  knob = P3) → the NORMAL cue editor binds the CACHED path (`ceEnterRemote`) holding
+  `remote_cache/<peer[:8]>/<sha16(path)>-<mtime>-<base>` (.part+rename, LRU-by-mtime, 4 GiB
+  default cap; Settings → LAN peers card: `Peers.RemoteCacheMaxMB` (0=default) + usage/clear/
+  open-folder, #90) → the NORMAL cue editor binds the CACHED path (`ceEnterRemote`) holding
   `ceSt.rce{peer, remotePath, baseSHA}` - waveform/peaks/audition local via `mpEnsureFile`.
   Every persistence hook branches on `c.rce` (drop add/remove, ceSetCues, delete-selected,
   pattern apply, convert-all, grid shift, undo): mutations stay in ceSt, dirty = live
@@ -103,4 +104,4 @@ goroutines on B). Native pickers + chained control blocked in sessions.
   exercised (same code path as local run over B's Services).
 - P2 local-first cue editing is unit-tested (rce persistence branching, intercept, cache) but
   not yet live-verified on the two-instance rig; P3 = set flows (ce-open-pl/ce-open-dir)
-  local-first + cache-size Settings knob (+ purge button over `remotecache.Purge`).
+  local-first. Cache-size Settings knob + purge/usage/open-folder shipped (#90, LAN peers card).

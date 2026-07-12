@@ -143,6 +143,10 @@
     "y": "Y"
   },
   "help": {
+    "remote-cache": {
+      "title": "Remote track cache",
+      "body": "When you prepare cues on a track that lives on a paired computer (Library → remote library → Prepare cues), rave-mate first pulls a byte-exact copy of that audio file over the LAN peer link and keeps it in this cache. The cue editor - waveform, beatgrid, audition playback - then runs entirely against the local copy, so scrubbing stays instant even over slow Wi-Fi; only your saved cue changes travel back to the peer.\n\nEach entry is keyed by peer, source path and the file's modification time: if the track changes on the peer, the stale copy is dropped and a fresh one is pulled on the next open. The cache trims itself to the size cap set here - least-recently-used copies are deleted first once the total exceeds the cap. The file currently being pulled is never trimmed; set the cap to 0 to use the built-in default (4096 MB).\n\nClearing the cache is always safe: it holds only replaceable copies, never originals or your cue edits - any track you open again is simply pulled from its peer again. On disk it lives in the remote_cache folder inside rave-mate's data directory (Open cache folder shows it)."
+    },
     "remote-library": {
       "title": "Remote library (paired instance)",
       "body": "You are looking at the OTHER computer's Library tab - the paired instance renders its own Library exactly as it would in its own window and streams the picture here; every click, key and edit you make is sent back and executed over there. Its own visible window is not touched or moved while you work.\n\nBecause commands execute on the remote machine, everything operates on ITS music files and database: beatgrid analysis (gridfix), cue and drop edits, tag writes, transcodes and playlist changes all read and write the remote library, using the remote computer's CPU/GPU and disk. Nothing is copied to this machine except the on-screen picture and small images like covers and waveforms.\n\nAudio auditions (play/cue preview) start the REMOTE player - the sound comes out of the remote computer's audio device, not this one. That is by design: a booth laptop can prep the studio PC's library while the studio PC's monitors stay authoritative. Embedded video previews may be unavailable in remote mode.\n\nIf the link drops mid-session this banner turns amber and the view freezes; the remote side cleans its session up automatically. Reconnect (or re-select the peer in the Controlling switcher) to resume. Pairing and transport ride the same end-to-end-authenticated LAN peer link as the rest of rave-mate (Ed25519 + per-frame MACs) - nothing goes through the internet."
@@ -2172,6 +2176,19 @@
         "mediaSources": "Media sources… ({count})",
         "note": "Keep OBS media sources in step with a shared clock. Start/stop + per-source readout live on the Live tab.",
         "restartThreshold": "Restart threshold (ms)"
+      },
+      "peers": {
+        "cacheBusy": "A remote cue-edit session is open - close it first, then clear the cache.",
+        "cacheClear": "Clear cache",
+        "cacheClearConfirm": "Delete every cached copy of peers' tracks? This is safe: the cache holds only replaceable copies, never originals or your cue edits - any track you open again is simply pulled from its peer again.",
+        "cacheClearFailed": "clear cache failed: ",
+        "cacheClearTitle": "Clear remote track cache",
+        "cacheCleared": "Remote track cache cleared",
+        "cacheNote": "Prepare cues on a peer's track and its audio is first copied into a local cache, so the editor runs at local speed.",
+        "cacheOpen": "Open cache folder",
+        "cacheSize": "Remote track cache cap (MB)",
+        "cacheUsage": "Cache usage",
+        "cacheUsageVal": "{size} · {count} file(s)"
       },
       "recorder": {
         "confirmAfter": "Confirm after (seconds)",

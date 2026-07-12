@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// DefaultCap is the byte cap for evict (Settings knob is P3).
+// DefaultCap is the byte cap for evict when no cap is configured (Settings → LAN peers).
 const DefaultCap int64 = 4 << 30
 
 // partMaxAge: .part temps older than this are orphans (crashed pull) and get swept by evict.
@@ -38,6 +38,57 @@ func New(root string, capBytes int64) *Cache {
 		capBytes = DefaultCap
 	}
 	return &Cache{root: root, cap: capBytes}
+}
+
+// Root returns the on-disk cache root (created lazily on first pull).
+func (c *Cache) Root() string { return c.root }
+
+// SetCap updates the byte cap (<=0 = DefaultCap). Memory-only - enforcement happens on the
+// next Commit or an explicit EvictNow.
+func (c *Cache) SetCap(capBytes int64) {
+	if capBytes <= 0 {
+		capBytes = DefaultCap
+	}
+	c.mu.Lock()
+	c.cap = capBytes
+	c.mu.Unlock()
+}
+
+// EvictNow enforces the cap immediately (Settings cap shrink).
+func (c *Cache) EvictNow() { c.evict("") }
+
+// Usage returns total bytes + entry count of committed cache entries. Live .part temps are
+// excluded (they don't count toward the cap either).
+func (c *Cache) Usage() (int64, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var total int64
+	var n int
+	peers, err := os.ReadDir(c.root)
+	if err != nil {
+		return 0, 0
+	}
+	for _, pd := range peers {
+		if !pd.IsDir() {
+			continue
+		}
+		ents, err := os.ReadDir(filepath.Join(c.root, pd.Name()))
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if strings.HasSuffix(e.Name(), ".part") {
+				continue
+			}
+			fi, err := e.Info()
+			if err != nil || fi.IsDir() {
+				continue
+			}
+			total += fi.Size()
+			n++
+		}
+	}
+	return total, n
 }
 
 // peerKey folds a peer nodeID to its dir name. NodeIDs are base64url (fs-safe) - the filter is

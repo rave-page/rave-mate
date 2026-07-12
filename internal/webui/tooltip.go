@@ -78,6 +78,10 @@ var helpTopics = map[string]helpTopic{
 		Title: i18n.T("help.session-recorder.title"),
 		Body:  i18n.T("help.session-recorder.body"),
 	},
+	"remote-cache": {
+		Title: i18n.T("help.remote-cache.title"),
+		Body:  i18n.T("help.remote-cache.body"),
+	},
 	"fingerprinting": {
 		Title: i18n.T("help.fingerprinting.title"),
 		Body:  i18n.T("help.fingerprinting.body"),

@@ -85,17 +85,25 @@ var (
 	rceCache   *remotecache.Cache
 )
 
-func rceCacheStore() *remotecache.Cache {
+// rceCacheStore returns the process-wide cache, applying the configured byte cap
+// (Settings → LAN peers; 0 = remotecache.DefaultCap) on every access - a cap edit in one
+// UI reaches the shared instance without a restart.
+func (u *UI) rceCacheStore() *remotecache.Cache {
+	var capBytes int64
+	if u.svc.Cfg != nil {
+		capBytes = u.svc.Cfg.Features.Peers.RemoteCacheBytes()
+	}
 	rceCacheMu.Lock()
 	defer rceCacheMu.Unlock()
-	if rceCache != nil {
+	if rceCache == nil {
+		dir, err := config.DataPath("remote_cache")
+		if err != nil {
+			return nil
+		}
+		rceCache = remotecache.New(dir, capBytes)
 		return rceCache
 	}
-	dir, err := config.DataPath("remote_cache")
-	if err != nil {
-		return nil
-	}
-	rceCache = remotecache.New(dir, remotecache.DefaultCap)
+	rceCache.SetCap(capBytes) // memory-only; eviction runs on next Commit / explicit EvictNow
 	return rceCache
 }
 
@@ -170,7 +178,7 @@ func (u *UI) rceFetch(ctx context.Context, client *remotectl.Client, peer, remot
 		u.toast(i18n.T("library.ce.noGrid"))
 		return
 	}
-	cache := rceCacheStore()
+	cache := u.rceCacheStore()
 	if cache == nil {
 		fail(errors.New(i18n.T("library.rce.cacheFail")))
 		return

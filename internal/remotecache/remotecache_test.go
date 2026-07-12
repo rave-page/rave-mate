@@ -173,6 +173,48 @@ func TestPurge(t *testing.T) {
 	}
 }
 
+func TestUsage(t *testing.T) {
+	c := New(t.TempDir(), 0)
+	if b, n := c.Usage(); b != 0 || n != 0 {
+		t.Fatalf("empty cache usage: %d bytes %d files", b, n)
+	}
+	put(t, c, "p1", "/m/a.mp3", 1, strings.Repeat("a", 10))
+	put(t, c, "p2", "/m/b.mp3", 1, strings.Repeat("b", 30))
+	w, err := c.Writer("p1", "/m/c.mp3", 1) // live .part must not count
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write([]byte("temp"))
+	if b, n := c.Usage(); b != 40 || n != 2 {
+		t.Fatalf("usage: got %d bytes %d files, want 40/2", b, n)
+	}
+	w.Abort()
+}
+
+func TestSetCapEvictNow(t *testing.T) {
+	c := New(t.TempDir(), 0)
+	a := put(t, c, "p", "/m/a.mp3", 1, strings.Repeat("a", 40))
+	b := put(t, c, "p", "/m/b.mp3", 1, strings.Repeat("b", 40))
+	age(t, a, 3*time.Hour)
+	age(t, b, 2*time.Hour)
+	c.SetCap(50) // memory-only: nothing evicted yet
+	if _, err := os.Stat(a); err != nil {
+		t.Fatal("SetCap alone must not evict")
+	}
+	c.EvictNow() // 80 > 50 → oldest (a) goes
+	if _, err := os.Stat(a); !os.IsNotExist(err) {
+		t.Fatal("EvictNow should drop the LRU entry")
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Fatal("entry within cap must survive")
+	}
+	c.SetCap(0) // back to DefaultCap
+	c.EvictNow()
+	if _, err := os.Stat(b); err != nil {
+		t.Fatal("DefaultCap must keep the entry")
+	}
+}
+
 func TestSanitizedNames(t *testing.T) {
 	c := New(t.TempDir(), 0)
 	p := put(t, c, "no/de:id", `/mus ic/tr<ack>*?.mp3`, 5, "x")
