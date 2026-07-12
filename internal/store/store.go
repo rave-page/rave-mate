@@ -98,6 +98,36 @@ func (s *Store) GetAnalysis(kind, path string, mtime int64) ([]byte, bool) {
 	return out, ok
 }
 
+// analysisKinds: the plain per-path cache namespaces RetagAnalyses sweeps (KindAlign is
+// composite-keyed + summed-mtime - excluded).
+var analysisKinds = []string{KindWaveform, KindPeaks, KindTags, KindFingerprint, KindLoudness, KindLoudnessTL}
+
+// RetagAnalyses re-keys path's analysis blobs from oldMtime to newMtime. For self-inflicted
+// tag rewrites: audio bytes are unchanged, so peaks/loudness/fingerprint caches stay valid -
+// without this every drop tag write forced a full re-analysis next session. Only entries
+// currently valid (stored mtime == oldMtime) move; stale blobs stay stale.
+func (s *Store) RetagAnalyses(path string, oldMtime, newMtime int64) {
+	if s == nil || s.db == nil || oldMtime == newMtime {
+		return
+	}
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketAnalysis))
+		for _, kind := range analysisKinds {
+			k := akey(kind, path)
+			v := b.Get(k)
+			if len(v) < 8 || int64(binary.BigEndian.Uint64(v[:8])) != oldMtime {
+				continue
+			}
+			nv := append([]byte(nil), v...)
+			binary.BigEndian.PutUint64(nv[:8], uint64(newMtime))
+			if err := b.Put(k, nv); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // PutAnalysis stores data for (kind, path) tagged with mtime.
 func (s *Store) PutAnalysis(kind, path string, mtime int64, data []byte) {
 	if s == nil || s.db == nil {

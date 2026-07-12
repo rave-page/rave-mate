@@ -346,6 +346,7 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 			}
 		}
 		s.mu.Unlock()
+		u.ceReloadTrack() // an open cue editor re-reads its track + grid (gridfix reimport)
 		u.libPatchBody()
 	})
 	return false

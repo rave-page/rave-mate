@@ -51,7 +51,8 @@ type ceSt struct {
 	report       *cuepattern.ApplyReport
 	lastErr      string
 	fileTag      bool        // drops also written to the file tag (format supported)
-	tagTimer     *time.Timer // debounced file-tag drop write during grid nudges
+	tagTimer     *time.Timer // debounce for the unified drop-tag write-behind (ceScheduleTagLocked)
+	dbTimer      *time.Timer // debounced grid-shift DB persist (latest state wins; key-repeat safe)
 	idleTimer    *time.Timer // stops the engine after idling paused in cue-edit (releases the file)
 	prewarmTimer *time.Timer // debounced paused-decoder reposition on cursor moves (press = unpause-only)
 	// cue write-back router (library_cuewrite.go)
@@ -280,13 +281,14 @@ func (u *UI) ceClose() {
 	u.patchMain()
 }
 
-// ceReloadTrack re-reads the track from the collection after a cue write. Cues changed,
-// so earlier per-software cue writes are stale - the write-back router re-arms.
+// ceReloadTrack re-reads the track from the collection after a cue write or reimport.
+// Cues changed, so earlier per-software cue writes are stale - the write-back router
+// re-arms. The beat math rebuilds too: a gridfix apply/reimport can change the beatgrid
+// under an open editor.
 func (u *UI) ceReloadTrack() {
 	c := u.ce()
 	c.mu.Lock()
 	path, active := c.path, c.active
-	c.wbApplied, c.wbErr = nil, ""
 	c.mu.Unlock()
 	if !active {
 		return
@@ -299,9 +301,114 @@ func (u *UI) ceReloadTrack() {
 		return
 	}
 	c.mu.Lock()
-	c.track = tr
-	c.syncSel()
+	if c.active && c.path == path { // re-check: the editor may have moved on (async callers)
+		c.track = tr
+		c.wbApplied, c.wbErr = nil, ""
+		if g, err := cuepattern.NewGrid(tr.Beatgrid, tr.DurationSec*1000); err == nil {
+			c.grid = g
+			c.cursorMs = g.SnapMs(c.cursorMs)
+		}
+		c.syncSel()
+	}
 	c.mu.Unlock()
+}
+
+// ── drop file-tag write-behind ──
+// EVERY drop mutation routes its file-tag write here: one debounced writer per path,
+// latest drop set wins - so a stale pending write can never revert a newer one, and
+// key-repeat causes at most one full-file tag rewrite. The write defers while the audio
+// engine holds the file open (Windows rename-over-open fails, no FILE_SHARE_DELETE) and
+// retries until the engine lets go - the cue-edit idle-stop bounds that - with a hard
+// give-up. libdb stays authoritative throughout.
+
+const (
+	ceTagDebounce = 800 * time.Millisecond
+	ceTagRetry    = 2 * time.Second
+	ceTagDeadline = 10 * time.Minute
+)
+
+var (
+	ceTagMu   sync.Mutex
+	ceTagPend = map[string][]float64{} // path → latest drops awaiting write (1 entry/path)
+	ceTagBusy = map[string]bool{}      // path → writer goroutine alive
+)
+
+// ceScheduleTagLocked queues drops for path's file tag. Caller holds c.mu.
+func (u *UI) ceScheduleTagLocked(c *ceSt, path string, drops []float64) {
+	ceTagMu.Lock()
+	ceTagPend[path] = drops
+	ceTagMu.Unlock()
+	if c.tagTimer != nil {
+		c.tagTimer.Stop()
+	}
+	c.tagTimer = time.AfterFunc(ceTagDebounce, func() { u.ceTagKick(path) })
+}
+
+// ceTagKick spawns the per-path writer unless one is already draining.
+func (u *UI) ceTagKick(path string) {
+	ceTagMu.Lock()
+	if ceTagBusy[path] {
+		ceTagMu.Unlock()
+		return
+	}
+	ceTagBusy[path] = true
+	ceTagMu.Unlock()
+	u.bg(func() { u.ceTagWriter(path) })
+}
+
+// ceTagWriter drains ceTagPend[path]: waits out the engine's file hold, writes the latest
+// drop set, re-keys the mtime-keyed analysis caches (audio bytes unchanged - peaks/loudness
+// must survive a self-inflicted tag write), repeats if more got queued meanwhile.
+func (u *UI) ceTagWriter(path string) {
+	deadline := time.Now().Add(ceTagDeadline)
+	for {
+		ceTagMu.Lock()
+		drops, ok := ceTagPend[path]
+		if !ok {
+			delete(ceTagBusy, path)
+			ceTagMu.Unlock()
+			return
+		}
+		delete(ceTagPend, path)
+		ceTagMu.Unlock()
+
+		for u.ceEngineHolds(path) {
+			if u.stopped() || time.Now().After(deadline) {
+				if !u.stopped() {
+					u.toast(i18n.T("library.ce.fileTagFailed") + i18n.T("library.ce.tagHeldGiveUp"))
+				}
+				ceTagMu.Lock()
+				delete(ceTagBusy, path)
+				ceTagMu.Unlock()
+				return
+			}
+			time.Sleep(ceTagRetry)
+			ceTagMu.Lock()
+			if nd, more := ceTagPend[path]; more { // newer state queued while parked
+				drops = nd
+				delete(ceTagPend, path)
+			}
+			ceTagMu.Unlock()
+		}
+
+		oldM := fileMtime(path)
+		if err := tagwrite.WriteDrops(path, drops); err != nil {
+			u.toast(i18n.T("library.ce.fileTagFailed") + err.Error())
+		} else if u.svc.Store != nil {
+			if newM := fileMtime(path); newM != oldM {
+				u.svc.Store.RetagAnalyses(path, oldM, newM)
+			}
+		}
+	}
+}
+
+// ceEngineHolds reports whether the audio engine has path open (playing OR paused decoder).
+func (u *UI) ceEngineHolds(path string) bool {
+	if u.svc.Player == nil {
+		return false
+	}
+	st := u.svc.Player.State()
+	return st.Playing && st.Path == path
 }
 
 // ── mutations ──
@@ -393,7 +500,8 @@ func (u *UI) ceToggleDrop(remove bool) {
 }
 
 // ceDropAt adds/removes a drop at ms (grid-snapped) and persists it to libdb + the
-// file tag.
+// file tag (write-behind). No-op when the drop set doesn't change (dup add / miss remove)
+// - no persist, no tag write, no repaint.
 func (u *UI) ceDropAt(ms float64, remove bool) {
 	c := u.ce()
 	c.mu.Lock()
@@ -404,25 +512,27 @@ func (u *UI) ceDropAt(ms float64, remove bool) {
 	if c.grid != nil {
 		ms = c.grid.SnapMs(ms)
 	}
+	before := len(c.drops)
 	if remove {
 		c.drops = cuepattern.RemoveDrop(c.drops, ms)
 		delete(c.dselMs, ceKeyMs(ms)) // drop gone from the persistent selection
 	} else {
 		c.drops = cuepattern.AddDrop(c.drops, ms)
 	}
+	if len(c.drops) == before {
+		c.mu.Unlock()
+		return
+	}
 	c.syncSel() // drop indexes shifted - re-derive from the ms sets
 	path, tr := c.path, c.track
 	drops := append([]float64(nil), c.drops...)
-	fileTag := c.fileTag
+	if c.fileTag {
+		u.ceScheduleTagLocked(c, path, drops)
+	}
 	c.mu.Unlock()
 	u.bg(func() {
 		if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 			u.logErr("save drops", err)
-		}
-		if fileTag {
-			if err := tagwrite.WriteDrops(path, drops); err != nil {
-				u.toast(i18n.T("library.ce.fileTagFailed") + err.Error())
-			}
 		}
 	})
 	u.libDropsChanged(path, drops)
@@ -487,7 +597,7 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		c.mu.Unlock()
 		return
 	}
-	tr, path, fileTag := c.track, c.path, c.fileTag
+	tr, path := c.track, c.path
 	dropsChanged := false
 	kept := c.drops[:0:0]
 	for _, d := range c.drops {
@@ -502,6 +612,9 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		c.syncSel() // drop indexes shifted - re-derive from the ms sets
 	}
 	drops := append([]float64(nil), c.drops...)
+	if dropsChanged && c.fileTag {
+		u.ceScheduleTagLocked(c, path, drops) // write-behind (latest wins)
+	}
 	c.mu.Unlock()
 
 	var cues []musiclib.CuePoint
@@ -517,11 +630,6 @@ func (u *UI) ceRemoveAt(ms, eps float64) {
 		u.bg(func() {
 			if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
 				u.logErr("save drops", err)
-			}
-			if fileTag {
-				if err := tagwrite.WriteDrops(path, drops); err != nil {
-					u.toast(i18n.T("library.ce.fileTagFailed") + err.Error())
-				}
 			}
 		})
 		u.libDropsChanged(path, drops)
@@ -741,14 +849,7 @@ func (u *UI) ceDeleteSelected() {
 	c.syncSel()
 	dropsCopy := append([]float64(nil), drops...)
 	if nd > 0 && fileTag {
-		if c.tagTimer != nil {
-			c.tagTimer.Stop()
-		}
-		c.tagTimer = time.AfterFunc(800*time.Millisecond, func() {
-			if err := tagwrite.WriteDrops(path, dropsCopy); err != nil {
-				u.logErr("drops file tag", err)
-			}
-		})
+		u.ceScheduleTagLocked(c, path, dropsCopy) // write-behind (latest wins)
 	}
 	c.mu.Unlock()
 	if nd > 0 {
@@ -1055,9 +1156,9 @@ func (u *UI) ceKey(val string) {
 }
 
 // ceGridShift nudges the whole grid AND every cue/drop marker by deltaMs - manual
-// alignment must keep markers glued to their beats. Rebuilds the beat math and
-// persists grid + cues + drops (journaled). The file-tag drop write is debounced:
-// key-repeat would otherwise rewrite the tag dozens of times a second.
+// alignment must keep markers glued to their beats. Rebuilds the beat math; DB persist
+// AND the file-tag drop write are debounced latest-state-wins (key-repeat would otherwise
+// race unordered writes / rewrite the tag dozens of times a second).
 func (u *UI) ceGridShift(deltaMs float64) {
 	c := u.ce()
 	c.mu.Lock()
@@ -1094,21 +1195,20 @@ func (u *UI) ceGridShift(deltaMs float64) {
 		c.cursorMs = g.SnapMs(c.cursorMs + deltaMs)
 	}
 	c.syncSel()
-	tr, path, fileTag := c.track, c.path, c.fileTag
+	path := c.path
 	dropsCopy := append([]float64(nil), drops...)
-	if c.tagTimer != nil {
-		c.tagTimer.Stop()
+	if c.fileTag {
+		u.ceScheduleTagLocked(c, path, dropsCopy) // write-behind (latest wins)
 	}
-	if fileTag {
-		c.tagTimer = time.AfterFunc(800*time.Millisecond, func() {
-			if err := tagwrite.WriteDrops(path, dropsCopy); err != nil {
-				u.logErr("drops file tag", err)
-			}
-		})
+	// debounced DB persist: one unserialized goroutine per press could land out of order
+	// (an early slow write last) and persist a torn intermediate state - write the LATEST
+	// state once, shortly after the last nudge (ceGridPersist re-snapshots at fire time)
+	if c.dbTimer != nil {
+		c.dbTimer.Stop()
 	}
+	c.dbTimer = time.AfterFunc(300*time.Millisecond, func() { u.ceGridPersist(path) })
 	c.mu.Unlock()
-	// mirror into the collection view + persist (one UPDATE per press on a
-	// single-writer sqlite is cheap; only the file tag is debounced)
+	// mirror into the collection view synchronously (renders + nav read from here)
 	s := u.lib()
 	s.mu.Lock()
 	if t, ok := s.byPath[path]; ok {
@@ -1122,19 +1222,44 @@ func (u *UI) ceGridShift(deltaMs float64) {
 	}
 	s.mu.Unlock()
 	u.libDropsChanged(path, dropsCopy)
-	u.bg(func() {
-		if err := u.svc.Lib.UpdateTrackBeatgrid(tr, grid); err != nil {
-			u.logErr("save beatgrid", err)
-		}
-		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
-			u.logErr("save cues", err)
-		}
-		if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, dropsCopy); err != nil {
-			u.logErr("save drops", err)
-		}
-	})
 	u.cePatchWave()
 	u.cePatchRail()
+}
+
+// ceGridPersist writes path's grid + cues + drops to libdb (debounce target of
+// ceGridShift). Re-snapshots at fire time - the editor if it's still on path (a later
+// nudge or drop edit may have landed), else the collection mirror (kept fresh per press) -
+// so the newest full state persists exactly once.
+func (u *UI) ceGridPersist(path string) {
+	var tr musiclib.Track
+	var drops []float64
+	c := u.ce()
+	c.mu.Lock()
+	if c.active && c.path == path {
+		tr = c.track
+		drops = append([]float64(nil), c.drops...)
+		c.mu.Unlock()
+	} else {
+		c.mu.Unlock()
+		s := u.lib()
+		s.mu.Lock()
+		t, ok := s.byPath[path]
+		drops = append([]float64(nil), s.dropsIdx[path]...)
+		s.mu.Unlock()
+		if !ok {
+			return
+		}
+		tr = t
+	}
+	if err := u.svc.Lib.UpdateTrackBeatgrid(tr, tr.Beatgrid); err != nil {
+		u.logErr("save beatgrid", err)
+	}
+	if err := u.svc.Lib.UpdateTrackCues(tr, tr.Cues); err != nil {
+		u.logErr("save cues", err)
+	}
+	if err := u.svc.Lib.SetDrops(path, tr.Artist, tr.Title, tr.DurationSec, drops); err != nil {
+		u.logErr("save drops", err)
+	}
 }
 
 // ceAudition: hold Space = play from the beat cursor, release = PAUSE + re-seek to the

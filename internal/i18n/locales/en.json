@@ -1212,6 +1212,7 @@
       "notInCollection": "Track is not in the collection.",
       "noGrid": "Track has no beatgrid — analyze or fix the grid first.",
       "fileTagFailed": "Could not write drops to the file tag: ",
+      "tagHeldGiveUp": "file stayed in use — drops are saved in the library only.",
       "nameNeeded": "Name the pattern first.",
       "saveFailed": "Could not save pattern: ",
       "patternSaved": "Pattern “{name}” saved ({n} cues).",

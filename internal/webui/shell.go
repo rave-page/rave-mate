@@ -136,7 +136,8 @@ const runtimeJS = `(function(){
     var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del'};
     var name=map[e.key]; if(!name) return;
     if(e.ctrlKey && name!=='left' && name!=='right') return; // Ctrl reserved for grid nudge only
-    if(name==='space'&&e.repeat){ e.preventDefault(); return; } // hold = one down, one up
+    // hold = one action: auto-repeat on one-shot keys hammered full-file tag rewrites (enter/t)
+    if(e.repeat&&(name==='space'||name==='enter'||name==='t')){ e.preventDefault(); return; }
     e.preventDefault();
     send({act:'key:'+scope, val:(e.ctrlKey?'c':'')+(e.shiftKey?'s':'')+name});
   });
