@@ -14,7 +14,6 @@ import (
 
 	"rave.page/mate/internal/cuepattern"
 	"rave.page/mate/internal/governor"
-	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/sysnotify"
@@ -52,12 +51,10 @@ type UI struct {
 	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
 	restarts settingRestarts // debounced auto module restarts on settings change (settings_apply.go)
 
-	gf       gfState    // beatgrid-fixer cockpit run state (library_gridfix.go)
-	tf       tfState    // tag-fixer scan/apply state (library_tagfix.go)
-	re       reencSt    // batch re-encode modal state (library_reencode.go)
-	gfVMu    sync.Mutex // guards gfVStore lazy-open
-	gfVStore *gridfix.VerifiedStore
-	gfTrain  gfTrainState // model fine-tuning state (settings_gridfix_model.go)
+	gf      gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
+	tf      tfState      // tag-fixer scan/apply state (library_tagfix.go)
+	re      reencSt      // batch re-encode modal state (library_reencode.go)
+	gfTrain gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
 	ceMu    sync.Mutex // guards ceState/ceStore lazy-init (library_cueedit.go)
 	ceState *ceSt

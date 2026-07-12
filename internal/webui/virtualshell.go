@@ -128,6 +128,7 @@ func releaseUIState(u *UI) {
 		}
 	}
 	mpMoveMu.Unlock()
+	mpMediaFS.releaseMediaOwner(u)
 	mirrorMu.Lock()
 	delete(mirrorSts, u)
 	mirrorMu.Unlock()

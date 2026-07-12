@@ -40,27 +40,35 @@ func (u *UI) stopped() bool {
 	}
 }
 
-// actBusy guards slow one-shot bg actions (ffmpeg stop, bbolt fsync): one in flight per key,
-// repeats dropped. Package-level like cfgJobs - one webview UI per process.
+// actBusy guards slow one-shot bg actions (ffmpeg stop, bbolt fsync): one in flight per
+// (UI, key), repeats dropped. Keyed per UI - it dedups THIS session's re-clicks; a headless
+// remote session must neither block the window's presses nor be blocked by them (the guarded
+// backends serialize themselves). Entries self-delete on completion, so nothing leaks per session.
+type actKey struct {
+	u   *UI
+	key string
+}
+
 var (
 	actBusyMu sync.Mutex
-	actBusy   = map[string]bool{}
+	actBusy   = map[actKey]bool{}
 )
 
-// actStart marks key in-flight; false if already running.
-func actStart(key string) bool {
+// actStart marks key in-flight for this UI; false if already running.
+func (u *UI) actStart(key string) bool {
 	actBusyMu.Lock()
 	defer actBusyMu.Unlock()
-	if actBusy[key] {
+	k := actKey{u, key}
+	if actBusy[k] {
 		return false
 	}
-	actBusy[key] = true
+	actBusy[k] = true
 	return true
 }
 
-func actEnd(key string) {
+func (u *UI) actEnd(key string) {
 	actBusyMu.Lock()
-	delete(actBusy, key)
+	delete(actBusy, actKey{u, key})
 	actBusyMu.Unlock()
 }
 
@@ -89,12 +97,12 @@ func (u *UI) launchAppGroup(id string) {
 
 // autoToggle flips an automation's enabled flag. Save fsyncs bbolt - off the actWorker.
 func (u *UI) autoToggle(id string, on bool) {
-	if u.svc.Automations == nil || !actStart("auto:"+id) {
+	if u.svc.Automations == nil || !u.actStart("auto:"+id) {
 		return
 	}
 	u.pendingAct("auto-toggle:" + id)
 	u.bg(func() {
-		defer actEnd("auto:" + id)
+		defer u.actEnd("auto:" + id)
 		for _, a := range u.svc.Automations.List() {
 			if a.ID == id {
 				a.Enabled = on
@@ -111,12 +119,12 @@ func (u *UI) autoToggle(id string, on bool) {
 
 // autoDelete removes an automation. Delete fsyncs bbolt - off the actWorker.
 func (u *UI) autoDelete(id string) {
-	if u.svc.Automations == nil || !actStart("auto:"+id) {
+	if u.svc.Automations == nil || !u.actStart("auto:"+id) {
 		return
 	}
 	u.pendingAct("auto-del:" + id)
 	u.bg(func() {
-		defer actEnd("auto:" + id)
+		defer u.actEnd("auto:" + id)
 		u.logErr("automation delete", u.svc.Automations.Delete(id))
 		if u.stopped() {
 			return
@@ -191,12 +199,12 @@ func (u *UI) xferCancel(id string) {
 
 // recFinish closes the recorder set (two bbolt fsyncs) - off the actWorker.
 func (u *UI) recFinish() {
-	if u.svc.Recorder == nil || !actStart("rec-finish") {
+	if u.svc.Recorder == nil || !u.actStart("rec-finish") {
 		return
 	}
 	u.pendingAct("rec-finish")
 	u.bg(func() {
-		defer actEnd("rec-finish")
+		defer u.actEnd("rec-finish")
 		u.svc.Recorder.StopRecording()
 		if u.stopped() {
 			return
@@ -290,12 +298,12 @@ func (u *UI) streamPause(_ bool) {
 // arecToggle starts/stops manual audio capture. Stop waits on ffmpeg's graceful exit (≤6s) +
 // finalize - off the actWorker; button stays disabled until the completion re-patch.
 func (u *UI) arecToggle() {
-	if u.svc.AudioRec == nil || !actStart("arec-toggle") {
+	if u.svc.AudioRec == nil || !u.actStart("arec-toggle") {
 		return
 	}
 	u.pendingAct("arec-toggle")
 	u.bg(func() {
-		defer actEnd("arec-toggle")
+		defer u.actEnd("arec-toggle")
 		var err error
 		if u.svc.AudioRec.Status().Recording {
 			err = u.svc.AudioRec.StopManual()

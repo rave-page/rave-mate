@@ -50,16 +50,24 @@ type gfState struct {
 	eng       *gridfix.Engine
 }
 
+// gfVStores shares ONE VerifiedStore per data dir across ALL UIs (window + headless remote
+// sessions): saves rewrite the whole file, so two open handles would last-write-wins clobber
+// each other's marks.
+var (
+	gfVStoreMu sync.Mutex
+	gfVStores  = map[string]*gridfix.VerifiedStore{}
+)
+
 // gfVerified lazily opens the verified-grid store (nil on error - marking disabled).
 func (u *UI) gfVerified() *gridfix.VerifiedStore {
-	u.gfVMu.Lock()
-	defer u.gfVMu.Unlock()
-	if u.gfVStore != nil {
-		return u.gfVStore
-	}
 	dir, err := config.DataPath("gridfix")
 	if err != nil {
 		return nil
+	}
+	gfVStoreMu.Lock()
+	defer gfVStoreMu.Unlock()
+	if st := gfVStores[dir]; st != nil {
+		return st
 	}
 	st, err := gridfix.OpenVerifiedStore(dir)
 	if err != nil {
@@ -68,7 +76,7 @@ func (u *UI) gfVerified() *gridfix.VerifiedStore {
 		}
 		return nil
 	}
-	u.gfVStore = st
+	gfVStores[dir] = st
 	return st
 }
 

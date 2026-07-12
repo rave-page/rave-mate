@@ -25,7 +25,8 @@ import (
 // plain file IO - no decode, no frames - so it stays in-daemon (the featurehost isolation
 // rule targets media processing, not sendfile). Security: 127.0.0.1 listener only, no
 // directory access - only files explicitly registered by the player are reachable, each
-// behind an unguessable random token. Token table is bounded (mpMediaMaxTokens, FIFO evict).
+// behind an unguessable random token. Token table is bounded (mpMediaMaxTokens; per-owner
+// FIFO evict, so a headless remote session's churn never evicts the window's live token).
 //
 // The same listener also serves /img/<token>: a CACHED, RESIZED image endpoint. VRChat
 // thumbnails (and other grids) register a (path, maxW) pair → a stable short URL the browser
@@ -35,7 +36,7 @@ import (
 // off the UI thread, and the encoded JPEG is cached in-memory (bounded).
 
 const (
-	mpMediaMaxTokens = 32
+	mpMediaMaxTokens = 128 // raised from 32: remote-session churn must not starve the window's tokens
 	mpImgMaxTokens   = 256
 	mpImgCacheMax    = 128
 )
@@ -49,7 +50,8 @@ type mpMediaSrv struct {
 	mu     sync.Mutex
 	port   int
 	tokens map[string]string // token → absolute file path (raw stream)
-	order  []string          // FIFO for eviction
+	owner  map[string]*UI    // token → minting UI: eviction stays within the minter's own tokens
+	order  []string          // FIFO for eviction (per-owner first)
 	byPath map[string]string // path → token (stable URLs per file)
 
 	imgTokens     map[string]imgReq // token → resize request
@@ -61,7 +63,7 @@ type mpMediaSrv struct {
 }
 
 var mpMediaFS = &mpMediaSrv{
-	tokens: map[string]string{}, byPath: map[string]string{},
+	tokens: map[string]string{}, owner: map[string]*UI{}, byPath: map[string]string{},
 	imgTokens: map[string]imgReq{}, imgByKey: map[string]string{}, imgKeyByTok: map[string]string{}, imgCache: map[string][]byte{},
 }
 
@@ -100,6 +102,9 @@ func (u *UI) mpMediaURL(path string) string {
 		return ""
 	}
 	if tok, ok := s.byPath[path]; ok {
+		if !u.virtual() { // window reuse re-tags: remote churn must not evict a live window token
+			s.owner[tok] = u
+		}
 		return fmt.Sprintf("http://127.0.0.1:%d/m/%s", s.port, tok)
 	}
 	tok := randToken()
@@ -107,15 +112,48 @@ func (u *UI) mpMediaURL(path string) string {
 		return ""
 	}
 	s.tokens[tok] = path
+	s.owner[tok] = u
 	s.byPath[path] = tok
 	s.order = append(s.order, tok)
-	if len(s.order) > mpMediaMaxTokens { // bounded: evict oldest registration
-		old := s.order[0]
-		s.order = s.order[1:]
-		delete(s.byPath, s.tokens[old])
-		delete(s.tokens, old)
+	if len(s.order) > mpMediaMaxTokens { // bounded: evict the minter's own oldest first
+		s.evictMediaLocked(u)
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/m/%s", s.port, tok)
+}
+
+// evictMediaLocked drops one token: the oldest minted by u, else the global oldest. Caller
+// holds s.mu. Per-owner first, so a remote session's churn can't evict the host window's
+// live <video> token mid-play.
+func (s *mpMediaSrv) evictMediaLocked(u *UI) {
+	idx := 0
+	for i, tok := range s.order {
+		if s.owner[tok] == u {
+			idx = i
+			break
+		}
+	}
+	tok := s.order[idx]
+	s.order = append(s.order[:idx], s.order[idx+1:]...)
+	delete(s.byPath, s.tokens[tok])
+	delete(s.tokens, tok)
+	delete(s.owner, tok)
+}
+
+// releaseMediaOwner drops every token minted by a retired UI (releaseUIState).
+func (s *mpMediaSrv) releaseMediaOwner(u *UI) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keep := s.order[:0]
+	for _, tok := range s.order {
+		if s.owner[tok] == u {
+			delete(s.byPath, s.tokens[tok])
+			delete(s.tokens, tok)
+			delete(s.owner, tok)
+			continue
+		}
+		keep = append(keep, tok)
+	}
+	s.order = keep
 }
 
 // imgURL returns a loopback URL serving path resized to maxW px wide (cached, JPEG). maxW<=0

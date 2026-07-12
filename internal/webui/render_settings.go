@@ -1923,7 +1923,9 @@ var cfgSaveMu sync.Mutex
 
 // cfgJobs coalesces per-control background persist jobs: one in flight per key; a repeat while busy
 // queues ONE rerun with the latest callbacks (optimistic flip + reconcile, mpv tap-freeze
-// precedent). Package-level (the UI struct lives in ui.go); one webview UI per process.
+// precedent). Deliberately process-global across UIs (window + headless remote sessions): the
+// config file is one shared resource, and a queued rerun always drains promptly after the
+// in-flight save - one UI can never starve another.
 var (
 	cfgJobMu sync.Mutex
 	cfgJobs  = map[string]*cfgJob{}
