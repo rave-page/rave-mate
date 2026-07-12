@@ -220,9 +220,17 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .ce-status{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;margin:var(--space-2) 0;font-size:.85rem}
 .ce-pos{font-family:var(--font-mono,monospace);color:var(--color-fg)}
 .ce-jump{color:var(--color-brand-amber,#FFB547);font-family:var(--font-mono,monospace)}
-.ce-drop{display:flex;align-items:center;gap:var(--space-2);padding:2px 0}
-.ce-dropname{font-family:var(--font-mono,monospace);color:var(--color-brand-amber,#FFB547);cursor:pointer;white-space:nowrap}
-.ce-dropname:hover{text-decoration:underline}
+/* drop→pattern assign grid: fixed rows (drop 1-4 + X), each = tag · time · picker */
+.ce-agrid{display:flex;flex-direction:column;gap:3px;margin:var(--space-2) 0}
+.ce-arow{display:grid;grid-template-columns:minmax(52px,auto) minmax(40px,auto) 1fr;align-items:center;column-gap:var(--space-2)}
+.ce-arow .ss-field{margin:0}
+.ce-arow-tag{font:600 11px var(--font-mono,monospace);color:var(--color-brand-amber,#FFB547);white-space:nowrap}
+.ce-arow-tag[data-act]{cursor:pointer}
+.ce-arow-tag[data-act]:hover{text-decoration:underline}
+.ce-arow-when{font:11px var(--font-mono,monospace);color:var(--rp-muted);white-space:nowrap;text-align:right}
+.ce-arow-when.unplaced{font-style:italic;opacity:.75}
+.ce-arow.unplaced .ce-arow-tag{color:var(--rp-muted);opacity:.6}
+.ce-arow.unplaced .ss-btn{opacity:.7}
 .ce-fullwave{margin-bottom:var(--space-3)}
 .ce-fullwave .mplayer{max-width:none}
 .ce-fullwave .mp-wavebox{height:190px}

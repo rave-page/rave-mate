@@ -37,12 +37,12 @@ type ceSt struct {
 	grid     *cuepattern.Grid
 	drops    []float64
 	cursorMs float64
-	jump     float64      // Shift+arrow beat-jump size
+	jump     float64        // Shift+arrow beat-jump size
 	sel      map[int]bool   // DERIVED index view of selMs (into track.Cues) - rebuilt by syncSel
 	dsel     map[int]bool   // DERIVED index view of dselMs (into drops)
 	selMs    map[int64]bool // persistent cue selection by rounded ms (survives reload + track nav)
 	dselMs   map[int64]bool // persistent drop selection by rounded ms
-	dragA    float64      // rubber band anchor (axis ms; <0 idle)
+	dragA    float64        // rubber band anchor (axis ms; <0 idle)
 	dragB    float64
 	dragMods string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
 	assign   map[int]string // drop index -> pattern id (apply flow)
@@ -1299,7 +1299,7 @@ func (u *UI) ceTopbarHTML() string {
 	b.WriteString(`<span class=ce-jump>` + esc(i18n.T("library.ce.jump", i18n.A{"n": fmt.Sprint(int(c.jump))})) + `</span>`)
 	for i, d := range c.drops {
 		b.WriteString(`<span class=ce-tb-drop data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) +
-			`>D` + fmt.Sprint(i+1) + ` ` + pubClock(d/1000) + `</span>`)
+			`>D` + ceDropLabel(i) + ` ` + pubClock(d/1000) + `</span>`)
 	}
 	b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.Tn("library.ce.patternCues", ceCueCount(c.track.Cues))) + `</span>`)
 	if !c.fileTag {
@@ -1338,19 +1338,9 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</div><div class=insp-title>` +
 		esc(trackTitle(c.track)) + `</div></div>`)
 
-	// drops → pattern assignment
-	b.WriteString(`<div class=pb-label>` + esc(i18n.Tn("library.ce.drops", len(c.drops))) + `</div>`)
-	if len(c.drops) == 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.noDropsHint")) + `</div>`)
-	}
+	// drops → pattern assign grid (fixed rows drop 1-4 + X; unplaced rows still show)
 	st := u.cePatterns() // ensure the store is open so the pickers render on first use
-	for i, d := range c.drops {
-		b.WriteString(`<div class=ce-drop><span class=ce-dropname data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) + `>DROP ` + fmt.Sprint(i+1) + `</span>`)
-		if st != nil {
-			b.WriteString(ceAssignSelect(i, c.assign[i], st))
-		}
-		b.WriteString(`</div>`)
-	}
+	b.WriteString(ceAssignGridHTML(c, st))
 	b.WriteString(btnRow(
 		btn(i18n.T("library.ce.addDrop"), "outline", "ce-drop-add", ""),
 		btn(i18n.T("library.ce.removeDrop"), "ghost", "ce-drop-del", "")))
@@ -1397,6 +1387,61 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	}
 	b.WriteString(wb)
 	b.WriteString(btnRow(btn(i18n.T("common.close"), "ghost", "ce-close", "")))
+	return b.String()
+}
+
+// ceAssignRows is the fixed minimum of assign-grid rows: drop 1-4 + the extra "X".
+// The grid always shows these five (more if extra drops are placed) so a pattern can be
+// picked for a slot even before its marker exists.
+const ceAssignRows = 5
+
+// ceDropLabel names a drop slot by index: 1-4, then X (the extra "x" drop), then 6+.
+func ceDropLabel(i int) string {
+	if i == 4 {
+		return "X"
+	}
+	return fmt.Sprint(i + 1)
+}
+
+// ceAssignGridHTML renders the compact drop→pattern assign grid: one row per drop
+// (1-4 + X, plus any extra placed drops), each carrying the drop label (click = jump when
+// placed), its position (or an "unplaced" hint), and the pattern picker. Assignments
+// persist in c.assign (drop index → pattern id) - the same map ceSavePattern auto-fills
+// and ceApply reads - so they survive track nav with the rest of the cue-edit state.
+// c is LOCKED by the caller (ceRailHTML); never re-lock it here.
+func ceAssignGridHTML(c *ceSt, st *cuepattern.Store) string {
+	rows := ceAssignRows
+	if len(c.drops) > rows {
+		rows = len(c.drops)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.assignTitle")) + `</div>`)
+	b.WriteString(`<div class=ce-agrid>`)
+	for i := 0; i < rows; i++ {
+		placed := i < len(c.drops)
+		cls := "ce-arow"
+		if !placed {
+			cls += " unplaced"
+		}
+		b.WriteString(`<div class="` + cls + `">`)
+		tag := `DROP ` + ceDropLabel(i)
+		if placed {
+			b.WriteString(`<span class=ce-arow-tag data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", c.drops[i])) + `>` + tag + `</span>`)
+			b.WriteString(`<span class=ce-arow-when>` + pubClock(c.drops[i]/1000) + `</span>`)
+		} else {
+			b.WriteString(`<span class=ce-arow-tag>` + tag + `</span>`)
+			b.WriteString(`<span class="ce-arow-when unplaced" title=` + attrQ(i18n.T("library.ce.unplacedTip")) +
+				`>` + esc(i18n.T("library.ce.unplaced")) + `</span>`)
+		}
+		if st != nil {
+			b.WriteString(ceAssignSelect(i, c.assign[i], st))
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
+	if len(c.drops) == 0 {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.noDropsHint")) + `</div>`)
+	}
 	return b.String()
 }
 
