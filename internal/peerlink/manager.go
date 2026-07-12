@@ -398,17 +398,20 @@ func (m *Manager) runHandshake(conn Conn, r role, nickname, addr string) {
 	if known, ok := m.store.Get(res.PeerNodeID); ok && cs.info.Nickname == "" {
 		cs.info.Nickname = known.Nickname
 	}
-	cs.link.onClose = func(error) { m.dropConn(res.PeerNodeID) }
+	cs.link.onClose = func(error) { m.dropConn(cs) }
 	cs.link.onFrame = func(t string, mp map[string]any) { m.onFrame(cs, t, mp) }
 
-	// Register (replace any stale entry for this peer).
+	// Register (replace any stale entry for this peer). Close the old link OUTSIDE m.mu:
+	// Close fires onClose→dropConn synchronously, which takes m.mu (self-deadlock under the
+	// lock - froze the whole act pipeline once every render queued behind Connections()).
 	m.mu.Lock()
-	if old, ok := m.conns[res.PeerNodeID]; ok {
+	old := m.conns[res.PeerNodeID]
+	m.conns[res.PeerNodeID] = cs
+	m.mu.Unlock()
+	if old != nil {
 		old.cancel()
 		old.link.Close()
 	}
-	m.conns[res.PeerNodeID] = cs
-	m.mu.Unlock()
 
 	debuglog.Go(m.log, logTag, func() { cs.link.readLoop(cctx) })
 
@@ -545,9 +548,14 @@ func (m *Manager) openConnected(cs *connState) {
 	m.fireState()
 }
 
-func (m *Manager) dropConn(nodeID string) {
+// dropConn removes cs from the registry. Identity-checked: a replaced (stale) link's
+// deferred onClose must not evict the fresh connection registered under the same peer.
+func (m *Manager) dropConn(cs *connState) {
 	m.mu.Lock()
-	delete(m.conns, nodeID)
+	id := cs.res.PeerNodeID
+	if m.conns[id] == cs {
+		delete(m.conns, id)
+	}
 	m.mu.Unlock()
 	m.fireState()
 }
