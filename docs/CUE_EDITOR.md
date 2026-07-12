@@ -31,7 +31,8 @@ holds the actions.
 | ← / → | walk beats · Shift = beat-jump (size: Shift+↑/↓, 1–64) |
 | T / Enter | add drop at cursor · +Shift removes |
 | Del / Backspace | delete **every selected cue and drop** in one action |
-| Hold Space | audition from cursor (release stops) |
+| Ctrl+Z | undo the last edit (one-deep; press again = redo — nudge runs count as one edit) |
+| Hold Space | audition from cursor — release **pauses** with the decoder parked on the cursor, so the next press starts instantly (the engine lets the file go after ~90 s idle) |
 | Ctrl+← / → | nudge the whole beatgrid 10 ms (Ctrl+Shift: 1 ms) — **cues and drops move with the grid** |
 
 Keys work only while the Library tab has focus and no input field is active. The ⓘ
@@ -55,7 +56,10 @@ Drop markers are a rave-mate enrichment: they live in the library database (keye
 file path — they survive collection re-imports) **and** in the file itself
 (`RAVEMATE_DROPS` ID3 TXXX frame / FLAC Vorbis comment), so they travel with your
 music. Formats without tag support show a ⚠ in the strip (database-only). Every
-change is journaled in the change log.
+change is journaled in the change log. The tag write is a debounced write-behind
+(latest state wins); while the audio engine still holds the file open it waits and
+retries until the file is free — the library stays authoritative throughout, and
+your waveform analysis cache survives the rewrite.
 
 Library sync to rave.page carries them too: each uploaded track includes its drop
 markers (`drops_ms`, integer ms), so waveforms on your rave.page profile show your
