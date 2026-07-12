@@ -35,7 +35,7 @@ type ttLink struct {
 // entry resolves at render time (localized mouse-gesture words like "Right-click"),
 // anything else is a literal, locale-independent key label (←, Shift, Del, T).
 type kbRow struct {
-	Group string   // i18n key of the section header, shown when it changes ("" = same section)
+	Group string // i18n key of the section header, shown when it changes ("" = same section)
 	Combo []string
 	Act   string // i18n key of the action description (resolved at render)
 }
