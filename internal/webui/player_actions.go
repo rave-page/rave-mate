@@ -28,8 +28,9 @@ import (
 // Unified media player/editor - state + interaction engine (render side: player.go).
 // ONE component drives every playback/edit surface: the Library inspector player, the
 // Publish tab set playback and the trim editor (the old trim modal + per-capture
-// transports are superseded). One instance per host surface ("publish"/"library"),
-// keyed acts (`mp-<verb>:<host>`), package-level under mpMu.
+// transports are superseded). One instance per (UI, host surface "publish"/"library"),
+// keyed acts (`mp-<verb>:<host>`), package-level under mpMu - a headless remote session
+// must never share (or clobber) the window's player state.
 //
 // Media kinds share one transport: audio plays on the featurehost PlayerProxy, video
 // in an embedded <video> element (loopback Range stream, mediahttp.go) mirrored into Go
@@ -167,18 +168,23 @@ func mpIsSet(v float64) bool { return v > mpNone/2 }
 
 var (
 	mpMu        sync.Mutex
-	mpInstances = map[string]*mpSt{}
+	mpInstances = map[*UI]map[string]*mpSt{} // per-UI: releaseUIState drops a retired session's entry
 )
 
-// mp returns the host's instance (created empty on first use).
+// mp returns this UI's instance for host (created empty on first use).
 func (u *UI) mp(host string) *mpSt {
 	mpMu.Lock()
 	defer mpMu.Unlock()
-	t := mpInstances[host]
+	hosts := mpInstances[u]
+	if hosts == nil {
+		hosts = map[string]*mpSt{}
+		mpInstances[u] = hosts
+	}
+	t := hosts[host]
 	if t == nil {
 		t = &mpSt{host: host, outSec: -1, viewSpan: 1, cursorSec: mpNone, hovT: mpNone,
 			firstTrackSec: -1, lastTrackEndSec: -1, lastFaderSec: -1}
-		mpInstances[host] = t
+		hosts[host] = t
 	}
 	return t
 }
@@ -1188,13 +1194,20 @@ type mpMoveEv struct {
 	gen  int // mpSt.dragGen at enqueue
 }
 
+// mpMoveKey scopes the coalescer per (UI, host) - a remote session's drags must not steal
+// or stall the window's mailbox.
+type mpMoveKey struct {
+	u    *UI
+	host string
+}
+
 var (
 	mpMoveMu   sync.Mutex
-	mpMovePend = map[string]mpMoveEv{} // host → newest pending move
-	mpMoveBusy = map[string]bool{}     // host → render in flight
+	mpMovePend = map[mpMoveKey]mpMoveEv{} // newest pending move
+	mpMoveBusy = map[mpMoveKey]bool{}     // render in flight
 )
 
-// mpMoveCoalesce enqueues a move (newest wins) and starts the per-host render worker if idle.
+// mpMoveCoalesce enqueues a move (newest wins) and starts the per-key render worker if idle.
 func (u *UI) mpMoveCoalesce(host, lane string, fx float64) {
 	t := u.mp(host)
 	mpMu.Lock()
@@ -1204,21 +1217,22 @@ func (u *UI) mpMoveCoalesce(host, lane string, fx float64) {
 		t.dragMoved = true
 	}
 	mpMu.Unlock()
+	k := mpMoveKey{u, host}
 	mpMoveMu.Lock()
-	mpMovePend[host] = mpMoveEv{lane, fx, gen}
-	if mpMoveBusy[host] {
+	mpMovePend[k] = mpMoveEv{lane, fx, gen}
+	if mpMoveBusy[k] {
 		mpMoveMu.Unlock()
 		return
 	}
-	mpMoveBusy[host] = true
+	mpMoveBusy[k] = true
 	mpMoveMu.Unlock()
 	u.bg(func() {
 		for {
 			mpMoveMu.Lock()
-			ev, ok := mpMovePend[host]
-			delete(mpMovePend, host)
+			ev, ok := mpMovePend[k]
+			delete(mpMovePend, k)
 			if !ok {
-				mpMoveBusy[host] = false
+				delete(mpMoveBusy, k) // delete, not =false: headless sessions come and go
 				mpMoveMu.Unlock()
 				return
 			}
@@ -1232,10 +1246,10 @@ func (u *UI) mpMoveCoalesce(host, lane string, fx float64) {
 	})
 }
 
-// mpMoveCancel drops any pending coalesced move (a down/up landed - it is stale).
-func mpMoveCancel(host string) {
+// mpMoveCancel drops this UI's pending coalesced move (a down/up landed - it is stale).
+func (u *UI) mpMoveCancel(host string) {
 	mpMoveMu.Lock()
-	delete(mpMovePend, host)
+	delete(mpMovePend, mpMoveKey{u, host})
 	mpMoveMu.Unlock()
 }
 
@@ -1249,7 +1263,7 @@ func (u *UI) mpHandle(host, which, val string) {
 		u.mpMoveCoalesce(host, which, fx)
 		return
 	}
-	mpMoveCancel(host)
+	u.mpMoveCancel(host)
 	t := u.mpMut(host, func(v *mpSt) {
 		v.dragGen++ // invalidate queued moves
 		if phase == "down" {
@@ -1324,7 +1338,7 @@ func (u *UI) mpSurf(host, val string) {
 		u.mpMoveCoalesce(host, "pan", fx)
 		return
 	}
-	mpMoveCancel(host)
+	u.mpMoveCancel(host)
 	seekSec := math.Inf(-1)
 	t := u.mpMut(host, func(v *mpSt) {
 		v.dragGen++ // invalidate queued moves

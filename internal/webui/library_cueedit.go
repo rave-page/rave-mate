@@ -775,13 +775,13 @@ func (u *UI) ceSurf(host, val string) {
 	case "move":
 		u.mpMoveCoalesce(host, "pan", fx)
 	case "down":
-		mpMoveCancel(host)
+		u.mpMoveCancel(host)
 		u.mpMut(host, func(v *mpSt) {
 			v.dragGen++
 			v.drag, v.dragAnchor, v.dragView, v.dragMoved = "pan", fx, v.viewStart, false
 		})
 	case "up":
-		mpMoveCancel(host)
+		u.mpMoveCancel(host)
 		moved := false
 		nt := u.mpMut(host, func(v *mpSt) { moved = v.dragMoved; v.drag = "" })
 		if moved { // it was a pan - leave the cursor where it was

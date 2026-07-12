@@ -117,6 +117,16 @@ func releaseUIState(u *UI) {
 	libStMu.Lock()
 	delete(libSts, u)
 	libStMu.Unlock()
+	mpMu.Lock()
+	delete(mpInstances, u)
+	mpMu.Unlock()
+	mpMoveMu.Lock() // busy flags self-delete when their worker drains
+	for k := range mpMovePend {
+		if k.u == u {
+			delete(mpMovePend, k)
+		}
+	}
+	mpMoveMu.Unlock()
 	mirrorMu.Lock()
 	delete(mirrorSts, u)
 	mirrorMu.Unlock()
