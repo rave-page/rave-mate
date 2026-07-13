@@ -209,11 +209,32 @@ NTSTATUS RavePnpDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     }
     RAVE_ADAPTER* a = g_Adapter;
     PIO_STACK_LOCATION s = IoGetCurrentIrpStackLocation(Irp);
-    if (a && DeviceObject == a->Fdo &&
-        (s->MinorFunction == IRP_MN_STOP_DEVICE ||
-         s->MinorFunction == IRP_MN_SURPRISE_REMOVAL ||
-         s->MinorFunction == IRP_MN_REMOVE_DEVICE)) {
-        RaveManagedStop();
+    if (a && DeviceObject == a->Fdo) {
+        switch (s->MinorFunction) {
+        // Quiesce at QUERY time, BEFORE portcls begins the stop/remove transaction:
+        // once that transaction holds the device lock, an MWorker inside
+        // PcRegisterSubdevice->AcquireDevice deadlocks against RaveManagedStop's
+        // thread-join in REMOVE — wedged devnode, then DPC watchdog (0x133 dumps
+        // 071326-11203 + 071326-11171, both during pending driver updates).
+        case IRP_MN_QUERY_STOP_DEVICE:
+        case IRP_MN_QUERY_REMOVE_DEVICE:
+        case IRP_MN_STOP_DEVICE:
+        case IRP_MN_SURPRISE_REMOVAL:
+        case IRP_MN_REMOVE_DEVICE:
+            RaveManagedStop();
+            break;
+        // query vetoed/canceled — device keeps running; re-arm from persisted
+        // config AFTER portcls finishes the cancel (never contend its lock mid-
+        // transition)
+        case IRP_MN_CANCEL_STOP_DEVICE:
+        case IRP_MN_CANCEL_REMOVE_DEVICE: {
+            NTSTATUS st = PcDispatchIrp(DeviceObject, Irp);
+            RaveManagedBoot(a->Fdo);
+            return st;
+        }
+        default:
+            break;
+        }
     }
     return PcDispatchIrp(DeviceObject, Irp);
 }
