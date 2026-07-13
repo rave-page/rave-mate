@@ -1,13 +1,13 @@
 {
-  "version": "nightly-02e61f6",
-  "build": 80,
-  "commit": "02e61f6",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-80-20260713-02e61f6.exe",
-  "sha256": "806bb2655f7df6ea87916c6534637e921aec099ccac4d5919df0ede4ad29e88b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-80-20260713-02e61f6.exe",
-  "installer_sha256": "e08679759f1f81eab3102a5cae3f31afe674fe8abb2e6286c14b408ade241b1a",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-80-20260713-02e61f6",
-  "linux_sha256": "c1976c82164536bf5ceff7907d98fa6a1a9ec02bee371e41c2a895d32741f491",
+  "version": "nightly-bf49f6a",
+  "build": 81,
+  "commit": "bf49f6a",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-81-20260713-bf49f6a.exe",
+  "sha256": "a591d3e02b20b916395162cefffb611d593739b89cb323e728aad6efa7c8e89d",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-81-20260713-bf49f6a.exe",
+  "installer_sha256": "5c2446b85529450ea727a94aa605c9f60a9a2e3793b4fe35214640d538d61240",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-81-20260713-bf49f6a",
+  "linux_sha256": "4dc47b574707fdaf01c66ce3af73224ce7158564b6583f61ed8ac3b86e8810e4",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-13T17:09:25Z",
-  "notes": "Merge feature/midi-cueedit-nav: user-mappable DJ-controller MIDI for cue editor + library browsing (learn flow, note/CC-abs/relative encoders, view-scoped dispatch)"
+  "released": "2026-07-13T17:52:37Z",
+  "notes": "Merge feature/midi-device-profiles: per-controller MIDI mapping profiles (derived from configured controllers, learn auto-assigns to source device, pause/copy/clear per profile, v30)"
 }
