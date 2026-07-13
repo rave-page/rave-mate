@@ -21,9 +21,16 @@
 #include "framer.h"
 
 #define RAVE_TAG RAVEMIDI_POOL_TAG
-#define MIRROR_READ_BUF 1024   // per-read MIDI byte buffer (bounded)
+// BSOD 0x50 071326-9546 (usbaudio!memcpy, write past pool page): usbaudio copies a
+// replaying pin's ENTIRE record-so-far into the frame WITHOUT clamping to FrameExtent.
+// With a 1KB frame, an idle-backoff window (no read pended, 5ms) + a knob burst grew
+// the record from under the highwater past the frame end -> overflow. Defense: the
+// frame carries massive slack over the reset threshold (60KB >> any burst a full-speed
+// USB-MIDI device can queue between reads), and any truncated/oversized record forces
+// a PAUSE->RUN record reset too.
+#define MIRROR_READ_BUF 65536  // per-read frame: alloc == FrameExtent (bounded)
 #define MIRROR_MAX_REC  (MIRROR_READ_BUF - 8)  // cap on one KSMUSICFORMAT record's payload
-#define MIRROR_REC_HIGHWATER (MIRROR_MAX_REC - 64)  // replaying pin near frame cap: reset it
+#define MIRROR_REC_HIGHWATER 4096  // replaying record past this: cycle the pin, reset it
 #define TAP_SAT_LIMIT 8        // consecutive no-growth resets before the tap gives up
 #define TAP_MAX_OUT (RAVEMIDI_MAX_MIRROR_OUT + 1)  // managed: reserved + outs
 #define TAP_FAIL_LIMIT 3       // consecutive read failures before OnDead fires
@@ -44,6 +51,7 @@ typedef struct _RAVE_TAP {
     // never consumes its record - every completion re-delivers the full record-so-far
     // plus the new bytes. LastRec/LastLen detect the replayed prefix so only the tail
     // is forwarded; SatCount counts no-growth completions at the frame cap.
+    // Sized to the frame (struct is ~64KB nonpaged pool, one per tap).
     UCHAR LastRec[MIRROR_READ_BUF];
     ULONG LastLen;
     ULONG SatCount;
@@ -368,6 +376,9 @@ static VOID TapThread(PVOID ctx)
             off += sizeof(KSMUSICFORMAT);
             ULONG bc = mf->ByteCount;
             if (bc == 0 || bc > MIRROR_MAX_REC || bc > used - off) {
+                // oversized or truncated record = the frame is saturating; make sure
+                // the cycle below still fires so the record can't grow unbounded
+                highwater = (bc > MIRROR_REC_HIGHWATER) ? TRUE : highwater;
                 break;
             }
             // Replaying-pin dedup: if this record strictly extends the previous one
@@ -397,9 +408,11 @@ static VOID TapThread(PVOID ctx)
             off += pad;
         }
         if (highwater && !t->Stop) {
-            // The replaying pin is about to saturate its frame (a full frame stops
-            // completing = dead MIDI). Cycle PAUSE->RUN to reset its record; if the
-            // pin never yields new bytes across TAP_SAT_LIMIT resets, rebind fully.
+            // The replaying record must never approach FrameExtent: usbaudio memcpys
+            // it into the frame UNCLAMPED (BSOD 0x50 once it crossed the extent).
+            // Cycle PAUSE->RUN to reset the record while it's still far below the
+            // frame; if the pin never yields new bytes across TAP_SAT_LIMIT resets,
+            // rebind fully.
             t->SatCount = grew ? 0 : t->SatCount + 1;
             if (t->SatCount >= TAP_SAT_LIMIT) {
                 if (t->OnDead) {
