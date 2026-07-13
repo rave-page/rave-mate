@@ -284,7 +284,8 @@ type Dispatcher struct {
 	h     map[ActionID]Handler
 	hold  map[ActionID]HoldHandler
 	step  map[ActionID]StepHandler
-	group func(group string) bool // nil = all groups enabled
+	group func(group string) bool           // nil = all groups enabled
+	prof  func(group, bindPort string) bool // nil = all device profiles enabled
 
 	stMu sync.Mutex
 	st   map[string]*bindState
@@ -308,6 +309,11 @@ func (d *Dispatcher) RegisterStep(id ActionID, fn StepHandler) { d.step[id] = fn
 // SetGroupFilter installs the group enable gate consulted by FireMIDIMsg (nil = all on).
 // Call during startup wiring, before events flow.
 func (d *Dispatcher) SetGroupFilter(fn func(group string) bool) { d.group = fn }
+
+// SetProfileFilter installs the per-device-profile enable gate consulted by FireMIDIMsg with
+// each matched bind's resolved group + MIDIKey.Port ("" = the any-device profile). nil = all
+// profiles enabled. Call during startup wiring, before events flow.
+func (d *Dispatcher) SetProfileFilter(fn func(group, bindPort string) bool) { d.prof = fn }
 
 // Fire runs the handler for b.Action with b.Target. Returns false if no handler is registered.
 // Hold/step actions fired this way (VR slots, quick buttons - press-only sources) degrade
@@ -376,6 +382,9 @@ func (d *Dispatcher) FireMIDIMsg(binds []Bind, port string, status, data1, data2
 			continue
 		}
 		if d.group != nil && !d.group(act.ResolvedGroup()) {
+			continue
+		}
+		if d.prof != nil && !d.prof(act.ResolvedGroup(), k.Port) {
 			continue
 		}
 		if d.fireOne(b, *k, act.Kind, status, data2) {
