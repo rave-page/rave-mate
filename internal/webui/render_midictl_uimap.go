@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/vrbind"
 )
@@ -40,8 +41,65 @@ func (u *UI) um() *umSt {
 	return s
 }
 
-// umGroups is the card's section order.
+// umGroups is the action-picker section order.
 var umGroups = []string{vrbind.GroupCueEdit, vrbind.GroupLibrary, vrbind.GroupNav}
+
+// umProfile is one per-device mapping profile for rendering: the derived key (controller Port /
+// config.BindProfileAny / raw orphan port), a display label, and the absolute VROverlay.Binds
+// indexes of the ui.* binds it owns.
+type umProfile struct {
+	Key   string
+	Label string
+	Port  string // copy target port ("" for the any-device profile)
+	Binds []int
+}
+
+// umIsUIBind reports whether a bind belongs to the desktop-UI groups this card manages.
+func umIsUIBind(b vrbind.Bind) bool {
+	if b.MIDI == nil {
+		return false
+	}
+	a, ok := vrbind.ActionByID(b.Action)
+	return ok && a.ResolvedGroup() != vrbind.GroupVR
+}
+
+// umProfiles derives the profile sections: configured controllers (config order), the
+// any-device profile, then orphan device ports (learned from a device that is no longer
+// configured), each with its owned bind indexes.
+func (u *UI) umProfiles() []umProfile {
+	m := u.svc.Cfg.Features.MIDI
+	f := &u.svc.Cfg.Features.VROverlay
+	var out []umProfile
+	seen := map[string]int{} // key → index in out
+	add := func(key, label, port string) *umProfile {
+		if i, ok := seen[key]; ok {
+			return &out[i]
+		}
+		out = append(out, umProfile{Key: key, Label: label, Port: port})
+		seen[key] = len(out) - 1
+		return &out[len(out)-1]
+	}
+	for _, c := range m.Controllers {
+		if c.Port == "" {
+			continue
+		}
+		label := c.Name
+		if label == "" {
+			label = c.Port
+		}
+		add(c.Port, label, c.Port)
+	}
+	add(config.BindProfileAny, i18n.T("midictl.uimap.profileAny"), "")
+	for i := range f.Binds {
+		if !umIsUIBind(f.Binds[i]) {
+			continue
+		}
+		key := m.BindProfileKey(f.Binds[i].MIDI.Port)
+		p := add(key, key, key) // orphan: raw port is label + copy-target port
+		p.Binds = append(p.Binds, i)
+	}
+	return out
+}
 
 // umActLabel translates an action id (midictl.uimap.act.<ce_audition>), falling back to the
 // vrbind catalog's English label for ids without a key yet.
@@ -116,11 +174,27 @@ func umBindLabel(k vrbind.MIDIKey) string {
 	return l
 }
 
-// midiUIMapCard renders the mappings card on the MIDI tab.
+// umActionOpts builds the add-mapping picker: every ui.* action, grouped label + kind hint.
+func umActionOpts() []ssOpt {
+	var out []ssOpt
+	for _, group := range umGroups {
+		g := i18n.T("midictl.uimap.group." + group)
+		for _, a := range vrbind.Actions() {
+			if a.ResolvedGroup() != group {
+				continue
+			}
+			out = append(out, ssOpt{Val: string(a.ID), Label: umActLabel(a), Sub: g + " · " + umKindLabel(a.Kind)})
+		}
+	}
+	return out
+}
+
+// midiUIMapCard renders the mappings card on the MIDI tab, grouped by device profile.
 func (u *UI) midiUIMapCard() string {
 	if u.svc.Cfg == nil || u.svc.MIDILearn == nil {
 		return ""
 	}
+	m := &u.svc.Cfg.Features.MIDI
 	f := &u.svc.Cfg.Features.VROverlay
 	st := u.um()
 	st.mu.Lock()
@@ -130,33 +204,79 @@ func (u *UI) midiUIMapCard() string {
 	var b strings.Builder
 	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.uimap.sub")) + `</p>`)
 	b.WriteString(toggleRowTip(i18n.T("midictl.uimap.enable"), "um-enable",
-		!u.svc.Cfg.Features.MIDI.DisableUIBinds, tipTopic("midi-mapping")))
+		!m.DisableUIBinds, tipTopic("midi-mapping")))
 
-	for _, group := range umGroups {
-		b.WriteString(`<div class=card-label>` + htmlEscape(i18n.T("midictl.uimap.group."+group)) + `</div>`)
-		for _, a := range vrbind.Actions() {
-			if a.ResolvedGroup() != group {
+	// Add mapping: pick an action, then touch a control - the touched device's profile owns it.
+	if learning != "" {
+		lbl := i18n.T("midictl.uimap.learnArmed")
+		if a, ok := vrbind.ActionByID(learning); ok {
+			lbl = umActLabel(a)
+		}
+		b.WriteString(itemRow(lbl, i18n.T("midictl.uimap.armedHint"),
+			btn(i18n.T("midictl.uimap.cancel"), "warn", "um-learn:"+string(learning), "")))
+	} else {
+		b.WriteString(itemRow(i18n.T("midictl.uimap.add"), i18n.T("midictl.uimap.addSub"),
+			smartSelect("um-add", "", "um-learn:", i18n.T("midictl.uimap.learn"), umActionOpts)))
+	}
+
+	profiles := u.umProfiles()
+	for pi, p := range profiles {
+		paused := m.BindProfileDisabled(profileProbePort(p))
+		sub := i18n.Tn("midictl.uimap.profileBinds", len(p.Binds))
+		if paused {
+			sub = i18n.T("midictl.uimap.profilePaused") + " · " + sub
+		}
+		pauseLbl, pauseVariant := i18n.T("midictl.uimap.profileOn"), "secondary"
+		if paused {
+			pauseLbl, pauseVariant = i18n.T("midictl.uimap.profileOff"), "warn"
+		}
+		trail := []string{btn(pauseLbl, pauseVariant, "um-prof:"+p.Key, "")}
+		if len(p.Binds) > 0 {
+			if opts := umCopyOpts(profiles, p.Key); len(opts) > 0 {
+				o := opts
+				trail = append(trail, smartSelect("um-pcopy-"+strconv.Itoa(pi), "",
+					"um-pcopy:"+p.Key, i18n.T("midictl.uimap.profileCopy"),
+					func() []ssOpt { return o }))
+			}
+			trail = append(trail, btn(i18n.T("midictl.uimap.profileClear"), "ghost", "um-pclear:"+p.Key, ""))
+		}
+		b.WriteString(itemRow(p.Label, sub, trail...))
+		if len(p.Binds) == 0 {
+			b.WriteString(`<div class=set-note>` + htmlEscape(i18n.T("midictl.uimap.profileEmpty")) + `</div>`)
+			continue
+		}
+		for _, i := range p.Binds {
+			bd := f.Binds[i]
+			a, ok := vrbind.ActionByID(bd.Action)
+			if !ok {
 				continue
 			}
-			learnLbl := i18n.T("midictl.uimap.learn")
-			learnVariant := "outline"
-			if learning == a.ID {
-				learnLbl = i18n.T("midictl.uimap.learnArmed")
-				learnVariant = "warn"
-			}
-			b.WriteString(itemRow(umActLabel(a), umKindLabel(a.Kind),
-				btn(learnLbl, learnVariant, "um-learn:"+string(a.ID), "")))
-			for i := range f.Binds {
-				bd := f.Binds[i]
-				if bd.Action != a.ID || bd.MIDI == nil {
-					continue
-				}
-				b.WriteString(u.umBindRow(i, a, *bd.MIDI))
-			}
+			b.WriteString(u.umBindRow(i, a, *bd.MIDI))
 		}
 	}
 	b.WriteString(`<div class=set-note>` + htmlEscape(i18n.T("midictl.uimap.note")) + `</div>`)
 	return card(i18n.T("midictl.uimap.title"), tipTopic("midi-mapping"), b.String())
+}
+
+// profileProbePort returns a port string that resolves to this profile's key (the key itself
+// works for both controller ports and raw orphan ports; the any-device profile probes "").
+func profileProbePort(p umProfile) string {
+	if p.Key == config.BindProfileAny {
+		return ""
+	}
+	return p.Key
+}
+
+// umCopyOpts lists copy targets for a profile: every OTHER profile with a distinct key.
+func umCopyOpts(profiles []umProfile, srcKey string) []ssOpt {
+	var out []ssOpt
+	for _, p := range profiles {
+		if p.Key == srcKey {
+			continue
+		}
+		out = append(out, ssOpt{Val: p.Key, Label: p.Label, Sub: i18n.T("midictl.uimap.profileCopySub")})
+	}
+	return out
 }
 
 // umBindRow renders one existing bind: key chip + mode/sensitivity/reverse editors + remove.
@@ -194,7 +314,7 @@ func (u *UI) umBindRow(idx int, a vrbind.Action, k vrbind.MIDIKey) string {
 		trail = append(trail, btn(i18n.T("midictl.uimap.rev"), revVariant, "um-rev:"+is, ""))
 	}
 	trail = append(trail, btn("✕", "ghost", "um-del:"+is, ""))
-	return itemRow("↳ "+umBindLabel(k), umModeLabel(a.Kind, k), trail...)
+	return itemRow("↳ "+umActLabel(a), vrmMIDIKeyLabel(k)+" · "+umModeLabel(a.Kind, k), trail...)
 }
 
 // ── actions ──
@@ -231,6 +351,37 @@ func init() {
 	})
 	onPrefix("um-rev:", func(u *UI, m actMsg) {
 		u.umEditBind(atoiSafe(m.arg("um-rev:")), func(k *vrbind.MIDIKey) { k.Rev = !k.Rev })
+	})
+	onPrefix("um-prof:", func(u *UI, m actMsg) { // pause/resume one device profile
+		if u.svc.Cfg == nil {
+			return
+		}
+		mf := &u.svc.Cfg.Features.MIDI
+		key := m.arg("um-prof:")
+		mf.SetBindProfileDisabled(key, !mf.BindProfileDisabled(umProfilePort(key)))
+		u.saveCfg()
+		u.umPatch()
+	})
+	onPrefix("um-pcopy:", func(u *UI, m actMsg) { // arg = src profile key, Val = dst key
+		if u.svc.Cfg == nil || m.Val == "" {
+			return
+		}
+		n := umCopyProfile(u.svc.Cfg.Features.MIDI, &u.svc.Cfg.Features.VROverlay, m.arg("um-pcopy:"), m.Val)
+		if n > 0 {
+			u.saveCfg()
+		}
+		u.toast(i18n.Tn("midictl.uimap.profileCopied", n))
+		u.umPatch()
+	})
+	onPrefix("um-pclear:", func(u *UI, m actMsg) {
+		if u.svc.Cfg == nil {
+			return
+		}
+		n := umClearProfile(u.svc.Cfg.Features.MIDI, &u.svc.Cfg.Features.VROverlay, m.arg("um-pclear:"))
+		if n > 0 {
+			u.saveCfg()
+		}
+		u.umPatch()
 	})
 }
 

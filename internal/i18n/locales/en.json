@@ -387,7 +387,7 @@
     },
     "midi-mapping": {
       "title": "Control rave-mate with your DJ controller",
-      "body": "Map any pad, button, knob or endless encoder on your MIDI controller to rave-mate actions: browse the collection, open a track in the cue editor, move the playhead, hold-audition from the cursor, drop markers and nudge the beatgrid - hands on hardware, eyes on the waveform. Click Learn next to an action, touch the control on your device, done. Actions are view-scoped: cue-editor actions only fire while the editor is open, library actions only on the collection list, so one pad can safely mean different things per view. For knobs and encoders pick the value encoding in the row that appears after learning: \"absolute knob\" for regular potentiometers, one of the relative modes for endless encoders (check your controller manual - two's complement is the most common), plus a sensitivity (ticks per step) and a reverse switch."
+      "body": "Map any pad, button, knob or endless encoder on your MIDI controller to rave-mate actions: browse the collection, open a track in the cue editor, move the playhead, hold-audition from the cursor, drop markers and nudge the beatgrid - hands on hardware, eyes on the waveform. Click Learn next to an action, touch the control on your device, done. Actions are view-scoped: cue-editor actions only fire while the editor is open, library actions only on the collection list, so one pad can safely mean different things per view. For knobs and encoders pick the value encoding in the row that appears after learning: \"absolute knob\" for regular potentiometers, one of the relative modes for endless encoders (check your controller manual - two's complement is the most common), plus a sensitivity (ticks per step) and a reverse switch. Mappings are organized into per-device profiles: the device you touch during Learn owns the new mapping, so two controllers can drive the same action with different controls (or different actions with the same CC number). Each device section can be paused as a whole, copied onto another controller (modes and sensitivity survive, only the device changes), or cleared. Mappings learned before profiles existed live under \"Any device\" and keep firing from every controller."
     }
   },
   "library": {
@@ -3849,6 +3849,30 @@
         "lib_open": "Open selected track in cue editor",
         "nav_back": "Navigate back",
         "nav_fwd": "Navigate forward"
+      },
+      "add": "Add a mapping",
+      "addSub": "Pick an action, then touch the control on your controller - the touched device's profile receives the mapping",
+      "cancel": "Cancel",
+      "armedHint": "Touch a control now - the mapping is saved under the device you touch",
+      "profileAny": "Any device",
+      "profilePaused": "paused",
+      "profileOn": "Active",
+      "profileOff": "Paused",
+      "profileCopy": "Copy to…",
+      "profileCopySub": "duplicate this device's mappings onto it",
+      "profileClear": "Clear",
+      "profileEmpty": "No mappings for this device yet - add one above and touch this controller.",
+      "profileBinds": {
+        "one": "{count} mapping",
+        "other": "{count} mappings",
+        "few": "{count} mappings",
+        "many": "{count} mappings"
+      },
+      "profileCopied": {
+        "one": "{count} mapping copied",
+        "other": "{count} mappings copied",
+        "few": "{count} mappings copied",
+        "many": "{count} mappings copied"
       }
     }
   }

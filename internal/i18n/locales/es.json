@@ -365,7 +365,7 @@
     },
     "midi-mapping": {
       "title": "Controla rave-mate con tu controladora DJ",
-      "body": "Asigna cualquier pad, botón, potenciómetro o encoder sin fin de tu controladora MIDI a acciones de rave-mate: navegar por la colección, abrir una pista en el editor de cues, mover el cabezal, pre-escuchar desde el cursor (mantener), colocar marcadores de drop y ajustar la rejilla de beats - manos en el hardware, ojos en la forma de onda. Pulsa Aprender junto a una acción, toca el control en tu dispositivo y listo. Las acciones dependen de la vista: las del editor de cues solo se disparan con el editor abierto, las de la biblioteca solo en la lista de la colección, así que un mismo pad puede significar cosas distintas según la vista. Para potenciómetros y encoders elige la codificación del valor en la fila que aparece tras aprender: «potenciómetro absoluto» para potenciómetros normales, uno de los modos relativos para encoders sin fin (consulta el manual - el complemento a dos es el más común), más una sensibilidad (ticks por paso) y una inversión."
+      "body": "Asigna cualquier pad, botón, potenciómetro o encoder sin fin de tu controladora MIDI a acciones de rave-mate: navegar por la colección, abrir una pista en el editor de cues, mover el cabezal, pre-escuchar desde el cursor (mantener), colocar marcadores de drop y ajustar la rejilla de beats - manos en el hardware, ojos en la forma de onda. Pulsa Aprender junto a una acción, toca el control en tu dispositivo y listo. Las acciones dependen de la vista: las del editor de cues solo se disparan con el editor abierto, las de la biblioteca solo en la lista de la colección, así que un mismo pad puede significar cosas distintas según la vista. Para potenciómetros y encoders elige la codificación del valor en la fila que aparece tras aprender: «potenciómetro absoluto» para potenciómetros normales, uno de los modos relativos para encoders sin fin (consulta el manual - el complemento a dos es el más común), más una sensibilidad (ticks por paso) y una inversión. Las asignaciones se organizan en perfiles por dispositivo: el dispositivo que tocas durante el aprendizaje posee la nueva asignación, así que dos controladores pueden manejar la misma acción con controles distintos (o acciones distintas con el mismo número CC). Cada sección de dispositivo puede pausarse por completo, copiarse a otro controlador (los modos y la sensibilidad sobreviven, solo cambia el dispositivo) o vaciarse. Las asignaciones aprendidas antes de que existieran los perfiles viven bajo «Cualquier dispositivo» y siguen disparándose desde todos los controladores."
     }
   },
   "library": {
@@ -3619,6 +3619,26 @@
         "lib_open": "Abrir la pista seleccionada en el editor de cues",
         "nav_back": "Atrás",
         "nav_fwd": "Adelante"
+      },
+      "add": "Añadir asignación",
+      "addSub": "Elige una acción y toca el control en tu controlador: el perfil del dispositivo tocado recibe la asignación",
+      "cancel": "Cancelar",
+      "armedHint": "Toca un control ahora: la asignación se guarda bajo el dispositivo tocado",
+      "profileAny": "Cualquier dispositivo",
+      "profilePaused": "en pausa",
+      "profileOn": "Activo",
+      "profileOff": "En pausa",
+      "profileCopy": "Copiar a…",
+      "profileCopySub": "duplicar las asignaciones de este dispositivo en él",
+      "profileClear": "Vaciar",
+      "profileEmpty": "Aún no hay asignaciones para este dispositivo: añade una arriba y toca este controlador.",
+      "profileBinds": {
+        "one": "{count} asignación",
+        "other": "{count} asignaciones"
+      },
+      "profileCopied": {
+        "one": "{count} asignación copiada",
+        "other": "{count} asignaciones copiadas"
       }
     }
   }

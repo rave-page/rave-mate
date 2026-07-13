@@ -365,7 +365,7 @@
     },
     "midi-mapping": {
       "title": "Contrôler rave-mate avec votre contrôleur DJ",
-      "body": "Assignez n'importe quel pad, bouton, potentiomètre ou encodeur sans fin de votre contrôleur MIDI aux actions rave-mate : parcourir la collection, ouvrir un morceau dans l'éditeur de cues, déplacer la tête de lecture, pré-écouter depuis le curseur (maintenir), poser des marqueurs de drop et ajuster la grille - les mains sur le matériel, les yeux sur la waveform. Cliquez sur Apprendre à côté d'une action, touchez la commande sur votre appareil, c'est fait. Les actions dépendent de la vue : celles de l'éditeur de cues ne se déclenchent que lorsqu'il est ouvert, celles de la bibliothèque uniquement sur la liste de la collection - un même pad peut donc changer de rôle selon la vue. Pour les potentiomètres et encodeurs, choisissez l'encodage de valeur dans la ligne qui apparaît après l'apprentissage : « potentiomètre absolu » pour les potentiomètres classiques, un des modes relatifs pour les encodeurs sans fin (voir le manuel - le complément à deux est le plus courant), plus une sensibilité (ticks par pas) et une inversion de sens."
+      "body": "Assignez n'importe quel pad, bouton, potentiomètre ou encodeur sans fin de votre contrôleur MIDI aux actions rave-mate : parcourir la collection, ouvrir un morceau dans l'éditeur de cues, déplacer la tête de lecture, pré-écouter depuis le curseur (maintenir), poser des marqueurs de drop et ajuster la grille - les mains sur le matériel, les yeux sur la waveform. Cliquez sur Apprendre à côté d'une action, touchez la commande sur votre appareil, c'est fait. Les actions dépendent de la vue : celles de l'éditeur de cues ne se déclenchent que lorsqu'il est ouvert, celles de la bibliothèque uniquement sur la liste de la collection - un même pad peut donc changer de rôle selon la vue. Pour les potentiomètres et encodeurs, choisissez l'encodage de valeur dans la ligne qui apparaît après l'apprentissage : « potentiomètre absolu » pour les potentiomètres classiques, un des modes relatifs pour les encodeurs sans fin (voir le manuel - le complément à deux est le plus courant), plus une sensibilité (ticks par pas) et une inversion de sens. Les mappages sont organisés en profils par appareil : l'appareil touché pendant l'apprentissage possède le nouveau mappage, deux contrôleurs peuvent donc piloter la même action avec des commandes différentes (ou des actions différentes avec le même numéro CC). Chaque section d'appareil peut être mise en pause dans son ensemble, copiée vers un autre contrôleur (les modes et la sensibilité survivent, seul l'appareil change) ou vidée. Les mappages appris avant l'existence des profils vivent sous « Tout appareil » et continuent de se déclencher depuis chaque contrôleur."
     }
   },
   "library": {
@@ -3619,6 +3619,26 @@
         "lib_open": "Ouvrir le morceau sélectionné dans l'éditeur de cues",
         "nav_back": "Retour",
         "nav_fwd": "Suivant"
+      },
+      "add": "Ajouter un mappage",
+      "addSub": "Choisissez une action, puis touchez la commande sur votre contrôleur - le profil de l'appareil touché reçoit le mappage",
+      "cancel": "Annuler",
+      "armedHint": "Touchez une commande maintenant - le mappage est enregistré sous l'appareil touché",
+      "profileAny": "Tout appareil",
+      "profilePaused": "en pause",
+      "profileOn": "Actif",
+      "profileOff": "En pause",
+      "profileCopy": "Copier vers…",
+      "profileCopySub": "dupliquer les mappages de cet appareil vers celui-ci",
+      "profileClear": "Vider",
+      "profileEmpty": "Aucun mappage pour cet appareil - ajoutez-en un ci-dessus et touchez ce contrôleur.",
+      "profileBinds": {
+        "one": "{count} mappage",
+        "other": "{count} mappages"
+      },
+      "profileCopied": {
+        "one": "{count} mappage copié",
+        "other": "{count} mappages copiés"
       }
     }
   }
