@@ -1787,6 +1787,11 @@ type PlayerFeature struct {
 	Profile   string   `json:"profile"`             // optional mpv --profile (e.g. "fast"); "" = none
 	ExtraArgs []string `json:"extraArgs,omitempty"` // power-user extra mpv flags
 	GioWindow *bool    `json:"gioWindow,omitempty"` // player pop-out engine: nil/true = Gio (default), explicit false = legacy Fyne/mpv-popout
+
+	// NativeDecode routes audio playback through the native internal/audio engine (low-latency
+	// oto, RAM preload, sample-accurate seek) instead of the legacy beep+ffmpeg path. Default OFF
+	// until on-hardware verify; AAC/M4A + any native-decode failure fall through to ffmpeg.
+	NativeDecode bool `json:"nativeDecode,omitempty"`
 }
 
 // UseGioWindow resolves the tri-state pop-out engine: unset = Gio (default), explicit

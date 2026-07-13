@@ -78,17 +78,25 @@ func NewEngine() *Engine {
 // Loaded reports the currently-loaded path ("" = none).
 func (e *Engine) Loaded() string { e.mu.Lock(); defer e.mu.Unlock(); return e.path }
 
-// Load decodes path and readies playback (paused, positioned at 0). Small/normal files preload to
-// RAM; oversized files stream with indexed seek. Replaces any current track. Returns
-// ErrUnsupported for a format with no native decoder (caller falls back to ffmpeg).
+// Load decodes path with the native decoder and readies playback (paused at 0). Small/normal
+// files preload to RAM; oversized files stream with indexed seek. Replaces any current track.
+// Returns ErrUnsupported for a format with no native decoder (caller builds an ffmpeg-backed
+// audio.Decoder and calls LoadDecoder).
 func (e *Engine) Load(path string) error {
 	dec, err := Open(path)
 	if err != nil {
 		return err
 	}
+	return e.LoadDecoder(dec, path)
+}
+
+// LoadDecoder readies playback from an already-opened Decoder (native OR the ffmpeg bridge for
+// AAC/M4A). Takes ownership of dec.
+func (e *Engine) LoadDecoder(dec Decoder, path string) error {
 	sf := dec.Format()
 	// Decide preload vs stream by the DEVICE-rate PCM size.
 	var s *source
+	var err error
 	if devBytes := estimateDeviceBytes(dec.TotalFrames(), sf); devBytes >= 0 && devBytes <= preloadMaxBytes {
 		if s, err = newRAMSource(dec); err != nil {
 			return err
@@ -114,6 +122,13 @@ func (e *Engine) Load(path string) error {
 		_ = oldSrc.Close()
 	}
 	return nil
+}
+
+// PreloadedRAM reports whether the loaded track is fully in RAM (instant seek / 0-latency Space).
+func (e *Engine) PreloadedRAM() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.src != nil && e.src.ram != nil
 }
 
 // estimateDeviceBytes returns the device-rate PCM byte size, or -1 if unknown (=> stream).
@@ -205,20 +220,32 @@ func (e *Engine) PreviewFrom(sec float64) {
 }
 
 // PreviewRelease stops playback and snaps the position back to where PreviewFrom started
-// (key-up in a hold-to-audition). If not previewing, it's a plain pause.
-func (e *Engine) PreviewRelease() {
+// (key-up in a hold-to-audition). fallbackSec covers a release whose press went through plain
+// PlayFrom (no preview anchor): <0 = plain pause, >=0 = snap there instead.
+func (e *Engine) PreviewRelease(fallbackSec float64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.player != nil {
 		e.player.Pause()
 	}
-	if e.src != nil && e.previewReturn >= 0 {
-		_ = e.src.SeekTo(e.previewReturn)
+	ret := e.previewReturn
+	if ret < 0 && fallbackSec >= 0 {
+		ret = e.format.SecondsToFrame(fallbackSec)
+	}
+	if e.src != nil && ret >= 0 {
+		_ = e.src.SeekTo(ret)
 		if e.player != nil {
 			e.player.Reset() // drop the ~15ms already-buffered so we're truly back at the return frame
 		}
 	}
 	e.previewReturn = -1
+}
+
+// IsPlaying reports whether the device is actively pulling (false when paused or drained).
+func (e *Engine) IsPlaying() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.player != nil && e.player.IsPlaying()
 }
 
 // resetAndPlay drops any buffered audio and starts from the source cursor (caller holds mu).

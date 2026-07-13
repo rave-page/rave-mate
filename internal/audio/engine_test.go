@@ -66,7 +66,7 @@ func TestEngineTransportPreview(t *testing.T) {
 		t.Fatalf("cursor after pump = %d want %d", got, deviceRate+deviceRate/4)
 	}
 	// Release: stop + snap back to where the preview started (1.0s).
-	e.PreviewRelease()
+	e.PreviewRelease(-1)
 	if fake.IsPlaying() {
 		t.Fatal("PreviewRelease should pause")
 	}
