@@ -262,6 +262,12 @@ func (u *UI) ceEnter(path string) {
 		if st := pl.State(); st.Playing && st.Path != path {
 			u.mpAudCall("library", "stop", func() { pl.Stop() })
 		}
+		// Prewarm: decode the edited track into the native engine's RAM buffer NOW so the first
+		// hold-Space is 0-latency (see ceAudition). Best-effort + off-thread — a slow decode
+		// never blocks track-open; a failure just means the first press pays the load. No-op on
+		// the legacy engine (no RAM buffer).
+		p := path
+		u.bg(func() { _ = pl.Preload(p) })
 	}
 	// keep the collection selection in sync with the editor target: the row
 	// highlights and cue-edit ↑/↓ (ceNav) anchor on s.sel.
@@ -1566,14 +1572,15 @@ func (u *UI) ceAudition(down bool) {
 	c.mu.Unlock()
 	local := clampF(cur-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 	if !down {
+		// Release: end the hold-audition. PreviewRelease pauses + snaps the playhead back to the
+		// press cursor (local) — on the native engine it drops the device buffer so the snap is
+		// exact; on the legacy engine it pauses + re-seeks (same as before). Cursor never moved
+		// during playback, so `local` == where the press started.
 		tr := u.mpEngineState(&t, m)
 		pl := u.player()
-		if m.kind != "video" && tr.loaded && !tr.paused && pl != nil {
+		if m.kind != "video" && tr.loaded && pl != nil {
 			path := m.path
-			u.mpAudCall(host, "pause", func() {
-				pl.TogglePause()
-				pl.SeekExplicit(local) // pre-position for the next press
-			})
+			u.mpAudCall(host, "pause", func() { pl.PreviewRelease(local) })
 			u.ceArmIdleStop(path)
 			u.mpPatchTransport(u.mpSnap(host))
 			return
@@ -1582,13 +1589,28 @@ func (u *UI) ceAudition(down bool) {
 		return
 	}
 	u.ceCancelIdleStop()
+	pl := u.player()
 	if tr := u.mpEngineState(&t, m); tr.loaded {
-		if pl := u.player(); pl != nil {
-			pl.SeekExplicit(local) // beat-precise: bypass the 0.5s seek-noop guard
+		// Already decoded (native: RAM-preloaded => instant): beat-precise seek + unpause. No
+		// re-decode; this is the 0-latency Space path once ceEnter preloaded the track.
+		if pl != nil {
+			pl.SeekExplicit(local)
 			if tr.paused {
 				u.mpAudCall(host, "play", func() { pl.TogglePause() })
 			}
 		}
+		u.mpPatchTransport(u.mpSnap(host))
+		return
+	}
+	if m.kind != "video" && pl != nil {
+		// First press before a preload landed: preview from the cursor (native loads/RAM-preloads
+		// + remembers the return point; legacy plays from the offset).
+		path := m.path
+		u.mpAudCall(host, "play", func() {
+			if err := pl.PreviewFrom(path, local); err != nil {
+				u.logErr("cue audition", err)
+			}
+		})
 		u.mpPatchTransport(u.mpSnap(host))
 		return
 	}

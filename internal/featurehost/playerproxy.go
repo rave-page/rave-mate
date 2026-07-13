@@ -30,6 +30,8 @@ type PlayerProxy struct {
 	obsSeq    int                      // observer id source
 	dispatch  func(func())             // UI-thread dispatcher (fyne.Do); default = direct call
 	notify    func(title, body string) // decode-failure toast
+
+	nativeDecode bool // select the internal/audio engine in the child (else beep/ffmpeg)
 }
 
 // playerObs is one extra tick/end listener, independent of the single AttachUI panel sink.
@@ -39,13 +41,17 @@ type playerObs struct {
 }
 
 // NewPlayerProxy builds the proxy + its host. The child spawns on Bind (pre-warmed) so the first
-// play is instant.
-func NewPlayerProxy(log *logbus.Bus) (*PlayerProxy, error) {
-	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }}
+// play is instant. nativeDecode selects the internal/audio engine in the child (else beep/ffmpeg).
+func NewPlayerProxy(log *logbus.Bus, nativeDecode bool) (*PlayerProxy, error) {
+	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }, nativeDecode: nativeDecode}
 	h, err := New(Options{
 		Name: "player",
 		Log:  log,
-		Init: func() any { return struct{}{} },
+		Init: func() any {
+			return struct {
+				NativeDecode bool `json:"nativeDecode"`
+			}{p.nativeDecode}
+		},
 		OnEvent: map[string]func(json.RawMessage){
 			"tick":   p.onTickEvent,
 			"end":    p.onEndEvent,
@@ -240,6 +246,48 @@ func (p *PlayerProxy) PlayFrom(path string, startSec float64) error {
 	p.mirror = st
 	p.mu.Unlock()
 	return nil
+}
+
+// PreviewFrom starts a cue-edit hold-audition at startSec (the child remembers it as the
+// snap-back point). With the native engine on a RAM-preloaded track this is 0-latency.
+func (p *PlayerProxy) PreviewFrom(path string, startSec float64) error {
+	if err := p.ensureUp(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := p.host.Call(ctx, "previewFrom", playParams{Path: path, StartSec: startSec})
+	if err != nil {
+		return err
+	}
+	var st audioengine.State
+	_ = json.Unmarshal(raw, &st)
+	p.mu.Lock()
+	p.mirror = st
+	p.mu.Unlock()
+	return nil
+}
+
+// PreviewRelease ends the hold-audition: stop + snap the playhead back to fallbackSec (the cursor
+// the press started from; <0 = plain pause). Fire-and-forget (hot key-up path).
+func (p *PlayerProxy) PreviewRelease(fallbackSec float64) {
+	if p.host.Running() {
+		_ = p.host.Send("previewRelease", struct {
+			FallbackSec float64 `json:"fallbackSec"`
+		}{fallbackSec})
+	}
+}
+
+// Preload decodes path into the child (RAM preload if it fits) without playing, so the first
+// cue-edit Space is instant. Best-effort; a failure just means the first press pays the decode.
+func (p *PlayerProxy) Preload(path string) error {
+	if err := p.ensureUp(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := p.host.Call(ctx, "preload", playParams{Path: path})
+	return err
 }
 
 // TogglePause flips play/pause; returns the resulting paused state.
