@@ -63,13 +63,11 @@ resamples to the device rate only if they differ (linear; codecs mostly already 
 
 ## AAC decision
 
-No mature **pure-Go** AAC decoder exists. Options: (a) cgo bind faad2 — but faad2 is GPL, and
-rave-mate ships **AGPL-3.0** binaries publicly; GPLv2 faad2 is AGPL-incompatible for
-distribution (flag for user). (b) a permissive C AAC decoder — licensing varies. (c) keep
-ffmpeg **only** for AAC/M4A until a clean codec is picked. Shipping default: **(c)** — native
-path owns WAV/AIFF/FLAC/MP3/Vorbis; AAC returns a clear "native AAC pending codec-license
-decision" and uses the existing ffmpeg fallback. USER DECISION NEEDED: pick the AAC codec +
-accept its license, or accept ffmpeg-for-AAC.
+No mature **pure-Go** AAC decoder exists. Options considered: (a) cgo bind faad2 — GPLv2,
+AGPL-incompatible for rave-mate's public binary distribution; (b) permissive C AAC decoder;
+(c) ffmpeg **only** for AAC/M4A. **DECIDED (user, 2026-07-13): (c) is permanent** — native
+path owns WAV/AIFF/FLAC/MP3/Vorbis; `.aac`/`.m4a`/`.mp4` return `ErrUnsupported` and route
+through the existing ffmpeg fallback by design. No native AAC codec planned.
 
 ## Rollout
 
