@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c588659",
-  "build": 79,
-  "commit": "c588659",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-79-20260713-c588659.exe",
-  "sha256": "2eaa9266f21eebc19efc8a82f4898f2eb57955ebd42e93b7aa9da5742fbc9284",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-79-20260713-c588659.exe",
-  "installer_sha256": "5892f76aab7cc2acdcfe5f134a9e2cc7f8e10c15c370de52d968c8e51a857701",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-79-20260713-c588659",
-  "linux_sha256": "328595b923e5b59ec535c76d6ae7d7500acfd53188dd2dc4727347506bd63c91",
+  "version": "nightly-02e61f6",
+  "build": 80,
+  "commit": "02e61f6",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-80-20260713-02e61f6.exe",
+  "sha256": "806bb2655f7df6ea87916c6534637e921aec099ccac4d5919df0ede4ad29e88b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-80-20260713-02e61f6.exe",
+  "installer_sha256": "e08679759f1f81eab3102a5cae3f31afe674fe8abb2e6286c14b408ade241b1a",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-80-20260713-02e61f6",
+  "linux_sha256": "c1976c82164536bf5ceff7907d98fa6a1a9ec02bee371e41c2a895d32741f491",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-13T16:32:51Z",
-  "notes": "Merge feature/native-audio-decoder: native decoder + low-latency engine behind features.player.nativeDecode (default OFF); AAC stays on ffmpeg by design"
+  "released": "2026-07-13T17:09:25Z",
+  "notes": "Merge feature/midi-cueedit-nav: user-mappable DJ-controller MIDI for cue editor + library browsing (learn flow, note/CC-abs/relative encoders, view-scoped dispatch)"
 }
