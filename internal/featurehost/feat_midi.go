@@ -47,11 +47,13 @@ type MidiBridgeInit struct {
 	FromDJPort string `json:"fromDjPort,omitempty"`
 }
 
-// midiMsg is one raw MIDI message on the wire (peer-bridge tap + inject).
+// midiMsg is one raw MIDI message on the wire (peer-bridge tap + inject). P = source input
+// port (tap only; empty on inject) so the daemon's keybind dispatcher can device-match.
 type midiMsg struct {
-	S  byte `json:"s"`
-	D1 byte `json:"d1"`
-	D2 byte `json:"d2"`
+	S  byte   `json:"s"`
+	D1 byte   `json:"d1"`
+	D2 byte   `json:"d2"`
+	P  string `json:"p,omitempty"`
 }
 
 // learnReq/learnRes carry a native MIDI-learn capture across the stdio boundary.
@@ -116,8 +118,8 @@ func (f *midiFeature) Init(params json.RawMessage, rt *Runtime) error {
 func (f *midiFeature) build(cfg midiInit) *midisrc.Source {
 	src := midisrc.New(f.rt.Log, cfg.DenonPort, cfg.CustomPort)
 	src.SetMonitor(f.mon)
-	src.SetForwarder(func(m midi.Message) {
-		f.rt.Emit("midi", midiMsg{S: m.Status, D1: m.Data1, D2: m.Data2})
+	src.SetForwarder(func(port string, m midi.Message) {
+		f.rt.Emit("midi", midiMsg{S: m.Status, D1: m.Data1, D2: m.Data2, P: port})
 	})
 	src.SetControllers(toControllerSpecs(cfg.Controllers))
 	src.SetBridge(midisrc.BridgeSpec{Enabled: cfg.Bridge.Enabled, ToDJPort: cfg.Bridge.ToDJPort, FromDJPort: cfg.Bridge.FromDJPort})

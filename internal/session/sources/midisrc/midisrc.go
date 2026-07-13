@@ -146,9 +146,9 @@ type BridgeSpec struct {
 // Source opens the configured MIDI input port(s) and runs the decoders.
 type Source struct {
 	log         *logbus.Bus
-	mon         *logbus.Bus          // raw-message monitor (MIDI debugger tab); nil = off
-	forward     func(m midi.Message) // tap for the peer-link MIDI bridge; nil = off
-	injectCh    chan midi.Message    // peer-bridged MIDI fed into the local decoders + DJ bridge
+	mon         *logbus.Bus                       // raw-message monitor (MIDI debugger tab); nil = off
+	forward     func(port string, m midi.Message) // tap: peer-link MIDI bridge + keybind dispatch; nil = off
+	injectCh    chan midi.Message                 // peer-bridged MIDI fed into the local decoders + DJ bridge
 	denonPort   string
 	customPort  string
 	controllers []ControllerSpec
@@ -181,9 +181,9 @@ func New(log *logbus.Bus, denonPort, customPort string) *Source {
 // SetMonitor attaches a raw-MIDI monitor bus (the MIDI debugger view subscribes to it).
 func (s *Source) SetMonitor(mon *logbus.Bus) { s.mon = mon }
 
-// SetForwarder taps every non-system local MIDI message for the peer-link bridge. Call before
-// Start (set-once); nil disables.
-func (s *Source) SetForwarder(fn func(m midi.Message)) { s.forward = fn }
+// SetForwarder taps every non-system local MIDI message (with its source port name) for the
+// peer-link bridge + the keybind dispatcher. Call before Start (set-once); nil disables.
+func (s *Source) SetForwarder(fn func(port string, m midi.Message)) { s.forward = fn }
 
 // SetControllers sets the native-learn controllers. Call before Start.
 func (s *Source) SetControllers(cs []ControllerSpec) { s.controllers = cs }
@@ -515,7 +515,7 @@ func (s *Source) handleLocal(b portBinding, now time.Time, m midi.Message, emit 
 		cb(b.name, m.Status, m.Data1)
 	}
 	if s.forward != nil && !m.IsSystem() {
-		s.forward(m) // tap for the peer-link MIDI bridge
+		s.forward(b.name, m) // tap for the peer-link MIDI bridge + keybind dispatch
 	}
 	for _, d := range b.decoders {
 		d.handle(now, m, emit)

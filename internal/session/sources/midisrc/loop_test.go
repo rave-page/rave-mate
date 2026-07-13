@@ -36,13 +36,17 @@ func noEmit(session.Observation) {}
 func TestHandleLocalFiresForwardTap(t *testing.T) {
 	s := New(logbus.New(8), "", "custom")
 	var tapped []midi.Message
-	s.SetForwarder(func(m midi.Message) { tapped = append(tapped, m) })
+	var tapPorts []string
+	s.SetForwarder(func(port string, m midi.Message) { tapped = append(tapped, m); tapPorts = append(tapPorts, port) })
 	dec := &recDecoder{}
 	b := portBinding{name: "custom", decoders: []decoder{dec}}
 
 	s.handleLocal(b, time.Now(), midi.Message{Status: 0x90, Data1: 60, Data2: 100}, noEmit)
 	if len(tapped) != 1 || dec.count() != 1 {
 		t.Fatalf("local data msg: want tap=1 decode=1, got tap=%d decode=%d", len(tapped), dec.count())
+	}
+	if tapPorts[0] != "custom" {
+		t.Fatalf("tap must carry the source port, got %q", tapPorts[0])
 	}
 
 	// System/real-time (clock) never forwards but still decodes.
@@ -57,7 +61,7 @@ func TestHandleLocalFiresForwardTap(t *testing.T) {
 func TestHandleInjectedNeverFiresForwardTap(t *testing.T) {
 	s := New(logbus.New(8), "", "custom")
 	tapCount := 0
-	s.SetForwarder(func(midi.Message) { tapCount++ })
+	s.SetForwarder(func(string, midi.Message) { tapCount++ })
 	dec := &recDecoder{}
 
 	s.applyInjected([]decoder{dec}, midi.Message{Status: 0x90, Data1: 64, Data2: 127}, noEmit)
@@ -110,7 +114,7 @@ func TestMeshNoEchoLoopAcrossInstances(t *testing.T) {
 		link := &loopLink{}
 		br := peerbridge.New(logbus.New(8), link)
 		br.SetMIDIMesh(true)
-		s.SetForwarder(func(m midi.Message) { br.ForwardMIDI(m.Status, m.Data1, m.Data2) })
+		s.SetForwarder(func(_ string, m midi.Message) { br.ForwardMIDI(m.Status, m.Data1, m.Data2) })
 		dec := &recDecoder{}
 		return s, link, br, dec, portBinding{name: "custom", decoders: []decoder{dec}}
 	}

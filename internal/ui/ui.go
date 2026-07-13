@@ -57,6 +57,7 @@ import (
 	"rave.page/mate/internal/traktormap"
 	"rave.page/mate/internal/twitch"
 	"rave.page/mate/internal/version"
+	"rave.page/mate/internal/vrbind"
 	"rave.page/mate/internal/vrchat"
 	"rave.page/mate/internal/vrcmidi"
 	"rave.page/mate/internal/vrcperm"
@@ -164,9 +165,14 @@ type Services struct {
 	// errored) counts. Call off the UI thread. May be nil.
 	SyncVRMAvatars func() (pulled, skipped, errored int)
 
-	// MIDILearn registers a one-shot capture of the next note/CC press (status,data1) for the
-	// keybind editor's "Learn MIDI" button; returns a cancel func. May be nil.
-	MIDILearn func(onCapture func(status, data1 byte)) (cancel func())
+	// MIDILearn registers a one-shot capture of the next note/CC press (port,status,data1) for
+	// the keybind editors' "Learn MIDI" buttons; returns a cancel func. May be nil.
+	MIDILearn func(onCapture func(port string, status, data1 byte)) (cancel func())
+
+	// BindDispatcher is the shared VR/MIDI action-bind dispatcher (app.go keyBinds). The
+	// webview renderer registers the desktop-UI action handlers (vrbind ui.* catalog) on it at
+	// construction; the Fyne renderer leaves them unregistered (no cue editor there). May be nil.
+	BindDispatcher *vrbind.Dispatcher
 
 	// Per-interface monitor buses (raw event firehoses for the Logs-area monitor tabs); may be nil.
 	MIDIMon    *logbus.Bus // raw MIDI messages

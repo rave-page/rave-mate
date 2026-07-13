@@ -601,11 +601,11 @@ func run(parent context.Context, serviceMode bool) error {
 	// MIDI bridge: tap local MIDI out to the link (gated by the control context), and apply
 	// inbound peer MIDI to the local decoders so a linked controller drives this session. The
 	// forwarder also fans MIDI to the keybind dispatcher (set once the managers below exist).
-	var dispatchMIDIBind func(midi.Message)
-	midiSrc.SetForwarder(func(m midi.Message) {
+	var dispatchMIDIBind func(port string, m midi.Message)
+	midiSrc.SetForwarder(func(port string, m midi.Message) {
 		peerBridge.ForwardMIDI(m.Status, m.Data1, m.Data2)
 		if dispatchMIDIBind != nil {
-			dispatchMIDIBind(m)
+			dispatchMIDIBind(port, m)
 		}
 	})
 	peerBridge.SetMIDISink(func(_ string, payload []byte) {
@@ -1053,32 +1053,35 @@ func run(parent context.Context, serviceMode bool) error {
 	vrSurf.proxy = vrProc
 	// MIDI learn: a one-shot capture of the next press, for the keybind editor's "Learn MIDI".
 	var midiLearnMu sync.Mutex
-	var midiLearnCB func(status, data1 byte)
-	// MIDI → binds: fire on a "press" edge (note-on / CC with nonzero value); ignore release.
-	dispatchMIDIBind = func(m midi.Message) {
+	var midiLearnCB func(port string, status, data1 byte)
+	// Desktop-UI bind groups honor the MIDI-tab master toggle (VR binds stay always-on).
+	keyBinds.SetGroupFilter(func(group string) bool {
+		return group == vrbind.GroupVR || !cfg.Features.MIDI.DisableUIBinds
+	})
+	// MIDI → binds. A pending learn capture wins on the press edge (the message must not also
+	// fire an already-bound action mid-learn); otherwise the dispatcher applies the full mode
+	// semantics (hold press/release, toggle, encoders) - releases DO flow through.
+	dispatchMIDIBind = func(port string, m midi.Message) {
 		k := m.Status & 0xF0
-		if k == 0x80 { // note-off
-			return
+		press := k != 0x80 && !((k == 0x90 || k == 0xB0) && m.Data2 == 0)
+		if press {
+			midiLearnMu.Lock()
+			cb := midiLearnCB
+			midiLearnMu.Unlock()
+			if cb != nil { // learning: capture this press, don't trigger a bind
+				cb(port, m.Status, m.Data1)
+				return
+			}
 		}
-		if (k == 0x90 || k == 0xB0) && m.Data2 == 0 { // zero velocity/value = release
-			return
-		}
-		midiLearnMu.Lock()
-		cb := midiLearnCB
-		midiLearnMu.Unlock()
-		if cb != nil { // learning: capture this press, don't trigger a bind
-			cb(m.Status, m.Data1)
-			return
-		}
-		keyBinds.FireMIDI(cfg.Features.VROverlay.Binds, m.Status, m.Data1)
+		keyBinds.FireMIDIMsg(cfg.Features.VROverlay.Binds, port, m.Status, m.Data1, m.Data2)
 	}
-	midiLearn := func(onCapture func(status, data1 byte)) func() {
+	midiLearn := func(onCapture func(port string, status, data1 byte)) func() {
 		midiLearnMu.Lock()
-		midiLearnCB = func(s, d byte) {
+		midiLearnCB = func(p string, s, d byte) {
 			midiLearnMu.Lock()
 			midiLearnCB = nil // one-shot
 			midiLearnMu.Unlock()
-			onCapture(s, d)
+			onCapture(p, s, d)
 		}
 		midiLearnMu.Unlock()
 		return func() { midiLearnMu.Lock(); midiLearnCB = nil; midiLearnMu.Unlock() }
@@ -1613,8 +1616,9 @@ func run(parent context.Context, serviceMode bool) error {
 			}
 		},
 		MIDIMon: midiMon, TraktorMon: traktorMon, SessionMon: sessionMon,
-		MIDILearn: midiLearn,
-		IDMarks:   idMarks,
+		MIDILearn:      midiLearn,
+		BindDispatcher: keyBinds,
+		IDMarks:        idMarks,
 	}
 	// Renderer seam: Fyne (default) or the Go-driven HTML/CSS webview (features.ui.renderer).
 	// Both satisfy `frontend`; only ONE is constructed (each builds a window). Coexist until parity.

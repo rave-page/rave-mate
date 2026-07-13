@@ -69,7 +69,10 @@ const (
 	// through the account relay; LocalStudio sub-toggle serves the Local Studio channel over
 	// it). Additive, off by default. The TOTP secret + trusted-session tokens do NOT live here -
 	// they are sealed in the bbolt authz bucket (config.json is plaintext 0600).
-	configVersion = 28
+	// v29 extended vrbind.MIDIKey (VROverlay.Binds[].midi: port/mode/step/rev - encoder +
+	// hold semantics for the desktop-UI actions) + MIDI.DisableUIBinds; all additive, zero
+	// values = the old press-edge behavior, no migration.
+	configVersion = 29
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -985,6 +988,11 @@ type MIDIFeature struct {
 	DenonPort   string `json:"denonPort"`   // input port carrying the Denon HC4500 stock map
 	CustomPort  string `json:"customPort"`  // input port carrying our custom TSI CC map
 	MeshForward bool   `json:"meshForward"` // always-on mesh: mirror local MIDI to every connected peer
+
+	// DisableUIBinds pauses the desktop-UI MIDI mappings (the cueedit/library/nav bind groups
+	// in VROverlay.Binds) without deleting them. Inverted so the zero value = mappings active
+	// (v29, additive, no migration). VR-group binds are unaffected.
+	DisableUIBinds bool `json:"disableUiBinds,omitempty"`
 
 	// Controllers = native MIDI-learn maps (v27): each is a physical controller read
 	// directly (or via a virtual port), with per-control learned bindings that all feed the
