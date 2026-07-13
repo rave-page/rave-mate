@@ -94,3 +94,19 @@ by build + unit dispatch test, need a file to exercise on-disk. AAC: ffmpeg fall
 
 Decode throughput is the DECODER only (no oto device); output latency + the hold-Space feel need
 on-hardware ears (the oto path can't be unit-tested headless).
+
+## Live rig verification (isolated ctl instance, 2026-07-13)
+
+Built the exe, ran an isolated instance (`RAVE_MATE_CTL_ADDR=127.0.0.1:47621` +
+`RAVE_MATE_CONFIG_DIR=<scratch>`, `features.player.nativeDecode=true`). Player child logged:
+
+    [player] audio engine = native (internal/audio)
+
+confirming the flag routes config -> proxy -> child. Webview rendered, no panic/crash, clean
+exit. NOT driven end-to-end through cue-edit here: the isolated library DB is empty (ce-open
+needs the track indexed) and the real 3.3GB library can't be cheaply isolated. Decode+seek is
+covered by the on-file harness above; what still needs the USER'S EARS on their real library
+with nativeDecode=true: (1) 0-latency feel of hold-Space in cue-edit, (2) the playhead
+advancing during hold + snapping back on release, (3) clean audio (no glitches/underruns) at
+the ~15ms buffer, (4) that AAC/M4A still play (ffmpeg fallback). Flag default stays OFF until
+that ear-verify passes.
