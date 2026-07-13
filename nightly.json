@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d997b06",
-  "build": 77,
-  "commit": "d997b06",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-77-20260713-d997b06.exe",
-  "sha256": "798aa0735e18e4056f327ade0cc4b8d8fb783725a2029d732f3bd70481eaab92",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-77-20260713-d997b06.exe",
-  "installer_sha256": "619aad14ca6b1cb3ee5060d1d206d25f440e0e43276d489dbd41a5c0270aaa2e",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-77-20260713-d997b06",
-  "linux_sha256": "b17931b75124629f243bfa844cc8e466d7c7d819288186c0f974b310710b27f8",
+  "version": "nightly-5eefe66",
+  "build": 78,
+  "commit": "5eefe66",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-78-20260713-5eefe66.exe",
+  "sha256": "007e64a1b460e04684f4b12f1146973d446c70932322934e47968964266c5dd7",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-78-20260713-5eefe66.exe",
+  "installer_sha256": "4c36690b5e456eab6a85bd0e5b5e269127d9a0a95b65b5d440dc0c08e98dd705",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-78-20260713-5eefe66",
+  "linux_sha256": "ab9ff074bb7208bef034237b84bcf1baa447a58afe0517e02ff2f0e5c7803027",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-13T13:40:47Z",
-  "notes": "feat(webui): local-first remote set cue prep - playlists, folders, nav, prefetch (#90)"
+  "released": "2026-07-13T15:20:46Z",
+  "notes": "fix(driver): ravemidi UAF in miniport teardown (BSOD 0x50) + tap CPU spin + Serato THRU name"
 }
