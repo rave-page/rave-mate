@@ -365,7 +365,7 @@
     },
     "midi-mapping": {
       "title": "rave-mate mit dem DJ-Controller steuern",
-      "body": "Belege Pads, Buttons, Regler oder Endlos-Encoder deines MIDI-Controllers mit rave-mate-Aktionen: durch die Sammlung blättern, einen Track im Cue-Editor öffnen, den Playhead bewegen, vom Cursor aus vorhören (halten), Drop-Marker setzen und das Beatgrid verschieben - Hände am Gerät, Augen auf der Waveform. Neben einer Aktion auf \"Anlernen\" klicken, das Bedienelement berühren, fertig. Aktionen sind an die Ansicht gebunden: Cue-Editor-Aktionen feuern nur bei geöffnetem Editor, Bibliotheks-Aktionen nur in der Sammlungsliste - dasselbe Pad kann je Ansicht gefahrlos etwas anderes bedeuten. Für Regler und Encoder nach dem Anlernen die Wert-Kodierung wählen: \"absoluter Regler\" für normale Potentiometer, einer der relativen Modi für Endlos-Encoder (Handbuch prüfen - Zweierkomplement ist am verbreitetsten), dazu Empfindlichkeit (Ticks pro Schritt) und Richtungsumkehr."
+      "body": "Belege Pads, Buttons, Regler oder Endlos-Encoder deines MIDI-Controllers mit rave-mate-Aktionen: durch die Sammlung blättern, einen Track im Cue-Editor öffnen, den Playhead bewegen, vom Cursor aus vorhören (halten), Drop-Marker setzen und das Beatgrid verschieben - Hände am Gerät, Augen auf der Waveform. Neben einer Aktion auf \"Anlernen\" klicken, das Bedienelement berühren, fertig. Aktionen sind an die Ansicht gebunden: Cue-Editor-Aktionen feuern nur bei geöffnetem Editor, Bibliotheks-Aktionen nur in der Sammlungsliste - dasselbe Pad kann je Ansicht gefahrlos etwas anderes bedeuten. Für Regler und Encoder nach dem Anlernen die Wert-Kodierung wählen: \"absoluter Regler\" für normale Potentiometer, einer der relativen Modi für Endlos-Encoder (Handbuch prüfen - Zweierkomplement ist am verbreitetsten), dazu Empfindlichkeit (Ticks pro Schritt) und Richtungsumkehr. Zuordnungen sind in Geräteprofilen organisiert: Das beim Lernen berührte Gerät besitzt die neue Zuordnung, sodass zwei Controller dieselbe Aktion mit verschiedenen Bedienelementen steuern können (oder verschiedene Aktionen mit derselben CC-Nummer). Jeder Gerätebereich lässt sich als Ganzes pausieren, auf einen anderen Controller kopieren (Modi und Empfindlichkeit bleiben erhalten, nur das Gerät ändert sich) oder leeren. Zuordnungen aus der Zeit vor den Profilen liegen unter \"Beliebiges Gerät\" und feuern weiterhin von jedem Controller."
     }
   },
   "library": {
@@ -3619,6 +3619,26 @@
         "lib_open": "Ausgewählten Track im Cue-Editor öffnen",
         "nav_back": "Zurück",
         "nav_fwd": "Vorwärts"
+      },
+      "add": "Zuordnung hinzufügen",
+      "addSub": "Aktion wählen, dann das Bedienelement am Controller berühren - die Zuordnung landet im Profil des berührten Geräts",
+      "cancel": "Abbrechen",
+      "armedHint": "Jetzt ein Bedienelement berühren - die Zuordnung wird unter dem berührten Gerät gespeichert",
+      "profileAny": "Beliebiges Gerät",
+      "profilePaused": "pausiert",
+      "profileOn": "Aktiv",
+      "profileOff": "Pausiert",
+      "profileCopy": "Kopieren nach…",
+      "profileCopySub": "die Zuordnungen dieses Geräts dorthin duplizieren",
+      "profileClear": "Leeren",
+      "profileEmpty": "Noch keine Zuordnungen für dieses Gerät - oben eine hinzufügen und diesen Controller berühren.",
+      "profileBinds": {
+        "one": "{count} Zuordnung",
+        "other": "{count} Zuordnungen"
+      },
+      "profileCopied": {
+        "one": "{count} Zuordnung kopiert",
+        "other": "{count} Zuordnungen kopiert"
       }
     }
   }

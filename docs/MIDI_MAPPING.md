@@ -199,7 +199,23 @@ and route through the same handlers, grouped by view:
 - **Library** (collection list showing): move selection, open selected in the cue editor.
 - **Navigation** (global): history back / forward.
 
-**Workflow:** click **Learn** next to an action, touch the control. Notes bind as press
+### Per-device profiles (v30)
+
+Mappings are organized into **per-device profiles**, one section per configured controller
+plus **Any device**. A profile is *derived*, not stored: every mapping belongs to the
+controller whose input port matches the port captured at learn time; portless (pre-profile)
+mappings live under Any device and keep firing from every controller. A device learned from
+but no longer configured keeps its own section under its raw port name.
+
+- **Learn targets the device you touch** — pick an action in the add-mapping picker, touch a
+  control; the touched device's profile receives the mapping. Two controllers can drive the
+  same action with different controls, or different actions with the same CC number.
+- **Pause/resume** a whole profile (`MIDI.disabledBindProfiles`; VR keybinds unaffected),
+  **copy** a profile onto another controller (modes/sensitivity/reverse survive, only the
+  device changes; already-present mappings are skipped), or **clear** it.
+- Dispatch: a message fires its own device's profile + Any device, view-scoped as before.
+
+**Workflow:** pick the action in **Add a mapping**, touch the control. Notes bind as press
 (momentary press/release for the audition action, or flip to *toggle*); CCs get a per-bind
 **mode**: `absolute knob` (0-127 value deltas become steps — the default for step actions),
 or a relative-encoder encoding for endless encoders — `two's complement` (1..63 up,
@@ -210,12 +226,13 @@ name, so identical CC numbers on two devices stay distinct.
 
 While a Learn capture is armed the touched control is captured *only* — it never also fires
 an existing mapping. The master toggle (`MIDI.disableUiBinds`, inverted) pauses the UI groups
-without deleting them. Storage is the same `VROverlay.Binds` list the VR keybinds use
-(`vrbind.Bind`, one store, two editors); dispatch: MIDI child forward tap → daemon
-`FireMIDIMsg` (mode semantics, per-bind state) → webview act worker → the same
-`ceKey`/`libKeyNav` paths the keyboard uses. Implementation: `internal/vrbind` (modes +
-dispatcher), `internal/webui/midibind.go` (handlers + scope gate),
-`internal/webui/render_midictl_uimap.go` (card).
+without deleting them; per-device pauses stack on top (`MIDI.disabledBindProfiles`). Storage
+is the same `VROverlay.Binds` list the VR keybinds use (`vrbind.Bind`, one store, two
+editors); dispatch: MIDI child forward tap → daemon `FireMIDIMsg` (mode semantics, per-bind
+state, group + profile gates) → webview act worker → the same `ceKey`/`libKeyNav` paths the
+keyboard uses. Implementation: `internal/vrbind` (modes + dispatcher),
+`internal/webui/midibind.go` (handlers + scope gate),
+`internal/webui/render_midictl_uimap.go` (card) + `midiprofile.go` (profile copy/clear).
 
 ## Two-port loopMIDI DJ bridge — shipped
 

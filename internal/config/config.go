@@ -72,7 +72,11 @@ const (
 	// v29 extended vrbind.MIDIKey (VROverlay.Binds[].midi: port/mode/step/rev - encoder +
 	// hold semantics for the desktop-UI actions) + MIDI.DisableUIBinds; all additive, zero
 	// values = the old press-edge behavior, no migration.
-	configVersion = 29
+	// v30 added per-device UI-mapping profiles (MIDI.DisabledBindProfiles: profile keys whose
+	// desktop-UI binds are paused). Additive - profiles are DERIVED from each bind's captured
+	// port ("" = the any-device profile), so v29 binds keep firing identically; the disable
+	// list starts empty (all profiles active).
+	configVersion = 30
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -993,6 +997,12 @@ type MIDIFeature struct {
 	// in VROverlay.Binds) without deleting them. Inverted so the zero value = mappings active
 	// (v29, additive, no migration). VR-group binds are unaffected.
 	DisableUIBinds bool `json:"disableUiBinds,omitempty"`
+	// DisabledBindProfiles pauses individual per-device UI-mapping profiles (v30). A profile is
+	// derived, not stored: every ui.* bind belongs to the profile of the controller whose Port
+	// matches the bind's captured port (BindProfileKey), or the any-device profile
+	// (BindProfileAny) when the bind has no port. Keys here = controller Port values /
+	// BindProfileAny / raw ports with no configured controller.
+	DisabledBindProfiles []string `json:"disabledBindProfiles,omitempty"`
 
 	// Controllers = native MIDI-learn maps (v27): each is a physical controller read
 	// directly (or via a virtual port), with per-control learned bindings that all feed the
@@ -1002,6 +1012,51 @@ type MIDIFeature struct {
 	// THRU flow out ToDJPort (the DJ reads it); the DJ's own output (indicators/VU) is read
 	// back on FromDJPort. Off unless Enabled + a port is set.
 	Bridge MIDIBridge `json:"bridge,omitempty"`
+}
+
+// BindProfileAny keys the any-device UI-mapping profile (binds captured without a port).
+const BindProfileAny = "*"
+
+// BindProfileKey resolves a bind's captured port to its profile key: "" = the any-device
+// profile; a port matching a configured controller (controller Port as case-insensitive
+// substring, config order wins) = that controller's Port; anything else = the raw port
+// (an un-configured device keeps its own profile rather than silently going global).
+func (m MIDIFeature) BindProfileKey(bindPort string) string {
+	if bindPort == "" {
+		return BindProfileAny
+	}
+	for _, c := range m.Controllers {
+		if c.Port != "" && strings.Contains(strings.ToLower(bindPort), strings.ToLower(c.Port)) {
+			return c.Port
+		}
+	}
+	return bindPort
+}
+
+// BindProfileDisabled reports whether the profile owning a bind's captured port is paused.
+func (m MIDIFeature) BindProfileDisabled(bindPort string) bool {
+	key := m.BindProfileKey(bindPort)
+	for _, k := range m.DisabledBindProfiles {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetBindProfileDisabled pauses/resumes one profile key in DisabledBindProfiles.
+func (m *MIDIFeature) SetBindProfileDisabled(key string, off bool) {
+	for i, k := range m.DisabledBindProfiles {
+		if strings.EqualFold(k, key) {
+			if !off {
+				m.DisabledBindProfiles = append(m.DisabledBindProfiles[:i], m.DisabledBindProfiles[i+1:]...)
+			}
+			return
+		}
+	}
+	if off {
+		m.DisabledBindProfiles = append(m.DisabledBindProfiles, key)
+	}
 }
 
 // MIDIBinding maps one learned MIDI message to a control on a deck/channel. Status carries the

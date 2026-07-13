@@ -273,6 +273,28 @@ func TestGroupFilterDisablesUIBinds(t *testing.T) {
 	}
 }
 
+func TestProfileFilter(t *testing.T) {
+	d := NewDispatcher()
+	ui, vr := 0, 0
+	d.Register(ActCEUndo, func(string) { ui++ })
+	d.Register(ActOBSRecord, func(string) { vr++ })
+	// pause the "ddj" device profile for UI binds; VR binds unaffected (app.go carve-out)
+	d.SetProfileFilter(func(group, bindPort string) bool {
+		return group == GroupVR || bindPort != "ddj"
+	})
+	binds := []Bind{
+		{Action: ActCEUndo, MIDI: &MIDIKey{Status: 0x90, Data1: 10, Port: "ddj"}},
+		{Action: ActCEUndo, MIDI: &MIDIKey{Status: 0x90, Data1: 11}}, // any-device profile
+		{Action: ActOBSRecord, MIDI: &MIDIKey{Status: 0x90, Data1: 12, Port: "ddj"}},
+	}
+	d.FireMIDIMsg(binds, "Pioneer DDJ-400", 0x90, 10, 100) // paused profile → inert
+	d.FireMIDIMsg(binds, "Pioneer DDJ-400", 0x90, 11, 100) // global profile → fires
+	d.FireMIDIMsg(binds, "Pioneer DDJ-400", 0x90, 12, 100) // VR group → fires despite pause
+	if ui != 1 || vr != 1 {
+		t.Fatalf("profile filter: ui=%d vr=%d", ui, vr)
+	}
+}
+
 func TestFireFallbackForHoldAndStep(t *testing.T) {
 	// VR slots / quick buttons call Fire (press-only): hold degrades to toggle, step to +1.
 	d := NewDispatcher()

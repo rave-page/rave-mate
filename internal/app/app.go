@@ -1059,6 +1059,11 @@ func run(parent context.Context, serviceMode bool) error {
 	keyBinds.SetGroupFilter(func(group string) bool {
 		return group == vrbind.GroupVR || !cfg.Features.MIDI.DisableUIBinds
 	})
+	// Per-device mapping profiles: a desktop-UI bind is inert while its device's profile is
+	// paused (VR-group binds are unaffected, same carve-out as the master toggle).
+	keyBinds.SetProfileFilter(func(group, bindPort string) bool {
+		return group == vrbind.GroupVR || !cfg.Features.MIDI.BindProfileDisabled(bindPort)
+	})
 	// MIDI → binds. A pending learn capture wins on the press edge (the message must not also
 	// fire an already-bound action mid-learn); otherwise the dispatcher applies the full mode
 	// semantics (hold press/release, toggle, encoders) - releases DO flow through.
