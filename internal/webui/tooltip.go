@@ -362,6 +362,7 @@ var cueEditKeys = []kbRow{
 	{"", []string{"Shift", "+", "T", "/", "Enter"}, "help.cue-edit.k.removeDrop"},
 	{"", []string{"Shift", "+", "@help.kb.rclick"}, "help.cue-edit.k.srclick"},
 	{"help.cue-edit.g.cues", []string{"@help.kb.rclick"}, "help.cue-edit.k.rclick"},
+	{"", []string{"Shift", "+", "Space"}, "help.cue-edit.k.addCue"},
 	{"", []string{"Ctrl", "+", "@help.kb.rclick"}, "help.cue-edit.k.crclick"},
 	{"help.cue-edit.g.select", []string{"Shift", "+", "@help.kb.drag"}, "help.cue-edit.k.drag"},
 	{"", []string{"Ctrl", "+", "@help.kb.click"}, "help.cue-edit.k.ctrlClick"},

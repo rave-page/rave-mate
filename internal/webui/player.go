@@ -172,6 +172,15 @@ func (u *UI) mpWaveInner(t mpSt) string {
 // Zoomed in past this many visible bins we fall to one column per bin (razor-sharp).
 const mpWaveCols = 800
 
+// mpWavePeakGamma expands waveform amplitude contrast. Peaks are LINEAR max-abs bytes, so a
+// loud, brick-walled master sits at ~0.85-1.0 everywhere and renders as a flat block where
+// transients can't be told apart. A gamma>1 curve pushes the loud body DOWN while leaving the
+// true peaks tall, so kicks/drops stand proud - the loud parts stop drowning the detail.
+const mpWavePeakGamma = 1.9
+
+// mpShapeAmp maps a 0-255 linear peak byte to a 0..1 display height via the contrast curve.
+func mpShapeAmp(mx byte) float64 { return math.Pow(float64(mx)/255.0, mpWavePeakGamma) }
+
 // mpWaveSVG draws every media band on the shared axis in the visible zoom window, with
 // trim dim/handles (edit), track/fader/cue markers, playhead (mint) and click cursor.
 // ce (nil = off) adds the cue-editor layer: beatgrid lines, drop markers, beat cursor,
@@ -267,7 +276,7 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 						}
 					}
 					x := float64(c) * bw
-					amp := (float64(mx) / 255.0) * half
+					amp := mpShapeAmp(mx) * half // contrast curve: loud tracks stop flat-lining the band
 					if hasBands {
 						// contiguous coloured column (full width, no inter-bar gap → one filled envelope
 						// not "bars"; +0.6 closes sub-pixel seams). Colour = dominant band, brighter played.

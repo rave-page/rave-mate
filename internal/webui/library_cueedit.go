@@ -57,6 +57,7 @@ type ceSt struct {
 	prewarmTimer *time.Timer // debounced paused-decoder reposition on cursor moves (press = unpause-only)
 	undo         *ceUndoSt   // one-deep undo snapshot (Ctrl+Z swaps = press again to redo)
 	undoShiftAt  time.Time   // last grid-nudge (coalesces a nudge run into one undo unit)
+	audDown      bool        // Space held = keyboard audition; the spaceup release only stops audition if it started one (Shift+Space is a one-shot cue, not audition)
 	// rce: non-nil while editing a CACHED copy of a peer's track (library_remotecue.go) -
 	// every persistence site below branches on it: mutations stay in ceSt, Save ships them
 	// to the peer over remotectl. path = the cached copy; rce.remotePath = the peer's file.
@@ -851,7 +852,10 @@ func (u *UI) ceSurf(host, val string) {
 			u.mpPatchWave(nt)
 			return
 		}
-		// click: marker select / cursor move (Ctrl+click toggles the marker under the pointer)
+		// click: ALWAYS move the beat cursor to the nearest beat - even onto a beat that
+		// already carries a drop/cue; a marker under the pointer is ALSO selected so the
+		// pattern/delete rail targets it. Ctrl+click stays a pure selection toggle (no cursor
+		// move) so a multi-select gesture can pick markers without walking the playhead.
 		c.mu.Lock()
 		ctrl := strings.Contains(c.dragMods, "c")
 		beatMs := 500.0
@@ -860,6 +864,7 @@ func (u *UI) ceSurf(host, val string) {
 		}
 		ci, di, dist := ceNearestMarker(c, axisMs)
 		hit := dist <= math.Max(beatMs/2, ceHitPxMs(&t)) // beat-based alone goes sub-pixel zoomed out
+		curMoved := false
 		switch {
 		case ctrl && hit && ci >= 0:
 			ceToggleKey(c.selMs, ceKeyMs(c.track.Cues[ci].StartMs))
@@ -867,16 +872,22 @@ func (u *UI) ceSurf(host, val string) {
 		case ctrl && hit && di >= 0:
 			ceToggleKey(c.dselMs, ceKeyMs(c.drops[di]))
 			c.syncSel()
-		case hit && ci >= 0:
-			c.selectOnly(c.track.Cues[ci].StartMs, -1)
-		case hit:
-			c.selectOnly(-1, c.drops[di])
 		default:
 			if c.grid != nil {
 				c.cursorMs = c.grid.SnapMs(axisMs)
+				curMoved = true
+			}
+			switch {
+			case hit && ci >= 0:
+				c.selectOnly(c.track.Cues[ci].StartMs, -1)
+			case hit && di >= 0:
+				c.selectOnly(-1, c.drops[di])
 			}
 		}
 		c.mu.Unlock()
+		if curMoved {
+			u.cePrewarmSeek() // reposition the paused decoder so audition-after-click is instant
+		}
 		u.cePatchWave()
 		u.cePatchRail()
 	}
@@ -1367,10 +1378,24 @@ func (u *UI) ceKey(val string) {
 		u.ceToggleDrop(true)
 	case "del":
 		u.ceDeleteSelected()
-	case "space", "sspace":
+	case "space": // hold = audition from the beat cursor
+		c.mu.Lock()
+		c.audDown = true
+		c.mu.Unlock()
 		u.ceAudition(true)
-	case "spaceup":
-		u.ceAudition(false)
+	case "sspace": // Shift+Space: memory cue at the beat cursor (keyboard twin of right-click)
+		c.mu.Lock()
+		cur := c.cursorMs
+		c.mu.Unlock()
+		u.ceAddCueAt(cur)
+	case "spaceup": // only stop the audition the matching Space started (Shift+Space never auditions)
+		c.mu.Lock()
+		was := c.audDown
+		c.audDown = false
+		c.mu.Unlock()
+		if was {
+			u.ceAudition(false)
+		}
 	case "cleft": // Ctrl: shift the whole beatgrid for manual alignment (10ms steps,
 		u.ceGridShift(-10) // key-repeat gives continuous travel)
 	case "cright":
@@ -1384,11 +1409,31 @@ func (u *UI) ceKey(val string) {
 	}
 }
 
+// ceGridLocked reports whether the open track's grid is marked verified - a verified grid
+// is a trusted training anchor, so nudging is disabled (it would silently poison the
+// dataset the model fine-tunes on). Always false for remote (rce) sessions: rce edits a
+// CACHED copy and the verified store is keyed on local collection paths.
+func (u *UI) ceGridLocked() bool {
+	c := u.ce()
+	c.mu.Lock()
+	path, active, remote := c.path, c.active, c.remote()
+	c.mu.Unlock()
+	if !active || remote {
+		return false
+	}
+	vs := u.gfVerified()
+	return vs != nil && vs.Has(path)
+}
+
 // ceGridShift nudges the whole grid AND every cue/drop marker by deltaMs - manual
 // alignment must keep markers glued to their beats. Rebuilds the beat math; DB persist
 // AND the file-tag drop write are debounced latest-state-wins (key-repeat would otherwise
 // race unordered writes / rewrite the tag dozens of times a second).
 func (u *UI) ceGridShift(deltaMs float64) {
+	if u.ceGridLocked() { // verified grid: nudging disabled (unmark to realign)
+		u.toast(i18n.T("library.ce.gridLocked"))
+		return
+	}
 	c := u.ce()
 	c.mu.Lock()
 	if !c.active || len(c.track.Beatgrid) == 0 {
@@ -1771,6 +1816,15 @@ func (u *UI) ceTopbarHTML() string {
 	if !c.active {
 		return ""
 	}
+	// verified-grid status: gfVerified()/vs.Has() take their OWN package locks (never c.mu),
+	// so this is safe under c.mu. rce edits a cached copy - the store is keyed on local paths.
+	verified, verifiable := false, false
+	if c.rce == nil {
+		if vs := u.gfVerified(); vs != nil {
+			verified = vs.Has(c.path)
+		}
+		verifiable = len(c.track.Beatgrid) == 1 && c.track.BPM > 0 // gfToggleVerify needs one marker + a BPM
+	}
 	var b strings.Builder
 	b.WriteString(`<div class=ce-topbar>`)
 	b.WriteString(`<span class=ce-tb-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</span>`)
@@ -1804,6 +1858,16 @@ func (u *UI) ceTopbarHTML() string {
 	b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.Tn("library.ce.patternCues", ceCueCount(c.track.Cues))) + `</span>`)
 	if !c.fileTag {
 		b.WriteString(`<span class=ce-tb-warn title=` + attrQ(i18n.T("library.ce.noFileTag")) + `>⚠</span>`)
+	}
+	// verified-grid chip: mint ✓ when verified (click = unmark), outline "Mark verified" when
+	// eligible. Verified locks nudging (ceGridShift), so the chip doubles as the toggle for it.
+	switch {
+	case verified:
+		b.WriteString(`<span class=ce-tb-verified title=` + attrQ(i18n.T("library.ce.verifiedTip")) +
+			` data-act=` + attrQ("gf-verify:"+c.path) + `>✓ ` + esc(i18n.T("library.gf.verifiedBadge")) + `</span>`)
+	case verifiable:
+		b.WriteString(`<span class=ce-tb-verify title=` + attrQ(i18n.T("library.ce.verifyTip")) +
+			` data-act=` + attrQ("gf-verify:"+c.path) + `>` + esc(i18n.T("library.gf.markVerified")) + `</span>`)
 	}
 	b.WriteString(`<span class=ce-tb-spacer></span>` + tipTopic("cue-edit") +
 		btn("✕ "+i18n.T("common.close"), "ghost", "ce-close", ""))

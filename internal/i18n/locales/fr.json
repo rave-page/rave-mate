@@ -338,6 +338,7 @@
         "drag": "Sélection au lasso des cues et des drops",
         "ctrlClick": "Ajouter/retirer un cue ou un drop de la sélection",
         "rclick": "Ajouter un cue mémoire sur ce temps",
+        "addCue": "Ajouter un cue mémoire au curseur de battement",
         "srclick": "Ajouter un marqueur de drop",
         "crclick": "Supprimer les marqueurs cue + drop sur ce temps"
       }
@@ -1117,6 +1118,9 @@
       "addDrop": "Ajouter un drop au curseur",
       "removeDrop": "Supprimer le drop au curseur",
       "noFileTag": "Ce format de fichier ne peut pas porter le tag de drop — les drops ne sont stockés que dans la bibliothèque (MP3/FLAC les stockent aussi dans le fichier).",
+      "gridLocked": "Grille vérifiée — retirez la marque pour ajuster la grille.",
+      "verifiedTip": "Grille vérifiée — un point d'ancrage d'entraînement fiable. L'ajustement est verrouillé. Cliquez pour retirer la marque et réaligner.",
+      "verifyTip": "Marquer cette grille comme vérifiée — un point d'ancrage d'entraînement fiable. Verrouille l'ajustement.",
       "selection": "{n} cues sélectionnés",
       "selDrops": "{n} marqueurs de drop sélectionnés",
       "delHint": "Suppr / Retour arrière supprime tous les cues et drops sélectionnés en une seule étape.",

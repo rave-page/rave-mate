@@ -245,6 +245,12 @@ svg.kwheel text { pointer-events:none; font:600 9px var(--font-mono,monospace); 
 .ce-tb-drop{color:var(--color-brand-amber,#FFB547);cursor:pointer;white-space:nowrap}
 .ce-tb-drop:hover{text-decoration:underline}
 .ce-tb-warn{color:var(--color-brand-amber,#FFB547);cursor:help}
+.ce-tb-verified{color:var(--color-brand-mint,#08F79B);cursor:pointer;white-space:nowrap;font-weight:600;
+  border:1px solid rgba(8,247,155,.4);border-radius:var(--radius-pill,999px);padding:2px 8px}
+.ce-tb-verified:hover{background:rgba(8,247,155,.12)}
+.ce-tb-verify{color:var(--rp-muted);cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(255,255,255,.18);border-radius:var(--radius-pill,999px);padding:2px 8px}
+.ce-tb-verify:hover{color:var(--color-brand-mint,#08F79B);border-color:rgba(8,247,155,.4)}
 .ce-tb-spacer{flex:1}
 
 /* collection drops/cues census cell (+ mass-apply marking in ce mode) */

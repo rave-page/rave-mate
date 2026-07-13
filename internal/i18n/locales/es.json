@@ -338,6 +338,7 @@
         "drag": "Selección con recuadro de cues y drops",
         "ctrlClick": "Añadir/quitar un cue o drop de la selección",
         "rclick": "Añadir un memory cue en ese beat",
+        "addCue": "Añadir un cue de memoria en el cursor de beat",
         "srclick": "Añadir un marcador de drop",
         "crclick": "Eliminar los marcadores cue + drop en ese beat"
       }
@@ -1117,6 +1118,9 @@
       "addDrop": "Añadir drop en el cursor",
       "removeDrop": "Quitar drop en el cursor",
       "noFileTag": "Este formato de archivo no puede llevar la etiqueta de drops: los drops solo se guardan en la biblioteca (MP3/FLAC también los guardan en el archivo).",
+      "gridLocked": "Rejilla verificada — quita la marca para ajustar la rejilla.",
+      "verifiedTip": "Rejilla verificada — un ancla de entrenamiento fiable. El ajuste está bloqueado. Haz clic para quitar la marca y realinear.",
+      "verifyTip": "Marcar esta rejilla como verificada — un ancla de entrenamiento fiable. Bloquea el ajuste.",
       "selection": "{n} cues seleccionados",
       "selDrops": "{n} marcadores de drop seleccionados",
       "delHint": "Supr / Retroceso elimina todos los cues y drops seleccionados en un solo paso.",

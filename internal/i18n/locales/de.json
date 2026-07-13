@@ -338,6 +338,7 @@
         "drag": "Cues und Drops per Auswahlrahmen markieren",
         "ctrlClick": "Cue/Drop zur Auswahl hinzufügen oder entfernen",
         "rclick": "Memory-Cue an diesem Beat setzen",
+        "addCue": "Memory-Cue am Beat-Cursor setzen",
         "srclick": "Drop-Marker setzen",
         "crclick": "Cue- und Drop-Marker an diesem Beat entfernen"
       }
@@ -1117,6 +1118,9 @@
       "addDrop": "Drop am Cursor setzen",
       "removeDrop": "Drop am Cursor entfernen",
       "noFileTag": "Dieses Dateiformat kann den Drop-Tag nicht tragen – Drops liegen nur in der Bibliothek (MP3/FLAC speichern sie auch in der Datei).",
+      "gridLocked": "Grid verifiziert — zum Nudgen die Markierung aufheben.",
+      "verifiedTip": "Verifiziertes Grid — ein vertrauenswürdiger Trainingsanker. Nudgen ist gesperrt. Zum Aufheben und Neuausrichten klicken.",
+      "verifyTip": "Dieses Beatgrid als verifiziert markieren — ein vertrauenswürdiger Trainingsanker. Sperrt das Nudgen.",
       "selection": "{n} Cues ausgewählt",
       "selDrops": "{n} Drop-Marker ausgewählt",
       "delHint": "Entf / Rücktaste entfernt alle ausgewählten Cues und Drops in einem Schritt.",
