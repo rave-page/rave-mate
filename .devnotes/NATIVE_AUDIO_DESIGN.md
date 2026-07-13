@@ -76,3 +76,21 @@ accept its license, or accept ffmpeg-for-AAC.
 New path behind `features.player.nativeDecode` (default off first), wired into
 `audioengine`/`feat_player`. beep+ffmpeg stays as the fallback until parity is proven, then
 becomes AAC-only.
+
+## On-file verification (real library, read-only)
+
+`GOWORK=off go test -tags manual -run TestOnFile -v ./internal/audio/` decodes + seeks the
+user's actual files under %USERPROFILE%/Music. Measured 2026-07-13:
+
+| Format | File | Decode xRT | In-window seek | Deep seek (mid-file) | Sample-accuracy |
+|---|---|---|---|---|---|
+| FLAC | 545 MiB, 1h09m, **no SEEKTABLE** (recorder capture) | 486x | 0–15 ms | **20.3 ms @ 34m40s** | exact |
+| WAV  | 30s 44.1k | 1940x | 0 ms | n/a (<5min) | exact |
+| MP3  | 94 MiB, 1h13m | 97x | 0.5–1 ms | **0.51 ms @ 36m47s** | n/a (lossy; position lands) |
+
+The seektable-less FLAC is the file that froze beep ~15 s/seek — now **20 ms** (mewkiz NewSeek
+builds a frame index on demand). OGG/AIFF/M4A: none in the library; decoders wrapper-verified
+by build + unit dispatch test, need a file to exercise on-disk. AAC: ffmpeg fallback (by design).
+
+Decode throughput is the DECODER only (no oto device); output latency + the hold-Space feel need
+on-hardware ears (the oto path can't be unit-tested headless).
