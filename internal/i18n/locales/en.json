@@ -384,6 +384,10 @@
     "bridge-local-studio": {
       "title": "Local Studio over the bridge",
       "body": "Local Studio is the channel that lets the rave.page web app drive this machine - browse your drives, transcode, run automations, control OBS. Normally the browser must be running ON this PC, because the channel is a loopback connection that never leaves the machine.\n\nTurn this on and the exact same channel is offered over the account bridge instead, so the web app can drive this PC from any browser you are signed in on. The protocol is not changed or weakened for this: it is the same key exchange, the same per-message signature, and the same check that both ends belong to the same rave.page account.\n\nWhat is added is a layer underneath. Before Local Studio says a word, the bridge builds an encrypted tunnel and makes the caller pass the access gate above. That ordering matters: Local Studio's handshake carries an access token, and on a loopback socket that is harmless, but across a relay it would be handing your token to the server. Inside the tunnel it is ciphertext.\n\nLeave this off if you only ever use the web app on this PC - the loopback channel already covers that, and there is no reason to be reachable from outside."
+    },
+    "midi-mapping": {
+      "title": "Control rave-mate with your DJ controller",
+      "body": "Map any pad, button, knob or endless encoder on your MIDI controller to rave-mate actions: browse the collection, open a track in the cue editor, move the playhead, hold-audition from the cursor, drop markers and nudge the beatgrid - hands on hardware, eyes on the waveform. Click Learn next to an action, touch the control on your device, done. Actions are view-scoped: cue-editor actions only fire while the editor is open, library actions only on the collection list, so one pad can safely mean different things per view. For knobs and encoders pick the value encoding in the row that appears after learning: \"absolute knob\" for regular potentiometers, one of the relative modes for endless encoders (check your controller manual - two's complement is the most common), plus a sensitivity (ticks per step) and a reverse switch."
     }
   },
   "library": {
@@ -3782,6 +3786,70 @@
       "feedback": "→ device",
       "loopdrop": "loop drop",
       "unknown": "?"
+    },
+    "uimap": {
+      "title": "Control rave-mate",
+      "sub": "Map controller pads, knobs and encoders to cue-editor, library and navigation actions. Learn, touch a control, play.",
+      "enable": "MIDI mappings active",
+      "note": "Mappings listen on every controller input rave-mate reads (add your device under \"Controllers\" above). While a Learn capture is armed, the touched control is captured only - it never also fires an existing mapping. VR keybinds (Settings -> VR overlays) share this binding store and are not affected by the toggle above.",
+      "learn": "Learn",
+      "learnArmed": "Touch a control…",
+      "captured": "Mapped: {key}",
+      "noSelection": "No track selected in the collection",
+      "step": "Sens",
+      "rev": "Reverse",
+      "stepSub": {
+        "one": "{count} tick per step",
+        "other": "{count} ticks per step",
+        "few": "{count} ticks per step",
+        "many": "{count} ticks per step"
+      },
+      "group": {
+        "cueedit": "Cue editor",
+        "library": "Library",
+        "nav": "Navigation"
+      },
+      "kind": {
+        "trigger": "button",
+        "hold": "hold (press / release)",
+        "step": "encoder or +/- buttons"
+      },
+      "mode": {
+        "press": "button press",
+        "momentary": "momentary (hold)",
+        "toggle": "toggle",
+        "abs": "absolute knob",
+        "rel2c": "encoder (two's complement)",
+        "relsm": "encoder (sign-magnitude)",
+        "rel64": "encoder (offset-64)"
+      },
+      "modeSub": {
+        "press": "fires once per press; value is ignored",
+        "momentary": "down while held, up on release - exact hold-Space behavior",
+        "toggle": "each press flips between down and up",
+        "abs": "regular potentiometer 0-127: turning becomes steps",
+        "rel2c": "endless encoder sending 1..63 up, 127..65 down (most common)",
+        "relsm": "endless encoder with direction bit 6: 65 = -1, 1 = +1",
+        "rel64": "endless encoder centered on 64: 65 = +1, 63 = -1"
+      },
+      "act": {
+        "ce_audition": "Audition (hold = play, release = snap back)",
+        "ce_cursor": "Move cursor (1 beat)",
+        "ce_cursorJump": "Move cursor (jump size)",
+        "ce_jumpSize": "Adjust jump size",
+        "ce_track": "Previous / next track",
+        "ce_gridNudge": "Nudge beatgrid (10 ms)",
+        "ce_gridNudgeFine": "Nudge beatgrid (1 ms)",
+        "ce_dropAdd": "Add drop at cursor",
+        "ce_dropDel": "Remove drop at cursor",
+        "ce_cue": "Memory cue at cursor",
+        "ce_delSel": "Delete selected markers",
+        "ce_undo": "Undo / redo",
+        "lib_nav": "Move track selection",
+        "lib_open": "Open selected track in cue editor",
+        "nav_back": "Navigate back",
+        "nav_fwd": "Navigate forward"
+      }
     }
   }
 }

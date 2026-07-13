@@ -279,7 +279,7 @@ func (u *UI) vrmLearnToggle() {
 		u.toast(i18n.T("settings.vr.midiUnavailable"))
 		return
 	}
-	cancel := u.svc.MIDILearn(func(status, data1 byte) {
+	cancel := u.svc.MIDILearn(func(_ string, status, data1 byte) {
 		s.mu.Lock()
 		armed := s.kbCancel != nil
 		if armed {

@@ -186,6 +186,37 @@ exclusive, so two apps can't open the same hardware port. Options, in order:
    to the loopMIDI cable, so the DJ app still gets it — rave-mate *is* the splitter.
 3. **External splitter.** loopMIDI + MIDI-OX fanning the hardware to both apps.
 
+## Control rave-mate from the controller (UI mappings) — shipped
+
+The MIDI tab's **Control rave-mate** card maps controller input to *app actions* — the inverse
+of everything above (which reads DJ *state*). Actions are the keyboard shortcuts' MIDI twins
+and route through the same handlers, grouped by view:
+
+- **Cue editor** (fires only while the editor is open): audition (hold = play from cursor,
+  release = snap back — exact hold-Space semantics incl. Note-Off), cursor ±1 beat / ±jump,
+  jump size, prev/next track, beatgrid nudge 10 ms / 1 ms, add/remove drop, memory cue,
+  delete selected, undo.
+- **Library** (collection list showing): move selection, open selected in the cue editor.
+- **Navigation** (global): history back / forward.
+
+**Workflow:** click **Learn** next to an action, touch the control. Notes bind as press
+(momentary press/release for the audition action, or flip to *toggle*); CCs get a per-bind
+**mode**: `absolute knob` (0-127 value deltas become steps — the default for step actions),
+or a relative-encoder encoding for endless encoders — `two's complement` (1..63 up,
+127..65 down, most common), `sign-magnitude` (bit 6 = direction), `offset-64` (65 = +1,
+63 = -1) — plus **sensitivity** (raw ticks per emitted step, steps capped at 8/message) and
+**reverse**. Bindings match `(type nibble, MIDI channel, data1)` + the captured source port
+name, so identical CC numbers on two devices stay distinct.
+
+While a Learn capture is armed the touched control is captured *only* — it never also fires
+an existing mapping. The master toggle (`MIDI.disableUiBinds`, inverted) pauses the UI groups
+without deleting them. Storage is the same `VROverlay.Binds` list the VR keybinds use
+(`vrbind.Bind`, one store, two editors); dispatch: MIDI child forward tap → daemon
+`FireMIDIMsg` (mode semantics, per-bind state) → webview act worker → the same
+`ceKey`/`libKeyNav` paths the keyboard uses. Implementation: `internal/vrbind` (modes +
+dispatcher), `internal/webui/midibind.go` (handlers + scope gate),
+`internal/webui/render_midictl_uimap.go` (card).
+
 ## Two-port loopMIDI DJ bridge — shipped
 
 `MIDI.Bridge` (**DJ bridge** card) routes a paired instance's control out to your DJ software.

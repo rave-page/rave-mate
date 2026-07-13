@@ -362,6 +362,10 @@
     "bridge-local-studio": {
       "title": "Local Studio via la passerelle",
       "body": "Local Studio est le canal qui permet à l'application web rave.page de piloter cette machine - parcourir vos disques, transcoder, lancer des automatisations, contrôler OBS. Normalement le navigateur doit tourner SUR ce PC, car le canal est une connexion en boucle locale qui ne quitte jamais la machine.\n\nActivez ceci et exactement le même canal est proposé via la passerelle de compte, si bien que l'application web peut piloter ce PC depuis n'importe quel navigateur où vous êtes connecté. Le protocole n'est ni modifié ni affaibli : même échange de clés, même signature par message, même vérification que les deux extrémités appartiennent au même compte rave.page.\n\nCe qui s'ajoute, c'est une couche en dessous. Avant que Local Studio ne dise un mot, la passerelle construit un tunnel chiffré et impose à l'appelant de franchir le contrôle d'accès. Cet ordre compte : la poignée de main de Local Studio transporte un jeton d'accès ; sur une boucle locale c'est sans danger, mais à travers un relais cela reviendrait à confier votre jeton au serveur. Dans le tunnel, c'est du chiffré.\n\nLaissez ceci désactivé si vous n'utilisez l'application web que sur ce PC - le canal en boucle locale suffit, et il n'y a aucune raison d'être joignable de l'extérieur."
+    },
+    "midi-mapping": {
+      "title": "Contrôler rave-mate avec votre contrôleur DJ",
+      "body": "Assignez n'importe quel pad, bouton, potentiomètre ou encodeur sans fin de votre contrôleur MIDI aux actions rave-mate : parcourir la collection, ouvrir un morceau dans l'éditeur de cues, déplacer la tête de lecture, pré-écouter depuis le curseur (maintenir), poser des marqueurs de drop et ajuster la grille - les mains sur le matériel, les yeux sur la waveform. Cliquez sur Apprendre à côté d'une action, touchez la commande sur votre appareil, c'est fait. Les actions dépendent de la vue : celles de l'éditeur de cues ne se déclenchent que lorsqu'il est ouvert, celles de la bibliothèque uniquement sur la liste de la collection - un même pad peut donc changer de rôle selon la vue. Pour les potentiomètres et encodeurs, choisissez l'encodage de valeur dans la ligne qui apparaît après l'apprentissage : « potentiomètre absolu » pour les potentiomètres classiques, un des modes relatifs pour les encodeurs sans fin (voir le manuel - le complément à deux est le plus courant), plus une sensibilité (ticks par pas) et une inversion de sens."
     }
   },
   "library": {
@@ -3554,6 +3558,68 @@
       "feedback": "→ appareil",
       "loopdrop": "boucle rejetée",
       "unknown": "?"
+    },
+    "uimap": {
+      "title": "Contrôler rave-mate",
+      "sub": "Assignez pads, potentiomètres et encodeurs aux actions de l'éditeur de cues, de la bibliothèque et de la navigation. Apprendre, toucher une commande, jouer.",
+      "enable": "Mappings MIDI actifs",
+      "note": "Les mappings écoutent chaque entrée contrôleur lue par rave-mate (ajoutez votre appareil sous « Contrôleurs » ci-dessus). Pendant un apprentissage, la commande touchée est seulement capturée - elle ne déclenche jamais un mapping existant. Les raccourcis VR (Réglages -> Overlays VR) partagent ce stockage et ne sont pas affectés par l'interrupteur ci-dessus.",
+      "learn": "Apprendre",
+      "learnArmed": "Touchez une commande…",
+      "captured": "Assigné : {key}",
+      "noSelection": "Aucun morceau sélectionné dans la collection",
+      "step": "Sens.",
+      "rev": "Inverser",
+      "stepSub": {
+        "one": "{count} tick par pas",
+        "other": "{count} ticks par pas"
+      },
+      "group": {
+        "cueedit": "Éditeur de cues",
+        "library": "Bibliothèque",
+        "nav": "Navigation"
+      },
+      "kind": {
+        "trigger": "bouton",
+        "hold": "maintien (presser / relâcher)",
+        "step": "encodeur ou boutons +/-"
+      },
+      "mode": {
+        "press": "pression de bouton",
+        "momentary": "momentané (maintien)",
+        "toggle": "bascule",
+        "abs": "potentiomètre absolu",
+        "rel2c": "encodeur (complément à deux)",
+        "relsm": "encodeur (signe-grandeur)",
+        "rel64": "encodeur (offset-64)"
+      },
+      "modeSub": {
+        "press": "se déclenche une fois par pression ; la valeur est ignorée",
+        "momentary": "enfoncé tant que maintenu, relâché au relâchement - exactement comme Espace maintenu",
+        "toggle": "chaque pression alterne entre enfoncé et relâché",
+        "abs": "potentiomètre classique 0-127 : la rotation devient des pas",
+        "rel2c": "encodeur sans fin : 1..63 monte, 127..65 descend (le plus courant)",
+        "relsm": "encodeur sans fin avec bit de direction 6 : 65 = -1, 1 = +1",
+        "rel64": "encodeur sans fin centré sur 64 : 65 = +1, 63 = -1"
+      },
+      "act": {
+        "ce_audition": "Pré-écoute (maintenir = lire, relâcher = revenir)",
+        "ce_cursor": "Déplacer le curseur (1 temps)",
+        "ce_cursorJump": "Déplacer le curseur (taille de saut)",
+        "ce_jumpSize": "Ajuster la taille de saut",
+        "ce_track": "Morceau précédent / suivant",
+        "ce_gridNudge": "Décaler la grille (10 ms)",
+        "ce_gridNudgeFine": "Décaler la grille (1 ms)",
+        "ce_dropAdd": "Ajouter un drop au curseur",
+        "ce_dropDel": "Retirer le drop au curseur",
+        "ce_cue": "Cue mémoire au curseur",
+        "ce_delSel": "Supprimer les marqueurs sélectionnés",
+        "ce_undo": "Annuler / rétablir",
+        "lib_nav": "Déplacer la sélection",
+        "lib_open": "Ouvrir le morceau sélectionné dans l'éditeur de cues",
+        "nav_back": "Retour",
+        "nav_fwd": "Suivant"
+      }
     }
   }
 }

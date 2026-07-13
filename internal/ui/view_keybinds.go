@@ -128,7 +128,7 @@ func (u *UI) keybindsDialog() {
 			return
 		}
 		learnBtn.SetText("Press a key… (cancel)")
-		cancelLearn = u.svc.MIDILearn(func(status, data1 byte) {
+		cancelLearn = u.svc.MIDILearn(func(_ string, status, data1 byte) {
 			midi = &vrbind.MIDIKey{Status: status, Data1: data1}
 			fyne.Do(func() {
 				midiLbl.SetText("MIDI: " + midiKeyLabel(*midi))

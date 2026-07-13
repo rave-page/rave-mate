@@ -362,6 +362,10 @@
     "bridge-local-studio": {
       "title": "Local Studio über die Bridge",
       "body": "Local Studio ist der Kanal, über den die rave.page-Web-App diesen Rechner steuert - Laufwerke durchsuchen, transkodieren, Automationen starten, OBS bedienen. Normalerweise muss der Browser AUF diesem PC laufen, denn der Kanal ist eine Loopback-Verbindung, die den Rechner nie verlässt.\n\nSchaltest du dies ein, wird genau derselbe Kanal zusätzlich über die Konto-Bridge angeboten, sodass die Web-App diesen PC aus jedem Browser steuern kann, in dem du angemeldet bist. Das Protokoll wird dafür nicht geändert oder abgeschwächt: derselbe Schlüsselaustausch, dieselbe Signatur pro Nachricht, dieselbe Prüfung, dass beide Seiten zum selben rave.page-Konto gehören.\n\nHinzu kommt eine Schicht darunter. Bevor Local Studio ein Wort sagt, baut die Bridge einen verschlüsselten Tunnel und lässt den Aufrufer die Zugangssperre passieren. Diese Reihenfolge ist entscheidend: Der Handshake von Local Studio trägt ein Zugriffstoken. Auf einem Loopback-Socket ist das harmlos, über ein Relay würdest du damit dem Server dein Token aushändigen. Im Tunnel ist es Chiffrat.\n\nLass dies aus, wenn du die Web-App ohnehin nur auf diesem PC nutzt - dafür genügt der Loopback-Kanal, und es gibt keinen Grund, von außen erreichbar zu sein."
+    },
+    "midi-mapping": {
+      "title": "rave-mate mit dem DJ-Controller steuern",
+      "body": "Belege Pads, Buttons, Regler oder Endlos-Encoder deines MIDI-Controllers mit rave-mate-Aktionen: durch die Sammlung blättern, einen Track im Cue-Editor öffnen, den Playhead bewegen, vom Cursor aus vorhören (halten), Drop-Marker setzen und das Beatgrid verschieben - Hände am Gerät, Augen auf der Waveform. Neben einer Aktion auf \"Anlernen\" klicken, das Bedienelement berühren, fertig. Aktionen sind an die Ansicht gebunden: Cue-Editor-Aktionen feuern nur bei geöffnetem Editor, Bibliotheks-Aktionen nur in der Sammlungsliste - dasselbe Pad kann je Ansicht gefahrlos etwas anderes bedeuten. Für Regler und Encoder nach dem Anlernen die Wert-Kodierung wählen: \"absoluter Regler\" für normale Potentiometer, einer der relativen Modi für Endlos-Encoder (Handbuch prüfen - Zweierkomplement ist am verbreitetsten), dazu Empfindlichkeit (Ticks pro Schritt) und Richtungsumkehr."
     }
   },
   "library": {
@@ -3554,6 +3558,68 @@
       "feedback": "→ Gerät",
       "loopdrop": "Loop verworfen",
       "unknown": "?"
+    },
+    "uimap": {
+      "title": "rave-mate steuern",
+      "sub": "Pads, Regler und Encoder des Controllers auf Cue-Editor-, Bibliotheks- und Navigations-Aktionen mappen. Anlernen, Element berühren, loslegen.",
+      "enable": "MIDI-Mappings aktiv",
+      "note": "Mappings hören auf jedem Controller-Eingang mit, den rave-mate liest (Gerät oben unter \"Controller\" hinzufügen). Während \"Anlernen\" aktiv ist, wird das berührte Element nur erfasst - es löst nie gleichzeitig ein bestehendes Mapping aus. VR-Keybinds (Einstellungen -> VR-Overlays) teilen sich diesen Binding-Speicher und bleiben vom Schalter oben unberührt.",
+      "learn": "Anlernen",
+      "learnArmed": "Element berühren…",
+      "captured": "Gemappt: {key}",
+      "noSelection": "Kein Track in der Sammlung ausgewählt",
+      "step": "Empf.",
+      "rev": "Umkehren",
+      "stepSub": {
+        "one": "{count} Tick pro Schritt",
+        "other": "{count} Ticks pro Schritt"
+      },
+      "group": {
+        "cueedit": "Cue-Editor",
+        "library": "Bibliothek",
+        "nav": "Navigation"
+      },
+      "kind": {
+        "trigger": "Button",
+        "hold": "Halten (Drücken / Loslassen)",
+        "step": "Encoder oder +/- Buttons"
+      },
+      "mode": {
+        "press": "Tastendruck",
+        "momentary": "momentan (halten)",
+        "toggle": "Umschalten",
+        "abs": "absoluter Regler",
+        "rel2c": "Encoder (Zweierkomplement)",
+        "relsm": "Encoder (Vorzeichen-Betrag)",
+        "rel64": "Encoder (Offset-64)"
+      },
+      "modeSub": {
+        "press": "feuert einmal pro Druck; der Wert wird ignoriert",
+        "momentary": "unten solange gehalten, oben beim Loslassen - exakt wie Space halten",
+        "toggle": "jeder Druck wechselt zwischen unten und oben",
+        "abs": "normales Potentiometer 0-127: Drehen wird zu Schritten",
+        "rel2c": "Endlos-Encoder: 1..63 hoch, 127..65 runter (am verbreitetsten)",
+        "relsm": "Endlos-Encoder mit Richtungs-Bit 6: 65 = -1, 1 = +1",
+        "rel64": "Endlos-Encoder um 64 zentriert: 65 = +1, 63 = -1"
+      },
+      "act": {
+        "ce_audition": "Vorhören (halten = abspielen, loslassen = zurückspringen)",
+        "ce_cursor": "Cursor bewegen (1 Beat)",
+        "ce_cursorJump": "Cursor bewegen (Sprungweite)",
+        "ce_jumpSize": "Sprungweite anpassen",
+        "ce_track": "Vorheriger / nächster Track",
+        "ce_gridNudge": "Beatgrid verschieben (10 ms)",
+        "ce_gridNudgeFine": "Beatgrid verschieben (1 ms)",
+        "ce_dropAdd": "Drop am Cursor setzen",
+        "ce_dropDel": "Drop am Cursor entfernen",
+        "ce_cue": "Memory-Cue am Cursor",
+        "ce_delSel": "Ausgewählte Marker löschen",
+        "ce_undo": "Rückgängig / Wiederholen",
+        "lib_nav": "Track-Auswahl bewegen",
+        "lib_open": "Ausgewählten Track im Cue-Editor öffnen",
+        "nav_back": "Zurück",
+        "nav_fwd": "Vorwärts"
+      }
     }
   }
 }

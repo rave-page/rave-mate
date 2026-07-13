@@ -136,6 +136,13 @@ var helpTopics = map[string]helpTopic{
 		Body:  i18n.T("help.cue-edit.body"),
 		Keys:  cueEditKeys,
 	},
+	"midi-mapping": {
+		Title: i18n.T("help.midi-mapping.title"),
+		Body:  i18n.T("help.midi-mapping.body"),
+		Links: []ttLink{
+			{"MIDI 1.0 CC + relative encoder conventions (midi.org)", "https://midi.org/midi-1-0-control-change-messages"},
+		},
+	},
 	"trim-editor": {
 		Title: i18n.T("help.trim-editor.title"),
 		Body:  i18n.T("help.trim-editor.body"),

@@ -21,7 +21,7 @@ type MidiProxy struct {
 	obs    chan session.Observation
 
 	mu          sync.Mutex
-	forward     func(m midi.Message)
+	forward     func(port string, m midi.Message)
 	openPorts   []string // last-reported opened INPUT ports (from the child's "ports" event)
 	failedPorts []string // last-reported input ports that failed to open (allocated/missing)
 }
@@ -63,7 +63,7 @@ func NewMidiProxy(log, mon *logbus.Bus, initFn func() MidiConfig) (*MidiProxy, e
 				fn := p.forward
 				p.mu.Unlock()
 				if fn != nil {
-					fn(midi.Message{Status: m.S, Data1: m.D1, Data2: m.D2})
+					fn(m.P, midi.Message{Status: m.S, Data1: m.D1, Data2: m.D2})
 				}
 			},
 			"ports": func(data json.RawMessage) {
@@ -87,8 +87,9 @@ func NewMidiProxy(log, mon *logbus.Bus, initFn func() MidiConfig) (*MidiProxy, e
 // Host exposes the supervising host (SetNotifier, Stats).
 func (p *MidiProxy) Host() *Host { return p.host }
 
-// SetForwarder taps every non-system MIDI message from the child (peer-link bridge).
-func (p *MidiProxy) SetForwarder(fn func(m midi.Message)) {
+// SetForwarder taps every non-system MIDI message from the child, with its source input port
+// name (peer-link bridge + keybind dispatch).
+func (p *MidiProxy) SetForwarder(fn func(port string, m midi.Message)) {
 	p.mu.Lock()
 	p.forward = fn
 	p.mu.Unlock()

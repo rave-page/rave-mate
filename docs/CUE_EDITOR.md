@@ -38,6 +38,11 @@ holds the actions.
 Keys work only while the Library tab has focus and no input field is active. The ⓘ
 tooltip in the strip above the wave shows this table as a key-cap grid.
 
+Every action above (plus library browsing and back/forward) is also MIDI-mappable to a DJ
+controller — pads, buttons, knobs and endless encoders, with hold-audition mapping to the exact
+hold-Space press/release semantics. MIDI tab → **Control rave-mate** → Learn; details in
+[MIDI_MAPPING.md](MIDI_MAPPING.md#control-rave-mate-from-the-controller-ui-mappings--shipped).
+
 ### Selection
 
 The rubber band selects cues **and drops** — selected cues glow in their color, drops

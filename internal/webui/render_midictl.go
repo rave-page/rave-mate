@@ -25,6 +25,7 @@ func (u *UI) renderMIDICtl() string {
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
 	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
+	b.WriteString(u.midiUIMapCard())       // map controller notes/CCs/encoders to app actions
 	b.WriteString(u.midiMonitorCard())     // live input monitor ("which device is which")
 	// output + driver / bridge + help: small cards pair up ≥1100px (.midi-2col)
 	b.WriteString(`<div class=midi-2col>` + u.midiPortCard() + u.midiDriverCard() + `</div>`)

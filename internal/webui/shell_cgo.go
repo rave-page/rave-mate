@@ -100,6 +100,23 @@ func newShell(title string, w, h int, onAction func(string), onReady func()) (sh
 		done: make(chan struct{}), acts: make(chan string, 64)}, true
 }
 
+// post enqueues a Go-originated act payload on the same serial worker page actions use, so
+// MIDI-mapped input is ordered with clicks/keys and handlers stay single-threaded. False =
+// queue full (drop - a wedged handler must not back-pressure the MIDI event pump) or closed.
+func (s *cgoShell) post(payload string) bool {
+	select {
+	case <-s.done:
+		return false
+	default:
+	}
+	select {
+	case s.acts <- payload:
+		return true
+	default:
+		return false
+	}
+}
+
 // actWorker drains page actions on its own goroutine, serialized in arrival order. The webview
 // binding callback runs ON the window's UI thread - handling actions there (renders, config
 // saves, device probes) froze the message pump: the whole window stalled and dragging lagged.

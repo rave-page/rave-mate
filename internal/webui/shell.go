@@ -22,6 +22,7 @@ type shell interface {
 	show()                                    // bring the window to the foreground
 	terminate()                               // request close (+ force-exit watchdog)
 	hwnd() uintptr                            // native window handle (0 if none) for OS screenshots
+	post(payload string) bool                 // enqueue an act payload on the serial act worker (Go-originated input)
 }
 
 // ── ctl eval round-trip ──
