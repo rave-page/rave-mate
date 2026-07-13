@@ -1,13 +1,13 @@
 {
-  "version": "nightly-5eefe66",
-  "build": 78,
-  "commit": "5eefe66",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-78-20260713-5eefe66.exe",
-  "sha256": "007e64a1b460e04684f4b12f1146973d446c70932322934e47968964266c5dd7",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-78-20260713-5eefe66.exe",
-  "installer_sha256": "4c36690b5e456eab6a85bd0e5b5e269127d9a0a95b65b5d440dc0c08e98dd705",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-78-20260713-5eefe66",
-  "linux_sha256": "ab9ff074bb7208bef034237b84bcf1baa447a58afe0517e02ff2f0e5c7803027",
+  "version": "nightly-c588659",
+  "build": 79,
+  "commit": "c588659",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-79-20260713-c588659.exe",
+  "sha256": "2eaa9266f21eebc19efc8a82f4898f2eb57955ebd42e93b7aa9da5742fbc9284",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-79-20260713-c588659.exe",
+  "installer_sha256": "5892f76aab7cc2acdcfe5f134a9e2cc7f8e10c15c370de52d968c8e51a857701",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-79-20260713-c588659",
+  "linux_sha256": "328595b923e5b59ec535c76d6ae7d7500acfd53188dd2dc4727347506bd63c91",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-13T15:20:46Z",
-  "notes": "fix(driver): ravemidi UAF in miniport teardown (BSOD 0x50) + tap CPU spin + Serato THRU name"
+  "released": "2026-07-13T16:32:51Z",
+  "notes": "Merge feature/native-audio-decoder: native decoder + low-latency engine behind features.player.nativeDecode (default OFF); AAC stays on ffmpeg by design"
 }
