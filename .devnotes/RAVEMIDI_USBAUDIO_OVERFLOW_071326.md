@@ -40,3 +40,26 @@ Install = step4-update-driver.ps1 elevated (stops midisrv around devnode restart
 Verify: knob-sweep the A61 with the tap active + Rekordbox/Serato attached; idle a few
 seconds, then hard knob sweep (reproduces the exact window). Watch QUERY_TRACE for clean
 tails; no BSOD = fix holds.
+VERIFIED live 2026-07-13 ~23:5x: both controllers bound+feedback on 5.0.0.2, 2.2M+ clean
+3-byte CC ToApp events through the knob path, zero corruption, no crash.
+
+## Crash #5 (23:40, 0x133 DPC watchdog) — NOT 5.0.0.2; PnP wedge, fixed in 5.0.0.3
+
+Dump `071326-11171-01.dmp` module list: loaded ravemidi timestamp 16:33 = **5.0.0.1 was
+still running**. The in-place step4 update never swapped the image ("reboot pending" was
+real; `driverquery` shows file metadata at the CURRENT DriverStore path, NOT the loaded
+image — verify via dump `lm vm ravemidi` timestamp, never driverquery, after in-place
+updates). The crash-forced reboot activated 5.0.0.2.
+
+Stack (same as crash #3): `MWorker → RavePortCreateOwnerless → CreatePort →
+PcRegisterSubdevice → portcls!AcquireDevice → KeWaitForSingleObject`, watchdog 0x133/1.
+Both 0x133s occurred with a driver update pending: the stop/remove transaction holds the
+portcls device lock; MWorker blocks in AcquireDevice; REMOVE's RaveManagedStop joins the
+blocked worker → wedged devnode → eventual watchdog.
+
+Fix (85e3917, 5.0.0.3 staged in build/testsign): RavePnpDispatch stops the engine on
+IRP_MN_QUERY_STOP/QUERY_REMOVE (before portcls takes the lock), re-arms on
+CANCEL_STOP/CANCEL_REMOVE after forwarding. INSTALL AT NEXT REBOOT via
+`pnputil /add-driver build/testsign/ravemidi.inf /install` + reboot — do NOT
+restart-device live: the RUNNING 5.0.0.2 lacks the QUERY hardening, an in-place restart
+is exactly the wedge trigger.
