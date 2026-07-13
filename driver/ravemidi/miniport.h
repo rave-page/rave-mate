@@ -35,6 +35,12 @@ typedef struct _RAVE_PORT {
     LIST_ENTRY ReadIrps;
     volatile LONG CaptureRunning;     // a capture stream is in KSSTATE_RUN
     volatile LONG StreamCount;        // open pin instances (blocks destroy)
+    volatile LONG OwnerRefs;          // block lifetime shares: port manager + miniport.
+                                      // DestroyPort drops the manager share; ~RaveMiniport
+                                      // drops its own. Freed on last deref — the portcls
+                                      // object graph (open filter handles in wdmaud/midisrv/
+                                      // apps) outlives DestroyPort, so the miniport's m_Ctx
+                                      // must stay dereferenceable until its dtor runs.
     volatile LONG MirrorRefs;         // mirror groups fanning into this port (blocks destroy)
     volatile LONG IoctlBusy;          // in-flight WRITE/READ dispatch on this port (blocks destroy;
                                       // taken under PortsLock, so find+pin is atomic vs teardown)
@@ -60,6 +66,9 @@ typedef struct _RAVE_PORT {
 // into it; the ref blocks the port's destroy until released.
 RAVE_PORT* RaveRefOutputPort(ULONG id);
 VOID RaveUnrefOutputPort(RAVE_PORT* p);
+
+// Drop one OwnerRefs share; frees the block on the last one. <= DISPATCH.
+VOID RavePortDeref(RAVE_PORT* p);
 
 // Cross-TU (managed.cpp): driver-owned ports with NO creator file object —
 // handle-close cleanup skips them, only the managed engine destroys them.

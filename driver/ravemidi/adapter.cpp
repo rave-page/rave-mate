@@ -93,7 +93,9 @@ VOID RaveUnload(PDRIVER_OBJECT DriverObject)
         // portcls objects are gone by unload, only our pool block remains.
         while (!IsListEmpty(&a->Ports)) {
             PLIST_ENTRY e = RemoveHeadList(&a->Ports);
-            ExFreePoolWithTag(CONTAINING_RECORD(e, RAVE_PORT, Link), RAVE_TAG);
+            // portcls destroyed all subdevices before unload → miniport shares
+            // already dropped; this deref is the manager's and frees the block.
+            RavePortDeref(CONTAINING_RECORD(e, RAVE_PORT, Link));
         }
         ExFreePoolWithTag(a, RAVE_TAG);
     }
@@ -399,6 +401,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
                     RaveCsqAcquireLock, RaveCsqReleaseLock, RaveCsqCompleteCanceled);
     p->CaptureRunning = 0;
     p->StreamCount = 0;
+    p->OwnerRefs = 1;      // manager share; CreateRaveMiniport takes the miniport's
     p->LastSetState = -1;  // never; rest of the counters are pool-zeroed
 
     ExAcquireFastMutex(&a->PortsLock);
@@ -434,7 +437,7 @@ static NTSTATUS CreatePort(RAVE_ADAPTER* a, PFILE_OBJECT creator, const RAVEMIDI
     if (p->PortUnknown) {
         p->PortUnknown->Release();
     }
-    ExFreePoolWithTag(p, RAVE_TAG);
+    RavePortDeref(p);  // miniport share (if taken) released via its dtor above
     return st;
 }
 #pragma code_seg()
@@ -481,7 +484,10 @@ static NTSTATUS DestroyPort(RAVE_ADAPTER* a, PFILE_OBJECT caller, ULONG id)
         p->PortUnknown->Release();
         p->PortUnknown = nullptr;
     }
-    ExFreePoolWithTag(p, RAVE_TAG);
+    // Manager share only. The portcls port object survives our Release while any
+    // filter handle stays open (wdmaud/midisrv/DJ apps hold them across our
+    // destroy) — the miniport's share keeps this block alive until ~RaveMiniport.
+    RavePortDeref(p);
     return STATUS_SUCCESS;
 }
 #pragma code_seg()
@@ -856,5 +862,12 @@ VOID RaveUnrefOutputPort(RAVE_PORT* p)
 {
     if (p) {
         InterlockedDecrement(&p->MirrorRefs);
+    }
+}
+
+VOID RavePortDeref(RAVE_PORT* p)
+{
+    if (p && InterlockedDecrement(&p->OwnerRefs) == 0) {
+        ExFreePoolWithTag(p, RAVE_TAG);
     }
 }

@@ -311,6 +311,7 @@ static VOID TapThread(PVOID ctx)
         return;
     }
     ULONG fails = 0;
+    ULONG zeroRuns = 0;  // consecutive successful reads with no payload
     while (!t->Stop) {
         KSSTREAM_HEADER hdr;
         RtlZeroMemory(&hdr, sizeof(hdr));
@@ -345,10 +346,20 @@ static VOID TapThread(PVOID ctx)
         if (used > MIRROR_READ_BUF) {
             used = MIRROR_READ_BUF;  // never trust DataUsed past the buffer
         }
-        if (used) {
-            // raw pre-parse view -> first fan-in port's ring (diagnosis anchor)
-            RaveTracePush(t->Outs[0], RaveTraceTapRaw, buf, used);
+        if (used == 0) {
+            // Contended pins (another client fighting over the device) can complete
+            // reads instantly with no payload — back off instead of busy-spinning a
+            // system thread into a 100%-CPU KS IOCTL storm.
+            if (++zeroRuns >= 8) {
+                LARGE_INTEGER zdt;
+                zdt.QuadPart = -10 * 1000 * 5;  // 5ms
+                KeDelayExecutionThread(KernelMode, FALSE, &zdt);
+            }
+            continue;
         }
+        zeroRuns = 0;
+        // raw pre-parse view -> first fan-in port's ring (diagnosis anchor)
+        RaveTracePush(t->Outs[0], RaveTraceTapRaw, buf, used);
         BOOLEAN grew = FALSE;
         BOOLEAN highwater = FALSE;
         ULONG off = 0;

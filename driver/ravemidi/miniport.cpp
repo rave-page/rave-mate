@@ -252,6 +252,7 @@ NTSTATUS CreateRaveMiniport(PDEVICE_OBJECT Fdo, RAVE_PORT* ctx, PUNKNOWN* OutUnk
     if (!mp) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
+    InterlockedIncrement(&ctx->OwnerRefs);  // miniport share — dropped in ~RaveMiniport
     mp->AddRef();  // our local ref
     ctx->Miniport = mp;
 
@@ -279,9 +280,14 @@ NTSTATUS CreateRaveMiniport(PDEVICE_OBJECT Fdo, RAVE_PORT* ctx, PUNKNOWN* OutUnk
 
 RaveMiniport::~RaveMiniport()
 {
+    // Runs when the LAST filter handle drops (often svchost/wdmaud, long after
+    // DestroyPort) — m_Ctx stays valid because this object holds an OwnerRefs
+    // share; without it these writes land in freed pool (BSOD 0x50, 2026-07-13).
     if (m_Ctx) {
         m_Ctx->ServiceGroup = nullptr;
         m_Ctx->Miniport = nullptr;
+        RavePortDeref(m_Ctx);
+        m_Ctx = nullptr;
     }
     if (m_ServiceGroup) {
         m_ServiceGroup->Release();

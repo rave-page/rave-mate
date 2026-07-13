@@ -238,8 +238,15 @@ static NTSTATUS CreateInputPorts(RAVE_MINPUT* in)
     for (ULONG i = 0; i < in->Cfg.OutCount; i++) {
         PCWSTR name = in->Cfg.OutNames[i];
         if (!name[0]) {
-            RtlStringCchPrintfW(nm, RTL_NUMBER_OF(nm), L"%s Out %lu", in->Cfg.Name, i + 1);
-            name = nm;
+            if (i == 0) {
+                // First fan-out clones the source device's name verbatim: DJ software
+                // (Serato) matches controllers by port name, and the physical pin is
+                // held by our tap — the identically-named THRU is what it can open.
+                name = in->Cfg.Name;
+            } else {
+                RtlStringCchPrintfW(nm, RTL_NUMBER_OF(nm), L"%s Out %lu", in->Cfg.Name, i + 1);
+                name = nm;
+            }
         }
         // BIDI: DJ software receives the controller AND can send LED feedback back
         // (render -> device tee). No internal render->capture path = loop-free.
