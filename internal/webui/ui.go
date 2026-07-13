@@ -114,6 +114,7 @@ func New(svc ui.Services) *UI {
 	if sh, ok := newShell("rave-mate", 1280, 820, u.onAction, u.onReady); ok {
 		u.shell = sh
 		go u.evalFlusher()
+		u.registerUIBinds() // MIDI-mapped desktop-UI actions (primary window only)
 	}
 	u.ruiInit() // remote Library sessions over the peer link (no-op without peers)
 	return u
