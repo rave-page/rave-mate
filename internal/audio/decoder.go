@@ -92,13 +92,15 @@ func sniff(b []byte, path string) string {
 		case string(b[0:4]) == "ftyp" || (len(b) >= 8 && string(b[4:8]) == "ftyp"):
 			return "aac" // MP4/M4A container
 		}
+		// ADTS AAC sync (12-bit 0xFFF + layer bits 00) — checked before the MP3 frame sync,
+		// which it would otherwise alias (both start 0xFF, top bits set). The 0xF6 mask keeps
+		// real MPEG-1 Layer III frames (0xFA/0xFB) out.
+		if b[0] == 0xFF && (b[1]&0xF6) == 0xF0 {
+			return "aac"
+		}
 		// MPEG audio frame sync (0xFFEx) — MP3 with no ID3 tag.
 		if b[0] == 0xFF && (b[1]&0xE0) == 0xE0 {
 			return "mp3"
-		}
-		// ADTS AAC sync (0xFFFx, layer bits 00).
-		if b[0] == 0xFF && (b[1]&0xF6) == 0xF0 {
-			return "aac"
 		}
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
