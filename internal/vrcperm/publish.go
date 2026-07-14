@@ -103,17 +103,7 @@ func (s *Service) publish(ctx context.Context, key string, gistID *string, desc 
 		return
 	}
 
-	var g *github.Gist
-	var err error
-	if *gistID == "" {
-		g, err = store.Create(ctx, desc, files, false) // secret gist: unlisted, URL-readable
-	} else {
-		g, err = store.Update(ctx, *gistID, desc, files)
-		if err != nil && strings.Contains(err.Error(), "404") {
-			// Stale id (deleted gist / relinked account) - self-heal with a new gist.
-			g, err = store.Create(ctx, desc, files, false)
-		}
-	}
+	g, err := s.writeGist(ctx, *gistID, desc, files)
 	if err != nil {
 		s.setErr(key, err.Error())
 		return
@@ -131,6 +121,21 @@ func (s *Service) publish(ctx context.Context, key string, gistID *string, desc 
 	}
 	s.mu.Unlock()
 	s.log.Info(source, "published", map[string]any{"target": key})
+}
+
+// writeGist creates the gist when id=="" (secret: unlisted, URL-readable), else updates it, healing
+// a stale id (deleted gist / relinked account) that 404s by creating a fresh one. Callers persist
+// the returned gist id when it differs from the one they passed.
+func (s *Service) writeGist(ctx context.Context, id, desc string, files map[string]string) (*github.Gist, error) {
+	store := s.gists()
+	if id == "" {
+		return store.Create(ctx, desc, files, false)
+	}
+	g, err := store.Update(ctx, id, desc, files)
+	if err != nil && strings.Contains(err.Error(), "404") {
+		return store.Create(ctx, desc, files, false)
+	}
+	return g, err
 }
 
 // setErr records a failed pass (keeps prior URL/When for the UI).

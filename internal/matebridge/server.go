@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -44,6 +45,27 @@ type SettingsStore interface {
 // owns the GitHub token). Returns (gistID, rawURL, jsonURL, seq).
 type RosterPublisher interface {
 	PublishRoster(ctx context.Context, kind, name string, names []string) (gistID, rawURL, jsonURL string, seq int64, err error)
+}
+
+// Availabler is an OPTIONAL interface a gateway may implement so /v1/health and its routes reflect
+// LIVE readiness, not just wiring. A wired gateway whose Available() is false behaves exactly like
+// a nil one: its capability drops from /health and its routes return 501 (the editor greys the
+// tool). Example: the Directory gateway is wired at startup but only Available once a VRChat
+// session is signed in; the Roster gateway only once GitHub is linked. A gateway that does not
+// implement it is always available when non-nil.
+type Availabler interface {
+	Available() bool
+}
+
+// available reports whether a gateway is present AND (if it implements Availabler) currently ready.
+func available(g any) bool {
+	if g == nil {
+		return false
+	}
+	if a, ok := g.(Availabler); ok {
+		return a.Available()
+	}
+	return true
 }
 
 // Options wires the server. Any nil gateway disables its routes gracefully. Version feeds /v1/health.
@@ -163,62 +185,62 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) capabilities() []string {
 	caps := []string{}
-	if s.opt.Directory != nil {
+	if available(s.opt.Directory) {
 		caps = append(caps, CapVRChat)
 	}
-	if s.opt.Roster != nil {
+	if available(s.opt.Roster) {
 		caps = append(caps, CapWorldSync)
 	}
-	if s.opt.Presets != nil {
+	if available(s.opt.Presets) {
 		caps = append(caps, CapPresets)
 	}
-	if s.opt.Settings != nil {
+	if available(s.opt.Settings) {
 		caps = append(caps, CapSettings)
 	}
 	return caps
 }
 
 func (s *Server) friends(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Directory == nil {
+	if !available(s.opt.Directory) {
 		unavailable(w, "vrchat directory not available")
 		return
 	}
 	out, err := s.opt.Directory.Friends(r.Context(), qi(r, "offset", 0), qi(r, "n", 60), qb(r, "offline"))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, FriendsResponse{ContractVersion: ContractVersion, Friends: out})
 }
 
 func (s *Server) groups(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Directory == nil {
+	if !available(s.opt.Directory) {
 		unavailable(w, "vrchat directory not available")
 		return
 	}
 	out, err := s.opt.Directory.Groups(r.Context())
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, GroupsResponse{ContractVersion: ContractVersion, Groups: out})
 }
 
 func (s *Server) groupMembers(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Directory == nil {
+	if !available(s.opt.Directory) {
 		unavailable(w, "vrchat directory not available")
 		return
 	}
 	out, partial, err := s.opt.Directory.GroupMembers(r.Context(), r.PathValue("groupId"), r.URL.Query().Get("roleId"), qi(r, "offset", 0), qi(r, "n", 100))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, GroupMembersResponse{ContractVersion: ContractVersion, Members: out, Partial: partial})
 }
 
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Directory == nil {
+	if !available(s.opt.Directory) {
 		unavailable(w, "vrchat directory not available")
 		return
 	}
@@ -228,14 +250,14 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.opt.Directory.Resolve(r.Context(), req.IDs)
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ResolveResponse{ContractVersion: ContractVersion, Resolved: out})
 }
 
 func (s *Server) presetList(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Presets == nil {
+	if !available(s.opt.Presets) {
 		unavailable(w, "presets not available")
 		return
 	}
@@ -246,20 +268,20 @@ func (s *Server) presetList(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.opt.Presets.List(r.Context(), kind, qi64(r, "sinceSeq", 0))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, PresetListResponse{ContractVersion: ContractVersion, Presets: out})
 }
 
 func (s *Server) presetGet(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Presets == nil {
+	if !available(s.opt.Presets) {
 		unavailable(w, "presets not available")
 		return
 	}
 	p, err := s.opt.Presets.Get(r.Context(), r.PathValue("kind"), r.PathValue("id"))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	if p == nil {
@@ -270,7 +292,7 @@ func (s *Server) presetGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) presetPut(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Presets == nil {
+	if !available(s.opt.Presets) {
 		unavailable(w, "presets not available")
 		return
 	}
@@ -280,40 +302,40 @@ func (s *Server) presetPut(w http.ResponseWriter, r *http.Request) {
 	}
 	seq, err := s.opt.Presets.Put(r.Context(), r.PathValue("kind"), r.PathValue("id"), p)
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, PresetPutResponse{ContractVersion: ContractVersion, OK: true, Seq: seq})
 }
 
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Settings == nil {
+	if !available(s.opt.Settings) {
 		unavailable(w, "settings not available")
 		return
 	}
 	out, err := s.opt.Settings.Settings(r.Context(), r.PathValue("projectId"))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) rebuildSignals(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Settings == nil {
+	if !available(s.opt.Settings) {
 		unavailable(w, "settings not available")
 		return
 	}
 	hw, sigs, err := s.opt.Settings.RebuildSignals(r.Context(), qi64(r, "sinceSeq", 0))
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, RebuildSignalsResponse{ContractVersion: ContractVersion, Seq: hw, Signals: sigs})
 }
 
 func (s *Server) publishRoster(w http.ResponseWriter, r *http.Request) {
-	if s.opt.Roster == nil {
+	if !available(s.opt.Roster) {
 		unavailable(w, "worldsync gist publishing not available")
 		return
 	}
@@ -323,7 +345,7 @@ func (s *Server) publishRoster(w http.ResponseWriter, r *http.Request) {
 	}
 	gistID, rawURL, jsonURL, seq, err := s.opt.Roster.PublishRoster(r.Context(), req.Kind, req.Name, req.Names)
 	if err != nil {
-		upstream(w, err)
+		fail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, PublishRosterResponse{
@@ -408,6 +430,16 @@ func badRequest(w http.ResponseWriter, detail string) {
 // detail that could carry a token/cookie leaks to the editor.
 func upstream(w http.ResponseWriter, _ error) {
 	writeProblem(w, http.StatusBadGateway, ProblemUpstream, "upstream error", "a VRChat/GitHub call failed; retry later")
+}
+
+// fail routes a gateway error: an ErrBadRequest-wrapped fault is a 400 (its message is local, no
+// upstream secret), anything else is a generic 502 upstream.
+func fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrBadRequest) {
+		badRequest(w, err.Error())
+		return
+	}
+	upstream(w, err)
 }
 
 func qi(r *http.Request, key string, def int) int {

@@ -15,14 +15,26 @@
 //     existing internal/vrcperm + internal/github gist plumbing). Udon CANNOT read the instance/group
 //     id, so identity is rave-mate-assigned and gist-written (the Pointer module).
 //
-// STUB STATUS: types + server skeleton only. NOT wired into internal/app. Handlers return 501 until
-// the app-side adapters over vrchat.Manager / vrcperm.Service / config are implemented. Keep additive.
+// STATUS: wired. internal/app constructs the server (editorbridge.go) with adapters over
+// vrchat.Manager (Directory), a file-backed preset store (internal/matepreset), config (Settings),
+// and vrcperm.Service (RosterPublisher); the enveloped gist writer lives in internal/vrcperm and the
+// SEQ-GATE counter in internal/gistseq. A gateway self-gates via the optional Availabler interface
+// (server.go) so /v1/health + routes reflect LIVE readiness (signed-in session / GitHub link), not
+// just wiring. A genuinely-absent capability is still nil => 501 + dropped from /health. Keep additive.
 //
 // Canonical contract doc: docs/WORLD_BRIDGE_CONTRACT.md (the shared source of truth both repos mirror;
 // the world repo mirrors it at .devnotes/MATE_WORLD_CONTRACT.md). Change types here + that doc together.
 package matebridge
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
+
+// ErrBadRequest, when wrapped by a gateway error, maps that error to a 400 bad-request response;
+// any other gateway error is a 502 upstream. Lets a gateway distinguish a caller-input fault
+// (unknown preset kind, illegal id) from a genuine downstream (VRChat/GitHub) failure.
+var ErrBadRequest = errors.New("bad request")
 
 // ContractVersion is the world-bridge contract major. Bumped on any breaking wire change; echoed on
 // every loopback response (body + X-Rave-Contract-Version header) and every gist envelope so a client

@@ -302,8 +302,47 @@ Twitch / GitHub directly is out of scope by construction.
 
 ## Go source of truth
 
-- `internal/matebridge/contract.go` - loopback DTOs, `Problem`, discovery file, constants.
-- `internal/matebridge/envelope.go` - gist envelope + module payloads.
-- `internal/matebridge/server.go` - loopback server skeleton + gateway seams (`Directory`, `Presets`,
-  `SettingsStore`, `RosterPublisher`). STUB: not wired into `internal/app`; handlers return 501 until the
-  app-side adapters over `vrchat.Manager` / `vrcperm.Service` / `config` are implemented.
+- `internal/matebridge/contract.go` - loopback DTOs, `Problem` (+ `ErrBadRequest` sentinel), discovery
+  file, constants.
+- `internal/matebridge/envelope.go` - gist envelope + module payloads + `MarshalSingle`/`MarshalBundle`.
+- `internal/matebridge/server.go` - loopback server + gateway seams (`Directory`, `Presets`,
+  `SettingsStore`, `RosterPublisher`) + the optional `Availabler` liveness interface.
+- `internal/gistseq` - the persisted monotonic per-module SEQ-GATE counter (`Open`/`Next`/`Peek`).
+- `internal/matepreset` - file-backed `Presets` store (`<cfg>/mate-presets/<kind>/<id>.json`).
+- `internal/vrcperm/live.go` - the enveloped rave.live/* gist WRITER + `PublishRoster` (extends the
+  flat `allow.txt`/posters/events writers).
+- `internal/app/editorbridge.go` - app-side adapters (`directoryGateway` over `vrchat.Manager`,
+  `settingsGateway` over `config`, `rosterGateway` over `vrcperm.Service`) + `pointerProvider` (from
+  `vrchat.Manager` + `vrctools`/`vrcloc`) + the `editorbridge` module (gated on `WorldSync.Enabled`).
+
+### App-side implementation status + decisions (v1)
+
+- **WIRED, not a stub.** The server is constructed + started in `internal/app` as the `editorbridge`
+  module. Handlers return real data; a genuinely-missing capability stays 501 + drops from `/health`.
+- **Enablement = reuse `WorldSync.Enabled`** (no new toggle). The editor bridge is the edit-time half
+  of the same world-integration feature; its runtime half is WorldSync's gist refresher. One flag = one
+  feature. A gateway further self-gates LIVE via `Availabler.Available()`: `vrchat` needs a signed-in
+  session, `worldsync` needs GitHub linked, so `/health` capabilities track login/link state between
+  heartbeats without a wire change.
+- **SEQ-GATE storage = a JSON ledger** (`<cfg>/worldsync_seq.json`) via `internal/gistseq`, keyed per
+  module (`pointer`/`config`/`performers`/`roster:<slug>`/`preset:<kind>`). A seq is consumed ONLY on an
+  actual write (diff-only hashes the INNER payload, so a changing `seq`/`updatedAt` never self-triggers).
+  Shared by the gist writer AND the preset store. A lost ledger risks at most a one-time reset.
+- **Flat + enveloped COEXIST.** `allow.txt`/`posters.json`/`events.json`/`nowplaying.json` stay flat for
+  VideoTXL/ProTV/RaveAccessControl; the new rave.live/* module gists (pointer/config/performers) carry
+  the `{schema,contractVersion,seq,updatedAt,<module>}` envelope. `PublishRoster` writes the FLAT
+  allow.txt/allow.json (page.rave.access consumes the flat list) and returns a `seq` for provenance.
+- **Carriage = SINGLE-MODULE** for pointer/config/performers (one gist + one seq each, independent
+  cadence + the out-of-order-completion fix). `MarshalBundle` is provided but unused by v1.
+- **Pointer** stamps `instanceOwnerName` = the signed-in VRChat display name and seeds
+  `byOperator=[{operator, profileId:"main", priority:10}]`; `activeGroupId/Name` + a best-effort
+  `joinInfo.deepLink` (`vrchat://launch?ref=rave.page&id=<world>:<instance>`) come from the location
+  timeline when known. Publishing is opt-in (`WorldSync.PointerOn`).
+- **`online`** is derived in `directoryGateway`: VRChat `""`/`offline` ⇒ offline, any other status ⇒
+  online (the editor never sees VRChat's status vocabulary).
+- **Preset payload** is stored verbatim as opaque JSON (whitespace may normalize; data is identical).
+  Unknown kind / traversal id ⇒ `ErrBadRequest` ⇒ 400 (distinct from 502 upstream).
+- **Not yet sourced (plumbing only, no data):** the `config` + `performersLive` module writers exist and
+  are tested, but rave-mate has no config-profile / Twitch-performer mapping yet, so nothing publishes
+  them. `rebuild-signals` returns an empty poll (rave-mate edits nothing needing a re-bake). `webLink`
+  in `joinInfo` is left empty (not derivable from the location).

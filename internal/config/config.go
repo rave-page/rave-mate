@@ -1720,6 +1720,16 @@ type WorldSyncFeature struct {
 	NowPlayingImg    string `json:"nowPlayingImg,omitempty"`  // card image URL (must be VRC image-allowlisted host)
 
 	FavoriteGroups []FavoriteGroup `json:"favoriteGroups,omitempty"` // pinned groups for quick role grants
+
+	// rave.live enveloped module gists (world PULLs) + editor-published rosters. These COEXIST with
+	// the flat allow.txt/posters.json above: the flat files stay for VideoTXL/ProTV/RaveAccessControl
+	// compat, the enveloped gists carry the SEQ-GATE'd {schema,seq,...} envelope. Gist ids are
+	// pointers, not secrets. See docs/WORLD_BRIDGE_CONTRACT.md.
+	PointerOn        bool              `json:"pointerOn,omitempty"`        // publish the rave.live/pointer instance link
+	PointerGistID    string            `json:"pointerGistId,omitempty"`    // "" until first publish
+	ConfigGistID     string            `json:"configGistId,omitempty"`     // rave.live/config module gist
+	PerformersGistID string            `json:"performersGistId,omitempty"` // rave.live/performers module gist
+	RosterGists      map[string]string `json:"rosterGists,omitempty"`      // editor-published roster slug -> gist id
 }
 
 // ResolvedRefresh returns the refresh interval (default 10 min).

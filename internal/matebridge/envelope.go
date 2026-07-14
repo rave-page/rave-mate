@@ -1,6 +1,9 @@
 package matebridge
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // This file defines the RUNTIME gist envelope the WORLD downloads (VRCStringDownloader ->
 // VRC.SDK3.Data.VRCJson). rave-mate is the SOLE writer (extends internal/vrcperm + internal/github).
@@ -181,4 +184,52 @@ type EmojiModule struct {
 type EmoteRef struct {
 	Name     string `json:"name"`
 	URLIndex int    `json:"urlIndex"`
+}
+
+// ── envelope serialization (rave-mate = sole writer; internal/vrcperm calls these) ─────────────
+
+// commonKeys are the reserved top-level envelope keys; a module key must not collide with them.
+var commonKeys = map[string]bool{"schema": true, "contractVersion": true, "seq": true, "updatedAt": true, "modules": true}
+
+// MarshalSingle renders a SINGLE-MODULE gist: the common envelope keys plus the module payload
+// inlined at the TOP LEVEL under moduleKey (payload embedded verbatim - the world reads it via
+// TryGetValue(moduleKey, ...)). schema is the module's own "rave.live/<kind>@<major>". Keys emit
+// sorted (map marshal); order is irrelevant to the world's key-lookup parse, but a duplicate key
+// would hard-fail VRCJson, so a moduleKey colliding with a common key is rejected.
+func MarshalSingle(schema string, seq int64, updatedAt, moduleKey string, payload json.RawMessage) ([]byte, error) {
+	if commonKeys[moduleKey] {
+		return nil, fmt.Errorf("matebridge: module key %q collides with a reserved envelope key", moduleKey)
+	}
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("matebridge: empty payload for module %q", moduleKey)
+	}
+	schemaB, _ := json.Marshal(schema)
+	cvB, _ := json.Marshal(ContractVersion)
+	seqB, _ := json.Marshal(seq)
+	uaB, _ := json.Marshal(updatedAt)
+	obj := map[string]json.RawMessage{
+		"schema":          schemaB,
+		"contractVersion": cvB,
+		"seq":             seqB,
+		"updatedAt":       uaB,
+		moduleKey:         payload,
+	}
+	return json.MarshalIndent(obj, "", "  ")
+}
+
+// MarshalBundle renders a BUNDLE gist (SchemaBundle): the common keys plus a modules map (each
+// value a module payload). One seq gates the whole bundle - use it for co-versioned low-cadence
+// config (pointer + config + performersLive together); prefer MarshalSingle for independent
+// per-module cadence + the out-of-order-completion fix.
+func MarshalBundle(seq int64, updatedAt string, modules map[string]json.RawMessage) ([]byte, error) {
+	if len(modules) == 0 {
+		return nil, fmt.Errorf("matebridge: empty bundle")
+	}
+	return json.MarshalIndent(Envelope{
+		Schema:          SchemaBundle,
+		ContractVersion: ContractVersion,
+		Seq:             seq,
+		UpdatedAt:       updatedAt,
+		Modules:         modules,
+	}, "", "  ")
 }
