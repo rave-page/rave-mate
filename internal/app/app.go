@@ -564,10 +564,10 @@ func run(parent context.Context, serviceMode bool) error {
 		title:    func() string { return nowPlayingTitle(merger) },
 	}
 	debuglog.Go(log, "governor-stream", func() { watchStreaming(ctx, obsW, log, autoLive, autoLiveIn) })
-	// Subprocessed audio player: the audio engine runs in the `player` child (a decode/codec/oto
-	// fault kills only it). Shared by every player panel; pre-warmed by Bind for instant play.
-	// features.player.nativeDecode picks the native internal/audio engine (else legacy beep/ffmpeg).
-	player, plerr := featurehost.NewPlayerProxy(log, cfg.Features.Player.NativeDecode)
+	// Subprocessed audio player: the native internal/audio engine runs in the `player` child (a
+	// decode/codec/oto fault kills only it), ffmpeg fallback for AAC/M4A. Shared by every player
+	// panel; pre-warmed by Bind for instant play.
+	player, plerr := featurehost.NewPlayerProxy(log)
 	if plerr != nil {
 		return plerr
 	}

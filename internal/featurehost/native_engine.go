@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"rave.page/mate/internal/audio"
-	"rave.page/mate/internal/audioengine"
 	"rave.page/mate/internal/logbus"
 )
 
@@ -42,10 +41,13 @@ func (n *nativeEngine) load(path string) (served string, err error) {
 	if err == nil {
 		return "native", nil
 	}
-	if !errors.Is(err, audio.ErrUnsupported) {
+	// Fall through to ffmpeg on ErrUnsupported (AAC/M4A/…) OR any native failure on a format ffmpeg
+	// handles - covers a mis-sniff (opus in an Ogg container routes to the vorbis decoder and fails).
+	// A genuine native-format error (corrupt FLAC/MP3/WAV, which ffmpeg can't rescue here) still surfaces.
+	if !errors.Is(err, audio.ErrUnsupported) && !audio.FFmpegPlayable(path) {
 		return "", err
 	}
-	dec, ferr := audioengine.NewFFmpegDecoder(path)
+	dec, ferr := audio.OpenFFmpeg(path)
 	if ferr != nil {
 		return "", fmt.Errorf("native decode unavailable + ffmpeg fallback failed: %w", ferr)
 	}
@@ -123,10 +125,10 @@ func (n *nativeEngine) Stop() {
 	n.eng.Stop()
 }
 
-func (n *nativeEngine) State() audioengine.State {
+func (n *nativeEngine) State() State {
 	cur, total, ok := n.eng.Position()
 	playing := n.eng.IsPlaying()
-	return audioengine.State{
+	return State{
 		Path:    n.eng.Loaded(),
 		Playing: ok,
 		Paused:  ok && !playing,

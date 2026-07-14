@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"rave.page/mate/internal/audioengine"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/logbus"
 )
@@ -23,15 +22,13 @@ type PlayerProxy struct {
 
 	mu        sync.Mutex
 	appCtx    context.Context
-	mirror    audioengine.State
+	mirror    State
 	onTick    func(cur, total float64)
 	onEnd     func()
 	observers map[int]playerObs        // extra tick/end listeners (detached now-playing window)
 	obsSeq    int                      // observer id source
 	dispatch  func(func())             // UI-thread dispatcher (fyne.Do); default = direct call
 	notify    func(title, body string) // decode-failure toast
-
-	nativeDecode bool // select the internal/audio engine in the child (else beep/ffmpeg)
 }
 
 // playerObs is one extra tick/end listener, independent of the single AttachUI panel sink.
@@ -41,17 +38,13 @@ type playerObs struct {
 }
 
 // NewPlayerProxy builds the proxy + its host. The child spawns on Bind (pre-warmed) so the first
-// play is instant. nativeDecode selects the internal/audio engine in the child (else beep/ffmpeg).
-func NewPlayerProxy(log *logbus.Bus, nativeDecode bool) (*PlayerProxy, error) {
-	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }, nativeDecode: nativeDecode}
+// play is instant. The child runs the native internal/audio engine (ffmpeg fallback for AAC/M4A).
+func NewPlayerProxy(log *logbus.Bus) (*PlayerProxy, error) {
+	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }}
 	h, err := New(Options{
 		Name: "player",
 		Log:  log,
-		Init: func() any {
-			return struct {
-				NativeDecode bool `json:"nativeDecode"`
-			}{p.nativeDecode}
-		},
+		Init: func() any { return struct{}{} },
 		OnEvent: map[string]func(json.RawMessage){
 			"tick":   p.onTickEvent,
 			"end":    p.onEndEvent,
@@ -120,7 +113,7 @@ func (p *PlayerProxy) onDown()                    { p.fireEnd() }
 
 func (p *PlayerProxy) fireEnd() {
 	p.mu.Lock()
-	p.mirror = audioengine.State{}
+	p.mirror = State{}
 	cb, disp := p.onEnd, p.dispatch
 	obs := p.endObservers()
 	p.mu.Unlock()
@@ -240,7 +233,7 @@ func (p *PlayerProxy) PlayFrom(path string, startSec float64) error {
 	if err != nil {
 		return err
 	}
-	var st audioengine.State
+	var st State
 	_ = json.Unmarshal(raw, &st)
 	p.mu.Lock()
 	p.mirror = st
@@ -260,7 +253,7 @@ func (p *PlayerProxy) PreviewFrom(path string, startSec float64) error {
 	if err != nil {
 		return err
 	}
-	var st audioengine.State
+	var st State
 	_ = json.Unmarshal(raw, &st)
 	p.mu.Lock()
 	p.mirror = st
@@ -347,7 +340,7 @@ func (p *PlayerProxy) Stop() {
 		cancel()
 	}
 	p.mu.Lock()
-	p.mirror = audioengine.State{}
+	p.mirror = State{}
 	p.mu.Unlock()
 }
 
@@ -359,7 +352,7 @@ func (p *PlayerProxy) Position() (cur, total float64, ok bool) {
 }
 
 // State returns the mirrored playback snapshot.
-func (p *PlayerProxy) State() audioengine.State {
+func (p *PlayerProxy) State() State {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.mirror

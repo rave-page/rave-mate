@@ -3,8 +3,6 @@ package featurehost
 import (
 	"context"
 	"encoding/json"
-
-	"rave.page/mate/internal/audioengine"
 )
 
 // playerFeature hosts the audio engine in the `player` child: it serves play/togglePause/stop/
@@ -12,19 +10,16 @@ import (
 // events back to the daemon (the PlayerProxy mirror). A decode/codec/oto fault kills only this
 // child; the host restarts it and the next play comes back clean.
 //
-// Two backends, chosen per child by the init flag nativeDecode:
-//   - legacy (default): audioengine.Engine (beep + ffmpeg).
-//   - native: audioengine.NativeEngine (internal/audio: low-latency oto, RAM preload,
-//     sample-accurate seek). AAC/M4A + any native-decode failure fall through to ffmpeg.
-//
-// Both satisfy playerBackend; the feature is otherwise identical.
+// One engine: the native internal/audio engine (low-latency oto ~15ms, RAM preload, sample-accurate
+// seek). AAC/M4A + any native-decode failure fall through to ffmpeg (internal/audio.OpenFFmpeg) on
+// the SAME transport. The legacy beep engine was retired (nativeEngine adapter in native_engine.go).
 type playerFeature struct {
 	rt  *Runtime
 	eng playerBackend
 }
 
-// playerBackend is the surface the feature drives — satisfied by both the legacy beep engine and
-// the native engine (adapter in native_engine.go). preview* implement the cue-edit hold-audition.
+// playerBackend is the surface the feature drives (native engine adapter in native_engine.go).
+// preview* implement the cue-edit hold-audition.
 type playerBackend interface {
 	PlayFrom(path string, startSec float64) error
 	TogglePause() bool
@@ -33,15 +28,10 @@ type playerBackend interface {
 	PreviewRelease(fallbackSec float64)
 	Preload(path string) error
 	Stop()
-	State() audioengine.State
+	State() State
 }
 
 func init() { Register("player", func() Feature { return &playerFeature{} }) }
-
-// playerInit is the child's init params (from the daemon proxy).
-type playerInit struct {
-	NativeDecode bool `json:"nativeDecode"`
-}
 
 // playerTick is the position event payload (~5/s while playing). Paused rides every tick so the
 // daemon mirror tracks pause state continuously - without it a hold-audition release (a
@@ -59,10 +49,8 @@ type playerError struct {
 	Msg  string `json:"msg"`
 }
 
-func (f *playerFeature) Init(raw json.RawMessage, rt *Runtime) error {
+func (f *playerFeature) Init(_ json.RawMessage, rt *Runtime) error {
 	f.rt = rt
-	var p playerInit
-	_ = json.Unmarshal(raw, &p) // absent/old daemon => legacy
 	tick := func(cur, total float64) {
 		paused := false
 		if f.eng != nil { // set before ticks fire; the tick reads live pause state each emit
@@ -72,13 +60,8 @@ func (f *playerFeature) Init(raw json.RawMessage, rt *Runtime) error {
 	}
 	end := func() { rt.Emit("end", struct{}{}) }
 	perr := func(path, msg string) { rt.Emit("perror", playerError{Path: path, Msg: msg}) }
-	if p.NativeDecode {
-		f.eng = newNativeEngine(rt.Log, tick, end, perr)
-		rt.Log.Info("player", "audio engine = native (internal/audio)", nil)
-	} else {
-		f.eng = audioengine.New(rt.Log, tick, end, perr)
-		rt.Log.Info("player", "audio engine = legacy (beep/ffmpeg)", nil)
-	}
+	f.eng = newNativeEngine(rt.Log, tick, end, perr)
+	rt.Log.Info("player", "audio engine = native (internal/audio)", nil)
 	return nil
 }
 
@@ -158,9 +141,5 @@ func (f *playerFeature) Handle(_ context.Context, method string, params json.Raw
 	}
 }
 
-// Compile-time: both engines satisfy playerBackend (legacy via preview_shim.go, native via
-// native_engine.go).
-var (
-	_ playerBackend = (*audioengine.Engine)(nil)
-	_ playerBackend = (*nativeEngine)(nil)
-)
+// Compile-time: the native engine adapter satisfies playerBackend (native_engine.go).
+var _ playerBackend = (*nativeEngine)(nil)

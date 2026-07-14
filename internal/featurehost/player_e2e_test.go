@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"rave.page/mate/internal/audioengine"
 	"rave.page/mate/internal/logbus"
 )
 
@@ -95,7 +94,7 @@ func TestPlayerChildPlaySeekStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("play: %v", err)
 	}
-	var st audioengine.State
+	var st State
 	_ = json.Unmarshal(raw, &st)
 	if !st.Playing {
 		t.Fatalf("expected playing, got %+v", st)

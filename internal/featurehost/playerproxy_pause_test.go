@@ -11,7 +11,7 @@ import (
 // fast re-press takes the warm unpause path, not a full re-decode. No child/device needed - drives
 // the mirror via the event handlers directly (Running()==false on an unstarted host).
 func TestPlayerMirrorTracksPause(t *testing.T) {
-	p, err := NewPlayerProxy(logbus.New(16), false)
+	p, err := NewPlayerProxy(logbus.New(16))
 	if err != nil {
 		t.Fatal(err)
 	}
