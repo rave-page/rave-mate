@@ -43,10 +43,14 @@ type playerInit struct {
 	NativeDecode bool `json:"nativeDecode"`
 }
 
-// playerTick is the position event payload (~5/s while playing).
+// playerTick is the position event payload (~5/s while playing). Paused rides every tick so the
+// daemon mirror tracks pause state continuously - without it a hold-audition release (a
+// fire-and-forget previewRelease that pauses the child) left the mirror reading Playing+!Paused,
+// and the next hold-Space skipped the unpause → silence until Stop.
 type playerTick struct {
-	Cur   float64 `json:"cur"`
-	Total float64 `json:"total"`
+	Cur    float64 `json:"cur"`
+	Total  float64 `json:"total"`
+	Paused bool    `json:"paused"`
 }
 
 // playerError is the decode-failure event payload (drives a daemon toast).
@@ -59,7 +63,13 @@ func (f *playerFeature) Init(raw json.RawMessage, rt *Runtime) error {
 	f.rt = rt
 	var p playerInit
 	_ = json.Unmarshal(raw, &p) // absent/old daemon => legacy
-	tick := func(cur, total float64) { rt.Emit("tick", playerTick{Cur: cur, Total: total}) }
+	tick := func(cur, total float64) {
+		paused := false
+		if f.eng != nil { // set before ticks fire; the tick reads live pause state each emit
+			paused = f.eng.State().Paused
+		}
+		rt.Emit("tick", playerTick{Cur: cur, Total: total, Paused: paused})
+	}
 	end := func() { rt.Emit("end", struct{}{}) }
 	perr := func(path, msg string) { rt.Emit("perror", playerError{Path: path, Msg: msg}) }
 	if p.NativeDecode {

@@ -103,7 +103,7 @@ func (p *PlayerProxy) onTickEvent(data json.RawMessage) {
 		return
 	}
 	p.mu.Lock()
-	p.mirror.Cur, p.mirror.Total, p.mirror.Playing = t.Cur, t.Total, true
+	p.mirror.Cur, p.mirror.Total, p.mirror.Playing, p.mirror.Paused = t.Cur, t.Total, true, t.Paused
 	cb, disp := p.onTick, p.dispatch
 	obs := p.tickObservers()
 	p.mu.Unlock()
@@ -276,6 +276,17 @@ func (p *PlayerProxy) PreviewRelease(fallbackSec float64) {
 			FallbackSec float64 `json:"fallbackSec"`
 		}{fallbackSec})
 	}
+	// Optimistic mirror: the child pauses + snaps to fallbackSec. Reflect it NOW - the confirming
+	// tick is ~200ms out, and a fast re-press before it lands must see Paused so it unpauses the
+	// warm decoder instead of forcing a full re-decode (the "have to hit Stop first" bug).
+	p.mu.Lock()
+	if p.mirror.Playing {
+		p.mirror.Paused = true
+		if fallbackSec >= 0 {
+			p.mirror.Cur = fallbackSec
+		}
+	}
+	p.mu.Unlock()
 }
 
 // Preload decodes path into the child (RAM preload if it fits) without playing, so the first

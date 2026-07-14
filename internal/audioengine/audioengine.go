@@ -27,6 +27,13 @@ import (
 
 const speakerRate = beep.SampleRate(48000)
 
+// speakerLatency is the beep/oto output buffer. It bounds cue-audition responsiveness on the legacy
+// engine: hold-Space start latency AND the release tail are ~one buffer (no beep API flushes the
+// oto ring without tearing down the stream). 40ms halves the old 100ms while staying underrun-safe
+// on a typical DJ box. The native engine (features.player.nativeDecode) runs ~15ms + drops the
+// buffer on preview/seek, so it's the lower-latency path for grid-check auditioning.
+const speakerLatency = 40 * time.Millisecond
+
 var (
 	speakerOnce sync.Once
 	speakerErr  error
@@ -34,7 +41,7 @@ var (
 
 func initSpeaker() error {
 	speakerOnce.Do(func() {
-		speakerErr = speaker.Init(speakerRate, speakerRate.N(time.Second/10))
+		speakerErr = speaker.Init(speakerRate, speakerRate.N(speakerLatency))
 	})
 	return speakerErr
 }

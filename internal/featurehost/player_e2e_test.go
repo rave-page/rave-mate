@@ -119,3 +119,63 @@ func TestPlayerChildPlaySeekStop(t *testing.T) {
 		t.Fatalf("stop: %v", err)
 	}
 }
+
+// TestPlayerPreviewPauseCycle exercises the cue-audition hold/release/re-press wire path against the
+// real child: previewFrom → previewRelease must land a tick reporting Paused (so the daemon mirror
+// tracks it and the next hold-Space unpauses instead of re-decoding), then togglePause resumes.
+func TestPlayerPreviewPauseCycle(t *testing.T) {
+	wav := filepath.Join(t.TempDir(), "tone.wav")
+	writeSineWAV(t, wav, 5)
+
+	var ticks atomic.Int64
+	var lastPaused atomic.Bool
+	log := logbus.New(64)
+	h, err := New(Options{
+		Name: "player",
+		Log:  log,
+		Init: func() any { return struct{}{} },
+		OnEvent: map[string]func(json.RawMessage){
+			"tick": func(data json.RawMessage) {
+				var tk playerTick
+				if json.Unmarshal(data, &tk) == nil {
+					ticks.Add(1)
+					lastPaused.Store(tk.Paused)
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.command = func() *exec.Cmd {
+		exe, _ := os.Executable()
+		cmd := exec.Command(exe)
+		cmd.Env = append(os.Environ(), "RAVE_MATE_TEST_FEATURE=player")
+		return cmd
+	}
+
+	ctx := context.Background()
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "child ready", 5*time.Second, h.Running)
+
+	if _, err := h.Call(ctx, "previewFrom", map[string]any{"path": wav, "startSec": 0.5}); err != nil {
+		t.Fatalf("previewFrom: %v", err)
+	}
+	waitFor(t, "playing (tick, !paused)", 3*time.Second, func() bool { return ticks.Load() >= 3 && !lastPaused.Load() })
+
+	// Release: pause + snap back. A subsequent tick must report Paused=true.
+	_ = h.Send("previewRelease", map[string]float64{"fallbackSec": 0.5})
+	waitFor(t, "paused tick after release", 3*time.Second, func() bool { return lastPaused.Load() })
+
+	// Re-press: unpause. Ticks must report !paused again (warm path, no re-decode).
+	if _, err := h.Call(ctx, "togglePause", nil); err != nil {
+		t.Fatalf("togglePause: %v", err)
+	}
+	waitFor(t, "resumed tick after re-press", 3*time.Second, func() bool { return !lastPaused.Load() })
+
+	if _, err := h.Call(ctx, "stop", nil); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+}
