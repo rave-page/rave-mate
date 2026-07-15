@@ -227,6 +227,17 @@ type seekParams struct {
 	Explicit bool    `json:"explicit,omitempty"`
 }
 
+// A large ffmpeg-decoded file (long AAC/M4A under the RAM-preload cap) fully decodes to RAM inside
+// the child Handle BEFORE the Call responds; a near-cap (~46 min) decode under concurrent OBS/VRChat
+// load runs tens of seconds. The old 10-15s Call timeouts spuriously failed it (false "playback
+// error" toast + the mirror never updated, while the child kept decoding and audio started late).
+// Size the timeouts to cover a worst-case decode; the ceEnter Preload (background) normally caches
+// the track before the first press, and load() dedups a press that races the in-flight preload.
+const (
+	playCallTimeout    = 60 * time.Second
+	preloadCallTimeout = 120 * time.Second
+)
+
 // Play decodes + starts path in the child, replacing any current playback.
 func (p *PlayerProxy) Play(path string) error { return p.PlayFrom(path, 0) }
 
@@ -236,7 +247,7 @@ func (p *PlayerProxy) PlayFrom(path string, startSec float64) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), playCallTimeout)
 	defer cancel()
 	raw, err := p.host.Call(ctx, "play", playParams{Path: path, StartSec: startSec})
 	if err != nil {
@@ -256,7 +267,7 @@ func (p *PlayerProxy) PreviewFrom(path string, startSec float64) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), playCallTimeout)
 	defer cancel()
 	raw, err := p.host.Call(ctx, "previewFrom", playParams{Path: path, StartSec: startSec})
 	if err != nil {
@@ -297,7 +308,7 @@ func (p *PlayerProxy) Preload(path string) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), preloadCallTimeout)
 	defer cancel()
 	_, err := p.host.Call(ctx, "preload", playParams{Path: path})
 	return err

@@ -152,8 +152,10 @@ func (n *nativeEngine) PreviewRelease(fallbackSec float64) {
 	}
 }
 
-func (n *nativeEngine) SeekTo(sec float64, _ bool) {
-	n.eng.SeekTo(sec) // native seek is always sample-exact; the explicit flag is a beep-only guard
+func (n *nativeEngine) SeekTo(sec float64, explicit bool) {
+	// RAM/native seeks are always sample-exact + free; on a STREAMED ffmpeg source, explicit=false
+	// (passive follow-slider) coalesces a near reseek so it doesn't respawn ffmpeg every tick.
+	n.eng.SeekTo(sec, explicit)
 	cur, total, ok := n.eng.Position()
 	if ok && n.onTick != nil {
 		n.onTick(cur, total)
