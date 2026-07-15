@@ -138,7 +138,7 @@ func recStateText(s audiorec.Status) string {
 // ableLinkHTML renders the Link sync panel: phrase-phase bar, tempo/peers summary, a resync
 // button, and (when OBS media-sync is present) the per-source chase/delay-comp readout.
 func (u *UI) ableLinkHTML() string {
-	st := u.svc.AbleLink.State()
+	st := u.svc.AbleLink.StateNow() // fresh phase (mirror snapshot is ~10 Hz)
 	if !st.Available {
 		return statusRow("warning", i18n.T("live.ablelink.backend"), i18n.T("live.ablelink.unavailable"))
 	}
@@ -200,7 +200,7 @@ func (u *UI) pushAbleLink() {
 	if u.shell == nil || u.svc.AbleLink == nil {
 		return
 	}
-	st := u.svc.AbleLink.State()
+	st := u.svc.AbleLink.StateNow() // extrapolate the ~10 Hz mirror to now so the pushed phase is fresh
 	q := st.Quantum
 	if q <= 0 {
 		q = 16
