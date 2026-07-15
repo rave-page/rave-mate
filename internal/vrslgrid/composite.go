@@ -162,10 +162,6 @@ func drawGrid(img *image.RGBA, xOff int, unis [][512]byte, mode Mode, bf byteFn)
 		}
 		return
 	}
-	blocks := len(unis)
-	if blocks < 1 {
-		blocks = 1
-	}
 	for i := 0; i < len(unis); i++ {
 		data := unis[i]
 		for ch := 0; ch < ChPerUni; ch++ {
