@@ -90,6 +90,13 @@ func (d customDecoder) handle(_ time.Time, m midi.Message, emit func(session.Obs
 		if !ok || !spec.boolean {
 			return
 		}
+		// A momentary Play button pulses on-press then off-release; the release is NOT
+		// "stopped playing". Emitting isPlaying=false on key-up dropped the deck from
+		// now-playing one frame after it appeared (flash-then-empty). Key-up is a no-op for
+		// Play; the deck stays now-playing until a load/staleness/real-time source clears it.
+		if m.IsNoteOff() && spec.field == session.FieldIsPlaying {
+			return
+		}
 		value = m.IsNoteOn()
 	default:
 		return
