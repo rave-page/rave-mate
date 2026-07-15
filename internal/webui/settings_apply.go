@@ -47,6 +47,7 @@ func settingModule(id string) string {
 		{"dmxmidi-", "dmxmidi"},
 		{"dmx-", "dmx"},
 		{"rtsp-", "rtspserve"},
+		{"vrslstream-", "vrslstream"},
 	} {
 		if strings.HasPrefix(id, p.pre) {
 			return p.mod
@@ -242,6 +243,7 @@ func (u *UI) moduleBusy(mod string) bool {
 var moduleToggleKey = map[string]string{
 	"traktor": "traktor", "obs": "obs", "abletonlink": "ablelink", "peers": "peers",
 	"setcapture": "setcapture", "dmx": "dmx", "dmxmidi": "dmxmidi", "rtspserve": "rtsp",
+	"vrslstream": "vrslstream",
 }
 
 // moduleDisplayName resolves the localized feature name for restart toasts.

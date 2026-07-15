@@ -298,6 +298,11 @@ var helpTopics = map[string]helpTopic{
 		Title: i18n.T("help.rtsp-passthrough.title"),
 		Body:  i18n.T("help.rtsp-passthrough.body"),
 	},
+	"stream-why": {
+		Title: i18n.T("help.stream-why.title"),
+		Body:  i18n.T("help.stream-why.body"),
+		Links: []ttLink{{"VRSL (VR Stage Lighting)", "https://github.com/AcChosen/VR-Stage-Lighting"}},
+	},
 	// ── Settings: Media-link card ──
 	"ml-accel": {
 		Title: i18n.T("help.ml-accel.title"),

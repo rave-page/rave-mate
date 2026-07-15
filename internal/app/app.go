@@ -105,6 +105,7 @@ import (
 	"rave.page/mate/internal/vrcperm"
 	"rave.page/mate/internal/vrctools"
 	"rave.page/mate/internal/vroverlay"
+	"rave.page/mate/internal/vrslstream"
 	"rave.page/mate/internal/vrstats"
 	"rave.page/mate/internal/waveform"
 	"rave.page/mate/internal/webcam"
@@ -977,6 +978,14 @@ func run(parent context.Context, serviceMode bool) error {
 	// RTSP/TCP for VRChat AVPro (rtspt://) - no OBS/MediaMTX relay.
 	rtspSrv := rtspserve.New(log, func() config.RTSPServeFeature { return cfg.Features.RTSPServe })
 
+	// VRSL DMX-over-video stream: render the shared DMX store → VRSL grid → ffmpeg → RTMP/WHIP push
+	// for VRChat playback. Reuses dmxRouter's store so one Art-Net listener serves both (it owns its
+	// own listener only when the DMX plane is off). In-proc rtspserve-style ffmpeg supervisor.
+	vrslStream := vrslstream.New(log, dmxRouter.Store(),
+		func() config.StreamFeature { return cfg.Features.Stream },
+		func() bool { return cfg.Features.DMX.Enabled },
+		func() config.DMXFeature { return cfg.Features.DMX })
+
 	// Application groups: relaunch a DJ-rig app set (crash recovery). LaunchGroup may sleep
 	// (per-app DelayMs), so fire it off-thread so a MIDI/VR dispatch isn't blocked.
 	appGroups := appgroups.New(log, func() []config.AppGroup { return cfg.Features.AppGroups.Groups })
@@ -1436,6 +1445,12 @@ func run(parent context.Context, serviceMode bool) error {
 		Enabled: func() bool { return cfg.Features.RTSPServe.Enabled },
 		Start:   rtspSrv.Start,
 	})
+	// VRSL DMX-over-video stream (ffmpeg encode → RTMP/WHIP push). Settings edits auto-restart it.
+	mods.Add(&module.Service{
+		Name:    "vrslstream",
+		Enabled: func() bool { return cfg.Features.Stream.Enabled },
+		Start:   vrslStream.Start,
+	})
 	// Webcam/UVC source (medialink P5). Disabled = zero footprint (no ffmpeg child, no COM).
 	mods.Add(&module.Service{
 		Name:    "webcam",
@@ -1571,7 +1586,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 
 	if serviceMode {
-		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 		remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app/VR-View screenshot (VR works headless)
 		remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 		remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -1617,6 +1632,7 @@ func run(parent context.Context, serviceMode bool) error {
 		MIDIEmit:    midiEmit,
 		MIDISource:  midiSrc,
 		RTSP:        rtspSrv,
+		VRSLStream:  vrslStream,
 		Timecode:    tcSvc,
 		Media:       mediaCtl,
 		MediaRoutes: mediaRoutesCtl,
@@ -1698,7 +1714,7 @@ func run(parent context.Context, serviceMode bool) error {
 		perfmon.RegisterProbe("recorder.reconcile", ar.Stats)
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
-	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -2258,6 +2274,7 @@ type appControl struct {
 	appGroups   *appgroups.Service            // application-group launcher (ctl launch-group); may be nil
 	obsControl  *obscontrol.Manager           // cross-instance OBS control + media-sync status (ctl obs-sync-status); may be nil
 	dmxR        *dmx.Router                   // DMX plane (ctl dmx-status); may be nil
+	vrslStream  *vrslstream.Streamer          // VRSL DMX-over-video stream (ctl stream-status); may be nil
 	tc          *timecode.Service             // house timecode outputs (ctl tc-status/tc-start/tc-stop); may be nil
 	gpuRec      *gpuRecovery                  // GPU-fault recovery (ctl gpu-selftest); nil in service mode
 	media       *medialink.RouteManager       // media plane (ctl encoder-scan: probed encoders); may be nil
@@ -2921,6 +2938,14 @@ func (c *appControl) DMXStatus() string {
 		return "dmx plane unavailable"
 	}
 	return c.dmxR.StatusText()
+}
+
+// StreamStatus reports the VRSL DMX-over-video stream: push target, encoder state, restarts.
+func (c *appControl) StreamStatus() string {
+	if c.vrslStream == nil {
+		return "vrsl stream unavailable"
+	}
+	return c.vrslStream.StatusText()
 }
 
 // OBSSyncStatus reports the media-sync tier state (house clock + per-source chase status) as JSON.

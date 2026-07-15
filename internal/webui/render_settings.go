@@ -80,6 +80,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "dmx", label: i18n.T("settings.toggle.dmx"), module: "dmx", get: func() bool { return f.DMX.Enabled }, set: func(b bool) { f.DMX.Enabled = b }},
 		{id: "dmxmidi", label: i18n.T("settings.toggle.dmxmidi"), module: "dmxmidi", get: func() bool { return f.DMXMIDI.Enabled }, set: func(b bool) { f.DMXMIDI.Enabled = b }},
 		{id: "rtsp", label: i18n.T("settings.toggle.rtsp"), module: "rtspserve", get: func() bool { return f.RTSPServe.Enabled }, set: func(b bool) { f.RTSPServe.Enabled = b }},
+		{id: "vrslstream", label: i18n.T("settings.toggle.vrslstream"), module: "vrslstream", get: func() bool { return f.Stream.Enabled }, set: func(b bool) { f.Stream.Enabled = b }},
 		{id: "unity", label: i18n.T("settings.toggle.unity"), get: func() bool { return f.Unity.Enabled }, set: func(b bool) { f.Unity.Enabled = b }},
 		// System
 		{id: "appgroups", label: i18n.T("settings.toggle.appgroups"), retab: true, get: func() bool { return f.AppGroups.Enabled }, set: func(b bool) { f.AppGroups.Enabled = b }},
@@ -148,7 +149,7 @@ func settingsSections() []setSection {
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "accountbridge", "webcam", "medialink", "timecode", "ablelink"}},
 		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
-		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "unity"}},
+		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "vrslstream", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
 	}
 }
@@ -325,6 +326,7 @@ var settingsCardTips = map[string]string{
 	"obssync":       "obssync-mediasync",
 	"dmx":           "dmx-connect",
 	"rtsp":          "rtsp-why",
+	"vrslstream":    "stream-why",
 }
 
 func (u *UI) settingsCard(id string, st stv) string {
@@ -611,6 +613,8 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.dmxmidi.title"), i18n.T("settings.card.dmxmidi.desc"), u.dmxMidiBody()
 	case "rtsp":
 		return i18n.T("settings.card.rtsp.title"), i18n.T("settings.card.rtsp.desc"), u.rtspBody()
+	case "vrslstream":
+		return i18n.T("settings.card.vrslstream.title"), i18n.T("settings.card.vrslstream.desc"), u.streamBody()
 	case "unity":
 		return i18n.T("settings.card.unity.title"), i18n.T("settings.card.unity.desc"), u.unityBody()
 
@@ -928,6 +932,28 @@ func (u *UI) rtspBody() string {
 		fpair(field(i18n.T("settings.body.common.frameRate"), "set:rtsp-fps", strconv.Itoa(f.ResolvedFPS()), "number"),
 			field(i18n.T("settings.body.rtsp.bitrate"), "set:rtsp-bitrate", strconv.Itoa(f.ResolvedBitrate()), "number")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.rtsp.note")) + ` rtspt://&lt;this machine's IP&gt;` + html.EscapeString(f.ResolvedListenAddr()) + html.EscapeString(f.ResolvedPath()) + `</div>`
+}
+
+func (u *UI) streamBody() string {
+	f := &u.svc.Cfg.Features.Stream
+	bitrate := ""
+	if f.BitrateKbps > 0 {
+		bitrate = strconv.Itoa(f.BitrateKbps)
+	}
+	return fpair(selectBox(i18n.T("settings.body.vrslstream.transport"), "set:vrslstream-transport",
+		[][2]string{{"rtmp", "RTMP"}, {"whip", "WHIP"}}, f.ResolvedTransport()),
+		field(i18n.T("settings.body.vrslstream.url"), "set:vrslstream-url", f.URL, "text")) +
+		field(i18n.T("settings.body.vrslstream.streamKey"), "set:vrslstream-key", f.StreamKey, "text") +
+		fpair(selectBox(i18n.T("settings.body.vrslstream.mode"), "set:vrslstream-mode",
+			[][2]string{{"standard", "standard"}, {"extended", "extended"}}, f.ResolvedMode()),
+			selectBox(i18n.T("settings.body.vrslstream.colorMode"), "set:vrslstream-color",
+				[][2]string{{"mono", "mono"}, {"rgb9", "rgb9"}}, f.ResolvedColorMode())) +
+		field(i18n.T("settings.body.dmx.universes"), "set:vrslstream-universes", intsToCSVWeb(f.Universes), "text") +
+		fpair(field(i18n.T("settings.body.common.frameRate"), "set:vrslstream-fps", strconv.Itoa(f.ResolvedFPS()), "number"),
+			field(i18n.T("settings.body.vrslstream.bitrate"), "set:vrslstream-bitrate", bitrate, "number")) +
+		selectBox(i18n.T("settings.body.vrslstream.encoder"), "set:vrslstream-encoder",
+			[][2]string{{"x264", "x264 (CPU)"}, {"nvenc", "NVENC"}, {"qsv", "QSV"}, {"amf", "AMF"}, {"auto", "auto"}}, f.ResolvedEncoder()) +
+		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.vrslstream.note")) + `</div>`
 }
 
 func (u *UI) unityBody() string {
@@ -1508,6 +1534,23 @@ func (u *UI) settingsStatus() map[string]stv {
 			set("rtsp", stWarn(tr("settings.status.rtsp.startingSource")))
 		}
 	}
+	if !f.Stream.Enabled {
+		set("vrslstream", stOff(""))
+	} else if u.svc.VRSLStream == nil {
+		set("vrslstream", stWarn(tr("settings.status.common.unavailable")))
+	} else {
+		snap := u.svc.VRSLStream.Status()
+		switch {
+		case !snap.Running:
+			set("vrslstream", stWarn(tr("settings.status.common.notRunningPortBusy")))
+		case snap.LastErr != "":
+			set("vrslstream", stWarn(snap.LastErr)) // raw error text, not authored UI copy
+		case snap.SourceUp:
+			set("vrslstream", stLive(tr("settings.status.vrslstream.pushing", i18n.A{"count": strconv.FormatUint(snap.Frames, 10)})))
+		default:
+			set("vrslstream", stWarn(tr("settings.status.vrslstream.starting")))
+		}
+	}
 	if len(f.Unity.Projects) == 0 {
 		set("unity", stOff(tr("settings.status.unity.noProjects")))
 	} else {
@@ -1897,6 +1940,29 @@ func (u *UI) applySet(id, val string) {
 		toInt(&f.RTSPServe.FPS, 1, 120)
 	case "rtsp-bitrate":
 		toInt(&f.RTSPServe.BitrateKbps, 250, 50000)
+	// VRSL video stream
+	case "vrslstream-transport":
+		f.Stream.Transport = v
+	case "vrslstream-url":
+		f.Stream.URL = v
+	case "vrslstream-key":
+		f.Stream.StreamKey = v
+	case "vrslstream-mode":
+		f.Stream.Mode = v
+	case "vrslstream-color":
+		f.Stream.ColorMode = v
+	case "vrslstream-universes":
+		f.Stream.Universes = csvToIntsWeb(v)
+	case "vrslstream-fps":
+		toInt(&f.Stream.FPS, 1, 60)
+	case "vrslstream-bitrate":
+		if v == "" || v == "0" {
+			f.Stream.BitrateKbps = 0 // auto (derive from frame size)
+		} else {
+			toInt(&f.Stream.BitrateKbps, 250, 50000)
+		}
+	case "vrslstream-encoder":
+		f.Stream.Encoder = v
 	// Overlays (rendered on the Overlays tab; port is read at overlay-server start)
 	case "overlay-port":
 		toInt(&f.OverlayWeb.Port, 1, 65535)

@@ -366,6 +366,10 @@
     "midi-mapping": {
       "title": "Contrôler rave-mate avec votre contrôleur DJ",
       "body": "Assignez n'importe quel pad, bouton, potentiomètre ou encodeur sans fin de votre contrôleur MIDI aux actions rave-mate : parcourir la collection, ouvrir un morceau dans l'éditeur de cues, déplacer la tête de lecture, pré-écouter depuis le curseur (maintenir), poser des marqueurs de drop et ajuster la grille - les mains sur le matériel, les yeux sur la waveform. Cliquez sur Apprendre à côté d'une action, touchez la commande sur votre appareil, c'est fait. Les actions dépendent de la vue : celles de l'éditeur de cues ne se déclenchent que lorsqu'il est ouvert, celles de la bibliothèque uniquement sur la liste de la collection - un même pad peut donc changer de rôle selon la vue. Pour les potentiomètres et encodeurs, choisissez l'encodage de valeur dans la ligne qui apparaît après l'apprentissage : « potentiomètre absolu » pour les potentiomètres classiques, un des modes relatifs pour les encodeurs sans fin (voir le manuel - le complément à deux est le plus courant), plus une sensibilité (ticks par pas) et une inversion de sens. Les mappages sont organisés en profils par appareil : l'appareil touché pendant l'apprentissage possède le nouveau mappage, deux contrôleurs peuvent donc piloter la même action avec des commandes différentes (ou des actions différentes avec le même numéro CC). Chaque section d'appareil peut être mise en pause dans son ensemble, copiée vers un autre contrôleur (les modes et la sensibilité survivent, seul l'appareil change) ou vidée. Les mappages appris avant l'existence des profils vivent sous « Tout appareil » et continuent de se déclencher depuis chaque contrôleur."
+    },
+    "stream-why": {
+      "title": "Flux vidéo VRSL",
+      "body": "Diffuse votre éclairage DMX en direct dans VRChat sous forme de vidéo. rave-mate rend les univers DMX dans une grille de pixels VRSL, l'encode avec ffmpeg et la pousse via RTMP (ou WHIP) vers un service de transcodage (VRCDN, Twitch ou le vôtre) qui la sert au casque. Le monde lit cette vidéo et redécode la grille en lumières, sans relais Spout/NDI/OBS.\n\nLe mode standard produit une grille VRSL standard qui éclaire n'importe quel monde VRSL. Le mode étendu est un sur-ensemble : il ajoute une précision 16 bits, un en-tête d'intégrité et un compteur de vivacité qu'un monde rave.page décode, tandis qu'un monde VRSL standard le lit toujours comme du simple 8 bits. Gardez toute la chaîne LINÉAIRE : les pixels sont des valeurs de lumière brutes, pas une image encodée en gamma."
     }
   },
   "library": {
@@ -2327,6 +2331,16 @@
         "sessionSub": "via {transport} - expire le {expires} si inutilisée",
         "revoke": "Révoquer",
         "revokeAll": "Tout révoquer"
+      },
+      "vrslstream": {
+        "transport": "Transport",
+        "url": "URL de diffusion",
+        "streamKey": "Clé de flux (RTMP)",
+        "mode": "Mode",
+        "colorMode": "Mode couleur",
+        "bitrate": "Débit (kbit/s, 0 = auto)",
+        "encoder": "Encodeur",
+        "note": "Nécessite ffmpeg (à installer dans Bibliothèque et médias). Réglez le lecteur vidéo du monde sur cette même URL. Le mode étendu ajoute des métadonnées 16 bits et d'intégrité qu'un monde rave.page décode ; le mode standard éclaire n'importe quel monde VRSL."
       }
     },
     "card": {
@@ -2516,6 +2530,10 @@
       "accountbridge": {
         "title": "Passerelle de compte rave.page",
         "desc": "Atteindre ce PC depuis n'importe où via votre compte rave.page - pas seulement depuis ce réseau."
+      },
+      "vrslstream": {
+        "title": "Flux vidéo VRSL",
+        "desc": "Rend le rig DMX en direct dans une grille vidéo VRSL et la pousse (RTMP/WHIP) vers un service de transcodage pour la lecture dans VRChat."
       }
     },
     "empty": {
@@ -2778,6 +2796,10 @@
         "notPersistedHint": "Ce système d'exploitation n'offre pas de coffre à secrets utilisable par rave-mate : la clé de l'authentificateur reste en mémoire et disparaît à la fermeture. Elle n'est jamais écrite en clair sur le disque. Reliez-la à nouveau après un redémarrage.",
         "signedOut": "Non connecté",
         "signedOutHint": "La passerelle réunit vos appareils au sein de votre compte rave.page : elle reste donc en veille tant que vous n'êtes pas connecté. Rien d'anormal."
+      },
+      "vrslstream": {
+        "pushing": "diffusion – {count} image(s)",
+        "starting": "démarrage de l'encodeur…"
       }
     },
     "subtitle": "Basculez ce que vous utilisez - les fonctions désactivées ne possèdent ni port, ni goroutine, ni sous-processus.",
@@ -2896,7 +2918,8 @@
       "webcam": "Webcam / source UVC",
       "worldsync": "World sync (flux gist)",
       "gridfix": "Correcteur de beatgrid",
-      "accountbridge": "Passerelle de compte rave.page"
+      "accountbridge": "Passerelle de compte rave.page",
+      "vrslstream": "Flux vidéo VRSL"
     },
     "vr": {
       "action": "Action",
