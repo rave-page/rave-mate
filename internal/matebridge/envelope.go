@@ -35,6 +35,7 @@ const (
 	SchemaCaptions   = "rave.live/captions@1"
 	SchemaEvents     = "rave.live/events@1"
 	SchemaEmoji      = "rave.live/emoji@1"
+	SchemaAccess     = "rave.live/access@1"
 )
 
 // Module keys inside a bundle Envelope.Modules map (also the single-module inline key).
@@ -46,6 +47,7 @@ const (
 	ModuleCaptions   = "captions"
 	ModuleEvents     = "events"
 	ModuleEmoji      = "emoji"
+	ModuleAccess     = "access"
 )
 
 // Envelope is the common gist wrapper. Modules is present in a BUNDLE gist (each value is a module

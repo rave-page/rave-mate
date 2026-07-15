@@ -197,6 +197,9 @@ func (s *Service) RefreshAll(ctx context.Context) {
 	if f.NowPlayingOn {
 		s.PublishNowPlaying(ctx)
 	}
+	if f.AccessOn {
+		s.PublishAccess(ctx) // rave.live/access module (hosted per-group permissions)
+	}
 	s.maybePublishPointer(ctx) // rave.live/pointer instance link (enveloped; own enablement flag)
 	s.notify()
 }

@@ -71,6 +71,8 @@ func (s *Service) gistIDPtr(key string) *string {
 		return &f.ConfigGistID
 	case "performers":
 		return &f.PerformersGistID
+	case "access":
+		return &f.AccessGistID
 	}
 	return nil
 }
