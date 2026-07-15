@@ -86,6 +86,7 @@ type Control interface {
 	DJSyncAutoStatus() string                    // one-line JSON: auto-sync scheduler state + armed jobs
 	VRPerf() string                              // JSON array: VR perf/debug telemetry from every instance
 	DMXStatus() string                           // DMX plane: universes seen (pps, source IP) + grid sink state
+	StreamStatus() string                        // VRSL DMX-over-video stream: push target + encoder state
 	TCStatus() string                            // one line: timecode running/rate/current TC/sinks on-off
 	TCStart() string                             // start the house timecode clock; status line
 	TCStop() string                              // stop the house timecode clock; status line
@@ -331,6 +332,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.VRPerf())
 	case cmd == "DMX-STATUS":
 		fmt.Fprintln(conn, ctrl.DMXStatus())
+	case cmd == "STREAM-STATUS":
+		fmt.Fprintln(conn, ctrl.StreamStatus())
 	case cmd == "TC-STATUS":
 		fmt.Fprintln(conn, ctrl.TCStatus())
 	case cmd == "TC-START":

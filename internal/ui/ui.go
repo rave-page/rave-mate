@@ -63,6 +63,7 @@ import (
 	"rave.page/mate/internal/vrcperm"
 	"rave.page/mate/internal/vrctools"
 	"rave.page/mate/internal/vroverlay"
+	"rave.page/mate/internal/vrslstream"
 	"rave.page/mate/internal/vrstats"
 	"rave.page/mate/internal/webcam"
 	"rave.page/mate/internal/worker"
@@ -147,6 +148,7 @@ type Services struct {
 	MIDIEmit     *midiemit.Emitter             // software MIDI test controller (pad/CC surface → loopback); may be nil
 	MIDISource   *featurehost.MidiProxy        // native MIDI-in: learned controllers + DJ bridge (learn/reconfigure/port enum); may be nil
 	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
+	VRSLStream   *vrslstream.Streamer          // VRSL DMX-over-video stream (ffmpeg → RTMP/WHIP push); may be nil
 	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
 	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
 	MediaRoutes  mediaroute.ReceiveControl     // P4 video routes: remote-source listing + receive control; in-proc or subprocess-proxied; may be nil
