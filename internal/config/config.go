@@ -76,7 +76,10 @@ const (
 	// desktop-UI binds are paused). Additive - profiles are DERIVED from each bind's captured
 	// port ("" = the any-device profile), so v29 binds keep firing identically; the disable
 	// list starts empty (all profiles active).
-	configVersion = 30
+	// v31 added the VRSL DMX-over-video stream (Stream): renders the DMX universe store into a
+	// VRSL-compatible video grid, ffmpeg-encodes it, and pushes RTMP/WHIP to a transcode service
+	// for VRChat playback. Additive, off by default (opt-in; needs ffmpeg + a push URL).
+	configVersion = 31
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -183,6 +186,8 @@ type Features struct {
 	DMXMIDI DMXMIDIFeature `json:"dmxMidi"` // DMX → MIDI CC bridge for VRChat --midi worlds
 
 	RTSPServe RTSPServeFeature `json:"rtspServe"` // local RTSP performer chain (ffmpeg encode → rtspt for VRChat AVPro)
+
+	Stream StreamFeature `json:"stream"` // VRSL DMX-over-video stream: render the DMX store → ffmpeg → RTMP/WHIP push for VRChat playback
 
 	Webcam WebcamFeature `json:"webcam"` // webcam/UVC source: dshow capture → Spout + PTZ/exposure control (medialink P5)
 
@@ -544,6 +549,98 @@ func (r RTSPServeFeature) ResolvedBitrate() int {
 		return 50000
 	}
 	return r.BitrateKbps
+}
+
+// StreamFeature is the VRSL DMX-over-video stream: rave-mate renders the live DMX universe store
+// into a VRSL-compatible video grid, ffmpeg-encodes it (LINEAR, no gamma), and pushes RTMP (or
+// WHIP) to a transcode service (VRCDN/Twitch/custom) that serves it to VRChat. The world plays the
+// stream back and decodes the grid with RaveVRSLGridReader. Off by default (opt-in; needs ffmpeg +
+// a push URL). See .devnotes/VRSL_VIDEO_STREAM.md (mirror of the frozen world-repo contract).
+type StreamFeature struct {
+	Enabled     bool   `json:"enabled"`
+	URL         string `json:"url"`               // RTMP (rtmp://host/app) or WHIP (https://host/whip) target
+	StreamKey   string `json:"streamKey"`         // RTMP stream key (appended as a path segment); WHIP: leave blank, embed auth in URL
+	Mode        string `json:"mode"`              // "standard" (stock VRSL, 8-bit) | "extended" (superset: low-byte mirror + metadata); "" = standard
+	ColorMode   string `json:"colorMode"`         // grid packing "mono" (default, compression-robust) | "rgb9"; "" = mono
+	Universes   []int  `json:"universes,omitempty"` // Art-Net port-addresses to stream (0-based); empty = universe 0 (mono) / 0..8 (rgb9)
+	FPS         int    `json:"fps"`               // encode frame rate; 0 = 30, clamped 1..60
+	BitrateKbps int    `json:"bitrateKbps"`       // H.264 bitrate; 0 = derived from frame size
+	Encoder     string `json:"encoder"`           // "x264"|"nvenc"|"qsv"|"amf"|"auto"; "" = x264
+	Transport   string `json:"transport"`         // "rtmp" (default) | "whip"; "" = rtmp
+}
+
+// ResolvedMode returns "standard" or "extended" (default "standard").
+func (s StreamFeature) ResolvedMode() string {
+	if strings.EqualFold(strings.TrimSpace(s.Mode), "extended") {
+		return "extended"
+	}
+	return "standard"
+}
+
+// ResolvedColorMode returns "mono" or "rgb9" (default "mono"; mono survives 4:2:0 transcode).
+func (s StreamFeature) ResolvedColorMode() string {
+	if strings.EqualFold(strings.TrimSpace(s.ColorMode), "rgb9") {
+		return "rgb9"
+	}
+	return "mono"
+}
+
+// ResolvedUniverses returns the streamed universes: the configured list, else universe 0 (mono)
+// / 0..8 (rgb9 packs nine into three colour blocks).
+func (s StreamFeature) ResolvedUniverses() []int {
+	if len(s.Universes) > 0 {
+		return s.Universes
+	}
+	if s.ResolvedColorMode() == "rgb9" {
+		return []int{0, 1, 2, 3, 4, 5, 6, 7, 8}
+	}
+	return []int{0}
+}
+
+// ResolvedFPS returns the encode frame rate (default 30, clamped 1..60 - grid frames are tiny +
+// low-rate; a short GOP at ≤60 locks late-joiners fast).
+func (s StreamFeature) ResolvedFPS() int {
+	if s.FPS <= 0 {
+		return 30
+	}
+	if s.FPS > 60 {
+		return 60
+	}
+	return s.FPS
+}
+
+// ResolvedBitrate returns the H.264 bitrate in kbps (0 = derived from frame size by the encoder;
+// clamped 250..50000 when set).
+func (s StreamFeature) ResolvedBitrate() int {
+	if s.BitrateKbps <= 0 {
+		return 0 // 0 = let the encoder derive from pixel rate
+	}
+	if s.BitrateKbps < 250 {
+		return 250
+	}
+	if s.BitrateKbps > 50000 {
+		return 50000
+	}
+	return s.BitrateKbps
+}
+
+// ResolvedEncoder returns the ffmpeg encoder token: "x264"|"nvenc"|"qsv"|"amf"|"auto"
+// (default "x264"). "auto" lets the stream module probe for a hardware encoder.
+func (s StreamFeature) ResolvedEncoder() string {
+	switch strings.ToLower(strings.TrimSpace(s.Encoder)) {
+	case "nvenc", "qsv", "amf", "auto":
+		return strings.ToLower(strings.TrimSpace(s.Encoder))
+	default:
+		return "x264"
+	}
+}
+
+// ResolvedTransport returns "rtmp" or "whip" (default "rtmp").
+func (s StreamFeature) ResolvedTransport() string {
+	if strings.EqualFold(strings.TrimSpace(s.Transport), "whip") {
+		return "whip"
+	}
+	return "rtmp"
 }
 
 // TimecodeFeature configures the house SMPTE timecode generator: one master frame clock other
@@ -1944,6 +2041,8 @@ func Default() Config {
 			DMXMIDI: DMXMIDIFeature{Enabled: false}, // opt-in; needs a virtual MIDI port + VRChat --midi
 
 			RTSPServe: RTSPServeFeature{Enabled: false}, // opt-in; needs ffmpeg + a configured source
+
+			Stream: StreamFeature{Enabled: false, Mode: "standard", ColorMode: "mono", Transport: "rtmp", Encoder: "x264", FPS: 30}, // opt-in; needs ffmpeg + a push URL
 
 			AbletonLink: AbletonLinkFeature{ // opt-in; real Link backend needs the `abletonlink` cgo build
 				Enabled: false, Quantum: 16, TempoOwner: "auto",
