@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/debuglog"
@@ -78,6 +79,10 @@ type Recorder struct {
 	pcond *sync.Cond // signaled when the flusher drains (drainPersist)
 	pq    []persistOp
 	pbusy bool
+
+	// recVer bumps on every persisted-recordings mutation (put/delete, sweep + flusher). The webui
+	// Publish list caches List() keyed by it so a full render doesn't rescan+unmarshal the bucket.
+	recVer atomic.Uint64
 }
 
 // persistOp is one queued store write: rec != nil → put snapshot, else delete id.
@@ -153,6 +158,7 @@ func (r *Recorder) sweepStale() {
 		}
 		if len(rec.Tracks) == 0 {
 			_ = r.st.Delete(store.BucketRecordings, rec.ID)
+			r.bumpRec()
 			r.log.Info(source, "stale empty recording discarded", map[string]any{"id": rec.ID})
 			continue
 		}
@@ -165,6 +171,7 @@ func (r *Recorder) sweepStale() {
 			r.log.Warn(source, "finalize stale recording failed", map[string]any{"id": rec.ID, "error": err.Error()})
 			continue
 		}
+		r.bumpRec()
 		r.markPendingReconcile(rec.ID) // finished + unreconciled
 		r.log.Info(source, "stale recording finalized", map[string]any{"id": rec.ID, "tracks": len(rec.Tracks)})
 	}
@@ -503,6 +510,13 @@ func (r *Recorder) List() []Recording {
 	return out
 }
 
+// RecordingsVersion returns a monotonic epoch bumped on every persisted-recordings mutation - a
+// change-aware key for callers that cache List() (the webui Publish tab) so a full render reads the
+// cache instead of rescanning+unmarshaling the whole recordings bucket.
+func (r *Recorder) RecordingsVersion() uint64 { return r.recVer.Load() }
+
+func (r *Recorder) bumpRec() { r.recVer.Add(1) }
+
 // Get returns one recording (active, queued-for-persist, or persisted) by id.
 func (r *Recorder) Get(id string) (Recording, bool) {
 	r.mu.Lock()
@@ -536,7 +550,11 @@ func (r *Recorder) Get(id string) (Recording, bool) {
 // Delete removes a persisted recording.
 func (r *Recorder) Delete(id string) error {
 	r.clearPendingReconcile(id)
-	return r.st.Delete(store.BucketRecordings, id)
+	err := r.st.Delete(store.BucketRecordings, id)
+	if err == nil {
+		r.bumpRec()
+	}
+	return err
 }
 
 // markPendingReconcile adds a finished-unreconciled recording to the auto-reconcile work-set.
@@ -704,6 +722,8 @@ func (r *Recorder) flushPersist() {
 		}
 		if err != nil {
 			r.log.Warn(source, msg, map[string]any{"id": op.id, "error": err.Error()})
+		} else {
+			r.bumpRec()
 		}
 	}
 }
