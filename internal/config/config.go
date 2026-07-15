@@ -1086,6 +1086,12 @@ type MIDIControllerMap struct {
 	// fan-out (keys per midi.FilterKeys). nil = midi.DefaultDriverFilter();
 	// empty non-nil = filter nothing. No omitempty: [] must persist.
 	DriverFilter []string `json:"driverFilter"`
+	// ThruDistinctName: name the ravemidi DJ-facing fan-out "<Name> THRU" instead of
+	// cloning the physical device's own name. Default (false) clones the device name so
+	// DJ software keyed on the controller name (Serato) matches existing mappings 1:1; the
+	// driver holds the real device's pin, so the identically-named clone is what the DJ app
+	// opens. Set true for a separate, uniquely-named port (no duplicate in the MIDI list).
+	ThruDistinctName bool `json:"thruDistinctName,omitempty"`
 }
 
 // MIDIBridge is the two-port loopMIDI DJ router. ToDJPort = MIDI-OUT the DJ app reads (peer

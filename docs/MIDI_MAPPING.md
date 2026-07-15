@@ -53,7 +53,12 @@ With the ravemidi kernel driver installed, pick **"ravemidi driver (recommended)
 controller's THRU. The DRIVER then taps the hardware and fans it out — forwarding keeps
 running when rave-mate is closed and comes back after a reboot on its own:
 
-- your DJ software selects the **`<Name> THRU`** port (shown in the UI). It is
+- by default the DJ-facing port **clones your controller's own name** (toggle: **"Show
+  under the controller's own name"**, on by default): the driver holds the real device's
+  pin and the identically-named port is what your DJ app opens, so DJ software that keys
+  mappings on the device name (Serato) matches your existing mapping with no re-learn. Turn
+  the toggle **off** for a separate **`<Name> THRU`** port instead (avoids a duplicate name
+  in the MIDI list). Either way the exact port to select is shown in the UI. It is
   bidirectional: controller MIDI down, LED feedback up (message-framed, teed to the
   device) — loop-free by construction, the port has no internal render→capture path
 - rave-mate reads the controller **through the driver directly** instead of the device
@@ -71,7 +76,7 @@ running when rave-mate is closed and comes back after a reboot on its own:
   history with every new event (seen on NI Komplete Kontrol keyboards) — MIDI-learn
   then fires on every key and the stream eventually goes silent, in ANY app reading
   the device directly. The driver detects the replay and forwards each message exactly
-  once, so such controllers stay fully usable through the THRU port
+  once, so such controllers stay fully usable through the forwarded port
 
 **Input monitor** (MIDI tab): live decoded feed of every incoming message, newest
 first — press a control to see which port belongs to which device. **Wire trace**

@@ -73,6 +73,15 @@ func init() {
 		}
 	})
 
+	// clone toggle (driver-managed): ON mirrors the controller's own name to the DJ fan-out
+	// (Serato matches by name); OFF names it "<Name> THRU". Toggle sends the CLONE state, so
+	// the stored distinct-name flag is its inverse.
+	onPrefix("midi-ctl-clone:", func(u *UI, m actMsg) {
+		if u.withCtl(atoiSafe(m.arg("midi-ctl-clone:")), func(c *config.MIDIControllerMap) { c.ThruDistinctName = m.Val != "true" }) {
+			u.midiApply()
+		}
+	})
+
 	// driver fan-out message-filter chips (driver-managed controllers only)
 	onPrefix("midi-ctl-filter:", func(u *UI, m actMsg) {
 		idxs, key, ok := strings.Cut(m.arg("midi-ctl-filter:"), ":")
