@@ -1,13 +1,13 @@
 {
-  "version": "nightly-67b3839",
-  "build": 94,
-  "commit": "67b3839",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-94-20260715-67b3839.exe",
-  "sha256": "1d7a24f3b21d1eb5a6a2fd8e615fd4614cc0e90478ac6773fbd493ea7d84d84f",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-94-20260715-67b3839.exe",
-  "installer_sha256": "4f5dd9ff686998f64e2d716912b4961b842b28a2b2ee6ab01b9140ee7fea2ada",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-94-20260715-67b3839",
-  "linux_sha256": "8583b56858dfba9f354e1e369504ea6b2621a3f6fe8779c8148d255ed7a46d94",
+  "version": "nightly-16875a1",
+  "build": 96,
+  "commit": "16875a1",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-96-20260715-16875a1.exe",
+  "sha256": "6df86094cb1445d5d93806279c1fc3cdd40c6de642cf756a78fa3146996b2c37",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-96-20260715-16875a1.exe",
+  "installer_sha256": "3d0bbffdee2e1f181cc2e4c3be2fd76d118f873ec65f4c504a200fd8527cc0e2",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-96-20260715-16875a1",
+  "linux_sha256": "a0885795336600d974b61b8fae84331feee76dd174c2bbf7a00c96e561e2ad51",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T21:19:55Z",
-  "notes": "Merge fix/cue-listen-hold-play: kill actWorker-blocking UI freezes"
+  "released": "2026-07-15T23:54:59Z",
+  "notes": "Merge agent-vrsl-video-stream: VRSL video-stream feature"
 }
