@@ -177,10 +177,13 @@ func (d *detector) step(evs []fbEvent) map[string]bool {
 		switch {
 		case d.streak[deck] >= flashStreak:
 			out[deck] = false // sustained flash = paused/cued
-		case d.ledOn[deck]:
-			out[deck] = true // settled + lit = playing
+		case d.streak[deck] == 0:
+			out[deck] = d.ledOn[deck] // settled: lit = playing, dark = stopped
 		default:
-			out[deck] = false // LED dark = not playing
+			// transient (LED just changed, not yet a sustained flash): hold the prior
+			// classification instead of flipping - kills the startup/transition blip where
+			// a paused deck's first flash frame would momentarily read as playing.
+			continue
 		}
 	}
 	return out
