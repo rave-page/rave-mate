@@ -213,6 +213,82 @@ func TestBatchCancelReturnsPartial(t *testing.T) {
 	}
 }
 
+// TestBatchCheckpointChangeReanalyzes guards the trained-model fix: a cache entry from one model
+// must NOT be replayed for a different model - the new model has to actually re-analyze.
+func TestBatchCheckpointChangeReanalyzes(t *testing.T) {
+	dir := t.TempDir()
+	fix := writeAudioStub(t, dir, "fix.mp3", "f")
+	det := synthDet(128, 0.25, 0.5)
+	stub := &stubAnalyzer{det: map[string]*Detection{fix: det}}
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks := []BatchTrack{{Path: fix, Title: "A", OldBPM: 120, OldStartMs: ptr(290)}}
+	// builtin model → analyze + cache under checkpoint ""
+	NewBatch(stub, cache, BatchOptions{}).Run(context.Background(), tracks, nil)
+	if stub.callCount() != 1 {
+		t.Fatalf("first run calls=%d want 1", stub.callCount())
+	}
+	// same model → cache hit, no re-analyze
+	r := NewBatch(stub, cache, BatchOptions{}).Run(context.Background(), tracks, nil)
+	if stub.callCount() != 1 || !r[0].FromCache {
+		t.Fatalf("same-model rerun: calls=%d fromCache=%v", stub.callCount(), r[0].FromCache)
+	}
+	// switch to a fine-tuned model → cache MISS → re-analyze
+	r = NewBatch(stub, cache, BatchOptions{Checkpoint: "trained-v1"}).Run(context.Background(), tracks, nil)
+	if stub.callCount() != 2 || r[0].FromCache {
+		t.Fatalf("model-switch rerun: calls=%d fromCache=%v (must re-analyze with the new model)", stub.callCount(), r[0].FromCache)
+	}
+}
+
+// TestBatchForceOverridesSkipsAndCache: force re-analyzes past Locked/MultiMarker AND the cache,
+// but verified grids stay protected in both modes.
+func TestBatchForceOverridesSkipsAndCache(t *testing.T) {
+	dir := t.TempDir()
+	fix := writeAudioStub(t, dir, "fix.mp3", "f")
+	locked := writeAudioStub(t, dir, "locked.mp3", "l")
+	multi := writeAudioStub(t, dir, "multi.mp3", "m")
+	verified := writeAudioStub(t, dir, "verified.mp3", "v")
+	det := synthDet(128, 0.25, 0.5)
+	newStub := func() *stubAnalyzer {
+		return &stubAnalyzer{det: map[string]*Detection{fix: det, locked: det, multi: det, verified: det}}
+	}
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks := []BatchTrack{
+		{Path: fix, Title: "Fix", OldBPM: 120, OldStartMs: ptr(290)},
+		{Path: locked, Title: "Locked", OldBPM: 120, OldStartMs: ptr(290), Locked: true},
+		{Path: multi, Title: "Multi", OldBPM: 120, MultiMarker: true},
+		{Path: verified, Title: "Verified", OldBPM: 120, OldStartMs: ptr(290), Verified: true},
+	}
+	// normal run: only fix analyzed; locked/multi/verified skipped
+	s1 := newStub()
+	r := NewBatch(s1, cache, BatchOptions{}).Run(context.Background(), tracks, nil)
+	if s1.callCount() != 1 {
+		t.Fatalf("normal run analyze calls=%d want 1", s1.callCount())
+	}
+	if r[3].Plan.Status != StatusSkip || r[3].Plan.Detail != "verified grid - protected" {
+		t.Fatalf("verified not protected: %+v", r[3])
+	}
+	// force run: fix (cache-bypassed) + locked + multi re-analyzed; verified STILL skipped
+	s2 := newStub()
+	r = NewBatch(s2, cache, BatchOptions{Force: true}).Run(context.Background(), tracks, nil)
+	if s2.callCount() != 3 {
+		t.Fatalf("force run analyze calls=%d want 3 (verified excluded)", s2.callCount())
+	}
+	if r[3].Plan.Status != StatusSkip || r[3].Plan.Detail != "verified grid - protected" {
+		t.Fatalf("verified not protected under force: %+v", r[3])
+	}
+	for i := 0; i < 3; i++ {
+		if r[i].FromCache {
+			t.Fatalf("force run served track %d from cache", i)
+		}
+	}
+}
+
 func TestBatchETAPositiveWhileAnalyzing(t *testing.T) {
 	dir := t.TempDir()
 	det := synthDet(128, 0.25, 0.5)

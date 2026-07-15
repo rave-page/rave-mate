@@ -14,6 +14,7 @@ type BatchTrack struct {
 	OldStartMs  *float64 // existing single grid marker (ms); nil = none
 	MultiMarker bool     // >1 grid markers: manually gridded, never touch
 	Locked      bool     // grid lock flag: never touch, never analyze
+	Verified    bool     // user-confirmed grid: always skip (never re-touch), even in force mode
 }
 
 // analyzer is the beat-detection seam (Engine satisfies it; tests stub it).
@@ -27,7 +28,9 @@ type BatchOptions struct {
 	ThresholdMS float64     // ignore corrections smaller than this (0 = default 12)
 	BiasS       float64     // manual detector offset (s); Bias wins when non-empty
 	Bias        Calibration // per-extension measured detector bias (nil = use BiasS)
-	Checkpoint  string      // model checkpoint id recorded on cache entries
+	Checkpoint  string      // model checkpoint id recorded on cache entries + matched on read
+	Force       bool        // re-analyze past the Locked/MultiMarker skips AND the detection cache
+	// (verified tracks stay protected); for "force re-analyze" after a model change or a bad grid
 }
 
 // Batch is the READ-ONLY run orchestrator: detect → fit → plan per track,
@@ -87,15 +90,19 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 		t0 := time.Now()
 		res := TrackResult{Path: t.Path, Title: t.Title, OldBPM: t.OldBPM}
 		switch {
-		case t.Locked:
+		case t.Verified:
+			// user confirmed this grid - never re-touch, not even in force mode
+			res.Plan = Plan{Status: StatusSkip, Detail: "verified grid - protected", OldBPM: t.OldBPM}
+		case !b.opts.Force && t.Locked:
 			res.Plan = Plan{Status: StatusSkip, Detail: "grid locked - not touching", OldBPM: t.OldBPM}
-		case t.MultiMarker:
+		case !b.opts.Force && t.MultiMarker:
 			// PlanFix short-circuits before touching fit; reuse its exact detail
 			res.Plan = PlanFix(GridFit{}, nil, PlanInput{MultiMarker: true})
 		default:
 			var det *Detection
-			if b.cache != nil {
-				det, res.FromCache = b.cache.Get(t.Path)
+			// force bypasses the cache (fresh detection); else a checkpoint-matched cache hit
+			if b.cache != nil && !b.opts.Force {
+				det, res.FromCache = b.cache.Get(t.Path, b.opts.Checkpoint)
 			}
 			if res.FromCache {
 				p.Cached++

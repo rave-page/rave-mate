@@ -2274,6 +2274,10 @@ func (u *UI) libCtxModal(path string) {
 	body := btnRow(btn(i18n.T("library.label.renameEllipsis"), "outline", "lib-rename:"+path, ""), btn(i18n.T("library.label.moveEllipsis"), "outline", "lib-move:"+path, ""),
 		btn(i18n.T("library.label.deleteEllipsis"), "destructive", "lib-del:"+path, "")) +
 		btnRow(btn(i18n.T("library.copyPath"), "ghost", "copy", ""), btn(i18n.T("library.reveal"), "ghost", "lib-reveal:"+path, ""), markBtn)
+	// force re-analyze this one track's beatgrid (overrides skips + cache; verified stays protected)
+	if u.svc.Cfg.Features.GridFix.Enabled {
+		body += btnRow(btn(i18n.T("library.gf.reanalyze"), "outline", "gf-reanalyze:"+path, ""))
+	}
 	// works-together: mark the active multi-selection (when this row is part of it) + discovery
 	if u.svc.Lib != nil {
 		s := u.lib()

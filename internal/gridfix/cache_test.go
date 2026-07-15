@@ -23,16 +23,24 @@ func TestDetectionCacheRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := c.Get(f); ok {
+	if _, ok := c.Get(f, "ckpt-1"); ok {
 		t.Fatal("empty cache returned a hit")
 	}
 	det := &Detection{Beats: []float64{0.25, 0.75, 1.25}, Downbeats: []float64{0.25}}
 	if err := c.Put(f, det, "ckpt-1"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := c.Get(f)
+	got, ok := c.Get(f, "ckpt-1")
 	if !ok || len(got.Beats) != 3 || got.Beats[1] != 0.75 || len(got.Downbeats) != 1 {
 		t.Fatalf("hit mismatch: ok=%v det=%+v", ok, got)
+	}
+	// a different checkpoint (re-trained model, or back to builtin) must MISS so the new
+	// model actually re-analyzes instead of replaying the previous model's detection.
+	if _, ok := c.Get(f, "ckpt-2"); ok {
+		t.Fatal("different checkpoint served a stale-model detection")
+	}
+	if _, ok := c.Get(f, ""); ok {
+		t.Fatal("builtin checkpoint served a fine-tuned detection")
 	}
 	if c.Len() != 1 {
 		t.Fatalf("Len=%d want 1", c.Len())
@@ -45,7 +53,7 @@ func TestDetectionCacheRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := c2.Get(f); !ok {
+	if _, ok := c2.Get(f, "ckpt-1"); !ok {
 		t.Fatal("persisted entry lost after reopen")
 	}
 }
@@ -62,7 +70,7 @@ func TestDetectionCacheInvalidatesOnFileChange(t *testing.T) {
 	}
 	// size change → new key → miss (mtime granularity too coarse to rely on)
 	writeAudioStub(t, dir, "a.mp3", "xx")
-	if _, ok := c.Get(f); ok {
+	if _, ok := c.Get(f, ""); ok {
 		t.Fatal("changed file served stale detection")
 	}
 }
@@ -74,7 +82,7 @@ func TestDetectionCacheStatErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(dir, "nope.mp3")
-	if _, ok := c.Get(missing); ok {
+	if _, ok := c.Get(missing, ""); ok {
 		t.Fatal("missing file returned a hit")
 	}
 	if err := c.Put(missing, &Detection{}, ""); err == nil {
@@ -101,11 +109,11 @@ func TestDetectionCacheEviction(t *testing.T) {
 	if c.Len() != 2 {
 		t.Fatalf("Len=%d want 2 after eviction", c.Len())
 	}
-	if _, ok := c.Get(a); ok {
+	if _, ok := c.Get(a, ""); ok {
 		t.Fatal("oldest entry not evicted")
 	}
 	for _, p := range []string{b, f3} {
-		if _, ok := c.Get(p); !ok {
+		if _, ok := c.Get(p, ""); !ok {
 			t.Fatalf("newer entry evicted: %s", p)
 		}
 	}
