@@ -43,6 +43,9 @@ func init() {
 		}
 		u.tickPatch(&js, "live-strip", u.liveStripHTML())
 		u.flushTick(&js)
+		if u.svc.AbleLink != nil {
+			u.pushAbleLink() // feed the client rAF phrase-bar interpolator (after the panel patch)
+		}
 	})
 
 	onLiveTick("logs", func(u *UI) {
