@@ -29,6 +29,13 @@ func TestPlayheadInterpolationID(t *testing.T) {
 	if idle := mpWaveSVG(&st, mpNone, nil); strings.Contains(idle, `id="mp-library-ph"`) {
 		t.Fatalf("idle player must not render the playhead id; svg=%q", idle)
 	}
+
+	// cue-editor overlay active (hold-Space audition): the mint playhead is the moving element
+	// (the white beat cursor stays put), so it must still carry the interpolation id.
+	ce := &ceOverlay{cursorMs: mpNone, dragA: -1, dragB: -1, sel: map[int]bool{}, dsel: map[int]bool{}}
+	if svg := mpWaveSVG(&st, 50, ce); !strings.Contains(svg, `id="mp-library-ph"`) {
+		t.Fatalf("cue-edit audition playhead missing interpolation id; svg=%q", svg)
+	}
 }
 
 // The Link phrase bar must carry the fill + caption ids the client rAF runtime (__rt 'link')
