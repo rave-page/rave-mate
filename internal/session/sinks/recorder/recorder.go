@@ -63,6 +63,13 @@ type Recorder struct {
 	subs    map[int]chan *Recording
 	nextSub int
 
+	// reconcile work-set: finished (EndedAt set) but not-yet-reconciled recording IDs. The
+	// AutoReconciler reads this instead of Listing+filtering all recordings every 30s sweep -
+	// empty set ⇒ the sweep does zero I/O. Seeded once at startup (seedPendingReconcile), added on
+	// finish (Stop/autoFinalize/sweepStale), removed on reconcile stamp + delete.
+	reconMu   sync.Mutex
+	pendingRe map[string]struct{}
+
 	// persist plumbing: store writes (bbolt fsync) run off r.mu on a single flusher
 	// goroutine, so render-facing Active()/Get()/Pending() never wait on disk. FIFO
 	// order preserved; consecutive same-id puts coalesce (newest wins), bounding the
@@ -135,7 +142,13 @@ func (r *Recorder) sweepStale() {
 	}
 	r.mu.Unlock()
 	for _, rec := range r.List() {
-		if !rec.EndedAt.IsZero() || rec.ID == activeID {
+		if rec.ID == activeID {
+			continue
+		}
+		if !rec.EndedAt.IsZero() { // already finished: seed the work-set if it never reconciled
+			if rec.ReconciledAt.IsZero() {
+				r.markPendingReconcile(rec.ID)
+			}
 			continue
 		}
 		if len(rec.Tracks) == 0 {
@@ -152,6 +165,7 @@ func (r *Recorder) sweepStale() {
 			r.log.Warn(source, "finalize stale recording failed", map[string]any{"id": rec.ID, "error": err.Error()})
 			continue
 		}
+		r.markPendingReconcile(rec.ID) // finished + unreconciled
 		r.log.Info(source, "stale recording finalized", map[string]any{"id": rec.ID, "tracks": len(rec.Tracks)})
 	}
 }
@@ -408,6 +422,7 @@ func (r *Recorder) autoFinalizeLocked(endAt time.Time) {
 		r.log.Info(source, "empty set discarded", map[string]any{"id": done.ID})
 	} else {
 		r.persistLocked()
+		r.markPendingReconcile(done.ID) // finished + unreconciled → auto-reconcile picks it up
 		r.log.Info(source, "set auto-finalized (silence)", map[string]any{"id": done.ID, "tracks": len(done.Tracks)})
 	}
 	r.active = nil
@@ -439,7 +454,8 @@ func (r *Recorder) StopRecording() *Recording {
 	r.pendingKey = ""
 	r.broadcastLocked()
 	r.mu.Unlock()
-	r.drainPersist() // stopped set durable + visible to List() before return; fsync waits off r.mu
+	r.markPendingReconcile(done.ID) // finished + unreconciled → auto-reconcile picks it up
+	r.drainPersist()                // stopped set durable + visible to List() before return; fsync waits off r.mu
 	return done.clone()
 }
 
@@ -518,7 +534,51 @@ func (r *Recorder) Get(id string) (Recording, bool) {
 }
 
 // Delete removes a persisted recording.
-func (r *Recorder) Delete(id string) error { return r.st.Delete(store.BucketRecordings, id) }
+func (r *Recorder) Delete(id string) error {
+	r.clearPendingReconcile(id)
+	return r.st.Delete(store.BucketRecordings, id)
+}
+
+// markPendingReconcile adds a finished-unreconciled recording to the auto-reconcile work-set.
+func (r *Recorder) markPendingReconcile(id string) {
+	r.reconMu.Lock()
+	if r.pendingRe == nil {
+		r.pendingRe = map[string]struct{}{}
+	}
+	r.pendingRe[id] = struct{}{}
+	r.reconMu.Unlock()
+}
+
+// clearPendingReconcile drops a recording from the work-set (reconciled or deleted).
+func (r *Recorder) clearPendingReconcile(id string) {
+	r.reconMu.Lock()
+	delete(r.pendingRe, id)
+	r.reconMu.Unlock()
+}
+
+// pendingReconcileIDs snapshots the current work-set (empty ⇒ the sweep is a no-op).
+func (r *Recorder) pendingReconcileIDs() []string {
+	r.reconMu.Lock()
+	defer r.reconMu.Unlock()
+	if len(r.pendingRe) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.pendingRe))
+	for id := range r.pendingRe {
+		out = append(out, id)
+	}
+	return out
+}
+
+// seedPendingReconcile scans persisted recordings once and marks every finished, not-yet-reconciled
+// one - startup catch-up so a set stopped before Traktor wrote its history still auto-reconciles.
+func (r *Recorder) seedPendingReconcile() {
+	for _, rec := range r.List() {
+		if !rec.EndedAt.IsZero() && rec.ReconciledAt.IsZero() {
+			r.markPendingReconcile(rec.ID)
+		}
+	}
+}
 
 // FindByWindow returns the recording with the most temporal overlap with [start,end] across
 // the in-progress + persisted recordings (ok=false if none overlaps). Used to link a captured

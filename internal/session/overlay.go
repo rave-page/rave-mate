@@ -92,14 +92,22 @@ type Overlay struct {
 // deck's mapped channel (A→1 … D→4).
 func (u UnifiedState) BuildOverlay(now time.Time, maxAge time.Duration) Overlay {
 	ov := Overlay{UpdatedAt: now}
+	// Derive the playing decks once (all-decks scan + per-deck stale/fader reads + sort) and reuse
+	// for both the db-fallback branch and the master pointer, instead of DeriveNowPlayingAt twice.
+	playing := u.DerivePlayingDecksAt(now, maxAge)
+	npDeck, npOK := "", false
+	for _, d := range playing {
+		if d.Audible {
+			npDeck, npOK = d.Deck, true
+			break
+		}
+	}
 	// Fallback for sources that report play-state but no track metadata (e.g. rekordbox via MIDI:
 	// play/cue only, no title). The audible playing deck inherits the master-scope latest play from
 	// the master.db poll (~60s lag) so the overlay still shows the live deck + a best-effort title.
 	dbFallbackDeck := ""
-	if StringField(u.Master, FieldTitle) != "" {
-		if np, ok := u.DeriveNowPlayingAt(now, maxAge); ok && StringField(u.Decks[np.Deck], FieldTitle) == "" {
-			dbFallbackDeck = np.Deck
-		}
+	if StringField(u.Master, FieldTitle) != "" && npOK && StringField(u.Decks[npDeck], FieldTitle) == "" {
+		dbFallbackDeck = npDeck
 	}
 	for _, deck := range deckOrder {
 		fields := u.Decks[deck]
@@ -173,8 +181,8 @@ func (u UnifiedState) BuildOverlay(now time.Time, maxAge time.Duration) Overlay 
 		ds.ArtKey = artKey(ds.Path, ds.Artist, ds.Title)
 		ov.Decks = append(ov.Decks, ds)
 	}
-	if np, ok := u.DeriveNowPlayingAt(now, maxAge); ok {
-		ov.Master.Deck = np.Deck
+	if npOK {
+		ov.Master.Deck = npDeck
 	}
 	if bpm, ok := floatVal(u.Master, FieldBPM); ok {
 		ov.Master.BPM = bpm
