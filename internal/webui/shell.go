@@ -598,6 +598,19 @@ const runtimeJS = `(function(){
     if(any) __rtRAF=requestAnimationFrame(__rtLoop); }
   window.__rt=function(kind,key,st){
     if(!st){ delete __rtM[key]; return; }
+    var cur=__rtM[key];
+    // Free-run: for a continuous constant-rate signal (Link phase) DON'T re-anchor when the fresh
+    // push still agrees with the running clock. Re-anchoring every ~1 Hz push to a value even
+    // slightly behind (residual transport latency) makes a steady-tempo bar hitch forward each
+    // second - the reported "smooth then jump" artifact. Re-anchor only on a real change: rate flip,
+    // tempo/quantum change, or the clock diverged past a small threshold (a genuine phase realign).
+    if(kind==='link' && cur && cur.kind==='link' && st.rate>0 && cur.rate>0 &&
+       Math.abs(cur.tempo-st.tempo)<0.01 && cur.q===st.q){
+      var q=cur.q||16, dt=(performance.now()-cur.t0)/1000;
+      var pred=cur.phase+(cur.tempo/60)*dt; pred=pred-Math.floor(pred/q)*q;
+      var d=st.phase-pred; d=d-Math.round(d/q)*q;   // circular difference in beats, [-q/2, q/2]
+      if(Math.abs(d)<0.25){ cur.pre=st.pre; cur.post=st.post; return; } // agrees → keep the running clock
+    }
     st.kind=kind; st.t0=performance.now(); __rtM[key]=st;
     __rtStep(st);                               // apply immediately (paused/seek snap needs no frame)
     if(st.rate>0 && !__rtRAF) __rtRAF=requestAnimationFrame(__rtLoop);

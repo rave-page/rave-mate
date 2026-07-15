@@ -3,6 +3,7 @@ package featurehost
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sync"
 	"time"
 
@@ -94,6 +95,37 @@ func (p *AbletonLinkProxy) State() abletonlink.State {
 		return abletonlink.State{}
 	}
 	return p.state
+}
+
+// StateNow returns the mirror with Beat/Phase advanced from the last ~10 Hz sample to the current
+// wall clock (tempo-driven), so the value reads fresh at call time. The mirror snapshot is up to
+// ~100 ms stale; the UI's 30 fps phrase-bar interpolation anchors to this, so a stale phase would
+// make the bar run behind and hitch forward on every re-sync. Falls back to the raw mirror when
+// Link isn't running/advancing (disabled, tempo-less, or a dead/hung child past posMaxExtrapolate).
+func (p *AbletonLinkProxy) StateNow() abletonlink.State {
+	p.mu.Lock()
+	st, at := p.state, p.at
+	running := p.host.Running()
+	p.mu.Unlock()
+	if !running {
+		return abletonlink.State{}
+	}
+	if !st.Available || !st.Enabled || st.Tempo <= 0 || at.IsZero() {
+		return st
+	}
+	elapsed := time.Since(at)
+	if elapsed <= 0 || elapsed > posMaxExtrapolate {
+		return st // dead/stale mirror - don't run the phase away
+	}
+	adv := elapsed.Seconds() * st.Tempo / 60.0 // beats elapsed since the sample
+	q := st.Quantum
+	if q <= 0 {
+		q = abletonlink.DefaultQuantum
+	}
+	st.Beat += adv
+	ph := st.Phase + adv
+	st.Phase = ph - math.Floor(ph/q)*q // wrap into [0,q)
+	return st
 }
 
 // Position implements mediasync.TimeSource: Link musical time as a monotonic house clock,

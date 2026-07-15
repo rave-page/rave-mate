@@ -82,6 +82,17 @@ func (u *UI) gfVerified() *gridfix.VerifiedStore {
 
 // ── rail rendering ──
 
+// gfStageActive reports whether a beatgrid-fixer flow (confirm/running/done/cal) is open. When it
+// is, the fixer owns the collection inspector even over a selected track - otherwise "Fix beatgrids"
+// from the collection TOOLBAR while a track is open in the inspector set stage="confirm" but the
+// confirm had nowhere to render (the inspector showed the track detail), so the click did nothing.
+func (u *UI) gfStageActive() bool {
+	g := &u.gf
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.stage != ""
+}
+
 // gfRailHTML renders the cockpit region of the Collection right rail.
 func (u *UI) gfRailHTML(s *libSt) string {
 	g := &u.gf
