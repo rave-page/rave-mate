@@ -68,8 +68,10 @@ func cacheKey(path string) (string, error) {
 	return fmt.Sprintf("%s|%d|%d", path, fi.Size(), fi.ModTime().Unix()), nil
 }
 
-// Get returns the cached detection for path (stat error or changed file = miss).
-func (c *DetectionCache) Get(path string) (*Detection, bool) {
+// Get returns the cached detection for path IF it was produced by checkpoint. A stat error,
+// a changed file, OR a different model = miss - so switching to a re-trained model (or back to
+// the builtin) re-analyzes instead of silently replaying the previous model's detection.
+func (c *DetectionCache) Get(path, checkpoint string) (*Detection, bool) {
 	k, err := cacheKey(path)
 	if err != nil {
 		return nil, false
@@ -77,7 +79,7 @@ func (c *DetectionCache) Get(path string) (*Detection, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[k]
-	if !ok {
+	if !ok || e.Checkpoint != checkpoint {
 		return nil, false
 	}
 	return &Detection{Beats: e.Beats, Downbeats: e.Downbeats}, true

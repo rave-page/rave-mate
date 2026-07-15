@@ -86,8 +86,14 @@ func (u *UI) refreshGridfixProbe() {
 	u.gfProbe.ready = true
 	u.gfProbe.busy = false
 	u.gfProbe.mu.Unlock()
-	if changed && u.activeTab() == "settings" {
-		u.patchMain()
+	// Re-render the surface that shows engine state when the async probe lands: settings (install
+	// card) AND library (the Collection cockpit health rail) - else the rail is stuck on its
+	// pre-probe "checking…" state until an unrelated re-render.
+	if changed {
+		switch u.activeTab() {
+		case "settings", "library":
+			u.patchMain()
+		}
 	}
 }
 

@@ -36,6 +36,7 @@ type gfState struct {
 	mu        sync.Mutex
 	stage     string // "" idle | "confirm" | "running" | "done"
 	scope     string // "all" | "filtered" | "selected"
+	force     bool   // force re-analyze: override the multi-marker/lock skips + the cache (verified stay protected)
 	prog      gridfix.BatchProgress
 	results   []gridfix.TrackResult
 	applied   map[string]int // per-software entries written on Apply (key absent = not applied)
@@ -125,12 +126,16 @@ func (u *UI) gfHealthHTML(s *libSt) string {
 		gfStat(fmt.Sprint(verified), i18n.T("library.gf.statVerified"), "mint") +
 		gfStat(fmt.Sprint(noGrid), i18n.T("library.gf.statNoGrid"), "amber") +
 		gfStat(fmt.Sprint(multi), i18n.T("library.gf.statManual"), "") + `</div>`)
-	engineOK := false
-	if st, ready := u.gridfixStatusCached(); ready && (st.CPU.EngineOK || st.CUDA.EngineOK) {
-		engineOK = true
+	engineOK, probing := false, false
+	if st, ready := u.gridfixStatusCached(); ready {
+		engineOK = st.CPU.EngineOK || st.CUDA.EngineOK
+	} else {
+		probing = true // env probe (spawns Python) hasn't landed yet - NOT the same as "not installed"
 	}
 	if !u.svc.Cfg.Features.GridFix.Enabled {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.disabledHint")) + `</div>`)
+	} else if probing {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.checking")) + `</div>`)
 	} else if !engineOK {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.noEngineHint")) + `</div>` +
 			btnRow(btn(i18n.T("library.gf.openSettings"), "outline", "gf-settings", "")))
@@ -192,6 +197,9 @@ func (u *UI) gfConfirmHTML(s *libSt) string {
 	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
 		esc(i18n.T("library.gf.confirmTitle")) + `</div></div>`)
 	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.confirmNote")) + `</div>`)
+	// force re-analyze: override the multi-marker/lock skips + the cache (verified stay protected)
+	b.WriteString(toggleRow(i18n.T("library.gf.force"), "gf-force", u.gf.force))
+	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.forceHint")) + `</div>`)
 	row := func(act, label string, n int, variant string) string {
 		if n == 0 {
 			return ""
@@ -392,7 +400,8 @@ func esc(s string) string { return html.EscapeString(s) }
 
 // ── run lifecycle ──
 
-// gfStart launches the batch over the chosen scope. Engine + cache live for the run.
+// gfStart launches the batch over the chosen scope. force (the cockpit toggle) overrides the
+// multi-marker/lock skips + the detection cache; verified grids stay protected.
 func (u *UI) gfStart(scope string) {
 	s := u.lib()
 	s.mu.Lock()
@@ -412,6 +421,32 @@ func (u *UI) gfStart(scope string) {
 		tracks = append(tracks, s.tracks...)
 	}
 	s.mu.Unlock()
+	g := &u.gf
+	g.mu.Lock()
+	force := g.force
+	g.mu.Unlock()
+	u.gfRunTracks(tracks, scope, force)
+}
+
+// gfReanalyze force-re-analyzes ONE track (the right-click "Re-analyze beatgrid" in the collection
+// browser / cue editor): overrides the skip checks + cache for that track (verified stays
+// protected), routed through the cockpit so results + Apply surface exactly like a scoped run.
+func (u *UI) gfReanalyze(path string) {
+	s := u.lib()
+	s.mu.Lock()
+	t, ok := s.byPath[path]
+	s.mu.Unlock()
+	if !ok {
+		u.toast(i18n.T("library.gf.nothingToDo"))
+		return
+	}
+	u.gfRunTracks([]musiclib.Track{t}, "selected", true)
+}
+
+// gfRunTracks runs the read-only batch over tracks. force overrides the multi-marker/lock skips
+// AND the detection cache (fresh detection - e.g. after switching models); verified grids are
+// always protected.
+func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 	if len(tracks) == 0 {
 		u.toast(i18n.T("library.gf.nothingToDo"))
 		return
@@ -442,11 +477,13 @@ func (u *UI) gfStart(scope string) {
 		}}
 	batch := gridfix.NewBatch(eng, cache, gridfix.BatchOptions{
 		MinQuality: f.ResolvedMinQuality(), ThresholdMS: f.ResolvedThresholdMS(),
-		BiasS: f.BiasS, Bias: gridfix.Calibration(f.BiasExt), Checkpoint: f.ActiveModel})
+		BiasS: f.BiasS, Bias: gridfix.Calibration(f.BiasExt), Checkpoint: f.ActiveModel, Force: force})
+	vs := u.gfVerified()
 	bts := make([]gridfix.BatchTrack, 0, len(tracks))
 	for _, t := range tracks {
 		bt := gridfix.BatchTrack{Path: t.Path, Title: trackTitle(t), OldBPM: t.BPM,
-			MultiMarker: len(t.Beatgrid) > 1}
+			MultiMarker: len(t.Beatgrid) > 1,
+			Verified:    vs != nil && vs.Has(t.Path)}
 		if len(t.Beatgrid) == 1 {
 			ms := t.Beatgrid[0].PositionMs
 			bt.OldStartMs = &ms
@@ -591,7 +628,7 @@ func (u *UI) gfCalibrate() {
 				cancelled = true
 				break
 			}
-			det, hit := cache.Get(v.Path)
+			det, hit := cache.Get(v.Path, f.ActiveModel)
 			if !hit {
 				d, err := eng.Analyze(ctx, v.Path)
 				if err != nil {
@@ -869,6 +906,16 @@ func init() {
 		u.patchMain()
 	})
 	onPrefix("gf-run:", func(u *UI, m actMsg) { u.gfStart(m.arg("gf-run:")) })
+	onExact("gf-force", func(u *UI, m actMsg) { // cockpit toggle; carries the new bool
+		g := &u.gf
+		g.mu.Lock()
+		g.force = m.Val == "true"
+		g.mu.Unlock()
+	})
+	onPrefix("gf-reanalyze:", func(u *UI, m actMsg) { // right-click: force re-analyze one track
+		u.closeModal()
+		u.gfReanalyze(m.arg("gf-reanalyze:"))
+	})
 	onExact("gf-cal", func(u *UI, _ actMsg) { u.gfCalibrate() })
 	onExact("gf-cancel", func(u *UI, _ actMsg) {
 		g := &u.gf
