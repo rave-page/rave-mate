@@ -1358,6 +1358,12 @@ func (u *UI) libDetailHTML(s *libSt) string {
 	if u.ceActiveFor("library") {
 		return u.ceDetailHTML(s)
 	}
+	// A live beatgrid-fixer flow (confirm/running/done/cal) owns the collection inspector even when a
+	// track is selected - else "Fix beatgrids" from the toolbar with a track open set the stage but
+	// the confirm had nowhere to render, so the click looked dead.
+	if u.libSectionOr() == "collection" && u.gfStageActive() {
+		return u.gfRailHTML(s)
+	}
 	sel := s.sel
 	if sel == nil {
 		// Collection rail without a selection = the beatgrid cockpit / health card
