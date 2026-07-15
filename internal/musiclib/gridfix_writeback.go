@@ -83,7 +83,7 @@ func rewriteFileAtomic(path, tmpPattern string, fn func(src io.Reader, dst io.Wr
 		_ = os.Remove(tmpName)
 		return perr
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil { // retries a transient reader (nmlsrc watcher / AV / sync)
 		_ = os.Remove(tmpName)
 		return err
 	}

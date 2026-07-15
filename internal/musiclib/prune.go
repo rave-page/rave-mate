@@ -74,7 +74,7 @@ func PruneCollectionFile(path string, removed map[string]bool) (PruneResult, err
 		_ = os.Remove(tmpName)
 		return PruneResult{}, perr
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil { // retries a transient reader (nmlsrc watcher / AV / sync)
 		_ = os.Remove(tmpName)
 		return PruneResult{}, err
 	}
