@@ -39,12 +39,13 @@ type Versions struct {
 // loads once, requests stream over newline-JSON stdio. Not safe for concurrent
 // Analyze calls by design (one model, serial GPU/CPU inference) - a mutex serializes.
 type Engine struct {
-	Python     string // venv python executable
-	DataDir    string // dir holding runner.py + model cache (HF_HOME etc. kept inside)
-	Device     string // "auto" | "cpu" | "cuda"
-	FFmpeg     string // ffmpeg path for decode fallback ("" = PATH)
-	Checkpoint string // fine-tuned checkpoint path ("" = builtin final0)
-	OnLog      func(line string)
+	Python      string        // venv python executable
+	DataDir     string        // dir holding runner.py + model cache (HF_HOME etc. kept inside)
+	Device      string        // "auto" | "cpu" | "cuda"
+	FFmpeg      string        // ffmpeg path for decode fallback ("" = PATH)
+	Checkpoint  string        // fine-tuned checkpoint path ("" = builtin final0)
+	CallTimeout time.Duration // per round-trip deadline (0 = none); bounds a wedged child call
+	OnLog       func(line string)
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd
@@ -180,6 +181,14 @@ func (e *Engine) stopLocked() {
 func (e *Engine) roundTrip(ctx context.Context, req map[string]any) (*runnerReply, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Per-call deadline: a child call that never replies (torch.load / CUDA / decode hang) would
+	// otherwise block forever - and an untimed caller goroutine can wedge its whole run. On timeout
+	// the ctx.Done branch below kills the child and returns; the caller treats it as a failed call.
+	if e.CallTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, e.CallTimeout)
+		defer cancel()
+	}
 	if err := e.startLocked(); err != nil {
 		return nil, err
 	}
