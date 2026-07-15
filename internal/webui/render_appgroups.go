@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"rave.page/mate/internal/appgroups"
 	"rave.page/mate/internal/i18n"
 )
 
@@ -23,13 +24,17 @@ func (u *UI) appGroupsBody() string {
 	if len(groups) == 0 {
 		return emptyState(i18n.T("appgroups.empty"))
 	}
+	// One process-table snapshot for ALL groups (was one full walk per group per render/tick).
+	var counts []appgroups.Counts
+	if u.svc.AppGroups != nil {
+		counts = u.svc.AppGroups.RunningCounts(groups)
+	} else {
+		counts = make([]appgroups.Counts, len(groups))
+	}
 	var b strings.Builder
 	b.WriteString(`<div class=grid>`)
-	for _, g := range groups {
-		running, total := 0, 0
-		if u.svc.AppGroups != nil {
-			running, total = u.svc.AppGroups.RunningCount(g)
-		}
+	for i, g := range groups {
+		running, total := counts[i].Running, counts[i].Total
 		variant := "muted"
 		if running > 0 && running >= total {
 			variant = "success"
