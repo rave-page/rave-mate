@@ -1,13 +1,13 @@
 {
-  "version": "nightly-51f293c",
-  "build": 86,
-  "commit": "51f293c",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-86-20260715-51f293c.exe",
-  "sha256": "6fda2ee6408af9c6a9e1db7cc1c1379c67e1b5035163a3ecf77e5cdd9f67ab10",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-86-20260715-51f293c.exe",
-  "installer_sha256": "0a122773c60470738406407cc46d1f1af7df314c2bd4fcfb02c58cca501ef928",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-86-20260715-51f293c",
-  "linux_sha256": "a3426817c4ad0150081c85148bd1ef1349879f5d5c7d780a67e70c3c4950db92",
+  "version": "nightly-d93112e",
+  "build": 87,
+  "commit": "d93112e",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-87-20260715-d93112e.exe",
+  "sha256": "923e7a6c58dcf67063144419ab5b0763625805c6ef5143e3b062f2fb1a1b5bf8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-87-20260715-d93112e.exe",
+  "installer_sha256": "c0a5cdb65d61f15929f553cdb6f3007ae0e3d62b1f66f7ce434a8e708a6ffa80",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-87-20260715-d93112e",
+  "linux_sha256": "df0dc799e229c0f742bf7f2ed0e648e051ad43a6d5055d168680f46df51a78fa",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T04:01:39Z",
-  "notes": "Merge 30fps real-time refresh: client-interpolated playhead/clock + Ableton Link"
+  "released": "2026-07-15T04:53:46Z",
+  "notes": "Merge gridfix robustness: no cockpit wedge on hung checkpoint + collection-write retry"
 }
