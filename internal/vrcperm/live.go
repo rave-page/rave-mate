@@ -23,26 +23,36 @@ import (
 // instance + operator table + off-world join affordance). No-op (records an error) when GitHub isn't
 // linked or no seq counter is wired. Stamps ConfigURL to the config-module gist when one exists.
 func (s *Service) PublishPointer(ctx context.Context, p matebridge.PointerModule) {
-	f := s.cfg()
-	if f.ConfigGistID != "" && p.ConfigURL == "" {
-		p.ConfigURL = github.RawURL(s.owner(), f.ConfigGistID, matebridge.ModuleConfig+".json")
+	if p.ConfigURL == "" {
+		p.ConfigURL = s.configModuleURL()
 	}
-	s.publishModule(ctx, "pointer", matebridge.SchemaPointer, matebridge.ModulePointer, p, &f.PointerGistID, "rave-mate world pointer")
+	s.publishModule(ctx, "pointer", matebridge.SchemaPointer, matebridge.ModulePointer, p, "rave-mate world pointer")
 }
 
 // PublishConfig writes the rave.live/config single-module gist (the active group's dotted-key ->
 // JSON-string settings).
 func (s *Service) PublishConfig(ctx context.Context, c matebridge.ConfigModule) {
-	f := s.cfg()
-	s.publishModule(ctx, "config", matebridge.SchemaConfig, matebridge.ModuleConfig, c, &f.ConfigGistID, "rave-mate world config")
+	s.publishModule(ctx, "config", matebridge.SchemaConfig, matebridge.ModuleConfig, c, "rave-mate world config")
 }
 
 // PublishPerformers writes the rave.live/performers single-module gist (the Twitch who-is-live
 // roster). rave-mate decides live off-world + scrubs before writing (the world only plays sanctioned
 // stream URLs).
 func (s *Service) PublishPerformers(ctx context.Context, m matebridge.PerformersLiveModule) {
-	f := s.cfg()
-	s.publishModule(ctx, "performers", matebridge.SchemaPerformers, matebridge.ModulePerformers, m, &f.PerformersGistID, "rave-mate world performers")
+	s.publishModule(ctx, "performers", matebridge.SchemaPerformers, matebridge.ModulePerformers, m, "rave-mate world performers")
+}
+
+// configModuleURL returns the world-facing raw URL of the config module (mode-agnostic): the
+// persisted LiveModules pointer, else the direct-mode owner+gist derivation before the first
+// LiveModules record. "" when no config module has been published.
+func (s *Service) configModuleURL() string {
+	if lm := s.liveModule("config"); lm.RawURL != "" {
+		return lm.RawURL
+	}
+	if f := s.cfg(); f.ConfigGistID != "" && s.owner() != "" {
+		return github.RawURL(s.owner(), f.ConfigGistID, matebridge.ModuleConfig+".json")
+	}
+	return ""
 }
 
 // maybePublishPointer publishes the instance pointer when enabled + a provider is set (called from
@@ -65,16 +75,15 @@ func (s *Service) maybePublishPointer(ctx context.Context) {
 	s.PublishPointer(ctx, p)
 }
 
-// publishModule writes one enveloped single-module gist, diff-only on the inner payload. On an
-// actual write it issues the next per-module seq (strictly increasing), wraps the payload in the
-// common envelope, and persists the gist id. mainFile is "<moduleKey>.json".
-func (s *Service) publishModule(ctx context.Context, key, schema, moduleKey string, payload any, gistID *string, desc string) {
-	if s.gists() == nil || s.owner() == "" {
-		s.setErr(key, "GitHub not linked")
-		return
-	}
-	if s.seq == nil {
-		s.setErr(key, "seq counter unavailable")
+// publishModule writes one live module, diff-only on the inner payload, mode-agnostically: it
+// delegates the wrap+seq+write to the active publisher (direct gist or hosted worldlive API),
+// then persists the returned raw URL + seq (LiveModules) so the editor bridge is mode-blind.
+// Diff-only is on the INNER payload: seq + updatedAt change every write, so hashing the envelope
+// would defeat it and bump the seq forever.
+func (s *Service) publishModule(ctx context.Context, key, schema, moduleKey string, payload any, desc string) {
+	p := s.publisher()
+	if ok, reason := p.ready(); !ok {
+		s.setErr(key, reason)
 		return
 	}
 	inner, err := json.Marshal(payload)
@@ -82,13 +91,10 @@ func (s *Service) publishModule(ctx context.Context, key, schema, moduleKey stri
 		s.setErr(key, err.Error())
 		return
 	}
-	// Hash the INNER payload only: seq + updatedAt change every write, so hashing the envelope would
-	// defeat diff-only and bump the seq forever.
 	h := hashBytes(inner)
 	s.mu.Lock()
-	unchanged := s.lastHash[key] == h && *gistID != ""
+	unchanged := s.lastHash[key] == h && p.published(key)
 	s.mu.Unlock()
-	mainFile := moduleKey + ".json"
 	if unchanged {
 		s.mu.Lock()
 		st := s.status[key]
@@ -98,29 +104,17 @@ func (s *Service) publishModule(ctx context.Context, key, schema, moduleKey stri
 		return
 	}
 
-	seq := s.seq.Next(key)
-	env, err := matebridge.MarshalSingle(schema, seq, time.Now().UTC().Format(time.RFC3339), moduleKey, inner)
+	res, err := p.write(ctx, key, schema, moduleKey, desc, inner)
 	if err != nil {
 		s.setErr(key, err.Error())
 		return
 	}
-	files := map[string]string{mainFile: string(env)}
-	g, err := s.writeGist(ctx, *gistID, desc, files)
-	if err != nil {
-		s.setErr(key, err.Error())
-		return
-	}
-	if g.ID != *gistID {
-		*gistID = g.ID
-		if s.save != nil {
-			s.save()
-		}
-	}
+	s.recordLiveModule(key, res) // raw URL + seq (+ any new gist id), persisted mode-agnostically
 	s.mu.Lock()
 	s.lastHash[key] = h
-	s.status[key] = PubStatus{URL: github.RawURL(s.owner(), g.ID, mainFile), HTMLURL: g.HTMLURL, When: time.Now()}
+	s.status[key] = PubStatus{URL: res.RawURL, HTMLURL: res.HTMLURL, When: time.Now()}
 	s.mu.Unlock()
-	s.log.Info(source, "published", map[string]any{"target": key, "seq": seq})
+	s.log.Info(source, "published", map[string]any{"target": key, "seq": res.Seq, "mode": s.mode()})
 }
 
 // PublishRoster publishes an editor-handed display-name roster (POST /v1/worldsync/gist) as a gist

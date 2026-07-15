@@ -139,16 +139,30 @@ func (g *settingsGateway) Settings(_ context.Context, _ string) (*matebridge.Set
 	f := g.cfg()
 	owner := g.owner()
 	var urls []string
-	add := func(gistID, moduleKey string) {
-		if owner != "" && gistID != "" {
-			urls = append(urls, ghlink.RawURL(owner, gistID, moduleKey+".json"))
+	var seqs []int64
+	// Mode-agnostic: prefer the persisted LiveModules pointer (both publish modes write it); fall
+	// back to the direct-mode owner+gist derivation before the first LiveModules record. Same for
+	// seq - the persisted value (server-owned in hosted mode) else the local gistseq high-water.
+	add := func(key, gistID, moduleKey string) {
+		lm := f.LiveModules[key]
+		raw := lm.RawURL
+		if raw == "" && owner != "" && gistID != "" {
+			raw = ghlink.RawURL(owner, gistID, moduleKey+".json")
 		}
+		if raw != "" {
+			urls = append(urls, raw)
+		}
+		s := lm.Seq
+		if s == 0 && g.seq != nil {
+			s = g.seq.Peek(key)
+		}
+		seqs = append(seqs, s)
 	}
-	add(f.PointerGistID, matebridge.ModulePointer)
-	add(f.ConfigGistID, matebridge.ModuleConfig)
-	add(f.PerformersGistID, matebridge.ModulePerformers)
+	add("pointer", f.PointerGistID, matebridge.ModulePointer)
+	add("config", f.ConfigGistID, matebridge.ModuleConfig)
+	add("performers", f.PerformersGistID, matebridge.ModulePerformers)
 
-	seq := maxSeq(g.seq.Peek("pointer"), g.seq.Peek("config"), g.seq.Peek("performers"))
+	seq := maxSeq(seqs...)
 	return &matebridge.Settings{
 		ContractVersion: matebridge.ContractVersion,
 		Seq:             seq,

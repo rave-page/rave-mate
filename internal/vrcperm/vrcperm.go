@@ -82,7 +82,8 @@ type Service struct {
 	members func() MemberSource // nil while VRChat unlinked
 	events  func(context.Context) []Event
 	nowPlay func() NowPlaying
-	seq     SeqCounter // nil => enveloped module + roster writes disabled
+	seq     SeqCounter   // nil => enveloped module + roster writes disabled
+	hosted  HostedClient // nil => hosted publish mode unavailable (falls to an error in hosted mode)
 
 	pagePause time.Duration // pause between member pages (API etiquette)
 
@@ -104,14 +105,15 @@ type Deps struct {
 	Members func() MemberSource
 	Events  func(context.Context) []Event
 	NowPlay func() NowPlaying
-	Seq     SeqCounter // persisted monotonic per-module seq; nil => enveloped/roster writes off
+	Seq     SeqCounter   // persisted monotonic per-module seq; nil => enveloped/roster writes off
+	Hosted  HostedClient // hosted-mode publish client (rave.page worldlive API); nil => hosted mode off
 }
 
 // New builds the service.
 func New(d Deps) *Service {
 	return &Service{
 		log: d.Log, cfg: d.Cfg, save: d.Save, gists: d.Gists, owner: d.Owner,
-		members: d.Members, events: d.Events, nowPlay: d.NowPlay, seq: d.Seq,
+		members: d.Members, events: d.Events, nowPlay: d.NowPlay, seq: d.Seq, hosted: d.Hosted,
 		pagePause: time.Second,
 		lastHash:  map[string]string{}, expCache: map[string][]string{}, status: map[string]PubStatus{},
 	}

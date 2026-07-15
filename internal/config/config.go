@@ -76,7 +76,10 @@ const (
 	// desktop-UI binds are paused). Additive - profiles are DERIVED from each bind's captured
 	// port ("" = the any-device profile), so v29 binds keep firing identically; the disable
 	// list starts empty (all profiles active).
-	configVersion = 30
+	// v31 added the WorldSync hosted publish path (PublishMode/HostedWorldID + mode-agnostic
+	// LiveModules pointer store): live modules can publish via rave.page's worldlive API instead
+	// of the user's own gist token. Additive - empty PublishMode = "direct" (the old behaviour).
+	configVersion = 31
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -1730,6 +1733,41 @@ type WorldSyncFeature struct {
 	ConfigGistID     string            `json:"configGistId,omitempty"`     // rave.live/config module gist
 	PerformersGistID string            `json:"performersGistId,omitempty"` // rave.live/performers module gist
 	RosterGists      map[string]string `json:"rosterGists,omitempty"`      // editor-published roster slug -> gist id
+
+	// PublishMode selects the live-module publish path: "direct" (default; the user's own
+	// gist-scoped token writes the gists) or "hosted" (rave.page's worldlive API creates them
+	// under its service account - no gist token needed in-app). Empty = direct.
+	PublishMode   string `json:"publishMode,omitempty"`
+	HostedWorldID string `json:"hostedWorldId,omitempty"` // target VRChat world id (wrld_…) for hosted publishes
+
+	// LiveModules is the mode-agnostic per-module published pointer (raw URL the world polls +
+	// SEQ-GATE value + gist id), keyed by internal target key (pointer|config|performers). BOTH
+	// modes write it so the editor bridge bakes URLs + the settings gateway advances seq without
+	// knowing the mode. Direct mode also keeps *GistID above (gist identity for republish/heal);
+	// hosted mode has only this (rave.page owns the gist).
+	LiveModules map[string]LiveModulePub `json:"liveModules,omitempty"`
+}
+
+// WorldSync live-module publish modes (WorldSyncFeature.PublishMode).
+const (
+	WorldSyncModeDirect = "direct"
+	WorldSyncModeHosted = "hosted"
+)
+
+// LiveModulePub is one live module's last published pointer (mode-agnostic). RawURL is the
+// stable world-facing gist raw URL; Seq is the world's SEQ-GATE value; GistID is provenance.
+type LiveModulePub struct {
+	RawURL string `json:"rawUrl,omitempty"`
+	Seq    int64  `json:"seq,omitempty"`
+	GistID string `json:"gistId,omitempty"`
+}
+
+// ResolvedPublishMode returns the effective publish mode ("hosted" or "direct"; default direct).
+func (w WorldSyncFeature) ResolvedPublishMode() string {
+	if w.PublishMode == WorldSyncModeHosted {
+		return WorldSyncModeHosted
+	}
+	return WorldSyncModeDirect
 }
 
 // ResolvedRefresh returns the refresh interval (default 10 min).

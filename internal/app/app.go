@@ -792,6 +792,13 @@ func run(parent context.Context, serviceMode bool) error {
 		Cfg:  func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
 		Save: func() { _ = cfg.Save() },
 		Seq:  gistSeq,
+		// Hosted publish path (rave.page worldlive API under its own service account) - self-gates
+		// on a live rave.page session + a configured world id; unused unless PublishMode="hosted".
+		Hosted: &worldliveClient{
+			api:   apiC,
+			token: authMgr.Token,
+			cfg:   func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
+		},
 		Gists: func() vrcperm.GistStore {
 			if !ghAuth.SignedIn() {
 				return nil
