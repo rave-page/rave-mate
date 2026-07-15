@@ -37,6 +37,13 @@ type vrmSt struct {
 	wlWorldID   string // bind-current-world capture
 	wlWorldName string
 	wlPick      string
+
+	// cam-path target picker cache: VRCTools.CamPaths() = full dir scan+parse, too heavy for the
+	// ss opts closure (runs on every modal render); computed once off-thread (vrmCamPathSelect),
+	// reset on each wrist-modal open.
+	cpOpts    []ssOpt
+	cpLoaded  bool
+	cpPending bool
 }
 
 var (
@@ -59,7 +66,13 @@ func init() {
 	// entry points (Settings ▸ VR overlays)
 	onExact("settings-vr-keybinds", func(u *UI, _ actMsg) { u.vrKeybindsModal() })
 	onExact("settings-vr-layouts", func(u *UI, _ actMsg) { u.vrLayoutsModal() })
-	onExact("settings-vr-wrist", func(u *UI, _ actMsg) { u.vrQuickButtonsModal() })
+	onExact("settings-vr-wrist", func(u *UI, _ actMsg) {
+		s := u.vrm() // fresh modal open: drop the cam-path cache so it recomputes once off-thread
+		s.mu.Lock()
+		s.cpOpts, s.cpLoaded, s.cpPending = nil, false, false
+		s.mu.Unlock()
+		u.vrQuickButtonsModal()
+	})
 	onExact("settings-vr-worldlay", func(u *UI, _ actMsg) { u.vrWorldLayoutsModal() })
 
 	// keybinds
@@ -589,15 +602,7 @@ func (u *UI) vrmQuickTargetRow(actID, cur string) string {
 			return out
 		})
 	case "campath.load":
-		return smartSelect("vr-qb-target", i18n.T("settings.vr.cameraPath"), "vr-qb-tgtpick:", cur, func() []ssOpt {
-			var out []ssOpt
-			if u.svc.VRCTools != nil {
-				for _, p := range u.svc.VRCTools.CamPaths() {
-					out = append(out, ssOpt{Val: p.File, Label: p.Name, Sub: p.Folder()})
-				}
-			}
-			return out
-		})
+		return u.vrmCamPathSelect(cur)
 	case string(vrbind.ActOverlayToggle), string(vrbind.ActOverlayShow), string(vrbind.ActOverlayHide):
 		return u.vrmTargetRow("vr-qb-target", "vr-qb-tgtpick:", "vr-qb-tgtval", cur, vrbind.TargetOverlay)
 	case string(vrbind.ActOBSRecord), string(vrbind.ActOBSStream):
@@ -608,6 +613,40 @@ func (u *UI) vrmQuickTargetRow(actID, cur string) string {
 		return u.vrmTargetRow("vr-qb-target", "vr-qb-tgtpick:", "vr-qb-tgtval", cur, vrbind.TargetAppGroup)
 	}
 	return ""
+}
+
+// vrmCamPathSelect is the campath.load target picker. VRCTools.CamPaths() = full dir scan+parse;
+// scanning it in the ss opts closure ran on EVERY modal render (ssInner resolves the label even
+// closed). Compute the list ONCE off-thread into vrmSt; the closure reads the live cache; the bg
+// completion re-patches just this smart-select.
+func (u *UI) vrmCamPathSelect(cur string) string {
+	s := u.vrm()
+	s.mu.Lock()
+	if !s.cpLoaded && !s.cpPending && u.svc.VRCTools != nil {
+		s.cpPending = true
+		s.mu.Unlock()
+		u.bg(func() {
+			var opts []ssOpt
+			for _, p := range u.svc.VRCTools.CamPaths() {
+				opts = append(opts, ssOpt{Val: p.File, Label: p.Name, Sub: p.Folder()})
+			}
+			s := u.vrm()
+			s.mu.Lock()
+			s.cpOpts, s.cpLoaded, s.cpPending = opts, true, false
+			s.mu.Unlock()
+			if !u.stopped() {
+				u.ssPatch("vr-qb-target")
+			}
+		})
+	} else {
+		s.mu.Unlock()
+	}
+	return smartSelect("vr-qb-target", i18n.T("settings.vr.cameraPath"), "vr-qb-tgtpick:", cur, func() []ssOpt {
+		s := u.vrm()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.cpOpts
+	})
 }
 
 func (u *UI) vrmAddQuickButton() {
