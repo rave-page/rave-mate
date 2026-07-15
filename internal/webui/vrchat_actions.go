@@ -416,6 +416,118 @@ func (u *UI) vrcEmoteGen(form string) {
 	})
 }
 
+// ── background scans (camera paths + photos) ──
+//
+// vrccampaths.Scan and vrcphotos.ScanAll are filepath.WalkDir sweeps of the VRChat dirs (hundreds–
+// thousands of files, a stat/parse/sidecar-read each) - far too heavy for the serial render/act
+// thread. Each is scanned ONCE off-thread into a process-global cache (the result depends only on
+// the shared VRCTools + filesystem, not on which UI), served to render from that cache
+// (stale-while-refresh; empty+loading until the FIRST scan lands, which re-renders). Invalidated by
+// a short TTL and explicitly by OrganizeNow. Process-global (not per-*UI) so it needs no teardown.
+const vrcScanTTL = 30 * time.Second
+
+var (
+	vrcScanMu     sync.Mutex
+	vrcScanGen    int64 // bumped by vrcInvalidateScans; a scan that started at an older gen discards its (pre-mutation) result
+	vrcPaths      []vrccampaths.Path
+	vrcPathsAt    time.Time
+	vrcPathsOK    bool // ≥1 scan completed
+	vrcPathsBusy  bool // a scan is in flight
+	vrcPhotos     []vrcphotos.Photo
+	vrcPhotosAt   time.Time
+	vrcPhotosOK   bool
+	vrcPhotosBusy bool
+)
+
+// vrcCachedPaths returns the sorted camera paths from cache, kicking an off-thread rescan when cold
+// or past the TTL. loaded=false only while the FIRST scan runs (render shows a loading state);
+// afterwards it serves the last result while a refresh runs. Never blocks on the fs.
+func (u *UI) vrcCachedPaths() ([]vrccampaths.Path, bool) {
+	if u.svc.VRCTools == nil {
+		return nil, true
+	}
+	vrcScanMu.Lock()
+	defer vrcScanMu.Unlock()
+	fresh := vrcPathsOK && time.Since(vrcPathsAt) < vrcScanTTL
+	if !fresh && !vrcPathsBusy {
+		vrcPathsBusy = true
+		u.bg(u.vrcScanPaths)
+	}
+	return vrcPaths, vrcPathsOK
+}
+
+// vrcScanPaths runs the camera-path Scan off-thread + refreshes the cache, then re-renders the
+// campaths pane if it is showing.
+func (u *UI) vrcScanPaths() {
+	vrcScanMu.Lock()
+	gen := vrcScanGen
+	vrcScanMu.Unlock()
+	paths := vrcSortedPaths(u)
+	vrcScanMu.Lock()
+	if gen != vrcScanGen { // invalidated mid-scan (fs changed): discard stale pre-mutation data, next read rescans
+		vrcPathsBusy = false
+		vrcScanMu.Unlock()
+		return
+	}
+	vrcPaths, vrcPathsAt, vrcPathsOK, vrcPathsBusy = paths, time.Now(), true, false
+	vrcScanMu.Unlock()
+	if !u.stopped() && u.activeTab() == "vrchat" && u.vrcgSub() == "profile" {
+		u.patchCampaths()
+	}
+}
+
+// vrcPathsPeek reads the cached camera paths without triggering a scan (ok=false if never scanned).
+func vrcPathsPeek() ([]vrccampaths.Path, bool) {
+	vrcScanMu.Lock()
+	defer vrcScanMu.Unlock()
+	return vrcPaths, vrcPathsOK
+}
+
+// vrcCachedPhotos returns the screenshot listing from cache, kicking an off-thread rescan when cold
+// or past the TTL (see vrcCachedPaths). Never blocks on the fs.
+func (u *UI) vrcCachedPhotos() ([]vrcphotos.Photo, bool) {
+	if u.svc.VRCTools == nil {
+		return nil, true
+	}
+	vrcScanMu.Lock()
+	defer vrcScanMu.Unlock()
+	fresh := vrcPhotosOK && time.Since(vrcPhotosAt) < vrcScanTTL
+	if !fresh && !vrcPhotosBusy {
+		vrcPhotosBusy = true
+		u.bg(u.vrcScanPhotos)
+	}
+	return vrcPhotos, vrcPhotosOK
+}
+
+// vrcScanPhotos runs the screenshot ScanAll off-thread + refreshes the cache, then re-renders the
+// photos pane if it is showing.
+func (u *UI) vrcScanPhotos() {
+	vrcScanMu.Lock()
+	gen := vrcScanGen
+	vrcScanMu.Unlock()
+	photos := u.svc.VRCTools.Photos()
+	vrcScanMu.Lock()
+	if gen != vrcScanGen { // invalidated mid-scan (fs changed): discard stale pre-mutation data, next read rescans
+		vrcPhotosBusy = false
+		vrcScanMu.Unlock()
+		return
+	}
+	vrcPhotos, vrcPhotosAt, vrcPhotosOK, vrcPhotosBusy = photos, time.Now(), true, false
+	vrcScanMu.Unlock()
+	if !u.stopped() && u.activeTab() == "vrchat" && u.vrcgSub() == "profile" {
+		u.patchPhotos()
+	}
+}
+
+// vrcInvalidateScans forces the next render to rescan camera paths + photos (the fs changed) while
+// still serving the last results until the refresh lands.
+func vrcInvalidateScans() {
+	vrcScanMu.Lock()
+	vrcScanGen++                                       // any in-flight scan (started pre-mutation) now discards its result
+	vrcPathsAt, vrcPhotosAt = time.Time{}, time.Time{} // zero → past TTL → rescan on next read
+	vrcScanMu.Unlock()
+}
+
 // ── camera paths ──
 
 // vrcSortedPaths returns the camera paths in the display order (world groups A→Z, player-relative
@@ -453,16 +565,18 @@ func (u *UI) vrcCampathLoad() {
 	if u.svc.VRCTools == nil {
 		return
 	}
-	paths := vrcSortedPaths(u)
 	vrcMu.Lock()
 	sel := vrcCampathSel
 	vrcMu.Unlock()
-	if sel < 0 || sel >= len(paths) {
-		return
-	}
-	file := paths[sel].File
 	u.bg(func() {
-		if err := u.svc.VRCTools.LoadCamPath(file); err != nil {
+		paths, ok := vrcPathsPeek()
+		if !ok {
+			paths = vrcSortedPaths(u) // cache cold - scan off-thread (already in bg)
+		}
+		if sel < 0 || sel >= len(paths) {
+			return
+		}
+		if err := u.svc.VRCTools.LoadCamPath(paths[sel].File); err != nil {
 			u.toast(i18n.T("vrchat.toast.loadFailed") + err.Error())
 			return
 		}
@@ -471,13 +585,21 @@ func (u *UI) vrcCampathLoad() {
 }
 
 func (u *UI) vrcCampathOrganize() {
-	if u.svc.VRCTools == nil {
+	if u.svc.VRCTools == nil || !u.actStart("vrc-organize") {
 		return
 	}
-	photos, paths := u.svc.VRCTools.OrganizeNow()
-	u.toast(i18n.T("vrchat.toast.organized", i18n.A{"paths": strconv.Itoa(paths), "photos": strconv.Itoa(photos)}))
-	u.patchCampaths()
-	u.patchPhotos()
+	u.pendingAct("vrc-campath-organize")
+	u.bg(func() { // OrganizeNow = WalkDir + copy/move - off the actWorker
+		defer u.actEnd("vrc-organize")
+		photos, paths := u.svc.VRCTools.OrganizeNow()
+		vrcInvalidateScans() // fs changed - drop cached path/photo scans
+		if u.stopped() {
+			return
+		}
+		u.toast(i18n.T("vrchat.toast.organized", i18n.A{"paths": strconv.Itoa(paths), "photos": strconv.Itoa(photos)}))
+		u.patchCampaths()
+		u.patchPhotos()
+	})
 }
 
 // ── photos ──

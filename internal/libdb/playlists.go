@@ -60,6 +60,7 @@ func (d *DB) CreatePlaylist(name, kind, rules string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	d.bumpPlaylists()
 	return res.LastInsertId()
 }
 
@@ -101,6 +102,9 @@ func (d *DB) SetSmartRules(id int64, rules string) error {
 func (d *DB) touchPlaylist(id int64, setClause string, v any) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := d.db.Exec(`UPDATE playlists SET `+setClause+`, updated_at=? WHERE id=?`, v, now, id)
+	if err == nil {
+		d.bumpPlaylists()
+	}
 	return err
 }
 
@@ -116,6 +120,7 @@ func (d *DB) DeletePlaylist(id int64) error {
 			return err
 		}
 	}
+	d.bumpPlaylists()
 	return nil
 }
 
@@ -214,12 +219,16 @@ func (d *DB) AddToPlaylist(id int64, paths ...string) (int, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	d.bumpPlaylists()
 	return added, nil
 }
 
 // RemoveFromPlaylist deletes one path from a playlist.
 func (d *DB) RemoveFromPlaylist(id int64, path string) error {
 	_, err := d.db.Exec(`DELETE FROM playlist_tracks WHERE playlist_id=? AND path=?`, id, path)
+	if err == nil {
+		d.bumpPlaylists()
+	}
 	return err
 }
 

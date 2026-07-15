@@ -245,16 +245,20 @@ func (u *UI) libCompatRemove(arg string) {
 	u.libPatchDetail()
 }
 
-// libCompatSectionHTML: detail-rail section - direct partners (capped) + find button.
-// Caller holds s.mu.
-func (u *UI) libCompatSectionHTML(s *libSt, path string) string {
+// libCompatSectionHTML: detail-rail section - direct partners (capped) + find button. direct is
+// resolved off-thread + cached on the selection (see libDetailData); ready=false shows a loading
+// line until the first resolve lands. Caller holds s.mu.
+func (u *UI) libCompatSectionHTML(s *libSt, path string, direct []libdb.CompatRow, ready bool) string {
 	if u.svc.Lib == nil {
 		return ""
 	}
-	direct, _ := u.svc.Lib.CompatFor(path)
 	var b strings.Builder
 	if len(direct) == 0 {
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.compat.sectionEmpty")) + `</p>`)
+		empty := i18n.T("library.compat.sectionEmpty")
+		if !ready {
+			empty = i18n.T("library.remote.col.loading")
+		}
+		b.WriteString(`<p class=page-sub>` + html.EscapeString(empty) + `</p>`)
 	} else {
 		hits := compatDiscover(path, direct, nil, compatRailMax)
 		for _, h := range hits {

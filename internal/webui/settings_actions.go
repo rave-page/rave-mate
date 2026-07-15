@@ -535,6 +535,7 @@ func init() {
 		}
 		u.bg(func() {
 			p, c := u.svc.VRCTools.OrganizeNow()
+			vrcInvalidateScans() // fs moved - drop the shared vrchat-pane scan cache
 			u.toast(i18n.T("settings.toast.organized", i18n.A{"photos": strconv.Itoa(p), "paths": strconv.Itoa(c)}))
 		})
 	})

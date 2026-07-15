@@ -1,15 +1,19 @@
 package webui
 
 import (
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"html"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/session/sinks/recorder"
+	"rave.page/mate/internal/store"
 )
 
 // renderPublish is the recording/publishing cockpit at parity with the Fyne Publish tab
@@ -241,16 +245,18 @@ func (u *UI) pubDetailHTML(sel *recorder.Recording, caps map[string][]libdb.SetR
 		u.pubActionsHTML(r) + `</div>`
 
 	sets := caps[r.ID]
-	rows := u.pubTrackRows(r, sets)
 	active := u.pubSubtab()
+	// Track COUNT needs no library resolution - use it for the subtab label so switching to
+	// Captures never pays the (async, DB-backed) tracklist link resolution.
 	tabs := subTabs("pub-tab:", active,
 		[2]string{"captures", i18n.T("publish.capturesCount", i18n.A{"count": fmt.Sprint(len(sets))})},
-		[2]string{"tracklist", i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(len(rows))})},
+		[2]string{"tracklist", i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(len(r.Tracks))})},
 	)
 
 	var body string
 	if active == "tracklist" {
-		body = u.pubTracklistHTML(rows)
+		rows, ready := u.pubTrackRows(r) // library-path resolution is off-thread + cached (see pubTrackPaths)
+		body = u.pubTracklistHTML(rows, !ready)
 	} else {
 		body = u.pubCapturesHTML(r, sets) + u.pubLooseHTML(loose)
 	}
@@ -267,20 +273,30 @@ func (u *UI) pubActionsHTML(r recorder.Recording) string {
 	return btnRow(btns...)
 }
 
-func (u *UI) pubTracklistHTML(rows []pubRow) string {
+// pubTracklistHTML renders the tracklist. resolving = library-path links are still being
+// resolved off-thread (names/times show immediately; the works-together checkboxes fill in when
+// the async resolve lands and re-renders).
+func (u *UI) pubTracklistHTML(rows []pubRow, resolving bool) string {
 	if len(rows) == 0 {
 		return hint("info", i18n.T("publish.noTracks"))
 	}
 	sel := u.pubTSel()
 	var b strings.Builder
+	if resolving {
+		b.WriteString(hint("info", i18n.T("publish.linkingLibrary")))
+	}
 	b.WriteString(`<div class=pub-tracklist>`)
 	unresolved := 0
 	for i, row := range rows {
 		lead, ctx := "", ""
-		if row.path == "" {
+		switch {
+		case resolving:
+			// links not resolved yet - neutral placeholder, not a "no match" mark
+			lead = `<span class="pub-track-chk none" title=` + attrQ(i18n.T("publish.linkingLibrary")) + `>…</span>`
+		case row.path == "":
 			unresolved++
 			lead = `<span class="pub-track-chk none" title=` + attrQ(i18n.T("publish.compat.unresolved")) + `>·</span>`
-		} else {
+		default:
 			chk := ""
 			if sel[row.path] {
 				chk = " checked"
@@ -437,14 +453,121 @@ type pubRow struct {
 }
 
 // pubTrackRows builds the tracklist from the live session tracks (offset = StartedAt − set start).
-// Each row resolves to a library path: the track's own recorded/reconciled path when present,
-// else a UNIQUE artist+title match against the library DB.
-func (u *UI) pubTrackRows(r recorder.Recording, _ []libdb.SetRecording) []pubRow {
-	rows := make([]pubRow, len(r.Tracks))
+// ready=false while each row's library path resolves off-thread (see pubTrackPaths); the label +
+// offset come straight off the track (no I/O) and render immediately.
+func (u *UI) pubTrackRows(r recorder.Recording) (rows []pubRow, ready bool) {
+	paths, ok := u.pubTrackPaths(r)
+	rows = make([]pubRow, len(r.Tracks))
 	for i, t := range r.Tracks {
-		rows[i] = pubRow{offset: t.StartedAt.Sub(r.StartedAt), label: orTrackLine(pubTrackLine(t)), path: u.pubResolvePath(t)}
+		p := ""
+		if ok && i < len(paths) {
+			p = paths[i]
+		}
+		rows[i] = pubRow{offset: t.StartedAt.Sub(r.StartedAt), label: orTrackLine(pubTrackLine(t)), path: p}
 	}
-	return rows
+	return rows, ok
+}
+
+// ── tracklist library-link resolution: computed ONCE, persisted, data-change-aware ──
+//
+// Resolving a track to a library path is a per-track libdb query (pubResolvePath →
+// TrackPathByMeta, a full scan); doing it in render for a 30+ track set froze the whole UI.
+// Instead we resolve the whole set ONCE off-thread and persist the result in the store, keyed by
+// recording ID. It is invalidated by BOTH data sources it depends on:
+//   - library side: the store mtime slot carries libdb LibraryVersion() (bumps on any library
+//     mutation) → a collection/import/edit re-resolves.
+//   - recording side: a content signature (artist+title+path of every track) stored in the blob →
+//     Match-history rewriting the paths, or a live set growing, re-resolves.
+//
+// A tiny in-proc map fronts the store (also dedups in-flight resolves) so repeat renders never
+// touch bbolt. Render NEVER blocks on the DB - it reads the cache or shows "linking…".
+type pubLinkKey struct {
+	u     *UI
+	recID string
+}
+type pubLinkEntry struct {
+	epoch   int64
+	sig     uint64
+	nTracks int
+	paths   []string // index-aligned with r.Tracks; nil while pending
+	pending bool
+}
+type pubLinkBlob struct {
+	Sig   uint64   `json:"sig"`
+	Paths []string `json:"paths"`
+}
+
+var (
+	pubLinkMu  sync.Mutex
+	pubLinkMem = map[pubLinkKey]*pubLinkEntry{}
+)
+
+// pubTracksSig hashes the resolution inputs (artist/title/path per track) so any recording-side
+// change invalidates the cached links without an explicit hook. Pure CPU, no I/O.
+func pubTracksSig(tracks []recorder.Track) uint64 {
+	h := fnv.New64a()
+	for _, t := range tracks {
+		_, _ = h.Write([]byte(t.Artist + "\x00" + t.Title + "\x00" + t.Path + "\n"))
+	}
+	return h.Sum64()
+}
+
+// pubTrackPaths returns the recording's resolved per-track library paths, or (nil,false) while a
+// one-shot async resolve runs. NEVER blocks the caller on the library DB.
+func (u *UI) pubTrackPaths(r recorder.Recording) ([]string, bool) {
+	epoch := int64(0)
+	if u.svc.Lib != nil {
+		epoch = u.svc.Lib.LibraryVersion()
+	}
+	n := len(r.Tracks)
+	sig := pubTracksSig(r.Tracks)
+	k := pubLinkKey{u, r.ID}
+
+	pubLinkMu.Lock()
+	if e := pubLinkMem[k]; e != nil && e.epoch == epoch && e.sig == sig && e.nTracks == n {
+		if e.paths != nil {
+			p := e.paths
+			pubLinkMu.Unlock()
+			return p, true
+		}
+		if e.pending {
+			pubLinkMu.Unlock()
+			return nil, false // resolve already in flight for this (epoch,sig)
+		}
+	}
+	if u.svc.Store != nil {
+		if raw, hit := u.svc.Store.GetAnalysis(store.KindSetTrackLinks, r.ID, epoch); hit {
+			var blob pubLinkBlob
+			if json.Unmarshal(raw, &blob) == nil && blob.Sig == sig && len(blob.Paths) == n {
+				pubLinkMem[k] = &pubLinkEntry{epoch: epoch, sig: sig, nTracks: n, paths: blob.Paths}
+				pubLinkMu.Unlock()
+				return blob.Paths, true
+			}
+		}
+	}
+	pubLinkMem[k] = &pubLinkEntry{epoch: epoch, sig: sig, nTracks: n, pending: true}
+	pubLinkMu.Unlock()
+
+	tracks := append([]recorder.Track(nil), r.Tracks...)
+	recID := r.ID
+	u.bg(func() {
+		paths := make([]string, len(tracks))
+		for i := range tracks {
+			paths[i] = u.pubResolvePath(tracks[i])
+		}
+		if u.svc.Store != nil {
+			if raw, err := json.Marshal(pubLinkBlob{Sig: sig, Paths: paths}); err == nil {
+				u.svc.Store.PutAnalysis(store.KindSetTrackLinks, recID, epoch, raw)
+			}
+		}
+		pubLinkMu.Lock()
+		pubLinkMem[k] = &pubLinkEntry{epoch: epoch, sig: sig, nTracks: len(tracks), paths: paths}
+		pubLinkMu.Unlock()
+		if !u.stopped() && u.activeTab() == "publish" && u.pubSubtab() == "tracklist" && u.pubSelID() == recID {
+			u.patchMain()
+		}
+	})
+	return nil, false
 }
 
 // pubResolvePath maps a recorder track to its library path (existing link first, then

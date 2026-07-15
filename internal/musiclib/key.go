@@ -1,6 +1,9 @@
 package musiclib
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // Harmonic key model: every notation a DJ library throws at us (musical "Ebm",
 // Camelot "8A", Open Key "8m", Traktor MUSICAL_KEY 0-23) normalizes to a Camelot
@@ -76,9 +79,29 @@ func KeyRelation(ref, k Key) KeyRel {
 	return RelNone
 }
 
+// parseKeyMemo caches ParseKey by raw notation. Parsing is deterministic (static notation rules)
+// so the memo never invalidates; bounded by a library's distinct key-notation strings.
+var parseKeyMemo sync.Map // string → parseKeyResult
+
+type parseKeyResult struct {
+	k  Key
+	ok bool
+}
+
 // ParseKey normalizes any common key notation. Accepted: Camelot ("8A"),
 // Open Key ("8m"/"8d"), musical ("Am", "C#", "Eb min", "F♯ minor", "Cmaj").
+// Memoized: hit per row per render (keyPillHTML/keyMatches) - was a full string parse each.
 func ParseKey(s string) (Key, bool) {
+	if v, ok := parseKeyMemo.Load(s); ok {
+		r := v.(parseKeyResult)
+		return r.k, r.ok
+	}
+	k, ok := parseKey(s)
+	parseKeyMemo.Store(s, parseKeyResult{k, ok})
+	return k, ok
+}
+
+func parseKey(s string) (Key, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Key{}, false

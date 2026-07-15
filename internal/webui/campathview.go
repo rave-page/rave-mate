@@ -70,8 +70,10 @@ func init() {
 	onPrefix("cpv-play:", func(u *UI, m actMsg) { u.cpvPlayToggle(m.arg("cpv-play:")) })
 }
 
-// cpvEnsure loads file into the host's viewer (frames the camera, stops a running
-// flythrough) when the selection changed; same file = keep the user's orbit.
+// cpvEnsure reflects the host's current selection in its viewer. On a selection change it clears the
+// old geometry + stops any flythrough synchronously, then loads the keyframes OFF-THREAD (LoadPoints
+// = file read + JSON parse; never on the serial render/act thread) and re-renders the pane when they
+// land. Same file = keep the user's orbit. Render/cpvView read only cached pts (empty until loaded).
 func (u *UI) cpvEnsure(host, file string) {
 	s := u.cpv(host)
 	s.mu.Lock()
@@ -79,30 +81,56 @@ func (u *UI) cpvEnsure(host, file string) {
 		s.mu.Unlock()
 		return
 	}
-	s.mu.Unlock()
-	var pts []vrccampaths.Point
-	var err error
-	if file != "" {
-		pts, err = vrccampaths.LoadPoints(file)
-	}
-	s.mu.Lock()
 	s.cpvStopLocked()
-	s.file, s.pts = file, pts
-	if len(pts) > 0 {
-		lo := [3]float32{1e9, 1e9, 1e9}
-		hi := [3]float32{-1e9, -1e9, -1e9}
-		for _, pt := range pts {
-			pos := cpvPos(pt)
-			for k := 0; k < 3; k++ {
-				lo[k] = float32(math.Min(float64(lo[k]), float64(pos[k])))
-				hi[k] = float32(math.Max(float64(hi[k]), float64(pos[k])))
-			}
-		}
-		s.cam.frame(lo, hi, 1.3, 1.5)
-	}
+	s.file, s.pts = file, nil // claim the new file; drop old geometry until the async load lands
 	s.mu.Unlock()
-	if err != nil {
-		u.toast(i18n.T("motion.toast.readPathFailed") + err.Error())
+	if file == "" {
+		return
+	}
+	u.bg(func() {
+		pts, err := vrccampaths.LoadPoints(file)
+		s.mu.Lock()
+		if s.file != file { // selection moved on while we loaded - drop stale points
+			s.mu.Unlock()
+			return
+		}
+		s.pts = pts
+		if len(pts) > 0 {
+			lo := [3]float32{1e9, 1e9, 1e9}
+			hi := [3]float32{-1e9, -1e9, -1e9}
+			for _, pt := range pts {
+				pos := cpvPos(pt)
+				for k := 0; k < 3; k++ {
+					lo[k] = float32(math.Min(float64(lo[k]), float64(pos[k])))
+					hi[k] = float32(math.Max(float64(hi[k]), float64(pos[k])))
+				}
+			}
+			s.cam.frame(lo, hi, 1.3, 1.5)
+		}
+		s.mu.Unlock()
+		if err != nil {
+			u.toast(i18n.T("motion.toast.readPathFailed") + err.Error())
+		}
+		u.cpvLoadedPatch(host)
+	})
+}
+
+// cpvLoadedPatch re-renders the host pane that embeds the viewer after an async point-load, so the
+// geometry appears inline (no dependency on the cpv fragments already being in the DOM). Scoped to
+// the host's visible surface; a no-op elsewhere.
+func (u *UI) cpvLoadedPatch(host string) {
+	if u.stopped() {
+		return
+	}
+	switch host {
+	case "vrc":
+		if u.activeTab() == "vrchat" && u.vrcgSub() == "profile" {
+			u.patchCampaths()
+		}
+	case "mo":
+		if u.activeTab() == "motion" {
+			u.moPatchBody()
+		}
 	}
 }
 

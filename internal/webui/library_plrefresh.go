@@ -109,25 +109,36 @@ func (u *UI) libAutoRefreshFolders() {
 
 func init() {
 	onPrefix("lib-pl-refresh:", func(u *UI, m actMsg) {
-		n, name, err := u.libPlaylistRefreshFolder(int64(atoi(m.arg("lib-pl-refresh:"))))
-		switch {
-		case err != nil:
-			u.toast(err.Error())
-		case n == 0:
-			u.toast(i18n.T("library.pl.refreshNone"))
-		default:
-			u.toast(i18n.T("library.pl.refreshedToast", i18n.A{"n": fmt.Sprint(n), "name": name}))
-			u.libPatchBody()
-		}
+		id := int64(atoi(m.arg("lib-pl-refresh:")))
+		u.bg(func() { // os.ReadDir + DB write off the actWorker
+			n, name, err := u.libPlaylistRefreshFolder(id)
+			if u.stopped() {
+				return
+			}
+			switch {
+			case err != nil:
+				u.toast(err.Error())
+			case n == 0:
+				u.toast(i18n.T("library.pl.refreshNone"))
+			default:
+				u.toast(i18n.T("library.pl.refreshedToast", i18n.A{"n": fmt.Sprint(n), "name": name}))
+				u.libPatchBody()
+			}
+		})
 	})
-	onExact("lib-pl-refresh-all", func(u *UI, m actMsg) {
-		added, lists := u.libRefreshFolderPlaylists(false)
-		if added == 0 {
-			u.toast(i18n.T("library.pl.refreshNone"))
-			return
-		}
-		u.toast(i18n.T("library.pl.refreshAllToast", i18n.A{"n": fmt.Sprint(added), "m": fmt.Sprint(lists)}))
-		u.libPatchBody()
+	onExact("lib-pl-refresh-all", func(u *UI, _ actMsg) {
+		u.bg(func() { // sweeps every folder playlist (os.ReadDir + DB writes) off the actWorker
+			added, lists := u.libRefreshFolderPlaylists(false)
+			if u.stopped() {
+				return
+			}
+			if added == 0 {
+				u.toast(i18n.T("library.pl.refreshNone"))
+				return
+			}
+			u.toast(i18n.T("library.pl.refreshAllToast", i18n.A{"n": fmt.Sprint(added), "m": fmt.Sprint(lists)}))
+			u.libPatchBody()
+		})
 	})
 	onPrefix("lib-pl-autorefresh:", func(u *UI, m actMsg) {
 		id := int64(atoi(m.arg("lib-pl-autorefresh:")))

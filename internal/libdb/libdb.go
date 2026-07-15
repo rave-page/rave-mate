@@ -8,6 +8,7 @@ package libdb
 import (
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (registers "sqlite")
@@ -132,6 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_played_tracks_started ON played_tracks(started_at
 type DB struct {
 	db     *sql.DB
 	nodeID string // change_log author (this node); set once at startup via SetNodeID
+	// In-proc mutation epochs for caches whose inputs do NOT append to change_log (so
+	// LibraryVersion() misses them). Bumped by the respective mutations; one daemon owns the DB,
+	// so an in-proc counter is consistent across UI/remotectl/worker writers.
+	plVer     atomic.Int64 // playlists + playlist_tracks
+	compatVer atomic.Int64 // track_compat
 }
 
 // SetNodeID sets the node identity stamped on every change_log row. Call once at startup
@@ -139,6 +145,35 @@ type DB struct {
 func (d *DB) SetNodeID(id string) {
 	if d != nil {
 		d.nodeID = id
+	}
+}
+
+// PlaylistVersion is an epoch bumped on any playlist / playlist_tracks mutation - version caches
+// of playlist lists / smart-playlist counts by it (change_log does NOT cover playlists).
+func (d *DB) PlaylistVersion() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.plVer.Load()
+}
+
+// CompatVersion is an epoch bumped on any track_compat mutation.
+func (d *DB) CompatVersion() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.compatVer.Load()
+}
+
+func (d *DB) bumpPlaylists() {
+	if d != nil {
+		d.plVer.Add(1)
+	}
+}
+
+func (d *DB) bumpCompat() {
+	if d != nil {
+		d.compatVer.Add(1)
 	}
 }
 

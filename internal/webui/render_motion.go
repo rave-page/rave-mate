@@ -12,6 +12,7 @@ package webui
 import (
 	"fmt"
 	"html"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -259,18 +260,61 @@ func (u *UI) moAvatarHTML() string {
 	if cur != "" {
 		curLbl = filepath.Base(cur)
 	}
-	opts := func() []ssOpt {
-		var out []ssOpt
-		for _, e := range config.ListAvatars() {
-			out = append(out, ssOpt{Val: e.Path, Label: e.Name, Sub: humanBytes(uint64(e.Size))})
-		}
-		return out
-	}
-	body := smartSelect("mo-avatar", i18n.T("motion.activeAvatar"), "mo-avatar-set", cur, opts) +
+	avatarOpts := u.moAvatarOpts() // cached snapshot; scans off-thread on first need + re-patches
+	body := smartSelect("mo-avatar", i18n.T("motion.activeAvatar"), "mo-avatar-set", cur, func() []ssOpt { return avatarOpts }) +
 		btnRow(btn(i18n.T("motion.importAvatar"), "outline", "pick-file:mo-avatar-import", ""),
 			btn(i18n.T("motion.syncNow"), "ghost", "mo-avatar-sync", "")) +
 		`<div class=mo-info>` + html.EscapeString(i18n.T("motion.avatarCurrentInfo", i18n.A{"name": curLbl})) + `</div>`
 	return `<div class=mo-avatars><div class=card-label>` + html.EscapeString(i18n.T("motion.avatarLabel")) + `</div>` + body + `</div>`
+}
+
+// moAvatarOpts returns the cached avatar-picker options. config.ListAvatars (os.ReadDir +
+// per-file stat) must not run on the render thread (ssInner evaluates opts even when closed),
+// so it's computed OFF-THREAD into motion state; empty until the first scan lands + patches.
+// Keyed by VRMAvatarsDir's mtime (one cheap dir-stat) so avatars a peer replicates into the dir
+// surface without a manual Sync; also invalidated explicitly via moInvalidateAvatars on import/sync.
+func (u *UI) moAvatarOpts() []ssOpt {
+	mod := avatarsDirMod()
+	s := u.mo()
+	s.mu.Lock()
+	if s.avatarLoaded && s.avatarDirMod == mod && !s.avatarPending {
+		opts := s.avatarOpts
+		s.mu.Unlock()
+		return opts
+	}
+	if s.avatarPending {
+		opts := s.avatarOpts
+		s.mu.Unlock()
+		return opts // scan in flight: serve stale until it lands
+	}
+	s.avatarPending = true
+	stale := s.avatarOpts // serve last-known while rescanning (no blank flash on a dir-changed refresh)
+	s.mu.Unlock()
+	u.bg(func() {
+		var opts []ssOpt
+		for _, e := range config.ListAvatars() {
+			opts = append(opts, ssOpt{Val: e.Path, Label: e.Name, Sub: humanBytes(uint64(e.Size))})
+		}
+		s := u.mo()
+		s.mu.Lock()
+		s.avatarOpts, s.avatarLoaded, s.avatarDirMod, s.avatarPending = opts, true, mod, false
+		s.mu.Unlock()
+		if !u.stopped() {
+			u.moPatchBody()
+		}
+	})
+	return stale
+}
+
+// avatarsDirMod returns VRMAvatarsDir's mtime (unix-nano; 0 on error) - a single-stat change key.
+// Adding/removing a file (peer replication, import) bumps the dir mtime, so the picker cache
+// re-scans without a manual Sync. One stat, never the per-file ListAvatars walk, on the render path.
+func avatarsDirMod() int64 {
+	fi, err := os.Stat(config.VRMAvatarsDir())
+	if err != nil {
+		return 0
+	}
+	return fi.ModTime().UnixNano()
 }
 
 // moSkeletonSVG: floor grid + head trail + skeleton (head dot, bones head→trackers) at s.t.

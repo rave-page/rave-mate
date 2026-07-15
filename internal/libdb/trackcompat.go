@@ -86,17 +86,25 @@ func (d *DB) AddCompatPairs(kind string, paths []string) (int, error) {
 			}
 		}
 	}
-	return added, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	d.bumpCompat()
+	return added, nil
 }
 
 // RemoveCompat deletes one pair's mark (kind "" = all kinds for the pair).
 func (d *DB) RemoveCompat(a, b, kind string) error {
 	a, b = NormPair(a, b)
+	var err error
 	if kind == "" {
-		_, err := d.db.Exec(`DELETE FROM track_compat WHERE a_path=? AND b_path=?`, a, b)
-		return err
+		_, err = d.db.Exec(`DELETE FROM track_compat WHERE a_path=? AND b_path=?`, a, b)
+	} else {
+		_, err = d.db.Exec(`DELETE FROM track_compat WHERE a_path=? AND b_path=? AND kind=?`, a, b, kind)
 	}
-	_, err := d.db.Exec(`DELETE FROM track_compat WHERE a_path=? AND b_path=? AND kind=?`, a, b, kind)
+	if err == nil {
+		d.bumpCompat()
+	}
 	return err
 }
 

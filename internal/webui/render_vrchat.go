@@ -202,7 +202,10 @@ func (u *UI) vrcCampathsBody() string {
 	if u.svc.VRCTools == nil {
 		return emptyState(i18n.T("vrchat.tools.unavailable"))
 	}
-	paths := vrcSortedPaths(u)
+	paths, loaded := u.vrcCachedPaths() // off-thread WalkDir scan; loading until it lands
+	if !loaded {
+		return hint("info", i18n.T("vrchat.groups.loadingGeneric"))
+	}
 	if len(paths) == 0 {
 		return emptyState(i18n.T("vrchat.campaths.empty"))
 	}
@@ -271,7 +274,10 @@ func (u *UI) photosBody() string {
 	if u.svc.VRCTools == nil {
 		return emptyState(i18n.T("vrchat.tools.unavailable"))
 	}
-	photos := u.svc.VRCTools.Photos()
+	photos, loaded := u.vrcCachedPhotos() // off-thread WalkDir scan; loading until it lands
+	if !loaded {
+		return hint("info", i18n.T("vrchat.groups.loadingGeneric"))
+	}
 	if len(photos) == 0 {
 		return emptyState(i18n.T("vrchat.photos.empty"))
 	}

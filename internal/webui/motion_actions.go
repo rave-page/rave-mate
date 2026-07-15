@@ -50,6 +50,15 @@ type moSt struct {
 	// motion studio
 	recNames []string
 	recName  string
+
+	// avatar picker list cache: config.ListAvatars = os.ReadDir + per-file stat, too heavy for
+	// render (ssInner evaluates opts even when closed); computed off-thread (moAvatarOpts),
+	// invalidated on import/sync.
+	avatarOpts    []ssOpt
+	avatarLoaded  bool
+	avatarPending bool
+	avatarDirMod  int64 // VRMAvatarsDir mtime at last scan; a change (peer replication) re-scans
+
 	rec      *vrmotion.Recording
 	player   *vrmotion.Player
 	t        float64
@@ -121,11 +130,18 @@ func init() {
 	onExact("mo-cp-load", func(u *UI, m actMsg) { u.moCPLoad() })
 	onExact("mo-cp-copy", func(u *UI, m actMsg) { u.moCPCopy() })
 	onExact("mo-cp-organize", func(u *UI, m actMsg) {
-		if u.svc.VRCTools != nil {
+		if u.svc.VRCTools == nil {
+			return
+		}
+		u.bg(func() { // OrganizeNow = WalkDir + copy/move - keep it off the actWorker
 			_, n := u.svc.VRCTools.OrganizeNow()
+			vrcInvalidateScans() // fs moved - drop the shared vrchat-pane scan cache too
+			if u.stopped() {
+				return
+			}
 			u.toast(i18n.Tn("motion.toast.organized", n))
 			u.moCPRefresh(true)
-		}
+		})
 	})
 	onExact("mo-cp-dj", func(u *UI, m actMsg) {
 		if u.svc.VRCTools == nil {
@@ -268,38 +284,43 @@ func (u *UI) moEnsure() {
 
 // ── camera paths ──
 
+// moCPRefresh scans + sorts cam paths OFF the act/render thread (VRCTools.CamPaths = dir scan
+// + per-file parse; ran synchronously on actWorker it froze the UI, incl. moEnsure on subtab
+// switch), stores them under the state mutex, then re-patches the body. Mirrors moRecRefresh.
 func (u *UI) moCPRefresh(patch bool) {
 	if u.svc.VRCTools == nil {
 		return
 	}
-	paths := u.svc.VRCTools.CamPaths()
-	sort.SliceStable(paths, func(i, j int) bool {
-		fi, fj := paths[i].Folder(), paths[j].Folder()
-		if fi != fj {
-			if fi == vrccampaths.PlayerRelativeFolder {
-				return false
+	u.bg(func() {
+		paths := u.svc.VRCTools.CamPaths()
+		sort.SliceStable(paths, func(i, j int) bool {
+			fi, fj := paths[i].Folder(), paths[j].Folder()
+			if fi != fj {
+				if fi == vrccampaths.PlayerRelativeFolder {
+					return false
+				}
+				if fj == vrccampaths.PlayerRelativeFolder {
+					return true
+				}
+				return fi < fj
 			}
-			if fj == vrccampaths.PlayerRelativeFolder {
-				return true
-			}
-			return fi < fj
+			return paths[i].SavedAt.After(paths[j].SavedAt)
+		})
+		s := u.mo()
+		s.mu.Lock()
+		s.cpPaths, s.cpLoaded = paths, true
+		if s.cpSel >= len(paths) {
+			s.cpSel = -1
 		}
-		return paths[i].SavedAt.After(paths[j].SavedAt)
+		sel := s.cpSel
+		s.mu.Unlock()
+		if patch {
+			u.moPatchBody()
+		}
+		if len(paths) > 0 && sel < 0 {
+			u.moCPSelect(0)
+		}
 	})
-	s := u.mo()
-	s.mu.Lock()
-	s.cpPaths, s.cpLoaded = paths, true
-	if s.cpSel >= len(paths) {
-		s.cpSel = -1
-	}
-	sel := s.cpSel
-	s.mu.Unlock()
-	if patch {
-		u.moPatchBody()
-	}
-	if len(paths) > 0 && sel < 0 {
-		u.moCPSelect(0)
-	}
 }
 
 // moCPSelect sets the selection; the render path hydrates the shared viewer (cpvEnsure).
@@ -1015,7 +1036,16 @@ func (u *UI) moAvatarImport(src string) {
 	if managed, err := config.ImportAvatar(src); err == nil {
 		p = managed
 	}
-	u.moAvatarSet(p)
+	u.moInvalidateAvatars() // new file in the managed dir - drop the picker cache
+	u.moAvatarSet(p)        // re-renders the body → cache recomputes off-thread
+}
+
+// moInvalidateAvatars drops the cached avatar list so the next render recomputes it off-thread.
+func (u *UI) moInvalidateAvatars() {
+	s := u.mo()
+	s.mu.Lock()
+	s.avatarOpts, s.avatarLoaded, s.avatarPending = nil, false, false
+	s.mu.Unlock()
 }
 
 func (u *UI) moAvatarSync() {
@@ -1031,6 +1061,7 @@ func (u *UI) moAvatarSync() {
 			msg += i18n.Tn("motion.toast.syncErrors", errored)
 		}
 		u.toast(msg)
-		u.moPatchBody()
+		u.moInvalidateAvatars() // pulled avatars changed the list
+		u.moPatchBody()         // recomputes the picker cache off-thread
 	})
 }

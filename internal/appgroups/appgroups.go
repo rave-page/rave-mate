@@ -7,14 +7,20 @@ package appgroups
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/elevate"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/sysactivity"
 	"rave.page/mate/internal/sysexec"
 )
+
+// procCacheTTL bounds staleness of the running-process snapshot used for count/status reads. Reads
+// reuse ONE OS process enumeration per window instead of one walk per group per render/tick.
+const procCacheTTL = time.Second
 
 // Starter launches one app; injectable for tests. elevated → UAC relaunch (Windows).
 type Starter func(path string, args []string, workDir string, elevated bool) error
@@ -25,6 +31,15 @@ type Service struct {
 	act    sysactivity.Activity
 	log    *logbus.Bus
 	start  Starter
+
+	// procCache: short-TTL running-process snapshot shared by count/status reads so the UI render
+	// thread does one enumeration per window (async-refreshed once warm), never one per group.
+	procMu   sync.Mutex
+	procSet  map[string]bool // last snapshot; replaced wholesale (never mutated) so reads stay safe
+	procOK   bool
+	procAt   time.Time // when procSet was taken
+	procHave bool      // a snapshot has been taken at least once
+	procBusy bool      // a background refresh is in flight
 }
 
 // New builds the service reading groups live from cfg with the platform process detector.
@@ -80,20 +95,71 @@ func (s *Service) Group(id string) (config.AppGroup, bool) {
 	return config.AppGroup{}, false
 }
 
-// RunningCount reports how many of a group's apps are currently running (for UI status).
-func (s *Service) RunningCount(g config.AppGroup) (running, total int) {
-	set, _ := s.act.RunningProcesses()
+// Counts is a group's running/total app tally for UI status.
+type Counts struct{ Running, Total int }
+
+// countIn tallies a group's running/total apps against a running-process set.
+func countIn(set map[string]bool, g config.AppGroup) Counts {
+	var c Counts
 	for _, a := range g.Apps {
 		if strings.TrimSpace(a.Path) == "" {
 			continue
 		}
-		total++
+		c.Total++
 		if sysactivity.Running(set, matchName(a)) {
-			running++
+			c.Running++
 		}
 	}
-	return running, total
+	return c
 }
+
+// RunningCount reports how many of a group's apps are currently running (for UI status).
+func (s *Service) RunningCount(g config.AppGroup) (running, total int) {
+	set, _ := s.snapshot()
+	c := countIn(set, g)
+	return c.Running, c.Total
+}
+
+// RunningCounts tallies running/total for every group against ONE cached process snapshot - avoids
+// the N process-table walks a per-group RunningCount loop caused per render/tick. Order matches groups.
+func (s *Service) RunningCounts(groups []config.AppGroup) []Counts {
+	set, _ := s.snapshot()
+	out := make([]Counts, len(groups))
+	for i, g := range groups {
+		out[i] = countIn(set, g)
+	}
+	return out
+}
+
+// snapshot returns the running-process set, cached for procCacheTTL. First call blocks so the first
+// render is accurate; later stale calls return the cached set and refresh in the background, so the
+// UI render/act thread never blocks on a process enumeration once warm.
+func (s *Service) snapshot() (map[string]bool, bool) {
+	s.procMu.Lock()
+	have := s.procHave
+	set, ok := s.procSet, s.procOK
+	if have && time.Since(s.procAt) >= procCacheTTL && !s.procBusy {
+		s.procBusy = true
+		debuglog.Go(s.log, "appgroups", s.refresh) // off-thread + panic-guarded; updates cache for the next read
+	}
+	s.procMu.Unlock()
+	if have {
+		return set, ok
+	}
+	return s.refreshNow() // cold: enumerate synchronously, then cache
+}
+
+// refreshNow enumerates processes, stores the snapshot, and returns it (clears the busy flag).
+func (s *Service) refreshNow() (map[string]bool, bool) {
+	set, ok := s.act.RunningProcesses()
+	s.procMu.Lock()
+	s.procSet, s.procOK, s.procAt, s.procHave, s.procBusy = set, ok, time.Now(), true, false
+	s.procMu.Unlock()
+	return set, ok
+}
+
+// refresh re-enumerates off the caller's goroutine (keeps the UI render/act thread unblocked).
+func (s *Service) refresh() { _, _ = s.refreshNow() }
 
 // LaunchGroup starts every app in the group not already running (matched by MatchName or the exe
 // basename). Snapshots the running set once. Returns the launched + skipped (already-running) app
