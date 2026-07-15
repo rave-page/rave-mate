@@ -558,15 +558,15 @@ func (r RTSPServeFeature) ResolvedBitrate() int {
 // a push URL). See .devnotes/VRSL_VIDEO_STREAM.md (mirror of the frozen world-repo contract).
 type StreamFeature struct {
 	Enabled     bool   `json:"enabled"`
-	URL         string `json:"url"`               // RTMP (rtmp://host/app) or WHIP (https://host/whip) target
-	StreamKey   string `json:"streamKey"`         // RTMP stream key (appended as a path segment); WHIP: leave blank, embed auth in URL
-	Mode        string `json:"mode"`              // "standard" (stock VRSL, 8-bit) | "extended" (superset: low-byte mirror + metadata); "" = standard
-	ColorMode   string `json:"colorMode"`         // grid packing "mono" (default, compression-robust) | "rgb9"; "" = mono
+	URL         string `json:"url"`                 // RTMP (rtmp://host/app) or WHIP (https://host/whip) target
+	StreamKey   string `json:"streamKey"`           // RTMP stream key (appended as a path segment); WHIP: leave blank, embed auth in URL
+	Mode        string `json:"mode"`                // "standard" (stock VRSL, 8-bit) | "extended" (superset: low-byte mirror + metadata); "" = standard
+	ColorMode   string `json:"colorMode"`           // grid packing "mono" (default, compression-robust) | "rgb9"; "" = mono
 	Universes   []int  `json:"universes,omitempty"` // Art-Net port-addresses to stream (0-based); empty = universe 0 (mono) / 0..8 (rgb9)
-	FPS         int    `json:"fps"`               // encode frame rate; 0 = 30, clamped 1..60
-	BitrateKbps int    `json:"bitrateKbps"`       // H.264 bitrate; 0 = derived from frame size
-	Encoder     string `json:"encoder"`           // "x264"|"nvenc"|"qsv"|"amf"|"auto"; "" = x264
-	Transport   string `json:"transport"`         // "rtmp" (default) | "whip"; "" = rtmp
+	FPS         int    `json:"fps"`                 // encode frame rate; 0 = 30, clamped 1..60
+	BitrateKbps int    `json:"bitrateKbps"`         // H.264 bitrate; 0 = derived from frame size
+	Encoder     string `json:"encoder"`             // "x264"|"nvenc"|"qsv"|"amf"|"auto"; "" = x264
+	Transport   string `json:"transport"`           // "rtmp" (default) | "whip"; "" = rtmp
 }
 
 // ResolvedMode returns "standard" or "extended" (default "standard").
