@@ -145,6 +145,7 @@ func (d *DB) UpdateTrackCues(t musiclib.Track, cues []musiclib.CuePoint) error {
 		string(raw), time.Now().UTC().Format(time.RFC3339), t.Path); err != nil {
 		return err
 	}
+	d.bumpTracks() // invalidate LoadAllTracks snapshot
 	return d.AppendChanges([]ChangeEvent{{
 		TrackHash: TrackHash(t.Artist, t.Title, t.DurationSec),
 		Path:      t.Path, Field: "cues", Op: "set",
@@ -167,6 +168,7 @@ func (d *DB) UpdateTrackBeatgrid(t musiclib.Track, grid []musiclib.GridMarker) e
 		string(raw), time.Now().UTC().Format(time.RFC3339), t.Path); err != nil {
 		return err
 	}
+	d.bumpTracks() // invalidate LoadAllTracks snapshot
 	return d.AppendChanges([]ChangeEvent{{
 		TrackHash: TrackHash(t.Artist, t.Title, t.DurationSec),
 		Path:      t.Path, Field: "beatgrid", Op: "set",

@@ -8,6 +8,7 @@ package libdb
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -138,6 +139,19 @@ type DB struct {
 	// so an in-proc counter is consistent across UI/remotectl/worker writers.
 	plVer     atomic.Int64 // playlists + playlist_tracks
 	compatVer atomic.Int64 // track_compat
+	// tracksVer bumps on EVERY tracks-table content mutation (add/update/delete/revert). It is
+	// the authoritative invalidation epoch for the LoadAllTracks snapshot: change_log/
+	// LibraryVersion() does NOT cover pure deletes or reverts, so keying on it alone would serve
+	// stale (e.g. deleted) tracks. INVARIANT: any writer touching a tracks row bumps this.
+	tracksVer atomic.Int64
+
+	// LoadAllTracks in-proc snapshot, guarded by allTracksMu, validated by tracksVer. A full-table
+	// scan + per-row cue/beatgrid JSON unmarshal is expensive and re-run by every consumer; the
+	// snapshot is re-scanned only when tracksVer advances. Callers get a defensive shallow copy.
+	allTracksMu     sync.Mutex
+	allTracksCache  []musiclib.Track
+	allTracksVer    int64
+	allTracksLoaded bool
 }
 
 // SetNodeID sets the node identity stamped on every change_log row. Call once at startup
@@ -165,6 +179,16 @@ func (d *DB) CompatVersion() int64 {
 	return d.compatVer.Load()
 }
 
+// TracksVersion is an epoch bumped on any tracks-table content mutation (add/update/delete/
+// revert) - the invalidation key for the LoadAllTracks snapshot. Covers the deletes+reverts
+// that change_log (LibraryVersion) misses.
+func (d *DB) TracksVersion() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.tracksVer.Load()
+}
+
 func (d *DB) bumpPlaylists() {
 	if d != nil {
 		d.plVer.Add(1)
@@ -174,6 +198,12 @@ func (d *DB) bumpPlaylists() {
 func (d *DB) bumpCompat() {
 	if d != nil {
 		d.compatVer.Add(1)
+	}
+}
+
+func (d *DB) bumpTracks() {
+	if d != nil {
+		d.tracksVer.Add(1)
 	}
 }
 

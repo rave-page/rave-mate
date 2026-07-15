@@ -183,6 +183,9 @@ func (s *TrackSync) Commit() (SyncResult, error) {
 		return SyncResult{}, err
 	}
 	s.res.Total = len(s.seen)
+	if s.res.Added+s.res.Updated+s.res.Removed > 0 {
+		s.db.bumpTracks() // invalidate LoadAllTracks snapshot (deletes don't journal to change_log)
+	}
 	return s.res, nil
 }
 
@@ -192,7 +195,49 @@ func (s *TrackSync) Rollback() { _ = s.tx.Rollback() }
 // LoadAllTracks returns every real track across all sources incl. cues/beatgrid -
 // the library metadata uploader's working set. Divider marker rows are excluded HERE so
 // every caller (collection view, cloud sync, media sync, cleanup) inherits the exclusion.
+//
+// Cached: the full-table scan + per-row cue/beatgrid JSON unmarshal is expensive and every
+// consumer (webui hydrate, playsync, libsync, cleanup, remotectl) re-runs it. An in-proc
+// snapshot is re-scanned only when tracksVer advances (any tracks-row mutation); otherwise a
+// defensive SHALLOW copy of the cached slice is returned. Callers may freely append/reorder or
+// replace whole elements / their .Cues/.Beatgrid fields (each caller gets its own backing
+// array); the shared inner cue/beatgrid slices MUST NOT be mutated in place - audited: no
+// caller does (webui replaces the whole field/element; playsync + cleanup are read-only).
 func (d *DB) LoadAllTracks() ([]musiclib.Track, error) {
+	if d == nil || d.db == nil {
+		return nil, nil
+	}
+	d.allTracksMu.Lock()
+	defer d.allTracksMu.Unlock()
+	ver := d.tracksVer.Load()
+	if d.allTracksLoaded && d.allTracksVer == ver {
+		return cloneTracks(d.allTracksCache), nil
+	}
+	fresh, err := d.loadAllTracksUncached()
+	if err != nil {
+		return nil, err
+	}
+	d.allTracksCache = fresh
+	d.allTracksVer = ver
+	d.allTracksLoaded = true
+	return cloneTracks(fresh), nil
+}
+
+// cloneTracks returns a shallow copy (new backing array) of src, or nil when empty (preserving
+// the uncached loader's nil-on-empty return). Track is a value type; the copy isolates callers'
+// append/reorder/element-replace from the cache. Inner cue/beatgrid slices stay shared - safe
+// only because no caller mutates their contents in place (see LoadAllTracks).
+func cloneTracks(src []musiclib.Track) []musiclib.Track {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]musiclib.Track, len(src))
+	copy(out, src)
+	return out
+}
+
+// loadAllTracksUncached is the raw scan behind LoadAllTracks (front it via the cache, not here).
+func (d *DB) loadAllTracksUncached() ([]musiclib.Track, error) {
 	rows, err := d.db.Query(`
 		SELECT path, title, artist, album, genre, label, comment, key, bpm, duration_sec,
 			play_count, rating, COALESCE(import_date,''), release_date, last_played,
@@ -318,6 +363,9 @@ func (d *DB) UpsertDividerTrack(sourceID int64, t musiclib.Track) error {
 			is_divider=1, updated_at=excluded.updated_at`,
 		sourceID, t.Path, t.Title, t.Artist, t.DurationSec,
 		time.Now().UTC().Format(time.RFC3339))
+	if err == nil {
+		d.bumpTracks() // ON CONFLICT can flip an existing real track to is_divider=1 → drop it from LoadAllTracks
+	}
 	return err
 }
 

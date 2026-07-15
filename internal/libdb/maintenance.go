@@ -131,6 +131,9 @@ func (d *DB) DeleteTracksByPaths(paths []string) (CleanupResult, error) {
 	if err := tx.Commit(); err != nil {
 		return res, err
 	}
+	if res.TracksDeleted > 0 {
+		d.bumpTracks() // deletes don't journal to change_log - invalidate LoadAllTracks snapshot
+	}
 	return res, nil
 }
 
