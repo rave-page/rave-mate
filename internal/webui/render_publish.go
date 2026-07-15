@@ -394,8 +394,10 @@ func (u *UI) pubCaptureBlock(s libdb.SetRecording, loose bool) string {
 // ── data helpers ────────────────────────────────────────────────────────────────
 
 // pubRecordings returns recordings newest-first with the live set pinned first (live copy).
+// The persisted list comes from the epoch-keyed cache (pubRecList); Active() stays live so the
+// in-flight set updates every frame.
 func (u *UI) pubRecordings() []recorder.Recording {
-	recs := u.svc.Recorder.List()
+	recs, _ := u.pubRecList()
 	if a := u.svc.Recorder.Active(); a != nil {
 		out := make([]recorder.Recording, 0, len(recs)+1)
 		out = append(out, *a)
@@ -410,16 +412,12 @@ func (u *UI) pubRecordings() []recorder.Recording {
 }
 
 // pubCaptures buckets linked captures by recording id + collects finished, unlinked captures.
+// Reads the epoch-keyed cache (pubCapList) - never libdb directly (a cold cache buckets nil →
+// empty maps, then the bg load re-renders).
 func (u *UI) pubCaptures() (map[string][]libdb.SetRecording, []libdb.SetRecording) {
 	caps := map[string][]libdb.SetRecording{}
 	var loose []libdb.SetRecording
-	if u.svc.Lib == nil {
-		return caps, loose
-	}
-	all, err := u.svc.Lib.ListSetRecordings(300)
-	if err != nil {
-		return caps, loose
-	}
+	all, _ := u.pubCapList()
 	for _, s := range all {
 		if s.RecordingID != "" {
 			caps[s.RecordingID] = append(caps[s.RecordingID], s)
@@ -428,6 +426,142 @@ func (u *UI) pubCaptures() (map[string][]libdb.SetRecording, []libdb.SetRecordin
 		}
 	}
 	return caps, loose
+}
+
+// ── captured-sets list cache: ListSetRecordings resolved off-thread, epoch-keyed ────
+//
+// ListSetRecordings(300) is a serialized SQLite read; doing it inline in publishBody (every full
+// Publish render) AND in every capture file-op click (pubCapByID) froze the act lane. Cache the raw
+// rows per-UI, keyed by libdb SetRecVersion() (bumps on any set_recordings insert/relink/delete,
+// incl. featurehost-created icecast/obs captures). Render + file-ops read the cache; a bg refresh
+// reloads when the epoch advanced (or on first read) and re-renders. Never blocks on libdb.
+// Mutation-safety: rows are value copies (libdb.SetRecording is all values); the cached slice is
+// replaced wholesale under the mutex, never appended in place, so a reader's slice header stays valid.
+type pubCapCache struct {
+	mu      sync.Mutex
+	epoch   int64
+	all     []libdb.SetRecording
+	loaded  bool // ≥1 load completed
+	loading bool // a load is in flight
+}
+
+var (
+	pubCapMu     sync.Mutex
+	pubCapCaches = map[*UI]*pubCapCache{}
+)
+
+func (u *UI) pubCapC() *pubCapCache {
+	pubCapMu.Lock()
+	defer pubCapMu.Unlock()
+	c := pubCapCaches[u]
+	if c == nil {
+		c = &pubCapCache{}
+		pubCapCaches[u] = c
+	}
+	return c
+}
+
+// pubCapList returns the cached set-recording rows, kicking an off-thread reload when the libdb
+// set-recordings epoch advanced (or on first read). loaded=false only until the FIRST load lands
+// (render shows empty meanwhile); afterwards it serves the last rows while a refresh runs.
+func (u *UI) pubCapList() ([]libdb.SetRecording, bool) {
+	if u.svc.Lib == nil {
+		return nil, true
+	}
+	epoch := u.svc.Lib.SetRecVersion()
+	c := u.pubCapC()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if (!c.loaded || c.epoch != epoch) && !c.loading {
+		c.loading = true
+		u.bg(u.pubCapReload)
+	}
+	return c.all, c.loaded
+}
+
+// pubCapReload reloads the captured-sets list off-thread + re-renders the Publish tab. Reads the
+// epoch immediately before the query so the stored epoch matches the loaded rows (a mutation racing
+// the load just triggers one redundant reload on the next read - converges).
+func (u *UI) pubCapReload() {
+	epoch := u.svc.Lib.SetRecVersion()
+	all, err := u.svc.Lib.ListSetRecordings(300)
+	c := u.pubCapC()
+	c.mu.Lock()
+	if err != nil {
+		c.loading = false
+		c.mu.Unlock()
+		return
+	}
+	c.all, c.epoch, c.loaded, c.loading = all, epoch, true, false
+	c.mu.Unlock()
+	if !u.stopped() && u.activeTab() == "publish" && u.libRemoteTarget() == "" {
+		u.patchMain()
+	}
+}
+
+// ── recordings list cache: Recorder.List() resolved off-thread, epoch-keyed ────
+//
+// Recorder.List() ForEach-scans the recordings bucket + json.Unmarshals EVERY recording (including
+// its full Tracks slice) + sorts - done inline in publishBody on every full Publish render. With
+// many long sets that deserializes thousands of Track structs per render on the act lane. Cache the
+// rows per-UI keyed by Recorder.RecordingsVersion() (bumps on any put/delete); render reads the
+// cache, a bg refresh reloads when the epoch advanced. Mutation-safety: the cached slice is owned by
+// this cache (from its own List() call) and read-only by pubRecordings; sweepStale mutates its OWN
+// List() results, never these.
+type pubRecCache struct {
+	mu      sync.Mutex
+	epoch   uint64
+	all     []recorder.Recording
+	loaded  bool // ≥1 load completed
+	loading bool // a load is in flight
+}
+
+var (
+	pubRecMu     sync.Mutex
+	pubRecCaches = map[*UI]*pubRecCache{}
+)
+
+func (u *UI) pubRecC() *pubRecCache {
+	pubRecMu.Lock()
+	defer pubRecMu.Unlock()
+	c := pubRecCaches[u]
+	if c == nil {
+		c = &pubRecCache{}
+		pubRecCaches[u] = c
+	}
+	return c
+}
+
+// pubRecList returns the cached persisted recordings, kicking an off-thread reload when the recorder
+// epoch advanced (or on first read). loaded=false only until the first load lands.
+func (u *UI) pubRecList() ([]recorder.Recording, bool) {
+	if u.svc.Recorder == nil {
+		return nil, true
+	}
+	epoch := u.svc.Recorder.RecordingsVersion()
+	c := u.pubRecC()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if (!c.loaded || c.epoch != epoch) && !c.loading {
+		c.loading = true
+		u.bg(u.pubRecReload)
+	}
+	return c.all, c.loaded
+}
+
+// pubRecReload reloads the persisted recordings off-thread + re-renders the Publish tab. Reads the
+// epoch before the scan so the stored epoch matches the loaded rows (a racing write just triggers
+// one redundant reload on the next read - converges).
+func (u *UI) pubRecReload() {
+	epoch := u.svc.Recorder.RecordingsVersion()
+	all := u.svc.Recorder.List()
+	c := u.pubRecC()
+	c.mu.Lock()
+	c.all, c.epoch, c.loaded, c.loading = all, epoch, true, false
+	c.mu.Unlock()
+	if !u.stopped() && u.activeTab() == "publish" && u.libRemoteTarget() == "" {
+		u.patchMain()
+	}
 }
 
 // pubSelected resolves the selected recording (falls back to newest).

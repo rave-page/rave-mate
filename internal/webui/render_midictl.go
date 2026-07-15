@@ -22,28 +22,29 @@ func (u *UI) renderMIDICtl() string {
 	if u.svc.MIDIEmit == nil {
 		return u.renderPlaceholder("midictl")
 	}
+	ctx := u.midiCtlCtx() // ONE cached OS-probe snapshot for the whole tab (ports + driver status)
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.midictl"), i18n.T("midictl.subtitle")))
-	b.WriteString(u.midiControllersCard()) // native MIDI-learn: read physical controllers (input)
-	b.WriteString(u.midiUIMapCard())       // map controller notes/CCs/encoders to app actions
-	b.WriteString(u.midiMonitorCard())     // live input monitor ("which device is which")
+	b.WriteString(u.midiControllersCard(ctx)) // native MIDI-learn: read physical controllers (input)
+	b.WriteString(u.midiUIMapCard())          // map controller notes/CCs/encoders to app actions
+	b.WriteString(u.midiMonitorCard())        // live input monitor ("which device is which")
 	// output + driver / bridge + help: small cards pair up ≥1100px (.midi-2col)
-	b.WriteString(`<div class=midi-2col>` + u.midiPortCard() + u.midiDriverCard() + `</div>`)
+	b.WriteString(`<div class=midi-2col>` + u.midiPortCard(ctx) + u.midiDriverCard(ctx) + `</div>`)
 	b.WriteString(u.midiRackCard())
-	b.WriteString(`<div class=midi-2col>` + u.midiBridgeCard() + u.midiHelpCard() + `</div>`)
+	b.WriteString(`<div class=midi-2col>` + u.midiBridgeCard(ctx) + u.midiHelpCard() + `</div>`)
 	return b.String()
 }
 
 // midiPortCard renders the output-port selector, the live active-port line, and Panic.
-func (u *UI) midiPortCard() string {
+func (u *UI) midiPortCard(ctx midiCtlRenderCtx) string {
 	e := u.svc.MIDIEmit
 	opts := [][2]string{{"", i18n.T("midictl.autoPort")}}
 	// Built-in one-way port first: kills the DJ app's LED-echo self-loop (ravemidi driver
 	// preferred, teVirtualMIDI fallback - see midi.OpenOneWayOut).
-	if midi.OneWayAvailable() {
+	if ctx.oneWay {
 		opts = append(opts, [2]string{midi.VirtualDJSentinel, i18n.T("midictl.in.thruVirtual")})
 	}
-	for _, p := range e.Ports() {
+	for _, p := range ctx.outPorts {
 		opts = append(opts, [2]string{p, p})
 	}
 	body := `<p class=page-sub>` + htmlEscape(i18n.T("midictl.out.sub")) + `</p>` +
@@ -55,17 +56,17 @@ func (u *UI) midiPortCard() string {
 
 // midiDriverCard: ravemidi kernel-driver status + the self-signed install walkthrough.
 // Only rendered on Windows (the driver is a Windows WDM/PortCls component).
-func (u *UI) midiDriverCard() string {
+func (u *UI) midiDriverCard(ctx midiCtlRenderCtx) string {
 	if runtime.GOOS != "windows" {
 		return ""
 	}
-	installed := midi.DriverInstalled()
+	installed := ctx.drvInstalled
 	var b strings.Builder
 	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.why")) + `</p>`)
 	switch {
 	case installed:
 		b.WriteString(statusRow("success", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.installed")))
-	case midi.VirtualAvailable():
+	case ctx.virtualAvail:
 		b.WriteString(statusRow("warning", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.fallback")))
 	default:
 		b.WriteString(statusRow("muted", i18n.T("midictl.drv.status"), i18n.T("midictl.drv.none")))
@@ -76,7 +77,7 @@ func (u *UI) midiDriverCard() string {
 		b.WriteString(`<pre class=midi-cmds>` + htmlEscape(driverInstallCmds) + `</pre>`)
 		b.WriteString(hint("warn", i18n.T("midictl.drv.smartscreen")))
 	} else {
-		b.WriteString(u.midiDriverManagedHTML())
+		b.WriteString(u.midiDriverManagedHTML(ctx))
 	}
 	b.WriteString(btnRow(btn(i18n.T("midictl.drv.docs"), "outline", "open-url",
 		"https://github.com/rave-page/rave-mate/tree/development/driver/ravemidi")))
@@ -91,22 +92,23 @@ func (u *UI) midiDriverCard() string {
 // Forwarding lives IN the driver (persisted kernel-side) - it survives rave-mate exit
 // and reboots. Config sync is AUTOMATIC (driver-managed THRU on a controller +
 // every MIDI config change re-syncs); the buttons are manual fallbacks.
-func (u *UI) midiDriverManagedHTML() string {
+func (u *UI) midiDriverManagedHTML(ctx midiCtlRenderCtx) string {
 	var b strings.Builder
 	b.WriteString(`<div class=pb-label>` + htmlEscape(i18n.T("midictl.drv.managedHdr")) + `</div>`)
 	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.managedSub")) + `</p>`)
 	if e := midi.DriverSyncErr(); e != "" { // covers boot sync AND webui apply sync
 		b.WriteString(hint("warn", i18n.T("midictl.drv.syncFailed", i18n.A{"err": e})))
 	}
-	sts, err := midi.QueryDriverInputs()
+	// Driver inputs come from the cached probe (midiCtlProbe), never a fresh ioctl on the render
+	// path. Reached only when ctx.drvInstalled, so the probe has landed + drvInputs/drvQueryErr valid.
 	switch {
-	case err != nil:
+	case ctx.drvQueryErr:
 		// older driver build without the config plane - honest degradation
 		b.WriteString(hint("warn", i18n.T("midictl.drv.queryFailed")))
-	case len(sts) == 0:
+	case len(ctx.drvInputs) == 0:
 		b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.drv.noneManaged")) + `</p>`)
 	default:
-		for _, st := range sts {
+		for _, st := range ctx.drvInputs {
 			variant, line := "warning", i18n.T("midictl.drv.retrying", i18n.A{"n": strconv.Itoa(int(st.RetryCount))})
 			if st.Bound {
 				variant, line = "success", i18n.T("midictl.drv.bound")

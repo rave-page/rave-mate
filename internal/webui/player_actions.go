@@ -502,13 +502,95 @@ func (u *UI) mpSetDrops(host, path string, drops []float64) {
 	})
 }
 
+// capOnDiskFresh is how long the capture on-disk existence cache serves before a bg re-sweep
+// (picks up removable/spun-down media that appeared or vanished).
+const capOnDiskFresh = 10 * time.Second
+
+// capExistCache caches capture-path on-disk existence off the render goroutine. Per-*UI (GC'd
+// with the UI); mpEnsureSet reads capOnDiskOr so no os.Stat runs in render.
+type capExistCache struct {
+	mu   sync.Mutex
+	ck   map[string]bool // path -> exists (last sweep)
+	busy bool            // a sweep is in flight
+	at   time.Time       // last sweep completion (TTL anchor)
+}
+
+// capEnsureOnDisk warms the capture existence cache for paths OFF-THREAD (per-capture os.Stat in
+// mpEnsureSet froze the publish render on a spun-down/removable drive). Sweeps when a path is
+// unknown or the cache is stale; re-renders the publish tab only when a flag actually changed.
+func (u *UI) capEnsureOnDisk(paths []string) {
+	c := &u.capFS
+	c.mu.Lock()
+	if c.busy {
+		c.mu.Unlock()
+		return
+	}
+	stale := time.Since(c.at) > capOnDiskFresh
+	unknown := false
+	for _, p := range paths {
+		if _, ok := c.ck[p]; !ok {
+			unknown = true
+			break
+		}
+	}
+	if !stale && !unknown {
+		c.mu.Unlock()
+		return
+	}
+	c.busy = true
+	c.mu.Unlock()
+	want := append([]string(nil), paths...)
+	u.bg(func() {
+		res := make(map[string]bool, len(want))
+		for _, p := range want {
+			res[p] = pubFileExists(p)
+		}
+		c.mu.Lock()
+		c.busy = false
+		c.at = time.Now()
+		if c.ck == nil {
+			c.ck = make(map[string]bool, len(res))
+		}
+		changed := false
+		for p, ex := range res {
+			if old, ok := c.ck[p]; !ok || old != ex {
+				changed = true
+			}
+			c.ck[p] = ex
+		}
+		c.mu.Unlock()
+		if changed && !u.stopped() && u.activeTab() == "publish" {
+			u.patchMain()
+		}
+	})
+}
+
+// capOnDiskOr reports a capture path's existence from the swept cache; an un-swept path reads as
+// present (neutral) until capEnsureOnDisk fills it in.
+func (u *UI) capOnDiskOr(path string) bool {
+	c := &u.capFS
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ex, ok := c.ck[path]; ok {
+		return ex
+	}
+	return true
+}
+
 // mpEnsureSet binds the publish instance to a recording's captures (first audio +
 // first video with a file on disk). No-op when the same paths are already bound.
+// aud/vid are classified from the libdb row fields (kind + extension) - NO os.Stat in render;
+// on-disk existence comes from capOnDiskOr (unknown = present until the bg sweep lands).
 func (u *UI) mpEnsureSet(r recorder.Recording, caps []libdb.SetRecording) {
+	paths := make([]string, 0, len(caps))
+	for i := range caps {
+		paths = append(paths, caps[i].Path)
+	}
+	u.capEnsureOnDisk(paths) // off-thread stat sweep; re-renders publish on change
 	var aud, vid *libdb.SetRecording
 	for i := range caps {
 		s := &caps[i]
-		if !pubFileExists(s.Path) {
+		if !u.capOnDiskOr(s.Path) {
 			continue
 		}
 		if s.Kind != libdb.SetKindOBS && pubIsAudio(s.Path) {
@@ -621,13 +703,16 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 		}
 	}
 
+	// size from the libdb row (s.Bytes) - no os.Stat here (mpLoadCaptures runs on the render
+	// goroutine via mpEnsureSet). An in-progress capture has Bytes 0 until it ends; the size row
+	// just stays hidden, matching pubCaptureBlock's own s.Bytes>0 gate.
 	var media []mpMedia
 	if aud != nil {
-		media = append(media, mpMedia{capID: aud.ID, path: aud.Path, kind: "audio", size: fileSize(aud.Path),
+		media = append(media, mpMedia{capID: aud.ID, path: aud.Path, kind: "audio", size: aud.Bytes,
 			startedAt: aud.StartedAt, presetID: "remux", peaksLoading: true})
 	}
 	if vid != nil {
-		media = append(media, mpMedia{capID: vid.ID, path: vid.Path, kind: "video", size: fileSize(vid.Path),
+		media = append(media, mpMedia{capID: vid.ID, path: vid.Path, kind: "video", size: vid.Bytes,
 			startedAt: vid.StartedAt, presetID: "remux", peaksLoading: true})
 	}
 
@@ -838,7 +923,30 @@ func (u *UI) mpLoadLoud(host string, gen, idx int, path string) {
 	})
 }
 
-// mpLoadSrc probes stream info for the encoding chip.
+// probeStreams runs (or serves from the KindStreams cache) the ffprobe stream/format JSON for
+// path. Persisted by path+mtime so the encoding chip's codec/container/bitrate isn't re-spawned
+// on every media load / library selection and survives restart. ctx bounds a cache-miss probe.
+func (u *UI) probeStreams(ctx context.Context, path string) ([]byte, error) {
+	if u.svc.Workers == nil {
+		return nil, errors.New("no worker runtime")
+	}
+	mtime := fileMtime(path)
+	if u.svc.Store != nil {
+		if raw, ok := u.svc.Store.GetAnalysis(store.KindStreams, path, mtime); ok {
+			return raw, nil
+		}
+	}
+	raw, err := u.svc.Workers.Run(ctx, "probe", "probe.streams", map[string]any{"path": path})
+	if err != nil {
+		return nil, err
+	}
+	if u.svc.Store != nil {
+		u.svc.Store.PutAnalysis(store.KindStreams, path, mtime, raw)
+	}
+	return raw, nil
+}
+
+// mpLoadSrc probes stream info for the encoding chip (store-cached; see probeStreams).
 func (u *UI) mpLoadSrc(host string, gen, idx int, path string) {
 	if u.svc.Workers == nil {
 		return
@@ -847,7 +955,7 @@ func (u *UI) mpLoadSrc(host string, gen, idx int, path string) {
 	u.bg(func() {
 		ctx, cancel := u.actx()
 		defer cancel()
-		raw, err := u.svc.Workers.Run(ctx, "probe", "probe.streams", map[string]any{"path": path})
+		raw, err := u.probeStreams(ctx, path)
 		var si transcode.SourceInfo
 		if err == nil {
 			si, _ = transcode.ParseProbe(raw)
@@ -1884,14 +1992,34 @@ func (u *UI) mpMaybeAlign(host string, force bool) {
 	})
 }
 
-// mpEnvelope fetches an RMS envelope via the probe worker.
+// mpEnvelope fetches an RMS envelope via the probe worker, persisted per-file (KindEnvelope,
+// key path+mtime, fixed rateHz=50) so aligning one audio against N videos decodes each file once
+// and the envelope survives restart. The align RESULT is cached per-pair (KindAlign); this caches
+// its per-file input.
 func (u *UI) mpEnvelope(path string) ([]float64, float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	raw, err := u.svc.Workers.RunBackground(ctx, "probe", "probe.envelope", map[string]any{"path": path, "rateHz": 50})
-	if err != nil {
-		return nil, 0, err
+	mtime := fileMtime(path)
+	raw, cached := []byte(nil), false
+	if u.svc.Store != nil {
+		raw, cached = u.svc.Store.GetAnalysis(store.KindEnvelope, path, mtime)
 	}
+	if !cached {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		var err error
+		raw, err = u.svc.Workers.RunBackground(ctx, "probe", "probe.envelope", map[string]any{"path": path, "rateHz": 50})
+		if err != nil {
+			return nil, 0, err
+		}
+		if u.svc.Store != nil {
+			u.svc.Store.PutAnalysis(store.KindEnvelope, path, mtime, raw)
+		}
+	}
+	return parseEnvelope(raw)
+}
+
+// parseEnvelope decodes a probe.envelope payload (base64 little-endian float32 buckets) to the
+// RMS envelope + its rate.
+func parseEnvelope(raw []byte) ([]float64, float64, error) {
 	var r struct {
 		Env    string  `json:"env"`
 		RateHz float64 `json:"rateHz"`

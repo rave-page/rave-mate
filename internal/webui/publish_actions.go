@@ -247,13 +247,15 @@ func (u *UI) pubMatch(id string) {
 	if u.svc.Recorder == nil {
 		return
 	}
-	histDir := u.pubHistoryDir()
-	if histDir == "" {
-		u.toast("No Traktor History folder found - can't match.")
-		return
-	}
-	u.toast("Matching to Traktor history…")
+	// pubHistoryDir → DiscoverTraktor is a filesystem scan of Traktor install dirs; run it (and the
+	// reconcile) off the act lane so a slow/spun-down disk can't freeze the UI.
 	u.bg(func() {
+		histDir := u.pubHistoryDir()
+		if histDir == "" {
+			u.toast("No Traktor History folder found - can't match.")
+			return
+		}
+		u.toast("Matching to Traktor history…")
 		rec, err := u.svc.Recorder.ReconcileWithHistory(id, histDir, u.pubHistoryResolver())
 		if err != nil {
 			u.logErr("reconcile", err)
@@ -314,14 +316,11 @@ func (u *UI) pubDel(arg string) {
 
 // ── lookups ───────────────────────────────────────────────────────────────────────
 
+// pubCapByID looks a capture up from the shared epoch-keyed cache (pubCapList) - no per-click libdb
+// read on the serialized act lane. The set list rendered first, so the cache is warm by the time a
+// capture's ⋯ menu / player load can be clicked.
 func (u *UI) pubCapByID(id string) (libdb.SetRecording, bool) {
-	if u.svc.Lib == nil {
-		return libdb.SetRecording{}, false
-	}
-	all, err := u.svc.Lib.ListSetRecordings(300)
-	if err != nil {
-		return libdb.SetRecording{}, false
-	}
+	all, _ := u.pubCapList()
 	for _, s := range all {
 		if s.ID == id {
 			return s, true

@@ -47,9 +47,11 @@ func (u *UI) gridfixModelCardBody() string {
 	if cur != "" {
 		curLabel = filepath.Base(cur)
 	}
+	// opts() runs on EVERY render (per keystroke in Settings search mode) - read the cached checkpoint
+	// list (populated by the gridfix probe, u.bg), never ReadDir here.
 	b.WriteString(smartSelect("gfmodel", i18n.T("settings.body.gridfixmodel.active"), "gfm-model", curLabel, func() []ssOpt {
 		opts := []ssOpt{{Val: "", Label: i18n.T("settings.body.gridfixmodel.builtin"), Sub: "final0"}}
-		for _, c := range train.ListCheckpoints(u.gfModelsDir()) {
+		for _, c := range u.gfCheckpointsCached() {
 			opts = append(opts, ssOpt{Val: c.Path, Label: c.Name, Sub: c.At.Format("2006-01-02 15:04")})
 		}
 		return opts
@@ -195,6 +197,12 @@ func (u *UI) gfmTrain() {
 				i18n.T("settings.toast.gfTrainDoneBody",
 					i18n.A{"before": fmt.Sprintf("%.3f", v.BeforeF), "after": fmt.Sprintf("%.3f", v.AfterF)}))
 		}
+		// a fine-tune just wrote a new checkpoint - re-list into the probe cache (still off-thread here)
+		// so the picker shows it without waiting for the env-probe TTL.
+		cps := train.ListCheckpoints(u.gfModelsDir())
+		u.gfProbe.mu.Lock()
+		u.gfProbe.checkpoints = cps
+		u.gfProbe.mu.Unlock()
 		u.patchMain()
 	})
 }

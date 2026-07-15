@@ -5,8 +5,11 @@ import (
 	"html"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/vrcperm"
 )
@@ -198,28 +201,94 @@ func (u *UI) worldsUnityCard() string {
 	var b strings.Builder
 	b.WriteString(`<div class="rp-card">`)
 	b.WriteString(`<p class=ws-help>Writes Assets/rave.page/WorldSync/sources.json into the project. In Unity: Tools → rave.page → World Sync lists the feeds, wires a VideoTXL Remote Whitelist, or copies URLs. Re-write after publishing a new list.</p>`)
-	rows := u.worldsUnityRows()
-	if rows == "" {
-		b.WriteString(emptyState("No Unity projects configured (Settings ▸ Integrations ▸ Unity)"))
-	} else {
-		b.WriteString(rows)
-	}
+	b.WriteString(`<div id=world-unity-rows>` + u.worldsUnityRowsInner() + `</div>`) // stable id: the async inspect cache re-patches it
 	b.WriteString(`</div>`)
 	return b.String()
 }
 
-// worldsUnityRows lists valid Unity projects (write action carries the project INDEX, not the
-// path - a Windows path would break fmt %q escaping in data-act).
-func (u *UI) worldsUnityRows() string {
+// worldsUnityRowsInner lists valid Unity projects from the cached inspects (never stats on the
+// render goroutine). Shows a loading placeholder until the first async inspect lands. The write
+// action carries the project INDEX, not the path - a Windows path would break fmt %q in data-act.
+func (u *UI) worldsUnityRowsInner() string {
+	projects := u.svc.Cfg.Features.Unity.Projects
+	empty := emptyState("No Unity projects configured (Settings ▸ Integrations ▸ Unity)")
+	if len(projects) == 0 {
+		return empty
+	}
+	infos, ready := u.worldsUnityInspects(projects)
+	if !ready {
+		return emptyState(i18n.T("remote.loading"))
+	}
 	var b strings.Builder
-	for i, dir := range u.svc.Cfg.Features.Unity.Projects {
-		info := unityproj.Inspect(dir)
-		if !info.Valid {
+	for i, dir := range projects {
+		if !infos[dir].Valid {
 			continue
 		}
-		b.WriteString(itemRow(info.Name, dir, btn("Write source URLs", "explore", "world-unity-write:"+strconv.Itoa(i), "")))
+		b.WriteString(itemRow(infos[dir].Name, dir, btn("Write source URLs", "explore", "world-unity-write:"+strconv.Itoa(i), "")))
+	}
+	if b.Len() == 0 {
+		return empty // projects configured but none are valid Unity projects
 	}
 	return b.String()
+}
+
+// worldsUnityTTL re-inspects even when the project list is unchanged, so a project that becomes
+// (in)valid on disk (Unity generating ProjectSettings, a moved/deleted dir) surfaces without editing
+// the list - the sig-only key can't see on-disk state changes. Matches the sibling probe caches.
+const worldsUnityTTL = 30 * time.Second
+
+// worldsUnityCache holds off-thread unityproj.Inspect results keyed by a signature of the project
+// list (any add/remove/reorder changes the sig → re-scan) plus a TTL for on-disk state changes.
+// Published snapshot is immutable.
+type worldsUnityCache struct {
+	mu    sync.Mutex
+	sig   string
+	infos map[string]unityproj.Project
+	at    time.Time
+	ready bool
+	busy  bool
+}
+
+// worldsUnityInspects returns cached inspects for the current project list, kicking an off-thread
+// re-scan when the list changed (sig mismatch) or the cache is cold. The per-project os.Stat sweep
+// runs in u.bg - never on the Worlds render goroutine.
+func (u *UI) worldsUnityInspects(projects []string) (map[string]unityproj.Project, bool) {
+	sig := strings.Join(projects, "\x00")
+	u.wuCache.mu.Lock()
+	sameSig := u.wuCache.ready && u.wuCache.sig == sig
+	infos := u.wuCache.infos
+	if sameSig && time.Since(u.wuCache.at) < worldsUnityTTL {
+		u.wuCache.mu.Unlock()
+		return infos, true
+	}
+	kick := !u.wuCache.busy
+	if kick {
+		u.wuCache.busy = true
+	}
+	u.wuCache.mu.Unlock()
+	if kick {
+		cp := append([]string(nil), projects...) // snapshot on the actWorker - config removal shifts the live slice in place
+		u.bg(func() { u.refreshWorldsUnity(sig, cp) })
+	}
+	if sameSig { // TTL expired but same project list: serve the last snapshot while it refreshes (no flash)
+		return infos, true
+	}
+	return nil, false // sig changed / cold: show loading until the scan lands
+}
+
+// refreshWorldsUnity inspects each project off-thread, publishes an immutable snapshot keyed by the
+// project-list signature, and re-patches the Unity rows when Worlds is active.
+func (u *UI) refreshWorldsUnity(sig string, projects []string) {
+	infos := make(map[string]unityproj.Project, len(projects))
+	for _, dir := range projects {
+		infos[dir] = unityproj.Inspect(dir)
+	}
+	u.wuCache.mu.Lock()
+	u.wuCache.sig, u.wuCache.infos, u.wuCache.at, u.wuCache.ready, u.wuCache.busy = sig, infos, time.Now(), true, false
+	u.wuCache.mu.Unlock()
+	if !u.stopped() && u.activeTab() == "worlds" {
+		u.eval("window.__patch('world-unity-rows'," + jsQuote(u.worldsUnityRowsInner()) + ")")
+	}
 }
 
 // ── modal editors (rendered into __modal via openModal) ──

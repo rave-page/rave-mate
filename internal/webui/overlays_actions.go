@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"rave.page/mate/internal/config"
@@ -28,6 +29,7 @@ func init() {
 			u.toast("Couldn't save: " + err.Error())
 			return
 		}
+		u.invalidateOvlStyle() // file changed - next render/tick re-reads the flag off-thread
 		if u.svc.Cfg != nil && u.svc.Cfg.Features.OverlayWeb.Enabled {
 			port := u.svc.Cfg.Features.OverlayWeb.ResolvedPort()
 			u.bg(func() { _ = overlaystyle.Push(port, path) })
@@ -157,6 +159,12 @@ func init() {
 			u.eval("window.__patch('" + s[0] + "'," + jsQuote(u.ovlStatus(s[1])) + ")")
 		}
 		u.eval("window.__patch('ovl-strip'," + jsQuote(u.ovlStripHTML()) + ")")
+		// keep the off-thread probe caches warm (read cache + kick a bg refresh when stale); their
+		// refreshers self-patch ovl-appearance / ovl-spout on change (e.g. browser editor / DLL landed).
+		u.ovlFaderCached()
+		if videoshare.Backend() == "Spout" {
+			u.spoutStatusCached()
+		}
 	})
 }
 
@@ -187,7 +195,7 @@ func (u *UI) spoutInstall() {
 			u.toast(i18n.T("overlays.spout.installedToast"))
 			u.scheduleSinkRestart(videoshare.SinkID) // running share reloads the DLL; off = next start finds it
 		}
-		u.eval("window.__patch('ovl-spout'," + jsQuote(u.spoutControlsHTML()) + ")")
+		u.refreshSpoutProbe() // re-probe (DLL just landed) + re-patch the controls block (already off-thread)
 	})
 }
 
@@ -200,6 +208,109 @@ func (u *UI) ovlOpenDir(dir string) {
 	if err := openURL(dir); err != nil {
 		u.logErr("open folder", err)
 	}
+}
+
+// ── Spout DLL probe cache (keep spoutdll.Probe's os.Executable+os.Stat sweep off the render goroutine) ──
+
+const spoutProbeTTL = 30 * time.Second
+
+type spoutProbeCache struct {
+	mu    sync.Mutex
+	st    spoutdll.Status
+	at    time.Time
+	ready bool
+	busy  bool
+}
+
+// spoutStatusCached returns the last SpoutLibrary.dll probe, kicking an off-thread refresh when
+// stale. Never touches the filesystem - safe on the render goroutine.
+func (u *UI) spoutStatusCached() spoutdll.Status {
+	u.spoutProbe.mu.Lock()
+	st := u.spoutProbe.st
+	stale := !u.spoutProbe.ready || time.Since(u.spoutProbe.at) > spoutProbeTTL
+	kick := stale && !u.spoutProbe.busy
+	if kick {
+		u.spoutProbe.busy = true
+	}
+	u.spoutProbe.mu.Unlock()
+	if kick {
+		u.bg(u.refreshSpoutProbe)
+	}
+	return st
+}
+
+// refreshSpoutProbe re-probes the DLL off the render goroutine + re-patches the Spout controls
+// block when the install state changed (probe landed / DLL installed). #ovl-spout only exists when
+// the Spout backend is active; __patch is a no-op on a missing id.
+func (u *UI) refreshSpoutProbe() {
+	st := spoutdll.Probe()
+	u.spoutProbe.mu.Lock()
+	changed := !u.spoutProbe.ready || st != u.spoutProbe.st
+	u.spoutProbe.st, u.spoutProbe.at, u.spoutProbe.ready, u.spoutProbe.busy = st, time.Now(), true, false
+	u.spoutProbe.mu.Unlock()
+	if changed && !u.stopped() {
+		u.eval("window.__patch('ovl-spout'," + jsQuote(u.spoutControlsHTML()) + ")")
+	}
+}
+
+// ── overlay-style.json fader-flag cache (no os.ReadFile+Unmarshal on every overlays render) ──
+
+const ovlStyleTTL = 5 * time.Second
+
+type ovlStyleCache struct {
+	mu      sync.Mutex
+	watcher *overlaystyle.Watcher // owned here; only ever touched inside refreshOvlStyle (busy-guarded → single-flight)
+	path    string
+	fader   bool
+	at      time.Time
+	ready   bool
+	busy    bool
+}
+
+// ovlFaderCached returns the cached cardFaderReact flag, kicking an off-thread refresh when stale.
+// Never reads the filesystem - safe on the render goroutine (the Watcher's os.Stat runs in u.bg).
+func (u *UI) ovlFaderCached() bool {
+	u.ovlStyle.mu.Lock()
+	v := u.ovlStyle.fader
+	stale := !u.ovlStyle.ready || time.Since(u.ovlStyle.at) > ovlStyleTTL
+	kick := stale && !u.ovlStyle.busy
+	if kick {
+		u.ovlStyle.busy = true
+	}
+	u.ovlStyle.mu.Unlock()
+	if kick {
+		u.bg(u.refreshOvlStyle)
+	}
+	return v
+}
+
+// refreshOvlStyle re-reads the fader flag via the mtime-caching Watcher (off the render goroutine)
+// and re-patches the appearance card when it changed (e.g. the browser editor flipped it).
+func (u *UI) refreshOvlStyle() {
+	path, _ := config.DataPath("overlay-style.json")
+	u.ovlStyle.mu.Lock()
+	if u.ovlStyle.watcher == nil || u.ovlStyle.path != path {
+		u.ovlStyle.watcher = overlaystyle.NewWatcher(path)
+		u.ovlStyle.path = path
+	}
+	w := u.ovlStyle.watcher
+	u.ovlStyle.mu.Unlock()
+	st := w.Get() // os.Stat; re-parses only when the file changed
+	fader := st.CardFaderReact != nil && *st.CardFaderReact
+	u.ovlStyle.mu.Lock()
+	changed := !u.ovlStyle.ready || fader != u.ovlStyle.fader
+	u.ovlStyle.fader, u.ovlStyle.at, u.ovlStyle.ready, u.ovlStyle.busy = fader, time.Now(), true, false
+	u.ovlStyle.mu.Unlock()
+	if changed && !u.stopped() && u.activeTab() == "overlays" {
+		u.eval("window.__patch('ovl-appearance'," + jsQuote(u.overlayAppearanceCard(u.ovlBase())) + ")")
+	}
+}
+
+// invalidateOvlStyle forces the next ovlFaderCached to re-read (after the fader toggle writes).
+func (u *UI) invalidateOvlStyle() {
+	u.ovlStyle.mu.Lock()
+	u.ovlStyle.at = time.Time{}
+	u.ovlStyle.mu.Unlock()
 }
 
 // ovlValidHex reports whether s is a #rgb or #rrggbb colour.

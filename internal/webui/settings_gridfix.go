@@ -16,17 +16,19 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/gridfix"
+	"rave.page/mate/internal/gridfix/train"
 	"rave.page/mate/internal/i18n"
 )
 
 const gridfixProbeTTL = 5 * time.Minute
 
 type gridfixProbe struct {
-	mu    sync.Mutex
-	st    gridfix.EnvStatus
-	at    time.Time
-	ready bool
-	busy  bool
+	mu          sync.Mutex
+	st          gridfix.EnvStatus
+	checkpoints []train.CheckpointInfo // fine-tune checkpoints (ReadDir) - folded in so the model-card picker never scans on render
+	at          time.Time
+	ready       bool
+	busy        bool
 }
 
 func (u *UI) gridfixEnvMgr() *gridfix.EnvManager {
@@ -79,9 +81,11 @@ func (u *UI) refreshGridfixProbe() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	st := u.gridfixEnvMgr().Status(ctx)
+	cps := train.ListCheckpoints(u.gfModelsDir()) // fold the checkpoint scan (ReadDir) into the probe - off the render goroutine
 	u.gfProbe.mu.Lock()
 	changed := !u.gfProbe.ready || st != u.gfProbe.st
 	u.gfProbe.st = st
+	u.gfProbe.checkpoints = cps
 	u.gfProbe.at = time.Now()
 	u.gfProbe.ready = true
 	u.gfProbe.busy = false
@@ -101,6 +105,14 @@ func (u *UI) invalidateGridfixProbe() {
 	u.gfProbe.mu.Lock()
 	u.gfProbe.at = time.Time{}
 	u.gfProbe.mu.Unlock()
+}
+
+// gfCheckpointsCached returns the cached fine-tune checkpoints (nil until the first probe lands).
+// Read on the render goroutine - the ReadDir scan runs in refreshGridfixProbe (u.bg).
+func (u *UI) gfCheckpointsCached() []train.CheckpointInfo {
+	u.gfProbe.mu.Lock()
+	defer u.gfProbe.mu.Unlock()
+	return u.gfProbe.checkpoints
 }
 
 // gridfixVariantHTML renders one engine variant's status line + install/remove buttons

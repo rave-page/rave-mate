@@ -137,7 +137,7 @@ func init() {
 			midiCfgMu.Lock()
 			cs := append([]config.MIDIControllerMap(nil), u.svc.Cfg.Features.MIDI.Controllers...)
 			midiCfgMu.Unlock()
-			ctx := u.midiCtlCtx()
+			ctx := u.midiCtlCtx() // cache-backed: reads the probe snapshot, no ioctl/enum on the tick
 			for i, c := range cs {
 				u.tickPatch(&js, "midi-ctlstat-"+strconv.Itoa(i), u.midiCtlPortStatusInner(c, ctx))
 			}
