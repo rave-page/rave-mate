@@ -71,6 +71,21 @@ func (d *DB) nextSeq(q interface {
 	return max.Int64 + 1, nil
 }
 
+// LibraryVersion returns a monotonic counter that advances on every library mutation
+// (each change_log append bumps MAX(seq)). Callers version cached per-track resolutions by it
+// so any collection/library change invalidates the cache. 0 when unavailable. Cheap: served by
+// idx_change_log_seq(node_id, seq).
+func (d *DB) LibraryVersion() int64 {
+	if d == nil || d.db == nil {
+		return 0
+	}
+	var max sql.NullInt64
+	if err := d.db.QueryRow(`SELECT MAX(seq) FROM change_log WHERE node_id=?`, d.nodeID).Scan(&max); err != nil {
+		return 0
+	}
+	return max.Int64
+}
+
 // appendTx writes events via ex, starting at startSeq (assigned per event). Used both for
 // the standalone AppendChanges (own tx) and the import path (TrackSync's tx - atomic with
 // the track writes).

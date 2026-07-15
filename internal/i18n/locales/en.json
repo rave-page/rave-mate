@@ -2031,6 +2031,7 @@
     "delete": "Delete",
     "export": "Export",
     "finishSet": "Finish set",
+    "linkingLibrary": "Matching tracks to your library…",
     "listening": "listening {addr}",
     "live": "live",
     "liveSet": "Live set",

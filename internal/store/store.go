@@ -40,6 +40,10 @@ const (
 	KindLoudness    = "lufs"     // EBU R128 measurement (transcode.Measurement JSON)
 	KindLoudnessTL  = "loudtl"   // EBU R128 momentary timeline (worker LoudTimeline JSON)
 	KindAlign       = "alignoff" // cross-recording time offset (setalign result JSON; path = "a\x1fb")
+	// KindSetTrackLinks caches a recording's resolved per-track library paths ([]string JSON,
+	// key = recording ID). NOT path-keyed: the mtime slot carries the libdb LibraryVersion() so
+	// any library/collection change invalidates it and it re-resolves off-thread (never in render).
+	KindSetTrackLinks = "trklinks"
 )
 
 // Store wraps the bbolt DB. A nil *Store is valid - every method is a safe no-op so callers
