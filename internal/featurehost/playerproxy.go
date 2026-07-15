@@ -96,7 +96,16 @@ func (p *PlayerProxy) onTickEvent(data json.RawMessage) {
 		return
 	}
 	p.mu.Lock()
-	p.mirror.Cur, p.mirror.Total, p.mirror.Playing, p.mirror.Paused = t.Cur, t.Total, true, t.Paused
+	p.mirror.Cur, p.mirror.Total, p.mirror.Playing = t.Cur, t.Total, true
+	// A tick may CONFIRM a pause but must never spuriously un-pause. A stale poll-tick sampled just
+	// before a previewRelease pause can reach the wire AFTER the confirming tick; an unconditional
+	// write would clobber Paused back to false, dropping the next spam-press into the silent
+	// SeekExplicit-without-unpause branch (the "have to hit Stop first" bug). Every real resume goes
+	// through an RPC (togglePause/playFrom/previewFrom) that rewrites the mirror directly, so a tick
+	// never needs to clear Paused - only set it.
+	if t.Paused {
+		p.mirror.Paused = true
+	}
 	cb, disp := p.onTick, p.dispatch
 	obs := p.tickObservers()
 	p.mu.Unlock()

@@ -47,6 +47,7 @@ type source struct {
 	pos     int64 // next device frame to hand to oto (the read cursor)
 	stopAt  int64 // hard stop frame (-1 = play to end); preview stop, loop-out, etc.
 	scratch []byte
+	ended   bool // Read drained the source to its natural end (authoritative EOF, not a pause). Cleared by SeekTo.
 }
 
 // newRAMSource decodes the whole file into a device-rate RAM buffer. Caller checked the size cap.
@@ -126,6 +127,7 @@ func (s *source) seekLocked(frame int64) error {
 		frame = s.total
 	}
 	s.pos = frame
+	s.ended = false // moved off the end; a subsequent drain re-arms it
 	if s.ram != nil {
 		return nil
 	}
@@ -176,10 +178,15 @@ func (s *source) Read(p []byte) (int, error) {
 	}
 	s.pos += int64(got)
 	if got == 0 {
+		s.ended = true // drained to the natural end (distinct from a pause: oto stops pulling on pause)
 		return 0, io.EOF
 	}
 	return got * deviceBytes * deviceChannels, nil
 }
+
+// reachedEnd reports whether Read has drained the source to its natural end. Cleared by SeekTo, so
+// a hold-audition release (pause + snap back) is NOT mistaken for EOF - the engine seeks on release.
+func (s *source) reachedEnd() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.ended }
 
 func (s *source) readRAM(frames int) int {
 	if remain := s.total - s.pos; int64(frames) > remain {

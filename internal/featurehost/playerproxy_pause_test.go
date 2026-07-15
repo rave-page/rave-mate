@@ -35,9 +35,21 @@ func TestPlayerMirrorTracksPause(t *testing.T) {
 		t.Fatalf("paused tick must keep Paused: got %+v", st)
 	}
 
-	// Resume tick clears it (the unpause landed in the child).
+	// Ticks are UPGRADE-ONLY on Paused: a stale poll-tick that sampled !paused just before the
+	// release must NOT clobber the confirmed pause back to playing (that dropped the next spam-press
+	// into the silent seek-without-unpause branch). Only an RPC (togglePause/playFrom) resumes.
 	p.onTickEvent([]byte(`{"cur":1.7,"total":10,"paused":false}`))
-	if st := p.State(); st.Paused {
-		t.Fatalf("resume tick must clear Paused: got %+v", st)
+	if st := p.State(); !st.Paused {
+		t.Fatalf("stale !paused tick must NOT clear a confirmed pause: got %+v", st)
+	}
+
+	// The RPC-driven resume path (togglePause) rewrites the mirror directly - proven by the direct
+	// mirror write here standing in for the child response (no device in this test).
+	p.mu.Lock()
+	p.mirror.Paused = false
+	p.mu.Unlock()
+	p.onTickEvent([]byte(`{"cur":1.9,"total":10,"paused":false}`)) // now playing ticks keep it clear
+	if st := p.State(); st.Paused || !st.Playing {
+		t.Fatalf("after RPC resume + playing tick: got %+v, want playing !paused", st)
 	}
 }

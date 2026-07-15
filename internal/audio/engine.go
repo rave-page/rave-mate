@@ -248,6 +248,15 @@ func (e *Engine) IsPlaying() bool {
 	return e.player != nil && e.player.IsPlaying()
 }
 
+// Drained reports whether playback reached the track's natural end (source read to EOF). This is
+// authoritative for natural-end detection - a pause (PreviewRelease snap-back near the tail) does
+// NOT set it, so it can't be mistaken for EOF the way a position>=total heuristic could.
+func (e *Engine) Drained() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.src != nil && e.src.reachedEnd()
+}
+
 // resetAndPlay drops any buffered audio and starts from the source cursor (caller holds mu).
 func (e *Engine) resetAndPlay() {
 	if e.player == nil {
