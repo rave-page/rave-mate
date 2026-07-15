@@ -878,7 +878,10 @@ func (u *UI) mpPatchAll(t mpSt) {
 		u.mpVidEval(t.host, js)
 	}
 }
-func (u *UI) mpPatchWave(t mpSt) { u.mpPatch(t.host, "wave", u.mpWaveInner(t)) }
+func (u *UI) mpPatchWave(t mpSt) {
+	u.mpPatch(t.host, "wave", u.mpWaveInner(t))
+	u.mpPushRealtime(t) // re-sync the client rAF playhead/clock interpolator to the fresh render
+}
 func (u *UI) mpPatchTransport(t mpSt) {
 	u.mpPatch(t.host, "tp", u.mpTransportHTML(t))
 }
@@ -892,6 +895,48 @@ func (u *UI) mpPatchHov(t mpSt)    { u.mpPatch(t.host, "hov", u.mpReadoutLine(t)
 func (u *UI) mpPatchTime(t mpSt) {
 	tx := jsQuote(u.mpTimeText(t))
 	u.eval("var e=document.getElementById(" + jsQuote("mp-"+t.host+"-time") + ");if(e){e.textContent=" + tx + ";e.setAttribute('data-value'," + tx + ");}")
+}
+
+// mpPushRealtime hands the client rAF interpolator (shell.go __rt) the playhead's sparse
+// motion so the mint playhead line + transport clock animate smoothly between the coarse
+// ~1 Hz Go wave re-renders: start x + velocity (viewBox units/sec in the fixed 1000-wide
+// viewBox) + clock seconds + playback rate (the native engine runs at 1.0x). rate 0 =
+// paused/stopped/idle → the client snaps once and stops its loop (idle = zero frames; the
+// "must not clog the system" contract). Coalesced per host so a fast scrub can't pile up
+// pushes. Called wherever the wave (hence the playhead line) is re-rendered.
+func (u *UI) mpPushRealtime(t mpSt) {
+	if u.shell == nil {
+		return
+	}
+	key := "mprt-" + t.host
+	m := t.activeMedia()
+	if m == nil {
+		u.enqueueEval(key, "window.__rt&&window.__rt('ph',"+jsQuote("mp-"+t.host)+",null)")
+		return
+	}
+	tr := u.mpEngineState(&t, m)
+	total := m.dur
+	if tr.loaded && tr.total > 0 {
+		total = tr.total
+	}
+	pos, x0, vx, rate := 0.0, 0.0, 0.0, 0.0
+	lo, ln := t.axis()
+	if tr.loaded {
+		pos = tr.cur
+		if ln > 0 && t.viewSpan > 0 {
+			pAxis := tr.cur + t.mediaStart(t.active)
+			x0 = ((pAxis-lo)/ln - t.viewStart) / t.viewSpan * 1000.0
+			if tr.playing {
+				if vss := t.viewSpan * ln; vss > 0 {
+					vx = 1000.0 / vss // 1.0x engine → 1000 units per view-span-second
+				}
+				rate = 1.0
+			}
+		}
+	}
+	js := fmt.Sprintf("window.__rt&&window.__rt('ph',%s,{ph:%s,clk:%s,x0:%.2f,vx:%.4f,pos:%.3f,rate:%.3f,total:%.3f,w:1000})",
+		jsQuote("mp-"+t.host), jsQuote("mp-"+t.host+"-ph"), jsQuote("mp-"+t.host+"-time"), x0, vx, pos, rate, total)
+	u.enqueueEval(key, js)
 }
 
 // mpApplyTrim mutates + repaints wave/edit (the common non-drag update path).

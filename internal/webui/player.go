@@ -503,9 +503,10 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		}
 	}
 
-	// playhead (mint) or last-click cursor (white)
+	// playhead (mint) or last-click cursor (white). id lets the client rAF runtime (shell.go
+	// __rt) interpolate x between the coarse ~1 Hz Go re-renders (mpPushRealtime feeds it).
 	if playX >= 0 && playX <= w {
-		fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#08F79B" stroke-width="1.5"/>`, playX, playX, h)
+		fmt.Fprintf(&b, `<line id="mp-%s-ph" x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#08F79B" stroke-width="1.5"/>`, t.host, playX, playX, h)
 	} else if mpIsSet(t.cursorSec) {
 		if x := toX(t.cursorSec); x >= 0 && x <= w {
 			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,0.5)" stroke-width="1" stroke-dasharray="3,3"/>`, x, x, h)
