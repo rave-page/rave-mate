@@ -26,6 +26,13 @@ const maxFPS = 30.0
 // cue-audition path (that's the low-latency native engine in the player child).
 const audioBufferLatency = 100 * time.Millisecond
 
+// audioPlayerBufFrames caps the oto PLAYER read-ahead buffer (distinct from the device buffer
+// above). Unset, oto defaults to ~0.5s/player - which (a) makes the samples master-clock lead the
+// DAC by 0.5s (video paced to clock() would run 0.5s ahead of audio) and (b) prime-blocks Play()
+// for ~0.5s on Windows (playImpl runs on the caller until the buffer fills), stalling seeks. Match
+// the device latency (~100ms) for parity with the retired beep speaker.
+const audioPlayerBufFrames = sampleRate / 10 // ~100ms, whole frames
+
 var (
 	audioCtxOnce sync.Once
 	audioCtx     *oto.Context
@@ -358,6 +365,7 @@ func (p *Player) startLocked(offset float64) error {
 			// master clock and stutter the video paced to it).
 			aBuf := bufio.NewReaderSize(aout, 256<<10)
 			player := audioCtx.NewPlayer(&pcmReader{r: aBuf, samples: p.samples})
+			player.SetBufferSize(audioPlayerBufFrames * bytesPerFrame) // ~100ms, not oto's 0.5s default
 			player.SetVolume(float64(atomic.LoadInt64(&p.vol)) / 100)
 			p.aud = player
 			if !p.paused {
@@ -417,10 +425,21 @@ func (p *Player) setPausedLocked(pause bool) {
 	p.playing = !pause && p.cancel != nil
 }
 
-// positionLocked computes the current position from the active master clock.
+// positionLocked computes the current AUDIBLE position from the active master clock. samples counts
+// frames as oto's read-ahead pulls them from pcmReader, which leads the DAC by the player's unplayed
+// buffer (capped at ~100ms via SetBufferSize) - subtract it so the clock (and the video paced to it)
+// tracks what's actually heard, not what's buffered. Matches internal/audio.Position (audible = pos
+// - buffered).
 func (p *Player) positionLocked() float64 {
 	if p.audioActive && p.samples != nil {
-		return p.seekOff + float64(atomic.LoadInt64(p.samples))/float64(sampleRate)
+		played := atomic.LoadInt64(p.samples)
+		if p.aud != nil {
+			played -= int64(p.aud.BufferedSize() / bytesPerFrame) // frames read-ahead but not yet played
+		}
+		if played < 0 {
+			played = 0
+		}
+		return p.seekOff + float64(played)/float64(sampleRate)
 	}
 	if p.wall != nil {
 		return p.wall.pos()
