@@ -7,14 +7,15 @@ import (
 )
 
 func TestIsPlayable(t *testing.T) {
-	for _, p := range []string{"a.mp3", "A.WAV", "x.flac", "y.ogg", "z.oga"} {
+	// Native-decoder tier: always playable (AIFF has a native decoder now, no ffmpeg needed).
+	for _, p := range []string{"a.mp3", "A.WAV", "x.flac", "y.ogg", "z.oga", "a.aiff", "a.aif"} {
 		if !isPlayable(p) {
 			t.Errorf("isPlayable(%q) = false, want true", p)
 		}
 	}
 	// ffmpeg-decoded tier: playable exactly when ffmpeg resolves on this box.
 	_, ffmpeg := mediatools.Resolve("ffmpeg")
-	for _, p := range []string{"a.m4a", "a.aac", "a.opus", "a.aiff"} {
+	for _, p := range []string{"a.m4a", "a.aac", "a.opus"} {
 		if isPlayable(p) != ffmpeg {
 			t.Errorf("isPlayable(%q) = %v, want %v (ffmpeg=%v)", p, !ffmpeg, ffmpeg, ffmpeg)
 		}
