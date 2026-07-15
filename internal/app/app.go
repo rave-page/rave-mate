@@ -953,7 +953,8 @@ func run(parent context.Context, serviceMode bool) error {
 
 	// DMX plane: Art-Net ingest → universe store → VRSL video grid (Spout/PNG) + optional
 	// re-emit. Config re-read on module (re)start.
-	dmxRouter := dmx.New(log, func() config.DMXFeature { return cfg.Features.DMX }, dmxGridPNGPath())
+	dmxRouter := dmx.New(log, func() config.DMXFeature { return cfg.Features.DMX },
+		func() config.LightCueFeature { return cfg.Features.LightCue }, dmxGridPNGPath())
 
 	// DMX→MIDI VRChat bridge: universe store → rate-limited MIDI CC on a virtual port for
 	// VRChat --midi worlds (change-detected + hard-capped under the ~128 events/frame crash bug).

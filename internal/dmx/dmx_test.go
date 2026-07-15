@@ -34,7 +34,8 @@ func TestRouterIngestToGrid(t *testing.T) {
 		Enabled: true, ListenAddr: addr,
 		Grid: config.DMXGrid{Enabled: true, Mode: "mono", FPSCap: 60},
 	}
-	r := New(logbus.New(64), func() config.DMXFeature { return cfg }, png)
+	r := New(logbus.New(64), func() config.DMXFeature { return cfg },
+		func() config.LightCueFeature { return config.LightCueFeature{RecordDir: t.TempDir()} }, png)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -83,7 +84,8 @@ func TestRouterBindClashFailsStart(t *testing.T) {
 	}
 	defer func() { _ = held.Close() }()
 	cfg := config.DMXFeature{Enabled: true, ListenAddr: addr}
-	r := New(logbus.New(16), func() config.DMXFeature { return cfg }, filepath.Join(t.TempDir(), "g.png"))
+	r := New(logbus.New(16), func() config.DMXFeature { return cfg },
+		func() config.LightCueFeature { return config.LightCueFeature{RecordDir: t.TempDir()} }, filepath.Join(t.TempDir(), "g.png"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := r.Start(ctx); err == nil {

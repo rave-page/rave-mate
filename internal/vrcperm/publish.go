@@ -11,6 +11,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/github"
+	"rave.page/mate/internal/lightcue"
 )
 
 // PublishList expands + publishes one permission list. Diff-only: unchanged
@@ -70,6 +71,30 @@ func (s *Service) PublishNowPlaying(ctx context.Context) {
 	}
 	files := map[string]string{FileNowPlaying: NowPlayingJSON(np)}
 	s.publish(ctx, "nowplaying", &f.NowPlayingGistID, "rave-mate now playing", files, FileNowPlaying)
+}
+
+// lightCuesWarnBytes is the gist string-load budget warning threshold (~1 MB).
+const lightCuesWarnBytes = 1 << 20
+
+// PublishLightCues publishes one DMX lighting-cue take (the frozen contract JSON) to the
+// lightcues gist. Warns if the serialized take exceeds the ~1 MB string-load budget.
+func (s *Service) PublishLightCues(ctx context.Context, take *lightcue.Recording) {
+	if take == nil {
+		s.setErr("lightcues", "no take selected")
+		return
+	}
+	data, err := lightcue.Marshal(take)
+	if err != nil {
+		s.setErr("lightcues", fmt.Sprintf("marshal: %v", err))
+		return
+	}
+	if len(data) > lightCuesWarnBytes {
+		s.log.Warn(source, "lightcue take exceeds ~1MB string-load budget - lower Hz / shorter take / fewer universes",
+			map[string]any{"bytes": len(data), "name": take.Name})
+	}
+	f := s.cfg()
+	files := map[string]string{FileLightCues: string(data)}
+	s.publish(ctx, "lightcues", &f.LightCuesGistID, "rave-mate world lighting cues", files, FileLightCues)
 }
 
 // RawURLFor returns the world-facing raw URL for a target's main file
