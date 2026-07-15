@@ -443,6 +443,45 @@ func (u *UI) gfReanalyze(path string) {
 	u.gfRunTracks([]musiclib.Track{t}, "selected", true)
 }
 
+// gfCallTimeout bounds EVERY engine round-trip (model load AND per-track analyze). A child call that
+// never replies - torch.load on a just-trained/incomplete .ckpt, a CUDA/cuDNN or decode hang -
+// otherwise blocks its run goroutine forever, wedging the cockpit at stage="running"/"cal" until an
+// app restart. Generous enough for a slow first base-model download + a large-file analyze; the
+// cancel button unblocks earlier. Applied via gridfix.Engine.CallTimeout.
+const gfCallTimeout = 5 * time.Minute
+
+// gfTeardown is the deferred run-lifecycle teardown shared by gfRunTracks + gfCalibrate. It ALWAYS
+// resolves the stage so a run can never stay wedged at "running"/"cal": recovers a panic (u.bg is
+// unguarded - a run panic would otherwise crash the daemon), stops the engine, closes the cache, and
+// - only while this run still owns the stage (ownStage; mutual exclusion via the start guards means
+// no other run can have taken it) - sets the resolved stage (successStage on a clean finish, else ""
+// idle) and clears the run handles. Returns the recovered panic value (nil = none) for the caller.
+func (u *UI) gfTeardown(eng *gridfix.Engine, cache *gridfix.DetectionCache, ownStage, successStage string, ok bool) any {
+	rec := recover()
+	if eng != nil {
+		eng.Stop()
+	}
+	if cache != nil {
+		_ = cache.Close()
+	}
+	tray.SetTooltip("")
+	g := &u.gf
+	g.mu.Lock()
+	if g.stage == ownStage { // still ours - never clobber a run that took over
+		if ok && rec == nil {
+			g.stage = successStage
+		} else {
+			g.stage = "" // warm-fail / cancel / crash → idle, retryable (no app restart)
+		}
+		g.cancel, g.cache, g.eng = nil, nil, nil
+	}
+	g.mu.Unlock()
+	if rec != nil {
+		u.toast(i18n.T("library.gf.runCrashed"))
+	}
+	return rec
+}
+
 // gfRunTracks runs the read-only batch over tracks. force overrides the multi-marker/lock skips
 // AND the detection cache (fresh detection - e.g. after switching models); verified grids are
 // always protected.
@@ -469,7 +508,7 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 		ffmpeg = p
 	}
 	eng := &gridfix.Engine{Python: py, DataDir: dir, Device: dev,
-		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg,
+		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg, CallTimeout: gfCallTimeout,
 		OnLog: func(line string) {
 			if u.log != nil {
 				u.log.Debug("gridfix", line, nil)
@@ -493,10 +532,11 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &u.gf
 	g.mu.Lock()
-	if g.stage == "running" {
+	if g.stage == "running" || g.stage == "cal" { // reject while a run of ANY kind is active
 		g.mu.Unlock()
 		cancel()
 		_ = cache.Close()
+		u.toast(i18n.T("library.gf.alreadyRunning")) // feedback instead of a silent no-op
 		return
 	}
 	g.stage, g.scope = "running", scope
@@ -507,7 +547,57 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 	g.mu.Unlock()
 	u.patchMain()
 	u.bg(func() {
+		done := false
+		defer func() {
+			rec := u.gfTeardown(eng, cache, "running", "done", done)
+			g.mu.Lock()
+			p := g.prog
+			g.mu.Unlock()
+			u.patchMain()
+			// don't announce completion for a run the user aborted (batch.Run returns cleanly on cancel)
+			if done && rec == nil && p.Phase != gridfix.PhaseCancelled {
+				u.Notify(i18n.T("library.gf.doneNotifyTitle"),
+					i18n.T("library.gf.doneNotifyBody", i18n.A{"fix": fmt.Sprint(p.Fixed), "ok": fmt.Sprint(p.OK), "manual": fmt.Sprint(p.Skipped)}))
+			}
+		}()
 		defer cancel()
+
+		// Warm + validate the (possibly just-switched) checkpoint FIRST so a hung/bad .ckpt fails
+		// fast (ONE attempt) instead of re-hanging per track. Only when the batch will actually
+		// analyze - a fully-cached / all-skipped re-run stays instant, never paying a model load.
+		// Predicate mirrors batch.Run's skip ORDER exactly: Verified always skipped (even in force),
+		// then force analyzes, then Locked/MultiMarker skipped, then a checkpoint-matched cache hit.
+		warm := false
+		for i := 0; !warm && i < len(bts); i++ {
+			switch {
+			case bts[i].Verified:
+			case force:
+				warm = true
+			case bts[i].MultiMarker || bts[i].Locked:
+			default:
+				if _, hit := cache.Get(bts[i].Path, f.ActiveModel); !hit {
+					warm = true
+				}
+			}
+		}
+		if warm {
+			g.mu.Lock() // a distinct "loading model" state - a motionless 0/N reads like the wedge
+			g.prog.Phase, g.prog.Current = gridfix.PhaseScanning, i18n.T("library.gf.loadingModel")
+			pr := g.prog
+			g.mu.Unlock()
+			u.eval("window.__patch('gf-live'," + jsQuote(gfLiveInner(pr, 0, "")) + ")")
+			if _, _, werr := eng.Ping(ctx, true); werr != nil { // gfCallTimeout bounds it internally
+				if ctx.Err() == nil { // a real load failure / timeout, not a user cancel
+					if errors.Is(werr, context.DeadlineExceeded) {
+						u.toast(i18n.T("library.gf.modelLoadTimeout"))
+					} else {
+						u.toast(i18n.T("library.gf.modelLoadFailed") + werr.Error())
+					}
+				}
+				return // teardown resets stage → idle, retryable (no app restart)
+			}
+		}
+
 		var lastPatch, lastTip time.Time
 		results := batch.Run(ctx, bts, func(p gridfix.BatchProgress) {
 			g.mu.Lock()
@@ -532,18 +622,10 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 					i18n.T("library.gf.trayLabel"), p.Done, p.Total, p.Fixed, p.OK))
 			}
 		})
-		eng.Stop()
-		_ = cache.Close()
-		tray.SetTooltip("")
 		g.mu.Lock()
 		g.results = results
-		g.stage = "done"
-		g.cancel, g.cache, g.eng = nil, nil, nil
-		p := g.prog
 		g.mu.Unlock()
-		u.Notify(i18n.T("library.gf.doneNotifyTitle"),
-			i18n.T("library.gf.doneNotifyBody", i18n.A{"fix": fmt.Sprint(p.Fixed), "ok": fmt.Sprint(p.OK), "manual": fmt.Sprint(p.Skipped)}))
-		u.patchMain()
+		done = true
 	})
 }
 
@@ -598,7 +680,7 @@ func (u *UI) gfCalibrate() {
 	}
 	f := u.svc.Cfg.Features.GridFix
 	eng := &gridfix.Engine{Python: py, DataDir: mgr.DataDir, Device: dev,
-		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg,
+		Checkpoint: f.ActiveModel, FFmpeg: ffmpeg, CallTimeout: gfCallTimeout,
 		OnLog: func(line string) {
 			if u.log != nil {
 				u.log.Debug("gridfix", line, nil)
@@ -619,7 +701,34 @@ func (u *UI) gfCalibrate() {
 	g.mu.Unlock()
 	u.patchMain()
 	u.bg(func() {
+		ok := false
+		defer func() {
+			u.gfTeardown(eng, cache, "cal", "", ok) // calibrate always resolves to idle
+			u.patchMain()
+		}()
 		defer cancel()
+
+		// Warm + validate the checkpoint once (fail-fast) before the sample loop - same rationale as
+		// gfRunTracks; calibrate always analyzes, so warm whenever any sample is a cache miss.
+		warmC := false
+		for i := 0; !warmC && i < len(sample); i++ {
+			if _, hit := cache.Get(sample[i].Path, f.ActiveModel); !hit {
+				warmC = true
+			}
+		}
+		if warmC {
+			if _, _, werr := eng.Ping(ctx, true); werr != nil {
+				if ctx.Err() == nil {
+					if errors.Is(werr, context.DeadlineExceeded) {
+						u.toast(i18n.T("library.gf.modelLoadTimeout"))
+					} else {
+						u.toast(i18n.T("library.gf.modelLoadFailed") + werr.Error())
+					}
+				}
+				return // teardown resets stage → idle, retryable
+			}
+		}
+
 		offsets := map[string][]float64{}
 		var lastPatch time.Time
 		cancelled := false
@@ -660,23 +769,18 @@ func (u *UI) gfCalibrate() {
 					`<div class=gf-current>`+esc(p.Current)+`</div>`) + ")")
 			}
 		}
-		eng.Stop()
-		_ = cache.Close()
-		g.mu.Lock()
-		g.stage = ""
-		g.cancel, g.cache, g.eng = nil, nil, nil
-		g.mu.Unlock()
-		if !cancelled {
-			bias, _ := gridfix.SummarizeCalibration(offsets)
-			if len(bias) == 0 {
-				u.toast(i18n.T("library.gf.calFailedToast"))
-			} else {
-				u.svc.Cfg.Features.GridFix.BiasExt = map[string]float64(bias)
-				u.saveCfg()
-				u.toast(i18n.T("library.gf.calDoneToast", i18n.A{"vals": gfBiasSummary(bias)}))
-			}
+		if cancelled {
+			return // teardown resets stage → idle
 		}
-		u.patchMain()
+		bias, _ := gridfix.SummarizeCalibration(offsets)
+		if len(bias) == 0 {
+			u.toast(i18n.T("library.gf.calFailedToast"))
+		} else {
+			u.svc.Cfg.Features.GridFix.BiasExt = map[string]float64(bias)
+			u.saveCfg()
+			u.toast(i18n.T("library.gf.calDoneToast", i18n.A{"vals": gfBiasSummary(bias)}))
+		}
+		ok = true
 	})
 }
 
