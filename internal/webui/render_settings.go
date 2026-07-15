@@ -908,7 +908,65 @@ func (u *UI) dmxBody() string {
 			field(i18n.T("settings.body.dmx.maxFps"), "set:dmx-fpscap", strconv.Itoa(f.Grid.ResolvedFPSCap()), "number")) +
 		field(i18n.T("settings.body.dmx.senderName"), "set:dmx-spout", f.Grid.SpoutName, "text") +
 		toggleRowTip(i18n.T("settings.body.dmx.reemit"), "set:dmx-reemit", f.ReEmit, tipTopic("dmx-reemit")) +
-		field(i18n.T("settings.body.dmx.reemitTarget"), "set:dmx-emittarget", f.EmitTarget, "text")
+		field(i18n.T("settings.body.dmx.reemitTarget"), "set:dmx-emittarget", f.EmitTarget, "text") +
+		u.dmxLightCueBody()
+}
+
+// dmxLightCueBody renders the lighting-cue recorder controls + sACN/Hz settings, folded into the
+// DMX settings card. Record/stop/play/loop/publish emit lc-* acts (lightcue_actions.go); the
+// enable/Hz/sACN fields emit dmx-* sets so the dmx module restarts to apply them.
+func (u *UI) dmxLightCueBody() string {
+	lc := &u.svc.Cfg.Features.LightCue
+	d := &u.svc.Cfg.Features.DMX
+	var b strings.Builder
+	b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.lightcue.note")) + `</div>`)
+	b.WriteString(toggleRowTip(i18n.T("settings.body.lightcue.enable"), "set:dmx-lc-enable", lc.Enabled, ""))
+	b.WriteString(fpair(
+		field(i18n.T("settings.body.lightcue.hz"), "set:dmx-lc-hz", strconv.Itoa(lc.ResolvedHz()), "number"),
+		field(i18n.T("settings.body.lightcue.sacnUniverses"), "set:dmx-sacn-universes", intsToCSVWeb(d.SACNUniverses), "text")))
+	b.WriteString(toggleRowTip(i18n.T("settings.body.lightcue.sacn"), "set:dmx-sacn", d.SACN, ""))
+
+	if u.svc.DMX == nil {
+		return b.String()
+	}
+	st := u.svc.DMX.RecordStatus()
+	if st.Recording {
+		b.WriteString(itemRow(i18n.T("lightcue.status.recording"), fmt.Sprintf("%.0fs", st.Elapsed),
+			btn(i18n.T("lightcue.btn.stopSave"), "primary", "lc-stop", "")))
+	} else {
+		b.WriteString(itemRow(i18n.T("lightcue.label.recorder"), i18n.T("lightcue.label.recorderSub"),
+			btn(i18n.T("lightcue.btn.record"), "primary", "lc-record", "")))
+	}
+	takes := u.svc.DMX.Takes()
+	if len(takes) == 0 {
+		b.WriteString(emptyState(i18n.T("lightcue.label.noTakes")))
+		return b.String()
+	}
+	opts := make([][2]string, 0, len(takes))
+	for _, t := range takes {
+		opts = append(opts, [2]string{t, t})
+	}
+	sel := u.lc().sel()
+	if sel == "" {
+		sel = takes[0]
+	}
+	b.WriteString(selectBox(i18n.T("lightcue.label.take"), "lc-select", opts, sel))
+	playLbl, playAct := i18n.T("lightcue.btn.play"), "lc-play"
+	if st.Playing {
+		playLbl, playAct = i18n.T("lightcue.btn.stop"), "lc-stopplay"
+	}
+	loopVariant := "outline"
+	if st.Loop {
+		loopVariant = "primary"
+	}
+	b.WriteString(itemRow(i18n.T("lightcue.label.playback"), i18n.T("lightcue.label.playbackSub"),
+		btn(playLbl, "primary", playAct, ""),
+		btn(i18n.T("lightcue.btn.loop"), loopVariant, "lc-loop", ""),
+		btn(i18n.T("lightcue.btn.publish"), "outline", "lc-publish", "")))
+	if st.Playing {
+		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("lightcue.status.playing")+" "+st.Name) + `</div>`)
+	}
+	return b.String()
 }
 
 func (u *UI) dmxMidiBody() string {
@@ -1875,6 +1933,15 @@ func (u *UI) applySet(id, val string) {
 		f.DMX.ReEmit = b
 	case "dmx-emittarget":
 		f.DMX.EmitTarget = v
+	case "dmx-sacn":
+		f.DMX.SACN = b
+	case "dmx-sacn-universes":
+		f.DMX.SACNUniverses = csvToIntsWeb(v)
+	// Lighting-cue recorder (folded into the DMX plane; dmx- prefix restarts the dmx module)
+	case "dmx-lc-enable":
+		f.LightCue.Enabled = b
+	case "dmx-lc-hz":
+		toInt(&f.LightCue.Hz, 1, 44)
 	// DMX→MIDI
 	case "dmxmidi-device":
 		f.DMXMIDI.Device = v

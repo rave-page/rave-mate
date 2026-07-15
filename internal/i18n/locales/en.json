@@ -2,6 +2,40 @@
   "_meta": {
     "name": "English"
   },
+  "lightcue": {
+    "btn": {
+      "loop": "Loop",
+      "play": "Play",
+      "publish": "Publish to world",
+      "record": "Record",
+      "stop": "Stop",
+      "stopSave": "Stop & save"
+    },
+    "label": {
+      "noTakes": "No takes yet - record one to get started.",
+      "playback": "Playback",
+      "playbackSub": "Replay a take out over Art-Net + publish it to the world.",
+      "recorder": "Lighting-cue recorder",
+      "recorderSub": "Capture the live DMX show to a take.",
+      "take": "Take"
+    },
+    "status": {
+      "playing": "Playing",
+      "recording": "Recording"
+    },
+    "toast": {
+      "enableDmxFirst": "Enable the DMX plane first (Settings -> DMX / VRSL).",
+      "enableFirst": "Enable the lighting-cue recorder first.",
+      "loadFailed": "Could not load that take.",
+      "nothingCaptured": "Nothing captured (no DMX received).",
+      "publishFailed": "Publish failed: ",
+      "published": "Lighting-cue take published. ",
+      "recording": "Recording lighting cues...",
+      "saved": "Take saved: ",
+      "selectTake": "Select a take first.",
+      "worldSyncOff": "World Sync is off - enable it + link GitHub to publish."
+    }
+  },
   "actions": {
     "toast": {
       "automationDeleted": "Automation deleted",
@@ -2142,6 +2176,13 @@
         "renderGrid": "Render the VRSL video grid",
         "senderName": "Sender name",
         "universes": "Universes (csv)"
+      },
+      "lightcue": {
+        "enable": "Enable the DMX lighting-cue recorder",
+        "hz": "Record rate (Hz)",
+        "note": "Record the live DMX show to a compact take, then publish it to a gist the VRChat world replays on a synced clock. Needs the DMX plane running (its store is the capture source).",
+        "sacn": "Also receive sACN (E1.31)",
+        "sacnUniverses": "sACN universes (csv)"
       },
       "dmxmidi": {
         "maxRate": "Max messages/s",
