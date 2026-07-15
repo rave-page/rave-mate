@@ -99,8 +99,17 @@ func (d *learnedDecoder) handle(_ time.Time, m midi.Message, emit func(session.O
 				value = m.Value() > 0
 			case m.IsNoteOn():
 				value = true
-			default:
-				value = false // note-off
+			default: // note-off
+				// A momentary Play button sends on-press THEN off-release (a pulse); the
+				// release is NOT "stopped playing". Emitting isPlaying=false here dropped the
+				// deck from DeriveNowPlaying one frame after it appeared - the flash-then-empty
+				// bug. A button can't express sustained transport, so key-up is a no-op; the
+				// deck stays now-playing until a new load, staleness, or a real-time source
+				// (Serato Remote / feedback) says otherwise.
+				if meta.field == session.FieldIsPlaying {
+					continue
+				}
+				value = false
 			}
 		} else {
 			v := float64(m.Value()) / 127.0

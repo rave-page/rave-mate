@@ -64,9 +64,10 @@ func TestLearnedDecoderPlayNoteToDeck(t *testing.T) {
 	if v, _ := on[0].Fields[session.FieldIsPlaying].(bool); !v {
 		t.Fatalf("play-on isPlaying = %v, want true", on[0].Fields[session.FieldIsPlaying])
 	}
-	off := collect(d, midi.Message{Status: 0x80, Data1: 20, Data2: 0}) // note-off → playing false
-	if v, ok := off[0].Fields[session.FieldIsPlaying].(bool); !ok || v {
-		t.Fatalf("play-off isPlaying = %v, want false", off[0].Fields[session.FieldIsPlaying])
+	// Play button RELEASE (note-off) is a no-op: a momentary button can't express "stopped",
+	// and clearing isPlaying on key-up caused the flash-then-empty now-playing bug.
+	if off := collect(d, midi.Message{Status: 0x80, Data1: 20, Data2: 0}); len(off) != 0 {
+		t.Fatalf("play-off emitted %d obs, want 0 (release must not clear now-playing)", len(off))
 	}
 }
 

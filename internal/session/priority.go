@@ -9,10 +9,15 @@ const (
 	SourceMIDI       = "midi"        // aggregator source id (one source, both decoders) - liveness key
 	SourceMIDIDenon  = "midi.denon"  // Denon HC4500 stock map: decks A/B title+artist (field provenance)
 	SourceMIDICustom = "midi.custom" // our custom TSI: per-deck numeric/boolean state (field provenance)
-	SourceIcecast    = "icecast"     // broadcast metadata: master title/artist
-	SourceQML        = "qml"         // opt-in richer QML HTTP feed
-	SourceNowPlaying = "nowplaying"  // macOS Now Playing: master title/artist
-	SourceProDJLink  = "prodjlink"   // Pioneer CDJ/XDJ LAN broadcasts: live BPM/play state per deck
+	// SourceMIDIFeedback derives real-time deck play/pause from the ravemidi driver's LED
+	// feedback (DJ software flashes a paused deck's play LED, holds it solid while playing).
+	// The only real-time play-state for a MIDI-only Serato rig; outranks the momentary Play
+	// button (which can't express sustained transport) but sits below explicit protocol feeds.
+	SourceMIDIFeedback = "midi.feedback"
+	SourceIcecast      = "icecast"    // broadcast metadata: master title/artist
+	SourceQML          = "qml"        // opt-in richer QML HTTP feed
+	SourceNowPlaying   = "nowplaying" // macOS Now Playing: master title/artist
+	SourceProDJLink    = "prodjlink"  // Pioneer CDJ/XDJ LAN broadcasts: live BPM/play state per deck
 
 	// Serato - one source (liveness key); collection (database V2 + crates) + live now-playing
 	// from the active History session file.
@@ -54,7 +59,7 @@ var fieldPriority = map[string][]string{
 	FieldGenre:     {SourceNML, SourceQML, SourceTraktor, SourceSerato, SourceRekordboxDB},
 	FieldKey:       {SourceQML, SourceTraktor, SourceVDJNetCtl, SourceRekordboxMem, SourceSerato, SourceProDJLink, SourceRekordboxDB, SourceNML, SourceMIDICustom},
 	FieldBPM:       {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceVDJOS2L, SourceRekordboxMem, SourceProDJLink, SourceSerato, SourceMIDICustom, SourceRekordboxDB, SourceNML},
-	FieldIsPlaying: {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDICustom, SourceSerato, SourceSeratoLive},
+	FieldIsPlaying: {SourceQML, SourceTraktor, SourceSeratoRemote, SourceVDJNetCtl, SourceRekordboxMem, SourceProDJLink, SourceMIDIFeedback, SourceMIDICustom, SourceSerato, SourceSeratoLive},
 	FieldPath:      {SourceNML, SourceQML, SourceTraktor, SourceSeratoRemote, SourceSerato, SourceRekordboxDB},
 	// Fader: the MIDI-custom map (RavePage Volume Adjust CC) reports the true channel-fader
 	// POSITION; Traktor's HTTP feed only gives onAirLevel (post fader×crossfader, ~0.85 at

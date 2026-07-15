@@ -74,6 +74,7 @@ import (
 	"rave.page/mate/internal/session/sinks/filesink"
 	"rave.page/mate/internal/session/sinks/pngsink"
 	"rave.page/mate/internal/session/sinks/recorder"
+	"rave.page/mate/internal/session/sources/midifbsrc"
 	"rave.page/mate/internal/session/sources/nmlsrc"
 	"rave.page/mate/internal/session/sources/nowplayingsrc"
 	"rave.page/mate/internal/session/sources/prodjlinksrc"
@@ -350,6 +351,14 @@ func run(parent context.Context, serviceMode bool) error {
 			Interval: time.Duration(cfg.Features.Serato.LivePlaylistInterval) * time.Second,
 		})
 	}, func() bool { return cfg.Features.Serato.LivePlaylist })
+	// MIDI LED-feedback play/pause: the ravemidi driver captures DJ-software LED writes; a
+	// paused deck flashes its play LED, a playing one holds it solid. Real-time per-deck
+	// play-state for a MIDI-only Serato rig (History lags + never records pause, Serato Remote
+	// is discontinued). In-proc + bounded (a ~350ms read of the driver trace ring, no media);
+	// gated on the kernel driver being installed (it's the only source of the feedback stream).
+	agg.AddSourceFn(func() session.Source {
+		return midifbsrc.New(log)
+	}, func() bool { return midi.DriverInstalled() })
 	// VirtualDJ: collection (database.xml) + live now-playing via Network Control (full metadata),
 	// our OS2L server (BPM/beat), and/or the tracklist file. In-proc; enable-gate drives lifecycle.
 	agg.AddSourceFn(func() session.Source {
