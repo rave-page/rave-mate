@@ -56,22 +56,51 @@ func redactedValue(field string, m Mark) (any, bool) {
 	return nil, false
 }
 
-// redactFieldValues redacts one scope's merged view in place (Snapshot copies only).
-func redactFieldValues(fv map[string]FieldValue, fn RedactFunc) {
+// redactSnapshot builds the redacted view of a raw (unredacted) UnifiedState. Top-level maps are
+// fresh (a consumer adding/removing a scope can't corrupt the shared raw memo); per-scope field
+// maps are SHARED with raw when not redacted and COPIED when a mark applies (so raw stays pristine).
+// Channels are mixer-only (never redactable); decks + master carry track identity.
+func redactSnapshot(raw UnifiedState, fn RedactFunc) UnifiedState {
+	out := UnifiedState{
+		Decks:    make(map[string]map[string]FieldValue, len(raw.Decks)),
+		Channels: make(map[string]map[string]FieldValue, len(raw.Channels)),
+		Master:   raw.Master,
+	}
+	for id, fv := range raw.Channels {
+		out.Channels[id] = fv
+	}
+	if fn == nil {
+		for id, fv := range raw.Decks {
+			out.Decks[id] = fv
+		}
+		return out
+	}
+	for id, fv := range raw.Decks {
+		out.Decks[id] = redactScopeShared(fv, fn)
+	}
+	out.Master = redactScopeShared(raw.Master, fn)
+	return out
+}
+
+// redactScopeShared returns fv unchanged (shared) when its track isn't marked; otherwise a redacted
+// COPY (fv and its FieldValues are never mutated).
+func redactScopeShared(fv map[string]FieldValue, fn RedactFunc) map[string]FieldValue {
 	path, _ := pathOf(fv)
 	if path == "" {
-		return
+		return fv
 	}
 	mark, ok := fn(path)
 	if !ok {
-		return
+		return fv
 	}
+	out := make(map[string]FieldValue, len(fv))
 	for f, h := range fv {
 		if nv, hit := redactedValue(f, mark); hit {
 			h.Value = nv
-			fv[f] = h
 		}
+		out[f] = h
 	}
+	return out
 }
 
 func pathOf(fv map[string]FieldValue) (string, bool) {

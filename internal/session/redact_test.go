@@ -182,3 +182,62 @@ func TestBuildOverlayInheritsRedaction(t *testing.T) {
 		t.Fatalf("overlay album/path leaked: %q / %q", d.Album, d.Path)
 	}
 }
+
+// The Snapshot raw-state memo is keyed by stateVer, but redaction MUST be applied per read: the
+// idmark set mutates at runtime independent of Apply, so a redactor installed AFTER a track's last
+// Apply must still redact it (a cached-redacted memo would leak). No Apply happens between the two
+// Snapshots below - only the redactor changes.
+func TestSnapshotRedactsAfterLateRedactorInstall(t *testing.T) {
+	mr := NewMerger()
+	applyDeck(t, mr, promoFields) // stateVer moves once; no redactor yet
+	if got := StringField(mr.Snapshot().Decks["A"], FieldTitle); got != "Secret Anthem" {
+		t.Fatalf("pre-redactor title: %q", got)
+	}
+	mr.SetRedactor(markDir(Mark{})) // installed with NO further Apply (stateVer unchanged)
+	d := mr.Snapshot().Decks["A"]
+	if got := StringField(d, FieldTitle); got != RedactedTitle {
+		t.Fatalf("late redactor not applied (title leaked): %q", got)
+	}
+	if got := StringField(d, FieldArtist); got != "" {
+		t.Fatalf("late redactor not applied (artist leaked): %q", got)
+	}
+}
+
+// A redacted Snapshot read must not corrupt the cached raw state: a later unredacted read (still
+// same stateVer, reusing the memo) must return the pristine values.
+func TestSnapshotMemoRawStaysPristine(t *testing.T) {
+	mr := NewMerger()
+	mr.SetRedactor(markDir(Mark{}))
+	applyDeck(t, mr, promoFields)
+	if got := StringField(mr.Snapshot().Decks["A"], FieldTitle); got != RedactedTitle {
+		t.Fatalf("redacted read title: %q", got)
+	}
+	mr.SetRedactor(nil) // no Apply → same stateVer → memo reused
+	if got := StringField(mr.Snapshot().Decks["A"], FieldTitle); got != "Secret Anthem" {
+		t.Fatalf("raw memo corrupted by prior redacted read: %q", got)
+	}
+	if got := StringField(mr.Snapshot().Decks["A"], FieldPath); got == "" {
+		t.Fatal("raw path lost from memo")
+	}
+}
+
+// DeckFields is the single-scope accessor nmlsrc uses instead of a full Snapshot; it must match
+// Snapshot().Decks[deck] exactly, redaction included.
+func TestDeckFieldsMatchesSnapshot(t *testing.T) {
+	mr := NewMerger()
+	mr.SetRedactor(markDir(Mark{ShowArtist: true}))
+	applyDeck(t, mr, promoFields)
+	snapA := mr.Snapshot().Decks["A"]
+	dfA, ok := mr.DeckFields("A")
+	if !ok {
+		t.Fatal("DeckFields(A) not found")
+	}
+	for _, f := range []string{FieldTitle, FieldArtist, FieldAlbum, FieldLabel, FieldPath} {
+		if StringField(dfA, f) != StringField(snapA, f) {
+			t.Fatalf("field %s: DeckFields=%q Snapshot=%q", f, StringField(dfA, f), StringField(snapA, f))
+		}
+	}
+	if _, ok := mr.DeckFields("B"); ok {
+		t.Fatal("DeckFields(B) should be absent")
+	}
+}

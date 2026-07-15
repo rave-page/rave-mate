@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"rave.page/mate/internal/store"
 )
 
 // Step build (propose, no side effects) + commit (perform) per action. buildStep returns
@@ -140,7 +142,7 @@ func (m *Service) buildTrim(ctx context.Context, rc *runContext, act Action, hin
 	if minSil == 0 {
 		minSil = defaultMinSilenceSecs
 	}
-	lead, trail, dur, err := silenceProbe(ctx, m.w, rc.currentPath, thr, minSil)
+	lead, trail, dur, err := cachedSilenceProbe(ctx, m.st, m.w, rc.currentPath, thr, minSil)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -247,6 +249,54 @@ func silenceProbe(ctx context.Context, w Worker, path string, thresholdDb, minSi
 		return 0, 0, 0, fmt.Errorf("silence decode: %w", err)
 	}
 	return res.Leading, res.Trailing, res.Duration, nil
+}
+
+// silenceCache is the persisted silence-probe result. Params (td/ms) are folded in and
+// validated on read: the probe depends on file bytes + threshold + min-silence, so a params
+// mismatch is a cache miss (re-probe). Kept under KindSilence so store.RetagAnalyses re-keys it
+// across a self-inflicted tag rewrite (audio bytes, hence silence, unchanged).
+type silenceCache struct {
+	ThresholdDb float64 `json:"td"`
+	MinSilence  float64 `json:"ms"`
+	Leading     float64 `json:"l"`
+	Trailing    float64 `json:"t"`
+	Duration    float64 `json:"d"`
+}
+
+// cachedSilenceProbe fronts silenceProbe with the store's KindSilence cache, keyed by path +
+// file mtime (version slot); params are folded into the blob and validated on read. Nil *Store
+// or an unstattable path degrades to a direct probe (no-op cache). Normalizes 0-params to the
+// defaults so the wire call + key match whether the caller passed explicit defaults or 0
+// (the worker applies the same -50dB/2s defaults on 0).
+func cachedSilenceProbe(ctx context.Context, st *store.Store, w Worker, path string, thresholdDb, minSilence float64) (float64, float64, float64, error) {
+	if thresholdDb == 0 {
+		thresholdDb = defaultThresholdDb
+	}
+	if minSilence == 0 {
+		minSilence = defaultMinSilenceSecs
+	}
+	var mtime int64
+	if fi, err := os.Stat(path); err == nil {
+		mtime = fi.ModTime().Unix()
+	}
+	if mtime > 0 {
+		if raw, ok := st.GetAnalysis(store.KindSilence, path, mtime); ok {
+			var c silenceCache
+			if json.Unmarshal(raw, &c) == nil && c.ThresholdDb == thresholdDb && c.MinSilence == minSilence {
+				return c.Leading, c.Trailing, c.Duration, nil
+			}
+		}
+	}
+	lead, trail, dur, err := silenceProbe(ctx, w, path, thresholdDb, minSilence)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if mtime > 0 {
+		if blob, e := json.Marshal(silenceCache{thresholdDb, minSilence, lead, trail, dur}); e == nil {
+			st.PutAnalysis(store.KindSilence, path, mtime, blob)
+		}
+	}
+	return lead, trail, dur, nil
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

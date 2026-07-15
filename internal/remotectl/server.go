@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"rave.page/mate/internal/automation"
@@ -184,7 +185,43 @@ func RegisterLibrary(e *Endpoint, lib *libdb.DB) {
 	registerLibrary(e, lib, apply, revert)
 }
 
+// libTracksCache fronts lib.LoadTracks(srcID) with an in-proc snapshot keyed by (srcID,
+// TracksVersion): the full-table SELECT + per-row cue/beatgrid JSON unmarshal reruns only when a
+// tracks-row content mutation bumps TracksVersion. Keyed on TracksVersion (NOT LibraryVersion):
+// pure deletes (DeleteTracksByPaths / sync removals) and "set" reverts don't append change_log, so
+// LibraryVersion (MAX(seq)) would keep serving deleted/pre-revert rows. TracksVersion is an atomic
+// load; the scan it gates is the expensive part.
+//
+// The returned slice is shared READ-ONLY — the library.tracks handler only filterTracks (fresh
+// slice on non-empty query, else aliases), pageTracks (sub-slice window), and json-marshals it;
+// nothing mutates elements or the backing array, so no clone is taken. A reload swaps the field
+// for a NEW array, so a concurrent reader holding the prior snapshot stays valid.
+type libTracksCache struct {
+	lib    *libdb.DB
+	mu     sync.Mutex
+	srcID  int64
+	ver    int64
+	loaded bool
+	tracks []musiclib.Track
+}
+
+func (c *libTracksCache) load(srcID int64) ([]musiclib.Track, error) {
+	ver := c.lib.TracksVersion()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.loaded && c.srcID == srcID && c.ver == ver {
+		return c.tracks, nil
+	}
+	fresh, err := c.lib.LoadTracks(srcID)
+	if err != nil {
+		return nil, err
+	}
+	c.tracks, c.srcID, c.ver, c.loaded = fresh, srcID, ver, true
+	return fresh, nil
+}
+
 func registerLibrary(e *Endpoint, lib *libdb.DB, apply tagApplier, revert tagReverter) {
+	tracksCache := &libTracksCache{lib: lib}
 	e.Register(MethodLibInfo, func(_ context.Context, _ string, _ json.RawMessage) (any, error) {
 		src, ok, err := lib.FirstSource()
 		if err != nil {
@@ -206,7 +243,7 @@ func registerLibrary(e *Endpoint, lib *libdb.DB, apply tagApplier, revert tagRev
 		if !ok {
 			return TracksResult{Tracks: []musiclib.Track{}}, nil
 		}
-		all, err := lib.LoadTracks(src.ID)
+		all, err := tracksCache.load(src.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -726,8 +763,9 @@ func RegisterMotionSync(e *Endpoint, dir string) {
 	if e == nil || dir == "" {
 		return
 	}
+	hashes := newFileHashCache()
 	e.Register(MethodMotionList, func(context.Context, string, json.RawMessage) (any, error) {
-		return motionList(dir)
+		return hashes.motionList(dir)
 	})
 	e.Register(MethodMotionGet, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
 		var p MotionGetParams
@@ -747,7 +785,9 @@ func RegisterMotionSync(e *Endpoint, dir string) {
 }
 
 // motionList enumerates dir/*.json → name+size+sha256. Missing dir ⇒ empty (not an error).
-func motionList(dir string) (MotionListResult, error) {
+// sha256 is served from the file-hash cache (re-read+hash only when size/mtime move) so the
+// per-connect/per-Sync list RPC no longer re-hashes every recording.
+func (c *fileHashCache) motionList(dir string) (MotionListResult, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -760,15 +800,18 @@ func motionList(dir string) (MotionListResult, error) {
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, ent.Name()))
+		fi, err := ent.Info()
+		if err != nil {
+			continue // entry vanished between ReadDir and Info
+		}
+		sha, size, err := c.hash(filepath.Join(dir, ent.Name()), fi)
 		if err != nil {
 			continue // skip unreadable entries; a partial list still lets the peer sync the rest
 		}
-		sum := sha256.Sum256(b)
 		items = append(items, MotionMeta{
 			Name:   strings.TrimSuffix(ent.Name(), ".json"),
-			Size:   int64(len(b)),
-			SHA256: hex.EncodeToString(sum[:]),
+			Size:   size,
+			SHA256: sha,
 		})
 	}
 	return MotionListResult{Items: items}, nil
@@ -803,8 +846,9 @@ func RegisterVRMSync(e *Endpoint, dir string) {
 	if e == nil || dir == "" {
 		return
 	}
+	hashes := newFileHashCache()
 	e.Register(MethodVRMList, func(context.Context, string, json.RawMessage) (any, error) {
-		return vrmList(dir)
+		return hashes.vrmList(dir)
 	})
 	e.Register(MethodVRMGetChunk, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
 		var p VRMGetChunkParams
@@ -840,7 +884,9 @@ func readVRMChunk(dir string, p VRMGetChunkParams) (VRMGetChunkResult, error) {
 }
 
 // vrmList enumerates dir/*.vrm|glb|gltf → name(with ext)+size+sha256. Missing dir ⇒ empty (not error).
-func vrmList(dir string) (VRMListResult, error) {
+// sha256 is served from the file-hash cache (re-read+hash only when size/mtime move) so the
+// per-connect/per-Sync list RPC no longer re-hashes every (large) avatar model.
+func (c *fileHashCache) vrmList(dir string) (VRMListResult, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -853,14 +899,65 @@ func vrmList(dir string) (VRMListResult, error) {
 		if ent.IsDir() || !hasVRMExt(ent.Name()) {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, ent.Name()))
+		fi, err := ent.Info()
+		if err != nil {
+			continue // entry vanished between ReadDir and Info
+		}
+		sha, size, err := c.hash(filepath.Join(dir, ent.Name()), fi)
 		if err != nil {
 			continue // skip unreadable; a partial list still lets the peer sync the rest
 		}
-		sum := sha256.Sum256(b)
-		items = append(items, VRMMeta{Name: ent.Name(), Size: int64(len(b)), SHA256: hex.EncodeToString(sum[:])})
+		items = append(items, VRMMeta{Name: ent.Name(), Size: size, SHA256: sha})
 	}
 	return VRMListResult{Items: items}, nil
+}
+
+// vrmList (back-compat / test entry): fresh cache, no cross-call memo.
+func vrmList(dir string) (VRMListResult, error) { return newFileHashCache().vrmList(dir) }
+
+// fileHashCache memoizes sha256(file) keyed by (path,size,mtime). The peer avatar/motion listing
+// re-runs on every peer connect/disconnect + manual Sync; re-hashing tens-hundreds of MB per model
+// each time is the cost this removes. In-proc + session-scoped: RegisterVRMSync/RegisterMotionSync
+// carry no *store.Store (their signatures stay stable, tests unbroken), so it doesn't survive a
+// restart — acceptable, the churn it targets is within a session. Stale entries are replaced when
+// size/mtime move; a deleted file leaves one small path-keyed entry (bounded dir → negligible).
+type fileHashCache struct {
+	mu sync.Mutex
+	m  map[string]fileHashEntry
+}
+
+type fileHashEntry struct {
+	size  int64 // bytes hashed (== stat size for a fully-read regular file)
+	mtime int64 // unix seconds
+	sha   string
+}
+
+func newFileHashCache() *fileHashCache { return &fileHashCache{m: map[string]fileHashEntry{}} }
+
+// hash returns sha256(path) hex + the hashed byte count, reusing the cached value when fi's
+// size+mtime match the stored key. fi is the caller's single stat (ent.Info()) — TOCTOU-safe:
+// one FileInfo gates both the cache key and, on a miss, the read. (size,sha) are always a
+// consistent pair from the same read; a short read self-heals (stored size < next stat size ⇒
+// re-hash).
+func (c *fileHashCache) hash(path string, fi os.FileInfo) (sha string, size int64, err error) {
+	fsize, mtime := fi.Size(), fi.ModTime().Unix()
+	c.mu.Lock()
+	if e, ok := c.m[path]; ok && e.size == fsize && e.mtime == mtime {
+		c.mu.Unlock()
+		return e.sha, e.size, nil
+	}
+	c.mu.Unlock()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, err
+	}
+	sum := sha256.Sum256(b)
+	sha = hex.EncodeToString(sum[:])
+	size = int64(len(b))
+	c.mu.Lock()
+	c.m[path] = fileHashEntry{size: size, mtime: mtime, sha: sha}
+	c.mu.Unlock()
+	return sha, size, nil
 }
 
 func hasVRMExt(name string) bool {

@@ -48,9 +48,14 @@ type UI struct {
 
 	rui *ruiHub // remote Library sessions over the peer link (host + mirror mux); nil without peers
 
-	probes   settingsProbes  // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
-	gfProbe  gridfixProbe    // beatgrid-engine env probe (spawns Python; own long TTL)
-	restarts settingRestarts // debounced auto module restarts on settings change (settings_apply.go)
+	probes     settingsProbes   // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
+	gfProbe    gridfixProbe     // beatgrid-engine env probe (spawns Python; own long TTL) + fine-tune checkpoints
+	midiProbe  midiCtlProbe     // MIDI-tab driver ioctl + winmm port enum - kept off render goroutine + tick
+	restarts   settingRestarts  // debounced auto module restarts on settings change (settings_apply.go)
+	capFS      capExistCache    // publish-tab capture on-disk existence (mpEnsureSet; off-thread stat sweep)
+	spoutProbe spoutProbeCache  // Overlays Spout-DLL presence probe (os.Stat) - off the render goroutine
+	ovlStyle   ovlStyleCache    // overlay-style.json fader flag (mtime-watched) - off the render goroutine
+	wuCache    worldsUnityCache // Worlds-tab Unity project inspects (fs stat sweep) - off the render goroutine
 
 	gf      gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
 	tf      tfState      // tag-fixer scan/apply state (library_tagfix.go)

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/debuglog"
@@ -39,6 +40,25 @@ type Service struct {
 	changeMu  sync.Mutex
 	changeSub map[int]func() // CRUD-change subscribers (UI live-refresh)
 	changeSeq int
+
+	// Change-aware caches for the ~1Hz webui Automations tab. List/ListSchedules/Runs each
+	// full-scan bbolt (ForEach-copy + unmarshal-all; Runs also sorts); cache the built, sorted
+	// result and invalidate on any write to the matching bucket. Guarded by cacheMu. Callers get a
+	// SHALLOW copy of the slice: safe to reorder/append, but a returned element's nested slices
+	// (Automation.Actions / Match.Extensions / Run.Steps) still alias the master - do NOT mutate a
+	// returned element or its inner slices (all current consumers are read-only or build fresh copies).
+	cacheMu    sync.Mutex
+	autosCache []Automation
+	autosOK    bool
+	schedCache []Schedule
+	schedOK    bool
+	runsCache  []Run // full history, sorted newest-first; Runs(limit) returns a limited copy
+	runsOK     bool
+
+	// version bumps on every autos/scheds/runs cache invalidation (i.e. any change the webui
+	// Automations tab can render). The ~1Hz webui tick reads it to skip the full autoBody
+	// rebuild+patch when nothing changed. Atomic: read lock-free off the UI tick.
+	version atomic.Uint64
 
 	mu     sync.Mutex
 	seq    int64
@@ -112,7 +132,7 @@ func (m *Service) ProbeSilence(ctx context.Context, path string, thresholdDb, mi
 	if minSilence == 0 {
 		minSilence = defaultMinSilenceSecs
 	}
-	lead, trail, dur, err := silenceProbe(ctx, m.w, path, thresholdDb, minSilence)
+	lead, trail, dur, err := cachedSilenceProbe(ctx, m.st, m.w, path, thresholdDb, minSilence)
 	if err != nil {
 		return SilenceResult{}, err
 	}
@@ -222,17 +242,46 @@ func (m *Service) nextID(prefix string) string {
 // ── automations CRUD ─────────────────────────────────────────────────────────
 
 func (m *Service) List() []Automation {
-	raws, _ := m.st.ListJSON(store.BucketAutomations)
-	out := make([]Automation, 0, len(raws))
-	for _, raw := range raws {
-		var a Automation
-		if json.Unmarshal(raw, &a) == nil {
-			out = append(out, a)
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if !m.autosOK {
+		raws, _ := m.st.ListJSON(store.BucketAutomations)
+		out := make([]Automation, 0, len(raws))
+		for _, raw := range raws {
+			var a Automation
+			if json.Unmarshal(raw, &a) == nil {
+				out = append(out, a)
+			}
 		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+		m.autosCache, m.autosOK = out, true
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
-	return out
+	return append([]Automation(nil), m.autosCache...) // defensive copy; master stays immutable
 }
+
+// invalidate* clear a cache AND bump version (bump after the store write in every caller, so a
+// tick observing the new version also observes the invalidated cache → rereads fresh data).
+func (m *Service) invalidateAutos() {
+	m.cacheMu.Lock()
+	m.autosOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+func (m *Service) invalidateScheds() {
+	m.cacheMu.Lock()
+	m.schedOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+func (m *Service) invalidateRuns() {
+	m.cacheMu.Lock()
+	m.runsOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+
+// Version is a cheap monotonic counter of automations/schedules/runs changes (webui tick gate).
+func (m *Service) Version() uint64 { return m.version.Load() }
 
 func (m *Service) Get(id string) (Automation, bool) {
 	var a Automation
@@ -248,6 +297,7 @@ func (m *Service) Save(a Automation) (Automation, error) {
 	if err := m.st.PutJSON(store.BucketAutomations, a.ID, a); err != nil {
 		return a, err
 	}
+	m.invalidateAutos()
 	m.rearm()
 	return a, nil
 }
@@ -256,6 +306,7 @@ func (m *Service) Delete(id string) error {
 	if err := m.st.Delete(store.BucketAutomations, id); err != nil {
 		return err
 	}
+	m.invalidateAutos()
 	m.rearm()
 	return nil
 }
@@ -263,16 +314,21 @@ func (m *Service) Delete(id string) error {
 // ── schedules CRUD ───────────────────────────────────────────────────────────
 
 func (m *Service) ListSchedules() []Schedule {
-	raws, _ := m.st.ListJSON(store.BucketSchedules)
-	out := make([]Schedule, 0, len(raws))
-	for _, raw := range raws {
-		var s Schedule
-		if json.Unmarshal(raw, &s) == nil {
-			out = append(out, s)
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if !m.schedOK {
+		raws, _ := m.st.ListJSON(store.BucketSchedules)
+		out := make([]Schedule, 0, len(raws))
+		for _, raw := range raws {
+			var s Schedule
+			if json.Unmarshal(raw, &s) == nil {
+				out = append(out, s)
+			}
 		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+		m.schedCache, m.schedOK = out, true
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
-	return out
+	return append([]Schedule(nil), m.schedCache...) // defensive copy; master stays immutable
 }
 
 func (m *Service) SaveSchedule(s Schedule) (Schedule, error) {
@@ -282,6 +338,7 @@ func (m *Service) SaveSchedule(s Schedule) (Schedule, error) {
 	if err := m.st.PutJSON(store.BucketSchedules, s.ID, s); err != nil {
 		return s, err
 	}
+	m.invalidateScheds()
 	m.rearm()
 	return s, nil
 }
@@ -290,26 +347,37 @@ func (m *Service) DeleteSchedule(id string) error {
 	if err := m.st.Delete(store.BucketSchedules, id); err != nil {
 		return err
 	}
+	m.invalidateScheds()
 	m.rearm()
 	return nil
 }
 
 // ── runs ─────────────────────────────────────────────────────────────────────
 
+// Runs returns recent runs newest-first (limit<=0 = all). NOTE: run keys are
+// "<automationID>-<sha256hex>" (chainID) - NOT time-sortable - so a reverse bbolt cursor can't
+// cheaply return the newest N; instead the full (capped ≤500 by pruneRuns) sorted history is
+// cached and invalidated on every run-record/prune, bounding the 1Hz render path to a copy.
 func (m *Service) Runs(limit int) []Run {
-	raws, _ := m.st.ListJSON(store.BucketRuns)
-	out := make([]Run, 0, len(raws))
-	for _, raw := range raws {
-		var r Run
-		if json.Unmarshal(raw, &r) == nil {
-			out = append(out, r)
+	m.cacheMu.Lock()
+	defer m.cacheMu.Unlock()
+	if !m.runsOK {
+		raws, _ := m.st.ListJSON(store.BucketRuns)
+		out := make([]Run, 0, len(raws))
+		for _, raw := range raws {
+			var r Run
+			if json.Unmarshal(raw, &r) == nil {
+				out = append(out, r)
+			}
 		}
+		sort.Slice(out, func(i, j int) bool { return out[i].StartedAt > out[j].StartedAt }) // newest first
+		m.runsCache, m.runsOK = out, true
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt > out[j].StartedAt }) // newest first
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	n := len(m.runsCache)
+	if limit > 0 && limit < n {
+		n = limit
 	}
-	return out
+	return append([]Run(nil), m.runsCache[:n]...) // defensive copy; master stays immutable
 }
 
 // RunManual runs an automation over one file on demand.
@@ -323,12 +391,12 @@ func (m *Service) RunManual(ctx context.Context, id, filePath string) (Run, erro
 
 // execute runs the chain, persists the Run + the automation's last-run summary.
 func (m *Service) execute(ctx context.Context, a Automation, filePath, trigger string) Run {
-	run := runChain(ctx, m.w, m.presets, m.log, a, filePath, trigger)
+	run := runChain(ctx, m.st, m.w, m.presets, m.log, a, filePath, trigger)
 	if run.ID == "" {
 		run.ID = m.nextID("run")
 	}
 	_ = m.st.PutJSON(store.BucketRuns, run.ID, run)
-	m.pruneRuns()
+	m.pruneRuns() // owns the runs-cache invalidation (fresh read + post-delete)
 
 	a.LastRunAt = run.FinishedAt
 	a.LastStatus = run.Status
@@ -339,19 +407,24 @@ func (m *Service) execute(ctx context.Context, a Automation, filePath, trigger s
 		}
 	}
 	_ = m.st.PutJSON(store.BucketAutomations, a.ID, a)
+	m.invalidateAutos() // last-run summary changed
 	return run
 }
 
-// pruneRuns caps run history (keep the newest 500).
+// pruneRuns caps run history (keep the newest 500). Sole owner of the runs-cache invalidation
+// on a run-record: the leading invalidate forces m.Runs(0) to reflect the just-inserted run
+// (a webui tick may have re-warmed a pre-insert cache); the trailing one covers the deletes.
 func (m *Service) pruneRuns() {
 	const keep = 500
+	m.invalidateRuns()
 	all := m.Runs(0)
 	if len(all) <= keep {
-		return
+		return // rebuilt cache already reflects the insert; no deletes → leave it valid
 	}
 	for _, r := range all[keep:] {
 		_ = m.st.Delete(store.BucketRuns, r.ID)
 	}
+	m.invalidateRuns()
 }
 
 // ── triggers ─────────────────────────────────────────────────────────────────
@@ -376,6 +449,7 @@ func (m *Service) onSchedule(scheduleID string) {
 	}
 	s.LastFiredAt = time.Now().UTC().Format(time.RFC3339)
 	_ = m.st.PutJSON(store.BucketSchedules, s.ID, s)
+	m.invalidateScheds() // LastFiredAt changed
 
 	a, ok := m.Get(s.AutomationID)
 	if !ok {

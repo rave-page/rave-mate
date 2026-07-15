@@ -213,7 +213,11 @@ func (d *DB) RevertChange(id int64) error {
 		_ = tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	d.bumpTracks() // a "set" revert wrote back a tracks row; reverts don't append change_log
+	return nil
 }
 
 // revertColumn maps a change_log field to its tracks column (allowlist - no injection).

@@ -23,6 +23,7 @@ import (
 	"rave.page/mate/internal/rekordboxdb"
 	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/seratolib"
+	"rave.page/mate/internal/store"
 	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/tagwrite"
 	"rave.page/mate/internal/transcode"
@@ -560,7 +561,7 @@ func (u *UI) libProbe(path string) {
 	u.bg(func() {
 		ctx, cancel := u.actx()
 		defer cancel()
-		raw, err := u.svc.Workers.Run(ctx, "probe", "probe.streams", map[string]any{"path": path})
+		raw, err := u.probeStreams(ctx, path)
 		var si transcode.SourceInfo
 		if err == nil {
 			si, _ = transcode.ParseProbe(raw)
@@ -584,7 +585,7 @@ func (u *UI) libProbeToast(path string) {
 	u.bg(func() {
 		ctx, cancel := u.actx()
 		defer cancel()
-		raw, err := u.svc.Workers.Run(ctx, "probe", "probe.streams", map[string]any{"path": path})
+		raw, err := u.probeStreams(ctx, path)
 		if err != nil {
 			u.toast(i18n.T("library.toast.probePrefix") + err.Error())
 			return
@@ -2191,11 +2192,6 @@ func (u *UI) libBatchAnalyze(kind string) {
 		return
 	}
 	labels := map[string]string{"peaks": i18n.T("library.batch.waveforms"), "tags": i18n.T("library.batch.tags"), "fingerprint": i18n.T("library.batch.fingerprint")}
-	methods := map[string]string{"peaks": "probe.peaks", "tags": "probe.tags", "fingerprint": "fingerprint.compute"}
-	wtype := "probe"
-	if kind == "fingerprint" {
-		wtype = "fingerprint"
-	}
 	jid := fmt.Sprintf("libbatch-%d", time.Now().UnixNano())
 	j := &libJob{id: jid, name: i18n.Tn("library.label.filesCount", len(files)), preset: labels[kind], status: "running"}
 	s.jobsMu.Lock()
@@ -2207,21 +2203,60 @@ func (u *UI) libBatchAnalyze(kind string) {
 	u.patchMain()
 	u.bg(func() {
 		for i, p := range files {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			params := map[string]any{"path": p}
-			if kind == "peaks" {
-				params["buckets"] = 8192
-			}
-			if _, err := u.svc.Workers.RunBackground(ctx, wtype, methods[kind], params); err != nil {
+			if err := u.libAnalyzeOne(kind, p); err != nil {
 				u.logErr("batch "+kind, err)
 			}
-			cancel()
 			frac := float64(i+1) / float64(len(files)) * 100
 			u.libJobUpd(j, func() { j.pct = frac })
 		}
 		u.libJobUpd(j, func() { j.status = "done"; j.pct = 100 })
 		u.toast(i18n.T("library.toast.batchDone", i18n.A{"kind": labels[kind]}))
 	})
+}
+
+// libAnalyzeOne runs one batch analysis op for one file, skipping when already cached (mtime-keyed)
+// and persisting the result so a re-run doesn't re-decode - the loop previously discarded every
+// worker result and never consulted the store. Mirrors the Fyne analyzeOne; peaks route through
+// mpResolvePeaks so the batch pre-warms exactly the store-cached mpPeakBlob format the player reads
+// (the old buckets=8192 raw output no webui surface consumed).
+func (u *UI) libAnalyzeOne(kind, path string) error {
+	mtime := fileMtime(path)
+	switch kind {
+	case "peaks":
+		_, _, _, err := u.mpResolvePeaks(path)
+		return err
+	case "tags":
+		if u.svc.Store != nil {
+			if _, ok := u.svc.Store.GetAnalysis(store.KindTags, path, mtime); ok {
+				return nil
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		raw, err := u.svc.Workers.RunBackground(ctx, "probe", "probe.tags", map[string]any{"path": path})
+		if err != nil {
+			return err
+		}
+		if u.svc.Store != nil {
+			u.svc.Store.PutAnalysis(store.KindTags, path, mtime, raw)
+		}
+	case "fingerprint":
+		if u.svc.Store != nil {
+			if _, ok := u.svc.Store.GetAnalysis(store.KindFingerprint, path, mtime); ok {
+				return nil
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		raw, err := u.svc.Workers.RunBackground(ctx, "fingerprint", "fingerprint.compute", map[string]any{"path": path})
+		if err != nil {
+			return err
+		}
+		if u.svc.Store != nil {
+			u.svc.Store.PutAnalysis(store.KindFingerprint, path, mtime, raw)
+		}
+	}
+	return nil
 }
 
 func (u *UI) libBatchTranscodeModal() {

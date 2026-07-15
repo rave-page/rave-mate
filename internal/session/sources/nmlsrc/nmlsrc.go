@@ -87,8 +87,11 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 
 // enrich looks up the deck's current title/artist and emits collection metadata if found.
 func (s *Source) enrich(deck string, last map[string]string, emit func(session.Observation)) {
-	snap := s.merger.Snapshot()
-	fields := snap.Decks[deck]
+	// Single-deck read (not a full-state Snapshot copy): only this deck's title/artist is needed.
+	fields, ok := s.merger.DeckFields(deck)
+	if !ok {
+		return
+	}
 	title := session.StringField(fields, session.FieldTitle)
 	artist := session.StringField(fields, session.FieldArtist)
 	if title == "" || artist == "" {

@@ -245,9 +245,10 @@ func (m *Service) persistRun(a Automation, run Run, runErr string) {
 		run.ID = m.nextID("run")
 	}
 	_ = m.st.PutJSON(store.BucketRuns, run.ID, run)
-	m.pruneRuns()
+	m.pruneRuns() // owns the runs-cache invalidation (fresh read + post-delete)
 	a.LastRunAt = run.FinishedAt
 	a.LastStatus = run.Status
 	a.LastError = runErr
 	_ = m.st.PutJSON(store.BucketAutomations, a.ID, a)
+	m.invalidateAutos() // last-run summary changed
 }

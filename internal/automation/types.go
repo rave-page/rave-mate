@@ -141,6 +141,7 @@ type Manager interface {
 	ListSchedules() []Schedule
 	SaveSchedule(s Schedule) (Schedule, error)
 	DeleteSchedule(id string) error
+	Version() uint64 // monotonic; bumps on any automations/schedules/runs change (webui tick gate)
 
 	// Interactive run engine (the studio "Automations" surface, parity w/ Electron).
 	OnEvent(fn func(RunEvent)) func()                           // subscribe to run events; returns unsub

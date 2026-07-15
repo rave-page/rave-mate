@@ -20,9 +20,19 @@ type held struct {
 type Merger struct {
 	clock func() time.Time // injectable for tests
 
-	mu     sync.RWMutex
-	fields map[string]map[string]held // scopeKey → field → winner
-	redact RedactFunc                 // ID-mark redaction at the output boundaries (redact.go); nil = off
+	mu       sync.RWMutex
+	fields   map[string]map[string]held // scopeKey → field → winner
+	redact   RedactFunc                 // ID-mark redaction at the output boundaries (redact.go); nil = off
+	stateVer uint64                     // bumped (under mu) whenever m.fields changes; keys the Snapshot cache
+
+	// Snapshot raw-state memo: the flattened UnifiedState (UNREDACTED) built from m.fields,
+	// reused while stateVer is unchanged so the per-tick rebuild (all scopes deep-copied) runs
+	// once per real change, not once per consumer/tick. Redaction is NOT cached - it's applied
+	// fresh on every Snapshot read (the ID-mark set mutates at runtime independent of Apply, so a
+	// cached redacted view could leak). cacheMu guards these; it's a leaf lock (taken under mu.RLock).
+	cacheMu   sync.Mutex
+	cachedRaw *UnifiedState
+	cachedVer uint64
 
 	// cumulative merge counters (Stats - perfmon probe)
 	nApply, nFieldsIn, nFieldsWon, nEmit uint64
@@ -74,6 +84,7 @@ func (m *Merger) Apply(o Observation) {
 	m.nFieldsWon += uint64(len(accepted))
 	if len(accepted) > 0 || o.Loaded {
 		m.nEmit++
+		m.stateVer++ // m.fields changed (a field won, or a load cleared/reset the scope) - invalidate the Snapshot memo
 	}
 	m.mu.Unlock()
 
@@ -114,11 +125,32 @@ func (m *Merger) Stats() string {
 		applies, fin, fwon, emits, scopes, subs)
 }
 
-// Snapshot returns the merged state across all scopes (deep copy; safe to retain).
-// ID-marked tracks are redacted in the copy - the merger's own state stays raw.
+// Snapshot returns the merged state across all scopes. ID-marked tracks are redacted - the
+// merger's own state stays raw. The unredacted flattening is memoized on stateVer (rebuilt only
+// when a field actually changed); redaction is re-applied every call so a live idmark edit takes
+// effect immediately. The returned struct has fresh top-level maps but SHARES the per-scope field
+// maps of the raw memo for scopes that aren't redacted - consumers are read-only (audited), so
+// this is safe; do not mutate a returned scope's field map or its FieldValues.
 func (m *Merger) Snapshot() UnifiedState {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	ver := m.stateVer
+	m.cacheMu.Lock()
+	raw := m.cachedRaw
+	if raw == nil || m.cachedVer != ver {
+		built := m.buildRawLocked()
+		raw = &built
+		m.cachedRaw = raw
+		m.cachedVer = ver
+	}
+	m.cacheMu.Unlock()
+	fn := m.redact
+	m.mu.RUnlock()
+	return redactSnapshot(*raw, fn)
+}
+
+// buildRawLocked flattens m.fields into an UNREDACTED UnifiedState (fresh maps, safe to cache).
+// Caller holds m.mu (at least RLock).
+func (m *Merger) buildRawLocked() UnifiedState {
 	st := UnifiedState{
 		Decks:    map[string]map[string]FieldValue{},
 		Channels: map[string]map[string]FieldValue{},
@@ -130,9 +162,6 @@ func (m *Merger) Snapshot() UnifiedState {
 		for f, h := range scope {
 			fv[f] = FieldValue{Value: h.value, Source: h.source, TS: h.ts, Confidence: h.conf}
 		}
-		if m.redact != nil && redactableScope(kind) {
-			redactFieldValues(fv, m.redact)
-		}
 		switch kind {
 		case ScopeDeck:
 			st.Decks[id] = fv
@@ -143,6 +172,27 @@ func (m *Merger) Snapshot() UnifiedState {
 		}
 	}
 	return st
+}
+
+// DeckFields returns one deck's merged fields (redacted, like Snapshot().Decks[deck]) with a
+// single-scope copy - avoids the full-state deep copy when a consumer only needs one deck.
+// ok=false when the deck has no state. Read-only; safe to retain.
+func (m *Merger) DeckFields(deck string) (map[string]FieldValue, bool) {
+	key := Scope{Kind: ScopeDeck, ID: deck}.Key()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	scope, ok := m.fields[key]
+	if !ok {
+		return nil, false
+	}
+	fv := make(map[string]FieldValue, len(scope))
+	for f, h := range scope {
+		fv[f] = FieldValue{Value: h.value, Source: h.source, TS: h.ts, Confidence: h.conf}
+	}
+	if m.redact != nil { // ScopeDeck is redactable
+		fv = redactScopeShared(fv, m.redact)
+	}
+	return fv, true
 }
 
 // Subscribe returns a channel of future merged Updates + an unsubscribe func. Buffered;

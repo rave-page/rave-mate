@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,13 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/store"
 	"rave.page/mate/internal/transcode"
 )
 
 // runChain executes a's action chain over filePath, threading a "current file" through the
 // steps. Output is always a NEW file per step; inputs are never overwritten. Returns a Run
 // recording per-step outcomes. Stops at the first failing step (status: error|partial).
-func runChain(ctx context.Context, w Worker, presets PresetResolver, log Logger, a Automation, filePath, trigger string) Run {
+func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetResolver, log Logger, a Automation, filePath, trigger string) Run {
 	started := time.Now().UTC().Format(time.RFC3339Nano)
 	run := Run{
 		ID:           chainID(a.ID, filePath, started),
@@ -42,7 +42,7 @@ func runChain(ctx context.Context, w Worker, presets PresetResolver, log Logger,
 			break
 		}
 		step := StepResult{Type: act.Type}
-		next, err := runStep(ctx, w, presets, act, current)
+		next, err := runStep(ctx, st, w, presets, act, current)
 		if err != nil {
 			step.Error = err.Error()
 			run.Steps = append(run.Steps, step)
@@ -78,13 +78,13 @@ func runChain(ctx context.Context, w Worker, presets PresetResolver, log Logger,
 
 // runStep runs one action over current and returns the new "current file" (== current for
 // copy, which doesn't relocate the working file).
-func runStep(ctx context.Context, w Worker, presets PresetResolver, act Action, current string) (string, error) {
+func runStep(ctx context.Context, st *store.Store, w Worker, presets PresetResolver, act Action, current string) (string, error) {
 	switch act.Type {
 	case ActionTranscode:
 		return doTranscode(ctx, w, presets, act, current, 0)
 
 	case ActionTrimSilence:
-		lead, err := detectLeadingSilence(ctx, w, current)
+		lead, err := detectLeadingSilence(ctx, st, w, current)
 		if err != nil {
 			return "", err
 		}
@@ -156,20 +156,15 @@ func doTranscode(ctx context.Context, w Worker, presets PresetResolver, act Acti
 	return out, nil
 }
 
-// detectLeadingSilence runs transcode.silence and returns leadingSeconds.
-func detectLeadingSilence(ctx context.Context, w Worker, current string) (float64, error) {
-	raw, err := w.RunStream(ctx, "transcode", "transcode.silence", map[string]any{"path": current}, nil)
+// detectLeadingSilence runs the (cached) transcode.silence probe and returns leadingSeconds.
+// Uses default params (0 → worker's -50dB/2s, identical wire call to the pre-cache behavior),
+// sharing the KindSilence cache with ProbeSilence/buildTrim on default-param probes.
+func detectLeadingSilence(ctx context.Context, st *store.Store, w Worker, current string) (float64, error) {
+	lead, _, _, err := cachedSilenceProbe(ctx, st, w, current, 0, 0)
 	if err != nil {
-		return 0, fmt.Errorf("silence detect: %w", err)
+		return 0, err
 	}
-	var res struct {
-		LeadingSeconds  float64 `json:"leadingSeconds"`
-		TrailingSeconds float64 `json:"trailingSeconds"`
-	}
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, fmt.Errorf("silence decode: %w", err)
-	}
-	return res.LeadingSeconds, nil
+	return lead, nil
 }
 
 // transcodeOut builds the new output path: <outDir>/<base>-<presetId><ext>. outDir defaults

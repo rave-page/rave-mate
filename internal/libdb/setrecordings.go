@@ -45,6 +45,9 @@ func (d *DB) SaveSetRecording(s SetRecording) error {
 		  mount=excluded.mount, kind=excluded.kind, ended_at=excluded.ended_at, bytes=excluded.bytes`,
 		s.ID, s.RecordingID, s.Path, s.Format, s.Mount, s.Kind,
 		s.StartedAt.UTC().Format(time.RFC3339), ended, s.Bytes)
+	if err == nil {
+		d.bumpSetRec()
+	}
 	return err
 }
 
@@ -83,6 +86,9 @@ func (d *DB) RelinkSetRecording(id, recordingID string) error {
 		return nil
 	}
 	_, err := d.db.Exec(`UPDATE set_recordings SET recording_id=? WHERE id=?`, recordingID, id)
+	if err == nil {
+		d.bumpSetRec()
+	}
 	return err
 }
 
@@ -93,6 +99,9 @@ func (d *DB) DeleteSetRecording(id string) error {
 		return nil
 	}
 	_, err := d.db.Exec(`DELETE FROM set_recordings WHERE id=?`, id)
+	if err == nil {
+		d.bumpSetRec()
+	}
 	return err
 }
 

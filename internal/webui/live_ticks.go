@@ -79,9 +79,26 @@ func init() {
 			jsQuote(u.logLinesHTML(logTailN)) + ";if(ab)lv.scrollTop=lv.scrollHeight;}")
 	})
 
-	// Automations + App Groups keep their v1 body refresh (not part of the parity fan-out);
-	// tickPatch skips the eval when the body is unchanged.
+	// Automations + App Groups keep their v1 body refresh (not part of the parity fan-out).
+	// Version-gate the automations rebuild: skip the whole autoBody build+patch unless the
+	// service's autos/scheds/runs actually changed (mirrors the logs tick's seq guard - tickPatch
+	// alone still rebuilt the full HTML every tick). patchMain's frags wipe forces one repaint
+	// after a DOM replace, so a re-entered tab repaints once then idles.
 	onLiveTick("automations", func(u *UI) {
+		if u.svc.Automations == nil {
+			return // unavailable state has no #auto-body; nothing to refresh (and autoBody would nil-deref)
+		}
+		ver := strconv.FormatUint(u.svc.Automations.Version(), 10)
+		u.fragMu.Lock()
+		if u.frags["auto-ver"] == ver {
+			u.fragMu.Unlock()
+			return
+		}
+		if u.frags == nil {
+			u.frags = map[string]string{}
+		}
+		u.frags["auto-ver"] = ver
+		u.fragMu.Unlock()
 		var js strings.Builder
 		u.tickPatch(&js, "auto-body", u.autoBody())
 		u.flushTick(&js)

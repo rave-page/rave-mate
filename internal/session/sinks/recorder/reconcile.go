@@ -95,6 +95,7 @@ func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Sessi
 	if err := r.st.PutJSON(store.BucketRecordings, rec.ID, &rec); err != nil {
 		return nil, fmt.Errorf("persist reconciled recording: %w", err)
 	}
+	r.clearPendingReconcile(rec.ID) // reconciled (idempotent stamp) → drop from the auto-reconcile work-set
 	r.log.Info(source, "reconciled with Traktor history", map[string]any{
 		"id": rec.ID, "session": m.SessionName, "tracks": len(tracks), "overlap": m.Overlap.String(),
 	})
@@ -179,7 +180,8 @@ func (a *AutoReconciler) Start(ctx context.Context) {
 	sweep := time.NewTicker(reconcileSweep)
 	defer sweep.Stop()
 
-	a.sweep() // catch anything already pending at launch
+	a.rec.seedPendingReconcile() // startup catch-up: finished-unreconciled sets from a prior run
+	a.sweep()                    // catch anything already pending at launch
 	for {
 		select {
 		case <-ctx.Done():
@@ -195,39 +197,33 @@ func (a *AutoReconciler) Start(ctx context.Context) {
 }
 
 // sweep reconciles every finished, not-yet-matched recording for which a history session now
-// overlaps. A "no overlapping session" error is expected (Traktor still open) → left for a
-// later sweep. No pending recordings → no I/O; otherwise sessions load once through the
-// mtime/size cache (only new/changed NMLs re-parse).
+// overlaps. A "no overlapping session" error is expected (Traktor still open) → the id stays in the
+// work-set for a later sweep. Empty work-set → zero I/O (no List, no ReadDir); otherwise sessions
+// load once through the mtime/size cache (only new/changed NMLs re-parse).
 func (a *AutoReconciler) sweep() {
-	dir := a.historyDir()
-	if dir == "" {
-		return
-	}
-	var pending []Recording
-	for _, rec := range a.rec.List() {
-		if rec.EndedAt.IsZero() || !rec.ReconciledAt.IsZero() {
-			continue
-		}
-		pending = append(pending, rec)
-	}
+	ids := a.rec.pendingReconcileIDs()
 	a.statMu.Lock()
 	a.sweeps++
-	a.lastPending = len(pending)
+	a.lastPending = len(ids)
 	a.statMu.Unlock()
-	if len(pending) == 0 {
+	if len(ids) == 0 {
+		return
+	}
+	dir := a.historyDir()
+	if dir == "" {
 		return
 	}
 	sessions, err := a.cache.Load(dir)
 	if err != nil {
 		return
 	}
-	for _, rec := range pending {
-		updated, err := a.rec.ReconcileWithSessions(rec.ID, sessions, a.resolve)
+	for _, id := range ids {
+		updated, err := a.rec.ReconcileWithSessions(id, sessions, a.resolve)
 		if err != nil {
-			continue
+			continue // "no overlapping session" (Traktor open) or gone → ReconcileWithSessions manages the set
 		}
 		a.log.Info(source, "auto-reconciled with Traktor history", map[string]any{
-			"id": rec.ID, "name": rec.Name, "tracks": len(updated.Tracks),
+			"id": updated.ID, "name": updated.Name, "tracks": len(updated.Tracks),
 		})
 		if a.onChange != nil {
 			a.onChange() // nudge the UI to rebuild the recordings list

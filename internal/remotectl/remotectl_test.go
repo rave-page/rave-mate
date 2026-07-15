@@ -358,6 +358,7 @@ func (f *fakeAuto) RunManual(_ context.Context, id, filePath string) (automation
 	return automation.Run{ID: "r1", AutomationID: id, FilePath: filePath, Status: "success"}, nil
 }
 func (f *fakeAuto) Runs(int) []automation.Run                                       { return nil }
+func (f *fakeAuto) Version() uint64                                                 { return 0 }
 func (f *fakeAuto) ListSchedules() []automation.Schedule                            { return nil }
 func (f *fakeAuto) SaveSchedule(s automation.Schedule) (automation.Schedule, error) { return s, nil }
 func (f *fakeAuto) DeleteSchedule(string) error                                     { return nil }

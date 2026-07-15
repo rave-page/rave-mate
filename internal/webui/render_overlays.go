@@ -5,9 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
-	"rave.page/mate/internal/overlaystyle"
 	"rave.page/mate/internal/spoutdll"
 	"rave.page/mate/internal/videoshare"
 )
@@ -21,8 +19,7 @@ func (u *UI) renderOverlays() string {
 	if u.svc.Cfg == nil {
 		return panel(i18n.T("tab.overlays"), "") + emptyState(i18n.T("overlays.configUnavailable"))
 	}
-	f := &u.svc.Cfg.Features
-	base := fmt.Sprintf("http://127.0.0.1:%d/", f.OverlayWeb.ResolvedPort())
+	base := u.ovlBase()
 
 	var b strings.Builder
 	b.WriteString(panel(i18n.T("tab.overlays"), i18n.T("overlays.subtitle")))
@@ -33,7 +30,8 @@ func (u *UI) renderOverlays() string {
 	))
 
 	b.WriteString(`<div class=ovl-cards>`)
-	b.WriteString(u.overlayAppearanceCard(base))
+	b.WriteString(`<div id=ovl-appearance>` + u.overlayAppearanceCard(base) + `</div>`) // stable id: the fader-flag cache re-patches it
+
 	b.WriteString(u.overlayWebCardHTML(base))
 	b.WriteString(u.overlayWaveformCardHTML())
 	b.WriteString(u.overlayPngCardHTML())
@@ -46,13 +44,17 @@ func (u *UI) renderOverlays() string {
 	return b.String()
 }
 
+// ovlBase is the local overlay-server root URL (http://127.0.0.1:<port>/).
+func (u *UI) ovlBase() string {
+	return fmt.Sprintf("http://127.0.0.1:%d/", u.svc.Cfg.Features.OverlayWeb.ResolvedPort())
+}
+
 // ── per-output cards ──
 
 // overlayAppearanceCard: the single appearance source of truth (browser editor) + the fade-by-fader
 // toggle (surgically read/written to overlay-style.json so browser-owned keys survive).
 func (u *UI) overlayAppearanceCard(base string) string {
-	stylePath, _ := config.DataPath("overlay-style.json")
-	fader := overlaystyle.GetBool(stylePath, "cardFaderReact", false)
+	fader := u.ovlFaderCached() // cached; the overlay-style.json read runs off the render goroutine
 	body := `<p class=ovl-note>` + htmlEscape(i18n.T("overlays.appearance.note1")) + `</p>` +
 		btnRow(btn(i18n.T("overlays.editColours"), "primary", "open-url", base+"?edit=1"), btn(i18n.T("overlays.copyEditorUrl"), "ghost", "copy", base+"?edit=1")) +
 		toggleRow(i18n.T("overlays.faderToggle"), "ovl-fader", fader) +
@@ -148,7 +150,7 @@ func (u *UI) overlayNowPlayingCardHTML() string {
 // spoutControlsHTML renders the SpoutLibrary.dll detect + download/install UI (parity with the Fyne
 // spoutRuntimeControls). Re-rendered into #ovl-spout on install completion.
 func (u *UI) spoutControlsHTML() string {
-	st := spoutdll.Probe()
+	st := u.spoutStatusCached() // cached; the DLL os.Stat sweep runs off the render goroutine
 	installLabel := i18n.T("overlays.spout.install")
 	var statusLine, extra string
 	if st.Installed {
