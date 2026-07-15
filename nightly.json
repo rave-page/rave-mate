@@ -1,13 +1,13 @@
 {
-  "version": "nightly-24c4793",
-  "build": 89,
-  "commit": "24c4793",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-89-20260715-24c4793.exe",
-  "sha256": "3fe775447fb9741bb3e4aa384d7e9bb9fd71575d10c69a805260441810ee8b22",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-89-20260715-24c4793.exe",
-  "installer_sha256": "eeea953a44d2ccb5e09330c6ec510671beb8a58f1561d0ff310929483e639ec7",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-89-20260715-24c4793",
-  "linux_sha256": "d466b17188cbcb62760afa589160cf9e41beb3db151a779f3f3a9905caa06728",
+  "version": "nightly-ad6ca04",
+  "build": 90,
+  "commit": "ad6ca04",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-90-20260715-ad6ca04.exe",
+  "sha256": "2477f6986063590cd8c09f37406a01910b2ef52ffca5b78bc151642a7d70dad8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-90-20260715-ad6ca04.exe",
+  "installer_sha256": "deeb3e5fc263ce34415cedb98633858b5ff960b9465a37d3c8bcfc1920f5019b",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-90-20260715-ad6ca04",
+  "linux_sha256": "2ba5d42f6e77610f3e9eb4f7a2beb21841f12db6059585a71c1b9ef7c0177d94",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T11:18:56Z",
-  "notes": "Merge: Fix-beatgrids-with-track-open + Ableton Link phrase-bar smoothing"
+  "released": "2026-07-15T15:03:47Z",
+  "notes": "Merge: clone controller name to ravemidi DJ port (toggleable)"
 }
