@@ -1,6 +1,9 @@
 package musiclib
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // genreFamilies maps a keyword (matched as a lowercased substring) to a canonical family, so
 // related sub-genres cluster when grouping/sorting ("Neurofunk", "Liquid DnB", "Jump Up" all →
@@ -26,9 +29,24 @@ var genreFamilies = []struct{ key, fam string }{
 	{"pop", "Pop"}, {"rock", "Rock"}, {"metal", "Rock"}, {"ambient", "Ambient"}, {"chill", "Ambient"},
 }
 
+// genreFamilyMemo caches GenreFamily by raw genre text. genreFamilies is a compile-time const so
+// the parse is deterministic and the memo never invalidates. Bounded by a library's distinct-genre
+// count (hundreds), not traffic.
+var genreFamilyMemo sync.Map // string → string
+
 // GenreFamily clusters a free-text genre into a broad family for "related genre" grouping/sort.
 // Unknown genres keep their own (trimmed) text so identical genres still group; empty → "".
+// Memoized: hit per track row per render (keyPillHTML/collView) - was ~40 substring scans each.
 func GenreFamily(genre string) string {
+	if v, ok := genreFamilyMemo.Load(genre); ok {
+		return v.(string)
+	}
+	fam := genreFamily(genre)
+	genreFamilyMemo.Store(genre, fam)
+	return fam
+}
+
+func genreFamily(genre string) string {
 	g := strings.ToLower(strings.TrimSpace(genre))
 	if g == "" {
 		return ""

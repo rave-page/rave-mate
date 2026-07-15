@@ -44,6 +44,10 @@ const (
 	// key = recording ID). NOT path-keyed: the mtime slot carries the libdb LibraryVersion() so
 	// any library/collection change invalidates it and it re-resolves off-thread (never in render).
 	KindSetTrackLinks = "trklinks"
+	KindEnvelope      = "envelope" // RMS envelope buckets (worker probe.envelope; input to setalign)
+	KindStreams       = "streams"  // ffprobe stream/format info (transcode.SourceInfo JSON)
+	KindSilence       = "silence"  // leading/trailing silence probe (worker transcode.silence JSON)
+	KindFileHash      = "filehash" // sha256 of a file's bytes (peer avatar/motion listing; mtime-keyed)
 )
 
 // Store wraps the bbolt DB. A nil *Store is valid - every method is a safe no-op so callers
@@ -104,7 +108,10 @@ func (s *Store) GetAnalysis(kind, path string, mtime int64) ([]byte, bool) {
 
 // analysisKinds: the plain per-path cache namespaces RetagAnalyses sweeps (KindAlign is
 // composite-keyed + summed-mtime - excluded).
-var analysisKinds = []string{KindWaveform, KindPeaks, KindTags, KindFingerprint, KindLoudness, KindLoudnessTL}
+// Audio-bytes-derived kinds: a self-inflicted tag rewrite leaves the audio unchanged, so these
+// stay valid and are re-keyed to the new mtime (KindFileHash covers whole-file bytes incl. tags,
+// so it is deliberately excluded - a tag write must invalidate it).
+var analysisKinds = []string{KindWaveform, KindPeaks, KindTags, KindFingerprint, KindLoudness, KindLoudnessTL, KindEnvelope, KindStreams, KindSilence}
 
 // RetagAnalyses re-keys path's analysis blobs from oldMtime to newMtime. For self-inflicted
 // tag rewrites: audio bytes are unchanged, so peaks/loudness/fingerprint caches stay valid -
