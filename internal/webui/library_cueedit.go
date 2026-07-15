@@ -1594,9 +1594,16 @@ func (u *UI) ceAudition(down bool) {
 		// Already decoded (native: RAM-preloaded => instant): beat-precise seek + unpause. No
 		// re-decode; this is the 0-latency Space path once ceEnter preloaded the track.
 		if pl != nil {
-			pl.SeekExplicit(local)
 			if tr.paused {
-				u.mpAudCall(host, "play", func() { pl.TogglePause() })
+				// Seek THEN unpause on ONE act-worker call so the seek is written before the toggle
+				// (issuing SeekExplicit inline raced the bg toggle → an unpause could beat the seek and
+				// blip from the stale position when the cursor had moved between presses).
+				u.mpAudCall(host, "play", func() {
+					pl.SeekExplicit(local)
+					pl.TogglePause()
+				})
+			} else {
+				pl.SeekExplicit(local) // already playing (rare re-press mid-play): just reposition
 			}
 		}
 		u.mpPatchTransport(u.mpSnap(host))

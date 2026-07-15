@@ -24,6 +24,10 @@ const preloadMaxBytes = 512 << 20
 // asks for more, so the transient decode buffer is capped at streamReadFrames*channels*4 bytes).
 const streamReadFrames = 4096
 
+// seekCoalesceFrames is the device-frame window within which a NON-explicit (follow-slider) seek on
+// a STREAMING source is a no-op, so passive playhead-follow never respawns the ffmpeg decoder.
+const seekCoalesceFrames = deviceRate / 2 // 0.5s
+
 // source is the io.Reader oto pulls: it yields interleaved float32-LE device bytes from either a
 // fully-decoded RAM buffer (cue-edit: instant seek, 0-latency Space) or an indexed streaming
 // decoder (huge files). It owns the frame read-cursor; Position math lets the engine subtract
@@ -47,6 +51,7 @@ type source struct {
 	pos     int64 // next device frame to hand to oto (the read cursor)
 	stopAt  int64 // hard stop frame (-1 = play to end); preview stop, loop-out, etc.
 	scratch []byte
+	ended   bool // Read drained the source to its natural end (authoritative EOF, not a pause). Cleared by SeekTo.
 }
 
 // newRAMSource decodes the whole file into a device-rate RAM buffer. Caller checked the size cap.
@@ -111,21 +116,33 @@ func (s *source) Total() int64 { s.mu.Lock(); defer s.mu.Unlock(); return s.tota
 func (s *source) Pos() int64 { s.mu.Lock(); defer s.mu.Unlock(); return s.pos }
 
 // SeekTo repositions the read cursor to a device frame (sample-accurate). RAM = index move
-// (0 cost); streaming = decoder SeekTo (index-backed) + resampler reset.
-func (s *source) SeekTo(frame int64) error {
+// (0 cost); streaming = decoder SeekTo (index-backed, respawns ffmpeg) + resampler reset. A
+// non-explicit near seek (follow-slider) on a streaming source is coalesced - see seekLocked.
+func (s *source) SeekTo(frame int64, explicit bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.seekLocked(frame)
+	return s.seekLocked(frame, explicit)
 }
 
-func (s *source) seekLocked(frame int64) error {
+func (s *source) seekLocked(frame int64, explicit bool) error {
 	if frame < 0 {
 		frame = 0
 	}
 	if s.total >= 0 && frame > s.total {
 		frame = s.total
 	}
+	// Coalesce a non-explicit near seek on a STREAMING source: the ffmpeg decoder respawns (~230ms)
+	// on any move, so the audio-editor follow-slider (reseeks ~1×/s to the audible frame, which
+	// trails the read cursor by the buffer) would churn ffmpeg → choppy sub-realtime. Keep the
+	// cursor for a sub-0.5s non-explicit nudge; explicit (cue/waveform click) always lands exactly.
+	// RAM seeks are free, so no coalescing there.
+	if s.ram == nil && !explicit {
+		if d := frame - s.pos; d < seekCoalesceFrames && d > -seekCoalesceFrames {
+			return nil
+		}
+	}
 	s.pos = frame
+	s.ended = false // moved off the end; a subsequent drain re-arms it
 	if s.ram != nil {
 		return nil
 	}
@@ -176,10 +193,15 @@ func (s *source) Read(p []byte) (int, error) {
 	}
 	s.pos += int64(got)
 	if got == 0 {
+		s.ended = true // drained to the natural end (distinct from a pause: oto stops pulling on pause)
 		return 0, io.EOF
 	}
 	return got * deviceBytes * deviceChannels, nil
 }
+
+// reachedEnd reports whether Read has drained the source to its natural end. Cleared by SeekTo, so
+// a hold-audition release (pause + snap back) is NOT mistaken for EOF - the engine seeks on release.
+func (s *source) reachedEnd() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.ended }
 
 func (s *source) readRAM(frames int) int {
 	if remain := s.total - s.pos; int64(frames) > remain {

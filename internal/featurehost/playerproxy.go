@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"rave.page/mate/internal/audioengine"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/logbus"
 )
@@ -23,15 +22,13 @@ type PlayerProxy struct {
 
 	mu        sync.Mutex
 	appCtx    context.Context
-	mirror    audioengine.State
+	mirror    State
 	onTick    func(cur, total float64)
 	onEnd     func()
 	observers map[int]playerObs        // extra tick/end listeners (detached now-playing window)
 	obsSeq    int                      // observer id source
 	dispatch  func(func())             // UI-thread dispatcher (fyne.Do); default = direct call
 	notify    func(title, body string) // decode-failure toast
-
-	nativeDecode bool // select the internal/audio engine in the child (else beep/ffmpeg)
 }
 
 // playerObs is one extra tick/end listener, independent of the single AttachUI panel sink.
@@ -41,17 +38,13 @@ type playerObs struct {
 }
 
 // NewPlayerProxy builds the proxy + its host. The child spawns on Bind (pre-warmed) so the first
-// play is instant. nativeDecode selects the internal/audio engine in the child (else beep/ffmpeg).
-func NewPlayerProxy(log *logbus.Bus, nativeDecode bool) (*PlayerProxy, error) {
-	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }, nativeDecode: nativeDecode}
+// play is instant. The child runs the native internal/audio engine (ffmpeg fallback for AAC/M4A).
+func NewPlayerProxy(log *logbus.Bus) (*PlayerProxy, error) {
+	p := &PlayerProxy{log: log, dispatch: func(fn func()) { fn() }}
 	h, err := New(Options{
 		Name: "player",
 		Log:  log,
-		Init: func() any {
-			return struct {
-				NativeDecode bool `json:"nativeDecode"`
-			}{p.nativeDecode}
-		},
+		Init: func() any { return struct{}{} },
 		OnEvent: map[string]func(json.RawMessage){
 			"tick":   p.onTickEvent,
 			"end":    p.onEndEvent,
@@ -104,6 +97,15 @@ func (p *PlayerProxy) onTickEvent(data json.RawMessage) {
 	}
 	p.mu.Lock()
 	p.mirror.Cur, p.mirror.Total, p.mirror.Playing = t.Cur, t.Total, true
+	// A tick may CONFIRM a pause but must never spuriously un-pause. A stale poll-tick sampled just
+	// before a previewRelease pause can reach the wire AFTER the confirming tick; an unconditional
+	// write would clobber Paused back to false, dropping the next spam-press into the silent
+	// SeekExplicit-without-unpause branch (the "have to hit Stop first" bug). Every real resume goes
+	// through an RPC (togglePause/playFrom/previewFrom) that rewrites the mirror directly, so a tick
+	// never needs to clear Paused - only set it.
+	if t.Paused {
+		p.mirror.Paused = true
+	}
 	cb, disp := p.onTick, p.dispatch
 	obs := p.tickObservers()
 	p.mu.Unlock()
@@ -120,7 +122,7 @@ func (p *PlayerProxy) onDown()                    { p.fireEnd() }
 
 func (p *PlayerProxy) fireEnd() {
 	p.mu.Lock()
-	p.mirror = audioengine.State{}
+	p.mirror = State{}
 	cb, disp := p.onEnd, p.dispatch
 	obs := p.endObservers()
 	p.mu.Unlock()
@@ -225,6 +227,17 @@ type seekParams struct {
 	Explicit bool    `json:"explicit,omitempty"`
 }
 
+// A large ffmpeg-decoded file (long AAC/M4A under the RAM-preload cap) fully decodes to RAM inside
+// the child Handle BEFORE the Call responds; a near-cap (~46 min) decode under concurrent OBS/VRChat
+// load runs tens of seconds. The old 10-15s Call timeouts spuriously failed it (false "playback
+// error" toast + the mirror never updated, while the child kept decoding and audio started late).
+// Size the timeouts to cover a worst-case decode; the ceEnter Preload (background) normally caches
+// the track before the first press, and load() dedups a press that races the in-flight preload.
+const (
+	playCallTimeout    = 60 * time.Second
+	preloadCallTimeout = 120 * time.Second
+)
+
 // Play decodes + starts path in the child, replacing any current playback.
 func (p *PlayerProxy) Play(path string) error { return p.PlayFrom(path, 0) }
 
@@ -234,13 +247,13 @@ func (p *PlayerProxy) PlayFrom(path string, startSec float64) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), playCallTimeout)
 	defer cancel()
 	raw, err := p.host.Call(ctx, "play", playParams{Path: path, StartSec: startSec})
 	if err != nil {
 		return err
 	}
-	var st audioengine.State
+	var st State
 	_ = json.Unmarshal(raw, &st)
 	p.mu.Lock()
 	p.mirror = st
@@ -254,13 +267,13 @@ func (p *PlayerProxy) PreviewFrom(path string, startSec float64) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), playCallTimeout)
 	defer cancel()
 	raw, err := p.host.Call(ctx, "previewFrom", playParams{Path: path, StartSec: startSec})
 	if err != nil {
 		return err
 	}
-	var st audioengine.State
+	var st State
 	_ = json.Unmarshal(raw, &st)
 	p.mu.Lock()
 	p.mirror = st
@@ -276,6 +289,17 @@ func (p *PlayerProxy) PreviewRelease(fallbackSec float64) {
 			FallbackSec float64 `json:"fallbackSec"`
 		}{fallbackSec})
 	}
+	// Optimistic mirror: the child pauses + snaps to fallbackSec. Reflect it NOW - the confirming
+	// tick is ~200ms out, and a fast re-press before it lands must see Paused so it unpauses the
+	// warm decoder instead of forcing a full re-decode (the "have to hit Stop first" bug).
+	p.mu.Lock()
+	if p.mirror.Playing {
+		p.mirror.Paused = true
+		if fallbackSec >= 0 {
+			p.mirror.Cur = fallbackSec
+		}
+	}
+	p.mu.Unlock()
 }
 
 // Preload decodes path into the child (RAM preload if it fits) without playing, so the first
@@ -284,7 +308,7 @@ func (p *PlayerProxy) Preload(path string) error {
 	if err := p.ensureUp(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), preloadCallTimeout)
 	defer cancel()
 	_, err := p.host.Call(ctx, "preload", playParams{Path: path})
 	return err
@@ -336,7 +360,7 @@ func (p *PlayerProxy) Stop() {
 		cancel()
 	}
 	p.mu.Lock()
-	p.mirror = audioengine.State{}
+	p.mirror = State{}
 	p.mu.Unlock()
 }
 
@@ -348,7 +372,7 @@ func (p *PlayerProxy) Position() (cur, total float64, ok bool) {
 }
 
 // State returns the mirrored playback snapshot.
-func (p *PlayerProxy) State() audioengine.State {
+func (p *PlayerProxy) State() State {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.mirror

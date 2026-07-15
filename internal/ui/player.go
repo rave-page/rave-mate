@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"rave.page/mate/internal/audioengine"
+	"rave.page/mate/internal/audio"
 	"rave.page/mate/internal/featurehost"
 )
 
@@ -11,8 +11,8 @@ import (
 // slow MP3 Seek never reaches the Fyne thread. All panels share ONE proxy (one file at a time).
 type nativePlayer struct{ proxy *featurehost.PlayerProxy }
 
-// isPlayable reports whether the native engine can decode this file (else use "Open").
-func isPlayable(path string) bool { return audioengine.IsPlayable(path) }
+// isPlayable reports whether the native engine (or its ffmpeg fallback) can decode this file (else use "Open").
+func isPlayable(path string) bool { return audio.Playable(path) }
 
 // playerState is a snapshot for (re)building a panel that reflects live playback.
 type playerState struct {

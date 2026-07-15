@@ -7,13 +7,11 @@ import (
 	"image"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/gopxl/beep/v2"
-	"github.com/gopxl/beep/v2/speaker"
+	"github.com/ebitengine/oto/v3"
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mediatools"
@@ -23,22 +21,40 @@ import (
 // maxFPS caps the decode/render rate; the player never asks ffmpeg for more than the source.
 const maxFPS = 30.0
 
+// audioBufferLatency is the oto device buffer for this (Fyne A/V trim) player. 100ms favours
+// underrun-free playback under concurrent video decode over minimal latency - this isn't the
+// cue-audition path (that's the low-latency native engine in the player child).
+const audioBufferLatency = 100 * time.Millisecond
+
+// audioPlayerBufFrames caps the oto PLAYER read-ahead buffer (distinct from the device buffer
+// above). Unset, oto defaults to ~0.5s/player - which (a) makes the samples master-clock lead the
+// DAC by 0.5s (video paced to clock() would run 0.5s ahead of audio) and (b) prime-blocks Play()
+// for ~0.5s on Windows (playImpl runs on the caller until the buffer fills), stalling seeks. Match
+// the device latency (~100ms) for parity with the retired beep speaker.
+const audioPlayerBufFrames = sampleRate / 10 // ~100ms, whole frames
+
 var (
-	speakerOnce sync.Once
-	speakerErr  error
+	audioCtxOnce sync.Once
+	audioCtx     *oto.Context
+	audioCtxErr  error
 )
 
-// initSpeaker initialises the shared beep speaker once. audioengine may have already initialised
-// the global speaker; that "more than once" error is benign here (we reuse it), so it's swallowed.
-func initSpeaker() error {
-	speakerOnce.Do(func() {
-		rate := beep.SampleRate(sampleRate)
-		if err := speaker.Init(rate, rate.N(time.Second/10)); err != nil &&
-			!strings.Contains(err.Error(), "more than once") {
-			speakerErr = err
+// initAudioContext opens the process oto device once (this player is the only oto user in the main
+// process; the native engine's context lives in the player child process).
+func initAudioContext() error {
+	audioCtxOnce.Do(func() {
+		var ready chan struct{}
+		audioCtx, ready, audioCtxErr = oto.NewContext(&oto.NewContextOptions{
+			SampleRate:   sampleRate,
+			ChannelCount: 2,
+			Format:       oto.FormatSignedInt16LE,
+			BufferSize:   audioBufferLatency,
+		})
+		if audioCtxErr == nil {
+			<-ready
 		}
 	})
-	return speakerErr
+	return audioCtxErr
 }
 
 // State is a snapshot of the player for the transport UI.
@@ -68,14 +84,14 @@ type Player struct {
 	paused  bool
 	closed  bool
 
-	vol         int64              // atomic: playback volume 0–100 (applied in pcmStreamer)
+	vol         int64              // atomic: playback volume 0–100 (applied via oto Player.SetVolume)
 	gen         uint64             // current play/seek generation
 	cancel      context.CancelFunc // cancels the current generation's ffmpeg procs
 	seekOff     float64            // start offset (s) of the current generation
 	samples     *int64             // atomic stereo-frame counter (audio master clock)
 	audioActive bool               // audio clock in use (else wall clock)
 	wall        *wallClock         // video-only master clock
-	ctrl        *beep.Ctrl         // pause control for the audio streamer
+	aud         *oto.Player        // audio sink for the current generation (nil = none)
 
 	frameMu sync.Mutex
 	frame   *image.NRGBA // latest published video frame (nil if audio-only)
@@ -93,7 +109,8 @@ func New(log *logbus.Bus) *Player {
 	return p
 }
 
-// SetVolume sets playback volume (0–100). Applied live in the audio streamer.
+// SetVolume sets playback volume (0–100), applied live to the oto player + remembered for the next
+// generation.
 func (p *Player) SetVolume(pct int) {
 	if pct < 0 {
 		pct = 0
@@ -102,6 +119,11 @@ func (p *Player) SetVolume(pct int) {
 		pct = 100
 	}
 	atomic.StoreInt64(&p.vol, int64(pct))
+	p.mu.Lock()
+	if p.aud != nil {
+		p.aud.SetVolume(float64(pct) / 100)
+	}
+	p.mu.Unlock()
 }
 
 // Open probes file and prepares playback at the given target canvas size (does not start playing).
@@ -307,7 +329,7 @@ func (p *Player) startLocked(offset float64) error {
 	}
 
 	if p.info.HasAudio {
-		if err := initSpeaker(); err != nil {
+		if err := initAudioContext(); err != nil {
 			if p.log != nil {
 				p.log.Warn("player", "audio init failed - video-only", map[string]any{"err": err.Error()})
 			}
@@ -339,12 +361,16 @@ func (p *Player) startLocked(offset float64) error {
 			}
 			p.samples = new(int64)
 			p.audioActive = true
-			// bufio read-ahead smooths the beep callback's pipe reads (avoids audio underrun, which
-			// would stall the master clock and stutter the video paced to it).
+			// bufio read-ahead smooths oto's pipe reads (avoids audio underrun, which would stall the
+			// master clock and stutter the video paced to it).
 			aBuf := bufio.NewReaderSize(aout, 256<<10)
-			ctrl := &beep.Ctrl{Streamer: &pcmStreamer{r: aBuf, samples: p.samples, vol: &p.vol}, Paused: p.paused}
-			p.ctrl = ctrl
-			speaker.Play(ctrl)
+			player := audioCtx.NewPlayer(&pcmReader{r: aBuf, samples: p.samples})
+			player.SetBufferSize(audioPlayerBufFrames * bytesPerFrame) // ~100ms, not oto's 0.5s default
+			player.SetVolume(float64(atomic.LoadInt64(&p.vol)) / 100)
+			p.aud = player
+			if !p.paused {
+				player.Play()
+			}
 			p.wg.Add(1)
 			go func() { defer p.wg.Done(); _ = acmd.Wait() }()
 		}
@@ -364,11 +390,10 @@ func (p *Player) startLocked(offset float64) error {
 // stopCurrentLocked cancels the current generation (kills ffmpeg) and detaches audio. Goroutines
 // exit on their own once the procs die; Close waits on wg. Safe when nothing is running.
 func (p *Player) stopCurrentLocked() {
-	if p.ctrl != nil {
-		speaker.Lock()
-		p.ctrl.Streamer = nil // mixer drops a drained streamer (surgical - doesn't disturb others)
-		speaker.Unlock()
-		p.ctrl = nil
+	if p.aud != nil {
+		p.aud.Pause()     // stop pulling before killing ffmpeg (no read on a dying pipe)
+		_ = p.aud.Close() // releases the oto player (buffer freed); the context stays open
+		p.aud = nil
 	}
 	if p.cancel != nil {
 		p.cancel()
@@ -383,10 +408,12 @@ func (p *Player) stopCurrentLocked() {
 // setPausedLocked applies pause/resume to both audio (Ctrl) and video pacing (wall clock).
 func (p *Player) setPausedLocked(pause bool) {
 	p.paused = pause
-	if p.ctrl != nil {
-		speaker.Lock()
-		p.ctrl.Paused = pause
-		speaker.Unlock()
+	if p.aud != nil {
+		if pause {
+			p.aud.Pause()
+		} else {
+			p.aud.Play()
+		}
 	}
 	if p.wall != nil {
 		if pause {
@@ -398,10 +425,21 @@ func (p *Player) setPausedLocked(pause bool) {
 	p.playing = !pause && p.cancel != nil
 }
 
-// positionLocked computes the current position from the active master clock.
+// positionLocked computes the current AUDIBLE position from the active master clock. samples counts
+// frames as oto's read-ahead pulls them from pcmReader, which leads the DAC by the player's unplayed
+// buffer (capped at ~100ms via SetBufferSize) - subtract it so the clock (and the video paced to it)
+// tracks what's actually heard, not what's buffered. Matches internal/audio.Position (audible = pos
+// - buffered).
 func (p *Player) positionLocked() float64 {
 	if p.audioActive && p.samples != nil {
-		return p.seekOff + float64(atomic.LoadInt64(p.samples))/float64(sampleRate)
+		played := atomic.LoadInt64(p.samples)
+		if p.aud != nil {
+			played -= int64(p.aud.BufferedSize() / bytesPerFrame) // frames read-ahead but not yet played
+		}
+		if played < 0 {
+			played = 0
+		}
+		return p.seekOff + float64(played)/float64(sampleRate)
 	}
 	if p.wall != nil {
 		return p.wall.pos()

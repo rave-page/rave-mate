@@ -17,7 +17,8 @@ Easy for noobs, powerful for pros.
 - Stdlib-first, no heavy deps, 7-day soak. **ffmpeg is already managed** (`mediatools`) → we shell
   out to it; no libmpv/libav cgo. The only "decoder" is ffmpeg as a subprocess.
 - Crash isolation: ffmpeg is already a separate process (the crash boundary). The Go side only
-  reads pipes + draws. oto audio is the one in-proc cgo bit (already used by audioengine).
+  reads pipes + draws. oto audio is the one in-proc cgo bit (the native `internal/audio` engine
+  uses oto too, but in the player featurehost child).
 - gofmt/vet clean, no `any` at boundaries, commit per phase.
 
 ## Architecture overview
@@ -43,8 +44,8 @@ Three new packages + UI; everything else reuses existing infra.
 ## Phase 1 - Video playback (`internal/mediaplayer`)
 
 New package `internal/mediaplayer` - an ffmpeg-backed player that handles audio-only AND video
-files (superset of audioengine for the player surface; audioengine stays as-is for the lightweight
-Library/now-playing audio).
+files (superset of the native `internal/audio` engine for the player surface; `internal/audio`
+serves the lightweight Library/now-playing + cue-audition audio, in the player featurehost child).
 
 ### Decode pipeline
 

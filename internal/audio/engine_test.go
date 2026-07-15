@@ -75,7 +75,7 @@ func TestEngineTransportPreview(t *testing.T) {
 	}
 
 	// SeekTo is sample-accurate via the cursor.
-	e.SeekTo(1.5)
+	e.SeekTo(1.5, true)
 	if got := e.src.Pos(); got != deviceRate+deviceRate/2 {
 		t.Fatalf("cursor after SeekTo(1.5) = %d want %d", got, deviceRate+deviceRate/2)
 	}
@@ -109,7 +109,7 @@ func TestEngineStreamFallback(t *testing.T) {
 	}
 	s := newStreamSource(dec)
 	defer s.Close()
-	if err := s.SeekTo(deviceRate / 2); err != nil {
+	if err := s.SeekTo(deviceRate/2, true); err != nil {
 		t.Fatalf("seek: %v", err)
 	}
 	buf := make([]byte, 100*deviceBytes*deviceChannels)

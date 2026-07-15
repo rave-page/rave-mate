@@ -148,7 +148,7 @@ func (e *Engine) PlayFrom(sec float64) {
 		return
 	}
 	e.previewReturn = -1
-	_ = e.src.SeekTo(e.format.SecondsToFrame(sec))
+	_ = e.src.SeekTo(e.format.SecondsToFrame(sec), true)
 	e.src.setStopAt(-1)
 	e.resetAndPlay()
 }
@@ -186,16 +186,17 @@ func (e *Engine) TogglePause() (paused bool) {
 	return false
 }
 
-// SeekTo repositions to sec (sample-accurate). Resets the oto buffer so the new position is
-// audible immediately, preserving play/pause state.
-func (e *Engine) SeekTo(sec float64) {
+// SeekTo repositions to sec (sample-accurate). Resets the oto buffer so the new position is audible
+// immediately, preserving play/pause state. explicit=false (follow-slider) coalesces a near seek on
+// a streaming source; explicit=true (cue/waveform click) always lands exactly.
+func (e *Engine) SeekTo(sec float64, explicit bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.src == nil {
 		return
 	}
 	wasPlaying := e.player != nil && e.player.IsPlaying()
-	_ = e.src.SeekTo(e.format.SecondsToFrame(sec))
+	_ = e.src.SeekTo(e.format.SecondsToFrame(sec), explicit)
 	if e.player != nil {
 		e.player.Reset()
 		if wasPlaying {
@@ -214,7 +215,7 @@ func (e *Engine) PreviewFrom(sec float64) {
 	}
 	frame := e.format.SecondsToFrame(sec)
 	e.previewReturn = frame
-	_ = e.src.SeekTo(frame)
+	_ = e.src.SeekTo(frame, true)
 	e.src.setStopAt(-1)
 	e.resetAndPlay()
 }
@@ -233,7 +234,7 @@ func (e *Engine) PreviewRelease(fallbackSec float64) {
 		ret = e.format.SecondsToFrame(fallbackSec)
 	}
 	if e.src != nil && ret >= 0 {
-		_ = e.src.SeekTo(ret)
+		_ = e.src.SeekTo(ret, true)
 		if e.player != nil {
 			e.player.Reset() // drop the ~15ms already-buffered so we're truly back at the return frame
 		}
@@ -246,6 +247,15 @@ func (e *Engine) IsPlaying() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.player != nil && e.player.IsPlaying()
+}
+
+// Drained reports whether playback reached the track's natural end (source read to EOF). This is
+// authoritative for natural-end detection - a pause (PreviewRelease snap-back near the tail) does
+// NOT set it, so it can't be mistaken for EOF the way a position>=total heuristic could.
+func (e *Engine) Drained() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.src != nil && e.src.reachedEnd()
 }
 
 // resetAndPlay drops any buffered audio and starts from the source cursor (caller holds mu).
