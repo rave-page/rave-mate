@@ -1,13 +1,13 @@
 {
-  "version": "nightly-ad6ca04",
-  "build": 90,
-  "commit": "ad6ca04",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-90-20260715-ad6ca04.exe",
-  "sha256": "2477f6986063590cd8c09f37406a01910b2ef52ffca5b78bc151642a7d70dad8",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-90-20260715-ad6ca04.exe",
-  "installer_sha256": "deeb3e5fc263ce34415cedb98633858b5ff960b9465a37d3c8bcfc1920f5019b",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-90-20260715-ad6ca04",
-  "linux_sha256": "2ba5d42f6e77610f3e9eb4f7a2beb21841f12db6059585a71c1b9ef7c0177d94",
+  "version": "nightly-0cc2867",
+  "build": 92,
+  "commit": "0cc2867",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-92-20260715-0cc2867.exe",
+  "sha256": "942dd06d42cf70ca310e9088dd8ea083eff86daaf93a9cdd5725d3fcdd57a4a8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-92-20260715-0cc2867.exe",
+  "installer_sha256": "cd4853ac7cefcf5d971877564589b02dec702868cc9428b3c008e7643cef403c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-92-20260715-0cc2867",
+  "linux_sha256": "5432042f8b7d86e76a2de7ef575029582af4d3e2d80b7c1083b71f5ef2935190",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T15:03:47Z",
-  "notes": "Merge: clone controller name to ravemidi DJ port (toggleable)"
+  "released": "2026-07-15T17:00:27Z",
+  "notes": "Merge: midifbsrc no-blip refinement + live probe"
 }
