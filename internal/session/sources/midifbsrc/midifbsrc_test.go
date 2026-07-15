@@ -30,12 +30,24 @@ func TestFlashStopsThenPlaying(t *testing.T) {
 	}
 }
 
-// A dark LED (last event NoteOff / vel 0) with no flash reads as NOT playing.
+// A dark LED (last event NoteOff / vel 0), once settled (a poll with no new feedback),
+// reads as NOT playing. The first poll is transient (held), so it settles on the second.
 func TestDarkLedNotPlaying(t *testing.T) {
 	d := newDetector()
+	d.step([]fbEvent{{1, "B", false}}) // transient (held) - no classification yet
 	r := d.step([]fbEvent{{1, "B", false}})
-	if r["B"] != false {
-		t.Fatalf("dark LED: deck B = %v, want false", r["B"])
+	got, ok := r["B"]
+	if !ok || got != false {
+		t.Fatalf("settled dark LED: deck B = %v (present=%v), want false", got, ok)
+	}
+}
+
+// The first (transient) poll must NOT classify - a paused deck's opening flash frame should
+// not momentarily read as playing (the live-probe startup blip).
+func TestFirstPollNoBlip(t *testing.T) {
+	d := newDetector()
+	if r := d.step([]fbEvent{{1, "A", true}, {2, "A", false}}); len(r) != 0 {
+		t.Fatalf("first poll classified %v, want nothing (transient held)", r)
 	}
 }
 
