@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d93112e",
-  "build": 87,
-  "commit": "d93112e",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-87-20260715-d93112e.exe",
-  "sha256": "923e7a6c58dcf67063144419ab5b0763625805c6ef5143e3b062f2fb1a1b5bf8",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-87-20260715-d93112e.exe",
-  "installer_sha256": "c0a5cdb65d61f15929f553cdb6f3007ae0e3d62b1f66f7ce434a8e708a6ffa80",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-87-20260715-d93112e",
-  "linux_sha256": "df0dc799e229c0f742bf7f2ed0e648e051ad43a6d5055d168680f46df51a78fa",
+  "version": "nightly-24c4793",
+  "build": 88,
+  "commit": "24c4793",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-88-20260715-24c4793.exe",
+  "sha256": "12cfbbf96c60a7ac0e1ecb934286617bcc8eebd3a971642925881c0becf35d2c",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-88-20260715-24c4793.exe",
+  "installer_sha256": "760fbe41b2e1ead6ecc40a156174202fd83f9c07a333ea0bb3cff5ecef3905a3",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-88-20260715-24c4793",
+  "linux_sha256": "458c0b0293b6b7e82e2b1e57e7a311585e41baab4d62ddc565a22cf3b7e32aa5",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T04:53:46Z",
-  "notes": "Merge gridfix robustness: no cockpit wedge on hung checkpoint + collection-write retry"
+  "released": "2026-07-15T05:44:12Z",
+  "notes": "Merge: Fix-beatgrids-with-track-open + Ableton Link phrase-bar smoothing"
 }
