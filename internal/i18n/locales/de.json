@@ -366,6 +366,10 @@
     "midi-mapping": {
       "title": "rave-mate mit dem DJ-Controller steuern",
       "body": "Belege Pads, Buttons, Regler oder Endlos-Encoder deines MIDI-Controllers mit rave-mate-Aktionen: durch die Sammlung blättern, einen Track im Cue-Editor öffnen, den Playhead bewegen, vom Cursor aus vorhören (halten), Drop-Marker setzen und das Beatgrid verschieben - Hände am Gerät, Augen auf der Waveform. Neben einer Aktion auf \"Anlernen\" klicken, das Bedienelement berühren, fertig. Aktionen sind an die Ansicht gebunden: Cue-Editor-Aktionen feuern nur bei geöffnetem Editor, Bibliotheks-Aktionen nur in der Sammlungsliste - dasselbe Pad kann je Ansicht gefahrlos etwas anderes bedeuten. Für Regler und Encoder nach dem Anlernen die Wert-Kodierung wählen: \"absoluter Regler\" für normale Potentiometer, einer der relativen Modi für Endlos-Encoder (Handbuch prüfen - Zweierkomplement ist am verbreitetsten), dazu Empfindlichkeit (Ticks pro Schritt) und Richtungsumkehr. Zuordnungen sind in Geräteprofilen organisiert: Das beim Lernen berührte Gerät besitzt die neue Zuordnung, sodass zwei Controller dieselbe Aktion mit verschiedenen Bedienelementen steuern können (oder verschiedene Aktionen mit derselben CC-Nummer). Jeder Gerätebereich lässt sich als Ganzes pausieren, auf einen anderen Controller kopieren (Modi und Empfindlichkeit bleiben erhalten, nur das Gerät ändert sich) oder leeren. Zuordnungen aus der Zeit vor den Profilen liegen unter \"Beliebiges Gerät\" und feuern weiterhin von jedem Controller."
+    },
+    "stream-why": {
+      "title": "VRSL-Videostream",
+      "body": "Streamt dein Live-DMX-Licht als Video nach VRChat. rave-mate rendert die DMX-Universen in ein VRSL-Pixelraster, kodiert es mit ffmpeg und pusht es über RTMP (oder WHIP) an einen Transcode-Dienst (VRCDN, Twitch oder eigenen), der es an das Headset ausliefert. Die Welt spielt dieses Video ab und dekodiert das Raster wieder in Licht – ohne Spout/NDI/OBS-Relay.\n\nDer Standardmodus erzeugt ein Standard-VRSL-Raster, das jede VRSL-Welt beleuchtet. Der erweiterte Modus ist eine Obermenge: Er ergänzt 16-Bit-Präzision, einen Integritäts-Header und einen Lebendigkeitszähler, die eine rave.page-Welt dekodiert, während eine Standard-VRSL-Welt es weiterhin als einfaches 8-Bit liest. Halte die gesamte Kette LINEAR – die Pixel sind rohe Lichtwerte, kein gamma-kodiertes Bild."
     }
   },
   "library": {
@@ -2327,6 +2331,16 @@
         "sessionSub": "über {transport} - läuft {expires} ab, wenn ungenutzt",
         "revoke": "Widerrufen",
         "revokeAll": "Alle widerrufen"
+      },
+      "vrslstream": {
+        "transport": "Transport",
+        "url": "Push-URL",
+        "streamKey": "Streamschlüssel (RTMP)",
+        "mode": "Modus",
+        "colorMode": "Farbmodus",
+        "bitrate": "Bitrate (kbit/s, 0 = automatisch)",
+        "encoder": "Encoder",
+        "note": "Benötigt ffmpeg (unter Bibliothek & Medien installieren). Stelle den Videoplayer der Welt auf dieselbe URL. Der erweiterte Modus fügt 16-Bit- und Integritäts-Metadaten hinzu, die eine rave.page-Welt dekodiert; der Standardmodus beleuchtet jede VRSL-Welt."
       }
     },
     "card": {
@@ -2516,6 +2530,10 @@
       "accountbridge": {
         "title": "rave.page-Konto-Bridge",
         "desc": "Diesen PC über dein rave.page-Konto von überall erreichen - nicht nur aus diesem Netzwerk."
+      },
+      "vrslstream": {
+        "title": "VRSL-Videostream",
+        "desc": "Rendert das Live-DMX-Rig in ein VRSL-Videoraster und pusht es (RTMP/WHIP) an einen Transcode-Dienst zur Wiedergabe in VRChat."
       }
     },
     "empty": {
@@ -2778,6 +2796,10 @@
         "notPersistedHint": "Dieses Betriebssystem bietet keinen Schlüsselspeicher, den rave-mate nutzen kann. Der Authenticator-Schlüssel bleibt daher im Arbeitsspeicher und geht beim Beenden verloren. Er wird nie unverschlüsselt auf die Festplatte geschrieben. Nach einem Neustart neu verknüpfen.",
         "signedOut": "Nicht angemeldet",
         "signedOutHint": "Die Bridge führt deine Geräte innerhalb deines rave.page-Kontos zusammen und bleibt daher untätig, bis du dich anmeldest. Es ist nichts kaputt."
+      },
+      "vrslstream": {
+        "pushing": "Push läuft – {count} Frame(s)",
+        "starting": "Encoder startet …"
       }
     },
     "subtitle": "Aktiviere nur, was du nutzt - deaktivierte Funktionen belegen keine Ports, Goroutinen oder Subprozesse.",
@@ -2896,7 +2918,8 @@
       "webcam": "Webcam / UVC-Quelle",
       "worldsync": "World Sync (Gist-Feeds)",
       "gridfix": "Beatgrid-Fixer",
-      "accountbridge": "rave.page-Konto-Bridge"
+      "accountbridge": "rave.page-Konto-Bridge",
+      "vrslstream": "VRSL-Videostream"
     },
     "vr": {
       "action": "Aktion",

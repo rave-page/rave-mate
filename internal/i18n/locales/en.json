@@ -388,6 +388,10 @@
     "midi-mapping": {
       "title": "Control rave-mate with your DJ controller",
       "body": "Map any pad, button, knob or endless encoder on your MIDI controller to rave-mate actions: browse the collection, open a track in the cue editor, move the playhead, hold-audition from the cursor, drop markers and nudge the beatgrid - hands on hardware, eyes on the waveform. Click Learn next to an action, touch the control on your device, done. Actions are view-scoped: cue-editor actions only fire while the editor is open, library actions only on the collection list, so one pad can safely mean different things per view. For knobs and encoders pick the value encoding in the row that appears after learning: \"absolute knob\" for regular potentiometers, one of the relative modes for endless encoders (check your controller manual - two's complement is the most common), plus a sensitivity (ticks per step) and a reverse switch. Mappings are organized into per-device profiles: the device you touch during Learn owns the new mapping, so two controllers can drive the same action with different controls (or different actions with the same CC number). Each device section can be paused as a whole, copied onto another controller (modes and sensitivity survive, only the device changes), or cleared. Mappings learned before profiles existed live under \"Any device\" and keep firing from every controller."
+    },
+    "stream-why": {
+      "title": "VRSL video stream",
+      "body": "Streams your live DMX lighting into VRChat as video. rave-mate renders the DMX universes into a VRSL pixel grid, encodes it with ffmpeg, and pushes it over RTMP (or WHIP) to a transcode service (VRCDN, Twitch, or your own) that serves it to the headset. The world plays that video back and decodes the grid into lights - no Spout/NDI/OBS relay needed.\n\nStandard mode emits a stock VRSL grid that lights any VRSL world. Extended mode is a superset: it adds 16-bit precision, an integrity header and a liveness counter that a rave.page world decodes, while a stock VRSL world still reads it as plain 8-bit. Keep the whole chain LINEAR - the pixels are raw light values, not a gamma-encoded picture."
     }
   },
   "library": {
@@ -2489,6 +2493,16 @@
         "sessionSub": "via {transport} - expires {expires} if unused",
         "revoke": "Revoke",
         "revokeAll": "Revoke all"
+      },
+      "vrslstream": {
+        "transport": "Transport",
+        "url": "Push URL",
+        "streamKey": "Stream key (RTMP)",
+        "mode": "Mode",
+        "colorMode": "Colour mode",
+        "bitrate": "Bitrate (kbps, 0 = auto)",
+        "encoder": "Encoder",
+        "note": "Needs ffmpeg (install it under Library & media). Set the world's video player to this same URL. Extended mode adds 16-bit + integrity metadata a rave.page world decodes; standard mode lights any stock VRSL world."
       }
     },
     "card": {
@@ -2678,6 +2692,10 @@
       "accountbridge": {
         "title": "rave.page account bridge",
         "desc": "Reach this PC from anywhere through your rave.page account - not only from this network."
+      },
+      "vrslstream": {
+        "title": "VRSL video stream",
+        "desc": "Render the live DMX rig into a VRSL video grid and push it (RTMP/WHIP) to a transcode service for VRChat playback."
       }
     },
     "empty": {
@@ -2940,6 +2958,10 @@
         "notPersistedHint": "This OS has no secret store rave-mate can use, so the authenticator secret is kept in memory and is lost when rave-mate quits. It is never written to disk unencrypted. Re-link after a restart.",
         "signedOut": "Not signed in",
         "signedOutHint": "The bridge meets your devices inside your rave.page account, so it stays idle until you sign in. Nothing is wrong."
+      },
+      "vrslstream": {
+        "pushing": "pushing - {count} frame(s)",
+        "starting": "starting encoder…"
       }
     },
     "subtitle": "Toggle what you use - disabled features own no ports, goroutines, or subprocesses.",
@@ -3058,7 +3080,8 @@
       "webcam": "Webcam / UVC source",
       "worldsync": "World sync (gist feeds)",
       "gridfix": "Beatgrid fixer",
-      "accountbridge": "rave.page account bridge"
+      "accountbridge": "rave.page account bridge",
+      "vrslstream": "VRSL video stream"
     },
     "vr": {
       "action": "Action",
