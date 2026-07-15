@@ -148,8 +148,8 @@ func (u *UI) ableLinkHTML() string {
 	}
 	var b strings.Builder
 	beat := int(st.Phase) + 1 // 1-based beat within the phrase
-	b.WriteString(progressBar(st.PhraseFraction(),
-		i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": fmt.Sprint(beat), "quantum": fmt.Sprint(quantum)})))
+	cap := i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": fmt.Sprint(beat), "quantum": fmt.Sprint(quantum)})
+	b.WriteString(linkPhraseBar(st.PhraseFraction()*100, cap))
 	variant, state := "success", i18n.T("live.ablelink.enabled")
 	if !st.Enabled {
 		variant, state = "off", i18n.T("live.ablelink.disabled")
@@ -175,6 +175,47 @@ func (u *UI) ableLinkHTML() string {
 		}
 	}
 	return b.String()
+}
+
+// linkPhraseBar renders the Link phrase progress bar carrying stable ids so the client rAF
+// runtime (__rt 'link', pushAbleLink) can advance the fill width + beat number at display
+// refresh between the ~1 Hz ticks. fillPct in [0,100].
+func linkPhraseBar(fillPct float64, cap string) string {
+	if fillPct < 0 {
+		fillPct = 0
+	}
+	if fillPct > 100 {
+		fillPct = 100
+	}
+	return `<div class=pbar><div class="pbar-fill" id=live-link-fill style="width:` +
+		fmt.Sprintf("%.2f%%", fillPct) + `"></div><span class="pbar-cap" id=live-link-cap>` +
+		html.EscapeString(cap) + `</span></div>`
+}
+
+// pushAbleLink hands the client rAF runtime (__rt 'link') the Link phrase so the phrase bar
+// advances smoothly at display refresh between the ~1 Hz ticks: phase (beats) + tempo drive a
+// local phase = (phase + tempo/60·dt) mod quantum → fill width + beat number. rate 0
+// (disabled/unavailable) = static snap + loop stop. Called each tick after the panel patch.
+func (u *UI) pushAbleLink() {
+	if u.shell == nil || u.svc.AbleLink == nil {
+		return
+	}
+	st := u.svc.AbleLink.State()
+	q := st.Quantum
+	if q <= 0 {
+		q = 16
+	}
+	// caption template with a sentinel where the (interpolated) beat number goes → split so the
+	// client can rebuild it per language without re-running i18n.
+	tmpl := i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": "\x00", "quantum": fmt.Sprint(int(q))})
+	pre, post, _ := strings.Cut(tmpl, "\x00")
+	rate := 0.0
+	if st.Available && st.Enabled && st.Tempo > 0 {
+		rate = 1.0
+	}
+	u.enqueueEval("rtlink", fmt.Sprintf(
+		"window.__rt&&window.__rt('link','live-link',{fill:'live-link-fill',cap:'live-link-cap',phase:%.4f,tempo:%.4f,q:%.2f,rate:%.1f,pre:%s,post:%s})",
+		st.Phase, st.Tempo, q, rate, jsQuote(pre), jsQuote(post)))
 }
 
 // ── now playing ──

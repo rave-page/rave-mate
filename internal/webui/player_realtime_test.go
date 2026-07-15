@@ -30,3 +30,18 @@ func TestPlayheadInterpolationID(t *testing.T) {
 		t.Fatalf("idle player must not render the playhead id; svg=%q", idle)
 	}
 }
+
+// The Link phrase bar must carry the fill + caption ids the client rAF runtime (__rt 'link')
+// targets, at the given fill width, so pushAbleLink can advance them at display refresh.
+func TestLinkPhraseBarInterpolationIDs(t *testing.T) {
+	bar := linkPhraseBar(37.5, "Beat 7 / 16")
+	for _, want := range []string{`id=live-link-fill`, `id=live-link-cap`, `width:37.50%`, `Beat 7 / 16`} {
+		if !strings.Contains(bar, want) {
+			t.Fatalf("phrase bar missing %q; bar=%q", want, bar)
+		}
+	}
+	// clamp out-of-range fill (a stale phase must never blow the bar past 100%).
+	if over := linkPhraseBar(150, "x"); !strings.Contains(over, `width:100.00%`) {
+		t.Fatalf("fill not clamped to 100%%; bar=%q", over)
+	}
+}

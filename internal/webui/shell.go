@@ -566,20 +566,31 @@ const runtimeJS = `(function(){
   // Go re-renders. Pure interpolation - NO business logic. Auto-stops the instant nothing
   // is live (rate 0, or the animated element is off-page after a tab switch): an idle or
   // paused player then spins ZERO frames - the "must not clog the system" contract.
-  // Kinds: 'ph' = waveform playhead line (x in the fixed 1000-wide viewBox) + transport
-  // clock text. State: {ph:lineId, clk:clockId, x0, vx (units/s), pos (sec), rate, total, w}.
+  // Kinds:
+  //   'ph'   waveform playhead line (x in the fixed 1000-wide viewBox) + transport clock.
+  //          {ph:lineId, clk:clockId, x0, vx (units/s), pos (sec), rate, total, w}
+  //   'link' Ableton-Link phrase bar: phase advances at tempo/60 beats/s, wraps at quantum.
+  //          {fill:barId, cap:capId, phase (beats), tempo (bpm), q (quantum), rate, pre, post}
   var __rtM={}, __rtRAF=0;
   function __rtClock(sec){ if(sec<0)sec=0; var t=Math.floor(sec),h=Math.floor(t/3600),m=Math.floor(t/60)%60,s=t%60;
     function p(n){return(n<10?'0':'')+n;} return h>0?h+':'+p(m)+':'+p(s):m+':'+p(s); }
   function __rtStep(el){
-    if(el.kind!=='ph') return false;
     var live=el.rate>0, dt=live?(performance.now()-el.t0)/1000:0, on=false;
-    var ln=document.getElementById(el.ph);      // playhead line: present only while in view
-    if(ln){ on=true; var w=el.w||1000, x=el.x0+el.vx*dt; if(x<0)x=0; if(x>w)x=w;
-      var xs=x.toFixed(2); ln.setAttribute('x1',xs); ln.setAttribute('x2',xs); }
-    if(el.clk){ var c=document.getElementById(el.clk); // transport clock: present while the player shows
-      if(c){ on=true; var tx=__rtClock(el.pos+el.rate*dt)+' / '+__rtClock(el.total);
-        if(c.textContent!==tx){ c.textContent=tx; c.setAttribute('data-value',tx); } } }
+    if(el.kind==='ph'){
+      var ln=document.getElementById(el.ph);    // playhead line: present only while in view
+      if(ln){ on=true; var w=el.w||1000, x=el.x0+el.vx*dt; if(x<0)x=0; if(x>w)x=w;
+        var xs=x.toFixed(2); ln.setAttribute('x1',xs); ln.setAttribute('x2',xs); }
+      if(el.clk){ var c=document.getElementById(el.clk); // transport clock: present while the player shows
+        if(c){ on=true; var tx=__rtClock(el.pos+el.rate*dt)+' / '+__rtClock(el.total);
+          if(c.textContent!==tx){ c.textContent=tx; c.setAttribute('data-value',tx); } } }
+    } else if(el.kind==='link'){
+      var q=el.q||16, ph=el.phase+(el.tempo/60)*dt; ph=ph-Math.floor(ph/q)*q; // wrap into [0,q)
+      var frac=ph/q, beat=Math.floor(ph)+1;
+      var f=document.getElementById(el.fill);
+      if(f){ on=true; f.style.width=(frac*100).toFixed(2)+'%'; }
+      var cp=document.getElementById(el.cap);
+      if(cp){ on=true; var t2=el.pre+beat+el.post; if(cp.textContent!==t2) cp.textContent=t2; }
+    } else return false;
     return live && on; // rate>0 but nothing on-page (tab switched away) → stop; a Go re-push restarts it
   }
   function __rtLoop(){ __rtRAF=0; var any=false;
