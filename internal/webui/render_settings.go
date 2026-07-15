@@ -868,13 +868,24 @@ func (u *UI) worldSyncBody() string {
 	if gh == nil {
 		return `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.worldsync.unavailable")) + `</div>`
 	}
+	f := &u.svc.Cfg.Features.WorldSync
 	line := i18n.T("settings.body.worldsync.linkLine")
 	row := btnRow(btn(i18n.T("settings.body.worldsync.linkDeviceCode"), "primary", "settings-gh-device", ""), btn(i18n.T("settings.body.worldsync.pasteToken"), "outline", "settings-gh-pat", ""))
 	if gh.SignedIn() {
 		line = i18n.T("settings.body.worldsync.linkedAs", i18n.A{"name": gh.Login()})
 		row = btnRow(btn(i18n.T("settings.body.common.unlink"), "destructive", "settings-gh-unlink", ""))
 	}
-	return `<div class=set-note>` + html.EscapeString(line) + `</div>` + row
+	out := `<div class=set-note>` + html.EscapeString(line) + `</div>` + row
+	// Publish mode: "direct" (user's gist token) or "hosted" (rave.page worldlive API) - values
+	// mirror config.WorldSyncMode*. Hosted needs a target world id (shown only in hosted mode).
+	mode := f.ResolvedPublishMode()
+	out += selectBox(i18n.T("settings.body.worldsync.publishVia"), "set:ws-mode",
+		[][2]string{{"direct", i18n.T("settings.body.worldsync.modeDirect")}, {"hosted", i18n.T("settings.body.worldsync.modeHosted")}}, mode)
+	out += `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.worldsync.modeHelp")) + `</div>`
+	if mode == "hosted" {
+		out += field(i18n.T("settings.body.worldsync.hostedWorldId"), "set:ws-worldid", f.HostedWorldID, "text")
+	}
+	return out
 }
 
 func (u *UI) vrOverlayBody() string {
@@ -1597,6 +1608,15 @@ func (u *UI) applySet(id, val string) {
 		u.patchMain()
 		return
 	}
+	if id == "ws-mode" {
+		// Values mirror config.WorldSyncMode*. Re-render so the hosted world-id field toggles.
+		if v == "direct" || v == "hosted" {
+			f.WorldSync.PublishMode = v
+		}
+		u.saveCfg()
+		u.patchMain()
+		return
+	}
 	toInt := func(dst *int, min, max int) {
 		if n, err := strconv.Atoi(v); err == nil && n >= min && n <= max {
 			*dst = n
@@ -1897,6 +1917,9 @@ func (u *UI) applySet(id, val string) {
 		toInt(&f.RTSPServe.FPS, 1, 120)
 	case "rtsp-bitrate":
 		toInt(&f.RTSPServe.BitrateKbps, 250, 50000)
+	// World Sync hosted-mode target world id (wrld_…); persisted, read at publish time.
+	case "ws-worldid":
+		f.WorldSync.HostedWorldID = v
 	// Overlays (rendered on the Overlays tab; port is read at overlay-server start)
 	case "overlay-port":
 		toInt(&f.OverlayWeb.Port, 1, 65535)

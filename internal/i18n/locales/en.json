@@ -2422,7 +2422,12 @@
         "linkLine": "Link a GitHub account (gist scope only). Paste a classic PAT with 'gist' scope, or use device code.",
         "linkedAs": "Linked as ",
         "pasteToken": "Paste token…",
-        "unavailable": "GitHub link unavailable in this build."
+        "unavailable": "GitHub link unavailable in this build.",
+        "publishVia": "Publish via",
+        "modeDirect": "direct (my gist token)",
+        "modeHosted": "hosted (rave.page)",
+        "hostedWorldId": "Hosted world id",
+        "modeHelp": "Direct: your own GitHub gist token writes the gists. Hosted: rave.page creates them under its account - no token needed; set the target world id."
       },
       "gridfix": {
         "probing": "checking engine…",
@@ -2731,6 +2736,7 @@
       "addUnityProject": "Add Unity project",
       "editOverlay": "Edit overlay",
       "editPreset": "Edit preset",
+      "ghGetToken": "Get token…",
       "ghPatNote": "Create one at github.com/settings/tokens → classic → only the 'gist' scope. Stored sealed, never logged.",
       "ghPatPlaceholder": "ghp_… (classic token, 'gist' scope)",
       "obsRemote": "Remote OBS",

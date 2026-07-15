@@ -248,8 +248,10 @@ func init() {
 	})
 	onExact("world-gh-device", func(u *UI, m actMsg) { u.wsGitHubDevice() })
 	onExact("world-gh-pat", func(u *UI, m actMsg) {
+		// Get-token button OUTSIDE the form (a typeless button submits the form otherwise).
 		body := hint("info", "Classic token, 'gist' scope only") +
 			`<p class=ws-help>Create at github.com/settings/tokens → classic → only the 'gist' scope. Stored sealed (OS secret store), never logged.</p>` +
+			btnRow(btn("Get token…", "outline", "open-url", ghTokenNewURL)) +
 			`<form data-act=world-gh-pat-save><input class=field-input name=pat type=password placeholder="ghp_… (gist scope)" autocomplete=off style="width:100%">` +
 			`<div class=btn-row><button class="rp-btn rp-btn--primary" type=submit>Link</button></div></form>`
 		u.openModal(modal("Paste GitHub token", body, ""))
