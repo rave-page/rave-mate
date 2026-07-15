@@ -1738,7 +1738,7 @@ func syncMIDIDriver(cs []config.MIDIControllerMap, log *logbus.Bus) {
 		if !c.Enabled || c.Port == "" || c.ThruPort != midi.DriverSentinel {
 			continue
 		}
-		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter})
+		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter, Distinct: c.ThruDistinctName})
 	}
 	if len(ins) == 0 {
 		return

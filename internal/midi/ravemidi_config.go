@@ -36,8 +36,19 @@ const DriverSentinel = "@rave-mate:ravemidi-managed"
 // enumeration here) — read via IOCTL (ravemidi_reader_windows.go), never midiInOpen.
 func ReservedPortName(name string) string { return name + " (rave-mate)" }
 
-// DJPortName is the driver fan-out port DJ software should select.
-func DJPortName(name string) string { return name + " THRU" }
+// DJPortName is the driver fan-out port DJ software selects for a managed controller.
+// Default (clone): the fan-out takes the physical device's own name (source) verbatim so
+// DJ software that keys mappings on the controller name (e.g. Serato) matches it - the
+// driver holds the real device's pin and its managed.cpp self-tap guard skips our clone, so
+// SourceMatch still binds the real hardware despite the shared name. distinct=true (or no
+// source yet) uses a separate "<name> THRU" port instead - pick that when the duplicate name
+// in the MIDI device list is undesired.
+func DJPortName(name, source string, distinct bool) string {
+	if distinct || source == "" {
+		return name + " THRU"
+	}
+	return source
+}
 
 // FilterKeys maps config filter keys to RAVEMIDI_FILTER_* bits (UI chip order).
 var FilterKeys = []struct {
@@ -74,6 +85,7 @@ type ManagedInput struct {
 	Name        string   // stable id + port base name
 	SourceMatch string   // hardware device FriendlyName substring (config Port)
 	Filter      []string // FilterKeys keys; nil = DefaultDriverFilter(), empty = none
+	Distinct    bool     // name the DJ fan-out "<Name> THRU" vs cloning the device name
 }
 
 // ManagedCfgs maps managed inputs to driver input configs (thru+feedback on,
@@ -88,7 +100,7 @@ func ManagedCfgs(ins []ManagedInput) []DriverInputCfg {
 		out = append(out, DriverInputCfg{
 			ID: m.Name, Name: m.Name, SourceMatch: m.SourceMatch,
 			Thru: true, Feedback: true, Filter: FilterMask(fl),
-			OutNames: []string{DJPortName(m.Name)},
+			OutNames: []string{DJPortName(m.Name, m.SourceMatch, m.Distinct)},
 		})
 		if len(out) == 8 { // RAVEMIDI_MAX_INPUTS
 			break

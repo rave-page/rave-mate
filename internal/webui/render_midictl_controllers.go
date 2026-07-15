@@ -83,7 +83,13 @@ func (u *UI) midiOwnDriverPorts() map[string]bool {
 	for _, c := range u.svc.Cfg.Features.MIDI.Controllers {
 		if c.ThruPort == midi.DriverSentinel && c.Name != "" {
 			out[strings.ToLower(midi.ReservedPortName(c.Name))] = true
-			out[strings.ToLower(midi.DJPortName(c.Name))] = true
+			// Only hide the fan-out when it has a DISTINCT name ("<Name> THRU"). In clone
+			// mode the fan-out is named after the real device (== c.Port), which the user
+			// legitimately picks as the input - hiding it would drop the real controller
+			// from the picker. Loop-safe either way: driver-managed reads the reserved port.
+			if dj := midi.DJPortName(c.Name, c.Port, c.ThruDistinctName); !strings.EqualFold(dj, c.Port) {
+				out[strings.ToLower(dj)] = true
+			}
 		}
 	}
 	return out
@@ -94,11 +100,17 @@ func (u *UI) midiControllerBlock(i int, c config.MIDIControllerMap, ctx midiCtlR
 	idx := strconv.Itoa(i)
 	own := u.midiOwnDriverPorts()
 	portOpts := [][2]string{{"", i18n.T("midictl.in.pickPort")}}
+	seen := map[string]bool{}
 	for _, p := range u.svc.MIDISource.InputPorts() {
+		lp := strings.ToLower(p)
 		if p == midi.VirtualDJPortName || p == midi.VirtualMixerPortName ||
-			own[strings.ToLower(p)] || strings.Contains(p, "(rave-mate)") {
+			own[lp] || strings.Contains(p, "(rave-mate)") {
 			continue // our own virtual ports - reading them back would loop through rave-mate
 		}
+		if seen[lp] {
+			continue // dedup: a clone-mode driver fan-out shares the real device's winmm name
+		}
+		seen[lp] = true
 		portOpts = append(portOpts, [2]string{p, p})
 	}
 	thruOpts := [][2]string{{"", i18n.T("midictl.in.thruNone")}}
@@ -143,9 +155,14 @@ func (u *UI) midiDriverThruHTML(i int, c config.MIDIControllerMap, ctx midiCtlRe
 	idx := strconv.Itoa(i)
 	var b strings.Builder
 	b.WriteString(`<div class=midi-drvthru>`)
-	// the ONE port to select in the DJ software - the core "which device do I use" answer
+	// the ONE port to select in the DJ software - the core "which device do I use" answer.
+	// Name tracks the clone toggle below: the device's own name (clone) or "<Name> THRU".
 	b.WriteString(`<div class=midi-drvuse>` + htmlEscape(i18n.T("midictl.in.useInDJ")) +
-		` <code>` + htmlEscape(midi.DJPortName(c.Name)) + `</code></div>`)
+		` <code>` + htmlEscape(midi.DJPortName(c.Name, c.Port, c.ThruDistinctName)) + `</code></div>`)
+	// clone toggle (default ON): mirror the controller's own name to DJ software so name-keyed
+	// mappings (Serato) match. Off = a distinct "<Name> THRU" port. Explained inline (the "why").
+	b.WriteString(toggleRow(i18n.T("midictl.in.cloneName"), "midi-ctl-clone:"+idx, !c.ThruDistinctName))
+	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.cloneNote")) + `</p>`)
 	b.WriteString(`<p class=midi-help-note>` + htmlEscape(i18n.T("midictl.in.driverNote")) + `</p>`)
 	if st, ok := ctx.drv[c.Name]; ok {
 		variant, line := "warning", i18n.T("midictl.drv.retrying", i18n.A{"n": strconv.Itoa(int(st.RetryCount))})

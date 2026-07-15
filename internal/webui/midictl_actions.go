@@ -201,7 +201,7 @@ func (u *UI) midiDrvSync(manual bool) {
 		if !c.Enabled || c.Port == "" || c.ThruPort != midi.DriverSentinel {
 			continue
 		}
-		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter})
+		ins = append(ins, midi.ManagedInput{Name: c.Name, SourceMatch: c.Port, Filter: c.DriverFilter, Distinct: c.ThruDistinctName})
 	}
 	midiCfgMu.Unlock()
 	// empty set is a valid sync: clears managed forwarding when the last
