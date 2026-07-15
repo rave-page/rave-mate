@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/debuglog"
@@ -53,6 +54,11 @@ type Service struct {
 	schedOK    bool
 	runsCache  []Run // full history, sorted newest-first; Runs(limit) returns a limited copy
 	runsOK     bool
+
+	// version bumps on every autos/scheds/runs cache invalidation (i.e. any change the webui
+	// Automations tab can render). The ~1Hz webui tick reads it to skip the full autoBody
+	// rebuild+patch when nothing changed. Atomic: read lock-free off the UI tick.
+	version atomic.Uint64
 
 	mu     sync.Mutex
 	seq    int64
@@ -253,9 +259,29 @@ func (m *Service) List() []Automation {
 	return append([]Automation(nil), m.autosCache...) // defensive copy; master stays immutable
 }
 
-func (m *Service) invalidateAutos()  { m.cacheMu.Lock(); m.autosOK = false; m.cacheMu.Unlock() }
-func (m *Service) invalidateScheds() { m.cacheMu.Lock(); m.schedOK = false; m.cacheMu.Unlock() }
-func (m *Service) invalidateRuns()   { m.cacheMu.Lock(); m.runsOK = false; m.cacheMu.Unlock() }
+// invalidate* clear a cache AND bump version (bump after the store write in every caller, so a
+// tick observing the new version also observes the invalidated cache → rereads fresh data).
+func (m *Service) invalidateAutos() {
+	m.cacheMu.Lock()
+	m.autosOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+func (m *Service) invalidateScheds() {
+	m.cacheMu.Lock()
+	m.schedOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+func (m *Service) invalidateRuns() {
+	m.cacheMu.Lock()
+	m.runsOK = false
+	m.cacheMu.Unlock()
+	m.version.Add(1)
+}
+
+// Version is a cheap monotonic counter of automations/schedules/runs changes (webui tick gate).
+func (m *Service) Version() uint64 { return m.version.Load() }
 
 func (m *Service) Get(id string) (Automation, bool) {
 	var a Automation
