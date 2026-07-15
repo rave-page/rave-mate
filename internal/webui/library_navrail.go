@@ -60,7 +60,7 @@ func (u *UI) libNavCollection(b *strings.Builder, s *libSt) {
 	if u.svc.Lib == nil {
 		return
 	}
-	rows, _ := u.svc.Lib.ListPlaylists()
+	rows := u.libPlaylists(s)
 	if len(rows) == 0 {
 		return
 	}

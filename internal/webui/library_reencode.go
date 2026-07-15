@@ -153,33 +153,38 @@ func (u *UI) reencStart() {
 	if !ok || dest == "" {
 		return
 	}
-	files := u.reencFiles()
-	if len(files) == 0 {
-		u.toast(i18n.T("library.re.noFiles"))
-		return
-	}
 	u.closeModal()
-	queued, skipped := 0, 0
-	for _, f := range files {
-		base := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
-		out := filepath.Join(dest, base+pre.Ext())
-		if kind == "dir" { // mirror the subfolder structure
-			if rel, err := filepath.Rel(src, f); err == nil {
-				out = filepath.Join(dest, strings.TrimSuffix(rel, filepath.Ext(rel))+pre.Ext())
+	u.bg(func() { // WalkDir source resolution + enqueue loop off the actWorker
+		files := u.reencFiles()
+		if len(files) == 0 {
+			u.toast(i18n.T("library.re.noFiles"))
+			return
+		}
+		queued, skipped := 0, 0
+		for _, f := range files {
+			base := strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))
+			out := filepath.Join(dest, base+pre.Ext())
+			if kind == "dir" { // mirror the subfolder structure
+				if rel, err := filepath.Rel(src, f); err == nil {
+					out = filepath.Join(dest, strings.TrimSuffix(rel, filepath.Ext(rel))+pre.Ext())
+				}
 			}
+			if pathOnDisk(out) {
+				skipped++ // already re-encoded on a previous run
+				continue
+			}
+			u.libStartTranscodeTo(f, out, pre, "", "")
+			queued++
 		}
-		if pathOnDisk(out) {
-			skipped++ // already re-encoded on a previous run
-			continue
+		if u.stopped() {
+			return
 		}
-		u.libStartTranscodeTo(f, out, pre, "", "")
-		queued++
-	}
-	u.mu.Lock()
-	u.libSection = "queue"
-	u.mu.Unlock()
-	u.patchMain()
-	u.toast(i18n.T("library.re.queuedToast", i18n.A{"queued": fmt.Sprint(queued), "skipped": fmt.Sprint(skipped)}))
+		u.mu.Lock()
+		u.libSection = "queue"
+		u.mu.Unlock()
+		u.patchMain()
+		u.toast(i18n.T("library.re.queuedToast", i18n.A{"queued": fmt.Sprint(queued), "skipped": fmt.Sprint(skipped)}))
+	})
 }
 
 // ── playlist-context detection (per-file encoder demotion) ──
@@ -235,8 +240,11 @@ func (u *UI) libMarkDirPlaylist(dir string) {
 		u.toast(err.Error())
 		return
 	}
-	u.toast(i18n.T("library.re.markedToast", i18n.A{"name": filepath.Base(dir), "n": fmt.Sprint(len(files))}))
 	_ = id
+	if u.stopped() {
+		return
+	}
+	u.toast(i18n.T("library.re.markedToast", i18n.A{"name": filepath.Base(dir), "n": fmt.Sprint(len(files))}))
 	u.libPatchBody()
 }
 
@@ -250,7 +258,10 @@ func init() {
 	})
 	onExact("lib-reenc-dir", func(u *UI, _ actMsg) { u.reencOpenDir(u.libDirOr()) })
 	onPrefix("lib-reenc-pl:", func(u *UI, m actMsg) { u.reencOpenPl(int64(atoi(m.arg("lib-reenc-pl:")))) })
-	onExact("lib-markpl", func(u *UI, _ actMsg) { u.libMarkDirPlaylist(u.libDirOr()) })
+	onExact("lib-markpl", func(u *UI, _ actMsg) {
+		dir := u.libDirOr()
+		u.bg(func() { u.libMarkDirPlaylist(dir) }) // os.ReadDir + DB write off the actWorker
+	})
 	onExact("re-preset", func(u *UI, m actMsg) {
 		u.re.mu.Lock()
 		old := u.re.preset

@@ -40,6 +40,16 @@ type libSel struct {
 	mod        time.Time
 	src        *transcode.SourceInfo // ffprobe result (nil = none/loading)
 	srcLoading bool
+
+	// detail-rail data (works-together partners + playlist membership): two DB queries once ran
+	// per detail render (= per keystroke); resolved off-thread + cached here, re-resolved when the
+	// Compat/Playlist epochs move. detReady=false only until the first resolve lands.
+	detCompat    []libdb.CompatRow
+	detPls       []libdb.PlaylistRow
+	detCompatVer int64
+	detPlVer     int64
+	detReady     bool
+	detBusy      bool
 }
 
 type libJob struct {
@@ -119,6 +129,36 @@ type libSt struct {
 
 	moreOpen      bool // Maintenance popover (collection toolbar) open
 	autoRefreshed bool // once-per-run auto folder-playlist sweep kicked
+
+	// ── render caches (render must stay pure+fast: memoized, epoch/generation-invalidated) ──
+	// collView: filtered+sorted index list, keyed by loadGen + the three libdb epochs + a hash of
+	// the sort/filter controls (was recomputed every render, incl. selection-only re-renders).
+	collViewIdx []int
+	collViewSig uint64
+	collViewOK  bool
+	// on-disk existence for the rendered rows: os.Stat per row froze render; swept off-thread and
+	// read from the map (unknown path = neutral/present until the sweep lands). Dropped on reload.
+	onDiskCk   map[string]bool
+	onDiskBusy bool
+	onDiskAt   time.Time
+	onDiskGen  int
+	// ListPlaylists rows (a per-row COUNT subquery; was issued 2-3× per render), cached by PlaylistVersion().
+	plRows    []libdb.PlaylistRow
+	plRowsVer int64
+	plRowsGen int // s.loadGen at cache fill: a reload (e.g. Cleanup drops playlists) invalidates without touching plVer
+	plRowsOK  bool
+	// smart-playlist match counts (a full ~23k scan + compat DB read per smart list), computed
+	// off-thread, keyed by lib+playlist+compat epochs + a hash of every smart rule set.
+	smartCounts     map[int64]int
+	smartCountsSig  uint64
+	smartCountsOK   bool
+	smartCountsBusy bool
+	// facet dropdown options (distinctCounts over all tracks: genre+label), keyed by loadGen.
+	facetGen     int
+	facetGenre   [][2]string
+	facetLabel   [][2]string
+	facetGenreOK bool
+	facetLabelOK bool
 
 	// smart-playlist rules editor draft
 	srID     int64 // 0 = create
@@ -377,6 +417,9 @@ type libFe struct {
 // browseFresh is how long a cached listing serves without a background re-read.
 const browseFresh = 2 * time.Second
 
+// collOnDiskFresh is how long the collection on-disk existence cache serves before a bg re-sweep.
+const collOnDiskFresh = 5 * time.Second
+
 // libBrowseEntries returns the (possibly stale) cached listing for dir, kicking a
 // background read when the cache is missing or stale. ok=false → nothing cached yet for
 // this dir (render a loading placeholder; the read completion re-patches). Caller holds s.mu.
@@ -539,7 +582,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 	b.WriteString(`<span class=lib-tlabel>` + html.EscapeString(i18n.Tn("library.item", len(fs))) + `</span>`)
 	b.WriteString(`</div>`)
 	// folder bound to a playlist -> its actions live right here
-	if pl := u.libFolderPlaylist(dir); pl != nil {
+	if pl := u.libFolderPlaylist(s, dir); pl != nil {
 		b.WriteString(`<p class=page-sub>🎵 ` + html.EscapeString(i18n.T("library.pl.folderBound", i18n.A{"name": pl.Name})) + `</p>`)
 		b.WriteString(u.libPlaylistActionsHTML(*pl, false))
 	}
@@ -678,7 +721,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		for k := range s.collPl {
 			id = k
 		}
-		if rows, _ := u.svc.Lib.ListPlaylists(); rows != nil {
+		if rows := u.libPlaylists(s); rows != nil {
 			for _, p := range rows {
 				if p.ID == id {
 					b.WriteString(u.libPlaylistActionsHTML(p, true))
@@ -702,9 +745,17 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 		return b.String() + u.gfResultsHTML(&u.gf)
 	}
 
-	// filtered + sorted view; column headers sort (click again flips direction)
-	shown := s.collView()
+	// filtered + sorted view (memoized) + on-disk existence swept off-thread (was os.Stat/row)
+	shown := u.libCollView(s)
 	total := len(shown)
+	shownPaths := make([]string, 0, libMaxRows)
+	for i, ti := range shown {
+		if i >= libMaxRows {
+			break
+		}
+		shownPaths = append(shownPaths, s.tracks[ti].Path)
+	}
+	u.libEnsureOnDisk(s, shownPaths)
 	hdr := func(key, label, cls string) string {
 		arrow := ""
 		if s.collSort == key {
@@ -742,7 +793,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 			break
 		}
 		t := s.tracks[ti]
-		onDisk := pathOnDisk(t.Path)
+		onDisk := s.onDiskOr(t.Path)
 		chk := ""
 		if s.collSel[t.Path] {
 			chk = " checked"
@@ -886,10 +937,10 @@ func (u *UI) libFacetSelect(s *libSt, kind, label string, active map[string]bool
 	if n := len(active); n > 0 {
 		lbl = fmt.Sprintf("%s (%d)", label, n)
 	}
-	tracks := s.tracks
+	facet := u.libFacetOpts(s, kind, keyOf) // memoized: was 2 full 23k scans per render
 	return smartSelect("libfacet-"+kind, "", "lib-"+kind+":", lbl, func() []ssOpt {
-		opts := make([]ssOpt, 0, 32)
-		for _, gc := range distinctCounts(tracks, keyOf, 200) {
+		opts := make([]ssOpt, 0, len(facet))
+		for _, gc := range facet {
 			o := ssOpt{Val: gc[0], Label: gc[0], Badge: gc[1]}
 			if active[gc[0]] {
 				o.Label = "✓ " + o.Label
@@ -900,32 +951,55 @@ func (u *UI) libFacetSelect(s *libSt, kind, label string, active map[string]bool
 	})
 }
 
+// libFacetOpts returns the cached distinct-value counts for a collection facet (genre|label),
+// rebuilt only when the loaded-track generation changes (distinctCounts is a full O(N) scan over
+// ~23k tracks; it ran twice per render inside the smartSelect opts closure). Caller holds s.mu.
+func (u *UI) libFacetOpts(s *libSt, kind string, keyOf func(musiclib.Track) string) [][2]string {
+	if s.facetGen != s.loadGen {
+		s.facetGen = s.loadGen
+		s.facetGenre, s.facetLabel = nil, nil
+		s.facetGenreOK, s.facetLabelOK = false, false
+	}
+	if kind == "label" {
+		if !s.facetLabelOK {
+			s.facetLabel, s.facetLabelOK = distinctCounts(s.tracks, keyOf, 200), true
+		}
+		return s.facetLabel
+	}
+	if !s.facetGenreOK {
+		s.facetGenre, s.facetGenreOK = distinctCounts(s.tracks, keyOf, 200), true
+	}
+	return s.facetGenre
+}
+
 // libPlaylistFacet: filterable playlist dropdown - filters the collection to tracks
 // that are members of any picked playlist (smart playlists eval live).
 func (u *UI) libPlaylistFacet(s *libSt) string {
 	if u.svc.Lib == nil {
 		return ""
 	}
-	rows, _ := u.svc.Lib.ListPlaylists()
+	rows := u.libPlaylists(s)
 	if len(rows) == 0 {
 		return ""
 	}
+	counts := u.libSmartCounts(s, rows) // smart counts precomputed off-thread (was a full scan per list per render)
 	lbl := i18n.T("library.label.playlist")
 	if n := len(s.collPl); n > 0 {
 		lbl = fmt.Sprintf("%s (%d)", lbl, n)
 	}
-	tracks := s.tracks
 	active := s.collPl
 	return smartSelect("libfacet-pl", "", "lib-plfilter:", lbl, func() []ssOpt {
 		opts := make([]ssOpt, 0, len(rows))
 		for _, p := range rows {
-			n := p.TrackCount
+			badge := fmt.Sprint(p.TrackCount)
 			if p.Kind == libdb.PlaylistSmart {
-				if r, ok := libParseRules(p.Rules); ok {
-					n = len(u.filterSmartDB(tracks, r))
+				if c, ok := counts[p.ID]; ok {
+					badge = fmt.Sprint(c)
+				} else {
+					badge = "…" // count not computed yet
 				}
 			}
-			o := ssOpt{Val: fmt.Sprint(p.ID), Label: p.Name, Badge: fmt.Sprint(n)}
+			o := ssOpt{Val: fmt.Sprint(p.ID), Label: p.Name, Badge: badge}
 			if active[p.ID] {
 				o.Label = "✓ " + o.Label
 			}
@@ -1011,13 +1085,236 @@ func (s *libSt) collView() []int {
 	return out
 }
 
+// libEpochs reads the three libdb cache-invalidation epochs (0 when the DB is absent).
+func (u *UI) libEpochs() (libVer, plVer, compatVer int64) {
+	if u.svc.Lib != nil {
+		return u.svc.Lib.LibraryVersion(), u.svc.Lib.PlaylistVersion(), u.svc.Lib.CompatVersion()
+	}
+	return 0, 0, 0
+}
+
+// libCollView returns collView memoized: it re-filtered+sorted ~23k tracks every render (incl.
+// selection-only re-renders). Keyed by loadGen + the three epochs + a hash of the sort/filter
+// controls; recomputed only when an input moves. Caller holds s.mu.
+func (u *UI) libCollView(s *libSt) []int {
+	libVer, plVer, compatVer := u.libEpochs()
+	sig := s.collViewSignature(libVer, plVer, compatVer)
+	if s.collViewOK && s.collViewSig == sig {
+		return s.collViewIdx
+	}
+	idx := s.collView()
+	s.collViewSig, s.collViewIdx, s.collViewOK = sig, idx, true
+	return idx
+}
+
+// collViewSignature hashes every input collView reads. tracks content is proxied by loadGen+libVer
+// (in-place edits land via a DB write that bumps LibraryVersion); collPlSet by collPl ids + the
+// playlist/compat epochs (it's a pure function of those); dropsIdx (collNoDrops presence test) by
+// len (it only holds tracks WITH drops). Caller holds s.mu.
+func (s *libSt) collViewSignature(libVer, plVer, compatVer int64) uint64 {
+	h := fnv.New64a()
+	fmt.Fprintf(h, "g%d|l%d|p%d|c%d|q%q|o%s|d%t|nd%t|di%d",
+		s.loadGen, libVer, plVer, compatVer, s.collSearch, s.collSort, s.collDesc, s.collNoDrops, len(s.dropsIdx))
+	for _, set := range []struct {
+		tag string
+		m   map[string]bool
+	}{{"k", s.keySel}, {"ge", s.collGenre}, {"la", s.collLabel}} {
+		keys := make([]string, 0, len(set.m))
+		for k := range set.m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(h, "|%s%s", set.tag, k)
+		}
+	}
+	ids := make([]int64, 0, len(s.collPl))
+	for id := range s.collPl {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		fmt.Fprintf(h, "|pl%d", id)
+	}
+	return h.Sum64()
+}
+
+// libEnsureOnDisk warms the on-disk existence cache for the rendered rows, sweeping os.Stat
+// OFF-THREAD (per-row stat in render froze the UI on a 300-row set / a spun-down drive). Render
+// reads s.onDiskOr; unknown paths read as present until the sweep lands. Refreshed on a TTL and
+// dropped on library reload. Caller holds s.mu.
+func (u *UI) libEnsureOnDisk(s *libSt, paths []string) {
+	if s.onDiskGen != s.loadGen { // library reloaded: prior results may be stale (files moved)
+		s.onDiskGen = s.loadGen
+		s.onDiskCk = nil
+		s.onDiskAt = time.Time{}
+	}
+	if s.onDiskBusy {
+		return
+	}
+	stale := time.Since(s.onDiskAt) > collOnDiskFresh
+	unknown := false
+	for _, p := range paths {
+		if _, ok := s.onDiskCk[p]; !ok {
+			unknown = true
+			break
+		}
+	}
+	if !stale && !unknown {
+		return
+	}
+	s.onDiskBusy = true
+	want := append([]string(nil), paths...)
+	u.bg(func() {
+		res := make(map[string]bool, len(want))
+		for _, p := range want {
+			res[p] = pathOnDisk(p)
+		}
+		s.mu.Lock()
+		s.onDiskBusy = false
+		s.onDiskAt = time.Now()
+		if s.onDiskCk == nil {
+			s.onDiskCk = make(map[string]bool, len(res))
+		}
+		changed := false
+		for p, ex := range res {
+			if old, ok := s.onDiskCk[p]; !ok || old != ex {
+				changed = true
+			}
+			s.onDiskCk[p] = ex
+		}
+		s.mu.Unlock()
+		if changed && !u.stopped() {
+			u.libPatchBody()
+		}
+	})
+}
+
+// onDiskOr reports path existence from the swept cache; an un-swept path reads as present
+// (neutral) until libEnsureOnDisk fills it in. Caller holds s.mu.
+func (s *libSt) onDiskOr(path string) bool {
+	if ex, ok := s.onDiskCk[path]; ok {
+		return ex
+	}
+	return true
+}
+
+// libPlaylists returns the playlist rows for this render pass, cached by PlaylistVersion()
+// (ListPlaylists issues a per-row COUNT subquery and was called 2-3× per render). Caller holds s.mu.
+func (u *UI) libPlaylists(s *libSt) []libdb.PlaylistRow {
+	if u.svc.Lib == nil {
+		return nil
+	}
+	ver := u.svc.Lib.PlaylistVersion()
+	if s.plRowsOK && s.plRowsVer == ver && s.plRowsGen == s.loadGen {
+		return s.plRows
+	}
+	rows, _ := u.svc.Lib.ListPlaylists()
+	s.plRows, s.plRowsVer, s.plRowsGen, s.plRowsOK = rows, ver, s.loadGen, true
+	return rows
+}
+
+// libSmartCounts returns cached smart-playlist match counts (id→count), computed OFF-THREAD:
+// each count is len(filterSmartDB(...)) = a full ~23k scan + a compat DB read, and it ran per
+// smart list per render. Keyed by all three epochs it depends on (library + playlist + compat)
+// plus a hash of every smart rule set; render shows a placeholder until the first compute lands.
+// Caller holds s.mu.
+func (u *UI) libSmartCounts(s *libSt, rows []libdb.PlaylistRow) map[int64]int {
+	if u.svc.Lib == nil {
+		return nil
+	}
+	libVer, plVer, compatVer := u.libEpochs()
+	sig := libSmartCountSig(s.loadGen, libVer, plVer, compatVer, rows)
+	if s.smartCountsOK && s.smartCountsSig == sig {
+		return s.smartCounts
+	}
+	if s.smartCountsBusy {
+		return s.smartCounts // stale/nil until the in-flight compute lands
+	}
+	smart := make([]libdb.PlaylistRow, 0)
+	for _, p := range rows {
+		if p.Kind == libdb.PlaylistSmart {
+			smart = append(smart, p)
+		}
+	}
+	if len(smart) == 0 { // nothing to eval: mark this sig ready (empty)
+		s.smartCounts, s.smartCountsSig, s.smartCountsOK = map[int64]int{}, sig, true
+		return s.smartCounts
+	}
+	s.smartCountsBusy = true
+	trk := s.tracks // immutable after load (replaced wholesale on reload) - safe to read off-thread
+	u.bg(func() {
+		counts := make(map[int64]int, len(smart))
+		for _, p := range smart {
+			if r, ok := libParseRules(p.Rules); ok {
+				counts[p.ID] = len(u.filterSmartDB(trk, r))
+			}
+		}
+		s.mu.Lock()
+		s.smartCounts, s.smartCountsSig, s.smartCountsOK, s.smartCountsBusy = counts, sig, true, false
+		s.mu.Unlock()
+		if !u.stopped() {
+			u.libPatchBody()
+		}
+	})
+	return s.smartCounts
+}
+
+// libSmartCountSig hashes loadGen + the three epochs + every smart rule set, so a library/playlist/
+// compat mutation, a reload (Cleanup drops tracks without a libVer bump), OR a rules edit invalidates
+// the counts. loadGen matches collViewSignature: every memo that scans s.tracks must key on it.
+func libSmartCountSig(loadGen int, libVer, plVer, compatVer int64, rows []libdb.PlaylistRow) uint64 {
+	h := fnv.New64a()
+	fmt.Fprintf(h, "g%d|l%d|p%d|c%d", loadGen, libVer, plVer, compatVer)
+	for _, p := range rows {
+		if p.Kind == libdb.PlaylistSmart {
+			fmt.Fprintf(h, "|%d=%s", p.ID, p.Rules)
+		}
+	}
+	return h.Sum64()
+}
+
+// libDetailData returns the selected track's works-together partners + playlist memberships,
+// resolved OFF-THREAD and cached on the selection: both were per-detail-render DB queries and the
+// detail rebuilds on every collection body render (= every keystroke). Re-resolves when the
+// Compat/Playlist epochs move; ready=false only until the first resolve lands. Caller holds s.mu.
+func (u *UI) libDetailData(s *libSt, path string) (compat []libdb.CompatRow, pls []libdb.PlaylistRow, ready bool) {
+	sel := s.sel
+	if sel == nil || sel.path != path || u.svc.Lib == nil {
+		return nil, nil, true // no library / no selection: sections render their normal empty state
+	}
+	cv, pv := u.svc.Lib.CompatVersion(), u.svc.Lib.PlaylistVersion()
+	if sel.detReady && sel.detCompatVer == cv && sel.detPlVer == pv {
+		return sel.detCompat, sel.detPls, true
+	}
+	if !sel.detBusy {
+		sel.detBusy = true
+		u.bg(func() {
+			c, _ := u.svc.Lib.CompatFor(path)
+			p, _ := u.svc.Lib.PlaylistsForTrack(path)
+			s.mu.Lock()
+			if s.sel != nil && s.sel.path == path {
+				s.sel.detCompat, s.sel.detPls = c, p
+				s.sel.detCompatVer, s.sel.detPlVer = cv, pv
+				s.sel.detReady, s.sel.detBusy = true, false
+			}
+			s.mu.Unlock()
+			if !u.stopped() {
+				u.libPatchDetail()
+			}
+		})
+	}
+	return sel.detCompat, sel.detPls, sel.detReady // stale-until-ready (empty on first resolve)
+}
+
 // ── Playlists ───────────────────────────────────────────────────────────────
 
 func (u *UI) libPlaylistsHTML(s *libSt) string {
 	if u.svc.Lib == nil {
 		return emptyState(i18n.T("library.dbUnavailable"))
 	}
-	rows, _ := u.svc.Lib.ListPlaylists()
+	rows := u.libPlaylists(s)
+	counts := u.libSmartCounts(s, rows)
 	var b strings.Builder
 	b.WriteString(`<div class=lib-toolbar>`)
 	b.WriteString(btn(i18n.T("library.pl.new"), "primary", "lib-pl-new", ""))
@@ -1043,7 +1340,11 @@ func (u *UI) libPlaylistsHTML(s *libSt) string {
 		case libdb.PlaylistSmart:
 			ic = "⚡"
 			if r, ok := libParseRules(p.Rules); ok {
-				sub = i18n.T("library.pl.smartSub", i18n.A{"count": fmt.Sprint(len(u.filterSmartDB(s.tracks, r))), "desc": r.Describe()})
+				cnt := "…"
+				if c, ok2 := counts[p.ID]; ok2 {
+					cnt = fmt.Sprint(c)
+				}
+				sub = i18n.T("library.pl.smartSub", i18n.A{"count": cnt, "desc": r.Describe()})
 			}
 		case libdb.PlaylistImported:
 			ic = "⤓"
@@ -1116,13 +1417,13 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	return b.String()
 }
 
-// libFolderPlaylist returns the playlist bound to dir (imported folder / manual mark).
-func (u *UI) libFolderPlaylist(dir string) *libdb.PlaylistRow {
+// libFolderPlaylist returns the playlist bound to dir (imported folder / manual mark). Caller holds s.mu.
+func (u *UI) libFolderPlaylist(s *libSt, dir string) *libdb.PlaylistRow {
 	if u.svc.Lib == nil {
 		return nil
 	}
 	d := filepath.Clean(dir)
-	rows, _ := u.svc.Lib.ListPlaylists()
+	rows := u.libPlaylists(s)
 	for i := range rows {
 		if rows[i].Folder != "" && filepath.Clean(rows[i].Folder) == d {
 			return &rows[i]
@@ -1443,13 +1744,21 @@ func (u *UI) libDetailHTML(s *libSt) string {
 			btnRow(btn(i18n.T("library.insp.writeTags"), "primary", "lib-tags-write:"+sel.path, ""), btn(i18n.T("library.revert"), "ghost", "lib-tags-revert:"+sel.path, ""))+
 			u.tfEditorHTML(s, sel)))
 	}
+	// detail-rail DB reads (works-together partners + playlist membership) resolve off-thread and
+	// cache on the selection - they used to run per detail render (= per keystroke).
+	var detCompat []libdb.CompatRow
+	var detPls []libdb.PlaylistRow
+	detReady := true
+	if sel.kind == "audio" {
+		detCompat, detPls, detReady = u.libDetailData(s, sel.path)
+	}
 	// PLAYLISTS membership
 	if sel.kind == "audio" {
-		b.WriteString(inspSec(i18n.T("library.insp.playlists"), u.libTrackPlaylistsHTML(sel.path)))
+		b.WriteString(inspSec(i18n.T("library.insp.playlists"), u.libTrackPlaylistsHTML(sel.path, detPls, detReady)))
 	}
 	// WORKS WELL TOGETHER (compat marks + discovery)
 	if sel.inColl && sel.kind == "audio" && u.svc.Lib != nil {
-		b.WriteString(inspSec(i18n.T("library.compat.section"), u.libCompatSectionHTML(s, sel.path)))
+		b.WriteString(inspSec(i18n.T("library.compat.section"), u.libCompatSectionHTML(s, sel.path, detCompat, detReady)))
 	}
 	// DETAILS
 	b.WriteString(inspSec(i18n.T("library.insp.details"), u.libDetailsMeta(sel.track)))
@@ -1464,17 +1773,22 @@ func (u *UI) libHarmonicHTML(s *libSt, sel *libSel) string {
 		btnRow(btn(i18n.T("library.harmonic.show"), "outline", "lib-key-harmonic:"+k.Camelot(), ""), btn(i18n.T("library.harmonic.clear"), "ghost", "lib-key-clear", ""))
 }
 
-func (u *UI) libTrackPlaylistsHTML(path string) string {
+// libTrackPlaylistsHTML renders the selected track's playlist chips from the off-thread-resolved
+// cache (see libDetailData); ready=false shows a loading line until the first resolve lands.
+func (u *UI) libTrackPlaylistsHTML(path string, pls []libdb.PlaylistRow, ready bool) string {
 	if u.svc.Lib == nil {
 		return `<p class=page-sub>-</p>`
 	}
-	pls, _ := u.svc.Lib.PlaylistsForTrack(path)
 	var chips string
 	for _, p := range pls {
 		chips += fchip(p.Name, "", fmt.Sprintf("lib-plgoto:%d", p.ID), false)
 	}
 	if chips == "" {
-		chips = `<span class=page-sub>` + html.EscapeString(i18n.T("library.insp.notInPlaylist")) + `</span>`
+		empty := i18n.T("library.insp.notInPlaylist")
+		if !ready {
+			empty = i18n.T("library.remote.col.loading")
+		}
+		chips = `<span class=page-sub>` + html.EscapeString(empty) + `</span>`
 	}
 	return chips + `<div class=btn-row>` + btn(i18n.T("library.addToPlaylist"), "outline", "lib-track-addto:"+path, "") + `</div>`
 }

@@ -176,7 +176,7 @@ func init() {
 	onExact("lib-collsel-all", func(u *UI, m actMsg) {
 		on := m.Val == "true"
 		u.libSet(func(s *libSt) {
-			for _, ti := range s.collView() {
+			for _, ti := range u.libCollView(s) {
 				if on {
 					s.collSel[s.tracks[ti].Path] = true
 				} else {
@@ -371,7 +371,7 @@ func (u *UI) libCollSelMod(path string, m actMsg, chkVal string) {
 	if m.shift() {
 		on := chkVal == "" || chkVal == "true"
 		order := make([]string, 0, len(s.tracks))
-		for _, ti := range s.collView() {
+		for _, ti := range u.libCollView(s) {
 			order = append(order, s.tracks[ti].Path)
 		}
 		libRangeApply(order, s.collSel, s.collAnchor, path, on)

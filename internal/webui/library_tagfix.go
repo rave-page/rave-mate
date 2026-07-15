@@ -278,22 +278,32 @@ func (u *UI) tfEditOpen() {
 	if sel == nil {
 		return
 	}
-	cur, err := tagwrite.Read(sel.path)
-	if err != nil {
-		u.toast(i18n.T("library.tf.readFailed") + err.Error())
-		return
-	}
-	s.mu.Lock()
-	s.tagEdit = true
-	s.tagDraft = map[string]string{}
-	for _, f := range tfEditFields {
-		s.tagDraft[f] = cur[f]
-	}
-	if r, err := strconv.Atoi(cur[tagwrite.FieldRating]); err == nil && r > 5 {
-		s.tagDraft["rating"] = fmt.Sprint(int(math.Round(float64(r) / 51))) // 0-255 → stars
-	}
-	s.mu.Unlock()
-	u.libPatchDetail()
+	path := sel.path
+	u.bg(func() { // tag-file parse off the actWorker (mirrors tfEditSave)
+		cur, err := tagwrite.Read(path)
+		if err != nil {
+			u.toast(i18n.T("library.tf.readFailed") + err.Error())
+			return
+		}
+		s.mu.Lock()
+		if s.sel == nil || s.sel.path != path { // selection moved while we read: don't seed the new track with the old one's tags
+			s.mu.Unlock()
+			return
+		}
+		s.tagEdit = true
+		s.tagDraft = map[string]string{}
+		for _, f := range tfEditFields {
+			s.tagDraft[f] = cur[f]
+		}
+		if r, err := strconv.Atoi(cur[tagwrite.FieldRating]); err == nil && r > 5 {
+			s.tagDraft["rating"] = fmt.Sprint(int(math.Round(float64(r) / 51))) // 0-255 → stars
+		}
+		s.mu.Unlock()
+		if u.stopped() {
+			return
+		}
+		u.libPatchDetail()
+	})
 }
 
 // tfEditSave writes the draft through tagsync (one atomic file write, revertible).
