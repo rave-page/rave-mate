@@ -5,63 +5,73 @@ import "testing"
 // A sustained LED flash (new feedback across >=flashStreak polls) reads as PAUSED.
 func TestSustainedFlashIsPaused(t *testing.T) {
 	d := newDetector()
-	// poll 1: flash burst on deck A (warm-up: streak=1, not yet a flash)
-	d.step([]fbEvent{{1, "A", true}, {2, "A", false}, {3, "A", true}, {4, "A", false}})
-	// poll 2: more flash (new seqs 5,6) → streak=2 → paused
-	r := d.step([]fbEvent{{3, "A", true}, {4, "A", false}, {5, "A", true}, {6, "A", false}})
+	d.step([]fbEvent{{1, "A"}, {2, "A"}}) // poll 1: streak 1 (transient)
+	r := d.step([]fbEvent{{3, "A"}, {4, "A"}})
 	if r["A"] != false {
 		t.Fatalf("sustained flash: deck A = %v, want false (paused)", r["A"])
 	}
 }
 
-// When the flash STOPS (ring frozen: entries reappear but no new Seq) and the LED settled
-// lit, the deck reads as PLAYING.
+// A deck that WAS flashing (paused) and then goes SILENT (no new feedback) reads as PLAYING -
+// regardless of how Serato ended the flash (velocity is never consulted).
 func TestFlashStopsThenPlaying(t *testing.T) {
 	d := newDetector()
-	d.step([]fbEvent{{1, "A", true}, {2, "A", false}, {3, "A", true}, {4, "A", false}}) // streak 1
-	d.step([]fbEvent{{5, "A", true}, {6, "A", false}})                                  // streak 2 (paused)
-	// play starts: NoteOff then solid NoteOn (new 7,8; max-seq event is lit)
-	d.step([]fbEvent{{6, "A", false}, {7, "A", false}, {8, "A", true}}) // streak 3 (still flashing this poll)
-	// next polls: ring frozen on the solid NoteOn - no new Seq
-	d.step([]fbEvent{{7, "A", false}, {8, "A", true}}) // streak 0, ledOn=true
-	r := d.step([]fbEvent{{7, "A", false}, {8, "A", true}})
+	d.step([]fbEvent{{1, "A"}, {2, "A"}}) // streak 1
+	d.step([]fbEvent{{3, "A"}, {4, "A"}}) // streak 2 → paused (everFlashed)
+	r := d.step([]fbEvent{{3, "A"}, {4, "A"}})
 	if r["A"] != true {
-		t.Fatalf("settled lit LED: deck A = %v, want true (playing)", r["A"])
-	}
-}
-
-// A dark LED (last event NoteOff / vel 0), once settled (a poll with no new feedback),
-// reads as NOT playing. The first poll is transient (held), so it settles on the second.
-func TestDarkLedNotPlaying(t *testing.T) {
-	d := newDetector()
-	d.step([]fbEvent{{1, "B", false}}) // transient (held) - no classification yet
-	r := d.step([]fbEvent{{1, "B", false}})
-	got, ok := r["B"]
-	if !ok || got != false {
-		t.Fatalf("settled dark LED: deck B = %v (present=%v), want false", got, ok)
+		t.Fatalf("flash stopped: deck A = %v, want true (playing)", r["A"])
 	}
 }
 
 // The first (transient) poll must NOT classify - a paused deck's opening flash frame should
-// not momentarily read as playing (the live-probe startup blip).
+// not momentarily read as playing.
 func TestFirstPollNoBlip(t *testing.T) {
 	d := newDetector()
-	if r := d.step([]fbEvent{{1, "A", true}, {2, "A", false}}); len(r) != 0 {
-		t.Fatalf("first poll classified %v, want nothing (transient held)", r)
+	if r := d.step([]fbEvent{{1, "A"}, {2, "A"}}); len(r) != 0 {
+		t.Fatalf("first poll classified %v, want nothing (transient)", r)
 	}
 }
 
-// Decks are independent: A flashing (paused) while B holds solid (playing).
+// A deck never seen to sustain a flash (so we don't know it as a loaded/paused deck) is left
+// UNCLASSIFIED - the Play button + History decide, not a guess.
+func TestNeverFlashedNotClassified(t *testing.T) {
+	d := newDetector()
+	d.step([]fbEvent{{1, "B"}}) // one-poll twitch (streak 1), never a sustained flash
+	r := d.step(nil)
+	if _, ok := r["B"]; ok {
+		t.Fatalf("never-flashed deck B classified %v, want unclassified", r["B"])
+	}
+}
+
+// A PLAYING deck emits NO feedback (verified live: silent wire). Once it has flashed and gone
+// silent it must stay PLAYING even across polls with no events at all (its ring entries age
+// out under another deck's blink).
+func TestPlayingDeckHeldWhenSilent(t *testing.T) {
+	d := newDetector()
+	d.step([]fbEvent{{1, "A"}})           // streak 1
+	d.step([]fbEvent{{2, "A"}})           // streak 2 → paused (everFlashed)
+	d.step([]fbEvent{{2, "A"}})           // settled → playing
+	if r := d.step(nil); r["A"] != true { // no events at all
+		t.Fatalf("silent aged-out deck A = %v, want PLAYING held", r["A"])
+	}
+	if r := d.step([]fbEvent{{99, "B"}}); r["A"] != true { // only B active
+		t.Fatalf("deck A while only B has feedback = %v, want PLAYING held", r["A"])
+	}
+}
+
+// Decks are independent: A flashing (paused) while B has flashed-then-settled (playing).
 func TestPerDeckIndependent(t *testing.T) {
 	d := newDetector()
-	d.step([]fbEvent{{1, "A", true}, {2, "A", false}, {10, "B", true}})
-	d.step([]fbEvent{{3, "A", true}, {4, "A", false}, {10, "B", true}}) // A new (flash), B stale (frozen solid)
-	r := d.step([]fbEvent{{5, "A", true}, {6, "A", false}, {10, "B", true}})
+	d.step([]fbEvent{{1, "A"}, {1, "B"}}) // both streak 1
+	d.step([]fbEvent{{2, "A"}, {2, "B"}}) // both streak 2 → paused (everFlashed)
+	d.step([]fbEvent{{3, "A"}, {2, "B"}}) // A keeps flashing; B settles → playing
+	r := d.step([]fbEvent{{4, "A"}, {2, "B"}})
 	if r["A"] != false {
-		t.Fatalf("deck A = %v, want false (paused/flashing)", r["A"])
+		t.Fatalf("deck A = %v, want false (paused)", r["A"])
 	}
 	if r["B"] != true {
-		t.Fatalf("deck B = %v, want true (settled lit)", r["B"])
+		t.Fatalf("deck B = %v, want true (playing)", r["B"])
 	}
 }
 
