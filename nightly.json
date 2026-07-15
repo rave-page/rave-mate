@@ -1,13 +1,13 @@
 {
-  "version": "nightly-ba64bbe",
-  "build": 84,
-  "commit": "ba64bbe",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-84-20260715-ba64bbe.exe",
-  "sha256": "1fe3b4addf311e806dbf73596c8105aeadd3a0459c26f2ee77db761ae9c3aae5",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-84-20260715-ba64bbe.exe",
-  "installer_sha256": "863000c06b38a82275e72353e03e3197cbf6181ddcba2d2d87161d82772fff38",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-84-20260715-ba64bbe",
-  "linux_sha256": "cbe7148136c4e6da0ac362c71c760f2cb93c087005087bc4855090a36f617f9b",
+  "version": "nightly-2e289cf",
+  "build": 85,
+  "commit": "2e289cf",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-85-20260715-2e289cf.exe",
+  "sha256": "1eb6aa049f10488ee389a1a52647fd9d3a63b4d2f79c9c1cdafdf21135397a1b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-85-20260715-2e289cf.exe",
+  "installer_sha256": "82d816e20644d5b3a6e3a202048b574512d52abb11c62f70d3a180beb9182da1",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-85-20260715-2e289cf",
+  "linux_sha256": "7b4cdc9bb9b0ecbb07b4087a7f84a2c71fd1f51b12b236a89f8780323f25ce66",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T01:41:54Z",
-  "notes": "Merge fix/cue-listen-hold-play: cue-audition hold-to-play + native audio engine"
+  "released": "2026-07-15T03:05:00Z",
+  "notes": "Merge gridfix trained-model fix: checkpoint-aware cache + force re-analyze"
 }
