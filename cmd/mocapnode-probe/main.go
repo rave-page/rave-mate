@@ -12,6 +12,11 @@
 // spout = the DIRECT camera-node path (VRChat Stream Camera -> Spout2 -> in-process
 // videoshare receiver; needs a SPOUT=1 build, -device "" lists senders). dshow = the
 // no-Spout-build fallback chain (Spout -> OBS Spout source -> OBS Virtual Camera -> dshow).
+//
+// Master mode: -master routes packets through a mocapmaster.Master (pose store + region
+// renderer) built from -bone-slots/-stage-min/-stage-size; -region-out FILE.png additionally
+// renders the composite mocap region into a black 1920x1080 canvas once per second and
+// overwrites the PNG - a live conformance fixture for world-side decoders.
 package main
 
 import (
@@ -19,10 +24,14 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"os/signal"
 	"time"
 
+	"rave.page/mate/internal/mocapmaster"
 	"rave.page/mate/internal/mocapnode"
 )
 
@@ -38,6 +47,12 @@ func main() {
 		monitor = flag.Int("monitor", 0, "desktop monitor index (ddagrab output_idx)")
 		grabber = flag.String("grabber", "ddagrab", "desktop grabber: ddagrab|gdigrab")
 		fps     = flag.Int("fps", 30, "target capture fps")
+
+		master    = flag.Bool("master", false, "route packets through a mocapmaster.Master (pose store + region renderer)")
+		regionOut = flag.String("region-out", "", "with -master: overwrite this PNG with the rendered 1920x1080 region frame once per second")
+		boneSlots = flag.Int("bone-slots", 22, "master bone slots S (1..32; region stride = 8+2*S)")
+		stageMin  = flag.String("stage-min", "-8,0,-6", "master stage bounds min x,y,z (m)")
+		stageSize = flag.String("stage-size", "16,4,12", "master stage bounds size x,y,z (m; all > 0)")
 	)
 	flag.Parse()
 
@@ -61,10 +76,27 @@ func main() {
 		defer func() { _ = f.Close() }()
 		cfg.Dump = f
 	}
-	node := mocapnode.New(cfg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	if *regionOut != "" && !*master {
+		fmt.Fprintln(os.Stderr, "mocapnode-probe: -region-out needs -master")
+		os.Exit(2)
+	}
+	if *master {
+		m, err := buildMaster(*boneSlots, *stageMin, *stageSize)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mocapnode-probe:", err)
+			os.Exit(2)
+		}
+		cfg.OnPacket = m.OnPacket
+		if *regionOut != "" {
+			go writeRegionPNGs(ctx, m, *regionOut)
+		}
+	}
+	node := mocapnode.New(cfg)
+
 	if *stats {
 		go printStats(ctx, node)
 	}
@@ -73,6 +105,67 @@ func main() {
 		os.Exit(1)
 	}
 	printHealth(node.Health())
+}
+
+// buildMaster wires a Master from the probe flags.
+func buildMaster(boneSlots int, minS, sizeS string) (*mocapmaster.Master, error) {
+	min, err := parseVec3(minS)
+	if err != nil {
+		return nil, fmt.Errorf("bad -stage-min: %w", err)
+	}
+	size, err := parseVec3(sizeS)
+	if err != nil {
+		return nil, fmt.Errorf("bad -stage-size: %w", err)
+	}
+	return mocapmaster.New(mocapmaster.Config{
+		BoneSlots: boneSlots, StageMin: min, StageSize: size,
+		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
+	})
+}
+
+// writeRegionPNGs renders the master's region into a black 1920x1080 canvas once per second
+// and overwrites path (write temp + rename so a reader never sees a torn file).
+func writeRegionPNGs(ctx context.Context, m *mocapmaster.Master, path string) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	canvas := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 255}), image.Point{}, draw.Src)
+			m.RenderInto(canvas)
+			if err := writePNG(path, canvas); err != nil {
+				fmt.Fprintln(os.Stderr, "mocapnode-probe: region-out:", err)
+			}
+		}
+	}
+}
+
+func writePNG(path string, img image.Image) error {
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// parseVec3 parses "x,y,z" into metres.
+func parseVec3(s string) ([3]float64, error) {
+	var v [3]float64
+	if _, err := fmt.Sscanf(s, "%g,%g,%g", &v[0], &v[1], &v[2]); err != nil {
+		return v, fmt.Errorf("%q (want x,y,z)", s)
+	}
+	return v, nil
 }
 
 // buildSource maps the flag set onto a mocapnode Source.
