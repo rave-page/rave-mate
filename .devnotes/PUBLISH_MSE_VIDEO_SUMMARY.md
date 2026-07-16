@@ -45,3 +45,22 @@ Feed fMP4 the way it's designed to be fed: MediaSource Extensions.
 | bytes to first frame | ~1 GB (1,867 range hops) | ~19 MB (1 fragment) |
 
 Diagnostics kept: `__jsdbg` act (page-JS → logbus), mediahttp serve Debug log (range/bytes/ms).
+
+## Audio half: FLAC binary-search seek (internal/audio/flac.go)
+
+Same symptom on the audio master (direct FLAC captures): mewkiz `Stream.Seek` needs a
+SEEKTABLE; without one (ffmpeg's flac muxer never writes one) it silently runs
+`makeSeekTable()` = full-file decode BEFORE the first seek returns. Measured 1.19 s / 12 MiB →
+~47 s on the 485 MB hour set, re-paid per open; `PlayFrom` seeks even for 0:00, so plain play
+paid it too.
+
+Fix: own the seek. flacDecoder now parses STREAMINFO itself, decodes via `flac/frame` directly,
+and `SeekTo` binary-searches the FILE: FLAC frame headers carry their own absolute sample
+number + CRC-8, so a probe = "scan ≤64 KB to the next validated header, read its sample
+number". O(log n), no index, no cache, any FLAC. Landing is a running-position decode from the
+anchor - NOT `frame.SampleNumber()`, which is wrong for the final short frame of a
+fixed-blocksize stream (frame number × THIS frame's short size); probes reject that frame too.
+
+Measured (real 485 MB seektable-less capture): open instant, every seek 0.5-30 ms,
+sample-exact vs full-decode reference. Pinned by `flac_seek_test.go` (committed seektable-less
+fixture; bounded-read gate proves no rescan) + the `-tags manual` on-file suite.
