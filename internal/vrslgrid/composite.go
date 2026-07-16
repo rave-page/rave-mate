@@ -79,6 +79,13 @@ type CompositeSpec struct {
 	LookID       byte // semantic lane: active look id (reserved for a VJ-state integration)
 	SceneID      byte // semantic lane: active scene id (reserved)
 	Blackout     byte // semantic lane: 0=normal, 255=hard blackout
+
+	// Overlay, when non-nil, is invoked LAST with the finished frame - the seam for co-resident
+	// extensions to paint the gap between the grids (e.g. the composite mocap region,
+	// MOCAP_PANEL_CONTRACT.md §10, via mocapmaster.Master.Overlay). The painter must never touch
+	// the lighting grids (x < 208 or x >= StripX0); extensions needing the calibration triad
+	// require Extended mode (the triad is part of the metadata band).
+	Overlay func(*image.RGBA)
 }
 
 // RenderComposite rasterizes the DMX store into the streamable frame for spec. Always opaque; cells
@@ -105,12 +112,14 @@ func RenderComposite(r Reader, spec CompositeSpec) *image.RGBA {
 	// High-byte grid → right strip (stock VRSL reads only this).
 	drawGrid(img, StripX0, unis, mode, highByte)
 
-	if !spec.Extended {
-		return img
+	if spec.Extended {
+		// Low-byte mirror grid → left. 8-bit source: low = high (bit-replication → lossless 16-bit).
+		drawGrid(img, LowGridX0, unis, mode, lowByte)
+		drawMetaBand(img, unis, mode, spec)
 	}
-	// Low-byte mirror grid → left. 8-bit source: low = high (bit-replication → lossless 16-bit).
-	drawGrid(img, LowGridX0, unis, mode, lowByte)
-	drawMetaBand(img, unis, mode, spec)
+	if spec.Overlay != nil {
+		spec.Overlay(img)
+	}
 	return img
 }
 
