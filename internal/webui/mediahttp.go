@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"rave.page/mate/internal/store"
 )
 
 // Loopback media endpoint for the unified player's embedded <video>: streams local files
@@ -119,6 +121,18 @@ func (u *UI) mpMediaURL(path string) string {
 		s.evictMediaLocked(u)
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/m/%s", s.port, tok)
+}
+
+// mpIndexURL returns the /mi/ URL serving path's cached fragmented-MP4 stream index
+// (mp4frag.Index JSON, consumed by the shell __mse runtime). Same token as the /m/ media
+// stream - the index is only rendered into the DOM once the cache is warm (mpLoadFrag), so
+// the endpoint can serve straight from the store.
+func (u *UI) mpIndexURL(path string) string {
+	mediaURL := u.mpMediaURL(path)
+	if mediaURL == "" {
+		return ""
+	}
+	return strings.Replace(mediaURL, "/m/", "/mi/", 1)
 }
 
 // evictMediaLocked drops one token: the oldest minted by u, else the global oldest. Caller
@@ -246,6 +260,9 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Range")
 		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		// Range is not CORS-safelisted → every MSE fragment fetch would preflight; cache the
+		// verdict (Chromium caps at 2 h) so steady-state streaming is one request per fragment.
+		w.Header().Set("Access-Control-Max-Age", "7200")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -261,9 +278,14 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		ruiProxyServe(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/mi/") { // fragmented-MP4 stream index (MSE runtime)
+		s.serveIndex(w, r)
+		return
+	}
 	tok := strings.TrimPrefix(r.URL.Path, "/m/")
 	s.mu.Lock()
 	path, ok := s.tokens[tok]
+	owner := s.owner[tok]
 	s.mu.Unlock()
 	if !ok || tok == "" {
 		http.NotFound(w, r)
@@ -280,7 +302,55 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f) // Range-capable
+	cw := &countingWriter{ResponseWriter: w}
+	start := time.Now()
+	http.ServeContent(cw, r, fi.Name(), fi.ModTime(), f) // Range-capable
+	if owner != nil {
+		owner.log.Debug("mediahttp", "serve", map[string]any{
+			"file": fi.Name(), "range": r.Header.Get("Range"), "sent": cw.n,
+			"ms": time.Since(start).Milliseconds(),
+		})
+	}
+}
+
+// countingWriter counts body bytes for the media-serve debug log.
+type countingWriter struct {
+	http.ResponseWriter
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// serveIndex serves a media token's cached fragmented-MP4 index JSON (404 when the file is
+// not a supported fMP4 - the negative sentinel has no frags - or the cache is cold/stale;
+// the JS runtime then falls back to plain src). Store read only - never parses here.
+func (s *mpMediaSrv) serveIndex(w http.ResponseWriter, r *http.Request) {
+	tok := strings.TrimPrefix(r.URL.Path, "/mi/")
+	s.mu.Lock()
+	path, ok := s.tokens[tok]
+	owner := s.owner[tok]
+	s.mu.Unlock()
+	if !ok || tok == "" || owner == nil || owner.svc.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	data, ok := owner.svc.Store.GetAnalysis(store.KindMp4Frag, path, fi.ModTime().Unix())
+	if !ok || !bytes.Contains(data, []byte(`"frags"`)) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // mtime-keyed server-side; tiny payload
+	_, _ = w.Write(data)
 }
 
 // serveImg serves a token's resized JPEG (decode+resize once, then cache the bytes).

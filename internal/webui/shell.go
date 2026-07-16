@@ -169,7 +169,8 @@ const runtimeJS = `(function(){
     send({act: f.getAttribute('data-act'), form: JSON.stringify(d), id: __elId(f)});
   });
   window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html;
-    if(html.indexOf('ss-panel')>=0) __ssplace(); } };
+    if(html.indexOf('ss-panel')>=0) __ssplace();
+    if(html.indexOf('data-mse')>=0) __mseScan(); } };
   window.__toast = function(msg){
     var t=document.getElementById('__toasts');
     if(!t){ t=document.createElement('div'); t.id='__toasts';
@@ -642,4 +643,164 @@ const runtimeJS = `(function(){
     __rtStep(st);                               // apply immediately (paused/seek snap needs no frame)
     if(st.rate>0 && !__rtRAF) __rtRAF=requestAnimationFrame(__rtLoop);
   };
+  // ── MSE feeder for fragmented MP4s (video[data-mse]) ──────────────────────────
+  // OBS records fragmented MP4; Chromium's demuxer ignores mfra and range-scans every moof
+  // of a multi-GB file before it will play or seek (~1 GB reads, 30 s+ on a busy disk). Go
+  // indexes the file once (mp4frag, store-cached) and serves {mime, init, frags[{t,o}]} at
+  // data-mse; this runtime appends the init segment + only the fragments around the playhead
+  // through MediaSource. Seek = binary-search the table. Any failure → plain src fallback
+  // (data-mse-src), i.e. exactly the old behavior. Idle/paused with a full buffer = zero work.
+  // Init-time script: no MutationObserver here (documentElement doesn't exist yet when this
+  // runs). Every Go DOM update flows through __patch, which calls __mseScan when the fragment
+  // carries a data-mse video; the bottom-of-file scan covers full-page loads.
+  function __mseScan(){
+    var vids=document.querySelectorAll('video[data-mse]');
+    for(var i=0;i<vids.length;i++){ if(!vids[i].__mse) __mseInit(vids[i]); }
+  }
+  function __mseDbg(m){ send({act:'__jsdbg', val:'mse: '+m}); }
+  function __mseFail(v,why){
+    var st=v.__mse; if(st){ st.dead=1; if(st.ab){ try{st.ab.abort();}catch(e){} } }
+    __mseDbg('fallback to plain src: '+why);
+    var raw=v.getAttribute('data-mse-src');
+    if(raw){ var t=v.currentTime||0; v.src=raw; try{ v.load(); if(t>0.2) v.currentTime=t; }catch(e){} }
+  }
+  function __mseInit(v){
+    var st={next:-1,gen:0,dead:0}; v.__mse=st;
+    if(!window.MediaSource){ __mseFail(v,'no MediaSource'); return; }
+    fetch(v.getAttribute('data-mse')).then(function(r){ if(!r.ok) throw new Error('index '+r.status); return r.json(); })
+    .then(function(idx){
+      if(st.dead || !v.isConnected) return;
+      if(!idx || !idx.frags || !idx.frags.length || !idx.initb64) throw new Error('empty index');
+      if(!MediaSource.isTypeSupported(idx.mime)) throw new Error('unsupported '+idx.mime);
+      st.idx=idx; st.src=v.getAttribute('data-mse-src');
+      __mseDbg('index ok: '+idx.frags.length+' frags, '+idx.mime);
+      var ms=new MediaSource(); st.ms=ms;
+      ms.addEventListener('sourceopen',function(){
+        if(st.sb || st.dead) return;
+        URL.revokeObjectURL(v.__mseURL);
+        try{ st.sb=ms.addSourceBuffer(idx.mime); }catch(e){ __mseFail(v,'addSourceBuffer'); return; }
+        try{ ms.duration=idx.dur; }catch(e){}
+        st.sb.addEventListener('updateend',function(){ __msePump(v); });
+        st.sb.addEventListener('error',function(){ __mseFail(v,'sourcebuffer error (state '+ms.readyState+')'); });
+        // sanitized init segment rides in the index (Go patched OBS's samplesize=0 quirk)
+        var b=atob(idx.initb64), init=new Uint8Array(b.length);
+        for(var i=0;i<b.length;i++) init[i]=b.charCodeAt(i);
+        st.pend=init.buffer; st.pendIdx=-1; __msePump(v);
+      });
+      ['play','waiting','timeupdate'].forEach(function(n){ v.addEventListener(n,function(){ __msePump(v); }); });
+      v.addEventListener('seeking',function(){ __mseSeek(v); });
+      v.__mseURL=URL.createObjectURL(ms);
+      v.src=v.__mseURL;
+    }).catch(function(e){ __mseFail(v,e&&e.message||'index fetch'); });
+  }
+  function __mseTarget(st,t){ var f=st.idx.frags, lo=0, hi=f.length-1;
+    while(lo<hi){ var m=(lo+hi+1>>1); if(f[m].t<=t) lo=m; else hi=m-1; } return lo; }
+  function __mseFragEnd(st,i){ var f=st.idx.frags; return i+1<f.length? f[i+1].o : st.idx.end; }
+  // __mseFix rewrites one fetched fragment ([moof][mdat]) for MSE: OBS addresses sample data
+  // by ABSOLUTE file offset (tfhd base-data-offset), which MSE's movie-fragment-relative rule
+  // rejects. Drop each 8-byte base_data_offset, set DEFAULT_BASE_IS_MOOF (0x020000), and
+  // shift every trun data_offset by (base - moof file offset - bytes removed). Returns the
+  // rewritten buffer (or the input untouched when the moof is already relative / unparsable -
+  // the SourceBuffer then reports honestly).
+  function __mseFix(buf, fileOff){
+    var d=new DataView(buf), u=new Uint8Array(buf);
+    if(u.byteLength<16) return buf;
+    var moofSz=d.getUint32(0);
+    if(moofSz<16||moofSz>u.byteLength||String.fromCharCode(u[4],u[5],u[6],u[7])!=='moof') return buf;
+    var cuts=[], trafFix=[], tfhdFix=[], trunFix=[];
+    var off=8;
+    while(off+8<=moofSz){
+      var sz=d.getUint32(off);
+      if(sz<8) return buf;
+      if(String.fromCharCode(u[off+4],u[off+5],u[off+6],u[off+7])==='traf'){
+        var nCut=0, base=null, o2=off+8;
+        while(o2+8<=off+sz){
+          var s2=d.getUint32(o2);
+          if(s2<8) return buf;
+          var t2=String.fromCharCode(u[o2+4],u[o2+5],u[o2+6],u[o2+7]);
+          if(t2==='tfhd'){
+            var fl=d.getUint32(o2+8)&0xffffff;
+            if((fl&1) && o2+24<=off+sz){
+              base=d.getUint32(o2+16)*4294967296+d.getUint32(o2+20);
+              cuts.push(o2+16); tfhdFix.push({pos:o2, flags:(fl&~1)|0x020000, ver:u[o2+8]});
+              nCut++;
+            }
+          } else if(t2==='trun'){
+            // a dbim traf's truns still shift by the moof shrink (base=fileOff → pure -R)
+            if(d.getUint32(o2+8)&1) trunFix.push({pos:o2+16, base:(base!==null?base:fileOff)});
+          }
+          o2+=s2;
+        }
+        if(nCut) trafFix.push({pos:off, cut:8*nCut});
+      }
+      off+=sz;
+    }
+    if(!cuts.length) return buf; // already movie-fragment relative
+    var R=8*cuts.length, i;
+    d.setUint32(0, moofSz-R);
+    for(i=0;i<trafFix.length;i++) d.setUint32(trafFix[i].pos, d.getUint32(trafFix[i].pos)-trafFix[i].cut);
+    for(i=0;i<tfhdFix.length;i++){ d.setUint32(tfhdFix[i].pos, d.getUint32(tfhdFix[i].pos)-8);
+      d.setUint32(tfhdFix[i].pos+8, (tfhdFix[i].ver<<24)|tfhdFix[i].flags); }
+    for(i=0;i<trunFix.length;i++) d.setInt32(trunFix[i].pos, d.getInt32(trunFix[i].pos)+(trunFix[i].base-fileOff)-R);
+    var out=new Uint8Array(u.byteLength-R), w=0, from=0;
+    for(i=0;i<cuts.length;i++){ out.set(u.subarray(from,cuts[i]),w); w+=cuts[i]-from; from=cuts[i]+8; }
+    out.set(u.subarray(from),w);
+    return out.buffer;
+  }
+  function __mseFetch(v, a, b, gen, fragIdx){
+    var st=v.__mse; if(st.dead||st.fetching) return; st.fetching=1;
+    st.ab=new AbortController();
+    fetch(st.src,{headers:{Range:'bytes='+a+'-'+(b-1)},signal:st.ab.signal})
+    .then(function(r){ if(!r.ok) throw new Error('range '+r.status); return r.arrayBuffer(); })
+    .then(function(buf){ st.fetching=0;
+      if(st.dead||gen!==st.gen) return;         // seek invalidated this fetch
+      st.pend=(fragIdx>=0)?__mseFix(buf, st.idx.frags[fragIdx].o):buf;
+      st.pendIdx=fragIdx; __msePump(v);
+    }).catch(function(e){ st.fetching=0;
+      if(st.dead||(e&&e.name==='AbortError')||gen!==st.gen) return;
+      __mseFail(v,'fetch: '+(e&&e.message||''));
+    });
+  }
+  function __msePump(v){
+    var st=v.__mse; if(!st||st.dead||!st.sb) return;
+    if(!v.isConnected){ st.dead=1; if(st.ab){ try{st.ab.abort();}catch(e){} } return; }
+    var sb=st.sb; if(sb.updating) return;
+    if(st.pend){                                 // one queued append at a time
+      var buf=st.pend;
+      try{ sb.appendBuffer(buf); st.pend=null;
+        if(st.pendIdx===-1){ st.inited=1; st.next=0; }
+      }catch(e){
+        if(e && e.name==='QuotaExceededError'){  // trim behind the playhead and retry on updateend
+          var cur0=v.currentTime;
+          try{ sb.remove(0, Math.max(0.1, cur0-10)); }catch(e2){ __mseFail(v,'quota'); }
+        } else __mseFail(v,'append');
+      }
+      return;
+    }
+    if(!st.inited) return;
+    var cur=v.currentTime, ahead=0, buf0=-1;
+    for(var i=0;i<v.buffered.length;i++){
+      if(cur>=v.buffered.start(i)-0.1 && cur<=v.buffered.end(i)+0.01){ ahead=v.buffered.end(i)-cur; }
+      if(i===0) buf0=v.buffered.start(0);
+    }
+    if(buf0>=0 && cur-buf0>90){ try{ sb.remove(0, cur-30); return; }catch(e){} }
+    var f=st.idx.frags;
+    if(st.next<0) st.next=__mseTarget(st,cur);
+    if(st.next>=f.length){
+      if(!st.ended && st.ms.readyState==='open'){ try{ st.ms.endOfStream(); st.ended=1; }catch(e){} }
+      return;
+    }
+    if(ahead>=30 || st.fetching) return;         // enough runway; timeupdate re-pumps as it drains
+    var idx=st.next; st.next++;
+    __mseFetch(v, f[idx].o, __mseFragEnd(st,idx), st.gen, idx);
+  }
+  function __mseSeek(v){
+    var st=v.__mse; if(!st||st.dead||!st.inited) return;
+    st.gen++; st.pend=null; st.ended=0;          // appendBuffer in 'ended' reopens the source
+    if(st.ab){ try{st.ab.abort();}catch(e){} } st.fetching=0;
+    if(st.sb && st.sb.updating){ try{ st.sb.abort(); }catch(e){} }
+    st.next=__mseTarget(st, v.currentTime);
+    __msePump(v);
+  }
+  __mseScan();
 })();`

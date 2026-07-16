@@ -38,8 +38,9 @@ func (u *UI) mpInnerHTML(t mpSt) string {
 			html.EscapeString(t.name) + `</div>`)
 	}
 
-	// embedded video (when the set has a video half / is a video file)
-	b.WriteString(u.mpVideoHTML(t))
+	// embedded video (when the set has a video half / is a video file); own patch target so
+	// the async fMP4-index resolve can swap plain-src → MSE before playback starts
+	b.WriteString(`<div id=mp-` + host + `-vid>` + u.mpVideoHTML(t) + `</div>`)
 
 	// wavebox: patched SVG inside, interaction lanes on top (lanes stay OUTSIDE the
 	// patched region so pointer capture survives repaints)
@@ -120,11 +121,19 @@ func (u *UI) mpVideoHTML(t mpSt) string {
 	if t.dual() && t.active == 0 { // audio recording is the source - video is a silent preview
 		muted = " muted"
 	}
-	// preload=none: load NOTHING on mount - a large OBS mp4 (often no faststart, moov at EOF)
-	// would otherwise make WebView2 scan the whole multi-GB file just to read metadata. The
-	// loopback server is Range-capable (mediahttp.go http.ServeContent), so playback/seek buffer
-	// progressively on demand instead of pulling the whole file.
-	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video src=` + attrQ(url) +
+	// Source strategy: a fragmented MP4 (OBS recording) streams via MSE (data-mse; shell.go
+	// __mse feeds init + only the fragments around the playhead using the mp4frag index) -
+	// Chromium's own demuxer would range-scan every moof (~1 GB / 30 s+ on an hour-long set)
+	// before playing or seeking. Anything else: plain src with preload=none - load NOTHING on
+	// mount; the loopback server is Range-capable (mediahttp.go http.ServeContent), so classic
+	// MP4s buffer progressively on demand. MSE setup failure falls back to plain src in JS.
+	src := ` src=` + attrQ(url)
+	if t.media[vi].fragOK {
+		if iu := u.mpIndexURL(t.media[vi].path); iu != "" {
+			src = ` data-mse=` + attrQ(iu) + ` data-mse-src=` + attrQ(url)
+		}
+	}
+	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video` + src +
 		` preload=none playsinline` + muted +
 		` ontimeupdate=` + attrQ(ev) + ` onplay=` + attrQ(ev) + ` onpause=` + attrQ(ev) +
 		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(ev+`;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`) + ` onerror=` + attrQ(onerr) +
