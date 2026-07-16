@@ -202,9 +202,13 @@ func (u *UI) pubListHTML(recs []recorder.Recording, sel *recorder.Recording, cap
 		if sel != nil && sel.ID == r.ID {
 			cls += " selected"
 		}
+		// Rename sits in the row's action slot: the runtime dispatches the closest [data-act], so
+		// the button wins over the row's own pub-select. Ungated - Recorder.Rename handles the
+		// live set too (unlike delete, which waits for the set to end).
 		b.WriteString(`<div class="` + cls + `" data-act="pub-select:` + html.EscapeString(r.ID) + `">` +
 			`<div class=irow-main><div class=irow-title>` + html.EscapeString(title) + `</div>` +
-			`<div class=irow-sub>` + html.EscapeString(pubSetMeta(r, caps[r.ID])) + `</div></div></div>`)
+			`<div class=irow-sub>` + html.EscapeString(pubSetMeta(r, caps[r.ID])) + `</div></div>` +
+			`<div class=irow-actions>` + btn(i18n.T("publish.renameDots"), "ghost", "pub-rename:"+r.ID, "") + `</div></div>`)
 	}
 	return b.String()
 }

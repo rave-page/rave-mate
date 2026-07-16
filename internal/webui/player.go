@@ -934,6 +934,15 @@ func (u *UI) mpExportHTML(t mpSt) string {
 			`<span class=mp-outfield>` + field(i18n.T("player.label.outputFile"), fmt.Sprintf("mp-outpath:%s\x1f%d", host, i), out, "text") + `</span>` +
 			btn("…", "ghost", "pick-save:"+mpExt(m.path, cur)+":mp-outpath:"+host+"\x1f"+fmt.Sprint(i), "") +
 			`</div>`)
+		// per-media loudness override of the chosen preset (the shared block, components.go)
+		b.WriteString(loudnessFields(loudnessOpts{
+			act:       func(f string) string { return fmt.Sprintf("mp-loud:%s\x1f%d\x1f%s", host, i, f) },
+			toggleLbl: i18n.T("library.enc.normalizeOverride"),
+			topic:     "mp-loudness",
+			vals:      m.loudOv,
+			override:  true,
+			preset:    &cur,
+		}))
 	}
 
 	if t.exporting {

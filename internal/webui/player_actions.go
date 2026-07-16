@@ -64,6 +64,10 @@ type mpMedia struct {
 
 	presetID string // export preset (default: lossless remux)
 	outPath  string // export destination ("" = auto "<base>-cut.<ext>")
+	// loudOv is this export's loudness override of presetID's own block, applied in mpPlanExport
+	// via transcode.ApplyLoudnessOverride. Off = don't override (never "force off"); 0 targets
+	// resolve to transcode's defaults. Per media: an audio/video pair exports two files.
+	loudOv loudnessVals
 }
 
 // mpMark is one track-start marker on the timeline (axis seconds).
@@ -1277,6 +1281,29 @@ func init() {
 		})
 		u.mpPatchExport(t)
 	})
+	// per-media loudness override: "mp-loud:<host>\x1f<idx>\x1f<field>" (loudnessFields' contract)
+	onPrefix("mp-loud:", func(u *UI, m actMsg) {
+		host, rest := mpArgs(m.arg("mp-loud:"))
+		idxS, f, _ := strings.Cut(rest, "\x1f")
+		idx := atoi(idxS)
+		t := u.mpMut(host, func(v *mpSt) {
+			if idx < 0 || idx >= len(v.media) {
+				return
+			}
+			ov := &v.media[idx].loudOv
+			switch f {
+			case "loudon":
+				ov.On = m.Val == "true"
+			case "loudi":
+				ov.I = atof(m.Val)
+			case "loudtp":
+				ov.TP = atof(m.Val)
+			case "loudraise":
+				ov.RaiseOnly = m.Val == "true"
+			}
+		})
+		u.mpPatchExport(t) // loudon shows/hides the targets
+	})
 	onPrefix("mp-export:", func(u *UI, m actMsg) {
 		host, which := mpArgs(m.arg("mp-export:"))
 		if which == "" { // condensed UI: scope comes from the export-target select
@@ -2119,7 +2146,11 @@ func (u *UI) mpPlanExport(t *mpSt, which string) ([]mpExportPlan, error) {
 		if e-s < 0.1 {
 			return nil, fmt.Errorf("the trim range doesn't overlap the %s recording", m.kind)
 		}
-		preset := mpPreset(u, m.presetID)
+		// The override replaces the preset's loudness block wholesale; off leaves the preset's own
+		// settings alone. The worker's NormalizePreset clamps the targets and drops loudness for
+		// copy/none audio (the export UI warns before it gets here).
+		preset := transcode.ApplyLoudnessOverride(mpPreset(u, m.presetID),
+			m.loudOv.On, m.loudOv.I, m.loudOv.TP, m.loudOv.RaiseOnly)
 		out := m.outPath
 		if out == "" {
 			out = mpOutPath(m.path, preset)

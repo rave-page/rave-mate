@@ -5,8 +5,11 @@
 
 /* ── toolbars / chips ─────────────────────────────────────────────────────── */
 .lib-toolbar { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3); }
-.lib-toolbar .field { margin:0; }
-.lib-toolbar .field-input { flex:1 1 200px; max-width:360px; }
+/* The toolbar's flex row item is the bare input (fieldRaw) OR the labelled .field wrapper.
+ * Size whichever one is the direct child: .field is itself a COLUMN flex, so sizing its
+ * input here would apply flex-basis on the vertical axis and stretch it 200px tall. */
+.lib-toolbar > .field-input { flex:1 1 200px; max-width:360px; }
+.lib-toolbar > .field { margin:0; flex:1 1 200px; max-width:360px; }
 .lib-tlabel { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--rp-muted); }
 /* label + control glued as one flex-wrap unit (toolbar dropdowns) */
 .lib-ctl { display:inline-flex; align-items:center; gap:var(--space-2); }
@@ -92,12 +95,9 @@
 .metacard .mv { font-family:var(--font-mono,monospace); }
 .metacard .mv.v { color:var(--rp-base); } .metacard .mv.a { color:var(--rp-mint); }
 
-/* ── preset / encode builder ───────────────────────────────────────────────── */
+/* ── preset / encode builder (the .pb-* field kit itself lives in components.css:
+      pbField/pbFieldEx + loudnessFields render it on the Player + Automations tabs too) ── */
 .pbuilder { display:flex; flex-direction:column; gap:var(--space-2); }
-.pb-field { display:flex; flex-direction:column; gap:3px; }
-.pb-label { font:600 10px/1 var(--font-display,Orbitron),sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--rp-muted); }
-.pb-hint { font:10px var(--font-mono,monospace); color:var(--rp-muted); }
-.pb-grp { border-top:1px dashed var(--rp-faint); padding-top:var(--space-2); }
 
 /* ── waveform (wheel = zoom at cursor, drag = pan, click = seek) ───────────── */
 #lib-wave { touch-action:none; cursor:crosshair; user-select:none; }

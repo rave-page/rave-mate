@@ -2450,8 +2450,11 @@ func hiddenField(name, val string) string {
 	return `<input type=hidden name="` + html.EscapeString(name) + `" value="` + html.EscapeString(val) + `">`
 }
 
+// labeledInput renders a named input for a <form data-act=…> modal (the value arrives in m.Form,
+// not via data-act). data-label makes it ctl-readable/settable like field/fieldEx - without it the
+// repo's form modals (rename, save-as, …) are undrivable from ctl.
 func labeledInput(name, label, val string) string {
-	return `<div class=pb-field><div class=pb-label>` + html.EscapeString(label) + `</div>` +
+	return `<div class=pb-field data-label=` + attrQ(strings.ToLower(label)) + `><div class=pb-label>` + html.EscapeString(label) + `</div>` +
 		`<input class=field-input name="` + html.EscapeString(name) + `" value="` + html.EscapeString(val) + `"></div>`
 }
 

@@ -123,3 +123,11 @@
 
 /* generic two-up card grid */
 .cardgrid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+
+/* labelled-field kit (pbField/pbFieldEx + labeledInput + the shared loudnessFields block).
+   Named for the library's preset builder, where it started; it now renders on Library,
+   Automations, Player/Publish and MIDI, so it belongs here, not in tabs/library.css. */
+.pb-field { display: flex; flex-direction: column; gap: 3px; }
+.pb-label { font: 600 10px/1 var(--font-display,Orbitron), sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--rp-muted); }
+.pb-hint { font: 10px var(--font-mono, monospace); color: var(--rp-muted); }
+.pb-grp { border-top: 1px dashed var(--rp-faint); padding-top: var(--space-2); }

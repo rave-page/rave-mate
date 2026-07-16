@@ -40,141 +40,98 @@ type kbRow struct {
 	Act   string // i18n key of the action description (resolved at render)
 }
 
-// helpTopic is a reusable explanation of one technical term/feature.
+// helpTopic is a reusable explanation of one technical term/feature. Title and body are NOT held
+// here: a topic's text is `help.<id>.title` / `help.<id>.body` and is resolved by tipTopic at
+// RENDER time. Holding the resolved strings froze every tooltip to the locale that was active when
+// this package's vars were initialized, so a language switch never reached them.
 type helpTopic struct {
-	Title string
-	// Body paragraphs, split on "\n\n". Plain text (escaped at render).
-	Body  string
 	Keys  []kbRow // optional keybind grid, shown between title and body
 	Links []ttLink
 }
 
 // helpTopics - the shared glossary. One entry per term; every surface that mentions
 // the term points here so the explanation stays consistent. Write for a newcomer,
-// stay precise for the expert.
+// stay precise for the expert. The map is the topic REGISTRY (which ids exist, plus their keybind
+// grid + links); the prose lives in the locale catalogs under help.<id>.*.
 var helpTopics = map[string]helpTopic{
-	"network-graph": {
-		Title: i18n.T("help.network-graph.title"),
-		Body:  i18n.T("help.network-graph.body"),
-	},
+	"network-graph": {},
 	"timing-graph": {
-		Title: i18n.T("help.timing-graph.title"),
-		Body:  i18n.T("help.timing-graph.body"),
 		Links: []ttLink{{"RTT explained (Wikipedia)", "https://en.wikipedia.org/wiki/Round-trip_delay"}},
 	},
-	"perf-graph": {
-		Title: i18n.T("help.perf-graph.title"),
-		Body:  i18n.T("help.perf-graph.body"),
-	},
+	"perf-graph": {},
 	"icecast": {
-		Title: i18n.T("help.icecast.title"),
-		Body:  i18n.T("help.icecast.body"),
 		Links: []ttLink{
 			{"Icecast project", "https://icecast.org/"},
 			{"Traktor broadcasting manual", "https://support.native-instruments.com/hc/en-us/articles/209590569"},
 		},
 	},
-	"session-recorder": {
-		Title: i18n.T("help.session-recorder.title"),
-		Body:  i18n.T("help.session-recorder.body"),
-	},
-	"remote-cache": {
-		Title: i18n.T("help.remote-cache.title"),
-		Body:  i18n.T("help.remote-cache.body"),
-	},
+	"session-recorder": {},
+	"remote-cache":     {},
 	"fingerprinting": {
-		Title: i18n.T("help.fingerprinting.title"),
-		Body:  i18n.T("help.fingerprinting.body"),
 		Links: []ttLink{
 			{"AcoustID / Chromaprint", "https://acoustid.org/chromaprint"},
 		},
 	},
 	"led-feedback": {
-		Title: i18n.T("help.led-feedback.title"),
-		Body:  i18n.T("help.led-feedback.body"),
 		Links: []ttLink{
 			{"MIDI 1.0 message summary (midi.org)", "https://midi.org/summary-of-midi-1-0-messages"},
 		},
 	},
 	"vrchat-announcement": {
-		Title: i18n.T("help.vrchat-announcement.title"),
-		Body:  i18n.T("help.vrchat-announcement.body"),
 		Links: []ttLink{
 			{"VRChat groups docs", "https://creators.vrchat.com/groups/"},
 		},
 	},
 	"camera-paths": {
-		Title: i18n.T("help.camera-paths.title"),
-		Body:  i18n.T("help.camera-paths.body"),
 		Links: []ttLink{
 			{"VRChat camera docs", "https://docs.vrchat.com/docs/vrchat-camera"},
 			{"VRChat OSC overview", "https://docs.vrchat.com/docs/osc-overview"},
 		},
 	},
 	"motion-studio": {
-		Title: i18n.T("help.motion-studio.title"),
-		Body:  i18n.T("help.motion-studio.body"),
 		Links: []ttLink{
 			{"VMC protocol", "https://protocol.vmc.info/english"},
 			{"VRChat OSC trackers", "https://docs.vrchat.com/docs/osc-trackers"},
 		},
 	},
 	"embedded-video": {
-		Title: i18n.T("help.embedded-video.title"),
-		Body:  i18n.T("help.embedded-video.body"),
 		Links: []ttLink{
 			{"HTTP Range requests (MDN)", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests"},
 		},
 	},
 	"wave-nav": {
-		Title: i18n.T("help.wave-nav.title"),
-		Body:  i18n.T("help.wave-nav.body"),
-		Keys:  waveNavKeys,
+		Keys: waveNavKeys,
 	},
 	"cue-edit": {
-		Title: i18n.T("help.cue-edit.title"),
-		Body:  i18n.T("help.cue-edit.body"),
-		Keys:  cueEditKeys,
+		Keys: cueEditKeys,
 	},
 	"midi-mapping": {
-		Title: i18n.T("help.midi-mapping.title"),
-		Body:  i18n.T("help.midi-mapping.body"),
 		Links: []ttLink{
 			{"MIDI 1.0 CC + relative encoder conventions (midi.org)", "https://midi.org/midi-1-0-control-change-messages"},
 		},
 	},
 	"trim-editor": {
-		Title: i18n.T("help.trim-editor.title"),
-		Body:  i18n.T("help.trim-editor.body"),
 		Links: []ttLink{
 			{"ffmpeg silencedetect", "https://ffmpeg.org/ffmpeg-filters.html#silencedetect"},
 		},
 	},
 	"dual-alignment": {
-		Title: i18n.T("help.dual-alignment.title"),
-		Body:  i18n.T("help.dual-alignment.body"),
 		Links: []ttLink{
 			{"Cross-correlation (Wikipedia)", "https://en.wikipedia.org/wiki/Cross-correlation"},
 		},
 	},
 	"vrchat-presence": {
-		Title: i18n.T("help.vrchat-presence.title"),
-		Body:  i18n.T("help.vrchat-presence.body"),
 		Links: []ttLink{
 			{"VRChat status docs", "https://docs.vrchat.com/docs/vrchat-safety-and-trust-system"},
 		},
 	},
 	// ── Transcode / encoding builder (Library) ──
 	"enc-container": {
-		Title: i18n.T("help.enc-container.title"),
-		Body:  i18n.T("help.enc-container.body"),
 		Links: []ttLink{
 			{"FFmpeg formats/muxers", "https://ffmpeg.org/ffmpeg-formats.html"},
 		},
 	},
 	"enc-video-codec": {
-		Title: i18n.T("help.enc-video-codec.title"),
-		Body:  i18n.T("help.enc-video-codec.body"),
 		Links: []ttLink{
 			{"H.264 / AVC (Wikipedia)", "https://en.wikipedia.org/wiki/Advanced_Video_Coding"},
 			{"H.265 / HEVC (Wikipedia)", "https://en.wikipedia.org/wiki/High_Efficiency_Video_Coding"},
@@ -182,82 +139,83 @@ var helpTopics = map[string]helpTopic{
 		},
 	},
 	"enc-rate": {
-		Title: i18n.T("help.enc-rate.title"),
-		Body:  i18n.T("help.enc-rate.body"),
 		Links: []ttLink{
 			{"FFmpeg CRF guide", "https://trac.ffmpeg.org/wiki/Encode/H.264#crf"},
 		},
 	},
 	"enc-audio-codec": {
-		Title: i18n.T("help.enc-audio-codec.title"),
-		Body:  i18n.T("help.enc-audio-codec.body"),
 		Links: []ttLink{
 			{"Opus codec", "https://opus-codec.org/"},
 			{"AAC (Wikipedia)", "https://en.wikipedia.org/wiki/Advanced_Audio_Coding"},
 		},
 	},
 	"enc-loudness": {
-		Title: i18n.T("help.enc-loudness.title"),
-		Body:  i18n.T("help.enc-loudness.body"),
 		Links: []ttLink{
 			{"EBU R128 loudness", "https://tech.ebu.ch/publications/r128"},
 			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
 		},
 	},
+	"mp-loudness": {
+		Links: []ttLink{
+			{"EBU R128 loudness", "https://tech.ebu.ch/publications/r128"},
+			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
+		},
+	},
+	// ── Automations: create/edit form (automations_editor.go) ──
+	"auto-watch-dir":  {},
+	"auto-match-exts": {},
+	"auto-match-pattern": {
+		Links: []ttLink{{"Go regexp syntax (RE2)", "https://github.com/google/re2/wiki/Syntax"}},
+	},
+	"auto-min-age": {},
+	"auto-trim-silence": {
+		Links: []ttLink{{"ffmpeg silencedetect", "https://ffmpeg.org/ffmpeg-filters.html#silencedetect"}},
+	},
+	"auto-rename-buffer":   {},
+	"auto-rename-template": {},
+	"auto-loudness": {
+		Links: []ttLink{
+			{"EBU R128 loudness", "https://tech.ebu.ch/publications/r128"},
+			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
+		},
+	},
+	"auto-delete-action": {},
+	// ── Automations: schedules + run now (automations_schedules.go / automations_runnow.go) ──
+	"auto-sch-kind":     {},
+	"auto-sch-interval": {},
+	"auto-sch-cron": {
+		Links: []ttLink{
+			{"crontab(5) field reference", "https://man7.org/linux/man-pages/man5/crontab.5.html"},
+			{"Cron (Wikipedia)", "https://en.wikipedia.org/wiki/Cron"},
+		},
+	},
+	"auto-sch-idle":         {},
+	"auto-sch-require-idle": {},
+	"auto-sch-apps":         {},
+	"auto-run-now":          {},
 	// ── Settings: Timecode card (SMPTE / LTC / MTC / Art-Net) ──
 	"tc-timecode": {
-		Title: i18n.T("help.tc-timecode.title"),
-		Body:  i18n.T("help.tc-timecode.body"),
 		Links: []ttLink{{"SMPTE timecode (Wikipedia)", "https://en.wikipedia.org/wiki/SMPTE_timecode"}},
 	},
-	"tc-rate": {
-		Title: i18n.T("help.tc-rate.title"),
-		Body:  i18n.T("help.tc-rate.body"),
-	},
-	"tc-start": {
-		Title: i18n.T("help.tc-start.title"),
-		Body:  i18n.T("help.tc-start.body"),
-	},
+	"tc-rate":  {},
+	"tc-start": {},
 	"tc-ltc": {
-		Title: i18n.T("help.tc-ltc.title"),
-		Body:  i18n.T("help.tc-ltc.body"),
 		Links: []ttLink{{"LTC (Wikipedia)", "https://en.wikipedia.org/wiki/Linear_timecode"}},
 	},
-	"tc-ltc-level": {
-		Title: i18n.T("help.tc-ltc-level.title"),
-		Body:  i18n.T("help.tc-ltc-level.body"),
-	},
+	"tc-ltc-level": {},
 	"tc-mtc": {
-		Title: i18n.T("help.tc-mtc.title"),
-		Body:  i18n.T("help.tc-mtc.body"),
 		Links: []ttLink{{"MIDI Time Code (Wikipedia)", "https://en.wikipedia.org/wiki/MIDI_timecode"}},
 	},
 	"tc-artnet": {
-		Title: i18n.T("help.tc-artnet.title"),
-		Body:  i18n.T("help.tc-artnet.body"),
 		Links: []ttLink{{"Art-Net (Wikipedia)", "https://en.wikipedia.org/wiki/Art-Net"}},
 	},
 	// ── Settings: OBS media-sync card ──
-	"obssync-mediasync": {
-		Title: i18n.T("help.obssync-mediasync.title"),
-		Body:  i18n.T("help.obssync-mediasync.body"),
-	},
-	"obssync-fps": {
-		Title: i18n.T("help.obssync-fps.title"),
-		Body:  i18n.T("help.obssync-fps.body"),
-	},
-	"obssync-deadband": {
-		Title: i18n.T("help.obssync-deadband.title"),
-		Body:  i18n.T("help.obssync-deadband.body"),
-	},
-	"obssync-restart": {
-		Title: i18n.T("help.obssync-restart.title"),
-		Body:  i18n.T("help.obssync-restart.body"),
-	},
+	"obssync-mediasync": {},
+	"obssync-fps":       {},
+	"obssync-deadband":  {},
+	"obssync-restart":   {},
 	// ── Settings: DMX / VRSL card ──
 	"account-bridge": {
-		Title: i18n.T("help.account-bridge.title"),
-		Body:  i18n.T("help.account-bridge.body"),
 		Links: []ttLink{
 			{"Time-Based One-Time Password (RFC 6238)", "https://datatracker.ietf.org/doc/html/rfc6238"},
 			{"End-to-end encryption (Wikipedia)", "https://en.wikipedia.org/wiki/End-to-end_encryption"},
@@ -265,91 +223,50 @@ var helpTopics = map[string]helpTopic{
 		},
 	},
 	"bridge-local-studio": {
-		Title: i18n.T("help.bridge-local-studio.title"),
-		Body:  i18n.T("help.bridge-local-studio.body"),
 		Links: []ttLink{
 			{"AES-GCM (Wikipedia)", "https://en.wikipedia.org/wiki/Galois/Counter_Mode"},
 		},
 	},
 	"dmx-connect": {
-		Title: i18n.T("help.dmx-connect.title"),
-		Body:  i18n.T("help.dmx-connect.body"),
 		Links: []ttLink{
 			{"DMX512 (Wikipedia)", "https://en.wikipedia.org/wiki/DMX512"},
 			{"Art-Net (Wikipedia)", "https://en.wikipedia.org/wiki/Art-Net"},
 		},
 	},
 	"dmx-vrsl": {
-		Title: i18n.T("help.dmx-vrsl.title"),
-		Body:  i18n.T("help.dmx-vrsl.body"),
 		Links: []ttLink{{"VR Stage Lighting (GitHub)", "https://github.com/AcChosen/VR-Stage-Lighting"}},
 	},
-	"dmx-reemit": {
-		Title: i18n.T("help.dmx-reemit.title"),
-		Body:  i18n.T("help.dmx-reemit.body"),
-	},
+	"dmx-reemit": {},
 	// ── Settings: RTSP card ──
 	"rtsp-why": {
-		Title: i18n.T("help.rtsp-why.title"),
-		Body:  i18n.T("help.rtsp-why.body"),
 		Links: []ttLink{{"RTSP (Wikipedia)", "https://en.wikipedia.org/wiki/Real_Time_Streaming_Protocol"}},
 	},
-	"rtsp-passthrough": {
-		Title: i18n.T("help.rtsp-passthrough.title"),
-		Body:  i18n.T("help.rtsp-passthrough.body"),
-	},
+	"rtsp-passthrough": {},
 	"stream-why": {
-		Title: i18n.T("help.stream-why.title"),
-		Body:  i18n.T("help.stream-why.body"),
 		Links: []ttLink{{"VRSL (VR Stage Lighting)", "https://github.com/AcChosen/VR-Stage-Lighting"}},
 	},
 	// ── Settings: Media-link card ──
-	"ml-accel": {
-		Title: i18n.T("help.ml-accel.title"),
-		Body:  i18n.T("help.ml-accel.body"),
-	},
-	"ml-budget": {
-		Title: i18n.T("help.ml-budget.title"),
-		Body:  i18n.T("help.ml-budget.body"),
-	},
+	"ml-accel":  {},
+	"ml-budget": {},
 	// ── MIDI tab: native MIDI-learn + DJ bridge ──
 	"midi-learn-controllers": {
-		Title: i18n.T("help.midi-learn-controllers.title"),
-		Body:  i18n.T("help.midi-learn-controllers.body"),
 		Links: append(virtualMIDILinks(), ttLink{"Rekordbox MIDI LEARN guide", "https://rekordbox.com/en/support/faq/mapping-6/"}),
 	},
 	"midi-in-port": {
-		Title: i18n.T("help.midi-in-port.title"),
-		Body:  i18n.T("help.midi-in-port.body"),
 		Links: virtualMIDILinks(),
 	},
 	"midi-thru": {
-		Title: i18n.T("help.midi-thru.title"),
-		Body:  i18n.T("help.midi-thru.body"),
 		Links: append(virtualMIDILinks(), ttLink{"MIDI-OX (router/splitter)", "http://www.midiox.com/"}),
 	},
-	"midi-learn-grid": {
-		Title: i18n.T("help.midi-learn-grid.title"),
-		Body:  i18n.T("help.midi-learn-grid.body"),
-	},
-	"midi-drv-filter": {
-		Title: i18n.T("help.midi-drv-filter.title"),
-		Body:  i18n.T("help.midi-drv-filter.body"),
-	},
+	"midi-learn-grid": {},
+	"midi-drv-filter": {},
 	"midi-bridge": {
-		Title: i18n.T("help.midi-bridge.title"),
-		Body:  i18n.T("help.midi-bridge.body"),
 		Links: virtualMIDILinks(),
 	},
 	// ── Remote library (mirror banner, library_mirror.go) ──
-	"remote-library": {
-		Title: i18n.T("help.remote-library.title"),
-		Body:  i18n.T("help.remote-library.body"),
-	},
+	"remote-library": {},
 	// ── Self-update (nav-rail block + settings Updates card) ──
 	"app-updates": {
-		Title: i18n.T("help.app-updates.title"),
-		Body:  i18n.T("help.app-updates.body"),
 		Links: []ttLink{
 			{"rave-mate releases (the update feed)", "https://github.com/rave-page/rave-mate/releases"},
 			{"Ed25519 signatures (Wikipedia)", "https://en.wikipedia.org/wiki/EdDSA"},
@@ -411,13 +328,16 @@ func virtualMIDILinks() []ttLink {
 }
 
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -
-// callers may reference topics that land later).
+// callers may reference topics that land later). The prose is resolved HERE, on the render path,
+// so every topic follows a language switch; two flat-map lookups per tooltip, which is what every
+// other i18n.T on a render already costs (a render runs on the actWorker - it must stay this cheap,
+// and no memo is needed for it).
 func tipTopic(id string) string {
 	t, ok := helpTopics[id]
 	if !ok {
 		return ""
 	}
-	return renderTip(id, t.Title, t.Body, t.Keys, t.Links)
+	return renderTip(id, i18n.T("help."+id+".title"), i18n.T("help."+id+".body"), t.Keys, t.Links)
 }
 
 // tip renders an ad-hoc tooltip (id must be a unique single token - it becomes the

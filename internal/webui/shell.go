@@ -56,6 +56,12 @@ func deliverEval(id, result string) {
 //     measurement CSS can't do).
 const runtimeJS = `(function(){
   function send(p){ try{ if(window.rave) window.rave(JSON.stringify(p)); }catch(e){} }
+  // __elId reads an element's id ATTRIBUTE. Never use el.id here: HTMLFormElement exposes its
+  // named controls as own properties, so a form carrying <input name=id> (hiddenField("id",…) -
+  // every rename modal) returns that INPUT from form.id. It then serializes as {} and Go's
+  // unmarshal into onAction's string ID field fails, silently dropping the whole act before it
+  // is even logged.
+  function __elId(el){ return (el && el.getAttribute && el.getAttribute('id')) || ''; }
   function mods(e){ return (e.shiftKey?'s':'')+((e.ctrlKey||e.metaKey)?'c':''); }
   // change events carry no modifier state - remember the last pointerdown's (checkbox flows)
   var lastMods='';
@@ -70,13 +76,13 @@ const runtimeJS = `(function(){
     var b = t.closest && t.closest('button');
     if(el.tagName==='FORM' && b && !b.getAttribute('data-act')) return;
     e.preventDefault();
-    send({act: el.getAttribute('data-act'), val: el.getAttribute('data-val')||'', id: el.id||'', mods: mods(e)});
+    send({act: el.getAttribute('data-act'), val: el.getAttribute('data-val')||'', id: __elId(el), mods: mods(e)});
   });
   document.addEventListener('change', function(e){
     var el = e.target;
     if(!el || !el.getAttribute || !el.getAttribute('data-act')) return;
     var v = el.type==='checkbox' ? String(el.checked) : (el.value||'');
-    send({act: el.getAttribute('data-act'), val: v, id: el.id||'', mods: el.type==='checkbox'?lastMods:''});
+    send({act: el.getAttribute('data-act'), val: v, id: __elId(el), mods: el.type==='checkbox'?lastMods:''});
   });
   // shift+click on a list row must never smear a text selection over the range
   document.addEventListener('selectstart', function(e){
@@ -155,12 +161,12 @@ const runtimeJS = `(function(){
     var el = e.target;
     if(!el || !el.getAttribute) return;
     var a = el.getAttribute('data-actinput'); if(!a) return;
-    send({act: a, val: el.value||'', id: el.id||''});
+    send({act: a, val: el.value||'', id: __elId(el)});
   });
   document.addEventListener('submit', function(e){
     var f = e.target.closest && e.target.closest('form[data-act]'); if(!f) return; e.preventDefault();
     var d={}; new FormData(f).forEach(function(v,k){ d[k]=v; });
-    send({act: f.getAttribute('data-act'), form: JSON.stringify(d), id: f.id||''});
+    send({act: f.getAttribute('data-act'), form: JSON.stringify(d), id: __elId(f)});
   });
   window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html;
     if(html.indexOf('ss-panel')>=0) __ssplace(); } };
@@ -276,11 +282,32 @@ const runtimeJS = `(function(){
     }
     return miss;
   }
+  // __ctlField resolves a data-label host to the control ctl should drive. The ACTION-BOUND
+  // control wins: a label-with-tooltip (fieldTip/toggleRowTip) nests the tooltip's pin checkbox
+  // BEFORE the real input, so a plain querySelector('input') drives the tooltip and silently
+  // drops the value. Fall back to the first control so bare wrappers - and the tooltip's own
+  // "ctl set tt-<id> true" pin, whose checkbox carries no act - keep working.
+  function __ctlField(el){
+    if(el.matches('input,select,textarea')) return el;
+    return el.querySelector('input[data-act],select[data-act],textarea[data-act],'+
+      'input[data-actinput],select[data-actinput],textarea[data-actinput]')
+      || el.querySelector('input,select,textarea');
+  }
   window.__read = function(q){
     q=(q||'').toLowerCase();
     var els=document.querySelectorAll('[data-label]');
     for(var i=0;i<els.length;i++){
       if((els[i].getAttribute('data-label')||'').toLowerCase().indexOf(q)>=0){
+        var f=__ctlField(els[i]); // the bound control's live value beats any text around it
+        if(f){
+          if(f.type==='checkbox') return f.checked?'true':'false';
+          // A real input's value IS the answer, BLANK INCLUDED. Blank-means-default is a
+          // deliberate shape (the automations editor renders it on nearly every field, so the
+          // placeholder can show the default); treating '' as "no value" fell through to
+          // textContent and returned the label plus the entire tooltip body as the field's value.
+          // Only a host with no form control at all falls through now.
+          if(typeof f.value==='string') return f.value;
+        }
         return els[i].getAttribute('data-value') || els[i].textContent.replace(/\s+/g,' ').trim();
       }
     }
@@ -291,7 +318,7 @@ const runtimeJS = `(function(){
     var els=document.querySelectorAll('[data-label]');
     for(var i=0;i<els.length;i++){
       if((els[i].getAttribute('data-label')||'').toLowerCase().indexOf(q)<0) continue;
-      var f=els[i].matches('input,select,textarea')?els[i]:els[i].querySelector('input,select,textarea');
+      var f=__ctlField(els[i]);
       if(!f) return false;
       if(f.type==='checkbox'){ f.checked=(val==='true'||val==='1'||val==='on'); }
       else { f.value=val; }

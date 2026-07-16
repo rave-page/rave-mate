@@ -34,6 +34,14 @@ type UI struct {
 	active    string
 	pinnedTab string // non-"" locks setTab to this tab (headless remote-library sessions)
 
+	modalMu  sync.Mutex // guards the single modal slot's session identity (see modalTok)
+	modalTk  modalTok   // the session on screen; the zero token = no modal
+	modalSeq uint64     // monotonic session-id source: only ever incremented, never reset or reused
+
+	pickMu   sync.Mutex         // guards the in-flight picked-path requests below (pick_actions.go)
+	pickSeq  uint64             // monotonic request-id source
+	pickReqs map[uint64]pickReq // request id → the session + target a returning dialog must apply under
+
 	// Pending account-bridge enrolment, shown ONCE while the user scans it. Held in memory
 	// only, cleared the moment a code confirms it. NEVER logged, never persisted here.
 	bridgeURI    string
@@ -60,6 +68,9 @@ type UI struct {
 	gf      gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
 	tf      tfState      // tag-fixer scan/apply state (library_tagfix.go)
 	re      reencSt      // batch re-encode modal state (library_reencode.go)
+	ae      aeSt         // automation create/edit form state (automations_editor.go)
+	as      asSt         // automation schedule form state (automations_schedules.go)
+	ar      arSt         // automation run-now modal state (automations_runnow.go)
 	gfTrain gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
 	ceMu    sync.Mutex // guards ceState/ceStore lazy-init (library_cueedit.go)
@@ -261,13 +272,19 @@ func (u *UI) RefreshRecordings() {
 
 // ── action dispatch (page → Go) ──
 
+// onAction decodes one page act. Unexported actMsg fields (tok) are not decodable, so nothing the
+// page says can forge a modal session - see onActMsg.
 func (u *UI) onAction(payload string) {
-	var m struct {
-		Act, Val, Form, ID, Mods string
-	}
+	var m actMsg
 	if json.Unmarshal([]byte(payload), &m) != nil {
 		return
 	}
+	u.onActMsg(m)
+}
+
+// onActMsg routes one act on the act worker. pickApply re-enters here with the same message plus
+// the modal session a returning native dialog's path must be applied under (pick_actions.go).
+func (u *UI) onActMsg(m actMsg) {
 	if u.log != nil { // every incoming act at debug - the first thing to check when a control is dead
 		u.log.Debug("webui", "act", map[string]any{"act": m.Act, "val": m.Val, "form": len(m.Form) > 0})
 	}
@@ -356,7 +373,7 @@ func (u *UI) onAction(payload string) {
 	case strings.HasPrefix(m.Act, "obs-record:"):
 		u.obsCmd(strings.TrimPrefix(m.Act, "obs-record:"), "record")
 	default:
-		if u.dispatch(actMsg{Act: m.Act, Val: m.Val, Form: m.Form, ID: m.ID, Mods: m.Mods}) {
+		if u.dispatch(m) {
 			return
 		}
 		if u.log != nil {
@@ -499,9 +516,157 @@ func (u *UI) livePush() {
 	}
 }
 
-// openModal renders inner (use the modal() component) into the modal root; closeModal clears it.
-func (u *UI) openModal(inner string) { u.eval("window.__patch('__modal'," + jsQuote(inner) + ")") }
-func (u *UI) closeModal()            { u.eval("window.__patch('__modal','')") }
+// ── modal slot ──
+//
+// One modal on screen at a time, so any patch of it is a patch of whatever the user is looking
+// at NOW. Work that finishes off the actWorker must therefore PROVE the modal is still its own
+// before touching it: a run outlives its modal by design (arRunCtx carries no deadline), so by
+// the time it completes the user may have cancelled and opened an unrelated form - an unguarded
+// openModal/closeModal there destroys it, unsaved, with no recovery path. modalTok is the proof,
+// and it lives here so every bg-completing modal gets it rather than one call site special-casing.
+//
+// Identity is the session id (gen), not the owner: a form re-renders its own modal on every field
+// change, so its token must survive that, while two SESSIONS of the same owner (run A cancelled,
+// run-now re-opened for automation B) must be told apart. owner rides along only for
+// openModalIfOwner. Ids come from one monotonic counter that is never reset and never reused, so
+// no two sessions can compare equal - not an empty slot against an open one, not two anonymous
+// dialogs against each other - and nothing outside this file can mint or re-derive one.
+
+// modalTok identifies one modal session. The zero token owns nothing and matches no live session:
+// ids start at 1, so an empty slot can never be mistaken for an occupied one.
+type modalTok struct {
+	owner string
+	gen   uint64
+}
+
+// live reports tok names a session at all.
+func (t modalTok) live() bool { return t.gen != 0 }
+
+// modalCur snapshots the modal slot's current session. Capture it ON the actWorker (before u.bg)
+// to pin what the user was looking at when they clicked.
+func (u *UI) modalCur() modalTok {
+	u.modalMu.Lock()
+	defer u.modalMu.Unlock()
+	return u.modalTk
+}
+
+// claimLocked takes the slot for owner. A NAMED owner re-rendering its own live modal keeps the
+// session (one form, many field-change re-renders - its outstanding save token must survive them);
+// EVERY other claim mints a fresh id: a different owner, a re-open after a close, and any anonymous
+// open, which never re-renders itself and so must never share an identity with the slot it found.
+// Caller holds u.modalMu.
+func (u *UI) claimLocked(owner string) modalTok {
+	if owner == "" || !u.modalTk.live() || u.modalTk.owner != owner {
+		u.modalSeq++
+		u.modalTk = modalTok{owner, u.modalSeq}
+	}
+	return u.modalTk
+}
+
+// openModalAs renders inner (use the modal() component) as owner's modal and returns the session
+// token to hand to any bg work that will patch it later. owner = a per-feature constant.
+func (u *UI) openModalAs(owner, inner string) modalTok {
+	u.modalMu.Lock()
+	tok := u.claimLocked(owner)
+	u.modalMu.Unlock()
+	u.evalModal(inner)
+	return tok
+}
+
+// claimModalWith opens owner's modal only if the slot is still exactly as prev left it - the guard
+// for an open that had to load off the actWorker first (a bbolt read). If anything else took the
+// modal while we loaded, the user has moved on and this open would clobber it.
+//
+// build runs UNDER the slot lock, only once prev is confirmed, and returns the HTML to render.
+// Everything the open mutates - the form's working copy - belongs inside it: a load that ran
+// before the check would seed the form the user actually has on screen with this entity's data,
+// and dropping the render afterwards does not undo that (the precedent: tfEditOpen seeded a new
+// track with the old track's tags). Check first, write second, atomically.
+func (u *UI) claimModalWith(prev modalTok, owner string, build func() string) (modalTok, bool) {
+	u.modalMu.Lock()
+	if u.modalTk != prev {
+		u.modalMu.Unlock()
+		return modalTok{}, false
+	}
+	inner := build()
+	tok := u.claimLocked(owner)
+	u.modalMu.Unlock()
+	u.evalModal(inner)
+	return tok, true
+}
+
+// updateModalIf applies a mutation to the modal's own state, but only while tok is still the
+// session on screen. mutate runs under the slot lock, so the check and the write are one step -
+// a reload that won the race would otherwise take the write into ANOTHER entity's form. It returns
+// the HTML to re-render with, or "" to leave the DOM alone (a field that can't change the form's
+// shape must not re-render under the user's cursor). false = the session is gone: the caller drops
+// the write, never forces it.
+func (u *UI) updateModalIf(tok modalTok, mutate func() string) bool {
+	u.modalMu.Lock()
+	if !tok.live() || u.modalTk != tok {
+		u.modalMu.Unlock()
+		return false
+	}
+	inner := mutate()
+	u.modalMu.Unlock()
+	if inner != "" {
+		u.evalModal(inner)
+	}
+	return true
+}
+
+// openModalIf re-renders the modal only if tok still owns it; reports whether it did.
+func (u *UI) openModalIf(tok modalTok, inner string) bool {
+	return u.updateModalIf(tok, func() string { return inner })
+}
+
+// openModalIfOwner re-renders the modal only if owner holds the slot, whatever the session - for
+// state a LATER session of the same form still renders (a finished run's "Running…" gate). Never
+// matches the anonymous owner: an unguarded dialog has no successor session to refresh.
+func (u *UI) openModalIfOwner(owner, inner string) bool {
+	u.modalMu.Lock()
+	if owner == "" || !u.modalTk.live() || u.modalTk.owner != owner {
+		u.modalMu.Unlock()
+		return false
+	}
+	u.modalMu.Unlock()
+	u.evalModal(inner)
+	return true
+}
+
+// closeModalIf clears the modal only if tok still owns it; reports whether it did. false is not an
+// error - it means the user closed it or moved to another modal, and both must be left alone.
+func (u *UI) closeModalIf(tok modalTok) bool {
+	u.modalMu.Lock()
+	if !tok.live() || u.modalTk != tok {
+		u.modalMu.Unlock()
+		return false
+	}
+	u.releaseLocked()
+	u.modalMu.Unlock()
+	u.evalModal("")
+	return true
+}
+
+// releaseLocked empties the slot and invalidates every outstanding token. Caller holds u.modalMu.
+func (u *UI) releaseLocked() { u.modalTk = modalTok{} }
+
+// openModal renders inner into the modal root anonymously - for modals with no bg completion to
+// guard. It still takes the slot (with a fresh id, so two anonymous dialogs are distinct), and an
+// owned modal's outstanding tokens go stale, which is correct: that owner's modal is no longer the
+// thing on screen.
+func (u *UI) openModal(inner string) { u.openModalAs("", inner) }
+
+// closeModal clears the modal unconditionally - a user close (modal-close, scrim, ✕), which is
+// always authoritative - and invalidates every outstanding token.
+func (u *UI) closeModal() {
+	u.modalMu.Lock()
+	u.releaseLocked()
+	u.modalMu.Unlock()
+	u.evalModal("")
+}
+
+func (u *UI) evalModal(inner string) { u.eval("window.__patch('__modal'," + jsQuote(inner) + ")") }
 
 func (u *UI) toast(msg string) {
 	if u.shell != nil {
