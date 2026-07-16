@@ -4,12 +4,14 @@
 //
 //	mocapnode-probe -source desktop [-monitor 0] [-size 1920x1080 | -crop X,Y,WxH]
 //	                [-grabber ddagrab|gdigrab] [-fps 30]
+//	mocapnode-probe -source spout -device "VRChat-StreamCamera"
 //	mocapnode-probe -source dshow -device "OBS Virtual Camera" [-size 1920x1080] [-fps 30]
 //	mocapnode-probe -source file -in capture.png [-size WxH (raw .rgb)] [-fps 30]
 //
 // Common: -dump packets.jsonl (JSON-lines packet dump), -stats (per-second health line).
-// The dshow path is the Spout chain: VRChat Stream Camera -> Spout2 -> OBS Spout source ->
-// OBS Virtual Camera -> dshow.
+// spout = the DIRECT camera-node path (VRChat Stream Camera -> Spout2 -> in-process
+// videoshare receiver; needs a SPOUT=1 build, -device "" lists senders). dshow = the
+// no-Spout-build fallback chain (Spout -> OBS Spout source -> OBS Virtual Camera -> dshow).
 package main
 
 import (
@@ -26,8 +28,8 @@ import (
 
 func main() {
 	var (
-		source  = flag.String("source", "", "capture source: desktop|dshow|file")
-		device  = flag.String("device", "OBS Virtual Camera", "dshow device name")
+		source  = flag.String("source", "", "capture source: desktop|spout|dshow|file")
+		device  = flag.String("device", "OBS Virtual Camera", "dshow device / spout sender name")
 		in      = flag.String("in", "", "fixture path for -source file (.png or raw .rgb)")
 		dump    = flag.String("dump", "", "JSON-lines packet dump path")
 		stats   = flag.Bool("stats", false, "print a health line every second")
@@ -88,6 +90,8 @@ func buildSource(source, device, in, size, crop string, monitor int, grabber str
 			}
 		}
 		return s, nil
+	case "spout":
+		return &mocapnode.SpoutSource{Sender: device}, nil
 	case "dshow":
 		return &mocapnode.FFmpegDShowSource{Device: device, W: w, H: h, FPS: fps}, nil
 	case "file":
@@ -96,7 +100,7 @@ func buildSource(source, device, in, size, crop string, monitor int, grabber str
 		}
 		return &mocapnode.FileSource{Path: in, W: w, H: h, FPS: fps}, nil
 	default:
-		return nil, fmt.Errorf("unknown -source %q (want desktop|dshow|file)", source)
+		return nil, fmt.Errorf("unknown -source %q (want desktop|spout|dshow|file)", source)
 	}
 }
 
