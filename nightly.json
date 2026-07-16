@@ -1,13 +1,13 @@
 {
   "version": "nightly-9f78049",
-  "build": 97,
+  "build": 98,
   "commit": "9f78049",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-97-20260716-9f78049.exe",
-  "sha256": "ebccd01ac210f0e12a75bd0d450dd36fc2a19715696ceb754036f50208c6c2c3",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-97-20260716-9f78049.exe",
-  "installer_sha256": "dc17cb6b8bf6a664414637282f508ede18bfdc5e6da332f5977299d5be07acdc",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-97-20260716-9f78049",
-  "linux_sha256": "7c0e54cdb58d53a777fcb62e5ebdebc2ed392392417f83c619e399d5c0d0b801",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-98-20260716-9f78049.exe",
+  "sha256": "0b6c700a2cc8c026ecc067dccbc75f736c560e58e0593d37ef0b3873bef87de4",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-98-20260716-9f78049.exe",
+  "installer_sha256": "f6697fd6a84f387cb16e7b14730f557205312a93ddda81f6de72594f0d091e2f",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-98-20260716-9f78049",
+  "linux_sha256": "02c5a48b58c4f50e3d68d13f469989e16a888f751756b8053033a2303b871cbd",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-16T00:06:17Z",
+  "released": "2026-07-16T07:21:54Z",
   "notes": "style(config): gofmt VRSL StreamFeature struct"
 }
