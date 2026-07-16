@@ -43,8 +43,34 @@ const (
 	StageFixedScale = 256 // stageMin/stageSize metres <-> 16-bit fixed-point x256
 )
 
+// v1.1 fiducials (contract §8b, FROZEN 2026-07-16): three constant corner cells drawn with
+// INVERTED parity - B = (hi XOR lo) XOR 0xFF, all three land on B=0 with R != G, a colour no
+// valid data/meta cell can produce (B=0 there forces R == G). TL anchor = the MAGIC pair
+// itself. v1-exact decoders ignore all three by construction (meta 59 was reserved; the two
+// data cells lie beyond any legal D*stride); v1.1 encoders MUST draw them.
+const (
+	FidTR = 0xC33C // meta col ColFidTR
+	FidBL = 0xA55A // data cell (FidBLCol, FidRow)
+	FidBR = 0x5AA5 // data cell (FidBRCol, FidRow)
+
+	ColFidTR = 59 // TR fiducial meta column
+	FidRow   = 64 // BL/BR fiducial data row (the last row)
+	FidBLCol = 0
+	FidBRCol = 119
+)
+
+// Fiducial anchor sample points (§8b): cell centres in canonical coords, top-left origin.
+// TL/TR = meta cell centres of cols 0/ColFidTR; BL/BR = data cell centres of
+// (FidBLCol,FidRow)/(FidBRCol,FidRow). Frozen alongside the fiducial values.
+const (
+	AnchorTLX, AnchorTLY = 16, 16
+	AnchorTRX, AnchorTRY = 1904, 16
+	AnchorBLX, AnchorBLY = 8, 1064
+	AnchorBRX, AnchorBRY = 1912, 1064
+)
+
 // Meta band column map (multi-cell integers big-endian across cells: lowest col = most
-// significant 16 bits). Cols 35..59 reserved = 0.
+// significant 16 bits). Cols 35..59 reserved = 0 (col 59 = the TR fiducial since v1.1).
 const (
 	ColMagic0       = 0
 	ColMagic1       = 1

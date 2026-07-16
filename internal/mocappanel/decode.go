@@ -17,41 +17,73 @@ var ErrNoMagic = errors.New("mocappanel: MAGIC mismatch")
 // native 1920x1080), degenerate calibration, MAGIC miss, unreadable/invalid header. Dancer
 // problems reject the dancer, bone problems the bone - never the frame.
 func DecodeFrame(img image.Image) (Header, []Dancer, error) {
+	if err := checkGeometry(img); err != nil {
+		return Header{}, nil, err
+	}
+	return DecodeSampled(ImageSampler(img))
+}
+
+// DecodeSampled decodes one panel from an arbitrary sampler: sample(x,y) returns the captured
+// RGB at CANONICAL panel coords. A rectifying node (contract §8b) inverse-maps only the cell
+// centres through its homography - no geometry check here, the sampler owns it. Same reject
+// semantics as DecodeFrame otherwise.
+func DecodeSampled(sample func(x, y int) (r, g, b uint8)) (Header, []Dancer, error) {
+	h, dancers, _, err := decodeSampled(sample)
+	return h, dancers, err
+}
+
+// decodeSampled is the stateless core; also yields the Calib (MidWarn) for the stateful Decoder.
+func decodeSampled(sample func(x, y int) (r, g, b uint8)) (Header, []Dancer, Calib, error) {
+	cal, err := calibrate(sample)
+	if err != nil {
+		return Header{}, nil, Calib{}, err
+	}
+	if !magicOK(sample, cal) {
+		return Header{}, nil, Calib{}, ErrNoMagic
+	}
+	h, err := parseHeader(sample, cal)
+	if err != nil {
+		return Header{}, nil, Calib{}, err
+	}
+	return h, parseDancers(sample, cal, h), cal, nil
+}
+
+// checkGeometry enforces the v1 native-1920x1080 rule (log expected-vs-actual; no fallback).
+func checkGeometry(img image.Image) error {
 	b := img.Bounds()
 	if b.Dx() != CanvasW || b.Dy() != CanvasH {
-		return Header{}, nil, fmt.Errorf("mocappanel: bad geometry: want %dx%d, got %dx%d", CanvasW, CanvasH, b.Dx(), b.Dy())
+		return fmt.Errorf("mocappanel: bad geometry: want %dx%d, got %dx%d", CanvasW, CanvasH, b.Dx(), b.Dy())
 	}
-	cal, err := calibrate(img)
-	if err != nil {
-		return Header{}, nil, err
+	return nil
+}
+
+// ImageSampler adapts an in-memory image to the sampler contract (honours a non-zero bounds
+// origin). Callers keep (x,y) inside the canonical canvas.
+func ImageSampler(img image.Image) func(x, y int) (r, g, b uint8) {
+	b := img.Bounds()
+	return func(x, y int) (uint8, uint8, uint8) {
+		r, g, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
+		return uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8)
 	}
-	if !magicOK(img, cal) {
-		return Header{}, nil, ErrNoMagic
-	}
-	h, err := parseHeader(img, cal)
-	if err != nil {
-		return Header{}, nil, err
-	}
-	return h, parseDancers(img, cal, h), nil
 }
 
 // magicOK checks the four MAGIC bytes independently within +-MagicTol post-calibration.
-func magicOK(img image.Image, cal Calib) bool {
+func magicOK(sample func(x, y int) (r, g, b uint8), cal Calib) bool {
 	ok := func(col int, want uint16) bool {
 		x, y := MetaSample(col)
-		px := cal.Apply(rawAt(img, x, y))
+		px := cal.Apply(rawSample(sample, x, y))
 		return absDiff(px[0], uint8(want>>8)) <= MagicTol && absDiff(px[1], uint8(want)) <= MagicTol
 	}
 	return ok(ColMagic0, Magic0) && ok(ColMagic1, Magic1)
 }
 
-// parseHeader reads meta cols 5..34 (reserved cols ignored for forward-compat). Any
-// parity-invalid header cell rejects the frame - without a trusted S/D the data region
-// cannot be parsed.
-func parseHeader(img image.Image, cal Calib) (Header, error) {
+// parseHeader reads meta cols 5..34 (reserved cols ignored for forward-compat; the v1.1 TR
+// fiducial at col 59 is never read). Any parity-invalid header cell rejects the frame - without
+// a trusted S/D the data region cannot be parsed.
+func parseHeader(sample func(x, y int) (r, g, b uint8), cal Calib) (Header, error) {
 	var cells [MetaCols]uint16
 	for c := ColVersion; c < ColReserved; c++ {
-		v, ok := cal.metaCell(img, c)
+		v, ok := cal.metaCell(sample, c)
 		if !ok {
 			return Header{}, fmt.Errorf("mocappanel: header cell %d parity-invalid", c)
 		}
@@ -93,14 +125,14 @@ func parseHeader(img image.Image, cal Calib) (Header, error) {
 // parseDancers reads each dancer block. Rejected (skipped) dancers: unreadable header cells,
 // present bit clear, or missing mandatory core bones (mask & CoreMask != CoreMask - an
 // undefined root is worse than no puppet). Invalid bone cells only mark that bone absent.
-func parseDancers(img image.Image, cal Calib, h Header) []Dancer {
+func parseDancers(sample func(x, y int) (r, g, b uint8), cal Calib, h Header) []Dancer {
 	dancers := make([]Dancer, 0, h.DancerCount)
 	for d := 0; d < h.DancerCount; d++ {
 		base := d * Stride(h.BoneSlots)
 		var hd [DancerHeaderCells]uint16
 		ok := true
 		for i := range hd {
-			v, valid := cal.dataCell(img, base+i)
+			v, valid := cal.dataCell(sample, base+i)
 			if !valid {
 				ok = false
 				break
@@ -127,8 +159,8 @@ func parseDancers(img image.Image, cal Calib, h Header) []Dancer {
 			if mask>>k&1 == 0 {
 				continue
 			}
-			hi, okHi := cal.dataCell(img, base+OffBones+2*k)
-			lo, okLo := cal.dataCell(img, base+OffBones+2*k+1)
+			hi, okHi := cal.dataCell(sample, base+OffBones+2*k)
+			lo, okLo := cal.dataCell(sample, base+OffBones+2*k+1)
 			if !okHi || !okLo {
 				continue // parity-invalid -> this bone absent this frame
 			}
@@ -195,7 +227,16 @@ func NewDecoder() *Decoder {
 // consecutive misses (transient noise), dropping on the third. Returned dancers carry the
 // ACCEPTED boneMask; wire-mask bits not yet accepted have Present forced false.
 func (dec *Decoder) Decode(img image.Image) (Header, []Dancer, error) {
-	h, dancers, err := DecodeFrame(img)
+	if err := checkGeometry(img); err != nil {
+		return Header{}, nil, err
+	}
+	return dec.DecodeSampled(ImageSampler(img))
+}
+
+// DecodeSampled is Decode over an arbitrary canonical-coord sampler (rectified capture,
+// contract §8b) - same stream state, no geometry check.
+func (dec *Decoder) DecodeSampled(sample func(x, y int) (r, g, b uint8)) (Header, []Dancer, error) {
+	h, dancers, cal, err := decodeSampled(sample)
 	if err != nil {
 		if errors.Is(err, ErrNoMagic) && dec.locked {
 			dec.magicMiss++
@@ -208,9 +249,7 @@ func (dec *Decoder) Decode(img image.Image) (Header, []Dancer, error) {
 	}
 	dec.magicMiss = 0
 	dec.locked = true
-	if cal, calErr := calibrate(img); calErr == nil {
-		dec.MidWarn = cal.MidWarn
-	}
+	dec.MidWarn = cal.MidWarn
 
 	// Liveness: frameCounter advancing within the staleness window.
 	if !dec.haveCounter || h.FrameCounter != dec.lastCounter {

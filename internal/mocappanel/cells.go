@@ -6,7 +6,6 @@ package mocappanel
 
 import (
 	"fmt"
-	"image"
 	"math"
 )
 
@@ -15,6 +14,14 @@ import (
 func CellBytes(v uint16) (r, g, b uint8) {
 	hi, lo := uint8(v>>8), uint8(v)
 	return hi, lo, hi ^ lo
+}
+
+// FidBytes returns the fiducial cell colour of a 16-bit value: R=hi, G=lo,
+// B = (hi XOR lo) XOR 0xFF - INVERTED parity (contract §8b), so a valid data/meta cell can
+// never collide with a fiducial.
+func FidBytes(v uint16) (r, g, b uint8) {
+	hi, lo := uint8(v>>8), uint8(v)
+	return hi, lo, (hi ^ lo) ^ 0xFF
 }
 
 // cellValue reassembles v from post-calibration bytes and checks the parity guard.
@@ -42,10 +49,10 @@ type Calib struct {
 
 // calibrate samples the calibration triad and builds the correction. Errors only when a channel
 // is degenerate (white <= black - no invertible mapping exists).
-func calibrate(img image.Image) (Calib, error) {
-	b := sampleMetaRaw(img, ColCalBlack)
-	m := sampleMetaRaw(img, ColCalMid)
-	w := sampleMetaRaw(img, ColCalWhite)
+func calibrate(sample func(x, y int) (r, g, b uint8)) (Calib, error) {
+	b := sampleMetaRaw(sample, ColCalBlack)
+	m := sampleMetaRaw(sample, ColCalMid)
+	w := sampleMetaRaw(sample, ColCalWhite)
 	var c Calib
 	for ch := 0; ch < 3; ch++ {
 		if w[ch] <= b[ch] {
@@ -75,28 +82,26 @@ func (c Calib) Apply(raw [3]uint8) [3]uint8 {
 }
 
 // metaCell reads meta cell col as a calibrated, parity-checked 16-bit value.
-func (c Calib) metaCell(img image.Image, col int) (uint16, bool) {
+func (c Calib) metaCell(sample func(x, y int) (r, g, b uint8), col int) (uint16, bool) {
 	x, y := MetaSample(col)
-	px := c.Apply(rawAt(img, x, y))
+	px := c.Apply(rawSample(sample, x, y))
 	return cellValue(px[0], px[1], px[2])
 }
 
 // dataCell reads data cell idx (row-major) as a calibrated, parity-checked 16-bit value.
-func (c Calib) dataCell(img image.Image, idx int) (uint16, bool) {
+func (c Calib) dataCell(sample func(x, y int) (r, g, b uint8), idx int) (uint16, bool) {
 	x, y := DataSample(idx)
-	px := c.Apply(rawAt(img, x, y))
+	px := c.Apply(rawSample(sample, x, y))
 	return cellValue(px[0], px[1], px[2])
 }
 
 // sampleMetaRaw samples a meta cell centre WITHOUT calibration (the triad itself).
-func sampleMetaRaw(img image.Image, col int) [3]uint8 {
+func sampleMetaRaw(sample func(x, y int) (r, g, b uint8), col int) [3]uint8 {
 	x, y := MetaSample(col)
-	return rawAt(img, x, y)
+	return rawSample(sample, x, y)
 }
 
-// rawAt reads the 8-bit RGB at panel coords (x,y), honouring a non-zero bounds origin.
-func rawAt(img image.Image, x, y int) [3]uint8 {
-	b := img.Bounds()
-	r, g, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-	return [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8)}
+func rawSample(sample func(x, y int) (r, g, b uint8), x, y int) [3]uint8 {
+	r, g, b := sample(x, y)
+	return [3]uint8{r, g, b}
 }

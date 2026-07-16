@@ -181,7 +181,7 @@ func TestGeometryReject(t *testing.T) {
 
 func TestCalibration(t *testing.T) {
 	img := goldenImage()
-	cal, err := calibrate(img)
+	cal, err := calibrate(ImageSampler(img))
 	if err != nil {
 		t.Fatalf("calibrate: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestCalibration(t *testing.T) {
 	// MID off by >6 -> warn only, frame still decodes.
 	warned := goldenImage()
 	fillRect(warned, ColCalMid*MetaCellPx, 0, MetaCellPx, color.NRGBA{150, 150, 150, 255})
-	cal, err = calibrate(warned)
+	cal, err = calibrate(ImageSampler(warned))
 	if err != nil {
 		t.Fatalf("calibrate warned: %v", err)
 	}

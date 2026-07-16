@@ -34,6 +34,12 @@ func Encode(h Header, dancers []Dancer) *image.NRGBA {
 		}
 	}
 
+	// v1.1 fiducials (§8b): inverted-parity corner anchors. Invisible to the v1-exact decode
+	// (meta 59 is never read; the two data cells lie beyond any legal D*stride).
+	fillMetaCell(img, ColFidTR, fidColor(FidTR))
+	fillDataCell(img, FidRow*DataCols+FidBLCol, fidColor(FidBL))
+	fillDataCell(img, FidRow*DataCols+FidBRCol, fidColor(FidBR))
+
 	stride := Stride(h.BoneSlots)
 	for d, dc := range dancers {
 		base := d * stride
@@ -123,7 +129,18 @@ func fillMetaCell(img *image.NRGBA, col int, c color.NRGBA) {
 // putData paints every pixel of data cell idx (row-major) with the value encoding.
 func putData(img *image.NRGBA, idx int, v uint16) {
 	r, g, b := CellBytes(v)
-	fillRect(img, (idx%DataCols)*DataCellPx, DataY0+(idx/DataCols)*DataCellPx, DataCellPx, color.NRGBA{r, g, b, 255})
+	fillDataCell(img, idx, color.NRGBA{r, g, b, 255})
+}
+
+// fillDataCell paints every pixel of data cell idx (row-major).
+func fillDataCell(img *image.NRGBA, idx int, c color.NRGBA) {
+	fillRect(img, (idx%DataCols)*DataCellPx, DataY0+(idx/DataCols)*DataCellPx, DataCellPx, c)
+}
+
+// fidColor is a fiducial value's inverted-parity cell colour (§8b).
+func fidColor(v uint16) color.NRGBA {
+	r, g, b := FidBytes(v)
+	return color.NRGBA{r, g, b, 255}
 }
 
 func fillRect(img *image.NRGBA, x0, y0, size int, c color.NRGBA) {
