@@ -87,6 +87,8 @@ const (
 	// v33 added the WorldSync hosted per-group access model (AccessOn/AccessRules/AccessUsers/
 	// AccessGroups/AccessGistID): the rave.live/access module. Additive - AccessOn off = the
 	// old flat allow.txt lists only; group secret codes live here plaintext, hashed on publish.
+	// Later additive at v33 (no bump - zero value = off): Mocap (capture master: mocap-panel
+	// capture -> pose store -> composite mocap region overlaid on the VRSL stream).
 	configVersion = 33
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
@@ -196,6 +198,8 @@ type Features struct {
 	RTSPServe RTSPServeFeature `json:"rtspServe"` // local RTSP performer chain (ffmpeg encode → rtspt for VRChat AVPro)
 
 	Stream StreamFeature `json:"stream"` // VRSL DMX-over-video stream: render the DMX store → ffmpeg → RTMP/WHIP push for VRChat playback
+
+	Mocap MocapFeature `json:"mocap"` // mocap capture master: panel capture → pose store → composite region overlay on the VRSL stream
 
 	Webcam WebcamFeature `json:"webcam"` // webcam/UVC source: dshow capture → Spout + PTZ/exposure control (medialink P5)
 
@@ -566,15 +570,15 @@ func (r RTSPServeFeature) ResolvedBitrate() int {
 // a push URL). See .devnotes/VRSL_VIDEO_STREAM.md (mirror of the frozen world-repo contract).
 type StreamFeature struct {
 	Enabled     bool   `json:"enabled"`
-	URL         string `json:"url"`               // RTMP (rtmp://host/app) or WHIP (https://host/whip) target
-	StreamKey   string `json:"streamKey"`         // RTMP stream key (appended as a path segment); WHIP: leave blank, embed auth in URL
-	Mode        string `json:"mode"`              // "standard" (stock VRSL, 8-bit) | "extended" (superset: low-byte mirror + metadata); "" = standard
-	ColorMode   string `json:"colorMode"`         // grid packing "mono" (default, compression-robust) | "rgb9"; "" = mono
+	URL         string `json:"url"`                 // RTMP (rtmp://host/app) or WHIP (https://host/whip) target
+	StreamKey   string `json:"streamKey"`           // RTMP stream key (appended as a path segment); WHIP: leave blank, embed auth in URL
+	Mode        string `json:"mode"`                // "standard" (stock VRSL, 8-bit) | "extended" (superset: low-byte mirror + metadata); "" = standard
+	ColorMode   string `json:"colorMode"`           // grid packing "mono" (default, compression-robust) | "rgb9"; "" = mono
 	Universes   []int  `json:"universes,omitempty"` // Art-Net port-addresses to stream (0-based); empty = universe 0 (mono) / 0..8 (rgb9)
-	FPS         int    `json:"fps"`               // encode frame rate; 0 = 30, clamped 1..60
-	BitrateKbps int    `json:"bitrateKbps"`       // H.264 bitrate; 0 = derived from frame size
-	Encoder     string `json:"encoder"`           // "x264"|"nvenc"|"qsv"|"amf"|"auto"; "" = x264
-	Transport   string `json:"transport"`         // "rtmp" (default) | "whip"; "" = rtmp
+	FPS         int    `json:"fps"`                 // encode frame rate; 0 = 30, clamped 1..60
+	BitrateKbps int    `json:"bitrateKbps"`         // H.264 bitrate; 0 = derived from frame size
+	Encoder     string `json:"encoder"`             // "x264"|"nvenc"|"qsv"|"amf"|"auto"; "" = x264
+	Transport   string `json:"transport"`           // "rtmp" (default) | "whip"; "" = rtmp
 }
 
 // ResolvedMode returns "standard" or "extended" (default "standard").
@@ -649,6 +653,80 @@ func (s StreamFeature) ResolvedTransport() string {
 		return "whip"
 	}
 	return "rtmp"
+}
+
+// MocapFeature is the mocap capture master: a capture node reads the in-world mocap panel
+// (desktop duplication / Spout / dshow), decodes dancer poses (internal/mocapnode), and the
+// master (internal/mocapmaster) re-renders the composite mocap region into the VRSL video
+// stream each encoder frame (extended mode - the region rides the composite's calibration
+// triad). Off by default (opt-in). Additive at v33, no bump - zero value = disabled.
+type MocapFeature struct {
+	Enabled   bool      `json:"enabled"`
+	Source    string    `json:"source"`              // capture source "desktop" (default) | "spout" | "dshow"
+	Device    string    `json:"device,omitempty"`    // spout sender / dshow device name
+	Monitor   int       `json:"monitor,omitempty"`   // desktop grabber monitor index (ddagrab output_idx)
+	FPS       int       `json:"fps"`                 // capture rate; 0 = 30, clamped 1..60
+	BoneSlots int       `json:"boneSlots"`           // region bone slots S (stride = 8+2*S); 0 = 22, clamped 1..32
+	StageMin  []float64 `json:"stageMin,omitempty"`  // stage bounds min x,y,z (m); missing = (-8,0,-6)
+	StageSize []float64 `json:"stageSize,omitempty"` // stage bounds size x,y,z (m); missing/non-positive component = (16,4,12)
+}
+
+// ResolvedSource returns "desktop", "spout" or "dshow" (default "desktop").
+func (m MocapFeature) ResolvedSource() string {
+	switch strings.ToLower(strings.TrimSpace(m.Source)) {
+	case "spout":
+		return "spout"
+	case "dshow":
+		return "dshow"
+	default:
+		return "desktop"
+	}
+}
+
+// ResolvedFPS returns the capture rate (default 30, clamped 1..60).
+func (m MocapFeature) ResolvedFPS() int {
+	if m.FPS <= 0 {
+		return 30
+	}
+	if m.FPS > 60 {
+		return 60
+	}
+	return m.FPS
+}
+
+// ResolvedBoneSlots returns the region bone-slot count S (default 22, clamped 1..32 -
+// mocappanel.BoneSlotMax; fixed for the stream).
+func (m MocapFeature) ResolvedBoneSlots() int {
+	if m.BoneSlots <= 0 {
+		return 22
+	}
+	if m.BoneSlots > 32 {
+		return 32
+	}
+	return m.BoneSlots
+}
+
+// ResolvedStageMin returns the stage bounds min in metres (default (-8,0,-6); a partial
+// array falls back whole - min components are free-signed, no per-axis validity rule).
+func (m MocapFeature) ResolvedStageMin() [3]float64 {
+	if len(m.StageMin) < 3 {
+		return [3]float64{-8, 0, -6}
+	}
+	return [3]float64{m.StageMin[0], m.StageMin[1], m.StageMin[2]}
+}
+
+// ResolvedStageSize returns the stage bounds size in metres (default (16,4,12); any
+// component <= 0 falls back to its default - the pose store requires all three positive).
+func (m MocapFeature) ResolvedStageSize() [3]float64 {
+	out := [3]float64{16, 4, 12}
+	if len(m.StageSize) >= 3 {
+		for i := 0; i < 3; i++ {
+			if m.StageSize[i] > 0 {
+				out[i] = m.StageSize[i]
+			}
+		}
+	}
+	return out
 }
 
 // TimecodeFeature configures the house SMPTE timecode generator: one master frame clock other
