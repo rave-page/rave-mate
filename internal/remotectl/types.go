@@ -278,6 +278,13 @@ type RecExportResult struct {
 	Content string `json:"content"`
 }
 
+// RecRenameParams sets set ID's display name. The peer's recorder enforces the real bounds
+// (non-empty after trim, ≤200 runes) - the controller doesn't pre-judge them.
+type RecRenameParams struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // RecMatchResult carries the reconciled set summary after matchHistory (so the controller can
 // refresh the row's track count / matched badge without re-listing).
 type RecMatchResult struct {

@@ -19,6 +19,12 @@ import (
 	"rave.page/mate/internal/transcode"
 )
 
+// testPresets resolves the real builtin presets, so the loudness wire check sees the same codecs
+// production does ("remux" copies audio; "audioAac" re-encodes it).
+var testPresets automation.PresetResolver = func(id string) (transcode.Preset, bool) {
+	return transcode.Find(id)
+}
+
 // testClient is the web side of the studio protocol, post-handshake: it tracks seq + the
 // jti-bind key so it can send MAC'd frames and read responses/notifications.
 type testClient struct {
@@ -143,6 +149,44 @@ func (cl *testClient) call(method string, params map[string]any) map[string]any 
 	}
 }
 
+// callList is call() for methods whose result is an array (automations.list).
+func (cl *testClient) callList(method string, params map[string]any) []map[string]any {
+	id := fmt.Sprintf("r%d", cl.seq)
+	cl.send(id, method, params, false)
+	for {
+		f := cl.readFrame()
+		if f["t"] != "res" || f["id"] != id {
+			continue
+		}
+		if f["ok"] != true {
+			cl.t.Fatalf("%s failed: %v", method, f["error"])
+		}
+		arr, _ := f["result"].([]any)
+		out := make([]map[string]any, 0, len(arr))
+		for _, it := range arr {
+			m, _ := it.(map[string]any)
+			out = append(out, m)
+		}
+		return out
+	}
+}
+
+// callErr sends a unary req expected to FAIL and returns the error message ("" if it succeeded).
+func (cl *testClient) callErr(method string, params map[string]any) string {
+	id := fmt.Sprintf("r%d", cl.seq)
+	cl.send(id, method, params, false)
+	for {
+		f := cl.readFrame()
+		if f["t"] != "res" || f["id"] != id {
+			continue
+		}
+		if f["ok"] == true {
+			return ""
+		}
+		return fmt.Sprint(f["error"])
+	}
+}
+
 // waitStream reads until a stream notify (for==subID) whose payload.state == want; returns it.
 func (cl *testClient) waitStreamState(subID string, want automation.RunState) map[string]any {
 	deadline := time.Now().Add(8 * time.Second)
@@ -172,7 +216,7 @@ func TestStudioAutomationsRoundTrip(t *testing.T) {
 	autos := automation.NewManager(st, nil, func(string) (transcode.Preset, bool) { return transcode.Preset{}, false }, logbus.New(50))
 
 	desktopJWT, webJWT := makeJWT("jti-desktop"), makeJWT("jti-web")
-	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos)
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos, testPresets)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -239,5 +283,362 @@ func TestStudioAutomationsRoundTrip(t *testing.T) {
 	_ = del
 	if got := autos.List(); len(got) != 0 {
 		t.Fatalf("expected 0 automations after delete, got %d", len(got))
+	}
+}
+
+// TestStudioAutomationsFieldParity round-trips the fields the automation backend grew (the delete
+// action, match.minAgeDays, the per-action loudness override) through the real camel-case wire:
+// create → engine → list. Guards the mappers, which are hand-written per field and so are exactly
+// where a new field silently goes missing.
+func TestStudioAutomationsFieldParity(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	autos := automation.NewManager(st, nil, func(string) (transcode.Preset, bool) { return transcode.Preset{}, false }, logbus.New(50))
+
+	desktopJWT, webJWT := makeJWT("jti-desktop"), makeJWT("jti-web")
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos, testPresets)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer srv.Stop()
+	cl := connectClient(t, srv, desktopJWT, webJWT)
+
+	created := cl.call("automations.create", map[string]any{
+		"input": map[string]any{
+			"label":          "archive",
+			"watchDirectory": dir,
+			"match":          map[string]any{"extensions": []any{".WAV"}, "minAgeDays": 30},
+			"actions": []any{
+				map[string]any{
+					"type": "transcode", "presetId": "p1",
+					"loudnessOn": true, "loudnessI": -9, "loudnessTP": -0.5, "loudnessRaiseOnly": true,
+				},
+				map[string]any{"type": "delete"}, // terminal
+			},
+		},
+	})
+	autoID, _ := created["id"].(string)
+	if autoID == "" {
+		t.Fatalf("create returned no id: %v", created)
+	}
+
+	// The engine's own view: the wire→Go mapper must have carried every field.
+	got, ok := autos.Get(autoID)
+	if !ok {
+		t.Fatalf("automation %s not persisted", autoID)
+	}
+	if got.Match.MinAgeDays != 30 {
+		t.Fatalf("minAgeDays not mapped: %+v", got.Match)
+	}
+	if len(got.Match.Extensions) != 1 || got.Match.Extensions[0] != ".wav" {
+		t.Fatalf("extensions not lower-cased: %+v", got.Match) // engine matches on lower-case ext
+	}
+	if len(got.Actions) != 2 {
+		t.Fatalf("actions=%+v", got.Actions)
+	}
+	if a := got.Actions[0]; !a.LoudnessOn || a.LoudnessI != -9 || a.LoudnessTP != -0.5 || !a.LoudnessRaiseOnly {
+		t.Fatalf("loudness override not mapped: %+v", a)
+	}
+	if got.Actions[1].Type != automation.ActionDelete {
+		t.Fatalf("delete action not mapped: %+v", got.Actions[1])
+	}
+
+	// ...and back out over the wire (Go→wire mapper), in the shape the web client reads.
+	items := cl.callList("automations.list", map[string]any{})
+	if len(items) != 1 {
+		t.Fatalf("list len=%d", len(items))
+	}
+	match, _ := items[0]["match"].(map[string]any)
+	if fmt.Sprint(match["minAgeDays"]) != "30" {
+		t.Fatalf("minAgeDays missing from the wire: %v", match)
+	}
+	acts, _ := items[0]["actions"].([]any)
+	if len(acts) != 2 {
+		t.Fatalf("wire actions=%v", acts)
+	}
+	tc, _ := acts[0].(map[string]any)
+	if tc["loudnessOn"] != true || fmt.Sprint(tc["loudnessI"]) != "-9" ||
+		fmt.Sprint(tc["loudnessTP"]) != "-0.5" || tc["loudnessRaiseOnly"] != true {
+		t.Fatalf("loudness override missing from the wire: %v", tc)
+	}
+	if del, _ := acts[1].(map[string]any); del["type"] != "delete" {
+		t.Fatalf("delete action missing from the wire: %v", acts[1])
+	}
+}
+
+// newAutosServer boots a studio server over a real automation engine + a connected client.
+func newAutosServer(t *testing.T) (*testClient, automation.Manager, string) {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	autos := automation.NewManager(st, nil, func(string) (transcode.Preset, bool) { return transcode.Preset{}, false }, logbus.New(50))
+
+	desktopJWT, webJWT := makeJWT("jti-desktop"), makeJWT("jti-web")
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos, testPresets)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(srv.Stop)
+	return connectClient(t, srv, desktopJWT, webJWT), autos, dir
+}
+
+// TestStudioAutomationsOldClientCannotEraseUnknownFields simulates the DEPLOYED web app: its typed
+// Automation model predates match.minAgeDays + the action loudness keys, so it drops them when it
+// decodes a GET and PATCHes the object back without them. minAgeDays gates a DELETE chain - if an
+// absent key decoded to 0, an unrelated rename from the web Remote Studio would silently turn
+// "delete raw sets older than 30 days" into "delete every matching set, nightly".
+func TestStudioAutomationsOldClientCannotEraseUnknownFields(t *testing.T) {
+	cl, autos, dir := newAutosServer(t)
+
+	created := cl.call("automations.create", map[string]any{
+		"input": map[string]any{
+			"label":          "purge old sets",
+			"watchDirectory": dir,
+			"match":          map[string]any{"extensions": []any{".wav"}, "minAgeDays": 30},
+			"actions": []any{
+				map[string]any{
+					"type": "transcode", "presetId": "p1",
+					"loudnessOn": true, "loudnessI": -9, "loudnessTP": -0.5, "loudnessRaiseOnly": true,
+				},
+				map[string]any{"type": "delete"},
+			},
+		},
+	})
+	autoID, _ := created["id"].(string)
+	if autoID == "" {
+		t.Fatalf("create returned no id: %v", created)
+	}
+
+	// GET, then strip every key the old client's model lacks - exactly what its decode does.
+	items := cl.callList("automations.list", map[string]any{})
+	if len(items) != 1 {
+		t.Fatalf("list len=%d", len(items))
+	}
+	got := items[0]
+	match, _ := got["match"].(map[string]any)
+	delete(match, "minAgeDays")
+	acts, _ := got["actions"].([]any)
+	for _, a := range acts {
+		am, _ := a.(map[string]any)
+		delete(am, "loudnessOn")
+		delete(am, "loudnessI")
+		delete(am, "loudnessTP")
+		delete(am, "loudnessRaiseOnly")
+	}
+
+	// ...and PATCH the whole object back with only the label touched (the rename path).
+	cl.call("automations.update", map[string]any{"id": autoID, "patch": map[string]any{
+		"label": "purge old sets (renamed)", "watchDirectory": got["watchDirectory"],
+		"enabled": got["enabled"], "match": match, "actions": acts,
+	}})
+
+	after, ok := autos.Get(autoID)
+	if !ok {
+		t.Fatal("automation gone")
+	}
+	if after.Label != "purge old sets (renamed)" {
+		t.Fatalf("the rename itself must apply: %q", after.Label)
+	}
+	if after.Match.MinAgeDays != 30 {
+		t.Fatalf("THE AGE GATE VANISHED: an old client's rename armed an unconditional nightly purge (match=%+v)", after.Match)
+	}
+	if len(after.Actions) != 2 {
+		t.Fatalf("actions=%+v", after.Actions)
+	}
+	if a := after.Actions[0]; !a.LoudnessOn || a.LoudnessI != -9 || a.LoudnessTP != -0.5 || !a.LoudnessRaiseOnly {
+		t.Fatalf("loudness override erased by an old client's round-trip: %+v", a)
+	}
+	if after.Actions[1].Type != automation.ActionDelete {
+		t.Fatalf("delete action lost: %+v", after.Actions[1])
+	}
+}
+
+// TestStudioAutomationsExplicitClearStillWorks is the other half of absent≠zero: a client that DOES
+// know a field stays in full control of it, including turning it off. Preserve-on-absent must not
+// become preserve-on-everything.
+func TestStudioAutomationsExplicitClearStillWorks(t *testing.T) {
+	cl, autos, dir := newAutosServer(t)
+
+	created := cl.call("automations.create", map[string]any{
+		"input": map[string]any{
+			"label": "x", "watchDirectory": dir,
+			"match": map[string]any{"minAgeDays": 30},
+			"actions": []any{
+				map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": true, "loudnessI": -9},
+				map[string]any{"type": "delete"},
+			},
+		},
+	})
+	autoID, _ := created["id"].(string)
+
+	// An explicit 0 / false is PRESENT ⇒ honored, so the gate and the override can still be cleared.
+	cl.call("automations.update", map[string]any{"id": autoID, "patch": map[string]any{
+		"match": map[string]any{"minAgeDays": 0},
+		"actions": []any{
+			map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": false},
+			map[string]any{"type": "delete"},
+		},
+	}})
+	after, _ := autos.Get(autoID)
+	if after.Match.MinAgeDays != 0 {
+		t.Fatalf("an explicit minAgeDays:0 must clear the gate, got %d", after.Match.MinAgeDays)
+	}
+	if after.Actions[0].LoudnessOn {
+		t.Fatalf("an explicit loudnessOn:false must clear the override: %+v", after.Actions[0])
+	}
+}
+
+// TestStudioAutomationsEditedChainIsAuthoritative pins the documented limit of the action merge:
+// actions carry no stable id, so loudness is only carried across a chain the client provably did
+// NOT restructure. Edit the chain and the patch stands as sent - a visible, recoverable loss rather
+// than a guess at which action a value belonged to.
+func TestStudioAutomationsEditedChainIsAuthoritative(t *testing.T) {
+	cl, autos, dir := newAutosServer(t)
+
+	created := cl.call("automations.create", map[string]any{
+		"input": map[string]any{
+			"label": "x", "watchDirectory": dir,
+			"actions": []any{
+				map[string]any{"type": "transcode", "presetId": "p1", "loudnessOn": true, "loudnessI": -9},
+				map[string]any{"type": "delete"},
+			},
+		},
+	})
+	autoID, _ := created["id"].(string)
+
+	// Same length + types, but the preset changed: the client edited a chain it can't fully express.
+	cl.call("automations.update", map[string]any{"id": autoID, "patch": map[string]any{
+		"actions": []any{
+			map[string]any{"type": "transcode", "presetId": "p2"},
+			map[string]any{"type": "delete"},
+		},
+	}})
+	after, _ := autos.Get(autoID)
+	if after.Actions[0].PresetID != "p2" {
+		t.Fatalf("the edit must apply: %+v", after.Actions[0])
+	}
+	if after.Actions[0].LoudnessOn {
+		t.Fatalf("a restructured chain must not inherit loudness by index: %+v", after.Actions[0])
+	}
+}
+
+// TestStudioAutomationsValidation pins that the wire layer enforces the ENGINE's rule set
+// (automation.ValidateActions) rather than a drifting copy: delete-is-terminal is rejected here,
+// at save, and every chain an old client could express still validates exactly as before.
+func TestStudioAutomationsValidation(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	autos := automation.NewManager(st, nil, func(string) (transcode.Preset, bool) { return transcode.Preset{}, false }, logbus.New(50))
+
+	desktopJWT, webJWT := makeJWT("jti-desktop"), makeJWT("jti-web")
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos, testPresets)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer srv.Stop()
+	cl := connectClient(t, srv, desktopJWT, webJWT)
+
+	mk := func(acts []any) map[string]any {
+		return map[string]any{"input": map[string]any{
+			"label": "x", "watchDirectory": dir, "actions": acts,
+		}}
+	}
+	bad := []struct {
+		name string
+		acts []any
+	}{
+		{"delete not last", []any{
+			map[string]any{"type": "delete"},
+			map[string]any{"type": "move-to", "outputDirectory": dir},
+		}},
+		{"no actions", []any{}},
+		{"transcode without preset", []any{map[string]any{"type": "transcode"}}},
+		{"move without dir", []any{map[string]any{"type": "move-to"}}},
+		{"unknown action", []any{map[string]any{"type": "nope"}}},
+		// The wire cannot WARN (the deployed client drops response keys its model lacks), so a
+		// setting it would store and then ignore on every run is refused instead of accepted in
+		// silence. "remux" copies audio; normalization needs a re-encode.
+		{"loudness on a copy-audio preset", []any{
+			map[string]any{"type": "transcode", "presetId": "remux", "loudnessOn": true, "loudnessI": -14},
+		}},
+		{"loudness on trim-silence's remux default", []any{
+			map[string]any{"type": "trim-silence", "loudnessOn": true},
+		}},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := cl.callErr("automations.create", mk(tc.acts)); err == "" {
+				t.Fatalf("%s must be rejected", tc.name)
+			}
+		})
+	}
+	// A chain an old client could express is still accepted, unchanged.
+	if res := cl.call("automations.create", mk([]any{
+		map[string]any{"type": "move-to", "outputDirectory": dir},
+	})); res["id"] == "" {
+		t.Fatal("legacy-shaped chain must still save")
+	}
+	// The loudness rule is NARROW: on a preset that re-encodes, the same override is legitimate.
+	if res := cl.call("automations.create", mk([]any{
+		map[string]any{"type": "transcode", "presetId": "audioAac", "loudnessOn": true, "loudnessI": -14},
+	})); res["id"] == "" {
+		t.Fatal("a LUFS target on a re-encoding preset must save")
+	}
+}
+
+// TestStudioAutomationsLoudnessCheckSparesLegacyToggles: the check is scoped to a patch that
+// CARRIES a chain. Data saved before the rule existed must stay enable/disable-able, or an old
+// inert override would strand the automation in whatever state it was left in.
+func TestStudioAutomationsLoudnessCheckSparesLegacyToggles(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	autos := automation.NewManager(st, nil, testPresets, logbus.New(50))
+
+	// Seeded straight into the engine, as a pre-rule client would have left it.
+	seeded, err := autos.Save(automation.Automation{
+		Label: "legacy", WatchDir: dir, Enabled: true,
+		Actions: []automation.Action{{Type: automation.ActionTranscode, PresetID: "remux",
+			LoudnessOn: true, LoudnessI: -14}},
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	desktopJWT, webJWT := makeJWT("jti-desktop"), makeJWT("jti-web")
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, st, autos, testPresets)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer srv.Stop()
+	cl := connectClient(t, srv, desktopJWT, webJWT)
+
+	// No "actions" key ⇒ the chain is untouched ⇒ the rule must not fire.
+	if err := cl.callErr("automations.update", map[string]any{
+		"id": seeded.ID, "patch": map[string]any{"enabled": false},
+	}); err != "" {
+		t.Fatalf("a toggle on pre-rule data was rejected: %s", err)
+	}
+	got, ok := autos.Get(seeded.ID)
+	if !ok || got.Enabled {
+		t.Fatal("the toggle did not land")
+	}
+	if !got.Actions[0].LoudnessOn {
+		t.Fatal("the toggle silently stripped the stored override")
 	}
 }

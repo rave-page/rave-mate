@@ -136,6 +136,71 @@ func TestAutomationsRPC(t *testing.T) {
 	}
 }
 
+// TestAutomationsWireParity pins the peer wire against the automation backend. remotectl puts
+// automation.Automation on the wire verbatim (no separate wire struct), so the delete action,
+// Match.MinAgeDays and the per-action loudness override must survive a controller→peer→controller
+// round-trip untouched - if a field ever loses its json tag, this fails.
+func TestAutomationsWireParity(t *testing.T) {
+	server, client := loopback()
+	m := &fakeAuto{items: map[string]automation.Automation{}}
+	RegisterAutomations(server, m)
+	rc := NewClient(client, "server")
+
+	saved, err := rc.SaveAutomation(ctx(t), automation.Automation{
+		Label:    "Archive",
+		WatchDir: "/sets",
+		Match:    automation.Match{Extensions: []string{".wav"}, MinSizeBytes: 1024, MinAgeDays: 30},
+		Actions: []automation.Action{
+			{Type: automation.ActionTranscode, PresetID: "p1",
+				LoudnessOn: true, LoudnessI: -9, LoudnessTP: -0.5, LoudnessRaiseOnly: true},
+			{Type: automation.ActionDelete}, // terminal
+		},
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if saved.Match.MinAgeDays != 30 {
+		t.Fatalf("minAgeDays lost over the wire: %+v", saved.Match)
+	}
+	if len(saved.Actions) != 2 {
+		t.Fatalf("actions=%+v", saved.Actions)
+	}
+	if a := saved.Actions[0]; !a.LoudnessOn || a.LoudnessI != -9 || a.LoudnessTP != -0.5 || !a.LoudnessRaiseOnly {
+		t.Fatalf("loudness override lost over the wire: %+v", a)
+	}
+	if saved.Actions[1].Type != automation.ActionDelete {
+		t.Fatalf("delete action lost over the wire: %+v", saved.Actions[1])
+	}
+}
+
+// TestAutomationLegacyPayloadDecodes pins the additive contract: a payload written before the
+// delete/minAgeDays/loudness fields existed must still decode, and its zero values must mean the
+// pre-existing behavior (no age gate, preset loudness untouched) rather than a new default.
+func TestAutomationLegacyPayloadDecodes(t *testing.T) {
+	const legacy = `{"id":"a1","label":"Old","watchDir":"/sets","enabled":true,` +
+		`"match":{"extensions":[".wav"],"minSizeBytes":1024},` +
+		`"actions":[{"type":"transcode","presetId":"p1"},{"type":"move-to","outputDir":"/done"}],` +
+		`"createdAt":"2026-01-01T00:00:00Z"}`
+
+	var a automation.Automation
+	if err := json.Unmarshal([]byte(legacy), &a); err != nil {
+		t.Fatalf("legacy payload must still decode: %v", err)
+	}
+	if a.Match.MinAgeDays != 0 {
+		t.Fatalf("legacy minAgeDays=%d, want 0 (age gate off)", a.Match.MinAgeDays)
+	}
+	for i, act := range a.Actions {
+		if act.LoudnessOn || act.LoudnessI != 0 || act.LoudnessTP != 0 || act.LoudnessRaiseOnly {
+			t.Fatalf("legacy action %d must not carry a loudness override: %+v", i, act)
+		}
+	}
+	// The chain an old client could express stays valid under the unified rule set - the new
+	// delete-is-terminal rule only fires on the new action type.
+	if err := automation.ValidateActions(a.Actions); err != nil {
+		t.Fatalf("legacy chain must stay valid: %v", err)
+	}
+}
+
 // TestMediaTranscodeRPC drives a transcode over the peer via a fake worker runner, asserting
 // the controller gets the peer-side output path back.
 func TestMediaTranscodeRPC(t *testing.T) {
@@ -217,6 +282,21 @@ func (f *fakeRec) Export(id, format string) (string, error) {
 	}
 	return r.Export(format)
 }
+
+// Rename mirrors the real recorder's contract narrowly enough for the wire test: unknown id and
+// an empty name are errors, otherwise the stored name changes.
+func (f *fakeRec) Rename(id, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("recording name empty")
+	}
+	r, ok := f.recs[id]
+	if !ok {
+		return errors.New("not found")
+	}
+	r.Name = name
+	f.recs[id] = r
+	return nil
+}
 func (f *fakeRec) Delete(id string) error { delete(f.recs, id); return nil }
 
 // fakeCaps is a minimal SetCaptureSource.
@@ -230,7 +310,7 @@ func (f fakeCaps) ListSetRecordings(limit int) ([]libdb.SetRecording, error) {
 }
 
 // TestRecorderRPC drives the peer's publish cockpit: list (paged), tracklist (paged), captures,
-// export, delete, and a not-found error.
+// export, rename, delete, and a not-found error.
 func TestRecorderRPC(t *testing.T) {
 	base := time.Date(2026, 7, 7, 20, 0, 0, 0, time.UTC)
 	mk := func(id string, n int, when time.Time) recorder.Recording {
@@ -286,6 +366,21 @@ func TestRecorderRPC(t *testing.T) {
 	out, err := rc.RecExport(ctx(t), "a", recorder.FormatJSON)
 	if err != nil || !strings.Contains(out, `"id": "a"`) {
 		t.Fatalf("export=%q err=%v", out, err)
+	}
+
+	// rename: the new name lands on the peer and shows up in the next listing.
+	if err := rc.RecRename(ctx(t), "a", "Closing Set 🎧"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if tl, err := rc.RecTracklist(ctx(t), "a", 0, 10); err != nil || tl.Name != "Closing Set 🎧" {
+		t.Fatalf("renamed tracklist=%+v err=%v", tl, err)
+	}
+	// The peer owns the name bounds - its rejection surfaces as an RPC error, not a silent no-op.
+	if err := rc.RecRename(ctx(t), "a", "   "); err == nil {
+		t.Fatal("empty rename must error")
+	}
+	if err := rc.RecRename(ctx(t), "nope", "X"); err == nil {
+		t.Fatal("rename of an unknown set must error")
 	}
 	if err := rc.RecDelete(ctx(t), "a"); err != nil {
 		t.Fatalf("delete: %v", err)

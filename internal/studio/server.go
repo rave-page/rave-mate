@@ -53,6 +53,11 @@ type Server struct {
 	runner jobs.Runner        // worker supervisor for one-shot calls (encoder detect, probe); nil when none
 	store  *store.Store       // persistence for localMedia favorites/presets/recents; nil = no persistence
 	autos  automation.Manager // media-automation engine facade (automations.* methods); nil = unavailable
+	// presets resolves a transcode preset id for wire-layer validation (automation.ValidateLoudness).
+	// The Manager facade deliberately does NOT carry this - remotectl.Client implements that
+	// interface over an RPC, where a preset lookup would be a network round-trip. nil = skip the
+	// check (validators that can't resolve must not guess).
+	presets automation.PresetResolver
 
 	pickerMu sync.Mutex
 	picker   Picker // native file dialogs (set by the UI post-construction); nil = headless
@@ -85,7 +90,8 @@ type Server struct {
 // New builds the studio server. api resolves identities; tokens yields the desktop token;
 // runner is the worker supervisor (one-shot encoder detect / probe); hub is the shared
 // transcode job fan-out (also driven by the desktop UI). runner/hub nil disable transcode.
-func New(log *logbus.Bus, api IdentityResolver, tokens TokenSource, runner jobs.Runner, hub *jobs.Hub, st *store.Store, autos automation.Manager) *Server {
+// presets resolves preset ids for automations.* wire validation (nil = that check is skipped).
+func New(log *logbus.Bus, api IdentityResolver, tokens TokenSource, runner jobs.Runner, hub *jobs.Hub, st *store.Store, autos automation.Manager, presets automation.PresetResolver) *Server {
 	return &Server{
 		log:      log,
 		api:      api,
@@ -94,6 +100,7 @@ func New(log *logbus.Bus, api IdentityResolver, tokens TokenSource, runner jobs.
 		hub:      hub,
 		store:    st,
 		autos:    autos,
+		presets:  presets,
 		sessions: map[*session]struct{}{},
 		hbStop:   make(chan struct{}),
 	}

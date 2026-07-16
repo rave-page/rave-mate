@@ -477,11 +477,12 @@ func readLibChunk(p FileChunkParams) (FileChunkResult, error) {
 }
 
 // RecorderSource is the subset of *recorder.Recorder a controller drives over the link:
-// list/get recorded sets, export a tracklist, delete a finished set. Decoupled for tests.
+// list/get recorded sets, export a tracklist, rename or delete a finished set. Decoupled for tests.
 type RecorderSource interface {
 	List() []recorder.Recording
 	Get(id string) (recorder.Recording, bool)
 	Export(id, format string) (string, error)
+	Rename(id, name string) error
 	Delete(id string) error
 }
 
@@ -490,10 +491,11 @@ type SetCaptureSource interface {
 	ListSetRecordings(limit int) ([]libdb.SetRecording, error)
 }
 
-// RegisterRecorder exposes the peer's recording/publish cockpit (read + export/delete) so a paired
-// controller can drive the remote Publish tab. Sets list as summaries (paged); one set's tracklist
-// pages separately so a monster set stays under maxControlFrame. caps (nil-ok) lists the peer's
-// captured audio/video files. No live start/finish over the link - recording control stays local.
+// RegisterRecorder exposes the peer's recording/publish cockpit (read + rename/export/delete) so a
+// paired controller can drive the remote Publish tab. Sets list as summaries (paged); one set's
+// tracklist pages separately so a monster set stays under maxControlFrame. caps (nil-ok) lists the
+// peer's captured audio/video files. No live start/finish over the link - recording control stays
+// local.
 func RegisterRecorder(e *Endpoint, rec RecorderSource, caps SetCaptureSource) {
 	if e == nil || rec == nil {
 		return
@@ -527,6 +529,18 @@ func RegisterRecorder(e *Endpoint, rec RecorderSource, caps SetCaptureSource) {
 			return nil, err
 		}
 		return RecExportResult{Content: out}, nil
+	})
+	e.Register(MethodRecRename, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p RecRenameParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		// Name bounds (trim/empty/length) are the recorder's call - it owns the invariant locally
+		// and over the link alike.
+		if err := rec.Rename(p.ID, p.Name); err != nil {
+			return nil, err
+		}
+		return OK{OK: true}, nil
 	})
 	e.Register(MethodRecDelete, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
 		var p IDParam

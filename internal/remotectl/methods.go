@@ -49,12 +49,14 @@ const (
 
 	// recorder - drive the peer's recording/publish cockpit: list its recorded sets (summaries,
 	// paged), page one set's tracklist, list its captured audio/video files, export a tracklist,
-	// delete a finished set. Read + export/delete only; no live start/finish over the link. Sets
-	// and tracklists page like library.tracks so a monster set stays under the control-frame cap.
+	// rename or delete a finished set. Read + rename/export/delete only; no live start/finish over
+	// the link. Sets and tracklists page like library.tracks so a monster set stays under the
+	// control-frame cap.
 	MethodRecList      = "recorder.listSets"
 	MethodRecTracklist = "recorder.tracklist"
 	MethodRecCaptures  = "recorder.captures"
 	MethodRecExport    = "recorder.export"
+	MethodRecRename    = "recorder.rename"
 	MethodRecDelete    = "recorder.delete"
 	MethodRecMatch     = "recorder.matchHistory" // reconcile a finished set against the peer's Traktor history
 

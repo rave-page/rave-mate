@@ -185,6 +185,12 @@ func (c *Client) RecExport(ctx context.Context, id, format string) (string, erro
 	return r.Content, err
 }
 
+// RecRename sets a finished set's display name on the peer.
+func (c *Client) RecRename(ctx context.Context, id, name string) error {
+	_, err := Do[OK](ctx, c.e, c.nodeID, MethodRecRename, RecRenameParams{ID: id, Name: name})
+	return err
+}
+
 // RecDelete deletes a finished set on the peer.
 func (c *Client) RecDelete(ctx context.Context, id string) error {
 	_, err := Do[OK](ctx, c.e, c.nodeID, MethodRecDelete, IDParam{ID: id})
