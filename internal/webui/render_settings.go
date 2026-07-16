@@ -81,6 +81,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "dmxmidi", label: i18n.T("settings.toggle.dmxmidi"), module: "dmxmidi", get: func() bool { return f.DMXMIDI.Enabled }, set: func(b bool) { f.DMXMIDI.Enabled = b }},
 		{id: "rtsp", label: i18n.T("settings.toggle.rtsp"), module: "rtspserve", get: func() bool { return f.RTSPServe.Enabled }, set: func(b bool) { f.RTSPServe.Enabled = b }},
 		{id: "vrslstream", label: i18n.T("settings.toggle.vrslstream"), module: "vrslstream", get: func() bool { return f.Stream.Enabled }, set: func(b bool) { f.Stream.Enabled = b }},
+		{id: "mocap", label: i18n.T("settings.toggle.mocap"), module: "mocap", get: func() bool { return f.Mocap.Enabled }, set: func(b bool) { f.Mocap.Enabled = b }},
 		{id: "unity", label: i18n.T("settings.toggle.unity"), get: func() bool { return f.Unity.Enabled }, set: func(b bool) { f.Unity.Enabled = b }},
 		// System
 		{id: "appgroups", label: i18n.T("settings.toggle.appgroups"), retab: true, get: func() bool { return f.AppGroups.Enabled }, set: func(b bool) { f.AppGroups.Enabled = b }},
@@ -149,7 +150,7 @@ func settingsSections() []setSection {
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "accountbridge", "webcam", "medialink", "timecode", "ablelink"}},
 		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
-		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "vrslstream", "unity"}},
+		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "vrslstream", "mocap", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
 	}
 }
@@ -615,6 +616,8 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.rtsp.title"), i18n.T("settings.card.rtsp.desc"), u.rtspBody()
 	case "vrslstream":
 		return i18n.T("settings.card.vrslstream.title"), i18n.T("settings.card.vrslstream.desc"), u.streamBody()
+	case "mocap":
+		return i18n.T("settings.card.mocap.title"), i18n.T("settings.card.mocap.desc"), u.mocapBody()
 	case "unity":
 		return i18n.T("settings.card.unity.title"), i18n.T("settings.card.unity.desc"), u.unityBody()
 
@@ -965,6 +968,28 @@ func (u *UI) streamBody() string {
 		selectBox(i18n.T("settings.body.vrslstream.encoder"), "set:vrslstream-encoder",
 			[][2]string{{"x264", "x264 (CPU)"}, {"nvenc", "NVENC"}, {"qsv", "QSV"}, {"amf", "AMF"}, {"auto", "auto"}}, f.ResolvedEncoder()) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.vrslstream.note")) + `</div>`
+}
+
+// mocapBody configures the mocap capture master (module "mocap"): capture source, panel
+// geometry (bone slots) + the master-authoritative stage bounds. The region only reaches the
+// world when the VRSL stream runs in extended mode.
+func (u *UI) mocapBody() string {
+	f := &u.svc.Cfg.Features.Mocap
+	min, size := f.ResolvedStageMin(), f.ResolvedStageSize()
+	ff := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+	return fpair(selectBox(i18n.T("settings.body.mocap.source"), "set:mocap-source",
+		[][2]string{{"desktop", "desktop"}, {"spout", "Spout"}, {"dshow", "DirectShow"}}, f.ResolvedSource()),
+		field(i18n.T("settings.body.mocap.device"), "set:mocap-device", f.Device, "text")) +
+		fpair(field(i18n.T("settings.body.mocap.monitor"), "set:mocap-monitor", strconv.Itoa(f.Monitor), "number"),
+			field(i18n.T("settings.body.common.frameRate"), "set:mocap-fps", strconv.Itoa(f.ResolvedFPS()), "number")) +
+		field(i18n.T("settings.body.mocap.boneSlots"), "set:mocap-boneslots", strconv.Itoa(f.ResolvedBoneSlots()), "number") +
+		fpair(field(i18n.T("settings.body.mocap.minX"), "set:mocap-min-x", ff(min[0]), "number"),
+			field(i18n.T("settings.body.mocap.sizeX"), "set:mocap-size-x", ff(size[0]), "number")) +
+		fpair(field(i18n.T("settings.body.mocap.minY"), "set:mocap-min-y", ff(min[1]), "number"),
+			field(i18n.T("settings.body.mocap.sizeY"), "set:mocap-size-y", ff(size[1]), "number")) +
+		fpair(field(i18n.T("settings.body.mocap.minZ"), "set:mocap-min-z", ff(min[2]), "number"),
+			field(i18n.T("settings.body.mocap.sizeZ"), "set:mocap-size-z", ff(size[2]), "number")) +
+		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.mocap.note")) + `</div>`
 }
 
 func (u *UI) unityBody() string {
@@ -1562,6 +1587,24 @@ func (u *UI) settingsStatus() map[string]stv {
 			set("vrslstream", stWarn(tr("settings.status.vrslstream.starting")))
 		}
 	}
+	if !f.Mocap.Enabled {
+		set("mocap", stOff(""))
+	} else if u.svc.Mocap == nil {
+		set("mocap", stWarn(tr("settings.status.common.unavailable")))
+	} else {
+		snap := u.svc.Mocap.Status()
+		switch {
+		case !snap.Running:
+			set("mocap", stWarn(tr("settings.status.mocap.notRunning")))
+		case snap.LastErr != "":
+			set("mocap", stWarn(snap.LastErr)) // raw error text, not authored UI copy
+		case snap.Packets > 0:
+			set("mocap", stLive(tr("settings.status.mocap.capturing", i18n.A{
+				"packets": strconv.FormatUint(snap.Packets, 10), "dancers": strconv.Itoa(snap.Dancers)})))
+		default:
+			set("mocap", stWarn(tr("settings.status.mocap.starting")))
+		}
+	}
 	if len(f.Unity.Projects) == 0 {
 		set("unity", stOff(tr("settings.status.unity.noProjects")))
 	} else {
@@ -1668,6 +1711,14 @@ func (u *UI) applySet(id, val string) {
 	toFloat := func(dst *float64, min float64) {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n >= min {
 			*dst = n
+		}
+	}
+	// toStage writes one axis of a mocap stage-bounds array, materializing the other two from
+	// their resolved values (config keeps a plain JSON array; ResolvedStage* guard validity).
+	toStage := func(dst *[]float64, cur [3]float64, axis int) {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			cur[axis] = n
+			*dst = []float64{cur[0], cur[1], cur[2]}
 		}
 	}
 	save := true
@@ -1983,6 +2034,31 @@ func (u *UI) applySet(id, val string) {
 		}
 	case "vrslstream-encoder":
 		f.Stream.Encoder = v
+	// Mocap capture
+	case "mocap-source":
+		if v == "desktop" || v == "spout" || v == "dshow" {
+			f.Mocap.Source = v
+		}
+	case "mocap-device":
+		f.Mocap.Device = v
+	case "mocap-monitor":
+		toInt(&f.Mocap.Monitor, 0, 16)
+	case "mocap-fps":
+		toInt(&f.Mocap.FPS, 1, 60)
+	case "mocap-boneslots":
+		toInt(&f.Mocap.BoneSlots, 1, 32)
+	case "mocap-min-x":
+		toStage(&f.Mocap.StageMin, f.Mocap.ResolvedStageMin(), 0)
+	case "mocap-min-y":
+		toStage(&f.Mocap.StageMin, f.Mocap.ResolvedStageMin(), 1)
+	case "mocap-min-z":
+		toStage(&f.Mocap.StageMin, f.Mocap.ResolvedStageMin(), 2)
+	case "mocap-size-x":
+		toStage(&f.Mocap.StageSize, f.Mocap.ResolvedStageSize(), 0)
+	case "mocap-size-y":
+		toStage(&f.Mocap.StageSize, f.Mocap.ResolvedStageSize(), 1)
+	case "mocap-size-z":
+		toStage(&f.Mocap.StageSize, f.Mocap.ResolvedStageSize(), 2)
 	// World Sync hosted-mode target world id (wrld_…); persisted, read at publish time.
 	case "ws-worldid":
 		f.WorldSync.HostedWorldID = v

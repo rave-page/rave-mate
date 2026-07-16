@@ -2341,6 +2341,19 @@
         "bitrate": "Bitrate (kbps, 0 = automático)",
         "encoder": "Codificador",
         "note": "Necesita ffmpeg (instálalo en Biblioteca y medios). Configura el reproductor de vídeo del mundo con esta misma URL. El modo extendido añade 16 bits y metadatos de integridad que decodifica un mundo de rave.page; el modo estándar ilumina cualquier mundo VRSL."
+      },
+      "mocap": {
+        "source": "Fuente de captura",
+        "device": "Dispositivo / emisor Spout",
+        "monitor": "Índice de monitor",
+        "boneSlots": "Ranuras de huesos",
+        "minX": "Mín. X del escenario (m)",
+        "minY": "Mín. Y del escenario (m)",
+        "minZ": "Mín. Z del escenario (m)",
+        "sizeX": "Tamaño X del escenario (m)",
+        "sizeY": "Tamaño Y del escenario (m)",
+        "sizeZ": "Tamaño Z del escenario (m)",
+        "note": "Captura el panel de mocap del mundo y vuelve a renderizar la región de mocap compuesta en la transmisión de vídeo VRSL (requiere el modo extendido). Las ranuras de huesos y los límites del escenario son fijos por transmisión y deben coincidir con la configuración del evento del mundo."
       }
     },
     "card": {
@@ -2534,6 +2547,10 @@
       "vrslstream": {
         "title": "Transmisión de vídeo VRSL",
         "desc": "Renderiza el rig DMX en vivo en una rejilla de vídeo VRSL y la envía (RTMP/WHIP) a un servicio de transcodificación para reproducirla en VRChat."
+      },
+      "mocap": {
+        "title": "Captura de mocap",
+        "desc": "Captura el panel de mocap del mundo (escritorio/Spout/DirectShow), decodifica las poses de los bailarines y las superpone en la transmisión de vídeo VRSL."
       }
     },
     "empty": {
@@ -2800,6 +2817,11 @@
       "vrslstream": {
         "pushing": "enviando: {count} fotograma(s)",
         "starting": "iniciando el codificador…"
+      },
+      "mocap": {
+        "capturing": "capturando: {packets} paquete(s), {dancers} bailarín(es)",
+        "starting": "iniciando la captura…",
+        "notRunning": "no está en ejecución"
       }
     },
     "subtitle": "Activa lo que uses - las funciones desactivadas no ocupan puertos, goroutines ni subprocesos.",
@@ -2919,7 +2941,8 @@
       "worldsync": "Sincronización de mundos (feeds de gist)",
       "gridfix": "Corrector de beatgrid",
       "accountbridge": "Puente de cuenta de rave.page",
-      "vrslstream": "Transmisión de vídeo VRSL"
+      "vrslstream": "Transmisión de vídeo VRSL",
+      "mocap": "Captura de mocap"
     },
     "vr": {
       "action": "Acción",

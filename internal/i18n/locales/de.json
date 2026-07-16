@@ -2341,6 +2341,19 @@
         "bitrate": "Bitrate (kbit/s, 0 = automatisch)",
         "encoder": "Encoder",
         "note": "Benötigt ffmpeg (unter Bibliothek & Medien installieren). Stelle den Videoplayer der Welt auf dieselbe URL. Der erweiterte Modus fügt 16-Bit- und Integritäts-Metadaten hinzu, die eine rave.page-Welt dekodiert; der Standardmodus beleuchtet jede VRSL-Welt."
+      },
+      "mocap": {
+        "source": "Aufnahmequelle",
+        "device": "Gerät / Spout-Sender",
+        "monitor": "Monitor-Index",
+        "boneSlots": "Bone-Slots",
+        "minX": "Bühnen-Min X (m)",
+        "minY": "Bühnen-Min Y (m)",
+        "minZ": "Bühnen-Min Z (m)",
+        "sizeX": "Bühnen-Größe X (m)",
+        "sizeY": "Bühnen-Größe Y (m)",
+        "sizeZ": "Bühnen-Größe Z (m)",
+        "note": "Nimmt das Mocap-Panel aus der Welt auf und rendert die zusammengesetzte Mocap-Region in den VRSL-Videostream (erweiterter Modus erforderlich). Bone-Slots und Bühnengrenzen sind pro Stream fest und müssen zur Event-Konfiguration der Welt passen."
       }
     },
     "card": {
@@ -2534,6 +2547,10 @@
       "vrslstream": {
         "title": "VRSL-Videostream",
         "desc": "Rendert das Live-DMX-Rig in ein VRSL-Videoraster und pusht es (RTMP/WHIP) an einen Transcode-Dienst zur Wiedergabe in VRChat."
+      },
+      "mocap": {
+        "title": "Mocap-Aufnahme",
+        "desc": "Nimmt das Mocap-Panel aus der Welt auf (Desktop/Spout/DirectShow), dekodiert Tänzer-Posen und legt sie über den VRSL-Videostream."
       }
     },
     "empty": {
@@ -2800,6 +2817,11 @@
       "vrslstream": {
         "pushing": "Push läuft – {count} Frame(s)",
         "starting": "Encoder startet …"
+      },
+      "mocap": {
+        "capturing": "Aufnahme läuft – {packets} Paket(e), {dancers} Tänzer",
+        "starting": "Aufnahme startet …",
+        "notRunning": "läuft nicht"
       }
     },
     "subtitle": "Aktiviere nur, was du nutzt - deaktivierte Funktionen belegen keine Ports, Goroutinen oder Subprozesse.",
@@ -2919,7 +2941,8 @@
       "worldsync": "World Sync (Gist-Feeds)",
       "gridfix": "Beatgrid-Fixer",
       "accountbridge": "rave.page-Konto-Bridge",
-      "vrslstream": "VRSL-Videostream"
+      "vrslstream": "VRSL-Videostream",
+      "mocap": "Mocap-Aufnahme"
     },
     "vr": {
       "action": "Aktion",

@@ -2341,6 +2341,19 @@
         "bitrate": "Débit (kbit/s, 0 = auto)",
         "encoder": "Encodeur",
         "note": "Nécessite ffmpeg (à installer dans Bibliothèque et médias). Réglez le lecteur vidéo du monde sur cette même URL. Le mode étendu ajoute des métadonnées 16 bits et d'intégrité qu'un monde rave.page décode ; le mode standard éclaire n'importe quel monde VRSL."
+      },
+      "mocap": {
+        "source": "Source de capture",
+        "device": "Périphérique / émetteur Spout",
+        "monitor": "Index du moniteur",
+        "boneSlots": "Emplacements d'os",
+        "minX": "Min X de la scène (m)",
+        "minY": "Min Y de la scène (m)",
+        "minZ": "Min Z de la scène (m)",
+        "sizeX": "Taille X de la scène (m)",
+        "sizeY": "Taille Y de la scène (m)",
+        "sizeZ": "Taille Z de la scène (m)",
+        "note": "Capture le panneau de mocap du monde et re-rend la région de mocap composite dans le flux vidéo VRSL (mode étendu requis). Les emplacements d'os et les limites de la scène sont fixes par flux et doivent correspondre à la configuration de l'événement du monde."
       }
     },
     "card": {
@@ -2534,6 +2547,10 @@
       "vrslstream": {
         "title": "Flux vidéo VRSL",
         "desc": "Rend le rig DMX en direct dans une grille vidéo VRSL et la pousse (RTMP/WHIP) vers un service de transcodage pour la lecture dans VRChat."
+      },
+      "mocap": {
+        "title": "Capture de mocap",
+        "desc": "Capture le panneau de mocap du monde (bureau/Spout/DirectShow), décode les poses des danseurs et les superpose au flux vidéo VRSL."
       }
     },
     "empty": {
@@ -2800,6 +2817,11 @@
       "vrslstream": {
         "pushing": "diffusion – {count} image(s)",
         "starting": "démarrage de l'encodeur…"
+      },
+      "mocap": {
+        "capturing": "capture – {packets} paquet(s), {dancers} danseur(s)",
+        "starting": "démarrage de la capture…",
+        "notRunning": "à l'arrêt"
       }
     },
     "subtitle": "Basculez ce que vous utilisez - les fonctions désactivées ne possèdent ni port, ni goroutine, ni sous-processus.",
@@ -2919,7 +2941,8 @@
       "worldsync": "World sync (flux gist)",
       "gridfix": "Correcteur de beatgrid",
       "accountbridge": "Passerelle de compte rave.page",
-      "vrslstream": "Flux vidéo VRSL"
+      "vrslstream": "Flux vidéo VRSL",
+      "mocap": "Capture de mocap"
     },
     "vr": {
       "action": "Action",

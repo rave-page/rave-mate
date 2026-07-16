@@ -2508,6 +2508,19 @@
         "bitrate": "Bitrate (kbps, 0 = auto)",
         "encoder": "Encoder",
         "note": "Needs ffmpeg (install it under Library & media). Set the world's video player to this same URL. Extended mode adds 16-bit + integrity metadata a rave.page world decodes; standard mode lights any stock VRSL world."
+      },
+      "mocap": {
+        "source": "Capture source",
+        "device": "Device / Spout sender",
+        "monitor": "Monitor index",
+        "boneSlots": "Bone slots",
+        "minX": "Stage min X (m)",
+        "minY": "Stage min Y (m)",
+        "minZ": "Stage min Z (m)",
+        "sizeX": "Stage size X (m)",
+        "sizeY": "Stage size Y (m)",
+        "sizeZ": "Stage size Z (m)",
+        "note": "Captures the in-world mocap panel and re-renders the composite mocap region into the VRSL video stream (extended mode required). Bone slots and stage bounds are fixed per stream and must match the world's event config."
       }
     },
     "card": {
@@ -2701,6 +2714,10 @@
       "vrslstream": {
         "title": "VRSL video stream",
         "desc": "Render the live DMX rig into a VRSL video grid and push it (RTMP/WHIP) to a transcode service for VRChat playback."
+      },
+      "mocap": {
+        "title": "Mocap capture",
+        "desc": "Capture the in-world mocap panel (desktop/Spout/DirectShow), decode dancer poses and overlay them onto the VRSL video stream."
       }
     },
     "empty": {
@@ -2968,6 +2985,11 @@
       "vrslstream": {
         "pushing": "pushing - {count} frame(s)",
         "starting": "starting encoder…"
+      },
+      "mocap": {
+        "capturing": "capturing - {packets} packet(s), {dancers} dancer(s)",
+        "starting": "starting capture…",
+        "notRunning": "not running"
       }
     },
     "subtitle": "Toggle what you use - disabled features own no ports, goroutines, or subprocesses.",
@@ -3087,7 +3109,8 @@
       "worldsync": "World sync (gist feeds)",
       "gridfix": "Beatgrid fixer",
       "accountbridge": "rave.page account bridge",
-      "vrslstream": "VRSL video stream"
+      "vrslstream": "VRSL video stream",
+      "mocap": "Mocap capture"
     },
     "vr": {
       "action": "Action",
