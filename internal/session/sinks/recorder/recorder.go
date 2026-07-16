@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/libdb"
@@ -545,6 +546,66 @@ func (r *Recorder) Get(id string) (Recording, bool) {
 		return Recording{}, false
 	}
 	return rec, true
+}
+
+// maxRecordingName bounds a user-supplied set name, in runes (a name is free text: emoji and
+// non-Latin scripts must count as one char each, not as their UTF-8 byte length).
+const maxRecordingName = 200
+
+// Rename sets a recording's display name (active or persisted). Resolves across active /
+// pending-persist-queue / store like Get, so a queued snapshot flushing afterwards can't revert
+// the new name.
+func (r *Recorder) Rename(id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("recording name empty")
+	}
+	if n := utf8.RuneCountInString(name); n > maxRecordingName {
+		return fmt.Errorf("recording name too long (%d chars, max %d)", n, maxRecordingName)
+	}
+
+	// Active: rename in memory + queue a fresh snapshot. persistLocked appends/coalesces at the
+	// queue TAIL, so it flushes after any older queued snapshot for this id (FIFO ⇒ newest wins).
+	r.mu.Lock()
+	if r.active != nil && r.active.ID == id {
+		if r.active.Name == name {
+			r.mu.Unlock()
+			return nil
+		}
+		r.active.Name = name
+		r.persistLocked()
+		r.broadcastLocked()
+		r.mu.Unlock()
+		r.bumpRec()
+		r.log.Info(source, "recording renamed", map[string]any{"id": id, "name": name})
+		return nil
+	}
+	r.mu.Unlock()
+
+	// Not active: drain first. A snapshot for this id may be queued OR in flight (the flusher pops
+	// an op before writing, so an in-flight one is invisible to a pq scan) - it carries the old name
+	// and fresher tracks than the store. Draining lands it before we read-modify-write, so we neither
+	// lose its tracks nor let it revert our name. Nothing can re-queue this id afterwards: only
+	// persistLocked queues puts and only for the active recording, and ids are never reused.
+	r.drainPersist()
+	var rec Recording
+	ok, err := r.st.GetJSON(store.BucketRecordings, id, &rec)
+	if err != nil {
+		return fmt.Errorf("read recording %s: %w", id, err)
+	}
+	if !ok {
+		return fmt.Errorf("recording %s not found", id)
+	}
+	if rec.Name == name {
+		return nil
+	}
+	rec.Name = name
+	if err := r.st.PutJSON(store.BucketRecordings, id, &rec); err != nil {
+		return fmt.Errorf("persist renamed recording %s: %w", id, err)
+	}
+	r.bumpRec()
+	r.log.Info(source, "recording renamed", map[string]any{"id": id, "name": name})
+	return nil
 }
 
 // Delete removes a persisted recording.
