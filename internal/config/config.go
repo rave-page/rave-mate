@@ -79,7 +79,15 @@ const (
 	// v31 added the VRSL DMX-over-video stream (Stream): renders the DMX universe store into a
 	// VRSL-compatible video grid, ffmpeg-encodes it, and pushes RTMP/WHIP to a transcode service
 	// for VRChat playback. Additive, off by default (opt-in; needs ffmpeg + a push URL).
-	configVersion = 31
+	// v32 added the WorldSync hosted publish path (PublishMode/HostedWorldID + mode-agnostic
+	// LiveModules pointer store): live modules can publish via rave.page's worldlive API instead
+	// of the user's own gist token. Additive - empty PublishMode = "direct" (the old behaviour).
+	// (Was v31 on its feature branch; renumbered at the development merge - migrate() is
+	// version-agnostic, additive fields carry over regardless of the loaded number.)
+	// v33 added the WorldSync hosted per-group access model (AccessOn/AccessRules/AccessUsers/
+	// AccessGroups/AccessGistID): the rave.live/access module. Additive - AccessOn off = the
+	// old flat allow.txt lists only; group secret codes live here plaintext, hashed on publish.
+	configVersion = 33
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -1823,6 +1831,61 @@ type WorldSyncFeature struct {
 	NowPlayingImg    string `json:"nowPlayingImg,omitempty"`  // card image URL (must be VRC image-allowlisted host)
 
 	FavoriteGroups []FavoriteGroup `json:"favoriteGroups,omitempty"` // pinned groups for quick role grants
+
+	// rave.live enveloped module gists (world PULLs) + editor-published rosters. These COEXIST with
+	// the flat allow.txt/posters.json above: the flat files stay for VideoTXL/ProTV/RaveAccessControl
+	// compat, the enveloped gists carry the SEQ-GATE'd {schema,seq,...} envelope. Gist ids are
+	// pointers, not secrets. See docs/WORLD_BRIDGE_CONTRACT.md.
+	PointerOn        bool              `json:"pointerOn,omitempty"`        // publish the rave.live/pointer instance link
+	PointerGistID    string            `json:"pointerGistId,omitempty"`    // "" until first publish
+	ConfigGistID     string            `json:"configGistId,omitempty"`     // rave.live/config module gist
+	PerformersGistID string            `json:"performersGistId,omitempty"` // rave.live/performers module gist
+	RosterGists      map[string]string `json:"rosterGists,omitempty"`      // editor-published roster slug -> gist id
+
+	// Hosted per-group access (rave.live/access module; see .devnotes/HOSTED_ACCESS_CONTRACT.md).
+	// The gist's `global` block is COMPOSED automatically = AccessRules + the union of AccessUsers
+	// and every group's Users (authored once, never twice). Group secret codes live ONLY here
+	// (plaintext, never published) - the gist carries the FNV-1a hash. Off by default.
+	AccessOn     bool                `json:"accessOn,omitempty"`     // publish the rave.live/access module
+	AccessRules  AccessRulesConfig   `json:"accessRules,omitempty"`  // global (default) rule toggles
+	AccessUsers  []string            `json:"accessUsers,omitempty"`  // non-group global allow-list entries
+	AccessGroups []AccessGroupConfig `json:"accessGroups,omitempty"` // code-selectable groups
+	AccessGistID string              `json:"accessGistId,omitempty"` // "" until first publish (direct mode)
+
+	// PublishMode selects the live-module publish path: "direct" (default; the user's own
+	// gist-scoped token writes the gists) or "hosted" (rave.page's worldlive API creates them
+	// under its service account - no gist token needed in-app). Empty = direct.
+	PublishMode   string `json:"publishMode,omitempty"`
+	HostedWorldID string `json:"hostedWorldId,omitempty"` // target VRChat world id (wrld_…) for hosted publishes
+
+	// LiveModules is the mode-agnostic per-module published pointer (raw URL the world polls +
+	// SEQ-GATE value + gist id), keyed by internal target key (pointer|config|performers). BOTH
+	// modes write it so the editor bridge bakes URLs + the settings gateway advances seq without
+	// knowing the mode. Direct mode also keeps *GistID above (gist identity for republish/heal);
+	// hosted mode has only this (rave.page owns the gist).
+	LiveModules map[string]LiveModulePub `json:"liveModules,omitempty"`
+}
+
+// WorldSync live-module publish modes (WorldSyncFeature.PublishMode).
+const (
+	WorldSyncModeDirect = "direct"
+	WorldSyncModeHosted = "hosted"
+)
+
+// LiveModulePub is one live module's last published pointer (mode-agnostic). RawURL is the
+// stable world-facing gist raw URL; Seq is the world's SEQ-GATE value; GistID is provenance.
+type LiveModulePub struct {
+	RawURL string `json:"rawUrl,omitempty"`
+	Seq    int64  `json:"seq,omitempty"`
+	GistID string `json:"gistId,omitempty"`
+}
+
+// ResolvedPublishMode returns the effective publish mode ("hosted" or "direct"; default direct).
+func (w WorldSyncFeature) ResolvedPublishMode() string {
+	if w.PublishMode == WorldSyncModeHosted {
+		return WorldSyncModeHosted
+	}
+	return WorldSyncModeDirect
 }
 
 // ResolvedRefresh returns the refresh interval (default 10 min).
@@ -1880,6 +1943,29 @@ type WorldPoster struct {
 type FavoriteGroup struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// AccessRulesConfig are the non-user grant toggles for an access scope (global or per-group).
+// Mirrors matebridge.AccessRules (the wire shape) - kept a distinct config type so persisted
+// config versions independently of the cross-repo contract.
+type AccessRulesConfig struct {
+	InstanceOwner bool `json:"instanceOwner,omitempty"`
+	Master        bool `json:"master,omitempty"`
+	Everyone      bool `json:"everyone,omitempty"`
+}
+
+// AccessGroupConfig is one code-selectable access group. Code is the PLAINTEXT secret typed on the
+// in-world keypad - it lives ONLY in local config and is NEVER published; the gist carries the
+// FNV-1a hash of it. Rules+Users are the group's own scope (replace global when active). ID +
+// Instances are rave.page bookkeeping the world ignores (Instances stays empty until group-instance
+// detection lands - a follow-up).
+type AccessGroupConfig struct {
+	ID        string            `json:"id,omitempty"`        // VRChat group id (grp_…), reference only
+	Name      string            `json:"name"`                // display name
+	Code      string            `json:"code"`                // PLAINTEXT secret code (local only; never published)
+	Rules     AccessRulesConfig `json:"rules,omitempty"`     // group scope rule toggles
+	Users     []string          `json:"users,omitempty"`     // group allow-list (display names)
+	Instances []string          `json:"instances,omitempty"` // optional; rave.page bookkeeping
 }
 
 // TitlePreset is a reusable stream-title template with named {variables} the user fills in, so a DJ

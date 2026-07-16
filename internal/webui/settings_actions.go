@@ -27,6 +27,9 @@ import (
 // Settings-tab action handlers + the ~1 Hz status tick. All names are namespaced `settings-*`
 // (scalar/bool field writes go through the shared set:/toggle: path handled in ui.go + applySet).
 
+// ghTokenNewURL opens GitHub's new-token page with the gist scope pre-checked + a description.
+const ghTokenNewURL = "https://github.com/settings/tokens/new?scopes=gist&description=rave-mate%20gist%20publishing"
+
 func init() {
 	// live status refresh - only cards actually in the DOM (active sub-tab / search matches),
 	// one coalesced eval, unchanged fragments skipped (tickPatch)
@@ -448,9 +451,12 @@ func init() {
 		})
 	})
 	onExact("settings-gh-pat", func(u *UI, _ actMsg) {
+		// The Get-token button lives OUTSIDE the form: a button with no type defaults to submit,
+		// which would post the (empty) PAT form instead of opening the browser.
 		u.openModal(modal(i18n.T("settings.modal.pasteGhToken"),
-			`<form class=set-dlgform data-act=settings-gh-patsave><input class=field-input type=password name=pat placeholder="`+html.EscapeString(i18n.T("settings.modal.ghPatPlaceholder"))+`" autocomplete=off>`+
-				`<div class=set-note>`+i18n.T("settings.modal.ghPatNote")+`</div>`+
+			`<div class=set-note>`+i18n.T("settings.modal.ghPatNote")+`</div>`+
+				btnRow(btn(i18n.T("settings.modal.ghGetToken"), "outline", "open-url", ghTokenNewURL))+
+				`<form class=set-dlgform data-act=settings-gh-patsave><input class=field-input type=password name=pat placeholder="`+html.EscapeString(i18n.T("settings.modal.ghPatPlaceholder"))+`" autocomplete=off>`+
 				`<button class="rp-btn rp-btn--primary" type=submit>`+i18n.T("settings.label.link")+`</button></form>`,
 			btn(i18n.T("common.cancel"), "outline", "modal-close", "")))
 	})

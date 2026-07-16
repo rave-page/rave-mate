@@ -14,6 +14,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/github"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/matebridge"
 	"rave.page/mate/internal/vrchat"
 )
 
@@ -58,6 +59,19 @@ type PubStatus struct {
 	Err     string    // last error ("" = ok)
 }
 
+// SeqCounter issues persisted, strictly-increasing per-module seq numbers - the world's SEQ-GATE
+// (satisfied by *gistseq.Counter). A seq is consumed only on an actual gist write (diff-only), so
+// unchanged content never advances it. Nil disables enveloped writes.
+type SeqCounter interface {
+	Next(module string) int64
+	Peek(module string) int64
+}
+
+// PointerProvider builds the current rave.live/pointer instance link (instanceOwnerName + operator
+// table + join affordance) from rave-mate's live VRChat session + location. ok=false => skip the
+// pointer publish this pass (signed out / no known instance).
+type PointerProvider func() (matebridge.PointerModule, bool)
+
 // Service owns expansion + publishing + the periodic refresher.
 type Service struct {
 	log     *logbus.Bus
@@ -68,6 +82,8 @@ type Service struct {
 	members func() MemberSource // nil while VRChat unlinked
 	events  func(context.Context) []Event
 	nowPlay func() NowPlaying
+	seq     SeqCounter   // nil => enveloped module + roster writes disabled
+	hosted  HostedClient // nil => hosted publish mode unavailable (falls to an error in hosted mode)
 
 	pagePause time.Duration // pause between member pages (API etiquette)
 
@@ -76,6 +92,7 @@ type Service struct {
 	expCache map[string][]string // groupID|roleID → last good displayNames
 	status   map[string]PubStatus
 	onChange []func()
+	pointer  PointerProvider // late-bound (needs vrcloc, built after this service); nil => no pointer
 }
 
 // Deps wires the service; any nil func is treated as "unavailable".
@@ -88,16 +105,26 @@ type Deps struct {
 	Members func() MemberSource
 	Events  func(context.Context) []Event
 	NowPlay func() NowPlaying
+	Seq     SeqCounter   // persisted monotonic per-module seq; nil => enveloped/roster writes off
+	Hosted  HostedClient // hosted-mode publish client (rave.page worldlive API); nil => hosted mode off
 }
 
 // New builds the service.
 func New(d Deps) *Service {
 	return &Service{
 		log: d.Log, cfg: d.Cfg, save: d.Save, gists: d.Gists, owner: d.Owner,
-		members: d.Members, events: d.Events, nowPlay: d.NowPlay,
+		members: d.Members, events: d.Events, nowPlay: d.NowPlay, seq: d.Seq, hosted: d.Hosted,
 		pagePause: time.Second,
 		lastHash:  map[string]string{}, expCache: map[string][]string{}, status: map[string]PubStatus{},
 	}
+}
+
+// SetPointerProvider late-binds the pointer builder (it needs the location timeline, constructed
+// after this service). Nil clears it. Publishing still requires WorldSync.PointerOn + GitHub linked.
+func (s *Service) SetPointerProvider(fn PointerProvider) {
+	s.mu.Lock()
+	s.pointer = fn
+	s.mu.Unlock()
 }
 
 // OnChange registers a status hook (UI refresh), called after each publish pass.
@@ -170,6 +197,10 @@ func (s *Service) RefreshAll(ctx context.Context) {
 	if f.NowPlayingOn {
 		s.PublishNowPlaying(ctx)
 	}
+	if f.AccessOn {
+		s.PublishAccess(ctx) // rave.live/access module (hosted per-group permissions)
+	}
+	s.maybePublishPointer(ctx) // rave.live/pointer instance link (enveloped; own enablement flag)
 	s.notify()
 }
 

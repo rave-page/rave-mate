@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"net/url"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -10,6 +11,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"rave.page/mate/internal/config"
 )
 
 // worldSyncCard is the World Sync settings card: feature toggle + GitHub link
@@ -107,6 +110,29 @@ func (u *UI) worldSyncCard() fyne.CanvasObject {
 	}
 	applyState()
 
+	// Publish mode: direct (the user's own gist token) vs hosted (rave.page's worldlive API creates
+	// the gists under its account - no token needed, but a target world id is required).
+	modeSel := widget.NewSelect([]string{config.WorldSyncModeDirect, config.WorldSyncModeHosted}, nil)
+	modeSel.SetSelected(f.ResolvedPublishMode())
+	worldIDEntry := widget.NewEntry()
+	worldIDEntry.SetPlaceHolder("wrld_… (target world id)")
+	worldIDEntry.SetText(f.HostedWorldID)
+	worldIDEntry.OnChanged = func(v string) { f.HostedWorldID = strings.TrimSpace(v); u.saveCfg() }
+	worldIDRow := container.NewBorder(nil, nil, widget.NewLabel("World id"), nil, worldIDEntry)
+	syncMode := func() {
+		if f.ResolvedPublishMode() == config.WorldSyncModeHosted {
+			worldIDRow.Show()
+		} else {
+			worldIDRow.Hide()
+		}
+	}
+	modeSel.OnChanged = func(v string) { f.PublishMode = v; u.saveCfg(); syncMode() }
+	syncMode()
+	modeRow := container.NewBorder(nil, nil,
+		container.NewHBox(widget.NewLabel("Publish via"),
+			helpIcon("Direct: your own GitHub gist token writes the gists. Hosted: rave.page creates them under its account - no token needed; set the target world id.")),
+		nil, modeSel)
+
 	st := u.newStatus(func(s *cardStatus) {
 		switch {
 		case !f.Enabled:
@@ -120,16 +146,25 @@ func (u *UI) worldSyncCard() fyne.CanvasObject {
 	toggle := u.moduleTabToggle("worldsync", &f.Enabled)
 	return featureCard("World Sync",
 		"Feed VRChat worlds from gists: permission lists (VideoTXL etc.), poster billboards, upcoming events + a now-playing card - updated live, no world rebuild.",
-		toggle, st, detail, container.NewHBox(signIn, patBtn, logout), pendingRow)
+		toggle, st, detail, modeRow, worldIDRow, container.NewHBox(signIn, patBtn, logout), pendingRow)
 }
+
+// ghTokenNewURL opens GitHub's new-token page with the gist scope pre-checked + a description.
+const ghTokenNewURL = "https://github.com/settings/tokens/new?scopes=gist&description=rave-mate%20gist%20publishing"
 
 // worldSyncPATDialog prompts for a classic PAT (gist scope) and validates it.
 func (u *UI) worldSyncPATDialog(onDone func()) {
 	gh := u.svc.GitHub
 	pat := widget.NewPasswordEntry()
 	pat.SetPlaceHolder("ghp_… (classic token, 'gist' scope)")
+	getTokenBtn := widget.NewButtonWithIcon("Get token…", theme.MailForwardIcon(), func() {
+		if uri, err := url.Parse(ghTokenNewURL); err == nil {
+			_ = u.app.OpenURL(uri)
+		}
+	})
 	content := container.NewVBox(
 		mutedLabel("Create one at github.com/settings/tokens → classic → only the 'gist' scope. Stored sealed (OS secret store), never logged."),
+		container.NewHBox(getTokenBtn, helpIcon("Opens GitHub with the 'gist' scope pre-checked. Approve to create a classic token, then paste it here.")),
 		pat,
 	)
 	d := dialog.NewCustomConfirm("Paste GitHub token", "Link", "Cancel", content, func(ok bool) {

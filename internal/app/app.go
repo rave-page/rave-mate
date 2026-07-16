@@ -38,6 +38,7 @@ import (
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/filexfer"
 	"rave.page/mate/internal/giokit"
+	"rave.page/mate/internal/gistseq"
 	ghlink "rave.page/mate/internal/github"
 	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/gpuwatch"
@@ -791,10 +792,23 @@ func run(parent context.Context, serviceMode bool) error {
 	ghAuth := ghlink.NewAuth(func() string { return cfg.Features.WorldSync.GitHubClientID }, log)
 	ghAuth.Load()
 	ghGists := ghlink.NewGists(ghAuth)
+	// Persisted monotonic per-module gist seq (the world's SEQ-GATE) - shared by the enveloped
+	// gist writer AND the editor-bridge preset store so a preset republished to a gist keeps a valid
+	// runtime seq. Survives restarts; a lost ledger risks at most a one-time reset (gistseq doc).
+	gistSeqPath, _ := config.DataPath("worldsync_seq.json")
+	gistSeq := gistseq.Open(gistSeqPath)
 	worldSync := vrcperm.New(vrcperm.Deps{
 		Log:  log,
 		Cfg:  func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
 		Save: func() { _ = cfg.Save() },
+		Seq:  gistSeq,
+		// Hosted publish path (rave.page worldlive API under its own service account) - self-gates
+		// on a live rave.page session + a configured world id; unused unless PublishMode="hosted".
+		Hosted: &worldliveClient{
+			api:   apiC,
+			token: authMgr.Token,
+			cfg:   func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
+		},
 		Gists: func() vrcperm.GistStore {
 			if !ghAuth.SignedIn() {
 				return nil
@@ -1252,6 +1266,21 @@ func run(parent context.Context, serviceMode bool) error {
 		func() bool { return cfg.Features.AppGroups.Enabled },
 		func() []config.AppGroup { return cfg.Features.AppGroups.Groups }))
 
+	// Editor bridge - edit-time loopback RPC for the Unity world toolkit (page.rave.mate). Runs with
+	// the WorldSync feature (its edit-time half); gateways self-gate live (vrchat needs a signed-in
+	// session, worldsync needs GitHub linked). The instance pointer is fed from the live VRChat
+	// session + location timeline.
+	worldSync.SetPointerProvider(pointerProvider(vrcMgr, vrcTools.CurrentWorld))
+	editorBridge := newEditorBridge(editorBridgeDeps{
+		VRChat:     vrcMgr,
+		WorldSync:  worldSync,
+		Cfg:        func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
+		Owner:      ghAuth.Login,
+		VRCEnabled: func() bool { return cfg.Features.VRChat.Enabled },
+		Seq:        gistSeq,
+		Version:    version.Version,
+	})
+
 	// ── rave.page account bridge ────────────────────────────────────────────────
 	// Reaches THIS instance from off-LAN through the account's blind relay. The relay is a
 	// transport only: peerlink authenticates + encrypts + gates every tunnel, so rave.page
@@ -1304,6 +1333,24 @@ func run(parent context.Context, serviceMode bool) error {
 		Enabled: func() bool { return cfg.Features.StudioChannel.Enabled },
 		Start:   func(context.Context) error { return studioSrv.Start() },
 		Stop:    studioSrv.Stop,
+	})
+	// Editor bridge - loopback HTTP server + editor-bridge.json handshake file. Bound to WorldSync
+	// enablement (edit-time half of the same feature). Start binds the first free 47623-47627 port +
+	// writes the 0600 discovery file; Stop tears down the listener + removes the file.
+	mods.Add(&module.Service{
+		Name:    "editorbridge",
+		Enabled: func() bool { return editorBridge != nil && cfg.Features.WorldSync.Enabled },
+		Start: func(context.Context) error {
+			if editorBridge == nil {
+				return nil
+			}
+			return editorBridge.Start()
+		},
+		Stop: func() {
+			if editorBridge != nil {
+				editorBridge.Stop()
+			}
+		},
 	})
 	// Icecast set-capture receiver - the local endpoint Traktor's Broadcasting streams to.
 	// Child process; the init closure re-reads config on every (re)spawn. Settings edits
