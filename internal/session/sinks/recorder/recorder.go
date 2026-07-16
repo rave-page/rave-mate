@@ -81,6 +81,23 @@ type Recorder struct {
 	pq    []persistOp
 	pbusy bool
 
+	// storeMu serializes read-modify-write cycles against BucketRecordings across ALL FOUR DIRECT
+	// store writers - Rename's non-active path, ReconcileWithSessions, sweepStale and Delete all
+	// Get/Put/Delete a whole Recording outside r.mu and outside the persist queue. Without it, a
+	// Rename or Delete landing inside a reconcile's slow per-track resolve (tens-to-hundreds of ms
+	// for a 30+ track set) is silently reverted by the reconciler's write-back: the rename undoes
+	// itself, or the deleted set REAPPEARS.
+	//
+	// LOCK ORDER: storeMu → r.mu → r.pmu (→ reconMu, leaf). Never the reverse: nothing holding r.mu
+	// takes storeMu (persistLocked only queues, taking r.pmu), so the order is acyclic. The flusher
+	// is deliberately NOT a participant - it takes r.pmu only, so drainPersist() under storeMu always
+	// makes progress, and every holder drains before reading (see Rename, Delete).
+	//
+	// The flusher is the fifth writer, reached only via queuePersist. Draining under storeMu is what
+	// contains it, and that is final ONLY for a non-active id: persistLocked re-queues r.active's id
+	// on every confirm/refresh, so Rename and Delete both branch on active BEFORE the drain.
+	storeMu sync.Mutex
+
 	// recVer bumps on every persisted-recordings mutation (put/delete, sweep + flusher). The webui
 	// Publish list caches List() keyed by it so a full render doesn't rescan+unmarshal the bucket.
 	recVer atomic.Uint64
@@ -147,6 +164,11 @@ func (r *Recorder) sweepStale() {
 		activeID = r.active.ID
 	}
 	r.mu.Unlock()
+	// Direct BucketRecordings read-modify-write: serialize against Rename + ReconcileWithSessions.
+	// r.mu is released above - storeMu is the OUTER lock (see its declaration).
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
+	r.drainPersist()
 	for _, rec := range r.List() {
 		if rec.ID == activeID {
 			continue
@@ -582,11 +604,21 @@ func (r *Recorder) Rename(id, name string) error {
 	}
 	r.mu.Unlock()
 
-	// Not active: drain first. A snapshot for this id may be queued OR in flight (the flusher pops
-	// an op before writing, so an in-flight one is invisible to a pq scan) - it carries the old name
-	// and fresher tracks than the store. Draining lands it before we read-modify-write, so we neither
-	// lose its tracks nor let it revert our name. Nothing can re-queue this id afterwards: only
-	// persistLocked queues puts and only for the active recording, and ids are never reused.
+	// Not active. Two different writers can clobber this read-modify-write; both are handled here.
+	//
+	// 1. The persist QUEUE. A snapshot for this id may be queued OR in flight (the flusher pops an op
+	//    before writing, so an in-flight one is invisible to a pq scan) - it carries the old name and
+	//    fresher tracks than the store. Draining lands it before we read, so we neither lose its
+	//    tracks nor let it revert our name. Nothing can re-queue this id afterwards: only
+	//    persistLocked queues puts and only for the ACTIVE recording, and ids are never reused.
+	// 2. The other DIRECT store writers - ReconcileWithSessions and sweepStale Get/PutJSON the whole
+	//    object, bypassing both the queue and r.mu, so draining does nothing about them. A reconcile
+	//    interleaving here loses the rename (it writes back the name it read) or loses its own
+	//    reconciled tracklist (we write back the object we read pre-reconcile). storeMu is what
+	//    serializes them; take it BEFORE draining so the drain in 1. can't be undone by a reconcile
+	//    that was already mid-cycle. Lock order storeMu → r.mu (released above) → r.pmu.
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
 	r.drainPersist()
 	var rec Recording
 	ok, err := r.st.GetJSON(store.BucketRecordings, id, &rec)
@@ -608,14 +640,45 @@ func (r *Recorder) Rename(id, name string) error {
 	return nil
 }
 
-// Delete removes a persisted recording.
+// Delete removes a persisted recording. Refuses the in-progress one (stop it first).
+//
+// A fourth DIRECT BucketRecordings writer, so it takes storeMu like the other three. Unserialized,
+// a delete landing inside ReconcileWithSessions' slow Get→resolve→Put window is undone by the
+// reconciler's write-back of the object it read pre-delete - and the AutoReconciler fires that off a
+// background fsnotify watcher over the Traktor history dir, so the user deletes a set and it just
+// reappears. Same shape against Rename's read-modify-write.
 func (r *Recorder) Delete(id string) error {
-	r.clearPendingReconcile(id)
-	err := r.st.Delete(store.BucketRecordings, id)
-	if err == nil {
-		r.bumpRec()
+	// The ACTIVE recording is refused, not deleted: draining below lands only the writes queued SO
+	// FAR, while persistLocked re-queues a put for r.active on every confirm/refresh and the flusher
+	// (not a storeMu participant) would write the row straight back - a "successful" delete that
+	// silently resurrects. Both renderers already gate their Delete button on EndedAt != 0; this
+	// closes remotectl's RecDelete, which has no such gate. Wording mirrors ReconcileWithSessions.
+	//
+	// Not a TOCTOU: a recording only ever goes active → finished (startLocked mints a fresh
+	// rec_<unixnano>_<seq> off a per-instance monotonic seq, so ids are never reused and a finished
+	// one can never become active again). "Not active" here is therefore stable, which is exactly
+	// what makes drain-then-delete below final.
+	r.mu.Lock()
+	active := r.active != nil && r.active.ID == id
+	r.mu.Unlock()
+	if active {
+		return fmt.Errorf("recording still in progress - stop it first")
 	}
-	return err
+
+	// Lock order storeMu → r.mu (released above) → r.pmu (drainPersist) → reconMu.
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
+	// Drain BEFORE deleting: a queued-but-unflushed snapshot (StopRecording queues then drains;
+	// autoFinalizeLocked and confirmCurrent queue without draining) would otherwise land AFTER the
+	// store delete and resurrect the row. Post-drain nothing can re-queue this id (see above).
+	r.drainPersist()
+	if err := r.st.Delete(store.BucketRecordings, id); err != nil {
+		return err
+	}
+	r.clearPendingReconcile(id) // drop from the auto-reconcile work-set only once it's really gone
+	r.bumpRec()                 // publish cache is epoch-keyed - without this the row lingers on screen
+	r.log.Info(source, "recording deleted", map[string]any{"id": id})
+	return nil
 }
 
 // markPendingReconcile adds a finished-unreconciled recording to the auto-reconcile work-set.
