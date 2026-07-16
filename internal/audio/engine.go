@@ -68,6 +68,11 @@ type Engine struct {
 	vol    float64
 
 	previewReturn int64 // frame to snap back to on PreviewRelease (-1 = not previewing)
+
+	// deferred RAM upgrade: EnsureRAM decodes in the caller's goroutine; a track playing at
+	// completion parks the buffer here and the next repositioning adopts it glitch-free.
+	pendingRAM *source
+	ramBusy    bool
 }
 
 // NewEngine builds an idle engine. The device is opened lazily on the first Load.
@@ -78,8 +83,8 @@ func NewEngine() *Engine {
 // Loaded reports the currently-loaded path ("" = none).
 func (e *Engine) Loaded() string { e.mu.Lock(); defer e.mu.Unlock(); return e.path }
 
-// Load decodes path with the native decoder and readies playback (paused at 0). Small/normal
-// files preload to RAM; oversized files stream with indexed seek. Replaces any current track.
+// Load decodes path with the native decoder and readies playback (paused at 0), streaming
+// from disk immediately; EnsureRAM upgrades in the background. Replaces any current track.
 // Returns ErrUnsupported for a format with no native decoder (caller builds an ffmpeg-backed
 // audio.Decoder and calls LoadDecoder).
 func (e *Engine) Load(path string) error {
@@ -91,27 +96,20 @@ func (e *Engine) Load(path string) error {
 }
 
 // LoadDecoder readies playback from an already-opened Decoder (native OR the ffmpeg bridge for
-// AAC/M4A). Takes ownership of dec.
+// AAC/M4A). Takes ownership of dec. ALWAYS stream-first: a RAM preload here used to decode the
+// whole file synchronously inside PlayFrom (seconds for FLAC, tens of seconds on the ffmpeg
+// bridge) - the reported "first media load hangs". Callers that want the RAM buffer (cue-edit
+// 0-latency Space) follow up with EnsureRAM.
 func (e *Engine) LoadDecoder(dec Decoder, path string) error {
-	sf := dec.Format()
-	// Decide preload vs stream by the DEVICE-rate PCM size.
-	var s *source
-	var err error
-	if devBytes := estimateDeviceBytes(dec.TotalFrames(), sf); devBytes >= 0 && devBytes <= preloadMaxBytes {
-		if s, err = newRAMSource(dec); err != nil {
-			return err
-		}
-	} else {
-		s = newStreamSource(dec) // dec owned by the stream source now
-	}
+	s := newStreamSource(dec) // dec owned by the stream source now
 	player, err := newOutput(s)
 	if err != nil {
 		_ = s.Close()
 		return err
 	}
 	e.mu.Lock()
-	old, oldSrc := e.player, e.src
-	e.player, e.src, e.path, e.previewReturn = player, s, path, -1
+	old, oldSrc, oldPend := e.player, e.src, e.pendingRAM
+	e.player, e.src, e.path, e.previewReturn, e.pendingRAM = player, s, path, -1, nil
 	player.SetVolume(e.vol)
 	e.mu.Unlock()
 	if old != nil {
@@ -121,7 +119,92 @@ func (e *Engine) LoadDecoder(dec Decoder, path string) error {
 	if oldSrc != nil {
 		_ = oldSrc.Close()
 	}
+	if oldPend != nil {
+		_ = oldPend.Close()
+	}
 	return nil
+}
+
+// EnsureRAM upgrades the loaded track to the fully-decoded RAM source (instant seek,
+// 0-latency Space). The decode runs in the caller's goroutine - call from a background one.
+// Idle/paused transport swaps immediately; a playing one parks the buffer and the next
+// repositioning (PlayFrom/SeekTo/PreviewFrom) adopts it, where the swap is free. open reopens
+// the path with whichever decoder served it (native / ffmpeg bridge). Skips oversized and
+// already-RAM tracks; dedups concurrent upgrades.
+func (e *Engine) EnsureRAM(path string, open func() (Decoder, error)) error {
+	e.mu.Lock()
+	skip := e.path != path || e.src == nil || e.src.ram != nil || e.pendingRAM != nil || e.ramBusy
+	if !skip {
+		devBytes := e.src.Total() * deviceBytes * deviceChannels
+		skip = devBytes <= 0 || devBytes > preloadMaxBytes
+	}
+	if skip {
+		e.mu.Unlock()
+		return nil
+	}
+	e.ramBusy = true
+	e.mu.Unlock()
+
+	dec, err := open()
+	var ram *source
+	if err == nil {
+		ram, err = newRAMSource(dec) // the heavy decode, off-lock
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ramBusy = false
+	if err != nil {
+		return err
+	}
+	if e.path != path || e.src == nil || e.src.ram != nil {
+		_ = ram.Close() // track changed mid-decode
+		return nil
+	}
+	if e.player != nil && e.player.IsPlaying() {
+		e.pendingRAM = ram
+		return nil
+	}
+	return e.adoptRAMLocked(ram)
+}
+
+// adoptRAMLocked swaps the current source for ram, preserving position, stop bound and
+// play/pause state. Caller holds e.mu.
+func (e *Engine) adoptRAMLocked(ram *source) error {
+	pos := e.src.Pos()
+	stopAt := e.src.stopAtNow()
+	wasPlaying := e.player != nil && e.player.IsPlaying()
+	player, err := newOutput(ram)
+	if err != nil {
+		_ = ram.Close()
+		return err
+	}
+	_ = ram.SeekTo(pos, true)
+	ram.setStopAt(stopAt)
+	old, oldSrc := e.player, e.src
+	e.player, e.src = player, ram
+	player.SetVolume(e.vol)
+	if wasPlaying {
+		player.Play()
+	}
+	if old != nil {
+		old.Pause()
+		_ = old.Close()
+	}
+	if oldSrc != nil {
+		_ = oldSrc.Close()
+	}
+	return nil
+}
+
+// adoptPendingLocked consumes a parked RAM upgrade at a repositioning boundary (the caller
+// re-seeks right after, so the handoff is glitch-free). Caller holds e.mu.
+func (e *Engine) adoptPendingLocked() {
+	if e.pendingRAM == nil {
+		return
+	}
+	ram := e.pendingRAM
+	e.pendingRAM = nil
+	_ = e.adoptRAMLocked(ram)
 }
 
 // PreloadedRAM reports whether the loaded track is fully in RAM (instant seek / 0-latency Space).
@@ -147,6 +230,7 @@ func (e *Engine) PlayFrom(sec float64) {
 	if e.src == nil {
 		return
 	}
+	e.adoptPendingLocked() // repositioning boundary: free RAM-upgrade handoff
 	e.previewReturn = -1
 	_ = e.src.SeekTo(e.format.SecondsToFrame(sec), true)
 	e.src.setStopAt(-1)
@@ -195,6 +279,7 @@ func (e *Engine) SeekTo(sec float64, explicit bool) {
 	if e.src == nil {
 		return
 	}
+	e.adoptPendingLocked() // repositioning boundary: free RAM-upgrade handoff
 	wasPlaying := e.player != nil && e.player.IsPlaying()
 	_ = e.src.SeekTo(e.format.SecondsToFrame(sec), explicit)
 	if e.player != nil {
@@ -213,6 +298,7 @@ func (e *Engine) PreviewFrom(sec float64) {
 	if e.src == nil {
 		return
 	}
+	e.adoptPendingLocked() // repositioning boundary: free RAM-upgrade handoff
 	frame := e.format.SecondsToFrame(sec)
 	e.previewReturn = frame
 	_ = e.src.SeekTo(frame, true)

@@ -1953,8 +1953,26 @@ type PlayerFeature struct {
 	Profile   string   `json:"profile"`             // optional mpv --profile (e.g. "fast"); "" = none
 	ExtraArgs []string `json:"extraArgs,omitempty"` // power-user extra mpv flags
 	GioWindow *bool    `json:"gioWindow,omitempty"` // player pop-out engine: nil/true = Gio (default), explicit false = legacy Fyne/mpv-popout
+	// Volume is the GLOBAL playback gain (0..1) applied to every media surface (audio engine +
+	// embedded video); nil = 1.0. Persisted so it survives restarts and view switches.
+	Volume *float64 `json:"volume,omitempty"`
 	// (audio decode is always the native internal/audio engine now - the legacy beep path + its
 	// nativeDecode opt-in flag were retired; AAC/M4A fall through to ffmpeg on the same transport.)
+}
+
+// VolumeOr resolves the global playback gain (nil = full volume), clamped to [0,1].
+func (p PlayerFeature) VolumeOr() float64 {
+	if p.Volume == nil {
+		return 1
+	}
+	v := *p.Volume
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // UseGioWindow resolves the tri-state pop-out engine: unset = Gio (default), explicit

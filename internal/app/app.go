@@ -581,6 +581,7 @@ func run(parent context.Context, serviceMode bool) error {
 	if plerr != nil {
 		return plerr
 	}
+	player.SetVolume(cfg.Features.Player.VolumeOr()) // persisted global gain, re-pushed per spawn
 	player.Bind(ctx)
 	// Auto-record across a live stream's span (start with go-live, finalize on end) so the
 	// tracklist + precise recording window are captured without a manual step.

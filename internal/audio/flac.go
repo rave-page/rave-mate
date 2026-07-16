@@ -25,8 +25,9 @@ type flacDecoder struct {
 	br        *bufio.Reader // frame parser reader over f (reset after every reposition)
 	format    Format
 	total     int64
-	bps       uint8 // STREAMINFO bits per sample (frame-header sanity check)
-	fixedBS   int   // STREAMINFO min==max blocksize (0 = variable-blocksize stream)
+	bps       uint8           // STREAMINFO bits per sample (frame-header sanity check)
+	fixedBS   int             // STREAMINFO min==max blocksize (0 = variable-blocksize stream)
+	seekPts   []flacSeekPoint // SEEKTABLE anchors when the file has one (recorder finalize writes it)
 	scale     float32
 	dataStart int64 // first audio frame (past fLaC magic + metadata blocks)
 	fileSize  int64
@@ -113,6 +114,20 @@ func (d *flacDecoder) parseMeta() error {
 			d.format = Format{SampleRate: rate, Channels: ch}
 			d.scale = 1.0 / float32(int64(1)<<(d.bps-1))
 			first = false
+		} else if btype == 3 && blen%18 == 0 && blen/18 <= 1<<16 { // SEEKTABLE → seed seek anchors
+			raw := make([]byte, blen)
+			if _, err := io.ReadFull(d.f, raw); err != nil {
+				return err
+			}
+			for i := 0; i+18 <= len(raw); i += 18 {
+				smp := binary.BigEndian.Uint64(raw[i:])
+				if smp == 0xFFFFFFFFFFFFFFFF { // placeholder point
+					continue
+				}
+				d.seekPts = append(d.seekPts, flacSeekPoint{
+					sample: int64(smp), off: int64(binary.BigEndian.Uint64(raw[i+8:])),
+				})
+			}
 		} else if _, err := d.f.Seek(blen, io.SeekCurrent); err != nil {
 			return err
 		}
@@ -120,6 +135,11 @@ func (d *flacDecoder) parseMeta() error {
 	}
 	d.dataStart = pos
 	return nil
+}
+
+// flacSeekPoint is one SEEKTABLE entry: first sample of a frame + its offset from dataStart.
+type flacSeekPoint struct {
+	sample, off int64
 }
 
 func (d *flacDecoder) Format() Format     { return d.format }
@@ -199,6 +219,27 @@ func (d *flacDecoder) SeekTo(target int64) error {
 	lo, loSmp := d.dataStart, int64(0)
 	if target > 0 {
 		hi := d.fileSize
+		// SEEKTABLE anchors (when present) collapse most of the search up front; the probe
+		// loop below still refines within the inter-point gap.
+		if n := len(d.seekPts); n > 0 {
+			i, j := 0, n-1
+			for i < j {
+				m := (i + j + 1) / 2
+				if d.seekPts[m].sample <= target {
+					i = m
+				} else {
+					j = m - 1
+				}
+			}
+			if p := d.seekPts[i]; p.sample <= target && d.dataStart+p.off > lo && d.dataStart+p.off < d.fileSize {
+				lo, loSmp = d.dataStart+p.off, p.sample
+			}
+			if i+1 < n {
+				if h := d.dataStart + d.seekPts[i+1].off; h > lo && h < hi {
+					hi = h
+				}
+			}
+		}
 		for hi-lo > flacSeekWindow {
 			mid := lo + (hi-lo)/2
 			smp, off, ok := d.syncScan(mid, minI64(mid+flacSeekWindow, hi))

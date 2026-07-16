@@ -29,6 +29,9 @@ type PlayerProxy struct {
 	obsSeq    int                      // observer id source
 	dispatch  func(func())             // UI-thread dispatcher (fyne.Do); default = direct call
 	notify    func(title, body string) // decode-failure toast
+
+	volMu sync.Mutex
+	vol   *float64 // last SetVolume; re-pushed to the child after every (re)spawn
 }
 
 // playerObs is one extra tick/end listener, independent of the single AttachUI panel sink.
@@ -212,6 +215,7 @@ func (p *PlayerProxy) ensureUp() error {
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
+	p.pushVolume() // fresh child: re-apply the persisted global gain
 	return nil
 }
 
@@ -235,6 +239,7 @@ type seekParams struct {
 // the track before the first press, and load() dedups a press that races the in-flight preload.
 const (
 	playCallTimeout    = 60 * time.Second
+	ctlCallTimeout     = 5 * time.Second // small control RPCs (setVolume)
 	preloadCallTimeout = 120 * time.Second
 )
 
@@ -312,6 +317,37 @@ func (p *PlayerProxy) Preload(path string) error {
 	defer cancel()
 	_, err := p.host.Call(ctx, "preload", playParams{Path: path})
 	return err
+}
+
+// SetVolume pushes the global output gain (0..1) to the child engine. Fire-and-forget on a
+// down child - the daemon re-pushes it after every (re)spawn via ensureUp.
+func (p *PlayerProxy) SetVolume(v float64) {
+	p.volMu.Lock()
+	p.vol = &v
+	p.volMu.Unlock()
+	if !p.host.Running() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctlCallTimeout)
+	defer cancel()
+	_, _ = p.host.Call(ctx, "setVolume", volumeParams{Volume: v})
+}
+
+// pushVolume re-applies the last SetVolume after a (re)spawn. Caller ensured the child is up.
+func (p *PlayerProxy) pushVolume() {
+	p.volMu.Lock()
+	v := p.vol
+	p.volMu.Unlock()
+	if v == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctlCallTimeout)
+	defer cancel()
+	_, _ = p.host.Call(ctx, "setVolume", volumeParams{Volume: *v})
+}
+
+type volumeParams struct {
+	Volume float64 `json:"volume"`
 }
 
 // TogglePause flips play/pause; returns the resulting paused state.

@@ -156,6 +156,9 @@ func (s *source) seekLocked(frame int64, explicit bool) error {
 	return s.dec.SeekTo(native)
 }
 
+// stopAtNow reads the current stop bound (RAM-upgrade handoff copies it across sources).
+func (s *source) stopAtNow() int64 { s.mu.Lock(); defer s.mu.Unlock(); return s.stopAt }
+
 // setStopAt bounds playback: Read returns EOF once pos reaches frame (-1 = no bound).
 func (s *source) setStopAt(frame int64) {
 	s.mu.Lock()

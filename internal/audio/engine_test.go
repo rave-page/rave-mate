@@ -45,11 +45,18 @@ func TestEngineTransportPreview(t *testing.T) {
 	if err := e.Load(path); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if e.src.ram == nil {
-		t.Fatal("expected RAM preload for a 2s file")
+	if e.src.ram != nil {
+		t.Fatal("Load must stream-first (RAM preload used to block PlayFrom for seconds)")
 	}
 	if got := e.Loaded(); got != path {
 		t.Fatalf("Loaded=%q", got)
+	}
+	// idle transport: EnsureRAM decodes and adopts the RAM source immediately
+	if err := e.EnsureRAM(path, func() (Decoder, error) { return Open(path) }); err != nil {
+		t.Fatalf("EnsureRAM: %v", err)
+	}
+	if e.src.ram == nil {
+		t.Fatal("expected RAM source after EnsureRAM on an idle transport")
 	}
 
 	// Hold-to-preview from 1.0s: playing, cursor at the 1s frame.
@@ -122,5 +129,47 @@ func TestEngineStreamFallback(t *testing.T) {
 	}
 	if got := s.Pos(); got < deviceRate/2 {
 		t.Fatalf("stream cursor = %d", got)
+	}
+}
+
+func TestEngineDeferredRAMAdoptWhilePlaying(t *testing.T) {
+	var fake *fakePlayer
+	orig := newOutput
+	newOutput = func(r io.Reader) (outputPlayer, error) { fake = &fakePlayer{r: r, vol: 1}; return fake, nil }
+	defer func() { newOutput = orig }()
+
+	path := filepath.Join(t.TempDir(), "t.wav")
+	writeWAV(t, path, 2*deviceRate, deviceChannels, 16, false)
+	e := NewEngine()
+	if err := e.Load(path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	e.PlayFrom(0.25)
+	if !fake.IsPlaying() {
+		t.Fatal("PlayFrom should start playback")
+	}
+	// upgrade completes mid-play → parked, source stays streaming (no mid-play swap glitch)
+	if err := e.EnsureRAM(path, func() (Decoder, error) { return Open(path) }); err != nil {
+		t.Fatalf("EnsureRAM: %v", err)
+	}
+	if e.src.ram != nil {
+		t.Fatal("RAM must not swap in mid-play")
+	}
+	if e.pendingRAM == nil {
+		t.Fatal("upgrade should be parked while playing")
+	}
+	// the next repositioning adopts it: RAM source, exact position, still playing
+	e.SeekTo(1.0, true)
+	if e.src.ram == nil {
+		t.Fatal("SeekTo should adopt the parked RAM source")
+	}
+	if e.pendingRAM != nil {
+		t.Fatal("pending buffer not consumed")
+	}
+	if got := e.src.Pos(); got != deviceRate {
+		t.Fatalf("position after adopt+seek = %d want %d", got, deviceRate)
+	}
+	if !fake.IsPlaying() {
+		t.Fatal("playback must survive the adopt")
 	}
 }
