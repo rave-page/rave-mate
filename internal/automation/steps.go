@@ -16,15 +16,19 @@ import (
 // Step build (propose, no side effects) + commit (perform) per action. buildStep returns
 // (proposal, proposedOutputPath, skipMessage, err); a non-empty skipMessage means "no-op,
 // continue". commitStepSideEffects performs the proposal and returns the new current path.
+//
+// The plan* helpers here are the single source of truth for WHAT a step does: the unattended
+// engine path (runStep) calls the same ones, so a proposal a human approves is what the run
+// performs, and a background run does what the manual preview showed.
 
-func (m *Service) buildStep(ctx context.Context, rc *runContext, act Action, hintDir string) (any, string, string, error) {
+func (m *Service) buildStep(ctx context.Context, rc *runContext, act Action) (any, string, string, error) {
 	switch act.Type {
 	case ActionRename:
 		return m.buildRename(ctx, rc, act)
 	case ActionTrimSilence:
-		return m.buildTrim(ctx, rc, act, hintDir)
+		return m.buildTrim(ctx, rc, act)
 	case ActionTranscode:
-		return m.buildTranscode(rc, act, hintDir)
+		return m.buildTranscode(rc, act)
 	case ActionMove:
 		return buildRelocate(rc, act, "move")
 	case ActionCopy:
@@ -41,9 +45,9 @@ func (m *Service) commitStepSideEffects(ctx context.Context, rc *runContext, act
 	case ActionRename:
 		return commitRename(rc.currentPath, proposed)
 	case ActionTrimSilence:
-		return m.commitTrim(ctx, rc, proposal, proposed)
+		return m.commitTrim(ctx, rc, act, proposal)
 	case ActionTranscode:
-		return doTranscode(ctx, m.w, m.presets, act, rc.currentPath, 0)
+		return doTranscode(ctx, m.engine(), act, rc.currentPath, "", 0, 0)
 	case ActionMove:
 		dest := relocateDest(act.OutputDir, rc.currentPath)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -63,16 +67,21 @@ func (m *Service) commitStepSideEffects(ctx context.Context, rc *runContext, act
 		}
 		return rc.currentPath, nil // copy doesn't relocate the working file
 	case ActionDelete:
+		// rc.origPath, NEVER rc.currentPath - see the runStep ActionDelete case for why.
 		// Re-validate at commit: in manual mode the proposal sat in front of a human, and the
-		// file may have moved/vanished/been swapped for a directory since it was built.
-		target, err := deleteTarget(rc.auto.WatchDir, rc.currentPath)
+		// file may have moved/vanished/been swapped for a directory since it was built. The
+		// survivor gate re-runs here too - buildDelete's verdict is not authority to destroy.
+		if err := rc.surv.err(); err != nil {
+			return "", err
+		}
+		target, err := deleteTarget(rc.auto.WatchDir, rc.origPath)
 		if err != nil {
 			return "", err
 		}
 		if err := localmedia.Delete(target); err != nil {
 			return "", fmt.Errorf("delete: %w", err)
 		}
-		return "", nil // terminal: no file survives; runInteractive stops here
+		return "", nil // terminal: the chain's input is consumed; runInteractive stops here
 	default:
 		return rc.currentPath, nil
 	}
@@ -80,18 +89,21 @@ func (m *Service) commitStepSideEffects(ctx context.Context, rc *runContext, act
 
 // ── rename-from-event ────────────────────────────────────────────────────────
 
-func (m *Service) buildRename(ctx context.Context, rc *runContext, act Action) (any, string, string, error) {
-	base, token := m.bgCreds()
-	if base == "" || token == "" {
-		return nil, "", "API token not provided - skipping rename-from-event.", nil
+// planRename resolves the new path for a rename-from-event step over current: the file's mtime is
+// matched against the caller's booked rave.page events (±BufferMinutes) and the winner fills the
+// template. Returns (target, matchedEvent, skipMsg, err); matched is nil when no booking matched -
+// the rename still proceeds with noEventSlug placeholders. Shared by both run paths.
+func planRename(ctx context.Context, apiBase, token string, act Action, current string) (string, *MatchedEvent, string, error) {
+	if apiBase == "" || token == "" {
+		return "", nil, "API token not provided - skipping rename-from-event.", nil
 	}
-	fi, err := os.Stat(rc.currentPath)
+	fi, err := os.Stat(current)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("cannot stat file: %w", err)
+		return "", nil, "", fmt.Errorf("cannot stat file: %w", err)
 	}
-	events, err := fetchUserEvents(ctx, base, token)
+	events, err := fetchUserEvents(ctx, apiBase, token)
 	if err != nil {
-		return nil, "", "", err
+		return "", nil, "", err
 	}
 	buf := act.BufferMinutes
 	if buf == 0 {
@@ -102,8 +114,8 @@ func (m *Service) buildRename(ctx context.Context, rc *runContext, act Action) (
 	// Skipping the whole rename here would leave recordings made outside any booking
 	// untouched.
 	matched := pickMatchingEvent(events, fi.ModTime().UnixMilli(), buf)
-	ext := filepath.Ext(rc.currentPath)
-	origBase := strings.TrimSuffix(filepath.Base(rc.currentPath), ext)
+	ext := filepath.Ext(current)
+	origBase := strings.TrimSuffix(filepath.Base(current), ext)
 	dateBase := fi.ModTime().UTC()
 	venueSlug := noEventSlug
 	eventSlug := noEventSlug
@@ -116,13 +128,20 @@ func (m *Service) buildRename(ctx context.Context, rc *runContext, act Action) (
 		venueSlug = slugify(deref(matched.VenueName), "venue")
 		eventSlug = slugify(orStr(deref(matched.Slug), matched.Title), matched.ID)
 	}
-	date := dateBase.Format("2006-01-02")
 	tmpl := act.Template
 	if tmpl == "" {
 		tmpl = defaultRenameTemplate
 	}
-	newName := applyTemplate(tmpl, date, venueSlug, eventSlug, sanitizeBasename(origBase), ext)
-	proposed := filepath.Join(filepath.Dir(rc.currentPath), newName)
+	newName := applyTemplate(tmpl, dateBase.Format("2006-01-02"), venueSlug, eventSlug, sanitizeBasename(origBase), ext)
+	return filepath.Join(filepath.Dir(current), newName), matched, "", nil
+}
+
+func (m *Service) buildRename(ctx context.Context, rc *runContext, act Action) (any, string, string, error) {
+	base, token := m.bgCreds()
+	proposed, matched, skip, err := planRename(ctx, base, token, act, rc.currentPath)
+	if err != nil || skip != "" {
+		return nil, "", skip, err
+	}
 	proposal := map[string]any{
 		"kind": "rename", "currentPath": rc.currentPath, "proposedPath": proposed,
 		"matchedEvent": matched, // nil when no booking matched the timestamp
@@ -147,83 +166,83 @@ func commitRename(current, target string) (string, error) {
 
 // ── trim-silence ─────────────────────────────────────────────────────────────
 
-func (m *Service) buildTrim(ctx context.Context, rc *runContext, act Action, hintDir string) (any, string, string, error) {
-	thr := act.ThresholdDb
-	if thr == 0 {
-		thr = defaultThresholdDb
-	}
-	minSil := act.MinSilenceSeconds
-	if minSil == 0 {
-		minSil = defaultMinSilenceSecs
-	}
-	lead, trail, dur, err := cachedSilenceProbe(ctx, m.st, m.w, rc.currentPath, thr, minSil)
+// trimPlan is the cut window resolved from a trim-silence action + the (cached) silence probe.
+// Start/End are absolute seconds into the source; End <= Start means "to the end of the file"
+// (transcode.Job.Args). Duration is 0 when the probe couldn't report one.
+type trimPlan struct {
+	Lead, Trail, Duration float64
+	Start, End            float64
+}
+
+// planTrim probes current with the ACTION's own threshold + min-silence (0 → the engine defaults,
+// which cachedSilenceProbe normalizes so the cache key matches a default-param probe) and resolves
+// the cut window, honoring the TrimStart/TrimEnd flags (unset = on, the editor's default). A
+// non-empty skipMsg means there is no silence worth cutting - the step is a no-op.
+func planTrim(ctx context.Context, e engine, act Action, current string) (trimPlan, string, error) {
+	lead, trail, dur, err := cachedSilenceProbe(ctx, e.st, e.w, current, act.ThresholdDb, act.MinSilenceSeconds)
 	if err != nil {
-		return nil, "", "", err
+		return trimPlan{}, "", err
 	}
-	trimStartFlag := act.TrimStart == nil || *act.TrimStart
-	trimEndFlag := act.TrimEnd == nil || *act.TrimEnd
-	start := 0.0
-	if trimStartFlag {
-		start = lead
+	p := trimPlan{Lead: lead, Trail: trail, Duration: dur}
+	if act.TrimStart == nil || *act.TrimStart {
+		p.Start = lead
 	}
-	end := dur
-	if trimEndFlag && dur > 0 {
-		end = maxF(start+0.1, dur-trail)
+	p.End = dur // trim-end off (or no known duration) → encode to the end
+	if (act.TrimEnd == nil || *act.TrimEnd) && dur > 0 {
+		p.End = maxF(p.Start+0.1, dur-trail) // never invert the window on an all-silent file
 	}
-	if start <= 0.05 && (end <= 0 || (dur > 0 && absF(dur-end) < 0.05)) {
-		return nil, "", "No leading/trailing silence detected - skipping trim.", nil
+	if p.Start <= 0.05 && (p.End <= 0 || (dur > 0 && absF(dur-p.End) < 0.05)) {
+		return p, "No leading/trailing silence detected - skipping trim.", nil
 	}
-	ext := filepath.Ext(rc.currentPath)
-	base := sanitizeBasename(strings.TrimSuffix(filepath.Base(rc.currentPath), ext))
-	dir := hintDir
-	if dir == "" {
-		dir = filepath.Dir(rc.currentPath)
+	return p, "", nil
+}
+
+func (m *Service) buildTrim(ctx context.Context, rc *runContext, act Action) (any, string, string, error) {
+	preset, ok := resolvePreset(m.presets, act, trimPresetID)
+	if !ok {
+		return nil, "", "Preset not found: " + orStr(act.PresetID, trimPresetID), nil
 	}
-	proposed := filepath.Join(dir, base+"-trimmed"+ext)
+	plan, skip, err := planTrim(ctx, m.engine(), act, rc.currentPath)
+	if err != nil || skip != "" {
+		return nil, "", skip, err
+	}
+	// transcodeOut, not a hand-rolled "-trimmed" name: commit runs doTranscode, which derives the
+	// output path this same way. Any other rule here proposes a file the run won't write.
+	proposed := transcodeOut(act.OutputDir, rc.currentPath, preset)
 	var durPtr *float64
-	if dur > 0 {
-		d := dur
+	if plan.Duration > 0 {
+		d := plan.Duration
 		durPtr = &d
 	}
 	proposal := map[string]any{
 		"kind": "trim-silence", "currentPath": rc.currentPath, "proposedOutputPath": proposed,
-		"leadingSilenceSeconds": lead, "trailingSilenceSeconds": trail,
-		"durationSeconds": durPtr, "trimStart": start, "trimEnd": end,
+		"leadingSilenceSeconds": plan.Lead, "trailingSilenceSeconds": plan.Trail,
+		"durationSeconds": durPtr, "trimStart": plan.Start, "trimEnd": plan.End,
 	}
 	return proposal, proposed, "", nil
 }
 
-func (m *Service) commitTrim(ctx context.Context, rc *runContext, proposal any, proposed string) (string, error) {
+// commitTrim cuts the window the proposal carried - re-probing here could hand the encoder a
+// different window than the human approved. Same doTranscode as the unattended path, so the
+// action's preset, output folder and loudness override all apply.
+func (m *Service) commitTrim(ctx context.Context, rc *runContext, act Action, proposal any) (string, error) {
 	p, _ := proposal.(map[string]any)
 	start, _ := p["trimStart"].(float64)
 	end, _ := p["trimEnd"].(float64)
-	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
-		return "", err
-	}
-	preset := "remux"
-	params := map[string]any{"input": rc.currentPath, "output": proposed, "presetId": preset, "trimStart": start, "trimEnd": end}
-	if _, err := m.w.RunStream(ctx, "transcode", "transcode.run", params, nil); err != nil {
-		return "", fmt.Errorf("trim transcode: %w", err)
-	}
-	return proposed, nil
+	return doTranscode(ctx, m.engine(), act, rc.currentPath, trimPresetID, start, end)
 }
 
 // ── transcode ────────────────────────────────────────────────────────────────
 
-func (m *Service) buildTranscode(rc *runContext, act Action, hintDir string) (any, string, string, error) {
-	if m.presets == nil {
-		return nil, "", "Preset not found: " + act.PresetID, nil
-	}
-	preset, ok := m.presets(act.PresetID)
+func (m *Service) buildTranscode(rc *runContext, act Action) (any, string, string, error) {
+	// resolvePreset, not a raw m.presets lookup: the proposal must show what commit will actually
+	// do, and commit's own resolvePreset drops loudness for a copy/none audio codec + clamps the
+	// targets. Reading it raw here promised normalization the encode was never going to run.
+	preset, ok := resolvePreset(m.presets, act, "")
 	if !ok {
 		return nil, "", "Preset not found: " + act.PresetID, nil
 	}
-	preset = applyActionLoudness(preset, act) // proposal must show what commit will actually do
-	dir := act.OutputDir
-	if dir == "" {
-		dir = hintDir
-	}
-	proposed := transcodeOut(dir, rc.currentPath, preset)
+	proposed := transcodeOut(act.OutputDir, rc.currentPath, preset)
 	proposal := map[string]any{
 		"kind": "transcode", "currentPath": rc.currentPath, "proposedOutputPath": proposed,
 		"presetId": preset.ID, "presetLabel": preset.Label,
@@ -241,13 +260,20 @@ func (m *Service) buildTranscode(rc *runContext, act Action, hintDir string) (an
 
 // ── delete ───────────────────────────────────────────────────────────────────
 
-// buildDelete proposes deleting the working file. It ALWAYS returns a non-nil proposal (never a
-// skip message): that is what gates the step behind an explicit commit in manual mode - the one
-// destructive step must never slip through unconfirmed. Guard errors surface here, at propose
-// time, so a manual run shows why instead of offering a delete it would refuse to perform.
-// The proposal carries size+mtime so the UI can show what is about to be erased.
+// buildDelete proposes deleting the chain's ORIGINAL input file (rc.origPath), not the working
+// file. It ALWAYS returns a non-nil proposal (never a skip message): that is what gates the step
+// behind an explicit commit in manual mode - the one destructive step must never slip through
+// unconfirmed. Guard errors surface here, at propose time, so a manual run shows why instead of
+// offering a delete it would refuse to perform. The proposal carries size+mtime so the UI can
+// show what is about to be erased; "currentPath" is the wire's generic "path this step acts on"
+// key (shape parity with the other proposals) and names the original.
 func buildDelete(rc *runContext) (any, string, string, error) {
-	target, err := deleteTarget(rc.auto.WatchDir, rc.currentPath)
+	// Same survivor gate as runStep, raised at propose time: never offer a human a delete that
+	// would leave them with no copy of the recording.
+	if err := rc.surv.err(); err != nil {
+		return nil, "", "", err
+	}
+	target, err := deleteTarget(rc.auto.WatchDir, rc.origPath)
 	if err != nil {
 		return nil, "", "", err
 	}

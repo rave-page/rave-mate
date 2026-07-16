@@ -302,11 +302,32 @@ func (m *Service) Save(a Automation) (Automation, error) {
 	return a, nil
 }
 
+// Delete removes an automation AND cascades to every schedule pointing at it. Without the cascade
+// the schedules outlive their target and the scheduler keeps firing them - onSchedule then skips
+// each fire (the automation is gone), so they are invisible work forever. A schedule has no meaning
+// without its automation: deleting one is deleting the other's trigger.
 func (m *Service) Delete(id string) error {
 	if err := m.st.Delete(store.BucketAutomations, id); err != nil {
 		return err
 	}
+	var orphans []string
+	for _, s := range m.ListSchedules() {
+		if s.AutomationID == id {
+			orphans = append(orphans, s.ID)
+		}
+	}
+	for _, sid := range orphans {
+		if err := m.st.Delete(store.BucketSchedules, sid); err != nil {
+			// Report, but keep going: the automation is already gone, so every schedule left behind
+			// is an orphan - delete as many as the store allows rather than stopping at the first.
+			// The webui renders any survivor with an orphan warning + a working Delete.
+			m.log.Warn(source, "schedule cascade delete failed", map[string]any{"scheduleId": sid, "error": err.Error()})
+		}
+	}
 	m.invalidateAutos()
+	if len(orphans) > 0 {
+		m.invalidateScheds() // the schedule cache + Version() readers must see the cascade
+	}
 	m.rearm()
 	return nil
 }
@@ -390,8 +411,14 @@ func (m *Service) RunManual(ctx context.Context, id, filePath string) (Run, erro
 }
 
 // execute runs the chain, persists the Run + the automation's last-run summary.
+// engine bundles the run dependencies both chain paths share, so background/scheduled runs and
+// interactive runs provably take their worker/presets/credentials from one place.
+func (m *Service) engine() engine {
+	return engine{st: m.st, w: m.w, presets: m.presets, creds: m.bgCreds}
+}
+
 func (m *Service) execute(ctx context.Context, a Automation, filePath, trigger string) Run {
-	run := runChain(ctx, m.st, m.w, m.presets, m.log, a, filePath, trigger)
+	run := runChain(ctx, m.engine(), m.log, a, filePath, trigger)
 	if run.ID == "" {
 		run.ID = m.nextID("run")
 	}
@@ -447,14 +474,24 @@ func (m *Service) onSchedule(scheduleID string) {
 	if ok, _ := m.st.GetJSON(store.BucketSchedules, scheduleID, &s); !ok || !s.Enabled {
 		return
 	}
+	// The automation's own switch is the master one: "enabled off" means it does not run, whatever
+	// started it - a timer no more than an arriving file (onWatchFile checks the same flag). Checked
+	// at FIRE time rather than by disarming the timer, so the schedule's own switch stays the truth
+	// about whether it is armed and re-enabling the automation resumes it with no re-save.
+	a, ok := m.Get(s.AutomationID)
+	if !ok || !a.Enabled {
+		m.log.Info(source, "schedule skipped", map[string]any{
+			"scheduleId": s.ID, "label": s.Label, "automationId": s.AutomationID,
+			"reason": "automation not found or disabled",
+		})
+		return
+	}
+	// Recorded only for a fire that actually sweeps - same as a gate-blocked tick, which never
+	// reaches this callback at all. "Last fired" naming a run that never happened is a lie.
 	s.LastFiredAt = time.Now().UTC().Format(time.RFC3339)
 	_ = m.st.PutJSON(store.BucketSchedules, s.ID, s)
 	m.invalidateScheds() // LastFiredAt changed
 
-	a, ok := m.Get(s.AutomationID)
-	if !ok {
-		return
-	}
 	ctx := m.baseCtx()
 	for _, f := range m.sweep(a) {
 		if ctx.Err() != nil {

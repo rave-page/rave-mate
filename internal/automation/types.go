@@ -27,7 +27,7 @@ const (
 	ActionTranscode   ActionType = "transcode"         // run a preset
 	ActionMove        ActionType = "move-to"           // move the (current) file into OutputDir
 	ActionCopy        ActionType = "copy-to"           // copy the (current) file into OutputDir
-	ActionDelete      ActionType = "delete"            // delete the (current) file - TERMINAL, see ValidateActions
+	ActionDelete      ActionType = "delete"            // delete the chain's ORIGINAL input file - TERMINAL, see ValidateActions
 )
 
 // Action is one step. Fields are interpreted per Type (others ignored).
@@ -195,8 +195,10 @@ const (
 
 // RunEvent is one progress notification (byte-shape = web AutomationRunEvent).
 type RunEvent struct {
-	AutomationID         string     `json:"automationId"`
-	RunID                string     `json:"runId"`
+	AutomationID string `json:"automationId"`
+	RunID        string `json:"runId"`
+	// FilePath is the run's WORKING file, which moves as steps relocate/transcode it. It is NOT
+	// what a delete step erases - render Proposal.currentPath for a delete gate, never this.
 	FilePath             string     `json:"filePath"`
 	Step                 int        `json:"step"`
 	TotalSteps           int        `json:"totalSteps"`
@@ -239,20 +241,24 @@ const (
 	defaultMinSilenceSecs = 2.0
 	defaultThresholdDb    = -50.0
 	defaultRenameTemplate = "{YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}"
+	// trimPresetID backs a trim-silence step with no preset of its own: cutting needs a re-encode,
+	// and remux cuts without touching the audio (-c copy), so nothing is lost by default.
+	trimPresetID = "remux"
 	// noEventSlug fills {venueSlug}/{eventSlug} when no booking matched the recording's
 	// timestamp, so the rename still proceeds instead of being skipped.
 	noEventSlug = "no-event"
-	// defaultLoudnessI backs Action.LoudnessI == 0 - the streaming target, i.e. the first entry
-	// of transcode.LoudnessTargets(). (transcode.NormalizePreset applies the same fallback
-	// worker-side; doing it here too keeps the step proposal honest about the real target.)
-	defaultLoudnessI = -14.0
+	// defaultLoudnessI backs Action.LoudnessI == 0. Aliases the encoder's own default so the step
+	// proposal can't drift from what the worker will really apply.
+	defaultLoudnessI = transcode.DefaultLoudnessI
 )
 
 const source = "automation"
 
 // ValidateActions checks an action chain the engine can actually run; UI/wire layers should
-// call it before Save. The engine independently enforces the delete-is-terminal rule at run
-// time, since chains persisted before this check existed can still carry trailing steps.
+// call it before Save. The engine independently fails closed at run time (delete-is-terminal;
+// delete stats its target; delete refuses unless a distinct artifact survived it - survivors),
+// since chains persisted before these checks existed can still carry trailing steps or a move
+// ahead of a delete, and since a step that VALIDATES as producing can still skip at run time.
 func ValidateActions(acts []Action) error {
 	if len(acts) == 0 {
 		return errors.New("automation must have at least one action")
@@ -269,13 +275,100 @@ func ValidateActions(acts []Action) error {
 				return fmt.Errorf("%s action requires an output directory", a.Type)
 			}
 		case ActionDelete:
-			// Terminal: delete consumes the chain's working file, leaving later steps nothing
-			// to act on.
+			// Terminal: delete consumes the chain's INPUT file (not its working file - a
+			// transcode/copy output survives), so any later step would act on a file whose
+			// provenance is now ambiguous.
 			if i != len(acts)-1 {
 				return errors.New("delete must be the last action in the chain")
 			}
+			// Delete may only erase the original if a distinct artifact actually survives it.
+			// The structural half of that: reject iff the ORIGINAL itself gets relocated first,
+			// which leaves the delete nothing at the path it resolves AND nothing in its place.
+			// Whether a move-to does that depends on WHERE in the chain it sits, not on its type -
+			// see relocatesOriginal.
+			if j, bad := relocatesOriginal(acts[:i]); bad {
+				return fmt.Errorf("delete cannot follow a %s (step %d): at that point the chain is still working on the recording it started from, so that step relocates the recording ITSELF - and delete erases exactly that original, which would no longer be there, with nothing produced to take its place. Either produce a new file first (transcode or trim-silence), so the move relocates that output and delete clears the source behind it, or use copy-to instead of move-to - a copy leaves the original in place for delete to clear", acts[j].Type, j+1)
+			}
 		default:
 			return fmt.Errorf("unknown automation action: %s", a.Type)
+		}
+	}
+	return nil
+}
+
+// relocatesOriginal walks a delete's prefix tracking what the working file IS, and reports the
+// index of the first step that relocates the chain's original. Step type alone cannot answer
+// this and pattern-matching on it was wrong: the same move-to relocates the ORIGINAL as step 1
+// (fatal - delete would erase nothing and leave nothing) but relocates a transcode's OUTPUT
+// after a producing step (harmless - the original stayed put, which is what delete wants).
+//
+// The model each step is scored against, in terms of the working file ("current"):
+//   - PRODUCING (transcode, trim-silence): writes a NEW file; original stays; current moves off it.
+//   - RELOCATING (move-to, rename-from-event): moves whatever current points at.
+//   - COPYING (copy-to): writes a copy elsewhere; current STAYS on the original.
+//
+// So [transcode, move, delete] and [copy, delete] pass; [move, delete], [rename, delete] and
+// [copy, move, delete] don't.
+func relocatesOriginal(prefix []Action) (int, bool) {
+	onOriginal := true // current == the chain's input until a step produces a new file
+	for i, a := range prefix {
+		switch a.Type {
+		case ActionTranscode, ActionTrimSilence:
+			onOriginal = false
+		case ActionMove, ActionRename:
+			if onOriginal {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// supersedesOriginal reports whether a step, when it runs, stops the original from being the sole
+// copy - either by writing a distinct new file (transcode/trim-silence) or by relocating the
+// original itself (rename-from-event). The run-time survivor gate counts these: if one is present
+// but SKIPS (no silence to cut; no matched event/credentials to rename from), the original is
+// still the only copy and a following delete would erase it. Validate cannot see a skip - only run
+// time can. copy/move are excluded: copy leaves the original in place as the surviving source and
+// never skips; move always relocates the original, so a delete after it fails closed on the
+// vanished path.
+func supersedesOriginal(a Action) bool {
+	return a.Type == ActionTranscode || a.Type == ActionTrimSilence || a.Type == ActionRename
+}
+
+// ValidateLoudness rejects a loudness override on a step whose preset cannot normalize.
+// Normalizing rewrites the samples, so a copy/none audio codec drops it (transcode.LoudnessAppliesTo
+// / NormalizePreset) - the target would be stored, handed back on the next read, and silently do
+// nothing forever.
+//
+// Split from ValidateActions because it needs preset resolution, which the structural rules do not.
+// presets == nil ⇒ skip: a surface that cannot resolve must not guess. EVERY surface that can
+// resolve calls this, so a chain one accepts they all accept - the webui editor and the studio wire
+// disagreeing would make an automation authored in one un-editable from the other.
+func ValidateLoudness(acts []Action, presets PresetResolver) error {
+	if presets == nil {
+		return nil
+	}
+	for i, a := range acts {
+		if !a.LoudnessOn {
+			continue
+		}
+		dflt := ""
+		switch a.Type {
+		case ActionTrimSilence:
+			dflt = trimPresetID
+		case ActionTranscode:
+		default:
+			continue // no other step transcodes, so no other step reads the loudness fields
+		}
+		// resolvePreset applies the override then NormalizePreset - the exact coercion the worker
+		// performs - so this reads the codec the encode will really use, not the preset as written.
+		p, ok := resolvePreset(presets, a, dflt)
+		if !ok {
+			continue // unknown preset: ValidateActions + the engine own that verdict, not this one
+		}
+		if !transcode.LoudnessAppliesTo(p.AudioCodec) {
+			return fmt.Errorf("step %d (%s): the %q preset copies the audio instead of re-encoding it, and loudness normalization can only run on a re-encode - so this target would be saved and then silently ignored on every run. Pick a preset that re-encodes the audio, or switch normalization off for this step", i+1, a.Type, p.Label)
 		}
 	}
 	return nil

@@ -29,11 +29,20 @@ const (
 
 // runContext is one in-flight interactive run.
 type runContext struct {
-	runID       string
-	auto        Automation
-	mode        RunMode
+	runID string
+	auto  Automation
+	mode  RunMode
+	// origPath is the chain's input file, fixed for the run's lifetime; currentPath is the
+	// working file threaded through the steps. They diverge the moment a step relocates or
+	// transcodes. delete resolves against origPath ONLY (buildDelete/commitStepSideEffects).
+	origPath    string
 	currentPath string
-	aborted     atomic.Bool
+	// surv gates the delete the same way runChain's does: it may only erase origPath if a
+	// producing step actually wrote a distinct file. A manual SKIP of the trim/transcode counts
+	// as producing nothing - the human declining the step must not cost them the recording.
+	// Touched only from runInteractive's own goroutine (buildStep/commit run inline there).
+	surv    survivors
+	aborted atomic.Bool
 
 	mu      sync.Mutex
 	pending chan decision // non-nil only while a manual step awaits a decision
@@ -54,7 +63,7 @@ func (m *Service) StartRun(mode RunMode, id, filePath string) (string, error) {
 	if _, err := os.Stat(filePath); err != nil {
 		return "", fmt.Errorf("file not found: %s", filePath)
 	}
-	rc := &runContext{runID: newRunID(), auto: a, mode: mode, currentPath: filePath}
+	rc := &runContext{runID: newRunID(), auto: a, mode: mode, origPath: filePath, currentPath: filePath}
 	m.runsMu.Lock()
 	if m.active == nil {
 		m.active = map[string]*runContext{}
@@ -119,20 +128,11 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 	}()
 
 	started := time.Now().UTC().Format(time.RFC3339Nano)
-	run := Run{ID: rc.runID, AutomationID: rc.auto.ID, Trigger: trigger, FilePath: rc.currentPath, StartedAt: started, Status: "running"}
-	m.emit(rc, RunEvent{Step: -1, State: StateStarting, Message: "Run started for " + filepath.Base(rc.currentPath)})
+	run := Run{ID: rc.runID, AutomationID: rc.auto.ID, Trigger: trigger, FilePath: rc.origPath, StartedAt: started, Status: "running"}
+	m.emit(rc, RunEvent{Step: -1, State: StateStarting, Message: "Run started for " + filepath.Base(rc.origPath)})
 
 	status := "success"
 	var runErr string
-
-	// Look-ahead: if a later step moves the file, earlier outputs land there directly.
-	moveStep, moveDir := -1, ""
-	for i, a := range rc.auto.Actions {
-		if a.Type == ActionMove && a.OutputDir != "" {
-			moveStep, moveDir = i, a.OutputDir
-			break
-		}
-	}
 
 	for i, act := range rc.auto.Actions {
 		if rc.aborted.Load() || ctx.Err() != nil {
@@ -143,11 +143,7 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 		}
 		m.emit(rc, RunEvent{Step: i, State: StateRunning, ActionType: act.Type, Message: "Running " + string(act.Type)})
 
-		hintDir := ""
-		if moveStep > i {
-			hintDir = moveDir
-		}
-		proposal, proposed, skipMsg, err := m.buildStep(ctx, rc, act, hintDir)
+		proposal, proposed, skipMsg, err := m.buildStep(ctx, rc, act)
 		if err != nil {
 			m.emit(rc, RunEvent{Step: i, State: StateError, ActionType: act.Type, Message: err.Error()})
 			run.Steps = append(run.Steps, StepResult{Type: act.Type, Error: err.Error()})
@@ -155,6 +151,7 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 			break
 		}
 		if skipMsg != "" {
+			rc.surv.step(act, true, skipMsg)
 			m.emit(rc, RunEvent{Step: i, State: StateSkipped, ActionType: act.Type, Message: skipMsg})
 			run.Steps = append(run.Steps, StepResult{Type: act.Type, OK: true, OutputPath: rc.currentPath})
 			if status == "success" {
@@ -178,6 +175,8 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 				status = "partial"
 				goto done
 			case decSkip:
+				// Declining the step produced nothing - a later delete must see that.
+				rc.surv.step(act, true, "The step that would have produced a new file was skipped.")
 				m.emit(rc, RunEvent{Step: i, State: StateSkipped, ActionType: act.Type, Message: "User skipped step."})
 				run.Steps = append(run.Steps, StepResult{Type: act.Type, OK: true, OutputPath: rc.currentPath})
 				if status == "success" {
@@ -194,19 +193,23 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 			status, runErr = "error", err.Error()
 			break
 		}
+		rc.surv.step(act, false, "")
 		if act.Type == ActionDelete {
-			// Delete is terminal: the working file is gone, so the chain ends here and any
-			// trailing steps are reported skipped rather than run against a missing path.
+			// Delete is terminal: it consumed the chain's INPUT, so any trailing step would run
+			// against a file whose provenance is now ambiguous - report them skipped instead.
 			// (ValidateActions rejects trailing steps up front; this covers chains persisted
-			// before that check.) rc.currentPath deliberately keeps naming the deleted file so
-			// the step/terminal events still say WHAT was removed.
+			// before that check.) The message names origPath - the file actually erased - and
+			// rc.currentPath when it differs, since that one SURVIVES (a transcode/copy output).
 			run.Steps = append(run.Steps, StepResult{Type: act.Type, OK: true}) // no output path
-			m.emit(rc, RunEvent{Step: i, State: StateCompleted, ActionType: act.Type,
-				Message: "Deleted " + filepath.Base(rc.currentPath)})
+			msg := "Deleted " + filepath.Base(rc.origPath)
+			if rc.currentPath != "" && rc.currentPath != rc.origPath {
+				msg += " - " + filepath.Base(rc.currentPath) + " remains."
+			}
+			m.emit(rc, RunEvent{Step: i, State: StateCompleted, ActionType: act.Type, Message: msg})
 			for j := i + 1; j < len(rc.auto.Actions); j++ {
 				t := rc.auto.Actions[j].Type
 				m.emit(rc, RunEvent{Step: j, State: StateSkipped, ActionType: t,
-					Message: "Skipped: the file was deleted by an earlier step."})
+					Message: "Skipped: an earlier delete step consumed the chain's input file."})
 				run.Steps = append(run.Steps, StepResult{Type: t, OK: true})
 				status = "partial"
 			}
