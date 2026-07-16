@@ -201,6 +201,8 @@ type Features struct {
 
 	Mocap MocapFeature `json:"mocap"` // mocap capture master: panel capture → pose store → composite region overlay on the VRSL stream
 
+	Crew CrewFeature `json:"crew"` // capture-crew relay: uplink/ingest mocap packets through the event's rave.page relay room
+
 	Webcam WebcamFeature `json:"webcam"` // webcam/UVC source: dshow capture → Spout + PTZ/exposure control (medialink P5)
 
 	MediaLink MediaLinkFeature `json:"mediaLink"` // LAN video routes: codec/bitrate + Spout-sender sharing (medialink P4)
@@ -728,6 +730,34 @@ func (m MocapFeature) ResolvedStageSize() [3]float64 {
 	}
 	return out
 }
+
+// CrewFeature is the capture-crew relay link (CREW_RELAY_CONTRACT.md §6): relay decoded mocap
+// panel packets between crew rave-mates through the event's mocap relay room on rave.page.
+// Role "node" uplinks this machine's decoded packets to every master present in the room;
+// "master" ingests remote crew packets into the local persistent mocap master (server-side
+// this role requires event-editor rights). NO token/URL fields: bearer = the signed-in
+// account's TokenSource, base = cfg.APIBaseURL (the AccountBridgeFeature precedent - tokens
+// never live in plaintext config). Additive at v33, no bump - zero value = disabled.
+type CrewFeature struct {
+	Enabled bool   `json:"enabled"`
+	EventID string `json:"eventId,omitempty"` // rave.page event id (the relay room key)
+	Role    string `json:"role,omitempty"`    // "node" (default) | "master"
+	Label   string `json:"label,omitempty"`   // human label shown to the crew (e.g. "FOH rig")
+}
+
+// ResolvedRole returns "node" or "master" (default "node").
+func (c CrewFeature) ResolvedRole() string {
+	if strings.EqualFold(strings.TrimSpace(c.Role), "master") {
+		return "master"
+	}
+	return "node"
+}
+
+// ResolvedEventID returns the trimmed event id ("" = unset; the module refuses to start).
+func (c CrewFeature) ResolvedEventID() string { return strings.TrimSpace(c.EventID) }
+
+// ResolvedLabel returns the trimmed crew label ("" = none).
+func (c CrewFeature) ResolvedLabel() string { return strings.TrimSpace(c.Label) }
 
 // TimecodeFeature configures the house SMPTE timecode generator: one master frame clock other
 // machines/software chase. Three independent sinks - LTC (audio-out, the SMPTE signal most media
