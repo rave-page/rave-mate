@@ -1,13 +1,13 @@
 {
-  "version": "nightly-16875a1",
-  "build": 96,
-  "commit": "16875a1",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-96-20260715-16875a1.exe",
-  "sha256": "6df86094cb1445d5d93806279c1fc3cdd40c6de642cf756a78fa3146996b2c37",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-96-20260715-16875a1.exe",
-  "installer_sha256": "3d0bbffdee2e1f181cc2e4c3be2fd76d118f873ec65f4c504a200fd8527cc0e2",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-96-20260715-16875a1",
-  "linux_sha256": "a0885795336600d974b61b8fae84331feee76dd174c2bbf7a00c96e561e2ad51",
+  "version": "nightly-9f78049",
+  "build": 97,
+  "commit": "9f78049",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-97-20260716-9f78049.exe",
+  "sha256": "ebccd01ac210f0e12a75bd0d450dd36fc2a19715696ceb754036f50208c6c2c3",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-97-20260716-9f78049.exe",
+  "installer_sha256": "dc17cb6b8bf6a664414637282f508ede18bfdc5e6da332f5977299d5be07acdc",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-97-20260716-9f78049",
+  "linux_sha256": "7c0e54cdb58d53a777fcb62e5ebdebc2ed392392417f83c619e399d5c0d0b801",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-15T23:54:59Z",
-  "notes": "Merge agent-vrsl-video-stream: VRSL video-stream feature"
+  "released": "2026-07-16T00:06:17Z",
+  "notes": "style(config): gofmt VRSL StreamFeature struct"
 }
