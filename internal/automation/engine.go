@@ -12,12 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/store"
 	"rave.page/mate/internal/transcode"
 )
 
 // runChain executes a's action chain over filePath, threading a "current file" through the
-// steps. Output is always a NEW file per step; inputs are never overwritten. Returns a Run
+// steps. Output is always a NEW file per step; inputs are never overwritten (the sole exception
+// is the terminal `delete` step, which consumes the working file - see runStep). Returns a Run
 // recording per-step outcomes. Stops at the first failing step (status: error|partial).
 func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetResolver, log Logger, a Automation, filePath, trigger string) Run {
 	started := time.Now().UTC().Format(time.RFC3339Nano)
@@ -35,6 +37,7 @@ func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetReso
 
 	current := filePath
 	failed := false
+	truncated := false // stopped early on a terminal step with actions still pending
 	for i, act := range a.Actions {
 		if ctx.Err() != nil {
 			run.Steps = append(run.Steps, StepResult{Type: act.Type, Error: "cancelled"})
@@ -42,7 +45,7 @@ func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetReso
 			break
 		}
 		step := StepResult{Type: act.Type}
-		next, err := runStep(ctx, st, w, presets, act, current)
+		next, err := runStep(ctx, st, w, presets, act, a.WatchDir, current)
 		if err != nil {
 			step.Error = err.Error()
 			run.Steps = append(run.Steps, step)
@@ -53,22 +56,33 @@ func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetReso
 			break
 		}
 		step.OK = true
-		step.OutputPath = next
-		current = next
+		step.OutputPath = next // "" for delete: no file survives it
 		run.Steps = append(run.Steps, step)
 		log.Info(source, "automation step ok", map[string]any{
 			"runId": run.ID, "index": i, "type": act.Type, "output": next,
 		})
+		if act.Type == ActionDelete {
+			// Delete is terminal - the working file is gone. ValidateActions rejects trailing
+			// steps up front, so this only fires for chains persisted before that check.
+			if n := len(a.Actions) - i - 1; n > 0 {
+				truncated = true
+				log.Warn(source, "chain stopped after delete", map[string]any{
+					"runId": run.ID, "skippedSteps": n,
+				})
+			}
+			break
+		}
+		current = next
 	}
 
 	run.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	switch {
-	case !failed:
-		run.Status = "success"
-	case len(run.Steps) <= 1:
+	case failed && len(run.Steps) <= 1:
 		run.Status = "error"
-	default:
+	case failed, truncated:
 		run.Status = "partial"
+	default:
+		run.Status = "success"
 	}
 	log.Info(source, "automation run finished", map[string]any{
 		"runId": run.ID, "status": run.Status, "steps": len(run.Steps),
@@ -77,8 +91,9 @@ func runChain(ctx context.Context, st *store.Store, w Worker, presets PresetReso
 }
 
 // runStep runs one action over current and returns the new "current file" (== current for
-// copy, which doesn't relocate the working file).
-func runStep(ctx context.Context, st *store.Store, w Worker, presets PresetResolver, act Action, current string) (string, error) {
+// copy, which doesn't relocate the working file; "" for delete, which consumes it). root is the
+// automation's watch dir - the containment boundary for the delete step.
+func runStep(ctx context.Context, st *store.Store, w Worker, presets PresetResolver, act Action, root, current string) (string, error) {
 	switch act.Type {
 	case ActionTranscode:
 		return doTranscode(ctx, w, presets, act, current, 0)
@@ -121,13 +136,66 @@ func runStep(ctx context.Context, st *store.Store, w Worker, presets PresetResol
 		// copy doesn't relocate the working file; current stays.
 		return current, nil
 
+	case ActionDelete:
+		target, err := deleteTarget(root, current)
+		if err != nil {
+			return "", err
+		}
+		if err := localmedia.Delete(target); err != nil {
+			return "", fmt.Errorf("delete: %w", err)
+		}
+		return "", nil // terminal: no file survives; runChain stops here
+
 	default:
 		return "", fmt.Errorf("unknown action type %q", act.Type)
 	}
 }
 
-// doTranscode resolves act.PresetID, builds a new output path alongside (or in OutputDir),
-// runs transcode.run with trimStart, and returns the output path.
+// deleteTarget validates that path is an existing regular file strictly inside root (the
+// automation's watch dir) and returns its cleaned absolute form. Fails closed on every doubt -
+// an empty path/root, an unresolvable path, a directory, or anything outside root - so a chain
+// with a mis-set OutputDir can never reach past the watched folder and erase arbitrary files.
+func deleteTarget(root, path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("delete: no current file")
+	}
+	if strings.TrimSpace(root) == "" {
+		return "", errors.New("delete: automation has no watch directory")
+	}
+	ap, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("delete: resolve file: %w", err)
+	}
+	ar, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("delete: resolve watch dir: %w", err)
+	}
+	if !withinDir(ar, ap) {
+		return "", fmt.Errorf("delete: %s is outside the watch directory", filepath.Base(ap))
+	}
+	fi, err := os.Stat(ap)
+	if err != nil {
+		return "", fmt.Errorf("delete: %w", err)
+	}
+	if fi.IsDir() {
+		return "", errors.New("delete: refusing to delete a directory")
+	}
+	return ap, nil
+}
+
+// withinDir reports whether path sits strictly under dir (dir itself is not "within"). Lexical:
+// filepath.Rel compares case-insensitively on Windows, and a symlink out of dir deletes the link,
+// not its target.
+func withinDir(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// doTranscode resolves act.PresetID (+ the action's loudness override), builds a new output path
+// alongside (or in OutputDir), runs transcode.run with trimStart, and returns the output path.
 func doTranscode(ctx context.Context, w Worker, presets PresetResolver, act Action, current string, trimStart float64) (string, error) {
 	if presets == nil {
 		return "", errors.New("unknown preset")
@@ -136,6 +204,7 @@ func doTranscode(ctx context.Context, w Worker, presets PresetResolver, act Acti
 	if !ok {
 		return "", errors.New("unknown preset")
 	}
+	preset = applyActionLoudness(preset, act)
 	out := transcodeOut(act.OutputDir, current, preset)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return "", fmt.Errorf("mkdir output: %w", err)
@@ -154,6 +223,37 @@ func doTranscode(ctx context.Context, w Worker, presets PresetResolver, act Acti
 		return "", fmt.Errorf("transcode: %w", err)
 	}
 	return out, nil
+}
+
+// applyActionLoudness overlays an action's LUFS override onto the resolved preset.
+//
+// Semantics (back-compat by construction):
+//   - act.LoudnessOn == false → preset returned untouched, so a preset that normalizes still
+//     normalizes exactly as before. Every automation saved before these fields existed decodes
+//     with LoudnessOn=false and therefore behaves identically.
+//   - act.LoudnessOn == true → the action's target REPLACES the preset's loudness block
+//     wholesale (on/I/TP/raise-only), rather than merging field-by-field: a half-overridden
+//     target (action I + preset TP) is nobody's intent.
+//
+// There is no "force off" override - LoudnessOn=false means "don't override". To skip
+// normalization, point the action at a preset that doesn't normalize.
+//
+// Zero values resolve to defaults: I → defaultLoudnessI (-14 LUFS streaming target); TP stays 0
+// and transcode.Preset.EffectiveTP resolves it to transcode.DefaultLoudnessTP (-1 dBTP). The
+// worker's transcode.NormalizePreset then clamps both to sane ranges and drops loudness entirely
+// for copy/none audio codecs (normalizing needs a re-encode).
+func applyActionLoudness(p transcode.Preset, act Action) transcode.Preset {
+	if !act.LoudnessOn {
+		return p
+	}
+	p.LoudnessOn = true
+	p.LoudnessI = act.LoudnessI
+	if p.LoudnessI == 0 {
+		p.LoudnessI = defaultLoudnessI
+	}
+	p.LoudnessTP = act.LoudnessTP
+	p.LoudnessRaiseOnly = act.LoudnessRaiseOnly
+	return p
 }
 
 // detectLeadingSilence runs the (cached) transcode.silence probe and returns leadingSeconds.

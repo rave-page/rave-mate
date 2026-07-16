@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/store"
 )
 
@@ -28,6 +29,8 @@ func (m *Service) buildStep(ctx context.Context, rc *runContext, act Action, hin
 		return buildRelocate(rc, act, "move")
 	case ActionCopy:
 		return buildRelocate(rc, act, "copy")
+	case ActionDelete:
+		return buildDelete(rc)
 	default:
 		return nil, "", "", fmt.Errorf("unknown action %q", act.Type)
 	}
@@ -59,6 +62,17 @@ func (m *Service) commitStepSideEffects(ctx context.Context, rc *runContext, act
 			return "", err
 		}
 		return rc.currentPath, nil // copy doesn't relocate the working file
+	case ActionDelete:
+		// Re-validate at commit: in manual mode the proposal sat in front of a human, and the
+		// file may have moved/vanished/been swapped for a directory since it was built.
+		target, err := deleteTarget(rc.auto.WatchDir, rc.currentPath)
+		if err != nil {
+			return "", err
+		}
+		if err := localmedia.Delete(target); err != nil {
+			return "", fmt.Errorf("delete: %w", err)
+		}
+		return "", nil // terminal: no file survives; runInteractive stops here
 	default:
 		return rc.currentPath, nil
 	}
@@ -204,6 +218,7 @@ func (m *Service) buildTranscode(rc *runContext, act Action, hintDir string) (an
 	if !ok {
 		return nil, "", "Preset not found: " + act.PresetID, nil
 	}
+	preset = applyActionLoudness(preset, act) // proposal must show what commit will actually do
 	dir := act.OutputDir
 	if dir == "" {
 		dir = hintDir
@@ -213,7 +228,35 @@ func (m *Service) buildTranscode(rc *runContext, act Action, hintDir string) (an
 		"kind": "transcode", "currentPath": rc.currentPath, "proposedOutputPath": proposed,
 		"presetId": preset.ID, "presetLabel": preset.Label,
 	}
+	// Loudness keys appear only when normalizing, so a non-normalizing chain's proposal stays
+	// byte-identical to the pre-loudness wire shape.
+	if preset.LoudnessOn {
+		proposal["loudnessOn"] = true
+		proposal["loudnessI"] = preset.LoudnessI
+		proposal["loudnessTP"] = preset.EffectiveTP()
+		proposal["loudnessRaiseOnly"] = preset.LoudnessRaiseOnly
+	}
 	return proposal, proposed, "", nil
+}
+
+// ── delete ───────────────────────────────────────────────────────────────────
+
+// buildDelete proposes deleting the working file. It ALWAYS returns a non-nil proposal (never a
+// skip message): that is what gates the step behind an explicit commit in manual mode - the one
+// destructive step must never slip through unconfirmed. Guard errors surface here, at propose
+// time, so a manual run shows why instead of offering a delete it would refuse to perform.
+// The proposal carries size+mtime so the UI can show what is about to be erased.
+func buildDelete(rc *runContext) (any, string, string, error) {
+	target, err := deleteTarget(rc.auto.WatchDir, rc.currentPath)
+	if err != nil {
+		return nil, "", "", err
+	}
+	proposal := map[string]any{"kind": "delete", "currentPath": target}
+	if fi, err := os.Stat(target); err == nil {
+		proposal["sizeBytes"] = fi.Size()
+		proposal["modifiedAt"] = fi.ModTime().UTC().Format(time.RFC3339)
+	}
+	return proposal, "", "", nil // no proposed output path: delete produces no file
 }
 
 // ── move / copy ──────────────────────────────────────────────────────────────

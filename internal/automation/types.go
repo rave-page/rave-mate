@@ -8,8 +8,11 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
 	"slices"
+	"time"
 
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/worker"
@@ -24,6 +27,7 @@ const (
 	ActionTranscode   ActionType = "transcode"         // run a preset
 	ActionMove        ActionType = "move-to"           // move the (current) file into OutputDir
 	ActionCopy        ActionType = "copy-to"           // copy the (current) file into OutputDir
+	ActionDelete      ActionType = "delete"            // delete the (current) file - TERMINAL, see ValidateActions
 )
 
 // Action is one step. Fields are interpreted per Type (others ignored).
@@ -39,6 +43,14 @@ type Action struct {
 	// rename-from-event
 	BufferMinutes int    `json:"bufferMinutes,omitempty"` // default 180
 	Template      string `json:"template,omitempty"`      // {YYYY-MM-DD}/{venueSlug}/{eventSlug}/...
+	// transcode loudness override (applyActionLoudness). LoudnessOn=true REPLACES the resolved
+	// preset's loudness settings; false = leave the preset's own loudness untouched (so chains
+	// saved before these fields existed behave identically). There is deliberately no "force
+	// off": to skip normalization, point PresetID at a preset that doesn't normalize.
+	LoudnessOn        bool    `json:"loudnessOn,omitempty"`
+	LoudnessI         float64 `json:"loudnessI,omitempty"`         // integrated target (LUFS); 0 = defaultLoudnessI
+	LoudnessTP        float64 `json:"loudnessTP,omitempty"`        // true-peak ceiling (dBTP); 0 = transcode.DefaultLoudnessTP
+	LoudnessRaiseOnly bool    `json:"loudnessRaiseOnly,omitempty"` // never turn an already-loud track down
 }
 
 // Match decides whether a file is eligible for an automation.
@@ -46,6 +58,10 @@ type Match struct {
 	Extensions      []string `json:"extensions,omitempty"` // lower-case, dot-prefixed e.g. ".wav"; empty = any
 	MinSizeBytes    int64    `json:"minSizeBytes,omitempty"`
 	FilenamePattern string   `json:"filenamePattern,omitempty"` // regex over basename; empty = any
+	// MinAgeDays gates on the file's mtime: it must be at least this old. 0 = off. Meant for
+	// scheduled sweeps ("archive/delete recordings older than 30 days") - a watch trigger fires
+	// on a fresh file, which by definition never passes a >0 age gate.
+	MinAgeDays int `json:"minAgeDays,omitempty"`
 }
 
 // Automation = a watched directory + match rules + an ordered action chain.
@@ -226,15 +242,56 @@ const (
 	// noEventSlug fills {venueSlug}/{eventSlug} when no booking matched the recording's
 	// timestamp, so the rename still proceeds instead of being skipped.
 	noEventSlug = "no-event"
+	// defaultLoudnessI backs Action.LoudnessI == 0 - the streaming target, i.e. the first entry
+	// of transcode.LoudnessTargets(). (transcode.NormalizePreset applies the same fallback
+	// worker-side; doing it here too keeps the step proposal honest about the real target.)
+	defaultLoudnessI = -14.0
 )
 
 const source = "automation"
 
-// matches reports whether a file (ext lower-case dot-prefixed, base name, size bytes) is
-// eligible under m. An invalid filenamePattern regex fails closed (no match).
-func (m Match) matches(ext, base string, size int64) bool {
+// ValidateActions checks an action chain the engine can actually run; UI/wire layers should
+// call it before Save. The engine independently enforces the delete-is-terminal rule at run
+// time, since chains persisted before this check existed can still carry trailing steps.
+func ValidateActions(acts []Action) error {
+	if len(acts) == 0 {
+		return errors.New("automation must have at least one action")
+	}
+	for i, a := range acts {
+		switch a.Type {
+		case ActionRename, ActionTrimSilence:
+		case ActionTranscode:
+			if a.PresetID == "" {
+				return errors.New("transcode action requires a preset")
+			}
+		case ActionMove, ActionCopy:
+			if a.OutputDir == "" {
+				return fmt.Errorf("%s action requires an output directory", a.Type)
+			}
+		case ActionDelete:
+			// Terminal: delete consumes the chain's working file, leaving later steps nothing
+			// to act on.
+			if i != len(acts)-1 {
+				return errors.New("delete must be the last action in the chain")
+			}
+		default:
+			return fmt.Errorf("unknown automation action: %s", a.Type)
+		}
+	}
+	return nil
+}
+
+// matches reports whether a file (ext lower-case dot-prefixed, base name, size bytes, mtime) is
+// eligible under m. An invalid filenamePattern regex fails closed (no match); so does a zero
+// mtime against a MinAgeDays gate (age unprovable → never delete/archive on a guess).
+func (m Match) matches(ext, base string, size int64, mtime time.Time) bool {
 	if m.MinSizeBytes > 0 && size < m.MinSizeBytes {
 		return false
+	}
+	if m.MinAgeDays > 0 {
+		if mtime.IsZero() || time.Since(mtime) < time.Duration(m.MinAgeDays)*24*time.Hour {
+			return false
+		}
 	}
 	if len(m.Extensions) > 0 && !slices.Contains(m.Extensions, ext) {
 		return false

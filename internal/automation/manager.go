@@ -483,11 +483,12 @@ func (m *Service) sweep(a Automation) []string {
 	return out
 }
 
-// eligible reports whether path passes the automation's Match (extension + min size).
+// eligible reports whether path passes the automation's Match (extension + min size + min age).
+// The mtime comes from the stat this already does - no extra stat on the watch/sweep path.
 func (m *Service) eligible(a Automation, path string) bool {
 	fi, err := os.Stat(path)
 	if err != nil || fi.IsDir() {
 		return false
 	}
-	return a.Match.matches(strings.ToLower(filepath.Ext(path)), filepath.Base(path), fi.Size())
+	return a.Match.matches(strings.ToLower(filepath.Ext(path)), filepath.Base(path), fi.Size(), fi.ModTime())
 }

@@ -194,6 +194,24 @@ func (m *Service) runInteractive(ctx context.Context, rc *runContext, trigger st
 			status, runErr = "error", err.Error()
 			break
 		}
+		if act.Type == ActionDelete {
+			// Delete is terminal: the working file is gone, so the chain ends here and any
+			// trailing steps are reported skipped rather than run against a missing path.
+			// (ValidateActions rejects trailing steps up front; this covers chains persisted
+			// before that check.) rc.currentPath deliberately keeps naming the deleted file so
+			// the step/terminal events still say WHAT was removed.
+			run.Steps = append(run.Steps, StepResult{Type: act.Type, OK: true}) // no output path
+			m.emit(rc, RunEvent{Step: i, State: StateCompleted, ActionType: act.Type,
+				Message: "Deleted " + filepath.Base(rc.currentPath)})
+			for j := i + 1; j < len(rc.auto.Actions); j++ {
+				t := rc.auto.Actions[j].Type
+				m.emit(rc, RunEvent{Step: j, State: StateSkipped, ActionType: t,
+					Message: "Skipped: the file was deleted by an earlier step."})
+				run.Steps = append(run.Steps, StepResult{Type: t, OK: true})
+				status = "partial"
+			}
+			break
+		}
 		rc.currentPath = out
 		run.Steps = append(run.Steps, StepResult{Type: act.Type, OK: true, OutputPath: out})
 		m.emit(rc, RunEvent{Step: i, State: StateCompleted, ActionType: act.Type, OutputPath: out,
