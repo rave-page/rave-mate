@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mocapnode"
 )
@@ -36,6 +37,25 @@ const (
 // re-joins; a genuinely revoked member then 404s at join and keeps backing off.
 var errKicked = errors.New("crewlink: kicked from the room")
 
+// reconnectLogEvery caps reconnect-warning spam: one message per failure KIND per interval
+// (the bridge/manager.go logbus.Gate pattern); a kind change re-emits immediately.
+const reconnectLogEvery = 10 * time.Minute
+
+// gateKey buckets session errors into stable keys so the reconnect log gate re-emits on a
+// failure-kind TRANSITION, not on cosmetic message differences.
+func gateKey(err error) string {
+	switch {
+	case errors.Is(err, ErrUnauthorized):
+		return "unauthorized"
+	case errors.Is(err, errKicked):
+		return "kicked"
+	case errors.Is(err, ErrSessionGone):
+		return "session-gone"
+	default:
+		return "error"
+	}
+}
+
 // NodeConfig wires a Node. Client + EventID are mandatory.
 type NodeConfig struct {
 	Client  *Client
@@ -49,7 +69,8 @@ type NodeConfig struct {
 	BurstEvery  time.Duration
 	SteadyEvery time.Duration
 
-	Logf func(format string, args ...any) // optional log sink; never logs payloads
+	Logf  func(format string, args ...any) // optional informational log sink; never logs payloads
+	Warnf func(format string, args ...any) // optional anomaly log sink; nil = Logf
 }
 
 // Node runs the node link. Run once; Enqueue is safe from any goroutine at any time.
@@ -63,6 +84,7 @@ type Node struct {
 	sid      string
 	masters  map[string]Member
 	syncSID  string        // elected sync master (discipline source)
+	lastSync string        // previous discipline source (detects domain changes across elections)
 	reburst  chan struct{} // signals the sync loop to re-burst (new/changed target)
 	kicked   bool
 	joins    uint64 // sessions established (observability)
@@ -76,6 +98,9 @@ type Node struct {
 func NewNode(cfg NodeConfig) *Node {
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
+	}
+	if cfg.Warnf == nil {
+		cfg.Warnf = cfg.Logf
 	}
 	if cfg.Tier == "" {
 		cfg.Tier = "panel"
@@ -117,6 +142,7 @@ func (n *Node) Enqueue(pkt mocapnode.Packet) {
 // re-join. Blocking; run on its own goroutine.
 func (n *Node) Run(ctx context.Context) {
 	backoff := time.Second
+	var gate logbus.Gate // reconnect spam: one warn per failure kind per reconnectLogEvery
 	for ctx.Err() == nil {
 		err := n.session(ctx)
 		if ctx.Err() != nil {
@@ -124,8 +150,15 @@ func (n *Node) Run(ctx context.Context) {
 		}
 		if err != nil {
 			n.setErr(err.Error())
-			n.cfg.Logf("crewlink: node session ended; reconnecting (%v)", err)
+			if sup, ok := gate.Should(gateKey(err), reconnectLogEvery); ok {
+				if sup > 0 {
+					n.cfg.Warnf("crewlink: node session ended; reconnecting (%v) [%d repeats suppressed]", err, sup)
+				} else {
+					n.cfg.Warnf("crewlink: node session ended; reconnecting (%v)", err)
+				}
+			}
 		} else {
+			gate.Reset()
 			backoff = time.Second
 		}
 		select {
@@ -156,8 +189,9 @@ func (n *Node) session(ctx context.Context) error {
 		}
 	}
 	n.electSyncLocked()
+	masters := len(n.masters)
 	n.mu.Unlock()
-	n.cfg.Logf("crewlink: node joined room (masters=%d)", len(res.Members))
+	n.cfg.Logf("crewlink: node joined room (masters=%d)", masters)
 
 	defer func() {
 		n.mu.Lock()
@@ -337,7 +371,7 @@ func (n *Node) onRelay(from string, payload []byte, cancel context.CancelFunc) {
 			return
 		}
 		if cf.Op == CtrlOpKick {
-			n.cfg.Logf("crewlink: node kicked by master ctrl")
+			n.cfg.Warnf("crewlink: node kicked by master ctrl")
 			n.mu.Lock()
 			n.kicked = true
 			n.mu.Unlock()
@@ -351,7 +385,11 @@ func (n *Node) onRelay(from string, payload []byte, cancel context.CancelFunc) {
 func (n *Node) onPresence(p Presence, ownSID string, cancel context.CancelFunc) {
 	if p.SID == ownSID {
 		if p.Type == "kick" || p.Type == "leave" {
-			n.cfg.Logf("crewlink: node session dropped by server (%s)", p.Type)
+			logf := n.cfg.Logf
+			if p.Type == "kick" {
+				logf = n.cfg.Warnf // deliberate removal = anomaly; leave is routine
+			}
+			logf("crewlink: node session dropped by server (%s)", p.Type)
 			n.mu.Lock()
 			n.kicked = p.Type == "kick"
 			n.mu.Unlock()
@@ -384,11 +422,18 @@ func (n *Node) electSyncLocked() {
 		n.syncSID = sid
 		break
 	}
-	if n.syncSID != "" {
-		select {
-		case n.reburst <- struct{}{}:
-		default:
-		}
+	if n.syncSID == "" {
+		return
+	}
+	if n.lastSync != "" && n.lastSync != n.syncSID {
+		// Master failover: the old master's min-RTT samples would pin the clock to its
+		// domain for up to 60s. Fresh estimator; same SoftwareClock → slew, not step.
+		n.clock.Resync()
+	}
+	n.lastSync = n.syncSID
+	select {
+	case n.reburst <- struct{}{}:
+	default:
 	}
 }
 
@@ -402,7 +447,7 @@ func (n *Node) setErr(msg string) {
 func (n *Node) guard(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			n.cfg.Logf("crewlink: node goroutine panicked: %v", r)
+			n.cfg.Warnf("crewlink: node goroutine panicked: %v", r)
 		}
 	}()
 	fn()

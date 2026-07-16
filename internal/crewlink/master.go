@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/mocapnode"
 )
 
@@ -26,6 +27,20 @@ const (
 	clampPast   = 2 * time.Second
 	clampFuture = 250 * time.Millisecond
 )
+
+// pongQueueCap bounds the sync-pong reply backlog. Tiny on purpose: probes repeat every 2s
+// per node, so an overflowed (dropped) pong just means the node re-probes.
+const pongQueueCap = 8
+
+// pongJob is one queued sync-ping answer: T1 echoed from the ping, T2 stamped at receive.
+// T3 stamps at actual send (pongPump) so queue wait lives inside (T3−T2) and cancels out of
+// the node's offset/RTT math.
+type pongJob struct {
+	to string
+	id uint32
+	t1 int64
+	t2 int64
+}
 
 // MasterConfig wires a MasterLink. Client, EventID and Inject are mandatory.
 type MasterConfig struct {
@@ -37,8 +52,9 @@ type MasterConfig struct {
 	// mocap module is off); counted in health, never fatal.
 	Inject func(pkt mocapnode.Packet) bool
 
-	Now  func() time.Time                 // clock seam for tests; nil = time.Now
-	Logf func(format string, args ...any) // optional log sink; never logs payloads
+	Now   func() time.Time                 // clock seam for tests; nil = time.Now
+	Logf  func(format string, args ...any) // optional informational log sink; never logs payloads
+	Warnf func(format string, args ...any) // optional anomaly log sink; nil = Logf
 }
 
 // MasterLink runs the master link. Run once.
@@ -46,22 +62,27 @@ type MasterLink struct {
 	cfg MasterConfig
 	seq atomic.Int64
 
-	mu       sync.Mutex
-	sid      string
-	nodes    map[string]Member
-	kicked   bool
-	joins    uint64
-	frames   uint64 // pose frames received
-	injected uint64 // accepted into the store
-	clamped  uint64 // capturedAt outside the clamp window
-	dropped  uint64 // inject refused (mocap module off) or undecodable
-	lastErr  string
+	mu        sync.Mutex
+	sid       string
+	nodes     map[string]Member
+	pongs     chan pongJob // per-session pong queue (replaced on each join)
+	kicked    bool
+	joins     uint64
+	frames    uint64 // pose frames received
+	injected  uint64 // accepted into the store
+	clamped   uint64 // capturedAt outside the clamp window
+	dropped   uint64 // inject refused (mocap module off) or undecodable
+	pongDrops uint64 // sync pongs dropped on queue overflow (node re-probes)
+	lastErr   string
 }
 
 // NewMaster builds a MasterLink.
 func NewMaster(cfg MasterConfig) *MasterLink {
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
+	}
+	if cfg.Warnf == nil {
+		cfg.Warnf = cfg.Logf
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -73,6 +94,7 @@ func NewMaster(cfg MasterConfig) *MasterLink {
 // Blocking; run on its own goroutine.
 func (m *MasterLink) Run(ctx context.Context) {
 	backoff := time.Second
+	var gate logbus.Gate // reconnect spam: one warn per failure kind per reconnectLogEvery
 	for ctx.Err() == nil {
 		err := m.session(ctx)
 		if ctx.Err() != nil {
@@ -80,8 +102,15 @@ func (m *MasterLink) Run(ctx context.Context) {
 		}
 		if err != nil {
 			m.setErr(err.Error())
-			m.cfg.Logf("crewlink: master session ended; reconnecting (%v)", err)
+			if sup, ok := gate.Should(gateKey(err), reconnectLogEvery); ok {
+				if sup > 0 {
+					m.cfg.Warnf("crewlink: master session ended; reconnecting (%v) [%d repeats suppressed]", err, sup)
+				} else {
+					m.cfg.Warnf("crewlink: master session ended; reconnecting (%v)", err)
+				}
+			}
 		} else {
+			gate.Reset()
 			backoff = time.Second
 		}
 		select {
@@ -101,8 +130,10 @@ func (m *MasterLink) session(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	pongs := make(chan pongJob, pongQueueCap)
 	m.mu.Lock()
 	m.sid, m.kicked, m.lastErr = res.SID, false, ""
+	m.pongs = pongs
 	m.joins++
 	m.nodes = map[string]Member{}
 	for _, mem := range res.Members {
@@ -117,6 +148,7 @@ func (m *MasterLink) session(ctx context.Context) error {
 		m.mu.Lock()
 		sid := m.sid
 		m.sid = ""
+		m.pongs = nil // pump is gone with sctx; late pings must not count phantom drops
 		m.nodes = map[string]Member{}
 		m.mu.Unlock()
 		if sid != "" {
@@ -127,9 +159,10 @@ func (m *MasterLink) session(ctx context.Context) error {
 	}()
 
 	go m.guard(func() { m.heartbeat(sctx, res.SID, cancel) })
+	go m.guard(func() { m.pongPump(sctx, res.SID, pongs) })
 
 	err = m.cfg.Client.Stream(sctx, res.SID, StreamHandlers{
-		OnRelay:    func(from string, _ int64, payload []byte) { m.onRelay(sctx, from, payload) },
+		OnRelay:    func(from string, _ int64, payload []byte) { m.onRelay(from, payload) },
 		OnPresence: func(p Presence) { m.onPresence(p, res.SID, cancel) },
 	})
 	m.mu.Lock()
@@ -164,9 +197,12 @@ func (m *MasterLink) heartbeat(ctx context.Context, sid string, cancel context.C
 	}
 }
 
-// onRelay handles a downstream frame: pose → clamp+inject; sync ping → pong. T2 (receive
-// stamp) is taken first so queueing inside this process doesn't inflate the nodes' RTT split.
-func (m *MasterLink) onRelay(ctx context.Context, from string, payload []byte) {
+// onRelay handles a downstream frame: pose → clamp+inject; sync ping → queued pong. T2
+// (receive stamp) is taken first so queueing inside this process doesn't inflate the nodes'
+// RTT split. Runs on the SSE pump goroutine (StreamHandlers must be cheap): the pong reply is
+// a synchronous HTTP Send, so it goes through a bounded queue drained by pongPump - a slow
+// relay must never stall pose ingest.
+func (m *MasterLink) onRelay(from string, payload []byte) {
 	t2 := m.cfg.Now().UnixNano()
 	switch frameType(payload) {
 	case FrameTypePose:
@@ -176,18 +212,39 @@ func (m *MasterLink) onRelay(ctx context.Context, from string, payload []byte) {
 		if json.Unmarshal(payload, &sf) != nil || sf.IsPong() {
 			return
 		}
-		pong := SyncFrame{T: FrameTypeSync, ID: sf.ID, T1: sf.T1, T2: t2, T3: m.cfg.Now().UnixNano()}
-		b, err := json.Marshal(pong)
-		if err != nil {
-			return
-		}
 		m.mu.Lock()
-		sid := m.sid
+		pongs := m.pongs
 		m.mu.Unlock()
-		if sid == "" {
+		if pongs == nil {
 			return
 		}
-		_ = m.cfg.Client.Send(ctx, sid, from, m.seq.Add(1), b) // loss-tolerant: the node re-probes
+		select {
+		case pongs <- pongJob{to: from, id: sf.ID, t1: sf.T1, t2: t2}:
+		default:
+			// Overflow drop-newest: sync probes repeat every 2s, the node just re-probes.
+			m.mu.Lock()
+			m.pongDrops++
+			m.mu.Unlock()
+		}
+	}
+}
+
+// pongPump answers queued sync pings off the stream goroutine, bound to the session ctx.
+// T3 stamps at actual send so the queue wait lives inside (T3−T2) and cancels out of the
+// node's offset/RTT computation.
+func (m *MasterLink) pongPump(ctx context.Context, sid string, jobs <-chan pongJob) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case j := <-jobs:
+			pong := SyncFrame{T: FrameTypeSync, ID: j.id, T1: j.t1, T2: j.t2, T3: m.cfg.Now().UnixNano()}
+			b, err := json.Marshal(pong)
+			if err != nil {
+				continue
+			}
+			_ = m.cfg.Client.Send(ctx, sid, j.to, m.seq.Add(1), b) // loss-tolerant: the node re-probes
+		}
 	}
 }
 
@@ -227,7 +284,11 @@ func (m *MasterLink) ingestPose(payload []byte) {
 func (m *MasterLink) onPresence(p Presence, ownSID string, cancel context.CancelFunc) {
 	if p.SID == ownSID {
 		if p.Type == "kick" || p.Type == "leave" {
-			m.cfg.Logf("crewlink: master session dropped by server (%s)", p.Type)
+			logf := m.cfg.Logf
+			if p.Type == "kick" {
+				logf = m.cfg.Warnf // deliberate removal = anomaly; leave is routine
+			}
+			logf("crewlink: master session dropped by server (%s)", p.Type)
 			m.mu.Lock()
 			m.kicked = p.Type == "kick"
 			m.mu.Unlock()
@@ -257,7 +318,7 @@ func (m *MasterLink) setErr(msg string) {
 func (m *MasterLink) guard(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			m.cfg.Logf("crewlink: master goroutine panicked: %v", r)
+			m.cfg.Warnf("crewlink: master goroutine panicked: %v", r)
 		}
 	}()
 	fn()
@@ -265,14 +326,15 @@ func (m *MasterLink) guard(fn func()) {
 
 // MasterStatus is the master link's live snapshot.
 type MasterStatus struct {
-	SID      string
-	Nodes    int
-	Joins    uint64
-	Frames   uint64 // pose frames received
-	Injected uint64 // accepted into the store
-	Clamped  uint64 // capturedAt outside [now−2s, now+250ms]
-	Dropped  uint64 // undecodable or inject refused
-	LastErr  string
+	SID       string
+	Nodes     int
+	Joins     uint64
+	Frames    uint64 // pose frames received
+	Injected  uint64 // accepted into the store
+	Clamped   uint64 // capturedAt outside [now−2s, now+250ms]
+	Dropped   uint64 // undecodable or inject refused
+	PongDrops uint64 // sync pongs dropped on queue overflow (the node re-probes)
+	LastErr   string
 }
 
 // Status snapshots the master link.
@@ -282,6 +344,7 @@ func (m *MasterLink) Status() MasterStatus {
 	return MasterStatus{
 		SID: m.sid, Nodes: len(m.nodes), Joins: m.joins,
 		Frames: m.frames, Injected: m.injected, Clamped: m.clamped, Dropped: m.dropped,
-		LastErr: m.lastErr,
+		PongDrops: m.pongDrops,
+		LastErr:   m.lastErr,
 	}
 }

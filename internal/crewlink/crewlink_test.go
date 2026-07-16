@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,6 +190,68 @@ func TestClockRestampUnderSkew(t *testing.T) {
 	}
 }
 
+// TestSyncTargetChangeResyncs pins the master-failover clock rule: electing a NEW sync target
+// discards the old master's estimator samples (fresh window, lock drops, slew holds - no
+// step), then fresh pongs re-discipline into the new master's domain. Without the resync the
+// old domain's min-RTT samples pin the clock for up to 60s.
+func TestSyncTargetChangeResyncs(t *testing.T) {
+	n := NewNode(NodeConfig{Client: NewClient("http://unused", staticTokens("t")), EventID: "ev"})
+	feed := func(from string, domain func() time.Time) {
+		for i := 0; i < 8; i++ {
+			t1 := n.clock.Now()
+			remote := domain().UnixNano()
+			pong := SyncFrame{T: FrameTypeSync, ID: uint32(i), T1: t1, T2: remote, T3: remote}
+			b, _ := json.Marshal(pong)
+			n.onRelay(from, b, func() {})
+		}
+	}
+	target := func() string {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.syncSID
+	}
+
+	domainA := func() time.Time { return time.Now().Add(5 * time.Hour) }
+	n.onPresence(Presence{Type: "join", SID: "A", Role: RoleMaster}, "self", func() {})
+	if target() != "A" {
+		t.Fatalf("sync target = %q, want A", target())
+	}
+	feed("A", domainA)
+	if !n.Status().Locked {
+		t.Fatal("clock not locked against master A")
+	}
+
+	// A drops, B (a different clock domain) takes over: target change must resync.
+	n.onPresence(Presence{Type: "leave", SID: "A", Role: RoleMaster}, "self", func() {})
+	n.onPresence(Presence{Type: "join", SID: "B", Role: RoleMaster}, "self", func() {})
+	if target() != "B" {
+		t.Fatalf("sync target = %q, want B", target())
+	}
+	if n.Status().Locked {
+		t.Fatal("lock must drop on target change (fresh estimator)")
+	}
+	// Slew, not step: the clock holds the old domain until B's samples discipline it.
+	if diff := n.clock.Now() - domainA().UnixNano(); diff < -50e6 || diff > 50e6 {
+		t.Errorf("resync stepped the clock off holdover by %dms", diff/1e6)
+	}
+
+	domainB := func() time.Time { return time.Now().Add(-3 * time.Hour) }
+	feed("B", domainB)
+	if !n.Status().Locked {
+		t.Fatal("clock not re-locked against master B")
+	}
+	if diff := n.clock.Now() - domainB().UnixNano(); diff < -50e6 || diff > 50e6 {
+		t.Errorf("clock pinned %dms off the new master domain (old samples survived?)", diff/1e6)
+	}
+
+	// Re-electing the SAME target (blip) keeps the window - no spurious resync.
+	n.onPresence(Presence{Type: "leave", SID: "B", Role: RoleMaster}, "self", func() {})
+	n.onPresence(Presence{Type: "join", SID: "B", Role: RoleMaster}, "self", func() {})
+	if !n.Status().Locked {
+		t.Fatal("same-target re-election must keep the disciplined window")
+	}
+}
+
 // ── master ingest clamp (§5) ─────────────────────────────────────────────────
 
 func TestMasterClampRejects(t *testing.T) {
@@ -357,4 +422,127 @@ func TestKickRejoinsAndRevocation(t *testing.T) {
 		st := node.Status()
 		return st.SID != "" && st.SID != sid
 	})
+}
+
+// ── pong replies never stall pose ingest (StreamHandlers must be cheap) ──────
+
+// TestBlockedPongSendDoesNotStallIngest wedges the relay's /send endpoint (the master only
+// sends sync pongs) and asserts pose ingest keeps flowing: the pong reply rides a bounded
+// queue drained off the SSE pump goroutine, and overflow drops are counted, never blocking.
+func TestBlockedPongSendDoesNotStallIngest(t *testing.T) {
+	stub := newStubRelay()
+	gate := make(chan struct{})
+	var blockedSends atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/realtime/mocap/send" {
+			blockedSends.Add(1)
+			<-gate // slow relay: hold the upstream send until the test ends
+			problem(w, http.StatusServiceUnavailable, "SLOW_RELAY")
+			return
+		}
+		stub.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	defer close(gate) // LIFO: release wedged handlers before srv.Close waits on them
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var injected atomic.Int32
+	ml := NewMaster(MasterConfig{
+		Client: NewClient(srv.URL, staticTokens("tok")), EventID: "ev1",
+		Inject: func(mocapnode.Packet) bool { injected.Add(1); return true },
+		Logf:   t.Logf,
+	})
+	go ml.Run(ctx)
+	waitFor(t, "master joined", 5*time.Second, func() bool { return ml.Status().SID != "" })
+	msid := ml.Status().SID
+
+	// A node session to send from (frames ride stub.relayFrom - no client goroutines).
+	nres, err := NewClient(srv.URL, staticTokens("tok")).Join(ctx, "ev1", RoleNode, "panel", "rig")
+	if err != nil {
+		t.Fatalf("node join: %v", err)
+	}
+
+	// One sync ping: the pong reply Send wedges in the relay.
+	ping, _ := json.Marshal(SyncFrame{T: FrameTypeSync, ID: 1, T1: 1})
+	stub.relayFrom(nres.SID, msid, ping)
+	waitFor(t, "pong send in flight (blocked)", 5*time.Second, func() bool { return blockedSends.Load() >= 1 })
+
+	// Pose ingest must keep flowing while the pong send is stuck.
+	const nPoses = 10
+	for i := 0; i < nPoses; i++ {
+		b, _ := json.Marshal(PoseFromPacket(goldenPacket(0), time.Now().UnixNano()))
+		stub.relayFrom(nres.SID, msid, b)
+	}
+	waitFor(t, "poses ingested while pong send blocked", 5*time.Second, func() bool {
+		return injected.Load() == nPoses
+	})
+
+	// Flooding pings overflows the bounded pong queue: drop-newest, counted, still no stall.
+	for i := 0; i < pongQueueCap+6; i++ {
+		p, _ := json.Marshal(SyncFrame{T: FrameTypeSync, ID: uint32(i + 2), T1: 1})
+		stub.relayFrom(nres.SID, msid, p)
+	}
+	waitFor(t, "pong overflow counted", 5*time.Second, func() bool { return ml.Status().PongDrops >= 1 })
+	b, _ := json.Marshal(PoseFromPacket(goldenPacket(0), time.Now().UnixNano()))
+	stub.relayFrom(nres.SID, msid, b)
+	waitFor(t, "ingest alive after pong flood", 5*time.Second, func() bool {
+		return injected.Load() == nPoses+1
+	})
+}
+
+// ── join input hygiene ───────────────────────────────────────────────────────
+
+// TestJoinValidatesAndEscapesEventID: user-typed event ids are rejected when blank and
+// path-escaped so they can never splice the route.
+func TestJoinValidatesAndEscapesEventID(t *testing.T) {
+	var gotPath atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath.Store(r.URL.EscapedPath())
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"sid":"mses_1","session_ttl_s":90,"heartbeat_s":25,"members":[]}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, staticTokens("tok"))
+
+	for _, id := range []string{"", "   ", "\t\n"} {
+		if _, err := c.Join(context.Background(), id, RoleNode, "", ""); err == nil {
+			t.Fatalf("event id %q must be rejected", id)
+		}
+	}
+	if gotPath.Load() != nil {
+		t.Fatal("blank event id must not hit the network")
+	}
+
+	if _, err := c.Join(context.Background(), "../sessions/x?admin=1#f", RoleNode, "", ""); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	want := "/realtime/mocap/rooms/..%2Fsessions%2Fx%3Fadmin=1%23f/sessions"
+	if got, _ := gotPath.Load().(string); got != want {
+		t.Errorf("request path = %q, want %q", got, want)
+	}
+}
+
+// ── reconnect log gating ─────────────────────────────────────────────────────
+
+// TestGateKeyBuckets pins the failure-kind keys the reconnect log gate dedupes on: repeats of
+// one kind suppress; a kind change re-emits.
+func TestGateKeyBuckets(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{ErrUnauthorized, "unauthorized"},
+		{errKicked, "kicked"},
+		{ErrSessionGone, "session-gone"},
+		{errors.New("dial tcp: refused"), "error"},
+		{&APIError{Status: http.StatusUnauthorized}, "unauthorized"},
+		{&APIError{Status: http.StatusNotFound, Code: CodeNotFound}, "session-gone"},
+	}
+	for _, c := range cases {
+		if got := gateKey(c.err); got != c.want {
+			t.Errorf("gateKey(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
 }

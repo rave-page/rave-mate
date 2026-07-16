@@ -58,6 +58,15 @@ func (e *OffsetEstimator) Add(offsetNs, rttNs int64, now time.Time) {
 	e.mu.Unlock()
 }
 
+// Reset discards the sample window (fresh estimator). Use on a sync-peer change: min-RTT
+// samples from the old peer's clock domain would otherwise pin the estimate for up to
+// syncMaxAge. Estimate over the empty window reports ok=false until new samples arrive.
+func (e *OffsetEstimator) Reset() {
+	e.mu.Lock()
+	e.n, e.next = 0, 0
+	e.mu.Unlock()
+}
+
 // Estimate runs the clock filter over the (aged) window. ok=false when no usable sample remains.
 func (e *OffsetEstimator) Estimate(now time.Time) (SyncEstimate, bool) {
 	e.mu.Lock()
@@ -148,6 +157,15 @@ func (c *SoftwareClock) AddSample(offsetNs, rttNs int64) {
 		c.offset.Store(est.OffsetNs)
 		c.locked.Store(est.Locked)
 	}
+}
+
+// Resync discards the sample window but keeps the applied slew + monotonic base: Now() keeps
+// ticking from its current value (slew, not step) while fresh samples re-discipline against a
+// NEW sync peer whose clock domain may differ. Lock drops until the fresh window qualifies.
+// Discipline side only - pairs with AddSample, not the mirror-side setters.
+func (c *SoftwareClock) Resync() {
+	c.est.Reset()
+	c.locked.Store(false)
 }
 
 // Quality reports the software tier's lock state + applied slew (gates the timecode plane, §2.3).

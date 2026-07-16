@@ -99,3 +99,35 @@ func TestSoftwareClockDiscipline(t *testing.T) {
 		t.Fatalf("offset drifted on zero residual: %d, want %d", q.OffsetNs, slew)
 	}
 }
+
+// TestSoftwareClockResync: Resync empties the window (lock drops, slew HOLDS - no step), and
+// fresh samples re-discipline to a new peer's domain without the old peer's min-RTT samples
+// pinning the estimate.
+func TestSoftwareClockResync(t *testing.T) {
+	c := NewSoftwareClock()
+	const oldDomain = int64(500_000_000) // peer A: +500 ms
+	for i := 0; i < 3; i++ {
+		c.AddSample(oldDomain-c.Quality().OffsetNs, 1_000_000)
+	}
+	if q := c.Quality(); !q.Locked || q.OffsetNs != oldDomain {
+		t.Fatalf("pre-resync quality = %+v", q)
+	}
+
+	c.Resync()
+	if q := c.Quality(); q.Locked {
+		t.Fatal("lock must drop on resync")
+	}
+	if q := c.Quality(); q.OffsetNs != oldDomain {
+		t.Fatalf("resync stepped the applied slew: %d, want %d (holdover)", q.OffsetNs, oldDomain)
+	}
+
+	// New peer B: -300 ms. Old A samples had better RTT; they must NOT survive the resync.
+	const newDomain = int64(-300_000_000)
+	for i := 0; i < 3; i++ {
+		c.AddSample(newDomain-c.Quality().OffsetNs, 2_000_000)
+	}
+	q := c.Quality()
+	if !q.Locked || q.OffsetNs != newDomain {
+		t.Fatalf("post-resync quality = %+v, want locked at %d", q, newDomain)
+	}
+}

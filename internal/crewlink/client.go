@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -238,10 +239,15 @@ type joinReq struct {
 }
 
 // Join creates a session in the event's mocap room (`joinMocapRoom`). role=master requires
-// event-editor rights server-side; non-crew callers get a BOLA-safe 404.
+// event-editor rights server-side; non-crew callers get a BOLA-safe 404. eventID is user-typed
+// config: rejected when blank, path-escaped so it can never splice the route.
 func (c *Client) Join(ctx context.Context, eventID, role, tier, label string) (JoinResult, error) {
 	var out JoinResult
-	err := c.do(ctx, http.MethodPost, "/realtime/mocap/rooms/"+eventID+"/sessions",
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return out, errors.New("crewlink: event id required (Settings -> Capture crew)")
+	}
+	err := c.do(ctx, http.MethodPost, "/realtime/mocap/rooms/"+url.PathEscape(eventID)+"/sessions",
 		joinReq{Role: role, Tier: tier, Label: label}, &out)
 	return out, err
 }
