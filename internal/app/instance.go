@@ -87,6 +87,7 @@ type Control interface {
 	VRPerf() string                              // JSON array: VR perf/debug telemetry from every instance
 	DMXStatus() string                           // DMX plane: universes seen (pps, source IP) + grid sink state
 	StreamStatus() string                        // VRSL DMX-over-video stream: push target + encoder state
+	MocapStatus() string                         // mocap capture master: source + packets + active dancers
 	TCStatus() string                            // one line: timecode running/rate/current TC/sinks on-off
 	TCStart() string                             // start the house timecode clock; status line
 	TCStop() string                              // stop the house timecode clock; status line
@@ -334,6 +335,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.DMXStatus())
 	case cmd == "STREAM-STATUS":
 		fmt.Fprintln(conn, ctrl.StreamStatus())
+	case cmd == "MOCAP-STATUS":
+		fmt.Fprintln(conn, ctrl.MocapStatus())
 	case cmd == "TC-STATUS":
 		fmt.Fprintln(conn, ctrl.TCStatus())
 	case cmd == "TC-START":

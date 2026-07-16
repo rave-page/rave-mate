@@ -36,6 +36,7 @@ import (
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/midiemit"
+	"rave.page/mate/internal/mocap"
 	"rave.page/mate/internal/module"
 	"rave.page/mate/internal/netstats"
 	"rave.page/mate/internal/obscontrol"
@@ -149,6 +150,7 @@ type Services struct {
 	MIDISource   *featurehost.MidiProxy        // native MIDI-in: learned controllers + DJ bridge (learn/reconfigure/port enum); may be nil
 	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
 	VRSLStream   *vrslstream.Streamer          // VRSL DMX-over-video stream (ffmpeg → RTMP/WHIP push); may be nil
+	Mocap        *mocap.Service                // mocap capture master (panel capture → VRSL stream region); may be nil
 	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
 	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
 	MediaRoutes  mediaroute.ReceiveControl     // P4 video routes: remote-source listing + receive control; in-proc or subprocess-proxied; may be nil

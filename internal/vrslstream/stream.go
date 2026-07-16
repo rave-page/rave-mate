@@ -52,6 +52,12 @@ type Streamer struct {
 	cfgFn    func() config.StreamFeature
 	dmxOnFn  func() bool              // DMX plane enabled? (it then owns the Art-Net listener)
 	dmxCfgFn func() config.DMXFeature // Art-Net listen addr when WE own the listener
+	// overlayFn provides the per-frame composite overlay painter (vrslgrid.CompositeSpec.Overlay,
+	// e.g. the mocap region via mocap.Service.Overlay). Resolved fresh EACH rendered frame so
+	// toggling the provider's module applies live without a stream restart; nil provider or
+	// provider-returned nil = no overlay. Extended mode only (the overlay's calibration rides
+	// the extended meta band's triad) - standard mode forces it off.
+	overlayFn func() func(*image.RGBA)
 
 	mu          sync.Mutex
 	running     bool
@@ -63,10 +69,11 @@ type Streamer struct {
 	lastErr     string
 }
 
-// New builds the streamer. store is the shared DMX universe cache (dmx.Router.Store()).
+// New builds the streamer. store is the shared DMX universe cache (dmx.Router.Store());
+// overlayFn may be nil (no overlay extension).
 func New(log *logbus.Bus, store *artnet.Store, cfgFn func() config.StreamFeature,
-	dmxOnFn func() bool, dmxCfgFn func() config.DMXFeature) *Streamer {
-	return &Streamer{log: log, store: store, cfgFn: cfgFn, dmxOnFn: dmxOnFn, dmxCfgFn: dmxCfgFn}
+	dmxOnFn func() bool, dmxCfgFn func() config.DMXFeature, overlayFn func() func(*image.RGBA)) *Streamer {
+	return &Streamer{log: log, store: store, cfgFn: cfgFn, dmxOnFn: dmxOnFn, dmxCfgFn: dmxCfgFn, overlayFn: overlayFn}
 }
 
 // Start launches the render producer + the supervised ffmpeg push, bound to ctx (module Start
@@ -145,13 +152,23 @@ func (s *Streamer) runProducer(ctx context.Context, cfg config.StreamFeature, fr
 	var lastGen uint64
 	var lastSend time.Time
 	var counter byte
+	var warnedOverlay bool
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
+			// Overlay resolved fresh each frame (live module toggling); standard mode forces
+			// it off (its calibration rides the extended meta band's triad).
+			ov, suppressed := overlayForFrame(s.overlayFn, extended)
+			if suppressed && !warnedOverlay {
+				warnedOverlay = true
+				s.log.Warn(source, "mocap overlay requires extended mode - ignored (Settings -> VRSL Stream -> Mode)", nil)
+			}
 			gen := s.store.Generation()
-			if !shouldRender(gen, lastGen, now, lastSend) {
+			// An active overlay carries live pose data outside the DMX store - render every
+			// tick while it's on (the dirty-flag only tracks universe changes).
+			if ov == nil && !shouldRender(gen, lastGen, now, lastSend) {
 				continue
 			}
 			// drop-newest: consumer behind -> skip this tick (bounded chan, no accumulation).
@@ -160,7 +177,7 @@ func (s *Streamer) runProducer(ctx context.Context, cfg config.StreamFeature, fr
 			}
 			counter++ // advances per emitted frame; wraps 0..255
 			img := vrslgrid.RenderComposite(s.store, vrslgrid.CompositeSpec{
-				Universes: universes, Mono: mono, Extended: extended, FrameCounter: counter,
+				Universes: universes, Mono: mono, Extended: extended, FrameCounter: counter, Overlay: ov,
 			})
 			lastGen, lastSend = gen, now
 			// Room was checked above and only this goroutine sends -> the send won't block.
@@ -177,6 +194,23 @@ func (s *Streamer) runProducer(ctx context.Context, cfg config.StreamFeature, fr
 // >=1fps keep-alive is due (mirrors dmx.shouldRender).
 func shouldRender(gen, lastGen uint64, now, lastSend time.Time) bool {
 	return gen != lastGen || now.Sub(lastSend) >= time.Second
+}
+
+// overlayForFrame resolves the per-frame overlay: nil provider or a provider-returned nil =
+// no overlay; standard (non-extended) mode forces nil and reports the suppression (the
+// overlay contract needs the extended meta band's calibration triad).
+func overlayForFrame(provider func() func(*image.RGBA), extended bool) (ov func(*image.RGBA), suppressed bool) {
+	if provider == nil {
+		return nil, false
+	}
+	ov = provider()
+	if ov == nil {
+		return nil, false
+	}
+	if !extended {
+		return nil, true
+	}
+	return ov, false
 }
 
 // runFFmpeg supervises the encode+push subprocess: spawn -> feed frames -> restart with capped
