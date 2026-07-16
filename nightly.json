@@ -1,13 +1,13 @@
 {
-  "version": "nightly-9e9d8dd",
-  "build": 99,
-  "commit": "9e9d8dd",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-99-20260716-9e9d8dd.exe",
-  "sha256": "6b7571ecd5893d3a760a49d29d4ecf0aba3dc327cff097f8a642b93b7ad3b194",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-99-20260716-9e9d8dd.exe",
-  "installer_sha256": "f2cd3c8d91ece64f59b80a8669990c0e03d1f6fa51c92661182c19f7d12b0bb8",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-99-20260716-9e9d8dd",
-  "linux_sha256": "613bb680e75078a1ba05ba715964f42422a0f17b4d8c1386f68bf491dc197c13",
+  "version": "nightly-a1a3078",
+  "build": 100,
+  "commit": "a1a3078",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-100-20260716-a1a3078.exe",
+  "sha256": "a4a38e74f92060438167584db067ed2e5e44299b5df47e6606fc4dfc14ec806d",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-100-20260716-a1a3078.exe",
+  "installer_sha256": "fed55a7ca6f07c2102a77d4e794718e5feb3628249c5235de7089a6470e350c2",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-100-20260716-a1a3078",
+  "linux_sha256": "4ad281554d3281063c76f6f644dd820a15a5bca9ac5770171c9208aa14b12948",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-16T08:46:36Z",
-  "notes": "feat(webui): automations editor, schedules, run-now, LUFS-on-recordings, set-rename"
+  "released": "2026-07-16T13:10:07Z",
+  "notes": "feat(publish): MSE streaming for fragmented-MP4 video (30 s load → <2.5 s)"
 }
