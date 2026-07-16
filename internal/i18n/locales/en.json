@@ -2521,6 +2521,14 @@
         "sizeY": "Stage size Y (m)",
         "sizeZ": "Stage size Z (m)",
         "note": "Captures the in-world mocap panel and re-renders the composite mocap region into the VRSL video stream (extended mode required). Bone slots and stage bounds are fixed per stream and must match the world's event config."
+      },
+      "crew": {
+        "eventId": "Event ID",
+        "role": "Role",
+        "roleNode": "Node (uplink this rig)",
+        "roleMaster": "Master (ingest the crew)",
+        "label": "Crew label",
+        "note": "Relays decoded mocap packets through the event's room on rave.page. You must be on the event's capture crew (masters need editor rights) and signed in. Node uplinks this rig's dancers to the event master; master feeds remote crew rigs into the local mocap master."
       }
     },
     "card": {
@@ -2718,6 +2726,10 @@
       "mocap": {
         "title": "Mocap capture",
         "desc": "Capture the in-world mocap panel (desktop/Spout/DirectShow), decode dancer poses and overlay them onto the VRSL video stream."
+      },
+      "crew": {
+        "title": "Capture crew",
+        "desc": "Link this rig into the event's capture crew: relay decoded mocap poses between crew rave-mates over rave.page."
       }
     },
     "empty": {
@@ -2990,6 +3002,12 @@
         "capturing": "capturing - {packets} packet(s), {dancers} dancer(s)",
         "starting": "starting capture…",
         "notRunning": "not running"
+      },
+      "crew": {
+        "connecting": "connecting…",
+        "notRunning": "not running",
+        "node": "uplinking - {frames} frame(s) to {masters} master(s)",
+        "master": "ingesting - {frames} frame(s) from {nodes} node(s)"
       }
     },
     "subtitle": "Toggle what you use - disabled features own no ports, goroutines, or subprocesses.",
@@ -3110,7 +3128,8 @@
       "gridfix": "Beatgrid fixer",
       "accountbridge": "rave.page account bridge",
       "vrslstream": "VRSL video stream",
-      "mocap": "Mocap capture"
+      "mocap": "Mocap capture",
+      "crew": "Capture crew"
     },
     "vr": {
       "action": "Action",

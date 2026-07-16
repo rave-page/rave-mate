@@ -426,7 +426,7 @@ func runCtl(args []string) int {
 			"                       gio-snapshot [WINDOWID]|gio-tap WINDOWID CONTROLID|\n"+
 			"                       sync-library|library-sync-status|sync-media [BUDGET]|media-sync-status|\n"+
 			"                       sync-playlists|playlist-sync-status|cleanup-missing [dry]|\n"+
-			"                       dmx-status|stream-status|mocap-status|perf|pprof-cpu [SECONDS]|pprof-heap|goroutines|\n"+
+			"                       dmx-status|stream-status|mocap-status|crew-status|perf|pprof-cpu [SECONDS]|pprof-heap|goroutines|\n"+
 			"                       tc-status|tc-start|tc-stop|ablelink-status|ablelink-resync|\n"+
 			"                       encoder-scan|remote-encoder-scan [NODEID]|\n"+
 			"                       remote-perf|remote-pprof-cpu [SECONDS] [NODEID]|remote-pprof-heap [NODEID]|remote-goroutines [NODEID]>")
@@ -468,6 +468,13 @@ func runCtl(args []string) int {
 		fmt.Println(resp)
 	case "mocap-status": // mocap capture master: source + packets + active dancers (multi-line)
 		resp, err := app.SendMulti("MOCAP-STATUS")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "crew-status": // capture-crew relay: role + session + frames + drops (multi-line)
+		resp, err := app.SendMulti("CREW-STATUS")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

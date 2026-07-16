@@ -2354,6 +2354,14 @@
         "sizeY": "Tamaño Y del escenario (m)",
         "sizeZ": "Tamaño Z del escenario (m)",
         "note": "Captura el panel de mocap del mundo y vuelve a renderizar la región de mocap compuesta en la transmisión de vídeo VRSL (requiere el modo extendido). Las ranuras de huesos y los límites del escenario son fijos por transmisión y deben coincidir con la configuración del evento del mundo."
+      },
+      "crew": {
+        "eventId": "ID del evento",
+        "role": "Rol",
+        "roleNode": "Nodo (subir este equipo)",
+        "roleMaster": "Máster (ingerir la crew)",
+        "label": "Etiqueta de crew",
+        "note": "Retransmite paquetes de mocap decodificados a través de la sala del evento en rave.page. Debes formar parte de la capture crew del evento (los másters necesitan derechos de editor) y haber iniciado sesión. El nodo sube los bailarines de este equipo al máster del evento; el máster inyecta los equipos remotos en el máster de mocap local."
       }
     },
     "card": {
@@ -2551,6 +2559,10 @@
       "mocap": {
         "title": "Captura de mocap",
         "desc": "Captura el panel de mocap del mundo (escritorio/Spout/DirectShow), decodifica las poses de los bailarines y las superpone en la transmisión de vídeo VRSL."
+      },
+      "crew": {
+        "title": "Capture crew",
+        "desc": "Vincula este equipo a la capture crew del evento: retransmite poses de mocap decodificadas entre rave-mates de la crew a través de rave.page."
       }
     },
     "empty": {
@@ -2822,6 +2834,12 @@
         "capturing": "capturando: {packets} paquete(s), {dancers} bailarín(es)",
         "starting": "iniciando la captura…",
         "notRunning": "no está en ejecución"
+      },
+      "crew": {
+        "connecting": "conectando…",
+        "notRunning": "no está en ejecución",
+        "node": "subiendo - {frames} frame(s) a {masters} máster(es)",
+        "master": "ingiriendo - {frames} frame(s) de {nodes} nodo(s)"
       }
     },
     "subtitle": "Activa lo que uses - las funciones desactivadas no ocupan puertos, goroutines ni subprocesos.",
@@ -2942,7 +2960,8 @@
       "gridfix": "Corrector de beatgrid",
       "accountbridge": "Puente de cuenta de rave.page",
       "vrslstream": "Transmisión de vídeo VRSL",
-      "mocap": "Captura de mocap"
+      "mocap": "Captura de mocap",
+      "crew": "Capture crew"
     },
     "vr": {
       "action": "Acción",

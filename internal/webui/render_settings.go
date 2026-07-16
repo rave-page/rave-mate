@@ -82,6 +82,7 @@ func (u *UI) toggleRegistry() []setToggle {
 		{id: "rtsp", label: i18n.T("settings.toggle.rtsp"), module: "rtspserve", get: func() bool { return f.RTSPServe.Enabled }, set: func(b bool) { f.RTSPServe.Enabled = b }},
 		{id: "vrslstream", label: i18n.T("settings.toggle.vrslstream"), module: "vrslstream", get: func() bool { return f.Stream.Enabled }, set: func(b bool) { f.Stream.Enabled = b }},
 		{id: "mocap", label: i18n.T("settings.toggle.mocap"), module: "mocap", get: func() bool { return f.Mocap.Enabled }, set: func(b bool) { f.Mocap.Enabled = b }},
+		{id: "crew", label: i18n.T("settings.toggle.crew"), module: "crew", get: func() bool { return f.Crew.Enabled }, set: func(b bool) { f.Crew.Enabled = b }},
 		{id: "unity", label: i18n.T("settings.toggle.unity"), get: func() bool { return f.Unity.Enabled }, set: func(b bool) { f.Unity.Enabled = b }},
 		// System
 		{id: "appgroups", label: i18n.T("settings.toggle.appgroups"), retab: true, get: func() bool { return f.AppGroups.Enabled }, set: func(b bool) { f.AppGroups.Enabled = b }},
@@ -150,7 +151,7 @@ func settingsSections() []setSection {
 		{"recording", st("recording"), sd("recording"), []string{"recorder", "setcapture", "audiorecord", "obs", "obssync", "fingerprint"}},
 		{"streaming", st("streaming"), sd("streaming"), []string{"streambridge", "studio", "peers", "accountbridge", "webcam", "medialink", "timecode", "ablelink"}},
 		{"libmedia", st("libmedia"), sd("libmedia"), []string{"library", "mediaeditor", "transcode", "gridfix", "gridfixmodel"}},
-		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "vrslstream", "mocap", "unity"}},
+		{"integrations", st("integrations"), sd("integrations"), []string{"twitch", "stt", "vrchat", "vrctools", "worldsync", "vroverlay", "dmx", "dmxmidi", "rtsp", "vrslstream", "mocap", "crew", "unity"}},
 		{"system", st("system"), sd("system"), []string{"appgroups", "notifications", "guardian", "service", "updates"}},
 	}
 }
@@ -618,6 +619,8 @@ func (u *UI) cardContent(id string) (string, string, string) {
 		return i18n.T("settings.card.vrslstream.title"), i18n.T("settings.card.vrslstream.desc"), u.streamBody()
 	case "mocap":
 		return i18n.T("settings.card.mocap.title"), i18n.T("settings.card.mocap.desc"), u.mocapBody()
+	case "crew":
+		return i18n.T("settings.card.crew.title"), i18n.T("settings.card.crew.desc"), u.crewBody()
 	case "unity":
 		return i18n.T("settings.card.unity.title"), i18n.T("settings.card.unity.desc"), u.unityBody()
 
@@ -990,6 +993,17 @@ func (u *UI) mocapBody() string {
 		fpair(field(i18n.T("settings.body.mocap.minZ"), "set:mocap-min-z", ff(min[2]), "number"),
 			field(i18n.T("settings.body.mocap.sizeZ"), "set:mocap-size-z", ff(size[2]), "number")) +
 		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.mocap.note")) + `</div>`
+}
+
+// crewBody configures the capture-crew relay (module "crew"): the event room + this rig's
+// role. No token/URL fields - the signed-in account is the bearer (contract §6).
+func (u *UI) crewBody() string {
+	f := &u.svc.Cfg.Features.Crew
+	return field(i18n.T("settings.body.crew.eventId"), "set:crew-eventid", f.EventID, "text") +
+		fpair(selectBox(i18n.T("settings.body.crew.role"), "set:crew-role",
+			[][2]string{{"node", i18n.T("settings.body.crew.roleNode")}, {"master", i18n.T("settings.body.crew.roleMaster")}}, f.ResolvedRole()),
+			field(i18n.T("settings.body.crew.label"), "set:crew-label", f.Label, "text")) +
+		`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.crew.note")) + `</div>`
 }
 
 func (u *UI) unityBody() string {
@@ -1605,6 +1619,27 @@ func (u *UI) settingsStatus() map[string]stv {
 			set("mocap", stWarn(tr("settings.status.mocap.starting")))
 		}
 	}
+	if !f.Crew.Enabled {
+		set("crew", stOff(""))
+	} else if u.svc.Crew == nil {
+		set("crew", stWarn(tr("settings.status.common.unavailable")))
+	} else {
+		snap := u.svc.Crew.Status()
+		switch {
+		case !snap.Running:
+			set("crew", stWarn(tr("settings.status.crew.notRunning")))
+		case snap.LastErr != "":
+			set("crew", stWarn(snap.LastErr)) // raw error text, not authored UI copy
+		case snap.SID == "":
+			set("crew", stWarn(tr("settings.status.crew.connecting")))
+		case snap.Role == "master":
+			set("crew", stLive(tr("settings.status.crew.master", i18n.A{
+				"frames": strconv.FormatUint(snap.Frames, 10), "nodes": strconv.Itoa(snap.Members)})))
+		default:
+			set("crew", stLive(tr("settings.status.crew.node", i18n.A{
+				"frames": strconv.FormatUint(snap.Frames, 10), "masters": strconv.Itoa(snap.Members)})))
+		}
+	}
 	if len(f.Unity.Projects) == 0 {
 		set("unity", stOff(tr("settings.status.unity.noProjects")))
 	} else {
@@ -2059,6 +2094,15 @@ func (u *UI) applySet(id, val string) {
 		toStage(&f.Mocap.StageSize, f.Mocap.ResolvedStageSize(), 1)
 	case "mocap-size-z":
 		toStage(&f.Mocap.StageSize, f.Mocap.ResolvedStageSize(), 2)
+	// Capture crew relay
+	case "crew-eventid":
+		f.Crew.EventID = v
+	case "crew-role":
+		if v == "node" || v == "master" {
+			f.Crew.Role = v
+		}
+	case "crew-label":
+		f.Crew.Label = v
 	// World Sync hosted-mode target world id (wrld_…); persisted, read at publish time.
 	case "ws-worldid":
 		f.WorldSync.HostedWorldID = v

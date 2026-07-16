@@ -21,6 +21,7 @@ import (
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/bridge"
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/crewlink"
 	"rave.page/mate/internal/debuglog"
 	"rave.page/mate/internal/discovery"
 	"rave.page/mate/internal/dmx"
@@ -151,6 +152,7 @@ type Services struct {
 	RTSP         *rtspserve.Server             // local RTSP performer chain (ffmpeg → rtspt); may be nil
 	VRSLStream   *vrslstream.Streamer          // VRSL DMX-over-video stream (ffmpeg → RTMP/WHIP push); may be nil
 	Mocap        *mocap.Service                // mocap capture master (panel capture → VRSL stream region); may be nil
+	Crew         *crewlink.Service             // capture-crew relay (node uplink / master ingest over the event room); may be nil
 	Timecode     *timecode.Service             // house SMPTE timecode outputs (LTC/MTC/Art-Net); may be nil
 	Media        medialink.MediaControl        // LAN media plane: route stats + clock sync (Peers tab); in-proc or subprocess-proxied; may be nil
 	MediaRoutes  mediaroute.ReceiveControl     // P4 video routes: remote-source listing + receive control; in-proc or subprocess-proxied; may be nil

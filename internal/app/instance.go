@@ -88,6 +88,7 @@ type Control interface {
 	DMXStatus() string                           // DMX plane: universes seen (pps, source IP) + grid sink state
 	StreamStatus() string                        // VRSL DMX-over-video stream: push target + encoder state
 	MocapStatus() string                         // mocap capture master: source + packets + active dancers
+	CrewStatus() string                          // capture-crew relay: role + session + frames + drops
 	TCStatus() string                            // one line: timecode running/rate/current TC/sinks on-off
 	TCStart() string                             // start the house timecode clock; status line
 	TCStop() string                              // stop the house timecode clock; status line
@@ -337,6 +338,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		fmt.Fprintln(conn, ctrl.StreamStatus())
 	case cmd == "MOCAP-STATUS":
 		fmt.Fprintln(conn, ctrl.MocapStatus())
+	case cmd == "CREW-STATUS":
+		fmt.Fprintln(conn, ctrl.CrewStatus())
 	case cmd == "TC-STATUS":
 		fmt.Fprintln(conn, ctrl.TCStatus())
 	case cmd == "TC-START":

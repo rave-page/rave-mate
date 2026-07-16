@@ -2354,6 +2354,14 @@
         "sizeY": "Bühnen-Größe Y (m)",
         "sizeZ": "Bühnen-Größe Z (m)",
         "note": "Nimmt das Mocap-Panel aus der Welt auf und rendert die zusammengesetzte Mocap-Region in den VRSL-Videostream (erweiterter Modus erforderlich). Bone-Slots und Bühnengrenzen sind pro Stream fest und müssen zur Event-Konfiguration der Welt passen."
+      },
+      "crew": {
+        "eventId": "Event-ID",
+        "role": "Rolle",
+        "roleNode": "Node (dieses Rig hochladen)",
+        "roleMaster": "Master (Crew aufnehmen)",
+        "label": "Crew-Label",
+        "note": "Leitet dekodierte Mocap-Pakete über den Event-Raum auf rave.page weiter. Du musst zur Capture-Crew des Events gehören (Master brauchen Editor-Rechte) und angemeldet sein. Node lädt die Tänzer dieses Rigs zum Event-Master hoch; Master speist entfernte Crew-Rigs in den lokalen Mocap-Master ein."
       }
     },
     "card": {
@@ -2551,6 +2559,10 @@
       "mocap": {
         "title": "Mocap-Aufnahme",
         "desc": "Nimmt das Mocap-Panel aus der Welt auf (Desktop/Spout/DirectShow), dekodiert Tänzer-Posen und legt sie über den VRSL-Videostream."
+      },
+      "crew": {
+        "title": "Capture-Crew",
+        "desc": "Dieses Rig in die Capture-Crew des Events einbinden: dekodierte Mocap-Posen zwischen Crew-rave-mates über rave.page weiterleiten."
       }
     },
     "empty": {
@@ -2822,6 +2834,12 @@
         "capturing": "Aufnahme läuft – {packets} Paket(e), {dancers} Tänzer",
         "starting": "Aufnahme startet …",
         "notRunning": "läuft nicht"
+      },
+      "crew": {
+        "connecting": "verbinde…",
+        "notRunning": "läuft nicht",
+        "node": "sende - {frames} Frame(s) an {masters} Master",
+        "master": "empfange - {frames} Frame(s) von {nodes} Node(s)"
       }
     },
     "subtitle": "Aktiviere nur, was du nutzt - deaktivierte Funktionen belegen keine Ports, Goroutinen oder Subprozesse.",
@@ -2942,7 +2960,8 @@
       "gridfix": "Beatgrid-Fixer",
       "accountbridge": "rave.page-Konto-Bridge",
       "vrslstream": "VRSL-Videostream",
-      "mocap": "Mocap-Aufnahme"
+      "mocap": "Mocap-Aufnahme",
+      "crew": "Capture-Crew"
     },
     "vr": {
       "action": "Aktion",
