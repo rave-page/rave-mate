@@ -1,13 +1,13 @@
 {
-  "version": "nightly-a1a3078",
-  "build": 100,
-  "commit": "a1a3078",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-100-20260716-a1a3078.exe",
-  "sha256": "a4a38e74f92060438167584db067ed2e5e44299b5df47e6606fc4dfc14ec806d",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-100-20260716-a1a3078.exe",
-  "installer_sha256": "fed55a7ca6f07c2102a77d4e794718e5feb3628249c5235de7089a6470e350c2",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-100-20260716-a1a3078",
-  "linux_sha256": "4ad281554d3281063c76f6f644dd820a15a5bca9ac5770171c9208aa14b12948",
+  "version": "nightly-1242169",
+  "build": 101,
+  "commit": "1242169",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-101-20260716-1242169.exe",
+  "sha256": "307a500ab0aa7211f1fdd939fea072bd2113b1cc828d678f269aee40a9cb3730",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-101-20260716-1242169.exe",
+  "installer_sha256": "3b32b42cf0ae84a84cf47135dedb63063b216daeb860794a0dc49e3747034bd5",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-101-20260716-1242169",
+  "linux_sha256": "6c2ab52d17ca38e4981ced34921644deffb1db41db7633971baf882cac19e06d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-16T13:10:07Z",
-  "notes": "feat(publish): MSE streaming for fragmented-MP4 video (30 s load → <2.5 s)"
+  "released": "2026-07-16T13:45:56Z",
+  "notes": "fix(audio): O(log n) FLAC seek without a SEEKTABLE (~47 s first seek → ms)"
 }
