@@ -133,10 +133,15 @@ func (u *UI) mpVideoHTML(t mpSt) string {
 			src = ` data-mse=` + attrQ(iu) + ` data-mse-src=` + attrQ(url)
 		}
 	}
+	vol := 1.0
+	if u.svc.Cfg != nil {
+		vol = u.svc.Cfg.Features.Player.VolumeOr()
+	}
+	onmeta := ev + fmt.Sprintf(`;this.volume=%.3f;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`, vol)
 	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video` + src +
 		` preload=none playsinline` + muted +
 		` ontimeupdate=` + attrQ(ev) + ` onplay=` + attrQ(ev) + ` onpause=` + attrQ(ev) +
-		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(ev+`;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`) + ` onerror=` + attrQ(onerr) +
+		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(onmeta) + ` onerror=` + attrQ(onerr) +
 		`></video></div>`
 }
 
@@ -151,7 +156,11 @@ func (u *UI) mpWaveInner(t mpSt) string {
 	}
 	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov))
 	if m := t.activeMedia(); m != nil {
-		b.WriteString(`<div class=wchips>` + mpEncChip(m) + mpLoudChip(m) + `</div>`)
+		seekChip := ""
+		if m.seekTabLoading {
+			seekChip = `<span class="wchip dim">` + html.EscapeString(i18n.T("player.label.buildingSeekTable")) + `</span>`
+		}
+		b.WriteString(`<div class=wchips>` + mpEncChip(m) + mpLoudChip(m) + seekChip + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	for i := range t.media {
@@ -671,6 +680,8 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	tr := u.mpEngineState(&t, m)
 	playLbl, playVar := "▶ "+i18n.T("player.play"), "go"
 	switch {
+	case t.audLoading && m.kind == "audio" && !tr.loaded:
+		playLbl, playVar = "⏳ "+i18n.T("player.loadingAudio"), "outline"
 	case tr.loaded && tr.playing:
 		playLbl, playVar = "⏸ "+i18n.T("player.pause"), "outline"
 	case tr.loaded && tr.paused:
@@ -744,6 +755,12 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 		frac = clampF((p-lo)/ln, 0, 1)
 	}
 	b.WriteString(slider(i18n.T("player.seek"), "mp-seek:"+host, 0, 1000, 1, math.Round(1000*frac), ""))
+	// global volume (persisted config; one value across every playback surface + restarts)
+	vol := 1.0
+	if u.svc.Cfg != nil {
+		vol = u.svc.Cfg.Features.Player.VolumeOr()
+	}
+	b.WriteString(`<div class=mp-volrow>` + slider(i18n.T("player.label.volume"), "mp-vol:"+host, 0, 100, 1, math.Round(vol*100), "%") + `</div>`)
 	return b.String()
 }
 

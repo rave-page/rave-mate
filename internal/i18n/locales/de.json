@@ -1843,7 +1843,9 @@
       "video": "Video",
       "videoOffsetField": "Video-Versatz ([-]mm:ss.s)",
       "videoOnly": "Nur Video",
-      "waveUnavailable": "Wellenform nicht verfügbar - "
+      "waveUnavailable": "Wellenform nicht verfügbar - ",
+      "buildingSeekTable": "Seek-Tabelle wird erstellt…",
+      "volume": "Lautstärke"
     },
     "openExternally": "Extern öffnen",
     "pause": "Pause",
@@ -1875,7 +1877,8 @@
     },
     "trimEdit": "Zuschneiden / bearbeiten",
     "more": "Mehr",
-    "trimEditSub": "Abschnitt schneiden oder gekürzte Kopie exportieren"
+    "trimEditSub": "Abschnitt schneiden oder gekürzte Kopie exportieren",
+    "loadingAudio": "Audio wird geladen…"
   },
   "publish": {
     "audio": "Audio",

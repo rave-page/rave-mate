@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/audio"
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/jobs"
@@ -62,6 +63,10 @@ type mpMedia struct {
 
 	src        *transcode.SourceInfo
 	srcLoading bool
+
+	// seekTabLoading: a FLAC SEEKTABLE retrofit scan is running for this path (chip in the
+	// wave overlay - first-load seek prep is visible, never a silent hang).
+	seekTabLoading bool
 
 	// fragOK: a fragmented-MP4 stream index is cached for this path, so the embedded <video>
 	// renders the MSE variant (data-mse) instead of plain src - Chromium's demuxer would
@@ -135,6 +140,7 @@ type mpSt struct {
 	// audio transport RPC guard: blocking PlayerProxy calls run off the act worker with an
 	// optimistic engine-state override until the proxy mirror reconciles (mpAudCall).
 	audBusy     bool      // one in-flight transport RPC per host
+	audLoading  bool      // first-load PlayFrom in flight (transport shows "Loading audio…")
 	audOpt      string    // "" none | "play" | "pause" | "stop" (mpEngineState override)
 	audOptUntil time.Time // override expiry (belt-and-braces if the RPC hangs)
 	audPend     func()    // one-slot latest-wins queued intent (runs when the in-flight RPC lands)
@@ -421,6 +427,8 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		return
 	}
 	path := m.path
+	u.mpMut(host, func(t *mpSt) { t.audLoading = true })
+	u.mpPatchTransport(u.mpSnap(host))
 	u.mpAudCall(host, "", func() { // guarded: double-press can't stack Play RPCs
 		// start offset rides the play RPC: the engine decodes at seekTo directly (no
 		// position-0 blip, no seek respawn)
@@ -428,6 +436,7 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 			u.logErr("player play", err)
 			u.toast(i18n.T("player.toast.playFailed") + err.Error())
 		}
+		u.mpMut(host, func(t *mpSt) { t.audLoading = false })
 	})
 }
 
@@ -765,7 +774,28 @@ func (u *UI) mpKickAnalyses(host string) {
 		if t.media[i].kind == "video" {
 			u.mpLoadFrag(host, t.gen, i, t.media[i].path)
 		}
+		if t.media[i].kind == "audio" && strings.EqualFold(filepath.Ext(t.media[i].path), ".flac") {
+			u.mpLoadSeekTab(host, t.gen, i, t.media[i].path)
+		}
 	}
+}
+
+// mpLoadSeekTab retrofits a real SEEKTABLE into a seektable-less FLAC capture (in-place
+// padding rewrite, mtime preserved - audio.FLACEnsureSeekTable) so every player seeks it
+// instantly. One-shot per file; the wave overlay shows a chip while the scan runs.
+func (u *UI) mpLoadSeekTab(host string, gen, idx int, path string) {
+	u.mpApply(host, gen, idx, func(m *mpMedia) { m.seekTabLoading = true })
+	u.bg(func() {
+		wrote, err := audio.FLACEnsureSeekTable(path)
+		if err != nil {
+			u.log.Debug("player", "flac seektable retrofit failed", map[string]any{
+				"file": filepath.Base(path), "err": err.Error(),
+			})
+		} else if wrote {
+			u.log.Info("player", "flac seektable written", map[string]any{"file": filepath.Base(path)})
+		}
+		u.mpApply(host, gen, idx, func(m *mpMedia) { m.seekTabLoading = false })
+	})
 }
 
 // mpLoadFrag resolves the fragmented-MP4 stream index (store-cached, path+mtime keyed) and
@@ -1233,6 +1263,26 @@ func init() {
 	// page-JS diagnostics (MSE runtime stage/failure reports; ctl logs surface them)
 	onExact("__jsdbg", func(u *UI, m actMsg) {
 		u.log.Info("webui-js", m.Val, nil)
+	})
+	// global playback volume: ONE persisted value for every media surface (audio engine +
+	// embedded videos), applied live and re-applied at startup/child respawn.
+	onPrefix("mp-vol:", func(u *UI, m actMsg) {
+		host := m.arg("mp-vol:")
+		raw, err := strconv.ParseFloat(m.Val, 64)
+		if err != nil {
+			return
+		}
+		v := clampF(raw/100, 0, 1)
+		if u.svc.Cfg != nil {
+			vol := v
+			u.svc.Cfg.Features.Player.Volume = &vol
+			u.saveCfg()
+		}
+		if pl := u.player(); pl != nil {
+			u.bg(func() { pl.SetVolume(v) }) // proxy RPC off the act lane
+		}
+		u.eval(fmt.Sprintf("document.querySelectorAll('video').forEach(function(v){v.volume=%.3f})", v))
+		u.mpPatchTransport(u.mpSnap(host))
 	})
 	onPrefix("mp-play:", func(u *UI, m actMsg) { u.mpPlayToggle(m.arg("mp-play:")) })
 	onPrefix("mp-stop:", func(u *UI, m actMsg) { u.mpStop(m.arg("mp-stop:")) })

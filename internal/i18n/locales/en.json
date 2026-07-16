@@ -2180,7 +2180,9 @@
       "video": "Video",
       "videoOffsetField": "Video offset ([-]mm:ss.s)",
       "videoOnly": "Video only",
-      "waveUnavailable": "Waveform unavailable - "
+      "waveUnavailable": "Waveform unavailable - ",
+      "buildingSeekTable": "Building seek table…",
+      "volume": "Volume"
     },
     "openExternally": "Open externally",
     "pause": "Pause",
@@ -2212,7 +2214,8 @@
     },
     "trimEdit": "Trim / edit",
     "more": "More",
-    "trimEditSub": "Cut a section or export a trimmed copy"
+    "trimEditSub": "Cut a section or export a trimmed copy",
+    "loadingAudio": "Loading audio…"
   },
   "publish": {
     "audio": "audio",
