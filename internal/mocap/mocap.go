@@ -36,6 +36,7 @@ type Service struct {
 	mu      sync.Mutex
 	running bool
 	master  *mocapmaster.Master
+	sink    func(mocapnode.Packet) // crew-relay seam: routes captured packets when set
 	srcDesc string
 	packets uint64
 	lastErr string
@@ -99,7 +100,7 @@ func (s *Service) runNode(ctx context.Context, cfg config.MocapFeature, master *
 		}
 		node := mocapnode.New(mocapnode.Config{
 			Source:   src,
-			OnPacket: func(pkt mocapnode.Packet) { s.countPacket(); master.OnPacket(pkt) },
+			OnPacket: func(pkt mocapnode.Packet) { s.countPacket(); s.route(pkt, master) },
 			Logf:     logf,
 		})
 		started := time.Now()
@@ -120,6 +121,42 @@ func (s *Service) runNode(ctx context.Context, cfg config.MocapFeature, master *
 			backoff *= 2
 		}
 	}
+}
+
+// route dispatches one captured packet: the crew sink when installed, else the local master.
+func (s *Service) route(pkt mocapnode.Packet, master *mocapmaster.Master) {
+	s.mu.Lock()
+	sink := s.sink
+	s.mu.Unlock()
+	if sink != nil {
+		sink(pkt)
+		return
+	}
+	master.OnPacket(pkt)
+}
+
+// SetSink installs a pluggable packet sink (the crew-relay seam): captured packets route to
+// fn INSTEAD of the local master; nil restores the default. A sink that also wants the local
+// overlay calls Inject itself (crew node role does). Survives supervised node restarts.
+func (s *Service) SetSink(fn func(mocapnode.Packet)) {
+	s.mu.Lock()
+	s.sink = fn
+	s.mu.Unlock()
+}
+
+// Inject feeds one packet into the persistent master (remote crew ingest, or a sink keeping
+// the local overlay alive). Reports false while the module is stopped - the packet is
+// dropped, the caller counts it. Keeps the one-persistent-Master invariant: remote packets
+// join the same store/election as local capture.
+func (s *Service) Inject(pkt mocapnode.Packet) bool {
+	s.mu.Lock()
+	m := s.master
+	s.mu.Unlock()
+	if m == nil {
+		return false
+	}
+	m.OnPacket(pkt)
+	return true
 }
 
 // Overlay returns the master's composite-region painter while the service runs, nil otherwise -
