@@ -576,7 +576,10 @@ const runtimeJS = `(function(){
         var p=ps[i], host=p.closest('.ss'); if(!host || __ssxf(p)) continue;
         var a=host.getBoundingClientRect(); if(!a.width && !a.height) continue;
         var M=8, vw=window.innerWidth, vh=window.innerHeight;
-        var w=Math.min(Math.max(a.width, parseFloat(getComputedStyle(p).minWidth)||0), vw-2*M);
+        // remember the pre-override CSS min-width: style.minWidth='0' below made the NEXT
+        // pass read 0 and collapse the panel to the trigger width mid-scroll
+        if(p.dataset.ssmw===undefined) p.dataset.ssmw=String(parseFloat(getComputedStyle(p).minWidth)||0);
+        var w=Math.min(Math.max(a.width, parseFloat(p.dataset.ssmw)||0), vw-2*M);
         p.style.position='fixed'; p.style.width=w+'px'; p.style.minWidth='0'; p.style.right='auto';
         var r=p.getBoundingClientRect();
         var below=vh-M-(a.bottom+4), above=a.top-4-M;
