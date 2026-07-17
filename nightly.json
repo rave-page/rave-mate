@@ -1,13 +1,13 @@
 {
-  "version": "nightly-2b19bd8",
-  "build": 107,
-  "commit": "2b19bd8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-107-20260717-2b19bd8.exe",
-  "sha256": "e57ffb0bd05bcf4c3b9ad4885cc84ebc6c94f1d857bed842c6551ab61b1f862b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-107-20260717-2b19bd8.exe",
-  "installer_sha256": "4d53f1f40b10f1dea957bf15f01bb32a32376533c24dd09377cd4b29095638d4",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-107-20260717-2b19bd8",
-  "linux_sha256": "2f0d8fd2320c1be5d18e702226f8a1d0379368d6280263442b9ede0b6b6d924d",
+  "version": "nightly-b15142b",
+  "build": 110,
+  "commit": "b15142b",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-110-20260717-b15142b.exe",
+  "sha256": "0f72103648b5a726f190ed6b86e739913e20907e0f48b1b1890dff3bde6b61df",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-110-20260717-b15142b.exe",
+  "installer_sha256": "93e6b8381f58610b1a78c70b39886374bd7cc37cd197399ffaed54da2bbaf950",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-110-20260717-b15142b",
+  "linux_sha256": "2ef6240c0cc049df7fa63aee3acf710a18e04fd5026e9df8a0bb14c4ecc8c99a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-17T14:04:45Z",
-  "notes": "feat(remotectl+webui): VRChat-link federation - one linked peer serves the pair group"
+  "released": "2026-07-17T14:47:59Z",
+  "notes": "feat(playsync): upload spectral bands with waveforms (web layered waves)"
 }
