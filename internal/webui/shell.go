@@ -607,7 +607,10 @@ const runtimeJS = `(function(){
     if(el.kind==='ph'){
       var ln=document.getElementById(el.ph);    // playhead line: present only while in view
       if(ln){ on=true; var w=el.w||1000, x=el.x0+el.vx*dt; if(x<0)x=0; if(x>w)x=w;
-        var xs=x.toFixed(2); ln.setAttribute('x1',xs); ln.setAttribute('x2',xs); }
+        var xs=x.toFixed(2); ln.setAttribute('x1',xs); ln.setAttribute('x2',xs);
+        // unplayed-side dim veil tracks the interpolated cursor (same id + '-veil')
+        var vl=document.getElementById(el.ph+'-veil');
+        if(vl){ vl.setAttribute('x',xs); vl.setAttribute('width',(w-x).toFixed(2)); } }
       if(el.clk){ var c=document.getElementById(el.clk); // transport clock: present while the player shows
         if(c){ on=true; var tx=__rtClock(el.pos+el.rate*dt)+' / '+__rtClock(el.total);
           if(c.textContent!==tx){ c.textContent=tx; c.setAttribute('data-value',tx); } } }

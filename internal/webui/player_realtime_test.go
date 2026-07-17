@@ -38,6 +38,28 @@ func TestPlayheadInterpolationID(t *testing.T) {
 	}
 }
 
+// The unplayed-side veil must carry id=mp-<host>-ph-veil (the rAF runtime moves it with
+// the interpolated playhead - shell.go __rt), and the playhead must be a device-pixel
+// hairline (vector-effect) - the 1000-unit viewBox used to fatten it on wide windows.
+func TestPlayheadVeilAndHairline(t *testing.T) {
+	st := mpSt{
+		host:      "library",
+		media:     []mpMedia{{path: "x.wav", kind: "audio", dur: 100}},
+		viewStart: 0, viewSpan: 1,
+		cursorSec: mpNone, hovT: mpNone, outSec: -1,
+	}
+	svg := mpWaveSVG(&st, 50, nil)
+	if !strings.Contains(svg, `id="mp-library-ph-veil"`) {
+		t.Fatalf("playing wave missing the unplayed-side veil; svg=%q", svg)
+	}
+	if !strings.Contains(svg, `vector-effect="non-scaling-stroke"`) {
+		t.Fatalf("playhead lost its non-scaling hairline stroke; svg=%q", svg)
+	}
+	if idle := mpWaveSVG(&st, mpNone, nil); strings.Contains(idle, "ph-veil") {
+		t.Fatalf("idle player must not render the veil; svg=%q", idle)
+	}
+}
+
 // The Link phrase bar must carry the fill + caption ids the client rAF runtime (__rt 'link')
 // targets, at the given fill width, so pushAbleLink can advance them at display refresh.
 func TestLinkPhraseBarInterpolationIDs(t *testing.T) {

@@ -266,6 +266,11 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 				}
 				bw := w / float64(cols)
 				var top, bot []string // mono-fallback min/max envelope points (top L→R; bot reversed on close)
+				// Traktor-style spectral layers: one mirrored envelope per frequency band,
+				// screen-blended so overlaps brighten (bass+mid → amber, all three → white
+				// transients) instead of collapsing to a single dominant-band hue.
+				envT := [3][]string{}
+				envB := [3][]string{}
 				for c := 0; c < cols; c++ {
 					// axis span of this column → media-local bucket range
 					a0 := lo + (t.viewStart+(float64(c)/float64(cols))*t.viewSpan)*ln
@@ -294,18 +299,41 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 						}
 					}
 					x := float64(c) * bw
-					amp := mpShapeAmp(mx) * half // contrast curve: loud tracks stop flat-lining the band
+					cx := x + bw*0.5
 					if hasBands {
-						// contiguous coloured column (full width, no inter-bar gap → one filled envelope
-						// not "bars"; +0.6 closes sub-pixel seams). Colour = dominant band, brighter played.
-						played := x+bw*0.5 < playX
-						fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>`,
-							x, mid-amp, bw+0.6, amp*2, bandColor(loB, miB, hiB, played))
+						// per-band mirrored amplitudes; highs get a lighter curve so
+						// hats/transients spike above the low/mid body like Traktor.
+						la := mpShapeAmp(loB) * half
+						ma := mpShapeAmp(miB) * half
+						ha := mpShapeHigh(hiB) * half
+						envT[0] = append(envT[0], fmt.Sprintf("%.2f %.2f", cx, mid-la))
+						envB[0] = append(envB[0], fmt.Sprintf("%.2f %.2f", cx, mid+la))
+						envT[1] = append(envT[1], fmt.Sprintf("%.2f %.2f", cx, mid-ma))
+						envB[1] = append(envB[1], fmt.Sprintf("%.2f %.2f", cx, mid+ma))
+						envT[2] = append(envT[2], fmt.Sprintf("%.2f %.2f", cx, mid-ha))
+						envB[2] = append(envB[2], fmt.Sprintf("%.2f %.2f", cx, mid+ha))
 						continue
 					}
-					cx := x + bw*0.5
+					amp := mpShapeAmp(mx) * half // contrast curve: loud tracks stop flat-lining the band
 					top = append(top, fmt.Sprintf("%.2f %.2f", cx, mid-amp))
 					bot = append(bot, fmt.Sprintf("%.2f %.2f", cx, mid+amp))
+				}
+				if hasBands && len(envT[0]) > 0 {
+					// three <path> elements total (was one <rect> per column): low = warm
+					// red core, mid = green overlay, high = cold blue-white accents.
+					// mix-blend-mode:screen composes them additively on the dark band.
+					for li, fill := range [3]string{mpBandLow, mpBandMid, mpBandHigh} {
+						var d strings.Builder
+						d.WriteString("M" + envT[li][0])
+						for _, pt := range envT[li][1:] {
+							d.WriteString(" L" + pt)
+						}
+						for k := len(envB[li]) - 1; k >= 0; k-- {
+							d.WriteString(" L" + envB[li][k])
+						}
+						d.WriteString(" Z")
+						fmt.Fprintf(&b, `<path d="%s" fill="%s" style="mix-blend-mode:screen"/>`, d.String(), fill)
+					}
 				}
 				// mono fallback (bands unavailable): one filled min/max envelope <path>, split at the
 				// playhead by a hard-stop gradient - a single element whatever the column count.
@@ -337,14 +365,14 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		if dur > 0 {
 			for _, cue := range m.cues {
 				if x := toX(start + cue.StartMs/1000.0); x >= 0 && x <= w {
-					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.5"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind))
+					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.25" vector-effect="non-scaling-stroke"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind))
 				}
 			}
 			// drop markers (libdb enrichment); the editor layer draws them when active
 			if ce == nil {
 				for di, dms := range m.drops {
 					if x := toX(start + dms/1000); x >= 0 && x <= w {
-						fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#FFB547" stroke-width="1.5"/><text x="%.1f" y="%.1f" fill="#FFB547" font-size="10" font-family="monospace" text-anchor="middle">D%d</text>`,
+						fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#FFB547" stroke-width="1.25" vector-effect="non-scaling-stroke"/><text x="%.1f" y="%.1f" fill="#FFB547" font-size="10" font-family="monospace" text-anchor="middle">D%d</text>`,
 							x, y0, x, y0+bandH, x, y0+11, di+1)
 					}
 				}
@@ -516,44 +544,43 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 			}
 		}
 		if x := toX(ce.cursorMs / 1000); x >= 0 && x <= w {
-			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#fafafa" stroke-width="1.5"/>`, x, x, h)
+			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#fafafa" stroke-width="1.25" vector-effect="non-scaling-stroke"/>`, x, x, h)
 			fmt.Fprintf(&b, `<path d="M %.1f %.0f l 6 8 l -12 0 z" fill="#fafafa" transform="rotate(180 %.1f %.0f)"/>`, x, h-8, x, h-4)
 		}
 	}
 
-	// playhead (mint) or last-click cursor (white). id lets the client rAF runtime (shell.go
-	// __rt) interpolate x between the coarse ~1 Hz Go re-renders (mpPushRealtime feeds it).
+	// playhead or last-click cursor. id lets the client rAF runtime (shell.go __rt)
+	// interpolate x between the coarse ~1 Hz Go re-renders (mpPushRealtime feeds it).
+	// The unplayed side sits behind a dark veil whose sharp edge marks the cursor
+	// unmistakably over any wave colour; __rt moves it too (id contract: <ph>-veil).
+	// The line itself is a HAIRLINE: non-scaling-stroke keeps it 1.25 device px however
+	// wide the strip renders (the 1000-unit viewBox used to fatten it on wide windows).
 	if playX >= 0 && playX <= w {
-		fmt.Fprintf(&b, `<line id="mp-%s-ph" x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#08F79B" stroke-width="1.5"/>`, t.host, playX, playX, h)
+		fmt.Fprintf(&b, `<rect id="mp-%s-ph-veil" x="%.2f" y="0" width="%.2f" height="%.0f" fill="rgba(5,5,8,0.42)"/>`, t.host, playX, w-playX, h)
+		fmt.Fprintf(&b, `<line id="mp-%s-ph" x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="#fafafa" stroke-width="1.25" vector-effect="non-scaling-stroke"/>`, t.host, playX, playX, h)
 	} else if mpIsSet(t.cursorSec) {
 		if x := toX(t.cursorSec); x >= 0 && x <= w {
-			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,0.5)" stroke-width="1" stroke-dasharray="3,3"/>`, x, x, h)
+			fmt.Fprintf(&b, `<line x1="%.1f" y1="0" x2="%.1f" y2="%.0f" stroke="rgba(250,250,250,0.5)" stroke-width="1" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"/>`, x, x, h)
 		}
 	}
 	b.WriteString(`</svg>`)
 	return b.String()
 }
 
-// bandColor maps a bucket's low/mid/high energy to a Traktor-style spectral colour: hue from
-// the frequency centroid (low→red, mid→green, high→blue; blends give orange/magenta/cyan),
-// lightness from whether the playhead has passed (played reads brighter). Near-silent = faint.
-func bandColor(lo, mid, hi byte, played bool) string {
-	l, m, h := float64(lo), float64(mid), float64(hi)
-	if l+m+h < 6 {
-		return "rgba(250,250,250,0.28)"
-	}
-	// centroid on the hue wheel: 0°=red (low), 120°=green (mid), 240°=blue (high)
-	x := l + m*math.Cos(2.0943951) + h*math.Cos(4.1887902)
-	y := m*math.Sin(2.0943951) + h*math.Sin(4.1887902)
-	hue := math.Atan2(y, x) * 57.29578 // rad → deg
-	if hue < 0 {
-		hue += 360
-	}
-	if played {
-		return fmt.Sprintf("hsl(%.0f,85%%,62%%)", hue)
-	}
-	return fmt.Sprintf("hsl(%.0f,70%%,47%%)", hue)
-}
+// Spectral layer fills (screen-blended paths): bass = warm red, mids = green, highs =
+// cold blue-white. Overlaps brighten additively - bass+mid reads amber, full-spectrum
+// transients read white - so the strip carries frequency structure like a DJ deck wave
+// (three <path> elements total; the old per-column dominant-hue rects flattened the mix
+// AND cost one <rect> per column).
+const (
+	mpBandLow  = "rgb(214,48,36)"
+	mpBandMid  = "rgb(24,190,110)"
+	mpBandHigh = "rgb(150,210,255)"
+)
+
+// mpShapeHigh lifts the high band with a lighter curve than mpShapeAmp: hat/transient
+// energy is small in absolute terms and the 1.9 gamma buried it inside the body.
+func mpShapeHigh(v byte) float64 { return math.Pow(float64(v)/255.0, 1.35) }
 
 func cueColor(k musiclib.CueKind) string {
 	switch k {
