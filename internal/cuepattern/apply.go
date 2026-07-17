@@ -146,6 +146,44 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 	return out, rep, nil
 }
 
+// PromoteMemoryToHotcues assigns free pad slots (0..7) to plain (memory) cues in
+// time order - the reverse of ConvertHotcuesToMemory, for tracks prepared with
+// memory cues that should fire from controller hotcue pads (Traktor shows a
+// HOTCUE=-1 cue as a flag but pads can't trigger it). Existing hotcue slots are
+// respected; loops/grid/load/fade cues are untouched; memory cues beyond the
+// free pads stay memory. Returns the new list + how many were promoted.
+func PromoteMemoryToHotcues(cues []musiclib.CuePoint) ([]musiclib.CuePoint, int) {
+	out := append([]musiclib.CuePoint(nil), cues...)
+	used := map[int]bool{}
+	for _, c := range out {
+		if c.Kind == musiclib.CueHot && c.Hotcue >= 0 {
+			used[c.Hotcue] = true
+		}
+	}
+	var cand []int
+	for i := range out {
+		if out[i].Kind == musiclib.CuePlain {
+			cand = append(cand, i)
+		}
+	}
+	sort.SliceStable(cand, func(a, b int) bool { return out[cand[a]].StartMs < out[cand[b]].StartMs })
+	n := 0
+	for _, i := range cand {
+		slot := freeSlot(used)
+		if slot < 0 {
+			break // pads exhausted - the rest stay memory cues
+		}
+		out[i].Kind = musiclib.CueHot
+		out[i].Hotcue = slot
+		used[slot] = true
+		n++
+	}
+	if n == 0 {
+		return cues, 0
+	}
+	return out, n
+}
+
 // ConvertHotcuesToMemory returns the cue list with every hotcue demoted to a plain
 // (memory) cue - names and positions preserved, pad slots released.
 func ConvertHotcuesToMemory(cues []musiclib.CuePoint) []musiclib.CuePoint {

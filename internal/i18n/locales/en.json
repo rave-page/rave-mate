@@ -1556,7 +1556,10 @@
       "writeNote": "Writing backs up the target library file first, then replaces that software's hotcues, memory cues and loops for the written tracks with the cues shown in rave-mate. Beatgrids are never touched. Close the DJ software before writing — otherwise it may overwrite the change on exit. Scope: the checked collection rows, or just the open track when nothing is checked.",
       "writeRbNote": "Rekordbox: cues are written to the collection XML — load them via File → Import Collection (hotcues keep their pad, memory cues become Rekordbox memory cues).",
       "writeVdjNote": "VirtualDJ: hotcues become pad cues 1–8, memory cues become remix points; saved loops carry their length in beats.",
-      "writeSeratoNote": "Serato: cues are written directly into the audio files (MP3/FLAC, verified temp-write; close Serato first). Memory cues have no Serato equivalent and are skipped — pad cues and saved loops only."
+      "writeSeratoNote": "Serato: cues are written directly into the audio files (MP3/FLAC, verified temp-write; close Serato first). Memory cues have no Serato equivalent and are skipped — pad cues and saved loops only.",
+      "promoteAll": "Assign pads: memory cues → hotcues",
+      "promotedToast": "{n} memory cues promoted to hotcue pads.",
+      "promoteNone": "No free pads or no memory cues to promote."
     },
     "tf": {
       "menu": "Fix tags…",

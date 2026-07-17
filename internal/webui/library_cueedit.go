@@ -1222,6 +1222,61 @@ func (u *UI) ceApplySelected(toMemory bool) {
 	})
 }
 
+// cePromoteAll assigns free pad slots to the track's memory cues in time order -
+// prepared cues become controller-fireable hotcues (the reverse of ceConvertAll).
+func (u *UI) cePromoteAll() {
+	c := u.ce()
+	c.mu.Lock()
+	tr := c.track
+	active := c.active
+	remote := c.remote()
+	if active {
+		c.undo, c.undoShiftAt = c.captureUndoLocked(), time.Time{}
+	}
+	c.mu.Unlock()
+	if !active {
+		return
+	}
+	cues, n := cuepattern.PromoteMemoryToHotcues(tr.Cues)
+	if n == 0 {
+		u.toast(i18n.T("library.ce.promoteNone"))
+		return
+	}
+	if remote { // rce: promote in ceSt only - Save ships it to the peer
+		c.mu.Lock()
+		if c.active && c.remote() && c.track.Path == tr.Path {
+			c.track.Cues = cues
+			c.syncSel()
+		}
+		c.mu.Unlock()
+		u.toast(i18n.T("library.ce.promotedToast", i18n.A{"n": fmt.Sprint(n)}))
+		u.patchMain()
+		return
+	}
+	u.bg(func() {
+		if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
+			u.toast(i18n.T("library.ce.applyFailed") + err.Error())
+			return
+		}
+		s := u.lib()
+		s.mu.Lock()
+		if t, ok := s.byPath[tr.Path]; ok {
+			t.Cues = cues
+			s.byPath[tr.Path] = t
+			for i := range s.tracks {
+				if s.tracks[i].Path == tr.Path {
+					s.tracks[i].Cues = cues
+				}
+			}
+		}
+		s.mu.Unlock()
+		u.libNotifyTrackChanged(tr.Path)
+		u.ceReloadTrack()
+		u.toast(i18n.T("library.ce.promotedToast", i18n.A{"n": fmt.Sprint(n)}))
+		u.patchMain()
+	})
+}
+
 // ceConvertAll demotes every hotcue on the track to a memory cue.
 func (u *UI) ceConvertAll() {
 	c := u.ce()
@@ -1966,7 +2021,9 @@ func (u *UI) ceRailHTML(s *libSt) string {
 			btn(i18n.T("library.ce.applyHot"), "primary", "ce-apply:hot", "") +
 			btn(i18n.T("library.ce.applyMem"), "outline", "ce-apply:mem", "") + `</div>`)
 	}
-	b.WriteString(btnRow(btn(i18n.T("library.ce.convertAll"), "ghost", "ce-convert", "")))
+	b.WriteString(btnRow(
+		btn(i18n.T("library.ce.promoteAll"), "ghost", "ce-promote", ""),
+		btn(i18n.T("library.ce.convertAll"), "ghost", "ce-convert", "")))
 	if c.report != nil {
 		r := c.report
 		b.WriteString(hint("ok", i18n.T("library.ce.reportHint", i18n.A{
@@ -2113,6 +2170,7 @@ func init() {
 	onPrefix("ce-apply:", func(u *UI, m actMsg) { u.ceApply(m.arg("ce-apply:") == "mem") })
 	onPrefix("ce-apply-sel:", func(u *UI, m actMsg) { u.ceApplySelected(m.arg("ce-apply-sel:") == "mem") })
 	onExact("ce-convert", func(u *UI, _ actMsg) { u.ceConvertAll() })
+	onExact("ce-promote", func(u *UI, _ actMsg) { u.cePromoteAll() })
 	// keyboard scopes (shell.go keydown transport; scope-gated + focus-gated in JS)
 	onPrefix("key:", func(u *UI, m actMsg) {
 		switch m.arg("key:") {
