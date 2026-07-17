@@ -14,10 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/audio"
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/jobs"
 	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/mp4frag"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/setalign"
@@ -62,8 +64,21 @@ type mpMedia struct {
 	src        *transcode.SourceInfo
 	srcLoading bool
 
+	// seekTabLoading: a FLAC SEEKTABLE retrofit scan is running for this path (chip in the
+	// wave overlay - first-load seek prep is visible, never a silent hang).
+	seekTabLoading bool
+
+	// fragOK: a fragmented-MP4 stream index is cached for this path, so the embedded <video>
+	// renders the MSE variant (data-mse) instead of plain src - Chromium's demuxer would
+	// range-scan every moof of a multi-GB fMP4 before playing (30 s+ on a busy disk).
+	fragOK bool
+
 	presetID string // export preset (default: lossless remux)
 	outPath  string // export destination ("" = auto "<base>-cut.<ext>")
+	// loudOv is this export's loudness override of presetID's own block, applied in mpPlanExport
+	// via transcode.ApplyLoudnessOverride. Off = don't override (never "force off"); 0 targets
+	// resolve to transcode's defaults. Per media: an audio/video pair exports two files.
+	loudOv loudnessVals
 }
 
 // mpMark is one track-start marker on the timeline (axis seconds).
@@ -125,6 +140,7 @@ type mpSt struct {
 	// audio transport RPC guard: blocking PlayerProxy calls run off the act worker with an
 	// optimistic engine-state override until the proxy mirror reconciles (mpAudCall).
 	audBusy     bool      // one in-flight transport RPC per host
+	audLoading  bool      // first-load PlayFrom in flight (transport shows "Loading audio…")
 	audOpt      string    // "" none | "play" | "pause" | "stop" (mpEngineState override)
 	audOptUntil time.Time // override expiry (belt-and-braces if the RPC hangs)
 	audPend     func()    // one-slot latest-wins queued intent (runs when the in-flight RPC lands)
@@ -411,6 +427,8 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		return
 	}
 	path := m.path
+	u.mpMut(host, func(t *mpSt) { t.audLoading = true })
+	u.mpPatchTransport(u.mpSnap(host))
 	u.mpAudCall(host, "", func() { // guarded: double-press can't stack Play RPCs
 		// start offset rides the play RPC: the engine decodes at seekTo directly (no
 		// position-0 blip, no seek respawn)
@@ -418,6 +436,7 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 			u.logErr("player play", err)
 			u.toast(i18n.T("player.toast.playFailed") + err.Error())
 		}
+		u.mpMut(host, func(t *mpSt) { t.audLoading = false })
 	})
 }
 
@@ -785,7 +804,98 @@ func (u *UI) mpKickAnalyses(host string) {
 		u.mpLoadPeaks(ctx, host, t.gen, i, t.media[i].path)
 		u.mpLoadLoud(ctx, host, t.gen, i, t.media[i].path)
 		u.mpLoadSrc(ctx, host, t.gen, i, t.media[i].path)
+		if t.media[i].kind == "video" {
+			u.mpLoadFrag(host, t.gen, i, t.media[i].path)
+		}
+		if t.media[i].kind == "audio" && strings.EqualFold(filepath.Ext(t.media[i].path), ".flac") {
+			u.mpLoadSeekTab(host, t.gen, i, t.media[i].path)
+		}
 	}
+}
+
+// mpLoadSeekTab retrofits a real SEEKTABLE into a seektable-less FLAC capture (in-place
+// padding rewrite, mtime preserved - audio.FLACEnsureSeekTable) so every player seeks it
+// instantly. One-shot per file; the wave overlay shows a chip while the scan runs.
+func (u *UI) mpLoadSeekTab(host string, gen, idx int, path string) {
+	u.mpApply(host, gen, idx, func(m *mpMedia) { m.seekTabLoading = true })
+	u.bg(func() {
+		wrote, err := audio.FLACEnsureSeekTable(path)
+		if err != nil {
+			u.log.Debug("player", "flac seektable retrofit failed", map[string]any{
+				"file": filepath.Base(path), "err": err.Error(),
+			})
+		} else if wrote {
+			u.log.Info("player", "flac seektable written", map[string]any{"file": filepath.Base(path)})
+		}
+		u.mpApply(host, gen, idx, func(m *mpMedia) { m.seekTabLoading = false })
+	})
+}
+
+// mpLoadFrag resolves the fragmented-MP4 stream index (store-cached, path+mtime keyed) and
+// flips the video element to MSE streaming. Classic MP4s / unsupported codecs cache a
+// negative sentinel and keep the plain-src path. Never patches a video that already started
+// playing - swapping the element mid-play would restart it.
+func (u *UI) mpLoadFrag(host string, gen, idx int, path string) {
+	u.bg(func() {
+		data, ok := u.mpResolveFrag(path)
+		if !ok {
+			return
+		}
+		var fi mp4frag.Index
+		if json.Unmarshal(data, &fi) != nil || len(fi.Frags) == 0 {
+			return // negative sentinel or unreadable - plain src stays
+		}
+		applied := u.mpApply(host, gen, idx, func(m *mpMedia) { m.fragOK = true })
+		if applied {
+			t := u.mpSnap(host)
+			if !t.vid.started {
+				u.mpPatchVideo(t)
+			}
+		}
+	})
+}
+
+// mpResolveFrag returns the cached index JSON for path (parsing + caching on miss).
+// ok=false only when no verdict could be stored (no store / stat failure).
+func (u *UI) mpResolveFrag(path string) ([]byte, bool) {
+	if u.svc.Store == nil {
+		return nil, false
+	}
+	var mtime int64
+	if fi, err := os.Stat(path); err == nil {
+		mtime = fi.ModTime().Unix()
+	} else {
+		return nil, false
+	}
+	if data, ok := u.svc.Store.GetAnalysis(store.KindMp4Frag, path, mtime); ok {
+		var cached mp4frag.Index
+		na := json.Unmarshal(data, &cached) == nil && len(cached.Frags) == 0
+		// a negative sentinel or a current-contract index serves from cache; an old-contract
+		// blob (pre-InitB64) falls through and re-parses
+		if na || cached.Ver >= mp4frag.ContractVer {
+			return data, true
+		}
+	}
+	idx, err := mp4frag.Parse(path)
+	if err != nil {
+		// negative cache: classic MP4 / unsupported codec / parse failure - don't re-parse
+		// every selection. Any file change (mtime) invalidates the verdict.
+		neg := []byte(`{"na":1}`)
+		u.svc.Store.PutAnalysis(store.KindMp4Frag, path, mtime, neg)
+		if !errors.Is(err, mp4frag.ErrNotFragmented) {
+			u.log.Debug("player", "mp4frag parse failed", map[string]any{"path": filepath.Base(path), "err": err.Error()})
+		}
+		return neg, true
+	}
+	data, merr := json.Marshal(idx)
+	if merr != nil {
+		return nil, false
+	}
+	u.svc.Store.PutAnalysis(store.KindMp4Frag, path, mtime, data)
+	u.log.Debug("player", "mp4frag indexed", map[string]any{
+		"path": filepath.Base(path), "frags": len(idx.Frags), "dur": idx.Duration, "mime": idx.Mime,
+	})
+	return data, true
 }
 
 // mpApply mutates media[idx] iff the instance is still generation gen, then patches.
@@ -1037,6 +1147,7 @@ func (u *UI) mpPatchTransport(t mpSt) {
 }
 func (u *UI) mpPatchEdit(t mpSt)   { u.mpPatch(t.host, "edit", u.mpEditHTML(t)) }
 func (u *UI) mpPatchExport(t mpSt) { u.mpPatch(t.host, "export", u.mpExportHTML(t)) }
+func (u *UI) mpPatchVideo(t mpSt)  { u.mpPatch(t.host, "vid", u.mpVideoHTML(t)) }
 func (u *UI) mpPatchRO(t mpSt)     { u.mpPatch(t.host, "ro", mpReadout(t)) }
 func (u *UI) mpPatchHov(t mpSt)    { u.mpPatch(t.host, "hov", u.mpReadoutLine(t)) }
 
@@ -1191,6 +1302,30 @@ func init() {
 		}
 		u.mpPatchAll(t)
 	})
+	// page-JS diagnostics (MSE runtime stage/failure reports; ctl logs surface them)
+	onExact("__jsdbg", func(u *UI, m actMsg) {
+		u.log.Info("webui-js", m.Val, nil)
+	})
+	// global playback volume: ONE persisted value for every media surface (audio engine +
+	// embedded videos), applied live and re-applied at startup/child respawn.
+	onPrefix("mp-vol:", func(u *UI, m actMsg) {
+		host := m.arg("mp-vol:")
+		raw, err := strconv.ParseFloat(m.Val, 64)
+		if err != nil {
+			return
+		}
+		v := clampF(raw/100, 0, 1)
+		if u.svc.Cfg != nil {
+			vol := v
+			u.svc.Cfg.Features.Player.Volume = &vol
+			u.saveCfg()
+		}
+		if pl := u.player(); pl != nil {
+			u.bg(func() { pl.SetVolume(v) }) // proxy RPC off the act lane
+		}
+		u.eval(fmt.Sprintf("document.querySelectorAll('video').forEach(function(v){v.volume=%.3f})", v))
+		u.mpPatchTransport(u.mpSnap(host))
+	})
 	onPrefix("mp-play:", func(u *UI, m actMsg) { u.mpPlayToggle(m.arg("mp-play:")) })
 	onPrefix("mp-stop:", func(u *UI, m actMsg) { u.mpStop(m.arg("mp-stop:")) })
 	onPrefix("mp-preview:", func(u *UI, m actMsg) { u.mpPreview(m.arg("mp-preview:")) })
@@ -1318,6 +1453,29 @@ func init() {
 			}
 		})
 		u.mpPatchExport(t)
+	})
+	// per-media loudness override: "mp-loud:<host>\x1f<idx>\x1f<field>" (loudnessFields' contract)
+	onPrefix("mp-loud:", func(u *UI, m actMsg) {
+		host, rest := mpArgs(m.arg("mp-loud:"))
+		idxS, f, _ := strings.Cut(rest, "\x1f")
+		idx := atoi(idxS)
+		t := u.mpMut(host, func(v *mpSt) {
+			if idx < 0 || idx >= len(v.media) {
+				return
+			}
+			ov := &v.media[idx].loudOv
+			switch f {
+			case "loudon":
+				ov.On = m.Val == "true"
+			case "loudi":
+				ov.I = atof(m.Val)
+			case "loudtp":
+				ov.TP = atof(m.Val)
+			case "loudraise":
+				ov.RaiseOnly = m.Val == "true"
+			}
+		})
+		u.mpPatchExport(t) // loudon shows/hides the targets
 	})
 	onPrefix("mp-export:", func(u *UI, m actMsg) {
 		host, which := mpArgs(m.arg("mp-export:"))
@@ -2161,7 +2319,11 @@ func (u *UI) mpPlanExport(t *mpSt, which string) ([]mpExportPlan, error) {
 		if e-s < 0.1 {
 			return nil, fmt.Errorf("the trim range doesn't overlap the %s recording", m.kind)
 		}
-		preset := mpPreset(u, m.presetID)
+		// The override replaces the preset's loudness block wholesale; off leaves the preset's own
+		// settings alone. The worker's NormalizePreset clamps the targets and drops loudness for
+		// copy/none audio (the export UI warns before it gets here).
+		preset := transcode.ApplyLoudnessOverride(mpPreset(u, m.presetID),
+			m.loudOv.On, m.loudOv.I, m.loudOv.TP, m.loudOv.RaiseOnly)
 		out := m.outPath
 		if out == "" {
 			out = mpOutPath(m.path, preset)

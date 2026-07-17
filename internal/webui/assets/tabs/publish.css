@@ -22,6 +22,11 @@
 
 /* Sets list rows reuse .irow; give the whole row a pointer. */
 .pub-setrow { cursor: pointer; }
+/* The row carries a Rename… button, so .irow-sub's single-line ellipsis would eat the tail of the
+   meta (duration · audio · matched ✓) - the parts that say most about a set. Let it wrap instead;
+   it is bounded (date · N tracks · duration · media · matched). Scoped to this list: every other
+   .irow consumer keeps the one-line ellipsis. Title stays ellipsized - set names are free text. */
+.pub-setrow .irow-sub { white-space: normal; overflow: visible; text-overflow: clip; }
 
 /* Detail header. */
 .pub-detail-h { margin: 0 0 12px; padding: 0 0 12px; border-bottom: 1px solid rgba(255,255,255,.08); }

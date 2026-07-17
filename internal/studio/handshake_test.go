@@ -36,7 +36,7 @@ func TestHandshakeAndRPC(t *testing.T) {
 	desktopJWT := makeJWT("jti-desktop")
 	webJWT := makeJWT("jti-web")
 
-	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, nil, nil)
+	srv := New(logbus.New(100), idResolver{"user-1"}, tokenSrc{desktopJWT}, nil, nil, nil, nil, nil)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}

@@ -584,6 +584,7 @@ func run(parent context.Context, serviceMode bool) error {
 	if plerr != nil {
 		return plerr
 	}
+	player.SetVolume(cfg.Features.Player.VolumeOr()) // persisted global gain, re-pushed per spawn
 	player.Bind(ctx)
 	// Auto-record across a live stream's span (start with go-live, finalize on end) so the
 	// tracklist + precise recording window are captured without a manual step.
@@ -1142,20 +1143,22 @@ func run(parent context.Context, serviceMode bool) error {
 	// Media-automation engine (file watchers + schedules; runs in the daemon, headless too).
 	var autoMgr *automation.Service
 	var autoIface automation.Manager
+	// Hoisted out of the store-gated block: the studio wire validates loudness overrides against
+	// the same presets the engine resolves, whether or not the engine itself came up.
+	presetResolver := automation.PresetResolver(func(id string) (transcode.Preset, bool) {
+		for _, p := range transcode.AllPresets(cfg.Features.Transcode.Presets) {
+			if p.ID == id {
+				return p, true
+			}
+		}
+		return transcode.Preset{}, false
+	})
 	if st != nil {
 		var autoWorker automation.Worker
 		if workers != nil {
 			autoWorker = workers
 		}
-		resolver := func(id string) (transcode.Preset, bool) {
-			for _, p := range transcode.AllPresets(cfg.Features.Transcode.Presets) {
-				if p.ID == id {
-					return p, true
-				}
-			}
-			return transcode.Preset{}, false
-		}
-		autoMgr = automation.NewManager(st, autoWorker, resolver, log)
+		autoMgr = automation.NewManager(st, autoWorker, presetResolver, log)
 		autoIface = autoMgr
 	}
 
@@ -1176,7 +1179,7 @@ func run(parent context.Context, serviceMode bool) error {
 	remotectl.RegisterLibraryCueEdit(remoteCtl, lib, bus.Publish,
 		func() string { return strings.TrimSpace(cfg.Features.NML.CollectionPath) }, cueBackupRoot)
 	remotectl.RegisterMedia(remoteCtl, transcodeHub)
-	remotectl.RegisterRecorder(remoteCtl, rec, lib) // peer-driven Publish cockpit (list/tracklist/captures/export/delete)
+	remotectl.RegisterRecorder(remoteCtl, rec, lib) // peer-driven Publish cockpit (list/tracklist/captures/export/rename/delete)
 	if rec != nil {
 		// peer-driven Traktor-history reconciliation - the match runs on THIS box (its history dir +
 		// library metadata resolver), triggered by a paired controller's remote Publish tab.
@@ -1264,7 +1267,7 @@ func run(parent context.Context, serviceMode bool) error {
 
 	// Local Studio WS control channel - browser drives this desktop's media/transcode/
 	// automations. Created here so it gets the store (favorites/presets) + automation engine.
-	studioSrv := studio.New(log, apiC, authMgr, studioRunner, transcodeHub, st, autoIface)
+	studioSrv := studio.New(log, apiC, authMgr, studioRunner, transcodeHub, st, autoIface, presetResolver)
 	authMgr.OnChange(func(auth.State) { studioSrv.OnDesktopTokenChanged() })
 	// Peer gateway: lets the web Local Studio manage + drive paired rave-mate instances on
 	// other machines (peers.* + remote-context routing over the existing remotectl).

@@ -1,13 +1,26 @@
 package recorder
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/session"
+	"rave.page/mate/internal/store"
 )
+
+// newStored builds a recorder over a real bbolt store (rename hits the persist path).
+func newStored(t *testing.T) *Recorder {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "rec.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return New(logbus.New(64), st, nil, 10)
+}
 
 func deckState(deck, title, artist string, playing bool) session.UnifiedState {
 	chForDeck := map[string]string{"A": "1", "B": "2", "C": "3", "D": "4"}
@@ -255,6 +268,103 @@ func TestStopGuardClearsOnSilence(t *testing.T) {
 	step(14, a)
 	if r.Active() == nil {
 		t.Fatal("silence should clear the stop hold-off so a later play starts a new set")
+	}
+}
+
+func TestRenameValidation(t *testing.T) {
+	r := newStored(t)
+	rec := r.StartRecording("Set A", "")
+
+	for _, tc := range []struct{ name, in string }{
+		{"empty", ""},
+		{"whitespace", "   \t\n "},
+		{"too long", strings.Repeat("x", maxRecordingName+1)},
+	} {
+		if err := r.Rename(rec.ID, tc.in); err == nil {
+			t.Fatalf("%s name must be rejected", tc.name)
+		}
+	}
+	if got := r.Active().Name; got != "Set A" {
+		t.Fatalf("rejected rename must not mutate the name: %q", got)
+	}
+	// Exactly at the cap is allowed; runes are counted, not bytes (a 200-rune emoji name fits).
+	if err := r.Rename(rec.ID, strings.Repeat("🎧", maxRecordingName)); err != nil {
+		t.Fatalf("%d-rune name must be accepted: %v", maxRecordingName, err)
+	}
+	if err := r.Rename("rec_does_not_exist", "Nope"); err == nil {
+		t.Fatal("unknown id must error")
+	}
+}
+
+func TestRenameActiveSurvivesQueuedSnapshot(t *testing.T) {
+	r := newStored(t)
+	v0 := r.RecordingsVersion()
+	rec := r.StartRecording("Set A", "") // queues a put carrying "Set A"
+
+	// Rename before that snapshot is known to have flushed: this is the regression the persist
+	// queue invites - a stale queued snapshot landing after the rename would revert the name.
+	if err := r.Rename(rec.ID, "  Peak Time  "); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Active().Name; got != "Peak Time" {
+		t.Fatalf("active name = %q, want trimmed %q", got, "Peak Time")
+	}
+	got, ok := r.Get(rec.ID)
+	if !ok || got.Name != "Peak Time" {
+		t.Fatalf("Get after rename = %+v ok=%v", got, ok)
+	}
+	if r.RecordingsVersion() == v0 {
+		t.Fatal("RecordingsVersion must bump (webui Publish list caches List() by it)")
+	}
+
+	r.drainPersist() // let every queued snapshot land
+	list := r.List()
+	if len(list) != 1 || list[0].Name != "Peak Time" {
+		t.Fatalf("queued snapshot reverted the name on flush: %+v", list)
+	}
+}
+
+func TestRenamePersisted(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	now := base
+	r := newStored(t)
+	r.clock = func() time.Time { return now }
+
+	a := deckState("A", "Track A", "Artist A", true)
+	step := func(sec int, st session.UnifiedState) {
+		now = base.Add(time.Duration(sec) * time.Second)
+		r.step(now, st)
+	}
+	step(0, a)
+	step(5, a)
+	step(11, a) // A confirmed
+	now = base.Add(12 * time.Second)
+	done := r.StopRecording() // no longer active; StopRecording drains
+	if done == nil {
+		t.Fatal("StopRecording returned nil")
+	}
+
+	v0 := r.RecordingsVersion()
+	if err := r.Rename(done.ID, "Closing Set"); err != nil {
+		t.Fatal(err)
+	}
+	if r.RecordingsVersion() == v0 {
+		t.Fatal("RecordingsVersion must bump after renaming a persisted recording")
+	}
+	got, ok := r.Get(done.ID)
+	if !ok || got.Name != "Closing Set" {
+		t.Fatalf("Get = %+v ok=%v", got, ok)
+	}
+	// The read-modify-write must carry the tracklist through, not just the name.
+	if len(got.Tracks) != 1 || got.Tracks[0].Title != "Track A" {
+		t.Fatalf("rename clobbered the tracklist: %+v", got.Tracks)
+	}
+	if got.EndedAt.IsZero() {
+		t.Fatal("rename clobbered EndedAt")
+	}
+	list := r.List()
+	if len(list) != 1 || list[0].Name != "Closing Set" {
+		t.Fatalf("List = %+v", list)
 	}
 }
 

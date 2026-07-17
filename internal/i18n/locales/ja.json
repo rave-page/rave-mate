@@ -1843,7 +1843,9 @@
       "video": "ビデオ",
       "videoOffsetField": "ビデオオフセット ([-]mm:ss.s)",
       "videoOnly": "ビデオのみ",
-      "waveUnavailable": "波形を利用できません - "
+      "waveUnavailable": "波形を利用できません - ",
+      "buildingSeekTable": "シークテーブルを作成中…",
+      "volume": "音量"
     },
     "openExternally": "外部で開く",
     "pause": "一時停止",
@@ -1875,7 +1877,8 @@
     },
     "trimEdit": "トリム / 編集",
     "more": "その他",
-    "trimEditSub": "区間をカットまたはトリミングしたコピーを書き出し"
+    "trimEditSub": "区間をカットまたはトリミングしたコピーを書き出し",
+    "loadingAudio": "音声を読み込み中…"
   },
   "publish": {
     "audio": "オーディオ",

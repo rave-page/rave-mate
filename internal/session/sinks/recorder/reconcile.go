@@ -39,7 +39,20 @@ func (r *Recorder) ReconcileWithHistory(recID, historyDir string, resolve Histor
 
 // ReconcileWithSessions is ReconcileWithHistory over pre-loaded sessions, so a sweep over
 // many recordings loads (and the AutoReconciler's cache parses) the history dir once.
+//
+// The whole Get→resolve→Put cycle holds storeMu: resolve() is a per-track library lookup over a
+// 30+ track set (tens-to-hundreds of ms), and Rename does the same read-modify-write on the same
+// bucket, so an unserialized rename landing in that window is silently lost. The AutoReconciler's
+// sweep re-takes storeMu per id, so a rename interleaves between recordings rather than waiting out
+// the whole sweep. Lock order storeMu → r.mu → r.pmu (r.Get takes r.mu + r.pmu, both inner).
 func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Session, resolve HistoryResolver) (*Recording, error) {
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
+	// Read AFTER draining: autoFinalizeLocked queues its snapshot and marks the id pending-reconcile
+	// without draining, so a queued put for this id can still be in flight - it would land on top of
+	// the reconciled tracklist we write below. Once drained nothing can re-queue it (persistLocked
+	// queues only for r.active; a pending-reconcile id is finalized, and ids are never reused).
+	r.drainPersist()
 	rec, ok := r.Get(recID)
 	if !ok {
 		return nil, fmt.Errorf("recording %s not found", recID)
@@ -95,6 +108,7 @@ func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Sessi
 	if err := r.st.PutJSON(store.BucketRecordings, rec.ID, &rec); err != nil {
 		return nil, fmt.Errorf("persist reconciled recording: %w", err)
 	}
+	r.bumpRec()                     // tracklist changed → invalidate the Publish tab's RecordingsVersion-keyed cache
 	r.clearPendingReconcile(rec.ID) // reconciled (idempotent stamp) → drop from the auto-reconcile work-set
 	r.log.Info(source, "reconciled with Traktor history", map[string]any{
 		"id": rec.ID, "session": m.SessionName, "tracks": len(tracks), "overlap": m.Overlap.String(),

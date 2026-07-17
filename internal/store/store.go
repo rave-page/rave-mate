@@ -48,6 +48,7 @@ const (
 	KindStreams       = "streams"  // ffprobe stream/format info (transcode.SourceInfo JSON)
 	KindSilence       = "silence"  // leading/trailing silence probe (worker transcode.silence JSON)
 	KindFileHash      = "filehash" // sha256 of a file's bytes (peer avatar/motion listing; mtime-keyed)
+	KindMp4Frag       = "mp4frag"  // fragmented-MP4 stream index (mp4frag.Index JSON; feeds MSE playback)
 )
 
 // Store wraps the bbolt DB. A nil *Store is valid - every method is a safe no-op so callers

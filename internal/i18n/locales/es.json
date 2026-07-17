@@ -1843,7 +1843,9 @@
       "video": "Vídeo",
       "videoOffsetField": "Desfase de vídeo ([-]mm:ss.s)",
       "videoOnly": "Solo vídeo",
-      "waveUnavailable": "Forma de onda no disponible - "
+      "waveUnavailable": "Forma de onda no disponible - ",
+      "buildingSeekTable": "Generando tabla de búsqueda…",
+      "volume": "Volumen"
     },
     "openExternally": "Abrir externamente",
     "pause": "Pausar",
@@ -1875,7 +1877,8 @@
     },
     "trimEdit": "Recortar / editar",
     "more": "Más",
-    "trimEditSub": "Cortar una sección o exportar una copia recortada"
+    "trimEditSub": "Cortar una sección o exportar una copia recortada",
+    "loadingAudio": "Cargando audio…"
   },
   "publish": {
     "audio": "audio",

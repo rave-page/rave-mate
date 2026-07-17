@@ -99,6 +99,28 @@ func (n *nativeEngine) decode(path string) (served string, err error) {
 	return "ffmpeg", nil
 }
 
+// ramOpener returns the reopen func for EnsureRAM matching the engine that served the load.
+func ramOpener(path, served string) func() (audio.Decoder, error) {
+	if served == "ffmpeg" {
+		return func() (audio.Decoder, error) { return audio.OpenFFmpeg(path) }
+	}
+	return func() (audio.Decoder, error) { return audio.Open(path) }
+}
+
+// kickRAM upgrades the loaded track to RAM in the background (playback already streams).
+func (n *nativeEngine) kickRAM(path, served string) {
+	if served == "cached" {
+		return
+	}
+	go func() {
+		if err := n.eng.EnsureRAM(path, ramOpener(path, served)); err != nil && n.log != nil {
+			n.log.Warn("player", "RAM upgrade failed (streaming continues)", map[string]any{
+				"file": filepath.Base(path), "err": err.Error(),
+			})
+		}
+	}()
+}
+
 func (n *nativeEngine) logServed(path, served string) {
 	if served == "cached" || n.log == nil {
 		return
@@ -117,6 +139,7 @@ func (n *nativeEngine) PlayFrom(path string, startSec float64) error {
 	n.logServed(path, served)
 	n.eng.PlayFrom(startSec)
 	n.startTicks()
+	n.kickRAM(path, served)
 	return nil
 }
 
@@ -129,11 +152,13 @@ func (n *nativeEngine) PreviewFrom(path string, startSec float64) error {
 	n.logServed(path, served)
 	n.eng.PreviewFrom(startSec)
 	n.startTicks()
+	n.kickRAM(path, served)
 	return nil
 }
 
-// Preload decodes path (RAM preload if it fits) without playing, so the first cue-edit Space is
-// 0-latency. Idempotent for the already-loaded track.
+// Preload readies path without playing and BLOCKS until the RAM upgrade lands (when it fits),
+// so the first cue-edit Space is 0-latency. Callers already run it off-thread. Idempotent for
+// the already-loaded track.
 func (n *nativeEngine) Preload(path string) error {
 	served, err := n.load(path)
 	if err != nil {
@@ -141,6 +166,11 @@ func (n *nativeEngine) Preload(path string) error {
 		return err
 	}
 	n.logServed(path, served)
+	if err := n.eng.EnsureRAM(path, ramOpener(path, served)); err != nil && n.log != nil {
+		n.log.Warn("player", "preload RAM upgrade failed (streaming continues)", map[string]any{
+			"file": filepath.Base(path), "err": err.Error(),
+		})
+	}
 	return nil
 }
 
@@ -163,6 +193,8 @@ func (n *nativeEngine) SeekTo(sec float64, explicit bool) {
 }
 
 func (n *nativeEngine) TogglePause() bool { return n.eng.TogglePause() }
+
+func (n *nativeEngine) SetVolume(v float64) { n.eng.SetVolume(v) }
 
 func (n *nativeEngine) Stop() {
 	n.stopTicks()

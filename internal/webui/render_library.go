@@ -1892,15 +1892,14 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	b.WriteString(pbSelect(i18n.T("library.enc.channels"), "lib-pf:channels", [][2]string{{"0", i18n.T("library.enc.source")}, {"1", i18n.T("library.enc.mono")}, {"2", i18n.T("library.enc.stereo")}}, strconv.Itoa(d.Channels)))
 	b.WriteString(pbSelect(i18n.T("library.enc.sampleRate"), "lib-pf:samplerate", [][2]string{{"0", i18n.T("library.enc.source")}, {"44100", "44.1 kHz"}, {"48000", "48 kHz"}, {"96000", "96 kHz"}}, strconv.Itoa(d.SampleRate)))
 	b.WriteString(`</div>`)
-	// loudness
-	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(toggleRowTip(i18n.T("library.enc.normalize"), "lib-pf:loudon", d.LoudnessOn, tipTopic("enc-loudness")))
-	if d.LoudnessOn {
-		b.WriteString(pbField(i18n.T("library.enc.lufsTarget"), "lib-pf:loudi", trimNum(d.LoudnessI), "number", i18n.T("library.enc.lufsHint")))
-		b.WriteString(pbField(i18n.T("library.enc.truePeak"), "lib-pf:loudtp", trimNum(d.LoudnessTP), "number", ""))
-		b.WriteString(toggleRow(i18n.T("library.enc.raiseQuiet"), "lib-pf:loudraise", d.LoudnessRaiseOnly))
-	}
-	b.WriteString(`</div>`)
+	// loudness - the shared block (components.go); the draft IS the preset, so no override framing
+	b.WriteString(loudnessFields(loudnessOpts{
+		act:       func(f string) string { return "lib-pf:" + f },
+		toggleLbl: i18n.T("library.enc.normalize"),
+		topic:     "enc-loudness",
+		vals:      loudnessVals{On: d.LoudnessOn, I: d.LoudnessI, TP: d.LoudnessTP, RaiseOnly: d.LoudnessRaiseOnly},
+		preset:    &d,
+	}))
 	// trim + start
 	b.WriteString(pbField(i18n.T("library.enc.trimStart"), "lib-trim-s", s.trimS, "number", ""))
 	b.WriteString(pbField(i18n.T("library.enc.trimEnd"), "lib-trim-e", s.trimE, "number", ""))
@@ -2315,7 +2314,13 @@ func fieldRaw(act, value, placeholder string) string {
 		html.EscapeString(placeholder) + `" data-act="` + html.EscapeString(act) + `" style="min-width:160px">`
 }
 
-func pbField(label, act, value, typ, hintTx string) string {
+// pbFieldEx is the encode-builder's labelled input: optional hint under it, optional placeholder
+// (a greyed default the user accepts by leaving the field blank - override surfaces need it).
+// pbField is the shorthand; extend HERE rather than growing a near-copy.
+// data-label matches field/fieldEx/labeledInput: without it ctl read/set cannot reach the input at
+// all, which silently took the shared loudness block's LUFS + true-peak targets off the mandated
+// verification path on every surface that renders it.
+func pbFieldEx(label, act, value, typ, placeholder, hintTx string) string {
 	h := ""
 	if hintTx != "" {
 		h = `<div class=pb-hint>` + html.EscapeString(hintTx) + `</div>`
@@ -2323,8 +2328,16 @@ func pbField(label, act, value, typ, hintTx string) string {
 	if typ == "" {
 		typ = "text"
 	}
-	return `<div class=pb-field><div class=pb-label>` + html.EscapeString(label) + `</div>` +
-		`<input class=field-input type="` + typ + `" value="` + html.EscapeString(value) + `" data-act="` + html.EscapeString(act) + `">` + h + `</div>`
+	ph := ""
+	if placeholder != "" {
+		ph = ` placeholder="` + html.EscapeString(placeholder) + `"`
+	}
+	return `<div class=pb-field data-label=` + attrQ(strings.ToLower(label)) + `><div class=pb-label>` + html.EscapeString(label) + `</div>` +
+		`<input class=field-input type="` + typ + `" value="` + html.EscapeString(value) + `" data-act="` + html.EscapeString(act) + `"` + ph + `>` + h + `</div>`
+}
+
+func pbField(label, act, value, typ, hintTx string) string {
+	return pbFieldEx(label, act, value, typ, "", hintTx)
 }
 
 // pbSelect: encode-builder property select - smartSelect over the same act contract

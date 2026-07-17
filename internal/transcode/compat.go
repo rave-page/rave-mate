@@ -101,13 +101,12 @@ func NormalizePreset(p Preset) Preset {
 	}
 
 	// Loudness normalization needs an audio re-encode; clamp targets to sane ranges.
-	switch p.AudioCodec {
-	case "copy", "none", "":
+	if !LoudnessAppliesTo(p.AudioCodec) {
 		p.LoudnessOn = false
 	}
 	if p.LoudnessOn {
 		if p.LoudnessI == 0 {
-			p.LoudnessI = -14
+			p.LoudnessI = DefaultLoudnessI
 		}
 		p.LoudnessI = clampF(p.LoudnessI, -36, -5)
 		if p.LoudnessTP != 0 {

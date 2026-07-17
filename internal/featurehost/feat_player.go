@@ -27,6 +27,7 @@ type playerBackend interface {
 	PreviewFrom(path string, startSec float64) error
 	PreviewRelease(fallbackSec float64)
 	Preload(path string) error
+	SetVolume(v float64)
 	Stop()
 	State() State
 }
@@ -126,6 +127,15 @@ func (f *playerFeature) Handle(_ context.Context, method string, params json.Raw
 			return nil, err
 		}
 		return nil, f.eng.Preload(p.Path)
+	case "setVolume": // global output gain (0..1), persisted in config by the daemon
+		var p struct {
+			Volume float64 `json:"volume"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		f.eng.SetVolume(clamp01(p.Volume))
+		return nil, nil
 	case "togglePause":
 		paused := f.eng.TogglePause()
 		return json.Marshal(struct {
@@ -139,6 +149,17 @@ func (f *playerFeature) Handle(_ context.Context, method string, params json.Raw
 	default:
 		return nil, errUnknownMethod(method)
 	}
+}
+
+// clamp01 bounds a gain value into [0,1].
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // Compile-time: the native engine adapter satisfies playerBackend (native_engine.go).

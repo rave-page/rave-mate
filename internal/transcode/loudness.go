@@ -23,6 +23,10 @@ import (
 // −1 dBTP is the common streaming-delivery headroom recommendation.
 const DefaultLoudnessTP = -1.0
 
+// DefaultLoudnessI is the integrated target (LUFS) used when a preset or an override leaves it 0:
+// the streaming target, i.e. the first entry of LoudnessTargets().
+const DefaultLoudnessI = -14.0
+
 // silenceGate: integrated loudness at/below this is treated as silence (skip).
 const silenceGate = -70.0
 
@@ -43,6 +47,49 @@ func LoudnessTargets() []LoudnessTarget {
 		{Label: "EBU R128 broadcast −23 LUFS", I: -23, TP: -2},
 		{Label: "Club / DJ master −8 LUFS (hot)", I: -8, TP: -0.3},
 	}
+}
+
+// LoudnessAppliesTo reports whether normalization can actually run with this audio codec.
+// Normalizing rewrites the samples, so it needs an audio re-encode: copy/none (and "" = no audio)
+// drop it. NormalizePreset enforces this; UIs call it to warn instead of offering targets that
+// silently do nothing.
+func LoudnessAppliesTo(audioCodec string) bool {
+	switch audioCodec {
+	case "copy", "none", "":
+		return false
+	}
+	return true
+}
+
+// ApplyLoudnessOverride overlays a per-run loudness override onto a resolved preset. Every
+// override surface (automation actions, the recordings export) folds through here.
+//
+// Semantics (back-compat by construction):
+//   - on == false → p returned untouched, so a preset that normalizes still normalizes exactly as
+//     before. Anything decoded from before these fields existed carries on == false and behaves
+//     identically.
+//   - on == true → the override REPLACES the preset's loudness block wholesale (on/I/TP/raise-
+//     only) rather than merging field-by-field: a half-overridden target (override I + preset TP)
+//     is nobody's intent.
+//
+// There is no "force off": off means "don't override". To skip normalization, point at a preset
+// that doesn't normalize.
+//
+// Zero values resolve to defaults: i → DefaultLoudnessI; tp stays 0 and EffectiveTP resolves it to
+// DefaultLoudnessTP. NormalizePreset then clamps both to sane ranges and drops loudness entirely
+// for copy/none audio codecs (see LoudnessAppliesTo).
+func ApplyLoudnessOverride(p Preset, on bool, i, tp float64, raiseOnly bool) Preset {
+	if !on {
+		return p
+	}
+	p.LoudnessOn = true
+	p.LoudnessI = i
+	if p.LoudnessI == 0 {
+		p.LoudnessI = DefaultLoudnessI
+	}
+	p.LoudnessTP = tp
+	p.LoudnessRaiseOnly = raiseOnly
+	return p
 }
 
 // EffectiveTP returns the preset's true-peak ceiling, defaulting 0 → DefaultLoudnessTP.

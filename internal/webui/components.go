@@ -5,6 +5,9 @@ import (
 	"html"
 	"strconv"
 	"strings"
+
+	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/transcode"
 )
 
 // Reusable HTML component helpers built on the rave.page .rp-* kit. Every tab renderer uses these
@@ -101,19 +104,10 @@ func toggleRowTip(label, act string, on bool, tipHTML string) string {
 		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
 }
 
-// field renders a labelled text/number input inside a form-less row (dispatch on change via act).
-func field(label, act, value, inputType string) string {
-	if inputType == "" {
-		inputType = "text"
-	}
-	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s</span>`+
-		`<input class=field-input type=%s value=%s data-value=%s data-act=%s></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), inputType, attrQ(value), attrQ(value), attrQ(act))
-}
-
-// fieldPH is field with a placeholder (shown greyed when the value is empty - e.g. a detected
-// default path the user can accept by leaving the field blank).
-func fieldPH(label, act, value, inputType, placeholder string) string {
+// fieldEx is the general labelled text/number input (dispatch on change via act): optional
+// placeholder + optional pre-rendered tooltip beside the label. field/fieldPH/fieldTip are the
+// shorthands - extend HERE rather than growing a fourth near-copy.
+func fieldEx(label, act, value, inputType, placeholder, tipHTML string) string {
 	if inputType == "" {
 		inputType = "text"
 	}
@@ -121,19 +115,25 @@ func fieldPH(label, act, value, inputType, placeholder string) string {
 	if placeholder != "" {
 		ph = ` placeholder=` + attrQ(placeholder)
 	}
-	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s</span>`+
+	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
 		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+}
+
+// field renders a labelled text/number input inside a form-less row (dispatch on change via act).
+func field(label, act, value, inputType string) string {
+	return fieldEx(label, act, value, inputType, "", "")
+}
+
+// fieldPH is field with a placeholder (shown greyed when the value is empty - e.g. a detected
+// default path the user can accept by leaving the field blank).
+func fieldPH(label, act, value, inputType, placeholder string) string {
+	return fieldEx(label, act, value, inputType, placeholder, "")
 }
 
 // fieldTip is field with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
 func fieldTip(label, act, value, inputType, tipHTML string) string {
-	if inputType == "" {
-		inputType = "text"
-	}
-	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
-		`<input class=field-input type=%s value=%s data-value=%s data-act=%s></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act))
+	return fieldEx(label, act, value, inputType, "", tipHTML)
 }
 
 // selectBoxTip is selectBox with a tooltip (topic id) beside the label.
@@ -276,6 +276,66 @@ func itemRow(title, sub string, trailing ...string) string {
 	}
 	return `<div class=irow><div class=irow-main><div class=irow-title>` + html.EscapeString(title) + `</div>` + s + `</div>` +
 		`<div class=irow-actions>` + strings.Join(trailing, "") + `</div></div>`
+}
+
+// ── loudness block (shared by every surface that edits transcode loudness) ──
+
+// loudnessVals are the four EBU R128 knobs of transcode's loudness block.
+type loudnessVals struct {
+	On        bool
+	I         float64 // integrated target (LUFS); 0 = transcode.DefaultLoudnessI
+	TP        float64 // true-peak ceiling (dBTP); 0 = transcode.DefaultLoudnessTP
+	RaiseOnly bool
+}
+
+// loudnessOpts parameterizes loudnessFields for one surface.
+type loudnessOpts struct {
+	act       func(string) string // field suffix ("loudon"|"loudi"|"loudtp"|"loudraise") → this surface's act token
+	toggleLbl string              // the switch's label
+	topic     string              // tooltip.go topic beside the switch
+	vals      loudnessVals
+	// override marks a surface that layers over a resolved preset instead of defining one: 0 means
+	// "unset, inherit the default", so the targets render blank behind a default placeholder
+	// rather than as a literal "0" the user never chose.
+	override bool
+	// preset is the preset the run will really use, or nil when the surface can't resolve one (a
+	// louder error already says so - don't blame the codec). Normalizing needs an audio re-encode,
+	// so transcode drops it for copy/none: say so rather than show targets that do nothing.
+	preset *transcode.Preset
+}
+
+// loudnessFields renders THE loudness block: the normalize switch plus integrated target,
+// true-peak ceiling and raise-quiet-only behind it. Every surface that edits transcode loudness
+// renders this one implementation - library preset builder, automation transcode steps, recordings
+// export. Extend HERE; never fork a per-surface copy. Only markup + copy are shared: the four
+// field handlers stay the caller's, reached through o.act.
+func loudnessFields(o loudnessOpts) string {
+	// An override surface shows the default as a placeholder, so blank reads as "inherit"; a
+	// surface that defines the preset has no default to fall back to - print the value.
+	tx := func(f, def float64) (val, ph string) {
+		if !o.override {
+			return trimNum(f), ""
+		}
+		if f == 0 {
+			return "", trimNum(def)
+		}
+		return trimNum(f), trimNum(def)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=pb-grp>`)
+	b.WriteString(toggleRowTip(o.toggleLbl, o.act("loudon"), o.vals.On, tipTopic(o.topic)))
+	if o.vals.On {
+		iv, iph := tx(o.vals.I, transcode.DefaultLoudnessI)
+		tv, tph := tx(o.vals.TP, transcode.DefaultLoudnessTP)
+		b.WriteString(pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, i18n.T("library.enc.lufsHint")))
+		b.WriteString(pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, ""))
+		b.WriteString(toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly))
+		if o.preset != nil && !transcode.LoudnessAppliesTo(o.preset.AudioCodec) {
+			b.WriteString(hint("warn", i18n.T("library.enc.loudNeedsReencode")))
+		}
+	}
+	b.WriteString(`</div>`)
+	return b.String()
 }
 
 // hint renders a small dynamic-info chip (the electron local-studio "current media hint" pattern).

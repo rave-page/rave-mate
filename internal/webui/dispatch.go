@@ -12,10 +12,28 @@ import (
 
 // Mods carries the originating click's modifier state ("s"=Shift, "c"=Ctrl/Cmd) -
 // range/toggle multi-select in list views.
-type actMsg struct{ Act, Val, Form, ID, Mods string }
+type actMsg struct {
+	Act, Val, Form, ID, Mods string
+
+	// tok pins the modal session a PICKED path must be applied under (pick_actions.go). Unexported
+	// on purpose: json.Unmarshal cannot reach it, so neither the DOM nor a ctl operator can forge a
+	// session - only pickApply sets it, from a token Go held across the native dialog. Zero on a
+	// page act, where the modal on screen is by construction the one that was clicked.
+	tok modalTok
+}
 
 func (m actMsg) shift() bool { return strings.Contains(m.Mods, "s") }
 func (m actMsg) ctrl() bool  { return strings.Contains(m.Mods, "c") }
+
+// actTok resolves the modal session this act must write its form state under: the picker's pinned
+// session for a returning dialog, else whatever is on screen now. Handlers that mutate modal state
+// pass the result to updateModalIf, which re-checks it under the slot lock.
+func (u *UI) actTok(m actMsg) modalTok {
+	if m.tok.live() {
+		return m.tok
+	}
+	return u.modalCur()
+}
 
 type actHandler func(u *UI, m actMsg)
 

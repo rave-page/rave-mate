@@ -32,7 +32,131 @@
     "schedules": "Schedules",
     "subtitle": "Media automation engine",
     "unavailable": "Automations unavailable",
-    "unnamed": "(unnamed)"
+    "unnamed": "(unnamed)",
+    "new": "New automation",
+    "act": {
+      "rename": "Rename from event",
+      "renameDesc": "Renames the file after the booked event it was recorded at.",
+      "trim": "Trim silence",
+      "trimDesc": "Detects the silence before the music starts and re-encodes without it.",
+      "transcode": "Transcode",
+      "transcodeDesc": "Re-encodes the file with a preset.",
+      "move": "Move to",
+      "moveDesc": "Moves the file into another folder. The chain follows it.",
+      "copy": "Copy to",
+      "copyDesc": "Copies the file into another folder. The chain keeps working on the original.",
+      "delete": "Delete",
+      "deleteDesc": "Permanently erases the recording the chain started from - and only if a new file was produced to survive it. Always the last step."
+    },
+    "ed": {
+      "titleNew": "New automation",
+      "titleEdit": "Edit automation",
+      "label": "Name",
+      "watchDir": "Watch folder",
+      "secMatch": "Match",
+      "secActions": "Action chain",
+      "exts": "Extensions",
+      "extsPH": ".wav, .flac, .aiff",
+      "minSize": "Minimum size (MB)",
+      "minAge": "Minimum age (days)",
+      "minAgeWatchWarn": "With a minimum age set, this automation only does anything on a schedule - a file arriving in the watch folder is brand new and can never pass the age gate.",
+      "pattern": "Filename pattern",
+      "patternPH": "regex over the file name, e.g. ^set_",
+      "noSteps": "No steps yet - add at least one.",
+      "save": "Save automation",
+      "saved": "Automation saved",
+      "errLabel": "Give the automation a name.",
+      "errWatch": "Pick the folder to watch.",
+      "errVanished": "This automation was deleted while you had it open, so there is nothing left to update. Everything you typed is still here: save again and it is created fresh, under a new id. Its old schedules went with it and are not coming back - add them again from the card once it exists.",
+      "errPattern": "The filename pattern is not a valid regular expression",
+      "outputDir": "Output folder",
+      "outputDirOptional": "Output folder (optional)",
+      "alongside": "alongside the source file",
+      "bufferMinutes": "Event match window (minutes)",
+      "template": "Filename template",
+      "thresholdDb": "Silence threshold (dB)",
+      "minSilence": "Minimum silence (seconds)",
+      "trimStart": "Trim the start",
+      "trimEnd": "Trim the end",
+      "deleteWarn": "Permanently erases the recording this chain started from - not what an earlier step produced from it. There is no recycle bin and no undo. It refuses to run unless something else survives it: if every step that would have produced a new file skipped, the recording is kept and the run is reported failed.",
+      "deleteTerminal": "Must be the last step - the chain ends here."
+    },
+    "sch": {
+      "titleNew": "New schedule",
+      "titleEdit": "Edit schedule",
+      "new": "New schedule",
+      "add": "Schedule",
+      "label": "Name",
+      "automation": "Automation",
+      "save": "Save schedule",
+      "saved": "Schedule saved",
+      "deleted": "Schedule deleted",
+      "secTrigger": "Trigger",
+      "secGates": "Conditions",
+      "kind": "Trigger type",
+      "kindInterval": "Every few minutes",
+      "kindIntervalDesc": "Repeats on a fixed gap, counted from the last run.",
+      "kindDaily": "Daily at a set time",
+      "kindDailyDesc": "Fires once a day at a wall-clock time.",
+      "kindCron": "Cron expression",
+      "kindCronDesc": "Five fields - for anything the other three cannot express.",
+      "kindIdle": "When the computer goes idle",
+      "kindIdleDesc": "Fires once each time you leave the machine alone. Windows only.",
+      "intervalMinutes": "Every (minutes)",
+      "atHour": "Hour",
+      "atMinute": "Minute",
+      "dailyHint": "Local time on this computer. A fire that lands while the machine is asleep or rave-mate is closed is skipped, not caught up afterwards.",
+      "cron": "Cron expression",
+      "cronEmpty": "Enter five fields - for example */15 * * * * to sweep every 15 minutes.",
+      "cronOK": "Valid cron expression.",
+      "idleMinutes": "Idle for (minutes)",
+      "idleUnsupported": "Idle detection is Windows-only. On this platform an idle trigger never fires at all - use an interval, daily or cron trigger instead.",
+      "requireIdle": "Require idle (minutes)",
+      "requireApps": "Only run while these apps run",
+      "requireAppsPH": "e.g. Traktor, rekordbox",
+      "excludeApps": "Skip while these apps run",
+      "excludeAppsPH": "e.g. Traktor, obs64",
+      "gatesUnsupported": "Idle and running-app conditions are Windows-only. On this platform they cannot be checked, so they are ignored and the schedule fires as if every condition passed.",
+      "deleteChainWarn": "This automation's chain ends by deleting the file. On a schedule it erases every matching file in the watch folder, every time it fires - unattended, with no confirmation and no undo.",
+      "automationOffWarn": "This automation is switched off, so this schedule will not run it - the automation's own switch stops it whatever starts it, a timer no less than an arriving file. The schedule stays armed and picks up again the moment you switch the automation back on.",
+      "needAutomation": "Create an automation first - a schedule re-runs one over its watch folder.",
+      "missingAutomation": "(automation deleted)",
+      "orphanWarn": "The automation this schedule ran no longer exists, so every fire is skipped - it does nothing and cannot be repaired by switching it on. Point it at another automation with Edit, or delete it. (Deleting an automation now takes its schedules with it; this one predates that.)",
+      "neverFired": "Never fired",
+      "lastFired": "Last fired {at}",
+      "sumInterval": "every {n} min",
+      "sumDaily": "daily at {at}",
+      "sumIdle": "when idle {n} min",
+      "sumRequireIdle": "idle ≥ {n} min",
+      "sumRequireApps": "needs {apps}",
+      "sumExcludeApps": "not while {apps}",
+      "sumNoGates": "no conditions",
+      "errLabel": "Give the schedule a name.",
+      "errAutomation": "Pick the automation this schedule runs.",
+      "errVanished": "This schedule was deleted while you had it open - either from its own card, or along with the automation it ran. Nothing was saved over it. Everything you typed is still here: pick an automation and save again to create it fresh.",
+      "errCron": "The cron expression is not valid"
+    },
+    "run": {
+      "title": "Run now",
+      "btn": "Run now",
+      "automation": "Automation",
+      "chain": "Chain",
+      "file": "File to run over",
+      "filePH": "pick a file, or paste a full path",
+      "go": "Run now",
+      "goDestructive": "Run and erase the file",
+      "running": "Running…",
+      "runningWhy": "This run is already going. It finishes on its own - the runs list updates when it does.",
+      "needFile": "Pick the file to run over first.",
+      "needAck": "Confirm you understand this permanently erases the file.",
+      "ignoresMatch": "Run now ignores the match rules - extension, size, age and filename pattern are not checked. The chain acts on exactly the file you pick.",
+      "deleteWarn": "This chain ends by deleting the file you pick below. Because run now skips the match rules, no filter stands between this button and a permanent delete - no recycle bin, no undo.",
+      "deleteScope": "The delete step erases exactly the file you pick here - the recording the chain starts from - and nothing else: a transcode output or an archived copy the chain makes on the way survives. It refuses anything outside the watch folder, and refuses outright if the chain produced nothing to survive it - a trim that finds no silence to cut leaves the recording as the only copy, so the recording is kept and the run reported partial.",
+      "ack": "I understand this permanently erases the file",
+      "started": "Running {label}…",
+      "finished": "{label} - {status}",
+      "failed": "Run failed: {error}"
+    }
   },
   "brand": {
     "tagline": "Local worker & bridge for rave.page"
@@ -57,7 +181,8 @@
     "remove": "Remove",
     "save": "Save",
     "signIn": "Sign in",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "edit": "Edit"
   },
   "editor": {
     "align": "Align",
@@ -392,6 +517,74 @@
     "stream-why": {
       "title": "VRSL video stream",
       "body": "Streams your live DMX lighting into VRChat as video. rave-mate renders the DMX universes into a VRSL pixel grid, encodes it with ffmpeg, and pushes it over RTMP (or WHIP) to a transcode service (VRCDN, Twitch, or your own) that serves it to the headset. The world plays that video back and decodes the grid into lights - no Spout/NDI/OBS relay needed.\n\nStandard mode emits a stock VRSL grid that lights any VRSL world. Extended mode is a superset: it adds 16-bit precision, an integrity header and a liveness counter that a rave.page world decodes, while a stock VRSL world still reads it as plain 8-bit. Keep the whole chain LINEAR - the pixels are raw light values, not a gamma-encoded picture."
+    },
+    "auto-watch-dir": {
+      "title": "The folder this automation watches",
+      "body": "Every automation is anchored to one folder. Two things can start a run over it: a file arriving (rave-mate watches the folder while the automation is enabled), or a schedule sweeping the folder's current contents on a timer.\n\nThe folder is also a safety boundary. The delete step only ever erases the recording its run started from, and refuses outright unless that file is inside this folder.\n\nSubfolders are not included. Both the arrival watcher and a scheduled sweep look only at the files sitting directly in this folder - a recording one level down never starts a run. Point it at the folder your recordings actually land in (the recorder's sets folder, or your OBS output folder)."
+    },
+    "auto-match-exts": {
+      "title": "Which file types to act on",
+      "body": "A comma-separated list of file extensions, e.g. \".wav, .flac\". Leave it empty to accept any file.\n\nCase and the leading dot do not matter - \"WAV\" and \".wav\" are both understood and stored the same way. This is matched against the file's extension only, never its contents, so a mislabelled file is taken at face value.\n\nWorth setting even when the folder only ever holds recordings: it keeps the chain off the stray sidecar files (cue sheets, .part/.tmp files a recorder writes while still running) that would otherwise trigger a pointless run."
+    },
+    "auto-match-pattern": {
+      "title": "Filename pattern (regular expression)",
+      "body": "An optional regular expression matched against the file name (not the full path). Leave it empty to accept any name.\n\nIt is a search, not a full-string match: \"live\" matches \"my-live-set.wav\". Anchor it if you mean the whole name - \"^set_\" matches names starting with \"set_\", \"\\.wav$\" only names ending in .wav.\n\nThe syntax is RE2 (Go's regexp). It deliberately has no backreferences or lookaround, which is what makes it immune to catastrophic backtracking - it cannot hang the daemon on a pathological name.\n\nIf the pattern does not compile it is treated as matching nothing, so the automation quietly stops firing rather than acting on the wrong files. The editor refuses to save an invalid pattern for that reason."
+    },
+    "auto-min-age": {
+      "title": "Minimum age (days)",
+      "body": "Only act on files at least this many days old, measured from the file's last-modified time. 0 turns the gate off.\n\nThis is built for scheduled sweeps - \"archive recordings older than 30 days\", \"delete raw sets after 90 days\". Pair it with a schedule and a move, copy or delete step.\n\nIt is almost never what you want on a file-arrival trigger: the watcher fires the moment a recording lands, and a file that was written seconds ago can never be days old, so any age gate above 0 makes a watch-triggered automation do nothing at all. Set an age here and the automation effectively becomes schedule-only.\n\nIf the file's timestamp cannot be read, the gate fails closed - the file is skipped rather than deleted or archived on a guess."
+    },
+    "auto-trim-silence": {
+      "title": "Trimming the silence off a recording",
+      "body": "Recordings usually start before the music does - the recorder is armed while you are still setting up. This step measures how long that silence lasts and re-encodes the file starting after it.\n\nThe threshold is the level, in dBFS, below which audio counts as silence. -50 dB is a good default: it ignores room tone, hiss and the noise floor of a mixer, but stops at the first real sound. Raise it (towards 0) if a noisy input keeps the trim from finding the start; lower it if a quiet intro is being cut off.\n\nMinimum silence is how long a quiet stretch must last before it counts. This is what stops the trim from stopping at a single click or a moment between tracks. 2 seconds is the default.\n\nTrim the start and Trim the end are independent, and both are on by default. Turn the end off to keep everything after the last track - useful when the crowd noise or an outro you want is quiet enough to read as silence. Turn the start off and only the tail is cut. With both off the step finds nothing to do and skips itself.\n\nIf the recording turns out to have no silence worth cutting at either end, the step skips rather than re-encoding the file for nothing, and the run is reported as partial.\n\nBecause the file has to be re-encoded to be cut, this step uses a transcode preset like the transcode step does. Leave the preset alone and it uses \"remux\", which cuts without touching the audio itself - no quality is lost."
+    },
+    "auto-rename-buffer": {
+      "title": "Matching a recording to a booked event",
+      "body": "To name a recording after the gig it came from, rave-mate looks up your booked rave.page events around the file's timestamp. This window is how far, in minutes, it is allowed to look.\n\nThe default is 180 minutes (3 hours), which is deliberately generous: a set recorded at 02:00 still belongs to the event that started at 23:00 the night before, and a file's timestamp is when the recording finished, not when the gig began.\n\nNarrow it if you play several venues in one night and the wrong event keeps winning. If no event matches at all, the rename still happens - the venue and event parts of the name fall back to \"no-event\" rather than leaving the file untouched."
+    },
+    "auto-rename-template": {
+      "title": "Filename template",
+      "body": "How the new file name is built. The default is {YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}.\n\nAvailable placeholders: {YYYY-MM-DD} the event date, {venueSlug} the venue, {eventSlug} the event, {originalBasename} the original file name without its extension, and {ext} the original extension including the dot.\n\nAlways end with {ext} unless you have a reason not to - an extension is how every other program on your machine knows what the file is. Forward slashes in the template create subfolders under the watch folder, so \"{YYYY-MM-DD}/{eventSlug}{ext}\" files each gig into its own dated folder.\n\nAnything not a placeholder is used literally. Characters a file name cannot contain are replaced automatically, so a venue called \"AC/DC Bar\" will not create a stray folder."
+    },
+    "auto-loudness": {
+      "title": "Overriding the preset loudness",
+      "body": "Turn this on to normalize loudness with the settings below instead of whatever the preset carries. Leave it off and the preset's own loudness settings apply, exactly as they are.\n\nThere is deliberately no \"force off\" here: this switch can only replace a preset's loudness settings, never disable them. If you want a step that does not normalize at all, point it at a preset that does not normalize.\n\nThe integrated target is the loudness the whole file is brought to, in LUFS. -14 is the streaming standard, -23 is the EBU R128 broadcast standard. The true-peak ceiling caps the loudest instantaneous sample in dBTP; -1 leaves headroom so that lossy encoders (which can overshoot on decode) do not clip.\n\n\"Only raise quiet tracks\" makes it a one-way move: a file already at or above the target is left alone instead of being turned down. Useful for a mixed archive where you want the quiet recordings lifted without touching the ones that are already right.\n\nNormalization is one whole-file volume change, not compression - the dynamics are untouched. It is measured in one pass and applied in a second, so it costs a full read of the file."
+    },
+    "auto-delete-action": {
+      "title": "The delete step",
+      "body": "Erases the recording the chain started from - the file the watcher picked up, the sweep found, or you handed to Run now. It is deliberately NOT whatever the step before it produced: a transcode output or an archived copy survives the delete.\n\nThat is what makes transcode + delete mean \"convert the recording, then drop the source\" - the MP3 stays, the WAV goes. Put a move in the middle and you get the shape most people want: transcode + move-to + delete converts the recording, files the new MP3 into your library folder, and clears the source WAV out of the watch folder. copy-to + delete is the archive shape: copy the recording somewhere else, then clear it out of the working folder. Paired with a minimum age and a schedule, that is a self-maintaining archive.\n\nWhat the editor will not save is a chain that relocates the recording ITSELF and then deletes it. move-to + delete is rejected: with nothing produced yet, the move takes the recording out of the watch folder, so the delete behind it has nothing left to erase and nothing in its place. Rename from event + delete is rejected for the same reason - the rename gives the recording a new path, and delete only ever erases the file the chain started from. copy-to + move-to + delete is rejected too: a copy does not move the working file, so the move still takes the original. The fix is either a producing step first (transcode or trim-silence - after it, a move relocates that NEW file and the delete clears the source behind it), or copy-to instead of move-to, which leaves the original in place for the delete to clear.\n\nA chain the editor accepts can still refuse at run time, because delete only erases the recording if a new file was actually produced to survive it. If trim-silence finds no silence worth cutting - an Icecast capture that starts on the first beat, or a set you already topped and tailed - it produces nothing, and the delete behind it refuses rather than leaving you with no copy at all: the recording stays and the run is reported partial. Skipping the transcode or trim yourself in a manual run does the same. A chain with no producing step at all - delete on its own, or copy-to + delete - is taken at its word: that is an explicit purge, and it runs.\n\nDelete must be the last step. It consumes the chain's input file, so any step after it would be working on a file it was never handed.\n\nThe delete is confined to this automation's watch folder, and the recording has to still be there when the step runs. If it is not - outside the folder, or already relocated by an earlier step - the delete refuses and the run is reported as failed rather than erasing something else instead.\n\nThis is permanent: the file does not go to the recycle bin, and there is no undo. A delete as the only step, on a watch trigger, erases every matching file the moment it appears - which is occasionally what you want, and otherwise a very bad afternoon."
+    },
+    "auto-sch-kind": {
+      "title": "What starts a scheduled run",
+      "body": "A schedule re-runs one automation over the files already sitting in its watch folder. Where the file-arrival trigger reacts to one new file, a schedule sweeps: every file directly in the folder that passes the match rules gets the full action chain, one after another. It does not look inside sub-folders.\n\nThere are four triggers. Every few minutes repeats on a fixed gap counted from the last run, so it drifts off the clock - 60 minutes starting at 14:37 fires at 15:37, not on the hour. Daily fires once a day at a wall-clock time. Cron is the escape hatch for everything else: specific weekdays, several times a day, one day a month. When the computer goes idle fires once each time you leave the machine alone long enough, and re-arms when you come back - the natural home for heavy transcodes.\n\nA missed fire is not made up later. If the computer is asleep or rave-mate is closed at the moment a daily or cron schedule was due, that run is simply skipped.\n\nThe schedule has its own Enabled switch, separate from the automation's, and both have to be on for anything to happen. Switching the automation off stops it entirely - arriving files and schedules alike. Switching only the schedule off leaves the automation reacting to arriving files, without the recurring sweep."
+    },
+    "auto-sch-interval": {
+      "title": "Every N minutes",
+      "body": "How long to wait between sweeps, in minutes. The gap is counted from the last run rather than the clock: 60 here means \"an hour after the last one\", not \"on the hour\". If you need it on the hour, use a daily or a cron trigger instead.\n\nLeft blank this becomes 60. It is deliberately not left at 0 - the scheduler reads 0 as \"as fast as possible\" and would sweep the folder every single minute.\n\nSweeps do not stack up. A tick that arrives while the previous sweep is still working is dropped, so a chain slower than its interval just means fewer sweeps, never two at once over the same files. Even so, prefer a gap comfortably longer than the work takes - a transcode chain over a folder of long recordings can outlast a five-minute interval easily."
+    },
+    "auto-sch-cron": {
+      "title": "Cron expressions",
+      "body": "Five fields separated by spaces: minute, hour, day-of-month, month, day-of-week. Each is either * (every value), a single number, a list (1,15), a range (9-17), or a step (*/15, or 9-17/2).\n\nExamples: */15 * * * * every 15 minutes · 0 9 * * 1-5 at 09:00 on weekdays · 30 2 1 * * at 02:30 on the first of the month · 0 4 * * 0 at 04:00 on Sundays.\n\nRanges are minute 0-59, hour 0-23 (there is no AM/PM), day-of-month 1-31, month 1-12, and day-of-week 0-6 from Sunday, where 7 also means Sunday. Names like MON or JAN are not supported - use numbers. Neither are the ?, L and # extensions some other cron dialects have.\n\nThe classic trap: when you restrict BOTH day-of-month and day-of-week, a run fires if EITHER matches. 0 0 1 * 1 means \"the 1st, and also every Monday\" - not \"the 1st, but only if it is a Monday\".\n\nResolution is one minute; seconds cannot be expressed. The line under the field is the same parser that runs the schedule, so if it says the expression is valid, that is exactly how it will be read."
+    },
+    "auto-sch-idle": {
+      "title": "Firing when the computer is idle",
+      "body": "How long, in minutes, the computer has to go untouched before this schedule fires. Idle means no keyboard or mouse input at all - a long video counts as idle, a spreadsheet you keep clicking does not.\n\nIt fires once per idle period, not repeatedly. Crossing the threshold starts the run, and it only re-arms after you come back and use the machine again - so a computer left alone all night runs the chain once, not every ten minutes until morning.\n\nLeft blank this becomes 10. It is deliberately not left at 0: the scheduler skips an idle schedule that has no threshold, so it would silently never fire.\n\nThis is the natural home for the expensive chains - transcoding a night's recordings while you are away costs you nothing. Idle detection reads the system's last-input time, which is Windows-only; on other platforms an idle trigger never fires."
+    },
+    "auto-sch-require-idle": {
+      "title": "Require idle (minutes)",
+      "body": "A condition layered on top of whatever trigger you picked: when the trigger fires, only actually run if the computer has been idle at least this long. 0 turns the condition off.\n\nThis is how you keep a schedule off your machine while you are working. \"Every 30 minutes, but only if I have been away for 10\" waits for a break instead of fighting you for CPU mid-set.\n\nIt is a gate, not a trigger: a blocked fire is skipped, never queued. It does not run late when you finally step away - the next tick has to come round again. Pair it with a short interval if you want it to catch the first opportunity, or use the idle trigger if \"when I leave\" is what you actually mean.\n\nIdle detection is Windows-only. Where the system cannot report it this gate is ignored and the schedule fires as normal."
+    },
+    "auto-sch-apps": {
+      "title": "Gating a schedule on running apps",
+      "body": "Two optional comma-separated lists of application names. Require: every app named there must be running or the fire is skipped. Skip: if any app named there is running, the fire is skipped. Both are checked against the processes alive at the moment the schedule fires.\n\nThe skip list is the useful one. \"Skip while Traktor or OBS is running\" keeps a heavy transcode from stealing CPU in the middle of a set or a stream - the single best reason to set a condition at all.\n\nNames match case-insensitively, with or without the .exe: Traktor, traktor and Traktor.exe all match the same process. Use the executable's name as it appears in Task Manager, not the window title or the product name on the box.\n\nLike the idle gate these are skips, not queues: a blocked fire never happens, it does not wait for the app to close. Process listing is Windows-only; elsewhere these lists are ignored and the schedule fires as normal."
+    },
+    "auto-run-now": {
+      "title": "Running an automation by hand",
+      "body": "Runs this automation's action chain once, right now, over one file you pick - the same chain, steps and settings the watcher and the schedules use.\n\nThe difference is what it does NOT do: run now skips the match rules entirely. Extension, minimum size, minimum age and the filename pattern are never consulted, so the chain acts on exactly the file you point it at - even one it would never have picked up on its own. That is the point, and it is how you test a chain or catch a file that arrived while the automation was off. It also means those rules are not protecting you here.\n\nThe file does not have to live in the watch folder. One step does care: delete refuses to erase anything outside it.\n\nThe run is recorded under Recent runs like any other, marked \"manual\". A long chain keeps going even if you close this dialog."
+    },
+    "mp-loudness": {
+      "title": "Normalizing the exported cut",
+      "body": "Turn this on to normalize the loudness of THIS export with the settings below, instead of whatever the encode preset above carries. It changes the exported file only - the preset itself is not touched, and neither is your recording.\n\nLeave it off and the preset's own loudness settings apply, exactly as they are. There is deliberately no \"force off\" here: this switch can only replace a preset's loudness settings, never disable them. If you want an export that does not normalize at all, pick a preset that does not normalize.\n\nNormalizing rewrites the audio samples, so it needs an audio re-encode. The default Lossless Remux preset copies the audio untouched - with it selected, nothing will be normalized. Pick an encoding preset (Audio Only Opus/AAC/FLAC, or a video preset with an audio codec).\n\nThe integrated target is the loudness the whole cut is brought to, in LUFS. -14 is the streaming standard (Spotify, YouTube, Tidal, Amazon), -16 Apple Music, -23 the EBU R128 broadcast standard; club and DJ-pool masters typically sit around -8. The true-peak ceiling caps the loudest instantaneous sample in dBTP; -1 leaves headroom so lossy encoders (which can overshoot on decode) do not clip.\n\n\"Only raise quiet tracks\" makes it a one-way move: a cut already at or above the target is left alone instead of being turned down.\n\nThis is one whole-file volume change, not compression - the mix and the transients are untouched. It is measured in one pass and applied in a second, so it costs a full read of the exported range on top of the encode. When you export an aligned audio + video pair, each half carries its own override - set both if you want both normalized."
     }
   },
   "library": {
@@ -648,7 +841,9 @@
       "truePeak": "True-peak ceiling (dBTP)",
       "videoCodec": "Video codec",
       "demotedNote": "Collection & playlist workflows re-encode whole folders or playlists into a duplicate directory (Browse toolbar / playlist view) — that keeps your originals organized. Need a one-off conversion of just this file? Open the encoder below.",
-      "show": "Show encoder for this file"
+      "show": "Show encoder for this file",
+      "normalizeOverride": "Override the preset loudness",
+      "loudNeedsReencode": "This preset copies the audio, so normalization won't run - it rewrites the samples and needs a re-encode. Pick a preset with a real audio codec (not copy/none)."
     },
     "favorites": {
       "desc": "Pinned folders - open in Browse. Pin the current folder from the Browse toolbar.",
@@ -1904,7 +2099,8 @@
     "xferTo": "{arrow} {name} - to {peer}"
   },
   "picker": {
-    "selectFolder": "Select a folder"
+    "selectFolder": "Select a folder",
+    "stale": "Nothing was changed. The form that opened this dialog is no longer on screen, so the path you picked has nowhere to go — applying it to whatever replaced it would edit the wrong thing. Re-open the form and browse again."
   },
   "placeholder": {
     "comingSoon": "Coming soon - the {name} controls will render here.",
@@ -1984,7 +2180,9 @@
       "video": "Video",
       "videoOffsetField": "Video offset ([-]mm:ss.s)",
       "videoOnly": "Video only",
-      "waveUnavailable": "Waveform unavailable - "
+      "waveUnavailable": "Waveform unavailable - ",
+      "buildingSeekTable": "Building seek table…",
+      "volume": "Volume"
     },
     "openExternally": "Open externally",
     "pause": "Pause",
@@ -2016,7 +2214,8 @@
     },
     "trimEdit": "Trim / edit",
     "more": "More",
-    "trimEditSub": "Cut a section or export a trimmed copy"
+    "trimEditSub": "Cut a section or export a trimmed copy",
+    "loadingAudio": "Loading audio…"
   },
   "publish": {
     "audio": "audio",
@@ -2088,7 +2287,23 @@
       "deleteFail": "Delete failed: {err}",
       "exportFail": "Export failed: {err}",
       "deleteConfirm": "Delete \"{name}\" on the paired instance? This can't be undone. The capture files stay on that computer."
-    }
+    },
+    "renameSet": "Rename set",
+    "setName": "Set name",
+    "toast": {
+      "renamed": "Set renamed",
+      "renameFailed": "Couldn't rename the set: ",
+      "deleteFailed": "Couldn't delete the set: {err}",
+      "deleted": "Set deleted",
+      "fileDeleteFailed": "Couldn't delete {file}: {err}"
+    },
+    "del": {
+      "title": "Delete set",
+      "confirm": "Delete \"{name}\"? This can't be undone.",
+      "do": "Delete set",
+      "doFiles": "Delete set + {n} file(s)"
+    },
+    "renameDots": "Rename…"
   },
   "settings": {
     "body": {

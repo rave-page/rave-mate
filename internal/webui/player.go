@@ -38,8 +38,9 @@ func (u *UI) mpInnerHTML(t mpSt) string {
 			html.EscapeString(t.name) + `</div>`)
 	}
 
-	// embedded video (when the set has a video half / is a video file)
-	b.WriteString(u.mpVideoHTML(t))
+	// embedded video (when the set has a video half / is a video file); own patch target so
+	// the async fMP4-index resolve can swap plain-src → MSE before playback starts
+	b.WriteString(`<div id=mp-` + host + `-vid>` + u.mpVideoHTML(t) + `</div>`)
 
 	// wavebox: patched SVG inside, interaction lanes on top (lanes stay OUTSIDE the
 	// patched region so pointer capture survives repaints)
@@ -120,14 +121,27 @@ func (u *UI) mpVideoHTML(t mpSt) string {
 	if t.dual() && t.active == 0 { // audio recording is the source - video is a silent preview
 		muted = " muted"
 	}
-	// preload=none: load NOTHING on mount - a large OBS mp4 (often no faststart, moov at EOF)
-	// would otherwise make WebView2 scan the whole multi-GB file just to read metadata. The
-	// loopback server is Range-capable (mediahttp.go http.ServeContent), so playback/seek buffer
-	// progressively on demand instead of pulling the whole file.
-	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video src=` + attrQ(url) +
+	// Source strategy: a fragmented MP4 (OBS recording) streams via MSE (data-mse; shell.go
+	// __mse feeds init + only the fragments around the playhead using the mp4frag index) -
+	// Chromium's own demuxer would range-scan every moof (~1 GB / 30 s+ on an hour-long set)
+	// before playing or seeking. Anything else: plain src with preload=none - load NOTHING on
+	// mount; the loopback server is Range-capable (mediahttp.go http.ServeContent), so classic
+	// MP4s buffer progressively on demand. MSE setup failure falls back to plain src in JS.
+	src := ` src=` + attrQ(url)
+	if t.media[vi].fragOK {
+		if iu := u.mpIndexURL(t.media[vi].path); iu != "" {
+			src = ` data-mse=` + attrQ(iu) + ` data-mse-src=` + attrQ(url)
+		}
+	}
+	vol := 1.0
+	if u.svc.Cfg != nil {
+		vol = u.svc.Cfg.Features.Player.VolumeOr()
+	}
+	onmeta := ev + fmt.Sprintf(`;this.volume=%.3f;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`, vol)
+	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+host) + ` class=mp-video` + src +
 		` preload=none playsinline` + muted +
 		` ontimeupdate=` + attrQ(ev) + ` onplay=` + attrQ(ev) + ` onpause=` + attrQ(ev) +
-		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(ev+`;if(this.currentTime===0){try{this.currentTime=0.05}catch(e){}}`) + ` onerror=` + attrQ(onerr) +
+		` onended=` + attrQ(ev) + ` onloadedmetadata=` + attrQ(onmeta) + ` onerror=` + attrQ(onerr) +
 		`></video></div>`
 }
 
@@ -142,7 +156,11 @@ func (u *UI) mpWaveInner(t mpSt) string {
 	}
 	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov))
 	if m := t.activeMedia(); m != nil {
-		b.WriteString(`<div class=wchips>` + mpEncChip(m) + mpLoudChip(m) + `</div>`)
+		seekChip := ""
+		if m.seekTabLoading {
+			seekChip = `<span class="wchip dim">` + html.EscapeString(i18n.T("player.label.buildingSeekTable")) + `</span>`
+		}
+		b.WriteString(`<div class=wchips>` + mpEncChip(m) + mpLoudChip(m) + seekChip + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	for i := range t.media {
@@ -662,6 +680,8 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 	tr := u.mpEngineState(&t, m)
 	playLbl, playVar := "▶ "+i18n.T("player.play"), "go"
 	switch {
+	case t.audLoading && m.kind == "audio" && !tr.loaded:
+		playLbl, playVar = "⏳ "+i18n.T("player.loadingAudio"), "outline"
 	case tr.loaded && tr.playing:
 		playLbl, playVar = "⏸ "+i18n.T("player.pause"), "outline"
 	case tr.loaded && tr.paused:
@@ -735,6 +755,12 @@ func (u *UI) mpTransportHTML(t mpSt) string {
 		frac = clampF((p-lo)/ln, 0, 1)
 	}
 	b.WriteString(slider(i18n.T("player.seek"), "mp-seek:"+host, 0, 1000, 1, math.Round(1000*frac), ""))
+	// global volume (persisted config; one value across every playback surface + restarts)
+	vol := 1.0
+	if u.svc.Cfg != nil {
+		vol = u.svc.Cfg.Features.Player.VolumeOr()
+	}
+	b.WriteString(`<div class=mp-volrow>` + slider(i18n.T("player.label.volume"), "mp-vol:"+host, 0, 100, 1, math.Round(vol*100), "%") + `</div>`)
 	return b.String()
 }
 
@@ -934,6 +960,15 @@ func (u *UI) mpExportHTML(t mpSt) string {
 			`<span class=mp-outfield>` + field(i18n.T("player.label.outputFile"), fmt.Sprintf("mp-outpath:%s\x1f%d", host, i), out, "text") + `</span>` +
 			btn("…", "ghost", "pick-save:"+mpExt(m.path, cur)+":mp-outpath:"+host+"\x1f"+fmt.Sprint(i), "") +
 			`</div>`)
+		// per-media loudness override of the chosen preset (the shared block, components.go)
+		b.WriteString(loudnessFields(loudnessOpts{
+			act:       func(f string) string { return fmt.Sprintf("mp-loud:%s\x1f%d\x1f%s", host, i, f) },
+			toggleLbl: i18n.T("library.enc.normalizeOverride"),
+			topic:     "mp-loudness",
+			vals:      m.loudOv,
+			override:  true,
+			preset:    &cur,
+		}))
 	}
 
 	if t.exporting {
