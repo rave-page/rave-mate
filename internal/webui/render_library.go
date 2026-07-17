@@ -1048,6 +1048,13 @@ func (u *UI) libRebuildPlFilter() {
 	}
 	s.mu.Lock()
 	s.collPlSet, s.collPlNames = set, names
+	if len(want) > 0 { // facet narrowed the view: checked rows outside it would silently
+		for p := range s.collSel { // ride into batch actions - keep the selection visible-only
+			if !set[p] {
+				delete(s.collSel, p)
+			}
+		}
+	}
 	s.mu.Unlock()
 }
 
