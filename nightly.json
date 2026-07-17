@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b15142b",
-  "build": 110,
-  "commit": "b15142b",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-110-20260717-b15142b.exe",
-  "sha256": "0f72103648b5a726f190ed6b86e739913e20907e0f48b1b1890dff3bde6b61df",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-110-20260717-b15142b.exe",
-  "installer_sha256": "93e6b8381f58610b1a78c70b39886374bd7cc37cd197399ffaed54da2bbaf950",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-110-20260717-b15142b",
-  "linux_sha256": "2ef6240c0cc049df7fa63aee3acf710a18e04fd5026e9df8a0bb14c4ecc8c99a",
+  "version": "nightly-b8a76ea",
+  "build": 111,
+  "commit": "b8a76ea",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-111-20260717-b8a76ea.exe",
+  "sha256": "1aad15a3cd15ec4ef1ac85f9e9cf48f4f626153e1630b07da9a3b0fb632243fb",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-111-20260717-b8a76ea.exe",
+  "installer_sha256": "5d56a236cac525525f11ca9d2c485b8b0d726bfdbf2756f8b8501fb47134ab39",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-111-20260717-b8a76ea",
+  "linux_sha256": "00e91b4deb20ce33b376a55efe91a964fd799f46068366a3a9c7db7ce3f79565",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-17T14:47:59Z",
-  "notes": "feat(playsync): upload spectral bands with waveforms (web layered waves)"
+  "released": "2026-07-17T16:49:48Z",
+  "notes": "feat(cueedit): per-software cue modes, batch actions, defaults + pattern manager"
 }
