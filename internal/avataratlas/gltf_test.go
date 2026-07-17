@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -349,6 +350,134 @@ func TestParseRejects(t *testing.T) {
 	// Not a GLB.
 	if _, err := ParseGLB([]byte("not a glb at all"), ""); err == nil {
 		t.Error("garbage accepted as GLB")
+	}
+}
+
+// TestParseMalformedRejects: crafted malformed buffer/accessor layouts must reject with a
+// clear error at parse time, never panic (package contract).
+func TestParseMalformedRejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(raw map[string]any)
+		wantSub string
+	}{
+		{
+			// off+len passes the overrun check when len is negative; the slice would panic.
+			name: "negative bufferView byteLength",
+			mutate: func(raw map[string]any) {
+				bv := raw["bufferViews"].([]any)[0].(map[string]any)
+				bv["byteOffset"] = 10
+				bv["byteLength"] = -5
+			},
+			wantSub: "negative byteOffset/byteLength",
+		},
+		{
+			// negative stride shrinks the overrun bound; element reads would panic.
+			name: "negative byteStride",
+			mutate: func(raw map[string]any) {
+				raw["bufferViews"].([]any)[0].(map[string]any)["byteStride"] = -12
+			},
+			wantSub: "byteStride -12 < element size 12",
+		},
+		{
+			name: "byteStride below element size",
+			mutate: func(raw map[string]any) {
+				raw["bufferViews"].([]any)[0].(map[string]any)["byteStride"] = 4
+			},
+			wantSub: "byteStride 4 < element size 12",
+		},
+		{
+			// indices are range-checked against POSITION only; a shorter attribute
+			// would panic at sampling.
+			name: "TEXCOORD_0 shorter than POSITION",
+			mutate: func(raw map[string]any) {
+				raw["accessors"].([]any)[1].(map[string]any)["count"] = 4
+			},
+			wantSub: "TEXCOORD_0 count 4 != POSITION count 8",
+		},
+		{
+			name: "JOINTS_0 shorter than POSITION",
+			mutate: func(raw map[string]any) {
+				raw["accessors"].([]any)[2].(map[string]any)["count"] = 4
+			},
+			wantSub: "JOINTS_0 count 4 != POSITION count 8",
+		},
+		{
+			name: "WEIGHTS_0 shorter than POSITION",
+			mutate: func(raw map[string]any) {
+				raw["accessors"].([]any)[3].(map[string]any)["count"] = 4
+			},
+			wantSub: "WEIGHTS_0 count 4 != POSITION count 8",
+		},
+	}
+	glbJSON, bin := splitGLB(t, buildRig(t, rigOpts{}, ""))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw map[string]any
+			if err := json.Unmarshal(glbJSON, &raw); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(raw)
+			mut, err := json.Marshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = ParseGLTF(mut, bin, ""); err == nil {
+				t.Fatal("malformed input accepted, want reject")
+			} else if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error %q, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+// TestParseVRM1DuplicateNodeDeterministic: spec-violating duplicate node refs in the VRM 1.0
+// humanBones map (a Go map - randomized iteration) must resolve deterministically across
+// parses (sorted bone-name order, last wins), be counted, and yield identical atlas bytes.
+func TestParseVRM1DuplicateNodeDeterministic(t *testing.T) {
+	glbJSON, bin := splitGLB(t, buildRig(t, rigOpts{vrm1: true}, ""))
+	var raw map[string]any
+	if err := json.Unmarshal(glbJSON, &raw); err != nil {
+		t.Fatal(err)
+	}
+	hb := raw["extensions"].(map[string]any)["VRMC_vrm"].(map[string]any)["humanoid"].(map[string]any)["humanBones"].(map[string]any)
+	hb["chest"] = map[string]any{"node": 1} // duplicate: spine already -> node 1
+	mut, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// sorted resolution: "chest" < "spine", spine wins node 1.
+	wantSlots := map[int]int{0: 0, 1: 1}
+	var wantAtlas []byte
+	for run := 0; run < 10; run++ {
+		doc, err := ParseGLTF(mut, bin, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.HumanoidDupNodes != 1 {
+			t.Fatalf("run %d: HumanoidDupNodes %d, want 1", run, doc.HumanoidDupNodes)
+		}
+		if !reflect.DeepEqual(doc.NodeSlot, wantSlots) {
+			t.Fatalf("run %d: NodeSlot %v, want %v", run, doc.NodeSlot, wantSlots)
+		}
+		res, err := Sample(doc, 64, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		atlas, err := BuildAtlas(res.Points, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if err := atlas.EncodePNG(&buf); err != nil {
+			t.Fatal(err)
+		}
+		if run == 0 {
+			wantAtlas = buf.Bytes()
+		} else if !bytes.Equal(buf.Bytes(), wantAtlas) {
+			t.Fatalf("run %d: atlas bytes drifted", run)
+		}
 	}
 }
 

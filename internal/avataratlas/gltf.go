@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -103,6 +104,10 @@ type Document struct {
 	NodeSlot map[int]int
 	// VRMVersion is "0" or "1" ("" when the file had no VRM humanoid extension).
 	VRMVersion string
+	// HumanoidDupNodes counts spec-violating duplicate node references in the humanoid map
+	// (two bone names -> same node). Resolution is deterministic (sorted bone-name order,
+	// last wins); the anomaly is surfaced here for the CLI report.
+	HumanoidDupNodes int
 }
 
 // ── raw JSON structs ─────────────────────────────────────────────────────────
@@ -395,8 +400,19 @@ func (p *parser) humanoid(doc *Document) error {
 		if err := json.Unmarshal(raw, &v); err != nil {
 			return fmt.Errorf("gltf: VRMC_vrm extension: %w", err)
 		}
-		for name, hb := range v.Humanoid.HumanBones {
+		// Go map iteration is randomized; iterate bone names sorted so spec-violating
+		// duplicate node references resolve deterministically (last sorted name wins).
+		names := make([]string, 0, len(v.Humanoid.HumanBones))
+		for name := range v.Humanoid.HumanBones {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			hb := v.Humanoid.HumanBones[name]
 			if slot, ok := SlotByVRMName(name); ok && hb.Node >= 0 && hb.Node < len(doc.Nodes) {
+				if _, dup := doc.NodeSlot[hb.Node]; dup {
+					doc.HumanoidDupNodes++
+				}
 				doc.NodeSlot[hb.Node] = slot
 			}
 		}
@@ -410,6 +426,9 @@ func (p *parser) humanoid(doc *Document) error {
 		}
 		for _, hb := range v.Humanoid.HumanBones {
 			if slot, ok := SlotByVRMName(hb.Bone); ok && hb.Node >= 0 && hb.Node < len(doc.Nodes) {
+				if _, dup := doc.NodeSlot[hb.Node]; dup {
+					doc.HumanoidDupNodes++
+				}
 				doc.NodeSlot[hb.Node] = slot
 			}
 		}
@@ -449,6 +468,17 @@ func (p *parser) primitive(jp jPrimitive) (Primitive, error) {
 		if prim.Weights, err = p.vec4Weights(wIdx); err != nil {
 			return Primitive{}, fmt.Errorf("WEIGHTS_0: %w", err)
 		}
+	}
+	// spec: all attribute accessors of a primitive have the same count. Indices are only
+	// range-checked against POSITION; a shorter attribute would panic at sampling.
+	if prim.UV != nil && len(prim.UV) != len(prim.Pos) {
+		return Primitive{}, fmt.Errorf("TEXCOORD_0 count %d != POSITION count %d", len(prim.UV), len(prim.Pos))
+	}
+	if prim.Joints != nil && len(prim.Joints) != len(prim.Pos) {
+		return Primitive{}, fmt.Errorf("JOINTS_0 count %d != POSITION count %d", len(prim.Joints), len(prim.Pos))
+	}
+	if prim.Weights != nil && len(prim.Weights) != len(prim.Pos) {
+		return Primitive{}, fmt.Errorf("WEIGHTS_0 count %d != POSITION count %d", len(prim.Weights), len(prim.Pos))
 	}
 	if jp.Indices != nil {
 		if prim.Indices, err = p.scalarIndices(*jp.Indices); err != nil {
@@ -523,7 +553,10 @@ func (p *parser) view(i int) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	if jv.ByteOffset < 0 || jv.ByteOffset+jv.ByteLength > len(buf) {
+	if jv.ByteOffset < 0 || jv.ByteLength < 0 {
+		return nil, 0, fmt.Errorf("bufferView %d: negative byteOffset/byteLength (%d/%d)", i, jv.ByteOffset, jv.ByteLength)
+	}
+	if jv.ByteOffset+jv.ByteLength > len(buf) {
 		return nil, 0, fmt.Errorf("bufferView %d overruns buffer", i)
 	}
 	stride := 0
@@ -576,6 +609,11 @@ func (p *parser) accessor(i, wantComps int, wantTypes ...int) (acc jAccessor, da
 		return acc, nil, 0, err
 	}
 	elem := compSize(acc.ComponentType) * wantComps
+	// spec: byteStride is 4..252 and >= element size; 0/absent = tightly packed. A stride
+	// below elem (incl. negative) would defeat the overrun check and panic element reads.
+	if vstride != 0 && vstride < elem {
+		return acc, nil, 0, fmt.Errorf("accessor %d: bufferView byteStride %d < element size %d", i, vstride, elem)
+	}
 	stride = vstride
 	if stride == 0 {
 		stride = elem

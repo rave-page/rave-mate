@@ -51,6 +51,9 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	if doc.HumanoidDupNodes > 0 {
+		fmt.Fprintf(os.Stderr, "avatarscan: warning: humanoid map references %d node(s) from multiple bones (spec violation; resolved deterministically)\n", doc.HumanoidDupNodes)
+	}
 	res, err := avataratlas.Sample(doc, *points, *seed)
 	if err != nil {
 		fatal(err)
@@ -102,6 +105,7 @@ type reportOut struct {
 	Emitted      int            `json:"emitted"`
 	Dropped      int            `json:"dropped"`
 	SkippedPrims int            `json:"skippedPrimitives"`
+	HumanoidDups int            `json:"humanoidDupNodes"` // spec-violating duplicate node refs in the VRM humanoid map
 	SlotIndex    int            `json:"slotIndex"`
 	BoneCount    int            `json:"boneCount"`
 	Width        int            `json:"width"`
@@ -114,7 +118,8 @@ func buildReport(in, out string, seed int64, doc *avataratlas.Document, res *ava
 	r := reportOut{
 		Input: in, Output: out, VRMVersion: doc.VRMVersion, Seed: seed,
 		Requested: res.Requested, Emitted: len(atlas.Points), Dropped: res.Dropped,
-		SkippedPrims: res.SkippedPrims, SlotIndex: atlas.SlotIndex, BoneCount: atlas.BoneCount,
+		SkippedPrims: res.SkippedPrims, HumanoidDups: doc.HumanoidDupNodes,
+		SlotIndex: atlas.SlotIndex, BoneCount: atlas.BoneCount,
 		Width: avataratlas.Width, Height: avataratlas.AtlasHeight(len(atlas.Points)),
 		PerBone: map[string]int{},
 	}
