@@ -350,11 +350,15 @@ func (u *UI) wsPatchGitHub() {
 
 // wsVrcReady reports VRChat linked; toasts + returns false otherwise.
 func (u *UI) wsVrcReady() bool {
-	if u.svc.Vrchat == nil || !u.svc.Vrchat.State().LoggedIn {
-		u.toast("Link VRChat first (Settings ▸ Integrations)")
-		return false
+	if u.svc.Vrchat != nil && u.svc.Vrchat.State().LoggedIn {
+		return true
 	}
-	return true
+	if _, _, ok := u.wsVrcFedCached(); ok {
+		return true // a paired instance serves the link (vrchat federation)
+	}
+	u.wsVrcFedKick() // probe peers off-thread; ready on the next click if one is linked
+	u.toast("Link VRChat first (Settings ▸ Integrations) - or pair an instance that has it linked")
+	return false
 }
 
 func (u *UI) wsOpenFriendPicker(listID string) {
@@ -368,11 +372,18 @@ func (u *UI) wsOpenFriendPicker(listID string) {
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		cli := u.svc.Vrchat.Client()
+		src, ok := u.wsVrcSource(ctx)
+		if !ok {
+			wsState.mu.Lock()
+			wsState.friendsLoading = false
+			wsState.mu.Unlock()
+			u.eval("window.__patch('world-fr-list'," + jsQuote(hint("bad", "VRChat unavailable - no local link and no linked peer")) + ")")
+			return
+		}
 		var got []vrchat.Friend
 		for _, offline := range []bool{false, true} {
 			for offset := 0; offset < 500; offset += 100 {
-				page, err := cli.Friends(ctx, offset, 100, offline)
+				page, err := src.Friends(ctx, offset, 100, offline)
 				if err != nil || len(page) == 0 {
 					break
 				}
@@ -401,8 +412,13 @@ func (u *UI) wsOpenGroupPicker(listID string) {
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		got, err := u.svc.Vrchat.Client().UserGroups(ctx, u.svc.Vrchat.CurrentUserID())
-		u.logErr("vrchat groups", err)
+		var got []vrchat.Group
+		src, ok := u.wsVrcSource(ctx)
+		if ok {
+			var err error
+			got, err = src.OwnGroups(ctx)
+			u.logErr("vrchat groups", err)
+		}
 		wsState.mu.Lock()
 		wsState.mygroups, wsState.groupsLoading = got, false
 		wsState.mu.Unlock()
@@ -417,7 +433,12 @@ func (u *UI) wsGroupSearch(q string) {
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		got, err := u.svc.Vrchat.Client().SearchGroups(ctx, q, 0, 30)
+		src, ok := u.wsVrcSource(ctx)
+		if !ok {
+			u.toast("VRChat unavailable - no local link and no linked peer")
+			return
+		}
+		got, err := src.SearchGroups(ctx, q, 0, 30)
 		if err != nil {
 			u.toast("Search failed: " + err.Error())
 			return
@@ -443,7 +464,12 @@ func (u *UI) wsOpenRolePicker(grp groupRef) {
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		roles, err := u.svc.Vrchat.Client().GroupRoles(ctx, grp.ID)
+		src, ok := u.wsVrcSource(ctx)
+		if !ok {
+			u.eval("window.__patch('world-role-list'," + jsQuote(hint("bad", "VRChat unavailable - no local link and no linked peer")) + ")")
+			return
+		}
+		roles, err := src.GroupRoles(ctx, grp.ID)
 		if err != nil {
 			u.eval("window.__patch('world-role-list'," + jsQuote(hint("bad", "Could not load roles: "+err.Error())) + ")")
 			return

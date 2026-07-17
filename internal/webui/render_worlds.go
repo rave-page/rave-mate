@@ -37,15 +37,26 @@ func (u *UI) renderWorlds() string {
 }
 
 // worldsLinkHintInner reports what still needs linking (GitHub / VRChat) for full function.
+// VRChat counts as linked when a PAIRED instance serves it (federation) - render reads the
+// memo only; a cold memo kicks an off-thread probe and the 1 Hz tick repaints this hint.
 func (u *UI) worldsLinkHintInner() string {
 	var missing []string
 	if u.svc.GitHub == nil || !u.svc.GitHub.SignedIn() {
 		missing = append(missing, "GitHub")
 	}
+	viaPeer := ""
 	if u.svc.Vrchat == nil || !u.svc.Vrchat.State().LoggedIn {
-		missing = append(missing, "VRChat (friends browser + group-role expansion)")
+		if _, name, ok := u.wsVrcFedCached(); ok {
+			viaPeer = name
+		} else {
+			u.wsVrcFedKick()
+			missing = append(missing, "VRChat (friends browser + group-role expansion)")
+		}
 	}
 	if len(missing) == 0 {
+		if viaPeer != "" {
+			return hint("ok", "All links connected - VRChat via peer "+viaPeer)
+		}
 		return hint("ok", "All links connected - ready to publish")
 	}
 	return hint("warn", "Link missing: "+strings.Join(missing, " · "))

@@ -7,6 +7,7 @@ import (
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/transcode"
+	"rave.page/mate/internal/vrchat"
 )
 
 // Client is a typed view of one paired peer over the endpoint. All calls block on a network
@@ -329,4 +330,36 @@ func (c *Client) SelfUpdate(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return r.Text, nil
+}
+
+// ── vrchat federation ─────────────────────────────────────────────────────────
+
+// VrcStatus reports whether the peer holds a live VRChat session.
+func (c *Client) VrcStatus(ctx context.Context) (VrcStatus, error) {
+	return Do[VrcStatus](ctx, c.e, c.nodeID, MethodVrcStatus, nil)
+}
+
+// VrcFriends pages the peer's VRChat friends list.
+func (c *Client) VrcFriends(ctx context.Context, offset, n int, offline bool) ([]vrchat.Friend, error) {
+	return Do[[]vrchat.Friend](ctx, c.e, c.nodeID, MethodVrcFriends, VrcFriendsParams{Offset: offset, N: n, Offline: offline})
+}
+
+// VrcUserGroups lists the groups of the peer's linked VRChat account.
+func (c *Client) VrcUserGroups(ctx context.Context) ([]vrchat.Group, error) {
+	return Do[[]vrchat.Group](ctx, c.e, c.nodeID, MethodVrcUserGroups, nil)
+}
+
+// VrcSearchGroups searches groups through the peer's session.
+func (c *Client) VrcSearchGroups(ctx context.Context, query string, offset, n int) ([]vrchat.Group, error) {
+	return Do[[]vrchat.Group](ctx, c.e, c.nodeID, MethodVrcSearchGroups, VrcSearchGroupsParams{Query: query, Offset: offset, N: n})
+}
+
+// VrcGroupRoles lists a group's roles through the peer's session.
+func (c *Client) VrcGroupRoles(ctx context.Context, groupID string) ([]vrchat.GroupRole, error) {
+	return Do[[]vrchat.GroupRole](ctx, c.e, c.nodeID, MethodVrcGroupRoles, VrcGroupRolesParams{GroupID: groupID})
+}
+
+// VrcGroupMembers pages a group's members through the peer's session (roleID "" = all).
+func (c *Client) VrcGroupMembers(ctx context.Context, groupID, roleID string, offset, n int) ([]vrchat.GroupMember, error) {
+	return Do[[]vrchat.GroupMember](ctx, c.e, c.nodeID, MethodVrcGroupMembers, VrcGroupMembersParams{GroupID: groupID, RoleID: roleID, Offset: offset, N: n})
 }

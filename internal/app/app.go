@@ -800,6 +800,11 @@ func run(parent context.Context, serviceMode bool) error {
 	// runtime seq. Survives restarts; a lost ledger risks at most a one-time reset (gistseq doc).
 	gistSeqPath, _ := config.DataPath("worldsync_seq.json")
 	gistSeq := gistseq.Open(gistSeqPath)
+	// vrchat federation fallback for group-role expansion: serves through a paired peer's
+	// link when this instance is unlinked. The remotectl endpoint doesn't exist yet - it's
+	// late-bound below (nil endpoint = "peer control unavailable" until wired).
+	var remoteCtlRef *remotectl.Endpoint
+	vrcFed := &peerVrcMembers{endpoint: func() *remotectl.Endpoint { return remoteCtlRef }, peers: peerMgr}
 	worldSync := vrcperm.New(vrcperm.Deps{
 		Log:  log,
 		Cfg:  func() *config.WorldSyncFeature { return &cfg.Features.WorldSync },
@@ -820,10 +825,12 @@ func run(parent context.Context, serviceMode bool) error {
 		},
 		Owner: ghAuth.Login,
 		Members: func() vrcperm.MemberSource {
-			if !vrcMgr.State().LoggedIn {
-				return nil
+			if vrcMgr.State().LoggedIn {
+				return vrcMgr.Client()
 			}
-			return vrcMgr.Client()
+			// vrchat federation: expansion keeps working when a PAIRED instance holds
+			// the link (endpoint late-bound; nil until remotectl is wired below).
+			return vrcFed
 		},
 		Events: func(ectx context.Context) []vrcperm.Event {
 			evs, err := apiC.ListEvents(ectx, authMgr.Token(), "", "", 50)
@@ -1170,8 +1177,12 @@ func run(parent context.Context, serviceMode bool) error {
 		return peerMgr.SendTo(nodeID, peerlink.ChanControl, payload)
 	})
 	peerBridge.SetControlSink(remoteCtl.OnControl)
+	remoteCtlRef = remoteCtl // arms the vrchat-federation fallback (vrcFed above)
 	remotectl.RegisterBrowse(remoteCtl)
 	remotectl.RegisterAutomations(remoteCtl, autoIface)
+	// vrchat federation: serve THIS instance's VRChat link to paired peers (read-only
+	// friends/groups/roles/members; the session never crosses the link).
+	remotectl.RegisterVrchat(remoteCtl, vrcMgr)
 	remotectl.RegisterLibrary(remoteCtl, lib)
 	// Remote cue/beatgrid/drop editing: a paired controller pulls a track's audio + edits
 	// locally, then writes back here. Writes publish library.trackchanged so every open UI

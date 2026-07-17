@@ -390,3 +390,40 @@ type PprofResult struct {
 type TextResult struct {
 	Text string `json:"text"`
 }
+
+// ── vrchat federation (one linked peer serves friends/groups to the pair) ─────
+
+// VrcStatus reports whether this instance holds a live VRChat session. Every peer answers
+// (Linked=false without one) so a controller can pick the serving peer.
+type VrcStatus struct {
+	Linked      bool   `json:"linked"`
+	UserID      string `json:"userId,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+// VrcFriendsParams pages the linked peer's friends list (offline=true pages the offline tab).
+type VrcFriendsParams struct {
+	Offset  int  `json:"offset"`
+	N       int  `json:"n"`
+	Offline bool `json:"offline"`
+}
+
+// VrcSearchGroupsParams runs a group search on the linked peer.
+type VrcSearchGroupsParams struct {
+	Query  string `json:"query"`
+	Offset int    `json:"offset"`
+	N      int    `json:"n"`
+}
+
+// VrcGroupRolesParams lists a group's roles.
+type VrcGroupRolesParams struct {
+	GroupID string `json:"groupId"`
+}
+
+// VrcGroupMembersParams pages a group's members (RoleID "" = all members).
+type VrcGroupMembersParams struct {
+	GroupID string `json:"groupId"`
+	RoleID  string `json:"roleId,omitempty"`
+	Offset  int    `json:"offset"`
+	N       int    `json:"n"`
+}

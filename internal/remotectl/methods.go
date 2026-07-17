@@ -113,4 +113,16 @@ const (
 	// headroom plan) as text. Read-only: samples PDH GPU-engine counters, touches no GPU encode.
 	// Lets the desk instance see the VR PC's encoder headroom before launching a peer-link stream.
 	MethodAppEncoderScan = "app.encoderscan"
+
+	// vrchat.* - VRChat-link federation: ONE paired instance holds the VRChat session; every
+	// other peer reads friends/groups/roles/members through it as if linked locally (Worlds
+	// pickers + publish-time group-role expansion). READ-ONLY by design - the session cookie
+	// never crosses the link, only query results over the MAC'd pair. status answers on every
+	// peer (linked=false when no session) so controllers can discover who serves the data.
+	MethodVrcStatus       = "vrchat.status"
+	MethodVrcFriends      = "vrchat.friends"
+	MethodVrcUserGroups   = "vrchat.userGroups"
+	MethodVrcSearchGroups = "vrchat.searchGroups"
+	MethodVrcGroupRoles   = "vrchat.groupRoles"
+	MethodVrcGroupMembers = "vrchat.groupMembers"
 )

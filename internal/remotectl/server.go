@@ -25,6 +25,7 @@ import (
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/tagwrite"
+	"rave.page/mate/internal/vrchat"
 )
 
 // remoteJobSeq names peer-driven transcode jobs uniquely on the controlled machine.
@@ -1089,5 +1090,78 @@ func RegisterMedia(e *Endpoint, hub *jobs.Hub) {
 				return TranscodeResult{Output: out}, nil
 			}
 		}
+	})
+}
+
+// ── vrchat federation (read-only proxy over the local VRChat session) ─────────
+
+// VrcSource is the narrow manager view the vrchat.* handlers serve from
+// (satisfied by *vrchat.Manager). The session itself never crosses the link.
+type VrcSource interface {
+	State() vrchat.State
+	Client() *vrchat.Client
+	CurrentUserID() string
+}
+
+// RegisterVrchat serves this instance's VRChat link to paired peers: status always answers
+// (linked=false without a session) so controllers can discover the serving peer; the data
+// methods mirror the exact reads the Worlds surfaces make locally (friends browser, group
+// pickers, publish-time group-role expansion). Read-only - no status writes, no auth verbs.
+func RegisterVrchat(e *Endpoint, src VrcSource) {
+	if e == nil || src == nil {
+		return
+	}
+	cli := func() (*vrchat.Client, error) {
+		if !src.State().LoggedIn || src.Client() == nil {
+			return nil, fmt.Errorf("vrchat not linked on this peer")
+		}
+		return src.Client(), nil
+	}
+	e.Register(MethodVrcStatus, func(context.Context, string, json.RawMessage) (any, error) {
+		st := src.State()
+		return VrcStatus{Linked: st.LoggedIn, UserID: st.UserID, DisplayName: st.DisplayName}, nil
+	})
+	e.Register(MethodVrcFriends, func(ctx context.Context, _ string, raw json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		var p VrcFriendsParams
+		_ = json.Unmarshal(raw, &p)
+		return c.Friends(ctx, p.Offset, p.N, p.Offline)
+	})
+	e.Register(MethodVrcUserGroups, func(ctx context.Context, _ string, _ json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		return c.UserGroups(ctx, src.CurrentUserID())
+	})
+	e.Register(MethodVrcSearchGroups, func(ctx context.Context, _ string, raw json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		var p VrcSearchGroupsParams
+		_ = json.Unmarshal(raw, &p)
+		return c.SearchGroups(ctx, p.Query, p.Offset, p.N)
+	})
+	e.Register(MethodVrcGroupRoles, func(ctx context.Context, _ string, raw json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		var p VrcGroupRolesParams
+		_ = json.Unmarshal(raw, &p)
+		return c.GroupRoles(ctx, p.GroupID)
+	})
+	e.Register(MethodVrcGroupMembers, func(ctx context.Context, _ string, raw json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		var p VrcGroupMembersParams
+		_ = json.Unmarshal(raw, &p)
+		return c.GroupMembers(ctx, p.GroupID, p.RoleID, p.Offset, p.N)
 	})
 }
