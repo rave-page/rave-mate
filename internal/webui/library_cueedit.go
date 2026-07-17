@@ -1828,11 +1828,10 @@ func (u *UI) ceDetailHTML(s *libSt) string {
 // ceWaveHTML is the full-width player strip: info topbar + waveform (beatgrid +
 // markers + beat distances) + transport. The editor's readouts live HERE, on the wave.
 func (u *UI) ceWaveHTML() string {
-	c := u.ce()
-	c.mu.Lock()
-	path, tr := c.path, c.track
-	c.mu.Unlock()
-	u.mpEnsureFile("library", path, tr)
+	// NO mpEnsureFile here - renders must not rebind the player. ceEnter/
+	// ceEnterRemote bind; a render-side ensure fought the selection
+	// handler's bind (gen ping-pong) whenever sel ≠ editor target and
+	// re-armed the lost-patch race behind stuck "Analyzing waveform…".
 	return `<div id=ce-topbar>` + u.ceTopbarHTML() + `</div>` + u.mpHTML("library")
 }
 

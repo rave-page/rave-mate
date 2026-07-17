@@ -1128,6 +1128,20 @@ func (u *UI) mpPatch(host, part, html string) {
 	u.eval("window.__patch(" + jsQuote("mp-"+host+"-"+part) + "," + jsQuote(html) + ")")
 }
 
+// mpResync re-emits the embedded players' root fragments from CURRENT state. Full renders
+// build HTML from a state snapshot; an analysis apply landing during a slow build (big
+// collection list) patches the OLD DOM and the render then overwrites it - the player
+// showed "Analyzing waveform…" forever while the state was healthy. Enqueued AFTER the
+// render eval this always wins that race; a fragment id the page doesn't carry is a
+// no-op (__patch guards on getElementById).
+func (u *UI) mpResync() {
+	for _, host := range []string{"library", "publish"} {
+		if t := u.mpSnap(host); len(t.media) > 0 {
+			u.mpPatchAll(t)
+		}
+	}
+}
+
 func (u *UI) mpPatchAll(t mpSt) {
 	u.mpPatch(t.host, "root", u.mpInnerHTML(t))
 	if t.vid.started && t.vid.err == "" { // the <video> element was recreated - restore it

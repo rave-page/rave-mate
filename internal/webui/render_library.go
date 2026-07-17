@@ -273,7 +273,10 @@ func (u *UI) libNav(path string) {
 	u.libPatchBody()
 }
 
-func (u *UI) libPatchBody() { u.eval("window.__patch('lib-body'," + jsQuote(u.libBody()) + ")") }
+func (u *UI) libPatchBody() {
+	u.eval("window.__patch('lib-body'," + jsQuote(u.libBody()) + ")")
+	u.mpResync() // heal any player patch the build raced (state changed mid-build)
+}
 
 func (u *UI) libPatchDetail() {
 	s := u.lib()
@@ -281,6 +284,7 @@ func (u *UI) libPatchDetail() {
 	h := u.libDetailHTML(s)
 	s.mu.Unlock()
 	u.eval("window.__patch('lib-detail'," + jsQuote(h) + ")")
+	u.mpResync() // heal any player patch the build raced (state changed mid-build)
 }
 
 // libBody builds the active section (locks state; sub-builders are lock-free). When a peer is
@@ -1714,9 +1718,12 @@ func (u *UI) libDetailHTML(s *libSt) string {
 	}
 	b.WriteString(inspSec(i18n.T("library.insp.actions"), act))
 
-	// PLAYER + waveform (audio on disk) - the unified media player/editor (player.go)
+	// PLAYER + waveform (audio on disk) - the unified media player/editor (player.go).
+	// Binding happens in the SELECTION HANDLER (libSelect / ceEnter), never here:
+	// a render-side mpEnsureFile rebinds mid-build and re-arms the lost-patch race
+	// (analysis applies patched the old DOM, the render overwrote them - stuck
+	// "Analyzing waveform…" with healthy state). mpSetDrops is idempotent (no kick).
 	if onDisk && sel.kind == "audio" {
-		u.mpEnsureFile("library", sel.path, sel.track)
 		u.mpSetDrops("library", sel.path, s.dropsIdx[sel.path])
 		b.WriteString(inspSec(i18n.T("library.insp.player"), u.mpHTML("library")))
 	}

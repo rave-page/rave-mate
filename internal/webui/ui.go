@@ -421,6 +421,7 @@ func (u *UI) patchMain() {
 	u.frags = nil // DOM replaced - drop the tick dedup cache
 	u.fragMu.Unlock()
 	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ");document.body.setAttribute('data-keyscope'," + jsQuote(u.keyScope()) + ")")
+	u.mpResync() // heal any player patch the build raced (state changed mid-build)
 }
 
 // keyScope names the active editing-key surface ("" = none; see shell.go keydown).
