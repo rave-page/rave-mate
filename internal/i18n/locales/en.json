@@ -2639,7 +2639,8 @@
         "unavailable": "VRChat unavailable in this build.",
         "uplink": "Share session with rave.page (server-side features)",
         "usernamePlaceholder": "VRChat username / email",
-        "verify": "Verify"
+        "verify": "Verify",
+        "linkedViaPeer": "Linked as {name} via peer {peer}. Sign in below to hold the session on THIS instance instead."
       },
       "vrctools": {
         "applyPresetNow": "Apply preset now",
@@ -3809,7 +3810,8 @@
     },
     "status": {
       "notSignedIn": "not signed in",
-      "signedInAs": "Signed in as {name}"
+      "signedInAs": "Signed in as {name}",
+      "viaPeer": "Session served by peer {peer} - all features work as if signed in here. Login/2FA stay on that instance."
     },
     "subtab": {
       "groups": "Groups",

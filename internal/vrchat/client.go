@@ -5,6 +5,7 @@
 package vrchat
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -80,6 +81,39 @@ func New(log *logbus.Bus) *Client {
 		hc:   &http.Client{Timeout: 20 * time.Second},
 		log:  log,
 	}
+}
+
+// NewWithTransport returns a client whose HTTP transport is rt. The vrchat
+// federation runs a REAL Client here: rt tunnels every request through a paired
+// instance (which executes it with its own session), so this client's cookie
+// jar stays empty and the session never crosses the link.
+func NewWithTransport(log *logbus.Bus, rt http.RoundTripper) *Client {
+	c := New(log)
+	c.hc = &http.Client{Timeout: 25 * time.Second, Transport: rt}
+	return c
+}
+
+// Raw executes one API call against this client's session and returns status +
+// body - the SERVING half of the vrchat federation proxy (remotectl
+// vrchat.proxy). pathAndQuery is joined to the API base; the caller validates
+// it is host-less. Bodies ride the same 1 MB read cap as every call (do()).
+func (c *Client) Raw(ctx context.Context, method, pathAndQuery string, body []byte, contentType string) (int, []byte, error) {
+	var rd io.Reader
+	if len(body) > 0 {
+		rd = bytes.NewReader(body)
+	}
+	req, err := c.newReq(ctx, method, pathAndQuery, rd)
+	if err != nil {
+		return 0, nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, respBody, err := c.do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, respBody, nil
 }
 
 // Cookies returns the current session cookies (for sealing / pipeline auth).

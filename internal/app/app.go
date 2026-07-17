@@ -436,8 +436,8 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 	vrcMgr.OnChange(func(s vrchat.State) {
 		tok := ""
-		if s.LoggedIn {
-			tok, _ = vrcMgr.Client().Cookies()
+		if s.LoggedIn && s.Via == "" { // pipeline runs ONLY on the instance holding the session
+			tok, _ = vrcMgr.LocalClient().Cookies()
 		}
 		vrcW.SetAuth(tok)
 	})
@@ -447,10 +447,12 @@ func run(parent context.Context, serviceMode bool) error {
 	vrcUplinkStore := func() {
 		s := vrcMgr.State()
 		rtok := authMgr.Token()
-		if !cfg.Features.VRChat.Uplink || !s.LoggedIn || rtok == "" {
+		// s.Via != "" = federated read-through session: NEVER vault (this instance
+		// has no cookies; pushing would overwrite the real vaulted session with "").
+		if !cfg.Features.VRChat.Uplink || !s.LoggedIn || s.Via != "" || rtok == "" {
 			return
 		}
-		a, t := vrcMgr.Client().Cookies()
+		a, t := vrcMgr.LocalClient().Cookies()
 		uctx, ucancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer ucancel()
 		if err := apiC.StoreVrchatToken(uctx, rtok, api.VrchatToken{
@@ -475,7 +477,7 @@ func run(parent context.Context, serviceMode bool) error {
 		}
 	}
 	vrcMgr.OnChange(func(s vrchat.State) {
-		if s.LoggedIn {
+		if s.LoggedIn && s.Via == "" {
 			debuglog.Go(log, "vrchat-uplink", vrcUplinkStore)
 		}
 	})
@@ -1180,9 +1182,13 @@ func run(parent context.Context, serviceMode bool) error {
 	remoteCtlRef = remoteCtl // arms the vrchat-federation fallback (vrcFed above)
 	remotectl.RegisterBrowse(remoteCtl)
 	remotectl.RegisterAutomations(remoteCtl, autoIface)
-	// vrchat federation: serve THIS instance's VRChat link to paired peers (read-only
-	// friends/groups/roles/members; the session never crosses the link).
+	// vrchat federation: serve THIS instance's VRChat link to paired peers (the session
+	// never crosses the link - only calls do), and ARM the consuming side: with no local
+	// session, a linked peer serves every VRChat feature as if logged in locally.
 	remotectl.RegisterVrchat(remoteCtl, vrcMgr)
+	debuglog.Go(log, "vrchat-federation", func() {
+		runVrcFederationWatcher(ctx, log, vrcMgr, peerMgr, func() *remotectl.Endpoint { return remoteCtl })
+	})
 	remotectl.RegisterLibrary(remoteCtl, lib)
 	// Remote cue/beatgrid/drop editing: a paired controller pulls a track's audio + edits
 	// locally, then writes back here. Writes publish library.trackchanged so every open UI

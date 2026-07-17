@@ -1164,4 +1164,42 @@ func RegisterVrchat(e *Endpoint, src VrcSource) {
 		_ = json.Unmarshal(raw, &p)
 		return c.GroupMembers(ctx, p.GroupID, p.RoleID, p.Offset, p.N)
 	})
+	e.Register(MethodVrcProxy, func(ctx context.Context, _ string, raw json.RawMessage) (any, error) {
+		c, err := cli()
+		if err != nil {
+			return nil, err
+		}
+		var p VrcProxyParams
+		_ = json.Unmarshal(raw, &p)
+		m := strings.ToUpper(strings.TrimSpace(p.Method))
+		switch m {
+		case "GET", "POST", "PUT", "DELETE":
+		default:
+			return nil, fmt.Errorf("vrchat.proxy: method %q not allowed", p.Method)
+		}
+		pq := p.PathQuery
+		if !strings.HasPrefix(pq, "/") || strings.Contains(pq, "://") {
+			return nil, fmt.Errorf("vrchat.proxy: path must be API-relative")
+		}
+		// auth flows stay local-only: a peer must never re-auth, verify 2FA, or
+		// kill the serving session. GET /auth/user is the one exception - the
+		// pure session read every client uses to fetch the current user (no
+		// Authorization header ever crosses the proxy, so it cannot re-login).
+		low := strings.ToLower(pq)
+		isUserRead := m == "GET" && (low == "/auth/user" || strings.HasPrefix(low, "/auth/user?"))
+		if !isUserRead && (strings.HasPrefix(low, "/auth") || strings.HasPrefix(low, "/logout")) {
+			return nil, fmt.Errorf("vrchat.proxy: auth endpoints are local-only")
+		}
+		var body []byte
+		if p.BodyB64 != "" {
+			if body, err = base64.StdEncoding.DecodeString(p.BodyB64); err != nil {
+				return nil, fmt.Errorf("vrchat.proxy: bad body: %w", err)
+			}
+		}
+		status, respBody, err := c.Raw(ctx, m, pq, body, p.ContentType)
+		if err != nil {
+			return nil, err
+		}
+		return VrcProxyResult{Status: status, BodyB64: base64.StdEncoding.EncodeToString(respBody)}, nil
+	})
 }

@@ -363,3 +363,23 @@ func (c *Client) VrcGroupRoles(ctx context.Context, groupID string) ([]vrchat.Gr
 func (c *Client) VrcGroupMembers(ctx context.Context, groupID, roleID string, offset, n int) ([]vrchat.GroupMember, error) {
 	return Do[[]vrchat.GroupMember](ctx, c.e, c.nodeID, MethodVrcGroupMembers, VrcGroupMembersParams{GroupID: groupID, RoleID: roleID, Offset: offset, N: n})
 }
+
+// VrcProxy tunnels one VRChat API call through the peer's session (full
+// vrchat federation - the app-side RoundTripper is the only caller).
+func (c *Client) VrcProxy(ctx context.Context, method, pathQuery string, body []byte, contentType string) (int, []byte, error) {
+	p := VrcProxyParams{Method: method, PathQuery: pathQuery, ContentType: contentType}
+	if len(body) > 0 {
+		p.BodyB64 = base64.StdEncoding.EncodeToString(body)
+	}
+	r, err := Do[VrcProxyResult](ctx, c.e, c.nodeID, MethodVrcProxy, p)
+	if err != nil {
+		return 0, nil, err
+	}
+	var respBody []byte
+	if r.BodyB64 != "" {
+		if respBody, err = base64.StdEncoding.DecodeString(r.BodyB64); err != nil {
+			return 0, nil, err
+		}
+	}
+	return r.Status, respBody, nil
+}

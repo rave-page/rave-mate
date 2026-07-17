@@ -125,4 +125,11 @@ const (
 	MethodVrcSearchGroups = "vrchat.searchGroups"
 	MethodVrcGroupRoles   = "vrchat.groupRoles"
 	MethodVrcGroupMembers = "vrchat.groupMembers"
+	// vrchat.proxy - FULL federation tunnel: the serving instance executes one
+	// VRChat API call with ITS session and returns status+body, so an unlinked
+	// peer's vrchat.Manager works as if logged in locally (all tabs/features).
+	// Server-side validation: GET/POST/PUT/DELETE only; API-relative paths only;
+	// /auth* + /logout refused (except GET /auth/user, the pure session read) so
+	// a peer can never re-auth, verify 2FA, or kill the serving session.
+	MethodVrcProxy = "vrchat.proxy"
 )

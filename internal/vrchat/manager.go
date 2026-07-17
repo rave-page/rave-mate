@@ -3,6 +3,7 @@ package vrchat
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"rave.page/mate/internal/logbus"
@@ -16,6 +17,10 @@ type State struct {
 	UserID      string
 	DisplayName string
 	Message     string // last auth outcome, human-readable
+	// Via names the paired instance serving this session (vrchat federation);
+	// "" = the session is local. Federated state is read-through: every feature
+	// works, but login/2FA/logout stay on the serving instance.
+	Via string
 }
 
 // storer abstracts sessionStore for tests.
@@ -38,6 +43,13 @@ type Manager struct {
 	state    State
 	onChange []func(State) // hooks (app wiring + UI), called outside locks
 	onUnlink []func()      // explicit user unlink (not session expiry)
+
+	// vrchat federation: when THIS instance has no local session but a paired
+	// instance does, fedCli (a Client whose transport tunnels through the peer)
+	// + fedState make every State()/Client() consumer work as if logged in
+	// locally. The local session, once it appears, always wins.
+	fedCli   *Client
+	fedState State
 }
 
 // NewManager wires client + sealed store. remember gates at-rest persistence.
@@ -45,8 +57,55 @@ func NewManager(log *logbus.Bus, remember func() bool) *Manager {
 	return &Manager{log: log, cli: New(log), store: &sessionStore{log: log}, remember: remember}
 }
 
-// Client exposes the underlying API client (pipeline cookie, future calls).
-func (m *Manager) Client() *Client { return m.cli }
+// Client exposes the API client every feature calls. With no local session but an
+// armed federation, this is the peer-tunneled client - callers can't tell the
+// difference (same funnel, the peer executes with its own cookies).
+func (m *Manager) Client() *Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.state.LoggedIn && m.fedCli != nil {
+		return m.fedCli
+	}
+	return m.cli
+}
+
+// LocalClient always returns the local-session client (login/2FA/pipeline wiring -
+// auth flows must never tunnel through a peer).
+func (m *Manager) LocalClient() *Client { return m.cli }
+
+// SetFederated arms read-through federation: cli tunnels through the serving peer,
+// st describes that peer's session (Via = peer name). No-op state-wise while a
+// LOCAL session is live (local always wins; the federation sits dormant behind it).
+func (m *Manager) SetFederated(cli *Client, st State) {
+	st.Via, st.LoggedIn = strings.TrimSpace(st.Via), true
+	m.mu.Lock()
+	m.fedCli = cli
+	m.fedState = st
+	local := m.state.LoggedIn
+	fns := append([]func(State){}, m.onChange...)
+	m.mu.Unlock()
+	if !local {
+		for _, fn := range fns {
+			fn(st)
+		}
+	}
+}
+
+// ClearFederated drops the federation (serving peer gone/unlinked).
+func (m *Manager) ClearFederated() {
+	m.mu.Lock()
+	had := m.fedCli != nil && !m.state.LoggedIn
+	m.fedCli = nil
+	m.fedState = State{}
+	st := m.state
+	fns := append([]func(State){}, m.onChange...)
+	m.mu.Unlock()
+	if had {
+		for _, fn := range fns {
+			fn(st)
+		}
+	}
+}
 
 // OnChange registers a state hook (appends - app wiring + UI both listen).
 func (m *Manager) OnChange(fn func(State)) {
@@ -55,8 +114,20 @@ func (m *Manager) OnChange(fn func(State)) {
 	m.mu.Unlock()
 }
 
-// State returns the current snapshot.
+// State returns the current snapshot. Without a local session an armed federation
+// answers instead (LoggedIn=true, Via=<peer>) so every gate lights up. An
+// IN-PROGRESS local auth (Awaiting2FA) is never masked - the 2FA form must win.
 func (m *Manager) State() State {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.state.LoggedIn && !m.state.Awaiting2FA && m.fedCli != nil {
+		return m.fedState
+	}
+	return m.state
+}
+
+// LocalState reports only the LOCAL session (federation watcher + auth flows).
+func (m *Manager) LocalState() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.state

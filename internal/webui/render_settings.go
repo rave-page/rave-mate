@@ -831,6 +831,15 @@ func (u *UI) vrchatBody() string {
 	s := u.svc.Vrchat.State()
 	var body string
 	switch {
+	case s.LoggedIn && s.Via != "":
+		// federated: a paired instance serves the session. No unlink here (nothing
+		// local to unlink) - but the login form stays reachable conceptually via
+		// the note; a LOCAL sign-in always overrides the federation.
+		body = `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.vrchat.linkedViaPeer", i18n.A{"name": s.DisplayName, "peer": s.Via})) + `</div>` +
+			`<form class=set-dlgform data-act=settings-vrc-login>` +
+			`<input class=field-input name=user placeholder=` + attrQ(i18n.T("settings.body.vrchat.usernamePlaceholder")) + `autocomplete=off>` +
+			`<input class=field-input type=password name=pass placeholder=` + attrQ(i18n.T("settings.body.vrchat.passwordPlaceholder")) + `autocomplete=off>` +
+			btn(i18n.T("common.signIn"), "outline", "", "") + `</form>`
 	case s.LoggedIn:
 		body = `<div class=set-note>` + html.EscapeString(i18n.T("settings.body.vrchat.linkedAs", i18n.A{"name": s.DisplayName})) + `</div>` +
 			btnRow(btn(i18n.T("settings.body.common.unlink"), "destructive", "settings-vrc-unlink", ""))

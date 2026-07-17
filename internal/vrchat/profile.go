@@ -93,9 +93,13 @@ func (c *Client) UpdateBio(ctx context.Context, userID, bio string, links []stri
 // ── Manager wrappers (use the logged-in current user) ─────────────────────────
 
 // CurrentUserID returns the logged-in VRChat user id ("" when signed out).
+// Federation-aware: with no local session, the serving peer's user id answers.
 func (m *Manager) CurrentUserID() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.state.LoggedIn && m.fedCli != nil {
+		return m.fedState.UserID
+	}
 	return m.state.UserID
 }
 
@@ -105,7 +109,7 @@ func (m *Manager) UpdateStatus(ctx context.Context, status, description string) 
 	if id == "" {
 		return nil, ErrUnauthorized
 	}
-	return m.cli.UpdateStatus(ctx, id, status, description)
+	return m.Client().UpdateStatus(ctx, id, status, description)
 }
 
 // UpdateBio sets the current user's bio (+ optional bioLinks). Errors if not logged in.
@@ -114,7 +118,7 @@ func (m *Manager) UpdateBio(ctx context.Context, bio string, links []string) (*U
 	if id == "" {
 		return nil, ErrUnauthorized
 	}
-	return m.cli.UpdateBio(ctx, id, bio, links)
+	return m.Client().UpdateBio(ctx, id, bio, links)
 }
 
 // FetchUser re-fetches the current user (to seed the editor with live status/bio). Errors if
@@ -123,5 +127,5 @@ func (m *Manager) FetchUser(ctx context.Context) (*User, error) {
 	if m.CurrentUserID() == "" {
 		return nil, ErrUnauthorized
 	}
-	return m.cli.CurrentUser(ctx)
+	return m.Client().CurrentUser(ctx)
 }

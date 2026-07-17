@@ -58,6 +58,13 @@ func (u *UI) vrcStatusRegion() string {
 	if !st.LoggedIn {
 		return `<div class="rp-card">` + statusRow("muted", i18n.T("tab.vrchat"), i18n.T("vrchat.status.notSignedIn")) + `</div>`
 	}
+	// federated session: a paired instance serves it - say so instead of the
+	// local pipeline line (the pipeline runs on the serving instance).
+	if st.Via != "" {
+		return `<div class="rp-card">` + statusRow("success",
+			i18n.T("vrchat.status.signedInAs", i18n.A{"name": orDash(st.DisplayName)}),
+			i18n.T("vrchat.status.viaPeer", i18n.A{"peer": st.Via})) + `</div>`
+	}
 	variant, line := "muted", i18n.T("vrchat.pipeline.off")
 	if u.svc.VrchatPipe != nil {
 		s := u.svc.VrchatPipe.Status()

@@ -427,3 +427,19 @@ type VrcGroupMembersParams struct {
 	Offset  int    `json:"offset"`
 	N       int    `json:"n"`
 }
+
+// VrcProxyParams is one tunneled VRChat API call (full vrchat federation).
+// PathQuery is API-relative ("/users/usr_x/groups?n=60"); the serving peer
+// joins it to its own API base and executes with its own session cookies.
+type VrcProxyParams struct {
+	Method      string `json:"method"`
+	PathQuery   string `json:"pathQuery"`
+	BodyB64     string `json:"bodyB64,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// VrcProxyResult carries the upstream VRChat response (status + raw body).
+type VrcProxyResult struct {
+	Status  int    `json:"status"`
+	BodyB64 string `json:"bodyB64,omitempty"`
+}

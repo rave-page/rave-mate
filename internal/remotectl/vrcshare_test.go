@@ -53,3 +53,27 @@ func TestVrcStatusRPC(t *testing.T) {
 		t.Fatalf("linked status drift: %+v", st)
 	}
 }
+
+// vrchat.proxy validation: bad methods, absolute URLs and auth endpoints are
+// refused server-side BEFORE any client call (GET /auth/user is the one
+// allowed auth read - not asserted here, it would hit the network).
+func TestVrcProxyValidation(t *testing.T) {
+	server, client := loopback()
+	RegisterVrchat(server, &fakeVrcSource{linked: true})
+	rc := NewClient(client, "server")
+
+	cases := []struct{ method, pq, wantErr string }{
+		{"PATCH", "/users/x", "not allowed"},
+		{"GET", "https://evil.example/api", "API-relative"},
+		{"GET", "users/x", "API-relative"},
+		{"PUT", "/logout", "local-only"},
+		{"POST", "/auth/twofactorauth/totp/verify", "local-only"},
+		{"GET", "/auth", "local-only"},
+	}
+	for _, c := range cases {
+		_, _, err := rc.VrcProxy(ctx(t), c.method, c.pq, nil, "")
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Fatalf("%s %s: want error containing %q, got %v", c.method, c.pq, c.wantErr, err)
+		}
+	}
+}
