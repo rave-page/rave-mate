@@ -1,13 +1,13 @@
 {
-  "version": "nightly-746e5e8",
-  "build": 105,
-  "commit": "746e5e8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-105-20260717-746e5e8.exe",
-  "sha256": "2f4bb7b53f6cce8393e37917831108b89bd9fb48d29963ae4cb381ed60967c68",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-105-20260717-746e5e8.exe",
-  "installer_sha256": "be5983b647bb829fcf134ec89d259964273647fbb9cf515fb2386cedc8e37091",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-105-20260717-746e5e8",
-  "linux_sha256": "d08516ddad4f9e07ae7ebfd8c6e6ec7f2eeda25f3c3159a6430b4655f8218d6a",
+  "version": "nightly-adab934",
+  "build": 106,
+  "commit": "adab934",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-106-20260717-adab934.exe",
+  "sha256": "b2b27b2e83764f2bd702b0230b3596f6bceb53d8dc232fb8dd9ddb387c45be43",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-106-20260717-adab934.exe",
+  "installer_sha256": "417146be77a351ca964395d717d2d6b32ef7fd5d830373c16d077b2acbe3034a",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-106-20260717-adab934",
+  "linux_sha256": "96d89a9b6f27a41bea8c41145b3b19a62065b8f1878c2e9ff5d8c3b2317b2338",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-17T07:16:33Z",
-  "notes": "Merge agent-lightcue-recorder into development (DMX lightcue recorder + sACN source)"
+  "released": "2026-07-17T13:21:16Z",
+  "notes": "fix(webui): stuck 'Analyzing waveform' - render-side rebinds + lost-patch race"
 }
