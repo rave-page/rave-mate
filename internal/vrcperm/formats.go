@@ -19,6 +19,7 @@ const (
 	FilePosters    = "posters.json"
 	FileEvents     = "events.json"
 	FileNowPlaying = "nowplaying.json"
+	FileLightCues  = "lightcues.json" // DMX lighting-cue take (lightcue contract JSON)
 )
 
 // FormatNames renders sorted unique displayNames, one per line.

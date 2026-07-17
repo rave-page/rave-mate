@@ -13,24 +13,28 @@ package dmx
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"rave.page/mate/internal/artnet"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/debuglog"
+	"rave.page/mate/internal/lightcue"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/sacn"
 	"rave.page/mate/internal/vrslgrid"
 )
 
 const source = "dmx"
 
-// Router owns the DMX plane for one Run lifetime. cfgFn is re-read on each module (re)start, so
-// settings edits apply on toggle off/on (the standard module pattern).
+// Router owns the DMX plane for one Run lifetime. cfgFn/lcCfgFn are re-read on each module
+// (re)start, so settings edits apply on toggle off/on (the standard module pattern).
 type Router struct {
 	log     *logbus.Bus
 	store   *artnet.Store
 	cfgFn   func() config.DMXFeature
+	lcCfgFn func() config.LightCueFeature
 	pngPath string
 
 	mu      sync.Mutex
@@ -39,11 +43,31 @@ type Router struct {
 	backend string
 	frames  uint64
 	lastPub time.Time
+	emitter *artnet.Emitter // shared re-emit sink + lightcue playback output (nil if dial failed)
+
+	// lightcue record/playback engine (record.go). Separate mutex: keeps Status() off this path.
+	recMu     sync.Mutex
+	recDir    string
+	rec       *lightcue.Recorder
+	recStart  time.Time
+	recUnis   []uint16
+	recPrimed bool // first frame captured (always kept regardless of the idle gate)
+	recording bool
+	player    *lightcue.Player
+	playStart time.Time
+	playName  string
+	playing   bool
+	loop      bool
 }
 
 // New builds the router. pngPath is the grid's PNG-fallback output file.
-func New(log *logbus.Bus, cfgFn func() config.DMXFeature, pngPath string) *Router {
-	return &Router{log: log, store: artnet.NewStore(), cfgFn: cfgFn, pngPath: pngPath}
+func New(log *logbus.Bus, cfgFn func() config.DMXFeature, lcCfgFn func() config.LightCueFeature, pngPath string) *Router {
+	r := &Router{log: log, store: artnet.NewStore(), cfgFn: cfgFn, lcCfgFn: lcCfgFn, pngPath: pngPath}
+	r.recDir = lcCfgFn().ResolvedRecordDir()
+	if r.recDir != "" {
+		_ = os.MkdirAll(r.recDir, 0o755)
+	}
+	return r
 }
 
 // Store exposes the universe store (read surface for future sinks; Set for future peer sources).
@@ -71,15 +95,36 @@ func (r *Router) Start(ctx context.Context) error {
 	if cfg.Grid.Enabled {
 		debuglog.Go(r.log, source, func() { r.runGrid(ctx, cfg) })
 	}
-	if cfg.ReEmit {
-		em, err := artnet.NewEmitter(r.log, cfg.ResolvedEmitTarget())
-		if err != nil {
-			r.log.Warn(source, "art-net re-emit unavailable", map[string]any{"target": cfg.ResolvedEmitTarget(), "error": err.Error()})
-		} else {
-			debuglog.Go(r.log, source, func() { _ = em.Run(ctx) })
+
+	// Shared Art-Net emitter: re-emit sink (when enabled) + lightcue playback output. Always
+	// built so a recorded take plays back even without ReEmit; dial failure degrades to a warning.
+	if em, err := artnet.NewEmitter(r.log, cfg.ResolvedEmitTarget()); err != nil {
+		r.log.Warn(source, "art-net emitter unavailable", map[string]any{"target": cfg.ResolvedEmitTarget(), "error": err.Error()})
+	} else {
+		r.mu.Lock()
+		r.emitter = em
+		r.mu.Unlock()
+		debuglog.Go(r.log, source, func() { _ = em.Run(ctx) })
+		if cfg.ReEmit {
 			debuglog.Go(r.log, source, func() { r.runReEmit(ctx, em) })
 		}
 	}
+
+	// sACN (E1.31) alternate source into the same store, when enabled. Bind failure warns
+	// (Art-Net is the probed primary; sACN is secondary/optional).
+	if cfg.SACN {
+		sl := sacn.NewListener(r.log, r.store, toU16(cfg.ResolvedSACNUniverses()))
+		debuglog.Go(r.log, source, func() {
+			if err := sl.Run(ctx, nil); err != nil {
+				r.log.Warn(source, "sacn source unavailable", map[string]any{"error": err.Error()})
+			}
+		})
+	}
+
+	// Lightcue record + playback pumps: one goroutine each, Hz ticker, ctx-bound. No-ops until
+	// StartRecord/Play flip the engine state.
+	debuglog.Go(r.log, source, func() { r.runRecord(ctx) })
+	debuglog.Go(r.log, source, func() { r.runPlay(ctx) })
 
 	r.mu.Lock()
 	r.running = true
@@ -89,7 +134,12 @@ func (r *Router) Start(ctx context.Context) error {
 		r.mu.Lock()
 		r.running = false
 		r.backend = ""
+		r.emitter = nil
 		r.mu.Unlock()
+		r.recMu.Lock()
+		r.recording = false
+		r.playing = false
+		r.recMu.Unlock()
 	})
 	return nil
 }
@@ -153,6 +203,9 @@ func (r *Router) runReEmit(ctx context.Context, em *artnet.Emitter) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			if r.isPlaying() {
+				continue // playback owns the emitter - don't fight it with live re-emit
+			}
 			gen := r.store.Generation()
 			if gen == lastGen {
 				continue

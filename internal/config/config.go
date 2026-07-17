@@ -89,7 +89,11 @@ const (
 	// old flat allow.txt lists only; group secret codes live here plaintext, hashed on publish.
 	// Later additive at v33 (no bump - zero value = off): Mocap (capture master: mocap-panel
 	// capture -> pose store -> composite mocap region overlaid on the VRSL stream).
-	configVersion = 33
+	// v34 added the DMX lighting-cue recorder (LightCue: enable/RecordDir/Hz), the sACN (E1.31)
+	// DMX source toggle (DMX.SACN + DMX.SACNUniverses), and WorldSync.LightCuesGistID (the take
+	// gist target). All additive, zero values = off/defaults - old configs load unchanged.
+	// (Was v31 on its feature branch; renumbered at the development merge.)
+	configVersion = 34
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -194,6 +198,8 @@ type Features struct {
 	DMX DMXFeature `json:"dmx"` // DMX plane: Art-Net ingest/emit + VRSL video grid
 
 	DMXMIDI DMXMIDIFeature `json:"dmxMidi"` // DMX → MIDI CC bridge for VRChat --midi worlds
+
+	LightCue LightCueFeature `json:"lightCue"` // DMX lighting-cue recorder → contract JSON take → gist for the VRChat world
 
 	RTSPServe RTSPServeFeature `json:"rtspServe"` // local RTSP performer chain (ffmpeg encode → rtspt for VRChat AVPro)
 
@@ -405,6 +411,10 @@ type DMXFeature struct {
 	ReEmit     bool    `json:"reEmit"`              // forward ingested universes to EmitTarget
 	Universes  []int   `json:"universes,omitempty"` // Art-Net port-addresses to render (0-based); empty = defaults per grid mode
 	Grid       DMXGrid `json:"grid"`                // VRSL grid sink
+
+	// sACN (E1.31) is an alternate DMX source into the same store. Off by default (Art-Net only).
+	SACN          bool  `json:"sacn,omitempty"`          // join E1.31 multicast (UDP 5568) as an extra source
+	SACNUniverses []int `json:"sacnUniverses,omitempty"` // universes to join; empty = ResolvedUniverses()
 }
 
 // DMXGrid configures the VRSL video-grid sink.
@@ -441,6 +451,47 @@ func (d DMXFeature) ResolvedUniverses() []int {
 		return []int{0, 1, 2, 3, 4, 5, 6, 7, 8}
 	}
 	return []int{0}
+}
+
+// ResolvedSACNUniverses returns the E1.31 universes to join (configured list, else the
+// Art-Net render universes).
+func (d DMXFeature) ResolvedSACNUniverses() []int {
+	if len(d.SACNUniverses) > 0 {
+		return d.SACNUniverses
+	}
+	return d.ResolvedUniverses()
+}
+
+// LightCueFeature configures the DMX lighting-cue recorder: it polls the universe store at Hz,
+// captures a delta-encoded step/hold timeline, and saves it as the frozen cross-repo contract
+// JSON take (published to a gist for the VRChat world). Needs the DMX plane running (its store
+// is the capture source). Off by default (opt-in).
+type LightCueFeature struct {
+	Enabled   bool   `json:"enabled"`
+	RecordDir string `json:"recordDir,omitempty"` // take output dir; "" = <configDir>/dmx_recordings
+	Hz        int    `json:"hz,omitempty"`        // decimation rate; 0 = 30, clamped to 44 (emitter cap)
+}
+
+// ResolvedHz returns the record decimation rate (default 30, capped at 44 = the Art-Net emitter rate).
+func (l LightCueFeature) ResolvedHz() int {
+	if l.Hz <= 0 {
+		return 30
+	}
+	if l.Hz > 44 {
+		return 44
+	}
+	return l.Hz
+}
+
+// ResolvedRecordDir returns the take output dir (default <configDir>/dmx_recordings).
+func (l LightCueFeature) ResolvedRecordDir() string {
+	if l.RecordDir != "" {
+		return l.RecordDir
+	}
+	if p, err := DataPath("dmx_recordings.x"); err == nil {
+		return filepath.Join(filepath.Dir(p), "dmx_recordings")
+	}
+	return "dmx_recordings"
 }
 
 // ResolvedSpoutName returns the grid's Spout sender name (default "rave-mate-vrsl").
@@ -1937,6 +1988,9 @@ type WorldSyncFeature struct {
 	NowPlayingGistID string `json:"nowPlayingGistId,omitempty"`
 	NowPlayingLink   string `json:"nowPlayingLink,omitempty"` // rave.page profile/stream URL shown on the card
 	NowPlayingImg    string `json:"nowPlayingImg,omitempty"`  // card image URL (must be VRC image-allowlisted host)
+
+	LightCuesOn     bool   `json:"lightCuesOn,omitempty"`     // publish the current DMX lighting-cue take
+	LightCuesGistID string `json:"lightCuesGistId,omitempty"` // "" until first publish
 
 	FavoriteGroups []FavoriteGroup `json:"favoriteGroups,omitempty"` // pinned groups for quick role grants
 
