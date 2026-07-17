@@ -1,13 +1,13 @@
 {
-  "version": "nightly-adab934",
-  "build": 106,
-  "commit": "adab934",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-106-20260717-adab934.exe",
-  "sha256": "b2b27b2e83764f2bd702b0230b3596f6bceb53d8dc232fb8dd9ddb387c45be43",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-106-20260717-adab934.exe",
-  "installer_sha256": "417146be77a351ca964395d717d2d6b32ef7fd5d830373c16d077b2acbe3034a",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-106-20260717-adab934",
-  "linux_sha256": "96d89a9b6f27a41bea8c41145b3b19a62065b8f1878c2e9ff5d8c3b2317b2338",
+  "version": "nightly-2b19bd8",
+  "build": 107,
+  "commit": "2b19bd8",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-107-20260717-2b19bd8.exe",
+  "sha256": "e57ffb0bd05bcf4c3b9ad4885cc84ebc6c94f1d857bed842c6551ab61b1f862b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-107-20260717-2b19bd8.exe",
+  "installer_sha256": "4d53f1f40b10f1dea957bf15f01bb32a32376533c24dd09377cd4b29095638d4",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-107-20260717-2b19bd8",
+  "linux_sha256": "2f0d8fd2320c1be5d18e702226f8a1d0379368d6280263442b9ede0b6b6d924d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-17T13:21:16Z",
-  "notes": "fix(webui): stuck 'Analyzing waveform' - render-side rebinds + lost-patch race"
+  "released": "2026-07-17T14:04:45Z",
+  "notes": "feat(remotectl+webui): VRChat-link federation - one linked peer serves the pair group"
 }
