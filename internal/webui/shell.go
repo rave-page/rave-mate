@@ -140,22 +140,23 @@ const runtimeJS = `(function(){
     var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
-    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del','z':'z','Z':'z'};
+    var map={'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','t':'t','T':'t',' ':'space','Delete':'del','Backspace':'del','z':'z','Z':'z','p':'p','P':'p'};
     var name=map[e.key]; if(!name) return;
-    if(e.ctrlKey && name!=='left' && name!=='right' && name!=='z') return; // Ctrl: grid nudge + undo only
+    if(e.ctrlKey && name!=='left' && name!=='right' && name!=='up' && name!=='down' && name!=='z') return; // Ctrl: grid nudge, zoom + undo only
     if(name==='z' && !e.ctrlKey) return; // plain z is not bound
-    // hold = one action: auto-repeat on one-shot keys hammered full-file tag rewrites (enter/t)
-    if(e.repeat&&(name==='space'||name==='enter'||name==='t')){ e.preventDefault(); return; }
+    // hold = one action: auto-repeat on one-shot keys hammered full-file tag rewrites (enter/t);
+    // p is down/up-paired (hold-to-remove timer lives in Go)
+    if(e.repeat&&(name==='space'||name==='enter'||name==='t'||name==='p')){ e.preventDefault(); return; }
     e.preventDefault();
     send({act:'key:'+scope, val:(e.ctrlKey?'c':'')+(e.shiftKey?'s':'')+name});
   });
   document.addEventListener('keyup', function(e){
-    if(e.key!==' ') return;
+    var up={' ':'spaceup','p':'pup','P':'pup'}[e.key]; if(!up) return;
     var scope=document.body.getAttribute('data-keyscope')||''; if(!scope) return;
     var a=document.activeElement;
     if(a&&a.matches&&a.matches('input,textarea,select,[contenteditable]')) return;
     e.preventDefault();
-    send({act:'key:'+scope, val:'spaceup'});
+    send({act:'key:'+scope, val:up});
   });
   document.addEventListener('input', function(e){
     var el = e.target;

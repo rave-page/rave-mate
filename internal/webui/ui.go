@@ -77,6 +77,7 @@ type UI struct {
 	ceState *ceSt
 	ceStore *cuepattern.Store
 	cePref  *cePrefsSt // cue-editor mode + per-software defaults (cueprefs.go)
+	prep    prepSt     // hold-P prep-playlist gesture (library_prep.go)
 
 	rceMu   sync.Mutex         // guards rcePull/rcePre (remote-track fetch, library_remotecue.go)
 	rcePull context.CancelFunc // active peer-file pull (nil = none); rce-cancel invokes it

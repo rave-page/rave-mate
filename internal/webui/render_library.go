@@ -708,6 +708,7 @@ func (u *UI) libCollectionHTML(s *libSt) string {
 	if len(s.collGenre)+len(s.collLabel)+len(s.keySel)+len(s.collPl) > 0 || s.collSearch != "" || s.collNoDrops {
 		b.WriteString(btn(i18n.T("library.clear"), "ghost", "lib-clearfilters", ""))
 	}
+	b.WriteString(u.prepSelectHTML("prep-coll")) // P-key target (library_prep.go)
 	b.WriteString(`</div>`)
 	for g := range s.collGenre {
 		b.WriteString(fchip(g+" ×", "", "lib-genre:"+g, true))

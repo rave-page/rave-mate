@@ -314,7 +314,8 @@
       "click": "Click",
       "drag": "Drag",
       "rclick": "Right-click",
-      "wheel": "Scroll wheel"
+      "wheel": "Scroll wheel",
+      "hold": "hold ≈1 s"
     },
     "camera-paths": {
       "body": "VRChat's in-game camera records dolly paths - keyframe sequences (position, facing, speed, focus) the camera flies through smoothly. VRChat saves them as JSON files; rave-mate finds them, groups them by the world they were recorded in, and can back them up, organize them and re-load them.\n\nThe preview shows the path in 3D: each dot is a keyframe, the small violet line is the camera's facing, and the line colour encodes speed (mint = slow, pink = fast). The amber marker flies the path at its real recorded speed.\n\n\"Load into VRChat\" sends the file over OSC so it appears in the in-game camera immediately - OSC must be enabled in VRChat (Action menu → Options → OSC). Loop and path-type aren't stored in the file; set them once in VRChat after loading.\n\n“Play path” previews the flythrough right here: the viewer camera rides the path first-person at its recorded per-segment timing.",
@@ -503,12 +504,14 @@
         "cues": "Cues",
         "select": "Select",
         "grid": "Grid alignment",
-        "audition": "Audition"
+        "audition": "Audition",
+        "prep": "Preparation"
       },
       "k": {
         "step": "Move the beat cursor one beat",
         "pan": "Scroll the waveform (drag)",
         "zoom": "Zoom on the playhead",
+        "zoomKeys": "Zoom in / out on the beat cursor (hold for continuous)",
         "jump": "Beat-jump by the jump size",
         "jumpSize": "Change the beat-jump size (1–64 beats)",
         "addDrop": "Add a DROP marker at the cursor",
@@ -525,7 +528,9 @@
         "rclick": "Add a memory cue at that beat",
         "addCue": "Add a memory cue at the beat cursor",
         "srclick": "Add a drop marker",
-        "crclick": "Remove cue + drop markers at that beat"
+        "crclick": "Remove cue + drop markers at that beat",
+        "prep": "Add the track to the preparation playlist",
+        "prepRemove": "Remove it again (only when it's already in — a toast reminds you)"
       }
     },
     "midi-drv-filter": {
@@ -1606,6 +1611,28 @@
       "pmDeleteConfirm": "Delete pattern “{name}”? Tracks that already received its cues keep them.",
       "scopeOnly": "{app} only",
       "writePromoteNote": "{app}: memory cues are promoted to pads during the write (this software's default)."
+    },
+    "prep": {
+      "label": "Preparation playlist",
+      "none": "— none —",
+      "new": "＋ New preparation playlist…",
+      "newTitle": "New preparation playlist",
+      "newName": "Name",
+      "createBtn": "Create + select",
+      "created": "Preparation playlist “{name}” created and selected.",
+      "pickFirst": "Pick a preparation playlist first — the picker is in the collection toolbar and the cue-editor rail.",
+      "noTrack": "Select a collection track first (or open one in the cue editor).",
+      "failed": "Preparation playlist update failed: ",
+      "added": "Added to “{name}”.",
+      "already": "Already in “{name}” — keep holding P for a second to remove it.",
+      "removed": "Removed from “{name}”.",
+      "hint": "P adds the current track to this playlist. If it's already in, a toast tells you — keep holding P for about a second to remove it again. Works here and on the collection list.",
+      "tracks": {
+        "one": "{count} track",
+        "few": "{count} tracks",
+        "many": "{count} tracks",
+        "other": "{count} tracks"
+      }
     },
     "tf": {
       "menu": "Fix tags…",

@@ -51,8 +51,9 @@ func (p ceSWPref) MaxPadsOr() int {
 }
 
 type cePrefsSt struct {
-	Mode string              `json:"mode,omitempty"` // active scope ("" = all software)
-	SW   map[string]ceSWPref `json:"sw,omitempty"`   // key "" = the all-software row
+	Mode         string              `json:"mode,omitempty"`         // active scope ("" = all software)
+	SW           map[string]ceSWPref `json:"sw,omitempty"`           // key "" = the all-software row
+	PrepPlaylist int64               `json:"prepPlaylist,omitempty"` // P-key target playlist (library_prep.go; 0 = none)
 }
 
 // cePrefsLoad lazily loads the prefs (missing/corrupt file = defaults).

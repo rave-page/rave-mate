@@ -1632,6 +1632,10 @@ func (u *UI) ceKey(val string) {
 		if was {
 			u.ceAudition(false)
 		}
+	case "cup": // Ctrl+↑/↓: zoom the wave on the beat cursor (key-repeat = continuous)
+		u.ceZoom(true)
+	case "cdown":
+		u.ceZoom(false)
 	case "cleft": // Ctrl: shift the whole beatgrid for manual alignment (10ms steps,
 		u.ceGridShift(-10) // key-repeat gives continuous travel)
 	case "cright":
@@ -1642,7 +1646,29 @@ func (u *UI) ceKey(val string) {
 		u.ceGridShift(1)
 	case "cz": // Ctrl+Z: one-deep undo (again = redo)
 		u.ceUndo()
+	case "p": // prep playlist: add / (already in) arm hold-to-remove
+		u.prepKey(true)
+	case "pup":
+		u.prepKey(false)
 	}
+}
+
+// ceZoom zooms the library wave keeping the beat cursor stationary (Ctrl+↑/↓).
+func (u *UI) ceZoom(in bool) {
+	const host = "library"
+	c := u.ce()
+	c.mu.Lock()
+	ms, active := c.cursorMs, c.active
+	c.mu.Unlock()
+	if !active {
+		return
+	}
+	t := u.mpSnap(host)
+	fx := 0.5
+	if lo, ln := t.axis(); ln > 0 && t.viewSpan > 0 {
+		fx = clampF(((ms/1000-lo)/ln-t.viewStart)/t.viewSpan, 0, 1)
+	}
+	u.mpZoomAt(host, in, fx)
 }
 
 // ceGridLocked reports whether the open track's grid is marked verified - a verified grid
@@ -2146,6 +2172,7 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	mode := u.ceMode()
 	pref := u.cePrefFor(mode)
 	modeSel := u.ceModeSelectHTML(mode)
+	prepSel := u.prepSelectHTML("prep-rail")
 	nChecked := len(s.collSel)
 	c := u.ce()
 	c.mu.Lock()
@@ -2166,6 +2193,10 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	// software mode: scopes new cues + apply/promote/write to one DJ app ("" = all)
 	b.WriteString(modeSel)
 	b.WriteString(u.ceDefaultsHTML(c, mode, pref))
+
+	// preparation playlist: P adds the open track, holding P removes it again
+	b.WriteString(prepSel)
+	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.prep.hint")) + `</div>`)
 
 	// drops → pattern assign grid (fixed rows drop 1-4 + X; unplaced rows still show)
 	st := u.cePatterns() // ensure the store is open so the pickers render on first use
@@ -2641,6 +2672,10 @@ func init() {
 				u.libKeyNav(false)
 			case "down":
 				u.libKeyNav(true)
+			case "p": // prep playlist works on the plain collection list too
+				u.prepKey(true)
+			case "pup":
+				u.prepKey(false)
 			}
 		}
 	})

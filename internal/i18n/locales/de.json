@@ -151,7 +151,8 @@
       "click": "Klick",
       "drag": "Ziehen",
       "rclick": "Rechtsklick",
-      "wheel": "Mausrad"
+      "wheel": "Mausrad",
+      "hold": "≈1 s halten"
     },
     "camera-paths": {
       "body": "Die In-Game-Kamera von VRChat nimmt Dolly-Pfade auf - Keyframe-Sequenzen (Position, Blickrichtung, Geschwindigkeit, Fokus), durch die die Kamera flüssig gleitet. VRChat speichert sie als JSON-Dateien; rave-mate findet sie, gruppiert sie nach der Welt, in der sie aufgenommen wurden, und kann sie sichern, organisieren und wieder laden.\n\nDie Vorschau zeigt den Pfad in 3D: jeder Punkt ist ein Keyframe, die kleine violette Linie ist die Blickrichtung der Kamera, und die Linienfarbe kodiert die Geschwindigkeit (Mint = langsam, Pink = schnell). Der bernsteinfarbene Marker fliegt den Pfad mit seiner echten aufgenommenen Geschwindigkeit ab.\n\n„In VRChat laden“ sendet die Datei über OSC, sodass sie sofort in der In-Game-Kamera erscheint - OSC muss in VRChat aktiviert sein (Action-Menü → Options → OSC). Loop und Pfadtyp werden nicht in der Datei gespeichert; stelle sie nach dem Laden einmalig in VRChat ein.\n\n„Pfad abspielen“ zeigt den Durchflug direkt hier: die Vorschaukamera fliegt den Pfad in Ego-Perspektive mit dem aufgezeichneten Timing pro Segment ab.",
@@ -319,12 +320,14 @@
         "cues": "Cues",
         "select": "Auswaehlen",
         "grid": "Grid-Ausrichtung",
-        "audition": "Vorhoeren"
+        "audition": "Vorhoeren",
+        "prep": "Vorbereitung"
       },
       "k": {
         "step": "Beat-Cursor um einen Beat bewegen",
         "pan": "Wellenform scrollen (ziehen)",
         "zoom": "Auf den Playhead zoomen",
+        "zoomKeys": "Auf den Beat-Cursor ein-/auszoomen (halten = kontinuierlich)",
         "jump": "Beat-Jump um die Sprunggröße",
         "jumpSize": "Sprunggröße ändern (1–64 Beats)",
         "addDrop": "DROP-Marker am Cursor setzen",
@@ -340,7 +343,9 @@
         "rclick": "Memory-Cue an diesem Beat setzen",
         "addCue": "Memory-Cue am Beat-Cursor setzen",
         "srclick": "Drop-Marker setzen",
-        "crclick": "Cue- und Drop-Marker an diesem Beat entfernen"
+        "crclick": "Cue- und Drop-Marker an diesem Beat entfernen",
+        "prep": "Track zur Vorbereitungs-Playlist hinzufügen",
+        "prepRemove": "Wieder entfernen (nur wenn er schon drin ist — ein Toast erinnert daran)"
       }
     },
     "midi-drv-filter": {
@@ -1237,6 +1242,28 @@
       "pmDeleteConfirm": "Pattern „{name}“ löschen? Tracks mit bereits erhaltenen Cues behalten sie.",
       "scopeOnly": "nur {app}",
       "writePromoteNote": "{app}: Memory-Cues werden beim Schreiben auf Pads gelegt (Standard dieser Software)."
+    },
+    "prep": {
+      "label": "Vorbereitungs-Playlist",
+      "none": "— keine —",
+      "new": "＋ Neue Vorbereitungs-Playlist…",
+      "newTitle": "Neue Vorbereitungs-Playlist",
+      "newName": "Name",
+      "createBtn": "Erstellen + auswählen",
+      "created": "Vorbereitungs-Playlist „{name}“ erstellt und ausgewählt.",
+      "pickFirst": "Zuerst eine Vorbereitungs-Playlist wählen — der Picker sitzt in der Collection-Toolbar und in der Cue-Editor-Leiste.",
+      "noTrack": "Zuerst einen Collection-Track auswählen (oder im Cue-Editor öffnen).",
+      "failed": "Vorbereitungs-Playlist-Update fehlgeschlagen: ",
+      "added": "Zu „{name}“ hinzugefügt.",
+      "already": "Schon in „{name}“ — P etwa eine Sekunde halten, um ihn zu entfernen.",
+      "removed": "Aus „{name}“ entfernt.",
+      "hint": "P fügt den aktuellen Track dieser Playlist hinzu. Ist er schon drin, sagt es ein Toast — P etwa eine Sekunde halten entfernt ihn wieder. Funktioniert hier und in der Collection-Liste.",
+      "tracks": {
+        "one": "{count} Track",
+        "few": "{count} Tracks",
+        "many": "{count} Tracks",
+        "other": "{count} Tracks"
+      }
     },
     "tf": {
       "menu": "Tags reparieren…",

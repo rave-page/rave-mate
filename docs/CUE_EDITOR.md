@@ -33,7 +33,9 @@ holds the actions.
 | Del / Backspace | delete **every selected cue and drop** in one action |
 | Ctrl+Z | undo the last edit (one-deep; press again = redo — nudge runs count as one edit) |
 | Hold Space | audition from cursor — release **pauses** with the decoder parked on the cursor, so the next press starts instantly (the engine lets the file go after ~90 s idle) |
+| Ctrl+↑ / ↓ | zoom the wave in / out on the beat cursor (hold for continuous) |
 | Ctrl+← / → | nudge the whole beatgrid 10 ms (Ctrl+Shift: 1 ms) — **cues and drops move with the grid** |
+| P | add the track to the **preparation playlist** · already in? a toast says so — **hold P ≈1 s** to remove it again |
 
 Keys work only while the Library tab has focus and no input field is active. The ⓘ
 tooltip in the strip above the wave shows this table as a key-cap grid.
@@ -106,6 +108,16 @@ Once collection rows are ticked, the rail grows a **{n} checked tracks** section
 apply the assigned patterns (hotcues or memory), **Assign pads**, **Hotcues → memory**
 and **Clear cues** across every checked row — each track anchored on its own drops;
 tracks without drops or grid are skipped and counted.
+
+## Preparation playlist (the P key)
+
+Pick a manual playlist as your **preparation playlist** — the picker sits in the
+collection toolbar and in the cue-editor rail (same selection, persisted), with a
+create-new entry right in the list. **P** then adds the current track — the open
+cue-editor track, or the selected collection row — to it. If the track is already in,
+a toast tells you; **keep holding P for about a second** and it's removed again
+(release earlier and nothing happens). Smart and DJ-imported playlists aren't offered:
+smart membership is rule-driven, and imported lists get replaced on the next DJ sync.
 
 ## Target software modes (different cues per app)
 

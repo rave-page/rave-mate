@@ -286,6 +286,7 @@ var cueEditKeys = []kbRow{
 	{"", []string{"↑", "/", "↓"}, "help.cue-edit.k.listNav"},
 	{"help.cue-edit.g.wave", []string{"@help.kb.drag"}, "help.cue-edit.k.pan"},
 	{"", []string{"@help.kb.wheel"}, "help.cue-edit.k.zoom"},
+	{"", []string{"Ctrl", "+", "↑", "/", "↓"}, "help.cue-edit.k.zoomKeys"},
 	{"", []string{"@help.kb.click"}, "help.cue-edit.k.click"},
 	{"help.cue-edit.g.drops", []string{"T", "/", "Enter"}, "help.cue-edit.k.addDrop"},
 	{"", []string{"Shift", "+", "T", "/", "Enter"}, "help.cue-edit.k.removeDrop"},
@@ -300,6 +301,8 @@ var cueEditKeys = []kbRow{
 	{"help.cue-edit.g.grid", []string{"Ctrl", "+", "←", "/", "→"}, "help.cue-edit.k.nudge"},
 	{"", []string{"Ctrl", "+", "Shift", "+", "←", "/", "→"}, "help.cue-edit.k.nudgeFine"},
 	{"help.cue-edit.g.audition", []string{"Space"}, "help.cue-edit.k.audition"},
+	{"help.cue-edit.g.prep", []string{"P"}, "help.cue-edit.k.prep"},
+	{"", []string{"P", "@help.kb.hold"}, "help.cue-edit.k.prepRemove"},
 }
 
 // waveNavKeys - the waveform pointer gestures (wave-nav tooltip grid).
