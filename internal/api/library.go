@@ -153,16 +153,21 @@ func (c *Client) ListLibraryTracks(ctx context.Context, token string, limit, off
 }
 
 // UploadTrackWaveform PUTs analyzed peak buckets for a server library row (owner only).
-// peaksB64 = base64 raw uint8 buckets (decoded 1–65536 bytes); durationMs 0 preserves stored.
-// Returns the server-confirmed bucket count.
-func (c *Client) UploadTrackWaveform(ctx context.Context, token, libraryTrackID, peaksB64 string, durationMs int) (int, error) {
+// peaksB64 = base64 raw uint8 buckets (decoded 1–65536 bytes); bandsB64 = optional spectral
+// band energies (3 bytes/bucket - the web app's layered waveform); durationMs 0 preserves
+// stored. Returns the server-confirmed bucket count.
+func (c *Client) UploadTrackWaveform(ctx context.Context, token, libraryTrackID, peaksB64, bandsB64 string, durationMs int) (int, error) {
 	if token == "" {
 		return 0, fmt.Errorf("waveform upload: unauthenticated")
 	}
 	if libraryTrackID == "" || peaksB64 == "" {
 		return 0, fmt.Errorf("waveform upload: missing id or peaks")
 	}
-	body, err := json.Marshal(map[string]any{"peaks_b64": peaksB64, "duration_ms": durationMs})
+	payload := map[string]any{"peaks_b64": peaksB64, "duration_ms": durationMs}
+	if bandsB64 != "" {
+		payload["bands_b64"] = bandsB64
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return 0, err
 	}

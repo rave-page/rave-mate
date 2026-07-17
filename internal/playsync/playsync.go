@@ -51,7 +51,7 @@ type trackAPI interface {
 	EndStream(ctx context.Context, streamID, publishToken string) error
 	UploadLibraryTracks(ctx context.Context, token string, tracks []api.LibraryTrack) (api.LibraryBulkResp, error)
 	ListLibraryTracks(ctx context.Context, token string, limit, offset int) ([]api.LibraryTrackOut, error)
-	UploadTrackWaveform(ctx context.Context, token, libraryTrackID, peaksB64 string, durationMs int) (int, error)
+	UploadTrackWaveform(ctx context.Context, token, libraryTrackID, peaksB64, bandsB64 string, durationMs int) (int, error)
 	UploadTrackArtwork(ctx context.Context, token, libraryTrackID, contentType string, data []byte) error
 	ListPlaylists(ctx context.Context, token string) ([]api.PlaylistOut, error)
 	GetPlaylist(ctx context.Context, token, id string, includeItems bool) (api.PlaylistOut, error)

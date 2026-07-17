@@ -31,7 +31,7 @@ func (f *fakeAPI) ListLibraryTracks(_ context.Context, _ string, limit, offset i
 	return f.listRows[offset:end], nil
 }
 
-func (f *fakeAPI) UploadTrackWaveform(_ context.Context, _, libID, peaksB64 string, durationMs int) (int, error) {
+func (f *fakeAPI) UploadTrackWaveform(_ context.Context, _, libID, peaksB64, _ string, durationMs int) (int, error) {
 	f.wfCalls++
 	if f.wfErr != nil {
 		return 0, f.wfErr

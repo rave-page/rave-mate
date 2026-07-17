@@ -177,8 +177,14 @@ func (s *Syncer) SyncMedia(ctx context.Context, budget int, onProgress func(Medi
 	return res, nil
 }
 
-// syncWaveform probes peak buckets for one file and uploads them (one retry). Ledger is
-// written only on success, so failures retry on the next run.
+// wfHashBandsPrefix versions the waveform ledger hash: entries WITHOUT it were
+// uploaded before spectral bands existed and re-sync once (bands backfill rides
+// the normal budget). New uploads always carry it.
+const wfHashBandsPrefix = "b2:"
+
+// syncWaveform probes peak buckets (+ spectral bands) for one file and uploads
+// them (one retry). Ledger is written only on success, so failures retry on the
+// next run.
 func (s *Syncer) syncWaveform(ctx context.Context, token, hash, path, libID string, res *MediaResult) {
 	raw, err := s.probe.RunBackground(ctx, "probe", "probe.peaks", map[string]any{"path": path, "buckets": peaksBuckets})
 	if err != nil {
@@ -188,6 +194,7 @@ func (s *Syncer) syncWaveform(ctx context.Context, token, hash, path, libID stri
 	}
 	var r struct {
 		Peaks  string  `json:"peaks"`
+		Bands  string  `json:"bands"`
 		DurSec float64 `json:"durationSeconds"`
 	}
 	if json.Unmarshal(raw, &r) != nil || r.Peaks == "" {
@@ -201,11 +208,19 @@ func (s *Syncer) syncWaveform(ctx context.Context, token, hash, path, libID stri
 		s.warn("waveform probe", fmt.Errorf("bad peaks size %d", len(peaks)))
 		return
 	}
+	// bands are best-effort: exactly 3 bytes per bucket or they don't ship
+	// (the ledger still marks b2: - no infinite retry on band-less decodes).
+	bandsB64 := ""
+	if r.Bands != "" {
+		if bands, berr := base64.StdEncoding.DecodeString(r.Bands); berr == nil && len(bands) == 3*len(peaks) {
+			bandsB64 = r.Bands
+		}
+	}
 	sum := sha256.Sum256(peaks)
-	wfHash := hex.EncodeToString(sum[:])
+	wfHash := wfHashBandsPrefix + hex.EncodeToString(sum[:])
 	durMs := int(r.DurSec * 1000)
-	if _, err := s.api.UploadTrackWaveform(ctx, token, libID, r.Peaks, durMs); err != nil {
-		if _, err = s.api.UploadTrackWaveform(ctx, token, libID, r.Peaks, durMs); err != nil {
+	if _, err := s.api.UploadTrackWaveform(ctx, token, libID, r.Peaks, bandsB64, durMs); err != nil {
+		if _, err = s.api.UploadTrackWaveform(ctx, token, libID, r.Peaks, bandsB64, durMs); err != nil {
 			res.Failed++
 			s.warn("waveform upload", err)
 			return
