@@ -623,6 +623,7 @@ func (u *UI) mpEnsureSet(r recorder.Recording, caps []libdb.SetRecording) {
 		}
 	}
 	if len(want) == 0 {
+		u.mpCancelLoads("publish") // unbind: don't let dead analyses hog the pools
 		u.mpMut("publish", func(t *mpSt) { t.reset() })
 		return
 	}
@@ -746,12 +747,44 @@ func (t *mpSt) reset() {
 
 // ── analyses (peaks + loudness + stream info; store-cached, probe/transcode workers) ──
 
+// mpCancelLoads cancels the host's in-flight analysis jobs. Superseded jobs used to run
+// to completion and hog the capped worker pools - rapid track switching queued minutes
+// of dead decodes ahead of the current track's peaks.
+func (u *UI) mpCancelLoads(host string) {
+	u.mpLoadMu.Lock()
+	if c := u.mpLoadCancel[host]; c != nil {
+		c()
+		delete(u.mpLoadCancel, host)
+	}
+	u.mpLoadMu.Unlock()
+}
+
 func (u *UI) mpKickAnalyses(host string) {
 	t := u.mpSnap(host)
+	// One cancelable parent per kick: a rebind cancels the previous kick's jobs
+	// (queued OR mid-decode; the pool kills a canceled worker and respawns).
+	// actx's 30s cap is too short for peaks/loudness - jobs bound themselves.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-u.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	u.mpLoadMu.Lock()
+	if c := u.mpLoadCancel[host]; c != nil {
+		c()
+	}
+	if u.mpLoadCancel == nil {
+		u.mpLoadCancel = map[string]context.CancelFunc{}
+	}
+	u.mpLoadCancel[host] = cancel
+	u.mpLoadMu.Unlock()
 	for i := range t.media {
-		u.mpLoadPeaks(host, t.gen, i, t.media[i].path)
-		u.mpLoadLoud(host, t.gen, i, t.media[i].path)
-		u.mpLoadSrc(host, t.gen, i, t.media[i].path)
+		u.mpLoadPeaks(ctx, host, t.gen, i, t.media[i].path)
+		u.mpLoadLoud(ctx, host, t.gen, i, t.media[i].path)
+		u.mpLoadSrc(ctx, host, t.gen, i, t.media[i].path)
 	}
 }
 
@@ -771,9 +804,12 @@ func (u *UI) mpApply(host string, gen, idx int, fn func(*mpMedia)) bool {
 	return ok
 }
 
-func (u *UI) mpLoadPeaks(host string, gen, idx int, path string) {
+func (u *UI) mpLoadPeaks(ctx context.Context, host string, gen, idx int, path string) {
 	u.bg(func() {
-		dur, data, bands, err := u.mpResolvePeaks(path)
+		dur, data, bands, err := u.mpResolvePeaks(ctx, path)
+		if ctx.Err() != nil {
+			return // superseded by a newer kick - the new job owns the flags
+		}
 		applied := u.mpApply(host, gen, idx, func(m *mpMedia) {
 			m.peaksLoading = false
 			if err != nil {
@@ -813,7 +849,7 @@ type mpPeakBlob struct {
 // 2 = 10 ms duration-proportional binning (binRateHz) - old ~8192-bucket blobs re-decode fine.
 const mpPeakContractVer = 2
 
-func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, err error) {
+func (u *UI) mpResolvePeaks(parent context.Context, path string) (durSec float64, peaks, bands []byte, err error) {
 	var mtime int64
 	if fi, serr := os.Stat(path); serr == nil {
 		mtime = fi.ModTime().Unix()
@@ -833,7 +869,7 @@ func (u *UI) mpResolvePeaks(path string) (durSec float64, peaks, bands []byte, e
 	if u.svc.Workers == nil {
 		return 0, nil, nil, errors.New("no worker runtime")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 120*time.Second)
 	defer cancel()
 	// binRateHz=100 → ~10 ms min/max bins (worker sizes the count to the decoded duration, capped
 	// at peaksMaxBuckets so a long set stays memory-safe). Fine detail for the zoomable strip.
@@ -885,7 +921,7 @@ func (u *UI) mpPeaksSanity(path, src string, dur float64, nPeaks, rate int, samp
 
 // mpLoadLoud fetches the EBU R128 timeline (LUFS chip + momentary readout). Works for
 // video files too (measures the first audio stream).
-func (u *UI) mpLoadLoud(host string, gen, idx int, path string) {
+func (u *UI) mpLoadLoud(parent context.Context, host string, gen, idx int, path string) {
 	if u.svc.Workers == nil {
 		return
 	}
@@ -900,11 +936,14 @@ func (u *UI) mpLoadLoud(host string, gen, idx int, path string) {
 			raw, cached = u.svc.Store.GetAnalysis(store.KindLoudnessTL, path, mtime)
 		}
 		if !cached {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 			defer cancel()
 			var err error
 			raw, err = u.svc.Workers.RunBackground(ctx, "transcode", "transcode.loudtl", map[string]any{"input": path})
 			if err != nil {
+				if parent.Err() != nil {
+					return // superseded - the new kick owns the flags
+				}
 				u.mpApply(host, gen, idx, func(m *mpMedia) { m.loudLoading = false })
 				return
 			}
@@ -947,15 +986,18 @@ func (u *UI) probeStreams(ctx context.Context, path string) ([]byte, error) {
 }
 
 // mpLoadSrc probes stream info for the encoding chip (store-cached; see probeStreams).
-func (u *UI) mpLoadSrc(host string, gen, idx int, path string) {
+func (u *UI) mpLoadSrc(parent context.Context, host string, gen, idx int, path string) {
 	if u.svc.Workers == nil {
 		return
 	}
 	u.mpApply(host, gen, idx, func(m *mpMedia) { m.srcLoading = true })
 	u.bg(func() {
-		ctx, cancel := u.actx()
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
 		raw, err := u.probeStreams(ctx, path)
+		if parent.Err() != nil {
+			return // superseded - the new kick owns the flags
+		}
 		var si transcode.SourceInfo
 		if err == nil {
 			si, _ = transcode.ParseProbe(raw)

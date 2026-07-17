@@ -2223,7 +2223,7 @@ func (u *UI) libAnalyzeOne(kind, path string) error {
 	mtime := fileMtime(path)
 	switch kind {
 	case "peaks":
-		_, _, _, err := u.mpResolvePeaks(path)
+		_, _, _, err := u.mpResolvePeaks(context.Background(), path)
 		return err
 	case "tags":
 		if u.svc.Store != nil {

@@ -68,7 +68,11 @@ type UI struct {
 
 	rceMu   sync.Mutex         // guards rcePull/rcePre (remote-track fetch, library_remotecue.go)
 	rcePull context.CancelFunc // active peer-file pull (nil = none); rce-cancel invokes it
-	rcePre  context.CancelFunc // active next-set-track prefetch (nil = none); nav/exit cancels
+
+	rcePre context.CancelFunc // active next-set-track prefetch (nil = none); nav/exit cancels
+
+	mpLoadMu     sync.Mutex                    // guards mpLoadCancel (player_actions.go analyses)
+	mpLoadCancel map[string]context.CancelFunc // host -> cancel for the in-flight analysis kick
 
 	twMu         sync.Mutex
 	twitchRows   []string             // rolling twitch chat/alert feed (cap 250)

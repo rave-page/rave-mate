@@ -228,8 +228,32 @@ func (p *pool) acquire(ctx context.Context) (*proc, error) {
 	p.mu.Unlock()
 	select {
 	case w := <-ch:
+		if w == nil { // discard()'s replacement spawn failed (closed channel)
+			return nil, fmt.Errorf("worker %s: replacement spawn failed", p.typ)
+		}
 		return w, nil
 	case <-ctx.Done():
+		// Unregister our channel: a later release() would otherwise park the
+		// proc in a buffer nobody reads - live stays at maxProcs, idle stays
+		// empty, and the pool is wedged for the rest of the session (every
+		// probe/transcode job then waits its full ctx and fails).
+		p.mu.Lock()
+		for i, c := range p.wait {
+			if c == ch {
+				p.wait = append(p.wait[:i], p.wait[i+1:]...)
+				break
+			}
+		}
+		p.mu.Unlock()
+		// release()/discard() may have handed us a proc before the removal -
+		// recover it into the pool instead of leaking it.
+		select {
+		case w := <-ch:
+			if w != nil {
+				p.release(w)
+			}
+		default:
+		}
 		return nil, ctx.Err()
 	}
 }
