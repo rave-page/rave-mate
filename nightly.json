@@ -1,13 +1,13 @@
 {
   "version": "nightly-746e5e8",
-  "build": 104,
+  "build": 105,
   "commit": "746e5e8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-104-20260717-746e5e8.exe",
-  "sha256": "ab099381e74e6782d836c65db71fa8558dd537e9e2a2739b475d952d4b8dde94",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-104-20260717-746e5e8.exe",
-  "installer_sha256": "8f0b0753ced42c56c3f68cb4a64fb80324ac858eae624b17658598cdaeb80f84",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-104-20260717-746e5e8",
-  "linux_sha256": "61c986e7821988b8022cf58d46482d7b6bd7567c96bd42ee95df3cc2ef1aa7fd",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-105-20260717-746e5e8.exe",
+  "sha256": "2f4bb7b53f6cce8393e37917831108b89bd9fb48d29963ae4cb381ed60967c68",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-105-20260717-746e5e8.exe",
+  "installer_sha256": "be5983b647bb829fcf134ec89d259964273647fbb9cf515fb2386cedc8e37091",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-105-20260717-746e5e8",
+  "linux_sha256": "d08516ddad4f9e07ae7ebfd8c6e6ec7f2eeda25f3c3159a6430b4655f8218d6a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-17T04:11:57Z",
+  "released": "2026-07-17T07:16:33Z",
   "notes": "Merge agent-lightcue-recorder into development (DMX lightcue recorder + sACN source)"
 }
