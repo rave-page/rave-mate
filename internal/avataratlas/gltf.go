@@ -108,6 +108,14 @@ type Document struct {
 	// (two bone names -> same node). Resolution is deterministic (sorted bone-name order,
 	// last wins); the anomaly is surfaced here for the CLI report.
 	HumanoidDupNodes int
+	// InputKind is the container the document came from: "glb", "gltf" or "fbx".
+	InputKind string
+	// FBXUnitScaleFactor is GlobalSettings.UnitScaleFactor (cm per raw unit; 0 for glTF).
+	// Positions were scaled to metres at parse: metres = raw * factor / 100.
+	FBXUnitScaleFactor float64
+	// Warnings are non-fatal parse anomalies (missing textures, skipped geometry) for the
+	// CLI report.
+	Warnings []string
 }
 
 // ── raw JSON structs ─────────────────────────────────────────────────────────
@@ -222,7 +230,8 @@ type jVRM1 struct {
 
 var glbMagic = []byte{'g', 'l', 'T', 'F'}
 
-// Load parses a .vrm/.glb (GLB container) or .gltf (JSON + external/data-URI resources) file.
+// Load parses a .vrm/.glb (GLB container), .gltf (JSON + external/data-URI resources) or
+// binary .fbx file, sniffing by magic. ASCII FBX rejects with a clear error.
 func Load(path string) (*Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -230,9 +239,23 @@ func Load(path string) (*Document, error) {
 	}
 	dir := filepath.Dir(path)
 	if bytes.HasPrefix(data, glbMagic) {
-		return ParseGLB(data, dir)
+		doc, err := ParseGLB(data, dir)
+		if doc != nil {
+			doc.InputKind = "glb"
+		}
+		return doc, err
 	}
-	return ParseGLTF(data, nil, dir)
+	if bytes.HasPrefix(data, []byte(fbxMagic)) {
+		return ParseFBX(data, dir)
+	}
+	if strings.EqualFold(filepath.Ext(path), ".fbx") || isASCIIFBX(data) {
+		return nil, fmt.Errorf("fbx: ASCII FBX unsupported - export binary FBX")
+	}
+	doc, err := ParseGLTF(data, nil, dir)
+	if doc != nil {
+		doc.InputKind = "gltf"
+	}
+	return doc, err
 }
 
 // ParseGLB splits a GLB container (magic/version/length header, JSON chunk, optional BIN chunk)

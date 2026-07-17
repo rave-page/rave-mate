@@ -27,8 +27,11 @@ type SampleResult struct {
 	Points       []SampledPoint
 	Requested    int
 	Dropped      int // draws whose ancestor walk found no mapped bone (or no IBM for it)
-	SkippedPrims int // primitives without POSITION+JOINTS_0+WEIGHTS_0 on a skinned node
+	SkippedPrims int // unskinned primitives (no joints/weights, or mesh node without skin)
 	PerSlot      [BoneSlots]int
+	// ModelMin/ModelMax bound the emitted points in model space (metres) - a humanoid
+	// plausibility check for the CLI report. Zero when nothing was emitted.
+	ModelMin, ModelMax [3]float64
 }
 
 // tri is one sampleable triangle (document order preserved).
@@ -48,7 +51,7 @@ func Sample(doc *Document, n int, seed int64) (*SampleResult, error) {
 		return nil, fmt.Errorf("sample: point count %d must be > 0", n)
 	}
 	if len(doc.NodeSlot) == 0 {
-		return nil, fmt.Errorf("sample: no VRM humanoid mapping (need VRM 0.x extensions.VRM.humanoid or VRM 1.0 extensions.VRMC_vrm.humanoid)")
+		return nil, fmt.Errorf("sample: no humanoid bone mapping (VRM humanoid extension, MapHumanoid name heuristics, or a -bonemap table)")
 	}
 
 	res := &SampleResult{Requested: n}
@@ -58,7 +61,12 @@ func Sample(doc *Document, n int, seed int64) (*SampleResult, error) {
 	var total float64
 	for ni := range doc.Nodes {
 		node := &doc.Nodes[ni]
-		if node.Mesh < 0 || node.Skin < 0 || node.Mesh >= len(doc.Meshes) || node.Skin >= len(doc.Skins) {
+		if node.Mesh < 0 || node.Mesh >= len(doc.Meshes) {
+			continue
+		}
+		if node.Skin < 0 || node.Skin >= len(doc.Skins) {
+			// unskinned mesh: skipped + counted (contract v1.3.1)
+			res.SkippedPrims += len(doc.Meshes[node.Mesh].Primitives)
 			continue
 		}
 		skin := &doc.Skins[node.Skin]
@@ -104,13 +112,21 @@ func Sample(doc *Document, n int, seed int64) (*SampleResult, error) {
 		}
 		wa, wb, wc := 1-u-v, u, v
 
-		p, err := samplePoint(doc, t, wa, wb, wc)
+		p, pos, err := samplePoint(doc, t, wa, wb, wc)
 		if err != nil {
 			return nil, err
 		}
 		if p == nil {
 			res.Dropped++
 			continue
+		}
+		if len(res.Points) == 0 {
+			res.ModelMin, res.ModelMax = pos, pos
+		} else {
+			for ax := 0; ax < 3; ax++ {
+				res.ModelMin[ax] = math.Min(res.ModelMin[ax], pos[ax])
+				res.ModelMax[ax] = math.Max(res.ModelMax[ax], pos[ax])
+			}
 		}
 		res.PerSlot[p.Slot]++
 		res.Points = append(res.Points, *p)
@@ -119,7 +135,8 @@ func Sample(doc *Document, n int, seed int64) (*SampleResult, error) {
 }
 
 // samplePoint resolves one barycentric draw; nil = dropped (no mapped ancestor / no IBM).
-func samplePoint(doc *Document, t *tri, wa, wb, wc float64) (*SampledPoint, error) {
+// pos is the model-space sample position (bounds accounting).
+func samplePoint(doc *Document, t *tri, wa, wb, wc float64) (*SampledPoint, [3]float64, error) {
 	prim := t.prim
 	pos := bary3(prim.Pos[t.a], prim.Pos[t.b], prim.Pos[t.c], wa, wb, wc)
 
@@ -143,10 +160,10 @@ func samplePoint(doc *Document, t *tri, wa, wb, wc float64) (*SampledPoint, erro
 		}
 	}
 	if domJ < 0 {
-		return nil, nil // all-zero weights
+		return nil, pos, nil // all-zero weights
 	}
 	if domJ >= len(t.skin.Joints) {
-		return nil, fmt.Errorf("sample: JOINTS_0 index %d exceeds skin joint count %d", domJ, len(t.skin.Joints))
+		return nil, pos, fmt.Errorf("sample: JOINTS_0 index %d exceeds skin joint count %d", domJ, len(t.skin.Joints))
 	}
 
 	// Joint node -> §5 slot; unmapped -> nearest mapped ancestor (must also be a joint of this
@@ -162,7 +179,7 @@ func samplePoint(doc *Document, t *tri, wa, wb, wc float64) (*SampledPoint, erro
 		}
 	}
 	if slot < 0 {
-		return nil, nil // dropped: walk found nothing usable
+		return nil, pos, nil // dropped: walk found nothing usable
 	}
 
 	local := mat4MulPoint(t.skin.IBMs[jointIdx], pos)
@@ -188,7 +205,7 @@ func samplePoint(doc *Document, t *tri, wa, wb, wc float64) (*SampledPoint, erro
 		rgb[ch] = LinearToSRGBByte(lin)
 	}
 
-	return &SampledPoint{Slot: slot, Local: local, RGB: rgb}, nil
+	return &SampledPoint{Slot: slot, Local: local, RGB: rgb}, pos, nil
 }
 
 // ── geometry / texture helpers ───────────────────────────────────────────────
