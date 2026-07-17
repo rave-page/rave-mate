@@ -47,6 +47,7 @@ type ceSt struct {
 	dragMods     string         // modifiers at left-down ("c"/"s"; Ctrl+click = toggle selection)
 	assign       map[int]string // drop index -> pattern id (apply flow)
 	patName      string         // save-pattern name input
+	prefsOpen    bool           // defaults section expanded (render state)
 	toMem        bool           // last apply wrote memory cues (render hint only)
 	report       *cuepattern.ApplyReport
 	lastErr      string
@@ -97,6 +98,7 @@ type ceOverlay struct {
 	dsel     map[int]bool
 	dragA    float64 // rubber band (axis ms; dragA<0 = none)
 	dragB    float64
+	mode     string // active software scope - other scopes' cues render dimmed
 }
 
 func (u *UI) ce() *ceSt {
@@ -169,6 +171,7 @@ func (u *UI) ceSnapOverlay(host, mediaPath string) *ceOverlay {
 	if host != "library" {
 		return nil
 	}
+	mode := u.ceMode()
 	c := u.ce()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -184,7 +187,7 @@ func (u *UI) ceSnapOverlay(host, mediaPath string) *ceOverlay {
 		dsel[k] = v
 	}
 	return &ceOverlay{grid: c.grid, cues: c.track.Cues, drops: append([]float64(nil), c.drops...),
-		cursorMs: c.cursorMs, sel: sel, dsel: dsel, dragA: c.dragA, dragB: c.dragB}
+		cursorMs: c.cursorMs, sel: sel, dsel: dsel, dragA: c.dragA, dragB: c.dragB, mode: mode}
 }
 
 // cePatterns lazily opens the pattern store (nil on error - saving disabled).
@@ -661,8 +664,10 @@ func (u *UI) ceSetCues(tr musiclib.Track, cues []musiclib.CuePoint) {
 	})
 }
 
-// ceAddCueAt inserts a memory cue at ms (grid-snapped; 25ms dedup). Right-click.
+// ceAddCueAt inserts a memory cue at ms (grid-snapped; 25ms dedup within the active
+// software scope - another software's cue on the beat doesn't block). Right-click.
 func (u *UI) ceAddCueAt(ms float64) {
+	mode := u.ceMode()
 	c := u.ce()
 	c.mu.Lock()
 	if !c.active {
@@ -676,13 +681,13 @@ func (u *UI) ceAddCueAt(ms float64) {
 	prev := c.captureUndoLocked()
 	c.mu.Unlock()
 	for _, q := range tr.Cues {
-		if q.Kind != musiclib.CueGrid && math.Abs(q.StartMs-ms) < 25 {
+		if q.Kind != musiclib.CueGrid && cuepattern.InScope(q, mode) && math.Abs(q.StartMs-ms) < 25 {
 			return // marker already here
 		}
 	}
 	u.ceCommitUndo(prev)
 	cues := append(append([]musiclib.CuePoint(nil), tr.Cues...),
-		musiclib.CuePoint{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: ms})
+		musiclib.CuePoint{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: ms, Sw: mode})
 	sort.Slice(cues, func(i, j int) bool { return cues[i].StartMs < cues[j].StartMs })
 	u.ceSetCues(tr, cues)
 }
@@ -1100,7 +1105,8 @@ func (u *UI) ceApply(toMemory bool) {
 		u.toast(i18n.T("library.ce.noPatternPicked"))
 		return
 	}
-	cues, rep, err := cuepattern.Apply(tr, drops, pats, cuepattern.ApplyOptions{ToMemory: toMemory, SnapDrop: true})
+	mode := u.ceMode()
+	cues, rep, err := u.ceRunApply(tr, drops, pats, toMemory, mode, u.cePrefFor(mode))
 	if err != nil {
 		u.toast(err.Error())
 		return
@@ -1186,6 +1192,10 @@ func (u *UI) ceApplySelected(toMemory bool) {
 	}
 	s.mu.Unlock()
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].tr.Path < jobs[j].tr.Path })
+	// snapshot ONCE: the bg loop must not read live prefs (map race with the
+	// act-worker), and a mid-batch defaults change must not alter later tracks
+	mode := u.ceMode()
+	pref := u.cePrefFor(mode)
 	u.bg(func() {
 		applied, skipped := 0, 0
 		for _, j := range jobs {
@@ -1193,7 +1203,7 @@ func (u *UI) ceApplySelected(toMemory bool) {
 				skipped++
 				continue
 			}
-			cues, _, err := cuepattern.Apply(j.tr, j.drops, pats, cuepattern.ApplyOptions{ToMemory: toMemory, SnapDrop: true})
+			cues, _, err := u.ceRunApply(j.tr, j.drops, pats, toMemory, mode, pref)
 			if err != nil {
 				skipped++
 				continue
@@ -1222,6 +1232,170 @@ func (u *UI) ceApplySelected(toMemory bool) {
 	})
 }
 
+// ceRunApply lays patterns with mode's scope + defaults: new cues carry the mode's
+// software tag, Overwrite clears the in-scope set first, and the pad budget is enforced
+// closest-to-drop (split evenly across drops per the mode's default). mode/pref are
+// snapshotted by the CALLER - batch loops run on bg goroutines and must not re-read
+// the live prefs per track (race + mid-batch semantics).
+func (u *UI) ceRunApply(tr musiclib.Track, drops []float64, pats map[int]cuepattern.Pattern, toMemory bool, mode string, pref ceSWPref) ([]musiclib.CuePoint, cuepattern.ApplyReport, error) {
+	cues, rep, err := cuepattern.Apply(tr, drops, pats, cuepattern.ApplyOptions{
+		ToMemory: toMemory, SnapDrop: true,
+		Software: mode, Overwrite: pref.Overwrite, MaxPads: pref.MaxPadsOr()})
+	if err != nil {
+		return nil, rep, err
+	}
+	if !toMemory { // pads may exceed the budget with pre-existing hotcues - cap by drop distance
+		var demoted int
+		cues, demoted = cuepattern.CapPads(cues, drops, mode, pref.MaxPadsOr(), !pref.NoSplitEven)
+		rep.Demoted += demoted
+	}
+	return cues, rep, nil
+}
+
+// ceBatchCues mutates every checked collection track's cue list off-thread and persists
+// the changed ones (collection mirror + change notify per track). toast receives
+// done/skipped once the run lands.
+func (u *UI) ceBatchCues(mutate func(musiclib.Track) ([]musiclib.CuePoint, bool), toast func(done, skipped int)) {
+	c := u.ce()
+	c.mu.Lock()
+	remote := c.remote()
+	c.mu.Unlock()
+	if remote { // batch ops target the LOCAL collection
+		return
+	}
+	s := u.lib()
+	s.mu.Lock()
+	jobs := make([]musiclib.Track, 0, len(s.collSel))
+	for p := range s.collSel {
+		if tr, ok := s.byPath[p]; ok {
+			jobs = append(jobs, tr)
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].Path < jobs[j].Path })
+	u.bg(func() {
+		done, skipped := 0, 0
+		for _, tr := range jobs {
+			cues, changed := mutate(tr)
+			if !changed {
+				skipped++
+				continue
+			}
+			if err := u.svc.Lib.UpdateTrackCues(tr, cues); err != nil {
+				skipped++
+				continue
+			}
+			s.mu.Lock()
+			if t, ok := s.byPath[tr.Path]; ok {
+				t.Cues = cues
+				s.byPath[tr.Path] = t
+				for i := range s.tracks {
+					if s.tracks[i].Path == tr.Path {
+						s.tracks[i].Cues = cues
+					}
+				}
+			}
+			s.mu.Unlock()
+			u.libNotifyTrackChanged(tr.Path)
+			done++
+		}
+		u.ceReloadTrack()
+		toast(done, skipped)
+		u.patchMain()
+	})
+}
+
+// cePromoteSelected promotes memory cues to pads on every checked track (mode scope + cap).
+func (u *UI) cePromoteSelected() {
+	mode := u.ceMode()
+	pads := u.cePrefFor(mode).MaxPadsOr()
+	u.ceBatchCues(func(tr musiclib.Track) ([]musiclib.CuePoint, bool) {
+		cues, n := cuepattern.PromoteMemoryToHotcues(tr.Cues, mode, pads)
+		return cues, n > 0
+	}, func(done, skipped int) {
+		u.toast(i18n.T("library.ce.batchOpToast", i18n.A{"done": fmt.Sprint(done), "skipped": fmt.Sprint(skipped)}))
+	})
+}
+
+// ceConvertSelected demotes in-scope hotcues to memory cues on every checked track.
+func (u *UI) ceConvertSelected() {
+	mode := u.ceMode()
+	u.ceBatchCues(func(tr musiclib.Track) ([]musiclib.CuePoint, bool) {
+		n := 0
+		for _, q := range tr.Cues {
+			if q.Kind == musiclib.CueHot && cuepattern.InScope(q, mode) {
+				n++
+			}
+		}
+		if n == 0 {
+			return nil, false
+		}
+		return cuepattern.ConvertHotcuesToMemory(tr.Cues, mode), true
+	}, func(done, skipped int) {
+		u.toast(i18n.T("library.ce.batchOpToast", i18n.A{"done": fmt.Sprint(done), "skipped": fmt.Sprint(skipped)}))
+	})
+}
+
+// ceClearSelected removes the in-scope musical cues from every checked track (confirmed).
+func (u *UI) ceClearSelected() {
+	mode := u.ceMode()
+	total := 0
+	u.ceBatchCues(func(tr musiclib.Track) ([]musiclib.CuePoint, bool) {
+		cues, n := cuepattern.ClearMusical(tr.Cues, mode)
+		total += n
+		return cues, n > 0
+	}, func(done, skipped int) {
+		u.toast(i18n.T("library.ce.clearedToast", i18n.A{"tracks": fmt.Sprint(done), "n": fmt.Sprint(total)}))
+	})
+}
+
+// ceClearOpen removes the in-scope musical cues from the open track (confirmed; undoable).
+func (u *UI) ceClearOpen() {
+	mode := u.ceMode()
+	c := u.ce()
+	c.mu.Lock()
+	if !c.active {
+		c.mu.Unlock()
+		return
+	}
+	tr := c.track
+	prev := c.captureUndoLocked()
+	c.mu.Unlock()
+	cues, n := cuepattern.ClearMusical(tr.Cues, mode)
+	if n == 0 {
+		u.toast(i18n.T("library.ce.clearNone"))
+		return
+	}
+	u.ceCommitUndo(prev)
+	u.ceSetCues(tr, cues)
+	u.toast(i18n.T("library.ce.clearedToast", i18n.A{"tracks": "1", "n": fmt.Sprint(n)}))
+}
+
+// ceClearConfirm opens the destructive-clear confirm (batch = the checked rows, else the
+// open track).
+func (u *UI) ceClearConfirm(batch bool) {
+	mode := u.ceMode()
+	scope := i18n.T("library.ce.clearScopeOne")
+	act := "ce-clear-do"
+	if batch {
+		s := u.lib()
+		s.mu.Lock()
+		nSel := len(s.collSel)
+		s.mu.Unlock()
+		scope = i18n.T("library.ce.clearScopeSel", i18n.A{"n": fmt.Sprint(nSel)})
+		act = "ce-clear-sel-do"
+	}
+	swNote := i18n.T("library.ce.clearScopeAllSw")
+	if mode != "" {
+		swNote = i18n.T("library.ce.clearScopeSw", i18n.A{"app": ceSoftwareLabel(mode)})
+	}
+	body := `<p>` + esc(i18n.T("library.ce.clearConfirm", i18n.A{"scope": scope})) + `</p>` +
+		`<div class=set-note>` + esc(swNote) + ` ` + esc(i18n.T("library.ce.clearKeeps")) + `</div>`
+	u.openModal(modal(i18n.T("library.ce.clearTitle"), body,
+		btnRow(btn(i18n.T("library.ce.clearTitle"), "destructive", act, ""),
+			btn(i18n.T("common.cancel"), "outline", "modal-close", ""))))
+}
+
 // cePromoteAll assigns free pad slots to the track's memory cues in time order -
 // prepared cues become controller-fireable hotcues (the reverse of ceConvertAll).
 func (u *UI) cePromoteAll() {
@@ -1237,7 +1411,8 @@ func (u *UI) cePromoteAll() {
 	if !active {
 		return
 	}
-	cues, n := cuepattern.PromoteMemoryToHotcues(tr.Cues)
+	mode := u.ceMode()
+	cues, n := cuepattern.PromoteMemoryToHotcues(tr.Cues, mode, u.cePrefFor(mode).MaxPadsOr())
 	if n == 0 {
 		u.toast(i18n.T("library.ce.promoteNone"))
 		return
@@ -1291,7 +1466,7 @@ func (u *UI) ceConvertAll() {
 	if !active {
 		return
 	}
-	cues := cuepattern.ConvertHotcuesToMemory(tr.Cues)
+	cues := cuepattern.ConvertHotcuesToMemory(tr.Cues, u.ceMode())
 	if remote { // rce: convert in ceSt only - Save ships it to the peer
 		c.mu.Lock()
 		if c.active && c.remote() && c.track.Path == tr.Path {
@@ -1968,6 +2143,10 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	if rs := u.rceSaveHTML(); rs != "" {
 		wb = rs // rce mode: save-to-peer rail replaces the local write-back router
 	}
+	mode := u.ceMode()
+	pref := u.cePrefFor(mode)
+	modeSel := u.ceModeSelectHTML(mode)
+	nChecked := len(s.collSel)
 	c := u.ce()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1983,6 +2162,10 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	var b strings.Builder
 	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(eyebrow) + `</div><div class=insp-title>` +
 		esc(trackTitle(c.track)) + `</div></div>`)
+
+	// software mode: scopes new cues + apply/promote/write to one DJ app ("" = all)
+	b.WriteString(modeSel)
+	b.WriteString(u.ceDefaultsHTML(c, mode, pref))
 
 	// drops → pattern assign grid (fixed rows drop 1-4 + X; unplaced rows still show)
 	st := u.cePatterns() // ensure the store is open so the pickers render on first use
@@ -2014,27 +2197,109 @@ func (u *UI) ceRailHTML(s *libSt) string {
 	if nsel+ndsel > 0 {
 		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.delHint")) + `</div>`)
 	}
+	if st != nil && len(st.List()) > 0 {
+		b.WriteString(btnRow(btn(i18n.T("library.ce.managePatterns"), "ghost", "ce-pat-manage", "")))
+	}
 
 	// apply
 	if len(c.drops) > 0 {
 		b.WriteString(`<div class=btn-col>` +
 			btn(i18n.T("library.ce.applyHot"), "primary", "ce-apply:hot", "") +
 			btn(i18n.T("library.ce.applyMem"), "outline", "ce-apply:mem", "") + `</div>`)
+		if pref.Overwrite {
+			if n := ceInScopeMusical(c.track.Cues, mode); n > 0 {
+				b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.owNote", i18n.A{"n": fmt.Sprint(n)})) + `</div>`)
+			}
+		}
 	}
 	b.WriteString(btnRow(
 		btn(i18n.T("library.ce.promoteAll"), "ghost", "ce-promote", ""),
 		btn(i18n.T("library.ce.convertAll"), "ghost", "ce-convert", "")))
+	b.WriteString(btnRow(btn(i18n.T("library.ce.clearOne"), "ghost", "ce-clear", "")))
 	if c.report != nil {
 		r := c.report
 		b.WriteString(hint("ok", i18n.T("library.ce.reportHint", i18n.A{
 			"added": fmt.Sprint(r.Added), "cut": fmt.Sprint(r.Cut),
 			"skipped": fmt.Sprint(r.Skipped), "demoted": fmt.Sprint(r.Demoted)})))
+		if r.Replaced > 0 {
+			b.WriteString(hint("info", i18n.T("library.ce.replacedHint", i18n.A{"n": fmt.Sprint(r.Replaced)})))
+		}
 	}
 	if c.lastErr != "" {
 		b.WriteString(hint("bad", c.lastErr))
 	}
+
+	// batch: every action below runs over the CHECKED collection rows
+	if nChecked > 0 && c.rce == nil {
+		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.batchHeader", i18n.A{"n": fmt.Sprint(nChecked)})) + `</div>`)
+		b.WriteString(`<div class=btn-col>` +
+			btn(i18n.T("library.ce.applySelHot"), "outline", "ce-apply-sel:hot", "") +
+			btn(i18n.T("library.ce.applySelMem"), "outline", "ce-apply-sel:mem", "") + `</div>`)
+		b.WriteString(btnRow(
+			btn(i18n.T("library.ce.promoteSel"), "ghost", "ce-promote-sel", ""),
+			btn(i18n.T("library.ce.convertSel"), "ghost", "ce-convert-sel", "")))
+		b.WriteString(btnRow(btn(i18n.T("library.ce.clearSel", i18n.A{"n": fmt.Sprint(nChecked)}), "ghost", "ce-clear-sel", "")))
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.batchNote")) + `</div>`)
+	}
+
 	b.WriteString(wb)
 	b.WriteString(btnRow(btn(i18n.T("common.close"), "ghost", "ce-close", "")))
+	return b.String()
+}
+
+// ceInScopeMusical counts the musical cues software scope sw sees.
+func ceInScopeMusical(cues []musiclib.CuePoint, sw string) int {
+	n := 0
+	for _, q := range cues {
+		if q.Kind != musiclib.CueGrid && q.Kind != musiclib.CueLoad && q.Kind != musiclib.CueFade && cuepattern.InScope(q, sw) {
+			n++
+		}
+	}
+	return n
+}
+
+// ceModeSelectHTML renders the target-software picker (detected installs badged).
+func (u *UI) ceModeSelectHTML(cur string) string {
+	det := map[string]bool{}
+	for _, t := range u.ceTargets(false) { // cached - no fs probes per repaint
+		det[t.key] = true
+	}
+	return smartSelect("ce-mode", i18n.T("library.ce.modeLabel"), "ce-mode:", cur, func() []ssOpt {
+		opts := []ssOpt{{Val: "", Label: i18n.T("library.ce.modeAll"), Sub: i18n.T("library.ce.modeAllSub")}}
+		for _, s := range ceSoftwares {
+			o := ssOpt{Val: s[0], Label: s[1], Sub: i18n.T("library.ce.modeSwSub", i18n.A{"app": s[1]})}
+			if det[s[0]] {
+				o.Badge = i18n.T("library.ce.modeDetected")
+			}
+			opts = append(opts, o)
+		}
+		return opts
+	})
+}
+
+// ceDefaultsHTML renders the collapsible per-mode defaults. c LOCKED by the caller.
+func (u *UI) ceDefaultsHTML(c *ceSt, mode string, pref ceSWPref) string {
+	title := i18n.T("library.ce.defaultsAll")
+	if mode != "" {
+		title = i18n.T("library.ce.defaultsFor", i18n.A{"app": ceSoftwareLabel(mode)})
+	}
+	arrow := "▸"
+	if c.prefsOpen {
+		arrow = "▾"
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="pb-label ce-prefs-hd" data-act=ce-prefs-tgl>` + arrow + ` ` + esc(title) + `</div>`)
+	if !c.prefsOpen {
+		return b.String()
+	}
+	padOpts := [][2]string{{"2", "2"}, {"4", "4"}, {"6", "6"}, {"8", "8"}, {"16", "16"}, {"32", "32"}}
+	b.WriteString(selectBox(i18n.T("library.ce.prefPads"), "ce-pref-pads", padOpts, fmt.Sprint(pref.MaxPadsOr())))
+	b.WriteString(toggleRow(i18n.T("library.ce.prefOw"), "ce-pref-ow", pref.Overwrite))
+	b.WriteString(toggleRow(i18n.T("library.ce.prefSplit"), "ce-pref-split", !pref.NoSplitEven))
+	if mode != "" {
+		b.WriteString(toggleRow(i18n.T("library.ce.prefPromote", i18n.A{"app": ceSoftwareLabel(mode)}), "ce-pref-promote", pref.AutoPromote))
+	}
+	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.defaultsNote")) + `</div>`)
 	return b.String()
 }
 
@@ -2110,6 +2375,143 @@ func ceAssignSelect(dropIdx int, cur string, st *cuepattern.Store) string {
 	})
 }
 
+// ── saved-pattern manager ──
+
+// cePatternManagerHTML is the manage-patterns modal: rename, overwrite from the current
+// wave selection, delete. Reopened after every action so the list stays fresh.
+func (u *UI) cePatternManagerHTML() string {
+	st := u.cePatterns()
+	if st == nil {
+		return modal(i18n.T("library.ce.pmTitle"), hint("bad", i18n.T("library.ce.pmStoreGone")), "")
+	}
+	c := u.ce()
+	c.mu.Lock()
+	nsel := 0
+	for _, on := range c.sel {
+		if on {
+			nsel++
+		}
+	}
+	c.mu.Unlock()
+	pats := st.List()
+	var b strings.Builder
+	if len(pats) == 0 {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.pmEmpty")) + `</div>`)
+	}
+	for _, p := range pats {
+		meta := i18n.Tn("library.ce.patternCues", len(p.Cues))
+		if p.FromTrack != "" {
+			meta += " · " + i18n.T("library.ce.pmFrom", i18n.A{"track": p.FromTrack})
+		}
+		b.WriteString(`<div class=pb-label>` + esc(p.Name) + `</div><div class=set-note>` + esc(meta) + `</div>`)
+		b.WriteString(fmt.Sprintf(`<form data-act=%s class=lib-toolbar>%s<button class="rp-btn rp-btn--outline" type=submit>%s</button></form>`,
+			attrQ("ce-pat-rename:"+p.ID), labeledInput("name", "", p.Name), esc(i18n.T("library.ce.pmRename"))))
+		ow := btnGated(i18n.T("library.ce.pmOverwrite"), i18n.T("library.ce.pmOverwriteTip"))
+		if nsel > 0 {
+			ow = btn(i18n.T("library.ce.pmOverwriteN", i18n.A{"n": fmt.Sprint(nsel)}), "outline", "ce-pat-ow:"+p.ID, "")
+		}
+		b.WriteString(btnRow(ow, btn(i18n.T("common.delete"), "destructive", "ce-pat-del:"+p.ID, "")))
+	}
+	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.pmNote")) + `</div>`)
+	return modal(i18n.T("library.ce.pmTitle"), b.String(), "")
+}
+
+// cePatRename renames a stored pattern (assign pickers pick the new name up on repaint).
+func (u *UI) cePatRename(id, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		u.toast(i18n.T("library.ce.nameNeeded"))
+		return
+	}
+	st := u.cePatterns()
+	if st == nil {
+		return
+	}
+	p, ok := st.Get(id)
+	if !ok {
+		return
+	}
+	p.Name = name
+	if _, err := st.Save(p); err != nil {
+		u.toast(i18n.T("library.ce.saveFailed") + err.Error())
+		return
+	}
+	u.toast(i18n.T("library.ce.pmRenamed", i18n.A{"name": name}))
+	u.openModal(u.cePatternManagerHTML())
+	u.cePatchRail()
+}
+
+// cePatOverwrite replaces a stored pattern's cues with the current wave selection
+// (same extraction as Save-as-pattern; ID + name survive).
+func (u *UI) cePatOverwrite(id string) {
+	st := u.cePatterns()
+	if st == nil {
+		return
+	}
+	old, ok := st.Get(id)
+	if !ok {
+		return
+	}
+	c := u.ce()
+	c.mu.Lock()
+	var idx []int
+	for i, on := range c.sel {
+		if on {
+			idx = append(idx, i)
+		}
+	}
+	sort.Ints(idx)
+	if len(idx) == 0 {
+		c.mu.Unlock()
+		u.toast(i18n.T("library.ce.noCuesSel"))
+		return
+	}
+	anchor := c.cursorMs
+	if di := cuepattern.NearestDrop(c.drops, anchor); di >= 0 {
+		anchor = c.drops[di]
+	}
+	tr := c.track
+	c.mu.Unlock()
+	p, err := cuepattern.Extract(tr, idx, anchor, old.Name)
+	if err != nil {
+		u.toast(err.Error())
+		return
+	}
+	p.ID, p.CreatedAt = old.ID, old.CreatedAt
+	saved, err := st.Save(p)
+	if err != nil {
+		u.toast(i18n.T("library.ce.saveFailed") + err.Error())
+		return
+	}
+	u.toast(i18n.T("library.ce.pmOverwritten", i18n.A{"name": saved.Name, "n": fmt.Sprint(len(saved.Cues))}))
+	u.openModal(u.cePatternManagerHTML())
+	u.cePatchRail()
+}
+
+// cePatDelete removes a stored pattern + any drop assignments pointing at it.
+func (u *UI) cePatDelete(id string) {
+	st := u.cePatterns()
+	if st == nil {
+		return
+	}
+	p, _ := st.Get(id)
+	if err := st.Delete(id); err != nil {
+		u.toast(i18n.T("library.ce.saveFailed") + err.Error())
+		return
+	}
+	c := u.ce()
+	c.mu.Lock()
+	for di, pid := range c.assign {
+		if pid == id {
+			delete(c.assign, di)
+		}
+	}
+	c.mu.Unlock()
+	u.toast(i18n.T("library.ce.pmDeleted", i18n.A{"name": p.Name}))
+	u.openModal(u.cePatternManagerHTML())
+	u.cePatchRail()
+}
+
 // ── actions ──
 
 func init() {
@@ -2171,6 +2573,63 @@ func init() {
 	onPrefix("ce-apply-sel:", func(u *UI, m actMsg) { u.ceApplySelected(m.arg("ce-apply-sel:") == "mem") })
 	onExact("ce-convert", func(u *UI, _ actMsg) { u.ceConvertAll() })
 	onExact("ce-promote", func(u *UI, _ actMsg) { u.cePromoteAll() })
+	// software mode + per-mode defaults
+	onPrefix("ce-mode:", func(u *UI, m actMsg) {
+		v := m.arg("ce-mode:")
+		u.cePrefsMut(func(p *cePrefsSt) { p.Mode = v })
+		u.cePatchWave() // out-of-scope flags dim
+		u.cePatchRail()
+	})
+	onExact("ce-prefs-tgl", func(u *UI, _ actMsg) {
+		c := u.ce()
+		c.mu.Lock()
+		c.prefsOpen = !c.prefsOpen
+		c.mu.Unlock()
+		u.cePatchRail()
+	})
+	onExact("ce-pref-pads", func(u *UI, m actMsg) {
+		n := atoi(m.Val)
+		u.cePrefMutSW(func(p *ceSWPref) { p.MaxPads = n })
+	})
+	onExact("ce-pref-ow", func(u *UI, m actMsg) {
+		on := m.Val == "true"
+		u.cePrefMutSW(func(p *ceSWPref) { p.Overwrite = on })
+	})
+	onExact("ce-pref-split", func(u *UI, m actMsg) {
+		off := m.Val != "true"
+		u.cePrefMutSW(func(p *ceSWPref) { p.NoSplitEven = off })
+	})
+	onExact("ce-pref-promote", func(u *UI, m actMsg) {
+		on := m.Val == "true"
+		u.cePrefMutSW(func(p *ceSWPref) { p.AutoPromote = on })
+	})
+	// batch (checked collection rows) + clear
+	onExact("ce-promote-sel", func(u *UI, _ actMsg) { u.cePromoteSelected() })
+	onExact("ce-convert-sel", func(u *UI, _ actMsg) { u.ceConvertSelected() })
+	onExact("ce-clear", func(u *UI, _ actMsg) { u.ceClearConfirm(false) })
+	onExact("ce-clear-sel", func(u *UI, _ actMsg) { u.ceClearConfirm(true) })
+	onExact("ce-clear-do", func(u *UI, _ actMsg) { u.closeModal(); u.ceClearOpen() })
+	onExact("ce-clear-sel-do", func(u *UI, _ actMsg) { u.closeModal(); u.ceClearSelected() })
+	// saved-pattern manager
+	onExact("ce-pat-manage", func(u *UI, _ actMsg) { u.openModal(u.cePatternManagerHTML()) })
+	onPrefix("ce-pat-rename:", func(u *UI, m actMsg) { u.cePatRename(m.arg("ce-pat-rename:"), parseForm(m.Form)["name"]) })
+	onPrefix("ce-pat-ow:", func(u *UI, m actMsg) { u.cePatOverwrite(m.arg("ce-pat-ow:")) })
+	onPrefix("ce-pat-del:", func(u *UI, m actMsg) {
+		id := m.arg("ce-pat-del:")
+		st := u.cePatterns()
+		if st == nil {
+			return
+		}
+		p, ok := st.Get(id)
+		if !ok {
+			return
+		}
+		body := `<p>` + esc(i18n.T("library.ce.pmDeleteConfirm", i18n.A{"name": p.Name})) + `</p>`
+		u.openModal(modal(i18n.T("common.delete"), body,
+			btnRow(btn(i18n.T("common.delete"), "destructive", "ce-pat-del-do:"+id, ""),
+				btn(i18n.T("common.cancel"), "outline", "modal-close", ""))))
+	})
+	onPrefix("ce-pat-del-do:", func(u *UI, m actMsg) { u.cePatDelete(m.arg("ce-pat-del-do:")) })
 	// keyboard scopes (shell.go keydown transport; scope-gated + focus-gated in JS)
 	onPrefix("key:", func(u *UI, m actMsg) {
 		switch m.arg("key:") {

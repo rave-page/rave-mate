@@ -60,6 +60,7 @@ type CuePoint struct {
 	StartMs float64 `json:"startMs"`         // position in ms
 	LenMs   float64 `json:"lenMs,omitempty"` // loop length in ms (0 = point cue)
 	Hotcue  int     `json:"hotcue"`          // pad/slot index; -1 = not a hotcue
+	Sw      string  `json:"sw,omitempty"`    // software scope: "" = every DJ software, else "traktor"|"rekordbox"|"serato"|"virtualdj" - only that app's write-back exports it
 }
 
 // MusicalCues counts non-grid cues (hotcues / memory cues / loops - what the editors flag).

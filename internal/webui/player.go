@@ -365,7 +365,11 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 		if dur > 0 {
 			for _, cue := range m.cues {
 				if x := toX(start + cue.StartMs/1000.0); x >= 0 && x <= w {
-					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.25" vector-effect="non-scaling-stroke"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind))
+					op := 1.0
+					if ce != nil && ce.mode != "" && cue.Sw != "" && cue.Sw != ce.mode {
+						op = 0.3 // another software's cue: visible but muted in this mode
+					}
+					fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="1.25" stroke-opacity="%.2f" vector-effect="non-scaling-stroke"/>`, x, y0, x, y0+bandH, cueColor(cue.Kind), op)
 				}
 			}
 			// drop markers (libdb enrichment); the editor layer draws them when active
@@ -511,8 +515,15 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 				tip += " · "
 			}
 			tip += pubClock(cue.StartMs / 1000)
-			fmt.Fprintf(&b, `<g><title>%s</title><rect x="%.1f" y="%.0f" width="15" height="13" rx="2" fill="%s" opacity="0.92"/><text x="%.1f" y="%.0f" fill="#0a0a0a" font-size="10" font-weight="700" font-family="monospace" text-anchor="middle">%s</text></g>`,
-				html.EscapeString(tip), x-7.5, h-13, cueColor(cue.Kind), x, h-3, html.EscapeString(lbl))
+			op := 0.92
+			if cue.Sw != "" { // software-scoped cue: name its app; dim it outside its mode
+				tip += " · " + i18n.T("library.ce.scopeOnly", i18n.A{"app": ceSoftwareLabel(cue.Sw)})
+				if ce.mode != "" && cue.Sw != ce.mode {
+					op = 0.35
+				}
+			}
+			fmt.Fprintf(&b, `<g><title>%s</title><rect x="%.1f" y="%.0f" width="15" height="13" rx="2" fill="%s" opacity="%.2f"/><text x="%.1f" y="%.0f" fill="#0a0a0a" font-size="10" font-weight="700" font-family="monospace" text-anchor="middle">%s</text></g>`,
+				html.EscapeString(tip), x-7.5, h-13, cueColor(cue.Kind), op, x, h-3, html.EscapeString(lbl))
 		}
 		// beat distances between neighbouring markers (cues + drops)
 		if ce.grid != nil {

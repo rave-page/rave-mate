@@ -89,7 +89,43 @@ column shows each track's census — ◆n drop markers, ⚑n cues.
    assigned patterns; tracks without drops or grid are skipped and counted.
 
 **Convert all hotcues → memory cues** demotes a track's pads in one step (positions +
-names kept) for software that supports memory cues.
+names kept) for software that supports memory cues. **Assign pads: memory cues →
+hotcues** is the reverse — free pad slots go to memory cues in time order (Traktor
+shows a memory cue as a flag but pads can't fire it; this makes them pad-triggerable).
+**Clear cues…** removes the mode's musical cues (confirmed; grid anchors, load/fade
+markers and drops are kept).
+
+**Manage patterns…** opens the pattern library: rename a pattern (drop assignments
+follow immediately), **overwrite** its cues with the current wave selection (anchored
+at the nearest drop), or delete it. Tracks that already received cues from a pattern
+keep them — patterns are stamps, not links.
+
+### Batch: the checked tracks
+
+Once collection rows are ticked, the rail grows a **{n} checked tracks** section:
+apply the assigned patterns (hotcues or memory), **Assign pads**, **Hotcues → memory**
+and **Clear cues** across every checked row — each track anchored on its own drops;
+tracks without drops or grid are skipped and counted.
+
+## Target software modes (different cues per app)
+
+The **Target software** picker at the top of the rail scopes the editor to one DJ app
+(installed ones are badged *detected*). In a mode, new cues — right-click memory cues
+and pattern applies alike — are tagged for that software only; other apps' cues stay
+visible but dimmed (the flag tooltip names their app), don't collide with the mode's
+cues, and don't consume its pad slots. **All software** (the default) edits the shared
+layer every app sees. So a track can carry one cue set for Traktor and another for
+Rekordbox, and each write-back exports only what its target should see: the shared
+layer plus that app's own cues.
+
+Each mode remembers its own **defaults** (the collapsible section under the picker):
+
+| Default | Effect |
+|---|---|
+| **Hotcue pad limit** | caps how many hotcues survive an apply or a write (Traktor pads = 8). The cues **closest to each drop** win; excess pads demote to memory cues. |
+| **Split the pad budget evenly across drops** | with several drops, each drop keeps its nearest cues (remainder to earlier drops; spare capacity refills globally). Off = one global closest-to-a-drop ranking. |
+| **Overwrite existing cues when applying patterns** | pattern applies **replace** the mode's existing cues instead of adding around them (the apply buttons warn how many would be cleared). |
+| **Always promote memory cues to pads when writing to {app}** | the write-back promotes memory cues to free pads on the way out — the library keeps them as memory cues. |
 
 ## Write cues to your DJ software
 
@@ -104,6 +140,11 @@ write **replaces** that software's hotcues/memory cues/loops for those tracks wi
 cues shown in rave-mate. Beatgrids are never touched (that's the [beatgrid
 fixer](BEATGRID_FIXER.md)'s job), and drop markers are **not** exported — they only
 become cues via an applied pattern.
+
+The export honours the target's scope and defaults: only the shared layer + that app's
+own cues ship; the app's pad limit is enforced (closest-to-drop, split across drops per
+its default) and, if enabled, memory cues are promoted to pads on the way out. The
+button count shows how many tracks carry cues that software would receive.
 
 Per software:
 

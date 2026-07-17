@@ -73,9 +73,10 @@ type UI struct {
 	ar      arSt         // automation run-now modal state (automations_runnow.go)
 	gfTrain gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
-	ceMu    sync.Mutex // guards ceState/ceStore lazy-init (library_cueedit.go)
+	ceMu    sync.Mutex // guards ceState/ceStore/cePref lazy-init (library_cueedit.go)
 	ceState *ceSt
 	ceStore *cuepattern.Store
+	cePref  *cePrefsSt // cue-editor mode + per-software defaults (cueprefs.go)
 
 	rceMu   sync.Mutex         // guards rcePull/rcePre (remote-track fetch, library_remotecue.go)
 	rcePull context.CancelFunc // active peer-file pull (nil = none); rce-cancel invokes it

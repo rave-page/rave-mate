@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/cuepattern"
 	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/musiclib"
@@ -37,31 +38,40 @@ func (u *UI) ceTargets(force bool) []gfTarget {
 	return t
 }
 
-// ceWriteJobsLocked builds the CueUpdate set the router would write (checked rows, else
-// openPath; tracks without musical cues are dropped). Caller holds s.mu.
-func ceWriteJobsLocked(s *libSt, openPath string) []musiclib.CueUpdate {
-	var paths []string
+// ceWritePathsLocked resolves the write scope: checked rows, else openPath. Caller holds s.mu.
+func ceWritePathsLocked(s *libSt, openPath string) []string {
 	if len(s.collSel) > 0 {
+		paths := make([]string, 0, len(s.collSel))
 		for p := range s.collSel {
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)
-	} else {
-		paths = []string{openPath}
+		return paths
 	}
-	var out []musiclib.CueUpdate
-	for _, p := range paths {
-		tr, ok := s.byPath[p]
-		if !ok || ceCueCount(tr.Cues) == 0 {
-			continue
-		}
-		out = append(out, musiclib.CueUpdate{Path: p, BPM: tr.BPM, Cues: tr.Cues})
-	}
-	return out
+	return []string{openPath}
 }
 
-// ceWriteJobs is the self-locking variant for action handlers (no locks held).
-func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
+// ceWriteCountLocked counts the tracks a write to software sw would touch (≥1 musical
+// cue in sw's scope). Render-cheap - the full transform only runs on the write click.
+// Caller holds s.mu.
+func ceWriteCountLocked(s *libSt, openPath, sw string) int {
+	n := 0
+	for _, p := range ceWritePathsLocked(s, openPath) {
+		tr, ok := s.byPath[p]
+		if !ok {
+			continue
+		}
+		if musiclib.MusicalCues(cuepattern.FilterForSoftware(tr.Cues, sw)) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// ceWriteJobs builds the transformed CueUpdate set for target sw: only sw's scope
+// exports; the software's defaults then optionally promote memory cues to pads and
+// always enforce its pad budget (closest-to-drop, split across drops per pref).
+func (u *UI) ceWriteJobs(sw string) []musiclib.CueUpdate {
 	c := u.ce()
 	c.mu.Lock()
 	path, active := c.path, c.active
@@ -69,10 +79,28 @@ func (u *UI) ceWriteJobs() []musiclib.CueUpdate {
 	if !active {
 		return nil
 	}
+	pref := u.cePrefFor(sw)
+	pads := pref.MaxPadsOr()
 	s := u.lib()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return ceWriteJobsLocked(s, path)
+	var out []musiclib.CueUpdate
+	for _, p := range ceWritePathsLocked(s, path) {
+		tr, ok := s.byPath[p]
+		if !ok {
+			continue
+		}
+		cues := cuepattern.FilterForSoftware(tr.Cues, sw)
+		if pref.AutoPromote { // "always promote memory cues to pads for {app}"
+			cues, _ = cuepattern.PromoteMemoryToHotcues(cues, "", pads)
+		}
+		cues, _ = cuepattern.CapPads(cues, s.dropsIdx[p], "", pads, !pref.NoSplitEven)
+		if musiclib.MusicalCues(cues) == 0 {
+			continue
+		}
+		out = append(out, musiclib.CueUpdate{Path: p, BPM: tr.BPM, Cues: cues})
+	}
+	return out
 }
 
 // ceWriteHTML renders the write-back section of the cue-editor rail. s is LOCKED by the
@@ -92,11 +120,6 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 	}
 	var b strings.Builder
 	b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.writeHeader")) + `</div>`)
-	updates := ceWriteJobsLocked(s, openPath)
-	if len(updates) == 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.writeNone")) + `</div>`)
-		return b.String()
-	}
 	targets := u.ceTargets(false) // cached: discovery fs-probes must not run per repaint
 	if len(targets) == 0 {
 		b.WriteString(hint("bad", i18n.T("library.gf.noTargets")))
@@ -105,16 +128,26 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 	var acts []string
 	var notes []string
 	variant := "primary"
+	writable := 0
 	for _, t := range targets {
 		if n, ok := applied[t.key]; ok {
+			writable++
 			b.WriteString(hint("ok", i18n.T("library.ce.wroteHint", i18n.A{"app": t.label, "n": fmt.Sprint(n)})))
 			continue
 		}
+		n := ceWriteCountLocked(s, openPath, t.key) // per-target: only its scope's cues count
+		if n == 0 {
+			continue
+		}
+		writable++
 		if busy {
 			continue // one write at a time; rail re-renders when it lands
 		}
-		acts = append(acts, btn(i18n.T("library.ce.writeTo", i18n.A{"app": t.label, "n": fmt.Sprint(len(updates))}), variant, "ce-write:"+t.key, ""))
+		acts = append(acts, btn(i18n.T("library.ce.writeTo", i18n.A{"app": t.label, "n": fmt.Sprint(n)}), variant, "ce-write:"+t.key, ""))
 		variant = "outline"
+		if u.cePrefFor(t.key).AutoPromote {
+			notes = append(notes, i18n.T("library.ce.writePromoteNote", i18n.A{"app": t.label}))
+		}
 		switch t.key {
 		case "rekordbox":
 			notes = append(notes, i18n.T("library.ce.writeRbNote"))
@@ -123,6 +156,10 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 		case "serato":
 			notes = append(notes, i18n.T("library.ce.writeSeratoNote"))
 		}
+	}
+	if writable == 0 {
+		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.writeNone")) + `</div>`)
+		return b.String()
 	}
 	if errStr != "" {
 		b.WriteString(hint("bad", errStr))
@@ -150,7 +187,7 @@ func (u *UI) ceWriteTo(sw string) {
 		return
 	}
 	c.mu.Unlock()
-	updates := u.ceWriteJobs()
+	updates := u.ceWriteJobs(sw)
 	if len(updates) == 0 {
 		u.toast(i18n.T("library.ce.writeNone"))
 		return

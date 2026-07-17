@@ -164,7 +164,7 @@ func TestConvertHotcuesToMemory(t *testing.T) {
 		{Kind: musiclib.CueHot, Hotcue: 2, Name: "a", StartMs: 1},
 		{Kind: musiclib.CueLoop, Hotcue: -1, StartMs: 2, LenMs: 100},
 	}
-	out := ConvertHotcuesToMemory(in)
+	out := ConvertHotcuesToMemory(in, "")
 	if out[0].Kind != musiclib.CuePlain || out[0].Hotcue != -1 || out[0].Name != "a" {
 		t.Fatalf("hotcue not demoted: %+v", out[0])
 	}

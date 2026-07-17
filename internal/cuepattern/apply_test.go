@@ -16,7 +16,7 @@ func TestPromoteMemoryToHotcues(t *testing.T) {
 		{Kind: musiclib.CueLoop, Hotcue: -1, StartMs: 1500}, // untouched
 		{Kind: musiclib.CueGrid, Hotcue: -1, StartMs: 0},    // untouched
 	}
-	out, n := PromoteMemoryToHotcues(cues)
+	out, n := PromoteMemoryToHotcues(cues, "", 0)
 	if n != 2 {
 		t.Fatalf("promoted=%d want 2", n)
 	}
@@ -43,7 +43,7 @@ func TestPromoteMemoryToHotcues(t *testing.T) {
 		full = append(full, musiclib.CuePoint{Kind: musiclib.CueHot, Hotcue: s, StartMs: float64(s * 100)})
 	}
 	full = append(full, musiclib.CuePoint{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: 900})
-	if _, n := PromoteMemoryToHotcues(full); n != 0 {
+	if _, n := PromoteMemoryToHotcues(full, "", 0); n != 0 {
 		t.Fatalf("promoted=%d want 0 (pads full)", n)
 	}
 }

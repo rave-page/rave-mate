@@ -52,16 +52,20 @@ func Extract(t musiclib.Track, selected []int, anchorMs float64, name string) (P
 
 // ApplyOptions controls pattern application.
 type ApplyOptions struct {
-	ToMemory bool // write pattern cues as memory cues (no pad slot) where supported
-	SnapDrop bool // snap each drop to the nearest gridline before anchoring (default true in UI)
+	ToMemory  bool   // write pattern cues as memory cues (no pad slot) where supported
+	SnapDrop  bool   // snap each drop to the nearest gridline before anchoring (default true in UI)
+	Software  string // scope: new cues carry this tag; collisions + pad slots count only this scope ("" = all)
+	Overwrite bool   // clear the in-scope musical cues first - the patterns REPLACE the track's cue set
+	MaxPads   int    // hotcue pad budget for this scope (0 = the 8-pad baseline)
 }
 
 // ApplyReport says what happened per track.
 type ApplyReport struct {
-	Added   int // cues written
-	Cut     int // pattern cues outside the drop's span (clipped per spec)
-	Skipped int // collision with an existing cue
-	Demoted int // wanted a pad slot but none free - written as memory cue
+	Added    int // cues written
+	Cut      int // pattern cues outside the drop's span (clipped per spec)
+	Skipped  int // collision with an existing cue
+	Demoted  int // wanted a pad slot but none free - written as memory cue
+	Replaced int // pre-existing cues cleared by Overwrite
 }
 
 // Apply generates the track's new cue list: existing cues preserved, each drop's
@@ -77,10 +81,17 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 	drops := append([]float64(nil), dropsMs...)
 	sort.Float64s(drops)
 
+	maxPads := opt.MaxPads
+	if maxPads <= 0 {
+		maxPads = hotcueSlots
+	}
 	out := append([]musiclib.CuePoint(nil), t.Cues...)
+	if opt.Overwrite {
+		out, rep.Replaced = ClearMusical(out, opt.Software)
+	}
 	used := map[int]bool{}
-	for _, c := range t.Cues {
-		if c.Kind == musiclib.CueHot && c.Hotcue >= 0 {
+	for _, c := range out {
+		if c.Kind == musiclib.CueHot && c.Hotcue >= 0 && InScope(c, opt.Software) {
 			used[c.Hotcue] = true
 		}
 	}
@@ -113,11 +124,11 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 				rep.Cut++
 				continue
 			}
-			if collides(out, pos) {
+			if collides(out, pos, opt.Software) {
 				rep.Skipped++
 				continue
 			}
-			nc := musiclib.CuePoint{Name: pc.Name, StartMs: pos, Hotcue: -1}
+			nc := musiclib.CuePoint{Name: pc.Name, StartMs: pos, Hotcue: -1, Sw: opt.Software}
 			switch {
 			case pc.Kind == musiclib.CueLoop:
 				nc.Kind = musiclib.CueLoop
@@ -127,8 +138,8 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 			default:
 				nc.Kind = musiclib.CueHot
 				slot := pc.Hotcue
-				if slot < 0 || slot >= hotcueSlots || used[slot] {
-					slot = freeSlot(used)
+				if slot < 0 || slot >= maxPads || used[slot] {
+					slot = freeSlotN(used, maxPads)
 				}
 				if slot < 0 { // pads exhausted - keep the cue, lose the pad
 					nc.Kind = musiclib.CuePlain
@@ -146,30 +157,35 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 	return out, rep, nil
 }
 
-// PromoteMemoryToHotcues assigns free pad slots (0..7) to plain (memory) cues in
-// time order - the reverse of ConvertHotcuesToMemory, for tracks prepared with
+// PromoteMemoryToHotcues assigns free pad slots to plain (memory) cues in time
+// order - the reverse of ConvertHotcuesToMemory, for tracks prepared with
 // memory cues that should fire from controller hotcue pads (Traktor shows a
-// HOTCUE=-1 cue as a flag but pads can't trigger it). Existing hotcue slots are
-// respected; loops/grid/load/fade cues are untouched; memory cues beyond the
-// free pads stay memory. Returns the new list + how many were promoted.
-func PromoteMemoryToHotcues(cues []musiclib.CuePoint) ([]musiclib.CuePoint, int) {
+// HOTCUE=-1 cue as a flag but pads can't trigger it). Scope-aware: only cues in
+// scope sw promote, and only that scope's slots count. max caps the pad budget
+// (0 = the 8-pad baseline). Existing hotcue slots are respected; loops/grid/
+// load/fade cues are untouched; memory cues beyond the free pads stay memory.
+// Returns the new list + how many were promoted.
+func PromoteMemoryToHotcues(cues []musiclib.CuePoint, sw string, max int) ([]musiclib.CuePoint, int) {
+	if max <= 0 {
+		max = hotcueSlots
+	}
 	out := append([]musiclib.CuePoint(nil), cues...)
 	used := map[int]bool{}
 	for _, c := range out {
-		if c.Kind == musiclib.CueHot && c.Hotcue >= 0 {
+		if c.Kind == musiclib.CueHot && c.Hotcue >= 0 && InScope(c, sw) {
 			used[c.Hotcue] = true
 		}
 	}
 	var cand []int
 	for i := range out {
-		if out[i].Kind == musiclib.CuePlain {
+		if out[i].Kind == musiclib.CuePlain && InScope(out[i], sw) {
 			cand = append(cand, i)
 		}
 	}
 	sort.SliceStable(cand, func(a, b int) bool { return out[cand[a]].StartMs < out[cand[b]].StartMs })
 	n := 0
 	for _, i := range cand {
-		slot := freeSlot(used)
+		slot := freeSlotN(used, max)
 		if slot < 0 {
 			break // pads exhausted - the rest stay memory cues
 		}
@@ -184,13 +200,13 @@ func PromoteMemoryToHotcues(cues []musiclib.CuePoint) ([]musiclib.CuePoint, int)
 	return out, n
 }
 
-// ConvertHotcuesToMemory returns the cue list with every hotcue demoted to a plain
-// (memory) cue - names and positions preserved, pad slots released.
-func ConvertHotcuesToMemory(cues []musiclib.CuePoint) []musiclib.CuePoint {
+// ConvertHotcuesToMemory returns the cue list with every in-scope hotcue demoted to a
+// plain (memory) cue - names and positions preserved, pad slots released.
+func ConvertHotcuesToMemory(cues []musiclib.CuePoint, sw string) []musiclib.CuePoint {
 	out := append([]musiclib.CuePoint(nil), cues...)
 	n := 0
 	for i := range out {
-		if out[i].Kind == musiclib.CueHot {
+		if out[i].Kind == musiclib.CueHot && InScope(out[i], sw) {
 			out[i].Kind = musiclib.CuePlain
 			out[i].Hotcue = -1
 			out[i].Type = 0
@@ -203,10 +219,15 @@ func ConvertHotcuesToMemory(cues []musiclib.CuePoint) []musiclib.CuePoint {
 	return out
 }
 
-func collides(cues []musiclib.CuePoint, ms float64) bool {
+// collides: only cues software sw can see count - a Traktor cue and a Rekordbox cue may
+// share a beat.
+func collides(cues []musiclib.CuePoint, ms float64, sw string) bool {
 	for _, c := range cues {
 		if c.Kind == musiclib.CueGrid {
 			continue // grid anchors share positions with musical cues by design
+		}
+		if !InScope(c, sw) {
+			continue
 		}
 		if math.Abs(c.StartMs-ms) <= collisionEps {
 			return true
@@ -215,8 +236,9 @@ func collides(cues []musiclib.CuePoint, ms float64) bool {
 	return false
 }
 
-func freeSlot(used map[int]bool) int {
-	for s := range hotcueSlots {
+// freeSlotN returns the lowest unused pad slot < n (-1 = none).
+func freeSlotN(used map[int]bool, n int) int {
+	for s := range n {
 		if !used[s] {
 			return s
 		}
