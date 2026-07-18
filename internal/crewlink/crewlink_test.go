@@ -198,7 +198,11 @@ func TestSyncTargetChangeResyncs(t *testing.T) {
 	n := NewNode(NodeConfig{Client: NewClient("http://unused", staticTokens("t")), EventID: "ev"})
 	feed := func(from string, domain func() time.Time) {
 		for i := 0; i < 8; i++ {
-			t1 := n.clock.Now()
+			// Backdate T1 by 1ms to pin RTT ≈ 1ms: with real elapsed-time RTTs, one
+			// ~100ns sample sets min-RTT and CI scheduler preemption (50µs+) throws
+			// every other sample past the 2×min qualifier → flaky lock. The ±0.5ms
+			// offset shift is far inside this test's 50ms tolerances.
+			t1 := n.clock.Now() - int64(time.Millisecond)
 			remote := domain().UnixNano()
 			pong := SyncFrame{T: FrameTypeSync, ID: uint32(i), T1: t1, T2: remote, T3: remote}
 			b, _ := json.Marshal(pong)
