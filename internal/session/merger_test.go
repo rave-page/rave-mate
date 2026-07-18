@@ -74,12 +74,25 @@ func TestSameSourceRefreshes(t *testing.T) {
 
 func TestPriorityRespectsDefaultOrder(t *testing.T) {
 	m, c := newTestMerger()
-	// FieldEQHigh has no explicit priority entry → defaultPriority, where traktor outranks
-	// midi.custom. Higher confidence must not flip it.
-	m.Apply(obs(SourceMIDICustom, 0.9, c.now(), "A", map[string]any{FieldEQHigh: 0.8}))
-	m.Apply(obs(SourceTraktor, 0.1, c.now(), "A", map[string]any{FieldEQHigh: 0.5}))
-	if got := deckVal(t, m, "A", FieldEQHigh); got.Value != 0.5 || got.Source != SourceTraktor {
+	// FieldElapsedTime has no explicit priority entry → defaultPriority, where traktor
+	// outranks midi.custom. Higher confidence must not flip it.
+	m.Apply(obs(SourceMIDICustom, 0.9, c.now(), "A", map[string]any{FieldElapsedTime: 42.0}))
+	m.Apply(obs(SourceTraktor, 0.1, c.now(), "A", map[string]any{FieldElapsedTime: 40.0}))
+	if got := deckVal(t, m, "A", FieldElapsedTime); got.Value != 40.0 || got.Source != SourceTraktor {
 		t.Fatalf("expected higher-priority traktor to win: %+v", got)
+	}
+}
+
+func TestEQFilterPreferMidiCustom(t *testing.T) {
+	m, c := newTestMerger()
+	// EQ/filter mirror the fader rule: the learned/custom MIDI knobs are the REAL
+	// positions - a periodic HTTP snapshot (QML mod) must not freeze them.
+	for _, f := range []string{FieldEQHigh, FieldEQMid, FieldEQLow, FieldFilter, FieldTrim} {
+		m.Apply(obs(SourceTraktor, 0.9, c.now(), "A", map[string]any{f: 0.5}))
+		m.Apply(obs(SourceMIDICustom, 0.1, c.now(), "A", map[string]any{f: 0.8}))
+		if got := deckVal(t, m, "A", f); got.Value != 0.8 || got.Source != SourceMIDICustom {
+			t.Fatalf("%s: expected midi.custom to win (real knob): %+v", f, got)
+		}
 	}
 }
 

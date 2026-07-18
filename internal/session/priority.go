@@ -66,6 +66,15 @@ var fieldPriority = map[string][]string{
 	// full). Prefer the real position so the meter reads 100% at 100%. onAirLevel→fader stays
 	// the fallback for HTTP-only setups (lowest here).
 	FieldFader: {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
+	// EQ / filter / trim: same rationale as fader - the learned/custom MIDI knobs are the
+	// REAL positions. Traktor's HTTP feed never carries raw mixer knobs (only onAirLevel),
+	// but a QML mod may post them; without these rows defaultPriority let that periodic
+	// snapshot outrank the hardware and freeze the overlay's EQ/filter.
+	FieldEQHigh: {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
+	FieldEQMid:  {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
+	FieldEQLow:  {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
+	FieldFilter: {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
+	FieldTrim:   {SourceQML, SourceMIDICustom, SourceTraktor, SourceSeratoRemote, SourceProDJLink, SourceNML},
 }
 
 // defaultPriority ranks sources for any field without an explicit table entry

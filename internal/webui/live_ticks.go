@@ -28,6 +28,9 @@ func init() {
 		u.tickPatch(&js, "live-np", u.nowPlayingHTML())
 		u.tickPatch(&js, "live-status", u.liveStatusHTML())
 		u.tickPatch(&js, "live-decks", u.decksHTML())
+		if u.svc.Session != nil {
+			u.tickPatch(&js, "live-signals", u.signalsHTML())
+		}
 		if u.svc.OBSControl != nil {
 			u.tickPatch(&js, "live-cockpit", u.cockpitHTML())
 		}

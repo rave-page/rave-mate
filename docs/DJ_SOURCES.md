@@ -6,9 +6,17 @@ them into one live session picture. Each connection method is an independent **S
 unified state. Code: `internal/session/` (contracts + merger), `internal/session/sources/*`,
 `internal/session/sinks/*`, `internal/session/aggregator` (the hub / `session` module).
 
-The **Session** tab shows the merged state with per-field provenance and a live coverage
-matrix; the **Recordings** tab shows the auto-generated tracklist. Toggle sources/sinks in
+The **Live** tab shows the merged state with provenance: each deck card carries a "via
+{sources}" line, and the **Signal sources** panel below the decks shows per-channel mixer
+coverage (which source feeds EQ / filter / fader — "—" = nobody, the instant answer to
+"why are my EQ knobs dead on the overlay"), every source's liveness, ravemidi
+driver bind health per managed controller, and any input port that failed to open. The
+**Recordings** tab shows the auto-generated tracklist. Toggle sources/sinks in
 Settings → "DJ data sources & outputs" (applied live, no restart).
+
+Mixer-knob priority: EQ / filter / trim / fader prefer the learned/custom **MIDI** source
+over an HTTP feed — the hardware knobs are the real positions (Traktor's HTTP feed carries
+no raw mixer knobs at all; for Traktor rigs these signals exist ONLY via MIDI).
 
 ## Normalized envelope
 

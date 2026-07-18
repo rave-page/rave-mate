@@ -377,6 +377,10 @@
       "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.",
       "title": "Per-route bitrate"
     },
+    "signal-sources": {
+      "body": "Who feeds what: each channel row shows the source behind the mixer signals the streamed decks overlay draws (EQ, filter, fader) - a '—' means NO source delivers that signal right now. For Traktor rigs, EQ and filter only ever arrive via MIDI (Traktor's HTTP feed carries no raw mixer knobs), so dead EQ here = the MIDI path is down: check the controller's driver bind state below and the MIDI tab's port status.",
+      "title": "Signal sources & provenance"
+    },
     "ml-fps": {
       "body": "Caps how many frames per second leave this machine. VJ tools often render at 120+ fps - every frame above the cap is dropped BEFORE capture-copy, encode and encryption, so the cap directly bounds sender CPU. 60 covers every projector and stream; raise it only if you know the far end displays faster.",
       "title": "Sender frame-rate cap"
@@ -1744,7 +1748,18 @@
     },
     "decks": {
       "fromPeer": "Decks from {name} (peer link)",
-      "title": "Decks (merged)"
+      "title": "Decks (merged)",
+      "via": "via {sources}"
+    },
+    "signals": {
+      "channel": "Ch {n}",
+      "driverBound": "driver holds the hardware (reading its rave-mate port)",
+      "driverUnbound": "NOT bound - another app may hold the controller (retries: {retries}). EQ/filter from this device are dead until it binds.",
+      "idle": "running · no data",
+      "off": "off",
+      "portFailed": "failed to open - held by another app or unplugged",
+      "receiving": "receiving · {age}",
+      "title": "Signal sources"
     },
     "network": {
       "apiDown": "API↓ {rate}",

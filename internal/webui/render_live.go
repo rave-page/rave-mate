@@ -11,6 +11,7 @@ import (
 
 	"rave.page/mate/internal/audiorec"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/session"
 )
@@ -27,6 +28,9 @@ func (u *UI) renderLive() string {
 	b.WriteString(`<div id=live-np>` + u.nowPlayingHTML() + `</div>`)
 	b.WriteString(section(i18n.T("live.status.title"), `<div id=live-status>`+u.liveStatusHTML()+`</div>`))
 	b.WriteString(section(i18n.T("live.decks.title"), `<div id=live-decks>`+u.decksHTML()+`</div>`))
+	if u.svc.Session != nil {
+		b.WriteString(sectionTip(i18n.T("live.signals.title"), tipTopic("signal-sources"), `<div id=live-signals>`+u.signalsHTML()+`</div>`))
+	}
 	if u.svc.OBSControl != nil {
 		b.WriteString(section(i18n.T("live.cockpit.title"), `<div id=live-cockpit>`+u.cockpitHTML()+`</div>`))
 	}
@@ -322,13 +326,24 @@ func (u *UI) liveStatusHTML() string {
 
 func (u *UI) decksHTML() string {
 	byDeck := map[string]session.DeckSnapshot{}
+	viaByDeck := map[string]string{} // deck id → "src1, src2" provenance (Fyne-parity "via" line)
 	audible := ""
 	if u.svc.Session != nil {
-		ov := u.svc.Session.Snapshot().BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
+		snap := u.svc.Session.Snapshot()
+		ov := snap.BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
 		for _, d := range ov.Decks {
 			byDeck[d.Deck] = d
 		}
 		audible = ov.Master.Deck
+		for id, fields := range snap.Decks {
+			set := map[string]bool{}
+			for _, fv := range fields {
+				if fv.Source != "" {
+					set[fv.Source] = true
+				}
+			}
+			viaByDeck[id] = joinSorted(set)
+		}
 	}
 	// No local deck playing → mirror all playing decks from the freshest linked peer.
 	note := ""
@@ -398,8 +413,87 @@ func (u *UI) decksHTML() string {
 				cls += " deckbig--audible"
 			}
 		}
+		via := ""
+		if v := viaByDeck[id]; v != "" {
+			via = `<div class="deckbig-m deckbig-src">` + html.EscapeString(i18n.T("live.decks.via", i18n.A{"sources": v})) + `</div>`
+		}
 		b.WriteString(`<div class="` + cls + `"><div class=deckbig-id>` + html.EscapeString(i18n.T("live.deck.name", i18n.A{"id": id})) + `</div>` +
-			`<div class=deckbig-t>` + html.EscapeString(title) + `</div><div class=deckbig-m>` + html.EscapeString(meta) + `</div></div>`)
+			`<div class=deckbig-t>` + html.EscapeString(title) + `</div><div class=deckbig-m>` + html.EscapeString(meta) + `</div>` + via + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// joinSorted renders a string set as a stable comma list.
+func joinSorted(set map[string]bool) string {
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+// ── signal sources (Fyne view_session parity: per-signal provenance + source coverage) ──
+
+// signalsHTML renders the merged-state provenance panel: which source feeds each
+// channel's mixer signals (EQ/filter/fader - "—" = nobody, the instant answer to "why
+// are my EQ knobs dead"), every registered source's liveness, and ravemidi driver bind
+// health for managed controllers.
+func (u *UI) signalsHTML() string {
+	if u.svc.Session == nil {
+		return ""
+	}
+	var b strings.Builder
+	row := func(k, v string) string {
+		return `<div class=st-row><span class=st-k>` + html.EscapeString(k) + `</span>` +
+			`<span>` + html.EscapeString(v) + `</span></div>`
+	}
+	snap := u.svc.Session.Snapshot()
+	b.WriteString(`<div class="rp-card">`)
+	// per-channel mixer coverage: the signals the streamed overlay draws
+	mixer := [][2]string{{session.FieldEQLow, "EQ lo"}, {session.FieldEQMid, "EQ mid"},
+		{session.FieldEQHigh, "EQ hi"}, {session.FieldFilter, "Filter"}, {session.FieldFader, "Fader"}}
+	for _, ch := range []string{"1", "2", "3", "4"} {
+		fields := snap.Channels[ch]
+		parts := make([]string, 0, len(mixer))
+		for _, m := range mixer {
+			src := "—"
+			if fv, ok := fields[m[0]]; ok && fv.Source != "" {
+				src = fv.Source
+			}
+			parts = append(parts, m[1]+" "+src)
+		}
+		b.WriteString(row(i18n.T("live.signals.channel", i18n.A{"n": ch}), strings.Join(parts, " · ")))
+	}
+	// source liveness
+	for _, s := range u.svc.Session.Sources() {
+		state := i18n.T("live.signals.off")
+		switch {
+		case s.Receiving:
+			state = i18n.T("live.signals.receiving", i18n.A{"age": agoShort(s.LastSeen)})
+		case s.Running:
+			state = i18n.T("live.signals.idle")
+		}
+		b.WriteString(row(s.ID, state))
+	}
+	// ravemidi managed-controller bind health: an unbound input = the driver lost the
+	// hardware (another app grabbed it?) = EQ/filter silently dead. Say it HERE.
+	if midi.DriverInstalled() {
+		if sts, err := midi.QueryDriverInputs(); err == nil {
+			for _, st := range sts {
+				v := i18n.T("live.signals.driverBound")
+				if !st.Bound {
+					v = i18n.T("live.signals.driverUnbound", i18n.A{"retries": fmt.Sprint(st.RetryCount)})
+				}
+				b.WriteString(row(st.Name, v))
+			}
+		}
+	}
+	if u.svc.MIDISource != nil {
+		for _, p := range u.svc.MIDISource.FailedInputPorts() {
+			b.WriteString(row(p, i18n.T("live.signals.portFailed")))
+		}
 	}
 	b.WriteString(`</div>`)
 	return b.String()

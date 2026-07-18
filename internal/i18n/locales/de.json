@@ -214,12 +214,16 @@
       "body": "Video-Budget pro Route. 20 Mbit/s reichen für 1080p60 HEVC mit Reserve im Gigabit-LAN.",
       "title": "Bitrate pro Route"
     },
+    "signal-sources": {
+      "body": "Wer liefert was: jede Kanal-Zeile zeigt die Quelle hinter den Mixer-Signalen, die das gestreamte Deck-Overlay zeichnet (EQ, Filter, Fader) - ein „—“ heißt, KEINE Quelle liefert dieses Signal gerade. Bei Traktor-Setups kommen EQ und Filter ausschließlich über MIDI (Traktors HTTP-Feed enthält keine rohen Mixer-Knobs) - tote EQs hier = der MIDI-Pfad ist unten: Treiber-Bind-Status des Controllers unten und Port-Status im MIDI-Tab prüfen.",
+      "title": "Signalquellen & Herkunft"
+    },
     "ml-fps": {
       "body": "Begrenzt, wie viele Frames pro Sekunde diese Maschine verlassen. VJ-Tools rendern oft mit 120+ fps - jeder Frame über dem Limit wird VOR Capture-Kopie, Encoding und Verschlüsselung verworfen, das Limit begrenzt also direkt die Sender-CPU. 60 reicht für jeden Projektor und Stream; nur erhöhen, wenn die Gegenseite wirklich schneller anzeigt.",
       "title": "Sender-Framerate-Limit"
     },
     "ml-height": {
-      "body": "auto = native Auflösung überall AUSSER beim Software-x264-Fallback, der bei 1080p gedeckelt wird (x264 bei 4K60 lastet jeden Kern aus - ein Set-Killer). Hardware-Encoder (NVENC/AMF/QSV) schaffen 4K60 auf dedizierter Hardware, 4K fließt also wie bei NDI in voller Auflösung. Ein festes Limit lohnt nur zum Sparen von LAN-Bandbreite; „nativ" deaktiviert Skalierung auch beim x264-Fallback.",
+      "body": "auto = native Auflösung überall AUSSER beim Software-x264-Fallback, der bei 1080p gedeckelt wird (x264 bei 4K60 lastet jeden Kern aus - ein Set-Killer). Hardware-Encoder (NVENC/AMF/QSV) schaffen 4K60 auf dedizierter Hardware, 4K fließt also wie bei NDI in voller Auflösung. Ein festes Limit lohnt nur zum Sparen von LAN-Bandbreite; „nativ“ deaktiviert Skalierung auch beim x264-Fallback.",
       "title": "Encoding-Auflösungs-Limit"
     },
     "motion-studio": {
@@ -1375,7 +1379,18 @@
     },
     "decks": {
       "fromPeer": "Decks von {name} (Peer-Link)",
-      "title": "Decks (zusammengeführt)"
+      "title": "Decks (zusammengeführt)",
+      "via": "via {sources}"
+    },
+    "signals": {
+      "channel": "Ch {n}",
+      "driverBound": "Treiber hält die Hardware (liest ihren rave-mate-Port)",
+      "driverUnbound": "NICHT gebunden - evtl. hält eine andere App den Controller (Versuche: {retries}). EQ/Filter von diesem Gerät sind tot, bis er bindet.",
+      "idle": "läuft · keine Daten",
+      "off": "aus",
+      "portFailed": "konnte nicht geöffnet werden - von anderer App belegt oder abgesteckt",
+      "receiving": "empfängt · {age}",
+      "title": "Signalquellen"
     },
     "network": {
       "apiDown": "API↓ {rate}",
