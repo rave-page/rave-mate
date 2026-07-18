@@ -1,13 +1,13 @@
 {
-  "version": "nightly-558e844",
-  "build": 116,
-  "commit": "558e844",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-116-20260718-558e844.exe",
-  "sha256": "d11fdea7fef9ac28df8f59713edfd15449761b7c885f6d55f0ff0d62e0bdd91f",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-116-20260718-558e844.exe",
-  "installer_sha256": "5217bb6c6e17bbf1260f5322a05ec29cdbc5c6aa14838a25730c5e1f86f26efd",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-116-20260718-558e844",
-  "linux_sha256": "851adef6be84c9550056f01f429beb28efd2f0f6579d9228743988d1359c083d",
+  "version": "nightly-9e81936",
+  "build": 117,
+  "commit": "9e81936",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-117-20260718-9e81936.exe",
+  "sha256": "e0a12af8e4d2c8a5b86c3629066e23516a58acd13a8decf3dde6797246c5c107",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-117-20260718-9e81936.exe",
+  "installer_sha256": "91304580311b69e325d672e6e18039a1d2227008c85c6ed1b220edc8e9450a72",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-117-20260718-9e81936",
+  "linux_sha256": "368a61a508ddf314a24eff4462c610c6601c97ddc4619539a60be0c4db4fb92e",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-18T14:57:53Z",
-  "notes": "fix(mfenc): GOOS-suffix the C++ shim - linux builds reject stray .cpp in a non-cgo package"
+  "released": "2026-07-18T16:12:06Z",
+  "notes": "test(crewlink): deflake TestSyncTargetChangeResyncs on loaded runners"
 }
