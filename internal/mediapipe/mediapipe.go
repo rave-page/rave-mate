@@ -26,13 +26,27 @@ import (
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediatools"
+	"rave.page/mate/internal/mfenc"
 )
 
 const source = "mediapipe"
 
-// Factories returns the medialink Encoder/Decoder factories backed by ffmpeg children.
+// Factories returns the medialink Encoder/Decoder factories: H.264 encodes prefer the
+// native Media Foundation hardware pipeline (mfenc: no ffmpeg child, no raw stdin pipe,
+// live forced IDRs); everything else - and any mfenc failure - runs the ffmpeg child.
 func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFactory) {
+	var mfWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
+		if spec.Codec == medialink.CodecH264 && mfenc.Available() {
+			s, err := newMFBridge(ctx, log, spec, src)
+			if err == nil {
+				return s, nil
+			}
+			if !mfWarned {
+				mfWarned = true
+				log.Warn(source, "native MF encoder unavailable - using the ffmpeg child", map[string]any{"err": err.Error()})
+			}
+		}
 		ffmpeg, ok := mediatools.Resolve("ffmpeg")
 		if !ok {
 			return nil, fmt.Errorf("mediapipe: ffmpeg not found")

@@ -5,6 +5,9 @@ frame so any compatible receiver (OBS, Resolume, TouchDesigner, VRChat, vMix, â€
 visuals straight from memory - no file, no browser source, no window capture. One named sender
 per deck ("RaveMate Deck A" â€¦).
 
+Related: cross-PC video routes ENCODE captured Spout frames via the native MF hardware
+pipeline on Windows (no ffmpeg child) - see `docs/dev/MF_NATIVE_ENCODE.md`.
+
 Transport is selected at **build time** by a per-platform build tag. The default build (no tag)
 ships the no-op backend (`sender_noop.go`, tag `!spout && !syphon && !pipewire`): the sink runs
 (gate + render) but publishes nothing.

@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -55,6 +56,7 @@ import (
 	"rave.page/mate/internal/mediapipe"
 	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/mediasync"
+	"rave.page/mate/internal/mfenc"
 	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/midiemit"
 	"rave.page/mate/internal/mocap"
@@ -709,6 +711,16 @@ func run(parent context.Context, serviceMode bool) error {
 	debuglog.Go(log, "mediapipe", func() {
 		caps, ok := mediapipe.Probe(ctx, log)
 		if !ok {
+			// No ffmpeg: the native MF hardware encoder can still SOURCE h264 routes
+			// (receiving still needs ffmpeg's decode child on the far end).
+			if mfenc.Available() {
+				log.Warn("mediapipe", "ffmpeg unavailable - sending via native MF encoder only, receiving disabled", nil)
+				mediaCapsMu.Lock()
+				mediaEnc, mediaDec = []string{"h264_mf"}, nil
+				mediaCapsMu.Unlock()
+				mediaCtl.SetCodecCaps([]string{"h264_mf"}, nil)
+				return
+			}
 			log.Warn("mediapipe", "ffmpeg unavailable - video routes stay raw/echo", nil)
 			return
 		}
@@ -720,6 +732,8 @@ func run(parent context.Context, serviceMode bool) error {
 					enc = append(enc, e)
 				}
 			}
+		} else if mfenc.Available() && !slices.Contains(enc, "h264_mf") {
+			enc = append(enc, "h264_mf") // native MF engine rides the h264 tier even if ffmpeg lacks h264_mf
 		}
 		mediaCapsMu.Lock()
 		mediaEnc, mediaDec = enc, caps.Decoders
