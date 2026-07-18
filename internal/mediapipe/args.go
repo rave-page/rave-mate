@@ -46,9 +46,17 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 	if fps <= 0 {
 		fps = 30
 	}
+	// Downscale ceiling: encode a 4K source at (default) 1080p - the single biggest CPU
+	// lever on software tiers. Bitrate defaults follow the OUTPUT pixel rate.
+	outW, outH := spec.Width, spec.Height
+	scaled := spec.MaxHeight > 0 && spec.Height > spec.MaxHeight
+	if scaled {
+		outH = spec.MaxHeight
+		outW = spec.Width * outH / spec.Height // approximation for bitrate math; ffmpeg computes the even width
+	}
 	kbps := spec.BitrateKbps
 	if kbps <= 0 {
-		kbps = defaultBitrateKbps(spec.Width, spec.Height, fps)
+		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
@@ -56,6 +64,9 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 		"-video_size", fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"-framerate", trimFloat(fps),
 		"-i", "-", "-an",
+	}
+	if scaled {
+		args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", outH))
 	}
 	g := strconv.Itoa(gopFrames(fps))
 	br := strconv.Itoa(kbps) + "k"

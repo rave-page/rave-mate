@@ -499,6 +499,52 @@ func TestOfferUnknownSourceRejected(t *testing.T) {
 	}
 }
 
+// Raw-video guard: a big uncompressed video source is refused on BOTH sides - the
+// requester errors synchronously when it has no decoders, and the sender refuses the
+// offer when negotiation yields no codec (no encoders). No route may come up either way.
+func TestRawVideoRouteRefused(t *testing.T) {
+	h := &hub{}
+	secrets := fakeSecrets{key: testKey()}
+	rmB := New(Options{Self: "B", Bus: &busView{h, "B"}, Secrets: secrets, Ports: []int{0}, AdvertHost: "127.0.0.1"})
+	rmA := New(Options{Self: "A", Bus: &busView{h, "A"}, Secrets: secrets, Ports: []int{0}, AdvertHost: "127.0.0.1"})
+	rmB.RegisterSource(SourceDesc{ID: "vj", Kind: KindVideo, Codec: CodecNRGBA,
+		Width: 1920, Height: 1080, FPS: 60}, func(context.Context, Offer) (Source, error) {
+		t.Error("raw big-video source must never be opened")
+		return nil, context.Canceled
+	})
+	rmA.RegisterSink(SinkDesc{ID: "scr", Kind: KindVideo}, func(context.Context, Answer) (Sink, error) {
+		return &collectSink{done: make(chan struct{})}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := rmB.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rmB.Stop()
+	if err := rmA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer rmA.Stop()
+	rmB.Advertise() // B's start-advert predates A's subscription; don't wait for the 5s re-advert
+	waitFor(t, 2*time.Second, func() bool {
+		adv, ok := rmA.RemoteAdverts()["B"]
+		return ok && len(adv.Sources) == 1
+	})
+
+	// requester side: no local decoders → synchronous error at the click
+	if _, err := rmA.Offer("B", "vj", "scr", CodecNone); err == nil {
+		t.Fatal("expected requester-side raw-video refusal")
+	}
+	// sender side: requester claims decoders, sender has no encoders → async refusal
+	if _, err := rmA.OfferRoute("B", "vj", "scr", OfferOptions{Decoders: []string{DecodeH264}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if len(rmA.Stats()) != 0 || len(rmB.Stats()) != 0 {
+		t.Fatalf("no route expected: A=%d B=%d", len(rmA.Stats()), len(rmB.Stats()))
+	}
+}
+
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(d)

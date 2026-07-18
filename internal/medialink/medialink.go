@@ -103,6 +103,9 @@ type Frame struct {
 	PTS     int64  // presentation time, nanoseconds on the shared media clock
 	TC      Timecode
 	Payload []byte
+	// Release recycles Payload's buffer once the frame is fully consumed (nil = GC).
+	// A consumer that retains Payload (retransmit buffer) must NOT call it.
+	Release func()
 }
 
 // Keyframe reports whether the frame is independently decodable.

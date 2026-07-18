@@ -7,6 +7,27 @@ import (
 	"time"
 )
 
+// Pixel-rate-aware tier-4 skip: software x264 above ~1080p60 melts the CPU - a 4K60
+// source with no hardware encoder must land on the NDI-class intra tier at native res,
+// while hardware encoders take 4K unaffected.
+func TestNegotiateCodecForPixelRate(t *testing.T) {
+	allDec := []string{DecodeAV1, DecodeHEVC, DecodeH264, DecodeJPEG}
+	px4k60 := float64(3840 * 2160 * 60)
+	if got, ok := NegotiateCodecFor([]string{"libx264", "mjpeg"}, allDec, px4k60); !ok || got.Encoder != "mjpeg" || got.Tier != 5 {
+		t.Fatalf("4K60 sw rig: got %+v ok=%v, want mjpeg tier 5", got, ok)
+	}
+	if got, ok := NegotiateCodecFor([]string{"libx264", "mjpeg"}, allDec, float64(1280*720*60)); !ok || got.Encoder != "libx264" {
+		t.Fatalf("720p60 sw rig: got %+v ok=%v, want libx264", got, ok)
+	}
+	if got, ok := NegotiateCodecFor([]string{"hevc_nvenc", "libx264"}, allDec, px4k60); !ok || got.Encoder != "hevc_nvenc" {
+		t.Fatalf("4K60 hw rig: got %+v ok=%v, want hevc_nvenc untouched", got, ok)
+	}
+	// 4K60 with ONLY x264 and no jpeg decode on the far end = refuse (better than melting)
+	if _, ok := NegotiateCodecFor([]string{"libx264"}, []string{DecodeH264}, px4k60); ok {
+		t.Fatal("4K60 x264-only must not negotiate")
+	}
+}
+
 // TestNegotiateCodecMatrix walks the §3.2 tier matrix.
 func TestNegotiateCodecMatrix(t *testing.T) {
 	allDec := []string{DecodeAV1, DecodeHEVC, DecodeH264, DecodeJPEG}

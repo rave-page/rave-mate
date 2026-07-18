@@ -248,6 +248,8 @@ var helpTopics = map[string]helpTopic{
 	// ── Settings: Media-link card ──
 	"ml-accel":  {},
 	"ml-budget": {},
+	"ml-fps":    {},
+	"ml-height": {},
 	// ── MIDI tab: native MIDI-learn + DJ bridge ──
 	"midi-learn-controllers": {
 		Links: append(virtualMIDILinks(), ttLink{"Rekordbox MIDI LEARN guide", "https://rekordbox.com/en/support/faq/mapping-6/"}),

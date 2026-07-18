@@ -69,6 +69,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
 		Log: rt.Log, Encoder: encFac, Decoder: decFac,
+		EncodeMaxHeight: in.MediaCfg.MaxHeight,
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(in.Encoders, in.Decoders)

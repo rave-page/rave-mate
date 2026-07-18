@@ -204,6 +204,11 @@ type Options struct {
 	// Encoders/Decoders should also be empty.
 	Encoder EncoderFactory
 	Decoder DecoderFactory
+
+	// EncodeMaxHeight is the encoder downscale policy (MediaLink.MaxHeight verbatim):
+	// 0 = auto (native everywhere except tier-4 software encodes, capped 1080p),
+	// >0 = always cap at that height, -1 = never scale.
+	EncodeMaxHeight int
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -227,10 +232,11 @@ type RouteManager struct {
 	syncMu    sync.Mutex
 	syncPeers map[string]*OffsetEstimator // per-peer pairwise offset telemetry
 
-	encoders []string // §3.2 probed working video encoders (advertised + drives onOffer matrix; mu)
-	decoders []string // §3.2 decodable video codecs (advertised + carried in offers; mu)
-	encFac   EncoderFactory
-	decFac   DecoderFactory
+	encoders     []string // §3.2 probed working video encoders (advertised + drives onOffer matrix; mu)
+	decoders     []string // §3.2 decodable video codecs (advertised + carried in offers; mu)
+	encFac       EncoderFactory
+	decFac       DecoderFactory
+	encMaxHeight int // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -270,7 +276,7 @@ func New(opts Options) *RouteManager {
 		syncBurst: 250 * time.Millisecond, syncSteady: 10 * time.Second, syncPeer: opts.SyncPeer,
 		syncPeers: map[string]*OffsetEstimator{},
 		encoders:  opts.Encoders, decoders: opts.Decoders,
-		encFac: opts.Encoder, decFac: opts.Decoder,
+		encFac: opts.Encoder, decFac: opts.Decoder, encMaxHeight: opts.EncodeMaxHeight,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
 		pendingOff: map[string]*pendingOffer{}, active: map[string]*activeRoute{},
@@ -542,6 +548,15 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 		decoders = rm.decoders
 	}
 	admit, reason := rm.admit()
+	var srcDesc *SourceDesc
+	if adv, ok := rm.remoteAdvert[target]; ok {
+		for i := range adv.Sources {
+			if adv.Sources[i].ID == sourceID {
+				srcDesc = &adv.Sources[i]
+				break
+			}
+		}
+	}
 	rm.mu.Unlock()
 	if !started {
 		return "", errors.New("medialink: not started")
@@ -551,6 +566,11 @@ func (rm *RouteManager) OfferRoute(target, sourceID, sinkID string, opt OfferOpt
 	}
 	if !admit { // route cap / RSS ceiling - host protection
 		return "", errors.New("medialink: " + reason)
+	}
+	// Raw-video guard, requester side: with no local decoders a big video source could only
+	// arrive raw (the sender refuses that) - fail at the click with the real reason instead.
+	if srcDesc != nil && srcDesc.Kind == KindVideo && len(decoders) == 0 && !rawVideoOK(*srcDesc) {
+		return "", errors.New("medialink: video decoders not ready (ffmpeg missing or codec probe still running) - retry in a few seconds")
 	}
 	session := newSession()
 	po := &pendingOffer{target: target, sourceID: sourceID, sinkKind: sink.desc.Kind, open: sink.open}
@@ -617,13 +637,27 @@ func (rm *RouteManager) onOffer(ev Event) {
 	// common tier wins. No overlap / no caps = P1 echo (raw frames, no encode child).
 	var choice *CodecChoice
 	if src.desc.Kind == KindVideo && off.Caps != nil {
-		if ch, ok := NegotiateCodec(encoders, off.Caps.Decoders); ok {
+		px := float64(src.desc.Width) * float64(src.desc.Height) * src.desc.FPS
+		if ch, ok := NegotiateCodecFor(encoders, off.Caps.Decoders, px); ok {
 			codec, choice = ch.Codec, &ch
 			if w := ch.Warning(); w != "" {
 				rm.warnf("codec negotiated on a software tier", map[string]any{
 					"session": off.Session, "encoder": ch.Encoder, "warning": w})
 			}
 		}
+	}
+	// Raw-video guard: refusing beats melting. An uncompressed route above the pixel cap
+	// AES-seals + TCP-writes every full frame (~500 MB/s at 1080p60) - that pinned a source
+	// PC into a hard reset once. Tiny frames stay allowed (P1 echo path + tests).
+	if src.desc.Kind == KindVideo && choice == nil && !rawVideoOK(src.desc) {
+		reason := "no compatible video codec between the peers - raw streaming at this size would overload the sender"
+		if len(encoders) == 0 {
+			reason = "video encoders not ready on the sender (ffmpeg missing or codec probe still running) - retry in a few seconds"
+		}
+		rm.warnf("offer refused - raw video guard", map[string]any{"session": off.Session,
+			"source": off.SourceID, "w": src.desc.Width, "h": src.desc.Height, "reason": reason})
+		rm.answer(Answer{Session: off.Session, Accept: false, Reason: reason})
+		return
 	}
 	stream := uint16(rm.streamSeq.Add(1))
 	granted := grantCaps(off)
@@ -791,6 +825,14 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		_ = c.Close()
 		return
 	}
+	// belt-and-braces for the onOffer raw-video guard: never open capture for a raw route
+	// above the pixel cap, whatever path produced the pending answer.
+	if pa.choice == nil && pa.srcDesc.Kind == KindVideo && !rawVideoOK(pa.srcDesc) {
+		rm.warnf("raw video route blocked at serve (guard)", map[string]any{
+			"session": session, "w": pa.srcDesc.Width, "h": pa.srcDesc.Height})
+		_ = conn.Close()
+		return
+	}
 	src, err := pa.open(ctx, pa.offer)
 	if err != nil {
 		rm.warnf("source open failed", map[string]any{"source": pa.offer.SourceID, "error": err.Error()})
@@ -807,9 +849,19 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 			_ = conn.Close()
 			return
 		}
+		// Downscale policy: hardware encoders take native res (4K60 is nearly free on the
+		// silicon - NDI parity); only the tier-4 SOFTWARE fallback is auto-capped at 1080p.
+		// Explicit user cap (>0) always applies; -1 = never scale.
+		maxH := rm.encMaxHeight
+		if maxH == 0 && pa.choice.Tier == 4 {
+			maxH = swAutoMaxHeight
+		}
+		if maxH < 0 {
+			maxH = 0
+		}
 		spec := EncodeSpec{Encoder: pa.choice.Encoder, Codec: pa.choice.Codec, Tier: pa.choice.Tier,
 			Software: pa.choice.Software, Width: pa.srcDesc.Width, Height: pa.srcDesc.Height,
-			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate}
+			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate, MaxHeight: maxH}
 		esrc, err := rm.encFac(rctx, spec, src)
 		if err != nil {
 			rm.warnf("encode child failed", map[string]any{"session": session, "encoder": spec.Encoder, "error": err.Error()})
@@ -1199,7 +1251,9 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 		}
 		rio.st.sent(f)
 		if rio.rebuf != nil {
-			rio.rebuf.add(f) // NACK retransmit window (§2.5)
+			rio.rebuf.add(f) // NACK retransmit window (§2.5) - retains Payload, no release
+		} else if f.Release != nil {
+			f.Release() // pooled capture buffer back to its pool
 		}
 	}
 }

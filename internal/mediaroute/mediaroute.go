@@ -156,8 +156,12 @@ func (m *Manager) scan() {
 		if had && prev.Width == w && prev.Height == h {
 			continue
 		}
+		fps := float64(defaultFPSAdv)
+		if c := m.cfg().FPSCap(); c > 0 && float64(c) < fps {
+			fps = float64(c) // the sender-side cap is the real delivery rate - advertise it
+		}
 		desc := medialink.SourceDesc{ID: "spout:" + n, Name: n, Kind: medialink.KindVideo,
-			Codec: medialink.CodecNRGBA, Width: w, Height: h, FPS: defaultFPSAdv}
+			Codec: medialink.CodecNRGBA, Width: w, Height: h, FPS: fps}
 		name := n
 		m.router.RegisterSource(desc, func(context.Context, medialink.Offer) (medialink.Source, error) {
 			ww, hh, ok := m.senderSize(name)
@@ -357,9 +361,13 @@ func encoderCodec(enc string) string {
 
 // ── videoshare-backed source/sink ─────────────────────────────────────────────
 
-// spoutSource adapts a FrameReceiver to a medialink Source.
+// spoutSource adapts a FrameReceiver to a medialink Source. Frames carry a Release hook
+// (pooled capture buffers); the sender-side fps cap drops over-budget frames here, before
+// any encode/crypto cost.
 type spoutSource struct {
-	recv videoshare.FrameReceiver
+	recv   videoshare.FrameReceiver
+	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
+	last   time.Time
 }
 
 func (m *Manager) openSpoutSource(name string, _, _ int) (medialink.Source, error) {
@@ -367,19 +375,34 @@ func (m *Manager) openSpoutSource(name string, _, _ int) (medialink.Source, erro
 	if err != nil {
 		return nil, err
 	}
-	return &spoutSource{recv: recv}, nil
+	s := &spoutSource{recv: recv}
+	if fps := m.cfg().FPSCap(); fps > 0 {
+		s.minGap = time.Duration(float64(time.Second) / float64(fps))
+	}
+	return s, nil
 }
 
 func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case img, ok := <-s.recv.Frames():
-		if !ok {
-			return nil, io.EOF // receiver closed - route ends cleanly
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case img, ok := <-s.recv.Frames():
+			if !ok {
+				return nil, io.EOF // receiver closed - route ends cleanly
+			}
+			if s.minGap > 0 {
+				now := time.Now()
+				if now.Sub(s.last) < s.minGap {
+					videoshare.PutPix(img.Pix) // over the fps budget - recycle + wait for the next
+					continue
+				}
+				s.last = now
+			}
+			pix := img.Pix
+			return &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA,
+				Payload: pix, Release: func() { videoshare.PutPix(pix) }}, nil
 		}
-		return &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA,
-			Payload: img.Pix}, nil
 	}
 }
 

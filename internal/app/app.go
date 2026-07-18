@@ -652,6 +652,7 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,
+		EncodeMaxHeight: cfg.Features.MediaLink.MaxHeight,
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) can run isolated in a memory-capped
 	// featurehost child (MediaLink.Subprocess flag; default off = in-proc, unchanged). TCPlane +

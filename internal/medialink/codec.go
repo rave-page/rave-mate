@@ -51,13 +51,33 @@ var codecTiers = []struct {
 	{5, CodecJPEG, DecodeJPEG, false, []string{"mjpeg"}},
 }
 
+// swTier4MaxPixelRate bounds the tier-4 software encoders (libx264/libsvtav1) to what
+// they survive in zerolatency mode: ~1080p60. Above it (4K VJ sources) the NDI-class
+// intra tier (mjpeg: SIMD DCT, near-linear multithread) encodes native res at a
+// fraction of the CPU - x264 at 4K60 pins every core, which is a set-killer.
+const swTier4MaxPixelRate = 1920 * 1080 * 60
+
+// swAutoMaxHeight is the auto downscale ceiling applied ONLY to tier-4 software encodes
+// (EncodeMaxHeight 0 = auto). Hardware tiers and the intra tier run native res.
+const swAutoMaxHeight = 1080
+
 // NegotiateCodec picks the highest common tier: encoders = the source node's probed working
 // encoders, decoders = the requesting node's decodable codecs. ok=false when nothing overlaps -
 // the caller falls back to the P1 echo behaviour.
 func NegotiateCodec(encoders, decoders []string) (CodecChoice, bool) {
+	return NegotiateCodecFor(encoders, decoders, 0)
+}
+
+// NegotiateCodecFor is NegotiateCodec with the source's pixel rate (w*h*fps; 0 = unknown):
+// hardware tiers are unaffected, but tier-4 SOFTWARE encoders are skipped above
+// swTier4MaxPixelRate so a 4K source lands on the intra tier instead of melting the CPU.
+func NegotiateCodecFor(encoders, decoders []string, pixelRate float64) (CodecChoice, bool) {
 	enc := toSet(encoders)
 	dec := toSet(decoders)
 	for _, t := range codecTiers {
+		if t.software && pixelRate > swTier4MaxPixelRate {
+			continue
+		}
 		if !dec[t.decode] {
 			continue
 		}
@@ -69,6 +89,15 @@ func NegotiateCodec(encoders, decoders []string) (CodecChoice, bool) {
 	}
 	return CodecChoice{}, false
 }
+
+// rawVideoMaxPixels caps UNCOMPRESSED video on a route: raw NRGBA above this frame area
+// is refused outright - every raw frame is AES-GCM-sealed + TCP-written whole, and at
+// 1080p60 that is ~500 MB/s of crypto + wire on the sender (the spout-over-peerlink
+// source-PC melt). Small frames stay allowed for the P1 echo path + tests.
+const rawVideoMaxPixels = 320 * 240
+
+// rawVideoOK reports whether a video source is small enough to stream uncompressed.
+func rawVideoOK(d SourceDesc) bool { return d.Width*d.Height <= rawVideoMaxPixels }
 
 // EncoderTier maps an encoder name (Answer.Caps.Encoders[0]) back to its §3.2 tier - the recv
 // side derives its route-stat tier/software flag from the answered choice.

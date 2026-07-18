@@ -172,6 +172,9 @@ func (u *UI) mediaReceive(arg string) {
 	u.toast(i18n.T("actions.toast.startingReceive"))
 	u.bg(func() {
 		_, err := u.svc.MediaRoutes.StartReceive(peer, src)
+		if err != nil {
+			u.toast(err.Error()) // refusals carry the actionable reason (codec probe, ffmpeg, raw guard)
+		}
 		u.logErr("media receive", err)
 	})
 }

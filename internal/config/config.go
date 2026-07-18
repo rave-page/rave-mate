@@ -369,6 +369,8 @@ type MediaLinkFeature struct {
 	PreferCodec string `json:"preferCodec,omitempty"` // "hevc"|"h264"|"mjpeg"; "" = auto (§3.2 matrix)
 	BitrateKbps int    `json:"bitrateKbps,omitempty"` // per-route video budget; 0 = 20000
 	SWOnly      bool   `json:"swOnly,omitempty"`      // advertise software encoders only (diagnostic; tier 4 + CPU warning)
+	MaxFPS      int    `json:"maxFps,omitempty"`      // sender-side video fps cap; 0 = 60, -1 = uncapped
+	MaxHeight   int    `json:"maxHeight,omitempty"`   // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
 	// Subprocess opts IN to running the media plane (medialink+mediaroute+webcam) as an isolated,
 	// memory-capped featurehost child (#44), so a media RAM/CPU runaway or cgo fault can't starve the
 	// host. Default (false) = in-proc, the current behaviour. Flip on after verifying cross-PC routing
@@ -386,6 +388,18 @@ func (f MediaLinkFeature) Bitrate() int {
 		return 20_000
 	}
 	return f.BitrateKbps
+}
+
+// FPSCap returns the sender-side video frame-rate cap (0 = uncapped). VJ sources can run
+// 120+ fps; every capped frame skips capture-copy, encode and crypto entirely.
+func (f MediaLinkFeature) FPSCap() int {
+	switch {
+	case f.MaxFPS < 0:
+		return 0
+	case f.MaxFPS == 0:
+		return 60
+	}
+	return f.MaxFPS
 }
 
 // WebcamFeature configures the webcam/UVC source (MEDIALINK_DESIGN.md §5): an ffmpeg dshow

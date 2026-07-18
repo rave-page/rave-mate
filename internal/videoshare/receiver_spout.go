@@ -119,13 +119,17 @@ func (r *spoutReceiver) run(name string) {
 		switch C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt) {
 		case 2: // (re)connected / resized: size the buffer, frame arrives on the next poll
 			if w > 0 && hgt > 0 {
-				buf = make([]byte, int(w)*int(hgt)*4)
+				buf = getPix(int(w) * int(hgt) * 4)
 			}
 			got = true // activity - stay/return to the fast poll
 		case 1:
-			img := &image.NRGBA{Pix: append([]byte(nil), buf...), Stride: int(w) * 4,
+			// zero-copy handoff: the readback buffer IS the delivered frame; the next
+			// readback targets a fresh pooled buffer (no full-frame memcpy - 2 GB/s at
+			// 4K60). Consumers release via Frame.Release → PutPix.
+			img := &image.NRGBA{Pix: buf, Stride: int(w) * 4,
 				Rect: image.Rect(0, 0, int(w), int(hgt))}
-			deliver(r.frames, img) // newest-wins, never blocks the poller
+			buf = getPix(len(buf))
+			r.deliver(img) // newest-wins, never blocks the poller
 			got = true
 		}
 		if got {
@@ -137,6 +141,23 @@ func (r *spoutReceiver) run(name string) {
 		} else if interval != recvPollIdle && time.Since(lastFrame) > recvIdleAfter {
 			interval = recvPollIdle
 			t.Reset(interval)
+		}
+	}
+}
+
+// deliver is newest-wins like the shared helper, but recycles the replaced frame's
+// pooled pixels - a dropped pending frame was never consumed, so nobody else holds it.
+func (r *spoutReceiver) deliver(img *image.NRGBA) {
+	for {
+		select {
+		case r.frames <- img:
+			return
+		default:
+			select {
+			case old := <-r.frames: // drop the stale pending frame, retry
+				PutPix(old.Pix)
+			default:
+			}
 		}
 	}
 }

@@ -214,6 +214,14 @@
       "body": "Video-Budget pro Route. 20 Mbit/s reichen für 1080p60 HEVC mit Reserve im Gigabit-LAN.",
       "title": "Bitrate pro Route"
     },
+    "ml-fps": {
+      "body": "Begrenzt, wie viele Frames pro Sekunde diese Maschine verlassen. VJ-Tools rendern oft mit 120+ fps - jeder Frame über dem Limit wird VOR Capture-Kopie, Encoding und Verschlüsselung verworfen, das Limit begrenzt also direkt die Sender-CPU. 60 reicht für jeden Projektor und Stream; nur erhöhen, wenn die Gegenseite wirklich schneller anzeigt.",
+      "title": "Sender-Framerate-Limit"
+    },
+    "ml-height": {
+      "body": "auto = native Auflösung überall AUSSER beim Software-x264-Fallback, der bei 1080p gedeckelt wird (x264 bei 4K60 lastet jeden Kern aus - ein Set-Killer). Hardware-Encoder (NVENC/AMF/QSV) schaffen 4K60 auf dedizierter Hardware, 4K fließt also wie bei NDI in voller Auflösung. Ein festes Limit lohnt nur zum Sparen von LAN-Bandbreite; „nativ" deaktiviert Skalierung auch beim x264-Fallback.",
+      "title": "Encoding-Auflösungs-Limit"
+    },
     "motion-studio": {
       "body": "Spielt VR-Motion-Takes ab, die von deinem Headset aufgenommen wurden (Kopf + Controller + beliebige Full-Body-Tracker, aufgenommen über das Handgelenk-Menü). Die Vorschau zeigt das Skelett in 3D mit der Kopfbewegung als violette Spur.\n\nZwei Live-Ausgänge: VMC streamt den Take als rohe Tracking-Geräte an einen VTuber-Renderer (VSeeFace, Warudo, VNyan), der die IK übernimmt und deinen Avatar animiert - das ist der eigentliche Wiedergabepfad. OSC-Tracker speisen VRChats Full-Body-Tracking, aber VRChat steuert Kopf und Hände immer von deinem Live-HMD und den Controllern, sodass ein aufgenommener Take deinen VRChat-Avatar nicht steuern kann - exportiere dafür eine Unity-.anim und treibe sie über den Animator des Avatars.\n\nHier importierte Avatare (.vrm) replizieren automatisch zu deinen gekoppelten rave-mate-Instanzen.",
       "title": "Motion Studio"
@@ -2113,10 +2121,15 @@
         "mpvNote": "Der integrierte Player nutzt mpv für flüssiges, hardwarebeschleunigtes Video. Ohne mpv fällt Video auf einen langsameren integrierten Decoder zurück."
       },
       "medialink": {
+        "auto": "auto",
         "bitrate": "Bitrate (Mbps)",
         "codec": "Bevorzugter Codec",
+        "maxFps": "Framerate-Limit",
+        "maxHeight": "Auflösungs-Limit",
+        "native": "nativ",
         "note": "Der Schalter in der Kopfzeile teilt deine lokalen Spout-Sender. Erstelle Routen im Geräte-Tab.",
-        "swOnly": "Software-Encoding erzwingen (Diagnose - hohe CPU-Last)"
+        "swOnly": "Software-Encoding erzwingen (Diagnose - hohe CPU-Last)",
+        "uncapped": "unbegrenzt"
       },
       "midi": {
         "customPort": "(MIDI-Eingabeport wählen)",

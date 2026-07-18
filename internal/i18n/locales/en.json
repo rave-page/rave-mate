@@ -377,6 +377,14 @@
       "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.",
       "title": "Per-route bitrate"
     },
+    "ml-fps": {
+      "body": "Caps how many frames per second leave this machine. VJ tools often render at 120+ fps - every frame above the cap is dropped BEFORE capture-copy, encode and encryption, so the cap directly bounds sender CPU. 60 covers every projector and stream; raise it only if you know the far end displays faster.",
+      "title": "Sender frame-rate cap"
+    },
+    "ml-height": {
+      "body": "auto = native resolution everywhere EXCEPT the software-x264 fallback, which caps at 1080p (x264 at 4K60 pins every core - a set-killer). Hardware encoders (NVENC/AMF/QSV) handle 4K60 on dedicated silicon, so 4K flows at full res like NDI. Pick a fixed cap only to save LAN bandwidth; 'native' disables scaling even on the x264 fallback.",
+      "title": "Encode resolution cap"
+    },
     "midi-learn-controllers": {
       "title": "Reading your controller (MIDI-learn)",
       "body": "rave-mate listens to your DJ controller's MIDI and maps each knob, fader and button to a deck or channel, so the overlays show real EQ, filter, trim, fader and play/cue state.\n\nWhy learn it from the controller instead of the DJ software? Because most DJ software can't send its mixer state back out. Traktor can (its Add-Out feature), but Rekordbox and Serato can't emit EQ or fader over a virtual MIDI port at all. And Rekordbox can't even emit play/pause cleanly: its play control is a two-way 'Button' whose LED is sent on the SAME MIDI code it listens on, so on a virtual loopback cable the LED feeds straight back into its own input and the deck toggles itself - the play flicker. Your controller has none of these limits: every knob and button already sends MIDI, so we read it at the source.\n\nAdd a controller, pick its MIDI input port, then click Learn on a control and move it once."
@@ -2508,10 +2516,15 @@
         "mpvNote": "The in-app player uses mpv for smooth, hardware-accelerated video. Without mpv, video falls back to a slower in-app decoder."
       },
       "medialink": {
+        "auto": "auto",
         "bitrate": "Bitrate (Mbps)",
         "codec": "Preferred codec",
+        "maxFps": "Frame-rate cap",
+        "maxHeight": "Resolution cap",
+        "native": "native",
         "note": "The header toggle shares your local Spout senders. Create routes on the Peers tab.",
-        "swOnly": "Force software encode (diagnostic - high CPU)"
+        "swOnly": "Force software encode (diagnostic - high CPU)",
+        "uncapped": "uncapped"
       },
       "midi": {
         "customPort": "(select MIDI input port)",

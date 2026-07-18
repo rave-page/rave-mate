@@ -18,6 +18,7 @@ type EncodeSpec struct {
 	Height      int
 	FPS         float64
 	BitrateKbps int // requester budget (Offer.Bitrate); 0 = encoder default
+	MaxHeight   int // downscale ceiling (px): input taller than this is scaled down; 0 = native
 }
 
 // DecodeSpec parametrizes the receive-side decode child (dims/fps from the source's advert).

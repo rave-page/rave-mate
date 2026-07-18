@@ -218,6 +218,9 @@ func (e *encoder) feed(ctx context.Context, stdin io.WriteCloser) error {
 		}
 		if f.Kind != medialink.KindVideo || len(f.Payload) != e.size {
 			e.dropped.Add(1)
+			if f.Release != nil {
+				f.Release()
+			}
 			continue
 		}
 		pts := f.PTS
@@ -229,7 +232,11 @@ func (e *encoder) feed(ctx context.Context, stdin io.WriteCloser) error {
 			e.ptsq = append(e.ptsq, ptsEntry{pts: pts, tc: f.TC})
 		}
 		e.mu.Unlock()
-		if _, err := stdin.Write(f.Payload); err != nil {
+		_, werr := stdin.Write(f.Payload)
+		if f.Release != nil {
+			f.Release() // stdin.Write copied into the pipe - pooled buffer is free
+		}
+		if werr != nil {
 			return nil // child died - Wait reports why
 		}
 	}
