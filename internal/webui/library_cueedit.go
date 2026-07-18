@@ -2330,6 +2330,9 @@ func (u *UI) ceDefaultsHTML(c *ceSt, mode string, pref ceSWPref) string {
 	if mode != "" {
 		b.WriteString(toggleRow(i18n.T("library.ce.prefPromote", i18n.A{"app": ceSoftwareLabel(mode)}), "ce-pref-promote", pref.AutoPromote))
 	}
+	if mode == "traktor" {
+		b.WriteString(toggleRow(i18n.T("library.ce.prefGridAnchor"), "ce-pref-grid", !pref.NoGridAnchor))
+	}
 	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.defaultsNote")) + `</div>`)
 	return b.String()
 }
@@ -2633,6 +2636,10 @@ func init() {
 	onExact("ce-pref-promote", func(u *UI, m actMsg) {
 		on := m.Val == "true"
 		u.cePrefMutSW(func(p *ceSWPref) { p.AutoPromote = on })
+	})
+	onExact("ce-pref-grid", func(u *UI, m actMsg) {
+		off := m.Val != "true" // stored inverted: anchor-on-first-hotcue is the default
+		u.cePrefMutSW(func(p *ceSWPref) { p.NoGridAnchor = off })
 	})
 	// batch (checked collection rows) + clear
 	onExact("ce-promote-sel", func(u *UI, _ actMsg) { u.cePromoteSelected() })

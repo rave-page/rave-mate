@@ -154,6 +154,8 @@ func Apply(t musiclib.Track, dropsMs []float64, patterns map[int]Pattern, opt Ap
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].StartMs < out[j].StartMs })
+	// pads always end up in track-time order (pad 0 = earliest); budget was enforced above
+	out, _ = RenumberPadsByTime(out, opt.Software, 0)
 	return out, rep, nil
 }
 
@@ -197,6 +199,8 @@ func PromoteMemoryToHotcues(cues []musiclib.CuePoint, sw string, max int) ([]mus
 	if n == 0 {
 		return cues, 0
 	}
+	// promoted cues gap-filled free slots - renumber so pads follow track time again
+	out, _ = RenumberPadsByTime(out, sw, 0)
 	return out, n
 }
 

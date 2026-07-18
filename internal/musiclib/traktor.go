@@ -139,7 +139,7 @@ func (e *nmlEntry) toTrack() Track {
 	for _, c := range e.Cues {
 		kind := traktorCueKind(c.Type, c.Hotcue)
 		t.Cues = append(t.Cues, CuePoint{Name: c.Name, Kind: kind, Type: c.Type, StartMs: c.Start, LenMs: c.Len, Hotcue: c.Hotcue})
-		if kind == CueGrid {
+		if c.Type == 4 { // every TYPE-4 anchors the grid, padded (kind CueHot) or not
 			t.Beatgrid = append(t.Beatgrid, GridMarker{PositionMs: c.Start, BPM: e.Tempo.BPM})
 		}
 	}

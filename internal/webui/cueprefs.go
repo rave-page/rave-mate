@@ -36,10 +36,11 @@ func ceSoftwareLabel(key string) string {
 // ceSWPref is one software's stored defaults. Zero value = the shipped defaults
 // (8 pads, no overwrite, no auto-promote, split-even on).
 type ceSWPref struct {
-	MaxPads     int  `json:"maxPads,omitempty"`
-	Overwrite   bool `json:"overwriteOnApply,omitempty"`
-	AutoPromote bool `json:"autoPromoteOnWrite,omitempty"`
-	NoSplitEven bool `json:"noSplitEven,omitempty"` // stored inverted: split-even is the default
+	MaxPads      int  `json:"maxPads,omitempty"`
+	Overwrite    bool `json:"overwriteOnApply,omitempty"`
+	AutoPromote  bool `json:"autoPromoteOnWrite,omitempty"`
+	NoSplitEven  bool `json:"noSplitEven,omitempty"`  // stored inverted: split-even is the default
+	NoGridAnchor bool `json:"noGridAnchor,omitempty"` // stored inverted: Traktor anchors the grid on the first hotcue by default
 }
 
 // MaxPadsOr returns the effective pad budget.

@@ -84,8 +84,9 @@ column shows each track's census — ◆n drop markers, ⚑n cues.
 2. On a prepared track: assign a pattern per drop (they can differ), then **Apply
    patterns (hotcues)** or **Apply as memory cues**. Cues that don't fit the span
    (track start ↔ drop 1, previous drop ↔ drop N) are cut — the drop is always the
-   anchor. Occupied pad slots are reallocated (or the cue is demoted to a memory cue
-   when none is free); duplicates are skipped.
+   anchor. Pads always come out in **track order** — pad 1 fires the earliest cue,
+   matching left-to-right, top-to-bottom pad rows (a cue is demoted to a memory cue
+   when the pad budget is exhausted); duplicates are skipped.
 3. **Mass apply**: tick tracks in the list (rows highlight amber) and use the same
    two buttons in the selection bar — every checked track's own drops anchor the
    assigned patterns; tracks without drops or grid are skipped and counted.
@@ -138,6 +139,7 @@ Each mode remembers its own **defaults** (the collapsible section under the pick
 | **Split the pad budget evenly across drops** | with several drops, each drop keeps its nearest cues (remainder to earlier drops; spare capacity refills globally). Off = one global closest-to-a-drop ranking. |
 | **Overwrite existing cues when applying patterns** | pattern applies **replace** the mode's existing cues instead of adding around them (the apply buttons warn how many would be cleared). |
 | **Always promote memory cues to pads when writing to {app}** | the write-back promotes memory cues to free pads on the way out — the library keeps them as memory cues. |
+| **Anchor the beatgrid on the first hotcue** (Traktor only, on by default) | the write emits the earliest hotcue as Traktor's TYPE-4 grid cue — the beatgrid anchors on it and the pad still fires. Previous grid markers are replaced (one anchor, not two); a write with no hotcues leaves the existing grid untouched. |
 
 ## Write cues to your DJ software
 
@@ -155,14 +157,15 @@ become cues via an applied pattern.
 
 The export honours the target's scope and defaults: only the shared layer + that app's
 own cues ship; the app's pad limit is enforced (closest-to-drop, split across drops per
-its default) and, if enabled, memory cues are promoted to pads on the way out. The
+its default) and, if enabled, memory cues are promoted to pads on the way out. Pads are
+always numbered in track order on the way out — pad 1 = the earliest cue. The
 button count shows how many tracks carry cues that software would receive.
 
 Per software:
 
 | Target | Written to | Notes |
 |---|---|---|
-| **Traktor** | `collection.nml` (backup first) | non-grid `CUE_V2` replaced; grid cues + TEMPO untouched. Restart Traktor to pick it up. |
+| **Traktor** | `collection.nml` (backup first) | non-grid `CUE_V2` replaced; TEMPO untouched. With the grid-anchor default on, the earliest hotcue is written as the TYPE-4 grid cue (replacing old grid markers); otherwise grid cues pass through untouched. Restart Traktor to pick it up. |
 | **Rekordbox** | exported collection XML (backup first) | `POSITION_MARK` hotcues (Num ≥ 0) + memory cues (Num = -1) + loops; import via **File → Import Collection**. The live `master.db` is deliberately not written — cues there are tied to ANLZ analysis data and a partial write would desync the library. |
 | **VirtualDJ** | `database.xml` (backup first) | hotcues → `<Poi Type="cue" Num="1..8">`, memory cues → remix points (`Type="remix"`), loops carry `Size` in beats. Refused while VirtualDJ runs (it rewrites the database on exit). |
 | **Serato** | the audio files ("Serato Markers2" tag, MP3 GEOB / FLAC vorbis) | verified temp-write per file, refused while Serato runs; a stale legacy `Serato Markers_` tag is removed (it would shadow the new cues). Memory cues have no Serato equivalent and are skipped — pad cues + saved loops only. MP4/AIFF/Ogg/WAV are left alone. |

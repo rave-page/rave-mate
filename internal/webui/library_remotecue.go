@@ -841,7 +841,9 @@ func (u *UI) rceWriteTo(key string) {
 		err := errors.New(i18n.T("library.mirror.noLink"))
 		if client != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*remotectl.DefaultCallTimeout)
-			res, err = client.WriteCuesTo(ctx, key, []string{remotePath})
+			// grid-anchor pref travels from the CONTROLLING side (peer has no rail prefs)
+			anchor := key == "traktor" && !u.cePrefFor("traktor").NoGridAnchor
+			res, err = client.WriteCuesTo(ctx, key, []string{remotePath}, anchor)
 			cancel()
 		}
 		c.mu.Lock()

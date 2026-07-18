@@ -6,11 +6,12 @@ import (
 	"rave.page/mate/internal/musiclib"
 )
 
-// PromoteMemoryToHotcues: time-ordered slot assignment, existing slots respected,
-// pads capped at 8, loops/grid untouched, no-op returns the original slice.
+// PromoteMemoryToHotcues: promoted + existing pads end up renumbered in track-time
+// order (pad 0 = earliest), pads capped at 8, loops/grid untouched, no-op returns the
+// original slice.
 func TestPromoteMemoryToHotcues(t *testing.T) {
 	cues := []musiclib.CuePoint{
-		{Kind: musiclib.CueHot, Hotcue: 2, StartMs: 1000},   // keeps slot 2
+		{Kind: musiclib.CueHot, Hotcue: 2, StartMs: 1000},   // renumbers to time position
 		{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: 500}, // earliest memory → slot 0
 		{Kind: musiclib.CuePlain, Hotcue: -1, StartMs: 2000},
 		{Kind: musiclib.CueLoop, Hotcue: -1, StartMs: 1500}, // untouched
@@ -27,11 +28,11 @@ func TestPromoteMemoryToHotcues(t *testing.T) {
 	if c := byStart[500]; c.Kind != musiclib.CueHot || c.Hotcue != 0 {
 		t.Fatalf("earliest memory cue: %+v want hot slot 0", c)
 	}
-	if c := byStart[2000]; c.Kind != musiclib.CueHot || c.Hotcue != 1 {
-		t.Fatalf("second memory cue: %+v want hot slot 1", c)
+	if c := byStart[1000]; c.Kind != musiclib.CueHot || c.Hotcue != 1 {
+		t.Fatalf("existing hotcue: %+v want hot slot 1 (time order)", c)
 	}
-	if c := byStart[1000]; c.Hotcue != 2 {
-		t.Fatalf("existing hotcue slot moved: %+v", c)
+	if c := byStart[2000]; c.Kind != musiclib.CueHot || c.Hotcue != 2 {
+		t.Fatalf("second memory cue: %+v want hot slot 2", c)
 	}
 	if c := byStart[1500]; c.Kind != musiclib.CueLoop {
 		t.Fatalf("loop touched: %+v", c)

@@ -393,7 +393,8 @@ func RegisterLibraryCueEdit(e *Endpoint, lib *libdb.DB, pub PublishFunc, nmlOver
 			if !ok || musiclib.MusicalCues(t.Cues) == 0 {
 				continue // mirror the local router: only tracks with ≥1 musical cue
 			}
-			updates = append(updates, musiclib.CueUpdate{Path: path, BPM: t.BPM, Cues: t.Cues})
+			updates = append(updates, musiclib.CueUpdate{Path: path, BPM: t.BPM, Cues: t.Cues,
+				GridAnchor: p.GridAnchor && p.Software == "traktor"})
 		}
 		if len(updates) == 0 {
 			return nil, errors.New("no tracks with musical cues")

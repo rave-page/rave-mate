@@ -26,6 +26,10 @@ type CueUpdate struct {
 	Path string
 	BPM  float64
 	Cues []CuePoint
+	// GridAnchor (Traktor only): write the earliest hotcue as the TYPE-4 grid cue -
+	// Traktor anchors the beatgrid on it and its pad still fires. Pre-existing grid
+	// cues are replaced (one anchor, not two). Off = grid cues pass through untouched.
+	GridAnchor bool
 }
 
 // cueUpdateIndex maps updates by path (empty paths dropped).
@@ -120,9 +124,22 @@ func applyCuesNMLStream(src io.Reader, byPath map[string]*CueUpdate, dst io.Writ
 
 // emitCueUpdatedEntry re-encodes a buffered ENTRY with only its musical cues rewritten:
 // non-TYPE-4 CUE_V2 subtrees dropped, replacements emitted before </ENTRY>. Grid cues
-// (TYPE 4), TEMPO and all other elements pass through unchanged.
+// (TYPE 4), TEMPO and all other elements pass through unchanged - unless up.GridAnchor
+// re-anchors the grid on the earliest hotcue, which drops the old TYPE-4 cues instead
+// (the new anchor replaces them; BPM from the entry's TEMPO, else up.BPM).
 func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error {
-	skip := 0 // >0 while inside a dropped non-grid CUE_V2 subtree
+	anchor := -1
+	var gridBPM float64
+	if up.GridAnchor {
+		if gridBPM = entryTempoBPM(buf); gridBPM <= 0 {
+			gridBPM = up.BPM
+		}
+		if gridBPM > 0 {
+			anchor = earliestHotcue(up.Cues)
+		}
+	}
+	dropGrid := anchor >= 0 // old grid cues are replaced by the new anchor
+	skip := 0               // >0 while inside a dropped CUE_V2 subtree
 	for _, tk := range buf {
 		switch el := tk.(type) {
 		case xml.StartElement:
@@ -130,7 +147,7 @@ func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error 
 				skip++
 				continue
 			}
-			if el.Name.Local == "CUE_V2" && attrVal(el.Attr, "TYPE") != "4" {
+			if el.Name.Local == "CUE_V2" && (dropGrid || attrVal(el.Attr, "TYPE") != "4") {
 				skip = 1
 				continue
 			}
@@ -143,7 +160,7 @@ func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error 
 				continue
 			}
 			if el.Name.Local == "ENTRY" {
-				if err := emitNMLCues(enc, up.Cues); err != nil {
+				if err := emitNMLCues(enc, up.Cues, anchor, gridBPM); err != nil {
 					return err
 				}
 			}
@@ -161,21 +178,69 @@ func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error 
 	return nil
 }
 
-// emitNMLCues writes CUE_V2 elements for the non-grid cues (Traktor's unnamed cues are "n.n.").
-func emitNMLCues(enc *xml.Encoder, cues []CuePoint) error {
-	for _, c := range cues {
+// entryTempoBPM reads the buffered ENTRY's TEMPO BPM (0 = absent/unparsable).
+func entryTempoBPM(buf []xml.Token) float64 {
+	for _, tk := range buf {
+		if se, ok := tk.(xml.StartElement); ok && se.Name.Local == "TEMPO" {
+			v, _ := strconv.ParseFloat(attrVal(se.Attr, "BPM"), 64)
+			return v
+		}
+	}
+	return 0
+}
+
+// earliestHotcue returns the index of the earliest padded hotcue (-1 = none).
+func earliestHotcue(cues []CuePoint) int {
+	best := -1
+	for i, c := range cues {
+		if c.Kind != CueHot || c.Hotcue < 0 {
+			continue
+		}
+		if best < 0 || c.StartMs < cues[best].StartMs {
+			best = i
+		}
+	}
+	return best
+}
+
+// emitNMLCues writes CUE_V2 elements for the non-grid cues (Traktor's unnamed cues are
+// "n.n."). cues[anchor] doubles as the beatgrid anchor: TYPE 4 with a <GRID BPM> child,
+// keeping its pad. With anchor < 0, TYPE-4 hotcues (imported grid anchors) are skipped -
+// their original element passes through upstream untouched.
+func emitNMLCues(enc *xml.Encoder, cues []CuePoint, anchor int, gridBPM float64) error {
+	for i, c := range cues {
 		if c.Kind == CueGrid {
 			continue
+		}
+		if anchor < 0 && c.Type == 4 {
+			continue // preserved via passthrough - re-emitting would duplicate it
 		}
 		name := c.Name
 		if name == "" {
 			name = "n.n."
 		}
-		if err := emitElem(enc, "CUE_V2", [][2]string{
-			{"NAME", name}, {"DISPL_ORDER", "0"}, {"TYPE", strconv.Itoa(traktorCueType(c.Kind))},
+		typ := traktorCueType(c.Kind)
+		if i == anchor {
+			typ = 4
+		}
+		se := startElem("CUE_V2", [][2]string{
+			{"NAME", name}, {"DISPL_ORDER", "0"}, {"TYPE", strconv.Itoa(typ)},
 			{"START", f6(c.StartMs)}, {"LEN", f6(c.LenMs)}, {"REPEATS", "-1"},
 			{"HOTCUE", strconv.Itoa(c.Hotcue)},
-		}); err != nil {
+		})
+		if err := enc.EncodeToken(se); err != nil {
+			return err
+		}
+		if i == anchor {
+			g := startElem("GRID", [][2]string{{"BPM", f6(gridBPM)}})
+			if err := enc.EncodeToken(g); err != nil {
+				return err
+			}
+			if err := enc.EncodeToken(g.End()); err != nil {
+				return err
+			}
+		}
+		if err := enc.EncodeToken(se.End()); err != nil {
 			return err
 		}
 	}

@@ -237,7 +237,7 @@ func TestPlaylistTracksRPC(t *testing.T) {
 		t.Fatalf("empty playlist paths=%v err=%v", paths, err)
 	}
 	// writeCuesTo with a software key that can never be detected → clean error.
-	if _, err := rc.WriteCuesTo(ctx(t), "nope", []string{path}); err == nil {
+	if _, err := rc.WriteCuesTo(ctx(t), "nope", []string{path}, false); err == nil {
 		t.Fatal("undetected target must error")
 	}
 }

@@ -225,6 +225,74 @@ func TestVDJPadNumberRoundTrip(t *testing.T) {
 	}
 }
 
+// GridAnchor: the earliest hotcue becomes the single TYPE-4 grid cue (pad kept, GRID
+// child from the entry's TEMPO); pre-existing grid cues are dropped. No hotcues in the
+// update = old grid preserved.
+func TestApplyCuesNMLGridAnchor(t *testing.T) {
+	path := writeFixture(t, gridFixture)
+	up := CueUpdate{Path: resolveLocation("C:", "/:Music/:", "a.mp3"), GridAnchor: true,
+		Cues: []CuePoint{
+			{Name: "Intro", Kind: CueHot, StartMs: 61250, Hotcue: 0},
+			{Name: "Drop", Kind: CueHot, StartMs: 90000, Hotcue: 1},
+		}}
+	if _, err := ApplyCuesNML(path, []CueUpdate{up}); err != nil {
+		t.Fatal(err)
+	}
+	s := readFileStr(t, path)
+	if !strings.Contains(s, `NAME="Intro" DISPL_ORDER="0" TYPE="4" START="61250.000000" LEN="0.000000" REPEATS="-1" HOTCUE="0"`) {
+		t.Errorf("anchor hotcue not written as TYPE-4:\n%s", s)
+	}
+	if !strings.Contains(s, `<GRID BPM="127.500000">`) {
+		t.Error("anchor missing GRID child with the entry's TEMPO BPM")
+	}
+	for _, gone := range []string{`START="55.0"`, `START="30055.0"`} {
+		if strings.Contains(s, gone) {
+			t.Errorf("old grid cue survived: %s", gone)
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	byPath := map[string]Track{}
+	if _, err := ParseCollection(f, func(tr Track) { byPath[tr.Path] = tr }); err != nil {
+		t.Fatal(err)
+	}
+	got := byPath[up.Path]
+	if len(got.Beatgrid) != 1 || got.Beatgrid[0].PositionMs != 61250 {
+		t.Errorf("beatgrid = %+v, want single anchor at 61250", got.Beatgrid)
+	}
+	// round-trip: the TYPE-4 pad cue imports as a firing hotcue, not a bare grid marker
+	var anchor *CuePoint
+	for i, c := range got.Cues {
+		if c.StartMs == 61250 {
+			anchor = &got.Cues[i]
+		}
+	}
+	if anchor == nil || anchor.Kind != CueHot || anchor.Hotcue != 0 || anchor.Type != 4 {
+		t.Errorf("anchor round-trip = %+v, want CueHot pad 0 type 4", anchor)
+	}
+	// untouched neighbor keeps its grid
+	if c := byPath[resolveLocation("C:", "/:Music/:", "c.mp3")]; len(c.Beatgrid) != 1 {
+		t.Errorf("neighbor grid mutated: %+v", c.Beatgrid)
+	}
+
+	// no hotcues in the update → grid passthrough as before
+	path2 := writeFixture(t, gridFixture)
+	up2 := CueUpdate{Path: up.Path, GridAnchor: true,
+		Cues: []CuePoint{{Kind: CuePlain, StartMs: 5000, Hotcue: -1}}}
+	if _, err := ApplyCuesNML(path2, []CueUpdate{up2}); err != nil {
+		t.Fatal(err)
+	}
+	s2 := readFileStr(t, path2)
+	for _, keep := range []string{`START="55.0"`, `START="30055.0"`} {
+		if !strings.Contains(s2, keep) {
+			t.Errorf("memory-only update dropped the grid: %s missing", keep)
+		}
+	}
+}
+
 func TestApplyCuesNoop(t *testing.T) {
 	path := writeFixture(t, gridFixture)
 	before := readFileStr(t, path)

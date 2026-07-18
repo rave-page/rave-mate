@@ -98,7 +98,8 @@ func (u *UI) ceWriteJobs(sw string) []musiclib.CueUpdate {
 		if musiclib.MusicalCues(cues) == 0 {
 			continue
 		}
-		out = append(out, musiclib.CueUpdate{Path: p, BPM: tr.BPM, Cues: cues})
+		out = append(out, musiclib.CueUpdate{Path: p, BPM: tr.BPM, Cues: cues,
+			GridAnchor: sw == "traktor" && !pref.NoGridAnchor})
 	}
 	return out
 }
@@ -147,6 +148,9 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 		variant = "outline"
 		if u.cePrefFor(t.key).AutoPromote {
 			notes = append(notes, i18n.T("library.ce.writePromoteNote", i18n.A{"app": t.label}))
+		}
+		if t.key == "traktor" && !u.cePrefFor("traktor").NoGridAnchor {
+			notes = append(notes, i18n.T("library.ce.writeGridNote"))
 		}
 		switch t.key {
 		case "rekordbox":

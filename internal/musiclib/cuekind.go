@@ -14,6 +14,9 @@ func traktorCueKind(typ, hotcue int) CueKind {
 	case 3:
 		return CueLoad
 	case 4:
+		if hotcue >= 0 {
+			return CueHot // grid anchor living on a pad - still a firing hotcue
+		}
 		return CueGrid
 	case 5:
 		return CueLoop

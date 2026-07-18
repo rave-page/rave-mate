@@ -198,9 +198,11 @@ type CueTargetsResult struct {
 
 // WriteCuesToParams routes the named tracks' cue sets into Software's library ON THE
 // PEER (backup-first; tracks without musical cues are skipped like the local router).
+// GridAnchor (Traktor only) re-anchors the beatgrid on each track's earliest hotcue.
 type WriteCuesToParams struct {
-	Software string   `json:"software"`
-	Paths    []string `json:"paths"`
+	Software   string   `json:"software"`
+	Paths      []string `json:"paths"`
+	GridAnchor bool     `json:"gridAnchor,omitempty"`
 }
 
 // PlaylistTracksParams selects one peer playlist by id.

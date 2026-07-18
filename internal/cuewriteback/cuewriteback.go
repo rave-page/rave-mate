@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"rave.page/mate/internal/cuepattern"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/serato"
@@ -83,8 +84,16 @@ func BackupFile(backupRoot, app, path string) error {
 
 // ApplyCues writes updates into t's library, backup-first into backupRoot. Refuses while
 // VirtualDJ is running; Serato = per-file temp+verify+rename with its own running-refusal.
+// Export invariant enforced here for EVERY entry point (local rail + peer RPC): only the
+// target's scope ships, and pads are numbered in track-time order (pad 0 = the earliest
+// cue - left-to-right, top-to-bottom pad rows).
 func ApplyCues(t Target, updates []musiclib.CueUpdate, backupRoot string) (musiclib.WritebackResult, error) {
 	var zero musiclib.WritebackResult
+	for i := range updates {
+		cues := cuepattern.FilterForSoftware(updates[i].Cues, t.Key)
+		cues, _ = cuepattern.RenumberPadsByTime(cues, "", 0)
+		updates[i].Cues = cues
+	}
 	switch t.Key {
 	case "traktor":
 		// safety: full collection backup before the write

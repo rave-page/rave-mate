@@ -148,8 +148,8 @@ func (c *Client) CueWriteTargets(ctx context.Context) ([]CueTarget, error) {
 
 // WriteCuesTo routes the named tracks' cues into software's library ON THE PEER
 // (backup-first there); returns how many tracks the write updated.
-func (c *Client) WriteCuesTo(ctx context.Context, software string, paths []string) (WriteResult, error) {
-	return Do[WriteResult](ctx, c.e, c.nodeID, MethodLibWriteCuesTo, WriteCuesToParams{Software: software, Paths: paths})
+func (c *Client) WriteCuesTo(ctx context.Context, software string, paths []string, gridAnchor bool) (WriteResult, error) {
+	return Do[WriteResult](ctx, c.e, c.nodeID, MethodLibWriteCuesTo, WriteCuesToParams{Software: software, Paths: paths, GridAnchor: gridAnchor})
 }
 
 // LibraryPlaylistTracks resolves a peer playlist to its track paths in order.

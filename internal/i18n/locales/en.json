@@ -1572,11 +1572,12 @@
       "modeDetected": "detected",
       "defaultsAll": "Defaults (all software)",
       "defaultsFor": "Defaults for {app}",
-      "defaultsNote": "The pad limit caps how many hotcues survive an apply or a write — the cues closest to each drop win; with the split enabled, the budget is divided evenly across the drops so every drop keeps its nearest cues. Overwrite makes pattern applies replace this mode's existing cues instead of adding around them. Each software remembers its own defaults.",
+      "defaultsNote": "The pad limit caps how many hotcues survive an apply or a write — the cues closest to each drop win; with the split enabled, the budget is divided evenly across the drops so every drop keeps its nearest cues. Overwrite makes pattern applies replace this mode's existing cues instead of adding around them. Pads always fill in track order — pad 1 fires the earliest cue, matching left-to-right, top-to-bottom pad rows. Each software remembers its own defaults.",
       "prefPads": "Hotcue pad limit",
       "prefOw": "Overwrite existing cues when applying patterns",
       "prefSplit": "Split the pad budget evenly across drops",
       "prefPromote": "Always promote memory cues to pads when writing to {app}",
+      "prefGridAnchor": "Anchor the beatgrid on the first hotcue (written as a Traktor grid cue on its pad)",
       "owNote": "Overwrite is on: applying patterns first clears the {n} cues this mode sees.",
       "replacedHint": "{n} existing cues cleared (overwrite)",
       "batchHeader": "{n} checked tracks",
@@ -1610,7 +1611,8 @@
       "pmDeleted": "Pattern “{name}” deleted.",
       "pmDeleteConfirm": "Delete pattern “{name}”? Tracks that already received its cues keep them.",
       "scopeOnly": "{app} only",
-      "writePromoteNote": "{app}: memory cues are promoted to pads during the write (this software's default)."
+      "writePromoteNote": "{app}: memory cues are promoted to pads during the write (this software's default).",
+      "writeGridNote": "Traktor: the earliest hotcue is written as the beatgrid anchor (grid cue on its pad) — previous grid markers are replaced."
     },
     "prep": {
       "label": "Preparation playlist",

@@ -163,6 +163,69 @@ func TestApplyScopedOverwrite(t *testing.T) {
 	}
 }
 
+// RenumberPadsByTime: pads follow track time (pad 0 = earliest), padded loops join the
+// pool, other scopes untouched, max demotes, ordered input is a no-op.
+func TestRenumberPadsByTime(t *testing.T) {
+	cues := []musiclib.CuePoint{
+		hot(60000, 0, ""), hot(10000, 5, ""),
+		{Kind: musiclib.CueLoop, Hotcue: 7, StartMs: 30000},
+		hot(90000, 1, "rekordbox"), // out of scope for traktor
+		mem(5000, ""),              // memory cue: never padded
+	}
+	out, changed := RenumberPadsByTime(cues, "traktor", 0)
+	if !changed {
+		t.Fatal("expected renumber")
+	}
+	want := map[float64]int{10000: 0, 30000: 1, 60000: 2, 90000: 1, 5000: -1}
+	for _, c := range out {
+		if c.Hotcue != want[c.StartMs] {
+			t.Fatalf("cue@%v slot=%d want %d (out=%+v)", c.StartMs, c.Hotcue, want[c.StartMs], out)
+		}
+	}
+
+	// max: pads past the budget demote (hotcue → memory, loop keeps kind)
+	three := []musiclib.CuePoint{hot(1000, 0, ""), hot(2000, 1, ""), hot(3000, 2, "")}
+	out, _ = RenumberPadsByTime(three, "", 2)
+	if out[2].Kind != musiclib.CuePlain || out[2].Hotcue != -1 {
+		t.Fatalf("over-budget pad not demoted: %+v", out[2])
+	}
+
+	// already ordered = untouched original
+	ordered := []musiclib.CuePoint{hot(1000, 0, ""), hot(2000, 1, "")}
+	if _, changed := RenumberPadsByTime(ordered, "", 0); changed {
+		t.Fatal("ordered input reported changed")
+	}
+}
+
+// Regression: a pattern cue EARLIER than an existing pad must end up on the LOWER pad -
+// pads fill left-to-right, top-to-bottom in track order, never gap-fill order.
+func TestApplyPadTimeOrder(t *testing.T) {
+	tr := musiclib.Track{
+		Title: "t", DurationSec: 300,
+		Beatgrid: []musiclib.GridMarker{{PositionMs: 0, BPM: 120}},
+		Cues:     []musiclib.CuePoint{hot(60000, 0, "")}, // existing pad 0 late in the track
+	}
+	pats := map[int]Pattern{0: {Name: "p", Cues: []PatternCue{
+		{Beats: 0, Kind: musiclib.CueHot, Hotcue: -1},
+	}}}
+	cues, rep, err := Apply(tr, []float64{10000}, pats, ApplyOptions{SnapDrop: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Added != 1 {
+		t.Fatalf("rep=%+v want added=1", rep)
+	}
+	slots := map[float64]int{}
+	for _, c := range cues {
+		if c.Kind == musiclib.CueHot {
+			slots[c.StartMs] = c.Hotcue
+		}
+	}
+	if slots[10000] != 0 || slots[60000] != 1 {
+		t.Fatalf("pads not in track order: %+v", slots)
+	}
+}
+
 // Promote: scope + cap respected.
 func TestPromoteScopedCap(t *testing.T) {
 	cues := []musiclib.CuePoint{

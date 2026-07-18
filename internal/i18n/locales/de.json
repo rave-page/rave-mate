@@ -1203,11 +1203,12 @@
       "modeDetected": "erkannt",
       "defaultsAll": "Standards (alle Software)",
       "defaultsFor": "Standards für {app}",
-      "defaultsNote": "Das Pad-Limit begrenzt, wie viele Hotcues ein Anwenden oder Schreiben überleben — die Cues am nächsten an jedem Drop gewinnen; mit aktivierter Aufteilung wird das Budget gleichmäßig auf die Drops verteilt, sodass jeder Drop seine nächsten Cues behält. Überschreiben lässt Pattern-Anwendungen die bestehenden Cues dieses Modus ersetzen statt ergänzen. Jede Software merkt sich ihre eigenen Standards.",
+      "defaultsNote": "Das Pad-Limit begrenzt, wie viele Hotcues ein Anwenden oder Schreiben überleben — die Cues am nächsten an jedem Drop gewinnen; mit aktivierter Aufteilung wird das Budget gleichmäßig auf die Drops verteilt, sodass jeder Drop seine nächsten Cues behält. Überschreiben lässt Pattern-Anwendungen die bestehenden Cues dieses Modus ersetzen statt ergänzen. Pads werden immer in Track-Reihenfolge belegt — Pad 1 feuert den frühesten Cue, passend zu Pad-Reihen von links nach rechts, oben nach unten. Jede Software merkt sich ihre eigenen Standards.",
       "prefPads": "Hotcue-Pad-Limit",
       "prefOw": "Bestehende Cues beim Anwenden von Patterns überschreiben",
       "prefSplit": "Pad-Budget gleichmäßig auf Drops aufteilen",
       "prefPromote": "Memory-Cues beim Schreiben nach {app} immer auf Pads legen",
+      "prefGridAnchor": "Beatgrid am ersten Hotcue verankern (als Traktor-Grid-Cue auf seinem Pad geschrieben)",
       "owNote": "Überschreiben ist aktiv: Anwenden entfernt zuerst die {n} Cues, die dieser Modus sieht.",
       "replacedHint": "{n} bestehende Cues entfernt (Überschreiben)",
       "batchHeader": "{n} markierte Tracks",
@@ -1241,7 +1242,8 @@
       "pmDeleted": "Pattern „{name}“ gelöscht.",
       "pmDeleteConfirm": "Pattern „{name}“ löschen? Tracks mit bereits erhaltenen Cues behalten sie.",
       "scopeOnly": "nur {app}",
-      "writePromoteNote": "{app}: Memory-Cues werden beim Schreiben auf Pads gelegt (Standard dieser Software)."
+      "writePromoteNote": "{app}: Memory-Cues werden beim Schreiben auf Pads gelegt (Standard dieser Software).",
+      "writeGridNote": "Traktor: der früheste Hotcue wird als Beatgrid-Anker geschrieben (Grid-Cue auf seinem Pad) — vorherige Grid-Marker werden ersetzt."
     },
     "prep": {
       "label": "Vorbereitungs-Playlist",

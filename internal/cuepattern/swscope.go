@@ -157,35 +157,64 @@ func CapPads(cues []musiclib.CuePoint, dropsMs []float64, sw string, max int, sp
 			demoted++
 		}
 	}
-	// re-slot the keepers: keep an existing unique slot < max, else lowest free (time order)
+	// re-slot the keepers in track-time order: pad 0 = the earliest cue (pads fill
+	// left-to-right, top-to-bottom on 2×4 pad rows - the order DJs expect)
 	kept := make([]int, 0, len(keep))
 	for i := range keep {
 		kept = append(kept, i)
 	}
 	sort.SliceStable(kept, func(x, y int) bool { return out[kept[x]].StartMs < out[kept[y]].StartMs })
-	used := map[int]bool{}
-	var reslot []int
-	for _, i := range kept {
-		if s := out[i].Hotcue; s >= 0 && s < max && !used[s] {
-			used[s] = true
-			continue
+	reslotted := false
+	for n, i := range kept {
+		if out[i].Hotcue != n {
+			out[i].Hotcue = n
+			reslotted = true
 		}
-		reslot = append(reslot, i)
 	}
-	for _, i := range reslot {
-		s := freeSlotN(used, max)
-		if s < 0 { // cannot happen (len(keep) <= max) - stay safe anyway
-			out[i].Kind = musiclib.CuePlain
-			out[i].Hotcue = -1
-			out[i].Type = 0
-			demoted++
-			continue
-		}
-		out[i].Hotcue = s
-		used[s] = true
-	}
-	if demoted == 0 && len(reslot) == 0 {
+	if demoted == 0 && !reslotted {
 		return cues, 0
 	}
 	return out, demoted
+}
+
+// RenumberPadsByTime reassigns the in-scope pad slots (hotcues + padded loops) to
+// ascending track-time order: pad 0 = the earliest cue, matching left-to-right
+// top-to-bottom pad rows. max > 0 also demotes pads past the budget (hotcues become
+// memory cues, loops lose their pad); max <= 0 renumbers without demoting.
+// Out-of-scope pads are untouched. Returns the new list + whether anything changed.
+func RenumberPadsByTime(cues []musiclib.CuePoint, sw string, max int) ([]musiclib.CuePoint, bool) {
+	var padded []int
+	for i, c := range cues {
+		if !InScope(c, sw) {
+			continue
+		}
+		if c.Kind == musiclib.CueHot || (c.Kind == musiclib.CueLoop && c.Hotcue >= 0) {
+			padded = append(padded, i)
+		}
+	}
+	if len(padded) == 0 {
+		return cues, false
+	}
+	sort.SliceStable(padded, func(a, b int) bool { return cues[padded[a]].StartMs < cues[padded[b]].StartMs })
+	out := append([]musiclib.CuePoint(nil), cues...)
+	changed := false
+	for n, i := range padded {
+		slot := n
+		if max > 0 && n >= max {
+			slot = -1
+		}
+		if out[i].Hotcue != slot {
+			out[i].Hotcue = slot
+			changed = true
+		}
+		if slot < 0 && out[i].Kind == musiclib.CueHot {
+			out[i].Kind = musiclib.CuePlain
+			out[i].Type = 0
+			changed = true
+		}
+	}
+	if !changed {
+		return cues, false
+	}
+	return out, true
 }
