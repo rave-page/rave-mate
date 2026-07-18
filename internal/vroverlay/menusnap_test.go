@@ -106,13 +106,14 @@ func TestFailedUploadKeepsShownSnapshotAndRetries(t *testing.T) {
 	if got := e.shownMenu(menuKey).rows; got != 26 {
 		t.Fatalf("shown rows = %d, want 26 (old texture still displayed)", got)
 	}
-	// Upload recovers → snapshot + sig follow the texture together.
+	// Upload recovers → snapshot + sig follow the texture together. Texture rows stay at the
+	// 26-row high-water (fixed-height padding - page navs never resize the overlay).
 	rt.texErr = nil
 	if !e.uploadMenu(menuKey, "rave-mate", sub, 1, "sub") {
 		t.Fatal("retry upload failed")
 	}
-	if got := e.shownMenu(menuKey).rows; got != 6 {
-		t.Fatalf("shown rows after retry = %d, want 6", got)
+	if got := e.shownMenu(menuKey).rows; got != 26 {
+		t.Fatalf("shown rows after retry = %d, want 26 (high-water padded)", got)
 	}
 	if e.menuSig[menuKey] != "sub" {
 		t.Fatalf("sig after retry = %q, want sub", e.menuSig[menuKey])
@@ -129,8 +130,9 @@ func TestSnapshotFollowsSuccessfulPageChange(t *testing.T) {
 	if !e.uploadMenu(menuKey, "rave-mate", actItems(6, &fired), 1, "sub") {
 		t.Fatal("sub upload failed")
 	}
-	// v=0.437 (bottom-origin) on the 7-row subpage texture: topY=(1-0.437)*392=220.7 → row 2.
-	hit := pointerHit{key: menuKey, u: 0.5, v: 0.437}
+	// Texture stays 27 rows (1512px, high-water padded) across the page change - row pixel
+	// geometry never shifts. Row 2 spans topY [168,224): v=0.8743 → topY=(1-0.8743)*1512=190.1.
+	hit := pointerHit{key: menuKey, u: 0.5, v: 0.8743}
 	e.applyHover(hit)
 	e.pointerClick(hit)
 	if fired != fmt.Sprintf("row%d", e.ptrRow) || e.ptrRow != 2 {
@@ -138,9 +140,9 @@ func TestSnapshotFollowsSuccessfulPageChange(t *testing.T) {
 	}
 }
 
-// A row-count change on upload must drop row state indexed to the OLD texture: the smoothRow
-// hysteresis band (ptrRow) + the transform cache (quad aspect changes → SetTransform re-sends) +
-// the hover-accent placement sig. A same-rows upload must keep them.
+// Texture rows follow the high-water mark: shrinking pages keep the padded height (no
+// destroy+recreate, no state reset - the menu-blink fix), and only GROWTH past the
+// high-water changes the texture → resets row state indexed to the old geometry.
 func TestRowCountChangeResetsRowState(t *testing.T) {
 	e := newTestEditor(t, &fakeRT{})
 	var fired string
@@ -156,9 +158,20 @@ func TestRowCountChangeResetsRowState(t *testing.T) {
 	if e.ptrRow != 14 || !e.menuTf.set || e.hoverSig != "placed" {
 		t.Fatalf("same-rows upload reset state: ptrRow=%d tfSet=%v hoverSig=%q", e.ptrRow, e.menuTf.set, e.hoverSig)
 	}
-	// Row count changes → hysteresis band + transform cache + hover placement all reset.
+	// FEWER rows → texture stays at the 26-row high-water: geometry unchanged, nothing resets.
 	if !e.uploadMenu(menuKey, "rave-mate", actItems(6, &fired), 1, "sub") {
 		t.Fatal("sub upload failed")
+	}
+	if e.ptrRow != 14 || !e.menuTf.set || e.hoverSig != "placed" {
+		t.Fatalf("shrink upload reset state (fixed-height should keep it): ptrRow=%d tfSet=%v hoverSig=%q",
+			e.ptrRow, e.menuTf.set, e.hoverSig)
+	}
+	if got := e.shownMenu(menuKey).rows; got != 26 {
+		t.Fatalf("shown rows = %d, want 26 (high-water padded)", got)
+	}
+	// GROWTH past the high-water → texture resizes once → row state resets.
+	if !e.uploadMenu(menuKey, "rave-mate", actItems(30, &fired), 1, "big") {
+		t.Fatal("big upload failed")
 	}
 	if e.ptrRow != -1 {
 		t.Fatalf("ptrRow = %d, want -1 (band indexed the old 27-row texture)", e.ptrRow)

@@ -60,6 +60,32 @@ type Renderer struct {
 	name font.Face // Orbitron-Bold (names / alerts)
 	body font.Face // Orbitron-Medium (message text)
 	lh   int       // line height px
+
+	// canvas recycles the hot-path raster buffers (menu ~1MB, panels 1.2MB) - a fresh
+	// alloc per content change was pure GC churn. Only RenderMenu/Panel use it: their
+	// output is uploaded synchronously (SetOverlayRaw copies) and never retained, and
+	// every render fully overwrites the buffer (bg fill first). Cap: canvasCacheMax.
+	canvas map[[2]int]*image.NRGBA
+}
+
+// canvasCacheMax bounds the canvas cache (menu + posmenu + panel sizes; a handful live).
+const canvasCacheMax = 8
+
+// canvasFor returns a fully-reusable w×h canvas. The caller must overwrite every pixel
+// and upload before the next canvasFor call with the same dims.
+func (r *Renderer) canvasFor(w, h int) *image.NRGBA {
+	if img, ok := r.canvas[[2]int{w, h}]; ok {
+		return img
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	if len(r.canvas) >= canvasCacheMax {
+		for k := range r.canvas { // drop an arbitrary entry - sizes churn only on config changes
+			delete(r.canvas, k)
+			break
+		}
+	}
+	r.canvas[[2]int{w, h}] = img
+	return img
 }
 
 // NewRenderer parses the embedded faces at the given scale (1 = default).
@@ -82,7 +108,7 @@ func NewRenderer(scale float64) (*Renderer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Renderer{name: nm, body: bd, lh: int(22 * scale)}, nil
+	return &Renderer{name: nm, body: bd, lh: int(22 * scale), canvas: map[[2]int]*image.NRGBA{}}, nil
 }
 
 // scaleA returns c with its alpha scaled by f (0..1) - lets the panel/menu background fade
@@ -100,7 +126,7 @@ func scaleA(c color.NRGBA, f float64) color.NRGBA {
 // Panel renders lines (oldest first) bottom-aligned into a w×h RGBA panel. bgAlpha (0..1) scales the
 // translucent background only - text stays fully opaque.
 func (r *Renderer) Panel(lines []Line, w, h int, bgAlpha float64) *image.NRGBA {
-	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	img := r.canvasFor(w, h)
 	draw.Draw(img, img.Bounds(), image.NewUniform(scaleA(colPanelBG, bgAlpha)), image.Point{}, draw.Src)
 
 	pad := 12
@@ -196,9 +222,13 @@ var (
 // text + slider fills stay opaque. Item i occupies top-left y in [(i+1)*MenuRowH, (i+2)*MenuRowH).
 // Hover is NOT baked here - it's a separate tiny overlay (RenderHoverRow + editor.driveHover), so a
 // hover move never re-uploads this whole texture (~2.5MB GPU churn + visible flicker per row change).
-func (r *Renderer) RenderMenu(title string, items []MenuItem, bgAlpha float64) *image.NRGBA {
-	h := MenuRowH * (len(items) + 1)
-	img := image.NewNRGBA(image.Rect(0, 0, MenuW, h))
+// padRows fixes the canvas height at max(len(items), padRows) rows: a constant texture size across
+// pages means SetTexture never destroy+recreates the overlay on navigation (the menu blink). The pad
+// zone below the rows is menu background - inert (row math bounds-checks past len(items)).
+func (r *Renderer) RenderMenu(title string, items []MenuItem, bgAlpha float64, padRows int) *image.NRGBA {
+	rows := max(len(items), padRows)
+	h := MenuRowH * (rows + 1)
+	img := r.canvasFor(MenuW, h)
 	headBG, rowBG := scaleA(colHeadBG, bgAlpha), scaleA(colRow, bgAlpha)
 	draw.Draw(img, img.Bounds(), image.NewUniform(scaleA(colMenuBG, bgAlpha)), image.Point{}, draw.Src)
 	// Title bar.

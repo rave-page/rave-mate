@@ -283,7 +283,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	if ed, ok := m.rt.(Editor); ok && m.mutate != nil {
 		m.edit = &editor{m: m, ed: ed, menuSig: map[string]string{},
 			menuInter: map[string]bool{}, menuMh: map[string]int{}, menuItems: map[string][]MenuItem{}, menuBuiltAt: map[string]time.Time{},
-			menuShown: map[string]menuSnap{}, menuTexWH: map[string][2]int{}, contentInter: map[string]bool{}}
+			menuShown: map[string]menuSnap{}, menuTexWH: map[string][2]int{}, contentInter: map[string]bool{},
+			menuRowsHi: map[string]int{}}
 		m.motion = newMotion(m.log, ed.TrackerPoses,
 			func() string { return m.cfg().ResolvedOSCAddr() },
 			func() string { return m.cfg().ResolvedVMCAddr() },
@@ -368,6 +369,15 @@ func (m *Manager) runConnected(ctx context.Context) {
 				feat := m.cfg()
 				m.edit.handleActions(feat, HandFromString(feat.ResolvedEditHand()))
 				m.inputStat.observe(time.Since(t0))
+				// Interaction edge → reconcile the editor NOW (~11ms) instead of waiting for
+				// the 100ms overlay tick: menu opens/navs/clicks paint within one input frame.
+				// Everything inside tick is signature/changed-gated, so a dirty pass costs
+				// only what actually changed. Content overlays stay on the slow tick.
+				if m.edit.consumeDirty() {
+					r0 := time.Now()
+					m.edit.tick(feat)
+					m.renderStat.observe(time.Since(r0))
+				}
 			}
 		case <-motionT.C:
 			if m.motion != nil {

@@ -148,6 +148,8 @@ type editor struct {
 	menuBuiltAt   map[string]time.Time  // per-menu-key last rebuild time
 	menuShown     map[string]menuSnap   // per-menu-key snapshot of the list the DISPLAYED texture was rendered from - ALL hover/click row mapping uses this, never the live rebuilt list (see uploadMenu)
 	menuTexWH     map[string][2]int     // per-menu-key last-uploaded texture dims (diag: compare vs GPU-reported size)
+	menuRowsHi    map[string]int        // per-menu-key high-water row count: textures pad to it so page navs never resize → never destroy+recreate the overlay (the menu blink)
+	dirty         bool                  // interaction edge pending → Manager reconciles on the next input frame (~11ms) instead of the 100ms tick
 	page          string                // current menu sub-page ("" = home); drill-down nav
 	dashInit      bool                  // dashboard tab created
 	menuSig       map[string]string     // per-menu-key last-UPLOADED label signature (committed only on SetTexture success; skip re-upload → no flicker)
@@ -282,7 +284,20 @@ type editor struct {
 func (e *editor) resetSession() {
 	*e = editor{m: e.m, ed: e.ed, menuSig: map[string]string{},
 		menuInter: map[string]bool{}, menuMh: map[string]int{}, menuItems: map[string][]MenuItem{}, menuBuiltAt: map[string]time.Time{},
-		menuShown: map[string]menuSnap{}, menuTexWH: map[string][2]int{}, contentInter: map[string]bool{}}
+		menuShown: map[string]menuSnap{}, menuTexWH: map[string][2]int{}, contentInter: map[string]bool{},
+		menuRowsHi: map[string]int{}}
+}
+
+// markDirty requests an immediate editor reconcile: the Manager services it on the next
+// ~11ms input frame instead of the 100ms overlay tick. Set on every interaction edge that
+// changes displayed UI (summon, page nav, clicks, grabs) - menus paint within one frame.
+func (e *editor) markDirty() { e.dirty = true }
+
+// consumeDirty returns + clears the dirty flag (input-loop goroutine only).
+func (e *editor) consumeDirty() bool {
+	d := e.dirty
+	e.dirty = false
+	return d
 }
 
 // menuSnap is the immutable {items, row count} snapshot of the list a menu overlay's CURRENTLY
@@ -304,7 +319,13 @@ func (e *editor) shownMenu(key string) menuSnap { return e.menuShown[key] }
 // what keeps pointer mapping correct even if OpenVR rejects an upload (e.g. a raw-texture resize).
 // Hover is NOT rendered into the texture (see driveHover) - uploads happen on CONTENT change only.
 func (e *editor) uploadMenu(key, title string, items []MenuItem, bg float64, sig string) bool {
-	img := e.m.rend.RenderMenu(title, items, bg)
+	// Fixed-height texture: pad to the key's high-water row count so page navs never change
+	// dims - SetTexture destroy+recreates the overlay on ANY resize (gen-suffixed key dance),
+	// which blinked the menu on almost every drill-down. Height only grows, to the biggest
+	// page seen this session; the pad zone is inert background.
+	texRows := max(len(items), e.menuRowsHi[key])
+	e.menuRowsHi[key] = texRows
+	img := e.m.rend.RenderMenu(title, items, bg, texRows)
 	if err := e.m.rt.SetTexture(key, img); err != nil {
 		if time.Since(e.texFailAt) > 2*time.Second {
 			e.texFailAt = time.Now()
@@ -312,7 +333,7 @@ func (e *editor) uploadMenu(key, title string, items []MenuItem, bg float64, sig
 		}
 		return false
 	}
-	if e.menuShown[key].rows != len(items) {
+	if e.menuShown[key].rows != texRows {
 		// Texture height changed → the quad's aspect changes. Re-send the transform (incl. WidthM) so
 		// SteamVR re-derives the quad from the NEW texture, and drop row state indexed to the OLD one:
 		// the smoothRow hysteresis band + the hover accent would otherwise pin to stale pixel rows.
@@ -329,7 +350,7 @@ func (e *editor) uploadMenu(key, title string, items []MenuItem, bg float64, sig
 		e.hoverSig = ""
 	}
 	e.menuSig[key] = sig
-	e.menuShown[key] = menuSnap{items: items, rows: len(items)}
+	e.menuShown[key] = menuSnap{items: items, rows: texRows} // rows = TEXTURE rows (padded) - all mh/UV math keys off it
 	e.menuTexWH[key] = [2]int{img.Bounds().Dx(), img.Bounds().Dy()}
 	return true
 }
@@ -354,6 +375,7 @@ func (e *editor) gotoPage(p string) {
 	e.navAt = time.Now()
 	e.menuBuiltAt[menuKey] = time.Time{}
 	e.menuBuiltAt[dashKey] = time.Time{}
+	e.markDirty()
 }
 
 // longPress is how long to hold the summon button before it opens the editor (a short tap toggles
@@ -364,6 +386,7 @@ func (e *editor) isGrabbing(key string) bool { return e.grab != nil && e.grab.ke
 
 func (e *editor) toggle() {
 	e.on = !e.on
+	e.markDirty()
 	e.evt("editor %s", map[bool]string{true: "OPENED", false: "CLOSED"}[e.on])
 	if !e.on {
 		e.grab = nil
@@ -389,6 +412,7 @@ func (e *editor) setEditMode(on bool) {
 		return
 	}
 	e.editMode = on
+	e.markDirty()
 	if !on {
 		e.menuHidden = false // leaving edit mode restores the main menu (hide is an edit-mode convenience)
 	}
@@ -1206,9 +1230,10 @@ func clampF32(v, lo, hi float32) float32 {
 }
 
 // menuRebuild throttles menu re-layout: items (with live values) are rebuilt at most this often, not
-// every 100ms tick - cuts allocations + obs-instance locks while keeping clicks responsive (events
+// every tick - cuts allocations + obs-instance locks while keeping clicks responsive (events
 // are polled every tick against the cached items, and a click forces an immediate rebuild).
-const menuRebuild = 250 * time.Millisecond
+// 100ms keeps live values (sliders, OBS state) within one overlay tick of reality.
+const menuRebuild = 100 * time.Millisecond
 
 // driveMenu renders the menu into an overlay + dispatches laser clicks (actions fire; sliders set a
 // value from the click's X). Used by both the floating menu and the SteamVR dashboard tab. Items are
@@ -1269,6 +1294,7 @@ func (e *editor) driveMenu(key, title string, feat config.VROverlayFeature, hand
 		}
 		if e.menuActionAt(shown.items, row, float64(ev.X)/float64(MenuW)) {
 			e.menuBuiltAt[key] = time.Time{} // a click changed state → rebuild on the next tick
+			e.markDirty()                    // ...and paint it on the next input frame, not in ≤100ms
 		}
 	}
 }
@@ -1380,6 +1406,7 @@ func (e *editor) startGrab(key, snap string, idx int, oworld Mat34) {
 		offset := MulMat(InvMat(pose), oworld)
 		e.grab = &grab{key: key, idx: idx, offset: offset, last: oworld, snap: snap, startAt: time.Now()}
 		e.ed.SetTransformMatrixDevice(key, idx, offset) // parent to the hand → SteamVR tracks it at full fps
+		e.markDirty()
 	}
 }
 
@@ -1389,6 +1416,7 @@ func mustPose(ed Editor, idx int) Mat34 { m, _ := ed.DevicePose(idx); return m }
 func (e *editor) endGrab() {
 	g := e.grab
 	e.grab = nil
+	e.markDirty()
 	if g == nil {
 		return
 	}

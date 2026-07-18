@@ -136,6 +136,7 @@ func (e *editor) openFullMenu(p string) {
 // toggleFullMenu opens/closes the paged menu (strip MNU button); opening lands on home.
 func (e *editor) toggleFullMenu() {
 	e.fullMenu = !e.fullMenu
+	e.markDirty()
 	if e.fullMenu {
 		e.menuHidden = false
 		e.gotoPage("")
@@ -276,5 +277,6 @@ func (e *editor) stripClick(h pointerHit) {
 	if b.OnClick != nil {
 		b.OnClick()
 		e.stripSig = "" // state likely changed → re-render next tick
+		e.markDirty()   // ...which is the next input frame, not ≤100ms away
 	}
 }

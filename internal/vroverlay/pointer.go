@@ -378,7 +378,9 @@ func hoverRowOffset(row, rows int, widthM float64) (y, z float64) {
 // navClickGuard swallows menu clicks briefly after a page change: navigation reflows the rows under
 // a stationary cursor, so the user's next click at the same spot would fire whatever NEW row landed
 // there (live trace: "< Back" → immediate second click hit "In-world editor" and closed the editor).
-const navClickGuard = 450 * time.Millisecond
+// 150ms: with dirty-driven rendering the new page paints within one input frame, so the user SEES
+// the reflow almost instantly - the old 450ms (compensating 100ms-stale visuals) ate real clicks.
+const navClickGuard = 150 * time.Millisecond
 
 // pointerClick activates the hovered element: the wrist toggles the editor (works while CLOSED); a
 // menu row fires its action/slider (identical to an EvMouseDown); a content overlay selects it.
@@ -396,6 +398,7 @@ func (e *editor) pointerClick(h pointerHit) {
 		items := e.shownMenu(h.key).items                  // fire from the DISPLAYED list - clicked row == seen row
 		if e.menuActionAt(items, e.ptrRow, float64(h.u)) { // fire the HIGHLIGHTED row (hysteresis-stable)
 			e.menuBuiltAt[h.key] = time.Time{}
+			e.markDirty() // paint the state change on the next input frame
 		}
 	case h.key == worldPathKey:
 		// orbit drag stays on the laser path; a pointer click here is a no-op

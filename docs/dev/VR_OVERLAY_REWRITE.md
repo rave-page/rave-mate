@@ -109,3 +109,22 @@ hysteresis, grab math) → deploy via the VR loop (push → CI → `ctl remote-u
 in-headset: pointer lands where aimed at arm's length AND point-blank, hovered row = clicked row,
 menu never vanishes across hand-untrack/dashboard/ respawn, edit move/rotate/tilt/scale feels solid.
 Sanity-check neighbouring surfaces (wrist badge open/close, content select, VRChat coexistence).
+
+## 2026-07-18 - menu latency fixes (shipped)
+
+Root cause of "laggy/delayed menus, don't open properly": ALL menu reconcile (open/nav/
+Show/upload) ran only on the 100 ms overlay tick while the cursor ran at 90 Hz, page navs
+destroy+recreated the overlay texture (blink), and a 450 ms nav guard ate follow-up clicks.
+
+- **Dirty-driven render**: interaction edges (summon, page nav, clicks, strip, grabs) set
+  `editor.dirty`; Manager services it right after `handleActions` on the ~11 ms input frame.
+  Menu paints within one frame; the 100 ms tick keeps periodic content refresh.
+- **Fixed-height menu texture**: `uploadMenu` pads to the per-key high-water row count
+  (`menuRowsHi`) so page navs never resize → `SetTexture` never destroy+recreates (no
+  blink). Pad zone = inert background; `menuSnap.rows` = texture rows, so all mh/UV math
+  keys off the padded height. Resize (+ row-state reset) only on growth past high-water.
+- **Guards retuned**: `navClickGuard` 450→150 ms (instant paint removed the stale-visual
+  window it compensated), `menuRebuild` 250→100 ms (live values track within a tick).
+  `longPress` 450 ms unchanged (intentional).
+- **Raster reuse**: `Renderer.canvasFor` recycles menu/panel canvases (~1 MB fresh alloc
+  per content change before); outputs upload synchronously and are never retained.
