@@ -1,13 +1,13 @@
 {
-  "version": "nightly-a8c7ec2",
-  "build": 113,
-  "commit": "a8c7ec2",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-113-20260718-a8c7ec2.exe",
-  "sha256": "9e514bebf2a98df54f813ffec53b342720148f42c6e36f1cb3297fdb68eadd6a",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-113-20260718-a8c7ec2.exe",
-  "installer_sha256": "89293eec11088a5c5997843c87ecfee9c7ec3061e4618bb92a04b9e9055811b9",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-113-20260718-a8c7ec2",
-  "linux_sha256": "50642bd77b80018fed5471c22aaa793c9db33d8c8ac5ef75eebcdf88ce4ac1c0",
+  "version": "nightly-2e8a13e",
+  "build": 114,
+  "commit": "2e8a13e",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-114-20260718-2e8a13e.exe",
+  "sha256": "c2fd83a2c9dd118d8edbc2fa76ed123ec3444bbfe2df0f109f34b1a64e14a2f6",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-114-20260718-2e8a13e.exe",
+  "installer_sha256": "b41084e81179e96414f79ff3fa828d56d18ed3269cb3278f1796cc62e4c376f9",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-114-20260718-2e8a13e",
+  "linux_sha256": "273d875f99f9cad4d54479d728aaed0ffdc08a8d1410aef9f7ade6c41e911f5a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-18T06:59:22Z",
-  "notes": "feat(library): Ctrl+arrow zoom in cue edit + P-key preparation playlist"
+  "released": "2026-07-18T13:36:29Z",
+  "notes": "fix(vroverlay): menu latency - dirty-driven render, fixed-height texture, guard retune"
 }
