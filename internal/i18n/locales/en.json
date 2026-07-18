@@ -1758,6 +1758,7 @@
       "idle": "running · no data",
       "off": "off",
       "portFailed": "failed to open - held by another app or unplugged",
+      "portMuted": "loopback delivers NOTHING - even our own probe never echoes back. LoopBe1 auto-mutes on a feedback loop: open its systray icon and untick Mute (and set the Traktor device's in-port to None so it can't loop again).",
       "receiving": "receiving · {age}",
       "title": "Signal sources"
     },

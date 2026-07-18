@@ -24,6 +24,7 @@ type MidiProxy struct {
 	forward     func(port string, m midi.Message)
 	openPorts   []string // last-reported opened INPUT ports (from the child's "ports" event)
 	failedPorts []string // last-reported input ports that failed to open (allocated/missing)
+	mutedPorts  []string // loopback ports delivering nothing (LoopBe mute - see midisrc.loopbackWatch)
 }
 
 // MidiConfig builds the child's init params (re-read live on every restart).
@@ -72,7 +73,7 @@ func NewMidiProxy(log, mon *logbus.Bus, initFn func() MidiConfig) (*MidiProxy, e
 					return
 				}
 				p.mu.Lock()
-				p.openPorts, p.failedPorts = ev.Open, ev.Failed
+				p.openPorts, p.failedPorts, p.mutedPorts = ev.Open, ev.Failed, ev.Muted
 				p.mu.Unlock()
 			},
 		},
@@ -151,6 +152,14 @@ func (p *MidiProxy) FailedInputPorts() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]string(nil), p.failedPorts...)
+}
+
+// MutedInputPorts returns open loopback ports that deliver nothing - even the child's own
+// probe never echoes back (LoopBe1 anti-feedback mute). EQ/filter are silently dead on these.
+func (p *MidiProxy) MutedInputPorts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.mutedPorts...)
 }
 
 // CancelLearn disarms a pending capture in the child.

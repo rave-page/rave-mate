@@ -69,11 +69,12 @@ type learnRes struct {
 	Reason string `json:"reason,omitempty"` // e.g. "port-not-open" (in use by another app / missing)
 }
 
-// portsEvent reports which controller INPUT ports opened vs failed (child → daemon), so the UI
-// can flag a port that's held exclusively by another app.
+// portsEvent reports which controller INPUT ports opened vs failed vs muted (child → daemon),
+// so the UI can flag a port held exclusively by another app or a loopback delivering nothing.
 type portsEvent struct {
 	Open   []string `json:"open"`
 	Failed []string `json:"failed"`
+	Muted  []string `json:"muted,omitempty"`
 }
 
 func toControllerSpecs(in []MidiControllerInit) []midisrc.ControllerSpec {
@@ -123,8 +124,8 @@ func (f *midiFeature) build(cfg midiInit) *midisrc.Source {
 	})
 	src.SetControllers(toControllerSpecs(cfg.Controllers))
 	src.SetBridge(midisrc.BridgeSpec{Enabled: cfg.Bridge.Enabled, ToDJPort: cfg.Bridge.ToDJPort, FromDJPort: cfg.Bridge.FromDJPort})
-	src.SetOnPorts(func(open, failed []string) {
-		f.rt.Emit("ports", portsEvent{Open: open, Failed: failed})
+	src.SetOnPorts(func(open, failed, muted []string) {
+		f.rt.Emit("ports", portsEvent{Open: open, Failed: failed, Muted: muted})
 	})
 	return src
 }

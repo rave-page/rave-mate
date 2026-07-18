@@ -9,8 +9,13 @@ unified state. Code: `internal/session/` (contracts + merger), `internal/session
 The **Live** tab shows the merged state with provenance: each deck card carries a "via
 {sources}" line, and the **Signal sources** panel below the decks shows per-channel mixer
 coverage (which source feeds EQ / filter / fader — "—" = nobody, the instant answer to
-"why are my EQ knobs dead on the overlay"), every source's liveness, ravemidi
-driver bind health per managed controller, and any input port that failed to open. The
+"why are my EQ knobs dead on the overlay"), every enabled source's liveness (planned stubs
+are hidden - the QML mod's data arrives via the `traktor` HTTP source, not a separate row),
+ravemidi driver bind health per managed controller, any input port that failed to open, and
+**loopback health**: a LoopBe/loopMIDI input that delivers nothing gets an idle-time echo
+probe (Active Sensing into its out side); no echo = flagged **muted** - LoopBe1 silently
+auto-mutes on a detected feedback loop (systray icon → untick Mute), which otherwise kills
+EQ/filter mid-set while every port-open check stays green. The
 **Recordings** tab shows the auto-generated tracklist. Toggle sources/sinks in
 Settings → "DJ data sources & outputs" (applied live, no restart).
 

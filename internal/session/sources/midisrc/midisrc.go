@@ -27,6 +27,8 @@ const (
 	srcLog      = "midi"
 	tickRate    = 100 * time.Millisecond
 	summaryRate = 5 * time.Second
+	// loopbackProbeEvery paces the loopback health check; probes fire only in silent windows.
+	loopbackProbeEvery = 15 * time.Second
 )
 
 // activity accumulates a per-port message digest between summary ticks: how many messages,
@@ -169,13 +171,19 @@ type Source struct {
 	portMu   sync.Mutex
 	openIn   []string // successfully-opened INPUT port display names
 	failedIn []string // input port names that failed to open (allocated/missing)
-	onPorts  func(open, failed []string)
+	mutedIn  []string // software-loopback ports that deliver NOTHING (see loopbackWatch)
+	onPorts  func(open, failed, muted []string)
+
+	// Loopback health: per-port received-message counters, read by loopbackWatch.
+	rxMu sync.Mutex
+	rxN  map[string]uint64
 }
 
 // New constructs the MIDI source. Empty port name = that decoder is disabled. Learned
 // controllers + the DJ bridge are added via SetControllers / SetBridge before Start.
 func New(log *logbus.Bus, denonPort, customPort string) *Source {
-	return &Source{log: log, denonPort: denonPort, customPort: customPort, injectCh: make(chan midi.Message, 64)}
+	return &Source{log: log, denonPort: denonPort, customPort: customPort,
+		injectCh: make(chan midi.Message, 64), rxN: map[string]uint64{}}
 }
 
 // SetMonitor attaches a raw-MIDI monitor bus (the MIDI debugger view subscribes to it).
@@ -191,9 +199,10 @@ func (s *Source) SetControllers(cs []ControllerSpec) { s.controllers = cs }
 // SetBridge sets the two-port DJ router. Call before Start.
 func (s *Source) SetBridge(b BridgeSpec) { s.bridge = b }
 
-// SetOnPorts registers a callback fired after each Start build with the opened + failed INPUT
-// port names, so the host can report which controllers are actually being read.
-func (s *Source) SetOnPorts(fn func(open, failed []string)) { s.onPorts = fn }
+// SetOnPorts registers a callback fired after each Start build (and on loopback-health flips)
+// with the opened + failed + muted INPUT port names, so the host can report which controllers
+// are actually being read.
+func (s *Source) SetOnPorts(fn func(open, failed, muted []string)) { s.onPorts = fn }
 
 // OpenInputPorts returns the INPUT ports opened by the last build.
 func (s *Source) OpenInputPorts() []string {
@@ -207,6 +216,44 @@ func (s *Source) FailedInputPorts() []string {
 	s.portMu.Lock()
 	defer s.portMu.Unlock()
 	return append([]string(nil), s.failedIn...)
+}
+
+// MutedInputPorts returns open software-loopback ports that currently deliver NOTHING - even
+// our own probe injected into their out side never arrives (classic: LoopBe1 anti-feedback
+// mute). The port opens fine, so only the loopbackWatch echo test catches this state.
+func (s *Source) MutedInputPorts() []string {
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+	return append([]string(nil), s.mutedIn...)
+}
+
+// rxCount returns the number of messages received on port since Start.
+func (s *Source) rxCount(port string) uint64 {
+	s.rxMu.Lock()
+	defer s.rxMu.Unlock()
+	return s.rxN[port]
+}
+
+// setMuted flips a port's muted state + refires onPorts so hosts mirror it live.
+func (s *Source) setMuted(port string, muted bool) {
+	s.portMu.Lock()
+	kept := s.mutedIn[:0]
+	for _, p := range s.mutedIn {
+		if p != port {
+			kept = append(kept, p)
+		}
+	}
+	s.mutedIn = kept
+	if muted {
+		s.mutedIn = append(s.mutedIn, port)
+	}
+	open := append([]string(nil), s.openIn...)
+	failed := append([]string(nil), s.failedIn...)
+	mutedL := append([]string(nil), s.mutedIn...)
+	s.portMu.Unlock()
+	if s.onPorts != nil {
+		s.onPorts(open, failed, mutedL)
+	}
 }
 
 // PortOpen reports whether an opened input port name contains substr (case-insensitive).
@@ -416,10 +463,13 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 		debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
 	}
 	s.portMu.Lock()
-	s.openIn, s.failedIn = opened, failed
+	s.openIn, s.failedIn, s.mutedIn = opened, failed, nil
 	s.portMu.Unlock()
 	if s.onPorts != nil {
-		s.onPorts(opened, failed)
+		s.onPorts(opened, failed, nil)
+	}
+	for _, name := range opened {
+		s.watchIfLoopback(ctx, name, &wg)
 	}
 
 	// Auto-retry ports that were held by another app (winmm single-client): when that app
@@ -488,13 +538,93 @@ func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBindi
 				s.failedIn = kept
 				open := append([]string(nil), s.openIn...)
 				fl := append([]string(nil), s.failedIn...)
+				muted := append([]string(nil), s.mutedIn...)
 				s.portMu.Unlock()
 				if s.onPorts != nil {
-					s.onPorts(open, fl)
+					s.onPorts(open, fl, muted)
 				}
+				s.watchIfLoopback(ctx, in.Name, wg)
 			}
 			if len(pending) == 0 {
 				return
+			}
+		}
+	}
+}
+
+// isLoopbackPort reports whether a port name is a software MIDI loopback (probe-safe: no
+// hardware behind it to confuse with our health probe).
+func isLoopbackPort(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "loopbe") || strings.Contains(n, "loopmidi")
+}
+
+// watchIfLoopback launches the loopback health watcher for a just-opened input port when it
+// is a software loopback with a same-name out side.
+func (s *Source) watchIfLoopback(ctx context.Context, name string, wg *sync.WaitGroup) {
+	if !isLoopbackPort(name) {
+		return
+	}
+	wg.Add(1)
+	debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.loopbackWatch(ctx, name) })
+}
+
+// loopbackWatch health-checks a software loopback input (LoopBe/loopMIDI): when the port has
+// been silent for a full interval, inject Active Sensing (0xFE - system-realtime, so it is
+// invisible to mappings, decoders, learn and the peer tap) into the loopback's OUT side; a
+// healthy loopback echoes it straight back to our input. No echo = the loopback delivers
+// NOTHING - classic LoopBe1 anti-feedback mute - the state that silently kills EQ/filter
+// mid-set while every port-open check stays green (a muted port still opens fine). Probes
+// fire only while silent, so a live set with moving knobs is never touched.
+func (s *Source) loopbackWatch(ctx context.Context, port string) {
+	out, err := midi.OpenOutput(port)
+	if err != nil {
+		return // no same-name out side - nothing to probe with
+	}
+	defer out.Close()
+	t := time.NewTicker(loopbackProbeEvery)
+	defer t.Stop()
+	last := s.rxCount(port)
+	muted := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n := s.rxCount(port); n != last {
+				last = n // real traffic flowed - healthy without probing
+				if muted {
+					muted = false
+					s.setMuted(port, false)
+					s.log.Info(srcLog, "loopback delivering again", map[string]any{"port": port})
+				}
+				continue
+			}
+			out.Send(0xFE, 0, 0) // Active Sensing probe
+			deadline := time.Now().Add(2 * time.Second)
+			echoed := false
+			for time.Now().Before(deadline) {
+				if s.rxCount(port) != last {
+					echoed = true
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+			last = s.rxCount(port)
+			if echoed != muted {
+				continue // state unchanged (echoed+not-muted, or silent+already-muted)
+			}
+			muted = !echoed
+			s.setMuted(port, muted)
+			if muted {
+				s.log.Warn(srcLog, "loopback port delivers nothing (muted?)", map[string]any{
+					"port": port, "hint": "LoopBe1 auto-mutes on feedback: systray icon → untick Mute"})
+			} else {
+				s.log.Info(srcLog, "loopback delivering again", map[string]any{"port": port})
 			}
 		}
 	}
@@ -504,6 +634,9 @@ func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBindi
 // tap, decoders. THRU is NOT here - it's re-emitted in the winmm input callback (Input.SetThru)
 // before this runs, so the DJ app sees the control at the lowest possible latency.
 func (s *Source) handleLocal(b portBinding, now time.Time, m midi.Message, emit func(session.Observation)) {
+	s.rxMu.Lock()
+	s.rxN[b.name]++ // loopback-health heartbeat (loopbackWatch reads it)
+	s.rxMu.Unlock()
 	if s.mon != nil {
 		// Every raw message - even ones no decoder maps - so the debugger shows exactly
 		// what the controller emits (the key signal when a mapping is missing/misrouted).

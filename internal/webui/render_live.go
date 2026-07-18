@@ -466,8 +466,13 @@ func (u *UI) signalsHTML() string {
 		}
 		b.WriteString(row(i18n.T("live.signals.channel", i18n.A{"n": ch}), strings.Join(parts, " · ")))
 	}
-	// source liveness
+	// source liveness. Disabled sources are skipped: planned stubs (qml, nowplaying) register
+	// disabled to advertise in Settings, and an "off" row here reads as a fault (the QML mod's
+	// data arrives via the traktor HTTP source, not a separate "qml" row).
 	for _, s := range u.svc.Session.Sources() {
+		if !s.Enabled {
+			continue
+		}
 		state := i18n.T("live.signals.off")
 		switch {
 		case s.Receiving:
@@ -493,6 +498,11 @@ func (u *UI) signalsHTML() string {
 	if u.svc.MIDISource != nil {
 		for _, p := range u.svc.MIDISource.FailedInputPorts() {
 			b.WriteString(row(p, i18n.T("live.signals.portFailed")))
+		}
+		// A muted loopback opens fine but delivers NOTHING (LoopBe1 anti-feedback mute) -
+		// the exact silent state that kills EQ/filter mid-set. Detected by echo probe.
+		for _, p := range u.svc.MIDISource.MutedInputPorts() {
+			b.WriteString(row(p, i18n.T("live.signals.portMuted")))
 		}
 	}
 	b.WriteString(`</div>`)

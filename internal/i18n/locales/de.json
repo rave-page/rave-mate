@@ -1389,6 +1389,7 @@
       "idle": "läuft · keine Daten",
       "off": "aus",
       "portFailed": "konnte nicht geöffnet werden - von anderer App belegt oder abgesteckt",
+      "portMuted": "Loopback liefert NICHTS - selbst unsere eigene Probe kommt nicht zurück. LoopBe1 schaltet sich bei einer Feedback-Schleife stumm: Systray-Symbol öffnen und Mute abwählen (und den In-Port des Traktor-Geräts auf None stellen, damit keine neue Schleife entsteht).",
       "receiving": "empfängt · {age}",
       "title": "Signalquellen"
     },
