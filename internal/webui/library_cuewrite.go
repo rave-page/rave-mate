@@ -91,7 +91,7 @@ func (u *UI) ceWriteJobs(sw string) []musiclib.CueUpdate {
 			continue
 		}
 		cues := cuepattern.FilterForSoftware(tr.Cues, sw)
-		if pref.AutoPromote { // "always promote memory cues to pads for {app}"
+		if pref.AutoPromoteOn(sw) { // "always promote memory cues to pads for {app}"
 			cues, _ = cuepattern.PromoteMemoryToHotcues(cues, "", pads)
 		}
 		cues, _ = cuepattern.CapPads(cues, s.dropsIdx[p], "", pads, !pref.NoSplitEven)
@@ -146,7 +146,7 @@ func (u *UI) ceWriteHTML(s *libSt) string {
 		}
 		acts = append(acts, btn(i18n.T("library.ce.writeTo", i18n.A{"app": t.label, "n": fmt.Sprint(n)}), variant, "ce-write:"+t.key, ""))
 		variant = "outline"
-		if u.cePrefFor(t.key).AutoPromote {
+		if u.cePrefFor(t.key).AutoPromoteOn(t.key) {
 			notes = append(notes, i18n.T("library.ce.writePromoteNote", i18n.A{"app": t.label}))
 		}
 		if t.key == "traktor" && !u.cePrefFor("traktor").NoGridAnchor {

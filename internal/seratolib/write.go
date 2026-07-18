@@ -21,12 +21,10 @@ var seratoRunning = func() bool {
 	if !ok {
 		return false
 	}
-	for _, n := range []string{"serato dj pro", "serato dj lite", "serato dj", "seratodj", "serato"} {
-		if sysactivity.Running(set, n) {
-			return true
-		}
-	}
-	return false
+	// Prefix survives version drift ("Serato DJ Pro 3.x" exe renames); exact names kept
+	// for the un-suffixed legacy exes.
+	return sysactivity.RunningPrefix(set, "serato dj") ||
+		sysactivity.Running(set, "seratodj") || sysactivity.Running(set, "serato")
 }
 
 // WriteBeatgrid writes a CONSTANT beatgrid (single terminal marker at startMs with bpm) into

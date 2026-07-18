@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/cuepattern"
+	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/rekordboxdb"
 	"rave.page/mate/internal/serato"
@@ -92,6 +94,11 @@ func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, err
 	out := TargetOutcome{App: t.App, Mode: ModeWriteback}
 	switch t.App {
 	case AppTraktor:
+		// Traktor keeps the collection in memory: it never sees a live file edit and
+		// overwrites it from memory on save/exit (same guard as cuewriteback).
+		if cuewriteback.TraktorRunning() {
+			return out, fmt.Errorf("Traktor is open - close it before syncing (it overwrites collection.nml from memory on save)")
+		}
 		path := t.OutputPath
 		if path == "" {
 			path = discoverTraktorCollection()
@@ -100,6 +107,11 @@ func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, err
 			return out, fmt.Errorf("no Traktor collection.nml found (set an output path)")
 		}
 		out.Path = path
+		// Product rule: Traktor pads fill left-to-right in track-time order on every
+		// export - the library's raw slot values are creation-order, not performance order.
+		for i := range tracks {
+			tracks[i].Cues, _ = cuepattern.RenumberPadsByTime(tracks[i].Cues, "", 0)
+		}
 		if err := backupBeforeWrite(path); err != nil {
 			return out, fmt.Errorf("backup: %w", err)
 		}
@@ -198,7 +210,7 @@ func writeBack(t config.SyncTarget, tracks []musiclib.Track) (TargetOutcome, err
 // same fail-open posture as rekordboxRunning).
 func virtualdjRunning() bool {
 	if set, ok := sysactivity.New().RunningProcesses(); ok {
-		return sysactivity.Running(set, "virtualdj")
+		return sysactivity.RunningPrefix(set, "virtualdj")
 	}
 	return false
 }

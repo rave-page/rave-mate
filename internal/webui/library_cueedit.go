@@ -2328,7 +2328,7 @@ func (u *UI) ceDefaultsHTML(c *ceSt, mode string, pref ceSWPref) string {
 	b.WriteString(toggleRow(i18n.T("library.ce.prefOw"), "ce-pref-ow", pref.Overwrite))
 	b.WriteString(toggleRow(i18n.T("library.ce.prefSplit"), "ce-pref-split", !pref.NoSplitEven))
 	if mode != "" {
-		b.WriteString(toggleRow(i18n.T("library.ce.prefPromote", i18n.A{"app": ceSoftwareLabel(mode)}), "ce-pref-promote", pref.AutoPromote))
+		b.WriteString(toggleRow(i18n.T("library.ce.prefPromote", i18n.A{"app": ceSoftwareLabel(mode)}), "ce-pref-promote", pref.AutoPromoteOn(mode)))
 	}
 	if mode == "traktor" {
 		b.WriteString(toggleRow(i18n.T("library.ce.prefGridAnchor"), "ce-pref-grid", !pref.NoGridAnchor))
@@ -2635,7 +2635,7 @@ func init() {
 	})
 	onExact("ce-pref-promote", func(u *UI, m actMsg) {
 		on := m.Val == "true"
-		u.cePrefMutSW(func(p *ceSWPref) { p.AutoPromote = on })
+		u.cePrefMutSW(func(p *ceSWPref) { p.AutoPromote = &on })
 	})
 	onExact("ce-pref-grid", func(u *UI, m actMsg) {
 		off := m.Val != "true" // stored inverted: anchor-on-first-hotcue is the default

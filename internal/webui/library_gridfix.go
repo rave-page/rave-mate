@@ -884,10 +884,9 @@ func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []
 	var zero musiclib.WritebackResult
 	switch t.key {
 	case "traktor":
-		// Traktor holds collection.nml open (and rewrites it on exit); a live write
-		// fails the atomic rename with a cryptic OS "permission denied". Refuse early
-		// with a clear message instead.
-		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "traktor") {
+		// Traktor holds collection.nml in memory and rewrites it on save/exit - a live
+		// write silently vanishes. Refuse early with a clear message instead.
+		if cuewriteback.TraktorRunning() {
 			return zero, errors.New(i18n.T("library.gf.traktorRunning"))
 		}
 		// safety: full collection backup before the write
@@ -919,7 +918,7 @@ func (u *UI) gfApplyTo(t gfTarget, fixes []musiclib.GridFixUpdate, fixedPaths []
 		return res, nil
 	case "virtualdj":
 		// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
-		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "virtualdj") {
+		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.RunningPrefix(set, "virtualdj") {
 			return zero, fmt.Errorf("%s", i18n.T("library.gf.vdjRunning"))
 		}
 		if err := gfBackupFile("virtualdj", t.path); err != nil {

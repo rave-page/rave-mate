@@ -41,6 +41,23 @@ func Running(set map[string]bool, name string) bool {
 	return n != "" && set[n]
 }
 
+// RunningPrefix reports whether any running process name starts with prefix (normalized).
+// Versioned DJ-app exes ("Traktor Pro 4", "virtualdj8", "Serato DJ Pro") defeat the exact
+// lookup; a PREFIX keeps our own helper children ("rave-mate-feature-traktor") out of the
+// match, which a substring would catch.
+func RunningPrefix(set map[string]bool, prefix string) bool {
+	p := NormalizeName(prefix)
+	if p == "" {
+		return false
+	}
+	for n := range set {
+		if strings.HasPrefix(n, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // addProcessNames inserts exe lowercased, both with and without its extension.
 func addProcessNames(set map[string]bool, exe string) {
 	exe = strings.ToLower(strings.TrimSpace(exe))

@@ -246,3 +246,41 @@ func TestPromoteScopedCap(t *testing.T) {
 		}
 	}
 }
+
+// Regression: the Breach write - 6 hotcues slotted by creation order (drop cluster got 0-2,
+// intro cluster 3-5) + 2 right-click memory cues ON the drop markers. The full write pipeline
+// (promote -> cap -> renumber, as ceWriteJobs + ApplyCues run it) must land ALL 8 on pads
+// 1..8 in pure track-time order - the drop-marker cues included.
+func TestWritePipelinePadsInTimeOrder(t *testing.T) {
+	cues := []musiclib.CuePoint{
+		{Kind: musiclib.CueGrid, StartMs: 15596, Hotcue: -1},
+		hot(59995, 3, ""), hot(65450, 4, ""), mem(70904, ""), hot(76359, 5, ""),
+		hot(125450, 0, ""), hot(130904, 1, ""), mem(136359, ""), hot(141813, 2, ""),
+	}
+	drops := []float64{70904, 136359}
+	out := FilterForSoftware(cues, "traktor")
+	out, _ = PromoteMemoryToHotcues(out, "", 8) // AutoPromoteOn default for pad-first software
+	out, _ = CapPads(out, drops, "", 8, true)
+	out, _ = RenumberPadsByTime(out, "", 0)
+	slot := 0
+	lastMs := -1.0
+	for _, c := range out {
+		if c.Kind == musiclib.CueGrid {
+			continue
+		}
+		if c.Kind != musiclib.CueHot {
+			t.Fatalf("cue @%.0fms left off the pads: %+v", c.StartMs, c)
+		}
+		if c.StartMs < lastMs {
+			t.Fatalf("cue order broken at @%.0fms", c.StartMs)
+		}
+		lastMs = c.StartMs
+		if c.Hotcue != slot {
+			t.Fatalf("cue @%.0fms got pad %d, want %d (left-to-right by time)", c.StartMs, c.Hotcue+1, slot+1)
+		}
+		slot++
+	}
+	if slot != 8 {
+		t.Fatalf("padded cues = %d, want 8", slot)
+	}
+}

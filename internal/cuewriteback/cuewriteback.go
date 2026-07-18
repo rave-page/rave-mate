@@ -87,6 +87,14 @@ func BackupFile(backupRoot, app, path string) error {
 // Export invariant enforced here for EVERY entry point (local rail + peer RPC): only the
 // target's scope ships, and pads are numbered in track-time order (pad 0 = the earliest
 // cue - left-to-right, top-to-bottom pad rows).
+// TraktorRunning reports a running Traktor. Exact "traktor" covers the TP≤3 exe; the prefix
+// covers versioned exes ("Traktor Pro 4") without matching our own "rave-mate-feature-traktor"
+// child. Shared by every collection.nml writer (cues here, beatgrids in webui gridfix).
+func TraktorRunning() bool {
+	set, ok := sysactivity.New().RunningProcesses()
+	return ok && (sysactivity.Running(set, "traktor") || sysactivity.RunningPrefix(set, "traktor pro"))
+}
+
 func ApplyCues(t Target, updates []musiclib.CueUpdate, backupRoot string) (musiclib.WritebackResult, error) {
 	var zero musiclib.WritebackResult
 	for i := range updates {
@@ -96,6 +104,12 @@ func ApplyCues(t Target, updates []musiclib.CueUpdate, backupRoot string) (music
 	}
 	switch t.Key {
 	case "traktor":
+		// Traktor holds the collection in memory: it never reloads a live file edit and
+		// overwrites the file from memory on save/exit - a write under a running Traktor
+		// silently vanishes. Refuse, like the VDJ guard below.
+		if TraktorRunning() {
+			return zero, fmt.Errorf("%s", i18n.T("library.gf.traktorRunning"))
+		}
 		// safety: full collection backup before the write
 		if installs, err := musiclib.DiscoverTraktor(); err == nil && len(installs) > 0 && installs[0].Collection != "" {
 			if _, berr := musiclib.BackupCollection(installs[0], backupRoot); berr != nil {
@@ -112,7 +126,7 @@ func ApplyCues(t Target, updates []musiclib.CueUpdate, backupRoot string) (music
 		return musiclib.ApplyCuesRekordboxXML(t.Path, updates)
 	case "virtualdj":
 		// VDJ rewrites database.xml from memory on exit - a live write would be clobbered.
-		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.Running(set, "virtualdj") {
+		if set, ok := sysactivity.New().RunningProcesses(); ok && sysactivity.RunningPrefix(set, "virtualdj") {
 			return zero, fmt.Errorf("%s", i18n.T("library.gf.vdjRunning"))
 		}
 		if err := BackupFile(backupRoot, "virtualdj", t.Path); err != nil {

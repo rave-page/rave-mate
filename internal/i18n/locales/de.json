@@ -1125,8 +1125,8 @@
       "noTargets": "Keine DJ-Bibliothek zum Schreiben gefunden – weder Traktor, Rekordbox, VirtualDJ noch Serato erkannt.",
       "rbNote": "Rekordbox: Grids werden in die Sammlungs-XML geschrieben – in Rekordbox über Datei → Sammlung importieren laden.",
       "seratoNote": "Serato: Grids werden direkt in die Audiodateien geschrieben (verifizierter Temp-Write; Serato vorher schließen).",
+      "traktorRunning": "Traktor ist geöffnet – zuerst schließen. Traktor hält die Collection im Speicher: es sieht diesen Schreibvorgang nicht und überschreibt die Datei beim Speichern.",
       "vdjRunning": "VirtualDJ ist geöffnet – vor dem Übernehmen schließen.",
-      "traktorRunning": "Traktor ist geöffnet — schließe es, bevor du die korrigierten Beatgrids anwendest.",
       "rekordboxRunning": "Rekordbox ist geöffnet — schließe es vor dem Anwenden.",
       "writeDenied": "Sammlung konnte nicht geschrieben werden — die Datei ist gesperrt oder schreibgeschützt. Schließe deine DJ-Software (und stelle sicher, dass die Datei nicht schreibgeschützt ist) und versuche es erneut."
     },

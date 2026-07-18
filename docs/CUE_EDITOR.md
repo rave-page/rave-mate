@@ -157,15 +157,18 @@ become cues via an applied pattern.
 
 The export honours the target's scope and defaults: only the shared layer + that app's
 own cues ship; the app's pad limit is enforced (closest-to-drop, split across drops per
-its default) and, if enabled, memory cues are promoted to pads on the way out. Pads are
-always numbered in track order on the way out — pad 1 = the earliest cue. The
-button count shows how many tracks carry cues that software would receive.
+its default) and memory cues are promoted to pads on the way out — **on by default for
+pad-first software (Traktor / Serato / VirtualDJ)**, since a manually-added cue is meant
+to be performable; off by default for rekordbox, where memory cues are first-class (the
+library keeps them as memory cues either way). Pads are always numbered in track order
+on the way out — pad 1 = the earliest cue. The button count shows how many tracks carry
+cues that software would receive.
 
 Per software:
 
 | Target | Written to | Notes |
 |---|---|---|
-| **Traktor** | `collection.nml` (backup first) | non-grid `CUE_V2` replaced; TEMPO untouched. With the grid-anchor default on, the earliest hotcue is written as the TYPE-4 grid cue (replacing old grid markers); otherwise grid cues pass through untouched. Restart Traktor to pick it up. |
+| **Traktor** | `collection.nml` (backup first) | non-grid `CUE_V2` replaced; TEMPO untouched. With the grid-anchor default on, the earliest hotcue is written as the TYPE-4 grid cue (replacing old grid markers); otherwise grid cues pass through untouched. **Refused while Traktor runs**: Traktor keeps the collection in memory — it never sees a live file edit and overwrites it from memory when it saves, so a running-Traktor write silently vanishes. Close Traktor, write, reopen. |
 | **Rekordbox** | exported collection XML (backup first) | `POSITION_MARK` hotcues (Num ≥ 0) + memory cues (Num = -1) + loops; import via **File → Import Collection**. The live `master.db` is deliberately not written — cues there are tied to ANLZ analysis data and a partial write would desync the library. |
 | **VirtualDJ** | `database.xml` (backup first) | hotcues → `<Poi Type="cue" Num="1..8">`, memory cues → remix points (`Type="remix"`), loops carry `Size` in beats. Refused while VirtualDJ runs (it rewrites the database on exit). |
 | **Serato** | the audio files ("Serato Markers2" tag, MP3 GEOB / FLAC vorbis) | verified temp-write per file, refused while Serato runs; a stale legacy `Serato Markers_` tag is removed (it would shadow the new cues). Memory cues have no Serato equivalent and are skipped — pad cues + saved loops only. MP4/AIFF/Ogg/WAV are left alone. |

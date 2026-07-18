@@ -34,13 +34,13 @@ func ceSoftwareLabel(key string) string {
 }
 
 // ceSWPref is one software's stored defaults. Zero value = the shipped defaults
-// (8 pads, no overwrite, no auto-promote, split-even on).
+// (8 pads, no overwrite, auto-promote per software, split-even on).
 type ceSWPref struct {
-	MaxPads      int  `json:"maxPads,omitempty"`
-	Overwrite    bool `json:"overwriteOnApply,omitempty"`
-	AutoPromote  bool `json:"autoPromoteOnWrite,omitempty"`
-	NoSplitEven  bool `json:"noSplitEven,omitempty"`  // stored inverted: split-even is the default
-	NoGridAnchor bool `json:"noGridAnchor,omitempty"` // stored inverted: Traktor anchors the grid on the first hotcue by default
+	MaxPads      int   `json:"maxPads,omitempty"`
+	Overwrite    bool  `json:"overwriteOnApply,omitempty"`
+	AutoPromote  *bool `json:"autoPromoteOnWrite,omitempty"` // nil = per-software default (AutoPromoteOn)
+	NoSplitEven  bool  `json:"noSplitEven,omitempty"`        // stored inverted: split-even is the default
+	NoGridAnchor bool  `json:"noGridAnchor,omitempty"`       // stored inverted: Traktor anchors the grid on the first hotcue by default
 }
 
 // MaxPadsOr returns the effective pad budget.
@@ -49,6 +49,17 @@ func (p ceSWPref) MaxPadsOr() int {
 		return p.MaxPads
 	}
 	return 8
+}
+
+// AutoPromoteOn returns the effective promote-memory-cues-to-pads choice for sw. Default ON
+// for pad-first software (a manually-added cue is meant to be performable - Traktor/Serato/VDJ
+// users add cues to hit them); OFF for rekordbox, where memory cues are a first-class concept
+// the user deliberately keeps off the pads.
+func (p ceSWPref) AutoPromoteOn(sw string) bool {
+	if p.AutoPromote != nil {
+		return *p.AutoPromote
+	}
+	return sw != "rekordbox"
 }
 
 type cePrefsSt struct {
