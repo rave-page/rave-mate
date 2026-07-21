@@ -130,6 +130,7 @@ type mpSt struct {
 	exporting   bool
 	exportPct   float64
 	exportMsg   string
+	exportStage string // "queued" (pre-worker) | worker stages "prepare"/"measure"/"encode"
 	exportScope string // dual export target: "both" | media index
 
 	vid          mpVid // embedded <video> transport mirror
@@ -2362,7 +2363,9 @@ func (u *UI) mpRunExport(host, which string) {
 		return
 	}
 	gen := t.gen
-	t = u.mpMut(host, func(v *mpSt) { v.exporting, v.exportPct, v.exportMsg = true, 0, "" })
+	// "queued" until the worker's first stage event - a busy transcode pool no longer looks
+	// like a hung 0% bar while the job waits for a slot.
+	t = u.mpMut(host, func(v *mpSt) { v.exporting, v.exportPct, v.exportMsg, v.exportStage = true, 0, "", "queued" })
 	u.mpPatchExport(t)
 	if len(plans) == 1 {
 		u.toast(i18n.T("player.toast.exportingCut", i18n.A{"preset": plans[0].preset.Label}))
@@ -2388,9 +2391,19 @@ func (u *UI) mpExportRunAll(host string, gen int, plans []mpExportPlan) {
 				u.mpPatchExport(t)
 			}
 		}
+		onStage := func(name string) {
+			t := u.mpMut(host, func(v *mpSt) {
+				if v.gen == gen {
+					v.exportStage = name
+				}
+			})
+			if t.gen == gen {
+				u.mpPatchExport(t)
+			}
+		}
 		params := map[string]any{"input": p.path, "output": p.out, "preset": p.preset,
 			"trimStart": p.trimS, "trimEnd": p.trimE}
-		if err := u.mpExportOne(params, onPct); err != nil {
+		if err := u.mpExportOne(params, onPct, onStage); err != nil {
 			u.mpExportDone(host, gen, false, err.Error(), outs)
 			return
 		}
@@ -2400,9 +2413,19 @@ func (u *UI) mpExportRunAll(host string, gen int, plans []mpExportPlan) {
 }
 
 // mpExportOne runs one transcode job (shared Hub when available, else the worker pool) and
-// blocks until it finishes.
-func (u *UI) mpExportOne(params map[string]any, onPct func(float64)) error {
+// blocks until it finishes. onStage receives the worker's "stage" events (prepare/measure/
+// encode) so the bar caption tracks what the job is actually doing.
+func (u *UI) mpExportOne(params map[string]any, onPct func(float64), onStage func(string)) error {
 	onProgress := func(event string, data json.RawMessage) {
+		if event == "stage" && onStage != nil {
+			var s struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(data, &s) == nil && s.Name != "" {
+				onStage(s.Name)
+			}
+			return
+		}
 		if event != "progress" {
 			return
 		}
@@ -2442,7 +2465,7 @@ func (u *UI) mpExportDone(host string, gen int, ok bool, errTx string, outs []st
 		if v.gen != gen {
 			return
 		}
-		v.exporting = false
+		v.exporting, v.exportStage = false, ""
 		if ok {
 			v.exportPct, v.exportMsg = 100, i18n.T("player.label.exportDone")+strings.Join(outs, " · ")
 		} else {

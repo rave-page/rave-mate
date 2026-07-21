@@ -151,11 +151,36 @@ func tcRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	}
 	job := transcode.Job{Input: in.Input, Output: in.Output, Preset: preset, TrimStart: in.TrimStart, TrimEnd: in.TrimEnd}
 
+	// Stage events + a shared 0-100 progress scale (measure pass folds into 0-tcMeasurePct,
+	// the encode into the rest) so the UI shows what is happening from the first second - a
+	// 2h loudness decode used to sit at a silent 0% for minutes.
+	emit("stage", map[string]any{"name": "prepare"})
+	var clipDur float64
+	if in.TrimEnd > in.TrimStart {
+		clipDur = in.TrimEnd - in.TrimStart
+	}
+	// ffprobe fallback total: header Duration is absent on unfinalized/streamed captures,
+	// which left the whole encode with no percent at all.
+	fallbackTotal := clipDur
+	if fallbackTotal <= 0 {
+		if d := probeDurationSec(in.Input); d > 0 {
+			fallbackTotal = max(d-in.TrimStart, 0)
+		}
+	}
+
 	// Pass 1 (loudness): measure the whole clip, plan ONE constant gain. The plan is
 	// emitted before the encode so callers can show exactly what will be applied.
 	var loud map[string]any
+	encBase := 0.0
 	if preset.LoudnessOn {
-		m, err := measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd)
+		emit("stage", map[string]any{"name": "measure"})
+		encBase = tcMeasurePct
+		onTime := func(t float64) {
+			if fallbackTotal > 0 {
+				emit("progress", map[string]any{"percent": min(t/fallbackTotal, 1) * tcMeasurePct})
+			}
+		}
+		m, err := measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd, onTime)
 		if err != nil {
 			return nil, fmt.Errorf("loudness measure: %w", err)
 		}
@@ -183,11 +208,10 @@ func tcRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("ffmpeg start: %w", err)
 	}
+	emit("stage", map[string]any{"name": "encode"})
+	emit("progress", map[string]any{"percent": encBase}) // bar moves off "measuring" before the first time= line
 
-	var dur, clipDur float64
-	if in.TrimEnd > in.TrimStart {
-		clipDur = in.TrimEnd - in.TrimStart
-	}
+	var dur float64
 	lastErr := ""
 	sc := bufio.NewScanner(stderr)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -202,15 +226,15 @@ func tcRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 				dur = d
 			}
 		}
-		total := dur
-		if clipDur > 0 {
-			total = clipDur
+		total := clipDur
+		if total <= 0 {
+			total = dur - in.TrimStart // header duration minus the input seek
+		}
+		if total <= 0 {
+			total = fallbackTotal
 		}
 		if t, ok := parseHMS(line, reTime); ok && total > 0 {
-			pct := t / total * 100
-			if pct > 100 {
-				pct = 100
-			}
+			pct := encBase + min(t/total, 1)*(100-encBase)
 			emit("progress", map[string]any{"percent": pct, "timeSec": t})
 		}
 	}
@@ -245,25 +269,55 @@ func tcMeasure(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd)
+	m, err := measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd, nil)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(m)
 }
 
+// tcMeasurePct is the share of the shared progress scale the loudness measure pass covers.
+const tcMeasurePct = 25.0
+
 // measureLoudness decodes the clip's first audio stream and parses loudnorm's EBU R128
-// analysis JSON from stderr. Decode-only - much faster than the encode pass.
-func measureLoudness(bin, input string, trimS, trimE float64) (transcode.Measurement, error) {
+// analysis JSON from stderr, reporting the decode position via onTime (nil ok). Decode-only
+// - much faster than the encode pass, but still minutes on a long set.
+func measureLoudness(bin, input string, trimS, trimE float64, onTime func(float64)) (transcode.Measurement, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, transcode.MeasureArgs(input, trimS, trimE)...)
 	prepareCmd(cmd)
-	out, runErr := cmd.CombinedOutput()
-	m, ok := transcode.ParseLoudnormJSON(string(out))
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return transcode.Measurement{}, err
+	}
+	if err := cmd.Start(); err != nil {
+		return transcode.Measurement{}, fmt.Errorf("ffmpeg start: %w", err)
+	}
+	// Stats (time=) lines feed onTime and are dropped; everything else is kept for the
+	// loudnorm JSON tail parse, capped - the stats stream is unbounded on long inputs.
+	var buf strings.Builder
+	sc := bufio.NewScanner(stderr)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	sc.Split(scanFFmpegLines)
+	for sc.Scan() {
+		line := sc.Text()
+		if t, ok := parseHMS(line, reTime); ok {
+			if onTime != nil {
+				onTime(t)
+			}
+			continue
+		}
+		if buf.Len() < 64*1024 {
+			buf.WriteString(line)
+			buf.WriteByte('\n')
+		}
+	}
+	runErr := cmd.Wait()
+	m, ok := transcode.ParseLoudnormJSON(buf.String())
 	if !ok {
 		if runErr != nil {
-			return m, fmt.Errorf("ffmpeg: %v: %s", runErr, lastLine(string(out)))
+			return m, fmt.Errorf("ffmpeg: %v: %s", runErr, lastLine(buf.String()))
 		}
 		return m, fmt.Errorf("no loudnorm stats in ffmpeg output")
 	}

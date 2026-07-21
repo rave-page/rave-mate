@@ -161,9 +161,11 @@ func PlanGain(m Measurement, targetI, ceilingTP float64, raiseOnly bool) GainPla
 }
 
 // MeasureArgs builds the pass-1 ffmpeg args: decode the first audio stream over the
-// same trim window the encode will use, print loudnorm stats, write nothing.
+// same trim window the encode will use, print loudnorm stats, write nothing. Stats stay
+// on: the worker parses the time= stream into measure-pass progress (a 2h set decodes
+// for minutes - silent 0% read as a hang).
 func MeasureArgs(input string, trimStart, trimEnd float64) []string {
-	a := []string{"-hide_banner", "-nostats"}
+	a := []string{"-hide_banner"}
 	if trimStart > 0 {
 		a = append(a, "-ss", ftoa(trimStart))
 	}

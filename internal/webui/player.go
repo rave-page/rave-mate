@@ -1010,7 +1010,17 @@ func (u *UI) mpExportHTML(t mpSt) string {
 	}
 
 	if t.exporting {
-		b.WriteString(progressBar(t.exportPct/100, i18n.T("player.label.exportingPct", i18n.A{"pct": fmt.Sprintf("%.0f", t.exportPct)})))
+		pct := i18n.A{"pct": fmt.Sprintf("%.0f", t.exportPct)}
+		label := i18n.T("player.label.exportingPct", pct)
+		switch t.exportStage { // caption tracks the job's actual stage (queued/prepare/measure)
+		case "queued":
+			label = i18n.T("player.label.exportQueued")
+		case "prepare":
+			label = i18n.T("player.label.exportPreparing")
+		case "measure":
+			label = i18n.T("player.label.exportMeasuring", pct)
+		}
+		b.WriteString(progressBar(t.exportPct/100, label))
 	} else {
 		var rowBits []string
 		if t.dual() {
