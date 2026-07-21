@@ -57,7 +57,8 @@
     "remove": "Quitar",
     "save": "Guardar",
     "signIn": "Iniciar sesión",
-    "signOut": "Cerrar sesión"
+    "signOut": "Cerrar sesión",
+    "copy": "Copiar"
   },
   "editor": {
     "align": "Alinear",
@@ -1845,7 +1846,10 @@
       "videoOnly": "Solo vídeo",
       "waveUnavailable": "Forma de onda no disponible - ",
       "buildingSeekTable": "Generando tabla de búsqueda…",
-      "volume": "Volumen"
+      "volume": "Volumen",
+      "exportQueued": "Esperando un slot de transcodificación…",
+      "exportPreparing": "Preparando exportación…",
+      "exportMeasuring": "Analizando sonoridad… {pct}%"
     },
     "openExternally": "Abrir externamente",
     "pause": "Pausar",
@@ -1949,6 +1953,39 @@
       "deleteFail": "Error al eliminar: {err}",
       "exportFail": "Error al exportar: {err}",
       "deleteConfirm": "¿Eliminar \"{name}\" en la instancia emparejada? No se puede deshacer. Los archivos de captura permanecen en ese equipo."
+    },
+    "offsetEditTip": "Tiempo de inicio en el set - edita como m:ss o h:mm:ss (Enter aplica)",
+    "fix": {
+      "button": "Corregir tiempos de inicio…",
+      "title": "Corregir tiempos de inicio",
+      "analyzing": "Analizando silencio en la captura…",
+      "noCapture": "Sin captura vinculada - nada con que alinear.",
+      "nothing": "Tiempos ya alineados - nada que corregir.",
+      "desc": "Inicio audible en {file}: {lead} de silencio inicial. Los inicios se alinean con el sonido real - un primer track en loop antes del set ya no desplaza la tracklist.",
+      "setStart": "Inicio del set",
+      "apply": "Aplicar corrección",
+      "applied": "Tiempos de inicio actualizados.",
+      "failed": "Corrección fallida: "
+    },
+    "toast": {
+      "badOffset": "No se puede leer “{v}” - usa m:ss o h:mm:ss.",
+      "offsetFailed": "Error al editar el inicio: ",
+      "exportFailed": "Error al exportar: "
+    },
+    "textExport": {
+      "title": "Exportar - texto",
+      "style": "Estilo",
+      "template": "Plantilla de línea",
+      "header": "Encabezado (nombre del set + fecha)",
+      "placeholders": "Marcadores:",
+      "preset": {
+        "classic": "Clásico (1. [0:00] Artista - Título)",
+        "youtube": "Capítulos de YouTube (0:00 Artista - Título)",
+        "numbered": "Numerado (01. Artista - Título)",
+        "plain": "Simple (Artista - Título)",
+        "detail": "Detallado (+ key y BPM)",
+        "custom": "Plantilla personalizada"
+      }
     }
   },
   "settings": {

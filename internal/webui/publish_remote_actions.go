@@ -14,6 +14,7 @@ import (
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/remotectl"
+	"rave.page/mate/internal/session/sinks/recorder"
 )
 
 func init() {
@@ -52,10 +53,22 @@ func (u *UI) pubRemoteExport(id, fmtKey string) {
 	if client == nil {
 		return
 	}
+	// Text renders on the peer with THIS machine's saved style (older peers fall back to classic).
+	line, noHeader := "", false
+	if fmtKey == recorder.FormatText {
+		opts := u.pubTxtOpts()
+		line, noHeader = opts.Line, opts.Header == ""
+	}
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), remotectl.DefaultCallTimeout)
 		defer cancel()
-		content, err := client.RecExport(ctx, id, fmtKey)
+		var content string
+		var err error
+		if line != "" || noHeader {
+			content, err = client.RecExportStyled(ctx, id, fmtKey, line, noHeader)
+		} else {
+			content, err = client.RecExport(ctx, id, fmtKey)
+		}
 		if err != nil {
 			u.toast(i18n.T("publish.remote.exportFail", i18n.A{"err": err.Error()}))
 			return

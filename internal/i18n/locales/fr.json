@@ -57,7 +57,8 @@
     "remove": "Retirer",
     "save": "Enregistrer",
     "signIn": "Se connecter",
-    "signOut": "Se déconnecter"
+    "signOut": "Se déconnecter",
+    "copy": "Copier"
   },
   "editor": {
     "align": "Aligner",
@@ -1845,7 +1846,10 @@
       "videoOnly": "Vidéo uniquement",
       "waveUnavailable": "Forme d'onde indisponible - ",
       "buildingSeekTable": "Création de la table de recherche…",
-      "volume": "Volume"
+      "volume": "Volume",
+      "exportQueued": "En attente d'un slot de transcodage…",
+      "exportPreparing": "Préparation de l'export…",
+      "exportMeasuring": "Analyse de la sonie… {pct}%"
     },
     "openExternally": "Ouvrir en externe",
     "pause": "Pause",
@@ -1949,6 +1953,39 @@
       "deleteFail": "Échec de la suppression : {err}",
       "exportFail": "Échec de l'export : {err}",
       "deleteConfirm": "Supprimer \"{name}\" sur l'instance appairée ? Action irréversible. Les fichiers de capture restent sur cet ordinateur."
+    },
+    "offsetEditTip": "Temps de début dans le set - éditer en m:ss ou h:mm:ss (Entrée applique)",
+    "fix": {
+      "button": "Corriger les temps de début…",
+      "title": "Corriger les temps de début",
+      "analyzing": "Analyse du silence dans la capture…",
+      "noCapture": "Aucune capture liée - rien pour aligner.",
+      "nothing": "Temps déjà alignés - rien à corriger.",
+      "desc": "Début audible dans {file} : {lead} de silence initial. Les débuts s'alignent sur le son réel - un premier track bouclé avant le set ne décale plus la tracklist.",
+      "setStart": "Début du set",
+      "apply": "Appliquer la correction",
+      "applied": "Temps de début mis à jour.",
+      "failed": "Échec de la correction : "
+    },
+    "toast": {
+      "badOffset": "Impossible de lire « {v} » - utiliser m:ss ou h:mm:ss.",
+      "offsetFailed": "Échec de la modification : ",
+      "exportFailed": "Échec de l'export : "
+    },
+    "textExport": {
+      "title": "Export - texte",
+      "style": "Style",
+      "template": "Modèle de ligne",
+      "header": "En-tête (nom du set + date)",
+      "placeholders": "Variables :",
+      "preset": {
+        "classic": "Classique (1. [0:00] Artiste - Titre)",
+        "youtube": "Chapitres YouTube (0:00 Artiste - Titre)",
+        "numbered": "Numéroté (01. Artiste - Titre)",
+        "plain": "Simple (Artiste - Titre)",
+        "detail": "Détaillé (+ key et BPM)",
+        "custom": "Modèle personnalisé"
+      }
     }
   },
   "settings": {

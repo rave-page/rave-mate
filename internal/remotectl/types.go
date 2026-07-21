@@ -270,9 +270,12 @@ type RecCapturesResult struct {
 }
 
 // RecExportParams renders set ID's tracklist in Format (recorder.FormatText/CSV/JSON).
+// Line/NoHeader style the text format (controller's saved template); older peers ignore them.
 type RecExportParams struct {
-	ID     string `json:"id"`
-	Format string `json:"format"`
+	ID       string `json:"id"`
+	Format   string `json:"format"`
+	Line     string `json:"line,omitempty"`
+	NoHeader bool   `json:"noHeader,omitempty"`
 }
 
 // RecExportResult carries the rendered tracklist text.

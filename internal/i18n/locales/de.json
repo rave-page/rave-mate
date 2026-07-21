@@ -57,7 +57,8 @@
     "remove": "Entfernen",
     "save": "Speichern",
     "signIn": "Anmelden",
-    "signOut": "Abmelden"
+    "signOut": "Abmelden",
+    "copy": "Kopieren"
   },
   "editor": {
     "align": "Ausrichten",
@@ -1947,7 +1948,10 @@
       "videoOnly": "Nur Video",
       "waveUnavailable": "Wellenform nicht verfügbar - ",
       "buildingSeekTable": "Seek-Tabelle wird erstellt…",
-      "volume": "Lautstärke"
+      "volume": "Lautstärke",
+      "exportQueued": "Warten auf freien Transcode-Slot…",
+      "exportPreparing": "Export wird vorbereitet…",
+      "exportMeasuring": "Lautheit wird analysiert… {pct}%"
     },
     "openExternally": "Extern öffnen",
     "pause": "Pause",
@@ -2051,6 +2055,39 @@
       "deleteFail": "Löschen fehlgeschlagen: {err}",
       "exportFail": "Export fehlgeschlagen: {err}",
       "deleteConfirm": "\"{name}\" auf der gekoppelten Instanz löschen? Das kann nicht rückgängig gemacht werden. Die Aufnahmedateien bleiben auf jenem Computer."
+    },
+    "offsetEditTip": "Startzeit im Set - als m:ss oder h:mm:ss bearbeiten (Enter übernimmt)",
+    "fix": {
+      "button": "Startzeiten korrigieren…",
+      "title": "Startzeiten korrigieren",
+      "analyzing": "Aufnahme wird auf Stille analysiert…",
+      "noCapture": "Keine verknüpfte Aufnahme - nichts zum Ausrichten.",
+      "nothing": "Startzeiten bereits ausgerichtet - nichts zu korrigieren.",
+      "desc": "Hörbarer Beginn in {file}: {lead} führende Stille. Trackstarts richten sich am tatsächlichen Klangbeginn aus - ein vor dem Set geloopter erster Track verschiebt die Tracklist nicht mehr.",
+      "setStart": "Set-Beginn",
+      "apply": "Korrektur anwenden",
+      "applied": "Startzeiten aktualisiert.",
+      "failed": "Korrektur fehlgeschlagen: "
+    },
+    "toast": {
+      "badOffset": "„{v}“ nicht lesbar - m:ss oder h:mm:ss verwenden.",
+      "offsetFailed": "Startzeit-Änderung fehlgeschlagen: ",
+      "exportFailed": "Export fehlgeschlagen: "
+    },
+    "textExport": {
+      "title": "Export - Text",
+      "style": "Stil",
+      "template": "Zeilenvorlage",
+      "header": "Kopfzeile (Setname + Datum)",
+      "placeholders": "Platzhalter:",
+      "preset": {
+        "classic": "Klassisch (1. [0:00] Artist - Titel)",
+        "youtube": "YouTube-Kapitel (0:00 Artist - Titel)",
+        "numbered": "Nummeriert (01. Artist - Titel)",
+        "plain": "Schlicht (Artist - Titel)",
+        "detail": "Detailliert (+ Key & BPM)",
+        "custom": "Eigene Vorlage"
+      }
     }
   },
   "settings": {

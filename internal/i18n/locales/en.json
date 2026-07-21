@@ -216,7 +216,8 @@
     "save": "Save",
     "signIn": "Sign in",
     "signOut": "Sign out",
-    "edit": "Edit"
+    "edit": "Edit",
+    "copy": "Copy"
   },
   "editor": {
     "align": "Align",
@@ -2318,7 +2319,10 @@
       "videoOnly": "Video only",
       "waveUnavailable": "Waveform unavailable - ",
       "buildingSeekTable": "Building seek table…",
-      "volume": "Volume"
+      "volume": "Volume",
+      "exportQueued": "Waiting for a free transcode slot…",
+      "exportPreparing": "Preparing export…",
+      "exportMeasuring": "Analyzing loudness… {pct}%"
     },
     "openExternally": "Open externally",
     "pause": "Pause",
@@ -2431,7 +2435,10 @@
       "renameFailed": "Couldn't rename the set: ",
       "deleteFailed": "Couldn't delete the set: {err}",
       "deleted": "Set deleted",
-      "fileDeleteFailed": "Couldn't delete {file}: {err}"
+      "fileDeleteFailed": "Couldn't delete {file}: {err}",
+      "badOffset": "Can't read “{v}” - use m:ss or h:mm:ss.",
+      "offsetFailed": "Start-time edit failed: ",
+      "exportFailed": "Export failed: "
     },
     "del": {
       "title": "Delete set",
@@ -2439,7 +2446,35 @@
       "do": "Delete set",
       "doFiles": "Delete set + {n} file(s)"
     },
-    "renameDots": "Rename…"
+    "renameDots": "Rename…",
+    "offsetEditTip": "Start time in the set - edit as m:ss or h:mm:ss (Enter applies)",
+    "fix": {
+      "button": "Fix start times…",
+      "title": "Fix start times",
+      "analyzing": "Analyzing capture for silence…",
+      "noCapture": "No linked capture - nothing to align against.",
+      "nothing": "Start times already aligned - nothing to fix.",
+      "desc": "Audible start in {file}: {lead} of leading silence. Track starts align to where sound actually begins - a first track looped before the mix went live no longer offsets the tracklist.",
+      "setStart": "Set start",
+      "apply": "Apply fix",
+      "applied": "Start times updated.",
+      "failed": "Fix failed: "
+    },
+    "textExport": {
+      "title": "Export - text",
+      "style": "Style",
+      "template": "Line template",
+      "header": "Header line (set name + date)",
+      "placeholders": "Placeholders:",
+      "preset": {
+        "classic": "Classic (1. [0:00] Artist - Title)",
+        "youtube": "YouTube chapters (0:00 Artist - Title)",
+        "numbered": "Numbered (01. Artist - Title)",
+        "plain": "Plain (Artist - Title)",
+        "detail": "Detailed (+ key & BPM)",
+        "custom": "Custom template"
+      }
+    }
   },
   "settings": {
     "body": {

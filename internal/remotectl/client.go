@@ -186,6 +186,14 @@ func (c *Client) RecExport(ctx context.Context, id, format string) (string, erro
 	return r.Content, err
 }
 
+// RecExportStyled is RecExport with a text-format line template + header choice (the
+// controller's saved style; an older peer ignores it and renders the classic text).
+func (c *Client) RecExportStyled(ctx context.Context, id, format, line string, noHeader bool) (string, error) {
+	r, err := Do[RecExportResult](ctx, c.e, c.nodeID, MethodRecExport,
+		RecExportParams{ID: id, Format: format, Line: line, NoHeader: noHeader})
+	return r.Content, err
+}
+
 // RecRename sets a finished set's display name on the peer.
 func (c *Client) RecRename(ctx context.Context, id, name string) error {
 	_, err := Do[OK](ctx, c.e, c.nodeID, MethodRecRename, RecRenameParams{ID: id, Name: name})

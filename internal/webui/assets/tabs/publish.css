@@ -45,6 +45,21 @@
 .pub-track-chk.none { color: var(--rp-muted, #B98AA0); opacity: .45; cursor: help; }
 .pub-track-o { color: var(--rp-violet-soft, #C4A4FF); flex: 0 0 auto; }
 .pub-track-l { color: #fafafa; min-width: 0; word-break: break-word; }
+/* Inline start-offset editor (finished sets): same mono metrics as the static offset. */
+.pub-track-oin { flex: 0 0 auto; width: 7ch; box-sizing: content-box; text-align: center;
+  background: rgba(255,255,255,.04); color: var(--rp-violet-soft, #C4A4FF);
+  border: 1px solid rgba(255,255,255,.10); border-radius: 6px; padding: 1px 4px;
+  font: inherit; }
+.pub-track-oin:focus { outline: none; border-color: var(--rp-violet-soft, #C4A4FF); }
+
+/* Fix-start-times preview rows. */
+.pub-fix-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 8px;
+  font: 13px 'JetBrains Mono', ui-monospace, monospace; }
+.pub-fix-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; border-radius: 7px; }
+.pub-fix-row:nth-child(odd) { background: rgba(255,255,255,.025); }
+
+/* Text-export style controls. */
+.pub-txt-opts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 
 /* Capture blocks. */
 .pub-cap { padding: 10px 12px; margin: 0 0 10px; border-radius: 10px;

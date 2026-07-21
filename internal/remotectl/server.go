@@ -484,6 +484,7 @@ type RecorderSource interface {
 	List() []recorder.Recording
 	Get(id string) (recorder.Recording, bool)
 	Export(id, format string) (string, error)
+	ExportText(id string, opts recorder.TextOptions) (string, error)
 	Rename(id, name string) error
 	Delete(id string) error
 }
@@ -525,6 +526,18 @@ func RegisterRecorder(e *Endpoint, rec RecorderSource, caps SetCaptureSource) {
 		var p RecExportParams
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, err
+		}
+		// Text with a controller-supplied style renders through the template exporter.
+		if p.Format == recorder.FormatText && (p.Line != "" || p.NoHeader) {
+			opts := recorder.TextOptions{Line: p.Line}
+			if !p.NoHeader {
+				opts.Header = recorder.DefaultTextOptions().Header
+			}
+			out, err := rec.ExportText(p.ID, opts)
+			if err != nil {
+				return nil, err
+			}
+			return RecExportResult{Content: out}, nil
 		}
 		out, err := rec.Export(p.ID, p.Format)
 		if err != nil {

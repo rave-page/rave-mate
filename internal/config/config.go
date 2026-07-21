@@ -1383,9 +1383,14 @@ type MIDIBridge struct {
 
 // RecorderFeature configures the session recorder. ConfirmSeconds is how long a track must
 // be audibly playing before it counts as "played" (mirrors Traktor's history commit rule).
+// Export* remember the Publish tab's text-export style (preset id, custom line template,
+// header on/off) across sessions.
 type RecorderFeature struct {
-	Enabled        bool `json:"enabled"`
-	ConfirmSeconds int  `json:"confirmSeconds"` // 0 = default (30)
+	Enabled        bool   `json:"enabled"`
+	ConfirmSeconds int    `json:"confirmSeconds"` // 0 = default (30)
+	ExportPreset   string `json:"exportPreset,omitempty"`
+	ExportLine     string `json:"exportLine,omitempty"` // custom per-track template (preset "custom")
+	ExportNoHeader bool   `json:"exportNoHeader,omitempty"`
 }
 
 // ResolvedConfirmSeconds returns the configured confirm threshold or the default.

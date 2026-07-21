@@ -283,6 +283,14 @@ func (f *fakeRec) Export(id, format string) (string, error) {
 	return r.Export(format)
 }
 
+func (f *fakeRec) ExportText(id string, opts recorder.TextOptions) (string, error) {
+	r, ok := f.recs[id]
+	if !ok {
+		return "", errors.New("not found")
+	}
+	return r.ExportText(opts), nil
+}
+
 // Rename mirrors the real recorder's contract narrowly enough for the wire test: unknown id and
 // an empty name are errors, otherwise the stored name changes.
 func (f *fakeRec) Rename(id, name string) error {

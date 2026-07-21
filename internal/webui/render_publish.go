@@ -260,7 +260,7 @@ func (u *UI) pubDetailHTML(sel *recorder.Recording, caps map[string][]libdb.SetR
 	var body string
 	if active == "tracklist" {
 		rows, ready := u.pubTrackRows(r) // library-path resolution is off-thread + cached (see pubTrackPaths)
-		body = u.pubTracklistHTML(rows, !ready)
+		body = u.pubTracklistHTML(r, len(sets) > 0, rows, !ready)
 	} else {
 		body = u.pubCapturesHTML(r, sets) + u.pubLooseHTML(loose)
 	}
@@ -279,11 +279,13 @@ func (u *UI) pubActionsHTML(r recorder.Recording) string {
 
 // pubTracklistHTML renders the tracklist. resolving = library-path links are still being
 // resolved off-thread (names/times show immediately; the works-together checkboxes fill in when
-// the async resolve lands and re-renders).
-func (u *UI) pubTracklistHTML(rows []pubRow, resolving bool) string {
+// the async resolve lands and re-renders). Finished sets get editable start offsets + the
+// capture-aligned "Fix start times" flow (hasCaps).
+func (u *UI) pubTracklistHTML(r recorder.Recording, hasCaps bool, rows []pubRow, resolving bool) string {
 	if len(rows) == 0 {
 		return hint("info", i18n.T("publish.noTracks"))
 	}
+	editable := !r.EndedAt.IsZero()
 	sel := u.pubTSel()
 	var b strings.Builder
 	if resolving {
@@ -308,12 +310,22 @@ func (u *UI) pubTracklistHTML(rows []pubRow, resolving bool) string {
 			lead = `<span class=pub-track-chk><input type=checkbox data-act="pub-tsel:` + html.EscapeString(row.path) + `"` + chk + `></span>`
 			ctx = ` data-ctx="pub-tctx:` + html.EscapeString(row.path) + `"`
 		}
+		off := pubClock(row.offset.Seconds())
+		oCell := `<span class=pub-track-o>[` + off + `]</span>`
+		if editable {
+			oCell = `<input class=pub-track-oin type=text value=` + attrQ(off) + ` data-value=` + attrQ(off) +
+				` data-act=` + attrQ("pub-toff:"+r.ID+"\x1f"+fmt.Sprint(i)) +
+				` title=` + attrQ(i18n.T("publish.offsetEditTip")) + `>`
+		}
 		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +
 			`<span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
-			`<span class=pub-track-o>[` + pubClock(row.offset.Seconds()) + `]</span>` +
+			oCell +
 			`<span class=pub-track-l>` + html.EscapeString(row.label) + `</span></div>`)
 	}
 	b.WriteString(`</div>`)
+	if editable && hasCaps {
+		b.WriteString(btnRow(btn(i18n.T("publish.fix.button"), "outline", "pub-fixtimes:"+r.ID, "")))
+	}
 	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.help")) + `</p>`)
 	if unresolved > 0 {
 		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.unresolvedCount", i18n.A{"count": fmt.Sprint(unresolved)})) + `</p>`)

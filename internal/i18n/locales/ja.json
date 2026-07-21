@@ -57,7 +57,8 @@
     "remove": "削除",
     "save": "保存",
     "signIn": "サインイン",
-    "signOut": "サインアウト"
+    "signOut": "サインアウト",
+    "copy": "コピー"
   },
   "editor": {
     "align": "整列",
@@ -1845,7 +1846,10 @@
       "videoOnly": "ビデオのみ",
       "waveUnavailable": "波形を利用できません - ",
       "buildingSeekTable": "シークテーブルを作成中…",
-      "volume": "音量"
+      "volume": "音量",
+      "exportQueued": "空きトランスコードスロットを待機中…",
+      "exportPreparing": "エクスポートを準備中…",
+      "exportMeasuring": "ラウドネスを解析中… {pct}%"
     },
     "openExternally": "外部で開く",
     "pause": "一時停止",
@@ -1949,6 +1953,39 @@
       "deleteFail": "削除に失敗しました: {err}",
       "exportFail": "エクスポートに失敗しました: {err}",
       "deleteConfirm": "ペア接続されたインスタンスで \"{name}\" を削除しますか? 取り消せません。キャプチャファイルはそのコンピューターに残ります。"
+    },
+    "offsetEditTip": "セット内の開始時刻 - m:ss または h:mm:ss で編集（Enter で適用）",
+    "fix": {
+      "button": "開始時刻を修正…",
+      "title": "開始時刻を修正",
+      "analyzing": "キャプチャの無音を解析中…",
+      "noCapture": "リンクされたキャプチャがなく、合わせる対象がありません。",
+      "nothing": "開始時刻は整合済み - 修正は不要です。",
+      "desc": "{file} の可聴開始: 先頭の無音 {lead}。実際に音が始まる位置に合わせます - セット前にループした 1 曲目がトラックリストをずらさなくなります。",
+      "setStart": "セット開始",
+      "apply": "修正を適用",
+      "applied": "開始時刻を更新しました。",
+      "failed": "修正に失敗: "
+    },
+    "toast": {
+      "badOffset": "「{v}」を読み取れません - m:ss または h:mm:ss を使用してください。",
+      "offsetFailed": "開始時刻の編集に失敗: ",
+      "exportFailed": "エクスポートに失敗: "
+    },
+    "textExport": {
+      "title": "エクスポート - テキスト",
+      "style": "スタイル",
+      "template": "行テンプレート",
+      "header": "ヘッダー行（セット名 + 日付）",
+      "placeholders": "プレースホルダー:",
+      "preset": {
+        "classic": "クラシック (1. [0:00] Artist - Title)",
+        "youtube": "YouTube チャプター (0:00 Artist - Title)",
+        "numbered": "番号付き (01. Artist - Title)",
+        "plain": "プレーン (Artist - Title)",
+        "detail": "詳細 (+ キー & BPM)",
+        "custom": "カスタムテンプレート"
+      }
     }
   },
   "settings": {

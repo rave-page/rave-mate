@@ -217,8 +217,9 @@ func (u *UI) pubExportOpen(id string) {
 	u.openModal(modal("Export tracklist", body, ""))
 }
 
-// pubExportFmt renders the exported tracklist in the modal (preview + copy). Native file-save is a
-// follow-up (pickers stub); the preview is fully selectable/copyable in the meantime.
+// pubExportFmt renders the exported tracklist in the modal (preview + copy). Text gets the
+// style dialog (pubTxtOpen); CSV/JSON stay direct. Native file-save is a follow-up (pickers
+// stub); the preview is fully selectable/copyable in the meantime.
 func (u *UI) pubExportFmt(arg string) {
 	id, fmtKey, _ := strings.Cut(arg, "\x1f")
 	if tgt := u.libRemoteTarget(); tgt != "" {
@@ -226,6 +227,10 @@ func (u *UI) pubExportFmt(arg string) {
 		return
 	}
 	if u.svc.Recorder == nil {
+		return
+	}
+	if fmtKey == recorder.FormatText {
+		u.pubTxtOpen(id)
 		return
 	}
 	content, err := u.svc.Recorder.Export(id, fmtKey)
