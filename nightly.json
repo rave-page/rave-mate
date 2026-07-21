@@ -1,13 +1,13 @@
 {
-  "version": "nightly-0449add",
-  "build": 123,
-  "commit": "0449add",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-123-20260721-0449add.exe",
-  "sha256": "cf96b66e05dc3fcf540ce120b7c43ab4dac8b1dcb52defd902020d61ec9494b6",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-123-20260721-0449add.exe",
-  "installer_sha256": "ef7ebca7fbda9aaab313fdb7c4040076866647635137dedefbde3b2a6d5ae9d1",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-123-20260721-0449add",
-  "linux_sha256": "7dbc3969eff64460a55e8a828993c9c3fe772fce8152cbbd041a1ec2db80de6e",
+  "version": "nightly-90c4f26",
+  "build": 124,
+  "commit": "90c4f26",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-124-20260721-90c4f26.exe",
+  "sha256": "c167f1ef9c2fd607d6da7ce73c8143170c196b2108c5d1c26e6aff5a3520c238",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-124-20260721-90c4f26.exe",
+  "installer_sha256": "a60b8f56400c3e12efb4b04170a9ebf60d9ea80bb080de4bddac5bf17c44bb95",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-124-20260721-90c4f26",
+  "linux_sha256": "58aaa4c553051757a4ac62d7437aea76b98b3a5ee2744c00315d1060b655ec64",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-21T15:08:57Z",
-  "notes": "fix(recorder): trust probed silence over deck-play times in PlanTimeFix"
+  "released": "2026-07-21T15:24:58Z",
+  "notes": "feat(recorder): opener choice + phantom removal + fader-true starts"
 }
