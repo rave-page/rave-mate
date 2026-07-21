@@ -217,7 +217,7 @@ func (u *UI) pubFixTimesOpen(id string) {
 				u.logErr("fix-times silence probe", err) // capture-start alignment still applies
 			}
 		}
-		fix, planned := recorder.PlanTimeFix(rec, capr.StartedAt, time.Duration(lead*float64(time.Second)))
+		fix, planned := recorder.PlanTimeFix(rec, capr.StartedAt, capr.EndedAt, time.Duration(lead*float64(time.Second)))
 		if !planned {
 			if !u.stopped() {
 				u.toast(i18n.T("publish.fix.nothing"))

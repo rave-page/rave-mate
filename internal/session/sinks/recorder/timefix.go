@@ -9,17 +9,18 @@ type TimeFix struct {
 	TrackStarts map[int]time.Time // track index → corrected absolute start
 }
 
-// PlanTimeFix aligns a finished recording's timeline to its captured audio file. The
-// audible start of the capture is capStart + leading (silence probed from the file): the
-// set start and track 1 move there, and any track that "started" earlier (deck looping /
-// cueing before the mix went live) clamps up to it - so a first track looped for 20 min
-// no longer offsets every exported start time.
+// PlanTimeFix aligns a finished recording's timeline to its captured audio file, so the
+// exported offsets are relative to the uploaded mix: the audible start of the capture
+// (capStart + probed leading silence) becomes 0:00. The set start moves there, track 1
+// starts there, and every track whose recorded start predates it clamps up to it.
 //
-// Track 2's start bounds the correction: probed silence reaching past it means the probe
-// measured the wrong thing (threshold too low, wrong capture), so fall back to the raw
-// capture start; if even that is at/past track 2, this capture can't align the set →
-// ok=false. ok=false also for live/empty sets and no-op plans.
-func PlanTimeFix(rec Recording, capStart time.Time, leading time.Duration) (TimeFix, bool) {
+// Deck-play/history times BEFORE the audible start are phantoms - looping, cueing or
+// prepping decks before the broadcast went live (often before the capture even began) -
+// so the silence measured from the actual file outranks them; several early tracks
+// clamping to 0:00 is expected, not an error. ok=false only when there is nothing to
+// align to (no capture start, live/empty set, an entirely-silent capture, audio starting
+// past the set end) or the plan is a no-op.
+func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duration) (TimeFix, bool) {
 	if capStart.IsZero() || len(rec.Tracks) == 0 || rec.EndedAt.IsZero() {
 		return TimeFix{}, false
 	}
@@ -27,14 +28,8 @@ func PlanTimeFix(rec Recording, capStart time.Time, leading time.Duration) (Time
 		leading = 0
 	}
 	audio := capStart.Add(leading)
-	if len(rec.Tracks) >= 2 {
-		t2 := rec.Tracks[1].StartedAt
-		if !audio.Before(t2) {
-			audio = capStart
-		}
-		if !audio.Before(t2) {
-			return TimeFix{}, false
-		}
+	if !capEnd.IsZero() && !audio.Before(capEnd) {
+		return TimeFix{}, false // silence runs to the capture's end - nothing audible to anchor on
 	}
 	if !audio.Before(rec.EndedAt) {
 		return TimeFix{}, false

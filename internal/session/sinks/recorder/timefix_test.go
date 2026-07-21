@@ -24,7 +24,7 @@ func TestPlanTimeFixLoopedFirstTrack(t *testing.T) {
 	// Track 1 "started" at t=0 (looping); capture began at t=15m, real audio at 15m+90s.
 	rec := fixRec(base, 0, 25*time.Minute, 40*time.Minute)
 	capStart := base.Add(15 * time.Minute)
-	fix, ok := PlanTimeFix(rec, capStart, 90*time.Second)
+	fix, ok := PlanTimeFix(rec, capStart, time.Time{}, 90*time.Second)
 	if !ok {
 		t.Fatal("expected a fix")
 	}
@@ -40,17 +40,32 @@ func TestPlanTimeFixLoopedFirstTrack(t *testing.T) {
 	}
 }
 
-func TestPlanTimeFixSilencePastTrack2FallsBack(t *testing.T) {
+// The real-world shape that first shipped a wrong "nothing to fix": deck-prep phantoms.
+// Tracks 1-2 carry deck-play times from BEFORE the capture even began (cueing/looping
+// while prepping); the capture starts mid-session and its probed silence is authoritative.
+func TestPlanTimeFixPhantomEarlyTracks(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
-	rec := fixRec(base, 0, 5*time.Minute)
-	capStart := base.Add(time.Minute)
-	// Probed silence would put the audio start past track 2 → fall back to capture start.
-	fix, ok := PlanTimeFix(rec, capStart, 10*time.Minute)
+	rec := fixRec(base, 21*time.Minute, 24*time.Minute, 36*time.Minute, 38*time.Minute)
+	capStart := base.Add(31 * time.Minute)
+	capEnd := base.Add(91 * time.Minute)
+	fix, ok := PlanTimeFix(rec, capStart, capEnd, 5*time.Minute)
 	if !ok {
-		t.Fatal("expected fallback fix")
+		t.Fatal("phantom early tracks must still plan")
 	}
-	if !fix.NewStart.Equal(capStart) {
-		t.Fatalf("NewStart = %v, want capture start %v", fix.NewStart, capStart)
+	audio := capStart.Add(5 * time.Minute) // = base+36m
+	if !fix.NewStart.Equal(audio) {
+		t.Fatalf("NewStart = %v, want %v", fix.NewStart, audio)
+	}
+	// Both pre-audio tracks clamp to the audible start (offset 0:00 in the mix).
+	if !fix.TrackStarts[0].Equal(audio) || !fix.TrackStarts[1].Equal(audio) {
+		t.Fatalf("phantom tracks must clamp to %v: %v", audio, fix.TrackStarts)
+	}
+	// Tracks at/after the audible start keep their times.
+	if _, moved := fix.TrackStarts[2]; moved {
+		t.Fatal("track at the audible start must not move")
+	}
+	if _, moved := fix.TrackStarts[3]; moved {
+		t.Fatal("track after the audible start must not move")
 	}
 }
 
@@ -58,16 +73,20 @@ func TestPlanTimeFixRejects(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	live := fixRec(base, 0)
 	live.EndedAt = time.Time{}
-	if _, ok := PlanTimeFix(live, base, 0); ok {
+	if _, ok := PlanTimeFix(live, base, time.Time{}, 0); ok {
 		t.Fatal("live set must not plan")
 	}
 	rec := fixRec(base, 0, 5*time.Minute)
-	// Capture starting past track 2 can't align.
-	if _, ok := PlanTimeFix(rec, base.Add(10*time.Minute), 0); ok {
-		t.Fatal("capture past track 2 must not plan")
+	// Silence running to the capture's end = nothing audible to anchor on.
+	if _, ok := PlanTimeFix(rec, base, base.Add(10*time.Minute), 10*time.Minute); ok {
+		t.Fatal("entirely-silent capture must not plan")
+	}
+	// Audio start past the set end can't align.
+	if _, ok := PlanTimeFix(rec, base.Add(3*time.Hour), time.Time{}, 0); ok {
+		t.Fatal("capture past set end must not plan")
 	}
 	// Aligned already → no-op.
-	if _, ok := PlanTimeFix(rec, base, 0); ok {
+	if _, ok := PlanTimeFix(rec, base, time.Time{}, 0); ok {
 		t.Fatal("aligned set must not plan")
 	}
 }
@@ -80,7 +99,7 @@ func TestApplyTimeFixPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	capStart := base.Add(10 * time.Minute)
-	fix, ok := PlanTimeFix(rec, capStart, 30*time.Second)
+	fix, ok := PlanTimeFix(rec, capStart, time.Time{}, 30*time.Second)
 	if !ok {
 		t.Fatal("expected fix")
 	}
