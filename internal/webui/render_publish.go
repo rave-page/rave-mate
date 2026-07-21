@@ -315,6 +315,7 @@ func (u *UI) pubTracklistHTML(r recorder.Recording, hasCaps bool, rows []pubRow,
 		if editable {
 			oCell = `<input class=pub-track-oin type=text value=` + attrQ(off) + ` data-value=` + attrQ(off) +
 				` data-act=` + attrQ("pub-toff:"+r.ID+"\x1f"+fmt.Sprint(i)) +
+				` data-label=` + attrQ("offset-"+fmt.Sprint(i+1)) + // ctl read/set target (space-free: ctl set splits on first space)
 				` title=` + attrQ(i18n.T("publish.offsetEditTip")) + `>`
 		}
 		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +

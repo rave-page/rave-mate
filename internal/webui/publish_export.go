@@ -242,13 +242,18 @@ func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, 
 	b.WriteString(`<div class=pub-fix-rows>`)
 	b.WriteString(`<div class=pub-fix-row><span class=pub-track-l>` + html.EscapeString(i18n.T("publish.fix.setStart")) + `</span>` +
 		`<span class=pub-track-o>` + rec.StartedAt.Local().Format("15:04:05") + ` → ` + fix.NewStart.Local().Format("15:04:05") + `</span></div>`)
+	// Preview the resulting OFFSETS for every track (the rebased set start shifts them all,
+	// not only the clamped ones) - rows whose displayed offset survives unchanged are skipped.
 	for i, t := range rec.Tracks {
-		ns, changed := fix.TrackStarts[i]
-		if !changed {
-			continue
+		ns, moved := fix.TrackStarts[i]
+		if !moved {
+			ns = t.StartedAt
 		}
 		oldOff := pubClock(t.StartedAt.Sub(rec.StartedAt).Seconds())
 		newOff := pubClock(ns.Sub(fix.NewStart).Seconds())
+		if oldOff == newOff {
+			continue
+		}
 		b.WriteString(`<div class=pub-fix-row><span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
 			`<span class=pub-track-o>[` + oldOff + `] → [` + newOff + `]</span>` +
 			`<span class=pub-track-l>` + html.EscapeString(orTrackLine(pubTrackLine(t))) + `</span></div>`)

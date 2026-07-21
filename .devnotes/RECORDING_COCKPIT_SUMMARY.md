@@ -59,3 +59,28 @@ finalized) are retried at startup + whenever a recording finalizes
   unlinked captures section. Newest set auto-selected.
 - `RefreshRecordings` does an in-place repaint (`u.recorderRefresh`), full tab rebuild
   only as fallback.
+
+## Tracklist export v2 (2026-07-21, webui)
+
+- **Editable start offsets** (Tracklist subtab, finished sets): each `[h:]m:ss` offset is an
+  inline input (`pub-toff:<rec>\x1f<idx>`, ctl label `offset-<n>`). `recorder.SetTrackStart`
+  moves the absolute start, drags a neighbour end stamped at the old start (±2s) along, and
+  refreshes the play-log row. Direct store writer #5 - storeMu + drainPersist discipline
+  (see recorder.mutate).
+- **Fix start times** (`pub-fixtimes:`): silence-probes the linked capture
+  (Automations.ProbeSilence, KindSilence cache) → `recorder.PlanTimeFix`: audible start =
+  capture start + leading silence; set start + track 1 move there, earlier "starts"
+  (pre-set loop/cueing) clamp up; track 2's start bounds the probe (garbage → capture
+  start; still past t2 → no plan). Preview modal shows the set-start move + every offset
+  that changes; Apply = `ApplyTimeFix`.
+- **Text-export styles** (`pub-exportfmt:txt` → dialog): presets classic/youtube/numbered/
+  plain/detail + custom line template ({n} {nn} {offset} {artist} {title} {track} {album}
+  {key} {bpm} {deck}; header {name} {date} {count}), header toggle, live preview + Copy.
+  Persisted in `Features.Recorder.Export*`. Remote export ships the controller's style via
+  `RecExportParams.Line/NoHeader` (old peers → classic). `Recording.ExportText`; default
+  template stays byte-identical to the classic export.
+- **Export progress stages** (`transcode.run`): emits `stage` prepare/measure/encode on a
+  shared 0-100 scale - loudness measure streams its decode position into 0-25%
+  (MeasureArgs keeps ffmpeg stats on), encode folds into the rest, ffprobe fallback total
+  covers headerless captures. Player export bar captions queued/preparing/measuring -
+  the "over a minute at silent 0%" (loudness pass on a 2h set) is gone.
