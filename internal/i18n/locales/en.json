@@ -2438,7 +2438,8 @@
       "fileDeleteFailed": "Couldn't delete {file}: {err}",
       "badOffset": "Can't read “{v}” - use m:ss or h:mm:ss.",
       "offsetFailed": "Start-time edit failed: ",
-      "exportFailed": "Export failed: "
+      "exportFailed": "Export failed: ",
+      "trackRemoved": "Track removed from the tracklist."
     },
     "del": {
       "title": "Delete set",
@@ -2458,7 +2459,9 @@
       "setStart": "Set start",
       "apply": "Apply fix",
       "applied": "Start times updated.",
-      "failed": "Fix failed: "
+      "failed": "Fix failed: ",
+      "opener": "Opens the recording",
+      "removedRow": "removed - ended before the recording"
     },
     "textExport": {
       "title": "Export - text",
@@ -2474,6 +2477,10 @@
         "detail": "Detailed (+ key & BPM)",
         "custom": "Custom template"
       }
+    },
+    "track": {
+      "remove": "Remove from tracklist",
+      "n": "Track {n}"
     }
   },
   "settings": {

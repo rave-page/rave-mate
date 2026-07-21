@@ -2067,12 +2067,15 @@
       "setStart": "Set-Beginn",
       "apply": "Korrektur anwenden",
       "applied": "Startzeiten aktualisiert.",
-      "failed": "Korrektur fehlgeschlagen: "
+      "failed": "Korrektur fehlgeschlagen: ",
+      "opener": "Eröffnet die Aufnahme",
+      "removedRow": "entfernt - endete vor der Aufnahme"
     },
     "toast": {
       "badOffset": "„{v}“ nicht lesbar - m:ss oder h:mm:ss verwenden.",
       "offsetFailed": "Startzeit-Änderung fehlgeschlagen: ",
-      "exportFailed": "Export fehlgeschlagen: "
+      "exportFailed": "Export fehlgeschlagen: ",
+      "trackRemoved": "Track aus der Tracklist entfernt."
     },
     "textExport": {
       "title": "Export - Text",
@@ -2088,6 +2091,10 @@
         "detail": "Detailliert (+ Key & BPM)",
         "custom": "Eigene Vorlage"
       }
+    },
+    "track": {
+      "remove": "Aus Tracklist entfernen",
+      "n": "Track {n}"
     }
   },
   "settings": {

@@ -1965,12 +1965,15 @@
       "setStart": "セット開始",
       "apply": "修正を適用",
       "applied": "開始時刻を更新しました。",
-      "failed": "修正に失敗: "
+      "failed": "修正に失敗: ",
+      "opener": "録音の冒頭曲",
+      "removedRow": "削除 - 録音開始前に終了"
     },
     "toast": {
       "badOffset": "「{v}」を読み取れません - m:ss または h:mm:ss を使用してください。",
       "offsetFailed": "開始時刻の編集に失敗: ",
-      "exportFailed": "エクスポートに失敗: "
+      "exportFailed": "エクスポートに失敗: ",
+      "trackRemoved": "トラックリストから削除しました。"
     },
     "textExport": {
       "title": "エクスポート - テキスト",
@@ -1986,6 +1989,10 @@
         "detail": "詳細 (+ キー & BPM)",
         "custom": "カスタムテンプレート"
       }
+    },
+    "track": {
+      "remove": "トラックリストから削除",
+      "n": "トラック {n}"
     }
   },
   "settings": {

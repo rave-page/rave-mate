@@ -43,6 +43,38 @@ func (d *DB) SavePlayedTrack(p PlayedTrack) error {
 	return err
 }
 
+// ReplacePlayedTracks rewrites the play-log rows for one recording in a single tx.
+// Tracklist edits that remove slots need this: rows are keyed "<rec>#<slot>", so any
+// shrink leaves stale tail rows behind a per-slot upsert.
+func (d *DB) ReplacePlayedTracks(recordingID string, tracks []PlayedTrack) error {
+	if d == nil || d.db == nil || recordingID == "" {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM played_tracks WHERE recording_id=?`, recordingID); err != nil {
+		return err
+	}
+	for _, p := range tracks {
+		var ended string
+		if !p.EndedAt.IsZero() {
+			ended = p.EndedAt.UTC().Format(time.RFC3339)
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO played_tracks
+			  (id, recording_id, artist, title, album, key, bpm, deck, title_source, started_at, ended_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			p.ID, p.RecordingID, p.Artist, p.Title, p.Album, p.Key, p.BPM, p.Deck, p.TitleSource,
+			p.StartedAt.UTC().Format(time.RFC3339), ended); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // PlayedTracksFor returns the played tracks linked to a recording, in play order (nil-safe).
 func (d *DB) PlayedTracksFor(recordingID string) ([]PlayedTrack, error) {
 	if d == nil || d.db == nil || recordingID == "" {

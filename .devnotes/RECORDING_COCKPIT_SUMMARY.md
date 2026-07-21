@@ -84,3 +84,23 @@ finalized) are retried at startup + whenever a recording finalizes
   (MeasureArgs keeps ffmpeg stats on), encode folds into the rest, ffprobe fallback total
   covers headerless captures. Player export bar captions queued/preparing/measuring -
   the "over a minute at silent 0%" (loudness pass on a 2h set) is gone.
+
+## Time-fix v2: opener choice + phantom removal + fader-true starts (2026-07-21)
+
+- **Root cause of "already fixed" on real sets**: deck-play/history times for early tracks
+  can predate the CAPTURE itself (cueing/looping while prepping); the v1 track-2-start
+  bound treated those phantoms as trustworthy and refused. v2 trusts probed silence.
+- **Opener choice**: the file can't order pre-audio tracks, so the fix modal picks the
+  deck-timeline default (last track started before the audible moment) with a smart-select
+  to overrule. Tracks before the opener that were over before the capture rolled →
+  removed (preview-labeled); pre-audio tracks after a hand-picked opener clamp to 0:00.
+  `PlanTimeFix(rec, capStart, capEnd, leading, opener)`; TimeFix.RemoveTracks/Opener.
+- **Row removal**: finished-set rows get a context menu (compat + "Remove from tracklist",
+  `pub-trm:`); `Recorder.RemoveTrack`. Removals rewrite the slot-keyed play-log wholesale
+  (`libdb.ReplacePlayedTracks`, tx delete+insert).
+- **Fader-true starts (future sets)**: DeriveNowPlaying picks a playing deck even at fader
+  0 - that's how phantoms confirmed. The recorder now (a) gates on
+  `Score <= OnAirFaderThreshold` (fail-open without fader data), so cue/loop prep never
+  starts a set or confirms, and (b) stamps per-deck first-fader-up marks
+  (markOnAirLocked); confirm uses the MEASURED fader-up as StartedAt when it precedes the
+  loudest-deck switch (blend starts at the fader, not the crossover).

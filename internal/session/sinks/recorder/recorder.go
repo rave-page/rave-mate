@@ -56,10 +56,11 @@ type Recorder struct {
 	cur           *candidate
 	pendingKey    string
 	pendingSince  time.Time
-	lastAudibleAt time.Time // last time a track was audible (drives auto-segmentation)
-	lastKey       string    // identity last observed in the now-playing slot ("" = silence)
-	suppressKey   string    // after a manual stop: don't auto-restart while this key still plays
-	seq           int       // disambiguates ids minted within the same nanosecond
+	lastAudibleAt time.Time            // last time a track was audible (drives auto-segmentation)
+	lastKey       string               // identity last observed in the now-playing slot ("" = silence)
+	onAir         map[string]onAirMark // per-deck first fader-up of the current track (see markOnAirLocked)
+	suppressKey   string               // after a manual stop: don't auto-restart while this key still plays
+	seq           int                  // disambiguates ids minted within the same nanosecond
 
 	subMu   sync.Mutex
 	subs    map[int]chan *Recording
@@ -204,9 +205,17 @@ func (r *Recorder) sweepStale() {
 func (r *Recorder) step(now time.Time, st session.UnifiedState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.markOnAirLocked(now, st)
 	// Explicit clock (testability) + staleness window: a dead source's leftover
 	// isPlaying=true must not keep the recorder "live" forever.
 	np, ok := st.DeriveNowPlayingAt(now, session.NowPlayingStaleAfter)
+	// On-air gate: DeriveNowPlaying picks the loudest PLAYING deck even at fader 0, so a
+	// cued/looped track with the fader down would confirm into the tracklist long before
+	// the mix goes live. With real fader data, below-threshold = silence; without any
+	// (Score stays 1) the gate fails open so mixer-less rigs keep recording.
+	if ok && np.Score <= session.OnAirFaderThreshold {
+		ok = false
+	}
 	key := ""
 	if ok {
 		key = ident(np)
@@ -281,10 +290,55 @@ func (r *Recorder) step(now time.Time, st session.UnifiedState) {
 	r.pendingKey = ""
 }
 
+// onAirMark is the first instant a (deck, track) pair sat above the on-air threshold -
+// the fader-up moment, i.e. the track's true start in the mix (deck-play begins earlier
+// when cueing/looping). measured = derived from real fader data; assumed marks (no fader
+// feed) are never used for start times.
+type onAirMark struct {
+	key      string
+	at       time.Time
+	measured bool
+}
+
+// markOnAirLocked maintains one on-air mark per deck (bounded: ≤ deck count; caller holds
+// r.mu). The first mark per (deck, track) sticks - a later EQ/fader dip doesn't reset it;
+// a track change on the deck re-arms it; a deck that stops playing clears it.
+func (r *Recorder) markOnAirLocked(now time.Time, st session.UnifiedState) {
+	if r.onAir == nil {
+		r.onAir = map[string]onAirMark{}
+	}
+	playing := map[string]bool{}
+	for _, d := range st.DerivePlayingDecksAt(now, session.NowPlayingStaleAfter) {
+		playing[d.Deck] = true
+		key := identFields(d.Fields)
+		if m, ok := r.onAir[d.Deck]; ok && m.key == key {
+			continue // first on-air of this track on this deck already stamped
+		}
+		switch {
+		case !d.HasFader:
+			r.onAir[d.Deck] = onAirMark{key: key, at: now} // assumed - not usable for starts
+		case d.Fader > session.OnAirFaderThreshold:
+			r.onAir[d.Deck] = onAirMark{key: key, at: now, measured: true}
+		default:
+			delete(r.onAir, d.Deck) // new track, still faded down - drop the stale mark
+		}
+	}
+	for deck := range r.onAir {
+		if !playing[deck] {
+			delete(r.onAir, deck)
+		}
+	}
+}
+
 // confirmCurrent appends the current candidate to the active tracklist.
 func (r *Recorder) confirmCurrent() {
 	t := r.cur.track
 	t.StartedAt = r.cur.firstSeen
+	// The measured fader-up moment beats the loudest-deck switch time: during a blend the
+	// incoming track is audible (fader up) well before it becomes the loudest deck.
+	if m, ok := r.onAir[t.Deck]; ok && m.measured && m.key == r.cur.key && m.at.Before(t.StartedAt) {
+		t.StartedAt = m.at
+	}
 	r.active.Tracks = append(r.active.Tracks, t)
 	r.cur.idx = len(r.active.Tracks) - 1
 	r.cur.confirmed = true
@@ -815,17 +869,21 @@ func (r *Recorder) SetTrackStart(id string, idx int, start time.Time) (Recording
 	if start.IsZero() {
 		return Recording{}, fmt.Errorf("zero start time")
 	}
-	return r.mutate(id, func(rec *Recording) ([]int, error) {
+	return r.mutate(id, func(rec *Recording) ([]int, bool, error) {
 		if idx < 0 || idx >= len(rec.Tracks) {
-			return nil, fmt.Errorf("track %d out of range", idx)
+			return nil, false, fmt.Errorf("track %d out of range", idx)
 		}
-		return setTrackStartIn(rec, idx, start), nil
+		return setTrackStartIn(rec, idx, start), false, nil
 	})
 }
 
-// ApplyTimeFix rebases the set start + applies the per-track corrections of a PlanTimeFix.
+// ApplyTimeFix rebases the set start + applies the per-track corrections and removals of a
+// PlanTimeFix. Refuses the in-progress set (removal would desync the confirm cursor).
 func (r *Recorder) ApplyTimeFix(id string, fix TimeFix) (Recording, error) {
-	return r.mutate(id, func(rec *Recording) ([]int, error) {
+	return r.mutate(id, func(rec *Recording) ([]int, bool, error) {
+		if rec.EndedAt.IsZero() {
+			return nil, false, fmt.Errorf("set still in progress")
+		}
 		var changed []int
 		if !fix.NewStart.IsZero() {
 			rec.StartedAt = fix.NewStart
@@ -841,23 +899,71 @@ func (r *Recorder) ApplyTimeFix(id string, fix TimeFix) (Recording, error) {
 			}
 			changed = append(changed, setTrackStartIn(rec, i, fix.TrackStarts[i])...)
 		}
-		return changed, nil
+		return changed, removeTracksIn(rec, fix.RemoveTracks), nil
 	})
+}
+
+// RemoveTrack deletes one track from a finished recording's tracklist (a phantom deck-play
+// that never made the mix). The change-history play events stay - only the tracklist shrinks.
+func (r *Recorder) RemoveTrack(id string, idx int) (Recording, error) {
+	return r.mutate(id, func(rec *Recording) ([]int, bool, error) {
+		if rec.EndedAt.IsZero() {
+			return nil, false, fmt.Errorf("set still in progress")
+		}
+		if idx < 0 || idx >= len(rec.Tracks) {
+			return nil, false, fmt.Errorf("track %d out of range", idx)
+		}
+		if !removeTracksIn(rec, []int{idx}) {
+			return nil, false, fmt.Errorf("track %d out of range", idx)
+		}
+		return nil, true, nil
+	})
+}
+
+// removeTracksIn drops the given track indexes (any order, dups ok). Reports whether
+// anything was removed - slot-keyed play-log rows must then be rewritten wholesale.
+func removeTracksIn(rec *Recording, idxs []int) bool {
+	if len(idxs) == 0 {
+		return false
+	}
+	drop := make(map[int]struct{}, len(idxs))
+	for _, i := range idxs {
+		if i >= 0 && i < len(rec.Tracks) {
+			drop[i] = struct{}{}
+		}
+	}
+	if len(drop) == 0 {
+		return false
+	}
+	kept := rec.Tracks[:0]
+	for i := range rec.Tracks {
+		if _, gone := drop[i]; !gone {
+			kept = append(kept, rec.Tracks[i])
+		}
+	}
+	rec.Tracks = kept
+	return true
 }
 
 // mutate applies fn to recording id - the active one in memory, else a serialized direct
 // store read-modify-write (direct writer #5, same storeMu + drain discipline as Rename) -
-// persists, refreshes the play-log rows fn reports changed, and returns the updated copy.
-func (r *Recorder) mutate(id string, fn func(*Recording) ([]int, error)) (Recording, error) {
+// persists, refreshes the play-log rows, and returns the updated copy. fn reports the
+// changed track indexes, or rewrite=true when slots moved (removals) - then the whole
+// play-log for the recording is rewritten (rows are keyed "<rec>#<slot>").
+func (r *Recorder) mutate(id string, fn func(*Recording) ([]int, bool, error)) (Recording, error) {
 	r.mu.Lock()
 	if r.active != nil && r.active.ID == id {
-		changed, err := fn(r.active)
+		changed, rewrite, err := fn(r.active)
 		if err != nil {
 			r.mu.Unlock()
 			return Recording{}, err
 		}
-		for _, i := range dedupInts(changed) {
-			r.savePlayedLocked(i)
+		if rewrite {
+			r.replacePlayLog(r.active)
+		} else {
+			for _, i := range dedupInts(changed) {
+				r.savePlayedLocked(i)
+			}
 		}
 		snap := *r.active.clone()
 		r.persistLocked()
@@ -879,7 +985,7 @@ func (r *Recorder) mutate(id string, fn func(*Recording) ([]int, error)) (Record
 	if !ok {
 		return Recording{}, fmt.Errorf("recording %s not found", id)
 	}
-	changed, err := fn(&rec)
+	changed, rewrite, err := fn(&rec)
 	if err != nil {
 		return Recording{}, err
 	}
@@ -887,10 +993,34 @@ func (r *Recorder) mutate(id string, fn func(*Recording) ([]int, error)) (Record
 		return Recording{}, fmt.Errorf("persist recording %s: %w", id, err)
 	}
 	r.bumpRec()
-	for _, i := range dedupInts(changed) {
-		r.savePlayed(&rec, i)
+	if rewrite {
+		r.replacePlayLog(&rec)
+	} else {
+		for _, i := range dedupInts(changed) {
+			r.savePlayed(&rec, i)
+		}
 	}
 	return rec, nil
+}
+
+// replacePlayLog rewrites the recording's consolidated play-log rows from its tracks.
+func (r *Recorder) replacePlayLog(rec *Recording) {
+	if r.lib == nil || rec == nil {
+		return
+	}
+	rows := make([]libdb.PlayedTrack, len(rec.Tracks))
+	for i, t := range rec.Tracks {
+		rows[i] = libdb.PlayedTrack{
+			ID:          fmt.Sprintf("%s#%d", rec.ID, i),
+			RecordingID: rec.ID,
+			Artist:      t.Artist, Title: t.Title, Album: t.Album, Key: t.Key, BPM: t.BPM,
+			Deck: t.Deck, TitleSource: t.TitleSource,
+			StartedAt: t.StartedAt, EndedAt: t.EndedAt,
+		}
+	}
+	if err := r.lib.ReplacePlayedTracks(rec.ID, rows); err != nil {
+		r.log.Warn(source, "rewrite play log failed", map[string]any{"id": rec.ID, "error": err.Error()})
+	}
 }
 
 // dedupInts drops duplicate indexes (a fix touching neighbours reports idx-1 twice).
@@ -1015,9 +1145,11 @@ func (r *Recorder) broadcastLocked() {
 }
 
 // ident is a track's stable identity for now-playing comparison.
-func ident(np session.NowPlaying) string {
-	title := session.StringField(np.Fields, session.FieldTitle)
-	artist := session.StringField(np.Fields, session.FieldArtist)
+func ident(np session.NowPlaying) string { return identFields(np.Fields) }
+
+func identFields(fields map[string]session.FieldValue) string {
+	title := session.StringField(fields, session.FieldTitle)
+	artist := session.StringField(fields, session.FieldArtist)
 	return strings.ToLower(strings.TrimSpace(title + "|" + artist))
 }
 

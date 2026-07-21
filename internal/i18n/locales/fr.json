@@ -1965,12 +1965,15 @@
       "setStart": "Début du set",
       "apply": "Appliquer la correction",
       "applied": "Temps de début mis à jour.",
-      "failed": "Échec de la correction : "
+      "failed": "Échec de la correction : ",
+      "opener": "Ouvre l'enregistrement",
+      "removedRow": "retiré - terminé avant l'enregistrement"
     },
     "toast": {
       "badOffset": "Impossible de lire « {v} » - utiliser m:ss ou h:mm:ss.",
       "offsetFailed": "Échec de la modification : ",
-      "exportFailed": "Échec de l'export : "
+      "exportFailed": "Échec de l'export : ",
+      "trackRemoved": "Track retiré de la tracklist."
     },
     "textExport": {
       "title": "Export - texte",
@@ -1986,6 +1989,10 @@
         "detail": "Détaillé (+ key et BPM)",
         "custom": "Modèle personnalisé"
       }
+    },
+    "track": {
+      "remove": "Retirer de la tracklist",
+      "n": "Track {n}"
     }
   },
   "settings": {

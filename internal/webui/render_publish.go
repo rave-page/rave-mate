@@ -317,6 +317,8 @@ func (u *UI) pubTracklistHTML(r recorder.Recording, hasCaps bool, rows []pubRow,
 				` data-act=` + attrQ("pub-toff:"+r.ID+"\x1f"+fmt.Sprint(i)) +
 				` data-label=` + attrQ("offset-"+fmt.Sprint(i+1)) + // ctl read/set target (space-free: ctl set splits on first space)
 				` title=` + attrQ(i18n.T("publish.offsetEditTip")) + `>`
+			// finished sets: every row gets a context menu (compat when resolved + remove)
+			ctx = ` data-ctx=` + attrQ("pub-tctx2:"+r.ID+"\x1f"+fmt.Sprint(i)+"\x1f"+row.path)
 		}
 		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +
 			`<span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +

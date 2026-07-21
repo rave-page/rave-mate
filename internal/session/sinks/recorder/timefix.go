@@ -2,25 +2,30 @@ package recorder
 
 import "time"
 
-// TimeFix is a planned start-time correction: a rebased set start + per-track clamps.
-// Pure data - PlanTimeFix computes it, the UI previews it, ApplyTimeFix commits it.
+// TimeFix is a planned start-time correction: a rebased set start, per-track clamps and
+// tracks to drop. Pure data - PlanTimeFix computes it, the UI previews it, ApplyTimeFix
+// commits it. Indexes refer to the recording's CURRENT track order.
 type TimeFix struct {
-	NewStart    time.Time
-	TrackStarts map[int]time.Time // track index → corrected absolute start
+	NewStart     time.Time
+	TrackStarts  map[int]time.Time // track index → corrected absolute start
+	RemoveTracks []int             // played before the opener - not in the capture
+	Opener       int               // index of the track that opens the audible recording
 }
 
 // PlanTimeFix aligns a finished recording's timeline to its captured audio file, so the
 // exported offsets are relative to the uploaded mix: the audible start of the capture
-// (capStart + probed leading silence) becomes 0:00. The set start moves there, track 1
-// starts there, and every track whose recorded start predates it clamps up to it.
+// (capStart + probed leading silence) becomes 0:00.
 //
 // Deck-play/history times BEFORE the audible start are phantoms - looping, cueing or
-// prepping decks before the broadcast went live (often before the capture even began) -
-// so the silence measured from the actual file outranks them; several early tracks
-// clamping to 0:00 is expected, not an error. ok=false only when there is nothing to
-// align to (no capture start, live/empty set, an entirely-silent capture, audio starting
-// past the set end) or the plan is a no-op.
-func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duration) (TimeFix, bool) {
+// prepping decks before the broadcast went live (often before the capture even began).
+// The file alone cannot order them, so ONE of them is the opener (opener param; <0 =
+// auto: the last track whose recorded start predates the audible start, i.e. the one the
+// deck timeline says was playing when sound appears; no pre-audio tracks → track 0).
+// Pre-audio tracks before the opener were over before the capture rolled → RemoveTracks;
+// pre-audio tracks after it (a hand-picked earlier opener) clamp to 0:00 for manual
+// adjustment. ok=false only when there is nothing to align to (no capture start,
+// live/empty set, entirely-silent capture, audio past the set end) or the plan is a no-op.
+func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duration, opener int) (TimeFix, bool) {
 	if capStart.IsZero() || len(rec.Tracks) == 0 || rec.EndedAt.IsZero() {
 		return TimeFix{}, false
 	}
@@ -34,17 +39,26 @@ func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duratio
 	if !audio.Before(rec.EndedAt) {
 		return TimeFix{}, false
 	}
-	fix := TimeFix{NewStart: audio, TrackStarts: map[int]time.Time{}}
-	for i, t := range rec.Tracks {
-		ns := t.StartedAt
-		if i == 0 || ns.Before(audio) {
-			ns = audio
-		}
-		if !ns.Equal(t.StartedAt) {
-			fix.TrackStarts[i] = ns
+	if opener < 0 || opener >= len(rec.Tracks) {
+		opener = 0
+		for i, t := range rec.Tracks {
+			if t.StartedAt.Before(audio) {
+				opener = i
+			}
 		}
 	}
-	if audio.Equal(rec.StartedAt) && len(fix.TrackStarts) == 0 {
+	fix := TimeFix{NewStart: audio, TrackStarts: map[int]time.Time{}, Opener: opener}
+	for i, t := range rec.Tracks {
+		switch {
+		case i < opener && t.StartedAt.Before(audio):
+			fix.RemoveTracks = append(fix.RemoveTracks, i)
+		case i == opener || t.StartedAt.Before(audio):
+			if !t.StartedAt.Equal(audio) {
+				fix.TrackStarts[i] = audio
+			}
+		}
+	}
+	if audio.Equal(rec.StartedAt) && len(fix.TrackStarts) == 0 && len(fix.RemoveTracks) == 0 {
 		return TimeFix{}, false
 	}
 	return fix, true
