@@ -103,6 +103,55 @@ func TestServerStateReflectsDecks(t *testing.T) {
 	}
 }
 
+// A track that ran out (stopped at its end, fader forgotten) must drop off the overlay.
+func TestServerHidesEndedDeck(t *testing.T) {
+	m, base := startTestServer(t)
+
+	deckObs := func(playing bool, elapsed float64) session.Observation {
+		return session.Observation{
+			Source: session.SourceTraktor,
+			Scope:  session.Scope{Kind: session.ScopeDeck, ID: "A"},
+			Fields: map[string]any{
+				session.FieldTitle: "Strobe", session.FieldIsPlaying: playing,
+				session.FieldElapsedTime: elapsed, session.FieldTrackLength: 300.0,
+			},
+		}
+	}
+	m.Apply(deckObs(true, 100))
+	m.Apply(session.Observation{
+		Source: session.SourceTraktor,
+		Scope:  session.Scope{Kind: session.ScopeChannel, ID: "1"},
+		Fields: map[string]any{session.FieldFader: 0.9},
+	})
+
+	waitDecks := func(want int) []session.DeckSnapshot {
+		t.Helper()
+		var ov session.Overlay
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			resp, err := http.Get(base + "/state")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			_ = json.Unmarshal(raw, &ov)
+			if len(ov.Decks) == want {
+				return ov.Decks
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatalf("want %d decks, got %+v", want, ov.Decks)
+		return nil
+	}
+
+	waitDecks(1)                   // on air → shown
+	m.Apply(deckObs(false, 299.5)) // ran out with fader still up
+	waitDecks(0)                   // ended → hidden
+	m.Apply(deckObs(true, 10))     // replayed → back
+	waitDecks(1)
+}
+
 func TestServerServesIndexAndLayout(t *testing.T) {
 	_, base := startTestServer(t)
 

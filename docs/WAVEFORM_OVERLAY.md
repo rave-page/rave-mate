@@ -38,9 +38,14 @@ Browser: a white-mask bitmap (`buildWaveImg`) + `source-in` colouring + `Path2D`
 ## Peaks pipeline
 
 `internal/waveform` - async single-flight ffmpeg decode → uint8 max-abs peak buckets (~60/s),
-cached on disk keyed by `DeckSnapshot.ArtKey`. Generated on first play; the panel shows a flat
-baseline until it lands, then swaps in. The browser fetches `/peaks/<artKey>.bin`
-(`[u32 LE durationMs][u8 peaks]`); native sinks read the resolver directly.
+cached on disk keyed by a hash of the resolved **file path** (survives any deck-key change).
+The overlay server **prefetches at track load** (pre-gate), so peaks are usually ready by
+fade-in; otherwise the panel shows a flat baseline until the decode lands, then swaps in. The
+browser fetches `/peaks/<artKey>.bin` (`[u32 LE durationMs][u8 peaks]`, backoff retry while
+404); native sinks read the resolver directly. `DeckSnapshot.ArtKey` (the deck's track
+identity) hashes **artist|title** with the path only as fallback - stable from the moment a
+track loads, so a late-arriving file path never flips the key (which used to blank
+waveform/art mid-track + reset the on-air gates).
 
 ## Appearance - one editor, every output (`overlay-style.json`)
 

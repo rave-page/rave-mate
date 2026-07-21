@@ -120,16 +120,47 @@ func TestBuildOverlayDBTitleFallback(t *testing.T) {
 	}
 }
 
-func TestArtKeyStableAndPathPreferred(t *testing.T) {
-	k1 := artKey("/music/x.mp3", "A", "B")
-	k2 := artKey("/music/x.mp3", "different", "meta")
-	if k1 != k2 {
-		t.Error("art key should depend only on path when present")
+func TestArtKeyMetaFirstAndStable(t *testing.T) {
+	// Track identity must NOT change when the path arrives late (or path sources disagree on
+	// the string) - a mid-track key flip resets overlay gates + blanks waveform/art caches.
+	k1 := artKey("", "deadmau5", "Strobe")
+	if artKey("/Music/x.mp3", "deadmau5", "Strobe") != k1 || artKey(`D:\Music\x.mp3`, "deadmau5", "Strobe") != k1 {
+		t.Error("art key must stay stable across path arrival / path-string variants")
 	}
 	if artKey("", "deadmau5", "Strobe") == artKey("", "Eric Prydz", "Opus") {
-		t.Error("art key should differ by artist/title when no path")
+		t.Error("art key should differ by artist/title")
+	}
+	if artKey("/music/x.mp3", "", "") == "" {
+		t.Error("path must key a track with no text metadata")
 	}
 	if artKey("", "", "") != "" {
 		t.Error("empty inputs should yield empty art key")
+	}
+}
+
+func TestBuildOverlayEnded(t *testing.T) {
+	now := time.Now()
+	deck := func(playing bool, elapsed, length float64) UnifiedState {
+		return UnifiedState{Decks: map[string]map[string]FieldValue{"A": {
+			FieldTitle:       fvt("T", now),
+			FieldIsPlaying:   fvt(playing, now),
+			FieldElapsedTime: fvt(elapsed, now),
+			FieldTrackLength: fvt(length, now),
+		}}}
+	}
+	for _, tc := range []struct {
+		name  string
+		st    UnifiedState
+		ended bool
+	}{
+		{"stopped at end", deck(false, 299.4, 300), true},
+		{"still playing at end", deck(true, 299.4, 300), false},
+		{"paused mid-track", deck(false, 120, 300), false},
+		{"no length known", deck(false, 120, 0), false},
+	} {
+		ov := tc.st.BuildOverlay(now, NowPlayingStaleAfter)
+		if len(ov.Decks) != 1 || ov.Decks[0].Ended != tc.ended {
+			t.Errorf("%s: ended=%v want %v (%+v)", tc.name, ov.Decks[0].Ended, tc.ended, ov.Decks)
+		}
 	}
 }

@@ -59,12 +59,14 @@ type Sink struct {
 	stylePath   string
 	presetsPath string
 
-	mu       sync.RWMutex
-	latest   session.Overlay // retains per-deck Path (not serialized) for /art
-	styleRaw json.RawMessage // cached overlay-style.json, pushed live over SSE (no manual reload)
-	layRaw   json.RawMessage // cached overlay-layout.json, pushed live over SSE
+	mu        sync.RWMutex
+	latest    session.Overlay        // gated decks the page renders; retains per-deck Path (not serialized)
+	latestAll []session.DeckSnapshot // pre-gate decks - /art + /peaks resolve cued/hidden decks too
+	styleRaw  json.RawMessage        // cached overlay-style.json, pushed live over SSE (no manual reload)
+	layRaw    json.RawMessage        // cached overlay-layout.json, pushed live over SSE
 
-	gate map[string]*gateEntry // pump-goroutine only; cued-not-played gate
+	gate       map[string]*gateEntry // pump-goroutine only; cued-not-played gate
+	prefetched map[string]string     // pump-goroutine only; deck → artKey already warmed
 
 	subMu   sync.Mutex
 	subs    map[int]chan []byte
@@ -81,6 +83,7 @@ func New(log *logbus.Bus, portFn func() int, art *overlayart.Resolver, wave *wav
 		presetsPath: filepath.Join(filepath.Dir(layoutPath), "overlay-presets.json"),
 		subs:        map[int]chan []byte{},
 		gate:        map[string]*gateEntry{},
+		prefetched:  map[string]string{},
 	}
 }
 
@@ -219,15 +222,44 @@ func (s *Sink) pump(ctx context.Context, m *session.Merger) {
 
 func (s *Sink) rebuild(st session.UnifiedState) {
 	ov := st.BuildOverlay(time.Now(), session.NowPlayingStaleAfter)
+	all := ov.Decks
 	ov.Decks = s.applyGate(ov.Decks)
 	s.mu.Lock()
 	s.latest = ov
+	s.latestAll = all
 	s.mu.Unlock()
+	s.prefetch(all)
 }
 
-// applyGate hides decks whose current track has never been on-air (cued but not yet faded in).
-// Once a track goes on-air it stays shown until a different track loads on that deck. Runs only
-// on the pump goroutine, so s.gate needs no lock.
+// prefetch warms the cover-art + waveform caches the moment a track LOADS (pre-gate), so both
+// are ready by fade-in. Previously nothing started until the page's first /art//peaks request -
+// impossible before the card passed the on-air gate - so the ffmpeg decode raced the fade-in
+// and the panel sat empty for its duration. Single-flight + caches inside the resolvers make
+// repeat calls free; one goroutine per track LOAD (max 4 decks), not per tick.
+func (s *Sink) prefetch(decks []session.DeckSnapshot) {
+	for _, d := range decks {
+		if d.ArtKey == "" || s.prefetched[d.Deck] == d.ArtKey {
+			continue
+		}
+		s.prefetched[d.Deck] = d.ArtKey
+		d := d
+		debuglog.Go(s.log, source, func() {
+			if s.wave != nil {
+				_, _ = s.wave.Get(d) // miss kicks the background decode
+			}
+			if s.art != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+				defer cancel()
+				_, _ = s.art.Ensure(ctx, d)
+			}
+		})
+	}
+}
+
+// applyGate hides decks whose current track has never been on-air (cued but not yet faded in)
+// or has ENDED (ran out with the fader still up). Once a track goes on-air it stays shown until
+// it ends or a different track loads on that deck. Runs only on the pump goroutine, so s.gate
+// needs no lock.
 func (s *Sink) applyGate(decks []session.DeckSnapshot) []session.DeckSnapshot {
 	out := decks[:0:0]
 	seen := map[string]bool{}
@@ -241,7 +273,7 @@ func (s *Sink) applyGate(decks []session.DeckSnapshot) []session.DeckSnapshot {
 		if d.OnAir {
 			e.everOnAir = true
 		}
-		if e.everOnAir {
+		if e.everOnAir && !d.Ended {
 			out = append(out, d)
 		}
 	}
@@ -306,6 +338,20 @@ func (s *Sink) stateJSON() []byte {
 	return raw
 }
 
+// deckByArtKey finds the deck currently holding the track identified by key. Searches the
+// PRE-gate list so cued / gated-out decks still resolve art + peaks (prefetch, late requests
+// racing a hide).
+func (s *Sink) deckByArtKey(key string) (session.DeckSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.latestAll {
+		if d.ArtKey == key {
+			return d, true
+		}
+	}
+	return session.DeckSnapshot{}, false
+}
+
 // ── HTTP handlers ──────────────────────────────────────────────────────────────
 
 func (s *Sink) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -365,16 +411,7 @@ func (s *Sink) handleArt(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.mu.RLock()
-	var deck session.DeckSnapshot
-	found := false
-	for _, d := range s.latest.Decks {
-		if d.ArtKey == key {
-			deck, found = d, true
-			break
-		}
-	}
-	s.mu.RUnlock()
+	deck, found := s.deckByArtKey(key)
 	if !found {
 		http.NotFound(w, r)
 		return
@@ -407,16 +444,7 @@ func (s *Sink) handlePeaks(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.mu.RLock()
-	var deck session.DeckSnapshot
-	found := false
-	for _, d := range s.latest.Decks {
-		if d.ArtKey == key {
-			deck, found = d, true
-			break
-		}
-	}
-	s.mu.RUnlock()
+	deck, found := s.deckByArtKey(key)
 	if !found {
 		http.NotFound(w, r)
 		return

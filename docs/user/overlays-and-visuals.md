@@ -9,8 +9,16 @@ All overlay sinks render the same fused session state - enable any combination.
 | **Browser overlay** | Browser source (local URL on the card) | Every loaded deck + faders/EQ + cover art, SSE-live |
 | **PNG deck cards** | Image source per deck | Native renderer, zero browser overhead |
 | **obs-websocket renderer** | (drives OBS text/image inputs directly) | No sources to add manually; needs the OBS bridge |
-| **Waveform panel** | part of the overlays | Scrolling waveform + EQ/FX strip; per-track peaks cached on first play |
+| **Waveform panel** | part of the overlays | Scrolling waveform + EQ/FX strip; peaks + cover pre-generated at track load |
 | **Now-playing file** | Text source reading `now_playing.txt/json` | simplest possible integration |
+
+## Deck visibility
+
+A deck card appears once its track first goes **on air** (playing + channel fader up) - cueing
+in headphones stays hidden. It disappears when the track **runs out** (stopped at its end, even
+with the fader still up), or when a new track loads and hasn't been faded in yet. Cover art +
+waveform are prepared in the background from the moment the track loads, so they're ready when
+the card appears.
 
 Styling (colors, opacity, layout) lives in the overlay settings cards; overlays share the
 brand-token look by default. Per-VRChat-world overlay layouts can auto-apply when you travel

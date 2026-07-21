@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>rave-mate overlay</title>
 <style>
   :root{
@@ -242,13 +243,40 @@
     return g.kind==="radial"?("radial-gradient(circle,"+st+")"):("linear-gradient("+(90-(g.angle||0))+"deg,"+st+")");
   }
 
-  // fetchPeaks pulls the waveform overview for a track once (retries every ~1.5s while it's still
-  // generating server-side). Format: [uint32 LE durationMs][uint8 peaks].
-  function fetchPeaks(deck, key){
+  // fetchPeaks pulls the waveform overview for a track, retrying while the key stays current -
+  // the server 404s until its background decode lands (or until Traktor finally reports the file
+  // path for a track the library doesn't know). Backoff 1.5s → 10s so a track with no obtainable
+  // file doesn't hammer forever; retries stop the moment the deck's key moves on.
+  // Format: [uint32 LE durationMs][uint8 peaks].
+  function fetchPeaks(deck, key, attempt){
     fetch("/peaks/"+key+".bin?k="+key).then(r=>{ if(!r.ok) throw 0; return r.arrayBuffer(); })
       .then(buf=>{ const dv=new DataView(buf); const durMs=dv.getUint32(0,true);
-        const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ ws.key=key; ws.peaks=new Uint8Array(buf,4); ws.durSec=durMs/1000; } })
-      .catch(()=>{ const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ setTimeout(()=>{ if(ws.reqKey===key&&!ws.peaks) ws.reqKey=""; },1500); } });
+        const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ ws.key=key; ws.peaks=new Uint8Array(buf,4); ws.durSec=durMs/1000; ws._imgSig=null; } })
+      .catch(()=>{ const ws=wstate.get(deck); if(ws&&ws.reqKey===key){ clearTimeout(ws._pkT);
+        const n=(attempt||0)+1, wait=Math.min(10000,1500*Math.pow(2,n-1));
+        ws._pkT=setTimeout(()=>{ const w2=wstate.get(deck); if(w2&&w2.reqKey===key&&w2.key!==key) fetchPeaks(deck,key,n); },wait); } });
+  }
+
+  // loadArt swaps a card's cover to the given artKey. The visible <img> only ever receives a URL
+  // that ALREADY loaded (preloaded via a detached Image), so a failed or in-flight art fetch can
+  // never paint the browser's broken-image glyph. A failure retries with backoff (2.5s → 20s -
+  // server-side extraction may still be running; a track with no art stops costing anything
+  // fast) while the track stays loaded; a real track change (tsig) drops the old cover to the
+  // placeholder immediately, while a key flip on the same track keeps it.
+  function loadArt(el, key, tsig, attempt){
+    const img=el.querySelector(".art img"), ph=el.querySelector(".art .ph");
+    clearTimeout(el._artT);
+    const clear=()=>{ img.hidden=true; img.removeAttribute("src"); el._artKey=null; ph.style.display="flex"; };
+    if(el._artTsig!==tsig){ el._artTsig=tsig; if(el._artKey&&el._artKey!==key) clear(); }
+    el._artReq=key;
+    if(!key){ clear(); return; }
+    if(el._artKey===key) return;                       // current cover already shown
+    const pre=new Image();
+    pre.onload=()=>{ if(el._artReq!==key) return; el._artKey=key; img.src=pre.src; img.hidden=false; ph.style.display="none"; };
+    pre.onerror=()=>{ if(el._artReq!==key) return;
+      const n=(attempt||0)+1, wait=Math.min(20000,2500*Math.pow(2,n-1));
+      el._artT=setTimeout(()=>{ if(el._artReq===key&&el._artKey!==key) loadArt(el,key,tsig,n); },wait); };
+    pre.src="/art/"+key+".jpg?k="+key;
   }
 
   // eqDispLevel maps an EQ band value (0=cut … 0.5=neutral … 1=boost) to a display level
@@ -454,8 +482,14 @@
     requestAnimationFrame(waveTick);
   }
   requestAnimationFrame(waveTick);
-  // Anchor-based defaults: {ax:l|c|r, ox, ay:t|c|b, oy} so positions are resolution-independent.
-  const DEFAULTS = {A:{ax:"l",ox:40,ay:"t",oy:40},B:{ax:"l",ox:40,ay:"t",oy:170},C:{ax:"l",ox:40,ay:"t",oy:300},D:{ax:"l",ox:40,ay:"t",oy:430}};
+  // Anchor-based default: a top-left stack spaced by the MEASURED card height (wave mode makes
+  // cards taller - a fixed 130px spacing overlapped them). Saved layout always wins.
+  function defaultPos(deck){
+    const i=Math.max(0,"ABCD".indexOf(deck));
+    let h=120; const first=cards.values().next().value;
+    if(first){ h=cardSize(first)[1]||h; }
+    return {ax:"l",ox:40,ay:"t",oy:40+i*(h+14)};
+  }
 
   const root = document.documentElement.style;
   function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
@@ -509,7 +543,7 @@
     if(cy<H/3){ay="t";oy=t;} else if(cy>2*H/3){ay="b";oy=H-h-t;} else {ay="c";oy=t-(H-h)/2;}
     return {ax,ox:Math.round(ox),ay,oy:Math.round(oy)};
   }
-  function placeAt(el,deck){ const p=layout[deck]||DEFAULTS[deck]||{ax:"l",ox:40,ay:"t",oy:40};
+  function placeAt(el,deck){ const p=layout[deck]||defaultPos(deck);
     const [w,h]=cardSize(el); const [l,t]=layoutPx(p,stage.clientWidth,stage.clientHeight,w,h);
     el.style.left=Math.round(l)+"px"; el.style.top=Math.round(t)+"px"; }
   function repositionAll(){ if(!ONLY) for(const [dk,el] of cards) placeAt(el,dk); refreshMarquees(); }
@@ -676,7 +710,13 @@
         ws.tl=d.trackLength||0;
         ws.low=d.eqLow; ws.mid=d.eqMid; ws.high=d.eqHigh; ws.filter=d.filter; ws.hasMixer=!!d.hasMixer;
         ws.fader=d.fader; ws.hasFader=!!d.hasFader;
-        if(d.artKey && ws.key!==d.artKey && ws.reqKey!==d.artKey){ ws.reqKey=d.artKey; ws.peaks=null; ws.durSec=0; fetchPeaks(d.deck,d.artKey); }
+        if(d.artKey && ws.key!==d.artKey && ws.reqKey!==d.artKey){ ws.reqKey=d.artKey;
+          // Clear the envelope only on a REAL track change; a key flip on the same track (rare -
+          // e.g. metadata settling right after load) keeps the old peaks until the new ones land,
+          // so the waveform never blanks mid-track.
+          const tsig=(d.title||"")+"|"+(d.artist||"");
+          if(ws.tsig!==tsig){ ws.tsig=tsig; ws.peaks=null; ws.durSec=0; }
+          fetchPeaks(d.deck,d.artKey); }
       }
       // Title/artist/art change RARELY - gate the forced-layout setScroll + art swap on a text-only
       // signature so they never run on a mere time tick (that re-measure mid-animation was the ~1/s
@@ -686,15 +726,7 @@
         el._sigText=sigText;
         setScroll(el.querySelector(".title"), d.title||"-");
         setScroll(el.querySelector(".artist"), d.artist||"");
-        const img=el.querySelector(".art img"), ph=el.querySelector(".art .ph");
-        if(d.artKey){
-          if(img.dataset.k!==d.artKey && img.dataset.req!==d.artKey){
-            img.dataset.req=d.artKey;
-            img.onload=()=>{ img.dataset.k=d.artKey; img.hidden=false; ph.style.display="none"; };
-            img.onerror=()=>{ img.hidden=true; ph.style.display="flex"; if(img.dataset.req===d.artKey) img.dataset.req=""; };
-            img.src="/art/"+d.artKey+".jpg?k="+d.artKey;
-          }
-        } else { img.hidden=true; img.removeAttribute("data-k"); img.removeAttribute("data-req"); ph.style.display="flex"; }
+        loadArt(el, d.artKey||"", (d.title||"")+"|"+(d.artist||""));
       }
       // Meta line (BPM · key · elapsed/length) - the time advances each second; rebuild only when the
       // whole-second value changes. No marquee re-measure, so no forced reflow.
@@ -708,9 +740,10 @@
         if(d.trackLength) metric(null,fmtTime(d.elapsedTime)," / "+fmtTime(d.trackLength));
         else if(d.elapsedTime) metric(null,fmtTime(d.elapsedTime),null);
       }
-      // Fader → whole-card opacity (cheap, no layout) - kept every tick.
+      // Card opacity is owned by the "fade by fader" style toggle (cardFaderReact, applied above) -
+      // a second unconditional fader→opacity writer here used to override it every tick, so the
+      // toggle was dead AND a fully-pulled fader made the card invisible instead of clamping.
       const f=Math.max(0,Math.min(1,d.fader||0));
-      if(!EDIT) el.style.opacity = d.hasFader ? String(f) : "";
       // Legacy mixer widgets only when the waveform panel is OFF (they're hidden in wave mode, and
       // the canvas shows EQ/filter/fader there - updating them every tick would jank for nothing).
       if(!WAVE.enabled){

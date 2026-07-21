@@ -97,6 +97,13 @@ func TestApplyGate(t *testing.T) {
 	if got := s.applyGate(cued); len(got) != 1 {
 		t.Errorf("faded-but-same-track deck should stay shown, got %d", len(got))
 	}
+	ended := []session.DeckSnapshot{{Deck: "A", ArtKey: "k1", OnAir: false, Ended: true}}
+	if got := s.applyGate(ended); len(got) != 0 {
+		t.Errorf("ended track should be hidden, got %d", len(got))
+	}
+	if got := s.applyGate(onair); len(got) != 1 {
+		t.Errorf("replayed track should reappear after ended, got %d", len(got))
+	}
 	newcued := []session.DeckSnapshot{{Deck: "A", ArtKey: "k2", OnAir: false}}
 	if got := s.applyGate(newcued); len(got) != 0 {
 		t.Errorf("new cued track should re-gate, got %d", len(got))

@@ -12,6 +12,10 @@ import (
 // audible ("on air"). Below it the track is loaded/cued but not in the mix.
 const OnAirFaderThreshold = 0.02
 
+// endedSlack is how close (seconds) a stopped deck's elapsed must be to the track length to
+// count as "ran out". Traktor reports elapsed at 1s granularity and may stop a hair short.
+const endedSlack = 2.0
+
 // deckOrder is the stable display order of decks in an Overlay.
 var deckOrder = []string{"A", "B", "C", "D"}
 
@@ -35,7 +39,8 @@ type DeckSnapshot struct {
 	// waveform scrolls smoothly between sparse source updates; a fresh reading (incl. after a
 	// backspin / beat-jump) snaps it. Not serialized - the browser interpolates from SSE arrival.
 	ElapsedAt time.Time `json:"-"`
-	OnAir     bool      `json:"onAir"` // playing AND fader above OnAirFaderThreshold (or fader unknown)
+	OnAir     bool      `json:"onAir"`           // playing AND fader above OnAirFaderThreshold (or fader unknown)
+	Ended     bool      `json:"ended,omitempty"` // stopped at/near the track's end (ran out) - overlay sinks hide these
 
 	Fader    float64 `json:"fader"` // 0..1 (0 if unknown - see HasFader)
 	HasFader bool    `json:"hasFader"`
@@ -49,7 +54,7 @@ type DeckSnapshot struct {
 	Cue      bool    `json:"cue,omitempty"`
 
 	Path   string `json:"-"`                // local file path (art resolution); never serialized to overlays
-	ArtKey string `json:"artKey,omitempty"` // stable key for art caching/lookup (hash of path|artist|title)
+	ArtKey string `json:"artKey,omitempty"` // stable track-identity key for art/waveform caching (hash of artist|title, path fallback)
 }
 
 // LivePosition interpolates the current playback position (seconds) from the last elapsed
@@ -178,6 +183,9 @@ func (u UnifiedState) BuildOverlay(now time.Time, maxAge time.Duration) Overlay 
 		}
 		// On air: playing and either audible by fader, or fader unknown (assume audible).
 		ds.OnAir = ds.IsPlaying && (!ds.HasFader || ds.Fader > OnAirFaderThreshold)
+		// Ended: the track ran out while loaded (DJ forgot the fader). Raw elapsed, not the
+		// interpolated position - sources freeze elapsed at the end when the deck stops.
+		ds.Ended = !ds.IsPlaying && ds.TrackLength > 0 && ds.ElapsedTime >= ds.TrackLength-endedSlack
 		ds.ArtKey = artKey(ds.Path, ds.Artist, ds.Title)
 		ov.Decks = append(ov.Decks, ds)
 	}
@@ -199,14 +207,19 @@ func orStr(a, b string) string {
 	return b
 }
 
-// artKey is a stable, filesystem-safe key identifying a track's artwork. Prefers the file
-// path (one image per file); falls back to artist|title. Empty when nothing identifies it.
+// artKey is a stable, filesystem-safe key identifying a deck's loaded track. Prefers
+// artist|title: present from the moment the deck appears and constant for the track's whole
+// life. The file path is only a fallback when there is no text metadata at all - path
+// sources disagree on the string for one file (Traktor's volume-stripped "/Music/…" vs the
+// collection's "D:\Music\…") and the path lands ~90s late, so a path-keyed identity flips
+// mid-track, resetting overlay gates + blanking waveform/art caches (the sporadic
+// disappearing-waveform/cover bug). Empty when nothing identifies the track.
 func artKey(path, artist, title string) string {
-	seed := strings.TrimSpace(path)
-	if seed == "" {
-		seed = strings.ToLower(strings.TrimSpace(artist) + "|" + strings.TrimSpace(title))
+	seed := strings.ToLower(strings.TrimSpace(artist) + "|" + strings.TrimSpace(title))
+	if seed == "|" {
+		seed = strings.TrimSpace(path)
 	}
-	if seed == "|" || seed == "" {
+	if seed == "" {
 		return ""
 	}
 	h := fnv.New64a()

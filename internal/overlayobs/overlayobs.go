@@ -396,7 +396,8 @@ func (s *Sink) teardown() {
 	})
 }
 
-// applyGate hides decks whose current track has never gone on-air (mirrors overlayserver).
+// applyGate hides decks whose current track has never gone on-air or has ended (mirrors
+// overlayserver).
 func (s *Sink) applyGate(decks []session.DeckSnapshot) []session.DeckSnapshot {
 	out := decks[:0:0]
 	seen := map[string]bool{}
@@ -410,7 +411,7 @@ func (s *Sink) applyGate(decks []session.DeckSnapshot) []session.DeckSnapshot {
 		if d.OnAir {
 			e.everOnAir = true
 		}
-		if e.everOnAir {
+		if e.everOnAir && !d.Ended {
 			out = append(out, d)
 		}
 	}
