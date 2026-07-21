@@ -81,9 +81,9 @@ type Recorder struct {
 	pq    []persistOp
 	pbusy bool
 
-	// storeMu serializes read-modify-write cycles against BucketRecordings across ALL FOUR DIRECT
-	// store writers - Rename's non-active path, ReconcileWithSessions, sweepStale and Delete all
-	// Get/Put/Delete a whole Recording outside r.mu and outside the persist queue. Without it, a
+	// storeMu serializes read-modify-write cycles against BucketRecordings across ALL FIVE DIRECT
+	// store writers - Rename's + mutate's non-active paths, ReconcileWithSessions, sweepStale and
+	// Delete all Get/Put/Delete a whole Recording outside r.mu and outside the persist queue. Without it, a
 	// Rename or Delete landing inside a reconcile's slow per-track resolve (tens-to-hundreds of ms
 	// for a 30+ track set) is silently reverted by the reconciler's write-back: the rename undoes
 	// itself, or the deleted set REAPPEARS.
@@ -93,9 +93,9 @@ type Recorder struct {
 	// is deliberately NOT a participant - it takes r.pmu only, so drainPersist() under storeMu always
 	// makes progress, and every holder drains before reading (see Rename, Delete).
 	//
-	// The flusher is the fifth writer, reached only via queuePersist. Draining under storeMu is what
-	// contains it, and that is final ONLY for a non-active id: persistLocked re-queues r.active's id
-	// on every confirm/refresh, so Rename and Delete both branch on active BEFORE the drain.
+	// The flusher is the one further writer, reached only via queuePersist. Draining under storeMu is
+	// what contains it, and that is final ONLY for a non-active id: persistLocked re-queues r.active's
+	// id on every confirm/refresh, so Rename, mutate and Delete all branch on active BEFORE the drain.
 	storeMu sync.Mutex
 
 	// recVer bumps on every persisted-recordings mutation (put/delete, sweep + flusher). The webui
@@ -298,14 +298,18 @@ func (r *Recorder) confirmCurrent() {
 // savePlayedLocked upserts the consolidated play-log row for the track at idx in the active
 // recording (caller holds r.mu). Keyed by recording id + slot so confirm-time inserts and
 // later end-time / metadata updates address the same row. No-op without a DB.
-func (r *Recorder) savePlayedLocked(idx int) {
-	if r.lib == nil || r.active == nil || idx < 0 || idx >= len(r.active.Tracks) {
+func (r *Recorder) savePlayedLocked(idx int) { r.savePlayed(r.active, idx) }
+
+// savePlayed upserts the consolidated play-log row for rec's track idx (any recording, not
+// only the active one - offset edits address finished sets).
+func (r *Recorder) savePlayed(rec *Recording, idx int) {
+	if r.lib == nil || rec == nil || idx < 0 || idx >= len(rec.Tracks) {
 		return
 	}
-	t := r.active.Tracks[idx]
+	t := rec.Tracks[idx]
 	if err := r.lib.SavePlayedTrack(libdb.PlayedTrack{
-		ID:          fmt.Sprintf("%s#%d", r.active.ID, idx),
-		RecordingID: r.active.ID,
+		ID:          fmt.Sprintf("%s#%d", rec.ID, idx),
+		RecordingID: rec.ID,
 		Artist:      t.Artist, Title: t.Title, Album: t.Album, Key: t.Key, BPM: t.BPM,
 		Deck: t.Deck, TitleSource: t.TitleSource,
 		StartedAt: t.StartedAt, EndedAt: t.EndedAt,
@@ -767,6 +771,139 @@ func (r *Recorder) Export(id, format string) (string, error) {
 		return "", fmt.Errorf("recording %s not found", id)
 	}
 	return rec.Export(format)
+}
+
+// ExportText renders id's tracklist as text with a caller-supplied template (see TextOptions).
+func (r *Recorder) ExportText(id string, opts TextOptions) (string, error) {
+	rec, ok := r.Get(id)
+	if !ok {
+		return "", fmt.Errorf("recording %s not found", id)
+	}
+	return rec.ExportText(opts), nil
+}
+
+// syncEndEpsilon: a previous track's end stamped at the next track's audible start matches
+// that start within this - moving the start drags the synced end along.
+const syncEndEpsilon = 2 * time.Second
+
+// setTrackStartIn moves track idx's start inside rec, keeping the track's own end and the
+// previous track's synced end consistent. Returns the changed track indexes.
+func setTrackStartIn(rec *Recording, idx int, start time.Time) []int {
+	t := &rec.Tracks[idx]
+	old := t.StartedAt
+	if start.Equal(old) {
+		return nil
+	}
+	changed := []int{idx}
+	t.StartedAt = start
+	if !t.EndedAt.IsZero() && t.EndedAt.Before(start) {
+		t.EndedAt = start
+	}
+	if idx > 0 {
+		p := &rec.Tracks[idx-1]
+		if !p.EndedAt.IsZero() && p.EndedAt.Sub(old).Abs() <= syncEndEpsilon {
+			p.EndedAt = start
+			changed = append(changed, idx-1)
+		}
+	}
+	return changed
+}
+
+// SetTrackStart moves one track's absolute start time (offset edits in the Publish tracklist),
+// persists durably, and refreshes the play-log rows it touched.
+func (r *Recorder) SetTrackStart(id string, idx int, start time.Time) (Recording, error) {
+	if start.IsZero() {
+		return Recording{}, fmt.Errorf("zero start time")
+	}
+	return r.mutate(id, func(rec *Recording) ([]int, error) {
+		if idx < 0 || idx >= len(rec.Tracks) {
+			return nil, fmt.Errorf("track %d out of range", idx)
+		}
+		return setTrackStartIn(rec, idx, start), nil
+	})
+}
+
+// ApplyTimeFix rebases the set start + applies the per-track corrections of a PlanTimeFix.
+func (r *Recorder) ApplyTimeFix(id string, fix TimeFix) (Recording, error) {
+	return r.mutate(id, func(rec *Recording) ([]int, error) {
+		var changed []int
+		if !fix.NewStart.IsZero() {
+			rec.StartedAt = fix.NewStart
+		}
+		idxs := make([]int, 0, len(fix.TrackStarts))
+		for i := range fix.TrackStarts {
+			idxs = append(idxs, i)
+		}
+		sort.Ints(idxs)
+		for _, i := range idxs {
+			if i < 0 || i >= len(rec.Tracks) {
+				continue
+			}
+			changed = append(changed, setTrackStartIn(rec, i, fix.TrackStarts[i])...)
+		}
+		return changed, nil
+	})
+}
+
+// mutate applies fn to recording id - the active one in memory, else a serialized direct
+// store read-modify-write (direct writer #5, same storeMu + drain discipline as Rename) -
+// persists, refreshes the play-log rows fn reports changed, and returns the updated copy.
+func (r *Recorder) mutate(id string, fn func(*Recording) ([]int, error)) (Recording, error) {
+	r.mu.Lock()
+	if r.active != nil && r.active.ID == id {
+		changed, err := fn(r.active)
+		if err != nil {
+			r.mu.Unlock()
+			return Recording{}, err
+		}
+		for _, i := range dedupInts(changed) {
+			r.savePlayedLocked(i)
+		}
+		snap := *r.active.clone()
+		r.persistLocked()
+		r.broadcastLocked()
+		r.mu.Unlock()
+		r.bumpRec()
+		return snap, nil
+	}
+	r.mu.Unlock()
+
+	r.storeMu.Lock()
+	defer r.storeMu.Unlock()
+	r.drainPersist()
+	var rec Recording
+	ok, err := r.st.GetJSON(store.BucketRecordings, id, &rec)
+	if err != nil {
+		return Recording{}, fmt.Errorf("read recording %s: %w", id, err)
+	}
+	if !ok {
+		return Recording{}, fmt.Errorf("recording %s not found", id)
+	}
+	changed, err := fn(&rec)
+	if err != nil {
+		return Recording{}, err
+	}
+	if err := r.st.PutJSON(store.BucketRecordings, id, &rec); err != nil {
+		return Recording{}, fmt.Errorf("persist recording %s: %w", id, err)
+	}
+	r.bumpRec()
+	for _, i := range dedupInts(changed) {
+		r.savePlayed(&rec, i)
+	}
+	return rec, nil
+}
+
+// dedupInts drops duplicate indexes (a fix touching neighbours reports idx-1 twice).
+func dedupInts(in []int) []int {
+	seen := map[int]struct{}{}
+	out := in[:0]
+	for _, v := range in {
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Subscribe streams the active recording on every change (nil when recording stops).

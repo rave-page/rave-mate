@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,19 +89,82 @@ func (r Recording) Export(format string) (string, error) {
 		w.Flush()
 		return b.String(), w.Error()
 	default: // FormatText
-		var b strings.Builder
-		name := r.Name
-		if name == "" {
-			name = "Live set"
-		}
-		fmt.Fprintf(&b, "%s - %s\n\n", name, r.StartedAt.Local().Format("2006-01-02 15:04"))
-		for i, t := range r.Tracks {
-			artist := t.Artist
-			if artist != "" {
-				artist += " - "
-			}
-			fmt.Fprintf(&b, "%d. [%s] %s%s\n", i+1, r.offset(t.StartedAt), artist, t.Title)
-		}
-		return b.String(), nil
+		return r.ExportText(DefaultTextOptions()), nil
 	}
+}
+
+// TextOptions controls the text export: a per-track line template + optional header block.
+// Line placeholders: {n} {nn} {offset} {artist} {title} {track} {album} {key} {bpm} {deck};
+// header placeholders: {name} {date} {count}. {track} = "Artist - Title" (title alone when
+// the artist is unknown); {nn} zero-pads to the track-count width.
+type TextOptions struct {
+	Line   string
+	Header string // "" = no header block
+}
+
+// DefaultTextOptions reproduces the classic text export.
+func DefaultTextOptions() TextOptions {
+	return TextOptions{Line: "{n}. [{offset}] {track}", Header: "{name} - {date}"}
+}
+
+// ExportText renders the tracklist with opts (an empty Line falls back to the default).
+func (r Recording) ExportText(opts TextOptions) string {
+	if strings.TrimSpace(opts.Line) == "" {
+		opts.Line = DefaultTextOptions().Line
+	}
+	name := r.Name
+	if name == "" {
+		name = "Live set"
+	}
+	var b strings.Builder
+	if h := strings.TrimSpace(opts.Header); h != "" {
+		b.WriteString(strings.NewReplacer(
+			"{name}", name,
+			"{date}", r.StartedAt.Local().Format("2006-01-02 15:04"),
+			"{count}", fmt.Sprint(len(r.Tracks)),
+		).Replace(h))
+		b.WriteString("\n\n")
+	}
+	pad := max(2, len(fmt.Sprint(len(r.Tracks))))
+	for i, t := range r.Tracks {
+		track := t.Title
+		if t.Artist != "" {
+			track = t.Artist + " - " + t.Title
+		}
+		bpm := ""
+		if t.BPM > 0 {
+			bpm = strings.TrimSuffix(fmt.Sprintf("%.1f", t.BPM), ".0")
+		}
+		b.WriteString(strings.NewReplacer(
+			"{n}", fmt.Sprint(i+1),
+			"{nn}", fmt.Sprintf("%0*d", pad, i+1),
+			"{offset}", r.offset(t.StartedAt),
+			"{artist}", t.Artist,
+			"{title}", t.Title,
+			"{track}", track,
+			"{album}", t.Album,
+			"{key}", t.Key,
+			"{bpm}", bpm,
+			"{deck}", t.Deck,
+		).Replace(opts.Line))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// ParseClock parses "h:mm:ss", "m:ss" or plain seconds into a duration (offset edits).
+func ParseClock(s string) (time.Duration, error) {
+	parts := strings.Split(strings.TrimSpace(s), ":")
+	if len(parts) == 0 || len(parts) > 3 {
+		return 0, fmt.Errorf("bad time %q", s)
+	}
+	total := 0
+	for _, p := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("bad time %q", s)
+		}
+		total = total*60 + n
+	}
+	return time.Duration(total) * time.Second, nil
 }
