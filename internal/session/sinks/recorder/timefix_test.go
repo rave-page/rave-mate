@@ -44,8 +44,8 @@ func TestPlanTimeFixLoopedFirstTrack(t *testing.T) {
 }
 
 // Deck-prep phantoms: tracks 1-2 carry deck-play times from BEFORE the capture began.
-// The deck timeline says track 2 was playing when sound appears → auto opener = track 2;
-// track 1 was over before the capture rolled → removed.
+// In the prep-then-record workflow the FIRST entry is the intended opener (looped while
+// prepping); later pre-audio entries are cue previews → removed.
 func TestPlanTimeFixPhantomEarlyTracks(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	rec := fixRec(base, 21*time.Minute, 24*time.Minute, 36*time.Minute, 38*time.Minute)
@@ -56,30 +56,29 @@ func TestPlanTimeFixPhantomEarlyTracks(t *testing.T) {
 		t.Fatal("phantom early tracks must still plan")
 	}
 	audio := capStart.Add(5 * time.Minute) // = base+36m
-	if !fix.NewStart.Equal(audio) || fix.Opener != 1 {
-		t.Fatalf("NewStart = %v opener %d, want %v / 1", fix.NewStart, fix.Opener, audio)
+	if !fix.NewStart.Equal(audio) || fix.Opener != 0 {
+		t.Fatalf("NewStart = %v opener %d, want %v / 0", fix.NewStart, fix.Opener, audio)
 	}
-	if len(fix.RemoveTracks) != 1 || fix.RemoveTracks[0] != 0 {
-		t.Fatalf("track 0 (over before capture) must be removed, got %v", fix.RemoveTracks)
+	if len(fix.RemoveTracks) != 1 || fix.RemoveTracks[0] != 1 {
+		t.Fatalf("the non-opener phantom must be removed, got %v", fix.RemoveTracks)
 	}
-	if !fix.TrackStarts[1].Equal(audio) {
-		t.Fatalf("opener must start at %v, got %v", audio, fix.TrackStarts[1])
+	if !fix.TrackStarts[0].Equal(audio) {
+		t.Fatalf("opener must start at %v, got %v", audio, fix.TrackStarts[0])
 	}
 	if _, moved := fix.TrackStarts[2]; moved {
 		t.Fatal("track at the audible start must not move")
 	}
 
-	// Hand-picked earlier opener: track 1 opens instead; nothing removed, track 2 clamps
-	// to 0:00 for manual adjustment.
-	fix, ok = PlanTimeFix(rec, capStart, capEnd, 5*time.Minute, 0)
-	if !ok || fix.Opener != 0 {
+	// Hand-picked opener 1 (late-capture case): track 2 opens; track 1 removed instead.
+	fix, ok = PlanTimeFix(rec, capStart, capEnd, 5*time.Minute, 1)
+	if !ok || fix.Opener != 1 {
 		t.Fatalf("explicit opener must plan (opener %d)", fix.Opener)
 	}
-	if len(fix.RemoveTracks) != 0 {
-		t.Fatalf("explicit first opener removes nothing, got %v", fix.RemoveTracks)
+	if len(fix.RemoveTracks) != 1 || fix.RemoveTracks[0] != 0 {
+		t.Fatalf("non-opener phantom must be removed, got %v", fix.RemoveTracks)
 	}
-	if !fix.TrackStarts[0].Equal(audio) || !fix.TrackStarts[1].Equal(audio) {
-		t.Fatalf("opener + later phantom must clamp to %v: %v", audio, fix.TrackStarts)
+	if !fix.TrackStarts[1].Equal(audio) {
+		t.Fatalf("opener must start at %v: %v", audio, fix.TrackStarts)
 	}
 }
 
@@ -124,8 +123,8 @@ func TestApplyTimeFixRemovesPhantoms(t *testing.T) {
 		t.Fatalf("removed track must be gone, got %d tracks", len(got.Tracks))
 	}
 	audio := base.Add(36 * time.Minute)
-	if got.Tracks[0].Title != "TB" || !got.Tracks[0].StartedAt.Equal(audio) {
-		t.Fatalf("opener = %q @ %v, want TB @ %v", got.Tracks[0].Title, got.Tracks[0].StartedAt, audio)
+	if got.Tracks[0].Title != "TA" || !got.Tracks[0].StartedAt.Equal(audio) {
+		t.Fatalf("opener = %q @ %v, want TA @ %v", got.Tracks[0].Title, got.Tracks[0].StartedAt, audio)
 	}
 	stored, ok := r.Get(rec.ID)
 	if !ok || len(stored.Tracks) != 2 {

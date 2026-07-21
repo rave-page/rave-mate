@@ -23,6 +23,15 @@ type Track struct {
 	TitleSource string    `json:"titleSource,omitempty"` // provenance of the title/artist
 }
 
+// OnAirEvent is one measured per-deck on-air threshold crossing (fader up/down while the
+// deck plays), stored with the recording so start times stay reconstructable after the fact.
+type OnAirEvent struct {
+	Deck string    `json:"deck"`
+	Key  string    `json:"key"` // track identity on the deck at the crossing ("title|artist", lowered)
+	At   time.Time `json:"at"`
+	Up   bool      `json:"up"`
+}
+
 // Recording is one captured live session: a named, time-bounded tracklist, optionally
 // linked to a live stream.
 type Recording struct {
@@ -38,6 +47,10 @@ type Recording struct {
 	// the true set end, more accurate than the last track's end when the DJ talks after the mix. Zero
 	// when no fader data was ever seen (no MIDI controller / Traktor level feed).
 	LastFaderAt time.Time `json:"lastFaderAt,omitzero"`
+	// OnAirLog records measured per-deck on-air crossings during the set (cap onAirLogCap,
+	// stop-appending: the opening crossings are the reconstruction-critical ones). Fed by
+	// markOnAirLocked; consumed by PlanFaderFix.
+	OnAirLog []OnAirEvent `json:"onAirLog,omitempty"`
 }
 
 // clone returns a deep copy safe to hand to subscribers/UI.

@@ -8,11 +8,13 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/session/sinks/recorder"
@@ -190,9 +192,10 @@ func (u *UI) pubOffsetEdit(arg, val string) {
 // preview modal, opener re-plans and Apply. Bounded: one entry per set, overwritten per
 // open, deleted on apply.
 type pubFixCtx struct {
-	fix  recorder.TimeFix
-	capr libdb.SetRecording
-	lead float64
+	fix   recorder.TimeFix
+	capr  libdb.SetRecording
+	lead  float64
+	fader bool // reconstructed from fader history (authoritative - no opener select)
 }
 
 var pubFixPlans = struct {
@@ -235,11 +238,43 @@ func (u *UI) pubFixTimesOpen(id string) {
 				u.logErr("fix-times silence probe", err) // capture-start alignment still applies
 			}
 		}
+		// Fader history is the exact mechanism (audio anchors 0:00, each track starts at
+		// its deck's first fader-up); the silence+opener heuristic is the fallback.
+		if evs := u.pubFaderEvents(rec); len(evs) > 0 {
+			if fix, ok := recorder.PlanFaderFix(rec, capr.StartedAt, capr.EndedAt, time.Duration(lead*float64(time.Second)), evs); ok {
+				pubFixPlans.Lock()
+				pubFixPlans.m[id] = pubFixCtx{fix: fix, capr: capr, lead: lead, fader: true}
+				pubFixPlans.Unlock()
+				if !u.stopped() {
+					u.openModal(pubFixModal(rec, capr, lead, fix, true))
+				}
+				return
+			}
+		}
 		u.pubFixPlan(id, rec, capr, lead, -1)
 	})
 }
 
-// pubFixPlan (re)plans with the given opener, stashes the context and shows the preview.
+// pubFaderEvents loads a set's fader history: its own OnAirLog (always-on going forward),
+// else the raw Traktor payload log windowed to the set (LogPayloads, default on).
+func (u *UI) pubFaderEvents(rec recorder.Recording) []recorder.DeckEvent {
+	if len(rec.OnAirLog) > 0 {
+		return recorder.FaderEventsFromOnAirLog(rec.OnAirLog)
+	}
+	p, err := config.DataPath("traktor-payloads.jsonl")
+	if err != nil {
+		return nil
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	return recorder.ParseTraktorPayloadLog(f, rec.StartedAt.Add(-15*time.Minute), rec.EndedAt.Add(time.Minute))
+}
+
+// pubFixPlan (re)plans heuristically with the given opener, stashes the context and shows
+// the preview.
 func (u *UI) pubFixPlan(id string, rec recorder.Recording, capr libdb.SetRecording, lead float64, opener int) {
 	fix, planned := recorder.PlanTimeFix(rec, capr.StartedAt, capr.EndedAt, time.Duration(lead*float64(time.Second)), opener)
 	if !planned {
@@ -252,7 +287,7 @@ func (u *UI) pubFixPlan(id string, rec recorder.Recording, capr libdb.SetRecordi
 	pubFixPlans.m[id] = pubFixCtx{fix: fix, capr: capr, lead: lead}
 	pubFixPlans.Unlock()
 	if !u.stopped() {
-		u.openModal(pubFixModal(rec, capr, lead, fix))
+		u.openModal(pubFixModal(rec, capr, lead, fix, false))
 	}
 }
 
@@ -272,25 +307,31 @@ func (u *UI) pubFixReplan(id string, opener int) {
 }
 
 // pubFixModal previews a planned fix: what the set start becomes, which pre-audio
-// phantom opens the recording (selectable when ambiguous), which tracks get removed
-// (over before the capture rolled), and every offset that changes.
-func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, fix recorder.TimeFix) string {
+// phantom opens the recording (selectable when the heuristic guessed - fader-history
+// plans are exact), which tracks get removed, and every offset that changes.
+func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, fix recorder.TimeFix, fader bool) string {
 	var b strings.Builder
-	b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T("publish.fix.desc", i18n.A{
+	descKey := "publish.fix.desc"
+	if fader {
+		descKey = "publish.fix.descFader"
+	}
+	b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T(descKey, i18n.A{
 		"file": filepath.Base(capr.Path), "lead": pubClock(lead)})) + `</div>`)
 
-	// Opener choice: the file can't order tracks that predate its audible start - the deck
-	// timeline default is preselected, the DJ can overrule.
+	// Opener choice (heuristic plans only): the file can't order tracks that predate its
+	// audible start - the workflow default is preselected, the DJ can overrule.
 	audio := fix.NewStart
-	var cands []ssOpt
-	for i, t := range rec.Tracks {
-		if t.StartedAt.Before(audio) || i == fix.Opener {
-			cands = append(cands, ssOpt{Val: fmt.Sprint(i), Label: fmt.Sprintf("%d. %s", i+1, orTrackLine(pubTrackLine(t)))})
+	if !fader {
+		var cands []ssOpt
+		for i, t := range rec.Tracks {
+			if t.StartedAt.Before(audio) || i == fix.Opener {
+				cands = append(cands, ssOpt{Val: fmt.Sprint(i), Label: fmt.Sprintf("%d. %s", i+1, orTrackLine(pubTrackLine(t)))})
+			}
 		}
-	}
-	if len(cands) > 1 {
-		b.WriteString(`<div class=pub-fix-opener>` + smartSelect("pub-fix-opener", i18n.T("publish.fix.opener"),
-			"pub-fixopener:"+rec.ID, fmt.Sprint(fix.Opener), func() []ssOpt { return cands }) + `</div>`)
+		if len(cands) > 1 {
+			b.WriteString(`<div class=pub-fix-opener>` + smartSelect("pub-fix-opener", i18n.T("publish.fix.opener"),
+				"pub-fixopener:"+rec.ID, fmt.Sprint(fix.Opener), func() []ssOpt { return cands }) + `</div>`)
+		}
 	}
 
 	removed := map[int]bool{}

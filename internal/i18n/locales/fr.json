@@ -1967,7 +1967,8 @@
       "applied": "Temps de début mis à jour.",
       "failed": "Échec de la correction : ",
       "opener": "Ouvre l'enregistrement",
-      "removedRow": "retiré - terminé avant l'enregistrement"
+      "removedRow": "retiré - terminé avant l'enregistrement",
+      "descFader": "Reconstruit depuis l'historique des faders : l'audio de {file} démarre après {lead} de silence ; chaque track démarre à la première montée de son fader. Les tracks jamais passés à l'antenne pendant la capture sont retirés."
     },
     "toast": {
       "badOffset": "Impossible de lire « {v} » - utiliser m:ss ou h:mm:ss.",

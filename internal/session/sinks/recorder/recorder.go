@@ -59,6 +59,7 @@ type Recorder struct {
 	lastAudibleAt time.Time            // last time a track was audible (drives auto-segmentation)
 	lastKey       string               // identity last observed in the now-playing slot ("" = silence)
 	onAir         map[string]onAirMark // per-deck first fader-up of the current track (see markOnAirLocked)
+	onAirUp       map[string]bool      // per-deck current measured on-air state (crossing detector)
 	suppressKey   string               // after a manual stop: don't auto-restart while this key still plays
 	seq           int                  // disambiguates ids minted within the same nanosecond
 
@@ -205,7 +206,6 @@ func (r *Recorder) sweepStale() {
 func (r *Recorder) step(now time.Time, st session.UnifiedState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.markOnAirLocked(now, st)
 	// Explicit clock (testability) + staleness window: a dead source's leftover
 	// isPlaying=true must not keep the recorder "live" forever.
 	np, ok := st.DeriveNowPlayingAt(now, session.NowPlayingStaleAfter)
@@ -241,6 +241,9 @@ func (r *Recorder) step(now time.Time, st session.UnifiedState) {
 		r.startLocked("", "")
 	}
 	r.lastKey = key
+	// After the start branch: the set-opening crossing must land in the (just-created)
+	// recording's OnAirLog.
+	r.markOnAirLocked(now, st)
 
 	// Set-end tracking: while any channel fader is up, advance LastFaderAt. It stops the instant the
 	// DJ pulls the final fader down - a more accurate set end than the last track's slot (which lingers
@@ -300,17 +303,36 @@ type onAirMark struct {
 	measured bool
 }
 
+// onAirLogCap bounds a recording's persisted on-air log. Stop-appending (keep oldest):
+// the opening crossings are the reconstruction-critical ones. ~100 tracks × a few
+// crossings each sits far below it; bytes ≈ cap × ~90B ≈ 360KB worst case.
+const onAirLogCap = 4000
+
 // markOnAirLocked maintains one on-air mark per deck (bounded: ≤ deck count; caller holds
 // r.mu). The first mark per (deck, track) sticks - a later EQ/fader dip doesn't reset it;
-// a track change on the deck re-arms it; a deck that stops playing clears it.
+// a track change on the deck re-arms it; a deck that stops playing clears it. Measured
+// threshold crossings also append to the active recording's OnAirLog (rides the existing
+// persist points; a crossing between persists can be lost on crash - acceptable).
 func (r *Recorder) markOnAirLocked(now time.Time, st session.UnifiedState) {
 	if r.onAir == nil {
 		r.onAir = map[string]onAirMark{}
+	}
+	if r.onAirUp == nil {
+		r.onAirUp = map[string]bool{}
 	}
 	playing := map[string]bool{}
 	for _, d := range st.DerivePlayingDecksAt(now, session.NowPlayingStaleAfter) {
 		playing[d.Deck] = true
 		key := identFields(d.Fields)
+		if d.HasFader { // crossing detector (measured only)
+			up := d.Fader > session.OnAirFaderThreshold
+			if prev, had := r.onAirUp[d.Deck]; !had || prev != up {
+				r.onAirUp[d.Deck] = up
+				if r.active != nil && len(r.active.OnAirLog) < onAirLogCap {
+					r.active.OnAirLog = append(r.active.OnAirLog, OnAirEvent{Deck: d.Deck, Key: key, At: now, Up: up})
+				}
+			}
+		}
 		if m, ok := r.onAir[d.Deck]; ok && m.key == key {
 			continue // first on-air of this track on this deck already stamped
 		}
@@ -326,6 +348,11 @@ func (r *Recorder) markOnAirLocked(now time.Time, st session.UnifiedState) {
 	for deck := range r.onAir {
 		if !playing[deck] {
 			delete(r.onAir, deck)
+		}
+	}
+	for deck := range r.onAirUp {
+		if !playing[deck] {
+			delete(r.onAirUp, deck)
 		}
 	}
 }

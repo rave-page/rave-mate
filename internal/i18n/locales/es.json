@@ -1967,7 +1967,8 @@
       "applied": "Tiempos de inicio actualizados.",
       "failed": "Corrección fallida: ",
       "opener": "Abre la grabación",
-      "removedRow": "eliminado - terminó antes de la grabación"
+      "removedRow": "eliminado - terminó antes de la grabación",
+      "descFader": "Reconstruido del historial de faders grabado: el audio en {file} empieza tras {lead} de silencio; cada track empieza cuando su fader sube por primera vez. Los tracks que nunca sonaron durante la grabación se eliminan."
     },
     "toast": {
       "badOffset": "No se puede leer “{v}” - usa m:ss o h:mm:ss.",

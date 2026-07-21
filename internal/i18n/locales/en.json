@@ -2461,7 +2461,8 @@
       "applied": "Start times updated.",
       "failed": "Fix failed: ",
       "opener": "Opens the recording",
-      "removedRow": "removed - ended before the recording"
+      "removedRow": "removed - ended before the recording",
+      "descFader": "Reconstructed from the recorded fader history: audio in {file} starts after {lead} of silence; each track starts at its deck's first fader-up. Tracks that never went on air during the capture are removed."
     },
     "textExport": {
       "title": "Export - text",

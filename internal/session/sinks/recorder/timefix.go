@@ -12,19 +12,20 @@ type TimeFix struct {
 	Opener       int               // index of the track that opens the audible recording
 }
 
-// PlanTimeFix aligns a finished recording's timeline to its captured audio file, so the
+// PlanTimeFix aligns a finished recording's timeline to its captured audio file WITHOUT
+// fader history (PlanFaderFix is the exact mechanism; this is the fallback), so the
 // exported offsets are relative to the uploaded mix: the audible start of the capture
 // (capStart + probed leading silence) becomes 0:00.
 //
 // Deck-play/history times BEFORE the audible start are phantoms - looping, cueing or
 // prepping decks before the broadcast went live (often before the capture even began).
 // The file alone cannot order them, so ONE of them is the opener (opener param; <0 =
-// auto: the last track whose recorded start predates the audible start, i.e. the one the
-// deck timeline says was playing when sound appears; no pre-audio tracks → track 0).
-// Pre-audio tracks before the opener were over before the capture rolled → RemoveTracks;
-// pre-audio tracks after it (a hand-picked earlier opener) clamp to 0:00 for manual
-// adjustment. ok=false only when there is nothing to align to (no capture start,
-// live/empty set, entirely-silent capture, audio past the set end) or the plan is a no-op.
+// auto: the FIRST pre-audio track - in the prep-then-record workflow the first entry is
+// the track that was sitting looped as the intended opener, later entries are cue
+// previews; no pre-audio tracks → track 0). Every other pre-audio track occupies a slot
+// the file doesn't have → RemoveTracks. ok=false only when there is nothing to align to
+// (no capture start, live/empty set, entirely-silent capture, audio past the set end) or
+// the plan is a no-op.
 func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duration, opener int) (TimeFix, bool) {
 	if capStart.IsZero() || len(rec.Tracks) == 0 || rec.EndedAt.IsZero() {
 		return TimeFix{}, false
@@ -41,21 +42,16 @@ func PlanTimeFix(rec Recording, capStart, capEnd time.Time, leading time.Duratio
 	}
 	if opener < 0 || opener >= len(rec.Tracks) {
 		opener = 0
-		for i, t := range rec.Tracks {
-			if t.StartedAt.Before(audio) {
-				opener = i
-			}
-		}
 	}
 	fix := TimeFix{NewStart: audio, TrackStarts: map[int]time.Time{}, Opener: opener}
 	for i, t := range rec.Tracks {
 		switch {
-		case i < opener && t.StartedAt.Before(audio):
-			fix.RemoveTracks = append(fix.RemoveTracks, i)
-		case i == opener || t.StartedAt.Before(audio):
+		case i == opener:
 			if !t.StartedAt.Equal(audio) {
 				fix.TrackStarts[i] = audio
 			}
+		case t.StartedAt.Before(audio):
+			fix.RemoveTracks = append(fix.RemoveTracks, i)
 		}
 	}
 	if audio.Equal(rec.StartedAt) && len(fix.TrackStarts) == 0 && len(fix.RemoveTracks) == 0 {

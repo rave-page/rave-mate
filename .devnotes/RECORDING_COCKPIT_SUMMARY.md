@@ -104,3 +104,21 @@ finalized) are retried at startup + whenever a recording finalizes
   starts a set or confirms, and (b) stamps per-deck first-fader-up marks
   (markOnAirLocked); confirm uses the MEASURED fader-up as StartedAt when it precedes the
   loudest-deck switch (blend starts at the fader, not the crossover).
+
+## Time-fix v3: fader-history reconstruction (2026-07-21)
+
+- **Exact mechanism (user spec)**: audio anchors 0:00 (capStart+silence); each pre-audio
+  track starts at ITS deck's first fader-up from the previous one, searched up to the
+  first post-audio track's recorded start; no on-air moment = cue preview → removed.
+  `PlanFaderFix(rec, capStart, capEnd, leading, evs)` in faderfix.go.
+- **Sources, layered**: (1) `Recording.OnAirLog` - measured per-deck on-air crossings
+  logged live by markOnAirLocked (cap 4000, stop-appending; rides existing persist
+  points); (2) `ParseTraktorPayloadLog` over traktor-payloads.jsonl
+  (Features.Traktor.LogPayloads, DEFAULT ON; /updateDeck isPlaying + /updateChannel
+  onAirLevel=FieldFader post-fader level, ch 1-4 → decks A-D); (3) silence+opener
+  heuristic fallback (PlanTimeFix; auto opener now = FIRST pre-audio track - the
+  prep-then-record workflow's intended opener; all other pre-audio removed).
+- Fader-history plans render without the opener select (authoritative);
+  publish.fix.descFader. Deckless histories refuse → heuristic fallback.
+- Verified on UMC_Neuro_Oblivion + the real payload log: Sindicate & Anizo → 0:00
+  (opener), Hated replay → 2:02 (its real fader-up), zero manual input.

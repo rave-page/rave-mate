@@ -2069,7 +2069,8 @@
       "applied": "Startzeiten aktualisiert.",
       "failed": "Korrektur fehlgeschlagen: ",
       "opener": "Eröffnet die Aufnahme",
-      "removedRow": "entfernt - endete vor der Aufnahme"
+      "removedRow": "entfernt - endete vor der Aufnahme",
+      "descFader": "Aus der aufgezeichneten Fader-Historie rekonstruiert: Audio in {file} beginnt nach {lead} Stille; jeder Track startet beim ersten Hochziehen seines Faders. Tracks, die während der Aufnahme nie on air waren, werden entfernt."
     },
     "toast": {
       "badOffset": "„{v}“ nicht lesbar - m:ss oder h:mm:ss verwenden.",
