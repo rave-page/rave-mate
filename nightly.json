@@ -1,13 +1,13 @@
 {
   "version": "nightly-95a4110",
-  "build": 120,
+  "build": 121,
   "commit": "95a4110",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-120-20260720-95a4110.exe",
-  "sha256": "f4a58677caac4267ac7c50a4e0e5aa45cb989782052e299185e9c5925625ed24",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-120-20260720-95a4110.exe",
-  "installer_sha256": "70b600928a005ea9b9ba6220d674c75e48246712dbfd08435bfde29d7777ad20",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-120-20260720-95a4110",
-  "linux_sha256": "9b7770bd944ada6261384973b816e36de016cafdabf81960bcf481118329c34d",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-121-20260721-95a4110.exe",
+  "sha256": "a680fdb32a0a74509b21a86788f9213a42759e7ae4afebe80954670499fe07b9",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-121-20260721-95a4110.exe",
+  "installer_sha256": "e75c1bca1c1a5f21120ecc7a11d93bd82c0055f2cc6c10a05714cc99298c977c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-121-20260721-95a4110",
+  "linux_sha256": "b3198beb93413ac34ce6ac0e8ece41499b8f284b1d825c1115ffc37210ba0d6b",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-20T07:58:00Z",
+  "released": "2026-07-21T07:34:27Z",
   "notes": "fix(cues): drop-marker cues reach Traktor pads + running-app guards actually fire"
 }
