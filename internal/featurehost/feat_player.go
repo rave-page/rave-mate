@@ -28,6 +28,7 @@ type playerBackend interface {
 	PreviewRelease(fallbackSec float64)
 	Preload(path string) error
 	SetVolume(v float64)
+	SetPreGainDB(db float64)
 	Stop()
 	State() State
 }
@@ -135,6 +136,15 @@ func (f *playerFeature) Handle(_ context.Context, method string, params json.Raw
 			return nil, err
 		}
 		f.eng.SetVolume(clamp01(p.Volume))
+		return nil, nil
+	case "setPreGain": // loudness pre-listen: dB gain on the decoded samples (0 = off)
+		var p struct {
+			DB float64 `json:"db"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		f.eng.SetPreGainDB(p.DB)
 		return nil, nil
 	case "togglePause":
 		paused := f.eng.TogglePause()

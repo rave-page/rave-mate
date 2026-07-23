@@ -196,6 +196,8 @@ func (n *nativeEngine) TogglePause() bool { return n.eng.TogglePause() }
 
 func (n *nativeEngine) SetVolume(v float64) { n.eng.SetVolume(v) }
 
+func (n *nativeEngine) SetPreGainDB(db float64) { n.eng.SetPreGainDB(db) }
+
 func (n *nativeEngine) Stop() {
 	n.stopTicks()
 	n.eng.Stop()

@@ -30,8 +30,9 @@ type PlayerProxy struct {
 	dispatch  func(func())             // UI-thread dispatcher (fyne.Do); default = direct call
 	notify    func(title, body string) // decode-failure toast
 
-	volMu sync.Mutex
-	vol   *float64 // last SetVolume; re-pushed to the child after every (re)spawn
+	volMu   sync.Mutex
+	vol     *float64 // last SetVolume; re-pushed to the child after every (re)spawn
+	preGain float64  // last SetPreGainDB (0 = off); re-pushed like vol
 }
 
 // playerObs is one extra tick/end listener, independent of the single AttachUI panel sink.
@@ -333,21 +334,44 @@ func (p *PlayerProxy) SetVolume(v float64) {
 	_, _ = p.host.Call(ctx, "setVolume", volumeParams{Volume: v})
 }
 
-// pushVolume re-applies the last SetVolume after a (re)spawn. Caller ensured the child is up.
+// pushVolume re-applies the last SetVolume + pre-gain after a (re)spawn. Caller ensured the
+// child is up.
 func (p *PlayerProxy) pushVolume() {
 	p.volMu.Lock()
-	v := p.vol
+	v, g := p.vol, p.preGain
 	p.volMu.Unlock()
-	if v == nil {
+	if v != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), ctlCallTimeout)
+		_, _ = p.host.Call(ctx, "setVolume", volumeParams{Volume: *v})
+		cancel()
+	}
+	if g != 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), ctlCallTimeout)
+		_, _ = p.host.Call(ctx, "setPreGain", preGainParams{DB: g})
+		cancel()
+	}
+}
+
+// SetPreGainDB pushes the loudness pre-listen gain (dB on the decoded samples; 0 = off).
+// Fire-and-forget like SetVolume; re-pushed after every (re)spawn.
+func (p *PlayerProxy) SetPreGainDB(db float64) {
+	p.volMu.Lock()
+	p.preGain = db
+	p.volMu.Unlock()
+	if !p.host.Running() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ctlCallTimeout)
 	defer cancel()
-	_, _ = p.host.Call(ctx, "setVolume", volumeParams{Volume: *v})
+	_, _ = p.host.Call(ctx, "setPreGain", preGainParams{DB: db})
 }
 
 type volumeParams struct {
 	Volume float64 `json:"volume"`
+}
+
+type preGainParams struct {
+	DB float64 `json:"db"`
 }
 
 // TogglePause flips play/pause; returns the resulting paused state.

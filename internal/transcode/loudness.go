@@ -92,6 +92,51 @@ func ApplyLoudnessOverride(p Preset, on bool, i, tp float64, raiseOnly bool) Pre
 	return p
 }
 
+// IntegrateMomentary estimates integrated loudness (LUFS) over [startSec, endSec) from a
+// momentary-loudness timeline (LUFS per step-second sample, e.g. the loudtl worker's Mom grid),
+// using BS.1770-style two-stage gating: absolute −70 LUFS gate, then a relative gate 10 LU below
+// the ungated mean. endSec <= 0 (or past the data) = to the end. ok=false when the window holds
+// no audible samples. An ESTIMATE (the grid is max-resampled, not true 75%-overlap blocks) -
+// exact numbers come from the ffmpeg loudnorm pass; this powers instant UI previews.
+func IntegrateMomentary(mom []float64, step, startSec, endSec float64) (lufs float64, ok bool) {
+	if step <= 0 || len(mom) == 0 {
+		return 0, false
+	}
+	i0 := int(startSec / step)
+	i1 := len(mom)
+	if endSec > 0 {
+		if n := int(math.Ceil(endSec / step)); n < i1 {
+			i1 = n
+		}
+	}
+	if i0 < 0 {
+		i0 = 0
+	}
+	if i0 >= i1 {
+		return 0, false
+	}
+	mean := func(gate float64) (float64, int) {
+		sum, n := 0.0, 0
+		for _, m := range mom[i0:i1] {
+			if m > gate {
+				sum += math.Pow(10, m/10)
+				n++
+			}
+		}
+		return sum, n
+	}
+	sum, n := mean(silenceGate)
+	if n == 0 {
+		return 0, false
+	}
+	relGate := 10*math.Log10(sum/float64(n)) - 10
+	sum2, n2 := mean(relGate)
+	if n2 == 0 {
+		return 0, false
+	}
+	return 10 * math.Log10(sum2/float64(n2)), true
+}
+
 // EffectiveTP returns the preset's true-peak ceiling, defaulting 0 → DefaultLoudnessTP.
 func (p Preset) EffectiveTP() float64 {
 	if p.LoudnessTP == 0 {

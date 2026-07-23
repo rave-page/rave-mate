@@ -1,8 +1,42 @@
 package transcode
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // Containers is the UI/editor order for supported output containers.
 func Containers() []string {
 	return []string{"mp4", "webm", "mkv", "m4a", "mp3", "ogg", "wav", "aiff", "flac", "opus"}
+}
+
+// ResolveSourceContainer resolves a Container=="" ("source format") preset against the input
+// file: the container matching the input's extension, else mkv (the muxer that carries
+// anything) so a stream-copy of an exotic capture still succeeds.
+func ResolveSourceContainer(p Preset, inputPath string) Preset {
+	if p.Container != "" {
+		return p
+	}
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(inputPath)), ".")
+	switch ext {
+	case "m4a", "aac", "mp4", "mov":
+		if p.IsAudioOnly() {
+			p.Container = "m4a"
+		} else {
+			p.Container = "mp4"
+		}
+	case "oga":
+		p.Container = "ogg"
+	case "aif":
+		p.Container = "aiff"
+	default:
+		if containsString(Containers(), ext) {
+			p.Container = ext
+		} else {
+			p.Container = "mkv"
+		}
+	}
+	return p
 }
 
 // IsAudioOnlyContainer reports whether a container cannot carry a video stream in this app.

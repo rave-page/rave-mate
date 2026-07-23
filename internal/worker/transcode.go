@@ -110,6 +110,10 @@ type tcRunIn struct {
 	Preset    *transcode.Preset `json:"preset,omitempty"` // resolved preset (custom/builder); wins over PresetID
 	TrimStart float64           `json:"trimStart"`
 	TrimEnd   float64           `json:"trimEnd"`
+	// Measured, when set, is a caller-cached pass-1 loudness measurement for EXACTLY this
+	// input+trim window - the measure pass is skipped (a 1h set decodes for minutes; the UI
+	// caches the result per (path, mtime, trim) so only the FIRST export ever pays it).
+	Measured *transcode.Measurement `json:"measured,omitempty"`
 }
 
 // tcRun executes one transcode to completion, emitting "progress" events (percent +
@@ -173,16 +177,22 @@ func tcRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	var loud map[string]any
 	encBase := 0.0
 	if preset.LoudnessOn {
-		emit("stage", map[string]any{"name": "measure"})
-		encBase = tcMeasurePct
-		onTime := func(t float64) {
-			if fallbackTotal > 0 {
-				emit("progress", map[string]any{"percent": min(t/fallbackTotal, 1) * tcMeasurePct})
+		var m transcode.Measurement
+		if in.Measured != nil {
+			m = *in.Measured // caller-cached pass 1 - no re-decode
+		} else {
+			emit("stage", map[string]any{"name": "measure"})
+			encBase = tcMeasurePct
+			onTime := func(t float64) {
+				if fallbackTotal > 0 {
+					emit("progress", map[string]any{"percent": min(t/fallbackTotal, 1) * tcMeasurePct})
+				}
 			}
-		}
-		m, err := measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd, onTime)
-		if err != nil {
-			return nil, fmt.Errorf("loudness measure: %w", err)
+			var err error
+			m, err = measureLoudness(bin, in.Input, in.TrimStart, in.TrimEnd, onTime)
+			if err != nil {
+				return nil, fmt.Errorf("loudness measure: %w", err)
+			}
 		}
 		plan := transcode.PlanGain(m, preset.LoudnessI, preset.EffectiveTP(), preset.LoudnessRaiseOnly)
 		if !plan.Skipped {

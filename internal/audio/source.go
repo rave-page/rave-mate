@@ -52,6 +52,17 @@ type source struct {
 	stopAt  int64 // hard stop frame (-1 = play to end); preview stop, loop-out, etc.
 	scratch []byte
 	ended   bool // Read drained the source to its natural end (authoritative EOF, not a pause). Cleared by SeekTo.
+
+	// gain is a linear pre-gain applied sample-by-sample in writeBytes (loudness pre-listen).
+	// 0 (zero value) means unity; may exceed 1 - output is hard-clamped to ±1.
+	gain float64
+}
+
+// setGain sets the linear pre-gain (1 = unity).
+func (s *source) setGain(g float64) {
+	s.mu.Lock()
+	s.gain = g
+	s.mu.Unlock()
 }
 
 // newRAMSource decodes the whole file into a device-rate RAM buffer. Caller checked the size cap.
@@ -216,9 +227,24 @@ func (s *source) readRAM(frames int) int {
 	return frames
 }
 
-// writeBytes serializes interleaved float32 device samples to little-endian bytes.
+// writeBytes serializes interleaved float32 device samples to little-endian bytes,
+// applying the pre-gain (clamped ±1 - the loudness plan keeps true peaks under the
+// ceiling, the clamp is belt-and-braces for out-of-plan boosts).
 func (s *source) writeBytes(p []byte, samples []float32) {
+	g := float32(s.gain)
+	if g == 0 || g == 1 {
+		for i, v := range samples {
+			binary.LittleEndian.PutUint32(p[i*4:], math.Float32bits(v))
+		}
+		return
+	}
 	for i, v := range samples {
+		v *= g
+		if v > 1 {
+			v = 1
+		} else if v < -1 {
+			v = -1
+		}
 		binary.LittleEndian.PutUint32(p[i*4:], math.Float32bits(v))
 	}
 }

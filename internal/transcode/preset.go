@@ -52,9 +52,12 @@ type Preset struct {
 	LoudnessRaiseOnly bool    `json:"loudnessRaiseOnly,omitempty"` // never turn an already-loud track down
 }
 
-// Ext is the output file extension for the preset's container.
+// Ext is the output file extension for the preset's container ("" container = source
+// format; callers fall back to the input's own extension).
 func (p Preset) Ext() string {
 	switch p.Container {
+	case "":
+		return ""
 	case "m4a", "aac":
 		return ".m4a"
 	case "opus":
@@ -101,6 +104,11 @@ var Builtins = []Preset{
 		Container: "mp4", VideoCodec: "copy", AudioCodec: "copy"},
 
 	// Audio-only.
+	// copy-audio keeps Container "" = "source format": the caller resolves the concrete
+	// container from the input extension (ResolveSourceContainer) before dispatch - a FLAC
+	// capture stays .flac instead of being forced into an .mp4 it can't legally carry.
+	{ID: "copy-audio", Label: "Lossless Copy (keep format)", Desc: "Copy the audio stream as-is - no re-encode, instant, bit-identical.",
+		Container: "", VideoCodec: "none", AudioCodec: "copy"},
 	{ID: "audioOpus", Label: "Audio Only (Opus 160k)", Desc: "Strip video; small high-quality audio.",
 		Container: "opus", VideoCodec: "none", AudioCodec: "opus", AudioBitrateK: 160},
 	{ID: "audioAac", Label: "Audio Only (AAC 256k)", Desc: "Strip video; broadly compatible audio.",

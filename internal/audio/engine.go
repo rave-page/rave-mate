@@ -3,6 +3,7 @@ package audio
 import (
 	"errors"
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -60,12 +61,13 @@ var newOutput = func(r io.Reader) (outputPlayer, error) {
 // (instant seek, 0-latency Space) or streamed with indexed seek. Transport supports the cue-edit
 // hold-to-preview (play from the cursor; release snaps back to where playback started).
 type Engine struct {
-	mu     sync.Mutex
-	player outputPlayer
-	src    *source
-	format Format // device format (always deviceRate/deviceChannels)
-	path   string
-	vol    float64
+	mu      sync.Mutex
+	player  outputPlayer
+	src     *source
+	format  Format // device format (always deviceRate/deviceChannels)
+	path    string
+	vol     float64
+	preGain float64 // linear pre-listen gain (0 = unity; see SetPreGainDB)
 
 	previewReturn int64 // frame to snap back to on PreviewRelease (-1 = not previewing)
 
@@ -111,6 +113,9 @@ func (e *Engine) LoadDecoder(dec Decoder, path string) error {
 	old, oldSrc, oldPend := e.player, e.src, e.pendingRAM
 	e.player, e.src, e.path, e.previewReturn, e.pendingRAM = player, s, path, -1, nil
 	player.SetVolume(e.vol)
+	if e.preGain != 0 {
+		s.setGain(e.preGain)
+	}
 	e.mu.Unlock()
 	if old != nil {
 		old.Pause()
@@ -183,6 +188,9 @@ func (e *Engine) adoptRAMLocked(ram *source) error {
 	old, oldSrc := e.player, e.src
 	e.player, e.src = player, ram
 	player.SetVolume(e.vol)
+	if e.preGain != 0 {
+		ram.setGain(e.preGain)
+	}
 	if wasPlaying {
 		player.Play()
 	}
@@ -375,6 +383,20 @@ func (e *Engine) Position() (cur, total float64, ok bool) {
 		total = e.format.FrameToSeconds(tot)
 	}
 	return e.format.FrameToSeconds(audible), total, true
+}
+
+// SetPreGainDB sets a decibel pre-gain applied to the decoded samples BEFORE the output
+// volume (loudness pre-listen: audition the export's planned constant gain). Unlike the
+// 0..1 output volume it can BOOST (+dB); samples are clamped at ±1 in the source. Survives
+// track loads until changed; 0 dB = off.
+func (e *Engine) SetPreGainDB(db float64) {
+	g := math.Pow(10, db/20)
+	e.mu.Lock()
+	e.preGain = g
+	if e.src != nil {
+		e.src.setGain(g)
+	}
+	e.mu.Unlock()
 }
 
 // SetVolume sets output gain (0..1).

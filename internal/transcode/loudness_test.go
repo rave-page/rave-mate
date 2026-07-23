@@ -119,3 +119,47 @@ func TestMeasureArgs(t *testing.T) {
 		t.Errorf("no trim args expected: %s", g)
 	}
 }
+
+func TestIntegrateMomentary(t *testing.T) {
+	// Uniform -20 momentary → integrated ≈ -20 whatever the window.
+	mom := make([]float64, 100)
+	for i := range mom {
+		mom[i] = -20
+	}
+	if v, ok := IntegrateMomentary(mom, 0.5, 0, 0); !ok || v < -20.01 || v > -19.99 {
+		t.Errorf("uniform: %v %v", v, ok)
+	}
+	// Window selection: first half -30, second half -10 → full ≈ dominated by the loud half;
+	// a window over the quiet half alone must read ≈ -30.
+	for i := range mom {
+		if i < 50 {
+			mom[i] = -30
+		} else {
+			mom[i] = -10
+		}
+	}
+	if v, ok := IntegrateMomentary(mom, 0.5, 0, 25); !ok || v < -30.01 || v > -29.99 {
+		t.Errorf("quiet window: %v %v", v, ok)
+	}
+	if v, ok := IntegrateMomentary(mom, 0.5, 25, 0); !ok || v < -10.5 || v > -9.99 {
+		t.Errorf("loud window: %v %v", v, ok)
+	}
+	// Relative gating: sparse loud content over silence-floor samples → the floor is gated out.
+	for i := range mom {
+		mom[i] = -70
+	}
+	mom[10], mom[11], mom[12] = -12, -12, -12
+	if v, ok := IntegrateMomentary(mom, 0.5, 0, 0); !ok || v < -12.5 || v > -11.5 {
+		t.Errorf("gated: %v %v", v, ok)
+	}
+	// All silence → no result.
+	for i := range mom {
+		mom[i] = -70
+	}
+	if _, ok := IntegrateMomentary(mom, 0.5, 0, 0); ok {
+		t.Errorf("silence must not integrate")
+	}
+	if _, ok := IntegrateMomentary(nil, 0.5, 0, 0); ok {
+		t.Errorf("empty must not integrate")
+	}
+}
