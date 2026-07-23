@@ -637,6 +637,10 @@
     "mp-loudness": {
       "title": "Normalizing the exported cut",
       "body": "Turn this on to normalize the loudness of THIS export with the settings below, instead of whatever the encode preset above carries. It changes the exported file only - the preset itself is not touched, and neither is your recording.\n\nLeave it off and the preset's own loudness settings apply, exactly as they are. There is deliberately no \"force off\" here: this switch can only replace a preset's loudness settings, never disable them. If you want an export that does not normalize at all, pick a preset that does not normalize.\n\nNormalizing rewrites the audio samples, so it needs an audio re-encode. The default Lossless Remux preset copies the audio untouched - with it selected, nothing will be normalized. Pick an encoding preset (Audio Only Opus/AAC/FLAC, or a video preset with an audio codec).\n\nThe integrated target is the loudness the whole cut is brought to, in LUFS. -14 is the streaming standard (Spotify, YouTube, Tidal, Amazon), -16 Apple Music, -23 the EBU R128 broadcast standard; club and DJ-pool masters typically sit around -8. The true-peak ceiling caps the loudest instantaneous sample in dBTP; -1 leaves headroom so lossy encoders (which can overshoot on decode) do not clip.\n\n\"Only raise quiet tracks\" makes it a one-way move: a cut already at or above the target is left alone instead of being turned down.\n\nThis is one whole-file volume change, not compression - the mix and the transients are untouched. It is measured in one pass and applied in a second, so it costs a full read of the exported range on top of the encode. When you export an aligned audio + video pair, each half carries its own override - set both if you want both normalized."
+    },
+    "mp-prelisten": {
+      "title": "Pre-listen the planned loudness",
+      "body": "Applies the export's planned constant gain to live playback, so you hear the track at the target loudness BEFORE encoding. It is exactly the gain the export will bake in: one whole-track volume change, no compression or limiting, capped so the true peak never exceeds the ceiling. Toggle it while A/B-ing targets — the gain follows your target and trim changes live. It only affects monitoring in this player, never the file on disk, and resets when you load other media."
     }
   },
   "library": {
@@ -895,7 +899,11 @@
       "demotedNote": "Collection & playlist workflows re-encode whole folders or playlists into a duplicate directory (Browse toolbar / playlist view) — that keeps your originals organized. Need a one-off conversion of just this file? Open the encoder below.",
       "show": "Show encoder for this file",
       "normalizeOverride": "Override the preset loudness",
-      "loudNeedsReencode": "This preset copies the audio, so normalization won't run - it rewrites the samples and needs a re-encode. Pick a preset with a real audio codec (not copy/none)."
+      "loudNeedsReencode": "This preset copies the audio, so normalization won't run - it rewrites the samples and needs a re-encode. Pick a preset with a real audio codec (not copy/none).",
+      "vbr": "VBR (variable bitrate)",
+      "vbrQuality": "VBR quality",
+      "maxForCodec": "max {max} for {codec}",
+      "losslessNoBitrate": "Lossless codec — no bitrate to choose."
     },
     "favorites": {
       "desc": "Pinned folders - open in Browse. Pin the current folder from the Browse toolbar.",
@@ -2322,7 +2330,17 @@
       "volume": "Volume",
       "exportQueued": "Waiting for a free transcode slot…",
       "exportPreparing": "Preparing export…",
-      "exportMeasuring": "Analyzing loudness… {pct}%"
+      "exportMeasuring": "Analyzing loudness… {pct}%",
+      "editPreset": "Edit preset…",
+      "noAudio": "no audio",
+      "monitorLoud": "Pre-listen loudness",
+      "monitorLoudOn": "Pre-listening at {gain} dB",
+      "estSize": "≈ {size}",
+      "useFlacInstead": "Normalizing needs a re-encode — switch to FLAC (lossless)",
+      "exportCanceled": "Export canceled — the partial file was removed.",
+      "loudApplied": "Loudness: applied {gain} dB → {out} LUFS integrated.",
+      "loudApCapped": "Loudness: applied {gain} dB (peak-capped) → {out} LUFS integrated.",
+      "loudApSkipped": "Loudness: skipped (silent source, or raise-only and already loud enough)."
     },
     "openExternally": "Open externally",
     "pause": "Pause",
@@ -2350,12 +2368,26 @@
       "playerUnavailable": "Player unavailable",
       "remoteAudioOff": "Audio won't play in a remote session - it would sound on the controlled computer. Play the file locally instead.",
       "silenceFailed": "Silence detection failed: ",
-      "timeFormat": "Time format: mm:ss.s (or h:mm:ss)"
+      "timeFormat": "Time format: mm:ss.s (or h:mm:ss)",
+      "exportCanceled": "Export canceled"
     },
     "trimEdit": "Trim / edit",
     "more": "More",
     "trimEditSub": "Cut a section or export a trimmed copy",
-    "loadingAudio": "Loading audio…"
+    "loadingAudio": "Loading audio…",
+    "plan": {
+      "measuring": "Measuring loudness…",
+      "noData": "No loudness analysis yet - the export will measure exactly before encoding.",
+      "skipRaise": "Raise-only: source {src} LUFS is already at/above {target} LUFS - left unchanged.",
+      "capped": "{src} → {out} LUFS · gain capped at {gain} dB: true peak {tp} dBTP hits the {ceil} dBTP ceiling. Lower the target or the ceiling for more.",
+      "line": "{src} → {out} LUFS · gain {gain} dB",
+      "measured": "measured",
+      "estimate": "estimate"
+    },
+    "pedit": {
+      "title": "Edit encoding preset",
+      "apply": "Apply without saving"
+    }
   },
   "publish": {
     "audio": "audio",

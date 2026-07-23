@@ -1879,10 +1879,11 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	}
 
 	b.WriteString(`<div class=pbuilder>`)
-	b.WriteString(pbSelectTip(i18n.T("library.enc.container"), "lib-pf:container", containerOpts, d.Container, "enc-container"))
+	b.WriteString(pbSelectTip(i18n.T("library.enc.container"), "lib-pf:container", pbContainerOptsFor(audioOnly), d.Container, "enc-container"))
 	if !audioOnly {
 		b.WriteString(`<div class=pb-grp>`)
-		b.WriteString(pbSelectTip(i18n.T("library.enc.videoCodec"), "lib-pf:vcodec", videoCodecOpts, d.VideoCodec, "enc-video-codec"))
+		// container-compatible codecs only - the builder can't describe an unencodable combo
+		b.WriteString(pbSelectTip(i18n.T("library.enc.videoCodec"), "lib-pf:vcodec", pbVideoCodecOptsFor(d.Container), d.VideoCodec, "enc-video-codec"))
 		b.WriteString(pbSelect(i18n.T("library.enc.accel"), "lib-pf:accel", accelOpts(), d.Accel))
 		// quality profiles
 		b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(i18n.T("library.enc.qualityProfile")) + `</div><div class=seg>`)
@@ -1902,7 +1903,7 @@ func (u *UI) libEncodeHTML(s *libSt, sel *libSel) string {
 	}
 	// audio section
 	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(pbSelectTip(i18n.T("library.enc.audioCodec"), "lib-pf:acodec", audioCodecOpts, d.AudioCodec, "enc-audio-codec"))
+	b.WriteString(pbSelectTip(i18n.T("library.enc.audioCodec"), "lib-pf:acodec", pbAudioCodecOptsFor(d.Container), d.AudioCodec, "enc-audio-codec"))
 	b.WriteString(pbField(i18n.T("library.enc.audioBitrate"), "lib-pf:abitratek", strconv.Itoa(d.AudioBitrateK), "number", audioCapHint(d.AudioCodec)))
 	b.WriteString(pbSelect(i18n.T("library.enc.channels"), "lib-pf:channels", [][2]string{{"0", i18n.T("library.enc.source")}, {"1", i18n.T("library.enc.mono")}, {"2", i18n.T("library.enc.stereo")}}, strconv.Itoa(d.Channels)))
 	b.WriteString(pbSelect(i18n.T("library.enc.sampleRate"), "lib-pf:samplerate", [][2]string{{"0", i18n.T("library.enc.source")}, {"44100", "44.1 kHz"}, {"48000", "48 kHz"}, {"96000", "96 kHz"}}, strconv.Itoa(d.SampleRate)))

@@ -17,7 +17,7 @@ func TestPlayheadInterpolationID(t *testing.T) {
 		cursorSec: mpNone, hovT: mpNone, outSec: -1,
 	}
 	// playing at 50s of a 100s track, full view → playhead at the viewBox midpoint (x=500).
-	svg := mpWaveSVG(&st, 50, nil)
+	svg := mpWaveSVG(&st, 50, nil, nil)
 	if !strings.Contains(svg, `id="mp-library-ph"`) {
 		t.Fatalf("playing playhead missing interpolation id; svg=%q", svg)
 	}
@@ -26,14 +26,14 @@ func TestPlayheadInterpolationID(t *testing.T) {
 	}
 
 	// not playing (mpNone) → no playhead line, so nothing for the client to (fail to) animate.
-	if idle := mpWaveSVG(&st, mpNone, nil); strings.Contains(idle, `id="mp-library-ph"`) {
+	if idle := mpWaveSVG(&st, mpNone, nil, nil); strings.Contains(idle, `id="mp-library-ph"`) {
 		t.Fatalf("idle player must not render the playhead id; svg=%q", idle)
 	}
 
 	// cue-editor overlay active (hold-Space audition): the mint playhead is the moving element
 	// (the white beat cursor stays put), so it must still carry the interpolation id.
 	ce := &ceOverlay{cursorMs: mpNone, dragA: -1, dragB: -1, sel: map[int]bool{}, dsel: map[int]bool{}}
-	if svg := mpWaveSVG(&st, 50, ce); !strings.Contains(svg, `id="mp-library-ph"`) {
+	if svg := mpWaveSVG(&st, 50, ce, nil); !strings.Contains(svg, `id="mp-library-ph"`) {
 		t.Fatalf("cue-edit audition playhead missing interpolation id; svg=%q", svg)
 	}
 }
@@ -48,14 +48,14 @@ func TestPlayheadVeilAndHairline(t *testing.T) {
 		viewStart: 0, viewSpan: 1,
 		cursorSec: mpNone, hovT: mpNone, outSec: -1,
 	}
-	svg := mpWaveSVG(&st, 50, nil)
+	svg := mpWaveSVG(&st, 50, nil, nil)
 	if !strings.Contains(svg, `id="mp-library-ph-veil"`) {
 		t.Fatalf("playing wave missing the unplayed-side veil; svg=%q", svg)
 	}
 	if !strings.Contains(svg, `vector-effect="non-scaling-stroke"`) {
 		t.Fatalf("playhead lost its non-scaling hairline stroke; svg=%q", svg)
 	}
-	if idle := mpWaveSVG(&st, mpNone, nil); strings.Contains(idle, "ph-veil") {
+	if idle := mpWaveSVG(&st, mpNone, nil, nil); strings.Contains(idle, "ph-veil") {
 		t.Fatalf("idle player must not render the veil; svg=%q", idle)
 	}
 }

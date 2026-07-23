@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"html"
+	"math"
 	"strconv"
 	"strings"
 
@@ -302,6 +303,13 @@ type loudnessOpts struct {
 	// louder error already says so - don't blame the codec). Normalizing needs an audio re-encode,
 	// so transcode drops it for copy/none: say so rather than show targets that do nothing.
 	preset *transcode.Preset
+	// compact renders the dense single-surface variant: industry-target quick-pick chips
+	// (act "loudtarget", val "<I>|<TP>") + inline I/TP fields + raise-only chip on one wrap
+	// row - instead of the full-width stacked builder fields.
+	compact bool
+	// extraHTML is injected inside the block while ON (the export surface's live gain-plan
+	// line + pre-listen toggle ride here so they collapse with the switch).
+	extraHTML string
 }
 
 // loudnessFields renders THE loudness block: the normalize switch plus integrated target,
@@ -322,20 +330,72 @@ func loudnessFields(o loudnessOpts) string {
 		return trimNum(f), trimNum(def)
 	}
 	var b strings.Builder
-	b.WriteString(`<div class=pb-grp>`)
+	grp := "pb-grp"
+	if o.compact {
+		grp = "pb-grp pb-grp--compact"
+	}
+	b.WriteString(`<div class="` + grp + `">`)
 	b.WriteString(toggleRowTip(o.toggleLbl, o.act("loudon"), o.vals.On, tipTopic(o.topic)))
 	if o.vals.On {
 		iv, iph := tx(o.vals.I, transcode.DefaultLoudnessI)
 		tv, tph := tx(o.vals.TP, transcode.DefaultLoudnessTP)
-		b.WriteString(pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, i18n.T("library.enc.lufsHint")))
-		b.WriteString(pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, ""))
-		b.WriteString(toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly))
+		if o.compact {
+			// quick-pick target chips: one tap sets I+TP to an industry target; the active
+			// chip mirrors the current I (unset = the default −14)
+			effI := o.vals.I
+			if o.override && effI == 0 {
+				effI = transcode.DefaultLoudnessI
+			}
+			b.WriteString(`<div class=lt-chips>`)
+			for _, lt := range transcode.LoudnessTargets() {
+				cls := "lt-chip"
+				if math.Abs(effI-lt.I) < 0.01 {
+					cls += " active"
+				}
+				b.WriteString(`<button class="` + cls + `" data-act=` + attrQ(o.act("loudtarget")) +
+					` data-val=` + attrQ(fmt.Sprintf("%g|%g", lt.I, lt.TP)) + ` title=` + attrQ(lt.Label) + `>` +
+					html.EscapeString(ltChipLabel(lt)) + `</button>`)
+			}
+			b.WriteString(`</div>`)
+			b.WriteString(`<div class=lt-fields>` +
+				`<span class=lt-field>` + pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, "") + `</span>` +
+				`<span class=lt-field>` + pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, "") + `</span>` +
+				`<span class=lt-raise>` + toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly) + `</span></div>`)
+		} else {
+			b.WriteString(pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, i18n.T("library.enc.lufsHint")))
+			b.WriteString(pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, ""))
+			b.WriteString(toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly))
+		}
 		if o.preset != nil && !transcode.LoudnessAppliesTo(o.preset.AudioCodec) {
 			b.WriteString(hint("warn", i18n.T("library.enc.loudNeedsReencode")))
 		}
+		b.WriteString(o.extraHTML)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// ltChipLabel compresses a LoudnessTarget to chip size: "−14 Streaming", "−23 EBU", …
+func ltChipLabel(lt transcode.LoudnessTarget) string {
+	name := lt.Label
+	if i := strings.IndexByte(name, ' '); i > 0 {
+		name = name[:i]
+	}
+	switch {
+	case strings.Contains(lt.Label, "Streaming"):
+		name = "Streaming"
+	case strings.Contains(lt.Label, "Apple"):
+		name = "Apple"
+	case strings.Contains(lt.Label, "Deezer"):
+		name = "Deezer"
+	case strings.Contains(lt.Label, "ReplayGain"):
+		name = "RG2"
+	case strings.Contains(lt.Label, "EBU"):
+		name = "EBU"
+	case strings.Contains(lt.Label, "Club"):
+		name = "Club"
+	}
+	return fmt.Sprintf("%g %s", lt.I, name)
 }
 
 // hint renders a small dynamic-info chip (the electron local-studio "current media hint" pattern).

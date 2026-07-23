@@ -161,6 +161,11 @@ var helpTopics = map[string]helpTopic{
 			{"ITU-R BS.1770 (true peak)", "https://www.itu.int/rec/R-REC-BS.1770"},
 		},
 	},
+	"mp-prelisten": {
+		Links: []ttLink{
+			{"EBU R128 loudness", "https://tech.ebu.ch/publications/r128"},
+		},
+	},
 	// ── Automations: create/edit form (automations_editor.go) ──
 	"auto-watch-dir":  {},
 	"auto-match-exts": {},

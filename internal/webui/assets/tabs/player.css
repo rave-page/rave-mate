@@ -63,14 +63,58 @@
 .mp-aoff { flex: 0 1 190px; }
 .mp-aoff .field { margin: 0; }
 
-/* export row */
-.mp-export { display: flex; flex-direction: column; gap: 6px; }
+/* export block: one bordered group per media - preset row, output row, loudness */
+.mp-export { display: flex; flex-direction: column; gap: 8px; }
+.mp-exmedia { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.02); }
 .mp-presel { flex: 0 1 240px; min-width: 200px; }
 .mp-scopesel { flex: 0 1 210px; min-width: 180px; }
 .mp-outfield { flex: 1 1 240px; min-width: 180px; }
 .mp-outfield .field { margin: 0; }
 .mp-exmsg { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #fafafa;
   word-break: break-all; }
+
+/* what-you-get summary chip: always-visible selected state for the export */
+.mp-sum { font: 600 10px/1.6 'JetBrains Mono', ui-monospace, monospace; color: #0a0a0a;
+  background: var(--rp-brand-mint, #08F79B); border-radius: 6px; padding: 2px 8px;
+  align-self: center; letter-spacing: .02em; white-space: nowrap; }
+
+/* loudness quick-target chips + inline fields (compact loudnessFields variant) */
+.pb-grp--compact { display: flex; flex-direction: column; gap: 6px; }
+.lt-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.lt-chip { font: 600 10px/1 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0);
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12); border-radius: 999px;
+  padding: 5px 9px; cursor: pointer; }
+.lt-chip:hover { border-color: var(--rp-brand-hot, #FF3E8A); color: #fafafa; }
+.lt-chip.active { background: var(--rp-brand-base, #F70864); border-color: var(--rp-brand-base, #F70864);
+  color: #fff; }
+.lt-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.lt-field { flex: 0 1 150px; min-width: 120px; }
+.lt-field .pb-field { margin: 0; }
+.lt-raise { display: flex; align-items: center; }
+.lt-raise .row { margin: 0; padding: 0; border: 0; }
+
+/* live gain-plan line: what the normalization will actually do */
+.mp-planline { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0); }
+.mp-planline--ok { color: var(--rp-brand-mint, #08F79B); }
+.mp-planline--warn { color: var(--rp-brand-amber, #FFB547); }
+.mp-planline--info { color: var(--rp-brand-violet, #A78BFA); }
+.mp-planline--dim { color: var(--rp-muted, #B98AA0); }
+.mp-monrow { display: flex; align-items: center; gap: 6px; }
+.lt-monitor.active { background: var(--rp-brand-mint, #08F79B); border-color: var(--rp-brand-mint, #08F79B);
+  color: #0a0a0a; }
+
+/* export run: progress + cancel side by side; applied-loudness result line */
+.mp-exrun { display: flex; gap: 8px; align-items: center; }
+.mp-exrun .pbar { flex: 1; }
+.mp-exloud { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-brand-mint, #08F79B); }
+.mp-est { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-muted, #B98AA0);
+  align-self: center; }
+
+/* export preset editor modal */
+.pedit { display: flex; flex-direction: column; gap: 8px; }
+.pedit .pb-grp { padding-top: 6px; }
+.pedit .fpair .pb-field { margin: 0; }
 
 /* chip cards: click/tap pins open (checkbox pin, mirrors the tooltip primitive) */
 .wchip-x { position: absolute; opacity: 0; pointer-events: none; }

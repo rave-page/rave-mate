@@ -154,7 +154,7 @@ func (u *UI) mpWaveInner(t mpSt) string {
 	if len(t.media) > 0 {
 		ov = u.ceSnapOverlay(t.host, t.media[0].path)
 	}
-	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov))
+	b.WriteString(mpWaveSVG(&t, u.mpPlayheadAxis(&t), ov, u.mpWaveLoudViz(&t)))
 	if m := t.activeMedia(); m != nil {
 		seekChip := ""
 		if m.seekTabLoading {
@@ -199,11 +199,89 @@ const mpWavePeakGamma = 1.9
 // mpShapeAmp maps a 0-255 linear peak byte to a 0..1 display height via the contrast curve.
 func mpShapeAmp(mx byte) float64 { return math.Pow(float64(mx)/255.0, mpWavePeakGamma) }
 
+// mpWaveLoud is one band's loudness-curve overlay data (zero value = no curve).
+type mpWaveLoud struct {
+	mom  []float64 // momentary LUFS grid (media-local)
+	step float64
+	on   bool    // normalization active → draw target line + projected curve
+	gain float64 // planned constant gain (dB)
+	targ float64 // target integrated loudness (LUFS)
+}
+
+// mpWaveLoudViz builds the per-media loudness overlays (edit mode only - the curve is a
+// mixing/export aid, not a playback decoration).
+func (u *UI) mpWaveLoudViz(t *mpSt) []mpWaveLoud {
+	if !t.edit {
+		return nil
+	}
+	viz := make([]mpWaveLoud, len(t.media))
+	for i := range t.media {
+		m := &t.media[i]
+		if m.loud == nil || len(m.loud.Mom) == 0 || m.loud.Step <= 0 {
+			continue
+		}
+		v := mpWaveLoud{mom: m.loud.Mom, step: m.loud.Step}
+		if p := u.mpPlanFor(t, i); p != nil && p.applies {
+			v.targ = p.targetI
+			if p.haveSrc && !p.res.Skipped {
+				v.on, v.gain = true, p.res.GainDB
+			}
+		}
+		viz[i] = v
+	}
+	return viz
+}
+
+// mpLufsY maps a momentary LUFS value into band-local y (top = loud). Fixed −45..−3 scale so
+// the curve is comparable across tracks and the target line sits where you'd expect.
+func mpLufsY(lufs, y0, bandH float64) float64 {
+	const lo, hi = -45.0, -3.0
+	f := (clampF(lufs, lo, hi) - lo) / (hi - lo)
+	return y0 + bandH - f*bandH
+}
+
+// mpLoudPath emits a decimated polyline of mom(+gainDB) over the visible window.
+func mpLoudPath(b *strings.Builder, v *mpWaveLoud, gainDB float64, t *mpSt, i int, y0, bandH, w float64, color string, width float64) {
+	lo, ln := t.axis()
+	if ln <= 0 || t.viewSpan <= 0 {
+		return
+	}
+	start := t.mediaStart(i)
+	const cols = 500
+	var pts strings.Builder
+	n := 0
+	for c := 0; c <= cols; c++ {
+		fx := float64(c) / cols
+		axis := lo + (t.viewStart+fx*t.viewSpan)*ln
+		local := axis - start
+		idx := int(local / v.step)
+		if local < 0 || idx < 0 || idx >= len(v.mom) {
+			continue
+		}
+		mv := v.mom[idx]
+		if mv <= -69.5 { // silence floor - drop to keep the curve honest
+			continue
+		}
+		y := mpLufsY(mv+gainDB, y0, bandH)
+		if n > 0 {
+			pts.WriteByte(' ')
+		}
+		fmt.Fprintf(&pts, "%.1f,%.1f", fx*w, y)
+		n++
+	}
+	if n < 2 {
+		return
+	}
+	fmt.Fprintf(b, `<polyline points="%s" fill="none" stroke="%s" stroke-width="%.1f" vector-effect="non-scaling-stroke"/>`,
+		pts.String(), color, width)
+}
+
 // mpWaveSVG draws every media band on the shared axis in the visible zoom window, with
 // trim dim/handles (edit), track/fader/cue markers, playhead (mint) and click cursor.
 // ce (nil = off) adds the cue-editor layer: beatgrid lines, drop markers, beat cursor,
-// cue selection + rubber band.
-func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
+// cue selection + rubber band. lviz (nil = off) adds the loudness layer per band: the
+// momentary curve, the normalize target line and the projected post-gain curve.
+func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay, lviz []mpWaveLoud) string {
 	const w = 1000.0
 	n := len(t.media)
 	if n == 0 {
@@ -359,6 +437,21 @@ func mpWaveSVG(t *mpSt, playAxis float64, ce *ceOverlay) string {
 			}
 		} else {
 			fmt.Fprintf(&b, `<line x1="0" y1="%.0f" x2="%.0f" y2="%.0f" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>`, mid, w, mid)
+		}
+
+		// loudness layer: momentary curve (amber), and when normalizing also the projected
+		// post-gain curve (mint) + the dashed target line the projection should ride on
+		if lviz != nil && i < len(lviz) && len(lviz[i].mom) > 0 {
+			v := &lviz[i]
+			mpLoudPath(&b, v, 0, t, i, y0, bandH, w, "rgba(255,181,71,0.55)", 1.1)
+			if v.on {
+				ty := mpLufsY(v.targ, y0, bandH)
+				fmt.Fprintf(&b, `<line x1="0" y1="%.1f" x2="%.0f" y2="%.1f" stroke="rgba(8,247,155,0.5)" stroke-width="1" stroke-dasharray="6,5" vector-effect="non-scaling-stroke"/>`, ty, w, ty)
+				fmt.Fprintf(&b, `<text x="%.0f" y="%.1f" fill="rgba(8,247,155,0.75)" font-size="9" font-family="monospace" text-anchor="end">%.1f</text>`, w-4, ty-3, v.targ)
+				if math.Abs(v.gain) >= 0.05 {
+					mpLoudPath(&b, v, v.gain, t, i, y0, bandH, w, "rgba(8,247,155,0.8)", 1.3)
+				}
+			}
 		}
 
 		// cue markers (library tracks) stay inside their band
@@ -961,7 +1054,7 @@ func (u *UI) mpAlignHTML(t mpSt) string {
 	return b.String()
 }
 
-// ── export row (patched fragment; compact) ──────────────────────────────────────
+// ── export row (patched fragment; compact + dynamic) ────────────────────────────
 
 func (u *UI) mpExportHTML(t mpSt) string {
 	host := t.host
@@ -975,30 +1068,41 @@ func (u *UI) mpExportHTML(t mpSt) string {
 	b.WriteString(`<div class=mp-export>`)
 	for i := range t.media {
 		m := &t.media[i]
-		cur := mpPreset(u, m.presetID)
+		cur := u.mpActivePreset(m)
 		out := m.outPath
 		if out == "" {
 			out = mpOutPath(m.path, cur)
 		}
 		opts := make([]ssOpt, 0, len(presets))
 		for _, p := range presets {
-			if m.kind == "audio" && !p.IsAudioOnly() && p.ID != "remux" {
-				continue
+			if m.kind == "audio" && !p.IsAudioOnly() {
+				continue // a video/remux-to-mp4 preset makes no sense for an audio capture
 			}
-			opts = append(opts, ssOpt{Val: p.ID, Label: p.Label, Sub: p.Desc, Badge: strings.ToUpper(p.Container)})
+			opts = append(opts, ssOpt{Val: p.ID, Label: p.Label, Sub: p.Desc, Badge: strings.ToUpper(mpExt(m.path, p))})
 		}
 		optsCopy := opts
+		curID := cur.ID
+		if m.inline != nil {
+			// unsaved editor result: select shows the base preset, the summary chip carries ✎
+			curID = m.presetID
+		}
 		label := i18n.T("player.label.encodePreset")
 		if t.dual() {
 			label = i18n.T("player.label.kindPreset", i18n.A{"kind": strings.ToUpper(m.kind)})
 		}
-		b.WriteString(`<div class=mp-erow>` +
+		b.WriteString(`<div class=mp-exmedia>`)
+		b.WriteString(`<div class="mp-erow mp-erow--preset">` +
 			`<span class=mp-presel>` + smartSelect(fmt.Sprintf("mp-preset-%s-%d", host, i), label,
-			fmt.Sprintf("mp-preset:%s\x1f%d", host, i), cur.ID, func() []ssOpt { return optsCopy }) + `</span>` +
+			fmt.Sprintf("mp-preset:%s\x1f%d", host, i), curID, func() []ssOpt { return optsCopy }) + `</span>` +
+			btn("✎ "+i18n.T("player.label.editPreset"), "ghost", fmt.Sprintf("mp-pedit:%s\x1f%d", host, i), "") +
+			u.mpSummaryChip(&t, i) +
+			`</div>`)
+		b.WriteString(`<div class="mp-erow mp-erow--out">` +
 			`<span class=mp-outfield>` + field(i18n.T("player.label.outputFile"), fmt.Sprintf("mp-outpath:%s\x1f%d", host, i), out, "text") + `</span>` +
 			btn("…", "ghost", "pick-save:"+mpExt(m.path, cur)+":mp-outpath:"+host+"\x1f"+fmt.Sprint(i), "") +
 			`</div>`)
-		// per-media loudness override of the chosen preset (the shared block, components.go)
+		// per-media loudness override of the chosen preset (the shared block, components.go);
+		// the live gain-plan line + pre-listen toggle collapse with the switch
 		b.WriteString(loudnessFields(loudnessOpts{
 			act:       func(f string) string { return fmt.Sprintf("mp-loud:%s\x1f%d\x1f%s", host, i, f) },
 			toggleLbl: i18n.T("library.enc.normalizeOverride"),
@@ -1006,7 +1110,16 @@ func (u *UI) mpExportHTML(t mpSt) string {
 			vals:      m.loudOv,
 			override:  true,
 			preset:    &cur,
+			compact:   true,
+			extraHTML: u.mpLoudExtraHTML(&t, i),
 		}))
+		// the preset itself normalizes (no override): still show what will happen
+		if !m.loudOv.On {
+			if eff := u.mpEffPreset(m); eff.LoudnessOn {
+				b.WriteString(u.mpLoudExtraHTML(&t, i))
+			}
+		}
+		b.WriteString(`</div>`)
 	}
 
 	if t.exporting {
@@ -1020,7 +1133,8 @@ func (u *UI) mpExportHTML(t mpSt) string {
 		case "measure":
 			label = i18n.T("player.label.exportMeasuring", pct)
 		}
-		b.WriteString(progressBar(t.exportPct/100, label))
+		b.WriteString(`<div class=mp-exrun>` + progressBar(t.exportPct/100, label) +
+			btn(i18n.T("common.cancel"), "destructive", "mp-excancel:"+host, "") + `</div>`)
 	} else {
 		var rowBits []string
 		if t.dual() {
@@ -1037,11 +1151,215 @@ func (u *UI) mpExportHTML(t mpSt) string {
 				smartSelect("mp-scope-"+host, i18n.T("player.label.exportTarget"), "mp-scope:"+host, scope, func() []ssOpt { return scopeOpts })+`</span>`)
 		}
 		rowBits = append(rowBits, btn(i18n.T("player.exportCut"), "primary", "mp-export:"+host, ""))
-		b.WriteString(`<div class=mp-erow>` + strings.Join(rowBits, "") + `</div>`)
+		if est := u.mpEstSizeLine(&t); est != "" {
+			rowBits = append(rowBits, `<span class=mp-est data-label="export estimate" data-value=`+attrQ(est)+`>`+html.EscapeString(est)+`</span>`)
+		}
+		b.WriteString(`<div class="mp-erow mp-erow--go">` + strings.Join(rowBits, "") + `</div>`)
+	}
+	if t.exportLoudTx != "" {
+		b.WriteString(`<div class=mp-exloud>` + html.EscapeString(t.exportLoudTx) + `</div>`)
 	}
 	if t.exportMsg != "" {
 		b.WriteString(`<div class=mp-exmsg>` + html.EscapeString(t.exportMsg) + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// mpSummaryChip is the at-a-glance "what will this export be" chip: codec · bitrate ·
+// container (+ ✎ when riding an unsaved edited preset, + →target LUFS when normalizing).
+func (u *UI) mpSummaryChip(t *mpSt, i int) string {
+	m := &t.media[i]
+	eff := u.mpEffPreset(m)
+	var parts []string
+	if m.kind == "video" && !eff.IsAudioOnly() {
+		v := strings.ToUpper(eff.VideoCodec)
+		if eff.VideoCodec == "copy" {
+			v = "COPY"
+		} else if eff.Height > 0 {
+			v += fmt.Sprintf(" %dp", eff.Height)
+		}
+		parts = append(parts, v)
+	}
+	switch eff.AudioCodec {
+	case "copy":
+		parts = append(parts, "AUDIO COPY")
+	case "none", "":
+		parts = append(parts, i18n.T("player.label.noAudio"))
+	default:
+		a := strings.ToUpper(eff.AudioCodec)
+		switch {
+		case eff.AudioVBR:
+			a += fmt.Sprintf(" V%d", eff.AudioVBRQuality)
+		case eff.AudioBitrateK > 0:
+			a += fmt.Sprintf(" %dk", eff.AudioBitrateK)
+		}
+		parts = append(parts, a)
+	}
+	parts = append(parts, strings.ToUpper(mpExt(m.path, eff)))
+	eff = transcode.MigrateLoudness(eff)
+	if eff.LoudnessOn && transcode.LoudnessAppliesTo(eff.AudioCodec) {
+		ti := eff.LoudnessI
+		if ti == 0 {
+			ti = transcode.DefaultLoudnessI
+		}
+		parts = append(parts, fmt.Sprintf("→ %g LUFS", ti))
+	}
+	tx := strings.Join(parts, " · ")
+	if m.inline != nil {
+		tx = "✎ " + tx
+	}
+	return `<span class=mp-sum data-label="preset summary" data-value=` + attrQ(tx) + `>` + html.EscapeString(tx) + `</span>`
+}
+
+// mpLoudExtraHTML renders the live gain-plan line + pre-listen toggle for media i.
+func (u *UI) mpLoudExtraHTML(t *mpSt, i int) string {
+	m := &t.media[i]
+	p := u.mpPlanFor(t, i)
+	if p == nil {
+		return ""
+	}
+	var b strings.Builder
+	if !p.applies {
+		// warned above by loudnessFields; offer the one-tap fix for audio captures
+		if m.kind == "audio" {
+			b.WriteString(`<div class=mp-planline>` + btn(i18n.T("player.label.useFlacInstead"), "outline",
+				fmt.Sprintf("mp-loudfix:%s\x1f%d", t.host, i), "") + `</div>`)
+		}
+		return b.String()
+	}
+	tone, line := "", ""
+	src := fmt.Sprintf("%.1f", p.srcI)
+	switch {
+	case !p.haveSrc:
+		if m.loudLoading {
+			tone, line = "dim", i18n.T("player.plan.measuring")
+		} else {
+			tone, line = "dim", i18n.T("player.plan.noData")
+		}
+	case p.res.Skipped:
+		tone = "info"
+		line = i18n.T("player.plan.skipRaise", i18n.A{"src": src, "target": fmt.Sprintf("%.1f", p.targetI)})
+	case p.res.PeakCapped:
+		tone = "warn"
+		line = i18n.T("player.plan.capped", i18n.A{
+			"src": src, "out": fmt.Sprintf("%.1f", p.outI), "gain": fmt.Sprintf("%+.1f", p.res.GainDB),
+			"tp": fmt.Sprintf("%.1f", p.srcTP), "ceil": fmt.Sprintf("%.1f", p.ceilTP)})
+	default:
+		tone = "ok"
+		line = i18n.T("player.plan.line", i18n.A{
+			"src": src, "out": fmt.Sprintf("%.1f", p.outI), "gain": fmt.Sprintf("%+.1f", p.res.GainDB)})
+	}
+	if p.haveSrc {
+		if p.exact {
+			line += " · " + i18n.T("player.plan.measured")
+		} else {
+			line += " · " + i18n.T("player.plan.estimate")
+		}
+	}
+	b.WriteString(`<div class="mp-planline mp-planline--` + tone + `" data-label="loudness plan" data-value=` + attrQ(line) + `>` +
+		html.EscapeString(line) + `</div>`)
+	// pre-listen: audition the planned gain on the live engine (audio media only)
+	if m.kind == "audio" && p.haveSrc && !p.res.Skipped {
+		cls, lbl := "lt-chip lt-monitor", "🎧 "+i18n.T("player.label.monitorLoud")
+		if t.monitorLoud {
+			cls += " active"
+			lbl = "🎧 " + i18n.T("player.label.monitorLoudOn", i18n.A{"gain": fmt.Sprintf("%+.1f", p.res.GainDB)})
+		}
+		b.WriteString(`<div class=mp-monrow><button class="` + cls + `" data-act=` + attrQ("mp-monloud:"+t.host) + `>` +
+			html.EscapeString(lbl) + `</button>` + tipTopic("mp-prelisten") + `</div>`)
+	}
+	return b.String()
+}
+
+// mpEstSizeLine estimates the export's output size from the kept duration + effective
+// bitrates ("" = not estimable, e.g. CRF video). Copy streams scale the source size.
+func (u *UI) mpEstSizeLine(t *mpSt) string {
+	var total int64
+	for i := range t.media {
+		if t.dual() {
+			scope := t.exportScope
+			if scope != "" && scope != "both" && scope != fmt.Sprint(i) {
+				continue
+			}
+		}
+		est := u.mpEstBytes(t, i)
+		if est <= 0 {
+			return "" // one media not estimable → no misleading total
+		}
+		total += est
+	}
+	if total <= 0 {
+		return ""
+	}
+	return i18n.T("player.label.estSize", i18n.A{"size": humanBytes(uint64(total))})
+}
+
+// mpEstBytes estimates one media's output bytes (0 = unknown).
+func (u *UI) mpEstBytes(t *mpSt, i int) int64 {
+	m := &t.media[i]
+	if m.dur <= 0 {
+		return 0
+	}
+	s, e := t.mpTrimWindow(i)
+	keep := m.dur - s
+	if e > 0 {
+		keep = e - s
+	}
+	if keep <= 0 {
+		return 0
+	}
+	eff := u.mpEffPreset(m)
+	frac := keep / m.dur
+
+	audioK := 0.0
+	switch eff.AudioCodec {
+	case "copy":
+		if m.src != nil && m.src.AudioKbps > 0 {
+			audioK = float64(m.src.AudioKbps)
+		} else if m.kind == "audio" && m.size > 0 {
+			return int64(float64(m.size) * frac) // pure audio copy: scale the file
+		} else {
+			return 0
+		}
+	case "none", "":
+		audioK = 0
+	default:
+		if eff.AudioVBR {
+			audioK = 245 // MP3 V0 ballpark
+		} else if eff.AudioBitrateK > 0 {
+			audioK = float64(eff.AudioBitrateK)
+		} else if eff.AudioCodec == "flac" {
+			if m.src != nil && m.src.AudioKbps > 0 {
+				audioK = float64(m.src.AudioKbps)
+			} else {
+				audioK = 900 // typical 16/44 FLAC
+			}
+		} else if strings.HasPrefix(eff.AudioCodec, "pcm-") {
+			audioK = 1411
+		} else {
+			return 0
+		}
+	}
+
+	videoK := 0.0
+	if m.kind == "video" && !eff.IsAudioOnly() {
+		switch eff.VideoCodec {
+		case "copy":
+			if m.src != nil && m.src.VideoKbps > 0 {
+				videoK = float64(m.src.VideoKbps)
+			} else if m.size > 0 {
+				return int64(float64(m.size) * frac)
+			} else {
+				return 0
+			}
+		default:
+			if eff.RateMode == "bitrate" && eff.BitrateK > 0 {
+				videoK = float64(eff.BitrateK)
+			} else {
+				return 0 // CRF: size genuinely unknown - stay honest
+			}
+		}
+	}
+	return int64((audioK + videoK) * 1000 / 8 * keep)
 }

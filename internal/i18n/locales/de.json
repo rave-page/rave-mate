@@ -388,6 +388,10 @@
     "stream-why": {
       "title": "VRSL-Videostream",
       "body": "Streamt dein Live-DMX-Licht als Video nach VRChat. rave-mate rendert die DMX-Universen in ein VRSL-Pixelraster, kodiert es mit ffmpeg und pusht es über RTMP (oder WHIP) an einen Transcode-Dienst (VRCDN, Twitch oder eigenen), der es an das Headset ausliefert. Die Welt spielt dieses Video ab und dekodiert das Raster wieder in Licht – ohne Spout/NDI/OBS-Relay.\n\nDer Standardmodus erzeugt ein Standard-VRSL-Raster, das jede VRSL-Welt beleuchtet. Der erweiterte Modus ist eine Obermenge: Er ergänzt 16-Bit-Präzision, einen Integritäts-Header und einen Lebendigkeitszähler, die eine rave.page-Welt dekodiert, während eine Standard-VRSL-Welt es weiterhin als einfaches 8-Bit liest. Halte die gesamte Kette LINEAR – die Pixel sind rohe Lichtwerte, kein gamma-kodiertes Bild."
+    },
+    "mp-prelisten": {
+      "title": "Geplante Lautheit vorhören",
+      "body": "Wendet den geplanten konstanten Gain des Exports auf die Live-Wiedergabe an – du hörst den Track in Ziel-Lautheit, BEVOR encodiert wird. Es ist exakt der Gain, den der Export einbrennt: eine Ganztrack-Lautstärkeänderung, keine Kompression, kein Limiting, gedeckelt, damit der True Peak nie die Grenze überschreitet. Beim A/B-Vergleich von Zielen einschalten — der Gain folgt Ziel- und Trim-Änderungen live. Betrifft nur das Monitoring in diesem Player, nie die Datei, und wird beim Laden anderer Medien zurückgesetzt."
     }
   },
   "library": {
@@ -538,7 +542,11 @@
       "truePeak": "True-Peak-Grenze (dBTP)",
       "videoCodec": "Video-Codec",
       "demotedNote": "Collection- & Playlist-Workflows re-encodieren ganze Ordner oder Playlists in ein Duplikat-Verzeichnis (Browse-Toolbar / Playlist-Ansicht) — so bleiben Originale sortiert. Einmalige Konvertierung nur dieser Datei? Encoder unten öffnen.",
-      "show": "Encoder für diese Datei anzeigen"
+      "show": "Encoder für diese Datei anzeigen",
+      "vbr": "VBR (variable Bitrate)",
+      "vbrQuality": "VBR-Qualität",
+      "maxForCodec": "max. {max} für {codec}",
+      "losslessNoBitrate": "Verlustfreier Codec — keine Bitrate zu wählen."
     },
     "favorites": {
       "desc": "Angeheftete Ordner - im Durchsuchen-Tab öffnen. Hefte den aktuellen Ordner über die Durchsuchen-Werkzeugleiste an.",
@@ -1951,7 +1959,17 @@
       "volume": "Lautstärke",
       "exportQueued": "Warten auf freien Transcode-Slot…",
       "exportPreparing": "Export wird vorbereitet…",
-      "exportMeasuring": "Lautheit wird analysiert… {pct}%"
+      "exportMeasuring": "Lautheit wird analysiert… {pct}%",
+      "editPreset": "Preset bearbeiten…",
+      "noAudio": "kein Audio",
+      "monitorLoud": "Lautheit vorhören",
+      "monitorLoudOn": "Vorhören mit {gain} dB",
+      "estSize": "≈ {size}",
+      "useFlacInstead": "Normalisieren braucht Re-Encode — zu FLAC (verlustfrei) wechseln",
+      "exportCanceled": "Export abgebrochen — Teildatei wurde entfernt.",
+      "loudApplied": "Lautheit: {gain} dB angewendet → {out} LUFS integriert.",
+      "loudApCapped": "Lautheit: {gain} dB angewendet (Peak-gedeckelt) → {out} LUFS integriert.",
+      "loudApSkipped": "Lautheit: übersprungen (stille Quelle oder nur-anheben und schon laut genug)."
     },
     "openExternally": "Extern öffnen",
     "pause": "Pause",
@@ -1979,12 +1997,26 @@
       "playerUnavailable": "Player nicht verfügbar",
       "remoteAudioOff": "In einer Remote-Sitzung wird kein Audio abgespielt - es würde auf dem gesteuerten Computer erklingen. Spiele die Datei stattdessen lokal ab.",
       "silenceFailed": "Stille-Erkennung fehlgeschlagen: ",
-      "timeFormat": "Zeitformat: mm:ss.s (oder h:mm:ss)"
+      "timeFormat": "Zeitformat: mm:ss.s (oder h:mm:ss)",
+      "exportCanceled": "Export abgebrochen"
     },
     "trimEdit": "Zuschneiden / bearbeiten",
     "more": "Mehr",
     "trimEditSub": "Abschnitt schneiden oder gekürzte Kopie exportieren",
-    "loadingAudio": "Audio wird geladen…"
+    "loadingAudio": "Audio wird geladen…",
+    "plan": {
+      "measuring": "Lautheit wird gemessen…",
+      "noData": "Noch keine Lautheitsanalyse – der Export misst vor dem Encoden exakt.",
+      "skipRaise": "Nur anheben: Quelle {src} LUFS liegt bereits auf/über {target} LUFS – unverändert.",
+      "capped": "{src} → {out} LUFS · Gain bei {gain} dB gedeckelt: True Peak {tp} dBTP erreicht die {ceil}-dBTP-Grenze. Für mehr Ziel oder Grenze senken.",
+      "line": "{src} → {out} LUFS · Gain {gain} dB",
+      "measured": "gemessen",
+      "estimate": "Schätzung"
+    },
+    "pedit": {
+      "title": "Encoding-Preset bearbeiten",
+      "apply": "Anwenden ohne zu speichern"
+    }
   },
   "publish": {
     "audio": "Audio",

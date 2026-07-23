@@ -371,6 +371,10 @@
     "stream-why": {
       "title": "Transmisión de vídeo VRSL",
       "body": "Transmite tu iluminación DMX en vivo a VRChat como vídeo. rave-mate renderiza los universos DMX en una rejilla de píxeles VRSL, la codifica con ffmpeg y la envía por RTMP (o WHIP) a un servicio de transcodificación (VRCDN, Twitch o el tuyo propio) que la sirve al visor. El mundo reproduce ese vídeo y decodifica la rejilla en luces, sin necesidad de un relé Spout/NDI/OBS.\n\nEl modo estándar emite una rejilla VRSL estándar que ilumina cualquier mundo VRSL. El modo extendido es un superconjunto: añade precisión de 16 bits, una cabecera de integridad y un contador de actividad que un mundo de rave.page decodifica, mientras que un mundo VRSL estándar lo sigue leyendo como 8 bits simples. Mantén toda la cadena LINEAL: los píxeles son valores de luz sin procesar, no una imagen con gamma."
+    },
+    "mp-prelisten": {
+      "title": "Pre-escuchar la sonoridad planificada",
+      "body": "Aplica la ganancia constante planificada de la exportación a la reproducción en vivo: escuchas la pista en la sonoridad objetivo ANTES de codificar. Es exactamente la ganancia que la exportación grabará: un cambio de volumen de pista completa, sin compresión ni limitación, con tope para que el pico real nunca supere el techo. Actívala al comparar objetivos — la ganancia sigue en vivo tus cambios de objetivo y recorte. Solo afecta la monitorización en este reproductor, nunca el archivo, y se restablece al cargar otros medios."
     }
   },
   "library": {
@@ -521,7 +525,11 @@
       "truePeak": "Techo de pico real (dBTP)",
       "videoCodec": "Códec de vídeo",
       "demotedNote": "Los flujos de colección y playlist re-codifican carpetas o playlists enteras a un directorio duplicado (barra de Browse / vista de playlist) — así tus originales quedan organizados. ¿Conversión puntual de solo este archivo? Abre el codificador abajo.",
-      "show": "Mostrar codificador para este archivo"
+      "show": "Mostrar codificador para este archivo",
+      "vbr": "VBR (tasa de bits variable)",
+      "vbrQuality": "Calidad VBR",
+      "maxForCodec": "máx. {max} para {codec}",
+      "losslessNoBitrate": "Códec sin pérdidas — no hay tasa de bits que elegir."
     },
     "favorites": {
       "desc": "Carpetas fijadas - ábrelas en Examinar. Fija la carpeta actual desde la barra de Examinar.",
@@ -1849,7 +1857,17 @@
       "volume": "Volumen",
       "exportQueued": "Esperando un slot de transcodificación…",
       "exportPreparing": "Preparando exportación…",
-      "exportMeasuring": "Analizando sonoridad… {pct}%"
+      "exportMeasuring": "Analizando sonoridad… {pct}%",
+      "editPreset": "Editar preset…",
+      "noAudio": "sin audio",
+      "monitorLoud": "Pre-escucha de sonoridad",
+      "monitorLoudOn": "Pre-escucha a {gain} dB",
+      "estSize": "≈ {size}",
+      "useFlacInstead": "Normalizar requiere recodificar — cambiar a FLAC (sin pérdidas)",
+      "exportCanceled": "Exportación cancelada — se eliminó el archivo parcial.",
+      "loudApplied": "Sonoridad: aplicados {gain} dB → {out} LUFS integrados.",
+      "loudApCapped": "Sonoridad: aplicados {gain} dB (limitado por pico) → {out} LUFS integrados.",
+      "loudApSkipped": "Sonoridad: omitida (fuente silenciosa, o solo-subir y ya es lo bastante alta)."
     },
     "openExternally": "Abrir externamente",
     "pause": "Pausar",
@@ -1877,12 +1895,26 @@
       "playerUnavailable": "Reproductor no disponible",
       "remoteAudioOff": "El audio no se reproduce en una sesión remota: sonaría en el equipo controlado. Reproduce el archivo localmente.",
       "silenceFailed": "Error en la detección de silencio: ",
-      "timeFormat": "Formato de tiempo: mm:ss.s (o h:mm:ss)"
+      "timeFormat": "Formato de tiempo: mm:ss.s (o h:mm:ss)",
+      "exportCanceled": "Exportación cancelada"
     },
     "trimEdit": "Recortar / editar",
     "more": "Más",
     "trimEditSub": "Cortar una sección o exportar una copia recortada",
-    "loadingAudio": "Cargando audio…"
+    "loadingAudio": "Cargando audio…",
+    "plan": {
+      "measuring": "Midiendo la sonoridad…",
+      "noData": "Aún no hay análisis de sonoridad: la exportación medirá con exactitud antes de codificar.",
+      "skipRaise": "Solo subir: la fuente {src} LUFS ya está en/sobre {target} LUFS — sin cambios.",
+      "capped": "{src} → {out} LUFS · ganancia limitada a {gain} dB: el pico real {tp} dBTP alcanza el techo de {ceil} dBTP. Baja el objetivo o el techo para más.",
+      "line": "{src} → {out} LUFS · ganancia {gain} dB",
+      "measured": "medido",
+      "estimate": "estimación"
+    },
+    "pedit": {
+      "title": "Editar preset de codificación",
+      "apply": "Aplicar sin guardar"
+    }
   },
   "publish": {
     "audio": "audio",

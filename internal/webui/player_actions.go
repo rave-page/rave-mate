@@ -75,6 +75,17 @@ type mpMedia struct {
 
 	presetID string // export preset (default: lossless remux)
 	outPath  string // export destination ("" = auto "<base>-cut.<ext>")
+	// inline is an unsaved preset from the export preset editor ("apply without saving");
+	// wins over presetID until the preset select changes. draft is the editor's open
+	// working copy (nil = editor closed).
+	inline *transcode.Preset
+	draft  *transcode.Preset
+
+	// measured is the exact pass-1 loudness measurement for measKey (path+mtime+trim window),
+	// from the store cache or captured off a finished export's worker event. nil = estimate only.
+	measured *transcode.Measurement
+	measKey  string
+
 	// loudOv is this export's loudness override of presetID's own block, applied in mpPlanExport
 	// via transcode.ApplyLoudnessOverride. Off = don't override (never "force off"); 0 targets
 	// resolve to transcode's defaults. Per media: an audio/video pair exports two files.
@@ -127,11 +138,15 @@ type mpSt struct {
 
 	align mpAlignSt
 
-	exporting   bool
-	exportPct   float64
-	exportMsg   string
-	exportStage string // "queued" (pre-worker) | worker stages "prepare"/"measure"/"encode"
-	exportScope string // dual export target: "both" | media index
+	exporting    bool
+	exportPct    float64
+	exportMsg    string
+	exportStage  string // "queued" (pre-worker) | worker stages "prepare"/"measure"/"encode"
+	exportScope  string // dual export target: "both" | media index
+	exportLoudTx string // applied-loudness line captured off the worker's "loudness" event
+	exportCancel func() // cancels the in-flight job (Hub.Cancel / worker ctx); nil = none
+
+	monitorLoud bool // pre-listen: planned loudness gain applied to the audio engine
 
 	vid          mpVid // embedded <video> transport mirror
 	lastTrackIdx int   // marker index at playhead (transport current-track display)
@@ -175,6 +190,177 @@ func (l *mpLoud) momAt(t float64) (float64, bool) {
 		return 0, false
 	}
 	return l.Mom[i], true
+}
+
+// ── loudness gain plan (instant estimate from the cached timeline; exact once measured) ──
+
+// mpPlan is what the configured normalization will do to THIS export: source loudness over
+// the trim window, the single gain the encoder will apply, and where the result lands.
+// Estimate (exact=false) comes from the store-cached momentary timeline - zero I/O, updates
+// live as the user drags trim bounds or changes targets. Exact numbers come from a cached
+// (or just-run) ffmpeg loudnorm pass over the same window.
+type mpPlan struct {
+	on      bool // effective preset normalizes
+	applies bool // audio codec re-encodes (copy/none can't normalize)
+	haveSrc bool // source loudness known (timeline or measure landed)
+
+	srcI  float64 // integrated loudness over the trim window (LUFS)
+	srcTP float64 // true peak (dBTP; whole-file until measured exactly)
+	exact bool    // srcI/srcTP from a real loudnorm pass (not the timeline estimate)
+
+	targetI, ceilTP float64
+	res             transcode.GainPlan
+	outI            float64 // projected integrated loudness after the gain
+}
+
+// mpActivePreset resolves media's preset: the unsaved inline editor result wins over presetID.
+func (u *UI) mpActivePreset(m *mpMedia) transcode.Preset {
+	if m.inline != nil {
+		return *m.inline
+	}
+	return mpPreset(u, m.presetID)
+}
+
+// mpEffPreset is the preset the export will really run: active preset + this media's
+// loudness override folded in (same fold as mpPlanExport - keep them identical).
+func (u *UI) mpEffPreset(m *mpMedia) transcode.Preset {
+	return transcode.ApplyLoudnessOverride(u.mpActivePreset(m),
+		m.loudOv.On, m.loudOv.I, m.loudOv.TP, m.loudOv.RaiseOnly)
+}
+
+// mpTrimWindow returns media i's local cut window [s, e) in media seconds (e=0 → to end).
+func (t *mpSt) mpTrimWindow(i int) (s, e float64) {
+	if i < 0 || i >= len(t.media) {
+		return 0, 0
+	}
+	m := &t.media[i]
+	start, dur := t.mediaStart(i), m.dur
+	if dur <= 0 {
+		return 0, 0
+	}
+	s = clampF(t.inSec-start, 0, dur)
+	e = clampF(t.axisOutEff()-start, 0, dur)
+	if e >= dur-0.05 {
+		e = 0
+	}
+	return s, e
+}
+
+// mpMeasKey keys an exact loudness measurement to its input identity: window + file mtime.
+func mpMeasKey(path string, winS, winE float64) string {
+	return fmt.Sprintf("%.2f|%.2f|%d", winS, winE, fileMtime(path))
+}
+
+// mpMeasStoreKey is the store key for an exact windowed measurement (KindLoudness).
+func mpMeasStoreKey(path string, winS, winE float64) string {
+	return fmt.Sprintf("%s\x1f%.2f\x1f%.2f", path, winS, winE)
+}
+
+// mpPlanFor computes the loudness plan for media i of snapshot t (nil when normalization is
+// off). Pure CPU over the in-memory timeline - safe to call from render.
+func (u *UI) mpPlanFor(t *mpSt, i int) *mpPlan {
+	if i < 0 || i >= len(t.media) {
+		return nil
+	}
+	m := &t.media[i]
+	eff := u.mpEffPreset(m)
+	eff = transcode.MigrateLoudness(eff)
+	if !eff.LoudnessOn {
+		return nil
+	}
+	p := &mpPlan{on: true, applies: transcode.LoudnessAppliesTo(eff.AudioCodec),
+		targetI: eff.LoudnessI, ceilTP: eff.EffectiveTP()}
+	if p.targetI == 0 {
+		p.targetI = transcode.DefaultLoudnessI
+	}
+	winS, winE := t.mpTrimWindow(i)
+	if m.measured != nil && m.measKey == mpMeasKey(m.path, winS, winE) {
+		p.srcI, p.srcTP, p.exact, p.haveSrc = m.measured.I, m.measured.TP, true, true
+	} else if l := m.loud; l != nil {
+		if est, ok := transcode.IntegrateMomentary(l.Mom, l.Step, winS, winE); ok {
+			p.srcI, p.srcTP, p.haveSrc = est, l.TP, true
+		}
+	}
+	if !p.haveSrc {
+		return p
+	}
+	p.res = transcode.PlanGain(transcode.Measurement{I: p.srcI, TP: p.srcTP},
+		p.targetI, p.ceilTP, eff.LoudnessRaiseOnly)
+	p.outI = p.srcI + p.res.GainDB
+	return p
+}
+
+// mpKickMeasure checks the store for an exact windowed measurement of every media whose
+// normalization is on (off-thread; render never blocks). Found → the plan flips to exact.
+func (u *UI) mpKickMeasure(host string) {
+	if u.svc.Store == nil {
+		return
+	}
+	t := u.mpSnap(host)
+	gen := t.gen
+	for i := range t.media {
+		m := t.media[i]
+		if eff := u.mpEffPreset(&m); !eff.LoudnessOn {
+			continue
+		}
+		winS, winE := t.mpTrimWindow(i)
+		key := mpMeasKey(m.path, winS, winE)
+		if m.measKey == key {
+			continue // current (found or already checked)
+		}
+		idx, path := i, m.path
+		u.mpMut(host, func(v *mpSt) {
+			if v.gen == gen && idx < len(v.media) {
+				v.media[idx].measKey = key // mark checked; bg fills measured on a hit
+				v.media[idx].measured = nil
+			}
+		})
+		u.bg(func() {
+			raw, ok := u.svc.Store.GetAnalysis(store.KindLoudness, mpMeasStoreKey(path, winS, winE), fileMtime(path))
+			if !ok {
+				return
+			}
+			var mm transcode.Measurement
+			if json.Unmarshal(raw, &mm) != nil {
+				return
+			}
+			applied := u.mpApply(host, gen, idx, func(md *mpMedia) {
+				if md.measKey == key {
+					md.measured = &mm
+				}
+			})
+			if applied {
+				u.mpPatchExport(u.mpSnap(host))
+				u.mpSyncMonitor(host)
+			}
+		})
+	}
+}
+
+// mpSyncMonitor re-pushes the pre-listen gain when loudness monitoring is on: the active
+// media's planned gain (0 when the plan is off/unknown/skipped). Fire-and-forget RPC.
+func (u *UI) mpSyncMonitor(host string) {
+	t := u.mpSnap(host)
+	if !t.monitorLoud {
+		return
+	}
+	pl := u.player()
+	if pl == nil {
+		return
+	}
+	g := 0.0
+	if p := u.mpPlanFor(&t, t.active); p != nil && p.haveSrc && p.applies && !p.res.Skipped {
+		g = p.res.GainDB
+	}
+	pl.SetPreGainDB(g)
+}
+
+// mpMonitorOff clears the pre-listen gain (leaving a bound surface / toggling off).
+func (u *UI) mpMonitorOff(host string) {
+	u.mpMut(host, func(v *mpSt) { v.monitorLoud = false })
+	if pl := u.player(); pl != nil {
+		pl.SetPreGainDB(0)
+	}
 }
 
 // mpNone marks "no position" - axis times can be legitimately negative (video
@@ -502,11 +688,14 @@ func (u *UI) mpEnsureFile(host, path string, tr musiclib.Track) {
 		return
 	}
 	dur := tr.DurationSec
+	if cur.monitorLoud {
+		u.mpMonitorOff(host) // never carry a pre-listen gain onto different media
+	}
 	u.mpMut(host, func(t *mpSt) {
 		t.reset()
 		t.name = filepath.Base(path)
 		t.media = []mpMedia{{path: path, kind: "audio", cues: tr.Cues, dur: dur,
-			size: fileSize(path), presetID: "remux", peaksLoading: true}}
+			size: fileSize(path), presetID: "copy-audio", peaksLoading: true}}
 	})
 	u.mpKickAnalyses(host)
 }
@@ -730,7 +919,7 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 	var media []mpMedia
 	if aud != nil {
 		media = append(media, mpMedia{capID: aud.ID, path: aud.Path, kind: "audio", size: aud.Bytes,
-			startedAt: aud.StartedAt, presetID: "remux", peaksLoading: true})
+			startedAt: aud.StartedAt, presetID: "copy-audio", peaksLoading: true})
 	}
 	if vid != nil {
 		media = append(media, mpMedia{capID: vid.ID, path: vid.Path, kind: "video", size: vid.Bytes,
@@ -744,6 +933,9 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 		hasPrior = true
 	}
 
+	if u.mpSnap(host).monitorLoud {
+		u.mpMonitorOff(host) // never carry a pre-listen gain onto different media
+	}
 	u.mpMut(host, func(t *mpSt) {
 		t.reset()
 		t.name, t.recID = name, r.ID
@@ -1064,12 +1256,18 @@ func (u *UI) mpLoadLoud(parent context.Context, host string, gen, idx int, path 
 		}
 		var l mpLoud
 		lerr := json.Unmarshal(raw, &l)
-		u.mpApply(host, gen, idx, func(m *mpMedia) {
+		applied := u.mpApply(host, gen, idx, func(m *mpMedia) {
 			m.loudLoading = false
 			if lerr == nil {
 				m.loud = &l
 			}
 		})
+		if applied && lerr == nil {
+			// the loudness plan just became computable - refresh its surfaces
+			u.mpPatchExport(u.mpSnap(host))
+			u.mpKickMeasure(host)
+			u.mpSyncMonitor(host)
+		}
 	})
 }
 
@@ -1215,7 +1413,8 @@ func (u *UI) mpPushRealtime(t mpSt) {
 	u.enqueueEval(key, js)
 }
 
-// mpApplyTrim mutates + repaints wave/edit (the common non-drag update path).
+// mpApplyTrim mutates + repaints wave/edit (the common non-drag update path). The trim
+// window feeds the loudness plan, so the exact-measure lookup + monitor gain re-sync ride here.
 func (u *UI) mpApplyTrim(host string, fn func(*mpSt)) {
 	t := u.mpMut(host, fn)
 	if len(t.media) == 0 {
@@ -1223,6 +1422,8 @@ func (u *UI) mpApplyTrim(host string, fn func(*mpSt)) {
 	}
 	u.mpPatchWave(t)
 	u.mpPatchEdit(t)
+	u.mpKickMeasure(host)
+	u.mpSyncMonitor(host)
 }
 
 // mpTick keeps clock/playhead/transport fresh while this host's tab shows (1 Hz).
@@ -1453,10 +1654,18 @@ func init() {
 		id := m.Val // smart-select forwards the picked value
 		t := u.mpMut(host, func(v *mpSt) {
 			if idx >= 0 && idx < len(v.media) {
-				v.media[idx].presetID = id
+				md := &v.media[idx]
+				md.presetID, md.inline = id, nil // picking a preset discards an unsaved edit
+				// the output file follows the preset's container - swap the extension in
+				// place (user-typed base names survive, only the ext tracks the format)
+				if md.outPath != "" {
+					md.outPath = swapExt(md.outPath, mpExt(md.path, mpPreset(u, id)))
+				}
 			}
 		})
 		u.mpPatchExport(t)
+		u.mpKickMeasure(host)
+		u.mpSyncMonitor(host)
 	})
 	onPrefix("mp-outpath:", func(u *UI, m actMsg) {
 		host, idxS := mpArgs(m.arg("mp-outpath:"))
@@ -1488,9 +1697,57 @@ func init() {
 				ov.TP = atof(m.Val)
 			case "loudraise":
 				ov.RaiseOnly = m.Val == "true"
+			case "loudtarget": // quick-pick chip: "<I>|<TP>" pair
+				iS, tpS, _ := strings.Cut(m.Val, "|")
+				ov.I, ov.TP = atof(iS), atof(tpS)
+				ov.On = true
 			}
 		})
 		u.mpPatchExport(t) // loudon shows/hides the targets
+		u.mpPatchWave(t)   // target line + projected curve track the settings
+		u.mpKickMeasure(host)
+		u.mpSyncMonitor(host)
+	})
+	// one-tap fix: normalization needs a re-encode - switch a copy preset to FLAC (lossless)
+	onPrefix("mp-loudfix:", func(u *UI, m actMsg) {
+		host, idxS := mpArgs(m.arg("mp-loudfix:"))
+		idx := atoi(idxS)
+		t := u.mpMut(host, func(v *mpSt) {
+			if idx >= 0 && idx < len(v.media) {
+				md := &v.media[idx]
+				md.presetID, md.inline = "flac", nil
+				if md.outPath != "" {
+					md.outPath = swapExt(md.outPath, "flac")
+				}
+			}
+		})
+		u.mpPatchExport(t)
+		u.mpKickMeasure(host)
+		u.mpSyncMonitor(host)
+	})
+	// pre-listen: audition the planned gain on the live audio engine
+	onPrefix("mp-monloud:", func(u *UI, m actMsg) {
+		host := m.arg("mp-monloud:")
+		if u.player() == nil {
+			u.toast(i18n.T(u.playerGateKey()))
+			return
+		}
+		t := u.mpMut(host, func(v *mpSt) { v.monitorLoud = !v.monitorLoud })
+		if t.monitorLoud {
+			u.mpSyncMonitor(host)
+		} else {
+			if pl := u.player(); pl != nil {
+				pl.SetPreGainDB(0)
+			}
+		}
+		u.mpPatchExport(t)
+	})
+	// cancel the in-flight export (kills the ffmpeg tree; partial output is removed)
+	onPrefix("mp-excancel:", func(u *UI, m actMsg) {
+		t := u.mpSnap(m.arg("mp-excancel:"))
+		if t.exporting && t.exportCancel != nil {
+			t.exportCancel()
+		}
 	})
 	onPrefix("mp-export:", func(u *UI, m actMsg) {
 		host, which := mpArgs(m.arg("mp-export:"))
@@ -1672,6 +1929,8 @@ func (u *UI) mpHandle(host, which, val string) {
 	u.mpPatchRO(t)
 	if phase == "up" {
 		u.mpPatchEdit(t)
+		u.mpKickMeasure(host) // drag settled - refresh the plan's exact-measure lookup
+		u.mpSyncMonitor(host)
 	}
 }
 
@@ -2336,13 +2595,15 @@ func (u *UI) mpPlanExport(t *mpSt, which string) ([]mpExportPlan, error) {
 		}
 		// The override replaces the preset's loudness block wholesale; off leaves the preset's own
 		// settings alone. The worker's NormalizePreset clamps the targets and drops loudness for
-		// copy/none audio (the export UI warns before it gets here).
-		preset := transcode.ApplyLoudnessOverride(mpPreset(u, m.presetID),
+		// copy/none audio (the export UI warns before it gets here). Inline (unsaved editor)
+		// presets win over presetID; a "source format" container resolves against the input.
+		preset := transcode.ApplyLoudnessOverride(u.mpActivePreset(&m),
 			m.loudOv.On, m.loudOv.I, m.loudOv.TP, m.loudOv.RaiseOnly)
 		out := m.outPath
 		if out == "" {
 			out = mpOutPath(m.path, preset)
 		}
+		preset = transcode.ResolveSourceContainer(preset, m.path)
 		te := e
 		if e >= dur-0.05 {
 			te = 0 // transcode.run treats trimEnd<=start as "to end"
@@ -2365,7 +2626,9 @@ func (u *UI) mpRunExport(host, which string) {
 	gen := t.gen
 	// "queued" until the worker's first stage event - a busy transcode pool no longer looks
 	// like a hung 0% bar while the job waits for a slot.
-	t = u.mpMut(host, func(v *mpSt) { v.exporting, v.exportPct, v.exportMsg, v.exportStage = true, 0, "", "queued" })
+	t = u.mpMut(host, func(v *mpSt) {
+		v.exporting, v.exportPct, v.exportMsg, v.exportStage, v.exportLoudTx = true, 0, "", "queued", ""
+	})
 	u.mpPatchExport(t)
 	if len(plans) == 1 {
 		u.toast(i18n.T("player.toast.exportingCut", i18n.A{"preset": plans[0].preset.Label}))
@@ -2375,7 +2638,9 @@ func (u *UI) mpRunExport(host, which string) {
 	u.bg(func() { u.mpExportRunAll(host, gen, plans) })
 }
 
-// mpExportRunAll runs the planned jobs sequentially, folding progress into one bar.
+// mpExportRunAll runs the planned jobs sequentially, folding progress into one bar. Runs on
+// a bg goroutine: the exact-measure cache lookup (skip pass 1) and the partial-output cleanup
+// on failure/cancel both live here.
 func (u *UI) mpExportRunAll(host string, gen int, plans []mpExportPlan) {
 	n := float64(len(plans))
 	var outs []string
@@ -2403,39 +2668,64 @@ func (u *UI) mpExportRunAll(host string, gen int, plans []mpExportPlan) {
 		}
 		params := map[string]any{"input": p.path, "output": p.out, "preset": p.preset,
 			"trimStart": p.trimS, "trimEnd": p.trimE}
-		if err := u.mpExportOne(params, onPct, onStage); err != nil {
-			u.mpExportDone(host, gen, false, err.Error(), outs)
+		// Exact windowed measurement already cached → the worker skips its measure pass
+		// entirely (the "analyze loudness every time" complaint).
+		if p.preset.LoudnessOn && transcode.LoudnessAppliesTo(p.preset.AudioCodec) && u.svc.Store != nil {
+			if raw, ok := u.svc.Store.GetAnalysis(store.KindLoudness,
+				mpMeasStoreKey(p.path, p.trimS, p.trimE), fileMtime(p.path)); ok {
+				var mm transcode.Measurement
+				if json.Unmarshal(raw, &mm) == nil {
+					params["measured"] = mm
+				}
+			}
+		}
+		if err := u.mpExportOne(host, gen, p, params, onPct, onStage); err != nil {
+			canceled := err.Error() == "canceled"
+			if pubFileExists(p.out) {
+				_ = os.Remove(p.out) // ffmpeg's partial output is corrupt either way
+			}
+			u.mpExportDone(host, gen, false, canceled, err.Error(), outs)
 			return
 		}
 		outs = append(outs, p.out)
 	}
-	u.mpExportDone(host, gen, true, "", outs)
+	u.mpExportDone(host, gen, true, false, "", outs)
 }
 
 // mpExportOne runs one transcode job (shared Hub when available, else the worker pool) and
 // blocks until it finishes. onStage receives the worker's "stage" events (prepare/measure/
-// encode) so the bar caption tracks what the job is actually doing.
-func (u *UI) mpExportOne(params map[string]any, onPct func(float64), onStage func(string)) error {
+// encode) so the bar caption tracks what the job is actually doing. The job's cancel handle
+// is published to the state (Cancel button); the worker's "loudness" event is captured to
+// the store (next export of the same window skips the measure) and to the applied-gain line.
+func (u *UI) mpExportOne(host string, gen int, plan mpExportPlan, params map[string]any, onPct func(float64), onStage func(string)) error {
 	onProgress := func(event string, data json.RawMessage) {
-		if event == "stage" && onStage != nil {
+		switch event {
+		case "stage":
 			var s struct {
 				Name string `json:"name"`
 			}
-			if json.Unmarshal(data, &s) == nil && s.Name != "" {
+			if json.Unmarshal(data, &s) == nil && s.Name != "" && onStage != nil {
 				onStage(s.Name)
 			}
-			return
-		}
-		if event != "progress" {
-			return
-		}
-		var p struct {
-			Percent float64 `json:"percent"`
-		}
-		if json.Unmarshal(data, &p) == nil {
-			onPct(p.Percent)
+		case "loudness":
+			u.mpExportLoudEvent(host, gen, plan, data)
+		case "progress":
+			var p struct {
+				Percent float64 `json:"percent"`
+			}
+			if json.Unmarshal(data, &p) == nil {
+				onPct(p.Percent)
+			}
 		}
 	}
+	setCancel := func(fn func()) {
+		u.mpMut(host, func(v *mpSt) {
+			if v.gen == gen {
+				v.exportCancel = fn
+			}
+		})
+	}
+	defer setCancel(nil)
 	if u.svc.Hub != nil { // shared transcode hub → live progress + queue visibility
 		done := make(chan error, 1)
 		jid := fmt.Sprintf("mpcut-%d", time.Now().UnixNano())
@@ -2449,6 +2739,7 @@ func (u *UI) mpExportOne(params map[string]any, onPct func(float64), onStage fun
 				done <- nil
 			}
 		})
+		setCancel(func() { u.svc.Hub.Cancel(jid) })
 		return <-done
 	}
 	if u.svc.Workers == nil {
@@ -2456,29 +2747,85 @@ func (u *UI) mpExportOne(params map[string]any, onPct func(float64), onStage fun
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
 	defer cancel()
+	setCancel(cancel)
 	_, err := u.svc.Workers.RunStream(ctx, "transcode", "transcode.run", params, onProgress)
+	if ctx.Err() != nil {
+		return errors.New("canceled")
+	}
 	return err
 }
 
-func (u *UI) mpExportDone(host string, gen int, ok bool, errTx string, outs []string) {
+// mpExportLoudEvent handles the worker's pass-1 result: persist the exact measurement for
+// this (input, trim window) so the NEXT export skips the measure pass, adopt it into the
+// live plan, and record the applied-gain line for the result readout.
+func (u *UI) mpExportLoudEvent(host string, gen int, plan mpExportPlan, data json.RawMessage) {
+	var ev struct {
+		InputI     float64 `json:"inputI"`
+		InputTP    float64 `json:"inputTP"`
+		InputLRA   float64 `json:"inputLRA"`
+		GainDB     float64 `json:"gainDB"`
+		PeakCapped bool    `json:"peakCapped"`
+		Skipped    bool    `json:"skipped"`
+	}
+	if json.Unmarshal(data, &ev) != nil {
+		return
+	}
+	mm := transcode.Measurement{I: ev.InputI, TP: ev.InputTP, LRA: ev.InputLRA}
+	if u.svc.Store != nil {
+		if raw, err := json.Marshal(mm); err == nil {
+			u.svc.Store.PutAnalysis(store.KindLoudness,
+				mpMeasStoreKey(plan.path, plan.trimS, plan.trimE), fileMtime(plan.path), raw)
+		}
+	}
+	tx := ""
+	switch {
+	case ev.Skipped:
+		tx = i18n.T("player.label.loudApSkipped")
+	case ev.PeakCapped:
+		tx = i18n.T("player.label.loudApCapped", i18n.A{
+			"gain": fmt.Sprintf("%+.1f", ev.GainDB), "out": fmt.Sprintf("%.1f", ev.InputI+ev.GainDB)})
+	default:
+		tx = i18n.T("player.label.loudApplied", i18n.A{
+			"gain": fmt.Sprintf("%+.1f", ev.GainDB), "out": fmt.Sprintf("%.1f", ev.InputI+ev.GainDB)})
+	}
+	u.mpMut(host, func(v *mpSt) {
+		if v.gen != gen {
+			return
+		}
+		v.exportLoudTx = tx
+		if plan.idx < len(v.media) && v.media[plan.idx].path == plan.path {
+			md := &v.media[plan.idx]
+			md.measKey = mpMeasKey(plan.path, plan.trimS, plan.trimE)
+			md.measured = &mm
+		}
+	})
+}
+
+func (u *UI) mpExportDone(host string, gen int, ok, canceled bool, errTx string, outs []string) {
 	t := u.mpMut(host, func(v *mpSt) {
 		if v.gen != gen {
 			return
 		}
-		v.exporting, v.exportStage = false, ""
-		if ok {
+		v.exporting, v.exportStage, v.exportCancel = false, "", nil
+		switch {
+		case ok:
 			v.exportPct, v.exportMsg = 100, i18n.T("player.label.exportDone")+strings.Join(outs, " · ")
-		} else {
+		case canceled:
+			v.exportPct, v.exportMsg, v.exportLoudTx = 0, i18n.T("player.label.exportCanceled"), ""
+		default:
 			v.exportMsg = i18n.T("player.label.exportMsgFailed") + errTx
 		}
 	})
-	if ok {
+	switch {
+	case ok:
 		names := make([]string, len(outs))
 		for i, o := range outs {
 			names[i] = filepath.Base(o)
 		}
 		u.toast(i18n.T("player.toast.cutExported") + strings.Join(names, ", "))
-	} else {
+	case canceled:
+		u.toast(i18n.T("player.toast.exportCanceled"))
+	default:
 		u.logErr("player export", errors.New(errTx))
 		u.toast(i18n.T("player.toast.exportFailed") + errTx)
 	}
@@ -2513,10 +2860,19 @@ func mpPreset(u *UI, id string) transcode.Preset {
 	return transcode.Preset{}
 }
 
-// mpExt is the output extension (no dot) - preset container, else the source's own.
+// swapExt swaps path's extension for extNoDot (no-op when extNoDot is empty).
+func swapExt(path, extNoDot string) string {
+	if extNoDot == "" {
+		return path
+	}
+	return strings.TrimSuffix(path, filepath.Ext(path)) + "." + extNoDot
+}
+
+// mpExt is the output extension (no dot) - the preset container's canonical extension
+// (Preset.Ext, so an "aac" container correctly writes .m4a), else the source's own.
 func mpExt(file string, preset transcode.Preset) string {
-	if preset.Container != "" {
-		return preset.Container
+	if e := preset.Ext(); e != "" {
+		return strings.TrimPrefix(e, ".")
 	}
 	return strings.TrimPrefix(filepath.Ext(file), ".")
 }

@@ -371,6 +371,10 @@
     "stream-why": {
       "title": "Flux vidéo VRSL",
       "body": "Diffuse votre éclairage DMX en direct dans VRChat sous forme de vidéo. rave-mate rend les univers DMX dans une grille de pixels VRSL, l'encode avec ffmpeg et la pousse via RTMP (ou WHIP) vers un service de transcodage (VRCDN, Twitch ou le vôtre) qui la sert au casque. Le monde lit cette vidéo et redécode la grille en lumières, sans relais Spout/NDI/OBS.\n\nLe mode standard produit une grille VRSL standard qui éclaire n'importe quel monde VRSL. Le mode étendu est un sur-ensemble : il ajoute une précision 16 bits, un en-tête d'intégrité et un compteur de vivacité qu'un monde rave.page décode, tandis qu'un monde VRSL standard le lit toujours comme du simple 8 bits. Gardez toute la chaîne LINÉAIRE : les pixels sont des valeurs de lumière brutes, pas une image encodée en gamma."
+    },
+    "mp-prelisten": {
+      "title": "Pré-écouter la sonie planifiée",
+      "body": "Applique à la lecture en direct le gain constant prévu par l'export : vous entendez le morceau à la sonie cible AVANT l'encodage. C'est exactement le gain que l'export inscrira : un changement de volume sur tout le morceau, sans compression ni limiteur, plafonné pour que le pic réel ne dépasse jamais le plafond. Activez-le pour comparer des cibles — le gain suit en direct vos changements de cible et de découpe. N'affecte que le monitoring de ce lecteur, jamais le fichier, et se réinitialise au chargement d'autres médias."
     }
   },
   "library": {
@@ -521,7 +525,11 @@
       "truePeak": "Plafond true-peak (dBTP)",
       "videoCodec": "Codec vidéo",
       "demotedNote": "Les workflows collection & playlist ré-encodent des dossiers ou playlists entiers vers un répertoire dupliqué (barre Browse / vue playlist) — vos originaux restent organisés. Conversion ponctuelle de ce seul fichier ? Ouvrez l'encodeur ci-dessous.",
-      "show": "Afficher l'encodeur pour ce fichier"
+      "show": "Afficher l'encodeur pour ce fichier",
+      "vbr": "VBR (débit variable)",
+      "vbrQuality": "Qualité VBR",
+      "maxForCodec": "max {max} pour {codec}",
+      "losslessNoBitrate": "Codec sans perte — pas de débit à choisir."
     },
     "favorites": {
       "desc": "Dossiers épinglés - ouverts dans Parcourir. Épinglez le dossier courant depuis la barre d'outils Parcourir.",
@@ -1849,7 +1857,17 @@
       "volume": "Volume",
       "exportQueued": "En attente d'un slot de transcodage…",
       "exportPreparing": "Préparation de l'export…",
-      "exportMeasuring": "Analyse de la sonie… {pct}%"
+      "exportMeasuring": "Analyse de la sonie… {pct}%",
+      "editPreset": "Modifier le preset…",
+      "noAudio": "pas d'audio",
+      "monitorLoud": "Pré-écoute de la sonie",
+      "monitorLoudOn": "Pré-écoute à {gain} dB",
+      "estSize": "≈ {size}",
+      "useFlacInstead": "La normalisation exige un réencodage — passer en FLAC (sans perte)",
+      "exportCanceled": "Export annulé — le fichier partiel a été supprimé.",
+      "loudApplied": "Sonie : {gain} dB appliqués → {out} LUFS intégrés.",
+      "loudApCapped": "Sonie : {gain} dB appliqués (plafonné au pic) → {out} LUFS intégrés.",
+      "loudApSkipped": "Sonie : ignorée (source silencieuse, ou augmentation seule et déjà assez forte)."
     },
     "openExternally": "Ouvrir en externe",
     "pause": "Pause",
@@ -1877,12 +1895,26 @@
       "playerUnavailable": "Lecteur indisponible",
       "remoteAudioOff": "L'audio ne joue pas dans une session distante - il retentirait sur l'ordinateur contrôlé. Lisez le fichier en local à la place.",
       "silenceFailed": "Échec de la détection de silence : ",
-      "timeFormat": "Format d'heure : mm:ss.s (ou h:mm:ss)"
+      "timeFormat": "Format d'heure : mm:ss.s (ou h:mm:ss)",
+      "exportCanceled": "Export annulé"
     },
     "trimEdit": "Rogner / éditer",
     "more": "Plus",
     "trimEditSub": "Couper une section ou exporter une copie rognée",
-    "loadingAudio": "Chargement de l'audio…"
+    "loadingAudio": "Chargement de l'audio…",
+    "plan": {
+      "measuring": "Mesure de la sonie…",
+      "noData": "Pas encore d'analyse de sonie — l'export mesurera précisément avant l'encodage.",
+      "skipRaise": "Augmentation seule : la source {src} LUFS est déjà à/au-dessus de {target} LUFS — inchangée.",
+      "capped": "{src} → {out} LUFS · gain plafonné à {gain} dB : le pic réel {tp} dBTP atteint le plafond de {ceil} dBTP. Baissez la cible ou le plafond pour plus.",
+      "line": "{src} → {out} LUFS · gain {gain} dB",
+      "measured": "mesuré",
+      "estimate": "estimation"
+    },
+    "pedit": {
+      "title": "Modifier le preset d'encodage",
+      "apply": "Appliquer sans enregistrer"
+    }
   },
   "publish": {
     "audio": "audio",

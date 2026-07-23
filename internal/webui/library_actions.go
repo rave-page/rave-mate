@@ -623,54 +623,7 @@ func (u *UI) libPickPreset(id string) {
 func (u *UI) libPF(field, val string) {
 	s := u.lib()
 	s.mu.Lock()
-	d := &s.draft
-	switch field {
-	case "container":
-		d.Container = val
-	case "vcodec":
-		d.VideoCodec = val
-	case "accel":
-		d.Accel = val
-	case "profile":
-		transcode.ApplyProfile(d, val)
-	case "ratemode":
-		d.RateMode = val
-	case "crf":
-		d.CRF = atoi(val)
-	case "bitratek":
-		d.BitrateK = atoi(val)
-	case "res":
-		switch val {
-		case "720":
-			d.Width, d.Height = 1280, 720
-		case "1080":
-			d.Width, d.Height = 1920, 1080
-		case "1440":
-			d.Width, d.Height = 2560, 1440
-		case "2160":
-			d.Width, d.Height = 3840, 2160
-		default:
-			d.Width, d.Height = 0, 0
-		}
-	case "fps":
-		d.FPS = atof(val)
-	case "acodec":
-		d.AudioCodec = val
-	case "abitratek":
-		d.AudioBitrateK = atoi(val)
-	case "channels":
-		d.Channels = atoi(val)
-	case "samplerate":
-		d.SampleRate = atoi(val)
-	case "loudon":
-		d.LoudnessOn = val == "true"
-	case "loudi":
-		d.LoudnessI = atof(val)
-	case "loudtp":
-		d.LoudnessTP = atof(val)
-	case "loudraise":
-		d.LoudnessRaiseOnly = val == "true"
-	}
+	applyPresetField(&s.draft, field, val) // shared builder core (pbuilder.go)
 	s.mu.Unlock()
 	u.libPatchDetail()
 }
