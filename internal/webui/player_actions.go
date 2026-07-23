@@ -1664,6 +1664,7 @@ func init() {
 			}
 		})
 		u.mpPatchExport(t)
+		u.mpPatchWave(t) // preset may change the loudness viz (target line / projection)
 		u.mpKickMeasure(host)
 		u.mpSyncMonitor(host)
 	})
@@ -1722,6 +1723,7 @@ func init() {
 			}
 		})
 		u.mpPatchExport(t)
+		u.mpPatchWave(t)
 		u.mpKickMeasure(host)
 		u.mpSyncMonitor(host)
 	})

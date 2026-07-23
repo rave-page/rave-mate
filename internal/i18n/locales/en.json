@@ -2382,7 +2382,8 @@
       "capped": "{src} → {out} LUFS · gain capped at {gain} dB: true peak {tp} dBTP hits the {ceil} dBTP ceiling. Lower the target or the ceiling for more.",
       "line": "{src} → {out} LUFS · gain {gain} dB",
       "measured": "measured",
-      "estimate": "estimate"
+      "estimate": "estimate",
+      "silence": "The trim window is silence - nothing to normalize."
     },
     "pedit": {
       "title": "Edit encoding preset",

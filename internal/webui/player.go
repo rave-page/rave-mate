@@ -1091,15 +1091,13 @@ func (u *UI) mpExportHTML(t mpSt) string {
 			label = i18n.T("player.label.kindPreset", i18n.A{"kind": strings.ToUpper(m.kind)})
 		}
 		b.WriteString(`<div class=mp-exmedia>`)
+		// one dense row: preset · edit · summary · output path · picker (wraps when narrow)
 		b.WriteString(`<div class="mp-erow mp-erow--preset">` +
 			`<span class=mp-presel>` + smartSelect(fmt.Sprintf("mp-preset-%s-%d", host, i), label,
 			fmt.Sprintf("mp-preset:%s\x1f%d", host, i), curID, func() []ssOpt { return optsCopy }) + `</span>` +
-			btn("✎ "+i18n.T("player.label.editPreset"), "ghost", fmt.Sprintf("mp-pedit:%s\x1f%d", host, i), "") +
 			u.mpSummaryChip(&t, i) +
-			`</div>`)
-		b.WriteString(`<div class="mp-erow mp-erow--out">` +
-			`<span class=mp-outfield>` + field(i18n.T("player.label.outputFile"), fmt.Sprintf("mp-outpath:%s\x1f%d", host, i), out, "text") + `</span>` +
-			btn("…", "ghost", "pick-save:"+mpExt(m.path, cur)+":mp-outpath:"+host+"\x1f"+fmt.Sprint(i), "") +
+			`<span class=mp-outwrap><span class=mp-outfield>` + field(i18n.T("player.label.outputFile"), fmt.Sprintf("mp-outpath:%s\x1f%d", host, i), out, "text") + `</span>` +
+			btn("…", "ghost", "pick-save:"+mpExt(m.path, cur)+":mp-outpath:"+host+"\x1f"+fmt.Sprint(i), "") + `</span>` +
 			`</div>`)
 		// per-media loudness override of the chosen preset (the shared block, components.go);
 		// the live gain-plan line + pre-listen toggle collapse with the switch
@@ -1207,9 +1205,12 @@ func (u *UI) mpSummaryChip(t *mpSt, i int) string {
 	}
 	tx := strings.Join(parts, " · ")
 	if m.inline != nil {
-		tx = "✎ " + tx
+		tx = "• " + tx // unsaved inline edit marker
 	}
-	return `<span class=mp-sum data-label="preset summary" data-value=` + attrQ(tx) + `>` + html.EscapeString(tx) + `</span>`
+	// the chip IS the edit-preset button: shows what you'll get, click to change it
+	return `<button class=mp-sum data-label="preset summary" data-value=` + attrQ(tx) +
+		` data-act=` + attrQ(fmt.Sprintf("mp-pedit:%s\x1f%d", t.host, i)) +
+		` title=` + attrQ(i18n.T("player.label.editPreset")) + `>` + html.EscapeString(tx) + ` ✎</button>`
 }
 
 // mpLoudExtraHTML renders the live gain-plan line + pre-listen toggle for media i.
@@ -1237,6 +1238,9 @@ func (u *UI) mpLoudExtraHTML(t *mpSt, i int) string {
 		} else {
 			tone, line = "dim", i18n.T("player.plan.noData")
 		}
+	case p.res.Skipped && p.srcI <= -70:
+		tone = "info"
+		line = i18n.T("player.plan.silence")
 	case p.res.Skipped:
 		tone = "info"
 		line = i18n.T("player.plan.skipRaise", i18n.A{"src": src, "target": fmt.Sprintf("%.1f", p.targetI)})

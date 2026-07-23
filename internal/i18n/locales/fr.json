@@ -1909,7 +1909,8 @@
       "capped": "{src} → {out} LUFS · gain plafonné à {gain} dB : le pic réel {tp} dBTP atteint le plafond de {ceil} dBTP. Baissez la cible ou le plafond pour plus.",
       "line": "{src} → {out} LUFS · gain {gain} dB",
       "measured": "mesuré",
-      "estimate": "estimation"
+      "estimate": "estimation",
+      "silence": "La fenêtre de découpe est silencieuse — rien à normaliser."
     },
     "pedit": {
       "title": "Modifier le preset d'encodage",

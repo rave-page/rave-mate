@@ -660,6 +660,17 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
+	case "scroll": // scroll the main content pane (webview; verification aid)
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl scroll <y-px>")
+			return 2
+		}
+		resp, err := app.Send("SCROLL " + args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
 	case "click":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl click <label substring>")

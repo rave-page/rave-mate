@@ -1909,7 +1909,8 @@
       "capped": "{src} → {out} LUFS · ganancia limitada a {gain} dB: el pico real {tp} dBTP alcanza el techo de {ceil} dBTP. Baja el objetivo o el techo para más.",
       "line": "{src} → {out} LUFS · ganancia {gain} dB",
       "measured": "medido",
-      "estimate": "estimación"
+      "estimate": "estimación",
+      "silence": "La ventana de recorte es silencio: nada que normalizar."
     },
     "pedit": {
       "title": "Editar preset de codificación",

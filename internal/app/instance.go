@@ -37,6 +37,7 @@ type Control interface {
 	Status() string
 	Snapshot() string                                            // text tree of the rendered UI (empty in service mode)
 	Resize(w, h float32) bool                                    // set the window size (viewport); false in service mode
+	Scroll(y float32) bool                                       // scroll the main content pane to y px (webview only); false otherwise
 	Click(query string) bool                                     // tap a button/check/tab by label; false if no match / service mode
 	Act(act, val string) bool                                    // post a raw UI action through the page act pipeline (webview renderer only)
 	Tap(x, y float32) bool                                       // tap the topmost leaf at canvas coords; false if no hit / service mode
@@ -275,6 +276,13 @@ func handleConn(conn net.Conn, ctrl Control) {
 			fmt.Fprintln(conn, "ok")
 		} else {
 			fmt.Fprintln(conn, "failed (no UI?)")
+		}
+	case strings.HasPrefix(cmd, "SCROLL "):
+		var y float32
+		if _, err := fmt.Sscanf(strings.TrimSpace(cmd[len("SCROLL "):]), "%f", &y); err == nil && ctrl.Scroll(y) {
+			fmt.Fprintln(conn, "ok")
+		} else {
+			fmt.Fprintln(conn, "unsupported")
 		}
 	case strings.HasPrefix(cmd, "RESIZE "):
 		var w, h float32

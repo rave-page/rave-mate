@@ -2011,7 +2011,8 @@
       "capped": "{src} → {out} LUFS · Gain bei {gain} dB gedeckelt: True Peak {tp} dBTP erreicht die {ceil}-dBTP-Grenze. Für mehr Ziel oder Grenze senken.",
       "line": "{src} → {out} LUFS · Gain {gain} dB",
       "measured": "gemessen",
-      "estimate": "Schätzung"
+      "estimate": "Schätzung",
+      "silence": "Der Schnittbereich ist Stille – nichts zu normalisieren."
     },
     "pedit": {
       "title": "Encoding-Preset bearbeiten",

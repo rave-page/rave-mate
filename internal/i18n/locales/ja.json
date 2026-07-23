@@ -1909,7 +1909,8 @@
       "capped": "{src} → {out} LUFS · ゲインは {gain} dB で上限: トゥルーピーク {tp} dBTP が {ceil} dBTP の上限に達します。ターゲットか上限を下げてください。",
       "line": "{src} → {out} LUFS · ゲイン {gain} dB",
       "measured": "実測",
-      "estimate": "推定"
+      "estimate": "推定",
+      "silence": "トリム範囲は無音です — ノーマライズするものがありません。"
     },
     "pedit": {
       "title": "エンコードプリセットを編集",

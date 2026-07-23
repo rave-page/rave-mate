@@ -2551,6 +2551,13 @@ func (c *appControl) Set(query, value string) bool {
 	return c.ui.Set(query, value)
 }
 
+// Scroll scrolls the main content pane (ctl SCROLL). Webview renderer only - resolved by
+// type assertion so the frontend seam (and the Fyne renderer) stays untouched.
+func (c *appControl) Scroll(y float32) bool {
+	s, ok := c.ui.(interface{ Scroll(y float32) bool })
+	return ok && s.Scroll(y)
+}
+
 func (c *appControl) Screenshot(path string) bool {
 	if c.ui == nil || path == "" {
 		return false

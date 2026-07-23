@@ -146,6 +146,16 @@ func (u *UI) Resize(w, h float32) {
 	}
 }
 
+// Scroll scrolls the #main content pane to y CSS px (ctl SCROLL; verification aid -
+// lower-page states become screenshotable without driving the mouse).
+func (u *UI) Scroll(y float32) bool {
+	if u.shell == nil {
+		return false
+	}
+	u.eval(fmt.Sprintf("var m=document.getElementById('main');if(m){m.scrollTop=%.0f}", y))
+	return true
+}
+
 // Screenshot captures the whole window to a PNG (OS window capture off the native HWND).
 func (u *UI) Screenshot(path string) error { return u.captureRegion(path, 0, 0, 0, 0) }
 

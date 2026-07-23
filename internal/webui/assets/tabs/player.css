@@ -63,21 +63,30 @@
 .mp-aoff { flex: 0 1 190px; }
 .mp-aoff .field { margin: 0; }
 
-/* export block: one bordered group per media - preset row, output row, loudness */
-.mp-export { display: flex; flex-direction: column; gap: 8px; }
-.mp-exmedia { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(255,255,255,.08);
-  border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.02); }
+/* export block: one dense bordered group per media; side-by-side on wide windows */
+.mp-export { display: grid; grid-template-columns: 1fr; gap: 6px; }
+@media (min-width: 1100px) { .mp-export { grid-template-columns: 1fr 1fr; } }
+.mp-export > .mp-erow--go, .mp-export > .mp-exrun,
+.mp-export > .mp-exloud, .mp-export > .mp-exmsg { grid-column: 1 / -1; }
+.mp-exmedia { display: flex; flex-direction: column; gap: 4px; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; padding: 6px 8px; background: rgba(255,255,255,.02); min-width: 0; }
+/* toggle rows inside the export blocks: inline + tight, not full-width settings rows */
+.mp-exmedia .row { width: auto; justify-content: flex-start; gap: 8px; padding: 2px 0; border: 0; }
+.mp-exmedia .row-label { font-size: 12px; }
+.mp-exmedia .pb-grp { border: 0; padding-top: 0; }
 .mp-presel { flex: 0 1 240px; min-width: 200px; }
 .mp-scopesel { flex: 0 1 210px; min-width: 180px; }
-.mp-outfield { flex: 1 1 240px; min-width: 180px; }
+.mp-outwrap { display: flex; gap: 4px; align-items: flex-end; flex: 1 1 200px; min-width: 0; }
+.mp-outfield { flex: 1 1 160px; min-width: 120px; }
 .mp-outfield .field { margin: 0; }
 .mp-exmsg { font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #fafafa;
   word-break: break-all; }
 
-/* what-you-get summary chip: always-visible selected state for the export */
+/* what-you-get summary chip - doubles as the preset-editor button */
 .mp-sum { font: 600 10px/1.6 'JetBrains Mono', ui-monospace, monospace; color: #0a0a0a;
-  background: var(--rp-brand-mint, #08F79B); border-radius: 6px; padding: 2px 8px;
-  align-self: center; letter-spacing: .02em; white-space: nowrap; }
+  background: var(--rp-brand-mint, #08F79B); border: 0; border-radius: 6px; padding: 3px 8px;
+  align-self: center; letter-spacing: .02em; white-space: nowrap; cursor: pointer; }
+.mp-sum:hover { background: var(--rp-brand-hot, #FF3E8A); color: #fff; }
 
 /* loudness quick-target chips + inline fields (compact loudnessFields variant) */
 .pb-grp--compact { display: flex; flex-direction: column; gap: 6px; }
