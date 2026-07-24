@@ -3,6 +3,8 @@ package gridfix
 import (
 	"fmt"
 	"math"
+
+	"rave.page/mate/internal/musiclib"
 )
 
 // Status of a per-track plan.
@@ -34,6 +36,8 @@ type PlanInput struct {
 	BiasS       float64  // calibrated systematic detector offset (s)
 	MinQuality  float64  // min grid coverage to auto-fix (Python default 0.85)
 	ThresholdMS float64  // ignore corrections smaller than this (Python default 12)
+	RangeLo     float64  // target tempo band (0 = none): fold prior + result into it
+	RangeHi     float64
 }
 
 // PlanFix decides FIX/OK/SKIP for a fitted grid. fit must be the raw FitConstantGrid
@@ -42,18 +46,25 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 	if in.MultiMarker {
 		return Plan{Status: StatusSkip, Detail: "multiple grid markers (manually gridded?) - not touching"}
 	}
-	fit = ChooseOctave(fit, in.OldBPM, downbeats)
+	// prior = stored BPM folded into the target band (87 → 174 for a 160-190 rule),
+	// so octave choice + snap trust compare against the band-correct octave while
+	// bpmChanged still compares against the raw stored value (forcing a FIX write).
+	prior := in.OldBPM
+	if p, ok := musiclib.FoldBPM(in.OldBPM, musiclib.BPMRange{Min: in.RangeLo, Max: in.RangeHi}); ok {
+		prior = p
+	}
+	fit = ChooseOctaveRange(fit, prior, downbeats, in.RangeLo, in.RangeHi)
 	fitted := fit.BPM()
 	// confident integer tempo: snap, correcting stored artifacts like 173.999
 	var newBPM float64
 	tempoAgrees := false
 	if snapped := math.RoundToEven(fitted); math.Abs(fitted-snapped) < 0.02 {
 		newBPM = snapped
-		tempoAgrees = in.OldBPM > 0 && math.Abs(newBPM-in.OldBPM) < 0.1
-	} else if in.OldBPM > 0 && math.Abs(fitted-in.OldBPM) < 0.1 {
-		// non-integer measurement within jitter noise of the stored BPM: trust the
-		// stored value (keeping it costs <15ms drift over a track)
-		newBPM = in.OldBPM
+		tempoAgrees = prior > 0 && math.Abs(newBPM-prior) < 0.1
+	} else if prior > 0 && math.Abs(fitted-prior) < 0.1 {
+		// non-integer measurement within jitter noise of the (folded) stored BPM:
+		// trust it (keeping it costs <15ms drift over a track)
+		newBPM = prior
 		tempoAgrees = true
 	} else {
 		newBPM = fitted
@@ -76,6 +87,10 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 		}
 	}
 
+	folded := ""
+	if prior != in.OldBPM && math.Abs(newBPM-in.OldBPM) > 5e-4 {
+		folded = fmt.Sprintf(" - BPM folded into %g-%g target range", in.RangeLo, in.RangeHi)
+	}
 	if in.OldStartS != nil {
 		// corrected offset: raw phase difference minus the calibrated bias
 		off := PhaseOffsetS(*in.OldStartS, fit) - in.BiasS
@@ -85,7 +100,7 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 				OldBPM: in.OldBPM, NewBPM: newBPM, OffsetMS: off * 1000}
 		}
 		return Plan{Status: StatusFix,
-			Detail: fmt.Sprintf("(grid coverage %.0f%%)", fit.Coverage*100),
+			Detail: fmt.Sprintf("(grid coverage %.0f%%)%s", fit.Coverage*100, folded),
 			OldBPM: in.OldBPM, NewBPM: newBPM,
 			NewStartS: newStart, OffsetMS: off * 1000}
 	}
@@ -103,7 +118,7 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 	}
 	k := math.RoundToEven((base - fit.Anchor) / fit.Period)
 	newStart := fit.Anchor + k*fit.Period + in.BiasS
-	return Plan{Status: StatusFix, Detail: "created grid marker",
+	return Plan{Status: StatusFix, Detail: "created grid marker" + folded,
 		OldBPM: in.OldBPM, NewBPM: newBPM,
 		NewStartS: newStart, OffsetMS: math.NaN(), Created: true}
 }

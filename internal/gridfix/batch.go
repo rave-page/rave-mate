@@ -3,6 +3,8 @@ package gridfix
 import (
 	"context"
 	"time"
+
+	"rave.page/mate/internal/musiclib"
 )
 
 // BatchTrack is one candidate track for a batch run (grid state as scanned from
@@ -15,6 +17,8 @@ type BatchTrack struct {
 	MultiMarker bool     // >1 grid markers: manually gridded, never touch
 	Locked      bool     // grid lock flag: never touch, never analyze
 	Verified    bool     // user-confirmed grid: always skip (never re-touch), even in force mode
+	RangeLo     float64  // target tempo band (0 = none): prior + octave choice fold into it
+	RangeHi     float64
 }
 
 // analyzer is the beat-detection seam (Engine satisfies it; tests stub it).
@@ -126,7 +130,13 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 				}
 			}
 			res.Beats = len(det.Beats)
-			fit := FitConstantGrid(det.Beats, det.Downbeats, t.OldBPM)
+			// candidate seeding + tie-breaks use the band-folded prior so the
+			// in-range octave wins even when the stored BPM is octave-wrong
+			prior := t.OldBPM
+			if p, ok := musiclib.FoldBPM(t.OldBPM, musiclib.BPMRange{Min: t.RangeLo, Max: t.RangeHi}); ok {
+				prior = p
+			}
+			fit := FitConstantGrid(det.Beats, det.Downbeats, prior)
 			if fit == nil {
 				res.Plan = Plan{Status: StatusSkip,
 					Detail: "no stable constant grid found - fix manually", OldBPM: t.OldBPM}
@@ -137,7 +147,8 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 				bias = b.opts.Bias.ForPath(t.Path) // calibrated per-ext bias wins
 			}
 			in := PlanInput{OldBPM: t.OldBPM, BiasS: bias,
-				MinQuality: b.opts.MinQuality, ThresholdMS: b.opts.ThresholdMS}
+				MinQuality: b.opts.MinQuality, ThresholdMS: b.opts.ThresholdMS,
+				RangeLo: t.RangeLo, RangeHi: t.RangeHi}
 			if t.OldStartMs != nil {
 				s := *t.OldStartMs / 1000.0
 				in.OldStartS = &s

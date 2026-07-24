@@ -5,6 +5,8 @@ package gridfix
 import (
 	"math"
 	"sort"
+
+	"rave.page/mate/internal/musiclib"
 )
 
 // GridFit is a constant grid anchored on detected beats.
@@ -282,22 +284,50 @@ func ChooseOctave(fit GridFit, oldBPM float64, downbeats []float64) GridFit {
 			if factor == 1.0 {
 				return fit
 			}
-			period := fit.Period / factor
-			anchor := fit.Anchor
-			if factor == 0.5 && len(downbeats) > 0 {
-				// halving the grid density: pick beat parity that matches downbeats
-				par := make([]float64, len(downbeats))
-				for i, db := range downbeats {
-					k := math.RoundToEven((db - fit.Anchor) / fit.Period)
-					par[i] = pymod(k, 2)
-				}
-				if median(par) >= 0.5 {
-					anchor += fit.Period
-				}
+			if factor == 0.5 {
+				return halveDensity(fit, downbeats)
 			}
-			fit.Anchor, fit.Period = anchor, period
+			fit.Period /= factor
 			return fit
 		}
+	}
+	return fit
+}
+
+// halveDensity doubles the beat period, picking the anchor parity that matches
+// the detected downbeats so the surviving gridlines stay on the strong beats.
+func halveDensity(fit GridFit, downbeats []float64) GridFit {
+	anchor := fit.Anchor
+	if len(downbeats) > 0 {
+		par := make([]float64, len(downbeats))
+		for i, db := range downbeats {
+			k := math.RoundToEven((db - fit.Anchor) / fit.Period)
+			par[i] = pymod(k, 2)
+		}
+		if median(par) >= 0.5 {
+			anchor += fit.Period
+		}
+	}
+	fit.Anchor, fit.Period = anchor, fit.Period*2
+	return fit
+}
+
+// ChooseOctaveRange is ChooseOctave plus a target tempo band [lo,hi] (0,0 = none):
+// after the legacy choice the result folds into the band by power-of-2 shifts, so
+// a track whose stored BPM sits in the wrong octave (DnB tagged 87) lands at 174
+// even though the stored octave "wins" the legacy heuristic. Doubling density
+// keeps the anchor; halving realigns parity to the downbeats.
+func ChooseOctaveRange(fit GridFit, oldBPM float64, downbeats []float64, lo, hi float64) GridFit {
+	fit = ChooseOctave(fit, oldBPM, downbeats)
+	folded, ok := musiclib.FoldBPM(fit.BPM(), musiclib.BPMRange{Min: lo, Max: hi})
+	if !ok {
+		return fit
+	}
+	for fit.BPM() < folded-1e-9 {
+		fit.Period /= 2
+	}
+	for fit.BPM() > folded+1e-9 {
+		fit = halveDensity(fit, downbeats)
 	}
 	return fit
 }

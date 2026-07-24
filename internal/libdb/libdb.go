@@ -261,6 +261,10 @@ func Open(path string) (*DB, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("apply track-compat schema: %w", err)
 	}
+	if _, err := sdb.Exec(bpmGenreRuleSchema); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("apply bpm-genre-rule schema: %w", err)
+	}
 	// Additive migrations for pre-existing DBs (CREATE IF NOT EXISTS skips new columns).
 	// "duplicate column" = already migrated; ignored.
 	for _, m := range []string{
@@ -272,6 +276,8 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE track_art ADD COLUMN artist TEXT`,       // name-based cover resolution
 		`ALTER TABLE track_art ADD COLUMN title TEXT`,
 		`ALTER TABLE playlists ADD COLUMN auto_refresh INTEGER NOT NULL DEFAULT 0`, // folder-bound: pick up new files automatically
+		`ALTER TABLE playlists ADD COLUMN bpm_min REAL NOT NULL DEFAULT 0`,         // BPM target range: fold members' octave-wrong BPMs in
+		`ALTER TABLE playlists ADD COLUMN bpm_max REAL NOT NULL DEFAULT 0`,
 		// set-builder divider marker rows: excluded from collection/sync/enrichment at query
 		// level (LoadAllTracks/AllSourcedTracks); they exist only inside playlists
 		`ALTER TABLE tracks ADD COLUMN is_divider INTEGER NOT NULL DEFAULT 0`,

@@ -1353,6 +1353,27 @@
       "pinned": "Angeheftet",
       "drives": "Laufwerke",
       "folders": "Ordner"
+    },
+    "bpr": {
+      "title": "BPM-Zielbereiche",
+      "menu": "BPM-Zielbereiche…",
+      "hint": "Lege pro Genre oder Playlist ein Ziel-Tempoband fest (Playlist-Regeln gewinnen, schmalstes Band zuerst). In der falschen Oktave analysierte Tracks — DnB als 87 statt 174 erkannt — werden nur durch Verdoppeln oder Halbieren ins Band gefaltet; kein Beat und kein Cue verschiebt sich: Verdoppeln setzt Beats dazwischen, Halbieren behält den Anker-Beat. Die Regeln steuern auch die Beatgrid-Analyse und jeden DJ-Software-Sync.",
+      "noLib": "Bibliotheksdatenbank nicht verfügbar.",
+      "genre": "Genre oder Familie",
+      "min": "Min. BPM",
+      "max": "Max. BPM",
+      "addRule": "Regel hinzufügen / aktualisieren",
+      "plRules": "Playlist-Regeln:",
+      "working": "Arbeitet…",
+      "scanResult": "{ruled} Tracks unter Regeln · {fix} außerhalb (korrigierbar) · {unfix} per ×2/÷2 nicht erreichbar",
+      "scan": "Sammlung scannen",
+      "apply": "{n} Tracks korrigieren (Bibliothek · Collection · Tags)",
+      "done": "{n} Tracks gefaltet · {tags} Datei-Tags aktualisiert",
+      "plTitle": "Playlist-BPM-Bereich",
+      "plHint": "Tracks dieser Playlist werden bei Beatgrid-Analyse, Durchsetzung und DJ-Software-Sync in dieses Band gefaltet. Nur Verdoppeln/Halbieren — Beats und Cues verschieben sich nie. Beide Felder leer (oder 0) löscht die Regel.",
+      "plMenu": "BPM-Bereich…",
+      "plMenuSub": "BPM der Tracks in ein Zielband zwingen",
+      "plSaved": "BPM-Bereich gespeichert"
     }
   },
   "live": {

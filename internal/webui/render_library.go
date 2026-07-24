@@ -924,6 +924,7 @@ func (u *UI) libMoreMenuHTML(s *libSt) string {
 		{"lib-relocate", i18n.T("library.coll.relocate")},
 		{"lib-export", i18n.T("library.coll.export")},
 		{"lib-tagfix", i18n.T("library.tf.menu")},
+		{"lib-bpmranges", i18n.T("library.bpr.menu")},
 	}
 	if u.svc.Syncer != nil {
 		items = append(items, [2]string{"lib-sync", i18n.T("library.coll.sync")})
@@ -1418,6 +1419,13 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 		add(i18n.T("library.pl.dupManual"), fmt.Sprintf("lib-pl-dup:%d", p.ID), "")
 	}
 	add(i18n.T("library.plsort.btn"), fmt.Sprintf("lib-plsort:%d", p.ID), "")
+	if p.Kind != libdb.PlaylistSmart && u.svc.Lib != nil {
+		lbl := i18n.T("library.bpr.plMenu")
+		if r, ok := u.svc.Lib.PlaylistBPMRange(p.ID); ok {
+			lbl += fmt.Sprintf(" (%g–%g)", r.Min, r.Max)
+		}
+		add(lbl, fmt.Sprintf("lib-pl-bpmrange:%d", p.ID), i18n.T("library.bpr.plMenuSub"))
+	}
 	if u.svc.Syncer != nil {
 		add(i18n.T("library.pl.push"), fmt.Sprintf("lib-pl-push:%d", p.ID), "")
 		add(i18n.T("library.pl.pull"), fmt.Sprintf("lib-pl-pull:%d", p.ID), "")

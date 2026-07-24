@@ -18,14 +18,29 @@ type Result struct {
 	Scanned   int             `json:"scanned"`   // candidate tracks loaded across sources
 	Canonical int             `json:"canonical"` // merged tracks in scope
 	Tagged    int             `json:"tagged"`    // files whose tags were written
+	BPMFolded int             `json:"bpmFolded"` // tracks whose BPM was octave-folded into a target range
 	Dry       bool            `json:"dry"`
 	Targets   []TargetOutcome `json:"targets,omitempty"`
 	Errors    []string        `json:"errors,omitempty"`
 }
 
+// resolveBPMRange finds a merged track's target band: playlist rules via ANY
+// candidate path first (per-source paths can differ), then the canonical genre.
+func resolveBPMRange(rules *libdb.BPMRules, cands []libdb.SourcedTrack, merged musiclib.Track) (musiclib.BPMRange, bool) {
+	for _, c := range cands {
+		if r, ok := rules.Resolve(c.Track.Path, ""); ok {
+			return r, true
+		}
+	}
+	return rules.Resolve(merged.Path, merged.Genre)
+}
+
 // Summary is a one-line human description of a result.
 func (r Result) Summary() string {
 	parts := []string{fmt.Sprintf("%d in scope", r.Canonical)}
+	if r.BPMFolded > 0 {
+		parts = append(parts, fmt.Sprintf("%d BPM folded", r.BPMFolded))
+	}
 	for _, t := range r.Targets {
 		if t.Updated+t.Added > 0 {
 			parts = append(parts, fmt.Sprintf("%s/%s +%d ~%d", t.App, t.Mode, t.Added, t.Updated))
@@ -73,6 +88,13 @@ func Run(db *libdb.DB, job config.SyncJob, dry bool) (Result, error) {
 		return res, err
 	}
 
+	// BPM target-range rules (per playlist/genre): fold octave-wrong BPMs into the
+	// band on the canonical track so every target receives the corrected tempo.
+	rules, err := db.LoadBPMRules()
+	if err != nil {
+		return res, err
+	}
+
 	// This merge scans the whole library (~23k tracks). Yield to the UI/encoder while a stream is
 	// live or the window is mid drag/resize (amortized - the per-item work is cheap).
 	var canonical []musiclib.Track
@@ -84,7 +106,15 @@ func Run(db *libdb.DB, job config.SyncJob, dry bool) (Result, error) {
 		if !inScope(h, cands) {
 			continue
 		}
-		canonical = append(canonical, MergeCanonical(cands, job.Rules.FieldSource))
+		merged := MergeCanonical(cands, job.Rules.FieldSource)
+		if !rules.Empty() {
+			if r, ok := resolveBPMRange(rules, cands, merged); ok {
+				if _, changed := musiclib.FoldTrack(&merged, r); changed {
+					res.BPMFolded++
+				}
+			}
+		}
+		canonical = append(canonical, merged)
 	}
 	res.Canonical = len(canonical)
 	if len(canonical) == 0 {

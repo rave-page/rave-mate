@@ -1722,6 +1722,27 @@
       "pinned": "Pinned",
       "drives": "Drives",
       "folders": "Folders"
+    },
+    "bpr": {
+      "title": "BPM target ranges",
+      "menu": "BPM target ranges…",
+      "hint": "Set a target tempo band per genre or per playlist (playlist rules win, narrowest band first). Tracks analyzed in the wrong octave — DnB detected at 87 instead of 174 — fold into the band by doubling or halving only, which never moves a beat or cue: doubling adds beats between the existing ones, halving keeps the anchor beat. Rules also steer beatgrid analysis and every DJ-software sync.",
+      "noLib": "Library database unavailable.",
+      "genre": "Genre or family",
+      "min": "Min BPM",
+      "max": "Max BPM",
+      "addRule": "Add / update rule",
+      "plRules": "Playlist rules:",
+      "working": "Working…",
+      "scan": "Scan collection",
+      "scanResult": "{ruled} tracks under rules · {fix} out of range (fixable) · {unfix} not reachable by ×2/÷2",
+      "apply": "Fix {n} tracks (library · collection · tags)",
+      "done": "{n} tracks folded · {tags} file tags updated",
+      "plTitle": "Playlist BPM range",
+      "plHint": "Members of this playlist fold into this band during beatgrid analysis, range enforcement and DJ-software sync. Doubling/halving only — beats and cues never move. Leave both fields empty (or 0) to clear the rule.",
+      "plMenu": "BPM range…",
+      "plMenuSub": "Force members' BPM into a target band",
+      "plSaved": "BPM range saved"
     }
   },
   "live": {

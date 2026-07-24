@@ -1263,6 +1263,27 @@
       "pinned": "Épinglés",
       "drives": "Disques",
       "folders": "Dossiers"
+    },
+    "bpr": {
+      "title": "Plages BPM cibles",
+      "menu": "Plages BPM cibles…",
+      "hint": "Définissez une bande de tempo cible par genre ou par playlist (les règles de playlist priment, bande la plus étroite d'abord). Les morceaux analysés dans la mauvaise octave — DnB détecté à 87 au lieu de 174 — sont repliés dans la bande uniquement par doublement ou division par deux, sans jamais déplacer un beat ni un cue : doubler ajoute des beats entre les existants, diviser conserve le beat d'ancrage. Les règles guident aussi l'analyse de beatgrid et chaque synchronisation vers les logiciels DJ.",
+      "noLib": "Base de données de la bibliothèque indisponible.",
+      "genre": "Genre ou famille",
+      "min": "BPM min",
+      "max": "BPM max",
+      "addRule": "Ajouter / mettre à jour la règle",
+      "plRules": "Règles de playlist :",
+      "working": "En cours…",
+      "scan": "Analyser la collection",
+      "scanResult": "{ruled} morceaux sous règles · {fix} hors plage (corrigeables) · {unfix} inatteignables en ×2/÷2",
+      "apply": "Corriger {n} morceaux (bibliothèque · collection · tags)",
+      "done": "{n} morceaux repliés · {tags} tags de fichier mis à jour",
+      "plTitle": "Plage BPM de la playlist",
+      "plHint": "Les morceaux de cette playlist sont repliés dans cette bande lors de l'analyse de beatgrid, de l'application de la plage et de la synchronisation DJ. Uniquement ×2/÷2 — beats et cues ne bougent jamais. Laissez les deux champs vides (ou 0) pour effacer la règle.",
+      "plMenu": "Plage BPM…",
+      "plMenuSub": "Forcer le BPM des morceaux dans une bande cible",
+      "plSaved": "Plage BPM enregistrée"
     }
   },
   "live": {

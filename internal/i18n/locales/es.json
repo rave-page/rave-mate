@@ -1263,6 +1263,27 @@
       "pinned": "Fijados",
       "drives": "Unidades",
       "folders": "Carpetas"
+    },
+    "bpr": {
+      "title": "Rangos BPM objetivo",
+      "menu": "Rangos BPM objetivo…",
+      "hint": "Define una banda de tempo objetivo por género o por playlist (las reglas de playlist ganan, la banda más estrecha primero). Los tracks analizados en la octava equivocada — DnB detectado a 87 en vez de 174 — se pliegan a la banda solo duplicando o dividiendo por dos, sin mover jamás un beat ni un cue: duplicar añade beats entre los existentes, dividir conserva el beat ancla. Las reglas también guían el análisis de beatgrid y cada sincronización con software DJ.",
+      "noLib": "Base de datos de la biblioteca no disponible.",
+      "genre": "Género o familia",
+      "min": "BPM mín",
+      "max": "BPM máx",
+      "addRule": "Añadir / actualizar regla",
+      "plRules": "Reglas de playlist:",
+      "working": "Trabajando…",
+      "scan": "Escanear colección",
+      "scanResult": "{ruled} tracks bajo reglas · {fix} fuera de rango (corregibles) · {unfix} inalcanzables con ×2/÷2",
+      "apply": "Corregir {n} tracks (biblioteca · colección · tags)",
+      "done": "{n} tracks plegados · {tags} tags de archivo actualizados",
+      "plTitle": "Rango BPM de la playlist",
+      "plHint": "Los tracks de esta playlist se pliegan a esta banda durante el análisis de beatgrid, la aplicación del rango y la sincronización con software DJ. Solo ×2/÷2 — beats y cues nunca se mueven. Deja ambos campos vacíos (o 0) para borrar la regla.",
+      "plMenu": "Rango BPM…",
+      "plMenuSub": "Forzar el BPM de los tracks a una banda objetivo",
+      "plSaved": "Rango BPM guardado"
     }
   },
   "live": {

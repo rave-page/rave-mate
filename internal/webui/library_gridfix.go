@@ -529,11 +529,15 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 		MinQuality: f.ResolvedMinQuality(), ThresholdMS: f.ResolvedThresholdMS(),
 		BiasS: f.BiasS, Bias: gridfix.Calibration(f.BiasExt), Checkpoint: f.ActiveModel, Force: force})
 	vs := u.gfVerified()
+	rules, _ := u.svc.Lib.LoadBPMRules() // nil-DB safe; empty = no ranges
 	bts := make([]gridfix.BatchTrack, 0, len(tracks))
 	for _, t := range tracks {
 		bt := gridfix.BatchTrack{Path: t.Path, Title: trackTitle(t), OldBPM: t.BPM,
 			MultiMarker: len(t.Beatgrid) > 1,
 			Verified:    vs != nil && vs.Has(t.Path)}
+		if r, ok := rules.Resolve(t.Path, t.Genre); ok {
+			bt.RangeLo, bt.RangeHi = r.Min, r.Max
+		}
 		if len(t.Beatgrid) == 1 {
 			ms := t.Beatgrid[0].PositionMs
 			bt.OldStartMs = &ms

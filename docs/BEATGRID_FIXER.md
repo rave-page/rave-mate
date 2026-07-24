@@ -91,3 +91,28 @@ tracks from `MANUAL_GRIDDING_PREP`, verify them, then train (20+ recommended).
   library-sync writeback target (constant grids only; variable grids are never collapsed).
 - Library sync (Settings → Library sync) can also write grids: VirtualDJ has file +
   live writeback modes, Serato a per-file writeback target, Rekordbox XML export.
+
+## BPM target ranges (Library → Collection → Maintenance)
+
+Half/double-time detections (a 174 DnB track analyzed and stored as 87) are fixed
+systemically with per-playlist and per-genre target bands:
+
+- **Rules.** Maintenance → "BPM target ranges…" stores per-genre bands (exact genre
+  or genre family, e.g. `drum & bass` 160–190). Any non-smart playlist gets its own
+  band via its ⋯ menu → "BPM range…" — playlist rules beat genre rules; the
+  narrowest band wins when several apply.
+- **Fold, never re-grid.** Out-of-band BPMs fold in by ×2/÷2 only: doubling adds
+  beats between existing ones, halving keeps the anchor beat — grid markers and
+  time-based cues never move, in any DJ software.
+- **Analysis.** The fixer's octave choice folds both the stored-BPM prior and the
+  fitted grid into the band, so a run on a ruled track lands at 174 even when the
+  tag says 87 (a band outside 90–180 also unlocks tempos the default normalization
+  would never pick).
+- **Enforcement.** "Scan collection" lists out-of-band tracks (with the unfixable
+  remainder where no power of 2 lands inside a too-narrow band); "Fix n tracks"
+  folds them in the library (journaled in change_log, revertible), writes every
+  detected DJ-software collection (backup first; grid locks are written through) and
+  the files' own BPM tags. Multi-marker manual grids fold library+tags only — their
+  marker lists are never collapsed.
+- **Sync.** Cross-software library sync folds canonical tracks through the same
+  rules, so every export/writeback target receives in-band tempos.

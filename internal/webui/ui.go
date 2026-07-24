@@ -66,6 +66,7 @@ type UI struct {
 	wuCache    worldsUnityCache // Worlds-tab Unity project inspects (fs stat sweep) - off the render goroutine
 
 	gf      gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
+	bpr     bprState     // BPM target-range rules + enforcement (library_bpmrange.go)
 	tf      tfState      // tag-fixer scan/apply state (library_tagfix.go)
 	re      reencSt      // batch re-encode modal state (library_reencode.go)
 	ae      aeSt         // automation create/edit form state (automations_editor.go)
