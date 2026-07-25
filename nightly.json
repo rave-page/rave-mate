@@ -1,13 +1,13 @@
 {
-  "version": "nightly-59fb6db",
-  "build": 134,
-  "commit": "59fb6db",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-134-20260725-59fb6db.exe",
-  "sha256": "ebd88af05880e8fb26532b56b597ab5644ece413cfcf3b6f17343e3e18b70290",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-134-20260725-59fb6db.exe",
-  "installer_sha256": "b7c616933425f306b9eae1bec8472cc81a313c536ebf68ecf639bd4af596c041",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-134-20260725-59fb6db",
-  "linux_sha256": "4d4d035b33bdbf03bca17e2a841c8e52109d45f1a34672fbf649d3233b653289",
+  "version": "nightly-1a3c09f",
+  "build": 137,
+  "commit": "1a3c09f",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-137-20260725-1a3c09f.exe",
+  "sha256": "647fdd5e65232e38c01a24af41ee96bfd6e455cf7eb4b655831a1282b43c345b",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-137-20260725-1a3c09f.exe",
+  "installer_sha256": "3bd159d936661436c37db6ea5a0f145b66e634fa367c0371cf005085e18d3b86",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-137-20260725-1a3c09f",
+  "linux_sha256": "4f99dedcfbc6e8c098afa64cc9fd1c982a554bf5973b3be32c4277523642a7ea",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T11:53:47Z",
-  "notes": "fix(zig): drop per-lib bundled compiler-rt - combined zigdsp+zigui+zigvr link deduped"
+  "released": "2026-07-25T12:56:33Z",
+  "notes": "Merge feature/zig-native-core: P2 WAV/AIFF decoders in Zig (sample-exact incl. seek; shared RzPcmDec handle)"
 }
