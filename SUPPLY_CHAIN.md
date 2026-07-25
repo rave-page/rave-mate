@@ -151,3 +151,9 @@ binary. Run via `make generate-api`.
 |---|---|---|---|
 | `github.com/oapi-codegen/oapi-codegen/v2` | v2.7.0 | 2026-05-01 | Generates the filtered Go API client from `/openapi.json`. |
 | `github.com/getkin/kin-openapi` | v0.135.0 | (w/ above) | OpenAPI 3 loader; lets us fix up the spec before generation. |
+
+### Native toolchain (build-time only, NOT a Go dep)
+
+| Tool | Version | Why |
+|---|---|---|
+| `zig` | >= 0.16.0 (winget zig.zig) | Builds `native/zigcore` (C-ABI static lib: sinc resampler + waveform kernels) for `-tags zigdsp` builds. Build-time only; untagged builds never need it. No third-party Zig packages (no `build.zig.zon` deps) — any future one gets a row here + the 7-day soak. |

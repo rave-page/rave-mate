@@ -93,6 +93,8 @@ From `rave-mate/`:
 | Supply-chain soak gate | `bash scripts/check-release-age.sh` |
 | Vuln scan | `govulncheck ./...` |
 | Package (Fyne, win) | `fyne package -os windows --release` |
+| Build Zig native core (zig >= 0.16) | `make zig` → `native/zigcore/zig-out/lib/libravezig.a` |
+| Build with Zig DSP linked | `make build-zig` (adds tag `zigdsp`) |
 
 "Tests pass" = `go build ./... && go vet ./... && go test ./...` clean.
 
@@ -205,6 +207,11 @@ internal/
               trust-on-pair, silent reconnect, MAC'd control frames. coder/websocket on a
               LAN listener (47631-47635). Manager ties discovery + peers + identity.
   peers/      Remembered (SAS-paired) peers over the bbolt store; feeds peerlink reconnect.
+  zignative/  cgo binding to the Zig native core (tag `zigdsp`, pure-Go stub untagged).
+              Sinc resampler + waveform kernels; seams in audio/source.go + worker/probe.go.
+              The Zig migration path: .devnotes/ZIG_MIGRATION.md + ZIG_UI_GUIDE.md.
+native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `make zig`.
+              Ported kernels stay byte-exact vs the Go originals (parity tests).
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.
 tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-mate .syso
               (area-average resize → 7 PNG-in-ICO sizes → COFF .rsrc). No external dep.

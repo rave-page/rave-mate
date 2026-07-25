@@ -43,7 +43,7 @@ type source struct {
 	// streaming path (dec != nil): decoder + on-the-fly resample to the device rate.
 	dec     Decoder
 	src     Format // decoder's native format
-	rs      *resampler
+	rs      rateConverter
 	decBuf  []float32 // transient decode scratch (bounded: streamReadFrames*src.Channels)
 	pending []float32 // resampled-but-unread device frames (bounded by resampler output)
 	decEOF  bool
@@ -110,7 +110,7 @@ func newStreamSource(dec Decoder) *source {
 		decBuf: make([]float32, streamReadFrames*ch),
 	}
 	if sf.SampleRate != deviceRate {
-		s.rs = newResampler(sf.SampleRate, deviceRate, deviceChannels)
+		s.rs = newRateConverter(sf.SampleRate, deviceRate, deviceChannels)
 	}
 	if tf := dec.TotalFrames(); tf > 0 {
 		s.total = tf * int64(deviceRate) / int64(sf.SampleRate) // device-rate frame estimate
@@ -307,7 +307,7 @@ func toDeviceRAM(native []float32, sf Format) []float32 {
 	if sf.SampleRate == deviceRate {
 		return stereo
 	}
-	rs := newResampler(sf.SampleRate, deviceRate, deviceChannels)
+	rs := newRateConverter(sf.SampleRate, deviceRate, deviceChannels)
 	out := rs.process(stereo)
 	return append(out, rs.flush()...)
 }

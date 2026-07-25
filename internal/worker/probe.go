@@ -159,8 +159,8 @@ func peaksHandler(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	if buckets > peaksMaxBuckets {
 		buckets = peaksMaxBuckets
 	}
-	peaks := bucketPeaks(pcm, buckets)
-	bands := bucketBands(pcm, buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
+	peaks := peaksBuckets(pcm, buckets)
+	bands := bandsBuckets(pcm, buckets, peaksRate) // 3 uint8 (low,mid,high) per bucket
 	// Decode contract: rate/samples pin the waveform origin+scale (dur = samples/rate); leadSkipMs =
 	// the gapless encoder priming this from=0 decode drops (0 for lossless). Lets the player detect +
 	// reconcile waveform↔audio origin/scale drift instead of it being silent.
