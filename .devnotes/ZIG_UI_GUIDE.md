@@ -604,11 +604,12 @@ would register smart selects the Go path never registered at that point.
 - Same class of quirk in the hover readout: `mpReadoutLine` escapes the `@ clock · M x LUFS` and
   momentary-at-playhead branches but returns the measuring/hover-hint i18n strings RAW - carried as
   `{text, raw}` rather than "fix"ing one side.
-- **Raw seam left deliberately: the shared loudness block** (`components.go loudnessFields`) incl.
-  its `extraHTML` (`mpLoudExtraHTML` gain-plan line + pre-listen toggle) and the standalone
-  "preset normalizes without an override" copy. Same precedent as `libDetailSt.Loudness`: ONE
-  components.go markup source shared with the library preset builder + automation transcode steps;
-  porting it belongs to a components-level pass, not the player. Tooltips (`tipTopic`) stay raw too.
+- **Raw seam left deliberately (phase A): the shared loudness block** (`components.go
+  loudnessFields`) incl. its `extraHTML` (`mpLoudExtraHTML` gain-plan line + pre-listen toggle) and
+  the standalone "preset normalizes without an override" copy. Same precedent as
+  `libDetailSt.Loudness`: ONE components.go markup source shared with the library preset builder +
+  automation transcode steps; porting it belongs to a components-level pass, not the player.
+  **CLOSED in phase B-1a** (see "Phase B-1a" below) - only `LoudExtra` and the tooltips stay raw.
 - Side-effect ORDER is load-bearing (peers/cue-edit lesson again): the state builders register the
   smart selects in the pre-split EMIT order - `mp-track-<host>` / `mp-more-<host>` (transport) before
   `mp-auto-<host>`, then `mp-preset-<host>-<i>` per media, then `mp-scope-<host>`.
@@ -656,7 +657,8 @@ per dialog in the `// --- dialogs-a ---` blocks. Every entry point kept its sign
   `cePatternManagerHTML`. A grep for `__patch`/`textContent` inside these dialogs' ids finds only
   `pub-hero` (a tab fragment, already ported) - checked before adding exports, per the modal recipe.
 - Raw (trusted) pass-throughs, each matching an UNESCAPED Go splice: the shared loudness block
-  (`components.go loudnessFields` - same seam the library encode builder keeps), the time-fix
+  (`components.go loudnessFields` - same seam the library encode builder keeps; structured in phase
+  B-1a), the time-fix
   preview's clock readouts (`time.Format("15:04:05")`, `pubClock`) and row numbers
   (`fmt.Sprint(i+1)`), and `pubExportModal`'s note literal.
 - Go helpers gained caller-resolved twins so each component keeps ONE markup source:
@@ -707,7 +709,8 @@ blocks of root.zig / raveui.h / zigui.go / zigui_stub.go.
   picker, Go `smartSelectRaw`) and `fpairsel` (the daily hour/minute pair) are the only kinds the
   editor itself didn't need.
 - Raw seams in the automations dialogs: every `tip` (tipTopic) and the loudness override block
-  (`loudnessFields`, float-formatted Go-side) — renderer ownership wins, same rule as the media batch.
+  (`loudnessFields`, float-formatted Go-side) — renderer ownership wins, same rule as the media
+  batch. The loudness half is structured as of phase B-1a (block kind `raw` → `loud`).
 - **Explicit flags over "empty means the other branch"**, as ever: the run-now footer carries
   `gated` + `why` vs `variant` (btnGated names the missing precondition instead of hiding the Run
   button), and `erases` (Go `autoChainDeletes`) gates both the acknowledgement block and the footer
@@ -755,3 +758,54 @@ locale-dependent text processing that belongs on the Go side of the seam. Recomm
 `tipTopic` in **phase B**, when the shell itself is Zig and a tooltip can be composed in-process
 without crossing the ABI; until then the pre-rendered-raw contract is correct and already
 golden-gated everywhere it appears.
+
+## Phase B — wave B-1
+
+### B-1a: the shared loudness block (`loudnessFields` → `loudSt`)
+
+Phase A left the loudness block riding through FOUR state contracts as pre-rendered raw HTML
+(`libEncSt.Loudness`, `mpPresetDlgSt.Loudness`, `aeBlockSt.Raw`, `mpExMediaSt.Loud`). It is now
+structured state; `components.zig` `loudnessFields` (marker block `phaseb-loud`) renders it.
+
+- **Shape:** `components.go loudSt` = `{compact, toggle, tip, chipAct, chips[], iField, tpField,
+  raise, hasWarn, warn, extra}`. Every string is final Go-side: i18n resolved, `trimNum`'d floats,
+  `%g|%g` chip payloads, `ltChipLabel` text, `strings.ToLower` data-labels. `toggle.on` gates the
+  whole body - the same single source Go always had (`o.vals.On` drives both switch and branch), so
+  there is no second "shown" flag to desync. `hasWarn` IS explicit (a blank i18n string must not
+  switch arms).
+- **Two raw seams stay, deliberately:** `tip` (Go `tipTopic`, owned by B-1b) and `extra` (the
+  caller's `extraHTML`: the export surface's live gain-plan line + pre-listen toggle, which must
+  collapse with the switch). `mpExMediaSt.LoudExtra` also stays raw - it is a *different* line (shown
+  when the PRESET normalizes without an override), not part of the block.
+- **ONE Go markup source:** `loudnessFields(o)` is now `newLoudSt(o).html()`. The Go renderers call
+  `st.Loud.html()`, so the untagged fallback and the Zig mirror render the same tree from the same
+  state. Same trick as `progressBarStr` / `toggleRowDL`: a caller-resolved twin, never a fork.
+- **`pbField` MOVED** `library_kit.zig` → `components.zig` (library_kit re-exports `PBField` +
+  `pbField`, like it already re-exports `Select`/`Btn`/`Tab`). The loudness block needs pb-field
+  markup and `components.zig` cannot import `library_kit.zig` without a cycle; duplicating the
+  markup would have forked it. This mirrors Go, where `pbFieldExDL` (render_library.go) is the one
+  source both paths call. Zero markup change - library_kit's original `pbField` test now doubles as
+  an alias-resolution proof.
+- **No new exports.** The block is embedded in views that already have exports
+  (`RenderLibraryDetail`, `RenderDlgPreset`, `RenderAutoEditor`, `RenderPlayerExport`), so
+  `root.zig` / `raveui.h` / `zigui.go` / `zigui_stub.go` are untouched -
+  `zigui.FallbackCounts()` gains no whole-view entry by construction.
+- **The dual-field bridge collapsed.** A grep proved those four are the ONLY consumers and all four
+  migrate in this wave, so the raw fields are dropped instead of bridged (the briefing's end state).
+  `aeBlockSt`'s generic `raw` kind went with it - loudness was its only user; the kind is now `loud`.
+- **Parity proof (the strongest gate here):** `loudness_test.go` keeps the pre-split implementation
+  VERBATIM as `loudnessFieldsLegacy` and asserts byte equality against both `loudnessFields` and
+  `loudSt.html()` over a 24-fixture matrix (`loudFx()`): off / off-compact / full / no-raise /
+  override-unset / override-I-only / override-TP-only / no-preset / copy-codec / no-audio-codec /
+  compact default+Apple+Club+no-match+builder / compact extra / compact copy-codec / chip-tolerance
+  edge (`|effI - lt.I| < 0.01`: -14.009 matches, -14.02 does not) / long decimals / zero / positive
+  / escaping / unicode. `loudFx()` is UNTAGGED on purpose, so the same matrix drives all four Zig
+  golden suites (24 subtests each: `TestZigLibEncLoudnessGolden`, `TestZigPresetLoudnessGolden`,
+  `TestZigAeLoudnessGolden`, `TestZigPlayerLoudnessGolden`) - a new state axis is exercised
+  everywhere at once.
+- Two contract tests ride along: `TestLoudStResolvesEverythingGoSide` (data-labels lowercased
+  Go-side, `number` input types, chips only in compact, nothing behind an off switch) and
+  `TestLoudStNoNullSlices` (`chips` needs `,omitempty` + Zig `&.{}` - the usual null-slice trap).
+- **Gotcha worth repeating:** `omitempty` does nothing for a struct field, so a zero-value nested
+  `loudSt` still marshals fully - fine here (all its own slices are omitempty), but never rely on
+  `omitempty` to make a nested struct disappear.

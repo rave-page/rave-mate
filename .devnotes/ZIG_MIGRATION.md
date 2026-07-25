@@ -166,6 +166,12 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
+- **P6 UI phase B (in flight):** wave B-1 shrinks the pre-rendered-raw seams that phase A
+  left in the state contracts. B-1a DONE: the shared loudness block (`components.go`
+  `loudnessFields`) is structured state (`loudSt`) rendered by `components.zig`
+  `loudnessFields` in all four consumers (library encode builder, export preset editor,
+  automation transcode step, player export pane) — no raw loudness markup crosses the ABI
+  any more. B-1b (tipTopic → tipSt) runs alongside.
 
 ## CI
 
