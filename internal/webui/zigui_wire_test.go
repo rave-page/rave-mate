@@ -4,9 +4,11 @@ package webui
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/zigui"
 )
@@ -56,7 +58,7 @@ func TestZigWireThreeWayAppGroups(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderAppGroups", "RenderAppGroupsV2", "RenderAppGroupsBody", "RenderAppGroupsBodyV2")
 }
 
 func TestZigWireThreeWayLogs(t *testing.T) {
@@ -100,7 +102,7 @@ func TestZigWireThreeWayLogs(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderLogs", "RenderLogsV2", "RenderLogsLines", "RenderLogsLinesV2")
 }
 
 // ── B-2 fan-out ──
@@ -148,7 +150,7 @@ func TestZigWireThreeWayLive(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderLive", "RenderLiveV2", "RenderLiveFrag", "RenderLiveFragV2")
 }
 
 // wireFrag asserts Go == v1 == v2 for one live fragment kind.
@@ -269,7 +271,7 @@ func TestZigWireThreeWayMotion(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderMotion", "RenderMotionV2", "RenderMotionBody", "RenderMotionBodyV2")
 }
 
 // TestWireOptStructPresenceIsNotNull: an all-zero but PRESENT section must render as the
@@ -349,7 +351,7 @@ func TestZigWireThreeWayPublish(t *testing.T) {
 		t.Fatal("no fixture exercised the hero fragment")
 	}
 	t.Logf("%d fixtures (%d heroes): wire %d B vs json %d B (%.1f%%)", len(fx), heroes, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderPublish", "RenderPublishV2", "RenderPublishHero", "RenderPublishHeroV2")
 }
 
 // TestWireUintRoundTrips: PubTrack.Num is the only numeric field on the wire (a 1-based row
@@ -438,7 +440,7 @@ func TestZigWireThreeWaySettings(t *testing.T) {
 		t.Fatal("no fixture exercised the #set-content pane")
 	}
 	t.Logf("%d fixtures (%d panes): wire %d B vs json %d B (%.1f%%)", len(fx), panes, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderSettings", "RenderSettingsV2", "RenderSettingsContent", "RenderSettingsContentV2")
 }
 
 // TestZigWireSettingsStatus: the per-card tick fragment, same state set as the golden suite.
@@ -467,7 +469,7 @@ func TestZigWireSettingsStatus(t *testing.T) {
 		assertBytesEqual(t, st.V+" go==v1", setStatusHTML(st), v1)
 		assertBytesEqual(t, st.V+" v1==v2", v1, v2)
 	}
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderSettingsStatus", "RenderSettingsStatusV2")
 }
 
 // TestZigWireThreeWayLibrary: the biggest state in the app (11 kB) plus its three patch
@@ -524,7 +526,7 @@ func TestZigWireThreeWayLibrary(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderLibrary", "RenderLibraryV2", "RenderLibraryBody", "RenderLibraryBodyV2", "RenderLibraryDetail", "RenderLibraryDetailV2")
 }
 
 // TestZigWireLibraryPatchTargets: #lib-queue-body (job progress) and one cue-census cell, the
@@ -568,7 +570,7 @@ func TestZigWireLibraryPatchTargets(t *testing.T) {
 		assertBytesEqual(t, name+" cuecell go==v1", libCueCellHTMLOf(st), v1)
 		assertBytesEqual(t, name+" cuecell v1==v2", v1, v2)
 	}
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderLibraryQueue", "RenderLibraryQueueV2", "RenderLibraryCueCell", "RenderLibraryCueCellV2")
 }
 
 // TestZigWireThreeWayPlayer: nine patch targets over the player fixture set, built through the
@@ -632,7 +634,7 @@ func TestZigWireThreeWayPlayer(t *testing.T) {
 	}
 	t.Logf("%d surfaces checked, %d legitimately empty: wire %d B vs json %d B (%.1f%%)",
 		checked, empties, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertFallbackDelta(t, before, 2*empties)
+	assertFallbackDelta(t, before, 2*empties, "RenderPlayer")
 }
 
 // TestZigWireThreeWayAutomations: full tab + the version-gated #auto-body tick fragment.
@@ -676,7 +678,7 @@ func TestZigWireThreeWayAutomations(t *testing.T) {
 		})
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderAutomations", "RenderAutomationsV2", "RenderAutomationsBody", "RenderAutomationsBodyV2")
 }
 
 // TestZigWireThreeWayPeers: full tab + the ~1 Hz #peers-body tick. Peers carries the only
@@ -725,7 +727,7 @@ func TestZigWireThreeWayPeers(t *testing.T) {
 		t.Fatal("no fixture carries media sync lines - the []string path is untested")
 	}
 	t.Logf("%d fixtures (%d sync lines): wire %d B vs json %d B (%.1f%%)", len(fx), syncLines, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "RenderPeers", "RenderPeersV2", "RenderPeersBody", "RenderPeersBodyV2")
 }
 
 // TestWireStrListEdges: an empty []string, an element that is itself empty, and one that needs
@@ -758,6 +760,181 @@ func TestWireStrListEdges(t *testing.T) {
 	if len(seen) < 3 {
 		t.Fatalf("only %d distinct renders across 5 sync-line shapes - the fixture does not render them", len(seen))
 	}
+}
+
+// ── merge composition: tip2's structured tooltip/label fields on the wire ──
+
+// wireTipSweep is the WIRE twin of tip2Sweep: it drives the same surface through the same four
+// tooltip variants in the same locales, but three ways (Go == v1 == v2) and through the RZW1
+// encoder. It exists because of the DlgField gotcha class - a Go state gaining a field the wire
+// does not carry is a SILENT drop, and the per-tab fixture sets do not all set the structured
+// tooltip fields, so the tab gates alone would have kept passing while v2 dropped every tooltip.
+//
+// Each case also asserts the fixture is not inert (the tooltip must change the bytes) and that
+// the raw dual-field arm reproduces the structured bytes through v2 as well.
+func wireTipSweep[T any](t *testing.T, what string, mk func(tp *tipSt, raw string) T,
+	goHTML func(T) string, wire func(T) []byte, v1, v2 func([]byte) (string, bool)) {
+	t.Helper()
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	for _, loc := range tip2Locales {
+		if got := i18n.SetLocale(loc); got != loc {
+			t.Fatalf("locale %q did not activate (got %q)", loc, got)
+		}
+		bare := goHTML(mk(nil, ""))
+		for _, v := range tipVariants() {
+			if v.st == nil {
+				continue // the absent case is what the per-tab suites already carry
+			}
+			st := mk(v.st, "")
+			want := goHTML(st)
+			t.Run(loc+"/"+what+"/"+v.name, func(t *testing.T) {
+				if want == bare {
+					t.Fatalf("%s/%s changed no bytes - the fixture reaches no tooltip", what, v.name)
+				}
+				if v.name == "tipKbGrid" && !strings.Contains(want, "tt-kb-keys") {
+					t.Fatalf("%s/%s: the keybind grid never reached the DOM", what, v.name)
+				}
+				doc := wire(st)
+				if len(doc) == 0 {
+					t.Fatal("wire encode failed")
+				}
+				a, ok := v1(stateJSON(st))
+				if !ok {
+					t.Fatal("v1 render failed")
+				}
+				b, ok := v2(doc)
+				if !ok {
+					t.Fatal("v2 render failed")
+				}
+				assertBytesEqual(t, what+"/"+v.name+" go==v1", want, a)
+				assertBytesEqual(t, what+"/"+v.name+" v1==v2", a, b)
+
+				rs := mk(nil, tipTopic(v.st.ID)) // the un-migrated builder's pre-rendered arm
+				rb, ok := v2(wire(rs))
+				if !ok {
+					t.Fatal("v2 raw-bridge render failed")
+				}
+				assertBytesEqual(t, what+"/"+v.name+" raw-bridge v2", want, rb)
+			})
+		}
+	}
+}
+
+// TestZigWireTip2Live: liveState's four structured section tooltips. The live fixture set leaves
+// them nil, so without this sweep the tab gate passes with v2 dropping every one.
+func TestZigWireTip2Live(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	wireTipSweep(t, "live", func(tp *tipSt, raw string) liveState {
+		st := liveFixtures()["populated"]
+		st.HasSignals, st.HasNet, st.HasPerf = true, true, true
+		st.SignalsTipS, st.SignalsTip = tp, raw
+		st.NetTipS, st.NetTip = tp, raw
+		st.TimTipS, st.TimTip = tp, raw
+		st.PerfTipS, st.PerfTip = tp, raw
+		return st
+	}, liveHTML, wireLiveState, zigui.RenderLive, zigui.RenderLiveV2)
+}
+
+// TestZigWireTip2Motion: the camera-path and motion-studio preview-card tooltips (two documents -
+// exactly one section state is built per render).
+func TestZigWireTip2Motion(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	wireTipSweep(t, "motionCam", func(tp *tipSt, raw string) moState {
+		st := moFixtures()["populated"]
+		cam := *st.Cam // copy: the fixture's pointer is shared
+		cam.TipS, cam.Tip = tp, raw
+		st.Cam = &cam
+		return st
+	}, motionHTML, wireMoState, zigui.RenderMotion, zigui.RenderMotionV2)
+	wireTipSweep(t, "motionStudio", func(tp *tipSt, raw string) moState {
+		st := moFixtures()["studio"]
+		stu := *st.Studio
+		stu.TipS, stu.Tip = tp, raw
+		st.Studio = &stu
+		return st
+	}, motionHTML, wireMoState, zigui.RenderMotion, zigui.RenderMotionV2)
+}
+
+// TestZigWireTip2Settings: the smart-select ss-label on a settings block and on an fpair kid.
+func TestZigWireTip2Settings(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	pane := func(blocks ...setBlock) setContentSt {
+		return setContentSt{
+			Nav: []setNavSt{{ID: "tips", Title: "Tips", Agg: "ok", Active: true}},
+			Secs: []setSecSt{{ID: "tips", Title: "Tooltips", Desc: "select labels", Cards: []setCardSt{
+				{ID: "medialink", Title: "Media link", St: setStatusSt{V: "go", T: "running"}, Blocks: blocks},
+			}}},
+		}
+	}
+	lbl := func(tp *tipSt, raw string) (*ssLabelSt, string) {
+		if raw != "" {
+			return nil, ssLabelRaw("Acceleration", raw)
+		}
+		return &ssLabelSt{Text: "Acceleration", Tip: tp}, ""
+	}
+	wireTipSweep(t, "setSelect", func(tp *tipSt, raw string) setContentSt {
+		s := tip2Sel("set-ml-accel", "Automatic")
+		l, rw := lbl(tp, raw)
+		return pane(setBlock{K: "select", Sel: &s, SelLblS: l, SelLbl: rw})
+	}, setContentHTML, wireSetContent, zigui.RenderSettingsContent, zigui.RenderSettingsContentV2)
+	wireTipSweep(t, "setSelectKid", func(tp *tipSt, raw string) setContentSt {
+		s := tip2Sel("set-ml-accel", "Automatic")
+		l, rw := lbl(tp, raw)
+		return pane(setBlock{K: "fpair", Kids: []setKid{{K: "select", Sel: &s, SelLblS: l, SelLbl: rw}}})
+	}, setContentHTML, wireSetContent, zigui.RenderSettingsContent, zigui.RenderSettingsContentV2)
+}
+
+// TestZigWireTip2LibDetail: libSelTip's ss-label in the #lib-detail encode builder, plus the
+// shared loudness block's own tooltip in the same document (loudSt.TipS).
+func TestZigWireTip2LibDetail(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	wireTipSweep(t, "libEncSel", func(tp *tipSt, raw string) libDetailSt {
+		det := libDetailFixture()
+		s := libSelTip{Sel: tip2Sel("lib-pf-container", "flac")}
+		if raw != "" {
+			s.Label = ssLabelRaw("Container", raw)
+		} else {
+			s.LabelS = &ssLabelSt{Text: "Container", Tip: tp}
+		}
+		det.Enc.Container = s
+		return det
+	}, libDetailHTMLOf, wireLibDetail, zigui.RenderLibraryDetail, zigui.RenderLibraryDetailV2)
+
+	wireTipSweep(t, "libEncLoud", func(tp *tipSt, raw string) libDetailSt {
+		det := libDetailFixture()
+		det.Enc.Loud.TipS, det.Enc.Loud.Tip = tp, raw
+		return det
+	}, libDetailHTMLOf, wireLibDetail, zigui.RenderLibraryDetail, zigui.RenderLibraryDetailV2)
+}
+
+// TestZigWireTip2PlayerLoud: the loudness block's tooltip inside the #mp-export patch target -
+// the surface that carries loudSt per media on the player.
+func TestZigWireTip2PlayerLoud(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	u := &UI{}
+	t.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["dualExport"]
+	*u.mp(fx.host) = fx
+	base := u.mpInnerState(u.mpSnap(fx.host)).EditBox.Export
+	if len(base.Medias) == 0 {
+		t.Fatal("dualExport fixture carries no media export block")
+	}
+	wireTipSweep(t, "mpExportLoud", func(tp *tipSt, raw string) mpExportSt {
+		st := base
+		st.Medias = append([]mpExMediaSt(nil), base.Medias...) // copy: shared backing array
+		st.Medias[0].Loud.TipS, st.Medias[0].Loud.Tip = tp, raw
+		return st
+	}, mpExportHTMLOf, wireMpExport, zigui.RenderPlayerExport, zigui.RenderPlayerExportV2)
 }
 
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
@@ -833,30 +1010,63 @@ func TestWireEmptyListsAreAbsentNotNull(t *testing.T) {
 	}
 }
 
-// assertFallbackDelta fails unless EXACTLY want downgrades were recorded during the test. Used
-// where some fragments are legitimately empty (an empty render is a NULL on both Zig paths, and
-// the Go renderer reproduces the same ""), so "no fallbacks" would be the wrong assertion and
-// "ignore fallbacks" would hide a real one.
-func assertFallbackDelta(t *testing.T, before map[string]int, want int) {
+// assertFallbackDelta fails unless EXACTLY want downgrades were recorded on the exports whose key
+// starts with prefix. Used where some fragments are legitimately empty (an empty render is a NULL
+// on both Zig paths and the Go renderer reproduces the same ""), so "no fallbacks" would be the
+// wrong assertion and "ignore fallbacks" would hide a real one. The prefix matters for the same
+// reason assertNoNewFallbacksIn takes names - see below.
+func assertFallbackDelta(t *testing.T, before map[string]int, want int, prefix string) {
 	t.Helper()
 	got := 0
 	for k, v := range zigui.FallbackCounts() {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
 		if d := v - before[k]; d > 0 {
 			got += d
 			t.Logf("fallback %s +%d", k, d)
 		}
 	}
 	if got != want {
-		t.Errorf("fallbacks recorded = %d, want %d", got, want)
+		t.Errorf("%s* fallbacks recorded = %d, want %d", prefix, got, want)
 	}
 }
 
-// assertNoNewFallbacks fails when a render downgraded (v2→v1 or v1→Go) during the test.
-func assertNoNewFallbacks(t *testing.T, before map[string]int) {
+// assertNoNewFallbacksIn fails when one of the NAMED exports downgraded (v2→v1 or v1→Go) during
+// the test. Named, not global: zigui.FallbackCounts() is process-wide and other tests drive their
+// own headless UIs concurrently, so asserting over the whole map is load-dependent - it once
+// failed TestZigWireThreeWayLogs on a stray `RenderLibRemote +1` from an unrelated suite. Listing
+// the exports under test keeps the assertion exact without making it a race.
+func assertNoNewFallbacksIn(t *testing.T, before map[string]int, keys ...string) {
 	t.Helper()
-	for k, v := range zigui.FallbackCounts() {
-		if v > before[k] {
-			t.Errorf("fallback recorded during golden run: %s +%d", k, v-before[k])
+	for _, s := range newFallbacks(before, keys) {
+		t.Errorf("fallback recorded during golden run: %s", s)
+	}
+}
+
+// newFallbacks is the pure half (so the assertion itself is testable - a typo'd export name would
+// otherwise make every caller vacuously green).
+func newFallbacks(before map[string]int, keys []string) []string {
+	now := zigui.FallbackCounts()
+	var out []string
+	for _, k := range keys {
+		if d := now[k] - before[k]; d > 0 {
+			out = append(out, fmt.Sprintf("%s +%d", k, d))
 		}
+	}
+	return out
+}
+
+// TestWireFallbackAssertionIsNotVacuous: the narrowed assertion must still catch a downgrade on a
+// key it names, and must ignore one it does not. Uses a probe key no export uses, so it cannot
+// perturb another test's narrow assertion.
+func TestWireFallbackAssertionIsNotVacuous(t *testing.T) {
+	before := zigui.FallbackCounts()
+	zigui.NoteWireFallback("RenderWireAssertProbe")
+	if got := newFallbacks(before, []string{"RenderWireAssertProbe"}); len(got) != 1 {
+		t.Fatalf("a recorded downgrade was not reported: %v", got)
+	}
+	if got := newFallbacks(before, []string{"RenderNoSuchExport"}); len(got) != 0 {
+		t.Fatalf("an unrelated export was reported: %v", got)
 	}
 }

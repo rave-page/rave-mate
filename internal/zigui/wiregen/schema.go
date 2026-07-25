@@ -218,7 +218,7 @@ var schema = []msg{
 	{
 		name: "LiveState", goT: "liveState", zigT: "live.State", id: 10,
 		doc: "Live tab - full cockpit",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip"), op(31, "SignalsTipS", "signalsTipSt", "Tip"), op(32, "NetTipS", "netTipSt", "Tip"), op(33, "TimTipS", "timTipSt", "Tip"), op(34, "PerfTipS", "perfTipSt", "Tip")},
 	},
 	// motion: one root - the full view and the #mo-body fragment share moState. Cam/Studio are Go pointers (exactly one section is built per render), so they are optp: presence IS the section switch.
 	{
@@ -227,7 +227,7 @@ var schema = []msg{
 	},
 	{
 		name: "MoCam", goT: "moCamSt", zigT: "motion.Cam",
-		fs: []field{s(1, "Unavailable", "unavailable"), li(2, "Rows", "rows", "MoCamRow"), s(3, "Empty", "empty"), s(4, "ReloadLbl", "reloadLbl"), s(5, "OrganizeLbl", "organizeLbl"), s(6, "DJLbl", "djLbl"), s(7, "PreviewLbl", "previewLbl"), s(8, "Tip", "tip"), s(9, "View", "view"), s(10, "Hint", "hint"), s(11, "Info", "info"), s(12, "PlayBtn", "playBtn"), s(13, "LoadLbl", "loadLbl"), s(14, "CopyLbl", "copyLbl")},
+		fs: []field{s(1, "Unavailable", "unavailable"), li(2, "Rows", "rows", "MoCamRow"), s(3, "Empty", "empty"), s(4, "ReloadLbl", "reloadLbl"), s(5, "OrganizeLbl", "organizeLbl"), s(6, "DJLbl", "djLbl"), s(7, "PreviewLbl", "previewLbl"), s(8, "Tip", "tip"), s(9, "View", "view"), s(10, "Hint", "hint"), s(11, "Info", "info"), s(12, "PlayBtn", "playBtn"), s(13, "LoadLbl", "loadLbl"), s(14, "CopyLbl", "copyLbl"), op(15, "TipS", "tipSt", "Tip")},
 	},
 	{
 		name: "MoRecRow", goT: "moRecRow", zigT: "motion.RecRow",
@@ -247,7 +247,7 @@ var schema = []msg{
 	},
 	{
 		name: "MoStudio", goT: "moStudioSt", zigT: "motion.Studio",
-		fs: []field{li(1, "Recs", "recs", "MoRecRow"), s(2, "Empty", "empty"), s(3, "RefreshLbl", "refreshLbl"), s(4, "ExportLbl", "exportLbl"), s(5, "RenderLbl", "renderLbl"), s(6, "PCViewLbl", "pcViewLbl"), s(7, "RenderProg", "renderProg"), st(8, "Avatar", "avatar", "MoAvatar"), s(9, "PreviewLbl", "previewLbl"), s(10, "Tip", "tip"), s(11, "View", "view"), s(12, "Hint", "hint"), s(13, "Time", "time"), st(14, "Scrub", "scrub", "MoSlider"), s(15, "PlayLbl", "playLbl"), s(16, "StopLbl", "stopLbl"), st(17, "Loop", "loop", "MoToggle"), st(18, "OSC", "osc", "MoToggle"), st(19, "VMC", "vmc", "MoToggle"), st(20, "Model", "model", "MoToggle"), b(21, "ModelOn", "modelOn"), b(22, "HasDyn", "hasDyn"), s(23, "PhysNote", "physNote"), st(24, "Phys", "phys", "MoToggle"), st(25, "Rest", "rest", "MoToggle"), st(26, "Marks", "marks", "MoToggle"), st(27, "PC", "pc", "MoToggle"), b(28, "PCOn", "pcOn"), st(29, "PCDensity", "pcDensity", "SelState"), st(30, "PCColor", "pcColor", "MoToggle"), s(31, "PCNote", "pcNote"), s(32, "PCExportLbl", "pcExportLbl"), s(33, "VMCHelp", "vmcHelp")},
+		fs: []field{li(1, "Recs", "recs", "MoRecRow"), s(2, "Empty", "empty"), s(3, "RefreshLbl", "refreshLbl"), s(4, "ExportLbl", "exportLbl"), s(5, "RenderLbl", "renderLbl"), s(6, "PCViewLbl", "pcViewLbl"), s(7, "RenderProg", "renderProg"), st(8, "Avatar", "avatar", "MoAvatar"), s(9, "PreviewLbl", "previewLbl"), s(10, "Tip", "tip"), s(11, "View", "view"), s(12, "Hint", "hint"), s(13, "Time", "time"), st(14, "Scrub", "scrub", "MoSlider"), s(15, "PlayLbl", "playLbl"), s(16, "StopLbl", "stopLbl"), st(17, "Loop", "loop", "MoToggle"), st(18, "OSC", "osc", "MoToggle"), st(19, "VMC", "vmc", "MoToggle"), st(20, "Model", "model", "MoToggle"), b(21, "ModelOn", "modelOn"), b(22, "HasDyn", "hasDyn"), s(23, "PhysNote", "physNote"), st(24, "Phys", "phys", "MoToggle"), st(25, "Rest", "rest", "MoToggle"), st(26, "Marks", "marks", "MoToggle"), st(27, "PC", "pc", "MoToggle"), b(28, "PCOn", "pcOn"), st(29, "PCDensity", "pcDensity", "SelState"), st(30, "PCColor", "pcColor", "MoToggle"), s(31, "PCNote", "pcNote"), s(32, "PCExportLbl", "pcExportLbl"), s(33, "VMCHelp", "vmcHelp"), op(34, "TipS", "tipSt", "Tip")},
 	},
 	{
 		name: "MoState", goT: "moState", zigT: "motion.State", id: 21,
@@ -369,7 +369,7 @@ var schema = []msg{
 	},
 	{
 		name: "SetKid", goT: "setKid", zigT: "settings.Kid",
-		fs: []field{s(1, "K", "k"), op(2, "Fld", "fld", "UiField"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), op(5, "Sel", "sel", "SelState"), s(6, "SelLbl", "selLbl"), op(7, "Btn", "btn", "UiBtn")},
+		fs: []field{s(1, "K", "k"), op(2, "Fld", "fld", "UiField"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), op(5, "Sel", "sel", "SelState"), s(6, "SelLbl", "selLbl"), op(7, "Btn", "btn", "UiBtn"), op(8, "SelLblS", "selLblSt", "SsLabel")},
 	},
 	{
 		name: "SetInput", goT: "setInput", zigT: "settings.Input",
@@ -405,7 +405,7 @@ var schema = []msg{
 	},
 	{
 		name: "Bridge", goT: "bridgeSt", zigT: "sub.Bridge",
-		fs: []field{st(1, "St", "st", "UiStatus"), st(2, "Studio", "studio", "UiToggle"), s(3, "Tip", "tip"), b(4, "HasGate", "hasGate"), s(5, "GateTitle", "gateTitle"), st(6, "Gate", "gate", "BridgeGate")},
+		fs: []field{st(1, "St", "st", "UiStatus"), st(2, "Studio", "studio", "UiToggle"), s(3, "Tip", "tip"), b(4, "HasGate", "hasGate"), s(5, "GateTitle", "gateTitle"), st(6, "Gate", "gate", "BridgeGate"), op(7, "TipS", "tipSt", "Tip")},
 	},
 	{
 		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow",
@@ -413,7 +413,7 @@ var schema = []msg{
 	},
 	{
 		name: "SetBlock", goT: "setBlock", zigT: "settings.Block",
-		fs: []field{s(1, "K", "k"), s(2, "Text", "text"), s(3, "HTML", "html"), s(4, "Tone", "tone"), s(5, "ID", "id"), s(6, "Title", "title"), s(7, "Sub", "sub"), op(8, "Fld", "fld", "UiField"), s(9, "Tip", "tip"), op(10, "TipS", "tipSt", "Tip"), op(11, "Tgl", "tgl", "UiToggle"), s(12, "Gate", "gate"), op(13, "KV", "kv", "UiKV"), op(14, "Sel", "sel", "SelState"), s(15, "SelLbl", "selLbl"), op(16, "Btn", "btn", "UiBtn"), li(17, "Kids", "kids", "SetKid"), li(18, "Inputs", "inputs", "SetInput"), s(19, "Submit", "submit"), s(20, "SubVar", "subVar"), op(21, "GF", "gf", "GfCard"), op(22, "GFM", "gfm", "GfModel"), op(23, "Brg", "brg", "Bridge"), op(24, "Upd", "upd", "UpdFlow")},
+		fs: []field{s(1, "K", "k"), s(2, "Text", "text"), s(3, "HTML", "html"), s(4, "Tone", "tone"), s(5, "ID", "id"), s(6, "Title", "title"), s(7, "Sub", "sub"), op(8, "Fld", "fld", "UiField"), s(9, "Tip", "tip"), op(10, "TipS", "tipSt", "Tip"), op(11, "Tgl", "tgl", "UiToggle"), s(12, "Gate", "gate"), op(13, "KV", "kv", "UiKV"), op(14, "Sel", "sel", "SelState"), s(15, "SelLbl", "selLbl"), op(16, "Btn", "btn", "UiBtn"), li(17, "Kids", "kids", "SetKid"), li(18, "Inputs", "inputs", "SetInput"), s(19, "Submit", "submit"), s(20, "SubVar", "subVar"), op(21, "GF", "gf", "GfCard"), op(22, "GFM", "gfm", "GfModel"), op(23, "Brg", "brg", "Bridge"), op(24, "Upd", "upd", "UpdFlow"), op(25, "SelLblS", "selLblSt", "SsLabel")},
 	},
 	{
 		name: "SetCard", goT: "setCardSt", zigT: "settings.Card",
@@ -468,7 +468,7 @@ var schema = []msg{
 	},
 	{
 		name: "LibSelTip", goT: "libSelTip", zigT: "k.SelTip",
-		fs: []field{st(1, "Sel", "sel", "SelState"), s(2, "Label", "labelHtml")},
+		fs: []field{st(1, "Sel", "sel", "SelState"), s(2, "Label", "labelHtml"), op(3, "LabelS", "labelSt", "SsLabel")},
 	},
 	{
 		name: "LibChip", goT: "libChipSt", zigT: "k.Chip",
@@ -488,7 +488,7 @@ var schema = []msg{
 	},
 	{
 		name: "Loud", goT: "loudSt", zigT: "c.Loud",
-		fs: []field{b(1, "Compact", "compact"), st(2, "Toggle", "toggle", "UiToggle"), s(3, "Tip", "tip"), s(4, "ChipAct", "chipAct"), li(5, "Chips", "chips", "LoudChip"), st(6, "IField", "iField", "LibPBField"), st(7, "TPField", "tpField", "LibPBField"), st(8, "Raise", "raise", "UiToggle"), b(9, "HasWarn", "hasWarn"), s(10, "Warn", "warn"), s(11, "Extra", "extra")},
+		fs: []field{b(1, "Compact", "compact"), st(2, "Toggle", "toggle", "UiToggle"), s(3, "Tip", "tip"), s(4, "ChipAct", "chipAct"), li(5, "Chips", "chips", "LoudChip"), st(6, "IField", "iField", "LibPBField"), st(7, "TPField", "tpField", "LibPBField"), st(8, "Raise", "raise", "UiToggle"), b(9, "HasWarn", "hasWarn"), s(10, "Warn", "warn"), s(11, "Extra", "extra"), op(12, "TipS", "tipSt", "Tip")},
 	},
 	{
 		name: "LibEnc", goT: "libEncSt", zigT: "d.Enc",
@@ -846,6 +846,15 @@ var schema = []msg{
 		name: "Peers", goT: "peersSt", zigT: "peers.State", id: 43,
 		doc: "Peers tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), st(5, "Body", "body", "PeersBody")},
+	},
+	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
+	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
+	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
+	// keeps a present-but-empty one from decoding as null. Field numbers are appended INSIDE the
+	// existing messages (never renumbered), so old documents stay readable.
+	{
+		name: "SsLabel", goT: "ssLabelSt", zigT: "c.SsLabel",
+		fs: []field{s(1, "Text", "text"), op(2, "Tip", "tip", "Tip")},
 	},
 }
 

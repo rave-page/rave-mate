@@ -1072,11 +1072,42 @@ document to every export, so the matrix grows on its own).
 | automations | 41, 42 | full + `#auto-body` | 6 × 2 surfaces |
 | peers | 43, 44 | full + `#peers-body` | 7 × 2 surfaces |
 
-**Fan-out state after wave B-2:** 173 messages, root ids 1-3 (pilots) + 10-44 (this wave), 35
-`_v2` exports, 285 735 fuzz cases. Ids 45-49 are free inside wire2's partition; 100-149 belong to
+**Fan-out state after wave B-2:** 174 messages, root ids 1-3 (pilots) + 10-44 (this wave), 31
+exported `_v2` symbols over 40 render surfaces (live's ten fragments share one kind-dispatched
+export), 288 135 fuzz cases. Ids 45-49 are free inside wire2's partition; 100-149 belong to
 the fragment scheduler. Documents run **26-78%** of the JSON they replace (peers best, player
 worst - see PHASEB_BASELINE.md for why one 29 kB SVG sets that floor), and the whole dispatch is
 **27-69% faster** on every view.
+
+**Merge composition with tip2 (B-1b shard 2).** tip2 added `*tipSt` / `*ssLabelSt` fields to eight
+states this block had already frozen (`liveState` ×4, `moCamSt`, `moStudioSt`, `setBlock`,
+`setKid`, `bridgeSt`, `libSelTip`, `loudSt`) plus the new shared `ssLabelSt` message. All are
+`kOptPtr` (nil = no tooltip) and were appended INSIDE the existing messages, so documents already
+in flight stay readable. **The merge produced ZERO textual conflicts and still broke the wire** -
+which is the whole point of the gate: settings, library and player failed immediately with
+`v1==v2: diverges at byte …"tt-mp-loudnes"…`.
+
+**live and motion did NOT fail, and that is the lesson.** Their fixture sets leave the new tooltip
+fields nil, so the tab gates stayed green while v2 silently dropped every tooltip - tip2's
+`DlgField` gotcha class exactly. The fix is a fixture, not more sweeps of the same states:
+`wireTipSweep` (the wire twin of `tip2Sweep`) drives each affected surface through all four tooltip
+variants × locales, three ways, with tip2's own inertness guards (the tooltip must change the
+bytes; the keybind grid must emit `tt-kb-keys`) plus the raw dual-field arm through v2. Verified by
+execution: deleting LiveState's four rows makes `TestZigWireTip2Live` fail while
+`TestZigWireThreeWayLive` still passes.
+
+**Keeping the schema honest is mechanical.** The composition was derived by an audit that re-reads
+every schema row against the current Go+Zig structs and prints the missing fields with their next
+free numbers (11 fields across 8 messages; it also confirmed tip2 changed no `Tip`/`TipKb`/`TipLink`
+shape). Re-run it after every merge that touches state structs - "the golden gate will catch it" is
+true, but only for states a fixture exercises.
+
+**FallbackCounts assertions are per-export.** `zigui.FallbackCounts()` is process-wide and other
+suites drive their own headless UIs concurrently, so a global "no new fallbacks" assertion is
+load-dependent (it once failed the logs gate on a stray `RenderLibRemote +1`). Each gate now names
+the exports it drives (`assertNoNewFallbacksIn`) and the player's exact-delta variant filters by
+prefix; `TestWireFallbackAssertionIsNotVacuous` pins that the narrowed check still catches a
+downgrade on a key it names, because a typo'd name would otherwise make every caller green.
 
 **Adding a field to a migrated state is now a two-sided edit.** A Go state field with a JSON tag
 and its Zig counterpart are only connected through `schema.go`; add the field without a schema row

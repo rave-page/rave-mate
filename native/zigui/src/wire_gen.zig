@@ -23,7 +23,7 @@ const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0x752a7ba3;
+pub const schema_hash: u32 = 0xaf5711c7;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -354,6 +354,10 @@ pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
         28 => out.perfTip = try r.str(t),
         29 => out.perf = try r.sub(live.Perf, decodeLivePerf, t),
         30 => out.strip = try r.sub(live.Strip, decodeLiveStrip, t),
+        31 => out.signalsTipSt = try r.sub(c.Tip, decodeTip, t),
+        32 => out.netTipSt = try r.sub(c.Tip, decodeTip, t),
+        33 => out.timTipSt = try r.sub(c.Tip, decodeTip, t),
+        34 => out.perfTipSt = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }
@@ -386,6 +390,7 @@ pub fn decodeMoCam(r: *wire.Reader, out: *motion.Cam) wire.Error!void {
         12 => out.playBtn = try r.str(t),
         13 => out.loadLbl = try r.str(t),
         14 => out.copyLbl = try r.str(t),
+        15 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }
@@ -470,6 +475,7 @@ pub fn decodeMoStudio(r: *wire.Reader, out: *motion.Studio) wire.Error!void {
         31 => out.pcNote = try r.str(t),
         32 => out.pcExportLbl = try r.str(t),
         33 => out.vmcHelp = try r.str(t),
+        34 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }
@@ -782,6 +788,7 @@ pub fn decodeSetKid(r: *wire.Reader, out: *settings.Kid) wire.Error!void {
         5 => out.sel = try r.sub(c.Select, decodeSelState, t),
         6 => out.selLbl = try r.str(t),
         7 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.selLblSt = try r.sub(c.SsLabel, decodeSsLabel, t),
         else => try r.skip(t),
     };
 }
@@ -908,6 +915,7 @@ pub fn decodeBridge(r: *wire.Reader, out: *sub.Bridge) wire.Error!void {
         4 => out.hasGate = try r.boolean(t),
         5 => out.gateTitle = try r.str(t),
         6 => out.gate = try r.sub(sub.BridgeGate, decodeBridgeGate, t),
+        7 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }
@@ -954,6 +962,7 @@ pub fn decodeSetBlock(r: *wire.Reader, out: *settings.Block) wire.Error!void {
         22 => out.gfm = try r.sub(sub.GfModel, decodeGfModel, t),
         23 => out.brg = try r.sub(sub.Bridge, decodeBridge, t),
         24 => out.upd = try r.sub(sub.UpdFlow, decodeUpdFlow, t),
+        25 => out.selLblSt = try r.sub(c.SsLabel, decodeSsLabel, t),
         else => try r.skip(t),
     };
 }
@@ -1097,6 +1106,7 @@ pub fn decodeLibSelTip(r: *wire.Reader, out: *k.SelTip) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.sel = try r.sub(c.Select, decodeSelState, t),
         2 => out.labelHtml = try r.str(t),
+        3 => out.labelSt = try r.sub(c.SsLabel, decodeSsLabel, t),
         else => try r.skip(t),
     };
 }
@@ -1162,6 +1172,7 @@ pub fn decodeLoud(r: *wire.Reader, out: *c.Loud) wire.Error!void {
         9 => out.hasWarn = try r.boolean(t),
         10 => out.warn = try r.str(t),
         11 => out.extra = try r.str(t),
+        12 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }
@@ -2308,6 +2319,14 @@ pub fn decodePeers(r: *wire.Reader, out: *peers.State) wire.Error!void {
         3 => out.available = try r.boolean(t),
         4 => out.unavailable = try r.str(t),
         5 => out.body = try r.sub(peers.Body, decodePeersBody, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.tip = try r.sub(c.Tip, decodeTip, t),
         else => try r.skip(t),
     };
 }

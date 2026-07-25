@@ -197,16 +197,21 @@ Rules:
   "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
 - **P6 UI phase B (wave B-2 wire fan-out, SHIPPED):** RZW1 now serves every benched view -
   live (+ its ten ~1 Hz fragments), motion, publish, settings, library, player, automations,
-  peers: **173 messages, root ids 10-44, 35 `_v2` exports**, all from schema rows (no
+  peers: **174 messages, root ids 10-44, 31 exported `_v2` symbols covering 40 render
+  surfaces** (one is kind-dispatched over live's ten fragments), all from schema rows (no
   hand-written codec per tab). Four kinds were added to the generator (`kStrAlways` for Zig
   fields whose default is not the zero value, `kOptPtr`/`kOptVal` for `?T`, `kStrList` for
   `[]string`) and the encoder now sizes its buffers per message - a flat 1 KiB made the
   smallest tick fragment SLOWER than the JSON it replaces. Whole-dispatch deltas **-27% to
-  -69%** per view, documents 26-78% of the JSON, decoder fuzzed over **285 735** mutated
-  buffers (39 exports x 77 base documents, cross-fed, poison-pad OOB canary + determinism
+  -69%** per view, documents 26-78% of the JSON, decoder fuzzed over **288 135** mutated
+  buffers (40 exports x 360 base documents, cross-fed, poison-pad OOB canary + determinism
   canary). Gate per view: Go == v1 == v2 over the FULL golden fixture set, full document and
   every fragment, with `FallbackCounts()` asserted exactly (player's legitimately-empty
   fragments make "no fallbacks" the wrong assertion). Numbers: PHASEB_BASELINE.md.
+  Composed with tip2 (shard 2) on merge: 11 structured tooltip/label fields appended inside the
+  affected messages + the shared `ssLabelSt` row, and a `wireTipSweep` gate for the surfaces whose
+  fixtures leave those fields nil - the merge had ZERO textual conflicts and still broke three
+  tabs, while live/motion stayed green with v2 dropping every tooltip until that sweep existed.
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

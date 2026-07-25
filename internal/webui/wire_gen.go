@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x752a7ba3
+	wireSchemaHash       uint32 = 0xaf5711c7
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -269,6 +269,18 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	w.Str(28, v.PerfTip)
 	w.Struct(29, func() { v.Perf.encodeWire(w) })
 	w.Struct(30, func() { v.Strip.encodeWire(w) })
+	if v.SignalsTipS != nil {
+		w.OptStruct(31, func() { v.SignalsTipS.encodeWire(w) })
+	}
+	if v.NetTipS != nil {
+		w.OptStruct(32, func() { v.NetTipS.encodeWire(w) })
+	}
+	if v.TimTipS != nil {
+		w.OptStruct(33, func() { v.TimTipS.encodeWire(w) })
+	}
+	if v.PerfTipS != nil {
+		w.OptStruct(34, func() { v.PerfTipS.encodeWire(w) })
+	}
 }
 
 func (v moCamRow) encodeWire(w *zigui.WireWriter) {
@@ -295,6 +307,9 @@ func (v moCamSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(12, v.PlayBtn)
 	w.Str(13, v.LoadLbl)
 	w.Str(14, v.CopyLbl)
+	if v.TipS != nil {
+		w.OptStruct(15, func() { v.TipS.encodeWire(w) })
+	}
 }
 
 func (v moRecRow) encodeWire(w *zigui.WireWriter) {
@@ -364,6 +379,9 @@ func (v moStudioSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(31, v.PCNote)
 	w.Str(32, v.PCExportLbl)
 	w.Str(33, v.VMCHelp)
+	if v.TipS != nil {
+		w.OptStruct(34, func() { v.TipS.encodeWire(w) })
+	}
 }
 
 func (v moState) encodeWire(w *zigui.WireWriter) {
@@ -601,6 +619,9 @@ func (v setKid) encodeWire(w *zigui.WireWriter) {
 	if v.Btn != nil {
 		w.OptStruct(7, func() { v.Btn.encodeWire(w) })
 	}
+	if v.SelLblS != nil {
+		w.OptStruct(8, func() { v.SelLblS.encodeWire(w) })
+	}
 }
 
 func (v setInput) encodeWire(w *zigui.WireWriter) {
@@ -700,6 +721,9 @@ func (v bridgeSt) encodeWire(w *zigui.WireWriter) {
 	w.Bool(4, v.HasGate)
 	w.Str(5, v.GateTitle)
 	w.Struct(6, func() { v.Gate.encodeWire(w) })
+	if v.TipS != nil {
+		w.OptStruct(7, func() { v.TipS.encodeWire(w) })
+	}
 }
 
 func (v updFlowSt) encodeWire(w *zigui.WireWriter) {
@@ -759,6 +783,9 @@ func (v setBlock) encodeWire(w *zigui.WireWriter) {
 	}
 	if v.Upd != nil {
 		w.OptStruct(24, func() { v.Upd.encodeWire(w) })
+	}
+	if v.SelLblS != nil {
+		w.OptStruct(25, func() { v.SelLblS.encodeWire(w) })
 	}
 }
 
@@ -868,6 +895,9 @@ func (v libGFSt) encodeWire(w *zigui.WireWriter) {
 func (v libSelTip) encodeWire(w *zigui.WireWriter) {
 	w.Struct(1, func() { v.Sel.encodeWire(w) })
 	w.Str(2, v.Label)
+	if v.LabelS != nil {
+		w.OptStruct(3, func() { v.LabelS.encodeWire(w) })
+	}
 }
 
 func (v libChipSt) encodeWire(w *zigui.WireWriter) {
@@ -918,6 +948,9 @@ func (v loudSt) encodeWire(w *zigui.WireWriter) {
 	w.Bool(9, v.HasWarn)
 	w.Str(10, v.Warn)
 	w.Str(11, v.Extra)
+	if v.TipS != nil {
+		w.OptStruct(12, func() { v.TipS.encodeWire(w) })
+	}
 }
 
 func (v libEncSt) encodeWire(w *zigui.WireWriter) {
@@ -1820,6 +1853,13 @@ func (v peersSt) encodeWire(w *zigui.WireWriter) {
 	w.Bool(3, v.Available)
 	w.Str(4, v.Unavailable)
 	w.Struct(5, func() { v.Body.encodeWire(w) })
+}
+
+func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	if v.Tip != nil {
+		w.OptStruct(2, func() { v.Tip.encodeWire(w) })
+	}
 }
 
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).

@@ -125,5 +125,33 @@ func wireBasesB2() []wireBase {
 			wireBase{"pub/" + n, wirePub(st)},
 			wireBase{"pub/" + n + "/hero", wirePubHero(st.Body.Hero)})
 	}
-	return out
+	return append(out, wireTipBasesB2()...)
+}
+
+// wireTipBasesB2 adds documents that actually CARRY tip2's structured tooltips, so the mutation
+// fuzz reaches the new optional-struct nesting (a keybind-grid tooltip is three levels of nested
+// lists deep) instead of only the tooltip-less fixture states.
+func wireTipBasesB2() []wireBase {
+	live := liveFixtures()["populated"]
+	live.HasSignals, live.HasNet, live.HasPerf = true, true, true
+	tp := tipTopicSt("cue-edit") // the 23-row keybind grid: the deepest tooltip shape
+	live.SignalsTipS, live.NetTipS, live.TimTipS, live.PerfTipS = tp, tp, tp, tp
+
+	sel := tip2Sel("set-ml-accel", "Automatic")
+	pane := setContentSt{
+		Nav: []setNavSt{{ID: "tips", Title: "Tips", Agg: "ok", Active: true}},
+		Secs: []setSecSt{{ID: "tips", Title: "Tooltips", Cards: []setCardSt{{ID: "medialink", Title: "Media link",
+			Blocks: []setBlock{{K: "select", Sel: &sel, SelLblS: &ssLabelSt{Text: "Acceleration", Tip: tp}}}}}}},
+	}
+
+	det := libDetailFixture()
+	det.Enc.Container = libSelTip{Sel: tip2Sel("lib-pf-container", "flac"),
+		LabelS: &ssLabelSt{Text: "Container", Tip: tp}}
+	det.Enc.Loud.TipS = tp
+
+	return []wireBase{
+		{"tip/libDetail", wireLibDetail(det)},
+		{"tip/live", wireLiveState(live)},
+		{"tip/setContent", wireSetContent(pane)},
+	}
 }
