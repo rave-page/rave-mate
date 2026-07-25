@@ -81,6 +81,9 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | vrchat | Zig (`native/zigui/src/vrchat.zig`; full + `#vrc-status-region`/`#vrc-editor`/`#vrc-campaths`/`#vrc-photos-body`) | `TestZigVRChatGolden` |
 | vrchat ▸ groups | Zig (`native/zigui/src/vrcgroups.zig`; `#vrcg-body` sub-view) | `TestZigVRCGroupsGolden` |
 | worlds | Zig (`native/zigui/src/worlds.zig`; full + `#world-linkhint`/`#world-gh`/`#world-st-<key>`/`#world-unity-rows`) | `TestZigWorldsGolden` |
+
+| midimon (MIDI-tab fragments) | Zig (`native/zigui/src/midimon.zig`; monitor card + `#midi-monitor` rows + driver wire trace) | `TestZigMIDIMonGolden`, `TestZigMIDITraceGolden` |
+| midictl | Zig (`native/zigui/src/midictl.zig` + `midictl_ctls.zig` + `midictl_uimap.zig`; full tab + `#midi-active` + `#midi-ctlstat-<i>`) | `TestZigMIDICtlGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -131,6 +134,28 @@ add-list placeholder/submit label were Go **source literals inserted unescaped**
 apostrophes, so escaping them would change the DOM. They travel in state and BOTH renderers emit
 them raw (documented in the header of worlds.zig + the state block). Everything user-derived
 (names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
+
+MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
+- Tooltips stay Go: `tipTopic(id)` markup (tooltip.go, keybind grid + link list) rides in
+  state as a PRE-RENDERED HTML string and Zig `raw`s it. Same for smart-select labels that
+  carry a tooltip (`selectBoxTip`) — state holds the resolved `selState` plus its
+  `<span class=ss-label>…</span>` HTML (`selHTMLRaw` / Zig `selectBoxRaw`).
+- Floats never cross the ABI: knob/fader `--v`/`--rot` are `trimNum`'d Go-side into strings.
+- Non-nil slices are mandatory — a nil Go slice marshals to `null` and the Zig parser
+  rejects it, silently falling the WHOLE tab back to Go. `emptySel()` (smartselect.go) is
+  the guard for zero-value `selState`s inside heterogeneous rows.
+- A fragment whose HTML is legitimately EMPTY (`#midi-ctlstat-<i>` before the MIDI child
+  reports) makes `renderJSON` return NULL ⇒ `ok=false` ⇒ the Go fallback renders the same
+  empty string. Golden tests must accept that (see `TestZigMIDICtlGolden`).
+- Components added to `components.zig` (`// --- midi ---` block):
+  `cardOpen(title,head)`/`cardTrailClose`/`cardClose` (Go `card`, streaming) ·
+  `statusRow(variant,label,data_label,line)` (Go `statusRowDL`) ·
+  `fchip(label,val,act,active)` · `toggleRowTip(label,dl,act,on,tip_html)` (Go
+  `toggleRowTipDL`) · `itemRowOpen(title,sub)`/`itemRowClose` (Go `itemRow`, streaming) ·
+  `selectBoxRaw(Select,label_html)` (Go `selHTMLRaw`).
+- Go helpers extended with caller-resolved-data-label twins (Unicode `ToLower` stays in Go,
+  same pattern as `toggleRowDL`): `statusRowDL`, `toggleRowTipDL`, plus
+  `resolveSelectBoxTip` and `resolveSmartSelect`/`selHTMLRaw`/`emptySel`.
 
 ## Dev rules when touching UI during migration
 

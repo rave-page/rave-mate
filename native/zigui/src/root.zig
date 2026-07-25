@@ -185,3 +185,42 @@ test "bad JSON returns null" {
     var n: usize = 0;
     try std.testing.expect(rz_ui_render_appgroups("{nope", 5, &n) == null);
 }
+
+// --- midi ---
+
+const midimon = @import("midimon.zig");
+
+export fn rz_ui_render_midimon(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.State, midimon.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midimon_rows(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Lines, midimon.renderRows, state_json, len, out_len);
+}
+
+export fn rz_ui_render_miditrace(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Trace, midimon.renderTrace, state_json, len, out_len);
+}
+
+const midictl = @import("midictl.zig");
+
+export fn rz_ui_render_midictl(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.State, midictl.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_active(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.Active, midictl.renderActive, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_stat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl_ctls.PortStat, midictl_ctls.renderPortStat, state_json, len, out_len);
+}
+
+const midictl_ctls = @import("midictl_ctls.zig");
+
+test {
+    _ = midimon;
+    _ = midictl;
+    _ = midictl_ctls;
+    _ = @import("midictl_uimap.zig");
+}

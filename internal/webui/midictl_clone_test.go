@@ -21,7 +21,7 @@ func TestMidiDriverThruCloneToggle(t *testing.T) {
 	}
 
 	// clone (default): fan-out shows the real device name, toggle checked.
-	clone := u.midiDriverThruHTML(0, c, ctx)
+	clone := midiDrvThruHTML(u.midiDrvThruState(0, c, ctx))
 	if !strings.Contains(clone, "<code>DJ2GO2 Touch MIDI</code>") {
 		t.Errorf("clone mode should show the device name; got:\n%s", clone)
 	}
@@ -38,7 +38,7 @@ func TestMidiDriverThruCloneToggle(t *testing.T) {
 
 	// distinct opt-in: fan-out is "<Name> THRU", toggle off.
 	c.ThruDistinctName = true
-	dist := u.midiDriverThruHTML(0, c, ctx)
+	dist := midiDrvThruHTML(u.midiDrvThruState(0, c, ctx))
 	if !strings.Contains(dist, "<code>Controller 2 THRU</code>") {
 		t.Errorf("distinct mode should show <Name> THRU; got:\n%s", dist)
 	}

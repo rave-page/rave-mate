@@ -101,6 +101,11 @@ func toggleRowGated(label string, on bool, gateHint string) string {
 
 // toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
 func toggleRowTip(label, act string, on bool, tipHTML string) string {
+	return toggleRowTipDL(label, strings.ToLower(label), act, on, tipHTML)
+}
+
+// toggleRowTipDL is toggleRowTip with a caller-resolved data-label (Zig state path).
+func toggleRowTipDL(label, dataLabel, act string, on bool, tipHTML string) string {
 	checked := ""
 	if on {
 		checked = " checked"
@@ -108,7 +113,7 @@ func toggleRowTip(label, act string, on bool, tipHTML string) string {
 	return fmt.Sprintf(`<label class=row data-label=%s><span class=row-label>%s%s</span>`+
 		`<span class=switch><input type=checkbox%s data-act=%s data-value=%s>`+
 		`<span class=switch-track></span></span></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
+		attrQ(dataLabel), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
 }
 
 // fieldEx is the general labelled text/number input (dispatch on change via act): optional
@@ -145,6 +150,20 @@ func selectBoxTip(label, act string, options [][2]string, current, topic string)
 		}
 		return out
 	})
+}
+
+// resolveSelectBoxTip registers + resolves a selectBoxTip into pure render state plus its
+// pre-rendered ss-label (label text + tooltip) for a Zig-migrated tab. selHTMLRaw pairs them.
+func resolveSelectBoxTip(label, act string, options [][2]string, current, topic string) (selState, string) {
+	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
+	ssRegister(id, act, current, func() []ssOpt {
+		out := make([]ssOpt, 0, len(options))
+		for _, op := range options {
+			out = append(out, ssOpt{Val: op[0], Label: op[1]})
+		}
+		return out
+	})
+	return ssResolve(id), `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
 }
 
 // emptyState renders the rp-empty placeholder.

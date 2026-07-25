@@ -34,3 +34,12 @@ func RenderWorldsLinkHint(stateJSON []byte) (string, bool)  { return "", false }
 func RenderWorldsGitHub(stateJSON []byte) (string, bool)    { return "", false }
 func RenderWorldsStatus(stateJSON []byte) (string, bool)    { return "", false }
 func RenderWorldsUnityRows(stateJSON []byte) (string, bool) { return "", false }
+
+// ── midi ──
+
+func RenderMIDIMon(stateJSON []byte) (string, bool)     { return "", false }
+func RenderMIDIMonRows(stateJSON []byte) (string, bool) { return "", false }
+func RenderMIDITrace(stateJSON []byte) (string, bool)   { return "", false }
+func RenderMIDICtl(stateJSON []byte) (string, bool)     { return "", false }
+func RenderMIDIActive(stateJSON []byte) (string, bool)  { return "", false }
+func RenderMIDICtlStat(stateJSON []byte) (string, bool) { return "", false }

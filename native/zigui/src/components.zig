@@ -615,3 +615,99 @@ test "slider markup matches Go slider" {
         "data-act=\"mo-scrub\" data-value=\"12.5\" oninput='var b=this.parentNode.querySelector(\".slider-val\");" ++
         "if(b)b.textContent=this.value+\"\"'></label>", h.b.items);
 }
+
+// --- midi ---
+// cardOpen/cardClose live in the vrchat block, statusRow in the motion+live block,
+// itemRowOpen/Close in the vrchat block (identical ports, deduped at merge).
+// cardTrailClose == cardHeadClose (same markup) — kept for the midi callers.
+
+pub fn cardTrailClose(h: *Html) !void {
+    try h.raw("</span></div>");
+}
+
+/// fchip: segmented/filter chip (Go fchip). Empty val omits data-val.
+pub fn fchip(h: *Html, label: []const u8, val: []const u8, act: []const u8, active: bool) !void {
+    try h.raw("<button class=\"fchip");
+    if (active) try h.raw(" active");
+    try h.raw("\" data-act=\"");
+    try h.esc(act);
+    try h.raw("\"");
+    if (val.len != 0) {
+        try h.raw(" data-val=\"");
+        try h.esc(val);
+        try h.raw("\"");
+    }
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</button>");
+}
+
+/// toggleRowTip: toggleRow with pre-rendered tooltip markup beside the label
+/// (Go toggleRowTipDL). tip_html is raw (tooltip.go owns that markup).
+pub fn toggleRowTip(h: *Html, label: []const u8, data_label: []const u8, act: []const u8, on: bool, tip_html: []const u8) !void {
+    try h.raw("<label class=row data-label=");
+    try h.attrQ(data_label);
+    try h.raw("><span class=row-label>");
+    try h.esc(label);
+    try h.raw(tip_html);
+    try h.raw("</span><span class=switch><input type=checkbox");
+    if (on) try h.raw(" checked");
+    try h.raw(" data-act=");
+    try h.attrQ(act);
+    try h.raw(" data-value=");
+    try h.attrQ(if (on) "true" else "false");
+    try h.raw("><span class=switch-track></span></span></label>");
+}
+
+/// selectBoxRaw is selectBox with a pre-rendered label (Go selHTMLRaw) — for select
+/// labels that carry a tooltip/badge. label_html is raw; s.label is ignored.
+pub fn selectBoxRaw(h: *Html, s: Select, label_html: []const u8) !void {
+    try h.raw("<div class=ss-field>");
+    try h.raw(label_html);
+    try h.raw("<div class=ss id=\"ss-");
+    try h.esc(s.id);
+    try h.raw("\">");
+    try selectInner(h, s);
+    try h.raw("</div></div>");
+}
+
+test "statusRow + fchip + itemRow + toggleRowTip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusRow(&h, "ok", "St&ate", "st&ate", "li\"ne");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--ok\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"st&amp;ate\">St&amp;ate</div>" ++
+        "<div class=strow-s data-value=\"li&#34;ne\">li&#34;ne</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "Cl&ock", "", "midi-ctl-filter:0:clock", true);
+    try std.testing.expectEqualStrings("<button class=\"fchip active\" data-act=\"midi-ctl-filter:0:clock\">Cl&amp;ock</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "L", "v'1", "a", false);
+    try std.testing.expectEqualStrings("<button class=\"fchip\" data-act=\"a\" data-val=\"v&#39;1\">L</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try itemRowOpen(&h, "T<x", "");
+    try itemRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=irow><div class=irow-main><div class=irow-title>T&lt;x</div>" ++
+        "</div><div class=irow-actions></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try toggleRowTip(&h, "En", "en", "um-enable", true, "<i>tip</i>");
+    try std.testing.expectEqualStrings("<label class=row data-label=\"en\"><span class=row-label>En<i>tip</i></span>" ++
+        "<span class=switch><input type=checkbox checked data-act=\"um-enable\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>", h.b.items);
+}
+
+test "cardOpen head + trail + close" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try cardOpen(&h, "T&x", true);
+    try badge(&h, "b", "info");
+    try cardTrailClose(&h);
+    try h.raw("body");
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;x</span>" ++
+        "<span class=card-trail><span class=\"rp-badge rp-badge--info\">b</span></span></div>body</div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try cardOpen(&h, "ignored", false);
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"></div>", h.b.items);
+}
