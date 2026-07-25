@@ -166,6 +166,13 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
+- **P6 UI phase B-1b (shard 1 SHIPPED):** `tooltip.go` `renderTip` — the 70-call-site, 18-file
+  tooltip primitive — now crosses as structured `tipSt` (all locale/registry resolution Go-side)
+  and renders in `components.zig renderTip`, byte-identical over 527 subtests (73 topics × 7
+  locales + 16 edge fixtures). Migrated consumers: settings (13 sites), player (4), automations
+  editor (8), automations schedules (7). The other 14 files keep the raw pre-rendered string over
+  a dual-field bridge (`tipOr`) and are untouched — wave B-2 flips them. Detail + rules:
+  ZIG_UI_GUIDE.md "tipTopic → structured tipSt".
 
 ## CI
 

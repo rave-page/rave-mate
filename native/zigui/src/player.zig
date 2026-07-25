@@ -10,7 +10,9 @@
 //!   - `export.medias[].loud` / `.loudExtra` = components.go loudnessFields + the
 //!     gain-plan line / pre-listen toggle (one markup source shared with the library
 //!     preset builder + automation transcode steps).
-//!   - `tipWave` / `tp.tipVideo` / `editBox.tipTrim` / `align.tipAlign` = tooltip.go.
+//!   - tooltips cross as STRUCTURED state since phase B1b (`tipWaveSt` / `tp.tipVideoSt` /
+//!     `editBox.tipTrimSt` / `alignRow.tipAlignSt`, components.zig renderTip); the raw `tip*`
+//!     strings stay only as the dual-field bridge (Go tipOr) and are empty on this path.
 //!   - the <video> element's inline JS handlers (they carry a %.3f volume and drive
 //!     shell.go __mse) — plain state values, attrQ'd identically on both sides.
 //!
@@ -105,7 +107,8 @@ pub const Tp = struct {
     editBtn: c.Btn = .{},
     isVideo: bool = false,
     openExt: c.Btn = .{},
-    tipVideo: []const u8 = "", // RAW
+    tipVideo: []const u8 = "", // legacy RAW tooltip markup (bridge)
+    tipVideoSt: ?c.Tip = null, // structured tooltip — wins over tipVideo
     timeTx: []const u8 = "",
     seek: c.Slider = .{},
     vol: c.Slider = .{},
@@ -136,7 +139,8 @@ pub const Align = struct {
     alignBtn: c.Btn = .{},
     nudges: []const c.Btn = &.{},
     offField: c.Field = .{},
-    tipAlign: []const u8 = "", // RAW
+    tipAlign: []const u8 = "", // legacy RAW tooltip markup (bridge)
+    tipAlignSt: ?c.Tip = null, // structured tooltip — wins over tipAlign
     warns: []const []const u8 = &.{},
 };
 
@@ -181,7 +185,8 @@ pub const Edit = struct {
     setIn: c.Btn = .{},
     setOut: c.Btn = .{},
     autoSel: c.Select = .{},
-    tipTrim: []const u8 = "", // RAW
+    tipTrim: []const u8 = "", // legacy RAW tooltip markup (bridge)
+    tipTrimSt: ?c.Tip = null, // structured tooltip — wins over tipTrim
     ro: RO = .{},
     dual: bool = false,
     alignRow: Align = .{},
@@ -205,7 +210,8 @@ pub const Inner = struct {
     fit: c.Btn = .{},
     zinfo: []const u8 = "", // "" = fit view
     hov: Hov = .{},
-    tipWave: []const u8 = "", // RAW
+    tipWave: []const u8 = "", // legacy RAW tooltip markup (bridge)
+    tipWaveSt: ?c.Tip = null, // structured tooltip — wins over tipWave
     tp: Tp = .{},
     editBox: Edit = .{},
 };
@@ -307,7 +313,7 @@ pub fn renderInner(h: *Html, s: Inner) !void {
     try h.raw("-hov class=mp-hovline>");
     try renderHov(h, s.hov);
     try h.raw("</span>");
-    try h.raw(s.tipWave);
+    try c.tipOr(h, s.tipWaveSt, s.tipWave);
     try h.raw("</div>");
 
     // transport
@@ -476,7 +482,7 @@ pub fn renderTp(h: *Html, s: Tp) !void {
     }
     if (s.isVideo) {
         try c.btnOf(h, s.openExt);
-        try h.raw(s.tipVideo);
+        try c.tipOr(h, s.tipVideoSt, s.tipVideo);
     }
     try h.raw("<span class=\"mp-time\" id=mp-");
     try h.raw(s.host);
@@ -507,7 +513,7 @@ pub fn renderEdit(h: *Html, s: Edit) !void {
     try h.raw("<span class=mp-autosel>");
     try c.selectBox(h, s.autoSel);
     try h.raw("</span>");
-    try h.raw(s.tipTrim);
+    try c.tipOr(h, s.tipTrimSt, s.tipTrim);
     try h.raw("</div>");
 
     try h.raw("<div id=mp-");
@@ -564,7 +570,7 @@ pub fn renderAlign(h: *Html, s: Align) !void {
     try h.raw("<span class=mp-aoff>");
     try c.fieldOf(h, s.offField);
     try h.raw("</span>");
-    try h.raw(s.tipAlign);
+    try c.tipOr(h, s.tipAlignSt, s.tipAlign);
     for (s.warns) |w| try c.hint(h, "warn", w);
     try h.raw("</div>");
 }

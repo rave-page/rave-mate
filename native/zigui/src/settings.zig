@@ -7,7 +7,10 @@
 //! Go-rendered card, so the query never reaches Zig). Card bodies arrive as BLOCK LISTS; this
 //! renderer walks them into the components.zig primitives.
 //!
-//! Trusted raw markup passed through verbatim (`raw`): tooltip.go `tipTopic` cards. The four card
+//! Tooltips cross as STRUCTURED state (`tipSt`, components.zig renderTip) since phase B1b; the
+//! legacy raw `tip` string stays as the dual-field bridge for state this file shares with
+//! un-migrated builders and wins nothing when tipSt is present.
+//! Trusted raw markup still passed through verbatim (`raw`/`noteRaw`/`region`). The four card
 //! bodies owned by other files (gridfix, gridfix model, account bridge, the #inst-update region)
 //! used to ride here as raw HTML too — they now cross as STRUCTURED state and render through
 //! settings_sub.zig (block kinds gridfix | gridfixmodel | bridge | updregion).
@@ -37,7 +40,8 @@ pub const Input = struct {
 pub const Kid = struct {
     k: []const u8 = "",
     fld: ?c.Field = null,
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy pre-rendered tooltip (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     sel: ?c.Select = null,
     selLbl: []const u8 = "",
     btn: ?c.Btn = null,
@@ -54,7 +58,8 @@ pub const Block = struct {
     title: []const u8 = "",
     sub: []const u8 = "",
     fld: ?c.Field = null,
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy pre-rendered tooltip (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     tgl: ?c.Toggle = null,
     gate: []const u8 = "",
     kv: ?c.KV = null,
@@ -84,7 +89,8 @@ pub const Switch = struct {
 pub const Card = struct {
     id: []const u8 = "",
     title: []const u8 = "",
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy pre-rendered tooltip (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     desc: []const u8 = "",
     st: Status = .{},
     tgl: ?Switch = null,
@@ -205,7 +211,7 @@ pub fn card(h: *Html, cd: Card) !void {
     try h.raw("<div class=\"rp-card\"><div class=set-cardhead><span class=set-title>");
     try h.esc(cd.title);
     try h.raw("</span>");
-    try h.raw(cd.tip);
+    try c.tipOr(h, cd.tipSt, cd.tip);
     var gate: []const u8 = "";
     if (cd.tgl) |t| {
         if (t.gate.len != 0) {
@@ -259,11 +265,14 @@ pub fn block(h: *Html, b: Block) !void {
     }
     if (eq(b.k, "hint")) return c.hint(h, b.tone, b.text);
     if (eq(b.k, "empty")) return c.emptyState(h, b.text);
-    if (eq(b.k, "field")) return field(h, b.fld, b.tip);
+    if (eq(b.k, "field")) return field(h, b.fld, b.tip, b.tipSt);
     if (eq(b.k, "toggle")) {
         const t = b.tgl orelse return;
         if (b.gate.len != 0) return c.toggleRowGated(h, t.label, t.dl, t.on, b.gate);
-        return c.toggleRowTip(h, t.label, t.dl, t.act, t.on, b.tip);
+        var tb = Html.init(h.a);
+        defer tb.deinit();
+        try c.tipOr(&tb, b.tipSt, b.tip);
+        return c.toggleRowTip(h, t.label, t.dl, t.act, t.on, tb.b.items);
     }
     if (eq(b.k, "select")) return select(h, b.sel, b.selLbl);
     if (eq(b.k, "amenu")) return amenu(h, b.sel);
@@ -285,7 +294,7 @@ pub fn block(h: *Html, b: Block) !void {
     }
     if (eq(b.k, "pathrow")) {
         try h.raw("<div class=set-pathrow>");
-        try field(h, b.fld, "");
+        try field(h, b.fld, "", null);
         if (b.btn) |bt| try c.btnOf(h, bt);
         try h.raw("</div>");
         return;
@@ -349,7 +358,7 @@ pub fn block(h: *Html, b: Block) !void {
 fn kids(h: *Html, list: []const Kid) !void {
     for (list) |k| {
         if (eq(k.k, "field")) {
-            try field(h, k.fld, k.tip);
+            try field(h, k.fld, k.tip, k.tipSt);
         } else if (eq(k.k, "select")) {
             try select(h, k.sel, k.selLbl);
         } else if (eq(k.k, "amenu")) {
@@ -360,9 +369,14 @@ fn kids(h: *Html, list: []const Kid) !void {
     }
 }
 
-fn field(h: *Html, f: ?c.Field, tip: []const u8) !void {
+/// field feeds components.fieldEx, which takes the tooltip as a STRING: render the structured
+/// tip into a scratch buffer rather than duplicating fieldEx's markup here.
+fn field(h: *Html, f: ?c.Field, tip: []const u8, tipSt: ?c.Tip) !void {
     const fl = f orelse return;
-    try c.fieldEx(h, fl.label, fl.dl, fl.act, fl.value, fl.inputType, fl.ph, tip);
+    var tb = Html.init(h.a);
+    defer tb.deinit();
+    try c.tipOr(&tb, tipSt, tip);
+    try c.fieldEx(h, fl.label, fl.dl, fl.act, fl.value, fl.inputType, fl.ph, tb.b.items);
 }
 
 /// select renders a resolved smart select; non-empty label_html = pre-rendered ss-label

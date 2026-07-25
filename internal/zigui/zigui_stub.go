@@ -178,3 +178,9 @@ func RenderPCViewer(stateJSON []byte) (string, bool) { return "", false }
 func RenderPCGpu(stateJSON []byte) (string, bool)    { return "", false }
 
 // --- end dialogs-b ---
+
+// --- phaseb-tip ---
+
+func RenderTip(stateJSON []byte) (string, bool) { return "", false }
+
+// --- end phaseb-tip ---

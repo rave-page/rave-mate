@@ -237,6 +237,10 @@ const uint8_t *rz_ui_render_auto_schedule(const uint8_t *state_json, size_t len,
 const uint8_t *rz_ui_render_pc_viewer(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_pc_gpu(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end dialogs-b --- */
+/* --- phaseb-tip --- */
+/* tooltip primitive (tipSt) - parity-gate export; migrated tabs compose it in-process. */
+const uint8_t *rz_ui_render_tip(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end phaseb-tip --- */
 
 #ifdef __cplusplus
 }
