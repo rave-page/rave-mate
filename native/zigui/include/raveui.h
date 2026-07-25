@@ -119,6 +119,18 @@ const uint8_t *rz_ui_render_settings_content(const uint8_t *state_json, size_t l
 /* #stset-<id> inner HTML (~1 Hz per-card status tick). */
 const uint8_t *rz_ui_render_settings_status(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- library --- */
+/* Whole Library tab (Browse · Favorites · Collection · Playlists · History · ID Marks ·
+ * Queue · Presets + the shared inspector). Sub-views owned by other renderers (nav rail,
+ * cue-edit, gridfix/tagfix panels, compat section, player, loudness block, key wheel) ride
+ * in the state as trusted pre-rendered markup. */
+const uint8_t *rz_ui_render_library(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Live-patched Library fragments: #lib-body, #lib-detail, #lib-queue-body, #ce-cell-<hash>. */
+const uint8_t *rz_ui_render_library_body(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_detail(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_queue(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_cuecell(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

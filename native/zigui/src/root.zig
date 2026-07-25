@@ -366,3 +366,31 @@ export fn rz_ui_render_settings_status(state_json: ?[*]const u8, len: usize, out
 test "settings tab module" {
     _ = settings;
 }
+
+// --- library ---
+
+const library = @import("library.zig");
+
+export fn rz_ui_render_library(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(library.State, library.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_library_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(library.Body, library.renderBody, state_json, len, out_len);
+}
+
+export fn rz_ui_render_library_detail(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(library.Detail, library.renderDetail, state_json, len, out_len);
+}
+
+export fn rz_ui_render_library_queue(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(library.Queue, library.renderQueue, state_json, len, out_len);
+}
+
+export fn rz_ui_render_library_cuecell(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(library.CueCell, library.renderCueCell, state_json, len, out_len);
+}
+
+test "library tab module" {
+    _ = library;
+}

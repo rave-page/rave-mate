@@ -80,3 +80,11 @@ func RenderPublishRemote(stateJSON []byte) (string, bool) { return "", false }
 func RenderSettings(stateJSON []byte) (string, bool)        { return "", false }
 func RenderSettingsContent(stateJSON []byte) (string, bool) { return "", false }
 func RenderSettingsStatus(stateJSON []byte) (string, bool)  { return "", false }
+
+// --- library ---
+
+func RenderLibrary(stateJSON []byte) (string, bool)        { return "", false }
+func RenderLibraryBody(stateJSON []byte) (string, bool)    { return "", false }
+func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
+func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }

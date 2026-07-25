@@ -89,7 +89,9 @@ type selState struct {
 	CurLabel string   `json:"curLabel"`
 	Open     bool     `json:"open"`
 	Filter   string   `json:"filter"`
-	Rows     []selRow `json:"rows"`
+	Rows     []selRow `json:"rows,omitempty"` // omitempty: a nil slice marshals to JSON null,
+	// which the Zig state parser rejects - an unrendered/zero-value select would then silently
+	// drop its WHOLE tab back to the Go renderer.
 }
 
 // ssResolve snapshots id's live smart-select state into pure render state.

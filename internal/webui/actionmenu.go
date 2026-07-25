@@ -6,11 +6,11 @@ package webui
 // Item Val = the target act (colons fine); picking dispatches it via menugo:.
 // id must be a unique colon-free token per instance.
 
+// actionMenu registers + renders the menu. resolveActionMenu owns the option shape and
+// actionMenuHTML the wrapper markup (both below), so the Go and Zig render paths share
+// ONE source; TestActionMenuResolvedParity pins them.
 func actionMenu(id, label string, items []ssOpt) string {
-	opts := make([]ssOpt, 0, len(items)+1)
-	opts = append(opts, ssOpt{Val: "", Label: label})
-	opts = append(opts, items...)
-	return `<span class=amenu>` + smartSelect(id, "", "menugo:", "", func() []ssOpt { return opts }) + `</span>`
+	return actionMenuHTML(resolveActionMenu(id, label, items))
 }
 
 func init() {
@@ -23,9 +23,9 @@ func init() {
 
 // --- publish (zigui) ---
 // Resolved-state twin of actionMenu for Zig-migrated tabs (same split as
-// smartSelectRaw → resolveSmartSelect + selHTMLRaw). actionMenu above is left
-// untouched for the Go-rendered tabs; TestActionMenuResolvedParity pins the two
-// to the same bytes.
+// smartSelectRaw → resolveSmartSelect + selHTMLRaw). actionMenu above now delegates
+// here (library batch), so there is exactly one markup source;
+// TestActionMenuResolvedParity keeps pinning the two entry points to the same bytes.
 
 // resolveActionMenu registers + resolves an actionMenu into pure render state. The
 // menu label rides as the leading empty-Val option (it becomes CurLabel), exactly

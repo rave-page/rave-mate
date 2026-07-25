@@ -396,3 +396,40 @@ func RenderSettingsStatus(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_settings_status(p, l, n)
 	})
 }
+
+// --- library ---
+
+// RenderLibrary renders the full Library tab.
+func RenderLibrary(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library(p, l, n)
+	})
+}
+
+// RenderLibraryBody renders the #lib-body inner fragment (section switch + list patches).
+func RenderLibraryBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_body(p, l, n)
+	})
+}
+
+// RenderLibraryDetail renders the #lib-detail inspector fragment.
+func RenderLibraryDetail(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_detail(p, l, n)
+	})
+}
+
+// RenderLibraryQueue renders the #lib-queue-body inner fragment.
+func RenderLibraryQueue(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_queue(p, l, n)
+	})
+}
+
+// RenderLibraryCueCell renders one #ce-cell-<hash> drops/cues census fragment.
+func RenderLibraryCueCell(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_cuecell(p, l, n)
+	})
+}

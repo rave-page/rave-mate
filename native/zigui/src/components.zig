@@ -932,3 +932,64 @@ test "toggleRowGated: disabled switch + warn hint" {
         "<input type=checkbox checked disabled><span class=switch-track></span></span></label>" ++
         "<div class=set-gate><span class=\"hint hint--warn\">Install mpv</span></div>", h.b.items);
 }
+
+// --- library ---
+// The Library tab reuses everything above (panel/emptyState/badge/btn*/fchip/toggleRow/
+// selectBox*/card*/itemRow*/kv*/subTabs/sectionOpen/num/masterDetail brackets, plus the
+// peers+publish progressBar and actionMenu). Only the wide + tri-pane layouts were missing.
+
+/// mdWideOpen brackets the wide list|detail split (Go masterDetailWide): the list is the
+/// primary work surface, the detail a fixed-width right inspector. Close with mdSplit/mdClose.
+pub fn mdWideOpen(h: *Html) !void {
+    try h.raw("<div class=\"mdsplit wide\"><div class=md-list>");
+}
+
+/// triOpen/triMid/triClose bracket the nav|list|detail split with draggable dividers
+/// (Go triPane). nav_var/detail_var are :root custom-property names the splitter JS
+/// persists - trusted literals, emitted raw exactly like the Go original. nav_html is
+/// the pre-rendered nav column.
+pub fn triOpen(h: *Html, nav_var: []const u8, detail_var: []const u8, nav_html: []const u8) !void {
+    try h.raw("<div class=\"mdsplit wide tri\" style=\"grid-template-columns:var(--");
+    try h.raw(nav_var);
+    try h.raw(",220px) 6px minmax(0,1fr) 6px var(--");
+    try h.raw(detail_var);
+    try h.raw(",clamp(300px,28vw,400px))\">");
+    try h.raw("<div class=md-nav>");
+    try h.raw(nav_html);
+    try h.raw("</div>");
+    try h.raw("<div class=split-h data-splitvar=\"");
+    try h.raw(nav_var);
+    try h.raw("\" data-splitdef=220></div>");
+    try h.raw("<div class=md-list>");
+}
+
+pub fn triMid(h: *Html, detail_var: []const u8) !void {
+    try h.raw("</div><div class=split-h data-splitvar=\"");
+    try h.raw(detail_var);
+    try h.raw("\" data-splitdef=340 data-splitdir=r></div><div class=md-detail>");
+}
+
+pub fn triClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+test "library layout primitives" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try mdWideOpen(&h);
+    try mdSplit(&h);
+    try mdClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"mdsplit wide\"><div class=md-list></div>" ++
+        "<div class=md-detail></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try triOpen(&h, "lib-nav-w", "lib-det-w", "N");
+    try h.raw("L");
+    try triMid(&h, "lib-det-w");
+    try h.raw("D");
+    try triClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"mdsplit wide tri\" style=\"grid-template-columns:" ++
+        "var(--lib-nav-w,220px) 6px minmax(0,1fr) 6px var(--lib-det-w,clamp(300px,28vw,400px))\">" ++
+        "<div class=md-nav>N</div><div class=split-h data-splitvar=\"lib-nav-w\" data-splitdef=220></div>" ++
+        "<div class=md-list>L</div><div class=split-h data-splitvar=\"lib-det-w\" data-splitdef=340 " ++
+        "data-splitdir=r></div><div class=md-detail>D</div></div>", h.b.items);
+}
