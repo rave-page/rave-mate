@@ -1081,3 +1081,119 @@ test "listRow with and without a sub-line" {
 }
 
 // --- end settings-sub ---
+
+// --- dialogs-a ---
+// Wave-4 dialog sweep: the shape most confirm/picker/context dialogs share, plus the two
+// form-modal inputs (Go hiddenField/labeledInput, library_actions.go). Additive only.
+
+/// Choice is the message + button-list dialog: a confirm, a format picker or a row context
+/// menu. hasMsg is explicit (a blank message still emits an empty `.np-artist`, like Go);
+/// msgRaw marks a message Go splices UNESCAPED (source literals with quotes around an
+/// already-escaped value); inBody puts the btn-row inside `.modal-body`, so the footer is
+/// Go's default Close button instead of the buttons.
+pub const Choice = struct {
+    title: []const u8 = "",
+    msg: []const u8 = "",
+    msgRaw: bool = false,
+    hasMsg: bool = false,
+    btns: []const Btn = &.{},
+    inBody: bool = false,
+};
+
+/// choiceDialog renders a whole Choice dialog (Go modal(title, body, footer)).
+pub fn choiceDialog(h: *Html, st: Choice) !void {
+    try modalOpen(h, st.title);
+    if (st.hasMsg) {
+        try h.raw("<div class=np-artist>");
+        if (st.msgRaw) try h.raw(st.msg) else try h.esc(st.msg);
+        try h.raw("</div>");
+    }
+    if (st.inBody) try btnRowOf(h, st.btns);
+    try modalFoot(h);
+    if (st.inBody) try modalFootDefault(h) else try btnRowOf(h, st.btns);
+    try modalClose(h);
+}
+
+/// hiddenField mirrors Go hiddenField: a form's carried-through value.
+pub fn hiddenField(h: *Html, name: []const u8, val: []const u8) !void {
+    try h.raw("<input type=hidden name=\"");
+    try h.esc(name);
+    try h.raw("\" value=\"");
+    try h.esc(val);
+    try h.raw("\">");
+}
+
+/// labeledInput mirrors Go labeledInput: a NAMED input for a `<form data-act=…>` modal
+/// (the value arrives in m.Form, not via data-act). dl = Go strings.ToLower(label).
+pub fn labeledInput(h: *Html, name: []const u8, label: []const u8, dl: []const u8, val: []const u8) !void {
+    try h.raw("<div class=pb-field data-label=");
+    try h.attrQ(dl);
+    try h.raw("><div class=pb-label>");
+    try h.esc(label);
+    try h.raw("</div><input class=field-input name=\"");
+    try h.esc(name);
+    try h.raw("\" value=\"");
+    try h.esc(val);
+    try h.raw("\"></div>");
+}
+
+test "choiceDialog: buttons in the footer (confirm shape)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try choiceDialog(&h, .{
+        .title = "Remove capture",
+        .msg = "Remove the capture \"set.ogg\" from the library?",
+        .msgRaw = true,
+        .hasMsg = true,
+        .btns = &.{ .{ .label = "Remove", .variant = "outline", .act = "pub-capdel-do:c1" }, .{ .label = "Cancel", .variant = "ghost", .act = "modal-close" } },
+    });
+    try std.testing.expectEqualStrings("<div class=modal-scrim data-act=modal-close></div>" ++
+        "<div class=modal role=dialog><div class=modal-head><h3 class=modal-title>Remove capture</h3>" ++
+        "<button class=modal-x data-act=modal-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body><div class=np-artist>Remove the capture \"set.ogg\" from the library?</div></div>" ++
+        "<div class=modal-foot><div class=btn-row>" ++
+        "<button class=\"rp-btn rp-btn--outline\" data-act=\"pub-capdel-do:c1\">Remove</button>" ++
+        "<button class=\"rp-btn rp-btn--ghost\" data-act=\"modal-close\">Cancel</button></div></div></div>", h.b.items);
+}
+
+test "choiceDialog: buttons in the body keep Go's default footer; msg escapes when not raw" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try choiceDialog(&h, .{
+        .title = "T",
+        .msg = "a&b",
+        .hasMsg = true,
+        .inBody = true,
+        .btns = &.{.{ .label = "Text (.txt)", .variant = "primary", .act = "pub-exportfmt:r1\x1ftxt" }},
+    });
+    try std.testing.expectEqualStrings("<div class=modal-scrim data-act=modal-close></div>" ++
+        "<div class=modal role=dialog><div class=modal-head><h3 class=modal-title>T</h3>" ++
+        "<button class=modal-x data-act=modal-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body><div class=np-artist>a&amp;b</div><div class=btn-row>" ++
+        "<button class=\"rp-btn rp-btn--primary\" data-act=\"pub-exportfmt:r1\x1ftxt\">Text (.txt)</button>" ++
+        "</div></div><div class=modal-foot>" ++
+        "<button class=\"rp-btn rp-btn--outline\" data-act=\"modal-close\">Close</button></div></div>", h.b.items);
+}
+
+test "choiceDialog: no message = context-menu shape (btn-row only body)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try choiceDialog(&h, .{ .title = "track.mp3", .inBody = true, .btns = &.{} });
+    try std.testing.expectEqualStrings("<div class=modal-scrim data-act=modal-close></div>" ++
+        "<div class=modal role=dialog><div class=modal-head><h3 class=modal-title>track.mp3</h3>" ++
+        "<button class=modal-x data-act=modal-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body><div class=btn-row></div></div><div class=modal-foot>" ++
+        "<button class=\"rp-btn rp-btn--outline\" data-act=\"modal-close\">Close</button></div></div>", h.b.items);
+}
+
+test "hiddenField + labeledInput match the Go form-modal inputs" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try hiddenField(&h, "id", "r&1");
+    try labeledInput(&h, "name", "Set n\"ame", "set n\"ame", "Live & loud");
+    try std.testing.expectEqualStrings("<input type=hidden name=\"id\" value=\"r&amp;1\">" ++
+        "<div class=pb-field data-label=\"set n&#34;ame\"><div class=pb-label>Set n&#34;ame</div>" ++
+        "<input class=field-input name=\"name\" value=\"Live &amp; loud\"></div>", h.b.items);
+}
+
+// --- end dialogs-a ---

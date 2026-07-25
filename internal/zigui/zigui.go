@@ -670,3 +670,60 @@ func RenderPlayerHov(stateJSON []byte) (string, bool) {
 }
 
 // --- end player ---
+
+// --- dialogs-a ---
+// Wave-4 dialog sweep A: the publish/transcode dialog family. Each renders a WHOLE dialog
+// (scrim + card + footer) for webui's openModal.
+
+// RenderDlgChoice renders the shared message+buttons dialog (confirm / format picker /
+// row context menu).
+func RenderDlgChoice(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_choice(p, l, n)
+	})
+}
+
+// RenderDlgTxtExport renders the tracklist text-export style dialog (preset + template +
+// header switch + live preview).
+func RenderDlgTxtExport(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_txtexport(p, l, n)
+	})
+}
+
+// RenderDlgExportPrev renders the CSV/JSON tracklist-export preview (local + remote arms).
+func RenderDlgExportPrev(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_exportprev(p, l, n)
+	})
+}
+
+// RenderDlgRename renders the rename-set form dialog.
+func RenderDlgRename(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_rename(p, l, n)
+	})
+}
+
+// RenderDlgFix renders the capture-aligned "Fix start times" preview.
+func RenderDlgFix(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_fix(p, l, n)
+	})
+}
+
+// RenderDlgPreset renders the export preset editor (pbuilder mp-pedit).
+func RenderDlgPreset(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_preset(p, l, n)
+	})
+}
+
+// RenderDlgPatMgr renders the cue-editor saved-pattern manager.
+func RenderDlgPatMgr(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_patmgr(p, l, n)
+	})
+}
+
+// --- end dialogs-a ---

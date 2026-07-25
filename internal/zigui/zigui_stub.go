@@ -137,3 +137,15 @@ func RenderPlayerRO(stateJSON []byte) (string, bool)     { return "", false }
 func RenderPlayerHov(stateJSON []byte) (string, bool)    { return "", false }
 
 // --- end player ---
+
+// --- dialogs-a ---
+
+func RenderDlgChoice(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgTxtExport(stateJSON []byte) (string, bool)  { return "", false }
+func RenderDlgExportPrev(stateJSON []byte) (string, bool) { return "", false }
+func RenderDlgRename(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgFix(stateJSON []byte) (string, bool)        { return "", false }
+func RenderDlgPreset(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgPatMgr(stateJSON []byte) (string, bool)     { return "", false }
+
+// --- end dialogs-a ---

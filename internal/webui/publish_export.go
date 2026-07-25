@@ -7,7 +7,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,16 +139,18 @@ func (u *UI) pubTxtOpen(id string) {
 	for _, p := range pubTxtPresets {
 		opts01 = append(opts01, ssOpt{Val: p[0], Label: i18n.T("publish.textExport.preset." + p[0])})
 	}
-	body := `<div class=pub-txt-opts>` +
-		`<span class=pub-txt-presel>` + smartSelect("pub-txt-preset", i18n.T("publish.textExport.style"), "pub-txt-preset:"+id, c.preset, func() []ssOpt { return opts01 }) + `</span>` +
-		field(i18n.T("publish.textExport.template"), "pub-txt-line:"+id, line, "text") +
-		toggleRow(i18n.T("publish.textExport.header"), "pub-txt-header:"+id, !c.noHeader) +
-		`</div>` +
-		`<p class=page-sub>` + html.EscapeString(i18n.T("publish.textExport.placeholders")+" {n} {nn} {offset} {artist} {title} {track} {album} {key} {bpm} {deck}") + `</p>` +
-		`<textarea class=pub-export-ta readonly rows=12>` + html.EscapeString(content) + `</textarea>`
-	footer := `<button class="rp-btn rp-btn--primary" data-act="copy" data-val="` + html.EscapeString(content) + `">` + html.EscapeString(i18n.T("common.copy")) + `</button>` +
-		btn(i18n.T("common.close"), "outline", "modal-close", "")
-	u.openModal(modal(i18n.T("publish.textExport.title"), body, footer))
+	// smartSelect with an explicit id: register + resolve, then hand selHTML the plain label
+	// (byte-identical to smartSelect's own label handling).
+	sel := resolveSmartSelect("pub-txt-preset", "pub-txt-preset:"+id, c.preset, func() []ssOpt { return opts01 })
+	sel.Label = i18n.T("publish.textExport.style")
+	u.openModal(pubTxtDlgHTML(pubTxtDlgSt{
+		Title:   i18n.T("publish.textExport.title"),
+		Sel:     sel,
+		Tmpl:    newField(i18n.T("publish.textExport.template"), "pub-txt-line:"+id, line, "text"),
+		Header:  newToggle(i18n.T("publish.textExport.header"), "pub-txt-header:"+id, !c.noHeader),
+		Place:   i18n.T("publish.textExport.placeholders") + " {n} {nn} {offset} {artist} {title} {track} {album} {key} {bpm} {deck}",
+		Content: content, CopyLbl: i18n.T("common.copy"), CloseLbl: i18n.T("common.close"),
+	}))
 }
 
 // ── inline start-offset edit ───────────────────────────────────────────────────────
@@ -310,13 +311,29 @@ func (u *UI) pubFixReplan(id string, opener int) {
 // phantom opens the recording (selectable when the heuristic guessed - fader-history
 // plans are exact), which tracks get removed, and every offset that changes.
 func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, fix recorder.TimeFix, fader bool) string {
-	var b strings.Builder
+	return pubFixDlgHTML(pubFixModalState(rec, capr, lead, fix, fader))
+}
+
+// pubFixModalState resolves the time-fix preview: description, opener picker (registering its
+// smart select, exactly where the old renderer did), the set-start line and every row whose
+// displayed offset changes.
+func pubFixModalState(rec recorder.Recording, capr libdb.SetRecording, lead float64, fix recorder.TimeFix, fader bool) pubFixDlgSt {
 	descKey := "publish.fix.desc"
 	if fader {
 		descKey = "publish.fix.descFader"
 	}
-	b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T(descKey, i18n.A{
-		"file": filepath.Base(capr.Path), "lead": pubClock(lead)})) + `</div>`)
+	st := pubFixDlgSt{
+		Title:       i18n.T("publish.fix.title"),
+		Desc:        i18n.T(descKey, i18n.A{"file": filepath.Base(capr.Path), "lead": pubClock(lead)}),
+		Opener:      emptySel(),
+		SetStartLbl: i18n.T("publish.fix.setStart"),
+		StartT:      rec.StartedAt.Local().Format("15:04:05"),
+		NewT:        fix.NewStart.Local().Format("15:04:05"),
+		RemovedTx:   i18n.T("publish.fix.removedRow"),
+		ApplyLbl:    i18n.T("publish.fix.apply"),
+		ApplyAct:    "pub-fixtimes-do:" + rec.ID,
+		CancelLbl:   i18n.T("common.cancel"),
+	}
 
 	// Opener choice (heuristic plans only): the file can't order tracks that predate its
 	// audible start - the workflow default is preselected, the DJ can overrule.
@@ -329,8 +346,9 @@ func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, 
 			}
 		}
 		if len(cands) > 1 {
-			b.WriteString(`<div class=pub-fix-opener>` + smartSelect("pub-fix-opener", i18n.T("publish.fix.opener"),
-				"pub-fixopener:"+rec.ID, fmt.Sprint(fix.Opener), func() []ssOpt { return cands }) + `</div>`)
+			sel := resolveSmartSelect("pub-fix-opener", "pub-fixopener:"+rec.ID, fmt.Sprint(fix.Opener), func() []ssOpt { return cands })
+			sel.Label = i18n.T("publish.fix.opener")
+			st.HasOpener, st.Opener = true, sel
 		}
 	}
 
@@ -338,18 +356,13 @@ func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, 
 	for _, i := range fix.RemoveTracks {
 		removed[i] = true
 	}
-	b.WriteString(`<div class=pub-fix-rows>`)
-	b.WriteString(`<div class=pub-fix-row><span class=pub-track-l>` + html.EscapeString(i18n.T("publish.fix.setStart")) + `</span>` +
-		`<span class=pub-track-o>` + rec.StartedAt.Local().Format("15:04:05") + ` → ` + fix.NewStart.Local().Format("15:04:05") + `</span></div>`)
 	// Preview the resulting OFFSETS for every track (the rebased set start shifts them all,
 	// not only the clamped ones) - rows whose displayed offset survives unchanged are skipped.
 	for i, t := range rec.Tracks {
 		oldOff := pubClock(t.StartedAt.Sub(rec.StartedAt).Seconds())
-		label := html.EscapeString(orTrackLine(pubTrackLine(t)))
+		label := orTrackLine(pubTrackLine(t))
 		if removed[i] {
-			b.WriteString(`<div class="pub-fix-row pub-fix-removed"><span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
-				`<span class=pub-track-o>[` + oldOff + `] ✕</span>` +
-				`<span class=pub-track-l>` + label + ` · ` + html.EscapeString(i18n.T("publish.fix.removedRow")) + `</span></div>`)
+			st.Rows = append(st.Rows, pubFixRowSt{Num: fmt.Sprint(i + 1), Off: oldOff, Removed: true, Label: label})
 			continue
 		}
 		ns, moved := fix.TrackStarts[i]
@@ -360,16 +373,9 @@ func pubFixModal(rec recorder.Recording, capr libdb.SetRecording, lead float64, 
 		if oldOff == newOff {
 			continue
 		}
-		b.WriteString(`<div class=pub-fix-row><span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
-			`<span class=pub-track-o>[` + oldOff + `] → [` + newOff + `]</span>` +
-			`<span class=pub-track-l>` + label + `</span></div>`)
+		st.Rows = append(st.Rows, pubFixRowSt{Num: fmt.Sprint(i + 1), Off: oldOff, NewOff: newOff, Label: label})
 	}
-	b.WriteString(`</div>`)
-	footer := btnRow(
-		btn(i18n.T("publish.fix.apply"), "primary", "pub-fixtimes-do:"+rec.ID, ""),
-		btn(i18n.T("common.cancel"), "ghost", "modal-close", ""),
-	)
-	return modal(i18n.T("publish.fix.title"), b.String(), footer)
+	return st
 }
 
 // pubFixTimesApply commits the previewed plan (drains the persist queue - off the act lane).
@@ -402,22 +408,17 @@ func (u *UI) pubFixTimesApply(id string) {
 func (u *UI) pubTrackCtx2(arg string) {
 	recID, rest, _ := strings.Cut(arg, "\x1f")
 	idxStr, path, _ := strings.Cut(rest, "\x1f")
-	sel := u.pubTSel()
-	var row []string
+	var row []uiBtn
 	if path != "" {
-		if sel[path] && len(sel) >= 2 {
-			row = append(row, btn(i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(len(sel))}), "primary", "lib-compat-mark:pub", ""))
-		}
-		row = append(row,
-			btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+path, ""),
-			btn(i18n.T("library.copyPath"), "ghost", "copy", path))
+		row = u.pubCompatBtns(path)
 	}
-	row = append(row, btn(i18n.T("publish.track.remove"), "destructive", "pub-trm:"+recID+"\x1f"+idxStr, ""))
+	row = append(row, uiBtn{Label: i18n.T("publish.track.remove"), Variant: "destructive",
+		Act: "pub-trm:" + recID + "\x1f" + idxStr})
 	title := filepath.Base(path)
 	if path == "" {
 		title = i18n.T("publish.track.n", i18n.A{"n": fmt.Sprint(atoi(idxStr) + 1)})
 	}
-	u.openModal(modal(title, btnRow(row...), ""))
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{Title: title, InBody: true, Btns: row}))
 }
 
 // pubRemoveTrack drops one track from a finished set's tracklist (context-menu action).
