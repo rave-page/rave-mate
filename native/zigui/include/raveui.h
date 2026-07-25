@@ -31,6 +31,13 @@ const uint8_t *rz_ui_render_automations(const uint8_t *state_json, size_t len, s
 /* #auto-body inner HTML (version-gated ~1 Hz tick patch target). */
 const uint8_t *rz_ui_render_automations_body(const uint8_t *state_json, size_t len, size_t *out_len);
 
+const uint8_t *rz_ui_render_overlays(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Live-patched overlays fragments: #ovl-appearance, #ovl-spout, #ovl-strip, #ovl-st-<kind>. */
+const uint8_t *rz_ui_render_overlays_appearance(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_spout(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_strip(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_status(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

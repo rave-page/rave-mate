@@ -83,3 +83,38 @@ func RenderAutomationsBody(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_automations_body(p, l, n)
 	})
 }
+
+// RenderOverlays renders the full Overlays view.
+func RenderOverlays(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays(p, l, n)
+	})
+}
+
+// RenderOverlaysAppearance renders the #ovl-appearance fragment.
+func RenderOverlaysAppearance(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_appearance(p, l, n)
+	})
+}
+
+// RenderOverlaysSpout renders the #ovl-spout fragment.
+func RenderOverlaysSpout(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_spout(p, l, n)
+	})
+}
+
+// RenderOverlaysStrip renders the #ovl-strip fragment.
+func RenderOverlaysStrip(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_strip(p, l, n)
+	})
+}
+
+// RenderOverlaysStatus renders one #ovl-st-<kind> status fragment.
+func RenderOverlaysStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_status(p, l, n)
+	})
+}

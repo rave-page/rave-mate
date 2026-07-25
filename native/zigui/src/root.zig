@@ -99,6 +99,29 @@ export fn rz_ui_render_automations_body(state_json: ?[*]const u8, len: usize, ou
     return renderJSON(automations.Body, automations.renderBody, state_json, len, out_len);
 }
 
+const overlays = @import("overlays.zig");
+
+export fn rz_ui_render_overlays(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(overlays.State, overlays.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_overlays_appearance(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(overlays.Appearance, overlays.renderAppearance, state_json, len, out_len);
+}
+
+export fn rz_ui_render_overlays_spout(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(overlays.Spout, overlays.renderSpout, state_json, len, out_len);
+}
+
+export fn rz_ui_render_overlays_strip(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(overlays.Strip, overlays.renderStrip, state_json, len, out_len);
+}
+
+export fn rz_ui_render_overlays_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(@import("components.zig").Status, overlays.renderStatus, state_json, len, out_len);
+}
+
 test "media tab modules" {
     _ = automations;
+    _ = overlays;
 }
