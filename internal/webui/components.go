@@ -89,14 +89,7 @@ func toggleRowDL(label, dataLabel, act string, on bool) string {
 // toggleRowGated renders a disabled switch + a warn hint naming what to install to
 // unlock it. Same rule as btnGated: gated controls stay visible, greyed, explained.
 func toggleRowGated(label string, on bool, gateHint string) string {
-	checked := ""
-	if on {
-		checked = " checked"
-	}
-	return fmt.Sprintf(`<label class="row row--gated" data-label=%s><span class=row-label>%s</span>`+
-		`<span class=switch><input type=checkbox%s disabled><span class=switch-track></span></span></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), checked) +
-		`<div class=set-gate>` + hint("warn", gateHint) + `</div>`
+	return toggleRowGatedDL(label, strings.ToLower(label), on, gateHint)
 }
 
 // toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
@@ -462,6 +455,20 @@ func statusRowDL(variant, label, dataLabel, line string) string {
 	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
 		attrQ(dataLabel) + `>` + html.EscapeString(label) + `</div>` +
 		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+}
+
+// --- settings (zigui port) ---
+
+// toggleRowGatedDL is toggleRowGated with a caller-resolved data-label.
+func toggleRowGatedDL(label, dataLabel string, on bool, gateHint string) string {
+	checked := ""
+	if on {
+		checked = " checked"
+	}
+	return fmt.Sprintf(`<label class="row row--gated" data-label=%s><span class=row-label>%s</span>`+
+		`<span class=switch><input type=checkbox%s disabled><span class=switch-track></span></span></label>`,
+		attrQ(dataLabel), html.EscapeString(label), checked) +
+		`<div class=set-gate>` + hint("warn", gateHint) + `</div>`
 }
 
 // fieldExDL is fieldEx with a caller-resolved data-label.
