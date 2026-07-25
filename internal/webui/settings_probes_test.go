@@ -258,7 +258,7 @@ func TestProbeAsyncArrivalRendersIdentically(t *testing.T) {
 	sync.probes.mu.Unlock()
 	if want := pane(sync); async != want {
 		t.Fatalf("async arrival != sync arrival:\n async: %d B\n sync:  %d B\n first diff at %d",
-			len(async), len(want), firstDiff(async, want))
+			len(async), len(want), probeFirstDiff(async, want))
 	}
 }
 
@@ -309,8 +309,8 @@ func TestProbeChangeDetection(t *testing.T) {
 	}
 }
 
-// firstDiff reports the first differing byte offset (-1 when equal).
-func firstDiff(a, b string) int {
+// probeFirstDiff reports the first differing byte offset (-1 when equal).
+func probeFirstDiff(a, b string) int {
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] != b[i] {
 			return i
