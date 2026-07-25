@@ -74,3 +74,9 @@ func RenderLibRemote(stateJSON []byte) (string, bool) { return "", false }
 func RenderPublish(stateJSON []byte) (string, bool)       { return "", false }
 func RenderPublishHero(stateJSON []byte) (string, bool)   { return "", false }
 func RenderPublishRemote(stateJSON []byte) (string, bool) { return "", false }
+
+// --- settings ---
+
+func RenderSettings(stateJSON []byte) (string, bool)        { return "", false }
+func RenderSettingsContent(stateJSON []byte) (string, bool) { return "", false }
+func RenderSettingsStatus(stateJSON []byte) (string, bool)  { return "", false }

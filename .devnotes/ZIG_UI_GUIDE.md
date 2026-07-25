@@ -94,6 +94,8 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 | publish | Zig (`native/zigui/src/publish.zig`; full + `#pub-hero` tick fragment) | `TestZigPublishGolden` |
 | publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
+
+| settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -294,3 +296,41 @@ wrapper around a bare `selectBox`). NOT ported (dialogs/modals stay Go, wave 3+)
 (`pubTxtOpen` text-export dialog, `pubFixModal` time-fix preview), `publish_actions.go` modals
 (rename/delete/capture-delete/track context menus), `pbuilder.go` (`mpPresetModal`), and everything
 `player.go` renders.
+
+Settings-port notes (the biggest tab, ~40 cards over 7 sub-tab sections): the split introduced a
+BLOCK LIST between the state builder and the renderers - `cardBlocks(id)` (was `cardContent`)
+returns `[]setBlock` instead of HTML, and `setBlockHTML` renders each kind through the existing
+components.go primitive (`note/noteRaw/hint/empty/field/toggle(+tip,+gated)/select(+tip)/amenu/
+kv/fpair/btnrow/pathrow/itemrow/install/installNote/region/form/raw`). That keeps ONE markup
+source for both renderers while the ~45 per-card bodies stay readable as data. Verified zero DOM
+change by dumping 24 pre/post fixtures (empty + populated config x 7 sections x 4 queries + full
+view) and diffing - 0 lines.
+- Everything impure is resolved Go-side as usual: config/service snapshots, the cached fs/PATH/
+  device probes (`settingsProbes` - a Go-runtime-shaped cache, see below), `strings.ToLower`
+  data-labels, all numbers (`strconv`/`trimNum`/`FormatFloat 'g'`), smart-select registration +
+  filtering, `tipTopic` tooltip markup, and the SEARCH match: `foldSearch(stripTags(setCardHTML(
+  card)))` runs on the Go-rendered card, so the query text never reaches Zig.
+- Trusted raw markup (`raw`/`region` blocks) = the WAVE 3 seams, each owned by another file:
+  `gridfixCardBody` (settings_gridfix.go), `gridfixModelCardBody` (settings_gridfix_model.go),
+  `bridgeCardBody` (bridge_actions.go), `updateFlowHTML` (update_actions.go, inside
+  `#inst-update`). settings_vr_managers.go is modal-only - it never enters the tab render.
+- Only ONE new components.zig helper was needed (`toggleRowGated`, Go `toggleRowGatedDL` - the
+  gated-switch + warn-hint pair); everything else reused. Settings-specific chrome (set-note,
+  set-pathrow, set-install, set-cardhead, set-nav, set-search, set-dlgform) stays tab-local in
+  settings.zig.
+- Composite children (fpair / btn-row / item-row trailing) travel as a NON-recursive `setKid`
+  (field|select|amenu|btn) - depth is 1 by construction, so the JSON stays a plain tree and Zig
+  needs no recursive parse instantiation.
+- Byte-exactness traps replicated: the hand-rolled `set-dlgform` inputs have NO space between the
+  `placeholder="…"` attribute and `autocomplete=off` (Go concatenates `attrQ(...)` straight onto
+  the literal); the RTSP note splices pre-escaped `&lt;this machine's IP&gt;` between two escaped
+  values (carried as a `noteRaw` block); ids (`stset-<id>`, `stnav-<id>`, `set-<sec>`,
+  `inst-<key>`, `data-act=toggle:<id>`, form acts) are spliced UNESCAPED both sides.
+- Go-runtime workaround, NOT ported behaviour (flagged per ZIG_MIGRATION "Why Zig"):
+  `settingsProbes` + `maybeRefreshProbes` (render_settings.go:~1210-1400) exist because the
+  blocking `mediatools.Tool.Status()` (PATH scan) / `vrdll.Probe()` / device enumerations ran on
+  the render goroutine and froze tab-open for seconds; the 10 s TTL + one-in-flight + "patch once
+  when the install state flips" dance is scheduler/GC-shaped, not feature-shaped. A Zig-native
+  pass can probe concurrently with an explicit allocator and drop the whole cache. Same for the
+  search path: it renders every card in Go to match against, then re-renders the matches in Zig -
+  acceptable now (goldens keep it honest), removable once the block state is matched directly.

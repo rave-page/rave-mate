@@ -373,3 +373,26 @@ func RenderPublishRemote(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_publish_remote(p, l, n)
 	})
 }
+
+// --- settings ---
+
+// RenderSettings renders the full Settings view.
+func RenderSettings(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings(p, l, n)
+	})
+}
+
+// RenderSettingsContent renders the #set-content pane (sub-tab / search patch).
+func RenderSettingsContent(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_content(p, l, n)
+	})
+}
+
+// RenderSettingsStatus renders one #stset-<id> status fragment (~1 Hz tick).
+func RenderSettingsStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_status(p, l, n)
+	})
+}

@@ -346,3 +346,23 @@ export fn rz_ui_render_publish_remote(state_json: ?[*]const u8, len: usize, out_
 test "publish tab module" {
     _ = publish;
 }
+
+// --- settings ---
+
+const settings = @import("settings.zig");
+
+export fn rz_ui_render_settings(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.State, settings.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_content(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.Content, settings.renderContent, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.Status, settings.renderStatus, state_json, len, out_len);
+}
+
+test "settings tab module" {
+    _ = settings;
+}

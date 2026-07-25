@@ -112,6 +112,13 @@ const uint8_t *rz_ui_render_publish(const uint8_t *state_json, size_t len, size_
 const uint8_t *rz_ui_render_publish_hero(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_publish_remote(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- settings --- */
+const uint8_t *rz_ui_render_settings(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #set-content inner HTML (sub-tab switch + debounced search patch target). */
+const uint8_t *rz_ui_render_settings_content(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #stset-<id> inner HTML (~1 Hz per-card status tick). */
+const uint8_t *rz_ui_render_settings_status(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif
