@@ -9,9 +9,10 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0x7dea1b80;
+pub const schema_hash: u32 = 0x3c93a16b;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -26,6 +27,7 @@ pub const msg_live_link: u16 = 17; // #live-ablelink fragment
 pub const msg_live_graph: u16 = 18; // #live-net + #live-tim fragments
 pub const msg_live_perf: u16 = 19; // #live-perf2 fragment
 pub const msg_live_strip: u16 = 20; // #live-strip fragment
+pub const msg_mo_state: u16 = 21; // Motion tab (full view + the #mo-body fragment share this state)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -322,6 +324,135 @@ pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
     };
 }
 
+pub fn decodeMoCamRow(r: *wire.Reader, out: *motion.CamRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.group = try r.str(t),
+        2 => out.showGroup = try r.boolean(t),
+        3 => out.act = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        5 => out.name = try r.str(t),
+        6 => out.meta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoCam(r: *wire.Reader, out: *motion.Cam) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.unavailable = try r.str(t),
+        2 => out.rows = try r.list(motion.CamRow, decodeMoCamRow, t),
+        3 => out.empty = try r.str(t),
+        4 => out.reloadLbl = try r.str(t),
+        5 => out.organizeLbl = try r.str(t),
+        6 => out.djLbl = try r.str(t),
+        7 => out.previewLbl = try r.str(t),
+        8 => out.tip = try r.str(t),
+        9 => out.view = try r.str(t),
+        10 => out.hint = try r.str(t),
+        11 => out.info = try r.str(t),
+        12 => out.playBtn = try r.str(t),
+        13 => out.loadLbl = try r.str(t),
+        14 => out.copyLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoRecRow(r: *wire.Reader, out: *motion.RecRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.act = try r.str(t),
+        3 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoAvatar(r: *wire.Reader, out: *motion.Avatar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        3 => out.importLbl = try r.str(t),
+        4 => out.syncLbl = try r.str(t),
+        5 => out.info = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoSlider(r: *wire.Reader, out: *c.Slider) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.unit = try r.str(t),
+        5 => out.unitJs = try r.str(t),
+        6 => out.minS = try r.str(t),
+        7 => out.maxS = try r.str(t),
+        8 => out.stepS = try r.str(t),
+        9 => out.valS = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoToggle(r: *wire.Reader, out: *motion.Toggle) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoStudio(r: *wire.Reader, out: *motion.Studio) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.recs = try r.list(motion.RecRow, decodeMoRecRow, t),
+        2 => out.empty = try r.str(t),
+        3 => out.refreshLbl = try r.str(t),
+        4 => out.exportLbl = try r.str(t),
+        5 => out.renderLbl = try r.str(t),
+        6 => out.pcViewLbl = try r.str(t),
+        7 => out.renderProg = try r.str(t),
+        8 => out.avatar = try r.sub(motion.Avatar, decodeMoAvatar, t),
+        9 => out.previewLbl = try r.str(t),
+        10 => out.tip = try r.str(t),
+        11 => out.view = try r.str(t),
+        12 => out.hint = try r.str(t),
+        13 => out.time = try r.str(t),
+        14 => out.scrub = try r.sub(c.Slider, decodeMoSlider, t),
+        15 => out.playLbl = try r.str(t),
+        16 => out.stopLbl = try r.str(t),
+        17 => out.loop = try r.sub(motion.Toggle, decodeMoToggle, t),
+        18 => out.osc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        19 => out.vmc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        20 => out.model = try r.sub(motion.Toggle, decodeMoToggle, t),
+        21 => out.modelOn = try r.boolean(t),
+        22 => out.hasDyn = try r.boolean(t),
+        23 => out.physNote = try r.str(t),
+        24 => out.phys = try r.sub(motion.Toggle, decodeMoToggle, t),
+        25 => out.rest = try r.sub(motion.Toggle, decodeMoToggle, t),
+        26 => out.marks = try r.sub(motion.Toggle, decodeMoToggle, t),
+        27 => out.pc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        28 => out.pcOn = try r.boolean(t),
+        29 => out.pcDensity = try r.sub(c.Select, decodeSelState, t),
+        30 => out.pcColor = try r.sub(motion.Toggle, decodeMoToggle, t),
+        31 => out.pcNote = try r.str(t),
+        32 => out.pcExportLbl = try r.str(t),
+        33 => out.vmcHelp = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoState(r: *wire.Reader, out: *motion.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.section = try r.str(t),
+        4 => out.tabCam = try r.str(t),
+        5 => out.tabStudio = try r.str(t),
+        6 => out.cam = try r.sub(motion.Cam, decodeMoCam, t),
+        7 => out.studio = try r.sub(motion.Studio, decodeMoStudio, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -336,6 +467,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_live_graph);
     try std.testing.expect(msg_ag_state != msg_live_perf);
     try std.testing.expect(msg_ag_state != msg_live_strip);
+    try std.testing.expect(msg_ag_state != msg_mo_state);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -348,6 +480,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_live_graph);
     try std.testing.expect(msg_logs_state != msg_live_perf);
     try std.testing.expect(msg_logs_state != msg_live_strip);
+    try std.testing.expect(msg_logs_state != msg_mo_state);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -359,6 +492,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_live_graph);
     try std.testing.expect(msg_logs_lines != msg_live_perf);
     try std.testing.expect(msg_logs_lines != msg_live_strip);
+    try std.testing.expect(msg_logs_lines != msg_mo_state);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -369,6 +503,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_live_graph);
     try std.testing.expect(msg_live_state != msg_live_perf);
     try std.testing.expect(msg_live_state != msg_live_strip);
+    try std.testing.expect(msg_live_state != msg_mo_state);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -378,6 +513,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_live_graph);
     try std.testing.expect(msg_live_transport != msg_live_perf);
     try std.testing.expect(msg_live_transport != msg_live_strip);
+    try std.testing.expect(msg_live_transport != msg_mo_state);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -386,6 +522,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_live_graph);
     try std.testing.expect(msg_live_n_p != msg_live_perf);
     try std.testing.expect(msg_live_n_p != msg_live_strip);
+    try std.testing.expect(msg_live_n_p != msg_mo_state);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -393,25 +530,33 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_live_graph);
     try std.testing.expect(msg_live_status != msg_live_perf);
     try std.testing.expect(msg_live_status != msg_live_strip);
+    try std.testing.expect(msg_live_status != msg_mo_state);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
     try std.testing.expect(msg_live_decks != msg_live_graph);
     try std.testing.expect(msg_live_decks != msg_live_perf);
     try std.testing.expect(msg_live_decks != msg_live_strip);
+    try std.testing.expect(msg_live_decks != msg_mo_state);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
     try std.testing.expect(msg_live_signals != msg_live_perf);
     try std.testing.expect(msg_live_signals != msg_live_strip);
+    try std.testing.expect(msg_live_signals != msg_mo_state);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
     try std.testing.expect(msg_live_cockpit != msg_live_strip);
+    try std.testing.expect(msg_live_cockpit != msg_mo_state);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
+    try std.testing.expect(msg_live_link != msg_mo_state);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
+    try std.testing.expect(msg_live_graph != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_live_strip);
+    try std.testing.expect(msg_live_perf != msg_mo_state);
+    try std.testing.expect(msg_live_strip != msg_mo_state);
 }

@@ -949,4 +949,18 @@ func RenderLiveFragV2(kind string, state []byte) (string, bool) {
 	})
 }
 
+// RenderMotionV2 renders the full Motion tab from an RZW1 document.
+func RenderMotionV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_v2(p, l, n)
+	})
+}
+
+// RenderMotionBodyV2 renders the #mo-body fragment from an RZW1 document.
+func RenderMotionBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_body_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

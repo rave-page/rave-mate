@@ -28,6 +28,9 @@ func wireExportsB2() []wireExport {
 	for _, k := range []string{"transport", "np", "status", "decks", "signals", "cockpit", "link", "graph", "perf", "strip"} {
 		out = append(out, liveFragExport(k))
 	}
+	out = append(out,
+		wireExport{"motion_v2", zigui.RenderMotionV2},
+		wireExport{"motion_body_v2", zigui.RenderMotionBodyV2})
 	return out
 }
 
@@ -47,6 +50,9 @@ func wireBasesB2() []wireBase {
 			wireBase{"live/" + n + "/perf", wireLivePerf(st.Perf)},
 			wireBase{"live/" + n + "/strip", wireLiveStrip(st.Strip)},
 		)
+	}
+	for n, st := range moFixtures() {
+		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
 	}
 	return out
 }

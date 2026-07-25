@@ -989,6 +989,7 @@ document to every export, so the matrix grows on its own).
 | appgroups (pilot) | 1 | full + `#appgroups-body` | 6 |
 | logs (pilot) | 2, 3 | full + `#log-view` | 6 |
 | live | 10-20 | full + 10 tick fragments (`live_frag_v2`) | 6 × 12 surfaces |
+| motion | 21 | full + `#mo-body` (one message, like appgroups) | 7 × 2 surfaces |
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

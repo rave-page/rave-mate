@@ -125,6 +125,26 @@ func BenchmarkWireBenchLivePerf(b *testing.B) {
 		func() (string, bool) { return zigui.RenderLiveFragV2("perf", wireLivePerf(st)) })
 }
 
+func BenchmarkWireBenchMotion(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := moFixtures()["studio"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMotion(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMotionV2(wireMoState(st)) })
+}
+
+func BenchmarkWireBenchMotionBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := moFixtures()["studio"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMotionBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMotionBodyV2(wireMoState(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

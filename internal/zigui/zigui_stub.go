@@ -194,4 +194,7 @@ func RenderLogsLinesV2(state []byte) (string, bool)     { return "", false }
 func RenderLiveV2(state []byte) (string, bool)                  { return "", false }
 func RenderLiveFragV2(kind string, state []byte) (string, bool) { return "", false }
 
+func RenderMotionV2(state []byte) (string, bool)     { return "", false }
+func RenderMotionBodyV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---

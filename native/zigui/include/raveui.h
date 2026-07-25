@@ -258,6 +258,8 @@ const uint8_t *rz_ui_render_logs_lines_v2(const uint8_t *state, size_t len, size
  * fragment is its own root message, so a document built for another fragment is refused. */
 const uint8_t *rz_ui_render_live_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_live_frag_v2(const uint8_t *kind, size_t kind_len, const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_motion_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_motion_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 #ifdef __cplusplus

@@ -829,6 +829,17 @@ export fn rz_ui_render_live_frag_v2(kind: ?[*]const u8, kind_len: usize, state: 
     return null;
 }
 
+// ── B-2 fan-out: motion ──
+// One message for both surfaces (the tab and the #mo-body section switch), like appgroups.
+
+export fn rz_ui_render_motion_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(motion.State, wire_gen.decodeMoState, motion.render, wire_gen.msg_mo_state, state, len, out_len);
+}
+
+export fn rz_ui_render_motion_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(motion.State, wire_gen.decodeMoState, motion.renderBody, wire_gen.msg_mo_state, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

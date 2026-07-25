@@ -225,6 +225,79 @@ func TestWireStrAlwaysKeepsEmptyFill(t *testing.T) {
 	}
 }
 
+// TestZigWireThreeWayMotion: one message, two surfaces. Motion is the optional-struct case -
+// exactly one section state is built per render and the other stays nil, so `null` vs a
+// zero-value struct must survive the wire (kOptPtr / OptStruct).
+func TestZigWireThreeWayMotion(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := moFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireMoState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderMotion(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderMotionV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", motionHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			b1, ok := zigui.RenderMotionBody(js)
+			if !ok {
+				t.Fatal("v1 body render failed")
+			}
+			b2, ok := zigui.RenderMotionBodyV2(doc)
+			if !ok {
+				t.Fatal("v2 body render failed")
+			}
+			assertBytesEqual(t, "body go==v1", motionBodyHTML(st), b1)
+			assertBytesEqual(t, "body v1==v2", b1, b2)
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// TestWireOptStructPresenceIsNotNull: an all-zero but PRESENT section must render as the
+// section (empty), not as the absent section. Struct would drop the empty body and the field
+// would decode as null - which is why the opt kinds use OptStruct.
+func TestWireOptStructPresenceIsNotNull(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	absent := moState{Title: "Motion", Section: "campaths", TabCam: "Camera paths", TabStudio: "Studio"}
+	present := absent
+	present.Cam = &moCamSt{} // every field zero, but the section IS there
+
+	for name, st := range map[string]moState{"absent": absent, "present": present} {
+		doc := wireMoState(st)
+		v2, ok := zigui.RenderMotionV2(doc)
+		if !ok {
+			t.Fatalf("%s: v2 render failed", name)
+		}
+		assertBytesEqual(t, name, motionHTML(st), v2)
+	}
+	if a, p := wireMoState(absent), wireMoState(present); len(a) >= len(p) {
+		t.Errorf("absent (%d B) should be smaller than present-but-empty (%d B)", len(a), len(p))
+	}
+	if motionHTML(absent) == motionHTML(present) {
+		t.Fatal("fixture is inert: absent and present render the same in Go")
+	}
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).

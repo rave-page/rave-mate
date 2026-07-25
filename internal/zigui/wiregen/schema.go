@@ -220,6 +220,40 @@ var schema = []msg{
 		doc: "Live tab - full cockpit",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip")},
 	},
+	// motion: one root - the full view and the #mo-body fragment share moState. Cam/Studio are Go pointers (exactly one section is built per render), so they are optp: presence IS the section switch.
+	{
+		name: "MoCamRow", goT: "moCamRow", zigT: "motion.CamRow",
+		fs: []field{s(1, "Group", "group"), b(2, "ShowGroup", "showGroup"), s(3, "Act", "act"), b(4, "Sel", "sel"), s(5, "Name", "name"), s(6, "Meta", "meta")},
+	},
+	{
+		name: "MoCam", goT: "moCamSt", zigT: "motion.Cam",
+		fs: []field{s(1, "Unavailable", "unavailable"), li(2, "Rows", "rows", "MoCamRow"), s(3, "Empty", "empty"), s(4, "ReloadLbl", "reloadLbl"), s(5, "OrganizeLbl", "organizeLbl"), s(6, "DJLbl", "djLbl"), s(7, "PreviewLbl", "previewLbl"), s(8, "Tip", "tip"), s(9, "View", "view"), s(10, "Hint", "hint"), s(11, "Info", "info"), s(12, "PlayBtn", "playBtn"), s(13, "LoadLbl", "loadLbl"), s(14, "CopyLbl", "copyLbl")},
+	},
+	{
+		name: "MoRecRow", goT: "moRecRow", zigT: "motion.RecRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Act", "act"), b(3, "Sel", "sel")},
+	},
+	{
+		name: "MoAvatar", goT: "moAvatarSt", zigT: "motion.Avatar",
+		fs: []field{s(1, "Label", "label"), st(2, "Sel", "sel", "SelState"), s(3, "ImportLbl", "importLbl"), s(4, "SyncLbl", "syncLbl"), s(5, "Info", "info")},
+	},
+	{
+		name: "MoSlider", goT: "moSliderSt", zigT: "c.Slider",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Unit", "unit"), sa(5, "UnitJS", "unitJs"), sa(6, "MinS", "minS"), sa(7, "MaxS", "maxS"), sa(8, "StepS", "stepS"), sa(9, "ValS", "valS")},
+	},
+	{
+		name: "MoToggle", goT: "moToggleSt", zigT: "motion.Toggle",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), b(4, "On", "on")},
+	},
+	{
+		name: "MoStudio", goT: "moStudioSt", zigT: "motion.Studio",
+		fs: []field{li(1, "Recs", "recs", "MoRecRow"), s(2, "Empty", "empty"), s(3, "RefreshLbl", "refreshLbl"), s(4, "ExportLbl", "exportLbl"), s(5, "RenderLbl", "renderLbl"), s(6, "PCViewLbl", "pcViewLbl"), s(7, "RenderProg", "renderProg"), st(8, "Avatar", "avatar", "MoAvatar"), s(9, "PreviewLbl", "previewLbl"), s(10, "Tip", "tip"), s(11, "View", "view"), s(12, "Hint", "hint"), s(13, "Time", "time"), st(14, "Scrub", "scrub", "MoSlider"), s(15, "PlayLbl", "playLbl"), s(16, "StopLbl", "stopLbl"), st(17, "Loop", "loop", "MoToggle"), st(18, "OSC", "osc", "MoToggle"), st(19, "VMC", "vmc", "MoToggle"), st(20, "Model", "model", "MoToggle"), b(21, "ModelOn", "modelOn"), b(22, "HasDyn", "hasDyn"), s(23, "PhysNote", "physNote"), st(24, "Phys", "phys", "MoToggle"), st(25, "Rest", "rest", "MoToggle"), st(26, "Marks", "marks", "MoToggle"), st(27, "PC", "pc", "MoToggle"), b(28, "PCOn", "pcOn"), st(29, "PCDensity", "pcDensity", "SelState"), st(30, "PCColor", "pcColor", "MoToggle"), s(31, "PCNote", "pcNote"), s(32, "PCExportLbl", "pcExportLbl"), s(33, "VMCHelp", "vmcHelp")},
+	},
+	{
+		name: "MoState", goT: "moState", zigT: "motion.State", id: 21,
+		doc: "Motion tab (full view + the #mo-body fragment share this state)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Section", "section"), s(4, "TabCam", "tabCam"), s(5, "TabStudio", "tabStudio"), op(6, "Cam", "cam", "MoCam"), op(7, "Studio", "studio", "MoStudio")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -227,6 +261,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"motion", "motion.zig"},
 	// --- phaseb-wire (B-2 fan-out) ---
 	{"live", "live.zig"},
 }

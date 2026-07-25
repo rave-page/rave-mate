@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x7dea1b80
+	wireSchemaHash       uint32 = 0x3c93a16b
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -22,6 +22,7 @@ const (
 	wireMsgLiveGraph     uint16 = 18 // #live-net + #live-tim fragments
 	wireMsgLivePerf      uint16 = 19 // #live-perf2 fragment
 	wireMsgLiveStrip     uint16 = 20 // #live-strip fragment
+	wireMsgMoState       uint16 = 21 // Motion tab (full view + the #mo-body fragment share this state)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -247,6 +248,115 @@ func (v liveState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(30, func() { v.Strip.encodeWire(w) })
 }
 
+func (v moCamRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Group)
+	w.Bool(2, v.ShowGroup)
+	w.Str(3, v.Act)
+	w.Bool(4, v.Sel)
+	w.Str(5, v.Name)
+	w.Str(6, v.Meta)
+}
+
+func (v moCamSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Unavailable)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(3, v.Empty)
+	w.Str(4, v.ReloadLbl)
+	w.Str(5, v.OrganizeLbl)
+	w.Str(6, v.DJLbl)
+	w.Str(7, v.PreviewLbl)
+	w.Str(8, v.Tip)
+	w.Str(9, v.View)
+	w.Str(10, v.Hint)
+	w.Str(11, v.Info)
+	w.Str(12, v.PlayBtn)
+	w.Str(13, v.LoadLbl)
+	w.Str(14, v.CopyLbl)
+}
+
+func (v moRecRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Act)
+	w.Bool(3, v.Sel)
+}
+
+func (v moAvatarSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Struct(2, func() { v.Sel.encodeWire(w) })
+	w.Str(3, v.ImportLbl)
+	w.Str(4, v.SyncLbl)
+	w.Str(5, v.Info)
+}
+
+func (v moSliderSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.DL)
+	w.Str(3, v.Act)
+	w.Str(4, v.Unit)
+	w.StrAlways(5, v.UnitJS)
+	w.StrAlways(6, v.MinS)
+	w.StrAlways(7, v.MaxS)
+	w.StrAlways(8, v.StepS)
+	w.StrAlways(9, v.ValS)
+}
+
+func (v moToggleSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.DL)
+	w.Str(3, v.Act)
+	w.Bool(4, v.On)
+}
+
+func (v moStudioSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Recs), func(i int) { v.Recs[i].encodeWire(w) })
+	w.Str(2, v.Empty)
+	w.Str(3, v.RefreshLbl)
+	w.Str(4, v.ExportLbl)
+	w.Str(5, v.RenderLbl)
+	w.Str(6, v.PCViewLbl)
+	w.Str(7, v.RenderProg)
+	w.Struct(8, func() { v.Avatar.encodeWire(w) })
+	w.Str(9, v.PreviewLbl)
+	w.Str(10, v.Tip)
+	w.Str(11, v.View)
+	w.Str(12, v.Hint)
+	w.Str(13, v.Time)
+	w.Struct(14, func() { v.Scrub.encodeWire(w) })
+	w.Str(15, v.PlayLbl)
+	w.Str(16, v.StopLbl)
+	w.Struct(17, func() { v.Loop.encodeWire(w) })
+	w.Struct(18, func() { v.OSC.encodeWire(w) })
+	w.Struct(19, func() { v.VMC.encodeWire(w) })
+	w.Struct(20, func() { v.Model.encodeWire(w) })
+	w.Bool(21, v.ModelOn)
+	w.Bool(22, v.HasDyn)
+	w.Str(23, v.PhysNote)
+	w.Struct(24, func() { v.Phys.encodeWire(w) })
+	w.Struct(25, func() { v.Rest.encodeWire(w) })
+	w.Struct(26, func() { v.Marks.encodeWire(w) })
+	w.Struct(27, func() { v.PC.encodeWire(w) })
+	w.Bool(28, v.PCOn)
+	w.Struct(29, func() { v.PCDensity.encodeWire(w) })
+	w.Struct(30, func() { v.PCColor.encodeWire(w) })
+	w.Str(31, v.PCNote)
+	w.Str(32, v.PCExportLbl)
+	w.Str(33, v.VMCHelp)
+}
+
+func (v moState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Str(3, v.Section)
+	w.Str(4, v.TabCam)
+	w.Str(5, v.TabStudio)
+	if v.Cam != nil {
+		w.OptStruct(6, func() { v.Cam.encodeWire(w) })
+	}
+	if v.Studio != nil {
+		w.OptStruct(7, func() { v.Studio.encodeWire(w) })
+	}
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -341,6 +451,13 @@ func wireLivePerf(v livePerfSt) []byte {
 // wireLiveStrip encodes liveStripSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireLiveStrip(v liveStripSt) []byte {
 	w := zigui.NewWireWriter(wireMsgLiveStrip, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMoState encodes moState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMoState(v moState) []byte {
+	w := zigui.NewWireWriter(wireMsgMoState, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
