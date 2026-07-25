@@ -6,11 +6,10 @@ package webui
 // Item Val = the target act (colons fine); picking dispatches it via menugo:.
 // id must be a unique colon-free token per instance.
 
+// actionMenu registers + renders the menu. resolveActionMenu owns the option shape and
+// actionMenuOf the wrapper markup, so the Zig render path shares ONE source.
 func actionMenu(id, label string, items []ssOpt) string {
-	opts := make([]ssOpt, 0, len(items)+1)
-	opts = append(opts, ssOpt{Val: "", Label: label})
-	opts = append(opts, items...)
-	return `<span class=amenu>` + smartSelect(id, "", "menugo:", "", func() []ssOpt { return opts }) + `</span>`
+	return actionMenuOf(resolveActionMenu(id, label, items))
 }
 
 func init() {

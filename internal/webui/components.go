@@ -222,18 +222,12 @@ func slider(label, act string, min, max, step, val float64, unit string) string 
 
 // progressBar renders a 0..1 fill with an optional caption (defaults to the percentage).
 func progressBar(frac float64, caption string) string {
-	if frac < 0 {
-		frac = 0
-	}
-	if frac > 1 {
-		frac = 1
-	}
-	pct := fmt.Sprintf("%.1f%%", frac*100)
+	pct := pbarPctOf(frac)
 	cap := caption
 	if cap == "" {
 		cap = pct
 	}
-	return `<div class=pbar><div class=pbar-fill style="width:` + pct + `"></div><span class=pbar-cap>` + html.EscapeString(cap) + `</span></div>`
+	return progressBarOf(pct, cap)
 }
 
 // statusRow renders a status dot + label + muted sub-line (the per-card live status pattern).
@@ -462,6 +456,25 @@ func statusRowDL(variant, label, dataLabel, line string) string {
 	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
 		attrQ(dataLabel) + `>` + html.EscapeString(label) + `</div>` +
 		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+}
+
+// --- library (zigui port) ---
+
+// pbarPctOf formats a progressBar fill width, clamped to 0..1. The Zig render path never
+// formats a float, so the width rides in state as this exact string.
+func pbarPctOf(frac float64) string {
+	if frac < 0 {
+		frac = 0
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	return fmt.Sprintf("%.1f%%", frac*100)
+}
+
+// progressBarOf renders a progress bar from a pre-formatted fill width + caption.
+func progressBarOf(width, caption string) string {
+	return `<div class=pbar><div class=pbar-fill style="width:` + width + `"></div><span class=pbar-cap>` + html.EscapeString(caption) + `</span></div>`
 }
 
 // fieldExDL is fieldEx with a caller-resolved data-label.
