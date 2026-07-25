@@ -25,6 +25,12 @@ endif
 ifeq ($(ZIG),1)
   TAGS += zigdsp
 endif
+# ZIG=1 also links the raveui Zig webview render layer (native/zigui, tag zigui) —
+# ONE switch turns on all Zig natives; `make zig` builds both libs. Separate block so
+# zigcore-side edits above don't conflict.
+ifeq ($(ZIG),1)
+  TAGS += zigui
+endif
 
 .PHONY: build build-spout spout-sdk zig build-zig run service vet fmt test tidy soak vuln clean all generate-api generate-icon
 

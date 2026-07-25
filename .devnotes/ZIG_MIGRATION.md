@@ -64,7 +64,10 @@ step keeps the shipped app green; pure-Go fallback stays until a port soaks.
   a Zig port adds risk, no wins. Stays a Go featurehost child; revisit when std TLS/http
   matures or a soaked Zig dep is chosen. P4's stdio contract makes the swap mechanical
   later.
-- **P6 UI:** see ZIG_UI_GUIDE.md — webview C-ABI port, HTML/CSS/DS assets unchanged.
+- **P6 UI (phase A SHIPPED):** see ZIG_UI_GUIDE.md — render-layer bridge live:
+  `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
+  migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
+  appgroups. Shell/actions/transport stay Go until phase B.
 
 ## CI
 
