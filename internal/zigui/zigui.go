@@ -18,7 +18,10 @@ package zigui
 #include "raveui.h"
 */
 import "C"
-import "unsafe"
+import (
+	"time"
+	"unsafe"
+)
 
 // abiVersion the lib must report; mismatch = stale artifact, refuse to render.
 const abiVersion = 1
@@ -179,6 +182,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	}
 	p := (*C.uint8_t)(unsafe.Pointer(&state[0]))
 	var n C.size_t
+	t0 := time.Now() // perf.go counters: two time.Now() per render, ~50ns on a >50µs render
 	out := f(p, C.size_t(len(state)), &n)
 	if out == nil {
 		noteFallback(2) // 2 frames up = the Render* wrapper (see fallback.go)
@@ -186,6 +190,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	}
 	s := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(n))
 	C.rz_ui_free(out, n)
+	NoteRender(len(state), time.Since(t0))
 	return s, true
 }
 
