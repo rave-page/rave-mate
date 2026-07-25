@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"rave.page/mate/internal/eventbus"
+	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/twitch"
 )
 
@@ -99,7 +100,7 @@ func (u *UI) buildTwitch() fyne.CanvasObject {
 
 // twitchTitleStrip is the stream-title preset strip (moved off the Settings Twitch card):
 // pick a preset, fill its {placeholders}, apply. nil without a manager/config.
-func (u *UI) twitchTitleStrip(mgr *twitch.Manager) fyne.CanvasObject {
+func (u *UI) twitchTitleStrip(mgr *featurehost.TwitchProxy) fyne.CanvasObject {
 	if mgr == nil || u.svc.Cfg == nil {
 		return nil
 	}
@@ -126,7 +127,7 @@ func (u *UI) twitchTitleStrip(mgr *twitch.Manager) fyne.CanvasObject {
 }
 
 // twitchChatRow renders a chat line: colored name + message + a moderation menu button.
-func (u *UI) twitchChatRow(mgr *twitch.Manager, ev twitch.Event) fyne.CanvasObject {
+func (u *UI) twitchChatRow(mgr *featurehost.TwitchProxy, ev twitch.Event) fyne.CanvasObject {
 	name := canvas.NewText(badgePrefix(ev)+displayName(ev)+":", twitchNameColor(ev.Color))
 	name.TextStyle = fyne.TextStyle{Bold: true}
 	msg := widget.NewLabel(ev.Text)
@@ -182,7 +183,7 @@ func twitchAlertRow(ev twitch.Event) fyne.CanvasObject {
 }
 
 // twitchModerateDialog offers delete/timeout/ban for a chat message.
-func (u *UI) twitchModerateDialog(mgr *twitch.Manager, ev twitch.Event) {
+func (u *UI) twitchModerateDialog(mgr *featurehost.TwitchProxy, ev twitch.Event) {
 	run := func(cmd twitch.ModerateCmd) {
 		goUI("twitch-mod", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

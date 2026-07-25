@@ -10,6 +10,9 @@
 .tw-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .tw-hint { color: var(--rp-muted, #B98AA0); font-size: 12px; }
 
+/* persisted-history date separator */
+.tw-sep { color: var(--rp-muted, #B98AA0); text-align: center; opacity: .75; padding: 4px 0; }
+
 /* chat feed rows (extends .log-view/.log-line) */
 .tw-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
 .tw-name { font-weight: 700; }
