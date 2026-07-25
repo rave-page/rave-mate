@@ -17,7 +17,6 @@ package webui
 
 import (
 	"fmt"
-	"html"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -112,12 +111,16 @@ func (f libPBFieldSt) html() string {
 	return pbFieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, f.Hint)
 }
 
-// libSelTip pairs a resolved smart select with its pre-rendered ss-label (label + tooltip
-// markup from tooltip.go, which stays Go-side).
+// libSelTip pairs a resolved smart select with its ss-label. The label is STRUCTURED state since
+// phase B-1b (components.go ssLabelSt); Label stays as the legacy pre-rendered bridge.
 type libSelTip struct {
-	Sel   selState `json:"sel"`
-	Label string   `json:"labelHtml"`
+	Sel    selState   `json:"sel"`
+	Label  string     `json:"labelHtml"`         // legacy pre-rendered ss-label (bridge)
+	LabelS *ssLabelSt `json:"labelSt,omitempty"` // structured ss-label - wins over Label
 }
+
+// html renders the pair through the shared ss-label bridge (components.go ssSelHTML).
+func (t libSelTip) html() string { return ssSelHTML(t.Sel, t.LabelS, t.Label) }
 
 // libBatchSt is a batchbar (browse + collection selection bars).
 type libBatchSt struct {
@@ -1625,9 +1628,9 @@ func resolvePbSelect(label, act string, options [][2]string, current string) sel
 	return s
 }
 
-// resolvePbSelectTip is resolvePbSelect plus the pre-rendered ss-label carrying the
-// shared-glossary tooltip (tooltip.go topic markup stays Go-side).
+// resolvePbSelectTip is resolvePbSelect plus the structured ss-label carrying the
+// shared-glossary tooltip (tooltip.go topic).
 func resolvePbSelectTip(label, act string, options [][2]string, current, topic string) libSelTip {
 	s := resolveSmartSelect(strings.ReplaceAll(act, ":", "-"), act, current, pbOptsFn(options))
-	return libSelTip{Sel: s, Label: `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`}
+	return libSelTip{Sel: s, LabelS: &ssLabelSt{Text: label, Tip: tipTopicSt(topic)}}
 }

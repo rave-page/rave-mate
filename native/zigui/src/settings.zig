@@ -43,7 +43,8 @@ pub const Kid = struct {
     tip: []const u8 = "", // legacy pre-rendered tooltip (bridge)
     tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     sel: ?c.Select = null,
-    selLbl: []const u8 = "",
+    selLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    selLblSt: ?c.SsLabel = null, // structured ss-label — wins over selLbl
     btn: ?c.Btn = null,
 };
 
@@ -64,7 +65,8 @@ pub const Block = struct {
     gate: []const u8 = "",
     kv: ?c.KV = null,
     sel: ?c.Select = null,
-    selLbl: []const u8 = "",
+    selLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    selLblSt: ?c.SsLabel = null, // structured ss-label — wins over selLbl
     btn: ?c.Btn = null,
     kids: []const Kid = &.{},
     inputs: []const Input = &.{},
@@ -274,7 +276,7 @@ pub fn block(h: *Html, b: Block) !void {
         try c.tipOr(&tb, b.tipSt, b.tip);
         return c.toggleRowTip(h, t.label, t.dl, t.act, t.on, tb.b.items);
     }
-    if (eq(b.k, "select")) return select(h, b.sel, b.selLbl);
+    if (eq(b.k, "select")) return select(h, b.sel, b.selLblSt, b.selLbl);
     if (eq(b.k, "amenu")) return amenu(h, b.sel);
     if (eq(b.k, "kv")) {
         if (b.kv) |k| try c.kvOf(h, k);
@@ -360,7 +362,7 @@ fn kids(h: *Html, list: []const Kid) !void {
         if (eq(k.k, "field")) {
             try field(h, k.fld, k.tip, k.tipSt);
         } else if (eq(k.k, "select")) {
-            try select(h, k.sel, k.selLbl);
+            try select(h, k.sel, k.selLblSt, k.selLbl);
         } else if (eq(k.k, "amenu")) {
             try amenu(h, k.sel);
         } else if (eq(k.k, "btn")) {
@@ -379,12 +381,11 @@ fn field(h: *Html, f: ?c.Field, tip: []const u8, tipSt: ?c.Tip) !void {
     try c.fieldEx(h, fl.label, fl.dl, fl.act, fl.value, fl.inputType, fl.ph, tb.b.items);
 }
 
-/// select renders a resolved smart select; non-empty label_html = pre-rendered ss-label
-/// (selectBoxTip, Go selHTMLRaw).
-fn select(h: *Html, s: ?c.Select, label_html: []const u8) !void {
+/// select renders a resolved smart select: a STRUCTURED ss-label wins (selectBoxTip since B-1b),
+/// else a legacy pre-rendered one, else the plain label the select state carries.
+fn select(h: *Html, s: ?c.Select, lbl: ?c.SsLabel, label_html: []const u8) !void {
     const sel = s orelse return;
-    if (label_html.len != 0) return c.selectBoxRaw(h, sel, label_html);
-    return c.selectBox(h, sel);
+    try c.selectBoxTipOr(h, sel, lbl, label_html);
 }
 
 /// amenu mirrors Go actionMenu: a label-as-current smart select in an amenu span.

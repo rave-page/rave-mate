@@ -179,6 +179,15 @@ Rules:
   editor (8), automations schedules (7). The other 14 files keep the raw pre-rendered string over
   a dual-field bridge (`tipOr`) and are untouched — wave B-2 flips them. Detail + rules:
   ZIG_UI_GUIDE.md "tipTopic → structured tipSt".
+- **P6 UI phase B-1b (shard 2 SHIPPED, wave B-2):** the remaining 14 files are flipped, so NO
+  pre-rendered tooltip markup is produced by a state builder any more — `tipTopic(` has zero
+  production callers (source-scanned by `TestNoProductionCallerShipsRawTooltipMarkup`; the two
+  Go-only surfaces, the nav rail and the pre-listen row inside the loudness block's `extraHTML`,
+  call `tipTopicHTML`). The select-with-tooltip **ss-label** became state too (`ssLabelSt` /
+  `components.zig SsLabel`), collapsing four pre-rendered label literals. The raw `tip` fields and
+  `tipOr`'s raw arm stay for one more step — the post-merge cleanup drops them. 144 new
+  byte-equality subtests (`zigui_golden_tip2_test.go`: 18 surfaces × 4 tooltip shapes × 2 locales,
+  each with its raw-bridge twin). Detail: ZIG_UI_GUIDE.md "shard 2".
 - **P6 UI phase B (wave B-1, in progress):** the per-render state→JSON→parse round trip is
   being replaced by RZW1, a length-prefixed TLV wire whose Go encoder and Zig decoder are
   GENERATED FROM ONE SCHEMA (`internal/zigui/wiregen`) - appgroups + logs pilots land as

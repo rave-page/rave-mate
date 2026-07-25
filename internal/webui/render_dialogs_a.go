@@ -301,13 +301,13 @@ func mpPresetDlgHTMLOf(st mpPresetDlgSt) string {
 	if st.HasSrc {
 		b.WriteString(hint("info", st.SrcHint))
 	}
-	b.WriteString(selHTMLRaw(st.Container.Sel, st.Container.Label))
+	b.WriteString(st.Container.html())
 	if st.HasVideo {
 		b.WriteString(`<div class=pb-grp>`)
-		b.WriteString(selHTMLRaw(st.VCodec.Sel, st.VCodec.Label))
+		b.WriteString(st.VCodec.html())
 		if st.HasVEnc {
 			b.WriteString(selHTML(st.Accel))
-			b.WriteString(selHTMLRaw(st.RateMode.Sel, st.RateMode.Label))
+			b.WriteString(st.RateMode.html())
 			b.WriteString(st.RateField.html())
 			b.WriteString(selHTML(st.Res))
 			b.WriteString(st.FPS.html())
@@ -315,7 +315,7 @@ func mpPresetDlgHTMLOf(st mpPresetDlgSt) string {
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(selHTMLRaw(st.ACodec.Sel, st.ACodec.Label))
+	b.WriteString(st.ACodec.html())
 	if st.HasLadder {
 		if st.HasVBRTgl {
 			b.WriteString(st.VBR.html())

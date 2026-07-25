@@ -91,8 +91,9 @@ type moCamSt struct {
 	OrganizeLbl string     `json:"organizeLbl"`
 	DJLbl       string     `json:"djLbl"`
 	PreviewLbl  string     `json:"previewLbl"`
-	Tip         string     `json:"tip"`  // raw tipTopic("camera-paths")
-	View        string     `json:"view"` // raw cpvView("mo")
+	Tip         string     `json:"tip"`             // legacy RAW tooltip markup (bridge)
+	TipS        *tipSt     `json:"tipSt,omitempty"` // structured tipTopic("camera-paths")
+	View        string     `json:"view"`            // raw cpvView("mo")
 	Hint        string     `json:"hint"`
 	Info        string     `json:"info"`    // plain text; renderers escape
 	PlayBtn     string     `json:"playBtn"` // raw cpvPlayBtn("mo")
@@ -127,8 +128,9 @@ type moStudioSt struct {
 	RenderProg  string     `json:"renderProg"` // raw moRenderProgHTML
 	Avatar      moAvatarSt `json:"avatar"`
 	PreviewLbl  string     `json:"previewLbl"`
-	Tip         string     `json:"tip"`  // raw tipTopic("motion-studio")
-	View        string     `json:"view"` // raw moViewHTML (SVG / raster frame)
+	Tip         string     `json:"tip"`             // legacy RAW tooltip markup (bridge)
+	TipS        *tipSt     `json:"tipSt,omitempty"` // structured tipTopic("motion-studio")
+	View        string     `json:"view"`            // raw moViewHTML (SVG / raster frame)
 	Hint        string     `json:"hint"`
 	Time        string     `json:"time"` // plain text; renderers escape
 	Scrub       moSliderSt `json:"scrub"`
@@ -254,7 +256,7 @@ func (u *UI) moCamPathsState() moCamSt {
 		Rows: make([]moCamRow, 0, len(paths)), Empty: i18n.T("motion.noCamPaths"),
 		ReloadLbl: i18n.T("motion.reloadList"), OrganizeLbl: i18n.T("motion.organizeNow"),
 		DJLbl:      i18n.T("motion.installDjPaths"),
-		PreviewLbl: i18n.T("motion.preview"), Tip: tipTopic("camera-paths"),
+		PreviewLbl: i18n.T("motion.preview"), TipS: tipTopicSt("camera-paths"),
 		Hint:    i18n.T("campath.hint"),
 		LoadLbl: i18n.T("motion.loadIntoVrchat"), CopyLbl: i18n.T("motion.copyFilePath"),
 	}
@@ -317,7 +319,7 @@ func moCamPathsHTML(st moCamSt) string {
 			st.PlayBtn,
 			btn(st.LoadLbl, "primary", "mo-cp-load", ""),
 			btn(st.CopyLbl, "outline", "mo-cp-copy", ""))
-	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + st.Tip + `</div>`
+	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + tipOr(st.TipS, st.Tip) + `</div>`
 	return masterDetail(list.String(), head+detail)
 }
 
@@ -374,7 +376,7 @@ func (u *UI) moStudioState() moStudioSt {
 		RefreshLbl: i18n.T("common.refresh"), ExportLbl: i18n.T("motion.exportAnim"),
 		RenderLbl: i18n.T("motion.renderVideo"), PCViewLbl: i18n.T("motion.pcView"),
 		RenderProg: u.moRenderProgHTML(), Avatar: u.moAvatarState(),
-		PreviewLbl: i18n.T("motion.preview"), Tip: tipTopic("motion-studio"),
+		PreviewLbl: i18n.T("motion.preview"), TipS: tipTopicSt("motion-studio"),
 		View: u.moViewHTML(), Hint: i18n.T("motion.studioHint"),
 		Time:    i18n.T("motion.timeDisplay", i18n.A{"cur": fmt.Sprintf("%.1f", t), "dur": fmt.Sprintf("%.1f", dur)}),
 		Scrub:   moSlide(i18n.T("motion.scrub"), "mo-scrub", 0, 1000, 1, scrubVal(t, dur), ""),
@@ -459,7 +461,7 @@ func moStudioHTML(st moStudioSt) string {
 		moPhysRow(st) + moCompareRows(st) + moPointCloudRows(st) +
 		`</div>` +
 		`<p class=page-sub>` + html.EscapeString(st.VMCHelp) + `</p>`
-	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + st.Tip + `</div>`
+	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + tipOr(st.TipS, st.Tip) + `</div>`
 	return masterDetail(list.String(), head+detail)
 }
 

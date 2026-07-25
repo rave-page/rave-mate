@@ -121,7 +121,8 @@ pub const PostRow = struct {
 
 pub const Posts = struct {
     annTitle: []const u8 = "",
-    annTip: []const u8 = "",
+    annTip: []const u8 = "", // legacy raw (bridge)
+    annTipSt: ?c.Tip = null, // structured tooltip — wins over annTip
     hasAnn: bool = false,
     annHead: []const u8 = "",
     annWhen: []const u8 = "",
@@ -384,10 +385,14 @@ fn renderUsers(h: *Html, us: Users) !void {
 
 fn renderPosts(h: *Html, ps: Posts) !void {
     if (ps.hasAnn or ps.annEmpty) {
-        const head = ps.annTitle.len != 0 or ps.annTip.len != 0;
+        // head follows Go card(): shown when the title OR the RESOLVED tooltip is non-empty,
+        // so it must be decided on the rendered card, not on the raw bridge string.
+        var tb = try c.tipBuf(h, ps.annTipSt, ps.annTip);
+        defer tb.deinit();
+        const head = ps.annTitle.len != 0 or tb.b.items.len != 0;
         try c.cardOpen(h, ps.annTitle, head);
         if (head) {
-            try h.raw(ps.annTip);
+            try h.raw(tb.b.items);
             try c.cardHeadClose(h);
         }
         if (ps.hasAnn) {

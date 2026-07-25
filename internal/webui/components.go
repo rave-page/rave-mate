@@ -132,31 +132,54 @@ func fieldTip(label, act, value, inputType, tipHTML string) string {
 	return fieldEx(label, act, value, inputType, "", tipHTML)
 }
 
-// selectBoxTip is selectBox with a tooltip (topic id) beside the label.
-func selectBoxTip(label, act string, options [][2]string, current, topic string) string {
-	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
-	lbl := `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
-	return smartSelectRaw(id, lbl, act, current, func() []ssOpt {
+// ssLabelSt is a smart-select ss-label as state: escaped label text + its structured tooltip
+// (tooltip.go tipSt). THE one markup source for the label span - the Go renderer below and
+// components.zig ssLabel mirror it. Was pre-rendered markup crossing as a raw string until B-1b.
+type ssLabelSt struct {
+	Text string `json:"text"`
+	Tip  *tipSt `json:"tip,omitempty"`
+}
+
+func (l ssLabelSt) html() string {
+	return `<span class=ss-label>` + html.EscapeString(l.Text) + tipOr(l.Tip, "") + `</span>`
+}
+
+// ssSelHTML renders a resolved smart select with the ss-label dual-field bridge: a STRUCTURED
+// label wins, else a legacy pre-rendered one, else the plain label the select state carries.
+// Zig twin: components.zig selectBoxTipOf / selectBoxRaw / selectBox, dispatched the same way.
+func ssSelHTML(s selState, lbl *ssLabelSt, labelHTML string) string {
+	if lbl != nil {
+		return selHTMLRaw(s, lbl.html())
+	}
+	if labelHTML != "" {
+		return selHTMLRaw(s, labelHTML)
+	}
+	return selHTML(s)
+}
+
+// ssOptsOf maps a [][2]string option table to the smart-select opts fn.
+func ssOptsOf(options [][2]string) func() []ssOpt {
+	return func() []ssOpt {
 		out := make([]ssOpt, 0, len(options))
 		for _, op := range options {
 			out = append(out, ssOpt{Val: op[0], Label: op[1]})
 		}
 		return out
-	})
+	}
+}
+
+// selectBoxTip is selectBox with a tooltip (topic id) beside the label.
+func selectBoxTip(label, act string, options [][2]string, current, topic string) string {
+	s, lbl := resolveSelectBoxTip(label, act, options, current, topic)
+	return selHTMLRaw(s, lbl.html())
 }
 
 // resolveSelectBoxTip registers + resolves a selectBoxTip into pure render state plus its
-// pre-rendered ss-label (label text + tooltip) for a Zig-migrated tab. selHTMLRaw pairs them.
-func resolveSelectBoxTip(label, act string, options [][2]string, current, topic string) (selState, string) {
+// structured ss-label (label text + tooltip) for a Zig-migrated tab. selHTMLRaw pairs them.
+func resolveSelectBoxTip(label, act string, options [][2]string, current, topic string) (selState, ssLabelSt) {
 	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
-	ssRegister(id, act, current, func() []ssOpt {
-		out := make([]ssOpt, 0, len(options))
-		for _, op := range options {
-			out = append(out, ssOpt{Val: op[0], Label: op[1]})
-		}
-		return out
-	})
-	return ssResolve(id), `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
+	ssRegister(id, act, current, ssOptsOf(options))
+	return ssResolve(id), ssLabelSt{Text: label, Tip: tipTopicSt(topic)}
 }
 
 // emptyState renders the rp-empty placeholder.
@@ -340,12 +363,14 @@ type loudChipSt struct {
 // loudSt is THE loudness block as resolved state (phase B-1a: it used to ride through 4 state
 // contracts as pre-rendered raw markup). Every string is final: i18n resolved, floats trimmed,
 // data-labels lowercased Go-side. Toggle.On gates the whole body - the same single source Go
-// always used (o.vals.On drives both the switch and the branch). Tip and Extra stay RAW:
-// tooltip.go owns tipTopic (phase B-1b), the caller owns extraHTML.
+// always used (o.vals.On drives both the switch and the branch). The tooltip is STRUCTURED since
+// phase B-1b (TipS, dual-field bridge over the legacy raw Tip); Extra stays RAW - the caller owns
+// extraHTML.
 type loudSt struct {
 	Compact bool         `json:"compact,omitempty"`
 	Toggle  uiToggle     `json:"toggle"`
-	Tip     string       `json:"tip"` // RAW (tipTopic)
+	Tip     string       `json:"tip"`             // legacy RAW pre-rendered tooltip markup (bridge)
+	TipS    *tipSt       `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
 	ChipAct string       `json:"chipAct,omitempty"`
 	Chips   []loudChipSt `json:"chips,omitempty"`
 	IField  libPBFieldSt `json:"iField"`
@@ -380,7 +405,7 @@ func newLoudSt(o loudnessOpts) loudSt {
 	st := loudSt{
 		Compact: o.compact,
 		Toggle:  newToggle(o.toggleLbl, o.act("loudon"), o.vals.On),
-		Tip:     tipTopic(o.topic),
+		TipS:    tipTopicSt(o.topic),
 		Extra:   o.extraHTML,
 	}
 	if !o.vals.On {
@@ -429,7 +454,7 @@ func (l loudSt) html() string {
 		grp = "pb-grp pb-grp--compact"
 	}
 	b.WriteString(`<div class="` + grp + `">`)
-	b.WriteString(toggleRowTipDL(l.Toggle.Label, l.Toggle.DL, l.Toggle.Act, l.Toggle.On, l.Tip))
+	b.WriteString(toggleRowTipDL(l.Toggle.Label, l.Toggle.DL, l.Toggle.Act, l.Toggle.On, tipOr(l.TipS, l.Tip)))
 	if l.Toggle.On {
 		if l.Compact {
 			b.WriteString(`<div class=lt-chips>`)

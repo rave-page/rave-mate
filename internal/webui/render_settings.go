@@ -482,7 +482,7 @@ func sbSelect(label, act string, options [][2]string, current string) setBlock {
 
 func sbSelectTip(label, act string, options [][2]string, current, topic string) setBlock {
 	s, lbl := resolveSelectBoxTip(label, act, options, current, topic)
-	return setBlock{K: "select", Sel: &s, SelLbl: lbl}
+	return setBlock{K: "select", Sel: &s, SelLblS: &lbl}
 }
 
 // sbSmartSel is a rich smart select (opts fn) with a plain label (Go smartSelect).
@@ -578,7 +578,7 @@ func blockKid(b setBlock) setKid {
 	case "field":
 		return setKid{K: "field", Fld: b.Fld, Tip: b.Tip, TipS: b.TipS}
 	case "select":
-		return setKid{K: "select", Sel: b.Sel, SelLbl: b.SelLbl}
+		return setKid{K: "select", Sel: b.Sel, SelLbl: b.SelLbl, SelLblS: b.SelLblS}
 	case "amenu":
 		return setKid{K: "amenu", Sel: b.Sel}
 	case "btn":

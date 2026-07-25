@@ -176,10 +176,11 @@ them raw (documented in the header of worlds.zig + the state block). Everything 
 (names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
 
 MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
-- Tooltips stay Go: `tipTopic(id)` markup (tooltip.go, keybind grid + link list) rides in
-  state as a PRE-RENDERED HTML string and Zig `raw`s it. Same for smart-select labels that
-  carry a tooltip (`selectBoxTip`) — state holds the resolved `selState` plus its
-  `<span class=ss-label>…</span>` HTML (`selHTMLRaw` / Zig `selectBoxRaw`).
+- Tooltips were pre-rendered HTML in phase A (`tipTopic(id)` in state, Zig `raw`s it); since
+  **B-1b shard 2** they cross as structured `tipSt` and the tab renderer composes the card.
+  Same for smart-select labels that carry a tooltip (`selectBoxTip`): state holds the resolved
+  `selState` plus a structured `ssLabelSt`, not a `<span class=ss-label>…</span>` string. The raw
+  fields survive only as the dual-field bridge until the post-merge cleanup.
 - Floats never cross the ABI: knob/fader `--v`/`--rot` are `trimNum`'d Go-side into strings.
 - Non-nil slices are mandatory — a nil Go slice marshals to `null` and the Zig parser
   rejects it, silently falling the WHOLE tab back to Go. `emptySel()` (smartselect.go) is
@@ -736,9 +737,9 @@ Not ported, with reasons (dialog sweep B):
 - `pickers.go` / `pickers_windows.go` / `pick_actions.go` — **no HTML at all**. These are the native
   OS dialog bindings (IFileDialog) plus the `pick-dir:`/`pick-file:` act redispatch; the only markup
   involved is the `Browse…` button the CALLING surface renders (already ported per tab).
-- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1** (shard 1: the mechanism
-  + the 4 densest consumers). The phase-A assessment below is kept as the record of WHY it waited;
-  the phase-B section after it is the shipped design.
+- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1b** (shard 1: the mechanism
+  + the 4 densest consumers; shard 2: every remaining call site). The phase-A assessment below is
+  kept as the record of WHY it waited; the phase-B sections after it are the shipped design.
 
 **tipTopic assessment (why the tooltip primitive stays Go).** `renderTip` is 40 lines of markup and
 would port cleanly in isolation (a `label.tt` + hidden checkbox + inline SVG + `tt-card`, one
@@ -778,7 +779,8 @@ structured state; `components.zig` `loudnessFields` (marker block `phaseb-loud`)
   whole body - the same single source Go always had (`o.vals.On` drives both switch and branch), so
   there is no second "shown" flag to desync. `hasWarn` IS explicit (a blank i18n string must not
   switch arms).
-- **Two raw seams stay, deliberately:** `tip` (Go `tipTopic`, owned by B-1b) and `extra` (the
+- **Two raw seams stayed, deliberately:** `tip` (Go `tipTopic`, owned by B-1b — structured in its
+  shard 2) and `extra` (the
   caller's `extraHTML`: the export surface's live gain-plan line + pre-listen toggle, which must
   collapse with the switch). `mpExMediaSt.LoudExtra` also stays raw - it is a *different* line (shown
   when the PRESET normalizes without an override), not part of the block.
@@ -848,7 +850,7 @@ pre-rendered). Both renderers resolve through one helper — Go `tipOr(*tipSt, r
 `render_library_cueedit.go`, `render_library_state.go`, `render_live.go`, `render_midictl*.go`,
 `render_motion.go`, `render_vrchat*.go`, `update_actions.go`, `components.go`'s own
 `selectBoxTip`/`resolveSelectBoxTip`) are literally untouched and keep working. Wave B-2 flips
-them; the raw fields die only when the last one is gone.
+them (see "shard 2" below); the raw fields die only when the last one is gone.
 
 **Consumers migrated (shard 1):** `render_settings.go` (13 sites — card head, `sbFieldTip`,
 `sbToggleTip`, fpair kids), `render_player.go` (4: `tipWave` / `tp.tipVideo` /
@@ -889,6 +891,79 @@ fixture whose mutation reaches no tooltip is worse than no fixture.
 **Standing rule.** Help texts are LONG and verbose BY DESIGN (owner directive, on record): the app
 teaches while it is used. Never trim, truncate, elide or "summarise" a `help.*` string, and never
 add a length cap to the renderer.
+
+### shard 2 (wave B-2) — the remaining 14 files, plus the ss-label
+
+Note first: the per-tab notes ABOVE that describe tooltips as "pre-rendered raw markup in state"
+are the phase-A record. Shard 2 makes them historical — no state contract ships tooltip HTML.
+
+Shard 2 finishes the sweep: **no state builder produces tooltip markup any more.** `tipTopic(` has
+ZERO production callers, pinned by `TestNoProductionCallerShipsRawTooltipMarkup` (untagged, in
+`tooltip_test.go`) — a **source scan**, because a missed call site renders correctly today and
+would only break when the raw bridge fields are dropped post-merge, far from the cause. Two
+surfaces have no state contract to carry a `*tipSt` and call the new `tooltip.go tipTopicHTML`
+(= `tipOr(tipTopicSt(id), "")`): the nav-rail update block (`update_actions.go`, Go-rendered shell)
+and the pre-listen row (`player.go`), which lives inside the loudness block's caller-owned
+`extraHTML`. When that extra block is lifted to state, its tip travels as `tipSt` like the rest.
+
+**Flipped:** `components.go` (`selectBoxTip`/`resolveSelectBoxTip` + `loudSt`, i.e. all four
+loudness surfaces at once) · `render_settings.go` (`sbSelectTip`) · `render_library_state.go`
+(`resolvePbSelectTip`/`libSelTip` → encode builder + preset dialog) · `render_midictl*.go` (7
+tooltips + 4 ss-labels) · `render_live.go` (4 section heads) · `render_motion.go` (2 preview cards)
+· `render_vrchat.go` + `render_vrchat_groups.go` · `automations_runnow.go` · `bridge_actions.go` ·
+`library_mirror.go` · `render_library_cueedit.go` · `player.go` · `update_actions.go`.
+
+**The ss-label became state too.** `<span class=ss-label>` + escaped label + tooltip was
+pre-rendered in FOUR places (`components.go` twice, `render_library_state.go`, and shard 1's
+`aeLabelSt`). It is now one type, `components.go ssLabelSt{text,tip}` / `components.zig SsLabel`,
+with `aeLabelSt` a Go **alias** of it and `dialogs_b.zig AeLabel = c.SsLabel` — no fork. The
+select-plus-label dispatch is one helper per side: Go `ssSelHTML(sel, *ssLabelSt, raw)` and Zig
+`selectBoxTipOr` (structured → legacy raw → the plain label the select state carries; `selHTML`
+with an empty `Label` is byte-identical to `selHTMLRaw` with an empty label, which is what made
+collapsing the three arms safe). `selectBoxTip` now delegates to `resolveSelectBoxTip` +
+`selHTMLRaw`, so the Go-only path shares the resolver instead of a second copy of the span.
+
+**New Zig helper: `tipBuf`.** Many primitives take the tooltip as a STRING (`sectionOpenTip`,
+`cardOpen`, `cardLabel`, `toggleRowTip`, `fieldEx`). `c.tipBuf(h, tipSt, raw)` returns a
+CALLER-OWNED scratch `Html` (`var tb = try c.tipBuf(...); defer tb.deinit();`), which replaced five
+hand-rolled buffers. The rule it protects is shard 1's: one allocation per tooltip, and **never**
+re-emit a primitive's markup to avoid the buffer.
+
+**Two traps worth remembering:**
+- **A `?Tip` on the Go side is invisible to a Zig struct that only has the raw field.**
+  `dialogs_b.zig ArModal.file` was `components.Field` (raw `tip` only), so the run-now dialog's
+  structured tooltip was silently DROPPED on the Zig path — Go rendered the card, Zig did not. Fix:
+  the local `DlgField` twin + `renderDlgField`. Whenever you add `tipSt` to a Go state, check what
+  the Zig side actually decodes into; `ignore_unknown_fields` makes the miss silent. Caught by the
+  existing per-tab golden suite, not by the new fixtures.
+- **A structural flag computed from the raw tip string must move to the RESOLVED tooltip.**
+  `vrcgroups.zig` decided the announcement card HEAD with `annTitle.len != 0 or annTip.len != 0`
+  (mirroring Go `card()`, where the trailing string gates the head). With the tooltip structured
+  the raw string is empty, so the head vanished. It now tests `tipBuf`'s output — gated by a
+  no-title fixture where absent vs present flips the whole `card-head` element.
+
+**Non-append-only edit:** `Loud.tipSt` inside `components.zig`'s `phaseb-loud` marker block. The
+field it replaces lives there; there is no way to bridge it from another block (same class of
+unavoidable edit as B0's counter inside `zigui.go render()`).
+
+**Gate.** `zigui_golden_tip2_test.go` (`//go:build zigui`) — ONE file instead of edits spread over
+ten per-tab golden files, which also keeps it clear of the wire fan-out touching those same files.
+`tip2Sweep` drives a surface through 4 tooltip SHAPES (absent / plain prose / multi-link /
+23-row keybind grid, all real registry topics so a catalog change reaches the fixtures) × 2 locales
+(`en` + `ja`), each with its raw-bridge twin, through the tab's real export and fixture builder:
+**144 byte-equality subtests** over loud · aeSelRaw · setSelect · setSelectKid · libEncSel ·
+presetSel · midiSsLabels · midiTips · live · motionCam · motionStudio · vrcEditor · vrcgAnn ·
+vrcgAnnNoTitle · arModal · bridgeCard · mirrorBanner · ceTopbar. Each subtest carries the shard-1
+inertness guard (the fixture must CHANGE the document bytes, a grid fixture must emit
+`tt-kb-keys`, the raw arm must reproduce the structured bytes). Falsified by execution:
+`ss-label` → `ss-labeX` in `components.zig` failed 64 assertions; restoring one `tipTopic(` call
+failed the source guard with file:line.
+
+**The raw fields stay.** `tip`/`labelHtml`/`selLbl`/`portLbl`… and `tipOr`'s raw arm are still
+there on purpose: dropping them is a separate post-merge cleanup, so this shard's diff stays
+additive against the sibling wave-B-2 branches. That cleanup must also drop the label bridges and
+`tipTopic` itself (only `tooltip_test.go` / the golden suites still use it, as the pre-split
+reference).
 ## Phase B — RZW1 binary state wire (wave B-1 pilots: appgroups + logs)
 
 The phase-A bridge pays a state→JSON→parse round trip on EVERY render (flagged twice above as

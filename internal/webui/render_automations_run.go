@@ -34,7 +34,8 @@ type arModalSt struct {
 	Erases       bool       `json:"erases,omitempty"` // the chain ends by deleting the file
 	DeleteWarn   string     `json:"deleteWarn,omitempty"`
 	DeleteScope  string     `json:"deleteScope,omitempty"`
-	DeleteTip    string     `json:"deleteTip,omitempty"` // RAW tipTopic markup
+	DeleteTip    string     `json:"deleteTip,omitempty"`   // legacy RAW tooltip markup (bridge)
+	DeleteTipS   *tipSt     `json:"deleteTipSt,omitempty"` // structured tooltip - wins over DeleteTip
 	Ack          uiToggle   `json:"ack,omitempty"`
 	Foot         arFootSt   `json:"foot"`
 }
@@ -55,7 +56,7 @@ func arModalHTMLOf(st arModalSt) string {
 		// The chain ends by erasing the file. Run now skips the match rules, so nothing else stands
 		// between this button and a permanent delete - make the user say it out loud.
 		b.WriteString(hint("bad", st.DeleteWarn))
-		b.WriteString(`<div class=pb-hint>` + htmlEscape(st.DeleteScope) + st.DeleteTip + `</div>`)
+		b.WriteString(`<div class=pb-hint>` + htmlEscape(st.DeleteScope) + tipOr(st.DeleteTipS, st.DeleteTip) + `</div>`)
 		b.WriteString(st.Ack.html())
 	}
 	return modal(st.Title, b.String(), arFooterHTMLOf(st.Foot))

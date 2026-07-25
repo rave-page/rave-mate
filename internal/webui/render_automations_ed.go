@@ -49,16 +49,9 @@ func (f dlgFieldSt) html() string {
 	return fieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, tipOr(f.TipS, f.Tip))
 }
 
-// aeLabelSt is a selraw's ss-label as state: escaped label text + its tooltip (Go smartSelectRaw
-// used to hand this over pre-rendered).
-type aeLabelSt struct {
-	Text string `json:"text"`
-	Tip  *tipSt `json:"tip,omitempty"`
-}
-
-func (l aeLabelSt) html() string {
-	return `<span class=ss-label>` + htmlEscape(l.Text) + tipOr(l.Tip, "") + `</span>`
-}
+// aeLabelSt is a selraw's ss-label as state. ALIAS of the shared components.go ssLabelSt (B-1b
+// shard 2 lifted it there for every select-with-tooltip surface) - one markup source, no fork.
+type aeLabelSt = ssLabelSt
 
 // Block kinds. A form block renders exactly one components.go primitive (or one small wrapper
 // around a pair), so the two renderers can never diverge on layout.
