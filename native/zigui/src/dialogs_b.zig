@@ -6,7 +6,7 @@
 //!   ws*  — Worlds dialogs (render_worlds_modals.go): list editor, poster editor, the
 //!          friend/group pickers (+ their independently patched lists), role list, GitHub
 //!          device-code dialog.
-//!   ae/ar/as — Automations dialogs (render_automations_modals.go): the automation editor,
+//!   ae/ar/as — Automations dialogs (render_automations_{ed,run,sch}.go): the automation editor,
 //!          the run-now dialog and the schedule editor.
 //!
 //! A modal renderer ENDS with the components.zig bracket triple (modalOpen → body →
@@ -542,7 +542,7 @@ test "ws poster field: label/placeholder raw, value escaped" {
 // the shared float-formatted loudness override).
 
 /// AeBlock is one form block. Only the fields its kind names are read.
-/// kind ∈ field|fpair|toolbar|toggle|select|hint|pbhint|raw.
+/// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|raw.
 pub const AeBlock = struct {
     kind: []const u8 = "",
     field: c.Field = .{},
@@ -550,6 +550,8 @@ pub const AeBlock = struct {
     btn: c.Btn = .{},
     toggle: c.Toggle = .{},
     sel: c.Select = .{},
+    sel2: c.Select = .{},
+    labelHtml: []const u8 = "",
     tone: []const u8 = "",
     text: []const u8 = "",
     tip: []const u8 = "",
@@ -574,6 +576,13 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
         try c.toggleOf(h, b.toggle);
     } else if (std.mem.eql(u8, k, "select")) {
         try c.selectBox(h, b.sel);
+    } else if (std.mem.eql(u8, k, "selraw")) {
+        try c.selectBoxRaw(h, b.sel, b.labelHtml);
+    } else if (std.mem.eql(u8, k, "fpairsel")) {
+        try c.fpairOpen(h);
+        try c.selectBox(h, b.sel);
+        try c.selectBox(h, b.sel2);
+        try c.fpairClose(h);
     } else if (std.mem.eql(u8, k, "hint")) {
         try c.hint(h, b.tone, b.text);
     } else if (std.mem.eql(u8, k, "pbhint")) {
@@ -668,4 +677,132 @@ test "ae block: pbhint escapes text and raws the tip" {
     defer h.deinit();
     try renderAeBlock(&h, .{ .kind = "pbhint", .text = "Deletes the file & stops", .tip = "<span class=tip></span>" });
     try std.testing.expectEqualStrings("<div class=pb-hint>Deletes the file &amp; stops<span class=tip></span></div>", h.b.items);
+}
+
+// ══ Automations ▸ run now ══
+// erases is explicit (Go autoChainDeletes) and gates BOTH the acknowledgement block and the
+// footer wording. deleteTip is RAW tipTopic markup.
+
+/// ArFoot is the resolved footer: gated = disabled Run button whose title names the missing
+/// precondition (Go btnGated), else a live button in `variant`.
+pub const ArFoot = struct {
+    gated: bool = false,
+    label: []const u8 = "",
+    why: []const u8 = "",
+    variant: []const u8 = "",
+    cancel: []const u8 = "",
+};
+
+/// ArModal is the run-now dialog.
+pub const ArModal = struct {
+    title: []const u8 = "",
+    hasErr: bool = false,
+    err: []const u8 = "",
+    auto: c.KV = .{},
+    watch: c.KV = .{},
+    chain: c.KV = .{},
+    ignoresMatch: []const u8 = "",
+    file: c.Field = .{},
+    browse: c.Btn = .{},
+    erases: bool = false,
+    deleteWarn: []const u8 = "",
+    deleteScope: []const u8 = "",
+    deleteTip: []const u8 = "",
+    ack: c.Toggle = .{},
+    foot: ArFoot = .{},
+};
+
+pub fn renderArModal(h: *Html, st: ArModal) !void {
+    try c.modalOpen(h, st.title);
+    if (st.hasErr) {
+        try h.raw("<div class=ae-err>");
+        try c.hint(h, "bad", st.err);
+        try h.raw("</div>");
+    }
+    try c.kvOf(h, st.auto);
+    try c.kvOf(h, st.watch);
+    try c.kvOf(h, st.chain);
+    try c.hint(h, "info", st.ignoresMatch);
+    try h.raw("<div class=lib-toolbar>");
+    try c.fieldOf(h, st.file);
+    try c.btnOf(h, st.browse);
+    try h.raw("</div>");
+    if (st.erases) {
+        try c.hint(h, "bad", st.deleteWarn);
+        try h.raw("<div class=pb-hint>");
+        try h.esc(st.deleteScope);
+        try h.raw(st.deleteTip);
+        try h.raw("</div>");
+        try c.toggleOf(h, st.ack);
+    }
+    try c.modalFoot(h);
+    try c.btnRowOpen(h);
+    if (st.foot.gated) {
+        try c.btnGated(h, st.foot.label, st.foot.why);
+    } else {
+        try c.btn(h, st.foot.label, st.foot.variant, "auto-run-go", "");
+    }
+    try c.btn(h, st.foot.cancel, "ghost", "modal-close", "");
+    try c.btnRowClose(h);
+    try c.modalClose(h);
+}
+
+// ══ Automations ▸ schedule editor ══
+// Three block lists (the aeBlock kit): head (label · automation picker · enabled · warnings),
+// trigger (kind picker + only the fields that kind reads) and the any-kind gates.
+
+/// AsModal is the schedule-editor dialog.
+pub const AsModal = struct {
+    title: []const u8 = "",
+    hasErr: bool = false,
+    err: []const u8 = "",
+    head: []const AeBlock = &.{},
+    secTrigger: []const u8 = "",
+    trigger: []const AeBlock = &.{},
+    secGates: []const u8 = "",
+    gates: []const AeBlock = &.{},
+    save: []const u8 = "",
+    cancel: []const u8 = "",
+};
+
+pub fn renderAsModal(h: *Html, st: AsModal) !void {
+    try c.modalOpen(h, st.title);
+    if (st.hasErr) {
+        try h.raw("<div class=ae-err>");
+        try c.hint(h, "bad", st.err);
+        try h.raw("</div>");
+    }
+    try renderAeBlocks(h, st.head);
+    try c.sectionOpen(h, st.secTrigger);
+    try renderAeBlocks(h, st.trigger);
+    try c.sectionClose(h);
+    try c.sectionOpen(h, st.secGates);
+    try renderAeBlocks(h, st.gates);
+    try c.sectionClose(h);
+    try c.modalFoot(h);
+    try c.btnRowOpen(h);
+    try c.btn(h, st.save, "primary", "auto-sch-save", "");
+    try c.btn(h, st.cancel, "ghost", "modal-close", "");
+    try c.btnRowClose(h);
+    try c.modalClose(h);
+}
+
+test "ar footer: gated arm renders btnGated, live arm the variant button" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderArModal(&h, .{ .title = "Run now", .foot = .{ .gated = true, .label = "Run", .why = "Pick a file first", .cancel = "Cancel" } });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "disabled title=\"Pick a file first\"") != null);
+    h.b.clearRetainingCapacity();
+    try renderArModal(&h, .{ .title = "Run now", .foot = .{ .label = "Run", .variant = "destructive", .cancel = "Cancel" } });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "rp-btn--destructive\" data-act=\"auto-run-go\"") != null);
+}
+
+test "as block: fpairsel pairs two selects, selraw raws the label" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderAeBlock(&h, .{ .kind = "selraw", .sel = .{ .id = "auto-sch-kind", .curLabel = "Interval" }, .labelHtml = "<span class=ss-label>Trigger<i></i></span>" });
+    try std.testing.expect(std.mem.startsWith(u8, h.b.items, "<div class=ss-field><span class=ss-label>Trigger<i></i></span>"));
+    h.b.clearRetainingCapacity();
+    try renderAeBlock(&h, .{ .kind = "fpairsel", .sel = .{ .id = "a" }, .sel2 = .{ .id = "b" } });
+    try std.testing.expect(std.mem.startsWith(u8, h.b.items, "<div class=fpair><div class=ss-field>"));
 }

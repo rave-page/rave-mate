@@ -611,6 +611,14 @@ export fn rz_ui_render_auto_editor(state_json: ?[*]const u8, len: usize, out_len
     return renderJSON(dialogs_b.AeModal, dialogs_b.renderAeModal, state_json, len, out_len);
 }
 
+export fn rz_ui_render_auto_runnow(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.ArModal, dialogs_b.renderArModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_auto_schedule(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.AsModal, dialogs_b.renderAsModal, state_json, len, out_len);
+}
+
 test "dialogs-b module" {
     _ = dialogs_b;
 }

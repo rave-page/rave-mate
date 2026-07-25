@@ -139,13 +139,13 @@ func TestAsCronRoundTripAndVerdict(t *testing.T) {
 	if got.CronExpr != "0 9 * * 1-5" {
 		t.Errorf("CronExpr = %q, want it trimmed", got.CronExpr)
 	}
-	if v := asCronVerdict("0 9 * * 1-5"); !strings.Contains(v, "hint--ok") {
+	if v := aeBlockHTML(asCronVerdictBlock("0 9 * * 1-5")); !strings.Contains(v, "hint--ok") {
 		t.Errorf("verdict for a valid expr = %q, want the ok tone", v)
 	}
-	if v := asCronVerdict("0 99 * * *"); !strings.Contains(v, "hint--bad") {
+	if v := aeBlockHTML(asCronVerdictBlock("0 99 * * *")); !strings.Contains(v, "hint--bad") {
 		t.Errorf("verdict for a bad expr = %q, want the bad tone", v)
 	}
-	if v := asCronVerdict("   "); !strings.Contains(v, "hint--warn") {
+	if v := aeBlockHTML(asCronVerdictBlock("   ")); !strings.Contains(v, "hint--warn") {
 		t.Errorf("verdict for a blank expr = %q, want the warn tone", v)
 	}
 }

@@ -714,4 +714,18 @@ func RenderAutoEditor(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderAutoRunNow renders the automations run-now dialog.
+func RenderAutoRunNow(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_runnow(p, l, n)
+	})
+}
+
+// RenderAutoSchedule renders the automations schedule-editor dialog.
+func RenderAutoSchedule(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_schedule(p, l, n)
+	})
+}
+
 // --- end dialogs-b ---

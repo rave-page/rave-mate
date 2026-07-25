@@ -145,4 +145,7 @@ func RenderWsDevice(stateJSON []byte) (string, bool)       { return "", false }
 
 func RenderAutoEditor(stateJSON []byte) (string, bool) { return "", false }
 
+func RenderAutoRunNow(stateJSON []byte) (string, bool)   { return "", false }
+func RenderAutoSchedule(stateJSON []byte) (string, bool) { return "", false }
+
 // --- end dialogs-b ---

@@ -42,28 +42,32 @@ func (f dlgFieldSt) html() string {
 // Block kinds. A form block renders exactly one components.go primitive (or one small wrapper
 // around a pair), so the two renderers can never diverge on layout.
 const (
-	aeBlkField   = "field"   // fieldEx
-	aeBlkFPair   = "fpair"   // fpair(field, field)
-	aeBlkToolbar = "toolbar" // <div class=lib-toolbar> field + Browse button
-	aeBlkToggle  = "toggle"  // toggleRow
-	aeBlkSelect  = "select"  // selHTML (smart select, resolved)
-	aeBlkHint    = "hint"    // hint(tone, text)
-	aeBlkPBHint  = "pbhint"  // <div class=pb-hint> escaped text + raw tip
-	aeBlkRaw     = "raw"     // another renderer's markup (loudness block)
+	aeBlkField    = "field"    // fieldEx
+	aeBlkFPair    = "fpair"    // fpair(field, field)
+	aeBlkToolbar  = "toolbar"  // <div class=lib-toolbar> field + Browse button
+	aeBlkToggle   = "toggle"   // toggleRow
+	aeBlkSelect   = "select"   // selHTML (smart select, resolved)
+	aeBlkSelRaw   = "selraw"   // selHTMLRaw (label carries a tooltip)
+	aeBlkFPairSel = "fpairsel" // fpair(select, select) - the daily hour/minute pair
+	aeBlkHint     = "hint"     // hint(tone, text)
+	aeBlkPBHint   = "pbhint"   // <div class=pb-hint> escaped text + raw tip
+	aeBlkRaw      = "raw"      // another renderer's markup (loudness block)
 )
 
 // aeBlockSt is one form block. Only the fields its Kind names are populated.
 type aeBlockSt struct {
-	Kind   string     `json:"kind"`
-	Field  dlgFieldSt `json:"field,omitempty"`
-	Field2 dlgFieldSt `json:"field2,omitempty"`
-	Btn    uiBtn      `json:"btn,omitempty"`
-	Toggle uiToggle   `json:"toggle,omitempty"`
-	Sel    selState   `json:"sel,omitempty"`
-	Tone   string     `json:"tone,omitempty"`
-	Text   string     `json:"text,omitempty"`
-	Tip    string     `json:"tip,omitempty"` // RAW
-	Raw    string     `json:"raw,omitempty"` // RAW
+	Kind      string     `json:"kind"`
+	Field     dlgFieldSt `json:"field,omitempty"`
+	Field2    dlgFieldSt `json:"field2,omitempty"`
+	Btn       uiBtn      `json:"btn,omitempty"`
+	Toggle    uiToggle   `json:"toggle,omitempty"`
+	Sel       selState   `json:"sel,omitempty"`
+	Sel2      selState   `json:"sel2,omitempty"`
+	LabelHTML string     `json:"labelHtml,omitempty"` // RAW (selraw: pre-rendered ss-label)
+	Tone      string     `json:"tone,omitempty"`
+	Text      string     `json:"text,omitempty"`
+	Tip       string     `json:"tip,omitempty"` // RAW
+	Raw       string     `json:"raw,omitempty"` // RAW
 }
 
 // aeStepSt is one chain-step card: header (order + type label + reorder/remove) then its body.
@@ -106,6 +110,10 @@ func aeBlockHTML(b aeBlockSt) string {
 		return b.Toggle.html()
 	case aeBlkSelect:
 		return selHTML(b.Sel)
+	case aeBlkSelRaw:
+		return selHTMLRaw(b.Sel, b.LabelHTML)
+	case aeBlkFPairSel:
+		return fpair(selHTML(b.Sel), selHTML(b.Sel2))
 	case aeBlkHint:
 		return hint(b.Tone, b.Text)
 	case aeBlkPBHint:

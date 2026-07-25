@@ -14,12 +14,12 @@ package webui
 
 import (
 	"context"
-	"html"
 	"strings"
 	"sync"
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/zigui"
 )
 
 // arSt is the run-now modal's state. acts is an independent copy (from Get), used for the chain
@@ -209,7 +209,9 @@ func (s *arSt) runnable() bool {
 // busy reports this modal's own automation is mid-run. Caller holds s.mu.
 func (s *arSt) busy() bool { return s.runningID != "" && s.runningID == s.autoID }
 
-// ── render (pure: reads the modal's own copy, no I/O) ──
+// ── render: impure state builder (the modal's own chain copy, no I/O) + the Zig bridge ──
+//
+// The pure renderer lives in render_automations_run.go, mirrored in dialogs_b.zig.
 
 func (u *UI) arModalHTML() string {
 	s := &u.ar
@@ -221,49 +223,59 @@ func (u *UI) arModalHTML() string {
 // arModalHTMLLocked renders the modal. Caller holds s.mu - the mutators already do, so the write
 // and the render it produces stay one atomic step under the slot lock.
 func (u *UI) arModalHTMLLocked(s *arSt) string {
-	var b strings.Builder
-	if s.errTx != "" {
-		b.WriteString(`<div class=ae-err>` + hint("bad", s.errTx) + `</div>`)
+	st := arModalState(s)
+	if zigui.Available() {
+		if h, ok := zigui.RenderAutoRunNow(stateJSON(st)); ok {
+			return h
+		}
 	}
-	b.WriteString(kv(i18n.T("automations.run.automation"), s.label))
-	b.WriteString(kv(i18n.T("automations.ed.watchDir"), s.watch))
-	b.WriteString(kv(i18n.T("automations.run.chain"), autoChainSummary(s.acts)))
-	// The rule that does NOT apply here, stated before the file is chosen.
-	b.WriteString(hint("info", i18n.T("automations.run.ignoresMatch")))
-	b.WriteString(`<div class=lib-toolbar>` +
-		fieldEx(i18n.T("automations.run.file"), "auto-run-file", s.file, "text",
-			i18n.T("automations.run.filePH"), tipTopic("auto-run-now")) +
-		btn(i18n.T("common.browse"), "ghost", "pick-file:auto-run-file", "") + `</div>`)
-
-	if autoChainDeletes(s.acts) {
-		// The chain ends by erasing the file. Run now skips the match rules, so nothing else stands
-		// between this button and a permanent delete - make the user say it out loud.
-		b.WriteString(hint("bad", i18n.T("automations.run.deleteWarn")))
-		b.WriteString(`<div class=pb-hint>` + html.EscapeString(i18n.T("automations.run.deleteScope")) +
-			tipTopic("auto-delete-action") + `</div>`)
-		b.WriteString(toggleRow(i18n.T("automations.run.ack"), "auto-run-ack", s.ack))
-	}
-	return modal(i18n.T("automations.run.title"), b.String(), arFooter(s))
+	return arModalHTMLOf(st)
 }
 
-// arFooter gates the Run button on each missing precondition in turn, naming it in the disabled
-// button's title (btnGated) rather than hiding the control. Caller holds s.mu.
-func arFooter(s *arSt) string {
-	cancel := btn(i18n.T("common.cancel"), "ghost", "modal-close", "")
-	erases := autoChainDeletes(s.acts)
-	label := i18n.T("automations.run.go")
+// arModalState resolves the dialog. Caller holds s.mu.
+func arModalState(s *arSt) arModalSt {
+	st := arModalSt{
+		Title:        i18n.T("automations.run.title"),
+		Auto:         newKV(i18n.T("automations.run.automation"), s.label),
+		Watch:        newKV(i18n.T("automations.ed.watchDir"), s.watch),
+		Chain:        newKV(i18n.T("automations.run.chain"), autoChainSummary(s.acts)),
+		IgnoresMatch: i18n.T("automations.run.ignoresMatch"),
+		File: newDlgField(i18n.T("automations.run.file"), "auto-run-file", s.file, "text",
+			i18n.T("automations.run.filePH"), tipTopic("auto-run-now")),
+		Browse: uiBtn{Label: i18n.T("common.browse"), Variant: "ghost", Act: "pick-file:auto-run-file"},
+		Erases: autoChainDeletes(s.acts),
+	}
+	if s.errTx != "" {
+		st.HasErr, st.Err = true, s.errTx
+	}
+	if st.Erases {
+		st.DeleteWarn = i18n.T("automations.run.deleteWarn")
+		st.DeleteScope = i18n.T("automations.run.deleteScope")
+		st.DeleteTip = tipTopic("auto-delete-action")
+		st.Ack = newToggle(i18n.T("automations.run.ack"), "auto-run-ack", s.ack)
+	}
+	st.Foot = arFooterState(s, st.Erases)
+	return st
+}
+
+// arFooterState gates the Run button on each missing precondition in turn, naming it in the
+// disabled button's title (btnGated) rather than hiding the control. Caller holds s.mu.
+func arFooterState(s *arSt, erases bool) arFootSt {
+	f := arFootSt{Cancel: i18n.T("common.cancel"), Label: i18n.T("automations.run.go")}
 	if erases {
-		label = i18n.T("automations.run.goDestructive")
+		f.Label = i18n.T("automations.run.goDestructive")
 	}
 	switch {
 	case s.busy():
-		return btnRow(btnGated(i18n.T("automations.run.running"), i18n.T("automations.run.runningWhy")), cancel)
+		f.Gated, f.Label, f.Why = true, i18n.T("automations.run.running"), i18n.T("automations.run.runningWhy")
 	case strings.TrimSpace(s.file) == "":
-		return btnRow(btnGated(label, i18n.T("automations.run.needFile")), cancel)
+		f.Gated, f.Why = true, i18n.T("automations.run.needFile")
 	case erases && !s.ack:
-		return btnRow(btnGated(label, i18n.T("automations.run.needAck")), cancel)
+		f.Gated, f.Why = true, i18n.T("automations.run.needAck")
 	case erases:
-		return btnRow(btn(label, "destructive", "auto-run-go", ""), cancel)
+		f.Variant = "destructive"
+	default:
+		f.Variant = "primary"
 	}
-	return btnRow(btn(label, "primary", "auto-run-go", ""), cancel)
+	return f
 }

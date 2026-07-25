@@ -353,3 +353,118 @@ func TestZigAutoEditorGolden(t *testing.T) {
 		})
 	}
 }
+
+// ── Automations ▸ run now ──
+
+func arModalFixtures() map[string]arModalSt {
+	mk := func(f func(*arSt)) arModalSt {
+		s := &arSt{autoID: "a1", label: "Post-set pipeline", watch: `D:\captures`,
+			acts: []automation.Action{{Type: automation.ActionTranscode, PresetID: "mp3-320"}}}
+		f(s)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return arModalState(s)
+	}
+	return map[string]arModalSt{
+		"empty":     {},
+		"needFile":  mk(func(s *arSt) {}),
+		"ready":     mk(func(s *arSt) { s.file = `D:\captures\set.wav` }),
+		"busy":      mk(func(s *arSt) { s.file = `D:\captures\set.wav`; s.runningID = "a1" }),
+		"otherBusy": mk(func(s *arSt) { s.file = `D:\captures\set.wav`; s.runningID = "a2" }),
+		"needAck": mk(func(s *arSt) {
+			s.file = `D:\captures\set.wav`
+			s.acts = append(s.acts, automation.Action{Type: automation.ActionDelete})
+		}),
+		"acked": mk(func(s *arSt) {
+			s.file, s.ack = `D:\captures\set.wav`, true
+			s.acts = append(s.acts, automation.Action{Type: automation.ActionDelete})
+		}),
+		"errBanner": mk(func(s *arSt) { s.file = `D:\x.wav`; s.errTx = `run failed: ffmpeg & "x" <y>'` }),
+		"escaping": mk(func(s *arSt) {
+			s.label, s.watch, s.file = `Set & "night" <x>'`, `D:\a&b\"c"`, `D:\p&q\"r".wav`
+		}),
+		"long":    mk(func(s *arSt) { s.label = strings.Repeat("long label ", 60); s.file = strings.Repeat(`D:\deep\`, 40) }),
+		"unicode": mk(func(s *arSt) { s.label = "セット後 🎧"; s.watch = `D:\größer`; s.file = `D:\запись.wav` }),
+	}
+}
+
+func TestZigAutoRunNowGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, st := range arModalFixtures() {
+		t.Run(name, func(t *testing.T) {
+			zigGolden(t, "arModal", st, arModalHTMLOf(st), zigui.RenderAutoRunNow)
+		})
+	}
+}
+
+// ── Automations ▸ schedule editor ──
+
+func asModalFixtures() map[string]asModalSt {
+	autos := []asAuto{
+		{id: "a1", label: "Post-set pipeline", enabled: true},
+		{id: "a2", label: `Purge & "old" <x>'`, deletes: true, enabled: false},
+	}
+	mk := func(sc automation.Schedule, f func(*asSt)) asModalSt {
+		s := &asSt{}
+		s.load(sc, autos)
+		if f != nil {
+			f(s)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return asModalState(s)
+	}
+	base := automation.Schedule{ID: "s1", Label: "Nightly", AutomationID: "a1", Enabled: true,
+		Kind: automation.ScheduleInterval, IntervalMinutes: 30}
+	daily := base
+	daily.Kind, daily.AtHour, daily.AtMinute = automation.ScheduleDaily, 3, 45
+	cronOK := base
+	cronOK.Kind, cronOK.CronExpr = automation.ScheduleCron, "*/15 * * * *"
+	cronBad := cronOK
+	cronBad.CronExpr = "0 99 * * *"
+	cronEmpty := cronOK
+	cronEmpty.CronExpr = ""
+	idle := base
+	idle.Kind, idle.IdleMinutes = automation.ScheduleIdle, 20
+	gates := base
+	gates.RequireIdleMinutes, gates.RequireAppsRunning, gates.ExcludeAppsRunning = 5,
+		[]string{"Traktor", "obs64"}, []string{`bad & "app"'`}
+	deletes := base
+	deletes.AutomationID = "a2" // erasing chain + automation disabled → both warnings
+	esc := base
+	esc.Label = `Nightly & "sweep" <x>'`
+	long := base
+	long.Label = strings.Repeat("long schedule label ", 40)
+	uni := base
+	uni.Label = "毎晩 · Ночной 🎧"
+
+	return map[string]asModalSt{
+		"empty":       {},
+		"unavailable": mk(automation.Schedule{}, nil),
+		"interval":    mk(base, nil),
+		"daily":       mk(daily, nil),
+		"cronOK":      mk(cronOK, nil),
+		"cronBad":     mk(cronBad, nil),
+		"cronEmpty":   mk(cronEmpty, nil),
+		"idle":        mk(idle, nil),
+		"gates":       mk(gates, nil),
+		"warnings":    mk(deletes, nil),
+		"errBanner":   mk(base, func(s *asSt) { s.errTx = `save failed & "x" <y>'` }),
+		"escaping":    mk(esc, nil),
+		"long":        mk(long, nil),
+		"unicode":     mk(uni, nil),
+	}
+}
+
+func TestZigAutoScheduleGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, st := range asModalFixtures() {
+		t.Run(name, func(t *testing.T) {
+			zigGolden(t, "asModal", st, asModalHTMLOf(st), zigui.RenderAutoSchedule)
+		})
+	}
+}
