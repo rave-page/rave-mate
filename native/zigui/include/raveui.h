@@ -26,6 +26,11 @@ const uint8_t *rz_ui_render_logs_lines(const uint8_t *state_json, size_t len, si
 
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
+/* --- media --- (automations, overlays, twitch, editor) */
+const uint8_t *rz_ui_render_automations(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #auto-body inner HTML (version-gated ~1 Hz tick patch target). */
+const uint8_t *rz_ui_render_automations_body(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

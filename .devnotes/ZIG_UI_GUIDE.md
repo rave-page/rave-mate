@@ -75,6 +75,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 |---|---|---|
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
+| automations | Zig (`native/zigui/src/automations.zig`; full + `#auto-body` fragment) | `TestZigAutomationsGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect

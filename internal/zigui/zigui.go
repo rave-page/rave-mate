@@ -67,3 +67,19 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	C.rz_ui_free(out, n)
 	return s, true
 }
+
+// --- media --- (automations, overlays, twitch, editor)
+
+// RenderAutomations renders the full Automations view.
+func RenderAutomations(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations(p, l, n)
+	})
+}
+
+// RenderAutomationsBody renders the #auto-body inner fragment (tick patch).
+func RenderAutomationsBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations_body(p, l, n)
+	})
+}

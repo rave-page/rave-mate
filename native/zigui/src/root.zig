@@ -85,3 +85,20 @@ test "bad JSON returns null" {
     var n: usize = 0;
     try std.testing.expect(rz_ui_render_appgroups("{nope", 5, &n) == null);
 }
+
+// --- media ---
+// Tabs: automations, overlays, twitch, editor.
+
+const automations = @import("automations.zig");
+
+export fn rz_ui_render_automations(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(automations.State, automations.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_automations_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(automations.Body, automations.renderBody, state_json, len, out_len);
+}
+
+test "media tab modules" {
+    _ = automations;
+}
