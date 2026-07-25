@@ -227,3 +227,17 @@ func RenderPeersV2(state []byte) (string, bool)     { return "", false }
 func RenderPeersBodyV2(state []byte) (string, bool) { return "", false }
 
 // --- end phaseb-wire ---
+// --- phaseb-sched ---
+
+// Frag mirrors the tagged build's type so webui compiles either way; the stub never returns any
+// (Available()=false keeps the scheduler branch unreachable and the legacy tick path in use).
+type Frag struct {
+	ID   string
+	Hash uint64
+	HTML string
+}
+
+func TickLive(state []byte) ([]Frag, bool) { return nil, false }
+func TickLogs(state []byte) ([]Frag, bool) { return nil, false }
+
+// --- end phaseb-sched ---

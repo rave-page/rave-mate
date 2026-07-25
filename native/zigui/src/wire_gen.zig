@@ -22,8 +22,9 @@ const settings = @import("settings.zig");
 const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
+const tick = @import("tick.zig");
 
-pub const schema_hash: u32 = 0xaf5711c7;
+pub const schema_hash: u32 = 0x70698930;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -62,6 +63,8 @@ pub const msg_auto_state: u16 = 41; // Automations tab (full view)
 pub const msg_auto_body_state: u16 = 42; // #auto-body (version-gated ~1 Hz tick)
 pub const msg_peers: u16 = 43; // Peers tab (full view)
 pub const msg_peers_body: u16 = 44; // #peers-body (~1 Hz live tick)
+pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
+pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -2331,6 +2334,31 @@ pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
     };
 }
 
+pub fn decodeTkPrev(r: *wire.Reader, out: *tick.Prev) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.hash = @intCast(try r.uint(t)),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLive(r: *wire.Reader, out: *tick.LiveBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.live = try r.sub(live.State, decodeLiveState, t),
+        2 => out.tc = try r.str(t),
+        3 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLogs(r: *wire.Reader, out: *tick.LogsBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.lines = try r.sub(logs.Lines, decodeLogsLines, t),
+        2 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -2369,6 +2397,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_auto_body_state);
     try std.testing.expect(msg_ag_state != msg_peers);
     try std.testing.expect(msg_ag_state != msg_peers_body);
+    try std.testing.expect(msg_ag_state != msg_tk_live);
+    try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -2405,6 +2435,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_auto_body_state);
     try std.testing.expect(msg_logs_state != msg_peers);
     try std.testing.expect(msg_logs_state != msg_peers_body);
+    try std.testing.expect(msg_logs_state != msg_tk_live);
+    try std.testing.expect(msg_logs_state != msg_tk_logs);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -2440,6 +2472,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_auto_body_state);
     try std.testing.expect(msg_logs_lines != msg_peers);
     try std.testing.expect(msg_logs_lines != msg_peers_body);
+    try std.testing.expect(msg_logs_lines != msg_tk_live);
+    try std.testing.expect(msg_logs_lines != msg_tk_logs);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -2474,6 +2508,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_auto_body_state);
     try std.testing.expect(msg_live_state != msg_peers);
     try std.testing.expect(msg_live_state != msg_peers_body);
+    try std.testing.expect(msg_live_state != msg_tk_live);
+    try std.testing.expect(msg_live_state != msg_tk_logs);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -2507,6 +2543,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_auto_body_state);
     try std.testing.expect(msg_live_transport != msg_peers);
     try std.testing.expect(msg_live_transport != msg_peers_body);
+    try std.testing.expect(msg_live_transport != msg_tk_live);
+    try std.testing.expect(msg_live_transport != msg_tk_logs);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -2539,6 +2577,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_auto_body_state);
     try std.testing.expect(msg_live_n_p != msg_peers);
     try std.testing.expect(msg_live_n_p != msg_peers_body);
+    try std.testing.expect(msg_live_n_p != msg_tk_live);
+    try std.testing.expect(msg_live_n_p != msg_tk_logs);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -2570,6 +2610,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_auto_body_state);
     try std.testing.expect(msg_live_status != msg_peers);
     try std.testing.expect(msg_live_status != msg_peers_body);
+    try std.testing.expect(msg_live_status != msg_tk_live);
+    try std.testing.expect(msg_live_status != msg_tk_logs);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -2600,6 +2642,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_auto_body_state);
     try std.testing.expect(msg_live_decks != msg_peers);
     try std.testing.expect(msg_live_decks != msg_peers_body);
+    try std.testing.expect(msg_live_decks != msg_tk_live);
+    try std.testing.expect(msg_live_decks != msg_tk_logs);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -2629,6 +2673,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_auto_body_state);
     try std.testing.expect(msg_live_signals != msg_peers);
     try std.testing.expect(msg_live_signals != msg_peers_body);
+    try std.testing.expect(msg_live_signals != msg_tk_live);
+    try std.testing.expect(msg_live_signals != msg_tk_logs);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -2657,6 +2703,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_auto_body_state);
     try std.testing.expect(msg_live_cockpit != msg_peers);
     try std.testing.expect(msg_live_cockpit != msg_peers_body);
+    try std.testing.expect(msg_live_cockpit != msg_tk_live);
+    try std.testing.expect(msg_live_cockpit != msg_tk_logs);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -2684,6 +2732,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_auto_body_state);
     try std.testing.expect(msg_live_link != msg_peers);
     try std.testing.expect(msg_live_link != msg_peers_body);
+    try std.testing.expect(msg_live_link != msg_tk_live);
+    try std.testing.expect(msg_live_link != msg_tk_logs);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -2710,6 +2760,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_auto_body_state);
     try std.testing.expect(msg_live_graph != msg_peers);
     try std.testing.expect(msg_live_graph != msg_peers_body);
+    try std.testing.expect(msg_live_graph != msg_tk_live);
+    try std.testing.expect(msg_live_graph != msg_tk_logs);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -2735,6 +2787,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_auto_body_state);
     try std.testing.expect(msg_live_perf != msg_peers);
     try std.testing.expect(msg_live_perf != msg_peers_body);
+    try std.testing.expect(msg_live_perf != msg_tk_live);
+    try std.testing.expect(msg_live_perf != msg_tk_logs);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
@@ -2759,6 +2813,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_auto_body_state);
     try std.testing.expect(msg_live_strip != msg_peers);
     try std.testing.expect(msg_live_strip != msg_peers_body);
+    try std.testing.expect(msg_live_strip != msg_tk_live);
+    try std.testing.expect(msg_live_strip != msg_tk_logs);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
@@ -2782,6 +2838,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_auto_body_state);
     try std.testing.expect(msg_mo_state != msg_peers);
     try std.testing.expect(msg_mo_state != msg_peers_body);
+    try std.testing.expect(msg_mo_state != msg_tk_live);
+    try std.testing.expect(msg_mo_state != msg_tk_logs);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
@@ -2804,6 +2862,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_auto_body_state);
     try std.testing.expect(msg_pub != msg_peers);
     try std.testing.expect(msg_pub != msg_peers_body);
+    try std.testing.expect(msg_pub != msg_tk_live);
+    try std.testing.expect(msg_pub != msg_tk_logs);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
@@ -2825,6 +2885,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_auto_body_state);
     try std.testing.expect(msg_pub_hero != msg_peers);
     try std.testing.expect(msg_pub_hero != msg_peers_body);
+    try std.testing.expect(msg_pub_hero != msg_tk_live);
+    try std.testing.expect(msg_pub_hero != msg_tk_logs);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
     try std.testing.expect(msg_set_state != msg_lib_state);
@@ -2845,6 +2907,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_auto_body_state);
     try std.testing.expect(msg_set_state != msg_peers);
     try std.testing.expect(msg_set_state != msg_peers_body);
+    try std.testing.expect(msg_set_state != msg_tk_live);
+    try std.testing.expect(msg_set_state != msg_tk_logs);
     try std.testing.expect(msg_set_content != msg_set_status);
     try std.testing.expect(msg_set_content != msg_lib_state);
     try std.testing.expect(msg_set_content != msg_lib_body);
@@ -2864,6 +2928,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_auto_body_state);
     try std.testing.expect(msg_set_content != msg_peers);
     try std.testing.expect(msg_set_content != msg_peers_body);
+    try std.testing.expect(msg_set_content != msg_tk_live);
+    try std.testing.expect(msg_set_content != msg_tk_logs);
     try std.testing.expect(msg_set_status != msg_lib_state);
     try std.testing.expect(msg_set_status != msg_lib_body);
     try std.testing.expect(msg_set_status != msg_lib_detail);
@@ -2882,6 +2948,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_auto_body_state);
     try std.testing.expect(msg_set_status != msg_peers);
     try std.testing.expect(msg_set_status != msg_peers_body);
+    try std.testing.expect(msg_set_status != msg_tk_live);
+    try std.testing.expect(msg_set_status != msg_tk_logs);
     try std.testing.expect(msg_lib_state != msg_lib_body);
     try std.testing.expect(msg_lib_state != msg_lib_detail);
     try std.testing.expect(msg_lib_state != msg_lib_queue);
@@ -2899,6 +2967,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_auto_body_state);
     try std.testing.expect(msg_lib_state != msg_peers);
     try std.testing.expect(msg_lib_state != msg_peers_body);
+    try std.testing.expect(msg_lib_state != msg_tk_live);
+    try std.testing.expect(msg_lib_state != msg_tk_logs);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
     try std.testing.expect(msg_lib_body != msg_lib_queue);
     try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
@@ -2915,6 +2985,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_auto_body_state);
     try std.testing.expect(msg_lib_body != msg_peers);
     try std.testing.expect(msg_lib_body != msg_peers_body);
+    try std.testing.expect(msg_lib_body != msg_tk_live);
+    try std.testing.expect(msg_lib_body != msg_tk_logs);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
     try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_detail != msg_mp_full);
@@ -2930,6 +3002,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_auto_body_state);
     try std.testing.expect(msg_lib_detail != msg_peers);
     try std.testing.expect(msg_lib_detail != msg_peers_body);
+    try std.testing.expect(msg_lib_detail != msg_tk_live);
+    try std.testing.expect(msg_lib_detail != msg_tk_logs);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_queue != msg_mp_full);
     try std.testing.expect(msg_lib_queue != msg_mp_inner);
@@ -2944,6 +3018,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_auto_body_state);
     try std.testing.expect(msg_lib_queue != msg_peers);
     try std.testing.expect(msg_lib_queue != msg_peers_body);
+    try std.testing.expect(msg_lib_queue != msg_tk_live);
+    try std.testing.expect(msg_lib_queue != msg_tk_logs);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
@@ -2957,6 +3033,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_auto_body_state);
     try std.testing.expect(msg_lib_cue_cell != msg_peers);
     try std.testing.expect(msg_lib_cue_cell != msg_peers_body);
+    try std.testing.expect(msg_lib_cue_cell != msg_tk_live);
+    try std.testing.expect(msg_lib_cue_cell != msg_tk_logs);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
     try std.testing.expect(msg_mp_full != msg_mp_vid);
     try std.testing.expect(msg_mp_full != msg_mp_wave);
@@ -2969,6 +3047,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_auto_body_state);
     try std.testing.expect(msg_mp_full != msg_peers);
     try std.testing.expect(msg_mp_full != msg_peers_body);
+    try std.testing.expect(msg_mp_full != msg_tk_live);
+    try std.testing.expect(msg_mp_full != msg_tk_logs);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
     try std.testing.expect(msg_mp_inner != msg_mp_wave);
     try std.testing.expect(msg_mp_inner != msg_mp_tp);
@@ -2980,6 +3060,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_auto_body_state);
     try std.testing.expect(msg_mp_inner != msg_peers);
     try std.testing.expect(msg_mp_inner != msg_peers_body);
+    try std.testing.expect(msg_mp_inner != msg_tk_live);
+    try std.testing.expect(msg_mp_inner != msg_tk_logs);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
     try std.testing.expect(msg_mp_vid != msg_mp_tp);
     try std.testing.expect(msg_mp_vid != msg_mp_edit);
@@ -2990,6 +3072,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_auto_body_state);
     try std.testing.expect(msg_mp_vid != msg_peers);
     try std.testing.expect(msg_mp_vid != msg_peers_body);
+    try std.testing.expect(msg_mp_vid != msg_tk_live);
+    try std.testing.expect(msg_mp_vid != msg_tk_logs);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
     try std.testing.expect(msg_mp_wave != msg_mp_edit);
     try std.testing.expect(msg_mp_wave != msg_mp_export);
@@ -2999,6 +3083,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_auto_body_state);
     try std.testing.expect(msg_mp_wave != msg_peers);
     try std.testing.expect(msg_mp_wave != msg_peers_body);
+    try std.testing.expect(msg_mp_wave != msg_tk_live);
+    try std.testing.expect(msg_mp_wave != msg_tk_logs);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
     try std.testing.expect(msg_mp_tp != msg_mp_export);
     try std.testing.expect(msg_mp_tp != msg_mp_r_o);
@@ -3007,6 +3093,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_auto_body_state);
     try std.testing.expect(msg_mp_tp != msg_peers);
     try std.testing.expect(msg_mp_tp != msg_peers_body);
+    try std.testing.expect(msg_mp_tp != msg_tk_live);
+    try std.testing.expect(msg_mp_tp != msg_tk_logs);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
     try std.testing.expect(msg_mp_edit != msg_mp_r_o);
     try std.testing.expect(msg_mp_edit != msg_mp_hov);
@@ -3014,25 +3102,42 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_auto_body_state);
     try std.testing.expect(msg_mp_edit != msg_peers);
     try std.testing.expect(msg_mp_edit != msg_peers_body);
+    try std.testing.expect(msg_mp_edit != msg_tk_live);
+    try std.testing.expect(msg_mp_edit != msg_tk_logs);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
     try std.testing.expect(msg_mp_export != msg_mp_hov);
     try std.testing.expect(msg_mp_export != msg_auto_state);
     try std.testing.expect(msg_mp_export != msg_auto_body_state);
     try std.testing.expect(msg_mp_export != msg_peers);
     try std.testing.expect(msg_mp_export != msg_peers_body);
+    try std.testing.expect(msg_mp_export != msg_tk_live);
+    try std.testing.expect(msg_mp_export != msg_tk_logs);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
     try std.testing.expect(msg_mp_r_o != msg_auto_state);
     try std.testing.expect(msg_mp_r_o != msg_auto_body_state);
     try std.testing.expect(msg_mp_r_o != msg_peers);
     try std.testing.expect(msg_mp_r_o != msg_peers_body);
+    try std.testing.expect(msg_mp_r_o != msg_tk_live);
+    try std.testing.expect(msg_mp_r_o != msg_tk_logs);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
     try std.testing.expect(msg_mp_hov != msg_auto_body_state);
     try std.testing.expect(msg_mp_hov != msg_peers);
     try std.testing.expect(msg_mp_hov != msg_peers_body);
+    try std.testing.expect(msg_mp_hov != msg_tk_live);
+    try std.testing.expect(msg_mp_hov != msg_tk_logs);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
     try std.testing.expect(msg_auto_state != msg_peers);
     try std.testing.expect(msg_auto_state != msg_peers_body);
+    try std.testing.expect(msg_auto_state != msg_tk_live);
+    try std.testing.expect(msg_auto_state != msg_tk_logs);
     try std.testing.expect(msg_auto_body_state != msg_peers);
     try std.testing.expect(msg_auto_body_state != msg_peers_body);
+    try std.testing.expect(msg_auto_body_state != msg_tk_live);
+    try std.testing.expect(msg_auto_body_state != msg_tk_logs);
     try std.testing.expect(msg_peers != msg_peers_body);
+    try std.testing.expect(msg_peers != msg_tk_live);
+    try std.testing.expect(msg_peers != msg_tk_logs);
+    try std.testing.expect(msg_peers_body != msg_tk_live);
+    try std.testing.expect(msg_peers_body != msg_tk_logs);
+    try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

@@ -215,8 +215,101 @@ needed for correctness and nothing in the tick path renders the full player.
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -
   three sibling wave-B1 branches are editing those same files, and a move would collide. That is
   the only reason the untagged table is a subset.
-- Fragment renderers (`_body`, `#live-*`, the nine player targets) are not benched yet; the ~1 Hz
-  tick patches them far more often than a full tab is rendered. Next increment should add the
-  fragment funnels - the per-render tax applies per FRAGMENT.
+- Fragment renderers: the two B3 pilot surfaces (Live tick, `#log-view`) ARE benched now - see
+  "Phase B3 - fragment scheduler" below. Still unbenched: the `_body` fragments of the un-piloted
+  tabs and the nine player patch targets.
 - `-benchtime 1s` with default N; no `benchstat` (no new deps). If a later increment needs
   statistical confidence, run `-count=10` on a quiet box and compare mins.
+
+## Phase B3 — fragment scheduler (tick surfaces)
+
+The B0 gap ("fragment renderers are not benched yet - the ~1 Hz tick patches them far more often
+than a full tab is rendered") is closed for the two pilot surfaces.
+Bench: `internal/webui/tick_sched_bench_test.go` (tagged). Same box/method as above: **min of 6**
+(three runs x `-count=2`, `-benchtime 1s`), parity-gated before timing (`tickBenchParity`: the
+scheduler's ids, order AND bytes must match the Go renderers, so a bench can never measure a
+fallback).
+
+**Re-measured after the wave B-2 composition** — the numbers below compare B3 against the
+**binary** per-fragment path (wave B-2 gave every live fragment its own `_v2` export), not against
+the JSON one. That is the honest baseline and it is a much harder one: the pre-composition figures
+(-43% / -45%) were measured against per-fragment JSON, which no longer exists.
+
+Rows:
+
+| row | what it does |
+|---|---|
+| `legacy_zig` | pre-B3: per fragment one RZW1 document + one cgo call (`RenderLiveFragV2`) |
+| `legacy_go` | the same per-fragment loop with the Go renderers (stub build / fallback cost) |
+| `sched_all` | B3: one encode, ONE cgo call, every fragment comes back (cold cache / all changed) |
+| `sched_same` | B3 steady state: one encode, one cgo call, NOTHING comes back |
+| `*_quoted` | the same plus `jsQuote` per patched fragment — what the tick pays before the Eval |
+
+### Live tab tick — 12 fragments, 5 087 B of HTML, doc 2 857 B (3 174 B with prev hashes)
+
+| row | µs/op (min of 6) | B/op | allocs/op |
+|---|--:|--:|--:|
+| legacy_zig (10 docs + 10 cgo calls) | 29.0 | 41 104 | 196 |
+| legacy_go | 21.0 | 35 593 | 166 |
+| sched_all | **20.5** | 28 032 | 34 |
+| sched_same | **16.8** | 15 976 | **9** |
+| legacy_zig_quoted | 47.3 | 57 822 | 231 |
+| **sched_all_quoted** | **34.5** | 44 629 | 69 |
+| encode_wire (ONE doc) | 7.1 | 15 832 | 7 |
+| encode_wire_perfrag (TEN docs) | 9.0 | 17 696 | 70 |
+
+**-29% on the dispatch (29.0 → 20.5 µs), -42% in steady state (16.8 µs), -27% on the full quoted
+tick (47.3 → 34.5 µs), allocations 196 → 34 → 9.** Twelve cgo crossings and twelve TLV parses
+become one; ten `WireWriter`s become one (9.0 → 7.1 µs, 70 → 7 allocs).
+
+**First time the Zig path is not a loss on this surface:** `sched_all` (20.5 µs) matches pure Go
+(21.0 µs) and `sched_same` beats it by 20%. B0 finding 1 ("the bridge is a net loss") is finally
+neutralised here — by B-2 killing the parse and B3 killing the per-fragment crossings together.
+
+### `#log-view` tick — 400-line tail, 61 400 B of HTML, doc 9 231 B vs 51 862 B of JSON
+
+| row | µs/op (min of 6) | B/op | allocs/op |
+|---|--:|--:|--:|
+| legacy_zig_v1 (pre-B1 JSON) | 375.4 | 126 599 | 4 |
+| legacy_zig_v2 (B-1 binary, the shipped path) | 149.9 | 109 152 | 9 |
+| legacy_go | **130.0** | 324 606 | 1 220 |
+| sched_all | 169.3 | 174 744 | 12 |
+| **sched_same** | **140.4** | 43 624 | 9 |
+| legacy_zig_v2_quoted | 260.9 | 319 694 | 13 |
+| legacy_go_quoted | 240.3 | 565 635 | 1 226 |
+| sched_all_quoted | 284.1 | 394 188 | 17 |
+
+Read this one carefully — it is NOT a straight win:
+
+- **Tail changed:** the scheduler is 13% slower than the single-fragment `_v2` export (169 vs
+  150 µs), 9% slower quoted (284 vs 261 µs). The extra is the 61 kB copy into the reply buffer that
+  the direct export avoids (it hands its render buffer straight out) plus the hash.
+- **Tail unchanged:** 140.4 µs and NOTHING leaves the lib — no 61 kB copy across the ABI, no
+  86 202 B `jsQuote`, no eval-queue entry, and no cross-process `ExecuteScript` with an 86 kB script
+  (the last of which dwarfs every number in this table and is not measured here). Against the
+  legacy 261 µs of Go-side work for a swap that changes nothing, that is **-46% CPU plus the whole
+  downstream**. With a filter active (`level=error` + a search box) this is the common case, which
+  is why the pilot exists.
+- **Hash choice matters at this size.** FNV-1a-64 consumes one byte per round: ~50 µs on the 51 kB
+  tail, more than it saves. Wyhash reads 64 bits at a time (~7 µs). Recorded because the first
+  implementation used FNV and the numbers said so.
+
+### Findings
+
+1. **B3 is the first phase-B change that makes the Zig tick path cheaper than pure Go** (Live tick:
+   20.5 / 16.8 µs vs 21.0 µs), and it gets there by removing CROSSINGS + Go-side churn, not by
+   rendering faster.
+2. **The composition halved the headline.** Against per-fragment JSON B3 measured -43%/-45%;
+   against wave B-2's per-fragment binary path it is -29%/-27%. Two independent optimisations on the
+   same tax do not add up — quote the post-composition figure.
+3. **Pure Go is still the cheapest renderer for the log tail** (130.0 vs 169.3 µs) — B0 finding 1
+   survives on that surface. What Zig buys there is the allocation profile (1 220 → 12 allocs) and,
+   with B3, the suppression.
+4. **A single big fragment is the wrong shape for a batching scheduler.** For `#log-view` the batch
+   adds a copy the direct export doesn't need; the win comes purely from dedup. A Go-side hash of
+   the Go-rendered tail would deliver the same suppression at 130 µs — worth considering if the log
+   tail stays Go-rendered. Batching pays where there are MANY fragments (the Live tick).
+5. **One document beats ten** even before the ABI: 7.1 vs 9.0 µs and 7 vs 70 allocations, with
+   wave B-2's per-message prealloc hints applying to the tick roots (ids 100/101) automatically.
+6. **Steady state is where the tick lives.** `sched_same` (16.8 µs, 9 allocs, zero eval traffic) is
+   the number to quote for a UI sitting on the Live tab.

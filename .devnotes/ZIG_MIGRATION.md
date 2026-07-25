@@ -212,6 +212,21 @@ Rules:
   affected messages + the shared `ssLabelSt` row, and a `wireTipSweep` gate for the surfaces whose
   fixtures leave those fields nil - the merge had ZERO textual conflicts and still broke three
   tabs, while live/motion stayed green with v2 dropping every tooltip until that sweep existed.
+- **P6 UI phase B3 (fragment scheduler, pilots SHIPPED):** the ~1 Hz tick no longer crosses the
+  ABI once per FRAGMENT. The surface's whole state + the hash of what Go last pushed per fragment
+  cross ONCE (RZW1 root ids 100/101, riding wave B-2's LiveState/LogsLines messages); `native/zigui/src/tick.zig` renders every fragment, drops the
+  unchanged ones (Wyhash-64, `tickPatch` semantics) and returns a packed RZF1 changed-fragment list
+  Go turns into ONE batched Eval - unchanged HTML never crosses the ABI. Pilots: the Live tab tick
+  (12 -> 1 call) + `#log-view`. Exports stay STATELESS (hashes travel in the document; a Zig-side
+  cache was rejected - reasoning in ZIG_UI_GUIDE.md "Phase B - B3 fragment scheduler"). Gate: the
+  scheduler and the legacy per-fragment path, driven from ONE state, must emit the IDENTICAL ordered
+  set of __patch calls (proven non-vacuous by execution).
+  Composed with wave B-2 on merge: the pilot's own Tk* mirrors of the live states were DELETED -
+  the tick envelope now references B-2's canonical messages, so the tooltip fields tip2 added ride
+  the tick documents too (gated by a tips fixture + a document-grows assertion, proven by execution).
+  Re-measured against B-2's per-fragment BINARY path (the JSON one is gone): Live tick **-29%**
+  dispatch / **-42%** steady state / -27% quoted, allocs 196 -> 34 -> 9, and `sched_all` now matches
+  pure Go while `sched_same` beats it - the first surface where the Zig path is not a loss.
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

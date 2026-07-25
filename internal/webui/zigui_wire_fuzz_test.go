@@ -103,6 +103,10 @@ func TestZigWireMutationFuzz(t *testing.T) {
 		{"appgroups_body_v2", zigui.RenderAppGroupsBodyV2},
 		{"logs_v2", zigui.RenderLogsV2},
 		{"logs_lines_v2", zigui.RenderLogsLinesV2},
+		// B3 scheduler exports: they return a packed fragment list, so fragString flattens it
+		// into the ids+HTML the OOB/determinism/size canaries below already know how to check.
+		{"tick_live", fragString(zigui.TickLive)},
+		{"tick_logs", fragString(zigui.TickLogs)},
 	}
 	exports = append(exports, wireExportsB2()...)
 
@@ -118,6 +122,10 @@ func TestZigWireMutationFuzz(t *testing.T) {
 	for n, st := range logsFixtures() {
 		bases = append(bases, base{"logs/" + n, wireLogsState(st)})
 		bases = append(bases, base{"lines/" + n, wireLogsLines(st.Lines)})
+		bases = append(bases, base{"tklogs/" + n, wireTkLogs(logsTickSt{Lines: st.Lines})})
+	}
+	for n, st := range liveFixtures() {
+		bases = append(bases, base{"tklive/" + n, wireTkLive(liveTickSt{Live: st, TC: "01:23:45:12"})})
 	}
 	for _, b := range wireBasesB2() {
 		bases = append(bases, base(b))
@@ -306,4 +314,23 @@ func TestZigWireSkipsUnknownFields(t *testing.T) {
 		t.Fatal("document with unknown fields rejected")
 	}
 	assertBytesEqual(t, "unknown-field skip", want, got)
+}
+
+// fragString adapts a B3 scheduler export to the wireExport shape: the packed reply is flattened
+// to "id" + NUL + "html" per fragment so the poison-marker, determinism and output-size canaries apply
+// to the ids as well as the HTML. A refused batch is a refused export - same contract.
+func fragString(f func([]byte) ([]zigui.Frag, bool)) func([]byte) (string, bool) {
+	return func(doc []byte) (string, bool) {
+		frs, ok := f(doc)
+		if !ok {
+			return "", false
+		}
+		var b strings.Builder
+		for _, fr := range frs {
+			b.WriteString(fr.ID)
+			b.WriteByte(0)
+			b.WriteString(fr.HTML)
+		}
+		return b.String(), true
+	}
 }

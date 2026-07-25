@@ -19,6 +19,7 @@ package zigui
 */
 import "C"
 import (
+	"encoding/binary"
 	"time"
 	"unsafe"
 )
@@ -1126,3 +1127,107 @@ func RenderPeersBodyV2(state []byte) (string, bool) {
 }
 
 // --- end phaseb-wire ---
+// --- phaseb-sched ---
+
+// B3 fragment scheduler (one call per tick per surface). The tick's whole state crosses once as
+// an RZW1 document carrying the hash of what Go last pushed per fragment id; the lib renders
+// every fragment of the surface, suppresses the ones whose bytes are unchanged and returns a
+// packed RZF1 list of the CHANGED ones. Unchanged fragment HTML never crosses the ABI.
+// Design: .devnotes/ZIG_UI_GUIDE.md "Phase B — B3 fragment scheduler".
+
+// Frag is one changed fragment: its patch id, the Wyhash-64 of its HTML (the caller stores this
+// as the next tick's dedup key) and the HTML itself.
+type Frag struct {
+	ID   string
+	Hash uint64
+	HTML string
+}
+
+// fragMagic + fragHdrLen frame the packed reply (native/zigui/src/tick.zig).
+const (
+	fragMagic   = "RZF1"
+	fragHdrLen  = 6
+	fragMaxCall = 1 << 20 // per-fragment sanity cap (1 MiB); the biggest real fragment is ~50 kB
+)
+
+// TickLive renders the Live cockpit's ~1 Hz fragments from one RZW1 document (wireTkLive).
+// ok=false → the caller runs its legacy per-fragment path for this tick.
+func TickLive(state []byte) ([]Frag, bool) {
+	return tickBatch(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_tick_live(p, l, n)
+	})
+}
+
+// TickLogs renders the #log-view tail from one RZW1 document (wireTkLogs).
+func TickLogs(state []byte) ([]Frag, bool) {
+	return tickBatch(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_tick_logs(p, l, n)
+	})
+}
+
+// tickBatch calls a scheduler export, copies + frees the reply and decodes it. A reply that
+// doesn't walk to exactly its end is refused whole - never applied in part.
+func tickBatch(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) ([]Frag, bool) {
+	if len(state) == 0 {
+		return nil, false
+	}
+	p := (*C.uint8_t)(unsafe.Pointer(&state[0]))
+	var n C.size_t
+	t0 := time.Now()
+	out := f(p, C.size_t(len(state)), &n)
+	if out == nil {
+		noteFallback(2) // 2 frames up = the Tick* wrapper
+		return nil, false
+	}
+	buf := C.GoBytes(unsafe.Pointer(out), C.int(n))
+	C.rz_ui_free(out, n)
+	NoteRender(len(state), time.Since(t0))
+	frs, ok := decodeFrags(buf)
+	if !ok {
+		noteFallback(2)
+		return nil, false
+	}
+	return frs, true
+}
+
+// decodeFrags walks a packed RZF1 reply. Every length is checked against the remaining bytes and
+// the buffer must end exactly on the last entry (same discipline as the RZW1 decoder).
+func decodeFrags(buf []byte) ([]Frag, bool) {
+	if len(buf) < fragHdrLen || string(buf[:4]) != fragMagic {
+		return nil, false
+	}
+	count := int(binary.LittleEndian.Uint16(buf[4:]))
+	pos := fragHdrLen
+	need := func(k int) bool { return k >= 0 && len(buf)-pos >= k }
+	out := make([]Frag, 0, count)
+	for i := 0; i < count; i++ {
+		if !need(2) {
+			return nil, false
+		}
+		idLen := int(binary.LittleEndian.Uint16(buf[pos:]))
+		pos += 2
+		if !need(idLen) {
+			return nil, false
+		}
+		id := string(buf[pos : pos+idLen])
+		pos += idLen
+		if !need(12) {
+			return nil, false
+		}
+		h := binary.LittleEndian.Uint64(buf[pos:])
+		pos += 8
+		htmlLen := int(binary.LittleEndian.Uint32(buf[pos:]))
+		pos += 4
+		if htmlLen > fragMaxCall || !need(htmlLen) {
+			return nil, false
+		}
+		out = append(out, Frag{ID: id, Hash: h, HTML: string(buf[pos : pos+htmlLen])})
+		pos += htmlLen
+	}
+	if pos != len(buf) {
+		return nil, false // trailing garbage: refuse the whole batch
+	}
+	return out, true
+}
+
+// --- end phaseb-sched ---

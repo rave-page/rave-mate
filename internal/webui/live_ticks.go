@@ -21,30 +21,15 @@ func init() {
 	// are UI-thread ExecuteScript calls and made window dragging stutter.
 	onLiveTick("live", func(u *UI) {
 		var js strings.Builder
-		u.tickPatch(&js, "live-tc", htmlEscape(u.tcText()))
-		if u.svc.AudioRec != nil {
-			u.tickPatch(&js, "live-rec-state", htmlEscape(recSideText(u.svc.AudioRec.Status())))
+		// --- phaseb-sched ---
+		// B3: resolve the whole surface once, then ONE call renders + dedups every fragment on
+		// the Zig side (tick_sched.go). Declined (stub build, malformed document, cache dropped
+		// mid-tick) → the legacy per-fragment path below, from the SAME state.
+		st := u.liveTickState()
+		if !u.tickLiveSched(&js, st) {
+			u.liveTickLegacy(&js, st)
 		}
-		u.tickPatch(&js, "live-np", u.nowPlayingHTML())
-		u.tickPatch(&js, "live-status", u.liveStatusHTML())
-		u.tickPatch(&js, "live-decks", u.decksHTML())
-		if u.svc.Session != nil {
-			u.tickPatch(&js, "live-signals", u.signalsHTML())
-		}
-		if u.svc.OBSControl != nil {
-			u.tickPatch(&js, "live-cockpit", u.cockpitHTML())
-		}
-		if u.svc.AbleLink != nil {
-			u.tickPatch(&js, "live-ablelink", u.ableLinkHTML())
-		}
-		if u.svc.NetStats != nil {
-			u.tickPatch(&js, "live-net", u.networkHTML())
-			u.tickPatch(&js, "live-tim", u.timingHTML())
-		}
-		if u.svc.Perf != nil {
-			u.tickPatch(&js, "live-perf2", u.sysperfHTML())
-		}
-		u.tickPatch(&js, "live-strip", u.liveStripHTML())
+		// --- end phaseb-sched ---
 		u.flushTick(&js)
 		if u.svc.AbleLink != nil {
 			u.pushAbleLink() // feed the client rAF phrase-bar interpolator (after the panel patch)
@@ -76,10 +61,16 @@ func init() {
 		}
 		u.frags["log-seq"] = key
 		u.fragMu.Unlock()
+		// --- phaseb-sched ---
+		// B3: the ring advanced, but the FILTERED tail often did not - one call renders it on the
+		// Zig side and suppresses the swap when its bytes are unchanged (tick_sched.go). Declined
+		// → the legacy render+swap below.
+		if u.tickLogsSched(logTailN) {
+			return
+		}
+		// --- end phaseb-sched ---
 		// tail-follow: keep scroll unless already at bottom; autoscroll gates the follow entirely
-		u.eval("var lv=document.getElementById('log-view');if(lv){var ab=" + u.logAutoscrollJS() +
-			"&&(lv.scrollHeight-lv.scrollTop-lv.clientHeight<40);lv.innerHTML=" +
-			jsQuote(u.logLinesHTML(logTailN)) + ";if(ab)lv.scrollTop=lv.scrollHeight;}")
+		u.evalLogView(u.logLinesHTML(logTailN))
 	})
 
 	// Automations + App Groups keep their v1 body refresh (not part of the parity fan-out).
@@ -112,3 +103,41 @@ func init() {
 		u.flushTick(&js)
 	})
 }
+
+// --- phaseb-sched ---
+
+// liveTickLegacy is the pre-B3 Live tick: one render + one tickPatch per fragment, deduped in Go
+// (post-B-2 each of those renders is itself a v2->v1->Go dispatch - one document per FRAGMENT,
+// which is exactly the per-fragment tax B3 removes)
+// against u.frags. It stays as the scheduler's fallback (stub builds, a declined batch) AND as
+// the parity reference - tick_sched_test.go drives this and the scheduler from the SAME state and
+// requires an identical ordered set of __patch calls. Fragment order + conditions are the wire
+// contract with native/zigui/src/tick.zig runLive; change them in both or the gate fails.
+func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
+	u.tickPatch(js, "live-tc", htmlEscape(st.TC))
+	if st.Live.Transport.HasRec {
+		u.tickPatch(js, "live-rec-state", htmlEscape(st.Live.Transport.RecState))
+	}
+	u.tickPatch(js, "live-np", liveFrag("np", st.Live.NP, wireLiveNP, liveNPHTML))
+	u.tickPatch(js, "live-status", liveFrag("status", st.Live.Status, wireLiveStatus, liveStatusFragHTML))
+	u.tickPatch(js, "live-decks", liveFrag("decks", st.Live.Decks, wireLiveDecks, liveDecksFragHTML))
+	if st.Live.HasSignals {
+		u.tickPatch(js, "live-signals", liveFrag("signals", st.Live.Signals, wireLiveSignals, liveSignalsFragHTML))
+	}
+	if st.Live.HasCockpit {
+		u.tickPatch(js, "live-cockpit", liveFrag("cockpit", st.Live.Cockpit, wireLiveCockpit, liveCockpitFragHTML))
+	}
+	if st.Live.HasLink {
+		u.tickPatch(js, "live-ablelink", liveFrag("link", st.Live.Link, wireLiveLink, liveLinkFragHTML))
+	}
+	if st.Live.HasNet {
+		u.tickPatch(js, "live-net", liveFrag("graph", st.Live.Net, wireLiveGraph, liveGraphFragHTML))
+		u.tickPatch(js, "live-tim", liveFrag("graph", st.Live.Tim, wireLiveGraph, liveGraphFragHTML))
+	}
+	if st.Live.HasPerf {
+		u.tickPatch(js, "live-perf2", liveFrag("perf", st.Live.Perf, wireLivePerf, livePerfFragHTML))
+	}
+	u.tickPatch(js, "live-strip", liveFrag("strip", st.Live.Strip, wireLiveStrip, liveStripFragHTML))
+}
+
+// --- end phaseb-sched ---

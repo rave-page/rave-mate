@@ -1154,3 +1154,139 @@ This section is the mechanism.
 - Not benched yet: the fragment renderers (`_body`, `#live-*`, the nine player patch targets),
   which the ~1 Hz tick hits far more often than a full tab render. Per-render tax applies per
   FRAGMENT - the next increment should extend the bench there.
+## Phase B — B3 fragment scheduler (pilots: live tick + `#log-view`)
+
+B0 finding 5 said the full-tab renders are not a live problem. The FRAGMENTS are what the app
+actually pays for: `livePush` hits the active tab's tick ~1 Hz, and the pre-B3 Live tick crossed
+the ABI **once per fragment** — up to twelve `stateJSON` marshals, twelve cgo calls, twelve
+`std.json` parses, twelve returned strings deduped in Go against `u.frags`. B3 collapses that to
+ONE call per tick per surface.
+
+### Shape
+
+Go resolves the whole surface once (`liveTickState()` / `logsLinesState()`), snapshots the hash of
+what it last pushed per fragment id, and encodes both into one RZW1 document (root ids **100**
+`TkLive` / **101** `TkLogs`). `native/zigui/src/tick.zig` renders EVERY fragment of that surface
+through the existing per-fragment renderers, hashes each result (Wyhash-64: FNV-1a costs one byte per round, ~50 us on the 51 kB log tail) and drops the ones
+whose hash matches the supplied `prev`. What comes back is a packed **RZF1** list of the changed
+fragments only:
+
+```
+"RZF1"  4 B   magic
+count   u16   changed fragments (0 = header only, 6 bytes: nothing to patch)
+entries count x { id_len u16, id, hash u64, html_len u32, html }
+```
+
+`internal/zigui` decodes it (`decodeFrags`, bounds-checked; a reply that does not walk to exactly
+its end is refused WHOLE, never applied in part), `tick_sched.go` turns each entry into the same
+`window.__patch('id',…)` call `tickPatch` produced, and `flushTick` batches the lot into one Eval.
+Unchanged fragment HTML never crosses the ABI, is never `jsQuote`d and never enters the eval queue.
+
+### Design decision: hash-return, NOT a Zig-side cache
+
+The alternative was a per-UI cache inside the lib (`rz_ui_tick_*(handle, …)`), which would have let
+Zig keep the previous HTML and answer "unchanged" without Go sending anything. Rejected:
+
+1. **Statelessness is the current ABI's whole safety story.** Every existing export is a pure
+   `state → HTML` function; that is why one lib serves the visible window, N headless remote-library
+   mirrors (`remoteui_host.go` builds a `*UI` per peer session) and the test binary at once, with no
+   instance registry, no lifetime rules and no cross-talk. A cache keyed by an opaque handle adds a
+   second lifetime to get wrong across a cgo boundary — for a *dedup hint*.
+2. **The cache has to be droppable from the Go side anyway.** `patchMain` replaces the DOM and
+   `enqueueEval`'s overflow policy drops a queued patch; both must invalidate the dedup state. With
+   the hashes in Go that is `u.fragH = nil` under the mutex we already hold. With a Zig-side cache
+   it is another export, called from a path that must not fail.
+3. **It buys almost nothing.** The saving would be the prev hashes on the wire: 8 bytes + the id per
+   fragment — measured at 317 B on the Live surface (2 857 B document → 3 174 B in steady state).
+   The renders still happen either way: you cannot hash HTML you have not produced.
+
+So the hashes travel in the document and Go owns the map (`u.fragH` + `u.fragGen`, both under
+`fragMu`, beside the legacy `u.frags`). This also makes the *dedup decision auditable from the Go
+side*: the parity test can replay it.
+
+**Race:** the prevs are snapshotted with `u.fragGen`; `commitFrags` refuses if the generation moved
+while the batch was in flight (a `patchMain` landed mid-tick). The batch is then discarded and the
+LEGACY path runs for that tick — it re-renders and re-pushes everything, which is exactly what a
+replaced DOM needs. A suppressed fragment can never be withheld from a fresh DOM.
+
+### Parity contract
+
+`tickPatch`'s semantics are reproduced, not approximated: same bytes → suppressed; an id with no
+cached hash → always emitted; `patchMain` drops the cache → everything resent; the eval queue's
+coalescing key stays the fragment id. The gate (`tick_sched_test.go`) drives the scheduler and
+`liveTickLegacy` from ONE state over a scripted mutation sequence and requires the **identical
+ordered set of `__patch` calls**, identical enqueued ids and an identical drained eval batch. Since
+a `__patch` call embeds `jsQuote(html)`, that equality is also a per-fragment Zig-vs-Go byte-parity
+assertion. Proven non-vacuous by execution: swapping two `tickPatch` lines in `liveTickLegacy` fails
+the gate.
+
+`liveTickLegacy` therefore stays forever — it is the stub-build path, the declined-batch path AND
+the parity reference. Fragment order + presence conditions are a contract between it and
+`tick.zig runLive`: change one, change both, or the gate fires.
+
+### Deliberate behaviour change (one, gated)
+
+`#log-view` had NO byte dedup: the seq gate skipped the tick only when the ring had not advanced, so
+any new log line re-swapped the whole ~50 kB tail even when the FILTERED view was byte-identical
+(level=error + a search box: the common case for a user watching one thing). The scheduler
+suppresses that swap. Text selection survives — the same motivation the seq gate was added for. The
+gate asserts the new eval sequence equals the legacy sequence with consecutive byte-identical
+repeats removed, so the change is exactly "tickPatch dedup, now on this surface too".
+
+### Notes for whoever extends this
+
+- **Per-tick state building got cheaper, not just the ABI crossings.** `liveTickState()` fills only
+  what the tick patches; the section titles and the five `tipTopic` tooltip cards that `liveState()`
+  builds for the full view are left empty (the tick patches fragment interiors, never section
+  headers). Building five tooltip cards a second to throw them away was pure waste.
+- **TEXT fragments are part of the surface.** `#live-tc` / `#live-rec-state` carry escaped plain
+  text, not a renderer's output. They are `Batch.text()` entries (`html.esc`, byte-identical to Go
+  `htmlEscape`) — do not route them through a renderer, and do not derive `#live-tc` from
+  `transport.tc`: the tick patches it even when no timecode service is wired (where `transport.tc`
+  is empty), so the raw text rides in `TkLive.tc`.
+- **`kUint` has its first user.** Rule 6 (Go formats every number) is about RENDERED numbers; a
+  dedup hash is not rendered. Sending it as a 16-char hex string per fragment per tick would be
+  waste, so `TkPrev.hash` is a varint.
+- **The tick envelope rides wave B-2's messages (composed on merge).** The pilot originally carried
+  its own `Tk*` mirrors of the live states because the two branches could not see each other's schema
+  rows. Wave B-2 defined the same structs as `LiveState` & co, so the mirrors were DELETED: `TkLive`
+  now references `LiveState`, `TkLogs` references `LogsLines`, and only the ENVELOPE (`TkPrev`,
+  `TkLive`, `TkLogs`; root ids 100/101) is B3's. `tick.zig` names `live.*`/`logs.*` directly instead
+  of re-exporting them. Consequence to keep in mind: the tick documents now carry everything those
+  states carry, tip2's four structured section tooltips included — `TestTickSchedLiveCarriesTooltips`
+  asserts they are really on the wire (the document must GROW when they are set; a silently dropped
+  field encodes to identical bytes), because the live fixtures leave them nil and every other gate
+  would stay green. Proven by execution: deleting fields 31-34 from the generated `liveState` encoder
+  fails it with "tooltip did not reach the tick document: 2857 B with, 2857 B without".
+- **The legacy fallback is itself a v2 path now.** Post-B-2, `liveTickLegacy`'s per-fragment renders
+  each build their OWN RZW1 document (`RenderLiveFragV2`) — ten documents + ten crossings per tick.
+  That is the baseline B3's numbers are measured against; `liveFrag` gained a wire-encoder parameter
+  in that wave, which is the kind of signature change a merge with ZERO textual conflicts still
+  breaks (it did).
+- **Wire hazard spotted while mirroring `live.Link`:** its Zig default is `fill = "0.00%"`, but the
+  Go zero value is `""`. On the wire a zero value is an ABSENT tag, so `Fill: ""` decodes to
+  `"0.00%"` — harmless today because `renderLink` returns before touching `fill` when
+  `available=false`, and Go always formats a non-empty fill when it is true. Any future use of
+  `fill` in the unavailable branch makes v1 != v2. A Zig struct default that is not the Go zero
+  value is a wire trap; prefer zero-valued defaults in state structs.
+- **Adding a surface:** resolve its fragments into one state struct → schema rows (root id from the
+  100-149 block) → regenerate → a `runX` in `tick.zig` listing the fragments in patch order → an
+  export + binding + stub → in the tick, `if !u.tickXSched(...) { legacy }` → extend the parity gate
+  and the fuzz base set. Do NOT let a surface's ids overlap another's: the dedup map is global per
+  `*UI`.
+
+### Numbers
+
+Measured tables + method live in `.devnotes/PHASEB_BASELINE.md` "Phase B3 - fragment scheduler",
+re-measured after the wave B-2 composition. Headline: the **Live tick** goes 29.0 -> 20.5 us of
+dispatch (**-29%**), 16.8 us in steady state (**-42%**), 47.3 -> 34.5 us including the per-fragment
+`jsQuote` (**-27%**), with allocations 196 -> 34 -> 9; ten `WireWriter`s become one (9.0 -> 7.1 us).
+`sched_all` now MATCHES pure Go (21.0 us) and `sched_same` beats it by 20% - the first surface where
+the Zig path is not a loss, which took B-2 killing the parse and B3 killing the per-fragment
+crossings together. **`#log-view`** is a wash when the tail changed (169 vs 150 us against B-1's
+single-fragment `_v2` export: the batch copies 61 kB the direct export hands straight out) and -46%
+plus the entire downstream (86 kB `jsQuote` + eval + cross-process ExecuteScript) when it did not.
+Two honest caveats recorded there: **pure Go is still the cheapest renderer for the log tail**, and
+**batching only pays where there are MANY fragments** - a single big fragment wants dedup, not a
+batch. Quote the post-composition figures: against per-fragment JSON the same change measured
+-43%/-45%, and two optimisations on one tax do not add up.

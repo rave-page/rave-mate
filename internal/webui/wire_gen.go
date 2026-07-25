@@ -7,45 +7,47 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0xaf5711c7
-	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
-	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
-	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
-	wireMsgLiveState     uint16 = 10 // Live tab - full cockpit
-	wireMsgLiveTransport uint16 = 11 // #live-transport fragment
-	wireMsgLiveNP        uint16 = 12 // #live-np fragment
-	wireMsgLiveStatus    uint16 = 13 // #live-status fragment
-	wireMsgLiveDecks     uint16 = 14 // #live-decks fragment
-	wireMsgLiveSignals   uint16 = 15 // #live-signals fragment
-	wireMsgLiveCockpit   uint16 = 16 // #live-cockpit fragment
-	wireMsgLiveLink      uint16 = 17 // #live-ablelink fragment
-	wireMsgLiveGraph     uint16 = 18 // #live-net + #live-tim fragments
-	wireMsgLivePerf      uint16 = 19 // #live-perf2 fragment
-	wireMsgLiveStrip     uint16 = 20 // #live-strip fragment
-	wireMsgMoState       uint16 = 21 // Motion tab (full view + the #mo-body fragment share this state)
-	wireMsgPub           uint16 = 22 // Publish tab (full view)
-	wireMsgPubHero       uint16 = 23 // #pub-hero fragment (~1 Hz tick)
-	wireMsgSetState      uint16 = 24 // Settings tab (full view)
-	wireMsgSetContent    uint16 = 25 // #set-content pane (sub-tab switch + search)
-	wireMsgSetStatus     uint16 = 26 // one #stset-<id> status fragment (settings tick)
-	wireMsgLibState      uint16 = 27 // Library tab (full view)
-	wireMsgLibBody       uint16 = 28 // #lib-body (active section)
-	wireMsgLibDetail     uint16 = 29 // #lib-detail inspector
-	wireMsgLibQueue      uint16 = 30 // #lib-queue-body (job progress patch)
-	wireMsgLibCueCell    uint16 = 31 // one cue-census cell (per-row patch)
-	wireMsgMpFull        uint16 = 32 // Player (full view; the 29 kB raw waveform SVG lives here)
-	wireMsgMpInner       uint16 = 33 // #mp-root inner
-	wireMsgMpVid         uint16 = 34 // #mp-vid
-	wireMsgMpWave        uint16 = 35 // #mp-wave
-	wireMsgMpTp          uint16 = 36 // #mp-tp transport
-	wireMsgMpEdit        uint16 = 37 // #mp-edit
-	wireMsgMpExport      uint16 = 38 // #mp-export
-	wireMsgMpRO          uint16 = 39 // #mp-ro read-only strip
-	wireMsgMpHov         uint16 = 40 // #mp-hov hover readout
-	wireMsgAutoState     uint16 = 41 // Automations tab (full view)
-	wireMsgAutoBodyState uint16 = 42 // #auto-body (version-gated ~1 Hz tick)
-	wireMsgPeers         uint16 = 43 // Peers tab (full view)
-	wireMsgPeersBody     uint16 = 44 // #peers-body (~1 Hz live tick)
+	wireSchemaHash       uint32 = 0x70698930
+	wireMsgAgState       uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
+	wireMsgLogsState     uint16 = 2   // Logs tab (full view)
+	wireMsgLogsLines     uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
+	wireMsgLiveState     uint16 = 10  // Live tab - full cockpit
+	wireMsgLiveTransport uint16 = 11  // #live-transport fragment
+	wireMsgLiveNP        uint16 = 12  // #live-np fragment
+	wireMsgLiveStatus    uint16 = 13  // #live-status fragment
+	wireMsgLiveDecks     uint16 = 14  // #live-decks fragment
+	wireMsgLiveSignals   uint16 = 15  // #live-signals fragment
+	wireMsgLiveCockpit   uint16 = 16  // #live-cockpit fragment
+	wireMsgLiveLink      uint16 = 17  // #live-ablelink fragment
+	wireMsgLiveGraph     uint16 = 18  // #live-net + #live-tim fragments
+	wireMsgLivePerf      uint16 = 19  // #live-perf2 fragment
+	wireMsgLiveStrip     uint16 = 20  // #live-strip fragment
+	wireMsgMoState       uint16 = 21  // Motion tab (full view + the #mo-body fragment share this state)
+	wireMsgPub           uint16 = 22  // Publish tab (full view)
+	wireMsgPubHero       uint16 = 23  // #pub-hero fragment (~1 Hz tick)
+	wireMsgSetState      uint16 = 24  // Settings tab (full view)
+	wireMsgSetContent    uint16 = 25  // #set-content pane (sub-tab switch + search)
+	wireMsgSetStatus     uint16 = 26  // one #stset-<id> status fragment (settings tick)
+	wireMsgLibState      uint16 = 27  // Library tab (full view)
+	wireMsgLibBody       uint16 = 28  // #lib-body (active section)
+	wireMsgLibDetail     uint16 = 29  // #lib-detail inspector
+	wireMsgLibQueue      uint16 = 30  // #lib-queue-body (job progress patch)
+	wireMsgLibCueCell    uint16 = 31  // one cue-census cell (per-row patch)
+	wireMsgMpFull        uint16 = 32  // Player (full view; the 29 kB raw waveform SVG lives here)
+	wireMsgMpInner       uint16 = 33  // #mp-root inner
+	wireMsgMpVid         uint16 = 34  // #mp-vid
+	wireMsgMpWave        uint16 = 35  // #mp-wave
+	wireMsgMpTp          uint16 = 36  // #mp-tp transport
+	wireMsgMpEdit        uint16 = 37  // #mp-edit
+	wireMsgMpExport      uint16 = 38  // #mp-export
+	wireMsgMpRO          uint16 = 39  // #mp-ro read-only strip
+	wireMsgMpHov         uint16 = 40  // #mp-hov hover readout
+	wireMsgAutoState     uint16 = 41  // Automations tab (full view)
+	wireMsgAutoBodyState uint16 = 42  // #auto-body (version-gated ~1 Hz tick)
+	wireMsgPeers         uint16 = 43  // Peers tab (full view)
+	wireMsgPeersBody     uint16 = 44  // #peers-body (~1 Hz live tick)
+	wireMsgTkLive        uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
+	wireMsgTkLogs        uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -1862,6 +1864,22 @@ func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
 	}
 }
 
+func (v tickPrev) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ID)
+	w.Uint(2, uint64(v.Hash))
+}
+
+func (v liveTickSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Live.encodeWire(w) })
+	w.Str(2, v.TC)
+	w.List(3, len(v.Prev), func(i int) { v.Prev[i].encodeWire(w) })
+}
+
+func (v logsTickSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Lines.encodeWire(w) })
+	w.List(2, len(v.Prev), func(i int) { v.Prev[i].encodeWire(w) })
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -2124,6 +2142,20 @@ func wirePeers(v peersSt) []byte {
 // wirePeersBody encodes peersBodySt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wirePeersBody(v peersBodySt) []byte {
 	w := zigui.NewWireWriter(wireMsgPeersBody, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTkLive encodes liveTickSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTkLive(v liveTickSt) []byte {
+	w := zigui.NewWireWriter(wireMsgTkLive, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTkLogs encodes logsTickSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTkLogs(v logsTickSt) []byte {
+	w := zigui.NewWireWriter(wireMsgTkLogs, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

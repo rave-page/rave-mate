@@ -856,6 +856,31 @@ var schema = []msg{
 		name: "SsLabel", goT: "ssLabelSt", zigT: "c.SsLabel",
 		fs: []field{s(1, "Text", "text"), op(2, "Tip", "tip", "Tip")},
 	},
+	// ── phase B3 fragment scheduler (topic sched): the tick surfaces ──
+	// Root ids 100-149. The fragment states themselves are the B-2 wire's messages (LiveState /
+	// LogsLines) - this block adds only the tick ENVELOPE: the surface state + the hash of what Go
+	// last pushed per fragment id. (Pre-merge this block carried its own Tk* mirrors of the live
+	// states; wave B-2 defined the same structs as LiveState & co, so the duplicates are gone and
+	// the tick documents ride the one canonical set - tooltips fields included.)
+	{
+		name: "TkPrev", goT: "tickPrev", zigT: "tick.Prev",
+		// kUint's user: a dedup hash is not a rendered number, so rule 6 (Go formats every number)
+		// does not apply - a 16-char hex string per fragment per tick would be pure waste. (Pre-merge
+		// this was an inline field literal; wave B-2 added the u() helper, which the schema-drift
+		// scanner can actually see.)
+		fs: []field{s(1, "ID", "id"), u(2, "Hash", "hash")},
+	},
+	{
+		name: "TkLive", goT: "liveTickSt", zigT: "tick.LiveBatch", id: 100,
+		doc: "Live-tab tick surface (all ~1 Hz fragments in one call)",
+		fs: []field{st(1, "Live", "live", "LiveState"), s(2, "TC", "tc"),
+			li(3, "Prev", "prev", "TkPrev")},
+	},
+	{
+		name: "TkLogs", goT: "logsTickSt", zigT: "tick.LogsBatch", id: 101,
+		doc: "#log-view tick surface (one fragment, 400-line tail)",
+		fs:  []field{st(1, "Lines", "lines", "LogsLines"), li(2, "Prev", "prev", "TkPrev")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -877,6 +902,8 @@ var zigImports = [][2]string{
 	{"motion", "motion.zig"},
 	// --- phaseb-wire (B-2 fan-out) ---
 	{"live", "live.zig"},
+	// --- phaseb-sched ---
+	{"tick", "tick.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means
