@@ -2,3 +2,4 @@
 # One per line. Add a dated reason as a trailing comment. See SUPPLY_CHAIN.md §7.
 # Example:
 #   golang.org/x/crypto v0.0.0  # 2026-06-01 CVE-2026-XXXX active exploit
+github.com/getkin/kin-openapi v0.144.0  # 2026-07-25 GHSA-r277-6w6q-xmqw fix; verified checksum-db + proxy==GitHub tag + full-diff scan; user-approved; THIS version only
