@@ -60,6 +60,27 @@ func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", fals
 func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
 func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }
 
+// --- peers ---
+
+func RenderPeers(stateJSON []byte) (string, bool)     { return "", false }
+func RenderPeersBody(stateJSON []byte) (string, bool) { return "", false }
+
+// --- library_remote ---
+
+func RenderLibRemote(stateJSON []byte) (string, bool) { return "", false }
+
+// --- publish ---
+
+func RenderPublish(stateJSON []byte) (string, bool)       { return "", false }
+func RenderPublishHero(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPublishRemote(stateJSON []byte) (string, bool) { return "", false }
+
+// --- settings ---
+
+func RenderSettings(stateJSON []byte) (string, bool)        { return "", false }
+func RenderSettingsContent(stateJSON []byte) (string, bool) { return "", false }
+func RenderSettingsStatus(stateJSON []byte) (string, bool)  { return "", false }
+
 // --- library ---
 
 func RenderLibrary(stateJSON []byte) (string, bool)        { return "", false }

@@ -88,6 +88,14 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
 | twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
 | editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
+
+| peers | Zig (`native/zigui/src/peers.zig`; full + `#peers-body` fragment) | `TestZigPeersGolden` |
+| library_remote | Zig (`native/zigui/src/libremote.zig`; the `.lib-target` control switcher) | `TestZigLibRemoteGolden` |
+
+| publish | Zig (`native/zigui/src/publish.zig`; full + `#pub-hero` tick fragment) | `TestZigPublishGolden` |
+| publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
+
+| settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
 | (all others) | Go | — |
 
@@ -225,6 +233,109 @@ signals card's rows carry no data-label at all. `cockpitHTML` is shared with the
 tab, so that tab now renders its OBS rows through Zig too.
 Components added: `statusRow`, `sectionOpenTip` (both used here).
 
+Peers-port notes (peers batch): the whole tab is ONE `#peers-body` funnel (peers_actions.go
+patches it ~1 Hz), so the split is `peersState`/`peersBodyState` (impure) vs
+`peersHTML`/`peersBodyHTML` (pure) plus one pure renderer per section. Details worth knowing:
+- **A state builder can carry a side effect and its ORDER is load-bearing.** `peerBannerState`
+  auto-clears a MIDI-forwarding target whose peer dropped, and `peerConnsState` reads
+  `Forwarding()` afterwards to decide Control vs Stop control. The builder assigns
+  `st.Banner` before `st.Conns` with a comment; swapping them changes the DOM for one tick.
+- Three lists (connections / discovered / remembered) collapsed into ONE `peerListSt` +
+  `peerRowHTML` (optional dot, name, `np-artist` tail, `btnRow`, plus the bridged deck lines
+  that render as SIBLINGS after the row div). Go picks the empty-state text per reason
+  (discovery off vs still searching), so the renderers stay pure.
+- Every number is pre-formatted Go-side: clock/sync/route/pipeline telemetry strings, UVC
+  `min/max/step/value` (`strconv.FormatInt`, Go `%d`), and the transfer progress-bar width.
+  `progressBar` was split like `linkPhraseBar`: `progressBar(frac,cap)` →
+  `progressBarStr(progressPct(frac), cap)`, and both renderers use the *Str form → ONE markup
+  source (`TestProgressBarDelegatesToPct`). NOTE the name: `pbarPct` was already taken by
+  render_live.go with a DIFFERENT contract (0..100, `%.2f%%`) - a state-name collision that
+  only surfaced at compile time.
+- Raw (trusted) fields, matching the Go source literals they replace: the receive-row `◂ `
+  mark, the `data-label="peer counts"` / `"controlling"` / `"spout sender"` literals, and the
+  cam-prop `oninput` display-only handler.
+- The webcam card's two device/mode pickers are smart selects → `resolveSelectBox` + `selHTML`
+  (`selectBox()` on the Go path is exactly that pair). `camPend` (the pending device/mode that
+  survives the 1 Hz re-render) stays a Go global read by the state builder.
+- Exactly-one-of choices ride as explicit flags, never "empty means the other": `xferProgSt`
+  has `isBadge` (badge vs button) and `bar` (progress bar vs muted text), `peerCamSt` has
+  `gated`. An implicit "" rule would have silently diverged on a blank i18n string.
+- Components added to `components.zig` (`// --- peers ---`): `progressBar(pct,caption)` only
+  (Go `progressBarStr`; empty caption falls back to the percentage). Everything else reused
+  panel/emptyState/hint/section/dot/btn+btnOf/btnRowOf/btnRowOpen+Close/subTabs/selectBox/
+  toggleOf/fieldOf/badge unchanged - no tab-local variants were needed.
+
+library_remote-port notes: `render_library_remote.go` is plumbing (peer enumeration + the
+typed remotectl client) with exactly ONE renderer, `targetSwitcherHTML` - the "Controlling
+[This computer ▾]" row. Split into `targetSwitcherState` (impure: `virtual()`, connected
+peers, current target, smart-select registration) + `targetSwitcherHTMLOf` (pure). Its only
+caller is render_library.go, which keeps calling `u.targetSwitcherHTML(id, act)` unchanged, so
+a later Library port can either keep embedding the returned markup as trusted raw HTML or lift
+`libRemoteSt` into its own state. `Show=false` (headless remote session / no peer connected)
+renders "" - and an empty fragment makes `renderJSON` return NULL, so the bridge falls back to
+Go which renders the same empty string (same rule as `#midi-ctlstat-<i>`).
+
+Publish-port notes (tab #14): the tab is one renderer with two data worlds (local recorder vs a
+peer over remotectl), so `renderPublish` dispatches on `libRemoteTarget()` and each world has its
+OWN state + export (`pubSt` / `pubRemSt`, `rz_ui_render_publish` / `_remote`; the remote view is a
+whole-view export because it re-frames panel + switcher + `#publish-body` itself and has no tick
+fragments - live status stays on the controlled box). Raw pass-throughs, both trusted: the unified player/editor
+(`player.go mpHTML("publish")`, embedded in the captures pane AND in the no-selection card when a
+loose capture is pinned) and the peer target switcher (`targetSwitcherHTML`, which registers a
+smart select as a side effect - the state builder calls it, exactly where the old renderer did).
+Progress bars adopt the motion/media dual-number shape: `pubBarSt` carries the float for Go's
+`progressBar()` AND Go's `%.1f%%` string for Zig (`TestPubBarNumberPairsAgree` pins them). Tracklist
+rows carry the RESOLVED `data-ctx` value instead of the two Go spellings (the non-editable branch
+spliced `"pub-tctx:" + esc(path)` by hand, the editable one `attrQ`'d - byte-identical because the
+prefix has no escapable characters) and a `lead` kind (`resolving|none|chk`) whose glyph (…/·) is a
+literal in both renderers. The capture rows' `⋯` menu needed a resolved twin of `actionMenu`
+(`resolveActionMenu` + `actionMenuHTML` in actionmenu.go, an appended block - `actionMenu` itself is
+untouched for the Go-rendered library/settings tabs; `TestActionMenuResolvedParity` pins the two to
+the same bytes). Components added to `components.zig` (`// --- publish ---`): `progressBar(pct,cap)`
+(pct pre-formatted, empty caption falls back to pct like Go) and `actionMenu(Select)` (the `amenu`
+wrapper around a bare `selectBox`). NOT ported (dialogs/modals stay Go, wave 3+): `publish_export.go`
+(`pubTxtOpen` text-export dialog, `pubFixModal` time-fix preview), `publish_actions.go` modals
+(rename/delete/capture-delete/track context menus), `pbuilder.go` (`mpPresetModal`), and everything
+`player.go` renders.
+
+Settings-port notes (the biggest tab, ~40 cards over 7 sub-tab sections): the split introduced a
+BLOCK LIST between the state builder and the renderers - `cardBlocks(id)` (was `cardContent`)
+returns `[]setBlock` instead of HTML, and `setBlockHTML` renders each kind through the existing
+components.go primitive (`note/noteRaw/hint/empty/field/toggle(+tip,+gated)/select(+tip)/amenu/
+kv/fpair/btnrow/pathrow/itemrow/install/installNote/region/form/raw`). That keeps ONE markup
+source for both renderers while the ~45 per-card bodies stay readable as data. Verified zero DOM
+change by dumping 24 pre/post fixtures (empty + populated config x 7 sections x 4 queries + full
+view) and diffing - 0 lines.
+- Everything impure is resolved Go-side as usual: config/service snapshots, the cached fs/PATH/
+  device probes (`settingsProbes` - a Go-runtime-shaped cache, see below), `strings.ToLower`
+  data-labels, all numbers (`strconv`/`trimNum`/`FormatFloat 'g'`), smart-select registration +
+  filtering, `tipTopic` tooltip markup, and the SEARCH match: `foldSearch(stripTags(setCardHTML(
+  card)))` runs on the Go-rendered card, so the query text never reaches Zig.
+- Trusted raw markup (`raw`/`region` blocks) = the WAVE 3 seams, each owned by another file:
+  `gridfixCardBody` (settings_gridfix.go), `gridfixModelCardBody` (settings_gridfix_model.go),
+  `bridgeCardBody` (bridge_actions.go), `updateFlowHTML` (update_actions.go, inside
+  `#inst-update`). settings_vr_managers.go is modal-only - it never enters the tab render.
+- Only ONE new components.zig helper was needed (`toggleRowGated`, Go `toggleRowGatedDL` - the
+  gated-switch + warn-hint pair); everything else reused. Settings-specific chrome (set-note,
+  set-pathrow, set-install, set-cardhead, set-nav, set-search, set-dlgform) stays tab-local in
+  settings.zig.
+- Composite children (fpair / btn-row / item-row trailing) travel as a NON-recursive `setKid`
+  (field|select|amenu|btn) - depth is 1 by construction, so the JSON stays a plain tree and Zig
+  needs no recursive parse instantiation.
+- Byte-exactness traps replicated: the hand-rolled `set-dlgform` inputs have NO space between the
+  `placeholder="…"` attribute and `autocomplete=off` (Go concatenates `attrQ(...)` straight onto
+  the literal); the RTSP note splices pre-escaped `&lt;this machine's IP&gt;` between two escaped
+  values (carried as a `noteRaw` block); ids (`stset-<id>`, `stnav-<id>`, `set-<sec>`,
+  `inst-<key>`, `data-act=toggle:<id>`, form acts) are spliced UNESCAPED both sides.
+- Go-runtime workaround, NOT ported behaviour (flagged per ZIG_MIGRATION "Why Zig"):
+  `settingsProbes` + `maybeRefreshProbes` (render_settings.go:~1210-1400) exist because the
+  blocking `mediatools.Tool.Status()` (PATH scan) / `vrdll.Probe()` / device enumerations ran on
+  the render goroutine and froze tab-open for seconds; the 10 s TTL + one-in-flight + "patch once
+  when the install state flips" dance is scheduler/GC-shaped, not feature-shaped. A Zig-native
+  pass can probe concurrently with an explicit allocator and drop the whole cache. Same for the
+  search path: it renders every card in Go to match against, then re-renders the matches in Zig -
+  acceptable now (goldens keep it honest), removable once the block state is matched directly.
+
 Library-port notes (the biggest tab, 2768 lines): split into `render_library_state.go`
 (impure) + pure renderers, then four Zig files - `library.zig` (tab + body dispatch),
 `library_kit.zig` (the helpers that live in render_library.go rather than components.go),
@@ -237,11 +348,13 @@ Library-port notes (the biggest tab, 2768 lines): split into `render_library_sta
 - Delegation so each component keeps ONE markup source: `pbFieldEx`->`pbFieldExDL`,
   `pbSelect`/`pbSelectTip`->`resolvePbSelect`/`resolvePbSelectTip` (+`selHTML`/`selHTMLRaw`),
   `keyPillHTML`->`libKeyPillState`+`libKeyPillHTML`, `actionMenu`->`resolveActionMenu`+
-  `actionMenuOf`, `progressBar`->`pbarPctOf`+`progressBarOf`. The literal-multiset diff against
+  `actionMenuHTML`, `progressBar`->`progressPct`+`progressBarStr`. The literal-multiset diff against
   the pre-split file is the proof of zero DOM change.
-- components.zig gained only layout ports (`mdWideOpen`, `triOpen`/`triMid`/`triClose`,
-  `progressBar` over a PRE-FORMATTED width). Everything else reused the existing blocks;
-  no existing helper was modified and no tab-local variant was needed.
+- components.zig gained only the two layout ports it was missing (`mdWideOpen`,
+  `triOpen`/`triMid`/`triClose`). At the development merge the library `progressBar` and
+  `amenu` were deduped against the peers+publish `progressBar`/`actionMenu` (markup-identical;
+  the shared ones win, `library_kit.amenu` now delegates). No existing helper was modified and
+  no tab-local variant was needed.
 - Name collisions bite in the golden test too: `libDetailSel` is a state-kind const, so the
   fixture helper had to become `libDetailFixture`. `inline` and `goto` are Zig keywords - the
   json tags are `inlineActs` / `gotoLbl`.

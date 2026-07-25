@@ -416,11 +416,11 @@ func libQueueFixture() libQueueSt {
 		Desc: "Transcode jobs", Empty: "Queue is empty",
 		Jobs: []libJobSt{
 			{Label: "a.flac · FLAC master", Cancel: true, CancelLbl: "Cancel", CancelAct: "lib-job-cancel:0",
-				Status: "running", StatusVar: "info", Width: pbarPctOf(0.42), Caption: "running · 42%"},
+				Status: "running", StatusVar: "info", Width: progressPct(0.42), Caption: "running · 42%"},
 			{Label: `b&"c".mp3 · My AAC`, Status: "error", StatusVar: "error",
-				Width: pbarPctOf(1.5), Caption: "error · 100%", Msg: `ffmpeg exited 1: bad &<codec>"x"'`},
+				Width: progressPct(1.5), Caption: "error · 100%", Msg: `ffmpeg exited 1: bad &<codec>"x"'`},
 			{Label: "c.wav · queued", Cancel: true, CancelLbl: "Cancel", CancelAct: "lib-job-cancel:2",
-				Status: "queued", StatusVar: "info", Width: pbarPctOf(-0.2), Caption: "queued · 0%"},
+				Status: "queued", StatusVar: "info", Width: progressPct(-0.2), Caption: "queued · 0%"},
 		},
 	}
 }
@@ -473,7 +473,7 @@ func TestZigLibraryQueueGolden(t *testing.T) {
 	for name, st := range map[string]libQueueSt{
 		"empty":     {Desc: "Transcode jobs", Empty: "Queue is empty"},
 		"populated": libQueueFixture(),
-		"unicode":   {Desc: "Задания", Empty: "пусто", Jobs: []libJobSt{{Label: "трек.flac · мастер", Status: "done", StatusVar: "success", Width: pbarPctOf(1), Caption: "done · 100%"}}},
+		"unicode":   {Desc: "Задания", Empty: "пусто", Jobs: []libJobSt{{Label: "трек.flac · мастер", Status: "done", StatusVar: "success", Width: progressPct(1), Caption: "done · 100%"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			js := stateJSON(st)

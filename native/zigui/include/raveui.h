@@ -96,6 +96,29 @@ const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t
 /* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
 const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- peers --- */
+const uint8_t *rz_ui_render_peers(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #peers-body inner HTML (~1 Hz live tick patch target). */
+const uint8_t *rz_ui_render_peers_body(const uint8_t *state_json, size_t len, size_t *out_len);
+
+/* --- library_remote --- */
+/* "Controlling [This computer]" switcher; NULL when hidden (Go fallback emits ""). */
+const uint8_t *rz_ui_render_libremote(const uint8_t *state_json, size_t len, size_t *out_len);
+
+/* --- publish --- (local cockpit + the remote peer's recorded-sets browser) */
+const uint8_t *rz_ui_render_publish(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #pub-hero inner (~1 Hz tick patch). May legitimately render empty (no recorder)
+ * => NULL, and the Go fallback renders the same "". */
+const uint8_t *rz_ui_render_publish_hero(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_publish_remote(const uint8_t *state_json, size_t len, size_t *out_len);
+
+/* --- settings --- */
+const uint8_t *rz_ui_render_settings(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #set-content inner HTML (sub-tab switch + debounced search patch target). */
+const uint8_t *rz_ui_render_settings_content(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #stset-<id> inner HTML (~1 Hz per-card status tick). */
+const uint8_t *rz_ui_render_settings_status(const uint8_t *state_json, size_t len, size_t *out_len);
+
 /* --- library --- */
 /* Whole Library tab (Browse · Favorites · Collection · Playlists · History · ID Marks ·
  * Queue · Presets + the shared inspector). Sub-views owned by other renderers (nav rail,

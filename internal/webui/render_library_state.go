@@ -1135,7 +1135,7 @@ func (u *UI) libQueueState() libQueueSt {
 	for i, j := range s.jobs {
 		job := libJobSt{
 			Label: j.name + " · " + j.preset, Status: j.status, StatusVar: jobBadge(j.status),
-			Width: pbarPctOf(j.pct / 100), Caption: fmt.Sprintf("%s · %.0f%%", j.status, j.pct), Msg: j.msg,
+			Width: progressPct(j.pct / 100), Caption: fmt.Sprintf("%s · %.0f%%", j.status, j.pct), Msg: j.msg,
 		}
 		if j.status == "running" || j.status == "queued" {
 			job.Cancel, job.CancelLbl, job.CancelAct = true, i18n.T("common.cancel"), fmt.Sprintf("lib-job-cancel:%d", i)
@@ -1601,15 +1601,7 @@ func (u *UI) libMediaHintsState(sel *libSel, d transcode.Preset) []libHintSt {
 }
 
 // ── shared select resolvers ──
-
-// resolveActionMenu registers + resolves an actionMenu (label rides as the "" option, like
-// actionmenu.go) into pure render state.
-func resolveActionMenu(id, label string, items []ssOpt) selState {
-	opts := make([]ssOpt, 0, len(items)+1)
-	opts = append(opts, ssOpt{Val: "", Label: label})
-	opts = append(opts, items...)
-	return resolveSmartSelect(id, "menugo:", "", func() []ssOpt { return opts })
-}
+// (resolveActionMenu lives in actionmenu.go - the publish batch added it first.)
 
 // pbOptsFn adapts [][val,label] pairs to the smart-select opts contract.
 func pbOptsFn(options [][2]string) func() []ssOpt {

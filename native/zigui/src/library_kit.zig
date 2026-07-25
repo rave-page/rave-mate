@@ -119,11 +119,10 @@ pub fn inspSecClose(h: *Html) !void {
     try h.raw("</div>");
 }
 
-/// amenu wraps a resolved actionMenu select (Go actionMenuOf).
+/// amenu wraps a resolved actionMenu select (Go actionMenuHTML). Delegates to the shared
+/// components.actionMenu (publish batch) - ONE markup source.
 pub fn amenu(h: *Html, s: Select) !void {
-    try h.raw("<span class=amenu>");
-    try c.selectBox(h, s);
-    try h.raw("</span>");
+    try c.actionMenu(h, s);
 }
 
 /// SelTip pairs a resolved select with its pre-rendered ss-label (label text + tooltip

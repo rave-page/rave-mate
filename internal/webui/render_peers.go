@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"sort"
+	"strconv"
 	"strings"
 
 	"rave.page/mate/internal/filexfer"
@@ -13,21 +14,234 @@ import (
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/peerlink"
 	"rave.page/mate/internal/webcam"
+	"rave.page/mate/internal/zigui"
 )
+
+// Peers is a Zig-rendered tab (native/zigui/src/peers.zig): Go resolves all state
+// (peerlink/peerbridge/medialink/webcam/filexfer data + RESOLVED i18n strings + every
+// number pre-formatted) into peersSt, the Zig lib renders HTML byte-identical to the Go
+// renderers below (fallback + golden reference, zigui_golden_peers_test.go).
+
+// ── resolved render state (JSON → Zig) ──
+
+// peerDeckSt is one bridged remote deck line rendered under a connection row.
+type peerDeckSt struct {
+	Audible bool   `json:"audible"`
+	Line    string `json:"line"`
+}
+
+// peerRowSt is one `.row` line of a peers list: optional status dot, name, muted tail,
+// trailing buttons, plus (connections only) the bridged now-playing deck lines.
+type peerRowSt struct {
+	Dot   string       `json:"dot"` // "" = no dot prefix
+	Name  string       `json:"name"`
+	Sub   string       `json:"sub"`
+	Btns  []uiBtn      `json:"btns,omitempty"`
+	Decks []peerDeckSt `json:"decks,omitempty"`
+}
+
+// peerListSt is a rows-or-empty-state card (connections / discovered / remembered). Go
+// picks Empty per reason (discovery off vs still searching), so the renderers stay pure.
+type peerListSt struct {
+	Empty string      `json:"empty"`
+	Rows  []peerRowSt `json:"rows,omitempty"`
+}
+
+// peerBannerSt is the MIDI-forwarding control banner ("controlling <peer>" + Stop).
+type peerBannerSt struct {
+	Show bool   `json:"show"`
+	Text string `json:"text"`
+	Btn  uiBtn  `json:"btn"`
+}
+
+// peerRouteSt is one media-plane route (title + telemetry detail + optional pipeline line).
+type peerRouteSt struct {
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Pipe   string `json:"pipe"` // "" = omitted
+}
+
+// peerRecvRowSt is one receivable/active remote video source. Mark is a trusted literal
+// prefix ("◂ " on an active receive) inserted raw, exactly like the Go source did.
+type peerRecvRowSt struct {
+	Mark string `json:"mark"`
+	Line string `json:"line"`
+	Btn  uiBtn  `json:"btn"`
+}
+
+// peerRecvSt is the "Receive video" block (hidden when nothing is offered or active).
+type peerRecvSt struct {
+	Show bool            `json:"show"`
+	Head string          `json:"head"`
+	Rows []peerRecvRowSt `json:"rows,omitempty"`
+}
+
+// peerMediaSt is the media plane: clock/sync/TC-master lines + per-route telemetry.
+// Every number is pre-formatted Go-side (floats never cross the ABI).
+type peerMediaSt struct {
+	Show      bool          `json:"show"`
+	ClockLine string        `json:"clockLine"`
+	SyncLines []string      `json:"syncLines,omitempty"`
+	HasTC     bool          `json:"hasTc"`
+	TCLine    string        `json:"tcLine"`
+	NoRoutes  string        `json:"noRoutes"`  // shown when Routes is empty
+	RoutesHdr string        `json:"routesHdr"` // "Routes: N"
+	Routes    []peerRouteSt `json:"routes,omitempty"`
+	Recv      peerRecvSt    `json:"recv"`
+}
+
+// camPropSt is one UVC property row. Min/Max/Step/Val ride as strings (Go %d).
+type camPropSt struct {
+	Label    string `json:"label"`
+	MinS     string `json:"minS"`
+	MaxS     string `json:"maxS"`
+	StepS    string `json:"stepS"`
+	ValS     string `json:"valS"`
+	Act      string `json:"act"`
+	Disabled bool   `json:"disabled"`
+	CanAuto  bool   `json:"canAuto"`
+	Auto     bool   `json:"auto"`
+	AutoAct  string `json:"autoAct"`
+	AutoLbl  string `json:"autoLbl"`
+}
+
+// camNodeSt is one camera instance card (device/mode selects + start-stop + PTZ props).
+type camNodeSt struct {
+	Name       string      `json:"name"`
+	RefreshAct string      `json:"refreshAct"`
+	Status     string      `json:"status"`
+	Dev        selState    `json:"dev"`
+	Mode       selState    `json:"mode"`
+	Start      uiBtn       `json:"start"`
+	Sender     string      `json:"sender"`     // "" = omit the sender row
+	SenderLine string      `json:"senderLine"` // localized "Spout sender: X"
+	PropsHdr   string      `json:"propsHdr"`
+	Props      []camPropSt `json:"props,omitempty"`
+}
+
+// peerCamSt is the webcam section. Show=false = no section at all (no webcam service or
+// no config); Gated = the feature is off, so the section only carries the hint.
+type peerCamSt struct {
+	Show     bool        `json:"show"`
+	Gated    bool        `json:"gated"`
+	GateHint string      `json:"gateHint"`
+	Empty    string      `json:"empty"`
+	Nodes    []camNodeSt `json:"nodes,omitempty"`
+}
+
+// xferSetSt is the file-transfer settings card (Show=false when there is no config).
+type xferSetSt struct {
+	Show       bool     `json:"show"`
+	Enabled    uiToggle `json:"enabled"`
+	AcceptLbl  string   `json:"acceptLbl"`
+	Mode       string   `json:"mode"` // "ask" | "auto"
+	AskLbl     string   `json:"askLbl"`
+	AutoLbl    string   `json:"autoLbl"`
+	Dir        uiField  `json:"dir"`
+	DefaultDir string   `json:"defaultDir"`
+}
+
+// xferPendSt is a pending incoming transfer awaiting an accept/decline decision.
+type xferPendSt struct {
+	Line string  `json:"line"`
+	Btns []uiBtn `json:"btns,omitempty"`
+}
+
+// xferProgSt is one in-flight/finished transfer row. Exactly one right-hand control
+// (IsBadge picks badge over button) and one sub-line (Bar picks the progress bar over
+// the muted text); BarPct is progressBar's fill width pre-formatted Go-side.
+type xferProgSt struct {
+	Title    string `json:"title"`
+	IsBadge  bool   `json:"isBadge"`
+	Btn      uiBtn  `json:"btn"`
+	Badge    string `json:"badge"`
+	BadgeVar string `json:"badgeVar"`
+	Bar      bool   `json:"bar"`
+	BarPct   string `json:"barPct"`
+	BarCap   string `json:"barCap"`
+	SubText  string `json:"subText"`
+}
+
+// peerXferSt is the file-transfer section (Show=false when the service is off).
+type peerXferSt struct {
+	Show     bool         `json:"show"`
+	Settings xferSetSt    `json:"settings"`
+	None     bool         `json:"none"` // no transfers at all → NoneHint instead of the card
+	NoneHint string       `json:"noneHint"`
+	Pend     []xferPendSt `json:"pend,omitempty"`
+	Rows     []xferProgSt `json:"rows,omitempty"`
+}
+
+// peersBodySt is the #peers-body inner state (patched ~1 Hz by peers_actions.go).
+type peersBodySt struct {
+	Strip           string       `json:"strip"`
+	Banner          peerBannerSt `json:"banner"`
+	ConnsTitle      string       `json:"connsTitle"`
+	Conns           peerListSt   `json:"conns"`
+	MediaTitle      string       `json:"mediaTitle"`
+	Media           peerMediaSt  `json:"media"`
+	CamTitle        string       `json:"camTitle"`
+	Cam             peerCamSt    `json:"cam"`
+	XferTitle       string       `json:"xferTitle"`
+	Xfer            peerXferSt   `json:"xfer"`
+	NetTitle        string       `json:"netTitle"`
+	Discovered      peerListSt   `json:"discovered"`
+	RememberedTitle string       `json:"rememberedTitle"`
+	Remembered      peerListSt   `json:"remembered"`
+}
+
+// peersSt is the resolved render state for the Peers view (JSON → Zig).
+type peersSt struct {
+	Title       string      `json:"title"`
+	Sub         string      `json:"sub"`
+	Available   bool        `json:"available"`
+	Unavailable string      `json:"unavailable"`
+	Body        peersBodySt `json:"body"`
+}
+
+// ── bridges ──
 
 // renderPeers: LAN peers at Fyne parity - control banner (MIDI forwarding) + per-connection Control
 // toggle + bridged now-playing, media plane (clock/sync/TC-master + per-route pipeline telemetry),
 // webcam panel (device/mode/start-stop/PTZ), file transfer (settings + progress), discovered +
 // remembered peers, status-strip counts. peers-body is patched ~1 Hz (peers_actions.go).
 func (u *UI) renderPeers() string {
-	if u.svc.Peers == nil {
-		return panel(i18n.T("peers.title"), "") + emptyState(i18n.T("peers.unavailable"))
+	st := u.peersState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderPeers(stateJSON(st)); ok {
+			return h
+		}
 	}
-	return panel(i18n.T("peers.title"), i18n.T("peers.subtitle")) +
-		`<div id=peers-body>` + u.peersBody() + `</div>`
+	return peersHTML(st)
 }
 
+// peersBody is the #peers-body inner fragment (~1 Hz live tick).
 func (u *UI) peersBody() string {
+	st := u.peersBodyState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderPeersBody(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return peersBodyHTML(st)
+}
+
+// ── state builders (impure: services, locks, i18n) ──
+
+func (u *UI) peersState() peersSt {
+	st := peersSt{
+		Title:       i18n.T("peers.title"),
+		Sub:         i18n.T("peers.subtitle"),
+		Available:   u.svc.Peers != nil,
+		Unavailable: i18n.T("peers.unavailable"),
+	}
+	if st.Available {
+		st.Body = u.peersBodyState()
+	}
+	return st
+}
+
+func (u *UI) peersBodyState() peersBodySt {
 	conns := u.peerConns()
 	byNode := map[string]peerlink.ConnInfo{}
 	for _, c := range conns {
@@ -46,23 +260,27 @@ func (u *UI) peersBody() string {
 		return peerName("", id)
 	}
 
-	var b strings.Builder
-	b.WriteString(`<div id=peers-strip class=peers-strip>` + u.peerStripHTML(conns) + `</div>`)
-	b.WriteString(u.controlBannerHTML(byNode))
-	b.WriteString(section(i18n.T("peers.connections"), u.peerConnsHTML(conns, remotes)))
+	st := peersBodySt{
+		Strip:           u.peerStripText(conns),
+		ConnsTitle:      i18n.T("peers.connections"),
+		MediaTitle:      i18n.T("peers.mediaPlane"),
+		CamTitle:        i18n.T("peers.webcam"),
+		XferTitle:       i18n.T("peers.fileTransfer"),
+		NetTitle:        i18n.T("peers.onThisNetwork"),
+		RememberedTitle: i18n.T("peers.rememberedOffline"),
+	}
+	// Banner state FIRST: it auto-clears a control target whose peer dropped, and the
+	// connection rows read Forwarding() afterwards (same order as the old renderer).
+	st.Banner = u.peerBannerState(byNode)
+	st.Conns = u.peerConnsState(conns, remotes)
 	if u.svc.Media != nil && (len(conns) > 0 || len(u.svc.Media.Stats()) > 0) {
-		b.WriteString(section(i18n.T("peers.mediaPlane"), u.peerMediaHTML(resolve)))
+		st.Media = u.peerMediaState(resolve)
 	}
-	if camHTML := u.peerWebcamHTML(resolve); camHTML != "" {
-		b.WriteString(section(i18n.T("peers.webcam"), camHTML))
-	}
-	if u.svc.FileXfer != nil {
-		b.WriteString(section(i18n.T("peers.fileTransfer"), u.peerXferHTML(resolve)))
-	}
-	// two sibling lists share a row ≥1100px (.peers-2col)
-	b.WriteString(`<div class=peers-2col>` + section(i18n.T("peers.onThisNetwork"), u.peerDiscoveredHTML(byNode)) +
-		section(i18n.T("peers.rememberedOffline"), u.peerRememberedHTML(byNode)) + `</div>`)
-	return b.String()
+	st.Cam = u.peerCamState(resolve)
+	st.Xfer = u.peerXferState(resolve)
+	st.Discovered = u.peerDiscoveredState(byNode)
+	st.Remembered = u.peerRememberedState(byNode)
+	return st
 }
 
 func (u *UI) peerConns() []peerlink.ConnInfo {
@@ -72,70 +290,67 @@ func (u *UI) peerConns() []peerlink.ConnInfo {
 	return u.svc.Peers.Connections()
 }
 
-// ── status strip ──
-
-func (u *UI) peerStripHTML(conns []peerlink.ConnInfo) string {
+// peerStripText resolves the status-strip counts line.
+func (u *UI) peerStripText(conns []peerlink.ConnInfo) string {
 	nFound := 0
 	if u.svc.Discovery != nil {
 		nFound = len(u.svc.Discovery.Peers())
 	}
-	var txt string
 	if u.svc.Identity != nil {
-		txt = i18n.T("peers.statusStripNode", i18n.A{
+		return i18n.T("peers.statusStripNode", i18n.A{
 			"connected": fmt.Sprint(len(conns)),
 			"found":     fmt.Sprint(nFound),
 			"node":      shortID(u.svc.Identity.NodeID),
 		})
-	} else {
-		txt = i18n.T("peers.statusStrip", i18n.A{
-			"connected": fmt.Sprint(len(conns)),
-			"found":     fmt.Sprint(nFound),
-		})
 	}
-	return `<span data-label="peer counts" data-value="` + html.EscapeString(txt) + `">` + html.EscapeString(txt) + `</span>`
+	return i18n.T("peers.statusStrip", i18n.A{
+		"connected": fmt.Sprint(len(conns)),
+		"found":     fmt.Sprint(nFound),
+	})
 }
 
-// ── control banner (MIDI forwarding) ──
-
-func (u *UI) controlBannerHTML(byNode map[string]peerlink.ConnInfo) string {
+// peerBannerState resolves the MIDI-forwarding banner. Side effect: a forwarding target
+// that is no longer connected is cleared here (the banner must never name a dead peer).
+func (u *UI) peerBannerState(byNode map[string]peerlink.ConnInfo) peerBannerSt {
 	if u.svc.PeerBridge == nil {
-		return ""
+		return peerBannerSt{}
 	}
 	on, target := u.svc.PeerBridge.Forwarding()
 	if !on {
-		return ""
+		return peerBannerSt{}
 	}
 	if _, live := byNode[target]; !live { // target dropped - auto-clear
 		u.svc.PeerBridge.SetMIDIForwarding(false)
 		u.svc.PeerBridge.SetControlTarget("")
-		return ""
+		return peerBannerSt{}
 	}
 	name := peerName(byNode[target].Nickname, target)
-	return `<div class=ctl-banner data-label="controlling"><span class=ctl-banner-tx>🎛 ` +
-		html.EscapeString(i18n.T("peers.controllingBanner", i18n.A{"name": name})) + `</span>` +
-		btn(i18n.T("peers.stopControlling"), "warn", "peers-control:"+target, "0") + `</div>`
+	return peerBannerSt{
+		Show: true,
+		Text: i18n.T("peers.controllingBanner", i18n.A{"name": name}),
+		Btn:  uiBtn{Label: i18n.T("peers.stopControlling"), Variant: "warn", Act: "peers-control:" + target, Val: "0"},
+	}
 }
 
-// ── connections ──
-
-func (u *UI) peerConnsHTML(conns []peerlink.ConnInfo, remotes map[string]peerbridge.RemoteState) string {
-	if len(conns) == 0 {
-		return emptyState(i18n.T("peers.noActiveConnections"))
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
+func (u *UI) peerConnsState(conns []peerlink.ConnInfo, remotes map[string]peerbridge.RemoteState) peerListSt {
+	lst := peerListSt{Empty: i18n.T("peers.noActiveConnections")}
 	on, target := false, ""
 	if u.svc.PeerBridge != nil {
 		on, target = u.svc.PeerBridge.Forwarding()
 	}
 	for _, c := range conns {
-		st := string(c.Status)
 		if c.Status == peerlink.StatusAwaitSAS {
-			b.WriteString(`<div class=row><span class=row-label>` + html.EscapeString(peerName(c.Nickname, c.NodeID)) +
-				` <span class=np-artist>` + html.EscapeString(i18n.T("peers.pairingCode", i18n.A{"sas": spaceSAS(c.SAS)})) + `</span></span>` +
-				btnRow(btn(i18n.T("peers.matches"), "go", "peer-sas:"+c.NodeID, "1"), btn(i18n.T("peers.doesntMatch"), "destructive", "peer-sas:"+c.NodeID, "0")) + `</div>`)
+			lst.Rows = append(lst.Rows, peerRowSt{
+				Name: peerName(c.Nickname, c.NodeID),
+				Sub:  i18n.T("peers.pairingCode", i18n.A{"sas": spaceSAS(c.SAS)}),
+				Btns: []uiBtn{
+					{Label: i18n.T("peers.matches"), Variant: "go", Act: "peer-sas:" + c.NodeID, Val: "1"},
+					{Label: i18n.T("peers.doesntMatch"), Variant: "destructive", Act: "peer-sas:" + c.NodeID, Val: "0"},
+				},
+			})
 			continue
 		}
+		st := string(c.Status)
 		v := "muted"
 		switch c.Status {
 		case peerlink.StatusConnected:
@@ -146,41 +361,34 @@ func (u *UI) peerConnsHTML(conns []peerlink.ConnInfo, remotes map[string]peerbri
 		case peerlink.StatusConnecting:
 			v = "warning"
 		}
+		var btns []uiBtn
 		// Control toggle (only for connected peers + a live bridge).
-		var actions string
 		if c.Status == peerlink.StatusConnected && u.svc.PeerBridge != nil {
 			if on && target == c.NodeID {
-				actions = btn(i18n.T("peers.stopControl"), "warn", "peers-control:"+c.NodeID, "0")
+				btns = append(btns, uiBtn{Label: i18n.T("peers.stopControl"), Variant: "warn", Act: "peers-control:" + c.NodeID, Val: "0"})
 			} else {
-				actions = btn(i18n.T("peers.control"), "outline", "peers-control:"+c.NodeID, "1")
+				btns = append(btns, uiBtn{Label: i18n.T("peers.control"), Variant: "outline", Act: "peers-control:" + c.NodeID, Val: "1"})
 			}
 		}
-		actions += btn(i18n.T("peers.forget"), "ghost", "peer-forget:"+c.NodeID, "")
-		b.WriteString(`<div class=row><span class=row-label>` + dot(v) + ` ` + html.EscapeString(peerName(c.Nickname, c.NodeID)) +
-			` <span class=np-artist>` + html.EscapeString(st) + `</span></span>` + btnRow(actions) + `</div>`)
+		btns = append(btns, uiBtn{Label: i18n.T("peers.forget"), Variant: "ghost", Act: "peer-forget:" + c.NodeID})
+		row := peerRowSt{Dot: v, Name: peerName(c.Nickname, c.NodeID), Sub: st, Btns: btns}
 		for _, ds := range remotes[c.NodeID].NowPlaying.AllDecks() {
 			line := fmtRemoteDeck(ds)
 			if line == "" {
 				continue
 			}
-			mark, cls := "▷ ", "peer-np peer-np--quiet"
-			if ds.Audible {
-				mark, cls = "▶ ", "peer-np"
-			}
-			b.WriteString(`<div class="` + cls + `">` + mark + html.EscapeString(line) + `</div>`)
+			row.Decks = append(row.Decks, peerDeckSt{Audible: ds.Audible, Line: line})
 		}
+		lst.Rows = append(lst.Rows, row)
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return lst
 }
 
-// ── discovered / remembered ──
-
-func (u *UI) peerDiscoveredHTML(byNode map[string]peerlink.ConnInfo) string {
+func (u *UI) peerDiscoveredState(byNode map[string]peerlink.ConnInfo) peerListSt {
 	if u.svc.Discovery == nil {
-		return emptyState(i18n.T("peers.discoveryOff"))
+		return peerListSt{Empty: i18n.T("peers.discoveryOff")}
 	}
-	var rows strings.Builder
+	lst := peerListSt{Empty: i18n.T("peers.searchingHint")}
 	for _, p := range u.svc.Discovery.Peers() {
 		if _, busy := byNode[p.NodeID]; busy {
 			continue
@@ -189,17 +397,15 @@ func (u *UI) peerDiscoveredHTML(byNode map[string]peerlink.ConnInfo) string {
 		if u.svc.Peers.IsTrusted(p.NodeID) {
 			verb, variant = i18n.T("peers.connect"), "outline"
 		}
-		rows.WriteString(`<div class=row><span class=row-label>` + html.EscapeString(peerName(p.Name, p.NodeID)) +
-			` <span class=np-artist>` + html.EscapeString(p.Address.String()) + `</span></span>` +
-			btnRow(btn(verb, variant, "peer-connect:"+p.NodeID, "")) + `</div>`)
+		lst.Rows = append(lst.Rows, peerRowSt{
+			Name: peerName(p.Name, p.NodeID), Sub: p.Address.String(),
+			Btns: []uiBtn{{Label: verb, Variant: variant, Act: "peer-connect:" + p.NodeID}},
+		})
 	}
-	if rows.Len() == 0 {
-		return emptyState(i18n.T("peers.searchingHint"))
-	}
-	return `<div class="rp-card">` + rows.String() + `</div>`
+	return lst
 }
 
-func (u *UI) peerRememberedHTML(byNode map[string]peerlink.ConnInfo) string {
+func (u *UI) peerRememberedState(byNode map[string]peerlink.ConnInfo) peerListSt {
 	online := map[string]bool{}
 	for id := range byNode {
 		online[id] = true
@@ -209,118 +415,96 @@ func (u *UI) peerRememberedHTML(byNode map[string]peerlink.ConnInfo) string {
 			online[p.NodeID] = true
 		}
 	}
-	var rows strings.Builder
+	lst := peerListSt{Empty: i18n.T("peers.none")}
 	for _, p := range u.svc.Peers.Remembered() {
 		if online[p.NodeID] {
 			continue
 		}
-		rows.WriteString(`<div class=row><span class=row-label>` + dot("muted") + ` ` + html.EscapeString(peerName(p.Nickname, p.NodeID)) +
-			` <span class=np-artist>` + html.EscapeString(i18n.T("peers.offline")) + `</span></span>` + btnRow(btn(i18n.T("peers.forget"), "ghost", "peer-forget:"+p.NodeID, "")) + `</div>`)
+		lst.Rows = append(lst.Rows, peerRowSt{
+			Dot: "muted", Name: peerName(p.Nickname, p.NodeID), Sub: i18n.T("peers.offline"),
+			Btns: []uiBtn{{Label: i18n.T("peers.forget"), Variant: "ghost", Act: "peer-forget:" + p.NodeID}},
+		})
 	}
-	if rows.Len() == 0 {
-		return emptyState(i18n.T("peers.none"))
-	}
-	return `<div class="rp-card">` + rows.String() + `</div>`
+	return lst
 }
 
-// ── media plane (clock / sync / TC master / per-route telemetry) ──
-
-func (u *UI) peerMediaHTML(resolve func(string) string) string {
+func (u *UI) peerMediaState(resolve func(string) string) peerMediaSt {
 	m := u.svc.Media
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
-
-	// Clock: active tier/lock/offset + per-peer sync estimates.
-	b.WriteString(`<div class=media-clock>` + html.EscapeString(fmtClockLine(m.ClockQuality())) + `</div>`)
+	st := peerMediaSt{
+		Show:      true,
+		ClockLine: fmtClockLine(m.ClockQuality()),
+		NoRoutes:  i18n.T("peers.noActiveMediaRoutes"),
+	}
 	syncs := m.SyncStats()
 	sort.Slice(syncs, func(i, j int) bool { return syncs[i].Peer < syncs[j].Peer })
 	for _, s := range syncs {
-		b.WriteString(`<div class=media-sub>` + html.EscapeString(fmtSyncLine(s, resolve(s.Peer))) + `</div>`)
+		st.SyncLines = append(st.SyncLines, fmtSyncLine(s, resolve(s.Peer)))
 	}
-
-	// Timecode master state.
 	if p := u.svc.TCPlane; p != nil {
-		b.WriteString(`<div class=media-clock>` + html.EscapeString(fmtTCLine(p.Status(), resolve)) + `</div>`)
+		st.HasTC, st.TCLine = true, fmtTCLine(p.Status(), resolve)
 	}
-
-	// Routes.
 	stats := m.Stats()
-	if len(stats) == 0 {
-		b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T("peers.noActiveMediaRoutes")) + `</div>`)
-	} else {
+	if len(stats) > 0 {
 		sort.Slice(stats, func(i, j int) bool { return stats[i].Session < stats[j].Session })
-		b.WriteString(`<div class=media-sub>` + html.EscapeString(i18n.T("peers.routes", i18n.A{"count": fmt.Sprint(len(stats))})) + `</div>`)
+		st.RoutesHdr = i18n.T("peers.routes", i18n.A{"count": fmt.Sprint(len(stats))})
 		for _, s := range stats {
 			title, detail := fmtRouteStat(s, resolve)
-			b.WriteString(`<div class=media-route>` + html.EscapeString(title) + `</div>`)
-			b.WriteString(`<div class=media-sub>` + html.EscapeString(detail) + `</div>`)
-			if pl := fmtPipeLine(s); pl != "" {
-				b.WriteString(`<div class=media-sub>` + html.EscapeString(pl) + `</div>`)
-			}
+			st.Routes = append(st.Routes, peerRouteSt{Title: title, Detail: detail, Pipe: fmtPipeLine(s)})
 		}
 	}
-	b.WriteString(`</div>`)
-
-	// Receivable remote sources + active receives (P4).
-	if recv := u.peerMediaReceiveHTML(resolve); recv != "" {
-		b.WriteString(recv)
-	}
-	return b.String()
+	st.Recv = u.peerRecvState(resolve)
+	return st
 }
 
-func (u *UI) peerMediaReceiveHTML(resolve func(string) string) string {
+// peerRecvState resolves receivable remote sources + active receives (P4).
+func (u *UI) peerRecvState(resolve func(string) string) peerRecvSt {
 	mr := u.svc.MediaRoutes
 	if mr == nil {
-		return ""
+		return peerRecvSt{}
 	}
 	srcs := mr.RemoteVideoSources()
 	recvs := mr.Receives()
 	if len(srcs) == 0 && len(recvs) == 0 {
-		return ""
+		return peerRecvSt{}
 	}
+	st := peerRecvSt{Show: true, Head: i18n.T("peers.receiveVideo")}
 	receiving := map[string]bool{}
-	var b strings.Builder
-	b.WriteString(`<div class=media-recv-head>` + html.EscapeString(i18n.T("peers.receiveVideo")) + `</div><div class="rp-card">`)
 	for _, r := range recvs {
 		receiving[r.Peer+"\x00"+r.Name] = true
-		line := i18n.T("peers.receiveVideoLine", i18n.A{"name": r.Name, "peer": resolve(r.Peer)})
-		b.WriteString(`<div class=row><span class=row-label>◂ ` +
-			html.EscapeString(line) +
-			`</span>` + btnRow(btn(i18n.T("player.stop"), "destructive", "media-stop:"+r.Session, "")) + `</div>`)
+		st.Rows = append(st.Rows, peerRecvRowSt{
+			Mark: "◂ ",
+			Line: i18n.T("peers.receiveVideoLine", i18n.A{"name": r.Name, "peer": resolve(r.Peer)}),
+			Btn:  uiBtn{Label: i18n.T("player.stop"), Variant: "destructive", Act: "media-stop:" + r.Session},
+		})
 	}
 	for _, s := range srcs {
 		if receiving[s.Peer+"\x00"+s.Desc.Name] {
 			continue
 		}
-		b.WriteString(`<div class=row><span class=row-label>` + html.EscapeString(fmtRemoteSource(s, resolve)) + `</span>` +
-			btnRow(btn(i18n.T("peers.receive"), "go", "media-recv:"+s.Peer+"\x1f"+s.Desc.ID, "")) + `</div>`)
+		st.Rows = append(st.Rows, peerRecvRowSt{
+			Line: fmtRemoteSource(s, resolve),
+			Btn:  uiBtn{Label: i18n.T("peers.receive"), Variant: "go", Act: "media-recv:" + s.Peer + "\x1f" + s.Desc.ID},
+		})
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// ── webcam (device / mode / start-stop / PTZ) ──
-
-func (u *UI) peerWebcamHTML(resolve func(string) string) string {
+func (u *UI) peerCamState(resolve func(string) string) peerCamSt {
 	w := u.svc.Webcam
 	if w == nil || u.svc.Cfg == nil {
-		return ""
+		return peerCamSt{}
 	}
 	if !u.svc.Cfg.Features.Webcam.Enabled {
-		return hint("info", i18n.T("peers.webcamOff"))
+		return peerCamSt{Show: true, Gated: true, GateHint: i18n.T("peers.webcamOff")}
 	}
-	insts := w.Instances()
-	if len(insts) == 0 {
-		return emptyState(i18n.T("peers.noCameraInstances"))
+	st := peerCamSt{Show: true, Empty: i18n.T("peers.noCameraInstances")}
+	for _, in := range w.Instances() {
+		st.Nodes = append(st.Nodes, camNodeState(in, resolve))
 	}
-	var b strings.Builder
-	for _, in := range insts {
-		b.WriteString(u.camNodeHTML(in, resolve))
-	}
-	return b.String()
+	return st
 }
 
-func (u *UI) camNodeHTML(in webcam.Instance, resolve func(string) string) string {
+func camNodeState(in webcam.Instance, resolve func(string) string) camNodeSt {
 	id := in.ID // owning node id = Cmd.Target (in.Node is publisher, used only for display)
 	name := i18n.T("peers.thisInstance")
 	if !in.Local {
@@ -378,155 +562,368 @@ func (u *UI) camNodeHTML(in webcam.Instance, resolve func(string) string) string
 		startLbl, startVal, startVar = i18n.T("player.stop"), "stop", "warn"
 	}
 
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card cam-node">`)
-	b.WriteString(`<div class=cam-head><span class=cam-title>` + html.EscapeString(name) + `</span>` +
-		btn("↻", "ghost", "peers-cam-refresh:"+id, "") + `</div>`)
-	b.WriteString(`<div class=cam-status>` + html.EscapeString(fmtCamStatus(in.Status)) + `</div>`)
-	b.WriteString(`<div class=cam-ctls>` +
-		selectBox(i18n.T("peers.device"), "peers-cam-device:"+id, devOpts, selDev) +
-		selectBox(i18n.T("peers.mode"), "peers-cam-mode:"+id, modeOpts, selMode) +
-		btn(startLbl, startVar, "peers-cam-start:"+id, startVal) + `</div>`)
+	n := camNodeSt{
+		Name:       name,
+		RefreshAct: "peers-cam-refresh:" + id,
+		Status:     fmtCamStatus(in.Status),
+		Dev:        resolveSelectBox(i18n.T("peers.device"), "peers-cam-device:"+id, devOpts, selDev),
+		Mode:       resolveSelectBox(i18n.T("peers.mode"), "peers-cam-mode:"+id, modeOpts, selMode),
+		Start:      uiBtn{Label: startLbl, Variant: startVar, Act: "peers-cam-start:" + id, Val: startVal},
+		Sender:     in.Sender,
+		PropsHdr:   i18n.T("peers.lensImage"),
+	}
 	if in.Sender != "" {
-		b.WriteString(`<div class=cam-sender data-label="spout sender" data-value="` + html.EscapeString(in.Sender) + `">` +
-			html.EscapeString(i18n.T("peers.spoutSender", i18n.A{"sender": in.Sender})) + `</div>`)
+		n.SenderLine = i18n.T("peers.spoutSender", i18n.A{"sender": in.Sender})
 	}
-	if len(in.Props) > 0 {
-		b.WriteString(`<div class=cam-props-h>` + html.EscapeString(i18n.T("peers.lensImage")) + `</div>`)
-		for _, p := range in.Props {
-			b.WriteString(camPropRowHTML(id, p))
-		}
+	for _, p := range in.Props {
+		n.Props = append(n.Props, camPropState(id, p))
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return n
 }
 
-// camPropRowHTML renders one UVC property: label + range + live value + optional auto checkbox.
-func camPropRowHTML(node string, p webcam.PropState) string {
+// camPropState resolves one UVC property: label + range + live value + auto flag.
+func camPropState(node string, p webcam.PropState) camPropSt {
 	step := int32(1)
 	if p.Step > 0 {
 		step = p.Step
 	}
-	dis := ""
-	if p.Auto {
-		dis = " disabled"
+	return camPropSt{
+		Label:    p.Label,
+		MinS:     strconv.FormatInt(int64(p.Min), 10),
+		MaxS:     strconv.FormatInt(int64(p.Max), 10),
+		StepS:    strconv.FormatInt(int64(step), 10),
+		ValS:     strconv.FormatInt(int64(p.Value), 10),
+		Act:      "peers-cam-prop:" + node + "\x1f" + p.ID,
+		Disabled: p.Auto,
+		CanAuto:  p.CanAuto,
+		Auto:     p.Auto,
+		AutoAct:  "peers-cam-auto:" + node + "\x1f" + p.ID,
+		AutoLbl:  i18n.T("peers.auto"),
 	}
-	act := "peers-cam-prop:" + node + "\x1f" + p.ID
-	oninput := `oninput="var v=this.parentNode.querySelector('.cam-prop-v');if(v)v.textContent=this.value"`
-	var b strings.Builder
-	b.WriteString(`<div class=cam-prop><span class=cam-prop-l>` + html.EscapeString(p.Label) + `</span>`)
-	fmt.Fprintf(&b, `<input class="slider-input cam-prop-s" type=range min=%d max=%d step=%d value=%d data-act=%s data-value=%d%s %s>`,
-		p.Min, p.Max, step, p.Value, attrQ(act), p.Value, dis, oninput)
-	b.WriteString(`<span class=cam-prop-v>` + fmt.Sprintf("%d", p.Value) + `</span>`)
-	if p.CanAuto {
-		checked := ""
-		if p.Auto {
-			checked = " checked"
-		}
-		fmt.Fprintf(&b, `<label class=cam-prop-auto><input type=checkbox%s data-act=%s data-value=%s>%s</label>`,
-			checked, attrQ("peers-cam-auto:"+node+"\x1f"+p.ID), attrQ(boolStr(p.Auto)), html.EscapeString(i18n.T("peers.auto")))
-	}
-	b.WriteString(`</div>`)
-	return b.String()
 }
 
-// ── file transfer (settings row + per-transfer progress) ──
-
-func (u *UI) peerXferHTML(resolve func(string) string) string {
-	var b strings.Builder
-	b.WriteString(u.xferSettingsHTML())
+func (u *UI) peerXferState(resolve func(string) string) peerXferSt {
+	if u.svc.FileXfer == nil {
+		return peerXferSt{}
+	}
+	st := peerXferSt{Show: true, Settings: u.xferSetState(), NoneHint: i18n.T("peers.noTransfersYet")}
 	tr := u.svc.FileXfer.Transfers()
 	if len(tr) == 0 {
-		b.WriteString(hint("info", i18n.T("peers.noTransfersYet")))
-		return b.String()
+		st.None = true
+		return st
 	}
-	b.WriteString(`<div class="rp-card">`)
 	// Pending incoming accepts first - they need a decision.
 	for _, t := range tr {
 		if !t.Send && string(t.State) == "pending" {
-			line := i18n.T("peers.xferIncoming", i18n.A{
-				"name":  t.Name,
-				"size":  humanBytes(uint64(t.Bytes)),
-				"files": i18n.Tn("peers.xferFile", t.Files),
-				"peer":  resolve(t.Peer),
+			st.Pend = append(st.Pend, xferPendSt{
+				Line: i18n.T("peers.xferIncoming", i18n.A{
+					"name":  t.Name,
+					"size":  humanBytes(uint64(t.Bytes)),
+					"files": i18n.Tn("peers.xferFile", t.Files),
+					"peer":  resolve(t.Peer),
+				}),
+				Btns: []uiBtn{
+					{Label: i18n.T("peers.accept"), Variant: "go", Act: "xfer-accept:" + t.ID, Val: "1"},
+					{Label: i18n.T("peers.decline"), Variant: "ghost", Act: "xfer-accept:" + t.ID, Val: "0"},
+				},
 			})
-			b.WriteString(`<div class=row><span class=row-label>` + html.EscapeString(line) + `</span>` +
-				btnRow(btn(i18n.T("peers.accept"), "go", "xfer-accept:"+t.ID, "1"), btn(i18n.T("peers.decline"), "ghost", "xfer-accept:"+t.ID, "0")) + `</div>`)
 		}
 	}
 	for _, t := range tr {
 		if !t.Send && string(t.State) == "pending" {
 			continue
 		}
-		b.WriteString(u.xferRowHTML(t, resolve))
+		st.Rows = append(st.Rows, xferRowState(t, resolve))
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-func (u *UI) xferSettingsHTML() string {
+func (u *UI) xferSetState() xferSetSt {
 	if u.svc.Cfg == nil {
-		return ""
+		return xferSetSt{}
 	}
 	f := u.svc.Cfg.Features.FileXfer
 	mode := "ask"
 	if f.AutoAccept() {
 		mode = "auto"
 	}
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card cam-node">`)
-	b.WriteString(toggleRow(i18n.T("peers.receiveFiles"), "peers-xfer-enabled", f.Enabled))
-	b.WriteString(`<div class=xfer-mode><span class=field-label>` + html.EscapeString(i18n.T("peers.accept")) + `</span>` +
-		subTabs("peers-xfer-mode:", mode, [2]string{"ask", i18n.T("peers.ask")}, [2]string{"auto", i18n.T("peers.autoMode")}) + `</div>`)
-	b.WriteString(field(i18n.T("peers.saveTo"), "peers-xfer-dir", f.DownloadDir, "text"))
-	b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T("peers.defaultDir", i18n.A{"dir": f.ResolvedDownloadDir()})) + `</div>`)
-	b.WriteString(`</div>`)
-	return b.String()
+	return xferSetSt{
+		Show:       true,
+		Enabled:    newToggle(i18n.T("peers.receiveFiles"), "peers-xfer-enabled", f.Enabled),
+		AcceptLbl:  i18n.T("peers.accept"),
+		Mode:       mode,
+		AskLbl:     i18n.T("peers.ask"),
+		AutoLbl:    i18n.T("peers.autoMode"),
+		Dir:        newField(i18n.T("peers.saveTo"), "peers-xfer-dir", f.DownloadDir, "text"),
+		DefaultDir: i18n.T("peers.defaultDir", i18n.A{"dir": f.ResolvedDownloadDir()}),
+	}
 }
 
-func (u *UI) xferRowHTML(t filexfer.Transfer, resolve func(string) string) string {
+func xferRowState(t filexfer.Transfer, resolve func(string) string) xferProgSt {
 	arrow := "⇧"
 	titleKey := "peers.xferTo"
 	if !t.Send {
 		arrow = "⇩"
 		titleKey = "peers.xferFrom"
 	}
-	title := i18n.T(titleKey, i18n.A{"arrow": arrow, "name": t.Name, "peer": resolve(t.Peer)})
-	st := string(t.State)
-	var right, sub string
-	switch st {
+	r := xferProgSt{Title: i18n.T(titleKey, i18n.A{"arrow": arrow, "name": t.Name, "peer": resolve(t.Peer)})}
+	cancel := uiBtn{Label: i18n.T("common.cancel"), Variant: "ghost", Act: "xfer-cancel:" + t.ID}
+	switch string(t.State) {
 	case "active":
 		frac := 0.0
 		if t.Bytes > 0 {
 			frac = float64(t.Done) / float64(t.Bytes)
 		}
-		cap := fmt.Sprintf("%s / %s · %s/s", humanBytes(uint64(t.Done)), humanBytes(uint64(t.Bytes)), humanBytes(uint64(t.Rate)))
-		sub = progressBar(frac, cap)
-		right = btn(i18n.T("common.cancel"), "ghost", "xfer-cancel:"+t.ID, "")
+		r.Bar, r.BarPct = true, progressPct(frac)
+		r.BarCap = fmt.Sprintf("%s / %s · %s/s", humanBytes(uint64(t.Done)), humanBytes(uint64(t.Bytes)), humanBytes(uint64(t.Rate)))
+		r.Btn = cancel
 	case "waiting":
-		sub = `<span class=np-artist>` + html.EscapeString(i18n.T("peers.waitingForPeer")) + `</span>`
-		right = btn(i18n.T("common.cancel"), "ghost", "xfer-cancel:"+t.ID, "")
+		r.SubText = i18n.T("peers.waitingForPeer")
+		r.Btn = cancel
 	case "stalled":
-		msg := i18n.T("peers.interruptedRetrying")
+		r.SubText = i18n.T("peers.interruptedRetrying")
 		if t.Error != "" {
-			msg = i18n.T("peers.interruptedWithError", i18n.A{"error": t.Error})
+			r.SubText = i18n.T("peers.interruptedWithError", i18n.A{"error": t.Error})
 		}
-		sub = `<span class=np-artist>` + html.EscapeString(msg) + `</span>`
-		right = btn(i18n.T("common.cancel"), "ghost", "xfer-cancel:"+t.ID, "")
+		r.Btn = cancel
 	case "done":
-		sub = `<span class=np-artist>` + html.EscapeString(i18n.T("peers.xferDone", i18n.A{
+		r.SubText = i18n.T("peers.xferDone", i18n.A{
 			"files": i18n.Tn("peers.xferFile", t.Files),
 			"size":  humanBytes(uint64(t.Bytes)),
-		})) + `</span>`
-		right = badge(i18n.T("peers.done"), "success")
+		})
+		r.IsBadge, r.Badge, r.BadgeVar = true, i18n.T("peers.done"), "success"
 	case "error":
-		sub = `<span class=np-artist>` + html.EscapeString(i18n.T("peers.xferFailed", i18n.A{"error": t.Error})) + `</span>`
-		right = badge(i18n.T("peers.error"), "error")
+		r.SubText = i18n.T("peers.xferFailed", i18n.A{"error": t.Error})
+		r.IsBadge, r.Badge, r.BadgeVar = true, i18n.T("peers.error"), "error"
 	default: // canceled
-		sub = `<span class=np-artist>` + html.EscapeString(i18n.T("peers.canceled")) + `</span>`
-		right = badge(st, "secondary")
+		r.SubText = i18n.T("peers.canceled")
+		r.IsBadge, r.Badge, r.BadgeVar = true, string(t.State), "secondary"
 	}
-	return `<div class=xfer-row><div class=row><span class=row-label>` + html.EscapeString(title) + `</span>` + btnRow(right) + `</div>` +
+	return r
+}
+
+// ── pure renderers (golden reference; byte-identical to native/zigui/src/peers.zig) ──
+
+func peersHTML(st peersSt) string {
+	if !st.Available {
+		return panel(st.Title, "") + emptyState(st.Unavailable)
+	}
+	return panel(st.Title, st.Sub) + `<div id=peers-body>` + peersBodyHTML(st.Body) + `</div>`
+}
+
+func peersBodyHTML(st peersBodySt) string {
+	var b strings.Builder
+	b.WriteString(`<div id=peers-strip class=peers-strip>` + peerStripHTML(st.Strip) + `</div>`)
+	b.WriteString(peerBannerHTML(st.Banner))
+	b.WriteString(section(st.ConnsTitle, peerListHTML(st.Conns)))
+	if st.Media.Show {
+		b.WriteString(section(st.MediaTitle, peerMediaHTML(st.Media)))
+	}
+	if st.Cam.Show {
+		b.WriteString(section(st.CamTitle, peerCamHTML(st.Cam)))
+	}
+	if st.Xfer.Show {
+		b.WriteString(section(st.XferTitle, peerXferHTML(st.Xfer)))
+	}
+	// two sibling lists share a row ≥1100px (.peers-2col)
+	b.WriteString(`<div class=peers-2col>` + section(st.NetTitle, peerListHTML(st.Discovered)) +
+		section(st.RememberedTitle, peerListHTML(st.Remembered)) + `</div>`)
+	return b.String()
+}
+
+func peerStripHTML(txt string) string {
+	return `<span data-label="peer counts" data-value="` + html.EscapeString(txt) + `">` + html.EscapeString(txt) + `</span>`
+}
+
+func peerBannerHTML(st peerBannerSt) string {
+	if !st.Show {
+		return ""
+	}
+	return `<div class=ctl-banner data-label="controlling"><span class=ctl-banner-tx>🎛 ` +
+		html.EscapeString(st.Text) + `</span>` + st.Btn.html() + `</div>`
+}
+
+func peerListHTML(st peerListSt) string {
+	if len(st.Rows) == 0 {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(peerRowHTML(r))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func peerRowHTML(r peerRowSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=row><span class=row-label>`)
+	if r.Dot != "" {
+		b.WriteString(dot(r.Dot) + ` `)
+	}
+	b.WriteString(html.EscapeString(r.Name) + ` <span class=np-artist>` + html.EscapeString(r.Sub) +
+		`</span></span>` + uiBtnRow(r.Btns) + `</div>`)
+	for _, d := range r.Decks {
+		mark, cls := "▷ ", "peer-np peer-np--quiet"
+		if d.Audible {
+			mark, cls = "▶ ", "peer-np"
+		}
+		b.WriteString(`<div class="` + cls + `">` + mark + html.EscapeString(d.Line) + `</div>`)
+	}
+	return b.String()
+}
+
+func peerMediaHTML(st peerMediaSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+
+	// Clock: active tier/lock/offset + per-peer sync estimates.
+	b.WriteString(`<div class=media-clock>` + html.EscapeString(st.ClockLine) + `</div>`)
+	for _, s := range st.SyncLines {
+		b.WriteString(`<div class=media-sub>` + html.EscapeString(s) + `</div>`)
+	}
+
+	// Timecode master state.
+	if st.HasTC {
+		b.WriteString(`<div class=media-clock>` + html.EscapeString(st.TCLine) + `</div>`)
+	}
+
+	// Routes.
+	if len(st.Routes) == 0 {
+		b.WriteString(`<div class=np-artist>` + html.EscapeString(st.NoRoutes) + `</div>`)
+	} else {
+		b.WriteString(`<div class=media-sub>` + html.EscapeString(st.RoutesHdr) + `</div>`)
+		for _, r := range st.Routes {
+			b.WriteString(`<div class=media-route>` + html.EscapeString(r.Title) + `</div>`)
+			b.WriteString(`<div class=media-sub>` + html.EscapeString(r.Detail) + `</div>`)
+			if r.Pipe != "" {
+				b.WriteString(`<div class=media-sub>` + html.EscapeString(r.Pipe) + `</div>`)
+			}
+		}
+	}
+	b.WriteString(`</div>`)
+
+	if st.Recv.Show {
+		b.WriteString(peerRecvHTML(st.Recv))
+	}
+	return b.String()
+}
+
+func peerRecvHTML(st peerRecvSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=media-recv-head>` + html.EscapeString(st.Head) + `</div><div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=row><span class=row-label>` + r.Mark + html.EscapeString(r.Line) + `</span>` +
+			btnRow(r.Btn.html()) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func peerCamHTML(st peerCamSt) string {
+	if st.Gated {
+		return hint("info", st.GateHint)
+	}
+	if len(st.Nodes) == 0 {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	for _, n := range st.Nodes {
+		b.WriteString(camNodeHTML(n))
+	}
+	return b.String()
+}
+
+func camNodeHTML(n camNodeSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card cam-node">`)
+	b.WriteString(`<div class=cam-head><span class=cam-title>` + html.EscapeString(n.Name) + `</span>` +
+		btn("↻", "ghost", n.RefreshAct, "") + `</div>`)
+	b.WriteString(`<div class=cam-status>` + html.EscapeString(n.Status) + `</div>`)
+	b.WriteString(`<div class=cam-ctls>` + selHTML(n.Dev) + selHTML(n.Mode) + n.Start.html() + `</div>`)
+	if n.Sender != "" {
+		b.WriteString(`<div class=cam-sender data-label="spout sender" data-value="` + html.EscapeString(n.Sender) + `">` +
+			html.EscapeString(n.SenderLine) + `</div>`)
+	}
+	if len(n.Props) > 0 {
+		b.WriteString(`<div class=cam-props-h>` + html.EscapeString(n.PropsHdr) + `</div>`)
+		for _, p := range n.Props {
+			b.WriteString(camPropHTML(p))
+		}
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// camPropHTML renders one UVC property: label + range + live value + optional auto checkbox.
+func camPropHTML(p camPropSt) string {
+	dis := ""
+	if p.Disabled {
+		dis = " disabled"
+	}
+	oninput := `oninput="var v=this.parentNode.querySelector('.cam-prop-v');if(v)v.textContent=this.value"`
+	var b strings.Builder
+	b.WriteString(`<div class=cam-prop><span class=cam-prop-l>` + html.EscapeString(p.Label) + `</span>`)
+	b.WriteString(`<input class="slider-input cam-prop-s" type=range min=` + p.MinS + ` max=` + p.MaxS +
+		` step=` + p.StepS + ` value=` + p.ValS + ` data-act=` + attrQ(p.Act) + ` data-value=` + p.ValS + dis + ` ` + oninput + `>`)
+	b.WriteString(`<span class=cam-prop-v>` + p.ValS + `</span>`)
+	if p.CanAuto {
+		checked := ""
+		if p.Auto {
+			checked = " checked"
+		}
+		b.WriteString(`<label class=cam-prop-auto><input type=checkbox` + checked + ` data-act=` + attrQ(p.AutoAct) +
+			` data-value=` + attrQ(boolStr(p.Auto)) + `>` + html.EscapeString(p.AutoLbl) + `</label>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func peerXferHTML(st peerXferSt) string {
+	var b strings.Builder
+	b.WriteString(xferSetHTML(st.Settings))
+	if st.None {
+		b.WriteString(hint("info", st.NoneHint))
+		return b.String()
+	}
+	b.WriteString(`<div class="rp-card">`)
+	for _, p := range st.Pend {
+		b.WriteString(`<div class=row><span class=row-label>` + html.EscapeString(p.Line) + `</span>` +
+			uiBtnRow(p.Btns) + `</div>`)
+	}
+	for _, r := range st.Rows {
+		b.WriteString(xferProgHTML(r))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func xferSetHTML(st xferSetSt) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card cam-node">`)
+	b.WriteString(st.Enabled.html())
+	b.WriteString(`<div class=xfer-mode><span class=field-label>` + html.EscapeString(st.AcceptLbl) + `</span>` +
+		subTabs("peers-xfer-mode:", st.Mode, [2]string{"ask", st.AskLbl}, [2]string{"auto", st.AutoLbl}) + `</div>`)
+	b.WriteString(st.Dir.html())
+	b.WriteString(`<div class=np-artist>` + html.EscapeString(st.DefaultDir) + `</div>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func xferProgHTML(r xferProgSt) string {
+	right := r.Btn.html()
+	if r.IsBadge {
+		right = badge(r.Badge, r.BadgeVar)
+	}
+	sub := `<span class=np-artist>` + html.EscapeString(r.SubText) + `</span>`
+	if r.Bar {
+		sub = progressBarStr(r.BarPct, r.BarCap)
+	}
+	return `<div class=xfer-row><div class=row><span class=row-label>` + html.EscapeString(r.Title) + `</span>` + btnRow(right) + `</div>` +
 		`<div class=xfer-sub>` + sub + `</div></div>`
 }
 

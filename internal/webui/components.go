@@ -89,14 +89,7 @@ func toggleRowDL(label, dataLabel, act string, on bool) string {
 // toggleRowGated renders a disabled switch + a warn hint naming what to install to
 // unlock it. Same rule as btnGated: gated controls stay visible, greyed, explained.
 func toggleRowGated(label string, on bool, gateHint string) string {
-	checked := ""
-	if on {
-		checked = " checked"
-	}
-	return fmt.Sprintf(`<label class="row row--gated" data-label=%s><span class=row-label>%s</span>`+
-		`<span class=switch><input type=checkbox%s disabled><span class=switch-track></span></span></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), checked) +
-		`<div class=set-gate>` + hint("warn", gateHint) + `</div>`
+	return toggleRowGatedDL(label, strings.ToLower(label), on, gateHint)
 }
 
 // toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
@@ -222,12 +215,29 @@ func slider(label, act string, min, max, step, val float64, unit string) string 
 
 // progressBar renders a 0..1 fill with an optional caption (defaults to the percentage).
 func progressBar(frac float64, caption string) string {
-	pct := pbarPctOf(frac)
+	return progressBarStr(progressPct(frac), caption)
+}
+
+// progressPct clamps frac to 0..1 and formats progressBar's fill width ("%.1f%%").
+// (render_live.go's pbarPct is a different contract: 0..100, "%.2f%%".)
+func progressPct(frac float64) string {
+	if frac < 0 {
+		frac = 0
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	return fmt.Sprintf("%.1f%%", frac*100)
+}
+
+// progressBarStr is progressBar with a pre-formatted fill width - the resolved-state twin
+// for Zig-migrated tabs (floats never cross the ABI). ONE markup source for both paths.
+func progressBarStr(pct, caption string) string {
 	cap := caption
 	if cap == "" {
 		cap = pct
 	}
-	return progressBarOf(pct, cap)
+	return `<div class=pbar><div class=pbar-fill style="width:` + pct + `"></div><span class=pbar-cap>` + html.EscapeString(cap) + `</span></div>`
 }
 
 // statusRow renders a status dot + label + muted sub-line (the per-card live status pattern).
@@ -458,23 +468,18 @@ func statusRowDL(variant, label, dataLabel, line string) string {
 		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
 }
 
-// --- library (zigui port) ---
+// --- settings (zigui port) ---
 
-// pbarPctOf formats a progressBar fill width, clamped to 0..1. The Zig render path never
-// formats a float, so the width rides in state as this exact string.
-func pbarPctOf(frac float64) string {
-	if frac < 0 {
-		frac = 0
+// toggleRowGatedDL is toggleRowGated with a caller-resolved data-label.
+func toggleRowGatedDL(label, dataLabel string, on bool, gateHint string) string {
+	checked := ""
+	if on {
+		checked = " checked"
 	}
-	if frac > 1 {
-		frac = 1
-	}
-	return fmt.Sprintf("%.1f%%", frac*100)
-}
-
-// progressBarOf renders a progress bar from a pre-formatted fill width + caption.
-func progressBarOf(width, caption string) string {
-	return `<div class=pbar><div class=pbar-fill style="width:` + width + `"></div><span class=pbar-cap>` + html.EscapeString(caption) + `</span></div>`
+	return fmt.Sprintf(`<label class="row row--gated" data-label=%s><span class=row-label>%s</span>`+
+		`<span class=switch><input type=checkbox%s disabled><span class=switch-track></span></span></label>`,
+		attrQ(dataLabel), html.EscapeString(label), checked) +
+		`<div class=set-gate>` + hint("warn", gateHint) + `</div>`
 }
 
 // fieldExDL is fieldEx with a caller-resolved data-label.

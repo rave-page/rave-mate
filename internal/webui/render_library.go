@@ -550,7 +550,7 @@ func libBrowseHTMLOf(st libBrowseSt) string {
 		fchip(st.GridLbl, "", "lib-view:grid", st.Grid) + `</span>`)
 	b.WriteString(st.KeyChip.html())
 	// folder ops: one ⋯ menu (was four ghost buttons)
-	b.WriteString(actionMenuOf(st.Folder))
+	b.WriteString(actionMenuHTML(st.Folder))
 	if st.SelAll {
 		chkAllB := ""
 		if st.SelAllOn {
@@ -623,9 +623,6 @@ func libBatchHTML(st libBatchSt) string {
 	b.WriteString(`</div>`)
 	return b.String()
 }
-
-// actionMenuOf renders a resolved actionMenu (actionmenu.go markup) from render state.
-func actionMenuOf(s selState) string { return `<span class=amenu>` + selHTML(s) + `</span>` }
 
 // ── Favorites ───────────────────────────────────────────────────────────────
 
@@ -1152,7 +1149,7 @@ func libPlsHTML(st libPlsSt) string {
 	b.WriteString(btn(st.NewSmartLbl, "outline", "lib-pl-newsmart", ""))
 	if st.HasCloud {
 		// cloud ops are occasional - one ⋯ menu instead of three toolbar buttons
-		b.WriteString(actionMenuOf(st.Cloud))
+		b.WriteString(actionMenuHTML(st.Cloud))
 	}
 	b.WriteString(`</div>`)
 	if len(st.Rows) == 0 {
@@ -1189,7 +1186,7 @@ func libPlActHTML(st libPlActSt) string {
 	for _, bt := range st.Btns {
 		b.WriteString(bt.html())
 	}
-	b.WriteString(actionMenuOf(st.Menu))
+	b.WriteString(actionMenuHTML(st.Menu))
 	b.WriteString(`</div>`)
 	return b.String()
 }
@@ -1353,7 +1350,7 @@ func libQueueBodyHTML(st libQueueSt) string {
 			trail = badge(j.Status, j.StatusVar)
 		}
 		b.WriteString(`<div class=qjob><div class=qjob-h><span class=qjob-t>` + html.EscapeString(j.Label) + `</span>` + trail + `</div>`)
-		b.WriteString(progressBarOf(j.Width, j.Caption))
+		b.WriteString(progressBarStr(j.Width, j.Caption))
 		if j.Msg != "" {
 			b.WriteString(`<p class=page-sub>` + html.EscapeString(j.Msg) + `</p>`)
 		}

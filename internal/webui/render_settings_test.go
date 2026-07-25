@@ -21,7 +21,7 @@ func TestSettingsRegistryComplete(t *testing.T) {
 	for _, s := range settingsSections() {
 		for _, id := range s.cards {
 			seen[id]++
-			if title, _, _ := u.cardContent(id); title == "?" || title == "" {
+			if title, _, _ := u.cardBlocks(id); title == "?" || title == "" {
 				t.Errorf("card %q (section %q) has no content", id, s.id)
 			}
 		}

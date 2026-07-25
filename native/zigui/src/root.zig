@@ -295,6 +295,78 @@ test "media tab modules" {
     _ = editor;
 }
 
+// --- peers ---
+
+const peers = @import("peers.zig");
+
+export fn rz_ui_render_peers(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.State, peers.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_peers_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.Body, peers.renderBody, state_json, len, out_len);
+}
+
+test "peers tab module" {
+    _ = peers;
+}
+
+// --- library_remote ---
+
+const libremote = @import("libremote.zig");
+
+/// Renders the "Controlling [This computer ▾]" switcher. show=false ⇒ empty ⇒ NULL ⇒ the
+/// Go fallback renders the same empty string (see zigui_golden_libremote_test.go).
+export fn rz_ui_render_libremote(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libremote.State, libremote.render, state_json, len, out_len);
+}
+
+test "library_remote module" {
+    _ = libremote;
+}
+
+// --- publish ---
+
+const publish = @import("publish.zig");
+
+export fn rz_ui_render_publish(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(publish.State, publish.render, state_json, len, out_len);
+}
+
+/// #pub-hero inner (~1 Hz tick patch). Legitimately EMPTY when no recorder exists ⇒
+/// NULL ⇒ the Go fallback renders the same empty string.
+export fn rz_ui_render_publish_hero(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(publish.Hero, publish.renderHero, state_json, len, out_len);
+}
+
+export fn rz_ui_render_publish_remote(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(publish.Remote, publish.renderRemote, state_json, len, out_len);
+}
+
+test "publish tab module" {
+    _ = publish;
+}
+
+// --- settings ---
+
+const settings = @import("settings.zig");
+
+export fn rz_ui_render_settings(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.State, settings.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_content(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.Content, settings.renderContent, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings.Status, settings.renderStatus, state_json, len, out_len);
+}
+
+test "settings tab module" {
+    _ = settings;
+}
+
 // --- library ---
 
 const library = @import("library.zig");

@@ -324,6 +324,79 @@ func RenderEditorPreview(stateJSON []byte) (string, bool) {
 	})
 }
 
+// --- peers ---
+
+// RenderPeers renders the full Peers view.
+func RenderPeers(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers(p, l, n)
+	})
+}
+
+// RenderPeersBody renders the #peers-body inner fragment (~1 Hz live tick).
+func RenderPeersBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_body(p, l, n)
+	})
+}
+
+// --- library_remote ---
+
+// RenderLibRemote renders the remote-control target switcher. ok=false when the switcher is
+// hidden (empty fragment) - the Go fallback renders the same empty string.
+func RenderLibRemote(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libremote(p, l, n)
+	})
+}
+
+// --- publish ---
+
+// RenderPublish renders the full local Publish cockpit.
+func RenderPublish(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish(p, l, n)
+	})
+}
+
+// RenderPublishHero renders the #pub-hero inner fragment (live tick patch). A state
+// with no recorder renders empty ⇒ ok=false ⇒ the Go fallback renders the same "".
+func RenderPublishHero(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_hero(p, l, n)
+	})
+}
+
+// RenderPublishRemote renders the full remote Publish view (a peer's recorded sets).
+func RenderPublishRemote(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_remote(p, l, n)
+	})
+}
+
+// --- settings ---
+
+// RenderSettings renders the full Settings view.
+func RenderSettings(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings(p, l, n)
+	})
+}
+
+// RenderSettingsContent renders the #set-content pane (sub-tab / search patch).
+func RenderSettingsContent(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_content(p, l, n)
+	})
+}
+
+// RenderSettingsStatus renders one #stset-<id> status fragment (~1 Hz tick).
+func RenderSettingsStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_status(p, l, n)
+	})
+}
+
 // --- library ---
 
 // RenderLibrary renders the full Library tab.
