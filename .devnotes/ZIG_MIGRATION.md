@@ -186,6 +186,15 @@ Rules:
   ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
   mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
   "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
+- **P6 UI phase B3 (fragment scheduler, pilots SHIPPED):** the ~1 Hz tick no longer crosses the
+  ABI once per FRAGMENT. The surface's whole state + the hash of what Go last pushed per fragment
+  cross ONCE (RZW1 root ids 100/101); `native/zigui/src/tick.zig` renders every fragment, drops the
+  unchanged ones (FNV-1a-64, `tickPatch` semantics) and returns a packed RZF1 changed-fragment list
+  Go turns into ONE batched Eval - unchanged HTML never crosses the ABI. Pilots: the Live tab tick
+  (12 -> 1 call) + `#log-view`. Exports stay STATELESS (hashes travel in the document; a Zig-side
+  cache was rejected - reasoning in ZIG_UI_GUIDE.md "Phase B - B3 fragment scheduler"). Gate: the
+  scheduler and the legacy per-fragment path, driven from ONE state, must emit the IDENTICAL ordered
+  set of __patch calls (proven non-vacuous by execution).
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
