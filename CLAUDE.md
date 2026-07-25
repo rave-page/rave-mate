@@ -93,8 +93,9 @@ From `rave-mate/`:
 | Supply-chain soak gate | `bash scripts/check-release-age.sh` |
 | Vuln scan | `govulncheck ./...` |
 | Package (Fyne, win) | `fyne package -os windows --release` |
-| Build Zig native core (zig >= 0.16) | `make zig` → `native/zigcore/zig-out/lib/libravezig.a` |
-| Build with Zig DSP linked | `make build-zig` (adds tag `zigdsp`) |
+| Build Zig native libs (zig >= 0.16) | `make zig` → `native/zigcore/.../libravezig.a` + `native/zigui/.../libraveui.a` |
+| Build with Zig natives linked | `make build-zig` (ZIG=1 adds tags `zigdsp zigui`) |
+| Zig UI golden gate (per migrated tab) | `GOWORK=off go test -tags zigui ./internal/webui -run TestZig` |
 
 "Tests pass" = `go build ./... && go vet ./... && go test ./...` clean.
 
@@ -210,8 +211,13 @@ internal/
   zignative/  cgo binding to the Zig native core (tag `zigdsp`, pure-Go stub untagged).
               Sinc resampler + waveform kernels; seams in audio/source.go + worker/probe.go.
               The Zig migration path: .devnotes/ZIG_MIGRATION.md + ZIG_UI_GUIDE.md.
+  zigui/      cgo binding to the Zig webui render layer (tag `zigui`, stub untagged).
+              Migrated tabs render in Zig byte-identical to their Go renderers (which
+              stay as fallback + golden reference; zigui_golden_test.go per tab).
 native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `make zig`.
               Ported kernels stay byte-exact vs the Go originals (parity tests).
+native/zigui/ Zig static lib for webui view rendering, C ABI (`rz_ui_*`, include/raveui.h).
+              html.zig escaping == Go html.EscapeString; state JSON carries resolved i18n.
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.
 tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-mate .syso
               (area-average resize → 7 PNG-in-ICO sizes → COFF .rsrc). No external dep.

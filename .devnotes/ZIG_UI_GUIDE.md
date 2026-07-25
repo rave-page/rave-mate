@@ -39,6 +39,51 @@ behind it is swappable.
    never hardcodes hex/px (same rule as Go/theme.go today).
 6. **i18n:** same 7-locale catalogs, embedded; keys shared so translators see one set.
 
+## Render bridge (phase A) — SHIPPED pipeline
+
+`native/zigui/` (static lib `libraveui.a`, C ABI `rz_ui_*`, ABI-versioned) +
+`internal/zigui` (cgo binding, tag `zigui`; pure-Go stub untagged) + per-tab bridge in
+webui: Go resolves a `<tab>State` struct (all data + RESOLVED i18n strings — catalogs
+stay single-source in Go, rule 6), marshals to JSON, Zig renders HTML byte-identical
+to the Go renderer. The Go renderer STAYS: untagged fallback + golden reference.
+Escaping contract: Zig `Html.esc` == Go `html.EscapeString` (`& ' < > "` →
+`&amp; &#39; &lt; &gt; &#34;`), verified in `native/zigui/src/html.zig` tests.
+
+Build: `make zig` builds zigcore AND zigui (scripts/build-zig.{sh,ps1}); `ZIG=1` adds
+tags `zigdsp zigui` (one switch = all Zig natives). Link gotcha: std.json float parsing
+pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
+`-lquadmath` on windows.
+
+### Porting recipe (per tab)
+
+1. Split `render_<tab>.go`: impure state builder (svc/cfg/locks/`i18n.T`) vs pure
+   `<tab>HTML(st)` / `<tab>BodyHTML(st)` renderers — zero DOM change (keep helpers).
+2. Mirror the pure renderers in `native/zigui/src/<tab>.zig` on `html.Html` +
+   `components.zig` (port missing components.go helpers there verbatim, byte-exact).
+3. Export `rz_ui_render_<tab>` (+ `_body` for tick-patched fragments) in `root.zig` +
+   `include/raveui.h`; add wrappers in `internal/zigui` (cgo file AND stub).
+4. Bridge: `render<Tab>()` builds state → `zigui.Available()` → Zig, `ok=false` → Go.
+5. Golden test (tag `zigui`) in webui: fixtures empty/unavailable/populated/escaping/
+   long/unicode; assert Zig == Go **byte-identical** (full + body).
+6. Gates: `zig build test` (native/zigui) · untagged `go build/vet/test ./...` ·
+   `go test -tags zigui ./internal/webui -run TestZig` with lib built · live ctl
+   snapshot/screenshot after merge.
+
+### Migrated tabs
+
+| Tab | Status | Golden test |
+|---|---|---|
+| appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
+| (all others) | Go | — |
+
+First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
+primitive + filter-state locking; appgroups is the smallest full tab yet exercises
+panel/emptyState/badge/dot/btn/data-act/i18n interpolation + the ~1 Hz `tickPatch`
+body funnel. Logs = natural tab #2 (port selectBox/subTabs/toggleRow into
+components.zig first). Zig 0.16: `std.ArrayList` is unmanaged (`.empty` + alloc per
+call); never name an identifier `i18n` (`i<digit>` reserved) — state JSON keeps i18n
+strings as flat resolved fields.
+
 ## Dev rules when touching UI during migration
 
 - A view lives in exactly ONE renderer at a time (Go or Zig) — no dual maintenance.

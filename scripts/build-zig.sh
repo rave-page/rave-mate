@@ -31,3 +31,12 @@ cd zig-out/lib
 [ -f ravezig.lib ] && cp -f ravezig.lib libravezig.a
 ls -la
 echo "ravezig built ($ver, ${target:-native})"
+
+# ── raveui webui render lib (native/zigui, tag zigui) — appended block; zigcore lines
+# above stay untouched. cwd here is native/zigcore/zig-out/lib.
+cd ../../../zigui
+"$ZIG" build -Drelease ${target:+-Dtarget=$target}
+cd zig-out/lib
+[ -f raveui.lib ] && cp -f raveui.lib libraveui.a
+ls -la
+echo "raveui built ($ver, ${target:-native})"
