@@ -96,6 +96,11 @@ const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t
 /* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
 const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- peers --- */
+const uint8_t *rz_ui_render_peers(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #peers-body inner HTML (~1 Hz live tick patch target). */
+const uint8_t *rz_ui_render_peers_body(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

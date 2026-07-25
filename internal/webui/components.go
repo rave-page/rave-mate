@@ -222,13 +222,24 @@ func slider(label, act string, min, max, step, val float64, unit string) string 
 
 // progressBar renders a 0..1 fill with an optional caption (defaults to the percentage).
 func progressBar(frac float64, caption string) string {
+	return progressBarStr(progressPct(frac), caption)
+}
+
+// progressPct clamps frac to 0..1 and formats progressBar's fill width ("%.1f%%").
+// (render_live.go's pbarPct is a different contract: 0..100, "%.2f%%".)
+func progressPct(frac float64) string {
 	if frac < 0 {
 		frac = 0
 	}
 	if frac > 1 {
 		frac = 1
 	}
-	pct := fmt.Sprintf("%.1f%%", frac*100)
+	return fmt.Sprintf("%.1f%%", frac*100)
+}
+
+// progressBarStr is progressBar with a pre-formatted fill width - the resolved-state twin
+// for Zig-migrated tabs (floats never cross the ABI). ONE markup source for both paths.
+func progressBarStr(pct, caption string) string {
 	cap := caption
 	if cap == "" {
 		cap = pct

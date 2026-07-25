@@ -850,3 +850,30 @@ test "btnRowOf and btnAct" {
     try btnAct(&h, "Run", "go", "auto-run:", "g&1");
     try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
 }
+
+// --- peers ---
+// The peers batch reuses panel/emptyState/hint/section/dot/btn+btnOf/btnRowOf/subTabs/
+// selectBox/toggleOf/fieldOf/badge unchanged. Only the progress bar was missing.
+
+/// progressBar mirrors Go progressBarStr: a .pbar whose fill width is PRE-FORMATTED
+/// Go-side (progressPct, "%.1f%%") — floats never cross the ABI. Empty caption falls
+/// back to the percentage, exactly like the Go helper.
+pub fn progressBar(h: *Html, pct: []const u8, caption: []const u8) !void {
+    try h.raw("<div class=pbar><div class=pbar-fill style=\"width:");
+    try h.raw(pct);
+    try h.raw("\"></div><span class=pbar-cap>");
+    try h.esc(if (caption.len == 0) pct else caption);
+    try h.raw("</span></div>");
+}
+
+test "progressBar caption defaults to the percentage" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try progressBar(&h, "42.5%", "4.2 MB / 10.0 MB");
+    try std.testing.expectEqualStrings("<div class=pbar><div class=pbar-fill style=\"width:42.5%\"></div>" ++
+        "<span class=pbar-cap>4.2 MB / 10.0 MB</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try progressBar(&h, "0.0%", "");
+    try std.testing.expectEqualStrings("<div class=pbar><div class=pbar-fill style=\"width:0.0%\"></div>" ++
+        "<span class=pbar-cap>0.0%</span></div>", h.b.items);
+}

@@ -323,3 +323,19 @@ func RenderEditorPreview(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_editor_preview(p, l, n)
 	})
 }
+
+// --- peers ---
+
+// RenderPeers renders the full Peers view.
+func RenderPeers(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers(p, l, n)
+	})
+}
+
+// RenderPeersBody renders the #peers-body inner fragment (~1 Hz live tick).
+func RenderPeersBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_body(p, l, n)
+	})
+}

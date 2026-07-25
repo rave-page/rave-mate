@@ -88,6 +88,8 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
 | twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
 | editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
+
+| peers | Zig (`native/zigui/src/peers.zig`; full + `#peers-body` fragment) | `TestZigPeersGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -223,3 +225,45 @@ status card splices `strings.ToLower(k)` into `data-label="…"` UNESCAPED, and 
 signals card's rows carry no data-label at all. `cockpitHTML` is shared with the Twitch
 tab, so that tab now renders its OBS rows through Zig too.
 Components added: `statusRow`, `sectionOpenTip` (both used here).
+
+Peers-port notes (peers batch): the whole tab is ONE `#peers-body` funnel (peers_actions.go
+patches it ~1 Hz), so the split is `peersState`/`peersBodyState` (impure) vs
+`peersHTML`/`peersBodyHTML` (pure) plus one pure renderer per section. Details worth knowing:
+- **A state builder can carry a side effect and its ORDER is load-bearing.** `peerBannerState`
+  auto-clears a MIDI-forwarding target whose peer dropped, and `peerConnsState` reads
+  `Forwarding()` afterwards to decide Control vs Stop control. The builder assigns
+  `st.Banner` before `st.Conns` with a comment; swapping them changes the DOM for one tick.
+- Three lists (connections / discovered / remembered) collapsed into ONE `peerListSt` +
+  `peerRowHTML` (optional dot, name, `np-artist` tail, `btnRow`, plus the bridged deck lines
+  that render as SIBLINGS after the row div). Go picks the empty-state text per reason
+  (discovery off vs still searching), so the renderers stay pure.
+- Every number is pre-formatted Go-side: clock/sync/route/pipeline telemetry strings, UVC
+  `min/max/step/value` (`strconv.FormatInt`, Go `%d`), and the transfer progress-bar width.
+  `progressBar` was split like `linkPhraseBar`: `progressBar(frac,cap)` →
+  `progressBarStr(progressPct(frac), cap)`, and both renderers use the *Str form → ONE markup
+  source (`TestProgressBarDelegatesToPct`). NOTE the name: `pbarPct` was already taken by
+  render_live.go with a DIFFERENT contract (0..100, `%.2f%%`) - a state-name collision that
+  only surfaced at compile time.
+- Raw (trusted) fields, matching the Go source literals they replace: the receive-row `◂ `
+  mark, the `data-label="peer counts"` / `"controlling"` / `"spout sender"` literals, and the
+  cam-prop `oninput` display-only handler.
+- The webcam card's two device/mode pickers are smart selects → `resolveSelectBox` + `selHTML`
+  (`selectBox()` on the Go path is exactly that pair). `camPend` (the pending device/mode that
+  survives the 1 Hz re-render) stays a Go global read by the state builder.
+- Exactly-one-of choices ride as explicit flags, never "empty means the other": `xferProgSt`
+  has `isBadge` (badge vs button) and `bar` (progress bar vs muted text), `peerCamSt` has
+  `gated`. An implicit "" rule would have silently diverged on a blank i18n string.
+- Components added to `components.zig` (`// --- peers ---`): `progressBar(pct,caption)` only
+  (Go `progressBarStr`; empty caption falls back to the percentage). Everything else reused
+  panel/emptyState/hint/section/dot/btn+btnOf/btnRowOf/btnRowOpen+Close/subTabs/selectBox/
+  toggleOf/fieldOf/badge unchanged - no tab-local variants were needed.
+
+library_remote-port notes: `render_library_remote.go` is plumbing (peer enumeration + the
+typed remotectl client) with exactly ONE renderer, `targetSwitcherHTML` - the "Controlling
+[This computer ▾]" row. Split into `targetSwitcherState` (impure: `virtual()`, connected
+peers, current target, smart-select registration) + `targetSwitcherHTMLOf` (pure). Its only
+caller is render_library.go, which keeps calling `u.targetSwitcherHTML(id, act)` unchanged, so
+a later Library port can either keep embedding the returned markup as trusted raw HTML or lift
+`libRemoteSt` into its own state. `Show=false` (headless remote session / no peer connected)
+renders "" - and an empty fragment makes `renderJSON` return NULL, so the bridge falls back to
+Go which renders the same empty string (same rule as `#midi-ctlstat-<i>`).

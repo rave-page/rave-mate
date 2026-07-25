@@ -294,3 +294,19 @@ test "media tab modules" {
     _ = twitch;
     _ = editor;
 }
+
+// --- peers ---
+
+const peers = @import("peers.zig");
+
+export fn rz_ui_render_peers(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.State, peers.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_peers_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.Body, peers.renderBody, state_json, len, out_len);
+}
+
+test "peers tab module" {
+    _ = peers;
+}
