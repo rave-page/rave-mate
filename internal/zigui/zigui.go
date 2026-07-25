@@ -644,4 +644,67 @@ func RenderVgPostConfirm(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderWsListEditor renders the Worlds permission-list entry editor dialog.
+func RenderWsListEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_listeditor(p, l, n)
+	})
+}
+
+// RenderWsPosterEditor renders the Worlds poster-slot editor dialog.
+func RenderWsPosterEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_postereditor(p, l, n)
+	})
+}
+
+// RenderWsFriendPicker renders the Worlds friend-picker dialog.
+func RenderWsFriendPicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendpicker(p, l, n)
+	})
+}
+
+// RenderWsFriendList renders #world-fr-list (the filtered friends list).
+func RenderWsFriendList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendlist(p, l, n)
+	})
+}
+
+// RenderWsGroupPicker renders the Worlds group/role-picker dialog.
+func RenderWsGroupPicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouppicker(p, l, n)
+	})
+}
+
+// RenderWsGroupList renders #world-grp-list (favorites + own groups + search results).
+func RenderWsGroupList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouplist(p, l, n)
+	})
+}
+
+// RenderWsRolePicker renders the Worlds role-grant dialog.
+func RenderWsRolePicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolepicker(p, l, n)
+	})
+}
+
+// RenderWsRoleList renders #world-role-list (the loaded group roles).
+func RenderWsRoleList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolelist(p, l, n)
+	})
+}
+
+// RenderWsDevice renders the GitHub device-code dialog.
+func RenderWsDevice(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_device(p, l, n)
+	})
+}
+
 // --- end dialogs-b ---

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/zigui"
 )
 
@@ -111,6 +112,182 @@ func TestZigVgDialogsGolden(t *testing.T) {
 	for name, st := range vgPostConfirmFixtures() {
 		t.Run("postConfirm/"+name, func(t *testing.T) {
 			zigGolden(t, "vgPostConfirm", st, vgPostConfirmHTMLOf(st), zigui.RenderVgPostConfirm)
+		})
+	}
+}
+
+// ── Worlds dialogs ──
+
+func wsListEditorFixtures() map[string]wsListEditorSt {
+	base := wsListEditorSt{
+		Title: "Edit list: Crew", Help: "Role grants publish that role's member names to the gist (unlisted but public URL). Only whole-group/role member names are listed - never user ids.",
+		EmptyMsg: "Empty list - add friends or group roles", DelLabel: "Delete",
+		AddPh: "exact VRChat display name", AddBtn: "Add name",
+		FriendBtn: "Add friend…", FriendAct: "world-friends:list-1",
+		GroupBtn: "Add group role…", GroupAct: "world-groups:list-1",
+	}
+	empty := base
+	empty.Empty = true
+
+	pop := base
+	pop.Entries = []wsEntryRowSt{
+		{Label: "User: DJ Nova", Act: "world-ent-del:0"},
+		{Label: "Group role: Rave Crew - all members", Act: "world-ent-del:1"},
+	}
+
+	esc := base
+	esc.Title = `Edit list: Crew & "B" <x>'`
+	esc.Entries = []wsEntryRowSt{{Label: `User: DJ & "Nova" <x>'`, Act: "world-ent-del:0"}}
+
+	long := base
+	long.Entries = []wsEntryRowSt{{Label: strings.Repeat("User: long display name ", 40), Act: "world-ent-del:0"}}
+
+	uni := base
+	uni.Title = "Edit list: クルー"
+	uni.Entries = []wsEntryRowSt{{Label: "User: ゆき · Юки 🎧", Act: "world-ent-del:0"}}
+
+	return map[string]wsListEditorSt{
+		"empty": {}, "unavailable": empty, "populated": pop,
+		"escaping": esc, "long": long, "unicode": uni,
+	}
+}
+
+func wsPosterEditorFixtures() map[string]wsPosterEditorSt {
+	base := wsPosterEditorState(2, config.WorldPoster{})
+	pop := wsPosterEditorState(0, config.WorldPoster{Img: "https://i.imgur.com/a.png", Caption: "Main stage", Link: "https://rave.page/e/1"})
+	warn := wsPosterEditorSt{}
+	warn = base
+	warn.Img, warn.HasWarn, warn.Warn = "https://evil.example/x.png", true, "Host not on VRChat's image allowlist - prefab shows text only"
+	esc := base
+	esc.Img, esc.Caption, esc.Link = `https://x/?a=1&b="2"`, `cap & "c" <x>'`, `https://y/?q=a&b='c'`
+	long := base
+	long.Caption = strings.Repeat("caption ", 120)
+	uni := base
+	uni.Caption = "メイン · Главная 🎧"
+	return map[string]wsPosterEditorSt{
+		"empty": {}, "unavailable": base, "populated": pop, "warn": warn,
+		"escaping": esc, "long": long, "unicode": uni,
+	}
+}
+
+func wsFriendListFixtures() map[string]wsFriendListSt {
+	rows := func(n int) []wsPickRowSt {
+		out := make([]wsPickRowSt, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, wsPickRowSt{Label: "friend", Act: "world-fr-pick:0"})
+		}
+		return out
+	}
+	return map[string]wsFriendListSt{
+		"empty":       {},
+		"loading":     {Loading: true, LoadingMsg: "Loading friends…"},
+		"unavailable": {Empty: true, EmptyMsg: "No friends found"},
+		"noMatch":     {Empty: true, EmptyMsg: "No match"},
+		"populated": {AddLabel: "Add", Rows: []wsPickRowSt{
+			{Label: "DJ Nova", Act: "world-fr-pick:0"}, {Label: "Kollektiv", Act: "world-fr-pick:3"},
+		}},
+		"capped":   {AddLabel: "Add", Rows: rows(60), HasMore: true, MoreMsg: "… refine the filter to see more"},
+		"escaping": {AddLabel: `Add & "one"'`, Rows: []wsPickRowSt{{Label: `DJ & "Nova" <x>'`, Act: "world-fr-pick:0"}}},
+		"long":     {AddLabel: "Add", Rows: []wsPickRowSt{{Label: strings.Repeat("friend name ", 60), Act: "world-fr-pick:0"}}},
+		"unicode":  {AddLabel: "追加", Rows: []wsPickRowSt{{Label: "ゆき · Юки 🎧", Act: "world-fr-pick:0"}}},
+	}
+}
+
+func wsGroupListFixtures() map[string]wsGroupListSt {
+	row := func(n string) wsGroupRowSt {
+		return wsGroupRowSt{Label: n, FavLabel: "☆ Pin", FavAct: "world-fav:0", RolesAct: "world-roles:0"}
+	}
+	return map[string]wsGroupListSt{
+		"empty":       {},
+		"unavailable": {Empty: true, EmptyMsg: "No groups - search above"},
+		"loading":     {Loading: true, LoadingMsg: "Loading your groups…", RolesLabel: "Roles…"},
+		"populated": {RolesLabel: "Roles…", Sections: []wsGroupSecSt{
+			{Caption: "Favorites", Rows: []wsGroupRowSt{{Label: "Rave Crew", FavLabel: "★ Unpin", FavAct: "world-fav:0", RolesAct: "world-roles:0"}}},
+			{Caption: "Your groups", Rows: []wsGroupRowSt{row("Studio (12 members)")}},
+			{Caption: "Search results"},
+		}},
+		"loadingWithRows": {Loading: true, LoadingMsg: "Loading your groups…", RolesLabel: "Roles…",
+			Sections: []wsGroupSecSt{{Caption: "Favorites", Rows: []wsGroupRowSt{row("Pinned")}}}},
+		"escaping": {RolesLabel: `Roles & "x"…`, Sections: []wsGroupSecSt{
+			{Caption: "Favorites", Rows: []wsGroupRowSt{{Label: `Crew & "B" <x>' (3 members)`, FavLabel: `★ Un&pin`, FavAct: "world-fav:0", RolesAct: "world-roles:0"}}},
+		}},
+		"long": {RolesLabel: "Roles…", Sections: []wsGroupSecSt{
+			{Caption: "Your groups", Rows: []wsGroupRowSt{row(strings.Repeat("group name ", 60))}},
+		}},
+		"unicode": {RolesLabel: "ロール…", Sections: []wsGroupSecSt{
+			{Caption: "お気に入り", Rows: []wsGroupRowSt{row("クルー · Клуб 🎧")}},
+		}},
+	}
+}
+
+func wsRoleListFixtures() map[string]wsRoleListSt {
+	return map[string]wsRoleListSt{
+		"empty":     {},
+		"loading":   {Loading: true, LoadingMsg: "Loading roles…"},
+		"allOnly":   {AllLabel: "All members", GrantLabel: "Grant"},
+		"populated": {AllLabel: "All members", GrantLabel: "Grant", Rows: []wsPickRowSt{{Label: "Moderator (management)", Act: "world-role-pick:0"}, {Label: "Resident", Act: "world-role-pick:1"}}},
+		"escaping":  {AllLabel: `All & "members"'`, GrantLabel: `Grant & "it"'`, Rows: []wsPickRowSt{{Label: `Mod & "crew" <x>'`, Act: "world-role-pick:0"}}},
+		"long":      {AllLabel: "All members", GrantLabel: "Grant", Rows: []wsPickRowSt{{Label: strings.Repeat("role ", 120), Act: "world-role-pick:0"}}},
+		"unicode":   {AllLabel: "全メンバー", GrantLabel: "付与", Rows: []wsPickRowSt{{Label: "モデレーター · Модератор 🎧", Act: "world-role-pick:0"}}},
+	}
+}
+
+func wsDeviceFixtures() map[string]wsDeviceSt {
+	base := wsDeviceSt{
+		Title: "Link GitHub", Help: "Open the activation page and enter this code, then approve in your browser:",
+		Code: "ABCD-1234", CopyLbl: "Copy code", OpenLbl: "Open activation page", URI: "https://github.com/login/device",
+	}
+	esc := base
+	esc.Code, esc.URI = `A&B "C"<d>'`, `https://x/?a=1&b="2"`
+	long := base
+	long.Code = strings.Repeat("CODE-", 60)
+	uni := base
+	uni.CopyLbl, uni.OpenLbl = "コピー", "開く"
+	return map[string]wsDeviceSt{"empty": {}, "populated": base, "escaping": esc, "long": long, "unicode": uni}
+}
+
+func TestZigWsDialogsGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, st := range wsListEditorFixtures() {
+		t.Run("listEditor/"+name, func(t *testing.T) {
+			zigGolden(t, "wsListEditor", st, wsListEditorHTMLOf(st), zigui.RenderWsListEditor)
+		})
+	}
+	for name, st := range wsPosterEditorFixtures() {
+		t.Run("posterEditor/"+name, func(t *testing.T) {
+			zigGolden(t, "wsPosterEditor", st, wsPosterEditorHTMLOf(st), zigui.RenderWsPosterEditor)
+		})
+	}
+	for name, st := range wsFriendListFixtures() {
+		t.Run("friendList/"+name, func(t *testing.T) {
+			zigGolden(t, "wsFriendList", st, wsFriendListHTMLOf(st), zigui.RenderWsFriendList)
+			p := wsFriendPickerSt{Title: "Add friend", SearchPh: "filter friends…",
+				BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st}
+			zigGolden(t, "wsFriendPicker", p, wsFriendPickerHTMLOf(p), zigui.RenderWsFriendPicker)
+		})
+	}
+	for name, st := range wsGroupListFixtures() {
+		t.Run("groupList/"+name, func(t *testing.T) {
+			zigGolden(t, "wsGroupList", st, wsGroupListHTMLOf(st), zigui.RenderWsGroupList)
+			p := wsGroupPickerSt{Title: "Add group role", SearchPh: "search all groups…", SearchBtn: "Search",
+				Help:    "Grant a whole group or a role. Member expansion only works where the member list is visible (public groups); private groups keep their last good expansion.",
+				BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st}
+			zigGolden(t, "wsGroupPicker", p, wsGroupPickerHTMLOf(p), zigui.RenderWsGroupPicker)
+		})
+	}
+	for name, st := range wsRoleListFixtures() {
+		t.Run("roleList/"+name, func(t *testing.T) {
+			zigGolden(t, "wsRoleList", st, wsRoleListHTMLOf(st), zigui.RenderWsRoleList)
+			p := wsRolePickerSt{Title: `Roles of Crew & "B"`, BackLbl: "Back to groups",
+				BackAct: "world-groups:list-1", List: st}
+			zigGolden(t, "wsRolePicker", p, wsRolePickerHTMLOf(p), zigui.RenderWsRolePicker)
+		})
+	}
+	for name, st := range wsDeviceFixtures() {
+		t.Run("device/"+name, func(t *testing.T) {
+			zigGolden(t, "wsDevice", st, wsDeviceHTMLOf(st), zigui.RenderWsDevice)
 		})
 	}
 }

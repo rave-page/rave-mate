@@ -459,8 +459,7 @@ func (u *UI) wsOpenRolePicker(grp groupRef) {
 	wsState.mu.Lock()
 	wsState.roleGroup, wsState.roles = grp, nil
 	wsState.mu.Unlock()
-	u.openModal(modal("Roles of "+grp.Name, `<div id=world-role-list><p class=ws-help>Loading roles…</p></div>`,
-		btn("Back to groups", "outline", "world-groups:"+listID, "")))
+	u.openModal(u.wsRolePickerHTML(grp.Name, listID))
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -477,16 +476,15 @@ func (u *UI) wsOpenRolePicker(grp groupRef) {
 		wsState.mu.Lock()
 		wsState.roles = roles
 		wsState.mu.Unlock()
-		var b strings.Builder
-		b.WriteString(itemRow("All members", "", btn("Grant", "primary", "world-role-pick:all", "")))
+		st := wsRoleListSt{AllLabel: "All members", GrantLabel: "Grant", Rows: make([]wsPickRowSt, 0, len(roles))}
 		for i, r := range roles {
 			lbl := r.Name
 			if r.IsManagementRole {
 				lbl += " (management)"
 			}
-			b.WriteString(itemRow(lbl, "", btn("Grant", "primary", "world-role-pick:"+strconv.Itoa(i), "")))
+			st.Rows = append(st.Rows, wsPickRowSt{Label: lbl, Act: "world-role-pick:" + strconv.Itoa(i)})
 		}
-		u.eval("window.__patch('world-role-list'," + jsQuote(b.String()) + ")")
+		u.eval("window.__patch('world-role-list'," + jsQuote(u.wsRoleListHTML(st)) + ")")
 	})
 }
 
@@ -506,10 +504,7 @@ func (u *UI) wsGitHubDevice() {
 			u.logErr("github device", err)
 			return
 		}
-		body := `<p class=ws-help>Open the activation page and enter this code, then approve in your browser:</p>` +
-			`<div class=ws-devcode>` + html.EscapeString(da.UserCode) + `</div>` +
-			btnRow(btn("Copy code", "ghost", "copy", da.UserCode), btn("Open activation page", "outline", "open-url", da.VerificationURI))
-		u.openModal(modal("Link GitHub", body, ""))
+		u.openModal(u.wsDeviceHTML(da.UserCode, da.VerificationURI))
 		_ = openURL(da.VerificationURI)
 		err = gh.PollDevice(ctx, da)
 		u.closeModal()

@@ -191,6 +191,15 @@ const uint8_t *rz_ui_render_vg_rolesmodal(const uint8_t *state_json, size_t len,
 const uint8_t *rz_ui_render_vg_invitemodal(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_memberconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_postconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_listeditor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_postereditor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendpicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendlist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouppicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouplist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolepicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolelist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_device(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end dialogs-b --- */
 
 #ifdef __cplusplus

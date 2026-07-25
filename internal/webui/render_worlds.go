@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/vrcperm"
@@ -26,7 +25,7 @@ import (
 // GitHub session, publish status, off-thread Unity inspect cache, federation memo); the *HTML
 // renderers stay the Go fallback + golden reference (zigui_golden_worlds_test.go). The tick-patched
 // fragments (#world-linkhint, #world-gh, #world-st-<key>, #world-unity-rows) each export their own
-// renderer. Modal editors/pickers are separate surfaces and stay Go-rendered.
+// renderer. The modal editors/pickers live in render_worlds_modals.go (same Zig treatment).
 
 // ── resolved render state (JSON → Zig) ──
 //
@@ -669,182 +668,4 @@ func (u *UI) refreshWorldsUnity(sig string, projects []string) {
 	if !u.stopped() && u.activeTab() == "worlds" {
 		u.eval("window.__patch('world-unity-rows'," + jsQuote(u.worldsUnityRowsInner()) + ")")
 	}
-}
-
-// ── modal editors (rendered into __modal via openModal; Go-rendered, not part of the Zig port) ──
-
-// wsListEditorHTML builds the per-list entry editor (delete + add-name + friend/role pickers).
-// Records the edited list id in wsState so index-based entry actions resolve it.
-func (u *UI) wsListEditorHTML(l *config.PermList) string {
-	wsState.mu.Lock()
-	wsState.editList = l.ID
-	wsState.mu.Unlock()
-
-	var body strings.Builder
-	body.WriteString(`<p class=ws-help>Role grants publish that role's member names to the gist (unlisted but public URL). Only whole-group/role member names are listed - never user ids.</p>`)
-	body.WriteString(`<div class=ws-entries>`)
-	if len(l.Entries) == 0 {
-		body.WriteString(emptyState("Empty list - add friends or group roles"))
-	}
-	for i := range l.Entries {
-		e := l.Entries[i]
-		label := "User: " + e.Display
-		if e.Kind == config.PermEntryGroupRole {
-			role := e.RoleName
-			if role == "" {
-				role = "all members"
-			}
-			label = fmt.Sprintf("Group role: %s - %s", e.GroupName, role)
-		}
-		body.WriteString(itemRow(label, "", btn("Delete", "destructive", "world-ent-del:"+strconv.Itoa(i), "")))
-	}
-	body.WriteString(`</div>`)
-	body.WriteString(`<form class=ws-addrow data-act=world-name-add>` +
-		`<input class=field-input name=name placeholder="exact VRChat display name" autocomplete=off>` +
-		`<button class="rp-btn rp-btn--outline" type=submit>Add name</button></form>`)
-	body.WriteString(btnRow(
-		btn("Add friend…", "primary", "world-friends:"+l.ID, ""),
-		btn("Add group role…", "outline", "world-groups:"+l.ID, ""),
-	))
-	return modal("Edit list: "+l.Name, body.String(), "")
-}
-
-// wsPosterEditorHTML builds the poster-slot editor form.
-func (u *UI) wsPosterEditorHTML(idx int, p config.WorldPoster) string {
-	warn := ""
-	if p.Img != "" && !vrcperm.ImageHostAllowed(p.Img) {
-		warn = `<div class=wsst-line>` + hint("bad", "Host not on VRChat's image allowlist - prefab shows text only") + `</div>`
-	}
-	body := `<form data-act=world-poster-save>` +
-		`<input type=hidden name=idx value="` + strconv.Itoa(idx) + `">` +
-		`<label class=field><span class=field-label>Image</span><input class=field-input name=img value="` + html.EscapeString(p.Img) + `" placeholder="https://i.imgur.com/… (VRC image-allowlisted host)" autocomplete=off></label>` +
-		`<label class=field><span class=field-label>Caption</span><input class=field-input name=caption value="` + html.EscapeString(p.Caption) + `" placeholder="caption" autocomplete=off></label>` +
-		`<label class=field><span class=field-label>Link</span><input class=field-input name=link value="` + html.EscapeString(p.Link) + `" placeholder="https://rave.page/… (shown as text/QR)" autocomplete=off></label>` +
-		warn +
-		`<div class=btn-row><button class="rp-btn rp-btn--primary" type=submit>Save</button></div></form>`
-	return modal("Edit poster", body, "")
-}
-
-// wsFriendPickerHTML is the friend-picker modal shell (list filled async by the handler).
-func (u *UI) wsFriendPickerHTML(listID string) string {
-	body := `<form class=ws-search data-act=world-fr-search><input class=field-input name=q placeholder="filter friends…" autocomplete=off></form>` +
-		`<div class=ws-picklist id=world-fr-list>` + u.wsFriendListHTML() + `</div>`
-	return modal("Add friend", body, btn("Back to list", "outline", "world-list-edit:"+listID, ""))
-}
-
-// wsFriendListHTML renders the loaded (filtered) friends into pick rows. The pick action carries
-// the friend's index into wsState.friends (stable across filtering - never the display name).
-func (u *UI) wsFriendListHTML() string {
-	wsState.mu.Lock()
-	friends := wsState.friends
-	q := strings.ToLower(strings.TrimSpace(wsState.fq))
-	loading := wsState.friendsLoading
-	wsState.mu.Unlock()
-	if loading {
-		return `<p class=ws-help>Loading friends…</p>`
-	}
-	var b strings.Builder
-	shown := 0
-	for i, fr := range friends {
-		if q != "" && !strings.Contains(strings.ToLower(fr.DisplayName), q) {
-			continue
-		}
-		if shown >= 60 {
-			b.WriteString(`<p class=ws-help>… refine the filter to see more</p>`)
-			break
-		}
-		shown++
-		b.WriteString(itemRow(fr.DisplayName, "", btn("Add", "primary", "world-fr-pick:"+strconv.Itoa(i), "")))
-	}
-	if shown == 0 {
-		if len(friends) == 0 {
-			b.WriteString(emptyState("No friends found"))
-		} else {
-			b.WriteString(emptyState("No match"))
-		}
-	}
-	return b.String()
-}
-
-// wsGroupPickerHTML is the group/role-picker modal shell.
-func (u *UI) wsGroupPickerHTML(listID string) string {
-	body := `<form class=ws-search data-act=world-grp-search><input class=field-input name=q placeholder="search all groups…" autocomplete=off><button class="rp-btn rp-btn--outline" type=submit>Search</button></form>` +
-		`<div class=ws-picklist id=world-grp-list>` + u.wsGroupListHTML() + `</div>` +
-		`<p class=ws-help>Grant a whole group or a role. Member expansion only works where the member list is visible (public groups); private groups keep their last good expansion.</p>`
-	return modal("Add group role", body, btn("Back to list", "outline", "world-list-edit:"+listID, ""))
-}
-
-// wsGroupListHTML renders favorites + your groups + search results as pick rows, and records the
-// flattened display order in wsState.pickGroups so fav/roles actions index it (group names may
-// carry chars fmt %q would mangle in data-act).
-func (u *UI) wsGroupListHTML() string {
-	f := &u.svc.Cfg.Features.WorldSync
-	wsState.mu.Lock()
-	mine := wsState.mygroups
-	results := wsState.results
-	loading := wsState.groupsLoading
-	wsState.mu.Unlock()
-
-	isFav := func(id string) bool {
-		for _, g := range f.FavoriteGroups {
-			if g.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-
-	var b strings.Builder
-	var refs []groupRef
-	emit := func(id, name string, members int) {
-		idx := len(refs)
-		refs = append(refs, groupRef{ID: id, Name: name})
-		favLabel := "☆ Pin"
-		if isFav(id) {
-			favLabel = "★ Unpin"
-		}
-		lbl := name
-		if members > 0 {
-			lbl = fmt.Sprintf("%s (%d members)", name, members)
-		}
-		trail := btnRow(
-			btn(favLabel, "ghost", "world-fav:"+strconv.Itoa(idx), ""),
-			btn("Roles…", "primary", "world-roles:"+strconv.Itoa(idx), ""),
-		)
-		b.WriteString(itemRow(lbl, "", trail))
-	}
-
-	if loading {
-		b.WriteString(`<p class=ws-help>Loading your groups…</p>`)
-	}
-	if len(f.FavoriteGroups) > 0 {
-		b.WriteString(`<div class=ws-caps>Favorites</div>`)
-		for _, g := range f.FavoriteGroups {
-			emit(g.ID, g.Name, 0)
-		}
-	}
-	if len(mine) > 0 {
-		b.WriteString(`<div class=ws-caps>Your groups</div>`)
-		for _, g := range mine {
-			if !isFav(g.EffectiveID()) {
-				emit(g.EffectiveID(), g.Name, g.MemberCount)
-			}
-		}
-	}
-	if len(results) > 0 {
-		b.WriteString(`<div class=ws-caps>Search results</div>`)
-		for _, g := range results {
-			if !isFav(g.EffectiveID()) {
-				emit(g.EffectiveID(), g.Name, g.MemberCount)
-			}
-		}
-	}
-	if !loading && len(refs) == 0 {
-		b.WriteString(emptyState("No groups - search above"))
-	}
-
-	wsState.mu.Lock()
-	wsState.pickGroups = refs
-	wsState.mu.Unlock()
-	return b.String()
 }

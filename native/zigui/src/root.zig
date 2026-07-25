@@ -568,6 +568,45 @@ export fn rz_ui_render_vg_postconfirm(state_json: ?[*]const u8, len: usize, out_
     return renderJSON(dialogs_b.PostConfirm, dialogs_b.renderPostConfirm, state_json, len, out_len);
 }
 
+export fn rz_ui_render_ws_listeditor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsListEditor, dialogs_b.renderWsListEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_postereditor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsPosterEditor, dialogs_b.renderWsPosterEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendpicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsFriendPicker, dialogs_b.renderWsFriendPicker, state_json, len, out_len);
+}
+
+/// #world-fr-list inner (patched when the async friends load lands / the filter changes).
+export fn rz_ui_render_ws_friendlist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsFriendList, dialogs_b.renderWsFriendList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouppicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsGroupPicker, dialogs_b.renderWsGroupPicker, state_json, len, out_len);
+}
+
+/// #world-grp-list inner (own-groups load + every group search).
+export fn rz_ui_render_ws_grouplist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsGroupList, dialogs_b.renderWsGroupList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolepicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsRolePicker, dialogs_b.renderWsRolePicker, state_json, len, out_len);
+}
+
+/// #world-role-list inner (patched once the group roles load).
+export fn rz_ui_render_ws_rolelist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsRoleList, dialogs_b.renderWsRoleList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_device(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsDevice, dialogs_b.renderWsDevice, state_json, len, out_len);
+}
+
 test "dialogs-b module" {
     _ = dialogs_b;
 }
