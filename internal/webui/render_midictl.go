@@ -54,7 +54,8 @@ type midiDrvInput struct {
 	FbTest    bool   `json:"fbTest"`
 	FbTestLbl string `json:"fbTestLbl"`
 	FbTestAct string `json:"fbTestAct"`
-	FbTip     string `json:"fbTip"` // pre-rendered tooltip HTML
+	FbTip     string `json:"fbTip"`             // legacy RAW pre-rendered tooltip markup (bridge)
+	FbTipS    *tipSt `json:"fbTipSt,omitempty"` // structured tooltip - wins over FbTip
 	FbRes     bool   `json:"fbRes"`
 	FbResVar  string `json:"fbResVar"`
 	FbResLbl  string `json:"fbResLbl"`
@@ -387,7 +388,7 @@ func (u *UI) midiDrvManagedState(ctx midiCtlRenderCtx) midiDrvManaged {
 				if ds.Bound && ds.FeedbackBound {
 					in.FbTest = true
 					in.FbTestLbl, in.FbTestAct = i18n.T("midictl.drv.fbTest"), "midi-fbtest:"+id
-					in.FbTip = tipTopic("led-feedback")
+					in.FbTipS = tipTopicSt("led-feedback")
 				}
 				if r := u.fbtResultFor(ds.ReservedPortID); r.line != "" {
 					in.FbRes, in.FbResVar, in.FbResLine = true, r.variant, r.line
@@ -425,7 +426,7 @@ func midiDrvManagedHTML(st midiDrvManaged) string {
 			if in.HasBtns {
 				btns := []string{btn(in.TraceLbl, "ghost", in.TraceAct, "")}
 				if in.FbTest {
-					btns = append(btns, btn(in.FbTestLbl, "ghost", in.FbTestAct, "")+in.FbTip)
+					btns = append(btns, btn(in.FbTestLbl, "ghost", in.FbTestAct, "")+tipOr(in.FbTipS, in.FbTip))
 				}
 				b.WriteString(btnRow(btns...))
 				if in.FbRes {

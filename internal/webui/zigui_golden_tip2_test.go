@@ -208,16 +208,53 @@ func TestZigTip2MidiCtlLabelsGolden(t *testing.T) {
 		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
 	}
 	tip2Sweep(t, "midiSsLabels", func(tp *tipSt, raw string) midiCtlState {
-		st := midiCtlFixtures()["populated"]
-		bs := make([]midiCtlBlock, len(st.Ctls.Blocks)) // copy: fixtures share the slice
-		copy(bs, st.Ctls.Blocks)
-		st.Ctls.Blocks = bs
+		st, bs := midiTipBase()
 		if raw != "" {
 			bs[0].PortLblS, bs[0].PortLbl = nil, ssLabelRaw("Port", raw)
 			st.Bridge.ToDJLblS, st.Bridge.ToDJLbl = nil, ssLabelRaw("To DJ", raw)
 		} else {
 			bs[0].PortLblS, bs[0].PortLbl = &ssLabelSt{Text: "Port", Tip: tp}, ""
 			st.Bridge.ToDJLblS, st.Bridge.ToDJLbl = &ssLabelSt{Text: "To DJ", Tip: tp}, ""
+		}
+		return st
+	}, midiCtlHTML, zigui.RenderMIDICtl)
+}
+
+// midiTipBase is the populated MIDI-tab fixture with a PRIVATE controller-block slice (the
+// fixture map shares it, and every sweep mutates block 0).
+func midiTipBase() (midiCtlState, []midiCtlBlock) {
+	st := midiCtlFixtures()["populated"]
+	bs := make([]midiCtlBlock, len(st.Ctls.Blocks))
+	copy(bs, st.Ctls.Blocks)
+	st.Ctls.Blocks = bs
+	return st, bs
+}
+
+// TestZigTip2MidiCtlTipsGolden sweeps every OTHER MIDI-tab tooltip seam that flipped in shard 2:
+// the controllers-card intro note, the driver drop-message filter label, the learn-grid header,
+// the DJ-bridge intro + enable switch, the UI-map card head + its enable switch, and the
+// LED-feedback tip beside the driver's feedback-test button.
+func TestZigTip2MidiCtlTipsGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	tip2Sweep(t, "midiTips", func(tp *tipSt, raw string) midiCtlState {
+		st, bs := midiTipBase()
+		st.Ctls.IntroTipS, st.Ctls.IntroTip = tp, raw
+		bs[0].DrvThru.FilterTipS, bs[0].DrvThru.FilterTip = tp, raw
+		bs[0].Grid.HdrTipS, bs[0].Grid.HdrTip = tp, raw
+		st.Bridge.IntroTipS, st.Bridge.IntroTip = tp, raw
+		st.Bridge.EnableTipS, st.Bridge.EnableTip = tp, raw
+		st.UIMap.TitleTipS, st.UIMap.TitleTip = tp, raw
+		st.UIMap.EnableTipS, st.UIMap.EnableTip = tp, raw
+		// the LED-feedback tip beside the driver's feedback-test button
+		ins := make([]midiDrvInput, len(st.Driver.Managed.Inputs)) // copy: the fixture shares the slice
+		copy(ins, st.Driver.Managed.Inputs)
+		st.Driver.Managed.Inputs = ins
+		for i := range ins {
+			if ins[i].FbTest {
+				ins[i].FbTipS, ins[i].FbTip = tp, raw
+			}
 		}
 		return st
 	}, midiCtlHTML, zigui.RenderMIDICtl)

@@ -47,7 +47,8 @@ pub const DrvThru = struct {
     stLabelDl: []const u8 = "",
     stLine: []const u8 = "",
     filterLbl: []const u8 = "",
-    filterTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    filterTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    filterTipSt: ?c.Tip = null, // structured tooltip — wins over filterTip
     chips: []const Chip = &.{},
 };
 
@@ -74,7 +75,8 @@ pub const LearnRow = struct {
 
 pub const LearnGrid = struct {
     hdr: []const u8 = "",
-    hdrTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    hdrTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    hdrTipSt: ?c.Tip = null, // structured tooltip — wins over hdrTip
     cols: []const u8 = "", // digits only (CSS var) — raw
     chHdrs: []const []const u8 = &.{},
     rows: []const LearnRow = &.{},
@@ -110,7 +112,8 @@ pub const State = struct {
     card: []const u8 = "",
     badge: []const u8 = "",
     intro: []const u8 = "",
-    introTip: []const u8 = "",
+    introTip: []const u8 = "", // legacy raw (bridge)
+    introTipSt: ?c.Tip = null, // structured tooltip — wins over introTip
     linksLbl: []const u8 = "",
     links: []const Link = &.{},
     empty: []const u8 = "",
@@ -127,7 +130,7 @@ pub fn render(h: *Html, s: State) !void {
     try h.raw("<p class=midi-help-note>");
     try h.esc(s.intro);
     try h.raw(" ");
-    try h.raw(s.introTip);
+    try c.tipOr(h, s.introTipSt, s.introTip);
     try h.raw("</p>");
     try renderLinks(h, s.linksLbl, s.links);
     if (s.blocks.len == 0) try c.emptyState(h, s.empty);
@@ -215,7 +218,7 @@ fn renderDrvThru(h: *Html, s: DrvThru) !void {
     try h.raw("<div class=midi-drvfilters><span class=midi-steplbl>");
     try h.esc(s.filterLbl);
     try h.raw(" ");
-    try h.raw(s.filterTip);
+    try c.tipOr(h, s.filterTipSt, s.filterTip);
     try h.raw("</span>");
     for (s.chips) |ch| try c.fchip(h, ch.label, "", ch.act, ch.active);
     try h.raw("</div></div>");
@@ -235,7 +238,7 @@ fn renderGrid(h: *Html, g: LearnGrid) !void {
     try h.raw("<div class=midi-learnhdr>");
     try h.esc(g.hdr);
     try h.raw(" ");
-    try h.raw(g.hdrTip);
+    try c.tipOr(h, g.hdrTipSt, g.hdrTip);
     try h.raw("</div><div class=midi-learngrid style=\"--cols:");
     try h.raw(g.cols);
     try h.raw("\"><div class=mlg-h></div>");
@@ -286,12 +289,14 @@ pub const Bridge = struct {
     card: []const u8 = "",
     badge: []const u8 = "",
     intro: []const u8 = "",
-    introTip: []const u8 = "",
+    introTip: []const u8 = "", // legacy raw (bridge)
+    introTipSt: ?c.Tip = null, // structured tooltip — wins over introTip
     enableLbl: []const u8 = "",
     enableDl: []const u8 = "",
     enableAct: []const u8 = "",
     enableOn: bool = false,
-    enableTip: []const u8 = "",
+    enableTip: []const u8 = "", // legacy raw (bridge)
+    enableTipSt: ?c.Tip = null, // structured tooltip — wins over enableTip
     toDj: c.Select = .{},
     toDjLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
     toDjLblSt: ?c.SsLabel = null, // structured ss-label — wins over toDjLbl
@@ -309,9 +314,12 @@ pub fn renderBridge(h: *Html, s: Bridge) !void {
     try h.raw("<p class=midi-help-note>");
     try h.esc(s.intro);
     try h.raw(" ");
-    try h.raw(s.introTip);
+    try c.tipOr(h, s.introTipSt, s.introTip);
     try h.raw("</p>");
-    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, s.enableTip);
+    var eb = Html.init(h.a); // toggleRowTip takes the tooltip as a string
+    defer eb.deinit();
+    try c.tipOr(&eb, s.enableTipSt, s.enableTip);
+    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, eb.b.items);
     try c.selectBoxTipOr(h, s.toDj, s.toDjLblSt, s.toDjLbl);
     try c.selectBoxTipOr(h, s.fromDj, s.fromDjLblSt, s.fromDjLbl);
     try c.cardClose(h);
