@@ -1112,8 +1112,13 @@
       "menu": {
         "cloud": "Cloud",
         "reencSub": "Re-encode every track into a duplicate folder - originals untouched.",
-        "autoSub": "When on, re-scans the bound folder once per launch."
-      }
+        "autoSub": "When on, re-scans the bound folder once per launch.",
+        "sendTraktorSub": "Backs up collection.nml first, adds tracks missing from the collection (incl. analyzed beatgrids and cues), then creates/updates this playlist in Traktor. Traktor must be closed."
+      },
+      "sendTraktor": "Send to Traktor…",
+      "sendingTraktor": "Sending to Traktor…",
+      "sendTraktorFailed": "Send to Traktor failed: ",
+      "sentTraktorToast": "Traktor: {added} tracks added, {updated} updated · playlist “{name}” +{pl}"
     },
     "playsort": {
       "artist": "Artist",
@@ -1743,6 +1748,58 @@
       "plMenu": "BPM range…",
       "plMenuSub": "Force members' BPM into a target band",
       "plSaved": "BPM range saved"
+    },
+    "fi": {
+      "title": "Add folder to collection",
+      "desc": "Imports every audio file of the folder straight into your collection - no DJ software needed. Artist, title, album, genre, BPM and duration are read from the file tags (ffprobe); when tags are missing, the file name is split as “Artist - Title”. The folder also becomes a folder-bound playlist, so files added later can be picked up via “Refresh from folder”.",
+      "folder": "Folder",
+      "recursive": "Include subfolders",
+      "pickHint": "Pick a folder to scan for audio files.",
+      "scanning": "Scanning folder…",
+      "found": {
+        "one": "{count} audio file found",
+        "few": "{count} audio files found",
+        "many": "{count} audio files found",
+        "other": "{count} audio files found"
+      },
+      "cappedNote": "Stopped at {cap} files - import smaller folders.",
+      "importBtn": {
+        "one": "Import {count} track",
+        "few": "Import {count} tracks",
+        "many": "Import {count} tracks",
+        "other": "Import {count} tracks"
+      },
+      "importGridBtn": {
+        "one": "Import {count} track + beatgrid",
+        "few": "Import {count} tracks + beatgrid",
+        "many": "Import {count} tracks + beatgrid",
+        "other": "Import {count} tracks + beatgrid"
+      },
+      "alreadyRunning": "A folder import is already running.",
+      "jobLabel": "Reading tags",
+      "failedToast": "Folder import failed: ",
+      "importedToast": {
+        "one": "Imported {count} track from “{name}”",
+        "few": "Imported {count} tracks from “{name}”",
+        "many": "Imported {count} tracks from “{name}”",
+        "other": "Imported {count} tracks from “{name}”"
+      },
+      "gridSavedToast": {
+        "one": "{count} beatgrid saved to the library",
+        "few": "{count} beatgrids saved to the library",
+        "many": "{count} beatgrids saved to the library",
+        "other": "{count} beatgrids saved to the library"
+      },
+      "refreshImported": {
+        "one": "{count} new file added to the collection",
+        "few": "{count} new files added to the collection",
+        "many": "{count} new files added to the collection",
+        "other": "{count} new files added to the collection"
+      },
+      "appLabel": "Folder",
+      "menuBtn": "Add folder to collection…",
+      "menuSub": "Tracks + playlist + optional beatgrid - no DJ software needed.",
+      "importModalBtn": "Add a folder of audio files…"
     }
   },
   "live": {

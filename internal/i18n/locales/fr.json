@@ -738,8 +738,13 @@
       "menu": {
         "cloud": "Cloud",
         "reencSub": "Ré-encode chaque piste dans un dossier dupliqué - les originaux restent intacts.",
-        "autoSub": "Si actif, réanalyse le dossier lié à chaque lancement."
-      }
+        "autoSub": "Si actif, réanalyse le dossier lié à chaque lancement.",
+        "sendTraktorSub": "Sauvegarde d'abord collection.nml, ajoute les pistes manquantes de la collection (beatgrids et cues analysés inclus), puis crée ou met à jour cette playlist dans Traktor. Traktor doit être fermé."
+      },
+      "sendTraktor": "Envoyer vers Traktor…",
+      "sendingTraktor": "Envoi vers Traktor…",
+      "sendTraktorFailed": "Échec de l'envoi vers Traktor : ",
+      "sentTraktorToast": "Traktor : {added} pistes ajoutées, {updated} mises à jour · playlist « {name} » +{pl}"
     },
     "playsort": {
       "artist": "Artiste",
@@ -1284,6 +1289,58 @@
       "plMenu": "Plage BPM…",
       "plMenuSub": "Forcer le BPM des morceaux dans une bande cible",
       "plSaved": "Plage BPM enregistrée"
+    },
+    "fi": {
+      "title": "Ajouter un dossier à la collection",
+      "desc": "Importe chaque fichier audio du dossier directement dans votre collection, sans logiciel DJ. Artiste, titre, album, genre, BPM et durée sont lus depuis les tags du fichier (ffprobe) ; si les tags manquent, le nom de fichier est découpé en « Artiste - Titre ». Le dossier devient aussi une playlist liée au dossier : les fichiers ajoutés plus tard se récupèrent via « Actualiser depuis le dossier ».",
+      "folder": "Dossier",
+      "recursive": "Inclure les sous-dossiers",
+      "pickHint": "Choisissez un dossier à analyser pour trouver des fichiers audio.",
+      "scanning": "Analyse du dossier…",
+      "found": {
+        "one": "{count} fichier audio trouvé",
+        "few": "{count} fichiers audio trouvés",
+        "many": "{count} fichiers audio trouvés",
+        "other": "{count} fichiers audio trouvés"
+      },
+      "cappedNote": "Arrêté à {cap} fichiers : importez des dossiers plus petits.",
+      "importBtn": {
+        "one": "Importer {count} piste",
+        "few": "Importer {count} pistes",
+        "many": "Importer {count} pistes",
+        "other": "Importer {count} pistes"
+      },
+      "importGridBtn": {
+        "one": "Importer {count} piste + beatgrid",
+        "few": "Importer {count} pistes + beatgrid",
+        "many": "Importer {count} pistes + beatgrid",
+        "other": "Importer {count} pistes + beatgrid"
+      },
+      "alreadyRunning": "Un import de dossier est déjà en cours.",
+      "jobLabel": "Lecture des tags",
+      "failedToast": "Échec de l'import du dossier : ",
+      "importedToast": {
+        "one": "{count} piste importée depuis « {name} »",
+        "few": "{count} pistes importées depuis « {name} »",
+        "many": "{count} pistes importées depuis « {name} »",
+        "other": "{count} pistes importées depuis « {name} »"
+      },
+      "gridSavedToast": {
+        "one": "{count} beatgrid enregistré dans la bibliothèque",
+        "few": "{count} beatgrids enregistrés dans la bibliothèque",
+        "many": "{count} beatgrids enregistrés dans la bibliothèque",
+        "other": "{count} beatgrids enregistrés dans la bibliothèque"
+      },
+      "refreshImported": {
+        "one": "{count} nouveau fichier ajouté à la collection",
+        "few": "{count} nouveaux fichiers ajoutés à la collection",
+        "many": "{count} nouveaux fichiers ajoutés à la collection",
+        "other": "{count} nouveaux fichiers ajoutés à la collection"
+      },
+      "appLabel": "Dossier",
+      "menuBtn": "Ajouter le dossier à la collection…",
+      "menuSub": "Pistes + playlist + beatgrid en option, sans logiciel DJ.",
+      "importModalBtn": "Ajouter un dossier de fichiers audio…"
     }
   },
   "live": {
