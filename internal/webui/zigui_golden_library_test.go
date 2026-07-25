@@ -95,7 +95,7 @@ func libEncFixture() libEncSt {
 		AudioBitrate: newPBField("Audio bitrate", "lib-pf:abitratek", "0", "number", "Opus caps at 510k"),
 		Channels:     selState{ID: "lib-pf-channels", Label: "Channels", CurLabel: "Source", Rows: []selRow{{Val: "0", Label: "Source", Cur: true}}},
 		SampleRate:   selState{ID: "lib-pf-samplerate", Label: "Sample rate", CurLabel: "Source", Rows: []selRow{{Val: "0", Label: "Source", Cur: true}}},
-		Loudness:     `<div class="pb-grp"><label class=row data-label="normalize"></label></div>`,
+		Loud:         newLoudSt(loudFx()["full"]),
 		TrimStart:    newPBField("Trim start", "lib-trim-s", "", "number", ""),
 		TrimEnd:      newPBField("Trim end", "lib-trim-e", "", "number", ""),
 		OutputNote:   "Output lands beside the source",
@@ -374,6 +374,7 @@ func libFixtures() map[string]libState {
 	escDetail.Enc.Desc = `Loss&less "archive"'`
 	escDetail.Enc.Hints = []libHintSt{{Tone: "warn", Text: `Upscale 1280×720 → 1920×1080 &"x"'`}}
 	escDetail.Enc.TrimStart = newPBField(`Tr&im "start"'`, "lib-trim-s", `1&"2'`, "number", `hi&nt "x"'`)
+	escDetail.Enc.Loud = newLoudSt(loudFx()["escaping"])
 	escDetail.Harm.SameLbl = `Sa&me "key"'`
 	escDetail.Pls.Chips = []libChipSt{{Label: `W&armup "×"'`, Act: `lib-plgoto:7`}}
 	escDetail.TagEditor = libTagEdSt{Open: true, Desc: `Writes the &file <"revertible">'`,
@@ -542,6 +543,23 @@ func TestZigLibraryCueCellGolden(t *testing.T) {
 				t.Fatal("zig cue-cell render failed")
 			}
 			assertBytesEqual(t, "cuecell", libCueCellHTMLOf(st), zig)
+		})
+	}
+}
+
+// TestZigLibEncLoudnessGolden sweeps the SHARED loudness block (components.go loudSt, phase
+// B-1a) through the library encode builder's #lib-detail fragment: absent (switch off),
+// partial (override surface, blank targets behind default placeholders), full, compact chips,
+// codec warning, unit edges, escaping, unicode. The block used to ride as raw markup here.
+func TestZigLibEncLoudnessGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, o := range loudFx() {
+		t.Run(name, func(t *testing.T) {
+			det := libDetailFixture()
+			det.Enc.Loud = newLoudSt(o)
+			zigGolden(t, "encLoud", det, libDetailHTMLOf(det), zigui.RenderLibraryDetail)
 		})
 	}
 }
