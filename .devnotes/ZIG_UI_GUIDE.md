@@ -733,7 +733,9 @@ Not ported, with reasons (dialog sweep B):
 - `pickers.go` / `pickers_windows.go` / `pick_actions.go` — **no HTML at all**. These are the native
   OS dialog bindings (IFileDialog) plus the `pick-dir:`/`pick-file:` act redispatch; the only markup
   involved is the `Browse…` button the CALLING surface renders (already ported per tab).
-- `tooltip.go` `tipTopic` — assessed, deliberately NOT ported. Cost/benefit below.
+- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1** (shard 1: the mechanism
+  + the 4 densest consumers). The phase-A assessment below is kept as the record of WHY it waited;
+  the phase-B section after it is the shipped design.
 
 **tipTopic assessment (why the tooltip primitive stays Go).** `renderTip` is 40 lines of markup and
 would port cleanly in isolation (a `label.tt` + hidden checkbox + inline SVG + `tt-card`, one
@@ -755,3 +757,78 @@ locale-dependent text processing that belongs on the Go side of the seam. Recomm
 `tipTopic` in **phase B**, when the shell itself is Zig and a tooltip can be composed in-process
 without crossing the ABI; until then the pre-rendered-raw contract is correct and already
 golden-gated everywhere it appears.
+
+## tipTopic → structured `tipSt` (phase B-1b shard 1) — SHIPPED
+
+The phase-A assessment above ruled out both bad options. What shipped is neither: the tooltip is
+composed **in-process by the tab renderer it sits in** (no per-tooltip ABI round trip), and the
+state contracts grew a `tipSt` **beside** the raw string, so nothing already merged broke.
+
+**Split.** `tooltip.go` now has two halves. `tipState(id,title,body,keys,links)` resolves
+EVERYTHING locale- and registry-dependent Go-side — `helpTopics` prose (`help.<id>.title/.body`),
+`virtualMIDILinks()`, one `i18n.T` per group header / action label / `@`-prefixed mouse-gesture
+word, the `kbEmph` first-whitespace verb split (now `kbSplit`), and the `
+
+` body paragraph
+split with its trim-and-drop-empties rule. `renderTipSt(tipSt)` is then PURE markup and is the
+golden reference for `components.zig renderTip`. `renderTip(...)` = `renderTipSt(tipState(...))`,
+so `tip()`, `tipTopic()` and `tooltip_test.go` are byte-unchanged.
+
+**State shape** (`omitempty` on every nested slice, per the null-slice gotcha):
+`tipSt{id,title,keys[],paras[],links[]}` · `tipKbSt{hasGroup,group,chips[],verb,rest}` ·
+`tipChipSt{text,sep}` · `tipLinkSt{label,url}`. Two decisions worth keeping:
+- **`hasGroup` is an explicit bool**, not "group is non-empty". The section dedup runs on the i18n
+  KEY (`r.Group != curGroup`), so two distinct keys that resolve to the same text still emit two
+  headers — and a catalog that maps a group key to `""` still emits an empty header, exactly as the
+  pre-split renderer did. "Empty means the other branch" would have silently dropped it.
+- **`verb`/`rest`** carry the kbEmph split, not the raw label: the split point is locale-dependent
+  text processing and belongs on the Go side of the seam.
+
+**Dual-field bridge.** Every migrated contract has `tipSt` (structured) next to `tip` (legacy
+pre-rendered). Both renderers resolve through one helper — Go `tipOr(*tipSt, raw)`, Zig
+`components.tipOr(h, ?Tip, raw)` — structured wins, else raw. So the 14 files NOT in this shard
+(`automations_runnow.go`, `bridge_actions.go`, `library_mirror.go`, `player.go`,
+`render_library_cueedit.go`, `render_library_state.go`, `render_live.go`, `render_midictl*.go`,
+`render_motion.go`, `render_vrchat*.go`, `update_actions.go`, `components.go`'s own
+`selectBoxTip`/`resolveSelectBoxTip`) are literally untouched and keep working. Wave B-2 flips
+them; the raw fields die only when the last one is gone.
+
+**Consumers migrated (shard 1):** `render_settings.go` (13 sites — card head, `sbFieldTip`,
+`sbToggleTip`, fpair kids), `render_player.go` (4: `tipWave` / `tp.tipVideo` /
+`editBox.tipTrim` / `alignRow.tipAlign`), `automations_editor.go` (8), `automations_schedules.go`
+(7, including the `selraw` **ss-label** — `aeLabelSt{text,tip}` replaces a pre-rendered
+`<span class=ss-label>` string).
+
+**Where the Zig code lives, and what it deliberately does NOT touch.**
+- `components.zig` marker block `// --- phaseb-tip ---`: `Tip`/`TipKb`/`TipChip`/`TipLink` +
+  `renderTip` + `tipOr`. The existing shared `Field` struct and `fieldEx` are **unchanged** —
+  `Field` is used by every migrated tab, so `dialogs_b.zig` grows a local `DlgField` twin
+  (`Field` + `tipSt`) instead, exactly the precedent the dialog sweep set for `dlgFieldSt`.
+- Primitives that take the tooltip as a **string** (`fieldEx`, `toggleRowTip`, the ss-label) are
+  fed from a scratch `Html` buffer:
+  ```zig
+  var tb = Html.init(h.a);
+  defer tb.deinit();
+  try c.tipOr(&tb, b.tipSt, b.tip);
+  try c.fieldEx(h, .., tb.b.items);
+  ```
+  One allocation per tooltip, and — the point — **zero duplication** of `fieldEx`'s markup. Never
+  re-emit a primitive's HTML to avoid a buffer; that is how the two renderers drift.
+- `rz_ui_render_tip` exists (root.zig / raveui.h / zigui.go / zigui_stub.go marker blocks) purely
+  as a **parity-gate export**. Production never calls it per tooltip — the tab renderer composes.
+
+**Gates.** `zigui_golden_tip_test.go` is the primitive's own gate: **527 byte-equality subtests** =
+every `helpTopics` id (73) × every installed locale (7) + 16 edge fixtures (empty, escaping-heavy,
+unicode, long-verbose, blank-paragraph runs, CRLF body, chip edges, repeated/empty kb groups,
+multi-link, tab-split verb, ad-hoc `tip()`). It also asserts `tipTopic(id) == renderTipSt(tipState)`
+per topic, so the split itself is proven lossless. A one-byte Zig perturbation
+(`tt-title`→`tt-titl`) failed **all 527**. Per-consumer suites got tooltip fixtures on top of their
+existing states (settings 77 · player 45 · automations 66 subtests), covering
+present / absent / multi-link / keybind-grid + the raw-bridge fallback in every locale. The
+automations tip test carries an **inertness guard**: the grid mutation must change the bytes and
+emit `tt-kb-keys`, and the raw-bridge variant must reproduce the structured bytes exactly — a
+fixture whose mutation reaches no tooltip is worse than no fixture.
+
+**Standing rule.** Help texts are LONG and verbose BY DESIGN (owner directive, on record): the app
+teaches while it is used. Never trim, truncate, elide or "summarise" a `help.*` string, and never
+add a length cap to the renderer.
