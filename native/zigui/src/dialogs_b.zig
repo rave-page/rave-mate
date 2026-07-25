@@ -538,11 +538,11 @@ test "ws poster field: label/placeholder raw, value escaped" {
 // The form body is a BLOCK LIST (settings-port shape): each block renders exactly one
 // components.zig primitive, so layout cannot drift between the renderers. Depth is 1 by
 // construction — a block carries at most two fields plus one button, so the JSON stays a plain
-// tree. Raw seams: every `tip` (Go tipTopic markup) and a step's `raw` block (Go loudnessFields,
-// the shared float-formatted loudness override).
+// tree. Raw seams: every `tip` (Go tipTopic markup). A step's `loud` block is the shared loudness
+// override as STRUCTURED state (components.zig loudnessFields); only its tip + extra stay raw.
 
 /// AeBlock is one form block. Only the fields its kind names are read.
-/// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|raw.
+/// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|loud.
 pub const AeBlock = struct {
     kind: []const u8 = "",
     field: c.Field = .{},
@@ -555,7 +555,7 @@ pub const AeBlock = struct {
     tone: []const u8 = "",
     text: []const u8 = "",
     tip: []const u8 = "",
-    raw: []const u8 = "",
+    loud: c.Loud = .{},
 };
 
 pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
@@ -590,8 +590,8 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
         try h.esc(b.text);
         try h.raw(b.tip);
         try h.raw("</div>");
-    } else if (std.mem.eql(u8, k, "raw")) {
-        try h.raw(b.raw);
+    } else if (std.mem.eql(u8, k, "loud")) {
+        try c.loudnessFields(h, b.loud);
     }
 }
 

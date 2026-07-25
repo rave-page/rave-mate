@@ -354,6 +354,29 @@ func TestZigAutoEditorGolden(t *testing.T) {
 	}
 }
 
+// TestZigAeLoudnessGolden sweeps the SHARED loudness block (components.go loudSt, phase B-1a)
+// through the automation editor's transcode step, which used to embed it as raw markup:
+// absent / override-partial / full / compact chips / codec warn / unit edges / escaping /
+// unicode. The step card frames the block, so a drift shows up as a full-document diff.
+func TestZigAeLoudnessGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, o := range loudFx() {
+		t.Run(name, func(t *testing.T) {
+			st := aeModalSt{
+				Title: "Edit automation", SecMatch: "Match", SecActions: "Actions",
+				Steps: []aeStepSt{{
+					Title: "3. Transcode", Desc: "Re-encode with a preset",
+					Blocks: []aeBlockSt{{Kind: aeBlkLoud, Loud: newLoudSt(o)}},
+				}},
+				Save: "Save", Cancel: "Cancel",
+			}
+			zigGolden(t, "aeLoud", st, aeModalHTMLOf(st), zigui.RenderAutoEditor)
+		})
+	}
+}
+
 // ── Automations ▸ run now ──
 
 func arModalFixtures() map[string]arModalSt {

@@ -456,8 +456,8 @@ func (u *UI) aePresets() automation.PresetResolver {
 // The pure renderers live in render_automations_ed.go and are mirrored byte-for-byte in
 // native/zigui/src/dialogs_b.zig. Everything impure stays here: the working copy under s.mu, the
 // builtin+config preset merge, the engine validators, smart-select registration and tipTopic
-// markup. The loudness override block rides as trusted raw markup (components.go loudnessFields -
-// float-formatted Go-side), same rule as every other pre-rendered fragment in the fleet.
+// markup. The loudness override block crosses as structured state (components.go loudSt, phase
+// B-1a); only its own tooltip + extra markup stay raw.
 
 func (u *UI) aeModalHTML() string {
 	s := &u.ae
@@ -599,13 +599,13 @@ func (u *UI) aeStepState(i, n int, step aeStep, presets []transcode.Preset) aeSt
 			{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("automations.ed.trimEnd"), af("trime"), a.TrimEnd == nil || *a.TrimEnd)},
 			{Kind: aeBlkSelect, Sel: aePresetSelectState(step.key, af("preset"), a.PresetID, presets, "remux")},
 			aeOutDirBlock(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")),
-			{Kind: aeBlkRaw, Raw: aeLoudnessHTML(af, a, presets, "remux")},
+			{Kind: aeBlkLoud, Loud: aeLoudnessSt(af, a, presets, "remux")},
 		}
 	case automation.ActionTranscode:
 		out.Blocks = []aeBlockSt{
 			{Kind: aeBlkSelect, Sel: aePresetSelectState(step.key, af("preset"), a.PresetID, presets, "")},
 			aeOutDirBlock(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")),
-			{Kind: aeBlkRaw, Raw: aeLoudnessHTML(af, a, presets, "")},
+			{Kind: aeBlkLoud, Loud: aeLoudnessSt(af, a, presets, "")},
 		}
 	case automation.ActionMove, automation.ActionCopy:
 		out.Blocks = []aeBlockSt{aeOutDirBlock(af("dir"), a.OutputDir, "")}
@@ -619,12 +619,12 @@ func (u *UI) aeStepState(i, n int, step aeStep, presets []transcode.Preset) aeSt
 	return out
 }
 
-// aeLoudnessHTML renders the shared loudness block (components.go loudnessFields) as a per-action
-// override of the step's preset. Applies to trim-silence too - both steps route through
-// doTranscode, so resolvePreset sees the override (engine.go). presets resolves a.PresetID so the
-// block can tell the user when the chosen preset copies audio and normalization therefore can't run.
-func aeLoudnessHTML(af func(string) string, a automation.Action, presets []transcode.Preset, dfltPreset string) string {
-	return loudnessFields(loudnessOpts{
+// aeLoudnessSt resolves the shared loudness block (components.go loudSt) as a per-action override
+// of the step's preset. Applies to trim-silence too - both steps route through doTranscode, so
+// resolvePreset sees the override (engine.go). presets resolves a.PresetID so the block can tell
+// the user when the chosen preset copies audio and normalization therefore can't run.
+func aeLoudnessSt(af func(string) string, a automation.Action, presets []transcode.Preset, dfltPreset string) loudSt {
+	return newLoudSt(loudnessOpts{
 		act:       af,
 		toggleLbl: i18n.T("library.enc.normalizeOverride"),
 		topic:     "auto-loudness",

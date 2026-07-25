@@ -14,9 +14,9 @@ import (
 // body is data, not HTML, so both renderers walk the same tree through the same components.go
 // primitives. Depth is 1 by construction - a block carries at most two fields plus one button.
 //
-// Trusted raw fields: every `tip` (tipTopic markup, tooltip.go) and a step's `raw` block, which is
-// another renderer's output (components.go loudnessFields - the shared loudness override block,
-// float-formatted Go-side like every other pre-rendered fragment in the fleet).
+// Trusted raw fields: every `tip` (tipTopic markup, tooltip.go). A step's `loud` block carries the
+// shared loudness override block as STRUCTURED state (components.go loudSt, phase B-1a) - only its
+// own tip + extra stay raw.
 
 // dlgFieldSt is a fieldEx() call as state; json tags match components.zig `Field` exactly
 // (uiField in render_media_shared.go carries no tip, and that shape is the media batch's).
@@ -51,7 +51,7 @@ const (
 	aeBlkFPairSel = "fpairsel" // fpair(select, select) - the daily hour/minute pair
 	aeBlkHint     = "hint"     // hint(tone, text)
 	aeBlkPBHint   = "pbhint"   // <div class=pb-hint> escaped text + raw tip
-	aeBlkRaw      = "raw"      // another renderer's markup (loudness block)
+	aeBlkLoud     = "loud"     // the shared loudness block (components.go loudSt)
 )
 
 // aeBlockSt is one form block. Only the fields its Kind names are populated.
@@ -67,7 +67,7 @@ type aeBlockSt struct {
 	Tone      string     `json:"tone,omitempty"`
 	Text      string     `json:"text,omitempty"`
 	Tip       string     `json:"tip,omitempty"` // RAW
-	Raw       string     `json:"raw,omitempty"` // RAW
+	Loud      loudSt     `json:"loud"`
 }
 
 // aeStepSt is one chain-step card: header (order + type label + reorder/remove) then its body.
@@ -118,8 +118,8 @@ func aeBlockHTML(b aeBlockSt) string {
 		return hint(b.Tone, b.Text)
 	case aeBlkPBHint:
 		return `<div class=pb-hint>` + htmlEscape(b.Text) + b.Tip + `</div>`
-	case aeBlkRaw:
-		return b.Raw
+	case aeBlkLoud:
+		return b.Loud.html()
 	}
 	return ""
 }
