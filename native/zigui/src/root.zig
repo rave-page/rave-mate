@@ -728,3 +728,21 @@ test "dialogs-b module" {
 }
 
 // --- end dialogs-b ---
+
+// --- phaseb-tip ---
+// The tooltip primitive as its OWN export: the migrated tabs compose it in-process (settings.zig
+// / player.zig / dialogs_b.zig call components.renderTip directly), so this export exists purely
+// for the byte-parity gate over the whole helpTopics registry x locales
+// (internal/webui/zigui_golden_tip_test.go).
+
+const components = @import("components.zig");
+
+export fn rz_ui_render_tip(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(components.Tip, components.renderTip, state_json, len, out_len);
+}
+
+test "phaseb-tip module" {
+    _ = components;
+}
+
+// --- end phaseb-tip ---

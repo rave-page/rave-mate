@@ -1197,3 +1197,212 @@ test "hiddenField + labeledInput match the Go form-modal inputs" {
 }
 
 // --- end dialogs-a ---
+
+// --- phaseb-tip ---
+// Port of internal/webui/tooltip.go renderTipSt: the shared long-form help card. Everything
+// locale- and registry-dependent (helpTopics prose, virtualMIDILinks, the i18n.T per keybind row
+// and group header, the kbEmph verb split, the body paragraph split) is resolved Go-side into
+// tipSt — this renderer only composes markup. Gate: internal/webui/zigui_golden_tip_test.go.
+//
+// Help texts are LONG and verbose BY DESIGN (owner directive): never truncate, never elide.
+
+/// TipChip is one combo token of a keybind row (webui tipChipSt): sep = a "+"/"/" separator span
+/// (trusted literal, raw like Go), else an escaped key-cap chip.
+pub const TipChip = struct {
+    text: []const u8 = "",
+    sep: bool = false,
+};
+
+/// TipKb is one resolved keybind row (webui tipKbSt). hasGroup is EXPLICIT: the section dedup ran
+/// on the i18n key Go-side, so an empty resolved header still renders.
+pub const TipKb = struct {
+    hasGroup: bool = false,
+    group: []const u8 = "",
+    chips: []const TipChip = &.{},
+    verb: []const u8 = "",
+    rest: []const u8 = "",
+};
+
+/// TipLink is one authoritative-source link at the card's foot (webui tipLinkSt).
+pub const TipLink = struct {
+    label: []const u8 = "",
+    url: []const u8 = "",
+};
+
+/// Tip is one resolved tooltip (webui tipSt).
+pub const Tip = struct {
+    id: []const u8 = "",
+    title: []const u8 = "",
+    keys: []const TipKb = &.{},
+    paras: []const []const u8 = &.{},
+    links: []const TipLink = &.{},
+};
+
+/// renderTip mirrors Go renderTipSt. Markup is a pure-CSS "checkbox pin"; the hidden checkbox
+/// carries the ctl data-label (tt-<id>), so ids stay addressable from `ctl set`.
+pub fn renderTip(h: *Html, t: Tip) !void {
+    try h.raw("<label class=tt data-label=\"tt-");
+    try h.esc(t.id);
+    try h.raw("\" aria-label=\"About: ");
+    try h.esc(t.title);
+    try h.raw("\" tabindex=0>");
+    try h.raw("<input type=checkbox class=tt-x tabindex=-1>");
+    // lucide-style info glyph; currentColor follows muted/hover/pinned states.
+    try h.raw("<svg class=tt-ic viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">" ++
+        "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/></svg>");
+    // tt-card = transparent positioner (+hover bridge), portaled to #__ttlayer while shown;
+    // tt-in = visual panel, scrolls internally when tall (~60vh cap).
+    try h.raw("<span class=tt-card role=tooltip><span class=tt-in>");
+    try h.raw("<b class=tt-title>");
+    try h.esc(t.title);
+    try h.raw("</b>");
+    if (t.keys.len != 0) { // keybind grid: section header + (combo chips -> action) rows
+        try h.raw("<span class=tt-kb>");
+        for (t.keys) |r| {
+            if (r.hasGroup) {
+                try h.raw("<span class=tt-kb-group>");
+                try h.esc(r.group);
+                try h.raw("</span>");
+            }
+            try h.raw("<span class=tt-kb-keys>");
+            for (r.chips) |ch| {
+                if (ch.sep) {
+                    try h.raw("<span class=tt-kb-sep>");
+                    try h.raw(ch.text);
+                    try h.raw("</span>");
+                    continue;
+                }
+                try h.raw("<kbd class=tt-kbd>");
+                try h.esc(ch.text);
+                try h.raw("</kbd>");
+            }
+            try h.raw("</span><span class=tt-kb-act><b class=tt-kb-verb>");
+            try h.esc(r.verb);
+            try h.raw("</b>");
+            try h.esc(r.rest);
+            try h.raw("</span>");
+        }
+        try h.raw("</span>");
+    }
+    for (t.paras) |p| {
+        try h.raw("<span class=tt-p>");
+        try h.esc(p);
+        try h.raw("</span>");
+    }
+    if (t.links.len != 0) {
+        try h.raw("<span class=tt-links>");
+        for (t.links) |l| {
+            try h.raw("<a class=tt-link data-act=open-url data-val=\"");
+            try h.esc(l.url);
+            try h.raw("\">");
+            try h.esc(l.label);
+            try h.raw(" \u{2197}</a>");
+        }
+        try h.raw("</span>");
+    }
+    try h.raw("</span></span></label>");
+}
+
+/// tipOr is the dual-field bridge (Go tipOr): structured state wins, else the pre-rendered raw
+/// markup an un-migrated Go builder still ships.
+pub fn tipOr(h: *Html, t: ?Tip, raw_tip: []const u8) !void {
+    if (t) |s| return renderTip(h, s);
+    try h.raw(raw_tip);
+}
+
+/// tt_glyph is the fixed pin-checkbox + info-glyph prologue every card shares (test literal).
+const tt_glyph = "<input type=checkbox class=tt-x tabindex=-1>" ++
+    "<svg class=tt-ic viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">" ++
+    "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/></svg>";
+
+test "renderTip: title + paragraphs only (no grid, no links)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderTip(&h, .{ .id = "icecast", .title = "Set capture", .paras = &.{ "First & only.", "Second <p>." } });
+    try std.testing.expectEqualStrings("<label class=tt data-label=\"tt-icecast\" aria-label=\"About: Set capture\" tabindex=0>" ++
+        tt_glyph ++
+        "<span class=tt-card role=tooltip><span class=tt-in><b class=tt-title>Set capture</b>" ++
+        "<span class=tt-p>First &amp; only.</span><span class=tt-p>Second &lt;p&gt;.</span>" ++
+        "</span></span></label>", h.b.items);
+}
+
+test "renderTip: escapes the id/title into data-label + aria-label" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderTip(&h, .{ .id = "a\"b&c", .title = "T <\"x\">" });
+    try std.testing.expectEqualStrings("<label class=tt data-label=\"tt-a&#34;b&amp;c\" aria-label=\"About: T &lt;&#34;x&#34;&gt;\" tabindex=0>" ++
+        tt_glyph ++
+        "<span class=tt-card role=tooltip><span class=tt-in><b class=tt-title>T &lt;&#34;x&#34;&gt;</b>" ++
+        "</span></span></label>", h.b.items);
+}
+
+test "renderTip: keybind grid - group header, separators, verb split" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderTip(&h, .{
+        .id = "cue-edit",
+        .title = "Cue editor",
+        .keys = &.{
+            .{ .hasGroup = true, .group = "Navigate", .chips = &.{ .{ .text = "\u{2190}" }, .{ .text = "/", .sep = true }, .{ .text = "\u{2192}" } }, .verb = "Step", .rest = " one beat" },
+            .{ .chips = &.{ .{ .text = "Shift" }, .{ .text = "+", .sep = true }, .{ .text = "Right-click" } }, .verb = "Remove" },
+        },
+        .paras = &.{"Body."},
+    });
+    try std.testing.expectEqualStrings("<label class=tt data-label=\"tt-cue-edit\" aria-label=\"About: Cue editor\" tabindex=0>" ++
+        tt_glyph ++
+        "<span class=tt-card role=tooltip><span class=tt-in><b class=tt-title>Cue editor</b>" ++
+        "<span class=tt-kb><span class=tt-kb-group>Navigate</span>" ++
+        "<span class=tt-kb-keys><kbd class=tt-kbd>\u{2190}</kbd><span class=tt-kb-sep>/</span><kbd class=tt-kbd>\u{2192}</kbd></span>" ++
+        "<span class=tt-kb-act><b class=tt-kb-verb>Step</b> one beat</span>" ++
+        "<span class=tt-kb-keys><kbd class=tt-kbd>Shift</kbd><span class=tt-kb-sep>+</span><kbd class=tt-kbd>Right-click</kbd></span>" ++
+        "<span class=tt-kb-act><b class=tt-kb-verb>Remove</b></span></span>" ++
+        "<span class=tt-p>Body.</span></span></span></label>", h.b.items);
+}
+
+test "renderTip: link list escapes url + label and keeps the arrow glyph" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderTip(&h, .{ .id = "x", .title = "X", .links = &.{
+        .{ .label = "EBU R128", .url = "https://tech.ebu.ch/publications/r128" },
+        .{ .label = "A & B", .url = "https://x/?a&b=\"c\"" },
+    } });
+    try std.testing.expectEqualStrings("<label class=tt data-label=\"tt-x\" aria-label=\"About: X\" tabindex=0>" ++
+        tt_glyph ++
+        "<span class=tt-card role=tooltip><span class=tt-in><b class=tt-title>X</b>" ++
+        "<span class=tt-links>" ++
+        "<a class=tt-link data-act=open-url data-val=\"https://tech.ebu.ch/publications/r128\">EBU R128 \u{2197}</a>" ++
+        "<a class=tt-link data-act=open-url data-val=\"https://x/?a&amp;b=&#34;c&#34;\">A &amp; B \u{2197}</a>" ++
+        "</span></span></span></label>", h.b.items);
+}
+
+test "tipOr: structured wins, absent falls back to the raw string" {
+    var a = Html.init(std.testing.allocator);
+    defer a.deinit();
+    try tipOr(&a, null, "<span class=raw></span>");
+    try std.testing.expectEqualStrings("<span class=raw></span>", a.b.items);
+
+    var b = Html.init(std.testing.allocator);
+    defer b.deinit();
+    try tipOr(&b, .{ .id = "x", .title = "X" }, "<span class=raw></span>");
+    try std.testing.expect(std.mem.indexOf(u8, b.b.items, "tt-x") != null);
+}
+
+test "Tip parses from JSON with omitted slices (Go omitempty contract)" {
+    const js = "{\"id\":\"x\",\"title\":\"T\",\"paras\":[\"a\",\"b\"]," ++
+        "\"keys\":[{\"hasGroup\":true,\"group\":\"G\",\"chips\":[{\"text\":\"+\",\"sep\":true}],\"verb\":\"V\",\"rest\":\" w\"}]," ++
+        "\"links\":[{\"label\":\"L\",\"url\":\"U\"}]}";
+    const p = try std.json.parseFromSlice(Tip, std.testing.allocator, js, .{ .ignore_unknown_fields = true });
+    defer p.deinit();
+    try std.testing.expectEqual(@as(usize, 2), p.value.paras.len);
+    try std.testing.expectEqualStrings("b", p.value.paras[1]);
+    try std.testing.expectEqual(@as(usize, 1), p.value.keys.len);
+    try std.testing.expect(p.value.keys[0].chips[0].sep);
+    try std.testing.expectEqualStrings("U", p.value.links[0].url);
+
+    const bare = try std.json.parseFromSlice(Tip, std.testing.allocator, "{\"id\":\"y\",\"title\":\"\"}", .{ .ignore_unknown_fields = true });
+    defer bare.deinit();
+    try std.testing.expectEqual(@as(usize, 0), bare.value.paras.len);
+    try std.testing.expectEqual(@as(usize, 0), bare.value.keys.len);
+}
+
+// --- end phaseb-tip ---

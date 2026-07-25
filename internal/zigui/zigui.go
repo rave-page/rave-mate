@@ -875,3 +875,15 @@ func RenderPCGpu(stateJSON []byte) (string, bool) {
 }
 
 // --- end dialogs-b ---
+
+// --- phaseb-tip ---
+
+// RenderTip renders one structured tooltip (webui tipSt). The migrated tabs compose tooltips
+// in-process inside their own view render; this binding exists for the byte-parity gate.
+func RenderTip(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_tip(p, l, n)
+	})
+}
+
+// --- end phaseb-tip ---
