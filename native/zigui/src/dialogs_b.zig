@@ -540,8 +540,9 @@ test "ws poster field: label/placeholder raw, value escaped" {
 // construction — a block carries at most two fields plus one button, so the JSON stays a plain
 // tree. Tooltips (field, pbhint, and the selraw ss-label) cross as STRUCTURED state since phase
 // B1b — components.zig renderTip; the `tip`/`labelHtml` strings stay as the dual-field bridge for
-// the state automations_runnow.go shares and still ships pre-rendered. Remaining raw seam: a
-// step's `raw` block (Go loudnessFields, the shared float-formatted loudness override).
+// the state automations_runnow.go shares and still ships pre-rendered. A step's `loud` block is
+// the shared loudness override as STRUCTURED state too (components.zig loudnessFields, phase
+// B-1a); only ITS own tip + extra stay raw. No `raw` block kind is left.
 
 /// DlgField is webui dlgFieldSt: components.Field plus a structured tooltip. Local twin (rather
 /// than a components.Field change) because Field is shared with every other migrated tab.
@@ -579,7 +580,7 @@ fn renderAeLabel(h: *Html, l: AeLabel) !void {
 }
 
 /// AeBlock is one form block. Only the fields its kind names are read.
-/// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|raw.
+/// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|loud.
 pub const AeBlock = struct {
     kind: []const u8 = "",
     field: DlgField = .{},
@@ -594,7 +595,7 @@ pub const AeBlock = struct {
     text: []const u8 = "",
     tip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
     tipSt: ?c.Tip = null, // structured tooltip — wins over tip
-    raw: []const u8 = "",
+    loud: c.Loud = .{}, // the shared loudness block, structured
 };
 
 pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
@@ -636,8 +637,8 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
         try h.esc(b.text);
         try c.tipOr(h, b.tipSt, b.tip);
         try h.raw("</div>");
-    } else if (std.mem.eql(u8, k, "raw")) {
-        try h.raw(b.raw);
+    } else if (std.mem.eql(u8, k, "loud")) {
+        try c.loudnessFields(h, b.loud);
     }
 }
 

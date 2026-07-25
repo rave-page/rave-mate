@@ -17,8 +17,8 @@ import (
 // Tooltips cross as STRUCTURED state (*tipSt, tooltip.go) since phase B1b - including the selraw
 // ss-label, which used to be pre-rendered markup. The raw `tip`/`labelHtml` fields stay as the
 // dual-field bridge (tipOr): automations_runnow.go shares dlgFieldSt and still ships raw.
-// Remaining trusted raw field: a step's `raw` block, another renderer's output (components.go
-// loudnessFields - the shared loudness override block, float-formatted Go-side).
+// A step's `loud` block carries the shared loudness override as STRUCTURED state too (components.go
+// loudSt, phase B-1a); only ITS own tip + extra markup stay raw. No `raw` block kind is left.
 
 // dlgFieldSt is a fieldEx() call as state; json tags match components.zig `Field` exactly
 // (uiField in render_media_shared.go carries no tip, and that shape is the media batch's).
@@ -72,7 +72,7 @@ const (
 	aeBlkFPairSel = "fpairsel" // fpair(select, select) - the daily hour/minute pair
 	aeBlkHint     = "hint"     // hint(tone, text)
 	aeBlkPBHint   = "pbhint"   // <div class=pb-hint> escaped text + raw tip
-	aeBlkRaw      = "raw"      // another renderer's markup (loudness block)
+	aeBlkLoud     = "loud"     // the shared loudness block (components.go loudSt)
 )
 
 // aeBlockSt is one form block. Only the fields its Kind names are populated.
@@ -90,7 +90,7 @@ type aeBlockSt struct {
 	Text      string     `json:"text,omitempty"`
 	Tip       string     `json:"tip,omitempty"`   // legacy RAW tooltip markup (bridge)
 	TipS      *tipSt     `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
-	Raw       string     `json:"raw,omitempty"`   // RAW
+	Loud      loudSt     `json:"loud"`            // the shared loudness block, structured
 }
 
 // aeStepSt is one chain-step card: header (order + type label + reorder/remove) then its body.
@@ -144,8 +144,8 @@ func aeBlockHTML(b aeBlockSt) string {
 		return hint(b.Tone, b.Text)
 	case aeBlkPBHint:
 		return `<div class=pb-hint>` + htmlEscape(b.Text) + tipOr(b.TipS, b.Tip) + `</div>`
-	case aeBlkRaw:
-		return b.Raw
+	case aeBlkLoud:
+		return b.Loud.html()
 	}
 	return ""
 }

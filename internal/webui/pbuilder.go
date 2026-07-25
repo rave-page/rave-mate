@@ -332,7 +332,7 @@ func mpPresetModalState(t mpSt, idx int) mpPresetDlgSt {
 		[][2]string{{"0", i18n.T("library.enc.source")}, {"44100", "44.1 kHz"}, {"48000", "48 kHz"}, {"96000", "96 kHz"}}, strconv.Itoa(d.SampleRate))
 
 	// loudness: the draft IS the preset here (no override framing), compact layout
-	st.Loudness = loudnessFields(loudnessOpts{
+	st.Loud = newLoudSt(loudnessOpts{
 		act:       act,
 		toggleLbl: i18n.T("library.enc.normalize"),
 		topic:     "enc-loudness",

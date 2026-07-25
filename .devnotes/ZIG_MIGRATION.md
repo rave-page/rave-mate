@@ -166,6 +166,12 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
+- **P6 UI phase B-1a (SHIPPED):** the shared loudness block (`components.go` `loudnessFields`) —
+  which phase A left riding through four state contracts as pre-rendered raw HTML — is structured
+  state (`loudSt`) rendered by `components.zig loudnessFields` in all four consumers (library
+  encode builder, export preset editor, automation transcode step, player export pane). No raw
+  loudness markup crosses the ABI any more; only its own tooltip + the caller's extraHTML stay
+  raw. Detail: ZIG_UI_GUIDE.md "B-1a: the shared loudness block".
 - **P6 UI phase B-1b (shard 1 SHIPPED):** `tooltip.go` `renderTip` — the 70-call-site, 18-file
   tooltip primitive — now crosses as structured `tipSt` (all locale/registry resolution Go-side)
   and renders in `components.zig renderTip`, byte-identical over 527 subtests (73 topics × 7

@@ -1246,7 +1246,7 @@ type libEncSt struct {
 	AudioBitrate libPBFieldSt  `json:"audioBitrate"`
 	Channels     selState      `json:"channels"`
 	SampleRate   selState      `json:"sampleRate"`
-	Loudness     string        `json:"loudness"` // raw shared loudness block (components.go)
+	Loud         loudSt        `json:"loud"` // the shared loudness block (components.go), structured
 	TrimStart    libPBFieldSt  `json:"trimStart"`
 	TrimEnd      libPBFieldSt  `json:"trimEnd"`
 	OutputNote   string        `json:"outputNote"`
@@ -1545,7 +1545,7 @@ func (u *UI) libEncodeState(s *libSt, sel *libSel) libEncSt {
 	st.SampleRate = resolvePbSelect(i18n.T("library.enc.sampleRate"), "lib-pf:samplerate",
 		[][2]string{{"0", i18n.T("library.enc.source")}, {"44100", "44.1 kHz"}, {"48000", "48 kHz"}, {"96000", "96 kHz"}}, strconv.Itoa(d.SampleRate))
 	// loudness - the shared block (components.go); the draft IS the preset, so no override framing
-	st.Loudness = loudnessFields(loudnessOpts{
+	st.Loud = newLoudSt(loudnessOpts{
 		act:       func(f string) string { return "lib-pf:" + f },
 		toggleLbl: i18n.T("library.enc.normalize"),
 		topic:     "enc-loudness",

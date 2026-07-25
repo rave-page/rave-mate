@@ -4,7 +4,7 @@
 //!
 //! Raw seams (pre-rendered Go markup, emitted verbatim exactly as the Go renderer does):
 //! cue-edit rail / gridfix cockpit (kind="raw"), the media player, the tag editor, the
-//! works-together section, the shared loudness block and the Camelot wheel SVG (all its
+//! works-together section and the Camelot wheel SVG (all its
 //! float math + %.2f formatting stays Go-side).
 
 const std = @import("std");
@@ -54,7 +54,7 @@ pub const Enc = struct {
     audioBitrate: k.PBField = .{},
     channels: k.Select = .{},
     sampleRate: k.Select = .{},
-    loudness: []const u8 = "",
+    loud: c.Loud = .{},
     trimStart: k.PBField = .{},
     trimEnd: k.PBField = .{},
     outputNote: []const u8 = "",
@@ -258,8 +258,8 @@ pub fn renderEnc(h: *Html, st: Enc) !void {
     try c.selectBox(h, st.channels);
     try c.selectBox(h, st.sampleRate);
     try h.raw("</div>");
-    // loudness - the shared block (components.go), resolved Go-side
-    try h.raw(st.loudness);
+    // loudness - the shared block (components.zig loudnessFields), resolved Go-side
+    try c.loudnessFields(h, st.loud);
     // trim + start
     try k.pbField(h, st.trimStart);
     try k.pbField(h, st.trimEnd);

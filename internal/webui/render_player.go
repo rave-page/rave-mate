@@ -20,9 +20,9 @@ import (
 //   - the waveform SVG (player.go mpWaveSVG/mpLoudPath: %.1f/%.2f coordinate math,
 //     beatgrid + cue/drop/trim geometry, and the `mp-<host>-ph` / `-ph-veil` ids the
 //     client rAF runtime rewrites 30x/s). Same rule as keywheelSVG / the campath viewer.
-//   - the shared loudness block (components.go loudnessFields) incl. its extraHTML
-//     (mpLoudExtraHTML gain-plan line + pre-listen toggle) - one components.go markup
-//     source shared with the library preset builder + automation steps.
+//   - mpLoudExtraHTML (the standalone gain-plan line + pre-listen toggle) when the PRESET
+//     normalizes without an override. The shared loudness block itself now crosses as
+//     structured state (components.go loudSt, phase B-1a) with its extraHTML inside it.
 //   - tipTopic() tooltip cards (tooltip.go).
 //   - the <video> element's inline JS handlers (they carry a %.3f volume and drive
 //     shell.go __mse) - resolved Go-side, then attrQ'd identically by both renderers.
@@ -169,14 +169,15 @@ type mpSumSt struct {
 	Title string `json:"title"`
 }
 
-// mpExMediaSt is one media's export block. Loud/LoudExtra are RAW (components.go
-// loudnessFields + the standalone gain-plan line).
+// mpExMediaSt is one media's export block. Loud is the shared loudness block as state (its own
+// extraHTML rides inside it); LoudExtra stays RAW - the standalone gain-plan line shown when the
+// PRESET normalizes without an override (Go mpLoudExtraHTML).
 type mpExMediaSt struct {
 	PresetSel selState `json:"presetSel"`
 	Summary   mpSumSt  `json:"summary"`
 	OutField  uiField  `json:"outField"`
 	PickBtn   uiBtn    `json:"pickBtn"`
-	Loud      string   `json:"loud"`
+	Loud      loudSt   `json:"loud"`
 	LoudExtra string   `json:"loudExtra"`
 }
 
@@ -690,8 +691,8 @@ func (u *UI) mpAlignState(t mpSt) mpAlignSt2 {
 	return st
 }
 
-// mpExportState resolves the export pane. The shared loudness block (components.go
-// loudnessFields, incl. mpLoudExtraHTML) rides as trusted RAW markup.
+// mpExportState resolves the export pane. The shared loudness block crosses as structured state
+// (components.go loudSt); its extraHTML (mpLoudExtraHTML) rides inside it as raw markup.
 func (u *UI) mpExportState(t mpSt) mpExportSt {
 	st := mpExportSt{Medias: []mpExMediaSt{}, ScopeSel: emptySel(), Dual: t.dual()}
 	var custom []transcode.Preset
@@ -735,7 +736,7 @@ func (u *UI) mpExportState(t mpSt) mpExportSt {
 			Act: "pick-save:" + mpExt(m.path, cur) + ":mp-outpath:" + t.host + "\x1f" + fmt.Sprint(i)}
 		// per-media loudness override of the chosen preset (the shared block, components.go);
 		// the live gain-plan line + pre-listen toggle collapse with the switch
-		ms.Loud = loudnessFields(loudnessOpts{
+		ms.Loud = newLoudSt(loudnessOpts{
 			act:       func(f string) string { return fmt.Sprintf("mp-loud:%s\x1f%d\x1f%s", t.host, i, f) },
 			toggleLbl: i18n.T("library.enc.normalizeOverride"),
 			topic:     "mp-loudness",
@@ -1083,7 +1084,7 @@ func mpExportHTMLOf(st mpExportSt) string {
 			`<span class=mp-outwrap><span class=mp-outfield>` + m.OutField.html() + `</span>` +
 			m.PickBtn.html() + `</span>` +
 			`</div>`)
-		b.WriteString(m.Loud)
+		b.WriteString(m.Loud.html())
 		b.WriteString(m.LoudExtra)
 		b.WriteString(`</div>`)
 	}

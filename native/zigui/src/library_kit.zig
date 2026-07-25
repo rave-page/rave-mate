@@ -59,43 +59,10 @@ pub fn hints(h: *Html, hs: []const Hint) !void {
     for (hs) |x| try c.hint(h, x.tone, x.text);
 }
 
-/// PBField is a pbFieldEx() call as state (dl = Go strings.ToLower(label)).
-pub const PBField = struct {
-    label: []const u8 = "",
-    dl: []const u8 = "",
-    act: []const u8 = "",
-    value: []const u8 = "",
-    inputType: []const u8 = "",
-    ph: []const u8 = "",
-    hint: []const u8 = "",
-};
-
-/// pbField mirrors Go pbFieldExDL: labelled input with optional hint + placeholder.
-pub fn pbField(h: *Html, f: PBField) !void {
-    try h.raw("<div class=pb-field data-label=");
-    try h.attrQ(f.dl);
-    try h.raw("><div class=pb-label>");
-    try h.esc(f.label);
-    try h.raw("</div><input class=field-input type=\"");
-    try h.raw(if (f.inputType.len == 0) "text" else f.inputType);
-    try h.raw("\" value=\"");
-    try h.esc(f.value);
-    try h.raw("\" data-act=\"");
-    try h.esc(f.act);
-    try h.raw("\"");
-    if (f.ph.len != 0) {
-        try h.raw(" placeholder=\"");
-        try h.esc(f.ph);
-        try h.raw("\"");
-    }
-    try h.raw(">");
-    if (f.hint.len != 0) {
-        try h.raw("<div class=pb-hint>");
-        try h.esc(f.hint);
-        try h.raw("</div>");
-    }
-    try h.raw("</div>");
-}
+/// PBField / pbField live in components.zig (the shared loudness block needs them and the base
+/// kit cannot import this file) - re-exported here for the library callers, same as Select/Btn/Tab.
+pub const PBField = c.PBField;
+pub const pbField = c.pbField;
 
 /// fieldRaw mirrors Go fieldRaw: a bare filter input dispatching act on change.
 pub fn fieldRaw(h: *Html, act: []const u8, value: []const u8, ph: []const u8) !void {

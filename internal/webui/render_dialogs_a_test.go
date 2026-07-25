@@ -220,7 +220,7 @@ func dlgPresetFx() map[string]mpPresetDlgSt {
 			HasLossles: true, LosslessTx: "Lossless codecs ignore a bitrate target",
 			Channels:   dlgSel("mp-pf-publish-0-channels", "Channels", "Source", false, "", selRow{Val: "0", Label: "Source", Cur: true}),
 			SampleRate: dlgSel("mp-pf-publish-0-samplerate", "Sample rate", "48 kHz", false, "", selRow{Val: "48000", Label: "48 kHz", Cur: true}),
-			Loudness:   `<div class="pb-grp pb-grp--compact"><label class=row data-label="normalize"></label></div>`,
+			Loud:       newLoudSt(loudFx()["compactDefault"]),
 			Foot:       foot,
 		}
 	}
@@ -286,7 +286,7 @@ func dlgPresetFx() map[string]mpPresetDlgSt {
 	esc.SrcHint, esc.MaxHint, esc.BitrateLbl = dlgAdv, dlgAdv, dlgAdv
 	esc.Chips = []libChipSt{newChip(dlgAdv, dlgAdv, "mp-pf:"+dlgAdv, true)}
 	esc.Warns = []libHintSt{{Tone: "warn", Text: dlgAdv}}
-	esc.Loudness = `<div class="pb-grp pb-grp--compact"><span data-x="a&b"></span></div>`
+	esc.Loud = newLoudSt(loudFx()["escaping"])
 	esc.Foot = []uiBtn{
 		{Label: dlgAdv, Variant: "outline", Act: "mp-papply:" + dlgAdv},
 		{Label: dlgAdv, Variant: "primary", Act: "mp-psave:" + dlgAdv},

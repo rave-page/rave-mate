@@ -1198,6 +1198,218 @@ test "hiddenField + labeledInput match the Go form-modal inputs" {
 
 // --- end dialogs-a ---
 
+// --- phaseb-loud ---
+// Phase B-1a: THE shared loudness block (Go components.go loudnessFields) as a structured
+// component. It used to ride through four state contracts (library encode builder, export
+// preset editor, automation transcode step, player export pane) as pre-rendered raw markup.
+//
+// pbField MOVED here from library_kit.zig (which now aliases both, like it already aliases
+// Select/Btn/Tab): the loudness block needs it and components.zig cannot import library_kit.zig
+// without a cycle - so the base kit owns the markup and the library kit re-exports it. ONE
+// markup source, mirroring Go where pbFieldExDL is the single source both paths call.
+
+/// PBField is a pbFieldEx() call as state (dl = Go strings.ToLower(label)).
+pub const PBField = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    value: []const u8 = "",
+    inputType: []const u8 = "",
+    ph: []const u8 = "",
+    hint: []const u8 = "",
+};
+
+/// pbField mirrors Go pbFieldExDL: labelled input with optional hint + placeholder.
+pub fn pbField(h: *Html, f: PBField) !void {
+    try h.raw("<div class=pb-field data-label=");
+    try h.attrQ(f.dl);
+    try h.raw("><div class=pb-label>");
+    try h.esc(f.label);
+    try h.raw("</div><input class=field-input type=\"");
+    try h.raw(if (f.inputType.len == 0) "text" else f.inputType);
+    try h.raw("\" value=\"");
+    try h.esc(f.value);
+    try h.raw("\" data-act=\"");
+    try h.esc(f.act);
+    try h.raw("\"");
+    if (f.ph.len != 0) {
+        try h.raw(" placeholder=\"");
+        try h.esc(f.ph);
+        try h.raw("\"");
+    }
+    try h.raw(">");
+    if (f.hint.len != 0) {
+        try h.raw("<div class=pb-hint>");
+        try h.esc(f.hint);
+        try h.raw("</div>");
+    }
+    try h.raw("</div>");
+}
+
+/// LoudChip is one industry-target quick-pick chip (compact layout only). label/val/title are
+/// final strings - Go formats the "%g|%g" I|TP payload and compresses the chip text, so no
+/// float crosses the ABI for Zig to format.
+pub const LoudChip = struct {
+    label: []const u8 = "",
+    val: []const u8 = "",
+    title: []const u8 = "",
+    active: bool = false,
+};
+
+/// Loud is the shared loudness block as state (Go loudSt). toggle.on gates the whole body -
+/// the same single source Go uses (o.vals.On drives both the switch and the branch), so an
+/// off block is a bare `.pb-grp` with just the switch. compact = the dense variant: industry
+/// quick-pick chips + inline targets + raise chip on one wrap row, instead of full-width
+/// stacked builder fields. tip and extra are RAW markup: tooltip.go owns tipTopic (phase
+/// B-1b), the caller owns extraHTML (the export surface's gain-plan line + pre-listen toggle,
+/// which collapse with the switch). hasWarn is explicit - a blank i18n string must not switch
+/// arms.
+pub const Loud = struct {
+    compact: bool = false,
+    toggle: Toggle = .{},
+    tip: []const u8 = "",
+    chipAct: []const u8 = "",
+    chips: []const LoudChip = &.{},
+    iField: PBField = .{},
+    tpField: PBField = .{},
+    raise: Toggle = .{},
+    hasWarn: bool = false,
+    warn: []const u8 = "",
+    extra: []const u8 = "",
+};
+
+/// loudnessFields mirrors Go loudSt.html() byte-for-byte.
+pub fn loudnessFields(h: *Html, st: Loud) !void {
+    try h.raw(if (st.compact) "<div class=\"pb-grp pb-grp--compact\">" else "<div class=\"pb-grp\">");
+    try toggleRowTip(h, st.toggle.label, st.toggle.dl, st.toggle.act, st.toggle.on, st.tip);
+    if (st.toggle.on) {
+        if (st.compact) {
+            try h.raw("<div class=lt-chips>");
+            for (st.chips) |ch| {
+                try h.raw(if (ch.active) "<button class=\"lt-chip active\" data-act=" else "<button class=\"lt-chip\" data-act=");
+                try h.attrQ(st.chipAct);
+                try h.raw(" data-val=");
+                try h.attrQ(ch.val);
+                try h.raw(" title=");
+                try h.attrQ(ch.title);
+                try h.raw(">");
+                try h.esc(ch.label);
+                try h.raw("</button>");
+            }
+            try h.raw("</div><div class=lt-fields><span class=lt-field>");
+            try pbField(h, st.iField);
+            try h.raw("</span><span class=lt-field>");
+            try pbField(h, st.tpField);
+            try h.raw("</span><span class=lt-raise>");
+            try toggleOf(h, st.raise);
+            try h.raw("</span></div>");
+        } else {
+            try pbField(h, st.iField);
+            try pbField(h, st.tpField);
+            try toggleOf(h, st.raise);
+        }
+        if (st.hasWarn) try hint(h, "warn", st.warn);
+        try h.raw(st.extra);
+    }
+    try h.raw("</div>");
+}
+
+test "pbField mirrors Go pbFieldExDL (moved from library_kit)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try pbField(&h, .{ .label = "CRF", .dl = "crf", .act = "lib-pf:crf", .value = "2\"3", .inputType = "number", .hint = "lower = better" });
+    try std.testing.expectEqualStrings("<div class=pb-field data-label=\"crf\"><div class=pb-label>CRF</div>" ++
+        "<input class=field-input type=\"number\" value=\"2&#34;3\" data-act=\"lib-pf:crf\">" ++
+        "<div class=pb-hint>lower = better</div></div>", h.b.items);
+}
+
+test "loudnessFields: switch off = the bare group (nothing behind it)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try loudnessFields(&h, .{
+        .toggle = .{ .label = "Normalize loudness", .dl = "normalize loudness", .act = "lib-pf:loudon" },
+        .tip = "<span class=tip>?</span>",
+        // a populated body must stay unrendered while the switch is off
+        .iField = .{ .label = "Target", .dl = "target", .act = "lib-pf:loudi", .value = "-14", .inputType = "number" },
+        .hasWarn = true,
+        .warn = "needs a re-encode",
+        .extra = "<div class=x></div>",
+    });
+    try std.testing.expectEqualStrings("<div class=\"pb-grp\">" ++
+        "<label class=row data-label=\"normalize loudness\"><span class=row-label>Normalize loudness" ++
+        "<span class=tip>?</span></span><span class=switch><input type=checkbox data-act=\"lib-pf:loudon\" " ++
+        "data-value=\"false\"><span class=switch-track></span></span></label></div>", h.b.items);
+}
+
+test "loudnessFields: stacked builder layout (hint on the target, warn chip, raw extra)" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try loudnessFields(&h, .{
+        .toggle = .{ .label = "Normalize loudness", .dl = "normalize loudness", .act = "lib-pf:loudon", .on = true },
+        .tip = "<span class=tip data-topic=enc-loudness>?</span>",
+        .iField = .{ .label = "Target loudness (LUFS)", .dl = "target loudness (lufs)", .act = "lib-pf:loudi", .value = "-14", .inputType = "number", .hint = "-14 suits streaming" },
+        .tpField = .{ .label = "True peak (dBTP)", .dl = "true peak (dbtp)", .act = "lib-pf:loudtp", .value = "-1", .inputType = "number" },
+        .raise = .{ .label = "Raise quiet only", .dl = "raise quiet only", .act = "lib-pf:loudraise", .on = true },
+        .hasWarn = true,
+        .warn = "This codec copies audio & can't normalize",
+        .extra = "<span data-x=\"a&b\">raw</span>",
+    });
+    try std.testing.expectEqualStrings("<div class=\"pb-grp\">" ++
+        "<label class=row data-label=\"normalize loudness\"><span class=row-label>Normalize loudness" ++
+        "<span class=tip data-topic=enc-loudness>?</span></span><span class=switch>" ++
+        "<input type=checkbox checked data-act=\"lib-pf:loudon\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>" ++
+        "<div class=pb-field data-label=\"target loudness (lufs)\"><div class=pb-label>Target loudness (LUFS)</div>" ++
+        "<input class=field-input type=\"number\" value=\"-14\" data-act=\"lib-pf:loudi\">" ++
+        "<div class=pb-hint>-14 suits streaming</div></div>" ++
+        "<div class=pb-field data-label=\"true peak (dbtp)\"><div class=pb-label>True peak (dBTP)</div>" ++
+        "<input class=field-input type=\"number\" value=\"-1\" data-act=\"lib-pf:loudtp\"></div>" ++
+        "<label class=row data-label=\"raise quiet only\"><span class=row-label>Raise quiet only</span>" ++
+        "<span class=switch><input type=checkbox checked data-act=\"lib-pf:loudraise\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>" ++
+        "<span class=\"hint hint--warn\">This codec copies audio &amp; can&#39;t normalize</span>" ++
+        "<span data-x=\"a&b\">raw</span></div>", h.b.items);
+}
+
+test "loudnessFields: compact layout - chips, placeholders, no warn" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try loudnessFields(&h, .{
+        .compact = true,
+        .toggle = .{ .label = "Normalize", .dl = "normalize", .act = "mp-loud:pub\x1f0\x1floudon", .on = true },
+        .tip = "",
+        .chipAct = "mp-loud:pub\x1f0\x1floudtarget",
+        .chips = &.{
+            .{ .label = "-14 Streaming", .val = "-14|-1", .title = "Streaming −14 LUFS (Spotify · YouTube)", .active = true },
+            .{ .label = "-8 Club", .val = "-8|-0.3", .title = "Club / DJ master −8 LUFS (hot)" },
+        },
+        .iField = .{ .label = "Target", .dl = "target", .act = "mp-loud:pub\x1f0\x1floudi", .inputType = "number", .ph = "-14" },
+        .tpField = .{ .label = "True peak", .dl = "true peak", .act = "mp-loud:pub\x1f0\x1floudtp", .inputType = "number", .ph = "-1" },
+        .raise = .{ .label = "Raise quiet only", .dl = "raise quiet only", .act = "mp-loud:pub\x1f0\x1floudraise" },
+    });
+    try std.testing.expectEqualStrings("<div class=\"pb-grp pb-grp--compact\">" ++
+        "<label class=row data-label=\"normalize\"><span class=row-label>Normalize</span><span class=switch>" ++
+        "<input type=checkbox checked data-act=\"mp-loud:pub\x1f0\x1floudon\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>" ++
+        "<div class=lt-chips>" ++
+        "<button class=\"lt-chip active\" data-act=\"mp-loud:pub\x1f0\x1floudtarget\" data-val=\"-14|-1\" " ++
+        "title=\"Streaming −14 LUFS (Spotify · YouTube)\">-14 Streaming</button>" ++
+        "<button class=\"lt-chip\" data-act=\"mp-loud:pub\x1f0\x1floudtarget\" data-val=\"-8|-0.3\" " ++
+        "title=\"Club / DJ master −8 LUFS (hot)\">-8 Club</button></div>" ++
+        "<div class=lt-fields><span class=lt-field>" ++
+        "<div class=pb-field data-label=\"target\"><div class=pb-label>Target</div>" ++
+        "<input class=field-input type=\"number\" value=\"\" data-act=\"mp-loud:pub\x1f0\x1floudi\" placeholder=\"-14\"></div>" ++
+        "</span><span class=lt-field>" ++
+        "<div class=pb-field data-label=\"true peak\"><div class=pb-label>True peak</div>" ++
+        "<input class=field-input type=\"number\" value=\"\" data-act=\"mp-loud:pub\x1f0\x1floudtp\" placeholder=\"-1\"></div>" ++
+        "</span><span class=lt-raise>" ++
+        "<label class=row data-label=\"raise quiet only\"><span class=row-label>Raise quiet only</span>" ++
+        "<span class=switch><input type=checkbox data-act=\"mp-loud:pub\x1f0\x1floudraise\" data-value=\"false\">" ++
+        "<span class=switch-track></span></span></label></span></div></div>", h.b.items);
+}
+
+// --- end phaseb-loud ---
+
 // --- phaseb-tip ---
 // Port of internal/webui/tooltip.go renderTipSt: the shared long-form help card. Everything
 // locale- and registry-dependent (helpTopics prose, virtualMIDILinks, the i18n.T per keybind row

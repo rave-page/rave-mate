@@ -1542,7 +1542,7 @@ func libEncHTML(st libEncSt) string {
 	b.WriteString(selHTML(st.SampleRate))
 	b.WriteString(`</div>`)
 	// loudness - the shared block (components.go); the draft IS the preset, so no override framing
-	b.WriteString(st.Loudness)
+	b.WriteString(st.Loud.html())
 	// trim + start
 	b.WriteString(st.TrimStart.html())
 	b.WriteString(st.TrimEnd.html())

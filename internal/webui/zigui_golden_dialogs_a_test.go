@@ -142,3 +142,20 @@ func TestZigDialogsAGolden(t *testing.T) {
 		})
 	}
 }
+
+// TestZigPresetLoudnessGolden sweeps the SHARED loudness block (components.go loudSt, phase
+// B-1a) through the export preset editor: absent / override-partial / full / compact chips /
+// codec warn / unit edges / escaping / unicode. It used to ride here as raw markup.
+func TestZigPresetLoudnessGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	base := dlgPresetFx()["video"]
+	for name, o := range loudFx() {
+		t.Run(name, func(t *testing.T) {
+			st := base
+			st.Loud = newLoudSt(o)
+			zigGolden(t, "presetLoud", st, mpPresetDlgHTMLOf(st), zigui.RenderDlgPreset)
+		})
+	}
+}

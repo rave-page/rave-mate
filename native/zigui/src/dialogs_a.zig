@@ -7,7 +7,7 @@
 //! local, publish remote and tracklist flows use it instead of six near-copy ports.
 //!
 //! Raw (trusted) pass-throughs, matching what Go splices UNESCAPED:
-//!  - the shared loudness block (components.go loudnessFields) inside the preset editor,
+//!  - the shared loudness block (components.zig loudnessFields) inside the preset editor,
 //!  - clock/offset readouts (`15:04:05`, pubClock) and row numbers in the time-fix preview,
 //!  - the hand-written English message literals that wrap an already-escaped value
 //!    (Choice.msgRaw).
@@ -212,8 +212,8 @@ pub fn renderFix(h: *Html, st: Fix) !void {
 /// shown" branch rides as an explicit flag (never "empty means the other arm"): hasSrc,
 /// hasVideo (not an audio-only media), hasVEnc (the codec really re-encodes), hasLadder /
 /// hasVbrTgl / hasVbrq / hasChips (the audio-bitrate arms), hasLossless.
-/// loudness = the SHARED loudness block (components.go loudnessFields) as trusted RAW
-/// markup — the same seam the library encode builder keeps.
+/// loud = the SHARED loudness block (components.zig loudnessFields) as structured state —
+/// same as the library encode builder.
 pub const Preset = struct {
     title: []const u8 = "",
     idField: k.PBField = .{},
@@ -243,7 +243,7 @@ pub const Preset = struct {
     losslessTx: []const u8 = "",
     channels: c.Select = .{},
     samplerate: c.Select = .{},
-    loudness: []const u8 = "",
+    loud: c.Loud = .{},
     warns: []const k.Hint = &.{},
     foot: []const c.Btn = &.{},
 };
@@ -294,7 +294,7 @@ pub fn renderPreset(h: *Html, st: Preset) !void {
     try c.selectBox(h, st.samplerate);
     try c.fpairClose(h);
     try h.raw("</div>");
-    try h.raw(st.loudness);
+    try c.loudnessFields(h, st.loud);
     try k.hints(h, st.warns);
     try h.raw("</div>");
     try c.modalFoot(h);
