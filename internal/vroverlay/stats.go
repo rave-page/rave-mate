@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"strings"
 	"time"
@@ -263,11 +262,17 @@ func (m *Manager) timingView() statsView {
 // only. Reuses the Renderer's Orbitron faces + brand palette (corporate identity).
 func (r *Renderer) RenderStats(v statsView, w, h int, bgAlpha float64) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(img, img.Bounds(), image.NewUniform(scaleA(colPanelBG, bgAlpha)), image.Point{}, draw.Src)
+	r.paintInto(img, func(p *paint) { r.statsPaint(p, v, w, h, bgAlpha) })
+	return img
+}
+
+// statsPaint draws the stats panel into a paint target (direct Go or zigvr display list).
+func (r *Renderer) statsPaint(p *paint, v statsView, w, h int, bgAlpha float64) {
+	p.fillSrc(0, 0, w, h, scaleA(colPanelBG, bgAlpha))
 	pad := 16
 
-	drawText(img, r.name, v.title, pad, pad+r.lh-4, colName)
-	fillRect(img, pad, pad+r.lh+2, w-2*pad, 2, colName) // brand underline
+	p.text(r.name, v.title, pad, pad+r.lh-4, colName)
+	p.fillOver(pad, pad+r.lh+2, w-2*pad, 2, colName) // brand underline
 	y := pad + r.lh + 8 + r.lh
 
 	for _, row := range v.rows {
@@ -275,8 +280,8 @@ func (r *Renderer) RenderStats(v statsView, w, h int, bgAlpha float64) *image.NR
 		if col == nil {
 			col = colText
 		}
-		drawText(img, r.body, truncText(r.body, row.label, w-2*pad-textWidth(r.body, row.value)-16), pad, y, colText)
-		drawText(img, r.body, row.value, w-pad-textWidth(r.body, row.value), y, col)
+		p.text(r.body, truncText(r.body, row.label, w-2*pad-textWidth(r.body, row.value)-16), pad, y, colText)
+		p.text(r.body, row.value, w-pad-textWidth(r.body, row.value), y, col)
 		y += r.lh
 	}
 
@@ -290,29 +295,28 @@ func (r *Renderer) RenderStats(v statsView, w, h int, bgAlpha float64) *image.NR
 	// Graph fills the gap between the rows and the footer (when there's room + data).
 	gTop, gBot := y+6, footTop-12
 	if len(v.graph) > 0 && gBot-gTop > 48 {
-		drawStatsLegend(img, r, v.graph, pad, gTop+r.lh-6)
+		drawStatsLegend(p, r, v.graph, pad, gTop+r.lh-6)
 		gTop += r.lh
-		drawStatsGraph(img, pad, gTop, w-2*pad, gBot-gTop, v.graph)
+		drawStatsGraph(p, pad, gTop, w-2*pad, gBot-gTop, v.graph)
 	}
 
 	fy := footTop + r.lh - 6
 	for _, ln := range foot {
-		drawText(img, r.body, ln, pad, fy, colMuted)
+		p.text(r.body, ln, pad, fy, colMuted)
 		fy += r.lh
 	}
-	return img
 }
 
 // drawStatsLegend draws colour swatch + label chips left→right at the given text baseline.
-func drawStatsLegend(img *image.NRGBA, r *Renderer, series []statsSeries, x, baseline int) {
+func drawStatsLegend(p *paint, r *Renderer, series []statsSeries, x, baseline int) {
 	cx := x
 	for _, s := range series {
 		if s.label == "" {
 			continue
 		}
-		fillRect(img, cx, baseline-10, 12, 10, s.col)
+		p.fillOver(cx, baseline-10, 12, 10, s.col)
 		cx += 16
-		drawText(img, r.body, s.label, cx, baseline, colText)
+		p.text(r.body, s.label, cx, baseline, colText)
 		cx += textWidth(r.body, s.label) + 18
 	}
 }
@@ -320,11 +324,11 @@ func drawStatsLegend(img *image.NRGBA, r *Renderer, series []statsSeries, x, bas
 // drawStatsGraph rasters multi-series traces into x,y,w,h: recessed dark well, faint thirds grid,
 // right-aligned (newest at the right edge), autoscaled to the hottest sample. Mirrors the dashboard
 // netGraph so the in-headset graph reads identically to the desktop one.
-func drawStatsGraph(img *image.NRGBA, x, y, w, h int, series []statsSeries) {
-	fillRect(img, x, y, w, h, color.NRGBA{R: 6, G: 6, B: 10, A: 220})
+func drawStatsGraph(p *paint, x, y, w, h int, series []statsSeries) {
+	p.fillOver(x, y, w, h, color.NRGBA{R: 6, G: 6, B: 10, A: 220})
 	grid := color.NRGBA{R: 60, G: 60, B: 72, A: 70}
-	fillRect(img, x, y+h/3, w, 1, grid)
-	fillRect(img, x, y+2*h/3, w, 1, grid)
+	p.fillOver(x, y+h/3, w, 1, grid)
+	p.fillOver(x, y+2*h/3, w, 1, grid)
 
 	span := 0
 	for _, s := range series {
@@ -369,13 +373,13 @@ func drawStatsGraph(img *image.NRGBA, x, y, w, h int, series []statsSeries) {
 			if s.fill {
 				fc := s.col
 				fc.A = 0x2e
-				fillRect(img, px, gy+1, 1, y+h-(gy+1), fc)
+				p.fillOver(px, gy+1, 1, y+h-(gy+1), fc)
 			}
 			top, bot := gy, gy
 			if prevY >= 0 { // connect columns → continuous line
 				top, bot = min(prevY, gy), max(prevY, gy)
 			}
-			fillRect(img, px, top, 1, bot+2-top, s.col)
+			p.fillOver(px, top, 1, bot+2-top, s.col)
 			prevY = gy
 		}
 	}

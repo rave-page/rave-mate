@@ -13,6 +13,8 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
+
+	"rave.page/mate/internal/zigvr"
 )
 
 //go:embed assets/Orbitron-Bold.ttf
@@ -66,6 +68,12 @@ type Renderer struct {
 	// output is uploaded synchronously (SetOverlayRaw copies) and never retained, and
 	// every render fully overwrites the buffer (bg fill first). Cap: canvasCacheMax.
 	canvas map[[2]int]*image.NRGBA
+
+	// zig dispatches the hot renders (Panel/RenderMenu/RenderStats) to the ravevr Zig
+	// raster lib when linked (-tags zigvr); the direct Go path stays the golden
+	// reference + fallback. dl is the reused per-frame display list (VR goroutine only).
+	zig bool
+	dl  *zigvr.List
 }
 
 // canvasCacheMax bounds the canvas cache (menu + posmenu + panel sizes; a handful live).
@@ -108,7 +116,8 @@ func NewRenderer(scale float64) (*Renderer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Renderer{name: nm, body: bd, lh: int(22 * scale), canvas: map[[2]int]*image.NRGBA{}}, nil
+	return &Renderer{name: nm, body: bd, lh: int(22 * scale), canvas: map[[2]int]*image.NRGBA{},
+		zig: zigvr.Available()}, nil
 }
 
 // scaleA returns c with its alpha scaled by f (0..1) - lets the panel/menu background fade
@@ -127,7 +136,13 @@ func scaleA(c color.NRGBA, f float64) color.NRGBA {
 // translucent background only - text stays fully opaque.
 func (r *Renderer) Panel(lines []Line, w, h int, bgAlpha float64) *image.NRGBA {
 	img := r.canvasFor(w, h)
-	draw.Draw(img, img.Bounds(), image.NewUniform(scaleA(colPanelBG, bgAlpha)), image.Point{}, draw.Src)
+	r.paintInto(img, func(p *paint) { r.panelPaint(p, lines, w, h, bgAlpha) })
+	return img
+}
+
+// panelPaint draws the panel into a paint target (direct Go or zigvr display list).
+func (r *Renderer) panelPaint(p *paint, lines []Line, w, h int, bgAlpha float64) {
+	p.fillSrc(0, 0, w, h, scaleA(colPanelBG, bgAlpha))
 
 	pad := 12
 	maxW := w - 2*pad
@@ -176,10 +191,9 @@ func (r *Renderer) Panel(lines []Line, w, h int, bgAlpha float64) *image.NRGBA {
 	}
 	y := h - pad - (len(rows)-1)*r.lh
 	for _, rw := range rows {
-		drawText(img, rw.face, rw.text, pad+rw.ind, y, rw.col)
+		p.text(rw.face, rw.text, pad+rw.ind, y, rw.col)
 		y += r.lh
 	}
-	return img
 }
 
 // Menu layout (pixels). Rows are full-width, drawn top-down; row 0 is the title.
@@ -229,48 +243,51 @@ func (r *Renderer) RenderMenu(title string, items []MenuItem, bgAlpha float64, p
 	rows := max(len(items), padRows)
 	h := MenuRowH * (rows + 1)
 	img := r.canvasFor(MenuW, h)
+	r.paintInto(img, func(p *paint) { r.menuPaint(p, title, items, bgAlpha, h) })
+	return img
+}
+
+// menuPaint draws the menu into a paint target (direct Go or zigvr display list).
+func (r *Renderer) menuPaint(p *paint, title string, items []MenuItem, bgAlpha float64, h int) {
 	headBG, rowBG := scaleA(colHeadBG, bgAlpha), scaleA(colRow, bgAlpha)
-	draw.Draw(img, img.Bounds(), image.NewUniform(scaleA(colMenuBG, bgAlpha)), image.Point{}, draw.Src)
+	p.fillSrc(0, 0, MenuW, h, scaleA(colMenuBG, bgAlpha))
 	// Title bar.
-	fillRect(img, 0, 0, MenuW, MenuRowH, headBG)
-	drawText(img, r.name, truncText(r.name, title, MenuW-32), 16, 34, colName)
+	p.fillOver(0, 0, MenuW, MenuRowH, headBG)
+	p.text(r.name, truncText(r.name, title, MenuW-32), 16, 34, colName)
 	for i, it := range items {
 		top := (i + 1) * MenuRowH
 		rb := rowBG
 		switch it.Kind {
 		case MIHeader:
-			fillRect(img, 0, top, MenuW, MenuRowH, headBG)
-			drawText(img, r.name, truncText(r.name, it.Label, MenuW-32), 16, top+34, colMuteTxt)
+			p.fillOver(0, top, MenuW, MenuRowH, headBG)
+			p.text(r.name, truncText(r.name, it.Label, MenuW-32), 16, top+34, colMuteTxt)
 		case MIAction:
-			fillRect(img, 0, top+1, MenuW, MenuRowH-1, rb)
+			p.fillOver(0, top+1, MenuW, MenuRowH-1, rb)
 			vw := 0
 			if it.Value != "" {
 				vw = textWidth(r.body, truncText(r.body, it.Value, MenuW/2))
 			}
-			drawText(img, r.body, truncText(r.body, it.Label, MenuW-44-vw), 16, top+34, colText)
+			p.text(r.body, truncText(r.body, it.Label, MenuW-44-vw), 16, top+34, colText)
 			if it.Value != "" {
 				v := truncText(r.body, it.Value, MenuW/2)
-				drawText(img, r.body, v, MenuW-textWidth(r.body, v)-16, top+34, colName)
+				p.text(r.body, v, MenuW-textWidth(r.body, v)-16, top+34, colName)
 			} else {
-				drawText(img, r.body, "›", MenuW-26, top+34, colMuteTxt)
+				p.text(r.body, "›", MenuW-26, top+34, colMuteTxt)
 			}
 		case MISlider:
-			fillRect(img, 0, top+1, MenuW, MenuRowH-1, rb)
+			p.fillOver(0, top+1, MenuW, MenuRowH-1, rb)
 			vw := textWidth(r.body, truncText(r.body, it.Value, MenuW/2))
-			drawText(img, r.body, truncText(r.body, it.Label, MenuW-44-vw), 16, top+24, colText)
+			p.text(r.body, truncText(r.body, it.Label, MenuW-44-vw), 16, top+24, colText)
 			vs := truncText(r.body, it.Value, MenuW/2)
-			drawText(img, r.body, vs, MenuW-textWidth(r.body, vs)-16, top+24, colName)
+			p.text(r.body, vs, MenuW-textWidth(r.body, vs)-16, top+24, colName)
 			// track + fill
 			tx0, tx1, ty := 16, MenuW-16, top+40
-			fillRect(img, tx0, ty, tx1-tx0, 8, colTrack)
+			p.fillOver(tx0, ty, tx1-tx0, 8, colTrack)
 			fw := int(float64(tx1-tx0) * clampFrac(it.Frac))
-			fillRect(img, tx0, ty, fw, 8, colName)
+			p.fillOver(tx0, ty, fw, 8, colName)
 		}
-		for x := 0; x < MenuW; x++ { // separator
-			img.Set(x, top, colSep)
-		}
+		p.set(0, top, MenuW, 1, colSep) // separator
 	}
-	return img
 }
 
 // RenderHoverRow draws the ray-pointer row highlight as its OWN small texture (MenuW×MenuRowH):
