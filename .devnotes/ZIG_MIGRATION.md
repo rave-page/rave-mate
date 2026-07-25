@@ -169,9 +169,22 @@ Rules:
 
 ## CI
 
-Untagged builds unaffected (deliberate). After local soak: add zig install (pinned
-version, checksum) + `make zig` + `ZIG=1` to release/nightly + GitLab build:windows.
-Track in the release checklist; do NOT flip CI and default tags in the same change.
+FLIPPED 2026-07-25 (user directive: all builds ship ZIG=1 + CI validates zig):
+- **GitHub ci.yml** (both OSes): pinned zig 0.16.0 (sha256-verified download, no
+  third-party action), per-lib `zig build test`, `build-zig.sh`, rz_ export-floor
+  check (28/111/2 actual; floors 15/60/2 — zigvr funnels everything through
+  `rz_vr_render`), then tagged build+vet+`test -count=1` (archives aren't in go's
+  test cache key). Untagged build/test kept — the stub fallback path must stay green.
+- **nightly.yml / release.yml**: zig install + `GOOS=windows build-zig.sh` cross
+  (windows-gnu libs via the linux zig) → exe tags now
+  `spout vr abletonlink zigdsp zigui zigvr`; linux binaries tagged too.
+- **GitLab .gitlab-ci.yml** (rave-suite): `.zig_install` anchor; test job runs zig
+  tests + tagged suite; build:linux/build:windows build libs + tagged binaries.
+- Gotchas fixed at flip time: `#cgo linux LDFLAGS: -lquadmath` (linux libraveui.a
+  has undefined roundq/__multf3, same f128 story as mingw); build-zig.sh `.lib→.a`
+  copy now windows-target-only (a stale windows .lib in a dirty tree used to clobber
+  the fresh ELF .a; and under `set -e` the bare `[ -f x ] && cp` would have killed
+  the script on linux where no .lib exists).
 
 ## Supply chain
 

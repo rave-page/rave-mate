@@ -23,8 +23,10 @@ library/config, authors not liable for file/system damage (LICENSE §15–16). D
 ## GitHub releases (standalone repo)
 
 GitHub Releases are the distribution + self-update feed. Both workflows cross-build the
-full-feature Windows exe on Linux via mingw (`-tags "spout vr abletonlink"`, SDKs fetched
-SHA-pinned by `scripts/fetch-spout.sh` / `fetch-link.sh`), the Linux binary, and the NSIS
+full-feature Windows exe on Linux via mingw (`-tags "spout vr abletonlink zigdsp zigui
+zigvr"`; SDKs fetched SHA-pinned by `scripts/fetch-spout.sh` / `fetch-link.sh`; Zig libs
+cross-built windows-gnu by a pinned, checksum-verified zig), the Linux binary (zig tags
+too), and the NSIS
 installer, then publish the complete feed set to a release:
 
 - versioned raw exe `rave-mate-<build>-<date>-<commit>.exe` (updater target; immutable name

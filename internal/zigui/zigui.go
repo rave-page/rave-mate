@@ -10,9 +10,11 @@ package zigui
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../native/zigui/include
 #cgo LDFLAGS: -L${SRCDIR}/../../native/zigui/zig-out/lib -lraveui
-// std.json float parsing references f128 intrinsics (roundq) that Zig's bundled
-// compiler-rt doesn't export for gnu targets — mingw libquadmath provides them.
+// std.json float parsing references f128 intrinsics (roundq/__multf3) that Zig's
+// bundled compiler-rt doesn't export for gnu targets — libquadmath (mingw on
+// windows, gcc's on linux) provides them.
 #cgo windows LDFLAGS: -lquadmath
+#cgo linux LDFLAGS: -lquadmath
 #include "raveui.h"
 */
 import "C"

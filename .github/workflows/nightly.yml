@@ -1,7 +1,7 @@
 # Nightly / dev-channel builds. Every push to `development` (plus a daily schedule and
-# manual dispatch) cross-builds the full-feature Windows exe (-tags spout vr abletonlink,
-# mingw - same recipe as the internal deploy pipeline), the Linux binary, and the NSIS
-# installer, then rolls the single "nightly" prerelease with the complete self-update feed:
+# manual dispatch) cross-builds the full-feature Windows exe (-tags spout vr abletonlink
+# zigdsp zigui zigvr, mingw + pinned Zig - same recipe as the internal deploy pipeline),
+# the Linux binary (zig tags too), and the NSIS installer, then rolls the single "nightly" prerelease with the complete self-update feed:
 # versioned + stable binaries, runtime DLLs, and latest.json (Ed25519-signed when the
 # signing key secret is provisioned). The binary's updater polls
 #   https://github.com/<repo>/releases/download/nightly/latest.json
@@ -27,6 +27,8 @@ concurrency:
 
 env:
   FEED: https://github.com/${{ github.repository }}/releases/download/nightly/
+  ZIG_VERSION: 0.16.0
+  ZIG_SHA256_LINUX: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 
 jobs:
   # Cross-build the Windows exe on Linux via mingw (proven recipe: Fyne cross-compiles
@@ -95,6 +97,19 @@ jobs:
           [ "$DERIVED" = "$EMBEDDED" ] || { echo "::error::signing key does not derive the embedded UpdatePubKey - rotate key + internal/version in lockstep"; exit 1; }
           echo "signing key matches embedded UpdatePubKey"
           echo "extra_ldflags=" >> "$GITHUB_OUTPUT"
+      - name: Install Zig (pinned, checksum-verified)
+        run: |
+          NAME="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSLo zig-dl.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${NAME}.tar.xz"
+          echo "${ZIG_SHA256_LINUX}  zig-dl.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/zig-toolchain"
+          tar -xJf zig-dl.tar.xz -C "$HOME/zig-toolchain"
+          rm -f zig-dl.tar.xz
+          echo "$HOME/zig-toolchain/$NAME" >> "$GITHUB_PATH"
+      - name: Build Zig libs (windows-gnu cross)
+        run: |
+          zig version
+          GOOS=windows bash scripts/build-zig.sh
       - name: Build rave-mate.exe (all feature tags)
         env:
           EXTRA_LDFLAGS: ${{ steps.updkey.outputs.extra_ldflags }}
@@ -110,7 +125,7 @@ jobs:
             -X rave.page/mate/internal/version.FeedURL=${FEED} \
             ${EXTRA_LDFLAGS}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
-            go build -tags "spout vr abletonlink" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
+            go build -tags "spout vr abletonlink zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
           cp internal/vroverlay/sdk/openvr_api.dll dist/    # runtime-loaded by the vr backend (vendored)
           ls -la dist/
@@ -185,6 +200,19 @@ jobs:
         run: |
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
+      - name: Install Zig (pinned, checksum-verified)
+        run: |
+          NAME="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSLo zig-dl.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${NAME}.tar.xz"
+          echo "${ZIG_SHA256_LINUX}  zig-dl.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/zig-toolchain"
+          tar -xJf zig-dl.tar.xz -C "$HOME/zig-toolchain"
+          rm -f zig-dl.tar.xz
+          echo "$HOME/zig-toolchain/$NAME" >> "$GITHUB_PATH"
+      - name: Build Zig libs
+        run: |
+          zig version
+          bash scripts/build-zig.sh
       - name: Build rave-mate-linux
         env:
           UPDATE_SIGNING_KEY_PEM: ${{ secrets.UPDATE_SIGNING_KEY_PEM }}
@@ -200,7 +228,7 @@ jobs:
             -X rave.page/mate/internal/version.Channel=nightly \
             -X rave.page/mate/internal/version.FeedURL=${FEED} \
             ${EXTRA_LDFLAGS}"
-          go build -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
+          go build -tags "zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate-linux ./cmd/rave-mate
       - uses: actions/upload-artifact@v4
         with:
           name: linux

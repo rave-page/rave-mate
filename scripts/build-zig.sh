@@ -30,7 +30,7 @@ esac
 "$ZIG" build -Drelease ${target:+-Dtarget=$target}
 # zig names gnu-target static libs <name>.lib on Windows; cgo -l wants libravezig.a
 cd zig-out/lib
-[ -f ravezig.lib ] && cp -f ravezig.lib libravezig.a
+case "$target" in *windows*|"") if [ -f ravezig.lib ]; then cp -f ravezig.lib libravezig.a; fi ;; *) rm -f ravezig.lib ;; esac
 ls -la . ../bin
 echo "ravezig + rave-probe built ($ver, ${target:-native})"
 
@@ -39,7 +39,7 @@ echo "ravezig + rave-probe built ($ver, ${target:-native})"
 cd ../../../zigui
 "$ZIG" build -Drelease ${target:+-Dtarget=$target}
 cd zig-out/lib
-[ -f raveui.lib ] && cp -f raveui.lib libraveui.a
+case "$target" in *windows*|"") if [ -f raveui.lib ]; then cp -f raveui.lib libraveui.a; fi ;; *) rm -f raveui.lib ;; esac
 ls -la
 echo "raveui built ($ver, ${target:-native})"
 
@@ -47,6 +47,6 @@ echo "raveui built ($ver, ${target:-native})"
 cd ../../../zigvr
 "$ZIG" build -Drelease ${target:+-Dtarget=$target}
 cd zig-out/lib
-[ -f ravevr.lib ] && cp -f ravevr.lib libravevr.a
+case "$target" in *windows*|"") if [ -f ravevr.lib ]; then cp -f ravevr.lib libravevr.a; fi ;; *) rm -f ravevr.lib ;; esac
 ls -la
 echo "ravevr built ($ver, ${target:-native})"

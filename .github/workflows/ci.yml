@@ -1,5 +1,10 @@
 # Build + test + static analysis. repo root = rave-mate, a self-contained Go module
 # (shared code folded into internal/shared).
+# Zig validation: pinned toolchain (checksum-verified), the three native libs'
+# own `zig build test`, then tagged (zigdsp zigui zigvr) build+vet+test against
+# the freshly built libs. Untagged build/test stays — the pure-Go stub path is
+# the shipped fallback and must remain green. `-count=1` on the tagged test run:
+# .a archives are not in go's test cache key, cached PASSes would hide stale libs.
 name: CI
 
 on:
@@ -9,6 +14,11 @@ on:
 
 permissions:
   contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+  ZIG_SHA256_LINUX: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+  ZIG_SHA256_WINDOWS: 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
 
 jobs:
   build:
@@ -27,12 +37,58 @@ jobs:
         run: |
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
           sudo apt-get install -y --no-install-recommends gcc pkg-config libgl1-mesa-dev xorg-dev libasound2-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libegl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
+      - name: Install Zig (pinned, checksum-verified)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            NAME="zig-x86_64-windows-${ZIG_VERSION}"; EXT=zip; SHA="$ZIG_SHA256_WINDOWS"
+          else
+            NAME="zig-x86_64-linux-${ZIG_VERSION}"; EXT=tar.xz; SHA="$ZIG_SHA256_LINUX"
+          fi
+          curl -fsSLo "zig-dl.$EXT" "https://ziglang.org/download/${ZIG_VERSION}/${NAME}.${EXT}"
+          echo "$SHA  zig-dl.$EXT" | sha256sum -c -
+          mkdir -p "$HOME/zig-toolchain"
+          if [ "$EXT" = zip ]; then unzip -q "zig-dl.$EXT" -d "$HOME/zig-toolchain"; else tar -xJf "zig-dl.$EXT" -C "$HOME/zig-toolchain"; fi
+          rm -f "zig-dl.$EXT"
+          DIR="$HOME/zig-toolchain/$NAME"
+          if [ "$RUNNER_OS" = "Windows" ]; then DIR=$(cygpath -w "$DIR"); fi
+          echo "$DIR" >> "$GITHUB_PATH"
+      - name: Zig unit tests (native libs)
+        shell: bash
+        run: |
+          zig version
+          for lib in zigcore zigui zigvr; do (cd "native/$lib" && zig build test); done
+      - name: Build Zig libs
+        shell: bash
+        run: bash scripts/build-zig.sh
+      - name: Zig export symbol check
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # a union-merge seam once left exports inside an unclosed test block — the lib
+          # compiled but exported nothing. Assert per-lib rz_ export floors.
+          # floors from the real export counts (28/111/2); zigvr funnels the whole
+          # display list through rz_vr_render, so 2 is its complete surface.
+          for spec in zigcore/libravezig.a:15 zigui/libraveui.a:60 zigvr/libravevr.a:2; do
+            min="${spec##*:}"
+            path="native/$(dirname "${spec%:*}")/zig-out/lib/$(basename "${spec%:*}")"
+            n=$(nm -g --defined-only "$path" | grep -c ' rz_' || true)
+            echo "$path: $n rz_ exports (min $min)"
+            [ "$n" -ge "$min" ] || { echo "::error::$path exports fewer rz_ symbols than expected"; exit 1; }
+          done
       - name: Build
         run: go build ./...
+      - name: Build (zig tags)
+        run: go build -tags "zigdsp zigui zigvr" ./...
       - name: Vet
         run: go vet ./...
-      - name: Test
+      - name: Vet (zig tags)
+        run: go vet -tags "zigdsp zigui zigvr" ./...
+      - name: Test (stub fallback path)
         run: go test ./...
+      - name: Test (zig tags, parity + goldens)
+        run: go test -count=1 -tags "zigdsp zigui zigvr" ./...
       - name: gofmt
         if: runner.os == 'Linux'
         shell: bash
