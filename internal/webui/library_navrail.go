@@ -3,10 +3,12 @@ package webui
 // Left nav rail (DJ-software layout): Collection = All tracks + playlist tree;
 // Browse = places / pinned / drives / current-dir folders. Rows dispatch the same
 // acts as their toolbar counterparts (lib-plgoto / lib-nav), so behavior is shared.
+//
+// Impure half only: the pure renderer + its markup helpers live in
+// render_library_fixers.go (Zig twin: native/zigui/src/libfixers.zig).
 
 import (
 	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,44 +21,34 @@ import (
 
 const libNavMaxRows = 80 // per group; megadirs / huge playlist sets stay scannable
 
-func (u *UI) libNavRailHTML(s *libSt, sec string) string {
-	var b strings.Builder
-	b.WriteString(`<div class=libnav>`)
+// libNavRailState resolves the nav rail's rows (DB / fs / i18n). Caller holds s.mu.
+func (u *UI) libNavRailState(s *libSt, sec string) libNavSt {
+	st := libNavSt{Rows: []libNavRowSt{}}
 	if sec == "collection" {
-		u.libNavCollection(&b, s)
+		u.libNavCollection(&st, s)
 	} else {
-		u.libNavBrowse(&b, s)
+		u.libNavBrowse(&st, s)
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-func navHd(label string) string {
-	return `<div class=libnav-hd>` + html.EscapeString(label) + `</div>`
+func navHdRow(label string) libNavRowSt { return libNavRowSt{Hd: true, Label: label} }
+
+func navItRow(act, icon, label, count string, on bool) libNavRowSt {
+	return libNavRowSt{Act: act, Icon: icon, Label: label, Count: count, On: on}
 }
 
-func navIt(act, icon, label, count string, on bool) string {
-	cls := "libnav-it"
-	if on {
-		cls += " on"
-	}
-	n := ""
-	if count != "" {
-		n = `<span class=libnav-n>` + html.EscapeString(count) + `</span>`
-	}
-	return `<div class="` + cls + `" data-act="` + html.EscapeString(act) + `"><span class=libnav-ic>` + icon +
-		`</span><span class=libnav-t>` + html.EscapeString(label) + `</span>` + n + `</div>`
-}
+func (st *libNavSt) add(r libNavRowSt) { st.Rows = append(st.Rows, r) }
 
-func (u *UI) libNavCollection(b *strings.Builder, s *libSt) {
+func (u *UI) libNavCollection(st *libNavSt, s *libSt) {
 	cur := int64(0)
 	if len(s.collPl) == 1 {
 		for id := range s.collPl {
 			cur = id
 		}
 	}
-	b.WriteString(navHd(i18n.T("library.section.collection")))
-	b.WriteString(navIt("lib-plclear", "🎧", i18n.T("library.nav.allTracks"), fmt.Sprint(len(s.tracks)), len(s.collPl) == 0))
+	st.add(navHdRow(i18n.T("library.section.collection")))
+	st.add(navItRow("lib-plclear", "🎧", i18n.T("library.nav.allTracks"), fmt.Sprint(len(s.tracks)), len(s.collPl) == 0))
 	if u.svc.Lib == nil {
 		return
 	}
@@ -64,10 +56,10 @@ func (u *UI) libNavCollection(b *strings.Builder, s *libSt) {
 	if len(rows) == 0 {
 		return
 	}
-	b.WriteString(navHd(i18n.T("library.section.playlists")))
+	st.add(navHdRow(i18n.T("library.section.playlists")))
 	for i, p := range rows {
 		if i >= libNavMaxRows {
-			b.WriteString(`<div class=libnav-hd>…</div>`)
+			st.add(navHdRow("…"))
 			break
 		}
 		ic, n := "🎵", fmt.Sprint(p.TrackCount)
@@ -77,40 +69,40 @@ func (u *UI) libNavCollection(b *strings.Builder, s *libSt) {
 		case libdb.PlaylistImported:
 			ic = "⤓"
 		}
-		b.WriteString(navIt(fmt.Sprintf("lib-plgoto:%d", p.ID), ic, p.Name, n, p.ID == cur))
+		st.add(navItRow(fmt.Sprintf("lib-plgoto:%d", p.ID), ic, p.Name, n, p.ID == cur))
 	}
 }
 
-func (u *UI) libNavBrowse(b *strings.Builder, s *libSt) {
+func (u *UI) libNavBrowse(st *libNavSt, s *libSt) {
 	dir := u.libDirOr()
 	home, _ := os.UserHomeDir()
-	b.WriteString(navHd(i18n.T("library.nav.places")))
+	st.add(navHdRow(i18n.T("library.nav.places")))
 	for _, q := range [][2]string{{"home", ""}, {"desktop", "Desktop"}, {"downloads", "Downloads"}, {"music", "Music"}, {"videos", "Videos"}, {"pictures", "Pictures"}} {
 		p := home
 		if q[1] != "" {
 			p = filepath.Join(home, q[1])
 		}
-		b.WriteString(navIt("lib-nav:"+p, "⌂", i18n.T("library.browse."+q[0]), "", p == dir))
+		st.add(navItRow("lib-nav:"+p, "⌂", i18n.T("library.browse."+q[0]), "", p == dir))
 	}
 	if marks := u.libMarks(s).List(); len(marks) > 0 {
-		b.WriteString(navHd(i18n.T("library.nav.pinned")))
+		st.add(navHdRow(i18n.T("library.nav.pinned")))
 		for _, bm := range marks {
-			b.WriteString(navIt("lib-nav:"+bm.Path, "★", bm.Label, "", bm.Path == dir))
+			st.add(navItRow("lib-nav:"+bm.Path, "★", bm.Label, "", bm.Path == dir))
 		}
 	}
 	if drives := libDrives(); len(drives) > 1 {
-		b.WriteString(navHd(i18n.T("library.nav.drives")))
+		st.add(navHdRow(i18n.T("library.nav.drives")))
 		for _, d := range drives {
-			b.WriteString(navIt("lib-nav:"+d, "💾", d, "", strings.EqualFold(filepath.VolumeName(dir)+`\`, d)))
+			st.add(navItRow("lib-nav:"+d, "💾", d, "", strings.EqualFold(filepath.VolumeName(dir)+`\`, d)))
 		}
 	}
 	fes, errRead, ok := u.libBrowseEntries(s, dir)
 	if !ok || errRead {
 		return
 	}
-	b.WriteString(navHd(i18n.T("library.nav.folders")))
+	st.add(navHdRow(i18n.T("library.nav.folders")))
 	if parent := filepath.Dir(dir); parent != dir {
-		b.WriteString(navIt("lib-nav:"+parent, "↰", "..", "", false))
+		st.add(navItRow("lib-nav:"+parent, "↰", "..", "", false))
 	}
 	n := 0
 	for _, e := range fes {
@@ -118,10 +110,10 @@ func (u *UI) libNavBrowse(b *strings.Builder, s *libSt) {
 			continue
 		}
 		if n++; n > libNavMaxRows {
-			b.WriteString(`<div class=libnav-hd>…</div>`)
+			st.add(navHdRow("…"))
 			break
 		}
-		b.WriteString(navIt("lib-nav:"+e.path, "📁", e.name, "", false))
+		st.add(navItRow("lib-nav:"+e.path, "📁", e.name, "", false))
 	}
 }
 

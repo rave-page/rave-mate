@@ -7,7 +7,6 @@ package webui
 
 import (
 	"fmt"
-	"html"
 	"math"
 	"path/filepath"
 	"strconv"
@@ -143,24 +142,23 @@ func (u *UI) tfSetKind(kind string, on bool) {
 	u.libPatchBody()
 }
 
-// tfResultsHTML replaces the collection list while the fixer view is open.
-func (u *UI) tfResultsHTML() string {
+// tfResultsState resolves the fixer view that replaces the collection list while it is open.
+// Pure renderer: libTFResHTML (render_library_fixers.go) / native/zigui/src/libfixers.zig.
+func (u *UI) tfResultsState() libTFResSt {
 	t := &u.tf
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + html.EscapeString(i18n.T("library.tf.eyebrow")) + `</div><div class=insp-title>` +
-		html.EscapeString(i18n.T("library.tf.title")) + `</div></div>`)
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.tf.desc")) + `</p>`)
+	st := libTFResSt{Eyebrow: i18n.T("library.tf.eyebrow"), Title: i18n.T("library.tf.title"),
+		Desc: i18n.T("library.tf.desc"), CloseLbl: i18n.T("common.close")}
 
 	if t.stage == "scan" {
 		frac := 0.0
 		if t.total > 0 {
 			frac = float64(t.done) / float64(t.total)
 		}
-		b.WriteString(progressBar(frac, i18n.T("library.tf.scanning", i18n.A{"done": fmt.Sprint(t.done), "total": fmt.Sprint(t.total)})))
-		b.WriteString(btnRow(btn(i18n.T("common.close"), "ghost", "tf-close", "")))
-		return b.String()
+		st.Scanning, st.Pct = true, progressPct(frac)
+		st.ScanCap = i18n.T("library.tf.scanning", i18n.A{"done": fmt.Sprint(t.done), "total": fmt.Sprint(t.total)})
+		return st
 	}
 
 	nsel := 0
@@ -169,22 +167,20 @@ func (u *UI) tfResultsHTML() string {
 			nsel++
 		}
 	}
-	b.WriteString(`<div class=lib-toolbar>` +
-		btn(i18n.T("library.tf.apply", i18n.A{"n": fmt.Sprint(nsel)}), "primary", "tf-apply", "") +
-		btn(i18n.T("library.tf.rescan"), "outline", "lib-tagfix", "") +
-		btn(i18n.T("common.close"), "ghost", "tf-close", "") + `</div>`)
+	st.ApplyLbl = i18n.T("library.tf.apply", i18n.A{"n": fmt.Sprint(nsel)})
+	st.RescanLbl = i18n.T("library.tf.rescan")
 	if t.applying {
-		b.WriteString(hint("info", i18n.T("library.tf.applying")))
+		st.Hints = append(st.Hints, libHintSt{Tone: "info", Text: i18n.T("library.tf.applying")})
 	}
 	if t.lastErr != "" {
-		b.WriteString(hint("bad", truncate(t.lastErr, 400)))
+		st.Hints = append(st.Hints, libHintSt{Tone: "bad", Text: truncate(t.lastErr, 400)})
 	}
 	if t.skipped > 0 {
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.tf.skipped", i18n.A{"n": fmt.Sprint(t.skipped)})) + `</p>`)
+		st.Skipped = i18n.T("library.tf.skipped", i18n.A{"n": fmt.Sprint(t.skipped)})
 	}
 	if len(t.probs) == 0 {
-		b.WriteString(emptyState(i18n.T("library.tf.clean")))
-		return b.String()
+		st.IsEmpty, st.Empty = true, i18n.T("library.tf.clean")
+		return st
 	}
 
 	// grouped by kind, stable order
@@ -204,36 +200,33 @@ func (u *UI) tfResultsHTML() string {
 				on++
 			}
 		}
-		b.WriteString(`<div class=tf-grp><div class=tf-grphead><span class=tf-grptitle>` +
-			html.EscapeString(i18n.T("library.tf.kind."+string(k))) + `</span>` +
-			badge(fmt.Sprintf("%d/%d", on, len(idxs)), "secondary") +
-			btn(i18n.T("library.tf.all"), "ghost", "tf-kind:"+string(k)+":on", "") +
-			btn(i18n.T("library.tf.none"), "ghost", "tf-kind:"+string(k)+":off", "") + `</div>`)
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.tf.kindDesc."+string(k))) + `</p>`)
+		g := libTFGrpSt{
+			Title:   i18n.T("library.tf.kind." + string(k)),
+			Badge:   fmt.Sprintf("%d/%d", on, len(idxs)),
+			AllLbl:  i18n.T("library.tf.all"),
+			AllAct:  "tf-kind:" + string(k) + ":on",
+			NoneLbl: i18n.T("library.tf.none"),
+			NoneAct: "tf-kind:" + string(k) + ":off",
+			Desc:    i18n.T("library.tf.kindDesc." + string(k)),
+		}
 		for n, i := range idxs {
 			if n >= maxRows {
-				b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.showingFirst",
-					i18n.A{"shown": fmt.Sprint(maxRows), "total": fmt.Sprint(len(idxs))})) + `</p>`)
+				g.More = i18n.T("library.showingFirst",
+					i18n.A{"shown": fmt.Sprint(maxRows), "total": fmt.Sprint(len(idxs))})
 				break
 			}
 			p := t.probs[i]
-			chk := ""
-			if t.sel[i] {
-				chk = " checked"
-			}
 			cur := p.Current
 			if cur == "" {
 				cur = "—"
 			}
-			b.WriteString(`<label class=tf-row><input type=checkbox data-act="tf-sel:` + fmt.Sprint(i) + `"` + chk + `>` +
-				`<span class=tf-file title="` + html.EscapeString(p.Path) + `">` + html.EscapeString(filepath.Base(p.Path)) + `</span>` +
-				`<span class=tf-field>` + html.EscapeString(p.Field) + `</span>` +
-				`<span class=tf-diff><s>` + html.EscapeString(truncate(cur, 60)) + `</s> → <b>` +
-				html.EscapeString(truncate(p.Proposed, 60)) + `</b></span></label>`)
+			g.Rows = append(g.Rows, libTFRowSt{Idx: fmt.Sprint(i), Checked: t.sel[i], Path: p.Path,
+				Base: filepath.Base(p.Path), Field: p.Field,
+				Cur: truncate(cur, 60), Proposed: truncate(p.Proposed, 60)})
 		}
-		b.WriteString(`</div>`)
+		st.Groups = append(st.Groups, g)
 	}
-	return b.String()
+	return st
 }
 
 // truncate shortens s to max runes with an ellipsis.
@@ -247,24 +240,20 @@ func truncate(s string, max int) string {
 
 // ── per-track tag editor (detail rail) ──
 
-// tfEditorHTML: editable file-tag fields for the selected track. Saving writes the
+// tfEditorState: editable file-tag fields for the selected track. Saving writes the
 // file via tagsync (revertible + journaled); the library row itself is untouched.
-func (u *UI) tfEditorHTML(s *libSt, sel *libSel) string {
+// Caller holds s.mu. Pure renderer: libTagEdHTML (render_library_fixers.go).
+func (u *UI) tfEditorState(s *libSt) libTagEdSt {
 	if !s.tagEdit {
-		return btnRow(btn(i18n.T("library.tf.editTags"), "outline", "tf-edit-open", ""))
+		return libTagEdSt{OpenLbl: i18n.T("library.tf.editTags")}
 	}
 	d := s.tagDraft
-	var b strings.Builder
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.tf.editDesc")) + `</p>`)
-	b.WriteString(`<div class=pbuilder>`)
+	st := libTagEdSt{Open: true, Desc: i18n.T("library.tf.editDesc"),
+		SaveLbl: i18n.T("common.save"), CancelLbl: i18n.T("common.cancel")}
 	for _, f := range tfEditFields {
-		b.WriteString(pbField(i18n.T("library.tf.f."+f), "tf-edit:"+f, d[f], "text", ""))
+		st.Fields = append(st.Fields, newPBField(i18n.T("library.tf.f."+f), "tf-edit:"+f, d[f], "text", ""))
 	}
-	b.WriteString(`</div>`)
-	b.WriteString(`<div class=btn-row>` +
-		btn(i18n.T("common.save"), "primary", "tf-edit-save", "") +
-		btn(i18n.T("common.cancel"), "ghost", "tf-edit-close", "") + `</div>`)
-	return b.String()
+	return st
 }
 
 var tfEditFields = []string{"title", "artist", "album", "genre", "label", "year", "rating"}

@@ -321,7 +321,7 @@ func libBodyHTML(st libBodySt) string {
 	case libBodyFav:
 		return libFavHTML(st.Fav)
 	case libBodyColl:
-		pane := triPane(st.NavRail, libCollHTML(st.Coll), libDetailWrapHTML(st.Detail), "lib-nav-w", "lib-det-w")
+		pane := triPane(libNavRailHTMLOf(st.NavRail), libCollHTML(st.Coll), libDetailWrapHTML(st.Detail), "lib-nav-w", "lib-det-w")
 		if st.CEFull {
 			// cue-edit mode: the waveform (grid + markers) spans the full tab width
 			// above the list; the rail keeps only the editor controls.
@@ -339,7 +339,7 @@ func libBodyHTML(st libBodySt) string {
 	case libBodyPresets:
 		return libPresetsHTMLOf(st.Presets)
 	default:
-		return triPane(st.NavRail, libBrowseHTMLOf(st.Browse), libDetailWrapHTML(st.Detail), "lib-nav-w", "lib-det-w")
+		return triPane(libNavRailHTMLOf(st.NavRail), libBrowseHTMLOf(st.Browse), libDetailWrapHTML(st.Detail), "lib-nav-w", "lib-det-w")
 	}
 }
 
@@ -671,7 +671,7 @@ func libCollHTML(st libCollSt) string {
 	if st.Clear {
 		b.WriteString(btn(st.ClearLbl, "ghost", "lib-clearfilters", ""))
 	}
-	b.WriteString(st.Prep) // P-key target (library_prep.go)
+	b.WriteString(selHTML(st.Prep)) // P-key target (library_prep.go)
 	b.WriteString(`</div>`)
 	for _, c := range st.Chips {
 		b.WriteString(c.html())
@@ -683,7 +683,7 @@ func libCollHTML(st libCollSt) string {
 	}
 	// batch results replace the list while a fixer's results view is on
 	if st.HasResults {
-		return b.String() + st.Results
+		return b.String() + libFixResHTML(st.Results)
 	}
 
 	b.WriteString(libCollHeadHTML(st.Head))
@@ -1405,8 +1405,11 @@ func libPresetsHTMLOf(st libPresetsSt) string {
 func libDetailHTMLOf(st libDetailSt) string {
 	switch st.Kind {
 	case libDetailRaw:
-		// cue-edit rail, or the beatgrid-fixer flow / cockpit owning the collection rail
+		// cue-edit rail owning the collection rail
 		return st.Raw
+	case libDetailGF:
+		// the beatgrid-fixer flow / cockpit owning the collection rail
+		return libGFRailHTML(st.GF)
 	case libDetailMsg:
 		return emptyState(st.Msg)
 	}
@@ -1449,7 +1452,7 @@ func libDetailHTMLOf(st libDetailSt) string {
 	if st.HasTags {
 		b.WriteString(inspSec(st.TagsTitle, `<p class=page-sub>`+html.EscapeString(st.TagsDesc)+`</p>`+
 			btnRow(btn(st.WriteLbl, "primary", st.WriteAct, ""), btn(st.RevertLbl, "ghost", st.RevertAct, ""))+
-			st.TagEditor))
+			libTagEdHTML(st.TagEditor)))
 	}
 	// PLAYLISTS membership
 	if st.HasPls {
@@ -1457,7 +1460,7 @@ func libDetailHTMLOf(st libDetailSt) string {
 	}
 	// WORKS WELL TOGETHER (compat marks + discovery)
 	if st.HasCompat {
-		b.WriteString(inspSec(st.CompatTitle, st.Compat))
+		b.WriteString(inspSec(st.CompatTitle, libCompatSecHTML(st.Compat)))
 	}
 	// DETAILS
 	b.WriteString(inspSec(st.DetailsTitle, libMetaHTML(st.Meta)))

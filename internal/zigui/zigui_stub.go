@@ -88,3 +88,13 @@ func RenderLibraryBody(stateJSON []byte) (string, bool)    { return "", false }
 func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
 func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
 func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
+
+// --- libfixers ---
+
+func RenderLibFixNavRail(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixPrep(stateJSON []byte) (string, bool)    { return "", false }
+func RenderLibFixGFRail(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibFixGFLive(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibFixResults(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixTagEdit(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixCompat(stateJSON []byte) (string, bool)  { return "", false }

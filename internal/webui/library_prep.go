@@ -123,14 +123,14 @@ func (u *UI) prepKey(down bool) {
 	pr.mu.Unlock()
 }
 
-// prepSelectHTML renders the prep-playlist picker. id must be unique per surface
-// (smartselect state is keyed on it): "prep-coll" toolbar, "prep-rail" cue rail.
-func (u *UI) prepSelectHTML(id string) string {
+// prepSelectState registers + resolves the prep-playlist picker. id must be unique per
+// surface (smartselect state is keyed on it): "prep-coll" toolbar, "prep-rail" cue rail.
+func (u *UI) prepSelectState(id string) selState {
 	cur := ""
 	if pid := u.cePrefs().PrepPlaylist; pid != 0 {
 		cur = fmt.Sprint(pid)
 	}
-	return smartSelect(id, i18n.T("library.prep.label"), "prep-pick:", cur, func() []ssOpt {
+	s := resolveSmartSelect(id, "prep-pick:", cur, func() []ssOpt {
 		opts := []ssOpt{
 			{Val: "", Label: i18n.T("library.prep.none")},
 			{Val: "__new", Label: i18n.T("library.prep.new")},
@@ -148,7 +148,13 @@ func (u *UI) prepSelectHTML(id string) string {
 		}
 		return opts
 	})
+	s.Label = i18n.T("library.prep.label")
+	return s
 }
+
+// prepSelectHTML renders the picker for surfaces that embed markup (the cue-editor rail);
+// the collection toolbar carries the resolved state through libCollSt instead.
+func (u *UI) prepSelectHTML(id string) string { return selHTML(u.prepSelectState(id)) }
 
 // prepNewModal asks for the new prep playlist's name.
 func (u *UI) prepNewModal() {

@@ -97,6 +97,9 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 | settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
+
+| library ▸ fixer subviews | Zig (`native/zigui/src/libfixers.zig`; nav rail · gridfix rail + `#gf-live` · fixer results (gridfix/tagfix) · tag editor · prep picker · compat section) | `TestZigLibFixNavRailGolden`, `TestZigLibFixPrepGolden`, `TestZigLibFixGFRailGolden`, `TestZigLibFixGFLiveGolden`, `TestZigLibFixResultsGolden`, `TestZigLibFixTagEditGolden`, `TestZigLibFixCompatGolden` |
+
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -194,6 +197,45 @@ Editor gotcha: `align` is a Zig keyword — the json tag is `alignment`. Composi
 attributes that Go builds then `attrQ`-escapes as ONE value (editor layer divs, whose
 image paint carries `%q` quotes) must be assembled into a scratch `Html` and then
 `attrQ`'d — they cannot be streamed.
+
+Library fixer-subview notes (wave 3, the seams the library port carried as `Raw`): the nav rail,
+beatgrid-fixer rail + results table, tag-fixer results + per-track editor, prep-playlist picker and
+"works well together" section now cross the ABI as STRUCTURED state - `libNavSt` / `libGFSt` (+
+`libGFLiveSt`) / `libFixResSt{gf|tf}` / `libTagEdSt` / `selState` / `libCompatSecSt` in the new
+`render_library_fixers.go` (pure renderers + state types) with the impure builders staying in their
+feature files (`library_navrail.go`, `library_gridfix.go`, `library_tagfix.go`, `library_prep.go`,
+`library_compat.go`). `libBodySt.NavRail`, `libCollSt.Prep`/`.Results`, `libDetailSt.TagEditor`/
+`.Compat` changed type in place (json keys unchanged) and the gridfix rail got its OWN detail kind
+(`libDetailGF`) instead of sharing the generic `raw` with the cue-edit rail.
+- **Two Go helpers that look identical are not**: `gfStat` ESCAPES its number, `gfTile` splices
+  `fmt.Sprint(int)` RAW. Unifying them would have been a silent DOM change on any adversarial
+  fixture; `libfixers.zig` keeps both and the golden fixtures feed `1&2` through the stat path.
+  Same class of quirk: a results row's status token (`FIX`/`OK`/`SKIP`/`ERR`) is spliced unescaped
+  into BOTH the chip class (pre-lowered Go-side, `stLow`) and the chip text, nav-row icons are
+  glyph literals emitted raw, and `tf-sel:<i>` / `libnav-hd` truncation markers stay raw.
+- Ordering is state, not renderer logic: `gfDoneState` resolves the rail's hints (no-targets →
+  per-target applied → apply error → prepped) into ONE ordered `Hints` slice while the write
+  actions accumulate separately, because the Go original interleaved `b.WriteString(hint(...))`
+  with `acts = append(...)` and emitted the button column last. The health card needed an explicit
+  `NoteAfter` flag - the engine-missing branch notes BEFORE its button row, the ready branch AFTER.
+- The calibration stage is NOT its own kind: it is `libGFRunning` with an empty tile set (the Go
+  `gfCalRunningHTML` differed from `gfRunningHTML` only in the title + the tile-less fragment).
+- `#gf-live` is the one independently patched fragment here (the run goroutine `u.eval`s it ~2 Hz
+  from `gfRunTracks`/`gfCalibrate`), so `gfLiveInner` became `gfLiveState`/`gfCalLiveState` +
+  `libGFLiveHTML` + a `gfLiveRender` bridge - the live patch now renders through Zig too.
+- `prepSelectHTML` survives for the cue-editor rail (`library_cueedit.go` embeds markup); it
+  delegates to `prepSelectState` + `selHTML`, so the `ssRegister` side effect keeps happening at
+  exactly the same point in the render and both surfaces share ONE markup source.
+- Proof of zero DOM change: a literal-multiset diff over the touched renderers (452 → 415 markup
+  literals, **zero added** - every drop is dedup of the per-stage `insp-hd`/`set-note`/`gf-current`
+  emits) plus a throwaway test that transcribed the pre-split renderers verbatim and asserted 15
+  byte-identical pairs (health both note orders, done with interleaved hints/acts/notes, confirm
+  with a zero-count scope row, both `#gf-live` variants, results table + empty, tf group list with
+  a capped group, tag editor open/closed, compat rows/empty).
+- No new components.zig helper and no tab-local variant was needed: the subviews reuse
+  `progressBar`/`btnRowOf`/`btnOf`/`toggleOf`/`hint`/`badge`/`emptyState`/`fchip`/`itemRow*`/
+  `selectBox` plus `library_kit.zig`'s `pageSub`/`btnRowOf1`/`chip`/`pbField`. `libfixers.zig`
+  keeps only its own chrome (libnav rows, gf-stat/gf-tile/set-note, trk-row result rows, tf-grp).
 
 ## Dev rules when touching UI during migration
 
@@ -362,6 +404,9 @@ Library-port notes (the biggest tab, 2768 lines): split into `render_library_sta
   switcher, nav rail, cue-edit wave + rail, remote mirror / remote cue-edit bodies, gridfix +
   tagfix panels, prepare-select, compat section, player, shared loudness block. The Camelot
   wheel SVG stays Go by design (float math + `%.2f`), like the campath viewer in the motion batch.
+  SINCE RESOLVED: nav rail, gridfix rail + results, tagfix results + editor, prepare-select and
+  the compat section became structured state (see "Library fixer-subview notes" below); the target
+  switcher, cue-edit surfaces, remote bodies, player and loudness block are still raw.
 - Go-runtime workarounds replicated for parity, flagged for phase B: the version-keyed render
   memos (`collViewSig`, `plRowsVer`, `smartCounts`, facet counts, `onDiskCk`) and the 2 s/5 s
   freshness TTLs exist because a full 23k scan, a per-row `os.Stat` or a DB `COUNT` on the

@@ -10,9 +10,10 @@ package webui
 //     parser rejects (whole-tab silent fallback to Go);
 //   - numbers are pre-formatted Go-side (no float ever crosses the ABI);
 //   - `dl` fields are the Go-resolved strings.ToLower(label) (Unicode lowering stays in Go);
-//   - pre-rendered markup from OTHER renderers (nav rail, cue-edit wave/rail, gridfix + tagfix
-//     panels, compat section, player, loudness block, key wheel, tooltips) rides as trusted raw
-//     strings; those seams are wave-3 work.
+//   - pre-rendered markup from OTHER renderers (cue-edit wave/rail, remote mirror/cue-edit
+//     bodies, player, loudness block, key wheel, tooltips) rides as trusted raw strings. The nav
+//     rail, gridfix rail + results, tagfix results + editor, prep picker and compat section were
+//     lifted to structured state in wave 3 (render_library_fixers.go).
 
 import (
 	"fmt"
@@ -161,12 +162,12 @@ const (
 
 // libBodySt is the #lib-body inner state: one kind + that section's sub-state.
 type libBodySt struct {
-	Kind    string `json:"kind"`
-	Raw     string `json:"raw,omitempty"`
-	Msg     string `json:"msg,omitempty"`
-	NavRail string `json:"navRail,omitempty"` // triPane nav column (library_navrail.go)
-	CEFull  bool   `json:"ceFull,omitempty"`  // cue-edit: full-width waveform above the panes
-	CEWave  string `json:"ceWave,omitempty"`  // its markup (library_cueedit.go)
+	Kind    string   `json:"kind"`
+	Raw     string   `json:"raw,omitempty"`
+	Msg     string   `json:"msg,omitempty"`
+	NavRail libNavSt `json:"navRail"`          // triPane nav column (library_navrail.go)
+	CEFull  bool     `json:"ceFull,omitempty"` // cue-edit: full-width waveform above the panes
+	CEWave  string   `json:"ceWave,omitempty"` // its markup (library_cueedit.go)
 
 	Detail  libDetailSt  `json:"detail"`
 	Browse  libBrowseSt  `json:"browse"`
@@ -228,7 +229,7 @@ func (u *UI) libBodyState() libBodySt {
 		if !u.libEnsureTracks(s) {
 			return libBodySt{Kind: libBodyMsg, Msg: i18n.T("library.remote.col.loading")}
 		}
-		st := libBodySt{Kind: libBodyColl, NavRail: u.libNavRailHTML(s, "collection"), Coll: u.libCollectionState(s)}
+		st := libBodySt{Kind: libBodyColl, NavRail: u.libNavRailState(s, "collection"), Coll: u.libCollectionState(s)}
 		if u.ceActiveFor("library") {
 			// cue-edit mode: the waveform (grid + markers) spans the full tab width
 			// above the list; the rail keeps only the editor controls.
@@ -256,7 +257,7 @@ func (u *UI) libBodyState() libBodySt {
 		// Browse renders the dir listing regardless; the collection (metadata enrichment)
 		// hydrates in the background and re-patches when ready.
 		u.libEnsureTracks(s)
-		return libBodySt{Kind: libBodyBrowse, NavRail: u.libNavRailHTML(s, "browse"),
+		return libBodySt{Kind: libBodyBrowse, NavRail: u.libNavRailState(s, "browse"),
 			Browse: u.libBrowseState(s), Detail: u.libDetailState(s)}
 	}
 }
@@ -536,14 +537,14 @@ type libCollSt struct {
 	NoDrops    bool       `json:"noDrops"`
 	Clear      bool       `json:"clear"`
 	ClearLbl   string     `json:"clearLbl"`
-	Prep       string     `json:"prep"` // raw prepSelectHTML (library_prep.go)
+	Prep       selState   `json:"prep"` // prep-playlist picker (library_prep.go)
 
 	Chips     []libChipSt `json:"chips,omitempty"`
 	HasInline bool        `json:"hasInline"`
 	Inline    libPlActSt  `json:"inlineActs"` // `inline` avoided as a Zig field name
 
-	HasResults bool   `json:"hasResults"`        // a fixer's results view replaces the list
-	Results    string `json:"results,omitempty"` // raw (library_tagfix.go / library_gridfix.go)
+	HasResults bool        `json:"hasResults"` // a fixer's results view replaces the list
+	Results    libFixResSt `json:"results"`    // library_tagfix.go / library_gridfix.go
 
 	Head          libCollHeadSt  `json:"head"`
 	Rows          []libCollRowSt `json:"rows,omitempty"`
@@ -565,7 +566,7 @@ func (u *UI) libCollectionState(s *libSt) libCollSt {
 		MoreLbl: i18n.T("library.coll.more"), MoreOpen: s.moreOpen, MoreItems: u.libMoreMenuState(s),
 		Search: s.collSearch, SearchPH: i18n.T("library.coll.search"),
 		KeyChip: u.libKeyChipState(s), NoDropsLbl: i18n.T("library.ce.noDropsChip"), NoDrops: s.collNoDrops,
-		ClearLbl: i18n.T("library.clear"), Prep: u.prepSelectHTML("prep-coll"),
+		ClearLbl: i18n.T("library.clear"), Prep: u.prepSelectState("prep-coll"),
 		VerifiedTitle: i18n.T("library.gf.verifiedBadge"),
 	}
 	st.Genre = u.libFacetSelectState(s, "genre", i18n.T("library.label.genre"), s.collGenre,
@@ -606,14 +607,14 @@ func (u *UI) libCollectionState(s *libSt) libCollSt {
 	tfView := u.tf.resView
 	u.tf.mu.Unlock()
 	if tfView {
-		st.HasResults, st.Results = true, u.tfResultsHTML()
+		st.HasResults, st.Results = true, libFixResSt{Kind: libFixResTF, TF: u.tfResultsState()}
 		return st
 	}
 	u.gf.mu.Lock()
 	resView := u.gf.resView && u.gf.stage == "done"
 	u.gf.mu.Unlock()
 	if resView {
-		st.HasResults, st.Results = true, u.gfResultsHTML(&u.gf)
+		st.HasResults, st.Results = true, libFixResSt{Kind: libFixResGF, GF: u.gfResultsState(&u.gf)}
 		return st
 	}
 
@@ -1193,7 +1194,8 @@ func (u *UI) libPresetsState() libPresetsSt {
 
 // libDetail kinds.
 const (
-	libDetailRaw = "raw" // cue-edit rail / beatgrid cockpit owns the pane
+	libDetailRaw = "raw" // cue-edit rail owns the pane
+	libDetailGF  = "gf"  // beatgrid-fixer rail owns the pane (library_gridfix.go)
 	libDetailMsg = "msg" // nothing selected
 	libDetailSel = "sel"
 )
@@ -1255,9 +1257,10 @@ type libEncSt struct {
 
 // libDetailSt is the #lib-detail inner state.
 type libDetailSt struct {
-	Kind string `json:"kind"`
-	Raw  string `json:"raw,omitempty"`
-	Msg  string `json:"msg,omitempty"`
+	Kind string  `json:"kind"`
+	Raw  string  `json:"raw,omitempty"`
+	Msg  string  `json:"msg,omitempty"`
+	GF   libGFSt `json:"gf"` // beatgrid-fixer rail (Kind == libDetailGF)
 
 	Eyebrow string `json:"eyebrow"`
 	Title   string `json:"title"`
@@ -1282,22 +1285,22 @@ type libDetailSt struct {
 	HarmTitle string    `json:"harmTitle"`
 	Harm      libHarmSt `json:"harm"`
 
-	HasTags   bool   `json:"hasTags"`
-	TagsTitle string `json:"tagsTitle"`
-	TagsDesc  string `json:"tagsDesc"`
-	WriteLbl  string `json:"writeLbl"`
-	WriteAct  string `json:"writeAct"`
-	RevertLbl string `json:"revertLbl"`
-	RevertAct string `json:"revertAct"`
-	TagEditor string `json:"tagEditor,omitempty"` // raw (library_tagfix.go)
+	HasTags   bool       `json:"hasTags"`
+	TagsTitle string     `json:"tagsTitle"`
+	TagsDesc  string     `json:"tagsDesc"`
+	WriteLbl  string     `json:"writeLbl"`
+	WriteAct  string     `json:"writeAct"`
+	RevertLbl string     `json:"revertLbl"`
+	RevertAct string     `json:"revertAct"`
+	TagEditor libTagEdSt `json:"tagEditor"` // library_tagfix.go
 
 	HasPls   bool          `json:"hasPls"`
 	PlsTitle string        `json:"plsTitle"`
 	Pls      libTrackPlsSt `json:"pls"`
 
-	HasCompat   bool   `json:"hasCompat"`
-	CompatTitle string `json:"compatTitle"`
-	Compat      string `json:"compat,omitempty"` // raw (library_compat.go)
+	HasCompat   bool           `json:"hasCompat"`
+	CompatTitle string         `json:"compatTitle"`
+	Compat      libCompatSecSt `json:"compat"` // library_compat.go
 
 	DetailsTitle string `json:"detailsTitle"`
 	Meta         []uiKV `json:"meta,omitempty"`
@@ -1312,13 +1315,13 @@ func (u *UI) libDetailState(s *libSt) libDetailSt {
 	// track is selected - else "Fix beatgrids" from the toolbar with a track open set the stage but
 	// the confirm had nowhere to render, so the click looked dead.
 	if u.libSectionOr() == "collection" && u.gfStageActive() {
-		return libDetailSt{Kind: libDetailRaw, Raw: u.gfRailHTML(s)}
+		return libDetailSt{Kind: libDetailGF, GF: u.gfRailState(s)}
 	}
 	sel := s.sel
 	if sel == nil {
 		// Collection rail without a selection = the beatgrid cockpit / health card
 		if u.libSectionOr() == "collection" {
-			return libDetailSt{Kind: libDetailRaw, Raw: u.gfRailHTML(s)}
+			return libDetailSt{Kind: libDetailGF, GF: u.gfRailState(s)}
 		}
 		return libDetailSt{Kind: libDetailMsg, Msg: i18n.T("library.insp.empty")}
 	}
@@ -1393,7 +1396,7 @@ func (u *UI) libDetailState(s *libSt) libDetailSt {
 		st.TagsDesc = i18n.T("library.insp.tagsDesc")
 		st.WriteLbl, st.WriteAct = i18n.T("library.insp.writeTags"), "lib-tags-write:"+sel.path
 		st.RevertLbl, st.RevertAct = i18n.T("library.revert"), "lib-tags-revert:"+sel.path
-		st.TagEditor = u.tfEditorHTML(s, sel)
+		st.TagEditor = u.tfEditorState(s)
 	}
 	// detail-rail DB reads (works-together partners + playlist membership) resolve off-thread and
 	// cache on the selection - they used to run per detail render (= per keystroke).
@@ -1411,7 +1414,7 @@ func (u *UI) libDetailState(s *libSt) libDetailSt {
 	// WORKS WELL TOGETHER (compat marks + discovery)
 	if sel.inColl && sel.kind == "audio" && u.svc.Lib != nil {
 		st.HasCompat, st.CompatTitle = true, i18n.T("library.compat.section")
-		st.Compat = u.libCompatSectionHTML(s, sel.path, detCompat, detReady)
+		st.Compat = u.libCompatSectionState(s, sel.path, detCompat, detReady)
 	}
 	st.DetailsTitle = i18n.T("library.insp.details")
 	st.Meta = libDetailsMetaState(sel.track)
