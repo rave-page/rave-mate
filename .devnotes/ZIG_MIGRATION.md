@@ -180,6 +180,11 @@ Rules:
   ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
   mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
   "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
+- **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
+  (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
+  Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
+  that is the Go marshal - 75-80% is the Zig-side `std.json` parse (6.9 ns per state byte, 5×
+  Go's marshal slope). A binary wire must kill the PARSE, not just the marshal.
 
 ## CI
 

@@ -16,6 +16,7 @@ import (
 	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/perfmon"
 	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/tray"
 	"rave.page/mate/internal/ui"
@@ -141,6 +142,7 @@ func New(svc ui.Services) *UI {
 		u.registerUIBinds() // MIDI-mapped desktop-UI actions (primary window only)
 	}
 	u.ruiInit() // remote Library sessions over the peer link (no-op without peers)
+	perfmon.RegisterProbe("zigui", zigPerfProbe)
 	return u
 }
 

@@ -901,3 +901,43 @@ to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. 
 are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
 kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
 Go formats every number).
+## Phase B — B0 baseline instrumentation (bench batch)
+
+Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
+This section is the mechanism.
+
+- **Benchmarks.** `internal/webui/render_bench_zig_test.go` (`//go:build zigui`) benches four
+  families per tab over the EXISTING golden fixtures: `RenderGo` (pure Go renderer) · `RenderZig`
+  (Zig export, state pre-marshalled) · `RenderBridge` (`stateJSON` + Zig = today's real cost) ·
+  `StateMarshal` (the round trip alone, reports `state_B`). 10 tabs: appgroups logs live motion
+  peers automations publish settings library player. `internal/webui/render_bench_test.go` is the
+  UNTAGGED half (settings state-build/render/marshal + the four untagged dialog fixtures), so
+  `go test -bench` also works on a stub build.
+- **Every bench case is parity-gated before timing** (`zigBenchState`): Zig must return ok=true
+  AND byte-equal Go. Without that gate a benchmark happily measures a rejected state (JSON null →
+  ok=false) and reports a fantastic number for doing nothing.
+- **`RenderZig` is NOT renderer-only** - every export parses its JSON first. There is no
+  parse-free entry point, so Go-render-vs-Zig-render cannot be compared today; the wave B-2 TLV
+  export gives it for free. Fit over the table: Zig parse+render 6.9 ns per STATE byte vs Go
+  marshal 1.33 ns/B vs Go render 1.63 ns per HTML byte. Parse cost tracks structure, not size
+  (player's 29 kB state is one raw SVG and parses ~2.3× cheaper than the fit).
+- **Live counters.** `internal/zigui/perf.go` is UNTAGGED (fallback.go's pattern) so both builds
+  expose one counter set: `NoteRender` (cgo render funnel: state bytes + native render ns) +
+  `NoteMarshal` (webui `stateJSON`: bytes + json ns) → `zigui.PerfCounts()`. Surfaced as
+  `ctl perf` section `[zigui]` (`internal/webui/zigui_perf_probe.go`, registered from `New()`,
+  additive) next to the FallbackCounts tally. Cost: two `time.Now()` per render per side.
+- **The one non-append-only edit in this batch:** 3 lines inside `render()` in the shared
+  `internal/zigui/zigui.go` (t0 / `NoteRender`) - it is the single funnel every Zig render passes
+  through, so a counter cannot exist without it. Appended marker blocks merge around it cleanly.
+- **Bench gotcha:** `b.ResetTimer()` CLEARS metrics added by `b.ReportMetric` (`b.SetBytes`
+  survives it). Report sizes AFTER the loop or they silently vanish from the output.
+- **Fixtures were deliberately NOT moved** out of the `//go:build zigui` golden files into untagged
+  siblings (the dialogs-A precedent). Three sibling wave-B1 branches were editing those same files;
+  a move would have collided. Consequence: the untagged bench table is a subset. Revisit once the
+  wave is merged - the tagged tabs' fixtures moving untagged would let one bench file cover both.
+- **Measuring on a fleet box:** parallel `zig build`/`go build` inflated worst samples 2-4×. Use
+  min-of-N over several `-count=2` runs and treat <20% deltas as noise (method note in
+  PHASEB_BASELINE.md).
+- Not benched yet: the fragment renderers (`_body`, `#live-*`, the nine player patch targets),
+  which the ~1 Hz tick hits far more often than a full tab render. Per-render tax applies per
+  FRAGMENT - the next increment should extend the bench there.

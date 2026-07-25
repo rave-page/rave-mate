@@ -6,6 +6,7 @@ import (
 	"html"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"rave.page/mate/internal/appgroups"
 	"rave.page/mate/internal/i18n"
@@ -87,8 +88,13 @@ func (u *UI) appGroupsState() agState {
 
 // stateJSON marshals render state for the Zig renderer (nil → zigui returns !ok →
 // Go fallback). Param is `any` at the json boundary only; states are plain structs.
+// Every Zig-path render funnels through here, so it is also where the marshal half of the
+// phase-A round trip is measured (zigui.PerfCounts, `ctl perf` section [zigui]) - two
+// time.Now() calls against a marshal that costs µs.
 func stateJSON(v any) []byte {
+	t0 := time.Now()
 	b, err := json.Marshal(v)
+	zigui.NoteMarshal(len(b), time.Since(t0)) // len(nil) == 0 → a failed marshal counts bytes 0
 	if err != nil {
 		return nil
 	}
