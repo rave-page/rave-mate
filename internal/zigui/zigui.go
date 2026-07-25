@@ -597,3 +597,76 @@ func RenderSettingsUpdFlow(stateJSON []byte) (string, bool) {
 }
 
 // --- end settings-sub ---
+
+// --- player ---
+// The unified media player/editor (player.go + render_player.go). One export per patch
+// target: the full component, its root inner, and the vid/wave/tp/edit/export/ro/hov
+// fragments. The waveform SVG + the shared loudness block ride through the state as
+// trusted RAW markup (Go owns every float) - these renderers own the chrome.
+
+// RenderPlayer renders the full .mplayer component (mpHTML).
+func RenderPlayer(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player(p, l, n)
+	})
+}
+
+// RenderPlayerRoot renders the #mp-<host>-root inner (mpPatchAll).
+func RenderPlayerRoot(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_root(p, l, n)
+	})
+}
+
+// RenderPlayerVid renders the #mp-<host>-vid inner. ok=false when no video media exists
+// (empty fragment) - the Go fallback renders the same empty string.
+func RenderPlayerVid(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_vid(p, l, n)
+	})
+}
+
+// RenderPlayerWave renders the #mp-<host>-wave inner (SVG + chips + captions).
+func RenderPlayerWave(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_wave(p, l, n)
+	})
+}
+
+// RenderPlayerTp renders the #mp-<host>-tp inner (transport + seek + volume).
+func RenderPlayerTp(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_tp(p, l, n)
+	})
+}
+
+// RenderPlayerEdit renders the #mp-<host>-edit inner. ok=false while edit mode is OFF
+// (the container stays empty so the toggle patch has a target).
+func RenderPlayerEdit(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_edit(p, l, n)
+	})
+}
+
+// RenderPlayerExport renders the #mp-<host>-export inner.
+func RenderPlayerExport(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_export(p, l, n)
+	})
+}
+
+// RenderPlayerRO renders the #mp-<host>-ro trim readout (handle-drag patch).
+func RenderPlayerRO(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_ro(p, l, n)
+	})
+}
+
+// RenderPlayerHov renders the #mp-<host>-hov readout line. ok=false with no active media.
+func RenderPlayerHov(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_hov(p, l, n)
+	})
+}
+
+// --- end player ---
