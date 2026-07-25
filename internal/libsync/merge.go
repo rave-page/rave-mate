@@ -11,8 +11,10 @@ import (
 	"rave.page/mate/internal/musiclib"
 )
 
-// defaultAppOrder ranks source apps when no per-field rule applies (richest analysis first).
-var defaultAppOrder = []string{"rekordbox", "traktor", "serato", "enginedj", "virtualdj"}
+// defaultAppOrder ranks source apps when no per-field rule applies (richest analysis
+// first). "folder" (loose-folder imports, tag-derived metadata) ranks last so it never
+// wins a field merge against real DJ software.
+var defaultAppOrder = []string{"rekordbox", "traktor", "serato", "enginedj", "virtualdj", "folder"}
 
 // MergeFields are the canonical field names a rule may target.
 var MergeFields = []string{"beatgrid", "cues", "rating", "key", "genre", "bpm", "comment", "playCount", "label", "album"}

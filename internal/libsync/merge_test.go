@@ -63,3 +63,19 @@ func TestMergeCanonicalDuration(t *testing.T) {
 		t.Errorf("duration: want 321, got %v", got.DurationSec)
 	}
 }
+
+// "folder" ranks last: it never wins a field merge against real DJ software, but still
+// fills fields nothing else has.
+func TestMergeCanonicalFolderRanksLast(t *testing.T) {
+	tr := musiclib.Track{Artist: "A", Title: "T", DurationSec: 200, Genre: "Techno", BPM: 174}
+	fo := musiclib.Track{Artist: "A", Title: "T", DurationSec: 200, Genre: "Tag Genre", BPM: 87, Label: "Tag Label"}
+	cands := []libdb.SourcedTrack{cand("folder", fo), cand("traktor", tr)}
+
+	got := MergeCanonical(cands, nil)
+	if got.Genre != "Techno" || got.BPM != 174 {
+		t.Errorf("traktor must win genre/bpm: got %q %v", got.Genre, got.BPM)
+	}
+	if got.Label != "Tag Label" { // only the folder source has it
+		t.Errorf("label: want folder fallback, got %q", got.Label)
+	}
+}
