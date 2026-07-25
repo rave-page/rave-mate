@@ -14,6 +14,7 @@ const c = @import("components.zig");
 const k = @import("library_kit.zig");
 const s = @import("library_sections.zig");
 const d = @import("library_detail.zig");
+const f = @import("libfixers.zig");
 
 pub const Detail = d.Detail;
 pub const CueCell = s.CueCell;
@@ -24,7 +25,7 @@ pub const Body = struct {
     kind: []const u8 = "",
     raw: []const u8 = "",
     msg: []const u8 = "",
-    navRail: []const u8 = "",
+    navRail: f.Nav = .{},
     ceFull: bool = false,
     ceWave: []const u8 = "",
 
@@ -75,7 +76,10 @@ pub fn renderBody(h: *Html, st: Body) !void {
             try h.raw(st.ceWave);
             try h.raw("</div>");
         }
-        try c.triOpen(h, "lib-nav-w", "lib-det-w", st.navRail);
+        var nav = Html.init(h.a);
+        defer nav.deinit();
+        try f.renderNav(&nav, st.navRail);
+        try c.triOpen(h, "lib-nav-w", "lib-det-w", nav.b.items);
         try s.renderColl(h, st.coll);
         try c.triMid(h, "lib-det-w");
         try detailWrap(h, st.detail);
@@ -107,7 +111,10 @@ pub fn renderBody(h: *Html, st: Body) !void {
     }
     if (eql(u8, st.kind, "presets")) return s.renderPresets(h, st.presets);
     // default: Browse renders the dir listing regardless (the collection hydrates async)
-    try c.triOpen(h, "lib-nav-w", "lib-det-w", st.navRail);
+    var nav = Html.init(h.a);
+    defer nav.deinit();
+    try f.renderNav(&nav, st.navRail);
+    try c.triOpen(h, "lib-nav-w", "lib-det-w", nav.b.items);
     try s.renderBrowse(h, st.browse);
     try c.triMid(h, "lib-det-w");
     try detailWrap(h, st.detail);
@@ -136,6 +143,7 @@ test {
     _ = k;
     _ = s;
     _ = d;
+    _ = f;
 }
 
 test "tab header + embedded skips the section tabs" {

@@ -93,27 +93,28 @@ func (u *UI) gfStageActive() bool {
 	return g.stage != ""
 }
 
-// gfRailHTML renders the cockpit region of the Collection right rail.
-func (u *UI) gfRailHTML(s *libSt) string {
+// gfRailState resolves the cockpit region of the Collection right rail. Pure renderer:
+// libGFRailHTML (render_library_fixers.go) / native/zigui/src/libfixers.zig.
+func (u *UI) gfRailState(s *libSt) libGFSt {
 	g := &u.gf
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch g.stage {
 	case "running":
-		return u.gfRunningHTML(g)
+		return u.gfRunningState(g)
 	case "cal":
-		return u.gfCalRunningHTML(g)
+		return u.gfCalRunningState(g)
 	case "done":
-		return u.gfDoneHTML(g)
+		return u.gfDoneState(g)
 	case "confirm":
-		return u.gfConfirmHTML(s)
+		return u.gfConfirmState(s)
 	}
 	// idle: health summary + entry point
-	return u.gfHealthHTML(s)
+	return u.gfHealthState(s)
 }
 
-// gfHealthHTML is the idle rail card: collection at a glance + the fixer entry.
-func (u *UI) gfHealthHTML(s *libSt) string {
+// gfHealthState is the idle rail card: collection at a glance + the fixer entry.
+func (u *UI) gfHealthState(s *libSt) libGFSt {
 	total := len(s.tracks)
 	verified := 0
 	if vs := u.gfVerified(); vs != nil {
@@ -129,40 +130,41 @@ func (u *UI) gfHealthHTML(s *libSt) string {
 			multi++
 		}
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.healthEyebrow")) + `</div><div class=insp-title>` +
-		esc(i18n.T("library.gf.healthTitle")) + `</div></div>`)
-	b.WriteString(`<div class=gf-stats>` +
-		gfStat(fmt.Sprint(total), i18n.T("library.gf.statTracks"), "") +
-		gfStat(fmt.Sprint(verified), i18n.T("library.gf.statVerified"), "mint") +
-		gfStat(fmt.Sprint(noGrid), i18n.T("library.gf.statNoGrid"), "amber") +
-		gfStat(fmt.Sprint(multi), i18n.T("library.gf.statManual"), "") + `</div>`)
+	st := libGFSt{Kind: libGFHealth,
+		Eyebrow: i18n.T("library.gf.healthEyebrow"), Title: i18n.T("library.gf.healthTitle"),
+		Stats: []libGFStatSt{
+			{N: fmt.Sprint(total), Label: i18n.T("library.gf.statTracks")},
+			{N: fmt.Sprint(verified), Label: i18n.T("library.gf.statVerified"), Tone: "mint"},
+			{N: fmt.Sprint(noGrid), Label: i18n.T("library.gf.statNoGrid"), Tone: "amber"},
+			{N: fmt.Sprint(multi), Label: i18n.T("library.gf.statManual")},
+		}}
 	engineOK, probing := false, false
-	if st, ready := u.gridfixStatusCached(); ready {
-		engineOK = st.CPU.EngineOK || st.CUDA.EngineOK
+	if gst, ready := u.gridfixStatusCached(); ready {
+		engineOK = gst.CPU.EngineOK || gst.CUDA.EngineOK
 	} else {
 		probing = true // env probe (spawns Python) hasn't landed yet - NOT the same as "not installed"
 	}
-	if !u.svc.Cfg.Features.GridFix.Enabled {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.disabledHint")) + `</div>`)
-	} else if probing {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.checking")) + `</div>`)
-	} else if !engineOK {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.noEngineHint")) + `</div>` +
-			btnRow(btn(i18n.T("library.gf.openSettings"), "outline", "gf-settings", "")))
-	} else {
-		buttons := btn(i18n.T("library.gf.start"), "primary", "gf-open", "")
+	switch {
+	case !u.svc.Cfg.Features.GridFix.Enabled:
+		st.Note = i18n.T("library.gf.disabledHint")
+	case probing:
+		st.Note = i18n.T("library.gf.checking")
+	case !engineOK:
+		st.Note = i18n.T("library.gf.noEngineHint")
+		st.Btns = []uiBtn{newBtn(i18n.T("library.gf.openSettings"), "outline", "gf-settings")}
+	default:
+		st.Btns = []uiBtn{newBtn(i18n.T("library.gf.start"), "primary", "gf-open")}
 		if verified > 0 {
-			buttons += btn(i18n.T("library.gf.calibrate"), "outline", "gf-cal", "")
+			st.Btns = append(st.Btns, newBtn(i18n.T("library.gf.calibrate"), "outline", "gf-cal"))
 		}
-		b.WriteString(btnRow(buttons))
+		st.NoteAfter = true // the ready branch notes AFTER the buttons
 		if bias := u.svc.Cfg.Features.GridFix.BiasExt; len(bias) > 0 {
-			b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.calBias", i18n.A{"vals": gfBiasSummary(bias)})) + `</div>`)
+			st.Note = i18n.T("library.gf.calBias", i18n.A{"vals": gfBiasSummary(bias)})
 		} else if verified > 0 {
-			b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.calHint")) + `</div>`)
+			st.Note = i18n.T("library.gf.calHint")
 		}
 	}
-	return b.String()
+	return st
 }
 
 // gfBiasSummary formats a bias map for display: ".mp3 +42.7 ms · * −2.9 ms" ("*" last).
@@ -184,49 +186,50 @@ func gfBiasSummary(bias map[string]float64) string {
 	return strings.Join(parts, " · ")
 }
 
-// gfCalRunningHTML: live calibration progress (reuses prog + gf-cancel).
-func (u *UI) gfCalRunningHTML(g *gfState) string {
+// gfCalRunningState: live calibration progress (reuses prog + gf-cancel). Same chrome as a
+// batch run, only the title + the tile-less live fragment differ.
+func (u *UI) gfCalRunningState(g *gfState) libGFSt {
 	p := g.prog
 	frac := 0.0
 	if p.Total > 0 {
 		frac = float64(p.Done) / float64(p.Total)
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
-		esc(i18n.T("library.gf.calibratingTitle")) + `</div></div>`)
-	b.WriteString(`<div id=gf-live>` + progressBar(frac, fmt.Sprintf("%d / %d", p.Done, p.Total)) +
-		`<div class=gf-current>` + esc(p.Current) + `</div></div>`)
-	b.WriteString(btnRow(btn(i18n.T("library.gf.stop"), "outline", "gf-cancel", "")))
-	return b.String()
+	return libGFSt{Kind: libGFRunning,
+		Eyebrow: i18n.T("library.gf.eyebrow"), Title: i18n.T("library.gf.calibratingTitle"),
+		Live:    gfCalLiveState(p, frac),
+		StopLbl: i18n.T("library.gf.stop")}
 }
 
-// gfConfirmHTML: pick scope + see what will happen before anything runs.
-func (u *UI) gfConfirmHTML(s *libSt) string {
+// gfCalLiveState is the calibration #gf-live fragment (bar + current track, no tiles).
+func gfCalLiveState(p gridfix.BatchProgress, frac float64) libGFLiveSt {
+	return libGFLiveSt{Pct: progressPct(frac), Caption: fmt.Sprintf("%d / %d", p.Done, p.Total), Current: p.Current}
+}
+
+// gfConfirmState: pick scope + see what will happen before anything runs.
+func (u *UI) gfConfirmState(s *libSt) libGFSt {
 	filtered := len(s.collView())
 	selected := len(s.collSel)
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
-		esc(i18n.T("library.gf.confirmTitle")) + `</div></div>`)
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.confirmNote")) + `</div>`)
-	// force re-analyze: override the multi-marker/lock skips + the cache (verified stay protected)
-	b.WriteString(toggleRow(i18n.T("library.gf.force"), "gf-force", u.gf.force))
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.forceHint")) + `</div>`)
-	row := func(act, label string, n int, variant string) string {
+	st := libGFSt{Kind: libGFConfirm,
+		Eyebrow: i18n.T("library.gf.eyebrow"), Title: i18n.T("library.gf.confirmTitle"),
+		ConfirmNote: i18n.T("library.gf.confirmNote"),
+		// force re-analyze: override the multi-marker/lock skips + the cache (verified stay protected)
+		Force:     newToggle(i18n.T("library.gf.force"), "gf-force", u.gf.force),
+		ForceHint: i18n.T("library.gf.forceHint")}
+	scope := func(act, label string, n int, variant string) {
 		if n == 0 {
-			return ""
+			return
 		}
-		return btn(label+" ("+fmt.Sprint(n)+")", variant, act, "")
+		st.Scopes = append(st.Scopes, newBtn(label+" ("+fmt.Sprint(n)+")", variant, act))
 	}
-	b.WriteString(`<div class=btn-col>` +
-		row("gf-run:all", i18n.T("library.gf.scopeAll"), len(s.tracks), "primary") +
-		row("gf-run:filtered", i18n.T("library.gf.scopeFiltered"), filtered, "outline") +
-		row("gf-run:selected", i18n.T("library.gf.scopeSelected"), selected, "outline") +
-		btn(i18n.T("common.cancel"), "ghost", "gf-close", "") + `</div>`)
-	return b.String()
+	scope("gf-run:all", i18n.T("library.gf.scopeAll"), len(s.tracks), "primary")
+	scope("gf-run:filtered", i18n.T("library.gf.scopeFiltered"), filtered, "outline")
+	scope("gf-run:selected", i18n.T("library.gf.scopeSelected"), selected, "outline")
+	st.Scopes = append(st.Scopes, newBtn(i18n.T("common.cancel"), "ghost", "gf-close"))
+	return st
 }
 
-// gfRunningHTML: the live cockpit - counter tiles + progress + current track.
-func (u *UI) gfRunningHTML(g *gfState) string {
+// gfRunningState: the live cockpit - counter tiles + progress + current track.
+func (u *UI) gfRunningState(g *gfState) libGFSt {
 	p := g.prog
 	frac := 0.0
 	if p.Total > 0 {
@@ -236,71 +239,69 @@ func (u *UI) gfRunningHTML(g *gfState) string {
 	if p.ETA > 0 {
 		eta = i18n.T("library.gf.eta", i18n.A{"eta": shortDur(p.ETA)})
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
-		esc(i18n.T("library.gf.runningTitle")) + `</div></div>`)
-	b.WriteString(`<div id=gf-live>` + gfLiveInner(p, frac, eta) + `</div>`)
-	b.WriteString(btnRow(btn(i18n.T("library.gf.stop"), "outline", "gf-cancel", "")))
-	return b.String()
+	return libGFSt{Kind: libGFRunning,
+		Eyebrow: i18n.T("library.gf.eyebrow"), Title: i18n.T("library.gf.runningTitle"),
+		Live:    gfLiveState(p, frac, eta),
+		StopLbl: i18n.T("library.gf.stop")}
 }
 
-// gfLiveInner is the per-tick patched fragment (tiles + bar + current).
-func gfLiveInner(p gridfix.BatchProgress, frac float64, eta string) string {
-	return `<div class=gf-tiles>` +
-		gfTile(p.Fixed, i18n.T("library.gf.tileFix"), "violet") +
-		gfTile(p.OK, i18n.T("library.gf.tileOk"), "mint") +
-		gfTile(p.Skipped, i18n.T("library.gf.tileManual"), "amber") +
-		gfTile(p.Failed, i18n.T("library.gf.tileErr"), "red") + `</div>` +
-		progressBar(frac, fmt.Sprintf("%d / %d  %s", p.Done, p.Total, eta)) +
-		`<div class=gf-current>` + esc(p.Current) + `</div>`
+// gfLiveState is the per-tick patched #gf-live fragment (tiles + bar + current).
+func gfLiveState(p gridfix.BatchProgress, frac float64, eta string) libGFLiveSt {
+	return libGFLiveSt{Tiles: gfTilesState(p), Pct: progressPct(frac),
+		Caption: fmt.Sprintf("%d / %d  %s", p.Done, p.Total, eta), Current: p.Current}
 }
 
-// gfDoneHTML: summary + the two write actions (Apply fixes / prep playlist).
-func (u *UI) gfDoneHTML(g *gfState) string {
+// gfTilesState is the four counter tiles (FIX / OK / MANUAL / ERR), numbers pre-formatted.
+func gfTilesState(p gridfix.BatchProgress) []libGFTileSt {
+	return []libGFTileSt{
+		{N: fmt.Sprint(p.Fixed), Label: i18n.T("library.gf.tileFix"), Tone: "violet"},
+		{N: fmt.Sprint(p.OK), Label: i18n.T("library.gf.tileOk"), Tone: "mint"},
+		{N: fmt.Sprint(p.Skipped), Label: i18n.T("library.gf.tileManual"), Tone: "amber"},
+		{N: fmt.Sprint(p.Failed), Label: i18n.T("library.gf.tileErr"), Tone: "red"},
+	}
+}
+
+// gfDoneState: summary + the two write actions (Apply fixes / prep playlist). Hint ORDER is
+// load-bearing (no-targets, per-target applied, apply error, prepped) - it is the byte order
+// the rail renders them in.
+func (u *UI) gfDoneState(g *gfState) libGFSt {
 	p := g.prog
-	var b strings.Builder
 	title := i18n.T("library.gf.doneTitle")
 	if p.Phase == gridfix.PhaseCancelled {
 		title = i18n.T("library.gf.cancelledTitle")
 	}
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.gf.eyebrow")) + `</div><div class=insp-title>` +
-		esc(title) + `</div></div>`)
-	b.WriteString(`<div class=gf-tiles>` +
-		gfTile(p.Fixed, i18n.T("library.gf.tileFix"), "violet") +
-		gfTile(p.OK, i18n.T("library.gf.tileOk"), "mint") +
-		gfTile(p.Skipped, i18n.T("library.gf.tileManual"), "amber") +
-		gfTile(p.Failed, i18n.T("library.gf.tileErr"), "red") + `</div>`)
+	st := libGFSt{Kind: libGFDone,
+		Eyebrow: i18n.T("library.gf.eyebrow"), Title: title, Tiles: gfTilesState(p)}
 	if p.Cached > 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.cachedNote", i18n.A{"n": fmt.Sprint(p.Cached)})) + `</div>`)
+		st.CachedNote = i18n.T("library.gf.cachedNote", i18n.A{"n": fmt.Sprint(p.Cached)})
 	}
-	var acts []string
-	var notes []string
 	targets := u.gfTargets()
 	if p.Fixed > 0 {
 		if len(targets) == 0 {
-			b.WriteString(hint("bad", i18n.T("library.gf.noTargets")))
+			st.Hints = append(st.Hints, libHintSt{Tone: "bad", Text: i18n.T("library.gf.noTargets")})
 		}
 		variant := "primary"
 		for _, t := range targets {
 			if n, ok := g.applied[t.key]; ok {
-				b.WriteString(hint("ok", i18n.T("library.gf.appliedToHint", i18n.A{"app": t.label, "n": fmt.Sprint(n)})))
+				st.Hints = append(st.Hints, libHintSt{Tone: "ok",
+					Text: i18n.T("library.gf.appliedToHint", i18n.A{"app": t.label, "n": fmt.Sprint(n)})})
 				continue
 			}
 			if g.applyBusy {
 				continue // one write at a time; rail re-renders when it lands
 			}
-			acts = append(acts, btn(i18n.T("library.gf.applyTo", i18n.A{"app": t.label, "n": fmt.Sprint(p.Fixed)}), variant, "gf-apply:"+t.key, ""))
+			st.Acts = append(st.Acts, newBtn(i18n.T("library.gf.applyTo", i18n.A{"app": t.label, "n": fmt.Sprint(p.Fixed)}), variant, "gf-apply:"+t.key))
 			variant = "outline"
 			switch t.key {
 			case "rekordbox":
-				notes = append(notes, i18n.T("library.gf.rbNote"))
+				st.Notes = append(st.Notes, i18n.T("library.gf.rbNote"))
 			case "serato":
-				notes = append(notes, i18n.T("library.gf.seratoNote"))
+				st.Notes = append(st.Notes, i18n.T("library.gf.seratoNote"))
 			}
 		}
 	}
 	if g.applyErr != "" {
-		b.WriteString(hint("bad", g.applyErr))
+		st.Hints = append(st.Hints, libHintSt{Tone: "bad", Text: g.applyErr})
 	}
 	hasTraktor := false
 	for _, t := range targets {
@@ -309,41 +310,36 @@ func (u *UI) gfDoneHTML(g *gfState) string {
 		}
 	}
 	if p.Skipped > 0 && g.prepped < 0 && hasTraktor {
-		acts = append(acts, btn(i18n.T("library.gf.prep", i18n.A{"n": fmt.Sprint(p.Skipped)}), "outline", "gf-prep", ""))
+		st.Acts = append(st.Acts, newBtn(i18n.T("library.gf.prep", i18n.A{"n": fmt.Sprint(p.Skipped)}), "outline", "gf-prep"))
 	}
 	if g.prepped >= 0 {
-		b.WriteString(hint("ok", i18n.T("library.gf.preppedHint", i18n.A{"n": fmt.Sprint(g.prepped), "playlist": gridfixPrepPlaylist})))
+		st.Hints = append(st.Hints, libHintSt{Tone: "ok",
+			Text: i18n.T("library.gf.preppedHint", i18n.A{"n": fmt.Sprint(g.prepped), "playlist": gridfixPrepPlaylist})})
 	}
 	resLbl := i18n.T("library.gf.viewResults")
 	if g.resView {
 		resLbl = i18n.T("library.gf.viewTracks")
 	}
-	acts = append(acts, btn(resLbl, "outline", "gf-results", ""), btn(i18n.T("common.close"), "ghost", "gf-close", ""))
-	b.WriteString(`<div class=btn-col>` + strings.Join(acts, "") + `</div>`)
-	for _, n := range notes {
-		b.WriteString(`<div class=set-note>` + esc(n) + `</div>`)
-	}
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.gf.applyNote")) + `</div>`)
-	return b.String()
+	st.Acts = append(st.Acts, newBtn(resLbl, "outline", "gf-results"), newBtn(i18n.T("common.close"), "ghost", "gf-close"))
+	st.ApplyNote = i18n.T("library.gf.applyNote")
+	return st
 }
 
-// gfResultsHTML swaps the main track list for the batch outcome table.
-func (u *UI) gfResultsHTML(g *gfState) string {
+// gfResultsState resolves the batch outcome table that swaps the main track list.
+func (u *UI) gfResultsState(g *gfState) libGFResSt {
 	g.mu.Lock()
 	results := g.results
 	flt := g.resFlt
 	g.mu.Unlock()
-	var b strings.Builder
-	b.WriteString(`<div class=lib-toolbar>`)
+	st := libGFResSt{Empty: i18n.T("library.gf.noResults")}
 	for _, f := range [][2]string{{"", i18n.T("library.gf.fltAll")}, {"FIX", i18n.T("library.gf.tileFix")},
 		{"OK", i18n.T("library.gf.tileOk")}, {"SKIP", i18n.T("library.gf.tileManual")}, {"ERR", i18n.T("library.gf.tileErr")}} {
-		b.WriteString(fchip(f[1], "", "gf-flt:"+f[0], flt == f[0]))
+		st.Chips = append(st.Chips, newChip(f[1], "", "gf-flt:"+f[0], flt == f[0]))
 	}
-	b.WriteString(`</div><div class=trk-table>`)
 	shown := 0
 	for _, r := range results {
-		st := gfResultClass(r)
-		if flt != "" && st != flt {
+		cls := gfResultClass(r)
+		if flt != "" && cls != flt {
 			continue
 		}
 		shown++
@@ -364,17 +360,11 @@ func (u *UI) gfResultsHTML(g *gfState) string {
 				delta = i18n.T("library.gf.newMarker")
 			}
 		}
-		b.WriteString(`<div class=trk-row data-ctx="lib-ctx:` + esc(r.Path) + `">` +
-			`<span class="gf-chip gf-` + strings.ToLower(st) + `">` + st + `</span>` +
-			`<span class=trk-main data-act="lib-track:` + esc(r.Path) + `"><span class=trk-title>` + esc(r.Title) + `</span>` +
-			`<span class=trk-sub>` + esc(detail) + `</span></span>` +
-			`<span class=gf-delta>` + esc(delta) + `</span></div>`)
+		st.Rows = append(st.Rows, libGFResRowSt{Path: r.Path, St: cls, StLow: strings.ToLower(cls),
+			Title: r.Title, Detail: detail, Delta: delta})
 	}
-	b.WriteString(`</div>`)
-	if shown == 0 {
-		b.WriteString(emptyState(i18n.T("library.gf.noResults")))
-	}
-	return b.String()
+	st.IsEmpty = shown == 0
+	return st
 }
 
 func gfResultClass(r gridfix.TrackResult) string {
@@ -382,18 +372,6 @@ func gfResultClass(r gridfix.TrackResult) string {
 		return "ERR"
 	}
 	return string(r.Plan.Status)
-}
-
-func gfStat(n, label, tone string) string {
-	cls := "gf-stat"
-	if tone != "" {
-		cls += " gf-" + tone
-	}
-	return `<div class="` + cls + `"><div class=gf-n>` + esc(n) + `</div><div class=gf-l>` + esc(label) + `</div></div>`
-}
-
-func gfTile(n int, label, tone string) string {
-	return `<div class="gf-tile gf-` + tone + `"><div class=gf-n>` + fmt.Sprint(n) + `</div><div class=gf-l>` + esc(label) + `</div></div>`
 }
 
 func shortDur(d time.Duration) string {
@@ -606,7 +584,7 @@ func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, 
 			g.prog.Phase, g.prog.Current = gridfix.PhaseScanning, i18n.T("library.gf.loadingModel")
 			pr := g.prog
 			g.mu.Unlock()
-			u.eval("window.__patch('gf-live'," + jsQuote(gfLiveInner(pr, 0, "")) + ")")
+			u.eval("window.__patch('gf-live'," + jsQuote(gfLiveRender(gfLiveState(pr, 0, ""))) + ")")
 			if _, _, werr := eng.Ping(ctx, true); werr != nil { // gfCallTimeout bounds it internally
 				if ctx.Err() == nil { // a real load failure / timeout, not a user cancel
 					if errors.Is(werr, context.DeadlineExceeded) {
@@ -635,7 +613,7 @@ func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, 
 				if p.ETA > 0 {
 					eta = i18n.T("library.gf.eta", i18n.A{"eta": shortDur(p.ETA)})
 				}
-				u.eval("window.__patch('gf-live'," + jsQuote(gfLiveInner(p, frac, eta)) + ")")
+				u.eval("window.__patch('gf-live'," + jsQuote(gfLiveRender(gfLiveState(p, frac, eta))) + ")")
 			}
 			if now.Sub(lastTip) > 2*time.Second {
 				lastTip = now
@@ -790,8 +768,7 @@ func (u *UI) gfCalibrate() {
 			if time.Since(lastPatch) > 500*time.Millisecond {
 				lastPatch = time.Now()
 				frac := float64(p.Done) / float64(p.Total)
-				u.eval("window.__patch('gf-live'," + jsQuote(progressBar(frac, fmt.Sprintf("%d / %d", p.Done, p.Total))+
-					`<div class=gf-current>`+esc(p.Current)+`</div>`) + ")")
+				u.eval("window.__patch('gf-live'," + jsQuote(gfLiveRender(gfCalLiveState(p, frac))) + ")")
 			}
 		}
 		if cancelled {

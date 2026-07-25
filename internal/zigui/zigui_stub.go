@@ -95,7 +95,7 @@ func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
 func RenderCueEditTopbar(stateJSON []byte) (string, bool) { return "", false }
 func RenderCueEditWave(stateJSON []byte) (string, bool)   { return "", false }
 func RenderCueEditRail(stateJSON []byte) (string, bool)   { return "", false }
-=======
+
 // --- libviews ---
 
 func RenderLibMirror(stateJSON []byte) (string, bool)       { return "", false }
@@ -106,3 +106,13 @@ func RenderRCESave(stateJSON []byte) (string, bool)         { return "", false }
 func RenderLibSmartModal(stateJSON []byte) (string, bool)   { return "", false }
 func RenderLibRelocModal(stateJSON []byte) (string, bool)   { return "", false }
 >>>>>>> feature/zig-ui-libviews
+=======
+// --- libfixers ---
+
+func RenderLibFixNavRail(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixPrep(stateJSON []byte) (string, bool)    { return "", false }
+func RenderLibFixGFRail(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibFixGFLive(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibFixResults(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixTagEdit(stateJSON []byte) (string, bool) { return "", false }
+func RenderLibFixCompat(stateJSON []byte) (string, bool)  { return "", false }

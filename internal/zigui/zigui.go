@@ -435,6 +435,7 @@ func RenderLibraryCueCell(stateJSON []byte) (string, bool) {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 // --- cueedit ---
 
 // RenderCueEditTopbar renders the #ce-topbar readout strip (empty when the editor is off).
@@ -505,5 +506,58 @@ func RenderLibRelocModal(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_lib_relocmodal(p, l, n)
 >>>>>>> feature/zig-ui-libviews
+=======
+// --- libfixers ---
+// The Library tab's fixer/section subviews. They also render inside RenderLibrary/
+// RenderLibraryBody/RenderLibraryDetail; these are the direct entry points (golden gate)
+// plus RenderLibFixGFLive, the one independently patched fragment.
+
+// RenderLibFixNavRail renders the triPane nav column (Collection tree / Browse places).
+func RenderLibFixNavRail(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_navrail(p, l, n)
+	})
+}
+
+// RenderLibFixPrep renders the prep-playlist picker (collection toolbar).
+func RenderLibFixPrep(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_prep(p, l, n)
+	})
+}
+
+// RenderLibFixGFRail renders the beatgrid-fixer rail (health/confirm/running/done).
+func RenderLibFixGFRail(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_gfrail(p, l, n)
+	})
+}
+
+// RenderLibFixGFLive renders the #gf-live inner fragment (~2 Hz run tick).
+func RenderLibFixGFLive(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_gflive(p, l, n)
+	})
+}
+
+// RenderLibFixResults renders the fixer results view that replaces the collection list.
+func RenderLibFixResults(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_results(p, l, n)
+	})
+}
+
+// RenderLibFixTagEdit renders the per-track tag editor (inspector Tags tail).
+func RenderLibFixTagEdit(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_tagedit(p, l, n)
+	})
+}
+
+// RenderLibFixCompat renders the "works well together" inspector section.
+func RenderLibFixCompat(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_compat(p, l, n)
+>>>>>>> feature/zig-ui-libfixers
 	})
 }

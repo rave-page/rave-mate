@@ -156,6 +156,20 @@ const uint8_t *rz_ui_render_rce_save(const uint8_t *state_json, size_t len, size
 const uint8_t *rz_ui_render_lib_smartmodal(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_lib_relocmodal(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- libfixers --- */
+/* The Library tab's fixer/section subviews (nav rail, beatgrid-fixer rail + results,
+ * tag-fixer results + editor, prep picker, compat section). They also render inside the
+ * library tab/body/detail exports; these are the direct entry points, plus #gf-live -
+ * the one independently patched fragment (batch/calibration run tick). */
+const uint8_t *rz_ui_render_libfix_navrail(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_prep(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_gfrail(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #gf-live inner HTML (~2 Hz run tick). */
+const uint8_t *rz_ui_render_libfix_gflive(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_results(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_tagedit(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_compat(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

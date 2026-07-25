@@ -460,4 +460,44 @@ export fn rz_ui_render_lib_relocmodal(state_json: ?[*]const u8, len: usize, out_
 
 test "libviews module" {
     _ = libviews;
+
+// --- libfixers ---
+// The Library tab's fixer/section subviews. They render as part of the library tab/body/detail
+// exports too; these standalone entry points serve the direct golden gate plus the ONE
+// independently patched fragment, #gf-live (the batch/calibration run's ~2 Hz tick).
+
+const libfixers = @import("libfixers.zig");
+const libfixSelect = @import("components.zig").Select;
+
+export fn rz_ui_render_libfix_navrail(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.Nav, libfixers.renderNav, state_json, len, out_len);
+}
+
+export fn rz_ui_render_libfix_prep(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixSelect, libfixers.renderPrep, state_json, len, out_len);
+}
+
+export fn rz_ui_render_libfix_gfrail(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.GF, libfixers.renderGF, state_json, len, out_len);
+}
+
+/// #gf-live inner (tiles + progress + current track), patched from the run goroutine.
+export fn rz_ui_render_libfix_gflive(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.GFLive, libfixers.renderGFLive, state_json, len, out_len);
+}
+
+export fn rz_ui_render_libfix_results(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.Results, libfixers.renderResults, state_json, len, out_len);
+}
+
+export fn rz_ui_render_libfix_tagedit(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.TagEdit, libfixers.renderTagEdit, state_json, len, out_len);
+}
+
+export fn rz_ui_render_libfix_compat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libfixers.Compat, libfixers.renderCompat, state_json, len, out_len);
+}
+
+test "library fixer subviews module" {
+    _ = libfixers;
 }

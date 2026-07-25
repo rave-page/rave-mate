@@ -11,6 +11,7 @@ const std = @import("std");
 const Html = @import("html.zig").Html;
 const c = @import("components.zig");
 const k = @import("library_kit.zig");
+const f = @import("libfixers.zig");
 
 pub const TrackPls = struct {
     unavailable: bool = false,
@@ -66,6 +67,7 @@ pub const Detail = struct {
     kind: []const u8 = "",
     raw: []const u8 = "",
     msg: []const u8 = "",
+    gf: f.GF = .{},
 
     eyebrow: []const u8 = "",
     title: []const u8 = "",
@@ -97,7 +99,7 @@ pub const Detail = struct {
     writeAct: []const u8 = "",
     revertLbl: []const u8 = "",
     revertAct: []const u8 = "",
-    tagEditor: []const u8 = "",
+    tagEditor: f.TagEdit = .{},
 
     hasPls: bool = false,
     plsTitle: []const u8 = "",
@@ -105,14 +107,15 @@ pub const Detail = struct {
 
     hasCompat: bool = false,
     compatTitle: []const u8 = "",
-    compat: []const u8 = "",
+    compat: f.Compat = .{},
 
     detailsTitle: []const u8 = "",
     meta: []const c.KV = &.{},
 };
 
 pub fn render(h: *Html, st: Detail) !void {
-    if (std.mem.eql(u8, st.kind, "raw")) return h.raw(st.raw);
+    if (std.mem.eql(u8, st.kind, "raw")) return h.raw(st.raw); // cue-edit rail
+    if (std.mem.eql(u8, st.kind, "gf")) return f.renderGF(h, st.gf); // beatgrid-fixer rail
     if (std.mem.eql(u8, st.kind, "msg")) return c.emptyState(h, st.msg);
 
     try h.raw("<div class=insp-hd><div class=insp-eyebrow>");
@@ -162,7 +165,7 @@ pub fn render(h: *Html, st: Detail) !void {
         try c.btn(h, st.writeLbl, "primary", st.writeAct, "");
         try c.btn(h, st.revertLbl, "ghost", st.revertAct, "");
         try c.btnRowClose(h);
-        try h.raw(st.tagEditor);
+        try f.renderTagEdit(h, st.tagEditor);
         try k.inspSecClose(h);
     }
     // PLAYLISTS membership
@@ -174,7 +177,7 @@ pub fn render(h: *Html, st: Detail) !void {
     // WORKS WELL TOGETHER (compat marks + discovery)
     if (st.hasCompat) {
         try k.inspSecOpen(h, st.compatTitle);
-        try h.raw(st.compat);
+        try f.renderCompat(h, st.compat);
         try k.inspSecClose(h);
     }
     // DETAILS

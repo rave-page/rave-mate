@@ -7,6 +7,7 @@ const std = @import("std");
 const Html = @import("html.zig").Html;
 const c = @import("components.zig");
 const k = @import("library_kit.zig");
+const f = @import("libfixers.zig");
 
 // ── Browse ──
 
@@ -283,12 +284,12 @@ pub const Coll = struct {
     noDrops: bool = false,
     clear: bool = false,
     clearLbl: []const u8 = "",
-    prep: []const u8 = "",
+    prep: c.Select = .{},
     chips: []const k.Chip = &.{},
     hasInline: bool = false,
     inlineActs: k.PlAct = .{},
     hasResults: bool = false,
-    results: []const u8 = "",
+    results: f.Results = .{},
     head: CollHead = .{},
     rows: []const CollRow = &.{},
     verifiedTitle: []const u8 = "",
@@ -319,13 +320,13 @@ pub fn renderColl(h: *Html, st: Coll) !void {
     try k.chip(h, st.keyChip);
     try c.fchip(h, st.noDropsLbl, "", "lib-nodrops", st.noDrops);
     if (st.clear) try c.btn(h, st.clearLbl, "ghost", "lib-clearfilters", "");
-    try h.raw(st.prep); // P-key target (library_prep.go)
+    try f.renderPrep(h, st.prep); // P-key target (library_prep.go)
     try h.raw("</div>");
     for (st.chips) |ch| try k.chip(h, ch);
     // exactly one playlist facet active -> the collection IS that playlist's view
     if (st.hasInline) try k.plAct(h, st.inlineActs);
     // batch results replace the list while a fixer's results view is on
-    if (st.hasResults) return h.raw(st.results);
+    if (st.hasResults) return f.renderResults(h, st.results);
 
     try renderCollHead(h, st.head);
     try h.raw("<div class=trk-table>");

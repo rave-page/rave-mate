@@ -245,27 +245,23 @@ func (u *UI) libCompatRemove(arg string) {
 	u.libPatchDetail()
 }
 
-// libCompatSectionHTML: detail-rail section - direct partners (capped) + find button. direct is
+// libCompatSectionState: detail-rail section - direct partners (capped) + find button. direct is
 // resolved off-thread + cached on the selection (see libDetailData); ready=false shows a loading
-// line until the first resolve lands. Caller holds s.mu.
-func (u *UI) libCompatSectionHTML(s *libSt, path string, direct []libdb.CompatRow, ready bool) string {
-	if u.svc.Lib == nil {
-		return ""
-	}
-	var b strings.Builder
+// line until the first resolve lands. Caller holds s.mu. Pure renderer: libCompatSecHTML
+// (render_library_fixers.go) / native/zigui/src/libfixers.zig.
+func (u *UI) libCompatSectionState(s *libSt, path string, direct []libdb.CompatRow, ready bool) libCompatSecSt {
+	st := libCompatSecSt{OpenLbl: i18n.T("library.open"),
+		FindLbl: i18n.T("library.compat.findBtn"), FindAct: "lib-compat-find:" + path}
 	if len(direct) == 0 {
-		empty := i18n.T("library.compat.sectionEmpty")
+		st.IsEmpty, st.Empty = true, i18n.T("library.compat.sectionEmpty")
 		if !ready {
-			empty = i18n.T("library.remote.col.loading")
+			st.Empty = i18n.T("library.remote.col.loading")
 		}
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(empty) + `</p>`)
-	} else {
-		hits := compatDiscover(path, direct, nil, compatRailMax)
-		for _, h := range hits {
-			b.WriteString(itemRow(libCompatTitle(s, h.path), compatKindsLabel(h.kinds),
-				btn(i18n.T("library.open"), "ghost", "lib-compat-go:"+h.path, "")))
-		}
+		return st
 	}
-	b.WriteString(btnRow(btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+path, "")))
-	return b.String()
+	for _, h := range compatDiscover(path, direct, nil, compatRailMax) {
+		st.Rows = append(st.Rows, libCompatRowSt{Title: libCompatTitle(s, h.path),
+			Sub: compatKindsLabel(h.kinds), Act: "lib-compat-go:" + h.path})
+	}
+	return st
 }

@@ -63,14 +63,14 @@ func libDetailFixture() libDetailSt {
 		HasTags: true, TagsTitle: "Tags", TagsDesc: "Write library metadata into the file",
 		WriteLbl: "Write tags", WriteAct: "lib-tags-write:C:\\m\\a.flac",
 		RevertLbl: "Revert", RevertAct: "lib-tags-revert:C:\\m\\a.flac",
-		TagEditor: `<div class=tf-ed><input class=field-input></div>`,
+		TagEditor: libTagEdFixture(),
 		HasPls:    true, PlsTitle: "Playlists",
 		Pls: libTrackPlsSt{
 			Chips:  []libChipSt{{Label: "Warmup", Act: "lib-plgoto:7"}},
 			AddLbl: "Add to playlist", AddAct: "lib-track-addto:C:\\m\\a.flac",
 			EmptyText: "Not in a playlist",
 		},
-		HasCompat: true, CompatTitle: "Works well together", Compat: `<div class=cmp><span>2 marks</span></div>`,
+		HasCompat: true, CompatTitle: "Works well together", Compat: libCompatFixture(),
 		DetailsTitle: "Details",
 		Meta:         []uiKV{newKV("Path", "C:\\m\\a.flac"), newKV("BPM", "128")},
 	}
@@ -147,7 +147,7 @@ func libFixtures() map[string]libState {
 			Tabs: libTabs(), Body: body}
 	}
 
-	emptyBrowse := libBodySt{Kind: libBodyBrowse, NavRail: `<div class=libnav></div>`,
+	emptyBrowse := libBodySt{Kind: libBodyBrowse, NavRail: libNavSt{Rows: []libNavRowSt{}},
 		Browse: libBrowseSt{
 			Up: "Up", UpPath: "C:\\", Goto: "Go to…", FilterPH: "Filter by name",
 			KindLbl: "Kind", Kind: libSel1(), SortLbl: "Sort", Sort: libSelOpen(),
@@ -169,7 +169,7 @@ func libFixtures() map[string]libState {
 		PlFacet:    selState{ID: "libfacet-pl", CurLabel: "Playlist (1)", Rows: []selRow{{Val: "7", Label: "✓ Warmup", Badge: "18"}}},
 		KeyChip:    newChip("Key (2)", "", "lib-key-clear", true),
 		NoDropsLbl: "No drops", NoDrops: true, Clear: true, ClearLbl: "Clear",
-		Prep:      `<div class=prep-sel></div>`,
+		Prep:      libPrepFixture(),
 		Chips:     []libChipSt{newChip("Techno ×", "", "lib-genre:Techno", true), newChip("Warmup ×", "", "lib-plfilter:7", true)},
 		HasInline: true, Inline: libPlActs(),
 		Head: libCollHeadSt{SelAllTitle: "Select all", SelAllOn: false,
@@ -198,11 +198,12 @@ func libFixtures() map[string]libState {
 			{Label: "Clear", Variant: "ghost", Act: "lib-collsel-clear"},
 		}},
 	}
-	populated := base(libBodySt{Kind: libBodyColl, NavRail: `<div class=libnav><div class=libnav-hd>Collection</div></div>`,
+	populated := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(),
 		Coll: coll, Detail: libDetailFixture()})
 	populated.Section = "collection"
 	populated.Switcher = `<div class=lib-target><div class=ss-field></div></div>`
 
+<<<<<<< HEAD
 	// cue-edit mode: full-width waveform above the panes. Both seams carry the REAL
 	// cue-editor markup (drops/grid readouts + assign grid + write-back rail, see
 	// zigui_golden_cueedit_test.go) so a library-side change cannot silently drop it.
@@ -211,15 +212,39 @@ func libFixtures() map[string]libState {
 			Player: `<div id=mp-library><div id=mp-library-ph style="left:12.50%"></div></div>`}),
 		Coll:   coll,
 		Detail: libDetailSt{Kind: libDetailRaw, Raw: ceRailHTMLOf(ceRailFixtures()["full"])}})
+=======
+	// cue-edit mode: full-width waveform above the panes
+	cueEdit := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(), CEFull: true,
+		CEWave: `<div id=ce-wave><canvas></canvas></div>`, Coll: coll,
+		Detail: libDetailSt{Kind: libDetailRaw, Raw: `<div id=ce-rail>editor</div>`}})
+>>>>>>> feature/zig-ui-libfixers
 	cueEdit.Section = "collection"
 
-	// collection with a fixer results view replacing the list
-	results := base(libBodySt{Kind: libBodyColl, NavRail: "", Coll: func() libCollSt {
+	// collection with a fixer results view replacing the list; the fixer rail owns the inspector
+	results := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(), Coll: func() libCollSt {
 		r := coll
-		r.HasResults, r.Results = true, `<div class=gf-res><span>42 fixed</span></div>`
+		r.HasResults, r.Results = true, libFixResSt{Kind: libFixResGF, GF: libGFResFixture()}
 		return r
-	}(), Detail: libDetailSt{Kind: libDetailRaw, Raw: `<div id=gf-rail></div>`}})
+	}(), Detail: libDetailSt{Kind: libDetailGF, GF: libGFDoneFixture()}})
 	results.Section = "collection"
+
+	// the tag fixer's problem list + the idle beatgrid health card
+	tagfix := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(), Coll: func() libCollSt {
+		r := coll
+		r.HasResults, r.Results = true, libFixResSt{Kind: libFixResTF, TF: libTFResFixture()}
+		return r
+	}(), Detail: libDetailSt{Kind: libDetailGF, GF: libGFHealthFixture()}})
+	tagfix.Section = "collection"
+
+	// a live batch run owns the inspector (tiles + #gf-live + stop)
+	gfRun := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(), Coll: coll,
+		Detail: libDetailSt{Kind: libDetailGF, GF: libGFFixtures()["running"]}})
+	gfRun.Section = "collection"
+
+	// the confirm stage (scope picker + force toggle)
+	gfConfirm := base(libBodySt{Kind: libBodyColl, NavRail: libNavFixture(), Coll: coll,
+		Detail: libDetailSt{Kind: libDetailGF, GF: libGFFixtures()["confirm"]}})
+	gfConfirm.Section = "collection"
 
 	unavailable := base(libBodySt{Kind: libBodyColl, Coll: libCollSt{Msg: "Library database unavailable"},
 		Detail: libDetailSt{Kind: libDetailMsg, Msg: "Nothing selected"}})
@@ -231,7 +256,7 @@ func libFixtures() map[string]libState {
 		Switcher: `<div class=lib-target></div>`,
 		Body:     libBodySt{Kind: libBodyRaw, Raw: `<div class=mirror>peer view</div>`}}
 
-	grid := base(libBodySt{Kind: libBodyBrowse, NavRail: `<div class=libnav></div>`,
+	grid := base(libBodySt{Kind: libBodyBrowse, NavRail: libNavBrowseFixture(),
 		Browse: libBrowseSt{
 			Up: "Up", UpPath: "C:\\m", Goto: "Go to…", Filter: "ra", FilterPH: "Filter by name",
 			KindLbl: "Kind", Kind: libSel1(), SortLbl: "Sort", Sort: libSel1(),
@@ -343,6 +368,8 @@ func libFixtures() map[string]libState {
 	escColl.Batch = libBatchSt{On: true, Count: `1 &selected "x"`, Btns: []uiBtn{
 		{Label: `Add &<to>"list"'`, Variant: "outline", Act: `lib-addto:a&"b'`},
 	}}
+	escColl.Prep = selState{ID: "prep-coll", Label: `Pre&pare <"x">'`, CurLabel: `W&armup "×"'`,
+		Rows: []selRow{{Val: `7&"a'`, Label: `W&armup`, Cur: true}}}
 	escDetail := libDetailFixture()
 	escDetail.Title = `Kollektiv & "Rausch" <mix>'`
 	escDetail.Sub = `8.2 MB · A&UDIO "x"`
@@ -356,6 +383,15 @@ func libFixtures() map[string]libState {
 	escDetail.Enc.TrimStart = newPBField(`Tr&im "start"'`, "lib-trim-s", `1&"2'`, "number", `hi&nt "x"'`)
 	escDetail.Harm.SameLbl = `Sa&me "key"'`
 	escDetail.Pls.Chips = []libChipSt{{Label: `W&armup "×"'`, Act: `lib-plgoto:7`}}
+	escDetail.TagEditor = libTagEdSt{Open: true, Desc: `Writes the &file <"revertible">'`,
+		Fields:  []libPBFieldSt{newPBField(`Ti&tle "x"'`, "tf-edit:title", `Rau&sch <"mix">'`, "text", "")},
+		SaveLbl: `Sa&ve"`, CancelLbl: `Can&cel'`}
+	escDetail.Compat = libCompatSecSt{OpenLbl: `O&pen "x"'`, FindLbl: `Fi&nd <"partners">'`,
+		FindAct: `lib-compat-find:C:\m\a&"b'.flac`,
+		Rows:    []libCompatRowSt{{Title: `A&B <"quoted'>`, Sub: `Ble&nd · Do"uble`, Act: `lib-compat-go:C:\m\b&"c'.flac`}}}
+	escEmptyNav := libNavSt{Rows: []libNavRowSt{navHdRow(`Coll&ection <"x">'`),
+		navItRow(`lib-plgoto:7&"a'<>`, "🎵", `W&armup <"peak">'`, `1&2"`, true)}}
+	esc.Body.NavRail = escEmptyNav
 	esc.Body.Coll = escColl
 	esc.Body.Detail = escDetail
 
@@ -369,6 +405,7 @@ func libFixtures() map[string]libState {
 			BPM: "128", Dur: "612:12", Key: libKeyPillSt{Text: "12B", Cls: " k-down", Ok: true}},
 	}
 	longColl.More = strings.Repeat("Showing ", 100)
+	long.Body.NavRail = libNavFixtures()["long"]
 	long.Body.Coll = longColl
 	longDetail := libDetailFixture()
 	longDetail.Title = longS
@@ -387,6 +424,7 @@ func libFixtures() map[string]libState {
 			BPM: "132", Dur: "7:07", Key: libKeyPillSt{Text: "5A", Cls: " k-rel", Ok: true}},
 	}
 	uniColl.Chips = []libChipSt{newChip("Техно ×", "", "lib-genre:Техно", true)}
+	uni.Body.NavRail = libNavFixtures()["unicode"]
 	uni.Body.Coll = uniColl
 	uniDetail := libDetailFixture()
 	uniDetail.Title = "Кириллица + 中文 🎛️"
@@ -400,6 +438,9 @@ func libFixtures() map[string]libState {
 		"populated":   populated,
 		"cueEdit":     cueEdit,
 		"results":     results,
+		"tagfix":      tagfix,
+		"gfRun":       gfRun,
+		"gfConfirm":   gfConfirm,
 		"embedded":    embedded,
 		"browseGrid":  grid,
 		"browseList":  listBrowse,
