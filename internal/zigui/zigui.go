@@ -52,6 +52,50 @@ func RenderLogsLines(stateJSON []byte) (string, bool) {
 	})
 }
 
+// --- vrchat ---
+
+// RenderVRChat renders the full VRChat tab.
+func RenderVRChat(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat(p, l, n)
+	})
+}
+
+// RenderVRChatStatus renders the #vrc-status-region fragment (live tick).
+func RenderVRChatStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_status(p, l, n)
+	})
+}
+
+// RenderVRChatEditor renders the #vrc-editor fragment.
+func RenderVRChatEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_editor(p, l, n)
+	})
+}
+
+// RenderVRChatCampaths renders the #vrc-campaths fragment.
+func RenderVRChatCampaths(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_campaths(p, l, n)
+	})
+}
+
+// RenderVRChatPhotos renders the #vrc-photos-body fragment.
+func RenderVRChatPhotos(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_photos(p, l, n)
+	})
+}
+
+// RenderVRCGroups renders the VRChat ▸ Groups sub-view (#vrcg-body).
+func RenderVRCGroups(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrcgroups(p, l, n)
+	})
+}
+
 // render calls a Zig renderer; copies the result and frees the Zig buffer.
 func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (string, bool) {
 	if len(state) == 0 {

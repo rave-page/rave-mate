@@ -75,6 +75,8 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 |---|---|---|
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
+| vrchat | Zig (`native/zigui/src/vrchat.zig`; full + `#vrc-status-region`/`#vrc-editor`/`#vrc-campaths`/`#vrc-photos-body`) | `TestZigVRChatGolden` |
+| vrchat ▸ groups | Zig (`native/zigui/src/vrcgroups.zig`; `#vrcg-body` sub-view) | `TestZigVRCGroupsGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -98,6 +100,19 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
   literals "Type to filter…"/"No matches" are hardcoded English (parity w/ smartselect.go).
 - `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
   `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
+
+VRChat-port notes (tabs #3/#4): the tab + its Groups sub-view are separate exports (the tab
+embeds `#vrcg-body`, actions patch it alone). components.go grew caller-resolved data-label
+variants (`kvDL`/`statusRowDL`/`fieldExDL`, wrappers delegate) mirroring `toggleRowDL`.
+Components ported to `components.zig`: `kv` · `statusRow` · `fieldEx` ·
+`cardOpen/cardHeadClose/cardClose` · `itemRowOpen/itemRowClose` · `mdOpen/mdSplit/mdClose`
+(masterDetail) · `fpairOpen/fpairClose` · `num(i64)` (Go `%d`). Two things stay resolved
+Go-side because Zig has no equivalent: the photo cell's `title=%q` (Go strconv quoting) is
+pre-quoted into state (`titleQ`, emitted verbatim), and pre-rendered fragments from other
+subsystems (campath 3-D viewer SVG, play button, `tipTopic` tooltips) travel as trusted raw
+strings. Nil-slice gotcha: nested zero-value state structs marshal `null` for their slices and
+Zig slice parsing rejects null — every slice field carries `,omitempty` so Zig falls back to
+its `&.{}` default.
 
 ## Dev rules when touching UI during migration
 

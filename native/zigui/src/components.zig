@@ -247,6 +247,167 @@ pub fn selectList(h: *Html, id: []const u8, rows: []const SelectRow) !void {
     }
 }
 
+// --- vrchat ---
+// Ports of the components.go helpers the vrchat/worlds tabs need. Label-derived data-labels
+// arrive pre-lowered from Go (the *DL variants there) — Unicode lowering stays in Go.
+
+/// kv: key/value line (Go kvDL). dl = Go strings.ToLower(label).
+pub fn kv(h: *Html, label: []const u8, dl: []const u8, value: []const u8) !void {
+    try h.raw("<div class=kv><span class=kv-k>");
+    try h.esc(label);
+    try h.raw("</span><span class=kv-v data-label=");
+    try h.attrQ(dl);
+    try h.raw(" data-value=");
+    try h.attrQ(value);
+    try h.raw(">");
+    try h.esc(value);
+    try h.raw("</span></div>");
+}
+
+/// statusRow: status dot + label + muted sub-line (Go statusRowDL).
+pub fn statusRow(h: *Html, variant: []const u8, label: []const u8, dl: []const u8, line: []const u8) !void {
+    try h.raw("<div class=strow>");
+    try dot(h, variant);
+    try h.raw("<div class=strow-tx><div class=strow-l data-label=");
+    try h.attrQ(dl);
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</div><div class=strow-s data-value=");
+    try h.attrQ(line);
+    try h.raw(">");
+    try h.esc(line);
+    try h.raw("</div></div></div>");
+}
+
+/// fieldEx: labelled input dispatching act on change (Go fieldExDL). Empty input_type → "text";
+/// empty placeholder omits the attribute; tip is pre-rendered markup (trusted, raw).
+pub fn fieldEx(h: *Html, label: []const u8, dl: []const u8, act: []const u8, value: []const u8, input_type: []const u8, placeholder: []const u8, tip: []const u8) !void {
+    try h.raw("<label class=field data-label=");
+    try h.attrQ(dl);
+    try h.raw("><span class=field-label>");
+    try h.esc(label);
+    try h.raw(tip);
+    try h.raw("</span><input class=field-input type=");
+    try h.raw(if (input_type.len == 0) "text" else input_type);
+    try h.raw(" value=");
+    try h.attrQ(value);
+    try h.raw(" data-value=");
+    try h.attrQ(value);
+    try h.raw(" data-act=");
+    try h.attrQ(act);
+    if (placeholder.len != 0) {
+        try h.raw(" placeholder=");
+        try h.attrQ(placeholder);
+    }
+    try h.raw("></label>");
+}
+
+/// cardOpen/cardHeadClose/cardClose bracket an rp-card (Go card, streaming form). head=true
+/// emits the card-head; the caller writes the trailing-slot markup, then cardHeadClose, then
+/// the body, then cardClose. head must be (title.len != 0 or trailing markup non-empty).
+pub fn cardOpen(h: *Html, title: []const u8, head: bool) !void {
+    try h.raw("<div class=\"rp-card\">");
+    if (head) {
+        try h.raw("<div class=card-head><span class=card-h>");
+        try h.esc(title);
+        try h.raw("</span><span class=card-trail>");
+    }
+}
+
+pub fn cardHeadClose(h: *Html) !void {
+    try h.raw("</span></div>");
+}
+
+pub fn cardClose(h: *Html) !void {
+    try h.raw("</div>");
+}
+
+/// itemRowOpen/itemRowClose bracket a list row (Go itemRow, streaming form): title + optional
+/// sub-line, then the trailing action buttons the caller writes before itemRowClose.
+pub fn itemRowOpen(h: *Html, title: []const u8, sub: []const u8) !void {
+    try h.raw("<div class=irow><div class=irow-main><div class=irow-title>");
+    try h.esc(title);
+    try h.raw("</div>");
+    if (sub.len != 0) {
+        try h.raw("<div class=irow-sub>");
+        try h.esc(sub);
+        try h.raw("</div>");
+    }
+    try h.raw("</div><div class=irow-actions>");
+}
+
+pub fn itemRowClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// mdOpen/mdSplit/mdClose bracket a master/detail split (Go masterDetail, streaming form).
+pub fn mdOpen(h: *Html) !void {
+    try h.raw("<div class=mdsplit><div class=md-list>");
+}
+
+pub fn mdSplit(h: *Html) !void {
+    try h.raw("</div><div class=md-detail>");
+}
+
+pub fn mdClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// fpairOpen/fpairClose bracket two side-by-side fields (Go fpair, streaming form).
+pub fn fpairOpen(h: *Html) !void {
+    try h.raw("<div class=fpair>");
+}
+
+pub fn fpairClose(h: *Html) !void {
+    try h.raw("</div>");
+}
+
+/// num appends a base-10 integer (Go %d).
+pub fn num(h: *Html, v: i64) !void {
+    var buf: [24]u8 = undefined;
+    try h.raw(std.fmt.bufPrint(&buf, "{d}", .{v}) catch unreachable);
+}
+
+test "kv + statusRow + fieldEx" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try kv(&h, "Owner", "owner", "me&you");
+    try std.testing.expectEqualStrings("<div class=kv><span class=kv-k>Owner</span>" ++
+        "<span class=kv-v data-label=\"owner\" data-value=\"me&amp;you\">me&amp;you</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try statusRow(&h, "success", "VRChat", "vrchat", "live");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--success\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"vrchat\">VRChat</div>" ++
+        "<div class=strow-s data-value=\"live\">live</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fieldEx(&h, "Link", "link", "world-np-link", "v", "", "", "");
+    try std.testing.expectEqualStrings("<label class=field data-label=\"link\"><span class=field-label>Link</span>" ++
+        "<input class=field-input type=text value=\"v\" data-value=\"v\" data-act=\"world-np-link\"></label>", h.b.items);
+}
+
+test "card + itemRow + masterDetail brackets" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try cardOpen(&h, "T&t", true);
+    try btn(&h, "R", "ghost", "a", "");
+    try cardHeadClose(&h);
+    try emptyState(&h, "none");
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;t</span>" ++
+        "<span class=card-trail><button class=\"rp-btn rp-btn--ghost\" data-act=\"a\">R</button></span></div>" ++
+        "<div class=\"rp-empty\"><div class=\"rp-empty__title\">none</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try itemRowOpen(&h, "N", "s");
+    try itemRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=irow><div class=irow-main><div class=irow-title>N</div>" ++
+        "<div class=irow-sub>s</div></div><div class=irow-actions></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try mdOpen(&h);
+    try mdSplit(&h);
+    try mdClose(&h);
+    try std.testing.expectEqualStrings("<div class=mdsplit><div class=md-list></div><div class=md-detail></div></div>", h.b.items);
+}
+
 test "panel with and without sub" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();

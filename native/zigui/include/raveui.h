@@ -24,6 +24,16 @@ const uint8_t *rz_ui_render_logs(const uint8_t *state_json, size_t len, size_t *
 /* #log-view inner HTML (filter-change + ~1 Hz tick patch target). */
 const uint8_t *rz_ui_render_logs_lines(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- vrchat --- */
+const uint8_t *rz_ui_render_vrchat(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Tick/action-patched fragments: #vrc-status-region, #vrc-editor, #vrc-campaths,
+ * #vrc-photos-body and the Groups sub-view root #vrcg-body. */
+const uint8_t *rz_ui_render_vrchat_status(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_editor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_campaths(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_photos(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrcgroups(const uint8_t *state_json, size_t len, size_t *out_len);
+
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus
