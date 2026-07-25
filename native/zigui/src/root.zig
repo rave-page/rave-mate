@@ -121,7 +121,26 @@ export fn rz_ui_render_overlays_status(state_json: ?[*]const u8, len: usize, out
     return renderJSON(@import("components.zig").Status, overlays.renderStatus, state_json, len, out_len);
 }
 
+const twitch = @import("twitch.zig");
+
+export fn rz_ui_render_twitch(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(twitch.State, twitch.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_twitch_obs(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(twitch.Obs, twitch.renderObs, state_json, len, out_len);
+}
+
+export fn rz_ui_render_twitch_presets(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(twitch.Presets, twitch.renderPresets, state_json, len, out_len);
+}
+
+export fn rz_ui_render_twitch_feed(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(twitch.Feed, twitch.renderFeed, state_json, len, out_len);
+}
+
 test "media tab modules" {
     _ = automations;
     _ = overlays;
+    _ = twitch;
 }

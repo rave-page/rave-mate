@@ -118,3 +118,31 @@ func RenderOverlaysStatus(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_overlays_status(p, l, n)
 	})
 }
+
+// RenderTwitch renders the full Twitch view.
+func RenderTwitch(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch(p, l, n)
+	})
+}
+
+// RenderTwitchObs renders the #twitch-obs fragment.
+func RenderTwitchObs(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_obs(p, l, n)
+	})
+}
+
+// RenderTwitchPresets renders the #twitch-presets fragment.
+func RenderTwitchPresets(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_presets(p, l, n)
+	})
+}
+
+// RenderTwitchFeed renders the #twitch-feed inner fragment.
+func RenderTwitchFeed(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_feed(p, l, n)
+	})
+}

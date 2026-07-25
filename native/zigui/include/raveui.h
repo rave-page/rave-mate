@@ -38,6 +38,12 @@ const uint8_t *rz_ui_render_overlays_spout(const uint8_t *state_json, size_t len
 const uint8_t *rz_ui_render_overlays_strip(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_overlays_status(const uint8_t *state_json, size_t len, size_t *out_len);
 
+const uint8_t *rz_ui_render_twitch(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Live-patched twitch fragments: #twitch-obs, #twitch-presets, #twitch-feed. */
+const uint8_t *rz_ui_render_twitch_obs(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_twitch_presets(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_twitch_feed(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

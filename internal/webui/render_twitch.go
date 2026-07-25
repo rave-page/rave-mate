@@ -12,7 +12,18 @@ import (
 	"rave.page/mate/internal/eventbus"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/twitch"
+	"rave.page/mate/internal/zigui"
 )
+
+// Twitch is a Zig-rendered tab (native/zigui/src/twitch.zig): Go resolves the feed +
+// presets + viewer state + i18n into twState, the Zig lib renders HTML byte-identical to
+// the Go renderers below (fallback + golden reference, zigui_golden_twitch_test.go).
+// The rolling feed buffer holds RESOLVED ROW STATE (twRow), not markup, so both
+// renderers build the same rows from one source.
+//
+// Exception: the streaming-cockpit block inside #twitch-obs is render_live.go's
+// cockpitHTML - that renderer belongs to the Live tab, so it rides through the state as
+// pre-rendered trusted markup and is emitted raw by both renderers.
 
 // Rolling viewer state (published on the bus by whichever instance owns the Twitch session - local
 // OR a paired peer). Package-scoped because the single UI's struct fields live in ui.go (not owned
@@ -22,6 +33,80 @@ var (
 	twViewer twitch.ViewerInfo
 	twViewOK bool
 )
+
+const twFeedCap = 250 // rolling feed rows; drop-oldest
+
+// twTag is one badge beside a chat name.
+type twTag struct {
+	Text    string `json:"text"`
+	Variant string `json:"variant"`
+}
+
+// twRow is one resolved feed row. Kind ∈ day|chat|alert; the other fields are the ones
+// that kind renders.
+type twRow struct {
+	Kind string `json:"kind"`
+
+	Date string `json:"date"` // day
+
+	Name      string  `json:"name"` // chat
+	NameStyle string  `json:"nameStyle"`
+	Tags      []twTag `json:"tags"`
+	Mod       bool    `json:"mod"`      // moderation button present
+	ModVal    string  `json:"modVal"`   // messageID|userID|name
+	ModTitle  string  `json:"modTitle"` // button title
+
+	Text    string `json:"text"`    // chat message / alert line
+	Variant string `json:"variant"` // alert accent (follow|sub|cheer)
+}
+
+// twViewerState is the viewer-count chip.
+type twViewerState struct {
+	Cls  string `json:"cls"` // trusted class literal
+	Text string `json:"text"`
+}
+
+// twObsState is the #twitch-obs fragment: viewer chip + the Live-tab cockpit markup.
+type twObsState struct {
+	Viewers twViewerState `json:"viewers"`
+	Cockpit string        `json:"cockpit"` // RAW: render_live.go cockpitHTML output
+}
+
+// twPresetsState is the #twitch-presets fragment (one chip per title preset).
+type twPresetsState struct {
+	Chips  []uiBtn `json:"chips"`
+	Empty  string  `json:"empty"` // shown instead of chips when there are none
+	Manage string  `json:"manage"`
+	Add    string  `json:"add"`
+}
+
+// twFeedState is the #twitch-feed fragment.
+type twFeedState struct {
+	Empty string  `json:"empty"`
+	Rows  []twRow `json:"rows"`
+}
+
+// twState is the resolved render state for the Twitch view (JSON → Zig).
+type twState struct {
+	Title       string `json:"title"`
+	Sub         string `json:"sub"`
+	Available   bool   `json:"available"` // manager or bus present
+	Unavailable string `json:"unavailable"`
+
+	ShowObs  bool       `json:"showObs"` // OBSControl present
+	ObsTitle string     `json:"obsTitle"`
+	Obs      twObsState `json:"obs"`
+
+	ShowPresets  bool           `json:"showPresets"`
+	PresetsTitle string         `json:"presetsTitle"`
+	Presets      twPresetsState `json:"presets"`
+
+	Feed twFeedState `json:"feed"`
+
+	ShowSend bool   `json:"showSend"`
+	SendPH   string `json:"sendPh"`
+	SendLbl  string `json:"sendLbl"`
+}
 
 // subscribeTwitch seeds the feed from the persistent chat log (history survives restarts -
 // a set streamed with the tab closed is readable after), then buffers live chat + alert
@@ -33,18 +118,18 @@ func (u *UI) subscribeTwitch() {
 	}
 	canMod := u.svc.Twitch != nil // manager present ⇒ moderation routes (locally or to the owning peer)
 	if cl := u.svc.TwitchLog; cl != nil {
-		if evs := cl.Recent(250); len(evs) > 0 {
-			rows := make([]string, 0, len(evs)+2)
+		if evs := cl.Recent(twFeedCap); len(evs) > 0 {
+			rows := make([]twRow, 0, len(evs)+2)
 			day := ""
 			for _, e := range evs {
 				if d := time.UnixMilli(e.TS).Format("2006-01-02"); d != day {
 					day = d
-					rows = append(rows, twitchDayRow(d))
+					rows = append(rows, twDayRow(d))
 				}
 				if e.Kind == twitch.KindChat {
-					rows = append(rows, twitchChatRow(e, canMod))
+					rows = append(rows, twChatRow(e, canMod))
 				} else {
-					rows = append(rows, twitchAlertRow(e))
+					rows = append(rows, twAlertRow(e))
 				}
 			}
 			u.twMu.Lock()
@@ -52,24 +137,24 @@ func (u *UI) subscribeTwitch() {
 			u.twMu.Unlock()
 		}
 	}
-	push := func(row string) {
+	push := func(row twRow) {
 		u.twMu.Lock()
 		u.twitchRows = append(u.twitchRows, row)
-		if len(u.twitchRows) > 250 {
-			u.twitchRows = u.twitchRows[len(u.twitchRows)-250:]
+		if len(u.twitchRows) > twFeedCap {
+			u.twitchRows = u.twitchRows[len(u.twitchRows)-twFeedCap:]
 		}
 		u.twMu.Unlock()
 	}
 	u.svc.EventBus.Subscribe(twitch.TopicChat, func(ev eventbus.Event) {
 		var e twitch.Event
 		if json.Unmarshal(ev.Data, &e) == nil {
-			push(twitchChatRow(e, canMod))
+			push(twChatRow(e, canMod))
 		}
 	})
 	u.svc.EventBus.Subscribe(twitch.TopicEvent, func(ev eventbus.Event) {
 		var e twitch.Event
 		if json.Unmarshal(ev.Data, &e) == nil {
-			push(twitchAlertRow(e))
+			push(twAlertRow(e))
 		}
 	})
 	u.svc.EventBus.Subscribe(twitch.TopicViewers, func(ev eventbus.Event) {
@@ -83,82 +168,86 @@ func (u *UI) subscribeTwitch() {
 	})
 }
 
-// renderTwitch: OBS control bar (viewer count + per-instance stream/rec) + title-preset strip + live
-// chat/alert feed with per-message moderation + send box. Full parity with the Fyne Twitch tab.
-func (u *UI) renderTwitch() string {
-	var b strings.Builder
-	b.WriteString(panel(i18n.T("twitch.title"), i18n.T("twitch.subtitle")))
-	if u.svc.Twitch == nil && u.svc.EventBus == nil {
-		return b.String() + emptyState(i18n.T("twitch.unavailable"))
+// ── state builders ──
+
+// twitchState resolves availability + the three sections + i18n into render state.
+func (u *UI) twitchState() twState {
+	st := twState{
+		Title:       i18n.T("twitch.title"),
+		Sub:         i18n.T("twitch.subtitle"),
+		Available:   u.svc.Twitch != nil || u.svc.EventBus != nil,
+		Unavailable: i18n.T("twitch.unavailable"),
+		Feed:        twFeedState{Empty: i18n.T("twitch.noMessagesYet"), Rows: []twRow{}},
+		Presets:     twPresetsState{Chips: []uiBtn{}},
+	}
+	if !st.Available {
+		return st
 	}
 	if u.svc.OBSControl != nil {
-		b.WriteString(section(i18n.T("twitch.streamingCockpit"), `<div id=twitch-obs>`+u.twitchObsHTML()+`</div>`))
+		st.ShowObs, st.ObsTitle, st.Obs = true, i18n.T("twitch.streamingCockpit"), u.twObsState()
 	}
 	if u.svc.Twitch != nil && u.svc.Cfg != nil {
-		b.WriteString(section(i18n.T("twitch.streamTitle"), `<div id=twitch-presets>`+u.twitchPresetsHTML()+`</div>`))
+		st.ShowPresets, st.PresetsTitle, st.Presets = true, i18n.T("twitch.streamTitle"), u.twPresetsState()
 	}
-	b.WriteString(`<div id=twitch-feed class=log-view>` + u.twitchFeedHTML() + `</div>`)
+	st.Feed = u.twFeedState()
 	if u.svc.Twitch != nil {
-		b.WriteString(`<form data-act=twitch-send class=tw-send>` +
-			`<input class=field-input name=text placeholder=` + attrQ(i18n.T("twitch.sendPlaceholder")) + ` style="flex:1" autocomplete=off>` +
-			`<button class="rp-btn rp-btn--primary" type=submit>` + html.EscapeString(i18n.T("twitch.send")) + `</button></form>`)
+		st.ShowSend = true
+		st.SendPH, st.SendLbl = i18n.T("twitch.sendPlaceholder"), i18n.T("twitch.send")
 	}
-	return b.String()
+	return st
 }
 
-// ── OBS control bar (viewer count + per-instance stream/rec via reused obs-stream/obs-record) ──
-
-func (u *UI) twitchObsHTML() string {
-	return `<div class=tw-viewers>` + twitchViewerHTML() + `</div>` + u.cockpitHTML()
+// twObsState resolves the viewer chip + the Live-tab cockpit markup.
+func (u *UI) twObsState() twObsState {
+	return twObsState{Viewers: twViewers(), Cockpit: u.cockpitHTML()}
 }
 
-func twitchViewerHTML() string {
+// twViewers resolves the viewer-count chip from the bus-published viewer info.
+func twViewers() twViewerState {
 	twViewMu.Lock()
 	vi, ok := twViewer, twViewOK
 	twViewMu.Unlock()
 	switch {
 	case !ok:
-		return `<span class="tw-vc tw-vc--off">` + html.EscapeString(i18n.T("twitch.viewersUnknown")) + `</span>`
+		return twViewerState{Cls: "tw-vc tw-vc--off", Text: i18n.T("twitch.viewersUnknown")}
 	case vi.Live:
-		return `<span class="tw-vc tw-vc--live">` + html.EscapeString(i18n.T("twitch.viewersLive", i18n.A{"count": twComma(vi.ViewerCount)})) + `</span>`
+		return twViewerState{Cls: "tw-vc tw-vc--live", Text: i18n.T("twitch.viewersLive", i18n.A{"count": twComma(vi.ViewerCount)})}
 	default:
-		return `<span class="tw-vc tw-vc--off">` + html.EscapeString(i18n.T("twitch.offline")) + `</span>`
+		return twViewerState{Cls: "tw-vc tw-vc--off", Text: i18n.T("twitch.offline")}
 	}
 }
 
-// ── title-preset strip (one chip per preset → apply dialog; manage + add) ──
-
-func (u *UI) twitchPresetsHTML() string {
+// twPresetsState resolves the title-preset chips + tools.
+func (u *UI) twPresetsState() twPresetsState {
 	f := &u.svc.Cfg.Features.Twitch
-	var chips strings.Builder
+	st := twPresetsState{
+		Chips:  make([]uiBtn, 0, len(f.Presets)),
+		Empty:  i18n.T("twitch.noPresetsYet"),
+		Manage: i18n.T("twitch.managePresets"),
+		Add:    i18n.T("twitch.addPreset"),
+	}
 	for i, p := range f.Presets {
-		chips.WriteString(btn(p.Name, "outline", "tw-apply:"+strconv.Itoa(i), ""))
+		st.Chips = append(st.Chips, uiBtn{Label: p.Name, Variant: "outline", Act: "tw-apply:" + strconv.Itoa(i)})
 	}
-	if len(f.Presets) == 0 {
-		chips.WriteString(`<span class=tw-hint>` + html.EscapeString(i18n.T("twitch.noPresetsYet")) + `</span>`)
-	}
-	tools := btnRow(btn(i18n.T("twitch.managePresets"), "secondary", "tw-presets", ""), btn(i18n.T("twitch.addPreset"), "ghost", "tw-preset-add", ""))
-	return `<div class=tw-presets>` + chips.String() + `</div>` + tools
+	return st
 }
 
-// ── feed ──
-
-func (u *UI) twitchFeedHTML() string {
-	// snapshot under twMu, join outside - the 250-row string build must not block eventbus
-	// publishers appending in push (strings immutable; appends never write into the snapshot)
+// twFeedState snapshots the rolling feed. Snapshot under twMu, render outside - the
+// 250-row build must not block eventbus publishers appending in push (slice header copy;
+// appends never write into the snapshot).
+func (u *UI) twFeedState() twFeedState {
 	u.twMu.Lock()
 	rows := u.twitchRows
 	u.twMu.Unlock()
-	if len(rows) == 0 {
-		return `<div class=log-line>` + html.EscapeString(i18n.T("twitch.noMessagesYet")) + `</div>`
+	if rows == nil {
+		rows = []twRow{}
 	}
-	return strings.Join(rows, "")
+	return twFeedState{Empty: i18n.T("twitch.noMessagesYet"), Rows: rows}
 }
 
-// twitchDayRow renders a date separator between persisted-history days.
-func twitchDayRow(d string) string {
-	return `<div class="log-line tw-sep">— ` + html.EscapeString(d) + ` —</div>`
-}
+// twDayRow is a date separator between persisted-history days. Tags is non-nil on every
+// row: a nil slice marshals to JSON null, which fails the Zig slice parse.
+func twDayRow(d string) twRow { return twRow{Kind: "day", Date: d, Tags: []twTag{}} }
 
 func twitchName(e twitch.Event) string {
 	if e.UserName != "" {
@@ -167,41 +256,36 @@ func twitchName(e twitch.Event) string {
 	return e.UserLogin
 }
 
-// twitchChatRow: coloured name + subscriber/mod/host/vip/cheer badges + text + (when a manager
-// exists) a moderation button. enc = messageID|userID|name for the moderation modal.
-func twitchChatRow(e twitch.Event, canMod bool) string {
-	var tags strings.Builder
+// twChatRow: coloured name + subscriber/mod/host/vip/cheer badges + text + (when a manager
+// exists) a moderation button. ModVal = messageID|userID|name for the moderation modal.
+func twChatRow(e twitch.Event, canMod bool) twRow {
+	r := twRow{Kind: "chat", Name: twitchName(e), NameStyle: twNameStyle(e.Color), Tags: []twTag{}, Text: e.Text}
 	switch {
 	case e.Broadcaster:
-		tags.WriteString(badge(i18n.T("twitch.badgeHost"), "error"))
+		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeHost"), Variant: "error"})
 	case e.Mod:
-		tags.WriteString(badge(i18n.T("twitch.badgeMod"), "success"))
+		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeMod"), Variant: "success"})
 	}
 	if e.VIP {
-		tags.WriteString(badge(i18n.T("twitch.badgeVip"), "info"))
+		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeVip"), Variant: "info"})
 	}
 	if e.Subscriber {
-		tags.WriteString(badge(i18n.T("twitch.badgeSub"), "secondary"))
+		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeSub"), Variant: "secondary"})
 	}
 	if e.Bits > 0 {
-		tags.WriteString(badge(i18n.T("twitch.badgeCheer"), "warning"))
+		r.Tags = append(r.Tags, twTag{Text: i18n.T("twitch.badgeCheer"), Variant: "warning"})
+		r.Text = i18n.T("twitch.bitsPrefix", i18n.A{"count": fmt.Sprint(e.Bits), "text": e.Text})
 	}
-	text := e.Text
-	if e.Bits > 0 {
-		text = i18n.T("twitch.bitsPrefix", i18n.A{"count": fmt.Sprint(e.Bits), "text": e.Text})
-	}
-	mod := ""
 	if canMod {
-		enc := e.MessageID + "|" + e.UserID + "|" + twitchName(e)
-		mod = `<button class="rp-btn rp-btn--ghost tw-modbtn" data-act=tw-mod data-val="` + html.EscapeString(enc) + `" title=` + attrQ(i18n.T("twitch.moderate")) + `>⋮</button>`
+		r.Mod = true
+		r.ModVal = e.MessageID + "|" + e.UserID + "|" + twitchName(e)
+		r.ModTitle = i18n.T("twitch.moderate")
 	}
-	return `<div class="log-line tw-row">` + mod +
-		`<span class=tw-name style="` + twNameStyle(e.Color) + `">` + html.EscapeString(twitchName(e)) + `</span>` +
-		tags.String() + ` <span class=tw-msg>` + html.EscapeString(text) + `</span></div>`
+	return r
 }
 
-// twitchAlertRow: kind-specific follow/sub/resub/gift/cheer line with a brand-coloured accent.
-func twitchAlertRow(e twitch.Event) string {
+// twAlertRow: kind-specific follow/sub/resub/gift/cheer line with a brand-coloured accent.
+func twAlertRow(e twitch.Event) twRow {
 	var text, variant string
 	switch e.Kind {
 	case twitch.KindFollow:
@@ -233,8 +317,131 @@ func twitchAlertRow(e twitch.Event) string {
 	default:
 		text, variant = string(e.Kind), "follow"
 	}
-	return `<div class="log-line tw-alert tw-alert--` + variant + `">` + html.EscapeString(text) + `</div>`
+	return twRow{Kind: "alert", Text: text, Variant: variant, Tags: []twTag{}}
 }
+
+// ── bridges ──
+
+// renderTwitch: OBS control bar (viewer count + per-instance stream/rec) + title-preset strip + live
+// chat/alert feed with per-message moderation + send box. Full parity with the Fyne Twitch tab.
+func (u *UI) renderTwitch() string {
+	st := u.twitchState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderTwitch(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return twitchHTML(st)
+}
+
+// twitchObsHTML is the #twitch-obs fragment.
+func (u *UI) twitchObsHTML() string {
+	st := u.twObsState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderTwitchObs(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return twObsHTML(st)
+}
+
+// twitchPresetsHTML is the #twitch-presets fragment.
+func (u *UI) twitchPresetsHTML() string {
+	st := u.twPresetsState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderTwitchPresets(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return twPresetsHTML(st)
+}
+
+// twitchFeedHTML is the #twitch-feed inner fragment (patched on every chat/alert event).
+func (u *UI) twitchFeedHTML() string {
+	st := u.twFeedState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderTwitchFeed(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return twFeedHTML(st)
+}
+
+// ── pure Go renderers (golden reference; byte-identical to Zig) ──
+
+func twitchHTML(st twState) string {
+	var b strings.Builder
+	b.WriteString(panel(st.Title, st.Sub))
+	if !st.Available {
+		return b.String() + emptyState(st.Unavailable)
+	}
+	if st.ShowObs {
+		b.WriteString(section(st.ObsTitle, `<div id=twitch-obs>`+twObsHTML(st.Obs)+`</div>`))
+	}
+	if st.ShowPresets {
+		b.WriteString(section(st.PresetsTitle, `<div id=twitch-presets>`+twPresetsHTML(st.Presets)+`</div>`))
+	}
+	b.WriteString(`<div id=twitch-feed class=log-view>` + twFeedHTML(st.Feed) + `</div>`)
+	if st.ShowSend {
+		b.WriteString(`<form data-act=twitch-send class=tw-send>` +
+			`<input class=field-input name=text placeholder=` + attrQ(st.SendPH) + ` style="flex:1" autocomplete=off>` +
+			`<button class="rp-btn rp-btn--primary" type=submit>` + html.EscapeString(st.SendLbl) + `</button></form>`)
+	}
+	return b.String()
+}
+
+func twObsHTML(st twObsState) string {
+	return `<div class=tw-viewers>` + twViewerHTML(st.Viewers) + `</div>` + st.Cockpit
+}
+
+func twViewerHTML(st twViewerState) string {
+	return `<span class="` + st.Cls + `">` + html.EscapeString(st.Text) + `</span>`
+}
+
+func twPresetsHTML(st twPresetsState) string {
+	var chips strings.Builder
+	for _, c := range st.Chips {
+		chips.WriteString(c.html())
+	}
+	if len(st.Chips) == 0 {
+		chips.WriteString(`<span class=tw-hint>` + html.EscapeString(st.Empty) + `</span>`)
+	}
+	tools := btnRow(btn(st.Manage, "secondary", "tw-presets", ""), btn(st.Add, "ghost", "tw-preset-add", ""))
+	return `<div class=tw-presets>` + chips.String() + `</div>` + tools
+}
+
+func twFeedHTML(st twFeedState) string {
+	if len(st.Rows) == 0 {
+		return `<div class=log-line>` + html.EscapeString(st.Empty) + `</div>`
+	}
+	var b strings.Builder
+	for _, r := range st.Rows {
+		b.WriteString(twRowHTML(r))
+	}
+	return b.String()
+}
+
+func twRowHTML(r twRow) string {
+	switch r.Kind {
+	case "day":
+		return `<div class="log-line tw-sep">— ` + html.EscapeString(r.Date) + ` —</div>`
+	case "alert":
+		return `<div class="log-line tw-alert tw-alert--` + r.Variant + `">` + html.EscapeString(r.Text) + `</div>`
+	}
+	mod := ""
+	if r.Mod {
+		mod = `<button class="rp-btn rp-btn--ghost tw-modbtn" data-act=tw-mod data-val="` + html.EscapeString(r.ModVal) + `" title=` + attrQ(r.ModTitle) + `>⋮</button>`
+	}
+	var tags strings.Builder
+	for _, t := range r.Tags {
+		tags.WriteString(badge(t.Text, t.Variant))
+	}
+	return `<div class="log-line tw-row">` + mod +
+		`<span class=tw-name style="` + r.NameStyle + `">` + html.EscapeString(r.Name) + `</span>` +
+		tags.String() + ` <span class=tw-msg>` + html.EscapeString(r.Text) + `</span></div>`
+}
+
+// ── small helpers ──
 
 func tierSuffix(tier string) string {
 	switch tier {

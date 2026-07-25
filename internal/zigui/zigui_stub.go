@@ -20,3 +20,7 @@ func RenderOverlaysAppearance(stateJSON []byte) (string, bool) { return "", fals
 func RenderOverlaysSpout(stateJSON []byte) (string, bool)      { return "", false }
 func RenderOverlaysStrip(stateJSON []byte) (string, bool)      { return "", false }
 func RenderOverlaysStatus(stateJSON []byte) (string, bool)     { return "", false }
+func RenderTwitch(stateJSON []byte) (string, bool)             { return "", false }
+func RenderTwitchObs(stateJSON []byte) (string, bool)          { return "", false }
+func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", false }
+func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
