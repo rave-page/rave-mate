@@ -584,7 +584,7 @@ func (u *UI) mpTimeText(t mpSt) string {
 		return ""
 	}
 	cur, total := 0.0, m.dur
-	if tr := u.mpEngineState(&t, m); tr.loaded {
+	if tr := u.mpEng(&t); tr.loaded {
 		cur = tr.cur
 		if tr.total > 0 {
 			total = tr.total

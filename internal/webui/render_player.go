@@ -454,7 +454,7 @@ func (u *UI) mpHovState(t mpSt) mpHovSt {
 		}
 		return mpHovSt{Text: tx}
 	}
-	tr := u.mpEngineState(&t, m)
+	tr := u.mpEng(&t)
 	if tr.loaded && tr.playing {
 		if mv, ok := m.loud.momAt(tr.cur); ok {
 			return mpHovSt{Text: i18n.T("player.label.momAtPlayhead", i18n.A{"lufs": fmt.Sprintf("%.1f", mv)})}
@@ -477,7 +477,7 @@ func (u *UI) mpTpState(t mpSt) mpTpSt {
 	}
 	st.Show = true
 
-	tr := u.mpEngineState(&t, m)
+	tr := u.mpEng(&t)
 	playLbl, playVar := "▶ "+i18n.T("player.play"), "go"
 	switch {
 	case t.audLoading && m.kind == "audio" && !tr.loaded:

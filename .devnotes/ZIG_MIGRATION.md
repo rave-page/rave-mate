@@ -227,6 +227,21 @@ Rules:
   Re-measured against B-2's per-fragment BINARY path (the JSON one is gone): Live tick **-29%**
   dispatch / **-42%** steady state / -27% quoted, allocs 196 -> 34 -> 9, and `sched_all` now matches
   pure Go while `sched_same` beats it - the first surface where the Zig path is not a loss.
+- **P6 UI phase B4a (player retained state, SHIPPED):** the two Go-runtime workarounds the player
+  port flagged are gone. (a) The transport was re-sampled per CONSUMER - four samples in one
+  component render, five in one tick - over a mirror the audio child rewrites ~5 Hz and an
+  optimistic override that expires on a wall clock, so one DOM could show a moving playhead over an
+  idle transport. `mpSt.eng` holds ONE sample per snapshot (`mpMut`/`mpSnap` → `mpCopy`, taken with
+  `mpMu` released). (b) `mpResync` re-rendered every embedded player after EVERY container patch to
+  survive a mid-build mutation; `mpSt.pgen` + `mpOrdered` (mark → build → enqueue → heal) decides
+  the race instead, and the heal is enqueued uncoalesced because the retired workaround's keyed
+  patch folded ahead of the container patch it had to beat - i.e. it never closed its own race.
+  Gates: a moving-mirror byte-equality + sample-count gate, and a mutation driven between build and
+  enqueue (both proven non-vacuous by execution). DOM: the 178 player goldens unchanged +
+  `TestZigPlayerEngineGolden` (330 new surfaces, Go == v1 == v2, over the 11 engine states no
+  fixture could reach before). Numbers: a quiet container patch **1 152 µs → 76.6 ns**, 9 939 → 0
+  allocs; the sample collapse is 0.018% of a tick - a correctness fix, not a speed-up. No Zig
+  change, no schema row (`mpSt` never crosses the ABI). Detail: ZIG_UI_GUIDE.md "Phase B — B4a".
 - **P6 UI phase B4b (Library retained state, SHIPPED):** the Library tab's Go-runtime retained-state
   workarounds are gone - `collViewSig`, `plRowsVer`, `smartCounts*`'s FNV-over-every-rule-set, the
   5s on-disk TTL and the 2s browse TTL - replaced by a comparable key (`libDerivKey`) + copy-on-write

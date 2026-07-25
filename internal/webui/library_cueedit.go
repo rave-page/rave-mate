@@ -1833,7 +1833,7 @@ func (u *UI) ceAudition(down bool) {
 		// press cursor (local) — on the native engine it drops the device buffer so the snap is
 		// exact; on the legacy engine it pauses + re-seeks (same as before). Cursor never moved
 		// during playback, so `local` == where the press started.
-		tr := u.mpEngineState(&t, m)
+		tr := u.mpEng(&t)
 		pl := u.player()
 		if m.kind != "video" && tr.loaded && pl != nil {
 			path := m.path
@@ -1847,7 +1847,7 @@ func (u *UI) ceAudition(down bool) {
 	}
 	u.ceCancelIdleStop()
 	pl := u.player()
-	if tr := u.mpEngineState(&t, m); tr.loaded {
+	if tr := u.mpEng(&t); tr.loaded {
 		// Already decoded (native: RAM-preloaded => instant): beat-precise seek + unpause. No
 		// re-decode; this is the 0-latency Space path once ceEnter preloaded the track.
 		if pl != nil {
