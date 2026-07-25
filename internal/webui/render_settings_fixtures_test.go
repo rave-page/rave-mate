@@ -18,13 +18,25 @@ import (
 // 18 fixtures x every card in every section (40+ cards, every block kind). Consumers: the zigui
 // golden + wire gates (tagged) and the B4 search differential + probe/search benches (untagged).
 
+// freezeProbes marks every probe landed and stops kickProbes from starting any: a fixture's probe
+// slots are the fixture itself, and B4c has no TTL window left to park inside (pre-B4c the fixtures
+// set ready=true + at=now, which is the same intent). Gates read probeDone, so "landed" is part of
+// the rendered state.
+func freezeProbes(u *UI) {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	u.probes.frozen = true
+	for _, p := range settingsProbeTable {
+		u.probes.slotOf(p.key).done = true
+	}
+}
+
 // setFixtureUI builds a settings UI over a config; populated = every feature configured.
 func setFixtureUI(populated bool) *UI {
 	cfg := &config.Config{}
 	cfg.APIBaseURL = "https://development.api.rave.page"
 	u := &UI{svc: ui.Services{Cfg: cfg}, active: "settings"}
-	u.probes.ready = true // gates + install cards only render from real probe data
-	u.probes.at = time.Now()
+	freezeProbes(u) // the slots below ARE the fixture; a demand kick would race real OS probes over them
 	if !populated {
 		return u
 	}

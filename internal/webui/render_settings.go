@@ -6,21 +6,17 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
-	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/remotecache"
 	"rave.page/mate/internal/serato"
 	"rave.page/mate/internal/stt"
-	"rave.page/mate/internal/timecode"
 	"rave.page/mate/internal/traktormap"
-	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/vrdll"
 	"rave.page/mate/internal/vroverlay"
@@ -205,7 +201,7 @@ func (u *UI) settingsState() setState {
 	if !st.Available {
 		return st
 	}
-	u.maybeRefreshProbes() // async fs/PATH/device probe refresh - the state below reads cache only (instant)
+	u.kickProbes() // concurrent off-lane probe refresh; the state below reads retained slots only (instant)
 	st.Sub = i18n.T("settings.subtitle")
 	st.Query = u.settingsQueryText()
 	st.Placeholder = i18n.T("settings.search.placeholder")
@@ -389,11 +385,11 @@ func (u *UI) settingsCardState(id string, st stv) setCardSt {
 func (u *UI) cardGate(id string) string {
 	switch id {
 	case "fingerprint":
-		if u.probesReady() && !u.toolStatusCached("fpcalc").Installed {
+		if u.probeDone(pkTools) && !u.toolStatusCached("fpcalc").Installed {
 			return i18n.T("settings.gate.fpcalc")
 		}
 	case "transcode":
-		if u.probesReady() && !u.toolStatusCached("ffmpeg").Installed &&
+		if u.probeDone(pkTools) && !u.toolStatusCached("ffmpeg").Installed &&
 			strings.TrimSpace(u.svc.Cfg.Features.Transcode.FfmpegPath) == "" {
 			return i18n.T("settings.gate.ffmpeg")
 		}
@@ -405,7 +401,7 @@ func (u *UI) cardGate(id string) string {
 		if !vroverlay.BuiltWithVR() {
 			return i18n.T("settings.gate.vrBuild")
 		}
-		if u.probesReady() && !u.vrStatusCached().Installed {
+		if u.probeDone(pkVR) && !u.vrStatusCached().Installed {
 			return i18n.T("settings.gate.vrRuntime")
 		}
 	case "gridfix":
@@ -414,14 +410,6 @@ func (u *UI) cardGate(id string) string {
 		}
 	}
 	return ""
-}
-
-// probesReady reports whether the first background probe refresh has landed (gates
-// only render from real probe data - never flash on the placeholder zero state).
-func (u *UI) probesReady() bool {
-	u.probes.mu.Lock()
-	defer u.probes.mu.Unlock()
-	return u.probes.ready
 }
 
 // ── block constructors (every one resolves into a components.go primitive at render time) ──
@@ -776,7 +764,7 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 	// ── Library & media ──
 	case "library":
 		embedRow := sbToggle(i18n.T("settings.body.library.embed"), "set:player-embed", f.Player.Embed)
-		if u.probesReady() && !u.toolStatusCached("mpv").Installed {
+		if u.probeDone(pkTools) && !u.toolStatusCached("mpv").Installed {
 			embedRow = sbToggleGated(i18n.T("settings.body.library.embed"), f.Player.Embed, i18n.T("settings.gate.mpv"))
 		}
 		return i18n.T("settings.card.library.title"), i18n.T("settings.card.library.desc"), []setBlock{
@@ -1400,163 +1388,6 @@ func (u *UI) vrInstallBlock() setBlock {
 	}
 	return sbInstall("vr", line, installBtn,
 		nbtn(i18n.T("settings.body.vrinstall.downloadPage"), "ghost", "open-url", vrdll.HomePage))
-}
-
-// ── probe cache (keep slow fs/PATH probes off the render goroutine) ──
-//
-// mediatools.Tool.Status() (os.Stat + exec.LookPath - a PATH scan) and vrdll.Probe() (DLL fs
-// probe) are the only blocking calls the Settings render used to make on the UI thread. Called
-// per-tool in both the status map AND the install-card bodies, a long PATH / slow mount made
-// tab-open lag seconds. Cache the results + refresh off-thread on the ~1 Hz settings tick; the
-// render + status map read cache only (never touch the filesystem). Service Status() calls
-// (OBS/Stream/AudioRec/RTSP/DMX proxies) are in-memory mirrors, so they stay live.
-
-const probeTTL = 10 * time.Second // fs/PATH state rarely changes; re-probe at most this often
-
-// settingsProbes caches the slow media-tool + VR-DLL probes and the device enumerations
-// (MIDI / waveOut / STT mics / capture devices / Unity project inspects). Device enumeration
-// hits OS APIs (winmm, WASAPI) and the filesystem - synchronous calls in card bodies froze the
-// Settings tab open for seconds.
-type settingsProbes struct {
-	mu    sync.Mutex
-	tools map[string]mediatools.Status // key ("ffmpeg"|"fpcalc"|"mpv") → last status
-	vr    vrdll.Status
-	devs  map[string][]string          // kind ("midi"|"waveout"|"midiout"|"sttmic"|"audiorec") → names
-	unity map[string]unityproj.Project // project dir → inspect result
-	at    time.Time
-	ready bool
-	busy  bool // a background refresh is in flight (prevents stacking on the 1 Hz tick)
-}
-
-// toolStatusCached returns the last cached status for a media tool (zero/uninstalled until the
-// first background probe lands). Never touches the filesystem - safe on the render goroutine.
-func (u *UI) toolStatusCached(key string) mediatools.Status {
-	u.probes.mu.Lock()
-	defer u.probes.mu.Unlock()
-	return u.probes.tools[key]
-}
-
-// vrStatusCached returns the last cached vrdll probe (non-blocking).
-func (u *UI) vrStatusCached() vrdll.Status {
-	u.probes.mu.Lock()
-	defer u.probes.mu.Unlock()
-	return u.probes.vr
-}
-
-// devNamesCached returns the last cached device enumeration for kind (empty until the first
-// background probe lands). Never hits OS device APIs - safe on the render goroutine.
-func (u *UI) devNamesCached(kind string) []string {
-	u.probes.mu.Lock()
-	defer u.probes.mu.Unlock()
-	return u.probes.devs[kind]
-}
-
-// unityInfoCached returns the last cached inspect for a Unity project dir.
-func (u *UI) unityInfoCached(dir string) unityproj.Project {
-	u.probes.mu.Lock()
-	defer u.probes.mu.Unlock()
-	return u.probes.unity[dir]
-}
-
-// invalidateProbes forces the next maybeRefreshProbes to re-probe now (Refresh buttons).
-func (u *UI) invalidateProbes() {
-	u.probes.mu.Lock()
-	u.probes.at = time.Time{}
-	u.probes.mu.Unlock()
-}
-
-// refreshProbes recomputes the slow fs/PATH probes and caches them. MUST run off the UI goroutine
-// (called via u.bg). Cheap enough for the tick when stale.
-func (u *UI) refreshProbes() {
-	tools := map[string]mediatools.Status{
-		"ffmpeg": mediatools.FFmpeg.Status(),
-		"fpcalc": mediatools.Fpcalc.Status(),
-		"mpv":    mediatools.MPV.Status(),
-	}
-	var vr vrdll.Status
-	if vroverlay.BuiltWithVR() {
-		vr = vrdll.Probe()
-	}
-	devs := map[string][]string{
-		"midi":    mustNames(midi.Ports),
-		"waveout": mustNames(timecode.WaveOutDevices),
-		"midiout": mustNames(timecode.MidiOutDevices),
-		"sttmic":  mustNames(stt.InputDevices),
-	}
-	if u.svc.AudioRec != nil {
-		devs["audiorec"] = mustNames(u.svc.AudioRec.Devices)
-	}
-	unity := map[string]unityproj.Project{}
-	if u.svc.Cfg != nil {
-		for _, dir := range u.svc.Cfg.Features.Unity.Projects {
-			unity[dir] = unityproj.Inspect(dir)
-		}
-	}
-	u.probes.mu.Lock()
-	// The install-card bodies (toolInstallHTML/vrInstallHTML) only re-render on a full patchMain,
-	// not the 1 Hz status tick - so patch once when the probe first lands or its install-state
-	// changes, to flip the card from the placeholder "not installed" to the real state.
-	changed := !u.probes.ready || vr.Installed != u.probes.vr.Installed ||
-		toolInstallChanged(u.probes.tools, tools) || devListsChanged(u.probes.devs, devs)
-	u.probes.tools = tools
-	u.probes.vr = vr
-	u.probes.devs = devs
-	u.probes.unity = unity
-	u.probes.at = time.Now()
-	u.probes.ready = true
-	u.probes.busy = false
-	u.probes.mu.Unlock()
-	if changed && u.activeTab() == "settings" {
-		u.patchMain()
-	}
-}
-
-// devListsChanged reports whether any device enumeration differs between snapshots.
-func devListsChanged(a, b map[string][]string) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	for k, bv := range b {
-		av := a[k]
-		if len(av) != len(bv) {
-			return true
-		}
-		for i := range bv {
-			if av[i] != bv[i] {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// toolInstallChanged reports whether any tool's install-state (installed/path) differs between two
-// probe snapshots - used to decide if the Settings body needs a one-shot re-render.
-func toolInstallChanged(a, b map[string]mediatools.Status) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	for k, bv := range b {
-		av := a[k]
-		if av.Installed != bv.Installed || av.Path != bv.Path {
-			return true
-		}
-	}
-	return false
-}
-
-// maybeRefreshProbes kicks a background probe refresh when the cache is stale (or never filled),
-// at most one in flight. Non-blocking - safe to call from the render path or the tick.
-func (u *UI) maybeRefreshProbes() {
-	u.probes.mu.Lock()
-	stale := !u.probes.ready || time.Since(u.probes.at) > probeTTL
-	if !stale || u.probes.busy {
-		u.probes.mu.Unlock()
-		return
-	}
-	u.probes.busy = true
-	u.probes.mu.Unlock()
-	u.bg(u.refreshProbes)
 }
 
 // ── status map (cheap; patched ~1 Hz by the settings tick) ──
@@ -2574,11 +2405,6 @@ func liveIntervalStr(sec int) string {
 		return ""
 	}
 	return strconv.Itoa(sec)
-}
-
-func mustNames(fn func() ([]string, error)) []string {
-	n, _ := fn()
-	return n
 }
 
 func devOpts(names []string, defLabel, cur string) [][2]string {

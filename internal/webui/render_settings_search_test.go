@@ -452,6 +452,43 @@ func BenchmarkSettingsSearchStructured(b *testing.B) {
 	b.ReportMetric(float64(len(cards)), "cards")
 }
 
+// BenchmarkSettingsPaneQuery: the REAL per-keystroke handler-lane cost - build every card's state,
+// match, keep the hits. This is what the search box pays on the actWorker.
+func BenchmarkSettingsPaneQuery(b *testing.B) {
+	u := setFixtureUI(true)
+	u.setMu.Lock()
+	u.setSec, u.setQuery = "account", "port"
+	u.setMu.Unlock()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c := u.settingsContentState()
+		if !c.Searching || len(c.Secs) == 0 {
+			b.Fatal("query matched nothing")
+		}
+	}
+}
+
+// BenchmarkSettingsPaneQueryLegacy: the same pane through the pre-B4d matcher.
+func BenchmarkSettingsPaneQueryLegacy(b *testing.B) {
+	u := setFixtureUI(true)
+	terms := strings.Fields(foldSearch("port"))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		stats := u.settingsStatus()
+		hits := 0
+		for _, s := range settingsSections() {
+			for _, id := range s.cards {
+				if matchAllTerms(setCardSearchHayLegacy(u.settingsCardState(id, stats[id])), terms) {
+					hits++
+				}
+			}
+		}
+		if hits == 0 {
+			b.Fatal("query matched nothing")
+		}
+	}
+}
+
 // BenchmarkSettingsSearchHaystackSize reports the bytes each path folds per card.
 func BenchmarkSettingsSearchHaystackSize(b *testing.B) {
 	cards := benchSearchCorpus(b)
