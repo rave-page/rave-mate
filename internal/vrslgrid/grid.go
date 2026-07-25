@@ -64,18 +64,26 @@ func cellForChannel(ch int) (x, y int) { return ch % ColsPerUni, ch / ColsPerUni
 // Render rasterizes universes into a VRSL grid image. Mono stacks one grey block per universe;
 // RGB9 packs the first up-to-9 universes into 3 colour blocks. Dead padding cells stay opaque black.
 func Render(r Reader, universes []int, mode Mode) *image.RGBA {
-	if mode == ModeRGB9 {
-		return renderRGB9(r, universes)
-	}
-	return renderMono(r, universes)
+	return render(r, universes, mode, zigFill())
 }
 
-func renderMono(r Reader, universes []int) *image.RGBA {
+// render is Render with an explicit cell-fill backend (zig = batched rz_fill_cells;
+// false = the Go loops). Parity gate: zigfill_parity_test.go.
+func render(r Reader, universes []int, mode Mode, zig bool) *image.RGBA {
+	if mode == ModeRGB9 {
+		return renderRGB9(r, universes, zig)
+	}
+	return renderMono(r, universes, zig)
+}
+
+func renderMono(r Reader, universes []int, zig bool) *image.RGBA {
 	blocks := len(universes)
 	if blocks < 1 {
 		blocks = 1
 	}
 	img := newBlack(blocks)
+	fb := newCellBatch(zig, len(universes)*ChPerUni)
+	paint := cellPainterAt(img, fb, 0)
 	for i, uni := range universes {
 		if uni < 0 {
 			continue
@@ -84,14 +92,17 @@ func renderMono(r Reader, universes []int) *image.RGBA {
 		for ch := 0; ch < ChPerUni; ch++ {
 			v := data[ch]
 			cx, cy := cellForChannel(ch)
-			fillCell(img, cx, i*RowsPerUni+cy, color.RGBA{v, v, v, 255})
+			paint(cx, i*RowsPerUni+cy, color.RGBA{v, v, v, 255})
 		}
 	}
+	fb.flush(img)
 	return img
 }
 
-func renderRGB9(r Reader, universes []int) *image.RGBA {
+func renderRGB9(r Reader, universes []int, zig bool) *image.RGBA {
 	img := newBlack(3)
+	fb := newCellBatch(zig, 3*ChPerUni)
+	paint := cellPainterAt(img, fb, 0)
 	get := func(idx int) [512]byte {
 		if idx < len(universes) && universes[idx] >= 0 {
 			d, _ := r.Get(uint16(universes[idx]))
@@ -103,9 +114,10 @@ func renderRGB9(r Reader, universes []int) *image.RGBA {
 		dr, dg, db := get(j), get(j+3), get(j+6)
 		for ch := 0; ch < ChPerUni; ch++ {
 			cx, cy := cellForChannel(ch)
-			fillCell(img, cx, j*RowsPerUni+cy, color.RGBA{dr[ch], dg[ch], db[ch], 255})
+			paint(cx, j*RowsPerUni+cy, color.RGBA{dr[ch], dg[ch], db[ch], 255})
 		}
 	}
+	fb.flush(img)
 	return img
 }
 
@@ -114,14 +126,4 @@ func newBlack(blocks int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, GridWidthPx, blocks*RowsPerUni*CellPx))
 	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 255}), image.Point{}, draw.Src)
 	return img
-}
-
-// fillCell paints a 16×16 cell at cell coords (cx,cy) with col.
-func fillCell(img *image.RGBA, cx, cy int, col color.RGBA) {
-	x0, y0 := cx*CellPx, cy*CellPx
-	for y := y0; y < y0+CellPx; y++ {
-		for x := x0; x < x0+CellPx; x++ {
-			img.SetRGBA(x, y, col)
-		}
-	}
 }

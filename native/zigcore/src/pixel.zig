@@ -51,6 +51,38 @@ fn absDiff(a: u8, b: u8) u8 {
     return if (a > b) a - b else b - a;
 }
 
+/// Batched square-cell fill into a 4bpp zero-origin image (R,G,B,A byte order),
+/// clipped to w*h. cells = n*4 i32 {x0, y0, size, rgba LE (R = low byte)}.
+/// Port of vrslgrid fillCell/fillCellAt/fillMetaCell (per-pixel SetRGBA loops).
+pub fn fillCells(pix: []u8, stride: usize, w: usize, h: usize, cells: []const i32) void {
+    var k: usize = 0;
+    while (k + 4 <= cells.len) : (k += 4) {
+        fillCell(pix, stride, w, h, cells[k], cells[k + 1], cells[k + 2], @bitCast(cells[k + 3]));
+    }
+}
+
+fn fillCell(pix: []u8, stride: usize, w: usize, h: usize, cx: i32, cy: i32, size: i32, rgba: u32) void {
+    if (size <= 0) return;
+    const xlo = @max(@as(i64, cx), 0);
+    const ylo = @max(@as(i64, cy), 0);
+    const xhi = @min(@as(i64, cx) + size, @as(i64, @intCast(w)));
+    const yhi = @min(@as(i64, cy) + size, @as(i64, @intCast(h)));
+    if (xlo >= xhi or ylo >= yhi) return;
+    const xa: usize = @intCast(xlo);
+    const ya: usize = @intCast(ylo);
+    const xb: usize = @intCast(xhi);
+    const yb: usize = @intCast(yhi);
+    const px = [4]u8{ @truncate(rgba), @truncate(rgba >> 8), @truncate(rgba >> 16), @truncate(rgba >> 24) };
+    const seg = (xb - xa) * 4;
+    const first = pix[ya * stride + xa * 4 ..][0..seg];
+    var x: usize = 0;
+    while (x < seg) : (x += 4) first[x..][0..4].* = px;
+    var y = ya + 1; // rows are identical: memcpy the first one
+    while (y < yb) : (y += 1) {
+        @memcpy(pix[y * stride + xa * 4 ..][0..seg], first);
+    }
+}
+
 const testing = std.testing;
 
 test "rgbaToRgb24 strided" {
@@ -62,6 +94,20 @@ test "rgbaToRgb24 strided" {
     var dst: [12]u8 = undefined;
     rgbaToRgb24(&src, 12, 2, 2, &dst);
     try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }, &dst);
+}
+
+test "fillCells clip + colour order" {
+    var pix = [_]u8{0} ** (4 * 4 * 4); // 4x4
+    const cells = [_]i32{
+        1,  1, 2, @bitCast(@as(u32, 0xFF03_0201)), // r=1 g=2 b=3 a=255
+        -1, 3, 2, @bitCast(@as(u32, 0xFF00_00FF)), // clipped to (0,3)-(1,4): red
+        9,  9, 2, 0, // fully outside
+    };
+    fillCells(&pix, 16, 4, 4, &cells);
+    try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 255 }, pix[16 + 4 ..][0..4]); // (1,1)
+    try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 255 }, pix[2 * 16 + 8 ..][0..4]); // (2,2)
+    try testing.expectEqualSlices(u8, &[_]u8{ 255, 0, 0, 255 }, pix[3 * 16 ..][0..4]); // (0,3)
+    try testing.expectEqual(@as(u8, 0), pix[3 * 16 + 8]); // (2,3) untouched
 }
 
 test "pxLabel first-match + bgra swap" {

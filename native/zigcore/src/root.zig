@@ -173,6 +173,13 @@ export fn rz_px_label(pix: [*]const u8, stride: usize, w: usize, h: usize, bpp: 
     pixel.pxLabel(pix[0 .. (h - 1) * stride + w * bpp], stride, w, h, bpp, bgra != 0, targets[0 .. n_targets * 3], @intCast(tol & 0xff), labels[0 .. w * h]);
 }
 
+/// Batched square-cell fill into a 4bpp zero-origin image (RGBA order), clipped to
+/// w*h. cells = n_cells*4 i32 {x0, y0, size, rgba LE}. Port of vrslgrid cell fills.
+export fn rz_fill_cells(pix: [*]u8, stride: usize, w: usize, h: usize, cells: [*]const i32, n_cells: usize) void {
+    if (w == 0 or h == 0) return;
+    pixel.fillCells(pix[0 .. (h - 1) * stride + w * 4], stride, w, h, cells[0 .. n_cells * 4]);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;

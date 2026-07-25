@@ -84,6 +84,11 @@ void rz_rgba_to_rgb24(const uint8_t *src, size_t src_stride, size_t w, size_t h,
 void rz_px_label(const uint8_t *pix, size_t stride, size_t w, size_t h, size_t bpp,
                  uint32_t bgra, const uint8_t *targets, size_t n_targets, uint32_t tol,
                  uint8_t *labels);
+/* Batched square-cell fill into a 4bpp zero-origin image (RGBA order), clipped to
+ * w*h. cells = n_cells*4 int32 {x0, y0, size, rgba LE (R = low byte)}. Port of the
+ * vrslgrid cell fills. */
+void rz_fill_cells(uint8_t *pix, size_t stride, size_t w, size_t h,
+                   const int32_t *cells, size_t n_cells);
 
 #ifdef __cplusplus
 }

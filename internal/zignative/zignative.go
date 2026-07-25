@@ -295,6 +295,21 @@ func PxLabel(pix []byte, stride, w, h, bpp int, bgra bool, targets []byte, tol i
 	return true
 }
 
+// FillCells batch-fills square cells into a 4bpp zero-origin image (RGBA byte order),
+// clipped to w*h. cells = n*4 int32 {x0, y0, size, rgba LE (R = low byte)}. Byte-exact
+// with the vrslgrid cell fills. False = bad geometry (caller keeps the Go loops).
+func FillCells(pix []byte, stride, w, h int, cells []int32) bool {
+	if w <= 0 || h <= 0 || stride < w*4 || len(pix) < (h-1)*stride+w*4 || len(cells)%4 != 0 {
+		return false
+	}
+	if len(cells) == 0 {
+		return true
+	}
+	C.rz_fill_cells((*C.uint8_t)(unsafe.Pointer(&pix[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), (*C.int32_t)(unsafe.Pointer(&cells[0])), C.size_t(len(cells)/4))
+	return true
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {
