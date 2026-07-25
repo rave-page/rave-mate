@@ -179,6 +179,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	var n C.size_t
 	out := f(p, C.size_t(len(state)), &n)
 	if out == nil {
+		noteFallback(2) // 2 frames up = the Render* wrapper (see fallback.go)
 		return "", false
 	}
 	s := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(n))
@@ -561,3 +562,38 @@ func RenderLibFixCompat(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_libfix_compat(p, l, n)
 	})
 }
+
+// --- settings-sub ---
+// Settings card bodies owned by other webui files (gridfix, gridfix model, account bridge,
+// the #inst-update flow). They also render inside the settings tab via its block list.
+
+// RenderSettingsGridfix renders the gridfix card body (engine variants + install controls).
+func RenderSettingsGridfix(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_gridfix(p, l, n)
+	})
+}
+
+// RenderSettingsGridfixModel renders the gridfix model card body (checkpoints + fine-tuning).
+func RenderSettingsGridfixModel(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_gridfixmodel(p, l, n)
+	})
+}
+
+// RenderSettingsBridge renders the account-bridge card body (enrolment + trusted sessions).
+func RenderSettingsBridge(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_bridge(p, l, n)
+	})
+}
+
+// RenderSettingsUpdFlow renders the #inst-update region (patchUpd). ok=false when the flow is
+// hidden (empty fragment) - the Go fallback renders the same empty string.
+func RenderSettingsUpdFlow(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_updflow(p, l, n)
+	})
+}
+
+// --- end settings-sub ---

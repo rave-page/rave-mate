@@ -62,6 +62,12 @@ type setBlock struct {
 	Inputs []setInput `json:"inputs,omitempty"`
 	Submit string     `json:"submit,omitempty"` // form: literal type=submit button label
 	SubVar string     `json:"subVar,omitempty"` // form: that button's rp-btn variant
+	// Sub-view bodies owned by other files, crossing as structured state (render_settings_sub_html.go):
+	// K gridfix | gridfixmodel | bridge | updregion (the last wraps GF-style state in <div id=ID>).
+	GF  *gfCardSt  `json:"gf,omitempty"`
+	GFM *gfModelSt `json:"gfm,omitempty"`
+	Brg *bridgeSt  `json:"brg,omitempty"`
+	Upd *updFlowSt `json:"upd,omitempty"`
 }
 
 // setSwitchSt is a card header's feature switch. Gate non-empty = the dependency is missing and
@@ -258,6 +264,14 @@ func setBlockHTML(b setBlock) string {
 		return setFormHTML(b)
 	case "raw":
 		return b.HTML
+	case "gridfix":
+		return gfCardHTML(*b.GF)
+	case "gridfixmodel":
+		return gfModelHTML(*b.GFM)
+	case "bridge":
+		return bridgeCardHTML(*b.Brg)
+	case "updregion":
+		return `<div id=` + b.ID + `>` + updFlowHTMLOf(*b.Upd) + `</div>`
 	}
 	return ""
 }

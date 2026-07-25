@@ -19,6 +19,7 @@ import (
 	"rave.page/mate/internal/sysnotify"
 	"rave.page/mate/internal/updater"
 	"rave.page/mate/internal/version"
+	"rave.page/mate/internal/zigui"
 )
 
 func init() {
@@ -196,43 +197,68 @@ func (u *UI) trayUpdateAction() {
 func (u *UI) patchUpd(inner string) { u.eval("window.__patch('inst-update'," + jsQuote(inner) + ")") }
 
 // updateFlowHTML renders #inst-update from the manager status (same machine as the rail).
+// Zig-rendered (native/zigui/src/settings_sub.zig) with updFlowHTMLOf as fallback + golden
+// reference; the hidden state renders "" ⇒ Zig returns NULL ⇒ the Go fallback renders "" too.
 func (u *UI) updateFlowHTML() string {
-	if u.updMgr == nil || !u.updMgr.Enabled() {
-		return ""
+	st := u.updateFlowState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderSettingsUpdFlow(stateJSON(st)); ok {
+			return h
+		}
 	}
-	st := u.updMgr.Status()
+	return updFlowHTMLOf(st)
+}
+
+// updateFlowState resolves the #inst-update region (impure: the manager snapshot).
+func (u *UI) updateFlowState() updFlowSt {
+	if u.updMgr == nil || !u.updMgr.Enabled() {
+		return updFlowSt{}
+	}
+	return updFlowStateOf(u.updMgr.Status())
+}
+
+// updFlowStateOf maps one updater snapshot to render state (numbers formatted here).
+func updFlowStateOf(st updater.Status) updFlowSt {
 	switch st.State {
 	case updater.Idle:
 		switch {
 		case st.Err != "":
-			return hint("bad", i18n.T("settings.body.updates.checkFailed")+st.Err)
+			return updFlowSt{Kind: "idle", Tone: "bad", Text: i18n.T("settings.body.updates.checkFailed") + st.Err}
 		case st.Checked:
-			return hint("ok", i18n.T("settings.body.updates.upToDate"))
+			return updFlowSt{Kind: "idle", Tone: "ok", Text: i18n.T("settings.body.updates.upToDate")}
 		default:
-			return "" // not checked yet - no verdict to show
+			return updFlowSt{} // not checked yet - no verdict to show
 		}
 	case updater.Available:
-		body := hint("warn", i18n.T("settings.body.updates.available", i18n.A{"version": st.Rel.Version}))
+		s := updFlowSt{Kind: "avail", Tone: "warn",
+			Text: i18n.T("settings.body.updates.available", i18n.A{"version": st.Rel.Version}),
+			Err:  errPrefixed(i18n.T("nav.update.failed"), st.Err)}
 		if st.Rel.Notes != "" {
-			body += `<div class=set-note>` + html.EscapeString(st.Rel.Notes) + `</div>`
+			s.HasNotes, s.Notes = true, st.Rel.Notes
 		}
-		if st.Err != "" {
-			body += hint("bad", i18n.T("nav.update.failed")+st.Err)
-		}
-		return body + btnRow(btn(i18n.T("nav.update.download", i18n.A{"version": st.Rel.Version}), "primary", "upd-download", ""))
+		s.HasBtn = true
+		s.Btn = nbtn(i18n.T("nav.update.download", i18n.A{"version": st.Rel.Version}), "primary", "upd-download", "")
+		return s
 	case updater.Downloading:
-		return progressBar(st.Progress, i18n.T("settings.label.downloading"))
+		return updFlowSt{Kind: "dl", Pct: progressPct(st.Progress), Cap: i18n.T("settings.label.downloading")}
 	case updater.Downloaded:
-		body := hint("ok", i18n.T("nav.update.verifiedNote"))
-		if st.Err != "" {
-			body += hint("bad", i18n.T("settings.body.updates.applyFailed")+st.Err)
-		}
-		return body + btnRow(btn(i18n.T("nav.update.install"), "primary", "upd-install", ""))
+		return updFlowSt{Kind: "ready", Tone: "ok", Text: i18n.T("nav.update.verifiedNote"),
+			Err:    errPrefixed(i18n.T("settings.body.updates.applyFailed"), st.Err),
+			HasBtn: true, Btn: nbtn(i18n.T("nav.update.install"), "primary", "upd-install", "")}
 	case updater.Staged:
-		return hint("ok", i18n.T("settings.body.updates.installedRestart")) +
-			btnRow(btn(i18n.T("settings.body.updates.restart"), "primary", "upd-restart", ""))
+		return updFlowSt{Kind: "staged", Tone: "ok", Text: i18n.T("settings.body.updates.installedRestart"),
+			HasBtn: true, Btn: nbtn(i18n.T("settings.body.updates.restart"), "primary", "upd-restart", "")}
 	}
-	return ""
+	return updFlowSt{}
+}
+
+// errPrefixed returns prefix+err, or "" when there is no error (an empty Err must stay empty -
+// the renderers key the trailing bad hint off it).
+func errPrefixed(prefix, err string) string {
+	if err == "" {
+		return ""
+	}
+	return prefix + err
 }
 
 // updateCheck runs an immediate poll and renders the verdict into #inst-update.

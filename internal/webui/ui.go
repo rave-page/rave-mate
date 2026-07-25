@@ -521,6 +521,7 @@ func (u *UI) livePush() {
 			if fn := liveTicks[u.activeTab()]; fn != nil {
 				fn(u)
 			}
+			u.logZigFallbacks() // debug tally of silent Zig→Go render fallbacks (≤1/min, on change)
 		}
 	}
 }

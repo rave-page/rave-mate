@@ -1,11 +1,11 @@
 package webui
 
 import (
-	"html"
 	"strconv"
 	"strings"
 
 	"rave.page/mate/internal/authz"
+	"rave.page/mate/internal/bridge"
 	"rave.page/mate/internal/i18n"
 )
 
@@ -132,108 +132,127 @@ func init() {
 	})
 }
 
-// bridgeCardBody renders the account-bridge settings card: state, the Local Studio sub-toggle,
-// authenticator enrolment, and the trusted-session list.
-func (u *UI) bridgeCardBody() string {
-	g := u.svc.AuthGate
-	f := &u.svc.Cfg.Features.AccountBridge
-	var b strings.Builder
-
-	// Live connection state.
-	if u.svc.Bridge != nil && f.Enabled {
-		s := u.svc.Bridge.State()
-		switch {
-		case s.SignedOut:
-			// Being signed out is an ordinary state, not a fault - don't alarm the user.
-			b.WriteString(statusRow("idle", i18n.T("settings.status.bridge.signedOut"),
-				i18n.T("settings.status.bridge.signedOutHint")))
-		case s.Error != "":
-			b.WriteString(statusRow("warn", i18n.T("settings.status.bridge.error"), s.Error))
-		case s.Registered:
-			b.WriteString(statusRow("go", i18n.T("settings.status.bridge.online"),
-				i18n.T("settings.status.bridge.devices", i18n.A{"devices": strconv.Itoa(s.Devices), "links": strconv.Itoa(s.Links)})))
-		default:
-			b.WriteString(statusRow("idle", i18n.T("settings.status.bridge.connecting"), ""))
-		}
-	}
-
-	// Serving the Local Studio channel over the relay is a separate, deliberate step: it lets a
-	// browser ANYWHERE drive this machine, not only one on this box.
-	b.WriteString(toggleRowTip(i18n.T("settings.body.bridge.localStudio"), "set:bridge-studio",
-		f.LocalStudio, tipTopic("bridge-local-studio")))
-
-	// ── the access gate ──────────────────────────────────────────────────────
-	if g == nil {
-		return b.String()
-	}
-	b.WriteString(section(i18n.T("settings.body.bridge.gateTitle"), u.bridgeGateBody(g)))
-	return b.String()
+// bridgeBits are the impure facts the account-bridge card renders from (relay state + gate),
+// lifted out so the state mapping needs no live authz.Gate.
+type bridgeBits struct {
+	HasState    bool // relay manager present AND the feature enabled
+	State       bridge.State
+	LocalStudio bool
+	HasGate     bool
+	URI, Secret string // pending enrolment (shown once)
+	Enrolled    bool
+	Persistent  bool // an OS secret store backs the enrolment
+	Sessions    []authz.Session
 }
 
-// bridgeGateBody renders enrolment + the trusted sessions.
-func (u *UI) bridgeGateBody(g *authz.Gate) string {
-	var b strings.Builder
+// bridgeCardState resolves the account-bridge card: relay state, the Local Studio sub-toggle,
+// authenticator enrolment and the trusted-session list. Pure renderer: bridgeCardHTML.
+func (u *UI) bridgeCardState() bridgeSt {
+	g := u.svc.AuthGate
+	f := &u.svc.Cfg.Features.AccountBridge
+	b := bridgeBits{LocalStudio: f.LocalStudio, HasGate: g != nil}
+	if u.svc.Bridge != nil && f.Enabled {
+		b.HasState, b.State = true, u.svc.Bridge.State()
+	}
+	if g != nil {
+		u.mu.Lock()
+		b.URI, b.Secret = u.bridgeURI, u.bridgeSecret
+		u.mu.Unlock()
+		if b.URI == "" { // pending enrolment wins - don't touch the store we don't render from
+			b.Enrolled, b.Persistent = g.Enrolled(), g.Persistent()
+		}
+		b.Sessions = g.Sessions() // side effect: lazily reaps expired tokens (as before)
+	}
+	return bridgeCardStateOf(b)
+}
 
-	u.mu.Lock()
-	uri, secret := u.bridgeURI, u.bridgeSecret
-	u.mu.Unlock()
+// bridgeCardStateOf maps the gathered facts to render state.
+func bridgeCardStateOf(b bridgeBits) bridgeSt {
+	// Serving the Local Studio channel over the relay is a separate, deliberate step: it lets a
+	// browser ANYWHERE drive this machine, not only one on this box.
+	s := bridgeSt{
+		Studio: newToggle(i18n.T("settings.body.bridge.localStudio"), "set:bridge-studio", b.LocalStudio),
+		Tip:    tipTopic("bridge-local-studio"),
+	}
+	if b.HasState {
+		switch st := b.State; {
+		case st.SignedOut:
+			// Being signed out is an ordinary state, not a fault - don't alarm the user.
+			s.St = newStatus("idle", i18n.T("settings.status.bridge.signedOut"),
+				i18n.T("settings.status.bridge.signedOutHint"))
+		case st.Error != "":
+			s.St = newStatus("warn", i18n.T("settings.status.bridge.error"), st.Error)
+		case st.Registered:
+			s.St = newStatus("go", i18n.T("settings.status.bridge.online"),
+				i18n.T("settings.status.bridge.devices", i18n.A{"devices": strconv.Itoa(st.Devices), "links": strconv.Itoa(st.Links)}))
+		default:
+			s.St = newStatus("idle", i18n.T("settings.status.bridge.connecting"), "")
+		}
+	}
+	// ── the access gate ──────────────────────────────────────────────────────
+	if !b.HasGate {
+		return s
+	}
+	s.HasGate, s.GateTitle = true, i18n.T("settings.body.bridge.gateTitle")
+	s.Gate = bridgeGateState(b)
+	return s
+}
 
+// bridgeGateState resolves enrolment + the trusted sessions.
+func bridgeGateState(b bridgeBits) bridgeGateSt {
+	g := bridgeGateSt{
+		Rows: []uiStatus{}, Sessions: []bridgeSessSt{},
+		SessionsTitle: i18n.T("settings.body.bridge.sessionsTitle"),
+	}
 	switch {
-	case uri != "":
+	case b.URI != "":
 		// Pending enrolment: show the URI + secret ONCE and ask for a code back. Deliberately
 		// plain text - there is no QR encoder in the tree and the supply-chain rule forbids
-		// adding a dependency for one (tracked as a follow-up).
-		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.bridge.enrolHelp")) + `</div>`)
-		b.WriteString(`<div class="bridge-secret mono">` + html.EscapeString(secret) + `</div>`)
-		b.WriteString(`<div class="bridge-uri mono">` + html.EscapeString(uri) + `</div>`)
-		// Raw named input + submit: the field() helper emits no name attribute, so parseForm
+		// adding a dependency for one (tracked as a follow-up). The code input is hand-rolled
+		// (raw named input + submit): the field() helper emits no name attribute, so parseForm
 		// would see nothing.
-		b.WriteString(`<form data-act=bridge-confirm class=bridge-confirm>` +
-			`<label class=field data-label=` + attrQ(strings.ToLower(i18n.T("settings.body.bridge.codeLabel"))) +
-			`><span class=field-label>` + html.EscapeString(i18n.T("settings.body.bridge.codeLabel")) + `</span>` +
-			`<input class=field-input type=text name=code data-act=bridge-code data-label=` +
-			attrQ(strings.ToLower(i18n.T("settings.body.bridge.codeLabel"))) +
-			` inputmode=numeric autocomplete=one-time-code maxlength=6 value=""></label>` +
-			`<div class=btn-row>` +
-			`<button class="rp-btn rp-btn--primary" type=submit>` + html.EscapeString(i18n.T("settings.body.bridge.confirm")) + `</button>` +
-			btn(i18n.T("common.cancel"), "ghost", "bridge-enrol-cancel", "") +
-			`</div></form>`)
-		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.bridge.burnNote")) + `</div>`)
-
-	case g.Enrolled():
-		b.WriteString(statusRow("go", i18n.T("settings.status.bridge.enrolled"), ""))
-		if !g.Persistent() {
+		label := i18n.T("settings.body.bridge.codeLabel")
+		g.Kind = "enrol"
+		g.Help = i18n.T("settings.body.bridge.enrolHelp")
+		g.Secret, g.URI = b.Secret, b.URI
+		g.CodeLabel, g.CodeDL = label, strings.ToLower(label)
+		g.Confirm = i18n.T("settings.body.bridge.confirm")
+		g.Cancel = nbtn(i18n.T("common.cancel"), "ghost", "bridge-enrol-cancel", "")
+		g.Burn = i18n.T("settings.body.bridge.burnNote")
+	case b.Enrolled:
+		g.Kind = "enrolled"
+		g.Rows = append(g.Rows, newStatus("go", i18n.T("settings.status.bridge.enrolled"), ""))
+		if !b.Persistent {
 			// No OS secret store (macOS/Linux today): the secret is memory-only, so it dies with
 			// the process. Say so plainly rather than let the user discover it after a restart.
-			b.WriteString(statusRow("warn", i18n.T("settings.status.bridge.notPersisted"),
+			g.Rows = append(g.Rows, newStatus("warn", i18n.T("settings.status.bridge.notPersisted"),
 				i18n.T("settings.status.bridge.notPersistedHint")))
 		}
-		b.WriteString(btnRow(btn(i18n.T("settings.body.bridge.unenrol"), "destructive", "bridge-unenrol", "")))
-
+		g.Btn = nbtn(i18n.T("settings.body.bridge.unenrol"), "destructive", "bridge-unenrol", "")
 	default:
-		b.WriteString(`<div class=set-note>` + html.EscapeString(i18n.T("settings.body.bridge.noAuthenticator")) + `</div>`)
-		b.WriteString(btnRow(btn(i18n.T("settings.body.bridge.enrol"), "primary", "bridge-enrol", "")))
+		g.Kind = "none"
+		g.Note = i18n.T("settings.body.bridge.noAuthenticator")
+		g.Btn = nbtn(i18n.T("settings.body.bridge.enrol"), "primary", "bridge-enrol", "")
 	}
-
 	// ── trusted sessions ─────────────────────────────────────────────────────
-	sessions := g.Sessions()
-	b.WriteString(`<div class=set-sub>` + html.EscapeString(i18n.T("settings.body.bridge.sessionsTitle")) + `</div>`)
-	if len(sessions) == 0 {
-		b.WriteString(emptyState(i18n.T("settings.empty.bridgeSessions")))
-		return b.String()
+	if len(b.Sessions) == 0 {
+		g.Empty = i18n.T("settings.empty.bridgeSessions")
+		return g
 	}
-	for _, s := range sessions {
+	for _, s := range b.Sessions {
 		label := s.Label
 		if strings.TrimSpace(label) == "" {
 			label = shortID(s.PeerID)
 		}
-		sub := i18n.T("settings.body.bridge.sessionSub", i18n.A{
-			"transport": string(s.Transport),
-			"expires":   s.ExpiresAt.Local().Format("2006-01-02 15:04"),
+		g.Sessions = append(g.Sessions, bridgeSessSt{
+			Title: label,
+			Sub: i18n.T("settings.body.bridge.sessionSub", i18n.A{
+				"transport": string(s.Transport),
+				"expires":   s.ExpiresAt.Local().Format("2006-01-02 15:04"),
+			}),
+			Revoke: nbtn(i18n.T("settings.body.bridge.revoke"), "destructive", "bridge-revoke:"+s.PeerID, ""),
 		})
-		b.WriteString(listRow(label, sub,
-			btn(i18n.T("settings.body.bridge.revoke"), "destructive", "bridge-revoke:"+s.PeerID, "")))
 	}
-	b.WriteString(btnRow(btn(i18n.T("settings.body.bridge.revokeAll"), "outline", "bridge-revoke-all", "")))
-	return b.String()
+	g.RevokeAll = nbtn(i18n.T("settings.body.bridge.revokeAll"), "outline", "bridge-revoke-all", "")
+	return g
 }

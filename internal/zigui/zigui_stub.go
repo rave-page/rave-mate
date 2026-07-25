@@ -114,3 +114,12 @@ func RenderLibFixGFLive(stateJSON []byte) (string, bool)  { return "", false }
 func RenderLibFixResults(stateJSON []byte) (string, bool) { return "", false }
 func RenderLibFixTagEdit(stateJSON []byte) (string, bool) { return "", false }
 func RenderLibFixCompat(stateJSON []byte) (string, bool)  { return "", false }
+
+// --- settings-sub ---
+
+func RenderSettingsGridfix(stateJSON []byte) (string, bool)      { return "", false }
+func RenderSettingsGridfixModel(stateJSON []byte) (string, bool) { return "", false }
+func RenderSettingsBridge(stateJSON []byte) (string, bool)       { return "", false }
+func RenderSettingsUpdFlow(stateJSON []byte) (string, bool)      { return "", false }
+
+// --- end settings-sub ---
