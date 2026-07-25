@@ -74,6 +74,13 @@ func (u *UI) libPlaylistRefreshFolder(id int64) (int, string, error) {
 	}
 	sort.Strings(add)
 	n, err := u.svc.Lib.AddToPlaylist(id, add...)
+	// new files unknown to ANY source also get collection rows (probe + additive upsert
+	// under the "folder" source) so they're playable/beatgriddable without a DJ software
+	if err == nil && n > 0 {
+		if got := u.fiPersistLoose(dir, add); got > 0 {
+			u.toast(i18n.Tn("library.fi.refreshImported", got))
+		}
+	}
 	return n, p.Name, err
 }
 

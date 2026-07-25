@@ -497,6 +497,12 @@ func (u *UI) gfTeardown(eng *gridfix.Engine, cache *gridfix.DetectionCache, ownS
 // AND the detection cache (fresh detection - e.g. after switching models); verified grids are
 // always protected.
 func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
+	u.gfRunTracksHook(tracks, scope, force, nil)
+}
+
+// gfRunTracksHook additionally hands the results to onDone after a clean (non-cancelled)
+// run - the folder-import flow saves created grids straight into libdb from it.
+func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, onDone func([]gridfix.TrackResult)) {
 	if len(tracks) == 0 {
 		u.toast(i18n.T("library.gf.nothingToDo"))
 		return
@@ -639,8 +645,12 @@ func (u *UI) gfRunTracks(tracks []musiclib.Track, scope string, force bool) {
 		})
 		g.mu.Lock()
 		g.results = results
+		cancelled := g.prog.Phase == gridfix.PhaseCancelled
 		g.mu.Unlock()
 		done = true
+		if onDone != nil && !cancelled {
+			onDone(results)
+		}
 	})
 }
 
