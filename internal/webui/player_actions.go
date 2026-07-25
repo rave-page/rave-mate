@@ -157,10 +157,16 @@ type mpSt struct {
 	// optimistic engine-state override until the proxy mirror reconciles (mpAudCall).
 	audBusy     bool      // one in-flight transport RPC per host
 	audLoading  bool      // first-load PlayFrom in flight (transport shows "Loading audio…")
-	audOpt      string    // "" none | "play" | "pause" | "stop" (mpEngineState override)
+	audOpt      string    // "" none | "play" | "pause" | "stop" (mpSampleEng override)
 	audOptUntil time.Time // override expiry (belt-and-braces if the RPC hangs)
 	audPend     func()    // one-slot latest-wins queued intent (runs when the in-flight RPC lands)
 	audPendOpt  string
+
+	// --- phaseb-b4player ---
+	// eng is this snapshot's ONE engine sample (see mpTr / mpEng). nil = not sampled yet.
+	// Lives on the render COPY only: a sample stored on the instance would go stale.
+	eng *mpTr
+	// --- end phaseb-b4player ---
 }
 
 // mpVid mirrors the embedded <video> element (updated by its mp-vtick events).
@@ -394,18 +400,26 @@ func (u *UI) mp(host string) *mpSt {
 }
 
 // mpMut mutates the instance under mpMu and returns a copy for rendering.
-func (u *UI) mpMut(host string, fn func(*mpSt)) mpSt {
+func (u *UI) mpMut(host string, fn func(*mpSt)) mpSt { return u.mpCopy(host, fn) }
+
+// mpSnap returns a render copy.
+func (u *UI) mpSnap(host string) mpSt { return u.mpCopy(host, nil) }
+
+// mpCopy is the ONE snapshot funnel: mutate (optional), copy, then take the snapshot's single
+// engine sample - outside mpMu, since the sample locks the proxy mirror.
+func (u *UI) mpCopy(host string, fn func(*mpSt)) mpSt {
 	t := u.mp(host)
 	mpMu.Lock()
-	fn(t)
+	if fn != nil {
+		fn(t)
+	}
 	c := *t
 	c.media = append([]mpMedia(nil), t.media...)
 	mpMu.Unlock()
+	c.eng = nil // never inherit the instance's sample: this snapshot gets its own
+	u.mpEng(&c)
 	return c
 }
-
-// mpSnap returns a render copy.
-func (u *UI) mpSnap(host string) mpSt { return u.mpMut(host, func(*mpSt) {}) }
 
 // ── axis (shared wall-clock timeline) ───────────────────────────────────────────
 
@@ -458,6 +472,18 @@ func (u *UI) player() *featurehost.PlayerProxy {
 	return u.svc.Player
 }
 
+// mpAudMirror is the mirror mpSampleEng reads: the audio engine, or the test override. nil =
+// no engine (headless session, stub build, no player service).
+func (u *UI) mpAudMirror() mpMirror {
+	if u.mpMirrorOv != nil {
+		return u.mpMirrorOv
+	}
+	if pl := u.player(); pl != nil {
+		return pl
+	}
+	return nil
+}
+
 // playerGateKey picks the "no audio" toast: headless sessions gate audio by design.
 func (u *UI) playerGateKey() string {
 	if u.virtual() {
@@ -466,14 +492,41 @@ func (u *UI) playerGateKey() string {
 	return "player.toast.playerUnavailable"
 }
 
-// mpTr is a media-local transport snapshot.
+// mpTr is a media-local transport snapshot: ONE sample of the engine, taken per mpSt snapshot
+// (mpSt.eng) and read by every consumer of that snapshot.
+//
+// It used to be re-sampled per consumer (`mpEngineState(&t, m)`), which meant THREE samples in one
+// component render - wave playhead, hover readout, transport row - and up to five in one mpTick.
+// Both inputs move between samples: the featurehost mirror is rewritten by the child's ~5 Hz tick
+// events (and zeroed outright by fireEnd), and the audOpt override expires on a wall clock. So one
+// DOM could carry a moving playhead over an idle transport, or a hover readout naming a different
+// position than the playhead beside it. The workaround for the resulting flicker was the ~1 Hz
+// re-patch that healed it a tick later; sampling once makes the torn DOM unrepresentable.
 type mpTr struct {
 	loaded          bool // the engine currently has this file
 	playing, paused bool
 	cur, total      float64
 }
 
-func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
+// mpMirror is the audio-engine surface the sampler reads (featurehost.PlayerProxy's mirrored
+// playback snapshot).
+type mpMirror interface{ State() featurehost.State }
+
+// mpEng returns the snapshot's engine sample, taking it on first read. Snapshots from
+// mpMut/mpSnap arrive pre-sampled; a hand-built mpSt (tests, fixtures) samples here, so no path
+// can render against a zero transport by accident.
+func (u *UI) mpEng(t *mpSt) mpTr {
+	if t.eng == nil {
+		tr := u.mpSampleEng(t)
+		t.eng = &tr
+	}
+	return *t.eng
+}
+
+// mpSampleEng samples the engine for t's ACTIVE media - every consumer asks about that one
+// (TestMpEngAsksAboutActiveMedia pins it). Only mpEng calls this.
+func (u *UI) mpSampleEng(t *mpSt) mpTr {
+	m := t.activeMedia()
 	if m == nil {
 		return mpTr{}
 	}
@@ -488,7 +541,7 @@ func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
 		}
 		return mpTr{loaded: true, playing: !v.paused, paused: v.paused, cur: v.cur, total: total}
 	}
-	pl := u.player()
+	pl := u.mpAudMirror()
 	if pl == nil {
 		return mpTr{}
 	}
@@ -507,7 +560,7 @@ func (u *UI) mpEngineState(t *mpSt, m *mpMedia) mpTr {
 }
 
 // mpAudCall runs one blocking PlayerProxy RPC off the act worker (a wedged child stalls them up
-// to 3-10s - inline they froze the whole acts lane). opt = optimistic mpEngineState override
+// to 3-10s - inline they froze the whole acts lane). opt = optimistic mpSampleEng override
 // while in flight ("" = none); the proxy mirror reconciles on completion. Busy = the press
 // parks in a one-slot latest-wins pending intent (no stacking; a rapid re-tap during the
 // ~250ms halt window used to be silently dropped) executed when the in-flight RPC lands.
@@ -571,7 +624,7 @@ func (u *UI) mpPlayToggle(host string) {
 	if m == nil {
 		return
 	}
-	tr := u.mpEngineState(&t, m)
+	tr := u.mpEng(&t)
 	if tr.loaded {
 		if m.kind == "video" {
 			u.mpVidEval(host, "if(v.paused){v.play().catch(function(){})}else{v.pause()}")
@@ -658,7 +711,7 @@ func (u *UI) mpSeekAxis(host string, axisSec float64) {
 		u.mpPatchWave(u.mpSnap(host))
 		return
 	}
-	if tr := u.mpEngineState(&t, m); tr.loaded {
+	if tr := u.mpEng(&t); tr.loaded {
 		if pl := u.player(); pl != nil {
 			pl.SeekExplicit(local) // user click = real intent; bypass the noop guard
 		}
@@ -672,7 +725,7 @@ func (u *UI) mpPlayheadAxis(t *mpSt) float64 {
 	if m == nil {
 		return mpNone
 	}
-	tr := u.mpEngineState(t, m)
+	tr := u.mpEng(t)
 	if !tr.loaded {
 		return mpNone
 	}
@@ -1388,7 +1441,7 @@ func (u *UI) mpPushRealtime(t mpSt) {
 		u.enqueueEval(key, "window.__rt&&window.__rt('ph',"+jsQuote("mp-"+t.host)+",null)")
 		return
 	}
-	tr := u.mpEngineState(&t, m)
+	tr := u.mpEng(&t)
 	total := m.dur
 	if tr.loaded && tr.total > 0 {
 		total = tr.total
@@ -1433,7 +1486,7 @@ func mpTick(u *UI, host string) {
 		return
 	}
 	m := t.activeMedia()
-	tr := u.mpEngineState(&t, m)
+	tr := u.mpEng(&t)
 	if !tr.loaded {
 		// audio source stopped - halt a slaved video preview too
 		if t.dual() && t.active == 0 && t.vid.started && !t.vid.paused {
@@ -2220,7 +2273,7 @@ func (u *UI) mpPreview(host string) {
 		return
 	}
 	local := clampF(t.inSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
-	if tr := u.mpEngineState(&t, m); tr.loaded {
+	if tr := u.mpEng(&t); tr.loaded {
 		u.mpSeekAxis(host, t.inSec)
 		if m.kind == "video" && tr.paused {
 			u.mpVidEval(host, "v.play().catch(function(){})")
@@ -2238,7 +2291,7 @@ func (u *UI) mpJump(host string, axisSec float64) {
 	if m == nil {
 		return
 	}
-	if tr := u.mpEngineState(&t, m); tr.loaded {
+	if tr := u.mpEng(&t); tr.loaded {
 		u.mpSeekAxis(host, axisSec)
 		if m.kind == "video" && tr.paused {
 			u.mpVidEval(host, "v.play().catch(function(){})")

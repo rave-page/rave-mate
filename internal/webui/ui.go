@@ -130,6 +130,13 @@ type UI struct {
 	setSearch   bool            // content pane is showing search results
 
 	nav navHist // browser-style back/forward stack (mouse X1/X2 + Alt+←/→)
+
+	// --- phaseb-b4player ---
+	// mpMirrorOv overrides the audio-engine mirror the transport sampler reads (nil = the
+	// featurehost proxy). Test seam: the B4a gates need a mirror that MOVES between reads, and
+	// the real one can only be moved by a live child process.
+	mpMirrorOv mpMirror
+	// --- end phaseb-b4player ---
 }
 
 // New builds the webview UI over the shared Services (identical struct the Fyne UI consumes). The
