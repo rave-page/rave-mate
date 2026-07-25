@@ -1,13 +1,13 @@
 {
-  "version": "nightly-a2da7f8",
-  "build": 146,
-  "commit": "a2da7f8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-146-20260725-a2da7f8.exe",
-  "sha256": "c3c7fbdd41169ea379e82cfa556c1dfa9ea8d386e497ae2fd229591097a6afc5",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-146-20260725-a2da7f8.exe",
-  "installer_sha256": "d8cb78565b8964522a0cd3f809cda9b678ad1cf028a23a157b5e157ad4f8e290",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-146-20260725-a2da7f8",
-  "linux_sha256": "d000a9477bfa98dfed0ed2335b68f14daa50bbbd9b480975ae0c313cd5f22fb6",
+  "version": "nightly-1b59dff",
+  "build": 147,
+  "commit": "1b59dff",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-147-20260725-1b59dff.exe",
+  "sha256": "b11e89ff35fa431518c4ff29f1b03378698230dfec8bfe9f99cb41d24f286028",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-147-20260725-1b59dff.exe",
+  "installer_sha256": "7854d452accc14f1f324d49b7e60aca9765962a2d609a6609bc6a45b82ddebf6",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-147-20260725-1b59dff",
+  "linux_sha256": "222f55835c72061b85b78975cd8ec1b38dd6fce27ff605fdfd166996b8209c07",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T19:37:21Z",
-  "notes": "Merge feature/zig-phaseb-loudness: structured loudness state (B-1a)"
+  "released": "2026-07-25T22:07:05Z",
+  "notes": "Merge feature/zig-phaseb-sched: B3 fragment scheduler pilot (live + #log-view)"
 }
