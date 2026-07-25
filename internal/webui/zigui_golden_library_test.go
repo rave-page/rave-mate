@@ -203,10 +203,14 @@ func libFixtures() map[string]libState {
 	populated.Section = "collection"
 	populated.Switcher = `<div class=lib-target><div class=ss-field></div></div>`
 
-	// cue-edit mode: full-width waveform above the panes
+	// cue-edit mode: full-width waveform above the panes. Both seams carry the REAL
+	// cue-editor markup (drops/grid readouts + assign grid + write-back rail, see
+	// zigui_golden_cueedit_test.go) so a library-side change cannot silently drop it.
 	cueEdit := base(libBodySt{Kind: libBodyColl, NavRail: `<div class=libnav></div>`, CEFull: true,
-		CEWave: `<div id=ce-wave><canvas></canvas></div>`, Coll: coll,
-		Detail: libDetailSt{Kind: libDetailRaw, Raw: `<div id=ce-rail>editor</div>`}})
+		CEWave: ceWaveHTMLOf(ceWaveSt{Topbar: ceTopbarFixtures()["local"],
+			Player: `<div id=mp-library><div id=mp-library-ph style="left:12.50%"></div></div>`}),
+		Coll:   coll,
+		Detail: libDetailSt{Kind: libDetailRaw, Raw: ceRailHTMLOf(ceRailFixtures()["full"])}})
 	cueEdit.Section = "collection"
 
 	// collection with a fixer results view replacing the list

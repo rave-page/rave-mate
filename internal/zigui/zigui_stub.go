@@ -88,3 +88,9 @@ func RenderLibraryBody(stateJSON []byte) (string, bool)    { return "", false }
 func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
 func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
 func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
+
+// --- cueedit ---
+
+func RenderCueEditTopbar(stateJSON []byte) (string, bool) { return "", false }
+func RenderCueEditWave(stateJSON []byte) (string, bool)   { return "", false }
+func RenderCueEditRail(stateJSON []byte) (string, bool)   { return "", false }

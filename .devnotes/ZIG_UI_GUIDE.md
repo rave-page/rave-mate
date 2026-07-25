@@ -97,6 +97,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 | settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
+| library ▸ cue editor | Zig (`native/zigui/src/cueedit.zig`; `#ce-topbar` + full-width wave strip + the `#lib-detail` editor rail) | `TestZigCueEditTopbarGolden`, `TestZigCueEditWaveGolden`, `TestZigCueEditRailGolden`, `TestZigCueEditRailInDetail` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -368,3 +369,44 @@ Library-port notes (the biggest tab, 2768 lines): split into `render_library_sta
   SINGLE serialized action goroutine froze the tab - they are latency workarounds for Go's
   webui threading model, not for the DOM. The phase-A bridge also adds a per-render
   state->JSON->parse round trip that phase B removes.
+
+Cue-editor-port notes (the deepest single subview, ~2000 lines of library_cueedit.go): three
+exports because three surfaces patch independently - `rz_ui_render_cueedit_topbar` (`#ce-topbar`,
+re-patched on EVERY cursor move / edit), `_wave` (the full-width strip the library embeds as
+`libBodySt.CEWave` and library_remotecue.go `rceBody` wraps in `.ce-fullwave`), `_rail` (the
+`#lib-detail` inner in cue-edit mode). Split into `render_library_cueedit.go` (state + pure
+renderers + bridges); `library_cueedit.go` keeps 3-line delegations so `cePatchRail`,
+`cePatchWave` and `rceBody` call the same names as before.
+- **The 30 fps surface stays Go by design.** `player.go mpHTML("library")` - the waveform SVG,
+  beatgrid/marker geometry, `%.2f` coords and every id the client rAF runtime (`__rt 'ph'`,
+  `<ph>`/`<ph>-veil`/clock) rewrites per frame - rides as ONE trusted raw `player` field.
+  Nothing in the topbar or rail is `__rt`-driven, so the ported markup carries no rAF contract.
+  Same rule as keywheelSVG/campath: pre-rendered float-math fragments are never ported.
+- Other Go-resolved strings that ride raw (spliced unescaped in Go too, so escaping them would
+  change the DOM): `pubClock` readouts (`cursor`, drop `when`), `ceBarBeat` (`barBeat`), the
+  `ce-goto:%f` acts (Go `%f` of a float64), the `DROP <n>` tags, the ▸/▾ prefs arrow, and
+  `tipTopic("cue-edit")`. Other renderers' output stays raw as well: `prepSel`
+  (library_prep.go), `writeBack` (library_cuewrite.go `ceWriteHTML` **or**
+  library_remotecue.go `rceSaveHTML` - the rce path is untouched and stays Go).
+- **Side-effect ORDER in the state builder is load-bearing** (same lesson as the peers batch):
+  `ceRailState` must call `ceWriteHTML`/`rceSaveHTML` (they lock ceSt) BEFORE taking `c.mu`, and
+  `ceDefaultsState` (registers the pad select) BEFORE `u.cePatterns()` opens the store and the
+  assign pickers register - exactly the sequence the pre-split renderer had. A collapsed
+  defaults block registers NOTHING, so the collapsed/open branch must skip resolution too.
+- Exactly-one-of and "is it shown" choices ride as explicit flags (`hasRce`, `hasSel`, `hasPats`,
+  `hasDrops`, `showOwNote`, `showNoDrops`, `showDelHint`, `hasPromote`, `hasGrid`, `placed`),
+  never "empty string means the other branch" - a blank i18n value would silently diverge.
+  The two exceptions are faithful to Go's OWN conditions (`meta != ""`, `label != ""` in selHTML).
+- Quirk replicated deliberately (golden-gated): the per-drop pattern picker is registered with
+  the pattern NAME as `cur` while its rows carry pattern IDs, so no row is ever marked current
+  and `CurLabel` passes straight through.
+- Zero new components.zig helpers - `selectBox`/`toggleOf`/`btnOf`/`btnRowOpen+Close`,
+  `library_kit.fieldRaw` and `library_kit.hints` covered everything; the four bits of
+  cue-edit chrome (`pbLabel`, `setNote`, `btnRow1/2`, `btnCol2`) are tab-local in cueedit.zig.
+  No existing helper was modified and no tab-local variant of one was needed.
+- Zero-DOM-change proof: the multiset of markup literals in the pre-split functions vs the
+  split ones is identical (73 literals, 0 diff), plus a deliberate one-byte Zig perturbation
+  that failed 9 golden subtests before revert. The library suite's `cueEdit` fixture now
+  embeds the REAL wave + rail markup instead of stubs, so the seam is pinned from both sides.
+- NOT ported (modal, wave 4+): `cePatternManagerHTML` (the manage-patterns dialog) - dialogs
+  stay Go, same rule as the publish batch.

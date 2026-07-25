@@ -394,3 +394,28 @@ export fn rz_ui_render_library_cuecell(state_json: ?[*]const u8, len: usize, out
 test "library tab module" {
     _ = library;
 }
+
+// --- cueedit ---
+
+const cueedit = @import("cueedit.zig");
+
+/// `#ce-topbar` inner: the cue-editor readout strip (patched on every cursor move/edit).
+/// Legitimately EMPTY when the editor is off ⇒ NULL ⇒ the Go fallback renders the same "".
+export fn rz_ui_render_cueedit_topbar(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(cueedit.Topbar, cueedit.renderTopbar, state_json, len, out_len);
+}
+
+/// Full-width cue-edit wave strip (topbar wrapper + the raw player markup, which owns the
+/// 30 fps `__rt` playhead surface and stays Go-rendered).
+export fn rz_ui_render_cueedit_wave(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(cueedit.Wave, cueedit.renderWave, state_json, len, out_len);
+}
+
+/// Cue-editor rail (the `#lib-detail` inner in cue-edit mode). Empty when the editor is off.
+export fn rz_ui_render_cueedit_rail(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(cueedit.Rail, cueedit.renderRail, state_json, len, out_len);
+}
+
+test "cueedit subview module" {
+    _ = cueedit;
+}
