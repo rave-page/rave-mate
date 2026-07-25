@@ -143,6 +143,83 @@ var schema = []msg{
 			s(14, "Copy", "copy"), s(15, "Clear", "clear"), s(16, "Tailing", "tailing"),
 			st(17, "Lines", "lines", "LogsLines")},
 	},
+	// --- phaseb-wire (B-2 fan-out) ---
+	// One block per tab, in fan-out order. Rows are DERIVED from the Go state structs + their
+	// Zig counterparts (json tag == Zig field name), so a field added on one side without the
+	// other trips the three-way golden gate instead of silently dropping from v2.
+	// live: full cockpit + the ten ~1 Hz tick fragments. Each fragment state crosses alone, so
+	// each is its own root message and the header id still refuses a foreign document.
+	{
+		name: "LiveTransport", goT: "liveTransportSt", zigT: "live.Transport", id: 11,
+		doc: "#live-transport fragment",
+		fs:  []field{s(1, "StreamHint", "streamHint"), s(2, "StreamLabel", "streamLabel"), s(3, "DotVar", "dotVar"), s(4, "State", "state"), s(5, "MetaOnly", "metaOnly"), s(6, "PauseLabel", "pauseLabel"), s(7, "PauseHint", "pauseHint"), b(8, "Paused", "paused"), b(9, "HasRec", "hasRec"), s(10, "RecHint", "recHint"), s(11, "RecLabel", "recLabel"), s(12, "RecBtn", "recBtn"), s(13, "RecState", "recState"), b(14, "HasTC", "hasTc"), s(15, "TCLabel", "tcLabel"), s(16, "TC", "tc"), s(17, "StartLbl", "startLbl"), s(18, "StopLbl", "stopLbl")},
+	},
+	{
+		name: "LiveNP", goT: "liveNPSt", zigT: "live.NP", id: 12,
+		doc: "#live-np fragment",
+		fs:  []field{s(1, "Line1", "line1"), s(2, "Line2", "line2")},
+	},
+	{
+		name: "LiveKV", goT: "liveKV", zigT: "live.KV",
+		fs: []field{s(1, "K", "k"), s(2, "KL", "kl"), s(3, "V", "v")},
+	},
+	{
+		name: "LiveStatus", goT: "liveStatusSt", zigT: "live.Status", id: 13,
+		doc: "#live-status fragment",
+		fs:  []field{li(1, "Rows", "rows", "LiveKV")},
+	},
+	{
+		name: "LiveDeck", goT: "liveDeck", zigT: "live.Deck",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Name", "name"), s(3, "Title", "title"), s(4, "Meta", "meta"), s(5, "Via", "via")},
+	},
+	{
+		name: "LiveDecks", goT: "liveDecksSt", zigT: "live.Decks", id: 14,
+		doc: "#live-decks fragment",
+		fs:  []field{s(1, "Note", "note"), li(2, "Decks", "decks", "LiveDeck")},
+	},
+	{
+		name: "LiveSignals", goT: "liveSignalsSt", zigT: "live.Signals", id: 15,
+		doc: "#live-signals fragment",
+		fs:  []field{li(1, "Rows", "rows", "LiveKV")},
+	},
+	{
+		name: "LiveCockpitRow", goT: "liveCockpitRow", zigT: "live.CockpitRow",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "State", "state"), s(4, "StreamLbl", "streamLbl"), s(5, "StreamAct", "streamAct"), s(6, "RecLbl", "recLbl"), s(7, "RecAct", "recAct")},
+	},
+	{
+		name: "LiveCockpit", goT: "liveCockpitSt", zigT: "live.Cockpit", id: 16,
+		doc: "#live-cockpit fragment",
+		fs:  []field{s(1, "Empty", "empty"), s(2, "Caption", "caption"), li(3, "Rows", "rows", "LiveCockpitRow")},
+	},
+	{
+		name: "LiveSRow", goT: "liveSRow", zigT: "live.SRow",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
+	},
+	{
+		name: "LiveLink", goT: "liveLinkSt", zigT: "live.Link", id: 17,
+		doc: "#live-ablelink fragment",
+		fs:  []field{b(1, "Available", "available"), st(2, "Backend", "backend", "LiveSRow"), sa(3, "Fill", "fill"), s(4, "Cap", "cap"), st(5, "Session", "session", "LiveSRow"), s(6, "ResyncLbl", "resyncLbl"), li(7, "Sources", "sources", "LiveSRow")},
+	},
+	{
+		name: "LiveGraph", goT: "liveGraphSt", zigT: "live.Graph", id: 18,
+		doc: "#live-net + #live-tim fragments",
+		fs:  []field{s(1, "Tooltip", "tooltip"), s(2, "Legend", "legend"), s(3, "Graph", "graph")},
+	},
+	{
+		name: "LivePerf", goT: "livePerfSt", zigT: "live.Perf", id: 19,
+		doc: "#live-perf2 fragment",
+		fs:  []field{s(1, "Tooltip", "tooltip"), s(2, "CPULeg", "cpuLeg"), s(3, "CPUGraph", "cpuGraph"), s(4, "RAMLeg", "ramLeg"), s(5, "RAMGraph", "ramGraph"), s(6, "Head", "head"), s(7, "HeadColor", "headColor")},
+	},
+	{
+		name: "LiveStrip", goT: "liveStripSt", zigT: "live.Strip", id: 20,
+		doc: "#live-strip fragment",
+		fs:  []field{s(1, "Left", "left"), s(2, "Center", "center"), s(3, "Right", "right")},
+	},
+	{
+		name: "LiveState", goT: "liveState", zigT: "live.State", id: 10,
+		doc: "Live tab - full cockpit",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Transport", "transport", "LiveTransport"), st(4, "NP", "np", "LiveNP"), s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "LiveStatus"), s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "LiveDecks"), b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"), s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "LiveSignals"), b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"), st(15, "Cockpit", "cockpit", "LiveCockpit"), b(16, "HasLink", "hasLink"), s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "LiveLink"), b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"), st(22, "Net", "net", "LiveGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"), st(25, "Tim", "tim", "LiveGraph"), b(26, "HasPerf", "hasPerf"), s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"), st(29, "Perf", "perf", "LivePerf"), st(30, "Strip", "strip", "LiveStrip")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -150,6 +227,8 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	// --- phaseb-wire (B-2 fan-out) ---
+	{"live", "live.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

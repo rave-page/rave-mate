@@ -254,6 +254,10 @@ const uint8_t *rz_ui_render_appgroups_v2(const uint8_t *state, size_t len, size_
 const uint8_t *rz_ui_render_appgroups_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_logs_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_logs_lines_v2(const uint8_t *state, size_t len, size_t *out_len);
+/* B-2 fan-out. The _frag_v2 exports take the same kind selector as their JSON twins; each
+ * fragment is its own root message, so a document built for another fragment is refused. */
+const uint8_t *rz_ui_render_live_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_live_frag_v2(const uint8_t *kind, size_t kind_len, const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 #ifdef __cplusplus

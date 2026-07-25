@@ -927,4 +927,26 @@ func RenderLogsLinesV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B-2 fan-out ──
+
+// RenderLiveV2 renders the full Live cockpit from an RZW1 document.
+func RenderLiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live_v2(p, l, n)
+	})
+}
+
+// RenderLiveFragV2 renders one live-tab fragment from an RZW1 document (kind as in
+// RenderLiveFrag). Each kind has its own message id, so a document for another fragment is
+// refused by the header check.
+func RenderLiveFragV2(kind string, state []byte) (string, bool) {
+	if kind == "" {
+		return "", false
+	}
+	kb := []byte(kind)
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live_frag_v2((*C.uint8_t)(unsafe.Pointer(&kb[0])), C.size_t(len(kb)), p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

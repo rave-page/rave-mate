@@ -147,6 +147,29 @@ fallbacks none
 - Read it WITH `FallbackCounts()` (same section): a fallback on a whole-view renderer means the
   Zig number is measuring fewer renders than you think.
 
+## Wave B-2: v1 (JSON) vs v2 (RZW1 binary) per view
+
+Same box + method as above (**min of 6** = three runs × `-count=2`, `-benchtime 500ms`), commit
+`feature/zig-phaseb-wire2`. Each number is the WHOLE dispatch a tick pays: state serialization +
+the Zig render (parse + render + copy). Fixture = the golden `populated` state; fragment rows use
+that fixture's sub-state.
+
+```sh
+GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$' -bench WireBench -benchtime 500ms
+```
+
+| view | v1 json ns/op | v2 wire ns/op | Δ | doc B vs json B (golden set) |
+|---|--:|--:|--:|---|
+| live (full cockpit) | 33 786 | 16 190 | **-52%** | 24 789 / 67 456 = 36.7% |
+| live `#live-transport` frag | 3 790 | 2 896 | -24% | (in the set above) |
+| live `#live-perf2` frag | 3 624 | 1 885 | **-48%** | (in the set above) |
+
+**Encoder allocation, honestly:** v2 costs MORE allocated bytes on small documents (transport
+1 722 → 6 880 B/op, 5 → 10 allocs). `NewWireWriter` preallocates 2 × 1 KiB plus a 64-entry intern
+map - sized for whole-tab documents, oversized for a 300-byte fragment. It still wins on time
+because it removes reflection + escaping + the Zig-side `std.json` parse, but a per-message size
+hint (or lazily creating the intern map) is the obvious next tightening; measure before doing it.
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -

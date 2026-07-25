@@ -4,6 +4,7 @@ package webui
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"rave.page/mate/internal/zigui"
@@ -99,6 +100,129 @@ func TestZigWireThreeWayLogs(t *testing.T) {
 	}
 	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
 	assertNoNewFallbacks(t, before)
+}
+
+// ── B-2 fan-out ──
+
+// TestZigWireThreeWayLive: the full cockpit plus all ten tick fragments, over the whole live
+// golden fixture set. The fragments are the ~1 Hz path, so they are the reason this exists.
+func TestZigWireThreeWayLive(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := liveFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireLiveState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderLive(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderLiveV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", liveHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			wireFrag(t, "transport", st.Transport, wireLiveTransport, liveTransHTML)
+			wireFrag(t, "np", st.NP, wireLiveNP, liveNPHTML)
+			wireFrag(t, "status", st.Status, wireLiveStatus, liveStatusFragHTML)
+			wireFrag(t, "decks", st.Decks, wireLiveDecks, liveDecksFragHTML)
+			wireFrag(t, "signals", st.Signals, wireLiveSignals, liveSignalsFragHTML)
+			wireFrag(t, "cockpit", st.Cockpit, wireLiveCockpit, liveCockpitFragHTML)
+			wireFrag(t, "link", st.Link, wireLiveLink, liveLinkFragHTML)
+			wireFrag(t, "graph", st.Net, wireLiveGraph, liveGraphFragHTML)
+			wireFrag(t, "graph", st.Tim, wireLiveGraph, liveGraphFragHTML)
+			wireFrag(t, "perf", st.Perf, wireLivePerf, livePerfFragHTML)
+			wireFrag(t, "strip", st.Strip, wireLiveStrip, liveStripFragHTML)
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// wireFrag asserts Go == v1 == v2 for one live fragment kind.
+func wireFrag[T any](t *testing.T, kind string, st T, wire func(T) []byte, goHTML func(T) string) {
+	t.Helper()
+	doc, js := wire(st), stateJSON(st)
+	if len(doc) == 0 {
+		t.Fatalf("%s: wire encode failed", kind)
+	}
+	v1, ok := zigui.RenderLiveFrag(kind, js)
+	if !ok {
+		t.Fatalf("%s: v1 render failed", kind)
+	}
+	v2, ok := zigui.RenderLiveFragV2(kind, doc)
+	if !ok {
+		t.Fatalf("%s: v2 render failed", kind)
+	}
+	assertBytesEqual(t, kind+" go==v1", goHTML(st), v1)
+	assertBytesEqual(t, kind+" v1==v2", v1, v2)
+}
+
+// TestZigWireLiveFragIdsAreDistinct: every live fragment is its own root message, so feeding
+// one fragment's document to another kind must be refused by the header - the property that
+// keeps a mis-wired dispatch a clean v1 downgrade instead of a mis-decode.
+func TestZigWireLiveFragIdsAreDistinct(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	st := liveFixtures()["populated"]
+	docs := map[string][]byte{
+		"transport": wireLiveTransport(st.Transport),
+		"np":        wireLiveNP(st.NP),
+		"status":    wireLiveStatus(st.Status),
+		"decks":     wireLiveDecks(st.Decks),
+		"signals":   wireLiveSignals(st.Signals),
+		"cockpit":   wireLiveCockpit(st.Cockpit),
+		"link":      wireLiveLink(st.Link),
+		"graph":     wireLiveGraph(st.Net),
+		"perf":      wireLivePerf(st.Perf),
+		"strip":     wireLiveStrip(st.Strip),
+	}
+	for kind, doc := range docs {
+		for other := range docs {
+			if other == kind {
+				continue
+			}
+			if _, ok := zigui.RenderLiveFragV2(other, doc); ok {
+				t.Errorf("%s export accepted the %s document", other, kind)
+			}
+		}
+		if _, ok := zigui.RenderLiveV2(doc); ok {
+			t.Errorf("full-cockpit export accepted the %s fragment document", kind)
+		}
+	}
+	if _, ok := zigui.RenderLiveFragV2("nope", docs["strip"]); ok {
+		t.Error("unknown kind rendered")
+	}
+}
+
+// TestWireStrAlwaysKeepsEmptyFill: live.Link.fill defaults to "0.00%" on the Zig side, so an
+// empty Fill must travel as a PRESENT empty string (kStrAlways) - absent would decode to the
+// default and only diverge on states where the panel has no phrase position yet.
+func TestWireStrAlwaysKeepsEmptyFill(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	st := liveLinkSt{Available: true, Cap: "beat 1", Session: liveSR("success", "Session", "2 peers")} // Fill == ""
+	v2, ok := zigui.RenderLiveFragV2("link", wireLiveLink(st))
+	if !ok {
+		t.Fatal("v2 render failed")
+	}
+	assertBytesEqual(t, "empty fill", liveLinkFragHTML(st), v2)
+	if strings.Contains(v2, "0.00%") {
+		t.Error("the Zig default leaked in - the field decoded as absent")
+	}
 }
 
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a

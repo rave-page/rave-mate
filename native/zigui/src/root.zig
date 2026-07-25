@@ -801,6 +801,34 @@ export fn rz_ui_render_logs_lines_v2(state: ?[*]const u8, len: usize, out_len: *
     return renderWire(logs.Lines, wire_gen.decodeLogsLines, logs.renderLines, wire_gen.msg_logs_lines, state, len, out_len);
 }
 
+// ── B-2 fan-out: live ──
+// The full cockpit is rendered rarely; the ten fragments are the ~1 Hz tick and are where the
+// round trip actually costs. Each fragment state crosses on its own, so each is its own root
+// message - the header id keeps refusing a document built for a different fragment.
+
+export fn rz_ui_render_live_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(live.State, wire_gen.decodeLiveState, live.render, wire_gen.msg_live_state, state, len, out_len);
+}
+
+/// kind selects the fragment + its state type, same set as rz_ui_render_live_frag ("graph"
+/// serves both #live-net and #live-tim). Unknown kind → NULL → the caller tries v1, then Go.
+export fn rz_ui_render_live_frag_v2(kind: ?[*]const u8, kind_len: usize, state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    const kp = kind orelse return null;
+    if (kind_len == 0) return null;
+    const k = kp[0..kind_len];
+    if (std.mem.eql(u8, k, "transport")) return renderWire(live.Transport, wire_gen.decodeLiveTransport, live.renderTransport, wire_gen.msg_live_transport, state, len, out_len);
+    if (std.mem.eql(u8, k, "np")) return renderWire(live.NP, wire_gen.decodeLiveNP, live.renderNP, wire_gen.msg_live_n_p, state, len, out_len);
+    if (std.mem.eql(u8, k, "status")) return renderWire(live.Status, wire_gen.decodeLiveStatus, live.renderStatus, wire_gen.msg_live_status, state, len, out_len);
+    if (std.mem.eql(u8, k, "decks")) return renderWire(live.Decks, wire_gen.decodeLiveDecks, live.renderDecks, wire_gen.msg_live_decks, state, len, out_len);
+    if (std.mem.eql(u8, k, "signals")) return renderWire(live.Signals, wire_gen.decodeLiveSignals, live.renderSignals, wire_gen.msg_live_signals, state, len, out_len);
+    if (std.mem.eql(u8, k, "cockpit")) return renderWire(live.Cockpit, wire_gen.decodeLiveCockpit, live.renderCockpit, wire_gen.msg_live_cockpit, state, len, out_len);
+    if (std.mem.eql(u8, k, "link")) return renderWire(live.Link, wire_gen.decodeLiveLink, live.renderLink, wire_gen.msg_live_link, state, len, out_len);
+    if (std.mem.eql(u8, k, "graph")) return renderWire(live.Graph, wire_gen.decodeLiveGraph, live.renderGraph, wire_gen.msg_live_graph, state, len, out_len);
+    if (std.mem.eql(u8, k, "perf")) return renderWire(live.Perf, wire_gen.decodeLivePerf, live.renderPerf, wire_gen.msg_live_perf, state, len, out_len);
+    if (std.mem.eql(u8, k, "strip")) return renderWire(live.Strip, wire_gen.decodeLiveStrip, live.renderStrip, wire_gen.msg_live_strip, state, len, out_len);
+    return null;
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

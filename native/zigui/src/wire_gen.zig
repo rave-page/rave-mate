@@ -9,11 +9,23 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0xfe16917d;
+pub const schema_hash: u32 = 0x7dea1b80;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
+pub const msg_live_state: u16 = 10; // Live tab - full cockpit
+pub const msg_live_transport: u16 = 11; // #live-transport fragment
+pub const msg_live_n_p: u16 = 12; // #live-np fragment
+pub const msg_live_status: u16 = 13; // #live-status fragment
+pub const msg_live_decks: u16 = 14; // #live-decks fragment
+pub const msg_live_signals: u16 = 15; // #live-signals fragment
+pub const msg_live_cockpit: u16 = 16; // #live-cockpit fragment
+pub const msg_live_link: u16 = 17; // #live-ablelink fragment
+pub const msg_live_graph: u16 = 18; // #live-net + #live-tim fragments
+pub const msg_live_perf: u16 = 19; // #live-perf2 fragment
+pub const msg_live_strip: u16 = 20; // #live-strip fragment
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -124,8 +136,282 @@ pub fn decodeLogsState(r: *wire.Reader, out: *logs.State) wire.Error!void {
     };
 }
 
+pub fn decodeLiveTransport(r: *wire.Reader, out: *live.Transport) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.streamHint = try r.str(t),
+        2 => out.streamLabel = try r.str(t),
+        3 => out.dotVar = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.metaOnly = try r.str(t),
+        6 => out.pauseLabel = try r.str(t),
+        7 => out.pauseHint = try r.str(t),
+        8 => out.paused = try r.boolean(t),
+        9 => out.hasRec = try r.boolean(t),
+        10 => out.recHint = try r.str(t),
+        11 => out.recLabel = try r.str(t),
+        12 => out.recBtn = try r.str(t),
+        13 => out.recState = try r.str(t),
+        14 => out.hasTc = try r.boolean(t),
+        15 => out.tcLabel = try r.str(t),
+        16 => out.tc = try r.str(t),
+        17 => out.startLbl = try r.str(t),
+        18 => out.stopLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveNP(r: *wire.Reader, out: *live.NP) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.line1 = try r.str(t),
+        2 => out.line2 = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveKV(r: *wire.Reader, out: *live.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.kl = try r.str(t),
+        3 => out.v = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveStatus(r: *wire.Reader, out: *live.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(live.KV, decodeLiveKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveDeck(r: *wire.Reader, out: *live.Deck) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cls = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.meta = try r.str(t),
+        5 => out.via = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveDecks(r: *wire.Reader, out: *live.Decks) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.note = try r.str(t),
+        2 => out.decks = try r.list(live.Deck, decodeLiveDeck, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveSignals(r: *wire.Reader, out: *live.Signals) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(live.KV, decodeLiveKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.state = try r.str(t),
+        4 => out.streamLbl = try r.str(t),
+        5 => out.streamAct = try r.str(t),
+        6 => out.recLbl = try r.str(t),
+        7 => out.recAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveCockpit(r: *wire.Reader, out: *live.Cockpit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.caption = try r.str(t),
+        3 => out.rows = try r.list(live.CockpitRow, decodeLiveCockpitRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveSRow(r: *wire.Reader, out: *live.SRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.dl = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveLink(r: *wire.Reader, out: *live.Link) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.available = try r.boolean(t),
+        2 => out.backend = try r.sub(live.SRow, decodeLiveSRow, t),
+        3 => out.fill = try r.str(t),
+        4 => out.cap = try r.str(t),
+        5 => out.session = try r.sub(live.SRow, decodeLiveSRow, t),
+        6 => out.resyncLbl = try r.str(t),
+        7 => out.sources = try r.list(live.SRow, decodeLiveSRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveGraph(r: *wire.Reader, out: *live.Graph) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tooltip = try r.str(t),
+        2 => out.legend = try r.str(t),
+        3 => out.graph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLivePerf(r: *wire.Reader, out: *live.Perf) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tooltip = try r.str(t),
+        2 => out.cpuLeg = try r.str(t),
+        3 => out.cpuGraph = try r.str(t),
+        4 => out.ramLeg = try r.str(t),
+        5 => out.ramGraph = try r.str(t),
+        6 => out.head = try r.str(t),
+        7 => out.headColor = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveStrip(r: *wire.Reader, out: *live.Strip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.left = try r.str(t),
+        2 => out.center = try r.str(t),
+        3 => out.right = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.transport = try r.sub(live.Transport, decodeLiveTransport, t),
+        4 => out.np = try r.sub(live.NP, decodeLiveNP, t),
+        5 => out.statusTitle = try r.str(t),
+        6 => out.status = try r.sub(live.Status, decodeLiveStatus, t),
+        7 => out.decksTitle = try r.str(t),
+        8 => out.decks = try r.sub(live.Decks, decodeLiveDecks, t),
+        9 => out.hasSignals = try r.boolean(t),
+        10 => out.signalsTitle = try r.str(t),
+        11 => out.signalsTip = try r.str(t),
+        12 => out.signals = try r.sub(live.Signals, decodeLiveSignals, t),
+        13 => out.hasCockpit = try r.boolean(t),
+        14 => out.cockpitTitle = try r.str(t),
+        15 => out.cockpit = try r.sub(live.Cockpit, decodeLiveCockpit, t),
+        16 => out.hasLink = try r.boolean(t),
+        17 => out.linkTitle = try r.str(t),
+        18 => out.link = try r.sub(live.Link, decodeLiveLink, t),
+        19 => out.hasNet = try r.boolean(t),
+        20 => out.netTitle = try r.str(t),
+        21 => out.netTip = try r.str(t),
+        22 => out.net = try r.sub(live.Graph, decodeLiveGraph, t),
+        23 => out.timTitle = try r.str(t),
+        24 => out.timTip = try r.str(t),
+        25 => out.tim = try r.sub(live.Graph, decodeLiveGraph, t),
+        26 => out.hasPerf = try r.boolean(t),
+        27 => out.perfTitle = try r.str(t),
+        28 => out.perfTip = try r.str(t),
+        29 => out.perf = try r.sub(live.Perf, decodeLivePerf, t),
+        30 => out.strip = try r.sub(live.Strip, decodeLiveStrip, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
+    try std.testing.expect(msg_ag_state != msg_live_state);
+    try std.testing.expect(msg_ag_state != msg_live_transport);
+    try std.testing.expect(msg_ag_state != msg_live_n_p);
+    try std.testing.expect(msg_ag_state != msg_live_status);
+    try std.testing.expect(msg_ag_state != msg_live_decks);
+    try std.testing.expect(msg_ag_state != msg_live_signals);
+    try std.testing.expect(msg_ag_state != msg_live_cockpit);
+    try std.testing.expect(msg_ag_state != msg_live_link);
+    try std.testing.expect(msg_ag_state != msg_live_graph);
+    try std.testing.expect(msg_ag_state != msg_live_perf);
+    try std.testing.expect(msg_ag_state != msg_live_strip);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
+    try std.testing.expect(msg_logs_state != msg_live_state);
+    try std.testing.expect(msg_logs_state != msg_live_transport);
+    try std.testing.expect(msg_logs_state != msg_live_n_p);
+    try std.testing.expect(msg_logs_state != msg_live_status);
+    try std.testing.expect(msg_logs_state != msg_live_decks);
+    try std.testing.expect(msg_logs_state != msg_live_signals);
+    try std.testing.expect(msg_logs_state != msg_live_cockpit);
+    try std.testing.expect(msg_logs_state != msg_live_link);
+    try std.testing.expect(msg_logs_state != msg_live_graph);
+    try std.testing.expect(msg_logs_state != msg_live_perf);
+    try std.testing.expect(msg_logs_state != msg_live_strip);
+    try std.testing.expect(msg_logs_lines != msg_live_state);
+    try std.testing.expect(msg_logs_lines != msg_live_transport);
+    try std.testing.expect(msg_logs_lines != msg_live_n_p);
+    try std.testing.expect(msg_logs_lines != msg_live_status);
+    try std.testing.expect(msg_logs_lines != msg_live_decks);
+    try std.testing.expect(msg_logs_lines != msg_live_signals);
+    try std.testing.expect(msg_logs_lines != msg_live_cockpit);
+    try std.testing.expect(msg_logs_lines != msg_live_link);
+    try std.testing.expect(msg_logs_lines != msg_live_graph);
+    try std.testing.expect(msg_logs_lines != msg_live_perf);
+    try std.testing.expect(msg_logs_lines != msg_live_strip);
+    try std.testing.expect(msg_live_state != msg_live_transport);
+    try std.testing.expect(msg_live_state != msg_live_n_p);
+    try std.testing.expect(msg_live_state != msg_live_status);
+    try std.testing.expect(msg_live_state != msg_live_decks);
+    try std.testing.expect(msg_live_state != msg_live_signals);
+    try std.testing.expect(msg_live_state != msg_live_cockpit);
+    try std.testing.expect(msg_live_state != msg_live_link);
+    try std.testing.expect(msg_live_state != msg_live_graph);
+    try std.testing.expect(msg_live_state != msg_live_perf);
+    try std.testing.expect(msg_live_state != msg_live_strip);
+    try std.testing.expect(msg_live_transport != msg_live_n_p);
+    try std.testing.expect(msg_live_transport != msg_live_status);
+    try std.testing.expect(msg_live_transport != msg_live_decks);
+    try std.testing.expect(msg_live_transport != msg_live_signals);
+    try std.testing.expect(msg_live_transport != msg_live_cockpit);
+    try std.testing.expect(msg_live_transport != msg_live_link);
+    try std.testing.expect(msg_live_transport != msg_live_graph);
+    try std.testing.expect(msg_live_transport != msg_live_perf);
+    try std.testing.expect(msg_live_transport != msg_live_strip);
+    try std.testing.expect(msg_live_n_p != msg_live_status);
+    try std.testing.expect(msg_live_n_p != msg_live_decks);
+    try std.testing.expect(msg_live_n_p != msg_live_signals);
+    try std.testing.expect(msg_live_n_p != msg_live_cockpit);
+    try std.testing.expect(msg_live_n_p != msg_live_link);
+    try std.testing.expect(msg_live_n_p != msg_live_graph);
+    try std.testing.expect(msg_live_n_p != msg_live_perf);
+    try std.testing.expect(msg_live_n_p != msg_live_strip);
+    try std.testing.expect(msg_live_status != msg_live_decks);
+    try std.testing.expect(msg_live_status != msg_live_signals);
+    try std.testing.expect(msg_live_status != msg_live_cockpit);
+    try std.testing.expect(msg_live_status != msg_live_link);
+    try std.testing.expect(msg_live_status != msg_live_graph);
+    try std.testing.expect(msg_live_status != msg_live_perf);
+    try std.testing.expect(msg_live_status != msg_live_strip);
+    try std.testing.expect(msg_live_decks != msg_live_signals);
+    try std.testing.expect(msg_live_decks != msg_live_cockpit);
+    try std.testing.expect(msg_live_decks != msg_live_link);
+    try std.testing.expect(msg_live_decks != msg_live_graph);
+    try std.testing.expect(msg_live_decks != msg_live_perf);
+    try std.testing.expect(msg_live_decks != msg_live_strip);
+    try std.testing.expect(msg_live_signals != msg_live_cockpit);
+    try std.testing.expect(msg_live_signals != msg_live_link);
+    try std.testing.expect(msg_live_signals != msg_live_graph);
+    try std.testing.expect(msg_live_signals != msg_live_perf);
+    try std.testing.expect(msg_live_signals != msg_live_strip);
+    try std.testing.expect(msg_live_cockpit != msg_live_link);
+    try std.testing.expect(msg_live_cockpit != msg_live_graph);
+    try std.testing.expect(msg_live_cockpit != msg_live_perf);
+    try std.testing.expect(msg_live_cockpit != msg_live_strip);
+    try std.testing.expect(msg_live_link != msg_live_graph);
+    try std.testing.expect(msg_live_link != msg_live_perf);
+    try std.testing.expect(msg_live_link != msg_live_strip);
+    try std.testing.expect(msg_live_graph != msg_live_perf);
+    try std.testing.expect(msg_live_graph != msg_live_strip);
+    try std.testing.expect(msg_live_perf != msg_live_strip);
 }

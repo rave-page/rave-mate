@@ -91,6 +91,40 @@ func BenchmarkWireBenchLogsLines(b *testing.B) {
 		func() (string, bool) { return zigui.RenderLogsLinesV2(wireLogsLines(st)) })
 }
 
+// ── B-2 fan-out: one full-view pair + two representative fragment pairs per tab (the
+// fragments are the ~1 Hz path; a full tab render is rare). Fixtures are the golden
+// `populated` states, so these numbers sit next to the B0 baseline table.
+
+func BenchmarkWireBenchLive(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLive(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveV2(wireLiveState(st)) })
+}
+
+func BenchmarkWireBenchLiveTransport(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"].Transport
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLiveFrag("transport", stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveFragV2("transport", wireLiveTransport(st)) })
+}
+
+func BenchmarkWireBenchLivePerf(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"].Perf
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLiveFrag("perf", stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveFragV2("perf", wireLivePerf(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

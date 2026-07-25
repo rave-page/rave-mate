@@ -971,7 +971,24 @@ all four are append-only additions to the codec, the wiretype set is unchanged):
 
 The rule behind all of them: **a Zig field default that is not the zero value is a v1/v2
 divergence waiting to happen.** `sa` is the fix; the scan is mechanical (any non-omitempty Go
-field whose Zig counterpart has a non-empty default).
+field whose Zig counterpart has a non-empty default). Proven by execution: flipping live's
+`Fill` back from `sa` to `s` makes `TestWireStrAlwaysKeepsEmptyFill` fail with the Zig default
+(`width:0.00%`) rendered where Go renders `width:`. Note that the six live golden fixtures all
+carry a non-empty `Fill`, so the whole-fixture gate does NOT catch it - a hazard needs its own
+fixture, not a bigger suite.
+
+**Fanned-out views (wave B-2).** `_v2` exports live in the `phaseb-wire` block of root.zig; the
+fragment exports keep their JSON twin's `kind` selector, and every fragment is its own root
+message so the header id still refuses a document built for a different fragment
+(`TestZigWireLiveFragIdsAreDistinct`). Each tab registers its exports + fuzz base documents in
+`internal/webui/zigui_wire_b2_test.go` (one block per tab; the fuzz cross-feeds every mutated
+document to every export, so the matrix grows on its own).
+
+| view | root ids | exports | fixtures gated |
+|---|---|---|---|
+| appgroups (pilot) | 1 | full + `#appgroups-body` | 6 |
+| logs (pilot) | 2, 3 | full + `#log-view` | 6 |
+| live | 10-20 | full + 10 tick fragments (`live_frag_v2`) | 6 × 12 surfaces |
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
