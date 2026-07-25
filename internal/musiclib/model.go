@@ -8,7 +8,8 @@ package musiclib
 import "time"
 
 // Source identifies where a library was imported from. App is one of "traktor",
-// "rekordbox", "virtualdj", "enginedj", "serato".
+// "rekordbox", "virtualdj", "enginedj", "serato", or "folder" (a loose directory
+// imported straight into the collection - no DJ software involved).
 type Source struct {
 	App     string `json:"app"`     // e.g. "traktor"
 	Version string `json:"version"` // e.g. "4.2.0"

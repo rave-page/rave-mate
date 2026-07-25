@@ -875,6 +875,7 @@ func (u *UI) libImportModal() {
 	body := `<p class=page-sub>` + html.EscapeString(i18n.T("library.modal.importDesc")) + `</p>` +
 		btnRow(btn(i18n.T("library.label.importTraktorAuto"), "primary", "lib-import-do:traktor", ""), btn(i18n.T("library.label.importRekordboxAuto"), "outline", "lib-import-do:rekordbox", "")) +
 		btnRow(btn(i18n.T("library.label.importVirtualDJAuto"), "outline", "lib-import-do:virtualdj", ""), btn(i18n.T("library.label.importSeratoAuto"), "outline", "lib-import-do:serato", "")) +
+		btnRow(btn(i18n.T("library.fi.importModalBtn"), "outline", "fi-open:", "")) +
 		`<div class=mform><div class=pb-label>` + html.EscapeString(i18n.T("library.label.importFromFile")) + `</div>` +
 		`<div class=lib-toolbar>` + fieldRaw("lib-import-path", path, i18n.T("library.label.xmlPath")) +
 		btn(i18n.T("common.browse"), "ghost", "pick-file:lib-import-path", "") + `</div>` +
@@ -2308,7 +2309,8 @@ func (u *UI) libDirCtxModal(path string) {
 		btn(i18n.T("library.reveal"), "primary", "lib-opendir:"+path, ""),
 		btn(i18n.T("library.open"), "outline", "lib-dirnav:"+path, ""),
 		markBtn,
-	) + btnRow(btn(i18n.T("library.copyPath"), "ghost", "copy", ""))
+	) + btnRow(btn(i18n.T("library.fi.menuBtn"), "outline", "fi-open:"+path, ""),
+		btn(i18n.T("library.copyPath"), "ghost", "copy", ""))
 	u.openModal(modal(filepath.Base(path), body, ""))
 }
 

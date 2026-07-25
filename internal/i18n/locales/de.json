@@ -755,8 +755,13 @@
       "menu": {
         "cloud": "Cloud",
         "reencSub": "Alle Tracks in einen Duplikat-Ordner umkodieren - Originale bleiben unangetastet.",
-        "autoSub": "Wenn aktiv, wird der verknüpfte Ordner bei jedem Start neu eingelesen."
-      }
+        "autoSub": "Wenn aktiv, wird der verknüpfte Ordner bei jedem Start neu eingelesen.",
+        "sendTraktorSub": "Sichert zuerst collection.nml, ergänzt fehlende Tracks (inkl. analysierter Beatgrids und Cues) und legt die Playlist in Traktor an bzw. aktualisiert sie. Traktor muss geschlossen sein."
+      },
+      "sendTraktor": "An Traktor senden…",
+      "sendingTraktor": "Wird an Traktor gesendet…",
+      "sendTraktorFailed": "Senden an Traktor fehlgeschlagen: ",
+      "sentTraktorToast": "Traktor: {added} Tracks hinzugefügt, {updated} aktualisiert · Playlist „{name}“ +{pl}"
     },
     "playsort": {
       "artist": "Künstler",
@@ -1374,6 +1379,58 @@
       "plMenu": "BPM-Bereich…",
       "plMenuSub": "BPM der Tracks in ein Zielband zwingen",
       "plSaved": "BPM-Bereich gespeichert"
+    },
+    "fi": {
+      "title": "Ordner zur Sammlung hinzufügen",
+      "desc": "Importiert jede Audiodatei des Ordners direkt in die Sammlung - ganz ohne DJ-Software. Artist, Titel, Album, Genre, BPM und Länge werden aus den Datei-Tags gelesen (ffprobe); fehlen Tags, wird der Dateiname als „Artist - Titel“ zerlegt. Der Ordner wird zugleich eine ordnergebundene Playlist, sodass später hinzugekommene Dateien per „Aus Ordner auffrischen“ nachgezogen werden.",
+      "folder": "Ordner",
+      "recursive": "Unterordner einbeziehen",
+      "pickHint": "Ordner wählen, der nach Audiodateien durchsucht wird.",
+      "scanning": "Ordner wird durchsucht…",
+      "found": {
+        "one": "{count} Audiodatei gefunden",
+        "few": "{count} Audiodateien gefunden",
+        "many": "{count} Audiodateien gefunden",
+        "other": "{count} Audiodateien gefunden"
+      },
+      "cappedNote": "Bei {cap} Dateien gestoppt - kleinere Ordner importieren.",
+      "importBtn": {
+        "one": "{count} Track importieren",
+        "few": "{count} Tracks importieren",
+        "many": "{count} Tracks importieren",
+        "other": "{count} Tracks importieren"
+      },
+      "importGridBtn": {
+        "one": "{count} Track importieren + Beatgrid",
+        "few": "{count} Tracks importieren + Beatgrid",
+        "many": "{count} Tracks importieren + Beatgrid",
+        "other": "{count} Tracks importieren + Beatgrid"
+      },
+      "alreadyRunning": "Ein Ordner-Import läuft bereits.",
+      "jobLabel": "Tags werden gelesen",
+      "failedToast": "Ordner-Import fehlgeschlagen: ",
+      "importedToast": {
+        "one": "{count} Track aus „{name}“ importiert",
+        "few": "{count} Tracks aus „{name}“ importiert",
+        "many": "{count} Tracks aus „{name}“ importiert",
+        "other": "{count} Tracks aus „{name}“ importiert"
+      },
+      "gridSavedToast": {
+        "one": "{count} Beatgrid in der Bibliothek gespeichert",
+        "few": "{count} Beatgrids in der Bibliothek gespeichert",
+        "many": "{count} Beatgrids in der Bibliothek gespeichert",
+        "other": "{count} Beatgrids in der Bibliothek gespeichert"
+      },
+      "refreshImported": {
+        "one": "{count} neue Datei zur Sammlung hinzugefügt",
+        "few": "{count} neue Dateien zur Sammlung hinzugefügt",
+        "many": "{count} neue Dateien zur Sammlung hinzugefügt",
+        "other": "{count} neue Dateien zur Sammlung hinzugefügt"
+      },
+      "appLabel": "Ordner",
+      "menuBtn": "Ordner zur Sammlung hinzufügen…",
+      "menuSub": "Tracks + Playlist + optional Beatgrid - ganz ohne DJ-Software.",
+      "importModalBtn": "Ordner mit Audiodateien hinzufügen…"
     }
   },
   "live": {

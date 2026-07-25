@@ -738,8 +738,13 @@
       "menu": {
         "cloud": "Nube",
         "reencSub": "Recodifica cada pista en una carpeta duplicada - los originales quedan intactos.",
-        "autoSub": "Si está activo, vuelve a escanear la carpeta vinculada en cada inicio."
-      }
+        "autoSub": "Si está activo, vuelve a escanear la carpeta vinculada en cada inicio.",
+        "sendTraktorSub": "Primero respalda collection.nml, añade las pistas que falten en la colección (incl. beatgrids y cues analizados) y crea o actualiza esta playlist en Traktor. Traktor debe estar cerrado."
+      },
+      "sendTraktor": "Enviar a Traktor…",
+      "sendingTraktor": "Enviando a Traktor…",
+      "sendTraktorFailed": "Fallo al enviar a Traktor: ",
+      "sentTraktorToast": "Traktor: {added} pistas añadidas, {updated} actualizadas · playlist «{name}» +{pl}"
     },
     "playsort": {
       "artist": "Artista",
@@ -1284,6 +1289,58 @@
       "plMenu": "Rango BPM…",
       "plMenuSub": "Forzar el BPM de los tracks a una banda objetivo",
       "plSaved": "Rango BPM guardado"
+    },
+    "fi": {
+      "title": "Añadir carpeta a la colección",
+      "desc": "Importa cada archivo de audio de la carpeta directamente a tu colección, sin software de DJ. Artista, título, álbum, género, BPM y duración se leen de las etiquetas del archivo (ffprobe); si faltan etiquetas, el nombre del archivo se divide como «Artista - Título». La carpeta se convierte además en una playlist vinculada a la carpeta, así los archivos añadidos después se recogen con «Actualizar desde carpeta».",
+      "folder": "Carpeta",
+      "recursive": "Incluir subcarpetas",
+      "pickHint": "Elige una carpeta donde buscar archivos de audio.",
+      "scanning": "Escaneando carpeta…",
+      "found": {
+        "one": "{count} archivo de audio encontrado",
+        "few": "{count} archivos de audio encontrados",
+        "many": "{count} archivos de audio encontrados",
+        "other": "{count} archivos de audio encontrados"
+      },
+      "cappedNote": "Detenido en {cap} archivos: importa carpetas más pequeñas.",
+      "importBtn": {
+        "one": "Importar {count} pista",
+        "few": "Importar {count} pistas",
+        "many": "Importar {count} pistas",
+        "other": "Importar {count} pistas"
+      },
+      "importGridBtn": {
+        "one": "Importar {count} pista + beatgrid",
+        "few": "Importar {count} pistas + beatgrid",
+        "many": "Importar {count} pistas + beatgrid",
+        "other": "Importar {count} pistas + beatgrid"
+      },
+      "alreadyRunning": "Ya hay una importación de carpeta en curso.",
+      "jobLabel": "Leyendo etiquetas",
+      "failedToast": "La importación de la carpeta falló: ",
+      "importedToast": {
+        "one": "Importada {count} pista de «{name}»",
+        "few": "Importadas {count} pistas de «{name}»",
+        "many": "Importadas {count} pistas de «{name}»",
+        "other": "Importadas {count} pistas de «{name}»"
+      },
+      "gridSavedToast": {
+        "one": "{count} beatgrid guardado en la biblioteca",
+        "few": "{count} beatgrids guardados en la biblioteca",
+        "many": "{count} beatgrids guardados en la biblioteca",
+        "other": "{count} beatgrids guardados en la biblioteca"
+      },
+      "refreshImported": {
+        "one": "{count} archivo nuevo añadido a la colección",
+        "few": "{count} archivos nuevos añadidos a la colección",
+        "many": "{count} archivos nuevos añadidos a la colección",
+        "other": "{count} archivos nuevos añadidos a la colección"
+      },
+      "appLabel": "Carpeta",
+      "menuBtn": "Añadir carpeta a la colección…",
+      "menuSub": "Pistas + playlist + beatgrid opcional, sin software de DJ.",
+      "importModalBtn": "Añadir una carpeta con archivos de audio…"
     }
   },
   "live": {

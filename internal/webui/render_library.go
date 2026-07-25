@@ -564,6 +564,7 @@ func (u *UI) libBrowseHTML(s *libSt) string {
 		{Val: "ce-open-dir:" + dir, Label: i18n.T("library.ce.openDir")},
 		{Val: "lib-reenc-dir", Label: i18n.T("library.re.dirBtn")},
 		{Val: "lib-markpl", Label: i18n.T("library.re.markBtn")},
+		{Val: "lib-folderimp", Label: i18n.T("library.fi.menuBtn"), Sub: i18n.T("library.fi.menuSub")},
 		{Val: "lib-pin", Label: pinLabel},
 	}))
 	nf, allB := 0, true
@@ -1417,6 +1418,9 @@ func (u *UI) libPlaylistActionsHTML(p libdb.PlaylistRow, inColl bool) string {
 	}
 	if !manual {
 		add(i18n.T("library.pl.dupManual"), fmt.Sprintf("lib-pl-dup:%d", p.ID), "")
+	}
+	if libPlCanSendTraktor(p) {
+		add(i18n.T("library.pl.sendTraktor"), fmt.Sprintf("lib-pl-traktor:%d", p.ID), i18n.T("library.pl.menu.sendTraktorSub"))
 	}
 	add(i18n.T("library.plsort.btn"), fmt.Sprintf("lib-plsort:%d", p.ID), "")
 	if p.Kind != libdb.PlaylistSmart && u.svc.Lib != nil {

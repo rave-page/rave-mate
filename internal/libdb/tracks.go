@@ -23,6 +23,7 @@ type TrackSync struct {
 	seen     map[string]bool
 	events   []ChangeEvent // buffered change_log rows, flushed atomically in Commit
 	res      SyncResult
+	additive bool // BeginTrackUpsert: top-up only, Commit never deletes unseen rows
 }
 
 // trackState is the prior value of the change-tracked columns for one path.
@@ -81,6 +82,18 @@ func (d *DB) BeginTrackSync(sourceID int64) (*TrackSync, error) {
 		return nil, err
 	}
 	return &TrackSync{db: d, sourceID: sourceID, tx: tx, stmt: stmt, existing: existing, seen: map[string]bool{}}, nil
+}
+
+// BeginTrackUpsert starts an ADDITIVE sync: tracks are upserted like BeginTrackSync but
+// Commit never deletes rows absent from this batch - the folder-playlist top-up path,
+// where only the new files are handed in.
+func (d *DB) BeginTrackUpsert(sourceID int64) (*TrackSync, error) {
+	sy, err := d.BeginTrackSync(sourceID)
+	if err != nil {
+		return nil, err
+	}
+	sy.additive = true
+	return sy, nil
 }
 
 // Add upserts one track. Cues/beatgrid persist as JSON. Safe to call for every parsed track.
@@ -156,15 +169,18 @@ func (s *TrackSync) journalImport(t musiclib.Track) {
 	})
 }
 
-// Commit deletes tracks no longer in the source, commits, and returns the diff counts.
+// Commit deletes tracks no longer in the source (unless additive), commits, and returns
+// the diff counts.
 func (s *TrackSync) Commit() (SyncResult, error) {
-	for path := range s.existing {
-		if !s.seen[path] {
-			if _, err := s.tx.Exec(`DELETE FROM tracks WHERE source_id=? AND path=?`, s.sourceID, path); err != nil {
-				_ = s.tx.Rollback()
-				return SyncResult{}, err
+	if !s.additive {
+		for path := range s.existing {
+			if !s.seen[path] {
+				if _, err := s.tx.Exec(`DELETE FROM tracks WHERE source_id=? AND path=?`, s.sourceID, path); err != nil {
+					_ = s.tx.Rollback()
+					return SyncResult{}, err
+				}
+				s.res.Removed++
 			}
-			s.res.Removed++
 		}
 	}
 	// Flush buffered change_log events in the same tx - atomic with the track writes.

@@ -242,6 +242,8 @@ func djAppLabel(app string) string {
 		return "Serato"
 	case "enginedj":
 		return "Engine DJ"
+	case "folder":
+		return i18n.T("library.fi.appLabel")
 	}
 	if app == "" {
 		return "?"
