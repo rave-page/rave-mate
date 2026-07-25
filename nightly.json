@@ -1,13 +1,13 @@
 {
-  "version": "nightly-eb82d93",
-  "build": 142,
-  "commit": "eb82d93",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-142-20260725-eb82d93.exe",
-  "sha256": "b8371030182a9596ee7adee3c385a67d556cb1feaa80c41242e55df8ee5cece4",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-142-20260725-eb82d93.exe",
-  "installer_sha256": "84d4f9774f9058c510fd9943ccc6c6a6756f3f3c636f96de9c7e343144ca3a14",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-142-20260725-eb82d93",
-  "linux_sha256": "8986d55c9036ba9b5a33403fc4d2dabb4c72fe11737f1f796f322b4c4a582238",
+  "version": "nightly-b42919f",
+  "build": 145,
+  "commit": "b42919f",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-145-20260725-b42919f.exe",
+  "sha256": "b1e5ccc5dfe4ca50cd9f2e27bb047ad10791e3a03e823640fc8362b6a94b23de",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-145-20260725-b42919f.exe",
+  "installer_sha256": "751052227d2f1069d72b018fac5b9fff633861ce26aa1e7f405fc5aab810fc51",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-145-20260725-b42919f",
+  "linux_sha256": "a87bb650aa4b739d45e804aa953b51a02f0a497ae372569e1b0f69a8a698c9bd",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T18:05:35Z",
-  "notes": "ci: ship + validate Zig natives everywhere (ZIG=1 flip)"
+  "released": "2026-07-25T18:25:31Z",
+  "notes": "chore(genapi): kin-openapi 0.144.0 - verified one-time soak exemption"
 }
