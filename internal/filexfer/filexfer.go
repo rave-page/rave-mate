@@ -124,6 +124,7 @@ type Options struct {
 	Policy     func() Policy // live receiver policy (config read)
 	Log        Logger        // optional
 	AdvertHost string        // host placed in Offer.Addr; default: autodetected LAN IPv4
+	BindHost   string        // listener bind host; default 0.0.0.0, or AdvertHost when it is loopback
 	Ports      []int         // listener candidates; default filePortRange; []int{0} = ephemeral (tests)
 }
 
@@ -145,13 +146,14 @@ type xfer struct {
 // Manager owns the transfer listener, negotiation, and queue. Both roles (send + receive)
 // live here. Create with New, then Start. Safe for concurrent use.
 type Manager struct {
-	self    string
-	bus     Bus
-	secrets SecretProvider
-	policy  func() Policy
-	log     Logger
-	host    string
-	ports   []int
+	self     string
+	bus      Bus
+	secrets  SecretProvider
+	policy   func() Policy
+	log      Logger
+	host     string
+	bindHost string
+	ports    []int
 
 	notify func(title, body string) // optional UI toast seam
 
@@ -177,13 +179,22 @@ func New(opts Options) *Manager {
 	if host == "" {
 		host = localIPv4()
 	}
+	bind := opts.BindHost
+	if bind == "" {
+		bind = "0.0.0.0"
+		// loopback advert = loopback-only reachability; binding loopback keeps go
+		// test binaries off the Windows Firewall listener prompt (see medialink).
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			bind = host
+		}
+	}
 	ports := opts.Ports
 	if ports == nil {
 		ports = filePortRange
 	}
 	return &Manager{
 		self: opts.Self, bus: opts.Bus, secrets: opts.Secrets, policy: opts.Policy,
-		log: opts.Log, host: host, ports: ports,
+		log: opts.Log, host: host, bindHost: bind, ports: ports,
 		retryAfter: 10 * time.Second, answerWait: 30 * time.Second, maxRetries: 30,
 		xfers: map[string]*xfer{}, subs: map[int]func(Transfer){},
 	}
@@ -198,7 +209,7 @@ func (m *Manager) SetNotify(fn func(title, body string)) {
 
 // Start binds the transfer listener and subscribes the negotiation topics.
 func (m *Manager) Start(ctx context.Context) error {
-	ln, err := listenRange(m.ports)
+	ln, err := listenRange(m.bindHost, m.ports)
 	if err != nil {
 		return err
 	}
@@ -706,10 +717,10 @@ func FmtBytes(n int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTPE"[exp])
 }
 
-func listenRange(ports []int) (net.Listener, error) {
+func listenRange(host string, ports []int) (net.Listener, error) {
 	var lastErr error
 	for _, p := range ports {
-		ln, err := net.Listen("tcp", "0.0.0.0:"+strconv.Itoa(p))
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(p)))
 		if err == nil {
 			return ln, nil
 		}

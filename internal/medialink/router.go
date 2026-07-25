@@ -186,6 +186,7 @@ type Options struct {
 	Clock      ClockSource // default: NewMonotonicClock()
 	Log        Logger      // optional
 	AdvertHost string      // host placed in Answer.Addr; default: autodetected LAN IPv4, else 127.0.0.1
+	BindHost   string      // listener bind host; default 0.0.0.0, or AdvertHost when it is loopback
 	Ports      []int       // listener candidates; default mediaPortRange; []int{0} = ephemeral (tests)
 
 	// SyncPeer pins the clock-sync master (§2.3 tier 2, D6): sync samples from this peer
@@ -214,13 +215,14 @@ type Options struct {
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
 // Start. Safe for concurrent use.
 type RouteManager struct {
-	self    string
-	bus     Bus
-	secrets SecretProvider
-	clock   ClockSource
-	log     Logger
-	host    string
-	ports   []int
+	self     string
+	bus      Bus
+	secrets  SecretProvider
+	clock    ClockSource
+	log      Logger
+	host     string
+	bindHost string
+	ports    []int
 
 	streamSeq atomic.Uint32 // stream-id allocator (starts at 1; 0 = meta)
 
@@ -266,13 +268,23 @@ func New(opts Options) *RouteManager {
 	if host == "" {
 		host = localIPv4()
 	}
+	bind := opts.BindHost
+	if bind == "" {
+		bind = "0.0.0.0"
+		// loopback advert = loopback-only reachability; binding loopback too keeps
+		// go test binaries off the Windows Firewall listener prompt (wildcard binds
+		// in per-build temp exes re-prompt every run).
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			bind = host
+		}
+	}
 	ports := opts.Ports
 	if ports == nil {
 		ports = mediaPortRange
 	}
 	rm := &RouteManager{
 		self: opts.Self, bus: opts.Bus, secrets: opts.Secrets, clock: clk, log: opts.Log,
-		host: host, ports: ports, reportEvery: time.Second,
+		host: host, bindHost: bind, ports: ports, reportEvery: time.Second,
 		syncBurst: 250 * time.Millisecond, syncSteady: 10 * time.Second, syncPeer: opts.SyncPeer,
 		syncPeers: map[string]*OffsetEstimator{},
 		encoders:  opts.Encoders, decoders: opts.Decoders,
@@ -344,7 +356,7 @@ func (rm *RouteManager) Encoders() []string {
 
 // Start binds the media listener, subscribes to the negotiation topics, and advertises.
 func (rm *RouteManager) Start(ctx context.Context) error {
-	ln, err := listenRange(rm.ports)
+	ln, err := listenRange(rm.bindHost, rm.ports)
 	if err != nil {
 		return err
 	}
@@ -1446,10 +1458,10 @@ func setNoDelay(c net.Conn) {
 	}
 }
 
-func listenRange(ports []int) (net.Listener, error) {
+func listenRange(host string, ports []int) (net.Listener, error) {
 	var lastErr error
 	for _, p := range ports {
-		ln, err := net.Listen("tcp", "0.0.0.0:"+strconv.Itoa(p))
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(p)))
 		if err == nil {
 			return ln, nil
 		}
