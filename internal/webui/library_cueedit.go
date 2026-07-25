@@ -303,6 +303,7 @@ func (u *UI) ceEnterSet(paths []string, plID int64) {
 		s.collSel = sel
 		if plID != 0 {
 			s.collPl = map[int64]bool{plID: true}
+			s.ctlTouch()
 		}
 	}
 	s.mu.Unlock()
@@ -2029,14 +2030,7 @@ func (u *UI) ceFollow(path string) {
 func (u *UI) libDropsChanged(path string, drops []float64) {
 	s := u.lib()
 	s.mu.Lock()
-	if s.dropsIdx == nil {
-		s.dropsIdx = map[string][]float64{}
-	}
-	if len(drops) == 0 {
-		delete(s.dropsIdx, path)
-	} else {
-		s.dropsIdx[path] = drops
-	}
+	s.cowDrops(path, drops) // copy-on-write: collViewOf reads dropsIdx off the handler lane
 	s.mu.Unlock()
 }
 
