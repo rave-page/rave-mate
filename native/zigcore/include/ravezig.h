@@ -32,6 +32,20 @@ float rz_peak_abs(const float *in, size_t n);
 size_t rz_bucket_peaks(const uint8_t *pcm, size_t pcm_len, size_t n, uint8_t *out);
 size_t rz_bucket_bands(const uint8_t *pcm, size_t pcm_len, size_t n, uint32_t fs, uint8_t *out);
 
+/* Sample-format conversion — byte-exact ports of internal/audio per-sample loops.
+ * f32→LE serialize (gain 0/1 = unity, else pre-gain + ±1 clamp); ch-fold to stereo;
+ * batch packed-PCM→f32 (bits 8/16/24/32 int, 32/64 float; LE 8-bit unsigned, BE signed). */
+void rz_f32_to_le(const float *in, size_t n, float gain, uint8_t *out);
+void rz_fold_stereo(const float *in, size_t frames, uint32_t ch, float *out);
+void rz_pcm_to_f32(const uint8_t *src, size_t frames, uint32_t ch, uint32_t block_align,
+                   uint32_t bits, uint32_t is_float, uint32_t big_endian, float *out);
+
+/* Waveform-display kernels over u8 peak buckets — ports of giokit.WaveColumns and
+ * deckcard.buildEnv (out_len = int(dur*img_pps)+1 f64 columns). */
+void rz_wave_columns(const uint8_t *peaks, size_t n, size_t cols, uint8_t *out);
+void rz_wave_env(const uint8_t *peaks, size_t n, double dur, double img_pps,
+                 double *out, size_t out_len);
+
 #ifdef __cplusplus
 }
 #endif
