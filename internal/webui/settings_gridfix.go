@@ -3,8 +3,8 @@ package webui
 // Beatgrid-fixer settings card: probe + one-click install of the managed Python
 // beat_this engine (internal/gridfix.EnvManager). CPU and CUDA engines are independent
 // installs (any order, both may coexist); an engine-preference select (auto/CPU/CUDA)
-// picks which one runs. The env probe spawns Python, so it gets its own long-TTL cache
-// instead of the 10s settingsProbes cycle.
+// picks which one runs. The env probe spawns Python, so it keeps its own long-TTL cache instead of
+// joining the demand-paced probe set in settings_probes.go (B4c) - one cost class further out.
 
 import (
 	"context"

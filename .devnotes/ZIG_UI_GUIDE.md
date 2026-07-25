@@ -378,6 +378,9 @@ view) and diffing - 0 lines.
   data-labels, all numbers (`strconv`/`trimNum`/`FormatFloat 'g'`), smart-select registration +
   filtering, `tipTopic` tooltip markup, and the SEARCH match: `foldSearch(stripTags(setCardHTML(
   card)))` runs on the Go-rendered card, so the query text never reaches Zig.
+  **Both of those last two are historical as of phase B4** (see "Phase B - B4 retained-state pass"):
+  the probe cache is `settings_probes.go` with no TTL, and search matches the structured block state -
+  the query text still never reaches Zig.
 - Trusted raw markup (`raw`/`region` blocks) = the WAVE 3 seams, each owned by another file:
   `gridfixCardBody` (settings_gridfix.go), `gridfixModelCardBody` (settings_gridfix_model.go),
   `bridgeCardBody` (bridge_actions.go), `updateFlowHTML` (update_actions.go, inside
