@@ -272,6 +272,29 @@ func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool {
 	return true
 }
 
+// PxLabel classifies every pixel against targets (n*3 RGB bytes): labels[y*w+x] =
+// first matching target index+1 (all channels within tol), else 0. bgra swaps the
+// in-pixel R/B order; bpp 3 or 4. Byte-exact with mocapnode.scanBlobs pass 1.
+// False = bad geometry (caller keeps the Go loop).
+func PxLabel(pix []byte, stride, w, h, bpp int, bgra bool, targets []byte, tol int, labels []byte) bool {
+	if w <= 0 || h <= 0 || (bpp != 3 && bpp != 4) || stride < w*bpp ||
+		len(pix) < (h-1)*stride+w*bpp || len(labels) < w*h ||
+		len(targets) == 0 || len(targets)%3 != 0 || tol < 0 || tol > 255 || len(targets)/3 > 254 {
+		return false
+	}
+	b2u := func(b bool) C.uint32_t {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	C.rz_px_label((*C.uint8_t)(unsafe.Pointer(&pix[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), C.size_t(bpp), b2u(bgra),
+		(*C.uint8_t)(unsafe.Pointer(&targets[0])), C.size_t(len(targets)/3), C.uint32_t(tol),
+		(*C.uint8_t)(unsafe.Pointer(&labels[0])))
+	return true
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {

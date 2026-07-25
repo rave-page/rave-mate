@@ -165,6 +165,14 @@ export fn rz_rgba_to_rgb24(src: [*]const u8, src_stride: usize, w: usize, h: usi
     pixel.rgbaToRgb24(src[0 .. (h - 1) * src_stride + w * 4], src_stride, w, h, dst[0 .. w * h * 3]);
 }
 
+/// Per-pixel multi-target classify: labels (w*h) = first target index+1 matching
+/// within tol per channel, else 0. targets = n_targets*3 RGB bytes; bgra != 0 swaps
+/// the in-pixel R/B order; bpp 3 or 4. Port of mocapnode.scanBlobs pass 1.
+export fn rz_px_label(pix: [*]const u8, stride: usize, w: usize, h: usize, bpp: usize, bgra: u32, targets: [*]const u8, n_targets: usize, tol: u32, labels: [*]u8) void {
+    if (w == 0 or h == 0) return;
+    pixel.pxLabel(pix[0 .. (h - 1) * stride + w * bpp], stride, w, h, bpp, bgra != 0, targets[0 .. n_targets * 3], @intCast(tol & 0xff), labels[0 .. w * h]);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;

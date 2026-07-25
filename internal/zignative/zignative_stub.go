@@ -27,6 +27,9 @@ func WaveEnv(peaks []byte, dur, imgPps float64, out []float64) {}
 func PCMToF32(src []byte, frames, ch, blockAlign, bits int, isFloat, bigEndian bool, out []float32) {
 }
 func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool { return false }
+func PxLabel(pix []byte, stride, w, h, bpp int, bgra bool, targets []byte, tol int, labels []byte) bool {
+	return false
+}
 
 // PCMDec stub — NewWAVDec/NewAIFFDec always return nil.
 const (

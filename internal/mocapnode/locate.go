@@ -13,6 +13,7 @@ import (
 	"math"
 
 	"rave.page/mate/internal/mocappanel"
+	"rave.page/mate/internal/zignative"
 )
 
 const (
@@ -120,26 +121,7 @@ func Locate(f *Frame) (Lock, error) {
 func scanBlobs(f *Frame) (anchors [4][2]float64, m1 [2]float64, err error) {
 	targets := targetColors()
 	labels := make([]uint8, f.W*f.H) // 0 = none, 1..numTargets = target+1
-	for y := 0; y < f.H; y++ {
-		row := y * f.Stride
-		bpp := f.Fmt.Bpp()
-		for x := 0; x < f.W; x++ {
-			i := row + x*bpp
-			var r, g, b uint8
-			if f.Fmt == FmtBGRA {
-				r, g, b = f.Pix[i+2], f.Pix[i+1], f.Pix[i]
-			} else {
-				r, g, b = f.Pix[i], f.Pix[i+1], f.Pix[i+2]
-			}
-			for t := 0; t < numTargets; t++ {
-				c := targets[t]
-				if absDiffU8(r, c[0]) <= fidTol && absDiffU8(g, c[1]) <= fidTol && absDiffU8(b, c[2]) <= fidTol {
-					labels[y*f.W+x] = uint8(t + 1)
-					break
-				}
-			}
-		}
-	}
+	labelPixels(f, targets, labels)
 
 	best := [numTargets]blob{}
 	visited := make([]bool, f.W*f.H)
@@ -188,6 +170,45 @@ func scanBlobs(f *Frame) (anchors [4][2]float64, m1 [2]float64, err error) {
 		anchors[i] = best[t].centroid()
 	}
 	return anchors, best[tgtM1].centroid(), nil
+}
+
+// labelPixels runs the per-pixel target classification (zig kernel when linked;
+// Go loop = fallback + golden reference).
+func labelPixels(f *Frame, targets [numTargets][3]uint8, labels []uint8) {
+	if zignative.Available() {
+		flat := make([]byte, 0, numTargets*3)
+		for _, c := range targets {
+			flat = append(flat, c[0], c[1], c[2])
+		}
+		if zignative.PxLabel(f.Pix, f.Stride, f.W, f.H, f.Fmt.Bpp(), f.Fmt == FmtBGRA, flat, fidTol, labels) {
+			return
+		}
+	}
+	labelPixelsGo(f, targets, labels)
+}
+
+// labelPixelsGo is the pure-Go labeling pass of scanBlobs.
+func labelPixelsGo(f *Frame, targets [numTargets][3]uint8, labels []uint8) {
+	for y := 0; y < f.H; y++ {
+		row := y * f.Stride
+		bpp := f.Fmt.Bpp()
+		for x := 0; x < f.W; x++ {
+			i := row + x*bpp
+			var r, g, b uint8
+			if f.Fmt == FmtBGRA {
+				r, g, b = f.Pix[i+2], f.Pix[i+1], f.Pix[i]
+			} else {
+				r, g, b = f.Pix[i], f.Pix[i+1], f.Pix[i+2]
+			}
+			for t := 0; t < numTargets; t++ {
+				c := targets[t]
+				if absDiffU8(r, c[0]) <= fidTol && absDiffU8(g, c[1]) <= fidTol && absDiffU8(b, c[2]) <= fidTol {
+					labels[y*f.W+x] = uint8(t + 1)
+					break
+				}
+			}
+		}
+	}
 }
 
 type blob struct {
