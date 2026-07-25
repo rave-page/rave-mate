@@ -14,64 +14,247 @@ import (
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/store"
+	"rave.page/mate/internal/zigui"
 )
 
-// renderPublish is the recording/publishing cockpit at parity with the Fyne Publish tab
+// Publish is the recording/publishing cockpit at parity with the Fyne Publish tab
 // (view_recorder.go): REC/CAPTURE/OBS hero badges, now-playing meta + confirm countdown,
 // a Sets ↔ Captures/Tracklist master-detail, and Export / Match-history / Delete flows.
 // Playback + trim/edit run in the unified media player (player.go) embedded in the
 // captures pane - audio, video (mpv) and aligned audio+video pairs alike. Live tick
 // patches pub-hero.
-func (u *UI) renderPublish() string {
-	sw := u.targetSwitcherHTML("pubtarget", "pub-target:")
-	// Remote: a peer is targeted → the recorded-sets browser over remotectl (local path untouched).
-	if tgt := u.libRemoteTarget(); tgt != "" {
-		return panel(i18n.T("publish.title"), i18n.T("publish.subtitle")) + sw +
-			`<div id=publish-body>` + u.pubRemoteBody(tgt) + `</div>`
-	}
-	if u.svc.Recorder == nil {
-		return panel(i18n.T("publish.title"), "") + sw + emptyState(i18n.T("publish.recorderUnavailable"))
-	}
-	return panel(i18n.T("publish.title"), i18n.T("publish.subtitle")) + sw +
-		`<div id=publish-body>` + u.publishBody() + `</div>`
+//
+// Zig-rendered (native/zigui/src/publish.zig): Go resolves recordings + captures +
+// tracklist links + i18n into pubSt, Zig renders HTML byte-identical to the pure Go
+// renderers below (fallback + golden reference, zigui_golden_publish_test.go).
+// Everything owned by another subsystem rides through the state as trusted RAW markup:
+// the unified player/editor (player.go mpHTML) and the peer target switcher
+// (render_library_remote.go targetSwitcherHTML). Numbers never cross as floats to be
+// formatted - the progress bars carry both the float (Go path) and Go's "%.1f%%" string
+// (Zig path), pinned by TestPubBarNumberPairsAgree.
+
+// ── render state (JSON → Zig) ───────────────────────────────────────────────────
+
+// pubBadgeSt is one hero badge (REC/CAPTURE/OBS). DL = Go strings.ToLower(Key).
+type pubBadgeSt struct {
+	Key     string `json:"key"`
+	DL      string `json:"dl"`
+	Variant string `json:"variant"`
+	Line    string `json:"line"`
 }
 
-func (u *UI) publishBody() string {
+// pubBarSt is a resolved progressBar. Frac feeds the Go primitive; Pct is Go's
+// "%.1f%%" of the clamped fraction (Zig never formats a float).
+type pubBarSt struct {
+	Show bool    `json:"show"`
+	Frac float64 `json:"-"`
+	Pct  string  `json:"pct"`
+	Cap  string  `json:"cap"`
+}
+
+// newPubBar clamps + pre-formats exactly like components.go progressBar.
+func newPubBar(frac float64, caption string) pubBarSt {
+	f := frac
+	if f < 0 {
+		f = 0
+	}
+	if f > 1 {
+		f = 1
+	}
+	return pubBarSt{Show: true, Frac: frac, Pct: fmt.Sprintf("%.1f%%", f*100), Cap: caption}
+}
+
+// pubNpSt is the now-playing strip.
+type pubNpSt struct {
+	Label string   `json:"label"`
+	Title string   `json:"title"`
+	Meta  string   `json:"meta"`
+	State string   `json:"state"`
+	Bar   pubBarSt `json:"bar"`
+}
+
+// pubPlayerSt is the hero transport readout (shared player position).
+type pubPlayerSt struct {
+	Show  bool     `json:"show"`
+	Label string   `json:"label"`
+	Pos   string   `json:"pos"`
+	Bar   pubBarSt `json:"bar"`
+}
+
+// pubHeroSt is the #pub-hero card (tick-patched). Show=false ⇒ no recorder ⇒ empty.
+type pubHeroSt struct {
+	Show   bool        `json:"show"`
+	Rec    pubBadgeSt  `json:"rec"`
+	Cap    pubBadgeSt  `json:"cap"`
+	Obs    pubBadgeSt  `json:"obs"`
+	Finish string      `json:"finish"` // "" = no set live → no Finish-set button
+	NP     pubNpSt     `json:"np"`
+	Player pubPlayerSt `json:"player"`
+}
+
+// pubSetRowSt is one row of the sets list.
+type pubSetRowSt struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Sub    string `json:"sub"`
+	Sel    bool   `json:"sel"`
+	Rename string `json:"rename"`
+}
+
+// pubListSt is the sets list (Rows empty ⇒ emptyState(Empty)).
+type pubListSt struct {
+	Empty string        `json:"empty"`
+	Count string        `json:"count"`
+	Rows  []pubSetRowSt `json:"rows,omitempty"`
+}
+
+// pubCapSt is one capture row: caption + optional loose-capture buttons + the ⋯ menu.
+type pubCapSt struct {
+	Caption string   `json:"caption"`
+	Btns    []uiBtn  `json:"btns,omitempty"`
+	Menu    selState `json:"menu"`
+}
+
+// pubLooseSt is the unlinked-captures block (Caps empty ⇒ nothing rendered).
+type pubLooseSt struct {
+	Count string     `json:"count"`
+	Desc  string     `json:"desc"`
+	Caps  []pubCapSt `json:"caps,omitempty"`
+}
+
+// pubCapturesSt is the Captures subtab. Player = RAW player.go mpHTML output.
+type pubCapturesSt struct {
+	Player string     `json:"player"`
+	Empty  string     `json:"empty"`
+	Caps   []pubCapSt `json:"caps,omitempty"`
+}
+
+// pubTrackSt is one tracklist row. Lead ∈ resolving|none|chk; Ctx = the data-ctx value
+// ("" = no context menu); OffAct/OffDL only used on editable (finished-set) rows.
+type pubTrackSt struct {
+	Num     int    `json:"num"`
+	Label   string `json:"label"`
+	Off     string `json:"off"`
+	Lead    string `json:"lead"`
+	LeadTip string `json:"leadTip"`
+	Checked bool   `json:"checked"`
+	Path    string `json:"path"`
+	Ctx     string `json:"ctx"`
+	OffAct  string `json:"offAct"`
+	OffDL   string `json:"offDl"`
+}
+
+// pubBatchSt is the works-together batch bar (Count "" ⇒ hidden).
+type pubBatchSt struct {
+	Count string  `json:"count"`
+	Btns  []uiBtn `json:"btns,omitempty"`
+}
+
+// pubTracklistSt is the Tracklist subtab.
+type pubTracklistSt struct {
+	Empty     string       `json:"empty"`     // no rows → hint
+	Resolving string       `json:"resolving"` // "" = library links resolved
+	Editable  bool         `json:"editable"`
+	OffTip    string       `json:"offTip"`
+	Rows      []pubTrackSt `json:"rows,omitempty"`
+	ShowFix   bool         `json:"showFix"`
+	Fix       uiBtn        `json:"fix"`
+	Help      string       `json:"help"`
+	Unres     string       `json:"unres"` // "" = nothing unresolved
+	Batch     pubBatchSt   `json:"batch"`
+}
+
+// pubDetailSt is the right pane. Sel=false ⇒ the select-a-set hint (+ a pinned loose
+// capture in the player) instead of the set detail.
+type pubDetailSt struct {
+	CardTitle string     `json:"cardTitle"`
+	Sel       bool       `json:"sel"`
+	Hint      string     `json:"hint"`
+	Player    string     `json:"player"` // RAW: pinned loose-capture player
+	Loose     pubLooseSt `json:"loose"`
+
+	Name      string         `json:"name"`
+	Meta      string         `json:"meta"`
+	Actions   []uiBtn        `json:"actions,omitempty"`
+	Active    string         `json:"active"`
+	CapsLbl   string         `json:"capsLbl"`
+	TracksLbl string         `json:"tracksLbl"`
+	Captures  pubCapturesSt  `json:"captures"`
+	Tracklist pubTracklistSt `json:"tracklist"`
+}
+
+// pubBodySt is #publish-body (hero + master/detail).
+type pubBodySt struct {
+	Hero   pubHeroSt   `json:"hero"`
+	List   pubListSt   `json:"list"`
+	Detail pubDetailSt `json:"detail"`
+}
+
+// pubSt is the resolved render state for the local Publish view.
+type pubSt struct {
+	Title       string    `json:"title"`
+	Sub         string    `json:"sub"`
+	Switcher    string    `json:"switcher"` // RAW: targetSwitcherHTML
+	Available   bool      `json:"available"`
+	Unavailable string    `json:"unavailable"`
+	Body        pubBodySt `json:"body"`
+}
+
+// ── state builders ──────────────────────────────────────────────────────────────
+
+// publishState resolves the whole local Publish view. Impure: recorder/libdb caches,
+// the smart-select registration inside targetSwitcherHTML, mpEnsureSet, and the
+// off-thread tracklist link resolve all fire here, in the render order the Go
+// renderer used.
+func (u *UI) publishState() pubSt {
+	st := pubSt{
+		Title:       i18n.T("publish.title"),
+		Sub:         i18n.T("publish.subtitle"),
+		Switcher:    u.targetSwitcherHTML("pubtarget", "pub-target:"),
+		Available:   u.svc.Recorder != nil,
+		Unavailable: i18n.T("publish.recorderUnavailable"),
+	}
+	if !st.Available {
+		return st
+	}
+	st.Body = u.pubBodyState()
+	return st
+}
+
+func (u *UI) pubBodyState() pubBodySt {
 	recs := u.pubRecordings()
 	caps, loose := u.pubCaptures()
 	sel := u.pubSelected(recs)
-	return `<div id=pub-hero>` + u.pubHeroHTML() + `</div>` +
-		masterDetail(u.pubListHTML(recs, sel, caps), u.pubDetailHTML(sel, caps, loose))
+	return pubBodySt{
+		Hero:   u.pubHeroState(),
+		List:   u.pubListState(recs, sel, caps),
+		Detail: u.pubDetailState(sel, caps, loose),
+	}
 }
 
 // ── hero: live badges + now-playing (tick-patched) ──────────────────────────────
 
-func (u *UI) pubHeroHTML() string {
+func (u *UI) pubHeroState() pubHeroSt {
 	if u.svc.Recorder == nil {
-		return ""
+		return pubHeroSt{}
 	}
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card pub-hero">`)
-	b.WriteString(`<div class=pub-badges>` + u.pubRecBadge() + u.pubCapBadge() + u.pubObsBadge() + `</div>`)
-
+	st := pubHeroSt{
+		Show: true,
+		Rec:  u.pubRecBadge(), Cap: u.pubCapBadge(), Obs: u.pubObsBadge(),
+		NP: u.pubNpState(), Player: u.pubPlayerState(),
+	}
 	// Finish-set action (only while a set is live).
 	if a := u.svc.Recorder.Active(); a != nil {
-		b.WriteString(btnRow(btn(i18n.T("publish.finishSet"), "destructive", "rec-finish", "")))
+		st.Finish = i18n.T("publish.finishSet")
 	}
-
-	b.WriteString(u.pubNowPlayingHTML())
-	b.WriteString(u.pubPlayerHTML())
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-func pubBadge(key, variant, line string) string {
-	return `<div class=pub-badge>` + dot(variant) +
-		`<div class=pub-badge-tx><div class=pub-badge-k data-label=` + attrQ(strings.ToLower(key)) + `>` + html.EscapeString(key) + `</div>` +
-		`<div class=pub-badge-v data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+func pubBadge(key, variant, line string) pubBadgeSt {
+	return pubBadgeSt{Key: key, DL: strings.ToLower(key), Variant: variant, Line: line}
 }
 
-func (u *UI) pubRecBadge() string {
+func (u *UI) pubRecBadge() pubBadgeSt {
 	cfg := u.svc.Cfg
 	switch a := u.svc.Recorder.Active(); {
 	case cfg != nil && !cfg.Features.Recorder.Enabled:
@@ -84,7 +267,7 @@ func (u *UI) pubRecBadge() string {
 	}
 }
 
-func (u *UI) pubCapBadge() string {
+func (u *UI) pubCapBadge() pubBadgeSt {
 	cfg := u.svc.Cfg
 	if u.svc.SetCapture == nil || (cfg != nil && !cfg.Features.SetCapture.Enabled) {
 		return pubBadge("CAPTURE", "muted", i18n.T("common.off"))
@@ -102,7 +285,7 @@ func (u *UI) pubCapBadge() string {
 	}
 }
 
-func (u *UI) pubObsBadge() string {
+func (u *UI) pubObsBadge() pubBadgeSt {
 	cfg := u.svc.Cfg
 	if u.svc.OBS == nil || (cfg != nil && !cfg.Features.OBS.Enabled) {
 		return pubBadge("OBS", "muted", i18n.T("common.off"))
@@ -118,57 +301,43 @@ func (u *UI) pubObsBadge() string {
 	}
 }
 
-// pubNowPlayingHTML mirrors the Fyne now-playing strip: pending candidate (confirm countdown)
+// pubNpState mirrors the Fyne now-playing strip: pending candidate (confirm countdown)
 // or the current confirmed track, else "Nothing audible".
-func (u *UI) pubNowPlayingHTML() string {
-	title, meta, state, bar := i18n.T("publish.nothingAudible"), "", "", ""
+func (u *UI) pubNpState() pubNpSt {
+	st := pubNpSt{Label: i18n.T("publish.nowPlaying"), Title: i18n.T("publish.nothingAudible")}
 
 	if p, ok := u.svc.Recorder.Pending(); ok {
-		title = orTrackLine(pubTrackLine(p.Track))
-		meta = pubTrackMeta(p.Track)
+		st.Title = orTrackLine(pubTrackLine(p.Track))
+		st.Meta = pubTrackMeta(p.Track)
 		left := time.Until(p.ConfirmAt).Truncate(time.Second)
 		if left < 0 {
 			left = 0
 		}
-		state = i18n.T("publish.confirming", i18n.A{"left": left.String()})
+		st.State = i18n.T("publish.confirming", i18n.A{"left": left.String()})
 		if window := p.ConfirmAt.Sub(p.FirstSeen); window > 0 {
-			bar = progressBar(1-float64(left)/float64(window), i18n.T("publish.confirmingIn", i18n.A{"left": left.String()}))
+			st.Bar = newPubBar(1-float64(left)/float64(window), i18n.T("publish.confirmingIn", i18n.A{"left": left.String()}))
 		}
 	} else if a := u.svc.Recorder.Active(); a != nil && len(a.Tracks) > 0 {
 		if t := a.Tracks[len(a.Tracks)-1]; t.EndedAt.IsZero() {
-			title = orTrackLine(pubTrackLine(t))
-			meta = pubTrackMeta(t)
-			state = i18n.T("publish.trackInList", i18n.A{"n": fmt.Sprint(len(a.Tracks)), "dur": time.Since(t.StartedAt).Truncate(time.Second).String()})
+			st.Title = orTrackLine(pubTrackLine(t))
+			st.Meta = pubTrackMeta(t)
+			st.State = i18n.T("publish.trackInList", i18n.A{"n": fmt.Sprint(len(a.Tracks)), "dur": time.Since(t.StartedAt).Truncate(time.Second).String()})
 		}
 	}
-
-	var b strings.Builder
-	b.WriteString(`<div class=pub-np>`)
-	b.WriteString(`<div class=card-label>` + html.EscapeString(i18n.T("publish.nowPlaying")) + `</div>`)
-	b.WriteString(`<div class=pub-np-t data-label="now playing" data-value="` + html.EscapeString(title) + `">` + html.EscapeString(title) + `</div>`)
-	if meta != "" {
-		b.WriteString(`<div class=np-artist>` + html.EscapeString(meta) + `</div>`)
-	}
-	if state != "" {
-		b.WriteString(`<div class=np-artist>` + html.EscapeString(state) + `</div>`)
-	}
-	if bar != "" {
-		b.WriteString(`<div style="margin-top:8px">` + bar + `</div>`)
-	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// pubPlayerHTML shows the shared audio player's live position (tick-patched via pub-hero) so
-// the transport readout stays fresh without rebuilding the detail pane's seek control.
-func (u *UI) pubPlayerHTML() string {
+// pubPlayerState resolves the shared audio player's live position (tick-patched via
+// pub-hero) so the transport readout stays fresh without rebuilding the detail pane's
+// seek control.
+func (u *UI) pubPlayerState() pubPlayerSt {
 	pl := u.player() // gated read: a remote mirror must not leak this machine's playback
 	if pl == nil {
-		return ""
+		return pubPlayerSt{}
 	}
 	st := pl.State()
 	if !st.Playing || st.Path == "" {
-		return ""
+		return pubPlayerSt{}
 	}
 	label := "▶ "
 	if st.Paused {
@@ -180,37 +349,32 @@ func (u *UI) pubPlayerHTML() string {
 	if st.Total > 0 {
 		frac = st.Cur / st.Total
 	}
-	return `<div class=pub-player><div class=pub-player-l>` + html.EscapeString(label) +
-		` <span class=np-artist>` + html.EscapeString(pos) + `</span></div>` + progressBar(frac, pos) + `</div>`
+	return pubPlayerSt{Show: true, Label: label, Pos: pos, Bar: newPubBar(frac, pos)}
 }
 
 // ── sets list ───────────────────────────────────────────────────────────────────
 
-func (u *UI) pubListHTML(recs []recorder.Recording, sel *recorder.Recording, caps map[string][]libdb.SetRecording) string {
+func (u *UI) pubListState(recs []recorder.Recording, sel *recorder.Recording, caps map[string][]libdb.SetRecording) pubListSt {
+	st := pubListSt{Empty: i18n.T("publish.noRecordings"), Rows: []pubSetRowSt{}}
 	if len(recs) == 0 {
-		return emptyState(i18n.T("publish.noRecordings"))
+		return st
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=card-label>` + html.EscapeString(i18n.T("publish.setsCount", i18n.A{"count": fmt.Sprint(len(recs))})) + `</div>`)
+	st.Count = i18n.T("publish.setsCount", i18n.A{"count": fmt.Sprint(len(recs))})
 	for i := range recs {
 		r := recs[i]
 		title := orSetName(r.Name)
 		if r.EndedAt.IsZero() {
 			title = "⏺ " + title
 		}
-		cls := "irow pub-setrow"
-		if sel != nil && sel.ID == r.ID {
-			cls += " selected"
-		}
 		// Rename sits in the row's action slot: the runtime dispatches the closest [data-act], so
 		// the button wins over the row's own pub-select. Ungated - Recorder.Rename handles the
 		// live set too (unlike delete, which waits for the set to end).
-		b.WriteString(`<div class="` + cls + `" data-act="pub-select:` + html.EscapeString(r.ID) + `">` +
-			`<div class=irow-main><div class=irow-title>` + html.EscapeString(title) + `</div>` +
-			`<div class=irow-sub>` + html.EscapeString(pubSetMeta(r, caps[r.ID])) + `</div></div>` +
-			`<div class=irow-actions>` + btn(i18n.T("publish.renameDots"), "ghost", "pub-rename:"+r.ID, "") + `</div></div>`)
+		st.Rows = append(st.Rows, pubSetRowSt{
+			ID: r.ID, Title: title, Sub: pubSetMeta(r, caps[r.ID]),
+			Sel: sel != nil && sel.ID == r.ID, Rename: i18n.T("publish.renameDots"),
+		})
 	}
-	return b.String()
+	return st
 }
 
 func pubSetMeta(r recorder.Recording, caps []libdb.SetRecording) string {
@@ -235,154 +399,138 @@ func pubSetMeta(r recorder.Recording, caps []libdb.SetRecording) string {
 
 // ── detail: header + actions + Captures/Tracklist subtabs ───────────────────────
 
-func (u *UI) pubDetailHTML(sel *recorder.Recording, caps map[string][]libdb.SetRecording, loose []libdb.SetRecording) string {
+func (u *UI) pubDetailState(sel *recorder.Recording, caps map[string][]libdb.SetRecording, loose []libdb.SetRecording) pubDetailSt {
+	st := pubDetailSt{CardTitle: i18n.T("publish.selectedSet"), Hint: i18n.T("publish.selectHint")}
 	if sel == nil {
-		body := hint("info", i18n.T("publish.selectHint"))
 		if t := u.mpSnap("publish"); t.pinned { // loose capture opened in the player
-			body += u.mpHTML("publish")
+			st.Player = u.mpHTML("publish")
 		}
-		return card(i18n.T("publish.selectedSet"), "", body+u.pubLooseHTML(loose))
+		st.Loose = u.pubLooseState(loose)
+		return st
 	}
 	r := *sel
-	head := `<div class=pub-detail-h><div class=pub-detail-name>` + html.EscapeString(orSetName(r.Name)) + `</div>` +
-		`<div class=np-artist>` + html.EscapeString(pubSetMeta(r, caps[r.ID])) + `</div>` +
-		u.pubActionsHTML(r) + `</div>`
+	st.Sel = true
+	st.Name, st.Meta = orSetName(r.Name), pubSetMeta(r, caps[r.ID])
+	st.Actions = u.pubActionsState(r)
 
 	sets := caps[r.ID]
-	active := u.pubSubtab()
+	st.Active = u.pubSubtab()
 	// Track COUNT needs no library resolution - use it for the subtab label so switching to
 	// Captures never pays the (async, DB-backed) tracklist link resolution.
-	tabs := subTabs("pub-tab:", active,
-		[2]string{"captures", i18n.T("publish.capturesCount", i18n.A{"count": fmt.Sprint(len(sets))})},
-		[2]string{"tracklist", i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(len(r.Tracks))})},
-	)
+	st.CapsLbl = i18n.T("publish.capturesCount", i18n.A{"count": fmt.Sprint(len(sets))})
+	st.TracksLbl = i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(len(r.Tracks))})
 
-	var body string
-	if active == "tracklist" {
+	if st.Active == "tracklist" {
 		rows, ready := u.pubTrackRows(r) // library-path resolution is off-thread + cached (see pubTrackPaths)
-		body = u.pubTracklistHTML(r, len(sets) > 0, rows, !ready)
+		st.Tracklist = u.pubTracklistState(r, len(sets) > 0, rows, !ready)
 	} else {
-		body = u.pubCapturesHTML(r, sets) + u.pubLooseHTML(loose)
+		st.Captures = u.pubCapturesState(r, sets)
+		st.Loose = u.pubLooseState(loose)
 	}
-	return card(i18n.T("publish.selectedSet"), "", head+tabs+`<div class=pub-subbody>`+body+`</div>`)
+	return st
 }
 
-func (u *UI) pubActionsHTML(r recorder.Recording) string {
-	btns := []string{btn(i18n.T("publish.export"), "outline", "pub-export:"+r.ID, "")}
+func (u *UI) pubActionsState(r recorder.Recording) []uiBtn {
+	btns := []uiBtn{{Label: i18n.T("publish.export"), Variant: "outline", Act: "pub-export:" + r.ID}}
 	if !r.EndedAt.IsZero() {
 		btns = append(btns,
-			btn(i18n.T("publish.matchHistory"), "secondary", "pub-match:"+r.ID, ""),
-			btn(i18n.T("publish.delete"), "destructive", "pub-del:"+r.ID, ""))
+			uiBtn{Label: i18n.T("publish.matchHistory"), Variant: "secondary", Act: "pub-match:" + r.ID},
+			uiBtn{Label: i18n.T("publish.delete"), Variant: "destructive", Act: "pub-del:" + r.ID})
 	}
-	return btnRow(btns...)
+	return btns
 }
 
-// pubTracklistHTML renders the tracklist. resolving = library-path links are still being
+// pubTracklistState resolves the tracklist. resolving = library-path links are still being
 // resolved off-thread (names/times show immediately; the works-together checkboxes fill in when
 // the async resolve lands and re-renders). Finished sets get editable start offsets + the
 // capture-aligned "Fix start times" flow (hasCaps).
-func (u *UI) pubTracklistHTML(r recorder.Recording, hasCaps bool, rows []pubRow, resolving bool) string {
+func (u *UI) pubTracklistState(r recorder.Recording, hasCaps bool, rows []pubRow, resolving bool) pubTracklistSt {
+	st := pubTracklistSt{Empty: i18n.T("publish.noTracks"), Rows: []pubTrackSt{}}
 	if len(rows) == 0 {
-		return hint("info", i18n.T("publish.noTracks"))
+		return st
 	}
-	editable := !r.EndedAt.IsZero()
+	st.Editable = !r.EndedAt.IsZero()
+	st.Help = i18n.T("publish.compat.help")
 	sel := u.pubTSel()
-	var b strings.Builder
 	if resolving {
-		b.WriteString(hint("info", i18n.T("publish.linkingLibrary")))
+		st.Resolving = i18n.T("publish.linkingLibrary")
 	}
-	b.WriteString(`<div class=pub-tracklist>`)
+	if st.Editable {
+		st.OffTip = i18n.T("publish.offsetEditTip")
+	}
 	unresolved := 0
 	for i, row := range rows {
-		lead, ctx := "", ""
+		t := pubTrackSt{Num: i + 1, Label: row.label, Off: pubClock(row.offset.Seconds()), Path: row.path}
 		switch {
 		case resolving:
 			// links not resolved yet - neutral placeholder, not a "no match" mark
-			lead = `<span class="pub-track-chk none" title=` + attrQ(i18n.T("publish.linkingLibrary")) + `>…</span>`
+			t.Lead, t.LeadTip = "resolving", i18n.T("publish.linkingLibrary")
 		case row.path == "":
 			unresolved++
-			lead = `<span class="pub-track-chk none" title=` + attrQ(i18n.T("publish.compat.unresolved")) + `>·</span>`
+			t.Lead, t.LeadTip = "none", i18n.T("publish.compat.unresolved")
 		default:
-			chk := ""
-			if sel[row.path] {
-				chk = " checked"
-			}
-			lead = `<span class=pub-track-chk><input type=checkbox data-act="pub-tsel:` + html.EscapeString(row.path) + `"` + chk + `></span>`
-			ctx = ` data-ctx="pub-tctx:` + html.EscapeString(row.path) + `"`
+			t.Lead, t.Checked = "chk", sel[row.path]
+			t.Ctx = "pub-tctx:" + row.path
 		}
-		off := pubClock(row.offset.Seconds())
-		oCell := `<span class=pub-track-o>[` + off + `]</span>`
-		if editable {
-			oCell = `<input class=pub-track-oin type=text value=` + attrQ(off) + ` data-value=` + attrQ(off) +
-				` data-act=` + attrQ("pub-toff:"+r.ID+"\x1f"+fmt.Sprint(i)) +
-				` data-label=` + attrQ("offset-"+fmt.Sprint(i+1)) + // ctl read/set target (space-free: ctl set splits on first space)
-				` title=` + attrQ(i18n.T("publish.offsetEditTip")) + `>`
+		if st.Editable {
+			t.OffAct = "pub-toff:" + r.ID + "\x1f" + fmt.Sprint(i)
+			t.OffDL = "offset-" + fmt.Sprint(i+1) // ctl read/set target (space-free: ctl set splits on first space)
 			// finished sets: every row gets a context menu (compat when resolved + remove)
-			ctx = ` data-ctx=` + attrQ("pub-tctx2:"+r.ID+"\x1f"+fmt.Sprint(i)+"\x1f"+row.path)
+			t.Ctx = "pub-tctx2:" + r.ID + "\x1f" + fmt.Sprint(i) + "\x1f" + row.path
 		}
-		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +
-			`<span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
-			oCell +
-			`<span class=pub-track-l>` + html.EscapeString(row.label) + `</span></div>`)
+		st.Rows = append(st.Rows, t)
 	}
-	b.WriteString(`</div>`)
-	if editable && hasCaps {
-		b.WriteString(btnRow(btn(i18n.T("publish.fix.button"), "outline", "pub-fixtimes:"+r.ID, "")))
+	if st.Editable && hasCaps {
+		st.ShowFix = true
+		st.Fix = uiBtn{Label: i18n.T("publish.fix.button"), Variant: "outline", Act: "pub-fixtimes:" + r.ID}
 	}
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.help")) + `</p>`)
 	if unresolved > 0 {
-		b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("publish.compat.unresolvedCount", i18n.A{"count": fmt.Sprint(unresolved)})) + `</p>`)
+		st.Unres = i18n.T("publish.compat.unresolvedCount", i18n.A{"count": fmt.Sprint(unresolved)})
 	}
 	if len(sel) > 0 {
-		btns := []string{}
+		st.Batch.Count = i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(sel))})
 		if len(sel) >= 2 {
-			btns = append(btns, btn(i18n.T("library.compat.markBtn"), "primary", "lib-compat-mark:pub", ""))
+			st.Batch.Btns = append(st.Batch.Btns, uiBtn{Label: i18n.T("library.compat.markBtn"), Variant: "primary", Act: "lib-compat-mark:pub"})
 		}
 		if len(sel) == 1 {
 			for p := range sel {
-				btns = append(btns, btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+p, ""))
+				st.Batch.Btns = append(st.Batch.Btns, uiBtn{Label: i18n.T("library.compat.findBtn"), Variant: "outline", Act: "lib-compat-find:" + p})
 			}
 		}
-		btns = append(btns, btn(i18n.T("library.clear"), "ghost", "pub-tsel-clear", ""))
-		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(i18n.T("library.selectedCount", i18n.A{"count": fmt.Sprint(len(sel))})) + `</span>` +
-			strings.Join(btns, "") + `</div>`)
+		st.Batch.Btns = append(st.Batch.Btns, uiBtn{Label: i18n.T("library.clear"), Variant: "ghost", Act: "pub-tsel-clear"})
 	}
-	return b.String()
+	return st
 }
 
-func (u *UI) pubCapturesHTML(r recorder.Recording, sets []libdb.SetRecording) string {
+func (u *UI) pubCapturesState(r recorder.Recording, sets []libdb.SetRecording) pubCapturesSt {
 	u.mpEnsureSet(r, sets)
-	var b strings.Builder
-	if p := u.mpHTML("publish"); p != "" { // unified player/editor (also shows a pinned loose capture)
-		b.WriteString(p)
-	}
-	if len(sets) == 0 {
-		b.WriteString(hint("info", i18n.T("publish.noCaptures")))
-		return b.String()
+	st := pubCapturesSt{
+		Player: u.mpHTML("publish"), // unified player/editor (also shows a pinned loose capture)
+		Empty:  i18n.T("publish.noCaptures"),
+		Caps:   []pubCapSt{},
 	}
 	for _, s := range sets {
-		b.WriteString(u.pubCaptureBlock(s, false))
+		st.Caps = append(st.Caps, u.pubCapState(s, false))
 	}
-	return b.String()
+	return st
 }
 
-func (u *UI) pubLooseHTML(loose []libdb.SetRecording) string {
+func (u *UI) pubLooseState(loose []libdb.SetRecording) pubLooseSt {
+	st := pubLooseSt{Caps: []pubCapSt{}}
 	if len(loose) == 0 {
-		return ""
+		return st
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=pub-loose><div class=card-label>` + html.EscapeString(i18n.T("publish.unlinkedCount", i18n.A{"count": fmt.Sprint(len(loose))})) + `</div>` +
-		`<div class=np-artist>` + html.EscapeString(i18n.T("publish.looseDesc")) + `</div>`)
+	st.Count = i18n.T("publish.unlinkedCount", i18n.A{"count": fmt.Sprint(len(loose))})
+	st.Desc = i18n.T("publish.looseDesc")
 	for _, s := range loose {
-		b.WriteString(u.pubCaptureBlock(s, true))
+		st.Caps = append(st.Caps, u.pubCapState(s, true))
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// pubCaptureBlock renders one capture row: caption + file ops. Playback + trim happen in
+// pubCapState resolves one capture row: caption + file ops. Playback + trim happen in
 // the unified player above; loose captures load into it via "Open in player" / "Trim / edit…".
-func (u *UI) pubCaptureBlock(s libdb.SetRecording, loose bool) string {
+func (u *UI) pubCapState(s libdb.SetRecording, loose bool) pubCapSt {
 	kindLbl := i18n.T("publish.broadcastAudio")
 	if s.Kind == libdb.SetKindOBS {
 		kindLbl = i18n.T("publish.obsRecordingKind")
@@ -393,20 +541,247 @@ func (u *UI) pubCaptureBlock(s libdb.SetRecording, loose bool) string {
 	}
 	capParts = append(capParts, filepath.Base(s.Path))
 
-	var btns []string
+	st := pubCapSt{Caption: strings.Join(capParts, " · "), Btns: []uiBtn{}}
 	if loose {
-		btns = append(btns,
-			btn(i18n.T("publish.openInPlayer"), "go", "mp-loadcap:"+s.ID, ""),
-			btn(i18n.T("publish.trimEditDots"), "secondary", "mp-loadcap:"+s.ID+"\x1fedit", ""))
+		st.Btns = append(st.Btns,
+			uiBtn{Label: i18n.T("publish.openInPlayer"), Variant: "go", Act: "mp-loadcap:" + s.ID},
+			uiBtn{Label: i18n.T("publish.trimEditDots"), Variant: "secondary", Act: "mp-loadcap:" + s.ID + "\x1fedit"})
 	}
 	// file ops are occasional - one ⋯ menu instead of three buttons per capture row
-	btns = append(btns, actionMenu("capmenu-"+strings.Map(menuIDSafe, s.ID), "⋯ "+i18n.T("player.more"), []ssOpt{
+	st.Menu = resolveActionMenu("capmenu-"+strings.Map(menuIDSafe, s.ID), "⋯ "+i18n.T("player.more"), []ssOpt{
 		{Val: "pub-open:" + s.ID, Label: i18n.T("player.openExternally")},
 		{Val: "pub-reveal:" + s.ID, Label: i18n.T("publish.showInFolder")},
 		{Val: "pub-capdel:" + s.ID, Label: i18n.T("common.remove")},
-	}))
+	})
+	return st
+}
 
-	return `<div class=pub-cap><div class=pub-cap-cap>` + html.EscapeString(strings.Join(capParts, " · ")) + `</div>` +
+// ── bridges (Zig when linked, Go otherwise) ─────────────────────────────────────
+
+func (u *UI) renderPublish() string {
+	// Remote: a peer is targeted → the recorded-sets browser over remotectl (still Go-rendered).
+	if tgt := u.libRemoteTarget(); tgt != "" {
+		return panel(i18n.T("publish.title"), i18n.T("publish.subtitle")) +
+			u.targetSwitcherHTML("pubtarget", "pub-target:") +
+			`<div id=publish-body>` + u.pubRemoteBody(tgt) + `</div>`
+	}
+	st := u.publishState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderPublish(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return publishHTML(st)
+}
+
+// publishHeroHTML is the #pub-hero fragment (live tick patch).
+func (u *UI) publishHeroHTML() string {
+	st := u.pubHeroState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderPublishHero(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return pubHeroHTML(st)
+}
+
+// ── pure Go renderers (golden reference; byte-identical to Zig) ─────────────────
+
+func publishHTML(st pubSt) string {
+	if !st.Available {
+		return panel(st.Title, "") + st.Switcher + emptyState(st.Unavailable)
+	}
+	return panel(st.Title, st.Sub) + st.Switcher +
+		`<div id=publish-body>` + publishBodyHTML(st.Body) + `</div>`
+}
+
+func publishBodyHTML(st pubBodySt) string {
+	return `<div id=pub-hero>` + pubHeroHTML(st.Hero) + `</div>` +
+		masterDetail(pubListHTML(st.List), pubDetailHTML(st.Detail))
+}
+
+func pubHeroHTML(st pubHeroSt) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card pub-hero">`)
+	b.WriteString(`<div class=pub-badges>` + pubBadgeHTML(st.Rec) + pubBadgeHTML(st.Cap) + pubBadgeHTML(st.Obs) + `</div>`)
+	if st.Finish != "" {
+		b.WriteString(btnRow(btn(st.Finish, "destructive", "rec-finish", "")))
+	}
+	b.WriteString(pubNpHTML(st.NP))
+	b.WriteString(pubPlayerHTML(st.Player))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func pubBadgeHTML(st pubBadgeSt) string {
+	return `<div class=pub-badge>` + dot(st.Variant) +
+		`<div class=pub-badge-tx><div class=pub-badge-k data-label=` + attrQ(st.DL) + `>` + html.EscapeString(st.Key) + `</div>` +
+		`<div class=pub-badge-v data-value=` + attrQ(st.Line) + `>` + html.EscapeString(st.Line) + `</div></div></div>`
+}
+
+func pubNpHTML(st pubNpSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=pub-np>`)
+	b.WriteString(`<div class=card-label>` + html.EscapeString(st.Label) + `</div>`)
+	b.WriteString(`<div class=pub-np-t data-label="now playing" data-value="` + html.EscapeString(st.Title) + `">` + html.EscapeString(st.Title) + `</div>`)
+	if st.Meta != "" {
+		b.WriteString(`<div class=np-artist>` + html.EscapeString(st.Meta) + `</div>`)
+	}
+	if st.State != "" {
+		b.WriteString(`<div class=np-artist>` + html.EscapeString(st.State) + `</div>`)
+	}
+	if st.Bar.Show {
+		b.WriteString(`<div style="margin-top:8px">` + progressBar(st.Bar.Frac, st.Bar.Cap) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func pubPlayerHTML(st pubPlayerSt) string {
+	if !st.Show {
+		return ""
+	}
+	return `<div class=pub-player><div class=pub-player-l>` + html.EscapeString(st.Label) +
+		` <span class=np-artist>` + html.EscapeString(st.Pos) + `</span></div>` +
+		progressBar(st.Bar.Frac, st.Bar.Cap) + `</div>`
+}
+
+func pubListHTML(st pubListSt) string {
+	if len(st.Rows) == 0 {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=card-label>` + html.EscapeString(st.Count) + `</div>`)
+	for _, r := range st.Rows {
+		cls := "irow pub-setrow"
+		if r.Sel {
+			cls += " selected"
+		}
+		b.WriteString(`<div class="` + cls + `" data-act="pub-select:` + html.EscapeString(r.ID) + `">` +
+			`<div class=irow-main><div class=irow-title>` + html.EscapeString(r.Title) + `</div>` +
+			`<div class=irow-sub>` + html.EscapeString(r.Sub) + `</div></div>` +
+			`<div class=irow-actions>` + btn(r.Rename, "ghost", "pub-rename:"+r.ID, "") + `</div></div>`)
+	}
+	return b.String()
+}
+
+func pubDetailHTML(st pubDetailSt) string {
+	if !st.Sel {
+		return card(st.CardTitle, "", hint("info", st.Hint)+st.Player+pubLooseHTML(st.Loose))
+	}
+	head := `<div class=pub-detail-h><div class=pub-detail-name>` + html.EscapeString(st.Name) + `</div>` +
+		`<div class=np-artist>` + html.EscapeString(st.Meta) + `</div>` +
+		uiBtnRow(st.Actions) + `</div>`
+	tabs := subTabs("pub-tab:", st.Active,
+		[2]string{"captures", st.CapsLbl},
+		[2]string{"tracklist", st.TracksLbl},
+	)
+	var body string
+	if st.Active == "tracklist" {
+		body = pubTracklistHTML(st.Tracklist)
+	} else {
+		body = pubCapturesHTML(st.Captures) + pubLooseHTML(st.Loose)
+	}
+	return card(st.CardTitle, "", head+tabs+`<div class=pub-subbody>`+body+`</div>`)
+}
+
+func pubTracklistHTML(st pubTracklistSt) string {
+	if len(st.Rows) == 0 {
+		return hint("info", st.Empty)
+	}
+	var b strings.Builder
+	if st.Resolving != "" {
+		b.WriteString(hint("info", st.Resolving))
+	}
+	b.WriteString(`<div class=pub-tracklist>`)
+	for _, row := range st.Rows {
+		lead := ""
+		switch row.Lead {
+		case "resolving", "none":
+			glyph := "…"
+			if row.Lead == "none" {
+				glyph = "·"
+			}
+			lead = `<span class="pub-track-chk none" title=` + attrQ(row.LeadTip) + `>` + glyph + `</span>`
+		default:
+			chk := ""
+			if row.Checked {
+				chk = " checked"
+			}
+			lead = `<span class=pub-track-chk><input type=checkbox data-act="pub-tsel:` + html.EscapeString(row.Path) + `"` + chk + `></span>`
+		}
+		ctx := ""
+		if row.Ctx != "" {
+			ctx = ` data-ctx=` + attrQ(row.Ctx)
+		}
+		oCell := `<span class=pub-track-o>[` + row.Off + `]</span>`
+		if st.Editable {
+			oCell = `<input class=pub-track-oin type=text value=` + attrQ(row.Off) + ` data-value=` + attrQ(row.Off) +
+				` data-act=` + attrQ(row.OffAct) +
+				` data-label=` + attrQ(row.OffDL) +
+				` title=` + attrQ(st.OffTip) + `>`
+		}
+		b.WriteString(`<div class=pub-track` + ctx + `>` + lead +
+			`<span class=pub-track-n>` + fmt.Sprint(row.Num) + `.</span>` +
+			oCell +
+			`<span class=pub-track-l>` + html.EscapeString(row.Label) + `</span></div>`)
+	}
+	b.WriteString(`</div>`)
+	if st.ShowFix {
+		b.WriteString(btnRow(st.Fix.html()))
+	}
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(st.Help) + `</p>`)
+	if st.Unres != "" {
+		b.WriteString(`<p class=page-sub>` + html.EscapeString(st.Unres) + `</p>`)
+	}
+	if st.Batch.Count != "" {
+		var btns strings.Builder
+		for _, x := range st.Batch.Btns {
+			btns.WriteString(x.html())
+		}
+		b.WriteString(`<div class=batchbar><span class=cnt>` + html.EscapeString(st.Batch.Count) + `</span>` +
+			btns.String() + `</div>`)
+	}
+	return b.String()
+}
+
+func pubCapturesHTML(st pubCapturesSt) string {
+	var b strings.Builder
+	b.WriteString(st.Player)
+	if len(st.Caps) == 0 {
+		b.WriteString(hint("info", st.Empty))
+		return b.String()
+	}
+	for _, s := range st.Caps {
+		b.WriteString(pubCapHTML(s))
+	}
+	return b.String()
+}
+
+func pubLooseHTML(st pubLooseSt) string {
+	if len(st.Caps) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=pub-loose><div class=card-label>` + html.EscapeString(st.Count) + `</div>` +
+		`<div class=np-artist>` + html.EscapeString(st.Desc) + `</div>`)
+	for _, s := range st.Caps {
+		b.WriteString(pubCapHTML(s))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func pubCapHTML(st pubCapSt) string {
+	btns := make([]string, 0, len(st.Btns)+1)
+	for _, x := range st.Btns {
+		btns = append(btns, x.html())
+	}
+	btns = append(btns, actionMenuHTML(st.Menu))
+	return `<div class=pub-cap><div class=pub-cap-cap>` + html.EscapeString(st.Caption) + `</div>` +
 		btnRow(btns...) + `</div>`
 }
 
@@ -449,7 +824,7 @@ func (u *UI) pubCaptures() (map[string][]libdb.SetRecording, []libdb.SetRecordin
 
 // ── captured-sets list cache: ListSetRecordings resolved off-thread, epoch-keyed ────
 //
-// ListSetRecordings(300) is a serialized SQLite read; doing it inline in publishBody (every full
+// ListSetRecordings(300) is a serialized SQLite read; doing it inline in pubBodyState (every full
 // Publish render) AND in every capture file-op click (pubCapByID) froze the act lane. Cache the raw
 // rows per-UI, keyed by libdb SetRecVersion() (bumps on any set_recordings insert/relink/delete,
 // incl. featurehost-created icecast/obs captures). Render + file-ops read the cache; a bg refresh
@@ -521,7 +896,7 @@ func (u *UI) pubCapReload() {
 // ── recordings list cache: Recorder.List() resolved off-thread, epoch-keyed ────
 //
 // Recorder.List() ForEach-scans the recordings bucket + json.Unmarshals EVERY recording (including
-// its full Tracks slice) + sorts - done inline in publishBody on every full Publish render. With
+// its full Tracks slice) + sorts - done inline in pubBodyState on every full Publish render. With
 // many long sets that deserializes thousands of Track structs per render on the act lane. Cache the
 // rows per-UI keyed by Recorder.RecordingsVersion() (bumps on any put/delete); render reads the
 // cache, a bg refresh reloads when the epoch advanced. Mutation-safety: the cached slice is owned by

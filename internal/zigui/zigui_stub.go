@@ -59,3 +59,8 @@ func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", fals
 func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
 func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
 func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }
+
+// --- publish ---
+
+func RenderPublish(stateJSON []byte) (string, bool)     { return "", false }
+func RenderPublishHero(stateJSON []byte) (string, bool) { return "", false }

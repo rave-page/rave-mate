@@ -850,3 +850,49 @@ test "btnRowOf and btnAct" {
     try btnAct(&h, "Run", "go", "auto-run:", "g&1");
     try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
 }
+
+// --- publish ---
+// Two primitives the publish batch needs. Everything else it renders comes from the
+// blocks above unchanged (panel/emptyState/hint/dot/btn/btnAct/btnRowOf/subTabs/
+// card*/md*/num/selectBox).
+
+/// progressBar: 0..1 fill with a caption (Go progressBar). pct is Go's "%.1f%%" of the
+/// already-clamped fraction — Zig never formats a float — and is emitted raw into the
+/// width style. An empty caption falls back to pct, matching the Go default.
+pub fn progressBar(h: *Html, pct: []const u8, caption: []const u8) !void {
+    try h.raw("<div class=pbar><div class=pbar-fill style=\"width:");
+    try h.raw(pct);
+    try h.raw("\"></div><span class=pbar-cap>");
+    try h.esc(if (caption.len == 0) pct else caption);
+    try h.raw("</span></div>");
+}
+
+/// actionMenu: the compact "⋯" one-shot-action dropdown (Go actionMenu / actionMenuHTML).
+/// The menu label rides as the resolved select's curLabel (leading empty-Val option), so
+/// this is just the amenu wrapper around a bare smart select.
+pub fn actionMenu(h: *Html, s: Select) !void {
+    try h.raw("<span class=amenu>");
+    try selectBox(h, s);
+    try h.raw("</span>");
+}
+
+test "progressBar + actionMenu" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try progressBar(&h, "42.5%", "3 of 7 <done>");
+    try std.testing.expectEqualStrings("<div class=pbar><div class=pbar-fill style=\"width:42.5%\"></div>" ++
+        "<span class=pbar-cap>3 of 7 &lt;done&gt;</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try progressBar(&h, "0.0%", "");
+    try std.testing.expectEqualStrings("<div class=pbar><div class=pbar-fill style=\"width:0.0%\"></div>" ++
+        "<span class=pbar-cap>0.0%</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try actionMenu(&h, .{ .id = "capmenu-1", .curLabel = "⋯ More" });
+    try std.testing.expectEqualStrings("<span class=amenu><div class=ss-field><div class=ss id=\"ss-capmenu-1\">" ++
+        "<button type=button class=\"ss-btn\" data-act=\"ss-tgl:capmenu-1\" data-label=\"capmenu-1\">" ++
+        "<span class=ss-cur>⋯ More</span>" ++
+        "<svg class=ss-chev viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg></button>" ++
+        "</div></div></span>", h.b.items);
+}
+
+// --- end publish ---

@@ -88,7 +88,7 @@ func init() {
 		if u.libRemoteTarget() != "" {
 			return // remote view has no live hero/player - status stays on the controlled box
 		}
-		u.eval("window.__patch('pub-hero'," + jsQuote(u.pubHeroHTML()) + ")")
+		u.eval("window.__patch('pub-hero'," + jsQuote(u.publishHeroHTML()) + ")")
 		mpTick(u, "publish") // unified player clock/playhead
 	})
 

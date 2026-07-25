@@ -294,3 +294,21 @@ test "media tab modules" {
     _ = twitch;
     _ = editor;
 }
+
+// --- publish ---
+
+const publish = @import("publish.zig");
+
+export fn rz_ui_render_publish(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(publish.State, publish.render, state_json, len, out_len);
+}
+
+/// #pub-hero inner (~1 Hz tick patch). Legitimately EMPTY when no recorder exists ⇒
+/// NULL ⇒ the Go fallback renders the same empty string.
+export fn rz_ui_render_publish_hero(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(publish.Hero, publish.renderHero, state_json, len, out_len);
+}
+
+test "publish tab module" {
+    _ = publish;
+}
