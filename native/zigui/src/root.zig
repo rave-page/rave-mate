@@ -8,6 +8,9 @@ const std = @import("std");
 const html = @import("html.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
+const vrchat = @import("vrchat.zig");
+const vrcgroups = @import("vrcgroups.zig");
+const worlds = @import("worlds.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -99,6 +102,54 @@ test {
 
 // --- end motion + live ---
 
+// --- vrchat ---
+
+export fn rz_ui_render_vrchat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.State, vrchat.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Status, vrchat.renderStatus, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_editor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Editor, vrchat.renderEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_campaths(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Campaths, vrchat.renderCampaths, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_photos(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Photos, vrchat.renderPhotos, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrcgroups(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrcgroups.State, vrcgroups.render, state_json, len, out_len);
+}
+
+// --- worlds ---
+
+export fn rz_ui_render_worlds(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.State, worlds.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_linkhint(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Hint, worlds.renderHint, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_github(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.GitHub, worlds.renderGitHub, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Status, worlds.renderStatus, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_unityrows(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Unity, worlds.renderUnityRows, state_json, len, out_len);
+}
+
 /// Free a buffer returned by an rz_ui_render_* call (len = its *out_len).
 export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
     const p = ptr orelse return;
@@ -110,6 +161,9 @@ test {
     _ = html;
     _ = appgroups;
     _ = logs;
+    _ = vrchat;
+    _ = vrcgroups;
+    _ = worlds;
     _ = @import("components.zig");
 }
 

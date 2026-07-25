@@ -39,6 +39,24 @@ const uint8_t *rz_ui_render_live_frag(const uint8_t *kind, size_t kind_len,
 
 /* --- end motion + live --- */
 
+/* --- vrchat --- */
+const uint8_t *rz_ui_render_vrchat(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Tick/action-patched fragments: #vrc-status-region, #vrc-editor, #vrc-campaths,
+ * #vrc-photos-body and the Groups sub-view root #vrcg-body. */
+const uint8_t *rz_ui_render_vrchat_status(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_editor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_campaths(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_photos(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrcgroups(const uint8_t *state_json, size_t len, size_t *out_len);
+
+/* --- worlds --- */
+const uint8_t *rz_ui_render_worlds(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Tick-patched fragments: #world-linkhint, #world-gh, #world-st-<key>, #world-unity-rows. */
+const uint8_t *rz_ui_render_worlds_linkhint(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_github(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_status(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_unityrows(const uint8_t *state_json, size_t len, size_t *out_len);
+
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus

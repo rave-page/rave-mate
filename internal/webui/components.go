@@ -115,16 +115,7 @@ func toggleRowTip(label, act string, on bool, tipHTML string) string {
 // placeholder + optional pre-rendered tooltip beside the label. field/fieldPH/fieldTip are the
 // shorthands - extend HERE rather than growing a fourth near-copy.
 func fieldEx(label, act, value, inputType, placeholder, tipHTML string) string {
-	if inputType == "" {
-		inputType = "text"
-	}
-	ph := ""
-	if placeholder != "" {
-		ph = ` placeholder=` + attrQ(placeholder)
-	}
-	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
-		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+	return fieldExDL(label, strings.ToLower(label), act, value, inputType, placeholder, tipHTML)
 }
 
 // field renders a labelled text/number input inside a form-less row (dispatch on change via act).
@@ -170,10 +161,7 @@ func attrQ(s string) string {
 }
 
 // kv renders a key/value line (label muted, value emphasised, ctl-readable).
-func kv(label, value string) string {
-	return `<div class=kv><span class=kv-k>` + html.EscapeString(label) + `</span>` +
-		`<span class=kv-v data-label=` + attrQ(strings.ToLower(label)) + ` data-value=` + attrQ(value) + `>` + html.EscapeString(value) + `</span></div>`
-}
+func kv(label, value string) string { return kvDL(label, strings.ToLower(label), value) }
 
 // btnRow groups buttons horizontally.
 func btnRow(buttons ...string) string {
@@ -231,9 +219,7 @@ func progressBar(frac float64, caption string) string {
 
 // statusRow renders a status dot + label + muted sub-line (the per-card live status pattern).
 func statusRow(variant, label, line string) string {
-	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
-		attrQ(strings.ToLower(label)) + `>` + html.EscapeString(label) + `</div>` +
-		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+	return statusRowDL(variant, label, strings.ToLower(label), line)
 }
 
 // subTabs renders a segmented control. items = [][value,label]; each button's act = actPrefix+value.
@@ -440,3 +426,35 @@ func trimNum(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // fpair puts two short fields/selects side by side (.fpair grid; stacks <560px).
 func fpair(a, b string) string { return `<div class=fpair>` + a + b + `</div>` }
+
+// --- vrchat/worlds (zigui port) ---
+// Caller-resolved data-label variants (like toggleRowDL): the Zig render path keeps Unicode
+// strings.ToLower in Go, so the pure renderers get the data-label handed to them. The
+// label-lowering wrappers above delegate here - ONE markup source per component.
+
+// kvDL is kv with a caller-resolved data-label.
+func kvDL(label, dataLabel, value string) string {
+	return `<div class=kv><span class=kv-k>` + html.EscapeString(label) + `</span>` +
+		`<span class=kv-v data-label=` + attrQ(dataLabel) + ` data-value=` + attrQ(value) + `>` + html.EscapeString(value) + `</span></div>`
+}
+
+// statusRowDL is statusRow with a caller-resolved data-label.
+func statusRowDL(variant, label, dataLabel, line string) string {
+	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
+		attrQ(dataLabel) + `>` + html.EscapeString(label) + `</div>` +
+		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+}
+
+// fieldExDL is fieldEx with a caller-resolved data-label.
+func fieldExDL(label, dataLabel, act, value, inputType, placeholder, tipHTML string) string {
+	if inputType == "" {
+		inputType = "text"
+	}
+	ph := ""
+	if placeholder != "" {
+		ph = ` placeholder=` + attrQ(placeholder)
+	}
+	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
+		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
+		attrQ(dataLabel), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+}

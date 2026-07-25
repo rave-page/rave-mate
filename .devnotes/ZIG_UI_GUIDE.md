@@ -77,6 +77,10 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
 | motion | Zig (`native/zigui/src/motion.zig`; full + `#mo-body` fragment) | `TestZigMotionGolden` |
 | live | Zig (`native/zigui/src/live.zig`; full + 10 tick fragments via `rz_ui_render_live_frag`) | `TestZigLiveGolden` |
+
+| vrchat | Zig (`native/zigui/src/vrchat.zig`; full + `#vrc-status-region`/`#vrc-editor`/`#vrc-campaths`/`#vrc-photos-body`) | `TestZigVRChatGolden` |
+| vrchat ▸ groups | Zig (`native/zigui/src/vrcgroups.zig`; `#vrcg-body` sub-view) | `TestZigVRCGroupsGolden` |
+| worlds | Zig (`native/zigui/src/worlds.zig`; full + `#world-linkhint`/`#world-gh`/`#world-st-<key>`/`#world-unity-rows`) | `TestZigWorldsGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -108,6 +112,25 @@ carries Go-runtime workarounds (string-builder reuse, tick/patch throttles sized
 pressure, precomputed caches dodging per-render alloc). During phase A, replicate them
 where they shape the DOM (parity!); FLAG them in port notes. Phase B (Zig shell) revisits
 each — many are unnecessary under explicit allocators + no GC.
+
+VRChat-port notes (tabs #3/#4): the tab + its Groups sub-view are separate exports (the tab
+embeds `#vrcg-body`, actions patch it alone). components.go grew caller-resolved data-label
+variants (`kvDL`/`statusRowDL`/`fieldExDL`, wrappers delegate) mirroring `toggleRowDL`.
+Components ported to `components.zig`: `kv` · `statusRow` · `fieldEx` ·
+`cardOpen/cardHeadClose/cardClose` · `itemRowOpen/itemRowClose` · `mdOpen/mdSplit/mdClose`
+(masterDetail) · `fpairOpen/fpairClose` · `num(i64)` (Go `%d`). Two things stay resolved
+Go-side because Zig has no equivalent: the photo cell's `title=%q` (Go strconv quoting) is
+pre-quoted into state (`titleQ`, emitted verbatim), and pre-rendered fragments from other
+subsystems (campath 3-D viewer SVG, play button, `tipTopic` tooltips) travel as trusted raw
+strings. Nil-slice gotcha: nested zero-value state structs marshal `null` for their slices and
+Zig slice parsing rejects null — every slice field carries `,omitempty` so Zig falls back to
+its `&.{}` default.
+
+Worlds-port notes (tab #5): the ws-help prose paragraphs, hand-written card titles and the
+add-list placeholder/submit label were Go **source literals inserted unescaped** — several carry
+apostrophes, so escaping them would change the DOM. They travel in state and BOTH renderers emit
+them raw (documented in the header of worlds.zig + the state block). Everything user-derived
+(names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
 
 ## Dev rules when touching UI during migration
 
