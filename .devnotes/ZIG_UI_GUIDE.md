@@ -1290,3 +1290,131 @@ Two honest caveats recorded there: **pure Go is still the cheapest renderer for 
 **batching only pays where there are MANY fragments** - a single big fragment wants dedup, not a
 batch. Quote the post-composition figures: against per-fragment JSON the same change measured
 -43%/-45%, and two optimisations on one tax do not add up.
+## Phase B — B4 retained-state pass: settings (B4c probes + B4d search)
+
+B4 removes retained-state workarounds whose only reason was the Go runtime (GC pressure,
+handler-lane budget). These are BEHAVIOUR changes: the DOM must stay identical, the inputs and the
+timing change. Both surfaces here are **Go-side only** — no schema row, no `_v2` export, no marker
+block in root.zig/components.zig, so wire ids 170-179 stay free. Matching is not rendering, and a
+probe schedule is not state the renderers see.
+
+### B4c — `settingsProbes` / `maybeRefreshProbes` / `probeTTL` → concurrent, cost-paced probes
+
+`internal/webui/settings_probes.go` (new) owns what render_settings.go used to carry. The blocking
+work still runs off the render + handler lane — that was never the workaround. The workaround was
+ONE `busy` flag plus a 10 s TTL:
+
+- the flag serialized the whole set behind its slowest member, and the pass published EVERY slot
+  only after the last one returned (so a MIDI port waited on a PATH scan and an STT enumeration);
+- the TTL bounded how often that serial pass ran — a lane/GC budget, not a correctness requirement —
+  and made every value up to 10 s stale.
+
+**Shape now.** A `probeSpec{key, run}` table (8 entries) with a `probeSlot{live, done, took, at}`
+each. `kickProbes()` starts every eligible probe on its own goroutine (non-blocking: a map walk plus
+N spawns, safe on both lanes); each probe commits ITS OWN slot and reports whether the DOM can
+differ; `runProbe` releases the guard and the LAST probe in flight owns the re-render.
+
+- **Coalescing is mandatory, and the eval queue cannot prove it.** `patchMain` rebuilds the whole
+  document and re-registers smart selects; eight concurrent rebuilds would race that. The queue
+  coalesces by fragment id, so N patchMains look like ONE entry there — which is why the cache
+  counts `repatches` itself and the gate asserts `== 1`. Falsified by execution: patching per probe
+  fails with "re-renders = 6, want 1".
+- **Gates are per-probe now.** `cardGate` read one global `ready` ("some pass finished"); it reads
+  `probeDone(pkTools)` / `probeDone(pkVR)`. Same settled DOM, and the fpcalc gate no longer waits on
+  a Unity inspect. `tcExtraModal` likewise asks for the device kind it needs.
+- **THE ONE GATE LEFT IS NOT A TTL.** A probe may not restart until `probeBudget`(=20) × **its own
+  last measured duration**. Measured (5950X, `TestProbeRealDurations`): tools 4.3 ms · dev:midi
+  56 ms · dev:waveout 6.6 ms · dev:midiout 0.5 ms · dev:sttmic **303 ms** · vr/audiorec/unity ~0.
+  Six of the eight therefore re-run at the full demand rate (1 Hz — 10× fresher than the TTL) while
+  the STT mic enumeration, the probe that actually motivated the TTL, prices ITSELF out to ~6 s. A
+  blind demand-rate sweep would have been a real regression: 303 ms/s is ~30% of a core for as long
+  as the Settings tab is open, and this repo's idle-CPU discipline (`u.bg` pollers back off) does not
+  permit that. Cost-proportional pacing gives the cheap probes 10× the freshness at ~5% of a core
+  each, with no fixed staleness bound anywhere. **If a future wave wants literally-no-gate, the STT
+  enumeration has to get cheaper first — that is the whole story of this TTL.**
+- **Demand, not a timer:** the ~1 Hz settings tick (governor-gated, only while Settings is the
+  active tab), tab-open renders, the Refresh button (`invalidateProbes` is gone — there is nothing
+  to invalidate), and `probeNow(pkTools, pkVR)` right after a tool install, which runs the two
+  relevant probes on the caller's (already off-lane) goroutine so the follow-up patch sees them.
+- **The gridfix env probe keeps its own 5-min TTL** (settings_gridfix.go): it spawns Python. Same
+  reasoning as above, one cost class further out.
+- **Deliberate second behaviour change:** the old changed-check ignored Unity entirely, so a project
+  that gained/lost its plugin only surfaced on the next unrelated `patchMain`. Now it patches. Same
+  settled DOM, sooner.
+
+**DOM-identity gate.** The settings goldens (18 fixtures × 2 surfaces + 6 status states) are
+unchanged. On top, `TestProbeAsyncArrivalRendersIdentically` pins the thing the async path could
+break: while a probe is IN FLIGHT the pane renders the LAST KNOWN values — no pending/loading state
+exists — and once the result lands the pane is byte-identical to one rendered from a cache that held
+those values all along (sync arrival, the pre-B4c shape). Falsified by execution: returning a zero
+status while the tools probe is live fails with "a probe in flight changed the DOM (10152 vs 10111
+bytes)". Serializing the kick fails the concurrency gate (peak=1, 362 ms for 6×60 ms).
+
+**Fixtures freeze the cache.** `freezeProbes(u)` sets `frozen` + marks every probe landed. Pre-B4c
+the fixtures parked `at = time.Now()` so the TTL suppressed the kick; with no TTL there is no window
+to park in, and an unfrozen fixture would have real OS probes overwriting its slots mid-render.
+Anything that renders `settingsState()` off a fixture MUST use it.
+
+**Test hazard worth remembering:** `settingsProbeTable` is package state, so any OTHER live `*UI` in
+the test process (its 1 Hz settings tick calls `kickProbes`) runs YOUR synthetic probes. Counting
+runs without checking whose UI asked made the pacing gate fail only in the full-package run
+("slow probe ran 5 times, want 2"). `countProbe(mine, …)` ignores foreign UIs.
+
+**Numbers.** Cold fill 370 ms serial → 303 ms concurrent (bounded by the slowest member instead of
+the sum), and per-slot freshness now lands at that probe's own cost instead of TTL + full pass
+(worst case 10.37 s → 0.5-303 ms). Handler lane unchanged: the kick is 214 ns of a 220 µs cold
+settings state build (+0.1%); the legacy kick measured 6.7 ns because the TTL short-circuited it
+99.9% of the time — the honest comparison is "the lane never paid for probes, before or after".
+
+### B4d — settings search over `setBlock`/`setKid` instead of rendered HTML
+
+`render_settings_search.go` (new). The old matcher rendered every card and matched
+`foldSearch(stripTags(setCardHTML(card)))` — ~40 full card renders per keystroke on the handler lane,
+over text the state already carries. Since wave B-2 `setBlock`/`setKid` are full structured state
+(tooltips included), so the walk reads the state.
+
+- **SEARCHABLE = the document's TEXT NODES**, which is exactly what `stripTags` left behind.
+  Attribute values are NOT searchable and must not start being: a field's `value`/`placeholder`, a
+  switch's `title`, a select's filter and every `data-*` never matched. (A select's OPTION rows are
+  in the DOM only while it is open — the walk mirrors that too.)
+- **Why per-piece collection is equivalent to the old single haystack:** terms come from
+  `strings.Fields`, so no term contains whitespace, and `setCardHTML` puts at least one tag — hence
+  at least one space after `stripTags` — between any two text nodes. A whitespace-free term
+  therefore matches the joined haystack iff it matches inside ONE text run. That is also what makes
+  the exhaustive gate possible.
+- **Raw seams keep using `stripTags`**, on their own fragment: `raw`/`noteRaw`/`region` blocks, a
+  legacy pre-rendered tooltip, and the four sub-view kinds (`gridfix`/`gridfixmodel`/`bridge`/
+  `updregion`, which render through their own renderers). Those are the only cards that still build
+  markup to be searched, and `stripTags` stays in production for them.
+- **Watch the text nodes that are not a state field.** `selListHTML`'s empty state is the literal
+  `No matches`, and a tooltip link's text node is `label + " ↗"` — both are part of the haystack.
+  The exhaustive gate found them.
+
+**Gates (written and run against BOTH implementations before the swap).**
+1. `TestSettingsSearchHaystacksEquivalent` — EXHAUSTIVE, not a sample: per card, the distinct
+   whitespace-free RUNS of both haystacks must contain each other, which decides identity for every
+   term that could ever be typed. 6069 corpus cards (17 fixtures × 51 cards × 7 locales) ⇒ 15.9 M
+   single-term queries.
+2. `TestSettingsSearchDifferential` — the enumerated form the plan asked for: 4248 mechanically
+   derived queries (every distinct corpus word + first/last/interior/prefix/suffix/upper/no-match
+   variants + multi-term ANDs + the fixture queries + whitespace edges) × 357 cards = 1 516 536 match
+   decisions, identical selection sets.
+3. `TestSettingsSearchPaneMatchesLegacy` — drives the PRODUCTION `settingsContentState()` and
+   compares the pane's section+card ids against the legacy matcher's verdict, so "production is
+   wired to the equivalent matcher" is pinned, not assumed.
+4. `TestSettingsSearchStructuredCoverage` — every block/kid kind + tooltip shape the fixture corpus
+   does not carry (open select with rows, empty filtered select, legacy raw ss-label, gated toggle,
+   form/install/itemrow/pathrow), with must-match / must-NOT-match lists.
+
+Falsified by execution: dropping the status line from the walk fails with "text run
+`https://development.api.rave.page` reachable in the OLD haystack only"; emitting a field's VALUE
+(an attribute in both paths) fails with "text run `30` reachable in the NEW haystack only".
+
+**Numbers.** Real per-keystroke pane (`settingsContentState` with a query, 51 cards):
+**2.10 → 1.25 ms** of handler lane (-40%), 9216 → 6473 allocs, 1.91 → 1.22 MB. Matching alone over
+the 867-card corpus: 15.2 → 6.2 ms (-59%), 58 077 → 11 193 allocs. Haystack bytes barely move
+(607 → 560 B/card): the win is not building the markup, not a smaller needle.
+
+**Settings fixtures are now UNTAGGED** (`render_settings_fixtures_test.go`) — the B0 note's "the
+tagged tabs' fixtures moving untagged would let one file cover both", done for settings because this
+wave owns those files. The zigui golden gate keeps its tests and shares the corpus.
