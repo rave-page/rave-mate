@@ -8,6 +8,7 @@ import (
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/zigui"
 )
 
@@ -508,5 +509,96 @@ func TestZigPCViewerGolden(t *testing.T) {
 		t.Run("gpu/"+name, func(t *testing.T) {
 			zigGolden(t, "pcGpu", st, moPCGpuHTMLOf(st), zigui.RenderPCGpu)
 		})
+	}
+}
+
+// ── Automations ▸ tooltip seam (phase B1b) ──
+
+// aeTipMutate rewrites the tooltips of a block list. kind:
+//
+//	"grid" - swap in the registry's KEYBIND-GRID topics (no automations topic has one)
+//	"raw"  - drop back to the pre-rendered dual-field bridge an un-migrated builder ships
+func aeTipMutate(bs []aeBlockSt, kind string) []aeBlockSt {
+	out := make([]aeBlockSt, len(bs))
+	copy(out, bs)
+	for i := range out {
+		b := &out[i]
+		switch kind {
+		case "grid":
+			if b.Field.TipS != nil {
+				b.Field.TipS = tipTopicSt("cue-edit") // grouped grid, 23 rows
+			}
+			if b.Field2.TipS != nil {
+				b.Field2.TipS = tipTopicSt("wave-nav") // grid with no section headers
+			}
+			if b.TipS != nil {
+				b.TipS = tipTopicSt("cue-edit")
+			}
+			if b.Label != nil && b.Label.Tip != nil {
+				b.Label = &aeLabelSt{Text: b.Label.Text, Tip: tipTopicSt("wave-nav")}
+			}
+		case "raw":
+			if b.Field.TipS != nil {
+				b.Field.Tip, b.Field.TipS = renderTipSt(*b.Field.TipS), nil
+			}
+			if b.Field2.TipS != nil {
+				b.Field2.Tip, b.Field2.TipS = renderTipSt(*b.Field2.TipS), nil
+			}
+			if b.TipS != nil {
+				b.Tip, b.TipS = renderTipSt(*b.TipS), nil
+			}
+			if b.Label != nil {
+				b.LabelHTML, b.Label = b.Label.html(), nil
+			}
+		}
+	}
+	return out
+}
+
+// TestZigAutomationsTipGolden pins the tooltip seam on both automations dialogs (8 sites in the
+// editor, 7 in the schedule editor incl. the selraw ss-label). The real fixtures already cover
+// present / absent / multi-link (auto-sch-cron carries two authoritative links); this adds the
+// keybind-grid shape neither dialog's topics have, the raw-bridge fallback, and every locale.
+func TestZigAutomationsTipGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	ed, sch := aeModalFixtures(t)["populated"], asModalFixtures()["cronOK"]
+	for _, loc := range i18n.Available() {
+		i18n.SetLocale(loc.Code)
+		for _, kind := range []string{"", "grid", "raw"} {
+			name := loc.Code + "/structured"
+			if kind != "" {
+				name = loc.Code + "/" + kind
+			}
+			t.Run(name, func(t *testing.T) {
+				e := ed
+				e.Ident, e.Match = aeTipMutate(e.Ident, kind), aeTipMutate(e.Match, kind)
+				e.Steps = make([]aeStepSt, len(ed.Steps))
+				copy(e.Steps, ed.Steps)
+				for i := range e.Steps {
+					e.Steps[i].Blocks = aeTipMutate(e.Steps[i].Blocks, kind)
+				}
+				zigGolden(t, "aeModal", e, aeModalHTMLOf(e), zigui.RenderAutoEditor)
+
+				s := sch
+				s.Head, s.Trigger, s.Gates = aeTipMutate(s.Head, kind), aeTipMutate(s.Trigger, kind), aeTipMutate(s.Gates, kind)
+				zigGolden(t, "asModal", s, asModalHTMLOf(s), zigui.RenderAutoSchedule)
+
+				// a mutation that changes nothing would make this subtest silently inert
+				if kind == "grid" {
+					if aeModalHTMLOf(e) == aeModalHTMLOf(ed) || asModalHTMLOf(s) == asModalHTMLOf(sch) {
+						t.Fatal("the grid mutation did not reach a tooltip - the fixture carries no structured tip")
+					}
+					if !strings.Contains(aeModalHTMLOf(e), "tt-kb-keys") || !strings.Contains(asModalHTMLOf(s), "tt-kb-keys") {
+						t.Fatal("no keybind grid in the mutated output")
+					}
+				}
+				if kind == "raw" && (aeModalHTMLOf(e) != aeModalHTMLOf(ed) || asModalHTMLOf(s) != asModalHTMLOf(sch)) {
+					t.Fatal("the raw bridge must reproduce the structured markup byte for byte")
+				}
+			})
+		}
 	}
 }
