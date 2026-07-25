@@ -173,6 +173,13 @@ Rules:
   editor (8), automations schedules (7). The other 14 files keep the raw pre-rendered string over
   a dual-field bridge (`tipOr`) and are untouched — wave B-2 flips them. Detail + rules:
   ZIG_UI_GUIDE.md "tipTopic → structured tipSt".
+- **P6 UI phase B (wave B-1, in progress):** the per-render state→JSON→parse round trip is
+  being replaced by RZW1, a length-prefixed TLV wire whose Go encoder and Zig decoder are
+  GENERATED FROM ONE SCHEMA (`internal/zigui/wiregen`) - appgroups + logs pilots land as
+  `_v2` exports beside the JSON ones (dispatch v2 → v1 → Go, downgrades counted). -61% on the
+  ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
+  mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
+  "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
 
 ## CI
 

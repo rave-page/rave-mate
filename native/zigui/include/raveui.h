@@ -242,6 +242,20 @@ const uint8_t *rz_ui_render_pc_gpu(const uint8_t *state_json, size_t len, size_t
 const uint8_t *rz_ui_render_tip(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end phaseb-tip --- */
 
+
+/* --- phaseb-wire --- */
+/* RZW1 binary state wire (phase B pilots). Same renderers as the JSON exports, fed by a
+ * length-prefixed TLV document (magic "RZW1", u16 message id, u32 schema hash, u32 arena
+ * length, strings arena, field-tagged body). Encoder: internal/zigui/wire.go; both sides
+ * generated from one schema (internal/zigui/wiregen). A header/schema/bounds mismatch
+ * returns NULL - the caller then tries the _v1 (JSON) export, then its Go renderer.
+ * Free with rz_ui_free(ptr, *out_len), same as the JSON exports. */
+const uint8_t *rz_ui_render_appgroups_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_appgroups_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_logs_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_logs_lines_v2(const uint8_t *state, size_t len, size_t *out_len);
+/* --- end phaseb-wire --- */
+
 #ifdef __cplusplus
 }
 #endif
