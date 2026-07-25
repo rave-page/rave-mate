@@ -737,12 +737,13 @@ pub const ArModal = struct {
     watch: c.KV = .{},
     chain: c.KV = .{},
     ignoresMatch: []const u8 = "",
-    file: c.Field = .{},
+    file: DlgField = .{}, // webui dlgFieldSt — carries the structured tooltip (B-1b)
     browse: c.Btn = .{},
     erases: bool = false,
     deleteWarn: []const u8 = "",
     deleteScope: []const u8 = "",
-    deleteTip: []const u8 = "",
+    deleteTip: []const u8 = "", // legacy raw (bridge)
+    deleteTipSt: ?c.Tip = null, // structured tooltip — wins over deleteTip
     ack: c.Toggle = .{},
     foot: ArFoot = .{},
 };
@@ -759,14 +760,14 @@ pub fn renderArModal(h: *Html, st: ArModal) !void {
     try c.kvOf(h, st.chain);
     try c.hint(h, "info", st.ignoresMatch);
     try h.raw("<div class=lib-toolbar>");
-    try c.fieldOf(h, st.file);
+    try renderDlgField(h, st.file);
     try c.btnOf(h, st.browse);
     try h.raw("</div>");
     if (st.erases) {
         try c.hint(h, "bad", st.deleteWarn);
         try h.raw("<div class=pb-hint>");
         try h.esc(st.deleteScope);
-        try h.raw(st.deleteTip);
+        try c.tipOr(h, st.deleteTipSt, st.deleteTip);
         try h.raw("</div>");
         try c.toggleOf(h, st.ack);
     }

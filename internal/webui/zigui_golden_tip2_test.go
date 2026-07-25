@@ -329,6 +329,39 @@ func TestZigTip2VRChatGolden(t *testing.T) {
 	}, vrcgBodyHTML, zigui.RenderVRCGroups)
 }
 
+// ── the last four state contracts: run-now dialog, bridge card, mirror banner, cue-edit topbar ──
+
+func TestZigTip2RestGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	// run-now: the file field's own tip (dlgFieldSt) AND the delete-scope pb-hint tip
+	tip2Sweep(t, "arModal", func(tp *tipSt, raw string) arModalSt {
+		st := arModalFixtures()["acked"]
+		st.File.TipS, st.File.Tip = tp, raw
+		st.DeleteTipS, st.DeleteTip = tp, raw
+		return st
+	}, arModalHTMLOf, zigui.RenderAutoRunNow)
+
+	tip2Sweep(t, "bridgeCard", func(tp *tipSt, raw string) bridgeSt {
+		st := bridgeFixtures()["enrolled"]
+		st.TipS, st.Tip = tp, raw
+		return st
+	}, bridgeCardHTML, zigui.RenderSettingsBridge)
+
+	tip2Sweep(t, "mirrorBanner", func(tp *tipSt, raw string) libMirrorBanSt {
+		st := libMirrorFixtures()["populated"].Banner
+		st.TipS, st.Tip = tp, raw
+		return st
+	}, mirrorBannerHTMLOf, zigui.RenderLibMirrorBanner)
+
+	tip2Sweep(t, "ceTopbar", func(tp *tipSt, raw string) ceTopbarSt {
+		st := ceTopbarFixtures()["local"]
+		st.TipS, st.Tip = tp, raw
+		return st
+	}, ceTopbarHTMLOf, zigui.RenderCueEditTopbar)
+}
+
 // ── contract tests (untagged behaviour, no lib needed beyond the build tag) ──
 
 // TestSsLabelStIsTheOneMarkupSource pins the shared label state against the two literals it

@@ -662,7 +662,7 @@ func (u *UI) mpLoudExtraHTML(t *mpSt, i int) string {
 			lbl = "🎧 " + i18n.T("player.label.monitorLoudOn", i18n.A{"gain": fmt.Sprintf("%+.1f", p.res.GainDB)})
 		}
 		b.WriteString(`<div class=mp-monrow><button class="` + cls + `" data-act=` + attrQ("mp-monloud:"+t.host) + `>` +
-			html.EscapeString(lbl) + `</button>` + tipTopic("mp-prelisten") + `</div>`)
+			html.EscapeString(lbl) + `</button>` + tipTopicHTML("mp-prelisten") + `</div>`)
 	}
 	return b.String()
 }
