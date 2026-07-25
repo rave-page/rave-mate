@@ -14,7 +14,7 @@ package zigui
 // bundled compiler-rt doesn't export for gnu targets — libquadmath (mingw on
 // windows, gcc's on linux) provides them.
 #cgo windows LDFLAGS: -lquadmath
-#cgo linux LDFLAGS: -lquadmath
+#cgo linux LDFLAGS: -lquadmath -lm
 #include "raveui.h"
 */
 import "C"

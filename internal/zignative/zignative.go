@@ -9,6 +9,8 @@ package zignative
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../native/zigcore/include
 #cgo LDFLAGS: -L${SRCDIR}/../../native/zigcore/zig-out/lib -lravezig
+// linux: Zig libc math (sin/floor/sincos/ceil) resolves from libm; mingw CRT has it built in.
+#cgo linux LDFLAGS: -lm
 #include "ravezig.h"
 */
 import "C"
