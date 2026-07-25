@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds the ravezig native core (native/zigcore) for zigdsp-tagged Go builds.
 # Requires zig >= 0.16 on PATH (winget zig.zig / https://ziglang.org/download).
-# Output: native/zigcore/zig-out/lib/libravezig.a (cgo links via -L -lravezig).
+# Outputs: native/zigcore/zig-out/lib/libravezig.a (cgo links via -L -lravezig)
+#          native/zigcore/zig-out/bin/rave-probe[.exe] (P4 probe worker exe,
+#          opt-in via config features.workers.probeExe).
 set -euo pipefail
 cd "$(dirname "$0")/../native/zigcore"
 
@@ -29,5 +31,5 @@ esac
 # zig names gnu-target static libs <name>.lib on Windows; cgo -l wants libravezig.a
 cd zig-out/lib
 [ -f ravezig.lib ] && cp -f ravezig.lib libravezig.a
-ls -la
-echo "ravezig built ($ver, ${target:-native})"
+ls -la . ../bin
+echo "ravezig + rave-probe built ($ver, ${target:-native})"
