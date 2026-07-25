@@ -131,6 +131,15 @@ const uint8_t *rz_ui_render_library_detail(const uint8_t *state_json, size_t len
 const uint8_t *rz_ui_render_library_queue(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_library_cuecell(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- cueedit --- */
+/* Cue-editor subview (library_cueedit.go): the #ce-topbar readout strip, the full-width
+ * wave strip (topbar + the raw player markup - player.go keeps the 30 fps __rt playhead
+ * surface and all of its float math), and the editor rail inside #lib-detail. The topbar
+ * and rail render EMPTY when the editor is off => NULL, and the Go fallback agrees. */
+const uint8_t *rz_ui_render_cueedit_topbar(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_cueedit_wave(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_cueedit_rail(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

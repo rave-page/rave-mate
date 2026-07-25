@@ -433,3 +433,26 @@ func RenderLibraryCueCell(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_library_cuecell(p, l, n)
 	})
 }
+
+// --- cueedit ---
+
+// RenderCueEditTopbar renders the #ce-topbar readout strip (empty when the editor is off).
+func RenderCueEditTopbar(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_topbar(p, l, n)
+	})
+}
+
+// RenderCueEditWave renders the full-width cue-edit wave strip (topbar + raw player markup).
+func RenderCueEditWave(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_wave(p, l, n)
+	})
+}
+
+// RenderCueEditRail renders the cue-editor rail (#lib-detail inner in cue-edit mode).
+func RenderCueEditRail(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_rail(p, l, n)
+	})
+}

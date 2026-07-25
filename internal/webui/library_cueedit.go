@@ -2088,194 +2088,26 @@ func (u *UI) ceWaveHTML() string {
 	// ceEnterRemote bind; a render-side ensure fought the selection
 	// handler's bind (gen ping-pong) whenever sel ≠ editor target and
 	// re-armed the lost-patch race behind stuck "Analyzing waveform…".
-	return `<div id=ce-topbar>` + u.ceTopbarHTML() + `</div>` + u.mpHTML("library")
+	st := ceWaveSt{Topbar: u.ceTopbarState()}
+	st.Player = u.mpHTML("library") // raw: player.go owns the 30 fps __rt surface
+	return ceWaveRender(st)
 }
 
 // ceTopbarHTML: track identity, cursor position (time + bar.beat), jump size, drops
 // (clickable = jump) and cue census in one strip above the waveform.
+// State + renderer live in render_library_cueedit.go (Zig-migrated).
 func (u *UI) ceTopbarHTML() string {
-	c := u.ce()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.active {
-		return ""
-	}
-	// verified-grid status: gfVerified()/vs.Has() take their OWN package locks (never c.mu),
-	// so this is safe under c.mu. rce edits a cached copy - the store is keyed on local paths.
-	verified, verifiable := false, false
-	if c.rce == nil {
-		if vs := u.gfVerified(); vs != nil {
-			verified = vs.Has(c.path)
-		}
-		verifiable = len(c.track.Beatgrid) == 1 && c.track.BPM > 0 // gfToggleVerify needs one marker + a BPM
-	}
-	var b strings.Builder
-	b.WriteString(`<div class=ce-topbar>`)
-	b.WriteString(`<span class=ce-tb-eyebrow>` + esc(i18n.T("library.ce.eyebrow")) + `</span>`)
-	b.WriteString(`<span class=ce-tb-title>` + esc(trackTitle(c.track)) + `</span>`)
-	if r := c.rce; r != nil { // remote session: whose track + unsaved marker
-		b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.T("library.rce.topbarOn", i18n.A{"name": r.peerName})) + `</span>`)
-		if c.rceDirtyLocked() {
-			b.WriteString(`<span class=ce-tb-warn title=` + attrQ(i18n.T("library.rce.unsaved")) + `>●</span>`)
-		}
-	}
-	meta := ""
-	if c.track.BPM > 0 {
-		meta = fmt.Sprintf("%.1f BPM", c.track.BPM)
-	}
-	if k := strings.TrimSpace(c.track.Key); k != "" {
-		if meta != "" {
-			meta += " · "
-		}
-		meta += k
-	}
-	if meta != "" {
-		b.WriteString(`<span class=ce-tb-meta>` + esc(meta) + `</span>`)
-	}
-	b.WriteString(`<span class=ce-tb-cursor>▸ ` + pubClock(c.cursorMs/1000) + ` · ` +
-		esc(i18n.T("library.ce.bar")) + ` ` + ceBarBeat(c.grid, c.cursorMs) + `</span>`)
-	b.WriteString(`<span class=ce-jump>` + esc(i18n.T("library.ce.jump", i18n.A{"n": fmt.Sprint(int(c.jump))})) + `</span>`)
-	for i, d := range c.drops {
-		b.WriteString(`<span class=ce-tb-drop data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", d)) +
-			`>D` + ceDropLabel(i) + ` ` + pubClock(d/1000) + `</span>`)
-	}
-	b.WriteString(`<span class=ce-tb-meta>` + esc(i18n.Tn("library.ce.patternCues", ceCueCount(c.track.Cues))) + `</span>`)
-	if !c.fileTag {
-		b.WriteString(`<span class=ce-tb-warn title=` + attrQ(i18n.T("library.ce.noFileTag")) + `>⚠</span>`)
-	}
-	// verified-grid chip: mint ✓ when verified (click = unmark), outline "Mark verified" when
-	// eligible. Verified locks nudging (ceGridShift), so the chip doubles as the toggle for it.
-	switch {
-	case verified:
-		b.WriteString(`<span class=ce-tb-verified title=` + attrQ(i18n.T("library.ce.verifiedTip")) +
-			` data-act=` + attrQ("gf-verify:"+c.path) + `>✓ ` + esc(i18n.T("library.gf.verifiedBadge")) + `</span>`)
-	case verifiable:
-		b.WriteString(`<span class=ce-tb-verify title=` + attrQ(i18n.T("library.ce.verifyTip")) +
-			` data-act=` + attrQ("gf-verify:"+c.path) + `>` + esc(i18n.T("library.gf.markVerified")) + `</span>`)
-	}
-	b.WriteString(`<span class=ce-tb-spacer></span>` + tipTopic("cue-edit") +
-		btn("✕ "+i18n.T("common.close"), "ghost", "ce-close", ""))
-	b.WriteString(`</div>`)
-	return b.String()
+	return ceTopbarRender(u.ceTopbarState())
 }
 
 // ceCueCount counts non-grid cues (what the waveform flags show).
 func ceCueCount(cues []musiclib.CuePoint) int { return musiclib.MusicalCues(cues) }
 
 // ceRailHTML is the cue-editor card in the library detail rail. s is LOCKED by the
-// caller - never re-lock it below (deadlock).
+// caller - never re-lock it below (deadlock). State + renderer live in
+// render_library_cueedit.go (Zig-migrated).
 func (u *UI) ceRailHTML(s *libSt) string {
-	wb := u.ceWriteHTML(s) // built first - locks ceSt itself (never nested under c.mu)
-	if rs := u.rceSaveHTML(); rs != "" {
-		wb = rs // rce mode: save-to-peer rail replaces the local write-back router
-	}
-	mode := u.ceMode()
-	pref := u.cePrefFor(mode)
-	modeSel := u.ceModeSelectHTML(mode)
-	prepSel := u.prepSelectHTML("prep-rail")
-	nChecked := len(s.collSel)
-	c := u.ce()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.active {
-		return ""
-	}
-	// controls only - the readouts (cursor, drop times, cue census) live in the
-	// ce-topbar on the waveform strip
-	eyebrow := i18n.T("library.ce.eyebrow")
-	if r := c.rce; r != nil {
-		eyebrow = i18n.T("library.rce.eyebrow", i18n.A{"name": r.peerName}) // editing the PEER's track
-	}
-	var b strings.Builder
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(eyebrow) + `</div><div class=insp-title>` +
-		esc(trackTitle(c.track)) + `</div></div>`)
-
-	// software mode: scopes new cues + apply/promote/write to one DJ app ("" = all)
-	b.WriteString(modeSel)
-	b.WriteString(u.ceDefaultsHTML(c, mode, pref))
-
-	// preparation playlist: P adds the open track, holding P removes it again
-	b.WriteString(prepSel)
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.prep.hint")) + `</div>`)
-
-	// drops → pattern assign grid (fixed rows drop 1-4 + X; unplaced rows still show)
-	st := u.cePatterns() // ensure the store is open so the pickers render on first use
-	b.WriteString(ceAssignGridHTML(c, st))
-	b.WriteString(btnRow(
-		btn(i18n.T("library.ce.addDrop"), "outline", "ce-drop-add", ""),
-		btn(i18n.T("library.ce.removeDrop"), "ghost", "ce-drop-del", "")))
-
-	// selection → pattern (cues) / delete (cues + drops)
-	nsel, ndsel := 0, 0
-	for _, on := range c.sel {
-		if on {
-			nsel++
-		}
-	}
-	for _, on := range c.dsel {
-		if on {
-			ndsel++
-		}
-	}
-	if nsel > 0 {
-		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.selection", i18n.A{"n": fmt.Sprint(nsel)})) + `</div>`)
-		b.WriteString(`<div class=lib-toolbar>` + fieldRaw("ce-pat-name", "", i18n.T("library.ce.patternName")) +
-			btn(i18n.T("library.ce.savePattern"), "outline", "ce-pat-save", "") + `</div>`)
-	}
-	if ndsel > 0 {
-		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.selDrops", i18n.A{"n": fmt.Sprint(ndsel)})) + `</div>`)
-	}
-	if nsel+ndsel > 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.delHint")) + `</div>`)
-	}
-	if st != nil && len(st.List()) > 0 {
-		b.WriteString(btnRow(btn(i18n.T("library.ce.managePatterns"), "ghost", "ce-pat-manage", "")))
-	}
-
-	// apply
-	if len(c.drops) > 0 {
-		b.WriteString(`<div class=btn-col>` +
-			btn(i18n.T("library.ce.applyHot"), "primary", "ce-apply:hot", "") +
-			btn(i18n.T("library.ce.applyMem"), "outline", "ce-apply:mem", "") + `</div>`)
-		if pref.Overwrite {
-			if n := ceInScopeMusical(c.track.Cues, mode); n > 0 {
-				b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.owNote", i18n.A{"n": fmt.Sprint(n)})) + `</div>`)
-			}
-		}
-	}
-	b.WriteString(btnRow(
-		btn(i18n.T("library.ce.promoteAll"), "ghost", "ce-promote", ""),
-		btn(i18n.T("library.ce.convertAll"), "ghost", "ce-convert", "")))
-	b.WriteString(btnRow(btn(i18n.T("library.ce.clearOne"), "ghost", "ce-clear", "")))
-	if c.report != nil {
-		r := c.report
-		b.WriteString(hint("ok", i18n.T("library.ce.reportHint", i18n.A{
-			"added": fmt.Sprint(r.Added), "cut": fmt.Sprint(r.Cut),
-			"skipped": fmt.Sprint(r.Skipped), "demoted": fmt.Sprint(r.Demoted)})))
-		if r.Replaced > 0 {
-			b.WriteString(hint("info", i18n.T("library.ce.replacedHint", i18n.A{"n": fmt.Sprint(r.Replaced)})))
-		}
-	}
-	if c.lastErr != "" {
-		b.WriteString(hint("bad", c.lastErr))
-	}
-
-	// batch: every action below runs over the CHECKED collection rows
-	if nChecked > 0 && c.rce == nil {
-		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.batchHeader", i18n.A{"n": fmt.Sprint(nChecked)})) + `</div>`)
-		b.WriteString(`<div class=btn-col>` +
-			btn(i18n.T("library.ce.applySelHot"), "outline", "ce-apply-sel:hot", "") +
-			btn(i18n.T("library.ce.applySelMem"), "outline", "ce-apply-sel:mem", "") + `</div>`)
-		b.WriteString(btnRow(
-			btn(i18n.T("library.ce.promoteSel"), "ghost", "ce-promote-sel", ""),
-			btn(i18n.T("library.ce.convertSel"), "ghost", "ce-convert-sel", "")))
-		b.WriteString(btnRow(btn(i18n.T("library.ce.clearSel", i18n.A{"n": fmt.Sprint(nChecked)}), "ghost", "ce-clear-sel", "")))
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.batchNote")) + `</div>`)
-	}
-
-	b.WriteString(wb)
-	b.WriteString(btnRow(btn(i18n.T("common.close"), "ghost", "ce-close", "")))
-	return b.String()
+	return ceRailRender(u.ceRailState(s))
 }
 
 // ceInScopeMusical counts the musical cues software scope sw sees.
@@ -2289,54 +2121,6 @@ func ceInScopeMusical(cues []musiclib.CuePoint, sw string) int {
 	return n
 }
 
-// ceModeSelectHTML renders the target-software picker (detected installs badged).
-func (u *UI) ceModeSelectHTML(cur string) string {
-	det := map[string]bool{}
-	for _, t := range u.ceTargets(false) { // cached - no fs probes per repaint
-		det[t.key] = true
-	}
-	return smartSelect("ce-mode", i18n.T("library.ce.modeLabel"), "ce-mode:", cur, func() []ssOpt {
-		opts := []ssOpt{{Val: "", Label: i18n.T("library.ce.modeAll"), Sub: i18n.T("library.ce.modeAllSub")}}
-		for _, s := range ceSoftwares {
-			o := ssOpt{Val: s[0], Label: s[1], Sub: i18n.T("library.ce.modeSwSub", i18n.A{"app": s[1]})}
-			if det[s[0]] {
-				o.Badge = i18n.T("library.ce.modeDetected")
-			}
-			opts = append(opts, o)
-		}
-		return opts
-	})
-}
-
-// ceDefaultsHTML renders the collapsible per-mode defaults. c LOCKED by the caller.
-func (u *UI) ceDefaultsHTML(c *ceSt, mode string, pref ceSWPref) string {
-	title := i18n.T("library.ce.defaultsAll")
-	if mode != "" {
-		title = i18n.T("library.ce.defaultsFor", i18n.A{"app": ceSoftwareLabel(mode)})
-	}
-	arrow := "▸"
-	if c.prefsOpen {
-		arrow = "▾"
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="pb-label ce-prefs-hd" data-act=ce-prefs-tgl>` + arrow + ` ` + esc(title) + `</div>`)
-	if !c.prefsOpen {
-		return b.String()
-	}
-	padOpts := [][2]string{{"2", "2"}, {"4", "4"}, {"6", "6"}, {"8", "8"}, {"16", "16"}, {"32", "32"}}
-	b.WriteString(selectBox(i18n.T("library.ce.prefPads"), "ce-pref-pads", padOpts, fmt.Sprint(pref.MaxPadsOr())))
-	b.WriteString(toggleRow(i18n.T("library.ce.prefOw"), "ce-pref-ow", pref.Overwrite))
-	b.WriteString(toggleRow(i18n.T("library.ce.prefSplit"), "ce-pref-split", !pref.NoSplitEven))
-	if mode != "" {
-		b.WriteString(toggleRow(i18n.T("library.ce.prefPromote", i18n.A{"app": ceSoftwareLabel(mode)}), "ce-pref-promote", pref.AutoPromoteOn(mode)))
-	}
-	if mode == "traktor" {
-		b.WriteString(toggleRow(i18n.T("library.ce.prefGridAnchor"), "ce-pref-grid", !pref.NoGridAnchor))
-	}
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.defaultsNote")) + `</div>`)
-	return b.String()
-}
-
 // ceAssignRows is the fixed minimum of assign-grid rows: drop 1-4 + the extra "X".
 // The grid always shows these five (more if extra drops are placed) so a pattern can be
 // picked for a slot even before its marker exists.
@@ -2348,65 +2132,6 @@ func ceDropLabel(i int) string {
 		return "X"
 	}
 	return fmt.Sprint(i + 1)
-}
-
-// ceAssignGridHTML renders the compact drop→pattern assign grid: one row per drop
-// (1-4 + X, plus any extra placed drops), each carrying the drop label (click = jump when
-// placed), its position (or an "unplaced" hint), and the pattern picker. Assignments
-// persist in c.assign (drop index → pattern id) - the same map ceSavePattern auto-fills
-// and ceApply reads - so they survive track nav with the rest of the cue-edit state.
-// c is LOCKED by the caller (ceRailHTML); never re-lock it here.
-func ceAssignGridHTML(c *ceSt, st *cuepattern.Store) string {
-	rows := ceAssignRows
-	if len(c.drops) > rows {
-		rows = len(c.drops)
-	}
-	var b strings.Builder
-	b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.ce.assignTitle")) + `</div>`)
-	b.WriteString(`<div class=ce-agrid>`)
-	for i := 0; i < rows; i++ {
-		placed := i < len(c.drops)
-		cls := "ce-arow"
-		if !placed {
-			cls += " unplaced"
-		}
-		b.WriteString(`<div class="` + cls + `">`)
-		tag := `DROP ` + ceDropLabel(i)
-		if placed {
-			b.WriteString(`<span class=ce-arow-tag data-act=` + attrQ(fmt.Sprintf("ce-goto:%f", c.drops[i])) + `>` + tag + `</span>`)
-			b.WriteString(`<span class=ce-arow-when>` + pubClock(c.drops[i]/1000) + `</span>`)
-		} else {
-			b.WriteString(`<span class=ce-arow-tag>` + tag + `</span>`)
-			b.WriteString(`<span class="ce-arow-when unplaced" title=` + attrQ(i18n.T("library.ce.unplacedTip")) +
-				`>` + esc(i18n.T("library.ce.unplaced")) + `</span>`)
-		}
-		if st != nil {
-			b.WriteString(ceAssignSelect(i, c.assign[i], st))
-		}
-		b.WriteString(`</div>`)
-	}
-	b.WriteString(`</div>`)
-	if len(c.drops) == 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.noDropsHint")) + `</div>`)
-	}
-	return b.String()
-}
-
-// ceAssignSelect renders the per-drop pattern picker.
-func ceAssignSelect(dropIdx int, cur string, st *cuepattern.Store) string {
-	id := fmt.Sprintf("ce-assign-%d", dropIdx)
-	curLabel := ""
-	if p, ok := st.Get(cur); ok {
-		curLabel = p.Name
-	}
-	return smartSelect(id, "", fmt.Sprintf("ce-assign:%d:", dropIdx), curLabel, func() []ssOpt {
-		opts := []ssOpt{{Val: "", Label: "—"}}
-		for _, p := range st.List() {
-			opts = append(opts, ssOpt{Val: p.ID, Label: p.Name,
-				Sub: i18n.Tn("library.ce.patternCues", len(p.Cues)), Badge: p.FromTrack})
-		}
-		return opts
-	})
 }
 
 // ── saved-pattern manager ──
