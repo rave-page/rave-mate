@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/getkin/kin-openapi v0.135.0
-	github.com/oapi-codegen/oapi-codegen/v2 v2.7.0
+	github.com/oapi-codegen/oapi-codegen/v2 v2.7.1
 )
 
 require (
