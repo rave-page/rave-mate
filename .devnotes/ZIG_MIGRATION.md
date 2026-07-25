@@ -166,6 +166,11 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
+- **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
+  (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
+  Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
+  that is the Go marshal - 75-80% is the Zig-side `std.json` parse (6.9 ns per state byte, 5×
+  Go's marshal slope). A binary wire must kill the PARSE, not just the marshal.
 
 ## CI
 
