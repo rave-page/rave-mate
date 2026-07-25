@@ -9,7 +9,6 @@ package webui
 import (
 	"context"
 	"fmt"
-	"html"
 	"time"
 
 	"rave.page/mate/internal/i18n"
@@ -107,12 +106,14 @@ func (u *UI) pubRemoteDelOpen(id string) {
 		}
 	}
 	s.mu.Unlock()
-	body := `<div class=np-artist>` + html.EscapeString(i18n.T("publish.remote.deleteConfirm", i18n.A{"name": name})) + `</div>`
-	footer := btnRow(
-		btn(i18n.T("publish.delete"), "destructive", "pub-del-do:"+id, ""),
-		btn(i18n.T("common.cancel"), "ghost", "modal-close", ""),
-	)
-	u.openModal(modal(i18n.T("publish.delete"), body, footer))
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{
+		Title:  i18n.T("publish.delete"),
+		HasMsg: true, Msg: i18n.T("publish.remote.deleteConfirm", i18n.A{"name": name}),
+		Btns: []uiBtn{
+			{Label: i18n.T("publish.delete"), Variant: "destructive", Act: "pub-del-do:" + id},
+			{Label: i18n.T("common.cancel"), Variant: "ghost", Act: "modal-close"},
+		},
+	}))
 }
 
 func (u *UI) pubRemoteDel(id string) {

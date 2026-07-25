@@ -146,15 +146,24 @@ func init() {
 // pubTrackCtxModal: right-click on a resolved tracklist row - mark the selection /
 // discover compatible tracks (same store + flows as the Collection).
 func (u *UI) pubTrackCtxModal(path string) {
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{
+		Title: filepath.Base(path), InBody: true, Btns: u.pubCompatBtns(path),
+	}))
+}
+
+// pubCompatBtns resolves the works-together buttons a tracklist row context menu offers for a
+// library-resolved path: mark the selection, discover compatible tracks, copy the path. Shared
+// by both context menus (pubTrackCtxModal, pubTrackCtx2).
+func (u *UI) pubCompatBtns(path string) []uiBtn {
 	sel := u.pubTSel()
-	var row []string
+	row := make([]uiBtn, 0, 3)
 	if sel[path] && len(sel) >= 2 {
-		row = append(row, btn(i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(len(sel))}), "primary", "lib-compat-mark:pub", ""))
+		row = append(row, uiBtn{Label: i18n.T("library.compat.ctxMark", i18n.A{"count": fmt.Sprint(len(sel))}),
+			Variant: "primary", Act: "lib-compat-mark:pub"})
 	}
-	row = append(row,
-		btn(i18n.T("library.compat.findBtn"), "outline", "lib-compat-find:"+path, ""),
-		btn(i18n.T("library.copyPath"), "ghost", "copy", path))
-	u.openModal(modal(filepath.Base(path), btnRow(row...), ""))
+	return append(row,
+		uiBtn{Label: i18n.T("library.compat.findBtn"), Variant: "outline", Act: "lib-compat-find:" + path},
+		uiBtn{Label: i18n.T("library.copyPath"), Variant: "ghost", Act: "copy", Val: path})
 }
 
 // ── capture file ops ──────────────────────────────────────────────────────────────
@@ -177,13 +186,18 @@ func (u *UI) pubCapDelOpen(capID string) {
 	if !ok {
 		return
 	}
-	body := `<div class=np-artist>Remove the capture "` + html.EscapeString(filepath.Base(s.Path)) + `" from the library?</div>`
-	footer := btnRow(
-		btn("Remove", "outline", "pub-capdel-do:"+capID, ""),
-		btn("Remove + delete file", "destructive", "pub-capdel-do:"+capID+"\x1ffiles", ""),
-		btn("Cancel", "ghost", "modal-close", ""),
-	)
-	u.openModal(modal("Remove capture", body, footer))
+	// The message literal quotes an ALREADY-ESCAPED file name, so it rides raw (MsgRaw) -
+	// escaping the whole line would turn its quotes into &#34; and change the DOM.
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{
+		Title:  "Remove capture",
+		HasMsg: true, MsgRaw: true,
+		Msg: `Remove the capture "` + html.EscapeString(filepath.Base(s.Path)) + `" from the library?`,
+		Btns: []uiBtn{
+			{Label: "Remove", Variant: "outline", Act: "pub-capdel-do:" + capID},
+			{Label: "Remove + delete file", Variant: "destructive", Act: "pub-capdel-do:" + capID + "\x1ffiles"},
+			{Label: "Cancel", Variant: "ghost", Act: "modal-close"},
+		},
+	}))
 }
 
 func (u *UI) pubCapDel(arg string) {
@@ -209,12 +223,16 @@ func (u *UI) pubCapDel(arg string) {
 // ── set ops: export / match / delete ──────────────────────────────────────────────
 
 func (u *UI) pubExportOpen(id string) {
-	body := `<div class=np-artist>Choose a format for the tracklist export.</div>` + btnRow(
-		btn("Text (.txt)", "primary", "pub-exportfmt:"+id+"\x1ftxt", ""),
-		btn("CSV (.csv)", "outline", "pub-exportfmt:"+id+"\x1fcsv", ""),
-		btn("JSON (.json)", "outline", "pub-exportfmt:"+id+"\x1fjson", ""),
-	)
-	u.openModal(modal("Export tracklist", body, ""))
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{
+		Title:  "Export tracklist",
+		HasMsg: true, MsgRaw: true, Msg: "Choose a format for the tracklist export.",
+		InBody: true, // buttons live in the body; the footer stays Go's default Close
+		Btns: []uiBtn{
+			{Label: "Text (.txt)", Variant: "primary", Act: "pub-exportfmt:" + id + "\x1ftxt"},
+			{Label: "CSV (.csv)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fcsv"},
+			{Label: "JSON (.json)", Variant: "outline", Act: "pub-exportfmt:" + id + "\x1fjson"},
+		},
+	}))
 }
 
 // pubExportFmt renders the exported tracklist in the modal (preview + copy). Text gets the
@@ -244,11 +262,7 @@ func (u *UI) pubExportFmt(arg string) {
 // pubExportModal renders the tracklist-export preview dialog (copyable textarea). Shared by the
 // local and remote (peer-driven) export flows.
 func pubExportModal(fmtKey, content string) string {
-	body := `<div class=np-artist>Select all + copy, or use Copy below.</div>` +
-		`<textarea class=pub-export-ta readonly rows=14>` + html.EscapeString(content) + `</textarea>`
-	footer := `<button class="rp-btn rp-btn--primary" data-act="copy" data-val="` + html.EscapeString(content) + `">Copy</button>` +
-		btn("Close", "outline", "modal-close", "")
-	return modal("Export - "+fmtKey, body, footer)
+	return pubExpDlgHTML(pubExportState(fmtKey, content))
 }
 
 func (u *UI) pubMatch(id string) {
@@ -289,9 +303,12 @@ func (u *UI) pubRenameOpen(id string) {
 			break
 		}
 	}
-	body := fmt.Sprintf(`<form data-act=pub-rename-do class=mform>%s%s<button class="rp-btn rp-btn--primary" type=submit>%s</button></form>`,
-		hiddenField("id", id), labeledInput("name", i18n.T("publish.setName"), cur), html.EscapeString(i18n.T("publish.renameSet")))
-	u.openModal(modal(i18n.T("publish.renameSet"), body, ""))
+	lbl := i18n.T("publish.setName")
+	u.openModal(pubRenameDlgHTML(pubRenameDlgSt{
+		Title: i18n.T("publish.renameSet"), ID: id,
+		NameLbl: lbl, NameDL: strings.ToLower(lbl), Cur: cur,
+		Submit: i18n.T("publish.renameSet"),
+	}))
 }
 
 func (u *UI) pubRename(f map[string]string) {
@@ -327,13 +344,17 @@ func (u *UI) pubDelOpen(id string) {
 	}
 	caps, _ := u.pubCaptures()
 	n := len(caps[id])
-	body := `<div class=np-artist>` + html.EscapeString(i18n.T("publish.del.confirm", i18n.A{"name": name})) + `</div>`
-	btns := []string{btn(i18n.T("publish.del.do"), "destructive", "pub-del-do:"+id, "")}
+	btns := []uiBtn{{Label: i18n.T("publish.del.do"), Variant: "destructive", Act: "pub-del-do:" + id}}
 	if n > 0 {
-		btns = append(btns, btn(i18n.T("publish.del.doFiles", i18n.A{"n": strconv.Itoa(n)}), "destructive", "pub-del-do:"+id+"\x1ffiles", ""))
+		btns = append(btns, uiBtn{Label: i18n.T("publish.del.doFiles", i18n.A{"n": strconv.Itoa(n)}),
+			Variant: "destructive", Act: "pub-del-do:" + id + "\x1ffiles"})
 	}
-	btns = append(btns, btn(i18n.T("actions.cancel"), "ghost", "modal-close", ""))
-	u.openModal(modal(i18n.T("publish.del.title"), body, btnRow(btns...)))
+	btns = append(btns, uiBtn{Label: i18n.T("actions.cancel"), Variant: "ghost", Act: "modal-close"})
+	u.openModal(dlgChoiceHTML(dlgChoiceSt{
+		Title:  i18n.T("publish.del.title"),
+		HasMsg: true, Msg: i18n.T("publish.del.confirm", i18n.A{"name": name}),
+		Btns: btns,
+	}))
 }
 
 // pubDel removes a set + reconciles its captures. Recorder.Delete takes storeMu and drainPersist()es
