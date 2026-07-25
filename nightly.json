@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d4c0b90",
-  "build": 133,
-  "commit": "d4c0b90",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-133-20260725-d4c0b90.exe",
-  "sha256": "067caba4e632234613007ad5e114490aa69aae48c9beda67d9685553e9575635",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-133-20260725-d4c0b90.exe",
-  "installer_sha256": "2d3aadeb446551292ba032290775b3672d554605ceb59ea6869fdfe0d6e5cea8",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-133-20260725-d4c0b90",
-  "linux_sha256": "5d5ab7d4dd092d08b243baf7513cf1ddde9ab9ad67f3e2863704c0639fe7470b",
+  "version": "nightly-59fb6db",
+  "build": 134,
+  "commit": "59fb6db",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-134-20260725-59fb6db.exe",
+  "sha256": "ebd88af05880e8fb26532b56b597ab5644ece413cfcf3b6f17343e3e18b70290",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-134-20260725-59fb6db.exe",
+  "installer_sha256": "b7c616933425f306b9eae1bec8472cc81a313c536ebf68ecf639bd4af596c041",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-134-20260725-59fb6db",
+  "linux_sha256": "4d4d035b33bdbf03bca17e2a841c8e52109d45f1a34672fbf649d3233b653289",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T07:16:00Z",
-  "notes": "feat(library): BPM target ranges per playlist/genre - octave-fold analysis, enforcement, sync"
+  "released": "2026-07-25T11:53:47Z",
+  "notes": "fix(zig): drop per-lib bundled compiler-rt - combined zigdsp+zigui+zigvr link deduped"
 }
