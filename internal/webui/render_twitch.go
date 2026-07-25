@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"rave.page/mate/internal/eventbus"
 	"rave.page/mate/internal/i18n"
@@ -22,13 +23,35 @@ var (
 	twViewOK bool
 )
 
-// subscribeTwitch buffers chat + alert events + viewer counts from the mesh bus (works for local AND
-// paired-peer Twitch, like the Fyne tab). Called once from onReady.
+// subscribeTwitch seeds the feed from the persistent chat log (history survives restarts -
+// a set streamed with the tab closed is readable after), then buffers live chat + alert
+// events + viewer counts from the mesh bus (works for local AND paired-peer Twitch, like
+// the Fyne tab). Called once from onReady.
 func (u *UI) subscribeTwitch() {
 	if u.svc.EventBus == nil {
 		return
 	}
 	canMod := u.svc.Twitch != nil // manager present ⇒ moderation routes (locally or to the owning peer)
+	if cl := u.svc.TwitchLog; cl != nil {
+		if evs := cl.Recent(250); len(evs) > 0 {
+			rows := make([]string, 0, len(evs)+2)
+			day := ""
+			for _, e := range evs {
+				if d := time.UnixMilli(e.TS).Format("2006-01-02"); d != day {
+					day = d
+					rows = append(rows, twitchDayRow(d))
+				}
+				if e.Kind == twitch.KindChat {
+					rows = append(rows, twitchChatRow(e, canMod))
+				} else {
+					rows = append(rows, twitchAlertRow(e))
+				}
+			}
+			u.twMu.Lock()
+			u.twitchRows = rows
+			u.twMu.Unlock()
+		}
+	}
 	push := func(row string) {
 		u.twMu.Lock()
 		u.twitchRows = append(u.twitchRows, row)
@@ -130,6 +153,11 @@ func (u *UI) twitchFeedHTML() string {
 		return `<div class=log-line>` + html.EscapeString(i18n.T("twitch.noMessagesYet")) + `</div>`
 	}
 	return strings.Join(rows, "")
+}
+
+// twitchDayRow renders a date separator between persisted-history days.
+func twitchDayRow(d string) string {
+	return `<div class="log-line tw-sep">— ` + html.EscapeString(d) + ` —</div>`
 }
 
 func twitchName(e twitch.Event) string {

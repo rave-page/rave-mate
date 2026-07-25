@@ -138,7 +138,8 @@ type Services struct {
 	GitHub       *ghlink.Auth                  // GitHub link (device flow / PAT, gist scope); may be nil
 	WorldSync    *vrcperm.Service              // VRChat world gist feeds (perms/posters/events/now-playing); may be nil
 	VrchatPipe   *featurehost.VrchatProxy      // subprocess-hosted VRChat pipeline WS (status mirror); may be nil
-	Twitch       *twitch.Manager               // Twitch chat/alerts/title-control/moderation; may be nil
+	Twitch       *featurehost.TwitchProxy      // subprocess-hosted Twitch (chat/alerts/title/moderation); may be nil
+	TwitchLog    *twitch.ChatLog               // persisted chat/alert history (seeds the Twitch feed); may be nil
 	VROverlay    vroverlay.Surface             // VR overlay control plane (in-proc or subprocess-proxied); may be nil
 	OBSControl   *obscontrol.Manager           // cross-instance OBS stream/record control + status; may be nil
 	VRStats      *vrstats.Collector            // VR perf/debug telemetry from any instance (monitor); may be nil

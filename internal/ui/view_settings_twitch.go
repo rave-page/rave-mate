@@ -14,6 +14,7 @@ import (
 	"net/url"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/twitch"
 )
 
@@ -135,7 +136,7 @@ func (u *UI) twitchCard() fyne.CanvasObject {
 }
 
 // twitchApplyPresetDialog prompts for the preset's {variables} (live preview) then sets the title.
-func (u *UI) twitchApplyPresetDialog(mgr *twitch.Manager, p *config.TitlePreset) {
+func (u *UI) twitchApplyPresetDialog(mgr *featurehost.TwitchProxy, p *config.TitlePreset) {
 	vars := twitch.TemplateVars(p.Template)
 	if p.Vars == nil {
 		p.Vars = map[string]string{}

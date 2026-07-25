@@ -93,7 +93,10 @@ const (
 	// DMX source toggle (DMX.SACN + DMX.SACNUniverses), and WorldSync.LightCuesGistID (the take
 	// gist target). All additive, zero values = off/defaults - old configs load unchanged.
 	// (Was v31 on its feature branch; renumbered at the development merge.)
-	configVersion = 34
+	// v35 removed Twitch.AutoConnect (dead - never read anywhere; the twitch feature now runs
+	// as an always-listening child that connects whenever enabled + signed in, so chat/alerts
+	// are captured with no UI open). Old configs with the key load fine (unknown-field ignore).
+	configVersion = 35
 
 	// DefaultMIDIChannels is the out-of-box MIDI-mixer channel/deck count (decks A..D).
 	DefaultMIDIChannels = 4
@@ -1970,10 +1973,9 @@ func (o VROverlay) ResolvedBgOpacity() float64 {
 // secureseal. Device Code Flow means no client secret. ClientID defaults to the bundled rave-mate
 // app; override only to use your own Twitch application.
 type TwitchFeature struct {
-	Enabled     bool          `json:"enabled"`
-	ClientID    string        `json:"clientId"`          // "" = bundled DefaultTwitchClientID
-	AutoConnect bool          `json:"autoConnect"`       // connect on launch when a sealed token exists
-	Presets     []TitlePreset `json:"presets,omitempty"` // reusable stream-title templates
+	Enabled  bool          `json:"enabled"`
+	ClientID string        `json:"clientId"`          // "" = bundled DefaultTwitchClientID
+	Presets  []TitlePreset `json:"presets,omitempty"` // reusable stream-title templates
 }
 
 // ResolvedClientID returns the configured client id or the bundled default.
@@ -2285,7 +2287,7 @@ func Default() Config {
 			VRCTools:      VRCToolsFeature{OrganizeByEvent: true, AutoBackupCamPaths: true, AutoRestoreCamPaths: true}, // event-match is the primary photo organize key; cam-path backup/restore default on for live-set crash-recovery
 			VR:            Toggle{Enabled: false},
 			VROverlay:     VROverlayFeature{Enabled: false, SummonOn: true, SummonButton: "ax"}, // opt-in; needs SteamVR + `vr` build. Summon = hold A/X to open editor (works OOTB).
-			Twitch:        TwitchFeature{Enabled: false, AutoConnect: true},                     // opt-in; bundled client id
+			Twitch:        TwitchFeature{Enabled: false},                                        // opt-in; bundled client id
 			WorldSync:     WorldSyncFeature{Enabled: false},                                     // opt-in; needs GitHub + VRChat links
 			Notifications: Toggle{Enabled: true},
 

@@ -801,9 +801,22 @@ func run(parent context.Context, serviceMode bool) error {
 		})
 	})
 
-	// Twitch integration (chat/alerts/title-control/moderation). Publishes events on the bus +
-	// serves peer commands; the UI drives sign-in + presets through it.
-	twitchMgr := twitch.New(log, bus, func() config.TwitchFeature { return cfg.Features.Twitch })
+	// Twitch integration (chat/alerts/title-control/moderation) - supervised feature child.
+	// The child owns auth (sealed twitch.bin single-writer) + EventSub + polling; the proxy
+	// republishes onto the bus, serves peer commands, and appends every bus chat/alert (local
+	// AND peer-origin) to the persistent chat log so a set is readable after the fact.
+	var twitchLog *twitch.ChatLog
+	if dir, derr := config.DataPath("twitch-chat"); derr == nil {
+		if cl, cerr := twitch.OpenChatLog(dir, log); cerr == nil {
+			twitchLog = cl // never closed: lives for the process; appends are single writes
+		} else {
+			log.Warn("twitch", "chat log unavailable", map[string]any{"error": cerr.Error()})
+		}
+	}
+	twitchW, twerr := featurehost.NewTwitchProxy(log, bus, twitchLog, func() string { return cfg.Features.Twitch.ClientID })
+	if twerr != nil {
+		return twerr
+	}
 
 	// World Sync: GitHub-gist feeds for VRChat worlds (permission lists + posters/events/
 	// now-playing). Publishes only while enabled + GitHub linked; group-role expansion needs
@@ -994,7 +1007,7 @@ func run(parent context.Context, serviceMode bool) error {
 			}
 			return o
 		},
-		func(text string) { _ = twitchMgr.SendChat(context.Background(), text, "") },
+		func(text string) { _ = twitchW.SendChat(context.Background(), text, "") },
 		func(s string) { log.Info("stt", s, nil) },
 	)
 	keyBinds.Register(vrbind.ActSTTRecord, func(string) { sttCtl.Toggle() })
@@ -1438,14 +1451,13 @@ func run(parent context.Context, serviceMode bool) error {
 		},
 		Stop: linkW.Host().Stop,
 	})
-	// VRChat - resume the sealed session in the background, then run the pipeline child.
+	// Twitch - supervised feature child. Always listening while enabled + signed in
+	// (EventSub + stats polling run tab-open or not; events persist via the chat log).
 	mods.Add(&module.Service{
 		Name:    "twitch",
 		Enabled: func() bool { return cfg.Features.Twitch.Enabled },
-		Start: func(c context.Context) error {
-			debuglog.Go(log, "twitch", func() { _ = twitchMgr.Start(c) })
-			return nil
-		},
+		Start:   func(c context.Context) error { return twitchW.Host().Start(c) },
+		Stop:    twitchW.Host().Stop,
 	})
 	mods.Add(&module.Service{
 		Name:    "worldsync",
@@ -1734,7 +1746,7 @@ func run(parent context.Context, serviceMode bool) error {
 		TraktorMap: tmap, Identity: ident, Peers: peerMgr, Discovery: disc, PeerBridge: peerBridge, NetStats: netSampler, Perf: perfMon,
 		Bridge: bridgeMgr, AuthGate: authGate,
 		EventBus:  bus,
-		RemoteCtl: remoteCtl, Vrchat: vrcMgr, VrchatPipe: vrcW, Twitch: twitchMgr, VROverlay: vrSurf, OBSControl: obsControl, VRStats: vrPerf, VRCTools: vrcTools,
+		RemoteCtl: remoteCtl, Vrchat: vrcMgr, VrchatPipe: vrcW, Twitch: twitchW, TwitchLog: twitchLog, VROverlay: vrSurf, OBSControl: obsControl, VRStats: vrPerf, VRCTools: vrcTools,
 		GitHub: ghAuth, WorldSync: worldSync,
 		STT:         sttCtl,
 		AppGroups:   appGroups,
