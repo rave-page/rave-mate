@@ -169,6 +169,36 @@ func TestZigTip2SettingsSelectGolden(t *testing.T) {
 	}, setContentHTML, zigui.RenderSettingsContent)
 }
 
+// ── library encode builder + export preset editor: libSelTip's ss-label ──
+
+// TestZigTip2LibSelTipGolden sweeps resolvePbSelectTip's structured ss-label through BOTH surfaces
+// that carry libSelTip - the #lib-detail encode builder and the mp-pedit preset dialog.
+func TestZigTip2LibSelTipGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	mkSel := func(tp *tipSt, raw string) libSelTip {
+		s := libSelTip{Sel: tip2Sel("lib-pf-container", "flac")}
+		if raw != "" {
+			s.Label = ssLabelRaw("Container", raw)
+		} else {
+			s.LabelS = &ssLabelSt{Text: "Container", Tip: tp}
+		}
+		return s
+	}
+	tip2Sweep(t, "libEncSel", func(tp *tipSt, raw string) libDetailSt {
+		det := libDetailFixture()
+		det.Enc.Container = mkSel(tp, raw)
+		return det
+	}, libDetailHTMLOf, zigui.RenderLibraryDetail)
+
+	tip2Sweep(t, "presetSel", func(tp *tipSt, raw string) mpPresetDlgSt {
+		st := dlgPresetFx()["video"]
+		st.Container = mkSel(tp, raw)
+		return st
+	}, mpPresetDlgHTMLOf, zigui.RenderDlgPreset)
+}
+
 // ── MIDI controllers: port / THRU / DJ-bridge ss-labels ──
 
 // TestZigTip2MidiCtlLabelsGolden sweeps the controller port label and the DJ-bridge port label

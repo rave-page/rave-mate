@@ -156,7 +156,7 @@ type midiCtlBlock struct {
 	Title     string             `json:"title"`
 	StatID    string             `json:"statId"` // midi-ctlstat-<i> (tick patch target)
 	Port      selState           `json:"port"`
-	PortLbl   string             `json:"portLbl"` // legacy pre-rendered ss-label (bridge)
+	PortLbl   string             `json:"portLbl"`             // legacy pre-rendered ss-label (bridge)
 	PortLblS  *ssLabelSt         `json:"portLblSt,omitempty"` // structured ss-label - wins over PortLbl
 	Stat      midiPortStat       `json:"stat"`
 	EnableLbl string             `json:"enableLbl"`
@@ -164,7 +164,7 @@ type midiCtlBlock struct {
 	EnableAct string             `json:"enableAct"`
 	EnableOn  bool               `json:"enableOn"`
 	Thru      selState           `json:"thru"`
-	ThruLbl   string             `json:"thruLbl"` // legacy pre-rendered ss-label (bridge)
+	ThruLbl   string             `json:"thruLbl"`             // legacy pre-rendered ss-label (bridge)
 	ThruLblS  *ssLabelSt         `json:"thruLblSt,omitempty"` // structured ss-label - wins over ThruLbl
 	DrvThru   midiDrvThru        `json:"drvThru"`
 	Warn      midiWarnState      `json:"warn"`
@@ -637,18 +637,18 @@ func bindingReadout(b config.MIDIBinding) string {
 
 // midiBridgeState is the resolved render state for the two-port DJ bridge card.
 type midiBridgeState struct {
-	Show      bool     `json:"show"`
-	Card      string   `json:"card"`
-	Badge     string   `json:"badge"`
-	Intro     string   `json:"intro"`
-	IntroTip  string   `json:"introTip"` // pre-rendered tooltip HTML
-	EnableLbl string   `json:"enableLbl"`
-	EnableDL  string   `json:"enableDl"`
-	EnableAct string   `json:"enableAct"`
-	EnableOn  bool     `json:"enableOn"`
-	EnableTip string   `json:"enableTip"`
+	Show       bool       `json:"show"`
+	Card       string     `json:"card"`
+	Badge      string     `json:"badge"`
+	Intro      string     `json:"intro"`
+	IntroTip   string     `json:"introTip"` // pre-rendered tooltip HTML
+	EnableLbl  string     `json:"enableLbl"`
+	EnableDL   string     `json:"enableDl"`
+	EnableAct  string     `json:"enableAct"`
+	EnableOn   bool       `json:"enableOn"`
+	EnableTip  string     `json:"enableTip"`
 	ToDJ       selState   `json:"toDj"`
-	ToDJLbl    string     `json:"toDjLbl"` // legacy pre-rendered ss-label (bridge)
+	ToDJLbl    string     `json:"toDjLbl"`             // legacy pre-rendered ss-label (bridge)
 	ToDJLblS   *ssLabelSt `json:"toDjLblSt,omitempty"` // structured ss-label - wins over ToDJLbl
 	FromDJ     selState   `json:"fromDj"`
 	FromDJLbl  string     `json:"fromDjLbl"`
