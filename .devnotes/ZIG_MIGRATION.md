@@ -189,7 +189,7 @@ Rules:
 - **P6 UI phase B3 (fragment scheduler, pilots SHIPPED):** the ~1 Hz tick no longer crosses the
   ABI once per FRAGMENT. The surface's whole state + the hash of what Go last pushed per fragment
   cross ONCE (RZW1 root ids 100/101); `native/zigui/src/tick.zig` renders every fragment, drops the
-  unchanged ones (FNV-1a-64, `tickPatch` semantics) and returns a packed RZF1 changed-fragment list
+  unchanged ones (Wyhash-64, `tickPatch` semantics) and returns a packed RZF1 changed-fragment list
   Go turns into ONE batched Eval - unchanged HTML never crosses the ABI. Pilots: the Live tab tick
   (12 -> 1 call) + `#log-view`. Exports stay STATELESS (hashes travel in the document; a Zig-side
   cache was rejected - reasoning in ZIG_UI_GUIDE.md "Phase B - B3 fragment scheduler"). Gate: the

@@ -21,7 +21,7 @@ import (
 // Piloted surfaces: the Live tab tick + the #log-view tick. Every other tick keeps the legacy
 // path untouched. Design notes: .devnotes/ZIG_UI_GUIDE.md "Phase B — B3 fragment scheduler".
 
-// tickPrev is one fragment's last-pushed hash (id + FNV-1a-64 of the HTML).
+// tickPrev is one fragment's last-pushed hash (id + the lib's Wyhash-64 of the HTML).
 type tickPrev struct {
 	ID   string `json:"id"`
 	Hash uint64 `json:"hash"`

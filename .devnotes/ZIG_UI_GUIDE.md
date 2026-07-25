@@ -1011,7 +1011,7 @@ ONE call per tick per surface.
 Go resolves the whole surface once (`liveTickState()` / `logsLinesState()`), snapshots the hash of
 what it last pushed per fragment id, and encodes both into one RZW1 document (root ids **100**
 `TkLive` / **101** `TkLogs`). `native/zigui/src/tick.zig` renders EVERY fragment of that surface
-through the existing per-fragment renderers, hashes each result (FNV-1a-64) and drops the ones
+through the existing per-fragment renderers, hashes each result (Wyhash-64: FNV-1a costs one byte per round, ~50 us on the 51 kB log tail) and drops the ones
 whose hash matches the supplied `prev`. What comes back is a packed **RZF1** list of the changed
 fragments only:
 
@@ -1041,8 +1041,8 @@ Zig keep the previous HTML and answer "unchanged" without Go sending anything. R
    the hashes in Go that is `u.fragH = nil` under the mutex we already hold. With a Zig-side cache
    it is another export, called from a path that must not fail.
 3. **It buys almost nothing.** The saving would be the prev hashes on the wire: 8 bytes + the id per
-   fragment (~150 B for the Live surface, ~3% of a live tick document). The renders still happen —
-   you cannot hash HTML you have not produced.
+   fragment — measured at 317 B on the Live surface (2 857 B document → 3 174 B in steady state).
+   The renders still happen either way: you cannot hash HTML you have not produced.
 
 So the hashes travel in the document and Go owns the map (`u.fragH` + `u.fragGen`, both under
 `fragMu`, beside the legacy `u.frags`). This also makes the *dedup decision auditable from the Go
@@ -1108,3 +1108,15 @@ repeats removed, so the change is exactly "tickPatch dedup, now on this surface 
   export + binding + stub → in the tick, `if !u.tickXSched(...) { legacy }` → extend the parity gate
   and the fuzz base set. Do NOT let a surface's ids overlap another's: the dedup map is global per
   `*UI`.
+
+### Numbers
+
+Measured tables + method live in `.devnotes/PHASEB_BASELINE.md` "Phase B3 - fragment scheduler".
+Headline: the **Live tick** goes 43.1 -> 24.6 us of dispatch (-43%) and 64.3 -> 35.5 us including
+the per-fragment `jsQuote` (-45%), with allocations 146 -> 36 (13 when nothing changed) - twelve cgo
+crossings and twelve `std.json` parses become one. **`#log-view`** is a wash when the tail changed
+(175 vs 158 us against B-1's single-fragment `_v2` export: the batch copies 61 kB the direct export
+hands straight out) and -45% plus the entire downstream (86 kB `jsQuote` + eval + cross-process
+ExecuteScript) when it did not. Two honest caveats recorded there: **pure Go is still the cheapest
+renderer on both surfaces**, and **batching only pays where there are MANY fragments** - a single
+big fragment wants dedup, not a batch.

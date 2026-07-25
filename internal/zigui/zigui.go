@@ -937,7 +937,7 @@ func RenderLogsLinesV2(state []byte) (string, bool) {
 // packed RZF1 list of the CHANGED ones. Unchanged fragment HTML never crosses the ABI.
 // Design: .devnotes/ZIG_UI_GUIDE.md "Phase B — B3 fragment scheduler".
 
-// Frag is one changed fragment: its patch id, the FNV-1a-64 of its HTML (the caller stores this
+// Frag is one changed fragment: its patch id, the Wyhash-64 of its HTML (the caller stores this
 // as the next tick's dedup key) and the HTML itself.
 type Frag struct {
 	ID   string

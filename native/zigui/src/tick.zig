@@ -3,7 +3,7 @@
 //! The ~1 Hz tick used to cross the ABI once per FRAGMENT: Go marshalled each fragment's state
 //! to JSON, called its render export, and deduped the returned string against its own cache.
 //! Here the whole surface's state crosses ONCE (RZW1 document), every fragment is rendered on
-//! this side, hashed (FNV-1a-64) and compared against the hash Go last pushed for that id, and
+//! this side, hashed (Wyhash-64) and compared against the hash Go last pushed for that id, and
 //! only the CHANGED fragments come back — packed into one buffer Go turns into one batched Eval.
 //!
 //! Exports stay STATELESS: the previous hashes travel IN the document (LiveBatch.prev /
@@ -91,9 +91,12 @@ const Batch = struct {
         try b.out.appendSlice(b.a, &.{ 0, 0 }); // count placeholder
     }
 
-    /// hashOf is the dedup key: FNV-1a-64 over the fragment's rendered bytes.
+    /// hashOf is the dedup key over the fragment's rendered bytes. Wyhash, not FNV-1a: FNV
+    /// consumes ONE byte per round, which cost ~50 us on the 51 kB log tail - more than the
+    /// render it guards. Wyhash reads 64 bits at a time and is ~7 us there. The value is opaque
+    /// (Go only ever compares what this returned last tick), so the choice is free.
     fn hashOf(body: []const u8) u64 {
-        return std.hash.Fnv1a_64.hash(body);
+        return std.hash.Wyhash.hash(0, body);
     }
 
     /// prevOf finds id's last-pushed hash. Linear scan: a surface has <= a dozen fragments and
