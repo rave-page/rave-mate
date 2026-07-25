@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"sync/atomic"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -69,11 +70,17 @@ type Renderer struct {
 	// every render fully overwrites the buffer (bg fill first). Cap: canvasCacheMax.
 	canvas map[[2]int]*image.NRGBA
 
-	// zig dispatches the hot renders (Panel/RenderMenu/RenderStats) to the ravevr Zig
-	// raster lib when linked (-tags zigvr); the direct Go path stays the golden
-	// reference + fallback. dl is the reused per-frame display list (VR goroutine only).
+	// zig dispatches the renders to the ravevr Zig raster lib when linked (-tags zigvr):
+	// Panel/RenderMenu/RenderStats plus the small editor textures (hover row, ghost,
+	// tooltip, wrist, strip(+hover), outline, path orbit). The direct Go path stays the
+	// golden reference + fallback. dl is the reused per-frame display list (VR goroutine only).
 	zig bool
 	dl  *zigvr.List
+
+	// Dispatch tally (atomic - PerfProbe reads it off the VR goroutine). A zigvr build stuck
+	// at zigOK=0 / a climbing zigFB means the display list is being rejected and every render
+	// silently costs the Go path: the zigui lesson (a whole tab rendered from Go for weeks).
+	zigOK, zigFB atomic.Uint64
 }
 
 // canvasCacheMax bounds the canvas cache (menu + posmenu + panel sizes; a handful live).
@@ -297,8 +304,10 @@ func (r *Renderer) RenderHoverRow() *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, MenuW, MenuRowH))
 	tint := colRowHi
 	tint.A = 96 // translucent - the row's text/slider stays readable underneath
-	fillRect(img, 0, 1, MenuW, MenuRowH-1, tint)
-	fillRect(img, 0, 1, 4, MenuRowH-1, colName) // left accent bar
+	r.paintInto(img, func(p *paint) {
+		p.fillOver(0, 1, MenuW, MenuRowH-1, tint)
+		p.fillOver(0, 1, 4, MenuRowH-1, colName) // left accent bar
+	})
 	return img
 }
 
@@ -313,10 +322,12 @@ func (r *Renderer) RenderGhost(rows int) *image.NRGBA {
 	}
 	w, h := MenuW, MenuRowH*(rows+1)
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{R: 0x2a, G: 0x06, B: 0x18, A: 90}), image.Point{}, draw.Src)
-	Border(img, colName, 4)
-	drawText(img, r.name, "PREVIEW", 16, h/2-6, colName)
-	drawText(img, r.body, "release here -> Apply", 16, h/2+22, colMuteTxt)
+	r.paintInto(img, func(p *paint) {
+		p.fillSrc(0, 0, w, h, color.NRGBA{R: 0x2a, G: 0x06, B: 0x18, A: 90})
+		p.border(4, colName)
+		p.text(r.name, "PREVIEW", 16, h/2-6, colName)
+		p.text(r.body, "release here -> Apply", 16, h/2+22, colMuteTxt)
+	})
 	return img
 }
 
@@ -333,13 +344,15 @@ func (r *Renderer) RenderTooltip(text string) *image.NRGBA {
 	}
 	h := 2*pad + len(lines)*r.lh
 	img := image.NewNRGBA(image.Rect(0, 0, TooltipW, h))
-	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{R: 10, G: 10, B: 14, A: 245}), image.Point{}, draw.Src)
-	Border(img, colName, 3)
-	y := pad + r.lh - 6
-	for _, ln := range lines {
-		drawText(img, r.body, ln, pad, y, colText)
-		y += r.lh
-	}
+	r.paintInto(img, func(p *paint) {
+		p.fillSrc(0, 0, TooltipW, h, color.NRGBA{R: 10, G: 10, B: 14, A: 245})
+		p.border(3, colName)
+		y := pad + r.lh - 6
+		for _, ln := range lines {
+			p.text(r.body, ln, pad, y, colText)
+			y += r.lh
+		}
+	})
 	return img
 }
 
@@ -354,18 +367,26 @@ func (r *Renderer) RenderWrist(on, hover bool) *image.NRGBA {
 	if on {
 		bg = color.NRGBA{R: 0x2a, G: 0x06, B: 0x18, A: 230}
 	}
-	draw.Draw(img, img.Bounds(), image.NewUniform(bg), image.Point{}, draw.Src)
+	// Two dispatched stages around the logo blit: drawScaled is x/image's float64 CatmullRom
+	// resampler fused with the Over blend (NOT display-list expressible — see ZIG_VR_OVERLAY.md),
+	// so it stays Go-side between them. Each stage flushes before the next → same draw order.
+	r.paintInto(img, func(p *paint) {
+		p.fillSrc(0, 0, WristW, WristW, bg)
+		if logo == nil {
+			p.text(r.name, "RM", 40, WristW/2+10, colText)
+		}
+	})
 	if logo != nil {
 		drawScaled(img, logo, 16, 16, WristW-32, WristW-32) // inset logo
-	} else {
-		drawText(img, r.name, "RM", 40, WristW/2+10, colText)
 	}
-	if on {
-		Border(img, colName, 6)
-	}
-	if hover {
-		Border(img, colMint, 4) // pointer-hover ring (drawn inside the on-ring)
-	}
+	r.paintInto(img, func(p *paint) {
+		if on {
+			p.border(6, colName)
+		}
+		if hover {
+			p.border(4, colMint) // pointer-hover ring (drawn inside the on-ring)
+		}
+	})
 	return img
 }
 
@@ -378,23 +399,25 @@ const StripCellPx = 96
 func (r *Renderer) RenderStrip(btns []StripButton) *image.NRGBA {
 	n := max(len(btns), 1)
 	img := image.NewNRGBA(image.Rect(0, 0, StripCellPx*n, StripCellPx))
-	draw.Draw(img, img.Bounds(), image.NewUniform(colMenuBG), image.Point{}, draw.Src)
-	for i, b := range btns {
-		x := i * StripCellPx
-		bg := colRow
-		if b.Active {
-			bg = colRowHi
+	r.paintInto(img, func(p *paint) {
+		p.fillSrc(0, 0, StripCellPx*n, StripCellPx, colMenuBG)
+		for i, b := range btns {
+			x := i * StripCellPx
+			bg := colRow
+			if b.Active {
+				bg = colRowHi
+			}
+			p.fillOver(x+3, 3, StripCellPx-6, StripCellPx-6, bg)
+			if b.Active { // accent frame on the cell inset
+				p.fillOver(x+3, 3, StripCellPx-6, 3, colName)
+				p.fillOver(x+3, StripCellPx-6, StripCellPx-6, 3, colName)
+				p.fillOver(x+3, 3, 3, StripCellPx-6, colName)
+				p.fillOver(x+StripCellPx-6, 3, 3, StripCellPx-6, colName)
+			}
+			g := truncText(r.name, b.Glyph, StripCellPx-12)
+			p.text(r.name, g, x+(StripCellPx-textWidth(r.name, g))/2, StripCellPx/2+6, colText)
 		}
-		fillRect(img, x+3, 3, StripCellPx-6, StripCellPx-6, bg)
-		if b.Active { // accent frame on the cell inset
-			fillRect(img, x+3, 3, StripCellPx-6, 3, colName)
-			fillRect(img, x+3, StripCellPx-6, StripCellPx-6, 3, colName)
-			fillRect(img, x+3, 3, 3, StripCellPx-6, colName)
-			fillRect(img, x+StripCellPx-6, 3, 3, StripCellPx-6, colName)
-		}
-		g := truncText(r.name, b.Glyph, StripCellPx-12)
-		drawText(img, r.name, g, x+(StripCellPx-textWidth(r.name, g))/2, StripCellPx/2+6, colText)
-	}
+	})
 	return img
 }
 
@@ -404,8 +427,10 @@ func (r *Renderer) RenderStripHover() *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, StripCellPx, StripCellPx))
 	tint := colRowHi
 	tint.A = 96
-	fillRect(img, 0, 0, StripCellPx, StripCellPx, tint)
-	Border(img, colMint, 4)
+	r.paintInto(img, func(p *paint) {
+		p.fillOver(0, 0, StripCellPx, StripCellPx, tint)
+		p.border(4, colMint)
+	})
 	return img
 }
 
@@ -414,6 +439,9 @@ const DotW = 64
 
 // RenderDot draws a soft filled brand-pink circle on transparent - the XSOverlay-style ray cursor
 // placed at the ray→overlay hit point (billboarded to the HMD).
+// NOT zigvr-dispatched: every pixel has its own alpha (soft edge) so there are no runs to record -
+// a display list would be 1 op/px with the float math still Go-side (no win). 64×64, uploaded once
+// per session. See ZIG_VR_OVERLAY.md "Skips".
 func (r *Renderer) RenderDot() *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, DotW, DotW))
 	c := float64(DotW) / 2
@@ -446,8 +474,14 @@ const (
 // edit mode: brand (colName) = the SELECTED overlay, mint (colMint) = the pointer-hovered "selectable".
 func (r *Renderer) RenderOutline(col color.Color) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, OutlineW, OutlineH))
-	Border(img, col, 6)
+	r.borderInto(img, col, 6)
 	return img
+}
+
+// borderInto draws a w-px border via the zigvr path when linked. Ops-only render: every other
+// pixel of img is untouched (used to stamp the edit-mode frame onto an already-rendered panel).
+func (r *Renderer) borderInto(img *image.NRGBA, col color.Color, w int) {
+	r.paintInto(img, func(p *paint) { p.border(w, col) })
 }
 
 func fillRect(img *image.NRGBA, x, y, w, h int, c color.Color) {

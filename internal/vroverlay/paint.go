@@ -1,7 +1,7 @@
 package vroverlay
 
-// paint is the raster target for the hot overlay renders (Panel / RenderMenu /
-// RenderStats). Direct mode (dl == nil) draws into img with the stdlib exactly as
+// paint is the raster target for vroverlay's renders (panels, menu, stats, and the
+// small editor textures). Direct mode (dl == nil) draws into img with the stdlib exactly as
 // the original code did — that Go path stays the golden reference. Record mode
 // captures the same primitives as a zigvr display list executed natively by
 // libravevr. Glyphs are Go-rasterized either way (x/image opentype, same faces):
@@ -27,7 +27,11 @@ type paint struct {
 
 // paintInto renders fn via the Zig raster lib when linked (record ops, execute
 // natively); any record/exec failure falls back to the direct Go path. img must be
-// a zero-origin packed-stride canvas (all vroverlay canvases are).
+// a zero-origin packed-stride canvas (all vroverlay canvases are). rz_vr_render is
+// atomic (validates before writing), so the fallback redraw is safe even for renders
+// that composite onto existing pixels instead of overwriting the whole canvas.
+// Callers may stage several paintInto passes over one canvas (each flushes in order)
+// to keep a non-recordable step - e.g. the wrist logo's CatmullRom blit - in Go.
 func (r *Renderer) paintInto(img *image.NRGBA, fn func(*paint)) {
 	if r.zig && img.Rect.Min == (image.Point{}) && img.Stride == 4*img.Rect.Dx() {
 		if r.dl == nil {
@@ -37,8 +41,10 @@ func (r *Renderer) paintInto(img *image.NRGBA, fn func(*paint)) {
 		p := &paint{img: img, dl: r.dl, ok: true}
 		fn(p)
 		if p.ok && zigvr.Render(img.Pix, img.Rect.Dx(), img.Rect.Dy(), r.dl) == nil {
+			r.zigOK.Add(1)
 			return
 		}
+		r.zigFB.Add(1)
 	}
 	fn(&paint{img: img})
 }
@@ -111,6 +117,43 @@ func (p *paint) set(x, y, w, h int, c color.Color) {
 		Kind: zigvr.KStore,
 		SR:   uint16(nc.R), SG: uint16(nc.G), SB: uint16(nc.B), SA: uint16(nc.A),
 	})
+}
+
+// setN replicates an img.SetNRGBA run (raw byte store, no colour-model conversion) —
+// the Bresenham/dot rasters in worldpath.go.
+func (p *paint) setN(x, y, w, h int, c color.NRGBA) {
+	if p.dl == nil {
+		for yy := y; yy < y+h; yy++ {
+			for xx := x; xx < x+w; xx++ {
+				p.img.SetNRGBA(xx, yy, c)
+			}
+		}
+		return
+	}
+	rr := p.clipRect(x, y, w, h)
+	if rr.Empty() {
+		return
+	}
+	p.push(zigvr.Op{
+		X: int32(rr.Min.X), Y: int32(rr.Min.Y), W: int32(rr.Dx()), H: int32(rr.Dy()),
+		Kind: zigvr.KStore,
+		SR:   uint16(c.R), SG: uint16(c.G), SB: uint16(c.B), SA: uint16(c.A),
+	})
+}
+
+// border replicates Border(img, col, width) as four clipped bands. The Go loop's rows
+// and columns overlap in the corners; every write stores the same bytes, so the band
+// decomposition (and its op order) is pixel-identical.
+func (p *paint) border(width int, c color.Color) {
+	if p.dl == nil {
+		Border(p.img, c, width)
+		return
+	}
+	w, h := p.img.Rect.Dx(), p.img.Rect.Dy()
+	p.set(0, 0, w, width, c)       // top
+	p.set(0, h-width, w, width, c) // bottom
+	p.set(0, 0, width, h, c)       // left
+	p.set(w-width, 0, width, h, c) // right
 }
 
 // text replicates font.Drawer.DrawString at (x, baseline) — same kern/advance walk,

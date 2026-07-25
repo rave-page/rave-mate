@@ -111,5 +111,10 @@ func (m *Manager) PerfProbe() string {
 			float64(m.perfC.touchFrames.Load())/float64(frames)*100)
 	}
 	out += fmt.Sprintf("tex uploads: last=%d/s total=%d", m.perfC.lastTexRate.Load(), m.perfC.texTotal.Load())
+	if r := m.rend; r != nil && r.zig {
+		// fallback>0 = a display list was rejected (cap hit / foreign glyph mask) and that render
+		// cost the Go raster instead; ok=0 on a zigvr build means the Zig path never runs at all.
+		out += fmt.Sprintf("\nzig raster: ok=%d fallback=%d", r.zigOK.Load(), r.zigFB.Load())
+	}
 	return out
 }

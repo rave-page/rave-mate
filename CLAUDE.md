@@ -215,8 +215,9 @@ internal/
               Migrated tabs render in Zig byte-identical to their Go renderers (which
               stay as fallback + golden reference; zigui_golden_test.go per tab).
   zigvr/      cgo binding to the ravevr VR-overlay raster lib (tag `zigvr`, stub untagged).
-              Display-list executor for vroverlay's hot renders (Panel/Menu/Stats);
-              pixel-identical to the Go raster. See .devnotes/ZIG_VR_OVERLAY.md.
+              Display-list executor for vroverlay's whole raster surface (panels, menu,
+              stats, path-orbit preview, editor textures); pixel-identical to the Go
+              raster, which stays fallback + golden. See .devnotes/ZIG_VR_OVERLAY.md.
 native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `make zig`.
               Ported kernels stay byte-exact vs the Go originals (parity tests).
               Also builds `rave-probe` (zig-out/bin): standalone Zig probe worker exe,

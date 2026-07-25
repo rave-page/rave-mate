@@ -31,6 +31,8 @@ typedef struct {
 } RzVrOp;
 
 /* Executes ops in order into canvas (w*h*4 bytes, NRGBA, stride = 4*w).
+ * Atomic: every op is validated before any pixel is written, so a non-zero return
+ * leaves the canvas untouched (the caller redraws via its own raster path).
  * Returns 0 ok; -1 bad args; -2 op rect/kind/mask out of bounds. */
 int32_t rz_vr_render(uint8_t *canvas, int32_t w, int32_t h,
                      const RzVrOp *ops, size_t n_ops,
