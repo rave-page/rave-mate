@@ -180,6 +180,51 @@ func (w *WireWriter) Finish() []byte {
 	return append(out, 0) // root body terminator
 }
 
+// --- phaseb-wire (B-2 fan-out: kinds the pilot states did not need) ---
+
+// StrAlways writes field num even when s is empty. Required where the Zig field's DEFAULT is
+// not the zero value (`fill: []const u8 = "0.00%"`, `stepS = "1"`): the JSON path always sends
+// the field, so an absent tag would decode to the default instead of "" and the two paths would
+// diverge. Cost is one tag + two zero varints per empty string, on a handful of fields.
+func (w *WireWriter) StrAlways(num int, s string) {
+	off := w.arenaOff(s)
+	w.tag(num, wireWTString)
+	w.uvarint(uint64(off))
+	w.uvarint(uint64(len(s)))
+}
+
+// OptStruct writes a nested message whose PRESENCE is meaningful (a Zig `?T` field: null vs a
+// zero-value struct render differently - motion's inactive section, the player's absent panels).
+// Unlike Struct it keeps the tag even when the message emits no fields, so "present but all
+// zero" cannot decode as null. Callers gate on the Go pointer being non-nil.
+func (w *WireWriter) OptStruct(num int, enc func()) {
+	w.tag(num, wireWTStruct)
+	lp := len(w.body)
+	w.body = append(w.body, 0, 0, 0, 0)
+	enc()
+	w.body = append(w.body, 0) // body terminator
+	w.patch(lp)
+}
+
+// StrList writes a []string as a list of single-field element bodies (field 1 = the string), so
+// the decoder reuses the list bounds discipline unchanged. n == 0 writes nothing (absent = empty).
+func (w *WireWriter) StrList(num int, ss []string) {
+	if len(ss) == 0 {
+		return
+	}
+	w.tag(num, wireWTList)
+	w.uvarint(uint64(len(ss)))
+	lp := len(w.body)
+	w.body = append(w.body, 0, 0, 0, 0)
+	for _, s := range ss {
+		w.Str(1, s)                // "" → absent → decodes to ""
+		w.body = append(w.body, 0) // per-element terminator
+	}
+	w.patch(lp)
+}
+
+// --- end phaseb-wire ---
+
 // NoteWireFallback records a v2→v1 downgrade that happened before the ABI was even reached
 // (encoder returned nil), keyed like FallbackCounts' render keys.
 func NoteWireFallback(name string) {

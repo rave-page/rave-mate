@@ -958,6 +958,20 @@ to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. 
 are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
 kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
 Go formats every number).
+
+**Four kinds the pilots did not need** (wave B-2, `schema.go` helpers `sa` / `op` / `ov` / `sl`;
+all four are append-only additions to the codec, the wiretype set is unchanged):
+
+| kind | Go ↔ Zig | why it exists |
+|---|---|---|
+| `kStrAlways` (`sa`) | `string` ↔ `[]const u8` with a **non-zero default** | absent means "the Zig default", and `fill: []const u8 = "0.00%"` / `stepS = "1"` are not "". The JSON path always sends the field, so v2 must too: `WireWriter.StrAlways` emits the tag with off 0 / len 0. Without it the two paths diverge on exactly the states where the field is empty. |
+| `kOptPtr` (`op`) | `*T` ↔ `?T` | tag present iff the pointer is non-nil (motion's inactive section is `nil`). |
+| `kOptVal` (`ov`) | `T` ↔ `?T` | tag **always** present: JSON always sends the object, so `null` must be unreachable. `Struct` drops an all-zero message (absent = zero value, which is correct for a value field but would decode as `null` here), so both opt kinds use `OptStruct`, which keeps the tag. |
+| `kStrList` (`sl`) | `[]string` ↔ `[]const []const u8` | encoded as a list of single-field element bodies (field 1 = the string), so `Reader.strList` reuses the list bounds discipline verbatim and `skip()` stays closed over four wiretypes. |
+
+The rule behind all of them: **a Zig field default that is not the zero value is a v1/v2
+divergence waiting to happen.** `sa` is the fix; the scan is mechanical (any non-omitempty Go
+field whose Zig counterpart has a non-empty default).
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

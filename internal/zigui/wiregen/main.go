@@ -81,7 +81,8 @@ func validate() error {
 	}
 	for _, m := range schema {
 		for _, f := range m.fs {
-			if f.kind == kStruct || f.kind == kList {
+			switch f.kind {
+			case kStruct, kList, kOptPtr, kOptVal:
 				if !byName[f.ref] {
 					return fmt.Errorf("%s.%s: unknown message %q", m.name, f.goF, f.ref)
 				}
@@ -139,6 +140,16 @@ func emitGo() []byte {
 				p("\tw.Struct(%d, func() { v.%s.encodeWire(w) })", f.num, f.goF)
 			case kList:
 				p("\tw.List(%d, len(v.%s), func(i int) { v.%s[i].encodeWire(w) })", f.num, f.goF, f.goF)
+			case kStrAlways:
+				p("\tw.StrAlways(%d, v.%s)", f.num, f.goF)
+			case kOptPtr:
+				p("\tif v.%s != nil {", f.goF)
+				p("\t\tw.OptStruct(%d, func() { v.%s.encodeWire(w) })", f.num, f.goF)
+				p("\t}")
+			case kOptVal:
+				p("\tw.OptStruct(%d, func() { v.%s.encodeWire(w) })", f.num, f.goF)
+			case kStrList:
+				p("\tw.StrList(%d, v.%s)", f.num, f.goF)
 			}
 		}
 		p("}")
@@ -202,6 +213,12 @@ func emitZig() string {
 				p("        %d => out.%s = try r.sub(%s, decode%s, t),", f.num, f.zigF, refZig(f.ref), f.ref)
 			case kList:
 				p("        %d => out.%s = try r.list(%s, decode%s, t),", f.num, f.zigF, refZig(f.ref), f.ref)
+			case kStrAlways:
+				p("        %d => out.%s = try r.str(t),", f.num, f.zigF)
+			case kOptPtr, kOptVal: // Zig `?T`: r.sub returns T, which coerces
+				p("        %d => out.%s = try r.sub(%s, decode%s, t),", f.num, f.zigF, refZig(f.ref), f.ref)
+			case kStrList:
+				p("        %d => out.%s = try r.strList(t),", f.num, f.zigF)
 			}
 		}
 		p("        else => try r.skip(t),")

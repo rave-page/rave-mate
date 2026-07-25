@@ -17,6 +17,12 @@ const (
 	kUint
 	kStruct
 	kList
+	// wave B-2 additions (append only - the iota values are part of nothing, but the
+	// String() names feed schemaHash, so renaming one rewrites every hash).
+	kStrAlways // string, tag emitted even when empty (Zig field has a non-zero default)
+	kOptPtr    // Go *T ↔ Zig ?T: tag present iff non-nil (presence is meaningful)
+	kOptVal    // Go T ↔ Zig ?T: tag ALWAYS present (JSON always sends the object)
+	kStrList   // Go []string ↔ Zig []const []const u8
 )
 
 func (k kind) String() string {
@@ -31,6 +37,14 @@ func (k kind) String() string {
 		return "struct"
 	case kList:
 		return "list"
+	case kStrAlways:
+		return "stra"
+	case kOptPtr:
+		return "optp"
+	case kOptVal:
+		return "optv"
+	case kStrList:
+		return "strlist"
 	}
 	return "?"
 }
@@ -64,6 +78,15 @@ func st(n int, g, z, r string) field {
 }
 func li(n int, g, z, r string) field {
 	return field{num: n, goF: g, zigF: z, kind: kList, ref: r}
+}
+func u(n int, g, z string) field  { return field{num: n, goF: g, zigF: z, kind: kUint} }
+func sa(n int, g, z string) field { return field{num: n, goF: g, zigF: z, kind: kStrAlways} }
+func sl(n int, g, z string) field { return field{num: n, goF: g, zigF: z, kind: kStrList} }
+func op(n int, g, z, r string) field {
+	return field{num: n, goF: g, zigF: z, kind: kOptPtr, ref: r}
+}
+func ov(n int, g, z, r string) field {
+	return field{num: n, goF: g, zigF: z, kind: kOptVal, ref: r}
 }
 
 // schema: wave B-1 pilots (appgroups + logs) and everything they nest.
