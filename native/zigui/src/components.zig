@@ -247,6 +247,89 @@ pub fn selectList(h: *Html, id: []const u8, rows: []const SelectRow) !void {
     }
 }
 
+// --- motion + live (fleet: live batch) ---
+
+/// masterDetailOpen/Mid/Close bracket the list|detail split (Go masterDetail, streaming form).
+pub fn masterDetailOpen(h: *Html) !void {
+    try h.raw("<div class=mdsplit><div class=md-list>");
+}
+
+pub fn masterDetailMid(h: *Html) !void {
+    try h.raw("</div><div class=md-detail>");
+}
+
+pub fn masterDetailClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// sectionOpenTip is sectionOpen with a pre-rendered tooltip after the title (Go sectionTip).
+/// tip_html is trusted markup resolved Go-side (tipTopic) — emitted raw.
+pub fn sectionOpenTip(h: *Html, title: []const u8, tip_html: []const u8) !void {
+    try h.raw("<section class=sec><h2 class=sec-title>");
+    try h.esc(title);
+    try h.raw(tip_html);
+    try h.raw("</h2>");
+}
+
+/// statusRow: status dot + label + muted sub-line (Go statusRow). data_label = Go
+/// strings.ToLower(label).
+pub fn statusRow(h: *Html, variant: []const u8, label: []const u8, data_label: []const u8, line: []const u8) !void {
+    try h.raw("<div class=strow>");
+    try dot(h, variant);
+    try h.raw("<div class=strow-tx><div class=strow-l data-label=");
+    try h.attrQ(data_label);
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</div><div class=strow-s data-value=");
+    try h.attrQ(line);
+    try h.raw(">");
+    try h.esc(line);
+    try h.raw("</div></div></div>");
+}
+
+/// Slider is a resolved labelled range input (Go slider): data_label pre-lowered Go-side,
+/// every number pre-formatted with Go trimNum, unitJs = jsQuote(unit). Zig never formats
+/// a float — the Go state builder owns all numeric formatting.
+pub const Slider = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    unit: []const u8 = "",
+    unitJs: []const u8 = "\"\"",
+    minS: []const u8 = "0",
+    maxS: []const u8 = "0",
+    stepS: []const u8 = "1",
+    valS: []const u8 = "0",
+};
+
+/// slider mirrors Go slider() byte-for-byte (live value display is inline JS, no act).
+pub fn slider(h: *Html, s: Slider) !void {
+    try h.raw("<label class=slider data-label=");
+    try h.attrQ(s.dl);
+    try h.raw("><span class=field-label>");
+    try h.esc(s.label);
+    try h.raw(" <b class=slider-val>");
+    try h.raw(s.valS);
+    try h.esc(s.unit);
+    try h.raw("</b></span><input class=slider-input type=range min=");
+    try h.raw(s.minS);
+    try h.raw(" max=");
+    try h.raw(s.maxS);
+    try h.raw(" step=");
+    try h.raw(s.stepS);
+    try h.raw(" value=");
+    try h.raw(s.valS);
+    try h.raw(" data-act=");
+    try h.attrQ(s.act);
+    try h.raw(" data-value=");
+    try h.attrQ(s.valS);
+    try h.raw(" oninput='var b=this.parentNode.querySelector(\".slider-val\");if(b)b.textContent=this.value+");
+    try h.raw(s.unitJs);
+    try h.raw("'></label>");
+}
+
+// --- end motion + live ---
+
 test "panel with and without sub" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
@@ -348,4 +431,40 @@ test "selectList empty = no matches" {
     defer h.deinit();
     try selectList(&h, "x", &.{});
     try std.testing.expectEqualStrings("<div class=ss-none>No matches</div>", h.b.items);
+}
+
+// --- motion + live tests ---
+
+test "masterDetail split + sectionOpenTip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try masterDetailOpen(&h);
+    try h.raw("L");
+    try masterDetailMid(&h);
+    try h.raw("D");
+    try masterDetailClose(&h);
+    try std.testing.expectEqualStrings("<div class=mdsplit><div class=md-list>L</div><div class=md-detail>D</div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try sectionOpenTip(&h, "T&x", "<i>tip</i>");
+    try sectionClose(&h);
+    try std.testing.expectEqualStrings("<section class=sec><h2 class=sec-title>T&amp;x<i>tip</i></h2></section>", h.b.items);
+}
+
+test "statusRow escapes label + line" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusRow(&h, "success", "Se&ssion", "se&ssion", "1 peer <ok>");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--success\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"se&amp;ssion\">Se&amp;ssion</div>" ++
+        "<div class=strow-s data-value=\"1 peer &lt;ok&gt;\">1 peer &lt;ok&gt;</div></div></div>", h.b.items);
+}
+
+test "slider markup matches Go slider" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try slider(&h, .{ .label = "Scrub", .dl = "scrub", .act = "mo-scrub", .minS = "0", .maxS = "1000", .stepS = "1", .valS = "12.5" });
+    try std.testing.expectEqualStrings("<label class=slider data-label=\"scrub\"><span class=field-label>Scrub " ++
+        "<b class=slider-val>12.5</b></span><input class=slider-input type=range min=0 max=1000 step=1 value=12.5 " ++
+        "data-act=\"mo-scrub\" data-value=\"12.5\" oninput='var b=this.parentNode.querySelector(\".slider-val\");" ++
+        "if(b)b.textContent=this.value+\"\"'></label>", h.b.items);
 }

@@ -75,6 +75,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 |---|---|---|
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
+| motion | Zig (`native/zigui/src/motion.zig`; full + `#mo-body` fragment) | `TestZigMotionGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -107,3 +108,18 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
   regression even if it looks right.
 - Screenshot sweep (`ctl screenshot-all`) after every migrated view, both themes if/when
   a light theme exists.
+
+Motion-port notes (tab #3): the impure half owns everything numeric + every
+Go-computed fragment - campath viewer SVG (`cpvView`), skeleton/mesh preview
+(`moViewHTML`), render progress, `tipTopic` cards, `cpvPlayBtn` - and the state
+carries them as trusted raw HTML; Zig only frames them. Numbers never cross as
+floats-to-be-formatted: `moSliderSt` carries the floats (Go path feeds the shared
+`slider()`) AND their `trimNum` strings (Zig path), so the golden gate detects drift
+instead of Zig re-implementing Go float formatting. `moCamPathInfo` split into
+`moCamPathInfoText` (state) + escaping wrapper (the live `#mo-cp-info` patch).
+Components ported to `components.zig`: `masterDetailOpen/Mid/Close`, `sectionOpenTip`,
+`statusRow`, `slider` (+`Slider` state struct - all numbers pre-formatted Go-side).
+Gotcha re-confirmed: a *conditionally built* `selState` (the point-cloud density
+picker) left `Rows` nil → JSON `null` → Zig parse fails → the tab silently falls back
+to Go. Every nested state with a slice must be initialized non-nil even when its
+section is hidden.

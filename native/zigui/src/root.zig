@@ -53,6 +53,24 @@ export fn rz_ui_render_logs_lines(state_json: ?[*]const u8, len: usize, out_len:
     return renderJSON(logs.Lines, logs.renderLines, state_json, len, out_len);
 }
 
+// --- motion + live (fleet: live batch) ---
+
+const motion = @import("motion.zig");
+
+export fn rz_ui_render_motion(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_motion_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.renderBody, state_json, len, out_len);
+}
+
+test {
+    _ = motion;
+}
+
+// --- end motion + live ---
+
 /// Free a buffer returned by an rz_ui_render_* call (len = its *out_len).
 export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
     const p = ptr orelse return;

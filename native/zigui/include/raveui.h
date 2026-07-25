@@ -24,6 +24,14 @@ const uint8_t *rz_ui_render_logs(const uint8_t *state_json, size_t len, size_t *
 /* #log-view inner HTML (filter-change + ~1 Hz tick patch target). */
 const uint8_t *rz_ui_render_logs_lines(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- motion + live (fleet: live batch) --- */
+
+const uint8_t *rz_ui_render_motion(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #mo-body inner HTML (section switch + avatar-scan patch target). */
+const uint8_t *rz_ui_render_motion_body(const uint8_t *state_json, size_t len, size_t *out_len);
+
+/* --- end motion + live --- */
+
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus

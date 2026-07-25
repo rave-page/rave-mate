@@ -52,6 +52,24 @@ func RenderLogsLines(stateJSON []byte) (string, bool) {
 	})
 }
 
+// --- motion + live (fleet: live batch) ---
+
+// RenderMotion renders the full Motion view.
+func RenderMotion(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion(p, l, n)
+	})
+}
+
+// RenderMotionBody renders the #mo-body inner fragment (section switch patch).
+func RenderMotionBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_body(p, l, n)
+	})
+}
+
+// --- end motion + live ---
+
 // render calls a Zig renderer; copies the result and frees the Zig buffer.
 func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (string, bool) {
 	if len(state) == 0 {
