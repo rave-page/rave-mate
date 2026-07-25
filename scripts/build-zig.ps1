@@ -7,3 +7,9 @@ if (-not $zig) { throw "zig not found - install zig >= 0.16 (winget install zig.
 & $zig.Source build -Drelease -Dtarget=x86_64-windows-gnu
 Copy-Item -Force zig-out\lib\ravezig.lib zig-out\lib\libravezig.a
 Write-Host "ravezig built ($(& $zig.Source version))"
+
+# --- zigvr: VR-overlay raster lib (native/zigvr -> libravevr.a, Go tag `zigvr`) ---
+Set-Location (Join-Path $PSScriptRoot "..\native\zigvr")
+& $zig.Source build -Drelease -Dtarget=x86_64-windows-gnu
+Copy-Item -Force zig-out\lib\ravevr.lib zig-out\lib\libravevr.a
+Write-Host "ravevr built ($(& $zig.Source version))"

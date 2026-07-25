@@ -25,6 +25,12 @@ endif
 ifeq ($(ZIG),1)
   TAGS += zigdsp
 endif
+# ZIGVR=1 links the ravevr VR-overlay raster lib (Zig display-list executor,
+# pixel-identical to the Go raster - see .devnotes/ZIG_VR_OVERLAY.md).
+# Needs `make zig` first (builds zigcore AND zigvr). Untagged = Go raster path.
+ifeq ($(ZIGVR),1)
+  TAGS += zigvr
+endif
 
 .PHONY: build build-spout spout-sdk zig build-zig run service vet fmt test tidy soak vuln clean all generate-api generate-icon
 
@@ -101,3 +107,7 @@ vuln:
 
 clean:
 	rm -rf $(DIST)
+# Build with both Zig libs linked (DSP core + VR-overlay raster).
+.PHONY: build-zig-all
+build-zig-all: zig
+	$(MAKE) build ZIG=1 ZIGVR=1
