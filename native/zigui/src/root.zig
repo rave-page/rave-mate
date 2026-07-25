@@ -535,3 +535,46 @@ test "settings sub-view module" {
 }
 
 // --- end settings-sub ---
+
+// --- dialogs-a ---
+// Wave-4 dialog sweep A: the publish/transcode dialog family. Each export returns a WHOLE
+// dialog (scrim + card + footer) - Go's openModal writes the same bytes either way. The
+// shared confirm/picker/context-menu shape has ONE export (rz_ui_render_dlg_choice) serving
+// six call sites. No dialog here has a live sub-patch, so there is no _frag export.
+
+const dialogs_a = @import("dialogs_a.zig");
+const componentsA = @import("components.zig");
+
+export fn rz_ui_render_dlg_choice(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(componentsA.Choice, componentsA.choiceDialog, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_txtexport(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.TxtExport, dialogs_a.renderTxtExport, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_exportprev(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.ExportPrev, dialogs_a.renderExportPrev, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_rename(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.Rename, dialogs_a.renderRename, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_fix(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.Fix, dialogs_a.renderFix, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_preset(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.Preset, dialogs_a.renderPreset, state_json, len, out_len);
+}
+
+export fn rz_ui_render_dlg_patmgr(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_a.PatMgr, dialogs_a.renderPatMgr, state_json, len, out_len);
+}
+
+test "dialogs-a module" {
+    _ = dialogs_a;
+}
+
+// --- end dialogs-a ---

@@ -123,3 +123,15 @@ func RenderSettingsBridge(stateJSON []byte) (string, bool)       { return "", fa
 func RenderSettingsUpdFlow(stateJSON []byte) (string, bool)      { return "", false }
 
 // --- end settings-sub ---
+
+// --- dialogs-a ---
+
+func RenderDlgChoice(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgTxtExport(stateJSON []byte) (string, bool)  { return "", false }
+func RenderDlgExportPrev(stateJSON []byte) (string, bool) { return "", false }
+func RenderDlgRename(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgFix(stateJSON []byte) (string, bool)        { return "", false }
+func RenderDlgPreset(stateJSON []byte) (string, bool)     { return "", false }
+func RenderDlgPatMgr(stateJSON []byte) (string, bool)     { return "", false }
+
+// --- end dialogs-a ---

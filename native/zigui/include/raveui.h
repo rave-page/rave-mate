@@ -181,6 +181,19 @@ const uint8_t *rz_ui_render_settings_bridge(const uint8_t *state_json, size_t le
 const uint8_t *rz_ui_render_settings_updflow(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end settings-sub --- */
 
+/* --- dialogs-a --- */
+/* Wave-4 dialog sweep A: the publish/transcode dialog family. Each call returns a WHOLE
+ * dialog (scrim + card + footer) for Go's openModal. rz_ui_render_dlg_choice is the shared
+ * message+buttons shape (confirm / format picker / row context menu), 6 call sites. */
+const uint8_t *rz_ui_render_dlg_choice(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_txtexport(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_exportprev(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_rename(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_fix(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_preset(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_patmgr(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end dialogs-a --- */
+
 #ifdef __cplusplus
 }
 #endif
