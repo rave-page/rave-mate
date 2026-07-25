@@ -153,6 +153,113 @@ func WaveEnv(peaks []byte, dur, imgPps float64, out []float64) {
 		C.double(dur), C.double(imgPps), (*C.double)(unsafe.Pointer(&out[0])), C.size_t(len(out)))
 }
 
+// ── WAV/AIFF container decoders (rz_wavdec/rz_aiffdec + shared rz_pcmdec_*) ──
+
+// Feed statuses (rz_pcmdec_feed return).
+const (
+	DecOK   = 0  // header parsed, Info valid
+	DecNeed = 1  // read needLen bytes at needOff, Feed again
+	DecErr  = -1 // malformed
+)
+
+// PCMDec is a Zig-side WAV/AIFF container decoder. Go owns file I/O; Zig owns
+// parsing, frame math and PCM→f32. Parity gate: audio/dec_zig_test.go.
+type PCMDec struct{ p *C.RzPcmDec }
+
+// PCMInfo mirrors RzPcmInfo (valid after Feed returned DecOK).
+type PCMInfo struct {
+	SampleRate  int64
+	TotalFrames int64
+	DataStart   uint64 // file offset of the first sample byte
+	Channels    int
+	Bits        int
+	BlockAlign  int
+	IsFloat     bool
+	BigEndian   bool
+}
+
+func newPCMDec(p *C.RzPcmDec) *PCMDec {
+	if p == nil {
+		return nil
+	}
+	d := &PCMDec{p: p}
+	runtime.SetFinalizer(d, func(d *PCMDec) { d.Free() })
+	return d
+}
+
+// NewWAVDec returns a WAV decoder handle (nil on alloc failure).
+func NewWAVDec() *PCMDec { return newPCMDec(C.rz_wavdec_new()) }
+
+// NewAIFFDec returns an AIFF/AIFC decoder handle (nil on alloc failure).
+func NewAIFFDec() *PCMDec { return newPCMDec(C.rz_aiffdec_new()) }
+
+// Free releases the native state (idempotent).
+func (d *PCMDec) Free() {
+	if d.p != nil {
+		C.rz_pcmdec_free(d.p)
+		d.p = nil
+	}
+}
+
+// Feed drives header parse: first call with nil, then feed the requested
+// window (short feed = truncated file). Returns Dec* status + next window.
+func (d *PCMDec) Feed(b []byte) (status int, needOff, needLen uint64) {
+	var off, ln C.uint64_t
+	var p *C.uint8_t
+	if len(b) > 0 {
+		p = (*C.uint8_t)(unsafe.Pointer(&b[0]))
+	}
+	st := C.rz_pcmdec_feed(d.p, p, C.size_t(len(b)), &off, &ln)
+	return int(st), uint64(off), uint64(ln)
+}
+
+// Info returns the parsed stream metadata.
+func (d *PCMDec) Info() PCMInfo {
+	var ci C.RzPcmInfo
+	C.rz_pcmdec_info(d.p, &ci)
+	return PCMInfo{
+		SampleRate:  int64(ci.sample_rate),
+		TotalFrames: int64(ci.total_frames),
+		DataStart:   uint64(ci.data_start),
+		Channels:    int(ci.channels),
+		Bits:        int(ci.bits),
+		BlockAlign:  int(ci.block_align),
+		IsFloat:     ci.flags&1 != 0,
+		BigEndian:   ci.flags&2 != 0,
+	}
+}
+
+// SeekOff clamps frame to [0,total] and returns the absolute byte offset.
+// Pure — commit via SetPos after the file seek succeeded (Go decoder parity).
+func (d *PCMDec) SeekOff(frame int64) (clamped int64, off uint64) {
+	var c C.int64_t
+	o := C.rz_pcmdec_seek_off(d.p, C.int64_t(frame), &c)
+	return int64(c), uint64(o)
+}
+
+// SetPos commits the read cursor to frame.
+func (d *PCMDec) SetPos(frame int64) { C.rz_pcmdec_set_pos(d.p, C.int64_t(frame)) }
+
+// Plan returns frames to read next (0 = EOF) + the byte count to read.
+func (d *PCMDec) Plan(dstSamples int) (wantFrames, needBytes int) {
+	var nb C.uint64_t
+	w := C.rz_pcmdec_plan(d.p, C.size_t(dstSamples), &nb)
+	return int(w), int(nb)
+}
+
+// Decode converts len(b)/blockAlign frames into dst and advances the cursor.
+// Caller guarantees cap(dst) via Plan (len(b) <= planned bytes).
+func (d *PCMDec) Decode(b []byte, dst []float32) int {
+	if len(b) == 0 {
+		return 0
+	}
+	var dp *C.float
+	if len(dst) > 0 {
+		dp = (*C.float)(unsafe.Pointer(&dst[0]))
+	}
+	return int(C.rz_pcmdec_decode(d.p, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.size_t(len(b)), dp))
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {
