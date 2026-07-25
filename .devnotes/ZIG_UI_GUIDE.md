@@ -995,6 +995,19 @@ document to every export, so the matrix grows on its own).
 | library | 27-31 | full + `#lib-body` + `#lib-detail` + `#lib-queue-body` + cue cell | 21 × 3 surfaces + 3 queue + 4 cell |
 | player | 32-40 | full + the nine `#mp-*` patch targets | 178 surfaces over the fixture set |
 | automations | 41, 42 | full + `#auto-body` | 6 × 2 surfaces |
+| peers | 43, 44 | full + `#peers-body` | 7 × 2 surfaces |
+
+**Fan-out state after wave B-2:** 173 messages, root ids 1-3 (pilots) + 10-44 (this wave), 35
+`_v2` exports, 285 735 fuzz cases. Ids 45-49 are free inside wire2's partition; 100-149 belong to
+the fragment scheduler. Documents run **26-78%** of the JSON they replace (peers best, player
+worst - see PHASEB_BASELINE.md for why one 29 kB SVG sets that floor), and the whole dispatch is
+**27-69% faster** on every view.
+
+**Adding a field to a migrated state is now a two-sided edit.** A Go state field with a JSON tag
+and its Zig counterpart are only connected through `schema.go`; add the field without a schema row
+and v2 silently stops carrying it - the three-way gate turns that into a byte-diff failure, which
+is exactly why the gate covers every fixture rather than a sample. Same for a Zig-side struct
+change (a renamed field, a new non-zero default): regenerate and re-read the HAZARD rule above.
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

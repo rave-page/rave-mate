@@ -776,6 +776,77 @@ var schema = []msg{
 		doc: "Automations tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), st(5, "Body", "body", "AutoBodyState")},
 	},
+	// peers: full tab + the ~1 Hz #peers-body live tick. Carries the only []string on the wire (PeerMedia.SyncLines -> kStrList) and CamProp's slider-shaped strings need kStrAlways (Zig defaults '0'/'1').
+	{
+		name: "PeerBanner", goT: "peerBannerSt", zigT: "peers.Banner",
+		fs: []field{b(1, "Show", "show"), s(2, "Text", "text"), st(3, "Btn", "btn", "UiBtn")},
+	},
+	{
+		name: "PeerDeck", goT: "peerDeckSt", zigT: "peers.Deck",
+		fs: []field{b(1, "Audible", "audible"), s(2, "Line", "line")},
+	},
+	{
+		name: "PeerRow", goT: "peerRowSt", zigT: "peers.Row",
+		fs: []field{s(1, "Dot", "dot"), s(2, "Name", "name"), s(3, "Sub", "sub"), li(4, "Btns", "btns", "UiBtn"), li(5, "Decks", "decks", "PeerDeck")},
+	},
+	{
+		name: "PeerList", goT: "peerListSt", zigT: "peers.List",
+		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "PeerRow")},
+	},
+	{
+		name: "PeerRoute", goT: "peerRouteSt", zigT: "peers.Route",
+		fs: []field{s(1, "Title", "title"), s(2, "Detail", "detail"), s(3, "Pipe", "pipe")},
+	},
+	{
+		name: "PeerRecvRow", goT: "peerRecvRowSt", zigT: "peers.RecvRow",
+		fs: []field{s(1, "Mark", "mark"), s(2, "Line", "line"), st(3, "Btn", "btn", "UiBtn")},
+	},
+	{
+		name: "PeerRecv", goT: "peerRecvSt", zigT: "peers.Recv",
+		fs: []field{b(1, "Show", "show"), s(2, "Head", "head"), li(3, "Rows", "rows", "PeerRecvRow")},
+	},
+	{
+		name: "PeerMedia", goT: "peerMediaSt", zigT: "peers.Media",
+		fs: []field{b(1, "Show", "show"), s(2, "ClockLine", "clockLine"), sl(3, "SyncLines", "syncLines"), b(4, "HasTC", "hasTc"), s(5, "TCLine", "tcLine"), s(6, "NoRoutes", "noRoutes"), s(7, "RoutesHdr", "routesHdr"), li(8, "Routes", "routes", "PeerRoute"), st(9, "Recv", "recv", "PeerRecv")},
+	},
+	{
+		name: "CamProp", goT: "camPropSt", zigT: "peers.CamProp",
+		fs: []field{s(1, "Label", "label"), sa(2, "MinS", "minS"), sa(3, "MaxS", "maxS"), sa(4, "StepS", "stepS"), sa(5, "ValS", "valS"), s(6, "Act", "act"), b(7, "Disabled", "disabled"), b(8, "CanAuto", "canAuto"), b(9, "Auto", "auto"), s(10, "AutoAct", "autoAct"), s(11, "AutoLbl", "autoLbl")},
+	},
+	{
+		name: "CamNode", goT: "camNodeSt", zigT: "peers.CamNode",
+		fs: []field{s(1, "Name", "name"), s(2, "RefreshAct", "refreshAct"), s(3, "Status", "status"), st(4, "Dev", "dev", "SelState"), st(5, "Mode", "mode", "SelState"), st(6, "Start", "start", "UiBtn"), s(7, "Sender", "sender"), s(8, "SenderLine", "senderLine"), s(9, "PropsHdr", "propsHdr"), li(10, "Props", "props", "CamProp")},
+	},
+	{
+		name: "PeerCam", goT: "peerCamSt", zigT: "peers.Cam",
+		fs: []field{b(1, "Show", "show"), b(2, "Gated", "gated"), s(3, "GateHint", "gateHint"), s(4, "Empty", "empty"), li(5, "Nodes", "nodes", "CamNode")},
+	},
+	{
+		name: "XferSet", goT: "xferSetSt", zigT: "peers.XferSet",
+		fs: []field{b(1, "Show", "show"), st(2, "Enabled", "enabled", "UiToggle"), s(3, "AcceptLbl", "acceptLbl"), s(4, "Mode", "mode"), s(5, "AskLbl", "askLbl"), s(6, "AutoLbl", "autoLbl"), st(7, "Dir", "dir", "UiField"), s(8, "DefaultDir", "defaultDir")},
+	},
+	{
+		name: "XferPend", goT: "xferPendSt", zigT: "peers.XferPend",
+		fs: []field{s(1, "Line", "line"), li(2, "Btns", "btns", "UiBtn")},
+	},
+	{
+		name: "XferProg", goT: "xferProgSt", zigT: "peers.XferProg",
+		fs: []field{s(1, "Title", "title"), b(2, "IsBadge", "isBadge"), st(3, "Btn", "btn", "UiBtn"), s(4, "Badge", "badge"), s(5, "BadgeVar", "badgeVar"), b(6, "Bar", "bar"), s(7, "BarPct", "barPct"), s(8, "BarCap", "barCap"), s(9, "SubText", "subText")},
+	},
+	{
+		name: "PeerXfer", goT: "peerXferSt", zigT: "peers.Xfer",
+		fs: []field{b(1, "Show", "show"), st(2, "Settings", "settings", "XferSet"), b(3, "None", "none"), s(4, "NoneHint", "noneHint"), li(5, "Pend", "pend", "XferPend"), li(6, "Rows", "rows", "XferProg")},
+	},
+	{
+		name: "PeersBody", goT: "peersBodySt", zigT: "peers.Body", id: 44,
+		doc: "#peers-body (~1 Hz live tick)",
+		fs:  []field{s(1, "Strip", "strip"), st(2, "Banner", "banner", "PeerBanner"), s(3, "ConnsTitle", "connsTitle"), st(4, "Conns", "conns", "PeerList"), s(5, "MediaTitle", "mediaTitle"), st(6, "Media", "media", "PeerMedia"), s(7, "CamTitle", "camTitle"), st(8, "Cam", "cam", "PeerCam"), s(9, "XferTitle", "xferTitle"), st(10, "Xfer", "xfer", "PeerXfer"), s(11, "NetTitle", "netTitle"), st(12, "Discovered", "discovered", "PeerList"), s(13, "RememberedTitle", "rememberedTitle"), st(14, "Remembered", "remembered", "PeerList")},
+	},
+	{
+		name: "Peers", goT: "peersSt", zigT: "peers.State", id: 43,
+		doc: "Peers tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), st(5, "Body", "body", "PeersBody")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -783,6 +854,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"peers", "peers.zig"},
 	{"automations", "automations.zig"},
 	{"player", "player.zig"},
 	{"f", "libfixers.zig"},

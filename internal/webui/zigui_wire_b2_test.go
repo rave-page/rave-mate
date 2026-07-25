@@ -51,7 +51,9 @@ func wireExportsB2() []wireExport {
 		wireExport{"player_ro_v2", zigui.RenderPlayerROV2},
 		wireExport{"player_hov_v2", zigui.RenderPlayerHovV2},
 		wireExport{"automations_v2", zigui.RenderAutomationsV2},
-		wireExport{"automations_body_v2", zigui.RenderAutomationsBodyV2})
+		wireExport{"automations_body_v2", zigui.RenderAutomationsBodyV2},
+		wireExport{"peers_v2", zigui.RenderPeersV2},
+		wireExport{"peers_body_v2", zigui.RenderPeersBodyV2})
 	return out
 }
 
@@ -74,6 +76,11 @@ func wireBasesB2() []wireBase {
 	}
 	for n, st := range moFixtures() {
 		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
+	}
+	for n, st := range peersFixtures() {
+		out = append(out,
+			wireBase{"peers/" + n, wirePeers(st)},
+			wireBase{"peers/" + n + "/body", wirePeersBody(st.Body)})
 	}
 	for n, st := range autoFixtures() {
 		out = append(out,

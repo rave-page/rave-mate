@@ -223,4 +223,7 @@ func RenderPlayerHovV2(state []byte) (string, bool)    { return "", false }
 func RenderAutomationsV2(state []byte) (string, bool)     { return "", false }
 func RenderAutomationsBodyV2(state []byte) (string, bool) { return "", false }
 
+func RenderPeersV2(state []byte) (string, bool)     { return "", false }
+func RenderPeersBodyV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---

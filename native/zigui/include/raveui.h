@@ -281,6 +281,8 @@ const uint8_t *rz_ui_render_player_ro_v2(const uint8_t *state, size_t len, size_
 const uint8_t *rz_ui_render_player_hov_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_automations_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_automations_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_peers_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_peers_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 #ifdef __cplusplus

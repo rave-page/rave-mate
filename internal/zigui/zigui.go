@@ -1111,4 +1111,18 @@ func RenderAutomationsBodyV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderPeersV2 renders the full Peers tab from an RZW1 document.
+func RenderPeersV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_v2(p, l, n)
+	})
+}
+
+// RenderPeersBodyV2 renders the #peers-body fragment from an RZW1 document.
+func RenderPeersBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_body_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

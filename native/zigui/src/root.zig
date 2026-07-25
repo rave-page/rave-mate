@@ -945,6 +945,18 @@ export fn rz_ui_render_automations_body_v2(state: ?[*]const u8, len: usize, out_
     return renderWire(automations.Body, wire_gen.decodeAutoBodyState, automations.renderBody, wire_gen.msg_auto_body_state, state, len, out_len);
 }
 
+// ── B-2 fan-out: peers ──
+// #peers-body is the ~1 Hz live tick (route telemetry, transfer progress). Peers carries the
+// only []string on the wire (media sync lines → kStrList).
+
+export fn rz_ui_render_peers_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(peers.State, wire_gen.decodePeers, peers.render, wire_gen.msg_peers, state, len, out_len);
+}
+
+export fn rz_ui_render_peers_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(peers.Body, wire_gen.decodePeersBody, peers.renderBody, wire_gen.msg_peers_body, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

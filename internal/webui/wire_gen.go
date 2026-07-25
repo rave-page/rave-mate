@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0xf85a4c91
+	wireSchemaHash       uint32 = 0x752a7ba3
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -44,6 +44,8 @@ const (
 	wireMsgMpHov         uint16 = 40 // #mp-hov hover readout
 	wireMsgAutoState     uint16 = 41 // Automations tab (full view)
 	wireMsgAutoBodyState uint16 = 42 // #auto-body (version-gated ~1 Hz tick)
+	wireMsgPeers         uint16 = 43 // Peers tab (full view)
+	wireMsgPeersBody     uint16 = 44 // #peers-body (~1 Hz live tick)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -1669,6 +1671,157 @@ func (v autoState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(5, func() { v.Body.encodeWire(w) })
 }
 
+func (v peerBannerSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Text)
+	w.Struct(3, func() { v.Btn.encodeWire(w) })
+}
+
+func (v peerDeckSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Audible)
+	w.Str(2, v.Line)
+}
+
+func (v peerRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Dot)
+	w.Str(2, v.Name)
+	w.Str(3, v.Sub)
+	w.List(4, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.List(5, len(v.Decks), func(i int) { v.Decks[i].encodeWire(w) })
+}
+
+func (v peerListSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Empty)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v peerRouteSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Detail)
+	w.Str(3, v.Pipe)
+}
+
+func (v peerRecvRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Mark)
+	w.Str(2, v.Line)
+	w.Struct(3, func() { v.Btn.encodeWire(w) })
+}
+
+func (v peerRecvSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Head)
+	w.List(3, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v peerMediaSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.ClockLine)
+	w.StrList(3, v.SyncLines)
+	w.Bool(4, v.HasTC)
+	w.Str(5, v.TCLine)
+	w.Str(6, v.NoRoutes)
+	w.Str(7, v.RoutesHdr)
+	w.List(8, len(v.Routes), func(i int) { v.Routes[i].encodeWire(w) })
+	w.Struct(9, func() { v.Recv.encodeWire(w) })
+}
+
+func (v camPropSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.StrAlways(2, v.MinS)
+	w.StrAlways(3, v.MaxS)
+	w.StrAlways(4, v.StepS)
+	w.StrAlways(5, v.ValS)
+	w.Str(6, v.Act)
+	w.Bool(7, v.Disabled)
+	w.Bool(8, v.CanAuto)
+	w.Bool(9, v.Auto)
+	w.Str(10, v.AutoAct)
+	w.Str(11, v.AutoLbl)
+}
+
+func (v camNodeSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.RefreshAct)
+	w.Str(3, v.Status)
+	w.Struct(4, func() { v.Dev.encodeWire(w) })
+	w.Struct(5, func() { v.Mode.encodeWire(w) })
+	w.Struct(6, func() { v.Start.encodeWire(w) })
+	w.Str(7, v.Sender)
+	w.Str(8, v.SenderLine)
+	w.Str(9, v.PropsHdr)
+	w.List(10, len(v.Props), func(i int) { v.Props[i].encodeWire(w) })
+}
+
+func (v peerCamSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Bool(2, v.Gated)
+	w.Str(3, v.GateHint)
+	w.Str(4, v.Empty)
+	w.List(5, len(v.Nodes), func(i int) { v.Nodes[i].encodeWire(w) })
+}
+
+func (v xferSetSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Struct(2, func() { v.Enabled.encodeWire(w) })
+	w.Str(3, v.AcceptLbl)
+	w.Str(4, v.Mode)
+	w.Str(5, v.AskLbl)
+	w.Str(6, v.AutoLbl)
+	w.Struct(7, func() { v.Dir.encodeWire(w) })
+	w.Str(8, v.DefaultDir)
+}
+
+func (v xferPendSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Line)
+	w.List(2, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+}
+
+func (v xferProgSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Bool(2, v.IsBadge)
+	w.Struct(3, func() { v.Btn.encodeWire(w) })
+	w.Str(4, v.Badge)
+	w.Str(5, v.BadgeVar)
+	w.Bool(6, v.Bar)
+	w.Str(7, v.BarPct)
+	w.Str(8, v.BarCap)
+	w.Str(9, v.SubText)
+}
+
+func (v peerXferSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Struct(2, func() { v.Settings.encodeWire(w) })
+	w.Bool(3, v.None)
+	w.Str(4, v.NoneHint)
+	w.List(5, len(v.Pend), func(i int) { v.Pend[i].encodeWire(w) })
+	w.List(6, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v peersBodySt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Strip)
+	w.Struct(2, func() { v.Banner.encodeWire(w) })
+	w.Str(3, v.ConnsTitle)
+	w.Struct(4, func() { v.Conns.encodeWire(w) })
+	w.Str(5, v.MediaTitle)
+	w.Struct(6, func() { v.Media.encodeWire(w) })
+	w.Str(7, v.CamTitle)
+	w.Struct(8, func() { v.Cam.encodeWire(w) })
+	w.Str(9, v.XferTitle)
+	w.Struct(10, func() { v.Xfer.encodeWire(w) })
+	w.Str(11, v.NetTitle)
+	w.Struct(12, func() { v.Discovered.encodeWire(w) })
+	w.Str(13, v.RememberedTitle)
+	w.Struct(14, func() { v.Remembered.encodeWire(w) })
+}
+
+func (v peersSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Bool(3, v.Available)
+	w.Str(4, v.Unavailable)
+	w.Struct(5, func() { v.Body.encodeWire(w) })
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -1917,6 +2070,20 @@ func wireAutoState(v autoState) []byte {
 // wireAutoBodyState encodes autoBodyState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAutoBodyState(v autoBodyState) []byte {
 	w := zigui.NewWireWriter(wireMsgAutoBodyState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wirePeers encodes peersSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wirePeers(v peersSt) []byte {
+	w := zigui.NewWireWriter(wireMsgPeers, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wirePeersBody encodes peersBodySt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wirePeersBody(v peersBodySt) []byte {
+	w := zigui.NewWireWriter(wireMsgPeersBody, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

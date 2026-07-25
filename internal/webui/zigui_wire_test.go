@@ -679,6 +679,87 @@ func TestZigWireThreeWayAutomations(t *testing.T) {
 	assertNoNewFallbacks(t, before)
 }
 
+// TestZigWireThreeWayPeers: full tab + the ~1 Hz #peers-body tick. Peers carries the only
+// []string on the wire (the media plane's sync lines), so this is also the kStrList gate.
+func TestZigWireThreeWayPeers(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := peersFixtures()
+	var wireB, jsonB, syncLines int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wirePeers(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+			syncLines += len(st.Body.Media.SyncLines)
+
+			v1, ok := zigui.RenderPeers(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderPeersV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", peersHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			b1, ok := zigui.RenderPeersBody(stateJSON(st.Body))
+			if !ok {
+				t.Fatal("v1 body render failed")
+			}
+			b2, ok := zigui.RenderPeersBodyV2(wirePeersBody(st.Body))
+			if !ok {
+				t.Fatal("v2 body render failed")
+			}
+			assertBytesEqual(t, "body go==v1", peersBodyHTML(st.Body), b1)
+			assertBytesEqual(t, "body v1==v2", b1, b2)
+		})
+	}
+	if syncLines == 0 {
+		t.Fatal("no fixture carries media sync lines - the []string path is untested")
+	}
+	t.Logf("%d fixtures (%d sync lines): wire %d B vs json %d B (%.1f%%)", len(fx), syncLines, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// TestWireStrListEdges: an empty []string, an element that is itself empty, and one that needs
+// escaping - the cases where a list of scalars can silently lose an element.
+func TestWireStrListEdges(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	base := peersFixtures()["populated"]
+	seen := map[string]bool{}
+	for name, lines := range map[string][]string{
+		"nil":      nil,
+		"empty":    {},
+		"oneEmpty": {""},
+		"gaps":     {"clock: leader", "", "tc: 01:02:03"},
+		"escaping": {`sync &"<x>"`, "синх ✓"},
+	} {
+		st := base
+		st.Body.Media.SyncLines = lines
+		v2, ok := zigui.RenderPeersV2(wirePeers(st))
+		if !ok {
+			t.Fatalf("%s: v2 render failed", name)
+		}
+		want := peersHTML(st)
+		assertBytesEqual(t, name, want, v2)
+		seen[want] = true
+	}
+	// Inertness guard: if the sync lines never reach the markup, every case above compares the
+	// same bytes and proves nothing.
+	if len(seen) < 3 {
+		t.Fatalf("only %d distinct renders across 5 sync-line shapes - the fixture does not render them", len(seen))
+	}
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).

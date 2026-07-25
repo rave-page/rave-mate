@@ -208,7 +208,8 @@ type peersSt struct {
 func (u *UI) renderPeers() string {
 	st := u.peersState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderPeers(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPeersV2", wirePeers(st), zigui.RenderPeersV2,
+			zigui.RenderPeers, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -219,7 +220,8 @@ func (u *UI) renderPeers() string {
 func (u *UI) peersBody() string {
 	st := u.peersBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderPeersBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPeersBodyV2", wirePeersBody(st), zigui.RenderPeersBodyV2,
+			zigui.RenderPeersBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
