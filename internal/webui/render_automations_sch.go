@@ -4,7 +4,7 @@ import "strings"
 
 // Automations SCHEDULE-editor dialog state + pure renderer (wave-4 dialog sweep B). The impure
 // half stays in automations_schedules.go (working copy under s.mu, the automation snapshot, the
-// engine cron validator, smart-select registration, tipTopic markup, the GOOS platform checks);
+// engine cron validator, smart-select registration, tooltip resolution, the GOOS platform checks);
 // this renderer is mirrored in native/zigui/src/dialogs_b.zig
 // (gate: zigui_golden_dialogs_b_test.go).
 //

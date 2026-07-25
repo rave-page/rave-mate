@@ -13,7 +13,6 @@ package webui
 
 import (
 	"fmt"
-	"html"
 	"runtime"
 	"strconv"
 	"strings"
@@ -482,13 +481,13 @@ func asTriggerState(s *asSt) []aeBlockSt {
 			aeBlockSt{Kind: aeBlkPBHint, Text: i18n.T("automations.sch.dailyHint")})
 	case automation.ScheduleCron:
 		out = append(out, aeBlockSt{Kind: aeBlkField,
-			Field: newDlgField(i18n.T("automations.sch.cron"), "auto-sch:cron", s.cronTx, "text",
-				"*/15 * * * *", tipTopic("auto-sch-cron"))})
+			Field: newDlgFieldSt(i18n.T("automations.sch.cron"), "auto-sch:cron", s.cronTx, "text",
+				"*/15 * * * *", tipTopicSt("auto-sch-cron"))})
 		out = append(out, asCronVerdictBlock(s.cronTx))
 	case automation.ScheduleIdle:
 		out = append(out, aeBlockSt{Kind: aeBlkField,
-			Field: newDlgField(i18n.T("automations.sch.idleMinutes"), "auto-sch:idle", aeIntTx(s.idle), "number",
-				strconv.Itoa(asDefaultIdle), tipTopic("auto-sch-idle"))})
+			Field: newDlgFieldSt(i18n.T("automations.sch.idleMinutes"), "auto-sch:idle", aeIntTx(s.idle), "number",
+				strconv.Itoa(asDefaultIdle), tipTopicSt("auto-sch-idle"))})
 		if runtime.GOOS != "windows" {
 			// The idle TRIGGER fails closed: evalTick skips the schedule outright when the platform
 			// can't report idle time, so this would be a schedule that never fires. (The idle GATE
@@ -497,8 +496,8 @@ func asTriggerState(s *asSt) []aeBlockSt {
 		}
 	default:
 		out = append(out, aeBlockSt{Kind: aeBlkField,
-			Field: newDlgField(i18n.T("automations.sch.intervalMinutes"), "auto-sch:interval", aeIntTx(s.interval), "number",
-				strconv.Itoa(asDefaultInterval), tipTopic("auto-sch-interval"))})
+			Field: newDlgFieldSt(i18n.T("automations.sch.intervalMinutes"), "auto-sch:interval", aeIntTx(s.interval), "number",
+				strconv.Itoa(asDefaultInterval), tipTopicSt("auto-sch-interval"))})
 	}
 	return out
 }
@@ -506,12 +505,12 @@ func asTriggerState(s *asSt) []aeBlockSt {
 // asGatesState resolves the gates that apply to ANY kind. Caller holds s.mu.
 func asGatesState(s *asSt) []aeBlockSt {
 	out := []aeBlockSt{
-		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.requireIdle"), "auto-sch:reqidle", aeIntTx(s.reqIdle),
-			"number", "0", tipTopic("auto-sch-require-idle"))},
-		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.requireApps"), "auto-sch:reqapps", s.reqApps, "text",
-			i18n.T("automations.sch.requireAppsPH"), tipTopic("auto-sch-apps"))},
-		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.excludeApps"), "auto-sch:exclapps", s.exclApps, "text",
-			i18n.T("automations.sch.excludeAppsPH"), tipTopic("auto-sch-apps"))},
+		{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.sch.requireIdle"), "auto-sch:reqidle", aeIntTx(s.reqIdle),
+			"number", "0", tipTopicSt("auto-sch-require-idle"))},
+		{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.sch.requireApps"), "auto-sch:reqapps", s.reqApps, "text",
+			i18n.T("automations.sch.requireAppsPH"), tipTopicSt("auto-sch-apps"))},
+		{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.sch.excludeApps"), "auto-sch:exclapps", s.exclApps, "text",
+			i18n.T("automations.sch.excludeAppsPH"), tipTopicSt("auto-sch-apps"))},
 	}
 	if runtime.GOOS != "windows" {
 		// gateBlock fails OPEN when the platform can't report idle/processes - the schedule still
@@ -541,8 +540,9 @@ func asAutoSelectState(s *asSt) selState {
 }
 
 // asKindSelectBlock registers + resolves the trigger picker. Each row carries a one-line
-// description of when it fires; the label is PRE-RENDERED (selraw, not select) so the full topic
-// tooltip can sit beside the label text - exactly what smartSelectRaw emitted.
+// description of when it fires; the block is a selraw (not select) because the label carries the
+// full topic tooltip beside its text - as structured state since phase B1b (aeLabelSt), which is
+// what smartSelectRaw used to emit pre-rendered.
 func asKindSelectBlock(s *asSt) aeBlockSt {
 	sel := resolveSmartSelect("auto-sch-kind", "auto-sch:kind", string(s.kind), func() []ssOpt {
 		out := make([]ssOpt, 0, len(asKinds))
@@ -551,8 +551,8 @@ func asKindSelectBlock(s *asSt) aeBlockSt {
 		}
 		return out
 	})
-	lbl := `<span class=ss-label>` + html.EscapeString(i18n.T("automations.sch.kind")) + tipTopic("auto-sch-kind") + `</span>`
-	return aeBlockSt{Kind: aeBlkSelRaw, Sel: sel, LabelHTML: lbl}
+	return aeBlockSt{Kind: aeBlkSelRaw, Sel: sel,
+		Label: &aeLabelSt{Text: i18n.T("automations.sch.kind"), Tip: tipTopicSt("auto-sch-kind")}}
 }
 
 // asClockSelectState registers + resolves one hour/minute picker - two of these stand in for a

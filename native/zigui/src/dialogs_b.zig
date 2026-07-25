@@ -538,38 +538,78 @@ test "ws poster field: label/placeholder raw, value escaped" {
 // The form body is a BLOCK LIST (settings-port shape): each block renders exactly one
 // components.zig primitive, so layout cannot drift between the renderers. Depth is 1 by
 // construction — a block carries at most two fields plus one button, so the JSON stays a plain
-// tree. Raw seams: every `tip` (Go tipTopic markup). A step's `loud` block is the shared loudness
-// override as STRUCTURED state (components.zig loudnessFields); only its tip + extra stay raw.
+// tree. Tooltips (field, pbhint, and the selraw ss-label) cross as STRUCTURED state since phase
+// B1b — components.zig renderTip; the `tip`/`labelHtml` strings stay as the dual-field bridge for
+// the state automations_runnow.go shares and still ships pre-rendered. A step's `loud` block is
+// the shared loudness override as STRUCTURED state too (components.zig loudnessFields, phase
+// B-1a); only ITS own tip + extra stay raw. No `raw` block kind is left.
+
+/// DlgField is webui dlgFieldSt: components.Field plus a structured tooltip. Local twin (rather
+/// than a components.Field change) because Field is shared with every other migrated tab.
+pub const DlgField = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    value: []const u8 = "",
+    inputType: []const u8 = "",
+    ph: []const u8 = "",
+    tip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
+};
+
+/// renderDlgField feeds components.fieldEx, which takes the tooltip as a STRING: the structured
+/// card renders into a scratch buffer so fieldEx's markup stays single-sourced.
+fn renderDlgField(h: *Html, f: DlgField) !void {
+    var tb = Html.init(h.a);
+    defer tb.deinit();
+    try c.tipOr(&tb, f.tipSt, f.tip);
+    try c.fieldEx(h, f.label, f.dl, f.act, f.value, f.inputType, f.ph, tb.b.items);
+}
+
+/// AeLabel is a selraw's ss-label as state (webui aeLabelSt): escaped text + its tooltip.
+pub const AeLabel = struct {
+    text: []const u8 = "",
+    tip: ?c.Tip = null,
+};
+
+fn renderAeLabel(h: *Html, l: AeLabel) !void {
+    try h.raw("<span class=ss-label>");
+    try h.esc(l.text);
+    if (l.tip) |t| try c.renderTip(h, t);
+    try h.raw("</span>");
+}
 
 /// AeBlock is one form block. Only the fields its kind names are read.
 /// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|loud.
 pub const AeBlock = struct {
     kind: []const u8 = "",
-    field: c.Field = .{},
-    field2: c.Field = .{},
+    field: DlgField = .{},
+    field2: DlgField = .{},
     btn: c.Btn = .{},
     toggle: c.Toggle = .{},
     sel: c.Select = .{},
     sel2: c.Select = .{},
-    labelHtml: []const u8 = "",
+    labelHtml: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    labelSt: ?AeLabel = null, // structured ss-label — wins over labelHtml
     tone: []const u8 = "",
     text: []const u8 = "",
-    tip: []const u8 = "",
-    loud: c.Loud = .{},
+    tip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
+    loud: c.Loud = .{}, // the shared loudness block, structured
 };
 
 pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
     const k = b.kind;
     if (std.mem.eql(u8, k, "field")) {
-        try c.fieldOf(h, b.field);
+        try renderDlgField(h, b.field);
     } else if (std.mem.eql(u8, k, "fpair")) {
         try c.fpairOpen(h);
-        try c.fieldOf(h, b.field);
-        try c.fieldOf(h, b.field2);
+        try renderDlgField(h, b.field);
+        try renderDlgField(h, b.field2);
         try c.fpairClose(h);
     } else if (std.mem.eql(u8, k, "toolbar")) {
         try h.raw("<div class=lib-toolbar>");
-        try c.fieldOf(h, b.field);
+        try renderDlgField(h, b.field);
         try c.btnOf(h, b.btn);
         try h.raw("</div>");
     } else if (std.mem.eql(u8, k, "toggle")) {
@@ -577,7 +617,14 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
     } else if (std.mem.eql(u8, k, "select")) {
         try c.selectBox(h, b.sel);
     } else if (std.mem.eql(u8, k, "selraw")) {
-        try c.selectBoxRaw(h, b.sel, b.labelHtml);
+        if (b.labelSt) |l| {
+            var lb = Html.init(h.a);
+            defer lb.deinit();
+            try renderAeLabel(&lb, l);
+            try c.selectBoxRaw(h, b.sel, lb.b.items);
+        } else {
+            try c.selectBoxRaw(h, b.sel, b.labelHtml);
+        }
     } else if (std.mem.eql(u8, k, "fpairsel")) {
         try c.fpairOpen(h);
         try c.selectBox(h, b.sel);
@@ -588,7 +635,7 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
     } else if (std.mem.eql(u8, k, "pbhint")) {
         try h.raw("<div class=pb-hint>");
         try h.esc(b.text);
-        try h.raw(b.tip);
+        try c.tipOr(h, b.tipSt, b.tip);
         try h.raw("</div>");
     } else if (std.mem.eql(u8, k, "loud")) {
         try c.loudnessFields(h, b.loud);

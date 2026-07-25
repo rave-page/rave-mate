@@ -149,8 +149,8 @@ binary. Run via `make generate-api`.
 
 | Module | Version | Pinned | Why |
 |---|---|---|---|
-| `github.com/oapi-codegen/oapi-codegen/v2` | v2.7.0 | 2026-05-01 | Generates the filtered Go API client from `/openapi.json`. |
-| `github.com/getkin/kin-openapi` | v0.135.0 | (w/ above) | OpenAPI 3 loader; lets us fix up the spec before generation. |
+| `github.com/oapi-codegen/oapi-codegen/v2` | v2.7.1 | 2026-06-05 | Generates the filtered Go API client from `/openapi.json`. 2.7.1 closes GHSA-rjwr-m7qx-3fjr (server-description comment injection; we generate from our own spec, defense in depth). |
+| `github.com/getkin/kin-openapi` | v0.144.0 | 2026-07-23 | OpenAPI 3 loader; lets us fix up the spec before generation. 0.144.0 closes GHSA-r277-6w6q-xmqw (critical, ValidationHandler fail-open) + GHSA-jpcw-4wr7-c3vq — neither path reachable from genapi (pure codegen, no request validation), fixed anyway. **One-time soak exemption** (user-approved 2026-07-25, `.modage-allow`): release was 2d old; verified before adoption — go checksum-DB verify clean, module-proxy bytes byte-identical to the GitHub v0.144.0 tag (0 differing files), release cut by the long-time maintainer (fenollp), and a danger-pattern scan of every added line in the v0.135.0→v0.144.0 diff found no exec/syscall/net/unsafe/linkname additions outside testdata. Exemption covers EXACTLY this version; future bumps re-enter the normal 7-day soak. Transitives pulled by the bump (jsonpointer v0.22.5, swag/jsonname v0.25.5, oasdiff/yaml v0.1.1, yaml3 v0.0.14, jsonschema/v6 v6.0.2, regexp2 v1.11.0, testify/v2 v2.4.0) are all ≥30d old — no exemption needed. |
 
 ### Native toolchain (build-time only, NOT a Go dep)
 

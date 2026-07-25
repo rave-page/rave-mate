@@ -5,6 +5,8 @@ package zigvr
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../native/zigvr/include
 #cgo LDFLAGS: -L${SRCDIR}/../../native/zigvr/zig-out/lib -lravevr
+// linux: Zig libc math resolves from libm; mingw CRT has it built in.
+#cgo linux LDFLAGS: -lm
 #include "ravevr.h"
 */
 import "C"

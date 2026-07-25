@@ -178,3 +178,17 @@ func RenderPCViewer(stateJSON []byte) (string, bool) { return "", false }
 func RenderPCGpu(stateJSON []byte) (string, bool)    { return "", false }
 
 // --- end dialogs-b ---
+
+// --- phaseb-tip ---
+
+func RenderTip(stateJSON []byte) (string, bool) { return "", false }
+
+// --- end phaseb-tip ---
+// --- phaseb-wire ---
+
+func RenderAppGroupsV2(state []byte) (string, bool)     { return "", false }
+func RenderAppGroupsBodyV2(state []byte) (string, bool) { return "", false }
+func RenderLogsV2(state []byte) (string, bool)          { return "", false }
+func RenderLogsLinesV2(state []byte) (string, bool)     { return "", false }
+
+// --- end phaseb-wire ---

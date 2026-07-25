@@ -166,12 +166,31 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
-- **P6 UI phase B (in flight):** wave B-1 shrinks the pre-rendered-raw seams that phase A
-  left in the state contracts. B-1a DONE: the shared loudness block (`components.go`
-  `loudnessFields`) is structured state (`loudSt`) rendered by `components.zig`
-  `loudnessFields` in all four consumers (library encode builder, export preset editor,
-  automation transcode step, player export pane) — no raw loudness markup crosses the ABI
-  any more. B-1b (tipTopic → tipSt) runs alongside.
+- **P6 UI phase B-1a (SHIPPED):** the shared loudness block (`components.go` `loudnessFields`) —
+  which phase A left riding through four state contracts as pre-rendered raw HTML — is structured
+  state (`loudSt`) rendered by `components.zig loudnessFields` in all four consumers (library
+  encode builder, export preset editor, automation transcode step, player export pane). No raw
+  loudness markup crosses the ABI any more; only its own tooltip + the caller's extraHTML stay
+  raw. Detail: ZIG_UI_GUIDE.md "B-1a: the shared loudness block".
+- **P6 UI phase B-1b (shard 1 SHIPPED):** `tooltip.go` `renderTip` — the 70-call-site, 18-file
+  tooltip primitive — now crosses as structured `tipSt` (all locale/registry resolution Go-side)
+  and renders in `components.zig renderTip`, byte-identical over 527 subtests (73 topics × 7
+  locales + 16 edge fixtures). Migrated consumers: settings (13 sites), player (4), automations
+  editor (8), automations schedules (7). The other 14 files keep the raw pre-rendered string over
+  a dual-field bridge (`tipOr`) and are untouched — wave B-2 flips them. Detail + rules:
+  ZIG_UI_GUIDE.md "tipTopic → structured tipSt".
+- **P6 UI phase B (wave B-1, in progress):** the per-render state→JSON→parse round trip is
+  being replaced by RZW1, a length-prefixed TLV wire whose Go encoder and Zig decoder are
+  GENERATED FROM ONE SCHEMA (`internal/zigui/wiregen`) - appgroups + logs pilots land as
+  `_v2` exports beside the JSON ones (dispatch v2 → v1 → Go, downgrades counted). -61% on the
+  ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
+  mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
+  "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
+- **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
+  (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
+  Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
+  that is the Go marshal - 75-80% is the Zig-side `std.json` parse (6.9 ns per state byte, 5×
+  Go's marshal slope). A binary wire must kill the PARSE, not just the marshal.
 
 ## CI
 

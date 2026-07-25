@@ -499,7 +499,7 @@ func (u *UI) aeModalState(s *aeSt) aeModalSt {
 	st.Ident = []aeBlockSt{
 		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.label"), "auto-ed:label", s.label, "text", "", "")},
 		{Kind: aeBlkToolbar,
-			Field: newDlgField(i18n.T("automations.ed.watchDir"), "auto-ed:watch", s.watch, "text", "", tipTopic("auto-watch-dir")),
+			Field: newDlgFieldSt(i18n.T("automations.ed.watchDir"), "auto-ed:watch", s.watch, "text", "", tipTopicSt("auto-watch-dir")),
 			Btn:   uiBtn{Label: i18n.T("common.browse"), Variant: "ghost", Act: "pick-dir:auto-ed:watch"}},
 		{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("common.enabledCap"), "auto-ed:enabled", s.enabled)},
 	}
@@ -511,14 +511,14 @@ func (u *UI) aeModalState(s *aeSt) aeModalSt {
 // aeMatchState resolves the eligibility rules. Caller holds s.mu.
 func (u *UI) aeMatchState(s *aeSt) []aeBlockSt {
 	out := []aeBlockSt{
-		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.exts"), "auto-ed:exts", s.extsTx, "text",
-			i18n.T("automations.ed.extsPH"), tipTopic("auto-match-exts"))},
+		{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.ed.exts"), "auto-ed:exts", s.extsTx, "text",
+			i18n.T("automations.ed.extsPH"), tipTopicSt("auto-match-exts"))},
 		{Kind: aeBlkFPair,
 			Field: newDlgField(i18n.T("automations.ed.minSize"), "auto-ed:minsize", s.minSizeTx, "number", "0", ""),
-			Field2: newDlgField(i18n.T("automations.ed.minAge"), "auto-ed:minage", aeIntTx(s.minAge), "number", "0",
-				tipTopic("auto-min-age"))},
-		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.pattern"), "auto-ed:pattern", s.pattern, "text",
-			i18n.T("automations.ed.patternPH"), tipTopic("auto-match-pattern"))},
+			Field2: newDlgFieldSt(i18n.T("automations.ed.minAge"), "auto-ed:minage", aeIntTx(s.minAge), "number", "0",
+				tipTopicSt("auto-min-age"))},
+		{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.ed.pattern"), "auto-ed:pattern", s.pattern, "text",
+			i18n.T("automations.ed.patternPH"), tipTopicSt("auto-match-pattern"))},
 	}
 	if s.minAge > 0 {
 		// The gate the watcher can never pass - say so where it's set, not in a failed run.
@@ -584,16 +584,16 @@ func (u *UI) aeStepState(i, n int, step aeStep, presets []transcode.Preset) aeSt
 	switch a.Type {
 	case automation.ActionRename:
 		out.Blocks = []aeBlockSt{
-			{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.bufferMinutes"), af("buf"), aeIntTx(a.BufferMinutes),
-				"number", "180", tipTopic("auto-rename-buffer"))},
-			{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.template"), af("tmpl"), a.Template, "text",
-				"{YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}", tipTopic("auto-rename-template"))},
+			{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.ed.bufferMinutes"), af("buf"), aeIntTx(a.BufferMinutes),
+				"number", "180", tipTopicSt("auto-rename-buffer"))},
+			{Kind: aeBlkField, Field: newDlgFieldSt(i18n.T("automations.ed.template"), af("tmpl"), a.Template, "text",
+				"{YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}", tipTopicSt("auto-rename-template"))},
 		}
 	case automation.ActionTrimSilence:
 		out.Blocks = []aeBlockSt{
 			{Kind: aeBlkFPair,
-				Field: newDlgField(i18n.T("automations.ed.thresholdDb"), af("thr"), aeNumTx(a.ThresholdDb), "number", "-50",
-					tipTopic("auto-trim-silence")),
+				Field: newDlgFieldSt(i18n.T("automations.ed.thresholdDb"), af("thr"), aeNumTx(a.ThresholdDb), "number", "-50",
+					tipTopicSt("auto-trim-silence")),
 				Field2: newDlgField(i18n.T("automations.ed.minSilence"), af("minsil"), aeNumTx(a.MinSilenceSeconds), "number", "2", "")},
 			{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("automations.ed.trimStart"), af("trims"), a.TrimStart == nil || *a.TrimStart)},
 			{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("automations.ed.trimEnd"), af("trime"), a.TrimEnd == nil || *a.TrimEnd)},
@@ -613,7 +613,7 @@ func (u *UI) aeStepState(i, n int, step aeStep, presets []transcode.Preset) aeSt
 		// The one irreversible step: say exactly what it erases and where it stops.
 		out.Blocks = []aeBlockSt{
 			{Kind: aeBlkHint, Tone: "bad", Text: i18n.T("automations.ed.deleteWarn")},
-			{Kind: aeBlkPBHint, Text: i18n.T("automations.ed.deleteTerminal"), Tip: tipTopic("auto-delete-action")},
+			{Kind: aeBlkPBHint, Text: i18n.T("automations.ed.deleteTerminal"), TipS: tipTopicSt("auto-delete-action")},
 		}
 	}
 	return out

@@ -14,9 +14,11 @@ import (
 // body is data, not HTML, so both renderers walk the same tree through the same components.go
 // primitives. Depth is 1 by construction - a block carries at most two fields plus one button.
 //
-// Trusted raw fields: every `tip` (tipTopic markup, tooltip.go). A step's `loud` block carries the
-// shared loudness override block as STRUCTURED state (components.go loudSt, phase B-1a) - only its
-// own tip + extra stay raw.
+// Tooltips cross as STRUCTURED state (*tipSt, tooltip.go) since phase B1b - including the selraw
+// ss-label, which used to be pre-rendered markup. The raw `tip`/`labelHtml` fields stay as the
+// dual-field bridge (tipOr): automations_runnow.go shares dlgFieldSt and still ships raw.
+// A step's `loud` block carries the shared loudness override as STRUCTURED state too (components.go
+// loudSt, phase B-1a); only ITS own tip + extra markup stay raw. No `raw` block kind is left.
 
 // dlgFieldSt is a fieldEx() call as state; json tags match components.zig `Field` exactly
 // (uiField in render_media_shared.go carries no tip, and that shape is the media batch's).
@@ -27,7 +29,8 @@ type dlgFieldSt struct {
 	Value string `json:"value"`
 	Type  string `json:"inputType"`
 	PH    string `json:"ph"`
-	Tip   string `json:"tip"` // RAW pre-rendered tooltip markup
+	Tip   string `json:"tip"`             // legacy RAW pre-rendered tooltip markup (bridge)
+	TipS  *tipSt `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
 }
 
 func newDlgField(label, act, value, inputType, ph, tip string) dlgFieldSt {
@@ -35,8 +38,26 @@ func newDlgField(label, act, value, inputType, ph, tip string) dlgFieldSt {
 		Type: inputType, PH: ph, Tip: tip}
 }
 
+// newDlgFieldSt is newDlgField with a STRUCTURED tooltip (the migrated call sites).
+func newDlgFieldSt(label, act, value, inputType, ph string, tp *tipSt) dlgFieldSt {
+	f := newDlgField(label, act, value, inputType, ph, "")
+	f.TipS = tp
+	return f
+}
+
 func (f dlgFieldSt) html() string {
-	return fieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, f.Tip)
+	return fieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, tipOr(f.TipS, f.Tip))
+}
+
+// aeLabelSt is a selraw's ss-label as state: escaped label text + its tooltip (Go smartSelectRaw
+// used to hand this over pre-rendered).
+type aeLabelSt struct {
+	Text string `json:"text"`
+	Tip  *tipSt `json:"tip,omitempty"`
+}
+
+func (l aeLabelSt) html() string {
+	return `<span class=ss-label>` + htmlEscape(l.Text) + tipOr(l.Tip, "") + `</span>`
 }
 
 // Block kinds. A form block renders exactly one components.go primitive (or one small wrapper
@@ -63,11 +84,13 @@ type aeBlockSt struct {
 	Toggle    uiToggle   `json:"toggle,omitempty"`
 	Sel       selState   `json:"sel,omitempty"`
 	Sel2      selState   `json:"sel2,omitempty"`
-	LabelHTML string     `json:"labelHtml,omitempty"` // RAW (selraw: pre-rendered ss-label)
+	LabelHTML string     `json:"labelHtml,omitempty"` // legacy RAW selraw ss-label (bridge)
+	Label     *aeLabelSt `json:"labelSt,omitempty"`   // structured selraw ss-label - wins over LabelHTML
 	Tone      string     `json:"tone,omitempty"`
 	Text      string     `json:"text,omitempty"`
-	Tip       string     `json:"tip,omitempty"` // RAW
-	Loud      loudSt     `json:"loud"`
+	Tip       string     `json:"tip,omitempty"`   // legacy RAW tooltip markup (bridge)
+	TipS      *tipSt     `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
+	Loud      loudSt     `json:"loud"`            // the shared loudness block, structured
 }
 
 // aeStepSt is one chain-step card: header (order + type label + reorder/remove) then its body.
@@ -111,13 +134,16 @@ func aeBlockHTML(b aeBlockSt) string {
 	case aeBlkSelect:
 		return selHTML(b.Sel)
 	case aeBlkSelRaw:
+		if b.Label != nil {
+			return selHTMLRaw(b.Sel, b.Label.html())
+		}
 		return selHTMLRaw(b.Sel, b.LabelHTML)
 	case aeBlkFPairSel:
 		return fpair(selHTML(b.Sel), selHTML(b.Sel2))
 	case aeBlkHint:
 		return hint(b.Tone, b.Text)
 	case aeBlkPBHint:
-		return `<div class=pb-hint>` + htmlEscape(b.Text) + b.Tip + `</div>`
+		return `<div class=pb-hint>` + htmlEscape(b.Text) + tipOr(b.TipS, b.Tip) + `</div>`
 	case aeBlkLoud:
 		return b.Loud.html()
 	}

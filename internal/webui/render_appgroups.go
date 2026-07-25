@@ -6,6 +6,7 @@ import (
 	"html"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"rave.page/mate/internal/appgroups"
 	"rave.page/mate/internal/i18n"
@@ -87,8 +88,13 @@ func (u *UI) appGroupsState() agState {
 
 // stateJSON marshals render state for the Zig renderer (nil → zigui returns !ok →
 // Go fallback). Param is `any` at the json boundary only; states are plain structs.
+// Every Zig-path render funnels through here, so it is also where the marshal half of the
+// phase-A round trip is measured (zigui.PerfCounts, `ctl perf` section [zigui]) - two
+// time.Now() calls against a marshal that costs µs.
 func stateJSON(v any) []byte {
+	t0 := time.Now()
 	b, err := json.Marshal(v)
+	zigui.NoteMarshal(len(b), time.Since(t0)) // len(nil) == 0 → a failed marshal counts bytes 0
 	if err != nil {
 		return nil
 	}
@@ -96,10 +102,12 @@ func stateJSON(v any) []byte {
 }
 
 // renderAppGroups: crash-recovery launcher - list groups, running count, Launch.
+// Render path: RZW1 binary state (v2) → JSON state (v1) → the Go renderer below (see wire.go).
 func (u *UI) renderAppGroups() string {
 	st := u.appGroupsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAppGroups(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAppGroupsV2", wireAgState(st), zigui.RenderAppGroupsV2,
+			zigui.RenderAppGroups, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -110,7 +118,8 @@ func (u *UI) renderAppGroups() string {
 func (u *UI) appGroupsBody() string {
 	st := u.appGroupsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAppGroupsBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAppGroupsBodyV2", wireAgState(st), zigui.RenderAppGroupsBodyV2,
+			zigui.RenderAppGroupsBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

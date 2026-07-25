@@ -736,7 +736,9 @@ Not ported, with reasons (dialog sweep B):
 - `pickers.go` / `pickers_windows.go` / `pick_actions.go` — **no HTML at all**. These are the native
   OS dialog bindings (IFileDialog) plus the `pick-dir:`/`pick-file:` act redispatch; the only markup
   involved is the `Browse…` button the CALLING surface renders (already ported per tab).
-- `tooltip.go` `tipTopic` — assessed, deliberately NOT ported. Cost/benefit below.
+- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1** (shard 1: the mechanism
+  + the 4 densest consumers). The phase-A assessment below is kept as the record of WHY it waited;
+  the phase-B section after it is the shipped design.
 
 **tipTopic assessment (why the tooltip primitive stays Go).** `renderTip` is 40 lines of markup and
 would port cleanly in isolation (a `label.tt` + hidden checkbox + inline SVG + `tt-card`, one
@@ -760,6 +762,9 @@ without crossing the ABI; until then the pre-rendered-raw contract is correct an
 golden-gated everywhere it appears.
 
 ## Phase B — wave B-1
+
+Four parallel shards. B-1a below; the sibling sections that follow cover B-1b (tipTopic →
+`tipSt`), the RZW1 binary wire and the B0 baseline.
 
 ### B-1a: the shared loudness block (`loudnessFields` → `loudSt`)
 
@@ -809,3 +814,187 @@ structured state; `components.zig` `loudnessFields` (marker block `phaseb-loud`)
 - **Gotcha worth repeating:** `omitempty` does nothing for a struct field, so a zero-value nested
   `loudSt` still marshals fully - fine here (all its own slices are omitempty), but never rely on
   `omitempty` to make a nested struct disappear.
+
+## tipTopic → structured `tipSt` (phase B-1b shard 1) — SHIPPED
+
+The phase-A assessment above ruled out both bad options. What shipped is neither: the tooltip is
+composed **in-process by the tab renderer it sits in** (no per-tooltip ABI round trip), and the
+state contracts grew a `tipSt` **beside** the raw string, so nothing already merged broke.
+
+**Split.** `tooltip.go` now has two halves. `tipState(id,title,body,keys,links)` resolves
+EVERYTHING locale- and registry-dependent Go-side — `helpTopics` prose (`help.<id>.title/.body`),
+`virtualMIDILinks()`, one `i18n.T` per group header / action label / `@`-prefixed mouse-gesture
+word, the `kbEmph` first-whitespace verb split (now `kbSplit`), and the `
+
+` body paragraph
+split with its trim-and-drop-empties rule. `renderTipSt(tipSt)` is then PURE markup and is the
+golden reference for `components.zig renderTip`. `renderTip(...)` = `renderTipSt(tipState(...))`,
+so `tip()`, `tipTopic()` and `tooltip_test.go` are byte-unchanged.
+
+**State shape** (`omitempty` on every nested slice, per the null-slice gotcha):
+`tipSt{id,title,keys[],paras[],links[]}` · `tipKbSt{hasGroup,group,chips[],verb,rest}` ·
+`tipChipSt{text,sep}` · `tipLinkSt{label,url}`. Two decisions worth keeping:
+- **`hasGroup` is an explicit bool**, not "group is non-empty". The section dedup runs on the i18n
+  KEY (`r.Group != curGroup`), so two distinct keys that resolve to the same text still emit two
+  headers — and a catalog that maps a group key to `""` still emits an empty header, exactly as the
+  pre-split renderer did. "Empty means the other branch" would have silently dropped it.
+- **`verb`/`rest`** carry the kbEmph split, not the raw label: the split point is locale-dependent
+  text processing and belongs on the Go side of the seam.
+
+**Dual-field bridge.** Every migrated contract has `tipSt` (structured) next to `tip` (legacy
+pre-rendered). Both renderers resolve through one helper — Go `tipOr(*tipSt, raw)`, Zig
+`components.tipOr(h, ?Tip, raw)` — structured wins, else raw. So the 14 files NOT in this shard
+(`automations_runnow.go`, `bridge_actions.go`, `library_mirror.go`, `player.go`,
+`render_library_cueedit.go`, `render_library_state.go`, `render_live.go`, `render_midictl*.go`,
+`render_motion.go`, `render_vrchat*.go`, `update_actions.go`, `components.go`'s own
+`selectBoxTip`/`resolveSelectBoxTip`) are literally untouched and keep working. Wave B-2 flips
+them; the raw fields die only when the last one is gone.
+
+**Consumers migrated (shard 1):** `render_settings.go` (13 sites — card head, `sbFieldTip`,
+`sbToggleTip`, fpair kids), `render_player.go` (4: `tipWave` / `tp.tipVideo` /
+`editBox.tipTrim` / `alignRow.tipAlign`), `automations_editor.go` (8), `automations_schedules.go`
+(7, including the `selraw` **ss-label** — `aeLabelSt{text,tip}` replaces a pre-rendered
+`<span class=ss-label>` string).
+
+**Where the Zig code lives, and what it deliberately does NOT touch.**
+- `components.zig` marker block `// --- phaseb-tip ---`: `Tip`/`TipKb`/`TipChip`/`TipLink` +
+  `renderTip` + `tipOr`. The existing shared `Field` struct and `fieldEx` are **unchanged** —
+  `Field` is used by every migrated tab, so `dialogs_b.zig` grows a local `DlgField` twin
+  (`Field` + `tipSt`) instead, exactly the precedent the dialog sweep set for `dlgFieldSt`.
+- Primitives that take the tooltip as a **string** (`fieldEx`, `toggleRowTip`, the ss-label) are
+  fed from a scratch `Html` buffer:
+  ```zig
+  var tb = Html.init(h.a);
+  defer tb.deinit();
+  try c.tipOr(&tb, b.tipSt, b.tip);
+  try c.fieldEx(h, .., tb.b.items);
+  ```
+  One allocation per tooltip, and — the point — **zero duplication** of `fieldEx`'s markup. Never
+  re-emit a primitive's HTML to avoid a buffer; that is how the two renderers drift.
+- `rz_ui_render_tip` exists (root.zig / raveui.h / zigui.go / zigui_stub.go marker blocks) purely
+  as a **parity-gate export**. Production never calls it per tooltip — the tab renderer composes.
+
+**Gates.** `zigui_golden_tip_test.go` is the primitive's own gate: **527 byte-equality subtests** =
+every `helpTopics` id (73) × every installed locale (7) + 16 edge fixtures (empty, escaping-heavy,
+unicode, long-verbose, blank-paragraph runs, CRLF body, chip edges, repeated/empty kb groups,
+multi-link, tab-split verb, ad-hoc `tip()`). It also asserts `tipTopic(id) == renderTipSt(tipState)`
+per topic, so the split itself is proven lossless. A one-byte Zig perturbation
+(`tt-title`→`tt-titl`) failed **all 527**. Per-consumer suites got tooltip fixtures on top of their
+existing states (settings 77 · player 45 · automations 66 subtests), covering
+present / absent / multi-link / keybind-grid + the raw-bridge fallback in every locale. The
+automations tip test carries an **inertness guard**: the grid mutation must change the bytes and
+emit `tt-kb-keys`, and the raw-bridge variant must reproduce the structured bytes exactly — a
+fixture whose mutation reaches no tooltip is worse than no fixture.
+
+**Standing rule.** Help texts are LONG and verbose BY DESIGN (owner directive, on record): the app
+teaches while it is used. Never trim, truncate, elide or "summarise" a `help.*` string, and never
+add a length cap to the renderer.
+## Phase B — RZW1 binary state wire (wave B-1 pilots: appgroups + logs)
+
+The phase-A bridge pays a state→JSON→parse round trip on EVERY render (flagged twice above as
+the phase-B tax). Wave B-1 replaces it with a length-prefixed TLV document for two pilot views.
+JSON exports STAY; the binary ones land alongside and the bridge dispatches **v2 → v1 → Go**
+(`internal/webui/wire.go zigWire`), so a stale lib or a malformed document degrades instead of
+breaking. Both downgrades are visible in `zigui.FallbackCounts()` (`Render<X>V2` = the binary
+export declined, `Render<X>` = the JSON one did).
+
+**ONE schema generates BOTH sides.** `internal/zigui/wiregen/schema.go` lists the messages
+(Go type ↔ Zig type, field number, kind, ref) and emits `internal/webui/wire_gen.go` (encoder
+methods) + `native/zigui/src/wire_gen.zig` (decoders writing into the EXISTING renderer state
+structs, so v1 and v2 feed the same renderers - that is what makes byte equality provable).
+Regenerate with `GOWORK=off go run ./internal/zigui/wiregen` (or the `//go:generate` line in
+`internal/zigui/wire.go`); never hand-edit either output. Wave B-2 fans this out to the
+remaining ~101 state structs by adding rows, not code. Rationale: hand-mirroring 300+ structs
+across a C ABI is silent memory corruption waiting to happen.
+
+**Format** (documented in `internal/zigui/wire.go`; decoder `native/zigui/src/wire.zig`):
+magic `RZW1`, u16 message id, u32 schema hash (FNV-1a of the schema text), u32 arena length,
+ONE strings arena, then a field-tagged body terminated by a 0 byte. Tag = uvarint
+`num<<3 | wiretype`; wiretypes varint / string(arena off+len) / struct(u32 len + body) /
+list(uvarint count + u32 len + bodies). Field number 0 is the terminator, never a tag.
+- **Strings decode ZERO-COPY** as slices into the caller's buffer (valid for the render);
+  only lists allocate, from one parse arena freed by `Parsed.deinit()`.
+- **The omitempty/null hazard is now unrepresentable.** There is no null; zero values are
+  absent tags; an empty list IS the absent tag and absent decodes to the zero value. The bug
+  class that silently dropped a whole tab to Go (nil slice → JSON `null` → Zig parse reject)
+  cannot be expressed. `TestWireEmptyListsAreAbsentNotNull` + `TestWireZeroValuesAreAbsent`
+  pin it, including nested and all-zero states.
+- **Unknown field numbers are skipped** (every payload is self-delimiting) - the replacement
+  for std.json's `ignore_unknown_fields`, pinned by `TestZigWireSkipsUnknownFields` across all
+  four wiretypes. An unknown WIRETYPE is not skippable and is rejected: additive changes only,
+  and anything else trips the schema hash.
+- **Message id + schema hash in the header** mean a stale `libraveui.a` or a document sent to
+  the wrong export is refused, not mis-decoded.
+
+**Bounds discipline (the fuzz gate rests on it):** a struct/list payload length is checked
+against the REMAINING bytes of its parent body and the child reader sees exactly that slice; a
+list count is checked against its payload length (every element body costs >= 1 byte, its
+terminator) so a huge count cannot drive an allocation bigger than the input; a body must end
+exactly on its terminator (no truncation, no trailing garbage).
+
+**Gates.** Three-way byte equality Go == v1(JSON) == v2(binary) over the FULL existing fixture
+sets, full document AND every fragment (`zigui_wire_test.go`; 12 fixtures x 2 surfaces), with
+`FallbackCounts()` asserted unchanged across the run. Mutation fuzz on the real exports
+(`zigui_wire_fuzz_test.go`): 1575 cases (18 base documents x 10 corruption classes x 2 reps x
+4 exports, cross-fed + 120 random buffers + 15 adversarial documents) → 1321 clean rejections,
+254 renders, zero crashes (stable run to run: the base list is SORTED, or the fixture maps'
+random iteration order defeats the fixed seed and a failure stops reproducing). Two canaries make "no OOB" falsifiable: every buffer is copied into
+the middle of a **poison-filled allocation** and only the inner slice crosses the ABI (a read
+past the end drags the marker into the HTML), and each buffer renders twice with the results
+compared. Verified by execution - deleting the arena bounds check in `wire.zig str()` made the
+gate fail on the second mutant.
+
+**Numbers** (Ryzen 9 5950X; whole dispatch = serialize + Zig render): appgroups full
+5840→4003 ns/op, body 5469→3403, logs full (400-line tail) 410818→158297, `#log-view`
+415823→162025 (-61%), serialize alone 85714→44020 (-49%). Documents are 80.5% (appgroups) /
+51.1% (logs fixtures) / **17.8%** (full 400-line tail: 9225 B vs 51862 B) of the JSON.
+The ~1 Hz `#log-view` tick - the reason this pilot exists - saves ~253 us per tick.
+`WireWriter` preallocates 1 KiB per buffer: re-growing two slices per render was 14 of 31
+allocs and ~9% of encode time (the GC pressure this format exists to remove).
+
+**When you add a message (wave B-2):** add the row to `schema.go`, regenerate, add the
+`_v2` export in your root.zig/raveui.h marker block, add the binding + stub, switch the bridge
+to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. Field numbers
+are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
+kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
+Go formats every number).
+## Phase B — B0 baseline instrumentation (bench batch)
+
+Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
+This section is the mechanism.
+
+- **Benchmarks.** `internal/webui/render_bench_zig_test.go` (`//go:build zigui`) benches four
+  families per tab over the EXISTING golden fixtures: `RenderGo` (pure Go renderer) · `RenderZig`
+  (Zig export, state pre-marshalled) · `RenderBridge` (`stateJSON` + Zig = today's real cost) ·
+  `StateMarshal` (the round trip alone, reports `state_B`). 10 tabs: appgroups logs live motion
+  peers automations publish settings library player. `internal/webui/render_bench_test.go` is the
+  UNTAGGED half (settings state-build/render/marshal + the four untagged dialog fixtures), so
+  `go test -bench` also works on a stub build.
+- **Every bench case is parity-gated before timing** (`zigBenchState`): Zig must return ok=true
+  AND byte-equal Go. Without that gate a benchmark happily measures a rejected state (JSON null →
+  ok=false) and reports a fantastic number for doing nothing.
+- **`RenderZig` is NOT renderer-only** - every export parses its JSON first. There is no
+  parse-free entry point, so Go-render-vs-Zig-render cannot be compared today; the wave B-2 TLV
+  export gives it for free. Fit over the table: Zig parse+render 6.9 ns per STATE byte vs Go
+  marshal 1.33 ns/B vs Go render 1.63 ns per HTML byte. Parse cost tracks structure, not size
+  (player's 29 kB state is one raw SVG and parses ~2.3× cheaper than the fit).
+- **Live counters.** `internal/zigui/perf.go` is UNTAGGED (fallback.go's pattern) so both builds
+  expose one counter set: `NoteRender` (cgo render funnel: state bytes + native render ns) +
+  `NoteMarshal` (webui `stateJSON`: bytes + json ns) → `zigui.PerfCounts()`. Surfaced as
+  `ctl perf` section `[zigui]` (`internal/webui/zigui_perf_probe.go`, registered from `New()`,
+  additive) next to the FallbackCounts tally. Cost: two `time.Now()` per render per side.
+- **The one non-append-only edit in this batch:** 3 lines inside `render()` in the shared
+  `internal/zigui/zigui.go` (t0 / `NoteRender`) - it is the single funnel every Zig render passes
+  through, so a counter cannot exist without it. Appended marker blocks merge around it cleanly.
+- **Bench gotcha:** `b.ResetTimer()` CLEARS metrics added by `b.ReportMetric` (`b.SetBytes`
+  survives it). Report sizes AFTER the loop or they silently vanish from the output.
+- **Fixtures were deliberately NOT moved** out of the `//go:build zigui` golden files into untagged
+  siblings (the dialogs-A precedent). Three sibling wave-B1 branches were editing those same files;
+  a move would have collided. Consequence: the untagged bench table is a subset. Revisit once the
+  wave is merged - the tagged tabs' fixtures moving untagged would let one bench file cover both.
+- **Measuring on a fleet box:** parallel `zig build`/`go build` inflated worst samples 2-4×. Use
+  min-of-N over several `-count=2` runs and treat <20% deltas as noise (method note in
+  PHASEB_BASELINE.md).
+- Not benched yet: the fragment renderers (`_body`, `#live-*`, the nine player patch targets),
+  which the ~1 Hz tick hits far more often than a full tab render. Per-render tax applies per
+  FRAGMENT - the next increment should extend the bench there.

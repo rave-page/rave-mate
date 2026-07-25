@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/zigui"
@@ -270,5 +271,46 @@ func TestPlayerStatesHaveNoNullSlices(t *testing.T) {
 			t.Errorf("%s: state carries a null (nil slice → Zig parse reject): %s", name, js)
 		}
 		releaseUIState(u)
+	}
+}
+
+// TestZigPlayerTipGolden pins the tooltip seam on the media player (phase B1b). The real fixtures
+// already exercise all four sites (tipWave = the wave-nav keybind grid, tipVideo on the video
+// hosts, tipTrim in edit mode, tipAlign on the dual row) in their present/absent states; this adds
+// the two shapes the player's own topics do not have - a MULTI-LINK card - and the raw-bridge
+// fallback an un-migrated builder would still ship, across every locale.
+func TestZigPlayerTipGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	fx := mpFixtures()["dualEditOK"] // edit mode + dual align + video half: all four sites live
+
+	for _, loc := range i18n.Available() {
+		i18n.SetLocale(loc.Code)
+		for _, variant := range []string{"structured", "multiLink", "rawBridge"} {
+			t.Run(loc.Code+"/"+variant, func(t *testing.T) {
+				u := &UI{}
+				t.Cleanup(func() { releaseUIState(u) })
+				*u.mp(fx.host) = fx
+				inner := u.mpInnerState(u.mpSnap(fx.host))
+				switch variant {
+				case "multiLink":
+					// three authoritative links + a two-link topic, no keybind grid
+					inner.TipWaveS = tipTopicSt("account-bridge")
+					inner.Tp.TipVideoS = tipTopicSt("midi-learn-controllers")
+					inner.EditBox.TipTrimS = tipTopicSt("enc-video-codec")
+					inner.EditBox.Align.TipAlignS = tipTopicSt("mp-loudness")
+				case "rawBridge":
+					// un-migrated shape: structured absent, pre-rendered markup carried raw
+					inner.TipWaveS, inner.TipWave = nil, tipTopic("wave-nav")
+					inner.Tp.TipVideoS, inner.Tp.TipVideo = nil, tipTopic("embedded-video")
+					inner.EditBox.TipTrimS, inner.EditBox.TipTrim = nil, tipTopic("trim-editor")
+					inner.EditBox.Align.TipAlignS, inner.EditBox.Align.TipAlign = nil, tipTopic("dual-alignment")
+				}
+				full := mpFullSt{Host: fx.host, Inner: inner}
+				zigFrag(t, "full", mpFullHTMLOf(full), stateJSON(full), zigui.RenderPlayer)
+			})
+		}
 	}
 }

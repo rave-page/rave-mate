@@ -123,7 +123,8 @@ type mpTpSt struct {
 	EditBtn    uiBtn     `json:"editBtn"`
 	IsVideo    bool      `json:"isVideo"`
 	OpenExt    uiBtn     `json:"openExt"`
-	TipVideo   string    `json:"tipVideo"` // RAW tipTopic("embedded-video")
+	TipVideo   string    `json:"tipVideo"`             // legacy RAW tooltip markup (bridge)
+	TipVideoS  *tipSt    `json:"tipVideoSt,omitempty"` // structured tipTopic("embedded-video")
 	TimeTx     string    `json:"timeTx"`
 	Seek       uiSlider  `json:"seek"`
 	Vol        uiSlider  `json:"vol"`
@@ -145,19 +146,20 @@ type mpROSt struct {
 // mpAlignSt2 is the dual-media alignment row. Exactly-one-of rides as explicit flags
 // (Bar/Err/Line) - never "empty means the other branch".
 type mpAlignSt2 struct {
-	Bar      bool     `json:"bar"`
-	BarFrac  float64  `json:"-"`
-	BarPct   string   `json:"barPct"`
-	BarCap   string   `json:"barCap"`
-	Err      bool     `json:"err"`
-	ErrText  string   `json:"errText"`
-	Line     string   `json:"line"` // "" = no readout span
-	LineVal  string   `json:"lineVal"`
-	AlignBtn uiBtn    `json:"alignBtn"`
-	Nudges   []uiBtn  `json:"nudges,omitempty"`
-	OffField uiField  `json:"offField"`
-	TipAlign string   `json:"tipAlign"` // RAW tipTopic("dual-alignment")
-	Warns    []string `json:"warns,omitempty"`
+	Bar       bool     `json:"bar"`
+	BarFrac   float64  `json:"-"`
+	BarPct    string   `json:"barPct"`
+	BarCap    string   `json:"barCap"`
+	Err       bool     `json:"err"`
+	ErrText   string   `json:"errText"`
+	Line      string   `json:"line"` // "" = no readout span
+	LineVal   string   `json:"lineVal"`
+	AlignBtn  uiBtn    `json:"alignBtn"`
+	Nudges    []uiBtn  `json:"nudges,omitempty"`
+	OffField  uiField  `json:"offField"`
+	TipAlign  string   `json:"tipAlign"`             // legacy RAW tooltip markup (bridge)
+	TipAlignS *tipSt   `json:"tipAlignSt,omitempty"` // structured tipTopic("dual-alignment")
+	Warns     []string `json:"warns,omitempty"`
 }
 
 // mpSumSt is the "what will this export be" chip (also the edit-preset button).
@@ -204,7 +206,8 @@ type mpEditSt struct {
 	SetIn    uiBtn      `json:"setIn"`
 	SetOut   uiBtn      `json:"setOut"`
 	AutoSel  selState   `json:"autoSel"`
-	TipTrim  string     `json:"tipTrim"` // RAW tipTopic("trim-editor")
+	TipTrim  string     `json:"tipTrim"`             // legacy RAW tooltip markup (bridge)
+	TipTrimS *tipSt     `json:"tipTrimSt,omitempty"` // structured tipTopic("trim-editor")
 	RO       mpROSt     `json:"ro"`
 	Dual     bool       `json:"dual"`
 	Align    mpAlignSt2 `json:"alignRow"`   // `align` is a Zig keyword
@@ -228,7 +231,8 @@ type mpInnerSt struct {
 	FitBtn   uiBtn    `json:"fit"`
 	ZInfo    string   `json:"zinfo"` // "" = fit view (no zoom readout)
 	Hov      mpHovSt  `json:"hov"`
-	TipWave  string   `json:"tipWave"` // RAW tipTopic("wave-nav")
+	TipWave  string   `json:"tipWave"`             // legacy RAW tooltip markup (bridge)
+	TipWaveS *tipSt   `json:"tipWaveSt,omitempty"` // structured tipTopic("wave-nav")
 	Tp       mpTpSt   `json:"tp"`
 	EditBox  mpEditSt `json:"editBox"`
 }
@@ -256,7 +260,7 @@ func (u *UI) mpInnerState(t mpSt) mpInnerSt {
 		ZIn:      uiBtn{Label: "＋", Variant: "ghost", Act: "mp-zin:" + t.host},
 		ZOut:     uiBtn{Label: "－", Variant: "ghost", Act: "mp-zout:" + t.host},
 		FitBtn:   uiBtn{Label: i18n.T("player.fit"), Variant: "ghost", Act: "mp-fit:" + t.host},
-		TipWave:  tipTopic("wave-nav"),
+		TipWaveS: tipTopicSt("wave-nav"),
 	}
 	if t.host == "publish" && t.name != "" {
 		st.Title = t.name
@@ -534,7 +538,7 @@ func (u *UI) mpTpState(t mpSt) mpTpSt {
 	if m.kind == "video" {
 		st.IsVideo = true
 		st.OpenExt = uiBtn{Label: i18n.T("player.openExternally"), Variant: "ghost", Act: "mp-openext:" + host}
-		st.TipVideo = tipTopic("embedded-video")
+		st.TipVideoS = tipTopicSt("embedded-video")
 	}
 
 	cur, total := 0.0, m.dur
@@ -581,7 +585,7 @@ func (u *UI) mpEditState(t mpSt) mpEditSt {
 	st.SetIn = uiBtn{Label: i18n.T("player.setIn"), Variant: "outline", Act: "mp-setin:" + t.host}
 	st.SetOut = uiBtn{Label: i18n.T("player.setOut"), Variant: "outline", Act: "mp-setout:" + t.host}
 	st.AutoSel = u.mpAutoSelState(t)
-	st.TipTrim = tipTopic("trim-editor")
+	st.TipTrimS = tipTopicSt("trim-editor")
 	st.RO = mpROState(t)
 	if t.dual() {
 		st.Align = u.mpAlignState(t)
@@ -638,7 +642,7 @@ func mpROState(t mpSt) mpROSt {
 // mpAlignState resolves the dual-pair alignment row.
 func (u *UI) mpAlignState(t mpSt) mpAlignSt2 {
 	a := t.align
-	st := mpAlignSt2{Nudges: []uiBtn{}, Warns: []string{}, TipAlign: tipTopic("dual-alignment")}
+	st := mpAlignSt2{Nudges: []uiBtn{}, Warns: []string{}, TipAlignS: tipTopicSt("dual-alignment")}
 
 	rel := i18n.T("player.label.after")
 	if a.off < 0 {
@@ -882,7 +886,7 @@ func mpInnerHTMLOf(st mpInnerSt) string {
 		st.ZIn.html() + st.ZOut.html() +
 		st.FitBtn.html() + zinfo +
 		`<span id=mp-` + host + `-hov class=mp-hovline>` + mpHovHTMLOf(st.Hov) + `</span>` +
-		st.TipWave + `</div>`)
+		tipOr(st.TipWaveS, st.TipWave) + `</div>`)
 
 	// transport
 	b.WriteString(`<div id=mp-` + host + `-tp>` + mpTpHTMLOf(st.Tp) + `</div>`)
@@ -999,7 +1003,7 @@ func mpTpHTMLOf(st mpTpSt) string {
 		row = append(row, st.EditBtn.html())
 	}
 	if st.IsVideo {
-		row = append(row, st.OpenExt.html(), st.TipVideo)
+		row = append(row, st.OpenExt.html(), tipOr(st.TipVideoS, st.TipVideo))
 	}
 	b.WriteString(`<div class=mp-tp>` + strings.Join(row, "") +
 		`<span class="mp-time" id=mp-` + host + `-time data-label=` + attrQ("player time") +
@@ -1024,7 +1028,7 @@ func mpEditHTMLOf(st mpEditSt) string {
 		`<span class=mp-tfield>` + st.OutField.html() + `</span>` +
 		st.SetIn.html() + st.SetOut.html() +
 		`<span class=mp-autosel>` + selHTML(st.AutoSel) + `</span>` +
-		st.TipTrim + `</div>`)
+		tipOr(st.TipTrimS, st.TipTrim) + `</div>`)
 	b.WriteString(`<div id=mp-` + host + `-ro>` + mpROHTMLOf(st.RO) + `</div>`)
 
 	if st.Dual {
@@ -1060,7 +1064,7 @@ func mpAlignHTMLOf(st mpAlignSt2) string {
 	for _, n := range st.Nudges {
 		b.WriteString(n.html())
 	}
-	b.WriteString(`<span class=mp-aoff>` + st.OffField.html() + `</span>` + st.TipAlign)
+	b.WriteString(`<span class=mp-aoff>` + st.OffField.html() + `</span>` + tipOr(st.TipAlignS, st.TipAlign))
 	for _, w := range st.Warns {
 		b.WriteString(hint("warn", w))
 	}

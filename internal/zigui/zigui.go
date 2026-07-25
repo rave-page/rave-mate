@@ -14,11 +14,14 @@ package zigui
 // bundled compiler-rt doesn't export for gnu targets — libquadmath (mingw on
 // windows, gcc's on linux) provides them.
 #cgo windows LDFLAGS: -lquadmath
-#cgo linux LDFLAGS: -lquadmath
+#cgo linux LDFLAGS: -lquadmath -lm
 #include "raveui.h"
 */
 import "C"
-import "unsafe"
+import (
+	"time"
+	"unsafe"
+)
 
 // abiVersion the lib must report; mismatch = stale artifact, refuse to render.
 const abiVersion = 1
@@ -179,6 +182,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	}
 	p := (*C.uint8_t)(unsafe.Pointer(&state[0]))
 	var n C.size_t
+	t0 := time.Now() // perf.go counters: two time.Now() per render, ~50ns on a >50µs render
 	out := f(p, C.size_t(len(state)), &n)
 	if out == nil {
 		noteFallback(2) // 2 frames up = the Render* wrapper (see fallback.go)
@@ -186,6 +190,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	}
 	s := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(n))
 	C.rz_ui_free(out, n)
+	NoteRender(len(state), time.Since(t0))
 	return s, true
 }
 
@@ -875,3 +880,51 @@ func RenderPCGpu(stateJSON []byte) (string, bool) {
 }
 
 // --- end dialogs-b ---
+
+// --- phaseb-tip ---
+
+// RenderTip renders one structured tooltip (webui tipSt). The migrated tabs compose tooltips
+// in-process inside their own view render; this binding exists for the byte-parity gate.
+func RenderTip(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_tip(p, l, n)
+	})
+}
+
+// --- end phaseb-tip ---
+// --- phaseb-wire ---
+
+// RZW1 binary-state exports (phase B pilots: appgroups + logs). Same Zig renderers as the
+// JSON bindings above; the state arrives as a length-prefixed TLV document from the
+// generated encoders (internal/webui/wire_gen.go) instead of JSON. ok=false → the caller
+// tries the JSON binding, then its Go renderer; both downgrades show up in FallbackCounts.
+
+// RenderAppGroupsV2 renders the full App Groups view from an RZW1 document.
+func RenderAppGroupsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_appgroups_v2(p, l, n)
+	})
+}
+
+// RenderAppGroupsBodyV2 renders the #appgroups-body fragment from an RZW1 document.
+func RenderAppGroupsBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_appgroups_body_v2(p, l, n)
+	})
+}
+
+// RenderLogsV2 renders the full Logs view from an RZW1 document.
+func RenderLogsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_logs_v2(p, l, n)
+	})
+}
+
+// RenderLogsLinesV2 renders the #log-view fragment from an RZW1 document.
+func RenderLogsLinesV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_logs_lines_v2(p, l, n)
+	})
+}
+
+// --- end phaseb-wire ---

@@ -359,35 +359,123 @@ func tip(id, title, body string, links ...ttLink) string {
 	return renderTip(id, title, body, nil, links)
 }
 
-// kbChips renders a combo spec as key-cap chips + separators (see kbRow).
-func kbChips(combo []string) string {
-	var b strings.Builder
-	for _, tok := range combo {
-		switch {
-		case tok == "+" || tok == "/":
-			b.WriteString(`<span class=tt-kb-sep>` + tok + `</span>`)
-		case strings.HasPrefix(tok, "@"):
-			b.WriteString(`<kbd class=tt-kbd>` + html.EscapeString(i18n.T(tok[1:])) + `</kbd>`)
-		default:
-			b.WriteString(`<kbd class=tt-kbd>` + html.EscapeString(tok) + `</kbd>`)
-		}
-	}
-	return b.String()
+// ── structured tooltip state (phase-B Zig seam) ────────────────────────────────────
+//
+// tipSt is renderTip's input as DATA: every locale- and registry-dependent decision is already
+// made Go-side (helpTopics prose, virtualMIDILinks, the i18n.T per keybind row/group header, the
+// kbEmph verb split, the body paragraph split), so a renderer only composes markup. renderTipSt
+// below is the golden reference; native/zigui/src/components.zig renderTip mirrors it byte for
+// byte (gate: zigui_golden_tip_test.go).
+//
+// Dual-field bridge: a migrated state contract carries *tipSt BESIDE its legacy pre-rendered raw
+// tip string, and the renderers prefer the structured one (tipOr / Zig tipOr). Files not yet
+// migrated keep shipping raw markup and need no change.
+
+// tipSt is one resolved tooltip.
+type tipSt struct {
+	ID    string      `json:"id"`
+	Title string      `json:"title"`
+	Keys  []tipKbSt   `json:"keys,omitempty"`
+	Paras []string    `json:"paras,omitempty"`
+	Links []tipLinkSt `json:"links,omitempty"`
 }
 
-// kbEmph emphasises the leading keyword (the verb) of an action label - language-agnostic, so
-// no per-string markup is needed in the catalogs.
-func kbEmph(s string) string {
+// tipKbSt is one resolved keybind row. HasGroup (explicit, never "Group is empty") marks the row
+// that OPENS a section: the dedup runs on the i18n KEY Go-side, so two distinct keys resolving to
+// the same text still emit two headers, exactly as the pre-split renderer did. Verb/Rest are the
+// kbEmph split of the action label.
+type tipKbSt struct {
+	HasGroup bool        `json:"hasGroup,omitempty"`
+	Group    string      `json:"group,omitempty"`
+	Chips    []tipChipSt `json:"chips,omitempty"`
+	Verb     string      `json:"verb"`
+	Rest     string      `json:"rest,omitempty"`
+}
+
+// tipChipSt is one combo token: Sep = a "+"/"/" separator span, else a key-cap chip.
+type tipChipSt struct {
+	Text string `json:"text"`
+	Sep  bool   `json:"sep,omitempty"`
+}
+
+// tipLinkSt is one authoritative-source link at the card's foot.
+type tipLinkSt struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// kbSplit is the language-agnostic emphasis split of an action label: leading keyword (the verb)
+// + tail, so no per-string markup is needed in the catalogs. Empty tail = the whole label is the
+// verb.
+func kbSplit(s string) (verb, rest string) {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexAny(s, " \t"); i > 0 {
-		return `<b class=tt-kb-verb>` + html.EscapeString(s[:i]) + `</b>` + html.EscapeString(s[i:])
+		return s[:i], s[i:]
 	}
-	return `<b class=tt-kb-verb>` + html.EscapeString(s) + `</b>`
+	return s, ""
+}
+
+// tipState resolves a tooltip into structured state (all i18n.T lookups happen here).
+func tipState(id, title, body string, keys []kbRow, links []ttLink) tipSt {
+	s := tipSt{ID: id, Title: title}
+	curGroup := ""
+	for _, r := range keys {
+		row := tipKbSt{}
+		if r.Group != "" && r.Group != curGroup {
+			curGroup = r.Group
+			row.HasGroup, row.Group = true, i18n.T(r.Group)
+		}
+		for _, tok := range r.Combo {
+			switch {
+			case tok == "+" || tok == "/":
+				row.Chips = append(row.Chips, tipChipSt{Text: tok, Sep: true})
+			case strings.HasPrefix(tok, "@"):
+				row.Chips = append(row.Chips, tipChipSt{Text: i18n.T(tok[1:])})
+			default:
+				row.Chips = append(row.Chips, tipChipSt{Text: tok})
+			}
+		}
+		row.Verb, row.Rest = kbSplit(i18n.T(r.Act))
+		s.Keys = append(s.Keys, row)
+	}
+	for _, p := range strings.Split(body, "\n\n") {
+		if p = strings.TrimSpace(p); p != "" {
+			s.Paras = append(s.Paras, p)
+		}
+	}
+	for _, l := range links {
+		s.Links = append(s.Links, tipLinkSt{Label: l.Label, URL: l.URL})
+	}
+	return s
+}
+
+// tipTopicSt is tipTopic as structured state (nil = unknown topic id, tipTopic's "" case).
+func tipTopicSt(id string) *tipSt {
+	t, ok := helpTopics[id]
+	if !ok {
+		return nil
+	}
+	s := tipState(id, i18n.T("help."+id+".title"), i18n.T("help."+id+".body"), t.Keys, t.Links)
+	return &s
+}
+
+// tipOr resolves the dual-field bridge: structured state wins, else the pre-rendered raw string.
+func tipOr(s *tipSt, raw string) string {
+	if s == nil {
+		return raw
+	}
+	return renderTipSt(*s)
 }
 
 func renderTip(id, title, body string, keys []kbRow, links []ttLink) string {
+	return renderTipSt(tipState(id, title, body, keys, links))
+}
+
+// renderTipSt composes the tooltip markup - PURE, no i18n, no registry: the golden reference for
+// the Zig port.
+func renderTipSt(s tipSt) string {
 	var b strings.Builder
-	b.WriteString(`<label class=tt data-label="tt-` + html.EscapeString(id) + `" aria-label="About: ` + html.EscapeString(title) + `" tabindex=0>`)
+	b.WriteString(`<label class=tt data-label="tt-` + html.EscapeString(s.ID) + `" aria-label="About: ` + html.EscapeString(s.Title) + `" tabindex=0>`)
 	b.WriteString(`<input type=checkbox class=tt-x tabindex=-1>`)
 	// lucide-style info glyph; currentColor follows muted/hover/pinned states.
 	b.WriteString(`<svg class=tt-ic viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
@@ -396,28 +484,32 @@ func renderTip(id, title, body string, keys []kbRow, links []ttLink) string {
 	// shown; tt-in = visual panel, scrolls internally when tall (~60vh cap). __ttplace
 	// (shell.go) flips/clamps both.
 	b.WriteString(`<span class=tt-card role=tooltip><span class=tt-in>`)
-	b.WriteString(`<b class=tt-title>` + html.EscapeString(title) + `</b>`)
-	if len(keys) > 0 { // keybind grid: section header + (combo chips → action) rows, two columns
+	b.WriteString(`<b class=tt-title>` + html.EscapeString(s.Title) + `</b>`)
+	if len(s.Keys) > 0 { // keybind grid: section header + (combo chips → action) rows, two columns
 		b.WriteString(`<span class=tt-kb>`)
-		curGroup := ""
-		for _, r := range keys {
-			if r.Group != "" && r.Group != curGroup {
-				curGroup = r.Group
-				b.WriteString(`<span class=tt-kb-group>` + html.EscapeString(i18n.T(r.Group)) + `</span>`)
+		for _, r := range s.Keys {
+			if r.HasGroup {
+				b.WriteString(`<span class=tt-kb-group>` + html.EscapeString(r.Group) + `</span>`)
 			}
-			b.WriteString(`<span class=tt-kb-keys>` + kbChips(r.Combo) + `</span>` +
-				`<span class=tt-kb-act>` + kbEmph(i18n.T(r.Act)) + `</span>`)
+			b.WriteString(`<span class=tt-kb-keys>`)
+			for _, ch := range r.Chips {
+				if ch.Sep {
+					b.WriteString(`<span class=tt-kb-sep>` + ch.Text + `</span>`)
+					continue
+				}
+				b.WriteString(`<kbd class=tt-kbd>` + html.EscapeString(ch.Text) + `</kbd>`)
+			}
+			b.WriteString(`</span><span class=tt-kb-act><b class=tt-kb-verb>` + html.EscapeString(r.Verb) + `</b>` +
+				html.EscapeString(r.Rest) + `</span>`)
 		}
 		b.WriteString(`</span>`)
 	}
-	for _, p := range strings.Split(body, "\n\n") {
-		if p = strings.TrimSpace(p); p != "" {
-			b.WriteString(`<span class=tt-p>` + html.EscapeString(p) + `</span>`)
-		}
+	for _, p := range s.Paras {
+		b.WriteString(`<span class=tt-p>` + html.EscapeString(p) + `</span>`)
 	}
-	if len(links) > 0 {
+	if len(s.Links) > 0 {
 		b.WriteString(`<span class=tt-links>`)
-		for _, l := range links {
+		for _, l := range s.Links {
 			b.WriteString(`<a class=tt-link data-act=open-url data-val="` + html.EscapeString(l.URL) + `">` +
 				html.EscapeString(l.Label) + ` ↗</a>`)
 		}
