@@ -52,6 +52,43 @@ func RenderLogsLines(stateJSON []byte) (string, bool) {
 	})
 }
 
+// --- motion + live (fleet: live batch) ---
+
+// RenderMotion renders the full Motion view.
+func RenderMotion(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion(p, l, n)
+	})
+}
+
+// RenderMotionBody renders the #mo-body inner fragment (section switch patch).
+func RenderMotionBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_body(p, l, n)
+	})
+}
+
+// RenderLive renders the full Live cockpit view.
+func RenderLive(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live(p, l, n)
+	})
+}
+
+// RenderLiveFrag renders one live-tab fragment (kind: transport|np|status|decks|signals|
+// cockpit|link|graph|perf|strip). Unknown kind → ok=false → the Go renderer.
+func RenderLiveFrag(kind string, stateJSON []byte) (string, bool) {
+	if kind == "" {
+		return "", false
+	}
+	kb := []byte(kind)
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live_frag((*C.uint8_t)(unsafe.Pointer(&kb[0])), C.size_t(len(kb)), p, l, n)
+	})
+}
+
+// --- end motion + live ---
+
 // render calls a Zig renderer; copies the result and frees the Zig buffer.
 func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (string, bool) {
 	if len(state) == 0 {

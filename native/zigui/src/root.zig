@@ -53,6 +53,52 @@ export fn rz_ui_render_logs_lines(state_json: ?[*]const u8, len: usize, out_len:
     return renderJSON(logs.Lines, logs.renderLines, state_json, len, out_len);
 }
 
+// --- motion + live (fleet: live batch) ---
+
+const motion = @import("motion.zig");
+
+export fn rz_ui_render_motion(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_motion_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.renderBody, state_json, len, out_len);
+}
+
+const live = @import("live.zig");
+
+export fn rz_ui_render_live(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(live.State, live.render, state_json, len, out_len);
+}
+
+/// Render one live-tab fragment (the ~1 Hz tickPatch targets). kind selects the
+/// fragment + its state type: transport|np|status|decks|signals|cockpit|link|graph|perf|
+/// strip ("graph" serves both #live-net and #live-tim). Unknown kind → NULL (Go falls
+/// back). One dispatch export beats ten near-identical ones on the C ABI surface.
+export fn rz_ui_render_live_frag(kind: ?[*]const u8, kind_len: usize, state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    const kp = kind orelse return null;
+    if (kind_len == 0) return null;
+    const k = kp[0..kind_len];
+    if (std.mem.eql(u8, k, "transport")) return renderJSON(live.Transport, live.renderTransport, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "np")) return renderJSON(live.NP, live.renderNP, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "status")) return renderJSON(live.Status, live.renderStatus, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "decks")) return renderJSON(live.Decks, live.renderDecks, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "signals")) return renderJSON(live.Signals, live.renderSignals, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "cockpit")) return renderJSON(live.Cockpit, live.renderCockpit, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "link")) return renderJSON(live.Link, live.renderLink, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "graph")) return renderJSON(live.Graph, live.renderGraph, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "perf")) return renderJSON(live.Perf, live.renderPerf, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "strip")) return renderJSON(live.Strip, live.renderStrip, state_json, len, out_len);
+    return null;
+}
+
+test {
+    _ = motion;
+    _ = live;
+}
+
+// --- end motion + live ---
+
 /// Free a buffer returned by an rz_ui_render_* call (len = its *out_len).
 export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
     const p = ptr orelse return;
