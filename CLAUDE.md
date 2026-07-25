@@ -212,6 +212,9 @@ internal/
               The Zig migration path: .devnotes/ZIG_MIGRATION.md + ZIG_UI_GUIDE.md.
 native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `make zig`.
               Ported kernels stay byte-exact vs the Go originals (parity tests).
+              Also builds `rave-probe` (zig-out/bin): standalone Zig probe worker exe,
+              same newline-JSON stdio protocol as `rave-mate worker probe`; opt-in via
+              config `features.workers.probeExe` (P4, golden cross-test in internal/worker).
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.
 tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-mate .syso
               (area-average resize → 7 PNG-in-ICO sizes → COFF .rsrc). No external dep.

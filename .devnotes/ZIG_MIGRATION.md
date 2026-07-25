@@ -41,10 +41,24 @@ step keeps the shipped app green; pure-Go fallback stays until a port soaks.
 - **P3 video:** pixel convert/scale kernels (videoshare pool, mediapipe pre-encode),
   mp4frag hot loops. `mfenc` (COM/D3D11 MFT) stays as-is — Zig can speak COM but a port
   buys nothing until the surrounding pipeline is Zig.
-- **P4 worker replacement (the real lever):** worker/featurehost children speak
-  newline-JSON stdio — language-agnostic by design. Replace whole children with Zig
-  executables one at a time (first candidate: `probe` worker), zero daemon changes.
+- **P4 worker replacement (the real lever) — STARTED: probe worker implemented, opt-in.**
+  worker/featurehost children speak newline-JSON stdio — language-agnostic by design.
+  Replace whole children with Zig executables one at a time, zero daemon changes.
   Subprocess isolation rule carries over unchanged.
+  - `rave-probe` (native/zigcore/src/probe_main.zig → zig-out/bin/rave-probe.exe): full
+    probe worker — ping + probe.{duration,streams,tags,artwork,waveform,peaks,envelope},
+    same protocol/field names, bands.zig kernels reused → peaks/bands AND envelope
+    byte-identical (golden cross-test `TestZigProbeParity` in internal/worker, skips
+    without the exe or ffmpeg).
+  - Opt-in seam: config `features.workers.probeExe` (additive at v34, no bump) →
+    `Supervisor.SetExternal("probe", exe)`; spawn keeps Hide/Named/LowPriority/job
+    object/KillTree; log line carries `backend: go|external`. Missing exe → builtin +
+    warn. Empty config = zero behavior change.
+  - Known deltas: tags/artwork read via ffprobe/ffmpeg (Go uses dhowden/tag) — format
+    fields match, embedded-tag values may differ on exotic containers; malformed request
+    JSON → error Response instead of Go's exit 1.
+  - Bounded buffers: 64 KiB request line, 1 GiB peaks PCM slurp, 8M-f32 envelope cap,
+    64 MiB tool output — fail with protocol error, never accumulate.
 - **P5 networking children (twitch etc.):** assessed on user ask — Twitch chat is
   I/O-bound (TLS WebSocket + OAuth + JSON); Zig std has no vetted TLS/WS client yet, so
   a Zig port adds risk, no wins. Stays a Go featurehost child; revisit when std TLS/http

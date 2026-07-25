@@ -93,6 +93,8 @@ const (
 	// DMX source toggle (DMX.SACN + DMX.SACNUniverses), and WorldSync.LightCuesGistID (the take
 	// gist target). All additive, zero values = off/defaults - old configs load unchanged.
 	// (Was v31 on its feature branch; renumbered at the development merge.)
+	// Later additive at v34 (no bump - zero value = builtin Go workers): Workers.ProbeExe
+	// (external probe-worker executable, e.g. the Zig rave-probe; ZIG_MIGRATION P4).
 	// v35 removed Twitch.AutoConnect (dead - never read anywhere; the twitch feature now runs
 	// as an always-listening child that connects whenever enabled + signed in, so chat/alerts
 	// are captured with no UI open). Old configs with the key load fine (unknown-field ignore).
@@ -153,6 +155,7 @@ type Features struct {
 	Traktor       TraktorFeature      `json:"traktor"`       // DJ-software (Traktor Pro 4) bridge
 	StreamBridge  StreamBridgeFeature `json:"streamBridge"`  // live set → rave.page stream ingest (auto-driven by OBS)
 	Transcode     TranscodeFeature    `json:"transcode"`     // ffmpeg transcode workers
+	Workers       WorkersFeature      `json:"workers"`       // worker-backend overrides (external probe exe)
 	StudioChannel Toggle              `json:"studioChannel"` // web↔desktop Local Studio WS channel
 	OBS           OBSFeature          `json:"obs"`           // OBS obs-websocket control + settings validation
 	Library       Toggle              `json:"library"`       // native file browser + media metadata viewer
@@ -2175,6 +2178,15 @@ func (t TraktorFeature) ResolvedPort() int {
 		return t.Port
 	}
 	return TraktorPort
+}
+
+// WorkersFeature overrides worker-subprocess backends. ProbeExe points the "probe"
+// worker type at an external executable speaking the same newline-JSON stdio protocol
+// (the Zig rave-probe from native/zigcore, ZIG_MIGRATION P4). Empty / missing file =
+// built-in `rave-mate worker probe`, zero behavior change. Additive at v34 (no bump -
+// zero value = builtin).
+type WorkersFeature struct {
+	ProbeExe string `json:"probeExe,omitempty"`
 }
 
 // TranscodeFeature configures the transcode worker pool + user-defined presets.
