@@ -151,6 +151,24 @@ func selHTML(s selState) string {
 	return `<div class=ss-field>` + lbl + `<div class=ss id="ss-` + html.EscapeString(s.ID) + `">` + selInnerHTML(s) + `</div></div>`
 }
 
+// emptySel is the zero render state for an unrendered select. Rows must never be nil:
+// a nil slice marshals to JSON null, which the Zig state parser rejects (whole-tab
+// render then falls back to Go).
+func emptySel() selState { return selState{Rows: []selRow{}} }
+
+// selHTMLRaw is selHTML with a pre-rendered label (caller escapes) - the resolved-state
+// twin of smartSelectRaw, for tabs whose select labels carry a tooltip/badge.
+func selHTMLRaw(s selState, labelHTML string) string {
+	return `<div class=ss-field>` + labelHTML + `<div class=ss id="ss-` + html.EscapeString(s.ID) + `">` + selInnerHTML(s) + `</div></div>`
+}
+
+// resolveSmartSelect registers + resolves a bare smartSelect (rich opts fn, caller-rendered
+// label) into pure render state for a Zig-migrated tab.
+func resolveSmartSelect(id, act, cur string, opts func() []ssOpt) selState {
+	ssRegister(id, act, cur, opts)
+	return ssResolve(id)
+}
+
 // selInnerHTML renders the <div class=ss> inner markup from resolved state.
 func selInnerHTML(s selState) string {
 	openCls := ""

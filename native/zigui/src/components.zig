@@ -247,6 +247,236 @@ pub fn selectList(h: *Html, id: []const u8, rows: []const SelectRow) !void {
     }
 }
 
+// --- motion + live (fleet: live batch) ---
+
+/// masterDetailOpen/Mid/Close bracket the list|detail split (Go masterDetail, streaming form).
+pub fn masterDetailOpen(h: *Html) !void {
+    try h.raw("<div class=mdsplit><div class=md-list>");
+}
+
+pub fn masterDetailMid(h: *Html) !void {
+    try h.raw("</div><div class=md-detail>");
+}
+
+pub fn masterDetailClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// sectionOpenTip is sectionOpen with a pre-rendered tooltip after the title (Go sectionTip).
+/// tip_html is trusted markup resolved Go-side (tipTopic) — emitted raw.
+pub fn sectionOpenTip(h: *Html, title: []const u8, tip_html: []const u8) !void {
+    try h.raw("<section class=sec><h2 class=sec-title>");
+    try h.esc(title);
+    try h.raw(tip_html);
+    try h.raw("</h2>");
+}
+
+/// statusRow: status dot + label + muted sub-line (Go statusRow/statusRowDL — shared by the
+/// live + vrchat batches). data_label = Go strings.ToLower(label).
+pub fn statusRow(h: *Html, variant: []const u8, label: []const u8, data_label: []const u8, line: []const u8) !void {
+    try h.raw("<div class=strow>");
+    try dot(h, variant);
+    try h.raw("<div class=strow-tx><div class=strow-l data-label=");
+    try h.attrQ(data_label);
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</div><div class=strow-s data-value=");
+    try h.attrQ(line);
+    try h.raw(">");
+    try h.esc(line);
+    try h.raw("</div></div></div>");
+}
+
+/// Slider is a resolved labelled range input (Go slider): data_label pre-lowered Go-side,
+/// every number pre-formatted with Go trimNum, unitJs = jsQuote(unit). Zig never formats
+/// a float — the Go state builder owns all numeric formatting.
+pub const Slider = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    unit: []const u8 = "",
+    unitJs: []const u8 = "\"\"",
+    minS: []const u8 = "0",
+    maxS: []const u8 = "0",
+    stepS: []const u8 = "1",
+    valS: []const u8 = "0",
+};
+
+/// slider mirrors Go slider() byte-for-byte (live value display is inline JS, no act).
+pub fn slider(h: *Html, s: Slider) !void {
+    try h.raw("<label class=slider data-label=");
+    try h.attrQ(s.dl);
+    try h.raw("><span class=field-label>");
+    try h.esc(s.label);
+    try h.raw(" <b class=slider-val>");
+    try h.raw(s.valS);
+    try h.esc(s.unit);
+    try h.raw("</b></span><input class=slider-input type=range min=");
+    try h.raw(s.minS);
+    try h.raw(" max=");
+    try h.raw(s.maxS);
+    try h.raw(" step=");
+    try h.raw(s.stepS);
+    try h.raw(" value=");
+    try h.raw(s.valS);
+    try h.raw(" data-act=");
+    try h.attrQ(s.act);
+    try h.raw(" data-value=");
+    try h.attrQ(s.valS);
+    try h.raw(" oninput='var b=this.parentNode.querySelector(\".slider-val\");if(b)b.textContent=this.value+");
+    try h.raw(s.unitJs);
+    try h.raw("'></label>");
+}
+
+// --- end motion + live ---
+
+// --- vrchat ---
+// Ports of the components.go helpers the vrchat/worlds tabs need. Label-derived data-labels
+// arrive pre-lowered from Go (the *DL variants there) — Unicode lowering stays in Go.
+// statusRow lives in the motion+live block above (identical port, deduped at merge).
+
+/// kv: key/value line (Go kvDL). dl = Go strings.ToLower(label).
+pub fn kv(h: *Html, label: []const u8, dl: []const u8, value: []const u8) !void {
+    try h.raw("<div class=kv><span class=kv-k>");
+    try h.esc(label);
+    try h.raw("</span><span class=kv-v data-label=");
+    try h.attrQ(dl);
+    try h.raw(" data-value=");
+    try h.attrQ(value);
+    try h.raw(">");
+    try h.esc(value);
+    try h.raw("</span></div>");
+}
+
+/// fieldEx: labelled input dispatching act on change (Go fieldExDL). Empty input_type → "text";
+/// empty placeholder omits the attribute; tip is pre-rendered markup (trusted, raw).
+pub fn fieldEx(h: *Html, label: []const u8, dl: []const u8, act: []const u8, value: []const u8, input_type: []const u8, placeholder: []const u8, tip: []const u8) !void {
+    try h.raw("<label class=field data-label=");
+    try h.attrQ(dl);
+    try h.raw("><span class=field-label>");
+    try h.esc(label);
+    try h.raw(tip);
+    try h.raw("</span><input class=field-input type=");
+    try h.raw(if (input_type.len == 0) "text" else input_type);
+    try h.raw(" value=");
+    try h.attrQ(value);
+    try h.raw(" data-value=");
+    try h.attrQ(value);
+    try h.raw(" data-act=");
+    try h.attrQ(act);
+    if (placeholder.len != 0) {
+        try h.raw(" placeholder=");
+        try h.attrQ(placeholder);
+    }
+    try h.raw("></label>");
+}
+
+/// cardOpen/cardHeadClose/cardClose bracket an rp-card (Go card, streaming form). head=true
+/// emits the card-head; the caller writes the trailing-slot markup, then cardHeadClose, then
+/// the body, then cardClose. head must be (title.len != 0 or trailing markup non-empty).
+pub fn cardOpen(h: *Html, title: []const u8, head: bool) !void {
+    try h.raw("<div class=\"rp-card\">");
+    if (head) {
+        try h.raw("<div class=card-head><span class=card-h>");
+        try h.esc(title);
+        try h.raw("</span><span class=card-trail>");
+    }
+}
+
+pub fn cardHeadClose(h: *Html) !void {
+    try h.raw("</span></div>");
+}
+
+pub fn cardClose(h: *Html) !void {
+    try h.raw("</div>");
+}
+
+/// itemRowOpen/itemRowClose bracket a list row (Go itemRow, streaming form): title + optional
+/// sub-line, then the trailing action buttons the caller writes before itemRowClose.
+pub fn itemRowOpen(h: *Html, title: []const u8, sub: []const u8) !void {
+    try h.raw("<div class=irow><div class=irow-main><div class=irow-title>");
+    try h.esc(title);
+    try h.raw("</div>");
+    if (sub.len != 0) {
+        try h.raw("<div class=irow-sub>");
+        try h.esc(sub);
+        try h.raw("</div>");
+    }
+    try h.raw("</div><div class=irow-actions>");
+}
+
+pub fn itemRowClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// mdOpen/mdSplit/mdClose bracket a master/detail split (Go masterDetail, streaming form).
+pub fn mdOpen(h: *Html) !void {
+    try h.raw("<div class=mdsplit><div class=md-list>");
+}
+
+pub fn mdSplit(h: *Html) !void {
+    try h.raw("</div><div class=md-detail>");
+}
+
+pub fn mdClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// fpairOpen/fpairClose bracket two side-by-side fields (Go fpair, streaming form).
+pub fn fpairOpen(h: *Html) !void {
+    try h.raw("<div class=fpair>");
+}
+
+pub fn fpairClose(h: *Html) !void {
+    try h.raw("</div>");
+}
+
+/// num appends a base-10 integer (Go %d).
+pub fn num(h: *Html, v: i64) !void {
+    var buf: [24]u8 = undefined;
+    try h.raw(std.fmt.bufPrint(&buf, "{d}", .{v}) catch unreachable);
+}
+
+test "kv + statusRow + fieldEx" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try kv(&h, "Owner", "owner", "me&you");
+    try std.testing.expectEqualStrings("<div class=kv><span class=kv-k>Owner</span>" ++
+        "<span class=kv-v data-label=\"owner\" data-value=\"me&amp;you\">me&amp;you</span></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try statusRow(&h, "success", "VRChat", "vrchat", "live");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--success\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"vrchat\">VRChat</div>" ++
+        "<div class=strow-s data-value=\"live\">live</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fieldEx(&h, "Link", "link", "world-np-link", "v", "", "", "");
+    try std.testing.expectEqualStrings("<label class=field data-label=\"link\"><span class=field-label>Link</span>" ++
+        "<input class=field-input type=text value=\"v\" data-value=\"v\" data-act=\"world-np-link\"></label>", h.b.items);
+}
+
+test "card + itemRow + masterDetail brackets" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try cardOpen(&h, "T&t", true);
+    try btn(&h, "R", "ghost", "a", "");
+    try cardHeadClose(&h);
+    try emptyState(&h, "none");
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;t</span>" ++
+        "<span class=card-trail><button class=\"rp-btn rp-btn--ghost\" data-act=\"a\">R</button></span></div>" ++
+        "<div class=\"rp-empty\"><div class=\"rp-empty__title\">none</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try itemRowOpen(&h, "N", "s");
+    try itemRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=irow><div class=irow-main><div class=irow-title>N</div>" ++
+        "<div class=irow-sub>s</div></div><div class=irow-actions></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try mdOpen(&h);
+    try mdSplit(&h);
+    try mdClose(&h);
+    try std.testing.expectEqualStrings("<div class=mdsplit><div class=md-list></div><div class=md-detail></div></div>", h.b.items);
+}
+
 test "panel with and without sub" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
@@ -350,10 +580,144 @@ test "selectList empty = no matches" {
     try std.testing.expectEqualStrings("<div class=ss-none>No matches</div>", h.b.items);
 }
 
+// --- motion + live tests ---
+
+test "masterDetail split + sectionOpenTip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try masterDetailOpen(&h);
+    try h.raw("L");
+    try masterDetailMid(&h);
+    try h.raw("D");
+    try masterDetailClose(&h);
+    try std.testing.expectEqualStrings("<div class=mdsplit><div class=md-list>L</div><div class=md-detail>D</div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try sectionOpenTip(&h, "T&x", "<i>tip</i>");
+    try sectionClose(&h);
+    try std.testing.expectEqualStrings("<section class=sec><h2 class=sec-title>T&amp;x<i>tip</i></h2></section>", h.b.items);
+}
+
+test "statusRow escapes label + line" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusRow(&h, "success", "Se&ssion", "se&ssion", "1 peer <ok>");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--success\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"se&amp;ssion\">Se&amp;ssion</div>" ++
+        "<div class=strow-s data-value=\"1 peer &lt;ok&gt;\">1 peer &lt;ok&gt;</div></div></div>", h.b.items);
+}
+
+test "slider markup matches Go slider" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try slider(&h, .{ .label = "Scrub", .dl = "scrub", .act = "mo-scrub", .minS = "0", .maxS = "1000", .stepS = "1", .valS = "12.5" });
+    try std.testing.expectEqualStrings("<label class=slider data-label=\"scrub\"><span class=field-label>Scrub " ++
+        "<b class=slider-val>12.5</b></span><input class=slider-input type=range min=0 max=1000 step=1 value=12.5 " ++
+        "data-act=\"mo-scrub\" data-value=\"12.5\" oninput='var b=this.parentNode.querySelector(\".slider-val\");" ++
+        "if(b)b.textContent=this.value+\"\"'></label>", h.b.items);
+}
+
+// --- midi ---
+// cardOpen/cardClose live in the vrchat block, statusRow in the motion+live block,
+// itemRowOpen/Close in the vrchat block (identical ports, deduped at merge).
+// cardTrailClose == cardHeadClose (same markup) — kept for the midi callers.
+
+pub fn cardTrailClose(h: *Html) !void {
+    try h.raw("</span></div>");
+}
+
+/// fchip: segmented/filter chip (Go fchip). Empty val omits data-val.
+pub fn fchip(h: *Html, label: []const u8, val: []const u8, act: []const u8, active: bool) !void {
+    try h.raw("<button class=\"fchip");
+    if (active) try h.raw(" active");
+    try h.raw("\" data-act=\"");
+    try h.esc(act);
+    try h.raw("\"");
+    if (val.len != 0) {
+        try h.raw(" data-val=\"");
+        try h.esc(val);
+        try h.raw("\"");
+    }
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</button>");
+}
+
+/// toggleRowTip: toggleRow with pre-rendered tooltip markup beside the label
+/// (Go toggleRowTipDL). tip_html is raw (tooltip.go owns that markup).
+pub fn toggleRowTip(h: *Html, label: []const u8, data_label: []const u8, act: []const u8, on: bool, tip_html: []const u8) !void {
+    try h.raw("<label class=row data-label=");
+    try h.attrQ(data_label);
+    try h.raw("><span class=row-label>");
+    try h.esc(label);
+    try h.raw(tip_html);
+    try h.raw("</span><span class=switch><input type=checkbox");
+    if (on) try h.raw(" checked");
+    try h.raw(" data-act=");
+    try h.attrQ(act);
+    try h.raw(" data-value=");
+    try h.attrQ(if (on) "true" else "false");
+    try h.raw("><span class=switch-track></span></span></label>");
+}
+
+/// selectBoxRaw is selectBox with a pre-rendered label (Go selHTMLRaw) — for select
+/// labels that carry a tooltip/badge. label_html is raw; s.label is ignored.
+pub fn selectBoxRaw(h: *Html, s: Select, label_html: []const u8) !void {
+    try h.raw("<div class=ss-field>");
+    try h.raw(label_html);
+    try h.raw("<div class=ss id=\"ss-");
+    try h.esc(s.id);
+    try h.raw("\">");
+    try selectInner(h, s);
+    try h.raw("</div></div>");
+}
+
+test "statusRow + fchip + itemRow + toggleRowTip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusRow(&h, "ok", "St&ate", "st&ate", "li\"ne");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--ok\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"st&amp;ate\">St&amp;ate</div>" ++
+        "<div class=strow-s data-value=\"li&#34;ne\">li&#34;ne</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "Cl&ock", "", "midi-ctl-filter:0:clock", true);
+    try std.testing.expectEqualStrings("<button class=\"fchip active\" data-act=\"midi-ctl-filter:0:clock\">Cl&amp;ock</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "L", "v'1", "a", false);
+    try std.testing.expectEqualStrings("<button class=\"fchip\" data-act=\"a\" data-val=\"v&#39;1\">L</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try itemRowOpen(&h, "T<x", "");
+    try itemRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=irow><div class=irow-main><div class=irow-title>T&lt;x</div>" ++
+        "</div><div class=irow-actions></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try toggleRowTip(&h, "En", "en", "um-enable", true, "<i>tip</i>");
+    try std.testing.expectEqualStrings("<label class=row data-label=\"en\"><span class=row-label>En<i>tip</i></span>" ++
+        "<span class=switch><input type=checkbox checked data-act=\"um-enable\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>", h.b.items);
+}
+
+test "cardOpen head + trail + close" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try cardOpen(&h, "T&x", true);
+    try badge(&h, "b", "info");
+    try cardTrailClose(&h);
+    try h.raw("body");
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;x</span>" ++
+        "<span class=card-trail><span class=\"rp-badge rp-badge--info\">b</span></span></div>body</div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try cardOpen(&h, "ignored", false);
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"></div>", h.b.items);
+}
+
 // --- media ---
-// Primitives for the media-batch tabs (overlays, twitch, editor). Ports of the
-// components.go helpers named in each doc line; Go resolves every `dl` (data-label) and
-// every number to a string, so nothing here formats floats or lowercases Unicode.
+// Struct-shaped wrappers for the media-batch tabs (automations, overlays, twitch, editor):
+// the tabs carry these controls around as state, so a struct beats 8 positional args. Each
+// one DELEGATES to the flat primitive above - no markup is duplicated here. Deduped at the
+// development merge: Slider/slider, cardOpen/cardHeadClose/cardClose, fpairOpen/fpairClose,
+// statusRow, kv and fieldEx all come from the motion+live / vrchat / midi blocks unchanged.
 
 /// Btn is a btn() call as data (for button lists).
 pub const Btn = struct {
@@ -411,26 +775,8 @@ pub const Field = struct {
     tip: []const u8 = "",
 };
 
-/// field mirrors Go fieldEx: labelled text/number input dispatching on change.
-pub fn field(h: *Html, f: Field) !void {
-    try h.raw("<label class=field data-label=");
-    try h.attrQ(f.dl);
-    try h.raw("><span class=field-label>");
-    try h.esc(f.label);
-    try h.raw(f.tip);
-    try h.raw("</span><input class=field-input type=");
-    try h.raw(if (f.inputType.len == 0) "text" else f.inputType);
-    try h.raw(" value=");
-    try h.attrQ(f.value);
-    try h.raw(" data-value=");
-    try h.attrQ(f.value);
-    try h.raw(" data-act=");
-    try h.attrQ(f.act);
-    if (f.ph.len != 0) {
-        try h.raw(" placeholder=");
-        try h.attrQ(f.ph);
-    }
-    try h.raw("></label>");
+pub fn fieldOf(h: *Html, f: Field) !void {
+    try fieldEx(h, f.label, f.dl, f.act, f.value, f.inputType, f.ph, f.tip);
 }
 
 /// KV is a kv() call as data (dl = Go strings.ToLower(label)).
@@ -440,21 +786,12 @@ pub const KV = struct {
     value: []const u8 = "",
 };
 
-/// kv mirrors Go kv: key/value line, value ctl-readable via data-label/data-value.
-pub fn kv(h: *Html, k: KV) !void {
-    try h.raw("<div class=kv><span class=kv-k>");
-    try h.esc(k.label);
-    try h.raw("</span><span class=kv-v data-label=");
-    try h.attrQ(k.dl);
-    try h.raw(" data-value=");
-    try h.attrQ(k.value);
-    try h.raw(">");
-    try h.esc(k.value);
-    try h.raw("</span></div>");
+pub fn kvOf(h: *Html, k: KV) !void {
+    try kv(h, k.label, k.dl, k.value);
 }
 
-/// Status is a statusRow() call as data. variant "" = render nothing (Go ovlStatus's
-/// unknown-kind case returns "").
+/// Status is a statusRow() call as data. variant "" = render NOTHING - Go ovlStatus returns
+/// "" for an unknown output kind, and the overlays fragment must match that byte-for-byte.
 pub const Status = struct {
     variant: []const u8 = "",
     label: []const u8 = "",
@@ -462,144 +799,46 @@ pub const Status = struct {
     line: []const u8 = "",
 };
 
-/// statusRow mirrors Go statusRow: status dot + label + muted sub-line.
-pub fn statusRow(h: *Html, s: Status) !void {
+pub fn statusOf(h: *Html, s: Status) !void {
     if (s.variant.len == 0) return;
-    try h.raw("<div class=strow>");
-    try dot(h, s.variant);
-    try h.raw("<div class=strow-tx><div class=strow-l data-label=");
-    try h.attrQ(s.dl);
-    try h.raw(">");
-    try h.esc(s.label);
-    try h.raw("</div><div class=strow-s data-value=");
-    try h.attrQ(s.line);
-    try h.raw(">");
-    try h.esc(s.line);
-    try h.raw("</div></div></div>");
+    try statusRow(h, s.variant, s.label, s.dl, s.line);
 }
 
-/// Slider is a slider() call as data. min/max/step/val arrive PRE-FORMATTED (Go trimNum)
-/// and unitJs pre-quoted (Go jsQuote) — Go's shortest-round-trip float formatting has no
-/// guaranteed Zig equivalent, so it stays Go-side.
-pub const Slider = struct {
-    label: []const u8 = "",
-    dl: []const u8 = "",
-    act: []const u8 = "",
-    min: []const u8 = "",
-    max: []const u8 = "",
-    step: []const u8 = "",
-    val: []const u8 = "",
-    unit: []const u8 = "",
-    unitJs: []const u8 = "", // JS string literal, inserted raw into the oninput attr
-};
-
-/// slider mirrors Go slider: labelled range input with an inline display-only readout.
-pub fn slider(h: *Html, s: Slider) !void {
-    try h.raw("<label class=slider data-label=");
-    try h.attrQ(s.dl);
-    try h.raw("><span class=field-label>");
-    try h.esc(s.label);
-    try h.raw(" <b class=slider-val>");
-    try h.raw(s.val);
-    try h.esc(s.unit);
-    try h.raw("</b></span><input class=slider-input type=range min=");
-    try h.raw(s.min);
-    try h.raw(" max=");
-    try h.raw(s.max);
-    try h.raw(" step=");
-    try h.raw(s.step);
-    try h.raw(" value=");
-    try h.raw(s.val);
-    try h.raw(" data-act=");
-    try h.attrQ(s.act);
-    try h.raw(" data-value=");
-    try h.attrQ(s.val);
-    try h.raw(" oninput='var b=this.parentNode.querySelector(\".slider-val\");if(b)b.textContent=this.value+");
-    try h.raw(s.unitJs);
-    try h.raw("'></label>");
-}
-
-/// cardOpen/cardClose bracket an rp-card (Go card, streaming form). trailing is
-/// pre-rendered trusted markup; the head is omitted only when BOTH are empty.
-pub fn cardOpen(h: *Html, title: []const u8, trailing: []const u8) !void {
-    try h.raw("<div class=\"rp-card\">");
-    if (title.len != 0 or trailing.len != 0) {
-        try h.raw("<div class=card-head><span class=card-h>");
-        try h.esc(title);
-        try h.raw("</span><span class=card-trail>");
-        try h.raw(trailing);
-        try h.raw("</span></div>");
-    }
-}
-
-pub fn cardClose(h: *Html) !void {
-    try h.raw("</div>");
-}
-
-/// fpairOpen/fpairClose put two short fields side by side (Go fpair, streaming form).
-pub fn fpairOpen(h: *Html) !void {
-    try h.raw("<div class=fpair>");
-}
-
-pub fn fpairClose(h: *Html) !void {
-    try h.raw("</div>");
-}
-
-test "field defaults type, omits empty placeholder" {
+test "media struct wrappers delegate to the flat primitives" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
-    try field(&h, .{ .label = "Port", .dl = "port", .act = "set:p", .value = "80\"8" });
-    try std.testing.expectEqualStrings("<label class=field data-label=\"port\"><span class=field-label>Port</span>" ++
-        "<input class=field-input type=text value=\"80&#34;8\" data-value=\"80&#34;8\" data-act=\"set:p\"></label>", h.b.items);
+    var f = Html.init(std.testing.allocator);
+    defer f.deinit();
+
+    try fieldOf(&h, .{ .label = "Port", .dl = "port", .act = "set:p", .value = "80\"8", .inputType = "number" });
+    try fieldEx(&f, "Port", "port", "set:p", "80\"8", "number", "", "");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
+
     h.b.clearRetainingCapacity();
-    try field(&h, .{ .label = "N", .dl = "n", .act = "a", .value = "1", .inputType = "number", .ph = "p&h" });
-    try std.testing.expectEqualStrings("<label class=field data-label=\"n\"><span class=field-label>N</span>" ++
-        "<input class=field-input type=number value=\"1\" data-value=\"1\" data-act=\"a\" placeholder=\"p&amp;h\"></label>", h.b.items);
-}
+    f.b.clearRetainingCapacity();
+    try kvOf(&h, .{ .label = "URL", .dl = "url", .value = "http://x/?a&b" });
+    try kv(&f, "URL", "url", "http://x/?a&b");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
 
-test "kv escapes label and value" {
-    var h = Html.init(std.testing.allocator);
-    defer h.deinit();
-    try kv(&h, .{ .label = "URL", .dl = "url", .value = "http://x/?a&b" });
-    try std.testing.expectEqualStrings("<div class=kv><span class=kv-k>URL</span>" ++
-        "<span class=kv-v data-label=\"url\" data-value=\"http://x/?a&amp;b\">http://x/?a&amp;b</span></div>", h.b.items);
-}
-
-test "statusRow renders dot + label + line; empty variant renders nothing" {
-    var h = Html.init(std.testing.allocator);
-    defer h.deinit();
-    try statusRow(&h, .{ .variant = "success", .label = "On", .dl = "on", .line = "" });
-    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--success\"></span>" ++
-        "<div class=strow-tx><div class=strow-l data-label=\"on\">On</div>" ++
-        "<div class=strow-s data-value=\"\"></div></div></div>", h.b.items);
     h.b.clearRetainingCapacity();
-    try statusRow(&h, .{});
+    f.b.clearRetainingCapacity();
+    try statusOf(&h, .{ .variant = "success", .label = "On", .dl = "on", .line = "" });
+    try statusRow(&f, "success", "On", "on", "");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
+
+    h.b.clearRetainingCapacity();
+    try toggleOf(&h, .{ .label = "On", .dl = "on", .act = "t", .on = true });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-value=\"true\"") != null);
+}
+
+test "statusOf renders nothing for an empty variant" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusOf(&h, .{});
     try std.testing.expectEqualStrings("", h.b.items);
 }
 
-test "slider assembles pre-formatted numbers + raw unitJs" {
-    var h = Html.init(std.testing.allocator);
-    defer h.deinit();
-    try slider(&h, .{ .label = "Opacity", .dl = "opacity", .act = "o", .min = "0", .max = "1", .step = "0.05", .val = "0.8", .unit = "%", .unitJs = "\"%\"" });
-    try std.testing.expectEqualStrings("<label class=slider data-label=\"opacity\"><span class=field-label>Opacity" ++
-        " <b class=slider-val>0.8%</b></span><input class=slider-input type=range min=0 max=1 step=0.05 value=0.8" ++
-        " data-act=\"o\" data-value=\"0.8\" oninput='var b=this.parentNode.querySelector(\".slider-val\");if(b)b.textContent=this.value+\"%\"'></label>", h.b.items);
-}
-
-test "cardOpen omits head when title and trailing are empty" {
-    var h = Html.init(std.testing.allocator);
-    defer h.deinit();
-    try cardOpen(&h, "", "");
-    try cardClose(&h);
-    try std.testing.expectEqualStrings("<div class=\"rp-card\"></div>", h.b.items);
-    h.b.clearRetainingCapacity();
-    try cardOpen(&h, "T&x", "<b>t</b>");
-    try cardClose(&h);
-    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;x</span>" ++
-        "<span class=card-trail><b>t</b></span></div></div>", h.b.items);
-}
-
-test "btnRowOf and toggleOf delegate" {
+test "btnRowOf and btnAct" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
     const bs = [_]Btn{ .{ .label = "A", .variant = "primary", .act = "a" }, .{ .label = "B", .variant = "ghost", .act = "b", .val = "v" } };
@@ -608,6 +847,6 @@ test "btnRowOf and toggleOf delegate" {
         "<button class=\"rp-btn rp-btn--primary\" data-act=\"a\">A</button>" ++
         "<button class=\"rp-btn rp-btn--ghost\" data-act=\"b\" data-val=\"v\">B</button></div>", h.b.items);
     h.b.clearRetainingCapacity();
-    try toggleOf(&h, .{ .label = "On", .dl = "on", .act = "t", .on = true });
-    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-value=\"true\"") != null);
+    try btnAct(&h, "Run", "go", "auto-run:", "g&1");
+    try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
 }

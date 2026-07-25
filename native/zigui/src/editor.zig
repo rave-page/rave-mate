@@ -405,32 +405,32 @@ fn renderInsp(h: *Html, s: Insp) !void {
         return;
     }
     try h.raw("<div class=ed-insp>");
-    try c.field(h, s.name);
+    try c.fieldOf(h, s.name);
     try h.raw("<div class=ed-row2>");
-    try c.field(h, s.x);
-    try c.field(h, s.y);
+    try c.fieldOf(h, s.x);
+    try c.fieldOf(h, s.y);
     try h.raw("</div>");
     if (s.showWh) {
         try h.raw("<div class=ed-row2>");
-        try c.field(h, s.w);
-        try c.field(h, s.h);
+        try c.fieldOf(h, s.w);
+        try c.fieldOf(h, s.h);
         try h.raw("</div>");
     }
     try h.raw("<div class=ed-row2>");
-    try c.field(h, s.sx);
-    try c.field(h, s.sy);
+    try c.fieldOf(h, s.sx);
+    try c.fieldOf(h, s.sy);
     try h.raw("</div>");
-    try c.field(h, s.rot);
+    try c.fieldOf(h, s.rot);
     if (std.mem.eql(u8, s.kind, "text")) {
         try renderInspText(h, s.text);
     } else if (std.mem.eql(u8, s.kind, "solid")) {
         try renderColorRow(h, s.fill);
     } else if (std.mem.eql(u8, s.kind, "gradient")) {
-        try c.field(h, s.angle);
+        try c.fieldOf(h, s.angle);
         try renderColorRow(h, s.start);
         try renderColorRow(h, s.end);
     } else if (std.mem.eql(u8, s.kind, "image")) {
-        try c.field(h, s.path);
+        try c.fieldOf(h, s.path);
         try c.selectBox(h, s.fit);
     }
     try h.raw("</div>");
@@ -445,10 +445,10 @@ fn renderInspText(h: *Html, s: InspText) !void {
     try c.hint(h, "info", s.hint);
     try c.selectBox(h, s.font);
     try h.raw("<div class=ed-row2>");
-    try c.field(h, s.size);
-    try c.field(h, s.ls);
+    try c.fieldOf(h, s.size);
+    try c.fieldOf(h, s.ls);
     try h.raw("</div>");
-    try c.field(h, s.lh);
+    try c.fieldOf(h, s.lh);
     try c.selectBox(h, s.alignment);
     try renderColorRow(h, s.color);
 }
@@ -458,7 +458,7 @@ fn renderColorRow(h: *Html, s: ColorRow) !void {
     try h.raw("<div class=ed-color-row><span class=ed-swatch style=\"background:");
     try h.raw(s.rgba);
     try h.raw("\"></span>");
-    try c.field(h, s.field);
+    try c.fieldOf(h, s.field);
     try h.raw("</div>");
 }
 

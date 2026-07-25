@@ -75,6 +75,15 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 |---|---|---|
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
+| motion | Zig (`native/zigui/src/motion.zig`; full + `#mo-body` fragment) | `TestZigMotionGolden` |
+| live | Zig (`native/zigui/src/live.zig`; full + 10 tick fragments via `rz_ui_render_live_frag`) | `TestZigLiveGolden` |
+
+| vrchat | Zig (`native/zigui/src/vrchat.zig`; full + `#vrc-status-region`/`#vrc-editor`/`#vrc-campaths`/`#vrc-photos-body`) | `TestZigVRChatGolden` |
+| vrchat ▸ groups | Zig (`native/zigui/src/vrcgroups.zig`; `#vrcg-body` sub-view) | `TestZigVRCGroupsGolden` |
+| worlds | Zig (`native/zigui/src/worlds.zig`; full + `#world-linkhint`/`#world-gh`/`#world-st-<key>`/`#world-unity-rows`) | `TestZigWorldsGolden` |
+
+| midimon (MIDI-tab fragments) | Zig (`native/zigui/src/midimon.zig`; monitor card + `#midi-monitor` rows + driver wire trace) | `TestZigMIDIMonGolden`, `TestZigMIDITraceGolden` |
+| midictl | Zig (`native/zigui/src/midictl.zig` + `midictl_ctls.zig` + `midictl_uimap.zig`; full tab + `#midi-active` + `#midi-ctlstat-<i>`) | `TestZigMIDICtlGolden` |
 | automations | Zig (`native/zigui/src/automations.zig`; full + `#auto-body` fragment) | `TestZigAutomationsGolden` |
 | overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
 | twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
@@ -103,19 +112,79 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
 - `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
   `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
 
+## Go-workaround awareness (see ZIG_MIGRATION.md "Why Zig")
+
+Zig's origin is a DAW that refused to compromise on UI performance — our Go render layer
+carries Go-runtime workarounds (string-builder reuse, tick/patch throttles sized for GC
+pressure, precomputed caches dodging per-render alloc). During phase A, replicate them
+where they shape the DOM (parity!); FLAG them in port notes. Phase B (Zig shell) revisits
+each — many are unnecessary under explicit allocators + no GC.
+
+VRChat-port notes (tabs #3/#4): the tab + its Groups sub-view are separate exports (the tab
+embeds `#vrcg-body`, actions patch it alone). components.go grew caller-resolved data-label
+variants (`kvDL`/`statusRowDL`/`fieldExDL`, wrappers delegate) mirroring `toggleRowDL`.
+Components ported to `components.zig`: `kv` · `statusRow` · `fieldEx` ·
+`cardOpen/cardHeadClose/cardClose` · `itemRowOpen/itemRowClose` · `mdOpen/mdSplit/mdClose`
+(masterDetail) · `fpairOpen/fpairClose` · `num(i64)` (Go `%d`). Two things stay resolved
+Go-side because Zig has no equivalent: the photo cell's `title=%q` (Go strconv quoting) is
+pre-quoted into state (`titleQ`, emitted verbatim), and pre-rendered fragments from other
+subsystems (campath 3-D viewer SVG, play button, `tipTopic` tooltips) travel as trusted raw
+strings. Nil-slice gotcha: nested zero-value state structs marshal `null` for their slices and
+Zig slice parsing rejects null — every slice field carries `,omitempty` so Zig falls back to
+its `&.{}` default.
+
+Worlds-port notes (tab #5): the ws-help prose paragraphs, hand-written card titles and the
+add-list placeholder/submit label were Go **source literals inserted unescaped** — several carry
+apostrophes, so escaping them would change the DOM. They travel in state and BOTH renderers emit
+them raw (documented in the header of worlds.zig + the state block). Everything user-derived
+(names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
+
+MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
+- Tooltips stay Go: `tipTopic(id)` markup (tooltip.go, keybind grid + link list) rides in
+  state as a PRE-RENDERED HTML string and Zig `raw`s it. Same for smart-select labels that
+  carry a tooltip (`selectBoxTip`) — state holds the resolved `selState` plus its
+  `<span class=ss-label>…</span>` HTML (`selHTMLRaw` / Zig `selectBoxRaw`).
+- Floats never cross the ABI: knob/fader `--v`/`--rot` are `trimNum`'d Go-side into strings.
+- Non-nil slices are mandatory — a nil Go slice marshals to `null` and the Zig parser
+  rejects it, silently falling the WHOLE tab back to Go. `emptySel()` (smartselect.go) is
+  the guard for zero-value `selState`s inside heterogeneous rows.
+- A fragment whose HTML is legitimately EMPTY (`#midi-ctlstat-<i>` before the MIDI child
+  reports) makes `renderJSON` return NULL ⇒ `ok=false` ⇒ the Go fallback renders the same
+  empty string. Golden tests must accept that (see `TestZigMIDICtlGolden`).
+- Components added to `components.zig` (`// --- midi ---` block):
+  `cardOpen(title,head)`/`cardTrailClose`/`cardClose` (Go `card`, streaming) ·
+  `statusRow(variant,label,data_label,line)` (Go `statusRowDL`) ·
+  `fchip(label,val,act,active)` · `toggleRowTip(label,dl,act,on,tip_html)` (Go
+  `toggleRowTipDL`) · `itemRowOpen(title,sub)`/`itemRowClose` (Go `itemRow`, streaming) ·
+  `selectBoxRaw(Select,label_html)` (Go `selHTMLRaw`).
+- Go helpers extended with caller-resolved-data-label twins (Unicode `ToLower` stays in Go,
+  same pattern as `toggleRowDL`): `statusRowDL`, `toggleRowTipDL`, plus
+  `resolveSelectBoxTip` and `resolveSmartSelect`/`selHTMLRaw`/`emptySel`.
+
 Media-batch notes (tabs automations/overlays/twitch/editor): `render_media_shared.go`
 carries the components.go primitives as JSON-able control state (`uiBtn`/`uiToggle`/
-`uiField`/`uiKV`/`uiStatus`/`uiSlider`), mirrored in the components.zig `media` block
-(`Btn`/`btnOf`/`btnRowOf`/`btnAct`, `Toggle`/`toggleOf`, `Field`/`field`, `KV`/`kv`,
-`Status`/`statusRow`, `Slider`/`slider`, `cardOpen/Close`, `fpairOpen/Close`). Each
-`html()` delegates to the Go primitive so the markup has ONE source; `uiSlider` is the
-exception (numbers pre-formatted Go-side because `trimNum` has no Zig equivalent) and is
-pinned by `TestUISliderMatchesPrimitive`. Two Go-resolved tokens ride through the editor
-state verbatim for the same reason: `fmt.Sprintf("%q", …)` of the font family + image URL
-(Go `strconv.Quote` semantics). Twitch's feed buffer (`ui.go twitchRows`) was converted
-from pre-rendered HTML to resolved row state; the streaming cockpit inside `#twitch-obs`
-stays render_live.go's renderer and passes through as raw trusted markup (a tab may embed
+`uiField`/`uiKV`/`uiStatus`/`uiSlider`) because these tabs pass controls around as state,
+where a struct beats 8 positional args. Each `html()` delegates to the caller-resolved
+Go primitive (`fieldExDL`/`kvDL`/`statusRowDL`/`toggleRowDL`/`slider`), so `dl` is
+AUTHORITATIVE for both renderers and the markup has exactly ONE Go source. The
+components.zig `media` block is thin wrappers over the flat helpers the other batches
+already added — `Field`/`fieldOf` → `fieldEx`, `KV`/`kvOf` → `kv`, `Status`/`statusOf` →
+`statusRow` (plus the variant-`""`-renders-nothing rule that Go `ovlStatus` needs),
+`Toggle`/`toggleOf` → `toggleRow` — with only `Btn`/`btnOf`/`btnRowOf`/`btnAct` genuinely
+new (`btnAct` = `btn` whose act is `prefix++id`, no data-val: the per-row action pattern).
+`uiSlider` adopted the motion batch's dual-number shape (floats for Go's `slider()`,
+`minS`/`maxS`/`stepS`/`valS` for Zig) so components.zig `Slider` is shared;
+`TestUISliderNumberPairsAgree` pins the two representations plus the primitive delegation.
+Two Go-resolved tokens ride through the editor state verbatim for the same
+formatting reason: `fmt.Sprintf("%q", …)` of the font family + image URL (Go
+`strconv.Quote` semantics). Twitch's feed buffer (`ui.go twitchRows`) was converted from
+pre-rendered HTML to resolved row state; the streaming cockpit inside `#twitch-obs` stays
+render_live.go's renderer and passes through as raw trusted markup (a tab may embed
 another tab's renderer, and renderer ownership wins over "one language per view").
+Editor gotcha: `align` is a Zig keyword — the json tag is `alignment`. Composite `style`
+attributes that Go builds then `attrQ`-escapes as ONE value (editor layer divs, whose
+image paint carries `%q` quotes) must be assembled into a scratch `Html` and then
+`attrQ`'d — they cannot be streamed.
 
 ## Dev rules when touching UI during migration
 
@@ -125,3 +194,32 @@ another tab's renderer, and renderer ownership wins over "one language per view"
   regression even if it looks right.
 - Screenshot sweep (`ctl screenshot-all`) after every migrated view, both themes if/when
   a light theme exists.
+
+Motion-port notes (tab #3): the impure half owns everything numeric + every
+Go-computed fragment - campath viewer SVG (`cpvView`), skeleton/mesh preview
+(`moViewHTML`), render progress, `tipTopic` cards, `cpvPlayBtn` - and the state
+carries them as trusted raw HTML; Zig only frames them. Numbers never cross as
+floats-to-be-formatted: `moSliderSt` carries the floats (Go path feeds the shared
+`slider()`) AND their `trimNum` strings (Zig path), so the golden gate detects drift
+instead of Zig re-implementing Go float formatting. `moCamPathInfo` split into
+`moCamPathInfoText` (state) + escaping wrapper (the live `#mo-cp-info` patch).
+Components ported to `components.zig`: `masterDetailOpen/Mid/Close`, `sectionOpenTip`,
+`statusRow`, `slider` (+`Slider` state struct - all numbers pre-formatted Go-side).
+Gotcha re-confirmed: a *conditionally built* `selState` (the point-cloud density
+picker) left `Rows` nil → JSON `null` → Zig parse fails → the tab silently falls back
+to Go. Every nested state with a slice must be initialized non-nil even when its
+section is hidden.
+
+Live-port notes (tab #4): the Live tab is 11 independently tick-patched fragments, so
+the ABI got ONE dispatch export - `rz_ui_render_live_frag(kind, kind_len, json…)`,
+kinds `transport|np|status|decks|signals|cockpit|link|graph|perf|strip` ("graph" serves
+both #live-net and #live-tim) - instead of ten near-identical exports; unknown kind
+returns NULL so the bridge falls back. Go keeps every float: sparkline SVGs + graph
+legends arrive as trusted raw HTML, and the Link phrase-bar fill arrives pre-formatted
+(`pbarPct`, `%.2f%%`) because the client rAF runtime (`__rt 'link'`) rewrites that exact
+attribute per frame - `linkPhraseBar(float)` stays for player_realtime_test.go and now
+delegates to `linkPhraseBarStr`. Quirks replicated deliberately (golden-gated): the
+status card splices `strings.ToLower(k)` into `data-label="…"` UNESCAPED, and the
+signals card's rows carry no data-label at all. `cockpitHTML` is shared with the Twitch
+tab, so that tab now renders its OBS rows through Zig too.
+Components added: `statusRow`, `sectionOpenTip` (both used here).

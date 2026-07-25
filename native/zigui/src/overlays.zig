@@ -130,14 +130,16 @@ fn note(h: *Html, text: []const u8) !void {
 }
 
 /// cardOpen mirrors Go ovlCardHTML's prologue: rp-card head + the status region, which
-/// precedes the body.
+/// precedes the body. Go card() emits the head when title OR trailing is non-empty;
+/// overlays never passes a trailing slot, so head = title non-empty.
 fn cardOpen(h: *Html, cd: Card) !void {
-    try c.cardOpen(h, cd.title, "");
+    try c.cardOpen(h, cd.title, cd.title.len != 0);
+    if (cd.title.len != 0) try c.cardHeadClose(h);
     if (cd.statusId.len != 0) {
         try h.raw("<div id=");
         try h.raw(cd.statusId);
         try h.raw(">");
-        try c.statusRow(h, cd.status);
+        try c.statusOf(h, cd.status);
         try h.raw("</div>");
     }
 }
@@ -154,13 +156,13 @@ pub fn renderAppearance(h: *Html, s: Appearance) !void {
 
 fn renderWeb(h: *Html, s: Web) !void {
     try cardOpen(h, s.card);
-    try c.field(h, s.port);
+    try c.fieldOf(h, s.port);
     try c.btnRowOf(h, s.btns);
-    try c.kv(h, s.url);
+    try c.kvOf(h, s.url);
     try note(h, s.note1);
     try h.raw("<hr class=ovl-sep>");
     try c.toggleOf(h, s.autoAdd);
-    try c.field(h, s.scene);
+    try c.fieldOf(h, s.scene);
     try c.toggleOf(h, s.nest);
     try note(h, s.note2);
     try c.cardClose(h);
@@ -174,11 +176,11 @@ fn renderWave(h: *Html, s: Wave) !void {
     try c.selectBox(h, s.playhead);
     try c.fpairClose(h);
     try c.fpairOpen(h);
-    try c.field(h, s.waveColor);
+    try c.fieldOf(h, s.waveColor);
     try c.slider(h, s.waveOpac);
     try c.fpairClose(h);
     try c.fpairOpen(h);
-    try c.field(h, s.bgColor);
+    try c.fieldOf(h, s.bgColor);
     try c.slider(h, s.bgOpac);
     try c.fpairClose(h);
     try note(h, s.note2);
@@ -187,7 +189,7 @@ fn renderWave(h: *Html, s: Wave) !void {
 
 fn renderDir(h: *Html, s: Dir) !void {
     try cardOpen(h, s.card);
-    try c.field(h, s.dir);
+    try c.fieldOf(h, s.dir);
     try c.btnRowOpen(h);
     try c.btnOf(h, s.open);
     try c.btnRowClose(h);
@@ -246,7 +248,7 @@ pub fn renderStrip(h: *Html, s: Strip) !void {
 
 /// renderStatus mirrors Go uiStatus.html (#ovl-st-<kind> fragment).
 pub fn renderStatus(h: *Html, s: c.Status) !void {
-    try c.statusRow(h, s);
+    try c.statusOf(h, s);
 }
 
 test "unavailable" {

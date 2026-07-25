@@ -21,20 +21,212 @@ import (
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/motionrender"
 	"rave.page/mate/internal/vrmotion"
+	"rave.page/mate/internal/zigui"
 )
 
-func (u *UI) renderMotion() string {
+// Motion is a Zig-rendered tab (native/zigui/src/motion.zig): Go resolves everything
+// impure into moState - data + i18n + the pre-rendered preview fragments (camera-path
+// viewer, skeleton/mesh SVG, render progress, tooltips) the renderers embed verbatim -
+// and the Zig lib renders HTML byte-identical to the Go renderers below (fallback +
+// golden reference, zigui_golden_motion_test.go).
+
+// moToggleSt is one resolved toggleRow (DL = Go strings.ToLower(Label): Unicode
+// lowercasing stays Go-side).
+type moToggleSt struct {
+	Label string `json:"label"`
+	DL    string `json:"dl"`
+	Act   string `json:"act"`
+	On    bool   `json:"on"`
+}
+
+// moTog resolves a toggleRow's render state.
+func moTog(label, act string, on bool) moToggleSt {
+	return moToggleSt{Label: label, DL: strings.ToLower(label), Act: act, On: on}
+}
+
+// moSliderSt is a resolved slider. Numbers ride BOTH as floats (the Go path feeds the
+// shared slider() unchanged) and pre-formatted via trimNum (the Zig path never formats
+// a float), so the golden gate catches any drift between the two.
+type moSliderSt struct {
+	Label  string  `json:"label"`
+	DL     string  `json:"dl"`
+	Act    string  `json:"act"`
+	Unit   string  `json:"unit"`
+	UnitJS string  `json:"unitJs"` // jsQuote(Unit) - the oninput display splice
+	Min    float64 `json:"-"`
+	Max    float64 `json:"-"`
+	Step   float64 `json:"-"`
+	Val    float64 `json:"-"`
+	MinS   string  `json:"minS"`
+	MaxS   string  `json:"maxS"`
+	StepS  string  `json:"stepS"`
+	ValS   string  `json:"valS"`
+}
+
+// moSlide resolves a slider's render state (both number representations).
+func moSlide(label, act string, minV, maxV, step, val float64, unit string) moSliderSt {
+	return moSliderSt{
+		Label: label, DL: strings.ToLower(label), Act: act, Unit: unit, UnitJS: jsQuote(unit),
+		Min: minV, Max: maxV, Step: step, Val: val,
+		MinS: trimNum(minV), MaxS: trimNum(maxV), StepS: trimNum(step), ValS: trimNum(val),
+	}
+}
+
+// moCamRow is one camera-path list row (ShowGroup = this row opens a new folder group).
+type moCamRow struct {
+	Group     string `json:"group"`
+	ShowGroup bool   `json:"showGroup"`
+	Act       string `json:"act"` // "mo-cp-sel:<index>"
+	Sel       bool   `json:"sel"`
+	Name      string `json:"name"`
+	Meta      string `json:"meta"` // resolved motion.camPathMeta
+}
+
+// moCamSt is the camera-paths section's render state.
+type moCamSt struct {
+	Unavailable string     `json:"unavailable"` // non-empty → only the emptyState renders
+	Rows        []moCamRow `json:"rows"`
+	Empty       string     `json:"empty"`
+	ReloadLbl   string     `json:"reloadLbl"`
+	OrganizeLbl string     `json:"organizeLbl"`
+	DJLbl       string     `json:"djLbl"`
+	PreviewLbl  string     `json:"previewLbl"`
+	Tip         string     `json:"tip"`  // raw tipTopic("camera-paths")
+	View        string     `json:"view"` // raw cpvView("mo")
+	Hint        string     `json:"hint"`
+	Info        string     `json:"info"`    // plain text; renderers escape
+	PlayBtn     string     `json:"playBtn"` // raw cpvPlayBtn("mo")
+	LoadLbl     string     `json:"loadLbl"`
+	CopyLbl     string     `json:"copyLbl"`
+}
+
+// moAvatarSt is the avatar-management block's render state.
+type moAvatarSt struct {
+	Label     string   `json:"label"`
+	Sel       selState `json:"sel"`
+	ImportLbl string   `json:"importLbl"`
+	SyncLbl   string   `json:"syncLbl"`
+	Info      string   `json:"info"`
+}
+
+// moRecRow is one motion-recording list row.
+type moRecRow struct {
+	Name string `json:"name"`
+	Act  string `json:"act"` // "mo-rec-sel:<name>"
+	Sel  bool   `json:"sel"`
+}
+
+// moStudioSt is the motion-studio section's render state.
+type moStudioSt struct {
+	Recs        []moRecRow `json:"recs"`
+	Empty       string     `json:"empty"`
+	RefreshLbl  string     `json:"refreshLbl"`
+	ExportLbl   string     `json:"exportLbl"`
+	RenderLbl   string     `json:"renderLbl"`
+	PCViewLbl   string     `json:"pcViewLbl"`
+	RenderProg  string     `json:"renderProg"` // raw moRenderProgHTML
+	Avatar      moAvatarSt `json:"avatar"`
+	PreviewLbl  string     `json:"previewLbl"`
+	Tip         string     `json:"tip"`  // raw tipTopic("motion-studio")
+	View        string     `json:"view"` // raw moViewHTML (SVG / raster frame)
+	Hint        string     `json:"hint"`
+	Time        string     `json:"time"` // plain text; renderers escape
+	Scrub       moSliderSt `json:"scrub"`
+	PlayLbl     string     `json:"playLbl"`
+	StopLbl     string     `json:"stopLbl"`
+	Loop        moToggleSt `json:"loop"`
+	OSC         moToggleSt `json:"osc"`
+	VMC         moToggleSt `json:"vmc"`
+	Model       moToggleSt `json:"model"`
+	ModelOn     bool       `json:"modelOn"` // gates every model-only row below
+	HasDyn      bool       `json:"hasDyn"`
+	PhysNote    string     `json:"physNote"` // RAW (the Go original emits it unescaped)
+	Phys        moToggleSt `json:"phys"`
+	Rest        moToggleSt `json:"rest"`
+	Marks       moToggleSt `json:"marks"`
+	PC          moToggleSt `json:"pc"`
+	PCOn        bool       `json:"pcOn"`
+	PCDensity   selState   `json:"pcDensity"`
+	PCColor     moToggleSt `json:"pcColor"`
+	PCNote      string     `json:"pcNote"`
+	PCExportLbl string     `json:"pcExportLbl"`
+	VMCHelp     string     `json:"vmcHelp"`
+}
+
+// moState is the resolved render state for the Motion view (JSON → Zig). Exactly one
+// section state is built per render (the inactive one stays nil/null).
+type moState struct {
+	Title     string      `json:"title"`
+	Sub       string      `json:"sub"`
+	Section   string      `json:"section"` // "campaths" | "studio"
+	TabCam    string      `json:"tabCam"`
+	TabStudio string      `json:"tabStudio"`
+	Cam       *moCamSt    `json:"cam"`
+	Studio    *moStudioSt `json:"studio"`
+}
+
+// moState resolves the active section + i18n into render state.
+func (u *UI) moState() moState {
 	s := u.mo()
 	s.mu.Lock()
 	sec := s.section
 	s.mu.Unlock()
-	var b strings.Builder
-	b.WriteString(`<h1 class=page-title>` + html.EscapeString(i18n.T("motion.title")) + `</h1><p class=page-sub>` +
-		html.EscapeString(i18n.T("motion.subtitle")) + `</p>`)
-	b.WriteString(`<div class=subtabs>` +
-		subtabBtn("campaths", i18n.T("motion.tabCamPaths"), sec) + subtabBtn("studio", i18n.T("motion.tabStudio"), sec) + `</div>`)
-	b.WriteString(`<div id=mo-body>` + u.moBody() + `</div>`)
-	return b.String()
+	st := moState{
+		Title: i18n.T("motion.title"), Sub: i18n.T("motion.subtitle"), Section: sec,
+		TabCam: i18n.T("motion.tabCamPaths"), TabStudio: i18n.T("motion.tabStudio"),
+	}
+	if sec == "studio" {
+		v := u.moStudioState()
+		st.Studio = &v
+		return st
+	}
+	v := u.moCamPathsState()
+	st.Cam = &v
+	return st
+}
+
+func (u *UI) renderMotion() string {
+	st := u.moState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderMotion(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return motionHTML(st)
+}
+
+// moBody is the #mo-body inner fragment (section switch + off-thread avatar-scan patch).
+func (u *UI) moBody() string {
+	st := u.moState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderMotionBody(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return motionBodyHTML(st)
+}
+
+// motionHTML is the pure Go renderer (golden reference; byte-identical to Zig).
+func motionHTML(st moState) string {
+	return `<h1 class=page-title>` + html.EscapeString(st.Title) + `</h1><p class=page-sub>` +
+		html.EscapeString(st.Sub) + `</p>` +
+		`<div class=subtabs>` + subtabBtn("campaths", st.TabCam, st.Section) +
+		subtabBtn("studio", st.TabStudio, st.Section) + `</div>` +
+		`<div id=mo-body>` + motionBodyHTML(st) + `</div>`
+}
+
+// motionBodyHTML is the pure #mo-body inner renderer.
+func motionBodyHTML(st moState) string {
+	if st.Section == "studio" {
+		if st.Studio == nil {
+			return ""
+		}
+		return moStudioHTML(*st.Studio)
+	}
+	if st.Cam == nil {
+		return ""
+	}
+	return moCamPathsHTML(*st.Cam)
 }
 
 func subtabBtn(id, label, cur string) string {
@@ -45,79 +237,98 @@ func subtabBtn(id, label, cur string) string {
 	return `<button class="` + cls + `" data-act="mo-section:` + id + `">` + html.EscapeString(label) + `</button>`
 }
 
-func (u *UI) moBody() string {
-	s := u.mo()
-	s.mu.Lock()
-	sec := s.section
-	s.mu.Unlock()
-	if sec == "studio" {
-		return u.moStudioHTML()
-	}
-	return u.moCamPathsHTML()
-}
-
 // ── camera paths ─────────────────────────────────────────────────────────────
 
-func (u *UI) moCamPathsHTML() string {
+// moCamPathsState resolves the path list + the shared campath viewer into render state.
+func (u *UI) moCamPathsState() moCamSt {
 	if u.svc.VRCTools == nil {
-		return emptyState(i18n.T("motion.vrchatUnavailable"))
+		return moCamSt{Unavailable: i18n.T("motion.vrchatUnavailable"), Rows: []moCamRow{}}
 	}
 	s := u.mo()
 	s.mu.Lock()
 	paths, sel := s.cpPaths, s.cpSel
 	s.mu.Unlock()
-
-	var list strings.Builder
-	list.WriteString(`<div class=mo-list>`)
+	st := moCamSt{
+		Rows: make([]moCamRow, 0, len(paths)), Empty: i18n.T("motion.noCamPaths"),
+		ReloadLbl: i18n.T("motion.reloadList"), OrganizeLbl: i18n.T("motion.organizeNow"),
+		DJLbl:      i18n.T("motion.installDjPaths"),
+		PreviewLbl: i18n.T("motion.preview"), Tip: tipTopic("camera-paths"),
+		Hint:    i18n.T("campath.hint"),
+		LoadLbl: i18n.T("motion.loadIntoVrchat"), CopyLbl: i18n.T("motion.copyFilePath"),
+	}
 	lastFolder := ""
 	for i, p := range paths {
-		folder := p.Folder()
-		if folder != lastFolder {
-			list.WriteString(`<div class=mo-group>` + html.EscapeString(folder) + `</div>`)
+		r := moCamRow{
+			Act: fmt.Sprintf("mo-cp-sel:%d", i), Sel: i == sel, Name: p.Name,
+			Meta: i18n.T("motion.camPathMeta", i18n.A{
+				"count": fmt.Sprint(p.Points), "duration": fmt.Sprintf("%.1f", p.DurationSec), "saved": p.SavedAt.Format("2006-01-02 15:04"),
+			}),
+		}
+		if folder := p.Folder(); folder != lastFolder {
+			r.Group, r.ShowGroup = folder, true
 			lastFolder = folder
 		}
-		cls := "irow"
-		if i == sel {
-			cls += " selected"
-		}
-		list.WriteString(`<div class="` + cls + `" data-act="mo-cp-sel:` + fmt.Sprintf("%d", i) + `"><div class=irow-main>` +
-			`<div class=irow-title>` + html.EscapeString(p.Name) + `</div>` +
-			`<div class=irow-sub>` + html.EscapeString(i18n.T("motion.camPathMeta", i18n.A{
-			"count": fmt.Sprint(p.Points), "duration": fmt.Sprintf("%.1f", p.DurationSec), "saved": p.SavedAt.Format("2006-01-02 15:04"),
-		})) + `</div>` +
-			`</div></div>`)
+		st.Rows = append(st.Rows, r)
 	}
-	if len(paths) == 0 {
-		list.WriteString(emptyState(i18n.T("motion.noCamPaths")))
-	}
-	list.WriteString(`</div>`)
-	list.WriteString(btnRow(
-		btn(i18n.T("motion.reloadList"), "ghost", "mo-cp-refresh", ""),
-		btn(i18n.T("motion.organizeNow"), "outline", "mo-cp-organize", ""),
-		btn(i18n.T("motion.installDjPaths"), "outline", "mo-cp-dj", "")))
-
 	file := ""
 	if sel >= 0 && sel < len(paths) {
 		file = paths[sel].File
 	}
 	u.cpvEnsure("mo", file)
-	detail := u.cpvView("mo") +
-		`<div class=mo-hint>` + html.EscapeString(i18n.T("campath.hint")) + `</div>` +
-		`<div id=mo-cp-info class=mo-info>` + u.moCamPathInfo() + `</div>` +
+	st.View, st.Info, st.PlayBtn = u.cpvView("mo"), u.moCamPathInfoText(), u.cpvPlayBtn("mo")
+	return st
+}
+
+// moCamPathsHTML is the pure camera-paths renderer.
+func moCamPathsHTML(st moCamSt) string {
+	if st.Unavailable != "" {
+		return emptyState(st.Unavailable)
+	}
+	var list strings.Builder
+	list.WriteString(`<div class=mo-list>`)
+	for _, r := range st.Rows {
+		if r.ShowGroup {
+			list.WriteString(`<div class=mo-group>` + html.EscapeString(r.Group) + `</div>`)
+		}
+		cls := "irow"
+		if r.Sel {
+			cls += " selected"
+		}
+		list.WriteString(`<div class="` + cls + `" data-act="` + html.EscapeString(r.Act) + `"><div class=irow-main>` +
+			`<div class=irow-title>` + html.EscapeString(r.Name) + `</div>` +
+			`<div class=irow-sub>` + html.EscapeString(r.Meta) + `</div>` +
+			`</div></div>`)
+	}
+	if len(st.Rows) == 0 {
+		list.WriteString(emptyState(st.Empty))
+	}
+	list.WriteString(`</div>`)
+	list.WriteString(btnRow(
+		btn(st.ReloadLbl, "ghost", "mo-cp-refresh", ""),
+		btn(st.OrganizeLbl, "outline", "mo-cp-organize", ""),
+		btn(st.DJLbl, "outline", "mo-cp-dj", "")))
+
+	detail := st.View +
+		`<div class=mo-hint>` + html.EscapeString(st.Hint) + `</div>` +
+		`<div id=mo-cp-info class=mo-info>` + html.EscapeString(st.Info) + `</div>` +
 		btnRow(
-			u.cpvPlayBtn("mo"),
-			btn(i18n.T("motion.loadIntoVrchat"), "primary", "mo-cp-load", ""),
-			btn(i18n.T("motion.copyFilePath"), "outline", "mo-cp-copy", ""))
-	head := `<div class=card-label>` + html.EscapeString(i18n.T("motion.preview")) + tipTopic("camera-paths") + `</div>`
+			st.PlayBtn,
+			btn(st.LoadLbl, "primary", "mo-cp-load", ""),
+			btn(st.CopyLbl, "outline", "mo-cp-copy", ""))
+	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + st.Tip + `</div>`
 	return masterDetail(list.String(), head+detail)
 }
 
-func (u *UI) moCamPathInfo() string {
+// moCamPathInfo renders the #mo-cp-info inner text (escaped; live patch target).
+func (u *UI) moCamPathInfo() string { return html.EscapeString(u.moCamPathInfoText()) }
+
+// moCamPathInfoText resolves the selected path's detail line (plain text).
+func (u *UI) moCamPathInfoText() string {
 	s := u.mo()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cpSel < 0 || s.cpSel >= len(s.cpPaths) {
-		return html.EscapeString(i18n.T("motion.selectPath"))
+		return i18n.T("motion.selectPath")
 	}
 	p := s.cpPaths[s.cpSel]
 	where := p.WorldName
@@ -126,14 +337,15 @@ func (u *UI) moCamPathInfo() string {
 	} else if where == "" {
 		where = i18n.T("motion.unknownWorld")
 	}
-	return html.EscapeString(i18n.T("motion.camPathDetail", i18n.A{
+	return i18n.T("motion.camPathDetail", i18n.A{
 		"name": p.Name, "where": where, "count": fmt.Sprint(p.Points), "duration": fmt.Sprintf("%.1f", p.DurationSec),
-	}))
+	})
 }
 
 // ── motion studio ────────────────────────────────────────────────────────────
 
-func (u *UI) moStudioHTML() string {
+// moStudioState resolves takes + playback + avatar/physics/point-cloud toggles into render state.
+func (u *UI) moStudioState() moStudioSt {
 	s := u.mo()
 	s.mu.Lock()
 	names, recName := s.recNames, s.recName
@@ -148,102 +360,146 @@ func (u *UI) moStudioHTML() string {
 	}
 	s.mu.Unlock()
 
-	var list strings.Builder
-	list.WriteString(`<div class=mo-list>`)
-	for _, n := range names {
-		cls := "irow"
-		if n == recName {
-			cls += " selected"
-		}
-		list.WriteString(`<div class="` + cls + `" data-act="mo-rec-sel:` + html.EscapeString(n) + `"><div class=irow-main><div class=irow-title>` +
-			html.EscapeString(n) + `</div></div></div>`)
-	}
-	if len(names) == 0 {
-		list.WriteString(emptyState(i18n.T("motion.noRecordings")))
-	}
-	list.WriteString(`</div>`)
-	list.WriteString(btnRow(
-		btn(i18n.T("common.refresh"), "ghost", "mo-rec-refresh", ""),
-		btn(i18n.T("motion.exportAnim"), "outline", "pick-save:anim:mo-export", ""),
-		btn(i18n.T("motion.renderVideo"), "outline", "mo-render", ""),
-		// View any exported .rmpc in the raw-WebGL point-cloud viewer (needs no avatar loaded).
-		btn(i18n.T("motion.pcView"), "outline", "pick-file:mo-pc-view", "")))
-	list.WriteString(`<div id=mo-render-prog>` + u.moRenderProgHTML() + `</div>`)
-	list.WriteString(u.moAvatarHTML())
-
 	playLbl := "▶ " + i18n.T("player.play")
 	if playing {
 		playLbl = "⏸ " + i18n.T("player.pause")
 	}
-	detail := `<div id=mo-view data-actpos="mo-orbit" data-actwheel="mo-zoom">` + u.moViewHTML() + `</div>` +
-		`<div class=mo-hint>` + html.EscapeString(i18n.T("motion.studioHint")) + `</div>` +
-		`<div id=mo-time class=mo-info>` + html.EscapeString(i18n.T("motion.timeDisplay", i18n.A{"cur": fmt.Sprintf("%.1f", t), "dur": fmt.Sprintf("%.1f", dur)})) + `</div>` +
-		slider(i18n.T("motion.scrub"), "mo-scrub", 0, 1000, 1, scrubVal(t, dur), "") +
-		btnRow(btn(playLbl, "go", "mo-play", ""), btn("⏹ "+i18n.T("player.stop"), "outline", "mo-stop", "")) +
+	if pcDensity == "" {
+		pcDensity = "med"
+	}
+	st := moStudioSt{
+		Recs: make([]moRecRow, 0, len(names)), Empty: i18n.T("motion.noRecordings"),
+		RefreshLbl: i18n.T("common.refresh"), ExportLbl: i18n.T("motion.exportAnim"),
+		RenderLbl: i18n.T("motion.renderVideo"), PCViewLbl: i18n.T("motion.pcView"),
+		RenderProg: u.moRenderProgHTML(), Avatar: u.moAvatarState(),
+		PreviewLbl: i18n.T("motion.preview"), Tip: tipTopic("motion-studio"),
+		View: u.moViewHTML(), Hint: i18n.T("motion.studioHint"),
+		Time:    i18n.T("motion.timeDisplay", i18n.A{"cur": fmt.Sprintf("%.1f", t), "dur": fmt.Sprintf("%.1f", dur)}),
+		Scrub:   moSlide(i18n.T("motion.scrub"), "mo-scrub", 0, 1000, 1, scrubVal(t, dur), ""),
+		PlayLbl: playLbl, StopLbl: "⏹ " + i18n.T("player.stop"),
+		Loop:  moTog(i18n.T("motion.loop"), "mo-loop", loop),
+		OSC:   moTog(i18n.T("motion.oscTrackers"), "mo-osc", oscOn),
+		VMC:   moTog(i18n.T("motion.streamVmc"), "mo-vmc", vmcOn),
+		Model: moTog(i18n.T("motion.showAvatarModel"), "mo-model", modelOn),
+		// model-only rows (moPhysRow / moCompareRows / moPointCloudRows parity)
+		ModelOn: modelOn, HasDyn: hasDyn, PhysNote: i18n.T("motion.noPhysBones"),
+		Phys:  moTog(i18n.T("motion.avatarPhysics"), "mo-phys", physOn),
+		Rest:  moTog(i18n.T("motion.restPose"), "mo-rest", restPose),
+		Marks: moTog(i18n.T("motion.overlayTrackerPoints"), "mo-marks", marks),
+		PC:    moTog(i18n.T("motion.pointCloud"), "mo-pc", pcOn),
+		PCOn:  pcOn,
+		// never leave Rows nil: Go marshals nil slices to JSON null, the Zig slice parse
+		// then fails and the whole tab silently falls back to the Go renderer.
+		PCDensity:   selState{Rows: []selRow{}},
+		PCColor:     moTog(i18n.T("motion.pcColor"), "mo-pc-color", pcColor),
+		PCNote:      i18n.T("motion.pcNote"),
+		PCExportLbl: i18n.T("motion.pcExport"),
+		VMCHelp:     i18n.T("motion.vmcHelp", i18n.A{"addr": u.svc.Cfg.Features.VROverlay.ResolvedVMCAddr()}),
+	}
+	for _, n := range names {
+		st.Recs = append(st.Recs, moRecRow{Name: n, Act: "mo-rec-sel:" + n, Sel: n == recName})
+	}
+	if modelOn && pcOn { // the density picker only exists while the cloud is on (ss registration too)
+		st.PCDensity = moResolveSelect("mo-pc-density", i18n.T("motion.pcDensity"), "mo-pc-density:", pcDensity, func() []ssOpt {
+			return []ssOpt{
+				{Val: "low", Label: i18n.T("motion.pcLow"), Sub: i18n.T("motion.pcLowSub")},
+				{Val: "med", Label: i18n.T("motion.pcMed"), Sub: i18n.T("motion.pcMedSub")},
+				{Val: "high", Label: i18n.T("motion.pcHigh"), Sub: i18n.T("motion.pcHighSub")},
+				{Val: "ultra", Label: i18n.T("motion.pcUltra"), Sub: i18n.T("motion.pcUltraSub")},
+			}
+		})
+	}
+	return st
+}
+
+// moResolveSelect registers + resolves a rich-row smart select into pure render state
+// (resolveSelectBox's [][2]string form can't carry ssOpt.Sub, which the density +
+// avatar pickers need). Tab-prefixed: keeps the fleet's parallel tab work collision-free.
+func moResolveSelect(id, label, act, cur string, opts func() []ssOpt) selState {
+	ssRegister(id, act, cur, opts)
+	s := ssResolve(id)
+	s.Label = label
+	return s
+}
+
+// moStudioHTML is the pure motion-studio renderer.
+func moStudioHTML(st moStudioSt) string {
+	var list strings.Builder
+	list.WriteString(`<div class=mo-list>`)
+	for _, r := range st.Recs {
+		cls := "irow"
+		if r.Sel {
+			cls += " selected"
+		}
+		list.WriteString(`<div class="` + cls + `" data-act="` + html.EscapeString(r.Act) + `"><div class=irow-main><div class=irow-title>` +
+			html.EscapeString(r.Name) + `</div></div></div>`)
+	}
+	if len(st.Recs) == 0 {
+		list.WriteString(emptyState(st.Empty))
+	}
+	list.WriteString(`</div>`)
+	list.WriteString(btnRow(
+		btn(st.RefreshLbl, "ghost", "mo-rec-refresh", ""),
+		btn(st.ExportLbl, "outline", "pick-save:anim:mo-export", ""),
+		btn(st.RenderLbl, "outline", "mo-render", ""),
+		// View any exported .rmpc in the raw-WebGL point-cloud viewer (needs no avatar loaded).
+		btn(st.PCViewLbl, "outline", "pick-file:mo-pc-view", "")))
+	list.WriteString(`<div id=mo-render-prog>` + st.RenderProg + `</div>`)
+	list.WriteString(moAvatarHTML(st.Avatar))
+
+	detail := `<div id=mo-view data-actpos="mo-orbit" data-actwheel="mo-zoom">` + st.View + `</div>` +
+		`<div class=mo-hint>` + html.EscapeString(st.Hint) + `</div>` +
+		`<div id=mo-time class=mo-info>` + html.EscapeString(st.Time) + `</div>` +
+		slider(st.Scrub.Label, st.Scrub.Act, st.Scrub.Min, st.Scrub.Max, st.Scrub.Step, st.Scrub.Val, st.Scrub.Unit) +
+		btnRow(btn(st.PlayLbl, "go", "mo-play", ""), btn(st.StopLbl, "outline", "mo-stop", "")) +
 		`<div class=mo-toggles>` +
-		toggleRow(i18n.T("motion.loop"), "mo-loop", loop) +
-		toggleRow(i18n.T("motion.oscTrackers"), "mo-osc", oscOn) +
-		toggleRow(i18n.T("motion.streamVmc"), "mo-vmc", vmcOn) +
-		toggleRow(i18n.T("motion.showAvatarModel"), "mo-model", modelOn) +
-		moPhysRow(modelOn, physOn, hasDyn) +
-		moCompareRows(modelOn, restPose, marks) +
-		moPointCloudRows(modelOn, pcOn, pcColor, pcDensity) +
+		moToggleHTML(st.Loop) + moToggleHTML(st.OSC) + moToggleHTML(st.VMC) + moToggleHTML(st.Model) +
+		moPhysRow(st) + moCompareRows(st) + moPointCloudRows(st) +
 		`</div>` +
-		`<p class=page-sub>` + html.EscapeString(i18n.T("motion.vmcHelp", i18n.A{"addr": u.svc.Cfg.Features.VROverlay.ResolvedVMCAddr()})) + `</p>`
-	head := `<div class=card-label>` + html.EscapeString(i18n.T("motion.preview")) + tipTopic("motion-studio") + `</div>`
+		`<p class=page-sub>` + html.EscapeString(st.VMCHelp) + `</p>`
+	head := `<div class=card-label>` + html.EscapeString(st.PreviewLbl) + st.Tip + `</div>`
 	return masterDetail(list.String(), head+detail)
 }
+
+// moToggleHTML renders one resolved toggle through the shared switch primitive.
+func moToggleHTML(t moToggleSt) string { return toggleRow(t.Label, t.Act, t.On) }
 
 // moPhysRow: avatar-physics toggle, shown only with the model on. Chain source:
 // <avatar>.physbones.json sidecar (exported from Unity - real PhysBone/DynamicBone
 // params) when present, otherwise name-heuristic detection (hair/tail/ears/…).
-func moPhysRow(modelOn, physOn, hasDyn bool) string {
-	if !modelOn {
+func moPhysRow(st moStudioSt) string {
+	if !st.ModelOn {
 		return ""
 	}
-	lbl := i18n.T("motion.avatarPhysics")
-	if !hasDyn {
-		return `<div class=mo-info>` + i18n.T("motion.noPhysBones") + `</div>`
+	if !st.HasDyn {
+		return `<div class=mo-info>` + st.PhysNote + `</div>`
 	}
-	return toggleRow(lbl, "mo-phys", physOn)
+	return moToggleHTML(st.Phys)
 }
 
 // moCompareRows: pose-debug toggles, shown only with the model on. Rest pose renders the
 // mesh at its authored A/T reference (the take's tracker points still draw, so retarget
 // alignment is inspectable); the marker overlay draws the raw take points over the posed mesh.
-func moCompareRows(modelOn, restPose, marks bool) string {
-	if !modelOn {
+func moCompareRows(st moStudioSt) string {
+	if !st.ModelOn {
 		return ""
 	}
-	return toggleRow(i18n.T("motion.restPose"), "mo-rest", restPose) +
-		toggleRow(i18n.T("motion.overlayTrackerPoints"), "mo-marks", marks)
+	return moToggleHTML(st.Rest) + moToggleHTML(st.Marks)
 }
 
 // moPointCloudRows: point-cloud preview toggle + (when on) export density / colour / .rmpc
 // export. Shown only with the model on (the cloud IS the posed mesh's surface).
-func moPointCloudRows(modelOn, pcOn, pcColor bool, density string) string {
-	if !modelOn {
+func moPointCloudRows(st moStudioSt) string {
+	if !st.ModelOn {
 		return ""
 	}
-	out := toggleRow(i18n.T("motion.pointCloud"), "mo-pc", pcOn)
-	if !pcOn {
+	out := moToggleHTML(st.PC)
+	if !st.PCOn {
 		return out
 	}
-	if density == "" {
-		density = "med"
-	}
-	out += smartSelect("mo-pc-density", i18n.T("motion.pcDensity"), "mo-pc-density:", density, func() []ssOpt {
-		return []ssOpt{
-			{Val: "low", Label: i18n.T("motion.pcLow"), Sub: i18n.T("motion.pcLowSub")},
-			{Val: "med", Label: i18n.T("motion.pcMed"), Sub: i18n.T("motion.pcMedSub")},
-			{Val: "high", Label: i18n.T("motion.pcHigh"), Sub: i18n.T("motion.pcHighSub")},
-			{Val: "ultra", Label: i18n.T("motion.pcUltra"), Sub: i18n.T("motion.pcUltraSub")},
-		}
-	}) +
-		toggleRow(i18n.T("motion.pcColor"), "mo-pc-color", pcColor) +
-		`<div class=mo-info>` + html.EscapeString(i18n.T("motion.pcNote")) + `</div>` +
-		btnRow(btn(i18n.T("motion.pcExport"), "primary", "pick-save:rmpc:mo-pc-export", ""))
-	return out
+	return out + selHTML(st.PCDensity) + moToggleHTML(st.PCColor) +
+		`<div class=mo-info>` + html.EscapeString(st.PCNote) + `</div>` +
+		btnRow(btn(st.PCExportLbl, "primary", "pick-save:rmpc:mo-pc-export", ""))
 }
 
 func scrubVal(t, dur float64) float64 {
@@ -253,19 +509,30 @@ func scrubVal(t, dur float64) float64 {
 	return 1000 * t / dur
 }
 
-// moAvatarHTML: active VRM + peer-synced avatar management (mesh preview lands with C5).
-func (u *UI) moAvatarHTML() string {
+// moAvatarState: active VRM + peer-synced avatar management (mesh preview lands with C5).
+func (u *UI) moAvatarState() moAvatarSt {
 	cur := u.svc.Cfg.Features.VRCTools.AvatarVRM
 	curLbl := i18n.T("motion.noneLabel")
 	if cur != "" {
 		curLbl = filepath.Base(cur)
 	}
 	avatarOpts := u.moAvatarOpts() // cached snapshot; scans off-thread on first need + re-patches
-	body := smartSelect("mo-avatar", i18n.T("motion.activeAvatar"), "mo-avatar-set", cur, func() []ssOpt { return avatarOpts }) +
-		btnRow(btn(i18n.T("motion.importAvatar"), "outline", "pick-file:mo-avatar-import", ""),
-			btn(i18n.T("motion.syncNow"), "ghost", "mo-avatar-sync", "")) +
-		`<div class=mo-info>` + html.EscapeString(i18n.T("motion.avatarCurrentInfo", i18n.A{"name": curLbl})) + `</div>`
-	return `<div class=mo-avatars><div class=card-label>` + html.EscapeString(i18n.T("motion.avatarLabel")) + `</div>` + body + `</div>`
+	return moAvatarSt{
+		Label: i18n.T("motion.avatarLabel"),
+		Sel: moResolveSelect("mo-avatar", i18n.T("motion.activeAvatar"), "mo-avatar-set", cur,
+			func() []ssOpt { return avatarOpts }),
+		ImportLbl: i18n.T("motion.importAvatar"), SyncLbl: i18n.T("motion.syncNow"),
+		Info: i18n.T("motion.avatarCurrentInfo", i18n.A{"name": curLbl}),
+	}
+}
+
+// moAvatarHTML is the pure avatar-block renderer.
+func moAvatarHTML(st moAvatarSt) string {
+	return `<div class=mo-avatars><div class=card-label>` + html.EscapeString(st.Label) + `</div>` +
+		selHTML(st.Sel) +
+		btnRow(btn(st.ImportLbl, "outline", "pick-file:mo-avatar-import", ""),
+			btn(st.SyncLbl, "ghost", "mo-avatar-sync", "")) +
+		`<div class=mo-info>` + html.EscapeString(st.Info) + `</div></div>`
 }
 
 // moAvatarOpts returns the cached avatar-picker options. config.ListAvatars (os.ReadDir +

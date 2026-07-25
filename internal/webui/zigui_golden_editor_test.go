@@ -193,9 +193,8 @@ func edFixtures() map[string]edViewState {
 	escaping.Layers.Empty = `e&mpty"<>'`
 	escaping.Layers.Actions = edActionsState{
 		Up: "↑", Down: "↓", Group: `G&roup"`, Ungroup: `U&ngroup'`, Delete: `D&el<>`,
-		HasSel: true,
-		Opacity: uiSlider{Label: `O&pac"<>'`, DL: `o&pac"<>'`, Act: `ed-opacity&"`,
-			Min: "0", Max: "1", Step: "0.01", Val: "0.5", Unit: `u&"'`, UnitJS: `"u\u0026\"'"`},
+		HasSel:  true,
+		Opacity: newSlider(`O&pac"<>'`, `ed-opacity&"`, 0, 1, 0.01, 0.5, `u&"'`),
 		Blend: selState{ID: "ed-blend", Label: `B&lend"<>'`, CurLabel: `s&creen"`, Open: true,
 			Filter: `f&"<>'`, Rows: []selRow{{Val: `v&"'<>`, Label: `L&"'<>`, Cur: true}}},
 	}

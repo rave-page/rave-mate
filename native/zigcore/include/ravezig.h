@@ -46,6 +46,35 @@ void rz_wave_columns(const uint8_t *peaks, size_t n, size_t cols, uint8_t *out);
 void rz_wave_env(const uint8_t *peaks, size_t n, double dur, double img_pps,
                  double *out, size_t out_len);
 
+/* WAV/AIFF container decoders — Go owns file I/O, Zig owns parse + frame math +
+ * PCM→f32. Open: rz_{wav,aiff}dec_new → feed(NULL,0) → while ret==1 read
+ * need_len bytes at need_off, feed (short feed = truncated file); 0 = header
+ * parsed (info valid), -1 = malformed. Read: plan → read bytes → decode.
+ * Seek: seek_off (pure) then set_pos once the caller's file seek succeeded. */
+typedef struct RzPcmDec RzPcmDec;
+typedef struct {
+  int64_t sample_rate;
+  int64_t total_frames;
+  uint64_t data_start;   /* file offset of the first sample byte */
+  int32_t channels;
+  int32_t bits;
+  int32_t block_align;
+  uint32_t flags;        /* 1 = float samples, 2 = big-endian samples */
+} RzPcmInfo;
+RzPcmDec *rz_wavdec_new(void);
+RzPcmDec *rz_aiffdec_new(void);
+void rz_pcmdec_free(RzPcmDec *d);
+int32_t rz_pcmdec_feed(RzPcmDec *d, const uint8_t *buf, size_t len,
+                       uint64_t *need_off, uint64_t *need_len);
+void rz_pcmdec_info(const RzPcmDec *d, RzPcmInfo *out);
+/* Clamps frame to [0,total]; *clamped gets the frame; returns byte offset. */
+uint64_t rz_pcmdec_seek_off(const RzPcmDec *d, int64_t frame, int64_t *clamped);
+void rz_pcmdec_set_pos(RzPcmDec *d, int64_t frame);
+/* Frames to read next (0 = EOF); *need_bytes = bytes to read at current pos. */
+int64_t rz_pcmdec_plan(const RzPcmDec *d, size_t dst_cap_samples, uint64_t *need_bytes);
+/* Decodes len/block_align frames into dst (interleaved f32), advances pos. */
+int64_t rz_pcmdec_decode(RzPcmDec *d, const uint8_t *buf, size_t len, float *dst);
+
 #ifdef __cplusplus
 }
 #endif

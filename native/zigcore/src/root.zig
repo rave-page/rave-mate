@@ -8,6 +8,7 @@ const peaks = @import("peaks.zig");
 const bands = @import("bands.zig");
 const convert = @import("convert.zig");
 const wave = @import("wave.zig");
+const pcmdec = @import("pcmdec.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -104,6 +105,57 @@ export fn rz_wave_env(peaks_in: [*]const u8, n: usize, dur: f64, img_pps: f64, o
     wave.waveEnv(peaks_in[0..n], dur, img_pps, out[0..out_len]);
 }
 
+// ── WAV/AIFF container decoders (P2) — Go owns file I/O, Zig owns parsing ────
+// Open protocol: rz_{wav,aiff}dec_new → feed(NULL,0) → while ret==1 read
+// need_len bytes at file offset need_off and feed them; 0 = header parsed
+// (info valid), -1 = malformed. Then plan/read/decode per block; seek via
+// seek_off (pure) + set_pos (commit after the caller's file seek succeeded).
+
+export fn rz_wavdec_new() ?*pcmdec.Dec {
+    const d = alloc.create(pcmdec.Dec) catch return null;
+    d.* = pcmdec.Dec.init(.wav);
+    return d;
+}
+
+export fn rz_aiffdec_new() ?*pcmdec.Dec {
+    const d = alloc.create(pcmdec.Dec) catch return null;
+    d.* = pcmdec.Dec.init(.aiff);
+    return d;
+}
+
+export fn rz_pcmdec_free(d: *pcmdec.Dec) void {
+    alloc.destroy(d);
+}
+
+export fn rz_pcmdec_feed(d: *pcmdec.Dec, buf: ?[*]const u8, len: usize, need_off: *u64, need_len: *u64) i32 {
+    const slice: []const u8 = if (buf) |p| p[0..len] else &.{};
+    const st = d.feed(slice);
+    need_off.* = d.need_off;
+    need_len.* = d.need_len;
+    return @intFromEnum(st);
+}
+
+export fn rz_pcmdec_info(d: *const pcmdec.Dec, out: *pcmdec.CInfo) void {
+    d.info(out);
+}
+
+export fn rz_pcmdec_seek_off(d: *const pcmdec.Dec, frame: i64, clamped: *i64) u64 {
+    return d.seekOff(frame, clamped);
+}
+
+export fn rz_pcmdec_set_pos(d: *pcmdec.Dec, frame: i64) void {
+    d.cur = frame;
+}
+
+export fn rz_pcmdec_plan(d: *const pcmdec.Dec, dst_cap_samples: usize, need_bytes: *u64) i64 {
+    return d.plan(dst_cap_samples, need_bytes);
+}
+
+export fn rz_pcmdec_decode(d: *pcmdec.Dec, buf: ?[*]const u8, len: usize, dst: [*]f32) i64 {
+    const slice: []const u8 = if (buf) |p| p[0..len] else &.{};
+    return d.decode(slice, dst);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;
@@ -111,4 +163,5 @@ test {
     _ = bands;
     _ = convert;
     _ = wave;
+    _ = pcmdec;
 }

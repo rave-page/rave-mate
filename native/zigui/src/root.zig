@@ -8,6 +8,9 @@ const std = @import("std");
 const html = @import("html.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
+const vrchat = @import("vrchat.zig");
+const vrcgroups = @import("vrcgroups.zig");
+const worlds = @import("worlds.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -53,6 +56,100 @@ export fn rz_ui_render_logs_lines(state_json: ?[*]const u8, len: usize, out_len:
     return renderJSON(logs.Lines, logs.renderLines, state_json, len, out_len);
 }
 
+// --- motion + live (fleet: live batch) ---
+
+const motion = @import("motion.zig");
+
+export fn rz_ui_render_motion(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_motion_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(motion.State, motion.renderBody, state_json, len, out_len);
+}
+
+const live = @import("live.zig");
+
+export fn rz_ui_render_live(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(live.State, live.render, state_json, len, out_len);
+}
+
+/// Render one live-tab fragment (the ~1 Hz tickPatch targets). kind selects the
+/// fragment + its state type: transport|np|status|decks|signals|cockpit|link|graph|perf|
+/// strip ("graph" serves both #live-net and #live-tim). Unknown kind → NULL (Go falls
+/// back). One dispatch export beats ten near-identical ones on the C ABI surface.
+export fn rz_ui_render_live_frag(kind: ?[*]const u8, kind_len: usize, state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    const kp = kind orelse return null;
+    if (kind_len == 0) return null;
+    const k = kp[0..kind_len];
+    if (std.mem.eql(u8, k, "transport")) return renderJSON(live.Transport, live.renderTransport, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "np")) return renderJSON(live.NP, live.renderNP, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "status")) return renderJSON(live.Status, live.renderStatus, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "decks")) return renderJSON(live.Decks, live.renderDecks, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "signals")) return renderJSON(live.Signals, live.renderSignals, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "cockpit")) return renderJSON(live.Cockpit, live.renderCockpit, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "link")) return renderJSON(live.Link, live.renderLink, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "graph")) return renderJSON(live.Graph, live.renderGraph, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "perf")) return renderJSON(live.Perf, live.renderPerf, state_json, len, out_len);
+    if (std.mem.eql(u8, k, "strip")) return renderJSON(live.Strip, live.renderStrip, state_json, len, out_len);
+    return null;
+}
+
+test {
+    _ = motion;
+    _ = live;
+}
+
+// --- end motion + live ---
+
+// --- vrchat ---
+
+export fn rz_ui_render_vrchat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.State, vrchat.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Status, vrchat.renderStatus, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_editor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Editor, vrchat.renderEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_campaths(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Campaths, vrchat.renderCampaths, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_photos(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrchat.Photos, vrchat.renderPhotos, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vrcgroups(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(vrcgroups.State, vrcgroups.render, state_json, len, out_len);
+}
+
+// --- worlds ---
+
+export fn rz_ui_render_worlds(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.State, worlds.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_linkhint(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Hint, worlds.renderHint, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_github(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.GitHub, worlds.renderGitHub, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_status(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Status, worlds.renderStatus, state_json, len, out_len);
+}
+
+export fn rz_ui_render_worlds_unityrows(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(worlds.Unity, worlds.renderUnityRows, state_json, len, out_len);
+}
+
 /// Free a buffer returned by an rz_ui_render_* call (len = its *out_len).
 export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
     const p = ptr orelse return;
@@ -64,6 +161,9 @@ test {
     _ = html;
     _ = appgroups;
     _ = logs;
+    _ = vrchat;
+    _ = vrcgroups;
+    _ = worlds;
     _ = @import("components.zig");
 }
 
@@ -84,6 +184,45 @@ test "renderJSON end-to-end via export" {
 test "bad JSON returns null" {
     var n: usize = 0;
     try std.testing.expect(rz_ui_render_appgroups("{nope", 5, &n) == null);
+}
+
+// --- midi ---
+
+const midimon = @import("midimon.zig");
+
+export fn rz_ui_render_midimon(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.State, midimon.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midimon_rows(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Lines, midimon.renderRows, state_json, len, out_len);
+}
+
+export fn rz_ui_render_miditrace(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Trace, midimon.renderTrace, state_json, len, out_len);
+}
+
+const midictl = @import("midictl.zig");
+
+export fn rz_ui_render_midictl(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.State, midictl.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_active(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.Active, midictl.renderActive, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_stat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl_ctls.PortStat, midictl_ctls.renderPortStat, state_json, len, out_len);
+}
+
+const midictl_ctls = @import("midictl_ctls.zig");
+
+test {
+    _ = midimon;
+    _ = midictl;
+    _ = midictl_ctls;
+    _ = @import("midictl_uimap.zig");
 }
 
 // --- media ---

@@ -1,17 +1,13 @@
 package webui
 
-import (
-	"fmt"
-	"html"
-	"strings"
-)
+import "strings"
 
 // Reusable control state for the Zig-migrated media-batch tabs (overlays, twitch,
 // editor): the shared components.go primitives resolved to plain JSON-able state, so
 // the Go renderer and native/zigui/src/components.zig render the same bytes from the
 // same input. Every `dl` field is the Go-resolved strings.ToLower(label) (Unicode
-// lowercasing stays in Go); html() delegates to the components.go primitive so the
-// markup has exactly ONE Go source.
+// lowercasing stays in Go) and is AUTHORITATIVE for both renderers - html() delegates
+// to the caller-resolved *DL primitives, so the markup has exactly ONE Go source.
 
 // uiBtn is a btn() call as state.
 type uiBtn struct {
@@ -60,7 +56,7 @@ func newField(label, act, value, inputType string) uiField {
 	return uiField{Label: label, DL: strings.ToLower(label), Act: act, Value: value, Type: inputType}
 }
 
-func (f uiField) html() string { return fieldEx(f.Label, f.Act, f.Value, f.Type, f.PH, "") }
+func (f uiField) html() string { return fieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, "") }
 
 // uiKV is a kv() call as state.
 type uiKV struct {
@@ -73,7 +69,7 @@ func newKV(label, value string) uiKV {
 	return uiKV{Label: label, DL: strings.ToLower(label), Value: value}
 }
 
-func (k uiKV) html() string { return kv(k.Label, k.Value) }
+func (k uiKV) html() string { return kvDL(k.Label, k.DL, k.Value) }
 
 // uiStatus is a statusRow() call as state. Variant "" = no row at all (the ovlStatus
 // "unknown kind" case, which renders nothing).
@@ -92,35 +88,39 @@ func (s uiStatus) html() string {
 	if s.Variant == "" {
 		return ""
 	}
-	return statusRow(s.Variant, s.Label, s.Line)
+	return statusRowDL(s.Variant, s.Label, s.DL, s.Line)
 }
 
-// uiSlider is a slider() call as state. The numbers arrive PRE-FORMATTED (trimNum) and
-// UnitJS pre-quoted (jsQuote): Go's shortest-round-trip float formatting has no
-// guaranteed Zig equivalent, so it stays on the Go side. html() therefore re-implements
-// slider() over strings - TestUISliderMatchesPrimitive pins the two together.
+// uiSlider is a slider() call as state. Numbers ride BOTH as floats (the Go path feeds
+// the shared slider() primitive unchanged) and pre-formatted via trimNum (the Zig path
+// never formats a float - Go's shortest-round-trip formatting has no guaranteed Zig
+// equivalent), so the golden gate catches any drift between the two. Field names +
+// json tags match native/zigui components.zig `Slider` (shared with the motion batch's
+// moSliderSt).
 type uiSlider struct {
-	Label  string `json:"label"`
-	DL     string `json:"dl"`
-	Act    string `json:"act"`
-	Min    string `json:"min"`
-	Max    string `json:"max"`
-	Step   string `json:"step"`
-	Val    string `json:"val"`
-	Unit   string `json:"unit"`
-	UnitJS string `json:"unitJs"` // jsQuote(Unit) - a JS string literal, inserted raw
+	Label  string  `json:"label"`
+	DL     string  `json:"dl"`
+	Act    string  `json:"act"`
+	Unit   string  `json:"unit"`
+	UnitJS string  `json:"unitJs"` // jsQuote(Unit) - a JS string literal, inserted raw
+	Min    float64 `json:"-"`
+	Max    float64 `json:"-"`
+	Step   float64 `json:"-"`
+	Val    float64 `json:"-"`
+	MinS   string  `json:"minS"`
+	MaxS   string  `json:"maxS"`
+	StepS  string  `json:"stepS"`
+	ValS   string  `json:"valS"`
 }
 
-func newSlider(label, act string, min, max, step, val float64, unit string) uiSlider {
-	return uiSlider{Label: label, DL: strings.ToLower(label), Act: act,
-		Min: trimNum(min), Max: trimNum(max), Step: trimNum(step), Val: trimNum(val),
-		Unit: unit, UnitJS: jsQuote(unit)}
+func newSlider(label, act string, minV, maxV, step, val float64, unit string) uiSlider {
+	return uiSlider{
+		Label: label, DL: strings.ToLower(label), Act: act, Unit: unit, UnitJS: jsQuote(unit),
+		Min: minV, Max: maxV, Step: step, Val: val,
+		MinS: trimNum(minV), MaxS: trimNum(maxV), StepS: trimNum(step), ValS: trimNum(val),
+	}
 }
 
 func (s uiSlider) html() string {
-	oninput := `oninput='var b=this.parentNode.querySelector(".slider-val");if(b)b.textContent=this.value+` + s.UnitJS + `'`
-	return fmt.Sprintf(`<label class=slider data-label=%s><span class=field-label>%s <b class=slider-val>%s%s</b></span>`+
-		`<input class=slider-input type=range min=%s max=%s step=%s value=%s data-act=%s data-value=%s %s></label>`,
-		attrQ(s.DL), html.EscapeString(s.Label), s.Val, html.EscapeString(s.Unit),
-		s.Min, s.Max, s.Step, s.Val, attrQ(s.Act), attrQ(s.Val), oninput)
+	return slider(s.Label, s.Act, s.Min, s.Max, s.Step, s.Val, s.Unit)
 }

@@ -12,34 +12,262 @@ import (
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/vrcperm"
+	"rave.page/mate/internal/zigui"
 )
 
-// renderWorlds is the Worlds tab at parity with the Fyne buildWorldSync: link/setup hint,
-// GitHub link control, permission lists (edit/publish/delete + friend/group-role pickers),
-// per-target publish status (URL/copy/open-gist), poster/events/now-playing channels with
-// publish toggles, and the Unity hand-off card. Status regions live under stable ids the
-// "worlds" live tick patches; editors/pickers render as modals. User-supplied strings never
-// go into data-act (fmt %q would mangle control chars / backslashes) - pickers index wsState.
+// Worlds tab at parity with the Fyne buildWorldSync: link/setup hint, GitHub link control,
+// permission lists (edit/publish/delete + friend/group-role pickers), per-target publish status
+// (URL/copy/open-gist), poster/events/now-playing channels with publish toggles, and the Unity
+// hand-off card. Status regions live under stable ids the "worlds" live tick patches;
+// editors/pickers render as modals. User-supplied strings never go into data-act (fmt %q would
+// mangle control chars / backslashes) - pickers index wsState.
+//
+// Zig-rendered (native/zigui/src/worlds.zig): the *State builders own everything impure (config,
+// GitHub session, publish status, off-thread Unity inspect cache, federation memo); the *HTML
+// renderers stay the Go fallback + golden reference (zigui_golden_worlds_test.go). The tick-patched
+// fragments (#world-linkhint, #world-gh, #world-st-<key>, #world-unity-rows) each export their own
+// renderer. Modal editors/pickers are separate surfaces and stay Go-rendered.
+
+// ── resolved render state (JSON → Zig) ──
+//
+// Prose fields the Go renderer inserted as source literals (ws-help paragraphs, card titles, the
+// add-list placeholder/submit label) stay UNESCAPED in both renderers - escaping them would change
+// the DOM (they carry apostrophes). They are trusted literals resolved here, never user input.
+
+// wsHintSt is a bare hint chip (#world-linkhint).
+type wsHintSt struct {
+	Tone string `json:"tone"`
+	Text string `json:"text"`
+}
+
+// wsGitHubSt is the compact GitHub link control (#world-gh). Mode ∈ {unavailable,linked,unlinked}.
+type wsGitHubSt struct {
+	Mode         string `json:"mode"`
+	Msg          string `json:"msg"` // hint text (unavailable/unlinked)
+	LinkedLabel  string `json:"linkedLabel"`
+	LinkedDL     string `json:"linkedDl"` // strings.ToLower(LinkedLabel)
+	Login        string `json:"login"`
+	LinkedHelp   string `json:"linkedHelp"`
+	UnlinkLabel  string `json:"unlinkLabel"`
+	UnlinkedHelp string `json:"unlinkedHelp"`
+	DeviceLabel  string `json:"deviceLabel"`
+	PatLabel     string `json:"patLabel"`
+}
+
+// wsStatusSt is one publish target's live status (#world-st-<key>).
+type wsStatusSt struct {
+	Tone      string `json:"tone"`
+	Line      string `json:"line"`
+	URL       string `json:"url"` // "" = nothing published yet (no URL block)
+	CopyLabel string `json:"copyLabel"`
+	OpenLabel string `json:"openLabel"`
+	HTMLURL   string `json:"htmlUrl"` // "" = no open-gist button
+}
+
+// wsListRowSt is one permission list.
+type wsListRowSt struct {
+	Key     string     `json:"key"` // status-region key ("list:<id>"; emitted raw, Go parity)
+	Name    string     `json:"name"`
+	Entries string     `json:"entries"` // "N entries"
+	EditAct string     `json:"editAct"`
+	PubAct  string     `json:"pubAct"`
+	DelAct  string     `json:"delAct"`
+	Status  wsStatusSt `json:"status"`
+}
+
+// wsListsSt is the permission-lists card.
+type wsListsSt struct {
+	Help           string        `json:"help"`
+	Empty          string        `json:"empty"` // "" = at least one list
+	Rows           []wsListRowSt `json:"rows,omitempty"`
+	EditLabel      string        `json:"editLabel"`
+	PubLabel       string        `json:"pubLabel"`
+	DelLabel       string        `json:"delLabel"`
+	AddPlaceholder string        `json:"addPlaceholder"`
+	AddLabel       string        `json:"addLabel"`
+}
+
+// wsPosterRowSt is one poster slot.
+type wsPosterRowSt struct {
+	Title   string `json:"title"` // "n. caption"
+	Sub     string `json:"sub"`   // allowlist warning; "" = none
+	EditAct string `json:"editAct"`
+	DelAct  string `json:"delAct"`
+}
+
+// wsPostersSt is the poster-billboards card.
+type wsPostersSt struct {
+	CardTitle   string          `json:"cardTitle"`
+	AddLabel    string          `json:"addLabel"`
+	PubLabel    string          `json:"pubLabel"`
+	ToggleLabel string          `json:"toggleLabel"`
+	ToggleDL    string          `json:"toggleDl"`
+	ToggleOn    bool            `json:"toggleOn"`
+	Help        string          `json:"help"`
+	Empty       string          `json:"empty"` // "" = at least one poster
+	Rows        []wsPosterRowSt `json:"rows,omitempty"`
+	EditLabel   string          `json:"editLabel"`
+	DelLabel    string          `json:"delLabel"`
+	Status      wsStatusSt      `json:"status"`
+}
+
+// wsEventsSt is the events-board card.
+type wsEventsSt struct {
+	CardTitle   string     `json:"cardTitle"`
+	PubLabel    string     `json:"pubLabel"`
+	ToggleLabel string     `json:"toggleLabel"`
+	ToggleDL    string     `json:"toggleDl"`
+	ToggleOn    bool       `json:"toggleOn"`
+	Help        string     `json:"help"`
+	Status      wsStatusSt `json:"status"`
+}
+
+// wsNowPlayingSt is the live DJ-card channel.
+type wsNowPlayingSt struct {
+	CardTitle   string     `json:"cardTitle"`
+	PubLabel    string     `json:"pubLabel"`
+	ToggleLabel string     `json:"toggleLabel"`
+	ToggleDL    string     `json:"toggleDl"`
+	ToggleOn    bool       `json:"toggleOn"`
+	LinkLabel   string     `json:"linkLabel"`
+	LinkDL      string     `json:"linkDl"`
+	Link        string     `json:"link"`
+	ImgLabel    string     `json:"imgLabel"`
+	ImgDL       string     `json:"imgDl"`
+	Img         string     `json:"img"`
+	ImgWarn     string     `json:"imgWarn"` // "" = host allowlisted / empty
+	Help        string     `json:"help"`
+	Status      wsStatusSt `json:"status"`
+}
+
+// wsUnityRowSt is one valid Unity project.
+type wsUnityRowSt struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+	Act  string `json:"act"`
+}
+
+// wsUnitySt is the Unity hand-off rows (#world-unity-rows). Mode ∈ {empty,loading,rows}.
+type wsUnitySt struct {
+	Mode       string         `json:"mode"`
+	Msg        string         `json:"msg"` // empty/loading text
+	WriteLabel string         `json:"writeLabel"`
+	Rows       []wsUnityRowSt `json:"rows,omitempty"`
+}
+
+// worldsState is the resolved render state for the Worlds tab.
+type worldsState struct {
+	Available   bool           `json:"available"`
+	Title       string         `json:"title"`
+	Sub         string         `json:"sub"`
+	Unavailable string         `json:"unavailable"`
+	LinkHint    wsHintSt       `json:"linkHint"`
+	SecGitHub   string         `json:"secGitHub"`
+	GH          wsGitHubSt     `json:"gh"`
+	SecLists    string         `json:"secLists"`
+	Lists       wsListsSt      `json:"lists"`
+	SecPosters  string         `json:"secPosters"`
+	Posters     wsPostersSt    `json:"posters"`
+	SecEvents   string         `json:"secEvents"`
+	Events      wsEventsSt     `json:"events"`
+	SecNP       string         `json:"secNp"`
+	NP          wsNowPlayingSt `json:"np"`
+	SecUnity    string         `json:"secUnity"`
+	UnityHelp   string         `json:"unityHelp"`
+	Unity       wsUnitySt      `json:"unity"`
+}
+
+// ── bridges ──
+
+// renderWorlds renders the Worlds tab (Zig when linked, Go otherwise).
 func (u *UI) renderWorlds() string {
-	if u.svc.WorldSync == nil {
-		return panel("Worlds", "") + emptyState("World Sync unavailable")
+	st := u.worldsState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderWorlds(stateJSON(st)); ok {
+			return h
+		}
 	}
-	var b strings.Builder
-	b.WriteString(panel("Worlds", "Feed VRChat worlds from gists - permission lists, poster billboards, events + a live now-playing card. Updated live, no world rebuild."))
-	b.WriteString(`<div id=world-linkhint>` + u.worldsLinkHintInner() + `</div>`)
-	b.WriteString(section("GitHub", `<div id=world-gh>`+u.worldsGitHubInner()+`</div>`))
-	b.WriteString(section("Permission lists", u.worldsListsCard()))
-	b.WriteString(section("Poster billboards", u.worldsPostersCard()))
-	b.WriteString(section("Upcoming events", u.worldsEventsCard()))
-	b.WriteString(section("Now playing", u.worldsNowPlayingCard()))
-	b.WriteString(section("Unity projects", u.worldsUnityCard()))
-	return b.String()
+	return worldsHTML(st)
 }
 
 // worldsLinkHintInner reports what still needs linking (GitHub / VRChat) for full function.
-// VRChat counts as linked when a PAIRED instance serves it (federation) - render reads the
-// memo only; a cold memo kicks an off-thread probe and the 1 Hz tick repaints this hint.
 func (u *UI) worldsLinkHintInner() string {
+	st := u.worldsLinkHintState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderWorldsLinkHint(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return wsHintHTML(st)
+}
+
+// worldsGitHubInner is the compact GitHub link control (device-code / PAT / unlink).
+func (u *UI) worldsGitHubInner() string {
+	st := u.worldsGitHubState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderWorldsGitHub(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return wsGitHubHTML(st)
+}
+
+// wsStatusInner renders one target's last publish outcome + URL copy / open-gist actions.
+func (u *UI) wsStatusInner(key, gistID, file string) string {
+	st := u.wsStatusState(key, gistID, file)
+	if zigui.Available() {
+		if h, ok := zigui.RenderWorldsStatus(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return wsStatusHTML(st)
+}
+
+// worldsUnityRowsInner lists valid Unity projects from the cached inspects.
+func (u *UI) worldsUnityRowsInner() string {
+	st := u.worldsUnityState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderWorldsUnityRows(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return wsUnityRowsHTML(st)
+}
+
+// ── state builders ──
+
+// worldsState resolves config + GitHub session + publish status + Unity inspects into render state.
+func (u *UI) worldsState() worldsState {
+	st := worldsState{
+		Available:   u.svc.WorldSync != nil,
+		Title:       "Worlds",
+		Sub:         "Feed VRChat worlds from gists - permission lists, poster billboards, events + a live now-playing card. Updated live, no world rebuild.",
+		Unavailable: "World Sync unavailable",
+		SecGitHub:   "GitHub",
+		SecLists:    "Permission lists",
+		SecPosters:  "Poster billboards",
+		SecEvents:   "Upcoming events",
+		SecNP:       "Now playing",
+		SecUnity:    "Unity projects",
+		UnityHelp:   "Writes Assets/rave.page/WorldSync/sources.json into the project. In Unity: Tools → rave.page → World Sync lists the feeds, wires a VideoTXL Remote Whitelist, or copies URLs. Re-write after publishing a new list.",
+	}
+	if !st.Available {
+		return st
+	}
+	st.LinkHint = u.worldsLinkHintState()
+	st.GH = u.worldsGitHubState()
+	st.Lists = u.worldsListsState()
+	st.Posters = u.worldsPostersState()
+	st.Events = u.worldsEventsState()
+	st.NP = u.worldsNowPlayingState()
+	st.Unity = u.worldsUnityState()
+	return st
+}
+
+// worldsLinkHintState resolves the link-status chip. VRChat counts as linked when a PAIRED
+// instance serves it (federation) - reads the memo only; a cold memo kicks an off-thread probe
+// and the 1 Hz tick repaints this hint.
+func (u *UI) worldsLinkHintState() wsHintSt {
 	var missing []string
 	if u.svc.GitHub == nil || !u.svc.GitHub.SignedIn() {
 		missing = append(missing, "GitHub")
@@ -55,102 +283,104 @@ func (u *UI) worldsLinkHintInner() string {
 	}
 	if len(missing) == 0 {
 		if viaPeer != "" {
-			return hint("ok", "All links connected - VRChat via peer "+viaPeer)
+			return wsHintSt{Tone: "ok", Text: "All links connected - VRChat via peer " + viaPeer}
 		}
-		return hint("ok", "All links connected - ready to publish")
+		return wsHintSt{Tone: "ok", Text: "All links connected - ready to publish"}
 	}
-	return hint("warn", "Link missing: "+strings.Join(missing, " · "))
+	return wsHintSt{Tone: "warn", Text: "Link missing: " + strings.Join(missing, " · ")}
 }
 
-// worldsGitHubInner is the compact GitHub link control (device-code / PAT / unlink).
-func (u *UI) worldsGitHubInner() string {
+// worldsGitHubState resolves the GitHub link control.
+func (u *UI) worldsGitHubState() wsGitHubSt {
 	gh := u.svc.GitHub
-	if gh == nil {
-		return card("", "", hint("bad", "GitHub integration unavailable in this build"))
+	st := wsGitHubSt{
+		LinkedLabel: "Linked as",
+		LinkedHelp:  "Token sealed at rest (gist scope). Publish targets below write to your gists.",
+		UnlinkLabel: "Unlink",
+		UnlinkedHelp: "Link a GitHub account (gist scope only). Device code needs an OAuth app client id; " +
+			"pasting a classic PAT with 'gist' scope always works. Sealed at rest, never logged.",
+		DeviceLabel: "Link GitHub (device code)",
+		PatLabel:    "Paste token…",
 	}
-	if gh.SignedIn() {
-		return card("", btnRow(btn("Unlink", "outline", "world-gh-unlink", "")),
-			kv("Linked as", gh.Login())+`<p class=ws-help>Token sealed at rest (gist scope). Publish targets below write to your gists.</p>`)
+	st.LinkedDL = strings.ToLower(st.LinkedLabel)
+	switch {
+	case gh == nil:
+		st.Mode, st.Msg = "unavailable", "GitHub integration unavailable in this build"
+	case gh.SignedIn():
+		st.Mode, st.Login = "linked", gh.Login()
+	default:
+		st.Mode, st.Msg = "unlinked", "GitHub not linked - needed to publish gists"
 	}
-	body := hint("warn", "GitHub not linked - needed to publish gists") +
-		`<p class=ws-help>Link a GitHub account (gist scope only). Device code needs an OAuth app client id; pasting a classic PAT with 'gist' scope always works. Sealed at rest, never logged.</p>` +
-		btnRow(btn("Link GitHub (device code)", "primary", "world-gh-device", ""), btn("Paste token…", "outline", "world-gh-pat", ""))
-	return card("", "", body)
+	return st
 }
 
-// ── permission lists ──
+// wsStatusState resolves one publish target's last outcome + raw URL.
+func (u *UI) wsStatusState(key, gistID, file string) wsStatusSt {
+	ws := u.svc.WorldSync
+	st := wsStatusSt{Tone: "info", Line: "Not published yet.", CopyLabel: "Copy world URL", OpenLabel: "Open gist"}
+	if ws == nil {
+		return st
+	}
+	s := ws.Status(key)
+	st.URL, st.HTMLURL = ws.RawURLFor(gistID, file), s.HTMLURL
+	switch {
+	case s.Err != "":
+		st.Line, st.Tone = "Last publish: "+s.Err, "bad"
+	case st.URL != "" && !s.When.IsZero():
+		st.Line, st.Tone = "Published "+s.When.Format("15:04:05"), "ok"
+	case st.URL != "":
+		st.Line, st.Tone = "Ready", "ok"
+	}
+	if st.URL == "" {
+		st.HTMLURL = "" // no URL block ⇒ no buttons at all
+	}
+	return st
+}
 
-func (u *UI) worldsListsCard() string {
+// worldsListsState resolves the permission lists + their publish status.
+func (u *UI) worldsListsState() wsListsSt {
 	f := &u.svc.Cfg.Features.WorldSync
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
-	b.WriteString(`<p class=ws-help>Each list publishes one gist (allow.txt newline names + allow.json envelope) worlds poll - VideoTXL Remote Whitelist, ProTV, generic loaders. Group-role entries expand to current member names at publish time (Udon has no runtime group API).</p>`)
+	st := wsListsSt{
+		Help: "Each list publishes one gist (allow.txt newline names + allow.json envelope) worlds poll - " +
+			"VideoTXL Remote Whitelist, ProTV, generic loaders. Group-role entries expand to current member " +
+			"names at publish time (Udon has no runtime group API).",
+		Rows:      []wsListRowSt{},
+		EditLabel: "Edit", PubLabel: "Publish", DelLabel: "Delete",
+		AddPlaceholder: "list name (e.g. VIP video control)", AddLabel: "Add list",
+	}
 	if len(f.Lists) == 0 {
-		b.WriteString(emptyState("No permission lists yet - add one below"))
+		st.Empty = "No permission lists yet - add one below"
 	}
 	for i := range f.Lists {
 		l := &f.Lists[i]
-		trailing := btnRow(
-			btn("Edit", "outline", "world-list-edit:"+l.ID, ""),
-			btn("Publish", "explore", "ws-pub-list:"+l.Name, ""),
-			btn("Delete", "destructive", "world-list-del:"+l.ID, ""),
-		)
-		b.WriteString(`<div class=ws-listrow>`)
-		b.WriteString(itemRow(l.Name, fmt.Sprintf("%d entries", len(l.Entries)), trailing))
-		b.WriteString(u.wsStatusRow("list:"+l.ID, l.GistID, vrcperm.FileNames))
-		b.WriteString(`</div>`)
+		st.Rows = append(st.Rows, wsListRowSt{
+			Key:     "list:" + l.ID,
+			Name:    l.Name,
+			Entries: fmt.Sprintf("%d entries", len(l.Entries)),
+			EditAct: "world-list-edit:" + l.ID,
+			PubAct:  "ws-pub-list:" + l.Name,
+			DelAct:  "world-list-del:" + l.ID,
+			Status:  u.wsStatusState("list:"+l.ID, l.GistID, vrcperm.FileNames),
+		})
 	}
-	b.WriteString(`<form class=ws-addrow data-act=world-list-add>` +
-		`<input class=field-input name=name placeholder="list name (e.g. VIP video control)" autocomplete=off>` +
-		`<button class="rp-btn rp-btn--primary" type=submit>Add list</button></form>`)
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// wsStatusRow wraps a target's live publish status under a stable id (patched by the tick).
-func (u *UI) wsStatusRow(key, gistID, file string) string {
-	return `<div class=wsst id="world-st-` + key + `">` + u.wsStatusInner(key, gistID, file) + `</div>`
-}
-
-// wsStatusInner renders one target's last publish outcome + URL copy / open-gist actions.
-func (u *UI) wsStatusInner(key, gistID, file string) string {
-	ws := u.svc.WorldSync
-	st := ws.Status(key)
-	url := ws.RawURLFor(gistID, file)
-	line, tone := "Not published yet.", "info"
-	switch {
-	case st.Err != "":
-		line, tone = "Last publish: "+st.Err, "bad"
-	case url != "" && !st.When.IsZero():
-		line, tone = "Published "+st.When.Format("15:04:05"), "ok"
-	case url != "":
-		line, tone = "Ready", "ok"
-	}
-	var b strings.Builder
-	b.WriteString(`<div class=wsst-line>` + hint(tone, line) + `</div>`)
-	if url != "" {
-		b.WriteString(`<div class=wsst-url>` + html.EscapeString(url) + `</div>`)
-		btns := []string{btn("Copy world URL", "ghost", "copy", url)}
-		if st.HTMLURL != "" {
-			btns = append(btns, btn("Open gist", "outline", "open-url", st.HTMLURL))
-		}
-		b.WriteString(btnRow(btns...))
-	}
-	return b.String()
-}
-
-// ── poster billboards ──
-
-func (u *UI) worldsPostersCard() string {
+// worldsPostersState resolves the poster slots (+ image-host allowlist warnings).
+func (u *UI) worldsPostersState() wsPostersSt {
 	f := &u.svc.Cfg.Features.WorldSync
-	var b strings.Builder
-	trailing := btnRow(btn("Add poster", "outline", "world-poster-add", ""), btn("Publish now", "explore", "ws-pub-posters", ""))
-	b.WriteString(`<div class="rp-card">`)
-	b.WriteString(`<div class=card-head><span class=card-h>Billboards</span><span class=card-trail>` + trailing + `</span></div>`)
-	b.WriteString(toggleRow("Publish", "world-posters-on", f.PostersOn))
-	b.WriteString(`<p class=ws-help>Gist-fed image URL + caption + link for the poster prefab. VRChat images load through a separate host allowlist (i.imgur.com, *.github.io, i.ibb.co, …) - non-allowlisted hosts show text only.</p>`)
+	st := wsPostersSt{
+		CardTitle: "Billboards", AddLabel: "Add poster", PubLabel: "Publish now",
+		ToggleLabel: "Publish", ToggleOn: f.PostersOn,
+		Help: "Gist-fed image URL + caption + link for the poster prefab. VRChat images load through a " +
+			"separate host allowlist (i.imgur.com, *.github.io, i.ibb.co, …) - non-allowlisted hosts show text only.",
+		Rows:      []wsPosterRowSt{},
+		EditLabel: "Edit", DelLabel: "Delete",
+		Status: u.wsStatusState("posters", f.PostersGistID, vrcperm.FilePosters),
+	}
+	st.ToggleDL = strings.ToLower(st.ToggleLabel)
 	if len(f.Posters) == 0 {
-		b.WriteString(emptyState("No posters yet"))
+		st.Empty = "No posters yet"
 	}
 	for i := range f.Posters {
 		p := f.Posters[i]
@@ -165,80 +395,219 @@ func (u *UI) worldsPostersCard() string {
 		if p.Img != "" && !vrcperm.ImageHostAllowed(p.Img) {
 			sub = "⚠ image host not VRC-allowlisted"
 		}
-		trail := btnRow(btn("Edit", "outline", "world-poster-edit:"+strconv.Itoa(i), ""), btn("Delete", "destructive", "world-poster-del:"+strconv.Itoa(i), ""))
-		b.WriteString(itemRow(fmt.Sprintf("%d. %s", i+1, capt), sub, trail))
+		st.Rows = append(st.Rows, wsPosterRowSt{
+			Title:   fmt.Sprintf("%d. %s", i+1, capt),
+			Sub:     sub,
+			EditAct: "world-poster-edit:" + strconv.Itoa(i),
+			DelAct:  "world-poster-del:" + strconv.Itoa(i),
+		})
 	}
-	b.WriteString(u.wsStatusRow("posters", f.PostersGistID, vrcperm.FilePosters))
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// ── upcoming events ──
-
-func (u *UI) worldsEventsCard() string {
+// worldsEventsState resolves the events-board channel.
+func (u *UI) worldsEventsState() wsEventsSt {
 	f := &u.svc.Cfg.Features.WorldSync
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
-	b.WriteString(`<div class=card-head><span class=card-h>Events board</span><span class=card-trail>` + btn("Publish now", "explore", "ws-pub-events", "") + `</span></div>`)
-	b.WriteString(toggleRow("Publish", "world-events-on", f.EventsOn))
-	b.WriteString(`<p class=ws-help>Publishes title + date of your upcoming rave.page events into a gist the events-board prefab polls. Worlds see changes within the refresh interval + ~5 min gist CDN cache.</p>`)
-	b.WriteString(u.wsStatusRow("events", f.EventsGistID, vrcperm.FileEvents))
-	b.WriteString(`</div>`)
-	return b.String()
+	st := wsEventsSt{
+		CardTitle: "Events board", PubLabel: "Publish now",
+		ToggleLabel: "Publish", ToggleOn: f.EventsOn,
+		Help: "Publishes title + date of your upcoming rave.page events into a gist the events-board prefab " +
+			"polls. Worlds see changes within the refresh interval + ~5 min gist CDN cache.",
+		Status: u.wsStatusState("events", f.EventsGistID, vrcperm.FileEvents),
+	}
+	st.ToggleDL = strings.ToLower(st.ToggleLabel)
+	return st
 }
 
-// ── now playing ──
-
-func (u *UI) worldsNowPlayingCard() string {
+// worldsNowPlayingState resolves the live DJ-card channel.
+func (u *UI) worldsNowPlayingState() wsNowPlayingSt {
 	f := &u.svc.Cfg.Features.WorldSync
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
-	b.WriteString(`<div class=card-head><span class=card-h>Live DJ card</span><span class=card-trail>` + btn("Publish now", "explore", "ws-pub-nowplaying", "") + `</span></div>`)
-	b.WriteString(toggleRow("Publish while live", "world-np-on", f.NowPlayingOn))
-	b.WriteString(field("Link", "world-np-link", f.NowPlayingLink, "text"))
-	b.WriteString(field("Image", "world-np-img", f.NowPlayingImg, "text"))
+	st := wsNowPlayingSt{
+		CardTitle: "Live DJ card", PubLabel: "Publish now",
+		ToggleLabel: "Publish while live", ToggleOn: f.NowPlayingOn,
+		LinkLabel: "Link", Link: f.NowPlayingLink,
+		ImgLabel: "Image", Img: f.NowPlayingImg,
+		Help: "While a session is live, publishes the audible track (artist/title from the session hub's " +
+			"redacted output) at most once a minute. Worlds lag 1–6 min with the gist CDN cache.",
+		Status: u.wsStatusState("nowplaying", f.NowPlayingGistID, vrcperm.FileNowPlaying),
+	}
+	st.ToggleDL = strings.ToLower(st.ToggleLabel)
+	st.LinkDL, st.ImgDL = strings.ToLower(st.LinkLabel), strings.ToLower(st.ImgLabel)
 	if f.NowPlayingImg != "" && !vrcperm.ImageHostAllowed(f.NowPlayingImg) {
-		b.WriteString(`<div class=wsst-line>` + hint("bad", "Image host not on VRChat's image allowlist") + `</div>`)
+		st.ImgWarn = "Image host not on VRChat's image allowlist"
 	}
-	b.WriteString(`<p class=ws-help>While a session is live, publishes the audible track (artist/title from the session hub's redacted output) at most once a minute. Worlds lag 1–6 min with the gist CDN cache.</p>`)
-	b.WriteString(u.wsStatusRow("nowplaying", f.NowPlayingGistID, vrcperm.FileNowPlaying))
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// ── Unity hand-off ──
-
-func (u *UI) worldsUnityCard() string {
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
-	b.WriteString(`<p class=ws-help>Writes Assets/rave.page/WorldSync/sources.json into the project. In Unity: Tools → rave.page → World Sync lists the feeds, wires a VideoTXL Remote Whitelist, or copies URLs. Re-write after publishing a new list.</p>`)
-	b.WriteString(`<div id=world-unity-rows>` + u.worldsUnityRowsInner() + `</div>`) // stable id: the async inspect cache re-patches it
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
-// worldsUnityRowsInner lists valid Unity projects from the cached inspects (never stats on the
-// render goroutine). Shows a loading placeholder until the first async inspect lands. The write
-// action carries the project INDEX, not the path - a Windows path would break fmt %q in data-act.
-func (u *UI) worldsUnityRowsInner() string {
+// worldsUnityState resolves the cached Unity inspects into write-target rows.
+func (u *UI) worldsUnityState() wsUnitySt {
+	st := wsUnitySt{
+		Msg:        "No Unity projects configured (Settings ▸ Integrations ▸ Unity)",
+		WriteLabel: "Write source URLs",
+		Rows:       []wsUnityRowSt{},
+	}
 	projects := u.svc.Cfg.Features.Unity.Projects
-	empty := emptyState("No Unity projects configured (Settings ▸ Integrations ▸ Unity)")
 	if len(projects) == 0 {
-		return empty
+		st.Mode = "empty"
+		return st
 	}
 	infos, ready := u.worldsUnityInspects(projects)
 	if !ready {
-		return emptyState(i18n.T("remote.loading"))
+		st.Mode, st.Msg = "loading", i18n.T("remote.loading")
+		return st
 	}
-	var b strings.Builder
 	for i, dir := range projects {
 		if !infos[dir].Valid {
 			continue
 		}
-		b.WriteString(itemRow(infos[dir].Name, dir, btn("Write source URLs", "explore", "world-unity-write:"+strconv.Itoa(i), "")))
+		st.Rows = append(st.Rows, wsUnityRowSt{Name: infos[dir].Name, Dir: dir, Act: "world-unity-write:" + strconv.Itoa(i)})
 	}
-	if b.Len() == 0 {
-		return empty // projects configured but none are valid Unity projects
+	if len(st.Rows) == 0 {
+		st.Mode = "empty" // projects configured but none are valid Unity projects
+		return st
+	}
+	st.Mode = "rows"
+	return st
+}
+
+// ── pure renderers (golden reference; byte-identical to native/zigui/src/worlds.zig) ──
+
+func worldsHTML(st worldsState) string {
+	if !st.Available {
+		return panel(st.Title, "") + emptyState(st.Unavailable)
+	}
+	var b strings.Builder
+	b.WriteString(panel(st.Title, st.Sub))
+	b.WriteString(`<div id=world-linkhint>` + wsHintHTML(st.LinkHint) + `</div>`)
+	b.WriteString(section(st.SecGitHub, `<div id=world-gh>`+wsGitHubHTML(st.GH)+`</div>`))
+	b.WriteString(section(st.SecLists, wsListsHTML(st.Lists)))
+	b.WriteString(section(st.SecPosters, wsPostersHTML(st.Posters)))
+	b.WriteString(section(st.SecEvents, wsEventsHTML(st.Events)))
+	b.WriteString(section(st.SecNP, wsNowPlayingHTML(st.NP)))
+	b.WriteString(section(st.SecUnity, wsUnityHTML(st)))
+	return b.String()
+}
+
+func wsHintHTML(st wsHintSt) string { return hint(st.Tone, st.Text) }
+
+func wsGitHubHTML(st wsGitHubSt) string {
+	switch st.Mode {
+	case "unavailable":
+		return card("", "", hint("bad", st.Msg))
+	case "linked":
+		return card("", btnRow(btn(st.UnlinkLabel, "outline", "world-gh-unlink", "")),
+			kvDL(st.LinkedLabel, st.LinkedDL, st.Login)+`<p class=ws-help>`+st.LinkedHelp+`</p>`)
+	}
+	body := hint("warn", st.Msg) +
+		`<p class=ws-help>` + st.UnlinkedHelp + `</p>` +
+		btnRow(btn(st.DeviceLabel, "primary", "world-gh-device", ""), btn(st.PatLabel, "outline", "world-gh-pat", ""))
+	return card("", "", body)
+}
+
+// wsStatusRow wraps a target's live publish status under a stable id (patched by the tick).
+func wsStatusRow(key string, st wsStatusSt) string {
+	return `<div class=wsst id="world-st-` + key + `">` + wsStatusHTML(st) + `</div>`
+}
+
+func wsStatusHTML(st wsStatusSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=wsst-line>` + hint(st.Tone, st.Line) + `</div>`)
+	if st.URL != "" {
+		b.WriteString(`<div class=wsst-url>` + html.EscapeString(st.URL) + `</div>`)
+		btns := []string{btn(st.CopyLabel, "ghost", "copy", st.URL)}
+		if st.HTMLURL != "" {
+			btns = append(btns, btn(st.OpenLabel, "outline", "open-url", st.HTMLURL))
+		}
+		b.WriteString(btnRow(btns...))
+	}
+	return b.String()
+}
+
+func wsListsHTML(st wsListsSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	b.WriteString(`<p class=ws-help>` + st.Help + `</p>`)
+	if st.Empty != "" {
+		b.WriteString(emptyState(st.Empty))
+	}
+	for _, l := range st.Rows {
+		trailing := btnRow(
+			btn(st.EditLabel, "outline", l.EditAct, ""),
+			btn(st.PubLabel, "explore", l.PubAct, ""),
+			btn(st.DelLabel, "destructive", l.DelAct, ""),
+		)
+		b.WriteString(`<div class=ws-listrow>`)
+		b.WriteString(itemRow(l.Name, l.Entries, trailing))
+		b.WriteString(wsStatusRow(l.Key, l.Status))
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<form class=ws-addrow data-act=world-list-add>` +
+		`<input class=field-input name=name placeholder="` + st.AddPlaceholder + `" autocomplete=off>` +
+		`<button class="rp-btn rp-btn--primary" type=submit>` + st.AddLabel + `</button></form>`)
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func wsPostersHTML(st wsPostersSt) string {
+	var b strings.Builder
+	trailing := btnRow(btn(st.AddLabel, "outline", "world-poster-add", ""), btn(st.PubLabel, "explore", "ws-pub-posters", ""))
+	b.WriteString(`<div class="rp-card">`)
+	b.WriteString(`<div class=card-head><span class=card-h>` + st.CardTitle + `</span><span class=card-trail>` + trailing + `</span></div>`)
+	b.WriteString(toggleRowDL(st.ToggleLabel, st.ToggleDL, "world-posters-on", st.ToggleOn))
+	b.WriteString(`<p class=ws-help>` + st.Help + `</p>`)
+	if st.Empty != "" {
+		b.WriteString(emptyState(st.Empty))
+	}
+	for _, p := range st.Rows {
+		trail := btnRow(btn(st.EditLabel, "outline", p.EditAct, ""), btn(st.DelLabel, "destructive", p.DelAct, ""))
+		b.WriteString(itemRow(p.Title, p.Sub, trail))
+	}
+	b.WriteString(wsStatusRow("posters", st.Status))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func wsEventsHTML(st wsEventsSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	b.WriteString(`<div class=card-head><span class=card-h>` + st.CardTitle + `</span><span class=card-trail>` +
+		btn(st.PubLabel, "explore", "ws-pub-events", "") + `</span></div>`)
+	b.WriteString(toggleRowDL(st.ToggleLabel, st.ToggleDL, "world-events-on", st.ToggleOn))
+	b.WriteString(`<p class=ws-help>` + st.Help + `</p>`)
+	b.WriteString(wsStatusRow("events", st.Status))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func wsNowPlayingHTML(st wsNowPlayingSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	b.WriteString(`<div class=card-head><span class=card-h>` + st.CardTitle + `</span><span class=card-trail>` +
+		btn(st.PubLabel, "explore", "ws-pub-nowplaying", "") + `</span></div>`)
+	b.WriteString(toggleRowDL(st.ToggleLabel, st.ToggleDL, "world-np-on", st.ToggleOn))
+	b.WriteString(fieldExDL(st.LinkLabel, st.LinkDL, "world-np-link", st.Link, "text", "", ""))
+	b.WriteString(fieldExDL(st.ImgLabel, st.ImgDL, "world-np-img", st.Img, "text", "", ""))
+	if st.ImgWarn != "" {
+		b.WriteString(`<div class=wsst-line>` + hint("bad", st.ImgWarn) + `</div>`)
+	}
+	b.WriteString(`<p class=ws-help>` + st.Help + `</p>`)
+	b.WriteString(wsStatusRow("nowplaying", st.Status))
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func wsUnityHTML(st worldsState) string {
+	return `<div class="rp-card"><p class=ws-help>` + st.UnityHelp + `</p>` +
+		`<div id=world-unity-rows>` + wsUnityRowsHTML(st.Unity) + `</div></div>` // stable id: the async inspect cache re-patches it
+}
+
+func wsUnityRowsHTML(st wsUnitySt) string {
+	if st.Mode != "rows" { // empty (none configured / none valid) or loading placeholder
+		return emptyState(st.Msg)
+	}
+	var b strings.Builder
+	for _, r := range st.Rows {
+		b.WriteString(itemRow(r.Name, r.Dir, btn(st.WriteLabel, "explore", r.Act, "")))
 	}
 	return b.String()
 }
@@ -302,7 +671,7 @@ func (u *UI) refreshWorldsUnity(sig string, projects []string) {
 	}
 }
 
-// ── modal editors (rendered into __modal via openModal) ──
+// ── modal editors (rendered into __modal via openModal; Go-rendered, not part of the Zig port) ──
 
 // wsListEditorHTML builds the per-list entry editor (delete + add-name + friend/role pickers).
 // Records the edited list id in wsState so index-based entry actions resolve it.

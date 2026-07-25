@@ -14,45 +14,272 @@ import (
 	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/session"
+	"rave.page/mate/internal/zigui"
 )
 
 const perfSpanWeb = 120 // 2 min at 1 Hz
+
+// Live is a Zig-rendered tab (native/zigui/src/live.zig): Go resolves every fragment's
+// state (service snapshots + i18n + all number formatting + the Go-built graph SVGs and
+// tooltips, embedded verbatim) and the Zig lib renders HTML byte-identical to the Go
+// renderers below, which stay fallback + golden reference (zigui_golden_live_test.go).
+// The ~1 Hz tick (live_ticks.go) patches each fragment id; the client rAF runtime
+// (__rt 'link') interpolates the Link phrase bar between ticks off live-link-fill /
+// live-link-cap - those ids and the pre-formatted fill width are part of the contract.
+
+// ── resolved render state ──
+
+// liveKV is one status row: K label, KL its Go-lowered data-label, V value.
+type liveKV struct {
+	K  string `json:"k"`
+	KL string `json:"kl"`
+	V  string `json:"v"`
+}
+
+// liveSRow is one resolved statusRow (DL = Go strings.ToLower(Label)).
+type liveSRow struct {
+	Variant string `json:"variant"`
+	Label   string `json:"label"`
+	DL      string `json:"dl"`
+	Line    string `json:"line"`
+}
+
+func liveSR(variant, label, line string) liveSRow {
+	return liveSRow{Variant: variant, Label: label, DL: strings.ToLower(label), Line: line}
+}
+
+// liveTransportSt is the transport strip (auto-live status, pause switch, audio record,
+// timecode). Ids live-stream-state / live-rec-state / live-tc are tick-patch targets.
+type liveTransportSt struct {
+	StreamHint  string `json:"streamHint"`
+	StreamLabel string `json:"streamLabel"`
+	DotVar      string `json:"dotVar"`
+	State       string `json:"state"`
+	MetaOnly    string `json:"metaOnly"`
+	PauseLabel  string `json:"pauseLabel"`
+	PauseHint   string `json:"pauseHint"`
+	Paused      bool   `json:"paused"`
+	HasRec      bool   `json:"hasRec"`
+	RecHint     string `json:"recHint"`
+	RecLabel    string `json:"recLabel"`
+	RecBtn      string `json:"recBtn"`
+	RecState    string `json:"recState"`
+	HasTC       bool   `json:"hasTc"`
+	TCLabel     string `json:"tcLabel"`
+	TC          string `json:"tc"`
+	StartLbl    string `json:"startLbl"`
+	StopLbl     string `json:"stopLbl"`
+}
+
+// liveNPSt is the now-playing LCD.
+type liveNPSt struct {
+	Line1 string `json:"line1"`
+	Line2 string `json:"line2"`
+}
+
+// liveStatusSt is the API/account/traktor/stream card.
+type liveStatusSt struct {
+	Rows []liveKV `json:"rows"`
+}
+
+// liveDeck is one deck tile; Cls is the resolved class list (trusted literals).
+type liveDeck struct {
+	Cls   string `json:"cls"`
+	Name  string `json:"name"`
+	Title string `json:"title"`
+	Meta  string `json:"meta"`
+	Via   string `json:"via"` // "" = no provenance line
+}
+
+type liveDecksSt struct {
+	Note  string     `json:"note"` // "" = local decks (no peer-mirror note)
+	Decks []liveDeck `json:"decks"`
+}
+
+// liveSignalsSt is the merged-state provenance card (k/v rows only).
+type liveSignalsSt struct {
+	Rows []liveKV `json:"rows"`
+}
+
+// liveCockpitRow is one OBS instance row.
+type liveCockpitRow struct {
+	Variant   string `json:"variant"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	StreamLbl string `json:"streamLbl"`
+	StreamAct string `json:"streamAct"`
+	RecLbl    string `json:"recLbl"`
+	RecAct    string `json:"recAct"`
+}
+
+type liveCockpitSt struct {
+	Empty   string           `json:"empty"`
+	Caption string           `json:"caption"`
+	Rows    []liveCockpitRow `json:"rows"`
+}
+
+// liveLinkSt is the Ableton Link panel. Fill is the pre-formatted "%.2f%%" width the
+// rAF runtime later overwrites; Cap the beat caption.
+type liveLinkSt struct {
+	Available bool       `json:"available"`
+	Backend   liveSRow   `json:"backend"` // unavailable-state row
+	Fill      string     `json:"fill"`
+	Cap       string     `json:"cap"`
+	Session   liveSRow   `json:"session"`
+	ResyncLbl string     `json:"resyncLbl"`
+	Sources   []liveSRow `json:"sources"`
+}
+
+// liveGraphSt is one graph well (network / timing): legend + SVG are Go-built raw HTML.
+type liveGraphSt struct {
+	Tooltip string `json:"tooltip"`
+	Legend  string `json:"legend"`
+	Graph   string `json:"graph"`
+}
+
+// livePerfSt is the system-performance well (CPU + RAM graph pair + headroom line).
+type livePerfSt struct {
+	Tooltip   string `json:"tooltip"`
+	CPULeg    string `json:"cpuLeg"`
+	CPUGraph  string `json:"cpuGraph"`
+	RAMLeg    string `json:"ramLeg"`
+	RAMGraph  string `json:"ramGraph"`
+	Head      string `json:"head"`
+	HeadColor string `json:"headColor"`
+}
+
+// liveStripSt is the bottom signal strip (three plain-text spans).
+type liveStripSt struct {
+	Left   string `json:"left"`
+	Center string `json:"center"`
+	Right  string `json:"right"`
+}
+
+// liveState is the resolved render state for the whole Live view (JSON → Zig).
+type liveState struct {
+	Title        string          `json:"title"`
+	Sub          string          `json:"sub"`
+	Transport    liveTransportSt `json:"transport"`
+	NP           liveNPSt        `json:"np"`
+	StatusTitle  string          `json:"statusTitle"`
+	Status       liveStatusSt    `json:"status"`
+	DecksTitle   string          `json:"decksTitle"`
+	Decks        liveDecksSt     `json:"decks"`
+	HasSignals   bool            `json:"hasSignals"`
+	SignalsTitle string          `json:"signalsTitle"`
+	SignalsTip   string          `json:"signalsTip"` // raw tipTopic
+	Signals      liveSignalsSt   `json:"signals"`
+	HasCockpit   bool            `json:"hasCockpit"`
+	CockpitTitle string          `json:"cockpitTitle"`
+	Cockpit      liveCockpitSt   `json:"cockpit"`
+	HasLink      bool            `json:"hasLink"`
+	LinkTitle    string          `json:"linkTitle"`
+	Link         liveLinkSt      `json:"link"`
+	HasNet       bool            `json:"hasNet"`
+	NetTitle     string          `json:"netTitle"`
+	NetTip       string          `json:"netTip"`
+	Net          liveGraphSt     `json:"net"`
+	TimTitle     string          `json:"timTitle"`
+	TimTip       string          `json:"timTip"`
+	Tim          liveGraphSt     `json:"tim"`
+	HasPerf      bool            `json:"hasPerf"`
+	PerfTitle    string          `json:"perfTitle"`
+	PerfTip      string          `json:"perfTip"`
+	Perf         livePerfSt      `json:"perf"`
+	Strip        liveStripSt     `json:"strip"`
+}
+
+// liveState resolves every fragment of the cockpit into render state.
+func (u *UI) liveState() liveState {
+	st := liveState{
+		Title: i18n.T("live.title"), Sub: i18n.T("live.subtitle"),
+		Transport: u.liveTransportState(), NP: u.liveNPState(),
+		StatusTitle: i18n.T("live.status.title"), Status: u.liveStatusState(),
+		DecksTitle: i18n.T("live.decks.title"), Decks: u.liveDecksState(),
+		Signals: liveSignalsSt{Rows: []liveKV{}},
+		Cockpit: liveCockpitSt{Rows: []liveCockpitRow{}},
+		Link:    liveLinkSt{Sources: []liveSRow{}},
+		Strip:   u.liveStripState(),
+	}
+	if u.svc.Session != nil {
+		st.HasSignals, st.SignalsTitle, st.SignalsTip = true, i18n.T("live.signals.title"), tipTopic("signal-sources")
+		st.Signals = u.liveSignalsState()
+	}
+	if u.svc.OBSControl != nil {
+		st.HasCockpit, st.CockpitTitle = true, i18n.T("live.cockpit.title")
+		st.Cockpit = u.liveCockpitState()
+	}
+	if u.svc.AbleLink != nil {
+		st.HasLink, st.LinkTitle = true, i18n.T("live.ablelink.title")
+		st.Link = u.liveLinkState()
+	}
+	// tips live on the STATIC section titles - the well contents tick at 1 Hz.
+	if u.svc.NetStats != nil {
+		st.HasNet = true
+		st.NetTitle, st.NetTip, st.Net = i18n.T("live.network.title"), tipTopic("network-graph"), u.liveNetState()
+		st.TimTitle, st.TimTip, st.Tim = i18n.T("live.timing.title"), tipTopic("timing-graph"), u.liveTimState()
+	}
+	if u.svc.Perf != nil {
+		st.HasPerf, st.PerfTitle, st.PerfTip = true, i18n.T("live.sysperf.title"), tipTopic("perf-graph")
+		st.Perf = u.livePerfState()
+	}
+	return st
+}
 
 // renderLive is the mid-set cockpit at parity with the Fyne Live tab: transport strip (stream /
 // record / timecode), now-playing LCD, status, Decks A–D, streaming cockpit, live Network / Timing /
 // System-performance graphs, and the bottom signal strip. livePush patches every live fragment.
 func (u *UI) renderLive() string {
+	st := u.liveState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderLive(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return liveHTML(st)
+}
+
+// liveHTML is the pure Go renderer (golden reference; byte-identical to Zig).
+func liveHTML(st liveState) string {
 	var b strings.Builder
-	b.WriteString(panel(i18n.T("live.title"), i18n.T("live.subtitle")))
-	b.WriteString(`<div id=live-transport>` + u.liveTransportHTML() + `</div>`)
-	b.WriteString(`<div id=live-np>` + u.nowPlayingHTML() + `</div>`)
-	b.WriteString(section(i18n.T("live.status.title"), `<div id=live-status>`+u.liveStatusHTML()+`</div>`))
-	b.WriteString(section(i18n.T("live.decks.title"), `<div id=live-decks>`+u.decksHTML()+`</div>`))
-	if u.svc.Session != nil {
-		b.WriteString(sectionTip(i18n.T("live.signals.title"), tipTopic("signal-sources"), `<div id=live-signals>`+u.signalsHTML()+`</div>`))
+	b.WriteString(panel(st.Title, st.Sub))
+	b.WriteString(`<div id=live-transport>` + liveTransHTML(st.Transport) + `</div>`)
+	b.WriteString(`<div id=live-np>` + liveNPHTML(st.NP) + `</div>`)
+	b.WriteString(section(st.StatusTitle, `<div id=live-status>`+liveStatusFragHTML(st.Status)+`</div>`))
+	b.WriteString(section(st.DecksTitle, `<div id=live-decks>`+liveDecksFragHTML(st.Decks)+`</div>`))
+	if st.HasSignals {
+		b.WriteString(sectionTip(st.SignalsTitle, st.SignalsTip, `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
 	}
-	if u.svc.OBSControl != nil {
-		b.WriteString(section(i18n.T("live.cockpit.title"), `<div id=live-cockpit>`+u.cockpitHTML()+`</div>`))
+	if st.HasCockpit {
+		b.WriteString(section(st.CockpitTitle, `<div id=live-cockpit>`+liveCockpitFragHTML(st.Cockpit)+`</div>`))
 	}
-	if u.svc.AbleLink != nil {
-		b.WriteString(section(i18n.T("live.ablelink.title"), `<div id=live-ablelink>`+u.ableLinkHTML()+`</div>`))
+	if st.HasLink {
+		b.WriteString(section(st.LinkTitle, `<div id=live-ablelink>`+liveLinkFragHTML(st.Link)+`</div>`))
 	}
-	// tips live on the STATIC section titles - the well contents tick at 1 Hz.
-	if u.svc.NetStats != nil {
-		b.WriteString(sectionTip(i18n.T("live.network.title"), tipTopic("network-graph"), `<div id=live-net>`+u.networkHTML()+`</div>`))
-		b.WriteString(sectionTip(i18n.T("live.timing.title"), tipTopic("timing-graph"), `<div id=live-tim>`+u.timingHTML()+`</div>`))
+	if st.HasNet {
+		b.WriteString(sectionTip(st.NetTitle, st.NetTip, `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
+		b.WriteString(sectionTip(st.TimTitle, st.TimTip, `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
 	}
-	if u.svc.Perf != nil {
-		b.WriteString(sectionTip(i18n.T("live.sysperf.title"), tipTopic("perf-graph"), `<div id=live-perf2>`+u.sysperfHTML()+`</div>`))
+	if st.HasPerf {
+		b.WriteString(sectionTip(st.PerfTitle, st.PerfTip, `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
 	}
-	b.WriteString(`<div id=live-strip class=livestrip>` + u.liveStripHTML() + `</div>`)
+	b.WriteString(`<div id=live-strip class=livestrip>` + liveStripFragHTML(st.Strip) + `</div>`)
 	return b.String()
+}
+
+// liveFrag renders one tick-patched fragment through Zig when available.
+func liveFrag[T any](kind string, st T, goHTML func(T) string) string {
+	if zigui.Available() {
+		if h, ok := zigui.RenderLiveFrag(kind, stateJSON(st)); ok {
+			return h
+		}
+	}
+	return goHTML(st)
 }
 
 // ── transport ──
 
-func (u *UI) liveTransportHTML() string {
-	var b strings.Builder
+func (u *UI) liveTransportState() liveTransportSt {
 	// Auto-live: OBS stream drives the now-playing broadcast (no manual go-live). Read-only status +
 	// a pause switch for private / non-DJ streams.
 	signedIn := u.svc.Auth != nil && u.svc.Auth.SignedIn()
@@ -75,40 +302,65 @@ func (u *UI) liveTransportHTML() string {
 	case streaming && !signedIn:
 		dotVar, stateKey = "warning", "live.transport.autoSignIn"
 	}
-	// STREAM label carries the full "metadata only, no A/V" explanation as a tooltip.
-	b.WriteString(`<div class=transport><span class=tlabel title=` + attrQ(i18n.T("live.transport.streamHint")) + `>` +
-		html.EscapeString(i18n.T("live.transport.streamLabel")) + `</span>`)
-	b.WriteString(`<span class=np-artist id=live-stream-state title=` + attrQ(i18n.T("live.transport.streamHint")) + `>` +
-		dot(dotVar) + ` ` + html.EscapeString(i18n.T(stateKey)) + `</span>`)
-	// Always-visible clarifier: "live" = now-playing metadata, never audio/video.
-	b.WriteString(`<span class=tlabel style="opacity:.7">` + html.EscapeString(i18n.T("live.transport.metaOnly")) + `</span>`)
-	pauseChecked := ""
-	if paused {
-		pauseChecked = " checked"
+	st := liveTransportSt{
+		// STREAM label carries the full "metadata only, no A/V" explanation as a tooltip.
+		StreamHint: i18n.T("live.transport.streamHint"), StreamLabel: i18n.T("live.transport.streamLabel"),
+		DotVar: dotVar, State: i18n.T(stateKey),
+		// Always-visible clarifier: "live" = now-playing metadata, never audio/video.
+		MetaOnly:   i18n.T("live.transport.metaOnly"),
+		PauseLabel: i18n.T("live.transport.pauseLabel"), PauseHint: i18n.T("live.transport.pauseHint"),
+		Paused: paused,
 	}
-	b.WriteString(`<span class=tlabel>` + html.EscapeString(i18n.T("live.transport.pauseLabel")) + `</span>`)
-	b.WriteString(`<label class=switch data-label="private stream" title=` + attrQ(i18n.T("live.transport.pauseHint")) +
-		`><input type=checkbox` + pauseChecked + ` data-act=stream-pause data-value=` + attrQ(boolStr(paused)) +
-		`><span class=switch-track></span></label>`)
 	if u.svc.AudioRec != nil {
 		rec := u.svc.AudioRec.Status()
 		label := i18n.T("live.transport.recordAudio")
 		if rec.Recording {
 			label = i18n.T("player.stop")
 		}
-		b.WriteString(`<span class=tsep></span><span class=tlabel title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
-			html.EscapeString(i18n.T("live.transport.recLabel")) + `</span>`)
-		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=arec-toggle title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
-			html.EscapeString(label) + `</button>`)
+		st.HasRec, st.RecHint, st.RecLabel = true, i18n.T("live.transport.recHint"), i18n.T("live.transport.recLabel")
 		// Idle: name the destination; recording: recStateText shows the live file.
-		b.WriteString(`<span class=np-artist id=live-rec-state title=` + attrQ(i18n.T("live.transport.recHint")) + `>` +
-			html.EscapeString(recSideText(rec)) + `</span>`)
+		st.RecBtn, st.RecState = label, recSideText(rec)
 	}
 	if u.svc.Timecode != nil {
-		b.WriteString(`<span class=tsep></span><span class=tlabel>` + html.EscapeString(i18n.T("live.transport.tcLabel")) + `</span>`)
-		b.WriteString(`<span class=tmono id=live-tc>` + html.EscapeString(u.tcText()) + `</span>`)
-		b.WriteString(`<button class="rp-btn rp-btn--go" data-act=tc-start>` + html.EscapeString(i18n.T("live.transport.start")) + `</button>`)
-		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=tc-stop>` + html.EscapeString(i18n.T("live.transport.stopCaps")) + `</button>`)
+		st.HasTC, st.TCLabel, st.TC = true, i18n.T("live.transport.tcLabel"), u.tcText()
+		st.StartLbl, st.StopLbl = i18n.T("live.transport.start"), i18n.T("live.transport.stopCaps")
+	}
+	return st
+}
+
+func (u *UI) liveTransportHTML() string {
+	return liveFrag("transport", u.liveTransportState(), liveTransHTML)
+}
+
+// liveTransHTML is the pure transport-strip renderer.
+func liveTransHTML(st liveTransportSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class=transport><span class=tlabel title=` + attrQ(st.StreamHint) + `>` +
+		html.EscapeString(st.StreamLabel) + `</span>`)
+	b.WriteString(`<span class=np-artist id=live-stream-state title=` + attrQ(st.StreamHint) + `>` +
+		dot(st.DotVar) + ` ` + html.EscapeString(st.State) + `</span>`)
+	b.WriteString(`<span class=tlabel style="opacity:.7">` + html.EscapeString(st.MetaOnly) + `</span>`)
+	pauseChecked := ""
+	if st.Paused {
+		pauseChecked = " checked"
+	}
+	b.WriteString(`<span class=tlabel>` + html.EscapeString(st.PauseLabel) + `</span>`)
+	b.WriteString(`<label class=switch data-label="private stream" title=` + attrQ(st.PauseHint) +
+		`><input type=checkbox` + pauseChecked + ` data-act=stream-pause data-value=` + attrQ(boolStr(st.Paused)) +
+		`><span class=switch-track></span></label>`)
+	if st.HasRec {
+		b.WriteString(`<span class=tsep></span><span class=tlabel title=` + attrQ(st.RecHint) + `>` +
+			html.EscapeString(st.RecLabel) + `</span>`)
+		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=arec-toggle title=` + attrQ(st.RecHint) + `>` +
+			html.EscapeString(st.RecBtn) + `</button>`)
+		b.WriteString(`<span class=np-artist id=live-rec-state title=` + attrQ(st.RecHint) + `>` +
+			html.EscapeString(st.RecState) + `</span>`)
+	}
+	if st.HasTC {
+		b.WriteString(`<span class=tsep></span><span class=tlabel>` + html.EscapeString(st.TCLabel) + `</span>`)
+		b.WriteString(`<span class=tmono id=live-tc>` + html.EscapeString(st.TC) + `</span>`)
+		b.WriteString(`<button class="rp-btn rp-btn--go" data-act=tc-start>` + html.EscapeString(st.StartLbl) + `</button>`)
+		b.WriteString(`<button class="rp-btn rp-btn--outline" data-act=tc-stop>` + html.EscapeString(st.StopLbl) + `</button>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -139,28 +391,30 @@ func recStateText(s audiorec.Status) string {
 
 // ── ableton link ──
 
-// ableLinkHTML renders the Link sync panel: phrase-phase bar, tempo/peers summary, a resync
-// button, and (when OBS media-sync is present) the per-source chase/delay-comp readout.
-func (u *UI) ableLinkHTML() string {
-	st := u.svc.AbleLink.StateNow() // fresh phase (mirror snapshot is ~10 Hz)
-	if !st.Available {
-		return statusRow("warning", i18n.T("live.ablelink.backend"), i18n.T("live.ablelink.unavailable"))
+// liveLinkState resolves the Link sync panel: phrase-phase bar, tempo/peers summary, and
+// (when OBS media-sync is present) the per-source chase/delay-comp readout.
+func (u *UI) liveLinkState() liveLinkSt {
+	lst := u.svc.AbleLink.StateNow() // fresh phase (mirror snapshot is ~10 Hz)
+	st := liveLinkSt{Sources: []liveSRow{}}
+	if !lst.Available {
+		st.Backend = liveSR("warning", i18n.T("live.ablelink.backend"), i18n.T("live.ablelink.unavailable"))
+		return st
 	}
-	quantum := int(st.Quantum)
+	st.Available = true
+	quantum := int(lst.Quantum)
 	if quantum <= 0 {
 		quantum = 16
 	}
-	var b strings.Builder
-	beat := int(st.Phase) + 1 // 1-based beat within the phrase
-	cap := i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": fmt.Sprint(beat), "quantum": fmt.Sprint(quantum)})
-	b.WriteString(linkPhraseBar(st.PhraseFraction()*100, cap))
+	beat := int(lst.Phase) + 1 // 1-based beat within the phrase
+	st.Fill = pbarPct(lst.PhraseFraction() * 100)
+	st.Cap = i18n.T("live.ablelink.phraseBeat", i18n.A{"beat": fmt.Sprint(beat), "quantum": fmt.Sprint(quantum)})
 	variant, state := "success", i18n.T("live.ablelink.enabled")
-	if !st.Enabled {
+	if !lst.Enabled {
 		variant, state = "off", i18n.T("live.ablelink.disabled")
 	}
-	b.WriteString(statusRow(variant, i18n.T("live.ablelink.session"),
-		i18n.T("live.ablelink.summary", i18n.A{"tempo": fmt.Sprintf("%.1f", st.Tempo), "peers": fmt.Sprint(st.Peers), "state": state})))
-	b.WriteString(btnRow(btn(i18n.T("settings.body.ablelink.resync"), "outline", "ablelink-resync", "")))
+	st.Session = liveSR(variant, i18n.T("live.ablelink.session"),
+		i18n.T("live.ablelink.summary", i18n.A{"tempo": fmt.Sprintf("%.1f", lst.Tempo), "peers": fmt.Sprint(lst.Peers), "state": state}))
+	st.ResyncLbl = i18n.T("settings.body.ablelink.resync")
 	// Per-source media-sync / delay-comp chase readout (mirrors the Fyne obssync view).
 	if u.svc.OBSControl != nil {
 		for _, ss := range u.svc.OBSControl.SyncStatuses() {
@@ -175,25 +429,57 @@ func (u *UI) ableLinkHTML() string {
 			if src == "" {
 				src = "?"
 			}
-			b.WriteString(statusRow(sv, src, fmt.Sprintf("%s · err %+dms · %.0f corr/min", line, ss.ErrorMs, ss.CorrectionsPerMin)))
+			st.Sources = append(st.Sources, liveSR(sv, src,
+				fmt.Sprintf("%s · err %+dms · %.0f corr/min", line, ss.ErrorMs, ss.CorrectionsPerMin)))
 		}
+	}
+	return st
+}
+
+func (u *UI) ableLinkHTML() string {
+	return liveFrag("link", u.liveLinkState(), liveLinkFragHTML)
+}
+
+// liveLinkFragHTML is the pure Link-panel renderer.
+func liveLinkFragHTML(st liveLinkSt) string {
+	if !st.Available {
+		return liveStatusRow(st.Backend)
+	}
+	var b strings.Builder
+	b.WriteString(linkPhraseBarStr(st.Fill, st.Cap))
+	b.WriteString(liveStatusRow(st.Session))
+	b.WriteString(btnRow(btn(st.ResyncLbl, "outline", "ablelink-resync", "")))
+	for _, s := range st.Sources {
+		b.WriteString(liveStatusRow(s))
 	}
 	return b.String()
 }
+
+// liveStatusRow renders a resolved statusRow through the shared primitive.
+func liveStatusRow(r liveSRow) string { return statusRow(r.Variant, r.Label, r.Line) }
 
 // linkPhraseBar renders the Link phrase progress bar carrying stable ids so the client rAF
 // runtime (__rt 'link', pushAbleLink) can advance the fill width + beat number at display
 // refresh between the ~1 Hz ticks. fillPct in [0,100].
 func linkPhraseBar(fillPct float64, cap string) string {
+	return linkPhraseBarStr(pbarPct(fillPct), cap)
+}
+
+// pbarPct clamps + formats a percentage width (the Zig path never formats a float).
+func pbarPct(fillPct float64) string {
 	if fillPct < 0 {
 		fillPct = 0
 	}
 	if fillPct > 100 {
 		fillPct = 100
 	}
-	return `<div class=pbar><div class="pbar-fill" id=live-link-fill style="width:` +
-		fmt.Sprintf("%.2f%%", fillPct) + `"></div><span class="pbar-cap" id=live-link-cap>` +
-		html.EscapeString(cap) + `</span></div>`
+	return fmt.Sprintf("%.2f%%", fillPct)
+}
+
+// linkPhraseBarStr is linkPhraseBar from a pre-formatted width (shared by both renderers).
+func linkPhraseBarStr(fill, cap string) string {
+	return `<div class=pbar><div class="pbar-fill" id=live-link-fill style="width:` + fill +
+		`"></div><span class="pbar-cap" id=live-link-cap>` + html.EscapeString(cap) + `</span></div>`
 }
 
 // pushAbleLink hands the client rAF runtime (__rt 'link') the Link phrase so the phrase bar
@@ -224,29 +510,37 @@ func (u *UI) pushAbleLink() {
 
 // ── now playing ──
 
-func (u *UI) nowPlayingHTML() string {
+func (u *UI) liveNPState() liveNPSt {
 	d, ok := u.masterDeck()
-	line1, line2 := i18n.T("live.nowPlaying.noTrack"), ""
-	if ok {
-		t := strings.TrimSpace(d.Artist)
-		if t != "" && d.Title != "" {
-			t += " - "
-		}
-		t += d.Title
-		if len(t) > 40 {
-			t = t[:39] + "…"
-		}
-		line1 = "♪ " + strings.ToUpper(t)
-		line2 = i18n.T("live.nowPlaying.line2", i18n.A{"deck": d.Deck, "elapsed": mmss(d.ElapsedTime), "total": mmss(d.TrackLength)})
-		if d.BPM > 0 {
-			line2 += "    " + i18n.T("live.bpm", i18n.A{"bpm": fmt.Sprintf("%.1f", d.BPM)})
-		}
-		if d.Key != "" {
-			line2 += "    " + d.Key
-		}
+	st := liveNPSt{Line1: i18n.T("live.nowPlaying.noTrack")}
+	if !ok {
+		return st
 	}
-	return `<div class=lcd><div class=lcd-1 data-label="now playing" data-value="` + html.EscapeString(line1) + `">` +
-		html.EscapeString(line1) + `</div><div class=lcd-2>` + html.EscapeString(line2) + `</div></div>`
+	t := strings.TrimSpace(d.Artist)
+	if t != "" && d.Title != "" {
+		t += " - "
+	}
+	t += d.Title
+	if len(t) > 40 {
+		t = t[:39] + "…"
+	}
+	st.Line1 = "♪ " + strings.ToUpper(t)
+	st.Line2 = i18n.T("live.nowPlaying.line2", i18n.A{"deck": d.Deck, "elapsed": mmss(d.ElapsedTime), "total": mmss(d.TrackLength)})
+	if d.BPM > 0 {
+		st.Line2 += "    " + i18n.T("live.bpm", i18n.A{"bpm": fmt.Sprintf("%.1f", d.BPM)})
+	}
+	if d.Key != "" {
+		st.Line2 += "    " + d.Key
+	}
+	return st
+}
+
+func (u *UI) nowPlayingHTML() string { return liveFrag("np", u.liveNPState(), liveNPHTML) }
+
+// liveNPHTML is the pure now-playing LCD renderer.
+func liveNPHTML(st liveNPSt) string {
+	return `<div class=lcd><div class=lcd-1 data-label="now playing" data-value="` + html.EscapeString(st.Line1) + `">` +
+		html.EscapeString(st.Line1) + `</div><div class=lcd-2>` + html.EscapeString(st.Line2) + `</div></div>`
 }
 
 func (u *UI) masterDeck() (session.DeckSnapshot, bool) {
@@ -280,7 +574,7 @@ func (u *UI) masterDeck() (session.DeckSnapshot, bool) {
 
 // ── status ──
 
-func (u *UI) liveStatusHTML() string {
+func (u *UI) liveStatusState() liveStatusSt {
 	api := ""
 	if u.svc.API != nil {
 		api = u.svc.API.BaseURL()
@@ -314,17 +608,36 @@ func (u *UI) liveStatusHTML() string {
 			strm = i18n.T("live.status.idleError", i18n.A{"error": s.LastError})
 		}
 	}
-	row := func(k, v string) string {
-		return `<div class=st-row><span class=st-k>` + html.EscapeString(k) + `</span>` +
-			`<span data-label="` + strings.ToLower(k) + `" data-value="` + html.EscapeString(v) + `">` + html.EscapeString(v) + `</span></div>`
+	return liveStatusSt{Rows: []liveKV{
+		liveRow(i18n.T("live.status.apiLabel"), api),
+		liveRow(i18n.T("live.status.accountLabel"), acct),
+		liveRow(i18n.T("live.status.traktorLabel"), trk),
+		liveRow(i18n.T("live.status.streamLabel"), strm),
+	}}
+}
+
+// liveRow resolves one k/v status row (KL = the Go-lowered data-label).
+func liveRow(k, v string) liveKV { return liveKV{K: k, KL: strings.ToLower(k), V: v} }
+
+func (u *UI) liveStatusHTML() string {
+	return liveFrag("status", u.liveStatusState(), liveStatusFragHTML)
+}
+
+// liveStatusFragHTML is the pure status-card renderer.
+func liveStatusFragHTML(st liveStatusSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=st-row><span class=st-k>` + html.EscapeString(r.K) + `</span>` +
+			`<span data-label="` + r.KL + `" data-value="` + html.EscapeString(r.V) + `">` + html.EscapeString(r.V) + `</span></div>`)
 	}
-	return `<div class="rp-card">` + row(i18n.T("live.status.apiLabel"), api) + row(i18n.T("live.status.accountLabel"), acct) +
-		row(i18n.T("live.status.traktorLabel"), trk) + row(i18n.T("live.status.streamLabel"), strm) + `</div>`
+	b.WriteString(`</div>`)
+	return b.String()
 }
 
 // ── decks ──
 
-func (u *UI) decksHTML() string {
+func (u *UI) liveDecksState() liveDecksSt {
 	byDeck := map[string]session.DeckSnapshot{}
 	viaByDeck := map[string]string{} // deck id → "src1, src2" provenance (Fyne-parity "via" line)
 	audible := ""
@@ -386,11 +699,7 @@ func (u *UI) decksHTML() string {
 		}
 	}
 	sort.Strings(ids[4:])
-	var b strings.Builder
-	if note != "" {
-		b.WriteString(`<div class=decks-note>` + html.EscapeString(note) + `</div>`)
-	}
-	b.WriteString(`<div class=decks-grid>`)
+	st := liveDecksSt{Note: note, Decks: make([]liveDeck, 0, len(ids))}
 	for _, id := range ids {
 		d, ok := byDeck[id]
 		cls := "deckbig"
@@ -415,10 +724,31 @@ func (u *UI) decksHTML() string {
 		}
 		via := ""
 		if v := viaByDeck[id]; v != "" {
-			via = `<div class="deckbig-m deckbig-src">` + html.EscapeString(i18n.T("live.decks.via", i18n.A{"sources": v})) + `</div>`
+			via = i18n.T("live.decks.via", i18n.A{"sources": v})
 		}
-		b.WriteString(`<div class="` + cls + `"><div class=deckbig-id>` + html.EscapeString(i18n.T("live.deck.name", i18n.A{"id": id})) + `</div>` +
-			`<div class=deckbig-t>` + html.EscapeString(title) + `</div><div class=deckbig-m>` + html.EscapeString(meta) + `</div>` + via + `</div>`)
+		st.Decks = append(st.Decks, liveDeck{Cls: cls, Name: i18n.T("live.deck.name", i18n.A{"id": id}),
+			Title: title, Meta: meta, Via: via})
+	}
+	return st
+}
+
+func (u *UI) decksHTML() string { return liveFrag("decks", u.liveDecksState(), liveDecksFragHTML) }
+
+// liveDecksFragHTML is the pure decks-grid renderer.
+func liveDecksFragHTML(st liveDecksSt) string {
+	var b strings.Builder
+	if st.Note != "" {
+		b.WriteString(`<div class=decks-note>` + html.EscapeString(st.Note) + `</div>`)
+	}
+	b.WriteString(`<div class=decks-grid>`)
+	for _, d := range st.Decks {
+		via := ""
+		if d.Via != "" {
+			via = `<div class="deckbig-m deckbig-src">` + html.EscapeString(d.Via) + `</div>`
+		}
+		b.WriteString(`<div class="` + d.Cls + `"><div class=deckbig-id>` + html.EscapeString(d.Name) + `</div>` +
+			`<div class=deckbig-t>` + html.EscapeString(d.Title) + `</div><div class=deckbig-m>` +
+			html.EscapeString(d.Meta) + `</div>` + via + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -436,21 +766,13 @@ func joinSorted(set map[string]bool) string {
 
 // ── signal sources (Fyne view_session parity: per-signal provenance + source coverage) ──
 
-// signalsHTML renders the merged-state provenance panel: which source feeds each
+// liveSignalsState resolves the merged-state provenance panel: which source feeds each
 // channel's mixer signals (EQ/filter/fader - "—" = nobody, the instant answer to "why
 // are my EQ knobs dead"), every registered source's liveness, and ravemidi driver bind
 // health for managed controllers.
-func (u *UI) signalsHTML() string {
-	if u.svc.Session == nil {
-		return ""
-	}
-	var b strings.Builder
-	row := func(k, v string) string {
-		return `<div class=st-row><span class=st-k>` + html.EscapeString(k) + `</span>` +
-			`<span>` + html.EscapeString(v) + `</span></div>`
-	}
+func (u *UI) liveSignalsState() liveSignalsSt {
+	st := liveSignalsSt{Rows: []liveKV{}}
 	snap := u.svc.Session.Snapshot()
-	b.WriteString(`<div class="rp-card">`)
 	// per-channel mixer coverage: the signals the streamed overlay draws
 	mixer := [][2]string{{session.FieldEQLow, "EQ lo"}, {session.FieldEQMid, "EQ mid"},
 		{session.FieldEQHigh, "EQ hi"}, {session.FieldFilter, "Filter"}, {session.FieldFader, "Fader"}}
@@ -464,7 +786,7 @@ func (u *UI) signalsHTML() string {
 			}
 			parts = append(parts, m[1]+" "+src)
 		}
-		b.WriteString(row(i18n.T("live.signals.channel", i18n.A{"n": ch}), strings.Join(parts, " · ")))
+		st.Rows = append(st.Rows, liveRow(i18n.T("live.signals.channel", i18n.A{"n": ch}), strings.Join(parts, " · ")))
 	}
 	// source liveness. Disabled sources are skipped: planned stubs (qml, nowplaying) register
 	// disabled to advertise in Settings, and an "off" row here reads as a fault (the QML mod's
@@ -480,30 +802,48 @@ func (u *UI) signalsHTML() string {
 		case s.Running:
 			state = i18n.T("live.signals.idle")
 		}
-		b.WriteString(row(s.ID, state))
+		st.Rows = append(st.Rows, liveRow(s.ID, state))
 	}
 	// ravemidi managed-controller bind health: an unbound input = the driver lost the
 	// hardware (another app grabbed it?) = EQ/filter silently dead. Say it HERE.
 	if midi.DriverInstalled() {
 		if sts, err := midi.QueryDriverInputs(); err == nil {
-			for _, st := range sts {
+			for _, dst := range sts {
 				v := i18n.T("live.signals.driverBound")
-				if !st.Bound {
-					v = i18n.T("live.signals.driverUnbound", i18n.A{"retries": fmt.Sprint(st.RetryCount)})
+				if !dst.Bound {
+					v = i18n.T("live.signals.driverUnbound", i18n.A{"retries": fmt.Sprint(dst.RetryCount)})
 				}
-				b.WriteString(row(st.Name, v))
+				st.Rows = append(st.Rows, liveRow(dst.Name, v))
 			}
 		}
 	}
 	if u.svc.MIDISource != nil {
 		for _, p := range u.svc.MIDISource.FailedInputPorts() {
-			b.WriteString(row(p, i18n.T("live.signals.portFailed")))
+			st.Rows = append(st.Rows, liveRow(p, i18n.T("live.signals.portFailed")))
 		}
 		// A muted loopback opens fine but delivers NOTHING (LoopBe1 anti-feedback mute) -
 		// the exact silent state that kills EQ/filter mid-set. Detected by echo probe.
 		for _, p := range u.svc.MIDISource.MutedInputPorts() {
-			b.WriteString(row(p, i18n.T("live.signals.portMuted")))
+			st.Rows = append(st.Rows, liveRow(p, i18n.T("live.signals.portMuted")))
 		}
+	}
+	return st
+}
+
+func (u *UI) signalsHTML() string {
+	if u.svc.Session == nil {
+		return ""
+	}
+	return liveFrag("signals", u.liveSignalsState(), liveSignalsFragHTML)
+}
+
+// liveSignalsFragHTML is the pure signals-card renderer (rows carry no data-label).
+func liveSignalsFragHTML(st liveSignalsSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=st-row><span class=st-k>` + html.EscapeString(r.K) + `</span>` +
+			`<span>` + html.EscapeString(r.V) + `</span></div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -511,15 +851,14 @@ func (u *UI) signalsHTML() string {
 
 // ── streaming cockpit ──
 
-func (u *UI) cockpitHTML() string {
+func (u *UI) liveCockpitState() liveCockpitSt {
 	insts := u.svc.OBSControl.Statuses()
+	st := liveCockpitSt{Empty: i18n.T("live.cockpit.empty"), Rows: make([]liveCockpitRow, 0, len(insts))}
 	if len(insts) == 0 {
-		return emptyState(i18n.T("live.cockpit.empty"))
+		return st
 	}
-	var b strings.Builder
 	// Caption: what the OBS controls below do + where recordings land + auto tracklist capture.
-	b.WriteString(`<div class=decks-note>` + html.EscapeString(i18n.T("live.cockpit.caption")) + `</div>`)
-	b.WriteString(`<div class="rp-card">`)
+	st.Caption = i18n.T("live.cockpit.caption")
 	for _, in := range insts {
 		name := in.Label
 		if name == "" {
@@ -546,9 +885,29 @@ func (u *UI) cockpitHTML() string {
 		if in.Recording {
 			recLabel = i18n.T("live.cockpit.stopRec")
 		}
-		b.WriteString(`<div class=row><span class=row-label>` + dot(sv) + ` ` + html.EscapeString(name) +
-			` <span class=np-artist>` + html.EscapeString(state) + `</span></span>` +
-			btnRow(btn(streamLabel, "primary", "obs-stream:"+in.ID, ""), btn(recLabel, "outline", "obs-record:"+in.ID, "")) + `</div>`)
+		st.Rows = append(st.Rows, liveCockpitRow{Variant: sv, Name: name, State: state,
+			StreamLbl: streamLabel, StreamAct: "obs-stream:" + in.ID,
+			RecLbl: recLabel, RecAct: "obs-record:" + in.ID})
+	}
+	return st
+}
+
+func (u *UI) cockpitHTML() string {
+	return liveFrag("cockpit", u.liveCockpitState(), liveCockpitFragHTML)
+}
+
+// liveCockpitFragHTML is the pure OBS-cockpit renderer.
+func liveCockpitFragHTML(st liveCockpitSt) string {
+	if len(st.Rows) == 0 {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=decks-note>` + html.EscapeString(st.Caption) + `</div>`)
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=row><span class=row-label>` + dot(r.Variant) + ` ` + html.EscapeString(r.Name) +
+			` <span class=np-artist>` + html.EscapeString(r.State) + `</span></span>` +
+			btnRow(btn(r.StreamLbl, "primary", r.StreamAct, ""), btn(r.RecLbl, "outline", r.RecAct, "")) + `</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -556,7 +915,7 @@ func (u *UI) cockpitHTML() string {
 
 // ── graphs ──
 
-func (u *UI) networkHTML() string {
+func (u *UI) liveNetState() liveGraphSt {
 	snap := u.svc.NetStats.Snapshot()
 	graph := sparklineSVG([]sparkSeries{
 		{snap.PeerIn, sparkMint, true},
@@ -575,10 +934,12 @@ func (u *UI) networkHTML() string {
 			"down": humanBytes(snap.SessPeerIn + snap.SessAPIIn),
 			"up":   humanBytes(snap.SessPeerOut + snap.SessAPIOut),
 		})))
-	return `<div class=gwell title=` + attrQ(i18n.T("live.network.tooltip")) + `><div class=glegend>` + legend + `</div>` + graph + `</div>`
+	return liveGraphSt{Tooltip: i18n.T("live.network.tooltip"), Legend: legend, Graph: graph}
 }
 
-func (u *UI) timingHTML() string {
+func (u *UI) networkHTML() string { return liveFrag("graph", u.liveNetState(), liveGraphFragHTML) }
+
+func (u *UI) liveTimState() liveGraphSt {
 	snap := u.svc.NetStats.Snapshot()
 	pal := []string{sparkMint, sparkHot, sparkViolet, sparkAmber, sparkInfo}
 	var series []sparkSeries
@@ -596,10 +957,17 @@ func (u *UI) timingHTML() string {
 		series = []sparkSeries{{make([]float64, snap.Span), sparkMuted, false}}
 		legend.WriteString(`<span>` + html.EscapeString(i18n.T("live.timing.noPeers")) + `</span>`)
 	}
-	return `<div class=gwell title=` + attrQ(i18n.T("live.timing.tooltip")) + `><div class=glegend>` + legend.String() + `</div>` + sparklineSVG(series, 600, 56) + `</div>`
+	return liveGraphSt{Tooltip: i18n.T("live.timing.tooltip"), Legend: legend.String(), Graph: sparklineSVG(series, 600, 56)}
 }
 
-func (u *UI) sysperfHTML() string {
+func (u *UI) timingHTML() string { return liveFrag("graph", u.liveTimState(), liveGraphFragHTML) }
+
+// liveGraphFragHTML is the pure graph-well renderer (legend + SVG are Go-built).
+func liveGraphFragHTML(st liveGraphSt) string {
+	return `<div class=gwell title=` + attrQ(st.Tooltip) + `><div class=glegend>` + st.Legend + `</div>` + st.Graph + `</div>`
+}
+
+func (u *UI) livePerfState() livePerfSt {
 	ss := u.svc.Perf.Snapshot()
 	if len(ss) > perfSpanWeb {
 		ss = ss[len(ss)-perfSpanWeb:]
@@ -634,18 +1002,35 @@ func (u *UI) sysperfHTML() string {
 		cpuLeg = fmt.Sprintf(`<span style="color:%s">%s %.0f%%</span><span style="color:%s">%s %s</span>`, sparkMint, appLbl, l.CPUPct, sparkHot, sysLbl, sysCPU)
 		ramLeg = fmt.Sprintf(`<span style="color:%s">%s %.0f MB</span><span style="color:%s">%s %s</span>`, sparkViolet, appLbl, l.RSSMB, sparkAmber, sysLbl, sysRAM)
 	}
-	cpuG := sparklineSVG([]sparkSeries{{appC, sparkMint, true}, {sysC, sparkHot, false}}, 600, 56)
-	ramG := sparklineSVG([]sparkSeries{{sysR, sparkAmber, false}, {appR, sparkViolet, true}}, 600, 56)
-	return `<div class=gwell title=` + attrQ(i18n.T("live.perf.tooltip")) + `><div class=glegend>` + cpuLeg + `</div>` + cpuG +
-		`<div class=glegend>` + ramLeg + `</div>` + ramG +
-		`<div class=glegend><span style="color:` + sparkMint + `">` + html.EscapeString(head) + `</span></div></div>`
+	return livePerfSt{
+		Tooltip: i18n.T("live.perf.tooltip"),
+		CPULeg:  cpuLeg, CPUGraph: sparklineSVG([]sparkSeries{{appC, sparkMint, true}, {sysC, sparkHot, false}}, 600, 56),
+		RAMLeg: ramLeg, RAMGraph: sparklineSVG([]sparkSeries{{sysR, sparkAmber, false}, {appR, sparkViolet, true}}, 600, 56),
+		Head: head, HeadColor: sparkMint,
+	}
+}
+
+func (u *UI) sysperfHTML() string { return liveFrag("perf", u.livePerfState(), livePerfFragHTML) }
+
+// livePerfFragHTML is the pure system-performance well renderer.
+func livePerfFragHTML(st livePerfSt) string {
+	return `<div class=gwell title=` + attrQ(st.Tooltip) + `><div class=glegend>` + st.CPULeg + `</div>` + st.CPUGraph +
+		`<div class=glegend>` + st.RAMLeg + `</div>` + st.RAMGraph +
+		`<div class=glegend><span style="color:` + st.HeadColor + `">` + html.EscapeString(st.Head) + `</span></div></div>`
 }
 
 // ── bottom signal strip (port of liveStatusLeft/Center/Right) ──
 
-func (u *UI) liveStripHTML() string {
-	return `<span>` + html.EscapeString(u.stripLeft()) + `</span><span>` + html.EscapeString(u.stripCenter()) +
-		`</span><span>` + html.EscapeString(u.stripRight()) + `</span>`
+func (u *UI) liveStripState() liveStripSt {
+	return liveStripSt{Left: u.stripLeft(), Center: u.stripCenter(), Right: u.stripRight()}
+}
+
+func (u *UI) liveStripHTML() string { return liveFrag("strip", u.liveStripState(), liveStripFragHTML) }
+
+// liveStripFragHTML is the pure signal-strip renderer.
+func liveStripFragHTML(st liveStripSt) string {
+	return `<span>` + html.EscapeString(st.Left) + `</span><span>` + html.EscapeString(st.Center) +
+		`</span><span>` + html.EscapeString(st.Right) + `</span>`
 }
 
 func (u *UI) stripLeft() string {

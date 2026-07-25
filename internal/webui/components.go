@@ -101,6 +101,11 @@ func toggleRowGated(label string, on bool, gateHint string) string {
 
 // toggleRowTip is toggleRow with a tooltip (pre-rendered, e.g. tipTopic) beside the label.
 func toggleRowTip(label, act string, on bool, tipHTML string) string {
+	return toggleRowTipDL(label, strings.ToLower(label), act, on, tipHTML)
+}
+
+// toggleRowTipDL is toggleRowTip with a caller-resolved data-label (Zig state path).
+func toggleRowTipDL(label, dataLabel, act string, on bool, tipHTML string) string {
 	checked := ""
 	if on {
 		checked = " checked"
@@ -108,23 +113,14 @@ func toggleRowTip(label, act string, on bool, tipHTML string) string {
 	return fmt.Sprintf(`<label class=row data-label=%s><span class=row-label>%s%s</span>`+
 		`<span class=switch><input type=checkbox%s data-act=%s data-value=%s>`+
 		`<span class=switch-track></span></span></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
+		attrQ(dataLabel), html.EscapeString(label), tipHTML, checked, attrQ(act), attrQ(boolStr(on)))
 }
 
 // fieldEx is the general labelled text/number input (dispatch on change via act): optional
 // placeholder + optional pre-rendered tooltip beside the label. field/fieldPH/fieldTip are the
 // shorthands - extend HERE rather than growing a fourth near-copy.
 func fieldEx(label, act, value, inputType, placeholder, tipHTML string) string {
-	if inputType == "" {
-		inputType = "text"
-	}
-	ph := ""
-	if placeholder != "" {
-		ph = ` placeholder=` + attrQ(placeholder)
-	}
-	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
-		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+	return fieldExDL(label, strings.ToLower(label), act, value, inputType, placeholder, tipHTML)
 }
 
 // field renders a labelled text/number input inside a form-less row (dispatch on change via act).
@@ -156,6 +152,20 @@ func selectBoxTip(label, act string, options [][2]string, current, topic string)
 	})
 }
 
+// resolveSelectBoxTip registers + resolves a selectBoxTip into pure render state plus its
+// pre-rendered ss-label (label text + tooltip) for a Zig-migrated tab. selHTMLRaw pairs them.
+func resolveSelectBoxTip(label, act string, options [][2]string, current, topic string) (selState, string) {
+	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
+	ssRegister(id, act, current, func() []ssOpt {
+		out := make([]ssOpt, 0, len(options))
+		for _, op := range options {
+			out = append(out, ssOpt{Val: op[0], Label: op[1]})
+		}
+		return out
+	})
+	return ssResolve(id), `<span class=ss-label>` + html.EscapeString(label) + tipTopic(topic) + `</span>`
+}
+
 // emptyState renders the rp-empty placeholder.
 func emptyState(msg string) string {
 	return `<div class="rp-empty"><div class="rp-empty__title">` + html.EscapeString(msg) + `</div></div>`
@@ -170,10 +180,7 @@ func attrQ(s string) string {
 }
 
 // kv renders a key/value line (label muted, value emphasised, ctl-readable).
-func kv(label, value string) string {
-	return `<div class=kv><span class=kv-k>` + html.EscapeString(label) + `</span>` +
-		`<span class=kv-v data-label=` + attrQ(strings.ToLower(label)) + ` data-value=` + attrQ(value) + `>` + html.EscapeString(value) + `</span></div>`
-}
+func kv(label, value string) string { return kvDL(label, strings.ToLower(label), value) }
 
 // btnRow groups buttons horizontally.
 func btnRow(buttons ...string) string {
@@ -231,9 +238,7 @@ func progressBar(frac float64, caption string) string {
 
 // statusRow renders a status dot + label + muted sub-line (the per-card live status pattern).
 func statusRow(variant, label, line string) string {
-	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
-		attrQ(strings.ToLower(label)) + `>` + html.EscapeString(label) + `</div>` +
-		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+	return statusRowDL(variant, label, strings.ToLower(label), line)
 }
 
 // subTabs renders a segmented control. items = [][value,label]; each button's act = actPrefix+value.
@@ -440,3 +445,35 @@ func trimNum(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // fpair puts two short fields/selects side by side (.fpair grid; stacks <560px).
 func fpair(a, b string) string { return `<div class=fpair>` + a + b + `</div>` }
+
+// --- vrchat/worlds (zigui port) ---
+// Caller-resolved data-label variants (like toggleRowDL): the Zig render path keeps Unicode
+// strings.ToLower in Go, so the pure renderers get the data-label handed to them. The
+// label-lowering wrappers above delegate here - ONE markup source per component.
+
+// kvDL is kv with a caller-resolved data-label.
+func kvDL(label, dataLabel, value string) string {
+	return `<div class=kv><span class=kv-k>` + html.EscapeString(label) + `</span>` +
+		`<span class=kv-v data-label=` + attrQ(dataLabel) + ` data-value=` + attrQ(value) + `>` + html.EscapeString(value) + `</span></div>`
+}
+
+// statusRowDL is statusRow with a caller-resolved data-label.
+func statusRowDL(variant, label, dataLabel, line string) string {
+	return `<div class=strow>` + dot(variant) + `<div class=strow-tx><div class=strow-l data-label=` +
+		attrQ(dataLabel) + `>` + html.EscapeString(label) + `</div>` +
+		`<div class=strow-s data-value=` + attrQ(line) + `>` + html.EscapeString(line) + `</div></div></div>`
+}
+
+// fieldExDL is fieldEx with a caller-resolved data-label.
+func fieldExDL(label, dataLabel, act, value, inputType, placeholder, tipHTML string) string {
+	if inputType == "" {
+		inputType = "text"
+	}
+	ph := ""
+	if placeholder != "" {
+		ph = ` placeholder=` + attrQ(placeholder)
+	}
+	return fmt.Sprintf(`<label class=field data-label=%s><span class=field-label>%s%s</span>`+
+		`<input class=field-input type=%s value=%s data-value=%s data-act=%s%s></label>`,
+		attrQ(dataLabel), html.EscapeString(label), tipHTML, inputType, attrQ(value), attrQ(value), attrQ(act), ph)
+}

@@ -143,8 +143,7 @@ func ovlFixtures() map[string]ovlState {
 	escaping.Web.Scene = uiField{Label: `Sc&ene"'`, DL: `sc&ene"'`, Act: "ovl-obsscene", Value: `r&ave "page"'`, Type: "text"}
 	escaping.Web.Note1, escaping.Web.Note2 = `w&1"<>'`, `w&2"<>'`
 	escaping.Wave.WaveColor = uiField{Label: `C&ol"<>'`, DL: `c&ol"<>'`, Act: "ovl-wf-wavecolor", Value: `#08&F7"`, Type: "text"}
-	escaping.Wave.WaveOpac = uiSlider{Label: `O&pac"<>'`, DL: `o&pac"<>'`, Act: `ovl-wf-waveopac&"`,
-		Min: "0", Max: "1", Step: "0.05", Val: "0.9", Unit: `%&"'`, UnitJS: `"%\u0026\"'"`}
+	escaping.Wave.WaveOpac = newSlider(`O&pac"<>'`, `ovl-wf-waveopac&"`, 0, 1, 0.05, 0.9, `%&"'`)
 	escaping.Wave.Zoom = selState{ID: "ovl-wf-zoom", Label: `Z&oom"<>'`, CurLabel: `1&6"<>'`, Open: true,
 		Filter: `f&"<>'`, Rows: []selRow{{Val: `v&"'<>`, Label: `L&"'<>`, Sub: `s&"'<>`, Badge: `b&"'<>`, Cur: true}}}
 	escaping.Png.Dir = uiField{Label: `D&ir"<>'`, DL: `d&ir"<>'`, Act: "ovl-png-dir", Value: `C:\p&th"<>'`, Type: "text"}

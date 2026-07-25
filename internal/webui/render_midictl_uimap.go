@@ -189,22 +189,77 @@ func umActionOpts() []ssOpt {
 	return out
 }
 
-// midiUIMapCard renders the mappings card on the MIDI tab, grouped by device profile.
-func (u *UI) midiUIMapCard() string {
+// ── resolved render state ──
+
+// umTrail is one trailing control of a mappings row: a smart select or a button.
+type umTrail struct {
+	Kind  string   `json:"kind"` // "sel" | "btn"
+	Sel   selState `json:"sel"`
+	Label string   `json:"label"`
+	Var   string   `json:"var"`
+	Act   string   `json:"act"`
+}
+
+// umSelTrail wraps a resolved smart select as a trailing control.
+func umSelTrail(s selState) umTrail { return umTrail{Kind: "sel", Sel: s} }
+
+// umBtnTrail wraps a button as a trailing control (Sel carries non-nil rows so the
+// state JSON never marshals a null slice - the Zig parser rejects those).
+func umBtnTrail(label, variant, act string) umTrail {
+	return umTrail{Kind: "btn", Sel: emptySel(), Label: label, Var: variant, Act: act}
+}
+
+// umRow is one itemRow of the mappings card (add row, profile row, bind row).
+type umRow struct {
+	Title string    `json:"title"`
+	Sub   string    `json:"sub"`
+	Trail []umTrail `json:"trail"`
+}
+
+// umProfileRow is a device-profile row plus the binds it owns (or the empty note).
+type umProfileRow struct {
+	Row      umRow   `json:"row"`
+	HasBinds bool    `json:"hasBinds"`
+	Empty    string  `json:"empty"`
+	Binds    []umRow `json:"binds"`
+}
+
+// umState is the resolved render state for the mappings card.
+type umState struct {
+	Show      bool           `json:"show"` // Cfg + MIDILearn wired
+	Title     string         `json:"title"`
+	TitleTip  string         `json:"titleTip"` // pre-rendered tooltip HTML
+	Sub       string         `json:"sub"`
+	EnableLbl string         `json:"enableLbl"`
+	EnableDL  string         `json:"enableDl"`
+	EnableAct string         `json:"enableAct"`
+	EnableOn  bool           `json:"enableOn"`
+	EnableTip string         `json:"enableTip"`
+	Add       umRow          `json:"add"`
+	Profiles  []umProfileRow `json:"profiles"`
+	Note      string         `json:"note"`
+}
+
+// umState resolves binds + profiles + learn arming into the mappings-card render state.
+func (u *UI) umState() umState {
 	if u.svc.Cfg == nil || u.svc.MIDILearn == nil {
-		return ""
+		return umState{Add: umRow{Trail: []umTrail{}}, Profiles: []umProfileRow{}}
 	}
 	m := &u.svc.Cfg.Features.MIDI
 	f := &u.svc.Cfg.Features.VROverlay
-	st := u.um()
-	st.mu.Lock()
-	learning := st.learn
-	st.mu.Unlock()
+	ls := u.um()
+	ls.mu.Lock()
+	learning := ls.learn
+	ls.mu.Unlock()
 
-	var b strings.Builder
-	b.WriteString(`<p class=page-sub>` + htmlEscape(i18n.T("midictl.uimap.sub")) + `</p>`)
-	b.WriteString(toggleRowTip(i18n.T("midictl.uimap.enable"), "um-enable",
-		!m.DisableUIBinds, tipTopic("midi-mapping")))
+	enLbl := i18n.T("midictl.uimap.enable")
+	st := umState{
+		Show: true, Title: i18n.T("midictl.uimap.title"), TitleTip: tipTopic("midi-mapping"),
+		Sub:       i18n.T("midictl.uimap.sub"),
+		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl), EnableAct: "um-enable",
+		EnableOn: !m.DisableUIBinds, EnableTip: tipTopic("midi-mapping"),
+		Profiles: []umProfileRow{}, Note: i18n.T("midictl.uimap.note"),
+	}
 
 	// Add mapping: pick an action, then touch a control - the touched device's profile owns it.
 	if learning != "" {
@@ -212,11 +267,13 @@ func (u *UI) midiUIMapCard() string {
 		if a, ok := vrbind.ActionByID(learning); ok {
 			lbl = umActLabel(a)
 		}
-		b.WriteString(itemRow(lbl, i18n.T("midictl.uimap.armedHint"),
-			btn(i18n.T("midictl.uimap.cancel"), "warn", "um-learn:"+string(learning), "")))
+		st.Add = umRow{Title: lbl, Sub: i18n.T("midictl.uimap.armedHint"), Trail: []umTrail{
+			umBtnTrail(i18n.T("midictl.uimap.cancel"), "warn", "um-learn:"+string(learning)),
+		}}
 	} else {
-		b.WriteString(itemRow(i18n.T("midictl.uimap.add"), i18n.T("midictl.uimap.addSub"),
-			smartSelect("um-add", "", "um-learn:", i18n.T("midictl.uimap.learn"), umActionOpts)))
+		st.Add = umRow{Title: i18n.T("midictl.uimap.add"), Sub: i18n.T("midictl.uimap.addSub"), Trail: []umTrail{
+			umSelTrail(resolveSmartSelect("um-add", "um-learn:", i18n.T("midictl.uimap.learn"), umActionOpts)),
+		}}
 	}
 
 	profiles := u.umProfiles()
@@ -230,32 +287,71 @@ func (u *UI) midiUIMapCard() string {
 		if paused {
 			pauseLbl, pauseVariant = i18n.T("midictl.uimap.profileOff"), "warn"
 		}
-		trail := []string{btn(pauseLbl, pauseVariant, "um-prof:"+p.Key, "")}
+		trail := []umTrail{umBtnTrail(pauseLbl, pauseVariant, "um-prof:"+p.Key)}
 		if len(p.Binds) > 0 {
 			if opts := umCopyOpts(profiles, p.Key); len(opts) > 0 {
 				o := opts
-				trail = append(trail, smartSelect("um-pcopy-"+strconv.Itoa(pi), "",
+				trail = append(trail, umSelTrail(resolveSmartSelect("um-pcopy-"+strconv.Itoa(pi),
 					"um-pcopy:"+p.Key, i18n.T("midictl.uimap.profileCopy"),
-					func() []ssOpt { return o }))
+					func() []ssOpt { return o })))
 			}
-			trail = append(trail, btn(i18n.T("midictl.uimap.profileClear"), "ghost", "um-pclear:"+p.Key, ""))
+			trail = append(trail, umBtnTrail(i18n.T("midictl.uimap.profileClear"), "ghost", "um-pclear:"+p.Key))
 		}
-		b.WriteString(itemRow(p.Label, sub, trail...))
-		if len(p.Binds) == 0 {
-			b.WriteString(`<div class=set-note>` + htmlEscape(i18n.T("midictl.uimap.profileEmpty")) + `</div>`)
+		pr := umProfileRow{
+			Row:   umRow{Title: p.Label, Sub: sub, Trail: trail},
+			Empty: i18n.T("midictl.uimap.profileEmpty"),
+			Binds: []umRow{},
+		}
+		if len(p.Binds) > 0 {
+			pr.HasBinds = true
+			for _, i := range p.Binds {
+				bd := f.Binds[i]
+				a, ok := vrbind.ActionByID(bd.Action)
+				if !ok {
+					continue
+				}
+				pr.Binds = append(pr.Binds, u.umBindRowState(i, a, *bd.MIDI))
+			}
+		}
+		st.Profiles = append(st.Profiles, pr)
+	}
+	return st
+}
+
+// umHTML is the pure mappings-card renderer (golden reference).
+func umHTML(st umState) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<p class=page-sub>` + htmlEscape(st.Sub) + `</p>`)
+	b.WriteString(toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, st.EnableTip))
+	b.WriteString(umRowHTML(st.Add))
+	for _, p := range st.Profiles {
+		b.WriteString(umRowHTML(p.Row))
+		if !p.HasBinds {
+			b.WriteString(`<div class=set-note>` + htmlEscape(p.Empty) + `</div>`)
 			continue
 		}
-		for _, i := range p.Binds {
-			bd := f.Binds[i]
-			a, ok := vrbind.ActionByID(bd.Action)
-			if !ok {
-				continue
-			}
-			b.WriteString(u.umBindRow(i, a, *bd.MIDI))
+		for _, r := range p.Binds {
+			b.WriteString(umRowHTML(r))
 		}
 	}
-	b.WriteString(`<div class=set-note>` + htmlEscape(i18n.T("midictl.uimap.note")) + `</div>`)
-	return card(i18n.T("midictl.uimap.title"), tipTopic("midi-mapping"), b.String())
+	b.WriteString(`<div class=set-note>` + htmlEscape(st.Note) + `</div>`)
+	return card(st.Title, st.TitleTip, b.String())
+}
+
+// umRowHTML renders one mappings itemRow with its trailing controls.
+func umRowHTML(r umRow) string {
+	trail := make([]string, 0, len(r.Trail))
+	for _, t := range r.Trail {
+		if t.Kind == "sel" {
+			trail = append(trail, selHTML(t.Sel))
+			continue
+		}
+		trail = append(trail, btn(t.Label, t.Var, t.Act, ""))
+	}
+	return itemRow(r.Title, r.Sub, trail...)
 }
 
 // profileProbePort returns a port string that resolves to this profile's key (the key itself
@@ -279,16 +375,16 @@ func umCopyOpts(profiles []umProfile, srcKey string) []ssOpt {
 	return out
 }
 
-// umBindRow renders one existing bind: key chip + mode/sensitivity/reverse editors + remove.
-// idx is the bind's absolute index in VROverlay.Binds (the shared store).
-func (u *UI) umBindRow(idx int, a vrbind.Action, k vrbind.MIDIKey) string {
+// umBindRowState resolves one existing bind: key chip + mode/sensitivity/reverse editors +
+// remove. idx is the bind's absolute index in VROverlay.Binds (the shared store).
+func (u *UI) umBindRowState(idx int, a vrbind.Action, k vrbind.MIDIKey) umRow {
 	is := strconv.Itoa(idx)
 	isNote := k.Status&0xF0 == 0x90 || k.Status&0xF0 == 0x80
-	var trail []string
+	trail := []umTrail{}
 	if opts := umModeOpts(a.Kind, isNote); len(opts) > 0 {
 		o := opts
-		trail = append(trail, smartSelect("um-mode-"+is, "", "um-mode:"+is+":", umModeLabel(a.Kind, k),
-			func() []ssOpt { return o }))
+		trail = append(trail, umSelTrail(resolveSmartSelect("um-mode-"+is, "um-mode:"+is+":",
+			umModeLabel(a.Kind, k), func() []ssOpt { return o })))
 	}
 	if a.Kind == vrbind.KindStep && !isNote && (k.Mode == vrbind.ModeAbs || k.Mode == vrbind.ModeRel2C ||
 		k.Mode == vrbind.ModeRelSM || k.Mode == vrbind.ModeRel64) {
@@ -296,7 +392,8 @@ func (u *UI) umBindRow(idx int, a vrbind.Action, k vrbind.MIDIKey) string {
 		if step <= 0 {
 			step = 1
 		}
-		trail = append(trail, smartSelect("um-step-"+is, "", "um-step:"+is+":", i18n.T("midictl.uimap.step")+" "+strconv.Itoa(step),
+		trail = append(trail, umSelTrail(resolveSmartSelect("um-step-"+is, "um-step:"+is+":",
+			i18n.T("midictl.uimap.step")+" "+strconv.Itoa(step),
 			func() []ssOpt {
 				var out []ssOpt
 				for _, n := range []int{1, 2, 4, 8} {
@@ -304,17 +401,17 @@ func (u *UI) umBindRow(idx int, a vrbind.Action, k vrbind.MIDIKey) string {
 						Sub: i18n.Tn("midictl.uimap.stepSub", n)})
 				}
 				return out
-			}))
+			})))
 	}
 	if a.Kind == vrbind.KindStep {
 		revVariant := "ghost"
 		if k.Rev {
 			revVariant = "secondary"
 		}
-		trail = append(trail, btn(i18n.T("midictl.uimap.rev"), revVariant, "um-rev:"+is, ""))
+		trail = append(trail, umBtnTrail(i18n.T("midictl.uimap.rev"), revVariant, "um-rev:"+is))
 	}
-	trail = append(trail, btn("✕", "ghost", "um-del:"+is, ""))
-	return itemRow("↳ "+umActLabel(a), vrmMIDIKeyLabel(k)+" · "+umModeLabel(a.Kind, k), trail...)
+	trail = append(trail, umBtnTrail("✕", "ghost", "um-del:"+is))
+	return umRow{Title: "↳ " + umActLabel(a), Sub: vrmMIDIKeyLabel(k) + " · " + umModeLabel(a.Kind, k), Trail: trail}
 }
 
 // ── actions ──
