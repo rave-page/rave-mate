@@ -89,8 +89,20 @@ func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
 func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
 func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
 
+<<<<<<< HEAD
 // --- cueedit ---
 
 func RenderCueEditTopbar(stateJSON []byte) (string, bool) { return "", false }
 func RenderCueEditWave(stateJSON []byte) (string, bool)   { return "", false }
 func RenderCueEditRail(stateJSON []byte) (string, bool)   { return "", false }
+=======
+// --- libviews ---
+
+func RenderLibMirror(stateJSON []byte) (string, bool)       { return "", false }
+func RenderLibMirrorBanner(stateJSON []byte) (string, bool) { return "", false }
+func RenderRCEBody(stateJSON []byte) (string, bool)         { return "", false }
+func RenderRCEInfo(stateJSON []byte) (string, bool)         { return "", false }
+func RenderRCESave(stateJSON []byte) (string, bool)         { return "", false }
+func RenderLibSmartModal(stateJSON []byte) (string, bool)   { return "", false }
+func RenderLibRelocModal(stateJSON []byte) (string, bool)   { return "", false }
+>>>>>>> feature/zig-ui-libviews

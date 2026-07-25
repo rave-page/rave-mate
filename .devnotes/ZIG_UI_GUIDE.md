@@ -96,6 +96,9 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
 
 | settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
+| library ▸ peer mirror | Zig (`native/zigui/src/libviews.zig`; `#lib-body` + `#rmirror-banner`) | `TestZigLibMirrorGolden` |
+| library ▸ remote cue edit | Zig (`libviews.zig`; `#lib-body` + `#rce-info` + the rail's save section) | `TestZigRCEGolden` |
+| library ▸ modals | Zig (`libviews.zig`; smart-rules editor + relocate-missing) | `TestZigLibModalsGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
 | library ▸ cue editor | Zig (`native/zigui/src/cueedit.zig`; `#ce-topbar` + full-width wave strip + the `#lib-detail` editor rail) | `TestZigCueEditTopbarGolden`, `TestZigCueEditWaveGolden`, `TestZigCueEditRailGolden`, `TestZigCueEditRailInDetail` |
 | (all others) | Go | — |
@@ -370,6 +373,7 @@ Library-port notes (the biggest tab, 2768 lines): split into `render_library_sta
   webui threading model, not for the DOM. The phase-A bridge also adds a per-render
   state->JSON->parse round trip that phase B removes.
 
+<<<<<<< HEAD
 Cue-editor-port notes (the deepest single subview, ~2000 lines of library_cueedit.go): three
 exports because three surfaces patch independently - `rz_ui_render_cueedit_topbar` (`#ce-topbar`,
 re-patched on EVERY cursor move / edit), `_wave` (the full-width strip the library embeds as
@@ -410,3 +414,64 @@ renderers + bridges); `library_cueedit.go` keeps 3-line delegations so `cePatchR
   embeds the REAL wave + rail markup instead of stubs, so the seam is pinned from both sides.
 - NOT ported (modal, wave 4+): `cePatternManagerHTML` (the manage-patterns dialog) - dialogs
   stay Go, same rule as the publish batch.
+=======
+## Modal ports (recipe — wave 4 dialog sweep follows this)
+
+First modal ports: the two Library dialogs (`libSmartModalHTML`, `libRelocModalHTML`). A modal
+differs from a tab in exactly two ways: it renders into the modal root instead of a patch
+target, and its markup is wrapped by `components.go modal(title, body, footer)`. Everything
+else is the tab recipe.
+
+1. **Split like a tab.** `<name>ModalState(...)` (impure: locks, i18n, smart-select
+   registration) + pure `<name>ModalHTMLOf(st)` that ENDS with `modal(st.Title, body, footer)`.
+   Keep the exported entry point's signature (`func (u *UI) libSmartModalHTML(s *libSt) string`)
+   so every `u.openModal(u.<x>ModalHTML(s))` call site is untouched — modals are re-opened from
+   many action handlers and each one is a full re-render.
+2. **Bridge inside that entry point** (`zigui.Available()` → `zigui.Render<X>Modal` → Go
+   fallback). The state travels as ONE struct; the modal chrome is part of the Zig output, so
+   `openModal` sees the same bytes either way.
+3. **components.zig gained the modal bracket triple** (`// --- libviews ---`):
+   `modalOpen(title)` → body → `modalFoot()` → footer → `modalClose()`, plus
+   `modalFootDefault()` for Go's default footer. NOTE: that default footer's label `"Close"` is
+   a HARDCODED ENGLISH literal in `components.go modal()` (not an i18n key) — replicated
+   verbatim; don't "fix" it on one side only.
+4. **Live sub-patches inside a modal stay Go.** `#lib-sr-count` is patched via
+   `c.textContent = <text>` (`libSRQuiet`), not innerHTML — so the count is a plain state string
+   (`Count`), and no fragment export is needed. Check every `__patch`/`textContent` site inside
+   the dialog before deciding you need a `_frag` export.
+5. **Modal-local smart selects resolve exactly like tab ones.** `pbSelect` → `resolvePbSelect`,
+   and a bare `smartSelect(id, "", act, cur, opts)` → `resolveSmartSelect(id, act, cur, opts)`
+   + `selHTML` (label "" ⇒ byte-identical). The opts closure keeps reading `ssFilter(id)` and
+   capping server-side — filtering NEVER crosses the ABI (the compat picker's 60-row cap and
+   its Unicode `strings.ToLower` stay in Go).
+6. **Golden fixtures for a modal** = the tab set plus the dialog's own state axes: closed /
+   open+filtered / open+no-matches (`ss-none`), the create-vs-edit title+confirm pair, the
+   conditional sub-block (compat depth chips), and every list cap (relocate: 200 rows + the
+   "showing" line). Escaping fixtures must include the ids/acts spliced UNESCAPED
+   (`lib-reloc-skip:<i>` is index-derived, emitted raw both sides).
+
+libviews-port notes (wave 3: mirror / remote-cue-edit / modals):
+- **Side-effect ORDER is part of the split.** `libMirrorState` opens the ruiMsg session, cancels
+  the previous one and only THEN resolves the banner — the old renderer built the banner after
+  flipping `status = connecting`, so resolving it first would render one stale tick. Same
+  discipline as `peerBannerState` before `peerConnsState`.
+- `rceBody` embeds the local inspector: it now carries `libDetailSt` as structured state and
+  renders through `libDetailWrapHTML` / Zig `library_detail.render`, which removes the nested
+  per-render bridge call the old `libDetailWrap(s)` made. `#lib-detail` / `#rce-info` ids and
+  patch contracts are unchanged.
+- **Raw seam left deliberately: `rceBodySt.Wave` = `ceWaveHTML()`** (library_cueedit.go). The cue
+  editor is a separate port; its topbar + waveform canvas + `ce-*` acts ride as trusted markup.
+  `rceSaveHTML()` (the rce arm of the rail) IS ported and keeps its signature, so
+  `ceRailHTML`'s `wb = rs` splice needs no change whichever renderer owns the rail.
+- **The StateSHA contract was not touched.** `rceDirtyLocked()` / `r.baseSHA` are read by the
+  state builders exactly where the renderers read them; no hashing, no state computation and no
+  save/conflict path moved. Explicit `status` enums (`busy|dirty|saved|clean`) + `hasWrites`
+  carry the branch instead of "empty means the other arm".
+- Trusted raw fields: the mirror banner's `tipTopic("remote-library")` markup, and the session
+  status spliced UNESCAPED into `class="rmirror-bar rmirror-<status>"` (one of four consts) —
+  both replicated raw.
+- Zero-DOM-change proof: a throwaway dump test rendered 36 fixtures (banner × every status,
+  no-link arm, rce info/save/body × set+dirty+saved+escaping arms, both modals × empty/
+  populated/edit/open-filtered/no-match/capped) in a HEAD worktree and in the split tree —
+  `diff -r` clean. The Zig golden then re-checks 48 subtests byte-for-byte.
+>>>>>>> feature/zig-ui-libviews

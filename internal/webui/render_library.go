@@ -1713,61 +1713,127 @@ func libGenres(tr []musiclib.Track) []string {
 	return out
 }
 
+// libSmartModalSt is the resolved smart-rules editor modal (Zig: libviews.SmartModal).
+type libSmartModalSt struct {
+	Title      string       `json:"title"`
+	Desc       string       `json:"desc"`
+	Name       libPBFieldSt `json:"name"`
+	GenresLbl  string       `json:"genresLbl"`
+	Genres     []libChipSt  `json:"genres,omitempty"`
+	Feel       selState     `json:"feel"`
+	BPMMin     libPBFieldSt `json:"bpmMin"`
+	BPMMax     libPBFieldSt `json:"bpmMax"`
+	KeyField   libPBFieldSt `json:"keyField"`
+	Rating     selState     `json:"rating"`
+	Plays      libPBFieldSt `json:"plays"`
+	Search     libPBFieldSt `json:"search"`
+	CompatLbl  string       `json:"compatLbl"`
+	Compat     selState     `json:"compat"`
+	HasDepth   bool         `json:"hasDepth,omitempty"` // an anchor is picked → depth chips show
+	Depth      []libChipSt  `json:"depth,omitempty"`
+	CompatHint string       `json:"compatHint"`
+	Count      string       `json:"count"`
+	Confirm    string       `json:"confirm"`
+	Cancel     string       `json:"cancel"`
+}
+
 // libSmartModalHTML builds the rules editor modal. Caller holds s.mu.
 func (u *UI) libSmartModalHTML(s *libSt) string {
-	r := s.srRules
-	var b strings.Builder
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.sr.desc")) + `</p>`)
-	b.WriteString(`<div class=mform>`)
-	b.WriteString(pbField(i18n.T("library.sr.name"), "lib-sr-name", s.srName, "text", ""))
-	// genre chips from the collection
-	b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(i18n.T("library.sr.genres")) + `</div><div class=seg>`)
-	for _, g := range libGenres(s.tracks) {
-		b.WriteString(fchip(g, "", "lib-sr-genre:"+g, s.srGenres[g]))
+	st := u.libSmartModalState(s)
+	if zigui.Available() {
+		if h, ok := zigui.RenderLibSmartModal(stateJSON(st)); ok {
+			return h
+		}
 	}
-	b.WriteString(`</div></div>`)
+	return libSmartModalHTMLOf(st)
+}
+
+// libSmartModalState resolves the modal (i18n + genre scan + the three smart-select
+// registrations, in RENDER order). Caller holds s.mu.
+func (u *UI) libSmartModalState(s *libSt) libSmartModalSt {
+	r := s.srRules
+	st := libSmartModalSt{
+		Title:     i18n.T("library.sr.titleNew"),
+		Desc:      i18n.T("library.sr.desc"),
+		Name:      newPBField(i18n.T("library.sr.name"), "lib-sr-name", s.srName, "text", ""),
+		GenresLbl: i18n.T("library.sr.genres"),
+		Genres:    []libChipSt{},
+	}
+	for _, g := range libGenres(s.tracks) { // genre chips from the collection
+		st.Genres = append(st.Genres, newChip(g, "", "lib-sr-genre:"+g, s.srGenres[g]))
+	}
 	// feel presets seed the BPM band - energy proxy without audio analysis
 	feelOpts := [][2]string{{"", i18n.T("library.sr.feelPlaceholder")}}
 	for _, f := range musiclib.FeelPresets() {
 		feelOpts = append(feelOpts, [2]string{f.Label, f.Label})
 	}
-	b.WriteString(pbSelect(i18n.T("library.sr.feel"), "lib-sr-feel", feelOpts, ""))
-	b.WriteString(`<div class=sr-band>` + pbField(i18n.T("library.sr.bpmMin"), "lib-sr-bpmmin", libTrimF0(r.BPMMin), "number", "") +
-		pbField(i18n.T("library.sr.bpmMax"), "lib-sr-bpmmax", libTrimF0(r.BPMMax), "number", "") + `</div>`)
-	b.WriteString(pbField(i18n.T("library.sr.keyContains"), "lib-sr-key", r.KeyContains, "text", i18n.T("library.sr.keyHint")))
+	st.Feel = resolvePbSelect(i18n.T("library.sr.feel"), "lib-sr-feel", feelOpts, "")
+	st.BPMMin = newPBField(i18n.T("library.sr.bpmMin"), "lib-sr-bpmmin", libTrimF0(r.BPMMin), "number", "")
+	st.BPMMax = newPBField(i18n.T("library.sr.bpmMax"), "lib-sr-bpmmax", libTrimF0(r.BPMMax), "number", "")
+	st.KeyField = newPBField(i18n.T("library.sr.keyContains"), "lib-sr-key", r.KeyContains, "text", i18n.T("library.sr.keyHint"))
 	rateOpts := [][2]string{{"0", i18n.T("library.sr.rateAny")}, {"1", "≥ 1★"}, {"2", "≥ 2★"}, {"3", "≥ 3★"}, {"4", "≥ 4★"}, {"5", "5★"}}
-	b.WriteString(`<div class=sr-band>` + pbSelect(i18n.T("library.sr.rating"), "lib-sr-rating", rateOpts, strconv.Itoa(r.RatingMin)) +
-		pbField(i18n.T("library.sr.plays"), "lib-sr-plays", libTrimI0(r.PlayCountMin), "number", "") + `</div>`)
-	b.WriteString(pbField(i18n.T("library.sr.search"), "lib-sr-search", r.Search, "text", i18n.T("library.sr.searchHint")))
+	st.Rating = resolvePbSelect(i18n.T("library.sr.rating"), "lib-sr-rating", rateOpts, strconv.Itoa(r.RatingMin))
+	st.Plays = newPBField(i18n.T("library.sr.plays"), "lib-sr-plays", libTrimI0(r.PlayCountMin), "number", "")
+	st.Search = newPBField(i18n.T("library.sr.search"), "lib-sr-search", r.Search, "text", i18n.T("library.sr.searchHint"))
 	// works-together anchor: caller-prepped compat set becomes the rule predicate
-	b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(i18n.T("library.sr.compat")) + `</div>` +
-		libSRCompatPicker(s.tracks, r.CompatWith))
+	st.CompatLbl = i18n.T("library.sr.compat")
+	st.Compat = libSRCompatPickerState(s.tracks, r.CompatWith)
 	if r.CompatWith != "" {
 		depth2 := r.CompatDepth >= 2
-		b.WriteString(`<div class=seg>` + fchip(i18n.T("library.sr.compatDirect"), "", "lib-sr-depth:1", !depth2) +
-			fchip(i18n.T("library.sr.compatDepth2"), "", "lib-sr-depth:2", depth2) + `</div>`)
+		st.HasDepth = true
+		st.Depth = []libChipSt{
+			newChip(i18n.T("library.sr.compatDirect"), "", "lib-sr-depth:1", !depth2),
+			newChip(i18n.T("library.sr.compatDepth2"), "", "lib-sr-depth:2", depth2),
+		}
 	}
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.sr.compatHint")) + `</p></div>`)
-	b.WriteString(`<div id=lib-sr-count class=sr-count>` + html.EscapeString(u.libSRCountText(s)) + `</div>`)
-	confirm := i18n.T("library.sr.create")
+	st.CompatHint = i18n.T("library.sr.compatHint")
+	st.Count = u.libSRCountText(s)
+	st.Confirm = i18n.T("library.sr.create")
 	if s.srID != 0 {
-		confirm = i18n.T("common.save")
+		st.Confirm = i18n.T("common.save")
+		st.Title = i18n.T("library.sr.titleEdit")
 	}
-	b.WriteString(btnRow(btn(confirm, "primary", "lib-sr-save", ""), btn(i18n.T("common.cancel"), "outline", "modal-close", "")))
-	b.WriteString(`</div>`)
-	title := i18n.T("library.sr.titleNew")
-	if s.srID != 0 {
-		title = i18n.T("library.sr.titleEdit")
-	}
-	return modal(title, b.String(), "")
+	st.Cancel = i18n.T("common.cancel")
+	return st
 }
 
-// libSRCompatPicker: filterable anchor-track picker for the compat rule. Captures the
-// tracks slice (NOT s - the opts closure runs off the render path, no s.mu). Unfiltered
-// open shows a capped slice; the filter pre-filters server-side via ssFilter.
-func libSRCompatPicker(tracks []musiclib.Track, cur string) string {
+// libSmartModalHTMLOf is the pure modal renderer.
+func libSmartModalHTMLOf(st libSmartModalSt) string {
+	var b strings.Builder
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(st.Desc) + `</p>`)
+	b.WriteString(`<div class=mform>`)
+	b.WriteString(st.Name.html())
+	b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(st.GenresLbl) + `</div><div class=seg>`)
+	for _, g := range st.Genres {
+		b.WriteString(g.html())
+	}
+	b.WriteString(`</div></div>`)
+	b.WriteString(selHTML(st.Feel))
+	b.WriteString(`<div class=sr-band>` + st.BPMMin.html() + st.BPMMax.html() + `</div>`)
+	b.WriteString(st.KeyField.html())
+	b.WriteString(`<div class=sr-band>` + selHTML(st.Rating) + st.Plays.html() + `</div>`)
+	b.WriteString(st.Search.html())
+	b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(st.CompatLbl) + `</div>` +
+		selHTML(st.Compat))
+	if st.HasDepth {
+		b.WriteString(`<div class=seg>`)
+		for _, d := range st.Depth {
+			b.WriteString(d.html())
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(st.CompatHint) + `</p></div>`)
+	b.WriteString(`<div id=lib-sr-count class=sr-count>` + html.EscapeString(st.Count) + `</div>`)
+	b.WriteString(btnRow(btn(st.Confirm, "primary", "lib-sr-save", ""), btn(st.Cancel, "outline", "modal-close", "")))
+	b.WriteString(`</div>`)
+	return modal(st.Title, b.String(), "")
+}
+
+// libSRCompatPickerState registers + resolves the anchor picker (label ""; selHTML then
+// renders exactly what smartSelect("lib-sr-compat", "", …) did).
+func libSRCompatPickerState(tracks []musiclib.Track, cur string) selState {
 	const capRows = 60
-	return smartSelect("lib-sr-compat", "", "lib-sr-compat:", cur, func() []ssOpt {
+	return resolveSmartSelect("lib-sr-compat", "lib-sr-compat:", cur, func() []ssOpt {
 		q := strings.ToLower(strings.TrimSpace(ssFilter("lib-sr-compat")))
 		opts := []ssOpt{{Val: "", Label: i18n.T("library.sr.compatNone")}}
 		if cur != "" { // anchor always listed so the closed control shows its label
@@ -1816,41 +1882,111 @@ func libTrimF0(f float64) string {
 
 // ── relocate-missing modal (Fyne doRelocate parity: index root → candidates → backup + write NEW collection) ──
 
+// libRelocRowSt is one candidate row. Act is spliced UNESCAPED (index-derived, like Go).
+type libRelocRowSt struct {
+	Act     string `json:"act"`
+	Checked bool   `json:"checked,omitempty"`
+	Old     string `json:"old"`
+	New     string `json:"newPath"`
+	Conf    string `json:"conf"`
+	ConfVar string `json:"confVar"`
+}
+
+// libRelocModalSt is the resolved relocate-missing modal (Zig: libviews.RelocModal).
+type libRelocModalSt struct {
+	Title     string          `json:"title"`
+	Desc      string          `json:"desc"`
+	Missing   string          `json:"missing"`
+	Root      string          `json:"root"`
+	RootPH    string          `json:"rootPh"`
+	BrowseLbl string          `json:"browseLbl"`
+	FindLbl   string          `json:"findLbl"`
+	HasMsg    bool            `json:"hasMsg,omitempty"`
+	Msg       string          `json:"msg,omitempty"`
+	HasRows   bool            `json:"hasRows,omitempty"`
+	Rows      []libRelocRowSt `json:"rows,omitempty"`
+	HasMore   bool            `json:"hasMore,omitempty"` // candidate list capped at 200
+	More      string          `json:"more,omitempty"`
+	ApplyLbl  string          `json:"applyLbl,omitempty"`
+}
+
 // libRelocModalHTML builds the relocate flow modal. Caller holds s.mu.
 func (u *UI) libRelocModalHTML(s *libSt) string {
-	var b strings.Builder
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.reloc.desc")) + `</p>`)
-	b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.reloc.missing", i18n.A{"count": fmt.Sprint(len(s.relocMiss))})) + `</p>`)
-	b.WriteString(`<div class=lib-toolbar>` + fieldRaw("lib-reloc-root", s.relocRoot, i18n.T("library.reloc.rootPlaceholder")) +
-		btn(i18n.T("common.browse"), "ghost", "pick-dir:lib-reloc-root", "") + `</div>`)
-	find := i18n.T("library.reloc.find")
-	if s.relocBusy {
-		find = i18n.T("library.reloc.working")
+	st := libRelocModalState(s)
+	if zigui.Available() {
+		if h, ok := zigui.RenderLibRelocModal(stateJSON(st)); ok {
+			return h
+		}
 	}
-	b.WriteString(btnRow(btn(find, "outline", "lib-reloc-find", "")))
+	return libRelocModalHTMLOf(st)
+}
+
+// libRelocModalState resolves the modal. Caller holds s.mu.
+func libRelocModalState(s *libSt) libRelocModalSt {
+	st := libRelocModalSt{
+		Title:     i18n.T("library.reloc.title"),
+		Desc:      i18n.T("library.reloc.desc"),
+		Missing:   i18n.T("library.reloc.missing", i18n.A{"count": fmt.Sprint(len(s.relocMiss))}),
+		Root:      s.relocRoot,
+		RootPH:    i18n.T("library.reloc.rootPlaceholder"),
+		BrowseLbl: i18n.T("common.browse"),
+		FindLbl:   i18n.T("library.reloc.find"),
+	}
+	if s.relocBusy {
+		st.FindLbl = i18n.T("library.reloc.working")
+	}
 	if s.relocMsg != "" {
-		b.WriteString(hint("info", s.relocMsg))
+		st.HasMsg, st.Msg = true, s.relocMsg
 	}
 	if n := len(s.relocCands); n > 0 {
-		b.WriteString(`<div class=reloc-list>`)
+		st.HasRows = true
+		st.ApplyLbl = i18n.T("library.reloc.apply")
 		for i, c := range s.relocCands {
 			if i >= 200 {
-				b.WriteString(`<p class=page-sub>` + html.EscapeString(i18n.T("library.reloc.showing", i18n.A{"total": fmt.Sprint(n)})) + `</p>`)
+				st.HasMore = true
+				st.More = i18n.T("library.reloc.showing", i18n.A{"total": fmt.Sprint(n)})
 				break
 			}
+			st.Rows = append(st.Rows, libRelocRowSt{
+				Act: "lib-reloc-skip:" + strconv.Itoa(i), Checked: !s.relocSkip[i],
+				Old: c.Track.Path, New: c.NewPath,
+				Conf: relocConf(c.Confidence), ConfVar: relocConfBadge(c.Confidence),
+			})
+		}
+	}
+	return st
+}
+
+// libRelocModalHTMLOf is the pure modal renderer.
+func libRelocModalHTMLOf(st libRelocModalSt) string {
+	var b strings.Builder
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(st.Desc) + `</p>`)
+	b.WriteString(`<p class=page-sub>` + html.EscapeString(st.Missing) + `</p>`)
+	b.WriteString(`<div class=lib-toolbar>` + fieldRaw("lib-reloc-root", st.Root, st.RootPH) +
+		btn(st.BrowseLbl, "ghost", "pick-dir:lib-reloc-root", "") + `</div>`)
+	b.WriteString(btnRow(btn(st.FindLbl, "outline", "lib-reloc-find", "")))
+	if st.HasMsg {
+		b.WriteString(hint("info", st.Msg))
+	}
+	if st.HasRows {
+		b.WriteString(`<div class=reloc-list>`)
+		for _, r := range st.Rows {
 			chk := " checked"
-			if s.relocSkip[i] {
+			if !r.Checked {
 				chk = ""
 			}
-			b.WriteString(`<div class=reloc-row><input type=checkbox data-act="lib-reloc-skip:` + strconv.Itoa(i) + `"` + chk + `>` +
-				`<span class=reloc-paths><span class=reloc-old>` + html.EscapeString(c.Track.Path) + `</span>` +
-				`<span class=reloc-new>→ ` + html.EscapeString(c.NewPath) + `</span></span>` +
-				badge(relocConf(c.Confidence), relocConfBadge(c.Confidence)) + `</div>`)
+			b.WriteString(`<div class=reloc-row><input type=checkbox data-act="` + r.Act + `"` + chk + `>` +
+				`<span class=reloc-paths><span class=reloc-old>` + html.EscapeString(r.Old) + `</span>` +
+				`<span class=reloc-new>→ ` + html.EscapeString(r.New) + `</span></span>` +
+				badge(r.Conf, r.ConfVar) + `</div>`)
+		}
+		if st.HasMore {
+			b.WriteString(`<p class=page-sub>` + html.EscapeString(st.More) + `</p>`)
 		}
 		b.WriteString(`</div>`)
-		b.WriteString(btnRow(btn(i18n.T("library.reloc.apply"), "primary", "lib-reloc-apply", "")))
+		b.WriteString(btnRow(btn(st.ApplyLbl, "primary", "lib-reloc-apply", "")))
 	}
-	return modal(i18n.T("library.reloc.title"), b.String(), "")
+	return modal(st.Title, b.String(), "")
 }
 
 func relocConf(c float64) string {

@@ -993,3 +993,51 @@ test "library layout primitives" {
         "<div class=md-list>L</div><div class=split-h data-splitvar=\"lib-det-w\" data-splitdef=340 " ++
         "data-splitdir=r></div><div class=md-detail>D</div></div>", h.b.items);
 }
+
+// --- libviews ---
+// First MODAL port (library mirror / remote-cue-edit bodies + the Library modals). The Go
+// `modal()` helper concatenates scrim + head + body + foot, so the Zig twin is a streaming
+// bracket triple: modalOpen(title) → body → modalFoot() → footer → modalClose().
+
+/// modalOpen emits the scrim + dialog head and opens `.modal-body` (Go components.go modal).
+pub fn modalOpen(h: *Html, title: []const u8) !void {
+    try h.raw("<div class=modal-scrim data-act=modal-close></div>" ++
+        "<div class=modal role=dialog><div class=modal-head><h3 class=modal-title>");
+    try h.esc(title);
+    try h.raw("</h3><button class=modal-x data-act=modal-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body>");
+}
+
+/// modalFoot closes `.modal-body` and opens `.modal-foot`.
+pub fn modalFoot(h: *Html) !void {
+    try h.raw("</div><div class=modal-foot>");
+}
+
+/// modalFootDefault emits Go's default footer: a single Close button. "Close" is a HARDCODED
+/// ENGLISH literal in components.go modal() (not an i18n key) - replicated verbatim for parity.
+pub fn modalFootDefault(h: *Html) !void {
+    try btn(h, "Close", "outline", "modal-close", "");
+}
+
+/// modalClose closes `.modal-foot` + the dialog.
+pub fn modalClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+test "modal brackets match Go modal() with the default footer" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try modalOpen(&h, "Re&locate \"missing\"");
+    try h.raw("BODY");
+    try modalFoot(&h);
+    try modalFootDefault(&h);
+    try modalClose(&h);
+    try std.testing.expectEqualStrings("<div class=modal-scrim data-act=modal-close></div>" ++
+        "<div class=modal role=dialog><div class=modal-head><h3 class=modal-title>" ++
+        "Re&amp;locate &#34;missing&#34;</h3>" ++
+        "<button class=modal-x data-act=modal-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body>BODY</div><div class=modal-foot>" ++
+        "<button class=\"rp-btn rp-btn--outline\" data-act=\"modal-close\">Close</button>" ++
+        "</div></div>", h.b.items);
+}
+// --- end libviews ---
