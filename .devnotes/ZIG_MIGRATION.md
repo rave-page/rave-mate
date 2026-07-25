@@ -35,9 +35,28 @@ step keeps the shipped app green; pure-Go fallback stays until a port soaks.
 - **P0 DONE (a35d23c):** toolchain, zigcore scaffold, polyphase Kaiser-sinc resampler
   (playback quality item closed: >70dB SNR vs ~35dB linear, zero added latency),
   bucketPeaks/bucketBands byte-exact kernels, seams in audio/source.go + worker/probe.go.
-- **P1 realtime audio:** engine inner loops — `writeBytes` f32→LE device feed, decode
-  per-sample converters (wav/aiff/mp3/flac/ffmpeg), envelope RMS (`probe.envelope`),
-  `waveform.bucketPeaks` (overlay resolver), giokit `WaveColumns`, deckcard envelope.
+- **P1 realtime audio DONE:** engine inner loops as additive kernels (ABI stays v1),
+  all byte/bit-exact parity-tested vs the Go originals (which stay as fallback +
+  golden reference; dispatch via `zignative.Available()`):
+  - `rz_f32_to_le` — source.writeBytes f32→LE device feed (gain 0/1 = memcpy
+    fast path). 12.9µs → 5.5µs / 8192-sample pull, 2.3x.
+  - `rz_fold_stereo` — source.toDeviceStereo channel fold (2ch stays Go-side
+    zero-copy). 2.8µs → 2.2µs, 1.3x.
+  - `rz_pcm_to_f32` — batch packed-PCM→f32 for wav decodeSample + aiff
+    decodeSampleBE (8/16/24/32 int, 32/64 float, LE+BE, padded block-align;
+    comptime-specialized loops). Decoders now convert one kernel call per block
+    instead of per-sample closures. s16: 38.7µs → 6.4µs (6.0x); s24: 48.3µs →
+    7.8µs (6.2x) / 4096-frame block. MP3/FLAC/Vorbis/ffmpeg loops skipped:
+    library-output copies with per-frame state, no per-sample math to lift.
+  - waveform resolver `bucketPeaks` — reuses existing `rz_bucket_peaks`
+    (semantics identical to worker's). 2.36ms → 1.45ms / 5-min file, 1.6x.
+  - `rz_wave_columns` — giokit WaveColumns bucket fold. Parity-neutral perf
+    (6.6µs vs 6.9µs; ~4-bucket spans, reduction can't vectorize wider).
+  - `rz_wave_env` — deckcard buildEnv smoothed envelope, f64 bit-exact
+    (truncation/ceil/3-pass binomial replicated; 56µs → 52µs, cached anyway).
+  - `probe.envelope` RMS stays Go: streamed per-bucket accumulator interleaved
+    with 64KiB stdin reads — no batch boundary to hand a kernel without
+    restructuring the streaming loop (revisit in P2/P4).
 - **P2 decoders:** WAV/AIFF decode in Zig (hand-written Go ports exist as goldens);
   evaluate FLAC frame decode. MP3/Vorbis/AAC stay Go/ffmpeg until Zig codecs are vetted
   (supply-chain: no unsoaked Zig deps).
