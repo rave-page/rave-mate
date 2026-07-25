@@ -57,9 +57,11 @@ type WireWriter struct {
 	bad    bool              // over-size: Finish returns nil, caller falls back to v1
 }
 
-// NewWireWriter starts a document for root message msgID under schema hash h.
+// NewWireWriter starts a document for root message msgID under schema hash h. The buffers
+// start at 1 KiB: every view state is bigger than that, and re-growing two slices per render
+// is exactly the GC pressure this format exists to remove.
 func NewWireWriter(msgID uint16, h uint32) *WireWriter {
-	return &WireWriter{msgID: msgID, hash: h}
+	return &WireWriter{msgID: msgID, hash: h, arena: make([]byte, 0, 1024), body: make([]byte, 0, 1024)}
 }
 
 func (w *WireWriter) tag(num, wt int) {
