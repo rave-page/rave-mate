@@ -368,3 +368,140 @@ became unrepresentable. Nothing else in the tick changed.
 3. **The player tick is the most expensive tick in the app** (582 µs vs the Live tab's 20.5 µs),
    and ~98% of it is the waveform SVG + peaks decimation the ports deliberately left in Go. That is
    the next number worth attacking on this surface, not the ABI.
+## Phase B4b — Library retained state: handler-lane occupancy
+
+The thing B4b removes is not render time, it is **handler-lane occupancy**: `internal/webui` runs
+render + every handler on ONE serialized goroutine, and the deleted caches spent that lane on
+hashing their own inputs, two `SELECT MAX(seq)` per render, and (on a miss) the full ~23k-track
+filter+sort. Bench: `internal/webui/library_deriv_bench_test.go` (UNTAGGED - it measures Go-side
+lane work, not the ABI), same box/method as the rest of this file (**min of 8** = four runs x
+`-count=2`, `-benchtime 1s`; one 300 ms warm-up round included in the mins).
+
+The `legacy_*` rows are the DELETED implementations transcribed verbatim (the `liveTickLegacy`
+precedent) - including `LibraryVersion` as the query it was before B4b. Fixture: 23 000 tracks,
+6 smart playlists, every derivation warm.
+
+```sh
+GOWORK=off go test -count=2 ./internal/webui -run '^$' -bench 'LibLane|LibCollViewCompute|LibFsSweep' -benchtime 1s
+```
+
+### Steady state - the 1 Hz tick and every selection-only re-render
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `LibLaneSteady/legacy` (2x `SELECT MAX(seq)` + 2 FNV signatures + version compares) | 30 639 | 1 264 | 43 |
+| **`LibLaneSteady/retained`** (3 comparable keys + 3 struct compares) | **126** | 176 | **4** |
+
+**-99.6% (243x) and 43 -> 4 allocations**, for the render the app performs most often. Range over the
+samples: legacy 30.6-38.3 us, retained 115-163 ns.
+
+### Worst case - a control moved, so the view must be re-derived
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `LibLaneChanged/legacy_inline_scan` (filter+sort 23k ON the lane) | 47 903 618 | 10.7 MB | 613 033 |
+| **`LibLaneChanged/retained_kick`** (stamp + key compare, scan handed to `u.bg`) | **73** | 144 | 2 |
+| `LibCollViewCompute` (the scan itself - unchanged code, now off-lane) | 47 612 327 | 12.4 MB | 683 077 |
+
+**This is the number the memo existed for.** Sorting the collection blocked the single action
+goroutine for ~48 ms (worst sample 62.5 ms) - every click, keystroke and tick queued behind it. The
+work did not get cheaper (`LibCollViewCompute` is the same 47.6 ms), it moved: the lane now pays
+73 ns and the scan runs on `u.bg`, with the control action recomputing BEFORE it patches, so the DOM
+still changes exactly once and to the fresh view.
+
+### Filesystem sweeps - what the 2s/5s TTLs re-ran blind (200 rendered rows, one dir)
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `legacy_stat_every_row` (the 5s on-disk TTL: `os.Stat` x 200) | 3 525 106 | 60 968 | 403 |
+| **`changegate_stat_dirs`** (stat the distinct parent dirs, stop if unmoved) | **56 031** | 16 848 | 205 |
+| `legacy_readdir` (the 2s browse TTL: `ReadDir` + `Info` per entry) | 147 666 | 35 464 | 413 |
+
+**-98.4% on the on-disk sweep** and the browse re-read drops to a single dir stat when nothing moved
+- while getting FRESHER: a dir-mtime move is picked up on the next render (<= 1 tick) instead of
+after the TTL window. Both halves are gated by counters, not by timing
+(`TestOnDiskFreshnessIsChangeDrivenNotTTL`, `TestBrowseFreshnessIsChangeDrivenNotTTL`).
+
+### Caveats
+
+- The `legacy_*` `SELECT MAX(seq)` runs against a near-empty `change_log` (the fixture writes tracks
+  into `libSt`, not the DB) and through a SECOND `sql.DB` handle, so it does NOT include the
+  writer-contention the real single-conn handle adds. The legacy column is therefore a LOWER bound.
+- 23 000 tracks is the size the deleted comments cite; the scan is linear in tracks and the sort
+  n log n, so the worst-case row scales with the user's library.
+- No Zig numbers here: B4b changes no export, no document and no state struct. The library
+  bridge/wire figures above stand unchanged.
+
+## Phase B4 — settings retained-state pass (probes + search)
+
+Same box + method as above (5950X, min-of-N over `-count=2` runs, <20% deltas are noise).
+Reproduce:
+
+```sh
+GOWORK=off go test -count=2 -run '^$' -bench 'BenchmarkSettingsSearch|BenchmarkSettingsPaneQuery|BenchmarkProbeKick|BenchmarkSettingsStateColdProbes' -benchmem ./internal/webui
+GOWORK=off go test -count=1 -run 'TestProbeRealDurations' -v ./internal/webui   # per-probe durations
+```
+
+### B4d search — handler lane per keystroke
+
+| what | pre-B4d (render + stripTags) | B4d (structured walk) | delta |
+|---|---|---|---|
+| real pane, query "port" (`settingsContentState`, 51 cards) | 2 040-2 163 µs | 1 244-1 267 µs | **-40%** |
+| ... allocations | 9 216 | 6 473 | -30% |
+| ... bytes | 1 912 KB | 1 219 KB | -36% |
+| matching alone, 867-card corpus | 15 214-16 021 µs | 6 197-7 058 µs | **-59%** |
+| ... allocations | 58 077 | 11 193 | -81% |
+| ... bytes | 16 297 KB | 4 384 KB | -73% |
+| folded haystack per card | 607 B | 560 B | -8% |
+
+The haystack barely shrinks — the win is not BUILDING the markup (escape + concat + strip + unescape
+of ~2.5 kB of HTML per card), not a smaller needle. The pane figure is the one to quote: it includes
+the card-state build, which B4d does not touch, so -40% is the real per-keystroke saving.
+
+### B4c probes — per-probe cost (the pacing input)
+
+| probe | duration |
+|---|---|
+| `dev:sttmic` | 297-325 ms |
+| `dev:midi` | 56-59 ms |
+| `dev:waveout` | 6.6-7.4 ms |
+| `tools` (3 x os.Stat + PATH scan) | 3.0-4.3 ms |
+| `dev:midiout` | 0-0.5 ms |
+| `vr` / `dev:audiorec` / `unity` | ~0 (not wired / no projects in the fixture) |
+| **cold fill: serial (pre-B4c)** | **370-391 ms** |
+| **cold fill: concurrent (B4c)** | **303-325 ms** (= the slowest member) |
+
+Freshness, which is what actually changed: pre-B4c ANY value was up to `probeTTL` + a full serial
+pass old (10.37 s worst case) because the pass published all slots at the end. Now each slot lands at
+its own probe's cost, so a MIDI port appears within ~59 ms of the next kick instead of waiting on the
+303 ms STT enumeration and the TTL.
+
+### B4c probes — handler lane
+
+| what | ns/op | note |
+|---|---|---|
+| `kickProbes` (8 slots, 8 spawns) | 214-217 | 21 B/op, 0 allocs |
+| pre-B4c kick (TTL check, mostly short-circuit) | 6.7-6.9 | the TTL made it free 99.9% of the time |
+| cold settings state build incl. kick | 219 856-221 915 | 616 allocs |
+
+So the kick is 0.1% of a cold settings state build: the lane never paid for probes, before or after,
+and B4c does not regress it. The probes' cost lives entirely on `u.bg` goroutines, capped per probe
+at 1/`probeBudget` (5%) of a core.
+
+### Findings
+
+1. **The TTL was one probe's fault.** 303 of the 370 ms serial pass is `stt.InputDevices`. Blindly
+   probing at the demand rate would have put ~30% of a core on a background goroutine for as long as
+   the Settings tab is open; cost-proportional pacing prices that probe out to ~6 s while the other
+   seven get the full 1 Hz. A per-probe budget is strictly better than a shared timer BECAUSE the
+   costs differ by 600x.
+2. **Publishing per probe matters as much as running them concurrently.** The old pass wrote every
+   slot after its slowest member returned, so concurrency alone (-18% on the fill) understates the
+   change: per-slot freshness improved by 1-4 orders of magnitude.
+3. **Coalescing the post-probe re-render is not optional and needs its own witness.** Eight landing
+   probes would trigger eight `patchMain`s; the eval queue's id coalescing hides that (one queue
+   entry), so the count lives in the cache and the gate asserts it.
+4. **Search identity is decidable, not samplable.** Because query terms are whitespace-free, mutual
+   containment of the two haystacks' whitespace-free runs settles every possible query - 15.9 M
+   single-term queries for 0.67 s of test time, where the enumerated 1.5 M-decision differential
+   takes 11 s. Enumerate to exercise the production path; decide with the invariant.

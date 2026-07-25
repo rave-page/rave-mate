@@ -110,3 +110,70 @@ func TestAppendChangesEmptyAndNil(t *testing.T) {
 		t.Errorf("nil DB should be a no-op: %v", err)
 	}
 }
+
+// TestLibraryVersionIsInMemoryEpoch: phase B4b moved LibraryVersion off SELECT MAX(seq) onto an
+// in-memory epoch, so a hot caller (the webui render lane) never queues behind the single writer
+// conn. Proof by execution: the epoch still advances with appends AND still answers after the SQL
+// handle is closed - the query path returned 0 there.
+func TestLibraryVersionIsInMemoryEpoch(t *testing.T) {
+	d := openTestDB(t)
+	if v := d.LibraryVersion(); v != 0 {
+		t.Fatalf("empty log version = %d, want 0", v)
+	}
+	ev := []ChangeEvent{{TrackHash: "h1", Field: "play_count", Op: "set", NewValue: "1", Origin: "test"}}
+	if err := d.AppendChanges(ev); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	v1 := d.LibraryVersion()
+	if v1 == 0 {
+		t.Fatal("version did not advance on append")
+	}
+	// still MAX(seq) for the committed log: persisted store caches compare epochs across restarts.
+	var max int64
+	if err := d.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM change_log WHERE node_id=?`, d.nodeID).Scan(&max); err != nil {
+		t.Fatalf("max seq: %v", err)
+	}
+	if v1 != max {
+		t.Fatalf("epoch %d != MAX(seq) %d", v1, max)
+	}
+	if err := d.AppendChanges(ev); err != nil {
+		t.Fatalf("append 2: %v", err)
+	}
+	if v2 := d.LibraryVersion(); v2 <= v1 {
+		t.Fatalf("second append: %d not > %d", v2, v1)
+	}
+	// the read no longer touches SQL at all
+	want := d.LibraryVersion()
+	if err := d.db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if got := d.LibraryVersion(); got != want {
+		t.Fatalf("after Close: %d, want %d (read still hits SQL)", got, want)
+	}
+}
+
+// TestLibraryVersionSeedsFromDisk: a reopened DB reports the persisted MAX(seq), not 0 - store
+// mtime slots keyed on the epoch must not go stale-valid across a restart.
+func TestLibraryVersionSeedsFromDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lib.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	d.SetNodeID("node-A")
+	if err := d.AppendChanges([]ChangeEvent{{TrackHash: "h1", Field: "rating", Op: "set", NewValue: "5"}}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	first := d.LibraryVersion()
+	_ = d.Close()
+
+	d2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { _ = d2.Close() })
+	d2.SetNodeID("node-A")
+	if got := d2.LibraryVersion(); got != first {
+		t.Fatalf("reopened epoch = %d, want the persisted %d", got, first)
+	}
+}

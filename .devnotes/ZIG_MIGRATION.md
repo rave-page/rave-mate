@@ -242,6 +242,40 @@ Rules:
   fixture could reach before). Numbers: a quiet container patch **1 152 µs → 76.6 ns**, 9 939 → 0
   allocs; the sample collapse is 0.018% of a tick - a correctness fix, not a speed-up. No Zig
   change, no schema row (`mpSt` never crosses the ABI). Detail: ZIG_UI_GUIDE.md "Phase B — B4a".
+- **P6 UI phase B4b (Library retained state, SHIPPED):** the Library tab's Go-runtime retained-state
+  workarounds are gone - `collViewSig`, `plRowsVer`, `smartCounts*`'s FNV-over-every-rule-set, the
+  5s on-disk TTL and the 2s browse TTL - replaced by a comparable key (`libDerivKey`) + copy-on-write
+  controls + computation on `u.bg` (`internal/webui/library_deriv.go`). `libdb.LibraryVersion()` also
+  stopped being a `SELECT MAX(seq)` per call: it is an in-memory epoch seeded from the table. Nothing
+  crosses the ABI differently and no state struct changed, so the wire schema and every library
+  golden/wire gate are untouched. Handler-lane occupancy for a steady-state collection render
+  **30.6 us -> 126 ns** (43 -> 4 allocs); worst case (a control moved) **47.9 ms -> 73 ns** on the
+  lane, because the ~23k filter+sort moved off it; the on-disk sweep the TTL re-ran blind
+  **3.53 ms -> 56 us**, and filesystem freshness improved from "within the TTL" to "next render".
+  Gates: a differential missed-invalidation test over every control action, off-lane proofs via a
+  runner seam, change-gate counters, and a byte-identity gate on `#lib-body` (retained vs cold) -
+  each proven non-vacuous by execution. Detail: ZIG_UI_GUIDE.md "Phase B - B4b".
+
+- **P6 UI phase B4 (retained-state pass, settings arm SHIPPED):** B4 deletes retained-state
+  workarounds that existed only for the Go runtime; the DOM must stay identical while the inputs and
+  timing change. Settings (B4c+B4d) is Go-side only - matching is not rendering and a probe schedule
+  is not renderer state, so no schema row and no `_v2` export (wire ids 170-179 unused).
+  **B4c:** `settingsProbes`/`maybeRefreshProbes`/`probeTTL`/`invalidateProbes` are gone. One `busy`
+  flag serialized eight probes behind their slowest member (and published every slot only after the
+  last returned); the 10 s TTL bounded that pass. Now: per-probe single-flight, per-probe goroutine,
+  per-probe slot commit, one COALESCED re-render (the eval queue cannot witness that - it coalesces
+  by fragment id - so the cache counts its own re-renders), and per-probe gate readiness. The only
+  gate left is cost-proportional (`probeBudget` x the probe's own measured duration, <=5% of a core),
+  not a TTL: six of eight probes now refresh at the 1 Hz demand rate while the 303 ms STT mic
+  enumeration - the probe that motivated the TTL - prices itself out to ~6 s. Cold fill 370 -> 303 ms
+  (slowest member, not the sum); worst-case staleness 10.37 s -> that probe's own cost.
+  **B4d:** settings search matches the STRUCTURED `setBlock`/`setKid` state instead of
+  `stripTags(setCardHTML(card))` (~40 card renders per keystroke on the handler lane): 2.10 -> 1.25 ms
+  per keystroke (-40%). Identity is proven twice before the swap - exhaustively (mutual containment
+  of both haystacks' whitespace-free runs decides EVERY possible term: 6069 cards, 15.9 M queries)
+  and by enumeration (4248 derived queries x 357 cards = 1.5 M match decisions), plus a pane-level
+  gate on the production path. Both arms falsified by execution. Detail: ZIG_UI_GUIDE.md
+  "Phase B - B4 retained-state pass".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

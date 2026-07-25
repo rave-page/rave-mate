@@ -57,7 +57,7 @@ type UI struct {
 
 	rui *ruiHub // remote Library sessions over the peer link (host + mirror mux); nil without peers
 
-	probes     settingsProbes   // cached fs/PATH probes (mediatools + vrdll) - kept off the render goroutine
+	probes     probeCache       // retained fs/PATH/device probes - concurrent, off-lane, no TTL (B4c)
 	gfProbe    gridfixProbe     // beatgrid-engine env probe (spawns Python; own long TTL) + fine-tune checkpoints
 	midiProbe  midiCtlProbe     // MIDI-tab driver ioctl + winmm port enum - kept off render goroutine + tick
 	restarts   settingRestarts  // debounced auto module restarts on settings change (settings_apply.go)
