@@ -5,7 +5,7 @@
 // both produce the same visual; only the output transport differs.
 //
 // Rendering is pure Go (image/draw + golang.org/x/image/font/opentype on an embedded Orbitron
-// face). No cgo, no external state.
+// face). No external state; the only optional cgo is the zigdsp envelope kernel (Go fallback).
 package deckcard
 
 import (
@@ -27,6 +27,7 @@ import (
 
 	"rave.page/mate/internal/overlaystyle"
 	"rave.page/mate/internal/session"
+	"rave.page/mate/internal/zignative"
 )
 
 // Card geometry (px). Width/Height are the default card size; callers that need a different
@@ -692,6 +693,7 @@ func waveEnv(peaks []byte, key string, dur, imgPps float64) []float64 {
 
 // buildEnv folds the raw peak buckets into a max-aggregated, heavily-smoothed 0..1 envelope at
 // imgPps columns/sec (mirrors the browser's buildWaveImg envelope so all outputs look the same).
+// Zig kernel when linked (-tags zigdsp; byte-exact, parity-tested), else the Go path.
 func buildEnv(peaks []byte, dur, imgPps float64) []float64 {
 	n := len(peaks)
 	iw := int(dur*imgPps) + 1
@@ -699,6 +701,18 @@ func buildEnv(peaks []byte, dur, imgPps float64) []float64 {
 		return []float64{0}
 	}
 	amp := make([]float64, iw)
+	if zignative.Available() {
+		zignative.WaveEnv(peaks, dur, imgPps, amp)
+		return amp
+	}
+	buildEnvGo(peaks, amp, dur, imgPps)
+	return amp
+}
+
+// buildEnvGo is the pure-Go envelope (authoritative; parity reference). Fills amp (len iw).
+func buildEnvGo(peaks []byte, amp []float64, dur, imgPps float64) {
+	n := len(peaks)
+	iw := len(amp)
 	pkPerCol := (float64(n) / dur) / imgPps
 	span := 0.5 / imgPps
 	for x := 0; x < iw; x++ {
@@ -744,7 +758,6 @@ func buildEnv(peaks []byte, dur, imgPps float64) []float64 {
 			prev = cur
 		}
 	}
-	return amp
 }
 
 func drawWaveformPanel(dst *image.NRGBA, box image.Rectangle, wave WaveOpts, scale float64, curvePys []float64) {

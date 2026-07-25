@@ -96,6 +96,63 @@ func BucketBands(pcm []byte, n, fs int, out []byte) int {
 		C.size_t(n), C.uint32_t(fs), (*C.uint8_t)(unsafe.Pointer(&out[0]))))
 }
 
+// F32ToLEBytes serializes samples to LE bytes (out: 4*len) with pre-gain + ±1 clamp;
+// gain 0/1 = unity passthrough. Byte-exact with source.writeBytes.
+func F32ToLEBytes(samples []float32, gain float32, out []byte) {
+	if len(samples) == 0 {
+		return
+	}
+	C.rz_f32_to_le((*C.float)(unsafe.Pointer(&samples[0])), C.size_t(len(samples)),
+		C.float(gain), (*C.uint8_t)(unsafe.Pointer(&out[0])))
+}
+
+// FoldStereo folds interleaved ch-channel samples to stereo (out: frames*2).
+// Byte-exact with source.toDeviceStereo (ch != 2 only; 2ch is a Go-side no-op).
+func FoldStereo(in []float32, frames, ch int, out []float32) {
+	if frames <= 0 || ch <= 0 {
+		return
+	}
+	C.rz_fold_stereo((*C.float)(unsafe.Pointer(&in[0])), C.size_t(frames), C.uint32_t(ch),
+		(*C.float)(unsafe.Pointer(&out[0])))
+}
+
+// PCMToF32 batch-converts frames packed PCM frames (src: frames*blockAlign bytes) to
+// interleaved f32 (out: frames*ch). Byte-exact with wav decodeSample / aiff decodeSampleBE.
+func PCMToF32(src []byte, frames, ch, blockAlign, bits int, isFloat, bigEndian bool, out []float32) {
+	if frames <= 0 || ch <= 0 {
+		return
+	}
+	b2u := func(b bool) C.uint32_t {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	C.rz_pcm_to_f32((*C.uint8_t)(unsafe.Pointer(&src[0])), C.size_t(frames), C.uint32_t(ch),
+		C.uint32_t(blockAlign), C.uint32_t(bits), b2u(isFloat), b2u(bigEndian),
+		(*C.float)(unsafe.Pointer(&out[0])))
+}
+
+// WaveColumns folds peak buckets into per-column maxima (out: cols bytes).
+// Byte-exact with giokit.WaveColumns.
+func WaveColumns(peaks []byte, cols int, out []byte) {
+	if len(peaks) == 0 || cols <= 0 {
+		return
+	}
+	C.rz_wave_columns((*C.uint8_t)(unsafe.Pointer(&peaks[0])), C.size_t(len(peaks)),
+		C.size_t(cols), (*C.uint8_t)(unsafe.Pointer(&out[0])))
+}
+
+// WaveEnv fills out with the smoothed 0..1 envelope at imgPps columns/sec.
+// Byte-exact with deckcard.buildEnv (caller sizes out = int(dur*imgPps)+1).
+func WaveEnv(peaks []byte, dur, imgPps float64, out []float64) {
+	if len(peaks) == 0 || len(out) == 0 {
+		return
+	}
+	C.rz_wave_env((*C.uint8_t)(unsafe.Pointer(&peaks[0])), C.size_t(len(peaks)),
+		C.double(dur), C.double(imgPps), (*C.double)(unsafe.Pointer(&out[0])), C.size_t(len(out)))
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {

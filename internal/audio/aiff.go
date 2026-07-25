@@ -173,18 +173,7 @@ func (d *aiffDecoder) ReadFrames(dst []float32) (int, error) {
 		return 0, err
 	}
 	frames := got / d.blockAlign
-	bps := d.bits / 8
-	for i := 0; i < frames; i++ {
-		base := i * d.blockAlign
-		for c := 0; c < ch; c++ {
-			s := b[base+c*bps : base+c*bps+bps]
-			if d.littleEnd {
-				dst[i*ch+c] = decodeSample(s, d.bits, d.isFloat)
-			} else {
-				dst[i*ch+c] = decodeSampleBE(s, d.bits, d.isFloat)
-			}
-		}
-	}
+	pcmToF32(b, frames, ch, d.blockAlign, d.bits, d.isFloat, !d.littleEnd, dst)
 	d.cur += int64(frames)
 	if frames == 0 {
 		return 0, io.EOF

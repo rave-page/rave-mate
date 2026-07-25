@@ -6,6 +6,8 @@ const std = @import("std");
 const resample = @import("resample.zig");
 const peaks = @import("peaks.zig");
 const bands = @import("bands.zig");
+const convert = @import("convert.zig");
+const wave = @import("wave.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -69,9 +71,44 @@ export fn rz_bucket_bands(pcm: [*]const u8, pcm_len: usize, n: usize, fs: u32, o
     return bands.bucketBands(pcm[0..pcm_len], n, fs, out[0 .. 3 * n]);
 }
 
+// ── sample-format conversion (byte-exact ports of internal/audio loops) ──────
+
+/// Serialize n interleaved f32 samples to LE bytes (out: 4*n) with pre-gain + ±1
+/// clamp; gain 0/1 = unity raw-bits passthrough. Port of source.writeBytes.
+export fn rz_f32_to_le(in: [*]const f32, n: usize, gain: f32, out: [*]u8) void {
+    convert.f32ToLe(in[0..n], gain, out[0 .. n * 4]);
+}
+
+/// Fold interleaved ch-channel f32 (frames*ch) to stereo (out: frames*2). Mono
+/// duplicates; >2 ch take the first two. Port of source.toDeviceStereo.
+export fn rz_fold_stereo(in: [*]const f32, frames: usize, ch: u32, out: [*]f32) void {
+    convert.foldStereo(in[0 .. frames * ch], ch, out[0 .. frames * 2]);
+}
+
+/// Batch-convert packed PCM frames to interleaved f32 [-1,1] (out: frames*ch).
+/// src holds frames*block_align bytes. Ports wav decodeSample / aiff decodeSampleBE.
+export fn rz_pcm_to_f32(src: [*]const u8, frames: usize, ch: u32, block_align: u32, bits: u32, is_float: u32, big_endian: u32, out: [*]f32) void {
+    convert.pcmToF32(src[0 .. frames * block_align], frames, ch, block_align, bits, is_float != 0, big_endian != 0, out[0 .. frames * ch]);
+}
+
+// ── waveform-display kernels over u8 peak buckets ────────────────────────────
+
+/// Per-column maxima of n peak buckets into cols columns. Port of giokit.WaveColumns.
+export fn rz_wave_columns(peaks_in: [*]const u8, n: usize, cols: usize, out: [*]u8) void {
+    wave.waveColumns(peaks_in[0..n], cols, out[0..cols]);
+}
+
+/// Smoothed 0..1 amplitude envelope at img_pps columns/sec (out: out_len f64,
+/// = int(dur*img_pps)+1). Port of deckcard.buildEnv.
+export fn rz_wave_env(peaks_in: [*]const u8, n: usize, dur: f64, img_pps: f64, out: [*]f64, out_len: usize) void {
+    wave.waveEnv(peaks_in[0..n], dur, img_pps, out[0..out_len]);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;
     _ = peaks;
     _ = bands;
+    _ = convert;
+    _ = wave;
 }
