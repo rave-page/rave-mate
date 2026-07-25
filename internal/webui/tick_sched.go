@@ -177,8 +177,16 @@ func (u *UI) tickLogsSched(n int) bool {
 	if !zigui.Available() {
 		return false // stub build: don't resolve the tail twice (the legacy path does it)
 	}
+	return u.tickLogsSchedFrom(logsTickSt{Lines: u.logsLinesState(n)})
+}
+
+// tickLogsSchedFrom is tickLogsSched over an already-resolved tail (the parity gate drives it).
+func (u *UI) tickLogsSchedFrom(st logsTickSt) bool {
+	if !zigui.Available() {
+		return false
+	}
 	prev, gen := u.tickPrevs(logsTickIDs)
-	st := logsTickSt{Lines: u.logsLinesState(n), Prev: prev}
+	st.Prev = prev
 	frs, ok := u.tickBatch(wireTkLogs(st), "TickLogs", zigui.TickLogs, gen)
 	if !ok {
 		return false
