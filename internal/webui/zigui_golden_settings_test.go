@@ -11,6 +11,7 @@ import (
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/ui"
 	"rave.page/mate/internal/unityproj"
+	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/vrdll"
 	"rave.page/mate/internal/zigui"
 )
@@ -221,6 +222,9 @@ func setFixtures() map[string]setFixture {
 		"search":       {u: populated, sec: "account", q: "port"},
 		"searchEsc":    {u: esc, sec: "account", q: `a&b<"c">`},
 		"searchNone":   {u: populated, sec: "account", q: "zzz-no-such-setting"},
+		// a stamped build (feed baked in) swaps the manual-updates note for the check control
+		// + the #inst-update region block
+		"updatesFeed": {u: populated, sec: "system"},
 	}
 }
 
@@ -233,6 +237,11 @@ func TestZigSettingsGolden(t *testing.T) {
 			fx.u.setMu.Lock()
 			fx.u.setSec, fx.u.setQuery = fx.sec, fx.q
 			fx.u.setMu.Unlock()
+			if name == "updatesFeed" {
+				old := version.FeedURL
+				version.FeedURL = "https://feed.rave.page/mate.json"
+				defer func() { version.FeedURL = old }()
+			}
 			if name == "selectOpen" {
 				ssOpen("set-ml-codec", "h") // registered by an earlier render of the same UI
 				defer func() { ssOpen("set-ml-codec", ""); ssMu.Lock(); ssSts["set-ml-codec"].open = false; ssMu.Unlock() }()
