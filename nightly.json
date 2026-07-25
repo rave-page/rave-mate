@@ -1,13 +1,13 @@
 {
-  "version": "nightly-12ce0a9",
-  "build": 141,
-  "commit": "12ce0a9",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-141-20260725-12ce0a9.exe",
-  "sha256": "ff138e6e8ec696255a3aae370380bf1fef592c27866f4d20ba1e2cc4bbf85e59",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-141-20260725-12ce0a9.exe",
-  "installer_sha256": "1be3a47747d634f19a6683078910fcff0de772b26956ad1e7a4c4b792a15297b",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-141-20260725-12ce0a9",
-  "linux_sha256": "83034aeb7f2c96bf06b083d13cc68501ffaa8005d2f595508f557eb283c8d7c9",
+  "version": "nightly-eb82d93",
+  "build": 142,
+  "commit": "eb82d93",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-142-20260725-eb82d93.exe",
+  "sha256": "b8371030182a9596ee7adee3c385a67d556cb1feaa80c41242e55df8ee5cece4",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-142-20260725-eb82d93.exe",
+  "installer_sha256": "84d4f9774f9058c510fd9943ccc6c6a6756f3f3c636f96de9c7e343144ca3a14",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-142-20260725-eb82d93",
+  "linux_sha256": "8986d55c9036ba9b5a33403fc4d2dabb4c72fe11737f1f796f322b4c4a582238",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T17:02:38Z",
-  "notes": "Merge feature/zig-dialogs-b: vrchat-groups/worlds/automations/pcviewer dialogs Zig render (byte-identical)"
+  "released": "2026-07-25T18:05:35Z",
+  "notes": "ci: ship + validate Zig natives everywhere (ZIG=1 flip)"
 }
