@@ -106,12 +106,14 @@ func init() {
 
 	// collection
 	onExact("lib-coll-search", func(u *UI, m actMsg) { u.libSearchDebounced(func(s *libSt) { s.collSearch = m.Val }) })
-	onPrefix("lib-coll-sort:", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collSort = m.arg("lib-coll-sort:") }) })
-	onExact("lib-coll-dir", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.collDesc = !s.collDesc }) })
+	onPrefix("lib-coll-sort:", func(u *UI, m actMsg) {
+		u.libSetColl(false, func(s *libSt) { s.collSort = m.arg("lib-coll-sort:") })
+	})
+	onExact("lib-coll-dir", func(u *UI, m actMsg) { u.libSetColl(false, func(s *libSt) { s.collDesc = !s.collDesc }) })
 	// column-header sort: click = sort by column, click again = flip direction
 	onPrefix("lib-coll-hsort:", func(u *UI, m actMsg) {
 		key := m.arg("lib-coll-hsort:")
-		u.libSet(func(s *libSt) {
+		u.libSetColl(false, func(s *libSt) {
 			if s.collSort == key {
 				s.collDesc = !s.collDesc
 			} else {
@@ -120,8 +122,7 @@ func init() {
 		})
 	})
 	onExact("lib-nodrops", func(u *UI, m actMsg) {
-		u.libSetQuiet(func(s *libSt) { s.collNoDrops = !s.collNoDrops })
-		u.libPatchBody()
+		u.libSetColl(false, func(s *libSt) { s.collNoDrops = !s.collNoDrops })
 	})
 	onExact("lib-more", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.moreOpen = !s.moreOpen }) })
 	// popover item: close the menu, then run the wrapped action
@@ -130,36 +131,32 @@ func init() {
 		u.dispatch(actMsg{Act: m.arg("lib-morego:")})
 	})
 	onPrefix("lib-genre:", func(u *UI, m actMsg) {
-		u.libToggle(func(s *libSt) map[string]bool { return s.collGenre }, m.arg("lib-genre:"), !u.libHas("genre", m.arg("lib-genre:")))
+		key, on := m.arg("lib-genre:"), !u.libHas("genre", m.arg("lib-genre:"))
+		u.libSetColl(false, func(s *libSt) { s.collGenre = cowToggle(s.collGenre, key, on) })
 	})
 	onPrefix("lib-label:", func(u *UI, m actMsg) {
-		u.libToggle(func(s *libSt) map[string]bool { return s.collLabel }, m.arg("lib-label:"), !u.libHas("label", m.arg("lib-label:")))
+		key, on := m.arg("lib-label:"), !u.libHas("label", m.arg("lib-label:"))
+		u.libSetColl(false, func(s *libSt) { s.collLabel = cowToggle(s.collLabel, key, on) })
 	})
 	onPrefix("lib-plgoto:", func(u *UI, m actMsg) {
 		id := int64(atoi(m.arg("lib-plgoto:")))
-		u.libSetQuiet(func(s *libSt) { s.collPl = map[int64]bool{id: true} })
-		u.libRebuildPlFilter()
+		u.libSetColl(true, func(s *libSt) { s.collPl = map[int64]bool{id: true} })
 		u.libSetSection("collection")
 	})
 	onPrefix("lib-plfilter:", func(u *UI, m actMsg) {
 		id := int64(atoi(m.arg("lib-plfilter:")))
-		u.libSetQuiet(func(s *libSt) {
-			if s.collPl[id] {
-				delete(s.collPl, id)
-			} else {
-				s.collPl[id] = true
-			}
-		})
-		u.libRebuildPlFilter()
-		u.libPatchBody()
+		u.libSetColl(true, func(s *libSt) { s.collPl = cowTogglePl(s.collPl, id, !s.collPl[id]) })
 	})
 	onPrefix("lib-key:", func(u *UI, m actMsg) {
-		u.libToggle(func(s *libSt) map[string]bool { return s.keySel }, m.arg("lib-key:"), !u.libHas("key", m.arg("lib-key:")))
+		key, on := m.arg("lib-key:"), !u.libHas("key", m.arg("lib-key:"))
+		u.libSetColl(false, func(s *libSt) { s.keySel = cowToggle(s.keySel, key, on) })
 	})
-	onExact("lib-key-clear", func(u *UI, m actMsg) { u.libSet(func(s *libSt) { s.keySel = map[string]bool{} }) })
+	onExact("lib-key-clear", func(u *UI, m actMsg) {
+		u.libSetColl(false, func(s *libSt) { s.keySel = map[string]bool{} })
+	})
 	onPrefix("lib-key-harmonic:", func(u *UI, m actMsg) { u.libKeyHarmonic(m.arg("lib-key-harmonic:")) })
 	onExact("lib-clearfilters", func(u *UI, m actMsg) {
-		u.libSet(func(s *libSt) {
+		u.libSetColl(false, func(s *libSt) {
 			s.collSearch, s.collGenre, s.collLabel, s.keySel = "", map[string]bool{}, map[string]bool{}, map[string]bool{}
 			s.collNoDrops = false
 			s.collPl, s.collPlSet, s.collPlNames = map[int64]bool{}, nil, nil
@@ -430,6 +427,29 @@ func (u *UI) libSet(mut func(*libSt)) {
 	u.libPatchBody()
 }
 
+// libSetColl mutates a COLLECTION CONTROL (search/sort/facets), stamps ctlVer, then recomputes the
+// filtered view OFF the handler lane before patching. Phase B4b: the recompute used to happen
+// inline in the next render (memoized behind an FNV hash of every control); doing it here means the
+// single patch already carries the fresh view - the lane never scans and no stale frame is drawn.
+// rebuildPl also refreshes the playlist-facet membership union (a smart-rule eval over every track,
+// which ran on the lane).
+func (u *UI) libSetColl(rebuildPl bool, mut func(*libSt)) {
+	s := u.lib()
+	s.mu.Lock()
+	mut(s)
+	s.ctlTouch()
+	s.mu.Unlock()
+	u.libRun(s, func() {
+		if rebuildPl {
+			u.libRebuildPlFilter() // DB + smart-rule eval; ctlTouch'd inside
+		}
+		u.libPrimeCollSync(s)
+		if !u.stopped() {
+			u.libPatchBody()
+		}
+	})
+}
+
 // libSetQuiet mutates without re-rendering (for trim inputs mid-edit).
 func (u *UI) libSetQuiet(mut func(*libSt)) {
 	s := u.lib()
@@ -440,14 +460,19 @@ func (u *UI) libSetQuiet(mut func(*libSt)) {
 
 // libSearchDebounced stores a search-filter mutation and debounces the full body re-render. Search
 // input fires per keystroke; a full filtered-list innerHTML swap over the ~23k-track collection per
-// keystroke is expensive, so coalesce (~150ms) and render once the user pauses.
+// keystroke is expensive, so coalesce (~150ms) and render once the user pauses. The debounced tick
+// primes the view off the lane first (B4b), so the render it triggers does no scanning.
 func (u *UI) libSearchDebounced(mut func(*libSt)) {
-	u.libSetQuiet(mut)
+	s := u.lib()
+	s.mu.Lock()
+	mut(s)
+	s.ctlTouch()
+	s.mu.Unlock()
 	u.mu.Lock()
 	if u.libSearchDeb != nil {
 		u.libSearchDeb.Stop()
 	}
-	u.libSearchDeb = time.AfterFunc(150*time.Millisecond, u.libPatchBody)
+	u.libSearchDeb = time.AfterFunc(150*time.Millisecond, func() { u.libPrimeColl(u.libPatchBody) })
 	u.mu.Unlock()
 }
 
@@ -516,8 +541,9 @@ func (u *UI) libKeyHarmonic(cam string) {
 	s := u.lib()
 	s.mu.Lock()
 	s.keySel = sel
+	s.ctlTouch()
 	s.mu.Unlock()
-	u.patchMain()
+	u.libPrimeColl(u.patchMain) // fresh view off the lane, then one repaint
 }
 
 // ── selection + async probe/peaks ──
@@ -2332,6 +2358,7 @@ func (u *UI) libFileRename(f map[string]string) {
 		return
 	}
 	u.toast(i18n.T("library.toast.renamed"))
+	u.libFsChanged(path, dst)
 	u.libPatchBody()
 }
 
@@ -2368,11 +2395,13 @@ func (u *UI) libFileMove() {
 	if path == "" || dir == "" {
 		return
 	}
-	if err := os.Rename(path, filepath.Join(dir, filepath.Base(path))); err != nil {
+	dst := filepath.Join(dir, filepath.Base(path))
+	if err := os.Rename(path, dst); err != nil {
 		u.toast(i18n.T("library.toast.moveFailed") + err.Error())
 		return
 	}
 	u.toast(i18n.T("library.toast.moved"))
+	u.libFsChanged(path, dst)
 	u.libPatchBody()
 }
 
@@ -2392,6 +2421,7 @@ func (u *UI) libFileDelete(path string) {
 		return
 	}
 	u.toast(i18n.T("library.toast.deleted"))
+	u.libFsChanged(path) // our own delete: re-sweep this row now, don't wait for a dir observation
 	u.libPatchBody()
 }
 

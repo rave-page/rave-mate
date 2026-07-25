@@ -1290,3 +1290,113 @@ Two honest caveats recorded there: **pure Go is still the cheapest renderer for 
 **batching only pays where there are MANY fragments** - a single big fragment wants dedup, not a
 batch. Quote the post-composition figures: against per-fragment JSON the same change measured
 -43%/-45%, and two optimisations on one tax do not add up.
+
+## Phase B — B4b: Library retained state (the TTL/signature memos are gone)
+
+B4's contract: each surface removes a retained-state workaround whose only reason was the Go
+runtime. The Library tab carried four, all in `render_library.go`, all now replaced by
+`internal/webui/library_deriv.go`. **The DOM does not change; the INPUTS and the timing do.**
+
+### What was there and why it was a workaround
+
+| removed | what the LANE paid per render | why it existed |
+|---|---|---|
+| `collViewSig` + `collViewIdx` | `fmt.Fprintf`+`sort.Strings`+FNV over three filter maps and the playlist-id set, then the ~23k-track filter+sort INLINE on a miss | the render lane could not afford the scan, and a hash was the cheapest available "did anything move" |
+| `plRowsVer` + `plRows` | `PlaylistVersion()` compare, `ListPlaylists()` (per-row `COUNT` subquery) inline on a miss | the query ran 2-3x per render |
+| `smartCounts*` | FNV over EVERY smart rule set, per render | each count is a ~23k scan + a compat read |
+| `onDiskCk` + `collOnDiskFresh` (5s) | nothing on the lane, but a blind re-`stat` of every rendered row every 5s | `os.Stat` per row froze the render |
+| `browseFresh` (2s) | nothing on the lane, but a blind `os.ReadDir` + per-entry `Info` every 2s | a network share wedged the action goroutine |
+| `LibraryVersion()` (libdb) | **a `SELECT MAX(seq)` per call, twice per render**, on a `SetMaxOpenConns(1)` handle - it queues behind any writer | it was cheap "enough" when nothing else was |
+
+### What replaces them
+
+- **A comparable key, not a hash.** `libDerivKey{lib,pl,compat,loadGen,ctl}` is compared by struct
+  equality: no hashing, no allocation, no map-key sort. Each derivation fills only the fields it
+  reads, so a keystroke does not invalidate the playlist rows and a playlist write does not
+  re-filter the collection.
+- **`ctlVer` + copy-on-write controls.** The collection controls (search/sort/facets/`dropsIdx`) are
+  replaced, never mutated in place, and every mutation stamps `ctlTouch()`. That is what lets
+  `collViewOf` read them from another goroutine at all - and it fixed a REAL pre-existing race:
+  `libWatchApply` wrote `s.tracks[i] = tr` in place while `libSmartCounts` read the same slice
+  off-thread, against the invariant its own comment claimed ("replaced wholesale => safe
+  off-thread"). It now clones.
+- **Compute on the mutation path, off the lane.** `libSetColl` mutates, stamps, then recomputes on
+  `u.bg` and patches ONCE with the fresh view. There is no stale intermediate frame - the old code
+  recomputed inline during the next render, the new code recomputes before it.
+- **Cold fills stay inline** (`libDerive(..., coldAsync=false)`): the old path blocked there too, and
+  rendering a placeholder instead would be a DOM change. `smartCounts` is the exception - its cold
+  state already rendered the ellipsis badge, so it stays async and keeps that markup.
+- **Filesystem freshness is dir-mtime gated, not TTL-gated.** Both sweeps stat the DISTINCT PARENT
+  DIRS first and only do the expensive half (N file stats / a full `ReadDir`) when a dir actually
+  moved or a row is unknown. A create/delete/rename inside a dir moves its mtime, which is exactly
+  what the TTLs were sampling for. Our own file ops call `libFsChanged` for instant re-verification.
+- **`LibraryVersion()` is an in-memory epoch** (`libdb.chgVer`): seeded once from `MAX(seq)` (so
+  epochs stay comparable across restarts, which the persisted `store` mtime slots need) and advanced
+  by `appendTx`. Same single-owner invariant `plVer`/`compatVer`/`tracksVer` already rest on. A
+  rolled-back append leaves it one step high: harmless, it is only compared for inequality and stays
+  monotonic.
+
+### Ordering hazard the hash was hiding
+
+Smart counts are computed FROM the playlist rows, so stamping them with an epoch the ROWS are not
+current for settles the OLD rules' counts under the NEW key - and they stick. The deleted code
+hashed the rule TEXT, which accidentally covered this. `libSmartCounts` now refuses to compute until
+`plD` is current for the same `PlaylistVersion`; `plD`'s settle re-patches, so it converges.
+Found by execution (`TestLibSmartCountsFreshAfterRulesEdit` failed with `30 not > 30`).
+
+### No Zig-side state
+
+Nothing crosses the ABI differently and no state struct changed shape, so the wire schema is
+untouched (drift audit: `0 drifted fields`). Per B3's "hash-return, NOT a Zig-side cache" reasoning
+the derivations stay Go-side and version-keyed: they key on libdb epochs and Go-owned control state
+the lib cannot see, and a stateful export would add a second lifetime across cgo for a cache the Go
+side has to be able to drop anyway.
+
+### Gates (`library_deriv_test.go`, untagged - runs in both builds)
+
+1. `TestLibCollViewRetainedMatchesFreshAfterEveryControlAction` - the missed-invalidation gate.
+   Every collection-control act is driven through the REAL dispatcher; after each, the retained view
+   must equal a from-scratch `collView()`. Non-vacuous by execution: deleting the `ctlTouch` in
+   `libSearchDebounced` fails it (`retained 10 rows != fresh 400`). Each step also asserts the view
+   is non-empty, so a fixture that filters everything away cannot make a step prove nothing.
+2. `TestLibCollViewKeyIsPreciseNotBlanket` - a selection click must NOT recompute (that is what the
+   memo was for); a sort must.
+3. `TestLibCollViewComputesOffTheLane` / `TestLibPlaylistsRefreshesOffTheLane` - with the runner seam
+   queued rather than spawned, the lane must return the OLD value and merely enqueue. This is the
+   actWorker constraint as a test.
+4. `TestOnDiskFreshnessIsChangeDrivenNotTTL` / `TestBrowseFreshnessIsChangeDrivenNotTTL` - the
+   staleness gate, both directions: an unchanged dir must do ZERO file stats / ZERO `ReadDir`
+   (counters `onDiskSweeps`/`browseReads`), and a moved dir must be reflected on the next render with
+   no wall-clock wait. Non-vacuous: forcing `moved := true` (the old TTL behaviour) fails the first
+   half (`1 -> 3 sweeps`, `2 -> 4 reads`).
+5. `TestLibSmartCountsFreshAfterRulesEdit`, `TestLibDerivFreshAfterLibraryVersionBump` - a rules edit
+   / an external library write is reflected immediately, not after a TTL.
+6. `TestLibBodyFromRetainedStateIsByteIdentical` - the DOM-identity gate over a scripted 12-step
+   mutation sequence: `#lib-body` rendered off retained state must be byte-identical to the same body
+   rendered with every derivation dropped (cold => fresh inline compute). Non-vacuous: making
+   `ctlTouch` a no-op fails it (`first diff at 3300`).
+7. libdb: `TestLibraryVersionIsInMemoryEpoch` proves the read no longer touches SQL (it still answers
+   after `d.db.Close()`, where the query path returned 0) and `TestLibraryVersionSeedsFromDisk` pins
+   the cross-restart seed.
+
+The 21x3 library golden suites + the fixers/libviews/libremote suites and the three-way wire gates
+are untouched and pass unchanged - they exercise the RENDERERS, which this change does not reach.
+That is also why gate 6 exists: a state-builder change needs a state-builder gate.
+
+### Numbers
+
+`.devnotes/PHASEB_BASELINE.md` "Phase B4b". Headline: steady-state handler-lane work for a
+collection render **30.6 us -> 126 ns** (43 -> 4 allocs), worst case (a control moved) **47.9 ms ->
+73 ns** on the lane because the scan moved to `u.bg`, and the filesystem sweep the 5s TTL re-ran
+blind **3.53 ms -> 56 us** (dir stats only).
+
+### If you extend this
+
+- Adding a collView input means adding it to `libCollInputs` AND making its writer copy-on-write +
+  `ctlTouch`. Gate 1 catches a forgotten stamp; gate 6 catches the DOM consequence.
+- A derivation computed FROM another must check the other's key is current (see the ordering hazard).
+- Do NOT put a `time.Since` back in: `s.derivRun` exists so freshness can be tested
+  deterministically, and every gate here would still pass with a TTL bolted on top - the sweep
+  counters are what forbid it.
+- `libRebuildPlFilter` is off the lane from `libSetColl`, but the one-shot cue-prep flow
+  (`library_cueedit.go` `ceOpenSet`) still calls it inline. Not the render path; left alone.

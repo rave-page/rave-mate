@@ -74,19 +74,19 @@ func (u *UI) libWatchApply(path string) {
 		return
 	}
 	s.byPath[path] = tr
+	// s.tracks is read OFF the handler lane by collViewOf / filterSmartDB, which is only sound
+	// because it is replaced wholesale - so a single-row edit clones instead of writing in place
+	// (an in-place write here raced those readers before phase B4b).
 	for i := range s.tracks {
 		if s.tracks[i].Path == path {
-			s.tracks[i] = tr
+			next := append([]musiclib.Track(nil), s.tracks...)
+			next[i] = tr
+			s.tracks = next
+			s.ctlTouch()
+			break
 		}
 	}
-	if s.dropsIdx == nil {
-		s.dropsIdx = map[string][]float64{}
-	}
-	if len(drops) == 0 {
-		delete(s.dropsIdx, path)
-	} else {
-		s.dropsIdx[path] = drops
-	}
+	s.cowDrops(path, drops)
 	if s.sel != nil && s.sel.path == path {
 		s.sel.track = tr // refresh the copy; which row is selected stays untouched
 	}

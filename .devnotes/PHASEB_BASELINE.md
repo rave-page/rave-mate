@@ -313,3 +313,67 @@ Read this one carefully — it is NOT a straight win:
    wave B-2's per-message prealloc hints applying to the tick roots (ids 100/101) automatically.
 6. **Steady state is where the tick lives.** `sched_same` (16.8 µs, 9 allocs, zero eval traffic) is
    the number to quote for a UI sitting on the Live tab.
+
+## Phase B4b — Library retained state: handler-lane occupancy
+
+The thing B4b removes is not render time, it is **handler-lane occupancy**: `internal/webui` runs
+render + every handler on ONE serialized goroutine, and the deleted caches spent that lane on
+hashing their own inputs, two `SELECT MAX(seq)` per render, and (on a miss) the full ~23k-track
+filter+sort. Bench: `internal/webui/library_deriv_bench_test.go` (UNTAGGED - it measures Go-side
+lane work, not the ABI), same box/method as the rest of this file (**min of 8** = four runs x
+`-count=2`, `-benchtime 1s`; one 300 ms warm-up round included in the mins).
+
+The `legacy_*` rows are the DELETED implementations transcribed verbatim (the `liveTickLegacy`
+precedent) - including `LibraryVersion` as the query it was before B4b. Fixture: 23 000 tracks,
+6 smart playlists, every derivation warm.
+
+```sh
+GOWORK=off go test -count=2 ./internal/webui -run '^$' -bench 'LibLane|LibCollViewCompute|LibFsSweep' -benchtime 1s
+```
+
+### Steady state - the 1 Hz tick and every selection-only re-render
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `LibLaneSteady/legacy` (2x `SELECT MAX(seq)` + 2 FNV signatures + version compares) | 30 639 | 1 264 | 43 |
+| **`LibLaneSteady/retained`** (3 comparable keys + 3 struct compares) | **126** | 176 | **4** |
+
+**-99.6% (243x) and 43 -> 4 allocations**, for the render the app performs most often. Range over the
+samples: legacy 30.6-38.3 us, retained 115-163 ns.
+
+### Worst case - a control moved, so the view must be re-derived
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `LibLaneChanged/legacy_inline_scan` (filter+sort 23k ON the lane) | 47 903 618 | 10.7 MB | 613 033 |
+| **`LibLaneChanged/retained_kick`** (stamp + key compare, scan handed to `u.bg`) | **73** | 144 | 2 |
+| `LibCollViewCompute` (the scan itself - unchanged code, now off-lane) | 47 612 327 | 12.4 MB | 683 077 |
+
+**This is the number the memo existed for.** Sorting the collection blocked the single action
+goroutine for ~48 ms (worst sample 62.5 ms) - every click, keystroke and tick queued behind it. The
+work did not get cheaper (`LibCollViewCompute` is the same 47.6 ms), it moved: the lane now pays
+73 ns and the scan runs on `u.bg`, with the control action recomputing BEFORE it patches, so the DOM
+still changes exactly once and to the fresh view.
+
+### Filesystem sweeps - what the 2s/5s TTLs re-ran blind (200 rendered rows, one dir)
+
+| row | ns/op (min of 8) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `legacy_stat_every_row` (the 5s on-disk TTL: `os.Stat` x 200) | 3 525 106 | 60 968 | 403 |
+| **`changegate_stat_dirs`** (stat the distinct parent dirs, stop if unmoved) | **56 031** | 16 848 | 205 |
+| `legacy_readdir` (the 2s browse TTL: `ReadDir` + `Info` per entry) | 147 666 | 35 464 | 413 |
+
+**-98.4% on the on-disk sweep** and the browse re-read drops to a single dir stat when nothing moved
+- while getting FRESHER: a dir-mtime move is picked up on the next render (<= 1 tick) instead of
+after the TTL window. Both halves are gated by counters, not by timing
+(`TestOnDiskFreshnessIsChangeDrivenNotTTL`, `TestBrowseFreshnessIsChangeDrivenNotTTL`).
+
+### Caveats
+
+- The `legacy_*` `SELECT MAX(seq)` runs against a near-empty `change_log` (the fixture writes tracks
+  into `libSt`, not the DB) and through a SECOND `sql.DB` handle, so it does NOT include the
+  writer-contention the real single-conn handle adds. The legacy column is therefore a LOWER bound.
+- 23 000 tracks is the size the deleted comments cite; the scan is linear in tracks and the sort
+  n log n, so the worst-case row scales with the user's library.
+- No Zig numbers here: B4b changes no export, no document and no state struct. The library
+  bridge/wire figures above stand unchanged.

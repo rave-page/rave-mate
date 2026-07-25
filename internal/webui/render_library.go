@@ -121,39 +121,41 @@ type libSt struct {
 
 	// Browse listing cache: os.ReadDir + per-entry stat run in the BACKGROUND (a network
 	// share / spun-down drive would otherwise wedge the single action goroutine); renders
-	// come from the cache and a stale cache refreshes async + re-patches.
+	// come from the cache and a stale cache refreshes async + re-patches. Staleness is decided
+	// by the dir's mtime (browseMod), not a TTL - see library_deriv.go.
 	browseDir  string  // dir the cache belongs to
 	browseFes  []libFe // cached entries (unfiltered; treat as immutable - copy before filter/sort)
 	browseErr  bool    // last read failed
 	browseBusy bool    // a background read is in flight
-	browseAt   time.Time
+	browseMod  libDirStamp
 
 	moreOpen      bool // Maintenance popover (collection toolbar) open
 	autoRefreshed bool // once-per-run auto folder-playlist sweep kicked
 
-	// ── render caches (render must stay pure+fast: memoized, epoch/generation-invalidated) ──
-	// collView: filtered+sorted index list, keyed by loadGen + the three libdb epochs + a hash of
-	// the sort/filter controls (was recomputed every render, incl. selection-only re-renders).
-	collViewIdx []int
-	collViewSig uint64
-	collViewOK  bool
+	// ── retained derivations (phase B4b; engine + rationale in library_deriv.go) ──
+	// The render lane compares keys and reads these; every computation runs off the lane.
+	collD  libDeriv[[]int]               // filtered+sorted indices into s.tracks
+	plD    libDeriv[[]libdb.PlaylistRow] // ListPlaylists rows (per-row COUNT subquery)
+	smartD libDeriv[map[int64]int]       // smart-playlist match counts (~23k scan per list)
+	// ctlVer stamps the collection controls (search/sort/facets/drops). The controls are
+	// copy-on-write so collViewOf can read them off the lane; ctlTouch is the ONE bump point.
+	ctlVer uint64
+	// derivRun is the off-lane runner (nil = u.bg); derivN/derivCh are settle observability.
+	derivRun func(func())
+	derivN   uint64
+	derivCh  chan struct{}
 	// on-disk existence for the rendered rows: os.Stat per row froze render; swept off-thread and
 	// read from the map (unknown path = neutral/present until the sweep lands). Dropped on reload.
+	// dirMod holds the observed mtime per parent dir - the sweep's change gate (no TTL).
 	onDiskCk   map[string]bool
+	dirMod     map[string]libDirStamp
 	onDiskBusy bool
-	onDiskAt   time.Time
 	onDiskGen  int
-	// ListPlaylists rows (a per-row COUNT subquery; was issued 2-3× per render), cached by PlaylistVersion().
-	plRows    []libdb.PlaylistRow
-	plRowsVer int64
-	plRowsGen int // s.loadGen at cache fill: a reload (e.g. Cleanup drops playlists) invalidates without touching plVer
-	plRowsOK  bool
-	// smart-playlist match counts (a full ~23k scan + compat DB read per smart list), computed
-	// off-thread, keyed by lib+playlist+compat epochs + a hash of every smart rule set.
-	smartCounts     map[int64]int
-	smartCountsSig  uint64
-	smartCountsOK   bool
-	smartCountsBusy bool
+	// change-gate observability: how often the EXPENSIVE half actually ran (N file stats / a full
+	// ReadDir). The old TTLs re-ran both on a timer; these counters are what makes "change-driven,
+	// not time-driven" falsifiable (library_deriv_test.go).
+	onDiskSweeps uint64
+	browseReads  uint64
 	// facet dropdown options (distinctCounts over all tracks: genre+label), keyed by loadGen.
 	facetGen     int
 	facetGenre   [][2]string
@@ -410,10 +412,12 @@ func (u *UI) libEnsureTracks(s *libSt) bool {
 			if err == nil {
 				s.tracks, s.byPath = tr, byPath
 				s.dropsIdx = drops
+				s.ctlTouch()
 			}
 		}
 		s.mu.Unlock()
-		u.ceReloadTrack() // an open cue editor re-reads its track + grid (gridfix reimport)
+		u.ceReloadTrack()     // an open cue editor re-reads its track + grid (gridfix reimport)
+		u.libPrimeCollSync(s) // still off the lane: the first collection paint then does no scanning
 		u.libPatchBody()
 	})
 	return false
@@ -435,51 +439,6 @@ type libFe struct {
 	isDir            bool
 	size             int64
 	mod              time.Time
-}
-
-// browseFresh is how long a cached listing serves without a background re-read.
-const browseFresh = 2 * time.Second
-
-// collOnDiskFresh is how long the collection on-disk existence cache serves before a bg re-sweep.
-const collOnDiskFresh = 5 * time.Second
-
-// libBrowseEntries returns the (possibly stale) cached listing for dir, kicking a
-// background read when the cache is missing or stale. ok=false → nothing cached yet for
-// this dir (render a loading placeholder; the read completion re-patches). Caller holds s.mu.
-func (u *UI) libBrowseEntries(s *libSt, dir string) (fes []libFe, errRead, ok bool) {
-	cached := s.browseDir == dir
-	if (!cached || time.Since(s.browseAt) > browseFresh) && !s.browseBusy {
-		s.browseBusy = true
-		u.bg(func() {
-			entries, err := os.ReadDir(dir)
-			var out []libFe
-			for _, e := range entries {
-				name := e.Name()
-				if strings.HasPrefix(name, ".") {
-					continue
-				}
-				fi, serr := e.Info()
-				if serr != nil {
-					continue
-				}
-				out = append(out, libFe{name, filepath.Join(dir, name), libKind(name, fi.IsDir()), fi.IsDir(), fi.Size(), fi.ModTime()})
-			}
-			s.mu.Lock()
-			changed := s.browseDir != dir || s.browseErr != (err != nil) || !slices.Equal(s.browseFes, out)
-			s.browseBusy = false
-			s.browseDir, s.browseAt = dir, time.Now()
-			s.browseErr = err != nil
-			s.browseFes = out
-			s.mu.Unlock()
-			if changed { // replace the loading placeholder / refresh a listing that changed on disk
-				u.libPatchBody()
-			}
-		})
-	}
-	if !cached {
-		return nil, false, false
-	}
-	return s.browseFes, s.browseErr, true
 }
 
 // libBrowseViewOf filters+sorts the cached dir entries per the current controls -
@@ -870,6 +829,7 @@ func (u *UI) libRebuildPlFilter() {
 	}
 	s.mu.Lock()
 	s.collPlSet, s.collPlNames = set, names
+	s.ctlTouch()       // collPlSet is a collView input
 	if len(want) > 0 { // facet narrowed the view: checked rows outside it would silently
 		for p := range s.collSel { // ride into batch actions - keep the selection visible-only
 			if !set[p] {
@@ -889,138 +849,46 @@ func sortedPlIDs(m map[int64]string) []int64 {
 	return ids
 }
 
-// collView returns filtered+sorted indices into s.tracks.
-func (s *libSt) collView() []int {
-	q := strings.ToLower(strings.TrimSpace(s.collSearch))
+// collViewOf returns filtered+sorted indices into in.tracks. PURE + off-lane: it runs on u.bg from
+// the retained derivation (library_deriv.go), so it may only touch the snapshot.
+func collViewOf(in libCollInputs) []int {
+	q := strings.ToLower(strings.TrimSpace(in.search))
 	var out []int
-	for i, t := range s.tracks {
+	for i, t := range in.tracks {
 		if q != "" && !strings.Contains(strings.ToLower(t.Title), q) && !strings.Contains(strings.ToLower(t.Artist), q) {
 			continue
 		}
-		if !keyMatches(t.Key, s.keySel) {
+		if !keyMatches(t.Key, in.keySel) {
 			continue
 		}
-		if !inFilter(musiclib.GenreFamily(t.Genre), s.collGenre) {
+		if !inFilter(musiclib.GenreFamily(t.Genre), in.genre) {
 			continue
 		}
-		if !inFilter(strings.TrimSpace(t.Label), s.collLabel) {
+		if !inFilter(strings.TrimSpace(t.Label), in.label) {
 			continue
 		}
-		if s.collNoDrops && len(s.dropsIdx[t.Path]) > 0 {
+		if in.noDrops && len(in.drops[t.Path]) > 0 {
 			continue
 		}
-		if len(s.collPl) > 0 && !s.collPlSet[t.Path] {
+		if len(in.plIDs) > 0 && !in.plSet[t.Path] {
 			continue
 		}
 		out = append(out, i)
 	}
-	sortIdx(out, func(i int) musiclib.Track { return s.tracks[i] }, s.collSort, s.collDesc)
+	sortIdx(out, func(i int) musiclib.Track { return in.tracks[i] }, in.sortBy, in.desc)
 	return out
 }
 
-// libEpochs reads the three libdb cache-invalidation epochs (0 when the DB is absent).
-func (u *UI) libEpochs() (libVer, plVer, compatVer int64) {
-	if u.svc.Lib != nil {
-		return u.svc.Lib.LibraryVersion(), u.svc.Lib.PlaylistVersion(), u.svc.Lib.CompatVersion()
-	}
-	return 0, 0, 0
-}
+// collView computes the filtered+sorted view directly from the current state - the reference
+// implementation the retained derivation is diffed against (library_deriv_test.go). Caller holds s.mu.
+func (s *libSt) collView() []int { return collViewOf(s.collInputs()) }
 
-// libCollView returns collView memoized: it re-filtered+sorted ~23k tracks every render (incl.
-// selection-only re-renders). Keyed by loadGen + the three epochs + a hash of the sort/filter
-// controls; recomputed only when an input moves. Caller holds s.mu.
+// libCollView returns the RETAINED filtered+sorted view (phase B4b): the lane compares one
+// comparable key and reads; the ~23k-track filter+sort runs on u.bg. Caller holds s.mu.
 func (u *UI) libCollView(s *libSt) []int {
-	libVer, plVer, compatVer := u.libEpochs()
-	sig := s.collViewSignature(libVer, plVer, compatVer)
-	if s.collViewOK && s.collViewSig == sig {
-		return s.collViewIdx
-	}
-	idx := s.collView()
-	s.collViewSig, s.collViewIdx, s.collViewOK = sig, idx, true
-	return idx
-}
-
-// collViewSignature hashes every input collView reads. tracks content is proxied by loadGen+libVer
-// (in-place edits land via a DB write that bumps LibraryVersion); collPlSet by collPl ids + the
-// playlist/compat epochs (it's a pure function of those); dropsIdx (collNoDrops presence test) by
-// len (it only holds tracks WITH drops). Caller holds s.mu.
-func (s *libSt) collViewSignature(libVer, plVer, compatVer int64) uint64 {
-	h := fnv.New64a()
-	fmt.Fprintf(h, "g%d|l%d|p%d|c%d|q%q|o%s|d%t|nd%t|di%d",
-		s.loadGen, libVer, plVer, compatVer, s.collSearch, s.collSort, s.collDesc, s.collNoDrops, len(s.dropsIdx))
-	for _, set := range []struct {
-		tag string
-		m   map[string]bool
-	}{{"k", s.keySel}, {"ge", s.collGenre}, {"la", s.collLabel}} {
-		keys := make([]string, 0, len(set.m))
-		for k := range set.m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(h, "|%s%s", set.tag, k)
-		}
-	}
-	ids := make([]int64, 0, len(s.collPl))
-	for id := range s.collPl {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	for _, id := range ids {
-		fmt.Fprintf(h, "|pl%d", id)
-	}
-	return h.Sum64()
-}
-
-// libEnsureOnDisk warms the on-disk existence cache for the rendered rows, sweeping os.Stat
-// OFF-THREAD (per-row stat in render froze the UI on a 300-row set / a spun-down drive). Render
-// reads s.onDiskOr; unknown paths read as present until the sweep lands. Refreshed on a TTL and
-// dropped on library reload. Caller holds s.mu.
-func (u *UI) libEnsureOnDisk(s *libSt, paths []string) {
-	if s.onDiskGen != s.loadGen { // library reloaded: prior results may be stale (files moved)
-		s.onDiskGen = s.loadGen
-		s.onDiskCk = nil
-		s.onDiskAt = time.Time{}
-	}
-	if s.onDiskBusy {
-		return
-	}
-	stale := time.Since(s.onDiskAt) > collOnDiskFresh
-	unknown := false
-	for _, p := range paths {
-		if _, ok := s.onDiskCk[p]; !ok {
-			unknown = true
-			break
-		}
-	}
-	if !stale && !unknown {
-		return
-	}
-	s.onDiskBusy = true
-	want := append([]string(nil), paths...)
-	u.bg(func() {
-		res := make(map[string]bool, len(want))
-		for _, p := range want {
-			res[p] = pathOnDisk(p)
-		}
-		s.mu.Lock()
-		s.onDiskBusy = false
-		s.onDiskAt = time.Now()
-		if s.onDiskCk == nil {
-			s.onDiskCk = make(map[string]bool, len(res))
-		}
-		changed := false
-		for p, ex := range res {
-			if old, ok := s.onDiskCk[p]; !ok || old != ex {
-				changed = true
-			}
-			s.onDiskCk[p] = ex
-		}
-		s.mu.Unlock()
-		if changed && !u.stopped() {
-			u.libPatchBody()
-		}
-	})
+	in := s.collInputs()
+	return libDerive(u, s, &s.collD, u.libCollKey(s), false,
+		func() []int { return collViewOf(in) }, u.libPatchBody)
 }
 
 // onDiskOr reports path existence from the swept cache; an un-swept path reads as present
@@ -1030,81 +898,6 @@ func (s *libSt) onDiskOr(path string) bool {
 		return ex
 	}
 	return true
-}
-
-// libPlaylists returns the playlist rows for this render pass, cached by PlaylistVersion()
-// (ListPlaylists issues a per-row COUNT subquery and was called 2-3× per render). Caller holds s.mu.
-func (u *UI) libPlaylists(s *libSt) []libdb.PlaylistRow {
-	if u.svc.Lib == nil {
-		return nil
-	}
-	ver := u.svc.Lib.PlaylistVersion()
-	if s.plRowsOK && s.plRowsVer == ver && s.plRowsGen == s.loadGen {
-		return s.plRows
-	}
-	rows, _ := u.svc.Lib.ListPlaylists()
-	s.plRows, s.plRowsVer, s.plRowsGen, s.plRowsOK = rows, ver, s.loadGen, true
-	return rows
-}
-
-// libSmartCounts returns cached smart-playlist match counts (id→count), computed OFF-THREAD:
-// each count is len(filterSmartDB(...)) = a full ~23k scan + a compat DB read, and it ran per
-// smart list per render. Keyed by all three epochs it depends on (library + playlist + compat)
-// plus a hash of every smart rule set; render shows a placeholder until the first compute lands.
-// Caller holds s.mu.
-func (u *UI) libSmartCounts(s *libSt, rows []libdb.PlaylistRow) map[int64]int {
-	if u.svc.Lib == nil {
-		return nil
-	}
-	libVer, plVer, compatVer := u.libEpochs()
-	sig := libSmartCountSig(s.loadGen, libVer, plVer, compatVer, rows)
-	if s.smartCountsOK && s.smartCountsSig == sig {
-		return s.smartCounts
-	}
-	if s.smartCountsBusy {
-		return s.smartCounts // stale/nil until the in-flight compute lands
-	}
-	smart := make([]libdb.PlaylistRow, 0)
-	for _, p := range rows {
-		if p.Kind == libdb.PlaylistSmart {
-			smart = append(smart, p)
-		}
-	}
-	if len(smart) == 0 { // nothing to eval: mark this sig ready (empty)
-		s.smartCounts, s.smartCountsSig, s.smartCountsOK = map[int64]int{}, sig, true
-		return s.smartCounts
-	}
-	s.smartCountsBusy = true
-	trk := s.tracks // immutable after load (replaced wholesale on reload) - safe to read off-thread
-	u.bg(func() {
-		counts := make(map[int64]int, len(smart))
-		for _, p := range smart {
-			if r, ok := libParseRules(p.Rules); ok {
-				counts[p.ID] = len(u.filterSmartDB(trk, r))
-			}
-		}
-		s.mu.Lock()
-		s.smartCounts, s.smartCountsSig, s.smartCountsOK, s.smartCountsBusy = counts, sig, true, false
-		s.mu.Unlock()
-		if !u.stopped() {
-			u.libPatchBody()
-		}
-	})
-	return s.smartCounts
-}
-
-// libSmartCountSig hashes loadGen + the three epochs + every smart rule set, so a library/playlist/
-// compat mutation, a reload (Cleanup drops tracks without a libVer bump), OR a rules edit invalidates
-// the counts. loadGen matches collViewSignature: every memo that scans s.tracks must key on it.
-func libSmartCountSig(loadGen int, libVer, plVer, compatVer int64, rows []libdb.PlaylistRow) uint64 {
-	h := fnv.New64a()
-	fmt.Fprintf(h, "g%d|l%d|p%d|c%d", loadGen, libVer, plVer, compatVer)
-	for _, p := range rows {
-		if p.Kind == libdb.PlaylistSmart {
-			fmt.Fprintf(h, "|%d=%s", p.ID, p.Rules)
-		}
-	}
-	return h.Sum64()
 }
 
 // libDetailData returns the selected track's works-together partners + playlist memberships,

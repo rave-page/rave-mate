@@ -148,6 +148,12 @@ type DB struct {
 	// LibraryVersion() does NOT cover set_recordings, so caches of the captured-sets list key on
 	// this - incl. featurehost-created (icecast/obs) captures, which never touch webui.
 	setRecVer atomic.Int64
+	// chgVer mirrors the change_log epoch in memory so LibraryVersion() is an atomic load, not a
+	// SELECT MAX(seq) on the caller's goroutine (SetMaxOpenConns(1): that query queues behind any
+	// writer, and the webui render lane called it per render). Seeded once from the table, then
+	// advanced by every append. See LibraryVersion.
+	chgVerOnce sync.Once
+	chgVer     atomic.Int64
 
 	// LoadAllTracks in-proc snapshot, guarded by allTracksMu, validated by tracksVer. A full-table
 	// scan + per-row cue/beatgrid JSON unmarshal is expensive and re-run by every consumer; the
@@ -163,6 +169,9 @@ type DB struct {
 func (d *DB) SetNodeID(id string) {
 	if d != nil {
 		d.nodeID = id
+		// the change_log epoch is per node_id: re-seed on the next LibraryVersion() read.
+		d.chgVerOnce = sync.Once{}
+		d.chgVer.Store(0)
 	}
 }
 

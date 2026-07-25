@@ -72,18 +72,35 @@ func (d *DB) nextSeq(q interface {
 }
 
 // LibraryVersion returns a monotonic counter that advances on every library mutation
-// (each change_log append bumps MAX(seq)). Callers version cached per-track resolutions by it
-// so any collection/library change invalidates the cache. 0 when unavailable. Cheap: served by
-// idx_change_log_seq(node_id, seq).
+// (each change_log append bumps it). Callers version cached per-track resolutions by it so any
+// collection/library change invalidates the cache. 0 when unavailable.
+//
+// Served from an in-memory epoch (d.chgVer): the value is seeded ONCE from MAX(seq) and then
+// advanced by appendTx, so a hot caller pays an atomic load instead of a query. Consistency rests
+// on the same invariant plVer/compatVer/tracksVer already rest on - one daemon owns this DB, so
+// every append goes through this process. Seeding from MAX(seq) (not 0) keeps epochs comparable
+// across restarts, which the persisted store mtime slots rely on. A rolled-back append leaves the
+// epoch one step high: harmless, because it is only ever compared for INEQUALITY and it stays
+// strictly monotonic (the next real append still moves it).
 func (d *DB) LibraryVersion() int64 {
 	if d == nil || d.db == nil {
 		return 0
 	}
-	var max sql.NullInt64
-	if err := d.db.QueryRow(`SELECT MAX(seq) FROM change_log WHERE node_id=?`, d.nodeID).Scan(&max); err != nil {
-		return 0
-	}
-	return max.Int64
+	d.chgVerOnce.Do(func() {
+		var max sql.NullInt64
+		if err := d.db.QueryRow(`SELECT MAX(seq) FROM change_log WHERE node_id=?`, d.nodeID).Scan(&max); err != nil {
+			return
+		}
+		// CompareAndSwap-free: appends that landed before the seed already added to chgVer, so take
+		// whichever is higher rather than clobbering them.
+		for {
+			cur := d.chgVer.Load()
+			if max.Int64 <= cur || d.chgVer.CompareAndSwap(cur, max.Int64) {
+				return
+			}
+		}
+	})
+	return d.chgVer.Load()
 }
 
 // appendTx writes events via ex, starting at startSeq (assigned per event). Used both for
@@ -115,6 +132,7 @@ func (d *DB) appendTx(ex execer, startSeq int64, events []ChangeEvent) error {
 		}
 		seq++
 	}
+	d.chgVer.Add(int64(len(events))) // LibraryVersion's in-memory epoch; see its doc comment
 	return nil
 }
 
