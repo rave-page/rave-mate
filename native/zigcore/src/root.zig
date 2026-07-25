@@ -9,6 +9,7 @@ const bands = @import("bands.zig");
 const convert = @import("convert.zig");
 const wave = @import("wave.zig");
 const pcmdec = @import("pcmdec.zig");
+const pixel = @import("pixel.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -156,6 +157,14 @@ export fn rz_pcmdec_decode(d: *pcmdec.Dec, buf: ?[*]const u8, len: usize, dst: [
     return d.decode(slice, dst);
 }
 
+// ── video pixel kernels (P3) — byte-exact ports of video-plane Go loops ──────
+
+/// Strided RGBA→packed RGB24 (dst: w*h*3). Port of mocapnode.frameFromNRGBA.
+export fn rz_rgba_to_rgb24(src: [*]const u8, src_stride: usize, w: usize, h: usize, dst: [*]u8) void {
+    if (w == 0 or h == 0) return;
+    pixel.rgbaToRgb24(src[0 .. (h - 1) * src_stride + w * 4], src_stride, w, h, dst[0 .. w * h * 3]);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;
@@ -164,4 +173,5 @@ test {
     _ = convert;
     _ = wave;
     _ = pcmdec;
+    _ = pixel;
 }

@@ -260,6 +260,18 @@ func (d *PCMDec) Decode(b []byte, dst []float32) int {
 	return int(C.rz_pcmdec_decode(d.p, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.size_t(len(b)), dp))
 }
 
+// RGBAToRGB24 converts h rows of strided RGBA to packed RGB24 (dst: w*h*3, alpha
+// dropped). Byte-exact with mocapnode.frameFromNRGBA. False = bad geometry (caller
+// keeps the Go loop).
+func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool {
+	if w <= 0 || h <= 0 || stride < w*4 || len(src) < (h-1)*stride+w*4 || len(dst) < w*h*3 {
+		return false
+	}
+	C.rz_rgba_to_rgb24((*C.uint8_t)(unsafe.Pointer(&src[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), (*C.uint8_t)(unsafe.Pointer(&dst[0])))
+	return true
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {

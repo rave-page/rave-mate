@@ -75,6 +75,10 @@ int64_t rz_pcmdec_plan(const RzPcmDec *d, size_t dst_cap_samples, uint64_t *need
 /* Decodes len/block_align frames into dst (interleaved f32), advances pos. */
 int64_t rz_pcmdec_decode(RzPcmDec *d, const uint8_t *buf, size_t len, float *dst);
 
+/* Video pixel kernels (P3) — byte-exact ports of video-plane Go loops. */
+/* Strided RGBA→packed RGB24 (dst: w*h*3). Port of mocapnode.frameFromNRGBA. */
+void rz_rgba_to_rgb24(const uint8_t *src, size_t src_stride, size_t w, size_t h, uint8_t *dst);
+
 #ifdef __cplusplus
 }
 #endif
