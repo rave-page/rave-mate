@@ -963,4 +963,19 @@ func RenderMotionBodyV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderPublishV2 renders the full Publish tab from an RZW1 document.
+func RenderPublishV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_v2(p, l, n)
+	})
+}
+
+// RenderPublishHeroV2 renders the #pub-hero fragment from an RZW1 document (ok=false when the
+// hero is legitimately empty - no recorder wired).
+func RenderPublishHeroV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_hero_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

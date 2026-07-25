@@ -165,6 +165,8 @@ GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$
 | live `#live-perf2` frag | 3 624 | 1 885 | **-48%** | (in the set above) |
 | motion (full tab) | 21 674 | 11 472 | **-47%** | 15 091 / 24 586 = 61.4% |
 | motion `#mo-body` frag | 24 243 | 12 774 | **-47%** | (same document) |
+| publish (full tab) | 24 701 | 12 507 | **-49%** | 20 223 / 48 766 = 41.5% |
+| publish `#pub-hero` frag | 5 938 | 4 400 | -26% | (in the set above) |
 
 **Encoder allocation, honestly:** v2 costs MORE allocated bytes on small documents (transport
 1 722 → 6 880 B/op, 5 → 10 allocs). `NewWireWriter` preallocates 2 × 1 KiB plus a 64-entry intern

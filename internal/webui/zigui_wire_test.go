@@ -298,6 +298,76 @@ func TestWireOptStructPresenceIsNotNull(t *testing.T) {
 	}
 }
 
+// TestZigWireThreeWayPublish: full tab + the #pub-hero tick fragment. An empty hero renders ""
+// (a legitimate NULL that the Go fallback reproduces), so only shown heroes are asserted.
+func TestZigWireThreeWayPublish(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := pubFixtures()
+	var wireB, jsonB, heroes int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wirePub(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderPublish(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderPublishV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", publishHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			if !st.Body.Hero.Show {
+				return
+			}
+			heroes++
+			hero := st.Body.Hero
+			h1, ok := zigui.RenderPublishHero(stateJSON(hero))
+			if !ok {
+				t.Fatal("v1 hero render failed")
+			}
+			h2, ok := zigui.RenderPublishHeroV2(wirePubHero(hero))
+			if !ok {
+				t.Fatal("v2 hero render failed")
+			}
+			assertBytesEqual(t, "hero go==v1", pubHeroHTML(hero), h1)
+			assertBytesEqual(t, "hero v1==v2", h1, h2)
+		})
+	}
+	if heroes == 0 {
+		t.Fatal("no fixture exercised the hero fragment")
+	}
+	t.Logf("%d fixtures (%d heroes): wire %d B vs json %d B (%.1f%%)", len(fx), heroes, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// TestWireUintRoundTrips: PubTrack.Num is the only numeric field on the wire (a 1-based row
+// index against a Zig i64). Zero encodes as an absent tag, so row numbering must survive.
+func TestWireUintRoundTrips(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	st := pubFixtures()["tracklist"]
+	v2, ok := zigui.RenderPublishV2(wirePub(st))
+	if !ok {
+		t.Fatal("v2 render failed")
+	}
+	assertBytesEqual(t, "tracklist numbering", publishHTML(st), v2)
+	if !strings.Contains(v2, "pub-track-n") {
+		t.Fatal("fixture is inert: no numbered track row in the render")
+	}
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).

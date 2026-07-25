@@ -9,10 +9,11 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0x3c93a16b;
+pub const schema_hash: u32 = 0x3306410d;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -28,6 +29,8 @@ pub const msg_live_graph: u16 = 18; // #live-net + #live-tim fragments
 pub const msg_live_perf: u16 = 19; // #live-perf2 fragment
 pub const msg_live_strip: u16 = 20; // #live-strip fragment
 pub const msg_mo_state: u16 = 21; // Motion tab (full view + the #mo-body fragment share this state)
+pub const msg_pub: u16 = 22; // Publish tab (full view)
+pub const msg_pub_hero: u16 = 23; // #pub-hero fragment (~1 Hz tick)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -453,6 +456,196 @@ pub fn decodeMoState(r: *wire.Reader, out: *motion.State) wire.Error!void {
     };
 }
 
+pub fn decodePubBadge(r: *wire.Reader, out: *publish.Badge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.key = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.variant = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBar(r: *wire.Reader, out: *publish.Bar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.pct = try r.str(t),
+        3 => out.cap = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubNp(r: *wire.Reader, out: *publish.Np) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.meta = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.bar = try r.sub(publish.Bar, decodePubBar, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubPlayer(r: *wire.Reader, out: *publish.Player) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.label = try r.str(t),
+        3 => out.pos = try r.str(t),
+        4 => out.bar = try r.sub(publish.Bar, decodePubBar, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubHero(r: *wire.Reader, out: *publish.Hero) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.rec = try r.sub(publish.Badge, decodePubBadge, t),
+        3 => out.cap = try r.sub(publish.Badge, decodePubBadge, t),
+        4 => out.obs = try r.sub(publish.Badge, decodePubBadge, t),
+        5 => out.finish = try r.str(t),
+        6 => out.np = try r.sub(publish.Np, decodePubNp, t),
+        7 => out.player = try r.sub(publish.Player, decodePubPlayer, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubSetRow(r: *wire.Reader, out: *publish.SetRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        5 => out.rename = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubList(r: *wire.Reader, out: *publish.List) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.count = try r.str(t),
+        3 => out.rows = try r.list(publish.SetRow, decodePubSetRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiBtn(r: *wire.Reader, out: *c.Btn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.val = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubCap(r: *wire.Reader, out: *publish.Cap) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.caption = try r.str(t),
+        2 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        3 => out.menu = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubLoose(r: *wire.Reader, out: *publish.Loose) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.count = try r.str(t),
+        2 => out.desc = try r.str(t),
+        3 => out.caps = try r.list(publish.Cap, decodePubCap, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubCaptures(r: *wire.Reader, out: *publish.Captures) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.player = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.caps = try r.list(publish.Cap, decodePubCap, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubTrack(r: *wire.Reader, out: *publish.Track) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.num = @intCast(try r.uint(t)),
+        2 => out.label = try r.str(t),
+        3 => out.off = try r.str(t),
+        4 => out.lead = try r.str(t),
+        5 => out.leadTip = try r.str(t),
+        6 => out.checked = try r.boolean(t),
+        7 => out.path = try r.str(t),
+        8 => out.ctx = try r.str(t),
+        9 => out.offAct = try r.str(t),
+        10 => out.offDl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBatch(r: *wire.Reader, out: *publish.Batch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.count = try r.str(t),
+        2 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubTracklist(r: *wire.Reader, out: *publish.Tracklist) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.resolving = try r.str(t),
+        3 => out.editable = try r.boolean(t),
+        4 => out.offTip = try r.str(t),
+        5 => out.rows = try r.list(publish.Track, decodePubTrack, t),
+        6 => out.showFix = try r.boolean(t),
+        7 => out.fix = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.help = try r.str(t),
+        9 => out.unres = try r.str(t),
+        10 => out.batch = try r.sub(publish.Batch, decodePubBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubDetail(r: *wire.Reader, out: *publish.Detail) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.sel = try r.boolean(t),
+        3 => out.hint = try r.str(t),
+        4 => out.player = try r.str(t),
+        5 => out.loose = try r.sub(publish.Loose, decodePubLoose, t),
+        6 => out.name = try r.str(t),
+        7 => out.meta = try r.str(t),
+        8 => out.actions = try r.list(c.Btn, decodeUiBtn, t),
+        9 => out.active = try r.str(t),
+        10 => out.capsLbl = try r.str(t),
+        11 => out.tracksLbl = try r.str(t),
+        12 => out.captures = try r.sub(publish.Captures, decodePubCaptures, t),
+        13 => out.tracklist = try r.sub(publish.Tracklist, decodePubTracklist, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBody(r: *wire.Reader, out: *publish.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hero = try r.sub(publish.Hero, decodePubHero, t),
+        2 => out.list = try r.sub(publish.List, decodePubList, t),
+        3 => out.detail = try r.sub(publish.Detail, decodePubDetail, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePub(r: *wire.Reader, out: *publish.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.switcher = try r.str(t),
+        4 => out.available = try r.boolean(t),
+        5 => out.unavailable = try r.str(t),
+        6 => out.body = try r.sub(publish.Body, decodePubBody, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -468,6 +661,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_live_perf);
     try std.testing.expect(msg_ag_state != msg_live_strip);
     try std.testing.expect(msg_ag_state != msg_mo_state);
+    try std.testing.expect(msg_ag_state != msg_pub);
+    try std.testing.expect(msg_ag_state != msg_pub_hero);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -481,6 +676,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_live_perf);
     try std.testing.expect(msg_logs_state != msg_live_strip);
     try std.testing.expect(msg_logs_state != msg_mo_state);
+    try std.testing.expect(msg_logs_state != msg_pub);
+    try std.testing.expect(msg_logs_state != msg_pub_hero);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -493,6 +690,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_live_perf);
     try std.testing.expect(msg_logs_lines != msg_live_strip);
     try std.testing.expect(msg_logs_lines != msg_mo_state);
+    try std.testing.expect(msg_logs_lines != msg_pub);
+    try std.testing.expect(msg_logs_lines != msg_pub_hero);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -504,6 +703,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_live_perf);
     try std.testing.expect(msg_live_state != msg_live_strip);
     try std.testing.expect(msg_live_state != msg_mo_state);
+    try std.testing.expect(msg_live_state != msg_pub);
+    try std.testing.expect(msg_live_state != msg_pub_hero);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -514,6 +715,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_live_perf);
     try std.testing.expect(msg_live_transport != msg_live_strip);
     try std.testing.expect(msg_live_transport != msg_mo_state);
+    try std.testing.expect(msg_live_transport != msg_pub);
+    try std.testing.expect(msg_live_transport != msg_pub_hero);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -523,6 +726,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_live_perf);
     try std.testing.expect(msg_live_n_p != msg_live_strip);
     try std.testing.expect(msg_live_n_p != msg_mo_state);
+    try std.testing.expect(msg_live_n_p != msg_pub);
+    try std.testing.expect(msg_live_n_p != msg_pub_hero);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -531,6 +736,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_live_perf);
     try std.testing.expect(msg_live_status != msg_live_strip);
     try std.testing.expect(msg_live_status != msg_mo_state);
+    try std.testing.expect(msg_live_status != msg_pub);
+    try std.testing.expect(msg_live_status != msg_pub_hero);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -538,25 +745,42 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_live_perf);
     try std.testing.expect(msg_live_decks != msg_live_strip);
     try std.testing.expect(msg_live_decks != msg_mo_state);
+    try std.testing.expect(msg_live_decks != msg_pub);
+    try std.testing.expect(msg_live_decks != msg_pub_hero);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
     try std.testing.expect(msg_live_signals != msg_live_perf);
     try std.testing.expect(msg_live_signals != msg_live_strip);
     try std.testing.expect(msg_live_signals != msg_mo_state);
+    try std.testing.expect(msg_live_signals != msg_pub);
+    try std.testing.expect(msg_live_signals != msg_pub_hero);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
     try std.testing.expect(msg_live_cockpit != msg_live_strip);
     try std.testing.expect(msg_live_cockpit != msg_mo_state);
+    try std.testing.expect(msg_live_cockpit != msg_pub);
+    try std.testing.expect(msg_live_cockpit != msg_pub_hero);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
     try std.testing.expect(msg_live_link != msg_mo_state);
+    try std.testing.expect(msg_live_link != msg_pub);
+    try std.testing.expect(msg_live_link != msg_pub_hero);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
+    try std.testing.expect(msg_live_graph != msg_pub);
+    try std.testing.expect(msg_live_graph != msg_pub_hero);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
+    try std.testing.expect(msg_live_perf != msg_pub);
+    try std.testing.expect(msg_live_perf != msg_pub_hero);
     try std.testing.expect(msg_live_strip != msg_mo_state);
+    try std.testing.expect(msg_live_strip != msg_pub);
+    try std.testing.expect(msg_live_strip != msg_pub_hero);
+    try std.testing.expect(msg_mo_state != msg_pub);
+    try std.testing.expect(msg_mo_state != msg_pub_hero);
+    try std.testing.expect(msg_pub != msg_pub_hero);
 }

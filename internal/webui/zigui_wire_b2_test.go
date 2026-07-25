@@ -30,7 +30,9 @@ func wireExportsB2() []wireExport {
 	}
 	out = append(out,
 		wireExport{"motion_v2", zigui.RenderMotionV2},
-		wireExport{"motion_body_v2", zigui.RenderMotionBodyV2})
+		wireExport{"motion_body_v2", zigui.RenderMotionBodyV2},
+		wireExport{"publish_v2", zigui.RenderPublishV2},
+		wireExport{"publish_hero_v2", zigui.RenderPublishHeroV2})
 	return out
 }
 
@@ -53,6 +55,11 @@ func wireBasesB2() []wireBase {
 	}
 	for n, st := range moFixtures() {
 		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
+	}
+	for n, st := range pubFixtures() {
+		out = append(out,
+			wireBase{"pub/" + n, wirePub(st)},
+			wireBase{"pub/" + n + "/hero", wirePubHero(st.Body.Hero)})
 	}
 	return out
 }

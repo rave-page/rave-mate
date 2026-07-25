@@ -145,6 +145,26 @@ func BenchmarkWireBenchMotionBody(b *testing.B) {
 		func() (string, bool) { return zigui.RenderMotionBodyV2(wireMoState(st)) })
 }
 
+func BenchmarkWireBenchPublish(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := pubFixtures()["tracklist"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPublish(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPublishV2(wirePub(st)) })
+}
+
+func BenchmarkWireBenchPublishHero(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := pubFixtures()["tracklist"].Body.Hero
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPublishHero(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPublishHeroV2(wirePubHero(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

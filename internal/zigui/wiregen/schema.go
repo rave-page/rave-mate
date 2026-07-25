@@ -254,6 +254,77 @@ var schema = []msg{
 		doc: "Motion tab (full view + the #mo-body fragment share this state)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Section", "section"), s(4, "TabCam", "tabCam"), s(5, "TabStudio", "tabStudio"), op(6, "Cam", "cam", "MoCam"), op(7, "Studio", "studio", "MoStudio")},
 	},
+	// publish: full tab + the #pub-hero tick fragment. PubTrack.Num is the FIRST kUint field on the wire (Zig i64): it is a 1-based row index (render_publish.go builds it as i+1), never negative - a signed value would encode as a huge uvarint. Everything else stays pre-formatted per rule 6.
+	{
+		name: "PubBadge", goT: "pubBadgeSt", zigT: "publish.Badge",
+		fs: []field{s(1, "Key", "key"), s(2, "DL", "dl"), s(3, "Variant", "variant"), s(4, "Line", "line")},
+	},
+	{
+		name: "PubBar", goT: "pubBarSt", zigT: "publish.Bar",
+		fs: []field{b(1, "Show", "show"), s(2, "Pct", "pct"), s(3, "Cap", "cap")},
+	},
+	{
+		name: "PubNp", goT: "pubNpSt", zigT: "publish.Np",
+		fs: []field{s(1, "Label", "label"), s(2, "Title", "title"), s(3, "Meta", "meta"), s(4, "State", "state"), st(5, "Bar", "bar", "PubBar")},
+	},
+	{
+		name: "PubPlayer", goT: "pubPlayerSt", zigT: "publish.Player",
+		fs: []field{b(1, "Show", "show"), s(2, "Label", "label"), s(3, "Pos", "pos"), st(4, "Bar", "bar", "PubBar")},
+	},
+	{
+		name: "PubHero", goT: "pubHeroSt", zigT: "publish.Hero", id: 23,
+		doc: "#pub-hero fragment (~1 Hz tick)",
+		fs:  []field{b(1, "Show", "show"), st(2, "Rec", "rec", "PubBadge"), st(3, "Cap", "cap", "PubBadge"), st(4, "Obs", "obs", "PubBadge"), s(5, "Finish", "finish"), st(6, "NP", "np", "PubNp"), st(7, "Player", "player", "PubPlayer")},
+	},
+	{
+		name: "PubSetRow", goT: "pubSetRowSt", zigT: "publish.SetRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Sub", "sub"), b(4, "Sel", "sel"), s(5, "Rename", "rename")},
+	},
+	{
+		name: "PubList", goT: "pubListSt", zigT: "publish.List",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Count", "count"), li(3, "Rows", "rows", "PubSetRow")},
+	},
+	{
+		name: "UiBtn", goT: "uiBtn", zigT: "c.Btn",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant"), s(3, "Act", "act"), s(4, "Val", "val")},
+	},
+	{
+		name: "PubCap", goT: "pubCapSt", zigT: "publish.Cap",
+		fs: []field{s(1, "Caption", "caption"), li(2, "Btns", "btns", "UiBtn"), st(3, "Menu", "menu", "SelState")},
+	},
+	{
+		name: "PubLoose", goT: "pubLooseSt", zigT: "publish.Loose",
+		fs: []field{s(1, "Count", "count"), s(2, "Desc", "desc"), li(3, "Caps", "caps", "PubCap")},
+	},
+	{
+		name: "PubCaptures", goT: "pubCapturesSt", zigT: "publish.Captures",
+		fs: []field{s(1, "Player", "player"), s(2, "Empty", "empty"), li(3, "Caps", "caps", "PubCap")},
+	},
+	{
+		name: "PubTrack", goT: "pubTrackSt", zigT: "publish.Track",
+		fs: []field{u(1, "Num", "num"), s(2, "Label", "label"), s(3, "Off", "off"), s(4, "Lead", "lead"), s(5, "LeadTip", "leadTip"), b(6, "Checked", "checked"), s(7, "Path", "path"), s(8, "Ctx", "ctx"), s(9, "OffAct", "offAct"), s(10, "OffDL", "offDl")},
+	},
+	{
+		name: "PubBatch", goT: "pubBatchSt", zigT: "publish.Batch",
+		fs: []field{s(1, "Count", "count"), li(2, "Btns", "btns", "UiBtn")},
+	},
+	{
+		name: "PubTracklist", goT: "pubTracklistSt", zigT: "publish.Tracklist",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Resolving", "resolving"), b(3, "Editable", "editable"), s(4, "OffTip", "offTip"), li(5, "Rows", "rows", "PubTrack"), b(6, "ShowFix", "showFix"), st(7, "Fix", "fix", "UiBtn"), s(8, "Help", "help"), s(9, "Unres", "unres"), st(10, "Batch", "batch", "PubBatch")},
+	},
+	{
+		name: "PubDetail", goT: "pubDetailSt", zigT: "publish.Detail",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "Sel", "sel"), s(3, "Hint", "hint"), s(4, "Player", "player"), st(5, "Loose", "loose", "PubLoose"), s(6, "Name", "name"), s(7, "Meta", "meta"), li(8, "Actions", "actions", "UiBtn"), s(9, "Active", "active"), s(10, "CapsLbl", "capsLbl"), s(11, "TracksLbl", "tracksLbl"), st(12, "Captures", "captures", "PubCaptures"), st(13, "Tracklist", "tracklist", "PubTracklist")},
+	},
+	{
+		name: "PubBody", goT: "pubBodySt", zigT: "publish.Body",
+		fs: []field{st(1, "Hero", "hero", "PubHero"), st(2, "List", "list", "PubList"), st(3, "Detail", "detail", "PubDetail")},
+	},
+	{
+		name: "Pub", goT: "pubSt", zigT: "publish.State", id: 22,
+		doc: "Publish tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Switcher", "switcher"), b(4, "Available", "available"), s(5, "Unavailable", "unavailable"), st(6, "Body", "body", "PubBody")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -261,6 +332,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"publish", "publish.zig"},
 	{"motion", "motion.zig"},
 	// --- phaseb-wire (B-2 fan-out) ---
 	{"live", "live.zig"},

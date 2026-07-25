@@ -840,6 +840,18 @@ export fn rz_ui_render_motion_body_v2(state: ?[*]const u8, len: usize, out_len: 
     return renderWire(motion.State, wire_gen.decodeMoState, motion.renderBody, wire_gen.msg_mo_state, state, len, out_len);
 }
 
+// ── B-2 fan-out: publish ──
+// #pub-hero is the ~1 Hz tick target (recorder progress); it renders EMPTY when no recorder is
+// wired, and an empty render is a legitimate NULL that the Go fallback reproduces.
+
+export fn rz_ui_render_publish_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.State, wire_gen.decodePub, publish.render, wire_gen.msg_pub, state, len, out_len);
+}
+
+export fn rz_ui_render_publish_hero_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.Hero, wire_gen.decodePubHero, publish.renderHero, wire_gen.msg_pub_hero, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

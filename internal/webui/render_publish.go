@@ -565,7 +565,8 @@ func (u *UI) renderPublish() string {
 	}
 	st := u.publishState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderPublish(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPublishV2", wirePub(st), zigui.RenderPublishV2,
+			zigui.RenderPublish, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -576,7 +577,8 @@ func (u *UI) renderPublish() string {
 func (u *UI) publishHeroHTML() string {
 	st := u.pubHeroState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderPublishHero(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPublishHeroV2", wirePubHero(st), zigui.RenderPublishHeroV2,
+			zigui.RenderPublishHero, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
