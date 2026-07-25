@@ -230,9 +230,10 @@ func (u *UI) settingsContentState() setContentSt {
 			cards := []setCardSt{}
 			for _, id := range s.cards {
 				card := u.settingsCardState(id, stats[id])
-				// match against the card's visible text (title + labels + help notes) - the
-				// registry stays single-sourced, every label is searchable for free
-				if !matchAllTerms(foldSearch(stripTags(setCardHTML(card))), terms) {
+				// match against the card's STRUCTURED state (render_settings_search.go): same visible
+				// text the rendered card would carry (title + labels + status + help notes), without
+				// rendering ~40 cards per keystroke on the handler lane
+				if !setCardMatches(card, terms) {
 					continue
 				}
 				cards = append(cards, card)
@@ -305,7 +306,11 @@ func (u *UI) settingsVisible() (map[string]bool, bool) {
 
 // ── search helpers ──
 
-// stripTags reduces card HTML to its visible text (titles, labels, help notes).
+// stripTags reduces markup to its visible text: every text node, joined by the space each '<'
+// leaves behind, entities decoded. Since B4d the matcher walks structured state instead, so this is
+// only for the RAW seams a card body can still carry (raw/noteRaw/region blocks + the sub-view
+// renderers + a legacy pre-rendered tooltip) - and it stays the reference the differential gate
+// measures the structured walk against.
 func stripTags(h string) string {
 	var b strings.Builder
 	in := false
