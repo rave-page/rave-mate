@@ -26,27 +26,40 @@ func Available() bool { return uint32(C.rz_ui_abi_version()) == abiVersion }
 
 // RenderAppGroups renders the full App Groups view. ok=false → use the Go renderer.
 func RenderAppGroups(stateJSON []byte) (string, bool) {
-	return render(stateJSON, false)
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_appgroups(p, l, n)
+	})
 }
 
 // RenderAppGroupsBody renders the #appgroups-body inner fragment (tick patch).
 func RenderAppGroupsBody(stateJSON []byte) (string, bool) {
-	return render(stateJSON, true)
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_appgroups_body(p, l, n)
+	})
 }
 
-// render calls the Zig renderer; copies the result and frees the Zig buffer.
-func render(state []byte, bodyOnly bool) (string, bool) {
+// RenderLogs renders the full Logs view.
+func RenderLogs(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_logs(p, l, n)
+	})
+}
+
+// RenderLogsLines renders the #log-view inner fragment (filter/tick patch).
+func RenderLogsLines(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_logs_lines(p, l, n)
+	})
+}
+
+// render calls a Zig renderer; copies the result and frees the Zig buffer.
+func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (string, bool) {
 	if len(state) == 0 {
 		return "", false
 	}
 	p := (*C.uint8_t)(unsafe.Pointer(&state[0]))
 	var n C.size_t
-	var out *C.uint8_t
-	if bodyOnly {
-		out = C.rz_ui_render_appgroups_body(p, C.size_t(len(state)), &n)
-	} else {
-		out = C.rz_ui_render_appgroups(p, C.size_t(len(state)), &n)
-	}
+	out := f(p, C.size_t(len(state)), &n)
 	if out == nil {
 		return "", false
 	}

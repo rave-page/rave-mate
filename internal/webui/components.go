@@ -70,6 +70,12 @@ func panel(title, sub string) string {
 // toggleRow renders a labelled switch. on = current state; on 'change' the runtime dispatches act
 // with val = the checkbox's new bool ("true"/"false"). data-label makes it ctl-readable/settable.
 func toggleRow(label, act string, on bool) string {
+	return toggleRowDL(label, strings.ToLower(label), act, on)
+}
+
+// toggleRowDL is toggleRow with a caller-resolved data-label (the Zig state path keeps
+// Unicode ToLower in Go).
+func toggleRowDL(label, dataLabel, act string, on bool) string {
 	checked := ""
 	if on {
 		checked = " checked"
@@ -77,7 +83,7 @@ func toggleRow(label, act string, on bool) string {
 	return fmt.Sprintf(`<label class=row data-label=%s><span class=row-label>%s</span>`+
 		`<span class=switch><input type=checkbox%s data-act=%s data-value=%s>`+
 		`<span class=switch-track></span></span></label>`,
-		attrQ(strings.ToLower(label)), html.EscapeString(label), checked, attrQ(act), attrQ(boolStr(on)))
+		attrQ(dataLabel), html.EscapeString(label), checked, attrQ(act), attrQ(boolStr(on)))
 }
 
 // toggleRowGated renders a disabled switch + a warn hint naming what to install to

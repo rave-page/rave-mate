@@ -54,90 +54,134 @@ func smartSelect(id, label, act, cur string, opts func() []ssOpt) string {
 // smartSelectRaw is smartSelect with a pre-rendered label (caller escapes) - lets a
 // tooltip/badge sit beside the label text.
 func smartSelectRaw(id, labelHTML, act, cur string, opts func() []ssOpt) string {
+	ssRegister(id, act, cur, opts)
+	return `<div class=ss-field>` + labelHTML + `<div class=ss id="ss-` + html.EscapeString(id) + `">` + ssInner(id) + `</div></div>`
+}
+
+// ssRegister records id's opts/act/cur (ensuring state exists) - the render-time side
+// effect shared by smartSelectRaw and the Zig-state resolvers.
+func ssRegister(id, act, cur string, opts func() []ssOpt) {
 	ssMu.Lock()
 	if ssSts[id] == nil {
 		ssSts[id] = &ssSt{}
 	}
 	ssOpts[id], ssActs[id], ssCurs[id] = opts, act, cur
 	ssMu.Unlock()
-	return `<div class=ss-field>` + labelHTML + `<div class=ss id="ss-` + html.EscapeString(id) + `">` + ssInner(id) + `</div></div>`
 }
 
-// ssFilter returns id's live filter text - opts fns over huge lists (track pickers)
-// pre-filter + cap server-side so an unfiltered open never renders thousands of rows.
-func ssFilter(id string) string {
-	ssMu.Lock()
-	defer ssMu.Unlock()
-	if st := ssSts[id]; st != nil {
-		return st.filter
-	}
-	return ""
+// ── resolved render state (JSON → Zig; selHTML/selInnerHTML stay the golden reference) ──
+
+// selRow is one filter-passing option row.
+type selRow struct {
+	Val   string `json:"val"`
+	Label string `json:"label"`
+	Sub   string `json:"sub"`
+	Badge string `json:"badge"`
+	Cur   bool   `json:"cur"`
 }
 
-func ssInner(id string) string {
+// selState is a smart select resolved to pure render state: id, plain label
+// (smartSelectRaw keeps rich labels on the Go path), current label, open/filter,
+// filter-passing rows. Unicode filtering/lowercasing stays here in Go.
+type selState struct {
+	ID       string   `json:"id"`
+	Label    string   `json:"label"`
+	CurLabel string   `json:"curLabel"`
+	Open     bool     `json:"open"`
+	Filter   string   `json:"filter"`
+	Rows     []selRow `json:"rows"`
+}
+
+// ssResolve snapshots id's live smart-select state into pure render state.
+func ssResolve(id string) selState {
 	ssMu.Lock()
 	st := ssSts[id]
 	opts := ssOpts[id]
 	cur := ssCurs[id]
-	open, filter := st.open, st.filter
 	ssMu.Unlock()
-
-	curLabel, list := cur, []ssOpt(nil)
+	s := selState{ID: id, CurLabel: cur, Rows: []selRow{}}
+	if st != nil {
+		s.Open, s.Filter = st.open, st.filter
+	}
+	var list []ssOpt
 	if opts != nil {
 		list = opts()
 	}
 	for _, o := range list {
 		if o.Val == cur {
-			curLabel = o.Label
+			s.CurLabel = o.Label
 			break
 		}
 	}
-	if curLabel == "" {
-		curLabel = "(select…)"
+	if s.CurLabel == "" {
+		s.CurLabel = "(select…)"
 	}
+	f := strings.ToLower(strings.TrimSpace(s.Filter))
+	for _, o := range list {
+		if f != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val), f) {
+			continue
+		}
+		s.Rows = append(s.Rows, selRow{Val: o.Val, Label: o.Label, Sub: o.Sub, Badge: o.Badge, Cur: o.Val == cur})
+	}
+	return s
+}
+
+// resolveSelectBox registers + resolves a selectBox (plain label + [][val,label]
+// options) into pure render state for a Zig-migrated tab.
+func resolveSelectBox(label, act string, options [][2]string, current string) selState {
+	id := strings.NewReplacer(":", "-", "/", "-", " ", "-").Replace(act)
+	ssRegister(id, act, current, func() []ssOpt {
+		out := make([]ssOpt, 0, len(options))
+		for _, op := range options {
+			out = append(out, ssOpt{Val: op[0], Label: op[1]})
+		}
+		return out
+	})
+	s := ssResolve(id)
+	s.Label = label
+	return s
+}
+
+// selHTML renders the full ss-field control from resolved state (plain label).
+func selHTML(s selState) string {
+	lbl := ""
+	if s.Label != "" {
+		lbl = `<span class=ss-label>` + html.EscapeString(s.Label) + `</span>`
+	}
+	return `<div class=ss-field>` + lbl + `<div class=ss id="ss-` + html.EscapeString(s.ID) + `">` + selInnerHTML(s) + `</div></div>`
+}
+
+// selInnerHTML renders the <div class=ss> inner markup from resolved state.
+func selInnerHTML(s selState) string {
 	openCls := ""
-	if open {
+	if s.Open {
 		openCls = " open"
 	}
 	var b strings.Builder
-	b.WriteString(`<button type=button class="ss-btn` + openCls + `" data-act="ss-tgl:` + html.EscapeString(id) + `" data-label=` + attrQ(id) + `>` +
-		`<span class=ss-cur>` + html.EscapeString(curLabel) + `</span>` +
+	b.WriteString(`<button type=button class="ss-btn` + openCls + `" data-act="ss-tgl:` + html.EscapeString(s.ID) + `" data-label=` + attrQ(s.ID) + `>` +
+		`<span class=ss-cur>` + html.EscapeString(s.CurLabel) + `</span>` +
 		`<svg class=ss-chev viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>`)
-	if open {
-		b.WriteString(`<div class=ss-bd data-act="ss-tgl:` + html.EscapeString(id) + `"></div>`)
+	if s.Open {
+		b.WriteString(`<div class=ss-bd data-act="ss-tgl:` + html.EscapeString(s.ID) + `"></div>`)
 		b.WriteString(`<div class=ss-panel>`)
-		b.WriteString(`<form class=ss-fw data-act="ss-first:` + html.EscapeString(id) + `">` +
-			`<input class=ss-filter id="ss-f-` + html.EscapeString(id) + `" data-actinput="ss-flt:` + html.EscapeString(id) + `" data-label=` + attrQ(id+"-flt") +
-			` placeholder="Type to filter…" value=` + attrQ(filter) + ` autocomplete=off></form>`)
-		b.WriteString(`<div class=ss-list id="ss-l-` + html.EscapeString(id) + `">` + ssListHTML(id) + `</div>`)
+		b.WriteString(`<form class=ss-fw data-act="ss-first:` + html.EscapeString(s.ID) + `">` +
+			`<input class=ss-filter id="ss-f-` + html.EscapeString(s.ID) + `" data-actinput="ss-flt:` + html.EscapeString(s.ID) + `" data-label=` + attrQ(s.ID+"-flt") +
+			` placeholder="Type to filter…" value=` + attrQ(s.Filter) + ` autocomplete=off></form>`)
+		b.WriteString(`<div class=ss-list id="ss-l-` + html.EscapeString(s.ID) + `">` + selListHTML(s.ID, s.Rows) + `</div>`)
 		b.WriteString(`</div>`)
 	}
 	return b.String()
 }
 
-// ssListHTML renders the filtered option rows.
-func ssListHTML(id string) string {
-	ssMu.Lock()
-	st := ssSts[id]
-	opts := ssOpts[id]
-	cur := ssCurs[id]
-	filter := ""
-	if st != nil {
-		filter = strings.ToLower(strings.TrimSpace(st.filter))
-	}
-	ssMu.Unlock()
-	if opts == nil {
-		return ""
+// selListHTML renders resolved option rows (ss-none when nothing passed the filter).
+func selListHTML(id string, rows []selRow) string {
+	if len(rows) == 0 {
+		return `<div class=ss-none>No matches</div>`
 	}
 	var b strings.Builder
-	n := 0
-	for _, o := range opts() {
-		if filter != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val), filter) {
-			continue
-		}
-		n++
+	for _, o := range rows {
 		cls := "ss-opt"
-		if o.Val == cur {
+		if o.Cur {
 			cls += " cur"
 		}
 		b.WriteString(`<div class="` + cls + `" data-act="ss-pick:` + html.EscapeString(id) + `" data-val=` + attrQ(o.Val) + `>`)
@@ -151,10 +195,32 @@ func ssListHTML(id string) string {
 		}
 		b.WriteString(`</div>`)
 	}
-	if n == 0 {
-		return `<div class=ss-none>No matches</div>`
-	}
 	return b.String()
+}
+
+// ssFilter returns id's live filter text - opts fns over huge lists (track pickers)
+// pre-filter + cap server-side so an unfiltered open never renders thousands of rows.
+func ssFilter(id string) string {
+	ssMu.Lock()
+	defer ssMu.Unlock()
+	if st := ssSts[id]; st != nil {
+		return st.filter
+	}
+	return ""
+}
+
+// ssInner renders the live control's inner markup via the resolved-state renderer.
+func ssInner(id string) string { return selInnerHTML(ssResolve(id)) }
+
+// ssListHTML renders the filtered option rows ("" when id was never registered).
+func ssListHTML(id string) string {
+	ssMu.Lock()
+	opts := ssOpts[id]
+	ssMu.Unlock()
+	if opts == nil {
+		return ""
+	}
+	return selListHTML(id, ssResolve(id).Rows)
 }
 
 func (u *UI) ssToggle(id string) {

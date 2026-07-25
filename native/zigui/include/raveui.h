@@ -20,6 +20,10 @@ const uint8_t *rz_ui_render_appgroups(const uint8_t *state_json, size_t len, siz
 /* Body-only fragment (#appgroups-body inner HTML, the ~1 Hz tick patch target). */
 const uint8_t *rz_ui_render_appgroups_body(const uint8_t *state_json, size_t len, size_t *out_len);
 
+const uint8_t *rz_ui_render_logs(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #log-view inner HTML (filter-change + ~1 Hz tick patch target). */
+const uint8_t *rz_ui_render_logs_lines(const uint8_t *state_json, size_t len, size_t *out_len);
+
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus

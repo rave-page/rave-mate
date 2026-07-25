@@ -8,3 +8,5 @@ func Available() bool { return false }
 
 func RenderAppGroups(stateJSON []byte) (string, bool)     { return "", false }
 func RenderAppGroupsBody(stateJSON []byte) (string, bool) { return "", false }
+func RenderLogs(stateJSON []byte) (string, bool)          { return "", false }
+func RenderLogsLines(stateJSON []byte) (string, bool)     { return "", false }

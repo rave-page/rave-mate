@@ -74,15 +74,30 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | Tab | Status | Golden test |
 |---|---|---|
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
+| logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
 primitive + filter-state locking; appgroups is the smallest full tab yet exercises
 panel/emptyState/badge/dot/btn/data-act/i18n interpolation + the ~1 Hz `tickPatch`
-body funnel. Logs = natural tab #2 (port selectBox/subTabs/toggleRow into
-components.zig first). Zig 0.16: `std.ArrayList` is unmanaged (`.empty` + alloc per
+body funnel. Zig 0.16: `std.ArrayList` is unmanaged (`.empty` + alloc per
 call); never name an identifier `i18n` (`i<digit>` reserved) — state JSON keeps i18n
 strings as flat resolved fields.
+
+Logs-port notes (tab #2): smartselect.go split into register (`ssRegister`) +
+resolved state (`selState`/`ssResolve`/`resolveSelectBox`) + pure renderers
+(`selHTML`/`selInnerHTML`/`selListHTML`) — `ssInner`/`ssListHTML` now delegate, so
+the live ss patches and the Zig port share ONE markup source. Filtering + Unicode
+`strings.ToLower` (select filter, toggleRow data-label via `toggleRowDL`) resolve
+Go-side; Zig only walks rows. Components ported to `components.zig`:
+- `toggleRow(label, data_label, act, on)` — Go `toggleRowDL`; data_label = Go-lowered label.
+- `subTabs(act_prefix, active, []Tab{val,label})` — segmented control; act = prefix++val.
+- `selectBox(Select)` / `selectInner` / `selectList` — smart select from resolved
+  `Select{id,label,curLabel,open,filter,rows[]{val,label,sub,badge,cur}}`; rows are
+  pre-filtered (only filter-passing rows arrive), empty rows ⇒ `ss-none` "No matches";
+  literals "Type to filter…"/"No matches" are hardcoded English (parity w/ smartselect.go).
+- `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
+  `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
 
 ## Dev rules when touching UI during migration
 
