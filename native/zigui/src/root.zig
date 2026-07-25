@@ -7,6 +7,7 @@
 const std = @import("std");
 const html = @import("html.zig");
 const appgroups = @import("appgroups.zig");
+const logs = @import("logs.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -44,6 +45,14 @@ export fn rz_ui_render_appgroups_body(state_json: ?[*]const u8, len: usize, out_
     return renderJSON(appgroups.State, appgroups.renderBody, state_json, len, out_len);
 }
 
+export fn rz_ui_render_logs(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(logs.State, logs.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_logs_lines(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(logs.Lines, logs.renderLines, state_json, len, out_len);
+}
+
 /// Free a buffer returned by an rz_ui_render_* call (len = its *out_len).
 export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
     const p = ptr orelse return;
@@ -54,6 +63,7 @@ export fn rz_ui_free(ptr: ?[*]const u8, len: usize) void {
 test {
     _ = html;
     _ = appgroups;
+    _ = logs;
     _ = @import("components.zig");
 }
 
