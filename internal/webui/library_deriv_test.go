@@ -545,3 +545,38 @@ func firstDiff(a, b string) int {
 	}
 	return n
 }
+
+// TestLibDerivRealBgPathSettlesImmediately exercises the PRODUCTION runner (u.bg, real goroutines)
+// rather than the queued seam every other test here uses, and waits on the settle channel: a
+// version move must be reflected in well under the wall-clock windows B4b deleted (2s browse /
+// 5s on-disk), with no polling interval anywhere.
+func TestLibDerivRealBgPathSettlesImmediately(t *testing.T) {
+	u, s, db, _, _ := newLibTestUIAt(t)
+	s.mu.Lock()
+	s.derivRun = nil // real u.bg from here on
+	s.mu.Unlock()
+	libTestTracks(s, 5000)
+	_ = retainedView(u, s) // cold fill
+
+	if err := db.AppendChanges([]libdb.ChangeEvent{
+		{TrackHash: "h1", Field: "rating", Op: "set", NewValue: "5", Origin: "peer"},
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	ch := s.derivWait()
+	t0 := time.Now()
+	_ = retainedView(u, s) // serves last-known, kicks the refresh on a real goroutine
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not settle within 2s - the real bg path is not wired")
+	}
+	el := time.Since(t0)
+	if el > 500*time.Millisecond {
+		t.Fatalf("settle took %v; the deleted TTLs were 2s/5s, this must be far below them", el)
+	}
+	if got, want := retainedView(u, s), collViewFresh(s); !sameIdx(got, want) {
+		t.Fatalf("post-settle view %d rows != fresh %d rows", len(got), len(want))
+	}
+	t.Logf("real bg settle: %v", el)
+}
