@@ -96,6 +96,13 @@ const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t
 /* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
 const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- settings --- */
+const uint8_t *rz_ui_render_settings(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #set-content inner HTML (sub-tab switch + debounced search patch target). */
+const uint8_t *rz_ui_render_settings_content(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #stset-<id> inner HTML (~1 Hz per-card status tick). */
+const uint8_t *rz_ui_render_settings_status(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

@@ -24,6 +24,7 @@ import (
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/vrdll"
 	"rave.page/mate/internal/vroverlay"
+	"rave.page/mate/internal/zigui"
 )
 
 // setToggle describes one feature toggle: how to read/write the config bool + how to apply it.
@@ -157,18 +158,36 @@ func settingsSections() []setSection {
 // cross-section results. Zig-rendered (native/zigui/src/settings.zig) with the pure Go
 // renderers in render_settings_html.go as fallback + golden reference.
 func (u *UI) renderSettings() string {
-	return settingsHTML(u.settingsState())
+	st := u.settingsState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderSettings(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return settingsHTML(st)
 }
 
 // renderSettingsContent renders the pane below the search box (#set-content) - patched on its
 // own so the search input's DOM (and its focus) survive.
 func (u *UI) renderSettingsContent() string {
-	return setContentHTML(u.settingsContentState())
+	st := u.settingsContentState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderSettingsContent(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return setContentHTML(st)
 }
 
 // renderStatus renders the dot + line fragment patched by the settings tick (#stset-<id>).
 func renderStatus(s stv) string {
-	return setStatusHTML(setStatusSt{V: s.v, T: s.t})
+	st := setStatusSt{V: s.v, T: s.t}
+	if zigui.Available() {
+		if h, ok := zigui.RenderSettingsStatus(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return setStatusHTML(st)
 }
 
 // ── state builders (impure: config + services + probes + i18n) ──

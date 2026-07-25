@@ -850,3 +850,32 @@ test "btnRowOf and btnAct" {
     try btnAct(&h, "Run", "go", "auto-run:", "g&1");
     try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
 }
+
+// --- settings ---
+// The settings tab reuses everything above (panel/emptyState/hint/section*/toggleRow*/fieldEx/
+// kv*/selectBox*/btn*/itemRow*/fpair*) — only the gated switch was missing.
+
+/// toggleRowGated: disabled switch + a warn hint naming what to install to unlock it (Go
+/// toggleRowGatedDL). Same rule as btnGated: gated controls stay visible, greyed, explained.
+/// data_label = Go strings.ToLower(label).
+pub fn toggleRowGated(h: *Html, label: []const u8, data_label: []const u8, on: bool, gate_hint: []const u8) !void {
+    try h.raw("<label class=\"row row--gated\" data-label=");
+    try h.attrQ(data_label);
+    try h.raw("><span class=row-label>");
+    try h.esc(label);
+    try h.raw("</span><span class=switch><input type=checkbox");
+    if (on) try h.raw(" checked");
+    try h.raw(" disabled><span class=switch-track></span></span></label><div class=set-gate>");
+    try hint(h, "warn", gate_hint);
+    try h.raw("</div>");
+}
+
+test "toggleRowGated: disabled switch + warn hint" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try toggleRowGated(&h, "Embed p&layer", "embed p&layer", true, "Install mpv");
+    try std.testing.expectEqualStrings("<label class=\"row row--gated\" data-label=\"embed p&amp;layer\">" ++
+        "<span class=row-label>Embed p&amp;layer</span><span class=switch>" ++
+        "<input type=checkbox checked disabled><span class=switch-track></span></span></label>" ++
+        "<div class=set-gate><span class=\"hint hint--warn\">Install mpv</span></div>", h.b.items);
+}
