@@ -85,3 +85,23 @@ test "bad JSON returns null" {
     var n: usize = 0;
     try std.testing.expect(rz_ui_render_appgroups("{nope", 5, &n) == null);
 }
+
+// --- midi ---
+
+const midimon = @import("midimon.zig");
+
+export fn rz_ui_render_midimon(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.State, midimon.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midimon_rows(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Lines, midimon.renderRows, state_json, len, out_len);
+}
+
+export fn rz_ui_render_miditrace(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midimon.Trace, midimon.renderTrace, state_json, len, out_len);
+}
+
+test {
+    _ = midimon;
+}

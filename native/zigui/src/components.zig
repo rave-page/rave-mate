@@ -349,3 +349,41 @@ test "selectList empty = no matches" {
     try selectList(&h, "x", &.{});
     try std.testing.expectEqualStrings("<div class=ss-none>No matches</div>", h.b.items);
 }
+
+// --- midi ---
+
+/// cardOpen opens an rp-card (Go card, streaming form). head=true also opens the
+/// card-head + card-trail slot: the caller renders the trailing HTML, then calls
+/// cardTrailClose. Go emits the head when title or trailing is non-empty.
+pub fn cardOpen(h: *Html, title: []const u8, head: bool) !void {
+    try h.raw("<div class=\"rp-card\">");
+    if (head) {
+        try h.raw("<div class=card-head><span class=card-h>");
+        try h.esc(title);
+        try h.raw("</span><span class=card-trail>");
+    }
+}
+
+pub fn cardTrailClose(h: *Html) !void {
+    try h.raw("</span></div>");
+}
+
+pub fn cardClose(h: *Html) !void {
+    try h.raw("</div>");
+}
+
+test "cardOpen head + trail + close" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try cardOpen(&h, "T&x", true);
+    try badge(&h, "b", "info");
+    try cardTrailClose(&h);
+    try h.raw("body");
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=card-head><span class=card-h>T&amp;x</span>" ++
+        "<span class=card-trail><span class=\"rp-badge rp-badge--info\">b</span></span></div>body</div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try cardOpen(&h, "ignored", false);
+    try cardClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"rp-card\"></div>", h.b.items);
+}

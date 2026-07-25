@@ -10,3 +10,9 @@ func RenderAppGroups(stateJSON []byte) (string, bool)     { return "", false }
 func RenderAppGroupsBody(stateJSON []byte) (string, bool) { return "", false }
 func RenderLogs(stateJSON []byte) (string, bool)          { return "", false }
 func RenderLogsLines(stateJSON []byte) (string, bool)     { return "", false }
+
+// ── midi ──
+
+func RenderMIDIMon(stateJSON []byte) (string, bool)     { return "", false }
+func RenderMIDIMonRows(stateJSON []byte) (string, bool) { return "", false }
+func RenderMIDITrace(stateJSON []byte) (string, bool)   { return "", false }

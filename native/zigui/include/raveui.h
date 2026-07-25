@@ -26,6 +26,14 @@ const uint8_t *rz_ui_render_logs_lines(const uint8_t *state_json, size_t len, si
 
 void rz_ui_free(const uint8_t *ptr, size_t len);
 
+/* --- midi --- */
+
+/* MIDI monitor card + its #midi-monitor inner rows (~1 Hz patch target). */
+const uint8_t *rz_ui_render_midimon(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midimon_rows(const uint8_t *state_json, size_t len, size_t *out_len);
+/* ravemidi driver wire-trace block (rendered inside the MIDI driver card). */
+const uint8_t *rz_ui_render_miditrace(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

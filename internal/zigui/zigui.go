@@ -67,3 +67,26 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	C.rz_ui_free(out, n)
 	return s, true
 }
+
+// ── midi ──
+
+// RenderMIDIMon renders the MIDI monitor card.
+func RenderMIDIMon(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midimon(p, l, n)
+	})
+}
+
+// RenderMIDIMonRows renders the #midi-monitor inner rows (tick patch).
+func RenderMIDIMonRows(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midimon_rows(p, l, n)
+	})
+}
+
+// RenderMIDITrace renders the ravemidi driver wire-trace block.
+func RenderMIDITrace(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_miditrace(p, l, n)
+	})
+}
