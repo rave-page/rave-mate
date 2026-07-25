@@ -123,3 +123,17 @@ func RenderSettingsBridge(stateJSON []byte) (string, bool)       { return "", fa
 func RenderSettingsUpdFlow(stateJSON []byte) (string, bool)      { return "", false }
 
 // --- end settings-sub ---
+
+// --- player ---
+
+func RenderPlayer(stateJSON []byte) (string, bool)       { return "", false }
+func RenderPlayerRoot(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPlayerVid(stateJSON []byte) (string, bool)    { return "", false }
+func RenderPlayerWave(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPlayerTp(stateJSON []byte) (string, bool)     { return "", false }
+func RenderPlayerEdit(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPlayerExport(stateJSON []byte) (string, bool) { return "", false }
+func RenderPlayerRO(stateJSON []byte) (string, bool)     { return "", false }
+func RenderPlayerHov(stateJSON []byte) (string, bool)    { return "", false }
+
+// --- end player ---

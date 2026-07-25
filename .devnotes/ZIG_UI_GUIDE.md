@@ -106,6 +106,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 
 | library ▸ fixer subviews | Zig (`native/zigui/src/libfixers.zig`; nav rail · gridfix rail + `#gf-live` · fixer results (gridfix/tagfix) · tag editor · prep picker · compat section) | `TestZigLibFixNavRailGolden`, `TestZigLibFixPrepGolden`, `TestZigLibFixGFRailGolden`, `TestZigLibFixGFLiveGolden`, `TestZigLibFixResultsGolden`, `TestZigLibFixTagEditGolden`, `TestZigLibFixCompatGolden` |
+| player (unified media player/editor) | Zig (`native/zigui/src/player.zig`; full component + `#mp-<host>-root`/`-vid`/`-wave`/`-tp`/`-edit`/`-export`/`-ro`/`-hov`) | `TestZigPlayerGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -556,3 +557,65 @@ libviews-port notes (wave 3: mirror / remote-cue-edit / modals):
   no-link arm, rce info/save/body × set+dirty+saved+escaping arms, both modals × empty/
   populated/edit/open-filtered/no-match/capped) in a HEAD worktree and in the split tree —
   `diff -r` clean. The Zig golden then re-checks 48 subtests byte-for-byte.
+
+Player-port notes (wave 4 - the most embedded surface: the library inspector Player body and BOTH
+publish captures panes ride it, and it is the 30 fps one). `mpHTML(host)` keeps its exact signature,
+so the three embed sites needed ZERO edits; the split is `render_player.go` (state builders + PURE
+renderers + bridges) while `player.go` keeps the float/SVG engine and the raw seams. NINE exports,
+one per patch target (`player_actions.go mpPatch*` patches root/vid/wave/tp/edit/export/ro/hov
+independently), each with its OWN state builder - building the whole state for a tiny `-ro` patch
+would register smart selects the Go path never registered at that point.
+- **The 30 fps waveform stays GO by design** (same rule as keywheelSVG / the campath viewer):
+  `mpWaveSVG` + `mpLoudPath` + `mpWaveLoudViz` own all `%.1f`/`%.2f` geometry, the beatgrid/cue/
+  drop/trim markers, the spectral band paths AND the `mp-<host>-ph` / `mp-<host>-ph-veil` ids the
+  client rAF runtime (`shell.go __rt 'ph'`) rewrites per frame. It crosses as ONE raw `svg` field;
+  `player_realtime_test.go` still pins it from the Go side. Nothing ported carries an rAF contract.
+- **Host is a state field, ids are composed in Zig** - with one QUIRK replicated: `mp-<host>-root`
+  ESCAPES the host (`mpHTML` called `html.EscapeString`), every other id splices it RAW. Composite
+  attribute values (`attrQ("mp-hin:"+host)`) need no scratch buffer: `esc` is per-byte, so
+  `"` + esc(prefix) + esc(host) + `"` is byte-exact (`attrComposite` in player.zig).
+- **The `<video>` element's inline JS handlers ride as attrQ VALUES, not raw markup.** They are
+  built Go-side (they carry the `%.3f` config volume and the `mp-vtick:`/`mp-verr:` acts) and both
+  renderers attrQ them identically - so the `data-mse` / `data-mse-src` MSE swap that `__mse` drives
+  keeps its exact bytes. `mse != ""` selects the MSE variant; an explicit flag, never "empty means".
+- **Two Go emitters that looked identical were NOT.** `mpEncChip` opens `class=wchip` (unquoted,
+  `data-label="enc-chip"`), `mpLoudChip` opens `class="wchip loud"` (quoted, `data-label="lufs-chip"`
+  + two `wc-link` rows). They are now ONE `mpChipSt`/`renderChip` with a `loud` flag; the two
+  hardcoded EBU/LUFS URLs travel in state and are spliced UNESCAPED both sides (Go source literals).
+  Both "dim" loading pills splice their i18n text UNESCAPED while the seek-table chip beside them
+  ESCAPES its - replicated, golden-gated.
+- Same class of quirk in the hover readout: `mpReadoutLine` escapes the `@ clock · M x LUFS` and
+  momentary-at-playhead branches but returns the measuring/hover-hint i18n strings RAW - carried as
+  `{text, raw}` rather than "fix"ing one side.
+- **Raw seam left deliberately: the shared loudness block** (`components.go loudnessFields`) incl.
+  its `extraHTML` (`mpLoudExtraHTML` gain-plan line + pre-listen toggle) and the standalone
+  "preset normalizes without an override" copy. Same precedent as `libDetailSt.Loudness`: ONE
+  components.go markup source shared with the library preset builder + automation transcode steps;
+  porting it belongs to a components-level pass, not the player. Tooltips (`tipTopic`) stay raw too.
+- Side-effect ORDER is load-bearing (peers/cue-edit lesson again): the state builders register the
+  smart selects in the pre-split EMIT order - `mp-track-<host>` / `mp-more-<host>` (transport) before
+  `mp-auto-<host>`, then `mp-preset-<host>-<i>` per media, then `mp-scope-<host>`.
+- Every number is pre-formatted Go-side: clocks (`pubClock`/`pubClockF`/`mpSignedClock`), the
+  `progressPct` "%.1f%%" bars, LUFS/kbps/size/`mmss`/`humanBytes` chip rows, and the `%.2f` marker
+  offsets that double as the jump-to-track select's VALUES. The transport sliders reuse
+  `render_media_shared.go uiSlider`'s dual-number shape.
+- Zig keyword traps: `align` and `export` are keywords, so the json tags are `alignRow` /
+  `exportPane`; the media-switch items reuse `components.zig Tab` directly (identical shape) instead
+  of a local type, so no per-render conversion buffer is needed.
+- Zero new components.zig helpers and no tab-local variant: `btnOf`/`btnRowOpen+Close`/`fieldOf`/
+  `slider`/`selectBox`/`subTabs`/`hint`/`progressBar` covered everything. components.go,
+  components.zig, render_media_shared.go and all three embed sites are byte-for-byte untouched.
+- Zero-DOM-change proof (the double proof): (1) a throwaway dump harness rendered **22 mpSt fixtures
+  x 9 surfaces** through the SAME entry points in a HEAD worktree and in the split tree -
+  `diff -r` clean (loopback media URLs carry a random port+token, normalized identically on both
+  sides); (2) a markup-literal multiset diff vs HEAD (217 -> 210) whose every drop is the dedup of
+  the two chip emitters and whose every add is a doc-comment string or a split of an existing
+  literal - zero new markup. Then a deliberate one-byte Zig perturbation failed 66 golden
+  assertions before revert.
+- Go-runtime workarounds replicated for parity, flagged for phase B: the per-render `mpEngineState`
+  re-reads (the transport, the hover line and `mpPlayheadAxis` each snapshot the proxy mirror
+  separately - a Go-side memo would change nothing in the DOM but exists only because the render
+  runs on the serialized act worker), `mpResync`'s "re-emit the root fragment after every render"
+  dance (a race workaround for slow Go renders being overwritten by async analysis applies), and the
+  phase-A per-render state->JSON->parse round trip itself. The `mpPushRealtime` rAF hand-off is NOT
+  a workaround - it is the feature.

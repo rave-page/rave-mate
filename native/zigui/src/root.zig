@@ -535,3 +535,56 @@ test "settings sub-view module" {
 }
 
 // --- end settings-sub ---
+
+// --- player ---
+// The unified media player/editor (internal/webui/player.go + render_player.go), the most
+// embedded surface in the app: the library inspector's Player body and BOTH publish
+// captures panes render it. One export per patch target - the full component plus the
+// root/vid/wave/tp/edit/export/ro/hov fragments (player_actions.go mpPatch*). The waveform
+// SVG and the shared loudness block ride through the state as trusted RAW markup; the
+// legitimately-empty fragments (no video media, edit mode off, no active media) render
+// EMPTY ⇒ NULL ⇒ the Go fallback renders the same empty string.
+
+const player = @import("player.zig");
+
+export fn rz_ui_render_player(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.State, player.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_root(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Inner, player.renderInner, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_vid(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Vid, player.renderVid, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_wave(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Wave, player.renderWave, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_tp(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Tp, player.renderTp, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_edit(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Edit, player.renderEdit, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_export(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Export, player.renderExport, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_ro(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.RO, player.renderRO, state_json, len, out_len);
+}
+
+export fn rz_ui_render_player_hov(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(player.Hov, player.renderHov, state_json, len, out_len);
+}
+
+test "player module" {
+    _ = player;
+}
+
+// --- end player ---

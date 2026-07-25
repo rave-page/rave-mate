@@ -181,6 +181,24 @@ const uint8_t *rz_ui_render_settings_bridge(const uint8_t *state_json, size_t le
 const uint8_t *rz_ui_render_settings_updflow(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end settings-sub --- */
 
+/* --- player --- */
+/* The unified media player/editor (internal/webui/player.go + render_player.go): the full
+ * .mplayer component plus one export per patch target (#mp-<host>-root/-vid/-wave/-tp/
+ * -edit/-export/-ro/-hov). The waveform SVG (float geometry + the rAF-driven `mp-<host>-ph`
+ * ids) and the shared loudness block ride through the state as trusted RAW markup.
+ * Legitimately-empty fragments (no video media, edit mode off, no active media) render
+ * empty => NULL, and the Go fallback renders the same "". */
+const uint8_t *rz_ui_render_player(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_root(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_vid(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_wave(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_tp(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_edit(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_export(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_ro(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_hov(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end player --- */
+
 #ifdef __cplusplus
 }
 #endif
