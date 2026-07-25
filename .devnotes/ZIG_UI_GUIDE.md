@@ -106,6 +106,16 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 
 | library ▸ fixer subviews | Zig (`native/zigui/src/libfixers.zig`; nav rail · gridfix rail + `#gf-live` · fixer results (gridfix/tagfix) · tag editor · prep picker · compat section) | `TestZigLibFixNavRailGolden`, `TestZigLibFixPrepGolden`, `TestZigLibFixGFRailGolden`, `TestZigLibFixGFLiveGolden`, `TestZigLibFixResultsGolden`, `TestZigLibFixTagEditGolden`, `TestZigLibFixCompatGolden` |
+
+| **Dialogs** | | |
+| dialogs ▸ shared choice | Zig (`components.zig` `Choice`/`choiceDialog`; confirm / format picker / row context menu - 6 call sites) | `TestZigDialogsAGolden` (`choice/*`) |
+| publish ▸ text export | Zig (`native/zigui/src/dialogs_a.zig` `renderTxtExport`) | `TestZigDialogsAGolden` (`txtExport/*`) |
+| publish ▸ export preview | Zig (`dialogs_a.zig` `renderExportPrev`; local + remote arms) | `TestZigDialogsAGolden` (`exportPrev/*`) |
+| publish ▸ rename set | Zig (`dialogs_a.zig` `renderRename`) | `TestZigDialogsAGolden` (`rename/*`) |
+| publish ▸ fix start times | Zig (`dialogs_a.zig` `renderFix`) | `TestZigDialogsAGolden` (`fix/*`) |
+| player ▸ export preset editor | Zig (`dialogs_a.zig` `renderPreset`; loudness block stays raw) | `TestZigDialogsAGolden` (`preset/*`) |
+| cue editor ▸ pattern manager | Zig (`dialogs_a.zig` `renderPatMgr`) | `TestZigDialogsAGolden` (`patMgr/*`) |
+
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -556,3 +566,45 @@ libviews-port notes (wave 3: mirror / remote-cue-edit / modals):
   no-link arm, rce info/save/body × set+dirty+saved+escaping arms, both modals × empty/
   populated/edit/open-filtered/no-match/capped) in a HEAD worktree and in the split tree —
   `diff -r` clean. The Zig golden then re-checks 48 subtests byte-for-byte.
+
+Dialog-sweep-A notes (wave 4: the publish/transcode dialog family - `publish_export.go`,
+`publish_actions.go`, `publish_remote_actions.go`, `pbuilder.go`, `library_cueedit.go`'s pattern
+manager). State + pure renderers in `render_dialogs_a.go`, Zig mirror in `dialogs_a.zig`, one export
+per dialog in the `// --- dialogs-a ---` blocks. Every entry point kept its signature, so the
+`u.openModal(...)` call sites are untouched.
+- **SIX dialogs collapsed into ONE renderer.** The capture-remove confirm, export-format picker,
+  delete-set confirm, remote delete confirm and both tracklist context menus differ only in
+  title / message / button list / where the buttons sit, so `components.zig` gained ONE shared
+  `Choice`/`choiceDialog` (append-only) instead of six near-copy ports. Three explicit flags carry
+  the shape: `hasMsg` (a blank message still emits an empty `.np-artist` - a blank i18n string must
+  not switch arms), `msgRaw` (the hand-written English literals that QUOTE an already-escaped file
+  name; escaping the whole line would turn those quotes into `&#34;`), `inBody` (btn-row inside
+  `.modal-body`, so the footer falls back to Go's default Close). `hiddenField`/`labeledInput` also
+  moved into components.zig - every form modal in the repo needs them.
+- **No `_frag` export was needed anywhere in this batch.** Each dialog's "live preview" is a WHOLE
+  re-open: `pub-txt-*` re-calls `pubTxtOpen`, `mp-pf:` re-calls `mpPresetModal`, `ce-pat-*` re-calls
+  `cePatternManagerHTML`. A grep for `__patch`/`textContent` inside these dialogs' ids finds only
+  `pub-hero` (a tab fragment, already ported) - checked before adding exports, per the modal recipe.
+- Raw (trusted) pass-throughs, each matching an UNESCAPED Go splice: the shared loudness block
+  (`components.go loudnessFields` - same seam the library encode builder keeps), the time-fix
+  preview's clock readouts (`time.Format("15:04:05")`, `pubClock`) and row numbers
+  (`fmt.Sprint(i+1)`), and `pubExportModal`'s note literal.
+- Go helpers gained caller-resolved twins so each component keeps ONE markup source:
+  `labeledInput` → `labeledInputDL`, and the dialogs resolve their selects through the existing
+  `resolveSmartSelect`/`resolvePbSelect`/`resolvePbSelectTip` (+`selHTML`/`selHTMLRaw`). Two selects
+  here are registered with an EXPLICIT id (`pub-txt-preset`, `pub-fix-opener`), so the state builder
+  calls `resolveSmartSelect(id, act, cur, opts)` and then sets `.Label` - byte-identical to what
+  `smartSelect(id, label, …)` did, and the `ssRegister` side effect still happens at the same point
+  in the render.
+- `pubTrackCtxModal` and `pubTrackCtx2` now share `pubCompatBtns(path)` (mark / find / copy path).
+  The `path == ""` arm stays in `pubTrackCtx2` alone - `pubTrackCtxModal` never guarded it, and
+  hoisting the guard would have changed its DOM for a crafted empty arg.
+- Zero-DOM-change proof: a throwaway harness transcribed all eight pre-split emitters verbatim and
+  diffed them against state+renderer over the full fixture set (capture-delete × 3 names,
+  format picker × 2 ids, export preview × 15 payload/format pairs, rename × 9, delete × 2 arms,
+  both context menus, 8 text-export states, 9 time-fix states, 9 pattern-manager states,
+  12 preset-editor states) - 0 diffs, then deleted. The permanent guards that stayed are
+  `TestDialogsAStatesHaveNoNullSlices` and the 61-subtest `TestZigDialogsAGolden`; a deliberate
+  one-byte Zig perturbation (`pub-track-l` → `pub-track-L`) failed 13 subtests before revert.
+- Fixture file `render_dialogs_a_test.go` is UNTAGGED on purpose so the byte-parity harness and the
+  tagged Zig gate share one fixture set - a new state axis is exercised by both.
