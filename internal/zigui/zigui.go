@@ -230,3 +230,96 @@ func RenderMIDICtlStat(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_midictl_stat(p, l, n)
 	})
 }
+
+// --- media --- (automations, overlays, twitch, editor)
+
+// RenderAutomations renders the full Automations view.
+func RenderAutomations(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations(p, l, n)
+	})
+}
+
+// RenderAutomationsBody renders the #auto-body inner fragment (tick patch).
+func RenderAutomationsBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations_body(p, l, n)
+	})
+}
+
+// RenderOverlays renders the full Overlays view.
+func RenderOverlays(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays(p, l, n)
+	})
+}
+
+// RenderOverlaysAppearance renders the #ovl-appearance fragment.
+func RenderOverlaysAppearance(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_appearance(p, l, n)
+	})
+}
+
+// RenderOverlaysSpout renders the #ovl-spout fragment.
+func RenderOverlaysSpout(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_spout(p, l, n)
+	})
+}
+
+// RenderOverlaysStrip renders the #ovl-strip fragment.
+func RenderOverlaysStrip(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_strip(p, l, n)
+	})
+}
+
+// RenderOverlaysStatus renders one #ovl-st-<kind> status fragment.
+func RenderOverlaysStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_status(p, l, n)
+	})
+}
+
+// RenderTwitch renders the full Twitch view.
+func RenderTwitch(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch(p, l, n)
+	})
+}
+
+// RenderTwitchObs renders the #twitch-obs fragment.
+func RenderTwitchObs(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_obs(p, l, n)
+	})
+}
+
+// RenderTwitchPresets renders the #twitch-presets fragment.
+func RenderTwitchPresets(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_presets(p, l, n)
+	})
+}
+
+// RenderTwitchFeed renders the #twitch-feed inner fragment.
+func RenderTwitchFeed(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_feed(p, l, n)
+	})
+}
+
+// RenderEditor renders the full Editor view.
+func RenderEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor(p, l, n)
+	})
+}
+
+// RenderEditorPreview renders the #ed-preview inner fragment (tick patch).
+func RenderEditorPreview(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_preview(p, l, n)
+	})
+}

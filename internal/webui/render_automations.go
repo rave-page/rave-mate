@@ -8,39 +8,163 @@ import (
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/zigui"
 )
 
-// renderAutomations: file-arrival + scheduled action chains (list/create/edit/enable/delete,
-// schedules, run-now, recent runs). The create/edit form lives in automations_editor.go, the
-// schedule form in automations_schedules.go, and run-now in automations_runnow.go.
-func (u *UI) renderAutomations() string {
-	if u.svc.Automations == nil {
-		return panel(i18n.T("tab.automations"), "") + emptyState(i18n.T("automations.unavailable"))
-	}
-	return panel(i18n.T("tab.automations"), i18n.T("automations.subtitle")) + `<div id=auto-body>` + u.autoBody() + `</div>`
+// Automations is a Zig-rendered tab (native/zigui/src/automations.zig): Go resolves
+// all state (service data + i18n) into autoState, the Zig lib renders HTML
+// byte-identical to the Go renderers below (fallback + golden reference,
+// zigui_golden_automations_test.go).
+
+// autoLabels are the per-card control labels (shared by automation + schedule cards).
+type autoLabels struct {
+	Enabled   string `json:"enabled"`
+	EnabledDL string `json:"enabledDl"` // strings.ToLower(Enabled)
+	Run       string `json:"run"`
+	SchAdd    string `json:"schAdd"`
+	Edit      string `json:"edit"`
+	Delete    string `json:"delete"`
 }
 
-func (u *UI) autoBody() string {
-	autos := u.svc.Automations.List() // listed once: the schedule cards name their target from it
-	var b strings.Builder
-	b.WriteString(section(i18n.T("tab.automations"), u.autoListHTML(autos)))
-	b.WriteString(section(i18n.T("automations.schedules"), u.autoSchedulesHTML(u.svc.Automations.ListSchedules(), autos)))
-	b.WriteString(section(i18n.T("automations.recentRuns"), u.autoRunsHTML(u.svc.Automations.Runs(20))))
-	return b.String()
+// autoCard is one automation card.
+type autoCard struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	WatchDir  string `json:"watchDir"`
+	Status    string `json:"status"` // LastStatus; "" = no badge
+	StatusVar string `json:"statusVar"`
+	Chain     string `json:"chain"`
+	Enabled   bool   `json:"enabled"`
 }
 
-func (u *UI) autoListHTML(autos []automation.Automation) string {
-	newBtn := btnRow(btn(i18n.T("automations.new"), "primary", "auto-new", ""))
-	if len(autos) == 0 {
-		return newBtn + emptyState(i18n.T("automations.emptyList"))
+// autoListState is the automations-list section.
+type autoListState struct {
+	New   string     `json:"new"`
+	Empty string     `json:"empty"`
+	Cards []autoCard `json:"cards"`
+}
+
+// autoSchedCard is one schedule card.
+type autoSchedCard struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Target    string `json:"target"`
+	StateText string `json:"stateText"`
+	StateVar  string `json:"stateVar"`
+	Trigger   string `json:"trigger"`
+	Gates     string `json:"gates"`
+	LastFired string `json:"lastFired"`
+	WarnTone  string `json:"warnTone"` // "" = no warning
+	WarnText  string `json:"warnText"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// autoSchedsState is the schedules section. Gated = no automation to point at, so New
+// is disabled (visible + explained) and GateWhy doubles as the empty-state text.
+type autoSchedsState struct {
+	New     string          `json:"new"`
+	Gated   bool            `json:"gated"`
+	GateWhy string          `json:"gateWhy"`
+	Empty   string          `json:"empty"`
+	Cards   []autoSchedCard `json:"cards"`
+}
+
+// autoRunRow is one recent-run line.
+type autoRunRow struct {
+	Name    string `json:"name"` // shortPath(FilePath)
+	Trigger string `json:"trigger"`
+	Status  string `json:"status"`
+	Variant string `json:"variant"`
+}
+
+// autoRunsState is the recent-runs section.
+type autoRunsState struct {
+	Empty string       `json:"empty"`
+	Rows  []autoRunRow `json:"rows"`
+}
+
+// autoBodyState is the #auto-body inner state (version-gated ~1 Hz tick patch target).
+type autoBodyState struct {
+	ListTitle  string          `json:"listTitle"`
+	SchedTitle string          `json:"schedTitle"`
+	RunsTitle  string          `json:"runsTitle"`
+	Labels     autoLabels      `json:"labels"`
+	List       autoListState   `json:"list"`
+	Scheds     autoSchedsState `json:"scheds"`
+	Runs       autoRunsState   `json:"runs"`
+}
+
+// autoState is the resolved render state for the Automations view (JSON → Zig).
+type autoState struct {
+	Title       string        `json:"title"`
+	Sub         string        `json:"sub"`
+	Available   bool          `json:"available"`
+	Unavailable string        `json:"unavailable"`
+	Body        autoBodyState `json:"body"`
+}
+
+// emptyAutoBody zeroes the body with NON-NIL slices: nil marshals to JSON null, which
+// fails the Zig slice parse (and would silently drop the tab to the Go fallback).
+func emptyAutoBody() autoBodyState {
+	return autoBodyState{
+		List:   autoListState{Cards: []autoCard{}},
+		Scheds: autoSchedsState{Cards: []autoSchedCard{}},
+		Runs:   autoRunsState{Rows: []autoRunRow{}},
 	}
-	var b strings.Builder
-	b.WriteString(newBtn)
-	b.WriteString(`<div class=grid>`)
+}
+
+// autoLabelsOf resolves the per-card control labels.
+func autoLabelsOf() autoLabels {
+	en := i18n.T("common.enabledCap")
+	return autoLabels{
+		Enabled: en, EnabledDL: strings.ToLower(en),
+		Run:    i18n.T("automations.run.btn"),
+		SchAdd: i18n.T("automations.sch.add"),
+		Edit:   i18n.T("common.edit"),
+		Delete: i18n.T("common.delete"),
+	}
+}
+
+// automationsState resolves availability + i18n + the whole body into render state.
+func (u *UI) automationsState() autoState {
+	st := autoState{
+		Title:       i18n.T("tab.automations"),
+		Sub:         i18n.T("automations.subtitle"),
+		Available:   u.svc.Automations != nil,
+		Unavailable: i18n.T("automations.unavailable"),
+		Body:        emptyAutoBody(),
+	}
+	if st.Available {
+		st.Body = u.autoBodyState()
+	}
+	return st
+}
+
+// autoBodyState resolves the three sections. List() runs once: the schedule cards name
+// their target from it.
+func (u *UI) autoBodyState() autoBodyState {
+	autos := u.svc.Automations.List()
+	return autoBodyState{
+		ListTitle:  i18n.T("tab.automations"),
+		SchedTitle: i18n.T("automations.schedules"),
+		RunsTitle:  i18n.T("automations.recentRuns"),
+		Labels:     autoLabelsOf(),
+		List:       autoListStateOf(autos),
+		Scheds:     autoSchedsStateOf(u.svc.Automations.ListSchedules(), autos),
+		Runs:       autoRunsStateOf(u.svc.Automations.Runs(20)),
+	}
+}
+
+func autoListStateOf(autos []automation.Automation) autoListState {
+	st := autoListState{
+		New:   i18n.T("automations.new"),
+		Empty: i18n.T("automations.emptyList"),
+		Cards: make([]autoCard, 0, len(autos)),
+	}
 	for _, a := range autos {
-		status := ""
+		v := ""
 		if a.LastStatus != "" {
-			v := "secondary"
+			v = "secondary"
 			switch a.LastStatus {
 			case "success":
 				v = "success"
@@ -49,86 +173,65 @@ func (u *UI) autoListHTML(autos []automation.Automation) string {
 			case "partial":
 				v = "warning"
 			}
-			status = badge(a.LastStatus, v)
 		}
-		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(autoLabelOf(a.Label)) + `</div>` +
-			`<div class=np-artist>` + html.EscapeString(a.WatchDir) + `</div>` +
-			`<div class=np-meta>` + status + `</div>` +
-			`<div class=np-meta>` + html.EscapeString(autoChainSummary(a.Actions)) + `</div>` +
-			toggleRow(i18n.T("common.enabledCap"), "auto-toggle:"+a.ID, a.Enabled) +
-			btnRow(btn(i18n.T("automations.run.btn"), "go", "auto-run:"+a.ID, ""),
-				btn(i18n.T("automations.sch.add"), "outline", "auto-sch-add:"+a.ID, ""),
-				btn(i18n.T("common.edit"), "outline", "auto-edit:"+a.ID, ""),
-				btn(i18n.T("common.delete"), "destructive", "auto-del:"+a.ID, "")) + `</div>`)
+		st.Cards = append(st.Cards, autoCard{
+			ID: a.ID, Label: autoLabelOf(a.Label), WatchDir: a.WatchDir,
+			Status: a.LastStatus, StatusVar: v,
+			Chain: autoChainSummary(a.Actions), Enabled: a.Enabled,
+		})
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// autoSchedulesHTML renders the schedule cards. autos supplies each schedule's target name (a
-// Schedule stores only the automation's id) and is passed in so autoBody's List() stays single.
+// autoSchedsStateOf resolves the schedule cards. autos supplies each schedule's target
+// name (a Schedule stores only the automation's id).
 //
 // Creating a schedule needs an automation to point at; RENDERING one does not. Gating the whole
 // section on len(autos)>0 hid every existing schedule - and its delete/toggle controls - while the
 // scheduler kept firing them: a nightly delete-purge with no UI to see or stop it. The cards
 // render regardless; only the New button is gated.
-func (u *UI) autoSchedulesHTML(scheds []automation.Schedule, autos []automation.Automation) string {
-	newBtn := btnRow(btn(i18n.T("automations.sch.new"), "primary", "auto-sch-new", ""))
-	if len(autos) == 0 {
-		newBtn = btnRow(btnGated(i18n.T("automations.sch.new"), i18n.T("automations.sch.needAutomation")))
-	}
-	if len(scheds) == 0 {
-		if len(autos) == 0 {
-			return newBtn + emptyState(i18n.T("automations.sch.needAutomation"))
-		}
-		return newBtn + emptyState(i18n.T("automations.noSchedules"))
+func autoSchedsStateOf(scheds []automation.Schedule, autos []automation.Automation) autoSchedsState {
+	st := autoSchedsState{
+		New:     i18n.T("automations.sch.new"),
+		Gated:   len(autos) == 0,
+		GateWhy: i18n.T("automations.sch.needAutomation"),
+		Empty:   i18n.T("automations.noSchedules"),
+		Cards:   make([]autoSchedCard, 0, len(scheds)),
 	}
 	byID := make(map[string]automation.Automation, len(autos))
 	for _, a := range autos {
 		byID[a.ID] = a // scalars + read-only slice reads; never mutated (elements alias the service cache)
 	}
-	var b strings.Builder
-	b.WriteString(newBtn)
-	b.WriteString(`<div class=grid>`)
 	for _, s := range scheds {
 		a, ok := byID[s.AutomationID]
-		target := autoLabelOf(a.Label)
-		warn := ""
+		c := autoSchedCard{
+			ID: s.ID, Label: autoLabelOf(s.Label), Target: autoLabelOf(a.Label),
+			StateText: i18n.T("common.off"), StateVar: "secondary",
+			Trigger: autoTriggerSummary(s), Gates: autoGateSummary(s),
+			LastFired: autoLastFired(s), Enabled: s.Enabled,
+		}
 		switch {
 		case !ok:
 			// Its automation is gone, so onSchedule skips every fire. Service.Delete cascades now,
 			// so this is data from before the cascade (or a store that refused one) - it must be
 			// visible AND deletable, never hidden behind an empty state.
-			target = i18n.T("automations.sch.missingAutomation")
-			warn = hint("bad", i18n.T("automations.sch.orphanWarn"))
+			c.Target = i18n.T("automations.sch.missingAutomation")
+			c.WarnTone, c.WarnText = "bad", i18n.T("automations.sch.orphanWarn")
 		case s.Enabled && !a.Enabled:
 			// Armed, but onSchedule skips the fire while the automation itself is off. The card would
 			// otherwise show an enabled schedule against a trigger summary that never happens.
-			warn = hint("warn", i18n.T("automations.sch.automationOffWarn"))
+			c.WarnTone, c.WarnText = "warn", i18n.T("automations.sch.automationOffWarn")
 		}
-		state := badge(i18n.T("common.off"), "secondary")
 		if s.Enabled {
-			state = badge(string(s.Kind), "info")
+			c.StateText, c.StateVar = string(s.Kind), "info"
 		}
-		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(autoLabelOf(s.Label)) + `</div>` +
-			`<div class=np-artist>` + html.EscapeString(target) + `</div>` +
-			`<div class=np-meta>` + state + ` ` + html.EscapeString(autoTriggerSummary(s)) + `</div>` +
-			`<div class=np-meta>` + html.EscapeString(autoGateSummary(s)) + `</div>` +
-			`<div class=np-meta>` + html.EscapeString(autoLastFired(s)) + `</div>` + warn +
-			toggleRow(i18n.T("common.enabledCap"), "auto-sch-tgl:"+s.ID, s.Enabled) +
-			btnRow(btn(i18n.T("common.edit"), "outline", "auto-sch-edit:"+s.ID, ""),
-				btn(i18n.T("common.delete"), "destructive", "auto-sch-del:"+s.ID, "")) + `</div>`)
+		st.Cards = append(st.Cards, c)
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-func (u *UI) autoRunsHTML(runs []automation.Run) string {
-	if len(runs) == 0 {
-		return emptyState(i18n.T("automations.noRuns"))
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="rp-card">`)
+func autoRunsStateOf(runs []automation.Run) autoRunsState {
+	st := autoRunsState{Empty: i18n.T("automations.noRuns"), Rows: make([]autoRunRow, 0, len(runs))}
 	for _, r := range runs {
 		v := "secondary"
 		switch r.Status {
@@ -139,8 +242,125 @@ func (u *UI) autoRunsHTML(runs []automation.Run) string {
 		case "running":
 			v = "info"
 		}
-		b.WriteString(`<div class=kv><span class=kv-k>` + html.EscapeString(shortPath(r.FilePath)) + ` <span class=np-artist>` + html.EscapeString(r.Trigger) + `</span></span>` +
-			`<span class=kv-v>` + badge(r.Status, v) + `</span></div>`)
+		st.Rows = append(st.Rows, autoRunRow{
+			Name: shortPath(r.FilePath), Trigger: r.Trigger, Status: r.Status, Variant: v,
+		})
+	}
+	return st
+}
+
+// renderAutomations: file-arrival + scheduled action chains (list/create/edit/enable/delete,
+// schedules, run-now, recent runs). The create/edit form lives in automations_editor.go, the
+// schedule form in automations_schedules.go, and run-now in automations_runnow.go.
+func (u *UI) renderAutomations() string {
+	st := u.automationsState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderAutomations(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return automationsHTML(st)
+}
+
+// autoBody is the #auto-body inner fragment (version-gated ~1 Hz tick patch target).
+func (u *UI) autoBody() string {
+	st := u.autoBodyState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderAutomationsBody(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return autoBodyHTML(st)
+}
+
+// autoSchedulesHTML renders the schedules section for the given data (ctl/behaviour tests).
+func (u *UI) autoSchedulesHTML(scheds []automation.Schedule, autos []automation.Automation) string {
+	return autoSchedsHTML(autoSchedsStateOf(scheds, autos), autoLabelsOf())
+}
+
+// automationsHTML is the pure Go renderer (golden reference; byte-identical to Zig).
+func automationsHTML(st autoState) string {
+	if !st.Available {
+		return panel(st.Title, "") + emptyState(st.Unavailable)
+	}
+	return panel(st.Title, st.Sub) + `<div id=auto-body>` + autoBodyHTML(st.Body) + `</div>`
+}
+
+// autoBodyHTML is the pure #auto-body inner renderer.
+func autoBodyHTML(st autoBodyState) string {
+	return section(st.ListTitle, autoListHTML(st.List, st.Labels)) +
+		section(st.SchedTitle, autoSchedsHTML(st.Scheds, st.Labels)) +
+		section(st.RunsTitle, autoRunsHTML(st.Runs))
+}
+
+func autoListHTML(st autoListState, lb autoLabels) string {
+	newBtn := btnRow(btn(st.New, "primary", "auto-new", ""))
+	if len(st.Cards) == 0 {
+		return newBtn + emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(newBtn)
+	b.WriteString(`<div class=grid>`)
+	for _, a := range st.Cards {
+		status := ""
+		if a.Status != "" {
+			status = badge(a.Status, a.StatusVar)
+		}
+		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(a.Label) + `</div>` +
+			`<div class=np-artist>` + html.EscapeString(a.WatchDir) + `</div>` +
+			`<div class=np-meta>` + status + `</div>` +
+			`<div class=np-meta>` + html.EscapeString(a.Chain) + `</div>` +
+			toggleRowDL(lb.Enabled, lb.EnabledDL, "auto-toggle:"+a.ID, a.Enabled) +
+			btnRow(btn(lb.Run, "go", "auto-run:"+a.ID, ""),
+				btn(lb.SchAdd, "outline", "auto-sch-add:"+a.ID, ""),
+				btn(lb.Edit, "outline", "auto-edit:"+a.ID, ""),
+				btn(lb.Delete, "destructive", "auto-del:"+a.ID, "")) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func autoSchedsHTML(st autoSchedsState, lb autoLabels) string {
+	newBtn := btnRow(btn(st.New, "primary", "auto-sch-new", ""))
+	if st.Gated {
+		newBtn = btnRow(btnGated(st.New, st.GateWhy))
+	}
+	if len(st.Cards) == 0 {
+		if st.Gated {
+			return newBtn + emptyState(st.GateWhy)
+		}
+		return newBtn + emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(newBtn)
+	b.WriteString(`<div class=grid>`)
+	for _, s := range st.Cards {
+		warn := ""
+		if s.WarnTone != "" {
+			warn = hint(s.WarnTone, s.WarnText)
+		}
+		b.WriteString(`<div class="rp-card"><div class=card-label>` + html.EscapeString(s.Label) + `</div>` +
+			`<div class=np-artist>` + html.EscapeString(s.Target) + `</div>` +
+			`<div class=np-meta>` + badge(s.StateText, s.StateVar) + ` ` + html.EscapeString(s.Trigger) + `</div>` +
+			`<div class=np-meta>` + html.EscapeString(s.Gates) + `</div>` +
+			`<div class=np-meta>` + html.EscapeString(s.LastFired) + `</div>` + warn +
+			toggleRowDL(lb.Enabled, lb.EnabledDL, "auto-sch-tgl:"+s.ID, s.Enabled) +
+			btnRow(btn(lb.Edit, "outline", "auto-sch-edit:"+s.ID, ""),
+				btn(lb.Delete, "destructive", "auto-sch-del:"+s.ID, "")) + `</div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func autoRunsHTML(st autoRunsState) string {
+	if len(st.Rows) == 0 {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rp-card">`)
+	for _, r := range st.Rows {
+		b.WriteString(`<div class=kv><span class=kv-k>` + html.EscapeString(r.Name) + ` <span class=np-artist>` + html.EscapeString(r.Trigger) + `</span></span>` +
+			`<span class=kv-v>` + badge(r.Status, r.Variant) + `</span></div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()

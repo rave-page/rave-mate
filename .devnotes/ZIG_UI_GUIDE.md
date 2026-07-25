@@ -84,6 +84,10 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 | midimon (MIDI-tab fragments) | Zig (`native/zigui/src/midimon.zig`; monitor card + `#midi-monitor` rows + driver wire trace) | `TestZigMIDIMonGolden`, `TestZigMIDITraceGolden` |
 | midictl | Zig (`native/zigui/src/midictl.zig` + `midictl_ctls.zig` + `midictl_uimap.zig`; full tab + `#midi-active` + `#midi-ctlstat-<i>`) | `TestZigMIDICtlGolden` |
+| automations | Zig (`native/zigui/src/automations.zig`; full + `#auto-body` fragment) | `TestZigAutomationsGolden` |
+| overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
+| twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
+| editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -156,6 +160,31 @@ MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
 - Go helpers extended with caller-resolved-data-label twins (Unicode `ToLower` stays in Go,
   same pattern as `toggleRowDL`): `statusRowDL`, `toggleRowTipDL`, plus
   `resolveSelectBoxTip` and `resolveSmartSelect`/`selHTMLRaw`/`emptySel`.
+
+Media-batch notes (tabs automations/overlays/twitch/editor): `render_media_shared.go`
+carries the components.go primitives as JSON-able control state (`uiBtn`/`uiToggle`/
+`uiField`/`uiKV`/`uiStatus`/`uiSlider`) because these tabs pass controls around as state,
+where a struct beats 8 positional args. Each `html()` delegates to the caller-resolved
+Go primitive (`fieldExDL`/`kvDL`/`statusRowDL`/`toggleRowDL`/`slider`), so `dl` is
+AUTHORITATIVE for both renderers and the markup has exactly ONE Go source. The
+components.zig `media` block is thin wrappers over the flat helpers the other batches
+already added — `Field`/`fieldOf` → `fieldEx`, `KV`/`kvOf` → `kv`, `Status`/`statusOf` →
+`statusRow` (plus the variant-`""`-renders-nothing rule that Go `ovlStatus` needs),
+`Toggle`/`toggleOf` → `toggleRow` — with only `Btn`/`btnOf`/`btnRowOf`/`btnAct` genuinely
+new (`btnAct` = `btn` whose act is `prefix++id`, no data-val: the per-row action pattern).
+`uiSlider` adopted the motion batch's dual-number shape (floats for Go's `slider()`,
+`minS`/`maxS`/`stepS`/`valS` for Zig) so components.zig `Slider` is shared;
+`TestUISliderNumberPairsAgree` pins the two representations plus the primitive delegation.
+Two Go-resolved tokens ride through the editor state verbatim for the same
+formatting reason: `fmt.Sprintf("%q", …)` of the font family + image URL (Go
+`strconv.Quote` semantics). Twitch's feed buffer (`ui.go twitchRows`) was converted from
+pre-rendered HTML to resolved row state; the streaming cockpit inside `#twitch-obs` stays
+render_live.go's renderer and passes through as raw trusted markup (a tab may embed
+another tab's renderer, and renderer ownership wins over "one language per view").
+Editor gotcha: `align` is a Zig keyword — the json tag is `alignment`. Composite `style`
+attributes that Go builds then `attrQ`-escapes as ONE value (editor layer divs, whose
+image paint carries `%q` quotes) must be assembled into a scratch `Html` and then
+`attrQ`'d — they cannot be streamed.
 
 ## Dev rules when touching UI during migration
 

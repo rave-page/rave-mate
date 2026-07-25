@@ -90,7 +90,7 @@ type UI struct {
 	mpLoadCancel map[string]context.CancelFunc // host -> cancel for the in-flight analysis kick
 
 	twMu         sync.Mutex
-	twitchRows   []string             // rolling twitch chat/alert feed (cap 250)
+	twitchRows   []twRow              // rolling twitch chat/alert feed as resolved state (cap 250)
 	libSection   string               // Library active sub-section: "browse" | "collection"
 	libDir       string               // Library browse cwd
 	midiTrace    uint32               // ravemidi wire-trace viewer: port id (0 = closed)

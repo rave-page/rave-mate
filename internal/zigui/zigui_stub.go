@@ -43,3 +43,19 @@ func RenderMIDITrace(stateJSON []byte) (string, bool)   { return "", false }
 func RenderMIDICtl(stateJSON []byte) (string, bool)     { return "", false }
 func RenderMIDIActive(stateJSON []byte) (string, bool)  { return "", false }
 func RenderMIDICtlStat(stateJSON []byte) (string, bool) { return "", false }
+
+// --- media --- (automations, overlays, twitch, editor)
+
+func RenderAutomations(stateJSON []byte) (string, bool)        { return "", false }
+func RenderAutomationsBody(stateJSON []byte) (string, bool)    { return "", false }
+func RenderOverlays(stateJSON []byte) (string, bool)           { return "", false }
+func RenderOverlaysAppearance(stateJSON []byte) (string, bool) { return "", false }
+func RenderOverlaysSpout(stateJSON []byte) (string, bool)      { return "", false }
+func RenderOverlaysStrip(stateJSON []byte) (string, bool)      { return "", false }
+func RenderOverlaysStatus(stateJSON []byte) (string, bool)     { return "", false }
+func RenderTwitch(stateJSON []byte) (string, bool)             { return "", false }
+func RenderTwitchObs(stateJSON []byte) (string, bool)          { return "", false }
+func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", false }
+func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
+func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
+func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }

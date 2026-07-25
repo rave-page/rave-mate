@@ -156,7 +156,7 @@ func init() {
 		}
 		for _, s := range [][2]string{{"ovl-st-web", "web"}, {"ovl-st-wave", "wave"}, {"ovl-st-png", "png"},
 			{"ovl-st-obs", "obs"}, {"ovl-st-vs", "vs"}, {"ovl-st-np", "np"}} {
-			u.eval("window.__patch('" + s[0] + "'," + jsQuote(u.ovlStatus(s[1])) + ")")
+			u.eval("window.__patch('" + s[0] + "'," + jsQuote(u.ovlStatusHTML(s[1])) + ")")
 		}
 		u.eval("window.__patch('ovl-strip'," + jsQuote(u.ovlStripHTML()) + ")")
 		// keep the off-thread probe caches warm (read cache + kick a bg refresh when stale); their

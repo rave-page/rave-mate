@@ -711,3 +711,142 @@ test "cardOpen head + trail + close" {
     try cardClose(&h);
     try std.testing.expectEqualStrings("<div class=\"rp-card\"></div>", h.b.items);
 }
+
+// --- media ---
+// Struct-shaped wrappers for the media-batch tabs (automations, overlays, twitch, editor):
+// the tabs carry these controls around as state, so a struct beats 8 positional args. Each
+// one DELEGATES to the flat primitive above - no markup is duplicated here. Deduped at the
+// development merge: Slider/slider, cardOpen/cardHeadClose/cardClose, fpairOpen/fpairClose,
+// statusRow, kv and fieldEx all come from the motion+live / vrchat / midi blocks unchanged.
+
+/// Btn is a btn() call as data (for button lists).
+pub const Btn = struct {
+    label: []const u8 = "",
+    variant: []const u8 = "",
+    act: []const u8 = "",
+    val: []const u8 = "",
+};
+
+pub fn btnOf(h: *Html, b: Btn) !void {
+    try btn(h, b.label, b.variant, b.act, b.val);
+}
+
+/// btnRowOf brackets a slice of buttons in one btn-row (Go btnRow over a slice).
+pub fn btnRowOf(h: *Html, bs: []const Btn) !void {
+    try btnRowOpen(h);
+    for (bs) |b| try btnOf(h, b);
+    try btnRowClose(h);
+}
+
+/// btnAct is btn with a per-row act built by concatenation (Go `btn(label, variant,
+/// "act:"+id, "")`): one data-act of prefix++id, NO data-val.
+pub fn btnAct(h: *Html, label: []const u8, variant: []const u8, act_prefix: []const u8, id: []const u8) !void {
+    try h.raw("<button class=\"rp-btn rp-btn--");
+    try h.raw(if (variant.len == 0) "outline" else variant);
+    try h.raw("\" data-act=\"");
+    try h.esc(act_prefix);
+    try h.esc(id);
+    try h.raw("\">");
+    try h.esc(label);
+    try h.raw("</button>");
+}
+
+/// Toggle is a toggleRow() call as data (dl = Go strings.ToLower(label)).
+pub const Toggle = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    on: bool = false,
+};
+
+pub fn toggleOf(h: *Html, t: Toggle) !void {
+    try toggleRow(h, t.label, t.dl, t.act, t.on);
+}
+
+/// Field is a fieldEx() call as data. inputType "" → "text"; ph "" → no placeholder;
+/// tip is pre-rendered trusted markup (Go tipTopic), emitted raw beside the label.
+pub const Field = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    act: []const u8 = "",
+    value: []const u8 = "",
+    inputType: []const u8 = "",
+    ph: []const u8 = "",
+    tip: []const u8 = "",
+};
+
+pub fn fieldOf(h: *Html, f: Field) !void {
+    try fieldEx(h, f.label, f.dl, f.act, f.value, f.inputType, f.ph, f.tip);
+}
+
+/// KV is a kv() call as data (dl = Go strings.ToLower(label)).
+pub const KV = struct {
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    value: []const u8 = "",
+};
+
+pub fn kvOf(h: *Html, k: KV) !void {
+    try kv(h, k.label, k.dl, k.value);
+}
+
+/// Status is a statusRow() call as data. variant "" = render NOTHING - Go ovlStatus returns
+/// "" for an unknown output kind, and the overlays fragment must match that byte-for-byte.
+pub const Status = struct {
+    variant: []const u8 = "",
+    label: []const u8 = "",
+    dl: []const u8 = "",
+    line: []const u8 = "",
+};
+
+pub fn statusOf(h: *Html, s: Status) !void {
+    if (s.variant.len == 0) return;
+    try statusRow(h, s.variant, s.label, s.dl, s.line);
+}
+
+test "media struct wrappers delegate to the flat primitives" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    var f = Html.init(std.testing.allocator);
+    defer f.deinit();
+
+    try fieldOf(&h, .{ .label = "Port", .dl = "port", .act = "set:p", .value = "80\"8", .inputType = "number" });
+    try fieldEx(&f, "Port", "port", "set:p", "80\"8", "number", "", "");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
+
+    h.b.clearRetainingCapacity();
+    f.b.clearRetainingCapacity();
+    try kvOf(&h, .{ .label = "URL", .dl = "url", .value = "http://x/?a&b" });
+    try kv(&f, "URL", "url", "http://x/?a&b");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
+
+    h.b.clearRetainingCapacity();
+    f.b.clearRetainingCapacity();
+    try statusOf(&h, .{ .variant = "success", .label = "On", .dl = "on", .line = "" });
+    try statusRow(&f, "success", "On", "on", "");
+    try std.testing.expectEqualStrings(f.b.items, h.b.items);
+
+    h.b.clearRetainingCapacity();
+    try toggleOf(&h, .{ .label = "On", .dl = "on", .act = "t", .on = true });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-value=\"true\"") != null);
+}
+
+test "statusOf renders nothing for an empty variant" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusOf(&h, .{});
+    try std.testing.expectEqualStrings("", h.b.items);
+}
+
+test "btnRowOf and btnAct" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    const bs = [_]Btn{ .{ .label = "A", .variant = "primary", .act = "a" }, .{ .label = "B", .variant = "ghost", .act = "b", .val = "v" } };
+    try btnRowOf(&h, &bs);
+    try std.testing.expectEqualStrings("<div class=btn-row>" ++
+        "<button class=\"rp-btn rp-btn--primary\" data-act=\"a\">A</button>" ++
+        "<button class=\"rp-btn rp-btn--ghost\" data-act=\"b\" data-val=\"v\">B</button></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try btnAct(&h, "Run", "go", "auto-run:", "g&1");
+    try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
+}

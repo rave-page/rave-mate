@@ -74,6 +74,27 @@ const uint8_t *rz_ui_render_midictl(const uint8_t *state_json, size_t len, size_
  * renders the same empty string. */
 const uint8_t *rz_ui_render_midictl_active(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_midictl_stat(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- media --- (automations, overlays, twitch, editor) */
+const uint8_t *rz_ui_render_automations(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #auto-body inner HTML (version-gated ~1 Hz tick patch target). */
+const uint8_t *rz_ui_render_automations_body(const uint8_t *state_json, size_t len, size_t *out_len);
+
+const uint8_t *rz_ui_render_overlays(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Live-patched overlays fragments: #ovl-appearance, #ovl-spout, #ovl-strip, #ovl-st-<kind>. */
+const uint8_t *rz_ui_render_overlays_appearance(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_spout(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_strip(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_status(const uint8_t *state_json, size_t len, size_t *out_len);
+
+const uint8_t *rz_ui_render_twitch(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Live-patched twitch fragments: #twitch-obs, #twitch-presets, #twitch-feed. */
+const uint8_t *rz_ui_render_twitch_obs(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_twitch_presets(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_twitch_feed(const uint8_t *state_json, size_t len, size_t *out_len);
+
+const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
+const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
 
 #ifdef __cplusplus
 }
