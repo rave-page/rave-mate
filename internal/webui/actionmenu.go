@@ -20,3 +20,23 @@ func init() {
 		}
 	})
 }
+
+// --- publish (zigui) ---
+// Resolved-state twin of actionMenu for Zig-migrated tabs (same split as
+// smartSelectRaw → resolveSmartSelect + selHTMLRaw). actionMenu above is left
+// untouched for the Go-rendered tabs; TestActionMenuResolvedParity pins the two
+// to the same bytes.
+
+// resolveActionMenu registers + resolves an actionMenu into pure render state. The
+// menu label rides as the leading empty-Val option (it becomes CurLabel), exactly
+// like actionMenu builds it.
+func resolveActionMenu(id, label string, items []ssOpt) selState {
+	return resolveSmartSelect(id, "menugo:", "", func() []ssOpt {
+		opts := make([]ssOpt, 0, len(items)+1)
+		opts = append(opts, ssOpt{Val: "", Label: label})
+		return append(opts, items...)
+	})
+}
+
+// actionMenuHTML renders an actionMenu from resolved state.
+func actionMenuHTML(s selState) string { return `<span class=amenu>` + selHTML(s) + `</span>` }

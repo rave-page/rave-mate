@@ -91,6 +91,9 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 | peers | Zig (`native/zigui/src/peers.zig`; full + `#peers-body` fragment) | `TestZigPeersGolden` |
 | library_remote | Zig (`native/zigui/src/libremote.zig`; the `.lib-target` control switcher) | `TestZigLibRemoteGolden` |
+
+| publish | Zig (`native/zigui/src/publish.zig`; full + `#pub-hero` tick fragment) | `TestZigPublishGolden` |
+| publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -268,3 +271,26 @@ a later Library port can either keep embedding the returned markup as trusted ra
 `libRemoteSt` into its own state. `Show=false` (headless remote session / no peer connected)
 renders "" - and an empty fragment makes `renderJSON` return NULL, so the bridge falls back to
 Go which renders the same empty string (same rule as `#midi-ctlstat-<i>`).
+
+Publish-port notes (tab #14): the tab is one renderer with two data worlds (local recorder vs a
+peer over remotectl), so `renderPublish` dispatches on `libRemoteTarget()` and each world has its
+OWN state + export (`pubSt` / `pubRemSt`, `rz_ui_render_publish` / `_remote`; the remote view is a
+whole-view export because it re-frames panel + switcher + `#publish-body` itself and has no tick
+fragments - live status stays on the controlled box). Raw pass-throughs, both trusted: the unified player/editor
+(`player.go mpHTML("publish")`, embedded in the captures pane AND in the no-selection card when a
+loose capture is pinned) and the peer target switcher (`targetSwitcherHTML`, which registers a
+smart select as a side effect - the state builder calls it, exactly where the old renderer did).
+Progress bars adopt the motion/media dual-number shape: `pubBarSt` carries the float for Go's
+`progressBar()` AND Go's `%.1f%%` string for Zig (`TestPubBarNumberPairsAgree` pins them). Tracklist
+rows carry the RESOLVED `data-ctx` value instead of the two Go spellings (the non-editable branch
+spliced `"pub-tctx:" + esc(path)` by hand, the editable one `attrQ`'d - byte-identical because the
+prefix has no escapable characters) and a `lead` kind (`resolving|none|chk`) whose glyph (…/·) is a
+literal in both renderers. The capture rows' `⋯` menu needed a resolved twin of `actionMenu`
+(`resolveActionMenu` + `actionMenuHTML` in actionmenu.go, an appended block - `actionMenu` itself is
+untouched for the Go-rendered library/settings tabs; `TestActionMenuResolvedParity` pins the two to
+the same bytes). Components added to `components.zig` (`// --- publish ---`): `progressBar(pct,cap)`
+(pct pre-formatted, empty caption falls back to pct like Go) and `actionMenu(Select)` (the `amenu`
+wrapper around a bare `selectBox`). NOT ported (dialogs/modals stay Go, wave 3+): `publish_export.go`
+(`pubTxtOpen` text-export dialog, `pubFixModal` time-fix preview), `publish_actions.go` modals
+(rename/delete/capture-delete/track context menus), `pbuilder.go` (`mpPresetModal`), and everything
+`player.go` renders.

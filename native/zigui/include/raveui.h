@@ -105,6 +105,13 @@ const uint8_t *rz_ui_render_peers_body(const uint8_t *state_json, size_t len, si
 /* "Controlling [This computer]" switcher; NULL when hidden (Go fallback emits ""). */
 const uint8_t *rz_ui_render_libremote(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- publish --- (local cockpit + the remote peer's recorded-sets browser) */
+const uint8_t *rz_ui_render_publish(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #pub-hero inner (~1 Hz tick patch). May legitimately render empty (no recorder)
+ * => NULL, and the Go fallback renders the same "". */
+const uint8_t *rz_ui_render_publish_hero(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_publish_remote(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

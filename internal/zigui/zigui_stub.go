@@ -68,3 +68,9 @@ func RenderPeersBody(stateJSON []byte) (string, bool) { return "", false }
 // --- library_remote ---
 
 func RenderLibRemote(stateJSON []byte) (string, bool) { return "", false }
+
+// --- publish ---
+
+func RenderPublish(stateJSON []byte) (string, bool)       { return "", false }
+func RenderPublishHero(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPublishRemote(stateJSON []byte) (string, bool) { return "", false }

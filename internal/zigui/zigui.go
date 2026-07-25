@@ -349,3 +349,27 @@ func RenderLibRemote(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_libremote(p, l, n)
 	})
 }
+
+// --- publish ---
+
+// RenderPublish renders the full local Publish cockpit.
+func RenderPublish(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish(p, l, n)
+	})
+}
+
+// RenderPublishHero renders the #pub-hero inner fragment (live tick patch). A state
+// with no recorder renders empty ⇒ ok=false ⇒ the Go fallback renders the same "".
+func RenderPublishHero(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_hero(p, l, n)
+	})
+}
+
+// RenderPublishRemote renders the full remote Publish view (a peer's recorded sets).
+func RenderPublishRemote(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_remote(p, l, n)
+	})
+}
