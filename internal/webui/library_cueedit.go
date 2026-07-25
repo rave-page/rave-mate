@@ -2139,9 +2139,17 @@ func ceDropLabel(i int) string {
 // cePatternManagerHTML is the manage-patterns modal: rename, overwrite from the current
 // wave selection, delete. Reopened after every action so the list stays fresh.
 func (u *UI) cePatternManagerHTML() string {
-	st := u.cePatterns()
-	if st == nil {
-		return modal(i18n.T("library.ce.pmTitle"), hint("bad", i18n.T("library.ce.pmStoreGone")), "")
+	return cePatMgrHTML(u.cePatMgrState())
+}
+
+// cePatMgrState resolves the manage-patterns dialog: store availability, the wave selection
+// count that decides gated-vs-live Overwrite, and one row per stored pattern.
+func (u *UI) cePatMgrState() cePatMgrSt {
+	st := cePatMgrSt{Title: i18n.T("library.ce.pmTitle")}
+	store := u.cePatterns()
+	if store == nil {
+		st.Gone, st.GoneTx = true, i18n.T("library.ce.pmStoreGone")
+		return st
 	}
 	c := u.ce()
 	c.mu.Lock()
@@ -2152,27 +2160,26 @@ func (u *UI) cePatternManagerHTML() string {
 		}
 	}
 	c.mu.Unlock()
-	pats := st.List()
-	var b strings.Builder
+	pats := store.List()
 	if len(pats) == 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.pmEmpty")) + `</div>`)
+		st.HasEmpty, st.EmptyTx = true, i18n.T("library.ce.pmEmpty")
 	}
+	st.RenameLbl, st.Note = i18n.T("library.ce.pmRename"), i18n.T("library.ce.pmNote")
 	for _, p := range pats {
 		meta := i18n.Tn("library.ce.patternCues", len(p.Cues))
 		if p.FromTrack != "" {
 			meta += " · " + i18n.T("library.ce.pmFrom", i18n.A{"track": p.FromTrack})
 		}
-		b.WriteString(`<div class=pb-label>` + esc(p.Name) + `</div><div class=set-note>` + esc(meta) + `</div>`)
-		b.WriteString(fmt.Sprintf(`<form data-act=%s class=lib-toolbar>%s<button class="rp-btn rp-btn--outline" type=submit>%s</button></form>`,
-			attrQ("ce-pat-rename:"+p.ID), labeledInput("name", "", p.Name), esc(i18n.T("library.ce.pmRename"))))
-		ow := btnGated(i18n.T("library.ce.pmOverwrite"), i18n.T("library.ce.pmOverwriteTip"))
+		row := cePatRowSt{ID: p.ID, Name: p.Name, Meta: meta, DelLbl: i18n.T("common.delete")}
 		if nsel > 0 {
-			ow = btn(i18n.T("library.ce.pmOverwriteN", i18n.A{"n": fmt.Sprint(nsel)}), "outline", "ce-pat-ow:"+p.ID, "")
+			row.OwLbl = i18n.T("library.ce.pmOverwriteN", i18n.A{"n": fmt.Sprint(nsel)})
+		} else {
+			row.OwGated = true
+			row.OwLbl, row.OwWhy = i18n.T("library.ce.pmOverwrite"), i18n.T("library.ce.pmOverwriteTip")
 		}
-		b.WriteString(btnRow(ow, btn(i18n.T("common.delete"), "destructive", "ce-pat-del:"+p.ID, "")))
+		st.Pats = append(st.Pats, row)
 	}
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("library.ce.pmNote")) + `</div>`)
-	return modal(i18n.T("library.ce.pmTitle"), b.String(), "")
+	return st
 }
 
 // cePatRename renames a stored pattern (assign pickers pick the new name up on repaint).
