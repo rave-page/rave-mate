@@ -13,6 +13,7 @@ import (
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/videoshare"
+	"rave.page/mate/internal/zignative"
 )
 
 // SpoutSource pulls frames from a named local Spout sender (e.g. the VRChat camera).
@@ -72,8 +73,17 @@ func frameFromNRGBA(img *image.NRGBA, buf *[]byte) (Frame, bool) {
 		*buf = make([]byte, need)
 	}
 	dst := (*buf)[:need]
+	if !(zignative.Available() && zignative.RGBAToRGB24(img.Pix, img.Stride, w, h, dst)) {
+		rgbaToRGB24Go(img.Pix, img.Stride, w, h, dst)
+	}
+	return Frame{Pix: dst, W: w, H: h, Stride: w * 3, Fmt: FmtRGB24}, true
+}
+
+// rgbaToRGB24Go is the pure-Go strided RGBA→RGB24 copy (fallback + golden reference
+// for the rz_rgba_to_rgb24 kernel).
+func rgbaToRGB24Go(pix []byte, stride, w, h int, dst []byte) {
 	for y := 0; y < h; y++ {
-		src := img.Pix[y*img.Stride : y*img.Stride+w*4]
+		src := pix[y*stride : y*stride+w*4]
 		row := dst[y*w*3 : (y+1)*w*3]
 		for x := 0; x < w; x++ {
 			row[x*3+0] = src[x*4+0]
@@ -81,5 +91,4 @@ func frameFromNRGBA(img *image.NRGBA, buf *[]byte) (Frame, bool) {
 			row[x*3+2] = src[x*4+2]
 		}
 	}
-	return Frame{Pix: dst, W: w, H: h, Stride: w * 3, Fmt: FmtRGB24}, true
 }

@@ -9,6 +9,7 @@ const bands = @import("bands.zig");
 const convert = @import("convert.zig");
 const wave = @import("wave.zig");
 const pcmdec = @import("pcmdec.zig");
+const pixel = @import("pixel.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -156,6 +157,29 @@ export fn rz_pcmdec_decode(d: *pcmdec.Dec, buf: ?[*]const u8, len: usize, dst: [
     return d.decode(slice, dst);
 }
 
+// ── video pixel kernels (P3) — byte-exact ports of video-plane Go loops ──────
+
+/// Strided RGBA→packed RGB24 (dst: w*h*3). Port of mocapnode.frameFromNRGBA.
+export fn rz_rgba_to_rgb24(src: [*]const u8, src_stride: usize, w: usize, h: usize, dst: [*]u8) void {
+    if (w == 0 or h == 0) return;
+    pixel.rgbaToRgb24(src[0 .. (h - 1) * src_stride + w * 4], src_stride, w, h, dst[0 .. w * h * 3]);
+}
+
+/// Per-pixel multi-target classify: labels (w*h) = first target index+1 matching
+/// within tol per channel, else 0. targets = n_targets*3 RGB bytes; bgra != 0 swaps
+/// the in-pixel R/B order; bpp 3 or 4. Port of mocapnode.scanBlobs pass 1.
+export fn rz_px_label(pix: [*]const u8, stride: usize, w: usize, h: usize, bpp: usize, bgra: u32, targets: [*]const u8, n_targets: usize, tol: u32, labels: [*]u8) void {
+    if (w == 0 or h == 0) return;
+    pixel.pxLabel(pix[0 .. (h - 1) * stride + w * bpp], stride, w, h, bpp, bgra != 0, targets[0 .. n_targets * 3], @intCast(tol & 0xff), labels[0 .. w * h]);
+}
+
+/// Batched square-cell fill into a 4bpp zero-origin image (RGBA order), clipped to
+/// w*h. cells = n_cells*4 i32 {x0, y0, size, rgba LE}. Port of vrslgrid cell fills.
+export fn rz_fill_cells(pix: [*]u8, stride: usize, w: usize, h: usize, cells: [*]const i32, n_cells: usize) void {
+    if (w == 0 or h == 0) return;
+    pixel.fillCells(pix[0 .. (h - 1) * stride + w * 4], stride, w, h, cells[0 .. n_cells * 4]);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;
@@ -164,4 +188,5 @@ test {
     _ = convert;
     _ = wave;
     _ = pcmdec;
+    _ = pixel;
 }

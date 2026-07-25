@@ -260,6 +260,56 @@ func (d *PCMDec) Decode(b []byte, dst []float32) int {
 	return int(C.rz_pcmdec_decode(d.p, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.size_t(len(b)), dp))
 }
 
+// RGBAToRGB24 converts h rows of strided RGBA to packed RGB24 (dst: w*h*3, alpha
+// dropped). Byte-exact with mocapnode.frameFromNRGBA. False = bad geometry (caller
+// keeps the Go loop).
+func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool {
+	if w <= 0 || h <= 0 || stride < w*4 || len(src) < (h-1)*stride+w*4 || len(dst) < w*h*3 {
+		return false
+	}
+	C.rz_rgba_to_rgb24((*C.uint8_t)(unsafe.Pointer(&src[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), (*C.uint8_t)(unsafe.Pointer(&dst[0])))
+	return true
+}
+
+// PxLabel classifies every pixel against targets (n*3 RGB bytes): labels[y*w+x] =
+// first matching target index+1 (all channels within tol), else 0. bgra swaps the
+// in-pixel R/B order; bpp 3 or 4. Byte-exact with mocapnode.scanBlobs pass 1.
+// False = bad geometry (caller keeps the Go loop).
+func PxLabel(pix []byte, stride, w, h, bpp int, bgra bool, targets []byte, tol int, labels []byte) bool {
+	if w <= 0 || h <= 0 || (bpp != 3 && bpp != 4) || stride < w*bpp ||
+		len(pix) < (h-1)*stride+w*bpp || len(labels) < w*h ||
+		len(targets) == 0 || len(targets)%3 != 0 || tol < 0 || tol > 255 || len(targets)/3 > 254 {
+		return false
+	}
+	b2u := func(b bool) C.uint32_t {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	C.rz_px_label((*C.uint8_t)(unsafe.Pointer(&pix[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), C.size_t(bpp), b2u(bgra),
+		(*C.uint8_t)(unsafe.Pointer(&targets[0])), C.size_t(len(targets)/3), C.uint32_t(tol),
+		(*C.uint8_t)(unsafe.Pointer(&labels[0])))
+	return true
+}
+
+// FillCells batch-fills square cells into a 4bpp zero-origin image (RGBA byte order),
+// clipped to w*h. cells = n*4 int32 {x0, y0, size, rgba LE (R = low byte)}. Byte-exact
+// with the vrslgrid cell fills. False = bad geometry (caller keeps the Go loops).
+func FillCells(pix []byte, stride, w, h int, cells []int32) bool {
+	if w <= 0 || h <= 0 || stride < w*4 || len(pix) < (h-1)*stride+w*4 || len(cells)%4 != 0 {
+		return false
+	}
+	if len(cells) == 0 {
+		return true
+	}
+	C.rz_fill_cells((*C.uint8_t)(unsafe.Pointer(&pix[0])), C.size_t(stride),
+		C.size_t(w), C.size_t(h), (*C.int32_t)(unsafe.Pointer(&cells[0])), C.size_t(len(cells)/4))
+	return true
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {

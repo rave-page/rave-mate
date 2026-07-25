@@ -99,9 +99,40 @@ Rules:
   the parse/error surface moving to Zig).
   Remaining P2: evaluate FLAC frame decode. MP3/Vorbis/AAC stay Go/ffmpeg until
   Zig codecs are vetted (supply-chain: no unsoaked Zig deps).
-- **P3 video:** pixel convert/scale kernels (videoshare pool, mediapipe pre-encode),
-  mp4frag hot loops. `mfenc` (COM/D3D11 MFT) stays as-is — Zig can speak COM but a port
-  buys nothing until the surrounding pipeline is Zig.
+- **P3 video DONE:** enumerated the whole video plane first — the named modules turned
+  out to delegate their per-pixel math (ffmpeg swscale / GPU / C++ shim), so the actual
+  Go pixel loops sit on the adjacent producer/consumer seams. Additive kernels (ABI v1),
+  byte-exact, Go originals stay fallback + golden:
+  - `rz_rgba_to_rgb24` — strided RGBA→RGB24 (mocapnode frameFromNRGBA, the
+    videoshare-receiver consumer). 1080p: 3.25ms → 0.78ms (4.1x).
+  - `rz_px_label` — per-pixel 5-target ±tol colour classify (mocapnode scanBlobs
+    pass 1, RGB24+BGRA; blob BFS stays Go — pointer-chasing, no batch win).
+    1080p BGRA: 22.0ms → 12.3ms (1.8x).
+  - `rz_fill_cells` — batched square-cell raster (vrslgrid Render/RenderComposite,
+    the vrslstream ffmpeg pre-encode + videoshare FrameSender producer; replaces
+    ~400k SetRGBA calls/frame with one call; flush before Overlay so painters see
+    finished grids). Extended 9-uni composite: 4.51ms → 1.90ms (2.4x).
+  Parity gates: `internal/mocapnode/zigpx_parity_test.go` (TestZigRGBAToRGB24Parity/
+  Fuzz, TestZigPxLabelParity/Fuzz), `internal/vrslgrid/zigfill_parity_test.go`
+  (TestZigRenderParity, TestZigCompositeParity incl. overlay ordering,
+  TestZigCompositeFuzz) — sizes/odd dims/padded strides + seeded fuzz.
+  Enumerated formats: capture/decode request `rgba` from ffmpeg by design ("zero
+  per-frame swizzle", webcam/capture.go); mocap ffmpeg sources emit `bgra` consumed
+  in place via Frame.RGB; RGBA→BGRA swizzle + NV12 CSC live in the mfenc C++ shim /
+  VideoProcessorBlt GPU (out of scope, unchanged).
+  Skips (no Go per-pixel compute to lift): mediapipe encode/decode + medialink
+  frame path (I/O piping + 26-byte header math + payload memcpy only); mp4frag
+  (header-only box parse, moov KBs + mfra tens of KB — I/O-bound, the P1 MP3/FLAC
+  precedent); videoshare send/recv (zero-copy GL readback, flip in shim);
+  deckcard.RenderScaled (videoshare's 30fps producer, but a full card renderer —
+  zigui-class display-list work, not a convert kernel); mocappanel.Encode
+  (reference/test-only) + mocapmaster region fill (already direct-Pix; can adopt
+  rz_fill_cells later).
+  Go-runtime workarounds NOT ported (stay Go-side as the I/O seam):
+  videoshare/pool.go pixPool (GC-dodging frame-buffer pool), the newest-wins cap-1
+  frame channels (scheduler seam), webcam/framepipe.go fresh-buffer handoff.
+  `mfenc` (COM/D3D11 MFT) stays as-is — Zig can speak COM but a port buys nothing
+  until the surrounding pipeline is Zig.
 - **P4 worker replacement (the real lever) — STARTED: probe worker implemented, opt-in.**
   worker/featurehost children speak newline-JSON stdio — language-agnostic by design.
   Replace whole children with Zig executables one at a time, zero daemon changes.

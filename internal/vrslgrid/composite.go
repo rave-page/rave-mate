@@ -91,6 +91,12 @@ type CompositeSpec struct {
 // RenderComposite rasterizes the DMX store into the streamable frame for spec. Always opaque; cells
 // carry raw DMX bytes (LINEAR, no gamma).
 func RenderComposite(r Reader, spec CompositeSpec) *image.RGBA {
+	return renderComposite(r, spec, zigFill())
+}
+
+// renderComposite is RenderComposite with an explicit cell-fill backend (zig =
+// batched rz_fill_cells; false = the Go loops). Parity gate: zigfill_parity_test.go.
+func renderComposite(r Reader, spec CompositeSpec, zig bool) *image.RGBA {
 	mode := ModeRGB9
 	if spec.Mono {
 		mode = ModeMono
@@ -109,14 +115,17 @@ func RenderComposite(r Reader, spec CompositeSpec) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, FrameWidth, h))
 	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 255}), image.Point{}, draw.Src)
 
+	fb := newCellBatch(zig, 2*3*ChPerUni+16)
+
 	// High-byte grid → right strip (stock VRSL reads only this).
-	drawGrid(img, StripX0, unis, mode, highByte)
+	drawGrid(img, fb, StripX0, unis, mode, highByte)
 
 	if spec.Extended {
 		// Low-byte mirror grid → left. 8-bit source: low = high (bit-replication → lossless 16-bit).
-		drawGrid(img, LowGridX0, unis, mode, lowByte)
-		drawMetaBand(img, unis, mode, spec)
+		drawGrid(img, fb, LowGridX0, unis, mode, lowByte)
+		drawMetaBand(img, fb, unis, mode, spec)
 	}
+	fb.flush(img) // before Overlay: painters must see the finished grids
 	if spec.Overlay != nil {
 		spec.Overlay(img)
 	}
@@ -154,7 +163,8 @@ func highByte(v byte) byte { return v } // strip carries the value (== high byte
 func lowByte(v byte) byte  { return v } // 8-bit source: low replicates high (lossless 16-bit)
 
 // drawGrid paints one universe grid (mono or rgb9) into img with its left edge at xOff, top-aligned.
-func drawGrid(img *image.RGBA, xOff int, unis [][512]byte, mode Mode, bf byteFn) {
+func drawGrid(img *image.RGBA, fb *cellBatch, xOff int, unis [][512]byte, mode Mode, bf byteFn) {
+	paint := cellPainterAt(img, fb, xOff)
 	if mode == ModeRGB9 {
 		get := func(idx int) [512]byte {
 			if idx < len(unis) {
@@ -166,7 +176,7 @@ func drawGrid(img *image.RGBA, xOff int, unis [][512]byte, mode Mode, bf byteFn)
 			dr, dg, db := get(j), get(j+3), get(j+6)
 			for ch := 0; ch < ChPerUni; ch++ {
 				cx, cy := cellForChannel(ch)
-				fillCellAt(img, xOff, cx, j*RowsPerUni+cy, color.RGBA{bf(dr[ch]), bf(dg[ch]), bf(db[ch]), 255})
+				paint(cx, j*RowsPerUni+cy, color.RGBA{bf(dr[ch]), bf(dg[ch]), bf(db[ch]), 255})
 			}
 		}
 		return
@@ -176,7 +186,7 @@ func drawGrid(img *image.RGBA, xOff int, unis [][512]byte, mode Mode, bf byteFn)
 		for ch := 0; ch < ChPerUni; ch++ {
 			v := bf(data[ch])
 			cx, cy := cellForChannel(ch)
-			fillCellAt(img, xOff, cx, i*RowsPerUni+cy, color.RGBA{v, v, v, 255})
+			paint(cx, i*RowsPerUni+cy, color.RGBA{v, v, v, 255})
 		}
 	}
 }
@@ -193,7 +203,7 @@ func fillCellAt(img *image.RGBA, xOff, cx, cy int, col color.RGBA) {
 
 // drawMetaBand paints the 32-px-cell metadata band: calibration triad + integrity header (row 0)
 // and semantic lanes (row 1).
-func drawMetaBand(img *image.RGBA, unis [][512]byte, mode Mode, spec CompositeSpec) {
+func drawMetaBand(img *image.RGBA, fb *cellBatch, unis [][512]byte, mode Mode, spec CompositeSpec) {
 	flags := byte(0)
 	if mode == ModeRGB9 {
 		flags |= FlagRGB9
@@ -206,8 +216,17 @@ func drawMetaBand(img *image.RGBA, unis [][512]byte, mode Mode, spec CompositeSp
 	}
 	crc := crc8Frame(unis, spec)
 
+	// putMeta paints a 32×32 meta cell (batched when fb != nil).
+	putMeta := func(col, row int, v byte) {
+		if fb != nil {
+			fb.add(MetaBandX0+col*MetaCellPx, row*MetaCellPx, MetaCellPx, color.RGBA{v, v, v, 255})
+			return
+		}
+		fillMetaCell(img, col, row, v)
+	}
+
 	// Row 0: calibration triad, then the header.
-	meta := func(col int, v byte) { fillMetaCell(img, col, 0, v) }
+	meta := func(col int, v byte) { putMeta(col, 0, v) }
 	meta(metaColCal0, 0)
 	meta(metaColCal1, 128)
 	meta(metaColCal2, 255)
@@ -221,9 +240,9 @@ func drawMetaBand(img *image.RGBA, unis [][512]byte, mode Mode, spec CompositeSp
 	meta(metaColCRC, crc)
 
 	// Row 1: semantic lanes (reserved cols default 0).
-	fillMetaCell(img, metaLaneLookID, 1, spec.LookID)
-	fillMetaCell(img, metaLaneSceneID, 1, spec.SceneID)
-	fillMetaCell(img, metaLaneBlackout, 1, spec.Blackout)
+	putMeta(metaLaneLookID, 1, spec.LookID)
+	putMeta(metaLaneSceneID, 1, spec.SceneID)
+	putMeta(metaLaneBlackout, 1, spec.Blackout)
 }
 
 // fillMetaCell paints a 32×32 metadata cell at (col,row) as R=G=B=v.
