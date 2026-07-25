@@ -88,6 +88,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
 | twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
 | editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
+| library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -223,3 +224,34 @@ status card splices `strings.ToLower(k)` into `data-label="…"` UNESCAPED, and 
 signals card's rows carry no data-label at all. `cockpitHTML` is shared with the Twitch
 tab, so that tab now renders its OBS rows through Zig too.
 Components added: `statusRow`, `sectionOpenTip` (both used here).
+
+Library-port notes (the biggest tab, 2768 lines): split into `render_library_state.go`
+(impure) + pure renderers, then four Zig files - `library.zig` (tab + body dispatch),
+`library_kit.zig` (the helpers that live in render_library.go rather than components.go),
+`library_sections.zig` (the eight sections), `library_detail.zig` (inspector + encode builder).
+- **`selState.Rows` needed `,omitempty`** (smartselect.go). A zero-value select - the playlist
+  facet when the DB has no playlists, the cloud menu without a syncer - marshalled `"rows":null`
+  and the Zig parser rejected it, so the WHOLE tab silently fell back to Go. This is the
+  nil-slice gotcha one level deeper than the earlier batches hit it: it is not enough for the
+  TAB state's slices to be non-nil, every nested reusable state must tolerate its zero value.
+- Delegation so each component keeps ONE markup source: `pbFieldEx`->`pbFieldExDL`,
+  `pbSelect`/`pbSelectTip`->`resolvePbSelect`/`resolvePbSelectTip` (+`selHTML`/`selHTMLRaw`),
+  `keyPillHTML`->`libKeyPillState`+`libKeyPillHTML`, `actionMenu`->`resolveActionMenu`+
+  `actionMenuOf`, `progressBar`->`pbarPctOf`+`progressBarOf`. The literal-multiset diff against
+  the pre-split file is the proof of zero DOM change.
+- components.zig gained only layout ports (`mdWideOpen`, `triOpen`/`triMid`/`triClose`,
+  `progressBar` over a PRE-FORMATTED width). Everything else reused the existing blocks;
+  no existing helper was modified and no tab-local variant was needed.
+- Name collisions bite in the golden test too: `libDetailSel` is a state-kind const, so the
+  fixture helper had to become `libDetailFixture`. `inline` and `goto` are Zig keywords - the
+  json tags are `inlineActs` / `gotoLbl`.
+- Raw seams (wave 3): the tab embeds nine other renderers' output as trusted markup - target
+  switcher, nav rail, cue-edit wave + rail, remote mirror / remote cue-edit bodies, gridfix +
+  tagfix panels, prepare-select, compat section, player, shared loudness block. The Camelot
+  wheel SVG stays Go by design (float math + `%.2f`), like the campath viewer in the motion batch.
+- Go-runtime workarounds replicated for parity, flagged for phase B: the version-keyed render
+  memos (`collViewSig`, `plRowsVer`, `smartCounts`, facet counts, `onDiskCk`) and the 2 s/5 s
+  freshness TTLs exist because a full 23k scan, a per-row `os.Stat` or a DB `COUNT` on the
+  SINGLE serialized action goroutine froze the tab - they are latency workarounds for Go's
+  webui threading model, not for the DOM. The phase-A bridge also adds a per-render
+  state->JSON->parse round trip that phase B removes.
