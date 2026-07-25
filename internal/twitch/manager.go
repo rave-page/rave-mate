@@ -71,6 +71,7 @@ type Manager struct {
 	onEvent    func(Event)       // UI hook (chat/event view); additive to bus publish
 	onViewers  func(ViewerInfo)  // UI hook for polled viewer count/state
 	onChatters func(ChatterInfo) // UI hook for the polled chatter list
+	onConnect  func(User, bool)  // connect/disconnect transitions (featurehost child state mirror)
 	kick       chan struct{}
 
 	viewerGate logbus.Gate // 15s poll: don't re-log the same failure every tick
@@ -106,6 +107,23 @@ func (m *Manager) SetOnStats(viewers func(ViewerInfo), chatters func(ChatterInfo
 	m.mu.Lock()
 	m.onViewers, m.onChatters = viewers, chatters
 	m.mu.Unlock()
+}
+
+// SetOnConnect registers a hook fired with (self, true) once EventSub connects and
+// (User{}, false) when the session ends.
+func (m *Manager) SetOnConnect(fn func(self User, connected bool)) {
+	m.mu.Lock()
+	m.onConnect = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) fireConnect(self User, connected bool) {
+	m.mu.Lock()
+	cb := m.onConnect
+	m.mu.Unlock()
+	if cb != nil {
+		cb(self, connected)
+	}
 }
 
 // pollStats polls viewer count + chatters while connected and publishes them onto the bus + UI hooks.
@@ -231,6 +249,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.bus.AddCap(CapTwitch)
 		}
 		m.log.Info(source, "connected", map[string]any{"login": self.Login})
+		m.fireConnect(self, true)
 		// Poll viewer count + chatters while connected, publishing onto the bus (so a VR/overlay
 		// instance can render them). Cancelled when EventSub returns (disconnect / ctx cancel).
 		sctx, scancel := context.WithCancel(ctx)
@@ -238,6 +257,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		es := NewEventSub(m.helix, self.ID, m.handleEvent, m.log)
 		_ = es.Run(ctx) // blocks until ctx cancel or fatal
 		scancel()
+		m.fireConnect(User{}, false)
 		if m.bus != nil {
 			m.bus.RemoveCap(CapTwitch)
 		}
