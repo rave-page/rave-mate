@@ -728,3 +728,65 @@ test "dialogs-b module" {
 }
 
 // --- end dialogs-b ---
+
+// --- phaseb-wire ---
+
+// RZW1 binary state wire (phase B pilots: appgroups + logs). Same renderers as the JSON
+// exports above, fed by a length-prefixed TLV document instead of a per-render
+// state→JSON→parse round trip. Decoder: wire.zig; per-message decoders: wire_gen.zig -
+// BOTH sides generated from ONE schema (internal/zigui/wiregen), so the Go encoder and the
+// Zig decoder cannot drift into silent memory corruption. The _v1 (JSON) exports stay:
+// Go prefers v2, falls back to v1, then to its own renderer.
+
+const wire = @import("wire.zig");
+const wire_gen = @import("wire_gen.zig");
+
+/// Parse an RZW1 document → run renderFn → owned buffer (null on any malformed input; the
+/// Go caller then tries the JSON export and finally its own renderer).
+fn renderWire(
+    comptime StateT: type,
+    comptime decodeFn: fn (*wire.Reader, *StateT) wire.Error!void,
+    comptime renderFn: fn (*html.Html, StateT) anyerror!void,
+    comptime msg_id: u16,
+    state: ?[*]const u8,
+    len: usize,
+    out_len: *usize,
+) ?[*]const u8 {
+    const p = state orelse return null;
+    if (len == 0) return null;
+    const parsed = wire.parse(StateT, decodeFn, alloc, msg_id, wire_gen.schema_hash, p[0..len]) catch return null;
+    defer parsed.deinit();
+    var h = html.Html.init(alloc);
+    defer h.deinit();
+    renderFn(&h, parsed.value) catch return null;
+    const out = h.toOwnedSlice() catch return null;
+    if (out.len == 0) {
+        alloc.free(out);
+        return null;
+    }
+    out_len.* = out.len;
+    return out.ptr;
+}
+
+export fn rz_ui_render_appgroups_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(appgroups.State, wire_gen.decodeAgState, appgroups.render, wire_gen.msg_ag_state, state, len, out_len);
+}
+
+export fn rz_ui_render_appgroups_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(appgroups.State, wire_gen.decodeAgState, appgroups.renderBody, wire_gen.msg_ag_state, state, len, out_len);
+}
+
+export fn rz_ui_render_logs_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(logs.State, wire_gen.decodeLogsState, logs.render, wire_gen.msg_logs_state, state, len, out_len);
+}
+
+export fn rz_ui_render_logs_lines_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(logs.Lines, wire_gen.decodeLogsLines, logs.renderLines, wire_gen.msg_logs_lines, state, len, out_len);
+}
+
+test "wire modules" {
+    _ = wire;
+    _ = wire_gen;
+}
+
+// --- end phaseb-wire ---

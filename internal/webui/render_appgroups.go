@@ -96,10 +96,12 @@ func stateJSON(v any) []byte {
 }
 
 // renderAppGroups: crash-recovery launcher - list groups, running count, Launch.
+// Render path: RZW1 binary state (v2) → JSON state (v1) → the Go renderer below (see wire.go).
 func (u *UI) renderAppGroups() string {
 	st := u.appGroupsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAppGroups(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAppGroupsV2", wireAgState(st), zigui.RenderAppGroupsV2,
+			zigui.RenderAppGroups, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -110,7 +112,8 @@ func (u *UI) renderAppGroups() string {
 func (u *UI) appGroupsBody() string {
 	st := u.appGroupsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAppGroupsBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAppGroupsBodyV2", wireAgState(st), zigui.RenderAppGroupsBodyV2,
+			zigui.RenderAppGroupsBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

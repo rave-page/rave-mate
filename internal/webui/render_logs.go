@@ -128,10 +128,12 @@ func (u *UI) logsLinesState(n int) logsLines {
 // renderLogs is the live daemon log viewer (mirrors the Fyne Logs tab). Multi-bus subTabs
 // (App + MIDI/Traktor/Session when wired) + level/source/search filters + autoscroll + copy.
 // livePush patches #log-view ~1 Hz, preserving scroll unless the user is already at the bottom.
+// Render path: RZW1 binary state (v2) → JSON state (v1) → the Go renderer below (see wire.go).
 func (u *UI) renderLogs() string {
 	st := u.logsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLogs(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLogsV2", wireLogsState(st), zigui.RenderLogsV2,
+			zigui.RenderLogs, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -142,7 +144,8 @@ func (u *UI) renderLogs() string {
 func (u *UI) logLinesHTML(n int) string {
 	st := u.logsLinesState(n)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLogsLines(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLogsLinesV2", wireLogsLines(st), zigui.RenderLogsLinesV2,
+			zigui.RenderLogsLines, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
