@@ -19,8 +19,9 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = mod,
     });
-    // Go links this lib with gcc, not zig — bundle compiler-rt so intrinsics resolve.
-    lib.bundle_compiler_rt = true;
+    // No bundled compiler-rt: mingw libgcc/quadmath provide the intrinsics at the Go
+    // link, and bundling in >1 Zig lib duplicates weak symbols (combined-tag link fails).
+    lib.bundle_compiler_rt = false;
     b.installArtifact(lib);
 
     // rave-probe: standalone probe-worker executable (ZIG_MIGRATION P4) — same
