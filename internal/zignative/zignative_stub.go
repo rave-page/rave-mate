@@ -26,3 +26,33 @@ func WaveColumns(peaks []byte, cols int, out []byte)           {}
 func WaveEnv(peaks []byte, dur, imgPps float64, out []float64) {}
 func PCMToF32(src []byte, frames, ch, blockAlign, bits int, isFloat, bigEndian bool, out []float32) {
 }
+
+// PCMDec stub — NewWAVDec/NewAIFFDec always return nil.
+const (
+	DecOK   = 0
+	DecNeed = 1
+	DecErr  = -1
+)
+
+type PCMDec struct{}
+
+type PCMInfo struct {
+	SampleRate  int64
+	TotalFrames int64
+	DataStart   uint64
+	Channels    int
+	Bits        int
+	BlockAlign  int
+	IsFloat     bool
+	BigEndian   bool
+}
+
+func NewWAVDec() *PCMDec                              { return nil }
+func NewAIFFDec() *PCMDec                             { return nil }
+func (d *PCMDec) Free()                               {}
+func (d *PCMDec) Feed(b []byte) (int, uint64, uint64) { return DecErr, 0, 0 }
+func (d *PCMDec) Info() PCMInfo                       { return PCMInfo{} }
+func (d *PCMDec) SeekOff(frame int64) (int64, uint64) { return 0, 0 }
+func (d *PCMDec) SetPos(frame int64)                  {}
+func (d *PCMDec) Plan(dstSamples int) (int, int)      { return 0, 0 }
+func (d *PCMDec) Decode(b []byte, dst []float32) int  { return 0 }

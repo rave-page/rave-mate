@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"rave.page/mate/internal/zignative"
 )
 
 // Decoder is a seekable PCM source. Implementations normalize to interleaved float32 in [-1,1]
@@ -56,8 +58,14 @@ func Open(path string) (Decoder, error) {
 	kind := sniff(magic[:n], path)
 	switch kind {
 	case "wav":
+		if d, err := openZig(f, zignative.NewWAVDec()); d != nil || err != nil {
+			return d, err
+		}
 		return newWAVDecoder(f)
 	case "aiff":
+		if d, err := openZig(f, zignative.NewAIFFDec()); d != nil || err != nil {
+			return d, err
+		}
 		return newAIFFDecoder(f)
 	case "flac":
 		return newFLACDecoder(f)

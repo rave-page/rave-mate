@@ -79,9 +79,26 @@ Rules:
   - `probe.envelope` RMS stays Go: streamed per-bucket accumulator interleaved
     with 64KiB stdin reads — no batch boundary to hand a kernel without
     restructuring the streaming loop (revisit in P2/P4).
-- **P2 decoders:** WAV/AIFF decode in Zig (hand-written Go ports exist as goldens);
-  evaluate FLAC frame decode. MP3/Vorbis/AAC stay Go/ffmpeg until Zig codecs are vetted
-  (supply-chain: no unsoaked Zig deps).
+- **P2 decoders — WAV/AIFF DONE:** full container decoders in Zig
+  (`src/{pcmdec,wavdec,aiffdec}.zig`, exports `rz_wavdec_new`/`rz_aiffdec_new` +
+  shared `rz_pcmdec_{feed,info,seek_off,set_pos,plan,decode,free}`, ABI stays v1).
+  Seam: Go owns file I/O — feed protocol requests absolute byte windows (16 MiB
+  header-chunk cap Go-side), Zig owns chunk/COMM/SSND parse (incl.
+  WAVE_FORMAT_EXTENSIBLE, 80-bit extended rate, AIFC NONE/twos/sowt/fl32/fl64),
+  frame math, seek clamp, and PCM→f32 via the P1 kernel. Zero Zig-side buffering:
+  Go's per-chunk body allocs + reuse buffer were GC workarounds, not replicated.
+  `audio.Open` dispatches when `zignative.Available()`; Zig open failure rewinds →
+  Go decoder (fallback + golden). Replicated Go quirks: fmt chunk NOT pad-aligned,
+  sowt 8-bit decoded unsigned, amd64 `int(f64)` trunc (NaN/Inf → min-i64), int64
+  PCM = silence. Hardening (both sides): reject `blockAlign` < frame size — the Go
+  decoder panicked / Zig kernel read OOB on crafted files. Parity gates
+  (`dec_zig_test.go`): bit-exact full matrix + container variants + seek matrix
+  (negative/EOF/past-EOF/mid-read) + truncated data + malformed corpus + 400×2
+  mutation fuzz. Bench 30s s16 stereo: pure Go 525/473 MB/s → Zig 2046/1956 MB/s
+  (~4x; equal to the P1-kernel path — decode is conversion-dominated, the win is
+  the parse/error surface moving to Zig).
+  Remaining P2: evaluate FLAC frame decode. MP3/Vorbis/AAC stay Go/ffmpeg until
+  Zig codecs are vetted (supply-chain: no unsoaked Zig deps).
 - **P3 video:** pixel convert/scale kernels (videoshare pool, mediapipe pre-encode),
   mp4frag hot loops. `mfenc` (COM/D3D11 MFT) stays as-is — Zig can speak COM but a port
   buys nothing until the surrounding pipeline is Zig.

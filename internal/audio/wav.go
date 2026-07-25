@@ -133,6 +133,11 @@ func (d *wavDecoder) parseFmt(b []byte) error {
 	if d.blockAlign == 0 {
 		d.blockAlign = d.format.Channels * d.bits / 8
 	}
+	// blockAlign may exceed the frame size (padded frames) but never undercut it —
+	// decode would index past the block (crafted-file crash guard; Zig mirrors).
+	if d.blockAlign < d.format.Channels*d.bits/8 {
+		return fmt.Errorf("wav: block align %d smaller than frame size", d.blockAlign)
+	}
 	return nil
 }
 
