@@ -978,4 +978,25 @@ func RenderPublishHeroV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderSettingsV2 renders the full Settings tab from an RZW1 document.
+func RenderSettingsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_v2(p, l, n)
+	})
+}
+
+// RenderSettingsContentV2 renders the #set-content pane from an RZW1 document.
+func RenderSettingsContentV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_content_v2(p, l, n)
+	})
+}
+
+// RenderSettingsStatusV2 renders one #stset-<id> status fragment from an RZW1 document.
+func RenderSettingsStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_status_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

@@ -325,6 +325,114 @@ var schema = []msg{
 		doc: "Publish tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Switcher", "switcher"), b(4, "Available", "available"), s(5, "Unavailable", "unavailable"), st(6, "Body", "body", "PubBody")},
 	},
+	// settings: full tab + the #set-content pane + one #stset-<id> status fragment. This block also pins the SHARED tooltip state (tipState/tipKb/tipLink, phase B-1b shard 1) - the first consumer to reach it owns the rows, later tabs reuse them. Sixteen kOptPtr fields: the settings card grid is almost entirely optional blocks.
+	{
+		name: "SetNav", goT: "setNavSt", zigT: "settings.Nav",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Agg", "agg"), b(4, "Active", "active")},
+	},
+	{
+		name: "TipChip", goT: "tipChipSt", zigT: "c.TipChip",
+		fs: []field{s(1, "Text", "text"), b(2, "Sep", "sep")},
+	},
+	{
+		name: "TipKb", goT: "tipKbSt", zigT: "c.TipKb",
+		fs: []field{b(1, "HasGroup", "hasGroup"), s(2, "Group", "group"), li(3, "Chips", "chips", "TipChip"), s(4, "Verb", "verb"), s(5, "Rest", "rest")},
+	},
+	{
+		name: "TipLink", goT: "tipLinkSt", zigT: "c.TipLink",
+		fs: []field{s(1, "Label", "label"), s(2, "URL", "url")},
+	},
+	{
+		name: "Tip", goT: "tipSt", zigT: "c.Tip",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), li(3, "Keys", "keys", "TipKb"), sl(4, "Paras", "paras"), li(5, "Links", "links", "TipLink")},
+	},
+	{
+		name: "SetStatus", goT: "setStatusSt", zigT: "settings.Status", id: 26,
+		doc: "one #stset-<id> status fragment (settings tick)",
+		fs:  []field{s(1, "V", "v"), s(2, "T", "t")},
+	},
+	{
+		name: "SetSwitch", goT: "setSwitchSt", zigT: "settings.Switch",
+		fs: []field{s(1, "Label", "label"), b(2, "On", "on"), s(3, "Gate", "gate")},
+	},
+	{
+		name: "UiField", goT: "uiField", zigT: "c.Field",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Value", "value"), s(5, "Type", "inputType"), s(6, "PH", "ph")},
+	},
+	{
+		name: "UiToggle", goT: "uiToggle", zigT: "c.Toggle",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), b(4, "On", "on")},
+	},
+	{
+		name: "UiKV", goT: "uiKV", zigT: "c.KV",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Value", "value")},
+	},
+	{
+		name: "SetKid", goT: "setKid", zigT: "settings.Kid",
+		fs: []field{s(1, "K", "k"), op(2, "Fld", "fld", "UiField"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), op(5, "Sel", "sel", "SelState"), s(6, "SelLbl", "selLbl"), op(7, "Btn", "btn", "UiBtn")},
+	},
+	{
+		name: "SetInput", goT: "setInput", zigT: "settings.Input",
+		fs: []field{s(1, "Type", "type"), s(2, "Name", "name"), s(3, "PH", "ph")},
+	},
+	{
+		name: "GfBtn", goT: "gfBtn", zigT: "sub.GfBtn",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant"), s(3, "Act", "act"), s(4, "Gate", "gate")},
+	},
+	{
+		name: "GfVar", goT: "gfVarSt", zigT: "sub.GfVar",
+		fs: []field{s(1, "Key", "key"), s(2, "Tone", "tone"), s(3, "Line", "line"), li(4, "Btns", "btns", "GfBtn"), b(5, "HasNote", "hasNote"), s(6, "Note", "note")},
+	},
+	{
+		name: "GfCard", goT: "gfCardSt", zigT: "sub.GfCard",
+		fs: []field{s(1, "LeadKind", "leadKind"), s(2, "LeadTone", "leadTone"), s(3, "Lead", "lead"), li(4, "Vars", "vars", "GfVar"), st(5, "Recheck", "recheck", "UiBtn"), st(6, "Engine", "engine", "SelState"), st(7, "Python", "python", "UiField"), st(8, "Browse", "browse", "UiBtn"), st(9, "MinQ", "minq", "UiField"), st(10, "Thresh", "thresh", "UiField"), st(11, "Lock", "lock", "UiToggle"), b(12, "HasCal", "hasCal"), s(13, "Cal", "cal"), s(14, "CalNote", "calNote"), s(15, "Note", "note")},
+	},
+	{
+		name: "GfModel", goT: "gfModelSt", zigT: "sub.GfModel",
+		fs: []field{st(1, "Sel", "sel", "SelState"), s(2, "Dataset", "dataset"), b(3, "Running", "running"), s(4, "BarPct", "barPct"), s(5, "BarCap", "barCap"), st(6, "Cancel", "cancel", "UiBtn"), b(7, "HasVerdict", "hasVerdict"), s(8, "VerdictTone", "verdictTone"), s(9, "Verdict", "verdict"), s(10, "Err", "err"), b(11, "CanTrain", "canTrain"), st(12, "Train", "train", "UiBtn"), b(13, "Few", "few"), s(14, "FewHint", "fewHint"), s(15, "Note", "note")},
+	},
+	{
+		name: "UiStatus", goT: "uiStatus", zigT: "c.Status",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
+	},
+	{
+		name: "BridgeSess", goT: "bridgeSessSt", zigT: "sub.BridgeSess",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Revoke", "revoke", "UiBtn")},
+	},
+	{
+		name: "BridgeGate", goT: "bridgeGateSt", zigT: "sub.BridgeGate",
+		fs: []field{s(1, "Kind", "kind"), s(2, "Help", "help"), s(3, "Secret", "secret"), s(4, "URI", "uri"), s(5, "CodeLabel", "codeLabel"), s(6, "CodeDL", "codeDL"), s(7, "Confirm", "confirm"), st(8, "Cancel", "cancel", "UiBtn"), s(9, "Burn", "burn"), li(10, "Rows", "rows", "UiStatus"), s(11, "Note", "note"), st(12, "Btn", "btn", "UiBtn"), s(13, "SessionsTitle", "sessionsTitle"), s(14, "Empty", "empty"), li(15, "Sessions", "sessions", "BridgeSess"), st(16, "RevokeAll", "revokeAll", "UiBtn")},
+	},
+	{
+		name: "Bridge", goT: "bridgeSt", zigT: "sub.Bridge",
+		fs: []field{st(1, "St", "st", "UiStatus"), st(2, "Studio", "studio", "UiToggle"), s(3, "Tip", "tip"), b(4, "HasGate", "hasGate"), s(5, "GateTitle", "gateTitle"), st(6, "Gate", "gate", "BridgeGate")},
+	},
+	{
+		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow",
+		fs: []field{s(1, "Kind", "kind"), s(2, "Tone", "tone"), s(3, "Text", "text"), b(4, "HasNotes", "hasNotes"), s(5, "Notes", "notes"), s(6, "Err", "err"), s(7, "Pct", "pct"), s(8, "Cap", "cap"), b(9, "HasBtn", "hasBtn"), st(10, "Btn", "btn", "UiBtn")},
+	},
+	{
+		name: "SetBlock", goT: "setBlock", zigT: "settings.Block",
+		fs: []field{s(1, "K", "k"), s(2, "Text", "text"), s(3, "HTML", "html"), s(4, "Tone", "tone"), s(5, "ID", "id"), s(6, "Title", "title"), s(7, "Sub", "sub"), op(8, "Fld", "fld", "UiField"), s(9, "Tip", "tip"), op(10, "TipS", "tipSt", "Tip"), op(11, "Tgl", "tgl", "UiToggle"), s(12, "Gate", "gate"), op(13, "KV", "kv", "UiKV"), op(14, "Sel", "sel", "SelState"), s(15, "SelLbl", "selLbl"), op(16, "Btn", "btn", "UiBtn"), li(17, "Kids", "kids", "SetKid"), li(18, "Inputs", "inputs", "SetInput"), s(19, "Submit", "submit"), s(20, "SubVar", "subVar"), op(21, "GF", "gf", "GfCard"), op(22, "GFM", "gfm", "GfModel"), op(23, "Brg", "brg", "Bridge"), op(24, "Upd", "upd", "UpdFlow")},
+	},
+	{
+		name: "SetCard", goT: "setCardSt", zigT: "settings.Card",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), s(5, "Desc", "desc"), st(6, "St", "st", "SetStatus"), op(7, "Tgl", "tgl", "SetSwitch"), li(8, "Blocks", "blocks", "SetBlock")},
+	},
+	{
+		name: "SetSec", goT: "setSecSt", zigT: "settings.Sec",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Desc", "desc"), li(4, "Cards", "cards", "SetCard")},
+	},
+	{
+		name: "SetContent", goT: "setContentSt", zigT: "settings.Content", id: 25,
+		doc: "#set-content pane (sub-tab switch + search)",
+		fs:  []field{b(1, "Searching", "searching"), s(2, "NoResults", "noResults"), li(3, "Nav", "nav", "SetNav"), li(4, "Secs", "secs", "SetSec")},
+	},
+	{
+		name: "SetState", goT: "setState", zigT: "settings.State", id: 24,
+		doc: "Settings tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), s(5, "Query", "query"), s(6, "Placeholder", "placeholder"), st(7, "Content", "content", "SetContent")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -332,6 +440,8 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"sub", "settings_sub.zig"},
+	{"settings", "settings.zig"},
 	{"publish", "publish.zig"},
 	{"motion", "motion.zig"},
 	// --- phaseb-wire (B-2 fan-out) ---

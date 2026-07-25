@@ -852,6 +852,22 @@ export fn rz_ui_render_publish_hero_v2(state: ?[*]const u8, len: usize, out_len:
     return renderWire(publish.Hero, wire_gen.decodePubHero, publish.renderHero, wire_gen.msg_pub_hero, state, len, out_len);
 }
 
+// ── B-2 fan-out: settings ──
+// Three messages: the tab, the #set-content pane (patched on its own so the search input keeps
+// focus) and one #stset-<id> status line, which the settings tick patches per card.
+
+export fn rz_ui_render_settings_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.State, wire_gen.decodeSetState, settings.render, wire_gen.msg_set_state, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_content_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.Content, wire_gen.decodeSetContent, settings.renderContent, wire_gen.msg_set_content, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.Status, wire_gen.decodeSetStatus, settings.renderStatus, wire_gen.msg_set_status, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

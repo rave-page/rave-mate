@@ -9,11 +9,13 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const sub = @import("settings_sub.zig");
+const settings = @import("settings.zig");
 const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0x3306410d;
+pub const schema_hash: u32 = 0xf842f2ca;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -31,6 +33,9 @@ pub const msg_live_strip: u16 = 20; // #live-strip fragment
 pub const msg_mo_state: u16 = 21; // Motion tab (full view + the #mo-body fragment share this state)
 pub const msg_pub: u16 = 22; // Publish tab (full view)
 pub const msg_pub_hero: u16 = 23; // #pub-hero fragment (~1 Hz tick)
+pub const msg_set_state: u16 = 24; // Settings tab (full view)
+pub const msg_set_content: u16 = 25; // #set-content pane (sub-tab switch + search)
+pub const msg_set_status: u16 = 26; // one #stset-<id> status fragment (settings tick)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -646,6 +651,334 @@ pub fn decodePub(r: *wire.Reader, out: *publish.State) wire.Error!void {
     };
 }
 
+pub fn decodeSetNav(r: *wire.Reader, out: *settings.Nav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.agg = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipChip(r: *wire.Reader, out: *c.TipChip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.sep = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipKb(r: *wire.Reader, out: *c.TipKb) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hasGroup = try r.boolean(t),
+        2 => out.group = try r.str(t),
+        3 => out.chips = try r.list(c.TipChip, decodeTipChip, t),
+        4 => out.verb = try r.str(t),
+        5 => out.rest = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipLink(r: *wire.Reader, out: *c.TipLink) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.url = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTip(r: *wire.Reader, out: *c.Tip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.keys = try r.list(c.TipKb, decodeTipKb, t),
+        4 => out.paras = try r.strList(t),
+        5 => out.links = try r.list(c.TipLink, decodeTipLink, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetStatus(r: *wire.Reader, out: *settings.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.v = try r.str(t),
+        2 => out.t = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetSwitch(r: *wire.Reader, out: *settings.Switch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.on = try r.boolean(t),
+        3 => out.gate = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiField(r: *wire.Reader, out: *c.Field) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.value = try r.str(t),
+        5 => out.inputType = try r.str(t),
+        6 => out.ph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiToggle(r: *wire.Reader, out: *c.Toggle) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiKV(r: *wire.Reader, out: *c.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.value = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetKid(r: *wire.Reader, out: *settings.Kid) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.fld = try r.sub(c.Field, decodeUiField, t),
+        3 => out.tip = try r.str(t),
+        4 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        5 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        6 => out.selLbl = try r.str(t),
+        7 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetInput(r: *wire.Reader, out: *settings.Input) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.type = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.ph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfBtn(r: *wire.Reader, out: *sub.GfBtn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.gate = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfVar(r: *wire.Reader, out: *sub.GfVar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.key = try r.str(t),
+        2 => out.tone = try r.str(t),
+        3 => out.line = try r.str(t),
+        4 => out.btns = try r.list(sub.GfBtn, decodeGfBtn, t),
+        5 => out.hasNote = try r.boolean(t),
+        6 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfCard(r: *wire.Reader, out: *sub.GfCard) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.leadKind = try r.str(t),
+        2 => out.leadTone = try r.str(t),
+        3 => out.lead = try r.str(t),
+        4 => out.vars = try r.list(sub.GfVar, decodeGfVar, t),
+        5 => out.recheck = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.engine = try r.sub(c.Select, decodeSelState, t),
+        7 => out.python = try r.sub(c.Field, decodeUiField, t),
+        8 => out.browse = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.minq = try r.sub(c.Field, decodeUiField, t),
+        10 => out.thresh = try r.sub(c.Field, decodeUiField, t),
+        11 => out.lock = try r.sub(c.Toggle, decodeUiToggle, t),
+        12 => out.hasCal = try r.boolean(t),
+        13 => out.cal = try r.str(t),
+        14 => out.calNote = try r.str(t),
+        15 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfModel(r: *wire.Reader, out: *sub.GfModel) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.dataset = try r.str(t),
+        3 => out.running = try r.boolean(t),
+        4 => out.barPct = try r.str(t),
+        5 => out.barCap = try r.str(t),
+        6 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.hasVerdict = try r.boolean(t),
+        8 => out.verdictTone = try r.str(t),
+        9 => out.verdict = try r.str(t),
+        10 => out.err = try r.str(t),
+        11 => out.canTrain = try r.boolean(t),
+        12 => out.train = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.few = try r.boolean(t),
+        14 => out.fewHint = try r.str(t),
+        15 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiStatus(r: *wire.Reader, out: *c.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.dl = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridgeSess(r: *wire.Reader, out: *sub.BridgeSess) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.revoke = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridgeGate(r: *wire.Reader, out: *sub.BridgeGate) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.help = try r.str(t),
+        3 => out.secret = try r.str(t),
+        4 => out.uri = try r.str(t),
+        5 => out.codeLabel = try r.str(t),
+        6 => out.codeDL = try r.str(t),
+        7 => out.confirm = try r.str(t),
+        8 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.burn = try r.str(t),
+        10 => out.rows = try r.list(c.Status, decodeUiStatus, t),
+        11 => out.note = try r.str(t),
+        12 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.sessionsTitle = try r.str(t),
+        14 => out.empty = try r.str(t),
+        15 => out.sessions = try r.list(sub.BridgeSess, decodeBridgeSess, t),
+        16 => out.revokeAll = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridge(r: *wire.Reader, out: *sub.Bridge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.st = try r.sub(c.Status, decodeUiStatus, t),
+        2 => out.studio = try r.sub(c.Toggle, decodeUiToggle, t),
+        3 => out.tip = try r.str(t),
+        4 => out.hasGate = try r.boolean(t),
+        5 => out.gateTitle = try r.str(t),
+        6 => out.gate = try r.sub(sub.BridgeGate, decodeBridgeGate, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUpdFlow(r: *wire.Reader, out: *sub.UpdFlow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.tone = try r.str(t),
+        3 => out.text = try r.str(t),
+        4 => out.hasNotes = try r.boolean(t),
+        5 => out.notes = try r.str(t),
+        6 => out.err = try r.str(t),
+        7 => out.pct = try r.str(t),
+        8 => out.cap = try r.str(t),
+        9 => out.hasBtn = try r.boolean(t),
+        10 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetBlock(r: *wire.Reader, out: *settings.Block) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.text = try r.str(t),
+        3 => out.html = try r.str(t),
+        4 => out.tone = try r.str(t),
+        5 => out.id = try r.str(t),
+        6 => out.title = try r.str(t),
+        7 => out.sub = try r.str(t),
+        8 => out.fld = try r.sub(c.Field, decodeUiField, t),
+        9 => out.tip = try r.str(t),
+        10 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        11 => out.tgl = try r.sub(c.Toggle, decodeUiToggle, t),
+        12 => out.gate = try r.str(t),
+        13 => out.kv = try r.sub(c.KV, decodeUiKV, t),
+        14 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        15 => out.selLbl = try r.str(t),
+        16 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        17 => out.kids = try r.list(settings.Kid, decodeSetKid, t),
+        18 => out.inputs = try r.list(settings.Input, decodeSetInput, t),
+        19 => out.submit = try r.str(t),
+        20 => out.subVar = try r.str(t),
+        21 => out.gf = try r.sub(sub.GfCard, decodeGfCard, t),
+        22 => out.gfm = try r.sub(sub.GfModel, decodeGfModel, t),
+        23 => out.brg = try r.sub(sub.Bridge, decodeBridge, t),
+        24 => out.upd = try r.sub(sub.UpdFlow, decodeUpdFlow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetCard(r: *wire.Reader, out: *settings.Card) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.tip = try r.str(t),
+        4 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        5 => out.desc = try r.str(t),
+        6 => out.st = try r.sub(settings.Status, decodeSetStatus, t),
+        7 => out.tgl = try r.sub(settings.Switch, decodeSetSwitch, t),
+        8 => out.blocks = try r.list(settings.Block, decodeSetBlock, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetSec(r: *wire.Reader, out: *settings.Sec) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.cards = try r.list(settings.Card, decodeSetCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetContent(r: *wire.Reader, out: *settings.Content) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.searching = try r.boolean(t),
+        2 => out.noResults = try r.str(t),
+        3 => out.nav = try r.list(settings.Nav, decodeSetNav, t),
+        4 => out.secs = try r.list(settings.Sec, decodeSetSec, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetState(r: *wire.Reader, out: *settings.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.available = try r.boolean(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.query = try r.str(t),
+        6 => out.placeholder = try r.str(t),
+        7 => out.content = try r.sub(settings.Content, decodeSetContent, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -663,6 +996,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_mo_state);
     try std.testing.expect(msg_ag_state != msg_pub);
     try std.testing.expect(msg_ag_state != msg_pub_hero);
+    try std.testing.expect(msg_ag_state != msg_set_state);
+    try std.testing.expect(msg_ag_state != msg_set_content);
+    try std.testing.expect(msg_ag_state != msg_set_status);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -678,6 +1014,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_mo_state);
     try std.testing.expect(msg_logs_state != msg_pub);
     try std.testing.expect(msg_logs_state != msg_pub_hero);
+    try std.testing.expect(msg_logs_state != msg_set_state);
+    try std.testing.expect(msg_logs_state != msg_set_content);
+    try std.testing.expect(msg_logs_state != msg_set_status);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -692,6 +1031,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_mo_state);
     try std.testing.expect(msg_logs_lines != msg_pub);
     try std.testing.expect(msg_logs_lines != msg_pub_hero);
+    try std.testing.expect(msg_logs_lines != msg_set_state);
+    try std.testing.expect(msg_logs_lines != msg_set_content);
+    try std.testing.expect(msg_logs_lines != msg_set_status);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -705,6 +1047,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_mo_state);
     try std.testing.expect(msg_live_state != msg_pub);
     try std.testing.expect(msg_live_state != msg_pub_hero);
+    try std.testing.expect(msg_live_state != msg_set_state);
+    try std.testing.expect(msg_live_state != msg_set_content);
+    try std.testing.expect(msg_live_state != msg_set_status);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -717,6 +1062,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_mo_state);
     try std.testing.expect(msg_live_transport != msg_pub);
     try std.testing.expect(msg_live_transport != msg_pub_hero);
+    try std.testing.expect(msg_live_transport != msg_set_state);
+    try std.testing.expect(msg_live_transport != msg_set_content);
+    try std.testing.expect(msg_live_transport != msg_set_status);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -728,6 +1076,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_mo_state);
     try std.testing.expect(msg_live_n_p != msg_pub);
     try std.testing.expect(msg_live_n_p != msg_pub_hero);
+    try std.testing.expect(msg_live_n_p != msg_set_state);
+    try std.testing.expect(msg_live_n_p != msg_set_content);
+    try std.testing.expect(msg_live_n_p != msg_set_status);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -738,6 +1089,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_mo_state);
     try std.testing.expect(msg_live_status != msg_pub);
     try std.testing.expect(msg_live_status != msg_pub_hero);
+    try std.testing.expect(msg_live_status != msg_set_state);
+    try std.testing.expect(msg_live_status != msg_set_content);
+    try std.testing.expect(msg_live_status != msg_set_status);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -747,6 +1101,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_mo_state);
     try std.testing.expect(msg_live_decks != msg_pub);
     try std.testing.expect(msg_live_decks != msg_pub_hero);
+    try std.testing.expect(msg_live_decks != msg_set_state);
+    try std.testing.expect(msg_live_decks != msg_set_content);
+    try std.testing.expect(msg_live_decks != msg_set_status);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -755,6 +1112,9 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_mo_state);
     try std.testing.expect(msg_live_signals != msg_pub);
     try std.testing.expect(msg_live_signals != msg_pub_hero);
+    try std.testing.expect(msg_live_signals != msg_set_state);
+    try std.testing.expect(msg_live_signals != msg_set_content);
+    try std.testing.expect(msg_live_signals != msg_set_status);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -762,25 +1122,52 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_mo_state);
     try std.testing.expect(msg_live_cockpit != msg_pub);
     try std.testing.expect(msg_live_cockpit != msg_pub_hero);
+    try std.testing.expect(msg_live_cockpit != msg_set_state);
+    try std.testing.expect(msg_live_cockpit != msg_set_content);
+    try std.testing.expect(msg_live_cockpit != msg_set_status);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
     try std.testing.expect(msg_live_link != msg_mo_state);
     try std.testing.expect(msg_live_link != msg_pub);
     try std.testing.expect(msg_live_link != msg_pub_hero);
+    try std.testing.expect(msg_live_link != msg_set_state);
+    try std.testing.expect(msg_live_link != msg_set_content);
+    try std.testing.expect(msg_live_link != msg_set_status);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
     try std.testing.expect(msg_live_graph != msg_pub);
     try std.testing.expect(msg_live_graph != msg_pub_hero);
+    try std.testing.expect(msg_live_graph != msg_set_state);
+    try std.testing.expect(msg_live_graph != msg_set_content);
+    try std.testing.expect(msg_live_graph != msg_set_status);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
     try std.testing.expect(msg_live_perf != msg_pub_hero);
+    try std.testing.expect(msg_live_perf != msg_set_state);
+    try std.testing.expect(msg_live_perf != msg_set_content);
+    try std.testing.expect(msg_live_perf != msg_set_status);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
+    try std.testing.expect(msg_live_strip != msg_set_state);
+    try std.testing.expect(msg_live_strip != msg_set_content);
+    try std.testing.expect(msg_live_strip != msg_set_status);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
+    try std.testing.expect(msg_mo_state != msg_set_state);
+    try std.testing.expect(msg_mo_state != msg_set_content);
+    try std.testing.expect(msg_mo_state != msg_set_status);
     try std.testing.expect(msg_pub != msg_pub_hero);
+    try std.testing.expect(msg_pub != msg_set_state);
+    try std.testing.expect(msg_pub != msg_set_content);
+    try std.testing.expect(msg_pub != msg_set_status);
+    try std.testing.expect(msg_pub_hero != msg_set_state);
+    try std.testing.expect(msg_pub_hero != msg_set_content);
+    try std.testing.expect(msg_pub_hero != msg_set_status);
+    try std.testing.expect(msg_set_state != msg_set_content);
+    try std.testing.expect(msg_set_state != msg_set_status);
+    try std.testing.expect(msg_set_content != msg_set_status);
 }

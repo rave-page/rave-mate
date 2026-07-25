@@ -32,7 +32,10 @@ func wireExportsB2() []wireExport {
 		wireExport{"motion_v2", zigui.RenderMotionV2},
 		wireExport{"motion_body_v2", zigui.RenderMotionBodyV2},
 		wireExport{"publish_v2", zigui.RenderPublishV2},
-		wireExport{"publish_hero_v2", zigui.RenderPublishHeroV2})
+		wireExport{"publish_hero_v2", zigui.RenderPublishHeroV2},
+		wireExport{"settings_v2", zigui.RenderSettingsV2},
+		wireExport{"settings_content_v2", zigui.RenderSettingsContentV2},
+		wireExport{"settings_status_v2", zigui.RenderSettingsStatusV2})
 	return out
 }
 
@@ -55,6 +58,18 @@ func wireBasesB2() []wireBase {
 	}
 	for n, st := range moFixtures() {
 		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
+	}
+	for n, f := range setFixtures() {
+		f.u.setMu.Lock()
+		f.u.setSec, f.u.setQuery = f.sec, f.q
+		f.u.setMu.Unlock()
+		st := f.u.settingsState()
+		out = append(out,
+			wireBase{"set/" + n, wireSetState(st)},
+			wireBase{"set/" + n + "/content", wireSetContent(st.Content)})
+	}
+	for _, s := range []stv{stOk("ok"), stWarn("warn"), stLive("live")} {
+		out = append(out, wireBase{"set/status/" + s.v, wireSetStatus(setStatusSt{V: s.v, T: s.t})})
 	}
 	for n, st := range pubFixtures() {
 		out = append(out,

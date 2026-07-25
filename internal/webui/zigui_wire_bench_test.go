@@ -165,6 +165,30 @@ func BenchmarkWireBenchPublishHero(b *testing.B) {
 		func() (string, bool) { return zigui.RenderPublishHeroV2(wirePubHero(st)) })
 }
 
+func BenchmarkWireBenchSettings(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	f := setFixtures()["libmedia"] // the widest card set in the suite
+	f.u.setMu.Lock()
+	f.u.setSec, f.u.setQuery = f.sec, f.q
+	f.u.setMu.Unlock()
+	st := f.u.settingsState()
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderSettings(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderSettingsV2(wireSetState(st)) })
+}
+
+func BenchmarkWireBenchSettingsStatus(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := setStatusSt{V: "ok", T: "https://development.api.rave.page"}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderSettingsStatus(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderSettingsStatusV2(wireSetStatus(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

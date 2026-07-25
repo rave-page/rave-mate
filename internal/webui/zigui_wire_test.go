@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/zigui"
 )
 
@@ -366,6 +367,107 @@ func TestWireUintRoundTrips(t *testing.T) {
 	if !strings.Contains(v2, "pub-track-n") {
 		t.Fatal("fixture is inert: no numbered track row in the render")
 	}
+}
+
+// TestZigWireThreeWaySettings: the tab, the #set-content pane and the per-card #stset-<id>
+// status line. Fixture setup mirrors TestZigSettingsGolden (the state is built from a UI, not a
+// literal), so the wire is gated on the same branchy states - including the search pane.
+func TestZigWireThreeWaySettings(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := setFixtures()
+	var wireB, jsonB, panes int
+	for name, f := range fx {
+		t.Run(name, func(t *testing.T) {
+			f.u.setMu.Lock()
+			f.u.setSec, f.u.setQuery = f.sec, f.q
+			f.u.setMu.Unlock()
+			if name == "updatesFeed" {
+				old := version.FeedURL
+				version.FeedURL = "https://feed.rave.page/mate.json"
+				defer func() { version.FeedURL = old }()
+			}
+			if name == "selectOpen" {
+				ssOpen("set-ml-codec", "h")
+				defer func() {
+					ssOpen("set-ml-codec", "")
+					ssMu.Lock()
+					ssSts["set-ml-codec"].open = false
+					ssMu.Unlock()
+				}()
+			}
+
+			st := f.u.settingsState()
+			doc, js := wireSetState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderSettings(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderSettingsV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", settingsHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			if !st.Available {
+				return // the content pane only exists on the available view
+			}
+			panes++
+			c1, ok := zigui.RenderSettingsContent(stateJSON(st.Content))
+			if !ok {
+				t.Fatal("v1 content render failed")
+			}
+			c2, ok := zigui.RenderSettingsContentV2(wireSetContent(st.Content))
+			if !ok {
+				t.Fatal("v2 content render failed")
+			}
+			assertBytesEqual(t, "content go==v1", setContentHTML(st.Content), c1)
+			assertBytesEqual(t, "content v1==v2", c1, c2)
+		})
+	}
+	if panes == 0 {
+		t.Fatal("no fixture exercised the #set-content pane")
+	}
+	t.Logf("%d fixtures (%d panes): wire %d B vs json %d B (%.1f%%)", len(fx), panes, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// TestZigWireSettingsStatus: the per-card tick fragment, same state set as the golden suite.
+func TestZigWireSettingsStatus(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	before := zigui.FallbackCounts()
+	for _, s := range []stv{
+		stOk("https://development.api.rave.page"),
+		stOk(`a&b <"c"> 'd'`),
+		stWarn("not listening"),
+		stLive("recording 3 tracks"),
+		stOk("信号 ✓ больш"),
+		stWarn(strings.Repeat("e", 500)),
+	} {
+		st := setStatusSt{V: s.v, T: s.t}
+		v1, ok := zigui.RenderSettingsStatus(stateJSON(st))
+		if !ok {
+			t.Fatalf("%s: v1 render failed", st.V)
+		}
+		v2, ok := zigui.RenderSettingsStatusV2(wireSetStatus(st))
+		if !ok {
+			t.Fatalf("%s: v2 render failed", st.V)
+		}
+		assertBytesEqual(t, st.V+" go==v1", setStatusHTML(st), v1)
+		assertBytesEqual(t, st.V+" v1==v2", v1, v2)
+	}
+	assertNoNewFallbacks(t, before)
 }
 
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a

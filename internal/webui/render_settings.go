@@ -160,7 +160,8 @@ func settingsSections() []setSection {
 func (u *UI) renderSettings() string {
 	st := u.settingsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderSettings(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderSettingsV2", wireSetState(st), zigui.RenderSettingsV2,
+			zigui.RenderSettings, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -172,7 +173,8 @@ func (u *UI) renderSettings() string {
 func (u *UI) renderSettingsContent() string {
 	st := u.settingsContentState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderSettingsContent(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderSettingsContentV2", wireSetContent(st), zigui.RenderSettingsContentV2,
+			zigui.RenderSettingsContent, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -183,7 +185,8 @@ func (u *UI) renderSettingsContent() string {
 func renderStatus(s stv) string {
 	st := setStatusSt{V: s.v, T: s.t}
 	if zigui.Available() {
-		if h, ok := zigui.RenderSettingsStatus(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderSettingsStatusV2", wireSetStatus(st), zigui.RenderSettingsStatusV2,
+			zigui.RenderSettingsStatus, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

@@ -200,4 +200,8 @@ func RenderMotionBodyV2(state []byte) (string, bool) { return "", false }
 func RenderPublishV2(state []byte) (string, bool)     { return "", false }
 func RenderPublishHeroV2(state []byte) (string, bool) { return "", false }
 
+func RenderSettingsV2(state []byte) (string, bool)        { return "", false }
+func RenderSettingsContentV2(state []byte) (string, bool) { return "", false }
+func RenderSettingsStatusV2(state []byte) (string, bool)  { return "", false }
+
 // --- end phaseb-wire ---
