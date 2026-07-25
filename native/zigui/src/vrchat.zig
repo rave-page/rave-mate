@@ -39,7 +39,8 @@ pub const PresetSel = struct {
 /// Editor: status & bio editor (#vrc-editor).
 pub const Editor = struct {
     statusTitle: []const u8 = "",
-    statusTip: []const u8 = "", // pre-rendered tooltip markup (trusted)
+    statusTip: []const u8 = "", // legacy raw (bridge)
+    statusTipSt: ?c.Tip = null, // structured tooltip — wins over statusTip
     presenceLabel: []const u8 = "",
     presence: []const Opt = &.{},
     statusMsgLabel: []const u8 = "",
@@ -223,7 +224,7 @@ pub fn renderEditor(h: *Html, s: Editor) !void {
     // Status card.
     try h.raw("<div class=\"rp-card vrc-card\"><div class=vrc-h>");
     try h.esc(s.statusTitle);
-    try h.raw(s.statusTip);
+    try c.tipOr(h, s.statusTipSt, s.statusTip);
     try h.raw("</div><form data-act=vrc-status><label class=field><span class=field-label>");
     try h.esc(s.presenceLabel);
     try h.raw("</span><select class=\"field-input select-input\" name=status>");

@@ -260,6 +260,75 @@ func TestZigTip2MidiCtlTipsGolden(t *testing.T) {
 	}, midiCtlHTML, zigui.RenderMIDICtl)
 }
 
+// ── Live tab: the four section-title tooltips ──
+
+// TestZigTip2LiveGolden sweeps signal-sources / network-graph / timing-graph / perf-graph, which
+// sit on sectionTip heads OUTSIDE the ticked fragments (a pinned card must survive the 1 Hz patch).
+func TestZigTip2LiveGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	tip2Sweep(t, "live", func(tp *tipSt, raw string) liveState {
+		st := liveFixtures()["populated"]
+		st.HasSignals, st.HasNet, st.HasPerf = true, true, true
+		st.SignalsTipS, st.SignalsTip = tp, raw
+		st.NetTipS, st.NetTip = tp, raw
+		st.TimTipS, st.TimTip = tp, raw
+		st.PerfTipS, st.PerfTip = tp, raw
+		return st
+	}, liveHTML, zigui.RenderLive)
+}
+
+// ── Motion tab: the camera-path + motion-studio preview card labels ──
+
+func TestZigTip2MotionGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	// the two preview cards live in different sections, so each needs its own document
+	tip2Sweep(t, "motionCam", func(tp *tipSt, raw string) moState {
+		st := moFixtures()["populated"]
+		cam := *st.Cam // copy: the fixture's pointer is shared
+		cam.TipS, cam.Tip = tp, raw
+		st.Cam = &cam
+		return st
+	}, motionHTML, zigui.RenderMotion)
+	tip2Sweep(t, "motionStudio", func(tp *tipSt, raw string) moState {
+		st := moFixtures()["studio"]
+		stu := *st.Studio
+		stu.TipS, stu.Tip = tp, raw
+		st.Studio = &stu
+		return st
+	}, motionHTML, zigui.RenderMotion)
+}
+
+// ── VRChat: presence card head + the group announcement card ──
+
+func TestZigTip2VRChatGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	tip2Sweep(t, "vrcEditor", func(tp *tipSt, raw string) vrcEditorSt {
+		st := vrcEditorFixture()
+		st.StatusTipS, st.StatusTip = tp, raw
+		return st
+	}, vrcEditorRenderHTML, zigui.RenderVRChatEditor)
+
+	// the announcement card's HEAD is gated on title-or-tooltip, so the tooltip decides the DOM:
+	// swept with an EMPTY title too, where absent vs present flips the whole card-head element.
+	tip2Sweep(t, "vrcgAnn", func(tp *tipSt, raw string) vrcgState {
+		st := vrcgFixtures()["posts"]
+		st.WS.Posts.AnnTipS, st.WS.Posts.AnnTip = tp, raw
+		return st
+	}, vrcgBodyHTML, zigui.RenderVRCGroups)
+	tip2Sweep(t, "vrcgAnnNoTitle", func(tp *tipSt, raw string) vrcgState {
+		st := vrcgFixtures()["posts"]
+		st.WS.Posts.AnnTitle = ""
+		st.WS.Posts.AnnTipS, st.WS.Posts.AnnTip = tp, raw
+		return st
+	}, vrcgBodyHTML, zigui.RenderVRCGroups)
+}
+
 // ── contract tests (untagged behaviour, no lib needed beyond the build tag) ──
 
 // TestSsLabelStIsTheOneMarkupSource pins the shared label state against the two literals it

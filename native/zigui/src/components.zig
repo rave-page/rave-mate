@@ -1529,6 +1529,29 @@ pub fn tipOr(h: *Html, t: ?Tip, raw_tip: []const u8) !void {
     try h.raw(raw_tip);
 }
 
+/// tipBuf resolves the dual-field bridge into a SCRATCH buffer, for the many primitives that take
+/// the tooltip as a string (sectionOpenTip, cardOpen, cardLabel, toggleRowTip, fieldEx, ss-label).
+/// The caller owns it: `var tb = try c.tipBuf(h, s.tipSt, s.tip); defer tb.deinit();`. One
+/// allocation per tooltip - NEVER re-emit a primitive's markup to save it, that is how the two
+/// renderers drift.
+pub fn tipBuf(h: *Html, t: ?Tip, raw_tip: []const u8) !Html {
+    var b = Html.init(h.a);
+    errdefer b.deinit();
+    try tipOr(&b, t, raw_tip);
+    return b;
+}
+
+test "tipBuf: caller-owned scratch buffer for string-taking primitives" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    var tb = try tipBuf(&h, .{ .id = "x", .title = "X" }, "RAW");
+    defer tb.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, tb.b.items, "tt-x") != null);
+    var rb = try tipBuf(&h, null, "RAW");
+    defer rb.deinit();
+    try std.testing.expectEqualStrings("RAW", rb.b.items);
+}
+
 /// tt_glyph is the fixed pin-checkbox + info-glyph prologue every card shares (test literal).
 const tt_glyph = "<input type=checkbox class=tt-x tabindex=-1>" ++
     "<svg class=tt-ic viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">" ++
