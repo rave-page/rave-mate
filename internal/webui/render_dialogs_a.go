@@ -250,9 +250,8 @@ func pubFixDlgHTMLOf(st pubFixDlgSt) string {
 // ── export preset editor (pbuilder.go) ──
 
 // mpPresetDlgSt is the export preset editor. Every "is it shown" branch is an explicit flag
-// (never "empty means the other arm"). Loudness carries the SHARED loudness block
-// (components.go loudnessFields) as trusted RAW markup - the same seam the library encode
-// builder keeps.
+// (never "empty means the other arm"). Loud carries the SHARED loudness block (components.go
+// loudSt) as structured state - same as the library encode builder.
 type mpPresetDlgSt struct {
 	Title      string       `json:"title"`
 	IDField    libPBFieldSt `json:"idField"`
@@ -282,7 +281,7 @@ type mpPresetDlgSt struct {
 	LosslessTx string       `json:"losslessTx,omitempty"`
 	Channels   selState     `json:"channels"`
 	SampleRate selState     `json:"samplerate"`
-	Loudness   string       `json:"loudness"`
+	Loud       loudSt       `json:"loud"`
 	Warns      []libHintSt  `json:"warns,omitempty"`
 	Foot       []uiBtn      `json:"foot"`
 }
@@ -336,7 +335,7 @@ func mpPresetDlgHTMLOf(st mpPresetDlgSt) string {
 	}
 	b.WriteString(fpair(selHTML(st.Channels), selHTML(st.SampleRate)))
 	b.WriteString(`</div>`)
-	b.WriteString(st.Loudness)
+	b.WriteString(st.Loud.html())
 	for _, w := range st.Warns {
 		b.WriteString(hint(w.Tone, w.Text))
 	}
