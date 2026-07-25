@@ -10,7 +10,6 @@ package webui
 // (dlgChoiceHTMLOf ↔ components.zig choiceDialog) instead of six near-copy ports.
 //
 // Raw (trusted) pass-throughs, matching what Go splices UNESCAPED:
-//   - the shared loudness block (components.go loudnessFields) inside the preset editor,
 //   - clock readouts + row numbers in the time-fix preview (Go time.Format / fmt.Sprint),
 //   - hand-written English literals that wrap an already-escaped value (dlgChoiceSt.MsgRaw).
 //

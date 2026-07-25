@@ -233,6 +233,32 @@ func TestZigPlayerGolden(t *testing.T) {
 	}
 }
 
+// TestZigPlayerLoudnessGolden sweeps the SHARED loudness block (components.go loudSt, phase
+// B-1a) through the #mp-<host>-export patch target, which used to embed it as raw markup.
+// The base state is a REAL dual-export snapshot, so the block sits in its production frame
+// (preset row + summary + output field + the standalone gain-plan line beside it).
+func TestZigPlayerLoudnessGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	u := &UI{}
+	t.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["dualExport"]
+	*u.mp(fx.host) = fx
+	base := u.mpInnerState(u.mpSnap(fx.host)).EditBox.Export
+	if len(base.Medias) == 0 {
+		t.Fatal("dualExport fixture has no export medias")
+	}
+	for name, o := range loudFx() {
+		t.Run(name, func(t *testing.T) {
+			st := base
+			st.Medias = append([]mpExMediaSt(nil), base.Medias...)
+			st.Medias[0].Loud = newLoudSt(o)
+			zigGolden(t, "playerLoud", st, mpExportHTMLOf(st), zigui.RenderPlayerExport)
+		})
+	}
+}
+
 // TestPlayerStatesHaveNoNullSlices guards the nil-slice trap: a nil Go slice marshals to
 // JSON null, which the Zig parser rejects → the WHOLE surface silently falls back to Go.
 func TestPlayerStatesHaveNoNullSlices(t *testing.T) {

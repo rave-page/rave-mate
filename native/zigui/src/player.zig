@@ -7,9 +7,9 @@
 //!   - `wave.svg` = player.go mpWaveSVG: the waveform/beatgrid/cue/trim geometry and the
 //!     `mp-<host>-ph` / `mp-<host>-ph-veil` ids the client rAF runtime (shell.go __rt)
 //!     rewrites 30x/s. Same rule as keywheelSVG / the campath viewer.
-//!   - `export.medias[].loud` / `.loudExtra` = components.go loudnessFields + the
-//!     gain-plan line / pre-listen toggle (one markup source shared with the library
-//!     preset builder + automation transcode steps).
+//!   - `export.medias[].loudExtra` = Go mpLoudExtraHTML (the standalone gain-plan line +
+//!     pre-listen toggle shown when the PRESET normalizes without an override). The shared
+//!     loudness block itself is structured now (components.zig loudnessFields).
 //!   - `tipWave` / `tp.tipVideo` / `editBox.tipTrim` / `align.tipAlign` = tooltip.go.
 //!   - the <video> element's inline JS handlers (they carry a %.3f volume and drive
 //!     shell.go __mse) — plain state values, attrQ'd identically on both sides.
@@ -147,13 +147,14 @@ pub const Sum = struct {
     title: []const u8 = "",
 };
 
-/// ExMedia is one media's export block. loud/loudExtra are RAW (components.go).
+/// ExMedia is one media's export block. loud is the shared loudness block as state
+/// (components.zig loudnessFields); loudExtra stays RAW (Go mpLoudExtraHTML).
 pub const ExMedia = struct {
     presetSel: c.Select = .{},
     summary: Sum = .{},
     outField: c.Field = .{},
     pickBtn: c.Btn = .{},
-    loud: []const u8 = "",
+    loud: c.Loud = .{},
     loudExtra: []const u8 = "",
 };
 
@@ -584,7 +585,7 @@ pub fn renderExport(h: *Html, s: Export) !void {
         try h.raw("</span>");
         try c.btnOf(h, m.pickBtn);
         try h.raw("</span></div>");
-        try h.raw(m.loud); // RAW: components.go loudnessFields (+ its extraHTML)
+        try c.loudnessFields(h, m.loud); // the shared block (its extraHTML rides inside)
         try h.raw(m.loudExtra);
         try h.raw("</div>");
     }
