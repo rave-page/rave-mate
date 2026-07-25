@@ -9,6 +9,10 @@
 /rave-mate-*
 *.app
 
+# Zig build output (native/zigcore)
+.zig-cache/
+zig-out/
+
 # Go
 *.test
 *.out

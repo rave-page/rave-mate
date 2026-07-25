@@ -20,8 +20,13 @@ TAGS :=
 ifeq ($(SPOUT),1)
   TAGS := spout
 endif
+# ZIG=1 links the ravezig native core (Zig DSP: sinc resampler + waveform kernels).
+# Needs `make zig` first (zig >= 0.16). Untagged builds keep the pure-Go paths.
+ifeq ($(ZIG),1)
+  TAGS += zigdsp
+endif
 
-.PHONY: build build-spout spout-sdk run service vet fmt test tidy soak vuln clean all generate-api generate-icon
+.PHONY: build build-spout spout-sdk zig build-zig run service vet fmt test tidy soak vuln clean all generate-api generate-icon
 
 all: generate-api fmt vet test build
 
@@ -57,6 +62,18 @@ endif
 # Build with the Spout backend enabled (fetches the SDK first if needed).
 build-spout: spout-sdk
 	$(MAKE) build SPOUT=1
+
+# Build the ravezig native core (native/zigcore → zig-out/lib/libravezig.a).
+zig:
+ifeq ($(GOOS),windows)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-zig.ps1
+else
+	bash scripts/build-zig.sh
+endif
+
+# Build with the Zig DSP core enabled (builds the lib first).
+build-zig: zig
+	$(MAKE) build ZIG=1
 
 run:
 	go run $(PKG)
