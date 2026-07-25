@@ -13,7 +13,9 @@ func RenderLogsLines(stateJSON []byte) (string, bool)     { return "", false }
 
 // --- motion + live (fleet: live batch) ---
 
-func RenderMotion(stateJSON []byte) (string, bool)     { return "", false }
-func RenderMotionBody(stateJSON []byte) (string, bool) { return "", false }
+func RenderMotion(stateJSON []byte) (string, bool)                { return "", false }
+func RenderMotionBody(stateJSON []byte) (string, bool)            { return "", false }
+func RenderLive(stateJSON []byte) (string, bool)                  { return "", false }
+func RenderLiveFrag(kind string, stateJSON []byte) (string, bool) { return "", false }
 
 // --- end motion + live ---

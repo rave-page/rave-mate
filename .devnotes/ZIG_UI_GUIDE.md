@@ -76,6 +76,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
 | motion | Zig (`native/zigui/src/motion.zig`; full + `#mo-body` fragment) | `TestZigMotionGolden` |
+| live | Zig (`native/zigui/src/live.zig`; full + 10 tick fragments via `rz_ui_render_live_frag`) | `TestZigLiveGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -123,3 +124,17 @@ Gotcha re-confirmed: a *conditionally built* `selState` (the point-cloud density
 picker) left `Rows` nil → JSON `null` → Zig parse fails → the tab silently falls back
 to Go. Every nested state with a slice must be initialized non-nil even when its
 section is hidden.
+
+Live-port notes (tab #4): the Live tab is 11 independently tick-patched fragments, so
+the ABI got ONE dispatch export - `rz_ui_render_live_frag(kind, kind_len, json…)`,
+kinds `transport|np|status|decks|signals|cockpit|link|graph|perf|strip` ("graph" serves
+both #live-net and #live-tim) - instead of ten near-identical exports; unknown kind
+returns NULL so the bridge falls back. Go keeps every float: sparkline SVGs + graph
+legends arrive as trusted raw HTML, and the Link phrase-bar fill arrives pre-formatted
+(`pbarPct`, `%.2f%%`) because the client rAF runtime (`__rt 'link'`) rewrites that exact
+attribute per frame - `linkPhraseBar(float)` stays for player_realtime_test.go and now
+delegates to `linkPhraseBarStr`. Quirks replicated deliberately (golden-gated): the
+status card splices `strings.ToLower(k)` into `data-label="…"` UNESCAPED, and the
+signals card's rows carry no data-label at all. `cockpitHTML` is shared with the Twitch
+tab, so that tab now renders its OBS rows through Zig too.
+Components added: `statusRow`, `sectionOpenTip` (both used here).
