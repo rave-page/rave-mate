@@ -131,6 +131,22 @@ const uint8_t *rz_ui_render_library_detail(const uint8_t *state_json, size_t len
 const uint8_t *rz_ui_render_library_queue(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_library_cuecell(const uint8_t *state_json, size_t len, size_t *out_len);
 
+
+/* --- libviews --- (Library alternate bodies + the Library modals) */
+/* #lib-body while a paired peer is targeted: status banner + peer-document iframe. */
+const uint8_t *rz_ui_render_libmirror(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #rmirror-banner inner (patched on every session-status move). */
+const uint8_t *rz_ui_render_libmirror_banner(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #lib-body while remote-cue-editing (waveform + #rce-info + the shared inspector). */
+const uint8_t *rz_ui_render_rce_body(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #rce-info inner; empty once the session ends => NULL (Go fallback emits ""). */
+const uint8_t *rz_ui_render_rce_info(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Save/write-back section of the cue-editor rail in rce mode; empty otherwise => NULL. */
+const uint8_t *rz_ui_render_rce_save(const uint8_t *state_json, size_t len, size_t *out_len);
+/* Library modals: full dialog markup (scrim + card), rendered into the modal root. */
+const uint8_t *rz_ui_render_lib_smartmodal(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_lib_relocmodal(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

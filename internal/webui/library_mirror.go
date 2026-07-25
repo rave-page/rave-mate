@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/zigui"
 )
 
 // mirrorOpenTimeout bounds the open→doc wait; on expiry the banner shows an error (a peer
@@ -69,13 +70,45 @@ func init() {
 
 // ── render ──────────────────────────────────────────────────────────────────────
 
+// libMirrorSt is the resolved mirror surface (#lib-body while a peer is targeted).
+type libMirrorSt struct {
+	NoLink    bool           `json:"noLink,omitempty"` // no peer-link hub: the whole body is one card
+	NoLinkMsg string         `json:"noLinkMsg,omitempty"`
+	Banner    libMirrorBanSt `json:"banner"`
+}
+
+// libMirrorBanSt is the status strip (#rmirror-banner, patched on every session state move).
+// HasNote / IsErr are explicit: an empty i18n string must not flip the branch.
+type libMirrorBanSt struct {
+	Status    string `json:"status"` // connecting|live|error|closed - spliced into the class UNESCAPED (const)
+	Title     string `json:"title"`
+	Tip       string `json:"tip"` // raw tipTopic("remote-library") markup
+	HasNote   bool   `json:"hasNote,omitempty"`
+	Note      string `json:"note,omitempty"`
+	IsErr     bool   `json:"isErr,omitempty"`
+	Err       string `json:"err,omitempty"`
+	Reconnect string `json:"reconnect,omitempty"`
+}
+
 // libMirrorBody renders the remote Library surface and (re)opens the session. Every render
 // recreates the iframe (lib-body innerHTML swap), so a fresh session is opened each time -
 // the peer streams a fresh doc, which also resyncs any patches lost while the tab was away.
 func (u *UI) libMirrorBody(target string) string {
+	st := u.libMirrorState(target)
+	if zigui.Available() {
+		if h, ok := zigui.RenderLibMirror(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return libMirrorBodyHTML(st)
+}
+
+// libMirrorState carries the session (re)open SIDE EFFECT and its order is load-bearing: the
+// banner resolves AFTER status flips to connecting, exactly where the old renderer built it.
+func (u *UI) libMirrorState(target string) libMirrorSt {
 	st := u.mirror()
 	if u.rui == nil {
-		return `<div class=rp-card>` + emptyState(i18n.T("library.mirror.noLink")) + `</div>`
+		return libMirrorSt{NoLink: true, NoLinkMsg: i18n.T("library.mirror.noLink")}
 	}
 	sid := randToken()
 	st.mu.Lock()
@@ -103,14 +136,33 @@ func (u *UI) libMirrorBody(target string) string {
 			}
 		})
 	})
+	return libMirrorSt{Banner: u.mirrorBannerState()}
+}
+
+// libMirrorBodyHTML is the pure mirror-surface renderer.
+func libMirrorBodyHTML(st libMirrorSt) string {
+	if st.NoLink {
+		return `<div class=rp-card>` + emptyState(st.NoLinkMsg) + `</div>`
+	}
 	var b strings.Builder
-	b.WriteString(`<div id=rmirror-banner>` + u.mirrorBannerHTML() + `</div>`)
+	b.WriteString(`<div id=rmirror-banner>` + mirrorBannerHTMLOf(st.Banner) + `</div>`)
 	b.WriteString(`<div class=rmirror-frame><iframe id=__rmirror title="remote library"></iframe></div>`)
 	return b.String()
 }
 
 // mirrorBannerHTML is the status strip above the mirror (patched independently on state moves).
 func (u *UI) mirrorBannerHTML() string {
+	st := u.mirrorBannerState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderLibMirrorBanner(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return mirrorBannerHTMLOf(st)
+}
+
+// mirrorBannerState resolves the banner (peer name lookup + i18n + tooltip markup).
+func (u *UI) mirrorBannerState() libMirrorBanSt {
 	st := u.mirror()
 	st.mu.Lock()
 	target, status, errMsg := st.target, st.status, st.errMsg
@@ -121,23 +173,39 @@ func (u *UI) mirrorBannerHTML() string {
 			name = p.Name
 		}
 	}
-	var b strings.Builder
-	b.WriteString(`<div class="rmirror-bar rmirror-` + status + `">`)
-	b.WriteString(`<span class=rmirror-dot></span><span class=rmirror-title>` +
-		html.EscapeString(i18n.T("library.mirror.banner", i18n.A{"name": name})) + `</span>`)
-	b.WriteString(tipTopic("remote-library"))
+	b := libMirrorBanSt{
+		Status: status,
+		Title:  i18n.T("library.mirror.banner", i18n.A{"name": name}),
+		Tip:    tipTopic("remote-library"),
+	}
 	switch status {
 	case mirrorConnecting:
-		b.WriteString(`<span class=rmirror-note>` + html.EscapeString(i18n.T("library.mirror.connecting")) + `</span>`)
+		b.HasNote, b.Note = true, i18n.T("library.mirror.connecting")
 	case mirrorLive:
-		b.WriteString(`<span class=rmirror-note>` + html.EscapeString(i18n.T("library.mirror.audioNote")) + `</span>`)
+		b.HasNote, b.Note = true, i18n.T("library.mirror.audioNote")
 	case mirrorError, mirrorClosed:
 		msg := errMsg
 		if msg == "" {
 			msg = i18n.T("library.mirror.closed")
 		}
-		b.WriteString(`<span class="rmirror-note rmirror-err">` + html.EscapeString(msg) + `</span>`)
-		b.WriteString(btn(i18n.T("library.mirror.reconnect"), "outline", "rmirror-reconnect", ""))
+		b.IsErr, b.Err, b.Reconnect = true, msg, i18n.T("library.mirror.reconnect")
+	}
+	return b
+}
+
+// mirrorBannerHTMLOf is the pure banner renderer.
+func mirrorBannerHTMLOf(st libMirrorBanSt) string {
+	var b strings.Builder
+	b.WriteString(`<div class="rmirror-bar rmirror-` + st.Status + `">`)
+	b.WriteString(`<span class=rmirror-dot></span><span class=rmirror-title>` +
+		html.EscapeString(st.Title) + `</span>`)
+	b.WriteString(st.Tip)
+	if st.HasNote {
+		b.WriteString(`<span class=rmirror-note>` + html.EscapeString(st.Note) + `</span>`)
+	}
+	if st.IsErr {
+		b.WriteString(`<span class="rmirror-note rmirror-err">` + html.EscapeString(st.Err) + `</span>`)
+		b.WriteString(btn(st.Reconnect, "outline", "rmirror-reconnect", ""))
 	}
 	b.WriteString(`</div>`)
 	return b.String()

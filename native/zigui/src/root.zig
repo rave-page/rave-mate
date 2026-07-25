@@ -394,3 +394,46 @@ export fn rz_ui_render_library_cuecell(state_json: ?[*]const u8, len: usize, out
 test "library tab module" {
     _ = library;
 }
+
+// --- libviews ---
+
+const libviews = @import("libviews.zig");
+
+/// #lib-body while a paired peer is targeted (mirror banner + the peer document iframe).
+export fn rz_ui_render_libmirror(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.Mirror, libviews.renderMirror, state_json, len, out_len);
+}
+
+/// #rmirror-banner inner (patched on every session-status move).
+export fn rz_ui_render_libmirror_banner(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.MirrorBanner, libviews.renderMirrorBanner, state_json, len, out_len);
+}
+
+/// #lib-body while remote-cue-editing.
+export fn rz_ui_render_rce_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.RceBody, libviews.renderRceBody, state_json, len, out_len);
+}
+
+/// #rce-info inner. Legitimately EMPTY once the session ends ⇒ NULL ⇒ the Go fallback
+/// renders the same empty string.
+export fn rz_ui_render_rce_info(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.RceInfo, libviews.renderRceInfo, state_json, len, out_len);
+}
+
+/// The save/write-back section spliced into the cue-editor rail; empty outside rce mode.
+export fn rz_ui_render_rce_save(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.RceSave, libviews.renderRceSave, state_json, len, out_len);
+}
+
+/// Library modals (rendered into the modal root, scrim + dialog included).
+export fn rz_ui_render_lib_smartmodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.SmartModal, libviews.renderSmartModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_lib_relocmodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libviews.RelocModal, libviews.renderRelocModal, state_json, len, out_len);
+}
+
+test "libviews module" {
+    _ = libviews;
+}

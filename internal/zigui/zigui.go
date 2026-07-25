@@ -433,3 +433,54 @@ func RenderLibraryCueCell(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_library_cuecell(p, l, n)
 	})
 }
+
+// --- libviews ---
+
+// RenderLibMirror renders the #lib-body peer-mirror surface (banner + iframe).
+func RenderLibMirror(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror(p, l, n)
+	})
+}
+
+// RenderLibMirrorBanner renders the #rmirror-banner status strip.
+func RenderLibMirrorBanner(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror_banner(p, l, n)
+	})
+}
+
+// RenderRCEBody renders the #lib-body remote-cue-edit surface.
+func RenderRCEBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_body(p, l, n)
+	})
+}
+
+// RenderRCEInfo renders the #rce-info pane.
+func RenderRCEInfo(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_info(p, l, n)
+	})
+}
+
+// RenderRCESave renders the rce save/write-back rail section.
+func RenderRCESave(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_save(p, l, n)
+	})
+}
+
+// RenderLibSmartModal renders the smart-rules editor modal.
+func RenderLibSmartModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_smartmodal(p, l, n)
+	})
+}
+
+// RenderLibRelocModal renders the relocate-missing modal.
+func RenderLibRelocModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_relocmodal(p, l, n)
+	})
+}

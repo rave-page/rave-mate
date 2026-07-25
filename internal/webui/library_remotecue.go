@@ -32,6 +32,7 @@ import (
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/remotecache"
 	"rave.page/mate/internal/remotectl"
+	"rave.page/mate/internal/zigui"
 )
 
 // ceRemote is the remote-edit context while the cue editor is bound to a cached copy of a
@@ -867,26 +868,122 @@ func (u *UI) rceWriteTo(key string) {
 }
 
 // ── rendering ──
+//
+// Split per .devnotes/ZIG_UI_GUIDE.md: impure state builders (ceSt/libSt locks, i18n,
+// remotectl targets) vs pure renderers, mirrored byte-for-byte in
+// native/zigui/src/libviews.zig. NOTHING here touches the StateSHA contract - the baseline
+// (r.baseSHA) and rceDirtyLocked() are READ, never recomputed or reformatted.
+//
+// The cue editor's own markup is NOT ported here: rceBodySt.Wave carries ceWaveHTML()
+// (library_cueedit.go) as a trusted raw string, and rceSaveHTML() keeps its signature so
+// ceRailHTML splices it exactly as before.
+
+// rceNavSt is one set prev/next control: a plain button, or a disabled gated one at the edge.
+type rceNavSt struct {
+	Label string `json:"label"`
+	Act   string `json:"act,omitempty"`
+	Gated bool   `json:"gated,omitempty"`
+	Why   string `json:"why,omitempty"` // btnGated title
+}
+
+// rceInfoSt is the #rce-info left pane. Show=false renders "" (the Zig export then returns
+// NULL and the Go fallback renders the same empty string).
+type rceInfoSt struct {
+	Show      bool        `json:"show,omitempty"`
+	Eyebrow   string      `json:"eyebrow"`
+	Title     string      `json:"title"`
+	Path      string      `json:"path"`
+	HasSet    bool        `json:"hasSet,omitempty"`
+	SetLine   string      `json:"setLine,omitempty"`
+	Prev      rceNavSt    `json:"prev"`
+	Next      rceNavSt    `json:"next"`
+	LocalNote string      `json:"localNote"`
+	Hints     []libHintSt `json:"hints,omitempty"`
+	Back      string      `json:"back"`
+}
+
+// rceBodySt is the whole #lib-body surface while remote-editing.
+type rceBodySt struct {
+	Wave   string      `json:"wave"` // raw ceWaveHTML (library_cueedit.go owns that markup)
+	Info   rceInfoSt   `json:"info"`
+	Detail libDetailSt `json:"detail"`
+}
+
+// rceWriteSt is one peer DJ-software write-back row (done hint, live button, or gated button).
+type rceWriteSt struct {
+	Done  bool   `json:"done,omitempty"`
+	Text  string `json:"text"` // wroteHint when done, else the button label
+	Act   string `json:"act,omitempty"`
+	Gated bool   `json:"gated,omitempty"`
+	Why   string `json:"why,omitempty"`
+}
+
+// rceSaveSt is the save/write-back rail section. Status ∈ {busy,dirty,saved,clean}.
+type rceSaveSt struct {
+	Show        bool         `json:"show,omitempty"`
+	Header      string       `json:"header"`
+	Moved       bool         `json:"moved,omitempty"`
+	MovedText   string       `json:"movedText,omitempty"`
+	ReloadLbl   string       `json:"reloadLbl,omitempty"`
+	HasErr      bool         `json:"hasErr,omitempty"`
+	ErrText     string       `json:"errText,omitempty"`
+	Status      string       `json:"status"`
+	StatusText  string       `json:"statusText"`  // busy/saved/clean line
+	UnsavedText string       `json:"unsavedText"` // dirty warn hint
+	SaveLbl     string       `json:"saveLbl"`
+	HasWrites   bool         `json:"hasWrites,omitempty"`
+	WriteHeader string       `json:"writeHeader,omitempty"`
+	Writes      []rceWriteSt `json:"writes,omitempty"`
+}
 
 // rceBody is the Library body while remote-editing: full-width local waveform + the editor
 // rail (same ids as the local layout, so cePatchWave/cePatchRail keep working).
 func (u *UI) rceBody() string {
+	st := u.rceBodyState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderRCEBody(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return rceBodyHTML(st)
+}
+
+// rceBodyState resolves the surface. Build ORDER matches the old expression (inspector under
+// s.mu first, then the waveform, then the info pane) - the cue editor patches these ids.
+func (u *UI) rceBodyState() rceBodySt {
 	s := u.lib()
 	s.mu.Lock()
-	detail := u.libDetailWrap(s)
+	detail := u.libDetailState(s)
 	s.mu.Unlock()
-	return `<div class=ce-fullwave>` + u.ceWaveHTML() + `</div>` +
-		masterDetailWide(`<div id=rce-info>`+u.rceInfoHTML()+`</div>`, detail)
+	wave := u.ceWaveHTML()
+	return rceBodySt{Wave: wave, Info: u.rceInfoState(), Detail: detail}
+}
+
+// rceBodyHTML is the pure body renderer.
+func rceBodyHTML(st rceBodySt) string {
+	return `<div class=ce-fullwave>` + st.Wave + `</div>` +
+		masterDetailWide(`<div id=rce-info>`+rceInfoHTMLOf(st.Info)+`</div>`, libDetailWrapHTML(st.Detail))
 }
 
 // rceInfoHTML is the left pane: whose track is being edited, where audio runs, session status.
 func (u *UI) rceInfoHTML() string {
+	st := u.rceInfoState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderRCEInfo(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return rceInfoHTMLOf(st)
+}
+
+// rceInfoState resolves the left pane under c.mu.
+func (u *UI) rceInfoState() rceInfoSt {
 	c := u.ce()
 	c.mu.Lock()
 	r := c.rce
 	if r == nil {
 		c.mu.Unlock()
-		return ""
+		return rceInfoSt{}
 	}
 	title := trackTitle(c.track)
 	name, remotePath := r.peerName, r.remotePath
@@ -899,10 +996,15 @@ func (u *UI) rceInfoHTML() string {
 		setPos, setN, setLabel, setNext = r.set.pos, len(r.set.paths), r.set.label, r.set.nextOK
 	}
 	c.mu.Unlock()
-	var b strings.Builder
-	b.WriteString(`<div class=rp-card>`)
-	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(i18n.T("library.rce.eyebrow", i18n.A{"name": name})) +
-		`</div><div class=insp-title>` + esc(title) + `</div><div class=insp-sub>` + esc(remotePath) + `</div></div>`)
+	st := rceInfoSt{
+		Show:      true,
+		Eyebrow:   i18n.T("library.rce.eyebrow", i18n.A{"name": name}),
+		Title:     title,
+		Path:      remotePath,
+		HasSet:    hasSet,
+		LocalNote: i18n.T("library.rce.localNote", i18n.A{"name": name}),
+		Back:      i18n.T("library.rce.back"),
+	}
 	if hasSet { // set header: position + prev/next (mirrors ↑/↓ key nav)
 		args := i18n.A{"i": fmt.Sprint(setPos + 1), "n": fmt.Sprint(setN), "name": setLabel}
 		line := i18n.T("library.rce.setPos", args)
@@ -912,41 +1014,77 @@ func (u *UI) rceInfoHTML() string {
 		if setNext {
 			line += " · " + i18n.T("library.rce.nextReady")
 		}
-		b.WriteString(`<div class=set-note>` + esc(line) + `</div>`)
-		prev := btnGated(i18n.T("library.rce.setPrev"), i18n.T("library.rce.setEdge"))
-		next := btnGated(i18n.T("library.rce.setNext"), i18n.T("library.rce.setEdge"))
+		st.SetLine = line
+		st.Prev = rceNavSt{Label: i18n.T("library.rce.setPrev"), Gated: true, Why: i18n.T("library.rce.setEdge")}
+		st.Next = rceNavSt{Label: i18n.T("library.rce.setNext"), Gated: true, Why: i18n.T("library.rce.setEdge")}
 		if setPos > 0 {
-			prev = btn(i18n.T("library.rce.setPrev"), "outline", "rce-set-prev", "")
+			st.Prev = rceNavSt{Label: i18n.T("library.rce.setPrev"), Act: "rce-set-prev"}
 		}
 		if setPos < setN-1 {
-			next = btn(i18n.T("library.rce.setNext"), "outline", "rce-set-next", "")
+			st.Next = rceNavSt{Label: i18n.T("library.rce.setNext"), Act: "rce-set-next"}
 		}
-		b.WriteString(btnRow(prev, next))
 	}
-	b.WriteString(`<p class=page-sub>` + esc(i18n.T("library.rce.localNote", i18n.A{"name": name})) + `</p>`)
 	if moved {
-		b.WriteString(hint("warn", i18n.T("library.rce.peerMoved", i18n.A{"name": name})))
+		st.Hints = append(st.Hints, libHintSt{Tone: "warn", Text: i18n.T("library.rce.peerMoved", i18n.A{"name": name})})
 	}
 	if dirty {
-		b.WriteString(hint("warn", i18n.T("library.rce.unsaved")))
+		st.Hints = append(st.Hints, libHintSt{Tone: "warn", Text: i18n.T("library.rce.unsaved")})
 	} else {
-		b.WriteString(hint("ok", i18n.T("library.rce.clean")))
+		st.Hints = append(st.Hints, libHintSt{Tone: "ok", Text: i18n.T("library.rce.clean")})
 	}
-	b.WriteString(btnRow(btn(i18n.T("library.rce.back"), "outline", "ce-close", "")))
+	return st
+}
+
+// rceInfoHTMLOf is the pure left-pane renderer.
+func rceInfoHTMLOf(st rceInfoSt) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=rp-card>`)
+	b.WriteString(`<div class=insp-hd><div class=insp-eyebrow>` + esc(st.Eyebrow) +
+		`</div><div class=insp-title>` + esc(st.Title) + `</div><div class=insp-sub>` + esc(st.Path) + `</div></div>`)
+	if st.HasSet {
+		b.WriteString(`<div class=set-note>` + esc(st.SetLine) + `</div>`)
+		b.WriteString(btnRow(rceNavBtn(st.Prev), rceNavBtn(st.Next)))
+	}
+	b.WriteString(`<p class=page-sub>` + esc(st.LocalNote) + `</p>`)
+	for _, hn := range st.Hints {
+		b.WriteString(hint(hn.Tone, hn.Text))
+	}
+	b.WriteString(btnRow(btn(st.Back, "outline", "ce-close", "")))
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+func rceNavBtn(n rceNavSt) string {
+	if n.Gated {
+		return btnGated(n.Label, n.Why)
+	}
+	return btn(n.Label, "outline", n.Act, "")
 }
 
 // rceSaveHTML is the save/write-back section of the editor rail in rce mode (replaces the
 // local DJ-software router, library_cuewrite.go). Locks ceSt itself - build it before
 // ceRailHTML locks c (same contract as ceWriteHTML).
 func (u *UI) rceSaveHTML() string {
+	st := u.rceSaveState()
+	if zigui.Available() {
+		if h, ok := zigui.RenderRCESave(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return rceSaveHTMLOf(st)
+}
+
+// rceSaveState resolves the rail section under c.mu.
+func (u *UI) rceSaveState() rceSaveSt {
 	c := u.ce()
 	c.mu.Lock()
 	r := c.rce
 	if r == nil || !c.active {
 		c.mu.Unlock()
-		return ""
+		return rceSaveSt{}
 	}
 	dirty := c.rceDirtyLocked()
 	busy, errStr := c.wbBusy, c.wbErr
@@ -959,43 +1097,86 @@ func (u *UI) rceSaveHTML() string {
 	targets := append([]remotectl.CueTarget(nil), r.targets...)
 	c.mu.Unlock()
 
-	var b strings.Builder
-	b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.rce.saveHeader", i18n.A{"name": name})) + `</div>`)
+	st := rceSaveSt{Show: true, Header: i18n.T("library.rce.saveHeader", i18n.A{"name": name})}
 	if moved {
-		b.WriteString(hint("warn", i18n.T("library.rce.peerMoved", i18n.A{"name": name})))
-		b.WriteString(btnRow(btn(i18n.T("library.rce.reload"), "outline", "rce-reload", "")))
+		st.Moved = true
+		st.MovedText = i18n.T("library.rce.peerMoved", i18n.A{"name": name})
+		st.ReloadLbl = i18n.T("library.rce.reload")
 	}
 	if errStr != "" {
-		b.WriteString(hint("bad", i18n.T("library.rce.saveFailed")+errStr))
+		st.HasErr, st.ErrText = true, i18n.T("library.rce.saveFailed")+errStr
 	}
 	switch {
 	case busy:
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.rce.saving")) + `</div>`)
+		st.Status, st.StatusText = "busy", i18n.T("library.rce.saving")
 	case dirty:
 		label := i18n.T("library.rce.save", i18n.A{"name": name})
 		if errStr != "" {
 			label = i18n.T("library.rce.retry")
 		}
-		b.WriteString(hint("warn", i18n.T("library.rce.unsaved")))
-		b.WriteString(`<div class=btn-col>` + btn(label, "primary", "rce-save", "") + `</div>`)
+		st.Status, st.UnsavedText, st.SaveLbl = "dirty", i18n.T("library.rce.unsaved"), label
 	case savedOnce:
-		b.WriteString(hint("ok", i18n.T("library.rce.saved")))
+		st.Status, st.StatusText = "saved", i18n.T("library.rce.saved")
 	default:
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("library.rce.clean")) + `</div>`)
+		st.Status, st.StatusText = "clean", i18n.T("library.rce.clean")
 	}
 	// peer-side DJ-software write-back: only meaningful once the peer holds the saved state
 	if savedOnce && len(targets) > 0 {
-		b.WriteString(`<div class=pb-label>` + esc(i18n.T("library.rce.writeHeader", i18n.A{"name": name})) + `</div>`)
+		st.HasWrites = true
+		st.WriteHeader = i18n.T("library.rce.writeHeader", i18n.A{"name": name})
 		for _, t := range targets {
 			if n, ok := applied[t.Key]; ok {
-				b.WriteString(hint("ok", i18n.T("library.ce.wroteHint", i18n.A{"app": t.Label, "n": fmt.Sprint(n)})))
+				st.Writes = append(st.Writes, rceWriteSt{Done: true,
+					Text: i18n.T("library.ce.wroteHint", i18n.A{"app": t.Label, "n": fmt.Sprint(n)})})
 				continue
 			}
-			label := i18n.T("library.ce.writeTo", i18n.A{"app": t.Label, "n": "1"})
+			w := rceWriteSt{Text: i18n.T("library.ce.writeTo", i18n.A{"app": t.Label, "n": "1"})}
 			if dirty || busy {
-				b.WriteString(btnRow(btnGated(label, i18n.T("library.rce.writeGate"))))
+				w.Gated, w.Why = true, i18n.T("library.rce.writeGate")
 			} else {
-				b.WriteString(btnRow(btn(label, "outline", "rce-write:"+t.Key, "")))
+				w.Act = "rce-write:" + t.Key
+			}
+			st.Writes = append(st.Writes, w)
+		}
+	}
+	return st
+}
+
+// rceSaveHTMLOf is the pure rail-section renderer.
+func rceSaveHTMLOf(st rceSaveSt) string {
+	if !st.Show {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=pb-label>` + esc(st.Header) + `</div>`)
+	if st.Moved {
+		b.WriteString(hint("warn", st.MovedText))
+		b.WriteString(btnRow(btn(st.ReloadLbl, "outline", "rce-reload", "")))
+	}
+	if st.HasErr {
+		b.WriteString(hint("bad", st.ErrText))
+	}
+	switch st.Status {
+	case "busy":
+		b.WriteString(`<div class=set-note>` + esc(st.StatusText) + `</div>`)
+	case "dirty":
+		b.WriteString(hint("warn", st.UnsavedText))
+		b.WriteString(`<div class=btn-col>` + btn(st.SaveLbl, "primary", "rce-save", "") + `</div>`)
+	case "saved":
+		b.WriteString(hint("ok", st.StatusText))
+	default:
+		b.WriteString(`<div class=set-note>` + esc(st.StatusText) + `</div>`)
+	}
+	if st.HasWrites {
+		b.WriteString(`<div class=pb-label>` + esc(st.WriteHeader) + `</div>`)
+		for _, w := range st.Writes {
+			switch {
+			case w.Done:
+				b.WriteString(hint("ok", w.Text))
+			case w.Gated:
+				b.WriteString(btnRow(btnGated(w.Text, w.Why)))
+			default:
+				b.WriteString(btnRow(btn(w.Text, "outline", w.Act, "")))
 			}
 		}
 	}
