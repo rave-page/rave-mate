@@ -36,7 +36,8 @@ pub const Cam = struct {
     organizeLbl: []const u8 = "",
     djLbl: []const u8 = "",
     previewLbl: []const u8 = "",
-    tip: []const u8 = "", // raw tipTopic
+    tip: []const u8 = "", // legacy raw (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     view: []const u8 = "", // raw cpvView
     hint: []const u8 = "",
     info: []const u8 = "",
@@ -69,7 +70,8 @@ pub const Studio = struct {
     renderProg: []const u8 = "", // raw
     avatar: Avatar = .{},
     previewLbl: []const u8 = "",
-    tip: []const u8 = "", // raw
+    tip: []const u8 = "", // legacy raw (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     view: []const u8 = "", // raw preview SVG / raster frame
     hint: []const u8 = "",
     time: []const u8 = "",
@@ -176,7 +178,9 @@ fn renderCam(h: *Html, s: Cam) !void {
     try c.btn(h, s.djLbl, "outline", "mo-cp-dj", "");
     try c.btnRowClose(h);
     try c.masterDetailMid(h);
-    try cardLabel(h, s.previewLbl, s.tip);
+    var tb = try c.tipBuf(h, s.tipSt, s.tip);
+    defer tb.deinit();
+    try cardLabel(h, s.previewLbl, tb.b.items);
     try h.raw(s.view);
     try h.raw("<div class=mo-hint>");
     try h.esc(s.hint);
@@ -225,7 +229,9 @@ fn renderStudio(h: *Html, s: Studio) !void {
     try h.raw("</div>");
     try renderAvatar(h, s.avatar);
     try c.masterDetailMid(h);
-    try cardLabel(h, s.previewLbl, s.tip);
+    var tb = try c.tipBuf(h, s.tipSt, s.tip);
+    defer tb.deinit();
+    try cardLabel(h, s.previewLbl, tb.b.items);
     try h.raw("<div id=mo-view data-actpos=\"mo-orbit\" data-actwheel=\"mo-zoom\">");
     try h.raw(s.view);
     try h.raw("</div><div class=mo-hint>");

@@ -928,6 +928,204 @@ func RenderLogsLinesV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B-2 fan-out ──
+
+// RenderLiveV2 renders the full Live cockpit from an RZW1 document.
+func RenderLiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live_v2(p, l, n)
+	})
+}
+
+// RenderLiveFragV2 renders one live-tab fragment from an RZW1 document (kind as in
+// RenderLiveFrag). Each kind has its own message id, so a document for another fragment is
+// refused by the header check.
+func RenderLiveFragV2(kind string, state []byte) (string, bool) {
+	if kind == "" {
+		return "", false
+	}
+	kb := []byte(kind)
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_live_frag_v2((*C.uint8_t)(unsafe.Pointer(&kb[0])), C.size_t(len(kb)), p, l, n)
+	})
+}
+
+// RenderMotionV2 renders the full Motion tab from an RZW1 document.
+func RenderMotionV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_v2(p, l, n)
+	})
+}
+
+// RenderMotionBodyV2 renders the #mo-body fragment from an RZW1 document.
+func RenderMotionBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_motion_body_v2(p, l, n)
+	})
+}
+
+// RenderPublishV2 renders the full Publish tab from an RZW1 document.
+func RenderPublishV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_v2(p, l, n)
+	})
+}
+
+// RenderPublishHeroV2 renders the #pub-hero fragment from an RZW1 document (ok=false when the
+// hero is legitimately empty - no recorder wired).
+func RenderPublishHeroV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_hero_v2(p, l, n)
+	})
+}
+
+// RenderSettingsV2 renders the full Settings tab from an RZW1 document.
+func RenderSettingsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_v2(p, l, n)
+	})
+}
+
+// RenderSettingsContentV2 renders the #set-content pane from an RZW1 document.
+func RenderSettingsContentV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_content_v2(p, l, n)
+	})
+}
+
+// RenderSettingsStatusV2 renders one #stset-<id> status fragment from an RZW1 document.
+func RenderSettingsStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_status_v2(p, l, n)
+	})
+}
+
+// RenderLibraryV2 renders the full Library tab from an RZW1 document.
+func RenderLibraryV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_v2(p, l, n)
+	})
+}
+
+// RenderLibraryBodyV2 renders the #lib-body active section from an RZW1 document.
+func RenderLibraryBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_body_v2(p, l, n)
+	})
+}
+
+// RenderLibraryDetailV2 renders the #lib-detail inspector from an RZW1 document.
+func RenderLibraryDetailV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_detail_v2(p, l, n)
+	})
+}
+
+// RenderLibraryQueueV2 renders the #lib-queue-body job list from an RZW1 document.
+func RenderLibraryQueueV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_queue_v2(p, l, n)
+	})
+}
+
+// RenderLibraryCueCellV2 renders one cue-census cell from an RZW1 document.
+func RenderLibraryCueCellV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_cuecell_v2(p, l, n)
+	})
+}
+
+// RenderPlayerV2 renders the full Player view from an RZW1 document.
+func RenderPlayerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_v2(p, l, n)
+	})
+}
+
+// RenderPlayerRootV2 renders the #mp-root inner from an RZW1 document.
+func RenderPlayerRootV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_root_v2(p, l, n)
+	})
+}
+
+// RenderPlayerVidV2 renders the #mp-vid fragment from an RZW1 document.
+func RenderPlayerVidV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_vid_v2(p, l, n)
+	})
+}
+
+// RenderPlayerWaveV2 renders the #mp-wave fragment from an RZW1 document.
+func RenderPlayerWaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_wave_v2(p, l, n)
+	})
+}
+
+// RenderPlayerTpV2 renders the #mp-tp transport from an RZW1 document.
+func RenderPlayerTpV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_tp_v2(p, l, n)
+	})
+}
+
+// RenderPlayerEditV2 renders the #mp-edit box from an RZW1 document.
+func RenderPlayerEditV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_edit_v2(p, l, n)
+	})
+}
+
+// RenderPlayerExportV2 renders the #mp-export panel from an RZW1 document.
+func RenderPlayerExportV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_export_v2(p, l, n)
+	})
+}
+
+// RenderPlayerROV2 renders the #mp-ro read-only strip from an RZW1 document.
+func RenderPlayerROV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_ro_v2(p, l, n)
+	})
+}
+
+// RenderPlayerHovV2 renders the #mp-hov hover readout from an RZW1 document.
+func RenderPlayerHovV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_hov_v2(p, l, n)
+	})
+}
+
+// RenderAutomationsV2 renders the full Automations tab from an RZW1 document.
+func RenderAutomationsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations_v2(p, l, n)
+	})
+}
+
+// RenderAutomationsBodyV2 renders the #auto-body fragment from an RZW1 document.
+func RenderAutomationsBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_automations_body_v2(p, l, n)
+	})
+}
+
+// RenderPeersV2 renders the full Peers tab from an RZW1 document.
+func RenderPeersV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_v2(p, l, n)
+	})
+}
+
+// RenderPeersBodyV2 renders the #peers-body fragment from an RZW1 document.
+func RenderPeersBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_peers_body_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

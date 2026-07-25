@@ -147,6 +147,69 @@ fallbacks none
 - Read it WITH `FallbackCounts()` (same section): a fallback on a whole-view renderer means the
   Zig number is measuring fewer renders than you think.
 
+## Wave B-2: v1 (JSON) vs v2 (RZW1 binary) per view
+
+Same box + method as above (**min of 6** = three runs × `-count=2`, `-benchtime 500ms`), commit
+`feature/zig-phaseb-wire2`. Each number is the WHOLE dispatch a tick pays: state serialization +
+the Zig render (parse + render + copy). Fixture = the golden `populated` state; fragment rows use
+that fixture's sub-state.
+
+```sh
+GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$' -bench WireBench -benchtime 500ms
+```
+
+| view | v1 json ns/op | v2 wire ns/op | Δ | doc B vs json B (golden set) |
+|---|--:|--:|--:|---|
+| live (full cockpit) | 33 786 | 16 190 | **-52%** | 24 789 / 67 456 = 36.7% |
+| live `#live-transport` frag | 3 790 | 2 896 | -24% | (in the set above) |
+| live `#live-perf2` frag | 3 624 | 1 885 | **-48%** | (in the set above) |
+| motion (full tab) | 21 674 | 11 472 | **-47%** | 15 091 / 24 586 = 61.4% |
+| motion `#mo-body` frag | 24 243 | 12 774 | **-47%** | (same document) |
+| publish (full tab) | 24 701 | 12 507 | **-49%** | 20 223 / 48 766 = 41.5% |
+| publish `#pub-hero` frag | 5 938 | 4 400 | -26% | (in the set above) |
+| settings (full tab, `libmedia`) | 64 953 | 32 651 | **-50%** | 139 005 / 203 734 = 68.2% |
+| settings `#stset-<id>` frag | 901 | 913 | ~0% | (~60 B of state; see the allocation note) |
+| library (full tab) | 124 435 | 38 668 | **-69%** | 72 850 / 209 353 = 34.8% |
+| library `#lib-body` frag | 121 232 | 39 131 | **-68%** | (in the set above) |
+| library cue-census cell | 1 183 | 838 | **-29%** | (~90 B of state) |
+| player (full, `singleEdit`) | 123 343 | 41 513 | **-66%** | 1 610 114 / 2 061 725 = 78.1% |
+| player `#mp-tp` transport frag | 9 448 | 3 450 | **-63%** | (in the set above) |
+| player `#mp-export` frag | 68 609 | 20 080 | **-71%** | (in the set above) |
+| automations (full tab) | 17 857 | 12 399 | **-31%** | 8 156 / 19 655 = 41.5% |
+| automations `#auto-body` frag | 17 832 | 12 945 | **-27%** | (in the set above) |
+| peers (full tab) | 56 457 | 24 735 | **-56%** | 23 865 / 90 741 = 26.3% |
+| peers `#peers-body` frag | 55 429 | 26 266 | **-53%** | (same document set) |
+
+**Encoder allocation: the flat prealloc was a real regression, now fixed.** With
+`NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment
+(`#stset-<id>`, ~60 B of state) cost **1 569 ns vs the JSON path's 932** - v2 was 68% slower than
+what it replaces, because two 1 KiB buffers and a 2.5 kB map dwarf the work. A flat 256 B instead
+cost the Live cockpit 12 extra allocations (16.2 → 22.6 µs). Both buffers and the intern map are
+now sized from **what the previous document of the same message needed** (`wireSizeHints`, one
+atomic per root id, +25% headroom; capacity only - `TestWireSizeHintIsCapacityOnly` pins that the
+bytes are unchanged). Result:
+
+| bench | flat 1 KiB | adaptive | v1 json |
+|---|--:|--:|--:|
+| `#stset-<id>` status frag | 1 569 ns / 5 792 B / 9 allocs | **913 ns / 1 568 B / 9** | 901 ns / 232 B / 4 |
+| live full cockpit | 16 190 ns / 20 704 B / 11 | **16 109 ns / 24 032 B / 9** | 33 544 ns / 14 422 B / 4 |
+| `#log-view` 400-line tail | 158 297 ns (pilot) / 22 allocs | **144 525 ns / 109 152 B / 9** | 379 877 ns / 126 022 B / 4 |
+| logs-tail encode only | 44 020 ns (pilot) / 17 allocs | **41 668 ns / 7 allocs** | 98 356 ns (marshal) |
+
+v2 still allocates more BYTES than `json.Marshal` on tiny fragments (1 568 vs 232): two buffers
+plus the map floor. Time is at parity there and 2-2.6× better everywhere else, so the remaining
+gap is not worth a pool. Benchmark numbers are mildly order-dependent now (the first document of
+a message pays the cold hint) - min-of-N over full-suite runs absorbs it.
+
+**Player's 29 kB raw SVG, measured as promised.** The document ratio on player is the WORST of
+the fan-out (78.1% vs library's 34.8%): its state is dominated by one huge `mpWaveSVG` string, so
+the arena has nothing to intern and the only saving is JSON's escaping of that string. The TIME
+delta is still -66%, because the win was never the document size - it is removing the Zig-side
+`std.json` parse (B0 finding 2). Player also allocates the most (165 kB/op): the SVG is copied
+into the arena, then the finished document is copied again by `Finish`. A zero-copy "big string"
+wiretype (offset into the caller's buffer instead of the arena) would fix that class; it is not
+needed for correctness and nothing in the tick path renders the full player.
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -
@@ -165,77 +228,88 @@ than a full tab is rendered") is closed for the two pilot surfaces.
 Bench: `internal/webui/tick_sched_bench_test.go` (tagged). Same box/method as above: **min of 6**
 (three runs x `-count=2`, `-benchtime 1s`), parity-gated before timing (`tickBenchParity`: the
 scheduler's ids, order AND bytes must match the Go renderers, so a bench can never measure a
-fallback). Commit `2d80223`+ on `feature/zig-phaseb-sched`, Zig 0.16.0, libraveui.a 12.7 MB.
+fallback).
+
+**Re-measured after the wave B-2 composition** — the numbers below compare B3 against the
+**binary** per-fragment path (wave B-2 gave every live fragment its own `_v2` export), not against
+the JSON one. That is the honest baseline and it is a much harder one: the pre-composition figures
+(-43% / -45%) were measured against per-fragment JSON, which no longer exists.
 
 Rows:
 
 | row | what it does |
 |---|---|
-| `legacy_zig` | pre-B3: per fragment `stateJSON` + one cgo render call (the path on `development`) |
+| `legacy_zig` | pre-B3: per fragment one RZW1 document + one cgo call (`RenderLiveFragV2`) |
 | `legacy_go` | the same per-fragment loop with the Go renderers (stub build / fallback cost) |
-| `sched_all` | B3: one encode, ONE cgo call, every fragment comes back (cold cache / everything changed) |
+| `sched_all` | B3: one encode, ONE cgo call, every fragment comes back (cold cache / all changed) |
 | `sched_same` | B3 steady state: one encode, one cgo call, NOTHING comes back |
-| `*_quoted` | the same plus `jsQuote` per patched fragment — what the tick actually pays before the Eval |
+| `*_quoted` | the same plus `jsQuote` per patched fragment — what the tick pays before the Eval |
 
 ### Live tab tick — 12 fragments, 5 087 B of HTML, doc 2 857 B (3 174 B with prev hashes)
 
 | row | µs/op (min of 6) | B/op | allocs/op |
 |---|--:|--:|--:|
-| legacy_zig | 43.1 | 27 663 | 146 |
-| legacy_go | **21.1** | 22 146 | 116 |
-| sched_all | 24.6 | 24 704 | **36** |
-| sched_same | 25.6 | 19 208 | **13** |
-| legacy_zig_quoted | 64.3 | 44 216 | 181 |
-| **sched_all_quoted** | **35.5** | 41 292 | 71 |
-| encode_wire (one doc) | 7.8 | 12 504 | 9 |
-| encode_json_perfrag (10 states) | 7.8 | 4 215 | 20 |
+| legacy_zig (10 docs + 10 cgo calls) | 29.0 | 41 104 | 196 |
+| legacy_go | 21.0 | 35 593 | 166 |
+| sched_all | **20.5** | 28 032 | 34 |
+| sched_same | **16.8** | 15 976 | **9** |
+| legacy_zig_quoted | 47.3 | 57 822 | 231 |
+| **sched_all_quoted** | **34.5** | 44 629 | 69 |
+| encode_wire (ONE doc) | 7.1 | 15 832 | 7 |
+| encode_wire_perfrag (TEN docs) | 9.0 | 17 696 | 70 |
 
-**-43% on the render dispatch (43.1 → 24.6 µs) and -45% on the full quoted tick (64.3 → 35.5 µs),
-with allocations down 146 → 36 (13 in steady state).** Twelve cgo crossings + twelve `std.json`
-parses become one.
+**-29% on the dispatch (29.0 → 20.5 µs), -42% in steady state (16.8 µs), -27% on the full quoted
+tick (47.3 → 34.5 µs), allocations 196 → 34 → 9.** Twelve cgo crossings and twelve TLV parses
+become one; ten `WireWriter`s become one (9.0 → 7.1 µs, 70 → 7 allocs).
+
+**First time the Zig path is not a loss on this surface:** `sched_all` (20.5 µs) matches pure Go
+(21.0 µs) and `sched_same` beats it by 20%. B0 finding 1 ("the bridge is a net loss") is finally
+neutralised here — by B-2 killing the parse and B3 killing the per-fragment crossings together.
 
 ### `#log-view` tick — 400-line tail, 61 400 B of HTML, doc 9 231 B vs 51 862 B of JSON
 
 | row | µs/op (min of 6) | B/op | allocs/op |
 |---|--:|--:|--:|
-| legacy_zig_v1 (pre-B1 JSON) | 376.0 | 126 444 | 4 |
-| legacy_zig_v2 (B-1 binary, on `development`) | 158.1 | 114 912 | 17 |
-| legacy_go | **138.6** | 324 606 | 1 220 |
-| sched_all | 175.0 | 180 504 | 20 |
-| **sched_same** | **152.6** | 49 384 | 17 |
-| legacy_zig_v2_quoted | 278.6 | 328 239 | 21 |
-| legacy_go_quoted | 240.7 | 569 700 | 1 226 |
-| sched_all_quoted | 291.9 | 403 561 | 25 |
+| legacy_zig_v1 (pre-B1 JSON) | 375.4 | 126 599 | 4 |
+| legacy_zig_v2 (B-1 binary, the shipped path) | 149.9 | 109 152 | 9 |
+| legacy_go | **130.0** | 324 606 | 1 220 |
+| sched_all | 169.3 | 174 744 | 12 |
+| **sched_same** | **140.4** | 43 624 | 9 |
+| legacy_zig_v2_quoted | 260.9 | 319 694 | 13 |
+| legacy_go_quoted | 240.3 | 565 635 | 1 226 |
+| sched_all_quoted | 284.1 | 394 188 | 17 |
 
 Read this one carefully — it is NOT a straight win:
 
-- **Tail changed:** the scheduler is 11% slower than B-1's single-fragment `_v2` export (175 vs
-  158 µs), 5% slower quoted (292 vs 279 µs). The extra is the 61 kB copy into the reply buffer that
+- **Tail changed:** the scheduler is 13% slower than the single-fragment `_v2` export (169 vs
+  150 µs), 9% slower quoted (284 vs 261 µs). The extra is the 61 kB copy into the reply buffer that
   the direct export avoids (it hands its render buffer straight out) plus the hash.
-- **Tail unchanged:** 152.6 µs and NOTHING leaves the lib — no 61 kB copy across the ABI, no
+- **Tail unchanged:** 140.4 µs and NOTHING leaves the lib — no 61 kB copy across the ABI, no
   86 202 B `jsQuote`, no eval-queue entry, and no cross-process `ExecuteScript` with an 86 kB script
   (the last of which dwarfs every number in this table and is not measured here). Against the
-  legacy 279 µs of Go-side work for a swap that changes nothing, that is **-45% CPU plus the whole
+  legacy 261 µs of Go-side work for a swap that changes nothing, that is **-46% CPU plus the whole
   downstream**. With a filter active (`level=error` + a search box) this is the common case, which
   is why the pilot exists.
-- **Hash choice matters at this size.** FNV-1a-64 consumes one byte per round: ~50 µs of the 51 kB
+- **Hash choice matters at this size.** FNV-1a-64 consumes one byte per round: ~50 µs on the 51 kB
   tail, more than it saves. Wyhash reads 64 bits at a time (~7 µs). Recorded because the first
   implementation used FNV and the numbers said so.
 
 ### Findings
 
-1. **B3 is the first phase-B change that is a clear net win on a real hot path** (the Live tick,
-   -43/-45%), and it wins by removing CROSSINGS + Go-side churn, not by rendering faster.
-2. **Pure Go is STILL the cheapest renderer on both surfaces** (21.1 vs 24.6 µs live; 138.6 vs
-   175 µs log tail) — B0 finding 1 restated at fragment level. What Zig buys today is the
-   allocation profile (1 220 → 20 allocs on the log tail) and, with B3, the suppression.
-3. **A single big fragment is the wrong shape for a batching scheduler.** For `#log-view` the batch
+1. **B3 is the first phase-B change that makes the Zig tick path cheaper than pure Go** (Live tick:
+   20.5 / 16.8 µs vs 21.0 µs), and it gets there by removing CROSSINGS + Go-side churn, not by
+   rendering faster.
+2. **The composition halved the headline.** Against per-fragment JSON B3 measured -43%/-45%;
+   against wave B-2's per-fragment binary path it is -29%/-27%. Two independent optimisations on the
+   same tax do not add up — quote the post-composition figure.
+3. **Pure Go is still the cheapest renderer for the log tail** (130.0 vs 169.3 µs) — B0 finding 1
+   survives on that surface. What Zig buys there is the allocation profile (1 220 → 12 allocs) and,
+   with B3, the suppression.
+4. **A single big fragment is the wrong shape for a batching scheduler.** For `#log-view` the batch
    adds a copy the direct export doesn't need; the win comes purely from dedup. A Go-side hash of
-   the Go-rendered tail would deliver the same suppression at 139 µs — worth considering if the log
+   the Go-rendered tail would deliver the same suppression at 130 µs — worth considering if the log
    tail stays Go-rendered. Batching pays where there are MANY fragments (the Live tick).
-4. **Encoding is a wash** (7.8 µs either way on the Live surface): the wire's gain is on the Zig
-   side (no per-fragment parse), exactly as B0 finding 2 predicted. The 1 KiB x2 `WireWriter`
-   prealloc + the intern map is why its B/op is higher than 10 small `json.Marshal` calls while its
-   alloc COUNT is half.
-5. **Steady state is where the tick lives.** `sched_same` is the number to quote for a UI sitting
-   on the Live tab with a stable set: 25.6 µs of Go+Zig work and zero eval traffic.
+5. **One document beats ten** even before the ABI: 7.1 vs 9.0 µs and 7 vs 70 allocations, with
+   wave B-2's per-message prealloc hints applying to the tick roots (ids 100/101) automatically.
+6. **Steady state is where the tick lives.** `sched_same` (16.8 µs, 9 allocs, zero eval traffic) is
+   the number to quote for a UI sitting on the Live tab.

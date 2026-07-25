@@ -108,6 +108,7 @@ func TestZigWireMutationFuzz(t *testing.T) {
 		{"tick_live", fragString(zigui.TickLive)},
 		{"tick_logs", fragString(zigui.TickLogs)},
 	}
+	exports = append(exports, wireExportsB2()...)
 
 	// Bases: every fixture from both golden suites, plus their fragment states.
 	type base struct {
@@ -125,6 +126,9 @@ func TestZigWireMutationFuzz(t *testing.T) {
 	}
 	for n, st := range liveFixtures() {
 		bases = append(bases, base{"tklive/" + n, wireTkLive(liveTickSt{Live: st, TC: "01:23:45:12"})})
+	}
+	for _, b := range wireBasesB2() {
+		bases = append(bases, base(b))
 	}
 	for _, b := range bases {
 		if len(b.doc) == 0 {

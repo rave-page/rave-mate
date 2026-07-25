@@ -176,10 +176,11 @@ them raw (documented in the header of worlds.zig + the state block). Everything 
 (names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
 
 MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
-- Tooltips stay Go: `tipTopic(id)` markup (tooltip.go, keybind grid + link list) rides in
-  state as a PRE-RENDERED HTML string and Zig `raw`s it. Same for smart-select labels that
-  carry a tooltip (`selectBoxTip`) — state holds the resolved `selState` plus its
-  `<span class=ss-label>…</span>` HTML (`selHTMLRaw` / Zig `selectBoxRaw`).
+- Tooltips were pre-rendered HTML in phase A (`tipTopic(id)` in state, Zig `raw`s it); since
+  **B-1b shard 2** they cross as structured `tipSt` and the tab renderer composes the card.
+  Same for smart-select labels that carry a tooltip (`selectBoxTip`): state holds the resolved
+  `selState` plus a structured `ssLabelSt`, not a `<span class=ss-label>…</span>` string. The raw
+  fields survive only as the dual-field bridge until the post-merge cleanup.
 - Floats never cross the ABI: knob/fader `--v`/`--rot` are `trimNum`'d Go-side into strings.
 - Non-nil slices are mandatory — a nil Go slice marshals to `null` and the Zig parser
   rejects it, silently falling the WHOLE tab back to Go. `emptySel()` (smartselect.go) is
@@ -736,9 +737,9 @@ Not ported, with reasons (dialog sweep B):
 - `pickers.go` / `pickers_windows.go` / `pick_actions.go` — **no HTML at all**. These are the native
   OS dialog bindings (IFileDialog) plus the `pick-dir:`/`pick-file:` act redispatch; the only markup
   involved is the `Browse…` button the CALLING surface renders (already ported per tab).
-- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1** (shard 1: the mechanism
-  + the 4 densest consumers). The phase-A assessment below is kept as the record of WHY it waited;
-  the phase-B section after it is the shipped design.
+- `tooltip.go` `tipTopic` — deferred in phase A, **PORTED in phase B-1b** (shard 1: the mechanism
+  + the 4 densest consumers; shard 2: every remaining call site). The phase-A assessment below is
+  kept as the record of WHY it waited; the phase-B sections after it are the shipped design.
 
 **tipTopic assessment (why the tooltip primitive stays Go).** `renderTip` is 40 lines of markup and
 would port cleanly in isolation (a `label.tt` + hidden checkbox + inline SVG + `tt-card`, one
@@ -778,7 +779,8 @@ structured state; `components.zig` `loudnessFields` (marker block `phaseb-loud`)
   whole body - the same single source Go always had (`o.vals.On` drives both switch and branch), so
   there is no second "shown" flag to desync. `hasWarn` IS explicit (a blank i18n string must not
   switch arms).
-- **Two raw seams stay, deliberately:** `tip` (Go `tipTopic`, owned by B-1b) and `extra` (the
+- **Two raw seams stayed, deliberately:** `tip` (Go `tipTopic`, owned by B-1b — structured in its
+  shard 2) and `extra` (the
   caller's `extraHTML`: the export surface's live gain-plan line + pre-listen toggle, which must
   collapse with the switch). `mpExMediaSt.LoudExtra` also stays raw - it is a *different* line (shown
   when the PRESET normalizes without an override), not part of the block.
@@ -848,7 +850,7 @@ pre-rendered). Both renderers resolve through one helper — Go `tipOr(*tipSt, r
 `render_library_cueedit.go`, `render_library_state.go`, `render_live.go`, `render_midictl*.go`,
 `render_motion.go`, `render_vrchat*.go`, `update_actions.go`, `components.go`'s own
 `selectBoxTip`/`resolveSelectBoxTip`) are literally untouched and keep working. Wave B-2 flips
-them; the raw fields die only when the last one is gone.
+them (see "shard 2" below); the raw fields die only when the last one is gone.
 
 **Consumers migrated (shard 1):** `render_settings.go` (13 sites — card head, `sbFieldTip`,
 `sbToggleTip`, fpair kids), `render_player.go` (4: `tipWave` / `tp.tipVideo` /
@@ -889,6 +891,79 @@ fixture whose mutation reaches no tooltip is worse than no fixture.
 **Standing rule.** Help texts are LONG and verbose BY DESIGN (owner directive, on record): the app
 teaches while it is used. Never trim, truncate, elide or "summarise" a `help.*` string, and never
 add a length cap to the renderer.
+
+### shard 2 (wave B-2) — the remaining 14 files, plus the ss-label
+
+Note first: the per-tab notes ABOVE that describe tooltips as "pre-rendered raw markup in state"
+are the phase-A record. Shard 2 makes them historical — no state contract ships tooltip HTML.
+
+Shard 2 finishes the sweep: **no state builder produces tooltip markup any more.** `tipTopic(` has
+ZERO production callers, pinned by `TestNoProductionCallerShipsRawTooltipMarkup` (untagged, in
+`tooltip_test.go`) — a **source scan**, because a missed call site renders correctly today and
+would only break when the raw bridge fields are dropped post-merge, far from the cause. Two
+surfaces have no state contract to carry a `*tipSt` and call the new `tooltip.go tipTopicHTML`
+(= `tipOr(tipTopicSt(id), "")`): the nav-rail update block (`update_actions.go`, Go-rendered shell)
+and the pre-listen row (`player.go`), which lives inside the loudness block's caller-owned
+`extraHTML`. When that extra block is lifted to state, its tip travels as `tipSt` like the rest.
+
+**Flipped:** `components.go` (`selectBoxTip`/`resolveSelectBoxTip` + `loudSt`, i.e. all four
+loudness surfaces at once) · `render_settings.go` (`sbSelectTip`) · `render_library_state.go`
+(`resolvePbSelectTip`/`libSelTip` → encode builder + preset dialog) · `render_midictl*.go` (7
+tooltips + 4 ss-labels) · `render_live.go` (4 section heads) · `render_motion.go` (2 preview cards)
+· `render_vrchat.go` + `render_vrchat_groups.go` · `automations_runnow.go` · `bridge_actions.go` ·
+`library_mirror.go` · `render_library_cueedit.go` · `player.go` · `update_actions.go`.
+
+**The ss-label became state too.** `<span class=ss-label>` + escaped label + tooltip was
+pre-rendered in FOUR places (`components.go` twice, `render_library_state.go`, and shard 1's
+`aeLabelSt`). It is now one type, `components.go ssLabelSt{text,tip}` / `components.zig SsLabel`,
+with `aeLabelSt` a Go **alias** of it and `dialogs_b.zig AeLabel = c.SsLabel` — no fork. The
+select-plus-label dispatch is one helper per side: Go `ssSelHTML(sel, *ssLabelSt, raw)` and Zig
+`selectBoxTipOr` (structured → legacy raw → the plain label the select state carries; `selHTML`
+with an empty `Label` is byte-identical to `selHTMLRaw` with an empty label, which is what made
+collapsing the three arms safe). `selectBoxTip` now delegates to `resolveSelectBoxTip` +
+`selHTMLRaw`, so the Go-only path shares the resolver instead of a second copy of the span.
+
+**New Zig helper: `tipBuf`.** Many primitives take the tooltip as a STRING (`sectionOpenTip`,
+`cardOpen`, `cardLabel`, `toggleRowTip`, `fieldEx`). `c.tipBuf(h, tipSt, raw)` returns a
+CALLER-OWNED scratch `Html` (`var tb = try c.tipBuf(...); defer tb.deinit();`), which replaced five
+hand-rolled buffers. The rule it protects is shard 1's: one allocation per tooltip, and **never**
+re-emit a primitive's markup to avoid the buffer.
+
+**Two traps worth remembering:**
+- **A `?Tip` on the Go side is invisible to a Zig struct that only has the raw field.**
+  `dialogs_b.zig ArModal.file` was `components.Field` (raw `tip` only), so the run-now dialog's
+  structured tooltip was silently DROPPED on the Zig path — Go rendered the card, Zig did not. Fix:
+  the local `DlgField` twin + `renderDlgField`. Whenever you add `tipSt` to a Go state, check what
+  the Zig side actually decodes into; `ignore_unknown_fields` makes the miss silent. Caught by the
+  existing per-tab golden suite, not by the new fixtures.
+- **A structural flag computed from the raw tip string must move to the RESOLVED tooltip.**
+  `vrcgroups.zig` decided the announcement card HEAD with `annTitle.len != 0 or annTip.len != 0`
+  (mirroring Go `card()`, where the trailing string gates the head). With the tooltip structured
+  the raw string is empty, so the head vanished. It now tests `tipBuf`'s output — gated by a
+  no-title fixture where absent vs present flips the whole `card-head` element.
+
+**Non-append-only edit:** `Loud.tipSt` inside `components.zig`'s `phaseb-loud` marker block. The
+field it replaces lives there; there is no way to bridge it from another block (same class of
+unavoidable edit as B0's counter inside `zigui.go render()`).
+
+**Gate.** `zigui_golden_tip2_test.go` (`//go:build zigui`) — ONE file instead of edits spread over
+ten per-tab golden files, which also keeps it clear of the wire fan-out touching those same files.
+`tip2Sweep` drives a surface through 4 tooltip SHAPES (absent / plain prose / multi-link /
+23-row keybind grid, all real registry topics so a catalog change reaches the fixtures) × 2 locales
+(`en` + `ja`), each with its raw-bridge twin, through the tab's real export and fixture builder:
+**144 byte-equality subtests** over loud · aeSelRaw · setSelect · setSelectKid · libEncSel ·
+presetSel · midiSsLabels · midiTips · live · motionCam · motionStudio · vrcEditor · vrcgAnn ·
+vrcgAnnNoTitle · arModal · bridgeCard · mirrorBanner · ceTopbar. Each subtest carries the shard-1
+inertness guard (the fixture must CHANGE the document bytes, a grid fixture must emit
+`tt-kb-keys`, the raw arm must reproduce the structured bytes). Falsified by execution:
+`ss-label` → `ss-labeX` in `components.zig` failed 64 assertions; restoring one `tipTopic(` call
+failed the source guard with file:line.
+
+**The raw fields stay.** `tip`/`labelHtml`/`selLbl`/`portLbl`… and `tipOr`'s raw arm are still
+there on purpose: dropping them is a separate post-merge cleanup, so this shard's diff stays
+additive against the sibling wave-B-2 branches. That cleanup must also drop the label bridges and
+`tipTopic` itself (only `tooltip_test.go` / the golden suites still use it, as the pre-split
+reference).
 ## Phase B — RZW1 binary state wire (wave B-1 pilots: appgroups + logs)
 
 The phase-A bridge pays a state→JSON→parse round trip on EVERY render (flagged twice above as
@@ -958,6 +1033,87 @@ to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. 
 are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
 kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
 Go formats every number).
+
+**Four kinds the pilots did not need** (wave B-2, `schema.go` helpers `sa` / `op` / `ov` / `sl`;
+all four are append-only additions to the codec, the wiretype set is unchanged):
+
+| kind | Go ↔ Zig | why it exists |
+|---|---|---|
+| `kStrAlways` (`sa`) | `string` ↔ `[]const u8` with a **non-zero default** | absent means "the Zig default", and `fill: []const u8 = "0.00%"` / `stepS = "1"` are not "". The JSON path always sends the field, so v2 must too: `WireWriter.StrAlways` emits the tag with off 0 / len 0. Without it the two paths diverge on exactly the states where the field is empty. |
+| `kOptPtr` (`op`) | `*T` ↔ `?T` | tag present iff the pointer is non-nil (motion's inactive section is `nil`). |
+| `kOptVal` (`ov`) | `T` ↔ `?T` | tag **always** present: JSON always sends the object, so `null` must be unreachable. `Struct` drops an all-zero message (absent = zero value, which is correct for a value field but would decode as `null` here), so both opt kinds use `OptStruct`, which keeps the tag. |
+| `kStrList` (`sl`) | `[]string` ↔ `[]const []const u8` | encoded as a list of single-field element bodies (field 1 = the string), so `Reader.strList` reuses the list bounds discipline verbatim and `skip()` stays closed over four wiretypes. |
+
+The rule behind all of them: **a Zig field default that is not the zero value is a v1/v2
+divergence waiting to happen.** `sa` is the fix; the scan is mechanical (any non-omitempty Go
+field whose Zig counterpart has a non-empty default). Proven by execution: flipping live's
+`Fill` back from `sa` to `s` makes `TestWireStrAlwaysKeepsEmptyFill` fail with the Zig default
+(`width:0.00%`) rendered where Go renders `width:`. Note that the six live golden fixtures all
+carry a non-empty `Fill`, so the whole-fixture gate does NOT catch it - a hazard needs its own
+fixture, not a bigger suite.
+
+**Fanned-out views (wave B-2).** `_v2` exports live in the `phaseb-wire` block of root.zig; the
+fragment exports keep their JSON twin's `kind` selector, and every fragment is its own root
+message so the header id still refuses a document built for a different fragment
+(`TestZigWireLiveFragIdsAreDistinct`). Each tab registers its exports + fuzz base documents in
+`internal/webui/zigui_wire_b2_test.go` (one block per tab; the fuzz cross-feeds every mutated
+document to every export, so the matrix grows on its own).
+
+| view | root ids | exports | fixtures gated |
+|---|---|---|---|
+| appgroups (pilot) | 1 | full + `#appgroups-body` | 6 |
+| logs (pilot) | 2, 3 | full + `#log-view` | 6 |
+| live | 10-20 | full + 10 tick fragments (`live_frag_v2`) | 6 × 12 surfaces |
+| motion | 21 | full + `#mo-body` (one message, like appgroups) | 7 × 2 surfaces |
+| publish | 22, 23 | full + `#pub-hero` | 13 × 2 surfaces (12 heroes) |
+| settings | 24-26 | full + `#set-content` + `#stset-<id>` | 18 × 2 surfaces + 6 status states |
+| library | 27-31 | full + `#lib-body` + `#lib-detail` + `#lib-queue-body` + cue cell | 21 × 3 surfaces + 3 queue + 4 cell |
+| player | 32-40 | full + the nine `#mp-*` patch targets | 178 surfaces over the fixture set |
+| automations | 41, 42 | full + `#auto-body` | 6 × 2 surfaces |
+| peers | 43, 44 | full + `#peers-body` | 7 × 2 surfaces |
+
+**Fan-out state after wave B-2:** 174 messages, root ids 1-3 (pilots) + 10-44 (this wave), 31
+exported `_v2` symbols over 40 render surfaces (live's ten fragments share one kind-dispatched
+export), 288 135 fuzz cases. Ids 45-49 are free inside wire2's partition; 100-149 belong to
+the fragment scheduler. Documents run **26-78%** of the JSON they replace (peers best, player
+worst - see PHASEB_BASELINE.md for why one 29 kB SVG sets that floor), and the whole dispatch is
+**27-69% faster** on every view.
+
+**Merge composition with tip2 (B-1b shard 2).** tip2 added `*tipSt` / `*ssLabelSt` fields to eight
+states this block had already frozen (`liveState` ×4, `moCamSt`, `moStudioSt`, `setBlock`,
+`setKid`, `bridgeSt`, `libSelTip`, `loudSt`) plus the new shared `ssLabelSt` message. All are
+`kOptPtr` (nil = no tooltip) and were appended INSIDE the existing messages, so documents already
+in flight stay readable. **The merge produced ZERO textual conflicts and still broke the wire** -
+which is the whole point of the gate: settings, library and player failed immediately with
+`v1==v2: diverges at byte …"tt-mp-loudnes"…`.
+
+**live and motion did NOT fail, and that is the lesson.** Their fixture sets leave the new tooltip
+fields nil, so the tab gates stayed green while v2 silently dropped every tooltip - tip2's
+`DlgField` gotcha class exactly. The fix is a fixture, not more sweeps of the same states:
+`wireTipSweep` (the wire twin of `tip2Sweep`) drives each affected surface through all four tooltip
+variants × locales, three ways, with tip2's own inertness guards (the tooltip must change the
+bytes; the keybind grid must emit `tt-kb-keys`) plus the raw dual-field arm through v2. Verified by
+execution: deleting LiveState's four rows makes `TestZigWireTip2Live` fail while
+`TestZigWireThreeWayLive` still passes.
+
+**Keeping the schema honest is mechanical.** The composition was derived by an audit that re-reads
+every schema row against the current Go+Zig structs and prints the missing fields with their next
+free numbers (11 fields across 8 messages; it also confirmed tip2 changed no `Tip`/`TipKb`/`TipLink`
+shape). Re-run it after every merge that touches state structs - "the golden gate will catch it" is
+true, but only for states a fixture exercises.
+
+**FallbackCounts assertions are per-export.** `zigui.FallbackCounts()` is process-wide and other
+suites drive their own headless UIs concurrently, so a global "no new fallbacks" assertion is
+load-dependent (it once failed the logs gate on a stray `RenderLibRemote +1`). Each gate now names
+the exports it drives (`assertNoNewFallbacksIn`) and the player's exact-delta variant filters by
+prefix; `TestWireFallbackAssertionIsNotVacuous` pins that the narrowed check still catches a
+downgrade on a key it names, because a typo'd name would otherwise make every caller green.
+
+**Adding a field to a migrated state is now a two-sided edit.** A Go state field with a JSON tag
+and its Zig counterpart are only connected through `schema.go`; add the field without a schema row
+and v2 silently stops carrying it - the three-way gate turns that into a byte-diff failure, which
+is exactly why the gate covers every fixture rather than a sample. Same for a Zig-side struct
+change (a renamed field, a new non-zero default): regenerate and re-read the HAZARD rule above.
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
@@ -1091,12 +1247,22 @@ repeats removed, so the change is exactly "tickPatch dedup, now on this surface 
 - **`kUint` has its first user.** Rule 6 (Go formats every number) is about RENDERED numbers; a
   dedup hash is not rendered. Sending it as a 16-char hex string per fragment per tick would be
   waste, so `TkPrev.hash` is a varint.
-- **`Tk*` message names duplicate what wave B-2 will call the live state.** They describe the same
-  Go structs under different message names because the two branches could not see each other's
-  schema rows; `tick.zig` re-exports `live.*` so only ONE import alias (`tick`) was added to
-  `zigImports`. Post-merge cleanup: point `TkLiveState`'s refs at B-2's messages and delete the
-  duplicates — message names are not a wire contract (only field numbers within a message are), and
-  a schema change simply re-hashes.
+- **The tick envelope rides wave B-2's messages (composed on merge).** The pilot originally carried
+  its own `Tk*` mirrors of the live states because the two branches could not see each other's schema
+  rows. Wave B-2 defined the same structs as `LiveState` & co, so the mirrors were DELETED: `TkLive`
+  now references `LiveState`, `TkLogs` references `LogsLines`, and only the ENVELOPE (`TkPrev`,
+  `TkLive`, `TkLogs`; root ids 100/101) is B3's. `tick.zig` names `live.*`/`logs.*` directly instead
+  of re-exporting them. Consequence to keep in mind: the tick documents now carry everything those
+  states carry, tip2's four structured section tooltips included — `TestTickSchedLiveCarriesTooltips`
+  asserts they are really on the wire (the document must GROW when they are set; a silently dropped
+  field encodes to identical bytes), because the live fixtures leave them nil and every other gate
+  would stay green. Proven by execution: deleting fields 31-34 from the generated `liveState` encoder
+  fails it with "tooltip did not reach the tick document: 2857 B with, 2857 B without".
+- **The legacy fallback is itself a v2 path now.** Post-B-2, `liveTickLegacy`'s per-fragment renders
+  each build their OWN RZW1 document (`RenderLiveFragV2`) — ten documents + ten crossings per tick.
+  That is the baseline B3's numbers are measured against; `liveFrag` gained a wire-encoder parameter
+  in that wave, which is the kind of signature change a merge with ZERO textual conflicts still
+  breaks (it did).
 - **Wire hazard spotted while mirroring `live.Link`:** its Zig default is `fill = "0.00%"`, but the
   Go zero value is `""`. On the wire a zero value is an ABSENT tag, so `Fill: ""` decodes to
   `"0.00%"` — harmless today because `renderLink` returns before touching `fill` when
@@ -1111,12 +1277,16 @@ repeats removed, so the change is exactly "tickPatch dedup, now on this surface 
 
 ### Numbers
 
-Measured tables + method live in `.devnotes/PHASEB_BASELINE.md` "Phase B3 - fragment scheduler".
-Headline: the **Live tick** goes 43.1 -> 24.6 us of dispatch (-43%) and 64.3 -> 35.5 us including
-the per-fragment `jsQuote` (-45%), with allocations 146 -> 36 (13 when nothing changed) - twelve cgo
-crossings and twelve `std.json` parses become one. **`#log-view`** is a wash when the tail changed
-(175 vs 158 us against B-1's single-fragment `_v2` export: the batch copies 61 kB the direct export
-hands straight out) and -45% plus the entire downstream (86 kB `jsQuote` + eval + cross-process
-ExecuteScript) when it did not. Two honest caveats recorded there: **pure Go is still the cheapest
-renderer on both surfaces**, and **batching only pays where there are MANY fragments** - a single
-big fragment wants dedup, not a batch.
+Measured tables + method live in `.devnotes/PHASEB_BASELINE.md` "Phase B3 - fragment scheduler",
+re-measured after the wave B-2 composition. Headline: the **Live tick** goes 29.0 -> 20.5 us of
+dispatch (**-29%**), 16.8 us in steady state (**-42%**), 47.3 -> 34.5 us including the per-fragment
+`jsQuote` (**-27%**), with allocations 196 -> 34 -> 9; ten `WireWriter`s become one (9.0 -> 7.1 us).
+`sched_all` now MATCHES pure Go (21.0 us) and `sched_same` beats it by 20% - the first surface where
+the Zig path is not a loss, which took B-2 killing the parse and B3 killing the per-fragment
+crossings together. **`#log-view`** is a wash when the tail changed (169 vs 150 us against B-1's
+single-fragment `_v2` export: the batch copies 61 kB the direct export hands straight out) and -46%
+plus the entire downstream (86 kB `jsQuote` + eval + cross-process ExecuteScript) when it did not.
+Two honest caveats recorded there: **pure Go is still the cheapest renderer for the log tail**, and
+**batching only pays where there are MANY fragments** - a single big fragment wants dedup, not a
+batch. Quote the post-composition figures: against per-fragment JSON the same change measured
+-43%/-45%, and two optimisations on one tax do not add up.

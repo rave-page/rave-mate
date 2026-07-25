@@ -105,7 +105,7 @@ func (u *UI) navUpdateHTML() string {
 	}
 	var b strings.Builder
 	b.WriteString(`<div class=nav-upd data-label="nav-update-block">`)
-	b.WriteString(`<div class=nav-upd-head>` + navUpdIcon + `<span>` + html.EscapeString(head) + `</span>` + tipTopic("app-updates") + `</div>`)
+	b.WriteString(`<div class=nav-upd-head>` + navUpdIcon + `<span>` + html.EscapeString(head) + `</span>` + tipTopicHTML("app-updates") + `</div>`)
 	b.WriteString(`<div class=nav-upd-meta>` + html.EscapeString(i18n.T("nav.update.meta",
 		i18n.A{"version": st.Rel.Version, "channel": version.ResolvedChannel()})) + `</div>`)
 	if n := shortNote(st.Rel.Notes); n != "" {

@@ -9,12 +9,60 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const peers = @import("peers.zig");
+const automations = @import("automations.zig");
+const player = @import("player.zig");
+const f = @import("libfixers.zig");
+const d = @import("library_detail.zig");
+const s = @import("library_sections.zig");
+const k = @import("library_kit.zig");
+const library = @import("library.zig");
+const sub = @import("settings_sub.zig");
+const settings = @import("settings.zig");
+const publish = @import("publish.zig");
+const motion = @import("motion.zig");
+const live = @import("live.zig");
 const tick = @import("tick.zig");
 
-pub const schema_hash: u32 = 0x8c5a267e;
+pub const schema_hash: u32 = 0x70698930;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
+pub const msg_live_state: u16 = 10; // Live tab - full cockpit
+pub const msg_live_transport: u16 = 11; // #live-transport fragment
+pub const msg_live_n_p: u16 = 12; // #live-np fragment
+pub const msg_live_status: u16 = 13; // #live-status fragment
+pub const msg_live_decks: u16 = 14; // #live-decks fragment
+pub const msg_live_signals: u16 = 15; // #live-signals fragment
+pub const msg_live_cockpit: u16 = 16; // #live-cockpit fragment
+pub const msg_live_link: u16 = 17; // #live-ablelink fragment
+pub const msg_live_graph: u16 = 18; // #live-net + #live-tim fragments
+pub const msg_live_perf: u16 = 19; // #live-perf2 fragment
+pub const msg_live_strip: u16 = 20; // #live-strip fragment
+pub const msg_mo_state: u16 = 21; // Motion tab (full view + the #mo-body fragment share this state)
+pub const msg_pub: u16 = 22; // Publish tab (full view)
+pub const msg_pub_hero: u16 = 23; // #pub-hero fragment (~1 Hz tick)
+pub const msg_set_state: u16 = 24; // Settings tab (full view)
+pub const msg_set_content: u16 = 25; // #set-content pane (sub-tab switch + search)
+pub const msg_set_status: u16 = 26; // one #stset-<id> status fragment (settings tick)
+pub const msg_lib_state: u16 = 27; // Library tab (full view)
+pub const msg_lib_body: u16 = 28; // #lib-body (active section)
+pub const msg_lib_detail: u16 = 29; // #lib-detail inspector
+pub const msg_lib_queue: u16 = 30; // #lib-queue-body (job progress patch)
+pub const msg_lib_cue_cell: u16 = 31; // one cue-census cell (per-row patch)
+pub const msg_mp_full: u16 = 32; // Player (full view; the 29 kB raw waveform SVG lives here)
+pub const msg_mp_inner: u16 = 33; // #mp-root inner
+pub const msg_mp_vid: u16 = 34; // #mp-vid
+pub const msg_mp_wave: u16 = 35; // #mp-wave
+pub const msg_mp_tp: u16 = 36; // #mp-tp transport
+pub const msg_mp_edit: u16 = 37; // #mp-edit
+pub const msg_mp_export: u16 = 38; // #mp-export
+pub const msg_mp_r_o: u16 = 39; // #mp-ro read-only strip
+pub const msg_mp_hov: u16 = 40; // #mp-hov hover readout
+pub const msg_auto_state: u16 = 41; // Automations tab (full view)
+pub const msg_auto_body_state: u16 = 42; // #auto-body (version-gated ~1 Hz tick)
+pub const msg_peers: u16 = 43; // Peers tab (full view)
+pub const msg_peers_body: u16 = 44; // #peers-body (~1 Hz live tick)
 pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
 pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
@@ -127,34 +175,7 @@ pub fn decodeLogsState(r: *wire.Reader, out: *logs.State) wire.Error!void {
     };
 }
 
-pub fn decodeTkPrev(r: *wire.Reader, out: *tick.Prev) wire.Error!void {
-    while (try r.next()) |t| switch (t.field) {
-        1 => out.id = try r.str(t),
-        2 => out.hash = @intCast(try r.uint(t)),
-        else => try r.skip(t),
-    };
-}
-
-pub fn decodeTkKV(r: *wire.Reader, out: *tick.KV) wire.Error!void {
-    while (try r.next()) |t| switch (t.field) {
-        1 => out.k = try r.str(t),
-        2 => out.kl = try r.str(t),
-        3 => out.v = try r.str(t),
-        else => try r.skip(t),
-    };
-}
-
-pub fn decodeTkSRow(r: *wire.Reader, out: *tick.SRow) wire.Error!void {
-    while (try r.next()) |t| switch (t.field) {
-        1 => out.variant = try r.str(t),
-        2 => out.label = try r.str(t),
-        3 => out.dl = try r.str(t),
-        4 => out.line = try r.str(t),
-        else => try r.skip(t),
-    };
-}
-
-pub fn decodeTkTransport(r: *wire.Reader, out: *tick.Transport) wire.Error!void {
+pub fn decodeLiveTransport(r: *wire.Reader, out: *live.Transport) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.streamHint = try r.str(t),
         2 => out.streamLabel = try r.str(t),
@@ -178,7 +199,7 @@ pub fn decodeTkTransport(r: *wire.Reader, out: *tick.Transport) wire.Error!void 
     };
 }
 
-pub fn decodeTkNP(r: *wire.Reader, out: *tick.NP) wire.Error!void {
+pub fn decodeLiveNP(r: *wire.Reader, out: *live.NP) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.line1 = try r.str(t),
         2 => out.line2 = try r.str(t),
@@ -186,14 +207,23 @@ pub fn decodeTkNP(r: *wire.Reader, out: *tick.NP) wire.Error!void {
     };
 }
 
-pub fn decodeTkStatus(r: *wire.Reader, out: *tick.Status) wire.Error!void {
+pub fn decodeLiveKV(r: *wire.Reader, out: *live.KV) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
-        1 => out.rows = try r.list(tick.KV, decodeTkKV, t),
+        1 => out.k = try r.str(t),
+        2 => out.kl = try r.str(t),
+        3 => out.v = try r.str(t),
         else => try r.skip(t),
     };
 }
 
-pub fn decodeTkDeck(r: *wire.Reader, out: *tick.Deck) wire.Error!void {
+pub fn decodeLiveStatus(r: *wire.Reader, out: *live.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(live.KV, decodeLiveKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveDeck(r: *wire.Reader, out: *live.Deck) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.cls = try r.str(t),
         2 => out.name = try r.str(t),
@@ -204,22 +234,22 @@ pub fn decodeTkDeck(r: *wire.Reader, out: *tick.Deck) wire.Error!void {
     };
 }
 
-pub fn decodeTkDecks(r: *wire.Reader, out: *tick.Decks) wire.Error!void {
+pub fn decodeLiveDecks(r: *wire.Reader, out: *live.Decks) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.note = try r.str(t),
-        2 => out.decks = try r.list(tick.Deck, decodeTkDeck, t),
+        2 => out.decks = try r.list(live.Deck, decodeLiveDeck, t),
         else => try r.skip(t),
     };
 }
 
-pub fn decodeTkSignals(r: *wire.Reader, out: *tick.Signals) wire.Error!void {
+pub fn decodeLiveSignals(r: *wire.Reader, out: *live.Signals) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
-        1 => out.rows = try r.list(tick.KV, decodeTkKV, t),
+        1 => out.rows = try r.list(live.KV, decodeLiveKV, t),
         else => try r.skip(t),
     };
 }
 
-pub fn decodeTkCockpitRow(r: *wire.Reader, out: *tick.CockpitRow) wire.Error!void {
+pub fn decodeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.variant = try r.str(t),
         2 => out.name = try r.str(t),
@@ -232,29 +262,39 @@ pub fn decodeTkCockpitRow(r: *wire.Reader, out: *tick.CockpitRow) wire.Error!voi
     };
 }
 
-pub fn decodeTkCockpit(r: *wire.Reader, out: *tick.Cockpit) wire.Error!void {
+pub fn decodeLiveCockpit(r: *wire.Reader, out: *live.Cockpit) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.empty = try r.str(t),
         2 => out.caption = try r.str(t),
-        3 => out.rows = try r.list(tick.CockpitRow, decodeTkCockpitRow, t),
+        3 => out.rows = try r.list(live.CockpitRow, decodeLiveCockpitRow, t),
         else => try r.skip(t),
     };
 }
 
-pub fn decodeTkLink(r: *wire.Reader, out: *tick.Link) wire.Error!void {
+pub fn decodeLiveSRow(r: *wire.Reader, out: *live.SRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.dl = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLiveLink(r: *wire.Reader, out: *live.Link) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.available = try r.boolean(t),
-        2 => out.backend = try r.sub(tick.SRow, decodeTkSRow, t),
+        2 => out.backend = try r.sub(live.SRow, decodeLiveSRow, t),
         3 => out.fill = try r.str(t),
         4 => out.cap = try r.str(t),
-        5 => out.session = try r.sub(tick.SRow, decodeTkSRow, t),
+        5 => out.session = try r.sub(live.SRow, decodeLiveSRow, t),
         6 => out.resyncLbl = try r.str(t),
-        7 => out.sources = try r.list(tick.SRow, decodeTkSRow, t),
+        7 => out.sources = try r.list(live.SRow, decodeLiveSRow, t),
         else => try r.skip(t),
     };
 }
 
-pub fn decodeTkGraph(r: *wire.Reader, out: *tick.Graph) wire.Error!void {
+pub fn decodeLiveGraph(r: *wire.Reader, out: *live.Graph) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.tooltip = try r.str(t),
         2 => out.legend = try r.str(t),
@@ -263,7 +303,7 @@ pub fn decodeTkGraph(r: *wire.Reader, out: *tick.Graph) wire.Error!void {
     };
 }
 
-pub fn decodeTkPerf(r: *wire.Reader, out: *tick.Perf) wire.Error!void {
+pub fn decodeLivePerf(r: *wire.Reader, out: *live.Perf) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.tooltip = try r.str(t),
         2 => out.cpuLeg = try r.str(t),
@@ -276,7 +316,7 @@ pub fn decodeTkPerf(r: *wire.Reader, out: *tick.Perf) wire.Error!void {
     };
 }
 
-pub fn decodeTkStrip(r: *wire.Reader, out: *tick.Strip) wire.Error!void {
+pub fn decodeLiveStrip(r: *wire.Reader, out: *live.Strip) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.left = try r.str(t),
         2 => out.center = try r.str(t),
@@ -285,45 +325,2026 @@ pub fn decodeTkStrip(r: *wire.Reader, out: *tick.Strip) wire.Error!void {
     };
 }
 
-pub fn decodeTkLiveState(r: *wire.Reader, out: *tick.LiveState) wire.Error!void {
+pub fn decodeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.title = try r.str(t),
         2 => out.sub = try r.str(t),
-        3 => out.transport = try r.sub(tick.Transport, decodeTkTransport, t),
-        4 => out.np = try r.sub(tick.NP, decodeTkNP, t),
+        3 => out.transport = try r.sub(live.Transport, decodeLiveTransport, t),
+        4 => out.np = try r.sub(live.NP, decodeLiveNP, t),
         5 => out.statusTitle = try r.str(t),
-        6 => out.status = try r.sub(tick.Status, decodeTkStatus, t),
+        6 => out.status = try r.sub(live.Status, decodeLiveStatus, t),
         7 => out.decksTitle = try r.str(t),
-        8 => out.decks = try r.sub(tick.Decks, decodeTkDecks, t),
+        8 => out.decks = try r.sub(live.Decks, decodeLiveDecks, t),
         9 => out.hasSignals = try r.boolean(t),
         10 => out.signalsTitle = try r.str(t),
         11 => out.signalsTip = try r.str(t),
-        12 => out.signals = try r.sub(tick.Signals, decodeTkSignals, t),
+        12 => out.signals = try r.sub(live.Signals, decodeLiveSignals, t),
         13 => out.hasCockpit = try r.boolean(t),
         14 => out.cockpitTitle = try r.str(t),
-        15 => out.cockpit = try r.sub(tick.Cockpit, decodeTkCockpit, t),
+        15 => out.cockpit = try r.sub(live.Cockpit, decodeLiveCockpit, t),
         16 => out.hasLink = try r.boolean(t),
         17 => out.linkTitle = try r.str(t),
-        18 => out.link = try r.sub(tick.Link, decodeTkLink, t),
+        18 => out.link = try r.sub(live.Link, decodeLiveLink, t),
         19 => out.hasNet = try r.boolean(t),
         20 => out.netTitle = try r.str(t),
         21 => out.netTip = try r.str(t),
-        22 => out.net = try r.sub(tick.Graph, decodeTkGraph, t),
+        22 => out.net = try r.sub(live.Graph, decodeLiveGraph, t),
         23 => out.timTitle = try r.str(t),
         24 => out.timTip = try r.str(t),
-        25 => out.tim = try r.sub(tick.Graph, decodeTkGraph, t),
+        25 => out.tim = try r.sub(live.Graph, decodeLiveGraph, t),
         26 => out.hasPerf = try r.boolean(t),
         27 => out.perfTitle = try r.str(t),
         28 => out.perfTip = try r.str(t),
-        29 => out.perf = try r.sub(tick.Perf, decodeTkPerf, t),
-        30 => out.strip = try r.sub(tick.Strip, decodeTkStrip, t),
+        29 => out.perf = try r.sub(live.Perf, decodeLivePerf, t),
+        30 => out.strip = try r.sub(live.Strip, decodeLiveStrip, t),
+        31 => out.signalsTipSt = try r.sub(c.Tip, decodeTip, t),
+        32 => out.netTipSt = try r.sub(c.Tip, decodeTip, t),
+        33 => out.timTipSt = try r.sub(c.Tip, decodeTip, t),
+        34 => out.perfTipSt = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoCamRow(r: *wire.Reader, out: *motion.CamRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.group = try r.str(t),
+        2 => out.showGroup = try r.boolean(t),
+        3 => out.act = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        5 => out.name = try r.str(t),
+        6 => out.meta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoCam(r: *wire.Reader, out: *motion.Cam) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.unavailable = try r.str(t),
+        2 => out.rows = try r.list(motion.CamRow, decodeMoCamRow, t),
+        3 => out.empty = try r.str(t),
+        4 => out.reloadLbl = try r.str(t),
+        5 => out.organizeLbl = try r.str(t),
+        6 => out.djLbl = try r.str(t),
+        7 => out.previewLbl = try r.str(t),
+        8 => out.tip = try r.str(t),
+        9 => out.view = try r.str(t),
+        10 => out.hint = try r.str(t),
+        11 => out.info = try r.str(t),
+        12 => out.playBtn = try r.str(t),
+        13 => out.loadLbl = try r.str(t),
+        14 => out.copyLbl = try r.str(t),
+        15 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoRecRow(r: *wire.Reader, out: *motion.RecRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.act = try r.str(t),
+        3 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoAvatar(r: *wire.Reader, out: *motion.Avatar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        3 => out.importLbl = try r.str(t),
+        4 => out.syncLbl = try r.str(t),
+        5 => out.info = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoSlider(r: *wire.Reader, out: *c.Slider) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.unit = try r.str(t),
+        5 => out.unitJs = try r.str(t),
+        6 => out.minS = try r.str(t),
+        7 => out.maxS = try r.str(t),
+        8 => out.stepS = try r.str(t),
+        9 => out.valS = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoToggle(r: *wire.Reader, out: *motion.Toggle) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoStudio(r: *wire.Reader, out: *motion.Studio) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.recs = try r.list(motion.RecRow, decodeMoRecRow, t),
+        2 => out.empty = try r.str(t),
+        3 => out.refreshLbl = try r.str(t),
+        4 => out.exportLbl = try r.str(t),
+        5 => out.renderLbl = try r.str(t),
+        6 => out.pcViewLbl = try r.str(t),
+        7 => out.renderProg = try r.str(t),
+        8 => out.avatar = try r.sub(motion.Avatar, decodeMoAvatar, t),
+        9 => out.previewLbl = try r.str(t),
+        10 => out.tip = try r.str(t),
+        11 => out.view = try r.str(t),
+        12 => out.hint = try r.str(t),
+        13 => out.time = try r.str(t),
+        14 => out.scrub = try r.sub(c.Slider, decodeMoSlider, t),
+        15 => out.playLbl = try r.str(t),
+        16 => out.stopLbl = try r.str(t),
+        17 => out.loop = try r.sub(motion.Toggle, decodeMoToggle, t),
+        18 => out.osc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        19 => out.vmc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        20 => out.model = try r.sub(motion.Toggle, decodeMoToggle, t),
+        21 => out.modelOn = try r.boolean(t),
+        22 => out.hasDyn = try r.boolean(t),
+        23 => out.physNote = try r.str(t),
+        24 => out.phys = try r.sub(motion.Toggle, decodeMoToggle, t),
+        25 => out.rest = try r.sub(motion.Toggle, decodeMoToggle, t),
+        26 => out.marks = try r.sub(motion.Toggle, decodeMoToggle, t),
+        27 => out.pc = try r.sub(motion.Toggle, decodeMoToggle, t),
+        28 => out.pcOn = try r.boolean(t),
+        29 => out.pcDensity = try r.sub(c.Select, decodeSelState, t),
+        30 => out.pcColor = try r.sub(motion.Toggle, decodeMoToggle, t),
+        31 => out.pcNote = try r.str(t),
+        32 => out.pcExportLbl = try r.str(t),
+        33 => out.vmcHelp = try r.str(t),
+        34 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMoState(r: *wire.Reader, out: *motion.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.section = try r.str(t),
+        4 => out.tabCam = try r.str(t),
+        5 => out.tabStudio = try r.str(t),
+        6 => out.cam = try r.sub(motion.Cam, decodeMoCam, t),
+        7 => out.studio = try r.sub(motion.Studio, decodeMoStudio, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBadge(r: *wire.Reader, out: *publish.Badge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.key = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.variant = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBar(r: *wire.Reader, out: *publish.Bar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.pct = try r.str(t),
+        3 => out.cap = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubNp(r: *wire.Reader, out: *publish.Np) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.meta = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.bar = try r.sub(publish.Bar, decodePubBar, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubPlayer(r: *wire.Reader, out: *publish.Player) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.label = try r.str(t),
+        3 => out.pos = try r.str(t),
+        4 => out.bar = try r.sub(publish.Bar, decodePubBar, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubHero(r: *wire.Reader, out: *publish.Hero) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.rec = try r.sub(publish.Badge, decodePubBadge, t),
+        3 => out.cap = try r.sub(publish.Badge, decodePubBadge, t),
+        4 => out.obs = try r.sub(publish.Badge, decodePubBadge, t),
+        5 => out.finish = try r.str(t),
+        6 => out.np = try r.sub(publish.Np, decodePubNp, t),
+        7 => out.player = try r.sub(publish.Player, decodePubPlayer, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubSetRow(r: *wire.Reader, out: *publish.SetRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        5 => out.rename = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubList(r: *wire.Reader, out: *publish.List) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.count = try r.str(t),
+        3 => out.rows = try r.list(publish.SetRow, decodePubSetRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiBtn(r: *wire.Reader, out: *c.Btn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.val = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubCap(r: *wire.Reader, out: *publish.Cap) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.caption = try r.str(t),
+        2 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        3 => out.menu = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubLoose(r: *wire.Reader, out: *publish.Loose) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.count = try r.str(t),
+        2 => out.desc = try r.str(t),
+        3 => out.caps = try r.list(publish.Cap, decodePubCap, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubCaptures(r: *wire.Reader, out: *publish.Captures) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.player = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.caps = try r.list(publish.Cap, decodePubCap, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubTrack(r: *wire.Reader, out: *publish.Track) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.num = @intCast(try r.uint(t)),
+        2 => out.label = try r.str(t),
+        3 => out.off = try r.str(t),
+        4 => out.lead = try r.str(t),
+        5 => out.leadTip = try r.str(t),
+        6 => out.checked = try r.boolean(t),
+        7 => out.path = try r.str(t),
+        8 => out.ctx = try r.str(t),
+        9 => out.offAct = try r.str(t),
+        10 => out.offDl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBatch(r: *wire.Reader, out: *publish.Batch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.count = try r.str(t),
+        2 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubTracklist(r: *wire.Reader, out: *publish.Tracklist) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.resolving = try r.str(t),
+        3 => out.editable = try r.boolean(t),
+        4 => out.offTip = try r.str(t),
+        5 => out.rows = try r.list(publish.Track, decodePubTrack, t),
+        6 => out.showFix = try r.boolean(t),
+        7 => out.fix = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.help = try r.str(t),
+        9 => out.unres = try r.str(t),
+        10 => out.batch = try r.sub(publish.Batch, decodePubBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubDetail(r: *wire.Reader, out: *publish.Detail) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.sel = try r.boolean(t),
+        3 => out.hint = try r.str(t),
+        4 => out.player = try r.str(t),
+        5 => out.loose = try r.sub(publish.Loose, decodePubLoose, t),
+        6 => out.name = try r.str(t),
+        7 => out.meta = try r.str(t),
+        8 => out.actions = try r.list(c.Btn, decodeUiBtn, t),
+        9 => out.active = try r.str(t),
+        10 => out.capsLbl = try r.str(t),
+        11 => out.tracksLbl = try r.str(t),
+        12 => out.captures = try r.sub(publish.Captures, decodePubCaptures, t),
+        13 => out.tracklist = try r.sub(publish.Tracklist, decodePubTracklist, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePubBody(r: *wire.Reader, out: *publish.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hero = try r.sub(publish.Hero, decodePubHero, t),
+        2 => out.list = try r.sub(publish.List, decodePubList, t),
+        3 => out.detail = try r.sub(publish.Detail, decodePubDetail, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePub(r: *wire.Reader, out: *publish.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.switcher = try r.str(t),
+        4 => out.available = try r.boolean(t),
+        5 => out.unavailable = try r.str(t),
+        6 => out.body = try r.sub(publish.Body, decodePubBody, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetNav(r: *wire.Reader, out: *settings.Nav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.agg = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipChip(r: *wire.Reader, out: *c.TipChip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.sep = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipKb(r: *wire.Reader, out: *c.TipKb) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hasGroup = try r.boolean(t),
+        2 => out.group = try r.str(t),
+        3 => out.chips = try r.list(c.TipChip, decodeTipChip, t),
+        4 => out.verb = try r.str(t),
+        5 => out.rest = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTipLink(r: *wire.Reader, out: *c.TipLink) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.url = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTip(r: *wire.Reader, out: *c.Tip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.keys = try r.list(c.TipKb, decodeTipKb, t),
+        4 => out.paras = try r.strList(t),
+        5 => out.links = try r.list(c.TipLink, decodeTipLink, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetStatus(r: *wire.Reader, out: *settings.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.v = try r.str(t),
+        2 => out.t = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetSwitch(r: *wire.Reader, out: *settings.Switch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.on = try r.boolean(t),
+        3 => out.gate = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiField(r: *wire.Reader, out: *c.Field) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.value = try r.str(t),
+        5 => out.inputType = try r.str(t),
+        6 => out.ph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiToggle(r: *wire.Reader, out: *c.Toggle) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiKV(r: *wire.Reader, out: *c.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.value = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetKid(r: *wire.Reader, out: *settings.Kid) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.fld = try r.sub(c.Field, decodeUiField, t),
+        3 => out.tip = try r.str(t),
+        4 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        5 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        6 => out.selLbl = try r.str(t),
+        7 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.selLblSt = try r.sub(c.SsLabel, decodeSsLabel, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetInput(r: *wire.Reader, out: *settings.Input) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.type = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.ph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfBtn(r: *wire.Reader, out: *sub.GfBtn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.gate = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfVar(r: *wire.Reader, out: *sub.GfVar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.key = try r.str(t),
+        2 => out.tone = try r.str(t),
+        3 => out.line = try r.str(t),
+        4 => out.btns = try r.list(sub.GfBtn, decodeGfBtn, t),
+        5 => out.hasNote = try r.boolean(t),
+        6 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfCard(r: *wire.Reader, out: *sub.GfCard) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.leadKind = try r.str(t),
+        2 => out.leadTone = try r.str(t),
+        3 => out.lead = try r.str(t),
+        4 => out.vars = try r.list(sub.GfVar, decodeGfVar, t),
+        5 => out.recheck = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.engine = try r.sub(c.Select, decodeSelState, t),
+        7 => out.python = try r.sub(c.Field, decodeUiField, t),
+        8 => out.browse = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.minq = try r.sub(c.Field, decodeUiField, t),
+        10 => out.thresh = try r.sub(c.Field, decodeUiField, t),
+        11 => out.lock = try r.sub(c.Toggle, decodeUiToggle, t),
+        12 => out.hasCal = try r.boolean(t),
+        13 => out.cal = try r.str(t),
+        14 => out.calNote = try r.str(t),
+        15 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeGfModel(r: *wire.Reader, out: *sub.GfModel) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.dataset = try r.str(t),
+        3 => out.running = try r.boolean(t),
+        4 => out.barPct = try r.str(t),
+        5 => out.barCap = try r.str(t),
+        6 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.hasVerdict = try r.boolean(t),
+        8 => out.verdictTone = try r.str(t),
+        9 => out.verdict = try r.str(t),
+        10 => out.err = try r.str(t),
+        11 => out.canTrain = try r.boolean(t),
+        12 => out.train = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.few = try r.boolean(t),
+        14 => out.fewHint = try r.str(t),
+        15 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiStatus(r: *wire.Reader, out: *c.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.dl = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridgeSess(r: *wire.Reader, out: *sub.BridgeSess) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.revoke = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridgeGate(r: *wire.Reader, out: *sub.BridgeGate) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.help = try r.str(t),
+        3 => out.secret = try r.str(t),
+        4 => out.uri = try r.str(t),
+        5 => out.codeLabel = try r.str(t),
+        6 => out.codeDL = try r.str(t),
+        7 => out.confirm = try r.str(t),
+        8 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.burn = try r.str(t),
+        10 => out.rows = try r.list(c.Status, decodeUiStatus, t),
+        11 => out.note = try r.str(t),
+        12 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.sessionsTitle = try r.str(t),
+        14 => out.empty = try r.str(t),
+        15 => out.sessions = try r.list(sub.BridgeSess, decodeBridgeSess, t),
+        16 => out.revokeAll = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeBridge(r: *wire.Reader, out: *sub.Bridge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.st = try r.sub(c.Status, decodeUiStatus, t),
+        2 => out.studio = try r.sub(c.Toggle, decodeUiToggle, t),
+        3 => out.tip = try r.str(t),
+        4 => out.hasGate = try r.boolean(t),
+        5 => out.gateTitle = try r.str(t),
+        6 => out.gate = try r.sub(sub.BridgeGate, decodeBridgeGate, t),
+        7 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUpdFlow(r: *wire.Reader, out: *sub.UpdFlow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.tone = try r.str(t),
+        3 => out.text = try r.str(t),
+        4 => out.hasNotes = try r.boolean(t),
+        5 => out.notes = try r.str(t),
+        6 => out.err = try r.str(t),
+        7 => out.pct = try r.str(t),
+        8 => out.cap = try r.str(t),
+        9 => out.hasBtn = try r.boolean(t),
+        10 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetBlock(r: *wire.Reader, out: *settings.Block) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.text = try r.str(t),
+        3 => out.html = try r.str(t),
+        4 => out.tone = try r.str(t),
+        5 => out.id = try r.str(t),
+        6 => out.title = try r.str(t),
+        7 => out.sub = try r.str(t),
+        8 => out.fld = try r.sub(c.Field, decodeUiField, t),
+        9 => out.tip = try r.str(t),
+        10 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        11 => out.tgl = try r.sub(c.Toggle, decodeUiToggle, t),
+        12 => out.gate = try r.str(t),
+        13 => out.kv = try r.sub(c.KV, decodeUiKV, t),
+        14 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        15 => out.selLbl = try r.str(t),
+        16 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        17 => out.kids = try r.list(settings.Kid, decodeSetKid, t),
+        18 => out.inputs = try r.list(settings.Input, decodeSetInput, t),
+        19 => out.submit = try r.str(t),
+        20 => out.subVar = try r.str(t),
+        21 => out.gf = try r.sub(sub.GfCard, decodeGfCard, t),
+        22 => out.gfm = try r.sub(sub.GfModel, decodeGfModel, t),
+        23 => out.brg = try r.sub(sub.Bridge, decodeBridge, t),
+        24 => out.upd = try r.sub(sub.UpdFlow, decodeUpdFlow, t),
+        25 => out.selLblSt = try r.sub(c.SsLabel, decodeSsLabel, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetCard(r: *wire.Reader, out: *settings.Card) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.tip = try r.str(t),
+        4 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        5 => out.desc = try r.str(t),
+        6 => out.st = try r.sub(settings.Status, decodeSetStatus, t),
+        7 => out.tgl = try r.sub(settings.Switch, decodeSetSwitch, t),
+        8 => out.blocks = try r.list(settings.Block, decodeSetBlock, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetSec(r: *wire.Reader, out: *settings.Sec) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.cards = try r.list(settings.Card, decodeSetCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetContent(r: *wire.Reader, out: *settings.Content) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.searching = try r.boolean(t),
+        2 => out.noResults = try r.str(t),
+        3 => out.nav = try r.list(settings.Nav, decodeSetNav, t),
+        4 => out.secs = try r.list(settings.Sec, decodeSetSec, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSetState(r: *wire.Reader, out: *settings.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.available = try r.boolean(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.query = try r.str(t),
+        6 => out.placeholder = try r.str(t),
+        7 => out.content = try r.sub(settings.Content, decodeSetContent, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTab(r: *wire.Reader, out: *c.Tab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibNavRow(r: *wire.Reader, out: *f.NavRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hd = try r.boolean(t),
+        2 => out.label = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.icon = try r.str(t),
+        5 => out.count = try r.str(t),
+        6 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibNav(r: *wire.Reader, out: *f.Nav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(f.NavRow, decodeLibNavRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFStat(r: *wire.Reader, out: *f.GFStat) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.n = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.tone = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFTile(r: *wire.Reader, out: *f.GFTile) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.n = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.tone = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFLive(r: *wire.Reader, out: *f.GFLive) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tiles = try r.list(f.GFTile, decodeLibGFTile, t),
+        2 => out.pct = try r.str(t),
+        3 => out.caption = try r.str(t),
+        4 => out.current = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHint(r: *wire.Reader, out: *k.Hint) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tone = try r.str(t),
+        2 => out.text = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGF(r: *wire.Reader, out: *f.GF) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.eyebrow = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.stats = try r.list(f.GFStat, decodeLibGFStat, t),
+        5 => out.note = try r.str(t),
+        6 => out.noteAfter = try r.boolean(t),
+        7 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        8 => out.confirmNote = try r.str(t),
+        9 => out.force = try r.sub(c.Toggle, decodeUiToggle, t),
+        10 => out.forceHint = try r.str(t),
+        11 => out.scopes = try r.list(c.Btn, decodeUiBtn, t),
+        12 => out.live = try r.sub(f.GFLive, decodeLibGFLive, t),
+        13 => out.stopLbl = try r.str(t),
+        14 => out.tiles = try r.list(f.GFTile, decodeLibGFTile, t),
+        15 => out.cachedNote = try r.str(t),
+        16 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        17 => out.acts = try r.list(c.Btn, decodeUiBtn, t),
+        18 => out.notes = try r.strList(t),
+        19 => out.applyNote = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSelTip(r: *wire.Reader, out: *k.SelTip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.labelHtml = try r.str(t),
+        3 => out.labelSt = try r.sub(c.SsLabel, decodeSsLabel, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibChip(r: *wire.Reader, out: *k.Chip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.val = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPBField(r: *wire.Reader, out: *c.PBField) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.value = try r.str(t),
+        5 => out.inputType = try r.str(t),
+        6 => out.ph = try r.str(t),
+        7 => out.hint = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibEncVideo(r: *wire.Reader, out: *d.EncVideo) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.vcodec = try r.sub(k.SelTip, decodeLibSelTip, t),
+        2 => out.accel = try r.sub(c.Select, decodeSelState, t),
+        3 => out.qualityLbl = try r.str(t),
+        4 => out.profiles = try r.list(k.Chip, decodeLibChip, t),
+        5 => out.profileHint = try r.str(t),
+        6 => out.rateMode = try r.sub(k.SelTip, decodeLibSelTip, t),
+        7 => out.rateField = try r.sub(c.PBField, decodeLibPBField, t),
+        8 => out.res = try r.sub(c.Select, decodeSelState, t),
+        9 => out.fps = try r.sub(c.PBField, decodeLibPBField, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLoudChip(r: *wire.Reader, out: *c.LoudChip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.val = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLoud(r: *wire.Reader, out: *c.Loud) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.compact = try r.boolean(t),
+        2 => out.toggle = try r.sub(c.Toggle, decodeUiToggle, t),
+        3 => out.tip = try r.str(t),
+        4 => out.chipAct = try r.str(t),
+        5 => out.chips = try r.list(c.LoudChip, decodeLoudChip, t),
+        6 => out.iField = try r.sub(c.PBField, decodeLibPBField, t),
+        7 => out.tpField = try r.sub(c.PBField, decodeLibPBField, t),
+        8 => out.raise = try r.sub(c.Toggle, decodeUiToggle, t),
+        9 => out.hasWarn = try r.boolean(t),
+        10 => out.warn = try r.str(t),
+        11 => out.extra = try r.str(t),
+        12 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibEnc(r: *wire.Reader, out: *d.Enc) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.preset = try r.sub(c.Select, decodeSelState, t),
+        2 => out.desc = try r.str(t),
+        3 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        4 => out.audioOnly = try r.boolean(t),
+        5 => out.container = try r.sub(k.SelTip, decodeLibSelTip, t),
+        6 => out.video = try r.sub(d.EncVideo, decodeLibEncVideo, t),
+        7 => out.audioCodec = try r.sub(k.SelTip, decodeLibSelTip, t),
+        8 => out.audioBitrate = try r.sub(c.PBField, decodeLibPBField, t),
+        9 => out.channels = try r.sub(c.Select, decodeSelState, t),
+        10 => out.sampleRate = try r.sub(c.Select, decodeSelState, t),
+        11 => out.loud = try r.sub(c.Loud, decodeLoud, t),
+        12 => out.trimStart = try r.sub(c.PBField, decodeLibPBField, t),
+        13 => out.trimEnd = try r.sub(c.PBField, decodeLibPBField, t),
+        14 => out.outputNote = try r.str(t),
+        15 => out.startLbl = try r.str(t),
+        16 => out.saveLbl = try r.str(t),
+        17 => out.saveAsLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHarm(r: *wire.Reader, out: *d.Harm) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.wheel = try r.str(t),
+        3 => out.sameLbl = try r.str(t),
+        4 => out.relLbl = try r.str(t),
+        5 => out.showLbl = try r.str(t),
+        6 => out.showAct = try r.str(t),
+        7 => out.clearLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTagEd(r: *wire.Reader, out: *f.TagEdit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.open = try r.boolean(t),
+        2 => out.openLbl = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.fields = try r.list(c.PBField, decodeLibPBField, t),
+        5 => out.saveLbl = try r.str(t),
+        6 => out.cancelLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTrackPls(r: *wire.Reader, out: *d.TrackPls) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.unavailable = try r.boolean(t),
+        2 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        3 => out.emptyText = try r.str(t),
+        4 => out.addLbl = try r.str(t),
+        5 => out.addAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCompatRow(r: *wire.Reader, out: *f.CompatRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCompatSec(r: *wire.Reader, out: *f.Compat) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.isEmpty = try r.boolean(t),
+        2 => out.empty = try r.str(t),
+        3 => out.rows = try r.list(f.CompatRow, decodeLibCompatRow, t),
+        4 => out.openLbl = try r.str(t),
+        5 => out.findLbl = try r.str(t),
+        6 => out.findAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibDetail(r: *wire.Reader, out: *d.Detail) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.raw = try r.str(t),
+        3 => out.msg = try r.str(t),
+        4 => out.gf = try r.sub(f.GF, decodeLibGF, t),
+        5 => out.eyebrow = try r.str(t),
+        6 => out.title = try r.str(t),
+        7 => out.sub = try r.str(t),
+        8 => out.actionsTitle = try r.str(t),
+        9 => out.missing = try r.str(t),
+        10 => out.actBtns = try r.list(c.Btn, decodeUiBtn, t),
+        11 => out.hasPlayer = try r.boolean(t),
+        12 => out.playerTitle = try r.str(t),
+        13 => out.player = try r.str(t),
+        14 => out.hasEnc = try r.boolean(t),
+        15 => out.encTitle = try r.str(t),
+        16 => out.encDemoted = try r.boolean(t),
+        17 => out.demotedNote = try r.str(t),
+        18 => out.showLbl = try r.str(t),
+        19 => out.enc = try r.sub(d.Enc, decodeLibEnc, t),
+        20 => out.hasHarm = try r.boolean(t),
+        21 => out.harmTitle = try r.str(t),
+        22 => out.harm = try r.sub(d.Harm, decodeLibHarm, t),
+        23 => out.hasTags = try r.boolean(t),
+        24 => out.tagsTitle = try r.str(t),
+        25 => out.tagsDesc = try r.str(t),
+        26 => out.writeLbl = try r.str(t),
+        27 => out.writeAct = try r.str(t),
+        28 => out.revertLbl = try r.str(t),
+        29 => out.revertAct = try r.str(t),
+        30 => out.tagEditor = try r.sub(f.TagEdit, decodeLibTagEd, t),
+        31 => out.hasPls = try r.boolean(t),
+        32 => out.plsTitle = try r.str(t),
+        33 => out.pls = try r.sub(d.TrackPls, decodeLibTrackPls, t),
+        34 => out.hasCompat = try r.boolean(t),
+        35 => out.compatTitle = try r.str(t),
+        36 => out.compat = try r.sub(f.Compat, decodeLibCompatSec, t),
+        37 => out.detailsTitle = try r.str(t),
+        38 => out.meta = try r.list(c.KV, decodeUiKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSeg(r: *wire.Reader, out: *s.Seg) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.path = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlAct(r: *wire.Reader, out: *k.PlAct) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        2 => out.menu = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibKeyPill(r: *wire.Reader, out: *k.KeyPill) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.cls = try r.str(t),
+        3 => out.ok = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFe(r: *wire.Reader, out: *s.Fe) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.path = try r.str(t),
+        3 => out.isDir = try r.boolean(t),
+        4 => out.glyph = try r.str(t),
+        5 => out.gridSub = try r.str(t),
+        6 => out.sub = try r.str(t),
+        7 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        8 => out.checked = try r.boolean(t),
+        9 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBatch(r: *wire.Reader, out: *k.Batch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.on = try r.boolean(t),
+        2 => out.count = try r.str(t),
+        3 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBrowse(r: *wire.Reader, out: *s.Browse) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.crumbs = try r.list(s.Seg, decodeLibSeg, t),
+        3 => out.up = try r.str(t),
+        4 => out.upPath = try r.str(t),
+        5 => out.gotoLbl = try r.str(t),
+        6 => out.filter = try r.str(t),
+        7 => out.filterPh = try r.str(t),
+        8 => out.kindLbl = try r.str(t),
+        9 => out.kind = try r.sub(c.Select, decodeSelState, t),
+        10 => out.sortLbl = try r.str(t),
+        11 => out.sort = try r.sub(c.Select, decodeSelState, t),
+        12 => out.listLbl = try r.str(t),
+        13 => out.gridLbl = try r.str(t),
+        14 => out.grid = try r.boolean(t),
+        15 => out.keyChip = try r.sub(k.Chip, decodeLibChip, t),
+        16 => out.folder = try r.sub(c.Select, decodeSelState, t),
+        17 => out.selAll = try r.boolean(t),
+        18 => out.selAllOn = try r.boolean(t),
+        19 => out.selAllTitle = try r.str(t),
+        20 => out.count = try r.str(t),
+        21 => out.boundNote = try r.str(t),
+        22 => out.hasBound = try r.boolean(t),
+        23 => out.boundActs = try r.sub(k.PlAct, decodeLibPlAct, t),
+        24 => out.entries = try r.list(s.Fe, decodeLibFe, t),
+        25 => out.more = try r.str(t),
+        26 => out.batch = try r.sub(k.Batch, decodeLibBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFResRow(r: *wire.Reader, out: *f.GFResRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.st = try r.str(t),
+        3 => out.stLow = try r.str(t),
+        4 => out.title = try r.str(t),
+        5 => out.detail = try r.str(t),
+        6 => out.delta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFRes(r: *wire.Reader, out: *f.GFRes) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        2 => out.rows = try r.list(f.GFResRow, decodeLibGFResRow, t),
+        3 => out.isEmpty = try r.boolean(t),
+        4 => out.empty = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFRow(r: *wire.Reader, out: *f.TFRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = try r.str(t),
+        2 => out.checked = try r.boolean(t),
+        3 => out.path = try r.str(t),
+        4 => out.base = try r.str(t),
+        5 => out.field = try r.str(t),
+        6 => out.cur = try r.str(t),
+        7 => out.proposed = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFGrp(r: *wire.Reader, out: *f.TFGrp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.badge = try r.str(t),
+        3 => out.allLbl = try r.str(t),
+        4 => out.allAct = try r.str(t),
+        5 => out.noneLbl = try r.str(t),
+        6 => out.noneAct = try r.str(t),
+        7 => out.desc = try r.str(t),
+        8 => out.rows = try r.list(f.TFRow, decodeLibTFRow, t),
+        9 => out.more = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFRes(r: *wire.Reader, out: *f.TFRes) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.eyebrow = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.scanning = try r.boolean(t),
+        5 => out.pct = try r.str(t),
+        6 => out.scanCap = try r.str(t),
+        7 => out.closeLbl = try r.str(t),
+        8 => out.applyLbl = try r.str(t),
+        9 => out.rescanLbl = try r.str(t),
+        10 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        11 => out.skipped = try r.str(t),
+        12 => out.isEmpty = try r.boolean(t),
+        13 => out.empty = try r.str(t),
+        14 => out.groups = try r.list(f.TFGrp, decodeLibTFGrp, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFixRes(r: *wire.Reader, out: *f.Results) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.gf = try r.sub(f.GFRes, decodeLibGFRes, t),
+        3 => out.tf = try r.sub(f.TFRes, decodeLibTFRes, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollHdr(r: *wire.Reader, out: *s.CollHdr) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cls = try r.str(t),
+        2 => out.key = try r.str(t),
+        3 => out.label = try r.str(t),
+        4 => out.arrow = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollHead(r: *wire.Reader, out: *s.CollHead) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.selAllTitle = try r.str(t),
+        2 => out.selAllOn = try r.boolean(t),
+        3 => out.main = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        4 => out.cueLbl = try r.str(t),
+        5 => out.bpm = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        6 => out.timeLbl = try r.str(t),
+        7 => out.key = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCueCell(r: *wire.Reader, out: *s.CueCell) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.drops = @intCast(try r.uint(t)),
+        2 => out.dropsTitle = try r.str(t),
+        3 => out.noDropsTitle = try r.str(t),
+        4 => out.cues = @intCast(try r.uint(t)),
+        5 => out.cuesTitle = try r.str(t),
+        6 => out.noCuesTitle = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollRow(r: *wire.Reader, out: *s.CollRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.checked = try r.boolean(t),
+        3 => out.warn = try r.boolean(t),
+        4 => out.selCls = try r.str(t),
+        5 => out.title = try r.str(t),
+        6 => out.sub = try r.str(t),
+        7 => out.verified = try r.boolean(t),
+        8 => out.cellId = try r.str(t),
+        9 => out.cue = try r.sub(s.CueCell, decodeLibCueCell, t),
+        10 => out.bpm = try r.str(t),
+        11 => out.dur = try r.str(t),
+        12 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibColl(r: *wire.Reader, out: *s.Coll) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.importLbl = try r.str(t),
+        3 => out.djsyncLbl = try r.str(t),
+        4 => out.gridFix = try r.boolean(t),
+        5 => out.gridFixLbl = try r.str(t),
+        6 => out.moreLbl = try r.str(t),
+        7 => out.moreOpen = try r.boolean(t),
+        8 => out.moreItems = try r.list(c.Tab, decodeLibTab, t),
+        9 => out.search = try r.str(t),
+        10 => out.searchPh = try r.str(t),
+        11 => out.genre = try r.sub(c.Select, decodeSelState, t),
+        12 => out.label = try r.sub(c.Select, decodeSelState, t),
+        13 => out.hasPlFacet = try r.boolean(t),
+        14 => out.plFacet = try r.sub(c.Select, decodeSelState, t),
+        15 => out.keyChip = try r.sub(k.Chip, decodeLibChip, t),
+        16 => out.noDropsLbl = try r.str(t),
+        17 => out.noDrops = try r.boolean(t),
+        18 => out.clear = try r.boolean(t),
+        19 => out.clearLbl = try r.str(t),
+        20 => out.prep = try r.sub(c.Select, decodeSelState, t),
+        21 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        22 => out.hasInline = try r.boolean(t),
+        23 => out.inlineActs = try r.sub(k.PlAct, decodeLibPlAct, t),
+        24 => out.hasResults = try r.boolean(t),
+        25 => out.results = try r.sub(f.Results, decodeLibFixRes, t),
+        26 => out.head = try r.sub(s.CollHead, decodeLibCollHead, t),
+        27 => out.rows = try r.list(s.CollRow, decodeLibCollRow, t),
+        28 => out.verifiedTitle = try r.str(t),
+        29 => out.empty = try r.str(t),
+        30 => out.isEmpty = try r.boolean(t),
+        31 => out.more = try r.str(t),
+        32 => out.batch = try r.sub(k.Batch, decodeLibBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFavRow(r: *wire.Reader, out: *s.FavRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.path = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFav(r: *wire.Reader, out: *s.Fav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.openLbl = try r.str(t),
+        4 => out.unpinLbl = try r.str(t),
+        5 => out.rows = try r.list(s.FavRow, decodeLibFavRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlRow(r: *wire.Reader, out: *s.PlRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.icon = try r.str(t),
+        3 => out.name = try r.str(t),
+        4 => out.sub = try r.str(t),
+        5 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlItem(r: *wire.Reader, out: *s.PlItem) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.pos = try r.str(t),
+        2 => out.idx = try r.str(t),
+        3 => out.path = try r.str(t),
+        4 => out.title = try r.str(t),
+        5 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        6 => out.manual = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlOpen(r: *wire.Reader, out: *s.PlOpen) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.smartNote = try r.str(t),
+        3 => out.acts = try r.sub(k.PlAct, decodeLibPlAct, t),
+        4 => out.items = try r.list(s.PlItem, decodeLibPlItem, t),
+        5 => out.empty = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPls(r: *wire.Reader, out: *s.Pls) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.newLbl = try r.str(t),
+        3 => out.newSmartLbl = try r.str(t),
+        4 => out.hasCloud = try r.boolean(t),
+        5 => out.cloud = try r.sub(c.Select, decodeSelState, t),
+        6 => out.rows = try r.list(s.PlRow, decodeLibPlRow, t),
+        7 => out.empty = try r.str(t),
+        8 => out.hasOpen = try r.boolean(t),
+        9 => out.open = try r.sub(s.PlOpen, decodeLibPlOpen, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSess(r: *wire.Reader, out: *s.Sess) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = try r.str(t),
+        2 => out.date = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlayed(r: *wire.Reader, out: *s.Played) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.warn = try r.boolean(t),
+        3 => out.title = try r.str(t),
+        4 => out.meta = try r.str(t),
+        5 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHist(r: *wire.Reader, out: *s.Hist) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loadLbl = try r.str(t),
+        2 => out.src = try r.sub(c.Select, decodeSelState, t),
+        3 => out.desc = try r.str(t),
+        4 => out.empty = try r.str(t),
+        5 => out.isEmpty = try r.boolean(t),
+        6 => out.sessions = try r.list(s.Sess, decodeLibSess, t),
+        7 => out.hasPlayed = try r.boolean(t),
+        8 => out.playedLbl = try r.str(t),
+        9 => out.sortLbl = try r.str(t),
+        10 => out.sort = try r.sub(c.Select, decodeSelState, t),
+        11 => out.dirLbl = try r.str(t),
+        12 => out.played = try r.list(s.Played, decodeLibPlayed, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibIDMRow(r: *wire.Reader, out: *s.IDMRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.artist = try r.boolean(t),
+        3 => out.artistAct = try r.str(t),
+        4 => out.label = try r.boolean(t),
+        5 => out.labelAct = try r.str(t),
+        6 => out.delAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibIDM(r: *wire.Reader, out: *s.IDM) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.markFileLbl = try r.str(t),
+        3 => out.markFolderLbl = try r.str(t),
+        4 => out.typePathLbl = try r.str(t),
+        5 => out.desc = try r.str(t),
+        6 => out.empty = try r.str(t),
+        7 => out.artistLbl = try r.str(t),
+        8 => out.artistDl = try r.str(t),
+        9 => out.labelLbl = try r.str(t),
+        10 => out.labelDl = try r.str(t),
+        11 => out.removeLbl = try r.str(t),
+        12 => out.rows = try r.list(s.IDMRow, decodeLibIDMRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibJob(r: *wire.Reader, out: *s.Job) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.cancel = try r.boolean(t),
+        3 => out.cancelLbl = try r.str(t),
+        4 => out.cancelAct = try r.str(t),
+        5 => out.status = try r.str(t),
+        6 => out.statusVar = try r.str(t),
+        7 => out.width = try r.str(t),
+        8 => out.caption = try r.str(t),
+        9 => out.msg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibQueue(r: *wire.Reader, out: *s.Queue) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.jobs = try r.list(s.Job, decodeLibJob, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPreset(r: *wire.Reader, out: *s.Preset) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.desc = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPresets(r: *wire.Reader, out: *s.Presets) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.newLbl = try r.str(t),
+        2 => out.yoursTitle = try r.str(t),
+        3 => out.emptyCustom = try r.str(t),
+        4 => out.builtinsTitle = try r.str(t),
+        5 => out.customBadge = try r.str(t),
+        6 => out.builtinBadge = try r.str(t),
+        7 => out.editLbl = try r.str(t),
+        8 => out.dupLbl = try r.str(t),
+        9 => out.delLbl = try r.str(t),
+        10 => out.dupEditLbl = try r.str(t),
+        11 => out.custom = try r.list(s.Preset, decodeLibPreset, t),
+        12 => out.builtins = try r.list(s.Preset, decodeLibPreset, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBody(r: *wire.Reader, out: *library.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.raw = try r.str(t),
+        3 => out.msg = try r.str(t),
+        4 => out.navRail = try r.sub(f.Nav, decodeLibNav, t),
+        5 => out.ceFull = try r.boolean(t),
+        6 => out.ceWave = try r.str(t),
+        7 => out.detail = try r.sub(d.Detail, decodeLibDetail, t),
+        8 => out.browse = try r.sub(s.Browse, decodeLibBrowse, t),
+        9 => out.coll = try r.sub(s.Coll, decodeLibColl, t),
+        10 => out.fav = try r.sub(s.Fav, decodeLibFav, t),
+        11 => out.pls = try r.sub(s.Pls, decodeLibPls, t),
+        12 => out.hist = try r.sub(s.Hist, decodeLibHist, t),
+        13 => out.idm = try r.sub(s.IDM, decodeLibIDM, t),
+        14 => out.queue = try r.sub(s.Queue, decodeLibQueue, t),
+        15 => out.presets = try r.sub(s.Presets, decodeLibPresets, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibState(r: *wire.Reader, out: *library.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.navTitle = try r.str(t),
+        3 => out.switcher = try r.str(t),
+        4 => out.embedded = try r.boolean(t),
+        5 => out.section = try r.str(t),
+        6 => out.tabs = try r.list(c.Tab, decodeLibTab, t),
+        7 => out.body = try r.sub(library.Body, decodeLibBody, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpVid(r: *wire.Reader, out: *player.Vid) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.kind = try r.str(t),
+        3 => out.errText = try r.str(t),
+        4 => out.openExt = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.noStream = try r.str(t),
+        6 => out.url = try r.str(t),
+        7 => out.mse = try r.str(t),
+        8 => out.muted = try r.boolean(t),
+        9 => out.ev = try r.str(t),
+        10 => out.onmeta = try r.str(t),
+        11 => out.onerr = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpKVRow(r: *wire.Reader, out: *player.KVRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.v = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpLink(r: *wire.Reader, out: *player.Link) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.url = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpChip(r: *wire.Reader, out: *player.Chip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.loud = try r.boolean(t),
+        3 => out.dim = try r.str(t),
+        4 => out.text = try r.str(t),
+        5 => out.rows = try r.list(player.KVRow, decodeMpKVRow, t),
+        6 => out.note = try r.str(t),
+        7 => out.links = try r.list(player.Link, decodeMpLink, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpWave(r: *wire.Reader, out: *player.Wave) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.svg = try r.str(t),
+        2 => out.hasChips = try r.boolean(t),
+        3 => out.enc = try r.sub(player.Chip, decodeMpChip, t),
+        4 => out.loud = try r.sub(player.Chip, decodeMpChip, t),
+        5 => out.seekTab = try r.str(t),
+        6 => out.captions = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpHov(r: *wire.Reader, out: *player.Hov) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.raw = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpTab(r: *wire.Reader, out: *c.Tab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiSlider(r: *wire.Reader, out: *c.Slider) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.unit = try r.str(t),
+        5 => out.unitJs = try r.str(t),
+        6 => out.minS = try r.str(t),
+        7 => out.maxS = try r.str(t),
+        8 => out.stepS = try r.str(t),
+        9 => out.valS = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpTp(r: *wire.Reader, out: *player.Tp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.show = try r.boolean(t),
+        3 => out.hasTabs = try r.boolean(t),
+        4 => out.tabPrefix = try r.str(t),
+        5 => out.tabActive = try r.str(t),
+        6 => out.tabs = try r.list(c.Tab, decodeMpTab, t),
+        7 => out.play = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.stop = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.hasPreview = try r.boolean(t),
+        10 => out.preview = try r.sub(c.Btn, decodeUiBtn, t),
+        11 => out.hasTracks = try r.boolean(t),
+        12 => out.prev = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.trackSel = try r.sub(c.Select, decodeSelState, t),
+        14 => out.next = try r.sub(c.Btn, decodeUiBtn, t),
+        15 => out.demoted = try r.boolean(t),
+        16 => out.moreSel = try r.sub(c.Select, decodeSelState, t),
+        17 => out.editBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        18 => out.isVideo = try r.boolean(t),
+        19 => out.openExt = try r.sub(c.Btn, decodeUiBtn, t),
+        20 => out.tipVideo = try r.str(t),
+        21 => out.tipVideoSt = try r.sub(c.Tip, decodeTip, t),
+        22 => out.timeTx = try r.str(t),
+        23 => out.seek = try r.sub(c.Slider, decodeUiSlider, t),
+        24 => out.vol = try r.sub(c.Slider, decodeUiSlider, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpRO(r: *wire.Reader, out: *player.RO) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.value = try r.str(t),
+        2 => out.durLbl = try r.str(t),
+        3 => out.dur = try r.str(t),
+        4 => out.inLbl = try r.str(t),
+        5 => out.in = try r.str(t),
+        6 => out.outLbl = try r.str(t),
+        7 => out.out = try r.str(t),
+        8 => out.keepsLbl = try r.str(t),
+        9 => out.keeps = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpAlignSt2(r: *wire.Reader, out: *player.Align) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.bar = try r.boolean(t),
+        2 => out.barPct = try r.str(t),
+        3 => out.barCap = try r.str(t),
+        4 => out.err = try r.boolean(t),
+        5 => out.errText = try r.str(t),
+        6 => out.line = try r.str(t),
+        7 => out.lineVal = try r.str(t),
+        8 => out.alignBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.nudges = try r.list(c.Btn, decodeUiBtn, t),
+        10 => out.offField = try r.sub(c.Field, decodeUiField, t),
+        11 => out.tipAlign = try r.str(t),
+        12 => out.tipAlignSt = try r.sub(c.Tip, decodeTip, t),
+        13 => out.warns = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpSum(r: *wire.Reader, out: *player.Sum) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tx = try r.str(t),
+        2 => out.act = try r.str(t),
+        3 => out.title = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpExMedia(r: *wire.Reader, out: *player.ExMedia) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.presetSel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.summary = try r.sub(player.Sum, decodeMpSum, t),
+        3 => out.outField = try r.sub(c.Field, decodeUiField, t),
+        4 => out.pickBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.loud = try r.sub(c.Loud, decodeLoud, t),
+        6 => out.loudExtra = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpExport(r: *wire.Reader, out: *player.Export) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.medias = try r.list(player.ExMedia, decodeMpExMedia, t),
+        2 => out.exporting = try r.boolean(t),
+        3 => out.runPct = try r.str(t),
+        4 => out.runLabel = try r.str(t),
+        5 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.dual = try r.boolean(t),
+        7 => out.scopeSel = try r.sub(c.Select, decodeSelState, t),
+        8 => out.exportBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.est = try r.str(t),
+        10 => out.loudTx = try r.str(t),
+        11 => out.msg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpEdit(r: *wire.Reader, out: *player.Edit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.show = try r.boolean(t),
+        3 => out.inField = try r.sub(c.Field, decodeUiField, t),
+        4 => out.outField = try r.sub(c.Field, decodeUiField, t),
+        5 => out.setIn = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.setOut = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.autoSel = try r.sub(c.Select, decodeSelState, t),
+        8 => out.tipTrim = try r.str(t),
+        9 => out.tipTrimSt = try r.sub(c.Tip, decodeTip, t),
+        10 => out.ro = try r.sub(player.RO, decodeMpRO, t),
+        11 => out.dual = try r.boolean(t),
+        12 => out.alignRow = try r.sub(player.Align, decodeMpAlignSt2, t),
+        13 => out.exportPane = try r.sub(player.Export, decodeMpExport, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpInner(r: *wire.Reader, out: *player.Inner) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.vid = try r.sub(player.Vid, decodeMpVid, t),
+        4 => out.dual = try r.boolean(t),
+        5 => out.edit = try r.boolean(t),
+        6 => out.wave = try r.sub(player.Wave, decodeMpWave, t),
+        7 => out.laneIn = try r.str(t),
+        8 => out.laneMid = try r.str(t),
+        9 => out.laneOut = try r.str(t),
+        10 => out.laneFull = try r.str(t),
+        11 => out.zin = try r.sub(c.Btn, decodeUiBtn, t),
+        12 => out.zout = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.fit = try r.sub(c.Btn, decodeUiBtn, t),
+        14 => out.zinfo = try r.str(t),
+        15 => out.hov = try r.sub(player.Hov, decodeMpHov, t),
+        16 => out.tipWave = try r.str(t),
+        17 => out.tipWaveSt = try r.sub(c.Tip, decodeTip, t),
+        18 => out.tp = try r.sub(player.Tp, decodeMpTp, t),
+        19 => out.editBox = try r.sub(player.Edit, decodeMpEdit, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpFull(r: *wire.Reader, out: *player.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.inner = try r.sub(player.Inner, decodeMpInner, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoLabels(r: *wire.Reader, out: *automations.Labels) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.enabled = try r.str(t),
+        2 => out.enabledDl = try r.str(t),
+        3 => out.run = try r.str(t),
+        4 => out.schAdd = try r.str(t),
+        5 => out.edit = try r.str(t),
+        6 => out.delete = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoCard(r: *wire.Reader, out: *automations.Card) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.watchDir = try r.str(t),
+        4 => out.status = try r.str(t),
+        5 => out.statusVar = try r.str(t),
+        6 => out.chain = try r.str(t),
+        7 => out.enabled = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoListState(r: *wire.Reader, out: *automations.ListState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.new = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.cards = try r.list(automations.Card, decodeAutoCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoSchedCard(r: *wire.Reader, out: *automations.SchedCard) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.target = try r.str(t),
+        4 => out.stateText = try r.str(t),
+        5 => out.stateVar = try r.str(t),
+        6 => out.trigger = try r.str(t),
+        7 => out.gates = try r.str(t),
+        8 => out.lastFired = try r.str(t),
+        9 => out.warnTone = try r.str(t),
+        10 => out.warnText = try r.str(t),
+        11 => out.enabled = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoSchedsState(r: *wire.Reader, out: *automations.SchedsState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.new = try r.str(t),
+        2 => out.gated = try r.boolean(t),
+        3 => out.gateWhy = try r.str(t),
+        4 => out.empty = try r.str(t),
+        5 => out.cards = try r.list(automations.SchedCard, decodeAutoSchedCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoRunRow(r: *wire.Reader, out: *automations.RunRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.trigger = try r.str(t),
+        3 => out.status = try r.str(t),
+        4 => out.variant = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoRunsState(r: *wire.Reader, out: *automations.RunsState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.rows = try r.list(automations.RunRow, decodeAutoRunRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoBodyState(r: *wire.Reader, out: *automations.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.listTitle = try r.str(t),
+        2 => out.schedTitle = try r.str(t),
+        3 => out.runsTitle = try r.str(t),
+        4 => out.labels = try r.sub(automations.Labels, decodeAutoLabels, t),
+        5 => out.list = try r.sub(automations.ListState, decodeAutoListState, t),
+        6 => out.scheds = try r.sub(automations.SchedsState, decodeAutoSchedsState, t),
+        7 => out.runs = try r.sub(automations.RunsState, decodeAutoRunsState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoState(r: *wire.Reader, out: *automations.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.available = try r.boolean(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.body = try r.sub(automations.Body, decodeAutoBodyState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerBanner(r: *wire.Reader, out: *peers.Banner) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.text = try r.str(t),
+        3 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerDeck(r: *wire.Reader, out: *peers.Deck) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.audible = try r.boolean(t),
+        2 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerRow(r: *wire.Reader, out: *peers.Row) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.dot = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        5 => out.decks = try r.list(peers.Deck, decodePeerDeck, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerList(r: *wire.Reader, out: *peers.List) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.rows = try r.list(peers.Row, decodePeerRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerRoute(r: *wire.Reader, out: *peers.Route) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.detail = try r.str(t),
+        3 => out.pipe = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerRecvRow(r: *wire.Reader, out: *peers.RecvRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.mark = try r.str(t),
+        2 => out.line = try r.str(t),
+        3 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerRecv(r: *wire.Reader, out: *peers.Recv) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.head = try r.str(t),
+        3 => out.rows = try r.list(peers.RecvRow, decodePeerRecvRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerMedia(r: *wire.Reader, out: *peers.Media) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.clockLine = try r.str(t),
+        3 => out.syncLines = try r.strList(t),
+        4 => out.hasTc = try r.boolean(t),
+        5 => out.tcLine = try r.str(t),
+        6 => out.noRoutes = try r.str(t),
+        7 => out.routesHdr = try r.str(t),
+        8 => out.routes = try r.list(peers.Route, decodePeerRoute, t),
+        9 => out.recv = try r.sub(peers.Recv, decodePeerRecv, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCamProp(r: *wire.Reader, out: *peers.CamProp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.minS = try r.str(t),
+        3 => out.maxS = try r.str(t),
+        4 => out.stepS = try r.str(t),
+        5 => out.valS = try r.str(t),
+        6 => out.act = try r.str(t),
+        7 => out.disabled = try r.boolean(t),
+        8 => out.canAuto = try r.boolean(t),
+        9 => out.auto = try r.boolean(t),
+        10 => out.autoAct = try r.str(t),
+        11 => out.autoLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCamNode(r: *wire.Reader, out: *peers.CamNode) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.refreshAct = try r.str(t),
+        3 => out.status = try r.str(t),
+        4 => out.dev = try r.sub(c.Select, decodeSelState, t),
+        5 => out.mode = try r.sub(c.Select, decodeSelState, t),
+        6 => out.start = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.sender = try r.str(t),
+        8 => out.senderLine = try r.str(t),
+        9 => out.propsHdr = try r.str(t),
+        10 => out.props = try r.list(peers.CamProp, decodeCamProp, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerCam(r: *wire.Reader, out: *peers.Cam) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.gated = try r.boolean(t),
+        3 => out.gateHint = try r.str(t),
+        4 => out.empty = try r.str(t),
+        5 => out.nodes = try r.list(peers.CamNode, decodeCamNode, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeXferSet(r: *wire.Reader, out: *peers.XferSet) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.enabled = try r.sub(c.Toggle, decodeUiToggle, t),
+        3 => out.acceptLbl = try r.str(t),
+        4 => out.mode = try r.str(t),
+        5 => out.askLbl = try r.str(t),
+        6 => out.autoLbl = try r.str(t),
+        7 => out.dir = try r.sub(c.Field, decodeUiField, t),
+        8 => out.defaultDir = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeXferPend(r: *wire.Reader, out: *peers.XferPend) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.line = try r.str(t),
+        2 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeXferProg(r: *wire.Reader, out: *peers.XferProg) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.isBadge = try r.boolean(t),
+        3 => out.btn = try r.sub(c.Btn, decodeUiBtn, t),
+        4 => out.badge = try r.str(t),
+        5 => out.badgeVar = try r.str(t),
+        6 => out.bar = try r.boolean(t),
+        7 => out.barPct = try r.str(t),
+        8 => out.barCap = try r.str(t),
+        9 => out.subText = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeerXfer(r: *wire.Reader, out: *peers.Xfer) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.settings = try r.sub(peers.XferSet, decodeXferSet, t),
+        3 => out.none = try r.boolean(t),
+        4 => out.noneHint = try r.str(t),
+        5 => out.pend = try r.list(peers.XferPend, decodeXferPend, t),
+        6 => out.rows = try r.list(peers.XferProg, decodeXferProg, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeersBody(r: *wire.Reader, out: *peers.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.strip = try r.str(t),
+        2 => out.banner = try r.sub(peers.Banner, decodePeerBanner, t),
+        3 => out.connsTitle = try r.str(t),
+        4 => out.conns = try r.sub(peers.List, decodePeerList, t),
+        5 => out.mediaTitle = try r.str(t),
+        6 => out.media = try r.sub(peers.Media, decodePeerMedia, t),
+        7 => out.camTitle = try r.str(t),
+        8 => out.cam = try r.sub(peers.Cam, decodePeerCam, t),
+        9 => out.xferTitle = try r.str(t),
+        10 => out.xfer = try r.sub(peers.Xfer, decodePeerXfer, t),
+        11 => out.netTitle = try r.str(t),
+        12 => out.discovered = try r.sub(peers.List, decodePeerList, t),
+        13 => out.rememberedTitle = try r.str(t),
+        14 => out.remembered = try r.sub(peers.List, decodePeerList, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodePeers(r: *wire.Reader, out: *peers.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.available = try r.boolean(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.body = try r.sub(peers.Body, decodePeersBody, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.tip = try r.sub(c.Tip, decodeTip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkPrev(r: *wire.Reader, out: *tick.Prev) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.hash = @intCast(try r.uint(t)),
         else => try r.skip(t),
     };
 }
 
 pub fn decodeTkLive(r: *wire.Reader, out: *tick.LiveBatch) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
-        1 => out.live = try r.sub(tick.LiveState, decodeTkLiveState, t),
+        1 => out.live = try r.sub(live.State, decodeLiveState, t),
         2 => out.tc = try r.str(t),
         3 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
         else => try r.skip(t),
@@ -341,12 +2362,782 @@ pub fn decodeTkLogs(r: *wire.Reader, out: *tick.LogsBatch) wire.Error!void {
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
+    try std.testing.expect(msg_ag_state != msg_live_state);
+    try std.testing.expect(msg_ag_state != msg_live_transport);
+    try std.testing.expect(msg_ag_state != msg_live_n_p);
+    try std.testing.expect(msg_ag_state != msg_live_status);
+    try std.testing.expect(msg_ag_state != msg_live_decks);
+    try std.testing.expect(msg_ag_state != msg_live_signals);
+    try std.testing.expect(msg_ag_state != msg_live_cockpit);
+    try std.testing.expect(msg_ag_state != msg_live_link);
+    try std.testing.expect(msg_ag_state != msg_live_graph);
+    try std.testing.expect(msg_ag_state != msg_live_perf);
+    try std.testing.expect(msg_ag_state != msg_live_strip);
+    try std.testing.expect(msg_ag_state != msg_mo_state);
+    try std.testing.expect(msg_ag_state != msg_pub);
+    try std.testing.expect(msg_ag_state != msg_pub_hero);
+    try std.testing.expect(msg_ag_state != msg_set_state);
+    try std.testing.expect(msg_ag_state != msg_set_content);
+    try std.testing.expect(msg_ag_state != msg_set_status);
+    try std.testing.expect(msg_ag_state != msg_lib_state);
+    try std.testing.expect(msg_ag_state != msg_lib_body);
+    try std.testing.expect(msg_ag_state != msg_lib_detail);
+    try std.testing.expect(msg_ag_state != msg_lib_queue);
+    try std.testing.expect(msg_ag_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_ag_state != msg_mp_full);
+    try std.testing.expect(msg_ag_state != msg_mp_inner);
+    try std.testing.expect(msg_ag_state != msg_mp_vid);
+    try std.testing.expect(msg_ag_state != msg_mp_wave);
+    try std.testing.expect(msg_ag_state != msg_mp_tp);
+    try std.testing.expect(msg_ag_state != msg_mp_edit);
+    try std.testing.expect(msg_ag_state != msg_mp_export);
+    try std.testing.expect(msg_ag_state != msg_mp_r_o);
+    try std.testing.expect(msg_ag_state != msg_mp_hov);
+    try std.testing.expect(msg_ag_state != msg_auto_state);
+    try std.testing.expect(msg_ag_state != msg_auto_body_state);
+    try std.testing.expect(msg_ag_state != msg_peers);
+    try std.testing.expect(msg_ag_state != msg_peers_body);
     try std.testing.expect(msg_ag_state != msg_tk_live);
     try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
+    try std.testing.expect(msg_logs_state != msg_live_state);
+    try std.testing.expect(msg_logs_state != msg_live_transport);
+    try std.testing.expect(msg_logs_state != msg_live_n_p);
+    try std.testing.expect(msg_logs_state != msg_live_status);
+    try std.testing.expect(msg_logs_state != msg_live_decks);
+    try std.testing.expect(msg_logs_state != msg_live_signals);
+    try std.testing.expect(msg_logs_state != msg_live_cockpit);
+    try std.testing.expect(msg_logs_state != msg_live_link);
+    try std.testing.expect(msg_logs_state != msg_live_graph);
+    try std.testing.expect(msg_logs_state != msg_live_perf);
+    try std.testing.expect(msg_logs_state != msg_live_strip);
+    try std.testing.expect(msg_logs_state != msg_mo_state);
+    try std.testing.expect(msg_logs_state != msg_pub);
+    try std.testing.expect(msg_logs_state != msg_pub_hero);
+    try std.testing.expect(msg_logs_state != msg_set_state);
+    try std.testing.expect(msg_logs_state != msg_set_content);
+    try std.testing.expect(msg_logs_state != msg_set_status);
+    try std.testing.expect(msg_logs_state != msg_lib_state);
+    try std.testing.expect(msg_logs_state != msg_lib_body);
+    try std.testing.expect(msg_logs_state != msg_lib_detail);
+    try std.testing.expect(msg_logs_state != msg_lib_queue);
+    try std.testing.expect(msg_logs_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_logs_state != msg_mp_full);
+    try std.testing.expect(msg_logs_state != msg_mp_inner);
+    try std.testing.expect(msg_logs_state != msg_mp_vid);
+    try std.testing.expect(msg_logs_state != msg_mp_wave);
+    try std.testing.expect(msg_logs_state != msg_mp_tp);
+    try std.testing.expect(msg_logs_state != msg_mp_edit);
+    try std.testing.expect(msg_logs_state != msg_mp_export);
+    try std.testing.expect(msg_logs_state != msg_mp_r_o);
+    try std.testing.expect(msg_logs_state != msg_mp_hov);
+    try std.testing.expect(msg_logs_state != msg_auto_state);
+    try std.testing.expect(msg_logs_state != msg_auto_body_state);
+    try std.testing.expect(msg_logs_state != msg_peers);
+    try std.testing.expect(msg_logs_state != msg_peers_body);
     try std.testing.expect(msg_logs_state != msg_tk_live);
     try std.testing.expect(msg_logs_state != msg_tk_logs);
+    try std.testing.expect(msg_logs_lines != msg_live_state);
+    try std.testing.expect(msg_logs_lines != msg_live_transport);
+    try std.testing.expect(msg_logs_lines != msg_live_n_p);
+    try std.testing.expect(msg_logs_lines != msg_live_status);
+    try std.testing.expect(msg_logs_lines != msg_live_decks);
+    try std.testing.expect(msg_logs_lines != msg_live_signals);
+    try std.testing.expect(msg_logs_lines != msg_live_cockpit);
+    try std.testing.expect(msg_logs_lines != msg_live_link);
+    try std.testing.expect(msg_logs_lines != msg_live_graph);
+    try std.testing.expect(msg_logs_lines != msg_live_perf);
+    try std.testing.expect(msg_logs_lines != msg_live_strip);
+    try std.testing.expect(msg_logs_lines != msg_mo_state);
+    try std.testing.expect(msg_logs_lines != msg_pub);
+    try std.testing.expect(msg_logs_lines != msg_pub_hero);
+    try std.testing.expect(msg_logs_lines != msg_set_state);
+    try std.testing.expect(msg_logs_lines != msg_set_content);
+    try std.testing.expect(msg_logs_lines != msg_set_status);
+    try std.testing.expect(msg_logs_lines != msg_lib_state);
+    try std.testing.expect(msg_logs_lines != msg_lib_body);
+    try std.testing.expect(msg_logs_lines != msg_lib_detail);
+    try std.testing.expect(msg_logs_lines != msg_lib_queue);
+    try std.testing.expect(msg_logs_lines != msg_lib_cue_cell);
+    try std.testing.expect(msg_logs_lines != msg_mp_full);
+    try std.testing.expect(msg_logs_lines != msg_mp_inner);
+    try std.testing.expect(msg_logs_lines != msg_mp_vid);
+    try std.testing.expect(msg_logs_lines != msg_mp_wave);
+    try std.testing.expect(msg_logs_lines != msg_mp_tp);
+    try std.testing.expect(msg_logs_lines != msg_mp_edit);
+    try std.testing.expect(msg_logs_lines != msg_mp_export);
+    try std.testing.expect(msg_logs_lines != msg_mp_r_o);
+    try std.testing.expect(msg_logs_lines != msg_mp_hov);
+    try std.testing.expect(msg_logs_lines != msg_auto_state);
+    try std.testing.expect(msg_logs_lines != msg_auto_body_state);
+    try std.testing.expect(msg_logs_lines != msg_peers);
+    try std.testing.expect(msg_logs_lines != msg_peers_body);
     try std.testing.expect(msg_logs_lines != msg_tk_live);
     try std.testing.expect(msg_logs_lines != msg_tk_logs);
+    try std.testing.expect(msg_live_state != msg_live_transport);
+    try std.testing.expect(msg_live_state != msg_live_n_p);
+    try std.testing.expect(msg_live_state != msg_live_status);
+    try std.testing.expect(msg_live_state != msg_live_decks);
+    try std.testing.expect(msg_live_state != msg_live_signals);
+    try std.testing.expect(msg_live_state != msg_live_cockpit);
+    try std.testing.expect(msg_live_state != msg_live_link);
+    try std.testing.expect(msg_live_state != msg_live_graph);
+    try std.testing.expect(msg_live_state != msg_live_perf);
+    try std.testing.expect(msg_live_state != msg_live_strip);
+    try std.testing.expect(msg_live_state != msg_mo_state);
+    try std.testing.expect(msg_live_state != msg_pub);
+    try std.testing.expect(msg_live_state != msg_pub_hero);
+    try std.testing.expect(msg_live_state != msg_set_state);
+    try std.testing.expect(msg_live_state != msg_set_content);
+    try std.testing.expect(msg_live_state != msg_set_status);
+    try std.testing.expect(msg_live_state != msg_lib_state);
+    try std.testing.expect(msg_live_state != msg_lib_body);
+    try std.testing.expect(msg_live_state != msg_lib_detail);
+    try std.testing.expect(msg_live_state != msg_lib_queue);
+    try std.testing.expect(msg_live_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_state != msg_mp_full);
+    try std.testing.expect(msg_live_state != msg_mp_inner);
+    try std.testing.expect(msg_live_state != msg_mp_vid);
+    try std.testing.expect(msg_live_state != msg_mp_wave);
+    try std.testing.expect(msg_live_state != msg_mp_tp);
+    try std.testing.expect(msg_live_state != msg_mp_edit);
+    try std.testing.expect(msg_live_state != msg_mp_export);
+    try std.testing.expect(msg_live_state != msg_mp_r_o);
+    try std.testing.expect(msg_live_state != msg_mp_hov);
+    try std.testing.expect(msg_live_state != msg_auto_state);
+    try std.testing.expect(msg_live_state != msg_auto_body_state);
+    try std.testing.expect(msg_live_state != msg_peers);
+    try std.testing.expect(msg_live_state != msg_peers_body);
+    try std.testing.expect(msg_live_state != msg_tk_live);
+    try std.testing.expect(msg_live_state != msg_tk_logs);
+    try std.testing.expect(msg_live_transport != msg_live_n_p);
+    try std.testing.expect(msg_live_transport != msg_live_status);
+    try std.testing.expect(msg_live_transport != msg_live_decks);
+    try std.testing.expect(msg_live_transport != msg_live_signals);
+    try std.testing.expect(msg_live_transport != msg_live_cockpit);
+    try std.testing.expect(msg_live_transport != msg_live_link);
+    try std.testing.expect(msg_live_transport != msg_live_graph);
+    try std.testing.expect(msg_live_transport != msg_live_perf);
+    try std.testing.expect(msg_live_transport != msg_live_strip);
+    try std.testing.expect(msg_live_transport != msg_mo_state);
+    try std.testing.expect(msg_live_transport != msg_pub);
+    try std.testing.expect(msg_live_transport != msg_pub_hero);
+    try std.testing.expect(msg_live_transport != msg_set_state);
+    try std.testing.expect(msg_live_transport != msg_set_content);
+    try std.testing.expect(msg_live_transport != msg_set_status);
+    try std.testing.expect(msg_live_transport != msg_lib_state);
+    try std.testing.expect(msg_live_transport != msg_lib_body);
+    try std.testing.expect(msg_live_transport != msg_lib_detail);
+    try std.testing.expect(msg_live_transport != msg_lib_queue);
+    try std.testing.expect(msg_live_transport != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_transport != msg_mp_full);
+    try std.testing.expect(msg_live_transport != msg_mp_inner);
+    try std.testing.expect(msg_live_transport != msg_mp_vid);
+    try std.testing.expect(msg_live_transport != msg_mp_wave);
+    try std.testing.expect(msg_live_transport != msg_mp_tp);
+    try std.testing.expect(msg_live_transport != msg_mp_edit);
+    try std.testing.expect(msg_live_transport != msg_mp_export);
+    try std.testing.expect(msg_live_transport != msg_mp_r_o);
+    try std.testing.expect(msg_live_transport != msg_mp_hov);
+    try std.testing.expect(msg_live_transport != msg_auto_state);
+    try std.testing.expect(msg_live_transport != msg_auto_body_state);
+    try std.testing.expect(msg_live_transport != msg_peers);
+    try std.testing.expect(msg_live_transport != msg_peers_body);
+    try std.testing.expect(msg_live_transport != msg_tk_live);
+    try std.testing.expect(msg_live_transport != msg_tk_logs);
+    try std.testing.expect(msg_live_n_p != msg_live_status);
+    try std.testing.expect(msg_live_n_p != msg_live_decks);
+    try std.testing.expect(msg_live_n_p != msg_live_signals);
+    try std.testing.expect(msg_live_n_p != msg_live_cockpit);
+    try std.testing.expect(msg_live_n_p != msg_live_link);
+    try std.testing.expect(msg_live_n_p != msg_live_graph);
+    try std.testing.expect(msg_live_n_p != msg_live_perf);
+    try std.testing.expect(msg_live_n_p != msg_live_strip);
+    try std.testing.expect(msg_live_n_p != msg_mo_state);
+    try std.testing.expect(msg_live_n_p != msg_pub);
+    try std.testing.expect(msg_live_n_p != msg_pub_hero);
+    try std.testing.expect(msg_live_n_p != msg_set_state);
+    try std.testing.expect(msg_live_n_p != msg_set_content);
+    try std.testing.expect(msg_live_n_p != msg_set_status);
+    try std.testing.expect(msg_live_n_p != msg_lib_state);
+    try std.testing.expect(msg_live_n_p != msg_lib_body);
+    try std.testing.expect(msg_live_n_p != msg_lib_detail);
+    try std.testing.expect(msg_live_n_p != msg_lib_queue);
+    try std.testing.expect(msg_live_n_p != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_n_p != msg_mp_full);
+    try std.testing.expect(msg_live_n_p != msg_mp_inner);
+    try std.testing.expect(msg_live_n_p != msg_mp_vid);
+    try std.testing.expect(msg_live_n_p != msg_mp_wave);
+    try std.testing.expect(msg_live_n_p != msg_mp_tp);
+    try std.testing.expect(msg_live_n_p != msg_mp_edit);
+    try std.testing.expect(msg_live_n_p != msg_mp_export);
+    try std.testing.expect(msg_live_n_p != msg_mp_r_o);
+    try std.testing.expect(msg_live_n_p != msg_mp_hov);
+    try std.testing.expect(msg_live_n_p != msg_auto_state);
+    try std.testing.expect(msg_live_n_p != msg_auto_body_state);
+    try std.testing.expect(msg_live_n_p != msg_peers);
+    try std.testing.expect(msg_live_n_p != msg_peers_body);
+    try std.testing.expect(msg_live_n_p != msg_tk_live);
+    try std.testing.expect(msg_live_n_p != msg_tk_logs);
+    try std.testing.expect(msg_live_status != msg_live_decks);
+    try std.testing.expect(msg_live_status != msg_live_signals);
+    try std.testing.expect(msg_live_status != msg_live_cockpit);
+    try std.testing.expect(msg_live_status != msg_live_link);
+    try std.testing.expect(msg_live_status != msg_live_graph);
+    try std.testing.expect(msg_live_status != msg_live_perf);
+    try std.testing.expect(msg_live_status != msg_live_strip);
+    try std.testing.expect(msg_live_status != msg_mo_state);
+    try std.testing.expect(msg_live_status != msg_pub);
+    try std.testing.expect(msg_live_status != msg_pub_hero);
+    try std.testing.expect(msg_live_status != msg_set_state);
+    try std.testing.expect(msg_live_status != msg_set_content);
+    try std.testing.expect(msg_live_status != msg_set_status);
+    try std.testing.expect(msg_live_status != msg_lib_state);
+    try std.testing.expect(msg_live_status != msg_lib_body);
+    try std.testing.expect(msg_live_status != msg_lib_detail);
+    try std.testing.expect(msg_live_status != msg_lib_queue);
+    try std.testing.expect(msg_live_status != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_status != msg_mp_full);
+    try std.testing.expect(msg_live_status != msg_mp_inner);
+    try std.testing.expect(msg_live_status != msg_mp_vid);
+    try std.testing.expect(msg_live_status != msg_mp_wave);
+    try std.testing.expect(msg_live_status != msg_mp_tp);
+    try std.testing.expect(msg_live_status != msg_mp_edit);
+    try std.testing.expect(msg_live_status != msg_mp_export);
+    try std.testing.expect(msg_live_status != msg_mp_r_o);
+    try std.testing.expect(msg_live_status != msg_mp_hov);
+    try std.testing.expect(msg_live_status != msg_auto_state);
+    try std.testing.expect(msg_live_status != msg_auto_body_state);
+    try std.testing.expect(msg_live_status != msg_peers);
+    try std.testing.expect(msg_live_status != msg_peers_body);
+    try std.testing.expect(msg_live_status != msg_tk_live);
+    try std.testing.expect(msg_live_status != msg_tk_logs);
+    try std.testing.expect(msg_live_decks != msg_live_signals);
+    try std.testing.expect(msg_live_decks != msg_live_cockpit);
+    try std.testing.expect(msg_live_decks != msg_live_link);
+    try std.testing.expect(msg_live_decks != msg_live_graph);
+    try std.testing.expect(msg_live_decks != msg_live_perf);
+    try std.testing.expect(msg_live_decks != msg_live_strip);
+    try std.testing.expect(msg_live_decks != msg_mo_state);
+    try std.testing.expect(msg_live_decks != msg_pub);
+    try std.testing.expect(msg_live_decks != msg_pub_hero);
+    try std.testing.expect(msg_live_decks != msg_set_state);
+    try std.testing.expect(msg_live_decks != msg_set_content);
+    try std.testing.expect(msg_live_decks != msg_set_status);
+    try std.testing.expect(msg_live_decks != msg_lib_state);
+    try std.testing.expect(msg_live_decks != msg_lib_body);
+    try std.testing.expect(msg_live_decks != msg_lib_detail);
+    try std.testing.expect(msg_live_decks != msg_lib_queue);
+    try std.testing.expect(msg_live_decks != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_decks != msg_mp_full);
+    try std.testing.expect(msg_live_decks != msg_mp_inner);
+    try std.testing.expect(msg_live_decks != msg_mp_vid);
+    try std.testing.expect(msg_live_decks != msg_mp_wave);
+    try std.testing.expect(msg_live_decks != msg_mp_tp);
+    try std.testing.expect(msg_live_decks != msg_mp_edit);
+    try std.testing.expect(msg_live_decks != msg_mp_export);
+    try std.testing.expect(msg_live_decks != msg_mp_r_o);
+    try std.testing.expect(msg_live_decks != msg_mp_hov);
+    try std.testing.expect(msg_live_decks != msg_auto_state);
+    try std.testing.expect(msg_live_decks != msg_auto_body_state);
+    try std.testing.expect(msg_live_decks != msg_peers);
+    try std.testing.expect(msg_live_decks != msg_peers_body);
+    try std.testing.expect(msg_live_decks != msg_tk_live);
+    try std.testing.expect(msg_live_decks != msg_tk_logs);
+    try std.testing.expect(msg_live_signals != msg_live_cockpit);
+    try std.testing.expect(msg_live_signals != msg_live_link);
+    try std.testing.expect(msg_live_signals != msg_live_graph);
+    try std.testing.expect(msg_live_signals != msg_live_perf);
+    try std.testing.expect(msg_live_signals != msg_live_strip);
+    try std.testing.expect(msg_live_signals != msg_mo_state);
+    try std.testing.expect(msg_live_signals != msg_pub);
+    try std.testing.expect(msg_live_signals != msg_pub_hero);
+    try std.testing.expect(msg_live_signals != msg_set_state);
+    try std.testing.expect(msg_live_signals != msg_set_content);
+    try std.testing.expect(msg_live_signals != msg_set_status);
+    try std.testing.expect(msg_live_signals != msg_lib_state);
+    try std.testing.expect(msg_live_signals != msg_lib_body);
+    try std.testing.expect(msg_live_signals != msg_lib_detail);
+    try std.testing.expect(msg_live_signals != msg_lib_queue);
+    try std.testing.expect(msg_live_signals != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_signals != msg_mp_full);
+    try std.testing.expect(msg_live_signals != msg_mp_inner);
+    try std.testing.expect(msg_live_signals != msg_mp_vid);
+    try std.testing.expect(msg_live_signals != msg_mp_wave);
+    try std.testing.expect(msg_live_signals != msg_mp_tp);
+    try std.testing.expect(msg_live_signals != msg_mp_edit);
+    try std.testing.expect(msg_live_signals != msg_mp_export);
+    try std.testing.expect(msg_live_signals != msg_mp_r_o);
+    try std.testing.expect(msg_live_signals != msg_mp_hov);
+    try std.testing.expect(msg_live_signals != msg_auto_state);
+    try std.testing.expect(msg_live_signals != msg_auto_body_state);
+    try std.testing.expect(msg_live_signals != msg_peers);
+    try std.testing.expect(msg_live_signals != msg_peers_body);
+    try std.testing.expect(msg_live_signals != msg_tk_live);
+    try std.testing.expect(msg_live_signals != msg_tk_logs);
+    try std.testing.expect(msg_live_cockpit != msg_live_link);
+    try std.testing.expect(msg_live_cockpit != msg_live_graph);
+    try std.testing.expect(msg_live_cockpit != msg_live_perf);
+    try std.testing.expect(msg_live_cockpit != msg_live_strip);
+    try std.testing.expect(msg_live_cockpit != msg_mo_state);
+    try std.testing.expect(msg_live_cockpit != msg_pub);
+    try std.testing.expect(msg_live_cockpit != msg_pub_hero);
+    try std.testing.expect(msg_live_cockpit != msg_set_state);
+    try std.testing.expect(msg_live_cockpit != msg_set_content);
+    try std.testing.expect(msg_live_cockpit != msg_set_status);
+    try std.testing.expect(msg_live_cockpit != msg_lib_state);
+    try std.testing.expect(msg_live_cockpit != msg_lib_body);
+    try std.testing.expect(msg_live_cockpit != msg_lib_detail);
+    try std.testing.expect(msg_live_cockpit != msg_lib_queue);
+    try std.testing.expect(msg_live_cockpit != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_cockpit != msg_mp_full);
+    try std.testing.expect(msg_live_cockpit != msg_mp_inner);
+    try std.testing.expect(msg_live_cockpit != msg_mp_vid);
+    try std.testing.expect(msg_live_cockpit != msg_mp_wave);
+    try std.testing.expect(msg_live_cockpit != msg_mp_tp);
+    try std.testing.expect(msg_live_cockpit != msg_mp_edit);
+    try std.testing.expect(msg_live_cockpit != msg_mp_export);
+    try std.testing.expect(msg_live_cockpit != msg_mp_r_o);
+    try std.testing.expect(msg_live_cockpit != msg_mp_hov);
+    try std.testing.expect(msg_live_cockpit != msg_auto_state);
+    try std.testing.expect(msg_live_cockpit != msg_auto_body_state);
+    try std.testing.expect(msg_live_cockpit != msg_peers);
+    try std.testing.expect(msg_live_cockpit != msg_peers_body);
+    try std.testing.expect(msg_live_cockpit != msg_tk_live);
+    try std.testing.expect(msg_live_cockpit != msg_tk_logs);
+    try std.testing.expect(msg_live_link != msg_live_graph);
+    try std.testing.expect(msg_live_link != msg_live_perf);
+    try std.testing.expect(msg_live_link != msg_live_strip);
+    try std.testing.expect(msg_live_link != msg_mo_state);
+    try std.testing.expect(msg_live_link != msg_pub);
+    try std.testing.expect(msg_live_link != msg_pub_hero);
+    try std.testing.expect(msg_live_link != msg_set_state);
+    try std.testing.expect(msg_live_link != msg_set_content);
+    try std.testing.expect(msg_live_link != msg_set_status);
+    try std.testing.expect(msg_live_link != msg_lib_state);
+    try std.testing.expect(msg_live_link != msg_lib_body);
+    try std.testing.expect(msg_live_link != msg_lib_detail);
+    try std.testing.expect(msg_live_link != msg_lib_queue);
+    try std.testing.expect(msg_live_link != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_link != msg_mp_full);
+    try std.testing.expect(msg_live_link != msg_mp_inner);
+    try std.testing.expect(msg_live_link != msg_mp_vid);
+    try std.testing.expect(msg_live_link != msg_mp_wave);
+    try std.testing.expect(msg_live_link != msg_mp_tp);
+    try std.testing.expect(msg_live_link != msg_mp_edit);
+    try std.testing.expect(msg_live_link != msg_mp_export);
+    try std.testing.expect(msg_live_link != msg_mp_r_o);
+    try std.testing.expect(msg_live_link != msg_mp_hov);
+    try std.testing.expect(msg_live_link != msg_auto_state);
+    try std.testing.expect(msg_live_link != msg_auto_body_state);
+    try std.testing.expect(msg_live_link != msg_peers);
+    try std.testing.expect(msg_live_link != msg_peers_body);
+    try std.testing.expect(msg_live_link != msg_tk_live);
+    try std.testing.expect(msg_live_link != msg_tk_logs);
+    try std.testing.expect(msg_live_graph != msg_live_perf);
+    try std.testing.expect(msg_live_graph != msg_live_strip);
+    try std.testing.expect(msg_live_graph != msg_mo_state);
+    try std.testing.expect(msg_live_graph != msg_pub);
+    try std.testing.expect(msg_live_graph != msg_pub_hero);
+    try std.testing.expect(msg_live_graph != msg_set_state);
+    try std.testing.expect(msg_live_graph != msg_set_content);
+    try std.testing.expect(msg_live_graph != msg_set_status);
+    try std.testing.expect(msg_live_graph != msg_lib_state);
+    try std.testing.expect(msg_live_graph != msg_lib_body);
+    try std.testing.expect(msg_live_graph != msg_lib_detail);
+    try std.testing.expect(msg_live_graph != msg_lib_queue);
+    try std.testing.expect(msg_live_graph != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_graph != msg_mp_full);
+    try std.testing.expect(msg_live_graph != msg_mp_inner);
+    try std.testing.expect(msg_live_graph != msg_mp_vid);
+    try std.testing.expect(msg_live_graph != msg_mp_wave);
+    try std.testing.expect(msg_live_graph != msg_mp_tp);
+    try std.testing.expect(msg_live_graph != msg_mp_edit);
+    try std.testing.expect(msg_live_graph != msg_mp_export);
+    try std.testing.expect(msg_live_graph != msg_mp_r_o);
+    try std.testing.expect(msg_live_graph != msg_mp_hov);
+    try std.testing.expect(msg_live_graph != msg_auto_state);
+    try std.testing.expect(msg_live_graph != msg_auto_body_state);
+    try std.testing.expect(msg_live_graph != msg_peers);
+    try std.testing.expect(msg_live_graph != msg_peers_body);
+    try std.testing.expect(msg_live_graph != msg_tk_live);
+    try std.testing.expect(msg_live_graph != msg_tk_logs);
+    try std.testing.expect(msg_live_perf != msg_live_strip);
+    try std.testing.expect(msg_live_perf != msg_mo_state);
+    try std.testing.expect(msg_live_perf != msg_pub);
+    try std.testing.expect(msg_live_perf != msg_pub_hero);
+    try std.testing.expect(msg_live_perf != msg_set_state);
+    try std.testing.expect(msg_live_perf != msg_set_content);
+    try std.testing.expect(msg_live_perf != msg_set_status);
+    try std.testing.expect(msg_live_perf != msg_lib_state);
+    try std.testing.expect(msg_live_perf != msg_lib_body);
+    try std.testing.expect(msg_live_perf != msg_lib_detail);
+    try std.testing.expect(msg_live_perf != msg_lib_queue);
+    try std.testing.expect(msg_live_perf != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_perf != msg_mp_full);
+    try std.testing.expect(msg_live_perf != msg_mp_inner);
+    try std.testing.expect(msg_live_perf != msg_mp_vid);
+    try std.testing.expect(msg_live_perf != msg_mp_wave);
+    try std.testing.expect(msg_live_perf != msg_mp_tp);
+    try std.testing.expect(msg_live_perf != msg_mp_edit);
+    try std.testing.expect(msg_live_perf != msg_mp_export);
+    try std.testing.expect(msg_live_perf != msg_mp_r_o);
+    try std.testing.expect(msg_live_perf != msg_mp_hov);
+    try std.testing.expect(msg_live_perf != msg_auto_state);
+    try std.testing.expect(msg_live_perf != msg_auto_body_state);
+    try std.testing.expect(msg_live_perf != msg_peers);
+    try std.testing.expect(msg_live_perf != msg_peers_body);
+    try std.testing.expect(msg_live_perf != msg_tk_live);
+    try std.testing.expect(msg_live_perf != msg_tk_logs);
+    try std.testing.expect(msg_live_strip != msg_mo_state);
+    try std.testing.expect(msg_live_strip != msg_pub);
+    try std.testing.expect(msg_live_strip != msg_pub_hero);
+    try std.testing.expect(msg_live_strip != msg_set_state);
+    try std.testing.expect(msg_live_strip != msg_set_content);
+    try std.testing.expect(msg_live_strip != msg_set_status);
+    try std.testing.expect(msg_live_strip != msg_lib_state);
+    try std.testing.expect(msg_live_strip != msg_lib_body);
+    try std.testing.expect(msg_live_strip != msg_lib_detail);
+    try std.testing.expect(msg_live_strip != msg_lib_queue);
+    try std.testing.expect(msg_live_strip != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_strip != msg_mp_full);
+    try std.testing.expect(msg_live_strip != msg_mp_inner);
+    try std.testing.expect(msg_live_strip != msg_mp_vid);
+    try std.testing.expect(msg_live_strip != msg_mp_wave);
+    try std.testing.expect(msg_live_strip != msg_mp_tp);
+    try std.testing.expect(msg_live_strip != msg_mp_edit);
+    try std.testing.expect(msg_live_strip != msg_mp_export);
+    try std.testing.expect(msg_live_strip != msg_mp_r_o);
+    try std.testing.expect(msg_live_strip != msg_mp_hov);
+    try std.testing.expect(msg_live_strip != msg_auto_state);
+    try std.testing.expect(msg_live_strip != msg_auto_body_state);
+    try std.testing.expect(msg_live_strip != msg_peers);
+    try std.testing.expect(msg_live_strip != msg_peers_body);
+    try std.testing.expect(msg_live_strip != msg_tk_live);
+    try std.testing.expect(msg_live_strip != msg_tk_logs);
+    try std.testing.expect(msg_mo_state != msg_pub);
+    try std.testing.expect(msg_mo_state != msg_pub_hero);
+    try std.testing.expect(msg_mo_state != msg_set_state);
+    try std.testing.expect(msg_mo_state != msg_set_content);
+    try std.testing.expect(msg_mo_state != msg_set_status);
+    try std.testing.expect(msg_mo_state != msg_lib_state);
+    try std.testing.expect(msg_mo_state != msg_lib_body);
+    try std.testing.expect(msg_mo_state != msg_lib_detail);
+    try std.testing.expect(msg_mo_state != msg_lib_queue);
+    try std.testing.expect(msg_mo_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_mo_state != msg_mp_full);
+    try std.testing.expect(msg_mo_state != msg_mp_inner);
+    try std.testing.expect(msg_mo_state != msg_mp_vid);
+    try std.testing.expect(msg_mo_state != msg_mp_wave);
+    try std.testing.expect(msg_mo_state != msg_mp_tp);
+    try std.testing.expect(msg_mo_state != msg_mp_edit);
+    try std.testing.expect(msg_mo_state != msg_mp_export);
+    try std.testing.expect(msg_mo_state != msg_mp_r_o);
+    try std.testing.expect(msg_mo_state != msg_mp_hov);
+    try std.testing.expect(msg_mo_state != msg_auto_state);
+    try std.testing.expect(msg_mo_state != msg_auto_body_state);
+    try std.testing.expect(msg_mo_state != msg_peers);
+    try std.testing.expect(msg_mo_state != msg_peers_body);
+    try std.testing.expect(msg_mo_state != msg_tk_live);
+    try std.testing.expect(msg_mo_state != msg_tk_logs);
+    try std.testing.expect(msg_pub != msg_pub_hero);
+    try std.testing.expect(msg_pub != msg_set_state);
+    try std.testing.expect(msg_pub != msg_set_content);
+    try std.testing.expect(msg_pub != msg_set_status);
+    try std.testing.expect(msg_pub != msg_lib_state);
+    try std.testing.expect(msg_pub != msg_lib_body);
+    try std.testing.expect(msg_pub != msg_lib_detail);
+    try std.testing.expect(msg_pub != msg_lib_queue);
+    try std.testing.expect(msg_pub != msg_lib_cue_cell);
+    try std.testing.expect(msg_pub != msg_mp_full);
+    try std.testing.expect(msg_pub != msg_mp_inner);
+    try std.testing.expect(msg_pub != msg_mp_vid);
+    try std.testing.expect(msg_pub != msg_mp_wave);
+    try std.testing.expect(msg_pub != msg_mp_tp);
+    try std.testing.expect(msg_pub != msg_mp_edit);
+    try std.testing.expect(msg_pub != msg_mp_export);
+    try std.testing.expect(msg_pub != msg_mp_r_o);
+    try std.testing.expect(msg_pub != msg_mp_hov);
+    try std.testing.expect(msg_pub != msg_auto_state);
+    try std.testing.expect(msg_pub != msg_auto_body_state);
+    try std.testing.expect(msg_pub != msg_peers);
+    try std.testing.expect(msg_pub != msg_peers_body);
+    try std.testing.expect(msg_pub != msg_tk_live);
+    try std.testing.expect(msg_pub != msg_tk_logs);
+    try std.testing.expect(msg_pub_hero != msg_set_state);
+    try std.testing.expect(msg_pub_hero != msg_set_content);
+    try std.testing.expect(msg_pub_hero != msg_set_status);
+    try std.testing.expect(msg_pub_hero != msg_lib_state);
+    try std.testing.expect(msg_pub_hero != msg_lib_body);
+    try std.testing.expect(msg_pub_hero != msg_lib_detail);
+    try std.testing.expect(msg_pub_hero != msg_lib_queue);
+    try std.testing.expect(msg_pub_hero != msg_lib_cue_cell);
+    try std.testing.expect(msg_pub_hero != msg_mp_full);
+    try std.testing.expect(msg_pub_hero != msg_mp_inner);
+    try std.testing.expect(msg_pub_hero != msg_mp_vid);
+    try std.testing.expect(msg_pub_hero != msg_mp_wave);
+    try std.testing.expect(msg_pub_hero != msg_mp_tp);
+    try std.testing.expect(msg_pub_hero != msg_mp_edit);
+    try std.testing.expect(msg_pub_hero != msg_mp_export);
+    try std.testing.expect(msg_pub_hero != msg_mp_r_o);
+    try std.testing.expect(msg_pub_hero != msg_mp_hov);
+    try std.testing.expect(msg_pub_hero != msg_auto_state);
+    try std.testing.expect(msg_pub_hero != msg_auto_body_state);
+    try std.testing.expect(msg_pub_hero != msg_peers);
+    try std.testing.expect(msg_pub_hero != msg_peers_body);
+    try std.testing.expect(msg_pub_hero != msg_tk_live);
+    try std.testing.expect(msg_pub_hero != msg_tk_logs);
+    try std.testing.expect(msg_set_state != msg_set_content);
+    try std.testing.expect(msg_set_state != msg_set_status);
+    try std.testing.expect(msg_set_state != msg_lib_state);
+    try std.testing.expect(msg_set_state != msg_lib_body);
+    try std.testing.expect(msg_set_state != msg_lib_detail);
+    try std.testing.expect(msg_set_state != msg_lib_queue);
+    try std.testing.expect(msg_set_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_state != msg_mp_full);
+    try std.testing.expect(msg_set_state != msg_mp_inner);
+    try std.testing.expect(msg_set_state != msg_mp_vid);
+    try std.testing.expect(msg_set_state != msg_mp_wave);
+    try std.testing.expect(msg_set_state != msg_mp_tp);
+    try std.testing.expect(msg_set_state != msg_mp_edit);
+    try std.testing.expect(msg_set_state != msg_mp_export);
+    try std.testing.expect(msg_set_state != msg_mp_r_o);
+    try std.testing.expect(msg_set_state != msg_mp_hov);
+    try std.testing.expect(msg_set_state != msg_auto_state);
+    try std.testing.expect(msg_set_state != msg_auto_body_state);
+    try std.testing.expect(msg_set_state != msg_peers);
+    try std.testing.expect(msg_set_state != msg_peers_body);
+    try std.testing.expect(msg_set_state != msg_tk_live);
+    try std.testing.expect(msg_set_state != msg_tk_logs);
+    try std.testing.expect(msg_set_content != msg_set_status);
+    try std.testing.expect(msg_set_content != msg_lib_state);
+    try std.testing.expect(msg_set_content != msg_lib_body);
+    try std.testing.expect(msg_set_content != msg_lib_detail);
+    try std.testing.expect(msg_set_content != msg_lib_queue);
+    try std.testing.expect(msg_set_content != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_content != msg_mp_full);
+    try std.testing.expect(msg_set_content != msg_mp_inner);
+    try std.testing.expect(msg_set_content != msg_mp_vid);
+    try std.testing.expect(msg_set_content != msg_mp_wave);
+    try std.testing.expect(msg_set_content != msg_mp_tp);
+    try std.testing.expect(msg_set_content != msg_mp_edit);
+    try std.testing.expect(msg_set_content != msg_mp_export);
+    try std.testing.expect(msg_set_content != msg_mp_r_o);
+    try std.testing.expect(msg_set_content != msg_mp_hov);
+    try std.testing.expect(msg_set_content != msg_auto_state);
+    try std.testing.expect(msg_set_content != msg_auto_body_state);
+    try std.testing.expect(msg_set_content != msg_peers);
+    try std.testing.expect(msg_set_content != msg_peers_body);
+    try std.testing.expect(msg_set_content != msg_tk_live);
+    try std.testing.expect(msg_set_content != msg_tk_logs);
+    try std.testing.expect(msg_set_status != msg_lib_state);
+    try std.testing.expect(msg_set_status != msg_lib_body);
+    try std.testing.expect(msg_set_status != msg_lib_detail);
+    try std.testing.expect(msg_set_status != msg_lib_queue);
+    try std.testing.expect(msg_set_status != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_status != msg_mp_full);
+    try std.testing.expect(msg_set_status != msg_mp_inner);
+    try std.testing.expect(msg_set_status != msg_mp_vid);
+    try std.testing.expect(msg_set_status != msg_mp_wave);
+    try std.testing.expect(msg_set_status != msg_mp_tp);
+    try std.testing.expect(msg_set_status != msg_mp_edit);
+    try std.testing.expect(msg_set_status != msg_mp_export);
+    try std.testing.expect(msg_set_status != msg_mp_r_o);
+    try std.testing.expect(msg_set_status != msg_mp_hov);
+    try std.testing.expect(msg_set_status != msg_auto_state);
+    try std.testing.expect(msg_set_status != msg_auto_body_state);
+    try std.testing.expect(msg_set_status != msg_peers);
+    try std.testing.expect(msg_set_status != msg_peers_body);
+    try std.testing.expect(msg_set_status != msg_tk_live);
+    try std.testing.expect(msg_set_status != msg_tk_logs);
+    try std.testing.expect(msg_lib_state != msg_lib_body);
+    try std.testing.expect(msg_lib_state != msg_lib_detail);
+    try std.testing.expect(msg_lib_state != msg_lib_queue);
+    try std.testing.expect(msg_lib_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_state != msg_mp_full);
+    try std.testing.expect(msg_lib_state != msg_mp_inner);
+    try std.testing.expect(msg_lib_state != msg_mp_vid);
+    try std.testing.expect(msg_lib_state != msg_mp_wave);
+    try std.testing.expect(msg_lib_state != msg_mp_tp);
+    try std.testing.expect(msg_lib_state != msg_mp_edit);
+    try std.testing.expect(msg_lib_state != msg_mp_export);
+    try std.testing.expect(msg_lib_state != msg_mp_r_o);
+    try std.testing.expect(msg_lib_state != msg_mp_hov);
+    try std.testing.expect(msg_lib_state != msg_auto_state);
+    try std.testing.expect(msg_lib_state != msg_auto_body_state);
+    try std.testing.expect(msg_lib_state != msg_peers);
+    try std.testing.expect(msg_lib_state != msg_peers_body);
+    try std.testing.expect(msg_lib_state != msg_tk_live);
+    try std.testing.expect(msg_lib_state != msg_tk_logs);
+    try std.testing.expect(msg_lib_body != msg_lib_detail);
+    try std.testing.expect(msg_lib_body != msg_lib_queue);
+    try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_body != msg_mp_full);
+    try std.testing.expect(msg_lib_body != msg_mp_inner);
+    try std.testing.expect(msg_lib_body != msg_mp_vid);
+    try std.testing.expect(msg_lib_body != msg_mp_wave);
+    try std.testing.expect(msg_lib_body != msg_mp_tp);
+    try std.testing.expect(msg_lib_body != msg_mp_edit);
+    try std.testing.expect(msg_lib_body != msg_mp_export);
+    try std.testing.expect(msg_lib_body != msg_mp_r_o);
+    try std.testing.expect(msg_lib_body != msg_mp_hov);
+    try std.testing.expect(msg_lib_body != msg_auto_state);
+    try std.testing.expect(msg_lib_body != msg_auto_body_state);
+    try std.testing.expect(msg_lib_body != msg_peers);
+    try std.testing.expect(msg_lib_body != msg_peers_body);
+    try std.testing.expect(msg_lib_body != msg_tk_live);
+    try std.testing.expect(msg_lib_body != msg_tk_logs);
+    try std.testing.expect(msg_lib_detail != msg_lib_queue);
+    try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_detail != msg_mp_full);
+    try std.testing.expect(msg_lib_detail != msg_mp_inner);
+    try std.testing.expect(msg_lib_detail != msg_mp_vid);
+    try std.testing.expect(msg_lib_detail != msg_mp_wave);
+    try std.testing.expect(msg_lib_detail != msg_mp_tp);
+    try std.testing.expect(msg_lib_detail != msg_mp_edit);
+    try std.testing.expect(msg_lib_detail != msg_mp_export);
+    try std.testing.expect(msg_lib_detail != msg_mp_r_o);
+    try std.testing.expect(msg_lib_detail != msg_mp_hov);
+    try std.testing.expect(msg_lib_detail != msg_auto_state);
+    try std.testing.expect(msg_lib_detail != msg_auto_body_state);
+    try std.testing.expect(msg_lib_detail != msg_peers);
+    try std.testing.expect(msg_lib_detail != msg_peers_body);
+    try std.testing.expect(msg_lib_detail != msg_tk_live);
+    try std.testing.expect(msg_lib_detail != msg_tk_logs);
+    try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_queue != msg_mp_full);
+    try std.testing.expect(msg_lib_queue != msg_mp_inner);
+    try std.testing.expect(msg_lib_queue != msg_mp_vid);
+    try std.testing.expect(msg_lib_queue != msg_mp_wave);
+    try std.testing.expect(msg_lib_queue != msg_mp_tp);
+    try std.testing.expect(msg_lib_queue != msg_mp_edit);
+    try std.testing.expect(msg_lib_queue != msg_mp_export);
+    try std.testing.expect(msg_lib_queue != msg_mp_r_o);
+    try std.testing.expect(msg_lib_queue != msg_mp_hov);
+    try std.testing.expect(msg_lib_queue != msg_auto_state);
+    try std.testing.expect(msg_lib_queue != msg_auto_body_state);
+    try std.testing.expect(msg_lib_queue != msg_peers);
+    try std.testing.expect(msg_lib_queue != msg_peers_body);
+    try std.testing.expect(msg_lib_queue != msg_tk_live);
+    try std.testing.expect(msg_lib_queue != msg_tk_logs);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_wave);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_tp);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_edit);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_export);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_r_o);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_hov);
+    try std.testing.expect(msg_lib_cue_cell != msg_auto_state);
+    try std.testing.expect(msg_lib_cue_cell != msg_auto_body_state);
+    try std.testing.expect(msg_lib_cue_cell != msg_peers);
+    try std.testing.expect(msg_lib_cue_cell != msg_peers_body);
+    try std.testing.expect(msg_lib_cue_cell != msg_tk_live);
+    try std.testing.expect(msg_lib_cue_cell != msg_tk_logs);
+    try std.testing.expect(msg_mp_full != msg_mp_inner);
+    try std.testing.expect(msg_mp_full != msg_mp_vid);
+    try std.testing.expect(msg_mp_full != msg_mp_wave);
+    try std.testing.expect(msg_mp_full != msg_mp_tp);
+    try std.testing.expect(msg_mp_full != msg_mp_edit);
+    try std.testing.expect(msg_mp_full != msg_mp_export);
+    try std.testing.expect(msg_mp_full != msg_mp_r_o);
+    try std.testing.expect(msg_mp_full != msg_mp_hov);
+    try std.testing.expect(msg_mp_full != msg_auto_state);
+    try std.testing.expect(msg_mp_full != msg_auto_body_state);
+    try std.testing.expect(msg_mp_full != msg_peers);
+    try std.testing.expect(msg_mp_full != msg_peers_body);
+    try std.testing.expect(msg_mp_full != msg_tk_live);
+    try std.testing.expect(msg_mp_full != msg_tk_logs);
+    try std.testing.expect(msg_mp_inner != msg_mp_vid);
+    try std.testing.expect(msg_mp_inner != msg_mp_wave);
+    try std.testing.expect(msg_mp_inner != msg_mp_tp);
+    try std.testing.expect(msg_mp_inner != msg_mp_edit);
+    try std.testing.expect(msg_mp_inner != msg_mp_export);
+    try std.testing.expect(msg_mp_inner != msg_mp_r_o);
+    try std.testing.expect(msg_mp_inner != msg_mp_hov);
+    try std.testing.expect(msg_mp_inner != msg_auto_state);
+    try std.testing.expect(msg_mp_inner != msg_auto_body_state);
+    try std.testing.expect(msg_mp_inner != msg_peers);
+    try std.testing.expect(msg_mp_inner != msg_peers_body);
+    try std.testing.expect(msg_mp_inner != msg_tk_live);
+    try std.testing.expect(msg_mp_inner != msg_tk_logs);
+    try std.testing.expect(msg_mp_vid != msg_mp_wave);
+    try std.testing.expect(msg_mp_vid != msg_mp_tp);
+    try std.testing.expect(msg_mp_vid != msg_mp_edit);
+    try std.testing.expect(msg_mp_vid != msg_mp_export);
+    try std.testing.expect(msg_mp_vid != msg_mp_r_o);
+    try std.testing.expect(msg_mp_vid != msg_mp_hov);
+    try std.testing.expect(msg_mp_vid != msg_auto_state);
+    try std.testing.expect(msg_mp_vid != msg_auto_body_state);
+    try std.testing.expect(msg_mp_vid != msg_peers);
+    try std.testing.expect(msg_mp_vid != msg_peers_body);
+    try std.testing.expect(msg_mp_vid != msg_tk_live);
+    try std.testing.expect(msg_mp_vid != msg_tk_logs);
+    try std.testing.expect(msg_mp_wave != msg_mp_tp);
+    try std.testing.expect(msg_mp_wave != msg_mp_edit);
+    try std.testing.expect(msg_mp_wave != msg_mp_export);
+    try std.testing.expect(msg_mp_wave != msg_mp_r_o);
+    try std.testing.expect(msg_mp_wave != msg_mp_hov);
+    try std.testing.expect(msg_mp_wave != msg_auto_state);
+    try std.testing.expect(msg_mp_wave != msg_auto_body_state);
+    try std.testing.expect(msg_mp_wave != msg_peers);
+    try std.testing.expect(msg_mp_wave != msg_peers_body);
+    try std.testing.expect(msg_mp_wave != msg_tk_live);
+    try std.testing.expect(msg_mp_wave != msg_tk_logs);
+    try std.testing.expect(msg_mp_tp != msg_mp_edit);
+    try std.testing.expect(msg_mp_tp != msg_mp_export);
+    try std.testing.expect(msg_mp_tp != msg_mp_r_o);
+    try std.testing.expect(msg_mp_tp != msg_mp_hov);
+    try std.testing.expect(msg_mp_tp != msg_auto_state);
+    try std.testing.expect(msg_mp_tp != msg_auto_body_state);
+    try std.testing.expect(msg_mp_tp != msg_peers);
+    try std.testing.expect(msg_mp_tp != msg_peers_body);
+    try std.testing.expect(msg_mp_tp != msg_tk_live);
+    try std.testing.expect(msg_mp_tp != msg_tk_logs);
+    try std.testing.expect(msg_mp_edit != msg_mp_export);
+    try std.testing.expect(msg_mp_edit != msg_mp_r_o);
+    try std.testing.expect(msg_mp_edit != msg_mp_hov);
+    try std.testing.expect(msg_mp_edit != msg_auto_state);
+    try std.testing.expect(msg_mp_edit != msg_auto_body_state);
+    try std.testing.expect(msg_mp_edit != msg_peers);
+    try std.testing.expect(msg_mp_edit != msg_peers_body);
+    try std.testing.expect(msg_mp_edit != msg_tk_live);
+    try std.testing.expect(msg_mp_edit != msg_tk_logs);
+    try std.testing.expect(msg_mp_export != msg_mp_r_o);
+    try std.testing.expect(msg_mp_export != msg_mp_hov);
+    try std.testing.expect(msg_mp_export != msg_auto_state);
+    try std.testing.expect(msg_mp_export != msg_auto_body_state);
+    try std.testing.expect(msg_mp_export != msg_peers);
+    try std.testing.expect(msg_mp_export != msg_peers_body);
+    try std.testing.expect(msg_mp_export != msg_tk_live);
+    try std.testing.expect(msg_mp_export != msg_tk_logs);
+    try std.testing.expect(msg_mp_r_o != msg_mp_hov);
+    try std.testing.expect(msg_mp_r_o != msg_auto_state);
+    try std.testing.expect(msg_mp_r_o != msg_auto_body_state);
+    try std.testing.expect(msg_mp_r_o != msg_peers);
+    try std.testing.expect(msg_mp_r_o != msg_peers_body);
+    try std.testing.expect(msg_mp_r_o != msg_tk_live);
+    try std.testing.expect(msg_mp_r_o != msg_tk_logs);
+    try std.testing.expect(msg_mp_hov != msg_auto_state);
+    try std.testing.expect(msg_mp_hov != msg_auto_body_state);
+    try std.testing.expect(msg_mp_hov != msg_peers);
+    try std.testing.expect(msg_mp_hov != msg_peers_body);
+    try std.testing.expect(msg_mp_hov != msg_tk_live);
+    try std.testing.expect(msg_mp_hov != msg_tk_logs);
+    try std.testing.expect(msg_auto_state != msg_auto_body_state);
+    try std.testing.expect(msg_auto_state != msg_peers);
+    try std.testing.expect(msg_auto_state != msg_peers_body);
+    try std.testing.expect(msg_auto_state != msg_tk_live);
+    try std.testing.expect(msg_auto_state != msg_tk_logs);
+    try std.testing.expect(msg_auto_body_state != msg_peers);
+    try std.testing.expect(msg_auto_body_state != msg_peers_body);
+    try std.testing.expect(msg_auto_body_state != msg_tk_live);
+    try std.testing.expect(msg_auto_body_state != msg_tk_logs);
+    try std.testing.expect(msg_peers != msg_peers_body);
+    try std.testing.expect(msg_peers != msg_tk_live);
+    try std.testing.expect(msg_peers != msg_tk_logs);
+    try std.testing.expect(msg_peers_body != msg_tk_live);
+    try std.testing.expect(msg_peers_body != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,5 +66,46 @@ func TestTipTopicKeepsGridAndLinks(t *testing.T) {
 	}
 	if tipTopic("no-such-topic") != "" {
 		t.Fatal("an unknown topic id rendered something")
+	}
+}
+
+// TestNoProductionCallerShipsRawTooltipMarkup is the phase-B-1b completeness guard. After shard 2
+// no production builder may call tipTopic(): a surface with a state contract carries *tipSt
+// (tipTopicSt) so the Zig renderer composes the card, and a Go-only surface calls tipTopicHTML.
+// Source-scanned because a missed call site renders CORRECTLY today - it only breaks when the raw
+// bridge fields are dropped post-merge, far from the change that caused it.
+func TestNoProductionCallerShipsRawTooltipMarkup(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("cannot scan the package source: %v (%d files)", err, len(files))
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") || f == "tooltip.go" {
+			continue // tooltip.go owns the definition + tipTopicHTML; tests use it as the raw fixture
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			code := line
+			if j := strings.Index(code, "//"); j >= 0 {
+				code = code[:j] // drop the comment tail (worst case this HIDES a hit, never invents one)
+			}
+			if strings.Contains(code, "tipTopic(") {
+				t.Errorf("%s:%d ships pre-rendered tooltip markup - carry *tipSt (tipTopicSt) on the "+
+					"state contract, or call tipTopicHTML for a Go-only surface:\n\t%s", f, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// TestEveryRegistryTopicHasAStructuredResolver: tipTopicSt must cover the whole glossary, so a new
+// helpTopics entry cannot be reachable only through the raw path.
+func TestEveryRegistryTopicHasAStructuredResolver(t *testing.T) {
+	for id := range helpTopics {
+		if tipTopicSt(id) == nil {
+			t.Errorf("registry topic %q has no structured resolver", id)
+		}
 	}
 }

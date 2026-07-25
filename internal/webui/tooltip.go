@@ -339,6 +339,12 @@ func virtualMIDILinks() []ttLink {
 	}
 }
 
+// tipTopicHTML renders a registry topic for a GO-ONLY surface that has no state contract to carry
+// a *tipSt: the nav rail (render.go, never Zig-rendered) and the pre-listen row that lives inside
+// the loudness block's caller-owned extraHTML. Everything WITH a state contract carries tipSt and
+// resolves through tipOr - grep for tipTopic( outside this file: there must be no hits.
+func tipTopicHTML(id string) string { return tipOr(tipTopicSt(id), "") }
+
 // tipTopic renders the shared tooltip for a registry topic id ("" for unknown ids -
 // callers may reference topics that land later). The prose is resolved HERE, on the render path,
 // so every topic follows a language switch; two flat-map lookups per tooltip, which is what every

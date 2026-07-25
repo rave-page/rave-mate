@@ -179,6 +179,15 @@ Rules:
   editor (8), automations schedules (7). The other 14 files keep the raw pre-rendered string over
   a dual-field bridge (`tipOr`) and are untouched — wave B-2 flips them. Detail + rules:
   ZIG_UI_GUIDE.md "tipTopic → structured tipSt".
+- **P6 UI phase B-1b (shard 2 SHIPPED, wave B-2):** the remaining 14 files are flipped, so NO
+  pre-rendered tooltip markup is produced by a state builder any more — `tipTopic(` has zero
+  production callers (source-scanned by `TestNoProductionCallerShipsRawTooltipMarkup`; the two
+  Go-only surfaces, the nav rail and the pre-listen row inside the loudness block's `extraHTML`,
+  call `tipTopicHTML`). The select-with-tooltip **ss-label** became state too (`ssLabelSt` /
+  `components.zig SsLabel`), collapsing four pre-rendered label literals. The raw `tip` fields and
+  `tipOr`'s raw arm stay for one more step — the post-merge cleanup drops them. 144 new
+  byte-equality subtests (`zigui_golden_tip2_test.go`: 18 surfaces × 4 tooltip shapes × 2 locales,
+  each with its raw-bridge twin). Detail: ZIG_UI_GUIDE.md "shard 2".
 - **P6 UI phase B (wave B-1, in progress):** the per-render state→JSON→parse round trip is
   being replaced by RZW1, a length-prefixed TLV wire whose Go encoder and Zig decoder are
   GENERATED FROM ONE SCHEMA (`internal/zigui/wiregen`) - appgroups + logs pilots land as
@@ -186,15 +195,38 @@ Rules:
   ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
   mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
   "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
+- **P6 UI phase B (wave B-2 wire fan-out, SHIPPED):** RZW1 now serves every benched view -
+  live (+ its ten ~1 Hz fragments), motion, publish, settings, library, player, automations,
+  peers: **174 messages, root ids 10-44, 31 exported `_v2` symbols covering 40 render
+  surfaces** (one is kind-dispatched over live's ten fragments), all from schema rows (no
+  hand-written codec per tab). Four kinds were added to the generator (`kStrAlways` for Zig
+  fields whose default is not the zero value, `kOptPtr`/`kOptVal` for `?T`, `kStrList` for
+  `[]string`) and the encoder now sizes its buffers per message - a flat 1 KiB made the
+  smallest tick fragment SLOWER than the JSON it replaces. Whole-dispatch deltas **-27% to
+  -69%** per view, documents 26-78% of the JSON, decoder fuzzed over **288 135** mutated
+  buffers (40 exports x 360 base documents, cross-fed, poison-pad OOB canary + determinism
+  canary). Gate per view: Go == v1 == v2 over the FULL golden fixture set, full document and
+  every fragment, with `FallbackCounts()` asserted exactly (player's legitimately-empty
+  fragments make "no fallbacks" the wrong assertion). Numbers: PHASEB_BASELINE.md.
+  Composed with tip2 (shard 2) on merge: 11 structured tooltip/label fields appended inside the
+  affected messages + the shared `ssLabelSt` row, and a `wireTipSweep` gate for the surfaces whose
+  fixtures leave those fields nil - the merge had ZERO textual conflicts and still broke three
+  tabs, while live/motion stayed green with v2 dropping every tooltip until that sweep existed.
 - **P6 UI phase B3 (fragment scheduler, pilots SHIPPED):** the ~1 Hz tick no longer crosses the
   ABI once per FRAGMENT. The surface's whole state + the hash of what Go last pushed per fragment
-  cross ONCE (RZW1 root ids 100/101); `native/zigui/src/tick.zig` renders every fragment, drops the
+  cross ONCE (RZW1 root ids 100/101, riding wave B-2's LiveState/LogsLines messages); `native/zigui/src/tick.zig` renders every fragment, drops the
   unchanged ones (Wyhash-64, `tickPatch` semantics) and returns a packed RZF1 changed-fragment list
   Go turns into ONE batched Eval - unchanged HTML never crosses the ABI. Pilots: the Live tab tick
   (12 -> 1 call) + `#log-view`. Exports stay STATELESS (hashes travel in the document; a Zig-side
   cache was rejected - reasoning in ZIG_UI_GUIDE.md "Phase B - B3 fragment scheduler"). Gate: the
   scheduler and the legacy per-fragment path, driven from ONE state, must emit the IDENTICAL ordered
   set of __patch calls (proven non-vacuous by execution).
+  Composed with wave B-2 on merge: the pilot's own Tk* mirrors of the live states were DELETED -
+  the tick envelope now references B-2's canonical messages, so the tooltip fields tip2 added ride
+  the tick documents too (gated by a tips fixture + a document-grows assertion, proven by execution).
+  Re-measured against B-2's per-fragment BINARY path (the JSON one is gone): Live tick **-29%**
+  dispatch / **-42%** steady state / -27% quoted, allocs 196 -> 34 -> 9, and `sched_all` now matches
+  pure Go while `sched_same` beats it - the first surface where the Zig path is not a loss.
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

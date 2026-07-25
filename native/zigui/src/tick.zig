@@ -21,24 +21,10 @@ const Html = @import("html.zig").Html;
 const live = @import("live.zig");
 const logs = @import("logs.zig");
 
-// Re-exports: the generated wire decoders (wire_gen.zig) name their types through THIS module,
-// so the schema needs no second import alias for live.zig (one alias per file, and wave B-2 owns
-// the `live` one). Same types, so a decoded batch feeds the existing renderers unchanged.
-pub const KV = live.KV;
-pub const SRow = live.SRow;
-pub const Transport = live.Transport;
-pub const NP = live.NP;
-pub const Status = live.Status;
-pub const Deck = live.Deck;
-pub const Decks = live.Decks;
-pub const Signals = live.Signals;
-pub const CockpitRow = live.CockpitRow;
-pub const Cockpit = live.Cockpit;
-pub const Link = live.Link;
-pub const Graph = live.Graph;
-pub const Perf = live.Perf;
-pub const Strip = live.Strip;
-pub const LiveState = live.State;
+// The decoded batch feeds the EXISTING renderers: wave B-2's schema rows already describe
+// live.State / logs.Lines (and their tooltip fields), so this module names those types directly
+// instead of mirroring them. Pre-merge it re-exported them under tick.* for its own duplicate
+// schema rows; those rows are gone.
 
 /// Prev is one fragment's last-pushed hash (0 = unknown → always emit).
 pub const Prev = struct {
@@ -49,7 +35,7 @@ pub const Prev = struct {
 /// LiveBatch is the Live cockpit's tick surface: every fragment's state + the timecode text
 /// fragment (#live-tc carries raw text, not a renderer's output) + the prev hashes.
 pub const LiveBatch = struct {
-    live: LiveState = .{},
+    live: live.State = .{},
     tc: []const u8 = "", // raw timecode text; escaped here (Go pushed htmlEscape(tcText()))
     prev: []const Prev = &.{},
 };
@@ -167,18 +153,18 @@ pub fn runLive(a: std.mem.Allocator, s: LiveBatch) ![]u8 {
     const p = s.prev;
     try b.text("live-tc", p, s.tc);
     if (s.live.transport.hasRec) try b.text("live-rec-state", p, s.live.transport.recState);
-    try b.frag("live-np", p, NP, live.renderNP, s.live.np);
-    try b.frag("live-status", p, Status, live.renderStatus, s.live.status);
-    try b.frag("live-decks", p, Decks, live.renderDecks, s.live.decks);
-    if (s.live.hasSignals) try b.frag("live-signals", p, Signals, live.renderSignals, s.live.signals);
-    if (s.live.hasCockpit) try b.frag("live-cockpit", p, Cockpit, live.renderCockpit, s.live.cockpit);
-    if (s.live.hasLink) try b.frag("live-ablelink", p, Link, live.renderLink, s.live.link);
+    try b.frag("live-np", p, live.NP, live.renderNP, s.live.np);
+    try b.frag("live-status", p, live.Status, live.renderStatus, s.live.status);
+    try b.frag("live-decks", p, live.Decks, live.renderDecks, s.live.decks);
+    if (s.live.hasSignals) try b.frag("live-signals", p, live.Signals, live.renderSignals, s.live.signals);
+    if (s.live.hasCockpit) try b.frag("live-cockpit", p, live.Cockpit, live.renderCockpit, s.live.cockpit);
+    if (s.live.hasLink) try b.frag("live-ablelink", p, live.Link, live.renderLink, s.live.link);
     if (s.live.hasNet) {
-        try b.frag("live-net", p, Graph, live.renderGraph, s.live.net);
-        try b.frag("live-tim", p, Graph, live.renderGraph, s.live.tim);
+        try b.frag("live-net", p, live.Graph, live.renderGraph, s.live.net);
+        try b.frag("live-tim", p, live.Graph, live.renderGraph, s.live.tim);
     }
-    if (s.live.hasPerf) try b.frag("live-perf2", p, Perf, live.renderPerf, s.live.perf);
-    try b.frag("live-strip", p, Strip, live.renderStrip, s.live.strip);
+    if (s.live.hasPerf) try b.frag("live-perf2", p, live.Perf, live.renderPerf, s.live.perf);
+    try b.frag("live-strip", p, live.Strip, live.renderStrip, s.live.strip);
     return b.finish();
 }
 
@@ -219,7 +205,7 @@ fn parseBatch(a: std.mem.Allocator, buf: []const u8) ![]Entry {
     return out;
 }
 
-fn liveTestState() LiveState {
+fn liveTestState() live.State {
     return .{
         .transport = .{ .hasRec = true, .recState = "● manual · set.flac" },
         .np = .{ .line1 = "Artist", .line2 = "Title" },

@@ -167,7 +167,8 @@ type liveState struct {
 	Decks        liveDecksSt     `json:"decks"`
 	HasSignals   bool            `json:"hasSignals"`
 	SignalsTitle string          `json:"signalsTitle"`
-	SignalsTip   string          `json:"signalsTip"` // raw tipTopic
+	SignalsTip   string          `json:"signalsTip"`             // legacy RAW tooltip markup (bridge)
+	SignalsTipS  *tipSt          `json:"signalsTipSt,omitempty"` // structured tooltip - wins over SignalsTip
 	Signals      liveSignalsSt   `json:"signals"`
 	HasCockpit   bool            `json:"hasCockpit"`
 	CockpitTitle string          `json:"cockpitTitle"`
@@ -177,14 +178,17 @@ type liveState struct {
 	Link         liveLinkSt      `json:"link"`
 	HasNet       bool            `json:"hasNet"`
 	NetTitle     string          `json:"netTitle"`
-	NetTip       string          `json:"netTip"`
+	NetTip       string          `json:"netTip"`             // legacy RAW tooltip markup (bridge)
+	NetTipS      *tipSt          `json:"netTipSt,omitempty"` // structured tooltip - wins over NetTip
 	Net          liveGraphSt     `json:"net"`
 	TimTitle     string          `json:"timTitle"`
-	TimTip       string          `json:"timTip"`
+	TimTip       string          `json:"timTip"`             // legacy RAW tooltip markup (bridge)
+	TimTipS      *tipSt          `json:"timTipSt,omitempty"` // structured tooltip - wins over TimTip
 	Tim          liveGraphSt     `json:"tim"`
 	HasPerf      bool            `json:"hasPerf"`
 	PerfTitle    string          `json:"perfTitle"`
-	PerfTip      string          `json:"perfTip"`
+	PerfTip      string          `json:"perfTip"`             // legacy RAW tooltip markup (bridge)
+	PerfTipS     *tipSt          `json:"perfTipSt,omitempty"` // structured tooltip - wins over PerfTip
 	Perf         livePerfSt      `json:"perf"`
 	Strip        liveStripSt     `json:"strip"`
 }
@@ -202,7 +206,7 @@ func (u *UI) liveState() liveState {
 		Strip:   u.liveStripState(),
 	}
 	if u.svc.Session != nil {
-		st.HasSignals, st.SignalsTitle, st.SignalsTip = true, i18n.T("live.signals.title"), tipTopic("signal-sources")
+		st.HasSignals, st.SignalsTitle, st.SignalsTipS = true, i18n.T("live.signals.title"), tipTopicSt("signal-sources")
 		st.Signals = u.liveSignalsState()
 	}
 	if u.svc.OBSControl != nil {
@@ -216,11 +220,11 @@ func (u *UI) liveState() liveState {
 	// tips live on the STATIC section titles - the well contents tick at 1 Hz.
 	if u.svc.NetStats != nil {
 		st.HasNet = true
-		st.NetTitle, st.NetTip, st.Net = i18n.T("live.network.title"), tipTopic("network-graph"), u.liveNetState()
-		st.TimTitle, st.TimTip, st.Tim = i18n.T("live.timing.title"), tipTopic("timing-graph"), u.liveTimState()
+		st.NetTitle, st.NetTipS, st.Net = i18n.T("live.network.title"), tipTopicSt("network-graph"), u.liveNetState()
+		st.TimTitle, st.TimTipS, st.Tim = i18n.T("live.timing.title"), tipTopicSt("timing-graph"), u.liveTimState()
 	}
 	if u.svc.Perf != nil {
-		st.HasPerf, st.PerfTitle, st.PerfTip = true, i18n.T("live.sysperf.title"), tipTopic("perf-graph")
+		st.HasPerf, st.PerfTitle, st.PerfTipS = true, i18n.T("live.sysperf.title"), tipTopicSt("perf-graph")
 		st.Perf = u.livePerfState()
 	}
 	return st
@@ -232,7 +236,8 @@ func (u *UI) liveState() liveState {
 func (u *UI) renderLive() string {
 	st := u.liveState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLive(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLiveV2", wireLiveState(st), zigui.RenderLiveV2,
+			zigui.RenderLive, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -248,7 +253,7 @@ func liveHTML(st liveState) string {
 	b.WriteString(section(st.StatusTitle, `<div id=live-status>`+liveStatusFragHTML(st.Status)+`</div>`))
 	b.WriteString(section(st.DecksTitle, `<div id=live-decks>`+liveDecksFragHTML(st.Decks)+`</div>`))
 	if st.HasSignals {
-		b.WriteString(sectionTip(st.SignalsTitle, st.SignalsTip, `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
+		b.WriteString(sectionTip(st.SignalsTitle, tipOr(st.SignalsTipS, st.SignalsTip), `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
 	}
 	if st.HasCockpit {
 		b.WriteString(section(st.CockpitTitle, `<div id=live-cockpit>`+liveCockpitFragHTML(st.Cockpit)+`</div>`))
@@ -257,20 +262,24 @@ func liveHTML(st liveState) string {
 		b.WriteString(section(st.LinkTitle, `<div id=live-ablelink>`+liveLinkFragHTML(st.Link)+`</div>`))
 	}
 	if st.HasNet {
-		b.WriteString(sectionTip(st.NetTitle, st.NetTip, `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
-		b.WriteString(sectionTip(st.TimTitle, st.TimTip, `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
+		b.WriteString(sectionTip(st.NetTitle, tipOr(st.NetTipS, st.NetTip), `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
+		b.WriteString(sectionTip(st.TimTitle, tipOr(st.TimTipS, st.TimTip), `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
 	}
 	if st.HasPerf {
-		b.WriteString(sectionTip(st.PerfTitle, st.PerfTip, `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
+		b.WriteString(sectionTip(st.PerfTitle, tipOr(st.PerfTipS, st.PerfTip), `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
 	}
 	b.WriteString(`<div id=live-strip class=livestrip>` + liveStripFragHTML(st.Strip) + `</div>`)
 	return b.String()
 }
 
-// liveFrag renders one tick-patched fragment through Zig when available.
-func liveFrag[T any](kind string, st T, goHTML func(T) string) string {
+// liveFrag renders one tick-patched fragment through Zig when available: RZW1 binary state
+// (v2) → JSON state (v1) → the Go renderer. wire is the fragment's generated encoder; the
+// fragments are the ~1 Hz path, so this is where the round trip is worth removing.
+func liveFrag[T any](kind string, st T, wire func(T) []byte, goHTML func(T) string) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderLiveFrag(kind, stateJSON(st)); ok {
+		v2 := func(doc []byte) (string, bool) { return zigui.RenderLiveFragV2(kind, doc) }
+		v1 := func(js []byte) (string, bool) { return zigui.RenderLiveFrag(kind, js) }
+		if h, ok := zigWire("RenderLiveFragV2", wire(st), v2, v1, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -329,7 +338,7 @@ func (u *UI) liveTransportState() liveTransportSt {
 }
 
 func (u *UI) liveTransportHTML() string {
-	return liveFrag("transport", u.liveTransportState(), liveTransHTML)
+	return liveFrag("transport", u.liveTransportState(), wireLiveTransport, liveTransHTML)
 }
 
 // liveTransHTML is the pure transport-strip renderer.
@@ -437,7 +446,7 @@ func (u *UI) liveLinkState() liveLinkSt {
 }
 
 func (u *UI) ableLinkHTML() string {
-	return liveFrag("link", u.liveLinkState(), liveLinkFragHTML)
+	return liveFrag("link", u.liveLinkState(), wireLiveLink, liveLinkFragHTML)
 }
 
 // liveLinkFragHTML is the pure Link-panel renderer.
@@ -535,7 +544,7 @@ func (u *UI) liveNPState() liveNPSt {
 	return st
 }
 
-func (u *UI) nowPlayingHTML() string { return liveFrag("np", u.liveNPState(), liveNPHTML) }
+func (u *UI) nowPlayingHTML() string { return liveFrag("np", u.liveNPState(), wireLiveNP, liveNPHTML) }
 
 // liveNPHTML is the pure now-playing LCD renderer.
 func liveNPHTML(st liveNPSt) string {
@@ -620,7 +629,7 @@ func (u *UI) liveStatusState() liveStatusSt {
 func liveRow(k, v string) liveKV { return liveKV{K: k, KL: strings.ToLower(k), V: v} }
 
 func (u *UI) liveStatusHTML() string {
-	return liveFrag("status", u.liveStatusState(), liveStatusFragHTML)
+	return liveFrag("status", u.liveStatusState(), wireLiveStatus, liveStatusFragHTML)
 }
 
 // liveStatusFragHTML is the pure status-card renderer.
@@ -732,7 +741,9 @@ func (u *UI) liveDecksState() liveDecksSt {
 	return st
 }
 
-func (u *UI) decksHTML() string { return liveFrag("decks", u.liveDecksState(), liveDecksFragHTML) }
+func (u *UI) decksHTML() string {
+	return liveFrag("decks", u.liveDecksState(), wireLiveDecks, liveDecksFragHTML)
+}
 
 // liveDecksFragHTML is the pure decks-grid renderer.
 func liveDecksFragHTML(st liveDecksSt) string {
@@ -834,7 +845,7 @@ func (u *UI) signalsHTML() string {
 	if u.svc.Session == nil {
 		return ""
 	}
-	return liveFrag("signals", u.liveSignalsState(), liveSignalsFragHTML)
+	return liveFrag("signals", u.liveSignalsState(), wireLiveSignals, liveSignalsFragHTML)
 }
 
 // liveSignalsFragHTML is the pure signals-card renderer (rows carry no data-label).
@@ -893,7 +904,7 @@ func (u *UI) liveCockpitState() liveCockpitSt {
 }
 
 func (u *UI) cockpitHTML() string {
-	return liveFrag("cockpit", u.liveCockpitState(), liveCockpitFragHTML)
+	return liveFrag("cockpit", u.liveCockpitState(), wireLiveCockpit, liveCockpitFragHTML)
 }
 
 // liveCockpitFragHTML is the pure OBS-cockpit renderer.
@@ -937,7 +948,9 @@ func (u *UI) liveNetState() liveGraphSt {
 	return liveGraphSt{Tooltip: i18n.T("live.network.tooltip"), Legend: legend, Graph: graph}
 }
 
-func (u *UI) networkHTML() string { return liveFrag("graph", u.liveNetState(), liveGraphFragHTML) }
+func (u *UI) networkHTML() string {
+	return liveFrag("graph", u.liveNetState(), wireLiveGraph, liveGraphFragHTML)
+}
 
 func (u *UI) liveTimState() liveGraphSt {
 	snap := u.svc.NetStats.Snapshot()
@@ -960,7 +973,9 @@ func (u *UI) liveTimState() liveGraphSt {
 	return liveGraphSt{Tooltip: i18n.T("live.timing.tooltip"), Legend: legend.String(), Graph: sparklineSVG(series, 600, 56)}
 }
 
-func (u *UI) timingHTML() string { return liveFrag("graph", u.liveTimState(), liveGraphFragHTML) }
+func (u *UI) timingHTML() string {
+	return liveFrag("graph", u.liveTimState(), wireLiveGraph, liveGraphFragHTML)
+}
 
 // liveGraphFragHTML is the pure graph-well renderer (legend + SVG are Go-built).
 func liveGraphFragHTML(st liveGraphSt) string {
@@ -1010,7 +1025,9 @@ func (u *UI) livePerfState() livePerfSt {
 	}
 }
 
-func (u *UI) sysperfHTML() string { return liveFrag("perf", u.livePerfState(), livePerfFragHTML) }
+func (u *UI) sysperfHTML() string {
+	return liveFrag("perf", u.livePerfState(), wireLivePerf, livePerfFragHTML)
+}
 
 // livePerfFragHTML is the pure system-performance well renderer.
 func livePerfFragHTML(st livePerfSt) string {
@@ -1025,7 +1042,9 @@ func (u *UI) liveStripState() liveStripSt {
 	return liveStripSt{Left: u.stripLeft(), Center: u.stripCenter(), Right: u.stripRight()}
 }
 
-func (u *UI) liveStripHTML() string { return liveFrag("strip", u.liveStripState(), liveStripFragHTML) }
+func (u *UI) liveStripHTML() string {
+	return liveFrag("strip", u.liveStripState(), wireLiveStrip, liveStripFragHTML)
+}
 
 // liveStripFragHTML is the pure signal-strip renderer.
 func liveStripFragHTML(st liveStripSt) string {

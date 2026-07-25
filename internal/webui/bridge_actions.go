@@ -172,7 +172,7 @@ func bridgeCardStateOf(b bridgeBits) bridgeSt {
 	// browser ANYWHERE drive this machine, not only one on this box.
 	s := bridgeSt{
 		Studio: newToggle(i18n.T("settings.body.bridge.localStudio"), "set:bridge-studio", b.LocalStudio),
-		Tip:    tipTopic("bridge-local-studio"),
+		TipS:   tipTopicSt("bridge-local-studio"),
 	}
 	if b.HasState {
 		switch st := b.State; {

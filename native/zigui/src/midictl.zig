@@ -40,7 +40,8 @@ pub const DrvInput = struct {
     fbTest: bool = false,
     fbTestLbl: []const u8 = "",
     fbTestAct: []const u8 = "",
-    fbTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    fbTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    fbTipSt: ?c.Tip = null, // structured tooltip — wins over fbTip
     fbRes: bool = false,
     fbResVar: []const u8 = "",
     fbResLbl: []const u8 = "",
@@ -250,7 +251,7 @@ fn renderManaged(h: *Html, s: DrvManaged) !void {
                 try c.btn(h, in.traceLbl, "ghost", in.traceAct, "");
                 if (in.fbTest) {
                     try c.btn(h, in.fbTestLbl, "ghost", in.fbTestAct, "");
-                    try h.raw(in.fbTip);
+                    try c.tipOr(h, in.fbTipSt, in.fbTip);
                 }
                 try c.btnRowClose(h);
                 if (in.fbRes) try c.statusRow(h, in.fbResVar, in.fbResLbl, in.fbResDl, in.fbResLine);

@@ -36,37 +36,39 @@ type setInput struct {
 // setKid is one child control of a composite block (fpair / btn-row / item-row trailing).
 // K ∈ field|select|amenu|btn.
 type setKid struct {
-	K      string    `json:"k"`
-	Fld    *uiField  `json:"fld,omitempty"`
-	Tip    string    `json:"tip,omitempty"`    // legacy pre-rendered tooltip markup (bridge)
-	TipS   *tipSt    `json:"tipSt,omitempty"`  // structured tooltip - wins over Tip
-	Sel    *selState `json:"sel,omitempty"`    // select/amenu kids
-	SelLbl string    `json:"selLbl,omitempty"` // pre-rendered ss-label (selectBoxTip)
-	Btn    *uiBtn    `json:"btn,omitempty"`
+	K       string     `json:"k"`
+	Fld     *uiField   `json:"fld,omitempty"`
+	Tip     string     `json:"tip,omitempty"`      // legacy pre-rendered tooltip markup (bridge)
+	TipS    *tipSt     `json:"tipSt,omitempty"`    // structured tooltip - wins over Tip
+	Sel     *selState  `json:"sel,omitempty"`      // select/amenu kids
+	SelLbl  string     `json:"selLbl,omitempty"`   // legacy pre-rendered ss-label (bridge)
+	SelLblS *ssLabelSt `json:"selLblSt,omitempty"` // structured ss-label - wins over SelLbl
+	Btn     *uiBtn     `json:"btn,omitempty"`
 }
 
 // setBlock is one card-body block. K selects the renderer; only that kind's fields are read.
 type setBlock struct {
-	K      string     `json:"k"`
-	Text   string     `json:"text,omitempty"`
-	HTML   string     `json:"html,omitempty"` // trusted raw markup (raw/noteRaw/region)
-	Tone   string     `json:"tone,omitempty"` // hint tone
-	ID     string     `json:"id,omitempty"`   // trusted literal id (install key, region id, form act)
-	Title  string     `json:"title,omitempty"`
-	Sub    string     `json:"sub,omitempty"`
-	Fld    *uiField   `json:"fld,omitempty"`
-	Tip    string     `json:"tip,omitempty"`   // legacy pre-rendered tooltip markup (bridge)
-	TipS   *tipSt     `json:"tipSt,omitempty"` // structured tooltip (field/toggle) - wins over Tip
-	Tgl    *uiToggle  `json:"tgl,omitempty"`
-	Gate   string     `json:"gate,omitempty"` // toggle kind: non-empty = gated (disabled + hint)
-	KV     *uiKV      `json:"kv,omitempty"`
-	Sel    *selState  `json:"sel,omitempty"`
-	SelLbl string     `json:"selLbl,omitempty"`
-	Btn    *uiBtn     `json:"btn,omitempty"` // path-row Browse button
-	Kids   []setKid   `json:"kids,omitempty"`
-	Inputs []setInput `json:"inputs,omitempty"`
-	Submit string     `json:"submit,omitempty"` // form: literal type=submit button label
-	SubVar string     `json:"subVar,omitempty"` // form: that button's rp-btn variant
+	K       string     `json:"k"`
+	Text    string     `json:"text,omitempty"`
+	HTML    string     `json:"html,omitempty"` // trusted raw markup (raw/noteRaw/region)
+	Tone    string     `json:"tone,omitempty"` // hint tone
+	ID      string     `json:"id,omitempty"`   // trusted literal id (install key, region id, form act)
+	Title   string     `json:"title,omitempty"`
+	Sub     string     `json:"sub,omitempty"`
+	Fld     *uiField   `json:"fld,omitempty"`
+	Tip     string     `json:"tip,omitempty"`   // legacy pre-rendered tooltip markup (bridge)
+	TipS    *tipSt     `json:"tipSt,omitempty"` // structured tooltip (field/toggle) - wins over Tip
+	Tgl     *uiToggle  `json:"tgl,omitempty"`
+	Gate    string     `json:"gate,omitempty"` // toggle kind: non-empty = gated (disabled + hint)
+	KV      *uiKV      `json:"kv,omitempty"`
+	Sel     *selState  `json:"sel,omitempty"`
+	SelLbl  string     `json:"selLbl,omitempty"`   // legacy pre-rendered ss-label (bridge)
+	SelLblS *ssLabelSt `json:"selLblSt,omitempty"` // structured ss-label - wins over SelLbl
+	Btn     *uiBtn     `json:"btn,omitempty"`      // path-row Browse button
+	Kids    []setKid   `json:"kids,omitempty"`
+	Inputs  []setInput `json:"inputs,omitempty"`
+	Submit  string     `json:"submit,omitempty"` // form: literal type=submit button label
+	SubVar  string     `json:"subVar,omitempty"` // form: that button's rp-btn variant
 	// Sub-view bodies owned by other files, crossing as structured state (render_settings_sub_html.go):
 	// K gridfix | gridfixmodel | bridge | updregion (the last wraps GF-style state in <div id=ID>).
 	GF  *gfCardSt  `json:"gf,omitempty"`
@@ -245,9 +247,9 @@ func setBlockHTML(b setBlock) string {
 		}
 		return toggleRowTipDL(b.Tgl.Label, b.Tgl.DL, b.Tgl.Act, b.Tgl.On, tipOr(b.TipS, b.Tip))
 	case "select":
-		return setSelHTML(b.Sel, b.SelLbl)
+		return setSelHTML(b.Sel, b.SelLblS, b.SelLbl)
 	case "amenu":
-		return `<span class=amenu>` + setSelHTML(b.Sel, "") + `</span>`
+		return `<span class=amenu>` + setSelHTML(b.Sel, nil, "") + `</span>`
 	case "kv":
 		return b.KV.html()
 	case "fpair":
@@ -289,9 +291,9 @@ func setKidsHTML(ks []setKid) string {
 		case "field":
 			b.WriteString(setFldHTML(k.Fld, tipOr(k.TipS, k.Tip)))
 		case "select":
-			b.WriteString(setSelHTML(k.Sel, k.SelLbl))
+			b.WriteString(setSelHTML(k.Sel, k.SelLblS, k.SelLbl))
 		case "amenu":
-			b.WriteString(`<span class=amenu>` + setSelHTML(k.Sel, "") + `</span>`)
+			b.WriteString(`<span class=amenu>` + setSelHTML(k.Sel, nil, "") + `</span>`)
 		case "btn":
 			b.WriteString(k.Btn.html())
 		}
@@ -307,12 +309,9 @@ func setFldHTML(f *uiField, tip string) string {
 	return fieldExDL(f.Label, f.DL, f.Act, f.Value, f.Type, f.PH, tip)
 }
 
-// setSelHTML renders a resolved smart select; labelHTML non-empty = pre-rendered ss-label.
-func setSelHTML(s *selState, labelHTML string) string {
-	if labelHTML != "" {
-		return selHTMLRaw(*s, labelHTML)
-	}
-	return selHTML(*s)
+// setSelHTML renders a resolved smart select through the shared ss-label bridge (components.go).
+func setSelHTML(s *selState, lbl *ssLabelSt, labelHTML string) string {
+	return ssSelHTML(*s, lbl, labelHTML)
 }
 
 // setFormHTML renders a set-dlgform: raw named inputs, then button kids, then the optional

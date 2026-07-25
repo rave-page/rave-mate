@@ -33,6 +33,7 @@ package zigui
 import (
 	"encoding/binary"
 	"math"
+	"sync/atomic"
 )
 
 const (
@@ -54,14 +55,55 @@ type WireWriter struct {
 	arena  []byte
 	body   []byte
 	intern map[string]uint32 // string → arena offset (dedup: log tails repeat src/level heavily)
+	cap    int               // this message's prealloc hint; also sizes the intern map
 	bad    bool              // over-size: Finish returns nil, caller falls back to v1
 }
 
-// NewWireWriter starts a document for root message msgID under schema hash h. The buffers
-// start at 1 KiB: every view state is bigger than that, and re-growing two slices per render
-// is exactly the GC pressure this format exists to remove.
+// NewWireWriter starts a document for root message msgID under schema hash h. Both buffers are
+// preallocated from what the PREVIOUS document of the same message needed (wireSizeHints):
+// re-growing two slices per render is exactly the GC pressure this format exists to remove, but
+// one global constant cannot serve both a 12 kB tab document and a 60 B tick fragment - a flat
+// 1 KiB made the smallest fragment (#stset-<id>) SLOWER than the JSON path it replaces, and a
+// flat 256 B cost the Live cockpit 12 extra allocations per render.
 func NewWireWriter(msgID uint16, h uint32) *WireWriter {
-	return &WireWriter{msgID: msgID, hash: h, arena: make([]byte, 0, 1024), body: make([]byte, 0, 1024)}
+	c := wireHint(msgID)
+	return &WireWriter{msgID: msgID, hash: h, cap: c, arena: make([]byte, 0, c), body: make([]byte, 0, c)}
+}
+
+// Adaptive per-message prealloc. Capacity only - it can never change a document's bytes.
+const (
+	wireHintSlots = 256     // root ids are small + partitioned; anything beyond uses the default
+	wireHintMin   = 192     // below this the two allocations dominate a tick fragment anyway
+	wireHintMax   = 1 << 18 // a 256 kB state is pathological; don't cache it
+	wireHintDflt  = 1 << 10 // cold start, or an id outside the table
+)
+
+var wireSizeHints [wireHintSlots]atomic.Uint32
+
+func wireHint(msgID uint16) int {
+	if msgID >= wireHintSlots {
+		return wireHintDflt
+	}
+	if n := int(wireSizeHints[msgID].Load()); n >= wireHintMin {
+		return n
+	}
+	return wireHintDflt
+}
+
+// noteWireSize records what the message actually needed plus 25% headroom, so a slowly growing
+// state (one more log line, one more card) does not regrow on every render.
+func noteWireSize(msgID uint16, n int) {
+	if msgID >= wireHintSlots {
+		return
+	}
+	n += n / 4
+	if n < wireHintMin {
+		n = wireHintMin
+	}
+	if n > wireHintMax {
+		return
+	}
+	wireSizeHints[msgID].Store(uint32(n))
 }
 
 func (w *WireWriter) tag(num, wt int) {
@@ -88,7 +130,10 @@ func (w *WireWriter) arenaOff(s string) uint32 {
 	off := uint32(len(w.arena))
 	w.arena = append(w.arena, s...)
 	if w.intern == nil {
-		w.intern = make(map[string]uint32, 64)
+		// Strings average ~20 B across the migrated states, so the byte hint also sizes the
+		// map: a flat 64 wasted ~2.5 kB on a tick fragment, a flat 8 regrew five times on a
+		// whole-tab document.
+		w.intern = make(map[string]uint32, w.cap/24+8)
 	}
 	w.intern[s] = off
 	return off
@@ -177,8 +222,54 @@ func (w *WireWriter) Finish() []byte {
 	out = binary.LittleEndian.AppendUint32(out, uint32(len(w.arena)))
 	out = append(out, w.arena...)
 	out = append(out, w.body...)
+	noteWireSize(w.msgID, max(len(w.arena), len(w.body)))
 	return append(out, 0) // root body terminator
 }
+
+// --- phaseb-wire (B-2 fan-out: kinds the pilot states did not need) ---
+
+// StrAlways writes field num even when s is empty. Required where the Zig field's DEFAULT is
+// not the zero value (`fill: []const u8 = "0.00%"`, `stepS = "1"`): the JSON path always sends
+// the field, so an absent tag would decode to the default instead of "" and the two paths would
+// diverge. Cost is one tag + two zero varints per empty string, on a handful of fields.
+func (w *WireWriter) StrAlways(num int, s string) {
+	off := w.arenaOff(s)
+	w.tag(num, wireWTString)
+	w.uvarint(uint64(off))
+	w.uvarint(uint64(len(s)))
+}
+
+// OptStruct writes a nested message whose PRESENCE is meaningful (a Zig `?T` field: null vs a
+// zero-value struct render differently - motion's inactive section, the player's absent panels).
+// Unlike Struct it keeps the tag even when the message emits no fields, so "present but all
+// zero" cannot decode as null. Callers gate on the Go pointer being non-nil.
+func (w *WireWriter) OptStruct(num int, enc func()) {
+	w.tag(num, wireWTStruct)
+	lp := len(w.body)
+	w.body = append(w.body, 0, 0, 0, 0)
+	enc()
+	w.body = append(w.body, 0) // body terminator
+	w.patch(lp)
+}
+
+// StrList writes a []string as a list of single-field element bodies (field 1 = the string), so
+// the decoder reuses the list bounds discipline unchanged. n == 0 writes nothing (absent = empty).
+func (w *WireWriter) StrList(num int, ss []string) {
+	if len(ss) == 0 {
+		return
+	}
+	w.tag(num, wireWTList)
+	w.uvarint(uint64(len(ss)))
+	lp := len(w.body)
+	w.body = append(w.body, 0, 0, 0, 0)
+	for _, s := range ss {
+		w.Str(1, s)                // "" → absent → decodes to ""
+		w.body = append(w.body, 0) // per-element terminator
+	}
+	w.patch(lp)
+}
+
+// --- end phaseb-wire ---
 
 // NoteWireFallback records a v2→v1 downgrade that happened before the ABI was even reached
 // (encoder returned nil), keyed like FallbackCounts' render keys.

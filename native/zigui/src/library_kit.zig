@@ -92,15 +92,17 @@ pub fn amenu(h: *Html, s: Select) !void {
     try c.actionMenu(h, s);
 }
 
-/// SelTip pairs a resolved select with its pre-rendered ss-label (label text + tooltip
-/// markup, resolved Go-side because tooltip.go owns it).
+/// SelTip pairs a resolved select with its ss-label. The label is STRUCTURED state since phase
+/// B-1b (components.SsLabel); labelHtml stays as the legacy pre-rendered bridge.
 pub const SelTip = struct {
     sel: Select = .{},
-    labelHtml: []const u8 = "",
+    labelHtml: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    labelSt: ?c.SsLabel = null, // structured ss-label — wins over labelHtml
 };
 
+/// selTip mirrors Go libSelTip.html() (components.go ssSelHTML: structured > raw > plain).
 pub fn selTip(h: *Html, t: SelTip) !void {
-    try c.selectBoxRaw(h, t.sel, t.labelHtml);
+    try c.selectBoxTipOr(h, t.sel, t.labelSt, t.labelHtml);
 }
 
 /// Batch is a batchbar (browse + collection multi-select bars).

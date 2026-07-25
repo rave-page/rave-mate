@@ -107,6 +107,8 @@ func init() {
 // --- phaseb-sched ---
 
 // liveTickLegacy is the pre-B3 Live tick: one render + one tickPatch per fragment, deduped in Go
+// (post-B-2 each of those renders is itself a v2->v1->Go dispatch - one document per FRAGMENT,
+// which is exactly the per-fragment tax B3 removes)
 // against u.frags. It stays as the scheduler's fallback (stub builds, a declined batch) AND as
 // the parity reference - tick_sched_test.go drives this and the scheduler from the SAME state and
 // requires an identical ordered set of __patch calls. Fragment order + conditions are the wire
@@ -116,26 +118,26 @@ func (u *UI) liveTickLegacy(js *strings.Builder, st liveTickSt) {
 	if st.Live.Transport.HasRec {
 		u.tickPatch(js, "live-rec-state", htmlEscape(st.Live.Transport.RecState))
 	}
-	u.tickPatch(js, "live-np", liveFrag("np", st.Live.NP, liveNPHTML))
-	u.tickPatch(js, "live-status", liveFrag("status", st.Live.Status, liveStatusFragHTML))
-	u.tickPatch(js, "live-decks", liveFrag("decks", st.Live.Decks, liveDecksFragHTML))
+	u.tickPatch(js, "live-np", liveFrag("np", st.Live.NP, wireLiveNP, liveNPHTML))
+	u.tickPatch(js, "live-status", liveFrag("status", st.Live.Status, wireLiveStatus, liveStatusFragHTML))
+	u.tickPatch(js, "live-decks", liveFrag("decks", st.Live.Decks, wireLiveDecks, liveDecksFragHTML))
 	if st.Live.HasSignals {
-		u.tickPatch(js, "live-signals", liveFrag("signals", st.Live.Signals, liveSignalsFragHTML))
+		u.tickPatch(js, "live-signals", liveFrag("signals", st.Live.Signals, wireLiveSignals, liveSignalsFragHTML))
 	}
 	if st.Live.HasCockpit {
-		u.tickPatch(js, "live-cockpit", liveFrag("cockpit", st.Live.Cockpit, liveCockpitFragHTML))
+		u.tickPatch(js, "live-cockpit", liveFrag("cockpit", st.Live.Cockpit, wireLiveCockpit, liveCockpitFragHTML))
 	}
 	if st.Live.HasLink {
-		u.tickPatch(js, "live-ablelink", liveFrag("link", st.Live.Link, liveLinkFragHTML))
+		u.tickPatch(js, "live-ablelink", liveFrag("link", st.Live.Link, wireLiveLink, liveLinkFragHTML))
 	}
 	if st.Live.HasNet {
-		u.tickPatch(js, "live-net", liveFrag("graph", st.Live.Net, liveGraphFragHTML))
-		u.tickPatch(js, "live-tim", liveFrag("graph", st.Live.Tim, liveGraphFragHTML))
+		u.tickPatch(js, "live-net", liveFrag("graph", st.Live.Net, wireLiveGraph, liveGraphFragHTML))
+		u.tickPatch(js, "live-tim", liveFrag("graph", st.Live.Tim, wireLiveGraph, liveGraphFragHTML))
 	}
 	if st.Live.HasPerf {
-		u.tickPatch(js, "live-perf2", liveFrag("perf", st.Live.Perf, livePerfFragHTML))
+		u.tickPatch(js, "live-perf2", liveFrag("perf", st.Live.Perf, wireLivePerf, livePerfFragHTML))
 	}
-	u.tickPatch(js, "live-strip", liveFrag("strip", st.Live.Strip, liveStripFragHTML))
+	u.tickPatch(js, "live-strip", liveFrag("strip", st.Live.Strip, wireLiveStrip, liveStripFragHTML))
 }
 
 // --- end phaseb-sched ---

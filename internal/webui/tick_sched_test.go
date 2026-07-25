@@ -73,6 +73,17 @@ func tickScript(t *testing.T) []struct {
 	add("long", get("long"), "01:23:45:12")
 	add("unicode", get("unicode"), "01:23:45:12 ◼")
 	add("back-to-unavailable", get("unavailable"), "00:00:00:00") // sections disappear
+
+	// tip2's structured section tooltips ride the SAME LiveState the tick document carries (the
+	// pilot's own Tk* mirrors were deleted when wave B-2 merged). The fragments do not render
+	// section headers, so this step must be parity-identical - but it proves the envelope decodes
+	// a state with the tooltip pointers set instead of refusing it. Representability is asserted
+	// separately in TestTickSchedLiveCarriesTooltips.
+	tips := get("populated")
+	tp := tipTopicSt("cue-edit")
+	tips.HasSignals, tips.HasNet, tips.HasPerf = true, true, true
+	tips.SignalsTipS, tips.NetTipS, tips.TimTipS, tips.PerfTipS = tp, tp, tp, tp
+	add("tips", tips, "01:23:45:12")
 	return steps
 }
 
@@ -108,7 +119,10 @@ func TestTickSchedLiveMatchesLegacy(t *testing.T) {
 		t.Logf("%-20s %d fragment(s) patched", step.name, len(newQ))
 	}
 	t.Logf("%d ticks: %d scheduler ABI calls vs %d legacy per-fragment calls", schedCalls, schedCalls, legacyCalls)
-	assertNoNewFallbacks(t, before)
+	// Narrowed per wave B-2: name the exports this test drives (the scheduler + the legacy path's
+	// per-fragment dispatch), so an unrelated tab's legitimate empty-fragment fallback can't mask
+	// a downgrade here - and a typo'd key can't make the assertion vacuous.
+	assertNoNewFallbacksIn(t, before, "TickLive", "RenderLiveFragV2", "RenderLiveFrag")
 }
 
 // pendKeys returns the fragment ids tickPatch/recordPatch queued for this batch, in order.
@@ -237,7 +251,7 @@ func TestTickSchedLogsDedupsIdenticalTail(t *testing.T) {
 		t.Fatalf("script exercised neither branch (swaps %d, suppressed %d)", swaps, suppressed)
 	}
 	t.Logf("%d steps: %d swaps, %d suppressed identical tails", len(steps), swaps, suppressed)
-	assertNoNewFallbacks(t, before)
+	assertNoNewFallbacksIn(t, before, "TickLogs")
 }
 
 // TestTickSchedRefusesForeignDocument pins the header contract: a document meant for another
@@ -260,4 +274,54 @@ func TestTickSchedRefusesForeignDocument(t *testing.T) {
 	if _, ok := zigui.TickLive(nil); ok {
 		t.Fatal("empty document accepted")
 	}
+}
+
+// TestTickSchedLiveCarriesTooltips is this layer's guard against the silent-drop class that bit
+// wave B-2 twice: a Go state gains a field, the wire does not carry it, and every gate stays green
+// because the fixtures leave it nil. The tick envelope embeds wave B-2's LiveState message, so
+// tip2's four structured section tooltips must be ON the wire - proven by the document GROWING when
+// they are set (a dropped field encodes to the same bytes) and by the batch still being accepted and
+// byte-identical to the Go renderers.
+func TestTickSchedLiveCarriesTooltips(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	before := zigui.FallbackCounts()
+	base := liveFixtures()["populated"]
+	base.HasSignals, base.HasNet, base.HasPerf = true, true, true
+	bare := liveTickSt{Live: base, TC: "01:23:45:12"}
+
+	for _, v := range tipVariants() {
+		if v.st == nil {
+			continue
+		}
+		withTip := bare
+		withTip.Live.SignalsTipS, withTip.Live.NetTipS = v.st, v.st
+		withTip.Live.TimTipS, withTip.Live.PerfTipS = v.st, v.st
+		t.Run(v.name, func(t *testing.T) {
+			nBare, nTip := len(wireTkLive(bare)), len(wireTkLive(withTip))
+			if nBare == 0 || nTip == 0 {
+				t.Fatal("wire encode failed")
+			}
+			if nTip <= nBare {
+				t.Fatalf("tooltip did not reach the tick document: %d B with, %d B without", nTip, nBare)
+			}
+			// and the document is still accepted + parity-identical (tips live on section headers,
+			// which the tick never patches - so the fragment stream must be unchanged)
+			got, ok := zigui.TickLive(wireTkLive(withTip))
+			if !ok {
+				t.Fatal("scheduler declined a tooltip-carrying document")
+			}
+			want := legacyLiveFrags(withTip, false)
+			if len(got) != len(want) {
+				t.Fatalf("%d fragments vs %d from the Go path", len(got), len(want))
+			}
+			for i := range got {
+				if got[i].ID != want[i].ID || got[i].HTML != want[i].HTML {
+					t.Fatalf("fragment %d (%s): zig != go", i, got[i].ID)
+				}
+			}
+		})
+	}
+	assertNoNewFallbacksIn(t, before, "TickLive")
 }

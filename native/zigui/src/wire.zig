@@ -132,6 +132,33 @@ pub const Reader = struct {
         return out;
     }
 
+    /// strList decodes a `[]const []const u8` field: a list whose element bodies each carry the
+    /// string as field 1 (encoder: WireWriter.StrList). Same bounds discipline as list() - the
+    /// count is checked against the payload and the payload against the parent body - so the
+    /// wiretype set stays closed and skip() keeps working unchanged.
+    pub fn strList(r: *Reader, t: Tag) Error![]const []const u8 {
+        if (t.wt != wt_list) return error.Malformed;
+        const n64 = try r.uvarint();
+        const s = try r.payload();
+        if (n64 > s.len) return error.Malformed; // every element body is >= 1 byte (its terminator)
+        const n: usize = @intCast(n64);
+        if (n == 0) return &.{};
+        const out = try r.a.alloc([]const u8, n);
+        var cr = Reader{ .buf = s, .arena = r.arena, .a = r.a };
+        for (out) |*e| {
+            e.* = "";
+            while (try cr.next()) |et| {
+                if (et.field == 1) {
+                    e.* = try cr.str(et);
+                } else {
+                    try cr.skip(et);
+                }
+            }
+        }
+        if (cr.pos != s.len) return error.Malformed;
+        return out;
+    }
+
     /// skip discards an unknown field (every payload is self-delimiting). An unknown WIRETYPE
     /// is not skippable and is rejected - additive schema changes only.
     pub fn skip(r: *Reader, t: Tag) Error!void {
@@ -205,6 +232,9 @@ const TestRoot = struct {
     flag: bool = false,
     kid: TestKid = .{},
     kids: []const TestKid = &.{},
+    opt: ?TestKid = null, // presence matters: null renders differently from a zero-value kid
+    tags: []const []const u8 = &.{},
+    dflt: []const u8 = "1", // non-zero default: only StrAlways keeps v1 and v2 identical
 };
 
 fn decodeKid(r: *Reader, out: *TestKid) Error!void {
@@ -221,6 +251,9 @@ fn decodeRoot(r: *Reader, out: *TestRoot) Error!void {
         2 => out.flag = try r.boolean(t),
         3 => out.kid = try r.sub(TestKid, decodeKid, t),
         4 => out.kids = try r.list(TestKid, decodeKid, t),
+        5 => out.opt = try r.sub(TestKid, decodeKid, t),
+        6 => out.tags = try r.strList(t),
+        7 => out.dflt = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -337,6 +370,110 @@ test "absent fields decode to zero values (no null representable)" {
     try std.testing.expectEqualStrings("", p.value.s);
     try std.testing.expectEqual(@as(usize, 0), p.value.kids.len); // empty, never null
     try std.testing.expectEqualStrings("", p.value.kid.a);
+}
+
+test "optional struct: absent is null, empty body is present" {
+    const a = std.testing.allocator;
+    {
+        var d = Doc.init(a);
+        defer d.deinit();
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        const p = try parse(TestRoot, decodeRoot, a, 7, hash, buf);
+        defer p.deinit();
+        try std.testing.expect(p.value.opt == null);
+    }
+    { // OptStruct emits the tag even with no fields → present, all-zero
+        var d = Doc.init(a);
+        defer d.deinit();
+        const lp = try d.open(5, wt_struct);
+        try d.body.append(d.a, 0);
+        try d.close(lp);
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        const p = try parse(TestRoot, decodeRoot, a, 7, hash, buf);
+        defer p.deinit();
+        try std.testing.expect(p.value.opt != null);
+        try std.testing.expectEqualStrings("", p.value.opt.?.a);
+    }
+}
+
+test "strList: strings, empty elements, absent, bounds" {
+    const a = std.testing.allocator;
+    { // three elements, the middle one empty (absent field 1)
+        var d = Doc.init(a);
+        defer d.deinit();
+        try d.tag(6, wt_list);
+        try d.uv(3);
+        const lp = d.body.items.len;
+        try d.body.appendSlice(d.a, &.{ 0, 0, 0, 0 });
+        try d.str(1, "aa");
+        try d.body.append(d.a, 0);
+        try d.body.append(d.a, 0); // empty element
+        try d.str(1, "cc");
+        try d.body.append(d.a, 0);
+        try d.close(lp);
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        const p = try parse(TestRoot, decodeRoot, a, 7, hash, buf);
+        defer p.deinit();
+        try std.testing.expectEqual(@as(usize, 3), p.value.tags.len);
+        try std.testing.expectEqualStrings("aa", p.value.tags[0]);
+        try std.testing.expectEqualStrings("", p.value.tags[1]);
+        try std.testing.expectEqualStrings("cc", p.value.tags[2]);
+    }
+    { // count beyond the payload = allocation bomb, must be refused
+        var d = Doc.init(a);
+        defer d.deinit();
+        try d.tag(6, wt_list);
+        try d.uv(0xFFFFFFFF);
+        const lp = d.body.items.len;
+        try d.body.appendSlice(d.a, &.{ 0, 0, 0, 0 });
+        try d.body.append(d.a, 0);
+        try d.close(lp);
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        try std.testing.expectError(error.Malformed, parse(TestRoot, decodeRoot, a, 7, hash, buf));
+    }
+    { // string offset past the arena inside an element body
+        var d = Doc.init(a);
+        defer d.deinit();
+        try d.tag(6, wt_list);
+        try d.uv(1);
+        const lp = d.body.items.len;
+        try d.body.appendSlice(d.a, &.{ 0, 0, 0, 0 });
+        try d.tag(1, wt_string);
+        try d.uv(9999);
+        try d.uv(1);
+        try d.body.append(d.a, 0);
+        try d.close(lp);
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        try std.testing.expectError(error.Malformed, parse(TestRoot, decodeRoot, a, 7, hash, buf));
+    }
+}
+
+test "StrAlways: an explicit empty string beats a non-zero default" {
+    const a = std.testing.allocator;
+    { // absent → the Zig default survives (why StrAlways exists)
+        var d = Doc.init(a);
+        defer d.deinit();
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        const p = try parse(TestRoot, decodeRoot, a, 7, hash, buf);
+        defer p.deinit();
+        try std.testing.expectEqualStrings("1", p.value.dflt);
+    }
+    { // present-but-empty (off 0, len 0, empty arena) → ""
+        var d = Doc.init(a);
+        defer d.deinit();
+        try d.str(7, "");
+        const buf = try d.finish(7, hash);
+        defer a.free(buf);
+        const p = try parse(TestRoot, decodeRoot, a, 7, hash, buf);
+        defer p.deinit();
+        try std.testing.expectEqualStrings("", p.value.dflt);
+    }
 }
 
 test "unknown field numbers are skipped" {

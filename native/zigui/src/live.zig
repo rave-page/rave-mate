@@ -136,7 +136,8 @@ pub const State = struct {
     decks: Decks = .{},
     hasSignals: bool = false,
     signalsTitle: []const u8 = "",
-    signalsTip: []const u8 = "", // raw tipTopic
+    signalsTip: []const u8 = "", // legacy raw (bridge)
+    signalsTipSt: ?c.Tip = null, // structured tooltip — wins over signalsTip
     signals: Signals = .{},
     hasCockpit: bool = false,
     cockpitTitle: []const u8 = "",
@@ -146,14 +147,17 @@ pub const State = struct {
     link: Link = .{},
     hasNet: bool = false,
     netTitle: []const u8 = "",
-    netTip: []const u8 = "",
+    netTip: []const u8 = "", // legacy raw (bridge)
+    netTipSt: ?c.Tip = null, // structured tooltip — wins over netTip
     net: Graph = .{},
     timTitle: []const u8 = "",
-    timTip: []const u8 = "",
+    timTip: []const u8 = "", // legacy raw (bridge)
+    timTipSt: ?c.Tip = null, // structured tooltip — wins over timTip
     tim: Graph = .{},
     hasPerf: bool = false,
     perfTitle: []const u8 = "",
-    perfTip: []const u8 = "",
+    perfTip: []const u8 = "", // legacy raw (bridge)
+    perfTipSt: ?c.Tip = null, // structured tooltip — wins over perfTip
     perf: Perf = .{},
     strip: Strip = .{},
 };
@@ -177,7 +181,9 @@ pub fn render(h: *Html, s: State) !void {
     try h.raw("</div>");
     try c.sectionClose(h);
     if (s.hasSignals) {
-        try c.sectionOpenTip(h, s.signalsTitle, s.signalsTip);
+        var signalstb = try c.tipBuf(h, s.signalsTipSt, s.signalsTip);
+        defer signalstb.deinit();
+        try c.sectionOpenTip(h, s.signalsTitle, signalstb.b.items);
         try h.raw("<div id=live-signals>");
         try renderSignals(h, s.signals);
         try h.raw("</div>");
@@ -198,19 +204,25 @@ pub fn render(h: *Html, s: State) !void {
         try c.sectionClose(h);
     }
     if (s.hasNet) {
-        try c.sectionOpenTip(h, s.netTitle, s.netTip);
+        var nettb = try c.tipBuf(h, s.netTipSt, s.netTip);
+        defer nettb.deinit();
+        try c.sectionOpenTip(h, s.netTitle, nettb.b.items);
         try h.raw("<div id=live-net>");
         try renderGraph(h, s.net);
         try h.raw("</div>");
         try c.sectionClose(h);
-        try c.sectionOpenTip(h, s.timTitle, s.timTip);
+        var timtb = try c.tipBuf(h, s.timTipSt, s.timTip);
+        defer timtb.deinit();
+        try c.sectionOpenTip(h, s.timTitle, timtb.b.items);
         try h.raw("<div id=live-tim>");
         try renderGraph(h, s.tim);
         try h.raw("</div>");
         try c.sectionClose(h);
     }
     if (s.hasPerf) {
-        try c.sectionOpenTip(h, s.perfTitle, s.perfTip);
+        var perftb = try c.tipBuf(h, s.perfTipSt, s.perfTip);
+        defer perftb.deinit();
+        try c.sectionOpenTip(h, s.perfTitle, perftb.b.items);
         try h.raw("<div id=live-perf2>");
         try renderPerf(h, s.perf);
         try h.raw("</div>");

@@ -254,6 +254,35 @@ const uint8_t *rz_ui_render_appgroups_v2(const uint8_t *state, size_t len, size_
 const uint8_t *rz_ui_render_appgroups_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_logs_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_logs_lines_v2(const uint8_t *state, size_t len, size_t *out_len);
+/* B-2 fan-out. The _frag_v2 exports take the same kind selector as their JSON twins; each
+ * fragment is its own root message, so a document built for another fragment is refused. */
+const uint8_t *rz_ui_render_live_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_live_frag_v2(const uint8_t *kind, size_t kind_len, const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_motion_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_motion_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_publish_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_publish_hero_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_content_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_status_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_detail_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_queue_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_cuecell_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_root_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_vid_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_wave_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_tp_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_edit_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_export_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_ro_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_hov_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_automations_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_automations_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_peers_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_peers_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

@@ -67,7 +67,8 @@ type ceTopbarSt struct {
 	VerifiedLbl string `json:"verifiedLbl"`
 	VerifyTip   string `json:"verifyTip"`
 	VerifyLbl   string `json:"verifyLbl"`
-	Tip         string `json:"tip"` // raw tipTopic("cue-edit")
+	Tip         string `json:"tip"`             // legacy RAW tooltip markup (bridge)
+	TipS        *tipSt `json:"tipSt,omitempty"` // structured tipTopic("cue-edit")
 	Close       uiBtn  `json:"close"`
 }
 
@@ -222,7 +223,7 @@ func (u *UI) ceTopbarState() ceTopbarSt {
 	st.VerifyAct = "gf-verify:" + c.path
 	st.VerifiedTip, st.VerifiedLbl = i18n.T("library.ce.verifiedTip"), i18n.T("library.gf.verifiedBadge")
 	st.VerifyTip, st.VerifyLbl = i18n.T("library.ce.verifyTip"), i18n.T("library.gf.markVerified")
-	st.Tip = tipTopic("cue-edit")
+	st.TipS = tipTopicSt("cue-edit")
 	st.Close = uiBtn{Label: "✕ " + i18n.T("common.close"), Variant: "ghost", Act: "ce-close"}
 	return st
 }
@@ -481,7 +482,7 @@ func ceTopbarHTMLOf(st ceTopbarSt) string {
 		b.WriteString(`<span class=ce-tb-verify title=` + attrQ(st.VerifyTip) +
 			` data-act=` + attrQ(st.VerifyAct) + `>` + esc(st.VerifyLbl) + `</span>`)
 	}
-	b.WriteString(`<span class=ce-tb-spacer></span>` + st.Tip + st.Close.html())
+	b.WriteString(`<span class=ce-tb-spacer></span>` + tipOr(st.TipS, st.Tip) + st.Close.html())
 	b.WriteString(`</div>`)
 	return b.String()
 }

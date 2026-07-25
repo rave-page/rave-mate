@@ -220,7 +220,8 @@ func (u *UI) lib() *libSt {
 func (u *UI) renderLibrary() string {
 	st := u.libraryState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibrary(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryV2", wireLibState(st), zigui.RenderLibraryV2,
+			zigui.RenderLibrary, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -304,7 +305,8 @@ func (u *UI) libPatchDetail() {
 func (u *UI) libBody() string {
 	st := u.libBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryBodyV2", wireLibBody(st), zigui.RenderLibraryBodyV2,
+			zigui.RenderLibraryBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -352,7 +354,8 @@ func (u *UI) libDetailWrap(s *libSt) string {
 func (u *UI) libDetailRender(s *libSt) string {
 	st := u.libDetailState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryDetail(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryDetailV2", wireLibDetail(st), zigui.RenderLibraryDetailV2,
+			zigui.RenderLibraryDetail, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -772,7 +775,8 @@ func (u *UI) libPatchCueCell(path string) {
 // libCueCellRender renders one cue-census cell via Zig when available.
 func libCueCellRender(st libCueCellSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryCueCell(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryCueCellV2", wireLibCueCell(st), zigui.RenderLibraryCueCellV2,
+			zigui.RenderLibraryCueCell, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1328,7 +1332,8 @@ func libIDMHTML(st libIDMSt) string {
 func (u *UI) libQueueHTML() string {
 	st := u.libQueueState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryQueue(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryQueueV2", wireLibQueue(st), zigui.RenderLibraryQueueV2,
+			zigui.RenderLibraryQueue, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1515,12 +1520,12 @@ func libEncHTML(st libEncSt) string {
 	}
 
 	b.WriteString(`<div class=pbuilder>`)
-	b.WriteString(selHTMLRaw(st.Container.Sel, st.Container.Label))
+	b.WriteString(st.Container.html())
 	if !st.AudioOnly {
 		v := st.Video
 		b.WriteString(`<div class=pb-grp>`)
 		// container-compatible codecs only - the builder can't describe an unencodable combo
-		b.WriteString(selHTMLRaw(v.VCodec.Sel, v.VCodec.Label))
+		b.WriteString(v.VCodec.html())
 		b.WriteString(selHTML(v.Accel))
 		// quality profiles
 		b.WriteString(`<div class=pb-field><div class=pb-label>` + html.EscapeString(v.QualityLbl) + `</div><div class=seg>`)
@@ -1528,7 +1533,7 @@ func libEncHTML(st libEncSt) string {
 			b.WriteString(c.html())
 		}
 		b.WriteString(`</div><div class=pb-hint>` + html.EscapeString(v.ProfileHint) + `</div></div>`)
-		b.WriteString(selHTMLRaw(v.RateMode.Sel, v.RateMode.Label))
+		b.WriteString(v.RateMode.html())
 		b.WriteString(v.RateField.html())
 		b.WriteString(selHTML(v.Res))
 		b.WriteString(v.FPS.html())
@@ -1536,7 +1541,7 @@ func libEncHTML(st libEncSt) string {
 	}
 	// audio section
 	b.WriteString(`<div class=pb-grp>`)
-	b.WriteString(selHTMLRaw(st.AudioCodec.Sel, st.AudioCodec.Label))
+	b.WriteString(st.AudioCodec.html())
 	b.WriteString(st.AudioBitrate.html())
 	b.WriteString(selHTML(st.Channels))
 	b.WriteString(selHTML(st.SampleRate))
@@ -2098,8 +2103,7 @@ func pbSelect(label, act string, opts [][2]string, current string) string {
 
 // pbSelectTip = pbSelect with a shared-glossary tooltip (tooltip.go topic) beside the label.
 func pbSelectTip(label, act string, opts [][2]string, current, topic string) string {
-	t := resolvePbSelectTip(label, act, opts, current, topic)
-	return selHTMLRaw(t.Sel, t.Label)
+	return resolvePbSelectTip(label, act, opts, current, topic).html()
 }
 
 func (s *libSt) selRef() *musiclib.Key {

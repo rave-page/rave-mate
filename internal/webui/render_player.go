@@ -1124,7 +1124,8 @@ func mpSumHTMLOf(st mpSumSt) string {
 
 func mpRenderFull(st mpFullSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayer(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerV2", wireMpFull(st), zigui.RenderPlayerV2,
+			zigui.RenderPlayer, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1133,7 +1134,8 @@ func mpRenderFull(st mpFullSt) string {
 
 func mpRenderInner(st mpInnerSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerRoot(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerRootV2", wireMpInner(st), zigui.RenderPlayerRootV2,
+			zigui.RenderPlayerRoot, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1142,7 +1144,8 @@ func mpRenderInner(st mpInnerSt) string {
 
 func mpRenderVid(st mpVidSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerVid(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerVidV2", wireMpVid(st), zigui.RenderPlayerVidV2,
+			zigui.RenderPlayerVid, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1151,7 +1154,8 @@ func mpRenderVid(st mpVidSt) string {
 
 func mpRenderWave(st mpWaveSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerWave(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerWaveV2", wireMpWave(st), zigui.RenderPlayerWaveV2,
+			zigui.RenderPlayerWave, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1160,7 +1164,8 @@ func mpRenderWave(st mpWaveSt) string {
 
 func mpRenderTp(st mpTpSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerTp(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerTpV2", wireMpTp(st), zigui.RenderPlayerTpV2,
+			zigui.RenderPlayerTp, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1169,7 +1174,8 @@ func mpRenderTp(st mpTpSt) string {
 
 func mpRenderEdit(st mpEditSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerEdit(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerEditV2", wireMpEdit(st), zigui.RenderPlayerEditV2,
+			zigui.RenderPlayerEdit, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1178,7 +1184,8 @@ func mpRenderEdit(st mpEditSt) string {
 
 func mpRenderExport(st mpExportSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerExport(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerExportV2", wireMpExport(st), zigui.RenderPlayerExportV2,
+			zigui.RenderPlayerExport, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1187,7 +1194,8 @@ func mpRenderExport(st mpExportSt) string {
 
 func mpRenderRO(st mpROSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerRO(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerROV2", wireMpRO(st), zigui.RenderPlayerROV2,
+			zigui.RenderPlayerRO, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1196,7 +1204,8 @@ func mpRenderRO(st mpROSt) string {
 
 func mpRenderHov(st mpHovSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPlayerHov(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPlayerHovV2", wireMpHov(st), zigui.RenderPlayerHovV2,
+			zigui.RenderPlayerHov, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

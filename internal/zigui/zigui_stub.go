@@ -191,6 +191,41 @@ func RenderAppGroupsBodyV2(state []byte) (string, bool) { return "", false }
 func RenderLogsV2(state []byte) (string, bool)          { return "", false }
 func RenderLogsLinesV2(state []byte) (string, bool)     { return "", false }
 
+func RenderLiveV2(state []byte) (string, bool)                  { return "", false }
+func RenderLiveFragV2(kind string, state []byte) (string, bool) { return "", false }
+
+func RenderMotionV2(state []byte) (string, bool)     { return "", false }
+func RenderMotionBodyV2(state []byte) (string, bool) { return "", false }
+
+func RenderPublishV2(state []byte) (string, bool)     { return "", false }
+func RenderPublishHeroV2(state []byte) (string, bool) { return "", false }
+
+func RenderSettingsV2(state []byte) (string, bool)        { return "", false }
+func RenderSettingsContentV2(state []byte) (string, bool) { return "", false }
+func RenderSettingsStatusV2(state []byte) (string, bool)  { return "", false }
+
+func RenderLibraryV2(state []byte) (string, bool)        { return "", false }
+func RenderLibraryBodyV2(state []byte) (string, bool)    { return "", false }
+func RenderLibraryDetailV2(state []byte) (string, bool)  { return "", false }
+func RenderLibraryQueueV2(state []byte) (string, bool)   { return "", false }
+func RenderLibraryCueCellV2(state []byte) (string, bool) { return "", false }
+
+func RenderPlayerV2(state []byte) (string, bool)       { return "", false }
+func RenderPlayerRootV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerVidV2(state []byte) (string, bool)    { return "", false }
+func RenderPlayerWaveV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerTpV2(state []byte) (string, bool)     { return "", false }
+func RenderPlayerEditV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerExportV2(state []byte) (string, bool) { return "", false }
+func RenderPlayerROV2(state []byte) (string, bool)     { return "", false }
+func RenderPlayerHovV2(state []byte) (string, bool)    { return "", false }
+
+func RenderAutomationsV2(state []byte) (string, bool)     { return "", false }
+func RenderAutomationsBodyV2(state []byte) (string, bool) { return "", false }
+
+func RenderPeersV2(state []byte) (string, bool)     { return "", false }
+func RenderPeersBodyV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

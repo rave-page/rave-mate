@@ -801,6 +801,162 @@ export fn rz_ui_render_logs_lines_v2(state: ?[*]const u8, len: usize, out_len: *
     return renderWire(logs.Lines, wire_gen.decodeLogsLines, logs.renderLines, wire_gen.msg_logs_lines, state, len, out_len);
 }
 
+// ── B-2 fan-out: live ──
+// The full cockpit is rendered rarely; the ten fragments are the ~1 Hz tick and are where the
+// round trip actually costs. Each fragment state crosses on its own, so each is its own root
+// message - the header id keeps refusing a document built for a different fragment.
+
+export fn rz_ui_render_live_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(live.State, wire_gen.decodeLiveState, live.render, wire_gen.msg_live_state, state, len, out_len);
+}
+
+/// kind selects the fragment + its state type, same set as rz_ui_render_live_frag ("graph"
+/// serves both #live-net and #live-tim). Unknown kind → NULL → the caller tries v1, then Go.
+export fn rz_ui_render_live_frag_v2(kind: ?[*]const u8, kind_len: usize, state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    const kp = kind orelse return null;
+    if (kind_len == 0) return null;
+    const k = kp[0..kind_len];
+    if (std.mem.eql(u8, k, "transport")) return renderWire(live.Transport, wire_gen.decodeLiveTransport, live.renderTransport, wire_gen.msg_live_transport, state, len, out_len);
+    if (std.mem.eql(u8, k, "np")) return renderWire(live.NP, wire_gen.decodeLiveNP, live.renderNP, wire_gen.msg_live_n_p, state, len, out_len);
+    if (std.mem.eql(u8, k, "status")) return renderWire(live.Status, wire_gen.decodeLiveStatus, live.renderStatus, wire_gen.msg_live_status, state, len, out_len);
+    if (std.mem.eql(u8, k, "decks")) return renderWire(live.Decks, wire_gen.decodeLiveDecks, live.renderDecks, wire_gen.msg_live_decks, state, len, out_len);
+    if (std.mem.eql(u8, k, "signals")) return renderWire(live.Signals, wire_gen.decodeLiveSignals, live.renderSignals, wire_gen.msg_live_signals, state, len, out_len);
+    if (std.mem.eql(u8, k, "cockpit")) return renderWire(live.Cockpit, wire_gen.decodeLiveCockpit, live.renderCockpit, wire_gen.msg_live_cockpit, state, len, out_len);
+    if (std.mem.eql(u8, k, "link")) return renderWire(live.Link, wire_gen.decodeLiveLink, live.renderLink, wire_gen.msg_live_link, state, len, out_len);
+    if (std.mem.eql(u8, k, "graph")) return renderWire(live.Graph, wire_gen.decodeLiveGraph, live.renderGraph, wire_gen.msg_live_graph, state, len, out_len);
+    if (std.mem.eql(u8, k, "perf")) return renderWire(live.Perf, wire_gen.decodeLivePerf, live.renderPerf, wire_gen.msg_live_perf, state, len, out_len);
+    if (std.mem.eql(u8, k, "strip")) return renderWire(live.Strip, wire_gen.decodeLiveStrip, live.renderStrip, wire_gen.msg_live_strip, state, len, out_len);
+    return null;
+}
+
+// ── B-2 fan-out: motion ──
+// One message for both surfaces (the tab and the #mo-body section switch), like appgroups.
+
+export fn rz_ui_render_motion_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(motion.State, wire_gen.decodeMoState, motion.render, wire_gen.msg_mo_state, state, len, out_len);
+}
+
+export fn rz_ui_render_motion_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(motion.State, wire_gen.decodeMoState, motion.renderBody, wire_gen.msg_mo_state, state, len, out_len);
+}
+
+// ── B-2 fan-out: publish ──
+// #pub-hero is the ~1 Hz tick target (recorder progress); it renders EMPTY when no recorder is
+// wired, and an empty render is a legitimate NULL that the Go fallback reproduces.
+
+export fn rz_ui_render_publish_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.State, wire_gen.decodePub, publish.render, wire_gen.msg_pub, state, len, out_len);
+}
+
+export fn rz_ui_render_publish_hero_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.Hero, wire_gen.decodePubHero, publish.renderHero, wire_gen.msg_pub_hero, state, len, out_len);
+}
+
+// ── B-2 fan-out: settings ──
+// Three messages: the tab, the #set-content pane (patched on its own so the search input keeps
+// focus) and one #stset-<id> status line, which the settings tick patches per card.
+
+export fn rz_ui_render_settings_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.State, wire_gen.decodeSetState, settings.render, wire_gen.msg_set_state, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_content_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.Content, wire_gen.decodeSetContent, settings.renderContent, wire_gen.msg_set_content, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings.Status, wire_gen.decodeSetStatus, settings.renderStatus, wire_gen.msg_set_status, state, len, out_len);
+}
+
+// ── B-2 fan-out: library ──
+// Five messages: the tab, #lib-body (section switch), #lib-detail (inspector),
+// #lib-queue-body (job progress, patched from the job goroutines) and one cue-census cell
+// (#ce-cell-<hash>, patched per row when a drop is toggled).
+
+export fn rz_ui_render_library_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.State, wire_gen.decodeLibState, library.render, wire_gen.msg_lib_state, state, len, out_len);
+}
+
+export fn rz_ui_render_library_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Body, wire_gen.decodeLibBody, library.renderBody, wire_gen.msg_lib_body, state, len, out_len);
+}
+
+export fn rz_ui_render_library_detail_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Detail, wire_gen.decodeLibDetail, library.renderDetail, wire_gen.msg_lib_detail, state, len, out_len);
+}
+
+export fn rz_ui_render_library_queue_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Queue, wire_gen.decodeLibQueue, library.renderQueue, wire_gen.msg_lib_queue, state, len, out_len);
+}
+
+export fn rz_ui_render_library_cuecell_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.CueCell, wire_gen.decodeLibCueCell, library.renderCueCell, wire_gen.msg_lib_cue_cell, state, len, out_len);
+}
+
+// ── B-2 fan-out: player ──
+// Nine patch targets, one message each. The full view carries the 29 kB raw waveform SVG
+// (mpWaveSVG stays Go by design), so its document is dominated by ONE string - see
+// PHASEB_BASELINE.md for what that does to the delta.
+
+export fn rz_ui_render_player_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.State, wire_gen.decodeMpFull, player.render, wire_gen.msg_mp_full, state, len, out_len);
+}
+
+export fn rz_ui_render_player_root_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Inner, wire_gen.decodeMpInner, player.renderInner, wire_gen.msg_mp_inner, state, len, out_len);
+}
+
+export fn rz_ui_render_player_vid_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Vid, wire_gen.decodeMpVid, player.renderVid, wire_gen.msg_mp_vid, state, len, out_len);
+}
+
+export fn rz_ui_render_player_wave_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Wave, wire_gen.decodeMpWave, player.renderWave, wire_gen.msg_mp_wave, state, len, out_len);
+}
+
+export fn rz_ui_render_player_tp_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Tp, wire_gen.decodeMpTp, player.renderTp, wire_gen.msg_mp_tp, state, len, out_len);
+}
+
+export fn rz_ui_render_player_edit_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Edit, wire_gen.decodeMpEdit, player.renderEdit, wire_gen.msg_mp_edit, state, len, out_len);
+}
+
+export fn rz_ui_render_player_export_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Export, wire_gen.decodeMpExport, player.renderExport, wire_gen.msg_mp_export, state, len, out_len);
+}
+
+export fn rz_ui_render_player_ro_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.RO, wire_gen.decodeMpRO, player.renderRO, wire_gen.msg_mp_r_o, state, len, out_len);
+}
+
+export fn rz_ui_render_player_hov_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(player.Hov, wire_gen.decodeMpHov, player.renderHov, wire_gen.msg_mp_hov, state, len, out_len);
+}
+
+// ── B-2 fan-out: automations ──
+// #auto-body is version-gated (~1 Hz, only re-rendered when the automation store changes).
+
+export fn rz_ui_render_automations_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(automations.State, wire_gen.decodeAutoState, automations.render, wire_gen.msg_auto_state, state, len, out_len);
+}
+
+export fn rz_ui_render_automations_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(automations.Body, wire_gen.decodeAutoBodyState, automations.renderBody, wire_gen.msg_auto_body_state, state, len, out_len);
+}
+
+// ── B-2 fan-out: peers ──
+// #peers-body is the ~1 Hz live tick (route telemetry, transfer progress). Peers carries the
+// only []string on the wire (media sync lines → kStrList).
+
+export fn rz_ui_render_peers_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(peers.State, wire_gen.decodePeers, peers.render, wire_gen.msg_peers, state, len, out_len);
+}
+
+export fn rz_ui_render_peers_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(peers.Body, wire_gen.decodePeersBody, peers.renderBody, wire_gen.msg_peers_body, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

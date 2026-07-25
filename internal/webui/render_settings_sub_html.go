@@ -197,7 +197,8 @@ type bridgeGateSt struct {
 type bridgeSt struct {
 	St        uiStatus     `json:"st"` // Variant "" = no live-state row (bridge off / absent)
 	Studio    uiToggle     `json:"studio"`
-	Tip       string       `json:"tip"` // pre-rendered tipTopic markup (trusted, raw)
+	Tip       string       `json:"tip"`             // legacy RAW tooltip markup (bridge)
+	TipS      *tipSt       `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
 	HasGate   bool         `json:"hasGate,omitempty"`
 	GateTitle string       `json:"gateTitle,omitempty"`
 	Gate      bridgeGateSt `json:"gate"`
@@ -207,7 +208,7 @@ type bridgeSt struct {
 func bridgeCardHTML(s bridgeSt) string {
 	var b strings.Builder
 	b.WriteString(s.St.html())
-	b.WriteString(toggleRowTipDL(s.Studio.Label, s.Studio.DL, s.Studio.Act, s.Studio.On, s.Tip))
+	b.WriteString(toggleRowTipDL(s.Studio.Label, s.Studio.DL, s.Studio.Act, s.Studio.On, tipOr(s.TipS, s.Tip)))
 	if !s.HasGate {
 		return b.String()
 	}

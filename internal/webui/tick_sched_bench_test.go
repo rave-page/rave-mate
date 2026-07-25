@@ -31,9 +31,11 @@ func tickBenchLive() liveTickSt {
 func legacyLiveFrags(st liveTickSt, zig bool) []zigui.Frag {
 	out := make([]zigui.Frag, 0, len(liveTickIDs))
 	add := func(id, html string) { out = append(out, zigui.Frag{ID: id, HTML: html}) }
-	frag := func(id, kind string, js []byte, goHTML string) {
+	// post-B-2 the per-fragment path is a BINARY dispatch (RenderLiveFragV2), which is the honest
+	// baseline for B3: one document + one cgo call per fragment vs one for the whole surface.
+	frag := func(id, kind string, doc []byte, goHTML string) {
 		if zig {
-			if h, ok := zigui.RenderLiveFrag(kind, js); ok {
+			if h, ok := zigui.RenderLiveFragV2(kind, doc); ok {
 				add(id, h)
 				return
 			}
@@ -45,36 +47,37 @@ func legacyLiveFrags(st liveTickSt, zig bool) []zigui.Frag {
 	if l.Transport.HasRec {
 		add("live-rec-state", htmlEscape(l.Transport.RecState))
 	}
-	frag("live-np", "np", stateJSON(l.NP), liveNPHTML(l.NP))
-	frag("live-status", "status", stateJSON(l.Status), liveStatusFragHTML(l.Status))
-	frag("live-decks", "decks", stateJSON(l.Decks), liveDecksFragHTML(l.Decks))
+	frag("live-np", "np", wireLiveNP(l.NP), liveNPHTML(l.NP))
+	frag("live-status", "status", wireLiveStatus(l.Status), liveStatusFragHTML(l.Status))
+	frag("live-decks", "decks", wireLiveDecks(l.Decks), liveDecksFragHTML(l.Decks))
 	if l.HasSignals {
-		frag("live-signals", "signals", stateJSON(l.Signals), liveSignalsFragHTML(l.Signals))
+		frag("live-signals", "signals", wireLiveSignals(l.Signals), liveSignalsFragHTML(l.Signals))
 	}
 	if l.HasCockpit {
-		frag("live-cockpit", "cockpit", stateJSON(l.Cockpit), liveCockpitFragHTML(l.Cockpit))
+		frag("live-cockpit", "cockpit", wireLiveCockpit(l.Cockpit), liveCockpitFragHTML(l.Cockpit))
 	}
 	if l.HasLink {
-		frag("live-ablelink", "link", stateJSON(l.Link), liveLinkFragHTML(l.Link))
+		frag("live-ablelink", "link", wireLiveLink(l.Link), liveLinkFragHTML(l.Link))
 	}
 	if l.HasNet {
-		frag("live-net", "graph", stateJSON(l.Net), liveGraphFragHTML(l.Net))
-		frag("live-tim", "graph", stateJSON(l.Tim), liveGraphFragHTML(l.Tim))
+		frag("live-net", "graph", wireLiveGraph(l.Net), liveGraphFragHTML(l.Net))
+		frag("live-tim", "graph", wireLiveGraph(l.Tim), liveGraphFragHTML(l.Tim))
 	}
 	if l.HasPerf {
-		frag("live-perf2", "perf", stateJSON(l.Perf), livePerfFragHTML(l.Perf))
+		frag("live-perf2", "perf", wireLivePerf(l.Perf), livePerfFragHTML(l.Perf))
 	}
-	frag("live-strip", "strip", stateJSON(l.Strip), liveStripFragHTML(l.Strip))
+	frag("live-strip", "strip", wireLiveStrip(l.Strip), liveStripFragHTML(l.Strip))
 	return out
 }
 
-// legacyLiveMarshal is the old path's serialization half: one stateJSON per fragment.
+// legacyLiveMarshal is the old path's serialization half: one document per fragment (post-B-2 that
+// is a wire encode, not a json.Marshal - ten WireWriters instead of one).
 func legacyLiveMarshal(st liveTickSt) int {
 	l, n := st.Live, 0
-	for _, js := range [][]byte{stateJSON(l.NP), stateJSON(l.Status), stateJSON(l.Decks),
-		stateJSON(l.Signals), stateJSON(l.Cockpit), stateJSON(l.Link), stateJSON(l.Net),
-		stateJSON(l.Tim), stateJSON(l.Perf), stateJSON(l.Strip)} {
-		n += len(js)
+	for _, doc := range [][]byte{wireLiveNP(l.NP), wireLiveStatus(l.Status), wireLiveDecks(l.Decks),
+		wireLiveSignals(l.Signals), wireLiveCockpit(l.Cockpit), wireLiveLink(l.Link),
+		wireLiveGraph(l.Net), wireLiveGraph(l.Tim), wireLivePerf(l.Perf), wireLiveStrip(l.Strip)} {
+		n += len(doc)
 	}
 	return n
 }
@@ -199,7 +202,7 @@ func BenchmarkTickBenchLive(b *testing.B) {
 			}
 		}
 	})
-	b.Run("encode_json_perfrag", func(b *testing.B) {
+	b.Run("encode_wire_perfrag", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			if legacyLiveMarshal(st) == 0 {

@@ -109,7 +109,8 @@ pub const BridgeGate = struct {
 pub const Bridge = struct {
     st: c.Status = .{},
     studio: c.Toggle = .{},
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy raw (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     hasGate: bool = false,
     gateTitle: []const u8 = "",
     gate: BridgeGate = .{},
@@ -208,7 +209,9 @@ pub fn renderGridfixModel(h: *Html, s: GfModel) !void {
 /// renderBridge mirrors Go bridgeCardHTML: relay state, the Local Studio sub-toggle, the gate.
 pub fn renderBridge(h: *Html, s: Bridge) !void {
     try c.statusOf(h, s.st);
-    try c.toggleRowTip(h, s.studio.label, s.studio.dl, s.studio.act, s.studio.on, s.tip);
+    var tb = try c.tipBuf(h, s.tipSt, s.tip); // toggleRowTip takes the tooltip as a string
+    defer tb.deinit();
+    try c.toggleRowTip(h, s.studio.label, s.studio.dl, s.studio.act, s.studio.on, tb.b.items);
     if (!s.hasGate) return;
     try c.sectionOpen(h, s.gateTitle);
     try renderBridgeGate(h, s.gate);

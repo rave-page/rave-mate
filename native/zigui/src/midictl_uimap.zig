@@ -30,13 +30,15 @@ pub const Profile = struct {
 pub const State = struct {
     show: bool = false,
     title: []const u8 = "",
-    titleTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    titleTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    titleTipSt: ?c.Tip = null, // structured tooltip — wins over titleTip
     sub: []const u8 = "",
     enableLbl: []const u8 = "",
     enableDl: []const u8 = "",
     enableAct: []const u8 = "",
     enableOn: bool = false,
-    enableTip: []const u8 = "",
+    enableTip: []const u8 = "", // legacy raw (bridge)
+    enableTipSt: ?c.Tip = null, // structured tooltip — wins over enableTip
     add: Row = .{},
     profiles: []const Profile = &.{},
     note: []const u8 = "",
@@ -46,12 +48,15 @@ pub const State = struct {
 pub fn render(h: *Html, s: State) !void {
     if (!s.show) return;
     try c.cardOpen(h, s.title, true);
-    try h.raw(s.titleTip);
+    try c.tipOr(h, s.titleTipSt, s.titleTip);
     try c.cardTrailClose(h);
     try h.raw("<p class=page-sub>");
     try h.esc(s.sub);
     try h.raw("</p>");
-    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, s.enableTip);
+    var eb = Html.init(h.a); // toggleRowTip takes the tooltip as a string
+    defer eb.deinit();
+    try c.tipOr(&eb, s.enableTipSt, s.enableTip);
+    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, eb.b.items);
     try renderRow(h, s.add);
     for (s.profiles) |p| {
         try renderRow(h, p.row);
