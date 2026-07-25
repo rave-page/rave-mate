@@ -9,13 +9,18 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const f = @import("libfixers.zig");
+const d = @import("library_detail.zig");
+const s = @import("library_sections.zig");
+const k = @import("library_kit.zig");
+const library = @import("library.zig");
 const sub = @import("settings_sub.zig");
 const settings = @import("settings.zig");
 const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0xf842f2ca;
+pub const schema_hash: u32 = 0x5d86f332;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -36,6 +41,11 @@ pub const msg_pub_hero: u16 = 23; // #pub-hero fragment (~1 Hz tick)
 pub const msg_set_state: u16 = 24; // Settings tab (full view)
 pub const msg_set_content: u16 = 25; // #set-content pane (sub-tab switch + search)
 pub const msg_set_status: u16 = 26; // one #stset-<id> status fragment (settings tick)
+pub const msg_lib_state: u16 = 27; // Library tab (full view)
+pub const msg_lib_body: u16 = 28; // #lib-body (active section)
+pub const msg_lib_detail: u16 = 29; // #lib-detail inspector
+pub const msg_lib_queue: u16 = 30; // #lib-queue-body (job progress patch)
+pub const msg_lib_cue_cell: u16 = 31; // one cue-census cell (per-row patch)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -979,6 +989,764 @@ pub fn decodeSetState(r: *wire.Reader, out: *settings.State) wire.Error!void {
     };
 }
 
+pub fn decodeLibTab(r: *wire.Reader, out: *c.Tab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibNavRow(r: *wire.Reader, out: *f.NavRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hd = try r.boolean(t),
+        2 => out.label = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.icon = try r.str(t),
+        5 => out.count = try r.str(t),
+        6 => out.on = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibNav(r: *wire.Reader, out: *f.Nav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(f.NavRow, decodeLibNavRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFStat(r: *wire.Reader, out: *f.GFStat) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.n = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.tone = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFTile(r: *wire.Reader, out: *f.GFTile) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.n = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.tone = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFLive(r: *wire.Reader, out: *f.GFLive) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tiles = try r.list(f.GFTile, decodeLibGFTile, t),
+        2 => out.pct = try r.str(t),
+        3 => out.caption = try r.str(t),
+        4 => out.current = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHint(r: *wire.Reader, out: *k.Hint) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tone = try r.str(t),
+        2 => out.text = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGF(r: *wire.Reader, out: *f.GF) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.eyebrow = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.stats = try r.list(f.GFStat, decodeLibGFStat, t),
+        5 => out.note = try r.str(t),
+        6 => out.noteAfter = try r.boolean(t),
+        7 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        8 => out.confirmNote = try r.str(t),
+        9 => out.force = try r.sub(c.Toggle, decodeUiToggle, t),
+        10 => out.forceHint = try r.str(t),
+        11 => out.scopes = try r.list(c.Btn, decodeUiBtn, t),
+        12 => out.live = try r.sub(f.GFLive, decodeLibGFLive, t),
+        13 => out.stopLbl = try r.str(t),
+        14 => out.tiles = try r.list(f.GFTile, decodeLibGFTile, t),
+        15 => out.cachedNote = try r.str(t),
+        16 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        17 => out.acts = try r.list(c.Btn, decodeUiBtn, t),
+        18 => out.notes = try r.strList(t),
+        19 => out.applyNote = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSelTip(r: *wire.Reader, out: *k.SelTip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.labelHtml = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibChip(r: *wire.Reader, out: *k.Chip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.val = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPBField(r: *wire.Reader, out: *c.PBField) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.value = try r.str(t),
+        5 => out.inputType = try r.str(t),
+        6 => out.ph = try r.str(t),
+        7 => out.hint = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibEncVideo(r: *wire.Reader, out: *d.EncVideo) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.vcodec = try r.sub(k.SelTip, decodeLibSelTip, t),
+        2 => out.accel = try r.sub(c.Select, decodeSelState, t),
+        3 => out.qualityLbl = try r.str(t),
+        4 => out.profiles = try r.list(k.Chip, decodeLibChip, t),
+        5 => out.profileHint = try r.str(t),
+        6 => out.rateMode = try r.sub(k.SelTip, decodeLibSelTip, t),
+        7 => out.rateField = try r.sub(c.PBField, decodeLibPBField, t),
+        8 => out.res = try r.sub(c.Select, decodeSelState, t),
+        9 => out.fps = try r.sub(c.PBField, decodeLibPBField, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLoudChip(r: *wire.Reader, out: *c.LoudChip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.val = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLoud(r: *wire.Reader, out: *c.Loud) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.compact = try r.boolean(t),
+        2 => out.toggle = try r.sub(c.Toggle, decodeUiToggle, t),
+        3 => out.tip = try r.str(t),
+        4 => out.chipAct = try r.str(t),
+        5 => out.chips = try r.list(c.LoudChip, decodeLoudChip, t),
+        6 => out.iField = try r.sub(c.PBField, decodeLibPBField, t),
+        7 => out.tpField = try r.sub(c.PBField, decodeLibPBField, t),
+        8 => out.raise = try r.sub(c.Toggle, decodeUiToggle, t),
+        9 => out.hasWarn = try r.boolean(t),
+        10 => out.warn = try r.str(t),
+        11 => out.extra = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibEnc(r: *wire.Reader, out: *d.Enc) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.preset = try r.sub(c.Select, decodeSelState, t),
+        2 => out.desc = try r.str(t),
+        3 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        4 => out.audioOnly = try r.boolean(t),
+        5 => out.container = try r.sub(k.SelTip, decodeLibSelTip, t),
+        6 => out.video = try r.sub(d.EncVideo, decodeLibEncVideo, t),
+        7 => out.audioCodec = try r.sub(k.SelTip, decodeLibSelTip, t),
+        8 => out.audioBitrate = try r.sub(c.PBField, decodeLibPBField, t),
+        9 => out.channels = try r.sub(c.Select, decodeSelState, t),
+        10 => out.sampleRate = try r.sub(c.Select, decodeSelState, t),
+        11 => out.loud = try r.sub(c.Loud, decodeLoud, t),
+        12 => out.trimStart = try r.sub(c.PBField, decodeLibPBField, t),
+        13 => out.trimEnd = try r.sub(c.PBField, decodeLibPBField, t),
+        14 => out.outputNote = try r.str(t),
+        15 => out.startLbl = try r.str(t),
+        16 => out.saveLbl = try r.str(t),
+        17 => out.saveAsLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHarm(r: *wire.Reader, out: *d.Harm) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.wheel = try r.str(t),
+        3 => out.sameLbl = try r.str(t),
+        4 => out.relLbl = try r.str(t),
+        5 => out.showLbl = try r.str(t),
+        6 => out.showAct = try r.str(t),
+        7 => out.clearLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTagEd(r: *wire.Reader, out: *f.TagEdit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.open = try r.boolean(t),
+        2 => out.openLbl = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.fields = try r.list(c.PBField, decodeLibPBField, t),
+        5 => out.saveLbl = try r.str(t),
+        6 => out.cancelLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTrackPls(r: *wire.Reader, out: *d.TrackPls) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.unavailable = try r.boolean(t),
+        2 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        3 => out.emptyText = try r.str(t),
+        4 => out.addLbl = try r.str(t),
+        5 => out.addAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCompatRow(r: *wire.Reader, out: *f.CompatRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCompatSec(r: *wire.Reader, out: *f.Compat) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.isEmpty = try r.boolean(t),
+        2 => out.empty = try r.str(t),
+        3 => out.rows = try r.list(f.CompatRow, decodeLibCompatRow, t),
+        4 => out.openLbl = try r.str(t),
+        5 => out.findLbl = try r.str(t),
+        6 => out.findAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibDetail(r: *wire.Reader, out: *d.Detail) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.raw = try r.str(t),
+        3 => out.msg = try r.str(t),
+        4 => out.gf = try r.sub(f.GF, decodeLibGF, t),
+        5 => out.eyebrow = try r.str(t),
+        6 => out.title = try r.str(t),
+        7 => out.sub = try r.str(t),
+        8 => out.actionsTitle = try r.str(t),
+        9 => out.missing = try r.str(t),
+        10 => out.actBtns = try r.list(c.Btn, decodeUiBtn, t),
+        11 => out.hasPlayer = try r.boolean(t),
+        12 => out.playerTitle = try r.str(t),
+        13 => out.player = try r.str(t),
+        14 => out.hasEnc = try r.boolean(t),
+        15 => out.encTitle = try r.str(t),
+        16 => out.encDemoted = try r.boolean(t),
+        17 => out.demotedNote = try r.str(t),
+        18 => out.showLbl = try r.str(t),
+        19 => out.enc = try r.sub(d.Enc, decodeLibEnc, t),
+        20 => out.hasHarm = try r.boolean(t),
+        21 => out.harmTitle = try r.str(t),
+        22 => out.harm = try r.sub(d.Harm, decodeLibHarm, t),
+        23 => out.hasTags = try r.boolean(t),
+        24 => out.tagsTitle = try r.str(t),
+        25 => out.tagsDesc = try r.str(t),
+        26 => out.writeLbl = try r.str(t),
+        27 => out.writeAct = try r.str(t),
+        28 => out.revertLbl = try r.str(t),
+        29 => out.revertAct = try r.str(t),
+        30 => out.tagEditor = try r.sub(f.TagEdit, decodeLibTagEd, t),
+        31 => out.hasPls = try r.boolean(t),
+        32 => out.plsTitle = try r.str(t),
+        33 => out.pls = try r.sub(d.TrackPls, decodeLibTrackPls, t),
+        34 => out.hasCompat = try r.boolean(t),
+        35 => out.compatTitle = try r.str(t),
+        36 => out.compat = try r.sub(f.Compat, decodeLibCompatSec, t),
+        37 => out.detailsTitle = try r.str(t),
+        38 => out.meta = try r.list(c.KV, decodeUiKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSeg(r: *wire.Reader, out: *s.Seg) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.path = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlAct(r: *wire.Reader, out: *k.PlAct) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        2 => out.menu = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibKeyPill(r: *wire.Reader, out: *k.KeyPill) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.cls = try r.str(t),
+        3 => out.ok = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFe(r: *wire.Reader, out: *s.Fe) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.path = try r.str(t),
+        3 => out.isDir = try r.boolean(t),
+        4 => out.glyph = try r.str(t),
+        5 => out.gridSub = try r.str(t),
+        6 => out.sub = try r.str(t),
+        7 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        8 => out.checked = try r.boolean(t),
+        9 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBatch(r: *wire.Reader, out: *k.Batch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.on = try r.boolean(t),
+        2 => out.count = try r.str(t),
+        3 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBrowse(r: *wire.Reader, out: *s.Browse) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.crumbs = try r.list(s.Seg, decodeLibSeg, t),
+        3 => out.up = try r.str(t),
+        4 => out.upPath = try r.str(t),
+        5 => out.gotoLbl = try r.str(t),
+        6 => out.filter = try r.str(t),
+        7 => out.filterPh = try r.str(t),
+        8 => out.kindLbl = try r.str(t),
+        9 => out.kind = try r.sub(c.Select, decodeSelState, t),
+        10 => out.sortLbl = try r.str(t),
+        11 => out.sort = try r.sub(c.Select, decodeSelState, t),
+        12 => out.listLbl = try r.str(t),
+        13 => out.gridLbl = try r.str(t),
+        14 => out.grid = try r.boolean(t),
+        15 => out.keyChip = try r.sub(k.Chip, decodeLibChip, t),
+        16 => out.folder = try r.sub(c.Select, decodeSelState, t),
+        17 => out.selAll = try r.boolean(t),
+        18 => out.selAllOn = try r.boolean(t),
+        19 => out.selAllTitle = try r.str(t),
+        20 => out.count = try r.str(t),
+        21 => out.boundNote = try r.str(t),
+        22 => out.hasBound = try r.boolean(t),
+        23 => out.boundActs = try r.sub(k.PlAct, decodeLibPlAct, t),
+        24 => out.entries = try r.list(s.Fe, decodeLibFe, t),
+        25 => out.more = try r.str(t),
+        26 => out.batch = try r.sub(k.Batch, decodeLibBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFResRow(r: *wire.Reader, out: *f.GFResRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.st = try r.str(t),
+        3 => out.stLow = try r.str(t),
+        4 => out.title = try r.str(t),
+        5 => out.detail = try r.str(t),
+        6 => out.delta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibGFRes(r: *wire.Reader, out: *f.GFRes) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        2 => out.rows = try r.list(f.GFResRow, decodeLibGFResRow, t),
+        3 => out.isEmpty = try r.boolean(t),
+        4 => out.empty = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFRow(r: *wire.Reader, out: *f.TFRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = try r.str(t),
+        2 => out.checked = try r.boolean(t),
+        3 => out.path = try r.str(t),
+        4 => out.base = try r.str(t),
+        5 => out.field = try r.str(t),
+        6 => out.cur = try r.str(t),
+        7 => out.proposed = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFGrp(r: *wire.Reader, out: *f.TFGrp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.badge = try r.str(t),
+        3 => out.allLbl = try r.str(t),
+        4 => out.allAct = try r.str(t),
+        5 => out.noneLbl = try r.str(t),
+        6 => out.noneAct = try r.str(t),
+        7 => out.desc = try r.str(t),
+        8 => out.rows = try r.list(f.TFRow, decodeLibTFRow, t),
+        9 => out.more = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibTFRes(r: *wire.Reader, out: *f.TFRes) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.eyebrow = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.desc = try r.str(t),
+        4 => out.scanning = try r.boolean(t),
+        5 => out.pct = try r.str(t),
+        6 => out.scanCap = try r.str(t),
+        7 => out.closeLbl = try r.str(t),
+        8 => out.applyLbl = try r.str(t),
+        9 => out.rescanLbl = try r.str(t),
+        10 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        11 => out.skipped = try r.str(t),
+        12 => out.isEmpty = try r.boolean(t),
+        13 => out.empty = try r.str(t),
+        14 => out.groups = try r.list(f.TFGrp, decodeLibTFGrp, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFixRes(r: *wire.Reader, out: *f.Results) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.gf = try r.sub(f.GFRes, decodeLibGFRes, t),
+        3 => out.tf = try r.sub(f.TFRes, decodeLibTFRes, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollHdr(r: *wire.Reader, out: *s.CollHdr) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cls = try r.str(t),
+        2 => out.key = try r.str(t),
+        3 => out.label = try r.str(t),
+        4 => out.arrow = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollHead(r: *wire.Reader, out: *s.CollHead) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.selAllTitle = try r.str(t),
+        2 => out.selAllOn = try r.boolean(t),
+        3 => out.main = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        4 => out.cueLbl = try r.str(t),
+        5 => out.bpm = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        6 => out.timeLbl = try r.str(t),
+        7 => out.key = try r.sub(s.CollHdr, decodeLibCollHdr, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCueCell(r: *wire.Reader, out: *s.CueCell) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.drops = @intCast(try r.uint(t)),
+        2 => out.dropsTitle = try r.str(t),
+        3 => out.noDropsTitle = try r.str(t),
+        4 => out.cues = @intCast(try r.uint(t)),
+        5 => out.cuesTitle = try r.str(t),
+        6 => out.noCuesTitle = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibCollRow(r: *wire.Reader, out: *s.CollRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.checked = try r.boolean(t),
+        3 => out.warn = try r.boolean(t),
+        4 => out.selCls = try r.str(t),
+        5 => out.title = try r.str(t),
+        6 => out.sub = try r.str(t),
+        7 => out.verified = try r.boolean(t),
+        8 => out.cellId = try r.str(t),
+        9 => out.cue = try r.sub(s.CueCell, decodeLibCueCell, t),
+        10 => out.bpm = try r.str(t),
+        11 => out.dur = try r.str(t),
+        12 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibColl(r: *wire.Reader, out: *s.Coll) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.importLbl = try r.str(t),
+        3 => out.djsyncLbl = try r.str(t),
+        4 => out.gridFix = try r.boolean(t),
+        5 => out.gridFixLbl = try r.str(t),
+        6 => out.moreLbl = try r.str(t),
+        7 => out.moreOpen = try r.boolean(t),
+        8 => out.moreItems = try r.list(c.Tab, decodeLibTab, t),
+        9 => out.search = try r.str(t),
+        10 => out.searchPh = try r.str(t),
+        11 => out.genre = try r.sub(c.Select, decodeSelState, t),
+        12 => out.label = try r.sub(c.Select, decodeSelState, t),
+        13 => out.hasPlFacet = try r.boolean(t),
+        14 => out.plFacet = try r.sub(c.Select, decodeSelState, t),
+        15 => out.keyChip = try r.sub(k.Chip, decodeLibChip, t),
+        16 => out.noDropsLbl = try r.str(t),
+        17 => out.noDrops = try r.boolean(t),
+        18 => out.clear = try r.boolean(t),
+        19 => out.clearLbl = try r.str(t),
+        20 => out.prep = try r.sub(c.Select, decodeSelState, t),
+        21 => out.chips = try r.list(k.Chip, decodeLibChip, t),
+        22 => out.hasInline = try r.boolean(t),
+        23 => out.inlineActs = try r.sub(k.PlAct, decodeLibPlAct, t),
+        24 => out.hasResults = try r.boolean(t),
+        25 => out.results = try r.sub(f.Results, decodeLibFixRes, t),
+        26 => out.head = try r.sub(s.CollHead, decodeLibCollHead, t),
+        27 => out.rows = try r.list(s.CollRow, decodeLibCollRow, t),
+        28 => out.verifiedTitle = try r.str(t),
+        29 => out.empty = try r.str(t),
+        30 => out.isEmpty = try r.boolean(t),
+        31 => out.more = try r.str(t),
+        32 => out.batch = try r.sub(k.Batch, decodeLibBatch, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFavRow(r: *wire.Reader, out: *s.FavRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.path = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibFav(r: *wire.Reader, out: *s.Fav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.openLbl = try r.str(t),
+        4 => out.unpinLbl = try r.str(t),
+        5 => out.rows = try r.list(s.FavRow, decodeLibFavRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlRow(r: *wire.Reader, out: *s.PlRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.icon = try r.str(t),
+        3 => out.name = try r.str(t),
+        4 => out.sub = try r.str(t),
+        5 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlItem(r: *wire.Reader, out: *s.PlItem) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.pos = try r.str(t),
+        2 => out.idx = try r.str(t),
+        3 => out.path = try r.str(t),
+        4 => out.title = try r.str(t),
+        5 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        6 => out.manual = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlOpen(r: *wire.Reader, out: *s.PlOpen) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.smartNote = try r.str(t),
+        3 => out.acts = try r.sub(k.PlAct, decodeLibPlAct, t),
+        4 => out.items = try r.list(s.PlItem, decodeLibPlItem, t),
+        5 => out.empty = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPls(r: *wire.Reader, out: *s.Pls) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.newLbl = try r.str(t),
+        3 => out.newSmartLbl = try r.str(t),
+        4 => out.hasCloud = try r.boolean(t),
+        5 => out.cloud = try r.sub(c.Select, decodeSelState, t),
+        6 => out.rows = try r.list(s.PlRow, decodeLibPlRow, t),
+        7 => out.empty = try r.str(t),
+        8 => out.hasOpen = try r.boolean(t),
+        9 => out.open = try r.sub(s.PlOpen, decodeLibPlOpen, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSess(r: *wire.Reader, out: *s.Sess) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = try r.str(t),
+        2 => out.date = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPlayed(r: *wire.Reader, out: *s.Played) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.warn = try r.boolean(t),
+        3 => out.title = try r.str(t),
+        4 => out.meta = try r.str(t),
+        5 => out.key = try r.sub(k.KeyPill, decodeLibKeyPill, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibHist(r: *wire.Reader, out: *s.Hist) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loadLbl = try r.str(t),
+        2 => out.src = try r.sub(c.Select, decodeSelState, t),
+        3 => out.desc = try r.str(t),
+        4 => out.empty = try r.str(t),
+        5 => out.isEmpty = try r.boolean(t),
+        6 => out.sessions = try r.list(s.Sess, decodeLibSess, t),
+        7 => out.hasPlayed = try r.boolean(t),
+        8 => out.playedLbl = try r.str(t),
+        9 => out.sortLbl = try r.str(t),
+        10 => out.sort = try r.sub(c.Select, decodeSelState, t),
+        11 => out.dirLbl = try r.str(t),
+        12 => out.played = try r.list(s.Played, decodeLibPlayed, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibIDMRow(r: *wire.Reader, out: *s.IDMRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.path = try r.str(t),
+        2 => out.artist = try r.boolean(t),
+        3 => out.artistAct = try r.str(t),
+        4 => out.label = try r.boolean(t),
+        5 => out.labelAct = try r.str(t),
+        6 => out.delAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibIDM(r: *wire.Reader, out: *s.IDM) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.msg = try r.str(t),
+        2 => out.markFileLbl = try r.str(t),
+        3 => out.markFolderLbl = try r.str(t),
+        4 => out.typePathLbl = try r.str(t),
+        5 => out.desc = try r.str(t),
+        6 => out.empty = try r.str(t),
+        7 => out.artistLbl = try r.str(t),
+        8 => out.artistDl = try r.str(t),
+        9 => out.labelLbl = try r.str(t),
+        10 => out.labelDl = try r.str(t),
+        11 => out.removeLbl = try r.str(t),
+        12 => out.rows = try r.list(s.IDMRow, decodeLibIDMRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibJob(r: *wire.Reader, out: *s.Job) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.cancel = try r.boolean(t),
+        3 => out.cancelLbl = try r.str(t),
+        4 => out.cancelAct = try r.str(t),
+        5 => out.status = try r.str(t),
+        6 => out.statusVar = try r.str(t),
+        7 => out.width = try r.str(t),
+        8 => out.caption = try r.str(t),
+        9 => out.msg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibQueue(r: *wire.Reader, out: *s.Queue) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.desc = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.jobs = try r.list(s.Job, decodeLibJob, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPreset(r: *wire.Reader, out: *s.Preset) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.desc = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibPresets(r: *wire.Reader, out: *s.Presets) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.newLbl = try r.str(t),
+        2 => out.yoursTitle = try r.str(t),
+        3 => out.emptyCustom = try r.str(t),
+        4 => out.builtinsTitle = try r.str(t),
+        5 => out.customBadge = try r.str(t),
+        6 => out.builtinBadge = try r.str(t),
+        7 => out.editLbl = try r.str(t),
+        8 => out.dupLbl = try r.str(t),
+        9 => out.delLbl = try r.str(t),
+        10 => out.dupEditLbl = try r.str(t),
+        11 => out.custom = try r.list(s.Preset, decodeLibPreset, t),
+        12 => out.builtins = try r.list(s.Preset, decodeLibPreset, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibBody(r: *wire.Reader, out: *library.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.raw = try r.str(t),
+        3 => out.msg = try r.str(t),
+        4 => out.navRail = try r.sub(f.Nav, decodeLibNav, t),
+        5 => out.ceFull = try r.boolean(t),
+        6 => out.ceWave = try r.str(t),
+        7 => out.detail = try r.sub(d.Detail, decodeLibDetail, t),
+        8 => out.browse = try r.sub(s.Browse, decodeLibBrowse, t),
+        9 => out.coll = try r.sub(s.Coll, decodeLibColl, t),
+        10 => out.fav = try r.sub(s.Fav, decodeLibFav, t),
+        11 => out.pls = try r.sub(s.Pls, decodeLibPls, t),
+        12 => out.hist = try r.sub(s.Hist, decodeLibHist, t),
+        13 => out.idm = try r.sub(s.IDM, decodeLibIDM, t),
+        14 => out.queue = try r.sub(s.Queue, decodeLibQueue, t),
+        15 => out.presets = try r.sub(s.Presets, decodeLibPresets, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibState(r: *wire.Reader, out: *library.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.navTitle = try r.str(t),
+        3 => out.switcher = try r.str(t),
+        4 => out.embedded = try r.boolean(t),
+        5 => out.section = try r.str(t),
+        6 => out.tabs = try r.list(c.Tab, decodeLibTab, t),
+        7 => out.body = try r.sub(library.Body, decodeLibBody, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -999,6 +1767,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_set_state);
     try std.testing.expect(msg_ag_state != msg_set_content);
     try std.testing.expect(msg_ag_state != msg_set_status);
+    try std.testing.expect(msg_ag_state != msg_lib_state);
+    try std.testing.expect(msg_ag_state != msg_lib_body);
+    try std.testing.expect(msg_ag_state != msg_lib_detail);
+    try std.testing.expect(msg_ag_state != msg_lib_queue);
+    try std.testing.expect(msg_ag_state != msg_lib_cue_cell);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -1017,6 +1790,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_set_state);
     try std.testing.expect(msg_logs_state != msg_set_content);
     try std.testing.expect(msg_logs_state != msg_set_status);
+    try std.testing.expect(msg_logs_state != msg_lib_state);
+    try std.testing.expect(msg_logs_state != msg_lib_body);
+    try std.testing.expect(msg_logs_state != msg_lib_detail);
+    try std.testing.expect(msg_logs_state != msg_lib_queue);
+    try std.testing.expect(msg_logs_state != msg_lib_cue_cell);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -1034,6 +1812,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_set_state);
     try std.testing.expect(msg_logs_lines != msg_set_content);
     try std.testing.expect(msg_logs_lines != msg_set_status);
+    try std.testing.expect(msg_logs_lines != msg_lib_state);
+    try std.testing.expect(msg_logs_lines != msg_lib_body);
+    try std.testing.expect(msg_logs_lines != msg_lib_detail);
+    try std.testing.expect(msg_logs_lines != msg_lib_queue);
+    try std.testing.expect(msg_logs_lines != msg_lib_cue_cell);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -1050,6 +1833,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_set_state);
     try std.testing.expect(msg_live_state != msg_set_content);
     try std.testing.expect(msg_live_state != msg_set_status);
+    try std.testing.expect(msg_live_state != msg_lib_state);
+    try std.testing.expect(msg_live_state != msg_lib_body);
+    try std.testing.expect(msg_live_state != msg_lib_detail);
+    try std.testing.expect(msg_live_state != msg_lib_queue);
+    try std.testing.expect(msg_live_state != msg_lib_cue_cell);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -1065,6 +1853,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_set_state);
     try std.testing.expect(msg_live_transport != msg_set_content);
     try std.testing.expect(msg_live_transport != msg_set_status);
+    try std.testing.expect(msg_live_transport != msg_lib_state);
+    try std.testing.expect(msg_live_transport != msg_lib_body);
+    try std.testing.expect(msg_live_transport != msg_lib_detail);
+    try std.testing.expect(msg_live_transport != msg_lib_queue);
+    try std.testing.expect(msg_live_transport != msg_lib_cue_cell);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -1079,6 +1872,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_set_state);
     try std.testing.expect(msg_live_n_p != msg_set_content);
     try std.testing.expect(msg_live_n_p != msg_set_status);
+    try std.testing.expect(msg_live_n_p != msg_lib_state);
+    try std.testing.expect(msg_live_n_p != msg_lib_body);
+    try std.testing.expect(msg_live_n_p != msg_lib_detail);
+    try std.testing.expect(msg_live_n_p != msg_lib_queue);
+    try std.testing.expect(msg_live_n_p != msg_lib_cue_cell);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -1092,6 +1890,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_set_state);
     try std.testing.expect(msg_live_status != msg_set_content);
     try std.testing.expect(msg_live_status != msg_set_status);
+    try std.testing.expect(msg_live_status != msg_lib_state);
+    try std.testing.expect(msg_live_status != msg_lib_body);
+    try std.testing.expect(msg_live_status != msg_lib_detail);
+    try std.testing.expect(msg_live_status != msg_lib_queue);
+    try std.testing.expect(msg_live_status != msg_lib_cue_cell);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -1104,6 +1907,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_set_state);
     try std.testing.expect(msg_live_decks != msg_set_content);
     try std.testing.expect(msg_live_decks != msg_set_status);
+    try std.testing.expect(msg_live_decks != msg_lib_state);
+    try std.testing.expect(msg_live_decks != msg_lib_body);
+    try std.testing.expect(msg_live_decks != msg_lib_detail);
+    try std.testing.expect(msg_live_decks != msg_lib_queue);
+    try std.testing.expect(msg_live_decks != msg_lib_cue_cell);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -1115,6 +1923,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_set_state);
     try std.testing.expect(msg_live_signals != msg_set_content);
     try std.testing.expect(msg_live_signals != msg_set_status);
+    try std.testing.expect(msg_live_signals != msg_lib_state);
+    try std.testing.expect(msg_live_signals != msg_lib_body);
+    try std.testing.expect(msg_live_signals != msg_lib_detail);
+    try std.testing.expect(msg_live_signals != msg_lib_queue);
+    try std.testing.expect(msg_live_signals != msg_lib_cue_cell);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -1125,6 +1938,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_set_state);
     try std.testing.expect(msg_live_cockpit != msg_set_content);
     try std.testing.expect(msg_live_cockpit != msg_set_status);
+    try std.testing.expect(msg_live_cockpit != msg_lib_state);
+    try std.testing.expect(msg_live_cockpit != msg_lib_body);
+    try std.testing.expect(msg_live_cockpit != msg_lib_detail);
+    try std.testing.expect(msg_live_cockpit != msg_lib_queue);
+    try std.testing.expect(msg_live_cockpit != msg_lib_cue_cell);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -1134,6 +1952,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_set_state);
     try std.testing.expect(msg_live_link != msg_set_content);
     try std.testing.expect(msg_live_link != msg_set_status);
+    try std.testing.expect(msg_live_link != msg_lib_state);
+    try std.testing.expect(msg_live_link != msg_lib_body);
+    try std.testing.expect(msg_live_link != msg_lib_detail);
+    try std.testing.expect(msg_live_link != msg_lib_queue);
+    try std.testing.expect(msg_live_link != msg_lib_cue_cell);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -1142,6 +1965,11 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_set_state);
     try std.testing.expect(msg_live_graph != msg_set_content);
     try std.testing.expect(msg_live_graph != msg_set_status);
+    try std.testing.expect(msg_live_graph != msg_lib_state);
+    try std.testing.expect(msg_live_graph != msg_lib_body);
+    try std.testing.expect(msg_live_graph != msg_lib_detail);
+    try std.testing.expect(msg_live_graph != msg_lib_queue);
+    try std.testing.expect(msg_live_graph != msg_lib_cue_cell);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -1149,25 +1977,75 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_set_state);
     try std.testing.expect(msg_live_perf != msg_set_content);
     try std.testing.expect(msg_live_perf != msg_set_status);
+    try std.testing.expect(msg_live_perf != msg_lib_state);
+    try std.testing.expect(msg_live_perf != msg_lib_body);
+    try std.testing.expect(msg_live_perf != msg_lib_detail);
+    try std.testing.expect(msg_live_perf != msg_lib_queue);
+    try std.testing.expect(msg_live_perf != msg_lib_cue_cell);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
     try std.testing.expect(msg_live_strip != msg_set_state);
     try std.testing.expect(msg_live_strip != msg_set_content);
     try std.testing.expect(msg_live_strip != msg_set_status);
+    try std.testing.expect(msg_live_strip != msg_lib_state);
+    try std.testing.expect(msg_live_strip != msg_lib_body);
+    try std.testing.expect(msg_live_strip != msg_lib_detail);
+    try std.testing.expect(msg_live_strip != msg_lib_queue);
+    try std.testing.expect(msg_live_strip != msg_lib_cue_cell);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
     try std.testing.expect(msg_mo_state != msg_set_content);
     try std.testing.expect(msg_mo_state != msg_set_status);
+    try std.testing.expect(msg_mo_state != msg_lib_state);
+    try std.testing.expect(msg_mo_state != msg_lib_body);
+    try std.testing.expect(msg_mo_state != msg_lib_detail);
+    try std.testing.expect(msg_mo_state != msg_lib_queue);
+    try std.testing.expect(msg_mo_state != msg_lib_cue_cell);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
     try std.testing.expect(msg_pub != msg_set_status);
+    try std.testing.expect(msg_pub != msg_lib_state);
+    try std.testing.expect(msg_pub != msg_lib_body);
+    try std.testing.expect(msg_pub != msg_lib_detail);
+    try std.testing.expect(msg_pub != msg_lib_queue);
+    try std.testing.expect(msg_pub != msg_lib_cue_cell);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
+    try std.testing.expect(msg_pub_hero != msg_lib_state);
+    try std.testing.expect(msg_pub_hero != msg_lib_body);
+    try std.testing.expect(msg_pub_hero != msg_lib_detail);
+    try std.testing.expect(msg_pub_hero != msg_lib_queue);
+    try std.testing.expect(msg_pub_hero != msg_lib_cue_cell);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
+    try std.testing.expect(msg_set_state != msg_lib_state);
+    try std.testing.expect(msg_set_state != msg_lib_body);
+    try std.testing.expect(msg_set_state != msg_lib_detail);
+    try std.testing.expect(msg_set_state != msg_lib_queue);
+    try std.testing.expect(msg_set_state != msg_lib_cue_cell);
     try std.testing.expect(msg_set_content != msg_set_status);
+    try std.testing.expect(msg_set_content != msg_lib_state);
+    try std.testing.expect(msg_set_content != msg_lib_body);
+    try std.testing.expect(msg_set_content != msg_lib_detail);
+    try std.testing.expect(msg_set_content != msg_lib_queue);
+    try std.testing.expect(msg_set_content != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_status != msg_lib_state);
+    try std.testing.expect(msg_set_status != msg_lib_body);
+    try std.testing.expect(msg_set_status != msg_lib_detail);
+    try std.testing.expect(msg_set_status != msg_lib_queue);
+    try std.testing.expect(msg_set_status != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_state != msg_lib_body);
+    try std.testing.expect(msg_lib_state != msg_lib_detail);
+    try std.testing.expect(msg_lib_state != msg_lib_queue);
+    try std.testing.expect(msg_lib_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_body != msg_lib_detail);
+    try std.testing.expect(msg_lib_body != msg_lib_queue);
+    try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_detail != msg_lib_queue);
+    try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
 }

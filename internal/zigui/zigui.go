@@ -999,4 +999,39 @@ func RenderSettingsStatusV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderLibraryV2 renders the full Library tab from an RZW1 document.
+func RenderLibraryV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_v2(p, l, n)
+	})
+}
+
+// RenderLibraryBodyV2 renders the #lib-body active section from an RZW1 document.
+func RenderLibraryBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_body_v2(p, l, n)
+	})
+}
+
+// RenderLibraryDetailV2 renders the #lib-detail inspector from an RZW1 document.
+func RenderLibraryDetailV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_detail_v2(p, l, n)
+	})
+}
+
+// RenderLibraryQueueV2 renders the #lib-queue-body job list from an RZW1 document.
+func RenderLibraryQueueV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_queue_v2(p, l, n)
+	})
+}
+
+// RenderLibraryCueCellV2 renders one cue-census cell from an RZW1 document.
+func RenderLibraryCueCellV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_library_cuecell_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

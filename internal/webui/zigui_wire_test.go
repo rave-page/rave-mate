@@ -470,6 +470,107 @@ func TestZigWireSettingsStatus(t *testing.T) {
 	assertNoNewFallbacks(t, before)
 }
 
+// TestZigWireThreeWayLibrary: the biggest state in the app (11 kB) plus its three patch
+// targets. The tab, #lib-body and #lib-detail are separate messages because the patch paths
+// send them separately.
+func TestZigWireThreeWayLibrary(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := libFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireLibState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderLibrary(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderLibraryV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", libraryHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			b1, ok := zigui.RenderLibraryBody(stateJSON(st.Body))
+			if !ok {
+				t.Fatal("v1 body render failed")
+			}
+			b2, ok := zigui.RenderLibraryBodyV2(wireLibBody(st.Body))
+			if !ok {
+				t.Fatal("v2 body render failed")
+			}
+			assertBytesEqual(t, "body go==v1", libBodyHTML(st.Body), b1)
+			assertBytesEqual(t, "body v1==v2", b1, b2)
+
+			d1, ok := zigui.RenderLibraryDetail(stateJSON(st.Body.Detail))
+			if !ok {
+				t.Fatal("v1 detail render failed")
+			}
+			d2, ok := zigui.RenderLibraryDetailV2(wireLibDetail(st.Body.Detail))
+			if !ok {
+				t.Fatal("v2 detail render failed")
+			}
+			assertBytesEqual(t, "detail go==v1", libDetailHTMLOf(st.Body.Detail), d1)
+			assertBytesEqual(t, "detail v1==v2", d1, d2)
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
+// TestZigWireLibraryPatchTargets: #lib-queue-body (job progress) and one cue-census cell, the
+// two library fragments patched outside a full-tab render. The cell carries the only counts on
+// the wire besides publish's row number (kUint: zero is an absent tag).
+func TestZigWireLibraryPatchTargets(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch")
+	}
+	before := zigui.FallbackCounts()
+	for name, st := range map[string]libQueueSt{
+		"empty":     {Desc: "Transcode jobs", Empty: "Queue is empty"},
+		"populated": libQueueFixture(),
+		"unicode":   {Desc: "Задания", Empty: "пусто", Jobs: []libJobSt{{Label: "трек.flac · мастер", Status: "done", StatusVar: "success", Width: progressPct(1), Caption: "done · 100%"}}},
+	} {
+		v1, ok := zigui.RenderLibraryQueue(stateJSON(st))
+		if !ok {
+			t.Fatalf("%s: v1 queue render failed", name)
+		}
+		v2, ok := zigui.RenderLibraryQueueV2(wireLibQueue(st))
+		if !ok {
+			t.Fatalf("%s: v2 queue render failed", name)
+		}
+		assertBytesEqual(t, name+" queue go==v1", libQueueBodyHTML(st), v1)
+		assertBytesEqual(t, name+" queue v1==v2", v1, v2)
+	}
+	for name, st := range map[string]libCueCellSt{
+		"none":     {NoDropsTitle: "no drops", NoCuesTitle: "no cues"},
+		"both":     {Drops: 2, DropsTitle: "2 drops", Cues: 4, CuesTitle: "4 cues"},
+		"escaping": {Drops: 1, DropsTitle: `1 &drop "x"'<>`, NoCuesTitle: `no &cues"'<>`},
+		"unicode":  {Drops: 3, DropsTitle: "3 дропа 🎛️", Cues: 1, CuesTitle: "1 кью"},
+	} {
+		v1, ok := zigui.RenderLibraryCueCell(stateJSON(st))
+		if !ok {
+			t.Fatalf("%s: v1 cuecell render failed", name)
+		}
+		v2, ok := zigui.RenderLibraryCueCellV2(wireLibCueCell(st))
+		if !ok {
+			t.Fatalf("%s: v2 cuecell render failed", name)
+		}
+		assertBytesEqual(t, name+" cuecell go==v1", libCueCellHTMLOf(st), v1)
+		assertBytesEqual(t, name+" cuecell v1==v2", v1, v2)
+	}
+	assertNoNewFallbacks(t, before)
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).

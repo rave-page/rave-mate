@@ -265,6 +265,11 @@ const uint8_t *rz_ui_render_publish_hero_v2(const uint8_t *state, size_t len, si
 const uint8_t *rz_ui_render_settings_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_settings_content_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_settings_status_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_detail_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_queue_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_library_cuecell_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 #ifdef __cplusplus

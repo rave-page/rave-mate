@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0xf842f2ca
+	wireSchemaHash       uint32 = 0x5d86f332
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -28,6 +28,11 @@ const (
 	wireMsgSetState      uint16 = 24 // Settings tab (full view)
 	wireMsgSetContent    uint16 = 25 // #set-content pane (sub-tab switch + search)
 	wireMsgSetStatus     uint16 = 26 // one #stset-<id> status fragment (settings tick)
+	wireMsgLibState      uint16 = 27 // Library tab (full view)
+	wireMsgLibBody       uint16 = 28 // #lib-body (active section)
+	wireMsgLibDetail     uint16 = 29 // #lib-detail inspector
+	wireMsgLibQueue      uint16 = 30 // #lib-queue-body (job progress patch)
+	wireMsgLibCueCell    uint16 = 31 // one cue-census cell (per-row patch)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -783,6 +788,599 @@ func (v setState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(7, func() { v.Content.encodeWire(w) })
 }
 
+func (v libTabSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Val)
+	w.Str(2, v.Label)
+}
+
+func (v libNavRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Hd)
+	w.Str(2, v.Label)
+	w.Str(3, v.Act)
+	w.Str(4, v.Icon)
+	w.Str(5, v.Count)
+	w.Bool(6, v.On)
+}
+
+func (v libNavSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v libGFStatSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.N)
+	w.Str(2, v.Label)
+	w.Str(3, v.Tone)
+}
+
+func (v libGFTileSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.N)
+	w.Str(2, v.Label)
+	w.Str(3, v.Tone)
+}
+
+func (v libGFLiveSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Tiles), func(i int) { v.Tiles[i].encodeWire(w) })
+	w.Str(2, v.Pct)
+	w.Str(3, v.Caption)
+	w.Str(4, v.Current)
+}
+
+func (v libHintSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Tone)
+	w.Str(2, v.Text)
+}
+
+func (v libGFSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Str(2, v.Eyebrow)
+	w.Str(3, v.Title)
+	w.List(4, len(v.Stats), func(i int) { v.Stats[i].encodeWire(w) })
+	w.Str(5, v.Note)
+	w.Bool(6, v.NoteAfter)
+	w.List(7, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.Str(8, v.ConfirmNote)
+	w.Struct(9, func() { v.Force.encodeWire(w) })
+	w.Str(10, v.ForceHint)
+	w.List(11, len(v.Scopes), func(i int) { v.Scopes[i].encodeWire(w) })
+	w.Struct(12, func() { v.Live.encodeWire(w) })
+	w.Str(13, v.StopLbl)
+	w.List(14, len(v.Tiles), func(i int) { v.Tiles[i].encodeWire(w) })
+	w.Str(15, v.CachedNote)
+	w.List(16, len(v.Hints), func(i int) { v.Hints[i].encodeWire(w) })
+	w.List(17, len(v.Acts), func(i int) { v.Acts[i].encodeWire(w) })
+	w.StrList(18, v.Notes)
+	w.Str(19, v.ApplyNote)
+}
+
+func (v libSelTip) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Sel.encodeWire(w) })
+	w.Str(2, v.Label)
+}
+
+func (v libChipSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Val)
+	w.Str(3, v.Act)
+	w.Bool(4, v.Active)
+}
+
+func (v libPBFieldSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.DL)
+	w.Str(3, v.Act)
+	w.Str(4, v.Value)
+	w.Str(5, v.Type)
+	w.Str(6, v.PH)
+	w.Str(7, v.Hint)
+}
+
+func (v libEncVideoSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.VCodec.encodeWire(w) })
+	w.Struct(2, func() { v.Accel.encodeWire(w) })
+	w.Str(3, v.QualityLbl)
+	w.List(4, len(v.Profiles), func(i int) { v.Profiles[i].encodeWire(w) })
+	w.Str(5, v.ProfileHint)
+	w.Struct(6, func() { v.RateMode.encodeWire(w) })
+	w.Struct(7, func() { v.RateField.encodeWire(w) })
+	w.Struct(8, func() { v.Res.encodeWire(w) })
+	w.Struct(9, func() { v.FPS.encodeWire(w) })
+}
+
+func (v loudChipSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Val)
+	w.Str(3, v.Title)
+	w.Bool(4, v.Active)
+}
+
+func (v loudSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Compact)
+	w.Struct(2, func() { v.Toggle.encodeWire(w) })
+	w.Str(3, v.Tip)
+	w.Str(4, v.ChipAct)
+	w.List(5, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.Struct(6, func() { v.IField.encodeWire(w) })
+	w.Struct(7, func() { v.TPField.encodeWire(w) })
+	w.Struct(8, func() { v.Raise.encodeWire(w) })
+	w.Bool(9, v.HasWarn)
+	w.Str(10, v.Warn)
+	w.Str(11, v.Extra)
+}
+
+func (v libEncSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Preset.encodeWire(w) })
+	w.Str(2, v.Desc)
+	w.List(3, len(v.Hints), func(i int) { v.Hints[i].encodeWire(w) })
+	w.Bool(4, v.AudioOnly)
+	w.Struct(5, func() { v.Container.encodeWire(w) })
+	w.Struct(6, func() { v.Video.encodeWire(w) })
+	w.Struct(7, func() { v.AudioCodec.encodeWire(w) })
+	w.Struct(8, func() { v.AudioBitrate.encodeWire(w) })
+	w.Struct(9, func() { v.Channels.encodeWire(w) })
+	w.Struct(10, func() { v.SampleRate.encodeWire(w) })
+	w.Struct(11, func() { v.Loud.encodeWire(w) })
+	w.Struct(12, func() { v.TrimStart.encodeWire(w) })
+	w.Struct(13, func() { v.TrimEnd.encodeWire(w) })
+	w.Str(14, v.OutputNote)
+	w.Str(15, v.StartLbl)
+	w.Str(16, v.SaveLbl)
+	w.Str(17, v.SaveAsLbl)
+}
+
+func (v libHarmSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Desc)
+	w.Str(2, v.Wheel)
+	w.Str(3, v.SameLbl)
+	w.Str(4, v.RelLbl)
+	w.Str(5, v.ShowLbl)
+	w.Str(6, v.ShowAct)
+	w.Str(7, v.ClearLbl)
+}
+
+func (v libTagEdSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Open)
+	w.Str(2, v.OpenLbl)
+	w.Str(3, v.Desc)
+	w.List(4, len(v.Fields), func(i int) { v.Fields[i].encodeWire(w) })
+	w.Str(5, v.SaveLbl)
+	w.Str(6, v.CancelLbl)
+}
+
+func (v libTrackPlsSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Unavailable)
+	w.List(2, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.Str(3, v.EmptyText)
+	w.Str(4, v.AddLbl)
+	w.Str(5, v.AddAct)
+}
+
+func (v libCompatRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Str(3, v.Act)
+}
+
+func (v libCompatSecSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.IsEmpty)
+	w.Str(2, v.Empty)
+	w.List(3, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(4, v.OpenLbl)
+	w.Str(5, v.FindLbl)
+	w.Str(6, v.FindAct)
+}
+
+func (v libDetailSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Str(2, v.Raw)
+	w.Str(3, v.Msg)
+	w.Struct(4, func() { v.GF.encodeWire(w) })
+	w.Str(5, v.Eyebrow)
+	w.Str(6, v.Title)
+	w.Str(7, v.Sub)
+	w.Str(8, v.ActionsTitle)
+	w.Str(9, v.Missing)
+	w.List(10, len(v.ActBtns), func(i int) { v.ActBtns[i].encodeWire(w) })
+	w.Bool(11, v.HasPlayer)
+	w.Str(12, v.PlayerTitle)
+	w.Str(13, v.Player)
+	w.Bool(14, v.HasEnc)
+	w.Str(15, v.EncTitle)
+	w.Bool(16, v.EncDemoted)
+	w.Str(17, v.DemotedNote)
+	w.Str(18, v.ShowLbl)
+	w.Struct(19, func() { v.Enc.encodeWire(w) })
+	w.Bool(20, v.HasHarm)
+	w.Str(21, v.HarmTitle)
+	w.Struct(22, func() { v.Harm.encodeWire(w) })
+	w.Bool(23, v.HasTags)
+	w.Str(24, v.TagsTitle)
+	w.Str(25, v.TagsDesc)
+	w.Str(26, v.WriteLbl)
+	w.Str(27, v.WriteAct)
+	w.Str(28, v.RevertLbl)
+	w.Str(29, v.RevertAct)
+	w.Struct(30, func() { v.TagEditor.encodeWire(w) })
+	w.Bool(31, v.HasPls)
+	w.Str(32, v.PlsTitle)
+	w.Struct(33, func() { v.Pls.encodeWire(w) })
+	w.Bool(34, v.HasCompat)
+	w.Str(35, v.CompatTitle)
+	w.Struct(36, func() { v.Compat.encodeWire(w) })
+	w.Str(37, v.DetailsTitle)
+	w.List(38, len(v.Meta), func(i int) { v.Meta[i].encodeWire(w) })
+}
+
+func (v libSegSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Path)
+}
+
+func (v libPlActSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.Struct(2, func() { v.Menu.encodeWire(w) })
+}
+
+func (v libKeyPillSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	w.Str(2, v.Cls)
+	w.Bool(3, v.Ok)
+}
+
+func (v libFeSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Path)
+	w.Bool(3, v.IsDir)
+	w.Str(4, v.Glyph)
+	w.Str(5, v.GridSub)
+	w.Str(6, v.Sub)
+	w.Struct(7, func() { v.Key.encodeWire(w) })
+	w.Bool(8, v.Checked)
+	w.Bool(9, v.Sel)
+}
+
+func (v libBatchSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.On)
+	w.Str(2, v.Count)
+	w.List(3, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+}
+
+func (v libBrowseSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Msg)
+	w.List(2, len(v.Crumbs), func(i int) { v.Crumbs[i].encodeWire(w) })
+	w.Str(3, v.Up)
+	w.Str(4, v.UpPath)
+	w.Str(5, v.Goto)
+	w.Str(6, v.Filter)
+	w.Str(7, v.FilterPH)
+	w.Str(8, v.KindLbl)
+	w.Struct(9, func() { v.Kind.encodeWire(w) })
+	w.Str(10, v.SortLbl)
+	w.Struct(11, func() { v.Sort.encodeWire(w) })
+	w.Str(12, v.ListLbl)
+	w.Str(13, v.GridLbl)
+	w.Bool(14, v.Grid)
+	w.Struct(15, func() { v.KeyChip.encodeWire(w) })
+	w.Struct(16, func() { v.Folder.encodeWire(w) })
+	w.Bool(17, v.SelAll)
+	w.Bool(18, v.SelAllOn)
+	w.Str(19, v.SelAllTitle)
+	w.Str(20, v.Count)
+	w.Str(21, v.BoundNote)
+	w.Bool(22, v.HasBound)
+	w.Struct(23, func() { v.BoundActs.encodeWire(w) })
+	w.List(24, len(v.Entries), func(i int) { v.Entries[i].encodeWire(w) })
+	w.Str(25, v.More)
+	w.Struct(26, func() { v.Batch.encodeWire(w) })
+}
+
+func (v libGFResRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Path)
+	w.Str(2, v.St)
+	w.Str(3, v.StLow)
+	w.Str(4, v.Title)
+	w.Str(5, v.Detail)
+	w.Str(6, v.Delta)
+}
+
+func (v libGFResSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Bool(3, v.IsEmpty)
+	w.Str(4, v.Empty)
+}
+
+func (v libTFRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Idx)
+	w.Bool(2, v.Checked)
+	w.Str(3, v.Path)
+	w.Str(4, v.Base)
+	w.Str(5, v.Field)
+	w.Str(6, v.Cur)
+	w.Str(7, v.Proposed)
+}
+
+func (v libTFGrpSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Badge)
+	w.Str(3, v.AllLbl)
+	w.Str(4, v.AllAct)
+	w.Str(5, v.NoneLbl)
+	w.Str(6, v.NoneAct)
+	w.Str(7, v.Desc)
+	w.List(8, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(9, v.More)
+}
+
+func (v libTFResSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Eyebrow)
+	w.Str(2, v.Title)
+	w.Str(3, v.Desc)
+	w.Bool(4, v.Scanning)
+	w.Str(5, v.Pct)
+	w.Str(6, v.ScanCap)
+	w.Str(7, v.CloseLbl)
+	w.Str(8, v.ApplyLbl)
+	w.Str(9, v.RescanLbl)
+	w.List(10, len(v.Hints), func(i int) { v.Hints[i].encodeWire(w) })
+	w.Str(11, v.Skipped)
+	w.Bool(12, v.IsEmpty)
+	w.Str(13, v.Empty)
+	w.List(14, len(v.Groups), func(i int) { v.Groups[i].encodeWire(w) })
+}
+
+func (v libFixResSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Struct(2, func() { v.GF.encodeWire(w) })
+	w.Struct(3, func() { v.TF.encodeWire(w) })
+}
+
+func (v libCollHdrSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Cls)
+	w.Str(2, v.Key)
+	w.Str(3, v.Label)
+	w.Str(4, v.Arrow)
+}
+
+func (v libCollHeadSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.SelAllTitle)
+	w.Bool(2, v.SelAllOn)
+	w.Struct(3, func() { v.Main.encodeWire(w) })
+	w.Str(4, v.CueLbl)
+	w.Struct(5, func() { v.BPM.encodeWire(w) })
+	w.Str(6, v.TimeLbl)
+	w.Struct(7, func() { v.Key.encodeWire(w) })
+}
+
+func (v libCueCellSt) encodeWire(w *zigui.WireWriter) {
+	w.Uint(1, uint64(v.Drops))
+	w.Str(2, v.DropsTitle)
+	w.Str(3, v.NoDropsTitle)
+	w.Uint(4, uint64(v.Cues))
+	w.Str(5, v.CuesTitle)
+	w.Str(6, v.NoCuesTitle)
+}
+
+func (v libCollRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Path)
+	w.Bool(2, v.Checked)
+	w.Bool(3, v.Warn)
+	w.Str(4, v.SelCls)
+	w.Str(5, v.Title)
+	w.Str(6, v.Sub)
+	w.Bool(7, v.Verified)
+	w.Str(8, v.CellID)
+	w.Struct(9, func() { v.Cue.encodeWire(w) })
+	w.Str(10, v.BPM)
+	w.Str(11, v.Dur)
+	w.Struct(12, func() { v.Key.encodeWire(w) })
+}
+
+func (v libCollSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Msg)
+	w.Str(2, v.ImportLbl)
+	w.Str(3, v.DJSyncLbl)
+	w.Bool(4, v.GridFix)
+	w.Str(5, v.GridFixLbl)
+	w.Str(6, v.MoreLbl)
+	w.Bool(7, v.MoreOpen)
+	w.List(8, len(v.MoreItems), func(i int) { v.MoreItems[i].encodeWire(w) })
+	w.Str(9, v.Search)
+	w.Str(10, v.SearchPH)
+	w.Struct(11, func() { v.Genre.encodeWire(w) })
+	w.Struct(12, func() { v.Label.encodeWire(w) })
+	w.Bool(13, v.HasPlFacet)
+	w.Struct(14, func() { v.PlFacet.encodeWire(w) })
+	w.Struct(15, func() { v.KeyChip.encodeWire(w) })
+	w.Str(16, v.NoDropsLbl)
+	w.Bool(17, v.NoDrops)
+	w.Bool(18, v.Clear)
+	w.Str(19, v.ClearLbl)
+	w.Struct(20, func() { v.Prep.encodeWire(w) })
+	w.List(21, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.Bool(22, v.HasInline)
+	w.Struct(23, func() { v.Inline.encodeWire(w) })
+	w.Bool(24, v.HasResults)
+	w.Struct(25, func() { v.Results.encodeWire(w) })
+	w.Struct(26, func() { v.Head.encodeWire(w) })
+	w.List(27, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(28, v.VerifiedTitle)
+	w.Str(29, v.Empty)
+	w.Bool(30, v.IsEmpty)
+	w.Str(31, v.More)
+	w.Struct(32, func() { v.Batch.encodeWire(w) })
+}
+
+func (v libFavRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Path)
+}
+
+func (v libFavSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Desc)
+	w.Str(2, v.Empty)
+	w.Str(3, v.OpenLbl)
+	w.Str(4, v.UnpinLbl)
+	w.List(5, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v libPlRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ID)
+	w.Str(2, v.Icon)
+	w.Str(3, v.Name)
+	w.Str(4, v.Sub)
+	w.Bool(5, v.Sel)
+}
+
+func (v libPlItemSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Pos)
+	w.Str(2, v.Idx)
+	w.Str(3, v.Path)
+	w.Str(4, v.Title)
+	w.Struct(5, func() { v.Key.encodeWire(w) })
+	w.Bool(6, v.Manual)
+}
+
+func (v libPlOpenSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.SmartNote)
+	w.Struct(3, func() { v.Acts.encodeWire(w) })
+	w.List(4, len(v.Items), func(i int) { v.Items[i].encodeWire(w) })
+	w.Str(5, v.Empty)
+}
+
+func (v libPlsSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Msg)
+	w.Str(2, v.NewLbl)
+	w.Str(3, v.NewSmartLbl)
+	w.Bool(4, v.HasCloud)
+	w.Struct(5, func() { v.Cloud.encodeWire(w) })
+	w.List(6, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(7, v.Empty)
+	w.Bool(8, v.HasOpen)
+	w.Struct(9, func() { v.Open.encodeWire(w) })
+}
+
+func (v libSessSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Idx)
+	w.Str(2, v.Date)
+	w.Str(3, v.Sub)
+	w.Bool(4, v.Sel)
+}
+
+func (v libPlayedSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Path)
+	w.Bool(2, v.Warn)
+	w.Str(3, v.Title)
+	w.Str(4, v.Meta)
+	w.Struct(5, func() { v.Key.encodeWire(w) })
+}
+
+func (v libHistSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.LoadLbl)
+	w.Struct(2, func() { v.Src.encodeWire(w) })
+	w.Str(3, v.Desc)
+	w.Str(4, v.Empty)
+	w.Bool(5, v.IsEmpty)
+	w.List(6, len(v.Sessions), func(i int) { v.Sessions[i].encodeWire(w) })
+	w.Bool(7, v.HasPlayed)
+	w.Str(8, v.PlayedLbl)
+	w.Str(9, v.SortLbl)
+	w.Struct(10, func() { v.Sort.encodeWire(w) })
+	w.Str(11, v.DirLbl)
+	w.List(12, len(v.Played), func(i int) { v.Played[i].encodeWire(w) })
+}
+
+func (v libIDMRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Path)
+	w.Bool(2, v.Artist)
+	w.Str(3, v.ArtistAct)
+	w.Bool(4, v.Label)
+	w.Str(5, v.LabelAct)
+	w.Str(6, v.DelAct)
+}
+
+func (v libIDMSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Msg)
+	w.Str(2, v.MarkFileLbl)
+	w.Str(3, v.MarkFolderLbl)
+	w.Str(4, v.TypePathLbl)
+	w.Str(5, v.Desc)
+	w.Str(6, v.Empty)
+	w.Str(7, v.ArtistLbl)
+	w.Str(8, v.ArtistDL)
+	w.Str(9, v.LabelLbl)
+	w.Str(10, v.LabelDL)
+	w.Str(11, v.RemoveLbl)
+	w.List(12, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v libJobSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Bool(2, v.Cancel)
+	w.Str(3, v.CancelLbl)
+	w.Str(4, v.CancelAct)
+	w.Str(5, v.Status)
+	w.Str(6, v.StatusVar)
+	w.Str(7, v.Width)
+	w.Str(8, v.Caption)
+	w.Str(9, v.Msg)
+}
+
+func (v libQueueSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Desc)
+	w.Str(2, v.Empty)
+	w.List(3, len(v.Jobs), func(i int) { v.Jobs[i].encodeWire(w) })
+}
+
+func (v libPresetSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ID)
+	w.Str(2, v.Label)
+	w.Str(3, v.Desc)
+}
+
+func (v libPresetsSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.NewLbl)
+	w.Str(2, v.YoursTitle)
+	w.Str(3, v.EmptyCustom)
+	w.Str(4, v.BuiltinsTitle)
+	w.Str(5, v.CustomBadge)
+	w.Str(6, v.BuiltinBadge)
+	w.Str(7, v.EditLbl)
+	w.Str(8, v.DupLbl)
+	w.Str(9, v.DelLbl)
+	w.Str(10, v.DupEditLbl)
+	w.List(11, len(v.Custom), func(i int) { v.Custom[i].encodeWire(w) })
+	w.List(12, len(v.Builtins), func(i int) { v.Builtins[i].encodeWire(w) })
+}
+
+func (v libBodySt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Str(2, v.Raw)
+	w.Str(3, v.Msg)
+	w.Struct(4, func() { v.NavRail.encodeWire(w) })
+	w.Bool(5, v.CEFull)
+	w.Str(6, v.CEWave)
+	w.Struct(7, func() { v.Detail.encodeWire(w) })
+	w.Struct(8, func() { v.Browse.encodeWire(w) })
+	w.Struct(9, func() { v.Coll.encodeWire(w) })
+	w.Struct(10, func() { v.Fav.encodeWire(w) })
+	w.Struct(11, func() { v.Pls.encodeWire(w) })
+	w.Struct(12, func() { v.Hist.encodeWire(w) })
+	w.Struct(13, func() { v.IDM.encodeWire(w) })
+	w.Struct(14, func() { v.Queue.encodeWire(w) })
+	w.Struct(15, func() { v.Presets.encodeWire(w) })
+}
+
+func (v libState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.NavTitle)
+	w.Str(3, v.Switcher)
+	w.Bool(4, v.Embedded)
+	w.Str(5, v.Section)
+	w.List(6, len(v.Tabs), func(i int) { v.Tabs[i].encodeWire(w) })
+	w.Struct(7, func() { v.Body.encodeWire(w) })
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -919,6 +1517,41 @@ func wireSetContent(v setContentSt) []byte {
 // wireSetStatus encodes setStatusSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireSetStatus(v setStatusSt) []byte {
 	w := zigui.NewWireWriter(wireMsgSetStatus, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireLibState encodes libState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLibState(v libState) []byte {
+	w := zigui.NewWireWriter(wireMsgLibState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireLibBody encodes libBodySt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLibBody(v libBodySt) []byte {
+	w := zigui.NewWireWriter(wireMsgLibBody, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireLibDetail encodes libDetailSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLibDetail(v libDetailSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLibDetail, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireLibQueue encodes libQueueSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLibQueue(v libQueueSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLibQueue, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireLibCueCell encodes libCueCellSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireLibCueCell(v libCueCellSt) []byte {
+	w := zigui.NewWireWriter(wireMsgLibCueCell, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

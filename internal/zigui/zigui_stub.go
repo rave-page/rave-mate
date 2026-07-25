@@ -204,4 +204,10 @@ func RenderSettingsV2(state []byte) (string, bool)        { return "", false }
 func RenderSettingsContentV2(state []byte) (string, bool) { return "", false }
 func RenderSettingsStatusV2(state []byte) (string, bool)  { return "", false }
 
+func RenderLibraryV2(state []byte) (string, bool)        { return "", false }
+func RenderLibraryBodyV2(state []byte) (string, bool)    { return "", false }
+func RenderLibraryDetailV2(state []byte) (string, bool)  { return "", false }
+func RenderLibraryQueueV2(state []byte) (string, bool)   { return "", false }
+func RenderLibraryCueCellV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---

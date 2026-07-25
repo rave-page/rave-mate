@@ -35,7 +35,12 @@ func wireExportsB2() []wireExport {
 		wireExport{"publish_hero_v2", zigui.RenderPublishHeroV2},
 		wireExport{"settings_v2", zigui.RenderSettingsV2},
 		wireExport{"settings_content_v2", zigui.RenderSettingsContentV2},
-		wireExport{"settings_status_v2", zigui.RenderSettingsStatusV2})
+		wireExport{"settings_status_v2", zigui.RenderSettingsStatusV2},
+		wireExport{"library_v2", zigui.RenderLibraryV2},
+		wireExport{"library_body_v2", zigui.RenderLibraryBodyV2},
+		wireExport{"library_detail_v2", zigui.RenderLibraryDetailV2},
+		wireExport{"library_queue_v2", zigui.RenderLibraryQueueV2},
+		wireExport{"library_cuecell_v2", zigui.RenderLibraryCueCellV2})
 	return out
 }
 
@@ -59,6 +64,15 @@ func wireBasesB2() []wireBase {
 	for n, st := range moFixtures() {
 		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
 	}
+	for n, st := range libFixtures() {
+		out = append(out,
+			wireBase{"lib/" + n, wireLibState(st)},
+			wireBase{"lib/" + n + "/body", wireLibBody(st.Body)},
+			wireBase{"lib/" + n + "/detail", wireLibDetail(st.Body.Detail)})
+	}
+	out = append(out,
+		wireBase{"lib/queue", wireLibQueue(libQueueFixture())},
+		wireBase{"lib/cuecell", wireLibCueCell(libCueCellSt{Drops: 2, DropsTitle: "2 drops", Cues: 4, CuesTitle: "4 cues"})})
 	for n, f := range setFixtures() {
 		f.u.setMu.Lock()
 		f.u.setSec, f.u.setQuery = f.sec, f.q

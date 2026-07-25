@@ -868,6 +868,31 @@ export fn rz_ui_render_settings_status_v2(state: ?[*]const u8, len: usize, out_l
     return renderWire(settings.Status, wire_gen.decodeSetStatus, settings.renderStatus, wire_gen.msg_set_status, state, len, out_len);
 }
 
+// ── B-2 fan-out: library ──
+// Five messages: the tab, #lib-body (section switch), #lib-detail (inspector),
+// #lib-queue-body (job progress, patched from the job goroutines) and one cue-census cell
+// (#ce-cell-<hash>, patched per row when a drop is toggled).
+
+export fn rz_ui_render_library_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.State, wire_gen.decodeLibState, library.render, wire_gen.msg_lib_state, state, len, out_len);
+}
+
+export fn rz_ui_render_library_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Body, wire_gen.decodeLibBody, library.renderBody, wire_gen.msg_lib_body, state, len, out_len);
+}
+
+export fn rz_ui_render_library_detail_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Detail, wire_gen.decodeLibDetail, library.renderDetail, wire_gen.msg_lib_detail, state, len, out_len);
+}
+
+export fn rz_ui_render_library_queue_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.Queue, wire_gen.decodeLibQueue, library.renderQueue, wire_gen.msg_lib_queue, state, len, out_len);
+}
+
+export fn rz_ui_render_library_cuecell_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(library.CueCell, wire_gen.decodeLibCueCell, library.renderCueCell, wire_gen.msg_lib_cue_cell, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

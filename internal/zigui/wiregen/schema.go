@@ -433,6 +433,232 @@ var schema = []msg{
 		doc: "Settings tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), s(5, "Query", "query"), s(6, "Placeholder", "placeholder"), st(7, "Content", "content", "SetContent")},
 	},
+	// library: the biggest state in the app (11 kB) - tab + #lib-body + #lib-detail + #lib-queue-body + one cue-census cell. LibCueCell.Drops/Cues are counts (kUint, zero = absent tag).
+	{
+		name: "LibTab", goT: "libTabSt", zigT: "c.Tab",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label")},
+	},
+	{
+		name: "LibNavRow", goT: "libNavRowSt", zigT: "f.NavRow",
+		fs: []field{b(1, "Hd", "hd"), s(2, "Label", "label"), s(3, "Act", "act"), s(4, "Icon", "icon"), s(5, "Count", "count"), b(6, "On", "on")},
+	},
+	{
+		name: "LibNav", goT: "libNavSt", zigT: "f.Nav",
+		fs: []field{li(1, "Rows", "rows", "LibNavRow")},
+	},
+	{
+		name: "LibGFStat", goT: "libGFStatSt", zigT: "f.GFStat",
+		fs: []field{s(1, "N", "n"), s(2, "Label", "label"), s(3, "Tone", "tone")},
+	},
+	{
+		name: "LibGFTile", goT: "libGFTileSt", zigT: "f.GFTile",
+		fs: []field{s(1, "N", "n"), s(2, "Label", "label"), s(3, "Tone", "tone")},
+	},
+	{
+		name: "LibGFLive", goT: "libGFLiveSt", zigT: "f.GFLive",
+		fs: []field{li(1, "Tiles", "tiles", "LibGFTile"), s(2, "Pct", "pct"), s(3, "Caption", "caption"), s(4, "Current", "current")},
+	},
+	{
+		name: "LibHint", goT: "libHintSt", zigT: "k.Hint",
+		fs: []field{s(1, "Tone", "tone"), s(2, "Text", "text")},
+	},
+	{
+		name: "LibGF", goT: "libGFSt", zigT: "f.GF",
+		fs: []field{s(1, "Kind", "kind"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), li(4, "Stats", "stats", "LibGFStat"), s(5, "Note", "note"), b(6, "NoteAfter", "noteAfter"), li(7, "Btns", "btns", "UiBtn"), s(8, "ConfirmNote", "confirmNote"), st(9, "Force", "force", "UiToggle"), s(10, "ForceHint", "forceHint"), li(11, "Scopes", "scopes", "UiBtn"), st(12, "Live", "live", "LibGFLive"), s(13, "StopLbl", "stopLbl"), li(14, "Tiles", "tiles", "LibGFTile"), s(15, "CachedNote", "cachedNote"), li(16, "Hints", "hints", "LibHint"), li(17, "Acts", "acts", "UiBtn"), sl(18, "Notes", "notes"), s(19, "ApplyNote", "applyNote")},
+	},
+	{
+		name: "LibSelTip", goT: "libSelTip", zigT: "k.SelTip",
+		fs: []field{st(1, "Sel", "sel", "SelState"), s(2, "Label", "labelHtml")},
+	},
+	{
+		name: "LibChip", goT: "libChipSt", zigT: "k.Chip",
+		fs: []field{s(1, "Label", "label"), s(2, "Val", "val"), s(3, "Act", "act"), b(4, "Active", "active")},
+	},
+	{
+		name: "LibPBField", goT: "libPBFieldSt", zigT: "c.PBField",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Value", "value"), s(5, "Type", "inputType"), s(6, "PH", "ph"), s(7, "Hint", "hint")},
+	},
+	{
+		name: "LibEncVideo", goT: "libEncVideoSt", zigT: "d.EncVideo",
+		fs: []field{st(1, "VCodec", "vcodec", "LibSelTip"), st(2, "Accel", "accel", "SelState"), s(3, "QualityLbl", "qualityLbl"), li(4, "Profiles", "profiles", "LibChip"), s(5, "ProfileHint", "profileHint"), st(6, "RateMode", "rateMode", "LibSelTip"), st(7, "RateField", "rateField", "LibPBField"), st(8, "Res", "res", "SelState"), st(9, "FPS", "fps", "LibPBField")},
+	},
+	{
+		name: "LoudChip", goT: "loudChipSt", zigT: "c.LoudChip",
+		fs: []field{s(1, "Label", "label"), s(2, "Val", "val"), s(3, "Title", "title"), b(4, "Active", "active")},
+	},
+	{
+		name: "Loud", goT: "loudSt", zigT: "c.Loud",
+		fs: []field{b(1, "Compact", "compact"), st(2, "Toggle", "toggle", "UiToggle"), s(3, "Tip", "tip"), s(4, "ChipAct", "chipAct"), li(5, "Chips", "chips", "LoudChip"), st(6, "IField", "iField", "LibPBField"), st(7, "TPField", "tpField", "LibPBField"), st(8, "Raise", "raise", "UiToggle"), b(9, "HasWarn", "hasWarn"), s(10, "Warn", "warn"), s(11, "Extra", "extra")},
+	},
+	{
+		name: "LibEnc", goT: "libEncSt", zigT: "d.Enc",
+		fs: []field{st(1, "Preset", "preset", "SelState"), s(2, "Desc", "desc"), li(3, "Hints", "hints", "LibHint"), b(4, "AudioOnly", "audioOnly"), st(5, "Container", "container", "LibSelTip"), st(6, "Video", "video", "LibEncVideo"), st(7, "AudioCodec", "audioCodec", "LibSelTip"), st(8, "AudioBitrate", "audioBitrate", "LibPBField"), st(9, "Channels", "channels", "SelState"), st(10, "SampleRate", "sampleRate", "SelState"), st(11, "Loud", "loud", "Loud"), st(12, "TrimStart", "trimStart", "LibPBField"), st(13, "TrimEnd", "trimEnd", "LibPBField"), s(14, "OutputNote", "outputNote"), s(15, "StartLbl", "startLbl"), s(16, "SaveLbl", "saveLbl"), s(17, "SaveAsLbl", "saveAsLbl")},
+	},
+	{
+		name: "LibHarm", goT: "libHarmSt", zigT: "d.Harm",
+		fs: []field{s(1, "Desc", "desc"), s(2, "Wheel", "wheel"), s(3, "SameLbl", "sameLbl"), s(4, "RelLbl", "relLbl"), s(5, "ShowLbl", "showLbl"), s(6, "ShowAct", "showAct"), s(7, "ClearLbl", "clearLbl")},
+	},
+	{
+		name: "LibTagEd", goT: "libTagEdSt", zigT: "f.TagEdit",
+		fs: []field{b(1, "Open", "open"), s(2, "OpenLbl", "openLbl"), s(3, "Desc", "desc"), li(4, "Fields", "fields", "LibPBField"), s(5, "SaveLbl", "saveLbl"), s(6, "CancelLbl", "cancelLbl")},
+	},
+	{
+		name: "LibTrackPls", goT: "libTrackPlsSt", zigT: "d.TrackPls",
+		fs: []field{b(1, "Unavailable", "unavailable"), li(2, "Chips", "chips", "LibChip"), s(3, "EmptyText", "emptyText"), s(4, "AddLbl", "addLbl"), s(5, "AddAct", "addAct")},
+	},
+	{
+		name: "LibCompatRow", goT: "libCompatRowSt", zigT: "f.CompatRow",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Act", "act")},
+	},
+	{
+		name: "LibCompatSec", goT: "libCompatSecSt", zigT: "f.Compat",
+		fs: []field{b(1, "IsEmpty", "isEmpty"), s(2, "Empty", "empty"), li(3, "Rows", "rows", "LibCompatRow"), s(4, "OpenLbl", "openLbl"), s(5, "FindLbl", "findLbl"), s(6, "FindAct", "findAct")},
+	},
+	{
+		name: "LibDetail", goT: "libDetailSt", zigT: "d.Detail", id: 29,
+		doc: "#lib-detail inspector",
+		fs:  []field{s(1, "Kind", "kind"), s(2, "Raw", "raw"), s(3, "Msg", "msg"), st(4, "GF", "gf", "LibGF"), s(5, "Eyebrow", "eyebrow"), s(6, "Title", "title"), s(7, "Sub", "sub"), s(8, "ActionsTitle", "actionsTitle"), s(9, "Missing", "missing"), li(10, "ActBtns", "actBtns", "UiBtn"), b(11, "HasPlayer", "hasPlayer"), s(12, "PlayerTitle", "playerTitle"), s(13, "Player", "player"), b(14, "HasEnc", "hasEnc"), s(15, "EncTitle", "encTitle"), b(16, "EncDemoted", "encDemoted"), s(17, "DemotedNote", "demotedNote"), s(18, "ShowLbl", "showLbl"), st(19, "Enc", "enc", "LibEnc"), b(20, "HasHarm", "hasHarm"), s(21, "HarmTitle", "harmTitle"), st(22, "Harm", "harm", "LibHarm"), b(23, "HasTags", "hasTags"), s(24, "TagsTitle", "tagsTitle"), s(25, "TagsDesc", "tagsDesc"), s(26, "WriteLbl", "writeLbl"), s(27, "WriteAct", "writeAct"), s(28, "RevertLbl", "revertLbl"), s(29, "RevertAct", "revertAct"), st(30, "TagEditor", "tagEditor", "LibTagEd"), b(31, "HasPls", "hasPls"), s(32, "PlsTitle", "plsTitle"), st(33, "Pls", "pls", "LibTrackPls"), b(34, "HasCompat", "hasCompat"), s(35, "CompatTitle", "compatTitle"), st(36, "Compat", "compat", "LibCompatSec"), s(37, "DetailsTitle", "detailsTitle"), li(38, "Meta", "meta", "UiKV")},
+	},
+	{
+		name: "LibSeg", goT: "libSegSt", zigT: "s.Seg",
+		fs: []field{s(1, "Label", "label"), s(2, "Path", "path")},
+	},
+	{
+		name: "LibPlAct", goT: "libPlActSt", zigT: "k.PlAct",
+		fs: []field{li(1, "Btns", "btns", "UiBtn"), st(2, "Menu", "menu", "SelState")},
+	},
+	{
+		name: "LibKeyPill", goT: "libKeyPillSt", zigT: "k.KeyPill",
+		fs: []field{s(1, "Text", "text"), s(2, "Cls", "cls"), b(3, "Ok", "ok")},
+	},
+	{
+		name: "LibFe", goT: "libFeSt", zigT: "s.Fe",
+		fs: []field{s(1, "Name", "name"), s(2, "Path", "path"), b(3, "IsDir", "isDir"), s(4, "Glyph", "glyph"), s(5, "GridSub", "gridSub"), s(6, "Sub", "sub"), st(7, "Key", "key", "LibKeyPill"), b(8, "Checked", "checked"), b(9, "Sel", "sel")},
+	},
+	{
+		name: "LibBatch", goT: "libBatchSt", zigT: "k.Batch",
+		fs: []field{b(1, "On", "on"), s(2, "Count", "count"), li(3, "Btns", "btns", "UiBtn")},
+	},
+	{
+		name: "LibBrowse", goT: "libBrowseSt", zigT: "s.Browse",
+		fs: []field{s(1, "Msg", "msg"), li(2, "Crumbs", "crumbs", "LibSeg"), s(3, "Up", "up"), s(4, "UpPath", "upPath"), s(5, "Goto", "gotoLbl"), s(6, "Filter", "filter"), s(7, "FilterPH", "filterPh"), s(8, "KindLbl", "kindLbl"), st(9, "Kind", "kind", "SelState"), s(10, "SortLbl", "sortLbl"), st(11, "Sort", "sort", "SelState"), s(12, "ListLbl", "listLbl"), s(13, "GridLbl", "gridLbl"), b(14, "Grid", "grid"), st(15, "KeyChip", "keyChip", "LibChip"), st(16, "Folder", "folder", "SelState"), b(17, "SelAll", "selAll"), b(18, "SelAllOn", "selAllOn"), s(19, "SelAllTitle", "selAllTitle"), s(20, "Count", "count"), s(21, "BoundNote", "boundNote"), b(22, "HasBound", "hasBound"), st(23, "BoundActs", "boundActs", "LibPlAct"), li(24, "Entries", "entries", "LibFe"), s(25, "More", "more"), st(26, "Batch", "batch", "LibBatch")},
+	},
+	{
+		name: "LibGFResRow", goT: "libGFResRowSt", zigT: "f.GFResRow",
+		fs: []field{s(1, "Path", "path"), s(2, "St", "st"), s(3, "StLow", "stLow"), s(4, "Title", "title"), s(5, "Detail", "detail"), s(6, "Delta", "delta")},
+	},
+	{
+		name: "LibGFRes", goT: "libGFResSt", zigT: "f.GFRes",
+		fs: []field{li(1, "Chips", "chips", "LibChip"), li(2, "Rows", "rows", "LibGFResRow"), b(3, "IsEmpty", "isEmpty"), s(4, "Empty", "empty")},
+	},
+	{
+		name: "LibTFRow", goT: "libTFRowSt", zigT: "f.TFRow",
+		fs: []field{s(1, "Idx", "idx"), b(2, "Checked", "checked"), s(3, "Path", "path"), s(4, "Base", "base"), s(5, "Field", "field"), s(6, "Cur", "cur"), s(7, "Proposed", "proposed")},
+	},
+	{
+		name: "LibTFGrp", goT: "libTFGrpSt", zigT: "f.TFGrp",
+		fs: []field{s(1, "Title", "title"), s(2, "Badge", "badge"), s(3, "AllLbl", "allLbl"), s(4, "AllAct", "allAct"), s(5, "NoneLbl", "noneLbl"), s(6, "NoneAct", "noneAct"), s(7, "Desc", "desc"), li(8, "Rows", "rows", "LibTFRow"), s(9, "More", "more")},
+	},
+	{
+		name: "LibTFRes", goT: "libTFResSt", zigT: "f.TFRes",
+		fs: []field{s(1, "Eyebrow", "eyebrow"), s(2, "Title", "title"), s(3, "Desc", "desc"), b(4, "Scanning", "scanning"), s(5, "Pct", "pct"), s(6, "ScanCap", "scanCap"), s(7, "CloseLbl", "closeLbl"), s(8, "ApplyLbl", "applyLbl"), s(9, "RescanLbl", "rescanLbl"), li(10, "Hints", "hints", "LibHint"), s(11, "Skipped", "skipped"), b(12, "IsEmpty", "isEmpty"), s(13, "Empty", "empty"), li(14, "Groups", "groups", "LibTFGrp")},
+	},
+	{
+		name: "LibFixRes", goT: "libFixResSt", zigT: "f.Results",
+		fs: []field{s(1, "Kind", "kind"), st(2, "GF", "gf", "LibGFRes"), st(3, "TF", "tf", "LibTFRes")},
+	},
+	{
+		name: "LibCollHdr", goT: "libCollHdrSt", zigT: "s.CollHdr",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Key", "key"), s(3, "Label", "label"), s(4, "Arrow", "arrow")},
+	},
+	{
+		name: "LibCollHead", goT: "libCollHeadSt", zigT: "s.CollHead",
+		fs: []field{s(1, "SelAllTitle", "selAllTitle"), b(2, "SelAllOn", "selAllOn"), st(3, "Main", "main", "LibCollHdr"), s(4, "CueLbl", "cueLbl"), st(5, "BPM", "bpm", "LibCollHdr"), s(6, "TimeLbl", "timeLbl"), st(7, "Key", "key", "LibCollHdr")},
+	},
+	{
+		name: "LibCueCell", goT: "libCueCellSt", zigT: "s.CueCell", id: 31,
+		doc: "one cue-census cell (per-row patch)",
+		fs:  []field{u(1, "Drops", "drops"), s(2, "DropsTitle", "dropsTitle"), s(3, "NoDropsTitle", "noDropsTitle"), u(4, "Cues", "cues"), s(5, "CuesTitle", "cuesTitle"), s(6, "NoCuesTitle", "noCuesTitle")},
+	},
+	{
+		name: "LibCollRow", goT: "libCollRowSt", zigT: "s.CollRow",
+		fs: []field{s(1, "Path", "path"), b(2, "Checked", "checked"), b(3, "Warn", "warn"), s(4, "SelCls", "selCls"), s(5, "Title", "title"), s(6, "Sub", "sub"), b(7, "Verified", "verified"), s(8, "CellID", "cellId"), st(9, "Cue", "cue", "LibCueCell"), s(10, "BPM", "bpm"), s(11, "Dur", "dur"), st(12, "Key", "key", "LibKeyPill")},
+	},
+	{
+		name: "LibColl", goT: "libCollSt", zigT: "s.Coll",
+		fs: []field{s(1, "Msg", "msg"), s(2, "ImportLbl", "importLbl"), s(3, "DJSyncLbl", "djsyncLbl"), b(4, "GridFix", "gridFix"), s(5, "GridFixLbl", "gridFixLbl"), s(6, "MoreLbl", "moreLbl"), b(7, "MoreOpen", "moreOpen"), li(8, "MoreItems", "moreItems", "LibTab"), s(9, "Search", "search"), s(10, "SearchPH", "searchPh"), st(11, "Genre", "genre", "SelState"), st(12, "Label", "label", "SelState"), b(13, "HasPlFacet", "hasPlFacet"), st(14, "PlFacet", "plFacet", "SelState"), st(15, "KeyChip", "keyChip", "LibChip"), s(16, "NoDropsLbl", "noDropsLbl"), b(17, "NoDrops", "noDrops"), b(18, "Clear", "clear"), s(19, "ClearLbl", "clearLbl"), st(20, "Prep", "prep", "SelState"), li(21, "Chips", "chips", "LibChip"), b(22, "HasInline", "hasInline"), st(23, "Inline", "inlineActs", "LibPlAct"), b(24, "HasResults", "hasResults"), st(25, "Results", "results", "LibFixRes"), st(26, "Head", "head", "LibCollHead"), li(27, "Rows", "rows", "LibCollRow"), s(28, "VerifiedTitle", "verifiedTitle"), s(29, "Empty", "empty"), b(30, "IsEmpty", "isEmpty"), s(31, "More", "more"), st(32, "Batch", "batch", "LibBatch")},
+	},
+	{
+		name: "LibFavRow", goT: "libFavRowSt", zigT: "s.FavRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Path", "path")},
+	},
+	{
+		name: "LibFav", goT: "libFavSt", zigT: "s.Fav",
+		fs: []field{s(1, "Desc", "desc"), s(2, "Empty", "empty"), s(3, "OpenLbl", "openLbl"), s(4, "UnpinLbl", "unpinLbl"), li(5, "Rows", "rows", "LibFavRow")},
+	},
+	{
+		name: "LibPlRow", goT: "libPlRowSt", zigT: "s.PlRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Icon", "icon"), s(3, "Name", "name"), s(4, "Sub", "sub"), b(5, "Sel", "sel")},
+	},
+	{
+		name: "LibPlItem", goT: "libPlItemSt", zigT: "s.PlItem",
+		fs: []field{s(1, "Pos", "pos"), s(2, "Idx", "idx"), s(3, "Path", "path"), s(4, "Title", "title"), st(5, "Key", "key", "LibKeyPill"), b(6, "Manual", "manual")},
+	},
+	{
+		name: "LibPlOpen", goT: "libPlOpenSt", zigT: "s.PlOpen",
+		fs: []field{s(1, "Title", "title"), s(2, "SmartNote", "smartNote"), st(3, "Acts", "acts", "LibPlAct"), li(4, "Items", "items", "LibPlItem"), s(5, "Empty", "empty")},
+	},
+	{
+		name: "LibPls", goT: "libPlsSt", zigT: "s.Pls",
+		fs: []field{s(1, "Msg", "msg"), s(2, "NewLbl", "newLbl"), s(3, "NewSmartLbl", "newSmartLbl"), b(4, "HasCloud", "hasCloud"), st(5, "Cloud", "cloud", "SelState"), li(6, "Rows", "rows", "LibPlRow"), s(7, "Empty", "empty"), b(8, "HasOpen", "hasOpen"), st(9, "Open", "open", "LibPlOpen")},
+	},
+	{
+		name: "LibSess", goT: "libSessSt", zigT: "s.Sess",
+		fs: []field{s(1, "Idx", "idx"), s(2, "Date", "date"), s(3, "Sub", "sub"), b(4, "Sel", "sel")},
+	},
+	{
+		name: "LibPlayed", goT: "libPlayedSt", zigT: "s.Played",
+		fs: []field{s(1, "Path", "path"), b(2, "Warn", "warn"), s(3, "Title", "title"), s(4, "Meta", "meta"), st(5, "Key", "key", "LibKeyPill")},
+	},
+	{
+		name: "LibHist", goT: "libHistSt", zigT: "s.Hist",
+		fs: []field{s(1, "LoadLbl", "loadLbl"), st(2, "Src", "src", "SelState"), s(3, "Desc", "desc"), s(4, "Empty", "empty"), b(5, "IsEmpty", "isEmpty"), li(6, "Sessions", "sessions", "LibSess"), b(7, "HasPlayed", "hasPlayed"), s(8, "PlayedLbl", "playedLbl"), s(9, "SortLbl", "sortLbl"), st(10, "Sort", "sort", "SelState"), s(11, "DirLbl", "dirLbl"), li(12, "Played", "played", "LibPlayed")},
+	},
+	{
+		name: "LibIDMRow", goT: "libIDMRowSt", zigT: "s.IDMRow",
+		fs: []field{s(1, "Path", "path"), b(2, "Artist", "artist"), s(3, "ArtistAct", "artistAct"), b(4, "Label", "label"), s(5, "LabelAct", "labelAct"), s(6, "DelAct", "delAct")},
+	},
+	{
+		name: "LibIDM", goT: "libIDMSt", zigT: "s.IDM",
+		fs: []field{s(1, "Msg", "msg"), s(2, "MarkFileLbl", "markFileLbl"), s(3, "MarkFolderLbl", "markFolderLbl"), s(4, "TypePathLbl", "typePathLbl"), s(5, "Desc", "desc"), s(6, "Empty", "empty"), s(7, "ArtistLbl", "artistLbl"), s(8, "ArtistDL", "artistDl"), s(9, "LabelLbl", "labelLbl"), s(10, "LabelDL", "labelDl"), s(11, "RemoveLbl", "removeLbl"), li(12, "Rows", "rows", "LibIDMRow")},
+	},
+	{
+		name: "LibJob", goT: "libJobSt", zigT: "s.Job",
+		fs: []field{s(1, "Label", "label"), b(2, "Cancel", "cancel"), s(3, "CancelLbl", "cancelLbl"), s(4, "CancelAct", "cancelAct"), s(5, "Status", "status"), s(6, "StatusVar", "statusVar"), s(7, "Width", "width"), s(8, "Caption", "caption"), s(9, "Msg", "msg")},
+	},
+	{
+		name: "LibQueue", goT: "libQueueSt", zigT: "s.Queue", id: 30,
+		doc: "#lib-queue-body (job progress patch)",
+		fs:  []field{s(1, "Desc", "desc"), s(2, "Empty", "empty"), li(3, "Jobs", "jobs", "LibJob")},
+	},
+	{
+		name: "LibPreset", goT: "libPresetSt", zigT: "s.Preset",
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Desc", "desc")},
+	},
+	{
+		name: "LibPresets", goT: "libPresetsSt", zigT: "s.Presets",
+		fs: []field{s(1, "NewLbl", "newLbl"), s(2, "YoursTitle", "yoursTitle"), s(3, "EmptyCustom", "emptyCustom"), s(4, "BuiltinsTitle", "builtinsTitle"), s(5, "CustomBadge", "customBadge"), s(6, "BuiltinBadge", "builtinBadge"), s(7, "EditLbl", "editLbl"), s(8, "DupLbl", "dupLbl"), s(9, "DelLbl", "delLbl"), s(10, "DupEditLbl", "dupEditLbl"), li(11, "Custom", "custom", "LibPreset"), li(12, "Builtins", "builtins", "LibPreset")},
+	},
+	{
+		name: "LibBody", goT: "libBodySt", zigT: "library.Body", id: 28,
+		doc: "#lib-body (active section)",
+		fs:  []field{s(1, "Kind", "kind"), s(2, "Raw", "raw"), s(3, "Msg", "msg"), st(4, "NavRail", "navRail", "LibNav"), b(5, "CEFull", "ceFull"), s(6, "CEWave", "ceWave"), st(7, "Detail", "detail", "LibDetail"), st(8, "Browse", "browse", "LibBrowse"), st(9, "Coll", "coll", "LibColl"), st(10, "Fav", "fav", "LibFav"), st(11, "Pls", "pls", "LibPls"), st(12, "Hist", "hist", "LibHist"), st(13, "IDM", "idm", "LibIDM"), st(14, "Queue", "queue", "LibQueue"), st(15, "Presets", "presets", "LibPresets")},
+	},
+	{
+		name: "LibState", goT: "libState", zigT: "library.State", id: 27,
+		doc: "Library tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "NavTitle", "navTitle"), s(3, "Switcher", "switcher"), b(4, "Embedded", "embedded"), s(5, "Section", "section"), li(6, "Tabs", "tabs", "LibTab"), st(7, "Body", "body", "LibBody")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -440,6 +666,11 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"f", "libfixers.zig"},
+	{"d", "library_detail.zig"},
+	{"s", "library_sections.zig"},
+	{"k", "library_kit.zig"},
+	{"library", "library.zig"},
 	{"sub", "settings_sub.zig"},
 	{"settings", "settings.zig"},
 	{"publish", "publish.zig"},

@@ -220,7 +220,8 @@ func (u *UI) lib() *libSt {
 func (u *UI) renderLibrary() string {
 	st := u.libraryState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibrary(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryV2", wireLibState(st), zigui.RenderLibraryV2,
+			zigui.RenderLibrary, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -304,7 +305,8 @@ func (u *UI) libPatchDetail() {
 func (u *UI) libBody() string {
 	st := u.libBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryBodyV2", wireLibBody(st), zigui.RenderLibraryBodyV2,
+			zigui.RenderLibraryBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -352,7 +354,8 @@ func (u *UI) libDetailWrap(s *libSt) string {
 func (u *UI) libDetailRender(s *libSt) string {
 	st := u.libDetailState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryDetail(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryDetailV2", wireLibDetail(st), zigui.RenderLibraryDetailV2,
+			zigui.RenderLibraryDetail, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -772,7 +775,8 @@ func (u *UI) libPatchCueCell(path string) {
 // libCueCellRender renders one cue-census cell via Zig when available.
 func libCueCellRender(st libCueCellSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryCueCell(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryCueCellV2", wireLibCueCell(st), zigui.RenderLibraryCueCellV2,
+			zigui.RenderLibraryCueCell, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1328,7 +1332,8 @@ func libIDMHTML(st libIDMSt) string {
 func (u *UI) libQueueHTML() string {
 	st := u.libQueueState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibraryQueue(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibraryQueueV2", wireLibQueue(st), zigui.RenderLibraryQueueV2,
+			zigui.RenderLibraryQueue, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

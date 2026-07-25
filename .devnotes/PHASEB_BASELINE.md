@@ -169,6 +169,9 @@ GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$
 | publish `#pub-hero` frag | 5 938 | 4 400 | -26% | (in the set above) |
 | settings (full tab, `libmedia`) | 64 953 | 32 651 | **-50%** | 139 005 / 203 734 = 68.2% |
 | settings `#stset-<id>` frag | 901 | 913 | ~0% | (~60 B of state; see the allocation note) |
+| library (full tab) | 124 435 | 38 668 | **-69%** | 72 850 / 209 353 = 34.8% |
+| library `#lib-body` frag | 121 232 | 39 131 | **-68%** | (in the set above) |
+| library cue-census cell | 1 183 | 838 | **-29%** | (~90 B of state) |
 
 **Encoder allocation: the flat prealloc was a real regression, now fixed.** With
 `NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment

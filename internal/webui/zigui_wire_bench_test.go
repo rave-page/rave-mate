@@ -189,6 +189,36 @@ func BenchmarkWireBenchSettingsStatus(b *testing.B) {
 		func() (string, bool) { return zigui.RenderSettingsStatusV2(wireSetStatus(st)) })
 }
 
+func BenchmarkWireBenchLibrary(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibrary(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryV2(wireLibState(st)) })
+}
+
+func BenchmarkWireBenchLibraryBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libFixtures()["populated"].Body
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibraryBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryBodyV2(wireLibBody(st)) })
+}
+
+func BenchmarkWireBenchLibraryCueCell(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libCueCellSt{Drops: 2, DropsTitle: "2 drops", Cues: 4, CuesTitle: "4 cues"}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibraryCueCell(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryCueCellV2(wireLibCueCell(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()
