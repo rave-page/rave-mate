@@ -850,3 +850,78 @@ test "btnRowOf and btnAct" {
     try btnAct(&h, "Run", "go", "auto-run:", "g&1");
     try std.testing.expectEqualStrings("<button class=\"rp-btn rp-btn--go\" data-act=\"auto-run:g&amp;1\">Run</button>", h.b.items);
 }
+
+// --- library ---
+// Ports of the components.go layout primitives the Library tab needs. mdOpen/mdSplit/mdClose
+// (masterDetail) already live in the vrchat block; these add the wide + tri-pane variants and
+// the pre-formatted progress bar (Go progressBarOf - the width string is built Go-side).
+
+/// mdWideOpen brackets the wide list|detail split (Go masterDetailWide): the list is the
+/// primary work surface, the detail a fixed-width right inspector. Close with mdSplit/mdClose.
+pub fn mdWideOpen(h: *Html) !void {
+    try h.raw("<div class=\"mdsplit wide\"><div class=md-list>");
+}
+
+/// triOpen/triMid/triClose bracket the nav|list|detail split with draggable dividers
+/// (Go triPane). nav_var/detail_var are :root custom-property names the splitter JS
+/// persists - trusted literals, emitted raw exactly like the Go original. nav_html is
+/// the pre-rendered nav column.
+pub fn triOpen(h: *Html, nav_var: []const u8, detail_var: []const u8, nav_html: []const u8) !void {
+    try h.raw("<div class=\"mdsplit wide tri\" style=\"grid-template-columns:var(--");
+    try h.raw(nav_var);
+    try h.raw(",220px) 6px minmax(0,1fr) 6px var(--");
+    try h.raw(detail_var);
+    try h.raw(",clamp(300px,28vw,400px))\">");
+    try h.raw("<div class=md-nav>");
+    try h.raw(nav_html);
+    try h.raw("</div>");
+    try h.raw("<div class=split-h data-splitvar=\"");
+    try h.raw(nav_var);
+    try h.raw("\" data-splitdef=220></div>");
+    try h.raw("<div class=md-list>");
+}
+
+pub fn triMid(h: *Html, detail_var: []const u8) !void {
+    try h.raw("</div><div class=split-h data-splitvar=\"");
+    try h.raw(detail_var);
+    try h.raw("\" data-splitdef=340 data-splitdir=r></div><div class=md-detail>");
+}
+
+pub fn triClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// progressBar renders a 0..1 fill from a PRE-FORMATTED width ("12.5%", Go pbarPctOf) plus
+/// its caption (Go progressBarOf) - no float ever crosses the ABI.
+pub fn progressBar(h: *Html, width: []const u8, caption: []const u8) !void {
+    try h.raw("<div class=pbar><div class=pbar-fill style=\"width:");
+    try h.raw(width);
+    try h.raw("\"></div><span class=pbar-cap>");
+    try h.esc(caption);
+    try h.raw("</span></div>");
+}
+
+test "library layout primitives" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try mdWideOpen(&h);
+    try mdSplit(&h);
+    try mdClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"mdsplit wide\"><div class=md-list></div>" ++
+        "<div class=md-detail></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try triOpen(&h, "lib-nav-w", "lib-det-w", "N");
+    try h.raw("L");
+    try triMid(&h, "lib-det-w");
+    try h.raw("D");
+    try triClose(&h);
+    try std.testing.expectEqualStrings("<div class=\"mdsplit wide tri\" style=\"grid-template-columns:" ++
+        "var(--lib-nav-w,220px) 6px minmax(0,1fr) 6px var(--lib-det-w,clamp(300px,28vw,400px))\">" ++
+        "<div class=md-nav>N</div><div class=split-h data-splitvar=\"lib-nav-w\" data-splitdef=220></div>" ++
+        "<div class=md-list>L</div><div class=split-h data-splitvar=\"lib-det-w\" data-splitdef=340 " ++
+        "data-splitdir=r></div><div class=md-detail>D</div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try progressBar(&h, "12.5%", "running · 13%");
+    try std.testing.expectEqualStrings("<div class=pbar><div class=pbar-fill style=\"width:12.5%\"></div>" ++
+        "<span class=pbar-cap>running · 13%</span></div>", h.b.items);
+}

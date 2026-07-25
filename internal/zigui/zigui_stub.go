@@ -59,3 +59,11 @@ func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", fals
 func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
 func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
 func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }
+
+// --- library ---
+
+func RenderLibrary(stateJSON []byte) (string, bool)        { return "", false }
+func RenderLibraryBody(stateJSON []byte) (string, bool)    { return "", false }
+func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
+func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
+func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
