@@ -256,6 +256,18 @@ const uint8_t *rz_ui_render_logs_v2(const uint8_t *state, size_t len, size_t *ou
 const uint8_t *rz_ui_render_logs_lines_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
+/* --- phaseb-sched --- */
+/* B3 fragment scheduler: ONE call per ~1 Hz tick per surface. Takes the surface's whole state
+ * as an RZW1 document (incl. the hash of what Go last pushed per fragment id) and returns a
+ * packed RZF1 changed-fragment list: "RZF1", u16 count, then count x
+ * { u16 id_len, id, u64 fnv1a64_hash, u32 html_len, html }. count 0 = nothing changed (header
+ * only, 6 bytes). Unchanged fragments never cross the ABI. NULL = malformed/OOM; the caller
+ * runs its legacy per-fragment path for that tick. Free with rz_ui_free(ptr, *out_len). */
+const uint8_t *rz_ui_tick_live(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_tick_logs(const uint8_t *state, size_t len, size_t *out_len);
+/* --- end phaseb-sched --- */
+
+
 #ifdef __cplusplus
 }
 #endif

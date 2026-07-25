@@ -120,6 +120,116 @@ var schema = []msg{
 			s(14, "Copy", "copy"), s(15, "Clear", "clear"), s(16, "Tailing", "tailing"),
 			st(17, "Lines", "lines", "LogsLines")},
 	},
+
+	// ── phase B3 fragment scheduler (topic sched): the tick surfaces ──
+	// Root ids 100-149. Tk* messages mirror the Live cockpit's fragment states; their Zig types
+	// are re-exported by tick.zig, so this block needs no second import alias for live.zig.
+	{
+		name: "TkPrev", goT: "tickPrev", zigT: "tick.Prev",
+		// kUint's first user: a dedup hash is not a rendered number, so rule 6 (Go formats every
+		// number) does not apply - a 16-char hex string per fragment per tick would be pure waste.
+		fs: []field{s(1, "ID", "id"), {num: 2, goF: "Hash", zigF: "hash", kind: kUint}},
+	},
+	{
+		name: "TkKV", goT: "liveKV", zigT: "tick.KV",
+		fs: []field{s(1, "K", "k"), s(2, "KL", "kl"), s(3, "V", "v")},
+	},
+	{
+		name: "TkSRow", goT: "liveSRow", zigT: "tick.SRow",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
+	},
+	{
+		name: "TkTransport", goT: "liveTransportSt", zigT: "tick.Transport",
+		fs: []field{s(1, "StreamHint", "streamHint"), s(2, "StreamLabel", "streamLabel"),
+			s(3, "DotVar", "dotVar"), s(4, "State", "state"), s(5, "MetaOnly", "metaOnly"),
+			s(6, "PauseLabel", "pauseLabel"), s(7, "PauseHint", "pauseHint"), b(8, "Paused", "paused"),
+			b(9, "HasRec", "hasRec"), s(10, "RecHint", "recHint"), s(11, "RecLabel", "recLabel"),
+			s(12, "RecBtn", "recBtn"), s(13, "RecState", "recState"), b(14, "HasTC", "hasTc"),
+			s(15, "TCLabel", "tcLabel"), s(16, "TC", "tc"), s(17, "StartLbl", "startLbl"),
+			s(18, "StopLbl", "stopLbl")},
+	},
+	{
+		name: "TkNP", goT: "liveNPSt", zigT: "tick.NP",
+		fs: []field{s(1, "Line1", "line1"), s(2, "Line2", "line2")},
+	},
+	{
+		name: "TkStatus", goT: "liveStatusSt", zigT: "tick.Status",
+		fs: []field{li(1, "Rows", "rows", "TkKV")},
+	},
+	{
+		name: "TkDeck", goT: "liveDeck", zigT: "tick.Deck",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Name", "name"), s(3, "Title", "title"),
+			s(4, "Meta", "meta"), s(5, "Via", "via")},
+	},
+	{
+		name: "TkDecks", goT: "liveDecksSt", zigT: "tick.Decks",
+		fs: []field{s(1, "Note", "note"), li(2, "Decks", "decks", "TkDeck")},
+	},
+	{
+		name: "TkSignals", goT: "liveSignalsSt", zigT: "tick.Signals",
+		fs: []field{li(1, "Rows", "rows", "TkKV")},
+	},
+	{
+		name: "TkCockpitRow", goT: "liveCockpitRow", zigT: "tick.CockpitRow",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "State", "state"),
+			s(4, "StreamLbl", "streamLbl"), s(5, "StreamAct", "streamAct"), s(6, "RecLbl", "recLbl"),
+			s(7, "RecAct", "recAct")},
+	},
+	{
+		name: "TkCockpit", goT: "liveCockpitSt", zigT: "tick.Cockpit",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Caption", "caption"),
+			li(3, "Rows", "rows", "TkCockpitRow")},
+	},
+	{
+		name: "TkLink", goT: "liveLinkSt", zigT: "tick.Link",
+		fs: []field{b(1, "Available", "available"), st(2, "Backend", "backend", "TkSRow"),
+			s(3, "Fill", "fill"), s(4, "Cap", "cap"), st(5, "Session", "session", "TkSRow"),
+			s(6, "ResyncLbl", "resyncLbl"), li(7, "Sources", "sources", "TkSRow")},
+	},
+	{
+		name: "TkGraph", goT: "liveGraphSt", zigT: "tick.Graph",
+		fs: []field{s(1, "Tooltip", "tooltip"), s(2, "Legend", "legend"), s(3, "Graph", "graph")},
+	},
+	{
+		name: "TkPerf", goT: "livePerfSt", zigT: "tick.Perf",
+		fs: []field{s(1, "Tooltip", "tooltip"), s(2, "CPULeg", "cpuLeg"), s(3, "CPUGraph", "cpuGraph"),
+			s(4, "RAMLeg", "ramLeg"), s(5, "RAMGraph", "ramGraph"), s(6, "Head", "head"),
+			s(7, "HeadColor", "headColor")},
+	},
+	{
+		name: "TkStrip", goT: "liveStripSt", zigT: "tick.Strip",
+		fs: []field{s(1, "Left", "left"), s(2, "Center", "center"), s(3, "Right", "right")},
+	},
+	{
+		// Full liveState mirror (field numbers follow the Go struct order): the tick leaves the
+		// static chrome empty, and absent tags cost nothing on the wire.
+		name: "TkLiveState", goT: "liveState", zigT: "tick.LiveState",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"),
+			st(3, "Transport", "transport", "TkTransport"), st(4, "NP", "np", "TkNP"),
+			s(5, "StatusTitle", "statusTitle"), st(6, "Status", "status", "TkStatus"),
+			s(7, "DecksTitle", "decksTitle"), st(8, "Decks", "decks", "TkDecks"),
+			b(9, "HasSignals", "hasSignals"), s(10, "SignalsTitle", "signalsTitle"),
+			s(11, "SignalsTip", "signalsTip"), st(12, "Signals", "signals", "TkSignals"),
+			b(13, "HasCockpit", "hasCockpit"), s(14, "CockpitTitle", "cockpitTitle"),
+			st(15, "Cockpit", "cockpit", "TkCockpit"), b(16, "HasLink", "hasLink"),
+			s(17, "LinkTitle", "linkTitle"), st(18, "Link", "link", "TkLink"),
+			b(19, "HasNet", "hasNet"), s(20, "NetTitle", "netTitle"), s(21, "NetTip", "netTip"),
+			st(22, "Net", "net", "TkGraph"), s(23, "TimTitle", "timTitle"), s(24, "TimTip", "timTip"),
+			st(25, "Tim", "tim", "TkGraph"), b(26, "HasPerf", "hasPerf"),
+			s(27, "PerfTitle", "perfTitle"), s(28, "PerfTip", "perfTip"),
+			st(29, "Perf", "perf", "TkPerf"), st(30, "Strip", "strip", "TkStrip")},
+	},
+	{
+		name: "TkLive", goT: "liveTickSt", zigT: "tick.LiveBatch", id: 100,
+		doc: "Live-tab tick surface (all ~1 Hz fragments in one call)",
+		fs: []field{st(1, "Live", "live", "TkLiveState"), s(2, "TC", "tc"),
+			li(3, "Prev", "prev", "TkPrev")},
+	},
+	{
+		name: "TkLogs", goT: "logsTickSt", zigT: "tick.LogsBatch", id: 101,
+		doc: "#log-view tick surface (one fragment, 400-line tail)",
+		fs:  []field{st(1, "Lines", "lines", "LogsLines"), li(2, "Prev", "prev", "TkPrev")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -127,6 +237,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"tick", "tick.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

@@ -807,3 +807,52 @@ test "wire modules" {
 }
 
 // --- end phaseb-wire ---
+// --- phaseb-sched ---
+
+// B3 fragment scheduler: ONE call per tick per surface. The tick's whole state crosses once as
+// an RZW1 document; tick.zig renders EVERY fragment of that surface, hashes each one and drops
+// the ones whose bytes match what Go last pushed (the hashes travel in the document - the
+// exports stay stateless). What comes back is a packed RZF1 changed-fragment list that Go turns
+// into ONE batched Eval. Design + rationale: .devnotes/ZIG_UI_GUIDE.md "Phase B — B3 fragment
+// scheduler". Free with rz_ui_free(ptr, *out_len), like every other export.
+//
+// Own aliases for wire.zig / wire_gen.zig so this block does not depend on the phaseb-wire
+// block's names (a duplicate @import of one file is the same type, not a second copy).
+
+const sched_wire = @import("wire.zig");
+const sched_wire_gen = @import("wire_gen.zig");
+const tick = @import("tick.zig");
+
+/// Parse an RZW1 tick document → run the surface's scheduler → owned RZF1 buffer. NULL on any
+/// malformed input or OOM; the Go caller then runs its legacy per-fragment path for that tick.
+fn tickWire(
+    comptime StateT: type,
+    comptime decodeFn: fn (*sched_wire.Reader, *StateT) sched_wire.Error!void,
+    comptime runFn: fn (std.mem.Allocator, StateT) anyerror![]u8,
+    comptime msg_id: u16,
+    state: ?[*]const u8,
+    len: usize,
+    out_len: *usize,
+) ?[*]const u8 {
+    const p = state orelse return null;
+    if (len == 0) return null;
+    const parsed = sched_wire.parse(StateT, decodeFn, alloc, msg_id, sched_wire_gen.schema_hash, p[0..len]) catch return null;
+    defer parsed.deinit();
+    const out = runFn(alloc, parsed.value) catch return null;
+    out_len.* = out.len;
+    return out.ptr;
+}
+
+export fn rz_ui_tick_live(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return tickWire(tick.LiveBatch, sched_wire_gen.decodeTkLive, tick.runLive, sched_wire_gen.msg_tk_live, state, len, out_len);
+}
+
+export fn rz_ui_tick_logs(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return tickWire(tick.LogsBatch, sched_wire_gen.decodeTkLogs, tick.runLogs, sched_wire_gen.msg_tk_logs, state, len, out_len);
+}
+
+test "phaseb-sched module" {
+    _ = tick;
+}
+
+// --- end phaseb-sched ---

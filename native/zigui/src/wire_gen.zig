@@ -9,11 +9,14 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const tick = @import("tick.zig");
 
-pub const schema_hash: u32 = 0xfe16917d;
+pub const schema_hash: u32 = 0x8c5a267e;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
+pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
+pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -124,8 +127,226 @@ pub fn decodeLogsState(r: *wire.Reader, out: *logs.State) wire.Error!void {
     };
 }
 
+pub fn decodeTkPrev(r: *wire.Reader, out: *tick.Prev) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.hash = @intCast(try r.uint(t)),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkKV(r: *wire.Reader, out: *tick.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.kl = try r.str(t),
+        3 => out.v = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkSRow(r: *wire.Reader, out: *tick.SRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.dl = try r.str(t),
+        4 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkTransport(r: *wire.Reader, out: *tick.Transport) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.streamHint = try r.str(t),
+        2 => out.streamLabel = try r.str(t),
+        3 => out.dotVar = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.metaOnly = try r.str(t),
+        6 => out.pauseLabel = try r.str(t),
+        7 => out.pauseHint = try r.str(t),
+        8 => out.paused = try r.boolean(t),
+        9 => out.hasRec = try r.boolean(t),
+        10 => out.recHint = try r.str(t),
+        11 => out.recLabel = try r.str(t),
+        12 => out.recBtn = try r.str(t),
+        13 => out.recState = try r.str(t),
+        14 => out.hasTc = try r.boolean(t),
+        15 => out.tcLabel = try r.str(t),
+        16 => out.tc = try r.str(t),
+        17 => out.startLbl = try r.str(t),
+        18 => out.stopLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkNP(r: *wire.Reader, out: *tick.NP) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.line1 = try r.str(t),
+        2 => out.line2 = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkStatus(r: *wire.Reader, out: *tick.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(tick.KV, decodeTkKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkDeck(r: *wire.Reader, out: *tick.Deck) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cls = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.meta = try r.str(t),
+        5 => out.via = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkDecks(r: *wire.Reader, out: *tick.Decks) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.note = try r.str(t),
+        2 => out.decks = try r.list(tick.Deck, decodeTkDeck, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkSignals(r: *wire.Reader, out: *tick.Signals) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(tick.KV, decodeTkKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkCockpitRow(r: *wire.Reader, out: *tick.CockpitRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.variant = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.state = try r.str(t),
+        4 => out.streamLbl = try r.str(t),
+        5 => out.streamAct = try r.str(t),
+        6 => out.recLbl = try r.str(t),
+        7 => out.recAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkCockpit(r: *wire.Reader, out: *tick.Cockpit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.caption = try r.str(t),
+        3 => out.rows = try r.list(tick.CockpitRow, decodeTkCockpitRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLink(r: *wire.Reader, out: *tick.Link) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.available = try r.boolean(t),
+        2 => out.backend = try r.sub(tick.SRow, decodeTkSRow, t),
+        3 => out.fill = try r.str(t),
+        4 => out.cap = try r.str(t),
+        5 => out.session = try r.sub(tick.SRow, decodeTkSRow, t),
+        6 => out.resyncLbl = try r.str(t),
+        7 => out.sources = try r.list(tick.SRow, decodeTkSRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkGraph(r: *wire.Reader, out: *tick.Graph) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tooltip = try r.str(t),
+        2 => out.legend = try r.str(t),
+        3 => out.graph = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkPerf(r: *wire.Reader, out: *tick.Perf) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tooltip = try r.str(t),
+        2 => out.cpuLeg = try r.str(t),
+        3 => out.cpuGraph = try r.str(t),
+        4 => out.ramLeg = try r.str(t),
+        5 => out.ramGraph = try r.str(t),
+        6 => out.head = try r.str(t),
+        7 => out.headColor = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkStrip(r: *wire.Reader, out: *tick.Strip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.left = try r.str(t),
+        2 => out.center = try r.str(t),
+        3 => out.right = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLiveState(r: *wire.Reader, out: *tick.LiveState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.transport = try r.sub(tick.Transport, decodeTkTransport, t),
+        4 => out.np = try r.sub(tick.NP, decodeTkNP, t),
+        5 => out.statusTitle = try r.str(t),
+        6 => out.status = try r.sub(tick.Status, decodeTkStatus, t),
+        7 => out.decksTitle = try r.str(t),
+        8 => out.decks = try r.sub(tick.Decks, decodeTkDecks, t),
+        9 => out.hasSignals = try r.boolean(t),
+        10 => out.signalsTitle = try r.str(t),
+        11 => out.signalsTip = try r.str(t),
+        12 => out.signals = try r.sub(tick.Signals, decodeTkSignals, t),
+        13 => out.hasCockpit = try r.boolean(t),
+        14 => out.cockpitTitle = try r.str(t),
+        15 => out.cockpit = try r.sub(tick.Cockpit, decodeTkCockpit, t),
+        16 => out.hasLink = try r.boolean(t),
+        17 => out.linkTitle = try r.str(t),
+        18 => out.link = try r.sub(tick.Link, decodeTkLink, t),
+        19 => out.hasNet = try r.boolean(t),
+        20 => out.netTitle = try r.str(t),
+        21 => out.netTip = try r.str(t),
+        22 => out.net = try r.sub(tick.Graph, decodeTkGraph, t),
+        23 => out.timTitle = try r.str(t),
+        24 => out.timTip = try r.str(t),
+        25 => out.tim = try r.sub(tick.Graph, decodeTkGraph, t),
+        26 => out.hasPerf = try r.boolean(t),
+        27 => out.perfTitle = try r.str(t),
+        28 => out.perfTip = try r.str(t),
+        29 => out.perf = try r.sub(tick.Perf, decodeTkPerf, t),
+        30 => out.strip = try r.sub(tick.Strip, decodeTkStrip, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLive(r: *wire.Reader, out: *tick.LiveBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.live = try r.sub(tick.LiveState, decodeTkLiveState, t),
+        2 => out.tc = try r.str(t),
+        3 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeTkLogs(r: *wire.Reader, out: *tick.LogsBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.lines = try r.sub(logs.Lines, decodeLogsLines, t),
+        2 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
+    try std.testing.expect(msg_ag_state != msg_tk_live);
+    try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
+    try std.testing.expect(msg_logs_state != msg_tk_live);
+    try std.testing.expect(msg_logs_state != msg_tk_logs);
+    try std.testing.expect(msg_logs_lines != msg_tk_live);
+    try std.testing.expect(msg_logs_lines != msg_tk_logs);
+    try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

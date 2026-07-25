@@ -108,9 +108,13 @@ type UI struct {
 	logSearch     string     // free-text filter over msg/source/fields
 	logAutoscroll bool       // tail-follow toggle (default on)
 
-	fragMu   sync.Mutex                       // guards frags + tickPend
+	fragMu   sync.Mutex                       // guards frags + tickPend (+ the phaseb-sched pair below)
 	frags    map[string]string                // last HTML pushed per fragment id - ticks skip unchanged fragments
 	tickPend map[*strings.Builder][]evalEntry // per-batch (id,patch) pairs tickPatch records for flushTick
+	// --- phaseb-sched ---
+	fragH   map[string]uint64 // last-pushed HTML hash per fragment id (scheduler surfaces; tick_sched.go)
+	fragGen uint64            // ++ on every frags/fragH drop; a batch built across a drop is discarded
+	// --- end phaseb-sched ---
 
 	evalMu   sync.Mutex     // guards the eval queue below
 	evalQ    []evalEntry    // pending page evals, insertion-ordered; keyed entries update in place
@@ -425,6 +429,9 @@ func (u *UI) setTab(id string) {
 func (u *UI) patchMain() {
 	u.fragMu.Lock()
 	u.frags = nil // DOM replaced - drop the tick dedup cache
+	// --- phaseb-sched ---
+	u.fragH, u.fragGen = nil, u.fragGen+1 // same for the hash cache; the bump voids an in-flight batch
+	// --- end phaseb-sched ---
 	u.fragMu.Unlock()
 	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ");document.body.setAttribute('data-keyscope'," + jsQuote(u.keyScope()) + ")")
 	u.mpResync() // heal any player patch the build raced (state changed mid-build)
@@ -762,6 +769,9 @@ func (u *UI) enqueueEval(key, js string) {
 	if wipe {
 		u.fragMu.Lock()
 		u.frags = nil
+		// --- phaseb-sched ---
+		u.fragH, u.fragGen = nil, u.fragGen+1 // a dropped patch must re-emit next tick, hashes included
+		// --- end phaseb-sched ---
 		u.fragMu.Unlock()
 	}
 	u.kickEval()
