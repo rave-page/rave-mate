@@ -42,3 +42,11 @@ cd zig-out/lib
 [ -f raveui.lib ] && cp -f raveui.lib libraveui.a
 ls -la
 echo "raveui built ($ver, ${target:-native})"
+
+# --- zigvr: VR-overlay raster lib (native/zigvr → libravevr.a, Go tag `zigvr`) ---
+cd ../../../zigvr
+"$ZIG" build -Drelease ${target:+-Dtarget=$target}
+cd zig-out/lib
+[ -f ravevr.lib ] && cp -f ravevr.lib libravevr.a
+ls -la
+echo "ravevr built ($ver, ${target:-native})"

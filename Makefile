@@ -26,10 +26,14 @@ ifeq ($(ZIG),1)
   TAGS += zigdsp
 endif
 # ZIG=1 also links the raveui Zig webview render layer (native/zigui, tag zigui) —
-# ONE switch turns on all Zig natives; `make zig` builds both libs. Separate block so
-# zigcore-side edits above don't conflict.
+# ONE switch turns on all Zig natives; `make zig` builds all libs.
 ifeq ($(ZIG),1)
-  TAGS += zigui
+  TAGS += zigui zigvr
+endif
+# ZIGVR=1 links only the ravevr VR-overlay raster lib (Zig display-list executor,
+# pixel-identical to the Go raster - see .devnotes/ZIG_VR_OVERLAY.md).
+ifeq ($(ZIGVR),1)
+  TAGS += zigvr
 endif
 
 .PHONY: build build-spout spout-sdk zig build-zig run service vet fmt test tidy soak vuln clean all generate-api generate-icon
@@ -107,3 +111,7 @@ vuln:
 
 clean:
 	rm -rf $(DIST)
+# Build with both Zig libs linked (DSP core + VR-overlay raster).
+.PHONY: build-zig-all
+build-zig-all: zig
+	$(MAKE) build ZIG=1 ZIGVR=1
