@@ -227,6 +227,19 @@ Rules:
   Re-measured against B-2's per-fragment BINARY path (the JSON one is gone): Live tick **-29%**
   dispatch / **-42%** steady state / -27% quoted, allocs 196 -> 34 -> 9, and `sched_all` now matches
   pure Go while `sched_same` beats it - the first surface where the Zig path is not a loss.
+- **P6 UI phase B4b (Library retained state, SHIPPED):** the Library tab's Go-runtime retained-state
+  workarounds are gone - `collViewSig`, `plRowsVer`, `smartCounts*`'s FNV-over-every-rule-set, the
+  5s on-disk TTL and the 2s browse TTL - replaced by a comparable key (`libDerivKey`) + copy-on-write
+  controls + computation on `u.bg` (`internal/webui/library_deriv.go`). `libdb.LibraryVersion()` also
+  stopped being a `SELECT MAX(seq)` per call: it is an in-memory epoch seeded from the table. Nothing
+  crosses the ABI differently and no state struct changed, so the wire schema and every library
+  golden/wire gate are untouched. Handler-lane occupancy for a steady-state collection render
+  **30.6 us -> 126 ns** (43 -> 4 allocs); worst case (a control moved) **47.9 ms -> 73 ns** on the
+  lane, because the ~23k filter+sort moved off it; the on-disk sweep the TTL re-ran blind
+  **3.53 ms -> 56 us**, and filesystem freshness improved from "within the TTL" to "next render".
+  Gates: a differential missed-invalidation test over every control action, off-lane proofs via a
+  runner seam, change-gate counters, and a byte-identity gate on `#lib-body` (retained vs cold) -
+  each proven non-vacuous by execution. Detail: ZIG_UI_GUIDE.md "Phase B - B4b".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
