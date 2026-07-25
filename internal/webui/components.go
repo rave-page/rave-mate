@@ -327,12 +327,45 @@ type loudnessOpts struct {
 	extraHTML string
 }
 
+// loudChipSt is one industry-target quick-pick chip (compact layout only). Val/Title/Label are
+// final strings - the "%g|%g" I|TP payload, the full target label and the compressed chip text
+// are all formatted Go-side (no float crosses the ABI as text Zig would have to format).
+type loudChipSt struct {
+	Label  string `json:"label"`
+	Val    string `json:"val"`
+	Title  string `json:"title"`
+	Active bool   `json:"active,omitempty"`
+}
+
+// loudSt is THE loudness block as resolved state (phase B-1a: it used to ride through 4 state
+// contracts as pre-rendered raw markup). Every string is final: i18n resolved, floats trimmed,
+// data-labels lowercased Go-side. Toggle.On gates the whole body - the same single source Go
+// always used (o.vals.On drives both the switch and the branch). Tip and Extra stay RAW:
+// tooltip.go owns tipTopic (phase B-1b), the caller owns extraHTML.
+type loudSt struct {
+	Compact bool         `json:"compact,omitempty"`
+	Toggle  uiToggle     `json:"toggle"`
+	Tip     string       `json:"tip"` // RAW (tipTopic)
+	ChipAct string       `json:"chipAct,omitempty"`
+	Chips   []loudChipSt `json:"chips,omitempty"`
+	IField  libPBFieldSt `json:"iField"`
+	TPField libPBFieldSt `json:"tpField"`
+	Raise   uiToggle     `json:"raise"`
+	HasWarn bool         `json:"hasWarn,omitempty"`
+	Warn    string       `json:"warn,omitempty"`
+	Extra   string       `json:"extra,omitempty"` // RAW (caller's extraHTML)
+}
+
 // loudnessFields renders THE loudness block: the normalize switch plus integrated target,
 // true-peak ceiling and raise-quiet-only behind it. Every surface that edits transcode loudness
 // renders this one implementation - library preset builder, automation transcode steps, recordings
 // export. Extend HERE; never fork a per-surface copy. Only markup + copy are shared: the four
 // field handlers stay the caller's, reached through o.act.
-func loudnessFields(o loudnessOpts) string {
+func loudnessFields(o loudnessOpts) string { return newLoudSt(o).html() }
+
+// newLoudSt resolves loudnessOpts into the structured block. Surfaces that render through Zig
+// carry THIS instead of the markup; the Go renderer below is the fallback + golden reference.
+func newLoudSt(o loudnessOpts) loudSt {
 	// An override surface shows the default as a placeholder, so blank reads as "inherit"; a
 	// surface that defines the preset has no default to fall back to - print the value.
 	tx := func(f, def float64) (val, ph string) {
@@ -344,47 +377,85 @@ func loudnessFields(o loudnessOpts) string {
 		}
 		return trimNum(f), trimNum(def)
 	}
+	st := loudSt{
+		Compact: o.compact,
+		Toggle:  newToggle(o.toggleLbl, o.act("loudon"), o.vals.On),
+		Tip:     tipTopic(o.topic),
+		Extra:   o.extraHTML,
+	}
+	if !o.vals.On {
+		return st
+	}
+	iv, iph := tx(o.vals.I, transcode.DefaultLoudnessI)
+	tv, tph := tx(o.vals.TP, transcode.DefaultLoudnessTP)
+	iHint := ""
+	if !o.compact {
+		iHint = i18n.T("library.enc.lufsHint")
+	}
+	st.IField = newPBField(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iHint)
+	st.IField.PH = iph
+	st.TPField = newPBField(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", "")
+	st.TPField.PH = tph
+	st.Raise = newToggle(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly)
+	if o.compact {
+		// quick-pick target chips: one tap sets I+TP to an industry target; the active
+		// chip mirrors the current I (unset = the default −14)
+		effI := o.vals.I
+		if o.override && effI == 0 {
+			effI = transcode.DefaultLoudnessI
+		}
+		st.ChipAct = o.act("loudtarget")
+		for _, lt := range transcode.LoudnessTargets() {
+			st.Chips = append(st.Chips, loudChipSt{
+				Label:  ltChipLabel(lt),
+				Val:    fmt.Sprintf("%g|%g", lt.I, lt.TP),
+				Title:  lt.Label,
+				Active: math.Abs(effI-lt.I) < 0.01,
+			})
+		}
+	}
+	if o.preset != nil && !transcode.LoudnessAppliesTo(o.preset.AudioCodec) {
+		st.HasWarn, st.Warn = true, i18n.T("library.enc.loudNeedsReencode")
+	}
+	return st
+}
+
+// html renders the resolved block - ONE markup source for the Go path and the golden reference
+// the Zig mirror (components.zig loudnessFields) must match byte-for-byte.
+func (l loudSt) html() string {
 	var b strings.Builder
 	grp := "pb-grp"
-	if o.compact {
+	if l.Compact {
 		grp = "pb-grp pb-grp--compact"
 	}
 	b.WriteString(`<div class="` + grp + `">`)
-	b.WriteString(toggleRowTip(o.toggleLbl, o.act("loudon"), o.vals.On, tipTopic(o.topic)))
-	if o.vals.On {
-		iv, iph := tx(o.vals.I, transcode.DefaultLoudnessI)
-		tv, tph := tx(o.vals.TP, transcode.DefaultLoudnessTP)
-		if o.compact {
-			// quick-pick target chips: one tap sets I+TP to an industry target; the active
-			// chip mirrors the current I (unset = the default −14)
-			effI := o.vals.I
-			if o.override && effI == 0 {
-				effI = transcode.DefaultLoudnessI
-			}
+	b.WriteString(toggleRowTipDL(l.Toggle.Label, l.Toggle.DL, l.Toggle.Act, l.Toggle.On, l.Tip))
+	if l.Toggle.On {
+		if l.Compact {
 			b.WriteString(`<div class=lt-chips>`)
-			for _, lt := range transcode.LoudnessTargets() {
+			for _, ch := range l.Chips {
 				cls := "lt-chip"
-				if math.Abs(effI-lt.I) < 0.01 {
+				if ch.Active {
 					cls += " active"
 				}
-				b.WriteString(`<button class="` + cls + `" data-act=` + attrQ(o.act("loudtarget")) +
-					` data-val=` + attrQ(fmt.Sprintf("%g|%g", lt.I, lt.TP)) + ` title=` + attrQ(lt.Label) + `>` +
-					html.EscapeString(ltChipLabel(lt)) + `</button>`)
+				b.WriteString(`<button class="` + cls + `" data-act=` + attrQ(l.ChipAct) +
+					` data-val=` + attrQ(ch.Val) + ` title=` + attrQ(ch.Title) + `>` +
+					html.EscapeString(ch.Label) + `</button>`)
 			}
 			b.WriteString(`</div>`)
 			b.WriteString(`<div class=lt-fields>` +
-				`<span class=lt-field>` + pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, "") + `</span>` +
-				`<span class=lt-field>` + pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, "") + `</span>` +
-				`<span class=lt-raise>` + toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly) + `</span></div>`)
+				`<span class=lt-field>` + l.IField.html() + `</span>` +
+				`<span class=lt-field>` + l.TPField.html() + `</span>` +
+				`<span class=lt-raise>` + l.Raise.html() + `</span></div>`)
 		} else {
-			b.WriteString(pbFieldEx(i18n.T("library.enc.lufsTarget"), o.act("loudi"), iv, "number", iph, i18n.T("library.enc.lufsHint")))
-			b.WriteString(pbFieldEx(i18n.T("library.enc.truePeak"), o.act("loudtp"), tv, "number", tph, ""))
-			b.WriteString(toggleRow(i18n.T("library.enc.raiseQuiet"), o.act("loudraise"), o.vals.RaiseOnly))
+			b.WriteString(l.IField.html())
+			b.WriteString(l.TPField.html())
+			b.WriteString(l.Raise.html())
 		}
-		if o.preset != nil && !transcode.LoudnessAppliesTo(o.preset.AudioCodec) {
-			b.WriteString(hint("warn", i18n.T("library.enc.loudNeedsReencode")))
+		if l.HasWarn {
+			b.WriteString(hint("warn", l.Warn))
 		}
-		b.WriteString(o.extraHTML)
+		b.WriteString(l.Extra)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
