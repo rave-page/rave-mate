@@ -156,14 +156,16 @@ type midiCtlBlock struct {
 	Title     string             `json:"title"`
 	StatID    string             `json:"statId"` // midi-ctlstat-<i> (tick patch target)
 	Port      selState           `json:"port"`
-	PortLbl   string             `json:"portLbl"` // pre-rendered ss-label (label + tooltip)
+	PortLbl   string             `json:"portLbl"` // legacy pre-rendered ss-label (bridge)
+	PortLblS  *ssLabelSt         `json:"portLblSt,omitempty"` // structured ss-label - wins over PortLbl
 	Stat      midiPortStat       `json:"stat"`
 	EnableLbl string             `json:"enableLbl"`
 	EnableDL  string             `json:"enableDl"`
 	EnableAct string             `json:"enableAct"`
 	EnableOn  bool               `json:"enableOn"`
 	Thru      selState           `json:"thru"`
-	ThruLbl   string             `json:"thruLbl"`
+	ThruLbl   string             `json:"thruLbl"` // legacy pre-rendered ss-label (bridge)
+	ThruLblS  *ssLabelSt         `json:"thruLblSt,omitempty"` // structured ss-label - wins over ThruLbl
 	DrvThru   midiDrvThru        `json:"drvThru"`
 	Warn      midiWarnState      `json:"warn"`
 	Remove    string             `json:"remove"`
@@ -305,11 +307,11 @@ func (u *UI) midiCtlBlockState(i int, c config.MIDIControllerMap, ctx midiCtlRen
 	enLbl := i18n.T("midictl.in.enabled")
 	return midiCtlBlock{
 		Tid: "midi-ctl-" + idx, Title: title, StatID: "midi-ctlstat-" + idx,
-		Port: portSel, PortLbl: portLbl,
+		Port: portSel, PortLblS: &portLbl,
 		Stat:      u.midiPortStatState(c, ctx),
 		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl),
 		EnableAct: "midi-ctl-enable:" + idx, EnableOn: c.Enabled,
-		Thru: thruSel, ThruLbl: thruLbl,
+		Thru: thruSel, ThruLblS: &thruLbl,
 		DrvThru:   u.midiDrvThruState(i, c, ctx),
 		Warn:      u.midiThruWarnState(i, c),
 		Remove:    i18n.T("midictl.in.remove"),
@@ -320,10 +322,10 @@ func (u *UI) midiCtlBlockState(i int, c config.MIDIControllerMap, ctx midiCtlRen
 
 // midiCtlBlockHTML is the pure one-controller renderer.
 func midiCtlBlockHTML(c midiCtlBlock) string {
-	head := selHTMLRaw(c.Port, c.PortLbl) +
+	head := ssSelHTML(c.Port, c.PortLblS, c.PortLbl) +
 		`<div id="` + c.StatID + `">` + midiPortStatHTML(c.Stat) + `</div>` +
 		toggleRowDL(c.EnableLbl, c.EnableDL, c.EnableAct, c.EnableOn) +
-		selHTMLRaw(c.Thru, c.ThruLbl) +
+		ssSelHTML(c.Thru, c.ThruLblS, c.ThruLbl) +
 		midiDrvThruHTML(c.DrvThru) +
 		midiWarnHTML(c.Warn) +
 		btnRow(btn(c.Remove, "warn", c.RemoveAct, ""))
@@ -645,10 +647,12 @@ type midiBridgeState struct {
 	EnableAct string   `json:"enableAct"`
 	EnableOn  bool     `json:"enableOn"`
 	EnableTip string   `json:"enableTip"`
-	ToDJ      selState `json:"toDj"`
-	ToDJLbl   string   `json:"toDjLbl"`
-	FromDJ    selState `json:"fromDj"`
-	FromDJLbl string   `json:"fromDjLbl"`
+	ToDJ       selState   `json:"toDj"`
+	ToDJLbl    string     `json:"toDjLbl"` // legacy pre-rendered ss-label (bridge)
+	ToDJLblS   *ssLabelSt `json:"toDjLblSt,omitempty"` // structured ss-label - wins over ToDJLbl
+	FromDJ     selState   `json:"fromDj"`
+	FromDJLbl  string     `json:"fromDjLbl"`
+	FromDJLblS *ssLabelSt `json:"fromDjLblSt,omitempty"`
 }
 
 // midiBridgeState resolves the two-port loopMIDI DJ router (peer control → DJ; DJ output → us).
@@ -679,7 +683,7 @@ func (u *UI) midiBridgeState(ctx midiCtlRenderCtx) midiBridgeState {
 		Intro: i18n.T("midictl.bridge.intro"), IntroTip: tipTopic("midi-bridge"),
 		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl), EnableAct: "midi-bridge-enable",
 		EnableOn: br.Enabled, EnableTip: tipTopic("midi-bridge"),
-		ToDJ: toSel, ToDJLbl: toLbl, FromDJ: fromSel, FromDJLbl: fromLbl,
+		ToDJ: toSel, ToDJLblS: &toLbl, FromDJ: fromSel, FromDJLblS: &fromLbl,
 	}
 }
 
@@ -690,7 +694,7 @@ func midiBridgeHTML(st midiBridgeState) string {
 	}
 	body := `<p class=midi-help-note>` + htmlEscape(st.Intro) + ` ` + st.IntroTip + `</p>` +
 		toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, st.EnableTip) +
-		selHTMLRaw(st.ToDJ, st.ToDJLbl) +
-		selHTMLRaw(st.FromDJ, st.FromDJLbl)
+		ssSelHTML(st.ToDJ, st.ToDJLblS, st.ToDJLbl) +
+		ssSelHTML(st.FromDJ, st.FromDJLblS, st.FromDJLbl)
 	return card(st.Card, badge(st.Badge, "info"), body)
 }

@@ -1,6 +1,7 @@
 //! MIDI-in controllers card + DJ bridge card — byte-exact ports of
-//! internal/webui/render_midictl_controllers.go (midiCtlsHTML & friends). Tooltips arrive
-//! as pre-rendered HTML (raw): tooltip.go stays the single source for that markup.
+//! internal/webui/render_midictl_controllers.go (midiCtlsHTML & friends). The port/THRU/bridge
+//! ss-labels cross as STRUCTURED state (components.SsLabel) since phase B-1b; the raw strings
+//! stay only as the dual-field bridge.
 
 const std = @import("std");
 const Html = @import("html.zig").Html;
@@ -87,14 +88,16 @@ pub const Block = struct {
     title: []const u8 = "",
     statId: []const u8 = "", // midi-ctlstat-<i> (digits/ASCII id) — raw
     port: c.Select = .{},
-    portLbl: []const u8 = "", // pre-rendered ss-label (raw)
+    portLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    portLblSt: ?c.SsLabel = null, // structured ss-label — wins over portLbl
     stat: PortStat = .{},
     enableLbl: []const u8 = "",
     enableDl: []const u8 = "",
     enableAct: []const u8 = "",
     enableOn: bool = false,
     thru: c.Select = .{},
-    thruLbl: []const u8 = "",
+    thruLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    thruLblSt: ?c.SsLabel = null, // structured ss-label — wins over thruLbl
     drvThru: DrvThru = .{},
     warn: Warn = .{},
     remove: []const u8 = "",
@@ -158,14 +161,14 @@ fn renderBlock(h: *Html, b: Block) !void {
     try h.raw("><div class=midi-ctlhead>");
     try h.esc(b.title);
     try h.raw("</div>");
-    try c.selectBoxRaw(h, b.port, b.portLbl);
+    try c.selectBoxTipOr(h, b.port, b.portLblSt, b.portLbl);
     try h.raw("<div id=\"");
     try h.raw(b.statId);
     try h.raw("\">");
     try renderPortStat(h, b.stat);
     try h.raw("</div>");
     try c.toggleRow(h, b.enableLbl, b.enableDl, b.enableAct, b.enableOn);
-    try c.selectBoxRaw(h, b.thru, b.thruLbl);
+    try c.selectBoxTipOr(h, b.thru, b.thruLblSt, b.thruLbl);
     try renderDrvThru(h, b.drvThru);
     try renderWarn(h, b.warn);
     try c.btnRowOpen(h);
@@ -290,9 +293,11 @@ pub const Bridge = struct {
     enableOn: bool = false,
     enableTip: []const u8 = "",
     toDj: c.Select = .{},
-    toDjLbl: []const u8 = "",
+    toDjLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    toDjLblSt: ?c.SsLabel = null, // structured ss-label — wins over toDjLbl
     fromDj: c.Select = .{},
     fromDjLbl: []const u8 = "",
+    fromDjLblSt: ?c.SsLabel = null,
 };
 
 /// renderBridge mirrors Go midiBridgeHTML.
@@ -307,8 +312,8 @@ pub fn renderBridge(h: *Html, s: Bridge) !void {
     try h.raw(s.introTip);
     try h.raw("</p>");
     try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, s.enableTip);
-    try c.selectBoxRaw(h, s.toDj, s.toDjLbl);
-    try c.selectBoxRaw(h, s.fromDj, s.fromDjLbl);
+    try c.selectBoxTipOr(h, s.toDj, s.toDjLblSt, s.toDjLbl);
+    try c.selectBoxTipOr(h, s.fromDj, s.fromDjLblSt, s.fromDjLbl);
     try c.cardClose(h);
 }
 

@@ -566,18 +566,9 @@ fn renderDlgField(h: *Html, f: DlgField) !void {
     try c.fieldEx(h, f.label, f.dl, f.act, f.value, f.inputType, f.ph, tb.b.items);
 }
 
-/// AeLabel is a selraw's ss-label as state (webui aeLabelSt): escaped text + its tooltip.
-pub const AeLabel = struct {
-    text: []const u8 = "",
-    tip: ?c.Tip = null,
-};
-
-fn renderAeLabel(h: *Html, l: AeLabel) !void {
-    try h.raw("<span class=ss-label>");
-    try h.esc(l.text);
-    if (l.tip) |t| try c.renderTip(h, t);
-    try h.raw("</span>");
-}
+/// AeLabel is a selraw's ss-label as state (webui aeLabelSt). ALIAS of components.SsLabel, which
+/// B-1b shard 2 lifted into the base kit for every select-with-tooltip surface - one markup source.
+pub const AeLabel = c.SsLabel;
 
 /// AeBlock is one form block. Only the fields its kind names are read.
 /// kind ∈ field|fpair|toolbar|toggle|select|selraw|fpairsel|hint|pbhint|loud.
@@ -618,10 +609,7 @@ pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
         try c.selectBox(h, b.sel);
     } else if (std.mem.eql(u8, k, "selraw")) {
         if (b.labelSt) |l| {
-            var lb = Html.init(h.a);
-            defer lb.deinit();
-            try renderAeLabel(&lb, l);
-            try c.selectBoxRaw(h, b.sel, lb.b.items);
+            try c.selectBoxTipOf(h, b.sel, l);
         } else {
             try c.selectBoxRaw(h, b.sel, b.labelHtml);
         }

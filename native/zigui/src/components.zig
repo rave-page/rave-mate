@@ -1260,14 +1260,16 @@ pub const LoudChip = struct {
 /// the same single source Go uses (o.vals.On drives both the switch and the branch), so an
 /// off block is a bare `.pb-grp` with just the switch. compact = the dense variant: industry
 /// quick-pick chips + inline targets + raise chip on one wrap row, instead of full-width
-/// stacked builder fields. tip and extra are RAW markup: tooltip.go owns tipTopic (phase
-/// B-1b), the caller owns extraHTML (the export surface's gain-plan line + pre-listen toggle,
-/// which collapse with the switch). hasWarn is explicit - a blank i18n string must not switch
-/// arms.
+/// stacked builder fields. The tooltip is STRUCTURED since phase B-1b (tipSt, dual-field bridge
+/// over the legacy raw tip - the ONE non-append-only edit this shard makes to another topic's
+/// block, unavoidable: the field it replaces lives here); extra stays RAW markup, the caller owns
+/// extraHTML (the export surface's gain-plan line + pre-listen toggle, which collapse with the
+/// switch). hasWarn is explicit - a blank i18n string must not switch arms.
 pub const Loud = struct {
     compact: bool = false,
     toggle: Toggle = .{},
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    tipSt: ?Tip = null, // structured tooltip — wins over tip
     chipAct: []const u8 = "",
     chips: []const LoudChip = &.{},
     iField: PBField = .{},
@@ -1281,7 +1283,12 @@ pub const Loud = struct {
 /// loudnessFields mirrors Go loudSt.html() byte-for-byte.
 pub fn loudnessFields(h: *Html, st: Loud) !void {
     try h.raw(if (st.compact) "<div class=\"pb-grp pb-grp--compact\">" else "<div class=\"pb-grp\">");
-    try toggleRowTip(h, st.toggle.label, st.toggle.dl, st.toggle.act, st.toggle.on, st.tip);
+    // toggleRowTip takes the tooltip as a STRING: render the structured card into a scratch
+    // buffer rather than duplicating the switch-row markup here.
+    var tb = Html.init(h.a);
+    defer tb.deinit();
+    try tipOr(&tb, st.tipSt, st.tip);
+    try toggleRowTip(h, st.toggle.label, st.toggle.dl, st.toggle.act, st.toggle.on, tb.b.items);
     if (st.toggle.on) {
         if (st.compact) {
             try h.raw("<div class=lt-chips>");
@@ -1597,6 +1604,57 @@ test "tipOr: structured wins, absent falls back to the raw string" {
     defer b.deinit();
     try tipOr(&b, .{ .id = "x", .title = "X" }, "<span class=raw></span>");
     try std.testing.expect(std.mem.indexOf(u8, b.b.items, "tt-x") != null);
+}
+
+/// SsLabel is a smart-select ss-label as state (webui ssLabelSt): escaped label text + its
+/// structured tooltip. THE one markup source for the label span - every select-with-tooltip
+/// surface (settings, library encode builder, automations selraw, midictl) renders through it
+/// instead of shipping the span as pre-rendered markup.
+pub const SsLabel = struct {
+    text: []const u8 = "",
+    tip: ?Tip = null,
+};
+
+/// ssLabel mirrors Go ssLabelSt.html().
+pub fn ssLabel(h: *Html, l: SsLabel) !void {
+    try h.raw("<span class=ss-label>");
+    try h.esc(l.text);
+    if (l.tip) |t| try renderTip(h, t);
+    try h.raw("</span>");
+}
+
+/// selectBoxTipOf is selectBoxRaw fed from a STRUCTURED ss-label (Go selHTMLRaw + ssLabelSt.html):
+/// the label renders into a scratch buffer so the ss-field markup stays single-sourced.
+pub fn selectBoxTipOf(h: *Html, s: Select, l: SsLabel) !void {
+    var lb = Html.init(h.a);
+    defer lb.deinit();
+    try ssLabel(&lb, l);
+    try selectBoxRaw(h, s, lb.b.items);
+}
+
+/// selectBoxTipOr is the ss-label dual-field bridge (Go ssSelHTML): structured label wins, else a
+/// legacy pre-rendered one, else the plain label the select state carries.
+pub fn selectBoxTipOr(h: *Html, s: Select, lbl: ?SsLabel, raw_label: []const u8) !void {
+    if (lbl) |l| return selectBoxTipOf(h, s, l);
+    if (raw_label.len != 0) return selectBoxRaw(h, s, raw_label);
+    return selectBox(h, s);
+}
+
+test "ssLabel: escapes the text and appends the structured card" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try ssLabel(&h, .{ .text = "A & B", .tip = .{ .id = "midi-thru", .title = "T" } });
+    try std.testing.expectEqualStrings("<span class=ss-label>A &amp; B" ++
+        "<label class=tt data-label=\"tt-midi-thru\" aria-label=\"About: T\" tabindex=0>" ++ tt_glyph ++
+        "<span class=tt-card role=tooltip><span class=tt-in><b class=tt-title>T</b></span></span></label>" ++
+        "</span>", h.b.items);
+}
+
+test "ssLabel: no tooltip renders the bare span" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try ssLabel(&h, .{ .text = "Port" });
+    try std.testing.expectEqualStrings("<span class=ss-label>Port</span>", h.b.items);
 }
 
 test "Tip parses from JSON with omitted slices (Go omitempty contract)" {
