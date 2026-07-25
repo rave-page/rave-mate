@@ -377,3 +377,77 @@ after the TTL window. Both halves are gated by counters, not by timing
   n log n, so the worst-case row scales with the user's library.
 - No Zig numbers here: B4b changes no export, no document and no state struct. The library
   bridge/wire figures above stand unchanged.
+
+## Phase B4 — settings retained-state pass (probes + search)
+
+Same box + method as above (5950X, min-of-N over `-count=2` runs, <20% deltas are noise).
+Reproduce:
+
+```sh
+GOWORK=off go test -count=2 -run '^$' -bench 'BenchmarkSettingsSearch|BenchmarkSettingsPaneQuery|BenchmarkProbeKick|BenchmarkSettingsStateColdProbes' -benchmem ./internal/webui
+GOWORK=off go test -count=1 -run 'TestProbeRealDurations' -v ./internal/webui   # per-probe durations
+```
+
+### B4d search — handler lane per keystroke
+
+| what | pre-B4d (render + stripTags) | B4d (structured walk) | delta |
+|---|---|---|---|
+| real pane, query "port" (`settingsContentState`, 51 cards) | 2 040-2 163 µs | 1 244-1 267 µs | **-40%** |
+| ... allocations | 9 216 | 6 473 | -30% |
+| ... bytes | 1 912 KB | 1 219 KB | -36% |
+| matching alone, 867-card corpus | 15 214-16 021 µs | 6 197-7 058 µs | **-59%** |
+| ... allocations | 58 077 | 11 193 | -81% |
+| ... bytes | 16 297 KB | 4 384 KB | -73% |
+| folded haystack per card | 607 B | 560 B | -8% |
+
+The haystack barely shrinks — the win is not BUILDING the markup (escape + concat + strip + unescape
+of ~2.5 kB of HTML per card), not a smaller needle. The pane figure is the one to quote: it includes
+the card-state build, which B4d does not touch, so -40% is the real per-keystroke saving.
+
+### B4c probes — per-probe cost (the pacing input)
+
+| probe | duration |
+|---|---|
+| `dev:sttmic` | 297-325 ms |
+| `dev:midi` | 56-59 ms |
+| `dev:waveout` | 6.6-7.4 ms |
+| `tools` (3 x os.Stat + PATH scan) | 3.0-4.3 ms |
+| `dev:midiout` | 0-0.5 ms |
+| `vr` / `dev:audiorec` / `unity` | ~0 (not wired / no projects in the fixture) |
+| **cold fill: serial (pre-B4c)** | **370-391 ms** |
+| **cold fill: concurrent (B4c)** | **303-325 ms** (= the slowest member) |
+
+Freshness, which is what actually changed: pre-B4c ANY value was up to `probeTTL` + a full serial
+pass old (10.37 s worst case) because the pass published all slots at the end. Now each slot lands at
+its own probe's cost, so a MIDI port appears within ~59 ms of the next kick instead of waiting on the
+303 ms STT enumeration and the TTL.
+
+### B4c probes — handler lane
+
+| what | ns/op | note |
+|---|---|---|
+| `kickProbes` (8 slots, 8 spawns) | 214-217 | 21 B/op, 0 allocs |
+| pre-B4c kick (TTL check, mostly short-circuit) | 6.7-6.9 | the TTL made it free 99.9% of the time |
+| cold settings state build incl. kick | 219 856-221 915 | 616 allocs |
+
+So the kick is 0.1% of a cold settings state build: the lane never paid for probes, before or after,
+and B4c does not regress it. The probes' cost lives entirely on `u.bg` goroutines, capped per probe
+at 1/`probeBudget` (5%) of a core.
+
+### Findings
+
+1. **The TTL was one probe's fault.** 303 of the 370 ms serial pass is `stt.InputDevices`. Blindly
+   probing at the demand rate would have put ~30% of a core on a background goroutine for as long as
+   the Settings tab is open; cost-proportional pacing prices that probe out to ~6 s while the other
+   seven get the full 1 Hz. A per-probe budget is strictly better than a shared timer BECAUSE the
+   costs differ by 600x.
+2. **Publishing per probe matters as much as running them concurrently.** The old pass wrote every
+   slot after its slowest member returned, so concurrency alone (-18% on the fill) understates the
+   change: per-slot freshness improved by 1-4 orders of magnitude.
+3. **Coalescing the post-probe re-render is not optional and needs its own witness.** Eight landing
+   probes would trigger eight `patchMain`s; the eval queue's id coalescing hides that (one queue
+   entry), so the count lives in the cache and the gate asserts it.
+4. **Search identity is decidable, not samplable.** Because query terms are whitespace-free, mutual
+   containment of the two haystacks' whitespace-free runs settles every possible query - 15.9 M
+   single-term queries for 0.67 s of test time, where the enumerated 1.5 M-decision differential
+   takes 11 s. Enumerate to exercise the production path; decide with the invariant.

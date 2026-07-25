@@ -37,7 +37,7 @@ func init() {
 		if u.svc.Cfg == nil {
 			return
 		}
-		u.maybeRefreshProbes() // keep the cached fs/PATH/device probes warm off the render path
+		u.kickProbes() // demand pacing: every probe not already running re-runs, each on its own goroutine
 		stats := u.settingsStatus()
 		visible, searching := u.settingsVisible()
 		var js strings.Builder
@@ -62,8 +62,7 @@ func init() {
 	})
 
 	onExact("settings-refresh", func(u *UI, _ actMsg) {
-		u.invalidateProbes()
-		u.maybeRefreshProbes() // async; re-patches when device lists change
+		u.kickProbes() // no TTL to invalidate any more: a kick re-probes whatever is not in flight
 		u.patchMain()
 	})
 
@@ -775,7 +774,7 @@ func (u *UI) runInstall(id, label string, fn func(context.Context, func(int64, i
 		}
 		u.eval("window.__patch('inst-" + id + "'," + jsQuote(hint("ok", i18n.T("settings.label.installed"))) + ")")
 		u.toast(i18n.T("settings.toast.installedTool", i18n.A{"tool": label}))
-		u.refreshProbes() // a tool/DLL just landed - refresh the cache so patchMain shows it (off UI thread)
+		u.probeNow(pkTools, pkVR) // a tool/DLL just landed - commit it before the patch (already off-lane)
 		u.patchMain()
 	})
 }
@@ -937,19 +936,24 @@ func (u *UI) obsSyncEditModal(i int) {
 // ── modals: timecode extra sinks ──
 
 // tcExtraModal opens the extra-sinks editor. Device enumeration (winmm syscalls) never runs on
-// actWorker: a warm settingsProbes cache (≤probeTTL stale) serves names directly; on a cold cache
-// the modal opens with a loading body and a bg goroutine enumerates + patches it.
+// actWorker: the retained slot for THIS kind's device probe serves names directly once it has landed
+// (B4c: per-probe, where it used to be "any probe pass finished"); before that the modal opens with a
+// loading body and a bg goroutine enumerates + patches it.
 func (u *UI) tcExtraModal(kind string) {
-	u.probes.mu.Lock()
-	ready := u.probes.ready
-	u.probes.mu.Unlock()
-	if ready || (kind != "ltc" && kind != "mtc") { // art/unknown need no device list
+	need := ""
+	switch kind {
+	case "ltc":
+		need = pkWaveOut
+	case "mtc":
+		need = pkMidiOut
+	}
+	if need == "" || u.probeDone(need) { // art/unknown need no device list
 		u.openModal(u.tcExtraModalHTML(kind, u.devNamesCached("waveout"), u.devNamesCached("midiout")))
 		return
 	}
 	u.openModal(modal(tcExtraTitle(kind), `<div id=tcx-wait>`+emptyState(i18n.T("remote.loading"))+`</div>`,
 		btn(i18n.T("common.close"), "outline", "modal-close", "")))
-	u.maybeRefreshProbes() // warm the shared cache too
+	u.kickProbes() // fill the shared slots too
 	u.bg(func() {
 		var waveOut, midiOut []string
 		if kind == "ltc" {
