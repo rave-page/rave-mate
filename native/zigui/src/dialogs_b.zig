@@ -533,3 +533,139 @@ test "ws poster field: label/placeholder raw, value escaped" {
         "<input class=field-input name=img value=\"https://x/?a=1&amp;b=2\" " ++
         "placeholder=\"https://i.imgur.com/…\" autocomplete=off></label>", h.b.items);
 }
+
+// ══ Automations ▸ editor ══
+// The form body is a BLOCK LIST (settings-port shape): each block renders exactly one
+// components.zig primitive, so layout cannot drift between the renderers. Depth is 1 by
+// construction — a block carries at most two fields plus one button, so the JSON stays a plain
+// tree. Raw seams: every `tip` (Go tipTopic markup) and a step's `raw` block (Go loudnessFields,
+// the shared float-formatted loudness override).
+
+/// AeBlock is one form block. Only the fields its kind names are read.
+/// kind ∈ field|fpair|toolbar|toggle|select|hint|pbhint|raw.
+pub const AeBlock = struct {
+    kind: []const u8 = "",
+    field: c.Field = .{},
+    field2: c.Field = .{},
+    btn: c.Btn = .{},
+    toggle: c.Toggle = .{},
+    sel: c.Select = .{},
+    tone: []const u8 = "",
+    text: []const u8 = "",
+    tip: []const u8 = "",
+    raw: []const u8 = "",
+};
+
+pub fn renderAeBlock(h: *Html, b: AeBlock) !void {
+    const k = b.kind;
+    if (std.mem.eql(u8, k, "field")) {
+        try c.fieldOf(h, b.field);
+    } else if (std.mem.eql(u8, k, "fpair")) {
+        try c.fpairOpen(h);
+        try c.fieldOf(h, b.field);
+        try c.fieldOf(h, b.field2);
+        try c.fpairClose(h);
+    } else if (std.mem.eql(u8, k, "toolbar")) {
+        try h.raw("<div class=lib-toolbar>");
+        try c.fieldOf(h, b.field);
+        try c.btnOf(h, b.btn);
+        try h.raw("</div>");
+    } else if (std.mem.eql(u8, k, "toggle")) {
+        try c.toggleOf(h, b.toggle);
+    } else if (std.mem.eql(u8, k, "select")) {
+        try c.selectBox(h, b.sel);
+    } else if (std.mem.eql(u8, k, "hint")) {
+        try c.hint(h, b.tone, b.text);
+    } else if (std.mem.eql(u8, k, "pbhint")) {
+        try h.raw("<div class=pb-hint>");
+        try h.esc(b.text);
+        try h.raw(b.tip);
+        try h.raw("</div>");
+    } else if (std.mem.eql(u8, k, "raw")) {
+        try h.raw(b.raw);
+    }
+}
+
+fn renderAeBlocks(h: *Html, bs: []const AeBlock) !void {
+    for (bs) |b| try renderAeBlock(h, b);
+}
+
+/// AeStep is one chain-step card: header (order + type label + reorder/remove) then its body.
+pub const AeStep = struct {
+    title: []const u8 = "",
+    trail: []const c.Btn = &.{},
+    desc: []const u8 = "",
+    blocks: []const AeBlock = &.{},
+};
+
+fn renderAeStep(h: *Html, st: AeStep) !void {
+    // Go card(title, trailing, body): the head shows whenever title OR trailing is non-empty —
+    // a step always carries the remove button, so the head is unconditional here.
+    try c.cardOpen(h, st.title, st.title.len != 0 or st.trail.len != 0);
+    for (st.trail) |t| try c.btnOf(h, t);
+    if (st.title.len != 0 or st.trail.len != 0) try c.cardHeadClose(h);
+    try h.raw("<div class=np-artist>");
+    try h.esc(st.desc);
+    try h.raw("</div>");
+    try renderAeBlocks(h, st.blocks);
+    try c.cardClose(h);
+}
+
+/// AeModal is the whole automation-editor dialog.
+pub const AeModal = struct {
+    title: []const u8 = "",
+    hasErr: bool = false,
+    err: []const u8 = "",
+    ident: []const AeBlock = &.{},
+    secMatch: []const u8 = "",
+    match: []const AeBlock = &.{},
+    secActions: []const u8 = "",
+    noSteps: bool = false,
+    noStepsMsg: []const u8 = "",
+    steps: []const AeStep = &.{},
+    add: []const c.Btn = &.{},
+    hasVerdict: bool = false,
+    verdict: []const u8 = "",
+    save: []const u8 = "",
+    cancel: []const u8 = "",
+};
+
+pub fn renderAeModal(h: *Html, st: AeModal) !void {
+    try c.modalOpen(h, st.title);
+    if (st.hasErr) {
+        try h.raw("<div class=ae-err>");
+        try c.hint(h, "bad", st.err);
+        try h.raw("</div>");
+    }
+    try renderAeBlocks(h, st.ident);
+    try c.sectionOpen(h, st.secMatch);
+    try renderAeBlocks(h, st.match);
+    try c.sectionClose(h);
+    try c.sectionOpen(h, st.secActions);
+    if (st.noSteps) try c.emptyState(h, st.noStepsMsg);
+    for (st.steps) |s| try renderAeStep(h, s);
+    try c.btnRowOf(h, st.add);
+    if (st.hasVerdict) try c.hint(h, "bad", st.verdict);
+    try c.sectionClose(h);
+    try c.modalFoot(h);
+    try c.btnRowOpen(h);
+    try c.btn(h, st.save, "primary", "auto-ed-save", "");
+    try c.btn(h, st.cancel, "ghost", "modal-close", "");
+    try c.btnRowClose(h);
+    try c.modalClose(h);
+}
+
+test "ae block: toolbar wraps field + browse button" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderAeBlock(&h, .{ .kind = "toolbar", .field = .{ .label = "Watch folder", .dl = "watch folder", .act = "auto-ed:watch", .value = "D:\\in" }, .btn = .{ .label = "Browse", .variant = "ghost", .act = "pick-dir:auto-ed:watch" } });
+    try std.testing.expect(std.mem.startsWith(u8, h.b.items, "<div class=lib-toolbar><label class=field"));
+    try std.testing.expect(std.mem.endsWith(u8, h.b.items, "</button></div>"));
+}
+
+test "ae block: pbhint escapes text and raws the tip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderAeBlock(&h, .{ .kind = "pbhint", .text = "Deletes the file & stops", .tip = "<span class=tip></span>" });
+    try std.testing.expectEqualStrings("<div class=pb-hint>Deletes the file &amp; stops<span class=tip></span></div>", h.b.items);
+}

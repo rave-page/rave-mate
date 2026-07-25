@@ -200,6 +200,7 @@ const uint8_t *rz_ui_render_ws_grouplist(const uint8_t *state_json, size_t len, 
 const uint8_t *rz_ui_render_ws_rolepicker(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_ws_rolelist(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_ws_device(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_editor(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end dialogs-b --- */
 
 #ifdef __cplusplus

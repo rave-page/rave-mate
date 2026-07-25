@@ -707,4 +707,11 @@ func RenderWsDevice(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderAutoEditor renders the automation editor dialog (identity + match rules + action chain).
+func RenderAutoEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_editor(p, l, n)
+	})
+}
+
 // --- end dialogs-b ---

@@ -143,4 +143,6 @@ func RenderWsRolePicker(stateJSON []byte) (string, bool)   { return "", false }
 func RenderWsRoleList(stateJSON []byte) (string, bool)     { return "", false }
 func RenderWsDevice(stateJSON []byte) (string, bool)       { return "", false }
 
+func RenderAutoEditor(stateJSON []byte) (string, bool) { return "", false }
+
 // --- end dialogs-b ---

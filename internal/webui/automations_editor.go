@@ -13,7 +13,6 @@ package webui
 
 import (
 	"fmt"
-	"html"
 	"math"
 	"regexp"
 	"strconv"
@@ -23,6 +22,7 @@ import (
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/transcode"
+	"rave.page/mate/internal/zigui"
 )
 
 const aeMiB = 1024 * 1024
@@ -451,7 +451,13 @@ func (u *UI) aePresets() automation.PresetResolver {
 	}
 }
 
-// ── render (pure: reads the working copy + in-memory presets, no I/O) ──
+// ── render: impure state builders (working copy + in-memory presets, no I/O) + the Zig bridge ──
+//
+// The pure renderers live in render_automations_ed.go and are mirrored byte-for-byte in
+// native/zigui/src/dialogs_b.zig. Everything impure stays here: the working copy under s.mu, the
+// builtin+config preset merge, the engine validators, smart-select registration and tipTopic
+// markup. The loudness override block rides as trusted raw markup (components.go loudnessFields -
+// float-formatted Go-side), same rule as every other pre-rendered fragment in the fleet.
 
 func (u *UI) aeModalHTML() string {
 	s := &u.ae
@@ -463,71 +469,82 @@ func (u *UI) aeModalHTML() string {
 // aeModalHTMLLocked renders the form. Caller holds s.mu - the mutators already do, and re-taking
 // it would drop the write and the render out of one atomic step.
 func (u *UI) aeModalHTMLLocked(s *aeSt) string {
+	st := u.aeModalState(s)
+	if zigui.Available() {
+		if h, ok := zigui.RenderAutoEditor(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return aeModalHTMLOf(st)
+}
+
+// aeModalState resolves the whole dialog. Caller holds s.mu.
+func (u *UI) aeModalState(s *aeSt) aeModalSt {
 	presets := u.aeAllPresets() // pure merge of builtins+config; safe to close over
 
-	var b strings.Builder
+	st := aeModalSt{
+		Title:      i18n.T("automations.ed.titleNew"),
+		SecMatch:   i18n.T("automations.ed.secMatch"),
+		SecActions: i18n.T("automations.ed.secActions"),
+		Save:       i18n.T("automations.ed.save"),
+		Cancel:     i18n.T("common.cancel"),
+	}
+	if s.id != "" {
+		st.Title = i18n.T("automations.ed.titleEdit")
+	}
 	if s.errTx != "" {
-		b.WriteString(`<div class=ae-err>` + hint("bad", s.errTx) + `</div>`)
+		st.HasErr, st.Err = true, s.errTx
 	}
 	// identity
-	b.WriteString(field(i18n.T("automations.ed.label"), "auto-ed:label", s.label, "text"))
-	b.WriteString(`<div class=lib-toolbar>` +
-		fieldTip(i18n.T("automations.ed.watchDir"), "auto-ed:watch", s.watch, "text", tipTopic("auto-watch-dir")) +
-		btn(i18n.T("common.browse"), "ghost", "pick-dir:auto-ed:watch", "") + `</div>`)
-	b.WriteString(toggleRow(i18n.T("common.enabledCap"), "auto-ed:enabled", s.enabled))
-
-	// match
-	b.WriteString(section(i18n.T("automations.ed.secMatch"), u.aeMatchHTML(s)))
-
-	// action chain
-	b.WriteString(section(i18n.T("automations.ed.secActions"), u.aeChainHTML(s, presets)))
-
-	footer := btnRow(btn(i18n.T("automations.ed.save"), "primary", "auto-ed-save", ""),
-		btn(i18n.T("common.cancel"), "ghost", "modal-close", ""))
-	title := i18n.T("automations.ed.titleNew")
-	if s.id != "" {
-		title = i18n.T("automations.ed.titleEdit")
+	st.Ident = []aeBlockSt{
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.label"), "auto-ed:label", s.label, "text", "", "")},
+		{Kind: aeBlkToolbar,
+			Field: newDlgField(i18n.T("automations.ed.watchDir"), "auto-ed:watch", s.watch, "text", "", tipTopic("auto-watch-dir")),
+			Btn:   uiBtn{Label: i18n.T("common.browse"), Variant: "ghost", Act: "pick-dir:auto-ed:watch"}},
+		{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("common.enabledCap"), "auto-ed:enabled", s.enabled)},
 	}
-	return modal(title, b.String(), footer)
+	st.Match = u.aeMatchState(s)
+	u.aeChainState(&st, s, presets)
+	return st
 }
 
-// aeMatchHTML renders the eligibility rules. Caller holds s.mu.
-func (u *UI) aeMatchHTML(s *aeSt) string {
-	var b strings.Builder
-	b.WriteString(fieldEx(i18n.T("automations.ed.exts"), "auto-ed:exts", s.extsTx, "text",
-		i18n.T("automations.ed.extsPH"), tipTopic("auto-match-exts")))
-	b.WriteString(fpair(
-		fieldPH(i18n.T("automations.ed.minSize"), "auto-ed:minsize", s.minSizeTx, "number", "0"),
-		fieldEx(i18n.T("automations.ed.minAge"), "auto-ed:minage", aeIntTx(s.minAge), "number", "0",
-			tipTopic("auto-min-age")),
-	))
-	b.WriteString(fieldEx(i18n.T("automations.ed.pattern"), "auto-ed:pattern", s.pattern, "text",
-		i18n.T("automations.ed.patternPH"), tipTopic("auto-match-pattern")))
+// aeMatchState resolves the eligibility rules. Caller holds s.mu.
+func (u *UI) aeMatchState(s *aeSt) []aeBlockSt {
+	out := []aeBlockSt{
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.exts"), "auto-ed:exts", s.extsTx, "text",
+			i18n.T("automations.ed.extsPH"), tipTopic("auto-match-exts"))},
+		{Kind: aeBlkFPair,
+			Field: newDlgField(i18n.T("automations.ed.minSize"), "auto-ed:minsize", s.minSizeTx, "number", "0", ""),
+			Field2: newDlgField(i18n.T("automations.ed.minAge"), "auto-ed:minage", aeIntTx(s.minAge), "number", "0",
+				tipTopic("auto-min-age"))},
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.pattern"), "auto-ed:pattern", s.pattern, "text",
+			i18n.T("automations.ed.patternPH"), tipTopic("auto-match-pattern"))},
+	}
 	if s.minAge > 0 {
 		// The gate the watcher can never pass - say so where it's set, not in a failed run.
-		b.WriteString(hint("warn", i18n.T("automations.ed.minAgeWatchWarn")))
+		out = append(out, aeBlockSt{Kind: aeBlkHint, Tone: "warn", Text: i18n.T("automations.ed.minAgeWatchWarn")})
 	}
-	return b.String()
+	return out
 }
 
-// aeChainHTML renders the ordered steps + the add palette + live validation. Caller holds s.mu.
-func (u *UI) aeChainHTML(s *aeSt, presets []transcode.Preset) string {
-	var b strings.Builder
+// aeChainState resolves the ordered steps + add palette + the live engine verdict. Caller holds
+// s.mu. Writes into st because the three parts are one ordered unit in the DOM.
+func (u *UI) aeChainState(st *aeModalSt, s *aeSt, presets []transcode.Preset) {
 	if len(s.acts) == 0 {
-		b.WriteString(emptyState(i18n.T("automations.ed.noSteps")))
+		st.NoSteps, st.NoStepsMsg = true, i18n.T("automations.ed.noSteps")
 	}
-	for i, st := range s.acts {
-		b.WriteString(u.aeStepHTML(i, len(s.acts), st, presets))
+	st.Steps = make([]aeStepSt, 0, len(s.acts))
+	for i, step := range s.acts {
+		st.Steps = append(st.Steps, u.aeStepState(i, len(s.acts), step, presets))
 	}
-	b.WriteString(`<div class=btn-row>`)
+	st.Add = make([]uiBtn, 0, len(aeAddable))
 	for _, t := range aeAddable {
 		v := "outline"
 		if t == automation.ActionDelete {
 			v = "destructive"
 		}
-		b.WriteString(btn("+ "+aeTypeLabel(t), v, "auto-ed-add:"+string(t), ""))
+		st.Add = append(st.Add, uiBtn{Label: "+ " + aeTypeLabel(t), Variant: v, Act: "auto-ed-add:" + string(t)})
 	}
-	b.WriteString(`</div>`)
 	// Live verdict from the engine's own validators - the user learns before the save click, and
 	// aeBuild re-runs both as the authority. Same order as aeBuild, so the banner names the same
 	// failure Save would.
@@ -538,59 +555,68 @@ func (u *UI) aeChainHTML(s *aeSt, presets []transcode.Preset) string {
 			err = automation.ValidateLoudness(acts, u.aePresets())
 		}
 		if err != nil {
-			b.WriteString(hint("bad", err.Error()))
+			st.HasVerdict, st.Verdict = true, err.Error()
 		}
 	}
-	return b.String()
 }
 
-// aeStepHTML renders one step: header (order + type + reorder/remove) then per-type fields only.
+// aeStepState resolves one step: header (order + type + reorder/remove) then per-type fields only.
 // Every act names the step's KEY, never its index: the DOM this renders can outlive the position
 // (a reorder, a removal, a whole other chain loaded) while a native dialog it opened is still up.
-func (u *UI) aeStepHTML(i, n int, st aeStep, presets []transcode.Preset) string {
-	a := st.act
-	af := func(f string) string { return fmt.Sprintf("auto-ed-af:%d:%s", st.key, f) }
-	trailing := ""
+func (u *UI) aeStepState(i, n int, step aeStep, presets []transcode.Preset) aeStepSt {
+	a := step.act
+	key := aeItoa(step.key)
+	af := func(f string) string { return "auto-ed-af:" + key + ":" + f }
+
+	out := aeStepSt{
+		Title: strconv.Itoa(i+1) + ". " + aeTypeLabel(a.Type),
+		Desc:  aeTypeDesc(a.Type),
+		Trail: make([]uiBtn, 0, 3),
+	}
 	if i > 0 {
-		trailing += btn("↑", "ghost", fmt.Sprintf("auto-ed-up:%d", st.key), "")
+		out.Trail = append(out.Trail, uiBtn{Label: "↑", Variant: "ghost", Act: "auto-ed-up:" + key})
 	}
 	if i < n-1 {
-		trailing += btn("↓", "ghost", fmt.Sprintf("auto-ed-down:%d", st.key), "")
+		out.Trail = append(out.Trail, uiBtn{Label: "↓", Variant: "ghost", Act: "auto-ed-down:" + key})
 	}
-	trailing += btn("✕", "ghost", fmt.Sprintf("auto-ed-rm:%d", st.key), "")
+	out.Trail = append(out.Trail, uiBtn{Label: "✕", Variant: "ghost", Act: "auto-ed-rm:" + key})
 
-	var b strings.Builder
-	b.WriteString(`<div class=np-artist>` + html.EscapeString(aeTypeDesc(a.Type)) + `</div>`)
 	switch a.Type {
 	case automation.ActionRename:
-		b.WriteString(fieldEx(i18n.T("automations.ed.bufferMinutes"), af("buf"), aeIntTx(a.BufferMinutes), "number",
-			"180", tipTopic("auto-rename-buffer")))
-		b.WriteString(fieldEx(i18n.T("automations.ed.template"), af("tmpl"), a.Template, "text",
-			"{YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}", tipTopic("auto-rename-template")))
+		out.Blocks = []aeBlockSt{
+			{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.bufferMinutes"), af("buf"), aeIntTx(a.BufferMinutes),
+				"number", "180", tipTopic("auto-rename-buffer"))},
+			{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.ed.template"), af("tmpl"), a.Template, "text",
+				"{YYYY-MM-DD}_{venueSlug}_{eventSlug}{ext}", tipTopic("auto-rename-template"))},
+		}
 	case automation.ActionTrimSilence:
-		b.WriteString(fpair(
-			fieldEx(i18n.T("automations.ed.thresholdDb"), af("thr"), aeNumTx(a.ThresholdDb), "number", "-50",
-				tipTopic("auto-trim-silence")),
-			fieldPH(i18n.T("automations.ed.minSilence"), af("minsil"), aeNumTx(a.MinSilenceSeconds), "number", "2"),
-		))
-		b.WriteString(toggleRow(i18n.T("automations.ed.trimStart"), af("trims"), a.TrimStart == nil || *a.TrimStart))
-		b.WriteString(toggleRow(i18n.T("automations.ed.trimEnd"), af("trime"), a.TrimEnd == nil || *a.TrimEnd))
-		b.WriteString(aePresetSelect(st.key, af("preset"), a.PresetID, presets, "remux"))
-		b.WriteString(aeOutDirHTML(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")))
-		b.WriteString(aeLoudnessHTML(af, a, presets, "remux"))
+		out.Blocks = []aeBlockSt{
+			{Kind: aeBlkFPair,
+				Field: newDlgField(i18n.T("automations.ed.thresholdDb"), af("thr"), aeNumTx(a.ThresholdDb), "number", "-50",
+					tipTopic("auto-trim-silence")),
+				Field2: newDlgField(i18n.T("automations.ed.minSilence"), af("minsil"), aeNumTx(a.MinSilenceSeconds), "number", "2", "")},
+			{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("automations.ed.trimStart"), af("trims"), a.TrimStart == nil || *a.TrimStart)},
+			{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("automations.ed.trimEnd"), af("trime"), a.TrimEnd == nil || *a.TrimEnd)},
+			{Kind: aeBlkSelect, Sel: aePresetSelectState(step.key, af("preset"), a.PresetID, presets, "remux")},
+			aeOutDirBlock(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")),
+			{Kind: aeBlkRaw, Raw: aeLoudnessHTML(af, a, presets, "remux")},
+		}
 	case automation.ActionTranscode:
-		b.WriteString(aePresetSelect(st.key, af("preset"), a.PresetID, presets, ""))
-		b.WriteString(aeOutDirHTML(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")))
-		b.WriteString(aeLoudnessHTML(af, a, presets, ""))
+		out.Blocks = []aeBlockSt{
+			{Kind: aeBlkSelect, Sel: aePresetSelectState(step.key, af("preset"), a.PresetID, presets, "")},
+			aeOutDirBlock(af("dir"), a.OutputDir, i18n.T("automations.ed.alongside")),
+			{Kind: aeBlkRaw, Raw: aeLoudnessHTML(af, a, presets, "")},
+		}
 	case automation.ActionMove, automation.ActionCopy:
-		b.WriteString(aeOutDirHTML(af("dir"), a.OutputDir, ""))
+		out.Blocks = []aeBlockSt{aeOutDirBlock(af("dir"), a.OutputDir, "")}
 	case automation.ActionDelete:
 		// The one irreversible step: say exactly what it erases and where it stops.
-		b.WriteString(hint("bad", i18n.T("automations.ed.deleteWarn")))
-		b.WriteString(`<div class=pb-hint>` + html.EscapeString(i18n.T("automations.ed.deleteTerminal")) +
-			tipTopic("auto-delete-action") + `</div>`)
+		out.Blocks = []aeBlockSt{
+			{Kind: aeBlkHint, Tone: "bad", Text: i18n.T("automations.ed.deleteWarn")},
+			{Kind: aeBlkPBHint, Text: i18n.T("automations.ed.deleteTerminal"), Tip: tipTopic("auto-delete-action")},
+		}
 	}
-	return card(fmt.Sprintf("%d. %s", i+1, aeTypeLabel(a.Type)), trailing, b.String())
+	return out
 }
 
 // aeLoudnessHTML renders the shared loudness block (components.go loudnessFields) as a per-action
@@ -622,31 +648,34 @@ func aeResolvePreset(id string, presets []transcode.Preset, dflt string) *transc
 	return nil
 }
 
-// aeOutDirHTML renders an output-folder field + Browse. ph "" = the folder is required.
-func aeOutDirHTML(act, cur, ph string) string {
+// aeOutDirBlock resolves an output-folder field + Browse. ph "" = the folder is required.
+func aeOutDirBlock(act, cur, ph string) aeBlockSt {
 	label := i18n.T("automations.ed.outputDir")
 	if ph != "" {
 		label = i18n.T("automations.ed.outputDirOptional")
 	}
-	return `<div class=lib-toolbar>` + fieldPH(label, act, cur, "text", ph) +
-		btn(i18n.T("common.browse"), "ghost", "pick-dir:"+act, "") + `</div>`
+	return aeBlockSt{Kind: aeBlkToolbar,
+		Field: newDlgField(label, act, cur, "text", ph, ""),
+		Btn:   uiBtn{Label: i18n.T("common.browse"), Variant: "ghost", Act: "pick-dir:" + act}}
 }
 
-// aePresetSelect renders the transcode-preset picker. The options closure is pure (it closes over
-// the already-resolved slice) - a smartSelect closure runs during render and must never do I/O.
-func aePresetSelect(key uint64, act, cur string, presets []transcode.Preset, dflt string) string {
-	id := fmt.Sprintf("auto-ed-preset-%d", key) // smartSelect ids must be single colon-free tokens
-	label := i18n.T("library.enc.preset")
+// aePresetSelectState registers + resolves the transcode-preset picker. The options closure is
+// pure (it closes over the already-resolved slice) - a smartSelect closure runs during render and
+// must never do I/O. selHTML over the resolved state emits exactly what smartSelect(id,label,…) did.
+func aePresetSelectState(key uint64, act, cur string, presets []transcode.Preset, dflt string) selState {
+	id := "auto-ed-preset-" + aeItoa(key) // smartSelect ids must be single colon-free tokens
 	if dflt != "" && cur == "" {
 		cur = dflt // trim-silence falls back to remux in the engine; show what will run
 	}
-	return smartSelect(id, label, act, cur, func() []ssOpt {
+	s := resolveSmartSelect(id, act, cur, func() []ssOpt {
 		out := make([]ssOpt, 0, len(presets))
 		for _, p := range presets {
 			out = append(out, ssOpt{Val: p.ID, Label: p.Label, Sub: p.Desc, Badge: strings.ToUpper(p.Container)})
 		}
 		return out
 	})
+	s.Label = i18n.T("library.enc.preset")
+	return s
 }
 
 // ── helpers ──

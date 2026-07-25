@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/zigui"
 )
@@ -288,6 +289,67 @@ func TestZigWsDialogsGolden(t *testing.T) {
 	for name, st := range wsDeviceFixtures() {
 		t.Run("device/"+name, func(t *testing.T) {
 			zigGolden(t, "wsDevice", st, wsDeviceHTMLOf(st), zigui.RenderWsDevice)
+		})
+	}
+}
+
+// ── Automations ▸ editor ──
+
+// aeModalFixtures resolves real editor states through the real state builder (tips, loudness
+// blocks and preset selects included) plus the adversarial text axes.
+func aeModalFixtures(t *testing.T) map[string]aeModalSt {
+	t.Helper()
+	u, _ := newTestHeadless(t)
+	mk := func(a automation.Automation) aeModalSt {
+		u.ae.mu.Lock()
+		defer u.ae.mu.Unlock()
+		u.ae.load(a)
+		return u.aeModalState(&u.ae)
+	}
+	all := mk(automation.Automation{
+		ID: "a1", Label: "Post-set pipeline", WatchDir: `D:\captures`, Enabled: true,
+		Match: automation.Match{Extensions: []string{".wav", ".flac"}, MinSizeBytes: 8 * 1024 * 1024,
+			FilenamePattern: `^set_.*`, MinAgeDays: 0},
+		Actions: []automation.Action{
+			{Type: automation.ActionRename, BufferMinutes: 120, Template: "{YYYY-MM-DD}_{eventSlug}{ext}"},
+			{Type: automation.ActionTrimSilence, ThresholdDb: -48.5, MinSilenceSeconds: 1.5, PresetID: "remux"},
+			{Type: automation.ActionTranscode, PresetID: "mp3-320", LoudnessOn: true, LoudnessI: -14, LoudnessTP: -1},
+			{Type: automation.ActionMove, OutputDir: `E:\archive`},
+			{Type: automation.ActionCopy, OutputDir: `E:\mirror`},
+			{Type: automation.ActionDelete},
+		},
+	})
+	minAge := mk(automation.Automation{Label: "Aged", Match: automation.Match{MinAgeDays: 3}})
+	invalid := mk(automation.Automation{Actions: []automation.Action{
+		{Type: automation.ActionDelete}, {Type: automation.ActionTranscode, PresetID: "remux"},
+	}})
+	esc := mk(automation.Automation{
+		ID: "a2", Label: `Set & "night" <x>'`, WatchDir: `D:\a&b\"c"`,
+		Match:   automation.Match{Extensions: []string{".w&v"}, FilenamePattern: `^a&"b"<c>'`},
+		Actions: []automation.Action{{Type: automation.ActionRename, Template: `{eventSlug} & "x" <y>'`}},
+	})
+	long := mk(automation.Automation{Label: strings.Repeat("long automation label ", 40),
+		WatchDir: strings.Repeat(`D:\deep\`, 60)})
+	uni := mk(automation.Automation{Label: "セット後 · Автоматизация 🎧", WatchDir: `D:\größer\запись`,
+		Actions: []automation.Action{{Type: automation.ActionCopy, OutputDir: `E:\コピー`}}})
+
+	withErr := all
+	withErr.HasErr, withErr.Err = true, `save failed: bad pattern & "x" <y>'`
+
+	return map[string]aeModalSt{
+		"empty": {}, "unavailable": mk(automation.Automation{Enabled: true}),
+		"populated": all, "minAgeWarn": minAge, "invalidChain": invalid, "errBanner": withErr,
+		"escaping": esc, "long": long, "unicode": uni,
+	}
+}
+
+func TestZigAutoEditorGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, st := range aeModalFixtures(t) {
+		t.Run(name, func(t *testing.T) {
+			zigGolden(t, "aeModal", st, aeModalHTMLOf(st), zigui.RenderAutoEditor)
 		})
 	}
 }
