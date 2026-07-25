@@ -9,6 +9,8 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+
+	"rave.page/mate/internal/zignative"
 )
 
 // Wave is a dense waveform strip: uint8 peak buckets (probe.peaks) rendered as
@@ -124,13 +126,25 @@ func (w *Wave) Layout(gtx layout.Context, th *Theme, reg *Registry, peaks []byte
 }
 
 // WaveColumns folds peak buckets into per-column maxima (column x covers buckets
-// [x·n/cols, (x+1)·n/cols)). cols ≤ 0 or empty peaks → nil.
+// [x·n/cols, (x+1)·n/cols)). cols ≤ 0 or empty peaks → nil. Zig kernel when linked
+// (-tags zigdsp; byte-exact, parity-tested), else the Go loop stays authoritative.
 func WaveColumns(peaks []byte, cols int) []byte {
 	n := len(peaks)
 	if n == 0 || cols <= 0 {
 		return nil
 	}
 	out := make([]byte, cols)
+	if zignative.Available() {
+		zignative.WaveColumns(peaks, cols, out)
+		return out
+	}
+	waveColumnsGo(peaks, out)
+	return out
+}
+
+// waveColumnsGo is the pure-Go fold (authoritative; parity reference).
+func waveColumnsGo(peaks []byte, out []byte) {
+	n, cols := len(peaks), len(out)
 	for x := 0; x < cols; x++ {
 		b0, b1 := x*n/cols, (x+1)*n/cols
 		if b1 <= b0 {
@@ -147,7 +161,6 @@ func WaveColumns(peaks []byte, cols int) []byte {
 		}
 		out[x] = peak
 	}
-	return out
 }
 
 // clampFrac clamps to [0,1].

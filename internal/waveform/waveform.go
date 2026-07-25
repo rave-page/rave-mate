@@ -224,7 +224,7 @@ func decode(path string) (*Peaks, error) {
 	}
 	durSec := float64(samples) / decodeRate
 	n := min(max(int(durSec*bucketsPerSec), minBuckets), maxBuckets)
-	return &Peaks{Data: bucketPeaks(pcm, n), DurationMs: uint32(durSec * 1000)}, nil
+	return &Peaks{Data: peaksBuckets(pcm, n), DurationMs: uint32(durSec * 1000)}, nil
 }
 
 // bucketPeaks folds little-endian s16 PCM into n uint8 max-abs buckets (mirrors worker.bucketPeaks).

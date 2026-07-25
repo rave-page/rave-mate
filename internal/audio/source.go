@@ -231,7 +231,11 @@ func (s *source) readRAM(frames int) int {
 // applying the pre-gain (clamped ±1 - the loudness plan keeps true peaks under the
 // ceiling, the clamp is belt-and-braces for out-of-plan boosts).
 func (s *source) writeBytes(p []byte, samples []float32) {
-	g := float32(s.gain)
+	f32ToLEBytes(p, samples, float32(s.gain))
+}
+
+// f32ToLEBytesGo is the pure-Go path (authoritative; parity-tested vs the Zig kernel).
+func f32ToLEBytesGo(p []byte, samples []float32, g float32) {
 	if g == 0 || g == 1 {
 		for i, v := range samples {
 			binary.LittleEndian.PutUint32(p[i*4:], math.Float32bits(v))
@@ -320,6 +324,12 @@ func toDeviceStereo(in []float32, ch int) []float32 {
 	}
 	frames := len(in) / ch
 	out := make([]float32, frames*deviceChannels)
+	foldStereo(in, frames, ch, out)
+	return out
+}
+
+// foldStereoGo is the pure-Go fold (authoritative; parity-tested vs the Zig kernel).
+func foldStereoGo(in []float32, frames, ch int, out []float32) {
 	for i := 0; i < frames; i++ {
 		if ch == 1 {
 			v := in[i]
@@ -328,5 +338,4 @@ func toDeviceStereo(in []float32, ch int) []float32 {
 			out[i*2], out[i*2+1] = in[i*ch], in[i*ch+1]
 		}
 	}
-	return out
 }
