@@ -93,8 +93,9 @@ From `rave-mate/`:
 | Supply-chain soak gate | `bash scripts/check-release-age.sh` |
 | Vuln scan | `govulncheck ./...` |
 | Package (Fyne, win) | `fyne package -os windows --release` |
-| Build Zig native core (zig >= 0.16) | `make zig` → `native/zigcore/zig-out/lib/libravezig.a` |
+| Build Zig native libs (zig >= 0.16) | `make zig` → `native/zigcore/.../libravezig.a` + `native/zigvr/.../libravevr.a` |
 | Build with Zig DSP linked | `make build-zig` (adds tag `zigdsp`) |
+| Build with both Zig libs linked | `make build-zig-all` (tags `zigdsp zigvr`; zigvr = VR-overlay raster) |
 
 "Tests pass" = `go build ./... && go vet ./... && go test ./...` clean.
 
@@ -210,8 +211,13 @@ internal/
   zignative/  cgo binding to the Zig native core (tag `zigdsp`, pure-Go stub untagged).
               Sinc resampler + waveform kernels; seams in audio/source.go + worker/probe.go.
               The Zig migration path: .devnotes/ZIG_MIGRATION.md + ZIG_UI_GUIDE.md.
+  zigvr/      cgo binding to the ravevr VR-overlay raster lib (tag `zigvr`, stub untagged).
+              Display-list executor for vroverlay's hot renders (Panel/Menu/Stats);
+              pixel-identical to the Go raster. See .devnotes/ZIG_VR_OVERLAY.md.
 native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `make zig`.
               Ported kernels stay byte-exact vs the Go originals (parity tests).
+native/zigvr/ Zig VR-overlay raster executor (`rz_vr_*`, include/ravevr.h). Built by
+              `make zig`. Blend math replicates Go image/draw exactly (parity-tested).
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.
 tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-mate .syso
               (area-average resize → 7 PNG-in-ICO sizes → COFF .rsrc). No external dep.

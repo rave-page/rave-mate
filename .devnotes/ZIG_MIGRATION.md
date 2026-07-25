@@ -29,6 +29,9 @@ step keeps the shipped app green; pure-Go fallback stays until a port soaks.
 
 ## Phases
 
+- **VR overlay raster DONE (feature/zig-vroverlay):** vroverlay's hot renders
+  (Panel/Menu/Stats) execute as a Zig display list (`native/zigvr`, tag `zigvr`),
+  pixel-identical (glyph masks stay Go-rasterized), 3.1-3.6x faster. ZIG_VR_OVERLAY.md.
 - **P0 DONE (a35d23c):** toolchain, zigcore scaffold, polyphase Kaiser-sinc resampler
   (playback quality item closed: >70dB SNR vs ~35dB linear, zero added latency),
   bucketPeaks/bucketBands byte-exact kernels, seams in audio/source.go + worker/probe.go.
