@@ -26,8 +26,9 @@ type Supervisor struct {
 	exePath     string
 	idleTimeout time.Duration
 
-	mu    sync.Mutex
-	pools map[string]*pool
+	mu       sync.Mutex
+	pools    map[string]*pool
+	external map[string]string // type → external worker exe (same stdio protocol); "" = builtin
 }
 
 // New builds a supervisor. exePath is this executable (re-invoked as `<exe> worker <type>`).
@@ -41,7 +42,30 @@ func New(log *logbus.Bus) (*Supervisor, error) {
 		exePath:     exe,
 		idleTimeout: 60 * time.Second,
 		pools:       map[string]*pool{},
+		external:    map[string]string{},
 	}, nil
+}
+
+// SetExternal routes a worker type to an external executable implementing the same
+// newline-JSON stdio protocol (ZIG_MIGRATION P4, e.g. the Zig rave-probe). Same sysexec
+// treatment as builtin workers (Hide/Named/LowPriority/job object/KillTree). Empty path
+// restores the builtin `<exe> worker <type>` child. Applies to workers spawned after
+// the call; running ones are idle-reaped naturally.
+func (s *Supervisor) SetExternal(typ, exePath string) {
+	s.mu.Lock()
+	if exePath == "" {
+		delete(s.external, typ)
+	} else {
+		s.external[typ] = exePath
+	}
+	s.mu.Unlock()
+}
+
+// externalFor returns the external exe for a type ("" = builtin).
+func (s *Supervisor) externalFor(typ string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.external[typ]
 }
 
 // pool holds idle worker processes for one type, capped at maxProcs.
@@ -307,7 +331,11 @@ func (p *pool) acquireSpawn() (*proc, error) {
 }
 
 func (p *pool) spawn() (*proc, error) {
-	cmd := exec.Command(p.sup.exePath, "worker", p.typ)
+	exe, args, backend := p.sup.exePath, []string{"worker", p.typ}, "go"
+	if ext := p.sup.externalFor(p.typ); ext != "" {
+		exe, args, backend = ext, nil, "external" // one-type exe, same stdio protocol
+	}
+	cmd := exec.Command(exe, args...)
 	sysexec.Hide(cmd)                   // no console window for the spawned worker (Windows GUI subsystem)
 	sysexec.Named(cmd, "worker-"+p.typ) // distinct image name in task managers / ps
 	if p.background {
@@ -333,7 +361,7 @@ func (p *pool) spawn() (*proc, error) {
 	p.mu.Lock()
 	p.all[w] = struct{}{}
 	p.mu.Unlock()
-	p.sup.log.Debug(source, "spawned worker", map[string]any{"type": p.typ, "background": p.background, "pid": cmd.Process.Pid})
+	p.sup.log.Debug(source, "spawned worker", map[string]any{"type": p.typ, "backend": backend, "background": p.background, "pid": cmd.Process.Pid})
 	return w, nil
 }
 

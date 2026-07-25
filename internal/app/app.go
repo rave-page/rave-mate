@@ -258,8 +258,20 @@ func run(parent context.Context, serviceMode bool) error {
 	workers, werr := worker.New(log)
 	if werr != nil {
 		log.Warn("app", "worker supervisor unavailable", map[string]any{"error": werr.Error()})
-	} else if cfg.Features.Transcode.Enabled {
-		workers.Configure("transcode", cfg.Features.Transcode.MaxConcurrent)
+	} else {
+		if cfg.Features.Transcode.Enabled {
+			workers.Configure("transcode", cfg.Features.Transcode.MaxConcurrent)
+		}
+		// Opt-in external probe worker (Zig rave-probe, ZIG_MIGRATION P4). Missing exe →
+		// keep the builtin so a stale config can't break analysis.
+		if exe := cfg.Features.Workers.ProbeExe; exe != "" {
+			if _, serr := os.Stat(exe); serr != nil {
+				log.Warn("app", "probe worker exe missing - using builtin", map[string]any{"exe": exe, "error": serr.Error()})
+			} else {
+				workers.SetExternal("probe", exe)
+				log.Info("app", "probe worker: external exe", map[string]any{"exe": exe})
+			}
+		}
 	}
 
 	// Per-interface monitor buses: live ring buffers the Logs-area monitor tabs subscribe to.
