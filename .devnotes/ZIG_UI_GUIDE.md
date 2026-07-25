@@ -1033,6 +1033,87 @@ to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. 
 are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
 kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
 Go formats every number).
+
+**Four kinds the pilots did not need** (wave B-2, `schema.go` helpers `sa` / `op` / `ov` / `sl`;
+all four are append-only additions to the codec, the wiretype set is unchanged):
+
+| kind | Go ↔ Zig | why it exists |
+|---|---|---|
+| `kStrAlways` (`sa`) | `string` ↔ `[]const u8` with a **non-zero default** | absent means "the Zig default", and `fill: []const u8 = "0.00%"` / `stepS = "1"` are not "". The JSON path always sends the field, so v2 must too: `WireWriter.StrAlways` emits the tag with off 0 / len 0. Without it the two paths diverge on exactly the states where the field is empty. |
+| `kOptPtr` (`op`) | `*T` ↔ `?T` | tag present iff the pointer is non-nil (motion's inactive section is `nil`). |
+| `kOptVal` (`ov`) | `T` ↔ `?T` | tag **always** present: JSON always sends the object, so `null` must be unreachable. `Struct` drops an all-zero message (absent = zero value, which is correct for a value field but would decode as `null` here), so both opt kinds use `OptStruct`, which keeps the tag. |
+| `kStrList` (`sl`) | `[]string` ↔ `[]const []const u8` | encoded as a list of single-field element bodies (field 1 = the string), so `Reader.strList` reuses the list bounds discipline verbatim and `skip()` stays closed over four wiretypes. |
+
+The rule behind all of them: **a Zig field default that is not the zero value is a v1/v2
+divergence waiting to happen.** `sa` is the fix; the scan is mechanical (any non-omitempty Go
+field whose Zig counterpart has a non-empty default). Proven by execution: flipping live's
+`Fill` back from `sa` to `s` makes `TestWireStrAlwaysKeepsEmptyFill` fail with the Zig default
+(`width:0.00%`) rendered where Go renders `width:`. Note that the six live golden fixtures all
+carry a non-empty `Fill`, so the whole-fixture gate does NOT catch it - a hazard needs its own
+fixture, not a bigger suite.
+
+**Fanned-out views (wave B-2).** `_v2` exports live in the `phaseb-wire` block of root.zig; the
+fragment exports keep their JSON twin's `kind` selector, and every fragment is its own root
+message so the header id still refuses a document built for a different fragment
+(`TestZigWireLiveFragIdsAreDistinct`). Each tab registers its exports + fuzz base documents in
+`internal/webui/zigui_wire_b2_test.go` (one block per tab; the fuzz cross-feeds every mutated
+document to every export, so the matrix grows on its own).
+
+| view | root ids | exports | fixtures gated |
+|---|---|---|---|
+| appgroups (pilot) | 1 | full + `#appgroups-body` | 6 |
+| logs (pilot) | 2, 3 | full + `#log-view` | 6 |
+| live | 10-20 | full + 10 tick fragments (`live_frag_v2`) | 6 × 12 surfaces |
+| motion | 21 | full + `#mo-body` (one message, like appgroups) | 7 × 2 surfaces |
+| publish | 22, 23 | full + `#pub-hero` | 13 × 2 surfaces (12 heroes) |
+| settings | 24-26 | full + `#set-content` + `#stset-<id>` | 18 × 2 surfaces + 6 status states |
+| library | 27-31 | full + `#lib-body` + `#lib-detail` + `#lib-queue-body` + cue cell | 21 × 3 surfaces + 3 queue + 4 cell |
+| player | 32-40 | full + the nine `#mp-*` patch targets | 178 surfaces over the fixture set |
+| automations | 41, 42 | full + `#auto-body` | 6 × 2 surfaces |
+| peers | 43, 44 | full + `#peers-body` | 7 × 2 surfaces |
+
+**Fan-out state after wave B-2:** 174 messages, root ids 1-3 (pilots) + 10-44 (this wave), 31
+exported `_v2` symbols over 40 render surfaces (live's ten fragments share one kind-dispatched
+export), 288 135 fuzz cases. Ids 45-49 are free inside wire2's partition; 100-149 belong to
+the fragment scheduler. Documents run **26-78%** of the JSON they replace (peers best, player
+worst - see PHASEB_BASELINE.md for why one 29 kB SVG sets that floor), and the whole dispatch is
+**27-69% faster** on every view.
+
+**Merge composition with tip2 (B-1b shard 2).** tip2 added `*tipSt` / `*ssLabelSt` fields to eight
+states this block had already frozen (`liveState` ×4, `moCamSt`, `moStudioSt`, `setBlock`,
+`setKid`, `bridgeSt`, `libSelTip`, `loudSt`) plus the new shared `ssLabelSt` message. All are
+`kOptPtr` (nil = no tooltip) and were appended INSIDE the existing messages, so documents already
+in flight stay readable. **The merge produced ZERO textual conflicts and still broke the wire** -
+which is the whole point of the gate: settings, library and player failed immediately with
+`v1==v2: diverges at byte …"tt-mp-loudnes"…`.
+
+**live and motion did NOT fail, and that is the lesson.** Their fixture sets leave the new tooltip
+fields nil, so the tab gates stayed green while v2 silently dropped every tooltip - tip2's
+`DlgField` gotcha class exactly. The fix is a fixture, not more sweeps of the same states:
+`wireTipSweep` (the wire twin of `tip2Sweep`) drives each affected surface through all four tooltip
+variants × locales, three ways, with tip2's own inertness guards (the tooltip must change the
+bytes; the keybind grid must emit `tt-kb-keys`) plus the raw dual-field arm through v2. Verified by
+execution: deleting LiveState's four rows makes `TestZigWireTip2Live` fail while
+`TestZigWireThreeWayLive` still passes.
+
+**Keeping the schema honest is mechanical.** The composition was derived by an audit that re-reads
+every schema row against the current Go+Zig structs and prints the missing fields with their next
+free numbers (11 fields across 8 messages; it also confirmed tip2 changed no `Tip`/`TipKb`/`TipLink`
+shape). Re-run it after every merge that touches state structs - "the golden gate will catch it" is
+true, but only for states a fixture exercises.
+
+**FallbackCounts assertions are per-export.** `zigui.FallbackCounts()` is process-wide and other
+suites drive their own headless UIs concurrently, so a global "no new fallbacks" assertion is
+load-dependent (it once failed the logs gate on a stray `RenderLibRemote +1`). Each gate now names
+the exports it drives (`assertNoNewFallbacksIn`) and the player's exact-delta variant filters by
+prefix; `TestWireFallbackAssertionIsNotVacuous` pins that the narrowed check still catches a
+downgrade on a key it names, because a typo'd name would otherwise make every caller green.
+
+**Adding a field to a migrated state is now a two-sided edit.** A Go state field with a JSON tag
+and its Zig counterpart are only connected through `schema.go`; add the field without a schema row
+and v2 silently stops carrying it - the three-way gate turns that into a byte-diff failure, which
+is exactly why the gate covers every fixture rather than a sample. Same for a Zig-side struct
+change (a renamed field, a new non-zero default): regenerate and re-read the HAZARD rule above.
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

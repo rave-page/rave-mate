@@ -104,6 +104,7 @@ func TestZigWireMutationFuzz(t *testing.T) {
 		{"logs_v2", zigui.RenderLogsV2},
 		{"logs_lines_v2", zigui.RenderLogsLinesV2},
 	}
+	exports = append(exports, wireExportsB2()...)
 
 	// Bases: every fixture from both golden suites, plus their fragment states.
 	type base struct {
@@ -117,6 +118,9 @@ func TestZigWireMutationFuzz(t *testing.T) {
 	for n, st := range logsFixtures() {
 		bases = append(bases, base{"logs/" + n, wireLogsState(st)})
 		bases = append(bases, base{"lines/" + n, wireLogsLines(st.Lines)})
+	}
+	for _, b := range wireBasesB2() {
+		bases = append(bases, base(b))
 	}
 	for _, b := range bases {
 		if len(b.doc) == 0 {

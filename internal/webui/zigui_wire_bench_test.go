@@ -91,6 +91,217 @@ func BenchmarkWireBenchLogsLines(b *testing.B) {
 		func() (string, bool) { return zigui.RenderLogsLinesV2(wireLogsLines(st)) })
 }
 
+// ── B-2 fan-out: one full-view pair + two representative fragment pairs per tab (the
+// fragments are the ~1 Hz path; a full tab render is rare). Fixtures are the golden
+// `populated` states, so these numbers sit next to the B0 baseline table.
+
+func BenchmarkWireBenchLive(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLive(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveV2(wireLiveState(st)) })
+}
+
+func BenchmarkWireBenchLiveTransport(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"].Transport
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLiveFrag("transport", stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveFragV2("transport", wireLiveTransport(st)) })
+}
+
+func BenchmarkWireBenchLivePerf(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := liveFixtures()["populated"].Perf
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLiveFrag("perf", stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLiveFragV2("perf", wireLivePerf(st)) })
+}
+
+func BenchmarkWireBenchMotion(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := moFixtures()["studio"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMotion(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMotionV2(wireMoState(st)) })
+}
+
+func BenchmarkWireBenchMotionBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := moFixtures()["studio"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMotionBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMotionBodyV2(wireMoState(st)) })
+}
+
+func BenchmarkWireBenchPublish(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := pubFixtures()["tracklist"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPublish(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPublishV2(wirePub(st)) })
+}
+
+func BenchmarkWireBenchPublishHero(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := pubFixtures()["tracklist"].Body.Hero
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPublishHero(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPublishHeroV2(wirePubHero(st)) })
+}
+
+func BenchmarkWireBenchSettings(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	f := setFixtures()["libmedia"] // the widest card set in the suite
+	f.u.setMu.Lock()
+	f.u.setSec, f.u.setQuery = f.sec, f.q
+	f.u.setMu.Unlock()
+	st := f.u.settingsState()
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderSettings(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderSettingsV2(wireSetState(st)) })
+}
+
+func BenchmarkWireBenchSettingsStatus(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := setStatusSt{V: "ok", T: "https://development.api.rave.page"}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderSettingsStatus(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderSettingsStatusV2(wireSetStatus(st)) })
+}
+
+func BenchmarkWireBenchLibrary(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibrary(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryV2(wireLibState(st)) })
+}
+
+func BenchmarkWireBenchLibraryBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libFixtures()["populated"].Body
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibraryBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryBodyV2(wireLibBody(st)) })
+}
+
+func BenchmarkWireBenchLibraryCueCell(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := libCueCellSt{Drops: 2, DropsTitle: "2 drops", Cues: 4, CuesTitle: "4 cues"}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderLibraryCueCell(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderLibraryCueCellV2(wireLibCueCell(st)) })
+}
+
+func BenchmarkWireBenchPlayer(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["singleEdit"]
+	*u.mp(fx.host) = fx
+	inner := u.mpInnerState(u.mpSnap(fx.host))
+	full := mpFullSt{Host: fx.host, Inner: inner}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayer(stateJSON(full)) },
+		func() (string, bool) { return zigui.RenderPlayerV2(wireMpFull(full)) })
+}
+
+func BenchmarkWireBenchPlayerTp(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["singleEdit"]
+	*u.mp(fx.host) = fx
+	st := u.mpInnerState(u.mpSnap(fx.host)).Tp
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayerTp(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPlayerTpV2(wireMpTp(st)) })
+}
+
+func BenchmarkWireBenchPlayerExport(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["dualExport"]
+	*u.mp(fx.host) = fx
+	st := u.mpInnerState(u.mpSnap(fx.host)).EditBox.Export
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayerExport(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPlayerExportV2(wireMpExport(st)) })
+}
+
+func BenchmarkWireBenchAutomations(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := autoFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderAutomations(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderAutomationsV2(wireAutoState(st)) })
+}
+
+func BenchmarkWireBenchAutomationsBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := autoFixtures()["populated"].Body
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderAutomationsBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderAutomationsBodyV2(wireAutoBodyState(st)) })
+}
+
+func BenchmarkWireBenchPeers(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := peersFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPeers(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPeersV2(wirePeers(st)) })
+}
+
+func BenchmarkWireBenchPeersBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := peersFixtures()["populated"].Body
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPeersBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPeersBodyV2(wirePeersBody(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

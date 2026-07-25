@@ -190,7 +190,8 @@ func (u *UI) moState() moState {
 func (u *UI) renderMotion() string {
 	st := u.moState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderMotion(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMotionV2", wireMoState(st), zigui.RenderMotionV2,
+			zigui.RenderMotion, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -201,7 +202,8 @@ func (u *UI) renderMotion() string {
 func (u *UI) moBody() string {
 	st := u.moState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderMotionBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMotionBodyV2", wireMoState(st), zigui.RenderMotionBodyV2,
+			zigui.RenderMotionBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

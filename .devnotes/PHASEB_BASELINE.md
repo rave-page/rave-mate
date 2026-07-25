@@ -147,6 +147,69 @@ fallbacks none
 - Read it WITH `FallbackCounts()` (same section): a fallback on a whole-view renderer means the
   Zig number is measuring fewer renders than you think.
 
+## Wave B-2: v1 (JSON) vs v2 (RZW1 binary) per view
+
+Same box + method as above (**min of 6** = three runs × `-count=2`, `-benchtime 500ms`), commit
+`feature/zig-phaseb-wire2`. Each number is the WHOLE dispatch a tick pays: state serialization +
+the Zig render (parse + render + copy). Fixture = the golden `populated` state; fragment rows use
+that fixture's sub-state.
+
+```sh
+GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$' -bench WireBench -benchtime 500ms
+```
+
+| view | v1 json ns/op | v2 wire ns/op | Δ | doc B vs json B (golden set) |
+|---|--:|--:|--:|---|
+| live (full cockpit) | 33 786 | 16 190 | **-52%** | 24 789 / 67 456 = 36.7% |
+| live `#live-transport` frag | 3 790 | 2 896 | -24% | (in the set above) |
+| live `#live-perf2` frag | 3 624 | 1 885 | **-48%** | (in the set above) |
+| motion (full tab) | 21 674 | 11 472 | **-47%** | 15 091 / 24 586 = 61.4% |
+| motion `#mo-body` frag | 24 243 | 12 774 | **-47%** | (same document) |
+| publish (full tab) | 24 701 | 12 507 | **-49%** | 20 223 / 48 766 = 41.5% |
+| publish `#pub-hero` frag | 5 938 | 4 400 | -26% | (in the set above) |
+| settings (full tab, `libmedia`) | 64 953 | 32 651 | **-50%** | 139 005 / 203 734 = 68.2% |
+| settings `#stset-<id>` frag | 901 | 913 | ~0% | (~60 B of state; see the allocation note) |
+| library (full tab) | 124 435 | 38 668 | **-69%** | 72 850 / 209 353 = 34.8% |
+| library `#lib-body` frag | 121 232 | 39 131 | **-68%** | (in the set above) |
+| library cue-census cell | 1 183 | 838 | **-29%** | (~90 B of state) |
+| player (full, `singleEdit`) | 123 343 | 41 513 | **-66%** | 1 610 114 / 2 061 725 = 78.1% |
+| player `#mp-tp` transport frag | 9 448 | 3 450 | **-63%** | (in the set above) |
+| player `#mp-export` frag | 68 609 | 20 080 | **-71%** | (in the set above) |
+| automations (full tab) | 17 857 | 12 399 | **-31%** | 8 156 / 19 655 = 41.5% |
+| automations `#auto-body` frag | 17 832 | 12 945 | **-27%** | (in the set above) |
+| peers (full tab) | 56 457 | 24 735 | **-56%** | 23 865 / 90 741 = 26.3% |
+| peers `#peers-body` frag | 55 429 | 26 266 | **-53%** | (same document set) |
+
+**Encoder allocation: the flat prealloc was a real regression, now fixed.** With
+`NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment
+(`#stset-<id>`, ~60 B of state) cost **1 569 ns vs the JSON path's 932** - v2 was 68% slower than
+what it replaces, because two 1 KiB buffers and a 2.5 kB map dwarf the work. A flat 256 B instead
+cost the Live cockpit 12 extra allocations (16.2 → 22.6 µs). Both buffers and the intern map are
+now sized from **what the previous document of the same message needed** (`wireSizeHints`, one
+atomic per root id, +25% headroom; capacity only - `TestWireSizeHintIsCapacityOnly` pins that the
+bytes are unchanged). Result:
+
+| bench | flat 1 KiB | adaptive | v1 json |
+|---|--:|--:|--:|
+| `#stset-<id>` status frag | 1 569 ns / 5 792 B / 9 allocs | **913 ns / 1 568 B / 9** | 901 ns / 232 B / 4 |
+| live full cockpit | 16 190 ns / 20 704 B / 11 | **16 109 ns / 24 032 B / 9** | 33 544 ns / 14 422 B / 4 |
+| `#log-view` 400-line tail | 158 297 ns (pilot) / 22 allocs | **144 525 ns / 109 152 B / 9** | 379 877 ns / 126 022 B / 4 |
+| logs-tail encode only | 44 020 ns (pilot) / 17 allocs | **41 668 ns / 7 allocs** | 98 356 ns (marshal) |
+
+v2 still allocates more BYTES than `json.Marshal` on tiny fragments (1 568 vs 232): two buffers
+plus the map floor. Time is at parity there and 2-2.6× better everywhere else, so the remaining
+gap is not worth a pool. Benchmark numbers are mildly order-dependent now (the first document of
+a message pays the cold hint) - min-of-N over full-suite runs absorbs it.
+
+**Player's 29 kB raw SVG, measured as promised.** The document ratio on player is the WORST of
+the fan-out (78.1% vs library's 34.8%): its state is dominated by one huge `mpWaveSVG` string, so
+the arena has nothing to intern and the only saving is JSON's escaping of that string. The TIME
+delta is still -66%, because the win was never the document size - it is removing the Zig-side
+`std.json` parse (B0 finding 2). Player also allocates the most (165 kB/op): the SVG is copied
+into the arena, then the finished document is copied again by `Finish`. A zero-copy "big string"
+wiretype (offset into the caller's buffer instead of the arena) would fix that class; it is not
+needed for correctness and nothing in the tick path renders the full player.
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -
