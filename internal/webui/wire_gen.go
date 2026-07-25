@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0xd570fe05
+	wireSchemaHash       uint32 = 0xf85a4c91
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -42,6 +42,8 @@ const (
 	wireMsgMpExport      uint16 = 38 // #mp-export
 	wireMsgMpRO          uint16 = 39 // #mp-ro read-only strip
 	wireMsgMpHov         uint16 = 40 // #mp-hov hover readout
+	wireMsgAutoState     uint16 = 41 // Automations tab (full view)
+	wireMsgAutoBodyState uint16 = 42 // #auto-body (version-gated ~1 Hz tick)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -1590,6 +1592,83 @@ func (v mpFullSt) encodeWire(w *zigui.WireWriter) {
 	w.Struct(2, func() { v.Inner.encodeWire(w) })
 }
 
+func (v autoLabels) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Enabled)
+	w.Str(2, v.EnabledDL)
+	w.Str(3, v.Run)
+	w.Str(4, v.SchAdd)
+	w.Str(5, v.Edit)
+	w.Str(6, v.Delete)
+}
+
+func (v autoCard) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ID)
+	w.Str(2, v.Label)
+	w.Str(3, v.WatchDir)
+	w.Str(4, v.Status)
+	w.Str(5, v.StatusVar)
+	w.Str(6, v.Chain)
+	w.Bool(7, v.Enabled)
+}
+
+func (v autoListState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.New)
+	w.Str(2, v.Empty)
+	w.List(3, len(v.Cards), func(i int) { v.Cards[i].encodeWire(w) })
+}
+
+func (v autoSchedCard) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ID)
+	w.Str(2, v.Label)
+	w.Str(3, v.Target)
+	w.Str(4, v.StateText)
+	w.Str(5, v.StateVar)
+	w.Str(6, v.Trigger)
+	w.Str(7, v.Gates)
+	w.Str(8, v.LastFired)
+	w.Str(9, v.WarnTone)
+	w.Str(10, v.WarnText)
+	w.Bool(11, v.Enabled)
+}
+
+func (v autoSchedsState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.New)
+	w.Bool(2, v.Gated)
+	w.Str(3, v.GateWhy)
+	w.Str(4, v.Empty)
+	w.List(5, len(v.Cards), func(i int) { v.Cards[i].encodeWire(w) })
+}
+
+func (v autoRunRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Trigger)
+	w.Str(3, v.Status)
+	w.Str(4, v.Variant)
+}
+
+func (v autoRunsState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Empty)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v autoBodyState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.ListTitle)
+	w.Str(2, v.SchedTitle)
+	w.Str(3, v.RunsTitle)
+	w.Struct(4, func() { v.Labels.encodeWire(w) })
+	w.Struct(5, func() { v.List.encodeWire(w) })
+	w.Struct(6, func() { v.Scheds.encodeWire(w) })
+	w.Struct(7, func() { v.Runs.encodeWire(w) })
+}
+
+func (v autoState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Bool(3, v.Available)
+	w.Str(4, v.Unavailable)
+	w.Struct(5, func() { v.Body.encodeWire(w) })
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -1824,6 +1903,20 @@ func wireMpRO(v mpROSt) []byte {
 // wireMpHov encodes mpHovSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireMpHov(v mpHovSt) []byte {
 	w := zigui.NewWireWriter(wireMsgMpHov, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireAutoState encodes autoState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireAutoState(v autoState) []byte {
+	w := zigui.NewWireWriter(wireMsgAutoState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireAutoBodyState encodes autoBodyState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireAutoBodyState(v autoBodyState) []byte {
+	w := zigui.NewWireWriter(wireMsgAutoBodyState, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

@@ -934,6 +934,17 @@ export fn rz_ui_render_player_hov_v2(state: ?[*]const u8, len: usize, out_len: *
     return renderWire(player.Hov, wire_gen.decodeMpHov, player.renderHov, wire_gen.msg_mp_hov, state, len, out_len);
 }
 
+// ── B-2 fan-out: automations ──
+// #auto-body is version-gated (~1 Hz, only re-rendered when the automation store changes).
+
+export fn rz_ui_render_automations_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(automations.State, wire_gen.decodeAutoState, automations.render, wire_gen.msg_auto_state, state, len, out_len);
+}
+
+export fn rz_ui_render_automations_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(automations.Body, wire_gen.decodeAutoBodyState, automations.renderBody, wire_gen.msg_auto_body_state, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

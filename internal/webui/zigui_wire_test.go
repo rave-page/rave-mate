@@ -635,6 +635,50 @@ func TestZigWireThreeWayPlayer(t *testing.T) {
 	assertFallbackDelta(t, before, 2*empties)
 }
 
+// TestZigWireThreeWayAutomations: full tab + the version-gated #auto-body tick fragment.
+func TestZigWireThreeWayAutomations(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := autoFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireAutoState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderAutomations(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderAutomationsV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", automationsHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			b1, ok := zigui.RenderAutomationsBody(stateJSON(st.Body))
+			if !ok {
+				t.Fatal("v1 body render failed")
+			}
+			b2, ok := zigui.RenderAutomationsBodyV2(wireAutoBodyState(st.Body))
+			if !ok {
+				t.Fatal("v2 body render failed")
+			}
+			assertBytesEqual(t, "body go==v1", autoBodyHTML(st.Body), b1)
+			assertBytesEqual(t, "body v1==v2", b1, b2)
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacks(t, before)
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).

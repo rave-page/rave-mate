@@ -175,6 +175,8 @@ GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$
 | player (full, `singleEdit`) | 123 343 | 41 513 | **-66%** | 1 610 114 / 2 061 725 = 78.1% |
 | player `#mp-tp` transport frag | 9 448 | 3 450 | **-63%** | (in the set above) |
 | player `#mp-export` frag | 68 609 | 20 080 | **-71%** | (in the set above) |
+| automations (full tab) | 17 857 | 12 399 | **-31%** | 8 156 / 19 655 = 41.5% |
+| automations `#auto-body` frag | 17 832 | 12 945 | **-27%** | (in the set above) |
 
 **Encoder allocation: the flat prealloc was a real regression, now fixed.** With
 `NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment

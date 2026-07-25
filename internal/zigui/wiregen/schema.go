@@ -737,6 +737,45 @@ var schema = []msg{
 		doc: "Player (full view; the 29 kB raw waveform SVG lives here)",
 		fs:  []field{s(1, "Host", "host"), st(2, "Inner", "inner", "MpInner")},
 	},
+	// automations: full tab + the version-gated #auto-body tick fragment.
+	{
+		name: "AutoLabels", goT: "autoLabels", zigT: "automations.Labels",
+		fs: []field{s(1, "Enabled", "enabled"), s(2, "EnabledDL", "enabledDl"), s(3, "Run", "run"), s(4, "SchAdd", "schAdd"), s(5, "Edit", "edit"), s(6, "Delete", "delete")},
+	},
+	{
+		name: "AutoCard", goT: "autoCard", zigT: "automations.Card",
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "WatchDir", "watchDir"), s(4, "Status", "status"), s(5, "StatusVar", "statusVar"), s(6, "Chain", "chain"), b(7, "Enabled", "enabled")},
+	},
+	{
+		name: "AutoListState", goT: "autoListState", zigT: "automations.ListState",
+		fs: []field{s(1, "New", "new"), s(2, "Empty", "empty"), li(3, "Cards", "cards", "AutoCard")},
+	},
+	{
+		name: "AutoSchedCard", goT: "autoSchedCard", zigT: "automations.SchedCard",
+		fs: []field{s(1, "ID", "id"), s(2, "Label", "label"), s(3, "Target", "target"), s(4, "StateText", "stateText"), s(5, "StateVar", "stateVar"), s(6, "Trigger", "trigger"), s(7, "Gates", "gates"), s(8, "LastFired", "lastFired"), s(9, "WarnTone", "warnTone"), s(10, "WarnText", "warnText"), b(11, "Enabled", "enabled")},
+	},
+	{
+		name: "AutoSchedsState", goT: "autoSchedsState", zigT: "automations.SchedsState",
+		fs: []field{s(1, "New", "new"), b(2, "Gated", "gated"), s(3, "GateWhy", "gateWhy"), s(4, "Empty", "empty"), li(5, "Cards", "cards", "AutoSchedCard")},
+	},
+	{
+		name: "AutoRunRow", goT: "autoRunRow", zigT: "automations.RunRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Trigger", "trigger"), s(3, "Status", "status"), s(4, "Variant", "variant")},
+	},
+	{
+		name: "AutoRunsState", goT: "autoRunsState", zigT: "automations.RunsState",
+		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "AutoRunRow")},
+	},
+	{
+		name: "AutoBodyState", goT: "autoBodyState", zigT: "automations.Body", id: 42,
+		doc: "#auto-body (version-gated ~1 Hz tick)",
+		fs:  []field{s(1, "ListTitle", "listTitle"), s(2, "SchedTitle", "schedTitle"), s(3, "RunsTitle", "runsTitle"), st(4, "Labels", "labels", "AutoLabels"), st(5, "List", "list", "AutoListState"), st(6, "Scheds", "scheds", "AutoSchedsState"), st(7, "Runs", "runs", "AutoRunsState")},
+	},
+	{
+		name: "AutoState", goT: "autoState", zigT: "automations.State", id: 41,
+		doc: "Automations tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), st(5, "Body", "body", "AutoBodyState")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -744,6 +783,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"automations", "automations.zig"},
 	{"player", "player.zig"},
 	{"f", "libfixers.zig"},
 	{"d", "library_detail.zig"},

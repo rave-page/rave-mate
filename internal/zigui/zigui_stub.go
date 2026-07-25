@@ -220,4 +220,7 @@ func RenderPlayerExportV2(state []byte) (string, bool) { return "", false }
 func RenderPlayerROV2(state []byte) (string, bool)     { return "", false }
 func RenderPlayerHovV2(state []byte) (string, bool)    { return "", false }
 
+func RenderAutomationsV2(state []byte) (string, bool)     { return "", false }
+func RenderAutomationsBodyV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---

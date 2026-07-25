@@ -255,7 +255,8 @@ func autoRunsStateOf(runs []automation.Run) autoRunsState {
 func (u *UI) renderAutomations() string {
 	st := u.automationsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAutomations(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAutomationsV2", wireAutoState(st), zigui.RenderAutomationsV2,
+			zigui.RenderAutomations, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -266,7 +267,8 @@ func (u *UI) renderAutomations() string {
 func (u *UI) autoBody() string {
 	st := u.autoBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderAutomationsBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAutomationsBodyV2", wireAutoBodyState(st), zigui.RenderAutomationsBodyV2,
+			zigui.RenderAutomationsBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

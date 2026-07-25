@@ -9,6 +9,7 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const automations = @import("automations.zig");
 const player = @import("player.zig");
 const f = @import("libfixers.zig");
 const d = @import("library_detail.zig");
@@ -21,7 +22,7 @@ const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0xd570fe05;
+pub const schema_hash: u32 = 0xf85a4c91;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -56,6 +57,8 @@ pub const msg_mp_edit: u16 = 37; // #mp-edit
 pub const msg_mp_export: u16 = 38; // #mp-export
 pub const msg_mp_r_o: u16 = 39; // #mp-ro read-only strip
 pub const msg_mp_hov: u16 = 40; // #mp-hov hover readout
+pub const msg_auto_state: u16 = 41; // Automations tab (full view)
+pub const msg_auto_body_state: u16 = 42; // #auto-body (version-gated ~1 Hz tick)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -2000,6 +2003,110 @@ pub fn decodeMpFull(r: *wire.Reader, out: *player.State) wire.Error!void {
     };
 }
 
+pub fn decodeAutoLabels(r: *wire.Reader, out: *automations.Labels) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.enabled = try r.str(t),
+        2 => out.enabledDl = try r.str(t),
+        3 => out.run = try r.str(t),
+        4 => out.schAdd = try r.str(t),
+        5 => out.edit = try r.str(t),
+        6 => out.delete = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoCard(r: *wire.Reader, out: *automations.Card) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.watchDir = try r.str(t),
+        4 => out.status = try r.str(t),
+        5 => out.statusVar = try r.str(t),
+        6 => out.chain = try r.str(t),
+        7 => out.enabled = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoListState(r: *wire.Reader, out: *automations.ListState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.new = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.cards = try r.list(automations.Card, decodeAutoCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoSchedCard(r: *wire.Reader, out: *automations.SchedCard) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.target = try r.str(t),
+        4 => out.stateText = try r.str(t),
+        5 => out.stateVar = try r.str(t),
+        6 => out.trigger = try r.str(t),
+        7 => out.gates = try r.str(t),
+        8 => out.lastFired = try r.str(t),
+        9 => out.warnTone = try r.str(t),
+        10 => out.warnText = try r.str(t),
+        11 => out.enabled = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoSchedsState(r: *wire.Reader, out: *automations.SchedsState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.new = try r.str(t),
+        2 => out.gated = try r.boolean(t),
+        3 => out.gateWhy = try r.str(t),
+        4 => out.empty = try r.str(t),
+        5 => out.cards = try r.list(automations.SchedCard, decodeAutoSchedCard, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoRunRow(r: *wire.Reader, out: *automations.RunRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.trigger = try r.str(t),
+        3 => out.status = try r.str(t),
+        4 => out.variant = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoRunsState(r: *wire.Reader, out: *automations.RunsState) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.empty = try r.str(t),
+        2 => out.rows = try r.list(automations.RunRow, decodeAutoRunRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoBodyState(r: *wire.Reader, out: *automations.Body) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.listTitle = try r.str(t),
+        2 => out.schedTitle = try r.str(t),
+        3 => out.runsTitle = try r.str(t),
+        4 => out.labels = try r.sub(automations.Labels, decodeAutoLabels, t),
+        5 => out.list = try r.sub(automations.ListState, decodeAutoListState, t),
+        6 => out.scheds = try r.sub(automations.SchedsState, decodeAutoSchedsState, t),
+        7 => out.runs = try r.sub(automations.RunsState, decodeAutoRunsState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeAutoState(r: *wire.Reader, out: *automations.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.available = try r.boolean(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.body = try r.sub(automations.Body, decodeAutoBodyState, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -2034,6 +2141,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_mp_export);
     try std.testing.expect(msg_ag_state != msg_mp_r_o);
     try std.testing.expect(msg_ag_state != msg_mp_hov);
+    try std.testing.expect(msg_ag_state != msg_auto_state);
+    try std.testing.expect(msg_ag_state != msg_auto_body_state);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -2066,6 +2175,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_mp_export);
     try std.testing.expect(msg_logs_state != msg_mp_r_o);
     try std.testing.expect(msg_logs_state != msg_mp_hov);
+    try std.testing.expect(msg_logs_state != msg_auto_state);
+    try std.testing.expect(msg_logs_state != msg_auto_body_state);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -2097,6 +2208,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_mp_export);
     try std.testing.expect(msg_logs_lines != msg_mp_r_o);
     try std.testing.expect(msg_logs_lines != msg_mp_hov);
+    try std.testing.expect(msg_logs_lines != msg_auto_state);
+    try std.testing.expect(msg_logs_lines != msg_auto_body_state);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -2127,6 +2240,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_mp_export);
     try std.testing.expect(msg_live_state != msg_mp_r_o);
     try std.testing.expect(msg_live_state != msg_mp_hov);
+    try std.testing.expect(msg_live_state != msg_auto_state);
+    try std.testing.expect(msg_live_state != msg_auto_body_state);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -2156,6 +2271,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_mp_export);
     try std.testing.expect(msg_live_transport != msg_mp_r_o);
     try std.testing.expect(msg_live_transport != msg_mp_hov);
+    try std.testing.expect(msg_live_transport != msg_auto_state);
+    try std.testing.expect(msg_live_transport != msg_auto_body_state);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -2184,6 +2301,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_mp_export);
     try std.testing.expect(msg_live_n_p != msg_mp_r_o);
     try std.testing.expect(msg_live_n_p != msg_mp_hov);
+    try std.testing.expect(msg_live_n_p != msg_auto_state);
+    try std.testing.expect(msg_live_n_p != msg_auto_body_state);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -2211,6 +2330,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_mp_export);
     try std.testing.expect(msg_live_status != msg_mp_r_o);
     try std.testing.expect(msg_live_status != msg_mp_hov);
+    try std.testing.expect(msg_live_status != msg_auto_state);
+    try std.testing.expect(msg_live_status != msg_auto_body_state);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -2237,6 +2358,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_mp_export);
     try std.testing.expect(msg_live_decks != msg_mp_r_o);
     try std.testing.expect(msg_live_decks != msg_mp_hov);
+    try std.testing.expect(msg_live_decks != msg_auto_state);
+    try std.testing.expect(msg_live_decks != msg_auto_body_state);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -2262,6 +2385,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_mp_export);
     try std.testing.expect(msg_live_signals != msg_mp_r_o);
     try std.testing.expect(msg_live_signals != msg_mp_hov);
+    try std.testing.expect(msg_live_signals != msg_auto_state);
+    try std.testing.expect(msg_live_signals != msg_auto_body_state);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -2286,6 +2411,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_mp_export);
     try std.testing.expect(msg_live_cockpit != msg_mp_r_o);
     try std.testing.expect(msg_live_cockpit != msg_mp_hov);
+    try std.testing.expect(msg_live_cockpit != msg_auto_state);
+    try std.testing.expect(msg_live_cockpit != msg_auto_body_state);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -2309,6 +2436,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_mp_export);
     try std.testing.expect(msg_live_link != msg_mp_r_o);
     try std.testing.expect(msg_live_link != msg_mp_hov);
+    try std.testing.expect(msg_live_link != msg_auto_state);
+    try std.testing.expect(msg_live_link != msg_auto_body_state);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -2331,6 +2460,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_mp_export);
     try std.testing.expect(msg_live_graph != msg_mp_r_o);
     try std.testing.expect(msg_live_graph != msg_mp_hov);
+    try std.testing.expect(msg_live_graph != msg_auto_state);
+    try std.testing.expect(msg_live_graph != msg_auto_body_state);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -2352,6 +2483,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_mp_export);
     try std.testing.expect(msg_live_perf != msg_mp_r_o);
     try std.testing.expect(msg_live_perf != msg_mp_hov);
+    try std.testing.expect(msg_live_perf != msg_auto_state);
+    try std.testing.expect(msg_live_perf != msg_auto_body_state);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
@@ -2372,6 +2505,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_mp_export);
     try std.testing.expect(msg_live_strip != msg_mp_r_o);
     try std.testing.expect(msg_live_strip != msg_mp_hov);
+    try std.testing.expect(msg_live_strip != msg_auto_state);
+    try std.testing.expect(msg_live_strip != msg_auto_body_state);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
@@ -2391,6 +2526,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_mp_export);
     try std.testing.expect(msg_mo_state != msg_mp_r_o);
     try std.testing.expect(msg_mo_state != msg_mp_hov);
+    try std.testing.expect(msg_mo_state != msg_auto_state);
+    try std.testing.expect(msg_mo_state != msg_auto_body_state);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
@@ -2409,6 +2546,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_mp_export);
     try std.testing.expect(msg_pub != msg_mp_r_o);
     try std.testing.expect(msg_pub != msg_mp_hov);
+    try std.testing.expect(msg_pub != msg_auto_state);
+    try std.testing.expect(msg_pub != msg_auto_body_state);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
@@ -2426,6 +2565,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_mp_export);
     try std.testing.expect(msg_pub_hero != msg_mp_r_o);
     try std.testing.expect(msg_pub_hero != msg_mp_hov);
+    try std.testing.expect(msg_pub_hero != msg_auto_state);
+    try std.testing.expect(msg_pub_hero != msg_auto_body_state);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
     try std.testing.expect(msg_set_state != msg_lib_state);
@@ -2442,6 +2583,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_mp_export);
     try std.testing.expect(msg_set_state != msg_mp_r_o);
     try std.testing.expect(msg_set_state != msg_mp_hov);
+    try std.testing.expect(msg_set_state != msg_auto_state);
+    try std.testing.expect(msg_set_state != msg_auto_body_state);
     try std.testing.expect(msg_set_content != msg_set_status);
     try std.testing.expect(msg_set_content != msg_lib_state);
     try std.testing.expect(msg_set_content != msg_lib_body);
@@ -2457,6 +2600,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_mp_export);
     try std.testing.expect(msg_set_content != msg_mp_r_o);
     try std.testing.expect(msg_set_content != msg_mp_hov);
+    try std.testing.expect(msg_set_content != msg_auto_state);
+    try std.testing.expect(msg_set_content != msg_auto_body_state);
     try std.testing.expect(msg_set_status != msg_lib_state);
     try std.testing.expect(msg_set_status != msg_lib_body);
     try std.testing.expect(msg_set_status != msg_lib_detail);
@@ -2471,6 +2616,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_mp_export);
     try std.testing.expect(msg_set_status != msg_mp_r_o);
     try std.testing.expect(msg_set_status != msg_mp_hov);
+    try std.testing.expect(msg_set_status != msg_auto_state);
+    try std.testing.expect(msg_set_status != msg_auto_body_state);
     try std.testing.expect(msg_lib_state != msg_lib_body);
     try std.testing.expect(msg_lib_state != msg_lib_detail);
     try std.testing.expect(msg_lib_state != msg_lib_queue);
@@ -2484,6 +2631,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_mp_export);
     try std.testing.expect(msg_lib_state != msg_mp_r_o);
     try std.testing.expect(msg_lib_state != msg_mp_hov);
+    try std.testing.expect(msg_lib_state != msg_auto_state);
+    try std.testing.expect(msg_lib_state != msg_auto_body_state);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
     try std.testing.expect(msg_lib_body != msg_lib_queue);
     try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
@@ -2496,6 +2645,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_mp_export);
     try std.testing.expect(msg_lib_body != msg_mp_r_o);
     try std.testing.expect(msg_lib_body != msg_mp_hov);
+    try std.testing.expect(msg_lib_body != msg_auto_state);
+    try std.testing.expect(msg_lib_body != msg_auto_body_state);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
     try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_detail != msg_mp_full);
@@ -2507,6 +2658,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_mp_export);
     try std.testing.expect(msg_lib_detail != msg_mp_r_o);
     try std.testing.expect(msg_lib_detail != msg_mp_hov);
+    try std.testing.expect(msg_lib_detail != msg_auto_state);
+    try std.testing.expect(msg_lib_detail != msg_auto_body_state);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_queue != msg_mp_full);
     try std.testing.expect(msg_lib_queue != msg_mp_inner);
@@ -2517,6 +2670,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_mp_export);
     try std.testing.expect(msg_lib_queue != msg_mp_r_o);
     try std.testing.expect(msg_lib_queue != msg_mp_hov);
+    try std.testing.expect(msg_lib_queue != msg_auto_state);
+    try std.testing.expect(msg_lib_queue != msg_auto_body_state);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
@@ -2526,6 +2681,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_mp_export);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_r_o);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_hov);
+    try std.testing.expect(msg_lib_cue_cell != msg_auto_state);
+    try std.testing.expect(msg_lib_cue_cell != msg_auto_body_state);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
     try std.testing.expect(msg_mp_full != msg_mp_vid);
     try std.testing.expect(msg_mp_full != msg_mp_wave);
@@ -2534,6 +2691,8 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_mp_export);
     try std.testing.expect(msg_mp_full != msg_mp_r_o);
     try std.testing.expect(msg_mp_full != msg_mp_hov);
+    try std.testing.expect(msg_mp_full != msg_auto_state);
+    try std.testing.expect(msg_mp_full != msg_auto_body_state);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
     try std.testing.expect(msg_mp_inner != msg_mp_wave);
     try std.testing.expect(msg_mp_inner != msg_mp_tp);
@@ -2541,25 +2700,42 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_mp_export);
     try std.testing.expect(msg_mp_inner != msg_mp_r_o);
     try std.testing.expect(msg_mp_inner != msg_mp_hov);
+    try std.testing.expect(msg_mp_inner != msg_auto_state);
+    try std.testing.expect(msg_mp_inner != msg_auto_body_state);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
     try std.testing.expect(msg_mp_vid != msg_mp_tp);
     try std.testing.expect(msg_mp_vid != msg_mp_edit);
     try std.testing.expect(msg_mp_vid != msg_mp_export);
     try std.testing.expect(msg_mp_vid != msg_mp_r_o);
     try std.testing.expect(msg_mp_vid != msg_mp_hov);
+    try std.testing.expect(msg_mp_vid != msg_auto_state);
+    try std.testing.expect(msg_mp_vid != msg_auto_body_state);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
     try std.testing.expect(msg_mp_wave != msg_mp_edit);
     try std.testing.expect(msg_mp_wave != msg_mp_export);
     try std.testing.expect(msg_mp_wave != msg_mp_r_o);
     try std.testing.expect(msg_mp_wave != msg_mp_hov);
+    try std.testing.expect(msg_mp_wave != msg_auto_state);
+    try std.testing.expect(msg_mp_wave != msg_auto_body_state);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
     try std.testing.expect(msg_mp_tp != msg_mp_export);
     try std.testing.expect(msg_mp_tp != msg_mp_r_o);
     try std.testing.expect(msg_mp_tp != msg_mp_hov);
+    try std.testing.expect(msg_mp_tp != msg_auto_state);
+    try std.testing.expect(msg_mp_tp != msg_auto_body_state);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
     try std.testing.expect(msg_mp_edit != msg_mp_r_o);
     try std.testing.expect(msg_mp_edit != msg_mp_hov);
+    try std.testing.expect(msg_mp_edit != msg_auto_state);
+    try std.testing.expect(msg_mp_edit != msg_auto_body_state);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
     try std.testing.expect(msg_mp_export != msg_mp_hov);
+    try std.testing.expect(msg_mp_export != msg_auto_state);
+    try std.testing.expect(msg_mp_export != msg_auto_body_state);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
+    try std.testing.expect(msg_mp_r_o != msg_auto_state);
+    try std.testing.expect(msg_mp_r_o != msg_auto_body_state);
+    try std.testing.expect(msg_mp_hov != msg_auto_state);
+    try std.testing.expect(msg_mp_hov != msg_auto_body_state);
+    try std.testing.expect(msg_auto_state != msg_auto_body_state);
 }

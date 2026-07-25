@@ -262,6 +262,26 @@ func BenchmarkWireBenchPlayerExport(b *testing.B) {
 		func() (string, bool) { return zigui.RenderPlayerExportV2(wireMpExport(st)) })
 }
 
+func BenchmarkWireBenchAutomations(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := autoFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderAutomations(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderAutomationsV2(wireAutoState(st)) })
+}
+
+func BenchmarkWireBenchAutomationsBody(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := autoFixtures()["populated"].Body
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderAutomationsBody(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderAutomationsBodyV2(wireAutoBodyState(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

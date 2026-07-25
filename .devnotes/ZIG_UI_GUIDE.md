@@ -994,6 +994,7 @@ document to every export, so the matrix grows on its own).
 | settings | 24-26 | full + `#set-content` + `#stset-<id>` | 18 × 2 surfaces + 6 status states |
 | library | 27-31 | full + `#lib-body` + `#lib-detail` + `#lib-queue-body` + cue cell | 21 × 3 surfaces + 3 queue + 4 cell |
 | player | 32-40 | full + the nine `#mp-*` patch targets | 178 surfaces over the fixture set |
+| automations | 41, 42 | full + `#auto-body` | 6 × 2 surfaces |
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
