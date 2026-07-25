@@ -399,6 +399,167 @@ fn renderCap(h: *Html, st: Cap) !void {
     try h.raw("</div>");
 }
 
+// ── remote Publish (peer's recorded sets over remotectl) ─────────────────────────
+
+pub const RemRow = struct {
+    id: []const u8 = "",
+    title: []const u8 = "",
+    sub: []const u8 = "",
+    sel: bool = false,
+};
+
+pub const RemList = struct {
+    empty: []const u8 = "", // ≠ "" ⇒ ONLY the empty state renders
+    count: []const u8 = "",
+    note: []const u8 = "",
+    rows: []const RemRow = &.{},
+};
+
+pub const RemTrack = struct {
+    num: i64 = 0,
+    off: []const u8 = "",
+    label: []const u8 = "",
+};
+
+pub const RemTl = struct {
+    empty: []const u8 = "", // emptyState (loading)
+    hint: []const u8 = "", // hint chip (link error / no tracks)
+    note: []const u8 = "",
+    rows: []const RemTrack = &.{},
+};
+
+pub const RemCaps = struct {
+    hint: []const u8 = "",
+    note: []const u8 = "",
+    caps: []const []const u8 = &.{},
+};
+
+pub const RemDetail = struct {
+    cardTitle: []const u8 = "",
+    sel: bool = false,
+    hint: []const u8 = "",
+
+    name: []const u8 = "",
+    meta: []const u8 = "",
+    actions: []const c.Btn = &.{},
+    active: []const u8 = "",
+    capsLbl: []const u8 = "",
+    tracksLbl: []const u8 = "",
+    tl: RemTl = .{},
+    caps: RemCaps = .{},
+};
+
+pub const Remote = struct {
+    title: []const u8 = "",
+    sub: []const u8 = "",
+    switcher: []const u8 = "", // RAW: targetSwitcherHTML
+    hint: []const u8 = "",
+    list: RemList = .{},
+    detail: RemDetail = .{},
+};
+
+/// renderRemote mirrors Go pubRemoteHTML.
+pub fn renderRemote(h: *Html, st: Remote) !void {
+    try c.panel(h, st.title, st.sub);
+    try h.raw(st.switcher);
+    try h.raw("<div id=publish-body><div class=\"rp-card pub-hero\"><div class=card-label>");
+    try h.esc(st.title);
+    try h.raw("</div><p class=page-sub>");
+    try h.esc(st.hint);
+    try h.raw("</p></div>");
+    try c.mdOpen(h);
+    try renderRemoteList(h, st.list);
+    try c.mdSplit(h);
+    try renderRemoteDetail(h, st.detail);
+    try c.mdClose(h);
+    try h.raw("</div>");
+}
+
+fn renderRemoteList(h: *Html, st: RemList) !void {
+    if (st.empty.len != 0) return c.emptyState(h, st.empty);
+    try h.raw("<div class=card-label>");
+    try h.esc(st.count);
+    try h.raw("</div>");
+    if (st.note.len != 0) {
+        try h.raw("<div class=lib-remote-note>");
+        try h.esc(st.note);
+        try h.raw("</div>");
+    }
+    for (st.rows) |r| {
+        try h.raw("<div class=\"irow pub-setrow");
+        if (r.sel) try h.raw(" selected");
+        try h.raw("\" data-act=\"pub-select:");
+        try h.esc(r.id);
+        try h.raw("\"><div class=irow-main><div class=irow-title>");
+        try h.esc(r.title);
+        try h.raw("</div><div class=irow-sub>");
+        try h.esc(r.sub);
+        try h.raw("</div></div></div>");
+    }
+}
+
+fn renderRemoteDetail(h: *Html, st: RemDetail) !void {
+    try c.cardOpen(h, st.cardTitle, true);
+    try c.cardHeadClose(h);
+    if (!st.sel) {
+        try c.hint(h, "info", st.hint);
+        return c.cardClose(h);
+    }
+    try h.raw("<div class=pub-detail-h><div class=pub-detail-name>");
+    try h.esc(st.name);
+    try h.raw("</div><div class=np-artist>");
+    try h.esc(st.meta);
+    try h.raw("</div>");
+    try c.btnRowOf(h, st.actions);
+    try h.raw("</div>");
+    const tabs = [_]c.Tab{
+        .{ .val = "captures", .label = st.capsLbl },
+        .{ .val = "tracklist", .label = st.tracksLbl },
+    };
+    try c.subTabs(h, "pub-tab:", st.active, &tabs);
+    try h.raw("<div class=pub-subbody>");
+    if (std.mem.eql(u8, st.active, "tracklist")) {
+        try renderRemoteTl(h, st.tl);
+    } else {
+        try renderRemoteCaps(h, st.caps);
+    }
+    try h.raw("</div>");
+    try c.cardClose(h);
+}
+
+fn renderRemoteTl(h: *Html, st: RemTl) !void {
+    if (st.empty.len != 0) return c.emptyState(h, st.empty);
+    if (st.hint.len != 0) return c.hint(h, "info", st.hint);
+    if (st.note.len != 0) {
+        try h.raw("<div class=lib-remote-note>");
+        try h.esc(st.note);
+        try h.raw("</div>");
+    }
+    try h.raw("<div class=pub-tracklist>");
+    for (st.rows) |t| {
+        try h.raw("<div class=pub-track><span class=pub-track-n>");
+        try c.num(h, t.num);
+        try h.raw(".</span><span class=pub-track-o>[");
+        try h.raw(t.off);
+        try h.raw("]</span><span class=pub-track-l>");
+        try h.esc(t.label);
+        try h.raw("</span></div>");
+    }
+    try h.raw("</div>");
+}
+
+fn renderRemoteCaps(h: *Html, st: RemCaps) !void {
+    if (st.hint.len != 0) return c.hint(h, "info", st.hint);
+    try h.raw("<div class=np-artist>");
+    try h.esc(st.note);
+    try h.raw("</div>");
+    for (st.caps) |cap| {
+        try h.raw("<div class=pub-cap><div class=pub-cap-cap>");
+        try h.esc(cap);
+        try h.raw("</div></div>");
+    }
+}
+
 test "hero badges + now-playing" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
@@ -436,4 +597,12 @@ test "tracklist lead variants + editable offsets" {
     try renderTracklist(&h, .{ .rows = &one, .editable = true, .offTip = "tip", .help = "h" });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<input class=pub-track-oin type=text value=\"1:02\" data-value=\"1:02\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-label=\"offset-1\" title=\"tip\">") != null);
+}
+
+test "remote list empty state wins over rows" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    const rows = [_]RemRow{.{ .id = "x", .title = "t" }};
+    try renderRemoteList(&h, .{ .empty = "Loading…", .rows = &rows });
+    try std.testing.expectEqualStrings("<div class=\"rp-empty\"><div class=\"rp-empty__title\">Loading…</div></div>", h.b.items);
 }

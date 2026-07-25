@@ -90,6 +90,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
 
 | publish | Zig (`native/zigui/src/publish.zig`; full + `#pub-hero` tick fragment) | `TestZigPublishGolden` |
+| publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -228,7 +229,9 @@ Components added: `statusRow`, `sectionOpenTip` (both used here).
 
 Publish-port notes (tab #14): the tab is one renderer with two data worlds (local recorder vs a
 peer over remotectl), so `renderPublish` dispatches on `libRemoteTarget()` and each world has its
-OWN state + export. Raw pass-throughs, both trusted: the unified player/editor
+OWN state + export (`pubSt` / `pubRemSt`, `rz_ui_render_publish` / `_remote`; the remote view is a
+whole-view export because it re-frames panel + switcher + `#publish-body` itself and has no tick
+fragments - live status stays on the controlled box). Raw pass-throughs, both trusted: the unified player/editor
 (`player.go mpHTML("publish")`, embedded in the captures pane AND in the no-selection card when a
 loose capture is pinned) and the peer target switcher (`targetSwitcherHTML`, which registers a
 smart select as a side effect - the state builder calls it, exactly where the old renderer did).

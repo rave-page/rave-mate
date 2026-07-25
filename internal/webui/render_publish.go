@@ -559,11 +559,9 @@ func (u *UI) pubCapState(s libdb.SetRecording, loose bool) pubCapSt {
 // ── bridges (Zig when linked, Go otherwise) ─────────────────────────────────────
 
 func (u *UI) renderPublish() string {
-	// Remote: a peer is targeted → the recorded-sets browser over remotectl (still Go-rendered).
+	// Remote: a peer is targeted → the recorded-sets browser over remotectl (local path untouched).
 	if tgt := u.libRemoteTarget(); tgt != "" {
-		return panel(i18n.T("publish.title"), i18n.T("publish.subtitle")) +
-			u.targetSwitcherHTML("pubtarget", "pub-target:") +
-			`<div id=publish-body>` + u.pubRemoteBody(tgt) + `</div>`
+		return u.renderPublishRemote(tgt)
 	}
 	st := u.publishState()
 	if zigui.Available() {

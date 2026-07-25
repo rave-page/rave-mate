@@ -307,3 +307,124 @@ func TestZigPublishHeroEmptyFallsBack(t *testing.T) {
 		t.Errorf("Go empty hero = %q, want \"\"", got)
 	}
 }
+
+// pubRemFixtures: loading, link error, no sets, populated captures/tracklist, paged
+// (showing-newest note), escaping edge, unicode.
+func pubRemFixtures() map[string]pubRemSt {
+	base := func() pubRemSt {
+		return pubRemSt{
+			Title: "Publish", Sub: "Recorded sets, captures and tracklists",
+			Switcher: `<div class=lib-target><div class=ss-field><span class=ss-label>Controlling</span></div></div>`,
+			Hint:     "Live status stays on the controlled computer",
+			List:     pubRemListSt{Rows: []pubRemRowSt{}},
+			Detail:   pubRemDetailSt{CardTitle: "Selected set", Hint: "Pick a set on the left"},
+		}
+	}
+	loading := base()
+	loading.List.Empty = "Loading…"
+
+	errored := base()
+	errored.List.Empty = "Link error: peer unreachable"
+
+	noSets := base()
+	noSets.List.Empty = "No recorded sets on that computer"
+
+	rows := []pubRemRowSt{
+		{ID: "r1", Title: "⏺ Live set", Sub: "2026-07-25 21:40 · 7 tracks · live", Sel: true},
+		{ID: "r2", Title: "Warmup", Sub: "2026-07-24 19:00 · 21 tracks · 2h0m0s · matched"},
+	}
+	caps := base()
+	caps.List = pubRemListSt{Count: "2 sets", Rows: rows}
+	caps.Detail = pubRemDetailSt{CardTitle: "Selected set", Sel: true, Hint: "Pick a set on the left",
+		Name: "Live set", Meta: "2026-07-25 21:40 · 7 tracks · live",
+		Actions: []uiBtn{{Label: "Export…", Variant: "outline", Act: "pub-export:r1"}},
+		Active:  "captures", CapsLbl: "Captures (2)", TracksLbl: "Tracklist (7)",
+		Caps: pubRemCapsSt{Note: "Files live on that computer", Caps: []string{
+			"Broadcast audio · OGG · 84.2 MB · set.ogg",
+			"OBS recording · MKV · 1.9 GB · set.mkv",
+		}},
+	}
+
+	paged := caps
+	paged.List = pubRemListSt{Count: "412 sets", Note: "Showing the newest 200 of 412", Rows: rows}
+
+	tl := caps
+	tl.Detail.Active = "tracklist"
+	tl.Detail.Actions = []uiBtn{
+		{Label: "Export…", Variant: "outline", Act: "pub-export:r2"},
+		{Label: "Match history", Variant: "secondary", Act: "pub-match:r2"},
+		{Label: "Delete", Variant: "destructive", Act: "pub-del:r2"},
+	}
+	tl.Detail.Caps = pubRemCapsSt{Caps: []string{}}
+	tl.Detail.Tl = pubRemTlSt{Note: "Showing the first 500 of 812", Rows: []pubRemTrackSt{
+		{Num: 1, Off: "0:00", Label: "A - One"},
+		{Num: 2, Off: "4:31", Label: "B - Two"},
+		{Num: 3, Off: "1:02:07", Label: "C - Three"},
+	}}
+
+	tlLoading := tl
+	tlLoading.Detail.Tl = pubRemTlSt{Empty: "Loading…", Rows: []pubRemTrackSt{}}
+
+	tlErr := tl
+	tlErr.Detail.Tl = pubRemTlSt{Hint: "Link error: timeout", Rows: []pubRemTrackSt{}}
+
+	capsErr := caps
+	capsErr.Detail.Caps = pubRemCapsSt{Hint: "Link error: timeout", Caps: []string{}}
+
+	escaping := tl
+	escaping.Title = `P&ublish <"live">`
+	escaping.Sub = `a&b<c>"d"'e'`
+	escaping.Switcher = `<div class="raw & kept">'x'</div>`
+	escaping.Hint = `h&int"<>'`
+	escaping.List = pubRemListSt{Count: `2 &"sets"<>'`, Note: `n&ote"<>'`, Rows: []pubRemRowSt{
+		{ID: `r&1"<>'`, Title: `⏺ L&ive"<>'`, Sub: `s&ub"<>'`, Sel: true},
+	}}
+	escaping.Detail.Name = `L&ive"<>'`
+	escaping.Detail.Meta = `m&eta"<>'`
+	escaping.Detail.CapsLbl = `C&aps"<>' (2)`
+	escaping.Detail.TracksLbl = `T&racks"<>' (7)`
+	escaping.Detail.Actions = []uiBtn{{Label: `E&xport"<>'…`, Variant: "outline", Act: `pub-export:r&1"`}}
+	escaping.Detail.Tl = pubRemTlSt{Note: `n&ote"<>'`, Rows: []pubRemTrackSt{
+		{Num: 1, Off: "0:00", Label: `A&B - <"One">'`},
+	}}
+
+	escCaps := escaping
+	escCaps.Detail.Active = "captures"
+	escCaps.Detail.Caps = pubRemCapsSt{Note: `c&note"<>'`, Caps: []string{`B&roadcast"<>' · s&t.ogg`}}
+
+	unicode := tl
+	unicode.Title = "公開 🎧"
+	unicode.Sub = "größer Опубліковано"
+	unicode.Hint = "Статус залишається на керованому комп'ютері"
+	unicode.List = pubRemListSt{Count: "2 セット", Rows: []pubRemRowSt{
+		{ID: "r☂1", Title: "⏺ Живий сет", Sub: "2026-07-25 · 7 треків", Sel: true},
+	}}
+	unicode.Detail.Name = "Живий сет 🎛️"
+	unicode.Detail.Tl = pubRemTlSt{Rows: []pubRemTrackSt{{Num: 1, Off: "0:00", Label: "アーティスト - タイトル"}}}
+
+	return map[string]pubRemSt{
+		"loading":   loading,
+		"error":     errored,
+		"noSets":    noSets,
+		"captures":  caps,
+		"paged":     paged,
+		"tracklist": tl,
+		"tlLoading": tlLoading,
+		"tlError":   tlErr,
+		"capsError": capsErr,
+		"escaping":  escaping,
+		"escCaps":   escCaps,
+		"unicode":   unicode,
+	}
+}
+
+func TestZigPublishRemoteGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	for name, st := range pubRemFixtures() {
+		t.Run(name, func(t *testing.T) {
+			zigFrag(t, "remote", pubRemoteHTML(st), stateJSON(st), zigui.RenderPublishRemote)
+		})
+	}
+}

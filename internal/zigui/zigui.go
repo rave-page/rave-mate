@@ -340,3 +340,10 @@ func RenderPublishHero(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_publish_hero(p, l, n)
 	})
 }
+
+// RenderPublishRemote renders the full remote Publish view (a peer's recorded sets).
+func RenderPublishRemote(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_remote(p, l, n)
+	})
+}

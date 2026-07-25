@@ -62,5 +62,6 @@ func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", fals
 
 // --- publish ---
 
-func RenderPublish(stateJSON []byte) (string, bool)     { return "", false }
-func RenderPublishHero(stateJSON []byte) (string, bool) { return "", false }
+func RenderPublish(stateJSON []byte) (string, bool)       { return "", false }
+func RenderPublishHero(stateJSON []byte) (string, bool)   { return "", false }
+func RenderPublishRemote(stateJSON []byte) (string, bool) { return "", false }

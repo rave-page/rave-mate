@@ -8,6 +8,10 @@ package webui
 // byte-behaviour-unchanged; renderPublish early-returns here only when a peer is targeted. remotectl
 // calls block on the network, so the body renders synchronously from a per-UI cache (pubRemoteSt)
 // and background fetches patch the cache in (render never blocks).
+//
+// Zig-rendered (native/zigui/src/publish.zig, export rz_ui_render_publish_remote): the cache read
+// + i18n resolve into pubRemSt, Zig renders HTML byte-identical to the pure Go renderers below
+// (golden reference, zigui_golden_publish_test.go).
 
 import (
 	"context"
@@ -22,6 +26,7 @@ import (
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/remotectl"
 	"rave.page/mate/internal/session/sinks/recorder"
+	"rave.page/mate/internal/zigui"
 )
 
 const (
@@ -80,18 +85,92 @@ func (u *UI) pubR() *pubRemoteSt {
 	return s
 }
 
-// ── body ────────────────────────────────────────────────────────────────────────
+// ── render state (JSON → Zig) ───────────────────────────────────────────────────
 
-func (u *UI) pubRemoteBody(target string) string {
+// pubRemRowSt is one row of the peer's sets list.
+type pubRemRowSt struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Sub   string `json:"sub"`
+	Sel   bool   `json:"sel"`
+}
+
+// pubRemListSt is the sets list. Empty ≠ "" ⇒ ONLY the empty state renders
+// (loading / link error / no sets).
+type pubRemListSt struct {
+	Empty string        `json:"empty"`
+	Count string        `json:"count"`
+	Note  string        `json:"note"` // "" = the full list arrived
+	Rows  []pubRemRowSt `json:"rows,omitempty"`
+}
+
+// pubRemTrackSt is one paged tracklist row (read-only: no links, no offsets edit).
+type pubRemTrackSt struct {
+	Num   int    `json:"num"`
+	Off   string `json:"off"`
+	Label string `json:"label"`
+}
+
+// pubRemTlSt is the Tracklist subtab. Empty ⇒ emptyState (loading); Hint ⇒ hint chip
+// (link error / no tracks); either wins over Rows.
+type pubRemTlSt struct {
+	Empty string          `json:"empty"`
+	Hint  string          `json:"hint"`
+	Note  string          `json:"note"`
+	Rows  []pubRemTrackSt `json:"rows,omitempty"`
+}
+
+// pubRemCapsSt is the Captures subtab (captions only - files live on the peer).
+type pubRemCapsSt struct {
+	Hint string   `json:"hint"` // link error / no captures
+	Note string   `json:"note"`
+	Caps []string `json:"caps,omitempty"`
+}
+
+// pubRemDetailSt is the right pane.
+type pubRemDetailSt struct {
+	CardTitle string `json:"cardTitle"`
+	Sel       bool   `json:"sel"`
+	Hint      string `json:"hint"` // no selection
+
+	Name      string       `json:"name"`
+	Meta      string       `json:"meta"`
+	Actions   []uiBtn      `json:"actions,omitempty"`
+	Active    string       `json:"active"`
+	CapsLbl   string       `json:"capsLbl"`
+	TracksLbl string       `json:"tracksLbl"`
+	Tl        pubRemTlSt   `json:"tl"`
+	Caps      pubRemCapsSt `json:"caps"`
+}
+
+// pubRemSt is the resolved render state for the remote Publish view.
+type pubRemSt struct {
+	Title    string         `json:"title"`
+	Sub      string         `json:"sub"`
+	Switcher string         `json:"switcher"` // RAW: targetSwitcherHTML
+	Hint     string         `json:"hint"`
+	List     pubRemListSt   `json:"list"`
+	Detail   pubRemDetailSt `json:"detail"`
+}
+
+// ── state builders ──────────────────────────────────────────────────────────────
+
+// pubRemoteState resolves the remote view: switcher + cache snapshot + i18n.
+func (u *UI) pubRemoteState(target string) pubRemSt {
+	st := pubRemSt{
+		Title:    i18n.T("publish.title"),
+		Sub:      i18n.T("publish.subtitle"),
+		Switcher: u.targetSwitcherHTML("pubtarget", "pub-target:"),
+		Hint:     i18n.T("publish.remote.hint"),
+	}
 	u.pubRemoteEnsure(target)
 	s := u.pubR()
 	s.mu.Lock()
 	sets, total, loading, errMsg, selID := s.sets, s.total, s.loading, s.err, s.selID
 	s.mu.Unlock()
-
-	hero := `<div class="rp-card pub-hero"><div class=card-label>` + html.EscapeString(i18n.T("publish.title")) + `</div>` +
-		`<p class=page-sub>` + html.EscapeString(i18n.T("publish.remote.hint")) + `</p></div>`
-	return hero + masterDetail(u.pubRemoteListHTML(sets, total, loading, errMsg, selID), u.pubRemoteDetailHTML(selID))
+	st.List = pubRemoteListState(sets, total, loading, errMsg, selID)
+	st.Detail = u.pubRemoteDetailState(selID)
+	return st
 }
 
 // pubRemoteEnsure resets on target change and lazily kicks the sets + captures fetches (idempotent).
@@ -114,19 +193,22 @@ func (u *UI) pubRemoteEnsure(target string) {
 
 // ── sets list ─────────────────────────────────────────────────────────────────────
 
-func (u *UI) pubRemoteListHTML(sets []remotectl.RecMeta, total int, loading bool, errMsg, selID string) string {
+func pubRemoteListState(sets []remotectl.RecMeta, total int, loading bool, errMsg, selID string) pubRemListSt {
+	st := pubRemListSt{Rows: []pubRemRowSt{}}
 	switch {
 	case loading && len(sets) == 0:
-		return emptyState(i18n.T("remote.loading"))
+		st.Empty = i18n.T("remote.loading")
+		return st
 	case errMsg != "":
-		return emptyState(i18n.T("publish.remote.error", i18n.A{"msg": errMsg}))
+		st.Empty = i18n.T("publish.remote.error", i18n.A{"msg": errMsg})
+		return st
 	case len(sets) == 0:
-		return emptyState(i18n.T("publish.remote.noSets"))
+		st.Empty = i18n.T("publish.remote.noSets")
+		return st
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=card-label>` + html.EscapeString(i18n.T("publish.setsCount", i18n.A{"count": fmt.Sprint(total)})) + `</div>`)
+	st.Count = i18n.T("publish.setsCount", i18n.A{"count": fmt.Sprint(total)})
 	if total > len(sets) {
-		b.WriteString(`<div class=lib-remote-note>` + html.EscapeString(i18n.T("publish.remote.showingNewest", i18n.A{"n": fmt.Sprint(len(sets)), "total": fmt.Sprint(total)})) + `</div>`)
+		st.Note = i18n.T("publish.remote.showingNewest", i18n.A{"n": fmt.Sprint(len(sets)), "total": fmt.Sprint(total)})
 	}
 	for i := range sets {
 		r := sets[i]
@@ -134,15 +216,9 @@ func (u *UI) pubRemoteListHTML(sets []remotectl.RecMeta, total int, loading bool
 		if r.EndedAt.IsZero() {
 			title = "⏺ " + title
 		}
-		cls := "irow pub-setrow"
-		if r.ID == selID {
-			cls += " selected"
-		}
-		b.WriteString(`<div class="` + cls + `" data-act="pub-select:` + html.EscapeString(r.ID) + `"><div class=irow-main>` +
-			`<div class=irow-title>` + html.EscapeString(title) + `</div>` +
-			`<div class=irow-sub>` + html.EscapeString(pubRemoteSetMeta(r)) + `</div></div></div>`)
+		st.Rows = append(st.Rows, pubRemRowSt{ID: r.ID, Title: title, Sub: pubRemoteSetMeta(r), Sel: r.ID == selID})
 	}
-	return b.String()
+	return st
 }
 
 func pubRemoteSetMeta(r remotectl.RecMeta) string {
@@ -160,9 +236,10 @@ func pubRemoteSetMeta(r remotectl.RecMeta) string {
 
 // ── detail (right pane) ────────────────────────────────────────────────────────────
 
-func (u *UI) pubRemoteDetailHTML(selID string) string {
+func (u *UI) pubRemoteDetailState(selID string) pubRemDetailSt {
+	st := pubRemDetailSt{CardTitle: i18n.T("publish.selectedSet"), Hint: i18n.T("publish.selectHint")}
 	if selID == "" {
-		return card(i18n.T("publish.selectedSet"), "", hint("info", i18n.T("publish.selectHint")))
+		return st
 	}
 	s := u.pubR()
 	s.mu.Lock()
@@ -179,76 +256,74 @@ func (u *UI) pubRemoteDetailHTML(selID string) string {
 	capsErr := s.capsErr
 	s.mu.Unlock()
 	if sel == nil {
-		return card(i18n.T("publish.selectedSet"), "", hint("info", i18n.T("publish.selectHint")))
+		return st
 	}
 	r := *sel
 
-	head := `<div class=pub-detail-h><div class=pub-detail-name>` + html.EscapeString(orSetName(r.Name)) + `</div>` +
-		`<div class=np-artist>` + html.EscapeString(pubRemoteSetMeta(r)) + `</div>` +
-		u.pubRemoteActionsHTML(r) + `</div>`
-	active := u.pubSubtab()
-	tabs := subTabs("pub-tab:", active,
-		[2]string{"captures", i18n.T("publish.capturesCount", i18n.A{"count": fmt.Sprint(len(caps))})},
-		[2]string{"tracklist", i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(tlTotal)})},
-	)
-	var body string
-	if active == "tracklist" {
-		body = u.pubRemoteTracklistHTML(tl, tlTotal, tlLoading, tlErr, tlStart)
+	st.Sel = true
+	st.Name, st.Meta = orSetName(r.Name), pubRemoteSetMeta(r)
+	st.Actions = pubRemoteActionsState(r)
+	st.Active = u.pubSubtab()
+	st.CapsLbl = i18n.T("publish.capturesCount", i18n.A{"count": fmt.Sprint(len(caps))})
+	st.TracksLbl = i18n.T("publish.tracklistCount", i18n.A{"count": fmt.Sprint(tlTotal)})
+	if st.Active == "tracklist" {
+		st.Tl = pubRemoteTracklistState(tl, tlTotal, tlLoading, tlErr, tlStart)
 	} else {
-		body = u.pubRemoteCapturesHTML(caps, capsErr)
+		st.Caps = pubRemoteCapturesState(caps, capsErr)
 	}
-	return card(i18n.T("publish.selectedSet"), "", head+tabs+`<div class=pub-subbody>`+body+`</div>`)
+	return st
 }
 
-func (u *UI) pubRemoteActionsHTML(r remotectl.RecMeta) string {
-	btns := []string{btn(i18n.T("publish.export"), "outline", "pub-export:"+r.ID, "")}
+func pubRemoteActionsState(r remotectl.RecMeta) []uiBtn {
+	btns := []uiBtn{{Label: i18n.T("publish.export"), Variant: "outline", Act: "pub-export:" + r.ID}}
 	if !r.EndedAt.IsZero() { // match/delete only on a finished set (recording control stays local)
 		btns = append(btns,
-			btn(i18n.T("publish.matchHistory"), "secondary", "pub-match:"+r.ID, ""),
-			btn(i18n.T("publish.delete"), "destructive", "pub-del:"+r.ID, ""))
+			uiBtn{Label: i18n.T("publish.matchHistory"), Variant: "secondary", Act: "pub-match:" + r.ID},
+			uiBtn{Label: i18n.T("publish.delete"), Variant: "destructive", Act: "pub-del:" + r.ID})
 	}
-	return btnRow(btns...)
+	return btns
 }
 
-func (u *UI) pubRemoteTracklistHTML(tl []recorder.Track, total int, loading bool, errMsg string, start time.Time) string {
+func pubRemoteTracklistState(tl []recorder.Track, total int, loading bool, errMsg string, start time.Time) pubRemTlSt {
+	st := pubRemTlSt{Rows: []pubRemTrackSt{}}
 	switch {
 	case loading && len(tl) == 0:
-		return emptyState(i18n.T("remote.loading"))
+		st.Empty = i18n.T("remote.loading")
+		return st
 	case errMsg != "":
-		return hint("info", i18n.T("publish.remote.error", i18n.A{"msg": errMsg}))
+		st.Hint = i18n.T("publish.remote.error", i18n.A{"msg": errMsg})
+		return st
 	case len(tl) == 0:
-		return hint("info", i18n.T("publish.noTracks"))
+		st.Hint = i18n.T("publish.noTracks")
+		return st
 	}
-	var b strings.Builder
 	if total > len(tl) {
-		b.WriteString(`<div class=lib-remote-note>` + html.EscapeString(i18n.T("publish.remote.tlShowing", i18n.A{"n": fmt.Sprint(len(tl)), "total": fmt.Sprint(total)})) + `</div>`)
+		st.Note = i18n.T("publish.remote.tlShowing", i18n.A{"n": fmt.Sprint(len(tl)), "total": fmt.Sprint(total)})
 	}
-	b.WriteString(`<div class=pub-tracklist>`)
 	for i := range tl {
 		t := tl[i]
 		off := t.StartedAt.Sub(start)
 		if off < 0 {
 			off = 0
 		}
-		b.WriteString(`<div class=pub-track><span class=pub-track-n>` + fmt.Sprint(i+1) + `.</span>` +
-			`<span class=pub-track-o>[` + pubClock(off.Seconds()) + `]</span>` +
-			`<span class=pub-track-l>` + html.EscapeString(orTrackLine(pubTrackLine(t))) + `</span></div>`)
+		st.Rows = append(st.Rows, pubRemTrackSt{Num: i + 1, Off: pubClock(off.Seconds()), Label: orTrackLine(pubTrackLine(t))})
 	}
-	b.WriteString(`</div>`)
-	return b.String()
+	return st
 }
 
-// pubRemoteCapturesHTML lists the peer's capture rows read-only (files live on that box; open/trim
+// pubRemoteCapturesState resolves the peer's capture rows read-only (files live on that box; open/trim
 // them there). No player / file ops - those need local playback + fs access.
-func (u *UI) pubRemoteCapturesHTML(caps []libdb.SetRecording, capsErr string) string {
+func pubRemoteCapturesState(caps []libdb.SetRecording, capsErr string) pubRemCapsSt {
+	st := pubRemCapsSt{Caps: []string{}}
 	if capsErr != "" {
-		return hint("info", i18n.T("publish.remote.error", i18n.A{"msg": capsErr}))
+		st.Hint = i18n.T("publish.remote.error", i18n.A{"msg": capsErr})
+		return st
 	}
 	if len(caps) == 0 {
-		return hint("info", i18n.T("publish.noCaptures"))
+		st.Hint = i18n.T("publish.noCaptures")
+		return st
 	}
-	var b strings.Builder
-	b.WriteString(`<div class=np-artist>` + html.EscapeString(i18n.T("publish.remote.capturesNote")) + `</div>`)
+	st.Note = i18n.T("publish.remote.capturesNote")
 	for _, s := range caps {
 		kindLbl := i18n.T("publish.broadcastAudio")
 		if s.Kind == libdb.SetKindOBS {
@@ -259,9 +334,9 @@ func (u *UI) pubRemoteCapturesHTML(caps []libdb.SetRecording, capsErr string) st
 			parts = append(parts, humanBytes(uint64(s.Bytes)))
 		}
 		parts = append(parts, filepath.Base(s.Path))
-		b.WriteString(`<div class=pub-cap><div class=pub-cap-cap>` + html.EscapeString(strings.Join(parts, " · ")) + `</div></div>`)
+		st.Caps = append(st.Caps, strings.Join(parts, " · "))
 	}
-	return b.String()
+	return st
 }
 
 // pubRemoteCapsForSet filters the peer's capture rows to the ones linked to set id.
@@ -273,6 +348,101 @@ func pubRemoteCapsForSet(all []libdb.SetRecording, id string) []libdb.SetRecordi
 		}
 	}
 	return out
+}
+
+// ── bridge ──────────────────────────────────────────────────────────────────────
+
+func (u *UI) renderPublishRemote(target string) string {
+	st := u.pubRemoteState(target)
+	if zigui.Available() {
+		if h, ok := zigui.RenderPublishRemote(stateJSON(st)); ok {
+			return h
+		}
+	}
+	return pubRemoteHTML(st)
+}
+
+// ── pure Go renderers (golden reference; byte-identical to Zig) ─────────────────
+
+func pubRemoteHTML(st pubRemSt) string {
+	hero := `<div class="rp-card pub-hero"><div class=card-label>` + html.EscapeString(st.Title) + `</div>` +
+		`<p class=page-sub>` + html.EscapeString(st.Hint) + `</p></div>`
+	return panel(st.Title, st.Sub) + st.Switcher + `<div id=publish-body>` +
+		hero + masterDetail(pubRemoteListHTML(st.List), pubRemoteDetailHTML(st.Detail)) + `</div>`
+}
+
+func pubRemoteListHTML(st pubRemListSt) string {
+	if st.Empty != "" {
+		return emptyState(st.Empty)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=card-label>` + html.EscapeString(st.Count) + `</div>`)
+	if st.Note != "" {
+		b.WriteString(`<div class=lib-remote-note>` + html.EscapeString(st.Note) + `</div>`)
+	}
+	for _, r := range st.Rows {
+		cls := "irow pub-setrow"
+		if r.Sel {
+			cls += " selected"
+		}
+		b.WriteString(`<div class="` + cls + `" data-act="pub-select:` + html.EscapeString(r.ID) + `"><div class=irow-main>` +
+			`<div class=irow-title>` + html.EscapeString(r.Title) + `</div>` +
+			`<div class=irow-sub>` + html.EscapeString(r.Sub) + `</div></div></div>`)
+	}
+	return b.String()
+}
+
+func pubRemoteDetailHTML(st pubRemDetailSt) string {
+	if !st.Sel {
+		return card(st.CardTitle, "", hint("info", st.Hint))
+	}
+	head := `<div class=pub-detail-h><div class=pub-detail-name>` + html.EscapeString(st.Name) + `</div>` +
+		`<div class=np-artist>` + html.EscapeString(st.Meta) + `</div>` +
+		uiBtnRow(st.Actions) + `</div>`
+	tabs := subTabs("pub-tab:", st.Active,
+		[2]string{"captures", st.CapsLbl},
+		[2]string{"tracklist", st.TracksLbl},
+	)
+	var body string
+	if st.Active == "tracklist" {
+		body = pubRemoteTracklistHTML(st.Tl)
+	} else {
+		body = pubRemoteCapturesHTML(st.Caps)
+	}
+	return card(st.CardTitle, "", head+tabs+`<div class=pub-subbody>`+body+`</div>`)
+}
+
+func pubRemoteTracklistHTML(st pubRemTlSt) string {
+	if st.Empty != "" {
+		return emptyState(st.Empty)
+	}
+	if st.Hint != "" {
+		return hint("info", st.Hint)
+	}
+	var b strings.Builder
+	if st.Note != "" {
+		b.WriteString(`<div class=lib-remote-note>` + html.EscapeString(st.Note) + `</div>`)
+	}
+	b.WriteString(`<div class=pub-tracklist>`)
+	for _, t := range st.Rows {
+		b.WriteString(`<div class=pub-track><span class=pub-track-n>` + fmt.Sprint(t.Num) + `.</span>` +
+			`<span class=pub-track-o>[` + t.Off + `]</span>` +
+			`<span class=pub-track-l>` + html.EscapeString(t.Label) + `</span></div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func pubRemoteCapturesHTML(st pubRemCapsSt) string {
+	if st.Hint != "" {
+		return hint("info", st.Hint)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class=np-artist>` + html.EscapeString(st.Note) + `</div>`)
+	for _, c := range st.Caps {
+		b.WriteString(`<div class=pub-cap><div class=pub-cap-cap>` + html.EscapeString(c) + `</div></div>`)
+	}
+	return b.String()
 }
 
 // ── fetches (off-thread, cache-then-patch) ─────────────────────────────────────────
