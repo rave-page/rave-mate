@@ -535,3 +535,41 @@ test "settings sub-view module" {
 }
 
 // --- end settings-sub ---
+
+// --- dialogs-b ---
+// Wave-4 dialog sweep B: the feature-tab dialog families (VRChat ▸ Groups, Worlds,
+// Automations). Fragment exports (#vrcg-role-body, #vrcg-inv-list, #world-fr-list,
+// #world-grp-list, #world-role-list) serve the in-modal patch targets; the rest are whole
+// dialogs including the modal chrome, so openModal sees the same bytes either way.
+
+const dialogs_b = @import("dialogs_b.zig");
+
+export fn rz_ui_render_vg_rolebody(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.RoleBody, dialogs_b.renderRoleBody, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitelist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.InviteList, dialogs_b.renderInviteList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolesmodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.RolesModal, dialogs_b.renderRolesModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitemodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.InviteModal, dialogs_b.renderInviteModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_memberconfirm(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.MemberConfirm, dialogs_b.renderMemberConfirm, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_postconfirm(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PostConfirm, dialogs_b.renderPostConfirm, state_json, len, out_len);
+}
+
+test "dialogs-b module" {
+    _ = dialogs_b;
+}
+
+// --- end dialogs-b ---

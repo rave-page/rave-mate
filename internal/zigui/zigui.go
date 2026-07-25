@@ -597,3 +597,51 @@ func RenderSettingsUpdFlow(stateJSON []byte) (string, bool) {
 }
 
 // --- end settings-sub ---
+
+// --- dialogs-b ---
+// Wave-4 dialog sweep B: the feature-tab dialog families. Fragment renderers serve the
+// in-modal patch targets; the modal renderers include the dialog chrome.
+
+// RenderVgRoleBody renders #vrcg-role-body (the member's add/remove-role list).
+func RenderVgRoleBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolebody(p, l, n)
+	})
+}
+
+// RenderVgInviteList renders #vrcg-inv-list (the filtered friends list).
+func RenderVgInviteList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitelist(p, l, n)
+	})
+}
+
+// RenderVgRolesModal renders the group-roles dialog.
+func RenderVgRolesModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolesmodal(p, l, n)
+	})
+}
+
+// RenderVgInviteModal renders the group-invite dialog.
+func RenderVgInviteModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitemodal(p, l, n)
+	})
+}
+
+// RenderVgMemberConfirm renders the kick/ban confirm dialog.
+func RenderVgMemberConfirm(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_memberconfirm(p, l, n)
+	})
+}
+
+// RenderVgPostConfirm renders the delete-post confirm dialog.
+func RenderVgPostConfirm(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_postconfirm(p, l, n)
+	})
+}
+
+// --- end dialogs-b ---

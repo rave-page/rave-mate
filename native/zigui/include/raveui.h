@@ -181,6 +181,18 @@ const uint8_t *rz_ui_render_settings_bridge(const uint8_t *state_json, size_t le
 const uint8_t *rz_ui_render_settings_updflow(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end settings-sub --- */
 
+/* --- dialogs-b --- */
+/* Wave-4 dialog sweep B: feature-tab dialog families. The fragment exports serve in-modal
+ * patch targets (#vrcg-role-body, #vrcg-inv-list, #world-fr-list, #world-grp-list,
+ * #world-role-list); the rest render a whole dialog including the modal chrome. */
+const uint8_t *rz_ui_render_vg_rolebody(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitelist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_rolesmodal(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitemodal(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_memberconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_postconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end dialogs-b --- */
+
 #ifdef __cplusplus
 }
 #endif

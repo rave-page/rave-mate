@@ -123,3 +123,14 @@ func RenderSettingsBridge(stateJSON []byte) (string, bool)       { return "", fa
 func RenderSettingsUpdFlow(stateJSON []byte) (string, bool)      { return "", false }
 
 // --- end settings-sub ---
+
+// --- dialogs-b ---
+
+func RenderVgRoleBody(stateJSON []byte) (string, bool)      { return "", false }
+func RenderVgInviteList(stateJSON []byte) (string, bool)    { return "", false }
+func RenderVgRolesModal(stateJSON []byte) (string, bool)    { return "", false }
+func RenderVgInviteModal(stateJSON []byte) (string, bool)   { return "", false }
+func RenderVgMemberConfirm(stateJSON []byte) (string, bool) { return "", false }
+func RenderVgPostConfirm(stateJSON []byte) (string, bool)   { return "", false }
+
+// --- end dialogs-b ---
