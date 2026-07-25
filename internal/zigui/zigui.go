@@ -179,6 +179,7 @@ func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (s
 	var n C.size_t
 	out := f(p, C.size_t(len(state)), &n)
 	if out == nil {
+		noteFallback(2) // 2 frames up = the Render* wrapper (see fallback.go)
 		return "", false
 	}
 	s := C.GoStringN((*C.char)(unsafe.Pointer(out)), C.int(n))

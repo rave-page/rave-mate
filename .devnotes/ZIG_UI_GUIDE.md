@@ -96,6 +96,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | publish ▸ remote peer | Zig (`native/zigui/src/publish.zig` `renderRemote`; full view) | `TestZigPublishRemoteGolden` |
 
 | settings | Zig (`native/zigui/src/settings.zig`; full + `#set-content` pane + `#stset-<id>` status) | `TestZigSettingsGolden`, `TestZigSettingsStatusGolden` |
+| settings ▸ sub-views | Zig (`native/zigui/src/settings_sub.zig`; gridfix + gridfix model + account bridge card bodies + `#inst-update`) | `TestZigSettingsSubGolden`, `TestZigSettingsSubBlocksGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
 | (all others) | Go | — |
 
@@ -335,6 +336,42 @@ view) and diffing - 0 lines.
   pass can probe concurrently with an explicit allocator and drop the whole cache. Same for the
   search path: it renders every card in Go to match against, then re-renders the matches in Zig -
   acceptable now (goldens keep it honest), removable once the block state is matched directly.
+
+Settings sub-view notes (the four wave-3 seams the settings port left as raw HTML - now structured
+state): `gridfixCardBody`/`gridfixModelCardBody`/`bridgeCardBody`/`updateFlowHTML` became
+`gridfixCardState`+`gridfixCardStateOf` / `gridfixModelState`+`gridfixModelSel`+`gridfixModelStateOf` /
+`bridgeCardState`+`bridgeCardStateOf`+`bridgeGateState` / `updateFlowState`+`updFlowStateOf`, with the
+PURE renderers in `render_settings_sub_html.go` and the Zig mirrors in `settings_sub.zig`. The card
+bodies now cross inside the settings state as four new `setBlock` kinds (`gridfix`, `gridfixmodel`,
+`bridge`, `updregion`) - `sbRaw`/`sbRegion` are gone from those cards - and each body ALSO has its own
+export (`rz_ui_render_settings_{gridfix,gridfixmodel,bridge,updflow}`) because `#inst-update` is
+patched on its own (`patchUpd`) and the goldens pin each body directly.
+- **Impure facts travel as a small "bits" struct where the source is unmockable.** `bridgeBits`
+  (relay `bridge.State` + gate URI/secret/enrolled/persistent/sessions) and the explicit
+  `updater.Status` / `gridfix.EnvStatus` / `train.TrainEvent` parameters keep the state MAPPING
+  testable without a live `authz.Gate` (bbolt + OS secret store) or a running `updater.Manager`
+  (unexported status). Side-effect order preserved: `g.Sessions()` still reaps expired tokens, and
+  `Enrolled()`/`Persistent()` are still skipped while an enrolment is pending.
+- Zero DOM change proven by a throwaway harness: verbatim copies of the four pre-split emitters vs
+  the new state+renderer over **100 fixtures** (9 env × 7 config for gridfix, 12 model, 14 bridge,
+  11 update states) - 0 diffs, then deleted. The permanent guard that stayed is
+  `TestSettingsSubStatesHaveNoNullSlices` (nil-slice → JSON null → Zig parse reject → silent
+  whole-tab fallback).
+- Quirks replicated deliberately: the gridfix "engine ready" line `esc()`s the version string INTO
+  the hint text, which `hint()` escapes AGAIN (double-escaped in the DOM); the model picker passes
+  the current LABEL to `smartSelect` as its `cur` value, so the resolver's value match never fires;
+  `progressBar(0, line)` rides as the pre-formatted `progressPct(0)`; the update flow's error hint
+  keys off a PREFIXED string (`errPrefixed`) so an empty error stays empty.
+- Only ONE new components.zig helper (`// --- settings-sub ---` block): `listRowOpen`/`listRowClose`
+  (Go `listRow`, settings_actions.go - the trusted-session rows). Everything else reused.
+- **Silent-fallback visibility (new, cross-cutting):** `internal/zigui/fallback.go` (UNTAGGED, so
+  both the cgo build and the stub expose it) counts every `ok=false` render keyed by the `Render*`
+  wrapper (`runtime.Caller`, failure path only; `len(state)==0` is not counted - nothing was asked
+  of Zig) and exposes `zigui.FallbackCounts()`. webui's `logZigFallbacks` (called from the ~1 Hz
+  `livePush` tick) logs the sorted tally at DEBUG, at most once a minute and only when it changed.
+  Expect benign counts from the legitimately-empty fragments (`#midi-ctlstat-<i>`, hidden
+  library-remote switcher, `#pub-hero` without a recorder, hidden update flow); a count on a
+  whole-view renderer is the real smell.
 
 Library-port notes (the biggest tab, 2768 lines): split into `render_library_state.go`
 (impure) + pure renderers, then four Zig files - `library.zig` (tab + body dispatch),
