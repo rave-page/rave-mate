@@ -294,3 +294,33 @@ test "media tab modules" {
     _ = twitch;
     _ = editor;
 }
+
+// --- peers ---
+
+const peers = @import("peers.zig");
+
+export fn rz_ui_render_peers(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.State, peers.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_peers_body(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(peers.Body, peers.renderBody, state_json, len, out_len);
+}
+
+test "peers tab module" {
+    _ = peers;
+}
+
+// --- library_remote ---
+
+const libremote = @import("libremote.zig");
+
+/// Renders the "Controlling [This computer ▾]" switcher. show=false ⇒ empty ⇒ NULL ⇒ the
+/// Go fallback renders the same empty string (see zigui_golden_libremote_test.go).
+export fn rz_ui_render_libremote(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(libremote.State, libremote.render, state_json, len, out_len);
+}
+
+test "library_remote module" {
+    _ = libremote;
+}
