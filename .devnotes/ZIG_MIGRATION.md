@@ -166,6 +166,13 @@ Rules:
   `native/zigui` (libraveui.a, `rz_ui_*`) + `internal/zigui` (tag `zigui`) render
   migrated tabs byte-identical to the Go renderers (golden-tested); first tab:
   appgroups. Shell/actions/transport stay Go until phase B.
+- **P6 UI phase B (wave B-1, in progress):** the per-render state→JSON→parse round trip is
+  being replaced by RZW1, a length-prefixed TLV wire whose Go encoder and Zig decoder are
+  GENERATED FROM ONE SCHEMA (`internal/zigui/wiregen`) - appgroups + logs pilots land as
+  `_v2` exports beside the JSON ones (dispatch v2 → v1 → Go, downgrades counted). -61% on the
+  ~1 Hz `#log-view` tick, documents 17.8% of the JSON they replace, decoder fuzzed over 1575
+  mutated buffers with a poison-pad OOB canary. Details + the wave B-2 recipe: ZIG_UI_GUIDE.md
+  "Phase B - RZW1 binary state wire". Go-runtime workarounds stay flagged, not blind-copied.
 
 ## CI
 

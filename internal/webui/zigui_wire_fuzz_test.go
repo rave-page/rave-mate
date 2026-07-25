@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 
@@ -122,6 +123,8 @@ func TestZigWireMutationFuzz(t *testing.T) {
 			t.Fatalf("%s: encode failed", b.name)
 		}
 	}
+	// Fixture maps iterate randomly - sort so the fixed seed actually reproduces a failure.
+	sort.Slice(bases, func(i, j int) bool { return bases[i].name < bases[j].name })
 
 	rnd := rand.New(rand.NewSource(0xB1B1_5EED)) // fixed seed: reproducible failures
 	var cases, accepted, rejected int

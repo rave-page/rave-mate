@@ -755,3 +755,73 @@ locale-dependent text processing that belongs on the Go side of the seam. Recomm
 `tipTopic` in **phase B**, when the shell itself is Zig and a tooltip can be composed in-process
 without crossing the ABI; until then the pre-rendered-raw contract is correct and already
 golden-gated everywhere it appears.
+
+## Phase B — RZW1 binary state wire (wave B-1 pilots: appgroups + logs)
+
+The phase-A bridge pays a state→JSON→parse round trip on EVERY render (flagged twice above as
+the phase-B tax). Wave B-1 replaces it with a length-prefixed TLV document for two pilot views.
+JSON exports STAY; the binary ones land alongside and the bridge dispatches **v2 → v1 → Go**
+(`internal/webui/wire.go zigWire`), so a stale lib or a malformed document degrades instead of
+breaking. Both downgrades are visible in `zigui.FallbackCounts()` (`Render<X>V2` = the binary
+export declined, `Render<X>` = the JSON one did).
+
+**ONE schema generates BOTH sides.** `internal/zigui/wiregen/schema.go` lists the messages
+(Go type ↔ Zig type, field number, kind, ref) and emits `internal/webui/wire_gen.go` (encoder
+methods) + `native/zigui/src/wire_gen.zig` (decoders writing into the EXISTING renderer state
+structs, so v1 and v2 feed the same renderers - that is what makes byte equality provable).
+Regenerate with `GOWORK=off go run ./internal/zigui/wiregen` (or the `//go:generate` line in
+`internal/zigui/wire.go`); never hand-edit either output. Wave B-2 fans this out to the
+remaining ~101 state structs by adding rows, not code. Rationale: hand-mirroring 300+ structs
+across a C ABI is silent memory corruption waiting to happen.
+
+**Format** (documented in `internal/zigui/wire.go`; decoder `native/zigui/src/wire.zig`):
+magic `RZW1`, u16 message id, u32 schema hash (FNV-1a of the schema text), u32 arena length,
+ONE strings arena, then a field-tagged body terminated by a 0 byte. Tag = uvarint
+`num<<3 | wiretype`; wiretypes varint / string(arena off+len) / struct(u32 len + body) /
+list(uvarint count + u32 len + bodies). Field number 0 is the terminator, never a tag.
+- **Strings decode ZERO-COPY** as slices into the caller's buffer (valid for the render);
+  only lists allocate, from one parse arena freed by `Parsed.deinit()`.
+- **The omitempty/null hazard is now unrepresentable.** There is no null; zero values are
+  absent tags; an empty list IS the absent tag and absent decodes to the zero value. The bug
+  class that silently dropped a whole tab to Go (nil slice → JSON `null` → Zig parse reject)
+  cannot be expressed. `TestWireEmptyListsAreAbsentNotNull` + `TestWireZeroValuesAreAbsent`
+  pin it, including nested and all-zero states.
+- **Unknown field numbers are skipped** (every payload is self-delimiting) - the replacement
+  for std.json's `ignore_unknown_fields`, pinned by `TestZigWireSkipsUnknownFields` across all
+  four wiretypes. An unknown WIRETYPE is not skippable and is rejected: additive changes only,
+  and anything else trips the schema hash.
+- **Message id + schema hash in the header** mean a stale `libraveui.a` or a document sent to
+  the wrong export is refused, not mis-decoded.
+
+**Bounds discipline (the fuzz gate rests on it):** a struct/list payload length is checked
+against the REMAINING bytes of its parent body and the child reader sees exactly that slice; a
+list count is checked against its payload length (every element body costs >= 1 byte, its
+terminator) so a huge count cannot drive an allocation bigger than the input; a body must end
+exactly on its terminator (no truncation, no trailing garbage).
+
+**Gates.** Three-way byte equality Go == v1(JSON) == v2(binary) over the FULL existing fixture
+sets, full document AND every fragment (`zigui_wire_test.go`; 12 fixtures x 2 surfaces), with
+`FallbackCounts()` asserted unchanged across the run. Mutation fuzz on the real exports
+(`zigui_wire_fuzz_test.go`): 1575 cases (18 base documents x 10 corruption classes x 2 reps x
+4 exports, cross-fed + 120 random buffers + 15 adversarial documents) → 1321 clean rejections,
+254 renders, zero crashes (stable run to run: the base list is SORTED, or the fixture maps'
+random iteration order defeats the fixed seed and a failure stops reproducing). Two canaries make "no OOB" falsifiable: every buffer is copied into
+the middle of a **poison-filled allocation** and only the inner slice crosses the ABI (a read
+past the end drags the marker into the HTML), and each buffer renders twice with the results
+compared. Verified by execution - deleting the arena bounds check in `wire.zig str()` made the
+gate fail on the second mutant.
+
+**Numbers** (Ryzen 9 5950X; whole dispatch = serialize + Zig render): appgroups full
+5840→4003 ns/op, body 5469→3403, logs full (400-line tail) 410818→158297, `#log-view`
+415823→162025 (-61%), serialize alone 85714→44020 (-49%). Documents are 80.5% (appgroups) /
+51.1% (logs fixtures) / **17.8%** (full 400-line tail: 9225 B vs 51862 B) of the JSON.
+The ~1 Hz `#log-view` tick - the reason this pilot exists - saves ~253 us per tick.
+`WireWriter` preallocates 1 KiB per buffer: re-growing two slices per render was 14 of 31
+allocs and ~9% of encode time (the GC pressure this format exists to remove).
+
+**When you add a message (wave B-2):** add the row to `schema.go`, regenerate, add the
+`_v2` export in your root.zig/raveui.h marker block, add the binding + stub, switch the bridge
+to `zigWire(...)`, and extend the owning golden suite to assert Go == v1 == v2. Field numbers
+are the wire contract: append only, never renumber, never reuse. `kUint` exists in the schema
+kinds but no pilot field uses it yet (renderers take pre-formatted strings by design - rule 6:
+Go formats every number).
