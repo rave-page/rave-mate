@@ -434,8 +434,6 @@ func RenderLibraryCueCell(stateJSON []byte) (string, bool) {
 	})
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 // --- cueedit ---
 
 // RenderCueEditTopbar renders the #ce-topbar readout strip (empty when the editor is off).
@@ -456,7 +454,9 @@ func RenderCueEditWave(stateJSON []byte) (string, bool) {
 func RenderCueEditRail(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_cueedit_rail(p, l, n)
-=======
+	})
+}
+
 // --- libviews ---
 
 // RenderLibMirror renders the #lib-body peer-mirror surface (banner + iframe).
@@ -505,8 +505,9 @@ func RenderLibSmartModal(stateJSON []byte) (string, bool) {
 func RenderLibRelocModal(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_lib_relocmodal(p, l, n)
->>>>>>> feature/zig-ui-libviews
-=======
+	})
+}
+
 // --- libfixers ---
 // The Library tab's fixer/section subviews. They also render inside RenderLibrary/
 // RenderLibraryBody/RenderLibraryDetail; these are the direct entry points (golden gate)
@@ -558,6 +559,5 @@ func RenderLibFixTagEdit(stateJSON []byte) (string, bool) {
 func RenderLibFixCompat(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_libfix_compat(p, l, n)
->>>>>>> feature/zig-ui-libfixers
 	})
 }

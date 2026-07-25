@@ -100,13 +100,10 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | library ▸ remote cue edit | Zig (`libviews.zig`; `#lib-body` + `#rce-info` + the rail's save section) | `TestZigRCEGolden` |
 | library ▸ modals | Zig (`libviews.zig`; smart-rules editor + relocate-missing) | `TestZigLibModalsGolden` |
 | library | Zig (`native/zigui/src/library.zig` + `library_kit.zig` + `library_sections.zig` + `library_detail.zig`; full tab + `#lib-body`/`#lib-detail`/`#lib-queue-body`/`#ce-cell-<hash>`) | `TestZigLibraryGolden`, `TestZigLibraryQueueGolden`, `TestZigLibraryCueCellGolden` |
-<<<<<<< HEAD
 | library ▸ cue editor | Zig (`native/zigui/src/cueedit.zig`; `#ce-topbar` + full-width wave strip + the `#lib-detail` editor rail) | `TestZigCueEditTopbarGolden`, `TestZigCueEditWaveGolden`, `TestZigCueEditRailGolden`, `TestZigCueEditRailInDetail` |
-=======
+
 
 | library ▸ fixer subviews | Zig (`native/zigui/src/libfixers.zig`; nav rail · gridfix rail + `#gf-live` · fixer results (gridfix/tagfix) · tag editor · prep picker · compat section) | `TestZigLibFixNavRailGolden`, `TestZigLibFixPrepGolden`, `TestZigLibFixGFRailGolden`, `TestZigLibFixGFLiveGolden`, `TestZigLibFixResultsGolden`, `TestZigLibFixTagEditGolden`, `TestZigLibFixCompatGolden` |
-
->>>>>>> feature/zig-ui-libfixers
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -421,7 +418,6 @@ Library-port notes (the biggest tab, 2768 lines): split into `render_library_sta
   webui threading model, not for the DOM. The phase-A bridge also adds a per-render
   state->JSON->parse round trip that phase B removes.
 
-<<<<<<< HEAD
 Cue-editor-port notes (the deepest single subview, ~2000 lines of library_cueedit.go): three
 exports because three surfaces patch independently - `rz_ui_render_cueedit_topbar` (`#ce-topbar`,
 re-patched on EVERY cursor move / edit), `_wave` (the full-width strip the library embeds as
@@ -462,7 +458,7 @@ renderers + bridges); `library_cueedit.go` keeps 3-line delegations so `cePatchR
   embeds the REAL wave + rail markup instead of stubs, so the seam is pinned from both sides.
 - NOT ported (modal, wave 4+): `cePatternManagerHTML` (the manage-patterns dialog) - dialogs
   stay Go, same rule as the publish batch.
-=======
+
 ## Modal ports (recipe — wave 4 dialog sweep follows this)
 
 First modal ports: the two Library dialogs (`libSmartModalHTML`, `libRelocModalHTML`). A modal
@@ -522,4 +518,3 @@ libviews-port notes (wave 3: mirror / remote-cue-edit / modals):
   no-link arm, rce info/save/body × set+dirty+saved+escaping arms, both modals × empty/
   populated/edit/open-filtered/no-match/capped) in a HEAD worktree and in the split tree —
   `diff -r` clean. The Zig golden then re-checks 48 subtests byte-for-byte.
->>>>>>> feature/zig-ui-libviews

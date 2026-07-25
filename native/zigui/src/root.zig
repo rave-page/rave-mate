@@ -418,6 +418,7 @@ export fn rz_ui_render_cueedit_rail(state_json: ?[*]const u8, len: usize, out_le
 
 test "cueedit subview module" {
     _ = cueedit;
+}
 
 // --- libviews ---
 
@@ -460,6 +461,7 @@ export fn rz_ui_render_lib_relocmodal(state_json: ?[*]const u8, len: usize, out_
 
 test "libviews module" {
     _ = libviews;
+}
 
 // --- libfixers ---
 // The Library tab's fixer/section subviews. They render as part of the library tab/body/detail
