@@ -619,6 +619,14 @@ export fn rz_ui_render_auto_schedule(state_json: ?[*]const u8, len: usize, out_l
     return renderJSON(dialogs_b.AsModal, dialogs_b.renderAsModal, state_json, len, out_len);
 }
 
+export fn rz_ui_render_pc_viewer(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PCViewer, dialogs_b.renderPCViewer, state_json, len, out_len);
+}
+
+export fn rz_ui_render_pc_gpu(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PCGpu, dialogs_b.renderPCGpu, state_json, len, out_len);
+}
+
 test "dialogs-b module" {
     _ = dialogs_b;
 }

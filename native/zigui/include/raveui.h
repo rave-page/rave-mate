@@ -203,6 +203,8 @@ const uint8_t *rz_ui_render_ws_device(const uint8_t *state_json, size_t len, siz
 const uint8_t *rz_ui_render_auto_editor(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_auto_runnow(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_auto_schedule(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_viewer(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_gpu(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end dialogs-b --- */
 
 #ifdef __cplusplus

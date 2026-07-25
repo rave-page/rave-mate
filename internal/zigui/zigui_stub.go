@@ -148,4 +148,7 @@ func RenderAutoEditor(stateJSON []byte) (string, bool) { return "", false }
 func RenderAutoRunNow(stateJSON []byte) (string, bool)   { return "", false }
 func RenderAutoSchedule(stateJSON []byte) (string, bool) { return "", false }
 
+func RenderPCViewer(stateJSON []byte) (string, bool) { return "", false }
+func RenderPCGpu(stateJSON []byte) (string, bool)    { return "", false }
+
 // --- end dialogs-b ---

@@ -468,3 +468,45 @@ func TestZigAutoScheduleGolden(t *testing.T) {
 		})
 	}
 }
+
+// ── Motion ▸ point-cloud viewer ──
+
+func moPCViewFixtures() map[string]moPCViewSt {
+	return map[string]moPCViewSt{
+		"empty":     {},
+		"populated": {Title: "Point cloud: set.rmpc", PlayLabel: "Play", MaxFrame: "1799", Hint: "Drag to orbit, scroll to zoom", Close: "Close"},
+		"zeroFrames": {Title: "Point cloud: empty.rmpc", PlayLabel: "Play", MaxFrame: "0",
+			Hint: "No frames", Close: "Close"},
+		"escaping": {Title: `Point cloud: a&"b"<c>'.rmpc`, PlayLabel: `Play & "go"'`, MaxFrame: "10",
+			Hint: `Drag & "orbit" <x>'`, Close: `Close & "it"'`},
+		"long":    {Title: strings.Repeat("very long capture name ", 40), PlayLabel: "Play", MaxFrame: "999999", Hint: strings.Repeat("hint ", 200), Close: "Close"},
+		"unicode": {Title: "点群: セット.rmpc", PlayLabel: "再生", MaxFrame: "42", Hint: "größer · вращать", Close: "閉じる"},
+	}
+}
+
+func moPCGpuFixtures() map[string]moPCGpuSt {
+	return map[string]moPCGpuSt{
+		"empty":    {},
+		"needsGPU": {Title: "3-D viewer needs the GPU", Msg: "GPU rendering is off by default so rave-mate never competes with a live encoder.", EnableLabel: "Enable GPU", Close: "Close"},
+		"enabled":  {Title: "3-D viewer needs the GPU", Msg: "Enabled - restart rave-mate when you are not on air.", Enabled: true, Close: "Close"},
+		"escaping": {Title: `GPU & "off" <x>'`, Msg: `why & "not" <y>'`, EnableLabel: `Enable & "it"'`, Close: "Close"},
+		"long":     {Title: "3-D viewer needs the GPU", Msg: strings.Repeat("reason ", 200), EnableLabel: "Enable GPU", Close: "Close"},
+		"unicode":  {Title: "GPUが必要", Msg: "größer · требуется перезапуск 🎧", EnableLabel: "有効化", Close: "閉じる"},
+	}
+}
+
+func TestZigPCViewerGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	for name, st := range moPCViewFixtures() {
+		t.Run("viewer/"+name, func(t *testing.T) {
+			zigGolden(t, "pcViewer", st, moPCViewerHTMLOf(st), zigui.RenderPCViewer)
+		})
+	}
+	for name, st := range moPCGpuFixtures() {
+		t.Run("gpu/"+name, func(t *testing.T) {
+			zigGolden(t, "pcGpu", st, moPCGpuHTMLOf(st), zigui.RenderPCGpu)
+		})
+	}
+}

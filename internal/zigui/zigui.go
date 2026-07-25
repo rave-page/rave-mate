@@ -728,4 +728,18 @@ func RenderAutoSchedule(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderPCViewer renders the point-cloud viewer dialog shell (canvas + transport chrome).
+func RenderPCViewer(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_viewer(p, l, n)
+	})
+}
+
+// RenderPCGpu renders the point-cloud viewer GPU prompt.
+func RenderPCGpu(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_gpu(p, l, n)
+	})
+}
+
 // --- end dialogs-b ---

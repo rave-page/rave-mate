@@ -806,3 +806,84 @@ test "as block: fpairsel pairs two selects, selraw raws the label" {
     try renderAeBlock(&h, .{ .kind = "fpairsel", .sel = .{ .id = "a" }, .sel2 = .{ .id = "b" } });
     try std.testing.expect(std.mem.startsWith(u8, h.b.items, "<div class=fpair><div class=ss-field>"));
 }
+
+// ══ Motion ▸ point-cloud viewer ══
+// STRUCTURAL chrome only: everything inside #pcv-canvas is pc_viewer.js (THREE.js), and the
+// transport controls deliberately carry NO data-act (the JS owns them, so a frame never costs a
+// Go round-trip). Both dialogs hand-roll their chrome — the dialog carries an extra `pcv-modal`
+// class and every close control dispatches pcv-close (dispose GL), not modal-close — so the
+// bracket is local to this pair rather than components.zig modalOpen.
+
+fn pcvModalOpen(h: *Html, title: []const u8) !void {
+    try h.raw("<div class=modal-scrim data-act=pcv-close></div>" ++
+        "<div class=\"modal pcv-modal\" role=dialog><div class=modal-head><h3 class=modal-title>");
+    try h.esc(title);
+    try h.raw("</h3><button class=modal-x data-act=pcv-close aria-label=Close>✕</button></div>" ++
+        "<div class=modal-body>");
+}
+
+fn pcvModalFoot(h: *Html) !void {
+    try h.raw("</div><div class=modal-foot>");
+}
+
+fn pcvModalClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// PCViewer is the viewer shell. maxFrame is a pre-formatted integer spliced into an UNQUOTED
+/// attribute, as Go does.
+pub const PCViewer = struct {
+    title: []const u8 = "",
+    playLabel: []const u8 = "",
+    maxFrame: []const u8 = "",
+    hint: []const u8 = "",
+    close: []const u8 = "",
+};
+
+pub fn renderPCViewer(h: *Html, st: PCViewer) !void {
+    try pcvModalOpen(h, st.title);
+    try h.raw("<div class=pcv-wrap><div id=pcv-stage class=pcv-stage>" ++
+        "<canvas id=pcv-canvas class=pcv-canvas></canvas></div><div class=pcv-transport>" ++
+        "<button id=pcv-play class=\"rp-btn rp-btn--go pcv-play\">▶ ");
+    try h.esc(st.playLabel);
+    try h.raw("</button><input id=pcv-scrub class=slider-input type=range min=0 max=");
+    try h.raw(st.maxFrame);
+    try h.raw(" step=1 value=0><span id=pcv-time class=pcv-time data-label=\"pcv-time\"></span></div>" ++
+        "<div id=pcv-info class=pcv-info data-label=\"pcv-info\"></div><div class=pcv-hint>");
+    try h.esc(st.hint);
+    try h.raw("</div></div>");
+    try pcvModalFoot(h);
+    try c.btn(h, st.close, "outline", "pcv-close", "");
+    try pcvModalClose(h);
+}
+
+/// PCGpu is the "viewer needs GPU" prompt. enabled = the flag was just flipped, so the card
+/// confirms + asks for a restart instead of offering the one-click enable.
+pub const PCGpu = struct {
+    title: []const u8 = "",
+    msg: []const u8 = "",
+    enabled: bool = false,
+    enableLabel: []const u8 = "",
+    close: []const u8 = "",
+};
+
+pub fn renderPCGpu(h: *Html, st: PCGpu) !void {
+    try pcvModalOpen(h, st.title);
+    try h.raw("<p class=pcv-gpu-msg>");
+    try h.esc(st.msg);
+    try h.raw("</p>");
+    try pcvModalFoot(h);
+    if (!st.enabled) try c.btn(h, st.enableLabel, "go", "pcv-enablegpu", "");
+    try c.btn(h, st.close, "outline", "pcv-close", "");
+    try pcvModalClose(h);
+}
+
+test "pcv gpu prompt: enable button only on the not-yet-enabled arm" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderPCGpu(&h, .{ .title = "GPU", .msg = "off by default", .enableLabel = "Enable GPU", .close = "Close" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-act=\"pcv-enablegpu\"") != null);
+    h.b.clearRetainingCapacity();
+    try renderPCGpu(&h, .{ .title = "GPU", .msg = "restart to apply", .enabled = true, .close = "Close" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "pcv-enablegpu") == null);
+}
