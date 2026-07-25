@@ -88,3 +88,12 @@ func RenderLibraryBody(stateJSON []byte) (string, bool)    { return "", false }
 func RenderLibraryDetail(stateJSON []byte) (string, bool)  { return "", false }
 func RenderLibraryQueue(stateJSON []byte) (string, bool)   { return "", false }
 func RenderLibraryCueCell(stateJSON []byte) (string, bool) { return "", false }
+
+// --- settings-sub ---
+
+func RenderSettingsGridfix(stateJSON []byte) (string, bool)      { return "", false }
+func RenderSettingsGridfixModel(stateJSON []byte) (string, bool) { return "", false }
+func RenderSettingsBridge(stateJSON []byte) (string, bool)       { return "", false }
+func RenderSettingsUpdFlow(stateJSON []byte) (string, bool)      { return "", false }
+
+// --- end settings-sub ---

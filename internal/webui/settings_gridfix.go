@@ -10,7 +10,6 @@ import (
 	"context"
 	"html"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -115,25 +114,26 @@ func (u *UI) gfCheckpointsCached() []train.CheckpointInfo {
 	return u.gfProbe.checkpoints
 }
 
-// gridfixVariantHTML renders one engine variant's status line + install/remove buttons
-// + its progress target. key ∈ {"cpu","cuda"}.
-func (u *UI) gridfixVariantHTML(key string, v gridfix.VariantStatus, gpuPresent bool) string {
+// gridfixVariantState resolves one engine variant's status line + install/remove actions
+// + its progress target. key ∈ {"cpu","cuda"}. Pure renderer: gfVarHTML.
+func gridfixVariantState(key string, v gridfix.VariantStatus, gpuPresent bool) gfVarSt {
 	esc := html.EscapeString
 	name := i18n.T("settings.body.gridfix." + key + "Name")
-	var line string
+	out := gfVarSt{Key: key, Btns: []gfBtn{}}
 	switch {
 	case v.EngineOK:
 		ver := ""
 		if v.Versions != nil {
 			ver = " (beat-this " + v.Versions.BeatThis + ", torch " + v.Versions.Torch + ")"
 		}
-		line = hint("ok", i18n.T("settings.body.gridfix.variantReady", i18n.A{"name": name})+esc(ver))
+		// esc(ver) here + hint()'s own escaping = the original's double escape; kept for parity
+		out.Tone = "ok"
+		out.Line = i18n.T("settings.body.gridfix.variantReady", i18n.A{"name": name}) + esc(ver)
 	case v.Python != "":
-		line = hint("bad", i18n.T("settings.body.gridfix.variantBroken", i18n.A{"name": name}))
+		out.Tone, out.Line = "bad", i18n.T("settings.body.gridfix.variantBroken", i18n.A{"name": name})
 	default:
-		line = hint("", i18n.T("settings.body.gridfix.variantMissing", i18n.A{"name": name}))
+		out.Line = i18n.T("settings.body.gridfix.variantMissing", i18n.A{"name": name})
 	}
-	var buttons string
 	installLabel := i18n.T("settings.body.gridfix.installCpu")
 	if key == "cuda" {
 		installLabel = i18n.T("settings.body.gridfix.installCuda")
@@ -141,66 +141,67 @@ func (u *UI) gridfixVariantHTML(key string, v gridfix.VariantStatus, gpuPresent 
 	if !v.EngineOK {
 		if key == "cuda" && !gpuPresent {
 			// gated, never hidden: name what's missing instead of failing later
-			buttons += btnGated(installLabel, i18n.T("settings.body.gridfix.noGpu"))
+			out.Btns = append(out.Btns, gfBtn{Label: installLabel, Gate: i18n.T("settings.body.gridfix.noGpu")})
 		} else {
-			buttons += btn(installLabel, "primary", "gridfix-install:"+key, "")
+			out.Btns = append(out.Btns, gfBtn{Label: installLabel, Variant: "primary", Act: "gridfix-install:" + key})
 		}
 	}
 	if v.Python != "" {
-		buttons += btn(i18n.T("settings.body.gridfix.remove", i18n.A{"name": name}), "", "gridfix-uninstall:"+key, "")
-	}
-	out := line
-	if buttons != "" {
-		out += btnRow(buttons)
+		out.Btns = append(out.Btns, gfBtn{Label: i18n.T("settings.body.gridfix.remove", i18n.A{"name": name}),
+			Act: "gridfix-uninstall:" + key})
 	}
 	if key == "cuda" && !v.EngineOK && gpuPresent {
-		out += `<div class=set-note>` + esc(i18n.T("settings.body.gridfix.cudaHint")) + `</div>`
+		out.HasNote, out.Note = true, i18n.T("settings.body.gridfix.cudaHint")
 	}
-	return out + `<div id=inst-gridfix-` + key + `></div>`
+	return out
 }
 
-// gridfixCardBody renders the engine state + install/uninstall controls + knobs.
-func (u *UI) gridfixCardBody() string {
-	f := &u.svc.Cfg.Features.GridFix
+// gridfixCardState resolves the engine state + install/uninstall controls + knobs (impure:
+// config + the cached env probe, whose refresh this call may kick).
+func (u *UI) gridfixCardState() gfCardSt {
 	st, ready := u.gridfixStatusCached()
-	var b strings.Builder
-	esc := html.EscapeString
+	return gridfixCardStateOf(&u.svc.Cfg.Features.GridFix, st, ready)
+}
 
+// gridfixCardStateOf maps config + probe result to render state (i18n + number formatting only).
+func gridfixCardStateOf(f *config.GridFixFeature, st gridfix.EnvStatus, ready bool) gfCardSt {
+	s := gfCardSt{Vars: []gfVarSt{}}
 	switch {
 	case !ready:
-		b.WriteString(hint("", i18n.T("settings.body.gridfix.probing")))
+		s.LeadKind, s.Lead = "hint", i18n.T("settings.body.gridfix.probing")
 	case st.BasePython == "":
-		b.WriteString(hint("bad", i18n.T("settings.body.gridfix.noPython")))
+		s.LeadKind, s.LeadTone, s.Lead = "hint", "bad", i18n.T("settings.body.gridfix.noPython")
 	case st.CPU.Python == "" && st.CUDA.Python == "":
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.notInstalled", i18n.A{"version": st.BaseVersion})) + `</div>`)
+		s.LeadKind, s.Lead = "note", i18n.T("settings.body.gridfix.notInstalled", i18n.A{"version": st.BaseVersion})
 	}
-
 	if ready && st.BasePython != "" {
-		b.WriteString(u.gridfixVariantHTML("cpu", st.CPU, st.GPUPresent))
-		b.WriteString(u.gridfixVariantHTML("cuda", st.CUDA, st.GPUPresent))
+		s.Vars = append(s.Vars,
+			gridfixVariantState("cpu", st.CPU, st.GPUPresent),
+			gridfixVariantState("cuda", st.CUDA, st.GPUPresent))
 	}
-	b.WriteString(btnRow(btn(i18n.T("settings.body.gridfix.recheck"), "", "gridfix-recheck", "")))
-
+	s.Recheck = nbtn(i18n.T("settings.body.gridfix.recheck"), "", "gridfix-recheck", "")
 	// engine preference - honored at run time; auto = CUDA if installed+working else CPU
-	b.WriteString(selectBox(i18n.T("settings.body.gridfix.enginePref"), "set:gridfix-device",
+	s.Engine = resolveSelectBox(i18n.T("settings.body.gridfix.enginePref"), "set:gridfix-device",
 		[][2]string{
 			{"auto", i18n.T("settings.body.gridfix.engineAuto")},
 			{"cpu", i18n.T("settings.body.gridfix.engineCpu")},
 			{"cuda", i18n.T("settings.body.gridfix.engineCuda")},
-		}, f.ResolvedDevice()))
-
-	b.WriteString(pathField(i18n.T("settings.body.gridfix.pythonPath"), "set:gridfix-python", f.PythonPath, "file"))
-	b.WriteString(field(i18n.T("settings.body.gridfix.minQuality"), "set:gridfix-minq",
-		strconv.FormatFloat(f.ResolvedMinQuality(), 'f', -1, 64), "number"))
-	b.WriteString(field(i18n.T("settings.body.gridfix.thresholdMs"), "set:gridfix-thresh",
-		strconv.FormatFloat(f.ResolvedThresholdMS(), 'f', -1, 64), "number"))
-	b.WriteString(toggleRow(i18n.T("settings.body.gridfix.lockFixed"), "set:gridfix-lock", f.LockFixed))
+		}, f.ResolvedDevice())
+	// path row (Go pathField): text input + the pick-file:<act> Browse button
+	s.Python = newField(i18n.T("settings.body.gridfix.pythonPath"), "set:gridfix-python", f.PythonPath, "text")
+	s.Browse = nbtn("Browse…", "ghost", "pick-file:set:gridfix-python", "")
+	s.MinQ = newField(i18n.T("settings.body.gridfix.minQuality"), "set:gridfix-minq",
+		strconv.FormatFloat(f.ResolvedMinQuality(), 'f', -1, 64), "number")
+	s.Thresh = newField(i18n.T("settings.body.gridfix.thresholdMs"), "set:gridfix-thresh",
+		strconv.FormatFloat(f.ResolvedThresholdMS(), 'f', -1, 64), "number")
+	s.Lock = newToggle(i18n.T("settings.body.gridfix.lockFixed"), "set:gridfix-lock", f.LockFixed)
 	if len(f.BiasExt) > 0 {
-		b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.calibrated", i18n.A{"vals": gfBiasSummary(f.BiasExt)})) + `</div>`)
+		s.HasCal = true
+		s.Cal = i18n.T("settings.body.gridfix.calibrated", i18n.A{"vals": gfBiasSummary(f.BiasExt)})
 	}
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.calNote")) + `</div>`)
-	b.WriteString(`<div class=set-note>` + esc(i18n.T("settings.body.gridfix.note")) + `</div>`)
-	return b.String()
+	s.CalNote = i18n.T("settings.body.gridfix.calNote")
+	s.Note = i18n.T("settings.body.gridfix.note")
+	return s
 }
 
 // gridfixInstall runs one variant's engine install, pip lines streamed into the card

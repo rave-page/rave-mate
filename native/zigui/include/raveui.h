@@ -131,6 +131,17 @@ const uint8_t *rz_ui_render_library_detail(const uint8_t *state_json, size_t len
 const uint8_t *rz_ui_render_library_queue(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_library_cuecell(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- settings-sub --- */
+/* Settings card bodies owned by other webui files (rendered inside the settings tab through its
+ * block list; exported for the standalone patch targets + the per-body golden tests). */
+const uint8_t *rz_ui_render_settings_gridfix(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_gridfixmodel(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_bridge(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #inst-update inner (patchUpd). Hidden/unchecked states render empty => NULL, and the Go
+ * fallback renders the same "". */
+const uint8_t *rz_ui_render_settings_updflow(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end settings-sub --- */
+
 #ifdef __cplusplus
 }
 #endif

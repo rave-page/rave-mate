@@ -394,3 +394,35 @@ export fn rz_ui_render_library_cuecell(state_json: ?[*]const u8, len: usize, out
 test "library tab module" {
     _ = library;
 }
+
+// --- settings-sub ---
+// The four settings card bodies owned by other webui files (settings_gridfix.go,
+// settings_gridfix_model.go, bridge_actions.go, update_actions.go). They render inside the
+// settings tab via its block list; these exports serve the standalone patch targets + the
+// per-body golden tests.
+
+const settings_sub = @import("settings_sub.zig");
+
+export fn rz_ui_render_settings_gridfix(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings_sub.GfCard, settings_sub.renderGridfix, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_gridfixmodel(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings_sub.GfModel, settings_sub.renderGridfixModel, state_json, len, out_len);
+}
+
+export fn rz_ui_render_settings_bridge(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings_sub.Bridge, settings_sub.renderBridge, state_json, len, out_len);
+}
+
+/// #inst-update inner (patchUpd). The hidden/unchecked states render EMPTY ⇒ NULL ⇒ the Go
+/// fallback renders the same empty string.
+export fn rz_ui_render_settings_updflow(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(settings_sub.UpdFlow, settings_sub.renderUpdFlow, state_json, len, out_len);
+}
+
+test "settings sub-view module" {
+    _ = settings_sub;
+}
+
+// --- end settings-sub ---

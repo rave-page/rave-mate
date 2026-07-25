@@ -558,6 +558,17 @@ func sbForm(act string, inputs []setInput, submit, submitVariant string, bs ...u
 	return b
 }
 
+// ── sub-view blocks (bodies owned by other files, crossing as structured state) ──
+
+func sbGridfix(s gfCardSt) setBlock       { return setBlock{K: "gridfix", GF: &s} }
+func sbGridfixModel(s gfModelSt) setBlock { return setBlock{K: "gridfixmodel", GFM: &s} }
+func sbBridge(s bridgeSt) setBlock        { return setBlock{K: "bridge", Brg: &s} }
+
+// sbUpdRegion is sbRegion whose inner markup is the update flow's state (#inst-update).
+func sbUpdRegion(id string, s updFlowSt) setBlock {
+	return setBlock{K: "updregion", ID: id, Upd: &s}
+}
+
 // blockKid narrows a control block to a composite child (fpair / btn-row / item-row trailing).
 func blockKid(b setBlock) setKid {
 	switch b.K {
@@ -727,9 +738,9 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 			[]setBlock{sbField(i18n.T("settings.body.account.nodeName"), "set:peer-nick", f.Peers.Nickname, "text")},
 			u.peersCacheBlocks()...)
 	case "accountbridge":
-		// WAVE 3 seam: bridge_actions.go owns this body (enrolment + trusted sessions).
+		// bridge_actions.go owns this body's state (enrolment + trusted sessions).
 		return i18n.T("settings.card.accountbridge.title"), i18n.T("settings.card.accountbridge.desc"),
-			[]setBlock{sbRaw(u.bridgeCardBody())}
+			[]setBlock{sbBridge(u.bridgeCardState())}
 	case "webcam":
 		return i18n.T("settings.card.webcam.title"), i18n.T("settings.card.webcam.desc"), []setBlock{
 			sbToggle(i18n.T("settings.body.webcam.autostart"), "set:webcam-autostart", f.Webcam.AutoStart),
@@ -779,14 +790,14 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 			u.toolInstallBlock(mediatools.FFmpeg, "ffmpeg")}
 
 	case "gridfix":
-		// WAVE 3 seam: settings_gridfix.go owns this body (engine variants + install).
+		// settings_gridfix.go owns this body's state (engine variants + install).
 		return i18n.T("settings.card.gridfix.title"), i18n.T("settings.card.gridfix.desc"),
-			[]setBlock{sbRaw(u.gridfixCardBody())}
+			[]setBlock{sbGridfix(u.gridfixCardState())}
 
 	case "gridfixmodel":
-		// WAVE 3 seam: settings_gridfix_model.go owns this body (checkpoints + fine-tuning).
+		// settings_gridfix_model.go owns this body's state (checkpoints + fine-tuning).
 		return i18n.T("settings.card.gridfixmodel.title"), i18n.T("settings.card.gridfixmodel.desc"),
-			[]setBlock{sbRaw(u.gridfixModelCardBody())}
+			[]setBlock{sbGridfixModel(u.gridfixModelState())}
 
 	// ── Integrations ──
 	case "twitch":
@@ -1331,8 +1342,8 @@ func (u *UI) unityBlocks() []setBlock {
 // updatesBlocks renders the version line + channel, and (on a stamped build with a feed baked in)
 // a "Check for updates" control wired to the shared selfupdate flow. A true dev build (empty
 // FeedURL) keeps the manual-updates note. #inst-update is the progress/result region the check +
-// apply handlers patch (same pattern as toolInstallBlock's #inst-<key>) - WAVE 3 seam:
-// update_actions.go owns updateFlowHTML.
+// apply handlers patch (same pattern as toolInstallBlock's #inst-<key>) - update_actions.go owns
+// its state (updateFlowState) + the standalone patch renderer.
 func (u *UI) updatesBlocks() []setBlock {
 	out := []setBlock{
 		sbKV(i18n.T("settings.body.updates.version"), version.String()),
@@ -1342,7 +1353,7 @@ func (u *UI) updatesBlocks() []setBlock {
 	}
 	return append(out,
 		sbBtnRow(nbtn(i18n.T("settings.body.updates.check"), "primary", "settings-update-check", "")),
-		sbRegion("inst-update", u.updateFlowHTML()),
+		sbUpdRegion("inst-update", u.updateFlowState()),
 		sbNote(i18n.T("settings.body.updates.note")))
 }
 

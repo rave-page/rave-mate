@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/gridfix"
+	"rave.page/mate/internal/gridfix/train"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/ui"
 	"rave.page/mate/internal/unityproj"
@@ -126,6 +128,20 @@ func setFixtureUI(populated bool) *UI {
 	u.probes.unity = map[string]unityproj.Project{
 		`C:\Unity\World`: {Valid: true, Name: "World", HasPlugin: true},
 	}
+
+	// Land the gridfix env probe so the sub-view card bodies (settings_sub.zig) render POPULATED in
+	// the real tab path: CPU engine installed + working, CUDA installed but broken with a GPU
+	// present (install + remove + cudaHint branches), one fine-tuned checkpoint active, and a
+	// finished training verdict. at=now keeps gridfixStatusCached from kicking a background probe.
+	u.gfProbe.ready, u.gfProbe.at = true, time.Now()
+	u.gfProbe.st = gridfix.EnvStatus{BasePython: `C:\py\python.exe`, BaseVersion: "3.12.10", GPUPresent: true,
+		CPU: gridfix.VariantStatus{Python: `C:\gf\env\python.exe`, Root: `C:\gf\env`, EngineOK: true,
+			Versions: &gridfix.Versions{BeatThis: "0.1.2", Torch: "2.4.0"}},
+		CUDA: gridfix.VariantStatus{Python: `C:\gf\env-cuda\python.exe`, Root: `C:\gf\env-cuda`}}
+	u.gfProbe.checkpoints = []train.CheckpointInfo{
+		{Path: `C:\gf\models\ft-1.ckpt`, Name: "ft-1", At: time.Date(2026, 7, 20, 15, 4, 0, 0, time.UTC)}}
+	u.gfTrain.verdict = &train.TrainEvent{Kind: "done", BeforeF: 0.812, AfterF: 0.877, Improved: true}
+	f.GridFix.ActiveModel = `C:\gf\models\ft-1.ckpt`
 	return u
 }
 

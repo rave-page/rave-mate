@@ -7,18 +7,17 @@
 //! Go-rendered card, so the query never reaches Zig). Card bodies arrive as BLOCK LISTS; this
 //! renderer walks them into the components.zig primitives.
 //!
-//! Trusted raw markup passed through verbatim (`raw`): tooltip.go `tipTopic` cards, and the four
-//! card bodies owned by other files — WAVE 3 seams:
-//!   settings_gridfix.go       gridfixCardBody()      → card "gridfix" body
-//!   settings_gridfix_model.go gridfixModelCardBody() → card "gridfixmodel" body
-//!   bridge_actions.go         bridgeCardBody()       → card "accountbridge" body
-//!   update_actions.go         updateFlowHTML()       → #inst-update region in card "updates"
+//! Trusted raw markup passed through verbatim (`raw`): tooltip.go `tipTopic` cards. The four card
+//! bodies owned by other files (gridfix, gridfix model, account bridge, the #inst-update region)
+//! used to ride here as raw HTML too — they now cross as STRUCTURED state and render through
+//! settings_sub.zig (block kinds gridfix | gridfixmodel | bridge | updregion).
 //! Element ids (stset-<id>, stnav-<id>, set-<sec>, inst-<key>, data-act=toggle:<id>, form acts)
 //! are trusted literals spliced unescaped, exactly as Go does — ctl addressing depends on it.
 
 const std = @import("std");
 const Html = @import("html.zig").Html;
 const c = @import("components.zig");
+const sub = @import("settings_sub.zig");
 
 /// Status is one card's live status region (webui setStatusSt): variant + terse state line.
 pub const Status = struct {
@@ -66,6 +65,11 @@ pub const Block = struct {
     inputs: []const Input = &.{},
     submit: []const u8 = "",
     subVar: []const u8 = "",
+    // sub-view bodies owned by other webui files (settings_sub.zig)
+    gf: ?sub.GfCard = null,
+    gfm: ?sub.GfModel = null,
+    brg: ?sub.Bridge = null,
+    upd: ?sub.UpdFlow = null,
 };
 
 /// Switch is a card header's feature switch (webui setSwitchSt). Non-empty gate = the
@@ -319,6 +323,27 @@ pub fn block(h: *Html, b: Block) !void {
     }
     if (eq(b.k, "form")) return form(h, b);
     if (eq(b.k, "raw")) return h.raw(b.html);
+    // sub-view bodies (settings_sub.zig); a missing payload renders nothing, like Go's nil guard
+    if (eq(b.k, "gridfix")) {
+        if (b.gf) |s| try sub.renderGridfix(h, s);
+        return;
+    }
+    if (eq(b.k, "gridfixmodel")) {
+        if (b.gfm) |s| try sub.renderGridfixModel(h, s);
+        return;
+    }
+    if (eq(b.k, "bridge")) {
+        if (b.brg) |s| try sub.renderBridge(h, s);
+        return;
+    }
+    if (eq(b.k, "updregion")) {
+        try h.raw("<div id=");
+        try h.raw(b.id);
+        try h.raw(">");
+        if (b.upd) |s| try sub.renderUpdFlow(h, s);
+        try h.raw("</div>");
+        return;
+    }
 }
 
 fn kids(h: *Html, list: []const Kid) !void {

@@ -993,3 +993,43 @@ test "library layout primitives" {
         "<div class=md-list>L</div><div class=split-h data-splitvar=\"lib-det-w\" data-splitdef=340 " ++
         "data-splitdir=r></div><div class=md-detail>D</div></div>", h.b.items);
 }
+
+// --- settings-sub ---
+// The settings sub-view bodies (gridfix, gridfix model, account bridge, update flow) reuse
+// everything above (hint/btn*/btnGated/fieldOf/toggleOf/toggleRowTip/statusOf/selectBox/
+// progressBar/section*/emptyState) — only the dialog-style list row was missing.
+
+/// listRowOpen/listRowClose bracket a dialog list entry (Go listRow, settings_actions.go):
+/// title + optional sub-line, then the trailing action buttons the caller writes.
+pub fn listRowOpen(h: *Html, title: []const u8, sub: []const u8) !void {
+    try h.raw("<div class=set-listrow><div class=set-listmain>");
+    try h.esc(title);
+    if (sub.len != 0) {
+        try h.raw("<div class=set-listsub>");
+        try h.esc(sub);
+        try h.raw("</div>");
+    }
+    try h.raw("</div><div class=irow-actions>");
+}
+
+pub fn listRowClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+test "listRow with and without a sub-line" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try listRowOpen(&h, "Chrome on <Studio>", "lan · expires 2026-08-01 12:00");
+    try btn(&h, "Revoke", "destructive", "bridge-revoke:p1", "");
+    try listRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=set-listrow><div class=set-listmain>Chrome on &lt;Studio&gt;" ++
+        "<div class=set-listsub>lan · expires 2026-08-01 12:00</div></div><div class=irow-actions>" ++
+        "<button class=\"rp-btn rp-btn--destructive\" data-act=\"bridge-revoke:p1\">Revoke</button></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try listRowOpen(&h, "T", "");
+    try listRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=set-listrow><div class=set-listmain>T</div>" ++
+        "<div class=irow-actions></div></div>", h.b.items);
+}
+
+// --- end settings-sub ---
