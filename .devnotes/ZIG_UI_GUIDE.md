@@ -106,6 +106,12 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 
 
 | library ▸ fixer subviews | Zig (`native/zigui/src/libfixers.zig`; nav rail · gridfix rail + `#gf-live` · fixer results (gridfix/tagfix) · tag editor · prep picker · compat section) | `TestZigLibFixNavRailGolden`, `TestZigLibFixPrepGolden`, `TestZigLibFixGFRailGolden`, `TestZigLibFixGFLiveGolden`, `TestZigLibFixResultsGolden`, `TestZigLibFixTagEditGolden`, `TestZigLibFixCompatGolden` |
+| vrchat ▸ groups dialogs | Zig (`native/zigui/src/dialogs_b.zig`; `#vrcg-role-body` · `#vrcg-inv-list` · roles + invite shells · kick/ban + post-delete confirms) | `TestZigVgDialogsGolden` |
+| worlds ▸ dialogs | Zig (`dialogs_b.zig`; list editor · poster editor · friend/group/role pickers + `#world-fr-list`/`#world-grp-list`/`#world-role-list` · GitHub device code) | `TestZigWsDialogsGolden` |
+| automations ▸ editor | Zig (`dialogs_b.zig` `AeModal`; block-list form + step cards) | `TestZigAutoEditorGolden` |
+| automations ▸ run now | Zig (`dialogs_b.zig` `ArModal`) | `TestZigAutoRunNowGolden` |
+| automations ▸ schedule editor | Zig (`dialogs_b.zig` `AsModal`) | `TestZigAutoScheduleGolden` |
+| motion ▸ point-cloud viewer dialogs | Zig (`dialogs_b.zig`; viewer shell chrome + GPU prompt) | `TestZigPCViewerGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -556,3 +562,80 @@ libviews-port notes (wave 3: mirror / remote-cue-edit / modals):
   no-link arm, rce info/save/body × set+dirty+saved+escaping arms, both modals × empty/
   populated/edit/open-filtered/no-match/capped) in a HEAD worktree and in the split tree —
   `diff -r` clean. The Zig golden then re-checks 48 subtests byte-for-byte.
+
+Dialog-sweep-B notes (wave 4: the feature-tab dialog families — VRChat ▸ Groups, Worlds,
+Automations, point-cloud viewer). All six families follow the modal recipe above; one Zig file
+(`native/zigui/src/dialogs_b.zig`) holds every mirror, exports live in the `// --- dialogs-b ---`
+blocks of root.zig / raveui.h / zigui.go / zigui_stub.go.
+- **Files with NO i18n keys carry their prose as state anyway.** vrchat_groups + worlds dialogs are
+  hardcoded English source literals; several are spliced UNESCAPED by Go (ws-help paragraphs carry
+  apostrophes, the friends-list overflow marker, form placeholders, submit-button labels), so they
+  travel in state and BOTH renderers emit them raw — same rule the Worlds TAB port set. Only fixed
+  sentence fragments that never vary stay as renderer literals in both files
+  (`? This cannot be undone.`, the kick/ban `<b>…</b> from …?` frame, the reloc-style `→ `).
+- The kick/ban confirm's **verb is raw in the body and escaped in the button**: Go splices
+  `verb + " <b>"` unescaped but passes the same string through `btn()`. Replicated exactly.
+- **Three in-modal patch targets got their own exports** (`#vrcg-role-body`, `#vrcg-inv-list`,
+  `#world-fr-list`/`#world-grp-list`/`#world-role-list`) and the shells embed the same renderer, so
+  a shell render and a later patch cannot diverge. The role-list "Loading roles…" arm folded into
+  the fragment state (`loading`), replacing the shell's hardcoded placeholder markup.
+- **Two more side-effect-ordered builders** (peers/cueedit lesson again): `wsListEditorState` writes
+  `wsState.editList` before rendering (entry actions index it) and `wsGroupListState` records
+  `wsState.pickGroups` in DISPLAY order (fav/roles acts index that). `vgInviteListState` writes back
+  `shownFriends` — the invite-pick indices are the filtered order, not the friends order.
+- **The automations forms are a BLOCK LIST** (`aeBlockSt`, settings-port shape) shared by the
+  automation editor AND the schedule editor: `field|fpair|toolbar|toggle|select|selraw|fpairsel|
+  hint|pbhint|raw`. `dlgFieldSt` is a local twin of `uiField` with a `tip` — the media batch's
+  `uiField` has no tooltip field and components.zig `Field` already carries `tip`, so a local Go
+  struct with matching json tags needed ZERO components.zig change. `selraw` (the tooltip'd trigger
+  picker, Go `smartSelectRaw`) and `fpairsel` (the daily hour/minute pair) are the only kinds the
+  editor itself didn't need.
+- Raw seams in the automations dialogs: every `tip` (tipTopic) and the loudness override block
+  (`loudnessFields`, float-formatted Go-side) — renderer ownership wins, same rule as the media batch.
+- **Explicit flags over "empty means the other branch"**, as ever: the run-now footer carries
+  `gated` + `why` vs `variant` (btnGated names the missing precondition instead of hiding the Run
+  button), and `erases` (Go `autoChainDeletes`) gates both the acknowledgement block and the footer
+  wording.
+- The point-cloud dialogs hand-roll their chrome (extra `pcv-modal` class, `pcv-close` on scrim/✕
+  so GL is disposed), so the bracket is LOCAL to that pair in both renderers — components.zig
+  `modalOpen` is untouched. Only structural chrome crosses the ABI: `#pcv-canvas` is pc_viewer.js
+  (THREE.js) and the transport controls carry no `data-act` by design (no Go round-trip per frame).
+- **Zero new components.zig helpers and zero modifications** in this whole batch — the existing kit
+  (`modalOpen/Foot/FootDefault/Close`, `fieldOf`, `toggleOf`, `kvOf`, `btnOf/btnRowOf`, `btnGated`,
+  `selectBox/selectBoxRaw`, `itemRow*`, `card*`, `section*`, `fpair*`, `hint`, `emptyState`) covered
+  everything; the family-specific chrome (`wsHelp`, `wsPosterField`, the pcv bracket) is local to
+  dialogs_b.zig.
+- Proof per family: the golden gate (106 subtests) plus a literal-multiset diff of the pre-split
+  emitters vs the split ones — every drop is dedup (chrome that existed twice now once) or a
+  `fmt.Sprintf` → concatenation, zero content lost. A deliberate one-byte Zig perturbation failed 4
+  subtests before revert (and confirmed `go test` needs `-count=1` after a lib rebuild — the cgo
+  archive is NOT part of the test cache key, so a stale PASS is possible without it).
+
+Not ported, with reasons (dialog sweep B):
+- `actionmenu.go` — already fully ported in the publish/library batches: `actionMenu()` delegates to
+  `resolveActionMenu` + `actionMenuHTML`, mirrored as components.zig `actionMenu`. Nothing left.
+- `pickers.go` / `pickers_windows.go` / `pick_actions.go` — **no HTML at all**. These are the native
+  OS dialog bindings (IFileDialog) plus the `pick-dir:`/`pick-file:` act redispatch; the only markup
+  involved is the `Browse…` button the CALLING surface renders (already ported per tab).
+- `tooltip.go` `tipTopic` — assessed, deliberately NOT ported. Cost/benefit below.
+
+**tipTopic assessment (why the tooltip primitive stays Go).** `renderTip` is 40 lines of markup and
+would port cleanly in isolation (a `label.tt` + hidden checkbox + inline SVG + `tt-card`, one
+keybind grid, `\n\n`-split body paragraphs, a link list). The cost is not the renderer — it is the
+CONTRACT. `tipTopic(id)` is called 70 times across 18 files and its output is embedded INSIDE other
+components (`fieldEx`'s tip slot, `ss-label` spans, `sectionOpenTip`, `pb-hint` tails, card heads),
+which is exactly why every migrated tab already carries it as a pre-rendered trusted raw string.
+Porting it would mean either (a) threading a structured `tipSt` through every one of those call
+sites and every state struct that currently has a `tip []const u8` field — a breaking change to
+~15 already-merged state contracts and their goldens, for markup that is byte-identical either way
+— or (b) exporting `rz_ui_render_tip` and having Go call INTO Zig per tooltip during a Go render,
+which adds a state→JSON→parse round trip per tooltip (multiple per card, ~40 on the settings tab)
+on the serialized actWorker and buys nothing while the surrounding renderer is still Go. Neither is
+worth it in phase A. Two further reasons to wait: `renderTip` resolves i18n INSIDE itself
+(`i18n.T("help."+id+".title")`, plus `i18n.T` per keybind row and per group header) so a port needs
+the whole `helpTopics` registry (keybind grids for cue-edit/wave-nav, `virtualMIDILinks`) resolved
+into state, and `kbEmph` splits the action label on the first whitespace to bold the leading verb —
+locale-dependent text processing that belongs on the Go side of the seam. Recommendation: port
+`tipTopic` in **phase B**, when the shell itself is Zig and a tooltip can be composed in-process
+without crossing the ABI; until then the pre-rendered-raw contract is correct and already
+golden-gated everywhere it appears.
