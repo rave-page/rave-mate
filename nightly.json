@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b42919f",
-  "build": 145,
-  "commit": "b42919f",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-145-20260725-b42919f.exe",
-  "sha256": "b1e5ccc5dfe4ca50cd9f2e27bb047ad10791e3a03e823640fc8362b6a94b23de",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-145-20260725-b42919f.exe",
-  "installer_sha256": "751052227d2f1069d72b018fac5b9fff633861ce26aa1e7f405fc5aab810fc51",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-145-20260725-b42919f",
-  "linux_sha256": "a87bb650aa4b739d45e804aa953b51a02f0a497ae372569e1b0f69a8a698c9bd",
+  "version": "nightly-a2da7f8",
+  "build": 146,
+  "commit": "a2da7f8",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-146-20260725-a2da7f8.exe",
+  "sha256": "c3c7fbdd41169ea379e82cfa556c1dfa9ea8d386e497ae2fd229591097a6afc5",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-146-20260725-a2da7f8.exe",
+  "installer_sha256": "d8cb78565b8964522a0cd3f809cda9b678ad1cf028a23a157b5e157ad4f8e290",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-146-20260725-a2da7f8",
+  "linux_sha256": "d000a9477bfa98dfed0ed2335b68f14daa50bbbd9b480975ae0c313cd5f22fb6",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T18:25:31Z",
-  "notes": "chore(genapi): kin-openapi 0.144.0 - verified one-time soak exemption"
+  "released": "2026-07-25T19:37:21Z",
+  "notes": "Merge feature/zig-phaseb-loudness: structured loudness state (B-1a)"
 }
