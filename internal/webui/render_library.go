@@ -286,18 +286,19 @@ func (u *UI) libNav(path string) {
 	u.libPatchBody()
 }
 
+// mpOrdered on both: mark → build → enqueue → heal, so a player mutation that raced the build
+// cannot be overwritten by this patch (player_actions.go "container-render ordering").
 func (u *UI) libPatchBody() {
-	u.eval("window.__patch('lib-body'," + jsQuote(u.libBody()) + ")")
-	u.mpResync() // heal any player patch the build raced (state changed mid-build)
+	u.mpOrdered(u.libBody, func(h string) { u.eval("window.__patch('lib-body'," + jsQuote(h) + ")") })
 }
 
 func (u *UI) libPatchDetail() {
-	s := u.lib()
-	s.mu.Lock()
-	h := u.libDetailRender(s)
-	s.mu.Unlock()
-	u.eval("window.__patch('lib-detail'," + jsQuote(h) + ")")
-	u.mpResync() // heal any player patch the build raced (state changed mid-build)
+	u.mpOrdered(func() string {
+		s := u.lib()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return u.libDetailRender(s)
+	}, func(h string) { u.eval("window.__patch('lib-detail'," + jsQuote(h) + ")") })
 }
 
 // libBody builds the active section (#lib-body patch target). When a peer is targeted it routes

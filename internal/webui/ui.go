@@ -440,8 +440,13 @@ func (u *UI) patchMain() {
 	u.fragH, u.fragGen = nil, u.fragGen+1 // same for the hash cache; the bump voids an in-flight batch
 	// --- end phaseb-sched ---
 	u.fragMu.Unlock()
-	u.eval("window.__patch('main'," + jsQuote(u.mainHTML()) + ");document.body.setAttribute('data-keyscope'," + jsQuote(u.keyScope()) + ")")
-	u.mpResync() // heal any player patch the build raced (state changed mid-build)
+	// --- phaseb-b4player ---
+	// mpOrdered: mark → build → enqueue → heal, so a player mutation that raced the build cannot
+	// be overwritten by this patch (player_actions.go "container-render ordering").
+	u.mpOrdered(u.mainHTML, func(h string) {
+		u.eval("window.__patch('main'," + jsQuote(h) + ");document.body.setAttribute('data-keyscope'," + jsQuote(u.keyScope()) + ")")
+	})
+	// --- end phaseb-b4player ---
 }
 
 // keyScope names the active editing-key surface ("" = none; see shell.go keydown).

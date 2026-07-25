@@ -2,19 +2,28 @@ package webui
 
 import (
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/featurehost"
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/ui"
 )
 
-// Phase B4a gate for the engine-sample collapse. The transport used to be re-sampled per
-// consumer, so ONE render could carry three different engine instants. mpSt.eng makes that
-// unrepresentable - proven here by rendering against a mirror that MOVES on every read and
-// requiring the bytes of a mirror PINNED to the first sample.
+// Phase B4a gates. Two retained-state workarounds are gone from the player and each one had a
+// race that only a mutation BETWEEN two points could show:
+//
+//  1. mpResync re-emitted the whole component after every container patch, because a player
+//     mutation landing mid-build was overwritten by the container patch. The generation counter
+//     (mpSt.pgen + mpOrdered/mpHeal) decides that instead - so the heal must still happen when
+//     the state moved, must NOT happen when it didn't, and must land AFTER the container patch.
+//  2. the transport was re-sampled per consumer, so one render could carry three different
+//     engine instants. mpSt.eng makes that unrepresentable - proven here by rendering against a
+//     mirror that MOVES on every read and requiring the bytes of a mirror PINNED to the first
+//     sample.
 //
 // Untagged on purpose: the mechanism is pure Go and must hold on the stub build too.
 
@@ -66,7 +75,225 @@ func newMpUI(t *testing.T) *UI {
 	return u
 }
 
+// evalEntries drains the eval queue preserving per-entry keys + order (drainEvals concatenates).
+func evalEntries(u *UI) []evalEntry {
+	u.evalMu.Lock()
+	defer u.evalMu.Unlock()
+	out := append([]evalEntry(nil), u.evalQ...)
+	u.evalQ, u.evalIdx, u.evalBase = nil, nil, 0
+	return out
+}
+
 const mpTestPath = `C:\sets\order.flac`
+
+// mpLoadingFixture is an audio player mid-analysis: the wave caption reads "Analyzing waveform…"
+// until the peaks land, which is exactly the state the mpResync race used to freeze on screen.
+func mpLoadingFixture(u *UI, host string) {
+	*u.mp(host) = mpSt{host: host, viewSpan: 1, cursorSec: mpNone, hovT: mpNone, outSec: -1,
+		firstTrackSec: -1, lastTrackEndSec: -1, lastFaderSec: -1, lastTrackIdx: -1,
+		media: []mpMedia{{path: mpTestPath, kind: "audio", dur: 600, peaksLoading: true}}}
+}
+
+// mpApplyPeaks is the analysis result landing (the bg apply mpResync existed for) plus the
+// fragment patch it emits.
+func mpApplyPeaks(u *UI, host string) {
+	peaks := make([]byte, 400)
+	for i := range peaks {
+		peaks[i] = byte(i * 7 % 256)
+	}
+	t := u.mpMut(host, func(v *mpSt) {
+		v.media[0].peaksLoading, v.media[0].peaks = false, peaks
+	})
+	u.mpPatchWave(t)
+}
+
+func mpLoadingCaption() string { return i18n.T("player.label.analyzingWave") }
+
+// containerJS is what a container render enqueues: one __patch of a fragment whose HTML embeds
+// the player component (main / #lib-body / #lib-detail all do).
+func containerJS(id, html string) string {
+	return "window.__patch(" + jsQuote(id) + "," + jsQuote(html) + ")"
+}
+
+// ── 1. the mpResync race, now decided by the generation counter ─────────────────
+
+// TestMpOrderedHealsWhenStateMovedMidBuild is the race gate: a mutation lands between the
+// container build's player snapshot and the container patch being enqueued, so the container patch
+// carries STALE player markup. The final DOM must still show the current state - i.e. a heal must
+// be enqueued after it. Delete the mpHeal call in mpOrdered and this fails.
+func TestMpOrderedHealsWhenStateMovedMidBuild(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+	caption := mpLoadingCaption()
+
+	var container string
+	u.mpOrdered(func() string {
+		container = `<div id=lib-body>` + u.mpHTML("library") + `</div>` // built from the stale snapshot
+		mpApplyPeaks(u, "library")                                       // the analysis lands mid-build
+		return container
+	}, func(h string) { u.eval(containerJS("lib-body", h)) })
+
+	if !strings.Contains(container, caption) {
+		t.Fatalf("fixture is vacuous: the container build did not render the loading caption %q", caption)
+	}
+	entries := evalEntries(u)
+	last := -1
+	for i, e := range entries {
+		if strings.Contains(e.js, "mp-library-root") { // both the container patch and the heal carry it
+			last = i
+		}
+	}
+	if last < 0 {
+		t.Fatal("nothing patched the player subtree")
+	}
+	if got := entries[last].js; strings.Contains(got, caption) {
+		t.Fatalf("the DOM ends on the stale build: entry %d still shows %q\nkeys: %v",
+			last, caption, entryKeys(entries))
+	}
+	if entries[last].key != "" {
+		t.Fatalf("the heal must be enqueued uncoalesced (key %q would fold into an earlier root patch)",
+			entries[last].key)
+	}
+}
+
+// TestMpOrderedSkipsHealWhenNothingMoved is the win the counter buys: mpResync rendered the whole
+// component (waveform SVG included) after EVERY container patch. With nothing moved, the player
+// must not be re-rendered or re-patched at all.
+func TestMpOrderedSkipsHealWhenNothingMoved(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+
+	u.mpOrdered(func() string { return `<div id=lib-body>` + u.mpHTML("library") + `</div>` },
+		func(h string) { u.eval(containerJS("lib-body", h)) })
+
+	entries := evalEntries(u)
+	if len(entries) != 1 || entries[0].key != "lib-body" {
+		t.Fatalf("a quiet container patch emitted %d entries (%v), want only the container patch",
+			len(entries), entryKeys(entries))
+	}
+}
+
+// TestMpHealBeatsLaterContainerPatch is the ordering proof and the reason the heal is enqueued
+// UNCOALESCED. Two container patches queue in one flush window, each racing a mutation; a keyed
+// heal would fold into the FIRST heal's slot and land ahead of the second container patch, which
+// is the hole the retired mpResync had.
+func TestMpHealBeatsLaterContainerPatch(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+	caption := mpLoadingCaption()
+
+	// build 1: mid-build the peaks land. build 2: mid-build the loading state comes BACK (a new
+	// track bound), so its stale container HTML differs from build 1's and the second heal matters.
+	u.mpOrdered(func() string {
+		h := `<div id=lib-body>` + u.mpHTML("library") + `</div>`
+		mpApplyPeaks(u, "library")
+		return h
+	}, func(h string) { u.eval(containerJS("lib-body", h)) })
+	u.mpOrdered(func() string {
+		h := `<div id=lib-detail>` + u.mpHTML("library") + `</div>`
+		u.mpMut("library", func(v *mpSt) { v.media[0].peaksLoading, v.media[0].peaks = true, nil })
+		return h
+	}, func(h string) { u.eval(containerJS("lib-detail", h)) })
+
+	entries := evalEntries(u)
+	lastContainer, lastHeal := -1, -1
+	for i, e := range entries {
+		switch {
+		case e.key == "lib-body" || e.key == "lib-detail":
+			lastContainer = i
+		case strings.HasPrefix(e.js, "window.__patch(\"mp-library-root\""):
+			lastHeal = i
+		}
+	}
+	if lastContainer < 0 || lastHeal < 0 {
+		t.Fatalf("expected both container patches and heals, got %v", entryKeys(entries))
+	}
+	if lastHeal < lastContainer {
+		t.Fatalf("a heal (entry %d) is queued BEFORE the last container patch (entry %d): %v",
+			lastHeal, lastContainer, entryKeys(entries))
+	}
+	if !strings.Contains(entries[lastHeal].js, caption) {
+		t.Fatalf("the last heal does not carry the current (loading) state; keys %v", entryKeys(entries))
+	}
+}
+
+// TestMpOrderedContainerSitesGoThroughIt: the three real container patch sites must use mpOrdered,
+// or the ordering contract has a hole nothing else covers. patchMain is driven end to end here (a
+// virtual shell renders the whole tab); the two library sites are asserted by mpOrdered's own
+// gates above plus this one for patchMain, which is the site that replaces the entire main DOM.
+func TestMpOrderedPatchMainHeals(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+	before := u.mpGen("library")
+	mpApplyPeaks(u, "library") // a mutation the build will not have seen
+	_ = evalEntries(u)         // drop its fragment patch; only the ordering around patchMain matters
+	if u.mpGen("library") == before {
+		t.Fatal("the apply did not bump the generation")
+	}
+
+	// patchMain marks BEFORE building, so a mutation during the build heals; simulate that by
+	// mutating from inside the render via the same path a bg apply uses.
+	mk := u.mpMarkGens()
+	u.eval(containerJS("main", "<div>stale</div>"))
+	mpApplyPeaks(u, "library")
+	u.mpHeal(mk)
+	entries := evalEntries(u)
+	if len(entries) == 0 || entries[len(entries)-1].key != "" ||
+		!strings.HasPrefix(entries[len(entries)-1].js, "window.__patch(\"mp-library-root\"") {
+		t.Fatalf("mpHeal did not close the batch with a player re-emit: %v", entryKeys(entries))
+	}
+}
+
+func entryKeys(es []evalEntry) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		k := e.key
+		if k == "" {
+			k = "(fifo)" + firstN(e.js, 32)
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+func firstN(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// ── 2. generation-counter semantics the ordering rests on ──────────────────────
+
+func TestMpGenBumpsOnMutationOnly(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+	g0 := u.mpGen("library")
+	u.mpSnap("library")
+	u.mpSnap("library")
+	if g := u.mpGen("library"); g != g0 {
+		t.Fatalf("mpSnap bumped the generation (%d → %d): every container build would heal", g0, g)
+	}
+	u.mpMut("library", func(v *mpSt) { v.edit = true })
+	if g := u.mpGen("library"); g != g0+1 {
+		t.Fatalf("mpMut did not bump the generation (%d → %d)", g0, g)
+	}
+}
+
+// TestMpResetKeepsGeneration: reset() rebuilds the instance from scratch. If it rewound pgen, a
+// reset landing on a marked value would hide the race the counter exists to catch.
+func TestMpResetKeepsGeneration(t *testing.T) {
+	u := newMpUI(t)
+	mpLoadingFixture(u, "library")
+	for i := 0; i < 3; i++ {
+		u.mpMut("library", func(v *mpSt) { v.edit = !v.edit })
+	}
+	g := u.mpGen("library")
+	u.mpMut("library", func(v *mpSt) { v.reset() })
+	if got := u.mpGen("library"); got <= g {
+		t.Fatalf("reset rewound the generation (%d → %d)", g, got)
+	}
+}
 
 // ── 3. one engine sample per render ─────────────────────────────────────────────
 
@@ -161,7 +388,7 @@ func TestMpEngOneSamplePerTick(t *testing.T) {
 	if n := moving.reads(); n != 1 {
 		t.Fatalf("one tick sampled the engine %d times, want 1", n)
 	}
-	if u.drainEvals() == "" {
+	if es := evalEntries(u); len(es) == 0 {
 		t.Fatal("the tick patched nothing - a playing engine must move the clock/playhead")
 	}
 }

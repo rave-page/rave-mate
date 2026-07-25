@@ -166,6 +166,10 @@ type mpSt struct {
 	// eng is this snapshot's ONE engine sample (see mpTr / mpEng). nil = not sampled yet.
 	// Lives on the render COPY only: a sample stored on the instance would go stale.
 	eng *mpTr
+	// pgen counts mutations of the instance (bumped by mpMut, never by mpSnap, preserved by
+	// reset). A container build marks it before rendering and mpHeal re-reads it after the
+	// container patch is enqueued - see "container-render ordering" below.
+	pgen uint64
 	// --- end phaseb-b4player ---
 }
 
@@ -399,19 +403,21 @@ func (u *UI) mp(host string) *mpSt {
 	return t
 }
 
-// mpMut mutates the instance under mpMu and returns a copy for rendering.
+// mpMut mutates the instance under mpMu and returns a copy for rendering. Bumps pgen (mpHeal's
+// ordering counter) - a caller that only reads uses mpSnap.
 func (u *UI) mpMut(host string, fn func(*mpSt)) mpSt { return u.mpCopy(host, fn) }
 
-// mpSnap returns a render copy.
+// mpSnap returns a render copy without mutating (pgen unchanged).
 func (u *UI) mpSnap(host string) mpSt { return u.mpCopy(host, nil) }
 
-// mpCopy is the ONE snapshot funnel: mutate (optional), copy, then take the snapshot's single
-// engine sample - outside mpMu, since the sample locks the proxy mirror.
+// mpCopy is the ONE snapshot funnel: mutate (optional, bumping pgen), copy, then take the
+// snapshot's single engine sample - outside mpMu, since the sample locks the proxy mirror.
 func (u *UI) mpCopy(host string, fn func(*mpSt)) mpSt {
 	t := u.mp(host)
 	mpMu.Lock()
 	if fn != nil {
 		fn(t)
+		t.pgen++
 	}
 	c := *t
 	c.media = append([]mpMedia(nil), t.media...)
@@ -1007,7 +1013,8 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 func (t *mpSt) reset() {
 	g, dg := t.gen+1, t.dragGen+1
 	*t = mpSt{host: t.host, gen: g, dragGen: dg, outSec: -1, viewSpan: 1, cursorSec: mpNone, hovT: mpNone,
-		firstTrackSec: -1, lastTrackEndSec: -1, lastFaderSec: -1}
+		firstTrackSec: -1, lastTrackEndSec: -1, lastFaderSec: -1,
+		pgen: t.pgen} // pgen must NEVER go backwards: a reset that lands on a marked value would hide a race
 }
 
 // ── analyses (peaks + loudness + stream info; store-cached, probe/transcode workers) ──
@@ -1380,14 +1387,62 @@ func (u *UI) mpPatch(host, part, html string) {
 	u.eval("window.__patch(" + jsQuote("mp-"+host+"-"+part) + "," + jsQuote(html) + ")")
 }
 
-// mpResync re-emits the embedded players' root fragments from CURRENT state. Full renders
-// build HTML from a state snapshot; an analysis apply landing during a slow build (big
-// collection list) patches the OLD DOM and the render then overwrites it - the player
-// showed "Analyzing waveform…" forever while the state was healthy. Enqueued AFTER the
-// render eval this always wins that race; a fragment id the page doesn't carry is a
-// no-op (__patch guards on getElementById).
-func (u *UI) mpResync() {
-	for _, host := range []string{"library", "publish"} {
+// ── container-render ordering (phase B4a; replaces mpResync) ────────────────────
+//
+// A container render (main / #lib-body / #lib-detail) builds its HTML from a player SNAPSHOT and
+// enqueues it when the build finishes. A mutation landing in between - an analysis apply, a
+// transport RPC completing - patches the player fragment with FRESH markup that the container
+// patch then overwrites: the player showed "Analyzing waveform…" forever while the state was
+// healthy. mpResync papered over it by re-emitting the whole component after EVERY container
+// patch: two full component renders (waveform SVG included) per tab switch, unconditionally -
+// and it did not even close the race, because its patch carried the `mp-<host>-root` coalescing
+// key and folded into the position of an earlier queued root patch, i.e. BEFORE the container
+// patch it was meant to beat (two container patches in one flush window is enough).
+//
+// The generation counter decides it instead. mpSt.pgen counts mutations; the mark is taken BEFORE
+// the build and re-read AFTER the container patch is enqueued. Every mutation that can still be
+// overwritten bumped pgen before that read (bump and read both under mpMu, so the read
+// happens-after), and one landing afterwards has its own patch enqueued behind the container
+// patch. Nothing is re-rendered when nothing moved. Same shape as the B3 fragment scheduler's
+// u.fragGen / commitFrags (tick_sched.go).
+
+// mpHosts are the surfaces a container render can embed.
+var mpHosts = [2]string{"library", "publish"}
+
+// mpGens is the per-host mutation generation a container build started from.
+type mpGens [len(mpHosts)]uint64
+
+// mpOrdered builds a container fragment, emits it, then heals any player whose state moved during
+// the build. EVERY container patch that can embed the player goes through here.
+func (u *UI) mpOrdered(build func() string, emit func(html string)) {
+	mk := u.mpMarkGens()
+	emit(build())
+	u.mpHeal(mk)
+}
+
+// mpMarkGens snapshots each host's mutation generation.
+func (u *UI) mpMarkGens() (mk mpGens) {
+	for i, host := range mpHosts {
+		mk[i] = u.mpGen(host)
+	}
+	return mk
+}
+
+// mpGen reads a host's mutation generation.
+func (u *UI) mpGen(host string) uint64 {
+	t := u.mp(host)
+	mpMu.Lock()
+	defer mpMu.Unlock()
+	return t.pgen
+}
+
+// mpHeal re-emits a host's component when its state moved since mk. A host with no media is not
+// in the DOM, so there is nothing to heal (a fragment id the page lacks is a __patch no-op).
+func (u *UI) mpHeal(mk mpGens) {
+	for i, host := range mpHosts {
+		if u.mpGen(host) == mk[i] {
+			continue
+		}
 		if t := u.mpSnap(host); len(t.media) > 0 {
 			u.mpPatchAll(t)
 		}
@@ -1395,7 +1450,9 @@ func (u *UI) mpResync() {
 }
 
 func (u *UI) mpPatchAll(t mpSt) {
-	u.mpPatch(t.host, "root", u.mpInnerHTML(t))
+	// UNCOALESCED (key ""): a keyed entry folds into an already-queued root patch and keeps THAT
+	// entry's position, which can be ahead of the container patch this has to land after.
+	u.enqueueEval("", "window.__patch("+jsQuote("mp-"+t.host+"-root")+","+jsQuote(u.mpInnerHTML(t))+")")
 	if t.vid.started && t.vid.err == "" { // the <video> element was recreated - restore it
 		js := fmt.Sprintf("v.currentTime=%.3f;", t.vid.cur)
 		if !t.vid.paused {
