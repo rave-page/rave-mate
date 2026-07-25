@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x5d86f332
+	wireSchemaHash       uint32 = 0xd570fe05
 	wireMsgAgState       uint16 = 1  // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2  // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3  // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -33,6 +33,15 @@ const (
 	wireMsgLibDetail     uint16 = 29 // #lib-detail inspector
 	wireMsgLibQueue      uint16 = 30 // #lib-queue-body (job progress patch)
 	wireMsgLibCueCell    uint16 = 31 // one cue-census cell (per-row patch)
+	wireMsgMpFull        uint16 = 32 // Player (full view; the 29 kB raw waveform SVG lives here)
+	wireMsgMpInner       uint16 = 33 // #mp-root inner
+	wireMsgMpVid         uint16 = 34 // #mp-vid
+	wireMsgMpWave        uint16 = 35 // #mp-wave
+	wireMsgMpTp          uint16 = 36 // #mp-tp transport
+	wireMsgMpEdit        uint16 = 37 // #mp-edit
+	wireMsgMpExport      uint16 = 38 // #mp-export
+	wireMsgMpRO          uint16 = 39 // #mp-ro read-only strip
+	wireMsgMpHov         uint16 = 40 // #mp-hov hover readout
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -1381,6 +1390,206 @@ func (v libState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(7, func() { v.Body.encodeWire(w) })
 }
 
+func (v mpVidSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Host)
+	w.Str(2, v.Kind)
+	w.Str(3, v.ErrText)
+	w.Struct(4, func() { v.OpenExt.encodeWire(w) })
+	w.Str(5, v.NoStream)
+	w.Str(6, v.URL)
+	w.Str(7, v.MSE)
+	w.Bool(8, v.Muted)
+	w.Str(9, v.Ev)
+	w.Str(10, v.OnMeta)
+	w.Str(11, v.OnErr)
+}
+
+func (v mpKVRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.K)
+	w.Str(2, v.V)
+}
+
+func (v mpLinkSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.URL)
+	w.Str(2, v.Label)
+}
+
+func (v mpChipSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Bool(2, v.Loud)
+	w.Str(3, v.Dim)
+	w.Str(4, v.Text)
+	w.List(5, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(6, v.Note)
+	w.List(7, len(v.Links), func(i int) { v.Links[i].encodeWire(w) })
+}
+
+func (v mpWaveSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.SVG)
+	w.Bool(2, v.HasChips)
+	w.Struct(3, func() { v.Enc.encodeWire(w) })
+	w.Struct(4, func() { v.Loud.encodeWire(w) })
+	w.Str(5, v.SeekTab)
+	w.StrList(6, v.Captions)
+}
+
+func (v mpHovSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	w.Bool(2, v.Raw)
+}
+
+func (v mpTabSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Val)
+	w.Str(2, v.Label)
+}
+
+func (v uiSlider) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.DL)
+	w.Str(3, v.Act)
+	w.Str(4, v.Unit)
+	w.StrAlways(5, v.UnitJS)
+	w.StrAlways(6, v.MinS)
+	w.StrAlways(7, v.MaxS)
+	w.StrAlways(8, v.StepS)
+	w.StrAlways(9, v.ValS)
+}
+
+func (v mpTpSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Host)
+	w.Bool(2, v.Show)
+	w.Bool(3, v.HasTabs)
+	w.Str(4, v.TabPrefix)
+	w.Str(5, v.TabActive)
+	w.List(6, len(v.Tabs), func(i int) { v.Tabs[i].encodeWire(w) })
+	w.Struct(7, func() { v.Play.encodeWire(w) })
+	w.Struct(8, func() { v.Stop.encodeWire(w) })
+	w.Bool(9, v.HasPreview)
+	w.Struct(10, func() { v.Preview.encodeWire(w) })
+	w.Bool(11, v.HasTracks)
+	w.Struct(12, func() { v.Prev.encodeWire(w) })
+	w.Struct(13, func() { v.TrackSel.encodeWire(w) })
+	w.Struct(14, func() { v.Next.encodeWire(w) })
+	w.Bool(15, v.Demoted)
+	w.Struct(16, func() { v.MoreSel.encodeWire(w) })
+	w.Struct(17, func() { v.EditBtn.encodeWire(w) })
+	w.Bool(18, v.IsVideo)
+	w.Struct(19, func() { v.OpenExt.encodeWire(w) })
+	w.Str(20, v.TipVideo)
+	if v.TipVideoS != nil {
+		w.OptStruct(21, func() { v.TipVideoS.encodeWire(w) })
+	}
+	w.Str(22, v.TimeTx)
+	w.Struct(23, func() { v.Seek.encodeWire(w) })
+	w.Struct(24, func() { v.Vol.encodeWire(w) })
+}
+
+func (v mpROSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Value)
+	w.Str(2, v.DurLbl)
+	w.Str(3, v.Dur)
+	w.Str(4, v.InLbl)
+	w.Str(5, v.In)
+	w.Str(6, v.OutLbl)
+	w.Str(7, v.Out)
+	w.Str(8, v.KeepsLbl)
+	w.Str(9, v.Keeps)
+}
+
+func (v mpAlignSt2) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Bar)
+	w.Str(2, v.BarPct)
+	w.Str(3, v.BarCap)
+	w.Bool(4, v.Err)
+	w.Str(5, v.ErrText)
+	w.Str(6, v.Line)
+	w.Str(7, v.LineVal)
+	w.Struct(8, func() { v.AlignBtn.encodeWire(w) })
+	w.List(9, len(v.Nudges), func(i int) { v.Nudges[i].encodeWire(w) })
+	w.Struct(10, func() { v.OffField.encodeWire(w) })
+	w.Str(11, v.TipAlign)
+	if v.TipAlignS != nil {
+		w.OptStruct(12, func() { v.TipAlignS.encodeWire(w) })
+	}
+	w.StrList(13, v.Warns)
+}
+
+func (v mpSumSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Tx)
+	w.Str(2, v.Act)
+	w.Str(3, v.Title)
+}
+
+func (v mpExMediaSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.PresetSel.encodeWire(w) })
+	w.Struct(2, func() { v.Summary.encodeWire(w) })
+	w.Struct(3, func() { v.OutField.encodeWire(w) })
+	w.Struct(4, func() { v.PickBtn.encodeWire(w) })
+	w.Struct(5, func() { v.Loud.encodeWire(w) })
+	w.Str(6, v.LoudExtra)
+}
+
+func (v mpExportSt) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Medias), func(i int) { v.Medias[i].encodeWire(w) })
+	w.Bool(2, v.Exporting)
+	w.Str(3, v.RunPct)
+	w.Str(4, v.RunLabel)
+	w.Struct(5, func() { v.Cancel.encodeWire(w) })
+	w.Bool(6, v.Dual)
+	w.Struct(7, func() { v.ScopeSel.encodeWire(w) })
+	w.Struct(8, func() { v.ExportBtn.encodeWire(w) })
+	w.Str(9, v.Est)
+	w.Str(10, v.LoudTx)
+	w.Str(11, v.Msg)
+}
+
+func (v mpEditSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Host)
+	w.Bool(2, v.Show)
+	w.Struct(3, func() { v.InField.encodeWire(w) })
+	w.Struct(4, func() { v.OutField.encodeWire(w) })
+	w.Struct(5, func() { v.SetIn.encodeWire(w) })
+	w.Struct(6, func() { v.SetOut.encodeWire(w) })
+	w.Struct(7, func() { v.AutoSel.encodeWire(w) })
+	w.Str(8, v.TipTrim)
+	if v.TipTrimS != nil {
+		w.OptStruct(9, func() { v.TipTrimS.encodeWire(w) })
+	}
+	w.Struct(10, func() { v.RO.encodeWire(w) })
+	w.Bool(11, v.Dual)
+	w.Struct(12, func() { v.Align.encodeWire(w) })
+	w.Struct(13, func() { v.Export.encodeWire(w) })
+}
+
+func (v mpInnerSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Host)
+	w.Str(2, v.Title)
+	w.Struct(3, func() { v.Vid.encodeWire(w) })
+	w.Bool(4, v.Dual)
+	w.Bool(5, v.Edit)
+	w.Struct(6, func() { v.Wave.encodeWire(w) })
+	w.Str(7, v.LaneIn)
+	w.Str(8, v.LaneMid)
+	w.Str(9, v.LaneOut)
+	w.Str(10, v.LaneFull)
+	w.Struct(11, func() { v.ZIn.encodeWire(w) })
+	w.Struct(12, func() { v.ZOut.encodeWire(w) })
+	w.Struct(13, func() { v.FitBtn.encodeWire(w) })
+	w.Str(14, v.ZInfo)
+	w.Struct(15, func() { v.Hov.encodeWire(w) })
+	w.Str(16, v.TipWave)
+	if v.TipWaveS != nil {
+		w.OptStruct(17, func() { v.TipWaveS.encodeWire(w) })
+	}
+	w.Struct(18, func() { v.Tp.encodeWire(w) })
+	w.Struct(19, func() { v.EditBox.encodeWire(w) })
+}
+
+func (v mpFullSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Host)
+	w.Struct(2, func() { v.Inner.encodeWire(w) })
+}
+
 // wireAgState encodes agState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireAgState(v agState) []byte {
 	w := zigui.NewWireWriter(wireMsgAgState, wireSchemaHash)
@@ -1552,6 +1761,69 @@ func wireLibQueue(v libQueueSt) []byte {
 // wireLibCueCell encodes libCueCellSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireLibCueCell(v libCueCellSt) []byte {
 	w := zigui.NewWireWriter(wireMsgLibCueCell, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpFull encodes mpFullSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpFull(v mpFullSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpFull, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpInner encodes mpInnerSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpInner(v mpInnerSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpInner, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpVid encodes mpVidSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpVid(v mpVidSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpVid, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpWave encodes mpWaveSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpWave(v mpWaveSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpWave, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpTp encodes mpTpSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpTp(v mpTpSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpTp, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpEdit encodes mpEditSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpEdit(v mpEditSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpEdit, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpExport encodes mpExportSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpExport(v mpExportSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpExport, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpRO encodes mpROSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpRO(v mpROSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpRO, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMpHov encodes mpHovSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMpHov(v mpHovSt) []byte {
+	w := zigui.NewWireWriter(wireMsgMpHov, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

@@ -659,6 +659,84 @@ var schema = []msg{
 		doc: "Library tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "NavTitle", "navTitle"), s(3, "Switcher", "switcher"), b(4, "Embedded", "embedded"), s(5, "Section", "section"), li(6, "Tabs", "tabs", "LibTab"), st(7, "Body", "body", "LibBody")},
 	},
+	// player: nine patch targets, one message each. The full view carries the 29 kB raw waveform SVG (mpWaveSVG stays Go by design) - one huge string, so the wire's win there is smaller than on structure-heavy states. uiSlider's minS/maxS/stepS/valS/unitJs need kStrAlways (Zig defaults '0'/'1'/'\\"\\"').
+	{
+		name: "MpVid", goT: "mpVidSt", zigT: "player.Vid", id: 34,
+		doc: "#mp-vid",
+		fs:  []field{s(1, "Host", "host"), s(2, "Kind", "kind"), s(3, "ErrText", "errText"), st(4, "OpenExt", "openExt", "UiBtn"), s(5, "NoStream", "noStream"), s(6, "URL", "url"), s(7, "MSE", "mse"), b(8, "Muted", "muted"), s(9, "Ev", "ev"), s(10, "OnMeta", "onmeta"), s(11, "OnErr", "onerr")},
+	},
+	{
+		name: "MpKVRow", goT: "mpKVRow", zigT: "player.KVRow",
+		fs: []field{s(1, "K", "k"), s(2, "V", "v")},
+	},
+	{
+		name: "MpLink", goT: "mpLinkSt", zigT: "player.Link",
+		fs: []field{s(1, "URL", "url"), s(2, "Label", "label")},
+	},
+	{
+		name: "MpChip", goT: "mpChipSt", zigT: "player.Chip",
+		fs: []field{s(1, "Kind", "kind"), b(2, "Loud", "loud"), s(3, "Dim", "dim"), s(4, "Text", "text"), li(5, "Rows", "rows", "MpKVRow"), s(6, "Note", "note"), li(7, "Links", "links", "MpLink")},
+	},
+	{
+		name: "MpWave", goT: "mpWaveSt", zigT: "player.Wave", id: 35,
+		doc: "#mp-wave",
+		fs:  []field{s(1, "SVG", "svg"), b(2, "HasChips", "hasChips"), st(3, "Enc", "enc", "MpChip"), st(4, "Loud", "loud", "MpChip"), s(5, "SeekTab", "seekTab"), sl(6, "Captions", "captions")},
+	},
+	{
+		name: "MpHov", goT: "mpHovSt", zigT: "player.Hov", id: 40,
+		doc: "#mp-hov hover readout",
+		fs:  []field{s(1, "Text", "text"), b(2, "Raw", "raw")},
+	},
+	{
+		name: "MpTab", goT: "mpTabSt", zigT: "c.Tab",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label")},
+	},
+	{
+		name: "UiSlider", goT: "uiSlider", zigT: "c.Slider",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Unit", "unit"), sa(5, "UnitJS", "unitJs"), sa(6, "MinS", "minS"), sa(7, "MaxS", "maxS"), sa(8, "StepS", "stepS"), sa(9, "ValS", "valS")},
+	},
+	{
+		name: "MpTp", goT: "mpTpSt", zigT: "player.Tp", id: 36,
+		doc: "#mp-tp transport",
+		fs:  []field{s(1, "Host", "host"), b(2, "Show", "show"), b(3, "HasTabs", "hasTabs"), s(4, "TabPrefix", "tabPrefix"), s(5, "TabActive", "tabActive"), li(6, "Tabs", "tabs", "MpTab"), st(7, "Play", "play", "UiBtn"), st(8, "Stop", "stop", "UiBtn"), b(9, "HasPreview", "hasPreview"), st(10, "Preview", "preview", "UiBtn"), b(11, "HasTracks", "hasTracks"), st(12, "Prev", "prev", "UiBtn"), st(13, "TrackSel", "trackSel", "SelState"), st(14, "Next", "next", "UiBtn"), b(15, "Demoted", "demoted"), st(16, "MoreSel", "moreSel", "SelState"), st(17, "EditBtn", "editBtn", "UiBtn"), b(18, "IsVideo", "isVideo"), st(19, "OpenExt", "openExt", "UiBtn"), s(20, "TipVideo", "tipVideo"), op(21, "TipVideoS", "tipVideoSt", "Tip"), s(22, "TimeTx", "timeTx"), st(23, "Seek", "seek", "UiSlider"), st(24, "Vol", "vol", "UiSlider")},
+	},
+	{
+		name: "MpRO", goT: "mpROSt", zigT: "player.RO", id: 39,
+		doc: "#mp-ro read-only strip",
+		fs:  []field{s(1, "Value", "value"), s(2, "DurLbl", "durLbl"), s(3, "Dur", "dur"), s(4, "InLbl", "inLbl"), s(5, "In", "in"), s(6, "OutLbl", "outLbl"), s(7, "Out", "out"), s(8, "KeepsLbl", "keepsLbl"), s(9, "Keeps", "keeps")},
+	},
+	{
+		name: "MpAlignSt2", goT: "mpAlignSt2", zigT: "player.Align",
+		fs: []field{b(1, "Bar", "bar"), s(2, "BarPct", "barPct"), s(3, "BarCap", "barCap"), b(4, "Err", "err"), s(5, "ErrText", "errText"), s(6, "Line", "line"), s(7, "LineVal", "lineVal"), st(8, "AlignBtn", "alignBtn", "UiBtn"), li(9, "Nudges", "nudges", "UiBtn"), st(10, "OffField", "offField", "UiField"), s(11, "TipAlign", "tipAlign"), op(12, "TipAlignS", "tipAlignSt", "Tip"), sl(13, "Warns", "warns")},
+	},
+	{
+		name: "MpSum", goT: "mpSumSt", zigT: "player.Sum",
+		fs: []field{s(1, "Tx", "tx"), s(2, "Act", "act"), s(3, "Title", "title")},
+	},
+	{
+		name: "MpExMedia", goT: "mpExMediaSt", zigT: "player.ExMedia",
+		fs: []field{st(1, "PresetSel", "presetSel", "SelState"), st(2, "Summary", "summary", "MpSum"), st(3, "OutField", "outField", "UiField"), st(4, "PickBtn", "pickBtn", "UiBtn"), st(5, "Loud", "loud", "Loud"), s(6, "LoudExtra", "loudExtra")},
+	},
+	{
+		name: "MpExport", goT: "mpExportSt", zigT: "player.Export", id: 38,
+		doc: "#mp-export",
+		fs:  []field{li(1, "Medias", "medias", "MpExMedia"), b(2, "Exporting", "exporting"), s(3, "RunPct", "runPct"), s(4, "RunLabel", "runLabel"), st(5, "Cancel", "cancel", "UiBtn"), b(6, "Dual", "dual"), st(7, "ScopeSel", "scopeSel", "SelState"), st(8, "ExportBtn", "exportBtn", "UiBtn"), s(9, "Est", "est"), s(10, "LoudTx", "loudTx"), s(11, "Msg", "msg")},
+	},
+	{
+		name: "MpEdit", goT: "mpEditSt", zigT: "player.Edit", id: 37,
+		doc: "#mp-edit",
+		fs:  []field{s(1, "Host", "host"), b(2, "Show", "show"), st(3, "InField", "inField", "UiField"), st(4, "OutField", "outField", "UiField"), st(5, "SetIn", "setIn", "UiBtn"), st(6, "SetOut", "setOut", "UiBtn"), st(7, "AutoSel", "autoSel", "SelState"), s(8, "TipTrim", "tipTrim"), op(9, "TipTrimS", "tipTrimSt", "Tip"), st(10, "RO", "ro", "MpRO"), b(11, "Dual", "dual"), st(12, "Align", "alignRow", "MpAlignSt2"), st(13, "Export", "exportPane", "MpExport")},
+	},
+	{
+		name: "MpInner", goT: "mpInnerSt", zigT: "player.Inner", id: 33,
+		doc: "#mp-root inner",
+		fs:  []field{s(1, "Host", "host"), s(2, "Title", "title"), st(3, "Vid", "vid", "MpVid"), b(4, "Dual", "dual"), b(5, "Edit", "edit"), st(6, "Wave", "wave", "MpWave"), s(7, "LaneIn", "laneIn"), s(8, "LaneMid", "laneMid"), s(9, "LaneOut", "laneOut"), s(10, "LaneFull", "laneFull"), st(11, "ZIn", "zin", "UiBtn"), st(12, "ZOut", "zout", "UiBtn"), st(13, "FitBtn", "fit", "UiBtn"), s(14, "ZInfo", "zinfo"), st(15, "Hov", "hov", "MpHov"), s(16, "TipWave", "tipWave"), op(17, "TipWaveS", "tipWaveSt", "Tip"), st(18, "Tp", "tp", "MpTp"), st(19, "EditBox", "editBox", "MpEdit")},
+	},
+	{
+		name: "MpFull", goT: "mpFullSt", zigT: "player.State", id: 32,
+		doc: "Player (full view; the 29 kB raw waveform SVG lives here)",
+		fs:  []field{s(1, "Host", "host"), st(2, "Inner", "inner", "MpInner")},
+	},
 }
 
 // zigImports maps the import alias used in wire_gen.zig to its source file.
@@ -666,6 +744,7 @@ var zigImports = [][2]string{
 	{"appgroups", "appgroups.zig"},
 	{"logs", "logs.zig"},
 	{"c", "components.zig"},
+	{"player", "player.zig"},
 	{"f", "libfixers.zig"},
 	{"d", "library_detail.zig"},
 	{"s", "library_sections.zig"},

@@ -219,6 +219,49 @@ func BenchmarkWireBenchLibraryCueCell(b *testing.B) {
 		func() (string, bool) { return zigui.RenderLibraryCueCellV2(wireLibCueCell(st)) })
 }
 
+func BenchmarkWireBenchPlayer(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["singleEdit"]
+	*u.mp(fx.host) = fx
+	inner := u.mpInnerState(u.mpSnap(fx.host))
+	full := mpFullSt{Host: fx.host, Inner: inner}
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayer(stateJSON(full)) },
+		func() (string, bool) { return zigui.RenderPlayerV2(wireMpFull(full)) })
+}
+
+func BenchmarkWireBenchPlayerTp(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["singleEdit"]
+	*u.mp(fx.host) = fx
+	st := u.mpInnerState(u.mpSnap(fx.host)).Tp
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayerTp(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPlayerTpV2(wireMpTp(st)) })
+}
+
+func BenchmarkWireBenchPlayerExport(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	u := &UI{}
+	b.Cleanup(func() { releaseUIState(u) })
+	fx := mpFixtures()["dualExport"]
+	*u.mp(fx.host) = fx
+	st := u.mpInnerState(u.mpSnap(fx.host)).EditBox.Export
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderPlayerExport(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderPlayerExportV2(wireMpExport(st)) })
+}
+
 // Serialization only - isolates what the wire replaces (reflection + escaping + quoting).
 func BenchmarkWireBenchSerializeLogsTail(b *testing.B) {
 	st := wireBenchTail()

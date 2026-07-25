@@ -9,6 +9,7 @@ const wire = @import("wire.zig");
 const appgroups = @import("appgroups.zig");
 const logs = @import("logs.zig");
 const c = @import("components.zig");
+const player = @import("player.zig");
 const f = @import("libfixers.zig");
 const d = @import("library_detail.zig");
 const s = @import("library_sections.zig");
@@ -20,7 +21,7 @@ const publish = @import("publish.zig");
 const motion = @import("motion.zig");
 const live = @import("live.zig");
 
-pub const schema_hash: u32 = 0x5d86f332;
+pub const schema_hash: u32 = 0xd570fe05;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -46,6 +47,15 @@ pub const msg_lib_body: u16 = 28; // #lib-body (active section)
 pub const msg_lib_detail: u16 = 29; // #lib-detail inspector
 pub const msg_lib_queue: u16 = 30; // #lib-queue-body (job progress patch)
 pub const msg_lib_cue_cell: u16 = 31; // one cue-census cell (per-row patch)
+pub const msg_mp_full: u16 = 32; // Player (full view; the 29 kB raw waveform SVG lives here)
+pub const msg_mp_inner: u16 = 33; // #mp-root inner
+pub const msg_mp_vid: u16 = 34; // #mp-vid
+pub const msg_mp_wave: u16 = 35; // #mp-wave
+pub const msg_mp_tp: u16 = 36; // #mp-tp transport
+pub const msg_mp_edit: u16 = 37; // #mp-edit
+pub const msg_mp_export: u16 = 38; // #mp-export
+pub const msg_mp_r_o: u16 = 39; // #mp-ro read-only strip
+pub const msg_mp_hov: u16 = 40; // #mp-hov hover readout
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -1747,6 +1757,249 @@ pub fn decodeLibState(r: *wire.Reader, out: *library.State) wire.Error!void {
     };
 }
 
+pub fn decodeMpVid(r: *wire.Reader, out: *player.Vid) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.kind = try r.str(t),
+        3 => out.errText = try r.str(t),
+        4 => out.openExt = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.noStream = try r.str(t),
+        6 => out.url = try r.str(t),
+        7 => out.mse = try r.str(t),
+        8 => out.muted = try r.boolean(t),
+        9 => out.ev = try r.str(t),
+        10 => out.onmeta = try r.str(t),
+        11 => out.onerr = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpKVRow(r: *wire.Reader, out: *player.KVRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.k = try r.str(t),
+        2 => out.v = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpLink(r: *wire.Reader, out: *player.Link) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.url = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpChip(r: *wire.Reader, out: *player.Chip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.loud = try r.boolean(t),
+        3 => out.dim = try r.str(t),
+        4 => out.text = try r.str(t),
+        5 => out.rows = try r.list(player.KVRow, decodeMpKVRow, t),
+        6 => out.note = try r.str(t),
+        7 => out.links = try r.list(player.Link, decodeMpLink, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpWave(r: *wire.Reader, out: *player.Wave) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.svg = try r.str(t),
+        2 => out.hasChips = try r.boolean(t),
+        3 => out.enc = try r.sub(player.Chip, decodeMpChip, t),
+        4 => out.loud = try r.sub(player.Chip, decodeMpChip, t),
+        5 => out.seekTab = try r.str(t),
+        6 => out.captions = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpHov(r: *wire.Reader, out: *player.Hov) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.raw = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpTab(r: *wire.Reader, out: *c.Tab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeUiSlider(r: *wire.Reader, out: *c.Slider) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.unit = try r.str(t),
+        5 => out.unitJs = try r.str(t),
+        6 => out.minS = try r.str(t),
+        7 => out.maxS = try r.str(t),
+        8 => out.stepS = try r.str(t),
+        9 => out.valS = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpTp(r: *wire.Reader, out: *player.Tp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.show = try r.boolean(t),
+        3 => out.hasTabs = try r.boolean(t),
+        4 => out.tabPrefix = try r.str(t),
+        5 => out.tabActive = try r.str(t),
+        6 => out.tabs = try r.list(c.Tab, decodeMpTab, t),
+        7 => out.play = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.stop = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.hasPreview = try r.boolean(t),
+        10 => out.preview = try r.sub(c.Btn, decodeUiBtn, t),
+        11 => out.hasTracks = try r.boolean(t),
+        12 => out.prev = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.trackSel = try r.sub(c.Select, decodeSelState, t),
+        14 => out.next = try r.sub(c.Btn, decodeUiBtn, t),
+        15 => out.demoted = try r.boolean(t),
+        16 => out.moreSel = try r.sub(c.Select, decodeSelState, t),
+        17 => out.editBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        18 => out.isVideo = try r.boolean(t),
+        19 => out.openExt = try r.sub(c.Btn, decodeUiBtn, t),
+        20 => out.tipVideo = try r.str(t),
+        21 => out.tipVideoSt = try r.sub(c.Tip, decodeTip, t),
+        22 => out.timeTx = try r.str(t),
+        23 => out.seek = try r.sub(c.Slider, decodeUiSlider, t),
+        24 => out.vol = try r.sub(c.Slider, decodeUiSlider, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpRO(r: *wire.Reader, out: *player.RO) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.value = try r.str(t),
+        2 => out.durLbl = try r.str(t),
+        3 => out.dur = try r.str(t),
+        4 => out.inLbl = try r.str(t),
+        5 => out.in = try r.str(t),
+        6 => out.outLbl = try r.str(t),
+        7 => out.out = try r.str(t),
+        8 => out.keepsLbl = try r.str(t),
+        9 => out.keeps = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpAlignSt2(r: *wire.Reader, out: *player.Align) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.bar = try r.boolean(t),
+        2 => out.barPct = try r.str(t),
+        3 => out.barCap = try r.str(t),
+        4 => out.err = try r.boolean(t),
+        5 => out.errText = try r.str(t),
+        6 => out.line = try r.str(t),
+        7 => out.lineVal = try r.str(t),
+        8 => out.alignBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.nudges = try r.list(c.Btn, decodeUiBtn, t),
+        10 => out.offField = try r.sub(c.Field, decodeUiField, t),
+        11 => out.tipAlign = try r.str(t),
+        12 => out.tipAlignSt = try r.sub(c.Tip, decodeTip, t),
+        13 => out.warns = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpSum(r: *wire.Reader, out: *player.Sum) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tx = try r.str(t),
+        2 => out.act = try r.str(t),
+        3 => out.title = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpExMedia(r: *wire.Reader, out: *player.ExMedia) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.presetSel = try r.sub(c.Select, decodeSelState, t),
+        2 => out.summary = try r.sub(player.Sum, decodeMpSum, t),
+        3 => out.outField = try r.sub(c.Field, decodeUiField, t),
+        4 => out.pickBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.loud = try r.sub(c.Loud, decodeLoud, t),
+        6 => out.loudExtra = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpExport(r: *wire.Reader, out: *player.Export) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.medias = try r.list(player.ExMedia, decodeMpExMedia, t),
+        2 => out.exporting = try r.boolean(t),
+        3 => out.runPct = try r.str(t),
+        4 => out.runLabel = try r.str(t),
+        5 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.dual = try r.boolean(t),
+        7 => out.scopeSel = try r.sub(c.Select, decodeSelState, t),
+        8 => out.exportBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.est = try r.str(t),
+        10 => out.loudTx = try r.str(t),
+        11 => out.msg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpEdit(r: *wire.Reader, out: *player.Edit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.show = try r.boolean(t),
+        3 => out.inField = try r.sub(c.Field, decodeUiField, t),
+        4 => out.outField = try r.sub(c.Field, decodeUiField, t),
+        5 => out.setIn = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.setOut = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.autoSel = try r.sub(c.Select, decodeSelState, t),
+        8 => out.tipTrim = try r.str(t),
+        9 => out.tipTrimSt = try r.sub(c.Tip, decodeTip, t),
+        10 => out.ro = try r.sub(player.RO, decodeMpRO, t),
+        11 => out.dual = try r.boolean(t),
+        12 => out.alignRow = try r.sub(player.Align, decodeMpAlignSt2, t),
+        13 => out.exportPane = try r.sub(player.Export, decodeMpExport, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpInner(r: *wire.Reader, out: *player.Inner) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.vid = try r.sub(player.Vid, decodeMpVid, t),
+        4 => out.dual = try r.boolean(t),
+        5 => out.edit = try r.boolean(t),
+        6 => out.wave = try r.sub(player.Wave, decodeMpWave, t),
+        7 => out.laneIn = try r.str(t),
+        8 => out.laneMid = try r.str(t),
+        9 => out.laneOut = try r.str(t),
+        10 => out.laneFull = try r.str(t),
+        11 => out.zin = try r.sub(c.Btn, decodeUiBtn, t),
+        12 => out.zout = try r.sub(c.Btn, decodeUiBtn, t),
+        13 => out.fit = try r.sub(c.Btn, decodeUiBtn, t),
+        14 => out.zinfo = try r.str(t),
+        15 => out.hov = try r.sub(player.Hov, decodeMpHov, t),
+        16 => out.tipWave = try r.str(t),
+        17 => out.tipWaveSt = try r.sub(c.Tip, decodeTip, t),
+        18 => out.tp = try r.sub(player.Tp, decodeMpTp, t),
+        19 => out.editBox = try r.sub(player.Edit, decodeMpEdit, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeMpFull(r: *wire.Reader, out: *player.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.host = try r.str(t),
+        2 => out.inner = try r.sub(player.Inner, decodeMpInner, t),
+        else => try r.skip(t),
+    };
+}
+
 test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_logs_state);
     try std.testing.expect(msg_ag_state != msg_logs_lines);
@@ -1772,6 +2025,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_lib_detail);
     try std.testing.expect(msg_ag_state != msg_lib_queue);
     try std.testing.expect(msg_ag_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_ag_state != msg_mp_full);
+    try std.testing.expect(msg_ag_state != msg_mp_inner);
+    try std.testing.expect(msg_ag_state != msg_mp_vid);
+    try std.testing.expect(msg_ag_state != msg_mp_wave);
+    try std.testing.expect(msg_ag_state != msg_mp_tp);
+    try std.testing.expect(msg_ag_state != msg_mp_edit);
+    try std.testing.expect(msg_ag_state != msg_mp_export);
+    try std.testing.expect(msg_ag_state != msg_mp_r_o);
+    try std.testing.expect(msg_ag_state != msg_mp_hov);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -1795,6 +2057,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_lib_detail);
     try std.testing.expect(msg_logs_state != msg_lib_queue);
     try std.testing.expect(msg_logs_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_logs_state != msg_mp_full);
+    try std.testing.expect(msg_logs_state != msg_mp_inner);
+    try std.testing.expect(msg_logs_state != msg_mp_vid);
+    try std.testing.expect(msg_logs_state != msg_mp_wave);
+    try std.testing.expect(msg_logs_state != msg_mp_tp);
+    try std.testing.expect(msg_logs_state != msg_mp_edit);
+    try std.testing.expect(msg_logs_state != msg_mp_export);
+    try std.testing.expect(msg_logs_state != msg_mp_r_o);
+    try std.testing.expect(msg_logs_state != msg_mp_hov);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -1817,6 +2088,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_lib_detail);
     try std.testing.expect(msg_logs_lines != msg_lib_queue);
     try std.testing.expect(msg_logs_lines != msg_lib_cue_cell);
+    try std.testing.expect(msg_logs_lines != msg_mp_full);
+    try std.testing.expect(msg_logs_lines != msg_mp_inner);
+    try std.testing.expect(msg_logs_lines != msg_mp_vid);
+    try std.testing.expect(msg_logs_lines != msg_mp_wave);
+    try std.testing.expect(msg_logs_lines != msg_mp_tp);
+    try std.testing.expect(msg_logs_lines != msg_mp_edit);
+    try std.testing.expect(msg_logs_lines != msg_mp_export);
+    try std.testing.expect(msg_logs_lines != msg_mp_r_o);
+    try std.testing.expect(msg_logs_lines != msg_mp_hov);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -1838,6 +2118,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_lib_detail);
     try std.testing.expect(msg_live_state != msg_lib_queue);
     try std.testing.expect(msg_live_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_state != msg_mp_full);
+    try std.testing.expect(msg_live_state != msg_mp_inner);
+    try std.testing.expect(msg_live_state != msg_mp_vid);
+    try std.testing.expect(msg_live_state != msg_mp_wave);
+    try std.testing.expect(msg_live_state != msg_mp_tp);
+    try std.testing.expect(msg_live_state != msg_mp_edit);
+    try std.testing.expect(msg_live_state != msg_mp_export);
+    try std.testing.expect(msg_live_state != msg_mp_r_o);
+    try std.testing.expect(msg_live_state != msg_mp_hov);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -1858,6 +2147,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_lib_detail);
     try std.testing.expect(msg_live_transport != msg_lib_queue);
     try std.testing.expect(msg_live_transport != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_transport != msg_mp_full);
+    try std.testing.expect(msg_live_transport != msg_mp_inner);
+    try std.testing.expect(msg_live_transport != msg_mp_vid);
+    try std.testing.expect(msg_live_transport != msg_mp_wave);
+    try std.testing.expect(msg_live_transport != msg_mp_tp);
+    try std.testing.expect(msg_live_transport != msg_mp_edit);
+    try std.testing.expect(msg_live_transport != msg_mp_export);
+    try std.testing.expect(msg_live_transport != msg_mp_r_o);
+    try std.testing.expect(msg_live_transport != msg_mp_hov);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -1877,6 +2175,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_lib_detail);
     try std.testing.expect(msg_live_n_p != msg_lib_queue);
     try std.testing.expect(msg_live_n_p != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_n_p != msg_mp_full);
+    try std.testing.expect(msg_live_n_p != msg_mp_inner);
+    try std.testing.expect(msg_live_n_p != msg_mp_vid);
+    try std.testing.expect(msg_live_n_p != msg_mp_wave);
+    try std.testing.expect(msg_live_n_p != msg_mp_tp);
+    try std.testing.expect(msg_live_n_p != msg_mp_edit);
+    try std.testing.expect(msg_live_n_p != msg_mp_export);
+    try std.testing.expect(msg_live_n_p != msg_mp_r_o);
+    try std.testing.expect(msg_live_n_p != msg_mp_hov);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -1895,6 +2202,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_lib_detail);
     try std.testing.expect(msg_live_status != msg_lib_queue);
     try std.testing.expect(msg_live_status != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_status != msg_mp_full);
+    try std.testing.expect(msg_live_status != msg_mp_inner);
+    try std.testing.expect(msg_live_status != msg_mp_vid);
+    try std.testing.expect(msg_live_status != msg_mp_wave);
+    try std.testing.expect(msg_live_status != msg_mp_tp);
+    try std.testing.expect(msg_live_status != msg_mp_edit);
+    try std.testing.expect(msg_live_status != msg_mp_export);
+    try std.testing.expect(msg_live_status != msg_mp_r_o);
+    try std.testing.expect(msg_live_status != msg_mp_hov);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -1912,6 +2228,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_lib_detail);
     try std.testing.expect(msg_live_decks != msg_lib_queue);
     try std.testing.expect(msg_live_decks != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_decks != msg_mp_full);
+    try std.testing.expect(msg_live_decks != msg_mp_inner);
+    try std.testing.expect(msg_live_decks != msg_mp_vid);
+    try std.testing.expect(msg_live_decks != msg_mp_wave);
+    try std.testing.expect(msg_live_decks != msg_mp_tp);
+    try std.testing.expect(msg_live_decks != msg_mp_edit);
+    try std.testing.expect(msg_live_decks != msg_mp_export);
+    try std.testing.expect(msg_live_decks != msg_mp_r_o);
+    try std.testing.expect(msg_live_decks != msg_mp_hov);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -1928,6 +2253,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_lib_detail);
     try std.testing.expect(msg_live_signals != msg_lib_queue);
     try std.testing.expect(msg_live_signals != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_signals != msg_mp_full);
+    try std.testing.expect(msg_live_signals != msg_mp_inner);
+    try std.testing.expect(msg_live_signals != msg_mp_vid);
+    try std.testing.expect(msg_live_signals != msg_mp_wave);
+    try std.testing.expect(msg_live_signals != msg_mp_tp);
+    try std.testing.expect(msg_live_signals != msg_mp_edit);
+    try std.testing.expect(msg_live_signals != msg_mp_export);
+    try std.testing.expect(msg_live_signals != msg_mp_r_o);
+    try std.testing.expect(msg_live_signals != msg_mp_hov);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -1943,6 +2277,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_lib_detail);
     try std.testing.expect(msg_live_cockpit != msg_lib_queue);
     try std.testing.expect(msg_live_cockpit != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_cockpit != msg_mp_full);
+    try std.testing.expect(msg_live_cockpit != msg_mp_inner);
+    try std.testing.expect(msg_live_cockpit != msg_mp_vid);
+    try std.testing.expect(msg_live_cockpit != msg_mp_wave);
+    try std.testing.expect(msg_live_cockpit != msg_mp_tp);
+    try std.testing.expect(msg_live_cockpit != msg_mp_edit);
+    try std.testing.expect(msg_live_cockpit != msg_mp_export);
+    try std.testing.expect(msg_live_cockpit != msg_mp_r_o);
+    try std.testing.expect(msg_live_cockpit != msg_mp_hov);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -1957,6 +2300,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_lib_detail);
     try std.testing.expect(msg_live_link != msg_lib_queue);
     try std.testing.expect(msg_live_link != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_link != msg_mp_full);
+    try std.testing.expect(msg_live_link != msg_mp_inner);
+    try std.testing.expect(msg_live_link != msg_mp_vid);
+    try std.testing.expect(msg_live_link != msg_mp_wave);
+    try std.testing.expect(msg_live_link != msg_mp_tp);
+    try std.testing.expect(msg_live_link != msg_mp_edit);
+    try std.testing.expect(msg_live_link != msg_mp_export);
+    try std.testing.expect(msg_live_link != msg_mp_r_o);
+    try std.testing.expect(msg_live_link != msg_mp_hov);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -1970,6 +2322,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_lib_detail);
     try std.testing.expect(msg_live_graph != msg_lib_queue);
     try std.testing.expect(msg_live_graph != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_graph != msg_mp_full);
+    try std.testing.expect(msg_live_graph != msg_mp_inner);
+    try std.testing.expect(msg_live_graph != msg_mp_vid);
+    try std.testing.expect(msg_live_graph != msg_mp_wave);
+    try std.testing.expect(msg_live_graph != msg_mp_tp);
+    try std.testing.expect(msg_live_graph != msg_mp_edit);
+    try std.testing.expect(msg_live_graph != msg_mp_export);
+    try std.testing.expect(msg_live_graph != msg_mp_r_o);
+    try std.testing.expect(msg_live_graph != msg_mp_hov);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -1982,6 +2343,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_lib_detail);
     try std.testing.expect(msg_live_perf != msg_lib_queue);
     try std.testing.expect(msg_live_perf != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_perf != msg_mp_full);
+    try std.testing.expect(msg_live_perf != msg_mp_inner);
+    try std.testing.expect(msg_live_perf != msg_mp_vid);
+    try std.testing.expect(msg_live_perf != msg_mp_wave);
+    try std.testing.expect(msg_live_perf != msg_mp_tp);
+    try std.testing.expect(msg_live_perf != msg_mp_edit);
+    try std.testing.expect(msg_live_perf != msg_mp_export);
+    try std.testing.expect(msg_live_perf != msg_mp_r_o);
+    try std.testing.expect(msg_live_perf != msg_mp_hov);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
@@ -1993,6 +2363,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_lib_detail);
     try std.testing.expect(msg_live_strip != msg_lib_queue);
     try std.testing.expect(msg_live_strip != msg_lib_cue_cell);
+    try std.testing.expect(msg_live_strip != msg_mp_full);
+    try std.testing.expect(msg_live_strip != msg_mp_inner);
+    try std.testing.expect(msg_live_strip != msg_mp_vid);
+    try std.testing.expect(msg_live_strip != msg_mp_wave);
+    try std.testing.expect(msg_live_strip != msg_mp_tp);
+    try std.testing.expect(msg_live_strip != msg_mp_edit);
+    try std.testing.expect(msg_live_strip != msg_mp_export);
+    try std.testing.expect(msg_live_strip != msg_mp_r_o);
+    try std.testing.expect(msg_live_strip != msg_mp_hov);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
@@ -2003,6 +2382,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_lib_detail);
     try std.testing.expect(msg_mo_state != msg_lib_queue);
     try std.testing.expect(msg_mo_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_mo_state != msg_mp_full);
+    try std.testing.expect(msg_mo_state != msg_mp_inner);
+    try std.testing.expect(msg_mo_state != msg_mp_vid);
+    try std.testing.expect(msg_mo_state != msg_mp_wave);
+    try std.testing.expect(msg_mo_state != msg_mp_tp);
+    try std.testing.expect(msg_mo_state != msg_mp_edit);
+    try std.testing.expect(msg_mo_state != msg_mp_export);
+    try std.testing.expect(msg_mo_state != msg_mp_r_o);
+    try std.testing.expect(msg_mo_state != msg_mp_hov);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
@@ -2012,6 +2400,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_lib_detail);
     try std.testing.expect(msg_pub != msg_lib_queue);
     try std.testing.expect(msg_pub != msg_lib_cue_cell);
+    try std.testing.expect(msg_pub != msg_mp_full);
+    try std.testing.expect(msg_pub != msg_mp_inner);
+    try std.testing.expect(msg_pub != msg_mp_vid);
+    try std.testing.expect(msg_pub != msg_mp_wave);
+    try std.testing.expect(msg_pub != msg_mp_tp);
+    try std.testing.expect(msg_pub != msg_mp_edit);
+    try std.testing.expect(msg_pub != msg_mp_export);
+    try std.testing.expect(msg_pub != msg_mp_r_o);
+    try std.testing.expect(msg_pub != msg_mp_hov);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
@@ -2020,6 +2417,15 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_lib_detail);
     try std.testing.expect(msg_pub_hero != msg_lib_queue);
     try std.testing.expect(msg_pub_hero != msg_lib_cue_cell);
+    try std.testing.expect(msg_pub_hero != msg_mp_full);
+    try std.testing.expect(msg_pub_hero != msg_mp_inner);
+    try std.testing.expect(msg_pub_hero != msg_mp_vid);
+    try std.testing.expect(msg_pub_hero != msg_mp_wave);
+    try std.testing.expect(msg_pub_hero != msg_mp_tp);
+    try std.testing.expect(msg_pub_hero != msg_mp_edit);
+    try std.testing.expect(msg_pub_hero != msg_mp_export);
+    try std.testing.expect(msg_pub_hero != msg_mp_r_o);
+    try std.testing.expect(msg_pub_hero != msg_mp_hov);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
     try std.testing.expect(msg_set_state != msg_lib_state);
@@ -2027,25 +2433,133 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_lib_detail);
     try std.testing.expect(msg_set_state != msg_lib_queue);
     try std.testing.expect(msg_set_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_state != msg_mp_full);
+    try std.testing.expect(msg_set_state != msg_mp_inner);
+    try std.testing.expect(msg_set_state != msg_mp_vid);
+    try std.testing.expect(msg_set_state != msg_mp_wave);
+    try std.testing.expect(msg_set_state != msg_mp_tp);
+    try std.testing.expect(msg_set_state != msg_mp_edit);
+    try std.testing.expect(msg_set_state != msg_mp_export);
+    try std.testing.expect(msg_set_state != msg_mp_r_o);
+    try std.testing.expect(msg_set_state != msg_mp_hov);
     try std.testing.expect(msg_set_content != msg_set_status);
     try std.testing.expect(msg_set_content != msg_lib_state);
     try std.testing.expect(msg_set_content != msg_lib_body);
     try std.testing.expect(msg_set_content != msg_lib_detail);
     try std.testing.expect(msg_set_content != msg_lib_queue);
     try std.testing.expect(msg_set_content != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_content != msg_mp_full);
+    try std.testing.expect(msg_set_content != msg_mp_inner);
+    try std.testing.expect(msg_set_content != msg_mp_vid);
+    try std.testing.expect(msg_set_content != msg_mp_wave);
+    try std.testing.expect(msg_set_content != msg_mp_tp);
+    try std.testing.expect(msg_set_content != msg_mp_edit);
+    try std.testing.expect(msg_set_content != msg_mp_export);
+    try std.testing.expect(msg_set_content != msg_mp_r_o);
+    try std.testing.expect(msg_set_content != msg_mp_hov);
     try std.testing.expect(msg_set_status != msg_lib_state);
     try std.testing.expect(msg_set_status != msg_lib_body);
     try std.testing.expect(msg_set_status != msg_lib_detail);
     try std.testing.expect(msg_set_status != msg_lib_queue);
     try std.testing.expect(msg_set_status != msg_lib_cue_cell);
+    try std.testing.expect(msg_set_status != msg_mp_full);
+    try std.testing.expect(msg_set_status != msg_mp_inner);
+    try std.testing.expect(msg_set_status != msg_mp_vid);
+    try std.testing.expect(msg_set_status != msg_mp_wave);
+    try std.testing.expect(msg_set_status != msg_mp_tp);
+    try std.testing.expect(msg_set_status != msg_mp_edit);
+    try std.testing.expect(msg_set_status != msg_mp_export);
+    try std.testing.expect(msg_set_status != msg_mp_r_o);
+    try std.testing.expect(msg_set_status != msg_mp_hov);
     try std.testing.expect(msg_lib_state != msg_lib_body);
     try std.testing.expect(msg_lib_state != msg_lib_detail);
     try std.testing.expect(msg_lib_state != msg_lib_queue);
     try std.testing.expect(msg_lib_state != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_state != msg_mp_full);
+    try std.testing.expect(msg_lib_state != msg_mp_inner);
+    try std.testing.expect(msg_lib_state != msg_mp_vid);
+    try std.testing.expect(msg_lib_state != msg_mp_wave);
+    try std.testing.expect(msg_lib_state != msg_mp_tp);
+    try std.testing.expect(msg_lib_state != msg_mp_edit);
+    try std.testing.expect(msg_lib_state != msg_mp_export);
+    try std.testing.expect(msg_lib_state != msg_mp_r_o);
+    try std.testing.expect(msg_lib_state != msg_mp_hov);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
     try std.testing.expect(msg_lib_body != msg_lib_queue);
     try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_body != msg_mp_full);
+    try std.testing.expect(msg_lib_body != msg_mp_inner);
+    try std.testing.expect(msg_lib_body != msg_mp_vid);
+    try std.testing.expect(msg_lib_body != msg_mp_wave);
+    try std.testing.expect(msg_lib_body != msg_mp_tp);
+    try std.testing.expect(msg_lib_body != msg_mp_edit);
+    try std.testing.expect(msg_lib_body != msg_mp_export);
+    try std.testing.expect(msg_lib_body != msg_mp_r_o);
+    try std.testing.expect(msg_lib_body != msg_mp_hov);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
     try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_detail != msg_mp_full);
+    try std.testing.expect(msg_lib_detail != msg_mp_inner);
+    try std.testing.expect(msg_lib_detail != msg_mp_vid);
+    try std.testing.expect(msg_lib_detail != msg_mp_wave);
+    try std.testing.expect(msg_lib_detail != msg_mp_tp);
+    try std.testing.expect(msg_lib_detail != msg_mp_edit);
+    try std.testing.expect(msg_lib_detail != msg_mp_export);
+    try std.testing.expect(msg_lib_detail != msg_mp_r_o);
+    try std.testing.expect(msg_lib_detail != msg_mp_hov);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
+    try std.testing.expect(msg_lib_queue != msg_mp_full);
+    try std.testing.expect(msg_lib_queue != msg_mp_inner);
+    try std.testing.expect(msg_lib_queue != msg_mp_vid);
+    try std.testing.expect(msg_lib_queue != msg_mp_wave);
+    try std.testing.expect(msg_lib_queue != msg_mp_tp);
+    try std.testing.expect(msg_lib_queue != msg_mp_edit);
+    try std.testing.expect(msg_lib_queue != msg_mp_export);
+    try std.testing.expect(msg_lib_queue != msg_mp_r_o);
+    try std.testing.expect(msg_lib_queue != msg_mp_hov);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_wave);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_tp);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_edit);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_export);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_r_o);
+    try std.testing.expect(msg_lib_cue_cell != msg_mp_hov);
+    try std.testing.expect(msg_mp_full != msg_mp_inner);
+    try std.testing.expect(msg_mp_full != msg_mp_vid);
+    try std.testing.expect(msg_mp_full != msg_mp_wave);
+    try std.testing.expect(msg_mp_full != msg_mp_tp);
+    try std.testing.expect(msg_mp_full != msg_mp_edit);
+    try std.testing.expect(msg_mp_full != msg_mp_export);
+    try std.testing.expect(msg_mp_full != msg_mp_r_o);
+    try std.testing.expect(msg_mp_full != msg_mp_hov);
+    try std.testing.expect(msg_mp_inner != msg_mp_vid);
+    try std.testing.expect(msg_mp_inner != msg_mp_wave);
+    try std.testing.expect(msg_mp_inner != msg_mp_tp);
+    try std.testing.expect(msg_mp_inner != msg_mp_edit);
+    try std.testing.expect(msg_mp_inner != msg_mp_export);
+    try std.testing.expect(msg_mp_inner != msg_mp_r_o);
+    try std.testing.expect(msg_mp_inner != msg_mp_hov);
+    try std.testing.expect(msg_mp_vid != msg_mp_wave);
+    try std.testing.expect(msg_mp_vid != msg_mp_tp);
+    try std.testing.expect(msg_mp_vid != msg_mp_edit);
+    try std.testing.expect(msg_mp_vid != msg_mp_export);
+    try std.testing.expect(msg_mp_vid != msg_mp_r_o);
+    try std.testing.expect(msg_mp_vid != msg_mp_hov);
+    try std.testing.expect(msg_mp_wave != msg_mp_tp);
+    try std.testing.expect(msg_mp_wave != msg_mp_edit);
+    try std.testing.expect(msg_mp_wave != msg_mp_export);
+    try std.testing.expect(msg_mp_wave != msg_mp_r_o);
+    try std.testing.expect(msg_mp_wave != msg_mp_hov);
+    try std.testing.expect(msg_mp_tp != msg_mp_edit);
+    try std.testing.expect(msg_mp_tp != msg_mp_export);
+    try std.testing.expect(msg_mp_tp != msg_mp_r_o);
+    try std.testing.expect(msg_mp_tp != msg_mp_hov);
+    try std.testing.expect(msg_mp_edit != msg_mp_export);
+    try std.testing.expect(msg_mp_edit != msg_mp_r_o);
+    try std.testing.expect(msg_mp_edit != msg_mp_hov);
+    try std.testing.expect(msg_mp_export != msg_mp_r_o);
+    try std.testing.expect(msg_mp_export != msg_mp_hov);
+    try std.testing.expect(msg_mp_r_o != msg_mp_hov);
 }

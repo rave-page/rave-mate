@@ -40,7 +40,16 @@ func wireExportsB2() []wireExport {
 		wireExport{"library_body_v2", zigui.RenderLibraryBodyV2},
 		wireExport{"library_detail_v2", zigui.RenderLibraryDetailV2},
 		wireExport{"library_queue_v2", zigui.RenderLibraryQueueV2},
-		wireExport{"library_cuecell_v2", zigui.RenderLibraryCueCellV2})
+		wireExport{"library_cuecell_v2", zigui.RenderLibraryCueCellV2},
+		wireExport{"player_v2", zigui.RenderPlayerV2},
+		wireExport{"player_root_v2", zigui.RenderPlayerRootV2},
+		wireExport{"player_vid_v2", zigui.RenderPlayerVidV2},
+		wireExport{"player_wave_v2", zigui.RenderPlayerWaveV2},
+		wireExport{"player_tp_v2", zigui.RenderPlayerTpV2},
+		wireExport{"player_edit_v2", zigui.RenderPlayerEditV2},
+		wireExport{"player_export_v2", zigui.RenderPlayerExportV2},
+		wireExport{"player_ro_v2", zigui.RenderPlayerROV2},
+		wireExport{"player_hov_v2", zigui.RenderPlayerHovV2})
 	return out
 }
 
@@ -63,6 +72,18 @@ func wireBasesB2() []wireBase {
 	}
 	for n, st := range moFixtures() {
 		out = append(out, wireBase{"motion/" + n, wireMoState(st)})
+	}
+	for n, fx := range mpFixtures() {
+		u := &UI{}
+		*u.mp(fx.host) = fx
+		inner := u.mpInnerState(u.mpSnap(fx.host))
+		out = append(out,
+			wireBase{"mp/" + n, wireMpFull(mpFullSt{Host: fx.host, Inner: inner})},
+			wireBase{"mp/" + n + "/inner", wireMpInner(inner)},
+			wireBase{"mp/" + n + "/tp", wireMpTp(inner.Tp)},
+			wireBase{"mp/" + n + "/edit", wireMpEdit(inner.EditBox)},
+			wireBase{"mp/" + n + "/export", wireMpExport(inner.EditBox.Export)})
+		releaseUIState(u)
 	}
 	for n, st := range libFixtures() {
 		out = append(out,

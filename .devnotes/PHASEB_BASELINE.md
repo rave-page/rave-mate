@@ -172,6 +172,9 @@ GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$
 | library (full tab) | 124 435 | 38 668 | **-69%** | 72 850 / 209 353 = 34.8% |
 | library `#lib-body` frag | 121 232 | 39 131 | **-68%** | (in the set above) |
 | library cue-census cell | 1 183 | 838 | **-29%** | (~90 B of state) |
+| player (full, `singleEdit`) | 123 343 | 41 513 | **-66%** | 1 610 114 / 2 061 725 = 78.1% |
+| player `#mp-tp` transport frag | 9 448 | 3 450 | **-63%** | (in the set above) |
+| player `#mp-export` frag | 68 609 | 20 080 | **-71%** | (in the set above) |
 
 **Encoder allocation: the flat prealloc was a real regression, now fixed.** With
 `NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment
@@ -193,6 +196,15 @@ v2 still allocates more BYTES than `json.Marshal` on tiny fragments (1 568 vs 23
 plus the map floor. Time is at parity there and 2-2.6× better everywhere else, so the remaining
 gap is not worth a pool. Benchmark numbers are mildly order-dependent now (the first document of
 a message pays the cold hint) - min-of-N over full-suite runs absorbs it.
+
+**Player's 29 kB raw SVG, measured as promised.** The document ratio on player is the WORST of
+the fan-out (78.1% vs library's 34.8%): its state is dominated by one huge `mpWaveSVG` string, so
+the arena has nothing to intern and the only saving is JSON's escaping of that string. The TIME
+delta is still -66%, because the win was never the document size - it is removing the Zig-side
+`std.json` parse (B0 finding 2). Player also allocates the most (165 kB/op): the SVG is copied
+into the arena, then the finished document is copied again by `Finish`. A zero-copy "big string"
+wiretype (offset into the caller's buffer instead of the arena) would fix that class; it is not
+needed for correctness and nothing in the tick path renders the full player.
 
 ## Gaps / caveats
 

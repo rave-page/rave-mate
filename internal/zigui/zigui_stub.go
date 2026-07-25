@@ -210,4 +210,14 @@ func RenderLibraryDetailV2(state []byte) (string, bool)  { return "", false }
 func RenderLibraryQueueV2(state []byte) (string, bool)   { return "", false }
 func RenderLibraryCueCellV2(state []byte) (string, bool) { return "", false }
 
+func RenderPlayerV2(state []byte) (string, bool)       { return "", false }
+func RenderPlayerRootV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerVidV2(state []byte) (string, bool)    { return "", false }
+func RenderPlayerWaveV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerTpV2(state []byte) (string, bool)     { return "", false }
+func RenderPlayerEditV2(state []byte) (string, bool)   { return "", false }
+func RenderPlayerExportV2(state []byte) (string, bool) { return "", false }
+func RenderPlayerROV2(state []byte) (string, bool)     { return "", false }
+func RenderPlayerHovV2(state []byte) (string, bool)    { return "", false }
+
 // --- end phaseb-wire ---

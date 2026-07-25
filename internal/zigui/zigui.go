@@ -1034,4 +1034,67 @@ func RenderLibraryCueCellV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderPlayerV2 renders the full Player view from an RZW1 document.
+func RenderPlayerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_v2(p, l, n)
+	})
+}
+
+// RenderPlayerRootV2 renders the #mp-root inner from an RZW1 document.
+func RenderPlayerRootV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_root_v2(p, l, n)
+	})
+}
+
+// RenderPlayerVidV2 renders the #mp-vid fragment from an RZW1 document.
+func RenderPlayerVidV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_vid_v2(p, l, n)
+	})
+}
+
+// RenderPlayerWaveV2 renders the #mp-wave fragment from an RZW1 document.
+func RenderPlayerWaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_wave_v2(p, l, n)
+	})
+}
+
+// RenderPlayerTpV2 renders the #mp-tp transport from an RZW1 document.
+func RenderPlayerTpV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_tp_v2(p, l, n)
+	})
+}
+
+// RenderPlayerEditV2 renders the #mp-edit box from an RZW1 document.
+func RenderPlayerEditV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_edit_v2(p, l, n)
+	})
+}
+
+// RenderPlayerExportV2 renders the #mp-export panel from an RZW1 document.
+func RenderPlayerExportV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_export_v2(p, l, n)
+	})
+}
+
+// RenderPlayerROV2 renders the #mp-ro read-only strip from an RZW1 document.
+func RenderPlayerROV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_ro_v2(p, l, n)
+	})
+}
+
+// RenderPlayerHovV2 renders the #mp-hov hover readout from an RZW1 document.
+func RenderPlayerHovV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_player_hov_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---

@@ -270,6 +270,15 @@ const uint8_t *rz_ui_render_library_body_v2(const uint8_t *state, size_t len, si
 const uint8_t *rz_ui_render_library_detail_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_library_queue_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_library_cuecell_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_root_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_vid_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_wave_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_tp_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_edit_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_export_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_ro_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_player_hov_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 #ifdef __cplusplus

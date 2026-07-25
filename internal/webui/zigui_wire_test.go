@@ -571,6 +571,70 @@ func TestZigWireLibraryPatchTargets(t *testing.T) {
 	assertNoNewFallbacks(t, before)
 }
 
+// TestZigWireThreeWayPlayer: nine patch targets over the player fixture set, built through the
+// same UI path the bridges use. Several fragments render legitimately EMPTY (no video, no edit
+// box), which NULLs both Zig paths - so the fallback assertion is exact rather than "none":
+// every empty surface costs one v2 + one v1 downgrade.
+func TestZigWireThreeWayPlayer(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `bash scripts/build-zig.sh` first")
+	}
+	before := zigui.FallbackCounts()
+	var wireB, jsonB, empties, checked int
+	for name, fx := range mpFixtures() {
+		t.Run(name, func(t *testing.T) {
+			u := &UI{}
+			t.Cleanup(func() { releaseUIState(u) })
+			u.mu.Lock()
+			u.libSection = "collection"
+			u.mu.Unlock()
+			*u.mp(fx.host) = fx
+			snap := u.mpSnap(fx.host)
+			inner := u.mpInnerState(snap)
+			full := mpFullSt{Host: snap.host, Inner: inner}
+
+			check := func(what string, doc, js []byte, want string, v1fn, v2fn func([]byte) (string, bool)) {
+				if len(doc) == 0 {
+					t.Fatalf("%s: wire encode failed", what)
+				}
+				wireB += len(doc)
+				jsonB += len(js)
+				v1, ok1 := v1fn(js)
+				v2, ok2 := v2fn(doc)
+				if ok1 != ok2 {
+					t.Fatalf("%s: v1 ok=%v but v2 ok=%v", what, ok1, ok2)
+				}
+				if !ok1 {
+					if want != "" {
+						t.Fatalf("%s: both Zig paths declined but Go rendered %d bytes", what, len(want))
+					}
+					empties++
+					return
+				}
+				checked++
+				assertBytesEqual(t, what+" go==v1", want, v1)
+				assertBytesEqual(t, what+" v1==v2", v1, v2)
+			}
+
+			check("full", wireMpFull(full), stateJSON(full), mpFullHTMLOf(full), zigui.RenderPlayer, zigui.RenderPlayerV2)
+			check("root", wireMpInner(inner), stateJSON(inner), mpInnerHTMLOf(inner), zigui.RenderPlayerRoot, zigui.RenderPlayerRootV2)
+			check("vid", wireMpVid(inner.Vid), stateJSON(inner.Vid), mpVidHTMLOf(inner.Vid), zigui.RenderPlayerVid, zigui.RenderPlayerVidV2)
+			check("wave", wireMpWave(inner.Wave), stateJSON(inner.Wave), mpWaveHTMLOf(inner.Wave), zigui.RenderPlayerWave, zigui.RenderPlayerWaveV2)
+			check("tp", wireMpTp(inner.Tp), stateJSON(inner.Tp), mpTpHTMLOf(inner.Tp), zigui.RenderPlayerTp, zigui.RenderPlayerTpV2)
+			check("edit", wireMpEdit(inner.EditBox), stateJSON(inner.EditBox), mpEditHTMLOf(inner.EditBox), zigui.RenderPlayerEdit, zigui.RenderPlayerEditV2)
+			check("export", wireMpExport(inner.EditBox.Export), stateJSON(inner.EditBox.Export), mpExportHTMLOf(inner.EditBox.Export), zigui.RenderPlayerExport, zigui.RenderPlayerExportV2)
+			check("ro", wireMpRO(inner.EditBox.RO), stateJSON(inner.EditBox.RO), mpROHTMLOf(inner.EditBox.RO), zigui.RenderPlayerRO, zigui.RenderPlayerROV2)
+			check("hov", wireMpHov(inner.Hov), stateJSON(inner.Hov), mpHovHTMLOf(inner.Hov), zigui.RenderPlayerHov, zigui.RenderPlayerHovV2)
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no player surface rendered")
+	}
+	t.Logf("%d surfaces checked, %d legitimately empty: wire %d B vs json %d B (%.1f%%)",
+		checked, empties, wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertFallbackDelta(t, before, 2*empties)
+}
+
 // TestZigWireRejectsForeignDocuments pins the header contract: an export must refuse a
 // document built for another message or another schema (that is what makes a stale
 // libraveui.a a clean v1 downgrade instead of a mis-decode).
@@ -641,6 +705,24 @@ func TestWireEmptyListsAreAbsentNotNull(t *testing.T) {
 		t.Fatal("v2 render of an all-zero logs state failed")
 	} else {
 		assertBytesEqual(t, "zero logs state", logsHTML(zero), h)
+	}
+}
+
+// assertFallbackDelta fails unless EXACTLY want downgrades were recorded during the test. Used
+// where some fragments are legitimately empty (an empty render is a NULL on both Zig paths, and
+// the Go renderer reproduces the same ""), so "no fallbacks" would be the wrong assertion and
+// "ignore fallbacks" would hide a real one.
+func assertFallbackDelta(t *testing.T, before map[string]int, want int) {
+	t.Helper()
+	got := 0
+	for k, v := range zigui.FallbackCounts() {
+		if d := v - before[k]; d > 0 {
+			got += d
+			t.Logf("fallback %s +%d", k, d)
+		}
+	}
+	if got != want {
+		t.Errorf("fallbacks recorded = %d, want %d", got, want)
 	}
 }
 
