@@ -99,6 +99,14 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
 - `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
   `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
 
+## Go-workaround awareness (see ZIG_MIGRATION.md "Why Zig")
+
+Zig's origin is a DAW that refused to compromise on UI performance — our Go render layer
+carries Go-runtime workarounds (string-builder reuse, tick/patch throttles sized for GC
+pressure, precomputed caches dodging per-render alloc). During phase A, replicate them
+where they shape the DOM (parity!); FLAG them in port notes. Phase B (Zig shell) revisits
+each — many are unnecessary under explicit allocators + no GC.
+
 ## Dev rules when touching UI during migration
 
 - A view lives in exactly ONE renderer at a time (Go or Zig) — no dual maintenance.

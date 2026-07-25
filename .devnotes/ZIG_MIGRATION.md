@@ -5,6 +5,28 @@ Method: **strangler pattern, not big-bang** — Zig code enters as C-ABI static 
 into the existing Go process tree via cgo, then as whole subprocess replacements. Every
 step keeps the shipped app green; pure-Go fallback stays until a port soaks.
 
+## Why Zig — porting philosophy (GUIDELINE, applies to every port)
+
+Go's runtime (GC pauses, goroutine scheduling jitter, cgo boundary cost) is the wrong
+substrate for hard-realtime audio/video. Zig was created for exactly this domain — Andrew
+Kelley started Zig to build a DAW without compromising on performance or UI usability.
+Consequence: parts of our Go code are **workarounds for the Go runtime**, not the feature.
+Recognize them when porting:
+
+- sync.Pool / buffer-reuse rings + prealloc contortions that exist only to dodge GC
+- channel hops / goroutine handoffs keeping the audio callback allocation-free
+- batching APIs shaped to amortize the cgo boundary
+- throttles/caching whose real trigger was GC or scheduler pressure, not the data rate
+
+Rules:
+1. **Parity port FIRST** — byte/behavior gates vs the Go original, workarounds replicated
+   if they affect output. Keeps ports honest.
+2. **Then a Zig-native pass may remove the workaround** (explicit allocators/arenas,
+   comptime specialization, deterministic latency, no GC → simpler ownership). Lands only
+   behind behavioral/SNR/bench gates + a note here naming the workaround removed + why safe.
+3. Never carry a workaround into Zig when its only reason is the Go runtime — flag it in
+   the port notes. Unsure whether it's load-bearing? Port faithfully + flag.
+
 ## Interop contract (P0, SHIPPED)
 
 - `native/zigcore/` — zig (>= 0.16) static lib. `zig build -Drelease` →
