@@ -63,15 +63,16 @@ func (m *scriptMirror) reads() int {
 
 // newMpUI builds a UI with a shell (so the eval queue accepts entries) but no flusher, so the
 // queue can be inspected entry by entry.
-func newMpUI(t *testing.T) *UI {
+func newMpUI(t testing.TB) *UI {
 	t.Helper()
 	u := &UI{svc: ui.Services{Cfg: &config.Config{}}, active: "library", started: time.Now(),
 		stop: make(chan struct{}), evalKick: make(chan struct{}, 1)}
-	u.shell = newVirtualShell(nil, func(string) {}, func(string) {})
+	sh := newVirtualShell(nil, func(string) {}, func(string) {})
+	u.shell = sh
 	u.mu.Lock()
 	u.libSection = "collection"
 	u.mu.Unlock()
-	t.Cleanup(func() { u.shell.terminate(); releaseUIState(u) })
+	t.Cleanup(func() { sh.terminate(); releaseUIState(u) }) // sh, not u.shell: a bench may clear it
 	return u
 }
 

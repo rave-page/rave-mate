@@ -638,6 +638,11 @@ would register smart selects the Go path never registered at that point.
   dance (a race workaround for slow Go renders being overwritten by async analysis applies), and the
   phase-A per-render state->JSON->parse round trip itself. The `mpPushRealtime` rAF hand-off is NOT
   a workaround - it is the feature.
+  **BOTH CLOSED in phase B4a** (see "Phase B — B4a" below): the re-reads collapsed into one sample
+  per snapshot (`mpSt.eng`) and `mpResync` became a generation counter. The flag was right about the
+  cause and wrong about the harm in both cases - the re-reads could TEAR the DOM (not just cost
+  time), and `mpResync` was the expensive one (1.15 ms per container patch) while also failing to
+  close the race it existed for.
 
 Dialog-sweep-A notes (wave 4: the publish/transcode dialog family - `publish_export.go`,
 `publish_actions.go`, `publish_remote_actions.go`, `pbuilder.go`, `library_cueedit.go`'s pattern
@@ -1290,3 +1295,87 @@ Two honest caveats recorded there: **pure Go is still the cheapest renderer for 
 **batching only pays where there are MANY fragments** - a single big fragment wants dedup, not a
 batch. Quote the post-composition figures: against per-fragment JSON the same change measured
 -43%/-45%, and two optimisations on one tax do not add up.
+
+## Phase B — B4a: the player's two retained-state workarounds
+
+B4 removes retained state whose only reason was the Go runtime. The player carried two, both
+latency/GC-shaped, both flagged in the port notes above. These are BEHAVIOUR changes: the DOM is
+identical, the INPUTS and the timing change.
+
+### 1. One engine sample per snapshot (`mpSt.eng`)
+
+`mpEngineState(&t, m)` was called per CONSUMER: **four** samples in one component render - wave
+playhead (`mpPlayheadAxis`), hover readout, transport clock, transport seek slider - and **five**
+in one `mpTick`. Both inputs move between samples: the featurehost mirror is rewritten by the
+child's ~5 Hz tick events (and zeroed outright by `fireEnd`), and the `audOpt` optimistic override
+expires on a wall clock. So one DOM could carry a moving playhead over an idle transport, or -
+inside the transport row alone - a clock reading `00:10` beside a thumb parked at the 5-minute mark.
+
+`mpSt.eng` (a `*mpTr` on the render COPY, never on the instance) holds the snapshot's ONE sample.
+`mpMut`/`mpSnap` both funnel through `mpCopy`, which takes it after releasing `mpMu` (the sample
+locks the proxy mirror - never nest those two); `mpEng(&t)` returns it and samples on first read so
+a hand-built `mpSt` cannot render against a zero transport. Every consumer reads `u.mpEng(&t)`; the
+sampler (`mpSampleEng`) resolves the ACTIVE media, which is what all twelve call sites passed.
+
+- **The gate is a moving mirror.** Rendering against a mirror that advances on every read must be
+  byte-equal to rendering against a mirror PINNED to the first sample, and must read the mirror
+  exactly once (per render AND per tick). Non-vacuous by construction: the test also asserts that
+  two different samples render DIFFERENTLY, so a fixture that cannot tell them apart fails.
+  Verified by execution - making `mpEng` re-sample fails with "sampled the engine 5 times" (render)
+  and "6 times" (tick).
+- **`mpMirrorOv` (on `UI`) is the test seam** and the only way to drive this: the real mirror moves
+  only when a live child process sends tick events, so no fixture could ever reach the audio arm.
+  Consequence for coverage: the 178 surfaces of `TestZigPlayerGolden` all render an IDLE transport
+  (`&UI{}` has no player service). `TestZigPlayerEngineGolden` adds the axis that was missing -
+  4 base fixtures × 11 engine states (idle · other-file · playing · paused · no-total · inside the
+  momentary-LUFS grid · optimistic play/pause/stop/expired/no-engine) over all nine patch targets,
+  Go == v1 == v2: **330 surfaces, 28 with a loaded transport**.
+- **This one is a correctness fix, not a speed-up.** A sample is 24.6 ns / 0 allocs, so the four
+  removed from a render are 0.02% of it. Do not quote it as a perf win.
+- Watch the fixture geometry when writing engine states: a playhead is only drawn INSIDE the
+  zoomed view window, and the hover readout only has data inside the momentary-LUFS grid, so
+  "playing" needs two different positions to light both up.
+
+### 2. `mpResync` → a generation counter (`mpSt.pgen` + `mpOrdered`/`mpHeal`)
+
+A container render (`main` / `#lib-body` / `#lib-detail`) builds HTML from a player snapshot and
+enqueues it when the build finishes. A mutation landing in between - an analysis apply, a transport
+RPC completing - patched the player fragment with FRESH markup that the container patch then
+overwrote: the player showed "Analyzing waveform…" forever while the state was healthy. `mpResync`
+papered over it by re-emitting the whole component after EVERY container patch.
+
+Now `mpSt.pgen` counts mutations (`mpMut` bumps, `mpSnap` does not, `reset()` carries it forward -
+a counter that rewinds could land back on a marked value and hide the race) and `mpOrdered` is the
+funnel every container patch goes through: **mark → build → enqueue → heal**. A mutation that can
+still be overwritten bumped `pgen` before the heal re-reads it (bump and read both under `mpMu`, so
+the read happens-after); one landing afterwards has its own patch enqueued behind the container
+patch. Nothing is re-rendered when nothing moved. Same shape as B3's `u.fragGen`/`commitFrags`.
+
+- **The workaround did not even fix the bug it existed for.** Its patch carried the
+  `mp-<host>-root` coalescing key, and `enqueueEval` updates a keyed entry IN PLACE (newest wins,
+  position kept). Two container patches in one flush window - `libPatchBody` then
+  `libPatchDetail`, or `patchMain` then either - and the second heal folded into the FIRST heal's
+  slot, ahead of the second container patch, which then overwrote it. The heal is therefore
+  enqueued **uncoalesced** (`enqueueEval("", …)`, FIFO). `TestMpHealBeatsLaterContainerPatch`
+  reproduces the hole: restoring the keyed patch fails with "a heal (entry 3) is queued BEFORE the
+  last container patch (entry 4)".
+- **The race gate drives a mutation between build and enqueue** and requires the LAST entry that
+  writes the player subtree to carry the current state. Verified by execution: dropping the heal
+  fails with "the DOM ends on the stale build: entry 2 still shows Analyzing waveform…" and prints
+  the queue as `[mp-library-wave mprt-library lib-body]` - the race itself.
+- **Number** (see PHASEB_BASELINE.md): a quiet container patch goes **1 152 µs → 76.6 ns**, 1.11 MB
+  → 0 B, 9 939 → 0 allocations. That is two full component renders (29 kB of HTML each, waveform
+  SVG included) plus two `jsQuote`s, per tab switch, per section change, per nav click - gone.
+  When the race DOES happen exactly one component is rendered (613 µs), not two.
+- The heal deliberately stays coarse (the whole `#mp-<host>-root`): it only runs on a real race, so
+  a finer-grained diff would buy nothing and would need its own dedup state.
+- **Adding a fourth container patch site?** Route it through `mpOrdered`. A site that patches a
+  fragment whose HTML embeds `mpHTML(host)` and does NOT is a silent regression - the DOM is right
+  until an analysis lands mid-build, which is exactly the case no golden fixture covers.
+
+### Not touched, on purpose
+
+No Zig-side change, no schema row, no export: `mpSt` is Go-side retained state and never crosses
+the ABI (the drift audit prints `0 drifted fields`). The nine player `_v2` exports, their fixtures
+and the fuzz base set are untouched; the new engine states ride the SAME messages, which is why
+they could be gated three-way for free.

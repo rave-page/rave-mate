@@ -313,3 +313,58 @@ Read this one carefully — it is NOT a straight win:
    wave B-2's per-message prealloc hints applying to the tick roots (ids 100/101) automatically.
 6. **Steady state is where the tick lives.** `sched_same` (16.8 µs, 9 allocs, zero eval traffic) is
    the number to quote for a UI sitting on the Live tab.
+
+## Phase B4a — the player's retained-state workarounds
+
+Bench: `internal/webui/player_order_bench_test.go` (UNTAGGED, so it measures both the Zig bridge and
+the pure-Go renderer). Same box/method as above: **min of 6** (three runs × `-count=2`). The
+retired workaround is transcribed in the bench file (`mpResyncLegacy`) so the baseline is the real
+code path, not a model of it.
+
+Fixture: both hosts loaded with a 1 h audio capture - 20 000 peak buckets, a 3 600-bucket momentary
+LUFS timeline, probe + loudness chips, three track markers - **29 005 B of component HTML per host**.
+Container UIs run with `shell == nil`, so the queue insert (identical work on both paths) is out of
+the numbers.
+
+### What a container patch pays to keep the embedded players correct
+
+| row | µs/op (min of 6) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `resync_old` (retired: re-render + re-quote both hosts, always) | 1 152 | 1 107 678 | 9 939 |
+| **`ordered_quiet`** (generation counter, nothing moved) | **0.077** | **0** | **0** |
+| `ordered_raced` (a mutation landed mid-build → one component healed) | 613 | 555 770 | 4 975 |
+| `mark_only` (the mark alone) | 0.037 | 0 | 0 |
+
+Untagged (Go renderer) for reference: `resync_old` 1 074 µs / 10 201 allocs, `ordered_quiet` 74 ns.
+
+**A quiet container patch drops from 1 152 µs to 76.6 ns and from 9 939 allocations to zero** - a
+tab switch, a Library section change and every nav click each paid two full component renders
+(waveform SVG included) plus two `jsQuote`s of 29 kB, unconditionally. When the race actually
+happens the new path renders ONE component (613 µs) where the old rendered two.
+
+### The engine-sample collapse is a correctness fix, not a speed-up
+
+| row | ns/op (min of 6) | B/op | allocs/op |
+|---|--:|--:|--:|
+| `tick` (whole ~1 Hz player tick, tagged) | 582 400 | 526 871 | 4 949 |
+| `render_inner` (one component render, tagged) | 570 570 | 446 390 | 4 963 |
+| `sample` (one engine sample) | 24.6 | 0 | 0 |
+| `removed_samples_per_tick` (the 4 the collapse removed) | 103.6 | 0 | 0 |
+
+4 samples → 1 removes **103.6 ns of 582 µs = 0.018%** of a tick. Quote the collapse for what it is:
+a torn DOM (moving playhead over an idle transport; clock and seek thumb from different instants)
+became unrepresentable. Nothing else in the tick changed.
+
+### Findings
+
+1. **The expensive workaround was the one that ran when nothing was wrong.** `mpResync` fired on
+   every container patch to survive a race that fires rarely; making the race decidable (a counter,
+   two mutex reads per host) is a 15 000× cut on the common path. B0 finding 5 said full-tab
+   renders are not the live problem - a full COMPONENT render on every tab switch was.
+2. **A cheap workaround can still be the buggy one.** The sample collapse costs nothing measurable
+   and fixes a real tear; `mpResync` cost 1.15 ms and did not close its race (keyed-patch
+   coalescing, see ZIG_UI_GUIDE.md "Phase B — B4a"). Neither fact was visible from the code
+   comments, only from a bench and a test.
+3. **The player tick is the most expensive tick in the app** (582 µs vs the Live tab's 20.5 µs),
+   and ~98% of it is the waveform SVG + peaks decimation the ports deliberately left in Go. That is
+   the next number worth attacking on this surface, not the ABI.
