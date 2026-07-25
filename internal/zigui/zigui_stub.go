@@ -64,3 +64,7 @@ func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", fals
 
 func RenderPeers(stateJSON []byte) (string, bool)     { return "", false }
 func RenderPeersBody(stateJSON []byte) (string, bool) { return "", false }
+
+// --- library_remote ---
+
+func RenderLibRemote(stateJSON []byte) (string, bool) { return "", false }

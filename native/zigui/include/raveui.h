@@ -101,6 +101,10 @@ const uint8_t *rz_ui_render_peers(const uint8_t *state_json, size_t len, size_t 
 /* #peers-body inner HTML (~1 Hz live tick patch target). */
 const uint8_t *rz_ui_render_peers_body(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* --- library_remote --- */
+/* "Controlling [This computer]" switcher; NULL when hidden (Go fallback emits ""). */
+const uint8_t *rz_ui_render_libremote(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif
