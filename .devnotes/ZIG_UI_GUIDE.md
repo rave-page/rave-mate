@@ -77,6 +77,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
 | vrchat | Zig (`native/zigui/src/vrchat.zig`; full + `#vrc-status-region`/`#vrc-editor`/`#vrc-campaths`/`#vrc-photos-body`) | `TestZigVRChatGolden` |
 | vrchat ▸ groups | Zig (`native/zigui/src/vrcgroups.zig`; `#vrcg-body` sub-view) | `TestZigVRCGroupsGolden` |
+| worlds | Zig (`native/zigui/src/worlds.zig`; full + `#world-linkhint`/`#world-gh`/`#world-st-<key>`/`#world-unity-rows`) | `TestZigWorldsGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -113,6 +114,12 @@ subsystems (campath 3-D viewer SVG, play button, `tipTopic` tooltips) travel as 
 strings. Nil-slice gotcha: nested zero-value state structs marshal `null` for their slices and
 Zig slice parsing rejects null — every slice field carries `,omitempty` so Zig falls back to
 its `&.{}` default.
+
+Worlds-port notes (tab #5): the ws-help prose paragraphs, hand-written card titles and the
+add-list placeholder/submit label were Go **source literals inserted unescaped** — several carry
+apostrophes, so escaping them would change the DOM. They travel in state and BOTH renderers emit
+them raw (documented in the header of worlds.zig + the state block). Everything user-derived
+(names, URLs, paths, gist errors) stays escaped. `#world-st-<key>` ids stay raw too, matching Go.
 
 ## Dev rules when touching UI during migration
 

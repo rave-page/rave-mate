@@ -96,6 +96,43 @@ func RenderVRCGroups(stateJSON []byte) (string, bool) {
 	})
 }
 
+// --- worlds ---
+
+// RenderWorlds renders the full Worlds tab.
+func RenderWorlds(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds(p, l, n)
+	})
+}
+
+// RenderWorldsLinkHint renders the #world-linkhint fragment (live tick).
+func RenderWorldsLinkHint(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_linkhint(p, l, n)
+	})
+}
+
+// RenderWorldsGitHub renders the #world-gh fragment.
+func RenderWorldsGitHub(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_github(p, l, n)
+	})
+}
+
+// RenderWorldsStatus renders one #world-st-<key> fragment.
+func RenderWorldsStatus(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_status(p, l, n)
+	})
+}
+
+// RenderWorldsUnityRows renders the #world-unity-rows fragment.
+func RenderWorldsUnityRows(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_unityrows(p, l, n)
+	})
+}
+
 // render calls a Zig renderer; copies the result and frees the Zig buffer.
 func render(state []byte, f func(*C.uint8_t, C.size_t, *C.size_t) *C.uint8_t) (string, bool) {
 	if len(state) == 0 {
