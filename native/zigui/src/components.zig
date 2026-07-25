@@ -372,6 +372,111 @@ pub fn cardClose(h: *Html) !void {
     try h.raw("</div>");
 }
 
+/// statusRow: status dot + label + muted sub-line (Go statusRowDL). data_label =
+/// Go strings.ToLower(label), resolved Go-side (Unicode lowercasing stays in Go).
+pub fn statusRow(h: *Html, variant: []const u8, label: []const u8, data_label: []const u8, line: []const u8) !void {
+    try h.raw("<div class=strow>");
+    try dot(h, variant);
+    try h.raw("<div class=strow-tx><div class=strow-l data-label=");
+    try h.attrQ(data_label);
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</div><div class=strow-s data-value=");
+    try h.attrQ(line);
+    try h.raw(">");
+    try h.esc(line);
+    try h.raw("</div></div></div>");
+}
+
+/// fchip: segmented/filter chip (Go fchip). Empty val omits data-val.
+pub fn fchip(h: *Html, label: []const u8, val: []const u8, act: []const u8, active: bool) !void {
+    try h.raw("<button class=\"fchip");
+    if (active) try h.raw(" active");
+    try h.raw("\" data-act=\"");
+    try h.esc(act);
+    try h.raw("\"");
+    if (val.len != 0) {
+        try h.raw(" data-val=\"");
+        try h.esc(val);
+        try h.raw("\"");
+    }
+    try h.raw(">");
+    try h.esc(label);
+    try h.raw("</button>");
+}
+
+/// toggleRowTip: toggleRow with pre-rendered tooltip markup beside the label
+/// (Go toggleRowTipDL). tip_html is raw (tooltip.go owns that markup).
+pub fn toggleRowTip(h: *Html, label: []const u8, data_label: []const u8, act: []const u8, on: bool, tip_html: []const u8) !void {
+    try h.raw("<label class=row data-label=");
+    try h.attrQ(data_label);
+    try h.raw("><span class=row-label>");
+    try h.esc(label);
+    try h.raw(tip_html);
+    try h.raw("</span><span class=switch><input type=checkbox");
+    if (on) try h.raw(" checked");
+    try h.raw(" data-act=");
+    try h.attrQ(act);
+    try h.raw(" data-value=");
+    try h.attrQ(if (on) "true" else "false");
+    try h.raw("><span class=switch-track></span></span></label>");
+}
+
+/// itemRowOpen/itemRowClose bracket a list row's trailing actions (Go itemRow,
+/// streaming form): caller renders the trailing controls between the two calls.
+pub fn itemRowOpen(h: *Html, title: []const u8, sub: []const u8) !void {
+    try h.raw("<div class=irow><div class=irow-main><div class=irow-title>");
+    try h.esc(title);
+    try h.raw("</div>");
+    if (sub.len != 0) {
+        try h.raw("<div class=irow-sub>");
+        try h.esc(sub);
+        try h.raw("</div>");
+    }
+    try h.raw("</div><div class=irow-actions>");
+}
+
+pub fn itemRowClose(h: *Html) !void {
+    try h.raw("</div></div>");
+}
+
+/// selectBoxRaw is selectBox with a pre-rendered label (Go selHTMLRaw) — for select
+/// labels that carry a tooltip/badge. label_html is raw; s.label is ignored.
+pub fn selectBoxRaw(h: *Html, s: Select, label_html: []const u8) !void {
+    try h.raw("<div class=ss-field>");
+    try h.raw(label_html);
+    try h.raw("<div class=ss id=\"ss-");
+    try h.esc(s.id);
+    try h.raw("\">");
+    try selectInner(h, s);
+    try h.raw("</div></div>");
+}
+
+test "statusRow + fchip + itemRow + toggleRowTip" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try statusRow(&h, "ok", "St&ate", "st&ate", "li\"ne");
+    try std.testing.expectEqualStrings("<div class=strow><span class=\"dot dot--ok\"></span>" ++
+        "<div class=strow-tx><div class=strow-l data-label=\"st&amp;ate\">St&amp;ate</div>" ++
+        "<div class=strow-s data-value=\"li&#34;ne\">li&#34;ne</div></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "Cl&ock", "", "midi-ctl-filter:0:clock", true);
+    try std.testing.expectEqualStrings("<button class=\"fchip active\" data-act=\"midi-ctl-filter:0:clock\">Cl&amp;ock</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try fchip(&h, "L", "v'1", "a", false);
+    try std.testing.expectEqualStrings("<button class=\"fchip\" data-act=\"a\" data-val=\"v&#39;1\">L</button>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try itemRowOpen(&h, "T<x", "");
+    try itemRowClose(&h);
+    try std.testing.expectEqualStrings("<div class=irow><div class=irow-main><div class=irow-title>T&lt;x</div>" ++
+        "</div><div class=irow-actions></div></div>", h.b.items);
+    h.b.clearRetainingCapacity();
+    try toggleRowTip(&h, "En", "en", "um-enable", true, "<i>tip</i>");
+    try std.testing.expectEqualStrings("<label class=row data-label=\"en\"><span class=row-label>En<i>tip</i></span>" ++
+        "<span class=switch><input type=checkbox checked data-act=\"um-enable\" data-value=\"true\">" ++
+        "<span class=switch-track></span></span></label>", h.b.items);
+}
+
 test "cardOpen head + trail + close" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();

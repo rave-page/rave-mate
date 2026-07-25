@@ -16,3 +16,6 @@ func RenderLogsLines(stateJSON []byte) (string, bool)     { return "", false }
 func RenderMIDIMon(stateJSON []byte) (string, bool)     { return "", false }
 func RenderMIDIMonRows(stateJSON []byte) (string, bool) { return "", false }
 func RenderMIDITrace(stateJSON []byte) (string, bool)   { return "", false }
+func RenderMIDICtl(stateJSON []byte) (string, bool)     { return "", false }
+func RenderMIDIActive(stateJSON []byte) (string, bool)  { return "", false }
+func RenderMIDICtlStat(stateJSON []byte) (string, bool) { return "", false }

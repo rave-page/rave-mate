@@ -102,6 +102,25 @@ export fn rz_ui_render_miditrace(state_json: ?[*]const u8, len: usize, out_len: 
     return renderJSON(midimon.Trace, midimon.renderTrace, state_json, len, out_len);
 }
 
+const midictl = @import("midictl.zig");
+
+export fn rz_ui_render_midictl(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.State, midictl.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_active(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl.Active, midictl.renderActive, state_json, len, out_len);
+}
+
+export fn rz_ui_render_midictl_stat(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(midictl_ctls.PortStat, midictl_ctls.renderPortStat, state_json, len, out_len);
+}
+
+const midictl_ctls = @import("midictl_ctls.zig");
+
 test {
     _ = midimon;
+    _ = midictl;
+    _ = midictl_ctls;
+    _ = @import("midictl_uimap.zig");
 }

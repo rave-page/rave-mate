@@ -92,19 +92,10 @@ func (u *UI) midiMonLinesState() midiMonLines {
 	return st
 }
 
-// midiMonitorCard renders the live input monitor (patched ~1 Hz via #midi-monitor).
-func (u *UI) midiMonitorCard() string {
-	if u.svc.MIDIMon == nil {
-		return ""
-	}
-	st := u.midiMonitorState()
-	if zigui.Available() {
-		if h, ok := zigui.RenderMIDIMon(stateJSON(st)); ok {
-			return h
-		}
-	}
-	return midiMonHTML(st)
-}
+// The monitor card + wire trace render as part of the MIDI tab's one state pass
+// (midiCtlState → zigui.RenderMIDICtl); rz_ui_render_midimon / _miditrace stay exported
+// as the per-fragment golden-gate entry points. Only the monitor ROWS have a live patch
+// site of their own (~1 Hz tick).
 
 // midiMonitorInner: newest-first rows of the raw-message bus.
 func (u *UI) midiMonitorInner() string {
@@ -230,20 +221,6 @@ func midiTraceStateFor(portID uint32) midiTraceState {
 		})
 	}
 	return st
-}
-
-// midiDrvTraceHTML renders the wire-trace table for the open port (u.midiTrace).
-func (u *UI) midiDrvTraceHTML() string {
-	if u.midiTrace == 0 {
-		return ""
-	}
-	st := midiTraceStateFor(u.midiTrace)
-	if zigui.Available() {
-		if h, ok := zigui.RenderMIDITrace(stateJSON(st)); ok {
-			return h
-		}
-	}
-	return midiTraceHTML(st)
 }
 
 // midiTraceHTML is the pure Go wire-trace renderer (golden reference).

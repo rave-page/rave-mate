@@ -76,6 +76,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | appgroups | Zig (`native/zigui/src/appgroups.zig`) | `TestZigAppGroupsGolden` |
 | logs | Zig (`native/zigui/src/logs.zig`; full + `#log-view` lines fragment) | `TestZigLogsGolden` |
 | midimon (MIDI-tab fragments) | Zig (`native/zigui/src/midimon.zig`; monitor card + `#midi-monitor` rows + driver wire trace) | `TestZigMIDIMonGolden`, `TestZigMIDITraceGolden` |
+| midictl | Zig (`native/zigui/src/midictl.zig` + `midictl_ctls.zig` + `midictl_uimap.zig`; full tab + `#midi-active` + `#midi-ctlstat-<i>`) | `TestZigMIDICtlGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -99,6 +100,28 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
   literals "Type to filter…"/"No matches" are hardcoded English (parity w/ smartselect.go).
 - `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
   `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
+
+MIDI-port notes (tabs #3+#4, midimon fragments then the whole midictl tab):
+- Tooltips stay Go: `tipTopic(id)` markup (tooltip.go, keybind grid + link list) rides in
+  state as a PRE-RENDERED HTML string and Zig `raw`s it. Same for smart-select labels that
+  carry a tooltip (`selectBoxTip`) — state holds the resolved `selState` plus its
+  `<span class=ss-label>…</span>` HTML (`selHTMLRaw` / Zig `selectBoxRaw`).
+- Floats never cross the ABI: knob/fader `--v`/`--rot` are `trimNum`'d Go-side into strings.
+- Non-nil slices are mandatory — a nil Go slice marshals to `null` and the Zig parser
+  rejects it, silently falling the WHOLE tab back to Go. `emptySel()` (smartselect.go) is
+  the guard for zero-value `selState`s inside heterogeneous rows.
+- A fragment whose HTML is legitimately EMPTY (`#midi-ctlstat-<i>` before the MIDI child
+  reports) makes `renderJSON` return NULL ⇒ `ok=false` ⇒ the Go fallback renders the same
+  empty string. Golden tests must accept that (see `TestZigMIDICtlGolden`).
+- Components added to `components.zig` (`// --- midi ---` block):
+  `cardOpen(title,head)`/`cardTrailClose`/`cardClose` (Go `card`, streaming) ·
+  `statusRow(variant,label,data_label,line)` (Go `statusRowDL`) ·
+  `fchip(label,val,act,active)` · `toggleRowTip(label,dl,act,on,tip_html)` (Go
+  `toggleRowTipDL`) · `itemRowOpen(title,sub)`/`itemRowClose` (Go `itemRow`, streaming) ·
+  `selectBoxRaw(Select,label_html)` (Go `selHTMLRaw`).
+- Go helpers extended with caller-resolved-data-label twins (Unicode `ToLower` stays in Go,
+  same pattern as `toggleRowDL`): `statusRowDL`, `toggleRowTipDL`, plus
+  `resolveSelectBoxTip` and `resolveSmartSelect`/`selHTMLRaw`/`emptySel`.
 
 ## Dev rules when touching UI during migration
 

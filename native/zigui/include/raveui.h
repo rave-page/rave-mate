@@ -34,6 +34,14 @@ const uint8_t *rz_ui_render_midimon_rows(const uint8_t *state_json, size_t len, 
 /* ravemidi driver wire-trace block (rendered inside the MIDI driver card). */
 const uint8_t *rz_ui_render_miditrace(const uint8_t *state_json, size_t len, size_t *out_len);
 
+/* Whole MIDI tab (controllers + mappings + monitor + output/driver + rack + bridge + help). */
+const uint8_t *rz_ui_render_midictl(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #midi-active status line and #midi-ctlstat-<i> inner (~1 Hz tick patch targets).
+ * The status fragment may legitimately render empty ⇒ NULL, and the Go fallback
+ * renders the same empty string. */
+const uint8_t *rz_ui_render_midictl_active(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midictl_stat(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif
