@@ -168,11 +168,26 @@ GOWORK=off go test -count=2 -tags "zigdsp zigui zigvr" ./internal/webui -run '^$
 | publish (full tab) | 24 701 | 12 507 | **-49%** | 20 223 / 48 766 = 41.5% |
 | publish `#pub-hero` frag | 5 938 | 4 400 | -26% | (in the set above) |
 
-**Encoder allocation, honestly:** v2 costs MORE allocated bytes on small documents (transport
-1 722 → 6 880 B/op, 5 → 10 allocs). `NewWireWriter` preallocates 2 × 1 KiB plus a 64-entry intern
-map - sized for whole-tab documents, oversized for a 300-byte fragment. It still wins on time
-because it removes reflection + escaping + the Zig-side `std.json` parse, but a per-message size
-hint (or lazily creating the intern map) is the obvious next tightening; measure before doing it.
+**Encoder allocation: the flat prealloc was a real regression, now fixed.** With
+`NewWireWriter` preallocating a flat 2 × 1 KiB + a 64-entry intern map, the SMALLEST fragment
+(`#stset-<id>`, ~60 B of state) cost **1 569 ns vs the JSON path's 932** - v2 was 68% slower than
+what it replaces, because two 1 KiB buffers and a 2.5 kB map dwarf the work. A flat 256 B instead
+cost the Live cockpit 12 extra allocations (16.2 → 22.6 µs). Both buffers and the intern map are
+now sized from **what the previous document of the same message needed** (`wireSizeHints`, one
+atomic per root id, +25% headroom; capacity only - `TestWireSizeHintIsCapacityOnly` pins that the
+bytes are unchanged). Result:
+
+| bench | flat 1 KiB | adaptive | v1 json |
+|---|--:|--:|--:|
+| `#stset-<id>` status frag | 1 569 ns / 5 792 B / 9 allocs | **913 ns / 1 568 B / 9** | 901 ns / 232 B / 4 |
+| live full cockpit | 16 190 ns / 20 704 B / 11 | **16 109 ns / 24 032 B / 9** | 33 544 ns / 14 422 B / 4 |
+| `#log-view` 400-line tail | 158 297 ns (pilot) / 22 allocs | **144 525 ns / 109 152 B / 9** | 379 877 ns / 126 022 B / 4 |
+| logs-tail encode only | 44 020 ns (pilot) / 17 allocs | **41 668 ns / 7 allocs** | 98 356 ns (marshal) |
+
+v2 still allocates more BYTES than `json.Marshal` on tiny fragments (1 568 vs 232): two buffers
+plus the map floor. Time is at parity there and 2-2.6× better everywhere else, so the remaining
+gap is not worth a pool. Benchmark numbers are mildly order-dependent now (the first document of
+a message pays the cold hint) - min-of-N over full-suite runs absorbs it.
 
 ## Gaps / caveats
 

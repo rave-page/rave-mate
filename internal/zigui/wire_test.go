@@ -53,6 +53,36 @@ func TestOptStructKeepsEmptyBodies(t *testing.T) {
 	}
 }
 
+// TestWireSizeHintIsCapacityOnly: the adaptive prealloc must never change a document's bytes,
+// only how many times the two buffers grow to produce them.
+func TestWireSizeHintIsCapacityOnly(t *testing.T) {
+	build := func() []byte {
+		w := NewWireWriter(200, 7) // id 200: its own hint slot, untouched by other tests
+		w.Str(1, "alpha")
+		w.StrList(2, []string{"beta", "gamma"})
+		w.OptStruct(3, func() { w.Str(1, "delta") })
+		return w.Finish()
+	}
+	cold := build() // first document of this message: hint is the default
+	hint := wireHint(200)
+	if hint == wireHintDflt {
+		t.Fatalf("hint not recorded after the first document (still %d)", hint)
+	}
+	warm := build() // second: preallocated from the first
+	if !bytes.Equal(cold, warm) {
+		t.Fatalf("hint changed the bytes: cold % x, warm % x", cold, warm)
+	}
+	if hint < wireHintMin {
+		t.Errorf("hint %d below the floor %d", hint, wireHintMin)
+	}
+	// An id outside the table falls back to the default and records nothing (no panic, no growth).
+	w := NewWireWriter(wireHintSlots+5, 7)
+	w.Str(1, "x")
+	if got := len(w.Finish()); got == 0 {
+		t.Error("out-of-range message id produced no document")
+	}
+}
+
 func TestStrListLayout(t *testing.T) {
 	w := NewWireWriter(1, 0)
 	w.StrList(6, []string{"aa", "", "cc"})
