@@ -146,3 +146,17 @@ func RenderTwitchFeed(stateJSON []byte) (string, bool) {
 		return C.rz_ui_render_twitch_feed(p, l, n)
 	})
 }
+
+// RenderEditor renders the full Editor view.
+func RenderEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor(p, l, n)
+	})
+}
+
+// RenderEditorPreview renders the #ed-preview inner fragment (tick patch).
+func RenderEditorPreview(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_preview(p, l, n)
+	})
+}

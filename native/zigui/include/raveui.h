@@ -44,6 +44,10 @@ const uint8_t *rz_ui_render_twitch_obs(const uint8_t *state_json, size_t len, si
 const uint8_t *rz_ui_render_twitch_presets(const uint8_t *state_json, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_twitch_feed(const uint8_t *state_json, size_t len, size_t *out_len);
 
+const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t *out_len);
+/* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
+const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

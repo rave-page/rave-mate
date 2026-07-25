@@ -78,6 +78,7 @@ pulls f128 intrinsics (`roundq`) not in bundled compiler-rt → binding adds
 | automations | Zig (`native/zigui/src/automations.zig`; full + `#auto-body` fragment) | `TestZigAutomationsGolden` |
 | overlays | Zig (`native/zigui/src/overlays.zig`; full + #ovl-appearance/#ovl-spout/#ovl-strip/#ovl-st-* fragments) | `TestZigOverlaysGolden` |
 | twitch | Zig (`native/zigui/src/twitch.zig`; full + #twitch-obs/#twitch-presets/#twitch-feed fragments) | `TestZigTwitchGolden` |
+| editor | Zig (`native/zigui/src/editor.zig`; full + #ed-preview fragment) | `TestZigEditorGolden` |
 | (all others) | Go | — |
 
 First-port notes: appgroups chosen over logs as pilot — logs drags in the smartSelect
@@ -101,6 +102,20 @@ Go-side; Zig only walks rows. Components ported to `components.zig`:
   literals "Type to filter…"/"No matches" are hardcoded English (parity w/ smartselect.go).
 - `btnGated(label, why)` · `hint(tone, text)` (empty tone → "info") ·
   `sectionOpen/Close(title)` — ready for the next tabs (automations/settings).
+
+Media-batch notes (tabs automations/overlays/twitch/editor): `render_media_shared.go`
+carries the components.go primitives as JSON-able control state (`uiBtn`/`uiToggle`/
+`uiField`/`uiKV`/`uiStatus`/`uiSlider`), mirrored in the components.zig `media` block
+(`Btn`/`btnOf`/`btnRowOf`/`btnAct`, `Toggle`/`toggleOf`, `Field`/`field`, `KV`/`kv`,
+`Status`/`statusRow`, `Slider`/`slider`, `cardOpen/Close`, `fpairOpen/Close`). Each
+`html()` delegates to the Go primitive so the markup has ONE source; `uiSlider` is the
+exception (numbers pre-formatted Go-side because `trimNum` has no Zig equivalent) and is
+pinned by `TestUISliderMatchesPrimitive`. Two Go-resolved tokens ride through the editor
+state verbatim for the same reason: `fmt.Sprintf("%q", …)` of the font family + image URL
+(Go `strconv.Quote` semantics). Twitch's feed buffer (`ui.go twitchRows`) was converted
+from pre-rendered HTML to resolved row state; the streaming cockpit inside `#twitch-obs`
+stays render_live.go's renderer and passes through as raw trusted markup (a tab may embed
+another tab's renderer, and renderer ownership wins over "one language per view").
 
 ## Dev rules when touching UI during migration
 

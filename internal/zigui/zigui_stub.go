@@ -24,3 +24,5 @@ func RenderTwitch(stateJSON []byte) (string, bool)             { return "", fals
 func RenderTwitchObs(stateJSON []byte) (string, bool)          { return "", false }
 func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", false }
 func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
+func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
+func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }

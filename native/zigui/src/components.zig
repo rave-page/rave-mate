@@ -374,6 +374,19 @@ pub fn btnRowOf(h: *Html, bs: []const Btn) !void {
     try btnRowClose(h);
 }
 
+/// btnAct is btn with a per-row act built by concatenation (Go `btn(label, variant,
+/// "act:"+id, "")`): one data-act of prefix++id, NO data-val.
+pub fn btnAct(h: *Html, label: []const u8, variant: []const u8, act_prefix: []const u8, id: []const u8) !void {
+    try h.raw("<button class=\"rp-btn rp-btn--");
+    try h.raw(if (variant.len == 0) "outline" else variant);
+    try h.raw("\" data-act=\"");
+    try h.esc(act_prefix);
+    try h.esc(id);
+    try h.raw("\">");
+    try h.esc(label);
+    try h.raw("</button>");
+}
+
 /// Toggle is a toggleRow() call as data (dl = Go strings.ToLower(label)).
 pub const Toggle = struct {
     label: []const u8 = "",

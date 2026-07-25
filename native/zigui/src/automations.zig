@@ -111,18 +111,6 @@ pub fn renderBody(h: *Html, s: Body) !void {
     try c.sectionClose(h);
 }
 
-/// actID writes `prefix ++ id` as an escaped data-act value (Go "act:"+ID concat).
-fn dataAct(h: *Html, prefix: []const u8, id: []const u8, label: []const u8, variant: []const u8) !void {
-    try h.raw("<button class=\"rp-btn rp-btn--");
-    try h.raw(variant);
-    try h.raw("\" data-act=\"");
-    try h.esc(prefix);
-    try h.esc(id);
-    try h.raw("\">");
-    try h.esc(label);
-    try h.raw("</button>");
-}
-
 /// toggleAct mirrors Go toggleRowDL(label, dl, prefix+id, on) — act needs the id appended.
 fn toggleAct(h: *Html, lb: Labels, prefix: []const u8, id: []const u8, on: bool) !void {
     try h.raw("<label class=row data-label=");
@@ -160,10 +148,10 @@ fn renderList(h: *Html, s: ListState, lb: Labels) !void {
         try h.raw("</div>");
         try toggleAct(h, lb, "auto-toggle:", a.id, a.enabled);
         try c.btnRowOpen(h);
-        try dataAct(h, "auto-run:", a.id, lb.run, "go");
-        try dataAct(h, "auto-sch-add:", a.id, lb.schAdd, "outline");
-        try dataAct(h, "auto-edit:", a.id, lb.edit, "outline");
-        try dataAct(h, "auto-del:", a.id, lb.delete, "destructive");
+        try c.btnAct(h, lb.run, "go", "auto-run:", a.id);
+        try c.btnAct(h, lb.schAdd, "outline", "auto-sch-add:", a.id);
+        try c.btnAct(h, lb.edit, "outline", "auto-edit:", a.id);
+        try c.btnAct(h, lb.delete, "destructive", "auto-del:", a.id);
         try c.btnRowClose(h);
         try h.raw("</div>");
     }
@@ -196,8 +184,8 @@ fn renderScheds(h: *Html, s: SchedsState, lb: Labels) !void {
         if (sc.warnTone.len != 0) try c.hint(h, sc.warnTone, sc.warnText);
         try toggleAct(h, lb, "auto-sch-tgl:", sc.id, sc.enabled);
         try c.btnRowOpen(h);
-        try dataAct(h, "auto-sch-edit:", sc.id, lb.edit, "outline");
-        try dataAct(h, "auto-sch-del:", sc.id, lb.delete, "destructive");
+        try c.btnAct(h, lb.edit, "outline", "auto-sch-edit:", sc.id);
+        try c.btnAct(h, lb.delete, "destructive", "auto-sch-del:", sc.id);
         try c.btnRowClose(h);
         try h.raw("</div>");
     }

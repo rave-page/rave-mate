@@ -139,8 +139,19 @@ export fn rz_ui_render_twitch_feed(state_json: ?[*]const u8, len: usize, out_len
     return renderJSON(twitch.Feed, twitch.renderFeed, state_json, len, out_len);
 }
 
+const editor = @import("editor.zig");
+
+export fn rz_ui_render_editor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(editor.State, editor.render, state_json, len, out_len);
+}
+
+export fn rz_ui_render_editor_preview(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(editor.Preview, editor.renderPreview, state_json, len, out_len);
+}
+
 test "media tab modules" {
     _ = automations;
     _ = overlays;
     _ = twitch;
+    _ = editor;
 }
