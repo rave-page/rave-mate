@@ -131,16 +131,12 @@ fn glyphRect(pix: []u8, canvas_w: usize, ox: usize, oy: usize, ow: usize, oh: us
     }
 }
 
-export fn rz_vr_render(canvas: ?[*]u8, w: i32, h: i32, ops_ptr: ?[*]const RzVrOp, n_ops: usize, mask_ptr: ?[*]const u8, mask_len: usize) i32 {
-    if (canvas == null or w <= 0 or h <= 0) return -1;
-    if (n_ops > 0 and ops_ptr == null) return -1;
-    const cw: usize = @intCast(w);
-    const ch: usize = @intCast(h);
-    const pix = canvas.?[0 .. cw * ch * 4];
-    const mask: []const u8 = if (mask_ptr) |mp| mp[0..mask_len] else &[_]u8{};
-    var oi: usize = 0;
-    while (oi < n_ops) : (oi += 1) {
-        const op = ops_ptr.?[oi];
+// validate checks every op BEFORE a single pixel is written, so a rejected list leaves the
+// canvas untouched and the Go fallback can redraw from scratch. (Ops-only renders — border
+// stamps, hover tints — composite onto existing pixels, so a half-executed list followed by
+// the Go redraw would double-blend.)
+fn validate(cw: usize, ch: usize, ops: []const RzVrOp, mask_len: usize) i32 {
+    for (ops) |op| {
         if (op.x < 0 or op.y < 0 or op.w < 0 or op.h < 0) return -2;
         const ox: usize = @intCast(op.x);
         const oy: usize = @intCast(op.y);
@@ -149,15 +145,39 @@ export fn rz_vr_render(canvas: ?[*]u8, w: i32, h: i32, ops_ptr: ?[*]const RzVrOp
         if (ow == 0 or oh == 0) continue;
         if (ox + ow > cw or oy + oh > ch) return -2;
         switch (op.kind) {
+            k_store, k_over => {},
+            k_glyph => if (@as(usize, op.mask_off) + ow * oh > mask_len) return -2,
+            else => return -2,
+        }
+    }
+    return 0;
+}
+
+export fn rz_vr_render(canvas: ?[*]u8, w: i32, h: i32, ops_ptr: ?[*]const RzVrOp, n_ops: usize, mask_ptr: ?[*]const u8, mask_len: usize) i32 {
+    if (canvas == null or w <= 0 or h <= 0) return -1;
+    if (n_ops > 0 and ops_ptr == null) return -1;
+    const cw: usize = @intCast(w);
+    const ch: usize = @intCast(h);
+    const pix = canvas.?[0 .. cw * ch * 4];
+    const mask: []const u8 = if (mask_ptr) |mp| mp[0..mask_len] else &[_]u8{};
+    const ops: []const RzVrOp = if (n_ops > 0) ops_ptr.?[0..n_ops] else &[_]RzVrOp{};
+    const bad = validate(cw, ch, ops, mask.len);
+    if (bad != 0) return bad;
+    var oi: usize = 0;
+    while (oi < n_ops) : (oi += 1) {
+        const op = ops[oi];
+        const ox: usize = @intCast(op.x);
+        const oy: usize = @intCast(op.y);
+        const ow: usize = @intCast(op.w);
+        const oh: usize = @intCast(op.h);
+        if (ow == 0 or oh == 0) continue;
+        switch (op.kind) {
             k_store => storeRect(pix, cw, ox, oy, ow, oh, .{
                 @truncate(op.sr), @truncate(op.sg), @truncate(op.sb), @truncate(op.sa),
             }),
             k_over => overRect(pix, cw, ox, oy, ow, oh, op),
-            k_glyph => {
-                if (@as(usize, op.mask_off) + ow * oh > mask.len) return -2;
-                glyphRect(pix, cw, ox, oy, ow, oh, op, mask);
-            },
-            else => return -2,
+            k_glyph => glyphRect(pix, cw, ox, oy, ow, oh, op, mask),
+            else => unreachable, // validate() rejected unknown kinds
         }
     }
     return 0;
@@ -243,4 +263,14 @@ test "bounds + kind rejection" {
     var m = [_]u8{ 1, 2, 3, 4 }; // needs 4 bytes at off 1 → 5 > 4
     try std.testing.expectEqual(@as(i32, -2), rz_vr_render(&pix, 2, 2, &badmask, badmask.len, &m, m.len));
     try std.testing.expectEqual(@as(i32, -1), rz_vr_render(null, 2, 2, &oob, oob.len, null, 0));
+}
+
+test "rejected list is atomic — no partial writes" {
+    var pix = [_]u8{0} ** (2 * 2 * 4);
+    const ops = [_]RzVrOp{
+        .{ .x = 0, .y = 0, .w = 1, .h = 1, .kind = k_store, .sr = 9, .sg = 9, .sb = 9, .sa = 9, .mask_off = 0 }, // valid
+        .{ .x = 1, .y = 1, .w = 5, .h = 1, .kind = k_store, .sr = 1, .sg = 1, .sb = 1, .sa = 1, .mask_off = 0 }, // OOB
+    };
+    try std.testing.expectEqual(@as(i32, -2), rz_vr_render(&pix, 2, 2, &ops, ops.len, null, 0));
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 0 }, pxAt(&pix, 2, 0, 0)); // op 0 never ran
 }

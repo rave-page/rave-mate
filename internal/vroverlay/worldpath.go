@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"time"
 
@@ -116,19 +115,28 @@ func (e *editor) pollPreviewInput() {
 func (r *Renderer) RenderPathOrbit(g CamPathGeom, yaw, pitch, zoom float32, t float64, playing bool) *image.NRGBA {
 	const px = pathPreviewPx
 	img := image.NewNRGBA(image.Rect(0, 0, px, px))
-	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{R: 10, G: 10, B: 14, A: 235}), image.Point{}, draw.Src)
-	Border(img, colName, 3)
+	r.paintInto(img, func(p *paint) { r.pathOrbitPaint(p, g, yaw, pitch, zoom, t, playing) })
+	return img
+}
+
+// pathOrbitPaint draws the orbit preview into a paint target (direct Go or zigvr display list).
+// Projection + Bresenham/circle walks stay Go-side (sequential integer/float control flow); only
+// the resulting pixel runs are recorded, so a big-path frame can exceed the op cap → Go fallback.
+func (r *Renderer) pathOrbitPaint(p *paint, g CamPathGeom, yaw, pitch, zoom float32, t float64, playing bool) {
+	const px = pathPreviewPx
+	p.fillSrc(0, 0, px, px, color.NRGBA{R: 10, G: 10, B: 14, A: 235})
+	p.border(3, colName)
 	if len(g.Pts) < 2 {
-		return img
+		return
 	}
 	lo, hi := g.Pts[0], g.Pts[0]
-	for _, p := range g.Pts {
+	for _, pt := range g.Pts {
 		for i := 0; i < 3; i++ {
-			if p[i] < lo[i] {
-				lo[i] = p[i]
+			if pt[i] < lo[i] {
+				lo[i] = pt[i]
 			}
-			if p[i] > hi[i] {
-				hi[i] = p[i]
+			if pt[i] > hi[i] {
+				hi[i] = pt[i]
 			}
 		}
 	}
@@ -144,8 +152,8 @@ func (r *Renderer) RenderPathOrbit(g CamPathGeom, yaw, pitch, zoom float32, t fl
 	gridR := float32(math.Max(1, float64((hi[0]-lo[0]+hi[2]-lo[2])/2)))
 	cy, sy := f32cos(yaw), f32sin(yaw)
 	cp, sp := f32cos(pitch), f32sin(pitch)
-	project := func(p [3]float32) (int, int) {
-		dx, dy, dz := p[0]-center[0], p[1]-center[1], p[2]-center[2]
+	project := func(pt [3]float32) (int, int) {
+		dx, dy, dz := pt[0]-center[0], pt[1]-center[1], pt[2]-center[2]
 		x1 := dx*cy + dz*sy
 		z1 := -dx*sy + dz*cy
 		y2 := dy*cp - z1*sp
@@ -164,10 +172,10 @@ func (r *Renderer) RenderPathOrbit(g CamPathGeom, yaw, pitch, zoom float32, t fl
 		d := -gridR + step*float32(i)
 		a1, b1 := project([3]float32{center[0] - gridR, floorY, center[2] + d})
 		a2, b2 := project([3]float32{center[0] + gridR, floorY, center[2] + d})
-		wpLine(img, a1, b1, a2, b2, wpGrid)
+		wpLine(p, a1, b1, a2, b2, wpGrid)
 		c1, e1 := project([3]float32{center[0] + d, floorY, center[2] - gridR})
 		c2, e2 := project([3]float32{center[0] + d, floorY, center[2] + gridR})
-		wpLine(img, c1, e1, c2, e2, wpGrid)
+		wpLine(p, c1, e1, c2, e2, wpGrid)
 	}
 	// Path polyline, speed-coloured (slow → mint, fast → pink), with keyframe dots.
 	maxSpd := float32(0.1)
@@ -177,29 +185,28 @@ func (r *Renderer) RenderPathOrbit(g CamPathGeom, yaw, pitch, zoom float32, t fl
 		}
 	}
 	var lx, ly int
-	for i, p := range g.Pts {
-		x, y := project(p)
+	for i, pt := range g.Pts {
+		x, y := project(pt)
 		if i > 0 {
 			spd := float32(0)
 			if i-1 < len(g.Spd) {
 				spd = g.Spd[i-1]
 			}
-			wpLine(img, lx, ly, x, y, wpSpeedColor(spd/maxSpd))
+			wpLine(p, lx, ly, x, y, wpSpeedColor(spd/maxSpd))
 		}
 		lx, ly = x, y
-		wpDot(img, x, y, 3, wpNode)
+		wpDot(p, x, y, 3, wpNode)
 	}
 	// Marker flying the path at the playback head.
 	mx, my := project(samplePath(g, t))
-	wpDot(img, mx, my, 6, colName)
+	wpDot(p, mx, my, 6, colName)
 	// HUD: time + play state.
 	total := pathTotal(g.Dur)
 	state := "paused"
 	if playing {
 		state = "playing"
 	}
-	drawText(img, r.body, fmt.Sprintf("%.1f / %.1fs  %s", t, total, state), 14, px-16, colText)
-	return img
+	p.text(r.body, fmt.Sprintf("%.1f / %.1fs  %s", t, total, state), 14, px-16, colText)
 }
 
 // samplePath returns the interpolated position at time t along the path (using per-segment durations).
@@ -260,7 +267,8 @@ func wpSpeedColor(f float32) color.NRGBA {
 }
 
 // wpLine draws a Bresenham line (bounded) into the overlay, slightly thickened.
-func wpLine(img *image.NRGBA, x0, y0, x1, y1 int, col color.NRGBA) {
+func wpLine(p *paint, x0, y0, x1, y1 int, col color.NRGBA) {
+	w, h := p.img.Rect.Dx(), p.img.Rect.Dy()
 	dx := abs(x1 - x0)
 	dy := -abs(y1 - y0)
 	sx, sy := 1, 1
@@ -272,11 +280,12 @@ func wpLine(img *image.NRGBA, x0, y0, x1, y1 int, col color.NRGBA) {
 	}
 	err := dx + dy
 	for i := 0; i < 8000; i++ {
-		if x0 >= 0 && x0 < img.Rect.Dx() && y0 >= 0 && y0 < img.Rect.Dy() {
-			img.SetNRGBA(x0, y0, col)
-			if x0+1 < img.Rect.Dx() {
-				img.SetNRGBA(x0+1, y0, col)
+		if x0 >= 0 && x0 < w && y0 >= 0 && y0 < h {
+			n := 1 // 2px thick where the neighbour is in bounds (matches the per-pixel guard)
+			if x0+1 < w {
+				n = 2
 			}
+			p.setN(x0, y0, n, 1, col)
 		}
 		if x0 == x1 && y0 == y1 {
 			return
@@ -293,17 +302,24 @@ func wpLine(img *image.NRGBA, x0, y0, x1, y1 int, col color.NRGBA) {
 	}
 }
 
-func wpDot(img *image.NRGBA, cx, cy, r int, col color.NRGBA) {
+// wpDot fills a disc of radius r. Rows are contiguous spans (dx² ≤ r²−dy²), so one run per row
+// is pixel-identical to the per-pixel loop it replaces.
+func wpDot(p *paint, cx, cy, r int, col color.NRGBA) {
+	w, h := p.img.Rect.Dx(), p.img.Rect.Dy()
 	for dy := -r; dy <= r; dy++ {
-		for dx := -r; dx <= r; dx++ {
-			if dx*dx+dy*dy > r*r {
-				continue
-			}
-			x, y := cx+dx, cy+dy
-			if x >= 0 && x < img.Rect.Dx() && y >= 0 && y < img.Rect.Dy() {
-				img.SetNRGBA(x, y, col)
-			}
+		y := cy + dy
+		if y < 0 || y >= h {
+			continue
 		}
+		span := 0
+		for span+1 <= r && (span+1)*(span+1)+dy*dy <= r*r {
+			span++
+		}
+		x0, x1 := max(cx-span, 0), min(cx+span, w-1)
+		if x1 < x0 {
+			continue
+		}
+		p.setN(x0, y, x1-x0+1, 1, col)
 	}
 }
 

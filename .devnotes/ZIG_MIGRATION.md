@@ -51,9 +51,15 @@ Rules:
 
 ## Phases
 
-- **VR overlay raster DONE (feature/zig-vroverlay):** vroverlay's hot renders
-  (Panel/Menu/Stats) execute as a Zig display list (`native/zigvr`, tag `zigvr`),
-  pixel-identical (glyph masks stay Go-rasterized), 3.1-3.6x faster. ZIG_VR_OVERLAY.md.
+- **VR overlay raster DONE (feature/zig-vroverlay + feature/zig-vr-remainder):** the
+  WHOLE vroverlay raster surface executes as a Zig display list (`native/zigvr`, tag
+  `zigvr`), pixel-identical (glyph masks stay Go-rasterized): Panel/Menu/Stats
+  (3.0-3.6x) plus path-orbit preview (7.3x), ghost (9.3x), strip (11.5x), tooltip,
+  hover row, outline + the edit-mode border stamp. No new op kinds — border/line/disc
+  rasters decompose into STORE runs; `rz_vr_render` became atomic (validate-then-write)
+  so ops-only renders can fall back cleanly. Skips: `RenderDot` (per-pixel alpha,
+  one-shot 64×64) and the wrist logo's fused CatmullRom blit (staged dispatch keeps the
+  rest). ZIG_VR_OVERLAY.md.
 - **P0 DONE (a35d23c):** toolchain, zigcore scaffold, polyphase Kaiser-sinc resampler
   (playback quality item closed: >70dB SNR vs ~35dB linear, zero added latency),
   bucketPeaks/bucketBands byte-exact kernels, seams in audio/source.go + worker/probe.go.

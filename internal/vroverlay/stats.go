@@ -130,9 +130,9 @@ func (m *Manager) renderStatsTexture(o config.VROverlay, key string, rtErr func(
 func (m *Manager) editBorder(img *image.NRGBA, key string) {
 	switch {
 	case m.edit != nil && m.edit.isGrabbing(key):
-		Border(img, colMint, 10)
+		m.rend.borderInto(img, colMint, 10)
 	case m.edit != nil && m.edit.editMode:
-		Border(img, colName, 6)
+		m.rend.borderInto(img, colName, 6)
 	}
 }
 
