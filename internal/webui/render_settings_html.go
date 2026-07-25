@@ -15,6 +15,9 @@ import (
 // exactly ONE Go source and the Zig renderer mirrors the same block walk. Bodies owned by
 // other files (gridfix, gridfix model, account bridge, the update flow) ride as trusted raw
 // HTML blocks — see the wave-3 seam list in the header of settings.zig.
+//
+// Tooltips are STRUCTURED (*tipSt, tooltip.go) since phase B1b; the raw `Tip` string stays as the
+// dual-field bridge (tipOr) so un-migrated builders keep working.
 
 // setStatusSt is a card's live status (stv resolved for JSON): variant + terse state line.
 type setStatusSt struct {
@@ -35,7 +38,8 @@ type setInput struct {
 type setKid struct {
 	K      string    `json:"k"`
 	Fld    *uiField  `json:"fld,omitempty"`
-	Tip    string    `json:"tip,omitempty"`    // pre-rendered tooltip markup (field kids)
+	Tip    string    `json:"tip,omitempty"`    // legacy pre-rendered tooltip markup (bridge)
+	TipS   *tipSt    `json:"tipSt,omitempty"`  // structured tooltip - wins over Tip
 	Sel    *selState `json:"sel,omitempty"`    // select/amenu kids
 	SelLbl string    `json:"selLbl,omitempty"` // pre-rendered ss-label (selectBoxTip)
 	Btn    *uiBtn    `json:"btn,omitempty"`
@@ -51,7 +55,8 @@ type setBlock struct {
 	Title  string     `json:"title,omitempty"`
 	Sub    string     `json:"sub,omitempty"`
 	Fld    *uiField   `json:"fld,omitempty"`
-	Tip    string     `json:"tip,omitempty"` // pre-rendered tooltip markup (field/toggle)
+	Tip    string     `json:"tip,omitempty"`   // legacy pre-rendered tooltip markup (bridge)
+	TipS   *tipSt     `json:"tipSt,omitempty"` // structured tooltip (field/toggle) - wins over Tip
 	Tgl    *uiToggle  `json:"tgl,omitempty"`
 	Gate   string     `json:"gate,omitempty"` // toggle kind: non-empty = gated (disabled + hint)
 	KV     *uiKV      `json:"kv,omitempty"`
@@ -82,7 +87,8 @@ type setSwitchSt struct {
 type setCardSt struct {
 	ID     string       `json:"id"` // trusted literal (stset-<id>, toggle:<id>)
 	Title  string       `json:"title"`
-	Tip    string       `json:"tip,omitempty"` // pre-rendered tipTopic markup
+	Tip    string       `json:"tip,omitempty"`   // legacy pre-rendered tipTopic markup (bridge)
+	TipS   *tipSt       `json:"tipSt,omitempty"` // structured tooltip - wins over Tip
 	Desc   string       `json:"desc,omitempty"`
 	St     setStatusSt  `json:"st"`
 	Tgl    *setSwitchSt `json:"tgl,omitempty"` // nil = card has no feature toggle
@@ -185,7 +191,7 @@ func setCardsHTML(cards []setCardSt) string {
 
 // setCardHTML renders one feature card: header (title + tooltip + switch) + status row + body.
 func setCardHTML(c setCardSt) string {
-	head := `<span class=set-title>` + html.EscapeString(c.Title) + `</span>` + c.Tip
+	head := `<span class=set-title>` + html.EscapeString(c.Title) + `</span>` + tipOr(c.TipS, c.Tip)
 	gateHTML := ""
 	if t := c.Tgl; t != nil {
 		if t.Gate != "" {
@@ -232,12 +238,12 @@ func setBlockHTML(b setBlock) string {
 	case "empty":
 		return emptyState(b.Text)
 	case "field":
-		return setFldHTML(b.Fld, b.Tip)
+		return setFldHTML(b.Fld, tipOr(b.TipS, b.Tip))
 	case "toggle":
 		if b.Gate != "" {
 			return toggleRowGatedDL(b.Tgl.Label, b.Tgl.DL, b.Tgl.On, b.Gate)
 		}
-		return toggleRowTipDL(b.Tgl.Label, b.Tgl.DL, b.Tgl.Act, b.Tgl.On, b.Tip)
+		return toggleRowTipDL(b.Tgl.Label, b.Tgl.DL, b.Tgl.Act, b.Tgl.On, tipOr(b.TipS, b.Tip))
 	case "select":
 		return setSelHTML(b.Sel, b.SelLbl)
 	case "amenu":
@@ -281,7 +287,7 @@ func setKidsHTML(ks []setKid) string {
 	for _, k := range ks {
 		switch k.K {
 		case "field":
-			b.WriteString(setFldHTML(k.Fld, k.Tip))
+			b.WriteString(setFldHTML(k.Fld, tipOr(k.TipS, k.Tip)))
 		case "select":
 			b.WriteString(setSelHTML(k.Sel, k.SelLbl))
 		case "amenu":

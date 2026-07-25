@@ -361,7 +361,7 @@ func (u *UI) settingsCardState(id string, st stv) setCardSt {
 	c := setCardSt{ID: id, St: setStatusSt{V: st.v, T: st.t}}
 	c.Title, c.Desc, c.Blocks = u.cardBlocks(id)
 	if topic := settingsCardTips[id]; topic != "" {
-		c.Tip = tipTopic(topic)
+		c.TipS = tipTopicSt(topic)
 	}
 	if t, ok := u.toggleMap()[id]; ok {
 		sw := setSwitchSt{Label: t.label, On: t.get()}
@@ -447,9 +447,9 @@ func sbFieldPH(label, act, value, inputType, placeholder string) setBlock {
 	return b
 }
 
-func sbFieldTip(label, act, value, inputType, tipHTML string) setBlock {
+func sbFieldTip(label, act, value, inputType string, tp *tipSt) setBlock {
 	b := sbField(label, act, value, inputType)
-	b.Tip = tipHTML
+	b.TipS = tp
 	return b
 }
 
@@ -458,9 +458,9 @@ func sbToggle(label, act string, on bool) setBlock {
 	return setBlock{K: "toggle", Tgl: &t}
 }
 
-func sbToggleTip(label, act string, on bool, tipHTML string) setBlock {
+func sbToggleTip(label, act string, on bool, tp *tipSt) setBlock {
 	b := sbToggle(label, act, on)
-	b.Tip = tipHTML
+	b.TipS = tp
 	return b
 }
 
@@ -573,7 +573,7 @@ func sbUpdRegion(id string, s updFlowSt) setBlock {
 func blockKid(b setBlock) setKid {
 	switch b.K {
 	case "field":
-		return setKid{K: "field", Fld: b.Fld, Tip: b.Tip}
+		return setKid{K: "field", Fld: b.Fld, Tip: b.Tip, TipS: b.TipS}
 	case "select":
 		return setKid{K: "select", Sel: b.Sel, SelLbl: b.SelLbl}
 	case "amenu":
@@ -888,7 +888,7 @@ func (u *UI) peersCacheBlocks() []setBlock {
 		mb = int(remotecache.DefaultCap >> 20)
 	}
 	return append(out,
-		sbFieldTip(i18n.T("settings.body.peers.cacheSize"), "set:peer-cachemb", strconv.Itoa(mb), "number", tipTopic("remote-cache")),
+		sbFieldTip(i18n.T("settings.body.peers.cacheSize"), "set:peer-cachemb", strconv.Itoa(mb), "number", tipTopicSt("remote-cache")),
 		sbBtnRow(nbtn(i18n.T("settings.body.peers.cacheClear"), "destructive", "settings-rcecache-clear", ""),
 			nbtn(i18n.T("settings.body.peers.cacheOpen"), "ghost", "settings-open:remotecache", "")))
 }
@@ -938,9 +938,9 @@ func (u *UI) obsBlocks() []setBlock {
 func (u *UI) obsSyncBlocks() []setBlock {
 	f := &u.svc.Cfg.Features.OBS.Sync
 	return []setBlock{
-		sbFpair(sbFieldTip(i18n.T("settings.body.common.frameRate"), "set:obssync-fps", trimNum(orFloat(f.Fps, 30)), "number", tipTopic("obssync-fps")),
-			sbFieldTip(i18n.T("settings.body.obssync.deadBand"), "set:obssync-deadband", trimNum(orFloat(f.DeadBandFrames, 2)), "number", tipTopic("obssync-deadband"))),
-		sbFieldTip(i18n.T("settings.body.obssync.restartThreshold"), "set:obssync-restart", strconv.Itoa(orInt(f.RestartThresholdMs, 1500)), "number", tipTopic("obssync-restart")),
+		sbFpair(sbFieldTip(i18n.T("settings.body.common.frameRate"), "set:obssync-fps", trimNum(orFloat(f.Fps, 30)), "number", tipTopicSt("obssync-fps")),
+			sbFieldTip(i18n.T("settings.body.obssync.deadBand"), "set:obssync-deadband", trimNum(orFloat(f.DeadBandFrames, 2)), "number", tipTopicSt("obssync-deadband"))),
+		sbFieldTip(i18n.T("settings.body.obssync.restartThreshold"), "set:obssync-restart", strconv.Itoa(orInt(f.RestartThresholdMs, 1500)), "number", tipTopicSt("obssync-restart")),
 		sbBtnRow(nbtn(i18n.T("settings.body.obssync.mediaSources", i18n.A{"count": fmt.Sprint(len(f.Sources))}), "outline", "settings-obssync-src", "")),
 		sbNote(i18n.T("settings.body.obssync.note"))}
 }
@@ -977,15 +977,15 @@ func (u *UI) timecodeBlocks() []setBlock {
 		sbSelectTip(i18n.T("settings.body.common.frameRate"), "set:tc-rate", [][2]string{{"24", i18n.T("settings.body.timecode.rate24")}, {"25", i18n.T("settings.body.timecode.rate25")}, {"29.97", i18n.T("settings.body.timecode.rate2997")}, {"30", i18n.T("settings.body.timecode.rate30")}}, f.ResolvedRate(), "tc-rate"),
 		sbToggle(i18n.T("settings.body.timecode.clockStart"), "set:tc-clock", clock)}
 	if !clock {
-		out = append(out, sbFieldTip(i18n.T("settings.body.timecode.startPosition"), "set:tc-startat", f.StartAt, "text", tipTopic("tc-start")))
+		out = append(out, sbFieldTip(i18n.T("settings.body.timecode.startPosition"), "set:tc-startat", f.StartAt, "text", tipTopicSt("tc-start")))
 	}
 	return append(out,
-		sbToggleTip(i18n.T("settings.body.timecode.ltcOn"), "set:tc-ltc-on", f.LTC.On, tipTopic("tc-ltc")),
+		sbToggleTip(i18n.T("settings.body.timecode.ltcOn"), "set:tc-ltc-on", f.LTC.On, tipTopicSt("tc-ltc")),
 		sbFpair(sbSelect(i18n.T("settings.body.timecode.ltcDevice"), "set:tc-ltc-dev", devOpts(waveOut, i18n.T("settings.body.common.systemDefault"), f.LTC.Device), f.LTC.Device),
-			sbFieldTip(i18n.T("settings.body.timecode.ltcLevel"), "set:tc-ltc-gain", trimNum(f.LTC.ResolvedGainDb()), "number", tipTopic("tc-ltc-level"))),
-		sbToggleTip(i18n.T("settings.body.timecode.mtcOn"), "set:tc-mtc-on", f.MTC.On, tipTopic("tc-mtc")),
+			sbFieldTip(i18n.T("settings.body.timecode.ltcLevel"), "set:tc-ltc-gain", trimNum(f.LTC.ResolvedGainDb()), "number", tipTopicSt("tc-ltc-level"))),
+		sbToggleTip(i18n.T("settings.body.timecode.mtcOn"), "set:tc-mtc-on", f.MTC.On, tipTopicSt("tc-mtc")),
 		sbSelect(i18n.T("settings.body.timecode.mtcPort"), "set:tc-mtc-dev", devOpts(midiOut, i18n.T("settings.body.timecode.firstPort"), f.MTC.Device), f.MTC.Device),
-		sbToggleTip(i18n.T("settings.body.timecode.artnetOn"), "set:tc-art-on", f.ArtNet.On, tipTopic("tc-artnet")),
+		sbToggleTip(i18n.T("settings.body.timecode.artnetOn"), "set:tc-art-on", f.ArtNet.On, tipTopicSt("tc-artnet")),
 		sbField(i18n.T("settings.body.timecode.artnetTarget"), "set:tc-art-addr", f.ArtNet.Addr, "text"),
 		sbBtnRowMix(sbAMenu("tcextras", "⋯ "+i18n.T("settings.body.timecode.extraMenu"), []ssOpt{
 			{Val: "settings-tcextra:ltc", Label: i18n.T("settings.body.timecode.extraLtc", i18n.A{"count": fmt.Sprint(len(f.LTCExtra))})},
@@ -1158,11 +1158,11 @@ func (u *UI) dmxBlocks() []setBlock {
 	return append([]setBlock{
 		sbFpair(sbField(i18n.T("settings.body.common.listenAddr"), "set:dmx-listen", f.ListenAddr, "text"),
 			sbField(i18n.T("settings.body.dmx.universes"), "set:dmx-universes", intsToCSVWeb(f.Universes), "text")),
-		sbToggleTip(i18n.T("settings.body.dmx.renderGrid"), "set:dmx-grid", f.Grid.Enabled, tipTopic("dmx-vrsl")),
+		sbToggleTip(i18n.T("settings.body.dmx.renderGrid"), "set:dmx-grid", f.Grid.Enabled, tipTopicSt("dmx-vrsl")),
 		sbFpair(sbSelect(i18n.T("settings.body.dmx.gridMode"), "set:dmx-mode", [][2]string{{"mono", "mono"}, {"rgb9", "rgb9"}}, or(f.Grid.Mode, "mono")),
 			sbField(i18n.T("settings.body.dmx.maxFps"), "set:dmx-fpscap", strconv.Itoa(f.Grid.ResolvedFPSCap()), "number")),
 		sbField(i18n.T("settings.body.dmx.senderName"), "set:dmx-spout", f.Grid.SpoutName, "text"),
-		sbToggleTip(i18n.T("settings.body.dmx.reemit"), "set:dmx-reemit", f.ReEmit, tipTopic("dmx-reemit")),
+		sbToggleTip(i18n.T("settings.body.dmx.reemit"), "set:dmx-reemit", f.ReEmit, tipTopicSt("dmx-reemit")),
 		sbField(i18n.T("settings.body.dmx.reemitTarget"), "set:dmx-emittarget", f.EmitTarget, "text"),
 	}, u.dmxLightCueBlocks()...)
 }
@@ -1175,10 +1175,10 @@ func (u *UI) dmxLightCueBlocks() []setBlock {
 	d := &u.svc.Cfg.Features.DMX
 	out := []setBlock{
 		sbNote(i18n.T("settings.body.lightcue.note")),
-		sbToggleTip(i18n.T("settings.body.lightcue.enable"), "set:dmx-lc-enable", lc.Enabled, ""),
+		sbToggle(i18n.T("settings.body.lightcue.enable"), "set:dmx-lc-enable", lc.Enabled),
 		sbFpair(sbField(i18n.T("settings.body.lightcue.hz"), "set:dmx-lc-hz", strconv.Itoa(lc.ResolvedHz()), "number"),
 			sbField(i18n.T("settings.body.lightcue.sacnUniverses"), "set:dmx-sacn-universes", intsToCSVWeb(d.SACNUniverses), "text")),
-		sbToggleTip(i18n.T("settings.body.lightcue.sacn"), "set:dmx-sacn", d.SACN, "")}
+		sbToggle(i18n.T("settings.body.lightcue.sacn"), "set:dmx-sacn", d.SACN)}
 
 	if u.svc.DMX == nil {
 		return out
@@ -1239,7 +1239,7 @@ func (u *UI) rtspBlocks() []setBlock {
 	return []setBlock{
 		sbFpair(sbField(i18n.T("settings.body.rtsp.videoSource"), "set:rtsp-source", f.Source, "text"),
 			sbField(i18n.T("settings.body.rtsp.inputFormat"), "set:rtsp-format", f.InputFormat, "text")),
-		sbToggleTip(i18n.T("settings.body.rtsp.passthrough"), "set:rtsp-passthrough", f.Passthrough, tipTopic("rtsp-passthrough")),
+		sbToggleTip(i18n.T("settings.body.rtsp.passthrough"), "set:rtsp-passthrough", f.Passthrough, tipTopicSt("rtsp-passthrough")),
 		sbFpair(sbField(i18n.T("settings.body.common.listenAddr"), "set:rtsp-listen", f.ListenAddr, "text"),
 			sbField(i18n.T("settings.body.rtsp.streamPath"), "set:rtsp-path", f.Path, "text")),
 		sbFpair(sbField(i18n.T("settings.body.common.frameRate"), "set:rtsp-fps", strconv.Itoa(f.ResolvedFPS()), "number"),

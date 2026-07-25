@@ -10,6 +10,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/gridfix"
 	"rave.page/mate/internal/gridfix/train"
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/ui"
 	"rave.page/mate/internal/unityproj"
@@ -298,5 +299,80 @@ func TestZigSettingsStatusGolden(t *testing.T) {
 	} {
 		st := setStatusSt{V: s.v, T: s.t}
 		zigFrag(t, "status", setStatusHTML(st), stateJSON(st), zigui.RenderSettingsStatus)
+	}
+}
+
+// TestZigSettingsTipGolden pins the tooltip seam on the settings card grid (phase B1b): a
+// hand-built #set-content pane covering every place a settings tooltip can sit - card head, field,
+// toggle, an fpair kid - in the four shapes the contract names (present / absent / multi-link /
+// keybind grid, which no real settings topic carries) plus the raw-bridge fallback a not-yet
+// migrated builder would still ship.
+func TestZigSettingsTipGolden(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	i18n.SetLocale("en")
+
+	fld := func(label, act string) *uiField {
+		f := newField(label, act, "v", "text")
+		return &f
+	}
+	tgl := func(label, act string) *uiToggle {
+		x := newToggle(label, act, true)
+		return &x
+	}
+	multi := tipTopicSt("account-bridge") // 3 authoritative links
+	grid := tipTopicSt("cue-edit")        // the only full keybind grid in the registry
+	waveGrid := tipTopicSt("wave-nav")    // grid with no section headers
+	esc := tipState(`c&"d"`, `T & <"x">`, "para &<>\n\npara two", nil, []ttLink{{`L & "x"`, `https://x/?a&b="c"`}})
+
+	content := setContentSt{
+		Nav: []setNavSt{{ID: "tips", Title: "Tips", Agg: "ok", Active: true}},
+		Secs: []setSecSt{{ID: "tips", Title: "Tooltips", Desc: "every tooltip shape", Cards: []setCardSt{
+			// card head: structured tip with a keybind grid + a feature switch
+			{ID: "grid", Title: "Card with a grid", TipS: grid, St: setStatusSt{V: "ok", T: "on"},
+				Tgl: &setSwitchSt{Label: "Enable", On: true},
+				Blocks: []setBlock{
+					{K: "field", Fld: fld("Field with a grid tip", "set:a"), TipS: waveGrid},
+					{K: "toggle", Tgl: tgl("Toggle with 3 links", "set:b"), TipS: multi},
+				}},
+			// card head: multi-link tip, body mixes tipped + untipped controls
+			{ID: "multi", Title: "Card with 3 links", TipS: multi, Desc: "desc", St: setStatusSt{V: "warn", T: "check"},
+				Blocks: []setBlock{
+					{K: "field", Fld: fld("No tip", "set:c")},
+					{K: "toggle", Tgl: tgl("No tip either", "set:d")},
+					{K: "fpair", Kids: []setKid{
+						{K: "field", Fld: fld("Kid with tip", "set:e"), TipS: tipTopicSt("obssync-fps")},
+						{K: "field", Fld: fld("Kid without", "set:f")},
+					}},
+					// gated toggle: the gate hint wins over any tooltip, exactly like Go
+					{K: "toggle", Tgl: tgl("Gated", ""), Gate: "install ffmpeg", TipS: multi},
+				}},
+			// no tooltip anywhere + the escaping-heavy ad-hoc tip
+			{ID: "plain", Title: "Plain card", St: setStatusSt{V: "off", T: ""},
+				Blocks: []setBlock{
+					{K: "field", Fld: fld(`Esc & <"tip">`, "set:g"), TipS: &esc},
+				}},
+			// dual-field bridge: an un-migrated builder still ships pre-rendered markup
+			{ID: "bridge", Title: "Raw bridge", Tip: tipTopic("icecast"), St: setStatusSt{V: "ok", T: "raw"},
+				Blocks: []setBlock{
+					{K: "field", Fld: fld("Raw field tip", "set:h"), Tip: tipTopic("fingerprinting")},
+					{K: "toggle", Tgl: tgl("Raw toggle tip", "set:i"), Tip: tipTopic("led-feedback")},
+					{K: "fpair", Kids: []setKid{{K: "field", Fld: fld("Raw kid tip", "set:j"), Tip: tipTopic("tc-ltc")}}},
+				}},
+		}}},
+	}
+	zigFrag(t, "tipContent", setContentHTML(content), stateJSON(content), zigui.RenderSettingsContent)
+
+	// ...and the same pane in every locale: the resolved prose changes, parity must not.
+	for _, loc := range i18n.Available() {
+		i18n.SetLocale(loc.Code)
+		c2 := content
+		c2.Secs[0].Cards[0].TipS = tipTopicSt("cue-edit")
+		c2.Secs[0].Cards[1].TipS = tipTopicSt("account-bridge")
+		t.Run("locale/"+loc.Code, func(t *testing.T) {
+			zigFrag(t, "tipContent", setContentHTML(c2), stateJSON(c2), zigui.RenderSettingsContent)
+		})
 	}
 }
