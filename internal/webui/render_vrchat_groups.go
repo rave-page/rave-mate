@@ -20,8 +20,8 @@ import (
 //
 // Zig-rendered (native/zigui/src/vrcgroups.zig): vrcgBodyState resolves everything impure
 // (locks, session, perms, i18n, timestamps); vrcgBodyHTML below stays the Go fallback + golden
-// reference (zigui_golden_vrchat_test.go). Modal fragments (vgRoleBodyHTML/vgInviteListHTML)
-// are separate surfaces and stay Go-rendered.
+// reference (zigui_golden_vrchat_test.go). The dialog surfaces (role body, invite list, the two
+// picker shells, kick/ban + post-delete confirms) live in render_vrchat_groups_modals.go.
 
 // ── resolved render state (JSON → Zig) ──
 
@@ -973,83 +973,6 @@ func vgAuditHTML(as vgAuditSt) string {
 	}
 	b.WriteString(vgPagerHTML(as.Pager))
 	return card(as.CardTitle, "", b.String())
-}
-
-// ── modal bodies (re-patched in place; Go-rendered, not part of the Zig tab port) ──
-
-// vgRoleBodyHTML renders the pending member's add/remove-role list (modal #vrcg-role-body).
-func (u *UI) vgRoleBodyHTML() string {
-	vgState.mu.Lock()
-	p := vgState.pend
-	roles := vgState.roles
-	var has map[string]bool
-	ok := p.idx >= 0 && p.idx < len(vgState.members.rows)
-	if ok {
-		m := vgState.members.rows[p.idx]
-		ok = m.UserID != nil && *m.UserID == p.userID
-		if ok {
-			has = make(map[string]bool, len(m.RoleIDs))
-			for _, rid := range m.RoleIDs {
-				has[rid] = true
-			}
-		}
-	}
-	vgState.mu.Unlock()
-	if !ok {
-		return hint("warn", "Member list changed - close and reopen.")
-	}
-	if len(roles) == 0 {
-		return hint("info", "Roles not loaded yet - Refresh the group.")
-	}
-	var b strings.Builder
-	for i, r := range roles {
-		lbl := r.Name
-		if r.IsManagementRole {
-			lbl += " (management)"
-		}
-		var act string
-		if has[r.ID] {
-			act = btn("Remove", "warn", fmt.Sprintf("vrcg-role-del:%d", i), "")
-		} else {
-			act = btn("Add", "go", fmt.Sprintf("vrcg-role-add:%d", i), "")
-		}
-		b.WriteString(itemRow(lbl, r.Description, act))
-	}
-	return b.String()
-}
-
-// vgInviteListHTML renders the filtered friends list (modal #vrcg-inv-list); writes the shown
-// order back so vrcg-inv-pick indices match.
-func (u *UI) vgInviteListHTML() string {
-	vgState.mu.Lock()
-	loading := vgState.friendsLoading
-	q := strings.ToLower(strings.TrimSpace(vgState.fq))
-	shown := vgState.shownFriends[:0]
-	for _, f := range vgState.friends {
-		if q == "" || strings.Contains(strings.ToLower(f.DisplayName), q) {
-			shown = append(shown, f)
-		}
-	}
-	vgState.shownFriends = shown
-
-	var b strings.Builder
-	switch {
-	case loading:
-		b.WriteString(hint("info", "Loading friends…"))
-	case len(shown) == 0:
-		b.WriteString(emptyState("No friends match."))
-	default:
-		const maxShow = 100 // render cap; filter to narrow
-		for i, f := range shown {
-			if i >= maxShow {
-				b.WriteString(`<div class=vrcg-count>…more matches - filter to narrow down</div>`)
-				break
-			}
-			b.WriteString(itemRow(f.DisplayName, f.Status, btn("Invite", "primary", fmt.Sprintf("vrcg-inv-pick:%d", i), "")))
-		}
-	}
-	vgState.mu.Unlock()
-	return b.String()
 }
 
 // ── small render helpers ──

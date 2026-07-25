@@ -149,3 +149,32 @@ func RenderDlgPreset(stateJSON []byte) (string, bool)     { return "", false }
 func RenderDlgPatMgr(stateJSON []byte) (string, bool)     { return "", false }
 
 // --- end dialogs-a ---
+
+// --- dialogs-b ---
+
+func RenderVgRoleBody(stateJSON []byte) (string, bool)      { return "", false }
+func RenderVgInviteList(stateJSON []byte) (string, bool)    { return "", false }
+func RenderVgRolesModal(stateJSON []byte) (string, bool)    { return "", false }
+func RenderVgInviteModal(stateJSON []byte) (string, bool)   { return "", false }
+func RenderVgMemberConfirm(stateJSON []byte) (string, bool) { return "", false }
+func RenderVgPostConfirm(stateJSON []byte) (string, bool)   { return "", false }
+
+func RenderWsListEditor(stateJSON []byte) (string, bool)   { return "", false }
+func RenderWsPosterEditor(stateJSON []byte) (string, bool) { return "", false }
+func RenderWsFriendPicker(stateJSON []byte) (string, bool) { return "", false }
+func RenderWsFriendList(stateJSON []byte) (string, bool)   { return "", false }
+func RenderWsGroupPicker(stateJSON []byte) (string, bool)  { return "", false }
+func RenderWsGroupList(stateJSON []byte) (string, bool)    { return "", false }
+func RenderWsRolePicker(stateJSON []byte) (string, bool)   { return "", false }
+func RenderWsRoleList(stateJSON []byte) (string, bool)     { return "", false }
+func RenderWsDevice(stateJSON []byte) (string, bool)       { return "", false }
+
+func RenderAutoEditor(stateJSON []byte) (string, bool) { return "", false }
+
+func RenderAutoRunNow(stateJSON []byte) (string, bool)   { return "", false }
+func RenderAutoSchedule(stateJSON []byte) (string, bool) { return "", false }
+
+func RenderPCViewer(stateJSON []byte) (string, bool) { return "", false }
+func RenderPCGpu(stateJSON []byte) (string, bool)    { return "", false }
+
+// --- end dialogs-b ---

@@ -727,3 +727,149 @@ func RenderDlgPatMgr(stateJSON []byte) (string, bool) {
 }
 
 // --- end dialogs-a ---
+
+// --- dialogs-b ---
+// Wave-4 dialog sweep B: the feature-tab dialog families. Fragment renderers serve the
+// in-modal patch targets; the modal renderers include the dialog chrome.
+
+// RenderVgRoleBody renders #vrcg-role-body (the member's add/remove-role list).
+func RenderVgRoleBody(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolebody(p, l, n)
+	})
+}
+
+// RenderVgInviteList renders #vrcg-inv-list (the filtered friends list).
+func RenderVgInviteList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitelist(p, l, n)
+	})
+}
+
+// RenderVgRolesModal renders the group-roles dialog.
+func RenderVgRolesModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolesmodal(p, l, n)
+	})
+}
+
+// RenderVgInviteModal renders the group-invite dialog.
+func RenderVgInviteModal(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitemodal(p, l, n)
+	})
+}
+
+// RenderVgMemberConfirm renders the kick/ban confirm dialog.
+func RenderVgMemberConfirm(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_memberconfirm(p, l, n)
+	})
+}
+
+// RenderVgPostConfirm renders the delete-post confirm dialog.
+func RenderVgPostConfirm(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_postconfirm(p, l, n)
+	})
+}
+
+// RenderWsListEditor renders the Worlds permission-list entry editor dialog.
+func RenderWsListEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_listeditor(p, l, n)
+	})
+}
+
+// RenderWsPosterEditor renders the Worlds poster-slot editor dialog.
+func RenderWsPosterEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_postereditor(p, l, n)
+	})
+}
+
+// RenderWsFriendPicker renders the Worlds friend-picker dialog.
+func RenderWsFriendPicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendpicker(p, l, n)
+	})
+}
+
+// RenderWsFriendList renders #world-fr-list (the filtered friends list).
+func RenderWsFriendList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendlist(p, l, n)
+	})
+}
+
+// RenderWsGroupPicker renders the Worlds group/role-picker dialog.
+func RenderWsGroupPicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouppicker(p, l, n)
+	})
+}
+
+// RenderWsGroupList renders #world-grp-list (favorites + own groups + search results).
+func RenderWsGroupList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouplist(p, l, n)
+	})
+}
+
+// RenderWsRolePicker renders the Worlds role-grant dialog.
+func RenderWsRolePicker(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolepicker(p, l, n)
+	})
+}
+
+// RenderWsRoleList renders #world-role-list (the loaded group roles).
+func RenderWsRoleList(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolelist(p, l, n)
+	})
+}
+
+// RenderWsDevice renders the GitHub device-code dialog.
+func RenderWsDevice(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_device(p, l, n)
+	})
+}
+
+// RenderAutoEditor renders the automation editor dialog (identity + match rules + action chain).
+func RenderAutoEditor(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_editor(p, l, n)
+	})
+}
+
+// RenderAutoRunNow renders the automations run-now dialog.
+func RenderAutoRunNow(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_runnow(p, l, n)
+	})
+}
+
+// RenderAutoSchedule renders the automations schedule-editor dialog.
+func RenderAutoSchedule(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_schedule(p, l, n)
+	})
+}
+
+// RenderPCViewer renders the point-cloud viewer dialog shell (canvas + transport chrome).
+func RenderPCViewer(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_viewer(p, l, n)
+	})
+}
+
+// RenderPCGpu renders the point-cloud viewer GPU prompt.
+func RenderPCGpu(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_gpu(p, l, n)
+	})
+}
+
+// --- end dialogs-b ---

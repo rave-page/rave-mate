@@ -12,7 +12,6 @@ package webui
 
 import (
 	"encoding/json"
-	"html"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,46 +105,29 @@ func (u *UI) moPCView(path string) {
 // moPCViewerModal builds the viewer modal shell (canvas + transport). Close controls dispatch
 // pcv-close (dispose GL) instead of the generic modal-close. Transport buttons/slider carry NO
 // data-act - the runtime leaves them alone and pc_viewer.js wires them (no Go round-trip per frame).
+// Pure renderer + Zig mirror: render_motion_pcv.go.
 func (u *UI) moPCViewerModal(name string, h pointcloud.Header) string {
-	maxFrame := strconv.Itoa(max(h.FrameCount-1, 0))
-	body := `<div class=pcv-wrap>` +
-		`<div id=pcv-stage class=pcv-stage><canvas id=pcv-canvas class=pcv-canvas></canvas></div>` +
-		`<div class=pcv-transport>` +
-		`<button id=pcv-play class="rp-btn rp-btn--go pcv-play">▶ ` + html.EscapeString(i18n.T("player.play")) + `</button>` +
-		`<input id=pcv-scrub class=slider-input type=range min=0 max=` + maxFrame + ` step=1 value=0>` +
-		`<span id=pcv-time class=pcv-time data-label="pcv-time"></span>` +
-		`</div>` +
-		`<div id=pcv-info class=pcv-info data-label="pcv-info"></div>` +
-		`<div class=pcv-hint>` + html.EscapeString(i18n.T("motion.pcViewHint")) + `</div>` +
-		`</div>`
-	foot := btn(i18n.T("common.close"), "outline", "pcv-close", "")
-	title := i18n.T("motion.pcViewTitle", i18n.A{"name": name})
-	return `<div class=modal-scrim data-act=pcv-close></div>` +
-		`<div class="modal pcv-modal" role=dialog><div class=modal-head><h3 class=modal-title>` +
-		html.EscapeString(title) + `</h3>` +
-		`<button class=modal-x data-act=pcv-close aria-label=Close>✕</button></div>` +
-		`<div class=modal-body>` + body + `</div><div class=modal-foot>` + foot + `</div></div>`
+	return renderPCViewerModal(moPCViewSt{
+		Title:     i18n.T("motion.pcViewTitle", i18n.A{"name": name}),
+		PlayLabel: i18n.T("player.play"),
+		MaxFrame:  strconv.Itoa(max(h.FrameCount-1, 0)),
+		Hint:      i18n.T("motion.pcViewHint"),
+		Close:     i18n.T("common.close"),
+	})
 }
 
 // moPCGpuModal is the "viewer needs GPU" prompt. enabled=false: explain the streaming-safe default
 // + offer one-click enable; enabled=true: confirm + tell the user to restart. We never auto-restart
 // - GPU-off is what keeps rave-mate off a live encoder, so the user restarts when they're not on air.
 func (u *UI) moPCGpuModal(enabled bool) string {
-	var body, foot string
+	st := moPCGpuSt{Title: i18n.T("motion.pcGpuTitle"), Enabled: enabled, Close: i18n.T("common.close")}
 	if enabled {
-		body = `<p class=pcv-gpu-msg>` + html.EscapeString(i18n.T("motion.pcGpuEnabled")) + `</p>`
-		foot = btn(i18n.T("common.close"), "outline", "pcv-close", "")
+		st.Msg = i18n.T("motion.pcGpuEnabled")
 	} else {
-		body = `<p class=pcv-gpu-msg>` + html.EscapeString(i18n.T("motion.pcGpuWhy")) + `</p>`
-		foot = btn(i18n.T("motion.pcGpuEnable"), "go", "pcv-enablegpu", "") +
-			btn(i18n.T("common.close"), "outline", "pcv-close", "")
+		st.Msg = i18n.T("motion.pcGpuWhy")
+		st.EnableLabel = i18n.T("motion.pcGpuEnable")
 	}
-	title := i18n.T("motion.pcGpuTitle")
-	return `<div class=modal-scrim data-act=pcv-close></div>` +
-		`<div class="modal pcv-modal" role=dialog><div class=modal-head><h3 class=modal-title>` +
-		html.EscapeString(title) + `</h3>` +
-		`<button class=modal-x data-act=pcv-close aria-label=Close>✕</button></div>` +
-		`<div class=modal-body>` + body + `</div><div class=modal-foot>` + foot + `</div></div>`
+	return renderPCGpuModal(st)
 }
 
 // pcvEnableGPU flips the webview-GPU escape hatch on + persists it, then swaps the prompt to the

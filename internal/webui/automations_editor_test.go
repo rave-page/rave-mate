@@ -257,8 +257,10 @@ func TestAeChainHTMLLiveValidation(t *testing.T) {
 		{Type: automation.ActionTranscode, PresetID: "remux"},
 	}})
 	u.ae.mu.Lock()
-	h := u.aeChainHTML(&u.ae, nil)
+	var st aeModalSt
+	u.aeChainState(&st, &u.ae, nil)
 	u.ae.mu.Unlock()
+	h := aeChainHTMLOf(st)
 	if !strings.Contains(h, "delete must be the last action") {
 		t.Fatal("invalid chain rendered no live validation banner")
 	}

@@ -588,9 +588,10 @@ func (u *UI) vgConfirmMember(arg, kind string) {
 	if kind == "ban" {
 		verb, note = "Ban", "They are removed and cannot rejoin until unbanned."
 	}
-	body := `<p>` + verb + ` <b>` + htmlEscape(name) + `</b> from ` + htmlEscape(gname) + `? ` + htmlEscape(note) + `</p>`
-	u.openModal(modal(verb+" member", body,
-		btnRow(btn(verb, "destructive", "vrcg-"+kind+"-y", ""), btn("Cancel", "outline", "modal-close", ""))))
+	u.openModal(u.vgMemberConfirmHTML(vgMemberConfirmSt{
+		Title: verb + " member", Verb: verb, Name: name, Group: gname, Note: note,
+		Act: "vrcg-" + kind + "-y", Cancel: "Cancel",
+	}))
 }
 
 // vgMemberMut runs the confirmed kick/ban against the pending member.
@@ -663,7 +664,7 @@ func (u *UI) vgRolesModal(arg string) {
 	if uid == "" {
 		return
 	}
-	u.openModal(modal("Roles - "+name, `<div id=vrcg-role-body>`+u.vgRoleBodyHTML()+`</div>`, ""))
+	u.openModal(u.vgRolesModalHTML("Roles - " + name))
 }
 
 // vgRoleMut adds/removes the role at index arg (into vgState.roles) on the pending member.
@@ -835,11 +836,7 @@ func (u *UI) vgInviteModal() {
 	vgState.mu.Lock()
 	vgState.fq, vgState.friends, vgState.shownFriends, vgState.friendsLoading = "", nil, nil, true
 	vgState.mu.Unlock()
-	body := `<form data-act=vrcg-inv-search><input class=field-input name=q placeholder="Filter friends… (Enter)"></form>` +
-		`<div id=vrcg-inv-list>` + u.vgInviteListHTML() + `</div>` +
-		`<form data-act=vrcg-inv-id class=vrcg-invid><input class=field-input name=userid placeholder="usr_… (invite by user ID)">` +
-		`<button class="rp-btn rp-btn--outline" type=submit>Invite ID</button></form>`
-	u.openModal(modal("Invite to "+name, body, ""))
+	u.openModal(u.vgInviteModalHTML("Invite to " + name))
 	u.bg(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -985,9 +982,9 @@ func (u *UI) vgConfirmPostDelete(arg string) {
 		u.toast("Post has no id - refresh posts and retry")
 		return
 	}
-	body := `<p>Delete post <b>` + htmlEscape(p.Title) + `</b> from ` + htmlEscape(gname) + `? This cannot be undone.</p>`
-	u.openModal(modal("Delete post", body,
-		btnRow(btn("Delete post", "destructive", "vrcg-post-del-y", ""), btn("Cancel", "outline", "modal-close", ""))))
+	u.openModal(u.vgPostConfirmHTML(vgPostConfirmSt{
+		Title: "Delete post", Post: p.Title, Group: gname, Confirm: "Delete post", Cancel: "Cancel",
+	}))
 }
 
 // vgDeletePost runs the confirmed delete against the pending post.

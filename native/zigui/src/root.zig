@@ -631,3 +631,100 @@ test "dialogs-a module" {
 }
 
 // --- end dialogs-a ---
+
+// --- dialogs-b ---
+// Wave-4 dialog sweep B: the feature-tab dialog families (VRChat ▸ Groups, Worlds,
+// Automations). Fragment exports (#vrcg-role-body, #vrcg-inv-list, #world-fr-list,
+// #world-grp-list, #world-role-list) serve the in-modal patch targets; the rest are whole
+// dialogs including the modal chrome, so openModal sees the same bytes either way.
+
+const dialogs_b = @import("dialogs_b.zig");
+
+export fn rz_ui_render_vg_rolebody(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.RoleBody, dialogs_b.renderRoleBody, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitelist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.InviteList, dialogs_b.renderInviteList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolesmodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.RolesModal, dialogs_b.renderRolesModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitemodal(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.InviteModal, dialogs_b.renderInviteModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_memberconfirm(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.MemberConfirm, dialogs_b.renderMemberConfirm, state_json, len, out_len);
+}
+
+export fn rz_ui_render_vg_postconfirm(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PostConfirm, dialogs_b.renderPostConfirm, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_listeditor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsListEditor, dialogs_b.renderWsListEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_postereditor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsPosterEditor, dialogs_b.renderWsPosterEditor, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendpicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsFriendPicker, dialogs_b.renderWsFriendPicker, state_json, len, out_len);
+}
+
+/// #world-fr-list inner (patched when the async friends load lands / the filter changes).
+export fn rz_ui_render_ws_friendlist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsFriendList, dialogs_b.renderWsFriendList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouppicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsGroupPicker, dialogs_b.renderWsGroupPicker, state_json, len, out_len);
+}
+
+/// #world-grp-list inner (own-groups load + every group search).
+export fn rz_ui_render_ws_grouplist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsGroupList, dialogs_b.renderWsGroupList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolepicker(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsRolePicker, dialogs_b.renderWsRolePicker, state_json, len, out_len);
+}
+
+/// #world-role-list inner (patched once the group roles load).
+export fn rz_ui_render_ws_rolelist(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsRoleList, dialogs_b.renderWsRoleList, state_json, len, out_len);
+}
+
+export fn rz_ui_render_ws_device(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.WsDevice, dialogs_b.renderWsDevice, state_json, len, out_len);
+}
+
+export fn rz_ui_render_auto_editor(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.AeModal, dialogs_b.renderAeModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_auto_runnow(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.ArModal, dialogs_b.renderArModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_auto_schedule(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.AsModal, dialogs_b.renderAsModal, state_json, len, out_len);
+}
+
+export fn rz_ui_render_pc_viewer(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PCViewer, dialogs_b.renderPCViewer, state_json, len, out_len);
+}
+
+export fn rz_ui_render_pc_gpu(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(dialogs_b.PCGpu, dialogs_b.renderPCGpu, state_json, len, out_len);
+}
+
+test "dialogs-b module" {
+    _ = dialogs_b;
+}
+
+// --- end dialogs-b ---

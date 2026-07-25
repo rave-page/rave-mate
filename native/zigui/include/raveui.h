@@ -212,6 +212,32 @@ const uint8_t *rz_ui_render_dlg_preset(const uint8_t *state_json, size_t len, si
 const uint8_t *rz_ui_render_dlg_patmgr(const uint8_t *state_json, size_t len, size_t *out_len);
 /* --- end dialogs-a --- */
 
+/* --- dialogs-b --- */
+/* Wave-4 dialog sweep B: feature-tab dialog families. The fragment exports serve in-modal
+ * patch targets (#vrcg-role-body, #vrcg-inv-list, #world-fr-list, #world-grp-list,
+ * #world-role-list); the rest render a whole dialog including the modal chrome. */
+const uint8_t *rz_ui_render_vg_rolebody(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitelist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_rolesmodal(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitemodal(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_memberconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_postconfirm(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_listeditor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_postereditor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendpicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendlist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouppicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouplist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolepicker(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolelist(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_device(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_editor(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_runnow(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_schedule(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_viewer(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_gpu(const uint8_t *state_json, size_t len, size_t *out_len);
+/* --- end dialogs-b --- */
+
 #ifdef __cplusplus
 }
 #endif

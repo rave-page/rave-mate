@@ -21,6 +21,7 @@ import (
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/i18n"
+	"rave.page/mate/internal/zigui"
 )
 
 // A blank interval/idle field materializes these on save rather than persisting 0: the scheduler
@@ -410,7 +411,9 @@ func (u *UI) asDelete(id string) {
 // form is by construction the modal on screen - a Save act arriving without it must not open it.
 func (u *UI) asSetErr(tok modalTok, msg string) { u.asSetErrIf(tok, msg, false) }
 
-// ── render (pure: reads the working copy + the automation snapshot, no I/O) ──
+// ── render: impure state builders (working copy + automation snapshot, no I/O) + the Zig bridge ──
+//
+// The pure renderer lives in render_automations_sch.go, mirrored in dialogs_b.zig.
 
 func (u *UI) asModalHTML() string {
 	s := &u.as
@@ -422,86 +425,107 @@ func (u *UI) asModalHTML() string {
 // asModalHTMLLocked renders the form. Caller holds s.mu - the mutators already do, so the write and
 // the render it produces stay one atomic step under the slot lock.
 func (u *UI) asModalHTMLLocked(s *asSt) string {
-	var b strings.Builder
-	if s.errTx != "" {
-		b.WriteString(`<div class=ae-err>` + hint("bad", s.errTx) + `</div>`)
+	st := asModalState(s)
+	if zigui.Available() {
+		if h, ok := zigui.RenderAutoSchedule(stateJSON(st)); ok {
+			return h
+		}
 	}
-	b.WriteString(field(i18n.T("automations.sch.label"), "auto-sch:label", s.label, "text"))
-	b.WriteString(asAutoSelect(s))
-	b.WriteString(toggleRow(i18n.T("common.enabledCap"), "auto-sch:enabled", s.enabled))
+	return asModalHTMLOf(st)
+}
+
+// asModalState resolves the dialog. Caller holds s.mu (the smart-select registrations happen in
+// RENDER order: automation picker, then the trigger's kind/clock pickers).
+func asModalState(s *asSt) asModalSt {
+	st := asModalSt{
+		Title:      i18n.T("automations.sch.titleNew"),
+		SecTrigger: i18n.T("automations.sch.secTrigger"),
+		SecGates:   i18n.T("automations.sch.secGates"),
+		Save:       i18n.T("automations.sch.save"),
+		Cancel:     i18n.T("common.cancel"),
+	}
+	if s.id != "" {
+		st.Title = i18n.T("automations.sch.titleEdit")
+	}
+	if s.errTx != "" {
+		st.HasErr, st.Err = true, s.errTx
+	}
+	st.Head = []aeBlockSt{
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.label"), "auto-sch:label", s.label, "text", "", "")},
+		{Kind: aeBlkSelect, Sel: asAutoSelectState(s)},
+		{Kind: aeBlkToggle, Toggle: newToggle(i18n.T("common.enabledCap"), "auto-sch:enabled", s.enabled)},
+	}
 	if a, ok := s.auto(); ok {
 		if a.deletes {
 			// A one-off delete is a decision; a delete on a timer is a standing order. Say it here,
 			// where the timer is being set, not in the run history afterwards.
-			b.WriteString(hint("bad", i18n.T("automations.sch.deleteChainWarn")))
+			st.Head = append(st.Head, aeBlockSt{Kind: aeBlkHint, Tone: "bad", Text: i18n.T("automations.sch.deleteChainWarn")})
 		}
 		if !a.enabled && s.enabled {
-			b.WriteString(hint("warn", i18n.T("automations.sch.automationOffWarn")))
+			st.Head = append(st.Head, aeBlockSt{Kind: aeBlkHint, Tone: "warn", Text: i18n.T("automations.sch.automationOffWarn")})
 		}
 	}
-	b.WriteString(section(i18n.T("automations.sch.secTrigger"), asTriggerHTML(s)))
-	b.WriteString(section(i18n.T("automations.sch.secGates"), asGatesHTML(s)))
-
-	footer := btnRow(btn(i18n.T("automations.sch.save"), "primary", "auto-sch-save", ""),
-		btn(i18n.T("common.cancel"), "ghost", "modal-close", ""))
-	title := i18n.T("automations.sch.titleNew")
-	if s.id != "" {
-		title = i18n.T("automations.sch.titleEdit")
-	}
-	return modal(title, b.String(), footer)
+	st.Trigger = asTriggerState(s)
+	st.Gates = asGatesState(s)
+	return st
 }
 
-// asTriggerHTML renders the kind picker + only the fields that kind actually reads. Caller holds s.mu.
-func asTriggerHTML(s *asSt) string {
-	var b strings.Builder
-	b.WriteString(asKindSelect(s))
+// asTriggerState resolves the kind picker + only the fields that kind actually reads. Caller holds s.mu.
+func asTriggerState(s *asSt) []aeBlockSt {
+	out := []aeBlockSt{asKindSelectBlock(s)}
 	switch s.kind {
 	case automation.ScheduleDaily:
-		b.WriteString(fpair(asClockSelect("auto-sch-hour", i18n.T("automations.sch.atHour"), "auto-sch:hour", s.atHour, 23),
-			asClockSelect("auto-sch-min", i18n.T("automations.sch.atMinute"), "auto-sch:minute", s.atMinute, 59)))
-		b.WriteString(`<div class=pb-hint>` + html.EscapeString(i18n.T("automations.sch.dailyHint")) + `</div>`)
+		out = append(out,
+			aeBlockSt{Kind: aeBlkFPairSel,
+				Sel:  asClockSelectState("auto-sch-hour", i18n.T("automations.sch.atHour"), "auto-sch:hour", s.atHour, 23),
+				Sel2: asClockSelectState("auto-sch-min", i18n.T("automations.sch.atMinute"), "auto-sch:minute", s.atMinute, 59)},
+			aeBlockSt{Kind: aeBlkPBHint, Text: i18n.T("automations.sch.dailyHint")})
 	case automation.ScheduleCron:
-		b.WriteString(fieldEx(i18n.T("automations.sch.cron"), "auto-sch:cron", s.cronTx, "text",
-			"*/15 * * * *", tipTopic("auto-sch-cron")))
-		b.WriteString(asCronVerdict(s.cronTx))
+		out = append(out, aeBlockSt{Kind: aeBlkField,
+			Field: newDlgField(i18n.T("automations.sch.cron"), "auto-sch:cron", s.cronTx, "text",
+				"*/15 * * * *", tipTopic("auto-sch-cron"))})
+		out = append(out, asCronVerdictBlock(s.cronTx))
 	case automation.ScheduleIdle:
-		b.WriteString(fieldEx(i18n.T("automations.sch.idleMinutes"), "auto-sch:idle", aeIntTx(s.idle), "number",
-			strconv.Itoa(asDefaultIdle), tipTopic("auto-sch-idle")))
+		out = append(out, aeBlockSt{Kind: aeBlkField,
+			Field: newDlgField(i18n.T("automations.sch.idleMinutes"), "auto-sch:idle", aeIntTx(s.idle), "number",
+				strconv.Itoa(asDefaultIdle), tipTopic("auto-sch-idle"))})
 		if runtime.GOOS != "windows" {
 			// The idle TRIGGER fails closed: evalTick skips the schedule outright when the platform
 			// can't report idle time, so this would be a schedule that never fires. (The idle GATE
 			// below fails open - opposite behaviour, hence the separate warning.)
-			b.WriteString(hint("bad", i18n.T("automations.sch.idleUnsupported")))
+			out = append(out, aeBlockSt{Kind: aeBlkHint, Tone: "bad", Text: i18n.T("automations.sch.idleUnsupported")})
 		}
 	default:
-		b.WriteString(fieldEx(i18n.T("automations.sch.intervalMinutes"), "auto-sch:interval", aeIntTx(s.interval), "number",
-			strconv.Itoa(asDefaultInterval), tipTopic("auto-sch-interval")))
+		out = append(out, aeBlockSt{Kind: aeBlkField,
+			Field: newDlgField(i18n.T("automations.sch.intervalMinutes"), "auto-sch:interval", aeIntTx(s.interval), "number",
+				strconv.Itoa(asDefaultInterval), tipTopic("auto-sch-interval"))})
 	}
-	return b.String()
+	return out
 }
 
-// asGatesHTML renders the gates that apply to ANY kind. Caller holds s.mu.
-func asGatesHTML(s *asSt) string {
-	var b strings.Builder
-	b.WriteString(fieldEx(i18n.T("automations.sch.requireIdle"), "auto-sch:reqidle", aeIntTx(s.reqIdle), "number", "0",
-		tipTopic("auto-sch-require-idle")))
-	b.WriteString(fieldEx(i18n.T("automations.sch.requireApps"), "auto-sch:reqapps", s.reqApps, "text",
-		i18n.T("automations.sch.requireAppsPH"), tipTopic("auto-sch-apps")))
-	b.WriteString(fieldEx(i18n.T("automations.sch.excludeApps"), "auto-sch:exclapps", s.exclApps, "text",
-		i18n.T("automations.sch.excludeAppsPH"), tipTopic("auto-sch-apps")))
+// asGatesState resolves the gates that apply to ANY kind. Caller holds s.mu.
+func asGatesState(s *asSt) []aeBlockSt {
+	out := []aeBlockSt{
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.requireIdle"), "auto-sch:reqidle", aeIntTx(s.reqIdle),
+			"number", "0", tipTopic("auto-sch-require-idle"))},
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.requireApps"), "auto-sch:reqapps", s.reqApps, "text",
+			i18n.T("automations.sch.requireAppsPH"), tipTopic("auto-sch-apps"))},
+		{Kind: aeBlkField, Field: newDlgField(i18n.T("automations.sch.excludeApps"), "auto-sch:exclapps", s.exclApps, "text",
+			i18n.T("automations.sch.excludeAppsPH"), tipTopic("auto-sch-apps"))},
+	}
 	if runtime.GOOS != "windows" {
 		// gateBlock fails OPEN when the platform can't report idle/processes - the schedule still
 		// fires, ungated. Silently ignoring a stated condition would be the worse surprise.
-		b.WriteString(hint("warn", i18n.T("automations.sch.gatesUnsupported")))
+		out = append(out, aeBlockSt{Kind: aeBlkHint, Tone: "warn", Text: i18n.T("automations.sch.gatesUnsupported")})
 	}
-	return b.String()
+	return out
 }
 
-// asAutoSelect picks the automation this schedule re-runs. The options closure is pure - it
-// closes over the snapshot taken when the form opened.
-func asAutoSelect(s *asSt) string {
+// asAutoSelectState registers + resolves the picker for the automation this schedule re-runs. The
+// options closure is pure - it closes over the snapshot taken when the form opened.
+func asAutoSelectState(s *asSt) selState {
 	autos := s.autos
-	return smartSelect("auto-sch-auto", i18n.T("automations.sch.automation"), "auto-sch:auto", s.autoID, func() []ssOpt {
+	sel := resolveSmartSelect("auto-sch-auto", "auto-sch:auto", s.autoID, func() []ssOpt {
 		out := make([]ssOpt, 0, len(autos))
 		for _, a := range autos {
 			o := ssOpt{Val: a.id, Label: a.label}
@@ -512,43 +536,50 @@ func asAutoSelect(s *asSt) string {
 		}
 		return out
 	})
+	sel.Label = i18n.T("automations.sch.automation")
+	return sel
 }
 
-// asKindSelect picks the trigger. Each row carries a one-line description of when it fires;
-// smartSelectRaw (not smartSelect) so the full topic tooltip can sit beside the label.
-func asKindSelect(s *asSt) string {
-	lbl := `<span class=ss-label>` + html.EscapeString(i18n.T("automations.sch.kind")) + tipTopic("auto-sch-kind") + `</span>`
-	return smartSelectRaw("auto-sch-kind", lbl, "auto-sch:kind", string(s.kind), func() []ssOpt {
+// asKindSelectBlock registers + resolves the trigger picker. Each row carries a one-line
+// description of when it fires; the label is PRE-RENDERED (selraw, not select) so the full topic
+// tooltip can sit beside the label text - exactly what smartSelectRaw emitted.
+func asKindSelectBlock(s *asSt) aeBlockSt {
+	sel := resolveSmartSelect("auto-sch-kind", "auto-sch:kind", string(s.kind), func() []ssOpt {
 		out := make([]ssOpt, 0, len(asKinds))
 		for _, k := range asKinds {
 			out = append(out, ssOpt{Val: string(k), Label: asKindLabel(k), Sub: asKindDesc(k)})
 		}
 		return out
 	})
+	lbl := `<span class=ss-label>` + html.EscapeString(i18n.T("automations.sch.kind")) + tipTopic("auto-sch-kind") + `</span>`
+	return aeBlockSt{Kind: aeBlkSelRaw, Sel: sel, LabelHTML: lbl}
 }
 
-// asClockSelect renders one hour/minute picker - two of these stand in for a native time input,
-// over the only legal values, so 25:99 is unrepresentable. The options closure is pure formatting.
-func asClockSelect(id, label, act string, cur, hi int) string {
-	return smartSelect(id, label, act, strconv.Itoa(cur), func() []ssOpt {
+// asClockSelectState registers + resolves one hour/minute picker - two of these stand in for a
+// native time input, over the only legal values, so 25:99 is unrepresentable. The options closure
+// is pure formatting.
+func asClockSelectState(id, label, act string, cur, hi int) selState {
+	sel := resolveSmartSelect(id, act, strconv.Itoa(cur), func() []ssOpt {
 		out := make([]ssOpt, 0, hi+1)
 		for n := 0; n <= hi; n++ {
 			out = append(out, ssOpt{Val: strconv.Itoa(n), Label: fmt.Sprintf("%02d", n)})
 		}
 		return out
 	})
+	sel.Label = label
+	return sel
 }
 
-// asCronVerdict renders the engine parser's own verdict as the expression is typed - the same
+// asCronVerdictBlock resolves the engine parser's own verdict as the expression is typed - the same
 // ValidateCron asBuild refuses on, so a typo can't first surface as a failed save.
-func asCronVerdict(expr string) string {
+func asCronVerdictBlock(expr string) aeBlockSt {
 	if strings.TrimSpace(expr) == "" {
-		return hint("warn", i18n.T("automations.sch.cronEmpty"))
+		return aeBlockSt{Kind: aeBlkHint, Tone: "warn", Text: i18n.T("automations.sch.cronEmpty")}
 	}
 	if err := automation.ValidateCron(expr); err != nil {
-		return hint("bad", err.Error())
+		return aeBlockSt{Kind: aeBlkHint, Tone: "bad", Text: err.Error()}
 	}
-	return hint("ok", i18n.T("automations.sch.cronOK"))
+	return aeBlockSt{Kind: aeBlkHint, Tone: "ok", Text: i18n.T("automations.sch.cronOK")}
 }
 
 // ── helpers ──
