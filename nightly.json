@@ -1,13 +1,13 @@
 {
-  "version": "nightly-badbeb2",
-  "build": 138,
-  "commit": "badbeb2",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-138-20260725-badbeb2.exe",
-  "sha256": "fac6c300d88ced7475fb3f0aae6b9dc572c8587cfe5b8389d404e51a0b60d592",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-138-20260725-badbeb2.exe",
-  "installer_sha256": "0a3e6d0e76074406632c7d0bac52b4dd2d979ffa5cdea8ab2ba1c0c6e07d76ba",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-138-20260725-badbeb2",
-  "linux_sha256": "0a53053b0fc18ee22fcfff4f152b5f4c9a3cab0c0a02dba932e3d4555f84d94c",
+  "version": "nightly-47ba7ea",
+  "build": 139,
+  "commit": "47ba7ea",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-139-20260725-47ba7ea.exe",
+  "sha256": "9000f927ea644e229d6b5196e08d5a7105d4edd1bb32cccf7854f675b0697ea2",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-139-20260725-47ba7ea.exe",
+  "installer_sha256": "dc9ceaddfd1789beaad10483933cd7146b8de46852fe57f5ceeb96ddcf73a9fd",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-139-20260725-47ba7ea",
+  "linux_sha256": "ecae6cddddaf9c3e88243496d4c6316508e8a9bba5f5a0a79ea3176db8e1e52e",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T13:17:54Z",
-  "notes": "Merge feature/zig-ui-media: automations + overlays + twitch + editor tabs Zig render (byte-identical)"
+  "released": "2026-07-25T14:12:52Z",
+  "notes": "Merge feature/zig-ui-library: library tab Zig render (tri-pane, byte-identical)"
 }
