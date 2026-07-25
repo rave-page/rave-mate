@@ -29,7 +29,8 @@ const d = @import("library_detail.zig");
 pub const MirrorBanner = struct {
     status: []const u8 = "",
     title: []const u8 = "",
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy raw (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     hasNote: bool = false,
     note: []const u8 = "",
     isErr: bool = false,
@@ -61,7 +62,7 @@ pub fn renderMirrorBanner(h: *Html, st: MirrorBanner) !void {
     try h.raw("\"><span class=rmirror-dot></span><span class=rmirror-title>");
     try h.esc(st.title);
     try h.raw("</span>");
-    try h.raw(st.tip);
+    try c.tipOr(h, st.tipSt, st.tip);
     if (st.hasNote) {
         try h.raw("<span class=rmirror-note>");
         try h.esc(st.note);

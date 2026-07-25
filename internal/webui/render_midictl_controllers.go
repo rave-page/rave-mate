@@ -95,23 +95,24 @@ type midiChipState struct {
 
 // midiDrvThru is the driver-managed routing block of one controller.
 type midiDrvThru struct {
-	Show      bool            `json:"show"`
-	UseInDJ   string          `json:"useInDj"`
-	Port      string          `json:"port"` // DJ-facing port name
-	CloneLbl  string          `json:"cloneLbl"`
-	CloneDL   string          `json:"cloneDl"`
-	CloneAct  string          `json:"cloneAct"`
-	CloneOn   bool            `json:"cloneOn"`
-	CloneNote string          `json:"cloneNote"`
-	DrvNote   string          `json:"drvNote"`
-	HasState  bool            `json:"hasState"`
-	StVariant string          `json:"stVariant"`
-	StLabel   string          `json:"stLabel"`
-	StLabelDL string          `json:"stLabelDl"`
-	StLine    string          `json:"stLine"`
-	FilterLbl string          `json:"filterLbl"`
-	FilterTip string          `json:"filterTip"` // pre-rendered tooltip HTML
-	Chips     []midiChipState `json:"chips"`
+	Show       bool            `json:"show"`
+	UseInDJ    string          `json:"useInDj"`
+	Port       string          `json:"port"` // DJ-facing port name
+	CloneLbl   string          `json:"cloneLbl"`
+	CloneDL    string          `json:"cloneDl"`
+	CloneAct   string          `json:"cloneAct"`
+	CloneOn    bool            `json:"cloneOn"`
+	CloneNote  string          `json:"cloneNote"`
+	DrvNote    string          `json:"drvNote"`
+	HasState   bool            `json:"hasState"`
+	StVariant  string          `json:"stVariant"`
+	StLabel    string          `json:"stLabel"`
+	StLabelDL  string          `json:"stLabelDl"`
+	StLine     string          `json:"stLine"`
+	FilterLbl  string          `json:"filterLbl"`
+	FilterTip  string          `json:"filterTip"`             // legacy RAW tooltip markup (bridge)
+	FilterTipS *tipSt          `json:"filterTipSt,omitempty"` // structured tooltip - wins over FilterTip
+	Chips      []midiChipState `json:"chips"`
 }
 
 // midiWarnState is a warn statusRow + explanation note (THRU port clash).
@@ -141,7 +142,8 @@ type midiLearnRow struct {
 // midiLearnGridState is the controls×channels learn grid.
 type midiLearnGridState struct {
 	Hdr     string         `json:"hdr"`
-	HdrTip  string         `json:"hdrTip"` // pre-rendered tooltip HTML
+	HdrTip  string         `json:"hdrTip"`             // legacy RAW tooltip markup (bridge)
+	HdrTipS *tipSt         `json:"hdrTipSt,omitempty"` // structured tooltip - wins over HdrTip
 	Cols    string         `json:"cols"`
 	ChHdrs  []string       `json:"chHdrs"`
 	Rows    []midiLearnRow `json:"rows"`
@@ -156,14 +158,16 @@ type midiCtlBlock struct {
 	Title     string             `json:"title"`
 	StatID    string             `json:"statId"` // midi-ctlstat-<i> (tick patch target)
 	Port      selState           `json:"port"`
-	PortLbl   string             `json:"portLbl"` // pre-rendered ss-label (label + tooltip)
+	PortLbl   string             `json:"portLbl"`             // legacy pre-rendered ss-label (bridge)
+	PortLblS  *ssLabelSt         `json:"portLblSt,omitempty"` // structured ss-label - wins over PortLbl
 	Stat      midiPortStat       `json:"stat"`
 	EnableLbl string             `json:"enableLbl"`
 	EnableDL  string             `json:"enableDl"`
 	EnableAct string             `json:"enableAct"`
 	EnableOn  bool               `json:"enableOn"`
 	Thru      selState           `json:"thru"`
-	ThruLbl   string             `json:"thruLbl"`
+	ThruLbl   string             `json:"thruLbl"`             // legacy pre-rendered ss-label (bridge)
+	ThruLblS  *ssLabelSt         `json:"thruLblSt,omitempty"` // structured ss-label - wins over ThruLbl
 	DrvThru   midiDrvThru        `json:"drvThru"`
 	Warn      midiWarnState      `json:"warn"`
 	Remove    string             `json:"remove"`
@@ -173,31 +177,32 @@ type midiCtlBlock struct {
 
 // midiCtlsState is the resolved render state for the controllers card.
 type midiCtlsState struct {
-	Show     bool            `json:"show"` // MIDISource + Cfg wired
-	Card     string          `json:"card"`
-	Badge    string          `json:"badge"`
-	Intro    string          `json:"intro"`
-	IntroTip string          `json:"introTip"` // pre-rendered tooltip HTML
-	LinksLbl string          `json:"linksLbl"`
-	Links    []midiLinkState `json:"links"`
-	Empty    string          `json:"empty"`
-	Blocks   []midiCtlBlock  `json:"blocks"`
-	Add      string          `json:"add"`
+	Show      bool            `json:"show"` // MIDISource + Cfg wired
+	Card      string          `json:"card"`
+	Badge     string          `json:"badge"`
+	Intro     string          `json:"intro"`
+	IntroTip  string          `json:"introTip"`             // legacy RAW tooltip markup (bridge)
+	IntroTipS *tipSt          `json:"introTipSt,omitempty"` // structured tooltip - wins over IntroTip
+	LinksLbl  string          `json:"linksLbl"`
+	Links     []midiLinkState `json:"links"`
+	Empty     string          `json:"empty"`
+	Blocks    []midiCtlBlock  `json:"blocks"`
+	Add       string          `json:"add"`
 }
 
 // midiCtlsState resolves config + probe + i18n into the controllers-card render state.
 func (u *UI) midiCtlsState(ctx midiCtlRenderCtx) midiCtlsState {
 	st := midiCtlsState{
-		Show:     u.svc.MIDISource != nil && u.svc.Cfg != nil,
-		Card:     i18n.T("midictl.in.card"),
-		Badge:    i18n.T("midictl.in.badge"),
-		Intro:    i18n.T("midictl.in.intro"),
-		IntroTip: tipTopic("midi-learn-controllers"),
-		LinksLbl: i18n.T("midictl.in.getPort"),
-		Links:    []midiLinkState{},
-		Empty:    i18n.T("midictl.in.empty"),
-		Blocks:   []midiCtlBlock{},
-		Add:      i18n.T("midictl.in.add"),
+		Show:      u.svc.MIDISource != nil && u.svc.Cfg != nil,
+		Card:      i18n.T("midictl.in.card"),
+		Badge:     i18n.T("midictl.in.badge"),
+		Intro:     i18n.T("midictl.in.intro"),
+		IntroTipS: tipTopicSt("midi-learn-controllers"),
+		LinksLbl:  i18n.T("midictl.in.getPort"),
+		Links:     []midiLinkState{},
+		Empty:     i18n.T("midictl.in.empty"),
+		Blocks:    []midiCtlBlock{},
+		Add:       i18n.T("midictl.in.add"),
 	}
 	if !st.Show {
 		return st
@@ -218,7 +223,7 @@ func midiCtlsHTML(st midiCtlsState) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`<p class=midi-help-note>` + htmlEscape(st.Intro) + ` ` + st.IntroTip + `</p>`)
+	b.WriteString(`<p class=midi-help-note>` + htmlEscape(st.Intro) + ` ` + tipOr(st.IntroTipS, st.IntroTip) + `</p>`)
 	b.WriteString(midiLinksHTML(st.LinksLbl, st.Links))
 	if len(st.Blocks) == 0 {
 		b.WriteString(emptyState(st.Empty))
@@ -305,11 +310,11 @@ func (u *UI) midiCtlBlockState(i int, c config.MIDIControllerMap, ctx midiCtlRen
 	enLbl := i18n.T("midictl.in.enabled")
 	return midiCtlBlock{
 		Tid: "midi-ctl-" + idx, Title: title, StatID: "midi-ctlstat-" + idx,
-		Port: portSel, PortLbl: portLbl,
+		Port: portSel, PortLblS: &portLbl,
 		Stat:      u.midiPortStatState(c, ctx),
 		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl),
 		EnableAct: "midi-ctl-enable:" + idx, EnableOn: c.Enabled,
-		Thru: thruSel, ThruLbl: thruLbl,
+		Thru: thruSel, ThruLblS: &thruLbl,
 		DrvThru:   u.midiDrvThruState(i, c, ctx),
 		Warn:      u.midiThruWarnState(i, c),
 		Remove:    i18n.T("midictl.in.remove"),
@@ -320,10 +325,10 @@ func (u *UI) midiCtlBlockState(i int, c config.MIDIControllerMap, ctx midiCtlRen
 
 // midiCtlBlockHTML is the pure one-controller renderer.
 func midiCtlBlockHTML(c midiCtlBlock) string {
-	head := selHTMLRaw(c.Port, c.PortLbl) +
+	head := ssSelHTML(c.Port, c.PortLblS, c.PortLbl) +
 		`<div id="` + c.StatID + `">` + midiPortStatHTML(c.Stat) + `</div>` +
 		toggleRowDL(c.EnableLbl, c.EnableDL, c.EnableAct, c.EnableOn) +
-		selHTMLRaw(c.Thru, c.ThruLbl) +
+		ssSelHTML(c.Thru, c.ThruLblS, c.ThruLbl) +
 		midiDrvThruHTML(c.DrvThru) +
 		midiWarnHTML(c.Warn) +
 		btnRow(btn(c.Remove, "warn", c.RemoveAct, ""))
@@ -351,11 +356,11 @@ func (u *UI) midiDrvThruState(i int, c config.MIDIControllerMap, ctx midiCtlRend
 		// mappings (Serato) match. Off = a distinct "<Name> THRU" port. Explained inline (the "why").
 		CloneLbl: cloneLbl, CloneDL: strings.ToLower(cloneLbl),
 		CloneAct: "midi-ctl-clone:" + idx, CloneOn: !c.ThruDistinctName,
-		CloneNote: i18n.T("midictl.in.cloneNote"),
-		DrvNote:   i18n.T("midictl.in.driverNote"),
-		FilterLbl: i18n.T("midictl.in.filterLbl"),
-		FilterTip: tipTopic("midi-drv-filter"),
-		Chips:     []midiChipState{},
+		CloneNote:  i18n.T("midictl.in.cloneNote"),
+		DrvNote:    i18n.T("midictl.in.driverNote"),
+		FilterLbl:  i18n.T("midictl.in.filterLbl"),
+		FilterTipS: tipTopicSt("midi-drv-filter"),
+		Chips:      []midiChipState{},
 	}
 	drvLbl := i18n.T("midictl.in.driverState")
 	if ds, ok := ctx.drv[c.Name]; ok {
@@ -406,7 +411,7 @@ func midiDrvThruHTML(st midiDrvThru) string {
 		b.WriteString(statusRowDL(st.StVariant, st.StLabel, st.StLabelDL, st.StLine))
 	}
 	b.WriteString(`<div class=midi-drvfilters><span class=midi-steplbl>` +
-		htmlEscape(st.FilterLbl) + ` ` + st.FilterTip + `</span>`)
+		htmlEscape(st.FilterLbl) + ` ` + tipOr(st.FilterTipS, st.FilterTip) + `</span>`)
 	for _, ch := range st.Chips {
 		b.WriteString(fchip(ch.Label, "", ch.Act, ch.Active))
 	}
@@ -558,7 +563,7 @@ func midiWarnHTML(st midiWarnState) string {
 func (u *UI) midiLearnGridState(ctlIdx int, c config.MIDIControllerMap) midiLearnGridState {
 	n := u.midiChannels()
 	st := midiLearnGridState{
-		Hdr: i18n.T("midictl.in.learnHdr"), HdrTip: tipTopic("midi-learn-grid"),
+		Hdr: i18n.T("midictl.in.learnHdr"), HdrTipS: tipTopicSt("midi-learn-grid"),
 		Cols: strconv.Itoa(n), ChHdrs: []string{}, Rows: []midiLearnRow{},
 		Learn: i18n.T("midictl.in.learn"), Relearn: i18n.T("midictl.in.relearn"), Clear: i18n.T("midictl.in.clear"),
 	}
@@ -586,7 +591,7 @@ func (u *UI) midiLearnGridState(ctlIdx int, c config.MIDIControllerMap) midiLear
 // midiLearnGridHTML is the pure learn-grid renderer.
 func midiLearnGridHTML(st midiLearnGridState) string {
 	var b strings.Builder
-	b.WriteString(`<div class=midi-learnhdr>` + htmlEscape(st.Hdr) + ` ` + st.HdrTip + `</div>`)
+	b.WriteString(`<div class=midi-learnhdr>` + htmlEscape(st.Hdr) + ` ` + tipOr(st.HdrTipS, st.HdrTip) + `</div>`)
 	b.WriteString(`<div class=midi-learngrid style="--cols:` + st.Cols + `">`)
 	b.WriteString(`<div class=mlg-h></div>`)
 	for _, h := range st.ChHdrs {
@@ -635,20 +640,24 @@ func bindingReadout(b config.MIDIBinding) string {
 
 // midiBridgeState is the resolved render state for the two-port DJ bridge card.
 type midiBridgeState struct {
-	Show      bool     `json:"show"`
-	Card      string   `json:"card"`
-	Badge     string   `json:"badge"`
-	Intro     string   `json:"intro"`
-	IntroTip  string   `json:"introTip"` // pre-rendered tooltip HTML
-	EnableLbl string   `json:"enableLbl"`
-	EnableDL  string   `json:"enableDl"`
-	EnableAct string   `json:"enableAct"`
-	EnableOn  bool     `json:"enableOn"`
-	EnableTip string   `json:"enableTip"`
-	ToDJ      selState `json:"toDj"`
-	ToDJLbl   string   `json:"toDjLbl"`
-	FromDJ    selState `json:"fromDj"`
-	FromDJLbl string   `json:"fromDjLbl"`
+	Show       bool       `json:"show"`
+	Card       string     `json:"card"`
+	Badge      string     `json:"badge"`
+	Intro      string     `json:"intro"`
+	IntroTip   string     `json:"introTip"`             // legacy RAW tooltip markup (bridge)
+	IntroTipS  *tipSt     `json:"introTipSt,omitempty"` // structured tooltip - wins over IntroTip
+	EnableLbl  string     `json:"enableLbl"`
+	EnableDL   string     `json:"enableDl"`
+	EnableAct  string     `json:"enableAct"`
+	EnableOn   bool       `json:"enableOn"`
+	EnableTip  string     `json:"enableTip"`             // legacy RAW tooltip markup (bridge)
+	EnableTipS *tipSt     `json:"enableTipSt,omitempty"` // structured tooltip - wins over EnableTip
+	ToDJ       selState   `json:"toDj"`
+	ToDJLbl    string     `json:"toDjLbl"`             // legacy pre-rendered ss-label (bridge)
+	ToDJLblS   *ssLabelSt `json:"toDjLblSt,omitempty"` // structured ss-label - wins over ToDJLbl
+	FromDJ     selState   `json:"fromDj"`
+	FromDJLbl  string     `json:"fromDjLbl"`
+	FromDJLblS *ssLabelSt `json:"fromDjLblSt,omitempty"`
 }
 
 // midiBridgeState resolves the two-port loopMIDI DJ router (peer control → DJ; DJ output → us).
@@ -676,10 +685,10 @@ func (u *UI) midiBridgeState(ctx midiCtlRenderCtx) midiBridgeState {
 	fromSel, fromLbl := resolveSelectBoxTip(i18n.T("midictl.bridge.fromdj"), "midi-bridge-fromdj", inOpts, br.FromDJPort, "midi-bridge")
 	return midiBridgeState{
 		Show: true, Card: i18n.T("midictl.bridge.card"), Badge: i18n.T("midictl.bridge.badge"),
-		Intro: i18n.T("midictl.bridge.intro"), IntroTip: tipTopic("midi-bridge"),
+		Intro: i18n.T("midictl.bridge.intro"), IntroTipS: tipTopicSt("midi-bridge"),
 		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl), EnableAct: "midi-bridge-enable",
-		EnableOn: br.Enabled, EnableTip: tipTopic("midi-bridge"),
-		ToDJ: toSel, ToDJLbl: toLbl, FromDJ: fromSel, FromDJLbl: fromLbl,
+		EnableOn: br.Enabled, EnableTipS: tipTopicSt("midi-bridge"),
+		ToDJ: toSel, ToDJLblS: &toLbl, FromDJ: fromSel, FromDJLblS: &fromLbl,
 	}
 }
 
@@ -688,9 +697,9 @@ func midiBridgeHTML(st midiBridgeState) string {
 	if !st.Show {
 		return ""
 	}
-	body := `<p class=midi-help-note>` + htmlEscape(st.Intro) + ` ` + st.IntroTip + `</p>` +
-		toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, st.EnableTip) +
-		selHTMLRaw(st.ToDJ, st.ToDJLbl) +
-		selHTMLRaw(st.FromDJ, st.FromDJLbl)
+	body := `<p class=midi-help-note>` + htmlEscape(st.Intro) + ` ` + tipOr(st.IntroTipS, st.IntroTip) + `</p>` +
+		toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, tipOr(st.EnableTipS, st.EnableTip)) +
+		ssSelHTML(st.ToDJ, st.ToDJLblS, st.ToDJLbl) +
+		ssSelHTML(st.FromDJ, st.FromDJLblS, st.FromDJLbl)
 	return card(st.Card, badge(st.Badge, "info"), body)
 }

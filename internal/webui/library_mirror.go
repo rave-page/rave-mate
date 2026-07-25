@@ -82,7 +82,8 @@ type libMirrorSt struct {
 type libMirrorBanSt struct {
 	Status    string `json:"status"` // connecting|live|error|closed - spliced into the class UNESCAPED (const)
 	Title     string `json:"title"`
-	Tip       string `json:"tip"` // raw tipTopic("remote-library") markup
+	Tip       string `json:"tip"`             // legacy RAW tooltip markup (bridge)
+	TipS      *tipSt `json:"tipSt,omitempty"` // structured tipTopic("remote-library")
 	HasNote   bool   `json:"hasNote,omitempty"`
 	Note      string `json:"note,omitempty"`
 	IsErr     bool   `json:"isErr,omitempty"`
@@ -176,7 +177,7 @@ func (u *UI) mirrorBannerState() libMirrorBanSt {
 	b := libMirrorBanSt{
 		Status: status,
 		Title:  i18n.T("library.mirror.banner", i18n.A{"name": name}),
-		Tip:    tipTopic("remote-library"),
+		TipS:   tipTopicSt("remote-library"),
 	}
 	switch status {
 	case mirrorConnecting:
@@ -199,7 +200,7 @@ func mirrorBannerHTMLOf(st libMirrorBanSt) string {
 	b.WriteString(`<div class="rmirror-bar rmirror-` + st.Status + `">`)
 	b.WriteString(`<span class=rmirror-dot></span><span class=rmirror-title>` +
 		html.EscapeString(st.Title) + `</span>`)
-	b.WriteString(st.Tip)
+	b.WriteString(tipOr(st.TipS, st.Tip))
 	if st.HasNote {
 		b.WriteString(`<span class=rmirror-note>` + html.EscapeString(st.Note) + `</span>`)
 	}

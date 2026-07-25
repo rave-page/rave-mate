@@ -152,8 +152,9 @@ type vgPostRowSt struct {
 
 // vgPostsSt is the posts view (announcement + composer forms + post feed).
 type vgPostsSt struct {
-	AnnTitle     string        `json:"annTitle"` // "Current announcement"
-	AnnTip       string        `json:"annTip"`   // pre-rendered tooltip HTML (trusted)
+	AnnTitle     string        `json:"annTitle"`           // "Current announcement"
+	AnnTip       string        `json:"annTip"`             // legacy RAW tooltip markup (bridge)
+	AnnTipS      *tipSt        `json:"annTipSt,omitempty"` // structured tooltip - wins over AnnTip
 	HasAnn       bool          `json:"hasAnn"`
 	AnnHead      string        `json:"annHead"`
 	AnnWhen      string        `json:"annWhen"`
@@ -613,7 +614,7 @@ func (u *UI) vgPostsState() vgPostsSt {
 	vgState.mu.Unlock()
 
 	ps := vgPostsSt{
-		AnnTitle: "Current announcement", AnnTip: tipTopic("vrchat-announcement"),
+		AnnTitle: "Current announcement", AnnTipS: tipTopicSt("vrchat-announcement"),
 		AnnEmptyMsg: "No announcement set.",
 		CanAnn:      canAnn,
 		NewAnnTitle: "New announcement", NewPostTitle: "New post",
@@ -892,9 +893,9 @@ func vgPostsHTML(ps vgPostsSt) string {
 		cur := `<div class=vrcg-post><div class=vrcg-mname><b>` + html.EscapeString(ps.AnnHead) + `</b></div>` +
 			`<div class=vrcg-mmeta>` + html.EscapeString(ps.AnnWhen) + `</div>` +
 			`<div class=vrcg-post-text>` + html.EscapeString(ps.AnnText) + `</div></div>`
-		b.WriteString(card(ps.AnnTitle, ps.AnnTip, cur))
+		b.WriteString(card(ps.AnnTitle, tipOr(ps.AnnTipS, ps.AnnTip), cur))
 	} else if ps.AnnEmpty {
-		b.WriteString(card(ps.AnnTitle, ps.AnnTip, emptyState(ps.AnnEmptyMsg)))
+		b.WriteString(card(ps.AnnTitle, tipOr(ps.AnnTipS, ps.AnnTip), emptyState(ps.AnnEmptyMsg)))
 	}
 
 	if ps.CanAnn {

@@ -240,8 +240,8 @@ func arModalState(s *arSt) arModalSt {
 		Watch:        newKV(i18n.T("automations.ed.watchDir"), s.watch),
 		Chain:        newKV(i18n.T("automations.run.chain"), autoChainSummary(s.acts)),
 		IgnoresMatch: i18n.T("automations.run.ignoresMatch"),
-		File: newDlgField(i18n.T("automations.run.file"), "auto-run-file", s.file, "text",
-			i18n.T("automations.run.filePH"), tipTopic("auto-run-now")),
+		File: newDlgFieldSt(i18n.T("automations.run.file"), "auto-run-file", s.file, "text",
+			i18n.T("automations.run.filePH"), tipTopicSt("auto-run-now")),
 		Browse: uiBtn{Label: i18n.T("common.browse"), Variant: "ghost", Act: "pick-file:auto-run-file"},
 		Erases: autoChainDeletes(s.acts),
 	}
@@ -251,7 +251,7 @@ func arModalState(s *arSt) arModalSt {
 	if st.Erases {
 		st.DeleteWarn = i18n.T("automations.run.deleteWarn")
 		st.DeleteScope = i18n.T("automations.run.deleteScope")
-		st.DeleteTip = tipTopic("auto-delete-action")
+		st.DeleteTipS = tipTopicSt("auto-delete-action")
 		st.Ack = newToggle(i18n.T("automations.run.ack"), "auto-run-ack", s.ack)
 	}
 	st.Foot = arFooterState(s, st.Erases)

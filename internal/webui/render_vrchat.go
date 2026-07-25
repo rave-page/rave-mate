@@ -54,7 +54,8 @@ type vrcPresetSelSt struct {
 // vrcEditorSt is the status & bio editor (#vrc-editor).
 type vrcEditorSt struct {
 	StatusTitle    string         `json:"statusTitle"`
-	StatusTip      string         `json:"statusTip"` // pre-rendered tooltip HTML (trusted)
+	StatusTip      string         `json:"statusTip"`             // legacy RAW tooltip markup (bridge)
+	StatusTipS     *tipSt         `json:"statusTipSt,omitempty"` // structured tooltip - wins over StatusTip
 	PresenceLabel  string         `json:"presenceLabel"`
 	Presence       []vrcOptSt     `json:"presence,omitempty"` // [0] = placeholder option
 	StatusMsgLabel string         `json:"statusMsgLabel"`
@@ -334,7 +335,7 @@ func (u *UI) vrcEditorState() vrcEditorSt {
 
 	presence := vrcPresenceOpts(status)
 	return vrcEditorSt{
-		StatusTitle: i18n.T("vrchat.card.status"), StatusTip: tipTopic("vrchat-presence"),
+		StatusTitle: i18n.T("vrchat.card.status"), StatusTipS: tipTopicSt("vrchat-presence"),
 		PresenceLabel: i18n.T("vrchat.field.presence"), Presence: presence,
 		StatusMsgLabel: i18n.T("vrchat.field.statusMessage"),
 		DescCls:        descCls, DescCount: fmt.Sprintf("%d / %d", descN, vrchat.MaxStatusDescription),
@@ -521,7 +522,7 @@ func vrcEditorRenderHTML(st vrcEditorSt) string {
 	var b strings.Builder
 
 	// Status card.
-	b.WriteString(`<div class="rp-card vrc-card"><div class=vrc-h>` + html.EscapeString(st.StatusTitle) + st.StatusTip + `</div>`)
+	b.WriteString(`<div class="rp-card vrc-card"><div class=vrc-h>` + html.EscapeString(st.StatusTitle) + tipOr(st.StatusTipS, st.StatusTip) + `</div>`)
 	b.WriteString(`<form data-act=vrc-status>`)
 	b.WriteString(`<label class=field><span class=field-label>` + html.EscapeString(st.PresenceLabel) + `</span>` +
 		`<select class="field-input select-input" name=status>` + vrcOptionsHTML(st.Presence) + `</select></label>`)

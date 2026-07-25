@@ -55,7 +55,8 @@ pub const Topbar = struct {
     verifiedLbl: []const u8 = "",
     verifyTip: []const u8 = "",
     verifyLbl: []const u8 = "",
-    tip: []const u8 = "",
+    tip: []const u8 = "", // legacy raw (bridge)
+    tipSt: ?c.Tip = null, // structured tooltip — wins over tip
     close: c.Btn = .{},
 };
 
@@ -226,7 +227,7 @@ pub fn renderTopbar(h: *Html, st: Topbar) !void {
         try h.raw("</span>");
     }
     try h.raw("<span class=ce-tb-spacer></span>");
-    try h.raw(st.tip);
+    try c.tipOr(h, st.tipSt, st.tip);
     try c.btnOf(h, st.close);
     try h.raw("</div>");
 }

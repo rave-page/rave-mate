@@ -167,7 +167,8 @@ type liveState struct {
 	Decks        liveDecksSt     `json:"decks"`
 	HasSignals   bool            `json:"hasSignals"`
 	SignalsTitle string          `json:"signalsTitle"`
-	SignalsTip   string          `json:"signalsTip"` // raw tipTopic
+	SignalsTip   string          `json:"signalsTip"`             // legacy RAW tooltip markup (bridge)
+	SignalsTipS  *tipSt          `json:"signalsTipSt,omitempty"` // structured tooltip - wins over SignalsTip
 	Signals      liveSignalsSt   `json:"signals"`
 	HasCockpit   bool            `json:"hasCockpit"`
 	CockpitTitle string          `json:"cockpitTitle"`
@@ -177,14 +178,17 @@ type liveState struct {
 	Link         liveLinkSt      `json:"link"`
 	HasNet       bool            `json:"hasNet"`
 	NetTitle     string          `json:"netTitle"`
-	NetTip       string          `json:"netTip"`
+	NetTip       string          `json:"netTip"`             // legacy RAW tooltip markup (bridge)
+	NetTipS      *tipSt          `json:"netTipSt,omitempty"` // structured tooltip - wins over NetTip
 	Net          liveGraphSt     `json:"net"`
 	TimTitle     string          `json:"timTitle"`
-	TimTip       string          `json:"timTip"`
+	TimTip       string          `json:"timTip"`             // legacy RAW tooltip markup (bridge)
+	TimTipS      *tipSt          `json:"timTipSt,omitempty"` // structured tooltip - wins over TimTip
 	Tim          liveGraphSt     `json:"tim"`
 	HasPerf      bool            `json:"hasPerf"`
 	PerfTitle    string          `json:"perfTitle"`
-	PerfTip      string          `json:"perfTip"`
+	PerfTip      string          `json:"perfTip"`             // legacy RAW tooltip markup (bridge)
+	PerfTipS     *tipSt          `json:"perfTipSt,omitempty"` // structured tooltip - wins over PerfTip
 	Perf         livePerfSt      `json:"perf"`
 	Strip        liveStripSt     `json:"strip"`
 }
@@ -202,7 +206,7 @@ func (u *UI) liveState() liveState {
 		Strip:   u.liveStripState(),
 	}
 	if u.svc.Session != nil {
-		st.HasSignals, st.SignalsTitle, st.SignalsTip = true, i18n.T("live.signals.title"), tipTopic("signal-sources")
+		st.HasSignals, st.SignalsTitle, st.SignalsTipS = true, i18n.T("live.signals.title"), tipTopicSt("signal-sources")
 		st.Signals = u.liveSignalsState()
 	}
 	if u.svc.OBSControl != nil {
@@ -216,11 +220,11 @@ func (u *UI) liveState() liveState {
 	// tips live on the STATIC section titles - the well contents tick at 1 Hz.
 	if u.svc.NetStats != nil {
 		st.HasNet = true
-		st.NetTitle, st.NetTip, st.Net = i18n.T("live.network.title"), tipTopic("network-graph"), u.liveNetState()
-		st.TimTitle, st.TimTip, st.Tim = i18n.T("live.timing.title"), tipTopic("timing-graph"), u.liveTimState()
+		st.NetTitle, st.NetTipS, st.Net = i18n.T("live.network.title"), tipTopicSt("network-graph"), u.liveNetState()
+		st.TimTitle, st.TimTipS, st.Tim = i18n.T("live.timing.title"), tipTopicSt("timing-graph"), u.liveTimState()
 	}
 	if u.svc.Perf != nil {
-		st.HasPerf, st.PerfTitle, st.PerfTip = true, i18n.T("live.sysperf.title"), tipTopic("perf-graph")
+		st.HasPerf, st.PerfTitle, st.PerfTipS = true, i18n.T("live.sysperf.title"), tipTopicSt("perf-graph")
 		st.Perf = u.livePerfState()
 	}
 	return st
@@ -248,7 +252,7 @@ func liveHTML(st liveState) string {
 	b.WriteString(section(st.StatusTitle, `<div id=live-status>`+liveStatusFragHTML(st.Status)+`</div>`))
 	b.WriteString(section(st.DecksTitle, `<div id=live-decks>`+liveDecksFragHTML(st.Decks)+`</div>`))
 	if st.HasSignals {
-		b.WriteString(sectionTip(st.SignalsTitle, st.SignalsTip, `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
+		b.WriteString(sectionTip(st.SignalsTitle, tipOr(st.SignalsTipS, st.SignalsTip), `<div id=live-signals>`+liveSignalsFragHTML(st.Signals)+`</div>`))
 	}
 	if st.HasCockpit {
 		b.WriteString(section(st.CockpitTitle, `<div id=live-cockpit>`+liveCockpitFragHTML(st.Cockpit)+`</div>`))
@@ -257,11 +261,11 @@ func liveHTML(st liveState) string {
 		b.WriteString(section(st.LinkTitle, `<div id=live-ablelink>`+liveLinkFragHTML(st.Link)+`</div>`))
 	}
 	if st.HasNet {
-		b.WriteString(sectionTip(st.NetTitle, st.NetTip, `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
-		b.WriteString(sectionTip(st.TimTitle, st.TimTip, `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
+		b.WriteString(sectionTip(st.NetTitle, tipOr(st.NetTipS, st.NetTip), `<div id=live-net>`+liveGraphFragHTML(st.Net)+`</div>`))
+		b.WriteString(sectionTip(st.TimTitle, tipOr(st.TimTipS, st.TimTip), `<div id=live-tim>`+liveGraphFragHTML(st.Tim)+`</div>`))
 	}
 	if st.HasPerf {
-		b.WriteString(sectionTip(st.PerfTitle, st.PerfTip, `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
+		b.WriteString(sectionTip(st.PerfTitle, tipOr(st.PerfTipS, st.PerfTip), `<div id=live-perf2>`+livePerfFragHTML(st.Perf)+`</div>`))
 	}
 	b.WriteString(`<div id=live-strip class=livestrip>` + liveStripFragHTML(st.Strip) + `</div>`)
 	return b.String()

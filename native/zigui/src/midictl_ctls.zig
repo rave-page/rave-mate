@@ -1,6 +1,7 @@
 //! MIDI-in controllers card + DJ bridge card — byte-exact ports of
-//! internal/webui/render_midictl_controllers.go (midiCtlsHTML & friends). Tooltips arrive
-//! as pre-rendered HTML (raw): tooltip.go stays the single source for that markup.
+//! internal/webui/render_midictl_controllers.go (midiCtlsHTML & friends). The port/THRU/bridge
+//! ss-labels cross as STRUCTURED state (components.SsLabel) since phase B-1b; the raw strings
+//! stay only as the dual-field bridge.
 
 const std = @import("std");
 const Html = @import("html.zig").Html;
@@ -46,7 +47,8 @@ pub const DrvThru = struct {
     stLabelDl: []const u8 = "",
     stLine: []const u8 = "",
     filterLbl: []const u8 = "",
-    filterTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    filterTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    filterTipSt: ?c.Tip = null, // structured tooltip — wins over filterTip
     chips: []const Chip = &.{},
 };
 
@@ -73,7 +75,8 @@ pub const LearnRow = struct {
 
 pub const LearnGrid = struct {
     hdr: []const u8 = "",
-    hdrTip: []const u8 = "", // pre-rendered tooltip HTML (raw)
+    hdrTip: []const u8 = "", // legacy pre-rendered tooltip markup (bridge)
+    hdrTipSt: ?c.Tip = null, // structured tooltip — wins over hdrTip
     cols: []const u8 = "", // digits only (CSS var) — raw
     chHdrs: []const []const u8 = &.{},
     rows: []const LearnRow = &.{},
@@ -87,14 +90,16 @@ pub const Block = struct {
     title: []const u8 = "",
     statId: []const u8 = "", // midi-ctlstat-<i> (digits/ASCII id) — raw
     port: c.Select = .{},
-    portLbl: []const u8 = "", // pre-rendered ss-label (raw)
+    portLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    portLblSt: ?c.SsLabel = null, // structured ss-label — wins over portLbl
     stat: PortStat = .{},
     enableLbl: []const u8 = "",
     enableDl: []const u8 = "",
     enableAct: []const u8 = "",
     enableOn: bool = false,
     thru: c.Select = .{},
-    thruLbl: []const u8 = "",
+    thruLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    thruLblSt: ?c.SsLabel = null, // structured ss-label — wins over thruLbl
     drvThru: DrvThru = .{},
     warn: Warn = .{},
     remove: []const u8 = "",
@@ -107,7 +112,8 @@ pub const State = struct {
     card: []const u8 = "",
     badge: []const u8 = "",
     intro: []const u8 = "",
-    introTip: []const u8 = "",
+    introTip: []const u8 = "", // legacy raw (bridge)
+    introTipSt: ?c.Tip = null, // structured tooltip — wins over introTip
     linksLbl: []const u8 = "",
     links: []const Link = &.{},
     empty: []const u8 = "",
@@ -124,7 +130,7 @@ pub fn render(h: *Html, s: State) !void {
     try h.raw("<p class=midi-help-note>");
     try h.esc(s.intro);
     try h.raw(" ");
-    try h.raw(s.introTip);
+    try c.tipOr(h, s.introTipSt, s.introTip);
     try h.raw("</p>");
     try renderLinks(h, s.linksLbl, s.links);
     if (s.blocks.len == 0) try c.emptyState(h, s.empty);
@@ -158,14 +164,14 @@ fn renderBlock(h: *Html, b: Block) !void {
     try h.raw("><div class=midi-ctlhead>");
     try h.esc(b.title);
     try h.raw("</div>");
-    try c.selectBoxRaw(h, b.port, b.portLbl);
+    try c.selectBoxTipOr(h, b.port, b.portLblSt, b.portLbl);
     try h.raw("<div id=\"");
     try h.raw(b.statId);
     try h.raw("\">");
     try renderPortStat(h, b.stat);
     try h.raw("</div>");
     try c.toggleRow(h, b.enableLbl, b.enableDl, b.enableAct, b.enableOn);
-    try c.selectBoxRaw(h, b.thru, b.thruLbl);
+    try c.selectBoxTipOr(h, b.thru, b.thruLblSt, b.thruLbl);
     try renderDrvThru(h, b.drvThru);
     try renderWarn(h, b.warn);
     try c.btnRowOpen(h);
@@ -212,7 +218,7 @@ fn renderDrvThru(h: *Html, s: DrvThru) !void {
     try h.raw("<div class=midi-drvfilters><span class=midi-steplbl>");
     try h.esc(s.filterLbl);
     try h.raw(" ");
-    try h.raw(s.filterTip);
+    try c.tipOr(h, s.filterTipSt, s.filterTip);
     try h.raw("</span>");
     for (s.chips) |ch| try c.fchip(h, ch.label, "", ch.act, ch.active);
     try h.raw("</div></div>");
@@ -232,7 +238,7 @@ fn renderGrid(h: *Html, g: LearnGrid) !void {
     try h.raw("<div class=midi-learnhdr>");
     try h.esc(g.hdr);
     try h.raw(" ");
-    try h.raw(g.hdrTip);
+    try c.tipOr(h, g.hdrTipSt, g.hdrTip);
     try h.raw("</div><div class=midi-learngrid style=\"--cols:");
     try h.raw(g.cols);
     try h.raw("\"><div class=mlg-h></div>");
@@ -283,16 +289,20 @@ pub const Bridge = struct {
     card: []const u8 = "",
     badge: []const u8 = "",
     intro: []const u8 = "",
-    introTip: []const u8 = "",
+    introTip: []const u8 = "", // legacy raw (bridge)
+    introTipSt: ?c.Tip = null, // structured tooltip — wins over introTip
     enableLbl: []const u8 = "",
     enableDl: []const u8 = "",
     enableAct: []const u8 = "",
     enableOn: bool = false,
-    enableTip: []const u8 = "",
+    enableTip: []const u8 = "", // legacy raw (bridge)
+    enableTipSt: ?c.Tip = null, // structured tooltip — wins over enableTip
     toDj: c.Select = .{},
-    toDjLbl: []const u8 = "",
+    toDjLbl: []const u8 = "", // legacy pre-rendered ss-label (bridge)
+    toDjLblSt: ?c.SsLabel = null, // structured ss-label — wins over toDjLbl
     fromDj: c.Select = .{},
     fromDjLbl: []const u8 = "",
+    fromDjLblSt: ?c.SsLabel = null,
 };
 
 /// renderBridge mirrors Go midiBridgeHTML.
@@ -304,11 +314,14 @@ pub fn renderBridge(h: *Html, s: Bridge) !void {
     try h.raw("<p class=midi-help-note>");
     try h.esc(s.intro);
     try h.raw(" ");
-    try h.raw(s.introTip);
+    try c.tipOr(h, s.introTipSt, s.introTip);
     try h.raw("</p>");
-    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, s.enableTip);
-    try c.selectBoxRaw(h, s.toDj, s.toDjLbl);
-    try c.selectBoxRaw(h, s.fromDj, s.fromDjLbl);
+    var eb = Html.init(h.a); // toggleRowTip takes the tooltip as a string
+    defer eb.deinit();
+    try c.tipOr(&eb, s.enableTipSt, s.enableTip);
+    try c.toggleRowTip(h, s.enableLbl, s.enableDl, s.enableAct, s.enableOn, eb.b.items);
+    try c.selectBoxTipOr(h, s.toDj, s.toDjLblSt, s.toDjLbl);
+    try c.selectBoxTipOr(h, s.fromDj, s.fromDjLblSt, s.fromDjLbl);
     try c.cardClose(h);
 }
 

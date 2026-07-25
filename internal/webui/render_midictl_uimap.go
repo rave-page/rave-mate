@@ -226,18 +226,20 @@ type umProfileRow struct {
 
 // umState is the resolved render state for the mappings card.
 type umState struct {
-	Show      bool           `json:"show"` // Cfg + MIDILearn wired
-	Title     string         `json:"title"`
-	TitleTip  string         `json:"titleTip"` // pre-rendered tooltip HTML
-	Sub       string         `json:"sub"`
-	EnableLbl string         `json:"enableLbl"`
-	EnableDL  string         `json:"enableDl"`
-	EnableAct string         `json:"enableAct"`
-	EnableOn  bool           `json:"enableOn"`
-	EnableTip string         `json:"enableTip"`
-	Add       umRow          `json:"add"`
-	Profiles  []umProfileRow `json:"profiles"`
-	Note      string         `json:"note"`
+	Show       bool           `json:"show"` // Cfg + MIDILearn wired
+	Title      string         `json:"title"`
+	TitleTip   string         `json:"titleTip"`             // legacy RAW tooltip markup (bridge)
+	TitleTipS  *tipSt         `json:"titleTipSt,omitempty"` // structured tooltip - wins over TitleTip
+	Sub        string         `json:"sub"`
+	EnableLbl  string         `json:"enableLbl"`
+	EnableDL   string         `json:"enableDl"`
+	EnableAct  string         `json:"enableAct"`
+	EnableOn   bool           `json:"enableOn"`
+	EnableTip  string         `json:"enableTip"`             // legacy RAW tooltip markup (bridge)
+	EnableTipS *tipSt         `json:"enableTipSt,omitempty"` // structured tooltip - wins over EnableTip
+	Add        umRow          `json:"add"`
+	Profiles   []umProfileRow `json:"profiles"`
+	Note       string         `json:"note"`
 }
 
 // umState resolves binds + profiles + learn arming into the mappings-card render state.
@@ -254,10 +256,10 @@ func (u *UI) umState() umState {
 
 	enLbl := i18n.T("midictl.uimap.enable")
 	st := umState{
-		Show: true, Title: i18n.T("midictl.uimap.title"), TitleTip: tipTopic("midi-mapping"),
+		Show: true, Title: i18n.T("midictl.uimap.title"), TitleTipS: tipTopicSt("midi-mapping"),
 		Sub:       i18n.T("midictl.uimap.sub"),
 		EnableLbl: enLbl, EnableDL: strings.ToLower(enLbl), EnableAct: "um-enable",
-		EnableOn: !m.DisableUIBinds, EnableTip: tipTopic("midi-mapping"),
+		EnableOn: !m.DisableUIBinds, EnableTipS: tipTopicSt("midi-mapping"),
 		Profiles: []umProfileRow{}, Note: i18n.T("midictl.uimap.note"),
 	}
 
@@ -325,7 +327,7 @@ func umHTML(st umState) string {
 	}
 	var b strings.Builder
 	b.WriteString(`<p class=page-sub>` + htmlEscape(st.Sub) + `</p>`)
-	b.WriteString(toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, st.EnableTip))
+	b.WriteString(toggleRowTipDL(st.EnableLbl, st.EnableDL, st.EnableAct, st.EnableOn, tipOr(st.EnableTipS, st.EnableTip)))
 	b.WriteString(umRowHTML(st.Add))
 	for _, p := range st.Profiles {
 		b.WriteString(umRowHTML(p.Row))
@@ -338,7 +340,7 @@ func umHTML(st umState) string {
 		}
 	}
 	b.WriteString(`<div class=set-note>` + htmlEscape(st.Note) + `</div>`)
-	return card(st.Title, st.TitleTip, b.String())
+	return card(st.Title, tipOr(st.TitleTipS, st.TitleTip), b.String())
 }
 
 // umRowHTML renders one mappings itemRow with its trailing controls.
