@@ -24,6 +24,9 @@ type Caps struct {
 	Errors   map[string]string // encoder name → last stderr line, for in-build candidates whose test-encode failed
 	Decoders []string          // decodable codec capability names (medialink.Decode*)
 	HWAccels []string          // decode hwaccel methods, preference-ordered
+	// Validated is false for a LISTING-ONLY probe (ProbeListing): Encoders is then the in-build
+	// candidate set, not a test-encode-proven set, so an entry may still fail at route time.
+	Validated bool
 }
 
 // hwEncoderMarkers identify hardware video encoders in ANY vendor's ffmpeg backend - vendor-neutral
@@ -49,8 +52,9 @@ var probeDecoders = map[string]string{
 var hwaccelOrder = []string{"cuda", "qsv", "d3d11va", "dxva2"}
 
 var (
-	probeMu     sync.Mutex
-	probeCached map[string]Caps // ffmpeg path → result
+	probeMu       sync.Mutex
+	probeCached   map[string]Caps // ffmpeg path → validated result (test-encodes ran)
+	listingCached map[string]Caps // ffmpeg path → listing-only result (no test-encodes)
 )
 
 // Probe returns this machine's cached capability set. ok=false when ffmpeg is unavailable.
@@ -97,8 +101,59 @@ func Cached() (Caps, bool) {
 	return c, ok
 }
 
+// ProbeListing returns capabilities WITHOUT test-encoding anything: encoder/decoder/hwaccel
+// listings only (`ffmpeg -encoders` etc. - text output, no GPU work, no encode session). Caps.
+// Encoders is therefore the in-build candidate set with Validated=false.
+//
+// This is what we advertise while the activity governor forbids background work: a test encode on
+// h264_nvenc takes a real NVENC session, and taking one mid-stream can fail OBS's encoder. Skipping
+// the advertisement entirely instead would be worse - a sender with no advertised encoders makes the
+// far end refuse the route (or fall back to raw video, the very melt we are fixing). ok=false when
+// ffmpeg is unavailable. Cached per ffmpeg path; never poisons the validated Probe cache.
+func ProbeListing(ctx context.Context, log *logbus.Bus) (Caps, bool) {
+	ffmpeg, ok := mediatools.Resolve("ffmpeg")
+	if !ok {
+		return Caps{}, false
+	}
+	probeMu.Lock()
+	if c, ok := probeCached[ffmpeg]; ok { // a validated result is strictly better - use it
+		probeMu.Unlock()
+		return c, true
+	}
+	if c, ok := listingCached[ffmpeg]; ok {
+		probeMu.Unlock()
+		return c, true
+	}
+	probeMu.Unlock()
+
+	c := listProbe(ctx, ffmpeg)
+	if log != nil {
+		log.Info(source, "codec probe (listing only - no test encodes)", map[string]any{
+			"encoders": strings.Join(c.Encoders, ","),
+			"decoders": strings.Join(c.Decoders, ","),
+			"hwaccels": strings.Join(c.HWAccels, ",")})
+	}
+	probeMu.Lock()
+	if listingCached == nil {
+		listingCached = map[string]Caps{}
+	}
+	listingCached[ffmpeg] = c
+	probeMu.Unlock()
+	return c, true
+}
+
+// listProbe reads the build's encoder/decoder/hwaccel listings - no test encodes.
+func listProbe(ctx context.Context, ffmpeg string) Caps {
+	cands := discoverVideoEncoders(ffmpegText(ctx, ffmpeg, "-encoders"))
+	return Caps{
+		Encoders: cands, InBuild: cands,
+		Decoders: parseDecoders(ffmpegText(ctx, ffmpeg, "-decoders")),
+		HWAccels: parseHWAccels(ffmpegText(ctx, ffmpeg, "-hwaccels")),
+	}
+}
+
 func runProbe(ctx context.Context, ffmpeg string) Caps {
-	var c Caps
+	c := Caps{Validated: true}
 	// Candidates are DISCOVERED from the build's own `-encoders` (all in-build by construction),
 	// so any HW backend present - named or not - is validated. Test-encode in parallel (bounded).
 	cands := discoverVideoEncoders(ffmpegText(ctx, ffmpeg, "-encoders"))
