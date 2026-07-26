@@ -175,23 +175,57 @@ refusal. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestM
 | non-Windows / no cgo | ffmpeg child (stub `Available()=false`, name never advertised) |
 | `MediaLink.SWOnly` | native name filtered out of the advertisement → software tier really is software |
 
-## Phase B (next): zero-copy source
+## Zero-copy source (zigmedia increment 1, flag OFF by default)
 
-Spout senders ARE DX11 shared textures; `GetSenderInfo` (already in the videoshare
-shim) returns the share handle. Plan: open the handle on mfenc's device
-(`OpenSharedResource`), `CopyResource` into the Blt input - the CPU readback +
-upload disappear entirely; frames never leave the GPU until they're compressed bits.
-Pacing via the Spout frame-count semaphore.
+**Landed.** A Spout sender IS a DX11 shared texture, so the child opens it on its own device
+and hands it to the video processor as the INPUT VIEW - the GPU→CPU readback, the pooled host
+frame buffer and the SHM frame slot all disappear. Go passes two scalars (share handle + DXGI
+format) and never a pixel. Spec + risk register: `.devnotes/ZIGMEDIA_DESIGN.md`.
 
-Two former blockers are now cleared: a no-ffmpeg machine DOES advertise the native engine
-(`mediaCaps`'s `mfOnly` set / `encFilter` add `EncoderMFNative`), and **device selection has
-landed** - `OpenSharedResource` fails across adapters, so Phase B needs the encoder device to
-be the adapter that owns the Spout texture. `EncodeSpec.DeviceLUID` + `mfenc.NewOn` give
-Phase B exactly that handle; the remaining work is opening the share handle on it.
+```
+Spout sender's shared texture (GPU)
+  │  handle + format resolved ONCE by Go (registry read, no GL)
+  ▼
+rave-mate-enc.exe session thread: pace(fps) → acquire mutex → VideoProcessorBlt (CSC+scale,
+  NV12 pool) → release → MFT submit → annex-B AU → AU ring (SHM) → SetEvent(-a)
+  ▼
+Go: pump AUs (~100 KB/frame) → wire crypto → socket
+```
 
-Phase B hooks that already exist (2026-07-25 capture pass): the readback is now rate-gated
-inside the poll loop (`videoshare.RecvOptions.MaxFPS`, live via `FPSLimiter`) and there is ONE
-capture per Spout sender fanned out to N routes (`mediaroute/capture.go`). A zero-copy source
-replaces the readback INSIDE that single capture - keep the same seam (one shared capture per
-sender name, refcounted, per-route fps applied downstream) so N routes still cost one GPU path.
-Zero-copy hard-depends on device selection: `OpenSharedResource` fails across adapters.
+- **Gate:** `config.MediaLink.zigCapture` (tri-state, default OFF) or
+  `RAVE_MATE_ZIGMEDIA_CAPTURE=1|0`. Requested only when the source implements
+  `medialink.ZeroCopySource` with a non-zero handle matching the negotiated geometry, the child
+  answers `hello.ver >= 2`, and the sender is not pinned to the readback path.
+- **Protocol:** `open` gains `src`/`sh`/`sfmt`/`sname`/`cap_n`/`cap_d`/`ring_kb`/`pts0`; header
+  v2 adds child-written capture counters at 64..111; new `srcgone` event. A `spout` session's
+  SHM is header + AU ring ONLY (no frame slot) and the ring is bitrate-derived
+  (`clamp(kbps/16, 4 MiB, 16 MiB)`), so a sender resize costs zero SHM realloc.
+- **Fallback ladder, never a dead route:** open-side refusal → `ErrZeroCopyRefused` → the same
+  route reopens on the readback path with one WARN; mid-route `srcgone`/staleness → reopen with
+  a freshly resolved handle, bounded at 3 attempts, then the sender is pinned to the readback
+  path and the AU stream ends so the route re-establishes there.
+- **R1, the worst failure mode:** after a sender restart `OpenSharedResource` can still succeed
+  on a DEAD texture - frames look healthy and the picture is frozen. Two detectors (`spoutCheck`):
+  a changed share handle on the 2 s registry rescan, and a capture clock that stopped while no
+  new frames were counted.
+- **`Encode()` is refused** on a zero-copy session: there is no frame slot to write into.
+- Route panels now render the whole `PipelineStats` block (submit→AU p50/p99, queue depth, child
+  CPU) plus the capture counters and a downgrade count. `EncBusyMs` replaces the percentiles on
+  a zero-copy route, where the parent submits nothing and they are structurally empty.
+
+Measured on this dev box (NVIDIA), real sender in a second process:
+
+| | zero-copy | readback control |
+|---|---|---|
+| host RSS, 4K60 @ 50 Mbps | 29 → 30 MB | 206 → 207 MB |
+| encoder-child RSS | 69 → 70 MB | 170 → 170 MB |
+| AUs / 45 s | 2880 | 2864 |
+| capture cost | 0.28 ms/frame | GPU→CPU readback + 33 MB memcpy |
+
+`capFlags=0x5` on this rig = zero-copy live + Spout's NAMED access mutex. Orientation and
+colour are gated by DECODING the bitstream (a red-top/blue-bottom probe), because the readback
+path flips on the CPU and a silently inverted zero-copy path passes every counter.
+
+Still open: 7-day soak before the flag defaults on, the 2-PC pass (§13.1 of the design - the
+single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on
+a real rig), and increment 2 (the receive side, `dir:"dec"`).
