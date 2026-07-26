@@ -377,6 +377,15 @@ type MediaLinkFeature struct {
 	SWOnly      bool   `json:"swOnly,omitempty"`      // advertise software encoders only (diagnostic; tier 4 + CPU warning)
 	MaxFPS      int    `json:"maxFps,omitempty"`      // sender-side video fps cap; 0 = 60, -1 = uncapped
 	MaxHeight   int    `json:"maxHeight,omitempty"`   // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
+	// Encode-device preference (SENDER side). DevicePolicy "" = auto: no device flags, the encoder
+	// picks (adapter 0) - byte-identical to pre-WP-3 behaviour. "pin" = always EncoderDevice.
+	// "avoid-busiest" = the least video-encode-loaded adapter, skipping ones OBS/Parsec hold.
+	// EncoderDevice is a DXGI adapter LUID key ("0xHIGH_0xLOW", encoderscan.AdapterInfo.LUID).
+	// Encoder pins a concrete encoder name (medialink.EncoderMFNative = the native pipe-free MF
+	// engine, "libx264", …); "" = negotiated (§3.2 matrix).
+	DevicePolicy  string `json:"devicePolicy,omitempty"`
+	EncoderDevice string `json:"encoderDevice,omitempty"`
+	Encoder       string `json:"encoder,omitempty"`
 	// Subprocess runs the media plane (medialink+mediaroute+webcam) as an isolated, memory-capped
 	// featurehost child (#44) so a media RAM/CPU runaway or cgo fault can't starve the host - and so
 	// the governor's below-normal demotion of THIS process never throttles a live route.
@@ -391,6 +400,20 @@ type MediaLinkFeature struct {
 // persisted this field with omitempty on a plain bool, so a pre-flip config could only ever carry
 // `true` (opt-in) or no key at all - no user can be silently pinned to the old in-proc path.
 func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess == nil || *m.Subprocess }
+
+// SetSubprocess sets the isolation opt-in EXPLICITLY (never leaves the tri-state unset, so an
+// opt-out survives a save). The single write seam, so the field's representation can change without
+// touching the settings UI.
+func (m *MediaLinkFeature) SetSubprocess(on bool) { v := on; m.Subprocess = &v }
+
+// DevicePref returns the sender-side encode-device preference verbatim (policy, adapter LUID key).
+// Normalization + resolution live in encoderscan.ResolveDevice - config stays dependency-free.
+func (m MediaLinkFeature) DevicePref() (policy, adapter string) {
+	return m.DevicePolicy, m.EncoderDevice
+}
+
+// PinnedEncoder returns the user-pinned encoder name ("" = negotiate per the §3.2 matrix).
+func (m MediaLinkFeature) PinnedEncoder() string { return strings.TrimSpace(m.Encoder) }
 
 // Bitrate returns the effective per-route budget (default 20 Mbps).
 func (f MediaLinkFeature) Bitrate() int {

@@ -15,10 +15,12 @@ typedef struct mfenc mfenc;
 // mf_shim_available: 1 = D3D11 hardware device + >=1 hardware H.264 encoder MFT exist.
 int mf_shim_available(void);
 
-// mf_enc_open builds the pipeline. codec: 0=h264. in dims = source; out dims = encode
-// target (VP scales when different; caller pre-clamps to even). fps as rational.
-// Returns NULL + errbuf ("stage hr=0x...") on failure.
-mfenc* mf_enc_open(int codec, int inW, int inH, int outW, int outH,
+// mf_enc_open builds the pipeline (H.264 only). adapterLuid pins the GPU: DXGI
+// AdapterLuid packed HighPart<<32|LowPart, 0 = default adapter. An unknown/unusable
+// LUID degrades to the default adapter rather than failing. in dims = source; out dims
+// = encode target (VP scales when different; caller pre-clamps to even). fps as
+// rational. Returns NULL + errbuf ("stage hr=0x...") on failure.
+mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
                    int fpsN, int fpsD, int bitrateKbps, int gopFrames,
                    char* errbuf, int errcap);
 

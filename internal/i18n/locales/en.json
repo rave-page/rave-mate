@@ -371,11 +371,11 @@
       "title": "Set capture via Icecast"
     },
     "ml-accel": {
-      "body": "auto negotiates the best common hardware tier (AV1/HEVC/H.264 -> software fallback). Pinning a codec only applies when the sending instance can encode it.",
+      "body": "Which video codec a route THIS PC requests should use. Set it on the machine that receives and plays the stream: the preference travels inside the route request and the sending PC honours it whenever it holds a matching encoder.\n\nIt is mirrored onto the send side too - when this PC shares a source, the same preference steers what it negotiates, so pinning h264 on the capturing PC forces the pipe-free native engine (see 'Encode engine') instead of HEVC.\n\nauto negotiates the best common tier: hardware AV1/HEVC/H.264, then software x264, then MJPEG as the floor - except that the pipe-free H.264 engine outranks the higher tiers when it exists, because those tiers cost the sender a multi-hundred-MB/s raw pixel pipe. Pinning a codec only applies when the sending instance can actually encode it; otherwise negotiation falls back rather than refusing the route.",
       "title": "Codec / hardware tier"
     },
     "ml-budget": {
-      "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.",
+      "body": "Per-route video budget. 20 Mbps fits 1080p60 HEVC with headroom on gigabit LAN.\n\nSet this on the PC that RECEIVES the stream: like the codec preference it travels inside the route request, and the sending PC encodes to it.",
       "title": "Per-route bitrate"
     },
     "signal-sources": {
@@ -387,7 +387,7 @@
       "title": "Sender frame-rate cap"
     },
     "ml-height": {
-      "body": "auto = native resolution everywhere EXCEPT the software-x264 fallback, which caps at 1080p (x264 at 4K60 pins every core - a set-killer). Hardware encoders (NVENC/AMF/QSV) handle 4K60 on dedicated silicon, so 4K flows at full res like NDI. Pick a fixed cap only to save LAN bandwidth; 'native' disables scaling even on the x264 fallback.",
+      "body": "auto = native resolution everywhere EXCEPT the software-x264 fallback, which caps at 1080p (x264 at 4K60 pins every core - a set-killer). Hardware encoders (NVENC/AMF/QSV) handle 4K60 on dedicated silicon, so 4K flows at full res like NDI. Pick a fixed cap only to save LAN bandwidth; 'native' disables scaling even on the x264 fallback.\n\nSet this on the PC that SENDS the video - it is applied where the frames are encoded.",
       "title": "Encode resolution cap"
     },
     "midi-learn-controllers": {
@@ -641,6 +641,18 @@
     "mp-prelisten": {
       "title": "Pre-listen the planned loudness",
       "body": "Applies the export's planned constant gain to live playback, so you hear the track at the target loudness BEFORE encoding. It is exactly the gain the export will bake in: one whole-track volume change, no compression or limiting, capped so the true peak never exceeds the ceiling. Toggle it while A/B-ing targets — the gain follows your target and trim changes live. It only affects monitoring in this player, never the file on disk, and resets when you load other media."
+    },
+    "ml-device": {
+      "title": "Encode GPU",
+      "body": "Which graphics adapter encodes the video THIS PC sends. Set it on the machine that captures the source - the receiving instance never reads it.\n\nautomatic lets the encoder pick, which in practice means adapter 0: the same GPU OBS, your games and Parsec are most likely already using. On a box with two adapters (discrete card + iGPU, or two cards) that is exactly the contention worth avoiding - a video-encode block has fixed throughput and a limited number of concurrent sessions, so a second encoder on the same silicon can degrade or outright fail the one you depend on live.\n\nPick an adapter to pin the encode there. 'Avoid the busiest GPU' re-checks every adapter's live video-encode load whenever a route starts and takes the least loaded one, skipping any GPU where OBS or Parsec is actively encoding. Each entry shows that adapter's current Video Encode utilisation - the same performance counter Task Manager's 'Video Encode' graph reads - and who is holding it.\n\nHow the choice is applied: NVIDIA takes the adapter ordinal as -gpu, Intel as -qsv_device, and the native Media Foundation engine binds the adapter by LUID directly - which makes it the only path that can steer AMD hardware, since ffmpeg's AMF encoder exposes no device option at all. A pinned GPU that is no longer present falls back to automatic rather than to the wrong device."
+    },
+    "ml-engine": {
+      "title": "Encode engine",
+      "body": "Which encoder actually compresses the frames. automatic negotiates the best engine both PCs support and is the right answer almost always.\n\n'Native Media Foundation' is the pipe-free path: frames go to the GPU once, are converted and scaled there, and come back as finished H.264 - no ffmpeg child process and no raw pixel stream through a pipe. The ffmpeg path moves about 500 MB/s of raw RGBA between processes at 1080p60 and close to 2 GB/s at 4K60, plus a CPU colour conversion and a re-upload to the GPU. That memory bandwidth, not the codec, is what makes a sending PC stutter while OBS is streaming - which is why this engine is picked automatically whenever the receiving PC can decode H.264.\n\nPin an ffmpeg encoder only to test or to force a codec: hevc_* saves bandwidth on a constrained link, libx264 proves that hardware is not the problem (expect high CPU above 1080p60). Only encoders that passed this machine's start-up test encode are listed. If a pinned encoder cannot serve a route, negotiation falls back to the normal order instead of refusing the route."
+    },
+    "ml-isolation": {
+      "title": "Isolated media process",
+      "body": "Runs the whole media plane - video routes, encode and decode, webcam capture - in a separate supervised child process with its own memory limit, instead of inside the main rave-mate daemon.\n\nWhy it matters: that plane moves frame buffers, spawns ffmpeg and drives Spout/DirectShow through C libraries. A runaway there once ate 75% of a host's RAM and killed Parsec mid-session. In the child, a crash or a runaway kills only the child - the daemon logs it, notifies you and restarts it with backoff, while your library, recorder and timecode keep running. The media clock and the negotiation bus stay on the daemon side and are mirrored into the child.\n\nCost: one extra process and a few milliseconds of hop latency on control calls (frames never cross that hop). Turn it off only while debugging the media plane itself."
     }
   },
   "library": {
@@ -2694,7 +2706,17 @@
         "native": "native",
         "note": "The header toggle shares your local Spout senders. Create routes on the Peers tab.",
         "swOnly": "Force software encode (diagnostic - high CPU)",
-        "uncapped": "uncapped"
+        "uncapped": "uncapped",
+        "senderSection": "Below: set on the PC that SENDS (captures + encodes). The receiving instance never reads these.",
+        "receiverSection": "Below: set on the PC that RECEIVES (plays). They travel inside the route request, so the sender honours them.",
+        "device": "Encode GPU",
+        "deviceAuto": "automatic",
+        "deviceAvoid": "avoid the busiest GPU",
+        "deviceMissing": "(not present)",
+        "encoder": "Encode engine",
+        "encoderAuto": "automatic (negotiated)",
+        "encoderNative": "native Media Foundation (no pipe)",
+        "subprocess": "Run the media plane in an isolated process"
       },
       "midi": {
         "customPort": "(select MIDI input port)",

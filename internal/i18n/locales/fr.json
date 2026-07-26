@@ -207,11 +207,11 @@
       "title": "Capture de set via Icecast"
     },
     "ml-accel": {
-      "body": "auto négocie le meilleur niveau matériel commun (AV1/HEVC/H.264 -> repli logiciel). Fixer un codec ne s'applique que si l'instance émettrice sait l'encoder.",
+      "body": "Quel codec vidéo une route demandée par CE PC doit utiliser. À régler sur la machine qui reçoit et lit le flux : la préférence voyage dans la demande de route et le PC émetteur la respecte s'il possède un encodeur correspondant.\n\nElle est aussi reflétée côté émission : quand ce PC partage une source, la même préférence oriente sa négociation, donc fixer h264 sur le PC qui capture force le moteur natif sans tuyau (voir « Moteur d'encodage ») au lieu du HEVC.\n\nauto négocie le meilleur palier commun : matériel AV1/HEVC/H.264, puis x264 logiciel, puis MJPEG en plancher - sauf que le moteur H.264 sans tuyau devance les paliers supérieurs lorsqu'il existe, car ces paliers coûtent à l'émetteur un tuyau de pixels bruts de plusieurs centaines de Mo/s. Fixer un codec ne s'applique que si l'instance émettrice sait vraiment l'encoder ; sinon la négociation se rabat plutôt que de refuser la route.",
       "title": "Codec / niveau matériel"
     },
     "ml-budget": {
-      "body": "Budget vidéo par route. 20 Mbps suffisent pour du 1080p60 HEVC avec de la marge sur un LAN gigabit.",
+      "body": "Budget vidéo par route. 20 Mbps suffisent pour du 1080p60 HEVC avec de la marge sur un LAN gigabit.\n\nÀ régler sur le PC qui REÇOIT le flux : comme la préférence de codec, il voyage dans la demande de route et le PC émetteur encode à cette valeur.",
       "title": "Débit par route"
     },
     "ml-fps": {
@@ -379,6 +379,22 @@
     "mp-prelisten": {
       "title": "Pré-écouter la sonie planifiée",
       "body": "Applique à la lecture en direct le gain constant prévu par l'export : vous entendez le morceau à la sonie cible AVANT l'encodage. C'est exactement le gain que l'export inscrira : un changement de volume sur tout le morceau, sans compression ni limiteur, plafonné pour que le pic réel ne dépasse jamais le plafond. Activez-le pour comparer des cibles — le gain suit en direct vos changements de cible et de découpe. N'affecte que le monitoring de ce lecteur, jamais le fichier, et se réinitialise au chargement d'autres médias."
+    },
+    "ml-device": {
+      "title": "GPU d'encodage",
+      "body": "Quel adaptateur graphique encode la vidéo que CE PC envoie. À régler sur la machine qui capture la source : l'instance réceptrice ne le lit jamais.\n\nautomatique laisse l'encodeur choisir, ce qui signifie en pratique l'adaptateur 0 : le même GPU qu'OBS, vos jeux et Parsec utilisent très probablement déjà. Sur une machine à deux adaptateurs (carte dédiée + iGPU, ou deux cartes), c'est exactement la contention à éviter - un bloc d'encodage vidéo a un débit fixe et un nombre limité de sessions simultanées, donc un second encodeur sur le même silicium peut dégrader ou faire échouer celui dont vous dépendez en direct.\n\nChoisissez un adaptateur pour y fixer l'encodage. « Éviter le GPU le plus chargé » revérifie la charge d'encodage vidéo de chaque adaptateur au démarrage de chaque route et prend le moins chargé, en écartant tout GPU où OBS ou Parsec encode activement. Chaque entrée affiche l'utilisation actuelle d'Encodage vidéo de cet adaptateur - le même compteur que lit le graphe « Encodage vidéo » du Gestionnaire des tâches - et qui l'occupe.\n\nApplication : NVIDIA prend l'ordinal de l'adaptateur via -gpu, Intel via -qsv_device, et le moteur Media Foundation natif lie l'adaptateur directement par LUID, ce qui en fait la seule voie capable de piloter du matériel AMD, l'encodeur AMF de ffmpeg n'exposant aucune option de périphérique. Un GPU fixé qui n'est plus présent retombe sur automatique, jamais sur le mauvais périphérique."
+    },
+    "ml-engine": {
+      "title": "Moteur d'encodage",
+      "body": "Quel encodeur compresse réellement les images. automatique négocie le meilleur moteur pris en charge par les deux PC et convient presque toujours.\n\n« Media Foundation natif » est la voie sans tuyau : les images montent une fois sur le GPU, y sont converties et redimensionnées, puis reviennent en H.264 fini - aucun processus enfant ffmpeg, aucun flux de pixels bruts dans un tuyau. La voie ffmpeg déplace environ 500 Mo/s de RGBA brut entre processus en 1080p60 et près de 2 Go/s en 4K60, plus une conversion colorimétrique CPU et un renvoi vers le GPU. C'est cette bande passante mémoire, et non le codec, qui fait saccader un PC émetteur pendant qu'OBS diffuse : d'où le choix automatique de ce moteur dès que le PC récepteur sait décoder le H.264.\n\nNe fixez un encodeur ffmpeg que pour tester ou imposer un codec : hevc_* économise la bande passante sur un lien contraint, libx264 prouve que le matériel n'est pas en cause (attendez-vous à un CPU élevé au-delà de 1080p60). Seuls les encodeurs ayant réussi l'encodage de test au démarrage sont listés. Si un encodeur fixé ne peut pas servir une route, la négociation revient à l'ordre normal au lieu de refuser la route."
+    },
+    "ml-isolation": {
+      "title": "Processus média isolé",
+      "body": "Exécute tout le plan média - routes vidéo, encodage et décodage, capture webcam - dans un processus enfant supervisé distinct, avec sa propre limite mémoire, au lieu du démon rave-mate principal.\n\nPourquoi c'est important : ce plan déplace des tampons d'images, lance ffmpeg et pilote Spout/DirectShow via des bibliothèques C. Un emballement y a déjà mangé 75 % de la RAM de l'hôte et tué Parsec en pleine session. Dans l'enfant, un crash ou un emballement ne tue que l'enfant : le démon le journalise, vous notifie et le redémarre avec temporisation, tandis que bibliothèque, enregistreur et timecode continuent. L'horloge média et le bus de négociation restent côté démon et sont répliqués dans l'enfant.\n\nCoût : un processus supplémentaire et quelques millisecondes de latence de saut sur les appels de contrôle (les images ne traversent jamais ce saut). Ne le désactivez que pour déboguer le plan média lui-même."
+    },
+    "ml-height": {
+      "title": "Plafond de résolution d'encodage",
+      "body": "auto = résolution native partout SAUF pour le repli logiciel x264, plafonné à 1080p (x264 en 4K60 sature tous les cœurs - un tueur de set). Les encodeurs matériels (NVENC/AMF/QSV) encaissent le 4K60 sur du silicium dédié, donc le 4K passe en pleine résolution comme en NDI. Ne choisissez un plafond fixe que pour économiser la bande passante LAN ; « native » désactive la mise à l'échelle même sur le repli x264.\n\nÀ régler sur le PC qui ENVOIE la vidéo - il s'applique là où les images sont encodées."
     }
   },
   "library": {
@@ -2198,7 +2214,22 @@
         "bitrate": "Débit (Mbps)",
         "codec": "Codec préféré",
         "note": "La bascule d'en-tête partage vos émetteurs Spout locaux. Créez des routes dans l'onglet Pairs.",
-        "swOnly": "Forcer l'encodage logiciel (diagnostic - CPU élevé)"
+        "swOnly": "Forcer l'encodage logiciel (diagnostic - CPU élevé)",
+        "senderSection": "Ci-dessous : à régler sur le PC qui ENVOIE (capture + encode). L'instance réceptrice ne les lit jamais.",
+        "receiverSection": "Ci-dessous : à régler sur le PC qui REÇOIT (lit). Ils voyagent dans la demande de route, donc l'émetteur les respecte.",
+        "device": "GPU d'encodage",
+        "deviceAuto": "automatique",
+        "deviceAvoid": "éviter le GPU le plus chargé",
+        "deviceMissing": "(absent)",
+        "encoder": "Moteur d'encodage",
+        "encoderAuto": "automatique (négocié)",
+        "encoderNative": "Media Foundation natif (sans tuyau)",
+        "subprocess": "Exécuter le plan média dans un processus isolé",
+        "auto": "auto",
+        "native": "native",
+        "uncapped": "sans limite",
+        "maxFps": "Plafond d'images/s",
+        "maxHeight": "Plafond de résolution"
       },
       "midi": {
         "customPort": "(sélectionnez un port d'entrée MIDI)",

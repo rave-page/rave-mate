@@ -208,11 +208,11 @@
       "title": "Set-Mitschnitt über Icecast"
     },
     "ml-accel": {
-      "body": "auto verhandelt die beste gemeinsame Hardware-Stufe (AV1/HEVC/H.264 -> Software-Fallback). Einen Codec festzulegen greift nur, wenn die sendende Instanz ihn kodieren kann.",
+      "body": "Welchen Video-Codec eine von DIESEM PC angeforderte Route nutzen soll. Auf dem Rechner einstellen, der den Stream empfängt und abspielt: die Präferenz reist in der Routen-Anfrage mit, und der sendende PC hält sich daran, wenn er einen passenden Encoder hat.\n\nSie wird auch auf die Sendeseite gespiegelt - teilt dieser PC eine Quelle, steuert dieselbe Präferenz seine Verhandlung. h264 auf dem aufnehmenden PC erzwingt also die Pipe-freie native Engine (siehe 'Encode-Engine') statt HEVC.\n\nauto verhandelt die beste gemeinsame Stufe: Hardware AV1/HEVC/H.264, dann Software-x264, dann MJPEG als Untergrenze - mit der Ausnahme, dass die Pipe-freie H.264-Engine die höheren Stufen überholt, wenn sie existiert, weil jene Stufen den Sender eine Rohbild-Pipe mit mehreren hundert MB/s kosten. Ein festgelegter Codec greift nur, wenn die sendende Instanz ihn wirklich kodieren kann; sonst fällt die Verhandlung zurück, statt die Route abzulehnen.",
       "title": "Codec / Hardware-Stufe"
     },
     "ml-budget": {
-      "body": "Video-Budget pro Route. 20 Mbit/s reichen für 1080p60 HEVC mit Reserve im Gigabit-LAN.",
+      "body": "Video-Budget pro Route. 20 Mbps reichen für 1080p60 HEVC mit Luft im Gigabit-LAN.\n\nAuf dem PC einstellen, der den Stream EMPFÄNGT: wie die Codec-Präferenz reist es in der Routen-Anfrage mit, und der sendende PC kodiert darauf.",
       "title": "Bitrate pro Route"
     },
     "signal-sources": {
@@ -224,8 +224,8 @@
       "title": "Sender-Framerate-Limit"
     },
     "ml-height": {
-      "body": "auto = native Auflösung überall AUSSER beim Software-x264-Fallback, der bei 1080p gedeckelt wird (x264 bei 4K60 lastet jeden Kern aus - ein Set-Killer). Hardware-Encoder (NVENC/AMF/QSV) schaffen 4K60 auf dedizierter Hardware, 4K fließt also wie bei NDI in voller Auflösung. Ein festes Limit lohnt nur zum Sparen von LAN-Bandbreite; „nativ“ deaktiviert Skalierung auch beim x264-Fallback.",
-      "title": "Encoding-Auflösungs-Limit"
+      "body": "auto = native Auflösung überall AUSSER beim Software-x264-Fallback, der bei 1080p begrenzt (x264 bei 4K60 legt jeden Kern lahm - ein Set-Killer). Hardware-Encoder (NVENC/AMF/QSV) schaffen 4K60 auf dedizierter Silizium-Einheit, 4K fließt also wie bei NDI in voller Auflösung. Eine feste Grenze nur zum Sparen von LAN-Bandbreite wählen; 'native' schaltet die Skalierung selbst beim x264-Fallback ab.\n\nAuf dem PC einstellen, der das Video SENDET - sie greift dort, wo die Frames kodiert werden.",
+      "title": "Encode-Auflösungsgrenze"
     },
     "motion-studio": {
       "body": "Spielt VR-Motion-Takes ab, die von deinem Headset aufgenommen wurden (Kopf + Controller + beliebige Full-Body-Tracker, aufgenommen über das Handgelenk-Menü). Die Vorschau zeigt das Skelett in 3D mit der Kopfbewegung als violette Spur.\n\nZwei Live-Ausgänge: VMC streamt den Take als rohe Tracking-Geräte an einen VTuber-Renderer (VSeeFace, Warudo, VNyan), der die IK übernimmt und deinen Avatar animiert - das ist der eigentliche Wiedergabepfad. OSC-Tracker speisen VRChats Full-Body-Tracking, aber VRChat steuert Kopf und Hände immer von deinem Live-HMD und den Controllern, sodass ein aufgenommener Take deinen VRChat-Avatar nicht steuern kann - exportiere dafür eine Unity-.anim und treibe sie über den Animator des Avatars.\n\nHier importierte Avatare (.vrm) replizieren automatisch zu deinen gekoppelten rave-mate-Instanzen.",
@@ -392,6 +392,18 @@
     "mp-prelisten": {
       "title": "Geplante Lautheit vorhören",
       "body": "Wendet den geplanten konstanten Gain des Exports auf die Live-Wiedergabe an – du hörst den Track in Ziel-Lautheit, BEVOR encodiert wird. Es ist exakt der Gain, den der Export einbrennt: eine Ganztrack-Lautstärkeänderung, keine Kompression, kein Limiting, gedeckelt, damit der True Peak nie die Grenze überschreitet. Beim A/B-Vergleich von Zielen einschalten — der Gain folgt Ziel- und Trim-Änderungen live. Betrifft nur das Monitoring in diesem Player, nie die Datei, und wird beim Laden anderer Medien zurückgesetzt."
+    },
+    "ml-device": {
+      "title": "Encode-GPU",
+      "body": "Welcher Grafikadapter das Video kodiert, das DIESER PC sendet. Auf dem Rechner einstellen, der die Quelle aufnimmt - die empfangende Instanz liest es nie.\n\nautomatisch lässt den Encoder wählen, praktisch also Adapter 0: dieselbe GPU, die OBS, deine Spiele und Parsec höchstwahrscheinlich schon benutzen. Auf einem Rechner mit zwei Adaptern (dedizierte Karte + iGPU oder zwei Karten) ist genau das die Konkurrenz, die man vermeiden will - ein Video-Encode-Block hat festen Durchsatz und eine begrenzte Zahl gleichzeitiger Sessions, ein zweiter Encoder auf demselben Silizium kann den Encoder also verschlechtern oder komplett scheitern lassen, auf den du live angewiesen bist.\n\nWähle einen Adapter, um das Encoding dort festzunageln. 'Am stärksten belastete GPU meiden' prüft bei jedem Routenstart die aktuelle Video-Encode-Last aller Adapter und nimmt die geringste, wobei GPUs übersprungen werden, auf denen OBS oder Parsec aktiv kodiert. Jeder Eintrag zeigt die aktuelle Video-Encode-Auslastung dieses Adapters - denselben Leistungsindikator, den der 'Videokodierung'-Graph im Task-Manager liest - und wer sie belegt.\n\nUmsetzung: NVIDIA nimmt die Adapter-Nummer als -gpu, Intel als -qsv_device, und die native Media-Foundation-Engine bindet den Adapter direkt per LUID - damit ist sie der einzige Weg, AMD-Hardware zu steuern, denn ffmpegs AMF-Encoder bietet überhaupt keine Geräteoption. Eine festgelegte GPU, die nicht mehr vorhanden ist, fällt auf automatisch zurück, nie auf das falsche Gerät."
+    },
+    "ml-engine": {
+      "title": "Encode-Engine",
+      "body": "Welcher Encoder die Frames tatsächlich komprimiert. automatisch verhandelt die beste Engine, die beide PCs unterstützen, und ist fast immer richtig.\n\n'Native Media Foundation' ist der Pipe-freie Weg: Frames gehen einmal auf die GPU, werden dort konvertiert und skaliert und kommen als fertiges H.264 zurück - kein ffmpeg-Kindprozess, kein Rohbild-Strom durch eine Pipe. Der ffmpeg-Weg schiebt bei 1080p60 rund 500 MB/s rohes RGBA zwischen Prozessen, bei 4K60 fast 2 GB/s, dazu eine CPU-Farbkonvertierung und ein erneutes Hochladen zur GPU. Diese Speicherbandbreite - nicht der Codec - lässt einen sendenden PC stocken, während OBS streamt. Genau deshalb wird diese Engine automatisch gewählt, sobald der empfangende PC H.264 dekodieren kann.\n\nEinen ffmpeg-Encoder nur zum Testen oder zum Erzwingen eines Codecs festlegen: hevc_* spart Bandbreite auf einer engen Leitung, libx264 beweist, dass Hardware nicht das Problem ist (über 1080p60 hohe CPU-Last erwarten). Gelistet sind nur Encoder, die den Test-Encode beim Start bestanden haben. Kann ein festgelegter Encoder eine Route nicht bedienen, fällt die Verhandlung auf die normale Reihenfolge zurück, statt die Route abzulehnen."
+    },
+    "ml-isolation": {
+      "title": "Isolierter Medienprozess",
+      "body": "Führt die gesamte Medienebene - Videorouten, Encode und Decode, Webcam-Aufnahme - in einem separaten, überwachten Kindprozess mit eigenem Speicherlimit aus, statt im Haupt-Daemon von rave-mate.\n\nWarum das zählt: diese Ebene bewegt Frame-Puffer, startet ffmpeg und treibt Spout/DirectShow über C-Bibliotheken. Ein Ausreißer dort hat einmal 75% des Host-RAMs gefressen und Parsec mitten in der Session getötet. Im Kindprozess tötet ein Crash oder Ausreißer nur das Kind - der Daemon protokolliert es, benachrichtigt dich und startet es mit Backoff neu, während Bibliothek, Recorder und Timecode weiterlaufen. Medienuhr und Verhandlungsbus bleiben auf Daemon-Seite und werden ins Kind gespiegelt.\n\nKosten: ein zusätzlicher Prozess und wenige Millisekunden Hop-Latenz bei Steuerbefehlen (Frames überqueren diesen Hop nie). Nur abschalten, während du die Medienebene selbst debuggst."
     }
   },
   "library": {
@@ -2301,7 +2313,17 @@
         "native": "nativ",
         "note": "Der Schalter in der Kopfzeile teilt deine lokalen Spout-Sender. Erstelle Routen im Geräte-Tab.",
         "swOnly": "Software-Encoding erzwingen (Diagnose - hohe CPU-Last)",
-        "uncapped": "unbegrenzt"
+        "uncapped": "unbegrenzt",
+        "senderSection": "Unten: auf dem PC einstellen, der SENDET (aufnimmt + kodiert). Die empfangende Instanz liest diese nie.",
+        "receiverSection": "Unten: auf dem PC einstellen, der EMPFÄNGT (abspielt). Sie reisen in der Routen-Anfrage mit, der Sender hält sich daran.",
+        "device": "Encode-GPU",
+        "deviceAuto": "automatisch",
+        "deviceAvoid": "am stärksten belastete GPU meiden",
+        "deviceMissing": "(nicht vorhanden)",
+        "encoder": "Encode-Engine",
+        "encoderAuto": "automatisch (verhandelt)",
+        "encoderNative": "native Media Foundation (ohne Pipe)",
+        "subprocess": "Medienebene in isoliertem Prozess ausführen"
       },
       "midi": {
         "customPort": "(MIDI-Eingabeport wählen)",

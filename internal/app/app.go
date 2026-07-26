@@ -666,10 +666,13 @@ func run(parent context.Context, serviceMode bool) error {
 	// capability negotiation. See MEDIALINK_DESIGN.md.
 	mediaClock := medialink.NewSoftwareClock() // §2.3 tier-2 media clock (disciplined by sync probes)
 	encFac, decFac := mediapipe.Factories(log)
+	mediaLinkCfg := func() config.MediaLinkFeature { return cfg.Features.MediaLink }
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,
 		EncodeMaxHeight: cfg.Features.MediaLink.MaxHeight,
+		EncodePolicy:    mediaEncodePolicy(mediaLinkCfg),
+		EncodeDevice:    mediaEncodeDevice(log, mediaLinkCfg),
 	})
 	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
 	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +
@@ -733,14 +736,17 @@ func run(parent context.Context, serviceMode bool) error {
 					enc = append(enc, e)
 				}
 			}
-		} else if mfenc.Available() && !slices.Contains(enc, "h264_mf") {
-			enc = append(enc, "h264_mf") // native MF engine rides the h264 tier even if ffmpeg lacks h264_mf
+		} else if mfenc.Available() && !slices.Contains(enc, medialink.EncoderMFNative) {
+			// The native pipe-free engine gets its OWN capability name (never ffmpeg's h264_mf), so
+			// the negotiation can preempt the pipe-fed tiers with it and the engine keying in
+			// mediapipe.Factories is unambiguous.
+			enc = append(enc, medialink.EncoderMFNative)
 		}
 		return enc
 	}
 	var mfOnly []string // ffmpeg-less fallback: the native MF engine can still SOURCE h264
 	if mfenc.Available() && !cfg.Features.MediaLink.SWOnly {
-		mfOnly = []string{"h264_mf"}
+		mfOnly = []string{medialink.EncoderMFNative}
 	}
 	// mediaCaps gates the probe on the governor (no encode session stolen mid-stream) and runs the
 	// advertised list through the encode-headroom planner on every streaming edge. See mediacaps.go.

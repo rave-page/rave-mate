@@ -255,6 +255,24 @@ var helpTopics = map[string]helpTopic{
 	"ml-budget": {},
 	"ml-fps":    {},
 	"ml-height": {},
+	"ml-device": {
+		Links: []ttLink{
+			{"ffmpeg hardware acceleration", "https://trac.ffmpeg.org/wiki/HWAccelIntro"},
+			{"NVIDIA encode/decode support matrix (session limits)", "https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new"},
+			{"GPU performance counters in Task Manager", "https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/"},
+		},
+	},
+	"ml-engine": {
+		Links: []ttLink{
+			{"Media Foundation Transforms (Microsoft)", "https://learn.microsoft.com/en-us/windows/win32/medfound/media-foundation-transforms"},
+			{"ffmpeg hardware acceleration", "https://trac.ffmpeg.org/wiki/HWAccelIntro"},
+		},
+	},
+	"ml-isolation": {
+		Links: []ttLink{
+			{"Windows job objects (process resource limits)", "https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects"},
+		},
+	},
 	// ── Live tab: signal-sources panel ──
 	"signal-sources": {},
 	// ── MIDI tab: native MIDI-learn + DJ bridge ──

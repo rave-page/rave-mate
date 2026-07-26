@@ -207,11 +207,11 @@
       "title": "Captura de set mediante Icecast"
     },
     "ml-accel": {
-      "body": "auto negocia el mejor nivel de hardware común (AV1/HEVC/H.264 -> alternativa por software). Fijar un códec solo se aplica cuando la instancia emisora puede codificarlo.",
+      "body": "Qué códec de vídeo debe usar una ruta que ESTE PC solicita. Configúralo en la máquina que recibe y reproduce el flujo: la preferencia viaja dentro de la solicitud de ruta y el PC emisor la respeta si tiene un codificador compatible.\n\nTambién se refleja en el lado emisor: cuando este PC comparte una fuente, la misma preferencia dirige lo que negocia, así que fijar h264 en el PC que captura fuerza el motor nativo sin tubería (ver 'Motor de codificación') en lugar de HEVC.\n\nauto negocia el mejor nivel común: hardware AV1/HEVC/H.264, luego x264 por software, luego MJPEG como suelo, salvo que el motor H.264 sin tubería supera a los niveles superiores cuando existe, porque esos niveles le cuestan al emisor una tubería de píxeles en bruto de varios cientos de MB/s. Fijar un códec solo se aplica si la instancia emisora puede codificarlo de verdad; si no, la negociación retrocede en lugar de rechazar la ruta.",
       "title": "Códec / nivel de hardware"
     },
     "ml-budget": {
-      "body": "Presupuesto de vídeo por ruta. 20 Mbps entran para 1080p60 HEVC con margen en una LAN gigabit.",
+      "body": "Presupuesto de vídeo por ruta. 20 Mbps caben para 1080p60 HEVC con margen en LAN gigabit.\n\nConfigúralo en el PC que RECIBE el flujo: como la preferencia de códec, viaja dentro de la solicitud de ruta y el PC emisor codifica a ese valor.",
       "title": "Bitrate por ruta"
     },
     "ml-fps": {
@@ -379,6 +379,22 @@
     "mp-prelisten": {
       "title": "Pre-escuchar la sonoridad planificada",
       "body": "Aplica la ganancia constante planificada de la exportación a la reproducción en vivo: escuchas la pista en la sonoridad objetivo ANTES de codificar. Es exactamente la ganancia que la exportación grabará: un cambio de volumen de pista completa, sin compresión ni limitación, con tope para que el pico real nunca supere el techo. Actívala al comparar objetivos — la ganancia sigue en vivo tus cambios de objetivo y recorte. Solo afecta la monitorización en este reproductor, nunca el archivo, y se restablece al cargar otros medios."
+    },
+    "ml-device": {
+      "title": "GPU de codificación",
+      "body": "Qué adaptador gráfico codifica el vídeo que ESTE PC envía. Configúralo en la máquina que captura la fuente: la instancia receptora nunca lo lee.\n\nautomático deja elegir al codificador, lo que en práctica significa el adaptador 0: la misma GPU que OBS, tus juegos y Parsec ya están usando con toda probabilidad. En un equipo con dos adaptadores (tarjeta dedicada + iGPU, o dos tarjetas) esa es exactamente la contención que conviene evitar: un bloque de codificación de vídeo tiene un rendimiento fijo y un número limitado de sesiones simultáneas, así que un segundo codificador en el mismo silicio puede degradar o hacer fallar por completo al que necesitas en directo.\n\nElige un adaptador para fijar la codificación ahí. 'Evitar la GPU más cargada' vuelve a comprobar la carga de codificación de vídeo de cada adaptador cada vez que arranca una ruta y toma el menos cargado, omitiendo cualquier GPU donde OBS o Parsec esté codificando activamente. Cada entrada muestra la utilización actual de Codificación de vídeo de ese adaptador - el mismo contador que lee la gráfica 'Codificación de vídeo' del Administrador de tareas - y quién la ocupa.\n\nCómo se aplica: NVIDIA toma el ordinal del adaptador como -gpu, Intel como -qsv_device, y el motor nativo de Media Foundation vincula el adaptador directamente por LUID, lo que lo convierte en la única vía capaz de dirigir hardware AMD, ya que el codificador AMF de ffmpeg no expone ninguna opción de dispositivo. Una GPU fijada que ya no está presente vuelve a automático, nunca al dispositivo equivocado."
+    },
+    "ml-engine": {
+      "title": "Motor de codificación",
+      "body": "Qué codificador comprime realmente los fotogramas. automático negocia el mejor motor que ambos PC admiten y casi siempre es la respuesta correcta.\n\n'Media Foundation nativo' es la vía sin tubería: los fotogramas van una vez a la GPU, se convierten y escalan allí y vuelven como H.264 terminado, sin proceso hijo de ffmpeg y sin flujo de píxeles en bruto por una tubería. La vía de ffmpeg mueve unos 500 MB/s de RGBA en bruto entre procesos a 1080p60 y casi 2 GB/s a 4K60, más una conversión de color en CPU y una nueva subida a la GPU. Ese ancho de banda de memoria, no el códec, es lo que hace tartamudear al PC emisor mientras OBS transmite; por eso este motor se elige automáticamente siempre que el PC receptor pueda decodificar H.264.\n\nFija un codificador de ffmpeg solo para probar o forzar un códec: hevc_* ahorra ancho de banda en un enlace limitado, libx264 demuestra que el hardware no es el problema (espera CPU alta por encima de 1080p60). Solo se listan los codificadores que superaron la codificación de prueba al arrancar. Si un codificador fijado no puede servir una ruta, la negociación vuelve al orden normal en lugar de rechazar la ruta."
+    },
+    "ml-isolation": {
+      "title": "Proceso de medios aislado",
+      "body": "Ejecuta todo el plano de medios - rutas de vídeo, codificación y decodificación, captura de webcam - en un proceso hijo supervisado aparte, con su propio límite de memoria, en lugar de dentro del demonio principal de rave-mate.\n\nPor qué importa: ese plano mueve búferes de fotogramas, lanza ffmpeg y maneja Spout/DirectShow a través de bibliotecas C. Un desbocamiento allí se comió una vez el 75% de la RAM del host y mató Parsec en mitad de la sesión. En el hijo, un fallo o un desbocamiento mata solo al hijo: el demonio lo registra, te avisa y lo reinicia con espera progresiva, mientras tu biblioteca, grabador y timecode siguen funcionando. El reloj de medios y el bus de negociación permanecen del lado del demonio y se reflejan en el hijo.\n\nCoste: un proceso extra y unos milisegundos de latencia de salto en las llamadas de control (los fotogramas nunca cruzan ese salto). Desactívalo solo mientras depuras el propio plano de medios."
+    },
+    "ml-height": {
+      "title": "Límite de resolución de codificación",
+      "body": "auto = resolución nativa en todas partes EXCEPTO en el respaldo por software x264, que se limita a 1080p (x264 a 4K60 clava todos los núcleos: mata la sesión). Los codificadores por hardware (NVENC/AMF/QSV) manejan 4K60 en silicio dedicado, así que 4K fluye a resolución completa como en NDI. Elige un límite fijo solo para ahorrar ancho de banda de LAN; 'nativa' desactiva el escalado incluso en el respaldo x264.\n\nConfigúralo en el PC que ENVÍA el vídeo: se aplica donde se codifican los fotogramas."
     }
   },
   "library": {
@@ -2198,7 +2214,22 @@
         "bitrate": "Bitrate (Mbps)",
         "codec": "Códec preferido",
         "note": "El interruptor de cabecera comparte tus emisores Spout locales. Crea rutas en la pestaña Peers.",
-        "swOnly": "Forzar codificación por software (diagnóstico - CPU alta)"
+        "swOnly": "Forzar codificación por software (diagnóstico - CPU alta)",
+        "senderSection": "Abajo: configurar en el PC que ENVÍA (captura + codifica). La instancia receptora nunca lee esto.",
+        "receiverSection": "Abajo: configurar en el PC que RECIBE (reproduce). Viajan dentro de la solicitud de ruta, así que el emisor las respeta.",
+        "device": "GPU de codificación",
+        "deviceAuto": "automático",
+        "deviceAvoid": "evitar la GPU más cargada",
+        "deviceMissing": "(no presente)",
+        "encoder": "Motor de codificación",
+        "encoderAuto": "automático (negociado)",
+        "encoderNative": "Media Foundation nativo (sin tubería)",
+        "subprocess": "Ejecutar el plano de medios en un proceso aislado",
+        "auto": "auto",
+        "native": "nativa",
+        "uncapped": "sin límite",
+        "maxFps": "Límite de fotogramas",
+        "maxHeight": "Límite de resolución"
       },
       "midi": {
         "customPort": "(seleccionar puerto de entrada MIDI)",

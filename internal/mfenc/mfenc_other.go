@@ -25,6 +25,11 @@ func New(inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*En
 	return nil, ErrUnsupported
 }
 
+// NewOn is unavailable on this platform (no Media Foundation, no adapter pinning).
+func NewOn(adapterLUID int64, inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*Encoder, error) {
+	return nil, ErrUnsupported
+}
+
 func (e *Encoder) Output() <-chan AU              { return nil }
 func (e *Encoder) Name() string                   { return "" }
 func (e *Encoder) InputIsBGRA() bool              { return false }

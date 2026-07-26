@@ -93,9 +93,10 @@ type AdvertisePlan struct {
 // increasing strength:
 //
 //  1. ORDER - the planner's chosen encoder first, then the rest by descending headroom, demoted
-//     (protected-silicon) encoders last. NOTE: medialink.NegotiateCodecFor currently treats the
-//     advertised list as a SET (tier order is fixed in codecTiers), so order is a forward-looking
-//     seam for sender-side preference; only (2) changes today's negotiation outcome.
+//     (protected-silicon) encoders last. NOTE: medialink.Negotiate treats the advertised list as a
+//     SET (tier order lives in codecTiers, and the sender's own preference/pin arrives through
+//     NegotiateOpts from config - not from this order), so ORDER is still diagnostic; only (2)
+//     changes the negotiation outcome.
 //  2. WITHHOLD - an encoder whose silicon a CRITICAL consumer holds (OBS actively streaming/
 //     recording, Parsec) is dropped from the advertisement, but ONLY when a non-protected HARDWARE
 //     encoder remains. We never degrade to software-only or to an empty list: a CPU tier at 1080p60

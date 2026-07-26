@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mfenc"
@@ -55,7 +56,16 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 	if kbps <= 0 {
 		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
-	enc, err := mfenc.New(spec.Width, spec.Height, outW, outH, fps, kbps, gopFrames(fps))
+	// Device preference (WP-3): the native engine takes the adapter LUID directly, so it is the
+	// device-steerable H.264 path on every vendor (ffmpeg has no device flag for AMF at all). An
+	// unusable LUID degrades to the default adapter inside the shim.
+	var luid int64
+	if key, _, ok := spec.Device(); ok {
+		if v, ok := encoderscan.LUIDInt64(key); ok {
+			luid = v
+		}
+	}
+	enc, err := mfenc.NewOn(luid, spec.Width, spec.Height, outW, outH, fps, kbps, gopFrames(fps))
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +74,8 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{})}
 	log.Info(source, "native MF hardware encode", map[string]any{
 		"encoder": enc.Name(), "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
-		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA()})
+		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA(),
+		"device": spec.DeviceLUID})
 	go b.feed(bctx)
 	go b.emit(bctx)
 	return b, nil
@@ -175,5 +186,5 @@ func (b *mfBridge) RequestKeyframe() {
 
 // PipeStats implements medialink.PipelineReporter.
 func (b *mfBridge) PipeStats() medialink.PipelineStats {
-	return medialink.PipelineStats{Encoder: "h264_mf_native", OutFPS: b.out.value()}
+	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value()}
 }
