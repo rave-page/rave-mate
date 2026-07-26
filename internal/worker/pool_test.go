@@ -72,16 +72,24 @@ func TestPoolTimedOutWaiterRecoversHandedProc(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}()
-	_, err := p.acquire(ctx)
+	w, err := p.acquire(ctx)
 	if err == nil {
-		t.Fatal("expected error from canceled acquire")
-	}
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		// release never happened (waiter unregistered first) - also fine;
-		// nothing was handed over, so nothing can leak.
-		return
+		// Legitimate race outcome: the handoff landed before acquire's select
+		// saw ctx.Done (both cases ready → runtime picks either). The caller
+		// got a live proc; returning it must land in idle, not leak.
+		if w != busy {
+			t.Fatalf("nil error but wrong proc: %v", w)
+		}
+		<-done
+		p.release(w)
+	} else {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			// release never happened (waiter unregistered first) - also fine;
+			// nothing was handed over, so nothing can leak.
+			return
+		}
 	}
 	p.mu.Lock()
 	idle := len(p.idle)
