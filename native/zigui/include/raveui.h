@@ -283,6 +283,12 @@ const uint8_t *rz_ui_render_automations_v2(const uint8_t *state, size_t len, siz
 const uint8_t *rz_ui_render_automations_body_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_peers_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_peers_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+/* B7 fan-out (root ids 45-99): remaining JSON-bridged tabs. overlays first. */
+const uint8_t *rz_ui_render_overlays_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_appearance_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_spout_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_status_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_overlays_strip_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

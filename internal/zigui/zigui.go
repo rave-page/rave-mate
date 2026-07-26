@@ -1126,6 +1126,43 @@ func RenderPeersBodyV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: overlays ──
+
+// RenderOverlaysV2 renders the full Overlays view from an RZW1 document.
+func RenderOverlaysV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_v2(p, l, n)
+	})
+}
+
+// RenderOverlaysAppearanceV2 renders the #ovl-appearance fragment from an RZW1 document.
+func RenderOverlaysAppearanceV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_appearance_v2(p, l, n)
+	})
+}
+
+// RenderOverlaysSpoutV2 renders the #ovl-spout fragment from an RZW1 document.
+func RenderOverlaysSpoutV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_spout_v2(p, l, n)
+	})
+}
+
+// RenderOverlaysStatusV2 renders one #ovl-st-<kind> status fragment from an RZW1 document.
+func RenderOverlaysStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_status_v2(p, l, n)
+	})
+}
+
+// RenderOverlaysStripV2 renders the #ovl-strip fragment from an RZW1 document.
+func RenderOverlaysStripV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_overlays_strip_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

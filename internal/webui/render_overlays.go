@@ -388,7 +388,8 @@ func (u *UI) ovlStripState() ovlStripState {
 func (u *UI) renderOverlays() string {
 	st := u.overlaysState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderOverlays(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderOverlaysV2", wireOvlState(st), zigui.RenderOverlaysV2,
+			zigui.RenderOverlays, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -399,7 +400,8 @@ func (u *UI) renderOverlays() string {
 func (u *UI) overlayAppearanceCard(base string) string {
 	st := u.ovlApprState(base)
 	if zigui.Available() {
-		if h, ok := zigui.RenderOverlaysAppearance(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderOverlaysAppearanceV2", wireOvlAppr(st), zigui.RenderOverlaysAppearanceV2,
+			zigui.RenderOverlaysAppearance, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -410,7 +412,8 @@ func (u *UI) overlayAppearanceCard(base string) string {
 func (u *UI) spoutControlsHTML() string {
 	st := u.spoutState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderOverlaysSpout(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderOverlaysSpoutV2", wireOvlSpout(st), zigui.RenderOverlaysSpoutV2,
+			zigui.RenderOverlaysSpout, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -421,7 +424,8 @@ func (u *UI) spoutControlsHTML() string {
 func (u *UI) ovlStatusHTML(kind string) string {
 	st := u.ovlStatus(kind)
 	if zigui.Available() {
-		if h, ok := zigui.RenderOverlaysStatus(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderOverlaysStatusV2", wireUiStatus(st), zigui.RenderOverlaysStatusV2,
+			zigui.RenderOverlaysStatus, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -432,7 +436,8 @@ func (u *UI) ovlStatusHTML(kind string) string {
 func (u *UI) ovlStripHTML() string {
 	st := u.ovlStripState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderOverlaysStrip(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderOverlaysStripV2", wireOvlStrip(st), zigui.RenderOverlaysStripV2,
+			zigui.RenderOverlaysStrip, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

@@ -957,6 +957,30 @@ export fn rz_ui_render_peers_body_v2(state: ?[*]const u8, len: usize, out_len: *
     return renderWire(peers.Body, wire_gen.decodePeersBody, peers.renderBody, wire_gen.msg_peers_body, state, len, out_len);
 }
 
+// ── B7 fan-out: overlays (root ids 45-49; the B7 partition extends B-2's 10-44) ──
+// Full tab + the four live-patched fragments. The status fragment's root message is the shared
+// c.Status (UiStatus, id 48) - nested everywhere else, root only here.
+
+export fn rz_ui_render_overlays_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(overlays.State, wire_gen.decodeOvlState, overlays.render, wire_gen.msg_ovl_state, state, len, out_len);
+}
+
+export fn rz_ui_render_overlays_appearance_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(overlays.Appearance, wire_gen.decodeOvlAppr, overlays.renderAppearance, wire_gen.msg_ovl_appr, state, len, out_len);
+}
+
+export fn rz_ui_render_overlays_spout_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(overlays.Spout, wire_gen.decodeOvlSpout, overlays.renderSpout, wire_gen.msg_ovl_spout, state, len, out_len);
+}
+
+export fn rz_ui_render_overlays_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(@import("components.zig").Status, wire_gen.decodeUiStatus, overlays.renderStatus, wire_gen.msg_ui_status, state, len, out_len);
+}
+
+export fn rz_ui_render_overlays_strip_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(overlays.Strip, wire_gen.decodeOvlStrip, overlays.renderStrip, wire_gen.msg_ovl_strip, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;
