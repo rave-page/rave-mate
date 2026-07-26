@@ -277,3 +277,13 @@ func TestVRProxyGPUReset(t *testing.T) {
 	}
 	t.Fatalf("no %s frame sent", vrEvGpuReset)
 }
+
+// The vr child beats from the Manager's supervise loop, INCLUDING while idle (no HMD / SteamVR down).
+// vrHeartbeat must stay comfortably above the longest idle beat gap the Manager can produce, or the
+// host force-restarts a perfectly healthy idle child every vrHeartbeat (regression: the no-HMD gate
+// first slept its full 60s re-check between beats → a 45s kill loop).
+func TestVRHeartbeatExceedsIdleBeatGap(t *testing.T) {
+	if gap := vroverlay.MaxIdleBeatGap(); vrHeartbeat <= 2*gap {
+		t.Fatalf("vrHeartbeat %v leaves no margin over the idle beat gap %v", vrHeartbeat, gap)
+	}
+}

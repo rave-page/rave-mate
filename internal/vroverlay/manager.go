@@ -315,6 +315,29 @@ const reconnectWait = 5 * time.Second
 // VR_IsHmdPresent loads vrclient each call, and plugging a headset in still arms VR within a minute.
 const hmdRecheckWait = 60 * time.Second
 
+// idleBeatSlice caps how long the supervise loop may go without pinging the featurehost heartbeat
+// monitor while idling. MUST stay well under featurehost's vrHeartbeat (45s) - the first cut of the
+// no-HMD gate slept the full hmdRecheckWait between beats, so the host declared the idle child hung
+// and force-restarted it every 45s. Asserted by MaxIdleBeatGap's caller in internal/featurehost.
+// var, not const, only so tests can shrink it.
+var idleBeatSlice = 5 * time.Second
+
+// MaxIdleBeatGap is the longest gap between heartbeats an idle Manager can produce. The featurehost
+// vr proxy asserts its HeartbeatTimeout stays above it.
+func MaxIdleBeatGap() time.Duration { return idleBeatSlice }
+
+// idleWait waits d, beating every idleBeatSlice so a long idle never looks like a wedged cgo call.
+// Returns false if ctx was cancelled.
+func (m *Manager) idleWait(ctx context.Context, d time.Duration) bool {
+	for left := d; left > 0; left -= idleBeatSlice {
+		if !sleepCtx(ctx, min(left, idleBeatSlice)) {
+			return false
+		}
+		m.doBeat()
+	}
+	return true
+}
+
 // Idle reasons, logged once per CHANGE of reason (the loop re-evaluates every 5-60s forever).
 const (
 	idleNoHMD     = "no-hmd"
@@ -400,14 +423,14 @@ func (m *Manager) Start(ctx context.Context) error {
 		// already been printed. Hardware awareness first, then "is it already running".
 		if !m.hmdPresent() {
 			lastIdle = m.logIdle(lastIdle, idleNoHMD)
-			if !sleepCtx(ctx, hmdRecheckWait) {
+			if !m.idleWait(ctx, hmdRecheckWait) {
 				break
 			}
 			continue
 		}
 		if !m.serverUp() {
 			lastIdle = m.logIdle(lastIdle, idleNoServer)
-			if !sleepCtx(ctx, reconnectWait) {
+			if !m.idleWait(ctx, reconnectWait) {
 				break
 			}
 			continue
@@ -415,7 +438,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		_ = m.rt.Init()
 		if !m.rt.Available() {
 			lastIdle = m.logIdle(lastIdle, idleNoSession)
-			if !sleepCtx(ctx, reconnectWait) {
+			if !m.idleWait(ctx, reconnectWait) {
 				break
 			}
 			continue

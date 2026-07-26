@@ -127,6 +127,23 @@ func TestReinitRequestNeverInitsWithoutHMD(t *testing.T) {
 	}
 }
 
+// An idle (no-HMD) supervise loop MUST keep beating: the featurehost host kills a child that stops
+// pinging for vrHeartbeat (45s). The first cut of this gate slept the whole 60s re-check between
+// beats, so the host force-restarted a perfectly healthy idle vr child every 45s.
+func TestIdleLoopKeepsBeating(t *testing.T) {
+	prev := idleBeatSlice
+	idleBeatSlice = 5 * time.Millisecond // shrink the slice; hmdRecheckWait stays production-sized
+	t.Cleanup(func() { idleBeatSlice = prev })
+
+	var beats atomic.Int32
+	m, _ := newGateManager(t, &gateRT{hmd: false}, false, true)
+	m.SetBeat(func() { beats.Add(1) })
+	runStart(t, m, 300*time.Millisecond)
+	if n := beats.Load(); n < 5 {
+		t.Fatalf("idle loop beat %d× in 300ms - the host would kill it as hung", n)
+	}
+}
+
 // ── log helpers ──
 
 func logDump(l *logbus.Bus) string {
