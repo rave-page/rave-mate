@@ -1122,6 +1122,26 @@ and its Zig counterpart are only connected through `schema.go`; add the field wi
 and v2 silently stops carrying it - the three-way gate turns that into a byte-diff failure, which
 is exactly why the gate covers every fixture rather than a sample. Same for a Zig-side struct
 change (a renamed field, a new non-zero default): regenerate and re-read the HAZARD rule above.
+## Phase B — B7 fan-out (wire partition extension: root ids 45-99)
+
+B-2 left ids 45-49 free and ~68 render surfaces on the JSON bridge (midi, vrchat, worlds,
+overlays, twitch, editor, dialogs, library modals/remote, motion pcv, publish remote,
+automations sub-views, update flow). B7 claims **45-99** for them (100-149 stay the fragment
+scheduler's); the recipe is B-2's unchanged - schema rows, regenerate, `_v2` export + binding
++ stub, `zigWire(...)` at the call site, three-way gate + fuzz registration in
+`zigui_wire_b7_test.go` (`wireExportsB7`/`wireBasesB7`, hooked into the same mutation-fuzz
+cross-feed as B-2's registry).
+
+Migrated so far:
+
+| view | root ids | exports | notes |
+|---|---|---|---|
+| overlays | 45-49 | full + `#ovl-appearance` + `#ovl-spout` + `#ovl-st-<kind>` + `#ovl-strip` | `UiStatus` doubles as the status fragment's ROOT message (id 48) - a nested message can also be a root (LogsLines precedent). A zero `uiStatus` renders "" and the exports decline empty output, so fragment gates skip the unavailable fixture (mirrors the golden suite). |
+| twitch | 50-53 | full + `#twitch-obs` + `#twitch-presets` + `#twitch-feed` | `#twitch-feed` is patched on EVERY chat/alert event - the hot path. Plain rows, nothing new in the codec. |
+
+Numbers: PHASEB_BASELINE.md "Phase B7 fan-out". Overlays: dispatch -44% full / -33% status
+frag, documents 42.1% of the JSON. Twitch: -63% full / -59% feed, documents 39.9%.
+
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

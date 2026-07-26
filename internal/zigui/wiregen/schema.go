@@ -392,7 +392,8 @@ var schema = []msg{
 		fs: []field{st(1, "Sel", "sel", "SelState"), s(2, "Dataset", "dataset"), b(3, "Running", "running"), s(4, "BarPct", "barPct"), s(5, "BarCap", "barCap"), st(6, "Cancel", "cancel", "UiBtn"), b(7, "HasVerdict", "hasVerdict"), s(8, "VerdictTone", "verdictTone"), s(9, "Verdict", "verdict"), s(10, "Err", "err"), b(11, "CanTrain", "canTrain"), st(12, "Train", "train", "UiBtn"), b(13, "Few", "few"), s(14, "FewHint", "fewHint"), s(15, "Note", "note")},
 	},
 	{
-		name: "UiStatus", goT: "uiStatus", zigT: "c.Status",
+		name: "UiStatus", goT: "uiStatus", zigT: "c.Status", id: 48,
+		doc: "one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else",
 		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
 	},
 	{
@@ -847,6 +848,90 @@ var schema = []msg{
 		doc: "Peers tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), st(5, "Body", "body", "PeersBody")},
 	},
+	// ── phase B7 fan-out: root ids 45-99 (extends wave B-2's 10-44 partition; 100-149 stay
+	// the fragment scheduler's). Remaining JSON-bridged tabs move to the wire by adding rows
+	// here - same recipe as B-2, no new codec kinds unless a Zig default demands one. ──
+	// overlays: full tab + the four live-patched fragments (#ovl-appearance, #ovl-spout,
+	// #ovl-st-<kind>, #ovl-strip). UiStatus doubles as the status fragment's ROOT message
+	// (id 48) - a message that is nested elsewhere can also be a root (LogsLines precedent).
+	{
+		name: "OvlCard", goT: "ovlCardState", zigT: "overlays.Card",
+		fs: []field{s(1, "Title", "title"), s(2, "StatusID", "statusId"), st(3, "Status", "status", "UiStatus"), st(4, "En", "en", "UiToggle")},
+	},
+	{
+		name: "OvlAppr", goT: "ovlApprState", zigT: "overlays.Appearance", id: 46,
+		doc: "#ovl-appearance fragment (re-patched by the fader-flag cache)",
+		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), li(3, "Btns", "btns", "UiBtn"), st(4, "Fader", "fader", "UiToggle"), s(5, "Note2", "note2")},
+	},
+	{
+		name: "OvlWeb", goT: "ovlWebState", zigT: "overlays.Web",
+		fs: []field{st(1, "Card", "card", "OvlCard"), st(2, "Port", "port", "UiField"), li(3, "Btns", "btns", "UiBtn"), st(4, "URL", "url", "UiKV"), s(5, "Note1", "note1"), st(6, "AutoAdd", "autoAdd", "UiToggle"), st(7, "Scene", "scene", "UiField"), st(8, "Nest", "nest", "UiToggle"), s(9, "Note2", "note2")},
+	},
+	{
+		name: "OvlWave", goT: "ovlWaveState", zigT: "overlays.Wave",
+		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), st(3, "Zoom", "zoom", "SelState"), st(4, "Playhead", "playhead", "SelState"), st(5, "WaveColor", "waveColor", "UiField"), st(6, "WaveOpac", "waveOpac", "UiSlider"), st(7, "BgColor", "bgColor", "UiField"), st(8, "BgOpac", "bgOpac", "UiSlider"), s(9, "Note2", "note2")},
+	},
+	{
+		name: "OvlDir", goT: "ovlDirState", zigT: "overlays.Dir",
+		fs: []field{st(1, "Card", "card", "OvlCard"), st(2, "Dir", "dir", "UiField"), st(3, "Open", "open", "UiBtn"), s(4, "Note", "note")},
+	},
+	{
+		name: "OvlNote", goT: "ovlNoteState", zigT: "overlays.Note",
+		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note", "note")},
+	},
+	{
+		name: "OvlSpout", goT: "ovlSpoutState", zigT: "overlays.Spout", id: 47,
+		doc: "#ovl-spout fragment (re-rendered on install completion)",
+		fs: []field{s(1, "Note", "note"), s(2, "StatusLine", "statusLine"), s(3, "InstallLbl", "installLbl"), b(4, "CanInstall", "canInstall"), s(5, "OpenSdk", "openSdk"), s(6, "SdkURL", "sdkUrl")},
+	},
+	{
+		name: "OvlVS", goT: "ovlVSState", zigT: "overlays.VideoShare",
+		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note", "note"), st(3, "Scale", "scale", "SelState"), s(4, "Note2", "note2"), b(5, "Spout", "spout"), st(6, "SpoutCtl", "spoutCtl", "OvlSpout")},
+	},
+	{
+		name: "OvlStrip", goT: "ovlStripState", zigT: "overlays.Strip", id: 49,
+		doc: "#ovl-strip fragment (outputs summary)",
+		fs: []field{s(1, "Parts", "parts"), s(2, "Hint", "hint"), s(3, "Right", "right")},
+	},
+	{
+		name: "OvlState", goT: "ovlState", zigT: "overlays.State", id: 45,
+		doc: "Overlays tab (full view)",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
+	},
+	// twitch: full tab + #twitch-obs + #twitch-presets + #twitch-feed (the feed is patched on
+	// EVERY chat/alert event - the hot path this tab moves to the wire for).
+	{
+		name: "TwTag", goT: "twTag", zigT: "twitch.Tag",
+		fs: []field{s(1, "Text", "text"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "TwRow", goT: "twRow", zigT: "twitch.Row",
+		fs: []field{s(1, "Kind", "kind"), s(2, "Date", "date"), s(3, "Name", "name"), s(4, "NameStyle", "nameStyle"), li(5, "Tags", "tags", "TwTag"), b(6, "Mod", "mod"), s(7, "ModVal", "modVal"), s(8, "ModTitle", "modTitle"), s(9, "Text", "text"), s(10, "Variant", "variant")},
+	},
+	{
+		name: "TwViewer", goT: "twViewerState", zigT: "twitch.Viewers",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Text", "text")},
+	},
+	{
+		name: "TwObs", goT: "twObsState", zigT: "twitch.Obs", id: 51,
+		doc: "#twitch-obs fragment (viewer count + cockpit)",
+		fs: []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
+	},
+	{
+		name: "TwPresets", goT: "twPresetsState", zigT: "twitch.Presets", id: 52,
+		doc: "#twitch-presets fragment (title-preset chip strip)",
+		fs: []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
+	},
+	{
+		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53,
+		doc: "#twitch-feed inner fragment (patched on every chat/alert event)",
+		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
+	},
+	{
+		name: "TwState", goT: "twState", zigT: "twitch.State", id: 50,
+		doc: "Twitch tab (full view)",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -904,6 +989,9 @@ var zigImports = [][2]string{
 	{"live", "live.zig"},
 	// --- phaseb-sched ---
 	{"tick", "tick.zig"},
+	// --- phase B7 fan-out ---
+	{"overlays", "overlays.zig"},
+	{"twitch", "twitch.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

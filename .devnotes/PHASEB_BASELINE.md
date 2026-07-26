@@ -210,6 +210,19 @@ into the arena, then the finished document is copied again by `Finish`. A zero-c
 wiretype (offset into the caller's buffer instead of the arena) would fix that class; it is not
 needed for correctness and nothing in the tick path renders the full player.
 
+## Phase B7 fan-out: v1 vs v2 per view (root ids 45-99)
+
+Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), branch
+`feat/zig-b7-state-i18n`. Whole dispatch = serialize + Zig render.
+
+| view | v1 json ns/op | v2 wire ns/op | Δ | doc B vs json B (golden set) |
+|---|--:|--:|--:|---|
+| overlays (full tab) | 41 685 | 23 157 | **-44%** | 19 627 / 46 596 = 42.1% |
+| overlays `#ovl-st-<kind>` frag | 1 367 | 920 | **-33%** | (~60 B of state) |
+| overlays `#ovl-strip` frag | 1 451 | 1 018 | **-30%** | (in the set above) |
+| twitch (full tab) | 15 692 | 5 770 | **-63%** | 7 330 / 18 371 = 39.9% |
+| twitch `#twitch-feed` frag | 10 724 | 4 364 | **-59%** | (per chat/alert event, not a tick) |
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -

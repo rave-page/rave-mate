@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x70698930
+	wireSchemaHash       uint32 = 0x0f4dde8e
 	wireMsgAgState       uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -46,6 +46,15 @@ const (
 	wireMsgAutoBodyState uint16 = 42  // #auto-body (version-gated ~1 Hz tick)
 	wireMsgPeers         uint16 = 43  // Peers tab (full view)
 	wireMsgPeersBody     uint16 = 44  // #peers-body (~1 Hz live tick)
+	wireMsgOvlState      uint16 = 45  // Overlays tab (full view)
+	wireMsgOvlAppr       uint16 = 46  // #ovl-appearance fragment (re-patched by the fader-flag cache)
+	wireMsgOvlSpout      uint16 = 47  // #ovl-spout fragment (re-rendered on install completion)
+	wireMsgUiStatus      uint16 = 48  // one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else
+	wireMsgOvlStrip      uint16 = 49  // #ovl-strip fragment (outputs summary)
+	wireMsgTwState       uint16 = 50  // Twitch tab (full view)
+	wireMsgTwObs         uint16 = 51  // #twitch-obs fragment (viewer count + cockpit)
+	wireMsgTwPresets     uint16 = 52  // #twitch-presets fragment (title-preset chip strip)
+	wireMsgTwFeed        uint16 = 53  // #twitch-feed inner fragment (patched on every chat/alert event)
 	wireMsgTkLive        uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
 	wireMsgTkLogs        uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
 )
@@ -1857,6 +1866,154 @@ func (v peersSt) encodeWire(w *zigui.WireWriter) {
 	w.Struct(5, func() { v.Body.encodeWire(w) })
 }
 
+func (v ovlCardState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.StatusID)
+	w.Struct(3, func() { v.Status.encodeWire(w) })
+	w.Struct(4, func() { v.En.encodeWire(w) })
+}
+
+func (v ovlApprState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Str(2, v.Note1)
+	w.List(3, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.Struct(4, func() { v.Fader.encodeWire(w) })
+	w.Str(5, v.Note2)
+}
+
+func (v ovlWebState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Struct(2, func() { v.Port.encodeWire(w) })
+	w.List(3, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.Struct(4, func() { v.URL.encodeWire(w) })
+	w.Str(5, v.Note1)
+	w.Struct(6, func() { v.AutoAdd.encodeWire(w) })
+	w.Struct(7, func() { v.Scene.encodeWire(w) })
+	w.Struct(8, func() { v.Nest.encodeWire(w) })
+	w.Str(9, v.Note2)
+}
+
+func (v ovlWaveState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Str(2, v.Note1)
+	w.Struct(3, func() { v.Zoom.encodeWire(w) })
+	w.Struct(4, func() { v.Playhead.encodeWire(w) })
+	w.Struct(5, func() { v.WaveColor.encodeWire(w) })
+	w.Struct(6, func() { v.WaveOpac.encodeWire(w) })
+	w.Struct(7, func() { v.BgColor.encodeWire(w) })
+	w.Struct(8, func() { v.BgOpac.encodeWire(w) })
+	w.Str(9, v.Note2)
+}
+
+func (v ovlDirState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Struct(2, func() { v.Dir.encodeWire(w) })
+	w.Struct(3, func() { v.Open.encodeWire(w) })
+	w.Str(4, v.Note)
+}
+
+func (v ovlNoteState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Str(2, v.Note)
+}
+
+func (v ovlSpoutState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Note)
+	w.Str(2, v.StatusLine)
+	w.Str(3, v.InstallLbl)
+	w.Bool(4, v.CanInstall)
+	w.Str(5, v.OpenSdk)
+	w.Str(6, v.SdkURL)
+}
+
+func (v ovlVSState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Card.encodeWire(w) })
+	w.Str(2, v.Note)
+	w.Struct(3, func() { v.Scale.encodeWire(w) })
+	w.Str(4, v.Note2)
+	w.Bool(5, v.Spout)
+	w.Struct(6, func() { v.SpoutCtl.encodeWire(w) })
+}
+
+func (v ovlStripState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Parts)
+	w.Str(2, v.Hint)
+	w.Str(3, v.Right)
+}
+
+func (v ovlState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Bool(3, v.Available)
+	w.Str(4, v.Unavailable)
+	w.List(5, len(v.TopBtns), func(i int) { v.TopBtns[i].encodeWire(w) })
+	w.Struct(6, func() { v.Appearance.encodeWire(w) })
+	w.Struct(7, func() { v.Web.encodeWire(w) })
+	w.Struct(8, func() { v.Wave.encodeWire(w) })
+	w.Struct(9, func() { v.Png.encodeWire(w) })
+	w.Struct(10, func() { v.Obs.encodeWire(w) })
+	w.Struct(11, func() { v.VS.encodeWire(w) })
+	w.Struct(12, func() { v.NP.encodeWire(w) })
+	w.Struct(13, func() { v.Strip.encodeWire(w) })
+}
+
+func (v twTag) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	w.Str(2, v.Variant)
+}
+
+func (v twRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Str(2, v.Date)
+	w.Str(3, v.Name)
+	w.Str(4, v.NameStyle)
+	w.List(5, len(v.Tags), func(i int) { v.Tags[i].encodeWire(w) })
+	w.Bool(6, v.Mod)
+	w.Str(7, v.ModVal)
+	w.Str(8, v.ModTitle)
+	w.Str(9, v.Text)
+	w.Str(10, v.Variant)
+}
+
+func (v twViewerState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Cls)
+	w.Str(2, v.Text)
+}
+
+func (v twObsState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Viewers.encodeWire(w) })
+	w.Str(2, v.Cockpit)
+}
+
+func (v twPresetsState) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.Str(2, v.Empty)
+	w.Str(3, v.Manage)
+	w.Str(4, v.Add)
+}
+
+func (v twFeedState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Empty)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v twState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Bool(3, v.Available)
+	w.Str(4, v.Unavailable)
+	w.Bool(5, v.ShowObs)
+	w.Str(6, v.ObsTitle)
+	w.Struct(7, func() { v.Obs.encodeWire(w) })
+	w.Bool(8, v.ShowPresets)
+	w.Str(9, v.PresetsTitle)
+	w.Struct(10, func() { v.Presets.encodeWire(w) })
+	w.Struct(11, func() { v.Feed.encodeWire(w) })
+	w.Bool(12, v.ShowSend)
+	w.Str(13, v.SendPH)
+	w.Str(14, v.SendLbl)
+}
+
 func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Text)
 	if v.Tip != nil {
@@ -2142,6 +2299,69 @@ func wirePeers(v peersSt) []byte {
 // wirePeersBody encodes peersBodySt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wirePeersBody(v peersBodySt) []byte {
 	w := zigui.NewWireWriter(wireMsgPeersBody, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireOvlState encodes ovlState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireOvlState(v ovlState) []byte {
+	w := zigui.NewWireWriter(wireMsgOvlState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireOvlAppr encodes ovlApprState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireOvlAppr(v ovlApprState) []byte {
+	w := zigui.NewWireWriter(wireMsgOvlAppr, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireOvlSpout encodes ovlSpoutState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireOvlSpout(v ovlSpoutState) []byte {
+	w := zigui.NewWireWriter(wireMsgOvlSpout, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireUiStatus encodes uiStatus as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireUiStatus(v uiStatus) []byte {
+	w := zigui.NewWireWriter(wireMsgUiStatus, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireOvlStrip encodes ovlStripState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireOvlStrip(v ovlStripState) []byte {
+	w := zigui.NewWireWriter(wireMsgOvlStrip, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwState encodes twState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwState(v twState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwObs encodes twObsState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwObs(v twObsState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwObs, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwPresets encodes twPresetsState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwPresets(v twPresetsState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwPresets, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwFeed encodes twFeedState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwFeed(v twFeedState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwFeed, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
