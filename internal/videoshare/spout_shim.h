@@ -41,6 +41,14 @@ int rave_spout_roundtrip(const unsigned char* in, unsigned char* out, unsigned i
 int rave_spout_sender_name(int idx, char* out, int cap);
 int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h);
 
+// rave_spout_sender_share resolves a named sender's DX11 SHARED-TEXTURE handle + DXGI format +
+// dims in ONE registry read (GetSenderInfo - the same shared-memory read rave_spout_scan uses).
+// Lets a zero-copy consumer open that texture on its OWN D3D11 device instead of paying a
+// GPU→CPU readback. 1 = ok. share == 0 → no DX11 shared texture (DX9 / CPU memoryshare sender):
+// the caller must keep the readback path. Dims are validated like every other shim geometry.
+int rave_spout_sender_share(const char* name, unsigned long long* share, unsigned int* fmt,
+                           unsigned int* w, unsigned int* h);
+
 // One-shot registry scan: names = maxN slots of nameCap bytes (NUL-terminated), dims = 2 uints per
 // slot (w,h; 0 when the registry has no size). Returns the filled slot count, -1 without the DLL.
 // Replaces count + N name + N size calls (which each built and released a Spout object).
