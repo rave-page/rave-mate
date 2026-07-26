@@ -52,6 +52,10 @@ type Options struct {
 	// cap (kill-on-close). A runaway heap fails its next allocation → child dies → Host restarts it.
 	// For resource-bearing children (media plane); leave 0 for the plain kill-on-close job.
 	MemLimitMB int
+	// Command overrides how the child is spawned (default `<exe> feature <name>`). TEST SEAM for
+	// callers outside this package: a test re-execs its own binary with an env marker instead of
+	// shipping an exe. Nil in production.
+	Command func() *exec.Cmd
 	// LowPriority spawns the child in BELOW_NORMAL_PRIORITY_CLASS so a background feature (e.g.
 	// Icecast set-capture receiving+writing a live broadcast) always yields to the user's
 	// foreground app and any active encoder. Leave false for latency-sensitive children.
@@ -93,7 +97,8 @@ func New(opt Options) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{opt: opt, exePath: exe, pending: map[string]chan frame{}, frames: map[string]uint64{}}
+	h := &Host{opt: opt, exePath: exe, command: opt.Command,
+		pending: map[string]chan frame{}, frames: map[string]uint64{}}
 	hostsMu.Lock()
 	hosts = append(hosts, h)
 	hostsMu.Unlock()
@@ -248,6 +253,19 @@ func (h *Host) Running() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.ready
+}
+
+// Kill force-ends the current child session (no graceful stop): the reader sees stdout close and
+// supervise restarts with backoff. For a child that is alive but no longer serving - e.g. one that
+// stopped reading its stdin (webui procShell's wedge watchdog). No-op when nothing is running.
+func (h *Host) Kill() {
+	h.mu.Lock()
+	cur := h.cur
+	h.mu.Unlock()
+	if cur == nil || cur.cmd.Process == nil {
+		return
+	}
+	sysexec.KillTree(cur.cmd.Process)
 }
 
 // Stats returns the lifetime restart count and the last crash error ("" if none).

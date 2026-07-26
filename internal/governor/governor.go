@@ -50,6 +50,7 @@ type gov struct {
 	log      *logbus.Bus
 	lastPrio bool // last applied "below-normal?" decision (avoid redundant syscalls)
 	prioSet  bool
+	watchers []func(Signals) // signal-change listeners (see OnChange)
 }
 
 // g is the process-wide singleton. Window starts focused (the app opens in the foreground).
@@ -101,7 +102,13 @@ func set(field *bool, v bool, name string) {
 		resume = g.drainDeferred() // stream ended - release parked background work
 	}
 	log := g.log
+	sig := Signals{Focused: g.focused, Minimized: g.minimized, SizeMove: g.sizeMove, Streaming: g.streaming}
+	watchers := make([]func(Signals), len(g.watchers))
+	copy(watchers, g.watchers)
 	g.mu.Unlock()
+	for _, fn := range watchers { // fired OUTSIDE the lock: a watcher may read Snapshot()
+		fn(sig)
+	}
 	if log != nil {
 		// streaming transitions are rare + meaningful (Info); focus/minimize/drag flap
 		// with normal window use - Debug keeps them out of the main view.
@@ -128,6 +135,19 @@ func SetSizeMove(b bool) { set(&g.sizeMove, b, "sizemove") }
 // SetStreaming reports an OBS stream on this machine went live/ended. On end, any background work
 // parked via WhenBackgroundAllowed is released.
 func SetStreaming(b bool) { set(&g.streaming, b, "streaming") }
+
+// OnChange registers a listener for signal changes (called after the priority decision is applied,
+// outside the lock). Used where a signal must reach ANOTHER process that cannot observe it - the
+// webui procShell forwards Streaming to its window child so the child's own governor reaches the
+// same below-normal verdict the single in-proc process used to make. Listeners must not block.
+func OnChange(fn func(Signals)) {
+	if fn == nil {
+		return
+	}
+	g.mu.Lock()
+	g.watchers = append(g.watchers, fn)
+	g.mu.Unlock()
+}
 
 // Snapshot returns the current signals.
 func Snapshot() Signals {

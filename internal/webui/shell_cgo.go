@@ -11,8 +11,6 @@ import (
 
 	webview "github.com/webview/webview_go"
 	"golang.org/x/sys/windows/registry"
-
-	"rave.page/mate/internal/config"
 )
 
 // shellAvailable reports the webview is compiled in (cgo Windows builds only).
@@ -76,7 +74,10 @@ var (
 )
 
 // SetShutdownHook registers the graceful-shutdown routine the force-exit watchdog invokes.
-// app.go wires its shutdown() here.
+// NOTE: nothing calls this today, so a wedged in-proc webview hard-exits WITHOUT flushing daemon
+// state. That gap is what the B5 procShell removes structurally (the daemon can always kill the
+// window child, so run() returns and app.go's own shutdown() runs) - see ZIG_UI_GUIDE.md
+// "Phase B - B5 procShell protocol" §6.
 func SetShutdownHook(fn func()) {
 	shutdownHookMu.Lock()
 	shutdownHook = fn
@@ -95,7 +96,7 @@ type cgoShell struct {
 	acts chan string // page → Go actions, drained off the UI thread (see actWorker)
 }
 
-func newShell(title string, w, h int, onAction func(string), onReady func()) (shell, bool) {
+func newNativeShell(title string, w, h int, onAction func(string), onReady func()) (shell, bool) {
 	return &cgoShell{title: title, w: w, h: h, onAction: onAction, onReady: onReady,
 		done: make(chan struct{}), acts: make(chan string, 64)}, true
 }
@@ -137,8 +138,9 @@ func (s *cgoShell) actWorker() {
 func (s *cgoShell) run(initialHTML string, _ bool) {
 	runtime.LockOSThread()
 	// Persistent WebView2 profile dir (owner-only). Go holds all app state, so this only avoids
-	// ephemeral temp churn / DevTools noise; harmless elsewhere.
-	if dir, err := config.DataPath("webview2"); err == nil {
+	// ephemeral temp churn / DevTools noise; harmless elsewhere. Resolved via shellDataDir so the B5
+	// child can be handed the path instead of reading config itself.
+	if dir, err := shellDataDir(); err == nil {
 		if os.MkdirAll(dir, 0o700) == nil {
 			_ = os.Setenv("WEBVIEW2_USER_DATA_FOLDER", dir)
 		}
@@ -193,7 +195,7 @@ func (s *cgoShell) run(initialHTML string, _ bool) {
 	})
 	// ctl eval round-trip result sink (see shell.go).
 	_ = w.Bind("__rave_evalResult", func(id, result string) { deliverEval(id, result) })
-	w.Init(runtimeJS)
+	w.Init(shellInitJS())
 	w.SetHtml(initialHTML)
 	if s.onReady != nil {
 		go s.onReady()

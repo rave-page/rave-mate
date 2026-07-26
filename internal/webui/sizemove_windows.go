@@ -48,7 +48,19 @@ const sizeMoveStale = 1500 * time.Millisecond
 var (
 	uiSizeMove   atomic.Bool
 	sizeMoveSeen atomic.Int64 // UnixNano of last enter/move/size message; 0 = none
+	// Latched for reportWindowState: the B5 window child has to FORWARD these signals (the daemon's
+	// governor + eval gate live in another process now), so they are remembered, not just passed on.
+	winFocused   atomic.Bool
+	winMinimized atomic.Bool
 )
+
+// reportWindowState pushes the current window signals to the parent when this process is the B5
+// window child (onWindowState set). No-op in the daemon: the governor calls below already applied.
+func reportWindowState() {
+	if fn := onWindowState; fn != nil {
+		fn(procWin{Focused: winFocused.Load(), Minimized: winMinimized.Load(), SizeMove: uiSizeMove.Load()})
+	}
+}
 
 // inSizeMove reports the user is currently dragging/resizing the window. Self-clears a latch left
 // set by a missed WM_EXITSIZEMOVE (no drag message for sizeMoveStale) so the eval flusher can't wedge.
@@ -59,6 +71,7 @@ func inSizeMove() bool {
 	if seen := sizeMoveSeen.Load(); seen == 0 || time.Since(time.Unix(0, seen)) > sizeMoveStale {
 		uiSizeMove.Store(false)
 		governor.SetSizeMove(false)
+		reportWindowState()
 		return false
 	}
 	return true
@@ -70,6 +83,7 @@ var sizeMoveProc = syscall.NewCallback(func(hwnd, msg, wp, lp, _, _ uintptr) uin
 		sizeMoveSeen.Store(time.Now().UnixNano()) // stamp BEFORE the latch so inSizeMove never sees true+seen==0
 		uiSizeMove.Store(true)
 		governor.SetSizeMove(true)
+		reportWindowState()
 	case wmSizing, wmMoving:
 		if uiSizeMove.Load() {
 			sizeMoveSeen.Store(time.Now().UnixNano()) // keep a live drag fresh
@@ -77,22 +91,32 @@ var sizeMoveProc = syscall.NewCallback(func(hwnd, msg, wp, lp, _, _ uintptr) uin
 	case wmExitSizeMove:
 		uiSizeMove.Store(false)
 		governor.SetSizeMove(false)
+		reportWindowState()
 	case wmCaptureChanged:
 		if uiSizeMove.Load() { // capture loss ends any drag - don't wait for a maybe-missing EXIT
 			uiSizeMove.Store(false)
 			governor.SetSizeMove(false)
+			reportWindowState()
 		}
 	case wmActivate:
-		governor.SetFocused((wp & 0xffff) != 0) // WA_INACTIVE==0 -> lost focus
+		winFocused.Store((wp & 0xffff) != 0)
+		governor.SetFocused(winFocused.Load()) // WA_INACTIVE==0 -> lost focus
+		reportWindowState()
 	case wmSize:
 		switch wp {
 		case sizeMinimized:
+			winMinimized.Store(true)
 			governor.SetMinimized(true)
+			reportWindowState()
 		case sizeRestored, sizeMaximized:
+			winMinimized.Store(false)
 			governor.SetMinimized(false)
+			reportWindowState()
 		}
 	case wmShowWindow:
+		winMinimized.Store(wp == 0)
 		governor.SetMinimized(wp == 0) // hidden-to-tray = not being looked at
+		reportWindowState()
 	case wmClose:
 		// Tray app, not quit-on-close (CLAUDE.md): X/Alt+F4 hides the window; only tray
 		// Quit / service stop exits. terminate() uses PostQuitMessage, so quit is unaffected.

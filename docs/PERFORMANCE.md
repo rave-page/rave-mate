@@ -85,7 +85,9 @@ worsen scheduling machine-wide.
 2. **Before** starting the stream, confirm in Task Manager: `rave-mate.exe` and
    `rave-mate-feature-icecast.exe` show **Below normal** priority when the window is unfocused;
    fingerprint/transcode helper processes show **Low**. WebView2 GPU usage should be ~0 (software
-   compositing).
+   compositing). With `RAVE_MATE_SHELL=proc` the window lives in
+   `rave-mate-feature-webview.exe`, which follows the same priority rule (it runs the same
+   governor and is told when a stream goes live).
 3. Start streaming in OBS. Within ~3 s, `rave-mate ctl logs` should show
    `governor: streaming changed value=true`. Confirm fingerprinting/indexing pause while Spout,
    peerlink, MIDI/now-playing and overlays keep working.

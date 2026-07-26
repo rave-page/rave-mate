@@ -36,8 +36,21 @@ var (
 
 func nextEvalID() string { return fmt.Sprintf("e%d", atomic.AddUint64(&evalSeq, 1)) }
 
+// evalSink, when set, REPLACES local waiter routing: the B5 child forwards every binding invocation
+// to the daemon, whose evalWaiters map holds the blocked callers (shell_proc_child.go). Nil in the
+// daemon and in the in-proc shell.
+var evalSink func(id, result string)
+
+// onWindowState, when set, reports window-state changes (focus/minimize/size-move/hide) to the B5
+// child's parent. Nil in the daemon: the in-proc subclass feeds the governor directly, as before.
+var onWindowState func(procWin)
+
 // deliverEval is called (from the webview binding) with a completed eval result.
 func deliverEval(id, result string) {
+	if sink := evalSink; sink != nil {
+		sink(id, result)
+		return
+	}
 	if ch, ok := evalWaiters.Load(id); ok {
 		select {
 		case ch.(chan string) <- result:

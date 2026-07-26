@@ -147,8 +147,13 @@ func New(svc ui.Services) *UI {
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
 	}
+	shellLog = svc.Log // procShell + its featurehost Host log here (set before construction)
 	if sh, ok := newShell("rave-mate", 1280, 820, u.onAction, u.onReady); ok {
 		u.shell = sh
+		if ps, isProc := sh.(*procShell); isProc {
+			ps.onReattach = u.reattach  // a restarted window child is rebuilt from state
+			ps.onDrop = u.dropFragCache // ordered-lane overflow must not leave stale fragments
+		}
 		go u.evalFlusher()
 		u.registerUIBinds() // MIDI-mapped desktop-UI actions (primary window only)
 	}
@@ -433,13 +438,30 @@ func (u *UI) setTab(id string) {
 	u.eval("window.__patch('nav-list'," + jsQuote(u.navListHTML()) + ")")
 }
 
-func (u *UI) patchMain() {
+// dropFragCache invalidates the tick dedup caches: whatever the page shows is no longer known, so
+// every fragment must re-emit. Callers: a main patch (DOM replaced), an eval-queue overflow, and a
+// dropped IPC frame (procShell ordered-lane overflow) - a dropped patch must never stick stale.
+func (u *UI) dropFragCache() {
 	u.fragMu.Lock()
-	u.frags = nil // DOM replaced - drop the tick dedup cache
+	u.frags = nil
 	// --- phaseb-sched ---
-	u.fragH, u.fragGen = nil, u.fragGen+1 // same for the hash cache; the bump voids an in-flight batch
+	u.fragH, u.fragGen = nil, u.fragGen+1 // the bump voids a batch built across the drop
 	// --- end phaseb-sched ---
 	u.fragMu.Unlock()
+}
+
+// reattach rebuilds the page after the window child restarted (B5 procShell): a fresh document plus
+// a full re-render. The virtualShell contract already guarantees the UI is derivable from state, so
+// nothing about a crashed window needs recovering - it is rendered again.
+func (u *UI) reattach() {
+	u.dropFragCache()
+	u.shell.setHTML(u.shellHTML())
+	u.patchMain()
+	u.eval("window.__patch('nav-list'," + jsQuote(u.navListHTML()) + ")")
+}
+
+func (u *UI) patchMain() {
+	u.dropFragCache()
 	// --- phaseb-b4player ---
 	// mpOrdered: mark → build → enqueue → heal, so a player mutation that raced the build cannot
 	// be overwritten by this patch (player_actions.go "container-render ordering").
@@ -779,12 +801,7 @@ func (u *UI) enqueueEval(key, js string) {
 	}
 	u.evalMu.Unlock()
 	if wipe {
-		u.fragMu.Lock()
-		u.frags = nil
-		// --- phaseb-sched ---
-		u.fragH, u.fragGen = nil, u.fragGen+1 // a dropped patch must re-emit next tick, hashes included
-		// --- end phaseb-sched ---
-		u.fragMu.Unlock()
+		u.dropFragCache() // a dropped patch must re-emit next tick, hashes included
 	}
 	u.kickEval()
 }
@@ -831,7 +848,7 @@ func (u *UI) evalFlusher() {
 		for {
 			// The size-move gate protects the REAL window's UI thread; a virtual shell has no
 			// window and must keep streaming while the local user drags theirs.
-			for !u.virtual() && inSizeMove() {
+			for u.holdEvals() {
 				select {
 				case <-u.stop:
 					return
@@ -845,6 +862,19 @@ func (u *UI) evalFlusher() {
 			u.dispatchEvals(js)
 		}
 	}
+}
+
+// holdEvals reports the eval flusher must stall: the user is dragging/resizing the window. With the
+// B5 procShell the window lives in a child, so the latch comes from its `win` events instead of the
+// in-proc subclass - the DAEMON holds during a size-move, the child never buffers (protocol doc).
+func (u *UI) holdEvals() bool {
+	if u.virtual() {
+		return false
+	}
+	if ps, ok := u.shell.(*procShell); ok {
+		return ps.inSizeMove()
+	}
+	return inSizeMove()
 }
 
 // dispatchEvals sends one batch to the page and waits for its ack (bounded): ≤1 un-acked Dispatch

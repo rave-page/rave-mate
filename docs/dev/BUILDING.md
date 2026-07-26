@@ -61,6 +61,17 @@ RAVE_MATE_CTL_ADDR=127.0.0.1:47733 ./dist/rave-mate.exe ctl status
 Both env vars must be set together - the ctl addr is also the single-instance guard, and the
 config dir keeps state (config, library, secrets) out of the real instance's.
 
+**Window host** (`RAVE_MATE_SHELL`, webview renderer only): `cgo` (default) runs the WebView2 window
+in the daemon; `proc` runs it in a supervised child (`rave-mate feature webview`), so a wedged or
+crashed window costs you the window, not the daemon - it is killed and relaunched and the page is
+re-rendered from state. ctl behaves identically either way (screenshots included: the daemon captures
+the child's window handle directly). Protocol + rationale: `.devnotes/ZIG_UI_GUIDE.md` "Phase B - B5
+procShell protocol".
+
+```
+RAVE_MATE_SHELL=proc ./dist/rave-mate.exe        # window in a child; tasklist shows rave-mate-feature-webview.exe
+```
+
 ## API endpoint
 
 Defaults to the rave.page development API; override with `RAVE_API_BASE_URL`. Production only on

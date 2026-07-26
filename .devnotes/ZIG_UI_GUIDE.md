@@ -1620,3 +1620,201 @@ the 867-card corpus: 15.2 → 6.2 ms (-59%), 58 077 → 11 193 allocs. Haystack 
 **Settings fixtures are now UNTAGGED** (`render_settings_fixtures_test.go`) — the B0 note's "the
 tagged tabs' fixtures moving untagged would let one file cover both", done for settings because this
 wave owns those files. The zigui golden gate keeps its tests and shares the corpus.
+
+## Phase B — B5 procShell protocol (PSH1)
+
+**This section is a SPEC, not a description of the Go code.** B6 replaces the child with a Zig exe
+behind exactly this contract; anything not written here is not guaranteed. Go side:
+`internal/webui/shell_proc*.go`. Selection: `RAVE_MATE_SHELL=proc` (default stays `cgo`; all three
+shells — cgo, proc, virtual — coexist in one binary).
+
+### 0. Roles
+
+- **Daemon** — renders every view, owns all state, owns ctl. Unchanged: the `shell` seam is still the
+  7 methods `run/setHTML/eval/resize/show/terminate/hwnd/post`, and the renderers do not know a child
+  exists.
+- **Child** — `rave-mate feature webview`. A pure VIEW + INPUT TRANSPORT. It MUST NOT read config,
+  open a database, touch identity/secureseal, or persist anything. Everything it needs arrives in
+  `init`; everything it learns leaves as an event.
+
+### 1. Framing
+
+featurehost's duplex newline-JSON over the child's stdio (`internal/featurehost/protocol.go`), one
+JSON object per line, both directions:
+
+```
+{"id":…,"method":…,"params":…}          request  (parent→child; only init/stop exist)
+{"id":…,"ok":…,"result":…,"error":…}    response
+{"event":…,"data":…}                    fire-and-forget event (both directions)
+```
+
+`method != ""` ⇒ request; `event != ""` ⇒ event; else response. stdout is the pure JSON channel;
+diagnostics (incl. panic stacks) go to stderr, which the daemon scans into its log. Supervision
+(spawn, per-role exe hardlink naming, Windows kill-on-close job object, init handshake, capped-backoff
+restart, `log`/`heartbeat` events) is featurehost's and is NOT re-specified here.
+
+### 2. Lanes
+
+Two lanes share the one stdin pipe. A single writer goroutine owns the pipe and **always drains the
+direct lane first**.
+
+| Lane | Frames | Order | Cap | Overflow policy |
+|---|---|---|---|---|
+| ORDERED | `doc`, `eval` | FIFO end-to-end, `seq` monotonic | `procOrdQueueCap` = 8 frames | drop-OLDEST + invalidate the daemon's fragment caches (`dropFragCache`), so a dropped patch re-emits next tick instead of sticking stale |
+| DIRECT | `xeval`, `act`, `resize`, `show`, `quit`, `streaming` | best-effort, never behind ORDERED | `procDirQueueCap` = 32 | REFUSE the caller (ctl returns `ok=false`) — a ctl round trip must never get a stale answer |
+
+**FIFO invariant (ORDERED).** Daemon enqueue order = child application order. Guaranteed by: one
+writer goroutine → one pipe → the child dispatching parent events INLINE on its stdin reader → one
+serialized application queue on the window's UI thread. A B6 child MUST preserve every link — in
+particular it must not apply `eval` frames concurrently, and it must not reorder `doc` against `eval`.
+Gate: `TestProcShellOrderedLaneIsFIFO` (60 frames through a real process).
+
+**Why DIRECT exists.** `evalValue` (control.go) deliberately bypasses the daemon's batching eval
+queue; it must also bypass the ordered IPC lane or a flooded batch stream deadlocks ctl. Gate:
+`TestProcShellWriterDrainsDirectLaneFirst`.
+
+**Un-acked window.** The daemon sends at most ONE un-acked ordered batch (`dispatchEvals` holds until
+the batch's ack returns, bounded by `evalAckTimeout` = 3 s). That is the in-proc bound, unchanged, and
+it is also what keeps DIRECT responsive: the child's own apply queue can never hold more than one
+batch plus the direct frame. A B6 child MUST NOT introduce its own unbounded apply buffer.
+
+### 3. Ack
+
+**There is no separate ack frame.** The daemon appends `window.__rave_evalResult("<id>",'1');` to
+every ordered batch, and wraps every ctl script so the page calls the same binding with the JSON
+result. The child forwards EVERY invocation of that binding verbatim as `evalres{id,result}`. So:
+
+- ordered-lane ack = an `evalres` whose id the daemon is waiting on in `dispatchEvals`;
+- ctl result = an `evalres` whose id `evalValue` is waiting on;
+- one reserved id, `__beat`, is consumed BY THE CHILD (§7) and never forwarded.
+
+The child never parses a script. B6 requirement: expose a `__rave_evalResult(id, result)` binding on
+the page and forward it unchanged. `doc` frames need no ack (they are ordered against `eval` by seq).
+
+### 4. Messages
+
+Parent → child (`event`/`data`):
+
+| event | data | lane | meaning |
+|---|---|---|---|
+| `doc` | `{seq,html}` | ORDERED | load a full document |
+| `eval` | `{seq,js}` | ORDERED | run one batched page script |
+| `xeval` | `{js}` | DIRECT | run one ctl round-trip script |
+| `act` | `{payload}` | DIRECT | replay a Go-originated act payload on the child's act worker (`shell.post`) |
+| `resize` | `{w,h}` | DIRECT | resize the viewport |
+| `show` | `{}` | DIRECT | raise + foreground (the CHILD does it: cross-process `SetForegroundWindow` is restricted) |
+| `quit` | `{graceMs}` | DIRECT | close the window, then exit (§6) |
+| `streaming` | `{on}` | DIRECT | governor signal (§8) |
+
+Child → parent:
+
+| event | data | meaning |
+|---|---|---|
+| `ready` | `{hwnd,virtual}` | the window exists; `hwnd` is the native handle |
+| `evalres` | `{id,result}` | a `__rave_evalResult` invocation, verbatim (§3) |
+| `action` | `{payload}` | a page act (`window.rave`) — drained OFF the UI thread by the child |
+| `win` | `{focused,minimized,sizeMove,hidden}` | window state changed (§8) |
+| `gone` | `{}` | the message loop returned / the window was destroyed |
+
+`init` params (`procInit`): `title`, `w`, `h`, `startHidden`, `allowGpu`, `dataDir`, `runtimeJs`,
+`initialHtml`, `mediaOrigin`, `mediaSession`, `streaming`, `virtual`. Re-evaluated on EVERY (re)spawn,
+so a restarted child comes up on the current document with the current signals.
+
+### 5. Screenshots do not cross the protocol
+
+`hwnd` travels once, in `ready`. The daemon captures the CHILD's window itself
+(`PrintWindow`/`GetDIBits` on a foreign HWND is a normal cross-process operation on Windows), so no
+pixels ever ride the pipe and `ctl screenshot` / `screenshot-all` / `screenshot-region` are untouched.
+A B6 child only has to report a real top-level HWND.
+
+### 6. Shutdown — re-homed, never a daemon hang
+
+The in-proc shell needed `forceExitGrace` + a `shutdownHook` + `forceExitBackstop` because a wedged
+WebView2 `Terminate` left `Run()` — and therefore the daemon's whole shutdown — blocked. After the
+split those live on the correct side of the boundary:
+
+1. daemon sends `quit{graceMs}` on the DIRECT lane.
+2. **child backstop:** it calls its own terminate and hard-exits after `graceMs` if the loop has not
+   unwound (`childForceExitGrace` = 1500 ms). It holds no daemon state, so there is nothing to flush.
+3. **daemon backstop:** if the child has not gone within `procQuitGrace` (1500 ms), the daemon
+   unblocks its own `run()` and reaps the child through the host (graceful `stop`, then `stopGrace`,
+   then `KillTree`); the Windows job object is the final backstop and kills the child with the daemon
+   ALWAYS, protocol or no protocol.
+4. **wedge watchdog:** a pipe write blocked for `procWriteGrace` (2 s) means the child stopped reading
+   stdin. The daemon kills it (`Host.Kill`), which closes the pipe, ends the session, and restarts it.
+
+So "webview wedged" now means "child killed (+ relaunched)", never "daemon hangs": `run()` always
+returns, so `app.go`'s `cancel(); shutdown()` always executes. This also closes a gap the in-proc path
+still has: `SetShutdownHook` was never wired by anyone, so an in-proc wedge hard-exits WITHOUT
+flushing daemon state. Under `proc` there is no hook to wire - the daemon was never blocked. Gates,
+all by execution:
+`TestProcShellWedgedChildTerminatesInGrace`, `…CrashedChildRestartsAndReattaches`, `…CleanQuit`.
+
+### 7. Crash, restart, reattach
+
+A child crash never propagates: featurehost restarts it with capped backoff and the daemon
+**reattaches** — `dropFragCache()`, `setHTML(shellHTML())`, `patchMain()`, re-patch the nav rail. The
+virtualShell contract already guarantees the UI is derivable from state, so nothing is "recovered"; it
+is rendered again. `ctl perf` reports the child (pid/ready/restarts/lastErr) through
+`featurehost.Children()`, and the restart is logged at WARN with its generation.
+
+Liveness: the child pings `__beat` FROM THE WINDOW'S UI THREAD every `procBeatInterval` (2 s); the host
+force-restarts it after `procBeatTimeout` (20 s) of silence. That detects a wedged webview, not merely
+a dead process. The timeout is deliberately generous — a slow render must never cost the user their
+window.
+
+### 8. Activity governor
+
+The governor's inputs now straddle the boundary; neither side may change observed behaviour:
+
+- **up:** the child owns the window, so `focused`/`minimized`/`sizeMove` originate there and are
+  forwarded as `win`. The daemon applies them to its governor exactly as the in-proc subclass did, and
+  ALSO latches `sizeMove` for the eval gate.
+- **down:** only the daemon knows a stream is live, so `streaming` is forwarded (deduped, and re-sent
+  on every ready so a restarted child is seeded). The child runs the same governor code with the same
+  inputs and therefore reaches the same BELOW_NORMAL verdict the single process used to.
+- **size-move policy: THE DAEMON HOLDS.** During a drag the daemon stalls its eval flusher
+  (`holdEvals`); the child does NOT buffer. Holding upstream is what keeps the child's UI thread free,
+  which was the whole point of the in-proc gate.
+- GPU compositing stays OFF by default; the decision travels as `allowGpu`.
+
+### 9. Media plane
+
+The player's `<video>` / `__mse` fetches originate in the CHILD's process (they already originated in
+WebView2's own browser process in-proc, so this is a smaller change than it looks). They still target
+the daemon's loopback endpoint with an unguessable per-file token, and the token table's owner
+semantics are untouched.
+
+What is added: a per-shell-session path segment. URLs become `/m/<session>/<token>` (same for `/mi/`
+and `/img/`) and the daemon serves only a LIVE session id. The session is minted per child session and
+handed to the child in `init` (`mediaOrigin`, `mediaSession`), so the child's fetches are authorized by
+an identity the daemon GAVE it rather than by "any loopback caller that still holds the token", and a
+URL captured from a dead session is refused. Two generations stay valid (`mediaSessMax`) so a `<video>`
+mid-play survives a restart. **Unsessioned is byte-identical to the historic URLs** — the in-proc
+shell, the Fyne renderer and headless mirror sessions never mint one, so the default path is
+unchanged. Gates: `mediahttp_session_test.go` (end-to-end over the real handler) plus the existing
+`mediahttp_owner_test.go`.
+
+### 10. Runtime JS
+
+`runtimeJS` (shell.go) travels in `init` and the child injects those bytes at document start,
+verbatim. It is NOT read from the child's own binary: it is byte-contracted with Go-generated SVG ids
+(`__rt`) and `data-mse` attributes, and a B6 Zig child has no copy. Gate:
+`TestProcShellRuntimeJSCrossesVerbatim` (wire bytes == in-proc bytes, plus the contracted needles).
+
+### 11. Measured cost
+
+ctl round trip over the lanes (loopback child, 200 iterations): **avg 73 µs, worst 604 µs** against
+the 3 s `evalTimeout` and the 300 ms `ScreenshotAll` settle. **The ctl budgets are unchanged** — the
+round trip is still dominated by the page, not the transport. Re-measure and raise them EXPLICITLY
+(with the number in the comment) only if a future child moves this by orders of magnitude.
+
+### 12. Testing a child without WebView2
+
+`procInit.virtual` selects the **loopback page model** (`shell_proc_loopback.go`): a `shell`
+implementation with no window and no cgo that string-scans the daemon's own emitters (`__patch`,
+`window.rave`, `__rave_evalResult`) and answers ctl queries from a fixture carried in a
+`<!--LBFIX {json}-->` comment in the document. It NEVER executes JS. It exists so the whole transport
+— both lanes, ordering, caps, acks, reattach, every shutdown path — is gated in a REAL child process
+on any build. It is a transport fixture, not a DOM, and production selection cannot reach it. The one
+real windowed check is `shell_proc_smoke_test.go`, opt-in via `RAVE_MATE_WEBVIEW_SMOKE=1`.

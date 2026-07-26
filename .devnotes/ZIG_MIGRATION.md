@@ -276,6 +276,42 @@ Rules:
   and by enumeration (4248 derived queries x 357 cards = 1.5 M match decisions), plus a pane-level
   gate on the production path. Both arms falsified by execution. Detail: ZIG_UI_GUIDE.md
   "Phase B - B4 retained-state pass".
+- **P6 UI phase B5 (procShell + PSH1 protocol, SHIPPED behind a flag):** the WebView2 window can now
+  live in a supervised featurehost child (`rave-mate feature webview`) with the daemon driving it over
+  newline-JSON stdio. Third `shell` implementation, speaking the EXISTING virtualShell contract (doc
+  HTML / eval JS / act payload) - **zero renderer changes**: the daemon builds the same document,
+  patches and acts; only where the bytes go changes. Selection `RAVE_MATE_SHELL=proc`; **default stays
+  cgo** and all three shells coexist in one binary (untagged + tagged both green). The PROTOCOL is the
+  deliverable as much as the code - B6 swaps the child for a Zig exe behind it - and it is spec'd in
+  ZIG_UI_GUIDE.md "Phase B - B5 procShell protocol" (framing, lanes, ack, reattach, shutdown, media,
+  runtime JS, governor).
+  Two lanes over one pipe: ORDERED (`doc`/`eval`, FIFO end-to-end, seq'd, cap 8, drop-oldest + fragment
+  cache wipe) and DIRECT (`xeval`/`act`/`resize`/`show`/`quit`/`streaming`, drained FIRST, cap 32,
+  refuse-on-full) - because `evalValue` bypasses the batching queue deliberately and would otherwise
+  deadlock behind a flooded batch stream. The ack is IN-BAND: the daemon's existing
+  `__rave_evalResult` round trip carries both batch acks and ctl results, so the ≤1-un-acked-batch
+  bound is unchanged and the child never parses a script.
+  The five scouted dependencies, each handled + gated: (1) mediahttp - the `<video>`/`__mse` fetches now
+  originate in the child, so URLs carry a per-shell-session segment the daemon hands the child in
+  `init` (2 generations valid; UNSESSIONED is byte-identical to the historic URLs, so the default path
+  is untouched); (2) `__rt`/`__mse` runtime JS travels on the wire verbatim (byte-equality gate vs the
+  in-proc bytes - B6's child has no copy); (3) ctl budgets MEASURED (round trip avg 73 µs / worst
+  604 µs vs the 3 s `evalTimeout`) and therefore unchanged, noted at the constant; (4) `evalValue` got
+  its own direct lane via a `directEvaler` seam; (5) shutdown backstops re-homed - the child force-exits
+  itself, the daemon's backstop is child-kill (host stop + job object) plus a wedge watchdog on a
+  blocked pipe write, so "webview wedged" means "child killed (+ relaunched)", never "daemon hangs".
+  Crash → featurehost restart → full `patchMain` reattach (the virtualShell contract already made the
+  UI derivable from state); liveness is a beat dispatched on the WINDOW's UI thread, so a wedged
+  webview - not just a dead process - is detected. Governor inputs straddle the boundary without
+  changing behaviour: window signals travel UP (daemon governor + eval gate; the DAEMON holds during a
+  size-move, the child never buffers), `streaming` travels DOWN so the child's own governor reaches the
+  same BELOW_NORMAL verdict. Screenshots do NOT cross the protocol - the HWND does, once, and the
+  daemon PrintWindows the foreign window.
+  Gates: the whole ctl suite (snapshot/click/tap/tap2/type/read/set/scroll/resize/act/tab/screenshot/
+  screenshot-all) through a REAL child process, ordering through a real process, lane priority, cap
+  policies, all three shutdown paths BY EXECUTION, runtime-JS byte equality, media session end-to-end
+  over the real handler, plus one opt-in REAL WINDOWED smoke (`RAVE_MATE_WEBVIEW_SMOKE=1`). Wire schema
+  untouched (regen = 0 drifted; 177 messages, hash 0x70698930).
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
