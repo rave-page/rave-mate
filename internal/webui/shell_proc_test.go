@@ -46,10 +46,7 @@ var lbDoc = lbMakeFixtureDoc(lbFixture{
 // procTestUI builds a UI whose shell is a procShell over a real loopback child, started and ready.
 func procTestUI(t *testing.T, mode string) (*UI, *procShell) {
 	t.Helper()
-	log := logbus.New(512)
-	shellLog = log
-	procVirtualChild = true
-	procChildCmd = func() *exec.Cmd {
+	return procTestUIWith(t, func() *exec.Cmd {
 		exe, err := os.Executable()
 		if err != nil {
 			t.Fatal(err)
@@ -57,7 +54,17 @@ func procTestUI(t *testing.T, mode string) (*UI, *procShell) {
 		cmd := exec.Command(exe, "-test.run=TestProcChildNoop")
 		cmd.Env = append(os.Environ(), procTestChildEnv+"=1", procTestModeEnv+"="+mode)
 		return cmd
-	}
+	})
+}
+
+// procTestUIWith is procTestUI with the child spawn injected - the B6 gates run the SAME suite
+// against the Zig rave-shell exe (shell_zigproc_test.go).
+func procTestUIWith(t *testing.T, cmd func() *exec.Cmd) (*UI, *procShell) {
+	t.Helper()
+	log := logbus.New(512)
+	shellLog = log
+	procVirtualChild = true
+	procChildCmd = cmd
 	t.Cleanup(func() { procVirtualChild, procChildCmd, shellLog = false, nil, nil })
 
 	u := &UI{svc: ui.Services{Cfg: &config.Config{}, Log: log}, log: log, active: "live",
@@ -102,7 +109,12 @@ func TestProcChildNoop(t *testing.T) {}
 
 func TestProcShellCtlSuiteThroughChild(t *testing.T) {
 	u, ps := procTestUI(t, procModeNormal)
+	runCtlSuiteGate(t, u, ps)
+}
 
+// runCtlSuiteGate drives the whole ctl surface through whichever child impl backs ps.
+func runCtlSuiteGate(t *testing.T, u *UI, ps *procShell) {
+	t.Helper()
 	if got := u.Snapshot(); !strings.Contains(got, "Track A") {
 		t.Fatalf("Snapshot through the child = %q", got)
 	}
@@ -183,6 +195,11 @@ func TestProcShellCtlSuiteThroughChild(t *testing.T) {
 // Proven through a real process by tagging each batch with an act the child replays back.
 func TestProcShellOrderedLaneIsFIFO(t *testing.T) {
 	u, _ := procTestUI(t, procModeNormal)
+	runOrderedFIFOGate(t, u)
+}
+
+func runOrderedFIFOGate(t *testing.T, u *UI) {
+	t.Helper()
 	acts := procDrainActs(u)
 	const n = 60
 	for i := 0; i < n; i++ {
@@ -243,6 +260,11 @@ func TestProcShellWriterDrainsDirectLaneFirst(t *testing.T) {
 // child's own apply queue can be holding.
 func TestProcShellDirectLaneUnblockedByBusyChild(t *testing.T) {
 	u, ps := procTestUI(t, procModeSlowApply)
+	runDirectLaneBusyGate(t, u, ps)
+}
+
+func runDirectLaneBusyGate(t *testing.T, u *UI, ps *procShell) {
+	t.Helper()
 	for i := 0; i < 40; i++ {
 		u.eval(fmt.Sprintf("window.__patch('flood-%d','x')", i))
 	}
@@ -296,6 +318,11 @@ func TestProcShellOrderedOverflowDropsOldestAndWipesCache(t *testing.T) {
 // and run() returns, so app.go's shutdown() always executes.
 func TestProcShellWedgedChildTerminatesInGrace(t *testing.T) {
 	u, ps := procTestUI(t, procModeDeafStdin)
+	runWedgedTerminateGate(t, u, ps)
+}
+
+func runWedgedTerminateGate(t *testing.T, u *UI, ps *procShell) {
+	t.Helper()
 	// Fill the pipe so the writer is stuck mid-write on a child that will never read again.
 	big := strings.Repeat("x", 128*1024)
 	for i := 0; i < 8; i++ {
@@ -314,8 +341,13 @@ func TestProcShellWedgedChildTerminatesInGrace(t *testing.T) {
 // A crashed child must not kill the daemon: it is restarted and the page is rebuilt from state
 // (reattach = fresh document + full patchMain).
 func TestProcShellCrashedChildRestartsAndReattaches(t *testing.T) {
-	var reattached atomic.Int64
 	u, ps := procTestUI(t, procModeCrash)
+	runCrashRestartGate(t, u, ps)
+}
+
+func runCrashRestartGate(t *testing.T, u *UI, ps *procShell) {
+	t.Helper()
+	var reattached atomic.Int64
 	ps.onReattach = func() { reattached.Add(1); u.reattach() }
 	procWaitForLong(t, "supervised restart after a crash", func() bool {
 		gens, _, restarts, _ := ps.Stats()
@@ -332,6 +364,11 @@ func TestProcShellCrashedChildRestartsAndReattaches(t *testing.T) {
 // A clean quit: the child unwinds on its own, well inside grace.
 func TestProcShellCleanQuit(t *testing.T) {
 	_, ps := procTestUI(t, procModeNormal)
+	runCleanQuitGate(t, ps)
+}
+
+func runCleanQuitGate(t *testing.T, ps *procShell) {
+	t.Helper()
 	start := time.Now()
 	ps.terminate()
 	select {
@@ -348,6 +385,11 @@ func TestProcShellCleanQuit(t *testing.T) {
 
 func TestProcShellCtlRoundTripCost(t *testing.T) {
 	u, _ := procTestUI(t, procModeNormal)
+	runRoundTripCostGate(t, u)
+}
+
+func runRoundTripCostGate(t *testing.T, u *UI) {
+	t.Helper()
 	const n = 200
 	var total time.Duration
 	worst := time.Duration(0)

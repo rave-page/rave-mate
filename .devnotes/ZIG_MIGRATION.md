@@ -276,6 +276,52 @@ Rules:
   and by enumeration (4248 derived queries x 357 cards = 1.5 M match decisions), plus a pane-level
   gate on the production path. Both arms falsified by execution. Detail: ZIG_UI_GUIDE.md
   "Phase B - B4 retained-state pass".
+- **P6 UI phase B6 (Zig shell exe behind PSH1, SHIPPED behind a flag):** the B5 window child is now
+  replaceable by a ZIG-owned exe - `rave-shell.exe` (native/zigui `src/shell/`, built by `zig build`
+  alongside libraveui / `scripts/build-zig.sh`, installed to `native/zigui/zig-out/bin/`). It speaks
+  the byte-identical PSH1 contract (featurehost newline-JSON stdio: init/stop handshake,
+  doc/eval/xeval/act/resize/show/quit/streaming/screenshot in; ready/evalres/action/win/gone/shotres/
+  heartbeat/log out) against an UNTOUCHED daemon side - shell_proc*.go changed only where the child
+  cmd is picked. Child = Win32 window + WebView2 through hand-rolled COM vtables (slot orders copied
+  from the shipped mswebview2 WebView2.h); loader = the same two-step webview_go uses (WebView2Loader.dll
+  if present, else the Evergreen runtime's `EmbeddedBrowserWebView.dll`
+  `CreateWebViewEnvironmentWithOptionsInternal` via registry `ClientState\{stable}` `EBWebView`,
+  KEY_WOW64_32KEY, api >= 1150). Bindings: a document-start shim maps `window.rave` /
+  `window.__rave_evalResult` onto `chrome.webview.postMessage` BEFORE the daemon's wire-delivered
+  runtimeJS; `__beat` is consumed in-child as the heartbeat (UI-thread SetTimer 2 s).
+  **B6 lesson (widget child window):** the controller MUST parent to a WS_CHILD "widget" window
+  filling the client area (webview.h's structure), not the top-level directly - with GPU compositing
+  OFF, a controller on the top-level renders fine ON SCREEN but PrintWindow captures the client area
+  solid WHITE (DOM/ctl fully alive, so only a REAL-app dark-theme capture exposes it; the smoke's
+  light page passes the >1%-non-black check either way). Found by live verify, fixed by replicating
+  the widget arrangement; ctl captures then match the Go child pixel-for-pixel. Window behavior
+  ports sizemove_windows.go 1:1 (enter/exit/sizing/moving/capture-changed + stale self-heal, activate,
+  size/minimize, showwindow, close-to-tray hide + `win{hidden}`), governor below-normal rule applied
+  in-child, screenshots captured in-child (PrintWindow PW_RENDERFULLCONTENT → own stored-deflate PNG
+  writer, path+rect over the pipe, never pixels). **Reveal-on-first-ready is honoured** (window created
+  hidden, SW_HIDE burned once, SW_SHOWNOACTIVATE at ready unless startHidden) - the B5 black-screenshot
+  lesson is a hard requirement here.
+  **Selection:** config `features.ui.shellImpl` = ""|"go" (default, Go child) | "zig", or
+  `RAVE_MATE_SHELL=zig`; either implies the proc shell. Resolution is gated on the `zigui` build tag
+  (shell_zig.go; untagged stub) + a runtime exe check (`RAVE_MATE_SHELL_EXE` override, else
+  `rave-shell.exe` beside the daemon exe) - missing exe = loud log + Go child, never a broken UI.
+  **Gates:** the ENTIRE B5 suite re-runs against the Zig child (shell_zigproc_test.go, tag zigui,
+  skips when the exe isn't built): ctl suite, ordered-FIFO, direct-lane-vs-busy-child, wedged/crash/
+  clean-quit shutdown paths BY EXECUTION (the exe implements the loopback page model + deaf/crash/slow
+  test modes), round-trip cost (avg 47 µs vs Go child's 73 µs), plus the REAL windowed smoke
+  (`RAVE_MATE_WEBVIEW_SMOKE=1 go test -tags zigui -run TestZigShellWindowedSmoke`) asserting
+  **>1% non-black pixels** - measured **97.1% non-black, pixel-count-identical to the Go child's
+  capture** (604235/621964 both), capture 35 ms, quit 21 ms, full snapshot/click/read/set/act/patch
+  parity through the real WebView2 window. Live-verified on an isolated instance
+  (RAVE_MATE_CONFIG_DIR + ctl :47695, shellImpl=zig): window visible, Live/Settings tabs render the
+  full dark UI, ctl tab/click/set/screenshot parity, `taskkill` on the child → supervised restart +
+  reattach re-render WITH state (tab + search text preserved), `ctl quit` exits everything cleanly;
+  then flipped back to go impl - no regression.
+  **Known deltas (documented, minor):** no embedded brand icon in the exe (title-bar/Alt-Tab icon is
+  default; windowicon step pending), `NavigateToString`'s 2 MB limit applies as in webview_go, and a
+  WebView2-runtime-missing box exits the child (host restarts w/ backoff) instead of degrading -
+  daemon-side probeWebview still gates the renderer choice first. Default stays the GO child until
+  parity soaks; flip = one config key.
 - **P6 UI phase B5 (procShell + PSH1 protocol, SHIPPED behind a flag):** the WebView2 window can now
   live in a supervised featurehost child (`rave-mate feature webview`) with the daemon driving it over
   newline-JSON stdio. Third `shell` implementation, speaking the EXISTING virtualShell contract (doc

@@ -45,6 +45,27 @@ func TestProcShellWindowedSmoke(t *testing.T) {
 	if os.Getenv(smokeEnv) == "" {
 		t.Skip("set " + smokeEnv + "=1 to run the real windowed smoke (opens a WebView2 window)")
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runWindowedSmoke(t, func() *exec.Cmd {
+		cmd := exec.Command(exe, "-test.run=TestProcChildNoop")
+		cmd.Env = append(os.Environ(), procTestChildEnv+"=1", procTestModeEnv+"=", smokeEnv+"=1")
+		// MUST mirror production's spawn (featurehost newCmd): sysexec.Hide is what made the child's
+		// WebView2 window come up hidden - invisible UI and a solid-black capture. Without this the
+		// smoke runs under conditions the real app never has, and cannot catch the regression it exists
+		// to catch. (Named/hardlink naming is skipped: irrelevant to rendering, and hardlinking the
+		// test binary is pure noise.)
+		sysexec.Hide(cmd)
+		return cmd
+	})
+}
+
+// runWindowedSmoke drives the real-window smoke against whichever child exe mkCmd spawns (the Go
+// re-exec above, or the B6 Zig rave-shell in shell_zigproc_test.go).
+func runWindowedSmoke(t *testing.T, mkCmd func() *exec.Cmd) {
+	t.Helper()
 	if !probeWebview() {
 		t.Skip("no WebView2 runtime on this box")
 	}
@@ -56,21 +77,7 @@ func TestProcShellWindowedSmoke(t *testing.T) {
 	saveDir := webviewDataDir
 	webviewDataDir = t.TempDir()
 	t.Cleanup(func() { webviewDataDir = saveDir })
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	procChildCmd = func() *exec.Cmd {
-		cmd := exec.Command(exe, "-test.run=TestProcChildNoop")
-		cmd.Env = append(os.Environ(), procTestChildEnv+"=1", procTestModeEnv+"=", smokeEnv+"=1")
-		// MUST mirror production's spawn (featurehost newCmd): sysexec.Hide is what made the child's
-		// WebView2 window come up hidden - invisible UI and a solid-black capture. Without this the
-		// smoke runs under conditions the real app never has, and cannot catch the regression it exists
-		// to catch. (Named/hardlink naming is skipped: irrelevant to rendering, and hardlinking the
-		// test binary is pure noise.)
-		sysexec.Hide(cmd)
-		return cmd
-	}
+	procChildCmd = mkCmd
 	t.Cleanup(func() { procChildCmd, shellLog = nil, nil })
 
 	u := &UI{svc: ui.Services{Cfg: &config.Config{}, Log: log}, log: log, active: "live",

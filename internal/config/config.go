@@ -2242,6 +2242,16 @@ type UIFeature struct {
 	// with a live NVENC/GPU encoder (OBS); explicit true re-enables GPU acceleration for a
 	// power user who prefers snappier UI over guaranteed non-interference. Safe-by-default is off.
 	WebviewGPU *bool `json:"webviewGpu,omitempty"`
+	// ShellImpl selects the PSH1 window-child exe under the B5 procShell (ZIG_MIGRATION B6):
+	// ""|"go" (default) = the Go child (`rave-mate feature webview`); "zig" = the Zig-owned
+	// rave-shell exe (also implies the proc shell). Missing/unbuildable exe falls back to the
+	// Go child with a loud log - never a broken UI. Additive (zero value = prior behavior).
+	ShellImpl string `json:"shellImpl,omitempty"`
+}
+
+// ZigShell reports the Zig window-child exe is selected (features.ui.shellImpl="zig").
+func (u UIFeature) ZigShell() bool {
+	return strings.EqualFold(strings.TrimSpace(u.ShellImpl), "zig")
 }
 
 // AllowWebviewGPU resolves the escape hatch: false by default (software compositing = low-impact),
