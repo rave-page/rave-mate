@@ -20,6 +20,7 @@ import (
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/governor"
 	"rave.page/mate/internal/logbus"
+	"rave.page/mate/internal/sysexec"
 )
 
 const (
@@ -123,7 +124,7 @@ func newProcShell(title string, w, h int, onAction func(string), onReady func())
 		OnReady:          s.onChildReady,
 		OnDown:           s.onChildDown,
 		HeartbeatTimeout: procBeatTimeout,
-		Command:          procChildCmd,
+		Command:          procCommand(),
 	})
 	if err != nil {
 		return nil, false
@@ -165,6 +166,24 @@ var procVirtualChild bool
 // procChildCmd overrides how the window child is spawned. Nil in production (`<exe> feature
 // webview`); the B5 tests re-exec the test binary with an env marker instead of shipping an exe.
 var procChildCmd func() *exec.Cmd
+
+// procCommand picks the window-child spawn: test override, else the B6 Zig exe when selected
+// (zigShellExe), else nil = featurehost's default Go child. The Zig spawn mirrors newCmd's
+// sysexec.Hide - which is exactly why the child MUST reveal its window on ready (SW_HIDE applies
+// to its first top-level window; see revealWindow).
+func procCommand() func() *exec.Cmd {
+	if procChildCmd != nil {
+		return procChildCmd
+	}
+	if exe := zigShellExe; exe != "" {
+		return func() *exec.Cmd {
+			cmd := exec.Command(exe, "feature", procFeatureName)
+			sysexec.Hide(cmd)
+			return cmd
+		}
+	}
+	return nil
+}
 
 func (s *procShell) events() map[string]func(json.RawMessage) {
 	return map[string]func(json.RawMessage){

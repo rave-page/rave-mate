@@ -147,7 +147,8 @@ func New(svc ui.Services) *UI {
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
 	}
-	shellLog = svc.Log // procShell + its featurehost Host log here (set before construction)
+	shellLog = svc.Log                                 // procShell + its featurehost Host log here (set before construction)
+	zigShellExe = resolveZigShellExe(svc.Cfg, svc.Log) // B6: "" = Go child (set before newShell)
 	if sh, ok := newShell("rave-mate", 1280, 820, u.onAction, u.onReady); ok {
 		u.shell = sh
 		if ps, isProc := sh.(*procShell); isProc {
