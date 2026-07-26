@@ -180,6 +180,11 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.ChildCPUPct > 0 {
 			p += fmt.Sprintf(" · child cpu %.0f%%", s.Pipe.ChildCPUPct)
 		}
+		// Every stage counted its own drops and none of them reached a surface: a route that
+		// throws most frames away (dims mismatch, fps cap, no keyframe yet) looked healthy.
+		if s.Pipe.Dropped > 0 {
+			p += fmt.Sprintf(" · dropped %d", s.Pipe.Dropped)
+		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
 			parts = append(parts, z)

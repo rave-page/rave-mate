@@ -55,20 +55,34 @@ func (b *retransmitBuf) add(f *Frame) {
 	b.mu.Unlock()
 }
 
+// rawExempt reports whether f is raw video, which NEVER enters the retransmit window whatever its
+// buffer ownership. The window's byte cap is 16 MB: one 4K frame (33 MB) evicts all of it and even
+// a 1080p frame (8 MB) evicts half, so a raw stream turns the window into a 1-frame buffer that
+// retransmits nothing useful. It buys nothing either - raw frames are intra, so the receiver
+// resyncs on the very next frame.
+//
+// Ownership is deliberately NOT part of this test. Keying on `Release == nil` (the old rule) meant
+// UNPOOLED raw producers were retained: webcam's framepipe allocates a fresh buffer per frame
+// (internal/webcam/framepipe.go), so every webcam frame on a nack-negotiated route displaced the
+// whole window.
+func rawExempt(f *Frame) bool {
+	return f.Kind == KindVideo && !f.Codec.CompressedVideo()
+}
+
 // retainOrRelease disposes of a frame the send loop just wrote: keep it in the retransmit window,
-// or hand its pooled buffer back. Keyed on OWNERSHIP, not codec tier:
+// or hand its pooled buffer back.
 //
 //   - no window (nack unnegotiated): release.
+//   - raw video (rawExempt): never retained - see above.
 //   - not pooled (Release == nil): the encoder allocated this AU for us - retain as is, free.
 //   - pooled + compressed AU within rebufCopyMax: COPY the (small) AU into the window, then
 //     release the pooled buffer.
-//   - pooled raw pixels (or an oversized AU): exempt from the window - release now. Retaining one
-//     starves the capture pool, so every readback re-allocates 8 MB (1080p) / 33 MB (4K) - exactly
-//     the GC churn the pool removed - and buys nothing: raw frames are intra (the receiver resyncs
-//     on the very next frame) and ONE 4K frame would evict the entire 16 MB window anyway.
+//   - pooled oversized AU: exempt - release now (retaining starves the capture pool, so every
+//     readback re-allocates 8 MB (1080p) / 33 MB (4K) - the GC churn the pool removed).
 func (rio *routeIO) retainOrRelease(f *Frame) {
 	switch {
 	case rio.rebuf == nil:
+	case rawExempt(f):
 	case f.Release == nil:
 		rio.rebuf.add(f)
 		return

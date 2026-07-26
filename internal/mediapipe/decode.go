@@ -133,7 +133,8 @@ func (d *decoder) PipeStats() medialink.PipelineStats {
 	restarts := d.restarts
 	d.mu.Unlock()
 	return medialink.PipelineStats{Encoder: "ffmpeg-decode", HWAccel: accel,
-		OutFPS: d.out.value(), Restarts: restarts}
+		OutFPS: d.out.value(), Restarts: restarts,
+		Dropped: d.dropped.Load() + medialink.InnerDrops(d.sink)}
 }
 
 // spawnLocked starts a child on the current tier. Caller holds mu.

@@ -116,7 +116,8 @@ func (e *encoder) PipeStats() medialink.PipelineStats {
 	e.mu.Lock()
 	restarts := e.restarts
 	e.mu.Unlock()
-	return medialink.PipelineStats{Encoder: e.spec.Encoder, OutFPS: e.out.value(), Restarts: restarts}
+	return medialink.PipelineStats{Encoder: e.spec.Encoder, OutFPS: e.out.value(), Restarts: restarts,
+		Dropped: e.dropped.Load() + medialink.InnerDrops(e.src)}
 }
 
 // hwScaling reports whether the current argv puts a GPU scaler in the filter chain.

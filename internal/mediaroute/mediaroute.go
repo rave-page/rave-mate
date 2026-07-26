@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/config"
@@ -387,8 +388,9 @@ type spoutSource struct {
 	attach  func(name string, maxFPS float64) (captureFeed, error)
 	shareOf func(name string) (uint64, uint32, int, int, bool)
 
-	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
-	last   time.Time
+	minGap  time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
+	last    time.Time
+	dropped atomic.Uint64 // fps-cap drops; surfaced via PipeStats (the encode wrapper sums it)
 
 	mu   sync.Mutex
 	feed captureFeed // nil until the first Next attaches (or a test injects one)
@@ -418,6 +420,13 @@ func (s *spoutSource) SharedTexture() (uint64, uint32, int, int, string, bool) {
 		return 0, 0, 0, 0, "", false
 	}
 	return h, fmt, w, hh, s.name, true
+}
+
+// PipeStats implements medialink.PipelineReporter: the per-route fps-cap drops. The encode
+// wrapper sums this into its own Dropped, so the number reaches the route panel instead of dying
+// in a struct field nobody reads.
+func (s *spoutSource) PipeStats() medialink.PipelineStats {
+	return medialink.PipelineStats{Dropped: s.dropped.Load()}
 }
 
 // feedOrAttach returns this route's capture feed, opening the shared capture on first use.
@@ -455,6 +464,7 @@ func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
 				now := time.Now()
 				if now.Sub(s.last) < s.minGap {
 					f.ref.release() // over this route's fps budget - drop our reference
+					s.dropped.Add(1)
 					continue
 				}
 				s.last = now
@@ -486,9 +496,15 @@ type spoutSink struct {
 	fs        videoshare.FrameSender
 	name      string
 	w, h      int
-	sentOne   bool // logged the first delivered frame (sender is now visible)
-	dropped   int  // frames skipped for wrong kind/size (compressed passthrough, dims mismatch)
-	loggedBad bool // logged the first drop once (rate-limit)
+	sentOne   bool          // logged the first delivered frame (sender is now visible)
+	dropped   atomic.Uint64 // frames skipped for wrong kind/size (compressed passthrough, dims mismatch)
+	loggedBad bool          // logged the first drop once (rate-limit)
+}
+
+// PipeStats implements medialink.PipelineReporter: the decode wrapper sums these drops into the
+// route's Dropped, so "route up, frames arriving, no Spout sender" is visible as a number.
+func (s *spoutSink) PipeStats() medialink.PipelineStats {
+	return medialink.PipelineStats{Dropped: s.dropped.Load()}
 }
 
 func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
@@ -506,7 +522,7 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 		// Undecoded/foreign frame - skip, never fatal. But a *sustained* stream of these means the
 		// Spout sender never materializes (it's created on the first real SendImage), so surface it
 		// once: this is the "route up, frames received, but no Spout source" failure.
-		s.dropped++
+		s.dropped.Add(1)
 		if !s.loggedBad {
 			s.loggedBad = true
 			s.log.Warn(source, "receive sink dropping frames - no Spout sender will appear", map[string]any{
@@ -522,7 +538,7 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 	if !s.sentOne {
 		s.sentOne = true
 		s.log.Info(source, "receive sink live - Spout sender publishing", map[string]any{
-			"sender": s.name, "w": s.w, "h": s.h, "droppedBefore": s.dropped})
+			"sender": s.name, "w": s.w, "h": s.h, "droppedBefore": s.dropped.Load()})
 	}
 	return nil
 }

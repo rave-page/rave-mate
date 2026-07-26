@@ -31,11 +31,6 @@ void rave_spout_release(void* h);
 int rave_spout_sender_count(void);
 int rave_spout_find(const char* name);
 
-// Test-only orientation probe: send `in` to a throwaway sender (with the given bInvert), then
-// receive it back into `out` (no receiver flip). Lets a test see the orientation a receiver
-// gets. Returns 1 if a frame round-tripped. in/out are w*h*4 RGBA.
-int rave_spout_roundtrip(const unsigned char* in, unsigned char* out, unsigned int w, unsigned int h, int binvert);
-
 // Sender registry queries (shared process-wide handle, no GL): copy the idx-th sender name into
 // out (cap bytes, NUL-terminated; 1 on success) / a named sender's current dimensions.
 int rave_spout_sender_name(int idx, char* out, int cap);

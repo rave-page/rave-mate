@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/encoderscan"
@@ -37,8 +38,11 @@ type mfBridge struct {
 	tcq     []medialink.Timecode // FIFO pts→TC carry (no B-frames: output order = input order)
 	lastKey int64
 
-	out        rate
-	dropped    int
+	out rate
+	// dropped: undersized/foreign input frames. Atomic - feed() writes it, PipeStats reads it
+	// from the telemetry goroutine (it was a plain int, i.e. a data race that also never
+	// reached any surface).
+	dropped    atomic.Uint64
 	zeroCopy   bool
 	downgrades int
 }
@@ -157,7 +161,7 @@ func (b *mfBridge) feed(ctx context.Context) {
 			return // EOF / cancel - drain via defer
 		}
 		if f.Kind != medialink.KindVideo || len(f.Payload) != b.size {
-			b.dropped++
+			b.dropped.Add(1)
 			if f.Release != nil {
 				f.Release()
 			}
@@ -264,5 +268,6 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
 		EncBusyMs:  st.EncBusyMs,
-		Downgrades: b.downgrades + st.Downgrades}
+		Downgrades: b.downgrades + st.Downgrades,
+		Dropped:    b.dropped.Load() + medialink.InnerDrops(b.src)}
 }

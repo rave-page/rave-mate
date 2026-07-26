@@ -1003,6 +1003,10 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.ChildCPUPct > 0 {
 			p += " · " + i18n.T("peers.pipeChildCpu", i18n.A{"pct": fmt.Sprintf("%.0f", s.Pipe.ChildCPUPct)})
 		}
+		// Stage drop counters were collected everywhere and rendered nowhere.
+		if s.Pipe.Dropped > 0 {
+			p += " · " + i18n.T("peers.pipeDropped", i18n.A{"n": fmt.Sprint(s.Pipe.Dropped)})
+		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
 			parts = append(parts, z)

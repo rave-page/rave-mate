@@ -68,6 +68,11 @@ type PipelineStats struct {
 	HWAccel  string  // decode side: active hwaccel ("" = software)
 	OutFPS   float64 // frames leaving the child per second
 	Restarts int     // supervised child restarts
+	// Dropped counts frames THIS element and everything it wraps threw away: undersized/foreign
+	// input, respawn-backoff gaps, waiting-for-keyframe, per-route fps-cap drops, sink dim
+	// mismatches. Each stage kept its own counter and none of them reached a log or the panel, so
+	// a route that silently drops most of its frames looked identical to a healthy one.
+	Dropped uint64
 	// Native-engine session telemetry (zero for ffmpeg children). Rising LatP99Ms is the
 	// Phase-2 load governor's early saturation signal.
 	LatP50Ms    float64 // submit→AU latency percentiles
@@ -91,6 +96,16 @@ type PipelineStats struct {
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.
 type PipelineReporter interface {
 	PipeStats() PipelineStats
+}
+
+// InnerDrops sums the Dropped counter of a wrapped Source/Sink, so the ONE reporter the router
+// asks (the outermost wrapper) accounts for the whole chain instead of the stage counters dying
+// where they were incremented. 0 when the inner stage reports nothing.
+func InnerDrops(inner any) uint64 {
+	if pr, ok := inner.(PipelineReporter); ok {
+		return pr.PipeStats().Dropped
+	}
+	return 0
 }
 
 // CompressedVideo reports whether c is an encoded video codec (vs raw pixels / audio).

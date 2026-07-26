@@ -2291,6 +2291,7 @@
     "pairedInstanceLabel": "{label} - a paired instance",
     "pairingCode": "code {sas}",
     "pipeChildCpu": "child cpu {pct}%",
+    "pipeDropped": "dropped {n}",
     "pipeLatency": "lat {p50}/{p99} ms p50/p99",
     "pipeQueue": "queue {n}",
     "receive": "Receive",
