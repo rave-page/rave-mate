@@ -9,7 +9,9 @@ package midi
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"sync"
 	"syscall"
 	"unicode/utf16"
 )
@@ -205,23 +207,72 @@ func QueryDriverTrace(portID uint32) ([]TraceEntry, error) {
 	return out, nil
 }
 
-// rmIoctl issues one DeviceIoControl against the ravemidi control device.
+// Long-lived config-plane handle. QueryDriverInputs alone is up to rmMaxInputs ioctls and
+// pollers hit it continuously (feedback source, UI probe); opening \\.\RaveMidiCtl per call
+// multiplied kernel create/close churn. One cached handle, mutex-serialized ioctls
+// (config-plane calls are short + infrequent), reopen-once when the handle dies (driver
+// restart / device removal).
+var (
+	rmCtlMu sync.Mutex
+	rmCtlH  = syscall.InvalidHandle
+
+	// Seams (tests script open/ioctl/close without the driver).
+	rmOpenCtl  = openRaveMIDICtl
+	rmCloseCtl = func(h syscall.Handle) { _ = syscall.CloseHandle(h) }
+	rmDevIoctl = func(h syscall.Handle, code uint32, in, out []byte) error {
+		var inPtr, outPtr *byte
+		if len(in) > 0 {
+			inPtr = &in[0]
+		}
+		if len(out) > 0 {
+			outPtr = &out[0]
+		}
+		var ret uint32
+		return syscall.DeviceIoControl(h, code,
+			inPtr, uint32(len(in)), outPtr, uint32(len(out)), &ret, nil)
+	}
+)
+
+// rmHandleDead reports errnos that mean the cached handle/device is gone (reopen-worthy),
+// as opposed to protocol errors the driver returns on a healthy handle (NO_MORE_ITEMS,
+// INVALID_PARAMETER, buffer-size errors) which must NOT churn the handle.
+func rmHandleDead(err error) bool {
+	var e syscall.Errno
+	if !errors.As(err, &e) {
+		return false
+	}
+	switch e {
+	case 2, 6, 20, 31, 55, 433, 995, 1117, 1167, 1617:
+		// FILE_NOT_FOUND, INVALID_HANDLE, BAD_UNIT, GEN_FAILURE, DEV_NOT_EXIST,
+		// NO_SUCH_DEVICE, OPERATION_ABORTED, IO_DEVICE, DEVICE_NOT_CONNECTED, DEVICE_REMOVED
+		return true
+	}
+	return false
+}
+
+// rmIoctl issues one DeviceIoControl against the ravemidi control device via the cached
+// handle; on a dead handle it reopens once and retries.
 func rmIoctl(code uint32, in, out []byte) error {
-	h, err := openRaveMIDICtl()
-	if err != nil {
-		return err
+	rmCtlMu.Lock()
+	defer rmCtlMu.Unlock()
+	for attempt := 0; ; attempt++ {
+		if rmCtlH == syscall.InvalidHandle {
+			h, err := rmOpenCtl()
+			if err != nil {
+				return err
+			}
+			rmCtlH = h
+		}
+		err := rmDevIoctl(rmCtlH, code, in, out)
+		if err == nil || !rmHandleDead(err) {
+			return err
+		}
+		rmCloseCtl(rmCtlH)
+		rmCtlH = syscall.InvalidHandle
+		if attempt == 1 {
+			return err
+		}
 	}
-	defer func() { _ = syscall.CloseHandle(h) }()
-	var inPtr, outPtr *byte
-	if len(in) > 0 {
-		inPtr = &in[0]
-	}
-	if len(out) > 0 {
-		outPtr = &out[0]
-	}
-	var ret uint32
-	return syscall.DeviceIoControl(h, code,
-		inPtr, uint32(len(in)), outPtr, uint32(len(out)), &ret, nil)
 }
 
 func b2u(v bool) uint32 {
