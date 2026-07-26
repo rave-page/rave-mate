@@ -126,30 +126,48 @@ func statelessRender[T any](s patchSurface[T], v T) (string, bool) {
 	return "", false
 }
 
+// The golden fixtures are correctness fixtures - several of them carry ONE row where the live
+// surface carries a full buffer, and a fixed-cost-dominated state would flatter the channel. These
+// three build the state the running app actually patches (same intent as wireBenchTail for the log
+// tail), so the opt-in decision is made on realistic sizes.
+
+// benchTwFeed is a busy chat feed: the rolling buffer is capped at 250 rows and a live chat fills it.
+func benchTwFeed(n int) twFeedState {
+	rows := make([]twRow, 0, n)
+	for i := 0; i < n; i++ {
+		rows = append(rows, twRow{Kind: "chat", Name: fmt.Sprintf("viewer%d", i%37),
+			NameStyle: "color:#F70864", Tags: []twTag{{Text: "sub", Variant: "sub"}},
+			Mod: true, ModVal: fmt.Sprintf("m%d|u%d|viewer%d", i, i%37, i%37), ModTitle: "Delete",
+			Text: fmt.Sprintf("message %d - this set is going hard right now", i)})
+	}
+	return twFeedState{Empty: "no messages yet", Rows: rows}
+}
+
+// benchMidiMon is a full monitor card (midiMonRows is what the renderer shows).
+func benchMidiMon() midiMonLines {
+	rows := make([]midiMonRow, 0, midiMonRows)
+	for i := 0; i < midiMonRows; i++ {
+		rows = append(rows, midiMonRow{Ago: fmt.Sprintf("%ds", i), Src: "Denon SC6000 MIDI",
+			Msg: fmt.Sprintf("CC %d ch1 = %d", 20+i%16, (i*7)%128)})
+	}
+	return midiMonLines{Empty: "no traffic", Rows: rows}
+}
+
 func BenchmarkPatchBenchTwitchFeed(b *testing.B) {
 	benchSkipUnavailable(b)
-	st := twFixtures()["populated"].Feed
-	if len(st.Rows) == 0 {
-		b.Skip("no rows in the populated twitch fixture")
-	}
+	st := benchTwFeed(120)
 	next := st
-	next.Rows = append([]twRow{{Kind: "chat", Name: "viewer", NameStyle: "color:#F70864", Tags: []twTag{}, Text: "another message"}}, st.Rows...)
+	next.Rows = append([]twRow{{Kind: "chat", Name: "viewer", NameStyle: "color:#F70864",
+		Tags: []twTag{}, Text: "another message"}}, st.Rows[:len(st.Rows)-1]...)
 	benchPatchPair(b, twFeedSurface(), st, next)
 }
 
 func BenchmarkPatchBenchMIDIMonRows(b *testing.B) {
 	benchSkipUnavailable(b)
-	var st midiMonLines
-	for _, s := range midiMonStates() {
-		if len(s.Rows) > len(st.Rows) {
-			st = s
-		}
-	}
-	if len(st.Rows) == 0 {
-		b.Skip("no midi-monitor fixture with rows")
-	}
+	st := benchMidiMon()
 	next := st
-	next.Rows = append([]midiMonRow{{Ago: "0s", Src: "Denon", Msg: "CC 21 = 64"}}, st.Rows...)
+	next.Rows = append([]midiMonRow{{Ago: "0s", Src: "Denon SC6000 MIDI", Msg: "CC 21 ch1 = 64"}},
+		st.Rows[:len(st.Rows)-1]...)
 	benchPatchPair(b, midiMonSurface(), st, next)
 }
 
@@ -169,7 +187,23 @@ func BenchmarkPatchBenchMIDICtlStat(b *testing.B) {
 	benchPatchPair(b, midiStatSurface(), st, next)
 }
 
+// BenchmarkPatchBenchCueEditTopbar: the TYPICAL topbar (3 drops, short title) - the drag case the
+// channel was opted in for. The stress variant is benched separately below.
 func BenchmarkPatchBenchCueEditTopbar(b *testing.B) {
+	benchSkipUnavailable(b)
+	st := ceTopbarFixtures()["local"]
+	if !st.Show {
+		b.Skip("no shown cue-edit topbar fixture")
+	}
+	next := st // a drag moves the cursor readout, nothing else
+	next.Cursor = "02:13.480"
+	next.BarBeat = "17.3"
+	benchPatchPair(b, ceTopbarSurface(), st, next)
+}
+
+// BenchmarkPatchBenchCueEditTopbarLong: the worst topbar in the fixture set (40 drops, 720 B
+// eyebrow, 1 kB census) - the delta is still the same three fields.
+func BenchmarkPatchBenchCueEditTopbarLong(b *testing.B) {
 	benchSkipUnavailable(b)
 	var st ceTopbarSt
 	for _, s := range ceTopbarStates() {
@@ -180,7 +214,7 @@ func BenchmarkPatchBenchCueEditTopbar(b *testing.B) {
 	if !st.Show {
 		b.Skip("no shown cue-edit topbar fixture")
 	}
-	next := st // a drag moves the cursor readout, nothing else
+	next := st
 	next.Cursor = "02:13.480"
 	next.BarBeat = "17.3"
 	benchPatchPair(b, ceTopbarSurface(), st, next)

@@ -145,7 +145,19 @@ func (u *UI) tickLiveSched(js *strings.Builder, st liveTickSt) bool {
 	}
 	prev, gen := u.tickPrevs(liveTickIDs)
 	st.Prev = prev
-	frs, ok := u.tickBatch(wireTkLive(st), "TickLive", zigui.TickLive, gen)
+	// --- phaseb-retain ---
+	// B7 (ii): the tick's state crosses as a DELTA when the slot already holds last tick's state.
+	// Most of the Live cockpit is static from second to second (decks, cockpit, link, strip), so a
+	// tick usually changes three fragments' worth of fields: the delta is 564 B against a 3 173 B
+	// document (18.0%). When NOTHING changed the delta is empty and neither the ABI nor a render is
+	// touched. Bench: -5% dispatch (inside the noise band), -67.0% allocated bytes on a changed
+	// tick, -84.8% on an unchanged one (PHASEB_BASELINE "Phase B7 (ii)").
+	frs, rok := u.retained().tickLive.send(st)
+	ok := rok && u.commitFrags(gen, frs)
+	if !ok {
+		frs, ok = u.tickBatch(wireTkLive(st), "TickLive", zigui.TickLive, gen)
+	}
+	// --- end phaseb-retain ---
 	if !ok {
 		return false
 	}

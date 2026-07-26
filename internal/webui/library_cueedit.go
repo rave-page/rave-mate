@@ -2091,7 +2091,18 @@ func (u *UI) ceWaveHTML() string {
 // (clickable = jump) and cue census in one strip above the waveform.
 // State + renderer live in render_library_cueedit.go (Zig-migrated).
 func (u *UI) ceTopbarHTML() string {
-	return ceTopbarRender(u.ceTopbarState())
+	st := u.ceTopbarState()
+	// --- phaseb-retain ---
+	// Retained-doc delta channel: a cue drag re-renders this strip per pointer move and changes
+	// three readout fields out of ~26, so the delta is 63 B against a 420 B document (1.3% of the
+	// 40-drop fixture's 4.7 kB). Bench: dispatch neutral to -10%, allocation -21% / -67.8%
+	// (PHASEB_BASELINE "Phase B7 (ii)"). A decline falls through to the stateless bridge below,
+	// which is unchanged.
+	if h, ok := u.retained().ceTopbar.send(st); ok {
+		return h
+	}
+	// --- end phaseb-retain ---
+	return ceTopbarRender(st)
 }
 
 // ceCueCount counts non-grid cues (what the waveform flags show).
