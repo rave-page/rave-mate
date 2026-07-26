@@ -23,6 +23,10 @@ import (
 const (
 	decEarlyFailNs  = int64(3 * time.Second) // child dies unframed within this → demote tier
 	decRespawnDelay = time.Second            // min gap between respawns (frames drop meanwhile)
+	// decFreeRing bounds the recycled raw-frame buffers. Frames are written synchronously and
+	// recycled immediately, so 1 is the steady-state need; 4 covers a reader goroutine still
+	// draining an old child while a restarted one runs. Cap in BYTES = 4 × W·H·4 (32 MB at 1080p).
+	decFreeRing = 4
 )
 
 // decoder implements medialink.Sink (+PipelineReporter) over the ffmpeg child.
@@ -33,7 +37,8 @@ type decoder struct {
 	sink   medialink.Sink
 	size   int // bytes per raw output frame
 
-	accels []string // remaining hwaccel candidates; accels[0] is in use ("" = software)
+	accels []string    // remaining hwaccel candidates; accels[0] is in use ("" = software)
+	free   chan []byte // bounded ring of recycled raw-frame buffers (decFreeRing)
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -60,6 +65,7 @@ func newDecoder(_ context.Context, log *logbus.Bus, ffmpeg string, spec medialin
 		log: log, ffmpeg: ffmpeg, spec: spec, sink: sink,
 		size:   spec.Width * spec.Height * 4,
 		accels: accels,
+		free:   make(chan []byte, decFreeRing),
 	}
 }
 
@@ -173,34 +179,7 @@ func (d *decoder) spawnLocked() error {
 // restart/demotion bookkeeping.
 func (d *decoder) readRaw(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, tail *ringWriter) {
 	defer d.readerWG.Done()
-	buf := make([]byte, 0, d.size)
-	tmp := make([]byte, 64<<10)
-	for {
-		n, err := stdout.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-			for len(buf) >= d.size {
-				payload := make([]byte, d.size)
-				copy(payload, buf[:d.size])
-				buf = append(buf[:0], buf[d.size:]...)
-				d.framed.Store(true)
-				out := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: payload}
-				d.mu.Lock()
-				if len(d.ptsq) > 0 {
-					out.PTS, out.TC = d.ptsq[0].pts, d.ptsq[0].tc
-					d.ptsq = d.ptsq[1:]
-				}
-				d.mu.Unlock()
-				d.out.tick()
-				if d.sink.Write(out) != nil {
-					d.restart("sink write failed")
-				}
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
+	d.pumpFrames(stdout)
 	werr := cmd.Wait()
 	if ctx.Err() != nil {
 		return // deliberate stop (Close/restart)
@@ -222,6 +201,73 @@ func (d *decoder) readRaw(ctx context.Context, cmd *exec.Cmd, stdout io.Reader, 
 	d.mu.Unlock()
 	if werr != nil {
 		d.log.Warn(source, msg, map[string]any{"error": werr.Error(), "tail": tail.String()})
+	}
+}
+
+// pumpFrames reassembles the child's fixed-size rawvideo output and writes each frame to the sink.
+//
+// Reads land DIRECTLY in the frame buffer, capped at the bytes still missing from the current
+// frame, so a read can never spill into the next one. That means: one copy total (kernel → frame
+// buffer), no staging slice, and no residual memmove per frame - the old loop appended into a
+// staging buffer, copied out a fresh 8/33 MB payload, then memmoved the leftovers down, i.e. ~3
+// full-frame passes plus an allocation per frame on the RECEIVING PC's hot path.
+//
+// Buffers come from a bounded free ring and are recycled right after Write returns - the Sink
+// contract forbids retaining Payload for exactly this reason.
+func (d *decoder) pumpFrames(stdout io.Reader) {
+	frame := d.getBuf()
+	filled := 0
+	for {
+		n, err := stdout.Read(frame[filled:])
+		if n > 0 {
+			filled += n
+			if filled >= d.size { // == by construction; >= is belt and braces
+				d.emit(frame)
+				d.putBuf(frame)
+				frame = d.getBuf()
+				filled = 0
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// emit writes one complete raw frame (PTS/TC popped in output order) to the inner sink.
+func (d *decoder) emit(frame []byte) {
+	d.framed.Store(true)
+	out := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: frame}
+	d.mu.Lock()
+	if len(d.ptsq) > 0 {
+		out.PTS, out.TC = d.ptsq[0].pts, d.ptsq[0].tc
+		d.ptsq = d.ptsq[1:]
+	}
+	d.mu.Unlock()
+	d.out.tick()
+	if d.sink.Write(out) != nil {
+		d.restart("sink write failed")
+	}
+}
+
+// getBuf takes a frame buffer from the ring (allocating when empty).
+func (d *decoder) getBuf() []byte {
+	select {
+	case b := <-d.free:
+		return b
+	default:
+		return make([]byte, d.size)
+	}
+}
+
+// putBuf returns a frame buffer to the ring; a full ring drops it (GC handles the overflow).
+func (d *decoder) putBuf(b []byte) {
+	if len(b) != d.size {
+		return
+	}
+	select {
+	case d.free <- b:
+	default:
 	}
 }
 

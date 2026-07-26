@@ -214,6 +214,10 @@
       "body": "Presupuesto de vídeo por ruta. 20 Mbps entran para 1080p60 HEVC con margen en una LAN gigabit.",
       "title": "Bitrate por ruta"
     },
+    "ml-fps": {
+      "body": "Configúralo en el PC que ENVÍA el stream. Limita cuántos fotogramas por segundo salen de esta máquina. Las herramientas VJ suelen renderizar a 120+ fps: los fotogramas por encima del límite se descartan dentro del bucle de captura, ANTES de la copia GPU→CPU, así que una fuente de 120 fps limitada a 60 paga 60 lecturas por segundo en lugar de 120. Esa copia es el mayor coste de ancho de banda de memoria en el emisor (8 MB por fotograma 1080p, 33 MB por fotograma 4K), y por eso el límite - no el códec - es la primera palanca cuando OBS u otro encoder en la misma máquina empieza a tironear. La codificación y el cifrado también se omiten para esos fotogramas. 60 cubre cualquier proyector y stream; súbelo solo si sabes que el otro extremo muestra más rápido. Cuando varios peers piden LA MISMA fuente, se comparte una sola captura: corre al ritmo de la ruta más rápida y las rutas más lentas descartan sus fotogramas extra sin una segunda lectura.",
+      "title": "Límite de fotogramas del emisor"
+    },
     "motion-studio": {
       "body": "Reproduce tomas de movimiento VR grabadas desde tu visor (cabeza + mandos + cualquier tracker de cuerpo completo, capturados desde el menú de muñeca). La vista previa muestra el esqueleto en 3D con el recorrido de la cabeza como una estela violeta.\n\nDos salidas en vivo: VMC transmite la toma como dispositivos de tracking en bruto a un renderizador de VTuber (VSeeFace, Warudo, VNyan) que hace la IK y anima tu avatar - esta es la vía de reproducción real. Los trackers OSC alimentan el tracking de cuerpo completo de VRChat, pero VRChat siempre mueve la cabeza y las manos desde tu HMD y mandos en vivo, así que una toma grabada no puede manejar tu avatar de VRChat - exporta un .anim de Unity para eso y muévelo desde el Animator del avatar.\n\nLos avatares (.vrm) importados aquí se replican automáticamente a tus instancias de rave-mate emparejadas.",
       "title": "Estudio de movimiento"

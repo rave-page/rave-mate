@@ -15,6 +15,9 @@ type Source interface {
 
 // Sink consumes media frames (a Spout sender, an audio output device, or a Conn to a peer).
 type Sink interface {
+	// Write consumes one frame. It must NOT retain f.Payload past the call - the decode path hands
+	// out recycled full-frame buffers (8 MB at 1080p, 33 MB at 4K) and reuses them immediately.
+	// Copy what you need (the Spout sink's SendImage does).
 	Write(*Frame) error
 	Close() error
 }

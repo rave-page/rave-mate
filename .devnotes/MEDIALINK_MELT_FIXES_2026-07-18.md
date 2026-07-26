@@ -20,11 +20,12 @@ default; the cap exists only for the x264 fallback + explicit bandwidth saving.
 - **mfenc (in progress)**: native MF hardware encoder replaces the ffmpeg child+pipe;
   Phase B = D3D11 shared-texture direct source (share handle already available via
   `GetSenderInfo`) - true zero-copy, no CPU readback at all.
-- Per-subscriber duplication: N peers on one source = N capture+encode stacks (cap 8).
-  Needs capture fan-out sharing.
+- Per-subscriber duplication (N peers on one source = N capture+encode stacks) → FIXED
+  2026-07-25 by the capture wave (shared refcounted capture); the encode stack is still per route.
 - ~~`MediaLink.Subprocess` isolation child: still default-off~~ → default ON since 2026-07-26 (see below); cross-PC rig pass still outstanding.
-- `mediaroute.scan` builds/releases a Spout runtime object per `ListSenders`/`SenderSize`
-  call every 2 s - cacheable.
+- ~~`mediaroute.scan` builds/releases a Spout runtime object per `ListSenders`/`SenderSize` call
+  every 2 s~~ → FIXED 2026-07-25 (one registry handle + cached one-shot scan).
+
 
 ## 2026-07-26 - QoS wave (branch `feature/medialink-qos`, WP-4 + WP-6)
 
@@ -119,3 +120,27 @@ a frame runaway before the OS kills the process.
 - Listing-only advertisement path: start rave-mate mid-stream, confirm no test encode runs
   (`ctl encoder-scan` note), routes still negotiate, and the validated probe replaces it when
   the stream ends.
+
+## 2026-07-25 - Capture wave (branch `feature/medialink-capture-path`, WP-5)
+
+Second wave, same incident. WP-1/3 (engine + device select) and WP-4/6 (QoS + isolation)
+land alongside; this section is the CAPTURE path only.
+
+| Cause | Fix |
+|---|---|
+| `MaxFPS` applied AFTER the readback: a 120 fps source capped to 60 still paid 120 full-frame GPU→CPU copies/s and dropped half | `fpsGate` inside the Spout poll loop (`videoshare/fpsgate.go`): over-budget ticks skip `ReceiveImage` entirely. `RecvOptions.MaxFPS` + live `FPSLimiter.SetMaxFPS`. Connect/resize detection stays at the fast poll rate |
+| Per-route capture duplication: each route = own FrameReceiver + GL context + 250 Hz poll of the SAME texture | `mediaroute/capture.go` `captureHub`: refcounted capture per sender name, fanned out to N routes. Capture rate = the FASTEST subscriber (uncapped wins), re-rated live on attach/detach; each route drops to its own cap downstream. One pooled buffer, N refs (`pixRef`), pool gets it back exactly once |
+| `rebuf.add(f)` retained pooled capture buffers with NACK armed (always) → the pool never refilled, every readback re-allocated 8/33 MB | `routeIO.retainOrRelease` (nack.go): unpooled AUs retained as before; pooled compressed AUs COPIED into the window (≤1 MiB); pooled raw pixels exempt (intra + one 4K frame evicts the 16 MB window anyway) |
+| Registry scan churned 1+2N COM objects every 2 s | ONE process-wide `registry()` handle in the shim + `rave_spout_scan` (names+dims in one call) + 1 s TTL cache in `videoshare/scan.go` |
+| Explicit `MaxHeight` on a HW tier resized with CPU swscale | `scaleFilter`: `scale_cuda` (NVENC) / `scale_qsv` (QSV); AMF + software keep swscale (scale_amf/scale_d3d11 are ffmpeg 7.1+). Early-fail demotion pins swscale if the local ffmpeg rejects the chain |
+| Receive side allocated a full raw frame per frame and moved it ~3× (append → copy → memmove) | `decoder.pumpFrames`: reads land directly in the frame buffer capped at the missing bytes (one copy, no memmove), buffers from a bounded ring recycled after `Write`. `Sink.Write` contract: must not retain `Payload` |
+| mocapnode never returned pooled readback buffers | `PutPix` after the RGB24 conversion copy |
+
+Semantics to remember: **shared capture is per Spout sender name, not per route.** Spout has
+exactly one capture format (NRGBA at the sender's current size) and the receiver detects resize
+itself, so nothing per-route needs reconciling there; per-route differences (fps, MaxHeight,
+codec) all live downstream of the single readback.
+
+Needs the 2-PC rig (cannot be unit-tested): real Spout readback rate at a cap, two peers on one
+source showing ONE poll loop, `scale_cuda`/`scale_qsv` acceptance by the installed ffmpeg (and the
+demotion warning when rejected), and the end-to-end sender-CPU/bandwidth delta while OBS streams.

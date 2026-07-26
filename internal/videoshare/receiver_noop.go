@@ -11,8 +11,7 @@ import (
 // No-backend receiver stubs (mirrors sender_noop): enumeration is empty, opening errors so the
 // caller reports a reason instead of silently idling.
 
-func listSenders() []string              { return nil }
-func senderSize(string) (int, int, bool) { return 0, 0, false }
-func newFrameReceiver(*logbus.Bus, string) (FrameReceiver, error) {
+func scanSenders() []SenderInfo { return nil }
+func newFrameReceiver(*logbus.Bus, string, RecvOptions) (FrameReceiver, error) {
 	return nil, errors.New("no video-share backend compiled in (build -tags spout)")
 }
