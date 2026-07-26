@@ -19,3 +19,9 @@ func newSender(_ *logbus.Bus) (Sender, error) { return noopSender{}, nil }
 func newFrameSender(_ *logbus.Bus, _ string) (FrameSender, error) {
 	return nil, errors.New("no video-share backend compiled in (build -tags spout)")
 }
+
+// newSharedSender: no backend → no GPU destination texture, so the native decode session is never
+// requested and the ffmpeg decode path stands.
+func newSharedSender(_ *logbus.Bus, _ string, _, _ int) (SharedSender, error) {
+	return nil, errors.New("no video-share backend compiled in (build -tags spout)")
+}

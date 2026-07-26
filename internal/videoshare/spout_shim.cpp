@@ -80,6 +80,16 @@ void* rave_spout_create(void) {
 static thread_local unsigned char* flip_buf = nullptr;
 static thread_local size_t flip_cap = 0;
 
+// grow_flip_buf sizes the pooled per-thread staging buffer; false = out of memory.
+static bool grow_flip_buf(size_t need) {
+    if (flip_cap >= need) return true;
+    unsigned char* nb = (unsigned char*)realloc(flip_buf, need);
+    if (!nb) return false;
+    flip_buf = nb;
+    flip_cap = need;
+    return true;
+}
+
 // rave_spout_send publishes one RGBA frame, applying a geometric flip first (flip bit0=horizontal,
 // bit1=vertical). bInvert is always false - the explicit flip fully controls orientation so the
 // user can pick the mode that lands upright in their receiver (RAVE_SPOUT_FLIP). deckcard.Render
@@ -93,12 +103,7 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
         return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
     }
     const size_t need = (size_t)w * height * 4;
-    if (flip_cap < need) {
-        unsigned char* nb = (unsigned char*)realloc(flip_buf, need);
-        if (!nb) return 0;
-        flip_buf = nb;
-        flip_cap = need;
-    }
+    if (!grow_flip_buf(need)) return 0;
     unsigned char* t = flip_buf;
     for (unsigned int y = 0; y < height; y++) {
         unsigned int sy = (flip & 2) ? (height - 1 - y) : y;
@@ -108,6 +113,27 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
         }
     }
     return s->SendImage(t, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+}
+
+// rave_spout_open_sender: force the sender's shared texture to exist, then hand its handle out.
+// GetHandle() returns the DX11 shared handle of the CURRENT sender - which is only allocated once
+// something has been sent, hence the single zeroed frame. See the header for why there is no
+// CreateSender to call.
+int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
+                          unsigned int fmt, unsigned long long* share) {
+    if (!h || !name || !share || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(hgt)) return 0;
+    *share = 0;
+    SPOUTHANDLE s = (SPOUTHANDLE)h;
+    s->SetSenderName(name);
+    if (fmt != 0) s->SetSenderFormat((DWORD)fmt);
+    const size_t need = (size_t)w * hgt * 4;
+    if (!grow_flip_buf(need)) return 0;
+    memset(flip_buf, 0, need);
+    if (!s->SendImage(flip_buf, w, hgt, 0x1908 /*GL_RGBA*/, false)) return 0;
+    HANDLE sh = s->GetHandle();
+    if (!sh) return 0; // CPU/memoryshare sender: no DX11 texture to render into
+    *share = (unsigned long long)(uintptr_t)sh;
+    return 1;
 }
 
 void rave_spout_release(void* h) {

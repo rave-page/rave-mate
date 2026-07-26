@@ -23,6 +23,18 @@ void* rave_spout_create(void);
 int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
                     unsigned int w, unsigned int height, int flip);
 
+// rave_spout_open_sender initialises the named sender at the given geometry and returns its DX11
+// SHARED-TEXTURE handle in *share, so a foreign D3D11 device (the decoder child, zigmedia inc 2)
+// can render INTO it instead of pushing raw frames back through this process. fmt = DXGI format to
+// request (0 = Spout's default). Call on h's owning thread, before any rave_spout_send.
+//
+// SPOUTLIBRARY has no CreateSender: a sender's texture is allocated by the first send. So this
+// publishes ONE zeroed frame to force the allocation, then reads GetHandle(). That is one
+// w*h*4 write per ROUTE (reusing the pooled flip buffer, no malloc), not per frame.
+// 1 = ok and *share is non-zero; 0 = no sender / no DX11 shared texture (caller keeps the pipe).
+int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
+                          unsigned int fmt, unsigned long long* share);
+
 // Release the sender, close its OpenGL context, free the handle. Call on the owning thread.
 void rave_spout_release(void* h);
 

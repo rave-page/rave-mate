@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"rave.page/mate/internal/logbus"
@@ -30,6 +31,10 @@ import (
 )
 
 const backendName = "Spout"
+
+// openSenderWait bounds the eager sender create (GL context + one zeroed frame + GetHandle). A
+// wedged driver must not hang a route open; the caller falls back to the frame path.
+const openSenderWait = 5 * time.Second
 
 var _ Sender = (*spoutSender)(nil)
 
@@ -223,7 +228,27 @@ type frameSender struct {
 	frames  chan *frameJob // cap 1; Send waits for the read (handoff.go)
 	done    chan struct{}
 	stopped chan struct{} // closed by the worker AFTER ReleaseSender+CloseOpenGL ran
+
+	// Eager-create (SharedSender, zigmedia inc 2): the worker initialises the sender at start and
+	// reports its shared-texture handle here, so a foreign decoder can render straight into it.
+	// Written once by the worker before ready closes; read-only afterwards.
+	openW, openH int
+	share        uint64
+	shareFmt     uint32
+	ready        chan struct{} // closed after the eager create attempt (success or not)
+	openErr      string
 }
+
+// spoutSenderFmt is the DXGI format requested for an eagerly created sender: B8G8R8A8_UNORM, the
+// Spout DX11 default and the one format every D3D11 video processor accepts as an OUTPUT view.
+// Pinning it means the decoder child never has to guess (and its allowlist can stay tight).
+const spoutSenderFmt = 87
+
+// Handle implements SharedSender.
+func (f *frameSender) Handle() uint64 { return f.share }
+
+// Format implements SharedSender.
+func (f *frameSender) Format() uint32 { return f.shareFmt }
 
 // newFrameSender opens a Spout sender named name. Errors if SpoutLibrary.dll is absent so the
 // caller can fall back (e.g. to a PNG file).
@@ -233,8 +258,40 @@ func newFrameSender(log *logbus.Bus, name string) (FrameSender, error) {
 		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
 	}
 	f := &frameSender{log: log, name: name, frames: make(chan *frameJob, 1),
-		done: make(chan struct{}), stopped: make(chan struct{})}
+		done: make(chan struct{}), stopped: make(chan struct{}), ready: make(chan struct{})}
 	go f.run(name)
+	return f, nil
+}
+
+// newSharedSender opens the sender EAGERLY at w×h and reports its shared-texture handle. The
+// worker owns the GL context, so the create happens there and this blocks on it (bounded) - the
+// handle has to be known before the caller can decide between the native decode session and the
+// frame path.
+func newSharedSender(log *logbus.Bus, name string, w, h int) (SharedSender, error) {
+	preloadManagedDLL()
+	if C.rave_spout_available() == 0 {
+		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
+	}
+	f := &frameSender{log: log, name: name, frames: make(chan *frameJob, 1),
+		done: make(chan struct{}), stopped: make(chan struct{}), ready: make(chan struct{}),
+		openW: w, openH: h}
+	go f.run(name)
+	select {
+	case <-f.ready:
+	case <-time.After(openSenderWait):
+		f.Close()
+		return nil, fmt.Errorf("videoshare: sender %q did not initialise within %s", name, openSenderWait)
+	}
+	if f.share == 0 {
+		err := f.openErr
+		if err == "" {
+			err = "no DX11 shared texture"
+		}
+		f.Close()
+		return nil, fmt.Errorf("videoshare: sender %q has no GPU destination texture: %s", name, err)
+	}
+	log.Info(source, "shared sender open - GPU destination texture published", map[string]any{
+		"sender": name, "w": w, "h": h, "fmt": f.shareFmt})
 	return f, nil
 }
 
@@ -270,6 +327,8 @@ func (f *frameSender) run(name string) {
 	h := C.rave_spout_create()
 	if h == nil {
 		f.log.Warn(source, "spout: OpenGL context unavailable; frame sender idle", map[string]any{"sender": name})
+		f.openErr = "no OpenGL context"
+		f.signalReady()
 		for {
 			select {
 			case <-f.done:
@@ -280,6 +339,7 @@ func (f *frameSender) run(name string) {
 		}
 	}
 	defer C.rave_spout_release(h)
+	f.eagerCreate(h, cname)
 	for {
 		select {
 		case <-f.done:
@@ -294,5 +354,30 @@ func (f *frameSender) run(name string) {
 				f.log.Debug(source, "spout: SendImage failed", map[string]any{"sender": name})
 			}
 		}
+	}
+}
+
+// eagerCreate initialises the sender + captures its shared-texture handle (SharedSender only).
+// Runs on the worker thread, which owns the GL context.
+func (f *frameSender) eagerCreate(h unsafe.Pointer, cname *C.char) {
+	defer f.signalReady()
+	if f.openW <= 0 || f.openH <= 0 {
+		return // plain FrameSender: the sender materialises on the first Send, as before
+	}
+	var share C.ulonglong
+	if C.rave_spout_open_sender(h, cname, C.uint(f.openW), C.uint(f.openH), spoutSenderFmt, &share) == 0 || share == 0 {
+		f.openErr = "SendImage/GetHandle produced no shared texture"
+		return
+	}
+	f.share = uint64(share)
+	f.shareFmt = spoutSenderFmt
+}
+
+// signalReady closes ready once (both the success and the failure paths run it).
+func (f *frameSender) signalReady() {
+	select {
+	case <-f.ready:
+	default:
+		close(f.ready)
 	}
 }
