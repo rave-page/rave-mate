@@ -114,7 +114,7 @@ func encodeEngineOptions(mf *config.MediaLinkFeature) [][2]string {
 		seen[val] = true
 		opts = append(opts, [2]string{val, label})
 	}
-	if mfenc.Available() {
+	if mfenc.ChildAvailable() {
 		add(medialink.EncoderMFNative, i18n.T("settings.body.medialink.encoderNative"))
 	}
 	if caps, ok := mediapipe.Cached(); ok {

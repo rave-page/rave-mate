@@ -61,6 +61,10 @@ case "$target" in
     cd ../../../zigenc
     "$ZIG" build -Drelease ${target:+-Dtarget=$target}
     ls -la zig-out/bin
-    echo "rave-mate-enc built ($ver, ${target:-native})"
+    # stage for go:embed (tag `encembed`): self-updated installs get the child from
+    # INSIDE rave-mate.exe (the self-updater swaps only the main exe)
+    mkdir -p ../../internal/mfenc/embedded
+    cp -f zig-out/bin/rave-mate-enc.exe ../../internal/mfenc/embedded/rave-mate-enc.exe
+    echo "rave-mate-enc built + embed-staged ($ver, ${target:-native})"
     ;;
 esac

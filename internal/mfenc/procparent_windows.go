@@ -19,6 +19,8 @@ package mfenc
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -203,10 +206,79 @@ var (
 	sidSeq   atomic.Uint32
 )
 
-// encExePath locates rave-mate-enc.exe: RAVE_MATE_ENC_EXE override, else beside our exe,
-// else the in-repo zig-out (dev/test runs).
+// stagedChildExe extracts the EMBEDDED encoder child to the per-role cache dir
+// (%LocalAppData%/rave-mate/proc, the sysexec proc-link convention). The filename is
+// version-stamped with the embed's content hash, so a self-updated main exe always runs
+// ITS OWN child version (stale on-disk copies are ignored + best-effort pruned). Atomic
+// write+rename; re-extract only on hash mismatch. "" when this build has no embed.
+var (
+	stagedOnce sync.Once
+	stagedPath string
+	stagedErr  error
+)
+
+// HasEmbeddedChild reports whether this build carries the embedded encoder child.
+func HasEmbeddedChild() bool { return len(embeddedEnc) > 0 }
+
+func stagedChildExe() (string, error) {
+	if len(embeddedEnc) == 0 {
+		return "", nil
+	}
+	stagedOnce.Do(func() {
+		sum := sha256.Sum256(embeddedEnc)
+		stamp := hex.EncodeToString(sum[:6])
+		base, err := os.UserCacheDir()
+		if err != nil {
+			stagedErr = err
+			return
+		}
+		dir := filepath.Join(base, "rave-mate", "proc")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			stagedErr = err
+			return
+		}
+		dst := filepath.Join(dir, "rave-mate-enc-"+stamp+".exe")
+		if fi, err := os.Stat(dst); err == nil && fi.Size() == int64(len(embeddedEnc)) {
+			stagedPath = dst // hash-stamped name + size match = current version already staged
+			return
+		}
+		tmp := dst + ".tmp"
+		if err := os.WriteFile(tmp, embeddedEnc, 0o755); err != nil {
+			stagedErr = err
+			return
+		}
+		if err := os.Rename(tmp, dst); err != nil {
+			_ = os.Remove(tmp)
+			// lost a race with a sibling extract: reuse if it now matches
+			if fi, serr := os.Stat(dst); serr == nil && fi.Size() == int64(len(embeddedEnc)) {
+				stagedPath = dst
+				return
+			}
+			stagedErr = err
+			return
+		}
+		stagedPath = dst
+		if old, err := filepath.Glob(filepath.Join(dir, "rave-mate-enc-*.exe")); err == nil {
+			for _, f := range old { // prune superseded versions (in-use ones refuse removal: fine)
+				if f != dst {
+					_ = os.Remove(f)
+				}
+			}
+		}
+	})
+	return stagedPath, stagedErr
+}
+
+// encExePath locates rave-mate-enc.exe: RAVE_MATE_ENC_EXE override, else the extracted
+// EMBED (version-exact, survives self-updates), else beside our exe (NSIS install), else
+// the in-repo zig-out (dev/test runs).
 func encExePath() (string, error) {
 	if p := os.Getenv("RAVE_MATE_ENC_EXE"); p != "" {
+		return p, nil
+	}
+	if p, err := stagedChildExe(); err != nil {
+		Warnf("mfenc: embedded child extraction failed: %v", err)
+	} else if p != "" {
 		return p, nil
 	}
 	if exe, err := os.Executable(); err == nil {
@@ -227,6 +299,91 @@ func encExePath() (string, error) {
 		}
 	}
 	return "", errors.New("rave-mate-enc.exe not found (build native/zigenc or set RAVE_MATE_ENC_EXE)")
+}
+
+// ChildAvailable reports whether the native engine is ACTUALLY usable end to end:
+// hardware caps (cgo probe) AND the encoder child exe resolvable + spawnable + answering
+// hello. Advertisement MUST use this, never Available() alone - a self-updated install
+// without the child would otherwise negotiate an engine it cannot run (field #166: the
+// self-updater swaps only rave-mate.exe, sidecars never arrive).
+var (
+	childAvailOnce sync.Once
+	childAvailOK   bool
+)
+
+func ChildAvailable() bool {
+	childAvailOnce.Do(func() { childAvailOK = childAvailCheck() })
+	return childAvailOK
+}
+
+// RefreshChildAvailable re-evaluates the gate (child staged/updated at runtime; tests).
+func RefreshChildAvailable() bool {
+	childAvailOK = childAvailCheck()
+	childAvailOnce = sync.Once{}
+	childAvailOnce.Do(func() {})
+	return childAvailOK
+}
+
+// childAvailCheck is ChildAvailable's uncached core (testable).
+func childAvailCheck() bool {
+	if !Available() {
+		return false
+	}
+	exe, err := encExePath()
+	if err != nil {
+		Warnf("mfenc: native engine NOT advertised - encoder child unavailable: %v", err)
+		return false
+	}
+	if err := probeChildHello(exe); err != nil {
+		Warnf("mfenc: native engine NOT advertised - encoder child probe failed (%s): %v", exe, err)
+		return false
+	}
+	return true
+}
+
+// probeChildHello spawns the child once and requires its hello line within 3s.
+func probeChildHello(exe string) error {
+	cmd := exec.Command(exe, "0")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	sysexec.Hide(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	sysexec.AssignToJob(cmd.Process, true)
+	defer func() {
+		_, _ = stdin.Write([]byte("{\"op\":\"quit\"}\n"))
+		done := make(chan struct{})
+		go func() { _, _ = cmd.Process.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			sysexec.KillTree(cmd.Process)
+		}
+	}()
+	lineCh := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		if sc.Scan() {
+			lineCh <- sc.Text()
+		}
+		close(lineCh)
+	}()
+	select {
+	case ln, ok := <-lineCh:
+		if !ok || !strings.Contains(ln, "\"ev\":\"hello\"") {
+			return fmt.Errorf("unexpected first line %q", ln)
+		}
+		return nil
+	case <-time.After(3 * time.Second):
+		return errors.New("no hello within 3s")
+	}
 }
 
 func getChild(luid int64) (*procChild, error) {

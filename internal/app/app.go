@@ -743,7 +743,7 @@ func run(parent context.Context, serviceMode bool) error {
 					enc = append(enc, e)
 				}
 			}
-		} else if mfenc.Available() && !slices.Contains(enc, medialink.EncoderMFNative) {
+		} else if mfenc.ChildAvailable() && !slices.Contains(enc, medialink.EncoderMFNative) {
 			// The native pipe-free engine gets its OWN capability name (never ffmpeg's h264_mf), so
 			// the negotiation can preempt the pipe-fed tiers with it and the engine keying in
 			// mediapipe.Factories is unambiguous.
@@ -752,7 +752,7 @@ func run(parent context.Context, serviceMode bool) error {
 		return enc
 	}
 	var mfOnly []string // ffmpeg-less fallback: the native MF engine can still SOURCE h264
-	if mfenc.Available() && !cfg.Features.MediaLink.SWOnly {
+	if mfenc.ChildAvailable() && !cfg.Features.MediaLink.SWOnly {
 		mfOnly = []string{medialink.EncoderMFNative}
 	}
 	// mediaCaps gates the probe on the governor (no encode session stolen mid-stream) and runs the

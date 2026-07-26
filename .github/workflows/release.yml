@@ -125,7 +125,7 @@ jobs:
             -X rave.page/mate/internal/version.FeedURL=${FEED} \
             ${EXTRA_LDFLAGS}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
-            go build -tags "spout vr abletonlink zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
+            go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/
           cp internal/vroverlay/sdk/openvr_api.dll dist/
           cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child

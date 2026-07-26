@@ -26,9 +26,14 @@ ifeq ($(ZIG),1)
   TAGS += zigdsp
 endif
 # ZIG=1 also links the raveui Zig webview render layer (native/zigui, tag zigui) —
-# ONE switch turns on all Zig natives; `make zig` builds all libs.
+# ONE switch turns on all Zig natives; `make zig` builds all libs. On Windows it also
+# embeds the encoder child exe (encembed - `make zig` stages it into internal/mfenc/
+# embedded) so self-updated installs always carry a version-matched rave-mate-enc.exe.
 ifeq ($(ZIG),1)
   TAGS += zigui zigvr
+  ifeq ($(OS),Windows_NT)
+    TAGS += encembed
+  endif
 endif
 # ZIGVR=1 links only the ravevr VR-overlay raster lib (Zig display-list executor,
 # pixel-identical to the Go raster - see .devnotes/ZIG_VR_OVERLAY.md).
