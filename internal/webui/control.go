@@ -16,9 +16,10 @@ import (
 // the JS run is Go-generated or a local-operator ctl command (trusted, loopback-only), never
 // remote/untrusted input.
 
-// evalTimeout bounds one ctl round-trip. Measured hop cost across the B5 procShell child
-// (TestProcShellCtlRoundTripCost): p50 well under a millisecond over the stdio lanes, so the budget
-// is unchanged - the round trip is still dominated by the page, not the transport.
+// evalTimeout bounds one ctl round-trip. The B5 procShell adds an IPC hop; measured over its stdio
+// lanes (TestProcShellCtlRoundTripCost, 200 round trips): avg 73 µs, worst 604 µs - 0.02% of this
+// budget. So it is UNCHANGED: the round trip is dominated by the page, not the transport. Same
+// verdict for ScreenshotAll's 300 ms settle.
 const evalTimeout = 3 * time.Second
 
 // directEvaler is implemented by a shell whose eval crosses a process boundary and therefore needs

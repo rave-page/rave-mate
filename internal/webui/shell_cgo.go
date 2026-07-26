@@ -74,7 +74,10 @@ var (
 )
 
 // SetShutdownHook registers the graceful-shutdown routine the force-exit watchdog invokes.
-// app.go wires its shutdown() here.
+// NOTE: nothing calls this today, so a wedged in-proc webview hard-exits WITHOUT flushing daemon
+// state. That gap is what the B5 procShell removes structurally (the daemon can always kill the
+// window child, so run() returns and app.go's own shutdown() runs) - see ZIG_UI_GUIDE.md
+// "Phase B - B5 procShell protocol" §6.
 func SetShutdownHook(fn func()) {
 	shutdownHookMu.Lock()
 	shutdownHook = fn

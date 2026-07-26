@@ -1744,7 +1744,10 @@ split those live on the correct side of the boundary:
    stdin. The daemon kills it (`Host.Kill`), which closes the pipe, ends the session, and restarts it.
 
 So "webview wedged" now means "child killed (+ relaunched)", never "daemon hangs": `run()` always
-returns, so `app.go`'s `cancel(); shutdown()` always executes. Gates, all by execution:
+returns, so `app.go`'s `cancel(); shutdown()` always executes. This also closes a gap the in-proc path
+still has: `SetShutdownHook` was never wired by anyone, so an in-proc wedge hard-exits WITHOUT
+flushing daemon state. Under `proc` there is no hook to wire - the daemon was never blocked. Gates,
+all by execution:
 `TestProcShellWedgedChildTerminatesInGrace`, `…CrashedChildRestartsAndReattaches`, `…CleanQuit`.
 
 ### 7. Crash, restart, reattach
