@@ -10,7 +10,28 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 )
+
+// Fixture knobs (loopback mode only). They model the two behaviours the transport gates need from a
+// real window that the model has no window to produce.
+var (
+	// lbApplyDelay is the per-script apply cost: a busy UI thread. Application is ALWAYS async here,
+	// exactly like WebView2's Dispatch queue, so a slow apply never stalls the child's stdin reader.
+	lbApplyDelay time.Duration
+	// lbStall blocks the CALLER inside setHTML/eval - i.e. inside the child's stdin reader, which
+	// featurehost dispatches events on. That is a child that stopped reading its stdin.
+	lbStall bool
+)
+
+// lbApplyQueueCap bounds the async apply queue. Past it the caller blocks (a child that cannot keep
+// up must stop consuming its stdin, never accumulate without bound).
+const lbApplyQueueCap = 4096
+
+type lbItem struct {
+	doc bool
+	s   string
+}
 
 // lbFixture is what the model answers ctl queries with. Set by the daemon-side test through the
 // document it loads: a `<!--LBFIX {json}-->` comment in the initial/doc HTML (the only channel a
@@ -30,24 +51,58 @@ type loopbackWindow struct {
 	fix   lbFixture
 	frags map[string]string // fragment id → last __patch html
 
+	apply     chan lbItem
 	closeOnce sync.Once
 	done      chan struct{}
 }
 
 func newLoopbackWindow(onAction func(string), onReady func()) *loopbackWindow {
 	return &loopbackWindow{onAction: onAction, onReady: onReady,
-		frags: map[string]string{}, done: make(chan struct{})}
+		frags: map[string]string{}, apply: make(chan lbItem, lbApplyQueueCap), done: make(chan struct{})}
 }
 
 func (s *loopbackWindow) run(initialHTML string, _ bool) {
-	s.setHTML(initialHTML)
+	s.applyDoc(initialHTML) // synchronous, like SetHtml before the message loop starts
+	go s.applier()
 	if s.onReady != nil {
 		go s.onReady()
 	}
 	<-s.done // block like a message loop
 }
 
-func (s *loopbackWindow) setHTML(html string) {
+// applier drains scripts one at a time, in arrival order - the model of the window's UI thread.
+func (s *loopbackWindow) applier() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case it := <-s.apply:
+			if lbApplyDelay > 0 {
+				time.Sleep(lbApplyDelay)
+			}
+			if it.doc {
+				s.applyDoc(it.s)
+			} else {
+				s.applyEval(it.s)
+			}
+		}
+	}
+}
+
+func (s *loopbackWindow) enqueue(it lbItem) {
+	if lbStall {
+		<-s.done // block the child's stdin reader: a wedged consumer
+		return
+	}
+	select {
+	case s.apply <- it:
+	case <-s.done:
+	}
+}
+
+func (s *loopbackWindow) setHTML(html string) { s.enqueue(lbItem{doc: true, s: html}) }
+
+func (s *loopbackWindow) applyDoc(html string) {
 	s.mu.Lock()
 	s.doc = html
 	s.frags = map[string]string{}
@@ -69,10 +124,12 @@ func (s *loopbackWindow) post(payload string) bool {
 	return true
 }
 
-// eval "runs" one script: applies every __patch, replays every window.rave() act, and answers every
-// __rave_evalResult call (literal second argument verbatim - that is the ordered-lane ack; a
+func (s *loopbackWindow) eval(js string) { s.enqueue(lbItem{s: js}) }
+
+// applyEval "runs" one script: applies every __patch, replays every window.rave() act, and answers
+// every __rave_evalResult call (literal second argument verbatim - that is the ordered-lane ack; a
 // JSON.stringify wrapper is answered from the fixture table).
-func (s *loopbackWindow) eval(js string) {
+func (s *loopbackWindow) applyEval(js string) {
 	for _, p := range lbPatches(js) {
 		s.mu.Lock()
 		s.frags[p.id] = p.html

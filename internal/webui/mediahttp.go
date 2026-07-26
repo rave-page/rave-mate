@@ -383,7 +383,7 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 	cw := &countingWriter{ResponseWriter: w}
 	start := time.Now()
 	http.ServeContent(cw, r, fi.Name(), fi.ModTime(), f) // Range-capable
-	if owner != nil {
+	if owner != nil && owner.log != nil {
 		owner.log.Debug("mediahttp", "serve", map[string]any{
 			"file": fi.Name(), "range": r.Header.Get("Range"), "sent": cw.n,
 			"ms": time.Since(start).Milliseconds(),

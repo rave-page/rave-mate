@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +74,9 @@ type procShell struct {
 
 	ord chan procFrame
 	dir chan procFrame
+	// sendFn writes one frame to the child; nil = the feature host. Seam for the lane-policy gates,
+	// which must observe the WRITER's choices without a child process in the way.
+	sendFn func(ev string, data any) error
 
 	seq     atomic.Uint64
 	dropped atomic.Uint64
@@ -112,6 +116,7 @@ func newProcShell(title string, w, h int, onAction func(string), onReady func())
 		OnReady:          s.onChildReady,
 		OnDown:           s.onChildDown,
 		HeartbeatTimeout: procBeatTimeout,
+		Command:          procChildCmd,
 	})
 	if err != nil {
 		return nil, false
@@ -149,6 +154,10 @@ func (s *procShell) initParams() any {
 // procVirtualChild makes the spawned child run the loopback page model instead of WebView2 (tests
 // only; see shell_proc_loopback.go).
 var procVirtualChild bool
+
+// procChildCmd overrides how the window child is spawned. Nil in production (`<exe> feature
+// webview`); the B5 tests re-exec the test binary with an env marker instead of shipping an exe.
+var procChildCmd func() *exec.Cmd
 
 func (s *procShell) events() map[string]func(json.RawMessage) {
 	return map[string]func(json.RawMessage){
@@ -358,7 +367,11 @@ func (s *procShell) writer() {
 func (s *procShell) write(f procFrame) {
 	s.writeAt.Store(time.Now().UnixNano())
 	defer s.writeAt.Store(0)
-	if err := s.host.Send(f.ev, f.data); err != nil && !errors.Is(err, os.ErrClosed) {
+	send := s.sendFn
+	if send == nil {
+		send = s.host.Send
+	}
+	if err := send(f.ev, f.data); err != nil && !errors.Is(err, os.ErrClosed) {
 		s.log.Debug("webui", "webview child send failed", map[string]any{"event": f.ev, "error": err.Error()})
 	}
 }

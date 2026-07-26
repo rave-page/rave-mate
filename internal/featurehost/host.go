@@ -52,6 +52,10 @@ type Options struct {
 	// cap (kill-on-close). A runaway heap fails its next allocation → child dies → Host restarts it.
 	// For resource-bearing children (media plane); leave 0 for the plain kill-on-close job.
 	MemLimitMB int
+	// Command overrides how the child is spawned (default `<exe> feature <name>`). TEST SEAM for
+	// callers outside this package: a test re-execs its own binary with an env marker instead of
+	// shipping an exe. Nil in production.
+	Command func() *exec.Cmd
 	// LowPriority spawns the child in BELOW_NORMAL_PRIORITY_CLASS so a background feature (e.g.
 	// Icecast set-capture receiving+writing a live broadcast) always yields to the user's
 	// foreground app and any active encoder. Leave false for latency-sensitive children.
@@ -93,7 +97,8 @@ func New(opt Options) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Host{opt: opt, exePath: exe, pending: map[string]chan frame{}, frames: map[string]uint64{}}
+	h := &Host{opt: opt, exePath: exe, command: opt.Command,
+		pending: map[string]chan frame{}, frames: map[string]uint64{}}
 	hostsMu.Lock()
 	hosts = append(hosts, h)
 	hostsMu.Unlock()
