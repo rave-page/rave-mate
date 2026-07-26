@@ -20,6 +20,10 @@
 #include "mirror.h"
 #include "framer.h"
 
+// ntifs.h-only export; portcls TUs declare it themselves (PsGetCurrentProcessId pattern).
+extern "C" NTSYSCALLAPI NTSTATUS NTAPI
+ZwWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 // BSOD 0x50 071326-9546 (usbaudio!memcpy, write past pool page): usbaudio copies a
 // replaying pin's ENTIRE record-so-far into the frame WITHOUT clamping to FrameExtent.
@@ -473,8 +477,25 @@ NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
         ExFreePoolWithTag(t, RAVE_TAG);
         return st;
     }
-    ObReferenceObjectByHandle(threadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
-                              &t->ThreadObj, nullptr);
+    st = ObReferenceObjectByHandle(threadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
+                                   &t->ThreadObj, nullptr);
+    if (!NT_SUCCESS(st)) {
+        // Unreferenced pump can't be joined by RaveTapClose — freeing t below
+        // would UAF under the live thread. Order it out and join via the handle.
+        InterlockedExchange(&t->Stop, 1);
+        SetPinState(t->PinFileObj, KSSTATE_STOP);  // completes the pump's pending read
+        NTSTATUS jw = ZwWaitForSingleObject(threadHandle, FALSE, nullptr);
+        ZwClose(threadHandle);
+        if (!NT_SUCCESS(jw)) {
+            return st;  // join failed (can't happen on a valid kernel handle):
+        }               // leak t rather than free it under a live pump
+        ObDereferenceObject(t->PinFileObj);
+        ZwClose(t->PinHandle);
+        ObDereferenceObject(t->FilterFileObj);
+        ZwClose(t->FilterHandle);
+        ExFreePoolWithTag(t, RAVE_TAG);
+        return st;
+    }
     ZwClose(threadHandle);
     *OutTap = t;
     return STATUS_SUCCESS;
@@ -482,7 +503,11 @@ NTSTATUS RaveTapOpen(PCWSTR Iface, RAVE_PORT* const* Outs, ULONG OutCount,
 #pragma code_seg()
 
 #pragma code_seg("PAGE")
-VOID RaveTapClose(RAVE_TAP* Tap)  // waits on the pump thread — PASSIVE, no locks held
+// Waits on the pump thread — PASSIVE. TRACKED (0x133/hang family, separate fix
+// wave): managed callers hold g_M.Lock across this unbounded join; a dead KS pin
+// that never completes the pending read wedges the engine and every Lock waiter
+// behind it. No behavior change here yet — do not add callers that hold locks.
+VOID RaveTapClose(RAVE_TAP* Tap)
 {
     PAGED_CODE();
     InterlockedExchange(&Tap->Stop, 1);
