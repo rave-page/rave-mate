@@ -10,6 +10,16 @@
   guarded by a persisted budget (≤3 restarts / 5 min, else pause + toast "fix the driver"). A
   logged TDR alone does NOT restart (many are transparently recovered) - it's toasted + fanned
   out to in-daemon GPU consumers (VR) to reinit in place. Prove it on demand: `ctl gpu-selftest`.
+- **P0 OpenVR in-place recovery + recovery-layer de-amplification** (fix/vr-tdr-hardening):
+  `ovrMu` serializes ALL OpenVR entry + VR goroutine `LockOSThread` + `VR_ShutdownInternal` on
+  partial-init failure (vrserver IPC session leak). `SetOverlayRaw` failures counted
+  (`vrHealth.observeTex`, budget 10) → `Shutdown`+`resetSession`+re-`Init` in place; TDR fan-out
+  now has a real consumer (`vrSurf.GPUReset` → vr child `gpureset` event → `RequestReinit`).
+  Amplification fixes: guardian disarmed before gpurecover's `os.Exit`; relaunch hands the fresh
+  instance a 10s boot cooldown (`RAVE_RELAUNCH_COOLDOWN`); vr child restart budget
+  (MaxAttempts=10, StableAfter=5m); TDR event-log query time-bounded (1h) + first-record-only +
+  30s poll. Cold-start paced (2 overlay creates/tick), lazy path-preview, high-water tooltip
+  textures (no 90Hz destroy+recreate).
 
 Goal: a Windows TDR / GPU driver crash must NOT kill the whole rave-mate app. GPU-dependent parts
 restart fast or fail recoverably. Today the daemon is ONE GPU fault domain: Fyne GL window + Spout
