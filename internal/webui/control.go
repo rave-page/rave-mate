@@ -16,7 +16,24 @@ import (
 // the JS run is Go-generated or a local-operator ctl command (trusted, loopback-only), never
 // remote/untrusted input.
 
+// evalTimeout bounds one ctl round-trip. Measured hop cost across the B5 procShell child
+// (TestProcShellCtlRoundTripCost): p50 well under a millisecond over the stdio lanes, so the budget
+// is unchanged - the round trip is still dominated by the page, not the transport.
 const evalTimeout = 3 * time.Second
+
+// directEvaler is implemented by a shell whose eval crosses a process boundary and therefore needs
+// an explicit DIRECT lane: evalValue deliberately bypasses the batching eval queue, and it must also
+// bypass the ordered IPC lane or ctl deadlocks behind a flooded batch stream (shell_proc.go).
+type directEvaler interface{ evalDirect(js string) }
+
+// evalCtl sends one ctl script on the direct lane when the shell has one, else straight to eval.
+func (u *UI) evalCtl(js string) {
+	if d, ok := u.shell.(directEvaler); ok {
+		d.evalDirect(js)
+		return
+	}
+	u.shell.eval(js)
+}
 
 // evalValue runs js on the page and returns the JSON-decoded result (via the __rave_evalResult
 // round-trip). ok=false on no-shell or timeout.
@@ -32,7 +49,7 @@ func (u *UI) evalValue(js string) (any, bool) {
 	wrapped := "(async()=>{try{var r=await (async()=>{" + js + "})();window.__rave_evalResult(" +
 		jsQuote(id) + ",JSON.stringify(r===undefined?null:r));}catch(e){window.__rave_evalResult(" +
 		jsQuote(id) + ",JSON.stringify('ERR:'+String(e)));}})()"
-	u.shell.eval(wrapped)
+	u.evalCtl(wrapped)
 	select {
 	case raw := <-ch:
 		var v any

@@ -8,7 +8,7 @@ package webui
 // linux CI jobs (lint/build:linux/test) from dragging in webkit2gtk.
 const shellAvailable = false
 
-func newShell(_ string, _, _ int, _ func(string), _ func()) (shell, bool) { return nil, false }
+func newNativeShell(_ string, _, _ int, _ func(string), _ func()) (shell, bool) { return nil, false }
 
 // probeWebview reports whether the webview runtime is usable. Always false off the cgo-Windows
 // path (the host isn't compiled in), so the seam picks Fyne.

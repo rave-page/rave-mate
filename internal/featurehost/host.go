@@ -250,6 +250,19 @@ func (h *Host) Running() bool {
 	return h.ready
 }
 
+// Kill force-ends the current child session (no graceful stop): the reader sees stdout close and
+// supervise restarts with backoff. For a child that is alive but no longer serving - e.g. one that
+// stopped reading its stdin (webui procShell's wedge watchdog). No-op when nothing is running.
+func (h *Host) Kill() {
+	h.mu.Lock()
+	cur := h.cur
+	h.mu.Unlock()
+	if cur == nil || cur.cmd.Process == nil {
+		return
+	}
+	sysexec.KillTree(cur.cmd.Process)
+}
+
 // Stats returns the lifetime restart count and the last crash error ("" if none).
 func (h *Host) Stats() (restarts int, lastErr string) {
 	h.mu.Lock()

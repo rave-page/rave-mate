@@ -48,9 +48,21 @@ type imgReq struct {
 	w    int // target max width in px; 0 = original size
 }
 
+// mediaSessMax keeps the CURRENT plus one PREVIOUS session valid: a <video> mid-play (or an
+// in-flight remote-mirror fetch) must survive the window child restarting under it, and the next
+// render re-mints the URL anyway.
+const mediaSessMax = 2
+
 type mpMediaSrv struct {
-	mu     sync.Mutex
-	port   int
+	mu   sync.Mutex
+	port int
+	// sess scopes every /m//mi//img/ URL to one shell session (newest first; see mediaSession).
+	// EMPTY = the historic 2-segment URLs, byte-for-byte - the in-proc shell, the Fyne renderer and
+	// headless mirror sessions never mint one, so the default path is untouched. procShell mints one
+	// per child session and hands it to the child in the init payload: the child's fetches are then
+	// authorized by an identity the DAEMON gave it, and a token URL captured from a dead session is
+	// refused instead of being served to any loopback caller that still holds the token.
+	sess   []string
 	tokens map[string]string // token → absolute file path (raw stream)
 	owner  map[string]*UI    // token → minting UI: eviction stays within the minter's own tokens
 	order  []string          // FIFO for eviction (per-owner first)
@@ -76,6 +88,68 @@ func randToken() string {
 		return ""
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// newSession mints (and activates) a media session, retiring the oldest past mediaSessMax. Returns
+// the session id.
+func (s *mpMediaSrv) newSession() string {
+	tok := randToken()
+	if tok == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sess = append([]string{tok}, s.sess...)
+	if len(s.sess) > mediaSessMax {
+		s.sess = s.sess[:mediaSessMax]
+	}
+	return tok
+}
+
+// originAndSession reports the loopback origin ("" until the listener starts) and the current
+// session id ("" when unsessioned) - the two facts the window child is told explicitly.
+func (s *mpMediaSrv) originAndSession() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	origin := ""
+	if s.port != 0 {
+		origin = fmt.Sprintf("http://127.0.0.1:%d", s.port)
+	}
+	if len(s.sess) == 0 {
+		return origin, ""
+	}
+	return origin, s.sess[0]
+}
+
+// sessPrefixLocked is the path segment URLs carry ("" when unsessioned). Caller holds s.mu.
+func (s *mpMediaSrv) sessPrefixLocked() string {
+	if len(s.sess) == 0 {
+		return ""
+	}
+	return s.sess[0] + "/"
+}
+
+// routeToken strips route from path and validates the session segment. ok=false = refuse (404):
+// wrong/absent session while sessions are active, or an empty token.
+func (s *mpMediaSrv) routeToken(path, route string) (string, bool) {
+	rest := strings.TrimPrefix(path, route)
+	s.mu.Lock()
+	live := append([]string(nil), s.sess...)
+	s.mu.Unlock()
+	if len(live) == 0 {
+		return rest, rest != ""
+	}
+	i := strings.IndexByte(rest, '/')
+	if i <= 0 {
+		return "", false
+	}
+	got, tok := rest[:i], rest[i+1:]
+	for _, ok := range live {
+		if got == ok && tok != "" {
+			return tok, true
+		}
+	}
+	return "", false
 }
 
 // ensureListenLocked lazily starts the loopback listener. Caller holds s.mu. Returns ok.
@@ -107,7 +181,7 @@ func (u *UI) mpMediaURL(path string) string {
 		if !u.virtual() { // window reuse re-tags: remote churn must not evict a live window token
 			s.owner[tok] = u
 		}
-		return fmt.Sprintf("http://127.0.0.1:%d/m/%s", s.port, tok)
+		return fmt.Sprintf("http://127.0.0.1:%d/m/%s%s", s.port, s.sessPrefixLocked(), tok)
 	}
 	tok := randToken()
 	if tok == "" {
@@ -120,7 +194,7 @@ func (u *UI) mpMediaURL(path string) string {
 	if len(s.order) > mpMediaMaxTokens { // bounded: evict the minter's own oldest first
 		s.evictMediaLocked(u)
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/m/%s", s.port, tok)
+	return fmt.Sprintf("http://127.0.0.1:%d/m/%s%s", s.port, s.sessPrefixLocked(), tok)
 }
 
 // mpIndexURL returns the /mi/ URL serving path's cached fragmented-MP4 stream index
@@ -181,7 +255,7 @@ func (u *UI) imgURL(path string, maxW int) string {
 	}
 	key := path + "\x00" + strconv.Itoa(maxW)
 	if tok, ok := s.imgByKey[key]; ok {
-		return fmt.Sprintf("http://127.0.0.1:%d/img/%s", s.port, tok)
+		return fmt.Sprintf("http://127.0.0.1:%d/img/%s%s", s.port, s.sessPrefixLocked(), tok)
 	}
 	tok := randToken()
 	if tok == "" {
@@ -192,7 +266,7 @@ func (u *UI) imgURL(path string, maxW int) string {
 	s.imgKeyByTok[tok] = key
 	s.imgOrder = append(s.imgOrder, tok)
 	s.evictImgLocked()
-	return fmt.Sprintf("http://127.0.0.1:%d/img/%s", s.port, tok)
+	return fmt.Sprintf("http://127.0.0.1:%d/img/%s%s", s.port, s.sessPrefixLocked(), tok)
 }
 
 // imgBytesURL registers pre-encoded JPEG bytes under the same /img/ loopback server and
@@ -214,7 +288,7 @@ func (u *UI) imgBytesURL(jpegBytes []byte) string {
 	sum := sha256.Sum256(jpegBytes)
 	key := "b\x00" + hex.EncodeToString(sum[:])
 	if tok, ok := s.imgByKey[key]; ok {
-		return fmt.Sprintf("http://127.0.0.1:%d/img/%s", s.port, tok)
+		return fmt.Sprintf("http://127.0.0.1:%d/img/%s%s", s.port, s.sessPrefixLocked(), tok)
 	}
 	tok := randToken()
 	if tok == "" {
@@ -232,7 +306,7 @@ func (u *UI) imgBytesURL(jpegBytes []byte) string {
 		delete(s.imgCache, old)
 	}
 	s.evictImgLocked()
-	return fmt.Sprintf("http://127.0.0.1:%d/img/%s", s.port, tok)
+	return fmt.Sprintf("http://127.0.0.1:%d/img/%s%s", s.port, s.sessPrefixLocked(), tok)
 }
 
 // evictImgLocked FIFO-evicts the oldest img token (+ its key + cache) past the cap. Caller
@@ -282,12 +356,16 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveIndex(w, r)
 		return
 	}
-	tok := strings.TrimPrefix(r.URL.Path, "/m/")
+	tok, sok := s.routeToken(r.URL.Path, "/m/")
+	if !sok {
+		http.NotFound(w, r)
+		return
+	}
 	s.mu.Lock()
 	path, ok := s.tokens[tok]
 	owner := s.owner[tok]
 	s.mu.Unlock()
-	if !ok || tok == "" {
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -329,12 +407,16 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 // not a supported fMP4 - the negative sentinel has no frags - or the cache is cold/stale;
 // the JS runtime then falls back to plain src). Store read only - never parses here.
 func (s *mpMediaSrv) serveIndex(w http.ResponseWriter, r *http.Request) {
-	tok := strings.TrimPrefix(r.URL.Path, "/mi/")
+	tok, sok := s.routeToken(r.URL.Path, "/mi/")
+	if !sok {
+		http.NotFound(w, r)
+		return
+	}
 	s.mu.Lock()
 	path, ok := s.tokens[tok]
 	owner := s.owner[tok]
 	s.mu.Unlock()
-	if !ok || tok == "" || owner == nil || owner.svc.Store == nil {
+	if !ok || owner == nil || owner.svc.Store == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -355,12 +437,16 @@ func (s *mpMediaSrv) serveIndex(w http.ResponseWriter, r *http.Request) {
 
 // serveImg serves a token's resized JPEG (decode+resize once, then cache the bytes).
 func (s *mpMediaSrv) serveImg(w http.ResponseWriter, r *http.Request) {
-	tok := strings.TrimPrefix(r.URL.Path, "/img/")
+	tok, sok := s.routeToken(r.URL.Path, "/img/")
+	if !sok {
+		http.NotFound(w, r)
+		return
+	}
 	s.mu.Lock()
 	req, ok := s.imgTokens[tok]
 	cached := s.imgCache[tok]
 	s.mu.Unlock()
-	if !ok || tok == "" {
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
