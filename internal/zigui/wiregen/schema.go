@@ -1078,6 +1078,180 @@ var schema = []msg{
 		doc: "point-cloud GPU prompt modal",
 		fs:  []field{s(1, "Title", "title"), s(2, "Msg", "msg"), b(3, "Enabled", "enabled"), s(4, "EnableLabel", "enableLabel"), s(5, "Close", "close")},
 	},
+	// vrchat family (i4): full tab (64) + #vrc-status (60) + #vrc-editor (61) + #vrc-campaths
+	// (62) + #vrc-photos-body (63) + the Groups sub-tab root #vrcg-body (65) + the six group
+	// modals (66-71, dialogs_b renderers). Go int fields ride kUint (Zig i64, all non-negative);
+	// Campaths.SVG/PlayBtn + PhotoCell.TitleQ + InviteList.MoreMsg + MemberConfirm.Verb are
+	// pre-rendered/trusted - plain kStr, raw semantics live in the renderer. VgTab duplicates
+	// LogsTab's zig type (c.Tab) for the vgTabSt Go type - one message per Go type.
+	{
+		name: "VrcStatus", goT: "vrcStatusSt", zigT: "vrchat.Status", id: 60,
+		doc: "#vrc-status account status region",
+		fs:  []field{b(1, "Present", "present"), s(2, "Variant", "variant"), s(3, "Label", "label"), s(4, "DL", "dl"), s(5, "Line", "line")},
+	},
+	{
+		name: "VrcOpt", goT: "vrcOptSt", zigT: "vrchat.Opt",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label"), b(3, "Sel", "sel")},
+	},
+	{
+		name: "VrcPresetSel", goT: "vrcPresetSelSt", zigT: "vrchat.PresetSel",
+		fs: []field{s(1, "Act", "act"), s(2, "Placeholder", "placeholder"), sl(3, "Names", "names")},
+	},
+	{
+		name: "VrcEditor", goT: "vrcEditorSt", zigT: "vrchat.Editor", id: 61,
+		doc: "#vrc-editor status & bio editor",
+		fs:  []field{s(1, "StatusTitle", "statusTitle"), s(2, "StatusTip", "statusTip"), op(3, "StatusTipS", "statusTipSt", "Tip"), s(4, "PresenceLabel", "presenceLabel"), li(5, "Presence", "presence", "VrcOpt"), s(6, "StatusMsgLabel", "statusMsgLabel"), s(7, "DescCls", "descCls"), s(8, "DescCount", "descCount"), s(9, "DescVal", "descVal"), u(10, "MaxDesc", "maxDesc"), s(11, "SaveStatus", "saveStatus"), st(12, "StatusPreset", "statusPreset", "VrcPresetSel"), s(13, "PresetsLabel", "presetsLabel"), s(14, "BioTitle", "bioTitle"), s(15, "BioCls", "bioCls"), s(16, "BioCount", "bioCount"), s(17, "BioVal", "bioVal"), u(18, "MaxBio", "maxBio"), s(19, "SaveBio", "saveBio"), s(20, "BioHint", "bioHint"), s(21, "PreviewLabel", "previewLabel"), s(22, "Preview", "preview"), b(23, "HasPreview", "hasPreview"), st(24, "BioPreset", "bioPreset", "VrcPresetSel"), s(25, "VarsLabel", "varsLabel"), s(26, "RefreshLabel", "refreshLabel")},
+	},
+	{
+		name: "VrcFrameOpt", goT: "vrcFrameOptSt", zigT: "vrchat.FrameOpt",
+		fs: []field{u(1, "Frames", "frames"), u(2, "Grid", "grid"), u(3, "Res", "res"), b(4, "Sel", "sel")},
+	},
+	{
+		name: "VrcEmotes", goT: "vrcEmotesSt", zigT: "vrchat.Emotes",
+		fs: []field{s(1, "Hint", "hint"), s(2, "SourceLabel", "sourceLabel"), s(3, "NameLabel", "nameLabel"), s(4, "FramesLabel", "framesLabel"), s(5, "FPSLabel", "fpsLabel"), s(6, "TrimStart", "trimStart"), s(7, "TrimEnd", "trimEnd"), s(8, "OutDirLabel", "outDirLabel"), li(9, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(10, "OutDir", "outDir"), s(11, "PingPong", "pingpong"), s(12, "Crop", "crop"), s(13, "Generate", "generate"), s(14, "OpenFolder", "openFolder"), s(15, "OpenUpload", "openUpload"), s(16, "UploadURL", "uploadUrl")},
+	},
+	{
+		name: "VrcPathItem", goT: "vrcPathItemSt", zigT: "vrchat.PathItem",
+		fs: []field{u(1, "Idx", "idx"), s(2, "Label", "label"), b(3, "Active", "active")},
+	},
+	{
+		name: "VrcCampaths", goT: "vrcCampathsSt", zigT: "vrchat.Campaths", id: 62,
+		doc: "#vrc-campaths camera-paths master/detail",
+		fs:  []field{s(1, "State", "state"), s(2, "Msg", "msg"), li(3, "Items", "items", "VrcPathItem"), s(4, "SVG", "svg"), s(5, "PlayBtn", "playBtn"), s(6, "Name", "name"), s(7, "Info", "info"), s(8, "Load", "load"), s(9, "Copy", "copy"), s(10, "CopyPath", "copyPath"), s(11, "Organize", "organize"), s(12, "Hint", "hint")},
+	},
+	{
+		name: "VrcPhotoGrp", goT: "vrcPhotoGrpSt", zigT: "vrchat.PhotoGrp",
+		fs: []field{s(1, "Label", "label"), u(2, "Count", "count"), b(3, "Active", "active")},
+	},
+	{
+		name: "VrcPhotoCell", goT: "vrcPhotoCellSt", zigT: "vrchat.PhotoCell",
+		fs: []field{s(1, "File", "file"), s(2, "TitleQ", "titleQ"), s(3, "Label", "label"), s(4, "Src", "src")},
+	},
+	{
+		name: "VrcPhotos", goT: "vrcPhotosSt", zigT: "vrchat.Photos", id: 63,
+		doc: "#vrc-photos-body screenshots browser",
+		fs:  []field{s(1, "State", "state"), s(2, "Msg", "msg"), li(3, "Groups", "groups", "VrcPhotoGrp"), li(4, "Cells", "cells", "VrcPhotoCell"), s(5, "Note", "note"), s(6, "OpenFolder", "openFolder"), s(7, "PhotosDir", "photosDir")},
+	},
+	{
+		name: "VgTab", goT: "vgTabSt", zigT: "c.Tab",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label")},
+	},
+	{
+		name: "VgBadge", goT: "vgBadgeSt", zigT: "vrcgroups.Badge",
+		fs: []field{s(1, "Text", "text"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "VgBtn", goT: "vgBtnSt", zigT: "vrcgroups.Btn",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant"), s(3, "Act", "act")},
+	},
+	{
+		name: "VgKV", goT: "vgKVSt", zigT: "vrcgroups.KV",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Value", "value")},
+	},
+	{
+		name: "VgPager", goT: "vgPagerSt", zigT: "vrcgroups.Pager",
+		fs: []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "Label", "label"), s(4, "Act", "act")},
+	},
+	{
+		name: "VgPickerRow", goT: "vgPickerRowSt", zigT: "vrcgroups.PickerRow",
+		fs: []field{u(1, "Idx", "idx"), s(2, "Name", "name"), s(3, "Meta", "meta")},
+	},
+	{
+		name: "VgPicker", goT: "vgPickerSt", zigT: "vrcgroups.Picker",
+		fs: []field{s(1, "Title", "title"), s(2, "Refresh", "refresh"), s(3, "Filter", "filter"), s(4, "State", "state"), s(5, "Msg", "msg"), li(6, "Rows", "rows", "VgPickerRow")},
+	},
+	{
+		name: "VgRole", goT: "vgRoleSt", zigT: "vrcgroups.Role",
+		fs: []field{s(1, "Name", "name"), li(2, "Tags", "tags", "VgBadge"), s(3, "Order", "order"), s(4, "Desc", "desc"), s(5, "PermSum", "permSum"), sl(6, "Perms", "perms")},
+	},
+	{
+		name: "VgOverview", goT: "vgOverviewSt", zigT: "vrcgroups.Overview",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "Loading", "loading"), s(3, "LoadingMsg", "loadingMsg"), b(4, "Missing", "missing"), s(5, "MissingMsg", "missingMsg"), s(6, "AboutTitle", "aboutTitle"), s(7, "Desc", "desc"), li(8, "KVs", "kvs", "VgKV"), s(9, "RulesTitle", "rulesTitle"), s(10, "Rules", "rules"), s(11, "PermsTitle", "permsTitle"), s(12, "PermsMode", "permsMode"), s(13, "PermsMsg", "permsMsg"), li(14, "PermBadges", "permBadges", "VgBadge"), s(15, "RolesTitle", "rolesTitle"), s(16, "RolesEmpty", "rolesEmpty"), li(17, "Roles", "roles", "VgRole")},
+	},
+	{
+		name: "VgMemberRow", goT: "vgMemberRowSt", zigT: "vrcgroups.MemberRow",
+		fs: []field{s(1, "Name", "name"), li(2, "Tags", "tags", "VgBadge"), s(3, "Meta", "meta"), li(4, "Acts", "acts", "VgBtn")},
+	},
+	{
+		name: "VgMembers", goT: "vgMembersSt", zigT: "vrcgroups.Members",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "State", "state"), s(3, "Msg", "msg"), li(4, "Rows", "rows", "VgMemberRow"), st(5, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgUserRow", goT: "vgUserRowSt", zigT: "vrcgroups.UserRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Sub", "sub"), li(3, "Acts", "acts", "VgBtn")},
+	},
+	{
+		name: "VgUsers", goT: "vgUsersSt", zigT: "vrcgroups.Users",
+		fs: []field{s(1, "CardTitle", "cardTitle"), li(2, "Head", "head", "VgBtn"), s(3, "State", "state"), s(4, "Msg", "msg"), s(5, "Empty", "empty"), li(6, "Rows", "rows", "VgUserRow"), st(7, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgPostRow", goT: "vgPostRowSt", zigT: "vrcgroups.PostRow",
+		fs: []field{s(1, "Title", "title"), s(2, "Meta", "meta"), s(3, "Text", "text"), li(4, "Del", "del", "VgBtn")},
+	},
+	{
+		name: "VgPosts", goT: "vgPostsSt", zigT: "vrcgroups.Posts",
+		fs: []field{s(1, "AnnTitle", "annTitle"), s(2, "AnnTip", "annTip"), op(3, "AnnTipS", "annTipSt", "Tip"), b(4, "HasAnn", "hasAnn"), s(5, "AnnHead", "annHead"), s(6, "AnnWhen", "annWhen"), s(7, "AnnText", "annText"), b(8, "AnnEmpty", "annEmpty"), s(9, "AnnEmptyMsg", "annEmptyMsg"), b(10, "CanAnn", "canAnn"), s(11, "NewAnnTitle", "newAnnTitle"), s(12, "NewPostTitle", "newPostTitle"), s(13, "FTitle", "fTitle"), s(14, "FText", "fText"), s(15, "FImage", "fImage"), s(16, "FNotify", "fNotify"), s(17, "AnnSubmit", "annSubmit"), s(18, "AnnHint", "annHint"), s(19, "PostSubmit", "postSubmit"), s(20, "PostHint", "postHint"), s(21, "CardTitle", "cardTitle"), s(22, "State", "state"), s(23, "Msg", "msg"), s(24, "Empty", "empty"), li(25, "Rows", "rows", "VgPostRow"), st(26, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgAuditRow", goT: "vgAuditRowSt", zigT: "vrcgroups.AuditRow",
+		fs: []field{s(1, "When", "when"), s(2, "Event", "event"), s(3, "Actor", "actor"), s(4, "Desc", "desc"), s(5, "Raw", "raw")},
+	},
+	{
+		name: "VgAudit", goT: "vgAuditSt", zigT: "vrcgroups.Audit",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "NoPerm", "noPerm"), s(3, "NoPermMsg", "noPermMsg"), s(4, "State", "state"), s(5, "Msg", "msg"), s(6, "Empty", "empty"), s(7, "RawSummary", "rawSummary"), li(8, "Rows", "rows", "VgAuditRow"), st(9, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgWorkspace", goT: "vgWorkspaceSt", zigT: "vrcgroups.Workspace",
+		fs: []field{s(1, "Title", "title"), s(2, "Refresh", "refresh"), s(3, "Back", "back"), li(4, "Badges", "badges", "VgBadge"), s(5, "View", "view"), li(6, "Tabs", "tabs", "VgTab"), st(7, "Overview", "overview", "VgOverview"), st(8, "Members", "members", "VgMembers"), st(9, "Users", "users", "VgUsers"), st(10, "Posts", "posts", "VgPosts"), st(11, "Audit", "audit", "VgAudit")},
+	},
+	{
+		name: "Vrcg", goT: "vrcgState", zigT: "vrcgroups.State", id: 65,
+		doc: "#vrcg-body Groups sub-tab root",
+		fs:  []field{b(1, "Available", "available"), s(2, "Unavailable", "unavailable"), b(3, "SignedIn", "signedIn"), s(4, "SignInTitle", "signInTitle"), s(5, "SignInHint", "signInHint"), s(6, "Mode", "mode"), st(7, "Picker", "picker", "VgPicker"), st(8, "WS", "ws", "VgWorkspace")},
+	},
+	{
+		name: "VrcTab", goT: "vrcTabSt", zigT: "vrchat.State", id: 64,
+		doc: "VRChat tab (full view)",
+		fs:  []field{b(1, "Available", "available"), s(2, "Title", "title"), s(3, "Sub", "sub"), s(4, "Unavailable", "unavailable"), st(5, "Status", "status", "VrcStatus"), s(6, "SubActive", "subActive"), li(7, "SubTabs", "subTabs", "VgTab"), st(8, "Groups", "groups", "Vrcg"), b(9, "LoggedIn", "loggedIn"), s(10, "SecStatusBio", "secStatusBio"), s(11, "SignInHint", "signInHint"), st(12, "Editor", "editor", "VrcEditor"), s(13, "SecEmotes", "secEmotes"), st(14, "Emotes", "emotes", "VrcEmotes"), b(15, "HasTools", "hasTools"), s(16, "SecCamPaths", "secCamPaths"), st(17, "CamPaths", "camPaths", "VrcCampaths"), s(18, "SecPhotos", "secPhotos"), st(19, "Photos", "photos", "VrcPhotos")},
+	},
+	{
+		name: "VgRoleRow", goT: "vgRoleRowSt", zigT: "dialogs_b.RoleRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Desc", "desc"), s(3, "BtnLabel", "btnLabel"), s(4, "BtnVar", "btnVar"), s(5, "Act", "act")},
+	},
+	{
+		name: "VgRoleBody", goT: "vgRoleBodySt", zigT: "dialogs_b.RoleBody", id: 66,
+		doc: "#vrcg-role-body add/remove-role list",
+		fs:  []field{b(1, "HasHint", "hasHint"), s(2, "HintTone", "hintTone"), s(3, "HintText", "hintText"), li(4, "Rows", "rows", "VgRoleRow")},
+	},
+	{
+		name: "VgInviteRow", goT: "vgInviteRowSt", zigT: "dialogs_b.InviteRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Status", "status"), s(3, "Act", "act")},
+	},
+	{
+		name: "VgInviteList", goT: "vgInviteListSt", zigT: "dialogs_b.InviteList", id: 67,
+		doc: "#vrcg-inv-list filtered friends list",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), b(3, "Empty", "empty"), s(4, "EmptyMsg", "emptyMsg"), li(5, "Rows", "rows", "VgInviteRow"), b(6, "HasMore", "hasMore"), s(7, "MoreMsg", "moreMsg")},
+	},
+	{
+		name: "VgRolesModal", goT: "vgRolesModalSt", zigT: "dialogs_b.RolesModal", id: 68,
+		doc: "roles dialog shell (embeds #vrcg-role-body)",
+		fs:  []field{s(1, "Title", "title"), st(2, "Body", "body", "VgRoleBody")},
+	},
+	{
+		name: "VgInviteModal", goT: "vgInviteModalSt", zigT: "dialogs_b.InviteModal", id: 69,
+		doc: "invite dialog shell (embeds #vrcg-inv-list)",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "IDPh", "idPh"), s(4, "IDBtn", "idBtn"), st(5, "List", "list", "VgInviteList")},
+	},
+	{
+		name: "VgMemberConfirm", goT: "vgMemberConfirmSt", zigT: "dialogs_b.MemberConfirm", id: 70,
+		doc: "kick/ban confirm dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Verb", "verb"), s(3, "Name", "name"), s(4, "Group", "group"), s(5, "Note", "note"), s(6, "Act", "act"), s(7, "Cancel", "cancel")},
+	},
+	{
+		name: "VgPostConfirm", goT: "vgPostConfirmSt", zigT: "dialogs_b.PostConfirm", id: 71,
+		doc: "delete-post confirm dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Post", "post"), s(3, "Group", "group"), s(4, "Confirm", "confirm"), s(5, "Cancel", "cancel")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -1143,6 +1317,8 @@ var zigImports = [][2]string{
 	{"uimap", "midictl_uimap.zig"},
 	{"midimon", "midimon.zig"},
 	{"dialogs_b", "dialogs_b.zig"},
+	{"vrchat", "vrchat.zig"},
+	{"vrcgroups", "vrcgroups.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

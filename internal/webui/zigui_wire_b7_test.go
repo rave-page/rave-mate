@@ -31,6 +31,18 @@ func wireExportsB7() []wireExport {
 		{"midimon_rows_v2", zigui.RenderMIDIMonRowsV2},
 		{"pc_viewer_v2", zigui.RenderPCViewerV2},
 		{"pc_gpu_v2", zigui.RenderPCGpuV2},
+		{"vrchat_v2", zigui.RenderVRChatV2},
+		{"vrchat_status_v2", zigui.RenderVRChatStatusV2},
+		{"vrchat_editor_v2", zigui.RenderVRChatEditorV2},
+		{"vrchat_campaths_v2", zigui.RenderVRChatCampathsV2},
+		{"vrchat_photos_v2", zigui.RenderVRChatPhotosV2},
+		{"vrcgroups_v2", zigui.RenderVRCGroupsV2},
+		{"vg_rolebody_v2", zigui.RenderVgRoleBodyV2},
+		{"vg_invitelist_v2", zigui.RenderVgInviteListV2},
+		{"vg_rolesmodal_v2", zigui.RenderVgRolesModalV2},
+		{"vg_invitemodal_v2", zigui.RenderVgInviteModalV2},
+		{"vg_memberconfirm_v2", zigui.RenderVgMemberConfirmV2},
+		{"vg_postconfirm_v2", zigui.RenderVgPostConfirmV2},
 	}
 }
 
@@ -65,6 +77,33 @@ func wireBasesB7() []wireBase {
 	}
 	for n, st := range moPCGpuFixtures() {
 		out = append(out, wireBase{"pcg/" + n, wirePCGpu(st)})
+	}
+	for n, st := range vrcFixtures() {
+		out = append(out,
+			wireBase{"vrc/" + n, wireVrcTab(st)},
+			wireBase{"vrc/" + n + "/status", wireVrcStatus(st.Status)},
+			wireBase{"vrc/" + n + "/editor", wireVrcEditor(st.Editor)},
+			wireBase{"vrc/" + n + "/campaths", wireVrcCampaths(st.CamPaths)},
+			wireBase{"vrc/" + n + "/photos", wireVrcPhotos(st.Photos)})
+	}
+	for n, st := range vrcgFixtures() {
+		out = append(out, wireBase{"vrcg/" + n, wireVrcg(st)})
+	}
+	for n, st := range vgRoleBodyFixtures() {
+		out = append(out,
+			wireBase{"vgrb/" + n, wireVgRoleBody(st)},
+			wireBase{"vgrm/" + n, wireVgRolesModal(vgRolesModalSt{Title: "Roles", Body: st})})
+	}
+	for n, st := range vgInviteListFixtures() {
+		out = append(out,
+			wireBase{"vgil/" + n, wireVgInviteList(st)},
+			wireBase{"vgim/" + n, wireVgInviteModal(vgInviteModalSt{Title: "Invite", SearchPh: "f", IDPh: "id", IDBtn: "Go", List: st})})
+	}
+	for n, st := range vgMemberConfirmFixtures() {
+		out = append(out, wireBase{"vgmc/" + n, wireVgMemberConfirm(st)})
+	}
+	for n, st := range vgPostConfirmFixtures() {
+		out = append(out, wireBase{"vgpc/" + n, wireVgPostConfirm(st)})
 	}
 	return out
 }
@@ -272,6 +311,172 @@ func TestZigWireThreeWayPCV(t *testing.T) {
 	}
 	assertNoNewFallbacksIn(t, before,
 		"RenderPCViewer", "RenderPCViewerV2", "RenderPCGpu", "RenderPCGpuV2")
+}
+
+// threeWayOrEmpty is threeWayFrag with the golden suite's empty-render arm: a fragment whose Go
+// reference renders "" makes BOTH Zig exports decline (NULL), and that must match too. Each
+// decline COUNTS as a fallback, so the caller passes its expected-delta map (rec) + the export
+// names and asserts exact deltas at the end - "no fallbacks" would be the wrong assertion here
+// (the player suite's lesson).
+func threeWayOrEmpty(t *testing.T, what, want string, js, doc []byte,
+	v1 func([]byte) (string, bool), v2 func([]byte) (string, bool),
+	rec map[string]int, v1n, v2n string) {
+	t.Helper()
+	if want == "" {
+		if _, ok := v1(js); ok {
+			t.Fatalf("%s: v1 rendered an empty fragment", what)
+		}
+		if _, ok := v2(doc); ok {
+			t.Fatalf("%s: v2 rendered an empty fragment", what)
+		}
+		rec[v1n]++
+		rec[v2n]++
+		return
+	}
+	threeWayFrag(t, what, want, js, doc, v1, v2)
+}
+
+// assertExactFallbacksIn: every named export's fallback delta must equal want[name] (0 default).
+func assertExactFallbacksIn(t *testing.T, before map[string]int, want map[string]int, keys ...string) {
+	t.Helper()
+	now := zigui.FallbackCounts()
+	for _, k := range keys {
+		if d, w := now[k]-before[k], want[k]; d != w {
+			t.Errorf("fallbacks for %s = %d, want %d", k, d, w)
+		}
+	}
+}
+
+// TestZigWireThreeWayVRChat: the full VRChat tab + its four fragments + the Groups sub-tab
+// root, over both golden fixture sets.
+func TestZigWireThreeWayVRChat(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	rec := map[string]int{}
+	fx := vrcFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireVrcTab(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderVRChat(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderVRChatV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", vrchatHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			threeWayOrEmpty(t, "status", vrcStatusHTML(st.Status), stateJSON(st.Status),
+				wireVrcStatus(st.Status), zigui.RenderVRChatStatus, zigui.RenderVRChatStatusV2,
+				rec, "RenderVRChatStatus", "RenderVRChatStatusV2")
+			threeWayOrEmpty(t, "editor", vrcEditorRenderHTML(st.Editor), stateJSON(st.Editor),
+				wireVrcEditor(st.Editor), zigui.RenderVRChatEditor, zigui.RenderVRChatEditorV2,
+				rec, "RenderVRChatEditor", "RenderVRChatEditorV2")
+			threeWayOrEmpty(t, "campaths", vrcCampathsHTML(st.CamPaths), stateJSON(st.CamPaths),
+				wireVrcCampaths(st.CamPaths), zigui.RenderVRChatCampaths, zigui.RenderVRChatCampathsV2,
+				rec, "RenderVRChatCampaths", "RenderVRChatCampathsV2")
+			threeWayOrEmpty(t, "photos", vrcPhotosHTML(st.Photos), stateJSON(st.Photos),
+				wireVrcPhotos(st.Photos), zigui.RenderVRChatPhotos, zigui.RenderVRChatPhotosV2,
+				rec, "RenderVRChatPhotos", "RenderVRChatPhotosV2")
+			threeWayOrEmpty(t, "groups", vrcgBodyHTML(st.Groups), stateJSON(st.Groups),
+				wireVrcg(st.Groups), zigui.RenderVRCGroups, zigui.RenderVRCGroupsV2,
+				rec, "RenderVRCGroups", "RenderVRCGroupsV2")
+		})
+	}
+	for name, st := range vrcgFixtures() {
+		t.Run("vrcg/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "body", vrcgBodyHTML(st), stateJSON(st),
+				wireVrcg(st), zigui.RenderVRCGroups, zigui.RenderVRCGroupsV2,
+				rec, "RenderVRCGroups", "RenderVRCGroupsV2")
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertExactFallbacksIn(t, before, rec,
+		"RenderVRChat", "RenderVRChatV2", "RenderVRChatStatus", "RenderVRChatStatusV2",
+		"RenderVRChatEditor", "RenderVRChatEditorV2", "RenderVRChatCampaths", "RenderVRChatCampathsV2",
+		"RenderVRChatPhotos", "RenderVRChatPhotosV2", "RenderVRCGroups", "RenderVRCGroupsV2")
+}
+
+// TestZigWireThreeWayVgModals: the six group modals (dialogs_b renderers). Shell modals are
+// composed from the body fixtures like the JSON goldens compose them.
+func TestZigWireThreeWayVgModals(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	rec := map[string]int{}
+	for name, st := range vgRoleBodyFixtures() {
+		t.Run("rolebody/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "rolebody", vgRoleBodyHTMLOf(st), stateJSON(st),
+				wireVgRoleBody(st), zigui.RenderVgRoleBody, zigui.RenderVgRoleBodyV2,
+				rec, "RenderVgRoleBody", "RenderVgRoleBodyV2")
+			m := vgRolesModalSt{Title: "Manage roles", Body: st}
+			threeWayOrEmpty(t, "rolesmodal", vgRolesModalHTMLOf(m), stateJSON(m),
+				wireVgRolesModal(m), zigui.RenderVgRolesModal, zigui.RenderVgRolesModalV2,
+				rec, "RenderVgRolesModal", "RenderVgRolesModalV2")
+		})
+	}
+	for name, st := range vgInviteListFixtures() {
+		t.Run("invitelist/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "invitelist", vgInviteListHTMLOf(st), stateJSON(st),
+				wireVgInviteList(st), zigui.RenderVgInviteList, zigui.RenderVgInviteListV2,
+				rec, "RenderVgInviteList", "RenderVgInviteListV2")
+			m := vgInviteModalSt{Title: "Invite", SearchPh: "Filter friends… (Enter)",
+				IDPh: "usr_… (invite by user ID)", IDBtn: "Invite ID", List: st}
+			threeWayOrEmpty(t, "invitemodal", vgInviteModalHTMLOf(m), stateJSON(m),
+				wireVgInviteModal(m), zigui.RenderVgInviteModal, zigui.RenderVgInviteModalV2,
+				rec, "RenderVgInviteModal", "RenderVgInviteModalV2")
+		})
+	}
+	for name, st := range vgMemberConfirmFixtures() {
+		t.Run("memberconfirm/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "memberconfirm", vgMemberConfirmHTMLOf(st), stateJSON(st),
+				wireVgMemberConfirm(st), zigui.RenderVgMemberConfirm, zigui.RenderVgMemberConfirmV2,
+				rec, "RenderVgMemberConfirm", "RenderVgMemberConfirmV2")
+		})
+	}
+	for name, st := range vgPostConfirmFixtures() {
+		t.Run("postconfirm/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "postconfirm", vgPostConfirmHTMLOf(st), stateJSON(st),
+				wireVgPostConfirm(st), zigui.RenderVgPostConfirm, zigui.RenderVgPostConfirmV2,
+				rec, "RenderVgPostConfirm", "RenderVgPostConfirmV2")
+		})
+	}
+	assertExactFallbacksIn(t, before, rec,
+		"RenderVgRoleBody", "RenderVgRoleBodyV2", "RenderVgInviteList", "RenderVgInviteListV2",
+		"RenderVgRolesModal", "RenderVgRolesModalV2", "RenderVgInviteModal", "RenderVgInviteModalV2",
+		"RenderVgMemberConfirm", "RenderVgMemberConfirmV2", "RenderVgPostConfirm", "RenderVgPostConfirmV2")
+}
+
+func BenchmarkWireBenchVRChat(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := vrcFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderVRChat(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderVRChatV2(wireVrcTab(st)) })
+}
+
+func BenchmarkWireBenchVRCGroups(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := vrcFixtures()["groupsView"].Groups
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderVRCGroups(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderVRCGroupsV2(wireVrcg(st)) })
 }
 
 func BenchmarkWireBenchMIDICtl(b *testing.B) {

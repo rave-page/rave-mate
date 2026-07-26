@@ -1028,6 +1028,58 @@ export fn rz_ui_render_pc_gpu_v2(state: ?[*]const u8, len: usize, out_len: *usiz
     return renderWire(dialogs_b.PCGpu, wire_gen.decodePCGpu, dialogs_b.renderPCGpu, wire_gen.msg_p_c_gpu, state, len, out_len);
 }
 
+// ── B7 fan-out: vrchat family (root ids 60-71) ──
+// Full tab (64) + #vrc-status/#vrc-editor/#vrc-campaths/#vrc-photos-body (60-63), the Groups
+// sub-tab root #vrcg-body (65) and the six group modals (66-71, dialogs_b renderers).
+
+export fn rz_ui_render_vrchat_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.State, wire_gen.decodeVrcTab, vrchat.render, wire_gen.msg_vrc_tab, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Status, wire_gen.decodeVrcStatus, vrchat.renderStatus, wire_gen.msg_vrc_status, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Editor, wire_gen.decodeVrcEditor, vrchat.renderEditor, wire_gen.msg_vrc_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_campaths_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Campaths, wire_gen.decodeVrcCampaths, vrchat.renderCampaths, wire_gen.msg_vrc_campaths, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_photos_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Photos, wire_gen.decodeVrcPhotos, vrchat.renderPhotos, wire_gen.msg_vrc_photos, state, len, out_len);
+}
+
+export fn rz_ui_render_vrcgroups_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrcgroups.State, wire_gen.decodeVrcg, vrcgroups.render, wire_gen.msg_vrcg, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolebody_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.RoleBody, wire_gen.decodeVgRoleBody, dialogs_b.renderRoleBody, wire_gen.msg_vg_role_body, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitelist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.InviteList, wire_gen.decodeVgInviteList, dialogs_b.renderInviteList, wire_gen.msg_vg_invite_list, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolesmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.RolesModal, wire_gen.decodeVgRolesModal, dialogs_b.renderRolesModal, wire_gen.msg_vg_roles_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitemodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.InviteModal, wire_gen.decodeVgInviteModal, dialogs_b.renderInviteModal, wire_gen.msg_vg_invite_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_memberconfirm_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.MemberConfirm, wire_gen.decodeVgMemberConfirm, dialogs_b.renderMemberConfirm, wire_gen.msg_vg_member_confirm, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_postconfirm_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PostConfirm, wire_gen.decodeVgPostConfirm, dialogs_b.renderPostConfirm, wire_gen.msg_vg_post_confirm, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

@@ -224,6 +224,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | twitch `#twitch-feed` frag | 10 724 | 4 364 | **-59%** | (per chat/alert event, not a tick) |
 | midi mixer (full tab) | 114 862 | 55 026 | **-52%** | 28 553 / 65 572 = 43.5% |
 | midi `#midi-monitor` rows frag | 1 538 | 859 | **-44%** | (~1 Hz tick) |
+| vrchat (full tab) | 36 314 | 14 177 | **-61%** | 15 749 / 47 025 = 33.5% |
+| vrchat `#vrcg-body` groups frag | 21 734 | 9 327 | **-57%** | (workspace fixture) |
 
 ## Gaps / caveats
 

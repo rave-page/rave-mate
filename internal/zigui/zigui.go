@@ -1237,6 +1237,92 @@ func RenderPCGpuV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: vrchat family ──
+
+// RenderVRChatV2 renders the full VRChat tab from an RZW1 document.
+func RenderVRChatV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_v2(p, l, n)
+	})
+}
+
+// RenderVRChatStatusV2 renders the #vrc-status region from an RZW1 document.
+func RenderVRChatStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_status_v2(p, l, n)
+	})
+}
+
+// RenderVRChatEditorV2 renders the #vrc-editor fragment from an RZW1 document.
+func RenderVRChatEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_editor_v2(p, l, n)
+	})
+}
+
+// RenderVRChatCampathsV2 renders the #vrc-campaths fragment from an RZW1 document.
+func RenderVRChatCampathsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_campaths_v2(p, l, n)
+	})
+}
+
+// RenderVRChatPhotosV2 renders the #vrc-photos-body fragment from an RZW1 document.
+func RenderVRChatPhotosV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_photos_v2(p, l, n)
+	})
+}
+
+// RenderVRCGroupsV2 renders the #vrcg-body Groups sub-tab from an RZW1 document.
+func RenderVRCGroupsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrcgroups_v2(p, l, n)
+	})
+}
+
+// RenderVgRoleBodyV2 renders the #vrcg-role-body fragment from an RZW1 document.
+func RenderVgRoleBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolebody_v2(p, l, n)
+	})
+}
+
+// RenderVgInviteListV2 renders the #vrcg-inv-list fragment from an RZW1 document.
+func RenderVgInviteListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitelist_v2(p, l, n)
+	})
+}
+
+// RenderVgRolesModalV2 renders the roles dialog from an RZW1 document.
+func RenderVgRolesModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolesmodal_v2(p, l, n)
+	})
+}
+
+// RenderVgInviteModalV2 renders the invite dialog from an RZW1 document.
+func RenderVgInviteModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitemodal_v2(p, l, n)
+	})
+}
+
+// RenderVgMemberConfirmV2 renders the kick/ban confirm dialog from an RZW1 document.
+func RenderVgMemberConfirmV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_memberconfirm_v2(p, l, n)
+	})
+}
+
+// RenderVgPostConfirmV2 renders the delete-post confirm dialog from an RZW1 document.
+func RenderVgPostConfirmV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_postconfirm_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

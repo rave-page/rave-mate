@@ -30,8 +30,10 @@ const ctls = @import("midictl_ctls.zig");
 const uimap = @import("midictl_uimap.zig");
 const midimon = @import("midimon.zig");
 const dialogs_b = @import("dialogs_b.zig");
+const vrchat = @import("vrchat.zig");
+const vrcgroups = @import("vrcgroups.zig");
 
-pub const schema_hash: u32 = 0x3d09786b;
+pub const schema_hash: u32 = 0xa89a82a8;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -85,6 +87,18 @@ pub const msg_midi_port_stat: u16 = 56; // #midi-ctlstat-<i> inner status (~1 Hz
 pub const msg_midi_ctl: u16 = 57; // MIDI Mixer tab (full view)
 pub const msg_p_c_view: u16 = 58; // point-cloud viewer modal shell
 pub const msg_p_c_gpu: u16 = 59; // point-cloud GPU prompt modal
+pub const msg_vrc_status: u16 = 60; // #vrc-status account status region
+pub const msg_vrc_editor: u16 = 61; // #vrc-editor status & bio editor
+pub const msg_vrc_campaths: u16 = 62; // #vrc-campaths camera-paths master/detail
+pub const msg_vrc_photos: u16 = 63; // #vrc-photos-body screenshots browser
+pub const msg_vrc_tab: u16 = 64; // VRChat tab (full view)
+pub const msg_vrcg: u16 = 65; // #vrcg-body Groups sub-tab root
+pub const msg_vg_role_body: u16 = 66; // #vrcg-role-body add/remove-role list
+pub const msg_vg_invite_list: u16 = 67; // #vrcg-inv-list filtered friends list
+pub const msg_vg_roles_modal: u16 = 68; // roles dialog shell (embeds #vrcg-role-body)
+pub const msg_vg_invite_modal: u16 = 69; // invite dialog shell (embeds #vrcg-inv-list)
+pub const msg_vg_member_confirm: u16 = 70; // kick/ban confirm dialog
+pub const msg_vg_post_confirm: u16 = 71; // delete-post confirm dialog
 pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
 pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
@@ -3023,6 +3037,511 @@ pub fn decodePCGpu(r: *wire.Reader, out: *dialogs_b.PCGpu) wire.Error!void {
     };
 }
 
+pub fn decodeVrcStatus(r: *wire.Reader, out: *vrchat.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.present = try r.boolean(t),
+        2 => out.variant = try r.str(t),
+        3 => out.label = try r.str(t),
+        4 => out.dl = try r.str(t),
+        5 => out.line = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcOpt(r: *wire.Reader, out: *vrchat.Opt) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcPresetSel(r: *wire.Reader, out: *vrchat.PresetSel) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.act = try r.str(t),
+        2 => out.placeholder = try r.str(t),
+        3 => out.names = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcEditor(r: *wire.Reader, out: *vrchat.Editor) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.statusTitle = try r.str(t),
+        2 => out.statusTip = try r.str(t),
+        3 => out.statusTipSt = try r.sub(c.Tip, decodeTip, t),
+        4 => out.presenceLabel = try r.str(t),
+        5 => out.presence = try r.list(vrchat.Opt, decodeVrcOpt, t),
+        6 => out.statusMsgLabel = try r.str(t),
+        7 => out.descCls = try r.str(t),
+        8 => out.descCount = try r.str(t),
+        9 => out.descVal = try r.str(t),
+        10 => out.maxDesc = @intCast(try r.uint(t)),
+        11 => out.saveStatus = try r.str(t),
+        12 => out.statusPreset = try r.sub(vrchat.PresetSel, decodeVrcPresetSel, t),
+        13 => out.presetsLabel = try r.str(t),
+        14 => out.bioTitle = try r.str(t),
+        15 => out.bioCls = try r.str(t),
+        16 => out.bioCount = try r.str(t),
+        17 => out.bioVal = try r.str(t),
+        18 => out.maxBio = @intCast(try r.uint(t)),
+        19 => out.saveBio = try r.str(t),
+        20 => out.bioHint = try r.str(t),
+        21 => out.previewLabel = try r.str(t),
+        22 => out.preview = try r.str(t),
+        23 => out.hasPreview = try r.boolean(t),
+        24 => out.bioPreset = try r.sub(vrchat.PresetSel, decodeVrcPresetSel, t),
+        25 => out.varsLabel = try r.str(t),
+        26 => out.refreshLabel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcFrameOpt(r: *wire.Reader, out: *vrchat.FrameOpt) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.frames = @intCast(try r.uint(t)),
+        2 => out.grid = @intCast(try r.uint(t)),
+        3 => out.res = @intCast(try r.uint(t)),
+        4 => out.sel = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcEmotes(r: *wire.Reader, out: *vrchat.Emotes) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hint = try r.str(t),
+        2 => out.sourceLabel = try r.str(t),
+        3 => out.nameLabel = try r.str(t),
+        4 => out.framesLabel = try r.str(t),
+        5 => out.fpsLabel = try r.str(t),
+        6 => out.trimStart = try r.str(t),
+        7 => out.trimEnd = try r.str(t),
+        8 => out.outDirLabel = try r.str(t),
+        9 => out.frameOpts = try r.list(vrchat.FrameOpt, decodeVrcFrameOpt, t),
+        10 => out.outDir = try r.str(t),
+        11 => out.pingpong = try r.str(t),
+        12 => out.crop = try r.str(t),
+        13 => out.generate = try r.str(t),
+        14 => out.openFolder = try r.str(t),
+        15 => out.openUpload = try r.str(t),
+        16 => out.uploadUrl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcPathItem(r: *wire.Reader, out: *vrchat.PathItem) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = @intCast(try r.uint(t)),
+        2 => out.label = try r.str(t),
+        3 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcCampaths(r: *wire.Reader, out: *vrchat.Campaths) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.state = try r.str(t),
+        2 => out.msg = try r.str(t),
+        3 => out.items = try r.list(vrchat.PathItem, decodeVrcPathItem, t),
+        4 => out.svg = try r.str(t),
+        5 => out.playBtn = try r.str(t),
+        6 => out.name = try r.str(t),
+        7 => out.info = try r.str(t),
+        8 => out.load = try r.str(t),
+        9 => out.copy = try r.str(t),
+        10 => out.copyPath = try r.str(t),
+        11 => out.organize = try r.str(t),
+        12 => out.hint = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcPhotoGrp(r: *wire.Reader, out: *vrchat.PhotoGrp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.count = @intCast(try r.uint(t)),
+        3 => out.active = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcPhotoCell(r: *wire.Reader, out: *vrchat.PhotoCell) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.file = try r.str(t),
+        2 => out.titleQ = try r.str(t),
+        3 => out.label = try r.str(t),
+        4 => out.src = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcPhotos(r: *wire.Reader, out: *vrchat.Photos) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.state = try r.str(t),
+        2 => out.msg = try r.str(t),
+        3 => out.groups = try r.list(vrchat.PhotoGrp, decodeVrcPhotoGrp, t),
+        4 => out.cells = try r.list(vrchat.PhotoCell, decodeVrcPhotoCell, t),
+        5 => out.note = try r.str(t),
+        6 => out.openFolder = try r.str(t),
+        7 => out.photosDir = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgTab(r: *wire.Reader, out: *c.Tab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgBadge(r: *wire.Reader, out: *vrcgroups.Badge) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.text = try r.str(t),
+        2 => out.variant = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgBtn(r: *wire.Reader, out: *vrcgroups.Btn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.variant = try r.str(t),
+        3 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgKV(r: *wire.Reader, out: *vrcgroups.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.dl = try r.str(t),
+        3 => out.value = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPager(r: *wire.Reader, out: *vrcgroups.Pager) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.mode = try r.str(t),
+        2 => out.msg = try r.str(t),
+        3 => out.label = try r.str(t),
+        4 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPickerRow(r: *wire.Reader, out: *vrcgroups.PickerRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.idx = @intCast(try r.uint(t)),
+        2 => out.name = try r.str(t),
+        3 => out.meta = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPicker(r: *wire.Reader, out: *vrcgroups.Picker) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.refresh = try r.str(t),
+        3 => out.filter = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.msg = try r.str(t),
+        6 => out.rows = try r.list(vrcgroups.PickerRow, decodeVgPickerRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgRole(r: *wire.Reader, out: *vrcgroups.Role) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.tags = try r.list(vrcgroups.Badge, decodeVgBadge, t),
+        3 => out.order = try r.str(t),
+        4 => out.desc = try r.str(t),
+        5 => out.permSum = try r.str(t),
+        6 => out.perms = try r.strList(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgOverview(r: *wire.Reader, out: *vrcgroups.Overview) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.loading = try r.boolean(t),
+        3 => out.loadingMsg = try r.str(t),
+        4 => out.missing = try r.boolean(t),
+        5 => out.missingMsg = try r.str(t),
+        6 => out.aboutTitle = try r.str(t),
+        7 => out.desc = try r.str(t),
+        8 => out.kvs = try r.list(vrcgroups.KV, decodeVgKV, t),
+        9 => out.rulesTitle = try r.str(t),
+        10 => out.rules = try r.str(t),
+        11 => out.permsTitle = try r.str(t),
+        12 => out.permsMode = try r.str(t),
+        13 => out.permsMsg = try r.str(t),
+        14 => out.permBadges = try r.list(vrcgroups.Badge, decodeVgBadge, t),
+        15 => out.rolesTitle = try r.str(t),
+        16 => out.rolesEmpty = try r.str(t),
+        17 => out.roles = try r.list(vrcgroups.Role, decodeVgRole, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgMemberRow(r: *wire.Reader, out: *vrcgroups.MemberRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.tags = try r.list(vrcgroups.Badge, decodeVgBadge, t),
+        3 => out.meta = try r.str(t),
+        4 => out.acts = try r.list(vrcgroups.Btn, decodeVgBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgMembers(r: *wire.Reader, out: *vrcgroups.Members) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.state = try r.str(t),
+        3 => out.msg = try r.str(t),
+        4 => out.rows = try r.list(vrcgroups.MemberRow, decodeVgMemberRow, t),
+        5 => out.pager = try r.sub(vrcgroups.Pager, decodeVgPager, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgUserRow(r: *wire.Reader, out: *vrcgroups.UserRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.acts = try r.list(vrcgroups.Btn, decodeVgBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgUsers(r: *wire.Reader, out: *vrcgroups.Users) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.head = try r.list(vrcgroups.Btn, decodeVgBtn, t),
+        3 => out.state = try r.str(t),
+        4 => out.msg = try r.str(t),
+        5 => out.empty = try r.str(t),
+        6 => out.rows = try r.list(vrcgroups.UserRow, decodeVgUserRow, t),
+        7 => out.pager = try r.sub(vrcgroups.Pager, decodeVgPager, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPostRow(r: *wire.Reader, out: *vrcgroups.PostRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.meta = try r.str(t),
+        3 => out.text = try r.str(t),
+        4 => out.del = try r.list(vrcgroups.Btn, decodeVgBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPosts(r: *wire.Reader, out: *vrcgroups.Posts) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.annTitle = try r.str(t),
+        2 => out.annTip = try r.str(t),
+        3 => out.annTipSt = try r.sub(c.Tip, decodeTip, t),
+        4 => out.hasAnn = try r.boolean(t),
+        5 => out.annHead = try r.str(t),
+        6 => out.annWhen = try r.str(t),
+        7 => out.annText = try r.str(t),
+        8 => out.annEmpty = try r.boolean(t),
+        9 => out.annEmptyMsg = try r.str(t),
+        10 => out.canAnn = try r.boolean(t),
+        11 => out.newAnnTitle = try r.str(t),
+        12 => out.newPostTitle = try r.str(t),
+        13 => out.fTitle = try r.str(t),
+        14 => out.fText = try r.str(t),
+        15 => out.fImage = try r.str(t),
+        16 => out.fNotify = try r.str(t),
+        17 => out.annSubmit = try r.str(t),
+        18 => out.annHint = try r.str(t),
+        19 => out.postSubmit = try r.str(t),
+        20 => out.postHint = try r.str(t),
+        21 => out.cardTitle = try r.str(t),
+        22 => out.state = try r.str(t),
+        23 => out.msg = try r.str(t),
+        24 => out.empty = try r.str(t),
+        25 => out.rows = try r.list(vrcgroups.PostRow, decodeVgPostRow, t),
+        26 => out.pager = try r.sub(vrcgroups.Pager, decodeVgPager, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgAuditRow(r: *wire.Reader, out: *vrcgroups.AuditRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.when = try r.str(t),
+        2 => out.event = try r.str(t),
+        3 => out.actor = try r.str(t),
+        4 => out.desc = try r.str(t),
+        5 => out.raw = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgAudit(r: *wire.Reader, out: *vrcgroups.Audit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.noPerm = try r.boolean(t),
+        3 => out.noPermMsg = try r.str(t),
+        4 => out.state = try r.str(t),
+        5 => out.msg = try r.str(t),
+        6 => out.empty = try r.str(t),
+        7 => out.rawSummary = try r.str(t),
+        8 => out.rows = try r.list(vrcgroups.AuditRow, decodeVgAuditRow, t),
+        9 => out.pager = try r.sub(vrcgroups.Pager, decodeVgPager, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgWorkspace(r: *wire.Reader, out: *vrcgroups.Workspace) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.refresh = try r.str(t),
+        3 => out.back = try r.str(t),
+        4 => out.badges = try r.list(vrcgroups.Badge, decodeVgBadge, t),
+        5 => out.view = try r.str(t),
+        6 => out.tabs = try r.list(c.Tab, decodeVgTab, t),
+        7 => out.overview = try r.sub(vrcgroups.Overview, decodeVgOverview, t),
+        8 => out.members = try r.sub(vrcgroups.Members, decodeVgMembers, t),
+        9 => out.users = try r.sub(vrcgroups.Users, decodeVgUsers, t),
+        10 => out.posts = try r.sub(vrcgroups.Posts, decodeVgPosts, t),
+        11 => out.audit = try r.sub(vrcgroups.Audit, decodeVgAudit, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcg(r: *wire.Reader, out: *vrcgroups.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.available = try r.boolean(t),
+        2 => out.unavailable = try r.str(t),
+        3 => out.signedIn = try r.boolean(t),
+        4 => out.signInTitle = try r.str(t),
+        5 => out.signInHint = try r.str(t),
+        6 => out.mode = try r.str(t),
+        7 => out.picker = try r.sub(vrcgroups.Picker, decodeVgPicker, t),
+        8 => out.ws = try r.sub(vrcgroups.Workspace, decodeVgWorkspace, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVrcTab(r: *wire.Reader, out: *vrchat.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.available = try r.boolean(t),
+        2 => out.title = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.status = try r.sub(vrchat.Status, decodeVrcStatus, t),
+        6 => out.subActive = try r.str(t),
+        7 => out.subTabs = try r.list(c.Tab, decodeVgTab, t),
+        8 => out.groups = try r.sub(vrcgroups.State, decodeVrcg, t),
+        9 => out.loggedIn = try r.boolean(t),
+        10 => out.secStatusBio = try r.str(t),
+        11 => out.signInHint = try r.str(t),
+        12 => out.editor = try r.sub(vrchat.Editor, decodeVrcEditor, t),
+        13 => out.secEmotes = try r.str(t),
+        14 => out.emotes = try r.sub(vrchat.Emotes, decodeVrcEmotes, t),
+        15 => out.hasTools = try r.boolean(t),
+        16 => out.secCamPaths = try r.str(t),
+        17 => out.camPaths = try r.sub(vrchat.Campaths, decodeVrcCampaths, t),
+        18 => out.secPhotos = try r.str(t),
+        19 => out.photos = try r.sub(vrchat.Photos, decodeVrcPhotos, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgRoleRow(r: *wire.Reader, out: *dialogs_b.RoleRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.desc = try r.str(t),
+        3 => out.btnLabel = try r.str(t),
+        4 => out.btnVar = try r.str(t),
+        5 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgRoleBody(r: *wire.Reader, out: *dialogs_b.RoleBody) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hasHint = try r.boolean(t),
+        2 => out.hintTone = try r.str(t),
+        3 => out.hintText = try r.str(t),
+        4 => out.rows = try r.list(dialogs_b.RoleRow, decodeVgRoleRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgInviteRow(r: *wire.Reader, out: *dialogs_b.InviteRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.status = try r.str(t),
+        3 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgInviteList(r: *wire.Reader, out: *dialogs_b.InviteList) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loading = try r.boolean(t),
+        2 => out.loadingMsg = try r.str(t),
+        3 => out.empty = try r.boolean(t),
+        4 => out.emptyMsg = try r.str(t),
+        5 => out.rows = try r.list(dialogs_b.InviteRow, decodeVgInviteRow, t),
+        6 => out.hasMore = try r.boolean(t),
+        7 => out.moreMsg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgRolesModal(r: *wire.Reader, out: *dialogs_b.RolesModal) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.body = try r.sub(dialogs_b.RoleBody, decodeVgRoleBody, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgInviteModal(r: *wire.Reader, out: *dialogs_b.InviteModal) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.searchPh = try r.str(t),
+        3 => out.idPh = try r.str(t),
+        4 => out.idBtn = try r.str(t),
+        5 => out.list = try r.sub(dialogs_b.InviteList, decodeVgInviteList, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgMemberConfirm(r: *wire.Reader, out: *dialogs_b.MemberConfirm) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.verb = try r.str(t),
+        3 => out.name = try r.str(t),
+        4 => out.group = try r.str(t),
+        5 => out.note = try r.str(t),
+        6 => out.act = try r.str(t),
+        7 => out.cancel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeVgPostConfirm(r: *wire.Reader, out: *dialogs_b.PostConfirm) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.post = try r.str(t),
+        3 => out.group = try r.str(t),
+        4 => out.confirm = try r.str(t),
+        5 => out.cancel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.text = try r.str(t),
@@ -3109,6 +3628,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_midi_ctl);
     try std.testing.expect(msg_ag_state != msg_p_c_view);
     try std.testing.expect(msg_ag_state != msg_p_c_gpu);
+    try std.testing.expect(msg_ag_state != msg_vrc_status);
+    try std.testing.expect(msg_ag_state != msg_vrc_editor);
+    try std.testing.expect(msg_ag_state != msg_vrc_campaths);
+    try std.testing.expect(msg_ag_state != msg_vrc_photos);
+    try std.testing.expect(msg_ag_state != msg_vrc_tab);
+    try std.testing.expect(msg_ag_state != msg_vrcg);
+    try std.testing.expect(msg_ag_state != msg_vg_role_body);
+    try std.testing.expect(msg_ag_state != msg_vg_invite_list);
+    try std.testing.expect(msg_ag_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_ag_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_ag_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_ag_state != msg_vg_post_confirm);
     try std.testing.expect(msg_ag_state != msg_tk_live);
     try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
@@ -3162,6 +3693,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_midi_ctl);
     try std.testing.expect(msg_logs_state != msg_p_c_view);
     try std.testing.expect(msg_logs_state != msg_p_c_gpu);
+    try std.testing.expect(msg_logs_state != msg_vrc_status);
+    try std.testing.expect(msg_logs_state != msg_vrc_editor);
+    try std.testing.expect(msg_logs_state != msg_vrc_campaths);
+    try std.testing.expect(msg_logs_state != msg_vrc_photos);
+    try std.testing.expect(msg_logs_state != msg_vrc_tab);
+    try std.testing.expect(msg_logs_state != msg_vrcg);
+    try std.testing.expect(msg_logs_state != msg_vg_role_body);
+    try std.testing.expect(msg_logs_state != msg_vg_invite_list);
+    try std.testing.expect(msg_logs_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_logs_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_logs_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_logs_state != msg_vg_post_confirm);
     try std.testing.expect(msg_logs_state != msg_tk_live);
     try std.testing.expect(msg_logs_state != msg_tk_logs);
     try std.testing.expect(msg_logs_lines != msg_live_state);
@@ -3214,6 +3757,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_midi_ctl);
     try std.testing.expect(msg_logs_lines != msg_p_c_view);
     try std.testing.expect(msg_logs_lines != msg_p_c_gpu);
+    try std.testing.expect(msg_logs_lines != msg_vrc_status);
+    try std.testing.expect(msg_logs_lines != msg_vrc_editor);
+    try std.testing.expect(msg_logs_lines != msg_vrc_campaths);
+    try std.testing.expect(msg_logs_lines != msg_vrc_photos);
+    try std.testing.expect(msg_logs_lines != msg_vrc_tab);
+    try std.testing.expect(msg_logs_lines != msg_vrcg);
+    try std.testing.expect(msg_logs_lines != msg_vg_role_body);
+    try std.testing.expect(msg_logs_lines != msg_vg_invite_list);
+    try std.testing.expect(msg_logs_lines != msg_vg_roles_modal);
+    try std.testing.expect(msg_logs_lines != msg_vg_invite_modal);
+    try std.testing.expect(msg_logs_lines != msg_vg_member_confirm);
+    try std.testing.expect(msg_logs_lines != msg_vg_post_confirm);
     try std.testing.expect(msg_logs_lines != msg_tk_live);
     try std.testing.expect(msg_logs_lines != msg_tk_logs);
     try std.testing.expect(msg_live_state != msg_live_transport);
@@ -3265,6 +3820,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_midi_ctl);
     try std.testing.expect(msg_live_state != msg_p_c_view);
     try std.testing.expect(msg_live_state != msg_p_c_gpu);
+    try std.testing.expect(msg_live_state != msg_vrc_status);
+    try std.testing.expect(msg_live_state != msg_vrc_editor);
+    try std.testing.expect(msg_live_state != msg_vrc_campaths);
+    try std.testing.expect(msg_live_state != msg_vrc_photos);
+    try std.testing.expect(msg_live_state != msg_vrc_tab);
+    try std.testing.expect(msg_live_state != msg_vrcg);
+    try std.testing.expect(msg_live_state != msg_vg_role_body);
+    try std.testing.expect(msg_live_state != msg_vg_invite_list);
+    try std.testing.expect(msg_live_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_state != msg_vg_post_confirm);
     try std.testing.expect(msg_live_state != msg_tk_live);
     try std.testing.expect(msg_live_state != msg_tk_logs);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
@@ -3315,6 +3882,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_midi_ctl);
     try std.testing.expect(msg_live_transport != msg_p_c_view);
     try std.testing.expect(msg_live_transport != msg_p_c_gpu);
+    try std.testing.expect(msg_live_transport != msg_vrc_status);
+    try std.testing.expect(msg_live_transport != msg_vrc_editor);
+    try std.testing.expect(msg_live_transport != msg_vrc_campaths);
+    try std.testing.expect(msg_live_transport != msg_vrc_photos);
+    try std.testing.expect(msg_live_transport != msg_vrc_tab);
+    try std.testing.expect(msg_live_transport != msg_vrcg);
+    try std.testing.expect(msg_live_transport != msg_vg_role_body);
+    try std.testing.expect(msg_live_transport != msg_vg_invite_list);
+    try std.testing.expect(msg_live_transport != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_transport != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_transport != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_transport != msg_vg_post_confirm);
     try std.testing.expect(msg_live_transport != msg_tk_live);
     try std.testing.expect(msg_live_transport != msg_tk_logs);
     try std.testing.expect(msg_live_n_p != msg_live_status);
@@ -3364,6 +3943,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_midi_ctl);
     try std.testing.expect(msg_live_n_p != msg_p_c_view);
     try std.testing.expect(msg_live_n_p != msg_p_c_gpu);
+    try std.testing.expect(msg_live_n_p != msg_vrc_status);
+    try std.testing.expect(msg_live_n_p != msg_vrc_editor);
+    try std.testing.expect(msg_live_n_p != msg_vrc_campaths);
+    try std.testing.expect(msg_live_n_p != msg_vrc_photos);
+    try std.testing.expect(msg_live_n_p != msg_vrc_tab);
+    try std.testing.expect(msg_live_n_p != msg_vrcg);
+    try std.testing.expect(msg_live_n_p != msg_vg_role_body);
+    try std.testing.expect(msg_live_n_p != msg_vg_invite_list);
+    try std.testing.expect(msg_live_n_p != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_n_p != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_n_p != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_n_p != msg_vg_post_confirm);
     try std.testing.expect(msg_live_n_p != msg_tk_live);
     try std.testing.expect(msg_live_n_p != msg_tk_logs);
     try std.testing.expect(msg_live_status != msg_live_decks);
@@ -3412,6 +4003,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_midi_ctl);
     try std.testing.expect(msg_live_status != msg_p_c_view);
     try std.testing.expect(msg_live_status != msg_p_c_gpu);
+    try std.testing.expect(msg_live_status != msg_vrc_status);
+    try std.testing.expect(msg_live_status != msg_vrc_editor);
+    try std.testing.expect(msg_live_status != msg_vrc_campaths);
+    try std.testing.expect(msg_live_status != msg_vrc_photos);
+    try std.testing.expect(msg_live_status != msg_vrc_tab);
+    try std.testing.expect(msg_live_status != msg_vrcg);
+    try std.testing.expect(msg_live_status != msg_vg_role_body);
+    try std.testing.expect(msg_live_status != msg_vg_invite_list);
+    try std.testing.expect(msg_live_status != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_status != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_status != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_status != msg_vg_post_confirm);
     try std.testing.expect(msg_live_status != msg_tk_live);
     try std.testing.expect(msg_live_status != msg_tk_logs);
     try std.testing.expect(msg_live_decks != msg_live_signals);
@@ -3459,6 +4062,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_midi_ctl);
     try std.testing.expect(msg_live_decks != msg_p_c_view);
     try std.testing.expect(msg_live_decks != msg_p_c_gpu);
+    try std.testing.expect(msg_live_decks != msg_vrc_status);
+    try std.testing.expect(msg_live_decks != msg_vrc_editor);
+    try std.testing.expect(msg_live_decks != msg_vrc_campaths);
+    try std.testing.expect(msg_live_decks != msg_vrc_photos);
+    try std.testing.expect(msg_live_decks != msg_vrc_tab);
+    try std.testing.expect(msg_live_decks != msg_vrcg);
+    try std.testing.expect(msg_live_decks != msg_vg_role_body);
+    try std.testing.expect(msg_live_decks != msg_vg_invite_list);
+    try std.testing.expect(msg_live_decks != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_decks != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_decks != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_decks != msg_vg_post_confirm);
     try std.testing.expect(msg_live_decks != msg_tk_live);
     try std.testing.expect(msg_live_decks != msg_tk_logs);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
@@ -3505,6 +4120,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_midi_ctl);
     try std.testing.expect(msg_live_signals != msg_p_c_view);
     try std.testing.expect(msg_live_signals != msg_p_c_gpu);
+    try std.testing.expect(msg_live_signals != msg_vrc_status);
+    try std.testing.expect(msg_live_signals != msg_vrc_editor);
+    try std.testing.expect(msg_live_signals != msg_vrc_campaths);
+    try std.testing.expect(msg_live_signals != msg_vrc_photos);
+    try std.testing.expect(msg_live_signals != msg_vrc_tab);
+    try std.testing.expect(msg_live_signals != msg_vrcg);
+    try std.testing.expect(msg_live_signals != msg_vg_role_body);
+    try std.testing.expect(msg_live_signals != msg_vg_invite_list);
+    try std.testing.expect(msg_live_signals != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_signals != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_signals != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_signals != msg_vg_post_confirm);
     try std.testing.expect(msg_live_signals != msg_tk_live);
     try std.testing.expect(msg_live_signals != msg_tk_logs);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
@@ -3550,6 +4177,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_midi_ctl);
     try std.testing.expect(msg_live_cockpit != msg_p_c_view);
     try std.testing.expect(msg_live_cockpit != msg_p_c_gpu);
+    try std.testing.expect(msg_live_cockpit != msg_vrc_status);
+    try std.testing.expect(msg_live_cockpit != msg_vrc_editor);
+    try std.testing.expect(msg_live_cockpit != msg_vrc_campaths);
+    try std.testing.expect(msg_live_cockpit != msg_vrc_photos);
+    try std.testing.expect(msg_live_cockpit != msg_vrc_tab);
+    try std.testing.expect(msg_live_cockpit != msg_vrcg);
+    try std.testing.expect(msg_live_cockpit != msg_vg_role_body);
+    try std.testing.expect(msg_live_cockpit != msg_vg_invite_list);
+    try std.testing.expect(msg_live_cockpit != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_cockpit != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_cockpit != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_cockpit != msg_vg_post_confirm);
     try std.testing.expect(msg_live_cockpit != msg_tk_live);
     try std.testing.expect(msg_live_cockpit != msg_tk_logs);
     try std.testing.expect(msg_live_link != msg_live_graph);
@@ -3594,6 +4233,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_midi_ctl);
     try std.testing.expect(msg_live_link != msg_p_c_view);
     try std.testing.expect(msg_live_link != msg_p_c_gpu);
+    try std.testing.expect(msg_live_link != msg_vrc_status);
+    try std.testing.expect(msg_live_link != msg_vrc_editor);
+    try std.testing.expect(msg_live_link != msg_vrc_campaths);
+    try std.testing.expect(msg_live_link != msg_vrc_photos);
+    try std.testing.expect(msg_live_link != msg_vrc_tab);
+    try std.testing.expect(msg_live_link != msg_vrcg);
+    try std.testing.expect(msg_live_link != msg_vg_role_body);
+    try std.testing.expect(msg_live_link != msg_vg_invite_list);
+    try std.testing.expect(msg_live_link != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_link != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_link != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_link != msg_vg_post_confirm);
     try std.testing.expect(msg_live_link != msg_tk_live);
     try std.testing.expect(msg_live_link != msg_tk_logs);
     try std.testing.expect(msg_live_graph != msg_live_perf);
@@ -3637,6 +4288,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_midi_ctl);
     try std.testing.expect(msg_live_graph != msg_p_c_view);
     try std.testing.expect(msg_live_graph != msg_p_c_gpu);
+    try std.testing.expect(msg_live_graph != msg_vrc_status);
+    try std.testing.expect(msg_live_graph != msg_vrc_editor);
+    try std.testing.expect(msg_live_graph != msg_vrc_campaths);
+    try std.testing.expect(msg_live_graph != msg_vrc_photos);
+    try std.testing.expect(msg_live_graph != msg_vrc_tab);
+    try std.testing.expect(msg_live_graph != msg_vrcg);
+    try std.testing.expect(msg_live_graph != msg_vg_role_body);
+    try std.testing.expect(msg_live_graph != msg_vg_invite_list);
+    try std.testing.expect(msg_live_graph != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_graph != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_graph != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_graph != msg_vg_post_confirm);
     try std.testing.expect(msg_live_graph != msg_tk_live);
     try std.testing.expect(msg_live_graph != msg_tk_logs);
     try std.testing.expect(msg_live_perf != msg_live_strip);
@@ -3679,6 +4342,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_midi_ctl);
     try std.testing.expect(msg_live_perf != msg_p_c_view);
     try std.testing.expect(msg_live_perf != msg_p_c_gpu);
+    try std.testing.expect(msg_live_perf != msg_vrc_status);
+    try std.testing.expect(msg_live_perf != msg_vrc_editor);
+    try std.testing.expect(msg_live_perf != msg_vrc_campaths);
+    try std.testing.expect(msg_live_perf != msg_vrc_photos);
+    try std.testing.expect(msg_live_perf != msg_vrc_tab);
+    try std.testing.expect(msg_live_perf != msg_vrcg);
+    try std.testing.expect(msg_live_perf != msg_vg_role_body);
+    try std.testing.expect(msg_live_perf != msg_vg_invite_list);
+    try std.testing.expect(msg_live_perf != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_perf != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_perf != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_perf != msg_vg_post_confirm);
     try std.testing.expect(msg_live_perf != msg_tk_live);
     try std.testing.expect(msg_live_perf != msg_tk_logs);
     try std.testing.expect(msg_live_strip != msg_mo_state);
@@ -3720,6 +4395,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_midi_ctl);
     try std.testing.expect(msg_live_strip != msg_p_c_view);
     try std.testing.expect(msg_live_strip != msg_p_c_gpu);
+    try std.testing.expect(msg_live_strip != msg_vrc_status);
+    try std.testing.expect(msg_live_strip != msg_vrc_editor);
+    try std.testing.expect(msg_live_strip != msg_vrc_campaths);
+    try std.testing.expect(msg_live_strip != msg_vrc_photos);
+    try std.testing.expect(msg_live_strip != msg_vrc_tab);
+    try std.testing.expect(msg_live_strip != msg_vrcg);
+    try std.testing.expect(msg_live_strip != msg_vg_role_body);
+    try std.testing.expect(msg_live_strip != msg_vg_invite_list);
+    try std.testing.expect(msg_live_strip != msg_vg_roles_modal);
+    try std.testing.expect(msg_live_strip != msg_vg_invite_modal);
+    try std.testing.expect(msg_live_strip != msg_vg_member_confirm);
+    try std.testing.expect(msg_live_strip != msg_vg_post_confirm);
     try std.testing.expect(msg_live_strip != msg_tk_live);
     try std.testing.expect(msg_live_strip != msg_tk_logs);
     try std.testing.expect(msg_mo_state != msg_pub);
@@ -3760,6 +4447,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_midi_ctl);
     try std.testing.expect(msg_mo_state != msg_p_c_view);
     try std.testing.expect(msg_mo_state != msg_p_c_gpu);
+    try std.testing.expect(msg_mo_state != msg_vrc_status);
+    try std.testing.expect(msg_mo_state != msg_vrc_editor);
+    try std.testing.expect(msg_mo_state != msg_vrc_campaths);
+    try std.testing.expect(msg_mo_state != msg_vrc_photos);
+    try std.testing.expect(msg_mo_state != msg_vrc_tab);
+    try std.testing.expect(msg_mo_state != msg_vrcg);
+    try std.testing.expect(msg_mo_state != msg_vg_role_body);
+    try std.testing.expect(msg_mo_state != msg_vg_invite_list);
+    try std.testing.expect(msg_mo_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_mo_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_mo_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_mo_state != msg_vg_post_confirm);
     try std.testing.expect(msg_mo_state != msg_tk_live);
     try std.testing.expect(msg_mo_state != msg_tk_logs);
     try std.testing.expect(msg_pub != msg_pub_hero);
@@ -3799,6 +4498,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_midi_ctl);
     try std.testing.expect(msg_pub != msg_p_c_view);
     try std.testing.expect(msg_pub != msg_p_c_gpu);
+    try std.testing.expect(msg_pub != msg_vrc_status);
+    try std.testing.expect(msg_pub != msg_vrc_editor);
+    try std.testing.expect(msg_pub != msg_vrc_campaths);
+    try std.testing.expect(msg_pub != msg_vrc_photos);
+    try std.testing.expect(msg_pub != msg_vrc_tab);
+    try std.testing.expect(msg_pub != msg_vrcg);
+    try std.testing.expect(msg_pub != msg_vg_role_body);
+    try std.testing.expect(msg_pub != msg_vg_invite_list);
+    try std.testing.expect(msg_pub != msg_vg_roles_modal);
+    try std.testing.expect(msg_pub != msg_vg_invite_modal);
+    try std.testing.expect(msg_pub != msg_vg_member_confirm);
+    try std.testing.expect(msg_pub != msg_vg_post_confirm);
     try std.testing.expect(msg_pub != msg_tk_live);
     try std.testing.expect(msg_pub != msg_tk_logs);
     try std.testing.expect(msg_pub_hero != msg_set_state);
@@ -3837,6 +4548,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_midi_ctl);
     try std.testing.expect(msg_pub_hero != msg_p_c_view);
     try std.testing.expect(msg_pub_hero != msg_p_c_gpu);
+    try std.testing.expect(msg_pub_hero != msg_vrc_status);
+    try std.testing.expect(msg_pub_hero != msg_vrc_editor);
+    try std.testing.expect(msg_pub_hero != msg_vrc_campaths);
+    try std.testing.expect(msg_pub_hero != msg_vrc_photos);
+    try std.testing.expect(msg_pub_hero != msg_vrc_tab);
+    try std.testing.expect(msg_pub_hero != msg_vrcg);
+    try std.testing.expect(msg_pub_hero != msg_vg_role_body);
+    try std.testing.expect(msg_pub_hero != msg_vg_invite_list);
+    try std.testing.expect(msg_pub_hero != msg_vg_roles_modal);
+    try std.testing.expect(msg_pub_hero != msg_vg_invite_modal);
+    try std.testing.expect(msg_pub_hero != msg_vg_member_confirm);
+    try std.testing.expect(msg_pub_hero != msg_vg_post_confirm);
     try std.testing.expect(msg_pub_hero != msg_tk_live);
     try std.testing.expect(msg_pub_hero != msg_tk_logs);
     try std.testing.expect(msg_set_state != msg_set_content);
@@ -3874,6 +4597,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_midi_ctl);
     try std.testing.expect(msg_set_state != msg_p_c_view);
     try std.testing.expect(msg_set_state != msg_p_c_gpu);
+    try std.testing.expect(msg_set_state != msg_vrc_status);
+    try std.testing.expect(msg_set_state != msg_vrc_editor);
+    try std.testing.expect(msg_set_state != msg_vrc_campaths);
+    try std.testing.expect(msg_set_state != msg_vrc_photos);
+    try std.testing.expect(msg_set_state != msg_vrc_tab);
+    try std.testing.expect(msg_set_state != msg_vrcg);
+    try std.testing.expect(msg_set_state != msg_vg_role_body);
+    try std.testing.expect(msg_set_state != msg_vg_invite_list);
+    try std.testing.expect(msg_set_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_set_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_set_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_set_state != msg_vg_post_confirm);
     try std.testing.expect(msg_set_state != msg_tk_live);
     try std.testing.expect(msg_set_state != msg_tk_logs);
     try std.testing.expect(msg_set_content != msg_set_status);
@@ -3910,6 +4645,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_midi_ctl);
     try std.testing.expect(msg_set_content != msg_p_c_view);
     try std.testing.expect(msg_set_content != msg_p_c_gpu);
+    try std.testing.expect(msg_set_content != msg_vrc_status);
+    try std.testing.expect(msg_set_content != msg_vrc_editor);
+    try std.testing.expect(msg_set_content != msg_vrc_campaths);
+    try std.testing.expect(msg_set_content != msg_vrc_photos);
+    try std.testing.expect(msg_set_content != msg_vrc_tab);
+    try std.testing.expect(msg_set_content != msg_vrcg);
+    try std.testing.expect(msg_set_content != msg_vg_role_body);
+    try std.testing.expect(msg_set_content != msg_vg_invite_list);
+    try std.testing.expect(msg_set_content != msg_vg_roles_modal);
+    try std.testing.expect(msg_set_content != msg_vg_invite_modal);
+    try std.testing.expect(msg_set_content != msg_vg_member_confirm);
+    try std.testing.expect(msg_set_content != msg_vg_post_confirm);
     try std.testing.expect(msg_set_content != msg_tk_live);
     try std.testing.expect(msg_set_content != msg_tk_logs);
     try std.testing.expect(msg_set_status != msg_lib_state);
@@ -3945,6 +4692,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_midi_ctl);
     try std.testing.expect(msg_set_status != msg_p_c_view);
     try std.testing.expect(msg_set_status != msg_p_c_gpu);
+    try std.testing.expect(msg_set_status != msg_vrc_status);
+    try std.testing.expect(msg_set_status != msg_vrc_editor);
+    try std.testing.expect(msg_set_status != msg_vrc_campaths);
+    try std.testing.expect(msg_set_status != msg_vrc_photos);
+    try std.testing.expect(msg_set_status != msg_vrc_tab);
+    try std.testing.expect(msg_set_status != msg_vrcg);
+    try std.testing.expect(msg_set_status != msg_vg_role_body);
+    try std.testing.expect(msg_set_status != msg_vg_invite_list);
+    try std.testing.expect(msg_set_status != msg_vg_roles_modal);
+    try std.testing.expect(msg_set_status != msg_vg_invite_modal);
+    try std.testing.expect(msg_set_status != msg_vg_member_confirm);
+    try std.testing.expect(msg_set_status != msg_vg_post_confirm);
     try std.testing.expect(msg_set_status != msg_tk_live);
     try std.testing.expect(msg_set_status != msg_tk_logs);
     try std.testing.expect(msg_lib_state != msg_lib_body);
@@ -3979,6 +4738,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_midi_ctl);
     try std.testing.expect(msg_lib_state != msg_p_c_view);
     try std.testing.expect(msg_lib_state != msg_p_c_gpu);
+    try std.testing.expect(msg_lib_state != msg_vrc_status);
+    try std.testing.expect(msg_lib_state != msg_vrc_editor);
+    try std.testing.expect(msg_lib_state != msg_vrc_campaths);
+    try std.testing.expect(msg_lib_state != msg_vrc_photos);
+    try std.testing.expect(msg_lib_state != msg_vrc_tab);
+    try std.testing.expect(msg_lib_state != msg_vrcg);
+    try std.testing.expect(msg_lib_state != msg_vg_role_body);
+    try std.testing.expect(msg_lib_state != msg_vg_invite_list);
+    try std.testing.expect(msg_lib_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_lib_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_lib_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_lib_state != msg_vg_post_confirm);
     try std.testing.expect(msg_lib_state != msg_tk_live);
     try std.testing.expect(msg_lib_state != msg_tk_logs);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
@@ -4012,6 +4783,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_midi_ctl);
     try std.testing.expect(msg_lib_body != msg_p_c_view);
     try std.testing.expect(msg_lib_body != msg_p_c_gpu);
+    try std.testing.expect(msg_lib_body != msg_vrc_status);
+    try std.testing.expect(msg_lib_body != msg_vrc_editor);
+    try std.testing.expect(msg_lib_body != msg_vrc_campaths);
+    try std.testing.expect(msg_lib_body != msg_vrc_photos);
+    try std.testing.expect(msg_lib_body != msg_vrc_tab);
+    try std.testing.expect(msg_lib_body != msg_vrcg);
+    try std.testing.expect(msg_lib_body != msg_vg_role_body);
+    try std.testing.expect(msg_lib_body != msg_vg_invite_list);
+    try std.testing.expect(msg_lib_body != msg_vg_roles_modal);
+    try std.testing.expect(msg_lib_body != msg_vg_invite_modal);
+    try std.testing.expect(msg_lib_body != msg_vg_member_confirm);
+    try std.testing.expect(msg_lib_body != msg_vg_post_confirm);
     try std.testing.expect(msg_lib_body != msg_tk_live);
     try std.testing.expect(msg_lib_body != msg_tk_logs);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
@@ -4044,6 +4827,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_midi_ctl);
     try std.testing.expect(msg_lib_detail != msg_p_c_view);
     try std.testing.expect(msg_lib_detail != msg_p_c_gpu);
+    try std.testing.expect(msg_lib_detail != msg_vrc_status);
+    try std.testing.expect(msg_lib_detail != msg_vrc_editor);
+    try std.testing.expect(msg_lib_detail != msg_vrc_campaths);
+    try std.testing.expect(msg_lib_detail != msg_vrc_photos);
+    try std.testing.expect(msg_lib_detail != msg_vrc_tab);
+    try std.testing.expect(msg_lib_detail != msg_vrcg);
+    try std.testing.expect(msg_lib_detail != msg_vg_role_body);
+    try std.testing.expect(msg_lib_detail != msg_vg_invite_list);
+    try std.testing.expect(msg_lib_detail != msg_vg_roles_modal);
+    try std.testing.expect(msg_lib_detail != msg_vg_invite_modal);
+    try std.testing.expect(msg_lib_detail != msg_vg_member_confirm);
+    try std.testing.expect(msg_lib_detail != msg_vg_post_confirm);
     try std.testing.expect(msg_lib_detail != msg_tk_live);
     try std.testing.expect(msg_lib_detail != msg_tk_logs);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
@@ -4075,6 +4870,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_midi_ctl);
     try std.testing.expect(msg_lib_queue != msg_p_c_view);
     try std.testing.expect(msg_lib_queue != msg_p_c_gpu);
+    try std.testing.expect(msg_lib_queue != msg_vrc_status);
+    try std.testing.expect(msg_lib_queue != msg_vrc_editor);
+    try std.testing.expect(msg_lib_queue != msg_vrc_campaths);
+    try std.testing.expect(msg_lib_queue != msg_vrc_photos);
+    try std.testing.expect(msg_lib_queue != msg_vrc_tab);
+    try std.testing.expect(msg_lib_queue != msg_vrcg);
+    try std.testing.expect(msg_lib_queue != msg_vg_role_body);
+    try std.testing.expect(msg_lib_queue != msg_vg_invite_list);
+    try std.testing.expect(msg_lib_queue != msg_vg_roles_modal);
+    try std.testing.expect(msg_lib_queue != msg_vg_invite_modal);
+    try std.testing.expect(msg_lib_queue != msg_vg_member_confirm);
+    try std.testing.expect(msg_lib_queue != msg_vg_post_confirm);
     try std.testing.expect(msg_lib_queue != msg_tk_live);
     try std.testing.expect(msg_lib_queue != msg_tk_logs);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
@@ -4105,6 +4912,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_midi_ctl);
     try std.testing.expect(msg_lib_cue_cell != msg_p_c_view);
     try std.testing.expect(msg_lib_cue_cell != msg_p_c_gpu);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrc_status);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrc_editor);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrc_campaths);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrc_photos);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrc_tab);
+    try std.testing.expect(msg_lib_cue_cell != msg_vrcg);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_role_body);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_invite_list);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_roles_modal);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_invite_modal);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_member_confirm);
+    try std.testing.expect(msg_lib_cue_cell != msg_vg_post_confirm);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_live);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_logs);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
@@ -4134,6 +4953,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_midi_ctl);
     try std.testing.expect(msg_mp_full != msg_p_c_view);
     try std.testing.expect(msg_mp_full != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_full != msg_vrc_status);
+    try std.testing.expect(msg_mp_full != msg_vrc_editor);
+    try std.testing.expect(msg_mp_full != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_full != msg_vrc_photos);
+    try std.testing.expect(msg_mp_full != msg_vrc_tab);
+    try std.testing.expect(msg_mp_full != msg_vrcg);
+    try std.testing.expect(msg_mp_full != msg_vg_role_body);
+    try std.testing.expect(msg_mp_full != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_full != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_full != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_full != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_full != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_full != msg_tk_live);
     try std.testing.expect(msg_mp_full != msg_tk_logs);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
@@ -4162,6 +4993,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_midi_ctl);
     try std.testing.expect(msg_mp_inner != msg_p_c_view);
     try std.testing.expect(msg_mp_inner != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_inner != msg_vrc_status);
+    try std.testing.expect(msg_mp_inner != msg_vrc_editor);
+    try std.testing.expect(msg_mp_inner != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_inner != msg_vrc_photos);
+    try std.testing.expect(msg_mp_inner != msg_vrc_tab);
+    try std.testing.expect(msg_mp_inner != msg_vrcg);
+    try std.testing.expect(msg_mp_inner != msg_vg_role_body);
+    try std.testing.expect(msg_mp_inner != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_inner != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_inner != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_inner != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_inner != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_inner != msg_tk_live);
     try std.testing.expect(msg_mp_inner != msg_tk_logs);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
@@ -4189,6 +5032,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_midi_ctl);
     try std.testing.expect(msg_mp_vid != msg_p_c_view);
     try std.testing.expect(msg_mp_vid != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_vid != msg_vrc_status);
+    try std.testing.expect(msg_mp_vid != msg_vrc_editor);
+    try std.testing.expect(msg_mp_vid != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_vid != msg_vrc_photos);
+    try std.testing.expect(msg_mp_vid != msg_vrc_tab);
+    try std.testing.expect(msg_mp_vid != msg_vrcg);
+    try std.testing.expect(msg_mp_vid != msg_vg_role_body);
+    try std.testing.expect(msg_mp_vid != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_vid != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_vid != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_vid != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_vid != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_vid != msg_tk_live);
     try std.testing.expect(msg_mp_vid != msg_tk_logs);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
@@ -4215,6 +5070,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_midi_ctl);
     try std.testing.expect(msg_mp_wave != msg_p_c_view);
     try std.testing.expect(msg_mp_wave != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_wave != msg_vrc_status);
+    try std.testing.expect(msg_mp_wave != msg_vrc_editor);
+    try std.testing.expect(msg_mp_wave != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_wave != msg_vrc_photos);
+    try std.testing.expect(msg_mp_wave != msg_vrc_tab);
+    try std.testing.expect(msg_mp_wave != msg_vrcg);
+    try std.testing.expect(msg_mp_wave != msg_vg_role_body);
+    try std.testing.expect(msg_mp_wave != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_wave != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_wave != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_wave != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_wave != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_wave != msg_tk_live);
     try std.testing.expect(msg_mp_wave != msg_tk_logs);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
@@ -4240,6 +5107,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_midi_ctl);
     try std.testing.expect(msg_mp_tp != msg_p_c_view);
     try std.testing.expect(msg_mp_tp != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_tp != msg_vrc_status);
+    try std.testing.expect(msg_mp_tp != msg_vrc_editor);
+    try std.testing.expect(msg_mp_tp != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_tp != msg_vrc_photos);
+    try std.testing.expect(msg_mp_tp != msg_vrc_tab);
+    try std.testing.expect(msg_mp_tp != msg_vrcg);
+    try std.testing.expect(msg_mp_tp != msg_vg_role_body);
+    try std.testing.expect(msg_mp_tp != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_tp != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_tp != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_tp != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_tp != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_tp != msg_tk_live);
     try std.testing.expect(msg_mp_tp != msg_tk_logs);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
@@ -4264,6 +5143,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_midi_ctl);
     try std.testing.expect(msg_mp_edit != msg_p_c_view);
     try std.testing.expect(msg_mp_edit != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_edit != msg_vrc_status);
+    try std.testing.expect(msg_mp_edit != msg_vrc_editor);
+    try std.testing.expect(msg_mp_edit != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_edit != msg_vrc_photos);
+    try std.testing.expect(msg_mp_edit != msg_vrc_tab);
+    try std.testing.expect(msg_mp_edit != msg_vrcg);
+    try std.testing.expect(msg_mp_edit != msg_vg_role_body);
+    try std.testing.expect(msg_mp_edit != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_edit != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_edit != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_edit != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_edit != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_edit != msg_tk_live);
     try std.testing.expect(msg_mp_edit != msg_tk_logs);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
@@ -4287,6 +5178,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_export != msg_midi_ctl);
     try std.testing.expect(msg_mp_export != msg_p_c_view);
     try std.testing.expect(msg_mp_export != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_export != msg_vrc_status);
+    try std.testing.expect(msg_mp_export != msg_vrc_editor);
+    try std.testing.expect(msg_mp_export != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_export != msg_vrc_photos);
+    try std.testing.expect(msg_mp_export != msg_vrc_tab);
+    try std.testing.expect(msg_mp_export != msg_vrcg);
+    try std.testing.expect(msg_mp_export != msg_vg_role_body);
+    try std.testing.expect(msg_mp_export != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_export != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_export != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_export != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_export != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_export != msg_tk_live);
     try std.testing.expect(msg_mp_export != msg_tk_logs);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
@@ -4309,6 +5212,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_r_o != msg_midi_ctl);
     try std.testing.expect(msg_mp_r_o != msg_p_c_view);
     try std.testing.expect(msg_mp_r_o != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_r_o != msg_vrc_status);
+    try std.testing.expect(msg_mp_r_o != msg_vrc_editor);
+    try std.testing.expect(msg_mp_r_o != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_r_o != msg_vrc_photos);
+    try std.testing.expect(msg_mp_r_o != msg_vrc_tab);
+    try std.testing.expect(msg_mp_r_o != msg_vrcg);
+    try std.testing.expect(msg_mp_r_o != msg_vg_role_body);
+    try std.testing.expect(msg_mp_r_o != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_r_o != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_r_o != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_r_o != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_r_o != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_r_o != msg_tk_live);
     try std.testing.expect(msg_mp_r_o != msg_tk_logs);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
@@ -4330,6 +5245,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_hov != msg_midi_ctl);
     try std.testing.expect(msg_mp_hov != msg_p_c_view);
     try std.testing.expect(msg_mp_hov != msg_p_c_gpu);
+    try std.testing.expect(msg_mp_hov != msg_vrc_status);
+    try std.testing.expect(msg_mp_hov != msg_vrc_editor);
+    try std.testing.expect(msg_mp_hov != msg_vrc_campaths);
+    try std.testing.expect(msg_mp_hov != msg_vrc_photos);
+    try std.testing.expect(msg_mp_hov != msg_vrc_tab);
+    try std.testing.expect(msg_mp_hov != msg_vrcg);
+    try std.testing.expect(msg_mp_hov != msg_vg_role_body);
+    try std.testing.expect(msg_mp_hov != msg_vg_invite_list);
+    try std.testing.expect(msg_mp_hov != msg_vg_roles_modal);
+    try std.testing.expect(msg_mp_hov != msg_vg_invite_modal);
+    try std.testing.expect(msg_mp_hov != msg_vg_member_confirm);
+    try std.testing.expect(msg_mp_hov != msg_vg_post_confirm);
     try std.testing.expect(msg_mp_hov != msg_tk_live);
     try std.testing.expect(msg_mp_hov != msg_tk_logs);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
@@ -4350,6 +5277,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_state != msg_midi_ctl);
     try std.testing.expect(msg_auto_state != msg_p_c_view);
     try std.testing.expect(msg_auto_state != msg_p_c_gpu);
+    try std.testing.expect(msg_auto_state != msg_vrc_status);
+    try std.testing.expect(msg_auto_state != msg_vrc_editor);
+    try std.testing.expect(msg_auto_state != msg_vrc_campaths);
+    try std.testing.expect(msg_auto_state != msg_vrc_photos);
+    try std.testing.expect(msg_auto_state != msg_vrc_tab);
+    try std.testing.expect(msg_auto_state != msg_vrcg);
+    try std.testing.expect(msg_auto_state != msg_vg_role_body);
+    try std.testing.expect(msg_auto_state != msg_vg_invite_list);
+    try std.testing.expect(msg_auto_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_auto_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_auto_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_auto_state != msg_vg_post_confirm);
     try std.testing.expect(msg_auto_state != msg_tk_live);
     try std.testing.expect(msg_auto_state != msg_tk_logs);
     try std.testing.expect(msg_auto_body_state != msg_peers);
@@ -4369,6 +5308,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_body_state != msg_midi_ctl);
     try std.testing.expect(msg_auto_body_state != msg_p_c_view);
     try std.testing.expect(msg_auto_body_state != msg_p_c_gpu);
+    try std.testing.expect(msg_auto_body_state != msg_vrc_status);
+    try std.testing.expect(msg_auto_body_state != msg_vrc_editor);
+    try std.testing.expect(msg_auto_body_state != msg_vrc_campaths);
+    try std.testing.expect(msg_auto_body_state != msg_vrc_photos);
+    try std.testing.expect(msg_auto_body_state != msg_vrc_tab);
+    try std.testing.expect(msg_auto_body_state != msg_vrcg);
+    try std.testing.expect(msg_auto_body_state != msg_vg_role_body);
+    try std.testing.expect(msg_auto_body_state != msg_vg_invite_list);
+    try std.testing.expect(msg_auto_body_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_auto_body_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_auto_body_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_auto_body_state != msg_vg_post_confirm);
     try std.testing.expect(msg_auto_body_state != msg_tk_live);
     try std.testing.expect(msg_auto_body_state != msg_tk_logs);
     try std.testing.expect(msg_peers != msg_peers_body);
@@ -4387,6 +5338,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers != msg_midi_ctl);
     try std.testing.expect(msg_peers != msg_p_c_view);
     try std.testing.expect(msg_peers != msg_p_c_gpu);
+    try std.testing.expect(msg_peers != msg_vrc_status);
+    try std.testing.expect(msg_peers != msg_vrc_editor);
+    try std.testing.expect(msg_peers != msg_vrc_campaths);
+    try std.testing.expect(msg_peers != msg_vrc_photos);
+    try std.testing.expect(msg_peers != msg_vrc_tab);
+    try std.testing.expect(msg_peers != msg_vrcg);
+    try std.testing.expect(msg_peers != msg_vg_role_body);
+    try std.testing.expect(msg_peers != msg_vg_invite_list);
+    try std.testing.expect(msg_peers != msg_vg_roles_modal);
+    try std.testing.expect(msg_peers != msg_vg_invite_modal);
+    try std.testing.expect(msg_peers != msg_vg_member_confirm);
+    try std.testing.expect(msg_peers != msg_vg_post_confirm);
     try std.testing.expect(msg_peers != msg_tk_live);
     try std.testing.expect(msg_peers != msg_tk_logs);
     try std.testing.expect(msg_peers_body != msg_ovl_state);
@@ -4404,6 +5367,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers_body != msg_midi_ctl);
     try std.testing.expect(msg_peers_body != msg_p_c_view);
     try std.testing.expect(msg_peers_body != msg_p_c_gpu);
+    try std.testing.expect(msg_peers_body != msg_vrc_status);
+    try std.testing.expect(msg_peers_body != msg_vrc_editor);
+    try std.testing.expect(msg_peers_body != msg_vrc_campaths);
+    try std.testing.expect(msg_peers_body != msg_vrc_photos);
+    try std.testing.expect(msg_peers_body != msg_vrc_tab);
+    try std.testing.expect(msg_peers_body != msg_vrcg);
+    try std.testing.expect(msg_peers_body != msg_vg_role_body);
+    try std.testing.expect(msg_peers_body != msg_vg_invite_list);
+    try std.testing.expect(msg_peers_body != msg_vg_roles_modal);
+    try std.testing.expect(msg_peers_body != msg_vg_invite_modal);
+    try std.testing.expect(msg_peers_body != msg_vg_member_confirm);
+    try std.testing.expect(msg_peers_body != msg_vg_post_confirm);
     try std.testing.expect(msg_peers_body != msg_tk_live);
     try std.testing.expect(msg_peers_body != msg_tk_logs);
     try std.testing.expect(msg_ovl_state != msg_ovl_appr);
@@ -4420,6 +5395,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_state != msg_midi_ctl);
     try std.testing.expect(msg_ovl_state != msg_p_c_view);
     try std.testing.expect(msg_ovl_state != msg_p_c_gpu);
+    try std.testing.expect(msg_ovl_state != msg_vrc_status);
+    try std.testing.expect(msg_ovl_state != msg_vrc_editor);
+    try std.testing.expect(msg_ovl_state != msg_vrc_campaths);
+    try std.testing.expect(msg_ovl_state != msg_vrc_photos);
+    try std.testing.expect(msg_ovl_state != msg_vrc_tab);
+    try std.testing.expect(msg_ovl_state != msg_vrcg);
+    try std.testing.expect(msg_ovl_state != msg_vg_role_body);
+    try std.testing.expect(msg_ovl_state != msg_vg_invite_list);
+    try std.testing.expect(msg_ovl_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_ovl_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_ovl_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_ovl_state != msg_vg_post_confirm);
     try std.testing.expect(msg_ovl_state != msg_tk_live);
     try std.testing.expect(msg_ovl_state != msg_tk_logs);
     try std.testing.expect(msg_ovl_appr != msg_ovl_spout);
@@ -4435,6 +5422,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_appr != msg_midi_ctl);
     try std.testing.expect(msg_ovl_appr != msg_p_c_view);
     try std.testing.expect(msg_ovl_appr != msg_p_c_gpu);
+    try std.testing.expect(msg_ovl_appr != msg_vrc_status);
+    try std.testing.expect(msg_ovl_appr != msg_vrc_editor);
+    try std.testing.expect(msg_ovl_appr != msg_vrc_campaths);
+    try std.testing.expect(msg_ovl_appr != msg_vrc_photos);
+    try std.testing.expect(msg_ovl_appr != msg_vrc_tab);
+    try std.testing.expect(msg_ovl_appr != msg_vrcg);
+    try std.testing.expect(msg_ovl_appr != msg_vg_role_body);
+    try std.testing.expect(msg_ovl_appr != msg_vg_invite_list);
+    try std.testing.expect(msg_ovl_appr != msg_vg_roles_modal);
+    try std.testing.expect(msg_ovl_appr != msg_vg_invite_modal);
+    try std.testing.expect(msg_ovl_appr != msg_vg_member_confirm);
+    try std.testing.expect(msg_ovl_appr != msg_vg_post_confirm);
     try std.testing.expect(msg_ovl_appr != msg_tk_live);
     try std.testing.expect(msg_ovl_appr != msg_tk_logs);
     try std.testing.expect(msg_ovl_spout != msg_ui_status);
@@ -4449,6 +5448,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_spout != msg_midi_ctl);
     try std.testing.expect(msg_ovl_spout != msg_p_c_view);
     try std.testing.expect(msg_ovl_spout != msg_p_c_gpu);
+    try std.testing.expect(msg_ovl_spout != msg_vrc_status);
+    try std.testing.expect(msg_ovl_spout != msg_vrc_editor);
+    try std.testing.expect(msg_ovl_spout != msg_vrc_campaths);
+    try std.testing.expect(msg_ovl_spout != msg_vrc_photos);
+    try std.testing.expect(msg_ovl_spout != msg_vrc_tab);
+    try std.testing.expect(msg_ovl_spout != msg_vrcg);
+    try std.testing.expect(msg_ovl_spout != msg_vg_role_body);
+    try std.testing.expect(msg_ovl_spout != msg_vg_invite_list);
+    try std.testing.expect(msg_ovl_spout != msg_vg_roles_modal);
+    try std.testing.expect(msg_ovl_spout != msg_vg_invite_modal);
+    try std.testing.expect(msg_ovl_spout != msg_vg_member_confirm);
+    try std.testing.expect(msg_ovl_spout != msg_vg_post_confirm);
     try std.testing.expect(msg_ovl_spout != msg_tk_live);
     try std.testing.expect(msg_ovl_spout != msg_tk_logs);
     try std.testing.expect(msg_ui_status != msg_ovl_strip);
@@ -4462,6 +5473,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ui_status != msg_midi_ctl);
     try std.testing.expect(msg_ui_status != msg_p_c_view);
     try std.testing.expect(msg_ui_status != msg_p_c_gpu);
+    try std.testing.expect(msg_ui_status != msg_vrc_status);
+    try std.testing.expect(msg_ui_status != msg_vrc_editor);
+    try std.testing.expect(msg_ui_status != msg_vrc_campaths);
+    try std.testing.expect(msg_ui_status != msg_vrc_photos);
+    try std.testing.expect(msg_ui_status != msg_vrc_tab);
+    try std.testing.expect(msg_ui_status != msg_vrcg);
+    try std.testing.expect(msg_ui_status != msg_vg_role_body);
+    try std.testing.expect(msg_ui_status != msg_vg_invite_list);
+    try std.testing.expect(msg_ui_status != msg_vg_roles_modal);
+    try std.testing.expect(msg_ui_status != msg_vg_invite_modal);
+    try std.testing.expect(msg_ui_status != msg_vg_member_confirm);
+    try std.testing.expect(msg_ui_status != msg_vg_post_confirm);
     try std.testing.expect(msg_ui_status != msg_tk_live);
     try std.testing.expect(msg_ui_status != msg_tk_logs);
     try std.testing.expect(msg_ovl_strip != msg_tw_state);
@@ -4474,6 +5497,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_strip != msg_midi_ctl);
     try std.testing.expect(msg_ovl_strip != msg_p_c_view);
     try std.testing.expect(msg_ovl_strip != msg_p_c_gpu);
+    try std.testing.expect(msg_ovl_strip != msg_vrc_status);
+    try std.testing.expect(msg_ovl_strip != msg_vrc_editor);
+    try std.testing.expect(msg_ovl_strip != msg_vrc_campaths);
+    try std.testing.expect(msg_ovl_strip != msg_vrc_photos);
+    try std.testing.expect(msg_ovl_strip != msg_vrc_tab);
+    try std.testing.expect(msg_ovl_strip != msg_vrcg);
+    try std.testing.expect(msg_ovl_strip != msg_vg_role_body);
+    try std.testing.expect(msg_ovl_strip != msg_vg_invite_list);
+    try std.testing.expect(msg_ovl_strip != msg_vg_roles_modal);
+    try std.testing.expect(msg_ovl_strip != msg_vg_invite_modal);
+    try std.testing.expect(msg_ovl_strip != msg_vg_member_confirm);
+    try std.testing.expect(msg_ovl_strip != msg_vg_post_confirm);
     try std.testing.expect(msg_ovl_strip != msg_tk_live);
     try std.testing.expect(msg_ovl_strip != msg_tk_logs);
     try std.testing.expect(msg_tw_state != msg_tw_obs);
@@ -4485,6 +5520,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_state != msg_midi_ctl);
     try std.testing.expect(msg_tw_state != msg_p_c_view);
     try std.testing.expect(msg_tw_state != msg_p_c_gpu);
+    try std.testing.expect(msg_tw_state != msg_vrc_status);
+    try std.testing.expect(msg_tw_state != msg_vrc_editor);
+    try std.testing.expect(msg_tw_state != msg_vrc_campaths);
+    try std.testing.expect(msg_tw_state != msg_vrc_photos);
+    try std.testing.expect(msg_tw_state != msg_vrc_tab);
+    try std.testing.expect(msg_tw_state != msg_vrcg);
+    try std.testing.expect(msg_tw_state != msg_vg_role_body);
+    try std.testing.expect(msg_tw_state != msg_vg_invite_list);
+    try std.testing.expect(msg_tw_state != msg_vg_roles_modal);
+    try std.testing.expect(msg_tw_state != msg_vg_invite_modal);
+    try std.testing.expect(msg_tw_state != msg_vg_member_confirm);
+    try std.testing.expect(msg_tw_state != msg_vg_post_confirm);
     try std.testing.expect(msg_tw_state != msg_tk_live);
     try std.testing.expect(msg_tw_state != msg_tk_logs);
     try std.testing.expect(msg_tw_obs != msg_tw_presets);
@@ -4495,6 +5542,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_obs != msg_midi_ctl);
     try std.testing.expect(msg_tw_obs != msg_p_c_view);
     try std.testing.expect(msg_tw_obs != msg_p_c_gpu);
+    try std.testing.expect(msg_tw_obs != msg_vrc_status);
+    try std.testing.expect(msg_tw_obs != msg_vrc_editor);
+    try std.testing.expect(msg_tw_obs != msg_vrc_campaths);
+    try std.testing.expect(msg_tw_obs != msg_vrc_photos);
+    try std.testing.expect(msg_tw_obs != msg_vrc_tab);
+    try std.testing.expect(msg_tw_obs != msg_vrcg);
+    try std.testing.expect(msg_tw_obs != msg_vg_role_body);
+    try std.testing.expect(msg_tw_obs != msg_vg_invite_list);
+    try std.testing.expect(msg_tw_obs != msg_vg_roles_modal);
+    try std.testing.expect(msg_tw_obs != msg_vg_invite_modal);
+    try std.testing.expect(msg_tw_obs != msg_vg_member_confirm);
+    try std.testing.expect(msg_tw_obs != msg_vg_post_confirm);
     try std.testing.expect(msg_tw_obs != msg_tk_live);
     try std.testing.expect(msg_tw_obs != msg_tk_logs);
     try std.testing.expect(msg_tw_presets != msg_tw_feed);
@@ -4504,6 +5563,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_presets != msg_midi_ctl);
     try std.testing.expect(msg_tw_presets != msg_p_c_view);
     try std.testing.expect(msg_tw_presets != msg_p_c_gpu);
+    try std.testing.expect(msg_tw_presets != msg_vrc_status);
+    try std.testing.expect(msg_tw_presets != msg_vrc_editor);
+    try std.testing.expect(msg_tw_presets != msg_vrc_campaths);
+    try std.testing.expect(msg_tw_presets != msg_vrc_photos);
+    try std.testing.expect(msg_tw_presets != msg_vrc_tab);
+    try std.testing.expect(msg_tw_presets != msg_vrcg);
+    try std.testing.expect(msg_tw_presets != msg_vg_role_body);
+    try std.testing.expect(msg_tw_presets != msg_vg_invite_list);
+    try std.testing.expect(msg_tw_presets != msg_vg_roles_modal);
+    try std.testing.expect(msg_tw_presets != msg_vg_invite_modal);
+    try std.testing.expect(msg_tw_presets != msg_vg_member_confirm);
+    try std.testing.expect(msg_tw_presets != msg_vg_post_confirm);
     try std.testing.expect(msg_tw_presets != msg_tk_live);
     try std.testing.expect(msg_tw_presets != msg_tk_logs);
     try std.testing.expect(msg_tw_feed != msg_midi_active);
@@ -4512,6 +5583,18 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_feed != msg_midi_ctl);
     try std.testing.expect(msg_tw_feed != msg_p_c_view);
     try std.testing.expect(msg_tw_feed != msg_p_c_gpu);
+    try std.testing.expect(msg_tw_feed != msg_vrc_status);
+    try std.testing.expect(msg_tw_feed != msg_vrc_editor);
+    try std.testing.expect(msg_tw_feed != msg_vrc_campaths);
+    try std.testing.expect(msg_tw_feed != msg_vrc_photos);
+    try std.testing.expect(msg_tw_feed != msg_vrc_tab);
+    try std.testing.expect(msg_tw_feed != msg_vrcg);
+    try std.testing.expect(msg_tw_feed != msg_vg_role_body);
+    try std.testing.expect(msg_tw_feed != msg_vg_invite_list);
+    try std.testing.expect(msg_tw_feed != msg_vg_roles_modal);
+    try std.testing.expect(msg_tw_feed != msg_vg_invite_modal);
+    try std.testing.expect(msg_tw_feed != msg_vg_member_confirm);
+    try std.testing.expect(msg_tw_feed != msg_vg_post_confirm);
     try std.testing.expect(msg_tw_feed != msg_tk_live);
     try std.testing.expect(msg_tw_feed != msg_tk_logs);
     try std.testing.expect(msg_midi_active != msg_midi_mon_lines);
@@ -4519,27 +5602,189 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_active != msg_midi_ctl);
     try std.testing.expect(msg_midi_active != msg_p_c_view);
     try std.testing.expect(msg_midi_active != msg_p_c_gpu);
+    try std.testing.expect(msg_midi_active != msg_vrc_status);
+    try std.testing.expect(msg_midi_active != msg_vrc_editor);
+    try std.testing.expect(msg_midi_active != msg_vrc_campaths);
+    try std.testing.expect(msg_midi_active != msg_vrc_photos);
+    try std.testing.expect(msg_midi_active != msg_vrc_tab);
+    try std.testing.expect(msg_midi_active != msg_vrcg);
+    try std.testing.expect(msg_midi_active != msg_vg_role_body);
+    try std.testing.expect(msg_midi_active != msg_vg_invite_list);
+    try std.testing.expect(msg_midi_active != msg_vg_roles_modal);
+    try std.testing.expect(msg_midi_active != msg_vg_invite_modal);
+    try std.testing.expect(msg_midi_active != msg_vg_member_confirm);
+    try std.testing.expect(msg_midi_active != msg_vg_post_confirm);
     try std.testing.expect(msg_midi_active != msg_tk_live);
     try std.testing.expect(msg_midi_active != msg_tk_logs);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_port_stat);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_ctl);
     try std.testing.expect(msg_midi_mon_lines != msg_p_c_view);
     try std.testing.expect(msg_midi_mon_lines != msg_p_c_gpu);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrc_status);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrc_editor);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrc_campaths);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrc_photos);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrc_tab);
+    try std.testing.expect(msg_midi_mon_lines != msg_vrcg);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_role_body);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_invite_list);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_roles_modal);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_invite_modal);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_member_confirm);
+    try std.testing.expect(msg_midi_mon_lines != msg_vg_post_confirm);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_live);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_logs);
     try std.testing.expect(msg_midi_port_stat != msg_midi_ctl);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_view);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_gpu);
+    try std.testing.expect(msg_midi_port_stat != msg_vrc_status);
+    try std.testing.expect(msg_midi_port_stat != msg_vrc_editor);
+    try std.testing.expect(msg_midi_port_stat != msg_vrc_campaths);
+    try std.testing.expect(msg_midi_port_stat != msg_vrc_photos);
+    try std.testing.expect(msg_midi_port_stat != msg_vrc_tab);
+    try std.testing.expect(msg_midi_port_stat != msg_vrcg);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_role_body);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_invite_list);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_roles_modal);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_invite_modal);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_member_confirm);
+    try std.testing.expect(msg_midi_port_stat != msg_vg_post_confirm);
     try std.testing.expect(msg_midi_port_stat != msg_tk_live);
     try std.testing.expect(msg_midi_port_stat != msg_tk_logs);
     try std.testing.expect(msg_midi_ctl != msg_p_c_view);
     try std.testing.expect(msg_midi_ctl != msg_p_c_gpu);
+    try std.testing.expect(msg_midi_ctl != msg_vrc_status);
+    try std.testing.expect(msg_midi_ctl != msg_vrc_editor);
+    try std.testing.expect(msg_midi_ctl != msg_vrc_campaths);
+    try std.testing.expect(msg_midi_ctl != msg_vrc_photos);
+    try std.testing.expect(msg_midi_ctl != msg_vrc_tab);
+    try std.testing.expect(msg_midi_ctl != msg_vrcg);
+    try std.testing.expect(msg_midi_ctl != msg_vg_role_body);
+    try std.testing.expect(msg_midi_ctl != msg_vg_invite_list);
+    try std.testing.expect(msg_midi_ctl != msg_vg_roles_modal);
+    try std.testing.expect(msg_midi_ctl != msg_vg_invite_modal);
+    try std.testing.expect(msg_midi_ctl != msg_vg_member_confirm);
+    try std.testing.expect(msg_midi_ctl != msg_vg_post_confirm);
     try std.testing.expect(msg_midi_ctl != msg_tk_live);
     try std.testing.expect(msg_midi_ctl != msg_tk_logs);
     try std.testing.expect(msg_p_c_view != msg_p_c_gpu);
+    try std.testing.expect(msg_p_c_view != msg_vrc_status);
+    try std.testing.expect(msg_p_c_view != msg_vrc_editor);
+    try std.testing.expect(msg_p_c_view != msg_vrc_campaths);
+    try std.testing.expect(msg_p_c_view != msg_vrc_photos);
+    try std.testing.expect(msg_p_c_view != msg_vrc_tab);
+    try std.testing.expect(msg_p_c_view != msg_vrcg);
+    try std.testing.expect(msg_p_c_view != msg_vg_role_body);
+    try std.testing.expect(msg_p_c_view != msg_vg_invite_list);
+    try std.testing.expect(msg_p_c_view != msg_vg_roles_modal);
+    try std.testing.expect(msg_p_c_view != msg_vg_invite_modal);
+    try std.testing.expect(msg_p_c_view != msg_vg_member_confirm);
+    try std.testing.expect(msg_p_c_view != msg_vg_post_confirm);
     try std.testing.expect(msg_p_c_view != msg_tk_live);
     try std.testing.expect(msg_p_c_view != msg_tk_logs);
+    try std.testing.expect(msg_p_c_gpu != msg_vrc_status);
+    try std.testing.expect(msg_p_c_gpu != msg_vrc_editor);
+    try std.testing.expect(msg_p_c_gpu != msg_vrc_campaths);
+    try std.testing.expect(msg_p_c_gpu != msg_vrc_photos);
+    try std.testing.expect(msg_p_c_gpu != msg_vrc_tab);
+    try std.testing.expect(msg_p_c_gpu != msg_vrcg);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_role_body);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_invite_list);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_roles_modal);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_invite_modal);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_member_confirm);
+    try std.testing.expect(msg_p_c_gpu != msg_vg_post_confirm);
     try std.testing.expect(msg_p_c_gpu != msg_tk_live);
     try std.testing.expect(msg_p_c_gpu != msg_tk_logs);
+    try std.testing.expect(msg_vrc_status != msg_vrc_editor);
+    try std.testing.expect(msg_vrc_status != msg_vrc_campaths);
+    try std.testing.expect(msg_vrc_status != msg_vrc_photos);
+    try std.testing.expect(msg_vrc_status != msg_vrc_tab);
+    try std.testing.expect(msg_vrc_status != msg_vrcg);
+    try std.testing.expect(msg_vrc_status != msg_vg_role_body);
+    try std.testing.expect(msg_vrc_status != msg_vg_invite_list);
+    try std.testing.expect(msg_vrc_status != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrc_status != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrc_status != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrc_status != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_status != msg_tk_live);
+    try std.testing.expect(msg_vrc_status != msg_tk_logs);
+    try std.testing.expect(msg_vrc_editor != msg_vrc_campaths);
+    try std.testing.expect(msg_vrc_editor != msg_vrc_photos);
+    try std.testing.expect(msg_vrc_editor != msg_vrc_tab);
+    try std.testing.expect(msg_vrc_editor != msg_vrcg);
+    try std.testing.expect(msg_vrc_editor != msg_vg_role_body);
+    try std.testing.expect(msg_vrc_editor != msg_vg_invite_list);
+    try std.testing.expect(msg_vrc_editor != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrc_editor != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrc_editor != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrc_editor != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_editor != msg_tk_live);
+    try std.testing.expect(msg_vrc_editor != msg_tk_logs);
+    try std.testing.expect(msg_vrc_campaths != msg_vrc_photos);
+    try std.testing.expect(msg_vrc_campaths != msg_vrc_tab);
+    try std.testing.expect(msg_vrc_campaths != msg_vrcg);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_role_body);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_invite_list);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrc_campaths != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_campaths != msg_tk_live);
+    try std.testing.expect(msg_vrc_campaths != msg_tk_logs);
+    try std.testing.expect(msg_vrc_photos != msg_vrc_tab);
+    try std.testing.expect(msg_vrc_photos != msg_vrcg);
+    try std.testing.expect(msg_vrc_photos != msg_vg_role_body);
+    try std.testing.expect(msg_vrc_photos != msg_vg_invite_list);
+    try std.testing.expect(msg_vrc_photos != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrc_photos != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrc_photos != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrc_photos != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_photos != msg_tk_live);
+    try std.testing.expect(msg_vrc_photos != msg_tk_logs);
+    try std.testing.expect(msg_vrc_tab != msg_vrcg);
+    try std.testing.expect(msg_vrc_tab != msg_vg_role_body);
+    try std.testing.expect(msg_vrc_tab != msg_vg_invite_list);
+    try std.testing.expect(msg_vrc_tab != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrc_tab != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrc_tab != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrc_tab != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_tab != msg_tk_live);
+    try std.testing.expect(msg_vrc_tab != msg_tk_logs);
+    try std.testing.expect(msg_vrcg != msg_vg_role_body);
+    try std.testing.expect(msg_vrcg != msg_vg_invite_list);
+    try std.testing.expect(msg_vrcg != msg_vg_roles_modal);
+    try std.testing.expect(msg_vrcg != msg_vg_invite_modal);
+    try std.testing.expect(msg_vrcg != msg_vg_member_confirm);
+    try std.testing.expect(msg_vrcg != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrcg != msg_tk_live);
+    try std.testing.expect(msg_vrcg != msg_tk_logs);
+    try std.testing.expect(msg_vg_role_body != msg_vg_invite_list);
+    try std.testing.expect(msg_vg_role_body != msg_vg_roles_modal);
+    try std.testing.expect(msg_vg_role_body != msg_vg_invite_modal);
+    try std.testing.expect(msg_vg_role_body != msg_vg_member_confirm);
+    try std.testing.expect(msg_vg_role_body != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_role_body != msg_tk_live);
+    try std.testing.expect(msg_vg_role_body != msg_tk_logs);
+    try std.testing.expect(msg_vg_invite_list != msg_vg_roles_modal);
+    try std.testing.expect(msg_vg_invite_list != msg_vg_invite_modal);
+    try std.testing.expect(msg_vg_invite_list != msg_vg_member_confirm);
+    try std.testing.expect(msg_vg_invite_list != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_invite_list != msg_tk_live);
+    try std.testing.expect(msg_vg_invite_list != msg_tk_logs);
+    try std.testing.expect(msg_vg_roles_modal != msg_vg_invite_modal);
+    try std.testing.expect(msg_vg_roles_modal != msg_vg_member_confirm);
+    try std.testing.expect(msg_vg_roles_modal != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_roles_modal != msg_tk_live);
+    try std.testing.expect(msg_vg_roles_modal != msg_tk_logs);
+    try std.testing.expect(msg_vg_invite_modal != msg_vg_member_confirm);
+    try std.testing.expect(msg_vg_invite_modal != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_invite_modal != msg_tk_live);
+    try std.testing.expect(msg_vg_invite_modal != msg_tk_logs);
+    try std.testing.expect(msg_vg_member_confirm != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_member_confirm != msg_tk_live);
+    try std.testing.expect(msg_vg_member_confirm != msg_tk_logs);
+    try std.testing.expect(msg_vg_post_confirm != msg_tk_live);
+    try std.testing.expect(msg_vg_post_confirm != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

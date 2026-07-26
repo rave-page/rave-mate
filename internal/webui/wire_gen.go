@@ -7,62 +7,74 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x3d09786b
-	wireMsgAgState       uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
-	wireMsgLogsState     uint16 = 2   // Logs tab (full view)
-	wireMsgLogsLines     uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
-	wireMsgLiveState     uint16 = 10  // Live tab - full cockpit
-	wireMsgLiveTransport uint16 = 11  // #live-transport fragment
-	wireMsgLiveNP        uint16 = 12  // #live-np fragment
-	wireMsgLiveStatus    uint16 = 13  // #live-status fragment
-	wireMsgLiveDecks     uint16 = 14  // #live-decks fragment
-	wireMsgLiveSignals   uint16 = 15  // #live-signals fragment
-	wireMsgLiveCockpit   uint16 = 16  // #live-cockpit fragment
-	wireMsgLiveLink      uint16 = 17  // #live-ablelink fragment
-	wireMsgLiveGraph     uint16 = 18  // #live-net + #live-tim fragments
-	wireMsgLivePerf      uint16 = 19  // #live-perf2 fragment
-	wireMsgLiveStrip     uint16 = 20  // #live-strip fragment
-	wireMsgMoState       uint16 = 21  // Motion tab (full view + the #mo-body fragment share this state)
-	wireMsgPub           uint16 = 22  // Publish tab (full view)
-	wireMsgPubHero       uint16 = 23  // #pub-hero fragment (~1 Hz tick)
-	wireMsgSetState      uint16 = 24  // Settings tab (full view)
-	wireMsgSetContent    uint16 = 25  // #set-content pane (sub-tab switch + search)
-	wireMsgSetStatus     uint16 = 26  // one #stset-<id> status fragment (settings tick)
-	wireMsgLibState      uint16 = 27  // Library tab (full view)
-	wireMsgLibBody       uint16 = 28  // #lib-body (active section)
-	wireMsgLibDetail     uint16 = 29  // #lib-detail inspector
-	wireMsgLibQueue      uint16 = 30  // #lib-queue-body (job progress patch)
-	wireMsgLibCueCell    uint16 = 31  // one cue-census cell (per-row patch)
-	wireMsgMpFull        uint16 = 32  // Player (full view; the 29 kB raw waveform SVG lives here)
-	wireMsgMpInner       uint16 = 33  // #mp-root inner
-	wireMsgMpVid         uint16 = 34  // #mp-vid
-	wireMsgMpWave        uint16 = 35  // #mp-wave
-	wireMsgMpTp          uint16 = 36  // #mp-tp transport
-	wireMsgMpEdit        uint16 = 37  // #mp-edit
-	wireMsgMpExport      uint16 = 38  // #mp-export
-	wireMsgMpRO          uint16 = 39  // #mp-ro read-only strip
-	wireMsgMpHov         uint16 = 40  // #mp-hov hover readout
-	wireMsgAutoState     uint16 = 41  // Automations tab (full view)
-	wireMsgAutoBodyState uint16 = 42  // #auto-body (version-gated ~1 Hz tick)
-	wireMsgPeers         uint16 = 43  // Peers tab (full view)
-	wireMsgPeersBody     uint16 = 44  // #peers-body (~1 Hz live tick)
-	wireMsgOvlState      uint16 = 45  // Overlays tab (full view)
-	wireMsgOvlAppr       uint16 = 46  // #ovl-appearance fragment (re-patched by the fader-flag cache)
-	wireMsgOvlSpout      uint16 = 47  // #ovl-spout fragment (re-rendered on install completion)
-	wireMsgUiStatus      uint16 = 48  // one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else
-	wireMsgOvlStrip      uint16 = 49  // #ovl-strip fragment (outputs summary)
-	wireMsgTwState       uint16 = 50  // Twitch tab (full view)
-	wireMsgTwObs         uint16 = 51  // #twitch-obs fragment (viewer count + cockpit)
-	wireMsgTwPresets     uint16 = 52  // #twitch-presets fragment (title-preset chip strip)
-	wireMsgTwFeed        uint16 = 53  // #twitch-feed inner fragment (patched on every chat/alert event)
-	wireMsgMidiActive    uint16 = 54  // #midi-active status line (~1 Hz patch target)
-	wireMsgMidiMonLines  uint16 = 55  // #midi-monitor inner rows (~1 Hz patch target)
-	wireMsgMidiPortStat  uint16 = 56  // #midi-ctlstat-<i> inner status (~1 Hz patch target)
-	wireMsgMidiCtl       uint16 = 57  // MIDI Mixer tab (full view)
-	wireMsgPCView        uint16 = 58  // point-cloud viewer modal shell
-	wireMsgPCGpu         uint16 = 59  // point-cloud GPU prompt modal
-	wireMsgTkLive        uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
-	wireMsgTkLogs        uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
+	wireSchemaHash         uint32 = 0xa89a82a8
+	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
+	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
+	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
+	wireMsgLiveState       uint16 = 10  // Live tab - full cockpit
+	wireMsgLiveTransport   uint16 = 11  // #live-transport fragment
+	wireMsgLiveNP          uint16 = 12  // #live-np fragment
+	wireMsgLiveStatus      uint16 = 13  // #live-status fragment
+	wireMsgLiveDecks       uint16 = 14  // #live-decks fragment
+	wireMsgLiveSignals     uint16 = 15  // #live-signals fragment
+	wireMsgLiveCockpit     uint16 = 16  // #live-cockpit fragment
+	wireMsgLiveLink        uint16 = 17  // #live-ablelink fragment
+	wireMsgLiveGraph       uint16 = 18  // #live-net + #live-tim fragments
+	wireMsgLivePerf        uint16 = 19  // #live-perf2 fragment
+	wireMsgLiveStrip       uint16 = 20  // #live-strip fragment
+	wireMsgMoState         uint16 = 21  // Motion tab (full view + the #mo-body fragment share this state)
+	wireMsgPub             uint16 = 22  // Publish tab (full view)
+	wireMsgPubHero         uint16 = 23  // #pub-hero fragment (~1 Hz tick)
+	wireMsgSetState        uint16 = 24  // Settings tab (full view)
+	wireMsgSetContent      uint16 = 25  // #set-content pane (sub-tab switch + search)
+	wireMsgSetStatus       uint16 = 26  // one #stset-<id> status fragment (settings tick)
+	wireMsgLibState        uint16 = 27  // Library tab (full view)
+	wireMsgLibBody         uint16 = 28  // #lib-body (active section)
+	wireMsgLibDetail       uint16 = 29  // #lib-detail inspector
+	wireMsgLibQueue        uint16 = 30  // #lib-queue-body (job progress patch)
+	wireMsgLibCueCell      uint16 = 31  // one cue-census cell (per-row patch)
+	wireMsgMpFull          uint16 = 32  // Player (full view; the 29 kB raw waveform SVG lives here)
+	wireMsgMpInner         uint16 = 33  // #mp-root inner
+	wireMsgMpVid           uint16 = 34  // #mp-vid
+	wireMsgMpWave          uint16 = 35  // #mp-wave
+	wireMsgMpTp            uint16 = 36  // #mp-tp transport
+	wireMsgMpEdit          uint16 = 37  // #mp-edit
+	wireMsgMpExport        uint16 = 38  // #mp-export
+	wireMsgMpRO            uint16 = 39  // #mp-ro read-only strip
+	wireMsgMpHov           uint16 = 40  // #mp-hov hover readout
+	wireMsgAutoState       uint16 = 41  // Automations tab (full view)
+	wireMsgAutoBodyState   uint16 = 42  // #auto-body (version-gated ~1 Hz tick)
+	wireMsgPeers           uint16 = 43  // Peers tab (full view)
+	wireMsgPeersBody       uint16 = 44  // #peers-body (~1 Hz live tick)
+	wireMsgOvlState        uint16 = 45  // Overlays tab (full view)
+	wireMsgOvlAppr         uint16 = 46  // #ovl-appearance fragment (re-patched by the fader-flag cache)
+	wireMsgOvlSpout        uint16 = 47  // #ovl-spout fragment (re-rendered on install completion)
+	wireMsgUiStatus        uint16 = 48  // one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else
+	wireMsgOvlStrip        uint16 = 49  // #ovl-strip fragment (outputs summary)
+	wireMsgTwState         uint16 = 50  // Twitch tab (full view)
+	wireMsgTwObs           uint16 = 51  // #twitch-obs fragment (viewer count + cockpit)
+	wireMsgTwPresets       uint16 = 52  // #twitch-presets fragment (title-preset chip strip)
+	wireMsgTwFeed          uint16 = 53  // #twitch-feed inner fragment (patched on every chat/alert event)
+	wireMsgMidiActive      uint16 = 54  // #midi-active status line (~1 Hz patch target)
+	wireMsgMidiMonLines    uint16 = 55  // #midi-monitor inner rows (~1 Hz patch target)
+	wireMsgMidiPortStat    uint16 = 56  // #midi-ctlstat-<i> inner status (~1 Hz patch target)
+	wireMsgMidiCtl         uint16 = 57  // MIDI Mixer tab (full view)
+	wireMsgPCView          uint16 = 58  // point-cloud viewer modal shell
+	wireMsgPCGpu           uint16 = 59  // point-cloud GPU prompt modal
+	wireMsgVrcStatus       uint16 = 60  // #vrc-status account status region
+	wireMsgVrcEditor       uint16 = 61  // #vrc-editor status & bio editor
+	wireMsgVrcCampaths     uint16 = 62  // #vrc-campaths camera-paths master/detail
+	wireMsgVrcPhotos       uint16 = 63  // #vrc-photos-body screenshots browser
+	wireMsgVrcTab          uint16 = 64  // VRChat tab (full view)
+	wireMsgVrcg            uint16 = 65  // #vrcg-body Groups sub-tab root
+	wireMsgVgRoleBody      uint16 = 66  // #vrcg-role-body add/remove-role list
+	wireMsgVgInviteList    uint16 = 67  // #vrcg-inv-list filtered friends list
+	wireMsgVgRolesModal    uint16 = 68  // roles dialog shell (embeds #vrcg-role-body)
+	wireMsgVgInviteModal   uint16 = 69  // invite dialog shell (embeds #vrcg-inv-list)
+	wireMsgVgMemberConfirm uint16 = 70  // kick/ban confirm dialog
+	wireMsgVgPostConfirm   uint16 = 71  // delete-post confirm dialog
+	wireMsgTkLive          uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
+	wireMsgTkLogs          uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -2418,6 +2430,398 @@ func (v moPCGpuSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(5, v.Close)
 }
 
+func (v vrcStatusSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Present)
+	w.Str(2, v.Variant)
+	w.Str(3, v.Label)
+	w.Str(4, v.DL)
+	w.Str(5, v.Line)
+}
+
+func (v vrcOptSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Val)
+	w.Str(2, v.Label)
+	w.Bool(3, v.Sel)
+}
+
+func (v vrcPresetSelSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Act)
+	w.Str(2, v.Placeholder)
+	w.StrList(3, v.Names)
+}
+
+func (v vrcEditorSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.StatusTitle)
+	w.Str(2, v.StatusTip)
+	if v.StatusTipS != nil {
+		w.OptStruct(3, func() { v.StatusTipS.encodeWire(w) })
+	}
+	w.Str(4, v.PresenceLabel)
+	w.List(5, len(v.Presence), func(i int) { v.Presence[i].encodeWire(w) })
+	w.Str(6, v.StatusMsgLabel)
+	w.Str(7, v.DescCls)
+	w.Str(8, v.DescCount)
+	w.Str(9, v.DescVal)
+	w.Uint(10, uint64(v.MaxDesc))
+	w.Str(11, v.SaveStatus)
+	w.Struct(12, func() { v.StatusPreset.encodeWire(w) })
+	w.Str(13, v.PresetsLabel)
+	w.Str(14, v.BioTitle)
+	w.Str(15, v.BioCls)
+	w.Str(16, v.BioCount)
+	w.Str(17, v.BioVal)
+	w.Uint(18, uint64(v.MaxBio))
+	w.Str(19, v.SaveBio)
+	w.Str(20, v.BioHint)
+	w.Str(21, v.PreviewLabel)
+	w.Str(22, v.Preview)
+	w.Bool(23, v.HasPreview)
+	w.Struct(24, func() { v.BioPreset.encodeWire(w) })
+	w.Str(25, v.VarsLabel)
+	w.Str(26, v.RefreshLabel)
+}
+
+func (v vrcFrameOptSt) encodeWire(w *zigui.WireWriter) {
+	w.Uint(1, uint64(v.Frames))
+	w.Uint(2, uint64(v.Grid))
+	w.Uint(3, uint64(v.Res))
+	w.Bool(4, v.Sel)
+}
+
+func (v vrcEmotesSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Hint)
+	w.Str(2, v.SourceLabel)
+	w.Str(3, v.NameLabel)
+	w.Str(4, v.FramesLabel)
+	w.Str(5, v.FPSLabel)
+	w.Str(6, v.TrimStart)
+	w.Str(7, v.TrimEnd)
+	w.Str(8, v.OutDirLabel)
+	w.List(9, len(v.FrameOpts), func(i int) { v.FrameOpts[i].encodeWire(w) })
+	w.Str(10, v.OutDir)
+	w.Str(11, v.PingPong)
+	w.Str(12, v.Crop)
+	w.Str(13, v.Generate)
+	w.Str(14, v.OpenFolder)
+	w.Str(15, v.OpenUpload)
+	w.Str(16, v.UploadURL)
+}
+
+func (v vrcPathItemSt) encodeWire(w *zigui.WireWriter) {
+	w.Uint(1, uint64(v.Idx))
+	w.Str(2, v.Label)
+	w.Bool(3, v.Active)
+}
+
+func (v vrcCampathsSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.State)
+	w.Str(2, v.Msg)
+	w.List(3, len(v.Items), func(i int) { v.Items[i].encodeWire(w) })
+	w.Str(4, v.SVG)
+	w.Str(5, v.PlayBtn)
+	w.Str(6, v.Name)
+	w.Str(7, v.Info)
+	w.Str(8, v.Load)
+	w.Str(9, v.Copy)
+	w.Str(10, v.CopyPath)
+	w.Str(11, v.Organize)
+	w.Str(12, v.Hint)
+}
+
+func (v vrcPhotoGrpSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Uint(2, uint64(v.Count))
+	w.Bool(3, v.Active)
+}
+
+func (v vrcPhotoCellSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.File)
+	w.Str(2, v.TitleQ)
+	w.Str(3, v.Label)
+	w.Str(4, v.Src)
+}
+
+func (v vrcPhotosSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.State)
+	w.Str(2, v.Msg)
+	w.List(3, len(v.Groups), func(i int) { v.Groups[i].encodeWire(w) })
+	w.List(4, len(v.Cells), func(i int) { v.Cells[i].encodeWire(w) })
+	w.Str(5, v.Note)
+	w.Str(6, v.OpenFolder)
+	w.Str(7, v.PhotosDir)
+}
+
+func (v vgTabSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Val)
+	w.Str(2, v.Label)
+}
+
+func (v vgBadgeSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	w.Str(2, v.Variant)
+}
+
+func (v vgBtnSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Variant)
+	w.Str(3, v.Act)
+}
+
+func (v vgKVSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.DL)
+	w.Str(3, v.Value)
+}
+
+func (v vgPagerSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Mode)
+	w.Str(2, v.Msg)
+	w.Str(3, v.Label)
+	w.Str(4, v.Act)
+}
+
+func (v vgPickerRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Uint(1, uint64(v.Idx))
+	w.Str(2, v.Name)
+	w.Str(3, v.Meta)
+}
+
+func (v vgPickerSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Refresh)
+	w.Str(3, v.Filter)
+	w.Str(4, v.State)
+	w.Str(5, v.Msg)
+	w.List(6, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v vgRoleSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.List(2, len(v.Tags), func(i int) { v.Tags[i].encodeWire(w) })
+	w.Str(3, v.Order)
+	w.Str(4, v.Desc)
+	w.Str(5, v.PermSum)
+	w.StrList(6, v.Perms)
+}
+
+func (v vgOverviewSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.CardTitle)
+	w.Bool(2, v.Loading)
+	w.Str(3, v.LoadingMsg)
+	w.Bool(4, v.Missing)
+	w.Str(5, v.MissingMsg)
+	w.Str(6, v.AboutTitle)
+	w.Str(7, v.Desc)
+	w.List(8, len(v.KVs), func(i int) { v.KVs[i].encodeWire(w) })
+	w.Str(9, v.RulesTitle)
+	w.Str(10, v.Rules)
+	w.Str(11, v.PermsTitle)
+	w.Str(12, v.PermsMode)
+	w.Str(13, v.PermsMsg)
+	w.List(14, len(v.PermBadges), func(i int) { v.PermBadges[i].encodeWire(w) })
+	w.Str(15, v.RolesTitle)
+	w.Str(16, v.RolesEmpty)
+	w.List(17, len(v.Roles), func(i int) { v.Roles[i].encodeWire(w) })
+}
+
+func (v vgMemberRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.List(2, len(v.Tags), func(i int) { v.Tags[i].encodeWire(w) })
+	w.Str(3, v.Meta)
+	w.List(4, len(v.Acts), func(i int) { v.Acts[i].encodeWire(w) })
+}
+
+func (v vgMembersSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.CardTitle)
+	w.Str(2, v.State)
+	w.Str(3, v.Msg)
+	w.List(4, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Struct(5, func() { v.Pager.encodeWire(w) })
+}
+
+func (v vgUserRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Sub)
+	w.List(3, len(v.Acts), func(i int) { v.Acts[i].encodeWire(w) })
+}
+
+func (v vgUsersSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.CardTitle)
+	w.List(2, len(v.Head), func(i int) { v.Head[i].encodeWire(w) })
+	w.Str(3, v.State)
+	w.Str(4, v.Msg)
+	w.Str(5, v.Empty)
+	w.List(6, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Struct(7, func() { v.Pager.encodeWire(w) })
+}
+
+func (v vgPostRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Meta)
+	w.Str(3, v.Text)
+	w.List(4, len(v.Del), func(i int) { v.Del[i].encodeWire(w) })
+}
+
+func (v vgPostsSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.AnnTitle)
+	w.Str(2, v.AnnTip)
+	if v.AnnTipS != nil {
+		w.OptStruct(3, func() { v.AnnTipS.encodeWire(w) })
+	}
+	w.Bool(4, v.HasAnn)
+	w.Str(5, v.AnnHead)
+	w.Str(6, v.AnnWhen)
+	w.Str(7, v.AnnText)
+	w.Bool(8, v.AnnEmpty)
+	w.Str(9, v.AnnEmptyMsg)
+	w.Bool(10, v.CanAnn)
+	w.Str(11, v.NewAnnTitle)
+	w.Str(12, v.NewPostTitle)
+	w.Str(13, v.FTitle)
+	w.Str(14, v.FText)
+	w.Str(15, v.FImage)
+	w.Str(16, v.FNotify)
+	w.Str(17, v.AnnSubmit)
+	w.Str(18, v.AnnHint)
+	w.Str(19, v.PostSubmit)
+	w.Str(20, v.PostHint)
+	w.Str(21, v.CardTitle)
+	w.Str(22, v.State)
+	w.Str(23, v.Msg)
+	w.Str(24, v.Empty)
+	w.List(25, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Struct(26, func() { v.Pager.encodeWire(w) })
+}
+
+func (v vgAuditRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.When)
+	w.Str(2, v.Event)
+	w.Str(3, v.Actor)
+	w.Str(4, v.Desc)
+	w.Str(5, v.Raw)
+}
+
+func (v vgAuditSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.CardTitle)
+	w.Bool(2, v.NoPerm)
+	w.Str(3, v.NoPermMsg)
+	w.Str(4, v.State)
+	w.Str(5, v.Msg)
+	w.Str(6, v.Empty)
+	w.Str(7, v.RawSummary)
+	w.List(8, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Struct(9, func() { v.Pager.encodeWire(w) })
+}
+
+func (v vgWorkspaceSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Refresh)
+	w.Str(3, v.Back)
+	w.List(4, len(v.Badges), func(i int) { v.Badges[i].encodeWire(w) })
+	w.Str(5, v.View)
+	w.List(6, len(v.Tabs), func(i int) { v.Tabs[i].encodeWire(w) })
+	w.Struct(7, func() { v.Overview.encodeWire(w) })
+	w.Struct(8, func() { v.Members.encodeWire(w) })
+	w.Struct(9, func() { v.Users.encodeWire(w) })
+	w.Struct(10, func() { v.Posts.encodeWire(w) })
+	w.Struct(11, func() { v.Audit.encodeWire(w) })
+}
+
+func (v vrcgState) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Available)
+	w.Str(2, v.Unavailable)
+	w.Bool(3, v.SignedIn)
+	w.Str(4, v.SignInTitle)
+	w.Str(5, v.SignInHint)
+	w.Str(6, v.Mode)
+	w.Struct(7, func() { v.Picker.encodeWire(w) })
+	w.Struct(8, func() { v.WS.encodeWire(w) })
+}
+
+func (v vrcTabSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Available)
+	w.Str(2, v.Title)
+	w.Str(3, v.Sub)
+	w.Str(4, v.Unavailable)
+	w.Struct(5, func() { v.Status.encodeWire(w) })
+	w.Str(6, v.SubActive)
+	w.List(7, len(v.SubTabs), func(i int) { v.SubTabs[i].encodeWire(w) })
+	w.Struct(8, func() { v.Groups.encodeWire(w) })
+	w.Bool(9, v.LoggedIn)
+	w.Str(10, v.SecStatusBio)
+	w.Str(11, v.SignInHint)
+	w.Struct(12, func() { v.Editor.encodeWire(w) })
+	w.Str(13, v.SecEmotes)
+	w.Struct(14, func() { v.Emotes.encodeWire(w) })
+	w.Bool(15, v.HasTools)
+	w.Str(16, v.SecCamPaths)
+	w.Struct(17, func() { v.CamPaths.encodeWire(w) })
+	w.Str(18, v.SecPhotos)
+	w.Struct(19, func() { v.Photos.encodeWire(w) })
+}
+
+func (v vgRoleRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Desc)
+	w.Str(3, v.BtnLabel)
+	w.Str(4, v.BtnVar)
+	w.Str(5, v.Act)
+}
+
+func (v vgRoleBodySt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.HasHint)
+	w.Str(2, v.HintTone)
+	w.Str(3, v.HintText)
+	w.List(4, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v vgInviteRowSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Status)
+	w.Str(3, v.Act)
+}
+
+func (v vgInviteListSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Loading)
+	w.Str(2, v.LoadingMsg)
+	w.Bool(3, v.Empty)
+	w.Str(4, v.EmptyMsg)
+	w.List(5, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Bool(6, v.HasMore)
+	w.Str(7, v.MoreMsg)
+}
+
+func (v vgRolesModalSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Struct(2, func() { v.Body.encodeWire(w) })
+}
+
+func (v vgInviteModalSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.SearchPh)
+	w.Str(3, v.IDPh)
+	w.Str(4, v.IDBtn)
+	w.Struct(5, func() { v.List.encodeWire(w) })
+}
+
+func (v vgMemberConfirmSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Verb)
+	w.Str(3, v.Name)
+	w.Str(4, v.Group)
+	w.Str(5, v.Note)
+	w.Str(6, v.Act)
+	w.Str(7, v.Cancel)
+}
+
+func (v vgPostConfirmSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Post)
+	w.Str(3, v.Group)
+	w.Str(4, v.Confirm)
+	w.Str(5, v.Cancel)
+}
+
 func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Text)
 	if v.Tip != nil {
@@ -2808,6 +3212,90 @@ func wirePCView(v moPCViewSt) []byte {
 // wirePCGpu encodes moPCGpuSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wirePCGpu(v moPCGpuSt) []byte {
 	w := zigui.NewWireWriter(wireMsgPCGpu, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcStatus encodes vrcStatusSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcStatus(v vrcStatusSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcStatus, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcEditor encodes vrcEditorSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcEditor(v vrcEditorSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcEditor, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcCampaths encodes vrcCampathsSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcCampaths(v vrcCampathsSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcCampaths, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcPhotos encodes vrcPhotosSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcPhotos(v vrcPhotosSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcPhotos, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcTab encodes vrcTabSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcTab(v vrcTabSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcTab, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVrcg encodes vrcgState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVrcg(v vrcgState) []byte {
+	w := zigui.NewWireWriter(wireMsgVrcg, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgRoleBody encodes vgRoleBodySt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgRoleBody(v vgRoleBodySt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgRoleBody, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgInviteList encodes vgInviteListSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgInviteList(v vgInviteListSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgInviteList, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgRolesModal encodes vgRolesModalSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgRolesModal(v vgRolesModalSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgRolesModal, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgInviteModal encodes vgInviteModalSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgInviteModal(v vgInviteModalSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgInviteModal, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgMemberConfirm encodes vgMemberConfirmSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgMemberConfirm(v vgMemberConfirmSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgMemberConfirm, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireVgPostConfirm encodes vgPostConfirmSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireVgPostConfirm(v vgPostConfirmSt) []byte {
+	w := zigui.NewWireWriter(wireMsgVgPostConfirm, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }

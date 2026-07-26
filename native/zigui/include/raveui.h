@@ -299,6 +299,18 @@ const uint8_t *rz_ui_render_midictl_stat_v2(const uint8_t *state, size_t len, si
 const uint8_t *rz_ui_render_midimon_rows_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_pc_viewer_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_pc_gpu_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_status_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_campaths_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrchat_photos_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vrcgroups_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_rolebody_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitelist_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_rolesmodal_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_invitemodal_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_memberconfirm_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_vg_postconfirm_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

@@ -235,7 +235,8 @@ type vrcgState struct {
 func (u *UI) vrcgBody() string {
 	st := u.vrcgBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRCGroups(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRCGroupsV2", wireVrcg(st), zigui.RenderVRCGroupsV2,
+			zigui.RenderVRCGroups, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

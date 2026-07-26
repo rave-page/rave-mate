@@ -244,6 +244,19 @@ func RenderMIDIMonRowsV2(state []byte) (string, bool) { return "", false }
 func RenderPCViewerV2(state []byte) (string, bool)    { return "", false }
 func RenderPCGpuV2(state []byte) (string, bool)       { return "", false }
 
+func RenderVRChatV2(state []byte) (string, bool)          { return "", false }
+func RenderVRChatStatusV2(state []byte) (string, bool)    { return "", false }
+func RenderVRChatEditorV2(state []byte) (string, bool)    { return "", false }
+func RenderVRChatCampathsV2(state []byte) (string, bool)  { return "", false }
+func RenderVRChatPhotosV2(state []byte) (string, bool)    { return "", false }
+func RenderVRCGroupsV2(state []byte) (string, bool)       { return "", false }
+func RenderVgRoleBodyV2(state []byte) (string, bool)      { return "", false }
+func RenderVgInviteListV2(state []byte) (string, bool)    { return "", false }
+func RenderVgRolesModalV2(state []byte) (string, bool)    { return "", false }
+func RenderVgInviteModalV2(state []byte) (string, bool)   { return "", false }
+func RenderVgMemberConfirmV2(state []byte) (string, bool) { return "", false }
+func RenderVgPostConfirmV2(state []byte) (string, bool)   { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 
