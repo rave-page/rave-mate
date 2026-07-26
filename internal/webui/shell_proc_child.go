@@ -79,6 +79,14 @@ func (f *webviewFeature) Init(params json.RawMessage, rt *featurehost.Runtime) e
 		if w != nil {
 			h = uint64(w.hwnd())
 		}
+		// Show the window explicitly: this process was spawned with SW_HIDE (sysexec.Hide suppresses
+		// the console window) and Windows applies that to our FIRST top-level window - so the WebView2
+		// window comes up hidden. That is invisible UI AND a solid-black capture. No focus steal here;
+		// raising is the daemon's call (it sends `show` on the first ready only, so a crash-restart does
+		// not yank the user out of another app). StartHidden = tray-only start, honoured for real now.
+		if !f.ini.Virtual && !f.ini.StartHidden {
+			revealWindow(uintptr(h))
+		}
 		rt.Emit(procEvReady, procReady{HWND: h, Virtual: f.ini.Virtual})
 		if !f.ini.Virtual {
 			go f.beat()
@@ -194,6 +202,20 @@ func (f *webviewFeature) HandleEvent(event string, data json.RawMessage) {
 		if json.Unmarshal(data, &m) == nil {
 			governor.SetStreaming(m.On)
 		}
+	case procEvShot:
+		var m procShot
+		if json.Unmarshal(data, &m) != nil {
+			return
+		}
+		// Own goroutine: PrintWindow + PNG encode is tens of ms, and this handler runs ON the stdin
+		// reader - blocking it would stall the ordered lane behind a screenshot.
+		go func() {
+			res := procShotRes{RID: m.RID}
+			if err := captureHWND(w.hwnd(), m.Path, m.X, m.Y, m.W, m.H); err != nil {
+				res.Err = err.Error()
+			}
+			f.rt.Emit(procEvShotRes, res)
+		}()
 	case procEvQuit:
 		var m procQuit
 		_ = json.Unmarshal(data, &m)

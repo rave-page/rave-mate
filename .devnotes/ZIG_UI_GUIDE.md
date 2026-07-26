@@ -1661,7 +1661,7 @@ direct lane first**.
 | Lane | Frames | Order | Cap | Overflow policy |
 |---|---|---|---|---|
 | ORDERED | `doc`, `eval` | FIFO end-to-end, `seq` monotonic | `procOrdQueueCap` = 8 frames | drop-OLDEST + invalidate the daemon's fragment caches (`dropFragCache`), so a dropped patch re-emits next tick instead of sticking stale |
-| DIRECT | `xeval`, `act`, `resize`, `show`, `quit`, `streaming` | best-effort, never behind ORDERED | `procDirQueueCap` = 32 | REFUSE the caller (ctl returns `ok=false`) — a ctl round trip must never get a stale answer |
+| DIRECT | `xeval`, `act`, `resize`, `show`, `quit`, `streaming`, `screenshot` | best-effort, never behind ORDERED | `procDirQueueCap` = 32 | REFUSE the caller (ctl returns `ok=false`) — a ctl round trip must never get a stale answer |
 
 **FIFO invariant (ORDERED).** Daemon enqueue order = child application order. Guaranteed by: one
 writer goroutine → one pipe → the child dispatching parent events INLINE on its stdin reader → one
@@ -1705,6 +1705,7 @@ Parent → child (`event`/`data`):
 | `show` | `{}` | DIRECT | raise + foreground (the CHILD does it: cross-process `SetForegroundWindow` is restricted) |
 | `quit` | `{graceMs}` | DIRECT | close the window, then exit (§6) |
 | `streaming` | `{on}` | DIRECT | governor signal (§8) |
+| `screenshot` | `{rid,path,x,y,w,h}` | DIRECT | capture the window to `path` (§5); answered by `shotres` |
 
 Child → parent:
 
@@ -1715,17 +1716,48 @@ Child → parent:
 | `action` | `{payload}` | a page act (`window.rave`) — drained OFF the UI thread by the child |
 | `win` | `{focused,minimized,sizeMove,hidden}` | window state changed (§8) |
 | `gone` | `{}` | the message loop returned / the window was destroyed |
+| `shotres` | `{rid,err}` | one capture finished; `err` "" = the PNG is at the requested path |
 
 `init` params (`procInit`): `title`, `w`, `h`, `startHidden`, `allowGpu`, `dataDir`, `runtimeJs`,
 `initialHtml`, `mediaOrigin`, `mediaSession`, `streaming`, `virtual`. Re-evaluated on EVERY (re)spawn,
 so a restarted child comes up on the current document with the current signals.
 
-### 5. Screenshots do not cross the protocol
+### 5. Screenshots — the child captures, the request crosses
 
-`hwnd` travels once, in `ready`. The daemon captures the CHILD's window itself
-(`PrintWindow`/`GetDIBits` on a foreign HWND is a normal cross-process operation on Windows), so no
-pixels ever ride the pipe and `ctl screenshot` / `screenshot-all` / `screenshot-region` are untouched.
-A B6 child only has to report a real top-level HWND.
+**The window must be SHOWN or every capture is solid black, and the child does not get a shown window
+for free.** featurehost spawns children with `sysexec.Hide` (`STARTF_USESHOWWINDOW` + `SW_HIDE`) so no
+console window appears; Windows applies that show state to the process's FIRST top-level window, so the
+child's WebView2 window is created HIDDEN. A window that was never shown has rendered nothing, so
+`PrintWindow` returns black — and the UI is invisible for the same reason. This shipped as a B5 defect:
+`ctl screenshot`/`screenshot-all` produced solid-black PNGs for every tab under `RAVE_MATE_SHELL=proc`
+while DOM, snapshot and click all worked. **A B6 child MUST reveal its window on ready** (unless
+`startHidden`); the daemon additionally sends `show` on the FIRST ready only, so launch matches in-proc
+and a crash-restart does not yank the user out of another app.
+
+Measured, on the real app in an isolated instance:
+
+| | non-black pixels |
+|---|---|
+| hidden child window (the defect) | **0.00 %** — all 10 tabs, identical 4917-byte black PNGs |
+| after `ShowWindow` (same window, same code path) | **97.89 %** |
+| with the reveal-on-ready fix, no `ctl show` needed | **97.89 %**, `screenshot-all` 10 tabs / 0 errors |
+
+Cross-process `PrintWindow` was NOT the cause — it works once the window is shown. The capture still
+runs in the child, deliberately: same-process capture is the proven-good path (what the in-proc shell
+has always used), and routing the REQUEST instead of the handle keeps cross-process GDI/DWM behaviour
+out of the verification path entirely.
+
+Contract: `screenshot{rid,path,x,y,w,h}` on the DIRECT lane → the child captures its own window and
+writes the PNG to `path` → `shotres{rid,err}`. **No pixels ever cross the pipe.** Base64 of a 1280×820
+PNG is hundreds of KB per ctl screenshot; the daemon already knows the destination (it is the
+operator's ctl argument), so handing over a path costs one string and needs no temp file to hand back
+and clean up. Rect in device px, `w<=0||h<=0` = whole window. Budget `procShotTimeout` = 5 s; measured
+33–37 ms per capture, against `ScreenshotAll`'s unchanged 300 ms per-tab settle. `hwnd` still travels
+in `ready`, but only so ctl/diagnostics can name the window and so procShell can refuse a capture
+before there is one.
+
+Known limitation, unchanged from in-proc: a window hidden to tray has nothing to render, so a capture
+taken while it is hidden is black on BOTH shells. `ctl show` first.
 
 ### 6. Shutdown — re-homed, never a daemon hang
 
@@ -1818,3 +1850,9 @@ implementation with no window and no cgo that string-scans the daemon's own emit
 — both lanes, ordering, caps, acks, reattach, every shutdown path — is gated in a REAL child process
 on any build. It is a transport fixture, not a DOM, and production selection cannot reach it. The one
 real windowed check is `shell_proc_smoke_test.go`, opt-in via `RAVE_MATE_WEBVIEW_SMOKE=1`.
+
+**The windowed smoke must spawn its child exactly as production does** (`sysexec.Hide`) and must assert
+PIXELS, not bytes. The first version did neither: it skipped `Hide`, so its child never had the hidden
+window production children get, and it asserted only "non-empty PNG" — which a solid-black file passes.
+Both holes had to be open for the black-screenshot defect to reach a merge with a green gate. The gate is
+now falsified by execution: disabling the reveal makes it fail with `0/621964 non-black px`.

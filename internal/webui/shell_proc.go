@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,10 @@ const (
 	procBeatTimeout  = 20 * time.Second
 	// procBeatID is the reserved __rave_evalResult id the child's beat rides on (no extra binding).
 	procBeatID = "__beat"
+	// procShotTimeout bounds one child-side capture (PrintWindow + PNG encode of a ~1280x820 window).
+	// Measured well under 100 ms; the budget is generous so a busy compositor cannot fail a ctl
+	// screenshot outright. ScreenshotAll's 300 ms per-tab settle is separate and unchanged.
+	procShotTimeout = 5 * time.Second
 )
 
 // shellLog is the bus procShell (and its featurehost Host) logs to. Set once in New before the
@@ -85,6 +90,9 @@ type procShell struct {
 	writeAt atomic.Int64 // UnixNano of the in-flight pipe write; 0 = idle (wedge watchdog)
 	gens    atomic.Uint64
 	streamV atomic.Bool
+
+	shotSeq  atomic.Uint64
+	shotWait sync.Map // rid → chan string (capture error; "" = ok)
 
 	mu       sync.Mutex
 	lastHTML string
@@ -165,6 +173,7 @@ func (s *procShell) events() map[string]func(json.RawMessage) {
 		procEvAction:  s.evAction,
 		procEvWin:     s.evWin,
 		procEvGone:    s.evGone,
+		procEvShotRes: s.evShotRes,
 	}
 }
 
@@ -218,6 +227,12 @@ func (s *procShell) evGone(json.RawMessage) { s.finish() }
 func (s *procShell) onChildReady() {
 	s.pushStream(governor.Snapshot().Streaming, true)
 	if s.gens.Add(1) == 1 {
+		s.mu.Lock()
+		hidden := s.hidden
+		s.mu.Unlock()
+		if !hidden {
+			s.sendDirect(procEvShow, struct{}{}) // launch parity with in-proc: the window comes up in front
+		}
 		if s.onReady != nil {
 			go s.onReady()
 		}
@@ -278,7 +293,48 @@ func (s *procShell) post(payload string) bool {
 	return s.sendDirect(procEvAct, procAct{Payload: payload})
 }
 
+// hwnd reports the child window's native handle. It is NOT a capture path (a foreign PrintWindow
+// renders black - see screenshot.go); it exists so ctl/diagnostics can name and find the window.
 func (s *procShell) hwnd() uintptr { return uintptr(s.hwndV.Load()) }
+
+// captureRegion has the CHILD capture its own window to path - same-process PrintWindow, the only
+// path that actually renders. Direct lane, so a ctl screenshot never queues behind a patch stream.
+func (s *procShell) captureRegion(path string, x, y, w, h int) error {
+	if s.hwndV.Load() == 0 {
+		return errors.New("no window handle")
+	}
+	rid := "s" + strconv.FormatUint(s.shotSeq.Add(1), 10)
+	ch := make(chan string, 1)
+	s.shotWait.Store(rid, ch)
+	defer s.shotWait.Delete(rid)
+	if !s.sendDirect(procEvShot, procShot{RID: rid, Path: path, X: x, Y: y, W: w, H: h}) {
+		return errors.New("screenshot lane full")
+	}
+	select {
+	case errStr := <-ch:
+		if errStr != "" {
+			return errors.New(errStr)
+		}
+		return nil
+	case <-time.After(procShotTimeout):
+		return errors.New("screenshot timed out in the window child")
+	case <-s.done:
+		return errors.New("window child gone")
+	}
+}
+
+func (s *procShell) evShotRes(data json.RawMessage) {
+	var m procShotRes
+	if json.Unmarshal(data, &m) != nil {
+		return
+	}
+	if ch, ok := s.shotWait.LoadAndDelete(m.RID); ok {
+		select {
+		case ch.(chan string) <- m.Err:
+		default:
+		}
+	}
+}
 
 // terminate re-homes the in-proc force-exit watchdog OUTWARD: ask the child to close, then kill it.
 // "Webview wedged" now means "child killed", never "daemon hangs" - run() returns either way, so
