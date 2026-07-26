@@ -55,10 +55,15 @@ func NewMediaHost(log *logbus.Bus, bus *eventbus.Bus, clock *medialink.SoftwareC
 		Name:       "media",
 		Log:        log,
 		MemLimitMB: deps.MemLimitMB,
+		// The child beats from its ~1 Hz telemetry loop (feat_media.Start). A media child that stops
+		// beating is WEDGED, not idle - a stuck cgo call (Spout/DirectShow) or a blocked frame path -
+		// and while it hangs it may still hold the camera + a capture pipeline. 5 s = 5 missed beats.
+		HeartbeatTimeout: 5 * time.Second,
 		Init: func() any {
 			mcfg, ccfg := deps.Cfg()
 			enc, dec := deps.Codecs()
-			in := mediaInit{Self: deps.Self, Label: deps.Label, MediaCfg: mcfg, CamCfg: ccfg, Encoders: enc, Decoders: dec, SyncPeer: deps.SyncPeer()}
+			in := mediaInit{Self: deps.Self, Label: deps.Label, MediaCfg: mcfg, CamCfg: ccfg,
+				Encoders: enc, Decoders: dec, SyncPeer: deps.SyncPeer(), MemLimitMB: deps.MemLimitMB}
 			for node, sec := range deps.Secrets() {
 				in.Secrets = append(in.Secrets, peerSecret{Node: node, Secret: sec})
 			}

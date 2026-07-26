@@ -668,12 +668,12 @@ func run(parent context.Context, serviceMode bool) error {
 		Encoder: encFac, Decoder: decFac,
 		EncodeMaxHeight: cfg.Features.MediaLink.MaxHeight,
 	})
-	// #44: the media plane (medialink+mediaroute+webcam) can run isolated in a memory-capped
-	// featurehost child (MediaLink.Subprocess flag; default off = in-proc, unchanged). TCPlane +
+	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
+	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +
 	// mediaClock stay daemon-side; the child mirrors the clock + bridges the negotiation bus.
 	// mediaCtl/mediaRoutesCtl/webcamCtl point at the child proxies or the in-proc managers, so the
 	// rest of app + UI is agnostic.
-	useMediaChild := cfg.Features.MediaLink.Subprocess
+	useMediaChild := cfg.Features.MediaLink.MediaSubprocess()
 	mediaChildFailed := false // config wanted the isolated child but it wouldn't spawn -> fail CLOSED
 	var mediaCapsMu sync.Mutex
 	var mediaEnc, mediaDec []string
@@ -1598,7 +1598,7 @@ func run(parent context.Context, serviceMode bool) error {
 		Stop:    webcamMgr.Stop,
 	})
 	// Media plane child (#44): one memory-capped subprocess hosts medialink + mediaroute + webcam
-	// when MediaLink.Subprocess is on. Runs while EITHER peers or webcam is enabled (both live inside
+	// (the default; explicit MediaLink.Subprocess=false opts out). Runs while EITHER peers or webcam is enabled (both live inside
 	// it). tcPlane + mediaClock stay daemon-side and mirror the child's clock.
 	if useMediaChild {
 		mods.Add(&module.Service{

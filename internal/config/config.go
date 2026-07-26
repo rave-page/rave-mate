@@ -377,16 +377,20 @@ type MediaLinkFeature struct {
 	SWOnly      bool   `json:"swOnly,omitempty"`      // advertise software encoders only (diagnostic; tier 4 + CPU warning)
 	MaxFPS      int    `json:"maxFps,omitempty"`      // sender-side video fps cap; 0 = 60, -1 = uncapped
 	MaxHeight   int    `json:"maxHeight,omitempty"`   // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
-	// Subprocess opts IN to running the media plane (medialink+mediaroute+webcam) as an isolated,
-	// memory-capped featurehost child (#44), so a media RAM/CPU runaway or cgo fault can't starve the
-	// host. Default (false) = in-proc, the current behaviour. Flip on after verifying cross-PC routing
-	// on a paired rig - TCPlane + mediaClock stay daemon-side and mirror the child's clock.
-	Subprocess bool `json:"subprocess,omitempty"`
+	// Subprocess runs the media plane (medialink+mediaroute+webcam) as an isolated, memory-capped
+	// featurehost child (#44) so a media RAM/CPU runaway or cgo fault can't starve the host - and so
+	// the governor's below-normal demotion of THIS process never throttles a live route.
+	// Tri-state: unset/nil = ON (the default since the whole-daemon priority demotion made in-proc
+	// media a liability), explicit false = the legacy in-proc plane, explicit true = on. TCPlane +
+	// mediaClock stay daemon-side either way and mirror the child's clock.
+	Subprocess *bool `json:"subprocess,omitempty"`
 }
 
-// MediaSubprocess reports whether the media plane should run in the isolated child (#44). Default is
-// in-proc; opt in via the Subprocess flag once routing is verified on a two-PC rig.
-func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess }
+// MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
+// absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema
+// persisted this field with omitempty on a plain bool, so a pre-flip config could only ever carry
+// `true` (opt-in) or no key at all - no user can be silently pinned to the old in-proc path.
+func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess == nil || *m.Subprocess }
 
 // Bitrate returns the effective per-route budget (default 20 Mbps).
 func (f MediaLinkFeature) Bitrate() int {

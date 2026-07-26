@@ -18,8 +18,15 @@
 // the window isn't the user's focus, OR the user is mid drag/resize, normal otherwise - so an in-proc
 // worker goroutine can never out-schedule OBS's (elevated) audio-encoder thread, nor starve the
 // (software-composited) WebView2 window during a drag. Stream-critical paths (Spout out, peerlink
-// media, MIDI/now-playing, overlays) are NOT gated here - they run in their own children and keep
-// feeding the stream.
+// media, MIDI/now-playing, overlays) are NOT gated here - they run in their own children (the media
+// plane included, isolated by default since #44/WP-6) and keep feeding the stream.
+//
+// Two carve-outs to keep honest:
+//   - `features.mediaLink.subprocess: false` puts the media plane back IN this process, where the
+//     below-normal demotion above DOES apply to live routes. That is the legacy path, kept only as an
+//     escape hatch; a route running under it will be de-prioritized while a stream is live.
+//   - Realtime children (medialink encode/decode) are additionally kept out of the CPU-capped
+//     background job object - see sysexec.JobClass.
 package governor
 
 import (
