@@ -1,13 +1,13 @@
 {
-  "version": "nightly-dfb06b2",
-  "build": 160,
-  "commit": "dfb06b2",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-160-20260726-dfb06b2.exe",
-  "sha256": "2ccbb5b2d76256c3c7ea22b4a85c32b73a672e2acea32451dedbca27bf961e41",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-160-20260726-dfb06b2.exe",
-  "installer_sha256": "df77728a92a0c5370bb6d2df477e836e47f1a64f17c9651ab3f0402f9aca7bfe",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-160-20260726-dfb06b2",
-  "linux_sha256": "f7703a5ffc7e1603b56d5c290876d239aa4b11363ae8c089a1590e9b199c83ea",
+  "version": "nightly-56c30e7",
+  "build": 161,
+  "commit": "56c30e7",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-161-20260726-56c30e7.exe",
+  "sha256": "6df6bc957866dbb9cdfadd7d36c65303a883f160713acb880ba91802cb8d8f4a",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-161-20260726-56c30e7.exe",
+  "installer_sha256": "15c823a8726cf18109c0cc4b47e7ce6463e13e59ba4ebaaa899b140039119614",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-161-20260726-56c30e7",
+  "linux_sha256": "c3cee78f1d1f04ef101ec95ae681e1af86c1d088cb83cdc4521d0ee06755fd3a",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T13:02:20Z",
-  "notes": "Merge fix/zero-config-save: Save refuses zero Config + stack tripwire + Load quarantine/recovery"
+  "released": "2026-07-26T14:35:56Z",
+  "notes": "Merge fix/mfenc-subprocess-probe: Zig per-adapter encoder child - native engine survives driver AVs"
 }
