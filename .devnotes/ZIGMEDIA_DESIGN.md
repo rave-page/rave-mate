@@ -368,19 +368,210 @@ Convergence: 1a+1b and 1c land behind the OFF-by-default flag, 1d proves them, t
 2-instance soak (§8.2). Flag flips to default-on only after a 7-day soak, in a follow-up commit
 that records the numbers here — same discipline as the B-waves.
 
-## 10. Part 2 (next commit) — do not implement into this gap
+## 10. Increment 2 — receive side
 
-- **Increment 2 — receive side:** wire → MF/D3D11 decode in the same child class →
-  present/Spout-send without a host round trip; `DecodeSpec` deltas, decoded-surface ring,
-  jitterbuf interaction.
-- **Increment 3 —** shared per-(adapter,sender) capture if measurement demands it; frame-new
-  gating; adapter-affinity resolution for cross-adapter senders.
-- **Increment 4 —** webcam + VRSL-grid PRODUCE paths (they publish INTO Spout, so their
-  consumption is already covered by increment 1; what remains is their own raster/ffmpeg→
-  `SendImage` path) and the `rave-mate-media.exe` rename.
-- **Full risk register:** GL context ownership (dissolved, but the fallback path still has it),
-  Spout sender discovery + access-mutex naming, legacy-SHARED vs. NT-handle and keyed-mutex
-  semantics, HVCI / job-object (`JobRealtime`) constraints, self-update + embed skew, the
-  2-PC verify recipe.
-- The exhaustive Go-runtime-workaround inventory across the whole media plane (§8.3 is only
-  the increment-1 subset).
+Today's receive path is the sender path's mirror image, and worse:
+
+```
+wire AU → jitterbuf (Go) → ffmpeg decode child: AU→stdin, raw RGBA→stdout (33 MB/frame pipe)
+        → Go buffer → videoshare.FrameSender → cgo SendImage (GL upload)
+          └─ and when flip != 0, spout_shim.cpp:81 does malloc(w*h*4) + a scalar
+             per-pixel transpose + free — a 33 MB malloc/free PER FRAME at 4K
+```
+
+Target: the child decodes and publishes; no raw frame ever crosses a pipe or the Go heap.
+
+```
+parent writes AU → inbound AU ring (SHM) → child: MF H.264/HEVC decoder MFT (D3D11,
+  hardware) → NV12 surface → VideoProcessorBlt → the Spout sender's shared texture
+```
+
+**Protocol delta (symmetric with §3):** session gains `dir:"enc"|"dec"` (absent = `"enc"`).
+A `dec` session's SHM = header + inbound AU ring (`in_ring_kb`), and the header's ring
+counter block is instantiated twice (outbound at 32-55 as today, inbound at a new 128-159
+block: `inWrite`/`inRead`/`inDropped`/`decBusyNs`). Parent → `SetEvent(-f)` on AU append;
+child → `-c` on consume. Reuses the exact ring code from §3, opposite direction.
+
+**Who owns the Spout sender (DECIDED-PROVISIONAL).** The child must write into a texture the
+Spout registry already advertises. Cleanest available seam: **Go calls `CreateSender(name,w,h,fmt)`
++ `GetHandle()`** through the existing shim (no pixels move) and passes that handle in `open`;
+the child opens it and uses it as the VP **output** view. Known cost: Spout increments a
+sender's frame counter only inside `SendTexture`/`SendImage`, so a receiver's `IsFrameNew()`
+dedup goes stale — content updates are still seen (receivers copy the texture each tick), only
+the "is this new" hint is lost. This is the same trade §6 already accepted on the capture side,
+so the system stays consistent. **Must be live-verified against OBS's Spout input and Resolume
+before the flag flips**; fallback = today's ffmpeg-decode + `SendImage` path, unchanged.
+
+Stays in Go, correctly: `jitterbuf`, `nack`, `syncclock`, `mediaclock`, LTC/timecode — these
+reason about compressed AUs and time, not pixels, and they are where protocol behaviour lives.
+
+Scope: ~400 LOC Zig (`dec.zig` + decoder MFT drive), ~250 LOC Go (inbound ring, `DecodeSpec`
+deltas, sender-handle plumbing), gates mirror §8. **1.5 agent-days**, and it unblocks deleting
+the ffmpeg decode child for H.264/HEVC.
+
+## 11. Increments 3-5
+
+**Increment 3 — measurement-driven (do NOT pre-build).** Only if the inc-1 soak shows it:
+one shared `CopyResource` per (adapter, sender) inside the child when N sessions share a
+sender; frame-new gating via the sender's frame-count shared memory or a metadata-only
+receiver; adapter-affinity resolution so a cross-adapter sender re-places the session on the
+right adapter instead of downgrading. ~0.5-1 agent-day each, independent.
+
+**Increment 4 — the produce paths.** Note first that webcam and VRSL/deckcard **publish INTO
+Spout**, so increment 1 already covers their consumption by a route — this is only about how
+they generate pixels. `webcam` (ffmpeg dshow → `framepipe` → `SendImage`), `vrslgrid` +
+`deckcard` (Go raster → `rz_fill_cells` → `SendImage`). Target: render/receive straight into a
+D3D11 texture and publish it, which deletes both the GL upload and `spout_shim.cpp:81`'s
+per-frame malloc. Also folds in the `rave-mate-media.exe` rename (cosmetic; touches
+`build-zig.sh`, embed staging, NSIS, `RAVE_MATE_ENC_EXE`, CI, docs). ~2 agent-days.
+
+**Increment 5 — retire the Go readback path.** Only after inc 1+2 soak 7 days at default-on:
+delete `pool.go`, `pixRef`/`captureHub` fan-out, the four duplicated newest-wins loops, and
+lift `nack.go`'s raw-video retransmit carve-out (§12 explains why that one is a *feature*
+regression caused by the allocator). Each deletion needs the flag already default-on and its
+gate green. ~1 agent-day.
+
+## 12. Go-runtime workarounds — full inventory
+
+§8.3 is the increment-1 subset. The complete plane (scouted with file:line refs) splits three
+ways. **Rule (ZIG_MIGRATION.md): never carry a workaround into Zig when its only reason is the
+Go runtime; port faithfully + flag when unsure.**
+
+### 12.1 Must NOT be ported — pure GC-dodges
+
+- `videoshare/pool.go:5-30` — `pixPool` + `getPix`/`PutPix`, including the `*[]byte` pointer
+  form chosen *only* to dodge the interface-boxing alloc on `Put` (`:12`). The package doc
+  states the motive outright: "~500 MB/s of short-lived 8 MB frame copies (GC churn was a
+  contributor to the … melt)". **Also the only long-lived buffer in the whole path with no
+  frames/bytes cap** (`:9-10` admits it) — i.e. the OOM had no ceiling to hit.
+- `mediaroute/capture.go:30-55, 185-244` — `pixRef` refcounting + the release-past-zero warn.
+  Exists *only* because buffers are pooled. Zero-copy has nothing to refcount.
+- `medialink/nack.go:58-84` — `retainOrRelease` **excludes raw pooled video frames from the
+  NACK retransmit window** because "Retaining one starves the capture pool, so every readback
+  re-allocates 8 MB (1080p) / 33 MB (4K)". This is the sharpest finding in the inventory: an
+  **output-visible protocol feature was switched off to relieve the allocator**. On a zero-copy
+  route there is no pool to starve, so the carve-out must be revisited (increment 5), not ported.
+- `videoshare/videoshare.go:180-193, 274-301` — per-publish `signature()` string building.
+
+### 12.2 Must NOT be ported — scheduler seams the design removes
+
+- The four duplicated newest-wins cap-1 loops (`sender_spout.go:273-286`,
+  `receiver_spout.go:150-163`, `capture.go:199-218`, `webcam/capture.go:184-198`).
+- `recvpoll.go:17-19` 4 ms/250 Hz ↔ 50 ms backoff + the `recvNeedSize` state machine.
+- `mediaroute/mediaroute.go:386-407` `spoutSource.minGap` per-route fps drop.
+- `videoshare/fpsgate.go:17-21` lock-free atomics for the gate (no cross-thread gate remains).
+- `videoshare/scan.go:8-17, 83` — the 1 s TTL + process-global scan cache exists to amortize
+  "1+2N COM objects per scan". **Keep the cache** (Go still owns discovery) but do not build a
+  second one in Zig, and keep `:63-72`'s forced-refresh-on-unknown-name: that carve-out is
+  output-visible (a route opens off that call).
+
+### 12.3 Load-bearing — preserve verbatim, with the rationale
+
+- `LockOSThread` GL workers (`sender_spout.go:130`, `:240`, `receiver_spout.go:86`) — required
+  for the FALLBACK and produce paths; only the zero-copy path escapes them.
+- `videoshare/helpers.go:15-43` `waitAll`/`closeJoin 1 s` bounded joins + `defer close(stopped)`
+  ordered after release. **Go cannot kill a goroutine wedged in cgo** — that is a runtime
+  limitation, not a crutch, and the same condition is caught at process level by
+  `mediaproxy.go:60-63`'s 5 s heartbeat. The Zig child faces the identical problem with driver
+  calls: keep bounded waits + a supervised kill, never an unbounded join.
+- `mediapipe/encode.go:199-203` — `JobRealtime`, **no CPU cap**, with the ruling that "parking
+  it in the 10% batch bucket does not save the machine work … Bounding cost belongs upstream
+  (fps/pixel-rate gates), not here." Carry this verbatim; it is the policy that stops a future
+  agent from "fixing" load by throttling the encoder.
+- All aggregate host guards: `router.go:78-86` + `:417-480` (`memWatchdog`, `admit`,
+  `shedAllRoutes`, `maxRoutes 8`, ceiling 2048 / recover 1536 MB), `codec.go:65-73`
+  (`swTier4MaxPixelRate`, `swAutoMaxHeight`), `codec.go:199-206` `rawVideoMaxPixels`,
+  `nack.go:12-14` dual frames+bytes caps, `app.go:129-142` 3 GiB soft guard + `:2210`
+  `mediaChildMemMB 2048`, `feat_media.go:304-321` 80 %-soft-under-hard ("The job cap KILLS the
+  process; GOMEMLIMIT only makes the GC work harder — so the soft limit must bite first"),
+  `sysexec/job_windows.go:40-150` job classes + `ensureMemJob`.
+- `mediaroute/mediaroute.go:141-148, 258-270` loop guard, self-share guard, same-PC refusal,
+  receive de-dup ("Activating the same source twice … a big multiplier in the RAM blowup").
+
+### 12.4 Independent defects surfaced by the scout (not zigmedia scope; file them)
+
+1. `webcam/framepipe.go:21-23` allocates a **fresh full frame per capture** ("never reused") —
+   the exact opposite policy from the rest of the plane, 250 MB/s of garbage at 1080p30.
+2. `spout_shim.cpp:81-92` — `malloc(w*h*4)` + scalar per-pixel transpose + `free` **per frame**
+   whenever `flip != 0`. At 4K that is a 33 MB alloc/free per frame on the send path.
+3. Collected-but-invisible telemetry: `PipelineStats.LatP50Ms/LatP99Ms/QueueDepth/ChildCPUPct`
+   are produced by `mf_bridge.go:192-197` and **never rendered** (`view_peers_media.go:163-172`,
+   `render_peers.go:987-992` show only Encoder/HWAccel/OutFPS/Restarts). Since §6 adds capture
+   counters to the same struct, increment 1 should surface the whole block or it ships blind.
+4. Dropped-frame counters that reach nobody: `encode.go:57,244`, `mf_bridge.go:40,96`,
+   `mediaroute.go:426,445`.
+
+## 13. Risk register
+
+| # | risk | why it bites | mitigation / gate |
+|---|---|---|---|
+| R1 | **Stale share handle = silently frozen picture** | A sender restart can leave `OpenSharedResource` succeeding on a dead texture whose content never changes. Worst failure mode in the design: the route looks healthy and ships a still frame. | `lastCapNs` staleness oracle + Go compares the handle on every 2 s registry scan; a changed handle forces `srcgone`→reopen. **Gate: restart the sending app mid-route and assert the picture recovers** (§8.1 #5), and assert the frozen case is detected, not just the clean case. |
+| R2 | Access-mutex name / semantics | `"<sender>_SpoutAccessMutex"` is inferred, not read from the SDK. Wrong name ⇒ unsynchronized copies ⇒ tearing. | Verify against Spout SDK source at implementation time; QI keyed mutex first; unsynchronized is a counted, logged last resort (`capFlags` bit3). |
+| R3 | Keyed-mutex deadlock | If a sender *does* expose `IDXGIKeyedMutex` and holds a non-zero key, `AcquireSync(0, INFINITE)` hangs the session thread. | Always `AcquireSync(0, 1..4 ms)`, always `ReleaseSync(0)`, timeout ⇒ skip tick + `mtxTimeouts++`. Never an unbounded wait (same rule as R6). |
+| R4 | TYPELESS / exotic formats | Shared textures are sometimes `_TYPELESS`, or `R10G10B10A2`/`RGBA16F`; `CreateVideoProcessorInputView` refuses TYPELESS and the VP may refuse the rest. | Explicit format allowlist + `CheckVideoProcessorFormat` probe → `fmt_unsupported` downgrade. Do not guess a typed view. |
+| R5 | Orientation | Spout textures are bottom-up in GL terms and the shim currently flips on the CPU (`spout_shim.cpp:72-93`) with `bInvert=false`. Zero-copy must re-establish row order once, on the GPU. | The §8.1 #1 pixel-parity gate, proven non-vacuous by injecting a flip. |
+| R6 | GL context ownership | Dissolved on the zero-copy path, but the fallback + produce paths still own GL contexts; two owners for one sender would be a real hazard. | Lazy attach (§7.1) means the fallback never creates a context unless it is actually the active path. Assert: zero-copy route ⇒ no GL context created (count `rave_spout_create` calls). |
+| R7 | Cross-adapter sender | `OpenSharedResource` fails across adapters; the child is pinned per LUID and device choice is user policy (WP-3). | Downgrade to `src:"shm"` with a warn naming the likely cause. **Never silently move adapters.** Affinity resolution is increment 3. |
+| R8 | DX9 / CPU-share / memoryshare senders | These have no DX11 shared texture at all. | `sh == 0` or unknown format ⇒ downgrade. These senders keep the readback path permanently, correctly. |
+| R9 | Job-object accounting | The enc child sits in `JobRealtime` (no CPU cap) and `ensureMemJob` caps **committed memory**; a mapped SHM view counts against it. | This is an argument *for* the design: 66.4 → 4.0 MB per session moves the child far from its cap. Assert committed memory in the soak. |
+| R10 | Embed / self-update version skew | A stale sidecar `rave-mate-enc.exe` could be protocol v1 while the parent requests `src:"spout"`. | The `hello.ver >= 2` gate (§3) plus the existing content-hash-stamped embed extraction. Assert a v1 child refuses cleanly and the route still runs. |
+| R11 | HVCI / driver hardening | Vendor MFT AVs are the reason the child exists; capture adds `OpenSharedResource` on a foreign process's texture, which HVCI-hardened drivers may refuse. | Already contained: capture failures are HRESULT-level → downgrade; AV-class faults still kill only the child and the supervisor re-places sessions (proven by execution). |
+| R12 | Blind pacing bandwidth | Duplicate frames on a static sender cost bitrate (§6). | Counted (`capFrames` vs AU sizes); increment 3 adds frame-new gating if the soak shows it matters. |
+
+### 13.1 2-PC verify recipe (beyond §8.2's single-box soak)
+
+The single-box soak proves memory + throughput; it does NOT prove the wire, and the OOM was
+first seen *sending to a peer*. Two-PC pass, after §8.2 is green:
+
+1. PC-A (sender, this box): OBS Spout out at 3840×2160@60, `zigCapture=true`, `ctl` on 47695.
+   PC-B (receiver, peer PC): `ctl` on its own port. **Neither instance uses 47620.**
+2. Pair over LAN peerlink (mDNS + Ed25519 + SAS), enable `shareVideo` on A, open the route from B.
+3. 30 min soak. On A: RSS of `rave-mate.exe` + media child + `rave-mate-enc*.exe` flat; GPU
+   encode utilisation steady; `capSkips`/`mtxTimeouts`/`auDropped` low and non-accelerating.
+4. On A, while the route runs: **verify the sending app stays usable** — OBS preview must not
+   stutter and the mouse must not lag. Systemic pointer lag on the sender PC is the documented
+   symptom of hammering the sender's shared-texture mutex (`recvpoll.go:7-11`), so this is the
+   regression the pacing rule exists to prevent, and it is only observable on a real rig.
+5. On B: picture correct, `late %` and jitter-buffer depth comparable to the flag-off control.
+6. Fault matrix on the live 2-PC route: kill the sending app (R1) · resize its canvas (§8.1 #4)
+   · `taskkill` the enc child (§8.1 #3) · pull the network briefly (jitterbuf/NACK unaffected by
+   this change — assert no new behaviour) · flip `zigCapture=false` live and re-open.
+
+## 14. Premise correction — the "in-flight stopgap" branch
+
+The brief assumed an unmerged Go stopgap on `fix/spout-4k-oom` that would land before
+implementation. **It is not unmerged and it is not in flight:** `fix/spout-4k-oom` resolves to
+`82a3543`, byte-identical to `development` and to this branch's parent;
+`git log development..fix/spout-4k-oom` is empty. It is a stale pointer, not a work branch.
+
+The stopgap work is **already merged** and this design sits on top of it — so there is nothing
+to avoid contradicting, and these are the commits whose behaviour the fallback path must keep:
+
+| commit | what |
+|---|---|
+| `c567b50` | bounded worker joins on Close + `PutPix` on receiver resize |
+| `2d9aceb` | gate the spout receive poll — a stale sender must reach idle backoff |
+| `1d471cd` | 4K60 open crash: deliberate adapter pick + driver-fault guard |
+| `b698dd8` | the Zig per-adapter encoder child (the seed this design grows) |
+| `d260ada` | realtime encode/decode children out of the 10 % CPU cap |
+| `9d560e1` | embed the encoder child in the exe + child-gated advertisement + crash forensics |
+
+Implementers should re-check this before starting: if a new stopgap appears on that branch
+later, §8.3 and §12 are the sections it could collide with.
+
+## 15. Full scheduling view
+
+| inc | work | agent-days | depends on |
+|---|---|---|---|
+| 1a+1b | parent + wiring + shim | 0.7 | protocol frozen (this doc) |
+| 1c | child capture (`cap.zig`) | 0.5 | protocol frozen — **parallel with 1a** |
+| 1d | gates + soak harness | 0.5 | 1a, 1c |
+| 1e | AU in-place read (own flag) | 0.3 | 1a |
+| — | §8.2 single-box soak, then §13.1 2-PC | 0.5 + 7 d wall | 1a-1d |
+| 2 | receive side (`dir:"dec"`) | 1.5 | 1 default-on |
+| 3 | measurement-driven items | 0.5-1 each | inc-1 soak numbers |
+| 4 | produce paths + rename | 2 | 1, 2 |
+| 5 | retire the Go readback path | 1 | 1+2 soaked 7 d |
+
+Critical path to the OOM being fixed on the field rig: **1a+1b ∥ 1c → 1d → soak ≈ 2 agent-days
+plus the soak wall-clock.** Increments 2-5 are value, not the fix.
