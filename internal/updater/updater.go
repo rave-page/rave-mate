@@ -70,7 +70,6 @@ const (
 	maxBackoffMul = 4
 	firstDelay    = 30 * time.Second // settle time before the first check after launch
 	checkTimeout  = 30 * time.Second
-	dlTimeout     = 10 * time.Minute
 )
 
 // Config wires a Manager. Notify fires once per newly-seen version (persist seam via
@@ -254,9 +253,10 @@ func (m *Manager) StartDownload() {
 }
 
 // download runs the blocking download (own goroutine via StartDownload; called directly in tests).
+// Deliberately NO deadline: a total-time cap killed slow-but-flowing downloads; selfupdate's own
+// stall watchdog + bounded retries end a dead transfer.
 func (m *Manager) download(rel *selfupdate.Release) {
-	ctx, cancel := context.WithTimeout(context.Background(), dlTimeout)
-	defer cancel()
+	ctx := context.Background()
 	lastPct := -1
 	inst, err := m.cfg.Feed.Download(ctx, rel, func(done, total int64) {
 		if total <= 0 {

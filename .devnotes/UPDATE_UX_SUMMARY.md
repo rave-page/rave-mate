@@ -50,6 +50,27 @@ OnChange dedup. `selfupdate`: Download stages without touching exe (win-gated).
   incidentally exercised live (user clicked it; download ran with no DOM act
   logged, matching the tray path).
 
+## Slow-connection download fix (branch fix/selfupdate-slow-download, 2026-07-26)
+
+User-hit P1: "Update failed: download: context deadline exceeded (Client.Timeout or
+context cancellation while reading body)". Root cause: `selfupdate.New`'s
+`http.Client{Timeout: 30s}` spans the WHOLE body read; any download >30s died. Second
+cap: `updater.dlTimeout`/UI ctx = 10 min total.
+
+Fix (`shared/selfupdate`): dedicated download client with NO total cap - phase timeouts
+(dial 30s, TLS 15s, ResponseHeaderTimeout 30s) + stall watchdog (abort only when zero
+bytes for 60s, reset per read). Bounded retries (5, backoff 2s doubling) resume via
+`Range`/`If-Range` from the persisted partial; 200-on-resume or validator change =
+clean restart from zero; 4xx + redirect-policy refusals permanent. Verification
+unchanged: sha256 over the FINAL assembled file; a resumed assembly that fails
+verification is deleted + re-fetched from zero once. Progress = high-water mark
+(never walks backwards across resume/restart). Final error says what happened
+("download gave up after 5 retries at 40%: transfer stalled (no data for 60s)").
+Callers dropped their total caps: `updater.Manager.download`, Fyne `runInstall`,
+ctl SELF-UPDATE Apply (check keeps 30s). Tests: `selfupdate/download_test.go`
+(throttled drip, mid-body cut resume w/ Range+If-Range assert, stall watchdog,
+validator change, corrupted resume, 4xx/5xx/redirect classification).
+
 ## Gotchas
 
 - helpTopics map is package-init - locale switch after boot keeps old tooltip
