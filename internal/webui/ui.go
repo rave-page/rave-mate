@@ -115,6 +115,10 @@ type UI struct {
 	fragH   map[string]uint64 // last-pushed HTML hash per fragment id (scheduler surfaces; tick_sched.go)
 	fragGen uint64            // ++ on every frags/fragH drop; a batch built across a drop is discarded
 	// --- end phaseb-sched ---
+	// --- phaseb-retain ---
+	rcMu sync.Mutex     // guards rc (built lazily on the first retained send)
+	rc   *retainedChans // this UI's retained-doc delta channels (patch_chan.go); nil = never used
+	// --- end phaseb-retain ---
 
 	evalMu   sync.Mutex     // guards the eval queue below
 	evalQ    []evalEntry    // pending page evals, insertion-ordered; keyed entries update in place
@@ -265,6 +269,7 @@ func (u *UI) Stop() {
 	if u.shell != nil {
 		u.shell.terminate()
 	}
+	u.dropRetained() // return this UI's retained-doc slots to the lib's bounded table
 }
 
 func (u *UI) Show() {
@@ -449,6 +454,11 @@ func (u *UI) dropFragCache() {
 	u.fragH, u.fragGen = nil, u.fragGen+1 // the bump voids a batch built across the drop
 	// --- end phaseb-sched ---
 	u.fragMu.Unlock()
+	// --- phaseb-retain ---
+	// Retained state must never outlive the DOM it describes: whatever the page shows is now
+	// unknown, so every slot is released and the next send is a full-doc reseed.
+	u.dropRetained()
+	// --- end phaseb-retain ---
 }
 
 // reattach rebuilds the page after the window child restarted (B5 procShell): a fresh document plus

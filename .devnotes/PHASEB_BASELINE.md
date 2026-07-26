@@ -233,6 +233,104 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | schedule editor (asModal, "daily") | 122 965 | 31 066 | **-75%** | (AeBlock kit; biggest win of the fan-out) |
 | export preset editor (DlgPreset, "video") | 47 648 | 22 799 | **-52%** | aeModal set: 68 892 / 140 051 = 49.2% |
 
+## Phase B7 (ii): retained-doc delta channel — stateless full doc vs RZD1 delta
+
+Branch `feat/zig-b7-state-i18n`, same machine, min of 3 × `-count=2`, `-benchmem`. Bench:
+`internal/webui/zigui_patch_bench_test.go` (`benchPatchPair`). Mechanism + gates: ZIG_UI_GUIDE.md
+"Phase B — B7 (ii) retained-doc delta channel".
+
+```sh
+GOWORK=off go test -count=2 -tags zigui ./internal/webui -run '^$' -bench PatchBench -benchmem
+```
+
+Three arms, all whole-dispatch (the convention since B0):
+
+| arm | what it pays |
+|---|---|
+| `stateless` | encode the full RZW1 document + the stateless export (today's shipping path) |
+| `retained` | encode the RZD1 delta (a walk that both diffs AND fingerprints) + the patch export (clone → merge → re-fingerprint → render) |
+| `unchanged` | the channel's other outcome: the state is byte-identical, the delta is empty, NOTHING crosses the ABI and nothing renders |
+
+Both timed arms **alternate between two consecutive states** — a delta is only legal against the
+state the slot holds, and re-sending one state would measure the empty-delta path by accident.
+
+**Fixtures are the app's sizes, not the golden set's.** Several golden fixtures carry ONE row where
+the live surface carries a full buffer; `benchMidiMon` uses `midiMonRows` (14), `benchTwFeed` 120 of
+the 250-row rolling chat buffer, the log tail `wireBenchTail` (400). Re-benching realistically moved
+the twitch feed from +47.6% to +89.7% — a 1-row state was measuring fixed cost, not the channel.
+
+min of 4 × `-count=2`:
+
+| surface | full doc B | delta B | delta/full | stateless ns | retained ns | Δ | B/op stateless → retained | unchanged ns | Δ | shipped |
+|---|--:|--:|--:|--:|--:|--:|---|--:|--:|---|
+| `#ce-topbar` (typical, 3 drops) | 420 | 63 | 14.3% | 2 618 | 2 638 | **+0.8%** | 2 912 → 2 296 (-21.2%) | 523 | -80.0% | **enabled** |
+| `#ce-topbar` (40 drops) | 4 661 | 63 | **1.3%** | 21 308 | 20 359 | **-4.5%** | 30 432 → 9 784 (**-67.8%**) | 2 334 | -89.0% | **enabled** |
+| Live tick, 2-field step | 3 173 | 564 | 18.0% | 16 640 | 15 759 | -5.3% | 19 504 → 6 440 (-67.0%) | 2 441 | -85.3% | — |
+| Live tick, **real churn** | 3 171 | 1 647 | 50.5% | 20 507 | 27 282 | **+33.0%** | 33 824 → 29 688 (-12.2%) | 2 468 | -88.0% | stateless |
+| `#midi-ctlstat-<i>` | 101 | 69 | 58.1% | 1 379 | 1 543 | +11.9% | 1 960 → 2 064 (+5.3%) | 216 | -84.3% | stateless |
+| `#midi-monitor` rows (14) | 431 | 442 | **103.4%** | 5 204 | 6 191 | +19.0% | 6 208 → 5 576 (-10.2%) | 616 | -88.2% | stateless |
+| `#log-view` tick (400 lines) | 9 260 | 9 299 | **100.1%** | 165 901 | 249 106 | +50.2% | 240 304 → 246 169 (+2.4%) | 25 191 | -84.8% | stateless |
+| `#twitch-feed` (120 rows) | 12 041 | 11 989 | **100.1%** | 70 092 | 127 994 | +82.6% | 86 112 → 129 016 (+49.8%) | 14 137 | -79.8% | stateless |
+
+### Live measurement (the one that changed a verdict)
+
+`ctl perf` section `[zigui]` on an isolated instance (`RAVE_MATE_CTL_ADDR 127.0.0.1:47698`,
+`RAVE_MATE_CONFIG_DIR` scratch), Live tab visible for 75 s, with a temporary counter recording the
+full-document size for the SAME states the deltas were built from:
+
+```
+PatchTickLive 2 seeds (avg 5.1 KB) + 82 deltas (avg 7.4 KB)
+PatchTickLive/fullref 82 seeds (avg 11.0 KB)      ← the same 82 states, encoded whole
+```
+
+→ the running app's Live tick delta is **67% of a full document**, not the 18% a hand-picked
+two-field step suggests: every graph (`Net.Graph`, `Tim.Graph`, `Perf.CPUGraph/RAMGraph`) is a
+pre-rendered string that one new sample replaces whole (rule 6: Go formats every number). Reproduced
+as `TickLiveChurn` at 50.5% / +33.0%, and the surface stayed stateless.
+
+**Never compare an average delta against an average seed from a different part of the session.** The
+same run reads "146.9% of a full doc" if you divide avg-delta by avg-seed, because the two seeds
+happened early (5.1 KB) and the deltas late (7.4 KB) — the state grows as services report. The
+per-state `fullref` counter is what makes the ratio honest, and the shipped `ctl perf` line carries
+seed/delta byte averages so this stays checkable in the field.
+
+The shipped surface, verified the same way (7 cursor moves in the cue editor):
+
+```
+retained slots 1 live · 1 seeded · 4.5 KB held
+  PatchCueEditTopbar 1 seeds (avg 4.2 KB) + 7 deltas (avg 58 B) = 1.3% of a full doc
+```
+
+Zero declines of any class; a tab switch dropped the slot (`0 live · 0 seeded`) and the next send was
+a seed; `ui-setlang:de` forced another. Note the cue editor cannot open at all in an empty scratch
+config — `lib-import-do:traktor` into the isolated config dir is part of the recipe.
+
+### Findings
+
+1. **delta/full is the whole decision.** Every surface at >= 100% loses; below ~20% it wins; 50-58%
+   loses on fixed cost. Compute the ratio before writing an export - it needs one `delta*` call.
+2. **v1's wholesale list replacement is the ceiling.** One prepended chat row or one new log line
+   re-sends the entire list, so the delta is the full document PLUS a clone of every retained string
+   PLUS two fingerprint walks. `#log-view` clones ~55 kB to then throw the list away (+50.2%). This
+   is the measurement that decides whether per-element splicing is worth an increment.
+3. **A pre-rendered string behaves exactly like a list.** The Live tick's graphs are single strings
+   that change entirely every second; that alone took a surface from -5.3% to +33.0%. Any state whose
+   bulk is one recomputed string per tick is disqualified for the same reason a list is.
+4. **A tiny state cannot win either.** `#midi-ctlstat` is 9 flat fields; the 43 B RZD1 header (vs
+   14 B) plus clone plus fingerprint is more work than re-encoding the whole 101 B document.
+5. **The time win on the shipped surface is inside the noise band; the allocation win is not.**
+   +0.8% / -4.5% on dispatch versus -21.2% / -67.8% on B/op, and B/op is exact - identical in every
+   run. That is the metric the binary wire was introduced for (B-1: "re-growing two slices per render
+   was 14 of 31 allocs"), so it is the metric this decision rests on.
+6. **The unchanged path is the biggest number in the table and it is free.** -80..-89% on every
+   surface, because a byte-identical state produces an empty delta and Go answers from its own last
+   output: no full document encoded, no cgo call, no render, no HTML hashed. It is also why a surface
+   that only renders WHEN its state changes (the twitch feed renders per message) gets nothing from it.
+7. **The clone is the next lever after splicing.** Patch-then-swap deep-copies every retained string
+   before the merge, including the ones the delta is about to overwrite. On an 11 kB state that is
+   most of the retained cost; a merge that defers the copy to the fields the delta leaves alone would
+   move every row in this table.
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -

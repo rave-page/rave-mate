@@ -8,6 +8,7 @@ package webui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,7 +35,52 @@ func zigPerfProbe() string {
 	} else {
 		fmt.Fprintf(&b, "fallbacks %s", zigFbKey(counts))
 	}
+	// --- phaseb-retain ---
+	b.WriteString(zigPatchProbe())
+	// --- end phaseb-retain ---
 	return b.String()
+}
+
+// zigPatchProbe reports the retained-doc delta channel (B7 ii): per-surface seed/delta counts and
+// EVERY way it declined, kept apart on purpose - a cap breach is the only decline that changes
+// behaviour (three make a surface sticky-stateless), so lumping it into a generic "fallback" would
+// hide the one number worth watching. Silent when the channel never ran.
+func zigPatchProbe() string {
+	pc := zigui.PatchCounts()
+	if len(pc) == 0 {
+		return ""
+	}
+	live, seeded, bytes := zigui.RetainStats()
+	names := make([]string, 0, len(pc))
+	for n := range pc {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nretained slots %d live · %d seeded · %s held", live, seeded, humanBytes(bytes))
+	for _, n := range names {
+		s := pc[n]
+		fmt.Fprintf(&b, "\n  %s %d seeds (avg %s) + %d deltas (avg %s) = %s of a full doc",
+			n, s.Seeds, humanBytes(zpAvgU(s.SeedBytes, s.Seeds)),
+			s.Deltas, humanBytes(zpAvgU(s.DeltaBytes, s.Deltas)),
+			zpRatio(s.DeltaBytes, s.Deltas, s.SeedBytes, s.Seeds))
+		if d := s.Desync + s.CapBreach + s.Malformed + s.Errors; d > 0 {
+			fmt.Fprintf(&b, " · declines desync %d cap %d malformed %d err %d", s.Desync, s.CapBreach, s.Malformed, s.Errors)
+		}
+		if s.Sticky != 0 {
+			b.WriteString(" · STICKY (stateless for this session)")
+		}
+	}
+	return b.String()
+}
+
+// zpRatio is the live delta/full ratio - avg delta bytes over avg seed bytes. Below ~20% the
+// surface belongs on the retained channel; at 100% it cannot win (PHASEB_BASELINE "Phase B7 (ii)").
+func zpRatio(dB, dN, sB, sN uint64) string {
+	if dN == 0 || sN == 0 || sB == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", 100*(float64(dB)/float64(dN))/(float64(sB)/float64(sN)))
 }
 
 // zpDur formats a cumulative duration at µs resolution (ns noise is meaningless over 1000s of renders).

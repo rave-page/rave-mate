@@ -365,6 +365,35 @@ const uint8_t *rz_ui_tick_logs(const uint8_t *state, size_t len, size_t *out_len
 /* --- end phaseb-sched --- */
 
 
+/* --- phaseb-retain --- */
+/* B7 increment (ii): retained-doc delta channel. The rz_ui_render_* exports above stay pure
+ * fn(state)->html and remain the default + the fallback; these are an opt-in stateful tier for
+ * high-cadence patch sites. Zig keeps the last-decoded state per slot, Go sends only the changed
+ * field trees as an RZD1 document ("RZD1" magic, so it can never be read by a stateless RZW1
+ * decoder that treats an absent field as ZERO instead of KEEP).
+ *
+ * Lifetime: rz_ui_retain_new(root_msg_id) -> handle {index:32, gen:32}, 0 = slot table full.
+ * rz_ui_retain_free bumps the slot generation, so every handle naming it is detected as stale.
+ *
+ * status (out) is retain.zig's code, and it is the ONLY way to read the outcome:
+ *   0 ok  1 malformed  2 desync (handle/gen/base-hash/locale-gen: reseed)  3 cap breach
+ *   4 merge/render error
+ * NULL with status 0 = merged fine, rendered nothing. Free a non-NULL result with
+ * rz_ui_free(ptr, *out_len). */
+uint64_t rz_ui_retain_new(uint16_t msg_id);
+void rz_ui_retain_free(uint64_t handle);
+void rz_ui_retain_stats(uint32_t *live, uint32_t *seeded, uint64_t *bytes);
+
+const uint8_t *rz_ui_patch_twitch_feed(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+const uint8_t *rz_ui_patch_midimon_rows(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+const uint8_t *rz_ui_patch_midictl_stat(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+const uint8_t *rz_ui_patch_cueedit_topbar(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+/* Retained + B3-scheduled compose: the delta says what changed in the STATE, the scheduler says
+ * which rendered fragments changed - so these two return a packed RZF1 list, not HTML. */
+const uint8_t *rz_ui_patch_tick_live(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+const uint8_t *rz_ui_patch_tick_logs(const uint8_t *state, size_t len, size_t *out_len, uint8_t *status);
+/* --- end phaseb-retain --- */
+
 #ifdef __cplusplus
 }
 #endif

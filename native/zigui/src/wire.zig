@@ -224,6 +224,178 @@ pub fn parse(
     return .{ .value = out, .arena = ar, .gpa = gpa };
 }
 
+// ── phaseb-retain (B7 increment ii): the RZD1 delta document + merge/clone/hash primitives ──
+//
+// RZW1 says "absent = zero value". RZD1 says "absent = KEEP what the slot holds", so the two
+// kinds must never be read by the other's decoder - and cannot be: the magic differs and both
+// parsers check it first. Layout is documented in internal/zigui/wire.go (phaseb-retain).
+//
+// Reserved field number: clear_field resets a field to the value its ABSENCE would produce on
+// the stateless channel. Schema numbers stay below it (wiregen validates).
+
+pub const delta_magic = "RZD1";
+pub const delta_header_len = 43;
+pub const clear_field: u32 = 1023;
+pub const kind_seed: u8 = 0;
+pub const kind_delta: u8 = 1;
+
+pub const DeltaHeader = struct {
+    kind: u8,
+    handle: u64,
+    base_hash: u64,
+    new_hash: u64,
+    locale_gen: u32,
+    arena: []const u8,
+    body: []const u8,
+};
+
+/// parseDeltaHeader validates an RZD1 header (magic, message id, schema hash, arena bounds) and
+/// slices out the arena + body. No field is read: the caller owns the slot checks.
+pub fn parseDeltaHeader(msg_id: u16, schema_hash: u32, buf: []const u8) Error!DeltaHeader {
+    if (buf.len < delta_header_len) return error.Malformed;
+    if (!std.mem.eql(u8, buf[0..4], delta_magic)) return error.Malformed;
+    if (std.mem.readInt(u16, buf[4..][0..2], .little) != msg_id) return error.Malformed;
+    if (std.mem.readInt(u32, buf[6..][0..4], .little) != schema_hash) return error.Malformed;
+    const alen = std.mem.readInt(u32, buf[10..][0..4], .little);
+    if (alen > buf.len - delta_header_len) return error.Malformed;
+    const kind = buf[14];
+    if (kind != kind_seed and kind != kind_delta) return error.Malformed;
+    return .{
+        .kind = kind,
+        .handle = std.mem.readInt(u64, buf[15..][0..8], .little),
+        .base_hash = std.mem.readInt(u64, buf[23..][0..8], .little),
+        .new_hash = std.mem.readInt(u64, buf[31..][0..8], .little),
+        .locale_gen = std.mem.readInt(u32, buf[39..][0..4], .little),
+        .arena = buf[delta_header_len..][0..alen],
+        .body = buf[delta_header_len + alen ..],
+    };
+}
+
+/// Merge-decode primitives. Strings are DUPED into the reader's allocator (the slot's scratch
+/// arena) instead of pointing into the caller's buffer: a retained state outlives the document
+/// that produced it, so zero-copy is exactly wrong on this channel.
+pub fn strDup(r: *Reader, t: Tag) Error![]const u8 {
+    return r.a.dupe(u8, try r.str(t));
+}
+
+/// mergeSub merges a nested message INTO the existing value (fields the delta omits keep theirs).
+pub fn mergeSub(r: *Reader, comptime T: type, comptime mergeFn: fn (*Reader, *T) Error!void, t: Tag, out: *T) Error!void {
+    if (t.wt != wt_struct) return error.Malformed;
+    const s = try r.payload();
+    var cr = Reader{ .buf = s, .arena = r.arena, .a = r.a };
+    try mergeFn(&cr, out);
+    if (cr.pos != s.len) return error.Malformed;
+}
+
+/// strListDup is strList with the strings duped into the reader's allocator.
+pub fn strListDup(r: *Reader, t: Tag) Error![]const []const u8 {
+    const src = try r.strList(t);
+    if (src.len == 0) return &.{};
+    const out = try r.a.alloc([]const u8, src.len);
+    for (out, src) |*d, s| d.* = try r.a.dupe(u8, s);
+    return out;
+}
+
+/// u64of widens any integer field to the hasher's u64 the SAME way Go's `uint64(v)` does
+/// (negatives wrap identically), so kUint fields cannot make the two fingerprints disagree -
+/// and unlike @intCast it cannot be UB on a negative value in a release build.
+pub inline fn u64of(v: anytype) u64 {
+    return switch (@typeInfo(@TypeOf(v)).int.signedness) {
+        .unsigned => @intCast(v),
+        .signed => @bitCast(@as(i64, v)),
+    };
+}
+
+/// cloneList deep-copies a list into a (used by the generated clone walkers).
+pub fn cloneList(comptime T: type, comptime cloneFn: fn (std.mem.Allocator, T) Error!T, a: std.mem.Allocator, v: []const T) Error![]const T {
+    if (v.len == 0) return &.{};
+    const out = try a.alloc(T, v.len);
+    for (out, v) |*d, s| d.* = try cloneFn(a, s);
+    return out;
+}
+
+/// cloneStrList deep-copies a []const []const u8.
+pub fn cloneStrList(a: std.mem.Allocator, v: []const []const u8) Error![]const []const u8 {
+    if (v.len == 0) return &.{};
+    const out = try a.alloc([]const u8, v.len);
+    for (out, v) |*d, s| d.* = try a.dupe(u8, s);
+    return out;
+}
+
+/// Hasher fingerprints a decoded state. Byte-for-byte identical to internal/zigui WireHasher
+/// (TestZigPatchHashParity pins it over the whole fixture corpus): the generated walkers feed
+/// EVERY field in schema order including zero values, so "was it sent" cannot be a disagreement.
+/// 8 bytes per round on purpose - a per-byte mixer costs more than the render it guards.
+pub const Hasher = struct {
+    pub const seed: u64 = 0xcbf29ce484222325;
+    pub const prime: u64 = 0x9e3779b97f4a7c15;
+
+    h: u64 = seed,
+    n: u64 = 0, // logical state size; the per-slot byte cap is measured on it
+
+    fn mix(s: *Hasher, v: u64) void {
+        s.h = (s.h ^ v) *% prime;
+        s.h ^= s.h >> 31;
+    }
+
+    fn bytes(s: *Hasher, b: []const u8) void {
+        var i: usize = 0;
+        while (i + 8 <= b.len) : (i += 8) s.mix(std.mem.readInt(u64, b[i..][0..8], .little));
+        var last: u64 = 0;
+        var j = i;
+        while (j < b.len) : (j += 1) last |= @as(u64, b[j]) << @intCast(8 * (j - i));
+        s.mix(last);
+        s.mix(b.len);
+        s.n += b.len;
+    }
+
+    pub fn str(s: *Hasher, num: u32, v: []const u8) void {
+        s.mix(@as(u64, num) << 3 | wt_string);
+        s.bytes(v);
+    }
+
+    pub fn boolean(s: *Hasher, num: u32, v: bool) void {
+        s.mix(@as(u64, num) << 3 | wt_varint);
+        s.mix(if (v) 1 else 0);
+        s.n += 8;
+    }
+
+    pub fn uint(s: *Hasher, num: u32, v: u64) void {
+        s.mix(@as(u64, num) << 3 | wt_varint);
+        s.mix(v);
+        s.n += 8;
+    }
+
+    pub fn sub(s: *Hasher, num: u32) void {
+        s.mix(@as(u64, num) << 3 | wt_struct);
+        s.n += 8;
+    }
+
+    pub fn opt(s: *Hasher, num: u32, present: bool) void {
+        s.mix(@as(u64, num) << 3 | wt_struct);
+        s.mix(if (present) 1 else 0);
+        s.n += 8;
+    }
+
+    pub fn list(s: *Hasher, num: u32, n: usize) void {
+        s.mix(@as(u64, num) << 3 | wt_list);
+        s.mix(n);
+        s.n += 8;
+    }
+
+    pub fn strList(s: *Hasher, num: u32, v: []const []const u8) void {
+        s.list(num, v.len);
+        for (v) |e| s.bytes(e);
+    }
+
+    /// sum finalizes the fingerprint.
+    pub fn sum(s: *const Hasher) u64 {
+        return s.h ^ (s.h >> 32);
+    }
+};
+
+// ── end phaseb-retain ──
+
 // ── tests: hand-built documents (the Go encoder is pinned by the three-way golden gate) ──
 
 const TestKid = struct { a: []const u8 = "", n: bool = false };

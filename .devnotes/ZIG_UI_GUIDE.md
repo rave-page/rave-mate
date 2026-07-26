@@ -1147,6 +1147,208 @@ Migrated so far:
 Numbers: PHASEB_BASELINE.md "Phase B7 fan-out". Overlays: dispatch -44% full / -33% status
 frag, documents 42.1% of the JSON. Twitch: -63% full / -59% feed, documents 39.9%.
 
+## Phase B — B7 (ii) retained-doc delta channel (RZD1)
+
+Every patch send re-encodes and re-decodes the FULL document, even at ~1 Hz. (ii) adds an
+**opt-in retained channel**: Zig keeps the last-decoded state per slot, Go sends only the changed
+field trees, Zig merges + re-renders. Design + review conditions: `.devnotes/B7_RETAINED_DOC_DESIGN.md`.
+
+**This reverses B3's stateless-exports decision in a SCOPED way.** Every `rz_ui_render_*` export
+is still a pure fn(state)→html with zero cross-call state. The reversal lives in a parallel
+`rz_ui_patch_*` family that is explicitly stateful, opt-in per surface, and self-healing back to
+the stateless path on any doubt. Stateless remains the default AND the fallback.
+
+### The second document kind
+
+`RZD1`: magic + msg_id + schema_hash + arena_len + `kind` (0 seed / 1 delta) + `handle` +
+`base_hash` + `new_hash` + `locale_gen`, then the SAME body grammar as RZW1 (43 B header vs 14).
+
+**Absent means KEEP here and ZERO on RZW1**, which is why the two kinds must never meet - a delta
+read by a stateless decoder would render the zero value for every field the delta omitted. They
+cannot meet: both parsers check the magic before reading a field, so a delta handed to a stateless
+export and a full document handed to a patch export both decline
+(`TestZigPatchDocKindsAreMutuallyUnparseable`, both directions).
+
+A field falling back to its zero value therefore needs an explicit tag: **reserved field number
+1023** (`zigui.WireClearField` / `wire.clear_field`), wiretype varint, payload = the field number
+to reset. Repeated tags are fine. wiregen REJECTS a schema field number >= 1023. `kStrAlways` has
+no clear arm on purpose - absence there restores the Zig DEFAULT (not ""), so Go always sends it.
+
+### Slot table (native/zigui/src/retain.zig)
+
+- `rz_ui_retain_new(msg_id) -> handle` / `rz_ui_retain_free(handle)` / `rz_ui_retain_stats`.
+  Handle = `{index:32, gen:32}`; freeing bumps gen, so a stale handle is DETECTED (decline), never
+  used. Handle 0 is never valid.
+- Fixed table, **64 slots** (one per UI × patch target, plus a headless mirror and the tests);
+  past it `retain_new` returns 0 and the caller stays stateless. Bounded by design.
+- Per-slot cap **512 KiB** on the state's LOGICAL size (string bytes + 8/scalar, as counted by the
+  fingerprint walk). Biggest real candidate is the 400-line log tail at ~55 kB. A breach DROPS the
+  slot and reports its own status.
+- A slot is bound to ONE root message id. The state pointer is type-erased (`?*anyopaque`), and
+  that id check is what makes the cast sound - not optional, ever.
+- **Patch-then-swap**: the merge runs into a CLONE in a scratch arena; the retained state is
+  replaced only after merge + fingerprint + render all succeed. A failure drops the slot, never
+  leaves a half-merged state (the lost-patch render race's discipline). The clone is what pays for
+  correctness here, and it is exactly why list-heavy surfaces lose the bench.
+- Status codes, all distinct: `ok` / `malformed` / `desync` / **`cap`** / `error`. NULL with status
+  ok means "merged fine, rendered nothing" - on this channel emptiness is a status, not a NULL.
+
+### Guards (all of them, per send)
+
+`handle live` → `gen matches` → `msg_id matches` → for a delta: `slot is seeded` AND
+`slot.hash == base_hash` AND `slot.locale_gen == locale_gen`. After the merge, Zig re-fingerprints
+what it produced and refuses unless it equals the document's `new_hash`: **a Go/Zig codec
+divergence declines on the spot instead of drifting.** Any mismatch → drop the slot → decline →
+Go reseeds with a full document.
+
+The fingerprint is a generated walk (`hashWire` in Go, `hash<X>` in Zig) over EVERY field in
+schema order, zero values included - "was this field sent" cannot be a disagreement. The mixer is
+8 bytes per round and identical on both sides: a per-byte FNV cost ~50 µs on the log tail, more
+than the render it guards (tick.zig's lesson), and Go's stdlib has no fixed-seed Wyhash, so two
+20-line mixers beat a hand-port of Wyhash's spec. `kUint` rides `wire.u64of`, which widens the way
+Go's `uint64(v)` does (negatives wrap identically) instead of `@intCast`, which would be UB on a
+negative in a release build.
+
+### Codegen (scoped to the closure)
+
+`retain: true` on a ROOT makes wiregen emit, for that root's transitive closure ONLY (33 of 347
+messages today): Zig `merge<X>` / `clone<X>` / `hash<X>`, Go `deltaWire` / `wireEq` / `hashWire`
+plus `seed<X>` / `delta<X>` / `hash<X>` entry points. Six more walkers for all 347 messages would
+triple the codec for surfaces that never retain anything. The flag feeds `schemaHash`, so flipping
+a surface's opt-in is refused by a stale lib like any other schema change.
+
+Merge semantics: strings are **duped into the reader's allocator** (a retained state outlives the
+document that produced it, so zero-copy is exactly wrong here); nested structs merge INTO the
+existing value; **lists replace wholesale** when they changed (no per-element splicing in v1 -
+measure first); `?T` fields merge into the existing value or into `.{}` when they were null.
+
+### Go side (internal/webui/patch_chan.go)
+
+`patchChan[T,O]` is an explicit state machine, because "a delta may only ever be built from a state
+the lib is known to hold" is the whole safety argument:
+
+```
+psUnseeded --send--> SEED doc --ok--> psSeeded --send--> DELTA doc --ok--> psSeeded
+psSeeded --any decline--> psUnseeded (prev CLEARED, handle released) --> next send reseeds
+3 cap breaches on one surface --> psSticky (stateless for the rest of the session)
+```
+
+There is no path from Unseeded to a delta: `seed := c.st != psSeeded` is the only branch that
+picks the kind, and every failure funnel calls `unseed()`. Handles are per (UI × target), built
+lazily, and released at EVERY hard resync point - `dropFragCache` (so `patchMain`, an eval-queue
+overflow and a dropped IPC frame all count), `reattach`, and `Stop`. Retained state must never
+outlive the DOM it describes, and a hidden tab has no business holding tens of kB.
+
+**An unchanged state crosses nothing.** The delta comes back empty, the channel answers from its
+own last output, and neither the ABI nor a render is touched (-81..-90% on every surface). For the
+tick surface that is safe because an unchanged state implies the previous tick emitted nothing: a
+fragment that WAS pushed changes `fragH`, which changes `Prev`, which changes the state.
+
+Locale: one Go-owned monotonic counter (`zigui.LocaleGen`, bumped in `setLanguage` before
+`patchMain`) folded into the slot guard. **No catalog payload** - (iii) reuses this plumbing.
+
+Accounting is its OWN ledger (`zigui.PatchCounts`, `ctl perf` section `[zigui]`), not
+`FallbackCounts`: seeds, deltas, bytes sent, and each decline class apart, because the cap breach
+is the only one that changes behaviour. `TestZigPatchGuardDeclines` asserts five patch-channel
+declines move ZERO stateless fallback counters for the same surface.
+
+### Which surfaces ship enabled (the bench decides, not the design)
+
+**ONE of the design's five provisional candidates survived its bench.** Full numbers:
+PHASEB_BASELINE.md "Phase B7 (ii)".
+
+Two measurement rules, both learned the hard way here:
+
+1. **Bench the state the app patches, not the golden fixture.** Several golden fixtures carry ONE
+   row where the live surface carries a full buffer (the midi monitor's has 1; the card shows 14), and
+   a fixed-cost-dominated state flatters the channel. Re-benching realistically moved the twitch feed
+   from +47.6% to +82.6%. `benchTwFeed` / `benchMidiMon` / `wireBenchTail` build the real sizes.
+2. **Verify the churn against the running app.** A hand-picked two-field step scored the Live tick at
+   -5.3% and it would have shipped. `ctl perf` on an isolated instance measured the delta at 7.4 KB
+   against an 11.0 KB full document over the same 82 tick states — **67%**, because every graph is a
+   PRE-RENDERED string that one new sample replaces whole. Reproduced as `TickLiveChurn`: **+33.0%**.
+   That is the whole reason the per-surface bench is a review condition.
+
+**The predictor is one ratio: delta bytes / full-document bytes.** Below ~20% it wins; at >= 100% it
+cannot (the same bytes cross, plus a clone of every retained string and two fingerprint walks).
+
+| surface | delta/full | dispatch | B/op | verdict |
+|---|--:|--:|---|---|
+| `#ce-topbar` (typical, 3 drops) | 14.3% | +0.8% | 2 912 → 2 296 (-21.2%) | **enabled** |
+| `#ce-topbar` (40 drops, 4.7 kB) | 1.3% | -4.5% | 30 432 → 9 784 (**-67.8%**) | **enabled** |
+| Live tab tick (2-field step) | 18.0% | -5.3% | 19 504 → 6 440 (-67.0%) | — |
+| Live tab tick (**real churn**) | 50.5% (67% live) | **+33.0%** | 33 824 → 29 688 | stateless |
+| `#midi-ctlstat-<i>` | 58.1% | +11.9% | 1 960 → 2 064 | stateless |
+| `#midi-monitor` rows (14) | 103.4% | +19.0% | 6 208 → 5 576 | stateless |
+| `#log-view` tick (400 lines) | 100.1% | +50.2% | 240 304 → 246 169 | stateless |
+| `#twitch-feed` (120 rows) | 100.1% | +82.6% | 86 112 → 129 016 | stateless |
+
+The list-shaped losers sit at ~100% because **v1 replaces a changed list wholesale**: one prepended
+chat row or one new log line re-sends the whole list. `#midi-ctlstat` loses for the OPPOSITE reason
+(9 flat fields, so clone + fingerprint + the 43 B header exceed the entire 101 B state). The two
+things that would widen the list: **per-element list splicing**, and **a merge that does not clone
+what the delta is about to overwrite**. Both are later increments, measured first.
+
+`#ce-topbar` ships on the DETERMINISTIC half of its measurement: dispatch time is a wash (+0.8% /
+-4.5%, inside the 20% noise band a fleet box earns), allocation is exact and repeatable at -21.2% /
+-67.8% — the GC pressure the binary wire exists to remove. Its drag behaviour also matches the bench
+pair exactly: during a drag `Cursor` and `BarBeat` are the only fields that move, which the live app
+confirms at **1.3% delta/full over 7 cursor moves**.
+
+The five stateless surfaces keep their exports + generated walkers. Cross-feeding six surfaces is
+what makes the mutual-unparseability, cross-feed and desync proofs strong, and the bench has to stay
+re-runnable to justify the table. They are simply not wired at a call site.
+
+### Live verification (isolated instance, ctl :47698)
+
+```
+retained slots 1 live · 1 seeded · 4.5 KB held
+  PatchCueEditTopbar 1 seeds (avg 4.2 KB) + 7 deltas (avg 58 B) = 1.3% of a full doc
+```
+
+Seven cursor moves in the cue editor → 1 seed + 7 deltas, zero declines of any class. A tab switch
+reported `0 live · 0 seeded` and the next send was a seed (drop-on-patchMain), and `ui-setlang:de`
+forced another (the locale guard). No errors in `ctl logs`, clean quit. Reproducing it needs a
+collection track WITH a beatgrid: an empty scratch config cannot open the cue editor at all, so
+`lib-import-do:traktor` into the isolated config dir is part of the recipe.
+
+### Gates (internal/webui/zigui_patch_test.go)
+
+- `TestZigPatchSequenceGoldens` - 6 surfaces × 60 random fixture→fixture deltas, byte-equal to the
+  stateless oracle at EVERY step. Because acceptance requires Zig's own fingerprint to equal Go's,
+  every step doubles as the hash-parity assertion (there is no separate parity test to rot).
+- `TestZigPatchDocKindsAreMutuallyUnparseable`, `TestZigPatchCrossFedDocumentsDecline`.
+- `TestZigPatchGuardDeclines` - unseeded / wrong base / moved locale / diverging fingerprint /
+  foreign handle, each `PatchDesync`, each leaving the slot reseedable, converging at the end.
+- `TestZigPatchDesyncReseedsAndConverges` - the slot vanishes behind Go's back (a real
+  `RetainFree` the channel did not perform) → decline → Unseeded → reseed → converge.
+- `TestZigPatchClearedFieldsComeBackToZero` - list emptied, optional nulled, bools/strings zeroed,
+  both directions.
+- `TestZigPatchCapBreachIsItsOwnCounterWithHysteresis` - exact counter, no leakage into the other
+  counters, sticky after 3, and sticky means sticky.
+- `TestZigPatchUnchangedStateSkipsTheABI`, `TestZigPatchLocaleGenerationForcesReseed`,
+  `TestZigPatchDropReleasesSlots` (deltas, not absolutes - the FallbackCounts lesson one layer down).
+- `TestZigPatchDeltaSequenceFuzz` - mutated deltas onto LIVE retained state. The determinism canary
+  had to be adapted: it **re-seeds to the same base before both attempts**, or "same input → same
+  output" is not a claim you can make about a stateful export. Plus the poison-marker and
+  bounded-output canaries, an oracle check on every ACCEPTED mutant, and a convergence reseed after
+  every mutant (a corrupted merge cannot leave the channel poisoned). 1230 cases, 40 accepted, all
+  equal to the oracle.
+- Zig-side unit tests in `retain.zig` cover the slot machine alone: seed→delta→clear, all five
+  guard rejections, stale/foreign/zero handles, table exhaustion + reuse-bumps-gen, and an RZW1
+  document refused by the patch path.
+
+### When you opt a surface in
+
+1. Bench it FIRST (`zigui_patch_bench_test.go`, `benchPatchPair` + a realistic consecutive-state
+   pair). A surface whose dominant field is a list that changes every tick will lose.
+2. `retain: true` on the root, regenerate.
+3. `rz_ui_patch_<surface>` in root.zig's `phaseb-retain` block (`patchWire` + `htmlProducer`, or a
+   producer that returns the scheduler's RZF1 buffer) + `raveui.h` + binding + stub.
+4. Register it in the gate's `patchSurface` table + the fuzz list.
+5. Add the channel to `retainedChans` and call `send` at the patch site, falling through to the
+   existing stateless bridge. Add the bench row to PHASEB_BASELINE with the verdict.
+
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).

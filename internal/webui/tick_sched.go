@@ -145,6 +145,11 @@ func (u *UI) tickLiveSched(js *strings.Builder, st liveTickSt) bool {
 	}
 	prev, gen := u.tickPrevs(liveTickIDs)
 	st.Prev = prev
+	// B7 (ii) measured this surface for the retained-doc delta channel and left it STATELESS: the
+	// running app's tick delta is 67% of the full document (`ctl perf`, 82 tick states) because every
+	// graph is a PRE-RENDERED string that one new sample replaces whole, and at that churn the
+	// channel costs +33% (PHASEB_BASELINE "Phase B7 (ii)", TickLiveChurn). A two-field step scores
+	// -5%, which is exactly why the opt-in is decided per surface against the app, not a fixture.
 	frs, ok := u.tickBatch(wireTkLive(st), "TickLive", zigui.TickLive, gen)
 	if !ok {
 		return false

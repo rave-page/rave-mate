@@ -37,8 +37,13 @@ func main() {
 	if err := write(filepath.Join(*root, *zigOut), []byte(emitZig())); err != nil {
 		fail(err)
 	}
-	fmt.Printf("wiregen: %d messages, schema hash 0x%08x\n", len(schema), schemaHash())
+	fmt.Printf("wiregen: %d messages, schema hash 0x%08x, retained %d/%d messages [%s]\n",
+		len(schema), schemaHash(), len(retainClosure()), len(retainRoots()), retainNames())
 }
+
+// clearFieldNum mirrors zigui.WireClearField / wire.zig clear_field: the retained channel's
+// reserved "reset this field" tag. No schema field may use it or anything above it.
+const clearFieldNum = 1023
 
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "wiregen:", err)
@@ -72,6 +77,10 @@ func validate() error {
 		for _, f := range m.fs {
 			if f.num < 1 {
 				return fmt.Errorf("%s.%s: field number must be >= 1 (0 is the body terminator)", m.name, f.goF)
+			}
+			if f.num >= clearFieldNum {
+				// The retained channel reserves it for "reset this field to its zero value".
+				return fmt.Errorf("%s.%s: field number %d is reserved (>= %d)", m.name, f.goF, f.num, clearFieldNum)
 			}
 			if nums[f.num] {
 				return fmt.Errorf("%s: duplicate field number %d", m.name, f.num)
@@ -163,6 +172,7 @@ func emitGo() []byte {
 		p("\treturn w.Finish()")
 		p("}")
 	}
+	emitGoRetain(p)
 	src, err := format.Source([]byte(b.String()))
 	if err != nil {
 		fail(fmt.Errorf("gofmt: %w", err))
@@ -225,6 +235,7 @@ func emitZig() string {
 		p("    };")
 		p("}")
 	}
+	emitZigRetain(p)
 	// A compile-time guard: every generated decoder is referenced, and the message ids are unique.
 	p("")
 	p("test \"schema ids are distinct\" {")

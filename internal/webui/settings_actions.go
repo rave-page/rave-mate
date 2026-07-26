@@ -22,6 +22,7 @@ import (
 	"rave.page/mate/internal/unityproj"
 	"rave.page/mate/internal/version"
 	"rave.page/mate/internal/vrdll"
+	"rave.page/mate/internal/zigui"
 )
 
 // Settings-tab action handlers + the ~1 Hz status tick. All names are namespaced `settings-*`
@@ -719,6 +720,10 @@ func (u *UI) patchSettingsContent() {
 
 func (u *UI) setLanguage(code string) {
 	active := i18n.SetLocale(code)
+	// Every retained-doc slot holds strings resolved under the OLD locale; the bumped generation
+	// makes their next delta decline into a full-doc reseed (patch_chan.go). patchMain below drops
+	// the slots anyway - this is the guard that holds when a surface renders before that lands.
+	zigui.BumpLocaleGen()
 	if u.svc.Cfg != nil {
 		u.svc.Cfg.Features.UI.Language = code
 		u.saveCfg()

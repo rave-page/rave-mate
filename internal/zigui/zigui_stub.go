@@ -315,3 +315,25 @@ func TickLive(state []byte) ([]Frag, bool) { return nil, false }
 func TickLogs(state []byte) ([]Frag, bool) { return nil, false }
 
 // --- end phaseb-sched ---
+// --- phaseb-retain ---
+
+// Retained-doc delta channel (B7 increment ii). The stub never retains anything: RetainNew hands
+// back handle 0 and every patch reports PatchStub, so webui's patch channels stay unseeded and the
+// stateless Go renderers run - the same shape as Available()=false everywhere else here.
+
+// Handle names one retained slot in the tagged build.
+type Handle uint64
+
+func RetainNew(msgID uint16) Handle { return 0 }
+func RetainFree(h Handle)           {}
+
+func RetainStats() (live, seeded uint32, bytes uint64) { return 0, 0, 0 }
+
+func PatchTwitchFeed(doc []byte) (string, PatchStatus)    { return "", PatchStub }
+func PatchMIDIMonRows(doc []byte) (string, PatchStatus)   { return "", PatchStub }
+func PatchMIDICtlStat(doc []byte) (string, PatchStatus)   { return "", PatchStub }
+func PatchCueEditTopbar(doc []byte) (string, PatchStatus) { return "", PatchStub }
+func PatchTickLive(doc []byte) ([]Frag, PatchStatus)      { return nil, PatchStub }
+func PatchTickLogs(doc []byte) ([]Frag, PatchStatus)      { return nil, PatchStub }
+
+// --- end phaseb-retain ---

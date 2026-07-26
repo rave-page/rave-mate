@@ -39,7 +39,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x51e1ae8b;
+pub const schema_hash: u32 = 0xb5702f0a;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4754,6 +4754,1369 @@ pub fn decodeTkLogs(r: *wire.Reader, out: *tick.LogsBatch) wire.Error!void {
         2 => out.prev = try r.list(tick.Prev, decodeTkPrev, t),
         else => try r.skip(t),
     };
+}
+
+// ── retained-doc delta channel (B7 increment ii) ──
+// merge/clone/hash for the messages reachable from a retain-flagged root. merge treats an
+// absent field as KEEP and wire.clear_field as "back to the zero value"; strings are DUPED
+// into the reader's allocator (the slot's scratch arena) because a retained state outlives
+// the document that produced it.
+
+pub fn mergeLogsEntry(r: *wire.Reader, out: *logs.Entry) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.time = "",
+            2 => out.lvl = "",
+            3 => out.cls = "",
+            4 => out.src = "",
+            5 => out.msg = "",
+            6 => out.fields = "",
+            else => {},
+        },
+        1 => out.time = try wire.strDup(r, t),
+        2 => out.lvl = try wire.strDup(r, t),
+        3 => out.cls = try wire.strDup(r, t),
+        4 => out.src = try wire.strDup(r, t),
+        5 => out.msg = try wire.strDup(r, t),
+        6 => out.fields = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLogsEntry(a: std.mem.Allocator, v: logs.Entry) wire.Error!logs.Entry {
+    var out = v;
+    out.time = try a.dupe(u8, v.time);
+    out.lvl = try a.dupe(u8, v.lvl);
+    out.cls = try a.dupe(u8, v.cls);
+    out.src = try a.dupe(u8, v.src);
+    out.msg = try a.dupe(u8, v.msg);
+    out.fields = try a.dupe(u8, v.fields);
+    return out;
+}
+
+pub fn hashLogsEntry(h: *wire.Hasher, v: logs.Entry) void {
+    h.str(1, v.time);
+    h.str(2, v.lvl);
+    h.str(3, v.cls);
+    h.str(4, v.src);
+    h.str(5, v.msg);
+    h.str(6, v.fields);
+}
+
+pub fn mergeLogsLines(r: *wire.Reader, out: *logs.Lines) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.wired = false,
+            2 => out.noBus = "",
+            3 => out.noEntries = "",
+            4 => out.entries = &.{},
+            else => {},
+        },
+        1 => out.wired = try r.boolean(t),
+        2 => out.noBus = try wire.strDup(r, t),
+        3 => out.noEntries = try wire.strDup(r, t),
+        4 => out.entries = try r.list(logs.Entry, mergeLogsEntry, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLogsLines(a: std.mem.Allocator, v: logs.Lines) wire.Error!logs.Lines {
+    var out = v;
+    out.noBus = try a.dupe(u8, v.noBus);
+    out.noEntries = try a.dupe(u8, v.noEntries);
+    out.entries = try wire.cloneList(logs.Entry, cloneLogsEntry, a, v.entries);
+    return out;
+}
+
+pub fn hashLogsLines(h: *wire.Hasher, v: logs.Lines) void {
+    h.boolean(1, v.wired);
+    h.str(2, v.noBus);
+    h.str(3, v.noEntries);
+    h.list(4, v.entries.len);
+    for (v.entries) |e| hashLogsEntry(h, e);
+}
+
+pub fn mergeLiveTransport(r: *wire.Reader, out: *live.Transport) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.streamHint = "",
+            2 => out.streamLabel = "",
+            3 => out.dotVar = "",
+            4 => out.state = "",
+            5 => out.metaOnly = "",
+            6 => out.pauseLabel = "",
+            7 => out.pauseHint = "",
+            8 => out.paused = false,
+            9 => out.hasRec = false,
+            10 => out.recHint = "",
+            11 => out.recLabel = "",
+            12 => out.recBtn = "",
+            13 => out.recState = "",
+            14 => out.hasTc = false,
+            15 => out.tcLabel = "",
+            16 => out.tc = "",
+            17 => out.startLbl = "",
+            18 => out.stopLbl = "",
+            else => {},
+        },
+        1 => out.streamHint = try wire.strDup(r, t),
+        2 => out.streamLabel = try wire.strDup(r, t),
+        3 => out.dotVar = try wire.strDup(r, t),
+        4 => out.state = try wire.strDup(r, t),
+        5 => out.metaOnly = try wire.strDup(r, t),
+        6 => out.pauseLabel = try wire.strDup(r, t),
+        7 => out.pauseHint = try wire.strDup(r, t),
+        8 => out.paused = try r.boolean(t),
+        9 => out.hasRec = try r.boolean(t),
+        10 => out.recHint = try wire.strDup(r, t),
+        11 => out.recLabel = try wire.strDup(r, t),
+        12 => out.recBtn = try wire.strDup(r, t),
+        13 => out.recState = try wire.strDup(r, t),
+        14 => out.hasTc = try r.boolean(t),
+        15 => out.tcLabel = try wire.strDup(r, t),
+        16 => out.tc = try wire.strDup(r, t),
+        17 => out.startLbl = try wire.strDup(r, t),
+        18 => out.stopLbl = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveTransport(a: std.mem.Allocator, v: live.Transport) wire.Error!live.Transport {
+    var out = v;
+    out.streamHint = try a.dupe(u8, v.streamHint);
+    out.streamLabel = try a.dupe(u8, v.streamLabel);
+    out.dotVar = try a.dupe(u8, v.dotVar);
+    out.state = try a.dupe(u8, v.state);
+    out.metaOnly = try a.dupe(u8, v.metaOnly);
+    out.pauseLabel = try a.dupe(u8, v.pauseLabel);
+    out.pauseHint = try a.dupe(u8, v.pauseHint);
+    out.recHint = try a.dupe(u8, v.recHint);
+    out.recLabel = try a.dupe(u8, v.recLabel);
+    out.recBtn = try a.dupe(u8, v.recBtn);
+    out.recState = try a.dupe(u8, v.recState);
+    out.tcLabel = try a.dupe(u8, v.tcLabel);
+    out.tc = try a.dupe(u8, v.tc);
+    out.startLbl = try a.dupe(u8, v.startLbl);
+    out.stopLbl = try a.dupe(u8, v.stopLbl);
+    return out;
+}
+
+pub fn hashLiveTransport(h: *wire.Hasher, v: live.Transport) void {
+    h.str(1, v.streamHint);
+    h.str(2, v.streamLabel);
+    h.str(3, v.dotVar);
+    h.str(4, v.state);
+    h.str(5, v.metaOnly);
+    h.str(6, v.pauseLabel);
+    h.str(7, v.pauseHint);
+    h.boolean(8, v.paused);
+    h.boolean(9, v.hasRec);
+    h.str(10, v.recHint);
+    h.str(11, v.recLabel);
+    h.str(12, v.recBtn);
+    h.str(13, v.recState);
+    h.boolean(14, v.hasTc);
+    h.str(15, v.tcLabel);
+    h.str(16, v.tc);
+    h.str(17, v.startLbl);
+    h.str(18, v.stopLbl);
+}
+
+pub fn mergeLiveNP(r: *wire.Reader, out: *live.NP) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.line1 = "",
+            2 => out.line2 = "",
+            else => {},
+        },
+        1 => out.line1 = try wire.strDup(r, t),
+        2 => out.line2 = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveNP(a: std.mem.Allocator, v: live.NP) wire.Error!live.NP {
+    var out = v;
+    out.line1 = try a.dupe(u8, v.line1);
+    out.line2 = try a.dupe(u8, v.line2);
+    return out;
+}
+
+pub fn hashLiveNP(h: *wire.Hasher, v: live.NP) void {
+    h.str(1, v.line1);
+    h.str(2, v.line2);
+}
+
+pub fn mergeLiveKV(r: *wire.Reader, out: *live.KV) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.k = "",
+            2 => out.kl = "",
+            3 => out.v = "",
+            else => {},
+        },
+        1 => out.k = try wire.strDup(r, t),
+        2 => out.kl = try wire.strDup(r, t),
+        3 => out.v = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveKV(a: std.mem.Allocator, v: live.KV) wire.Error!live.KV {
+    var out = v;
+    out.k = try a.dupe(u8, v.k);
+    out.kl = try a.dupe(u8, v.kl);
+    out.v = try a.dupe(u8, v.v);
+    return out;
+}
+
+pub fn hashLiveKV(h: *wire.Hasher, v: live.KV) void {
+    h.str(1, v.k);
+    h.str(2, v.kl);
+    h.str(3, v.v);
+}
+
+pub fn mergeLiveStatus(r: *wire.Reader, out: *live.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.rows = &.{},
+            else => {},
+        },
+        1 => out.rows = try r.list(live.KV, mergeLiveKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveStatus(a: std.mem.Allocator, v: live.Status) wire.Error!live.Status {
+    var out = v;
+    out.rows = try wire.cloneList(live.KV, cloneLiveKV, a, v.rows);
+    return out;
+}
+
+pub fn hashLiveStatus(h: *wire.Hasher, v: live.Status) void {
+    h.list(1, v.rows.len);
+    for (v.rows) |e| hashLiveKV(h, e);
+}
+
+pub fn mergeLiveDeck(r: *wire.Reader, out: *live.Deck) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.cls = "",
+            2 => out.name = "",
+            3 => out.title = "",
+            4 => out.meta = "",
+            5 => out.via = "",
+            else => {},
+        },
+        1 => out.cls = try wire.strDup(r, t),
+        2 => out.name = try wire.strDup(r, t),
+        3 => out.title = try wire.strDup(r, t),
+        4 => out.meta = try wire.strDup(r, t),
+        5 => out.via = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveDeck(a: std.mem.Allocator, v: live.Deck) wire.Error!live.Deck {
+    var out = v;
+    out.cls = try a.dupe(u8, v.cls);
+    out.name = try a.dupe(u8, v.name);
+    out.title = try a.dupe(u8, v.title);
+    out.meta = try a.dupe(u8, v.meta);
+    out.via = try a.dupe(u8, v.via);
+    return out;
+}
+
+pub fn hashLiveDeck(h: *wire.Hasher, v: live.Deck) void {
+    h.str(1, v.cls);
+    h.str(2, v.name);
+    h.str(3, v.title);
+    h.str(4, v.meta);
+    h.str(5, v.via);
+}
+
+pub fn mergeLiveDecks(r: *wire.Reader, out: *live.Decks) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.note = "",
+            2 => out.decks = &.{},
+            else => {},
+        },
+        1 => out.note = try wire.strDup(r, t),
+        2 => out.decks = try r.list(live.Deck, mergeLiveDeck, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveDecks(a: std.mem.Allocator, v: live.Decks) wire.Error!live.Decks {
+    var out = v;
+    out.note = try a.dupe(u8, v.note);
+    out.decks = try wire.cloneList(live.Deck, cloneLiveDeck, a, v.decks);
+    return out;
+}
+
+pub fn hashLiveDecks(h: *wire.Hasher, v: live.Decks) void {
+    h.str(1, v.note);
+    h.list(2, v.decks.len);
+    for (v.decks) |e| hashLiveDeck(h, e);
+}
+
+pub fn mergeLiveSignals(r: *wire.Reader, out: *live.Signals) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.rows = &.{},
+            else => {},
+        },
+        1 => out.rows = try r.list(live.KV, mergeLiveKV, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveSignals(a: std.mem.Allocator, v: live.Signals) wire.Error!live.Signals {
+    var out = v;
+    out.rows = try wire.cloneList(live.KV, cloneLiveKV, a, v.rows);
+    return out;
+}
+
+pub fn hashLiveSignals(h: *wire.Hasher, v: live.Signals) void {
+    h.list(1, v.rows.len);
+    for (v.rows) |e| hashLiveKV(h, e);
+}
+
+pub fn mergeLiveCockpitRow(r: *wire.Reader, out: *live.CockpitRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.variant = "",
+            2 => out.name = "",
+            3 => out.state = "",
+            4 => out.streamLbl = "",
+            5 => out.streamAct = "",
+            6 => out.recLbl = "",
+            7 => out.recAct = "",
+            else => {},
+        },
+        1 => out.variant = try wire.strDup(r, t),
+        2 => out.name = try wire.strDup(r, t),
+        3 => out.state = try wire.strDup(r, t),
+        4 => out.streamLbl = try wire.strDup(r, t),
+        5 => out.streamAct = try wire.strDup(r, t),
+        6 => out.recLbl = try wire.strDup(r, t),
+        7 => out.recAct = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveCockpitRow(a: std.mem.Allocator, v: live.CockpitRow) wire.Error!live.CockpitRow {
+    var out = v;
+    out.variant = try a.dupe(u8, v.variant);
+    out.name = try a.dupe(u8, v.name);
+    out.state = try a.dupe(u8, v.state);
+    out.streamLbl = try a.dupe(u8, v.streamLbl);
+    out.streamAct = try a.dupe(u8, v.streamAct);
+    out.recLbl = try a.dupe(u8, v.recLbl);
+    out.recAct = try a.dupe(u8, v.recAct);
+    return out;
+}
+
+pub fn hashLiveCockpitRow(h: *wire.Hasher, v: live.CockpitRow) void {
+    h.str(1, v.variant);
+    h.str(2, v.name);
+    h.str(3, v.state);
+    h.str(4, v.streamLbl);
+    h.str(5, v.streamAct);
+    h.str(6, v.recLbl);
+    h.str(7, v.recAct);
+}
+
+pub fn mergeLiveCockpit(r: *wire.Reader, out: *live.Cockpit) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.empty = "",
+            2 => out.caption = "",
+            3 => out.rows = &.{},
+            else => {},
+        },
+        1 => out.empty = try wire.strDup(r, t),
+        2 => out.caption = try wire.strDup(r, t),
+        3 => out.rows = try r.list(live.CockpitRow, mergeLiveCockpitRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveCockpit(a: std.mem.Allocator, v: live.Cockpit) wire.Error!live.Cockpit {
+    var out = v;
+    out.empty = try a.dupe(u8, v.empty);
+    out.caption = try a.dupe(u8, v.caption);
+    out.rows = try wire.cloneList(live.CockpitRow, cloneLiveCockpitRow, a, v.rows);
+    return out;
+}
+
+pub fn hashLiveCockpit(h: *wire.Hasher, v: live.Cockpit) void {
+    h.str(1, v.empty);
+    h.str(2, v.caption);
+    h.list(3, v.rows.len);
+    for (v.rows) |e| hashLiveCockpitRow(h, e);
+}
+
+pub fn mergeLiveSRow(r: *wire.Reader, out: *live.SRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.variant = "",
+            2 => out.label = "",
+            3 => out.dl = "",
+            4 => out.line = "",
+            else => {},
+        },
+        1 => out.variant = try wire.strDup(r, t),
+        2 => out.label = try wire.strDup(r, t),
+        3 => out.dl = try wire.strDup(r, t),
+        4 => out.line = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveSRow(a: std.mem.Allocator, v: live.SRow) wire.Error!live.SRow {
+    var out = v;
+    out.variant = try a.dupe(u8, v.variant);
+    out.label = try a.dupe(u8, v.label);
+    out.dl = try a.dupe(u8, v.dl);
+    out.line = try a.dupe(u8, v.line);
+    return out;
+}
+
+pub fn hashLiveSRow(h: *wire.Hasher, v: live.SRow) void {
+    h.str(1, v.variant);
+    h.str(2, v.label);
+    h.str(3, v.dl);
+    h.str(4, v.line);
+}
+
+pub fn mergeLiveLink(r: *wire.Reader, out: *live.Link) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.available = false,
+            2 => out.backend = .{},
+            4 => out.cap = "",
+            5 => out.session = .{},
+            6 => out.resyncLbl = "",
+            7 => out.sources = &.{},
+            else => {},
+        },
+        1 => out.available = try r.boolean(t),
+        2 => try wire.mergeSub(r, live.SRow, mergeLiveSRow, t, &out.backend),
+        3 => out.fill = try wire.strDup(r, t),
+        4 => out.cap = try wire.strDup(r, t),
+        5 => try wire.mergeSub(r, live.SRow, mergeLiveSRow, t, &out.session),
+        6 => out.resyncLbl = try wire.strDup(r, t),
+        7 => out.sources = try r.list(live.SRow, mergeLiveSRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveLink(a: std.mem.Allocator, v: live.Link) wire.Error!live.Link {
+    var out = v;
+    out.backend = try cloneLiveSRow(a, v.backend);
+    out.fill = try a.dupe(u8, v.fill);
+    out.cap = try a.dupe(u8, v.cap);
+    out.session = try cloneLiveSRow(a, v.session);
+    out.resyncLbl = try a.dupe(u8, v.resyncLbl);
+    out.sources = try wire.cloneList(live.SRow, cloneLiveSRow, a, v.sources);
+    return out;
+}
+
+pub fn hashLiveLink(h: *wire.Hasher, v: live.Link) void {
+    h.boolean(1, v.available);
+    h.sub(2);
+    hashLiveSRow(h, v.backend);
+    h.str(3, v.fill);
+    h.str(4, v.cap);
+    h.sub(5);
+    hashLiveSRow(h, v.session);
+    h.str(6, v.resyncLbl);
+    h.list(7, v.sources.len);
+    for (v.sources) |e| hashLiveSRow(h, e);
+}
+
+pub fn mergeLiveGraph(r: *wire.Reader, out: *live.Graph) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.tooltip = "",
+            2 => out.legend = "",
+            3 => out.graph = "",
+            else => {},
+        },
+        1 => out.tooltip = try wire.strDup(r, t),
+        2 => out.legend = try wire.strDup(r, t),
+        3 => out.graph = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveGraph(a: std.mem.Allocator, v: live.Graph) wire.Error!live.Graph {
+    var out = v;
+    out.tooltip = try a.dupe(u8, v.tooltip);
+    out.legend = try a.dupe(u8, v.legend);
+    out.graph = try a.dupe(u8, v.graph);
+    return out;
+}
+
+pub fn hashLiveGraph(h: *wire.Hasher, v: live.Graph) void {
+    h.str(1, v.tooltip);
+    h.str(2, v.legend);
+    h.str(3, v.graph);
+}
+
+pub fn mergeLivePerf(r: *wire.Reader, out: *live.Perf) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.tooltip = "",
+            2 => out.cpuLeg = "",
+            3 => out.cpuGraph = "",
+            4 => out.ramLeg = "",
+            5 => out.ramGraph = "",
+            6 => out.head = "",
+            7 => out.headColor = "",
+            else => {},
+        },
+        1 => out.tooltip = try wire.strDup(r, t),
+        2 => out.cpuLeg = try wire.strDup(r, t),
+        3 => out.cpuGraph = try wire.strDup(r, t),
+        4 => out.ramLeg = try wire.strDup(r, t),
+        5 => out.ramGraph = try wire.strDup(r, t),
+        6 => out.head = try wire.strDup(r, t),
+        7 => out.headColor = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLivePerf(a: std.mem.Allocator, v: live.Perf) wire.Error!live.Perf {
+    var out = v;
+    out.tooltip = try a.dupe(u8, v.tooltip);
+    out.cpuLeg = try a.dupe(u8, v.cpuLeg);
+    out.cpuGraph = try a.dupe(u8, v.cpuGraph);
+    out.ramLeg = try a.dupe(u8, v.ramLeg);
+    out.ramGraph = try a.dupe(u8, v.ramGraph);
+    out.head = try a.dupe(u8, v.head);
+    out.headColor = try a.dupe(u8, v.headColor);
+    return out;
+}
+
+pub fn hashLivePerf(h: *wire.Hasher, v: live.Perf) void {
+    h.str(1, v.tooltip);
+    h.str(2, v.cpuLeg);
+    h.str(3, v.cpuGraph);
+    h.str(4, v.ramLeg);
+    h.str(5, v.ramGraph);
+    h.str(6, v.head);
+    h.str(7, v.headColor);
+}
+
+pub fn mergeLiveStrip(r: *wire.Reader, out: *live.Strip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.left = "",
+            2 => out.center = "",
+            3 => out.right = "",
+            else => {},
+        },
+        1 => out.left = try wire.strDup(r, t),
+        2 => out.center = try wire.strDup(r, t),
+        3 => out.right = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveStrip(a: std.mem.Allocator, v: live.Strip) wire.Error!live.Strip {
+    var out = v;
+    out.left = try a.dupe(u8, v.left);
+    out.center = try a.dupe(u8, v.center);
+    out.right = try a.dupe(u8, v.right);
+    return out;
+}
+
+pub fn hashLiveStrip(h: *wire.Hasher, v: live.Strip) void {
+    h.str(1, v.left);
+    h.str(2, v.center);
+    h.str(3, v.right);
+}
+
+pub fn mergeLiveState(r: *wire.Reader, out: *live.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.title = "",
+            2 => out.sub = "",
+            3 => out.transport = .{},
+            4 => out.np = .{},
+            5 => out.statusTitle = "",
+            6 => out.status = .{},
+            7 => out.decksTitle = "",
+            8 => out.decks = .{},
+            9 => out.hasSignals = false,
+            10 => out.signalsTitle = "",
+            11 => out.signalsTip = "",
+            12 => out.signals = .{},
+            13 => out.hasCockpit = false,
+            14 => out.cockpitTitle = "",
+            15 => out.cockpit = .{},
+            16 => out.hasLink = false,
+            17 => out.linkTitle = "",
+            18 => out.link = .{},
+            19 => out.hasNet = false,
+            20 => out.netTitle = "",
+            21 => out.netTip = "",
+            22 => out.net = .{},
+            23 => out.timTitle = "",
+            24 => out.timTip = "",
+            25 => out.tim = .{},
+            26 => out.hasPerf = false,
+            27 => out.perfTitle = "",
+            28 => out.perfTip = "",
+            29 => out.perf = .{},
+            30 => out.strip = .{},
+            31 => out.signalsTipSt = null,
+            32 => out.netTipSt = null,
+            33 => out.timTipSt = null,
+            34 => out.perfTipSt = null,
+            else => {},
+        },
+        1 => out.title = try wire.strDup(r, t),
+        2 => out.sub = try wire.strDup(r, t),
+        3 => try wire.mergeSub(r, live.Transport, mergeLiveTransport, t, &out.transport),
+        4 => try wire.mergeSub(r, live.NP, mergeLiveNP, t, &out.np),
+        5 => out.statusTitle = try wire.strDup(r, t),
+        6 => try wire.mergeSub(r, live.Status, mergeLiveStatus, t, &out.status),
+        7 => out.decksTitle = try wire.strDup(r, t),
+        8 => try wire.mergeSub(r, live.Decks, mergeLiveDecks, t, &out.decks),
+        9 => out.hasSignals = try r.boolean(t),
+        10 => out.signalsTitle = try wire.strDup(r, t),
+        11 => out.signalsTip = try wire.strDup(r, t),
+        12 => try wire.mergeSub(r, live.Signals, mergeLiveSignals, t, &out.signals),
+        13 => out.hasCockpit = try r.boolean(t),
+        14 => out.cockpitTitle = try wire.strDup(r, t),
+        15 => try wire.mergeSub(r, live.Cockpit, mergeLiveCockpit, t, &out.cockpit),
+        16 => out.hasLink = try r.boolean(t),
+        17 => out.linkTitle = try wire.strDup(r, t),
+        18 => try wire.mergeSub(r, live.Link, mergeLiveLink, t, &out.link),
+        19 => out.hasNet = try r.boolean(t),
+        20 => out.netTitle = try wire.strDup(r, t),
+        21 => out.netTip = try wire.strDup(r, t),
+        22 => try wire.mergeSub(r, live.Graph, mergeLiveGraph, t, &out.net),
+        23 => out.timTitle = try wire.strDup(r, t),
+        24 => out.timTip = try wire.strDup(r, t),
+        25 => try wire.mergeSub(r, live.Graph, mergeLiveGraph, t, &out.tim),
+        26 => out.hasPerf = try r.boolean(t),
+        27 => out.perfTitle = try wire.strDup(r, t),
+        28 => out.perfTip = try wire.strDup(r, t),
+        29 => try wire.mergeSub(r, live.Perf, mergeLivePerf, t, &out.perf),
+        30 => try wire.mergeSub(r, live.Strip, mergeLiveStrip, t, &out.strip),
+        31 => {
+            if (out.signalsTipSt == null) out.signalsTipSt = .{};
+            try wire.mergeSub(r, c.Tip, mergeTip, t, &out.signalsTipSt.?);
+        },
+        32 => {
+            if (out.netTipSt == null) out.netTipSt = .{};
+            try wire.mergeSub(r, c.Tip, mergeTip, t, &out.netTipSt.?);
+        },
+        33 => {
+            if (out.timTipSt == null) out.timTipSt = .{};
+            try wire.mergeSub(r, c.Tip, mergeTip, t, &out.timTipSt.?);
+        },
+        34 => {
+            if (out.perfTipSt == null) out.perfTipSt = .{};
+            try wire.mergeSub(r, c.Tip, mergeTip, t, &out.perfTipSt.?);
+        },
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneLiveState(a: std.mem.Allocator, v: live.State) wire.Error!live.State {
+    var out = v;
+    out.title = try a.dupe(u8, v.title);
+    out.sub = try a.dupe(u8, v.sub);
+    out.transport = try cloneLiveTransport(a, v.transport);
+    out.np = try cloneLiveNP(a, v.np);
+    out.statusTitle = try a.dupe(u8, v.statusTitle);
+    out.status = try cloneLiveStatus(a, v.status);
+    out.decksTitle = try a.dupe(u8, v.decksTitle);
+    out.decks = try cloneLiveDecks(a, v.decks);
+    out.signalsTitle = try a.dupe(u8, v.signalsTitle);
+    out.signalsTip = try a.dupe(u8, v.signalsTip);
+    out.signals = try cloneLiveSignals(a, v.signals);
+    out.cockpitTitle = try a.dupe(u8, v.cockpitTitle);
+    out.cockpit = try cloneLiveCockpit(a, v.cockpit);
+    out.linkTitle = try a.dupe(u8, v.linkTitle);
+    out.link = try cloneLiveLink(a, v.link);
+    out.netTitle = try a.dupe(u8, v.netTitle);
+    out.netTip = try a.dupe(u8, v.netTip);
+    out.net = try cloneLiveGraph(a, v.net);
+    out.timTitle = try a.dupe(u8, v.timTitle);
+    out.timTip = try a.dupe(u8, v.timTip);
+    out.tim = try cloneLiveGraph(a, v.tim);
+    out.perfTitle = try a.dupe(u8, v.perfTitle);
+    out.perfTip = try a.dupe(u8, v.perfTip);
+    out.perf = try cloneLivePerf(a, v.perf);
+    out.strip = try cloneLiveStrip(a, v.strip);
+    if (v.signalsTipSt) |x| { out.signalsTipSt = try cloneTip(a, x); }
+    if (v.netTipSt) |x| { out.netTipSt = try cloneTip(a, x); }
+    if (v.timTipSt) |x| { out.timTipSt = try cloneTip(a, x); }
+    if (v.perfTipSt) |x| { out.perfTipSt = try cloneTip(a, x); }
+    return out;
+}
+
+pub fn hashLiveState(h: *wire.Hasher, v: live.State) void {
+    h.str(1, v.title);
+    h.str(2, v.sub);
+    h.sub(3);
+    hashLiveTransport(h, v.transport);
+    h.sub(4);
+    hashLiveNP(h, v.np);
+    h.str(5, v.statusTitle);
+    h.sub(6);
+    hashLiveStatus(h, v.status);
+    h.str(7, v.decksTitle);
+    h.sub(8);
+    hashLiveDecks(h, v.decks);
+    h.boolean(9, v.hasSignals);
+    h.str(10, v.signalsTitle);
+    h.str(11, v.signalsTip);
+    h.sub(12);
+    hashLiveSignals(h, v.signals);
+    h.boolean(13, v.hasCockpit);
+    h.str(14, v.cockpitTitle);
+    h.sub(15);
+    hashLiveCockpit(h, v.cockpit);
+    h.boolean(16, v.hasLink);
+    h.str(17, v.linkTitle);
+    h.sub(18);
+    hashLiveLink(h, v.link);
+    h.boolean(19, v.hasNet);
+    h.str(20, v.netTitle);
+    h.str(21, v.netTip);
+    h.sub(22);
+    hashLiveGraph(h, v.net);
+    h.str(23, v.timTitle);
+    h.str(24, v.timTip);
+    h.sub(25);
+    hashLiveGraph(h, v.tim);
+    h.boolean(26, v.hasPerf);
+    h.str(27, v.perfTitle);
+    h.str(28, v.perfTip);
+    h.sub(29);
+    hashLivePerf(h, v.perf);
+    h.sub(30);
+    hashLiveStrip(h, v.strip);
+    h.opt(31, v.signalsTipSt != null);
+    if (v.signalsTipSt) |x| hashTip(h, x);
+    h.opt(32, v.netTipSt != null);
+    if (v.netTipSt) |x| hashTip(h, x);
+    h.opt(33, v.timTipSt != null);
+    if (v.timTipSt) |x| hashTip(h, x);
+    h.opt(34, v.perfTipSt != null);
+    if (v.perfTipSt) |x| hashTip(h, x);
+}
+
+pub fn mergeUiBtn(r: *wire.Reader, out: *c.Btn) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.label = "",
+            2 => out.variant = "",
+            3 => out.act = "",
+            4 => out.val = "",
+            else => {},
+        },
+        1 => out.label = try wire.strDup(r, t),
+        2 => out.variant = try wire.strDup(r, t),
+        3 => out.act = try wire.strDup(r, t),
+        4 => out.val = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneUiBtn(a: std.mem.Allocator, v: c.Btn) wire.Error!c.Btn {
+    var out = v;
+    out.label = try a.dupe(u8, v.label);
+    out.variant = try a.dupe(u8, v.variant);
+    out.act = try a.dupe(u8, v.act);
+    out.val = try a.dupe(u8, v.val);
+    return out;
+}
+
+pub fn hashUiBtn(h: *wire.Hasher, v: c.Btn) void {
+    h.str(1, v.label);
+    h.str(2, v.variant);
+    h.str(3, v.act);
+    h.str(4, v.val);
+}
+
+pub fn mergeTipChip(r: *wire.Reader, out: *c.TipChip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.text = "",
+            2 => out.sep = false,
+            else => {},
+        },
+        1 => out.text = try wire.strDup(r, t),
+        2 => out.sep = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTipChip(a: std.mem.Allocator, v: c.TipChip) wire.Error!c.TipChip {
+    var out = v;
+    out.text = try a.dupe(u8, v.text);
+    return out;
+}
+
+pub fn hashTipChip(h: *wire.Hasher, v: c.TipChip) void {
+    h.str(1, v.text);
+    h.boolean(2, v.sep);
+}
+
+pub fn mergeTipKb(r: *wire.Reader, out: *c.TipKb) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.hasGroup = false,
+            2 => out.group = "",
+            3 => out.chips = &.{},
+            4 => out.verb = "",
+            5 => out.rest = "",
+            else => {},
+        },
+        1 => out.hasGroup = try r.boolean(t),
+        2 => out.group = try wire.strDup(r, t),
+        3 => out.chips = try r.list(c.TipChip, mergeTipChip, t),
+        4 => out.verb = try wire.strDup(r, t),
+        5 => out.rest = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTipKb(a: std.mem.Allocator, v: c.TipKb) wire.Error!c.TipKb {
+    var out = v;
+    out.group = try a.dupe(u8, v.group);
+    out.chips = try wire.cloneList(c.TipChip, cloneTipChip, a, v.chips);
+    out.verb = try a.dupe(u8, v.verb);
+    out.rest = try a.dupe(u8, v.rest);
+    return out;
+}
+
+pub fn hashTipKb(h: *wire.Hasher, v: c.TipKb) void {
+    h.boolean(1, v.hasGroup);
+    h.str(2, v.group);
+    h.list(3, v.chips.len);
+    for (v.chips) |e| hashTipChip(h, e);
+    h.str(4, v.verb);
+    h.str(5, v.rest);
+}
+
+pub fn mergeTipLink(r: *wire.Reader, out: *c.TipLink) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.label = "",
+            2 => out.url = "",
+            else => {},
+        },
+        1 => out.label = try wire.strDup(r, t),
+        2 => out.url = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTipLink(a: std.mem.Allocator, v: c.TipLink) wire.Error!c.TipLink {
+    var out = v;
+    out.label = try a.dupe(u8, v.label);
+    out.url = try a.dupe(u8, v.url);
+    return out;
+}
+
+pub fn hashTipLink(h: *wire.Hasher, v: c.TipLink) void {
+    h.str(1, v.label);
+    h.str(2, v.url);
+}
+
+pub fn mergeTip(r: *wire.Reader, out: *c.Tip) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.id = "",
+            2 => out.title = "",
+            3 => out.keys = &.{},
+            4 => out.paras = &.{},
+            5 => out.links = &.{},
+            else => {},
+        },
+        1 => out.id = try wire.strDup(r, t),
+        2 => out.title = try wire.strDup(r, t),
+        3 => out.keys = try r.list(c.TipKb, mergeTipKb, t),
+        4 => out.paras = try wire.strListDup(r, t),
+        5 => out.links = try r.list(c.TipLink, mergeTipLink, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTip(a: std.mem.Allocator, v: c.Tip) wire.Error!c.Tip {
+    var out = v;
+    out.id = try a.dupe(u8, v.id);
+    out.title = try a.dupe(u8, v.title);
+    out.keys = try wire.cloneList(c.TipKb, cloneTipKb, a, v.keys);
+    out.paras = try wire.cloneStrList(a, v.paras);
+    out.links = try wire.cloneList(c.TipLink, cloneTipLink, a, v.links);
+    return out;
+}
+
+pub fn hashTip(h: *wire.Hasher, v: c.Tip) void {
+    h.str(1, v.id);
+    h.str(2, v.title);
+    h.list(3, v.keys.len);
+    for (v.keys) |e| hashTipKb(h, e);
+    h.strList(4, v.paras);
+    h.list(5, v.links.len);
+    for (v.links) |e| hashTipLink(h, e);
+}
+
+pub fn mergeTwTag(r: *wire.Reader, out: *twitch.Tag) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.text = "",
+            2 => out.variant = "",
+            else => {},
+        },
+        1 => out.text = try wire.strDup(r, t),
+        2 => out.variant = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTwTag(a: std.mem.Allocator, v: twitch.Tag) wire.Error!twitch.Tag {
+    var out = v;
+    out.text = try a.dupe(u8, v.text);
+    out.variant = try a.dupe(u8, v.variant);
+    return out;
+}
+
+pub fn hashTwTag(h: *wire.Hasher, v: twitch.Tag) void {
+    h.str(1, v.text);
+    h.str(2, v.variant);
+}
+
+pub fn mergeTwRow(r: *wire.Reader, out: *twitch.Row) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.kind = "",
+            2 => out.date = "",
+            3 => out.name = "",
+            4 => out.nameStyle = "",
+            5 => out.tags = &.{},
+            6 => out.mod = false,
+            7 => out.modVal = "",
+            8 => out.modTitle = "",
+            9 => out.text = "",
+            10 => out.variant = "",
+            else => {},
+        },
+        1 => out.kind = try wire.strDup(r, t),
+        2 => out.date = try wire.strDup(r, t),
+        3 => out.name = try wire.strDup(r, t),
+        4 => out.nameStyle = try wire.strDup(r, t),
+        5 => out.tags = try r.list(twitch.Tag, mergeTwTag, t),
+        6 => out.mod = try r.boolean(t),
+        7 => out.modVal = try wire.strDup(r, t),
+        8 => out.modTitle = try wire.strDup(r, t),
+        9 => out.text = try wire.strDup(r, t),
+        10 => out.variant = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTwRow(a: std.mem.Allocator, v: twitch.Row) wire.Error!twitch.Row {
+    var out = v;
+    out.kind = try a.dupe(u8, v.kind);
+    out.date = try a.dupe(u8, v.date);
+    out.name = try a.dupe(u8, v.name);
+    out.nameStyle = try a.dupe(u8, v.nameStyle);
+    out.tags = try wire.cloneList(twitch.Tag, cloneTwTag, a, v.tags);
+    out.modVal = try a.dupe(u8, v.modVal);
+    out.modTitle = try a.dupe(u8, v.modTitle);
+    out.text = try a.dupe(u8, v.text);
+    out.variant = try a.dupe(u8, v.variant);
+    return out;
+}
+
+pub fn hashTwRow(h: *wire.Hasher, v: twitch.Row) void {
+    h.str(1, v.kind);
+    h.str(2, v.date);
+    h.str(3, v.name);
+    h.str(4, v.nameStyle);
+    h.list(5, v.tags.len);
+    for (v.tags) |e| hashTwTag(h, e);
+    h.boolean(6, v.mod);
+    h.str(7, v.modVal);
+    h.str(8, v.modTitle);
+    h.str(9, v.text);
+    h.str(10, v.variant);
+}
+
+pub fn mergeTwFeed(r: *wire.Reader, out: *twitch.Feed) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.empty = "",
+            2 => out.rows = &.{},
+            else => {},
+        },
+        1 => out.empty = try wire.strDup(r, t),
+        2 => out.rows = try r.list(twitch.Row, mergeTwRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTwFeed(a: std.mem.Allocator, v: twitch.Feed) wire.Error!twitch.Feed {
+    var out = v;
+    out.empty = try a.dupe(u8, v.empty);
+    out.rows = try wire.cloneList(twitch.Row, cloneTwRow, a, v.rows);
+    return out;
+}
+
+pub fn hashTwFeed(h: *wire.Hasher, v: twitch.Feed) void {
+    h.str(1, v.empty);
+    h.list(2, v.rows.len);
+    for (v.rows) |e| hashTwRow(h, e);
+}
+
+pub fn mergeMidiMonRow(r: *wire.Reader, out: *midimon.Row) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.ago = "",
+            2 => out.src = "",
+            3 => out.msg = "",
+            else => {},
+        },
+        1 => out.ago = try wire.strDup(r, t),
+        2 => out.src = try wire.strDup(r, t),
+        3 => out.msg = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneMidiMonRow(a: std.mem.Allocator, v: midimon.Row) wire.Error!midimon.Row {
+    var out = v;
+    out.ago = try a.dupe(u8, v.ago);
+    out.src = try a.dupe(u8, v.src);
+    out.msg = try a.dupe(u8, v.msg);
+    return out;
+}
+
+pub fn hashMidiMonRow(h: *wire.Hasher, v: midimon.Row) void {
+    h.str(1, v.ago);
+    h.str(2, v.src);
+    h.str(3, v.msg);
+}
+
+pub fn mergeMidiMonLines(r: *wire.Reader, out: *midimon.Lines) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.empty = "",
+            2 => out.rows = &.{},
+            else => {},
+        },
+        1 => out.empty = try wire.strDup(r, t),
+        2 => out.rows = try r.list(midimon.Row, mergeMidiMonRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneMidiMonLines(a: std.mem.Allocator, v: midimon.Lines) wire.Error!midimon.Lines {
+    var out = v;
+    out.empty = try a.dupe(u8, v.empty);
+    out.rows = try wire.cloneList(midimon.Row, cloneMidiMonRow, a, v.rows);
+    return out;
+}
+
+pub fn hashMidiMonLines(h: *wire.Hasher, v: midimon.Lines) void {
+    h.str(1, v.empty);
+    h.list(2, v.rows.len);
+    for (v.rows) |e| hashMidiMonRow(h, e);
+}
+
+pub fn mergeMidiPortStat(r: *wire.Reader, out: *ctls.PortStat) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.hasRow = false,
+            2 => out.variant = "",
+            3 => out.label = "",
+            4 => out.labelDl = "",
+            5 => out.line = "",
+            6 => out.hint = "",
+            7 => out.hasAct = false,
+            8 => out.act = "",
+            9 => out.actMsg = "",
+            else => {},
+        },
+        1 => out.hasRow = try r.boolean(t),
+        2 => out.variant = try wire.strDup(r, t),
+        3 => out.label = try wire.strDup(r, t),
+        4 => out.labelDl = try wire.strDup(r, t),
+        5 => out.line = try wire.strDup(r, t),
+        6 => out.hint = try wire.strDup(r, t),
+        7 => out.hasAct = try r.boolean(t),
+        8 => out.act = try wire.strDup(r, t),
+        9 => out.actMsg = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneMidiPortStat(a: std.mem.Allocator, v: ctls.PortStat) wire.Error!ctls.PortStat {
+    var out = v;
+    out.variant = try a.dupe(u8, v.variant);
+    out.label = try a.dupe(u8, v.label);
+    out.labelDl = try a.dupe(u8, v.labelDl);
+    out.line = try a.dupe(u8, v.line);
+    out.hint = try a.dupe(u8, v.hint);
+    out.act = try a.dupe(u8, v.act);
+    out.actMsg = try a.dupe(u8, v.actMsg);
+    return out;
+}
+
+pub fn hashMidiPortStat(h: *wire.Hasher, v: ctls.PortStat) void {
+    h.boolean(1, v.hasRow);
+    h.str(2, v.variant);
+    h.str(3, v.label);
+    h.str(4, v.labelDl);
+    h.str(5, v.line);
+    h.str(6, v.hint);
+    h.boolean(7, v.hasAct);
+    h.str(8, v.act);
+    h.str(9, v.actMsg);
+}
+
+pub fn mergeCeTbDrop(r: *wire.Reader, out: *cueedit.TbDrop) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.act = "",
+            2 => out.lbl = "",
+            3 => out.when = "",
+            else => {},
+        },
+        1 => out.act = try wire.strDup(r, t),
+        2 => out.lbl = try wire.strDup(r, t),
+        3 => out.when = try wire.strDup(r, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneCeTbDrop(a: std.mem.Allocator, v: cueedit.TbDrop) wire.Error!cueedit.TbDrop {
+    var out = v;
+    out.act = try a.dupe(u8, v.act);
+    out.lbl = try a.dupe(u8, v.lbl);
+    out.when = try a.dupe(u8, v.when);
+    return out;
+}
+
+pub fn hashCeTbDrop(h: *wire.Hasher, v: cueedit.TbDrop) void {
+    h.str(1, v.act);
+    h.str(2, v.lbl);
+    h.str(3, v.when);
+}
+
+pub fn mergeCeTopbar(r: *wire.Reader, out: *cueedit.Topbar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.show = false,
+            2 => out.eyebrow = "",
+            3 => out.title = "",
+            4 => out.hasRce = false,
+            5 => out.rceMeta = "",
+            6 => out.dirty = false,
+            7 => out.dirtyTip = "",
+            8 => out.meta = "",
+            9 => out.cursor = "",
+            10 => out.barLbl = "",
+            11 => out.barBeat = "",
+            12 => out.jump = "",
+            13 => out.drops = &.{},
+            14 => out.census = "",
+            15 => out.noTag = false,
+            16 => out.noTagTip = "",
+            17 => out.verified = false,
+            18 => out.verifiable = false,
+            19 => out.verifyAct = "",
+            20 => out.verifiedTip = "",
+            21 => out.verifiedLbl = "",
+            22 => out.verifyTip = "",
+            23 => out.verifyLbl = "",
+            24 => out.tip = "",
+            25 => out.tipSt = null,
+            26 => out.close = .{},
+            else => {},
+        },
+        1 => out.show = try r.boolean(t),
+        2 => out.eyebrow = try wire.strDup(r, t),
+        3 => out.title = try wire.strDup(r, t),
+        4 => out.hasRce = try r.boolean(t),
+        5 => out.rceMeta = try wire.strDup(r, t),
+        6 => out.dirty = try r.boolean(t),
+        7 => out.dirtyTip = try wire.strDup(r, t),
+        8 => out.meta = try wire.strDup(r, t),
+        9 => out.cursor = try wire.strDup(r, t),
+        10 => out.barLbl = try wire.strDup(r, t),
+        11 => out.barBeat = try wire.strDup(r, t),
+        12 => out.jump = try wire.strDup(r, t),
+        13 => out.drops = try r.list(cueedit.TbDrop, mergeCeTbDrop, t),
+        14 => out.census = try wire.strDup(r, t),
+        15 => out.noTag = try r.boolean(t),
+        16 => out.noTagTip = try wire.strDup(r, t),
+        17 => out.verified = try r.boolean(t),
+        18 => out.verifiable = try r.boolean(t),
+        19 => out.verifyAct = try wire.strDup(r, t),
+        20 => out.verifiedTip = try wire.strDup(r, t),
+        21 => out.verifiedLbl = try wire.strDup(r, t),
+        22 => out.verifyTip = try wire.strDup(r, t),
+        23 => out.verifyLbl = try wire.strDup(r, t),
+        24 => out.tip = try wire.strDup(r, t),
+        25 => {
+            if (out.tipSt == null) out.tipSt = .{};
+            try wire.mergeSub(r, c.Tip, mergeTip, t, &out.tipSt.?);
+        },
+        26 => try wire.mergeSub(r, c.Btn, mergeUiBtn, t, &out.close),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneCeTopbar(a: std.mem.Allocator, v: cueedit.Topbar) wire.Error!cueedit.Topbar {
+    var out = v;
+    out.eyebrow = try a.dupe(u8, v.eyebrow);
+    out.title = try a.dupe(u8, v.title);
+    out.rceMeta = try a.dupe(u8, v.rceMeta);
+    out.dirtyTip = try a.dupe(u8, v.dirtyTip);
+    out.meta = try a.dupe(u8, v.meta);
+    out.cursor = try a.dupe(u8, v.cursor);
+    out.barLbl = try a.dupe(u8, v.barLbl);
+    out.barBeat = try a.dupe(u8, v.barBeat);
+    out.jump = try a.dupe(u8, v.jump);
+    out.drops = try wire.cloneList(cueedit.TbDrop, cloneCeTbDrop, a, v.drops);
+    out.census = try a.dupe(u8, v.census);
+    out.noTagTip = try a.dupe(u8, v.noTagTip);
+    out.verifyAct = try a.dupe(u8, v.verifyAct);
+    out.verifiedTip = try a.dupe(u8, v.verifiedTip);
+    out.verifiedLbl = try a.dupe(u8, v.verifiedLbl);
+    out.verifyTip = try a.dupe(u8, v.verifyTip);
+    out.verifyLbl = try a.dupe(u8, v.verifyLbl);
+    out.tip = try a.dupe(u8, v.tip);
+    if (v.tipSt) |x| { out.tipSt = try cloneTip(a, x); }
+    out.close = try cloneUiBtn(a, v.close);
+    return out;
+}
+
+pub fn hashCeTopbar(h: *wire.Hasher, v: cueedit.Topbar) void {
+    h.boolean(1, v.show);
+    h.str(2, v.eyebrow);
+    h.str(3, v.title);
+    h.boolean(4, v.hasRce);
+    h.str(5, v.rceMeta);
+    h.boolean(6, v.dirty);
+    h.str(7, v.dirtyTip);
+    h.str(8, v.meta);
+    h.str(9, v.cursor);
+    h.str(10, v.barLbl);
+    h.str(11, v.barBeat);
+    h.str(12, v.jump);
+    h.list(13, v.drops.len);
+    for (v.drops) |e| hashCeTbDrop(h, e);
+    h.str(14, v.census);
+    h.boolean(15, v.noTag);
+    h.str(16, v.noTagTip);
+    h.boolean(17, v.verified);
+    h.boolean(18, v.verifiable);
+    h.str(19, v.verifyAct);
+    h.str(20, v.verifiedTip);
+    h.str(21, v.verifiedLbl);
+    h.str(22, v.verifyTip);
+    h.str(23, v.verifyLbl);
+    h.str(24, v.tip);
+    h.opt(25, v.tipSt != null);
+    if (v.tipSt) |x| hashTip(h, x);
+    h.sub(26);
+    hashUiBtn(h, v.close);
+}
+
+pub fn mergeTkPrev(r: *wire.Reader, out: *tick.Prev) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.id = "",
+            2 => out.hash = 0,
+            else => {},
+        },
+        1 => out.id = try wire.strDup(r, t),
+        2 => out.hash = @intCast(try r.uint(t)),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTkPrev(a: std.mem.Allocator, v: tick.Prev) wire.Error!tick.Prev {
+    var out = v;
+    out.id = try a.dupe(u8, v.id);
+    return out;
+}
+
+pub fn hashTkPrev(h: *wire.Hasher, v: tick.Prev) void {
+    h.str(1, v.id);
+    h.uint(2, wire.u64of(v.hash));
+}
+
+pub fn mergeTkLive(r: *wire.Reader, out: *tick.LiveBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.live = .{},
+            2 => out.tc = "",
+            3 => out.prev = &.{},
+            else => {},
+        },
+        1 => try wire.mergeSub(r, live.State, mergeLiveState, t, &out.live),
+        2 => out.tc = try wire.strDup(r, t),
+        3 => out.prev = try r.list(tick.Prev, mergeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTkLive(a: std.mem.Allocator, v: tick.LiveBatch) wire.Error!tick.LiveBatch {
+    var out = v;
+    out.live = try cloneLiveState(a, v.live);
+    out.tc = try a.dupe(u8, v.tc);
+    out.prev = try wire.cloneList(tick.Prev, cloneTkPrev, a, v.prev);
+    return out;
+}
+
+pub fn hashTkLive(h: *wire.Hasher, v: tick.LiveBatch) void {
+    h.sub(1);
+    hashLiveState(h, v.live);
+    h.str(2, v.tc);
+    h.list(3, v.prev.len);
+    for (v.prev) |e| hashTkPrev(h, e);
+}
+
+pub fn mergeTkLogs(r: *wire.Reader, out: *tick.LogsBatch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        wire.clear_field => switch (try r.uint(t)) {
+            1 => out.lines = .{},
+            2 => out.prev = &.{},
+            else => {},
+        },
+        1 => try wire.mergeSub(r, logs.Lines, mergeLogsLines, t, &out.lines),
+        2 => out.prev = try r.list(tick.Prev, mergeTkPrev, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn cloneTkLogs(a: std.mem.Allocator, v: tick.LogsBatch) wire.Error!tick.LogsBatch {
+    var out = v;
+    out.lines = try cloneLogsLines(a, v.lines);
+    out.prev = try wire.cloneList(tick.Prev, cloneTkPrev, a, v.prev);
+    return out;
+}
+
+pub fn hashTkLogs(h: *wire.Hasher, v: tick.LogsBatch) void {
+    h.sub(1);
+    hashLogsLines(h, v.lines);
+    h.list(2, v.prev.len);
+    for (v.prev) |e| hashTkPrev(h, e);
 }
 
 test "schema ids are distinct" {
