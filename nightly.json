@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b0536f3",
-  "build": 174,
-  "commit": "b0536f3",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-174-20260726-b0536f3.exe",
-  "sha256": "34affa6ad7380fa9e5e3712951461bbd4cee5d397946c31dce6439ddca7bf479",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-174-20260726-b0536f3.exe",
-  "installer_sha256": "61baa5beaa117a989a0656baeab43f327c539050b9a08313c1d63933693aa108",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-174-20260726-b0536f3",
-  "linux_sha256": "50394809a94d7c782d588a924dbd03a17868b4e71a4d99c758a7d37557159e4f",
+  "version": "nightly-68d8692",
+  "build": 175,
+  "commit": "68d8692",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-175-20260726-68d8692.exe",
+  "sha256": "303082a7b1c72e156c528cb3e9d6044065e07ccdf5e43474ed088c4ba6760d15",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-175-20260726-68d8692.exe",
+  "installer_sha256": "cf5a3a58ca93551d8a2ff33b99b5f472965f4b87a57fca5c8cba2188f36ce9f7",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-175-20260726-68d8692",
+  "linux_sha256": "3612ea380f9aacc874dfc4eac5b8089452c44cb246828461711d21782c022e96",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T23:00:28Z",
-  "notes": "Merge feat/zig-b7-i18n-catalog (iii): catalog handshake measured + refused; i18n fast path"
+  "released": "2026-07-26T23:13:28Z",
+  "notes": "Merge feat/zigmedia-inc1: zero-copy DX11 spout capture -> Zig encoder child"
 }
