@@ -29,7 +29,44 @@ const (
 	summaryRate = 5 * time.Second
 	// loopbackProbeEvery paces the loopback health check; probes fire only in silent windows.
 	loopbackProbeEvery = 15 * time.Second
+
+	// Failed-port retry pacing. Endless midiInOpen retries against a port another client
+	// holds (MMSYSERR_ALLOCATED) keep re-entering wdmaud/audiosrv - the kernel contention
+	// pattern implicated in a host bugcheck. Backoff 4s→60s cap, hard ceiling after
+	// retryMaxAttempts cycles; past the ceiling only a device-list change (cheap user-mode
+	// enum, no opens) or a source restart re-arms attempts.
+	retryBaseDelay   = 4 * time.Second
+	retryMaxDelay    = 60 * time.Second
+	retryMaxAttempts = 8
 )
+
+// retryWatchEvery paces the post-ceiling device-list watch (var: shrunk in tests).
+var retryWatchEvery = 30 * time.Second
+
+// listInputPorts is the device-list probe used by the post-ceiling watch (seam for tests).
+var listInputPorts = func() []string {
+	ps, _ := midi.Ports()
+	return ps
+}
+
+// retrySchedule is the pure backoff/ceiling state machine for failed-port reopen attempts.
+type retrySchedule struct{ attempts int }
+
+// next returns the delay before the next attempt; ok=false once the ceiling is reached.
+func (r *retrySchedule) next() (time.Duration, bool) {
+	if r.attempts >= retryMaxAttempts {
+		return 0, false
+	}
+	d := retryBaseDelay << r.attempts
+	if d > retryMaxDelay || d <= 0 { // <=0 guards shift overflow
+		d = retryMaxDelay
+	}
+	r.attempts++
+	return d, true
+}
+
+// reset re-arms the schedule (device list changed / a port recovered).
+func (r *retrySchedule) reset() { r.attempts = 0 }
 
 // activity accumulates a per-port message digest between summary ticks: how many messages,
 // broken down by kind, which channels + CC numbers appeared, and how many were System/
@@ -490,63 +527,102 @@ func (s *Source) Start(ctx context.Context, emit func(session.Observation)) erro
 	return nil
 }
 
-// retryFailed re-attempts each still-failed input port every few seconds until ctx ends. On
-// success it launches the port's pump and flips its status to open (fires onPorts so the UI can
-// show "reading"). Its own wg count is held for the goroutine's life, so pumps it adds are always
-// awaited by Start's wg.Wait().
+// retryFailed re-attempts each still-failed input port until ctx ends, backoff-paced with a
+// hard ceiling (see retrySchedule): NOT a fixed-rate forever loop, so a port held by another
+// app (Serato et al) stops being hammered through the kernel MIDI stack. Past the ceiling it
+// logs ONCE and re-arms only when the winmm device list changes or the source restarts. On
+// success it launches the port's pump and flips its status to open (fires onPorts so the UI
+// can show "reading"). Its own wg count is held for the goroutine's life, so pumps it adds are
+// always awaited by Start's wg.Wait().
 func (s *Source) retryFailed(ctx context.Context, bindings map[string]*portBinding, failed []string, emit func(session.Observation), wg *sync.WaitGroup) {
 	pending := make(map[string]bool, len(failed))
 	for _, f := range failed {
 		pending[f] = true
 	}
-	t := time.NewTicker(4 * time.Second)
+	var sched retrySchedule
+	for {
+		delay, ok := sched.next()
+		if !ok {
+			// Ceiling: one loud line, then a cheap device-list watch (enum only, no opens).
+			names := make([]string, 0, len(pending))
+			for n := range pending {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			s.log.Warn(srcLog, "MIDI port retry ceiling reached - pausing reopen attempts", map[string]any{
+				"ports": strings.Join(names, ", "), "attempts": retryMaxAttempts,
+				"hint": "attempts resume when the device list changes or MIDI is re-enabled"})
+			if !s.waitDeviceChange(ctx) {
+				return
+			}
+			sched.reset()
+			s.log.Info(srcLog, "MIDI device list changed - resuming port reopen attempts", nil)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		for name := range pending {
+			b := bindings[name]
+			if b == nil {
+				delete(pending, name)
+				continue
+			}
+			in, err := midi.Open(name)
+			if err != nil {
+				continue // still held / absent - next backoff cycle
+			}
+			sched.reset() // contention easing - re-arm full attempts for remaining ports
+			s.log.Info(srcLog, "MIDI port recovered", map[string]any{"port": in.Name, "thru": b.thruOut != nil})
+			delete(pending, name)
+			binding := *b
+			binding.name = in.Name
+			input := in
+			if b.thruOut != nil {
+				to := b.thruOut
+				input.SetThru(func(m midi.Message) { to.Send(m.Status, m.Data1, m.Data2) })
+			}
+			wg.Add(1)
+			debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
+			s.portMu.Lock()
+			s.openIn = append(s.openIn, in.Name)
+			kept := s.failedIn[:0]
+			for _, f := range s.failedIn {
+				if f != name {
+					kept = append(kept, f)
+				}
+			}
+			s.failedIn = kept
+			open := append([]string(nil), s.openIn...)
+			fl := append([]string(nil), s.failedIn...)
+			muted := append([]string(nil), s.mutedIn...)
+			s.portMu.Unlock()
+			if s.onPorts != nil {
+				s.onPorts(open, fl, muted)
+			}
+			s.watchIfLoopback(ctx, in.Name, wg)
+		}
+		if len(pending) == 0 {
+			return
+		}
+	}
+}
+
+// waitDeviceChange blocks until the winmm input device list changes (name-set signature via
+// a slow enum poll - no device opens) or ctx ends; reports false on ctx end.
+func (s *Source) waitDeviceChange(ctx context.Context) bool {
+	base := strings.Join(listInputPorts(), "\x00")
+	t := time.NewTicker(retryWatchEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-t.C:
-			for name := range pending {
-				b := bindings[name]
-				if b == nil {
-					delete(pending, name)
-					continue
-				}
-				in, err := midi.Open(name)
-				if err != nil {
-					continue // still held / absent - try again next tick
-				}
-				s.log.Info(srcLog, "MIDI port recovered", map[string]any{"port": in.Name, "thru": b.thruOut != nil})
-				delete(pending, name)
-				binding := *b
-				binding.name = in.Name
-				input := in
-				if b.thruOut != nil {
-					to := b.thruOut
-					input.SetThru(func(m midi.Message) { to.Send(m.Status, m.Data1, m.Data2) })
-				}
-				wg.Add(1)
-				debuglog.Go(s.log, srcLog, func() { defer wg.Done(); s.pump(ctx, binding, input, emit) })
-				s.portMu.Lock()
-				s.openIn = append(s.openIn, in.Name)
-				kept := s.failedIn[:0]
-				for _, f := range s.failedIn {
-					if f != name {
-						kept = append(kept, f)
-					}
-				}
-				s.failedIn = kept
-				open := append([]string(nil), s.openIn...)
-				fl := append([]string(nil), s.failedIn...)
-				muted := append([]string(nil), s.mutedIn...)
-				s.portMu.Unlock()
-				if s.onPorts != nil {
-					s.onPorts(open, fl, muted)
-				}
-				s.watchIfLoopback(ctx, in.Name, wg)
-			}
-			if len(pending) == 0 {
-				return
+			if strings.Join(listInputPorts(), "\x00") != base {
+				return true
 			}
 		}
 	}
