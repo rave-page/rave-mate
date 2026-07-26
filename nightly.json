@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b2adad8",
-  "build": 172,
-  "commit": "b2adad8",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-172-20260726-b2adad8.exe",
-  "sha256": "c0d8d2db74de5ec914bd4362afed767d5e8efa857893a9ab8825f2d92c459a5b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-172-20260726-b2adad8.exe",
-  "installer_sha256": "78b0ea33cbcdbd567decbc0b2970806b81ff41ac65d8a0579311d8b4ab069559",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-172-20260726-b2adad8",
-  "linux_sha256": "fe0a6b2811b07601840c576e379a2cc0bf5869f5669277b502eb76ed827df44f",
+  "version": "nightly-060fb37",
+  "build": 173,
+  "commit": "060fb37",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-173-20260726-060fb37.exe",
+  "sha256": "c3a1eca9997406e7fb68d598dbc2ab7659f98c30515d4a571e791c7053cbefa2",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-173-20260726-060fb37.exe",
+  "installer_sha256": "cd4d2b33b6b86f35b5def714ba583bdc7a278831dbc8beca9d42bc603eb3546c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-173-20260726-060fb37",
+  "linux_sha256": "db46cdba3463274f8bc4f74cfbefe695eab2c87354c788b8664401466d3b9a84",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T22:18:00Z",
-  "notes": "Merge fix/vr-hmd-awareness: hard no-launch discipline for SteamVR (P1)"
+  "released": "2026-07-26T22:29:07Z",
+  "notes": "Merge feat/zig-b7-state-i18n (ii): RZD1 retained-doc delta channel"
 }
