@@ -56,7 +56,7 @@ void rave_spout_set_receiver(void* h, const char* name);
 //  -1 = no connection to the sender (yet)
 // Per the Spout SDK contract, a dimension change sets the update flag WITHOUT writing pixels,
 // so the caller reallocates before the next call. cap is a defensive double-check.
-int rave_spout_recv(void* h, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt);
+int rave_spout_recv(void* h, const char* name, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt);
 
 // Release the receiver binding + GL context + handle (owning thread).
 void rave_spout_recv_release(void* h);

@@ -30,8 +30,10 @@ const (
 
 // recvAction is what one poll result asks the cgo loop to do.
 type recvAction struct {
-	resize   bool          // swap in a w*h*4 buffer (old one goes back to the pool)
+	resize   bool          // swap in a sizeBytes buffer (old one goes back to the pool)
+	size     int           // bytes for the resize (validated: 0 unless resize)
 	frame    bool          // deliver the filled buffer as a frame
+	badGeom  bool          // shim reported an implausible w×h - refused, retry later
 	interval time.Duration // poll interval after this result
 }
 
@@ -55,14 +57,24 @@ func (p *recvPoller) allow(now time.Time) bool {
 }
 
 // apply folds one shim result into the state machine and returns the actions to take.
+//
+// Geometry is VALIDATED here, never trusted: the shim reads the sender's shared-memory info
+// and can return torn values while a large shared texture is still being created (a
+// 3840×2160 sender was observed reporting w=139846784 h=3840 on the first poll). Sizing a
+// buffer from that allocated 2 TB and killed the media child with "runtime: cannot allocate
+// memory". Implausible dims are refused (badGeom) and count as NO activity, so the poller
+// backs off to the idle interval and retries until the sender info is coherent.
 func (p *recvPoller) apply(code, w, h, bufLen int, now time.Time) recvAction {
-	usable := w > 0 && h > 0
+	size, usable := FrameBytes(w, h)
 	var act recvAction
 	switch code {
 	case recvFrame:
 		act.frame = true
 	case recvUpdated, recvNeedSize:
-		act.resize = usable && bufLen != w*h*4
+		act.badGeom = !usable
+		if usable && bufLen != size {
+			act.resize, act.size = true, size
+		}
 	}
 	// recvNeedSize is NOT activity: a stale sender makes the shim report it on every
 	// poll, and treating that as fresh frames is what kept the 250 Hz poll armed forever.

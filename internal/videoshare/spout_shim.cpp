@@ -15,6 +15,13 @@
 // vtable calls on the handle the DLL returns, so only the GetSpout factory needs resolving.
 typedef SPOUTHANDLE(WINAPI* GetSpoutFn)(void);
 
+// RAVE_SPOUT_DIM_OK bounds a frame edge (mirrors videoshare.MaxFrameDim / mediapipe's encode
+// guard). GetSenderWidth/Height read the sender's SHARED MEMORY info, which can be TORN while a
+// large shared texture is still being created - a 3840x2160 sender was observed reporting
+// w=139846784 h=3840 on a receiver's first poll, and the Go side then sized a 2 TB buffer and
+// killed the media child ("runtime: cannot allocate memory"). Never REPORT garbage dims either.
+#define RAVE_SPOUT_DIM_OK(d) ((d) > 0 && (d) <= 16384)
+
 // spout_factory resolves DLL!GetSpout once (C++11 magic statics → thread-safe, run-once).
 // Returns NULL if the DLL is absent or the export is missing.
 static GetSpoutFn spout_factory(void) {
@@ -65,21 +72,33 @@ void* rave_spout_create(void) {
     return (void*)s;
 }
 
+// flip_buf is the flip staging buffer, POOLED per sender thread (one SPOUTHANDLE per
+// LockOSThread'd worker, so thread_local is per handle and needs no lock). It used to be a
+// malloc+free per frame: 33 MB of C-heap churn per frame at 4K60 = 2 GB/s the Go GOMEMLIMIT
+// cannot see. Grown only on a geometry change; freed in rave_spout_release (same thread).
+static thread_local unsigned char* flip_buf = nullptr;
+static thread_local size_t flip_cap = 0;
+
 // rave_spout_send publishes one RGBA frame, applying a geometric flip first (flip bit0=horizontal,
 // bit1=vertical). bInvert is always false - the explicit flip fully controls orientation so the
 // user can pick the mode that lands upright in their receiver (RAVE_SPOUT_FLIP). deckcard.Render
 // produces top-row-first RGBA.
 int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
                     unsigned int w, unsigned int height, int flip) {
-    if (!h || !rgba) return 0;
+    if (!h || !rgba || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(height)) return 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
     s->SetSenderName(name);
     if (flip == 0) {
         return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
     }
-    const size_t n = (size_t)w * height;
-    unsigned char* t = (unsigned char*)malloc(n * 4);
-    if (!t) return 0;
+    const size_t need = (size_t)w * height * 4;
+    if (flip_cap < need) {
+        unsigned char* nb = (unsigned char*)realloc(flip_buf, need);
+        if (!nb) return 0;
+        flip_buf = nb;
+        flip_cap = need;
+    }
+    unsigned char* t = flip_buf;
     for (unsigned int y = 0; y < height; y++) {
         unsigned int sy = (flip & 2) ? (height - 1 - y) : y;
         for (unsigned int x = 0; x < w; x++) {
@@ -87,12 +106,15 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
             memcpy(t + ((size_t)y * w + x) * 4, rgba + ((size_t)sy * w + sx) * 4, 4);
         }
     }
-    int ok = s->SendImage(t, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
-    free(t);
-    return ok;
+    return s->SendImage(t, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
 }
 
 void rave_spout_release(void* h) {
+    if (flip_buf) {
+        free(flip_buf);
+        flip_buf = nullptr;
+        flip_cap = 0;
+    }
     if (!h) return;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
     s->ReleaseSender();
@@ -132,6 +154,7 @@ int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h) {
     HANDLE share = 0;
     DWORD fmt = 0;
     if (!s->GetSenderInfo(name, ww, hh, share, fmt)) return 0;
+    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) return 0; // torn info: "no size yet"
     *w = ww;
     *h = hh;
     return 1;
@@ -158,6 +181,7 @@ int rave_spout_scan(char* names, int nameCap, int maxN, unsigned int* dims) {
         HANDLE share = 0;
         DWORD fmt = 0;
         if (!s->GetSenderInfo(slot, w, h, share, fmt)) { w = 0; h = 0; }
+        if (!RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(h)) { w = 0; h = 0; } // torn info
         dims[(size_t)out * 2] = w;
         dims[(size_t)out * 2 + 1] = h;
         out++;
@@ -175,19 +199,47 @@ void rave_spout_set_receiver(void* h, const char* name) {
 // absent/undersized with NO sender update (caller resizes quietly - reporting this as 2
 // used to re-arm the receiver's 250 Hz poll forever against a stale/0x0 sender). Codes
 // mirrored in recvpoll.go.
-int rave_spout_recv(void* h, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt) {
+// recv_dims resolves the named sender's current size. GetSenderInfo (a shared-memory registry
+// read, the same call rave_spout_scan uses successfully) rather than
+// GetSenderWidth/GetSenderHeight: those two vtable slots are SKEWED against the shipped
+// SpoutLibrary.dll on at least one 2.007.x pairing - GetSenderWidth() dispatched to
+// GetSenderName() and returned a truncated POINTER (139846784) while GetSenderHeight() returned
+// the real width. Sizing a buffer from that made the media child allocate 2 TB and die with
+// "runtime: cannot allocate memory". Falls back to the width/height slots (guarded) only when no
+// name is known.
+static bool recv_dims(SPOUTHANDLE s, const char* name, unsigned int* w, unsigned int* h) {
+    unsigned int ww = 0, hh = 0;
+    if (name && name[0]) {
+        HANDLE share = 0;
+        DWORD fmt = 0;
+        if (!s->GetSenderInfo(name, ww, hh, share, fmt)) { ww = 0; hh = 0; }
+    }
+    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) {
+        ww = s->GetSenderWidth();
+        hh = s->GetSenderHeight();
+    }
+    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) {
+        *w = 0;
+        *h = 0;
+        return false;
+    }
+    *w = ww;
+    *h = hh;
+    return true;
+}
+
+int rave_spout_recv(void* h, const char* name, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt) {
     if (!h || !w || !hgt) return -1;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
-    // Defensive: never hand ReceiveImage a buffer smaller than the sender's current frame -
-    // the SDK skips the copy on a dimension change, but a stale-size race would overrun.
-    unsigned char* dst = pixels;
-    unsigned int sw = s->GetSenderWidth(), sh = s->GetSenderHeight();
-    if (!dst || (sw && sh && cap < (size_t)sw * sh * 4)) dst = NULL;
-    if (!s->ReceiveImage(dst, 0x1908 /*GL_RGBA*/, false, 0)) return -1;
-    *w = s->GetSenderWidth();
-    *hgt = s->GetSenderHeight();
-    if (s->IsUpdated()) return 2;
-    if (!dst || cap < (size_t)(*w) * (*hgt) * 4) return 3; // caller must (re)size
+    // Size FIRST, receive second. ReceiveImage is never called without a correctly sized
+    // buffer: the SDK's readback writes w*h*4 bytes, so an absent/undersized target is
+    // either an overrun or (observed) an access violation inside the DLL on the NEXT call.
+    // Dims come from the registry, which needs no connection - so the caller can allocate
+    // before the first receive instead of probing with a NULL buffer.
+    if (!recv_dims(s, name, w, hgt)) return 3; // no usable size yet: caller retries
+    if (!pixels || cap < (size_t)(*w) * (*hgt) * 4) return 3; // caller must (re)size
+    if (!s->ReceiveImage(pixels, 0x1908 /*GL_RGBA*/, false, 0)) return -1;
+    if (s->IsUpdated()) return 2; // resized under us: caller re-sizes, frame comes next poll
     return s->IsFrameNew() ? 1 : 0;
 }
 

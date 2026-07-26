@@ -120,3 +120,49 @@ func TestRecvPollerGateAppliesWhileUnconnected(t *testing.T) {
 		t.Fatalf("fps gate bypassed while unconnected: %d receives in 1s (cap 10)", allowed)
 	}
 }
+
+// TestRecvPollerRefusesBogusGeometry is the OOM regression at the state-machine level: a
+// sender-info read can be torn while a large shared texture is created (measured:
+// w=139846784 h=3840 for a 3840x2160 sender). The poller must refuse it - never emit a
+// resize - and must not count it as activity, so the poll backs off and retries.
+func TestRecvPollerRefusesBogusGeometry(t *testing.T) {
+	now := time.Now()
+	p := newRecvPoller(nil, now)
+	for _, code := range []int{recvUpdated, recvNeedSize} {
+		act := p.apply(code, 139846784, 3840, 0, now)
+		if act.resize || act.size != 0 {
+			t.Fatalf("code %d: resize=%v size=%d - want refused (would allocate %d bytes)",
+				code, act.resize, act.size, 139846784*3840*4)
+		}
+		if !act.badGeom {
+			t.Fatalf("code %d: badGeom=false, want true", code)
+		}
+	}
+	// A bogus update is NOT activity: the poller must reach the idle interval.
+	now = now.Add(recvIdleAfter + time.Millisecond)
+	if act := p.apply(recvUpdated, 139846784, 3840, 0, now); act.interval != recvPollIdle {
+		t.Fatalf("interval after a bogus update = %v, want the idle backoff %v", act.interval, recvPollIdle)
+	}
+	// Real dims recover: resize with the exact validated byte size, and the fast poll re-arms.
+	act := p.apply(recvUpdated, 3840, 2160, 0, now)
+	if !act.resize || act.size != 3840*2160*4 || act.badGeom {
+		t.Fatalf("valid 4K update = %+v, want resize with size %d", act, 3840*2160*4)
+	}
+	if act.interval != recvPollEvery {
+		t.Fatalf("interval after a real update = %v, want %v", act.interval, recvPollEvery)
+	}
+}
+
+// TestRecvPollerResizeOnlyOnGeometryChange: a matching buffer length is never re-sized, so a
+// steady 4K sender allocates nothing on the needs-size/updated paths.
+func TestRecvPollerResizeOnlyOnGeometryChange(t *testing.T) {
+	now := time.Now()
+	p := newRecvPoller(nil, now)
+	const n = 3840 * 2160 * 4
+	if act := p.apply(recvNeedSize, 3840, 2160, n, now); act.resize {
+		t.Fatal("re-sized a buffer that already matches the sender geometry")
+	}
+	if act := p.apply(recvNeedSize, 1920, 1080, n, now); !act.resize || act.size != 1920*1080*4 {
+		t.Fatalf("geometry change = %+v, want resize to %d", act, 1920*1080*4)
+	}
+}

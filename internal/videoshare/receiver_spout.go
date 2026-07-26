@@ -100,7 +100,19 @@ func (r *spoutReceiver) run(name string) {
 	C.rave_spout_set_receiver(h, cname)
 
 	var buf []byte
+	var bw, bh int // geometry buf was sized for (a resize between poll passes must not tear Rect)
 	var w, hgt C.uint
+	var dropped int     // frames dropped at the pool's live-bytes ceiling (bounded capture)
+	var warnedGeom bool // rate-limit the implausible-geometry warning
+	defer func() {
+		if len(buf) > 0 {
+			PutPix(buf) // the un-delivered readback buffer (leaked on every receiver close)
+		}
+		if dropped > 0 {
+			r.log.Info(source, "spout: capture frames dropped at the in-flight ceiling",
+				map[string]any{"sender": name, "dropped": dropped})
+		}
+	}()
 	// Poll discipline (interval backoff, FPS gate, resize/deliver decisions) lives in
 	// recvPoller (recvpoll.go) - the gate runs BEFORE ReceiveImage, connected or not, so
 	// an over-budget or stale poll never acquires the sender's shared-texture mutex.
@@ -121,21 +133,40 @@ func (r *spoutReceiver) run(name string) {
 		if len(buf) > 0 {
 			px = (*C.uchar)(unsafe.Pointer(&buf[0]))
 		}
-		act := p.apply(int(C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt)),
-			int(w), int(hgt), len(buf), time.Now())
+		// The cgo call WRITES w/hgt, so read them in a separate statement: Go leaves the
+		// evaluation order of non-call operands vs. the call in one expression unspecified.
+		code := int(C.rave_spout_recv(h, cname, px, C.uint(len(buf)), &w, &hgt))
+		act := p.apply(code, int(w), int(hgt), len(buf), time.Now())
+		if act.badGeom && !warnedGeom {
+			warnedGeom = true
+			r.log.Warn(source, "spout: sender reported an implausible frame size - ignoring until it settles",
+				map[string]any{"sender": name, "w": int(w), "h": int(hgt)})
+		}
 		if act.resize { // (re)connect/resize: size the buffer, frame arrives on a later poll
 			if len(buf) > 0 {
 				PutPix(buf) // recycle the old size's buffer (leaked before)
 			}
-			buf = getPix(int(w) * int(hgt) * 4)
+			buf = getPix(act.size) // act.size is validated (FrameBytes); nil only if the pool refused
+			bw, bh = int(w), int(hgt)
 		}
-		if act.frame {
+		if act.frame && len(buf) > 0 {
 			// zero-copy handoff: the readback buffer IS the delivered frame; the next
 			// readback targets a fresh pooled buffer (no full-frame memcpy - 2 GB/s at
 			// 4K60). Consumers release via Frame.Release → PutPix.
-			img := &image.NRGBA{Pix: buf, Stride: int(w) * 4,
-				Rect: image.Rect(0, 0, int(w), int(hgt))}
-			buf = getPix(len(buf))
+			//
+			// Geometry comes from the LAST RESIZE (bw/bh), not the current poll: the buffer
+			// was sized then, and a sender resize between the two would otherwise publish a
+			// Rect that disagrees with len(Pix).
+			next, ok := tryGetPix(len(buf))
+			if !ok {
+				// Live-bytes ceiling: downstream is holding the maximum in-flight frames.
+				// Newest-wins - drop THIS frame and re-use its buffer for the next readback
+				// rather than allocating (allocating is what OOM'd the child at 4K60).
+				dropped++
+				continue
+			}
+			img := &image.NRGBA{Pix: buf, Stride: bw * 4, Rect: image.Rect(0, 0, bw, bh)}
+			buf = next
 			r.deliver(img) // newest-wins, never blocks the poller
 		}
 		if act.interval != interval {
