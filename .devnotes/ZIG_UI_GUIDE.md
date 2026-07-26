@@ -1349,6 +1349,50 @@ collection track WITH a beatgrid: an empty scratch config cannot open the cue ed
 5. Add the channel to `retainedChans` and call `send` at the patch site, falling through to the
    existing stateless bridge. Add the bench row to PHASEB_BASELINE with the verdict.
 
+## Phase B — B7 (iii) i18n catalog handshake: MEASURED, NOT SHIPPED
+
+Full record + numbers: `.devnotes/B7_I18N_CATALOG_DESIGN.md`. Summary, because the temptation
+recurs every time someone notices how much chrome a settings document carries:
+
+**Shipping catalogs into Zig so documents can carry i18n KEYS is not worth it, and the numbers say
+so before the non-negotiable does.** i18n text is **10.7% of document bytes** (12.4% of arena bytes,
+25.8% of distinct strings) across 827 golden documents — and the distribution is upside down: the
+chrome-heavy surfaces (settings 41.1%, worlds modals 48.1%) render on demand, while the hot path is
+almost pure data (player 4.6%, live cockpit 1.0%, live tick 1.8%).
+
+**The decisive number is (ii)'s, not (iii)'s:** `#ce-topbar` cut 98.7% of its document bytes and
+dispatch moved +0.8%/-4.5% — inside the noise band. This seam is not byte-bound, so a 10.7% cut
+cannot register. Against that: a reverse lookup per encoded string (slower on the 74% of strings that
+are not catalog values), an RZW1 header break (14 → 18 B for `locale_gen`) on every document, a
+resident 261 kB catalog per locale in the lib, a second source of truth for locale resolution, and a
+catalog miss as a new way to render "" on a byte-equality seam — plus `Tn` plurals and `{...}`
+interpolation stay Go-side regardless.
+
+`i18n Go-only` is a recorded non-negotiable (UI_RENDER_ARCH_ANALYSIS.md, rule 6, root.zig's header,
+CLAUDE.md), not a phase decision. It stands.
+
+**What (iii) shipped instead** — the cost i18n really has on this seam is Go-side, and it had no
+benchmark at all: `load()` took the EXCLUSIVE mutex on every `T`/`Tn` just to read a `loaded` bool,
+and `lookup` took `mu.RLock` per key although the catalogs are immutable after load. `sync.Once` +
+three atomic snapshots (active map, en fallback, active code, published together under `mu`):
+
+| | before | after |
+|---|--:|--:|
+| `T` | 31.4 ns | **12.9 ns** |
+| `T`, 32 goroutines | 71.0 ns | **0.90 ns** |
+| 400-key state-build shape | 13.5 µs | **5.4 µs** |
+
+~7 µs off a ~100 µs settings state build (inside the noise band, but on the handler lane and with no
+wire change). Race-tested, including 8 readers × 20k resolutions against a continuous locale-switch
+storm — the switcher is stopped only AFTER the readers finish, or the overlap it exists to prove
+never happens.
+
+Reopen only if ALL of: a >40% i18n surface lands on a high-cadence path; the seam becomes byte-bound
+(procShell, not cgo); and a catalog miss can be made a build failure rather than a runtime "". The
+preferred shape then is a **content-addressed intern table**, not the i18n catalog — Go stays the
+single source of truth, Zig never learns what a locale is, and the retained channel already carries
+the generation it would key on.
+
 ## Phase B — B0 baseline instrumentation (bench batch)
 
 Numbers live in **`.devnotes/PHASEB_BASELINE.md`** (machine, commit, tables, cost model, findings).
