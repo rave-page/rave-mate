@@ -24,3 +24,6 @@ func AssignToJobClass(*os.Process, JobClass) {}
 // AssignToJobMem is a no-op off Windows (no per-process memory-cap equivalent wired yet; a
 // cgroup/setrlimit RLIMIT_AS variant can be added if needed).
 func AssignToJobMem(*os.Process, int) {}
+
+// AssignToJobMemClass is a no-op off Windows (see AssignToJobMem).
+func AssignToJobMemClass(*os.Process, int, JobClass) {}

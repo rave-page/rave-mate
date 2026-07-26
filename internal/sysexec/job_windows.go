@@ -113,11 +113,13 @@ type jobCPUInfo struct {
 	CpuRate      uint32
 }
 
-// ensureMemJob builds (once) a kill-on-close job with a per-process committed-memory cap. The
-// cap is fixed by the first caller (only the media child uses it today); a runaway heap in an
-// assigned child fails its next allocation → the child dies → its Host restarts it. This is the
-// OS hard backstop under the child's own GOMEMLIMIT + medialink.memWatchdog.
-func ensureMemJob(capBytes uintptr) {
+// ensureMemJob builds (once) a kill-on-close job with a per-process committed-memory cap AND
+// the given class's aggregate CPU rate cap (a process joins exactly one job, so the mem job
+// must carry its own CPU discipline - the media child previously got the mem cap but NO CPU
+// class). Cap + class are fixed by the first caller (only the media child uses it today); a
+// runaway heap in an assigned child fails its next allocation → the child dies → its Host
+// restarts it. OS hard backstop under the child's own GOMEMLIMIT + medialink.memWatchdog.
+func ensureMemJob(capBytes uintptr, class JobClass) {
 	memJobOnce.Do(func() {
 		h, err := windows.CreateJobObject(nil, nil)
 		if err != nil {
@@ -136,28 +138,42 @@ func ensureMemJob(capBytes uintptr) {
 			_ = windows.CloseHandle(h)
 			return
 		}
+		if rate := cpuRateFor(class); rate > 0 {
+			cpu := jobCPUInfo{ControlFlags: jobCPUEnable | jobCPUHardCap, CpuRate: rate}
+			if _, err := windows.SetInformationJobObject(
+				h, windows.JobObjectCpuRateControlInformation,
+				uintptr(unsafe.Pointer(&cpu)), uint32(unsafe.Sizeof(cpu)),
+			); err != nil {
+				_ = windows.CloseHandle(h)
+				return
+			}
+		}
 		memJobH = h
 	})
 }
 
-// AssignToJobMem places a freshly-started child under a kill-on-close job with a per-process
-// committed-memory cap of capMB (first call fixes the cap). Best-effort - on failure the child
-// still runs, just uncapped. capMB<=0 falls back to the plain kill-on-close job.
-func AssignToJobMem(p *os.Process, capMB int) {
+// AssignToJobMemClass places a freshly-started child under a kill-on-close job carrying a
+// per-process committed-memory cap of capMB AND class's CPU rate cap (first call fixes both).
+// Best-effort - on failure the child still runs, just uncapped. capMB<=0 falls back to the
+// plain per-class job.
+func AssignToJobMemClass(p *os.Process, capMB int, class JobClass) {
 	if p == nil {
 		return
 	}
 	if capMB <= 0 {
-		AssignToJob(p, false)
+		AssignToJobClass(p, class)
 		return
 	}
-	ensureMemJob(uintptr(capMB) * 1024 * 1024)
+	ensureMemJob(uintptr(capMB)*1024*1024, class)
 	if memJobH == 0 {
-		AssignToJob(p, false) // cap setup failed - at least keep kill-on-close
+		AssignToJobClass(p, class) // mem-cap setup failed - at least keep kill-on-close + CPU class
 		return
 	}
 	assign(memJobH, p)
 }
+
+// AssignToJobMem is AssignToJobMemClass with the uncapped realtime class.
+func AssignToJobMem(p *os.Process, capMB int) { AssignToJobMemClass(p, capMB, JobRealtime) }
 
 // AssignToJob places a freshly-started child process under the kill-on-close job. Best-effort:
 // on failure the cooperative shutdown + taskkill path still applies. background=true selects the

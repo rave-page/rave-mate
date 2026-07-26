@@ -52,6 +52,9 @@ type Options struct {
 	// cap (kill-on-close). A runaway heap fails its next allocation → child dies → Host restarts it.
 	// For resource-bearing children (media plane); leave 0 for the plain kill-on-close job.
 	MemLimitMB int
+	// CPUClass is the child's job CPU-scheduling class (sysexec.JobClass). Zero value =
+	// JobRealtime (uncapped, prior behaviour); the media plane child runs as JobMedia.
+	CPUClass sysexec.JobClass
 	// Command overrides how the child is spawned (default `<exe> feature <name>`). TEST SEAM for
 	// callers outside this package: a test re-execs its own binary with an env marker instead of
 	// shipping an exe. Nil in production.
@@ -412,9 +415,9 @@ func (h *Host) runOnce(ctx context.Context) error {
 		return err
 	}
 	if h.opt.MemLimitMB > 0 {
-		sysexec.AssignToJobMem(cmd.Process, h.opt.MemLimitMB) // memory-capped kill-on-close job
+		sysexec.AssignToJobMemClass(cmd.Process, h.opt.MemLimitMB, h.opt.CPUClass) // mem-capped kill-on-close job + CPU class
 	} else {
-		sysexec.AssignToJob(cmd.Process, false) // Windows: kill-on-close backstop
+		sysexec.AssignToJobClass(cmd.Process, h.opt.CPUClass) // Windows: kill-on-close backstop (+ class CPU cap)
 	}
 
 	// Child stderr (panic stacks, raw diagnostics) → daemon log, line by line.

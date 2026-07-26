@@ -2,7 +2,12 @@
 
 package sysexec
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
 
 // The CPU discipline per class is the whole point of the split: realtime uncapped, batch at the
 // original 10% bucket, live media bounded but generous.
@@ -45,7 +50,29 @@ func TestAssignToJobBoolMapping(t *testing.T) {
 	AssignToJob(nil, true)
 	AssignToJobClass(nil, JobMedia)
 	AssignToJobMem(nil, 64)
+	AssignToJobMemClass(nil, 64, JobMedia)
 	if cpuRateFor(JobBatch) == 0 {
 		t.Fatal("background=true must still map to a CPU-capped job")
+	}
+}
+
+// The memory-capped job must ALSO carry its class's CPU cap - the media child previously
+// sat in a mem-only job with no CPU discipline at all (WP-7).
+func TestMemJobCarriesClassCPUCap(t *testing.T) {
+	ensureMemJob(64*1024*1024, JobMedia) // singleton: first caller fixes cap + class
+	if memJobH == 0 {
+		t.Fatal("mem job creation failed")
+	}
+	var cpu jobCPUInfo
+	var got uint32
+	if err := windows.QueryInformationJobObject(memJobH, windows.JobObjectCpuRateControlInformation,
+		uintptr(unsafe.Pointer(&cpu)), uint32(unsafe.Sizeof(cpu)), &got); err != nil {
+		t.Fatalf("query cpu rate: %v", err)
+	}
+	if cpu.CpuRate != cpuRateFor(JobMedia) {
+		t.Fatalf("mem job CpuRate = %d, want %d", cpu.CpuRate, cpuRateFor(JobMedia))
+	}
+	if cpu.ControlFlags&jobCPUHardCap == 0 {
+		t.Fatalf("mem job CPU cap not hard: flags %#x", cpu.ControlFlags)
 	}
 }
