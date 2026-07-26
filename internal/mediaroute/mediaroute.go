@@ -371,12 +371,16 @@ type spoutSource struct {
 }
 
 func (m *Manager) openSpoutSource(name string, _, _ int) (medialink.Source, error) {
-	recv, err := videoshare.NewFrameReceiver(m.log, name)
+	fps := m.cfg().FPSCap()
+	// The cap goes INTO the receiver: an over-budget poll skips ReceiveImage entirely, so a 120 fps
+	// VJ source capped to 60 pays 60 GPU→CPU readbacks/s instead of 120. The gate below stays as the
+	// downstream guard (shared capture runs at the fastest route's rate; slower routes drop here).
+	recv, err := videoshare.NewFrameReceiverOpts(m.log, name, videoshare.RecvOptions{MaxFPS: float64(fps)})
 	if err != nil {
 		return nil, err
 	}
 	s := &spoutSource{recv: recv}
-	if fps := m.cfg().FPSCap(); fps > 0 {
+	if fps > 0 {
 		s.minGap = time.Duration(float64(time.Second) / float64(fps))
 	}
 	return s, nil

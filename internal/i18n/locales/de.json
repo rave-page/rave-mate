@@ -220,7 +220,7 @@
       "title": "Signalquellen & Herkunft"
     },
     "ml-fps": {
-      "body": "Begrenzt, wie viele Frames pro Sekunde diese Maschine verlassen. VJ-Tools rendern oft mit 120+ fps - jeder Frame über dem Limit wird VOR Capture-Kopie, Encoding und Verschlüsselung verworfen, das Limit begrenzt also direkt die Sender-CPU. 60 reicht für jeden Projektor und Stream; nur erhöhen, wenn die Gegenseite wirklich schneller anzeigt.",
+      "body": "Auf dem PC einstellen, der den Stream SENDET. Begrenzt, wie viele Frames pro Sekunde diese Maschine verlassen. VJ-Tools rendern oft mit 120+ fps - Frames über dem Limit werden bereits in der Capture-Schleife übersprungen, VOR der GPU→CPU-Kopie: eine 120-fps-Quelle mit Limit 60 zahlt 60 Readbacks pro Sekunde statt 120. Diese Kopie ist der größte Speicherbandbreiten-Posten auf dem Sender (8 MB pro 1080p-Frame, 33 MB pro 4K-Frame) - deshalb ist das Limit, nicht der Codec, der erste Hebel, wenn OBS oder ein anderer Encoder auf derselben Maschine anfängt zu ruckeln. Encoding und Verschlüsselung entfallen für diese Frames ebenfalls. 60 reicht für jeden Projektor und Stream; nur erhöhen, wenn die Gegenseite wirklich schneller anzeigt. Ziehen mehrere Peers DIESELBE Quelle, wird ein Capture geteilt: es läuft mit der Rate der schnellsten Route, langsamere Routen verwerfen ihre zusätzlichen Frames ohne zweiten Readback.",
       "title": "Sender-Framerate-Limit"
     },
     "ml-height": {

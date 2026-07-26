@@ -4,6 +4,7 @@
 // <string>, <vector> - compiled by g++ via cgo). One SPOUTLIBRARY handle per deck/thread.
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <windows.h>
 #include "SpoutLibrary.h"
 #include "spout_shim.h"
@@ -29,6 +30,22 @@ static GetSpoutFn spout_factory(void) {
 static SPOUTHANDLE make_spout(void) {
     GetSpoutFn fn = spout_factory();
     return fn ? fn() : nullptr;
+}
+
+// registry() is ONE process-wide handle used only for name-registry queries (shared-memory reads:
+// GetSenderCount / GetSender / GetSenderInfo / FindSenderName). No OpenGL context, no sender or
+// receiver binding, never released. The registry lives in shared memory, so a long-lived object
+// answers every query - the old create-and-Release per call churned 1+2N COM objects on every 2 s
+// mediaroute scan, on the machine that is already busy encoding. Guarded by registry_mu because
+// the scan goroutine and route opens can query concurrently.
+static std::mutex& registry_mu(void) {
+    static std::mutex m;
+    return m;
+}
+
+static SPOUTHANDLE registry(void) {
+    static SPOUTHANDLE s = make_spout(); // magic static: run-once, thread-safe
+    return s;
 }
 
 extern "C" {
@@ -84,41 +101,68 @@ void rave_spout_release(void* h) {
 }
 
 int rave_spout_sender_count(void) {
-    SPOUTHANDLE s = make_spout();
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
     if (!s) return -1;
-    int n = s->GetSenderCount();
-    s->Release();
-    return n;
+    return s->GetSenderCount();
 }
 
 int rave_spout_find(const char* name) {
-    SPOUTHANDLE s = make_spout();
+    if (!name) return 0;
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
     if (!s) return -1;
-    int found = s->FindSenderName(name) ? 1 : 0;
-    s->Release();
-    return found;
+    return s->FindSenderName(name) ? 1 : 0;
 }
 
 int rave_spout_sender_name(int idx, char* out, int cap) {
     if (!out || cap <= 0) return 0;
-    SPOUTHANDLE s = make_spout();
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
     if (!s) return 0;
-    int ok = s->GetSender(idx, out, cap) ? 1 : 0;
-    s->Release();
-    return ok;
+    return s->GetSender(idx, out, cap) ? 1 : 0;
 }
 
 int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h) {
     if (!name || !w || !h) return 0;
-    SPOUTHANDLE s = make_spout();
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
     if (!s) return 0;
     unsigned int ww = 0, hh = 0;
     HANDLE share = 0;
     DWORD fmt = 0;
-    int ok = s->GetSenderInfo(name, ww, hh, share, fmt) ? 1 : 0;
-    s->Release();
-    if (ok) { *w = ww; *h = hh; }
-    return ok;
+    if (!s->GetSenderInfo(name, ww, hh, share, fmt)) return 0;
+    *w = ww;
+    *h = hh;
+    return 1;
+}
+
+// rave_spout_scan fills names (maxN slots of nameCap bytes, NUL-terminated) + dims (2 uints per
+// slot: w,h) in one pass and returns the slot count (-1 = no DLL). One lock, one handle, zero
+// allocations of COM objects - this replaces count + N name + N size calls per scan.
+int rave_spout_scan(char* names, int nameCap, int maxN, unsigned int* dims) {
+    if (!names || !dims || nameCap <= 0 || maxN <= 0) return -1;
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
+    if (!s) return -1;
+    int n = s->GetSenderCount();
+    if (n < 0) return -1;
+    if (n > maxN) n = maxN;
+    int out = 0;
+    for (int i = 0; i < n; i++) {
+        char* slot = names + (size_t)out * (size_t)nameCap;
+        slot[0] = 0;
+        if (!s->GetSender(i, slot, nameCap) || slot[0] == 0) continue;
+        slot[nameCap - 1] = 0;
+        unsigned int w = 0, h = 0;
+        HANDLE share = 0;
+        DWORD fmt = 0;
+        if (!s->GetSenderInfo(slot, w, h, share, fmt)) { w = 0; h = 0; }
+        dims[(size_t)out * 2] = w;
+        dims[(size_t)out * 2 + 1] = h;
+        out++;
+    }
+    return out;
 }
 
 void rave_spout_set_receiver(void* h, const char* name) {
