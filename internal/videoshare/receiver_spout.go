@@ -19,12 +19,10 @@ import (
 	"rave.page/mate/internal/logbus"
 )
 
+// Poll cadence constants live in recvpoll.go (untagged) with the state machine.
 const (
-	recvPollEvery = 4 * time.Millisecond  // ~250 Hz poll while frames flow; IsFrameNew gates actual work
-	recvPollIdle  = 50 * time.Millisecond // backed-off poll once the sender goes quiet (no frame for recvIdleAfter)
-	recvIdleAfter = 2 * time.Second       // quiet period before backing off (reconnect latency ≤ recvPollIdle)
-	recvNameCap   = 256
-	scanMaxN      = 64 // per-scan sender ceiling (bounded staging buffers; Spout registries are far smaller)
+	recvNameCap = 256
+	scanMaxN    = 64 // per-scan sender ceiling (bounded staging buffers; Spout registries are far smaller)
 )
 
 // scanSenders enumerates every registered sender name + its dimensions in ONE call on the
@@ -96,10 +94,11 @@ func (r *spoutReceiver) run(name string) {
 
 	var buf []byte
 	var w, hgt C.uint
-	// Adaptive poll: 4ms while frames flow (latency), 50ms once the sender goes quiet -
-	// a 250 Hz busy-poll against an idle/closed sender is pure wakeup churn.
-	interval := recvPollEvery
-	lastFrame := time.Now()
+	// Poll discipline (interval backoff, FPS gate, resize/deliver decisions) lives in
+	// recvPoller (recvpoll.go) - the gate runs BEFORE ReceiveImage, connected or not, so
+	// an over-budget or stale poll never acquires the sender's shared-texture mutex.
+	p := newRecvPoller(&r.gate, time.Now())
+	interval := p.interval
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -108,23 +107,19 @@ func (r *spoutReceiver) run(name string) {
 			return
 		case <-t.C:
 		}
-		// FPS cap: skip the whole readback while over budget. Only once connected (len(buf) > 0) -
-		// (re)connect/resize detection stays at the fast poll rate so a route comes up promptly.
-		if len(buf) > 0 && !r.gate.allow(time.Now().UnixNano()) {
+		if !p.allow(time.Now()) {
 			continue
 		}
 		var px *C.uchar
 		if len(buf) > 0 {
 			px = (*C.uchar)(unsafe.Pointer(&buf[0]))
 		}
-		got := false
-		switch C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt) {
-		case 2: // (re)connected / resized: size the buffer, frame arrives on the next poll
-			if w > 0 && hgt > 0 {
-				buf = getPix(int(w) * int(hgt) * 4)
-			}
-			got = true // activity - stay/return to the fast poll
-		case 1:
+		act := p.apply(int(C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt)),
+			int(w), int(hgt), len(buf), time.Now())
+		if act.resize { // (re)connect/resize: size the buffer, frame arrives on a later poll
+			buf = getPix(int(w) * int(hgt) * 4)
+		}
+		if act.frame {
 			// zero-copy handoff: the readback buffer IS the delivered frame; the next
 			// readback targets a fresh pooled buffer (no full-frame memcpy - 2 GB/s at
 			// 4K60). Consumers release via Frame.Release → PutPix.
@@ -132,16 +127,9 @@ func (r *spoutReceiver) run(name string) {
 				Rect: image.Rect(0, 0, int(w), int(hgt))}
 			buf = getPix(len(buf))
 			r.deliver(img) // newest-wins, never blocks the poller
-			got = true
 		}
-		if got {
-			lastFrame = time.Now()
-			if interval != recvPollEvery {
-				interval = recvPollEvery
-				t.Reset(interval)
-			}
-		} else if interval != recvPollIdle && time.Since(lastFrame) > recvIdleAfter {
-			interval = recvPollIdle
+		if act.interval != interval {
+			interval = act.interval
 			t.Reset(interval)
 		}
 	}
