@@ -30,10 +30,11 @@ func autoUI(t *testing.T) (*UI, *automation.Service) {
 	return &UI{svc: ui.Services{Automations: svc}, stop: make(chan struct{})}, svc
 }
 
-// waitFor polls until cond or the deadline: aeSave/asSave complete in u.bg.
+// waitFor polls until cond or the deadline: aeSave/asSave complete in u.bg. The deadline
+// covers a real bbolt Put+fsync on a loaded CI runner disk - 3s flaked on windows-latest.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
