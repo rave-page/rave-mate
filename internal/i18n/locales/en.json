@@ -2263,6 +2263,7 @@
     "doesntMatch": "Doesn't match",
     "done": "done",
     "downgrades": "downgrades {n}",
+    "encBusy": "encode {ms} ms/frame",
     "error": "error",
     "fileTransfer": "File transfer",
     "forget": "Forget",

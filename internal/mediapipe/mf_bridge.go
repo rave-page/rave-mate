@@ -263,5 +263,6 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
+		EncBusyMs:  st.EncBusyMs,
 		Downgrades: b.downgrades + st.Downgrades}
 }

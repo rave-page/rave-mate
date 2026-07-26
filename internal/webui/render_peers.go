@@ -1016,6 +1016,9 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 	var out []string
 	if p.ZeroCopy {
 		out = append(out, i18n.T("peers.zeroCopyFps", i18n.A{"fps": fmt.Sprintf("%.1f", p.CapFPS)}))
+		if p.EncBusyMs > 0 {
+			out = append(out, i18n.T("peers.encBusy", i18n.A{"ms": fmt.Sprintf("%.1f", p.EncBusyMs)}))
+		}
 		if p.CapSkips > 0 {
 			out = append(out, i18n.T("peers.capSkips", i18n.A{"n": fmt.Sprint(p.CapSkips)}))
 		}

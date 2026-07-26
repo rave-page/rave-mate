@@ -840,6 +840,7 @@ type ProcSession struct {
 	recycle    func(reason string)
 	downgrades atomic.Int32
 	capRate    counterRate
+	busyRate   busyMean
 
 	name       string
 	bgra       bool
@@ -1282,6 +1283,25 @@ func (r *counterRate) sample(n uint64, now time.Time) float64 {
 	return r.fps
 }
 
+// busyMean turns the child's cumulative encBusyNs + capFrames into a per-frame mean over the
+// interval between reads (a cumulative ratio would flatten a live saturation spike).
+type busyMean struct {
+	mu     sync.Mutex
+	ns     uint64
+	frames uint64
+	ms     float64
+}
+
+func (b *busyMean) mean(ns, frames uint64) float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if frames > b.frames && ns >= b.ns {
+		b.ms = float64(ns-b.ns) / float64(frames-b.frames) / 1e6
+	}
+	b.ns, b.frames = ns, frames
+	return b.ms
+}
+
 // Encode submits one RGBA frame. During a child restart frames are DROPPED (nil error)
 // so the route survives the crash; a poisoned/dead session returns an error.
 func (s *ProcSession) Encode(rgba []byte, ptsNs int64) error {
@@ -1468,6 +1488,7 @@ func (s *ProcSession) Stats() ProcStats {
 			}
 		}
 		st.CapFPS = s.capRate.sample(st.CapFrames, time.Now())
+		st.EncBusyMs = s.busyRate.mean(atomic.LoadUint64(s.shm.u64(56)), st.CapFrames)
 	}
 	s.child.mu.Lock()
 	st.Restarts = s.child.restarts

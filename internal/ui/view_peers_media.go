@@ -194,6 +194,9 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 	var out []string
 	if p.ZeroCopy {
 		out = append(out, fmt.Sprintf("zero-copy %.1f fps", p.CapFPS))
+		if p.EncBusyMs > 0 {
+			out = append(out, fmt.Sprintf("encode %.1f ms/frame", p.EncBusyMs))
+		}
 		if p.CapSkips > 0 {
 			out = append(out, fmt.Sprintf("skips %d", p.CapSkips))
 		}
