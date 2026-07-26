@@ -2522,7 +2522,24 @@ func Load() (Config, error) {
 	}
 	cfg := Default()
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Default(), nil // corrupt file - don't block startup
+		// Corrupt file: preserve the evidence, then try the .bak from the last good
+		// Save. Silently resetting to defaults (the old behavior) destroyed the
+		// user's settings for good the moment anything saved.
+		_ = os.Rename(path, path+fmt.Sprintf(".corrupt-%d", time.Now().Unix()))
+		if braw, berr := os.ReadFile(path + ".bak"); berr == nil {
+			bcfg := Default()
+			if json.Unmarshal(braw, &bcfg) == nil {
+				if bcfg.Version < configVersion {
+					migrate(&bcfg, braw)
+				}
+				bcfg.Features.MIDIController.normalize()
+				if bcfg.APIBaseURL == "" {
+					bcfg.APIBaseURL = resolveAPIBase()
+				}
+				return bcfg, fmt.Errorf("config was corrupt; recovered from .bak")
+			}
+		}
+		return Default(), fmt.Errorf("config was corrupt and no usable .bak; reset to defaults")
 	}
 	if cfg.Version < configVersion {
 		migrate(&cfg, raw)
@@ -2556,7 +2573,9 @@ func migrate(cfg *Config, raw []byte) {
 	cfg.Version = configVersion
 }
 
-// Save atomically writes config to disk.
+// Save atomically + DURABLY writes config to disk. fsync before rename: without it a
+// hard crash can commit the rename while the data blocks are lost, leaving a zeroed
+// config (happened in production 2026-07-26). The previous config survives as .bak.
 func (c Config) Save() error {
 	path, err := DataPath(fileName)
 	if err != nil {
@@ -2567,8 +2586,23 @@ func (c Config) Save() error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
+	}
+	if _, err = f.Write(raw); err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	// Keep the last good config as .bak (best-effort; source for corrupt-file recovery).
+	if _, serr := os.Stat(path); serr == nil {
+		_ = os.Remove(path + ".bak")
+		_ = os.Rename(path, path+".bak")
 	}
 	return os.Rename(tmp, path)
 }
