@@ -1,13 +1,13 @@
 {
-  "version": "nightly-8c4506e",
-  "build": 167,
-  "commit": "8c4506e",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-167-20260726-8c4506e.exe",
-  "sha256": "9bf0039e3bbd88de3269654f1e339c3a9656b511c61e5313183cf540121a792c",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-167-20260726-8c4506e.exe",
-  "installer_sha256": "bb0cf8e333868d289c08f6dfa843738a167ac8ecc363333af090ce60a62c5f8e",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-167-20260726-8c4506e",
-  "linux_sha256": "cab8dda5d6dbc0f54526dc35451cdcca3e71dd3ff097f9ca1b1a31000045a138",
+  "version": "nightly-82a3543",
+  "build": 168,
+  "commit": "82a3543",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-168-20260726-82a3543.exe",
+  "sha256": "f86a7cd31a78f49af2e7a360e61352a6cc0c87c81bbab5bf36fcd05cfac71b8d",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-168-20260726-82a3543.exe",
+  "installer_sha256": "445cec7ec212b9a2c5612e4304ee991f7d1ff57061a93fc2b87d08a21d013bb6",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-168-20260726-82a3543",
+  "linux_sha256": "52790b3d93b87e99106861a1567515ba9ebd6565bd797e80c55eb954cb257e8d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T20:16:37Z",
-  "notes": "Merge feat/zig-b7-state-i18n (i3-i7): B7 wire fan-out complete - every tab on RZW1"
+  "released": "2026-07-26T20:36:19Z",
+  "notes": "Merge fix/mfenc-embed-child: encoder child embedded in main exe + advertisement gate"
 }
