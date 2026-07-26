@@ -52,9 +52,33 @@ var Warnf = func(format string, args ...any) {}
 // ProcSession is unavailable on this platform (no Zig MF encoder child).
 type ProcSession struct{}
 
+// SpoutSource / ProcOpts mirror the Windows surface so callers compile everywhere.
+type SpoutSource struct {
+	Name    string
+	Resolve func() (handle uint64, dxgiFormat uint32, w, h int, ok bool)
+}
+
+type ProcOpts struct {
+	LUID                 int64
+	InW, InH, OutW, OutH int
+	FPS                  float64
+	Kbps, Gop            int
+	Spout                *SpoutSource
+}
+
+// ErrZeroCopyRefused never fires here (no zero-copy path off Windows).
+var ErrZeroCopyRefused = errors.New("mfenc: zero-copy source refused")
+
 func OpenProcSession(int64, int, int, int, int, float64, int, int) (*ProcSession, error) {
 	return nil, ErrUnsupported
 }
+
+func OpenProcSessionOpts(ProcOpts) (*ProcSession, error) { return nil, ErrUnsupported }
+
+// ZeroCopyPinnedToReadback: nothing to pin without a zero-copy path.
+func ZeroCopyPinnedToReadback(string) bool { return false }
+
+func (s *ProcSession) IsZeroCopy() bool { return false }
 
 func (s *ProcSession) Encode(_ []byte, _ int64) error { return ErrUnsupported }
 func (s *ProcSession) Output() <-chan AU              { return nil }

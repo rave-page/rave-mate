@@ -168,9 +168,49 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.Restarts > 0 {
 			p += fmt.Sprintf(" · restarts %d", s.Pipe.Restarts)
 		}
+		// Collected since the native engine landed but never rendered until now: submit→AU
+		// latency, encoder queue depth and child CPU are THE saturation signals, and a route
+		// that ships them nowhere ships blind.
+		if s.Pipe.LatP99Ms > 0 {
+			p += fmt.Sprintf(" · lat %.1f/%.1f ms p50/p99", s.Pipe.LatP50Ms, s.Pipe.LatP99Ms)
+		}
+		if s.Pipe.QueueDepth != 0 {
+			p += fmt.Sprintf(" · queue %d", s.Pipe.QueueDepth)
+		}
+		if s.Pipe.ChildCPUPct > 0 {
+			p += fmt.Sprintf(" · child cpu %.0f%%", s.Pipe.ChildCPUPct)
+		}
 		parts = append(parts, p)
+		if z := fmtCaptureLine(*s.Pipe); z != "" {
+			parts = append(parts, z)
+		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// fmtCaptureLine renders the zero-copy capture block ("" on a readback route with no
+// downgrades). A rig that always downgrades must be visible here rather than silently slow.
+func fmtCaptureLine(p medialink.PipelineStats) string {
+	var out []string
+	if p.ZeroCopy {
+		out = append(out, fmt.Sprintf("zero-copy %.1f fps", p.CapFPS))
+		if p.CapSkips > 0 {
+			out = append(out, fmt.Sprintf("skips %d", p.CapSkips))
+		}
+		if p.MtxTimeouts > 0 {
+			out = append(out, fmt.Sprintf("mutex timeouts %d", p.MtxTimeouts))
+		}
+		if p.SrcErrors > 0 {
+			out = append(out, fmt.Sprintf("src errors %d", p.SrcErrors))
+		}
+		if p.CapStaleMs > 0 {
+			out = append(out, fmt.Sprintf("stale %.0f ms", p.CapStaleMs))
+		}
+	}
+	if p.Downgrades > 0 {
+		out = append(out, fmt.Sprintf("downgrades %d", p.Downgrades))
+	}
+	return strings.Join(out, " · ")
 }
 
 // fmtClockLine renders the media-clock tier ("clock software · locked · offset +0.31 ms").
