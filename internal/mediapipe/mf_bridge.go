@@ -1,10 +1,12 @@
 package mediapipe
 
 // mf_bridge.go - native Media Foundation hardware encode as a medialink Source: the
-// preferred H.264 engine on Windows. No ffmpeg child, no multi-GB/s stdin pipe - frames
-// go to the GPU once (D3D11 upload → VideoProcessorBlt CSC/scale → encoder silicon) and
-// come back as annex-B AUs with PTS preserved. ffmpeg remains the fallback engine and
-// the decode side. Scaling (spec.MaxHeight) rides the same Blt - no extra cost.
+// preferred H.264 engine on Windows. Frames go over a shared-memory ring to the
+// supervised per-adapter Zig encoder child (native/zigenc: D3D11 upload →
+// VideoProcessorBlt CSC/scale → encoder silicon) and come back as annex-B AUs with PTS
+// preserved - no ffmpeg child, no multi-GB/s stdin pipe, and a vendor-driver fault kills
+// only the encoder child (supervisor restarts it; the route survives). ffmpeg remains
+// the fallback engine and the decode side. Scaling (spec.MaxHeight) rides the same Blt.
 
 import (
 	"context"
@@ -19,10 +21,11 @@ import (
 	"rave.page/mate/internal/mfenc"
 )
 
-// mfBridge implements medialink.Source (+KeyframeSource, PipelineReporter) over mfenc.
+// mfBridge implements medialink.Source (+KeyframeSource, PipelineReporter) over an
+// mfenc encoder-child session.
 type mfBridge struct {
 	log    *logbus.Bus
-	enc    *mfenc.Encoder
+	enc    *mfenc.ProcSession
 	src    medialink.Source
 	size   int
 	frames chan *medialink.Frame
@@ -65,14 +68,14 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 			luid = v
 		}
 	}
-	enc, err := mfenc.NewOn(luid, spec.Width, spec.Height, outW, outH, fps, kbps, gopFrames(fps))
+	enc, err := mfenc.OpenProcSession(luid, spec.Width, spec.Height, outW, outH, fps, kbps, gopFrames(fps))
 	if err != nil {
 		return nil, err
 	}
 	bctx, cancel := context.WithCancel(ctx)
 	b := &mfBridge{log: log, enc: enc, src: src, size: spec.Width * spec.Height * 4,
 		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{})}
-	log.Info(source, "native MF hardware encode", map[string]any{
+	log.Info(source, "native MF hardware encode (isolated encoder child)", map[string]any{
 		"encoder": enc.Name(), "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA(),
 		"device": spec.DeviceLUID})
@@ -184,7 +187,11 @@ func (b *mfBridge) RequestKeyframe() {
 	}
 }
 
-// PipeStats implements medialink.PipelineReporter.
+// PipeStats implements medialink.PipelineReporter (per-session perf: p99 rise is the
+// Phase-2 governor's early saturation signal).
 func (b *mfBridge) PipeStats() medialink.PipelineStats {
-	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value()}
+	st := b.enc.Stats()
+	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value(),
+		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
+		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct}
 }

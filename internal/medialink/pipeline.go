@@ -56,6 +56,12 @@ type PipelineStats struct {
 	HWAccel  string  // decode side: active hwaccel ("" = software)
 	OutFPS   float64 // frames leaving the child per second
 	Restarts int     // supervised child restarts
+	// Native-engine session telemetry (zero for ffmpeg children). Rising LatP99Ms is the
+	// Phase-2 load governor's early saturation signal.
+	LatP50Ms    float64 // submit→AU latency percentiles
+	LatP99Ms    float64
+	QueueDepth  int     // frames in flight inside the encoder
+	ChildCPUPct float64 // encoder child process CPU
 }
 
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.

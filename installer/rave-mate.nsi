@@ -83,6 +83,9 @@ Section "Install"
   !ifdef OPENVR_DLL
     File "/oname=openvr_api.dll" "${OPENVR_DLL}"    ; runtime-loaded by the vr backend
   !endif
+  !ifdef ENC_EXE
+    File "/oname=rave-mate-enc.exe" "${ENC_EXE}"    ; per-adapter MF encoder child (zigenc)
+  !endif
 
   CreateShortCut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -106,6 +109,7 @@ Section "Uninstall"
   Delete "$INSTDIR\${EXE_NAME}"
   Delete "$INSTDIR\SpoutLibrary.dll"
   Delete "$INSTDIR\openvr_api.dll"
+  Delete "$INSTDIR\rave-mate-enc.exe"
   Delete "$INSTDIR\uninstall.exe"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   RMDir  "$INSTDIR"

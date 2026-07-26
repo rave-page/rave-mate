@@ -1,8 +1,41 @@
-# Native MF hardware encode (internal/mfenc)
+# Native MF hardware encode (internal/mfenc + native/zigenc)
 
-The preferred H.264 engine on Windows for medialink video routes. Replaces the ffmpeg
-child on the send path: no subprocess, no multi-GB/s rawvideo stdin pipe - frames go to
-the GPU once and come back as annex-B AUs.
+The preferred H.264 engine on Windows for medialink video routes. No ffmpeg child, no
+multi-GB/s rawvideo stdin pipe - frames go to the GPU once and come back as annex-B AUs.
+
+**Architecture (since the 4K60 crash epic): the MF pipeline runs in a dedicated
+per-adapter Zig subprocess** (`native/zigenc` → `rave-mate-enc.exe`, no cgo). The media
+child talks to it over a per-session shared-memory ring + named events (data plane) and
+newline-JSON stdio (control plane: `open`/`close`/`bitrate`/`idr`/`quit`, session IDs -
+N sessions multiplex in one child). Rationale: vendor MFTs can raise access violations
+on THEIR OWN worker threads during open (the 4K60 field crash) - no in-process guard can
+catch that (VEH is process-wide but longjmp context is thread-local; Go takes the fault
+as fatal). Process boundary = the containment. A driver AV kills only the encoder child;
+the supervisor (`internal/mfenc/procparent_windows.go`) reports which sessions died,
+restarts with bounded backoff (0.5s→2s, RestartPolicy plug for the Phase-2 governor),
+re-places the sessions + forces an IDR - the route survives; frames during recovery are
+dropped, never errored. Only after 3 consecutive fast-fails is the (adapter, geometry)
+tuple poisoned and the child refused (crash-loop guard) - routes then land on the ffmpeg
+engine via the existing spec-rewrite (transient safety net, not the goal).
+
+The cgo shim (`mf_shim_windows.cpp` + `mfenc_windows.go` Encoder) stays as LAB BENCH +
+in-proc reference (tests exercise both); the production path is the Zig child
+(`mediapipe/mf_bridge.go` → `mfenc.OpenProcSession`).
+
+Per-session telemetry (Phase-2 governor inputs): submit→AU latency p50/p99, queue
+depth, child CPU%, ring drops - surfaced through `medialink.PipelineStats`. Measured on
+NVIDIA RTX (dev box): 1080p sustained submit 335 fps, p50 5.4 ms / p99 22 ms submit→AU;
+4K60/50Mbps/gop120 (the field crash tuple) encodes through the child.
+
+Hard-won contract lessons (cost real debugging, keep them):
+- `IID_IMFMediaEventGenerator` ends `…1e7d`. The hand-rolled `…1e7b` variant gets
+  E_NOINTERFACE → silently forces sync drive of an async MFT → E_UNEXPECTED storms +
+  lost outputs. (Second time this exact typo bit this codebase.)
+- NEVER resubmit a pool NV12 sample the encoder still queues: in-flight cap =
+  NVPOOL-1 in feed (both Zig + C++ now). Reuse corrupts the MFT input queue.
+- The encoder child calls `timeBeginPeriod(1)` - without it Sleep(1) waits ~15.6 ms
+  and throughput collapses (Go's runtime sets this for the parent, Zig does not).
+- MF pts are 100ns-quantized: latency maps must key on quantized pts.
 
 ## Pipeline
 
@@ -98,9 +131,11 @@ geometry sweep), `TestFaultGuardSubprocess` (real AV → clean error + poison, i
 process), `TestNativeOpenFailDegradesToFfmpeg` (mediapipe: substitution runs a LIVE ffmpeg
 H.264 child, wire codec unchanged).
 
-Verified on hardware (NVIDIA H.264 Encoder MFT): 720p60 60/60 AUs with SPS+IDR
-first AU + mid-stream forced IDR; 4K→1080p and native-4K bridge runs, keyframe-first,
-clean drain. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestMFBridge'`.
+Verified on hardware (NVIDIA H.264 Encoder MFT): 720p60 60/60 AUs with SPS+IDR first AU
++ mid-stream forced IDR (cgo bench); via the Zig child: 1080p60 60/60 with live bitrate
+retarget + forced IDR, exact 4K60 field tuple, mid-route child AV → restart → SAME
+session resumes (route continuity proven by execution), startup crash-loop → clean
+refusal. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestMFBridge|TestProc'`.
 
 ## Fallback rules
 

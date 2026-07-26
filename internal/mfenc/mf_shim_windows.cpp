@@ -59,7 +59,7 @@ DEFINE_GUID(kCODECAPI_AVEncCommonLowLatency, 0x9d3ecd55, 0x89e8, 0x490a, 0x97, 0
 DEFINE_GUID(kCODECAPI_AVEncMPVDefaultBPictureCount, 0x8d390aac, 0xdc5c, 0x4200, 0xb5, 0x7f, 0x81, 0x4d, 0x04, 0xba, 0xba, 0xb2);
 DEFINE_GUID(kCODECAPI_AVEncVideoForceKeyFrame, 0x398c1b98, 0x8353, 0x475a, 0x9e, 0xf2, 0x8f, 0x26, 0x5d, 0x26, 0x03, 0x45);
 DEFINE_GUID(kIID_ICodecAPI, 0x901db4c7, 0x31ce, 0x41a2, 0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda);
-DEFINE_GUID(kIID_IMFMediaEventGenerator, 0x2cd0bd52, 0xbcd5, 0x4b89, 0xb6, 0x2c, 0xea, 0xdc, 0x0c, 0x03, 0x1e, 0x7b);
+DEFINE_GUID(kIID_IMFMediaEventGenerator, 0x2cd0bd52, 0xbcd5, 0x4b89, 0xb6, 0x2c, 0xea, 0xdc, 0x0c, 0x03, 0x1e, 0x7d); // 0x7d! the 0x7b typo silently forces sync mode (QI path uses __uuidof, this stays correct for reference)
 DEFINE_GUID(kIID_ID3D10Multithread, 0x9b7e4e00, 0x342c, 0x4106, 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0);
 DEFINE_GUID(kIID_ID3D11Texture2D, 0x6f15aaf2, 0xd208, 0x4e89, 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c);
 DEFINE_GUID(kIID_IMF2DBuffer, 0x7dc9d5f9, 0x9ed9, 0x44ec, 0x9b, 0xbf, 0x06, 0x00, 0xbb, 0x58, 0x9f, 0xbb);
@@ -106,6 +106,7 @@ struct mfenc {
     int                     encProvides;  // encoder allocates its own output samples
     DWORD                   encOutSize;   // CPU output buffer size when !encProvides
     int                     needInput;    // pending METransformNeedInput credits
+    long long               fedN, outN;   // in-flight gate: pool samples must not be resubmitted
     int                     drainDone;
     int                     forceIDR;
     char                    name[128];
@@ -469,6 +470,7 @@ static int harvestOutput(mfenc* e) {
             buf->Release();
         }
         s->Release(); // provided samples: MFT gave us a ref; CPU sample: ours
+        e->outN++;
         if (e->evgen) return 0; // async: one output per HaveOutput event
     }
 }
@@ -823,6 +825,17 @@ mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
 
 int mf_enc_feed(mfenc* e, const uint8_t* rgba, int stride, int64_t pts100) {
     if (!e || !rgba || stride < e->inW * 4) return -1;
+    // In-flight cap: never resubmit a pool sample the encoder still queues (async MFTs
+    // queue deeply; reuse corrupts the queue -> E_UNEXPECTED storm + lost outputs).
+    DWORD gateWaited = 0;
+    while (e->fedN - e->outN >= NVPOOL - 1) {
+        int rc = e->evgen ? pumpEvents(e) : harvestOutput(e);
+        if (rc < 0) return -5;
+        if (e->fedN - e->outN < NVPOOL - 1) break;
+        if (gateWaited >= FEED_WAIT_MS) return -6;
+        Sleep(1);
+        gateWaited++;
+    }
     const uint8_t* rows = rgba;
     if (e->bgraIn) { // negotiated BGRA memory order - swizzle our RGBA rows
         if (stride == e->inW * 4) {
@@ -867,6 +880,7 @@ int mf_enc_feed(mfenc* e, const uint8_t* rgba, int stride, int64_t pts100) {
         e->needInput--;
         hr = e->enc->ProcessInput(0, nv12, 0);
         if (FAILED(hr)) { e->lastHR = hr; return -7; }
+        e->fedN++;
         if (pumpEvents(e) < 0) return -5;
         return 0;
     }
@@ -881,6 +895,7 @@ int mf_enc_feed(mfenc* e, const uint8_t* rgba, int stride, int64_t pts100) {
         waited++;
     }
     if (FAILED(hr)) { e->lastHR = hr; return -7; }
+    e->fedN++;
     if (harvestOutput(e) < 0) return -5;
     return 0;
 }

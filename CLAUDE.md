@@ -225,6 +225,10 @@ native/zigcore/ Zig (>= 0.16) static lib, C ABI (`rz_*`, include/ravezig.h). `ma
               config `features.workers.probeExe` (P4, golden cross-test in internal/worker).
 native/zigui/ Zig static lib for webui view rendering, C ABI (`rz_ui_*`, include/raveui.h).
               html.zig escaping == Go html.EscapeString; state JSON carries resolved i18n.
+native/zigenc/ Zig per-adapter MF H.264 encoder child exe (rave-mate-enc.exe, no cgo):
+              session-multiplexed encode over shared-mem rings + stdio JSON control;
+              supervised by the media child (internal/mfenc procparent). Driver AVs kill
+              only this exe. See docs/dev/MF_NATIVE_ENCODE.md.
 native/zigvr/ Zig VR-overlay raster executor (`rz_vr_*`, include/ravevr.h). Built by
               `make zig`. Blend math replicates Go image/draw exactly (parity-tested).
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.

@@ -38,6 +38,9 @@ const source = "mediapipe"
 // ran mfenc for a negotiated libx264/h264_nvenc, so the Answer's encoder + the route's software/tier
 // stats described an engine that wasn't running, and SWOnly's "force software" ran on GPU silicon.
 func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFactory) {
+	mfenc.Warnf = func(format string, args ...any) { // encoder-child crash/poison reports
+		log.Warn(source, fmt.Sprintf(format, args...), nil)
+	}
 	var mfWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
 		if encodeEngine(spec) == engineMFNative {
