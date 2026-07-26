@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
+#include <setjmp.h>
 
 #include "mf_shim.h"
 
@@ -118,6 +120,48 @@ static void setErr(char* errbuf, int errcap, const char* stage, HRESULT hr) {
 
 template <class T> static void rel(T*& p) { if (p) { p->Release(); p = NULL; } }
 
+// ── driver-fault guard ──
+// The 4K60 field crash (build 157) was an access violation INSIDE a vendor encoder MFT during
+// mf_enc_open - a c0000005 no HRESULT check can catch; it killed the media child before the Go
+// ffmpeg fallback could run. A scoped vectored handler converts any such fault inside the open
+// path into a clean failure: setjmp before the driver-touching body, VEH longjmps back on fault.
+// On fault the partial pipeline is deliberately LEAKED (Release into a faulted driver can fault
+// again) and the shim is POISONED - every later available/open call fails fast, so this process
+// never re-enters the broken driver and the ffmpeg engine carries the routes from then on.
+static volatile LONG g_shimPoisoned;    // 1 = a driver faulted once: native engine off for this process
+static __thread int g_guardArmed;       // fault guard active on THIS thread
+static __thread jmp_buf g_guardJmp;
+static __thread DWORD g_guardCode;      // exception code captured by the VEH
+
+static LONG CALLBACK mfFaultVEH(EXCEPTION_POINTERS* xp) {
+    if (!g_guardArmed) return EXCEPTION_CONTINUE_SEARCH; // not ours (Go installs its own handlers)
+    DWORD c = xp->ExceptionRecord->ExceptionCode;
+    switch (c) {
+    case EXCEPTION_ACCESS_VIOLATION:
+    case EXCEPTION_ILLEGAL_INSTRUCTION:
+    case EXCEPTION_PRIV_INSTRUCTION:
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:
+    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+    case 0xC0000374L: // STATUS_HEAP_CORRUPTION
+        break;
+    default: // breakpoints, C++ EH, Go's own traps: never intercept
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    g_guardArmed = 0;
+    g_guardCode = c;
+    longjmp(g_guardJmp, 1);
+}
+
+static void guardInstall(void) {
+    static volatile LONG once;
+    if (InterlockedCompareExchange((LONG*)&once, 1, 0) == 0)
+        AddVectoredExceptionHandler(1 /*call first*/, mfFaultVEH);
+}
+
+// guardArm primes the per-thread jump target; Frame=0 forces msvcrt longjmp to plain-restore
+// instead of RtlUnwindEx through driver frames. Pair every arm with g_guardArmed=0 before return.
+#define guardArm() (((_JUMP_BUFFER*)&g_guardJmp)->Frame = 0, g_guardArmed = 1)
+
 void mf_swizzle_rgba_bgra(uint8_t* dst, const uint8_t* src, int npx) {
     for (int i = 0; i < npx; i++) { // auto-vectorizes; ~memcpy speed at -O2
         dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = src[3];
@@ -192,6 +236,49 @@ static void findAdapter(int64_t luid, IDXGIAdapter1** out, UINT* vendorId) {
     fac->Release();
 }
 
+// pickDefaultAdapter chooses the adapter a luid==0 open binds. Blind adapter-0 creation
+// (NULL + DRIVER_TYPE_HARDWARE) follows the primary display - on rigs with a virtual display
+// adapter (Parsec/spacedesk) that can be a device no encoder silicon lives on, and a vendor
+// MFT handed a foreign device's manager can FAULT instead of refusing it (the 4K60 field
+// crash class). Pass 0: first non-software adapter of a known encode vendor. Pass 1: first
+// non-software adapter. *out NULL = keep the system HARDWARE default.
+static void pickDefaultAdapter(IDXGIAdapter1** out, UINT* vendorId) {
+    *out = NULL;
+    if (vendorId) *vendorId = 0;
+    IDXGIFactory1* fac = NULL;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&fac)) || !fac) return;
+    for (int pass = 0; pass < 2 && !*out; pass++) {
+        for (UINT i = 0;; i++) {
+            IDXGIAdapter1* ad = NULL;
+            if (fac->EnumAdapters1(i, &ad) != S_OK || !ad) break;
+            DXGI_ADAPTER_DESC1 d;
+            if (SUCCEEDED(ad->GetDesc1(&d)) && !(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
+                (pass == 1 || vendorTag(d.VendorId) != NULL)) {
+                if (vendorId) *vendorId = d.VendorId;
+                *out = ad;
+                break;
+            }
+            ad->Release();
+        }
+    }
+    fac->Release();
+}
+
+// kKnownVendorTags: vendor substrings hardware encoder MFT friendly names carry.
+static const char* kKnownVendorTags[] = { "NVIDIA", "AMD", "Intel" };
+
+// vendorMismatch: fn names a DIFFERENT known vendor than the device's tag. Cross-vendor
+// SET_D3D_MANAGER is exactly where broken vendor MFTs fault instead of failing - never offer
+// the manager across vendors. Unknown names stay eligible (SET_D3D_MANAGER stays the gate).
+static int vendorMismatch(const char* fn, const char* deviceTag) {
+    if (!deviceTag || !*deviceTag || !fn || !*fn) return 0;
+    for (size_t i = 0; i < sizeof(kKnownVendorTags) / sizeof(kKnownVendorTags[0]); i++) {
+        if (strcmp(kKnownVendorTags[i], deviceTag) == 0) continue;
+        if (containsNoCase(fn, kKnownVendorTags[i])) return 1;
+    }
+    return 0;
+}
+
 // enumHWEncoder activates a hardware encoder MFT for outSub. out==NULL only reports existence.
 // vendorHint (may be NULL) is the pinned adapter's vendor tag: candidates whose friendly name
 // carries it are tried FIRST, so a two-vendor machine binds the MFT that belongs to the chosen
@@ -221,6 +308,7 @@ static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int
             if (SUCCEEDED(acts[i]->GetString(kMFT_FRIENDLY_NAME_Attribute, wn, 127, &wl)))
                 WideCharToMultiByte(CP_UTF8, 0, wn, -1, fn, sizeof(fn) - 1, NULL, NULL);
             if (pass == 0 && !containsNoCase(fn, vendorHint)) continue;
+            if (vendorMismatch(fn, vendorHint)) continue; // both passes: no cross-vendor manager handoff
             IMFTransform* t = NULL;
             if (FAILED(acts[i]->ActivateObject(__uuidof(IMFTransform), (void**)&t)) || !t) continue;
             IMFAttributes* ea = NULL;
@@ -231,6 +319,7 @@ static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int
             }
             if (devmgr && FAILED(t->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)devmgr))) {
                 t->Release(); // will not run on the chosen adapter's device
+                acts[i]->ShutdownObject(); // activated-but-rejected: full MF activate teardown
                 continue;
             }
             *out = t;
@@ -246,7 +335,7 @@ static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int
     return ok;
 }
 
-int mf_shim_available(void) {
+static int availImpl(void) {
     HRESULT ci = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     int comHere = (ci == S_OK || ci == S_FALSE);
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
@@ -266,6 +355,20 @@ int mf_shim_available(void) {
     return ok;
 }
 
+int mf_shim_available(void) {
+    if (g_shimPoisoned) return 0;
+    guardInstall();
+    if (setjmp(g_guardJmp) != 0) { // driver faulted during the probe: report unavailable, stay off
+        g_guardArmed = 0;
+        InterlockedExchange((LONG*)&g_shimPoisoned, 1);
+        return 0;
+    }
+    guardArm();
+    int ok = availImpl();
+    g_guardArmed = 0;
+    return ok;
+}
+
 // pumpEvents drains pending encoder events without blocking. Returns <0 on hard error.
 static int pumpEvents(mfenc* e);
 
@@ -280,7 +383,11 @@ static int harvestOutput(mfenc* e) {
         IMFSample* cpuSample = NULL;
         if (!e->encProvides) {
             IMFMediaBuffer* mb = NULL;
-            DWORD sz = e->encOutSize ? e->encOutSize : (1 << 20);
+            // CPU output buffer scales with the frame: a 4K IDR AU exceeds the old 1 MB floor
+            // (MF_E_BUFFERTOOSMALL would kill the route needlessly).
+            DWORD floorSz = (DWORD)e->outW * (DWORD)e->outH;
+            if (floorSz < (1u << 20)) floorSz = 1u << 20;
+            DWORD sz = e->encOutSize > floorSz ? e->encOutSize : floorSz;
             if (FAILED(MFCreateMemoryBuffer(sz, &mb))) return -1;
             if (FAILED(MFCreateSample(&cpuSample))) { mb->Release(); return -1; }
             cpuSample->AddBuffer(mb);
@@ -372,9 +479,64 @@ static HRESULT vpBlt(mfenc* e, int* slot) {
     return S_OK;
 }
 
-mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
-                   int fpsN, int fpsD, int bitrateKbps, int gopFrames,
-                   char* errbuf, int errcap) {
+// openDevice creates dev/ctx + the video interfaces + a VideoProcessor enumerator for the
+// route geometry on ONE adapter (NULL = system HARDWARE default; non-NULL mandates
+// DRIVER_TYPE_UNKNOWN per the D3D11CreateDevice contract). The VP enumerator doubles as the
+// video-capability gate: a device that cannot run the VP at this geometry (virtual display
+// adapters) is rejected HERE, before any vendor MFT is offered its device manager. Failure
+// releases everything it created; *stage names the failing call.
+static HRESULT openDevice(mfenc* e, IDXGIAdapter1* adapter, int inW, int inH, int outW, int outH,
+                          int fpsN, int fpsD, const char** stage) {
+    D3D_FEATURE_LEVEL fl;
+    *stage = "D3D11CreateDevice";
+    HRESULT hr = D3D11CreateDevice(adapter, adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+        NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
+    if (FAILED(hr)) return hr;
+    ID3D10Multithread* mt10 = NULL;
+    if (SUCCEEDED(e->dev->QueryInterface(kIID_ID3D10Multithread, (void**)&mt10))) {
+        mt10->SetMultithreadProtected(TRUE);
+        mt10->Release();
+    }
+    *stage = "QI ID3D11VideoDevice";
+    hr = e->dev->QueryInterface(kIID_ID3D11VideoDevice, (void**)&e->vdev);
+    if (SUCCEEDED(hr)) {
+        *stage = "QI ID3D11VideoContext";
+        hr = e->ctx->QueryInterface(kIID_ID3D11VideoContext, (void**)&e->vctx);
+    }
+    if (SUCCEEDED(hr)) {
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd;
+        memset(&cd, 0, sizeof(cd));
+        cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        cd.InputFrameRate.Numerator = (UINT)fpsN;
+        cd.InputFrameRate.Denominator = (UINT)fpsD;
+        cd.InputWidth = (UINT)inW;
+        cd.InputHeight = (UINT)inH;
+        cd.OutputFrameRate = cd.InputFrameRate;
+        cd.OutputWidth = (UINT)outW;
+        cd.OutputHeight = (UINT)outH;
+        cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        *stage = "CreateVideoProcessorEnumerator";
+        hr = e->vdev->CreateVideoProcessorEnumerator(&cd, &e->vpe);
+    }
+    if (FAILED(hr)) {
+        rel(e->vpe);
+        rel(e->vctx);
+        rel(e->vdev);
+        rel(e->ctx);
+        rel(e->dev);
+    }
+    return hr;
+}
+
+// openImpl is mf_enc_open's body; it runs under the driver-fault guard armed by the wrapper.
+static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH,
+                       int fpsN, int fpsD, int bitrateKbps, int gopFrames,
+                       char* errbuf, int errcap) {
+    if (getenv("RAVE_MATE_MFENC_FAULT_INJECT")) { // guard-path test hook: deliberate AV
+        volatile int* p = NULL;
+        *p = 1;
+    }
     if (inW <= 0 || inH <= 0 || outW <= 0 || outH <= 0 || fpsN <= 0) {
         setErr(errbuf, errcap, "args", E_INVALIDARG);
         return NULL;
@@ -392,31 +554,26 @@ mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
     if (FAILED(hr)) { setErr(errbuf, errcap, "MFStartup", hr); mf_enc_close(e); return NULL; }
     e->mfInit = 1;
 
-    // Device selection (WP-3): a pinned adapter LUID creates the device ON THAT ADAPTER
-    // (DRIVER_TYPE_UNKNOWN is mandatory when an adapter is passed). LUID 0 / not found keeps the
-    // adapter-0 default. The adapter's vendor also steers which encoder MFT gets bound below.
+    // Device selection (WP-3 + 4K60 crash fix): a pinned adapter LUID creates the device ON
+    // THAT ADAPTER; luid 0 picks a DELIBERATE default (known encode vendor first) instead of
+    // blind adapter 0 - on rigs with a virtual display adapter (Parsec) the blind default can
+    // be a device no encoder MFT can run on, and a vendor MFT handed that foreign device's
+    // manager faults instead of refusing it. Unusable adapter degrades to the system default;
+    // the adapter's vendor also steers which encoder MFT gets bound below.
     IDXGIAdapter1* adapter = NULL;
     UINT vendorId = 0;
     findAdapter(adapterLuid, &adapter, &vendorId);
-    D3D_FEATURE_LEVEL fl;
-    hr = D3D11CreateDevice(adapter, adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-        NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
-    if (FAILED(hr) && adapter) { // pinned adapter cannot host the pipeline: degrade, never kill the route
+    if (!adapter) pickDefaultAdapter(&adapter, &vendorId);
+    const char* stage = "D3D11CreateDevice";
+    hr = openDevice(e, adapter, inW, inH, outW, outH, fpsN, fpsD, &stage);
+    if (FAILED(hr) && adapter) { // chosen adapter cannot host the pipeline: degrade, never kill the route
         adapter->Release();
         adapter = NULL;
         vendorId = 0;
-        hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-            NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
+        hr = openDevice(e, NULL, inW, inH, outW, outH, fpsN, fpsD, &stage);
     }
     if (adapter) adapter->Release();
-    if (FAILED(hr)) { setErr(errbuf, errcap, "D3D11CreateDevice", hr); mf_enc_close(e); return NULL; }
-    ID3D10Multithread* mt10 = NULL;
-    if (SUCCEEDED(e->dev->QueryInterface(kIID_ID3D10Multithread, (void**)&mt10))) {
-        mt10->SetMultithreadProtected(TRUE);
-        mt10->Release();
-    }
+    if (FAILED(hr)) { setErr(errbuf, errcap, stage, hr); mf_enc_close(e); return NULL; }
     hr = MFCreateDXGIDeviceManager(&e->devmgrToken, &e->devmgr);
     if (FAILED(hr)) { setErr(errbuf, errcap, "MFCreateDXGIDeviceManager", hr); mf_enc_close(e); return NULL; }
     hr = e->devmgr->ResetDevice(e->dev, e->devmgrToken);
@@ -495,23 +652,7 @@ mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
     inMT->Release();
 
     // ── D3D11 Video API CSC + scale (VideoProcessorBlt: deterministic, no XVP quirks) ──
-    hr = e->dev->QueryInterface(kIID_ID3D11VideoDevice, (void**)&e->vdev);
-    if (FAILED(hr)) { setErr(errbuf, errcap, "QI ID3D11VideoDevice", hr); mf_enc_close(e); return NULL; }
-    hr = e->ctx->QueryInterface(kIID_ID3D11VideoContext, (void**)&e->vctx);
-    if (FAILED(hr)) { setErr(errbuf, errcap, "QI ID3D11VideoContext", hr); mf_enc_close(e); return NULL; }
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd;
-    memset(&cd, 0, sizeof(cd));
-    cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    cd.InputFrameRate.Numerator = (UINT)fpsN;
-    cd.InputFrameRate.Denominator = (UINT)fpsD;
-    cd.InputWidth = (UINT)inW;
-    cd.InputHeight = (UINT)inH;
-    cd.OutputFrameRate = cd.InputFrameRate;
-    cd.OutputWidth = (UINT)outW;
-    cd.OutputHeight = (UINT)outH;
-    cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
-    hr = e->vdev->CreateVideoProcessorEnumerator(&cd, &e->vpe);
-    if (FAILED(hr)) { setErr(errbuf, errcap, "CreateVideoProcessorEnumerator", hr); mf_enc_close(e); return NULL; }
+    // vdev/vctx/vpe already exist: openDevice created them as the video-capability gate.
     UINT fmtFl = 0;
     e->bgraIn = 1; // default BGRA+swizzle; prefer RGBA input when the VP takes it directly
     if (SUCCEEDED(e->vpe->CheckVideoProcessorFormat(DXGI_FORMAT_R8G8B8A8_UNORM, &fmtFl)) &&
@@ -585,6 +726,31 @@ mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
 
     e->enc->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     e->enc->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+    return e;
+}
+
+mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
+                   int fpsN, int fpsD, int bitrateKbps, int gopFrames,
+                   char* errbuf, int errcap) {
+    if (g_shimPoisoned) {
+        setErr(errbuf, errcap, "native engine disabled by earlier driver fault", E_FAIL);
+        return NULL;
+    }
+    guardInstall();
+    if (setjmp(g_guardJmp) != 0) {
+        // Driver fault (c0000005 class) anywhere in the open path: clean failure instead of
+        // process death. Partial pipeline deliberately leaked; native engine off for this
+        // process - the Go side substitutes the probed ffmpeg H.264 encoder.
+        g_guardArmed = 0;
+        InterlockedExchange((LONG*)&g_shimPoisoned, 1);
+        setErr(errbuf, errcap, "driver fault during open (native engine disabled, pipeline leaked)",
+               (HRESULT)g_guardCode);
+        return NULL;
+    }
+    guardArm();
+    mfenc* e = openImpl(adapterLuid, inW, inH, outW, outH, fpsN, fpsD, bitrateKbps, gopFrames,
+                        errbuf, errcap);
+    g_guardArmed = 0;
     return e;
 }
 

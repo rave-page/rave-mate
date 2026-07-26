@@ -15,6 +15,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -79,6 +80,11 @@ func New(inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*En
 // (encoderscan.LUIDInt64); 0 = default adapter. An adapter that cannot host the pipeline degrades
 // to the default one inside the shim - a device preference never kills a route.
 func NewOn(adapterLUID int64, inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*Encoder, error) {
+	// Kill-switch + degrade-path test hook: every native open fails cleanly; routes
+	// substitute the probed ffmpeg H.264 encoder (wire codec unchanged).
+	if os.Getenv("RAVE_MATE_MFENC_OPEN_FAIL") != "" {
+		return nil, errors.New("mfenc: native open disabled (RAVE_MATE_MFENC_OPEN_FAIL)")
+	}
 	if fps <= 0 {
 		fps = 30
 	}

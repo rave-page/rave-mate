@@ -4,6 +4,9 @@ package mfenc
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,6 +108,121 @@ func TestEncodeRealFrames(t *testing.T) {
 		t.Fatal("ForceKeyframe produced no later keyframe")
 	}
 	t.Logf("aus=%d firstAU=%dB avg=%dB laterKeyframes=%d", len(aus), len(first.Data), total/len(aus[1:]), later)
+}
+
+// encodeOneAndClose opens luid0, feeds one gradient frame, closes. Any failure must be a
+// clean error - never a process fault (the 4K60 field crash killed the media child inside
+// mf_enc_open).
+func encodeOneAndClose(t *testing.T, inW, inH, outW, outH int, fps float64, kbps, gop int) error {
+	t.Helper()
+	enc, err := NewOn(0, inW, inH, outW, outH, fps, kbps, gop)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for range enc.Output() { //nolint:revive // drain
+		}
+	}()
+	frame := make([]byte, inW*inH*4)
+	for i := range frame {
+		frame[i] = byte(i)
+	}
+	encErr := enc.Encode(frame, 0)
+	closed := make(chan struct{})
+	go func() { enc.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(20 * time.Second):
+		t.Fatal("Close hung")
+	}
+	return encErr
+}
+
+// TestOpenCrashTuple4K60 is the exact field-crash tuple (build 157): 3840x2160@60,
+// 50 Mbps, gop 120, luid 0. Open→encode→close must complete or fail cleanly.
+func TestOpenCrashTuple4K60(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	if err := encodeOneAndClose(t, 3840, 2160, 3840, 2160, 60, 50000, 120); err != nil {
+		t.Logf("clean open/encode failure (acceptable, must degrade upstream): %v", err)
+	}
+}
+
+// TestOpenSizeTable sweeps odd/edge geometries through open→encode-one→close. Odd OUTPUT
+// dims may fail (caller contract: pre-clamp to even) but must fail cleanly; even outputs
+// must encode.
+func TestOpenSizeTable(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	cases := []struct {
+		name                 string
+		inW, inH, outW, outH int
+		fps                  float64
+		kbps, gop            int
+		mustWork             bool
+	}{
+		{"1080p60", 1920, 1080, 1920, 1080, 60, 8000, 120, true},
+		{"4k30", 3840, 2160, 3840, 2160, 30, 25000, 60, true},
+		{"4k60-scale-1080", 3840, 2160, 1920, 1080, 60, 8000, 120, true},
+		{"odd-in-even-out", 1919, 1079, 1918, 1078, 30, 4000, 60, true},
+		{"odd-out-w", 1280, 720, 1279, 720, 30, 4000, 60, false},
+		{"odd-out-h", 1280, 720, 1280, 719, 30, 4000, 60, false},
+		{"tiny", 320, 240, 320, 240, 30, 500, 30, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := encodeOneAndClose(t, c.inW, c.inH, c.outW, c.outH, c.fps, c.kbps, c.gop)
+			if err != nil && c.mustWork {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if err != nil {
+				t.Logf("clean failure: %v", err)
+			}
+		})
+	}
+}
+
+// TestOpenFailKnob: RAVE_MATE_MFENC_OPEN_FAIL forces a clean Go-side open failure (field
+// kill-switch + the degrade-path simulation hook).
+func TestOpenFailKnob(t *testing.T) {
+	t.Setenv("RAVE_MATE_MFENC_OPEN_FAIL", "1")
+	if _, err := NewOn(0, 320, 240, 320, 240, 30, 500, 30); err == nil {
+		t.Fatal("NewOn succeeded despite RAVE_MATE_MFENC_OPEN_FAIL")
+	}
+}
+
+// TestFaultGuardSubprocess proves the crash→degrade chain BY EXECUTION: a child test process
+// injects a REAL access violation inside mf_enc_open (RAVE_MATE_MFENC_FAULT_INJECT, read at
+// CRT startup); the VEH guard must turn it into a clean Go error, poison the shim so the next
+// open fast-fails, and leave the process alive. No hardware needed - the injection fires
+// before device creation.
+func TestFaultGuardSubprocess(t *testing.T) {
+	if os.Getenv("MFENC_FAULT_HELPER") == "1" {
+		_, err := NewOn(0, 320, 240, 320, 240, 30, 500, 30)
+		if err == nil || !strings.Contains(err.Error(), "driver fault") {
+			t.Fatalf("want driver-fault error, got %v", err)
+		}
+		_, err = NewOn(0, 320, 240, 320, 240, 30, 500, 30)
+		if err == nil || !strings.Contains(err.Error(), "disabled by earlier driver fault") {
+			t.Fatalf("want poisoned fast-fail, got %v", err)
+		}
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cmd := exec.Command(exe, "-test.run", "^TestFaultGuardSubprocess$", "-test.v")
+	cmd.Env = append(os.Environ(), "MFENC_FAULT_HELPER=1", "RAVE_MATE_MFENC_FAULT_INJECT=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper died (guard failed to contain the fault): %v\n%s", err, out)
+	}
+	if !bytes.Contains(out, []byte("PASS")) {
+		t.Fatalf("helper did not pass:\n%s", out)
+	}
 }
 
 // TestSwizzleCanary pins the RGBA→BGRA upload swizzle on a known 4-px pattern (used

@@ -65,6 +65,39 @@ This is the ACCURATE device path: ffmpeg has `-gpu` (NVENC) and `-qsv_device` (Q
 device option for AMF at all, and NVENC's ordinal is a CUDA ordinal that need not match the
 DXGI one. Here the adapter is identified by LUID.
 
+**4K60 open-crash hardening (P0 field fix).** Build 157 crashed the media child 100% inside
+`mf_enc_open` at 3840×2160@60 (c0000005 in a vendor MFT; goroutine locked-to-thread, exit 2)
+on a rig with OBS live + a Parsec Virtual Display Adapter. Root-cause class: luid 0 used
+blind adapter 0 (`D3D11CreateDevice(NULL, HARDWARE)` follows the primary display - on such
+rigs a device no encoder silicon lives on), and a vendor MFT handed a foreign device's
+manager via `SET_D3D_MANAGER` can FAULT in type negotiation instead of refusing the message -
+an AV no HRESULT check catches, killing the child before the ffmpeg fallback runs
+(`Available()` passes: the probe never binds a device manager). Defenses, all in the shim:
+
+- `pickDefaultAdapter`: luid 0 picks a DELIBERATE default - first non-software adapter of a
+  known encode vendor (NVIDIA/AMD/Intel), else first non-software - never blind adapter 0.
+  Also sets the vendor hint for default opens (was pinned-only).
+- Video-capability gate: `openDevice` QIs `ID3D11VideoDevice` + creates the VP enumerator
+  for the route geometry BEFORE any MFT is offered the device manager; an unusable adapter
+  degrades to the system default, then fails clean.
+- Cross-vendor guard: an MFT whose friendly name carries a DIFFERENT known vendor than the
+  device's adapter is never offered the manager (`vendorMismatch`); rejected activations get
+  `IMFActivate::ShutdownObject`.
+- Driver-fault guard: a scoped VEH + `setjmp`/`longjmp` (Frame=0, no unwind through driver
+  frames) wraps `mf_shim_available` and `mf_enc_open`. Any AV-class fault returns a clean
+  error to Go ("driver fault during open"), LEAKS the partial pipeline (Release into a
+  faulted driver can fault again) and POISONS the shim - later opens fast-fail, the route
+  degrades to the ffmpeg child instead of dying every attempt.
+- CPU output buffers scale with frame area (4K IDR AUs exceed the old 1 MB floor).
+
+Env knobs: `RAVE_MATE_MFENC_OPEN_FAIL` (Go-side kill-switch: every native open fails clean →
+ffmpeg substitution; also the degrade-path test hook), `RAVE_MATE_MFENC_FAULT_INJECT`
+(deliberate AV inside open; read at CRT startup - set BEFORE process launch; guard-path test
+hook). Tests: `TestOpenCrashTuple4K60` (exact field tuple), `TestOpenSizeTable` (odd/edge
+geometry sweep), `TestFaultGuardSubprocess` (real AV → clean error + poison, in a child test
+process), `TestNativeOpenFailDegradesToFfmpeg` (mediapipe: substitution runs a LIVE ffmpeg
+H.264 child, wire codec unchanged).
+
 Verified on hardware (NVIDIA H.264 Encoder MFT): 720p60 60/60 AUs with SPS+IDR
 first AU + mid-stream forced IDR; 4K→1080p and native-4K bridge runs, keyframe-first,
 clean drain. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestMFBridge'`.

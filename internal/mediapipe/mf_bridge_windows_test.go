@@ -10,6 +10,7 @@ import (
 
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/mfenc"
 )
 
@@ -32,6 +33,52 @@ func (s *rawSrc) Next(ctx context.Context) (*medialink.Frame, error) {
 }
 
 func (s *rawSrc) Close() error { return nil }
+
+// TestNativeOpenFailDegradesToFfmpeg proves the P0 degrade chain BY EXECUTION: an
+// EncoderMFNative spec whose native open FAILS (RAVE_MATE_MFENC_OPEN_FAIL - same clean-error
+// path a shim/driver failure takes) must come back as a LIVE ffmpeg H.264 encoder, wire codec
+// unchanged (the peer was answered H.264) - never an error, never a dead route.
+func TestNativeOpenFailDegradesToFfmpeg(t *testing.T) {
+	ffmpeg, ok := mediatools.Resolve("ffmpeg")
+	if !ok {
+		t.Skip("no ffmpeg")
+	}
+	t.Setenv("RAVE_MATE_MFENC_OPEN_FAIL", "1")
+	// Seed the validated probe cache - substitution reads Cached(), never probes.
+	probeMu.Lock()
+	saved := probeCached
+	probeCached = map[string]Caps{ffmpeg: {Encoders: []string{"libx264"}, Validated: true}}
+	probeMu.Unlock()
+	defer func() { probeMu.Lock(); probeCached = saved; probeMu.Unlock() }()
+
+	log := logbus.New(64)
+	encF, _ := Factories(log)
+	spec := medialink.EncodeSpec{Encoder: medialink.EncoderMFNative, Codec: medialink.CodecH264,
+		Width: 128, Height: 96, FPS: 30, BitrateKbps: 300}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	src, err := encF(ctx, spec, &rawSrc{w: 128, h: 96, n: 60})
+	if err != nil {
+		t.Fatalf("factory must degrade, got error: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	pr, ok := src.(medialink.PipelineReporter)
+	if !ok {
+		t.Fatal("substituted source lacks PipelineReporter")
+	}
+	if st := pr.PipeStats(); st.Encoder != "libx264" {
+		t.Fatalf("substituted encoder=%q want libx264", st.Encoder)
+	}
+	for got := 0; got < 3; got++ {
+		f, err := src.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next after %d frames: %v", got, err)
+		}
+		if f.Kind != medialink.KindVideo || f.Codec != medialink.CodecH264 {
+			t.Fatalf("frame kind=%v codec=%v want video H.264", f.Kind, f.Codec)
+		}
+	}
+}
 
 // TestMFBridgeHardware drives the full native path as medialink sees it: raw source →
 // mfBridge → H.264 frames with a leading keyframe. Also proves the 4K→1080p Blt scale.
