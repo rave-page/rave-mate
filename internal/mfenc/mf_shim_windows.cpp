@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <cguid.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mftransform.h>
@@ -13,6 +14,7 @@
 #include <codecapi.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "mf_shim.h"
 
@@ -138,7 +140,65 @@ static HRESULT mtVideo(const GUID& sub, int w, int h, int fpsN, int fpsD, IMFMed
     return S_OK;
 }
 
-static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int namecap) {
+// vendorTag maps a DXGI VendorID to the substring that vendor's encoder MFT friendly name carries
+// ("NVIDIA H.264 Encoder MFT", "AMD H.264 Hardware MFT Encoder", "Intel(R) Quick Sync ..."). NULL =
+// unknown vendor -> no name filtering (any MFT that accepts our device manager is accepted).
+static const char* vendorTag(UINT vid) {
+    switch (vid) {
+    case 0x10DE: return "NVIDIA";
+    case 0x1002: return "AMD";
+    case 0x1022: return "AMD";
+    case 0x8086: return "Intel";
+    }
+    return NULL;
+}
+
+// containsNoCase: case-insensitive substring test (empty needle matches).
+static int containsNoCase(const char* hay, const char* needle) {
+    if (!hay || !needle || !*needle) return 1;
+    size_t nl = strlen(needle);
+    for (const char* p = hay; *p; p++) {
+        size_t i = 0;
+        while (i < nl && p[i] && tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nl) return 1;
+    }
+    return 0;
+}
+
+// findAdapter locates the DXGI adapter whose LUID equals luid (HighPart<<32 | LowPart - the same
+// int64 encoderscan.LUIDInt64 produces). luid 0 or no match -> *out NULL (default adapter). Caller
+// releases *out. *vendorId gets the adapter's PCI vendor id (0 when unresolved).
+static void findAdapter(int64_t luid, IDXGIAdapter1** out, UINT* vendorId) {
+    *out = NULL;
+    if (vendorId) *vendorId = 0;
+    if (luid == 0) return;
+    IDXGIFactory1* fac = NULL;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&fac)) || !fac) return;
+    for (UINT i = 0;; i++) {
+        IDXGIAdapter1* ad = NULL;
+        if (fac->EnumAdapters1(i, &ad) != S_OK || !ad) break;
+        DXGI_ADAPTER_DESC1 d;
+        if (SUCCEEDED(ad->GetDesc1(&d))) {
+            int64_t key = ((int64_t)d.AdapterLuid.HighPart << 32) | (int64_t)(uint32_t)d.AdapterLuid.LowPart;
+            if (key == luid) {
+                if (vendorId) *vendorId = d.VendorId;
+                *out = ad;
+                fac->Release();
+                return;
+            }
+        }
+        ad->Release();
+    }
+    fac->Release();
+}
+
+// enumHWEncoder activates a hardware encoder MFT for outSub. out==NULL only reports existence.
+// vendorHint (may be NULL) is the pinned adapter's vendor tag: candidates whose friendly name
+// carries it are tried FIRST, so a two-vendor machine binds the MFT that belongs to the chosen
+// adapter instead of blind acts[0]. devmgr (may be NULL) is the device manager built on that
+// adapter - an MFT that refuses it (foreign adapter) is skipped, which is the hard gate.
+static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int namecap,
+                         const char* vendorHint, IMFDXGIDeviceManager* devmgr) {
     MFT_REGISTER_TYPE_INFO ti = { kMFMediaType_Video, kMFVideoFormat_NV12 };
     MFT_REGISTER_TYPE_INFO to = { kMFMediaType_Video, outSub };
     IMFActivate** acts = NULL;
@@ -146,18 +206,40 @@ static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int
     HRESULT hr = MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER,
         MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &ti, &to, &acts, &n);
     if (FAILED(hr) || n == 0) return 0;
+    if (!out) { // availability probe only
+        for (UINT32 i = 0; i < n; i++) acts[i]->Release();
+        CoTaskMemFree(acts);
+        return 1;
+    }
     int ok = 0;
-    if (out) {
-        hr = acts[0]->ActivateObject(__uuidof(IMFTransform), (void**)out);
-        ok = SUCCEEDED(hr) ? 1 : 0;
-        if (ok && name && namecap > 0) {
+    for (int pass = 0; pass < 2 && !ok; pass++) {
+        if (pass == 0 && (!vendorHint || !*vendorHint)) continue; // no hint: one unfiltered pass
+        for (UINT32 i = 0; i < n && !ok; i++) {
+            char fn[128] = {0};
             WCHAR wn[128] = {0};
             UINT32 wl = 0;
-            if (SUCCEEDED(acts[0]->GetString(kMFT_FRIENDLY_NAME_Attribute, wn, 127, &wl)))
-                WideCharToMultiByte(CP_UTF8, 0, wn, -1, name, namecap - 1, NULL, NULL);
+            if (SUCCEEDED(acts[i]->GetString(kMFT_FRIENDLY_NAME_Attribute, wn, 127, &wl)))
+                WideCharToMultiByte(CP_UTF8, 0, wn, -1, fn, sizeof(fn) - 1, NULL, NULL);
+            if (pass == 0 && !containsNoCase(fn, vendorHint)) continue;
+            IMFTransform* t = NULL;
+            if (FAILED(acts[i]->ActivateObject(__uuidof(IMFTransform), (void**)&t)) || !t) continue;
+            IMFAttributes* ea = NULL;
+            if (SUCCEEDED(t->GetAttributes(&ea)) && ea) {
+                ea->SetUINT32(kMF_TRANSFORM_ASYNC_UNLOCK, 1);
+                ea->SetUINT32(kMF_LOW_LATENCY, 1);
+                ea->Release();
+            }
+            if (devmgr && FAILED(t->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)devmgr))) {
+                t->Release(); // will not run on the chosen adapter's device
+                continue;
+            }
+            *out = t;
+            ok = 1;
+            if (name && namecap > 0) {
+                strncpy(name, fn, (size_t)namecap - 1);
+                name[namecap - 1] = 0;
+            }
         }
-    } else {
-        ok = 1;
     }
     for (UINT32 i = 0; i < n; i++) acts[i]->Release();
     CoTaskMemFree(acts);
@@ -176,7 +258,7 @@ int mf_shim_available(void) {
         D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
         NULL, 0, D3D11_SDK_VERSION, &dev, &fl, NULL);
     if (SUCCEEDED(hr)) {
-        ok = enumHWEncoder(kMFVideoFormat_H264, NULL, NULL, 0);
+        ok = enumHWEncoder(kMFVideoFormat_H264, NULL, NULL, 0, NULL, NULL);
         dev->Release();
     }
     MFShutdown();
@@ -290,10 +372,10 @@ static HRESULT vpBlt(mfenc* e, int* slot) {
     return S_OK;
 }
 
-mfenc* mf_enc_open(int codec, int inW, int inH, int outW, int outH,
+mfenc* mf_enc_open(int64_t adapterLuid, int inW, int inH, int outW, int outH,
                    int fpsN, int fpsD, int bitrateKbps, int gopFrames,
                    char* errbuf, int errcap) {
-    if (codec != 0 || inW <= 0 || inH <= 0 || outW <= 0 || outH <= 0 || fpsN <= 0) {
+    if (inW <= 0 || inH <= 0 || outW <= 0 || outH <= 0 || fpsN <= 0) {
         setErr(errbuf, errcap, "args", E_INVALIDARG);
         return NULL;
     }
@@ -310,10 +392,25 @@ mfenc* mf_enc_open(int codec, int inW, int inH, int outW, int outH,
     if (FAILED(hr)) { setErr(errbuf, errcap, "MFStartup", hr); mf_enc_close(e); return NULL; }
     e->mfInit = 1;
 
+    // Device selection (WP-3): a pinned adapter LUID creates the device ON THAT ADAPTER
+    // (DRIVER_TYPE_UNKNOWN is mandatory when an adapter is passed). LUID 0 / not found keeps the
+    // adapter-0 default. The adapter's vendor also steers which encoder MFT gets bound below.
+    IDXGIAdapter1* adapter = NULL;
+    UINT vendorId = 0;
+    findAdapter(adapterLuid, &adapter, &vendorId);
     D3D_FEATURE_LEVEL fl;
-    hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+    hr = D3D11CreateDevice(adapter, adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
         NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
+    if (FAILED(hr) && adapter) { // pinned adapter cannot host the pipeline: degrade, never kill the route
+        adapter->Release();
+        adapter = NULL;
+        vendorId = 0;
+        hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+            NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
+    }
+    if (adapter) adapter->Release();
     if (FAILED(hr)) { setErr(errbuf, errcap, "D3D11CreateDevice", hr); mf_enc_close(e); return NULL; }
     ID3D10Multithread* mt10 = NULL;
     if (SUCCEEDED(e->dev->QueryInterface(kIID_ID3D10Multithread, (void**)&mt10))) {
@@ -326,19 +423,14 @@ mfenc* mf_enc_open(int codec, int inW, int inH, int outW, int outH,
     if (FAILED(hr)) { setErr(errbuf, errcap, "ResetDevice", hr); mf_enc_close(e); return NULL; }
 
     // ── async hardware encoder ──
-    if (!enumHWEncoder(kMFVideoFormat_H264, &e->enc, e->name, sizeof(e->name))) {
-        setErr(errbuf, errcap, "MFTEnumEx(no hw encoder)", E_FAIL);
+    // Adapter-bound: vendor-first candidate order + SET_D3D_MANAGER as the hard gate (an MFT that
+    // refuses this adapter's device manager is skipped instead of failing the whole pipeline).
+    if (!enumHWEncoder(kMFVideoFormat_H264, &e->enc, e->name, sizeof(e->name),
+                       vendorTag(vendorId), e->devmgr)) {
+        setErr(errbuf, errcap, "MFTEnumEx(no hw encoder for this device)", E_FAIL);
         mf_enc_close(e);
         return NULL;
     }
-    IMFAttributes* ea = NULL;
-    if (SUCCEEDED(e->enc->GetAttributes(&ea)) && ea) {
-        ea->SetUINT32(kMF_TRANSFORM_ASYNC_UNLOCK, 1);
-        ea->SetUINT32(kMF_LOW_LATENCY, 1);
-        ea->Release();
-    }
-    hr = e->enc->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)e->devmgr);
-    if (FAILED(hr)) { setErr(errbuf, errcap, "enc SET_D3D_MANAGER", hr); mf_enc_close(e); return NULL; }
 
     IMFMediaType* outMT = NULL;
     hr = mtVideo(kMFVideoFormat_H264, outW, outH, fpsN, fpsD, &outMT);

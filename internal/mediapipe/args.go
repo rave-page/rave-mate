@@ -40,6 +40,56 @@ func gopFrames(fps float64) int {
 	return g
 }
 
+// hwFilterDevice is the name the d3d11va hardware context is registered under, so the encoder and
+// any hardware filter reference the same device.
+const hwFilterDevice = "ml"
+
+// hwDeviceArgs binds the child to a SPECIFIC GPU (WP-3), emitted before the input. Empty unless the
+// user actually pinned a device (EncodeSpec.Device ok) - the auto path stays byte-identical to the
+// pre-device-selection argv, so a build without d3d11va can only be affected by an explicit pin.
+//
+// Windows D3D11 families (nvenc/qsv/amf/*_mf) get the general
+// `-init_hw_device d3d11va=ml:<idx> -filter_hw_device ml` pair: the documented ffmpeg way to bind a
+// Windows hardware context (and any hardware scaler) to one DXGI adapter ordinal. LUID keys only
+// ever come from DXGI, so this cannot fire off Windows. Non-D3D11 families get nothing here - see
+// deviceEncoderArgs for the per-family selectors that do the real work.
+func hwDeviceArgs(spec medialink.EncodeSpec) []string {
+	_, idx, ok := spec.Device()
+	if !ok || !d3d11Family(spec.Encoder) {
+		return nil
+	}
+	return []string{"-init_hw_device", fmt.Sprintf("d3d11va=%s:%d", hwFilterDevice, idx),
+		"-filter_hw_device", hwFilterDevice}
+}
+
+// deviceEncoderArgs are the per-encoder device selectors (appended next to -c:v). NVENC takes a GPU
+// ordinal, QSV a child-device ordinal. AMF exposes no device option in ffmpeg and VA-API wants a DRM
+// render node rather than an ordinal, so both are steered only via the native engine (internal/mfenc
+// honours the adapter LUID directly) - documented in docs/dev/MF_NATIVE_ENCODE.md.
+func deviceEncoderArgs(spec medialink.EncodeSpec) []string {
+	_, idx, ok := spec.Device()
+	if !ok {
+		return nil
+	}
+	switch {
+	case strings.HasSuffix(spec.Encoder, "_nvenc"):
+		return []string{"-gpu", strconv.Itoa(idx)}
+	case strings.HasSuffix(spec.Encoder, "_qsv"):
+		return []string{"-qsv_device", strconv.Itoa(idx)}
+	}
+	return nil
+}
+
+// d3d11Family reports whether an encoder runs on a Windows D3D11-backed hardware family.
+func d3d11Family(enc string) bool {
+	for _, s := range []string{"_nvenc", "_qsv", "_amf", "_mf"} {
+		if strings.HasSuffix(enc, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv.
 func encodeArgs(spec medialink.EncodeSpec) []string {
 	fps := spec.FPS
@@ -58,13 +108,14 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 	if kbps <= 0 {
 		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
-	args := []string{
-		"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
+	args := []string{"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer"}
+	args = append(args, hwDeviceArgs(spec)...)
+	args = append(args,
 		"-f", "rawvideo", "-pix_fmt", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"-framerate", trimFloat(fps),
 		"-i", "-", "-an",
-	}
+	)
 	if scaled {
 		args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", outH))
 	}
@@ -73,6 +124,11 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 	vbv := strconv.Itoa(kbps/2) + "k"
 	rc := []string{"-b:v", br, "-maxrate", br, "-bufsize", vbv, "-g", g, "-bf", "0"}
 	switch spec.Encoder {
+	case medialink.EncoderMFNative:
+		// Defensive: the native engine has no ffmpeg counterpart name. Reached only when the
+		// engine keying in Factories was bypassed; h264_mf is the ffmpeg Media Foundation wrapper.
+		args = append(args, "-c:v", "h264_mf")
+		args = append(args, rc...)
 	case "libx264":
 		args = append(args, "-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency")
 		args = append(args, rc...)
@@ -101,6 +157,7 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 		args = append(args, "-c:v", spec.Encoder)
 		args = append(args, rc...)
 	}
+	args = append(args, deviceEncoderArgs(spec)...)
 	// Output framing: parameter sets repeated on every keyframe (dump_extra) so a decoder can
 	// (re)join mid-stream. Non-AMF also gets the {codec}_metadata filter for AUD insertion. AMF is
 	// EXCLUDED from that filter: its encoder emits an imperfect elementary stream (parameter sets

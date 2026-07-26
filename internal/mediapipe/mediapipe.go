@@ -31,21 +31,35 @@ import (
 
 const source = "mediapipe"
 
-// Factories returns the medialink Encoder/Decoder factories: H.264 encodes prefer the
-// native Media Foundation hardware pipeline (mfenc: no ffmpeg child, no raw stdin pipe,
-// live forced IDRs); everything else - and any mfenc failure - runs the ffmpeg child.
+// Factories returns the medialink Encoder/Decoder factories. The ENGINE IS KEYED ON THE NEGOTIATED
+// ENCODER NAME, never on the codec: medialink.EncoderMFNative (advertised only when mfenc really
+// works) runs the native Media Foundation pipeline - no ffmpeg child, no raw stdin pipe, live forced
+// IDRs - and every other name runs the ffmpeg child. Keying on Codec==H264 (the old rule) silently
+// ran mfenc for a negotiated libx264/h264_nvenc, so the Answer's encoder + the route's software/tier
+// stats described an engine that wasn't running, and SWOnly's "force software" ran on GPU silicon.
 func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFactory) {
 	var mfWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
-		if spec.Codec == medialink.CodecH264 && mfenc.Available() {
-			s, err := newMFBridge(ctx, log, spec, src)
-			if err == nil {
-				return s, nil
+		if encodeEngine(spec) == engineMFNative {
+			if mfenc.Available() {
+				s, err := newMFBridge(ctx, log, spec, src)
+				if err == nil {
+					return s, nil
+				}
+				if !mfWarned {
+					mfWarned = true
+					log.Warn(source, "native MF encoder failed to open - falling back to the ffmpeg child (raw stdin pipe: expect higher sender load)", map[string]any{"err": err.Error()})
+				}
 			}
-			if !mfWarned {
-				mfWarned = true
-				log.Warn(source, "native MF encoder unavailable - using the ffmpeg child", map[string]any{"err": err.Error()})
+			// The peer was answered EncoderMFNative, i.e. H.264. Substitute a real ffmpeg H.264
+			// encoder so the wire codec still matches the answer; the peer decodes it unchanged.
+			sub, ok := ffmpegH264Fallback()
+			if !ok {
+				return nil, fmt.Errorf("mediapipe: native MF encode unavailable and no ffmpeg H.264 encoder probed")
 			}
+			log.Warn(source, "substituting an ffmpeg H.264 encoder for the native MF engine", map[string]any{"encoder": sub})
+			spec.Encoder = sub
+			spec.Software = sub == "libx264"
 		}
 		ffmpeg, ok := mediatools.Resolve("ffmpeg")
 		if !ok {
@@ -61,6 +75,53 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		return newDecoder(ctx, log, ffmpeg, spec, sink), nil
 	}
 	return enc, dec
+}
+
+// encodeEngineKind names an encode engine.
+type encodeEngineKind int
+
+const (
+	engineFfmpegChild encodeEngineKind = iota // supervised ffmpeg child, raw RGBA over stdin
+	engineMFNative                            // internal/mfenc: pipe-free, in-process, GPU-resident
+)
+
+// encodeEngine reports which engine serves a spec. Keyed on the NEGOTIATED ENCODER NAME so the
+// engine always matches the name the peer was answered with. The old rule (Codec == CodecH264) sent
+// every H.264 spec to mfenc, including a negotiated libx264 - the route then reported a tier-4
+// software encode while hardware silicon did the work, and SWOnly ("force software") didn't.
+func encodeEngine(spec medialink.EncodeSpec) encodeEngineKind {
+	if spec.Encoder == medialink.EncoderMFNative {
+		return engineMFNative
+	}
+	return engineFfmpegChild
+}
+
+// h264FallbackOrder is the ffmpeg H.264 encoder preference when the native MF engine can't open:
+// hardware first (still one GPU, just with the pipe), CPU last.
+var h264FallbackOrder = []string{"h264_nvenc", "h264_qsv", "h264_amf", "h264_mf", "h264_vaapi",
+	"h264_videotoolbox", "h264_v4l2m2m", "libx264"}
+
+// ffmpegH264Fallback picks the best PROBED ffmpeg H.264 encoder (never triggers a probe).
+func ffmpegH264Fallback() (string, bool) {
+	caps, ok := Cached()
+	if !ok {
+		return "", false
+	}
+	return pickH264(caps.Encoders)
+}
+
+// pickH264 returns the preferred H.264 encoder present in encoders (pure; h264FallbackOrder).
+func pickH264(encoders []string) (string, bool) {
+	have := make(map[string]bool, len(encoders))
+	for _, e := range encoders {
+		have[e] = true
+	}
+	for _, e := range h264FallbackOrder {
+		if have[e] {
+			return e, true
+		}
+	}
+	return "", false
 }
 
 // sleepCtx sleeps d or until ctx cancel; false when cancelled.

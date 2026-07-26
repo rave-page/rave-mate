@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/eventbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediapipe"
@@ -66,10 +67,19 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	f.clock = medialink.NewSoftwareClock()
 
 	encFac, decFac := mediapipe.Factories(rt.Log)
+	// Live media config (the daemon pushes updates into f.mediaCfg), so the sender-side codec
+	// preference / encoder pin / device policy behave the same in the isolated child as in-proc.
+	liveCfg := func() config.MediaLinkFeature { f.mu.Lock(); defer f.mu.Unlock(); return f.mediaCfg }
+	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,
 		Log: rt.Log, Encoder: encFac, Decoder: decFac,
 		EncodeMaxHeight: in.MediaCfg.MaxHeight,
+		EncodePolicy: func() (string, string) {
+			c := liveCfg()
+			return c.PreferCodec, c.PinnedEncoder()
+		},
+		EncodeDevice: func() (string, int) { d := devSel(); return d.LUID, d.Index },
 	})
 	if len(in.Encoders) > 0 || len(in.Decoders) > 0 {
 		f.router.SetCodecCaps(in.Encoders, in.Decoders)
@@ -78,7 +88,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 
 	f.routes = mediaroute.New(mediaroute.Options{
 		Log: rt.Log, Router: f.router,
-		Cfg:      func() config.MediaLinkFeature { f.mu.Lock(); defer f.mu.Unlock(); return f.mediaCfg },
+		Cfg:      liveCfg,
 		SameHost: nil, // the daemon proxy applies the same-host guard (peerMgr is daemon-side)
 	})
 

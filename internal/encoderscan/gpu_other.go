@@ -11,3 +11,7 @@ func gpuDiagNote() string { return "" }
 
 // adapterNames has no DXGI off Windows.
 func adapterNames() map[string]string { return nil }
+
+// enumAdapters has no DXGI off Windows → no adapter list, so every device policy degrades to
+// PolicyAuto (the engine's own default device).
+func enumAdapters() ([]AdapterInfo, error) { return nil, nil }

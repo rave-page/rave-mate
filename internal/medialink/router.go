@@ -210,6 +210,17 @@ type Options struct {
 	// 0 = auto (native everywhere except tier-4 software encodes, capped 1080p),
 	// >0 = always cap at that height, -1 = never scale.
 	EncodeMaxHeight int
+
+	// EncodePolicy supplies the SENDER-side negotiation preferences LIVE (read per offer, so a
+	// settings change lands on the next route): prefer = MediaLink.PreferCodec mirrored onto the
+	// send side, pin = MediaLink.Encoder. nil = no preference (pure §3.2 tier order + the
+	// pipe-free preemption). See Negotiate for the precedence.
+	EncodePolicy func() (prefer, pin string)
+
+	// EncodeDevice resolves which GPU to encode on, LIVE (read per route open; the resolver is
+	// TTL-cached in encoderscan). Returns the adapter LUID key + its DXGI ordinal; ("", -1) = the
+	// engine's own default device, which emits no device flags at all. nil = always default.
+	EncodeDevice func() (luid string, index int)
 }
 
 // RouteManager owns the media listener + negotiation. Create with New, attach sources/sinks, then
@@ -238,7 +249,9 @@ type RouteManager struct {
 	decoders     []string // §3.2 decodable video codecs (advertised + carried in offers; mu)
 	encFac       EncoderFactory
 	decFac       DecoderFactory
-	encMaxHeight int // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
+	encMaxHeight int                           // encoder downscale ceiling (Options.EncodeMaxHeight; 0 = native)
+	encPolicy    func() (prefer, pin string)   // sender-side codec preference + encoder pin (live)
+	encDevice    func() (luid string, idx int) // sender-side encode-device resolver (live)
 
 	sampler procstat.Sampler // daemon RSS sampler for the media memory watchdog
 
@@ -289,6 +302,7 @@ func New(opts Options) *RouteManager {
 		syncPeers: map[string]*OffsetEstimator{},
 		encoders:  opts.Encoders, decoders: opts.Decoders,
 		encFac: opts.Encoder, decFac: opts.Decoder, encMaxHeight: opts.EncodeMaxHeight,
+		encPolicy: opts.EncodePolicy, encDevice: opts.EncodeDevice,
 		sources: map[string]sourceReg{}, sinks: map[string]sinkReg{},
 		remoteAdvert: map[string]Advert{}, pendingAns: map[string]*pendingAnswer{},
 		pendingOff: map[string]*pendingOffer{}, active: map[string]*activeRoute{},
@@ -650,7 +664,11 @@ func (rm *RouteManager) onOffer(ev Event) {
 	var choice *CodecChoice
 	if src.desc.Kind == KindVideo && off.Caps != nil {
 		px := float64(src.desc.Width) * float64(src.desc.Height) * src.desc.FPS
-		if ch, ok := NegotiateCodecFor(encoders, off.Caps.Decoders, px); ok {
+		nopt := NegotiateOpts{PixelRate: px}
+		if rm.encPolicy != nil {
+			nopt.Prefer, nopt.PinEncoder = rm.encPolicy()
+		}
+		if ch, ok := Negotiate(encoders, off.Caps.Decoders, nopt); ok {
 			codec, choice = ch.Codec, &ch
 			if w := ch.Warning(); w != "" {
 				rm.warnf("codec negotiated on a software tier", map[string]any{
@@ -873,7 +891,10 @@ func (rm *RouteManager) serveInbound(ctx context.Context, c net.Conn) {
 		}
 		spec := EncodeSpec{Encoder: pa.choice.Encoder, Codec: pa.choice.Codec, Tier: pa.choice.Tier,
 			Software: pa.choice.Software, Width: pa.srcDesc.Width, Height: pa.srcDesc.Height,
-			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate, MaxHeight: maxH}
+			FPS: pa.srcDesc.FPS, BitrateKbps: pa.offer.Bitrate, MaxHeight: maxH, DeviceIndex: -1}
+		if rm.encDevice != nil {
+			spec.DeviceLUID, spec.DeviceIndex = rm.encDevice()
+		}
 		esrc, err := rm.encFac(rctx, spec, src)
 		if err != nil {
 			rm.warnf("encode child failed", map[string]any{"session": session, "encoder": spec.Encoder, "error": err.Error()})

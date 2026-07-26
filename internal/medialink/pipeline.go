@@ -19,6 +19,20 @@ type EncodeSpec struct {
 	FPS         float64
 	BitrateKbps int // requester budget (Offer.Bitrate); 0 = encoder default
 	MaxHeight   int // downscale ceiling (px): input taller than this is scaled down; 0 = native
+	// Encode device (WP-3): which GPU to encode on. DeviceLUID is the DXGI adapter LUID key
+	// ("0xHIGH_0xLOW"), DeviceIndex its DXGI ordinal (the number ffmpeg's d3d11va/-gpu/-qsv_device
+	// flags take). Zero value ("" / 0) is NOT a device: engines treat DeviceIndex < 0 OR an empty
+	// LUID as "engine default" and emit no device flags, so an unset spec behaves exactly as before.
+	DeviceLUID  string
+	DeviceIndex int
+}
+
+// Device reports the resolved encode device, ok=false when the engine should use its own default.
+func (s EncodeSpec) Device() (luid string, index int, ok bool) {
+	if s.DeviceLUID == "" || s.DeviceIndex < 0 {
+		return "", -1, false
+	}
+	return s.DeviceLUID, s.DeviceIndex, true
 }
 
 // DecodeSpec parametrizes the receive-side decode child (dims/fps from the source's advert).

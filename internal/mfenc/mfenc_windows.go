@@ -7,7 +7,7 @@
 package mfenc
 
 // #cgo CXXFLAGS: -O2
-// #cgo LDFLAGS: -lmfplat -lole32 -ld3d11 -loleaut32
+// #cgo LDFLAGS: -lmfplat -lole32 -ld3d11 -ldxgi -loleaut32
 // #include <stdlib.h>
 // #include "mf_shim.h"
 import "C"
@@ -69,9 +69,16 @@ type ctrlReq struct {
 	done chan struct{}
 }
 
-// New builds a hardware pipeline: inW/inH source dims, outW/outH encode dims (caller
-// clamps/evens; VP scales when different), fps, bitrate kbps, gop frames.
+// New builds a hardware pipeline on the DEFAULT adapter: inW/inH source dims, outW/outH
+// encode dims (caller clamps/evens; VP scales when different), fps, bitrate kbps, gop frames.
 func New(inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*Encoder, error) {
+	return NewOn(0, inW, inH, outW, outH, fps, bitrateKbps, gopFrames)
+}
+
+// NewOn is New pinned to one GPU: adapterLUID is the DXGI AdapterLuid packed HighPart<<32|LowPart
+// (encoderscan.LUIDInt64); 0 = default adapter. An adapter that cannot host the pipeline degrades
+// to the default one inside the shim - a device preference never kills a route.
+func NewOn(adapterLUID int64, inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*Encoder, error) {
 	if fps <= 0 {
 		fps = 30
 	}
@@ -82,7 +89,7 @@ func New(inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*En
 		done:   make(chan struct{}),
 	}
 	openErr := make(chan error, 1)
-	go e.run(inW, inH, outW, outH, fps, bitrateKbps, gopFrames, openErr)
+	go e.run(adapterLUID, inW, inH, outW, outH, fps, bitrateKbps, gopFrames, openErr)
 	if err := <-openErr; err != nil {
 		return nil, err
 	}
@@ -136,13 +143,13 @@ func (e *Encoder) Close() {
 }
 
 // run owns the pipeline on one locked OS thread: open, serve feed/ctrl, drain, close.
-func (e *Encoder) run(inW, inH, outW, outH int, fps float64, kbps, gop int, openErr chan<- error) {
+func (e *Encoder) run(adapterLUID int64, inW, inH, outW, outH int, fps float64, kbps, gop int, openErr chan<- error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	fpsN, fpsD := fpsRational(fps)
 	errbuf := (*C.char)(C.malloc(256))
 	defer C.free(unsafe.Pointer(errbuf))
-	h := C.mf_enc_open(0, C.int(inW), C.int(inH), C.int(outW), C.int(outH),
+	h := C.mf_enc_open(C.int64_t(adapterLUID), C.int(inW), C.int(inH), C.int(outW), C.int(outH),
 		C.int(fpsN), C.int(fpsD), C.int(kbps), C.int(gop), errbuf, 256)
 	if h == nil {
 		openErr <- fmt.Errorf("mfenc: %s", C.GoString(errbuf))
