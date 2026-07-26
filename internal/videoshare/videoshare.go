@@ -47,7 +47,9 @@ func SenderName(deck string) string { return "RaveMate Deck " + deck }
 // implementations need no internal locking for Send/Remove/Close ordering.
 type Sender interface {
 	// Send creates (first call for a deck) or updates the named sender for deck with frame img
-	// (NRGBA, deckcard.Width×Height). The image is owned by the caller after return.
+	// (NRGBA, deckcard.Width×Height). The image is the CALLER's again on return, so an
+	// implementation must not retain img.Pix past Send - a backend uploading on its own thread
+	// waits for that read (internal/videoshare/handoff.go).
 	Send(deck string, img *image.NRGBA) error
 	// Remove tears down a deck's sender (track unloaded / gated out). No-op if absent.
 	Remove(deck string) error

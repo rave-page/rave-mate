@@ -44,7 +44,7 @@ type spoutSender struct {
 
 // deckWorker owns one Spout handle + GL context on a locked OS thread for one deck.
 type deckWorker struct {
-	frames  chan *image.NRGBA // cap 1, newest-wins (slow frame never blocks the Sink)
+	frames  chan *frameJob // cap 1, newest-wins; Send waits for the read (handoff.go)
 	done    chan struct{}
 	stopped chan struct{} // closed by the worker AFTER ReleaseSender+CloseOpenGL ran
 }
@@ -74,19 +74,28 @@ func preloadManagedDLL() {
 	}
 }
 
-// Send delivers img to deck's worker (starting it on first frame). Non-blocking: if a frame
-// is already pending it is replaced with the newer one.
+// Send delivers img to deck's worker (starting it on first frame) and returns once the worker has
+// finished reading its pixels - the caller owns img again on return (handoff.go). A frame a newer
+// one displaces is dropped, never queued.
 func (s *spoutSender) Send(deck string, img *image.NRGBA) error {
+	if img == nil || len(img.Pix) == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	w := s.workers[deck]
 	if w == nil {
-		w = &deckWorker{frames: make(chan *image.NRGBA, 1),
+		w = &deckWorker{frames: make(chan *frameJob, 1),
 			done: make(chan struct{}), stopped: make(chan struct{})}
 		s.workers[deck] = w
 		go s.run(deck, w)
 	}
 	s.mu.Unlock()
-	deliver(w.frames, img)
+	b := img.Bounds()
+	// Blocks until the worker finished reading img.Pix: the caller may recycle it on return.
+	_ = handoff(w.frames, img.Pix, b.Dx(), b.Dy(), handoffBudget, func() {
+		s.log.Warn(source, "spout: sender worker stuck in a driver call - frame handoff waiting (the caller's buffer cannot be recycled until it returns)",
+			map[string]any{"deck": deck})
+	})
 	return nil
 }
 
@@ -139,12 +148,14 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 	if h == nil {
 		s.log.Warn(source, "spout: OpenGL context unavailable; deck idle",
 			map[string]any{"deck": deck, "sender": name})
-		// Drain frames until torn down so Send never blocks on a dead worker.
+		// Drain frames until torn down so Send never blocks on a dead worker. Ack each one
+		// immediately (unread) - a discarded frame must still release its producer.
 		for {
 			select {
 			case <-w.done:
 				return
-			case <-w.frames:
+			case j := <-w.frames:
+				j.reclaim()
 			}
 		}
 	}
@@ -154,14 +165,14 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 		select {
 		case <-w.done:
 			return
-		case img := <-w.frames:
-			if img == nil || len(img.Pix) == 0 {
-				continue
+		case j := <-w.frames:
+			if !j.claim() {
+				continue // reclaimed by a newer frame or an expired waiter
 			}
-			b := img.Bounds()
 			ok := C.rave_spout_send(h, cname,
-				(*C.uchar)(unsafe.Pointer(&img.Pix[0])),
-				C.uint(b.Dx()), C.uint(b.Dy()), spoutFlip)
+				(*C.uchar)(unsafe.Pointer(&j.pix[0])),
+				C.uint(j.w), C.uint(j.h), spoutFlip)
+			j.finish(ok != 0) // pixels are ours no longer: the producer may recycle now
 			if ok == 0 {
 				s.log.Debug(source, "spout: SendImage failed",
 					map[string]any{"deck": deck, "sender": name})
@@ -208,7 +219,8 @@ func spoutFindSender(name string) bool {
 // (own SPOUTLIBRARY handle + GL context), mirroring deckWorker but for a single stream.
 type frameSender struct {
 	log     *logbus.Bus
-	frames  chan *image.NRGBA // cap 1, newest-wins
+	name    string
+	frames  chan *frameJob // cap 1; Send waits for the read (handoff.go)
 	done    chan struct{}
 	stopped chan struct{} // closed by the worker AFTER ReleaseSender+CloseOpenGL ran
 }
@@ -220,13 +232,26 @@ func newFrameSender(log *logbus.Bus, name string) (FrameSender, error) {
 	if C.rave_spout_available() == 0 {
 		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
 	}
-	f := &frameSender{log: log, frames: make(chan *image.NRGBA, 1),
+	f := &frameSender{log: log, name: name, frames: make(chan *frameJob, 1),
 		done: make(chan struct{}), stopped: make(chan struct{})}
 	go f.run(name)
 	return f, nil
 }
 
-func (f *frameSender) Send(img *image.NRGBA) error { deliver(f.frames, img); return nil }
+// Send publishes img and returns only once the worker has finished reading its pixels - the
+// medialink.Sink contract lets the producer (mediaroute's receive sink, over mediapipe's decoder)
+// recycle the buffer immediately, and the old async queue read it after that recycle: torn frames.
+func (f *frameSender) Send(img *image.NRGBA) error {
+	if img == nil || len(img.Pix) == 0 {
+		return nil
+	}
+	b := img.Bounds()
+	_ = handoff(f.frames, img.Pix, b.Dx(), b.Dy(), handoffBudget, func() {
+		f.log.Warn(source, "spout: frame-sender worker stuck in a driver call - frame handoff waiting (the caller's buffer cannot be recycled until it returns)",
+			map[string]any{"sender": f.name})
+	})
+	return nil
+}
 
 // Close joins the worker (bounded) - see spoutSender.Close.
 func (f *frameSender) Close() {
@@ -249,7 +274,8 @@ func (f *frameSender) run(name string) {
 			select {
 			case <-f.done:
 				return
-			case <-f.frames:
+			case j := <-f.frames:
+				j.reclaim() // discarded, but the producer must still be released
 			}
 		}
 	}
@@ -258,28 +284,14 @@ func (f *frameSender) run(name string) {
 		select {
 		case <-f.done:
 			return
-		case img := <-f.frames:
-			if img == nil || len(img.Pix) == 0 {
+		case j := <-f.frames:
+			if !j.claim() {
 				continue
 			}
-			b := img.Bounds()
-			if C.rave_spout_send(h, cname, (*C.uchar)(unsafe.Pointer(&img.Pix[0])), C.uint(b.Dx()), C.uint(b.Dy()), spoutFlip) == 0 {
+			ok := C.rave_spout_send(h, cname, (*C.uchar)(unsafe.Pointer(&j.pix[0])), C.uint(j.w), C.uint(j.h), spoutFlip)
+			j.finish(ok != 0)
+			if ok == 0 {
 				f.log.Debug(source, "spout: SendImage failed", map[string]any{"sender": name})
-			}
-		}
-	}
-}
-
-// deliver pushes img onto a cap-1 channel, replacing any pending frame (newest-wins).
-func deliver(ch chan *image.NRGBA, img *image.NRGBA) {
-	for {
-		select {
-		case ch <- img:
-			return
-		default:
-			select {
-			case <-ch: // drop the stale pending frame, retry
-			default:
 			}
 		}
 	}
