@@ -257,3 +257,23 @@ func TestVRProxyRestartRepushE2E(t *testing.T) {
 		t.Fatal("no restart recorded")
 	}
 }
+
+// GPUReset (gpurecover.OnGPUReset consumer) pushes the TDR detail to the child as a gpureset event.
+func TestVRProxyGPUReset(t *testing.T) {
+	p, sent := newTestVrProxy(t, VROverlayDeps{})
+	p.GPUReset("nvlddmkm (event 13)")
+	for _, f := range sent() {
+		if f.event != vrEvGpuReset {
+			continue
+		}
+		var e vrGpuResetEvent
+		if err := json.Unmarshal(f.data, &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Detail != "nvlddmkm (event 13)" {
+			t.Fatalf("detail = %q", e.Detail)
+		}
+		return
+	}
+	t.Fatalf("no %s frame sent", vrEvGpuReset)
+}

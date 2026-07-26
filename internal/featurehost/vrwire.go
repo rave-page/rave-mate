@@ -20,7 +20,13 @@ const (
 	vrEvCamPaths = "campaths" // full camera-path list + geometry
 	vrEvStats    = "stats"    // perf ring + net snapshot for live-stats overlays (1 Hz while wanted)
 	vrEvBus      = "bus"      // eventbus bridge, both directions (Origin/Local preserved down; child→up published as self)
+	vrEvGpuReset = "gpureset" // OS logged a display-driver reset (TDR) → child rebuilds its OpenVR session in place
 )
+
+// vrGpuResetEvent carries the TDR cause (driver provider + event id) for the child's reinit log.
+type vrGpuResetEvent struct {
+	Detail string `json:"detail"`
+}
 
 // Child→parent events.
 const (

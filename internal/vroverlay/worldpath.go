@@ -23,14 +23,13 @@ const (
 )
 
 // driveWorldPath renders + positions the orbit preview when active, else hides it. Called each tick.
+// The overlay is created LAZILY on first actual use (editor open + path loaded) - eagerly creating
+// it every session added a compositor overlay to the cold-start burst that most sessions never show.
 func (e *editor) driveWorldPath(feat config.VROverlayFeature, hand Hand) {
-	if !e.worldPathInit {
-		if err := e.m.rt.EnsureOverlay(worldPathKey, "rave-mate path preview"); err != nil {
-			return
-		}
-		e.worldPathInit = true
-	}
 	if !e.on || !e.worldPathOn || len(e.worldPathGeom.Pts) < 2 {
+		if !e.worldPathInit {
+			return // never created - nothing to hide
+		}
 		if e.worldPathShow.changed(false) {
 			_ = e.m.rt.Show(worldPathKey, false)
 		}
@@ -39,6 +38,12 @@ func (e *editor) driveWorldPath(feat config.VROverlayFeature, hand Hand) {
 			e.worldPathInter = false
 		}
 		return
+	}
+	if !e.worldPathInit {
+		if err := e.m.rt.EnsureOverlay(worldPathKey, "rave-mate path preview"); err != nil {
+			return
+		}
+		e.worldPathInit = true
 	}
 	if e.worldPathZoom == 0 {
 		e.worldPathZoom, e.worldPathPitch = 1, 0.38 // first show: defaults
@@ -71,7 +76,7 @@ func (e *editor) driveWorldPath(feat config.VROverlayFeature, hand Hand) {
 	// Re-render only when the visible frame changes (orbit / zoom / playback head / play state).
 	sig := fmt.Sprintf("%.3f|%.3f|%.3f|%.3f|%v|%d", e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying, len(e.worldPathGeom.Pts))
 	if e.worldPathSig != sig {
-		_ = e.m.rt.SetTexture(worldPathKey, e.m.rend.RenderPathOrbit(e.worldPathGeom, e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying))
+		_ = e.m.setTex(worldPathKey, e.m.rend.RenderPathOrbit(e.worldPathGeom, e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying))
 		e.worldPathSig = sig
 	}
 	// Place beside the menu (opposite the help panel), as a normal panel - never covers the menu.

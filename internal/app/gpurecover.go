@@ -22,6 +22,9 @@ const (
 	gpuMaxRestarts   = 3
 	gpuHistoryFile   = "gpu-restart-history.json"
 	gpuHardKillAfter = 8 * time.Second // backstop: force exit if graceful shutdown wedges on the hung UI
+	// gpuRelaunchCooldown paces the relaunched instance's boot: re-running the identical failing
+	// GL/VR init against a still-recovering driver just re-crashes into the recovery loop.
+	gpuRelaunchCooldown = 10 * time.Second
 )
 
 // gpuRecovery turns detected GPU faults into recovery actions.
@@ -29,11 +32,13 @@ type gpuRecovery struct {
 	log    *logbus.Bus
 	notify func(title, body string) // desktop toast (nil-safe)
 	quit   func()                   // graceful shutdown (ctx cancel)
+	disarm func()                   // guardian disarm (nil-safe) - MUST run before any os.Exit path
 
-	// Injectable for tests; zero values = production defaults (selfupdate.Relaunch + delayed
-	// os.Exit, history under config.DataPath).
+	// Injectable for tests; zero values = production defaults (selfupdate.RelaunchWithCooldown +
+	// delayed hardExitNow, history under config.DataPath).
 	relaunch         func() error
 	scheduleHardExit func()
+	exit             func(int) // test seam for os.Exit
 	historyPath      string
 
 	mu         sync.Mutex
@@ -45,7 +50,7 @@ func (g *gpuRecovery) doRelaunch() error {
 	if g.relaunch != nil {
 		return g.relaunch()
 	}
-	return selfupdate.Relaunch()
+	return selfupdate.RelaunchWithCooldown(gpuRelaunchCooldown)
 }
 
 // hardExit schedules a forced process exit as a backstop: if the wedged UI thread stalls the
@@ -58,9 +63,23 @@ func (g *gpuRecovery) hardExit() {
 	}
 	go func() {
 		time.Sleep(gpuHardKillAfter)
-		g.log.Warn("gpuwatch", "graceful shutdown timed out - forcing exit", nil)
-		os.Exit(0)
+		g.hardExitNow()
 	}()
+}
+
+// hardExitNow disarms the guardian, then force-exits. os.Exit skips the deferred disarm in run() -
+// without this an armed guardian relaunches a SECOND instance on top of gpurecover's own relaunch
+// (one TDR → two instances fighting for the single-instance lock).
+func (g *gpuRecovery) hardExitNow() {
+	g.log.Warn("gpuwatch", "graceful shutdown timed out - forcing exit", nil)
+	if g.disarm != nil {
+		g.disarm()
+	}
+	if g.exit != nil {
+		g.exit(0)
+		return
+	}
+	os.Exit(0)
 }
 
 // OnGPUReset registers a callback fired when the OS logs a display-driver reset - used by

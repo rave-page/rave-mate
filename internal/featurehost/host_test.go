@@ -195,3 +195,54 @@ func TestHostStopWhileBackoff(t *testing.T) {
 		t.Fatal("Stop hung during backoff")
 	}
 }
+
+// MaxAttempts: a crash-looping child (spawn fails instantly) makes the supervisor give up at the
+// cap instead of respawning forever; the give-up is recorded in Stats.
+func TestHostMaxAttemptsGivesUp(t *testing.T) {
+	old := backoffSchedule
+	backoffSchedule = []time.Duration{10 * time.Millisecond}
+	defer func() { backoffSchedule = old }()
+	log := logbus.New(500)
+	h, err := New(Options{Name: "crash", Log: log, Init: func() any { return nil }, MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.command = func() *exec.Cmd { return exec.Command("rave-mate-test-no-such-exe") }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	select {
+	case <-h.done: // supervise returned on its own = gave up
+	case <-time.After(10 * time.Second):
+		t.Fatal("supervisor did not give up at MaxAttempts")
+	}
+	restarts, lastErr := h.Stats()
+	if restarts != 3 {
+		t.Fatalf("restarts=%d, want 3", restarts)
+	}
+	if !strings.Contains(lastErr, "gave up after 3 attempts") {
+		t.Fatalf("lastErr=%q, want give-up marker", lastErr)
+	}
+}
+
+// StableAfter override selects the per-host window; zero keeps the package default.
+func TestHostStableWindowOverride(t *testing.T) {
+	log := logbus.New(8)
+	def, err := New(Options{Name: "a", Log: log, Init: func() any { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := def.stableWindow(); got != stableAfter {
+		t.Fatalf("default stableWindow=%v, want %v", got, stableAfter)
+	}
+	ovr, err := New(Options{Name: "b", Log: log, Init: func() any { return nil }, StableAfter: 5 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ovr.stableWindow(); got != 5*time.Minute {
+		t.Fatalf("override stableWindow=%v, want 5m", got)
+	}
+}

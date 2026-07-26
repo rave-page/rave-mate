@@ -34,3 +34,13 @@ func (s *vrSurface) ToggleHidden(id string)                 { s.sel().ToggleHidd
 func (s *vrSurface) SetHidden(id string, hidden bool)       { s.sel().SetHidden(id, hidden) }
 func (s *vrSurface) RequestEditorToggle()                   { s.sel().RequestEditorToggle() }
 func (s *vrSurface) PerfProbe() string                      { return s.sel().PerfProbe() }
+
+// GPUReset routes an OS-logged display-driver reset (TDR) to whichever backend owns OpenVR, so the
+// session rebuilds in place - the gpurecover.OnGPUReset consumer.
+func (s *vrSurface) GPUReset(detail string) {
+	if s.proxy != nil && s.useProxy != nil && s.useProxy() {
+		s.proxy.GPUReset(detail)
+		return
+	}
+	s.mgr.RequestReinit(detail)
+}

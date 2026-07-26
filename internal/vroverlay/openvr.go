@@ -93,7 +93,12 @@ static int mate_init(void) {
 	char buf[128];
 	snprintf(buf, sizeof(buf), "FnTable:%s", IVROverlay_Version);
 	g_ov = (struct VR_IVROverlay_FnTable *)p_VR_GetGenericInterface(buf, &e);
-	if (e != EVRInitError_VRInitError_None || !g_ov) return e ? (int)e : -2;
+	if (e != EVRInitError_VRInitError_None || !g_ov) {
+		// Post-init failure MUST shut the session down: the manager retries every 5s, and each
+		// VR_InitInternal without a matching VR_ShutdownInternal leaks a vrserver IPC session.
+		p_VR_ShutdownInternal();
+		return e ? (int)e : -2;
+	}
 	snprintf(buf, sizeof(buf), "FnTable:%s", IVRSystem_Version);
 	g_sys = (struct VR_IVRSystem_FnTable *)p_VR_GetGenericInterface(buf, &e); // optional (controller snap)
 	snprintf(buf, sizeof(buf), "FnTable:%s", IVRApplications_Version);
@@ -608,14 +613,21 @@ import "C"
 import (
 	"fmt"
 	"image"
+	"sync"
 	"unsafe"
 
 	"rave.page/mate/internal/vrmotion"
 	"rave.page/mate/internal/vrstats"
 )
 
+// ovrMu serializes ALL OpenVR entry. The C fn-tables + action handles are process-globals and
+// OpenVR (IVRInput especially) is not thread-safe; historically the VR goroutine's UpdateActionState
+// raced the daemon-RPC surfaces (BindingStatus/InputDiag/ActionBinding polled off-thread at 1-2 Hz).
+// One uncontended lock per call is noise next to the cgo transition cost.
+var ovrMu sync.Mutex
+
 // openvrRuntime is the OpenVR/SteamVR backend (built with -tags vr). Requires SteamVR running +
-// openvr_api.dll alongside the exe.
+// openvr_api.dll alongside the exe. All exported methods take ovrMu; unexported helpers assume it.
 type openvrRuntime struct {
 	ok         bool
 	inputReady bool // SteamVR Input action manifest loaded (custom keybinds available)
@@ -662,13 +674,23 @@ func NewRuntime() Runtime {
 		names: map[string]string{}, state: map[string]*ovlState{}, dash: map[string]bool{}, gen: map[string]int{}}
 }
 
-func (r *openvrRuntime) Available() bool { return r.ok }
+func (r *openvrRuntime) Available() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return r.ok
+}
 
 // RuntimeInstalled reports whether SteamVR is installed (no session needed).
-func (r *openvrRuntime) RuntimeInstalled() bool { return C.mate_runtime_installed() != 0 }
+func (r *openvrRuntime) RuntimeInstalled() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return C.mate_runtime_installed() != 0
+}
 
 // PollQuit reports (+ acknowledges) a session-fatal SteamVR event: quit, driver quit/restart, HMD lost.
 func (r *openvrRuntime) PollQuit() QuitReason {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return QuitNone
 	}
@@ -677,6 +699,8 @@ func (r *openvrRuntime) PollQuit() QuitReason {
 
 // RegisterApp installs the .vrmanifest + sets auto-launch so SteamVR lists/can start the overlay.
 func (r *openvrRuntime) RegisterApp(manifestPath, appKey string, autoLaunch bool) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return fmt.Errorf("openvr: not connected")
 	}
@@ -694,6 +718,8 @@ func (r *openvrRuntime) RegisterApp(manifestPath, appKey string, autoLaunch bool
 }
 
 func (r *openvrRuntime) Init() error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if rc := C.mate_init(); rc != 0 {
 		r.ok = false
 		return nil // SteamVR not running / not installed - manager idles cleanly
@@ -703,6 +729,8 @@ func (r *openvrRuntime) Init() error {
 }
 
 func (r *openvrRuntime) EnsureOverlay(key, name string) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return nil
 	}
@@ -788,6 +816,8 @@ func (r *openvrRuntime) recreate(key string) (C.ulonglong, bool) {
 }
 
 func (r *openvrRuntime) SetTexture(key string, img *image.NRGBA) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || img == nil || len(img.Pix) == 0 {
 		return nil
 	}
@@ -832,6 +862,8 @@ func (r *openvrRuntime) SetTexture(key string, img *image.NRGBA) error {
 // TextureInfo reports the GPU-side texture size + bounds SteamVR holds for an overlay - a remote
 // diag can PROVE the displayed texture matches the last upload (vs. the click/hover row mapping).
 func (r *openvrRuntime) TextureInfo(key string) (int, int, [4]float32, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	h, ok := r.handles[key]
 	if !ok || !r.ok {
 		return 0, 0, [4]float32{}, false
@@ -845,6 +877,8 @@ func (r *openvrRuntime) TextureInfo(key string) (int, int, [4]float32, bool) {
 }
 
 func (r *openvrRuntime) SetTransform(key string, t Transform) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	h, ok := r.handles[key]
 	if !ok || !r.ok {
 		return nil
@@ -858,7 +892,7 @@ func (r *openvrRuntime) SetTransform(key string, t Transform) error {
 		r.setMatrixDevice(h, 0, mat)
 		s.matKind, s.matIdx, s.mat = 2, 0, mat
 	case HandLeft, HandRight:
-		if idx, ok := r.ControllerIndex(t.Snap); ok {
+		if idx, ok := r.controllerIndex(t.Snap); ok {
 			r.setMatrixDevice(h, idx, mat)
 			s.matKind, s.matIdx, s.mat = 2, idx, mat
 		} else {
@@ -891,6 +925,8 @@ func (r *openvrRuntime) setMatrixDevice(h C.ulonglong, idx int, m Mat34) {
 }
 
 func (r *openvrRuntime) Show(key string, visible bool) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	h, ok := r.handles[key]
 	if !ok || !r.ok {
 		return nil
@@ -905,6 +941,8 @@ func (r *openvrRuntime) Show(key string, visible bool) error {
 }
 
 func (r *openvrRuntime) DestroyOverlay(key string) error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	h, ok := r.handles[key]
 	if !ok {
 		return nil
@@ -919,6 +957,8 @@ func (r *openvrRuntime) DestroyOverlay(key string) error {
 }
 
 func (r *openvrRuntime) Shutdown() {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if r.ok {
 		C.mate_shutdown()
 		r.ok = false
@@ -932,6 +972,8 @@ func (r *openvrRuntime) Shutdown() {
 // ── Editor implementation (in-VR editing) ────────────────────────────────────────
 
 func (r *openvrRuntime) SetInteractive(key string, w, h int, on bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, ok := r.handles[key]
 	if !ok || !r.ok {
 		return
@@ -946,6 +988,8 @@ func (r *openvrRuntime) SetInteractive(key string, w, h int, on bool) {
 }
 
 func (r *openvrRuntime) PollEvents(key string) []OverlayEvent {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, ok := r.handles[key]
 	if !ok || !r.ok {
 		return nil
@@ -965,6 +1009,13 @@ func (r *openvrRuntime) PollEvents(key string) []OverlayEvent {
 }
 
 func (r *openvrRuntime) DevicePose(idx int) (Mat34, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return r.devicePose(idx)
+}
+
+// devicePose is DevicePose with ovrMu already held.
+func (r *openvrRuntime) devicePose(idx int) (Mat34, bool) {
 	if !r.ok {
 		return Mat34{}, false
 	}
@@ -982,6 +1033,8 @@ func (r *openvrRuntime) DevicePose(idx int) (Mat34, bool) {
 // AimPose returns a hand's AIM/tip pose (where the controller points) for the ray pointer. false if
 // input/the aim action isn't ready - callers fall back to the raw device pose.
 func (r *openvrRuntime) AimPose(hand Hand) (Mat34, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return Mat34{}, false
 	}
@@ -1002,6 +1055,8 @@ func (r *openvrRuntime) AimPose(hand Hand) (Mat34, bool) {
 
 // Haptic fires a short rumble pulse on a hand (grab engage/drop feedback). No-op if input isn't ready.
 func (r *openvrRuntime) Haptic(hand Hand, durationSec, freq, amplitude float32) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return
 	}
@@ -1023,6 +1078,8 @@ func (r *openvrRuntime) Intersect(key string, src, dir [3]float32) (u, v, dist f
 // touch cast projects the tip PERPENDICULARLY onto the surface with it (gaze projection parallax-offset
 // the cursor from the tip, with the sign flipping as the hand crossed the gaze line).
 func (r *openvrRuntime) IntersectN(key string, src, dir [3]float32) (u, v, dist float32, n [3]float32, ok bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, has := r.handles[key]
 	if !has || !r.ok {
 		return 0, 0, 0, n, false
@@ -1039,6 +1096,8 @@ func (r *openvrRuntime) IntersectN(key string, src, dir [3]float32) (u, v, dist 
 // UVWorld maps an overlay UV (bottom-origin, as IntersectN returns it) to the point's world position
 // using the runtime's own overlay→world mapping. ok=false on unknown overlay / API error.
 func (r *openvrRuntime) UVWorld(key string, u, v float32) ([3]float32, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, has := r.handles[key]
 	if !has || !r.ok {
 		return [3]float32{}, false
@@ -1051,6 +1110,13 @@ func (r *openvrRuntime) UVWorld(key string, u, v float32) ([3]float32, bool) {
 }
 
 func (r *openvrRuntime) ControllerIndex(hand Hand) (int, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return r.controllerIndex(hand)
+}
+
+// controllerIndex is ControllerIndex with ovrMu already held.
+func (r *openvrRuntime) controllerIndex(hand Hand) (int, bool) {
 	if !r.ok {
 		return 0, false
 	}
@@ -1066,6 +1132,8 @@ func (r *openvrRuntime) ControllerIndex(hand Hand) (int, bool) {
 }
 
 func (r *openvrRuntime) ThumbY(idx int) float32 {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return 0
 	}
@@ -1074,6 +1142,8 @@ func (r *openvrRuntime) ThumbY(idx int) float32 {
 
 // ThumbVec returns a hand's thumbstick (x,y in −1..1) via the push_pull action's per-hand source.
 func (r *openvrRuntime) ThumbVec(hand Hand) (float32, float32) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return 0, 0
 	}
@@ -1092,6 +1162,8 @@ func (r *openvrRuntime) ThumbVec(hand Hand) (float32, float32) {
 // additionally classifies keys geometrically (vrmik.Calibrate), so legacy index-order takes
 // still map correctly. One pose fetch; nil if SteamVR has no valid devices.
 func (r *openvrRuntime) TrackerPoses() map[int]vrmotion.Pose {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return nil
 	}
@@ -1130,6 +1202,8 @@ func (r *openvrRuntime) TrackerPoses() map[int]vrmotion.Pose {
 
 // InputInit loads the SteamVR Input action manifest; reports whether actions are ready (custom binds).
 func (r *openvrRuntime) InputInit(manifestPath string) bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return false
 	}
@@ -1140,11 +1214,17 @@ func (r *openvrRuntime) InputInit(manifestPath string) bool {
 	return r.inputReady
 }
 
-func (r *openvrRuntime) InputReady() bool { return r.ok && r.inputReady }
+func (r *openvrRuntime) InputReady() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return r.ok && r.inputReady
+}
 
 // InputDiag returns a human-readable dump of the SteamVR Input action set: manifest-loaded state +
 // per-action live active/state + the bound physical inputs (for debugging "my binding does nothing").
 func (r *openvrRuntime) InputDiag() string {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return "VR not connected (start SteamVR)"
 	}
@@ -1156,6 +1236,8 @@ func (r *openvrRuntime) InputDiag() string {
 // BindingStatus reports whether SteamVR has usable bindings for our action set: Unbound means the
 // manifest loaded but a stale custom binding leaves every action unbound (summon/pointer/grab dead).
 func (r *openvrRuntime) BindingStatus() BindingStatus {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return BindingNotReady
 	}
@@ -1171,6 +1253,8 @@ func (r *openvrRuntime) BindingStatus() BindingStatus {
 
 // InputUpdate pumps the action set; call once per tick before reading actions.
 func (r *openvrRuntime) InputUpdate() {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if r.ok && r.inputReady {
 		C.mate_input_update()
 	}
@@ -1180,6 +1264,8 @@ func (r *openvrRuntime) InputUpdate() {
 func digital(v C.int) (state, changed bool) { return v&1 != 0, v&2 != 0 }
 
 func (r *openvrRuntime) ActToggleEditorEdge() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1188,6 +1274,8 @@ func (r *openvrRuntime) ActToggleEditorEdge() bool {
 }
 
 func (r *openvrRuntime) ActToggleOverlaysEdge() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1196,6 +1284,8 @@ func (r *openvrRuntime) ActToggleOverlaysEdge() bool {
 }
 
 func (r *openvrRuntime) ActGrabHeld() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1206,6 +1296,8 @@ func (r *openvrRuntime) ActGrabHeld() bool {
 // ActSummonHeld reports the summon action's held state (open-editor / tap-hide button). Uses
 // IVRInput - legacy GetControllerState returns nothing for face buttons on Index/Touch.
 func (r *openvrRuntime) ActSummonHeld() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1217,6 +1309,8 @@ func (r *openvrRuntime) ActSummonHeld() bool {
 // activate the ray-pointed rave-mate overlay. Manual ray-hit gating means it never affects in-game
 // trigger use when you're not pointing at our overlay.
 func (r *openvrRuntime) ActPointerClickEdge() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1227,6 +1321,8 @@ func (r *openvrRuntime) ActPointerClickEdge() bool {
 // ActPointerClickHeld reports the pointer-click action's held state (trigger down) - used to drag a
 // menu slider continuously so the user can pull it to the 0%/100% edges a single click can't reach.
 func (r *openvrRuntime) ActPointerClickHeld() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false
 	}
@@ -1237,6 +1333,8 @@ func (r *openvrRuntime) ActPointerClickHeld() bool {
 // PointerClickState reports one hand's pointer_click trigger: held now + a rising edge this tick. Used
 // for active-hand detection (pulling a hand's trigger makes it the pointer hand → no hand-jitter).
 func (r *openvrRuntime) PointerClickState(hand Hand) (held, edge bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return false, false
 	}
@@ -1249,6 +1347,8 @@ func (r *openvrRuntime) PointerClickState(hand Hand) (held, edge bool) {
 }
 
 func (r *openvrRuntime) ActPushPull() float32 {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return 0
 	}
@@ -1257,6 +1357,8 @@ func (r *openvrRuntime) ActPushPull() float32 {
 
 // ActSlotEdges returns a bitmask of user-mappable slots pressed this tick (bit i = slot i+1).
 func (r *openvrRuntime) ActSlotEdges() uint32 {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return 0
 	}
@@ -1265,6 +1367,8 @@ func (r *openvrRuntime) ActSlotEdges() uint32 {
 
 // OpenBindingUI opens SteamVR's controller-binding screen for our action set.
 func (r *openvrRuntime) OpenBindingUI() error {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return fmt.Errorf("openvr: input not ready")
 	}
@@ -1277,6 +1381,8 @@ func (r *openvrRuntime) OpenBindingUI() error {
 // ActionBinding returns the human-readable physical inputs SteamVR binds to the action at the given
 // action path (e.g. "Left Hand Index Controller A Button, …"); "" when unbound or input not ready.
 func (r *openvrRuntime) ActionBinding(action string) string {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok || !r.inputReady {
 		return ""
 	}
@@ -1288,6 +1394,8 @@ func (r *openvrRuntime) ActionBinding(action string) string {
 }
 
 func (r *openvrRuntime) EnsureDashboard(key, name string) (bool, error) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		return false, nil
 	}
@@ -1309,6 +1417,8 @@ func (r *openvrRuntime) EnsureDashboard(key, name string) (bool, error) {
 }
 
 func (r *openvrRuntime) SetTransformMatrixWorld(key string, m Mat34) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, ok := r.handles[key]
 	if !ok || !r.ok {
 		return
@@ -1322,6 +1432,8 @@ func (r *openvrRuntime) SetTransformMatrixWorld(key string, m Mat34) {
 // keeps it rigidly attached at full framerate (no per-tick pose math), so a grabbed surface follows
 // the hand smoothly. m is the overlay pose in the device's frame.
 func (r *openvrRuntime) SetTransformMatrixDevice(key string, idx int, m Mat34) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	hd, ok := r.handles[key]
 	if !ok || !r.ok {
 		return
@@ -1337,6 +1449,8 @@ func (r *openvrRuntime) SetTransformMatrixDevice(key string, idx int, m Mat34) {
 // analytic pointer (hitQuad/projectPoint), replacing ComputeOverlayIntersection + the mouse-scale
 // GetTransformForOverlayCoordinates round-trip that disagreed by a center-scaled factor.
 func (r *openvrRuntime) OverlayQuad(key string) (Mat34, float32, float32, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	s, ok := r.state[key]
 	if !ok || !s.hasBasic || s.widthM <= 0 {
 		return Mat34{}, 0, 0, false // no width set yet → not a hit-testable quad
@@ -1350,7 +1464,7 @@ func (r *openvrRuntime) OverlayQuad(key string) (Mat34, float32, float32, bool) 
 	case 1: // world-anchored → the stored matrix IS the world pose
 		return s.mat, s.widthM, heightM, true
 	case 2: // device-relative → world = devicePose × localOffset (exact every frame, incl. hand-held)
-		dev, dok := r.DevicePose(s.matIdx)
+		dev, dok := r.devicePose(s.matIdx)
 		if !dok {
 			return Mat34{}, 0, 0, false
 		}
@@ -1362,6 +1476,8 @@ func (r *openvrRuntime) OverlayQuad(key string) (Mat34, float32, float32, bool) 
 // PerfStats samples compositor frame timing + HMD debug. Frame counters are deltas since the prior
 // call (the first call seeds the baseline → 0 deltas). false when no session/compositor.
 func (r *openvrRuntime) PerfStats() (vrstats.PerfStats, bool) {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
 	if !r.ok {
 		r.havePerf = false
 		return vrstats.PerfStats{}, false

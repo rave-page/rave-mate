@@ -336,7 +336,7 @@ func (e *editor) driveHover(feat config.VROverlayFeature) {
 		if e.m.rt.EnsureOverlay(hoverHlKey, "rave-mate hover") != nil {
 			return
 		}
-		_ = e.m.rt.SetTexture(hoverHlKey, e.m.rend.RenderHoverRow())
+		_ = e.m.setTex(hoverHlKey, e.m.rend.RenderHoverRow())
 		e.hoverEnsured = true
 	}
 	tf := e.menuTransform(feat, HandFromString(feat.ResolvedEditHand()))
@@ -429,7 +429,7 @@ func (e *editor) placeCursor(pt [3]float32) {
 		if e.m.rt.EnsureOverlay(cursorKey, "rave-mate cursor") != nil {
 			return
 		}
-		_ = e.m.rt.SetTexture(cursorKey, e.m.rend.RenderDot())
+		_ = e.m.setTex(cursorKey, e.m.rend.RenderDot())
 		_ = e.m.rt.SetTransform(cursorKey, Transform{WidthM: cursorSizeM, Opacity: 1})
 		e.cursorEnsured = true
 	}
@@ -492,7 +492,7 @@ func (e *editor) showPtrTip(label string, pt [3]float32) {
 		e.ptrTipEnsured = true
 	}
 	if e.ptrTipSig != label {
-		_ = e.m.rt.SetTexture(ptrTipKey, e.m.rend.RenderTooltip(label))
+		_ = e.m.setTex(ptrTipKey, e.m.rend.RenderTooltip(label))
 		e.ptrTipSig = label
 	}
 	// Same delta gate as the cursor: skip the compositor push while neither the anchor nor the viewer moved.
