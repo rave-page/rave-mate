@@ -22,6 +22,24 @@ The cgo shim (`mf_shim_windows.cpp` + `mfenc_windows.go` Encoder) stays as LAB B
 in-proc reference (tests exercise both); the production path is the Zig child
 (`mediapipe/mf_bridge.go` → `mfenc.OpenProcSession`).
 
+**Child delivery (field #166): the exe is EMBEDDED in rave-mate.exe** (`encembed` tag;
+`build-zig.sh` stages it into `internal/mfenc/embedded/`, CI Windows builds carry it) and
+extracted on demand to `%LocalAppData%/rave-mate/proc/rave-mate-enc-<hash>.exe`
+(content-hash-stamped, atomic write+rename, stale versions pruned) - the self-updater
+swaps only the main exe, so sidecar-only shipping never reaches self-updated installs,
+and the hash stamp kills main-exe/child version skew. Resolution order:
+`RAVE_MATE_ENC_EXE` → staged embed → sidecar next to the exe (NSIS) → repo zig-out (dev).
+
+**Advertisement gate:** `mfenc.ChildAvailable()` (not `Available()`) gates every
+h264_mf_native advertisement (app caps, mfOnly, settings list, mediapipe engine): cgo HW
+probe AND child exe resolvable AND it spawns + answers hello within 3s. A rig without a
+working child negotiates as if the native engine does not exist.
+
+**Crash forensics:** featurehost logs a consolidated `feature crash forensics` entry on
+child death - latched fatal header (`panic:`/`fatal error:`/`Exception 0x`) + bounded
+last-64-line stderr tail - because per-line streaming lets goroutine dumps evict the
+header from the log ring.
+
 Per-session telemetry (Phase-2 governor inputs): submit→AU latency p50/p99, queue
 depth, child CPU%, ring drops - surfaced through `medialink.PipelineStats`. Measured on
 NVIDIA RTX (dev box): 1080p sustained submit 335 fps, p50 5.4 ms / p99 22 ms submit→AU;

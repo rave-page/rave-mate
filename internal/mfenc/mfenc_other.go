@@ -21,6 +21,15 @@ type Encoder struct{}
 
 func Available() bool { return false }
 
+// ChildAvailable: no native engine / encoder child on this platform.
+func ChildAvailable() bool { return false }
+
+// RefreshChildAvailable: no-op stub.
+func RefreshChildAvailable() bool { return false }
+
+// HasEmbeddedChild: never on this platform.
+func HasEmbeddedChild() bool { return false }
+
 func New(inW, inH, outW, outH int, fps float64, bitrateKbps, gopFrames int) (*Encoder, error) {
 	return nil, ErrUnsupported
 }

@@ -44,7 +44,7 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 	var mfWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
 		if encodeEngine(spec) == engineMFNative {
-			if mfenc.Available() {
+			if mfenc.ChildAvailable() {
 				s, err := newMFBridge(ctx, log, spec, src)
 				if err == nil {
 					return s, nil

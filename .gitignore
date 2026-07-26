@@ -40,3 +40,4 @@ rave-mate-debug.log
 /driver/ravemidi/build/*
 !/driver/ravemidi/build/sign-cab.ps1
 !/driver/ravemidi/build/attest/
+internal/mfenc/embedded/*.exe

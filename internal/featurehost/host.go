@@ -449,13 +449,18 @@ func (h *Host) runOnce(ctx context.Context) error {
 		sysexec.AssignToJobClass(cmd.Process, h.opt.CPUClass) // Windows: kill-on-close backstop (+ class CPU cap)
 	}
 
-	// Child stderr (panic stacks, raw diagnostics) → daemon log, line by line.
+	// Child stderr (panic stacks, raw diagnostics) → daemon log, line by line - AND a
+	// bounded tail + latched fatal header. A goroutine dump is hundreds of lines: streamed
+	// alone it scrolls the fatal header ("panic: ...", "fatal error: ...") out of the ring
+	// before anyone reads it; the consolidated crash entry below keeps the header.
+	tail := &stderrTail{}
 	debuglog.Go(h.opt.Log, h.src(), func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 256*1024)
 		for sc.Scan() {
 			if ln := sc.Text(); ln != "" {
 				h.opt.Log.Warn(h.src(), ln, nil)
+				tail.add(ln)
 			}
 		}
 	})
@@ -559,6 +564,12 @@ func (h *Host) runOnce(ctx context.Context) error {
 		h.failPending()
 		if ps != nil && ps.ExitCode() == 0 {
 			return errors.New("feature exited")
+		}
+		// One consolidated crash entry: latched fatal header + bounded stderr tail (the
+		// per-line stream above is ring-evicted by long goroutine dumps).
+		if hdr, tl := tail.snapshot(); hdr != "" || tl != "" {
+			h.opt.Log.Error(h.src(), "feature crash forensics", map[string]any{
+				"header": hdr, "stderr_tail": tl})
 		}
 		if ps != nil {
 			return fmt.Errorf("feature exited with code %d", ps.ExitCode())

@@ -1,7 +1,6 @@
 package featurehost
 
 import (
-	"math"
 	"os"
 	"runtime/debug"
 	"testing"
@@ -63,7 +62,7 @@ func TestSetChildMemoryLimit(t *testing.T) {
 	if got := debug.SetMemoryLimit(-1); got != want {
 		t.Errorf("soft limit = %d, want %d (%d%% of the 2048MB hard cap)", got, want, childMemSoftPct)
 	}
-	if want >= int64(2048)*1024*1024 || want >= math.MaxInt64 {
+	if want >= int64(2048)*1024*1024 {
 		t.Error("soft limit must stay strictly under the hard cap")
 	}
 }
