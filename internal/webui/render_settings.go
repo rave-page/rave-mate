@@ -742,20 +742,9 @@ func (u *UI) cardBlocks(id string) (string, string, []setBlock) {
 			sbToggle(i18n.T("settings.body.webcam.autostart"), "set:webcam-autostart", f.Webcam.AutoStart),
 			sbNote(i18n.T("settings.body.webcam.note"))}
 	case "medialink":
-		mf := &f.MediaLink
-		fpsCapSel := func(v int) int { // stored -1 = uncapped, 0 = default 60
-			if v == 0 {
-				return 60
-			}
-			return v
-		}
-		return i18n.T("settings.card.medialink.title"), i18n.T("settings.card.medialink.desc"), []setBlock{
-			sbFpair(sbSelectTip(i18n.T("settings.body.medialink.codec"), "set:ml-codec", [][2]string{{"", "auto"}, {"hevc", "hevc"}, {"h264", "h264"}, {"mjpeg", "mjpeg"}}, mf.PreferCodec, "ml-accel"),
-				sbSelectTip(i18n.T("settings.body.medialink.bitrate"), "set:ml-bitrate", [][2]string{{"8", "8"}, {"12", "12"}, {"20", "20"}, {"30", "30"}, {"50", "50"}}, strconv.Itoa(mf.Bitrate()/1000), "ml-budget")),
-			sbFpair(sbSelectTip(i18n.T("settings.body.medialink.maxFps"), "set:ml-maxfps", [][2]string{{"30", "30"}, {"60", "60"}, {"-1", i18n.T("settings.body.medialink.uncapped")}}, strconv.Itoa(fpsCapSel(mf.MaxFPS)), "ml-fps"),
-				sbSelectTip(i18n.T("settings.body.medialink.maxHeight"), "set:ml-maxheight", [][2]string{{"0", i18n.T("settings.body.medialink.auto")}, {"720", "720p"}, {"1080", "1080p"}, {"1440", "1440p"}, {"-1", i18n.T("settings.body.medialink.native")}}, strconv.Itoa(mf.MaxHeight), "ml-height")),
-			sbToggle(i18n.T("settings.body.medialink.swOnly"), "set:ml-swonly", mf.SWOnly),
-			sbNote(i18n.T("settings.body.medialink.note"))}
+		// settings_medialink.go owns this body (sender/receiver split + device & engine pickers).
+		return i18n.T("settings.card.medialink.title"), i18n.T("settings.card.medialink.desc"),
+			u.mediaLinkBlocks(&f.MediaLink)
 	case "timecode":
 		return i18n.T("settings.card.timecode.title"), i18n.T("settings.card.timecode.desc"), u.timecodeBlocks()
 	case "ablelink":
@@ -2051,6 +2040,12 @@ func (u *UI) applySet(id, val string) {
 		}
 	case "ml-swonly":
 		f.MediaLink.SWOnly = b
+	case "ml-device":
+		applyEncodeDevice(&f.MediaLink, v)
+	case "ml-encoder":
+		f.MediaLink.Encoder = strings.TrimSpace(v)
+	case "ml-subprocess":
+		f.MediaLink.SetSubprocess(b)
 	case "ml-maxfps":
 		if n, err := strconv.Atoi(v); err == nil && (n > 0 || n == -1) {
 			f.MediaLink.MaxFPS = n

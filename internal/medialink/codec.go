@@ -20,7 +20,7 @@ const (
 // EncoderMFNative names the sender's PIPE-FREE H.264 engine (internal/mfenc: D3D11 upload →
 // VideoProcessorBlt → encoder MFT, no ffmpeg child and no rawvideo stdin pipe). It is advertised
 // ONLY when that engine is actually available, which is what makes it safe to preempt the tier
-// order with (see pipeFreeWins). Distinct from ffmpeg's own "h264_mf" encoder, which is a normal
+// order with (see Negotiate). Distinct from ffmpeg's own "h264_mf" encoder, which is a normal
 // pipe-fed tier-3 candidate.
 const EncoderMFNative = "h264_mf_native"
 

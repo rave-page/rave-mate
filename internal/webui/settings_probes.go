@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/stt"
@@ -52,6 +53,7 @@ type probeCache struct {
 	vr    vrdll.Status
 	devs  map[string][]string          // kind ("midi"|"waveout"|"midiout"|"sttmic"|"audiorec") → names
 	unity map[string]unityproj.Project // project dir → inspect result
+	gpus  []gpuAdapterRow              // encode-GPU picker rows (DXGI adapters + live encode load)
 
 	slots map[string]*probeSlot // probe key → its single-flight + pacing state
 	pend  int                   // probes in flight across the current kick(s)
@@ -89,6 +91,7 @@ const (
 	pkSttMic   = "dev:sttmic"
 	pkAudioRec = "dev:audiorec"
 	pkUnity    = "unity"
+	pkGPUEnc   = "dev:gpuenc"
 )
 
 // probeSpec is one independent probe: it does its own blocking work, commits its own slot and
@@ -109,6 +112,7 @@ var settingsProbeTable = []probeSpec{
 	{pkSttMic, devProbe(pkSttMic, "sttmic", stt.InputDevices)},
 	{pkAudioRec, probeAudioRec},
 	{pkUnity, probeUnity},
+	{pkGPUEnc, probeGPUEncoders},
 }
 
 // ── slot readers (render path: never blocks, never touches the OS) ──
@@ -140,6 +144,14 @@ func (u *UI) unityInfoCached(dir string) unityproj.Project {
 	u.probes.mu.Lock()
 	defer u.probes.mu.Unlock()
 	return u.probes.unity[dir]
+}
+
+// gpuAdaptersCached returns the retained encode-GPU rows (empty until the probe lands, and always
+// empty off Windows - the picker then offers automatic/avoid only).
+func (u *UI) gpuAdaptersCached() []gpuAdapterRow {
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	return u.probes.gpus
 }
 
 // probeDone reports that key's probe has landed at least once (a cold slot renders zero values, so
@@ -320,6 +332,57 @@ func probeUnity(u *UI) bool {
 		}
 	}
 	u.probes.unity = next
+	return changed
+}
+
+// gpuAdapterRow is one encode-GPU option: adapter LUID + a label carrying the GPU name, its live
+// video-encode load and who is holding it.
+type gpuAdapterRow struct {
+	LUID  string
+	Label string
+}
+
+// probeGPUEncoders enumerates GPU adapters (DXGI, ~1 ms) and, ONLY on a multi-adapter machine, joins
+// each with its live video-encode load + detected holders (PDH GPU-Engine counters + a config-only
+// OBS read, ~300 ms - the probe budget then paces it to a few seconds). A single-GPU box gets the
+// cheap path: with one adapter every device policy resolves to "automatic" anyway, so the load
+// column would cost 300 ms to show something un-actionable. Read-only: never touches the GPU, never
+// starts an encode.
+func probeGPUEncoders(u *UI) bool {
+	ads := encoderscan.Adapters()
+	var rep encoderscan.Report
+	if len(ads) > 1 {
+		rep = encoderscan.Detect(func() (stream, record string, active bool, err error) {
+			s, r, ok := encoderscan.OBSConfigEncoder()
+			if !ok {
+				return "", "", false, nil
+			}
+			return s, r, false, nil
+		})
+	}
+	next := make([]gpuAdapterRow, 0, len(ads))
+	for _, a := range ads {
+		label := a.Name
+		if label == "" {
+			label = a.LUID
+		}
+		if load := rep.AdapterLoad(a.LUID); load != "" {
+			label += " · " + load
+		}
+		if who := rep.AdapterHolders(a.LUID); who != "" {
+			label += " · " + who
+		}
+		next = append(next, gpuAdapterRow{LUID: a.LUID, Label: label})
+	}
+	u.probes.mu.Lock()
+	defer u.probes.mu.Unlock()
+	changed := len(next) != len(u.probes.gpus)
+	for i := range next {
+		if !changed && next[i] != u.probes.gpus[i] {
+			changed = true
+		}
+	}
+	u.probes.gpus = next
 	return changed
 }
 
