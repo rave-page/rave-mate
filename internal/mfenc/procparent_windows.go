@@ -185,6 +185,7 @@ type procChild struct {
 	openWait   map[uint32]chan openedEv
 	closeWait  map[uint32]chan struct{}
 	dead       bool
+	stateCh    chan struct{} // closed+replaced on every liveness transition (spawn/death/loop)
 	spawnCount int
 	consecFail int
 	lastSpawn  time.Time
@@ -238,7 +239,7 @@ func getChild(luid int64) (*procChild, error) {
 		return c, nil
 	}
 	c := &procChild{luid: luid, sessions: map[uint32]*ProcSession{}, openWait: map[uint32]chan openedEv{},
-		closeWait: map[uint32]chan struct{}{}}
+		closeWait: map[uint32]chan struct{}{}, stateCh: make(chan struct{})}
 	if err := c.spawn(); err != nil {
 		return nil, err
 	}
@@ -250,6 +251,43 @@ func (c *procChild) isDeadLocked() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.dead && c.consecFail >= maxConsecFails
+}
+
+// signalState wakes waitUsable waiters after a liveness transition. Caller holds c.mu.
+func (c *procChild) signalState() {
+	close(c.stateCh)
+	c.stateCh = make(chan struct{})
+}
+
+// waitUsable blocks until the child is alive (nil), crash-looped (error), or the deadline
+// passes - so an open landing during a restart backoff WAITS for the respawn instead of
+// burning its attempts in microseconds (route survival beats a spurious ffmpeg fallback).
+func (c *procChild) waitUsable(d time.Duration) error {
+	deadline := time.Now().Add(d)
+	for {
+		c.mu.Lock()
+		if !c.dead {
+			c.mu.Unlock()
+			return nil
+		}
+		if c.consecFail >= maxConsecFails {
+			c.mu.Unlock()
+			return fmt.Errorf("mfenc: encoder child (adapter %#x) is crash-looping - using ffmpeg", uint64(c.luid))
+		}
+		ch := c.stateCh
+		c.mu.Unlock()
+		rem := time.Until(deadline)
+		if rem <= 0 {
+			return errors.New("mfenc: encoder child not back within the respawn window")
+		}
+		tm := time.NewTimer(rem)
+		select {
+		case <-ch:
+			tm.Stop()
+		case <-tm.C:
+			return errors.New("mfenc: encoder child not back within the respawn window")
+		}
+	}
 }
 
 // spawn launches the child (caller need not hold c.mu on first spawn; restarts hold it).
@@ -285,6 +323,7 @@ func (c *procChild) spawn() error {
 	c.cmd = cmd
 	c.stdin = stdin
 	c.dead = false
+	c.signalState() // spawn/restart callers hold c.mu (first spawn: fresh struct, no waiters yet)
 	c.spawnCount++
 	c.lastSpawn = time.Now()
 	if h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid)); err == nil {
@@ -368,6 +407,7 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 		return
 	}
 	c.dead = true
+	c.signalState()
 	if c.proc != 0 {
 		_ = windows.CloseHandle(c.proc)
 		c.proc = 0
@@ -409,6 +449,9 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 			s.fail("mfenc: encoder child crash limit reached")
 		}
 		Warnf("mfenc: adapter %#x poisoned after %d consecutive crashes - affected geometries fall back to ffmpeg", uint64(c.luid), fails)
+		c.mu.Lock()
+		c.signalState() // wake waitUsable: crash-loop verdict is final for this child
+		c.mu.Unlock()
 		return
 	}
 	backoff := time.Duration(500*(1<<uint(fails-1))) * time.Millisecond
@@ -418,6 +461,8 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 	time.Sleep(backoff)
 	c.mu.Lock()
 	if err := c.spawn(); err != nil {
+		c.consecFail = maxConsecFails // no binary to respawn: final for this child
+		c.signalState()
 		c.mu.Unlock()
 		for _, s := range live {
 			s.fail("mfenc: encoder child respawn failed: " + err.Error())
@@ -469,6 +514,16 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 	case ev := <-ch:
 		return ev, nil
 	case <-time.After(openWait):
+		c.mu.Lock()
+		if ch2, ok := c.openWait[s.sid]; ok && ch2 == ch {
+			delete(c.openWait, s.sid) // prune our waiter (readEvents may have raced the delete)
+		}
+		c.mu.Unlock()
+		select {
+		case ev := <-ch: // late event landed between timeout and prune - use it
+			return ev, nil
+		default:
+		}
 		return openedEv{}, errors.New("open timeout")
 	}
 }
@@ -544,9 +599,14 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 		ringSize = frameBytes
 	}
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ { // one respawned-child retry on transient send races
+	for attempt := 0; attempt < 2; attempt++ { // one respawned-child retry (waitUsable spans the backoff)
 		child, err := getChild(luid)
 		if err != nil {
+			return nil, err
+		}
+		// A crash may have JUST happened: wait out the respawn backoff (max 2s) + spawn
+		// instead of burning both attempts in microseconds against a dead child.
+		if err := child.waitUsable(3 * time.Second); err != nil {
 			return nil, err
 		}
 		sid := sidSeq.Add(1)
@@ -721,9 +781,18 @@ func (s *ProcSession) pump() {
 			s.droppedAUs.Store(atomic.LoadUint64(s.shm.u64(48)))
 			s.sampleLatency(pts)
 			au := AU{Data: data, PTSNs: pts, Keyframe: flags&1 != 0}
-			// Bounded-blocking delivery: Output consumers read until close, so this only
-			// times out when the consumer is gone mid-teardown - then dropping is correct
-			// (never abandon shm reads to a racing unmap).
+			// Delivery policy: block (bounded) for a live consumer, but NEVER stall once
+			// teardown began - Close() waits on pumpDone before unmapping the shm, so any
+			// stall here would either delay Close or (worse) race a UAF. During teardown
+			// (final drain, session closed, or done fired mid-wait) undeliverable AUs are
+			// discarded immediately.
+			if final || s.closed.Load() {
+				select {
+				case s.out <- au:
+				default: // no reader during teardown: discard
+				}
+				continue
+			}
 			select {
 			case s.out <- au:
 			default:
@@ -731,7 +800,9 @@ func (s *ProcSession) pump() {
 				select {
 				case s.out <- au:
 					tm.Stop()
-				case <-tm.C:
+				case <-s.done: // teardown began while blocked: discard, drain fast
+					tm.Stop()
+				case <-tm.C: // consumer wedged outside teardown: drop rather than stall shm
 				}
 			}
 		}
@@ -827,9 +898,9 @@ func (s *ProcSession) Close() {
 	}
 	close(s.done)
 	_ = windows.SetEvent(s.shm.evAU) // wake the pump for its final drain
-	select {
-	case <-s.pumpDone:
-	case <-time.After(5 * time.Second):
-	}
+	// UNCONDITIONAL: the shm must never be unmapped while pump can still touch it. pump's
+	// exit is bounded by construction (waits <=200ms, ring drain finite, teardown delivery
+	// never blocks), so this converges promptly; a timeout fallback here would be a UAF.
+	<-s.pumpDone
 	s.shm.close()
 }

@@ -200,6 +200,113 @@ func TestProcCrashLoopFailsClean(t *testing.T) {
 	}
 }
 
+// TestProcCloseUnreadOutputNoUAF (review CRITICAL 1): a consumer that abandoned Output()
+// (mf_bridge emit on ctx cancel with full frames chan) must not turn Close into a UAF -
+// pump must discard undeliverable AUs during teardown and exit BEFORE the shm unmaps;
+// Close blocks on that ordering unconditionally and still returns promptly.
+func TestProcCloseUnreadOutputNoUAF(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	requireEncExe(t)
+	s, err := OpenProcSession(0, 320, 240, 320, 240, 30, 500, 30)
+	if err != nil {
+		t.Fatalf("OpenProcSession: %v", err)
+	}
+	frame := make([]byte, 320*240*4)
+	for i := 0; i < 16; i++ { // > out chan cap (8): tail AUs pile up with NO reader
+		if err := s.Encode(frame, int64(i)*33_333_333); err != nil {
+			t.Fatalf("Encode %d: %v", i, err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond) // let AUs land in chan + ring
+	t0 := time.Now()
+	s.Close()
+	if d := time.Since(t0); d > 3*time.Second {
+		t.Fatalf("Close stalled %v with an unread Output", d)
+	}
+	select { // Close returned → pump must already be done (shm was unmapped after it)
+	case <-s.pumpDone:
+	default:
+		t.Fatal("Close returned before pump exited - unmap raced live shm reads")
+	}
+	s.child.mu.Lock()
+	tail := string(s.child.stderrTail)
+	s.child.mu.Unlock()
+	t.Logf("child stderr tail: %s", tail)
+}
+
+// TestProcOpenDuringRespawnBackoff (review IMPORTANT 4): an open landing while the child
+// is inside its restart backoff must WAIT for the respawn (waitUsable), not burn its
+// attempts in microseconds and fall to ffmpeg.
+func TestProcOpenDuringRespawnBackoff(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	requireEncExe(t)
+	t.Setenv("RAVE_MATE_MFENC_TEST_FAULT_FIRST", "1") // first spawn dies on frame 1
+	const luid = int64(0x7e59)                        // own child (fault fires on first spawn only)
+	a, err := OpenProcSession(luid, 320, 240, 320, 240, 30, 500, 30)
+	if err != nil {
+		t.Fatalf("open A: %v", err)
+	}
+	defer a.Close()
+	nA, doneA := drainSession(a)
+	frame := make([]byte, 320*240*4)
+	_ = a.Encode(frame, 0) // triggers the child AV
+	for i := 0; i < 100 && !a.recovering.Load(); i++ {
+		_ = a.Encode(frame, int64(i+1)*33_333_333)
+		time.Sleep(10 * time.Millisecond)
+	}
+	// child is dead/backing off RIGHT NOW: this open must ride the respawn
+	b, err := OpenProcSession(luid, 640, 480, 640, 480, 30, 1000, 60)
+	if err != nil {
+		t.Fatalf("open B during respawn backoff must succeed, got: %v", err)
+	}
+	nB, doneB := drainSession(b)
+	bframe := make([]byte, 640*480*4)
+	for i := 0; i < 10; i++ {
+		if err := b.Encode(bframe, int64(i)*33_333_333); err != nil {
+			t.Fatalf("B Encode %d: %v", i, err)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	b.Close()
+	<-doneB
+	if *nB < 5 {
+		t.Fatalf("B aus=%d want >=5", *nB)
+	}
+	a.Close()
+	<-doneA
+	_ = nA
+}
+
+// TestProcSessionOpenCloseCycles (review IMPORTANT 2+3): repeated open/encode/close on ONE
+// long-lived child exercises the detached closer + per-session handle/view cleanup paths.
+func TestProcSessionOpenCloseCycles(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	requireEncExe(t)
+	frame := make([]byte, 320*240*4)
+	for i := 0; i < 10; i++ {
+		s, err := OpenProcSession(0, 320, 240, 320, 240, 30, 500, 30)
+		if err != nil {
+			t.Fatalf("cycle %d open: %v", i, err)
+		}
+		n, done := drainSession(s)
+		if err := s.Encode(frame, 0); err != nil {
+			t.Fatalf("cycle %d encode: %v", i, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		s.Close()
+		<-done
+		if *n < 1 {
+			t.Fatalf("cycle %d: no AU", i)
+		}
+	}
+}
+
 // TestProcOpenFailKnobClean: the Go-side kill-switch short-circuits before any child spawn.
 func TestProcOpenFailKnobClean(t *testing.T) {
 	t.Setenv("RAVE_MATE_MFENC_OPEN_FAIL", "1")

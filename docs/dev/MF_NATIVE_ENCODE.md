@@ -36,6 +36,15 @@ Hard-won contract lessons (cost real debugging, keep them):
 - The encoder child calls `timeBeginPeriod(1)` - without it Sleep(1) waits ~15.6 ms
   and throughput collapses (Go's runtime sets this for the parent, Zig does not).
 - MF pts are 100ns-quantized: latency maps must key on quantized pts.
+- Some vendor MFTs NEVER deliver METransformDrainComplete: drain also exits when
+  fed_n == out_n (every submitted frame returned) or every close burns the full
+  2 s FEED_WAIT_MS.
+- Teardown discipline (review CRITICAL): the parent NEVER unmaps a session's shm
+  until its pump goroutine has exited (Close blocks on pumpDone, no timeout
+  fallback), and the pump never blocks on AU delivery once teardown began - an
+  abandoned Output() consumer must cost drops, not a UAF. Child close runs on a
+  detached closer thread (session independence) and releases view + mapping + all
+  event handles on every exit path.
 
 ## Pipeline
 

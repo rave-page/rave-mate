@@ -1150,14 +1150,17 @@ pub const Enc = struct {
             return e.harvestOutput(sink);
         }
         var waited: u32 = 0;
-        while (!e.drain_done and waited < FEED_WAIT_MS) {
+        // Done when the MFT says so OR when every submitted frame came back (fed_n==out_n):
+        // some vendor MFTs never deliver METransformDrainComplete - without the in-flight
+        // check every close would burn the full FEED_WAIT_MS.
+        while (!e.drain_done and e.fed_n != e.out_n and waited < FEED_WAIT_MS) {
             const rc = e.pump(sink);
             if (rc < 0) return rc;
-            if (e.drain_done) break;
+            if (e.drain_done or e.fed_n == e.out_n) break;
             Sleep(1);
             waited += 1;
         }
-        return if (e.drain_done) 0 else 1;
+        return if (e.drain_done or e.fed_n == e.out_n) 0 else 1;
     }
 
     pub fn close(e: *Enc) void {

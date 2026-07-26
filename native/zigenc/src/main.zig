@@ -29,6 +29,8 @@ extern "kernel32" fn OpenFileMappingW(u32, i32, [*:0]const u16) callconv(.winapi
 extern "kernel32" fn MapViewOfFile(*anyopaque, u32, u32, u32, usize) callconv(.winapi) ?[*]u8;
 extern "kernel32" fn OpenEventW(u32, i32, [*:0]const u16) callconv(.winapi) ?*anyopaque;
 extern "kernel32" fn SetEvent(*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn UnmapViewOfFile(*const anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn CloseHandle(*anyopaque) callconv(.winapi) i32;
 extern "kernel32" fn WaitForSingleObject(*anyopaque, u32) callconv(.winapi) u32;
 extern "kernel32" fn AcquireSRWLockExclusive(*usize) callconv(.winapi) void;
 extern "kernel32" fn ReleaseSRWLockExclusive(*usize) callconv(.winapi) void;
@@ -131,9 +133,12 @@ const Session = struct {
     frame: [*]u8 = undefined,
     ring: [*]u8 = undefined,
     ring_size: u64 = 0,
+    mapping: ?*anyopaque = null, // OS handles owned by this session - released in closeShm
+    view: ?[*]u8 = null,
     ev_frame: *anyopaque = undefined,
     ev_cons: *anyopaque = undefined,
     ev_au: *anyopaque = undefined,
+    evs_open: u32 = 0, // how many of the 3 events opened (partial-open cleanup)
     aus_put: u64 = 0,
     fed: u64 = 0,
 };
@@ -167,7 +172,9 @@ fn openShm(s: *Session) !void {
     const wname = try utf16Z(gpa, s.shm_name);
     defer gpa.free(wname);
     const mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, 0, wname) orelse return error.ShmOpen;
+    s.mapping = mapping;
     const view = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, total) orelse return error.ShmMap;
+    s.view = view;
     s.hdr = .{ .base = view };
     s.frame = view + hdr_size;
     s.ring = view + hdr_size + @as(usize, @intCast(frame_bytes));
@@ -184,7 +191,22 @@ fn openShm(s: *Session) !void {
             1 => s.ev_cons = ev,
             else => s.ev_au = ev,
         }
+        s.evs_open = i + 1;
     }
+}
+
+// closeShm releases the view + mapping + event handles (ALL exit paths incl. partial
+// opens): a long-lived per-adapter child over many open/close cycles must not leak
+// handles or VA (>=8 MB view per session).
+fn closeShm(s: *Session) void {
+    if (s.view) |v| _ = UnmapViewOfFile(v);
+    s.view = null;
+    if (s.mapping) |m| _ = CloseHandle(m);
+    s.mapping = null;
+    if (s.evs_open >= 1) _ = CloseHandle(s.ev_frame);
+    if (s.evs_open >= 2) _ = CloseHandle(s.ev_cons);
+    if (s.evs_open >= 3) _ = CloseHandle(s.ev_au);
+    s.evs_open = 0;
 }
 
 // ringPut appends one AU record; full ring drops (parent drains on evAU; bounded by design).
@@ -294,7 +316,18 @@ fn sessionMain(s: *Session) void {
 }
 
 fn teardownSession(s: *Session) void {
+    closeShm(s); // pipeline is closed by now; the parent holds its own view of the mapping
     emit(struct { ev: []const u8 = "closed", sid: u32 }{ .sid = s.sid });
+}
+
+// closeSession signals + joins one session off the dispatch thread, then frees it.
+fn closeSession(s: *Session) void {
+    s.mu.lock();
+    s.closing = true;
+    s.mu.unlock();
+    if (s.thread) |t| t.join();
+    s.gpa.free(s.shm_name);
+    s.gpa.destroy(s);
 }
 
 const Cmd = struct {
@@ -390,13 +423,17 @@ pub fn main(init: std.process.Init) !void {
         }
         const s = sessions.get(cmd.sid) orelse continue;
         if (std.mem.eql(u8, cmd.op, "close")) {
-            s.mu.lock();
-            s.closing = true;
-            s.mu.unlock();
-            if (s.thread) |t| t.join();
+            // Session independence: drain+join can take ~2 s (FEED_WAIT_MS) - never on the
+            // dispatch thread, or every other session's ops on this adapter stall. Remove
+            // from the map FIRST (no double-join from the shutdown sweep), then a detached
+            // closer joins + frees; teardownSession (session thread) emits "closed" +
+            // releases the shm handles before the closer frees the struct.
             _ = sessions.remove(cmd.sid);
-            gpa.free(s.shm_name);
-            gpa.destroy(s);
+            const closer = std.Thread.spawn(.{}, closeSession, .{s}) catch {
+                closeSession(s); // spawn failed (rare): close inline rather than leak
+                continue;
+            };
+            closer.detach();
         } else if (std.mem.eql(u8, cmd.op, "bitrate")) {
             s.mu.lock();
             s.want_kbps = if (cmd.kbps > 0) @intCast(cmd.kbps) else 0;
@@ -408,15 +445,10 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // shut every session down cleanly (drain tails) before exit
+    // shut every session down cleanly (drain tails) before exit. Sessions being closed
+    // by a detached closer are already OUT of the map - no double-join.
     var it = sessions.valueIterator();
-    while (it.next()) |sp| {
-        const s = sp.*;
-        s.mu.lock();
-        s.closing = true;
-        s.mu.unlock();
-        if (s.thread) |t| t.join();
-    }
+    while (it.next()) |sp| closeSession(sp.*);
 }
 
 fn faultThread() void {
