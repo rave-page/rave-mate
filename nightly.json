@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d13cd64",
-  "build": 157,
-  "commit": "d13cd64",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-157-20260726-d13cd64.exe",
-  "sha256": "3569f0694e5a332e824dee905020cb6a69d21a8a986e36c608650a049ce64c09",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-157-20260726-d13cd64.exe",
-  "installer_sha256": "7a173db7544a71b66804b140359cd26baba3505808c454b3a1a83344a359beb6",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-157-20260726-d13cd64",
-  "linux_sha256": "b92165f10d08ec5cc7a5af7c26fd447d5dccaf3559181975533c053ef930c2be",
+  "version": "nightly-b8710a1",
+  "build": 158,
+  "commit": "b8710a1",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-158-20260726-b8710a1.exe",
+  "sha256": "f2acdc02517cc717bb9507fe034585a7f290628305d4429fe59a2b2616975513",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-158-20260726-b8710a1.exe",
+  "installer_sha256": "17fcb98810f390532cf224b10eea4a0cb432483928a8aeb5adad9ff5121d31e7",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-158-20260726-b8710a1",
+  "linux_sha256": "9c680d6b7fd90bbf8423565f3f3a9d3938be3dc4d30f39ed6f1876ef64cc66de",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T11:19:26Z",
-  "notes": "Merge fix/overlay-enable-toggles: restore per-card enable switches on the Overlays tab"
+  "released": "2026-07-26T12:15:19Z",
+  "notes": "Merge feature/zig-shell-b6: Zig PSH1 shell exe behind shellImpl seam (B6)"
 }
