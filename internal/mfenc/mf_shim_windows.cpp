@@ -48,6 +48,8 @@ DEFINE_GUID(kMF_MT_PIXEL_ASPECT_RATIO, 0xc6376a1e, 0x8d0a, 0x4027, 0xbe, 0x45, 0
 DEFINE_GUID(kMF_MT_AVG_BITRATE, 0x20332624, 0xfb0d, 0x4d9e, 0xbd, 0x0d, 0xcb, 0xf6, 0x78, 0x6c, 0x10, 0x2e);
 DEFINE_GUID(kMF_MT_INTERLACE_MODE, 0xe2724bb8, 0xe676, 0x4806, 0xb4, 0xb2, 0xa8, 0xd6, 0xef, 0xb4, 0x4c, 0xcd);
 DEFINE_GUID(kMF_MT_MPEG2_PROFILE, 0xad76a80b, 0x2d5c, 0x4e0b, 0xb3, 0x75, 0x64, 0xe5, 0x20, 0x13, 0x70, 0x36);
+DEFINE_GUID(kMF_MT_MPEG2_LEVEL, 0x96f66574, 0x11c5, 0x4015, 0x86, 0x66, 0xbf, 0xf5, 0x16, 0x43, 0x6d, 0xa7);
+DEFINE_GUID(kMF_SA_D3D11_AWARE, 0x206b4fc8, 0xfcf9, 0x4c51, 0xaf, 0xe3, 0x97, 0x64, 0x36, 0x9e, 0x33, 0xa0);
 DEFINE_GUID(kMF_MT_ALL_SAMPLES_INDEPENDENT, 0xc9173739, 0x5e56, 0x461c, 0xb7, 0x13, 0x46, 0xfb, 0x99, 0x5c, 0xb9, 0x5f);
 DEFINE_GUID(kMFT_FRIENDLY_NAME_Attribute, 0x314ffbae, 0x5b41, 0x4c95, 0x9c, 0x19, 0x4e, 0x7d, 0x58, 0x6f, 0xac, 0xe3);
 DEFINE_GUID(kCODECAPI_AVEncCommonRateControlMode, 0x1c0608e9, 0x370c, 0x4710, 0x8a, 0x58, 0xcb, 0x61, 0x81, 0xc4, 0x24, 0x23);
@@ -161,6 +163,33 @@ static void guardInstall(void) {
 // guardArm primes the per-thread jump target; Frame=0 forces msvcrt longjmp to plain-restore
 // instead of RtlUnwindEx through driver frames. Pair every arm with g_guardArmed=0 before return.
 #define guardArm() (((_JUMP_BUFFER*)&g_guardJmp)->Frame = 0, g_guardArmed = 1)
+
+// stageTrace (RAVE_MATE_MFENC_TRACE=1) breadcrumbs every driver-touching open stage to stderr.
+// The encoder child runs with it always on: when a vendor driver kills the child, the parent's
+// captured stderr tail names the exact faulting call - field root-cause without a debugger.
+static int g_trace = -1;
+static void stageTrace(const char* s) {
+    if (g_trace < 0) g_trace = getenv("RAVE_MATE_MFENC_TRACE") ? 1 : 0;
+    if (!g_trace) return;
+    fprintf(stderr, "mfenc stage: %s\n", s);
+    fflush(stderr);
+}
+
+// h264LevelFor returns the minimal eAVEncH264VLevel for the geometry (H.264 Table A-1
+// MB/frame + MB/s limits). 4K60 needs level 5.2; a driver deriving the level itself from an
+// UNSET media-type field can size internal buffers for a lower level and fault at 4K - set
+// it explicitly.
+static UINT32 h264LevelFor(int w, int h, int fpsN, int fpsD) {
+    int64_t mbs = (int64_t)((w + 15) / 16) * (int64_t)((h + 15) / 16);
+    int64_t mbps = mbs * fpsN / (fpsD > 0 ? fpsD : 1);
+    static const struct { UINT32 lvl; int64_t maxMBs, maxMBps; } t[] = {
+        {31, 3600, 108000}, {32, 5120, 216000}, {40, 8192, 245760}, {41, 8192, 245760},
+        {42, 8704, 522240}, {50, 22080, 589824}, {51, 36864, 983040}, {52, 36864, 2073600},
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+        if (mbs <= t[i].maxMBs && mbps <= t[i].maxMBps) return t[i].lvl;
+    return 52;
+}
 
 void mf_swizzle_rgba_bgra(uint8_t* dst, const uint8_t* src, int npx) {
     for (int i = 0; i < npx; i++) { // auto-vectorizes; ~memcpy speed at -O2
@@ -311,11 +340,18 @@ static int enumHWEncoder(const GUID& outSub, IMFTransform** out, char* name, int
             if (vendorMismatch(fn, vendorHint)) continue; // both passes: no cross-vendor manager handoff
             IMFTransform* t = NULL;
             if (FAILED(acts[i]->ActivateObject(__uuidof(IMFTransform), (void**)&t)) || !t) continue;
+            UINT32 aware = 0;
             IMFAttributes* ea = NULL;
             if (SUCCEEDED(t->GetAttributes(&ea)) && ea) {
+                ea->GetUINT32(kMF_SA_D3D11_AWARE, &aware);
                 ea->SetUINT32(kMF_TRANSFORM_ASYNC_UNLOCK, 1);
                 ea->SetUINT32(kMF_LOW_LATENCY, 1);
                 ea->Release();
+            }
+            if (devmgr && !aware) { // HW MFTs MUST publish MF_SA_D3D11_AWARE (Chromium enforces
+                t->Release();       // the same) - one that doesn't cannot take our device manager
+                acts[i]->ShutdownObject();
+                continue;
             }
             if (devmgr && FAILED(t->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)devmgr))) {
                 t->Release(); // will not run on the chosen adapter's device
@@ -489,6 +525,7 @@ static HRESULT openDevice(mfenc* e, IDXGIAdapter1* adapter, int inW, int inH, in
                           int fpsN, int fpsD, const char** stage) {
     D3D_FEATURE_LEVEL fl;
     *stage = "D3D11CreateDevice";
+    stageTrace(adapter ? "D3D11CreateDevice(pinned adapter)" : "D3D11CreateDevice(default)");
     HRESULT hr = D3D11CreateDevice(adapter, adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
         NULL, 0, D3D11_SDK_VERSION, &e->dev, &fl, &e->ctx);
@@ -499,6 +536,7 @@ static HRESULT openDevice(mfenc* e, IDXGIAdapter1* adapter, int inW, int inH, in
         mt10->Release();
     }
     *stage = "QI ID3D11VideoDevice";
+    stageTrace(*stage);
     hr = e->dev->QueryInterface(kIID_ID3D11VideoDevice, (void**)&e->vdev);
     if (SUCCEEDED(hr)) {
         *stage = "QI ID3D11VideoContext";
@@ -517,6 +555,7 @@ static HRESULT openDevice(mfenc* e, IDXGIAdapter1* adapter, int inW, int inH, in
         cd.OutputHeight = (UINT)outH;
         cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
         *stage = "CreateVideoProcessorEnumerator";
+        stageTrace(*stage);
         hr = e->vdev->CreateVideoProcessorEnumerator(&cd, &e->vpe);
     }
     if (FAILED(hr)) {
@@ -529,11 +568,25 @@ static HRESULT openDevice(mfenc* e, IDXGIAdapter1* adapter, int inW, int inH, in
     return hr;
 }
 
+// faultThreadProc AVs on a thread the fault guard cannot reach (test hook, see below).
+static DWORD WINAPI faultThreadProc(LPVOID) {
+    volatile int* p = NULL;
+    *p = 1;
+    return 0;
+}
+
 // openImpl is mf_enc_open's body; it runs under the driver-fault guard armed by the wrapper.
 static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH,
                        int fpsN, int fpsD, int bitrateKbps, int gopFrames,
                        char* errbuf, int errcap) {
-    if (getenv("RAVE_MATE_MFENC_FAULT_INJECT")) { // guard-path test hook: deliberate AV
+    if (getenv("RAVE_MATE_MFENC_FAULT_INJECT_THREAD")) {
+        // FIELD failure mode test hook: vendor MFTs fault on THEIR OWN worker threads,
+        // where the thread-local guard context is unarmed - the process dies. That is why
+        // first-time opens run in a sacrificial probe child, never in the media child.
+        HANDLE h = CreateThread(NULL, 0, faultThreadProc, NULL, 0, NULL);
+        if (h) { WaitForSingleObject(h, 2000); CloseHandle(h); }
+    }
+    if (getenv("RAVE_MATE_MFENC_FAULT_INJECT")) { // guard-path test hook: calling-thread AV
         volatile int* p = NULL;
         *p = 1;
     }
@@ -550,6 +603,7 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
 
     HRESULT ci = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     e->comInit = (ci == S_OK) ? 1 : 0;
+    stageTrace("MFStartup");
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
     if (FAILED(hr)) { setErr(errbuf, errcap, "MFStartup", hr); mf_enc_close(e); return NULL; }
     e->mfInit = 1;
@@ -574,6 +628,7 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
     }
     if (adapter) adapter->Release();
     if (FAILED(hr)) { setErr(errbuf, errcap, stage, hr); mf_enc_close(e); return NULL; }
+    stageTrace("MFCreateDXGIDeviceManager+ResetDevice");
     hr = MFCreateDXGIDeviceManager(&e->devmgrToken, &e->devmgr);
     if (FAILED(hr)) { setErr(errbuf, errcap, "MFCreateDXGIDeviceManager", hr); mf_enc_close(e); return NULL; }
     hr = e->devmgr->ResetDevice(e->dev, e->devmgrToken);
@@ -582,6 +637,7 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
     // ── async hardware encoder ──
     // Adapter-bound: vendor-first candidate order + SET_D3D_MANAGER as the hard gate (an MFT that
     // refuses this adapter's device manager is skipped instead of failing the whole pipeline).
+    stageTrace("enumHWEncoder(bind + SET_D3D_MANAGER)");
     if (!enumHWEncoder(kMFVideoFormat_H264, &e->enc, e->name, sizeof(e->name),
                        vendorTag(vendorId), e->devmgr)) {
         setErr(errbuf, errcap, "MFTEnumEx(no hw encoder for this device)", E_FAIL);
@@ -595,11 +651,16 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
     int kbps = bitrateKbps > 0 ? bitrateKbps : 8000;
     outMT->SetUINT32(kMF_MT_AVG_BITRATE, (UINT32)kbps * 1000u);
     outMT->SetUINT32(kMF_MT_MPEG2_PROFILE, 77 /*eAVEncH264VProfile_Main*/);
+    // Explicit level: 4K60 needs 5.2; leaving it unset makes the driver derive it, and a
+    // mis-derived level sizes internal buffers for less than 4K (crash-audit fix).
+    outMT->SetUINT32(kMF_MT_MPEG2_LEVEL, h264LevelFor(outW, outH, fpsN, fpsD));
+    stageTrace("enc SetOutputType");
     hr = e->enc->SetOutputType(0, outMT, 0);
     outMT->Release();
     if (FAILED(hr)) { setErr(errbuf, errcap, "enc SetOutputType", hr); mf_enc_close(e); return NULL; }
 
     // input: pick the MFT's own NV12 candidate (HW MFTs attach required attrs), stamp geometry
+    stageTrace("enc input type negotiation");
     IMFMediaType* inMT = NULL;
     for (DWORD i = 0; ; i++) {
         IMFMediaType* c = NULL;
@@ -615,10 +676,12 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
     }
     inMT->SetUINT64(kMF_MT_FRAME_SIZE, ((UINT64)(UINT32)outW << 32) | (UINT32)outH);
     inMT->SetUINT64(kMF_MT_FRAME_RATE, ((UINT64)(UINT32)fpsN << 32) | (UINT32)fpsD);
+    stageTrace("enc SetInputType");
     hr = e->enc->SetInputType(0, inMT, 0);
     if (FAILED(hr)) { inMT->Release(); setErr(errbuf, errcap, "enc SetInputType", hr); mf_enc_close(e); return NULL; }
 
     // rate control / GOP / latency knobs (best-effort: encoders vary)
+    stageTrace("ICodecAPI knobs");
     if (SUCCEEDED(e->enc->QueryInterface(kIID_ICodecAPI, (void**)&e->capi)) && e->capi) {
         VARIANT v;
         VariantInit(&v);
@@ -653,6 +716,7 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
 
     // ── D3D11 Video API CSC + scale (VideoProcessorBlt: deterministic, no XVP quirks) ──
     // vdev/vctx/vpe already exist: openDevice created them as the video-capability gate.
+    stageTrace("VP format check + CreateVideoProcessor");
     UINT fmtFl = 0;
     e->bgraIn = 1; // default BGRA+swizzle; prefer RGBA input when the VP takes it directly
     if (SUCCEEDED(e->vpe->CheckVideoProcessorFormat(DXGI_FORMAT_R8G8B8A8_UNORM, &fmtFl)) &&
@@ -668,6 +732,7 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
     e->vctx->VideoProcessorSetStreamColorSpace(e->vproc, 0, &cs);
 
     // input upload texture (byte order per the VP's accepted RGB format)
+    stageTrace("input texture + views + NV12 pool");
     D3D11_TEXTURE2D_DESC td;
     memset(&td, 0, sizeof(td));
     td.Width = (UINT)inW;
@@ -724,8 +789,10 @@ static mfenc* openImpl(int64_t adapterLuid, int inW, int inH, int outW, int outH
         mb->Release();
     }
 
+    stageTrace("BEGIN_STREAMING/START_OF_STREAM");
     e->enc->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     e->enc->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+    stageTrace("open complete");
     return e;
 }
 
@@ -833,6 +900,16 @@ int mf_enc_next(mfenc* e, uint8_t* out, int cap, int64_t* pts100, int* keyframe)
     e->rHead = (e->rHead + 1) % AURING_CAP;
     e->rCount--;
     return n;
+}
+
+// mf_enc_set_bitrate live-retargets CBR mean bitrate (no reopen; Phase-2 degrade ladder).
+int mf_enc_set_bitrate(mfenc* e, int kbps) {
+    if (!e || kbps <= 0) return -1;
+    if (!e->capi) return -2;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_UI4; v.ulVal = (ULONG)kbps * 1000u;
+    return SUCCEEDED(e->capi->SetValue(&kCODECAPI_AVEncCommonMeanBitRate, &v)) ? 0 : -3;
 }
 
 int mf_enc_force_idr(mfenc* e) {

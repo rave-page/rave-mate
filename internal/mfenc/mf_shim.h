@@ -37,6 +37,9 @@ int mf_enc_next(mfenc* e, uint8_t* out, int cap, int64_t* pts100, int* keyframe)
 // mf_enc_force_idr requests an IDR on the next fed frame (live, no restart).
 int mf_enc_force_idr(mfenc* e);
 
+// mf_enc_set_bitrate live-retargets CBR mean bitrate (no reopen). 0 = ok.
+int mf_enc_set_bitrate(mfenc* e, int kbps);
+
 // mf_enc_drain flushes the encoder; keep calling mf_enc_next until 0 afterwards.
 int mf_enc_drain(mfenc* e);
 
