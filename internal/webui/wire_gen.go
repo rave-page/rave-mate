@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x51e1ae8b
+	wireSchemaHash         uint32 = 0xb5702f0a
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4539,4 +4539,2769 @@ func wireUpdFlow(v updFlowSt) []byte {
 	w := zigui.NewWireWriter(wireMsgUpdFlow, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
+}
+
+// ── retained-doc delta channel (B7 increment ii; internal/zigui/wiregen/retain.go) ──
+//
+// hashWire/wireEq/deltaWire exist only for the messages reachable from a retain-flagged
+// root. deltaWire's contract: a field it does NOT write keeps the retained value, and a
+// field falling back to its zero value is written as an explicit Clear - which is why
+// these documents (RZD1) can never be read by a stateless export (RZW1 magic).
+
+// wireEqStrs compares two []string fields (kStrList).
+func wireEqStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (v logsEntry) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Time)
+	h.Str(2, v.Lvl)
+	h.Str(3, v.Cls)
+	h.Str(4, v.Src)
+	h.Str(5, v.Msg)
+	h.Str(6, v.Fields)
+}
+
+func (v logsEntry) wireEq(o *logsEntry) bool {
+	if v.Time != o.Time {
+		return false
+	}
+	if v.Lvl != o.Lvl {
+		return false
+	}
+	if v.Cls != o.Cls {
+		return false
+	}
+	if v.Src != o.Src {
+		return false
+	}
+	if v.Msg != o.Msg {
+		return false
+	}
+	if v.Fields != o.Fields {
+		return false
+	}
+	return true
+}
+
+func (v logsEntry) deltaWire(w *zigui.WireWriter, prev *logsEntry) {
+	if v.Time != prev.Time {
+		if v.Time == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Time)
+		}
+	}
+	if v.Lvl != prev.Lvl {
+		if v.Lvl == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Lvl)
+		}
+	}
+	if v.Cls != prev.Cls {
+		if v.Cls == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Cls)
+		}
+	}
+	if v.Src != prev.Src {
+		if v.Src == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Src)
+		}
+	}
+	if v.Msg != prev.Msg {
+		if v.Msg == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.Msg)
+		}
+	}
+	if v.Fields != prev.Fields {
+		if v.Fields == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.Fields)
+		}
+	}
+}
+
+func (v logsLines) hashWire(h *zigui.WireHasher) {
+	h.Bool(1, v.Wired)
+	h.Str(2, v.NoBus)
+	h.Str(3, v.NoEntries)
+	h.List(4, len(v.Entries))
+	for i := range v.Entries {
+		v.Entries[i].hashWire(h)
+	}
+}
+
+func (v logsLines) wireEq(o *logsLines) bool {
+	if v.Wired != o.Wired {
+		return false
+	}
+	if v.NoBus != o.NoBus {
+		return false
+	}
+	if v.NoEntries != o.NoEntries {
+		return false
+	}
+	if len(v.Entries) != len(o.Entries) {
+		return false
+	}
+	for i3 := range v.Entries {
+		if !v.Entries[i3].wireEq(&o.Entries[i3]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v logsLines) deltaWire(w *zigui.WireWriter, prev *logsLines) {
+	if v.Wired != prev.Wired {
+		if !v.Wired {
+			w.Clear(1)
+		} else {
+			w.Bool(1, v.Wired)
+		}
+	}
+	if v.NoBus != prev.NoBus {
+		if v.NoBus == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.NoBus)
+		}
+	}
+	if v.NoEntries != prev.NoEntries {
+		if v.NoEntries == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.NoEntries)
+		}
+	}
+	chg3 := len(v.Entries) != len(prev.Entries)
+	for i3 := 0; !chg3 && i3 < len(v.Entries); i3++ {
+		chg3 = !v.Entries[i3].wireEq(&prev.Entries[i3])
+	}
+	if chg3 {
+		if len(v.Entries) == 0 {
+			w.Clear(4)
+		} else {
+			w.List(4, len(v.Entries), func(i int) { v.Entries[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveTransportSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.StreamHint)
+	h.Str(2, v.StreamLabel)
+	h.Str(3, v.DotVar)
+	h.Str(4, v.State)
+	h.Str(5, v.MetaOnly)
+	h.Str(6, v.PauseLabel)
+	h.Str(7, v.PauseHint)
+	h.Bool(8, v.Paused)
+	h.Bool(9, v.HasRec)
+	h.Str(10, v.RecHint)
+	h.Str(11, v.RecLabel)
+	h.Str(12, v.RecBtn)
+	h.Str(13, v.RecState)
+	h.Bool(14, v.HasTC)
+	h.Str(15, v.TCLabel)
+	h.Str(16, v.TC)
+	h.Str(17, v.StartLbl)
+	h.Str(18, v.StopLbl)
+}
+
+func (v liveTransportSt) wireEq(o *liveTransportSt) bool {
+	if v.StreamHint != o.StreamHint {
+		return false
+	}
+	if v.StreamLabel != o.StreamLabel {
+		return false
+	}
+	if v.DotVar != o.DotVar {
+		return false
+	}
+	if v.State != o.State {
+		return false
+	}
+	if v.MetaOnly != o.MetaOnly {
+		return false
+	}
+	if v.PauseLabel != o.PauseLabel {
+		return false
+	}
+	if v.PauseHint != o.PauseHint {
+		return false
+	}
+	if v.Paused != o.Paused {
+		return false
+	}
+	if v.HasRec != o.HasRec {
+		return false
+	}
+	if v.RecHint != o.RecHint {
+		return false
+	}
+	if v.RecLabel != o.RecLabel {
+		return false
+	}
+	if v.RecBtn != o.RecBtn {
+		return false
+	}
+	if v.RecState != o.RecState {
+		return false
+	}
+	if v.HasTC != o.HasTC {
+		return false
+	}
+	if v.TCLabel != o.TCLabel {
+		return false
+	}
+	if v.TC != o.TC {
+		return false
+	}
+	if v.StartLbl != o.StartLbl {
+		return false
+	}
+	if v.StopLbl != o.StopLbl {
+		return false
+	}
+	return true
+}
+
+func (v liveTransportSt) deltaWire(w *zigui.WireWriter, prev *liveTransportSt) {
+	if v.StreamHint != prev.StreamHint {
+		if v.StreamHint == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.StreamHint)
+		}
+	}
+	if v.StreamLabel != prev.StreamLabel {
+		if v.StreamLabel == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.StreamLabel)
+		}
+	}
+	if v.DotVar != prev.DotVar {
+		if v.DotVar == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.DotVar)
+		}
+	}
+	if v.State != prev.State {
+		if v.State == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.State)
+		}
+	}
+	if v.MetaOnly != prev.MetaOnly {
+		if v.MetaOnly == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.MetaOnly)
+		}
+	}
+	if v.PauseLabel != prev.PauseLabel {
+		if v.PauseLabel == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.PauseLabel)
+		}
+	}
+	if v.PauseHint != prev.PauseHint {
+		if v.PauseHint == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.PauseHint)
+		}
+	}
+	if v.Paused != prev.Paused {
+		if !v.Paused {
+			w.Clear(8)
+		} else {
+			w.Bool(8, v.Paused)
+		}
+	}
+	if v.HasRec != prev.HasRec {
+		if !v.HasRec {
+			w.Clear(9)
+		} else {
+			w.Bool(9, v.HasRec)
+		}
+	}
+	if v.RecHint != prev.RecHint {
+		if v.RecHint == "" {
+			w.Clear(10)
+		} else {
+			w.Str(10, v.RecHint)
+		}
+	}
+	if v.RecLabel != prev.RecLabel {
+		if v.RecLabel == "" {
+			w.Clear(11)
+		} else {
+			w.Str(11, v.RecLabel)
+		}
+	}
+	if v.RecBtn != prev.RecBtn {
+		if v.RecBtn == "" {
+			w.Clear(12)
+		} else {
+			w.Str(12, v.RecBtn)
+		}
+	}
+	if v.RecState != prev.RecState {
+		if v.RecState == "" {
+			w.Clear(13)
+		} else {
+			w.Str(13, v.RecState)
+		}
+	}
+	if v.HasTC != prev.HasTC {
+		if !v.HasTC {
+			w.Clear(14)
+		} else {
+			w.Bool(14, v.HasTC)
+		}
+	}
+	if v.TCLabel != prev.TCLabel {
+		if v.TCLabel == "" {
+			w.Clear(15)
+		} else {
+			w.Str(15, v.TCLabel)
+		}
+	}
+	if v.TC != prev.TC {
+		if v.TC == "" {
+			w.Clear(16)
+		} else {
+			w.Str(16, v.TC)
+		}
+	}
+	if v.StartLbl != prev.StartLbl {
+		if v.StartLbl == "" {
+			w.Clear(17)
+		} else {
+			w.Str(17, v.StartLbl)
+		}
+	}
+	if v.StopLbl != prev.StopLbl {
+		if v.StopLbl == "" {
+			w.Clear(18)
+		} else {
+			w.Str(18, v.StopLbl)
+		}
+	}
+}
+
+func (v liveNPSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Line1)
+	h.Str(2, v.Line2)
+}
+
+func (v liveNPSt) wireEq(o *liveNPSt) bool {
+	if v.Line1 != o.Line1 {
+		return false
+	}
+	if v.Line2 != o.Line2 {
+		return false
+	}
+	return true
+}
+
+func (v liveNPSt) deltaWire(w *zigui.WireWriter, prev *liveNPSt) {
+	if v.Line1 != prev.Line1 {
+		if v.Line1 == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Line1)
+		}
+	}
+	if v.Line2 != prev.Line2 {
+		if v.Line2 == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Line2)
+		}
+	}
+}
+
+func (v liveKV) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.K)
+	h.Str(2, v.KL)
+	h.Str(3, v.V)
+}
+
+func (v liveKV) wireEq(o *liveKV) bool {
+	if v.K != o.K {
+		return false
+	}
+	if v.KL != o.KL {
+		return false
+	}
+	if v.V != o.V {
+		return false
+	}
+	return true
+}
+
+func (v liveKV) deltaWire(w *zigui.WireWriter, prev *liveKV) {
+	if v.K != prev.K {
+		if v.K == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.K)
+		}
+	}
+	if v.KL != prev.KL {
+		if v.KL == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.KL)
+		}
+	}
+	if v.V != prev.V {
+		if v.V == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.V)
+		}
+	}
+}
+
+func (v liveStatusSt) hashWire(h *zigui.WireHasher) {
+	h.List(1, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v liveStatusSt) wireEq(o *liveStatusSt) bool {
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i0 := range v.Rows {
+		if !v.Rows[i0].wireEq(&o.Rows[i0]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveStatusSt) deltaWire(w *zigui.WireWriter, prev *liveStatusSt) {
+	chg0 := len(v.Rows) != len(prev.Rows)
+	for i0 := 0; !chg0 && i0 < len(v.Rows); i0++ {
+		chg0 = !v.Rows[i0].wireEq(&prev.Rows[i0])
+	}
+	if chg0 {
+		if len(v.Rows) == 0 {
+			w.Clear(1)
+		} else {
+			w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveDeck) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Cls)
+	h.Str(2, v.Name)
+	h.Str(3, v.Title)
+	h.Str(4, v.Meta)
+	h.Str(5, v.Via)
+}
+
+func (v liveDeck) wireEq(o *liveDeck) bool {
+	if v.Cls != o.Cls {
+		return false
+	}
+	if v.Name != o.Name {
+		return false
+	}
+	if v.Title != o.Title {
+		return false
+	}
+	if v.Meta != o.Meta {
+		return false
+	}
+	if v.Via != o.Via {
+		return false
+	}
+	return true
+}
+
+func (v liveDeck) deltaWire(w *zigui.WireWriter, prev *liveDeck) {
+	if v.Cls != prev.Cls {
+		if v.Cls == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Cls)
+		}
+	}
+	if v.Name != prev.Name {
+		if v.Name == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Name)
+		}
+	}
+	if v.Title != prev.Title {
+		if v.Title == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Title)
+		}
+	}
+	if v.Meta != prev.Meta {
+		if v.Meta == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Meta)
+		}
+	}
+	if v.Via != prev.Via {
+		if v.Via == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.Via)
+		}
+	}
+}
+
+func (v liveDecksSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Note)
+	h.List(2, len(v.Decks))
+	for i := range v.Decks {
+		v.Decks[i].hashWire(h)
+	}
+}
+
+func (v liveDecksSt) wireEq(o *liveDecksSt) bool {
+	if v.Note != o.Note {
+		return false
+	}
+	if len(v.Decks) != len(o.Decks) {
+		return false
+	}
+	for i1 := range v.Decks {
+		if !v.Decks[i1].wireEq(&o.Decks[i1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveDecksSt) deltaWire(w *zigui.WireWriter, prev *liveDecksSt) {
+	if v.Note != prev.Note {
+		if v.Note == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Note)
+		}
+	}
+	chg1 := len(v.Decks) != len(prev.Decks)
+	for i1 := 0; !chg1 && i1 < len(v.Decks); i1++ {
+		chg1 = !v.Decks[i1].wireEq(&prev.Decks[i1])
+	}
+	if chg1 {
+		if len(v.Decks) == 0 {
+			w.Clear(2)
+		} else {
+			w.List(2, len(v.Decks), func(i int) { v.Decks[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveSignalsSt) hashWire(h *zigui.WireHasher) {
+	h.List(1, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v liveSignalsSt) wireEq(o *liveSignalsSt) bool {
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i0 := range v.Rows {
+		if !v.Rows[i0].wireEq(&o.Rows[i0]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveSignalsSt) deltaWire(w *zigui.WireWriter, prev *liveSignalsSt) {
+	chg0 := len(v.Rows) != len(prev.Rows)
+	for i0 := 0; !chg0 && i0 < len(v.Rows); i0++ {
+		chg0 = !v.Rows[i0].wireEq(&prev.Rows[i0])
+	}
+	if chg0 {
+		if len(v.Rows) == 0 {
+			w.Clear(1)
+		} else {
+			w.List(1, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveCockpitRow) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Variant)
+	h.Str(2, v.Name)
+	h.Str(3, v.State)
+	h.Str(4, v.StreamLbl)
+	h.Str(5, v.StreamAct)
+	h.Str(6, v.RecLbl)
+	h.Str(7, v.RecAct)
+}
+
+func (v liveCockpitRow) wireEq(o *liveCockpitRow) bool {
+	if v.Variant != o.Variant {
+		return false
+	}
+	if v.Name != o.Name {
+		return false
+	}
+	if v.State != o.State {
+		return false
+	}
+	if v.StreamLbl != o.StreamLbl {
+		return false
+	}
+	if v.StreamAct != o.StreamAct {
+		return false
+	}
+	if v.RecLbl != o.RecLbl {
+		return false
+	}
+	if v.RecAct != o.RecAct {
+		return false
+	}
+	return true
+}
+
+func (v liveCockpitRow) deltaWire(w *zigui.WireWriter, prev *liveCockpitRow) {
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Variant)
+		}
+	}
+	if v.Name != prev.Name {
+		if v.Name == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Name)
+		}
+	}
+	if v.State != prev.State {
+		if v.State == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.State)
+		}
+	}
+	if v.StreamLbl != prev.StreamLbl {
+		if v.StreamLbl == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.StreamLbl)
+		}
+	}
+	if v.StreamAct != prev.StreamAct {
+		if v.StreamAct == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.StreamAct)
+		}
+	}
+	if v.RecLbl != prev.RecLbl {
+		if v.RecLbl == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.RecLbl)
+		}
+	}
+	if v.RecAct != prev.RecAct {
+		if v.RecAct == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.RecAct)
+		}
+	}
+}
+
+func (v liveCockpitSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Empty)
+	h.Str(2, v.Caption)
+	h.List(3, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v liveCockpitSt) wireEq(o *liveCockpitSt) bool {
+	if v.Empty != o.Empty {
+		return false
+	}
+	if v.Caption != o.Caption {
+		return false
+	}
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i2 := range v.Rows {
+		if !v.Rows[i2].wireEq(&o.Rows[i2]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveCockpitSt) deltaWire(w *zigui.WireWriter, prev *liveCockpitSt) {
+	if v.Empty != prev.Empty {
+		if v.Empty == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Empty)
+		}
+	}
+	if v.Caption != prev.Caption {
+		if v.Caption == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Caption)
+		}
+	}
+	chg2 := len(v.Rows) != len(prev.Rows)
+	for i2 := 0; !chg2 && i2 < len(v.Rows); i2++ {
+		chg2 = !v.Rows[i2].wireEq(&prev.Rows[i2])
+	}
+	if chg2 {
+		if len(v.Rows) == 0 {
+			w.Clear(3)
+		} else {
+			w.List(3, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveSRow) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Variant)
+	h.Str(2, v.Label)
+	h.Str(3, v.DL)
+	h.Str(4, v.Line)
+}
+
+func (v liveSRow) wireEq(o *liveSRow) bool {
+	if v.Variant != o.Variant {
+		return false
+	}
+	if v.Label != o.Label {
+		return false
+	}
+	if v.DL != o.DL {
+		return false
+	}
+	if v.Line != o.Line {
+		return false
+	}
+	return true
+}
+
+func (v liveSRow) deltaWire(w *zigui.WireWriter, prev *liveSRow) {
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Variant)
+		}
+	}
+	if v.Label != prev.Label {
+		if v.Label == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Label)
+		}
+	}
+	if v.DL != prev.DL {
+		if v.DL == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.DL)
+		}
+	}
+	if v.Line != prev.Line {
+		if v.Line == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Line)
+		}
+	}
+}
+
+func (v liveLinkSt) hashWire(h *zigui.WireHasher) {
+	h.Bool(1, v.Available)
+	h.Sub(2)
+	v.Backend.hashWire(h)
+	h.Str(3, v.Fill)
+	h.Str(4, v.Cap)
+	h.Sub(5)
+	v.Session.hashWire(h)
+	h.Str(6, v.ResyncLbl)
+	h.List(7, len(v.Sources))
+	for i := range v.Sources {
+		v.Sources[i].hashWire(h)
+	}
+}
+
+func (v liveLinkSt) wireEq(o *liveLinkSt) bool {
+	if v.Available != o.Available {
+		return false
+	}
+	if !v.Backend.wireEq(&o.Backend) {
+		return false
+	}
+	if v.Fill != o.Fill {
+		return false
+	}
+	if v.Cap != o.Cap {
+		return false
+	}
+	if !v.Session.wireEq(&o.Session) {
+		return false
+	}
+	if v.ResyncLbl != o.ResyncLbl {
+		return false
+	}
+	if len(v.Sources) != len(o.Sources) {
+		return false
+	}
+	for i6 := range v.Sources {
+		if !v.Sources[i6].wireEq(&o.Sources[i6]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveLinkSt) deltaWire(w *zigui.WireWriter, prev *liveLinkSt) {
+	if v.Available != prev.Available {
+		if !v.Available {
+			w.Clear(1)
+		} else {
+			w.Bool(1, v.Available)
+		}
+	}
+	w.Struct(2, func() { v.Backend.deltaWire(w, &prev.Backend) })
+	if v.Fill != prev.Fill {
+		w.StrAlways(3, v.Fill)
+	}
+	if v.Cap != prev.Cap {
+		if v.Cap == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Cap)
+		}
+	}
+	w.Struct(5, func() { v.Session.deltaWire(w, &prev.Session) })
+	if v.ResyncLbl != prev.ResyncLbl {
+		if v.ResyncLbl == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.ResyncLbl)
+		}
+	}
+	chg6 := len(v.Sources) != len(prev.Sources)
+	for i6 := 0; !chg6 && i6 < len(v.Sources); i6++ {
+		chg6 = !v.Sources[i6].wireEq(&prev.Sources[i6])
+	}
+	if chg6 {
+		if len(v.Sources) == 0 {
+			w.Clear(7)
+		} else {
+			w.List(7, len(v.Sources), func(i int) { v.Sources[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v liveGraphSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Tooltip)
+	h.Str(2, v.Legend)
+	h.Str(3, v.Graph)
+}
+
+func (v liveGraphSt) wireEq(o *liveGraphSt) bool {
+	if v.Tooltip != o.Tooltip {
+		return false
+	}
+	if v.Legend != o.Legend {
+		return false
+	}
+	if v.Graph != o.Graph {
+		return false
+	}
+	return true
+}
+
+func (v liveGraphSt) deltaWire(w *zigui.WireWriter, prev *liveGraphSt) {
+	if v.Tooltip != prev.Tooltip {
+		if v.Tooltip == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Tooltip)
+		}
+	}
+	if v.Legend != prev.Legend {
+		if v.Legend == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Legend)
+		}
+	}
+	if v.Graph != prev.Graph {
+		if v.Graph == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Graph)
+		}
+	}
+}
+
+func (v livePerfSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Tooltip)
+	h.Str(2, v.CPULeg)
+	h.Str(3, v.CPUGraph)
+	h.Str(4, v.RAMLeg)
+	h.Str(5, v.RAMGraph)
+	h.Str(6, v.Head)
+	h.Str(7, v.HeadColor)
+}
+
+func (v livePerfSt) wireEq(o *livePerfSt) bool {
+	if v.Tooltip != o.Tooltip {
+		return false
+	}
+	if v.CPULeg != o.CPULeg {
+		return false
+	}
+	if v.CPUGraph != o.CPUGraph {
+		return false
+	}
+	if v.RAMLeg != o.RAMLeg {
+		return false
+	}
+	if v.RAMGraph != o.RAMGraph {
+		return false
+	}
+	if v.Head != o.Head {
+		return false
+	}
+	if v.HeadColor != o.HeadColor {
+		return false
+	}
+	return true
+}
+
+func (v livePerfSt) deltaWire(w *zigui.WireWriter, prev *livePerfSt) {
+	if v.Tooltip != prev.Tooltip {
+		if v.Tooltip == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Tooltip)
+		}
+	}
+	if v.CPULeg != prev.CPULeg {
+		if v.CPULeg == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.CPULeg)
+		}
+	}
+	if v.CPUGraph != prev.CPUGraph {
+		if v.CPUGraph == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.CPUGraph)
+		}
+	}
+	if v.RAMLeg != prev.RAMLeg {
+		if v.RAMLeg == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.RAMLeg)
+		}
+	}
+	if v.RAMGraph != prev.RAMGraph {
+		if v.RAMGraph == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.RAMGraph)
+		}
+	}
+	if v.Head != prev.Head {
+		if v.Head == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.Head)
+		}
+	}
+	if v.HeadColor != prev.HeadColor {
+		if v.HeadColor == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.HeadColor)
+		}
+	}
+}
+
+func (v liveStripSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Left)
+	h.Str(2, v.Center)
+	h.Str(3, v.Right)
+}
+
+func (v liveStripSt) wireEq(o *liveStripSt) bool {
+	if v.Left != o.Left {
+		return false
+	}
+	if v.Center != o.Center {
+		return false
+	}
+	if v.Right != o.Right {
+		return false
+	}
+	return true
+}
+
+func (v liveStripSt) deltaWire(w *zigui.WireWriter, prev *liveStripSt) {
+	if v.Left != prev.Left {
+		if v.Left == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Left)
+		}
+	}
+	if v.Center != prev.Center {
+		if v.Center == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Center)
+		}
+	}
+	if v.Right != prev.Right {
+		if v.Right == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Right)
+		}
+	}
+}
+
+func (v liveState) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Title)
+	h.Str(2, v.Sub)
+	h.Sub(3)
+	v.Transport.hashWire(h)
+	h.Sub(4)
+	v.NP.hashWire(h)
+	h.Str(5, v.StatusTitle)
+	h.Sub(6)
+	v.Status.hashWire(h)
+	h.Str(7, v.DecksTitle)
+	h.Sub(8)
+	v.Decks.hashWire(h)
+	h.Bool(9, v.HasSignals)
+	h.Str(10, v.SignalsTitle)
+	h.Str(11, v.SignalsTip)
+	h.Sub(12)
+	v.Signals.hashWire(h)
+	h.Bool(13, v.HasCockpit)
+	h.Str(14, v.CockpitTitle)
+	h.Sub(15)
+	v.Cockpit.hashWire(h)
+	h.Bool(16, v.HasLink)
+	h.Str(17, v.LinkTitle)
+	h.Sub(18)
+	v.Link.hashWire(h)
+	h.Bool(19, v.HasNet)
+	h.Str(20, v.NetTitle)
+	h.Str(21, v.NetTip)
+	h.Sub(22)
+	v.Net.hashWire(h)
+	h.Str(23, v.TimTitle)
+	h.Str(24, v.TimTip)
+	h.Sub(25)
+	v.Tim.hashWire(h)
+	h.Bool(26, v.HasPerf)
+	h.Str(27, v.PerfTitle)
+	h.Str(28, v.PerfTip)
+	h.Sub(29)
+	v.Perf.hashWire(h)
+	h.Sub(30)
+	v.Strip.hashWire(h)
+	h.Opt(31, v.SignalsTipS != nil)
+	if v.SignalsTipS != nil {
+		v.SignalsTipS.hashWire(h)
+	}
+	h.Opt(32, v.NetTipS != nil)
+	if v.NetTipS != nil {
+		v.NetTipS.hashWire(h)
+	}
+	h.Opt(33, v.TimTipS != nil)
+	if v.TimTipS != nil {
+		v.TimTipS.hashWire(h)
+	}
+	h.Opt(34, v.PerfTipS != nil)
+	if v.PerfTipS != nil {
+		v.PerfTipS.hashWire(h)
+	}
+}
+
+func (v liveState) wireEq(o *liveState) bool {
+	if v.Title != o.Title {
+		return false
+	}
+	if v.Sub != o.Sub {
+		return false
+	}
+	if !v.Transport.wireEq(&o.Transport) {
+		return false
+	}
+	if !v.NP.wireEq(&o.NP) {
+		return false
+	}
+	if v.StatusTitle != o.StatusTitle {
+		return false
+	}
+	if !v.Status.wireEq(&o.Status) {
+		return false
+	}
+	if v.DecksTitle != o.DecksTitle {
+		return false
+	}
+	if !v.Decks.wireEq(&o.Decks) {
+		return false
+	}
+	if v.HasSignals != o.HasSignals {
+		return false
+	}
+	if v.SignalsTitle != o.SignalsTitle {
+		return false
+	}
+	if v.SignalsTip != o.SignalsTip {
+		return false
+	}
+	if !v.Signals.wireEq(&o.Signals) {
+		return false
+	}
+	if v.HasCockpit != o.HasCockpit {
+		return false
+	}
+	if v.CockpitTitle != o.CockpitTitle {
+		return false
+	}
+	if !v.Cockpit.wireEq(&o.Cockpit) {
+		return false
+	}
+	if v.HasLink != o.HasLink {
+		return false
+	}
+	if v.LinkTitle != o.LinkTitle {
+		return false
+	}
+	if !v.Link.wireEq(&o.Link) {
+		return false
+	}
+	if v.HasNet != o.HasNet {
+		return false
+	}
+	if v.NetTitle != o.NetTitle {
+		return false
+	}
+	if v.NetTip != o.NetTip {
+		return false
+	}
+	if !v.Net.wireEq(&o.Net) {
+		return false
+	}
+	if v.TimTitle != o.TimTitle {
+		return false
+	}
+	if v.TimTip != o.TimTip {
+		return false
+	}
+	if !v.Tim.wireEq(&o.Tim) {
+		return false
+	}
+	if v.HasPerf != o.HasPerf {
+		return false
+	}
+	if v.PerfTitle != o.PerfTitle {
+		return false
+	}
+	if v.PerfTip != o.PerfTip {
+		return false
+	}
+	if !v.Perf.wireEq(&o.Perf) {
+		return false
+	}
+	if !v.Strip.wireEq(&o.Strip) {
+		return false
+	}
+	if (v.SignalsTipS == nil) != (o.SignalsTipS == nil) {
+		return false
+	}
+	if v.SignalsTipS != nil && !v.SignalsTipS.wireEq(o.SignalsTipS) {
+		return false
+	}
+	if (v.NetTipS == nil) != (o.NetTipS == nil) {
+		return false
+	}
+	if v.NetTipS != nil && !v.NetTipS.wireEq(o.NetTipS) {
+		return false
+	}
+	if (v.TimTipS == nil) != (o.TimTipS == nil) {
+		return false
+	}
+	if v.TimTipS != nil && !v.TimTipS.wireEq(o.TimTipS) {
+		return false
+	}
+	if (v.PerfTipS == nil) != (o.PerfTipS == nil) {
+		return false
+	}
+	if v.PerfTipS != nil && !v.PerfTipS.wireEq(o.PerfTipS) {
+		return false
+	}
+	return true
+}
+
+func (v liveState) deltaWire(w *zigui.WireWriter, prev *liveState) {
+	if v.Title != prev.Title {
+		if v.Title == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Title)
+		}
+	}
+	if v.Sub != prev.Sub {
+		if v.Sub == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Sub)
+		}
+	}
+	w.Struct(3, func() { v.Transport.deltaWire(w, &prev.Transport) })
+	w.Struct(4, func() { v.NP.deltaWire(w, &prev.NP) })
+	if v.StatusTitle != prev.StatusTitle {
+		if v.StatusTitle == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.StatusTitle)
+		}
+	}
+	w.Struct(6, func() { v.Status.deltaWire(w, &prev.Status) })
+	if v.DecksTitle != prev.DecksTitle {
+		if v.DecksTitle == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.DecksTitle)
+		}
+	}
+	w.Struct(8, func() { v.Decks.deltaWire(w, &prev.Decks) })
+	if v.HasSignals != prev.HasSignals {
+		if !v.HasSignals {
+			w.Clear(9)
+		} else {
+			w.Bool(9, v.HasSignals)
+		}
+	}
+	if v.SignalsTitle != prev.SignalsTitle {
+		if v.SignalsTitle == "" {
+			w.Clear(10)
+		} else {
+			w.Str(10, v.SignalsTitle)
+		}
+	}
+	if v.SignalsTip != prev.SignalsTip {
+		if v.SignalsTip == "" {
+			w.Clear(11)
+		} else {
+			w.Str(11, v.SignalsTip)
+		}
+	}
+	w.Struct(12, func() { v.Signals.deltaWire(w, &prev.Signals) })
+	if v.HasCockpit != prev.HasCockpit {
+		if !v.HasCockpit {
+			w.Clear(13)
+		} else {
+			w.Bool(13, v.HasCockpit)
+		}
+	}
+	if v.CockpitTitle != prev.CockpitTitle {
+		if v.CockpitTitle == "" {
+			w.Clear(14)
+		} else {
+			w.Str(14, v.CockpitTitle)
+		}
+	}
+	w.Struct(15, func() { v.Cockpit.deltaWire(w, &prev.Cockpit) })
+	if v.HasLink != prev.HasLink {
+		if !v.HasLink {
+			w.Clear(16)
+		} else {
+			w.Bool(16, v.HasLink)
+		}
+	}
+	if v.LinkTitle != prev.LinkTitle {
+		if v.LinkTitle == "" {
+			w.Clear(17)
+		} else {
+			w.Str(17, v.LinkTitle)
+		}
+	}
+	w.Struct(18, func() { v.Link.deltaWire(w, &prev.Link) })
+	if v.HasNet != prev.HasNet {
+		if !v.HasNet {
+			w.Clear(19)
+		} else {
+			w.Bool(19, v.HasNet)
+		}
+	}
+	if v.NetTitle != prev.NetTitle {
+		if v.NetTitle == "" {
+			w.Clear(20)
+		} else {
+			w.Str(20, v.NetTitle)
+		}
+	}
+	if v.NetTip != prev.NetTip {
+		if v.NetTip == "" {
+			w.Clear(21)
+		} else {
+			w.Str(21, v.NetTip)
+		}
+	}
+	w.Struct(22, func() { v.Net.deltaWire(w, &prev.Net) })
+	if v.TimTitle != prev.TimTitle {
+		if v.TimTitle == "" {
+			w.Clear(23)
+		} else {
+			w.Str(23, v.TimTitle)
+		}
+	}
+	if v.TimTip != prev.TimTip {
+		if v.TimTip == "" {
+			w.Clear(24)
+		} else {
+			w.Str(24, v.TimTip)
+		}
+	}
+	w.Struct(25, func() { v.Tim.deltaWire(w, &prev.Tim) })
+	if v.HasPerf != prev.HasPerf {
+		if !v.HasPerf {
+			w.Clear(26)
+		} else {
+			w.Bool(26, v.HasPerf)
+		}
+	}
+	if v.PerfTitle != prev.PerfTitle {
+		if v.PerfTitle == "" {
+			w.Clear(27)
+		} else {
+			w.Str(27, v.PerfTitle)
+		}
+	}
+	if v.PerfTip != prev.PerfTip {
+		if v.PerfTip == "" {
+			w.Clear(28)
+		} else {
+			w.Str(28, v.PerfTip)
+		}
+	}
+	w.Struct(29, func() { v.Perf.deltaWire(w, &prev.Perf) })
+	w.Struct(30, func() { v.Strip.deltaWire(w, &prev.Strip) })
+	switch {
+	case v.SignalsTipS == nil:
+		if prev.SignalsTipS != nil {
+			w.Clear(31)
+		}
+	case prev.SignalsTipS == nil:
+		w.OptStruct(31, func() { v.SignalsTipS.encodeWire(w) })
+	case !v.SignalsTipS.wireEq(prev.SignalsTipS):
+		w.OptStruct(31, func() { v.SignalsTipS.deltaWire(w, prev.SignalsTipS) })
+	}
+	switch {
+	case v.NetTipS == nil:
+		if prev.NetTipS != nil {
+			w.Clear(32)
+		}
+	case prev.NetTipS == nil:
+		w.OptStruct(32, func() { v.NetTipS.encodeWire(w) })
+	case !v.NetTipS.wireEq(prev.NetTipS):
+		w.OptStruct(32, func() { v.NetTipS.deltaWire(w, prev.NetTipS) })
+	}
+	switch {
+	case v.TimTipS == nil:
+		if prev.TimTipS != nil {
+			w.Clear(33)
+		}
+	case prev.TimTipS == nil:
+		w.OptStruct(33, func() { v.TimTipS.encodeWire(w) })
+	case !v.TimTipS.wireEq(prev.TimTipS):
+		w.OptStruct(33, func() { v.TimTipS.deltaWire(w, prev.TimTipS) })
+	}
+	switch {
+	case v.PerfTipS == nil:
+		if prev.PerfTipS != nil {
+			w.Clear(34)
+		}
+	case prev.PerfTipS == nil:
+		w.OptStruct(34, func() { v.PerfTipS.encodeWire(w) })
+	case !v.PerfTipS.wireEq(prev.PerfTipS):
+		w.OptStruct(34, func() { v.PerfTipS.deltaWire(w, prev.PerfTipS) })
+	}
+}
+
+func (v uiBtn) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Label)
+	h.Str(2, v.Variant)
+	h.Str(3, v.Act)
+	h.Str(4, v.Val)
+}
+
+func (v uiBtn) wireEq(o *uiBtn) bool {
+	if v.Label != o.Label {
+		return false
+	}
+	if v.Variant != o.Variant {
+		return false
+	}
+	if v.Act != o.Act {
+		return false
+	}
+	if v.Val != o.Val {
+		return false
+	}
+	return true
+}
+
+func (v uiBtn) deltaWire(w *zigui.WireWriter, prev *uiBtn) {
+	if v.Label != prev.Label {
+		if v.Label == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Label)
+		}
+	}
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Variant)
+		}
+	}
+	if v.Act != prev.Act {
+		if v.Act == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Act)
+		}
+	}
+	if v.Val != prev.Val {
+		if v.Val == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Val)
+		}
+	}
+}
+
+func (v tipChipSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Text)
+	h.Bool(2, v.Sep)
+}
+
+func (v tipChipSt) wireEq(o *tipChipSt) bool {
+	if v.Text != o.Text {
+		return false
+	}
+	if v.Sep != o.Sep {
+		return false
+	}
+	return true
+}
+
+func (v tipChipSt) deltaWire(w *zigui.WireWriter, prev *tipChipSt) {
+	if v.Text != prev.Text {
+		if v.Text == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Text)
+		}
+	}
+	if v.Sep != prev.Sep {
+		if !v.Sep {
+			w.Clear(2)
+		} else {
+			w.Bool(2, v.Sep)
+		}
+	}
+}
+
+func (v tipKbSt) hashWire(h *zigui.WireHasher) {
+	h.Bool(1, v.HasGroup)
+	h.Str(2, v.Group)
+	h.List(3, len(v.Chips))
+	for i := range v.Chips {
+		v.Chips[i].hashWire(h)
+	}
+	h.Str(4, v.Verb)
+	h.Str(5, v.Rest)
+}
+
+func (v tipKbSt) wireEq(o *tipKbSt) bool {
+	if v.HasGroup != o.HasGroup {
+		return false
+	}
+	if v.Group != o.Group {
+		return false
+	}
+	if len(v.Chips) != len(o.Chips) {
+		return false
+	}
+	for i2 := range v.Chips {
+		if !v.Chips[i2].wireEq(&o.Chips[i2]) {
+			return false
+		}
+	}
+	if v.Verb != o.Verb {
+		return false
+	}
+	if v.Rest != o.Rest {
+		return false
+	}
+	return true
+}
+
+func (v tipKbSt) deltaWire(w *zigui.WireWriter, prev *tipKbSt) {
+	if v.HasGroup != prev.HasGroup {
+		if !v.HasGroup {
+			w.Clear(1)
+		} else {
+			w.Bool(1, v.HasGroup)
+		}
+	}
+	if v.Group != prev.Group {
+		if v.Group == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Group)
+		}
+	}
+	chg2 := len(v.Chips) != len(prev.Chips)
+	for i2 := 0; !chg2 && i2 < len(v.Chips); i2++ {
+		chg2 = !v.Chips[i2].wireEq(&prev.Chips[i2])
+	}
+	if chg2 {
+		if len(v.Chips) == 0 {
+			w.Clear(3)
+		} else {
+			w.List(3, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+		}
+	}
+	if v.Verb != prev.Verb {
+		if v.Verb == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.Verb)
+		}
+	}
+	if v.Rest != prev.Rest {
+		if v.Rest == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.Rest)
+		}
+	}
+}
+
+func (v tipLinkSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Label)
+	h.Str(2, v.URL)
+}
+
+func (v tipLinkSt) wireEq(o *tipLinkSt) bool {
+	if v.Label != o.Label {
+		return false
+	}
+	if v.URL != o.URL {
+		return false
+	}
+	return true
+}
+
+func (v tipLinkSt) deltaWire(w *zigui.WireWriter, prev *tipLinkSt) {
+	if v.Label != prev.Label {
+		if v.Label == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Label)
+		}
+	}
+	if v.URL != prev.URL {
+		if v.URL == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.URL)
+		}
+	}
+}
+
+func (v tipSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.ID)
+	h.Str(2, v.Title)
+	h.List(3, len(v.Keys))
+	for i := range v.Keys {
+		v.Keys[i].hashWire(h)
+	}
+	h.StrList(4, v.Paras)
+	h.List(5, len(v.Links))
+	for i := range v.Links {
+		v.Links[i].hashWire(h)
+	}
+}
+
+func (v tipSt) wireEq(o *tipSt) bool {
+	if v.ID != o.ID {
+		return false
+	}
+	if v.Title != o.Title {
+		return false
+	}
+	if len(v.Keys) != len(o.Keys) {
+		return false
+	}
+	for i2 := range v.Keys {
+		if !v.Keys[i2].wireEq(&o.Keys[i2]) {
+			return false
+		}
+	}
+	if !wireEqStrs(v.Paras, o.Paras) {
+		return false
+	}
+	if len(v.Links) != len(o.Links) {
+		return false
+	}
+	for i4 := range v.Links {
+		if !v.Links[i4].wireEq(&o.Links[i4]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v tipSt) deltaWire(w *zigui.WireWriter, prev *tipSt) {
+	if v.ID != prev.ID {
+		if v.ID == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.ID)
+		}
+	}
+	if v.Title != prev.Title {
+		if v.Title == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Title)
+		}
+	}
+	chg2 := len(v.Keys) != len(prev.Keys)
+	for i2 := 0; !chg2 && i2 < len(v.Keys); i2++ {
+		chg2 = !v.Keys[i2].wireEq(&prev.Keys[i2])
+	}
+	if chg2 {
+		if len(v.Keys) == 0 {
+			w.Clear(3)
+		} else {
+			w.List(3, len(v.Keys), func(i int) { v.Keys[i].encodeWire(w) })
+		}
+	}
+	if !wireEqStrs(v.Paras, prev.Paras) {
+		if len(v.Paras) == 0 {
+			w.Clear(4)
+		} else {
+			w.StrList(4, v.Paras)
+		}
+	}
+	chg4 := len(v.Links) != len(prev.Links)
+	for i4 := 0; !chg4 && i4 < len(v.Links); i4++ {
+		chg4 = !v.Links[i4].wireEq(&prev.Links[i4])
+	}
+	if chg4 {
+		if len(v.Links) == 0 {
+			w.Clear(5)
+		} else {
+			w.List(5, len(v.Links), func(i int) { v.Links[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v twTag) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Text)
+	h.Str(2, v.Variant)
+}
+
+func (v twTag) wireEq(o *twTag) bool {
+	if v.Text != o.Text {
+		return false
+	}
+	if v.Variant != o.Variant {
+		return false
+	}
+	return true
+}
+
+func (v twTag) deltaWire(w *zigui.WireWriter, prev *twTag) {
+	if v.Text != prev.Text {
+		if v.Text == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Text)
+		}
+	}
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Variant)
+		}
+	}
+}
+
+func (v twRow) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Kind)
+	h.Str(2, v.Date)
+	h.Str(3, v.Name)
+	h.Str(4, v.NameStyle)
+	h.List(5, len(v.Tags))
+	for i := range v.Tags {
+		v.Tags[i].hashWire(h)
+	}
+	h.Bool(6, v.Mod)
+	h.Str(7, v.ModVal)
+	h.Str(8, v.ModTitle)
+	h.Str(9, v.Text)
+	h.Str(10, v.Variant)
+}
+
+func (v twRow) wireEq(o *twRow) bool {
+	if v.Kind != o.Kind {
+		return false
+	}
+	if v.Date != o.Date {
+		return false
+	}
+	if v.Name != o.Name {
+		return false
+	}
+	if v.NameStyle != o.NameStyle {
+		return false
+	}
+	if len(v.Tags) != len(o.Tags) {
+		return false
+	}
+	for i4 := range v.Tags {
+		if !v.Tags[i4].wireEq(&o.Tags[i4]) {
+			return false
+		}
+	}
+	if v.Mod != o.Mod {
+		return false
+	}
+	if v.ModVal != o.ModVal {
+		return false
+	}
+	if v.ModTitle != o.ModTitle {
+		return false
+	}
+	if v.Text != o.Text {
+		return false
+	}
+	if v.Variant != o.Variant {
+		return false
+	}
+	return true
+}
+
+func (v twRow) deltaWire(w *zigui.WireWriter, prev *twRow) {
+	if v.Kind != prev.Kind {
+		if v.Kind == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Kind)
+		}
+	}
+	if v.Date != prev.Date {
+		if v.Date == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Date)
+		}
+	}
+	if v.Name != prev.Name {
+		if v.Name == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Name)
+		}
+	}
+	if v.NameStyle != prev.NameStyle {
+		if v.NameStyle == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.NameStyle)
+		}
+	}
+	chg4 := len(v.Tags) != len(prev.Tags)
+	for i4 := 0; !chg4 && i4 < len(v.Tags); i4++ {
+		chg4 = !v.Tags[i4].wireEq(&prev.Tags[i4])
+	}
+	if chg4 {
+		if len(v.Tags) == 0 {
+			w.Clear(5)
+		} else {
+			w.List(5, len(v.Tags), func(i int) { v.Tags[i].encodeWire(w) })
+		}
+	}
+	if v.Mod != prev.Mod {
+		if !v.Mod {
+			w.Clear(6)
+		} else {
+			w.Bool(6, v.Mod)
+		}
+	}
+	if v.ModVal != prev.ModVal {
+		if v.ModVal == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.ModVal)
+		}
+	}
+	if v.ModTitle != prev.ModTitle {
+		if v.ModTitle == "" {
+			w.Clear(8)
+		} else {
+			w.Str(8, v.ModTitle)
+		}
+	}
+	if v.Text != prev.Text {
+		if v.Text == "" {
+			w.Clear(9)
+		} else {
+			w.Str(9, v.Text)
+		}
+	}
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(10)
+		} else {
+			w.Str(10, v.Variant)
+		}
+	}
+}
+
+func (v twFeedState) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Empty)
+	h.List(2, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v twFeedState) wireEq(o *twFeedState) bool {
+	if v.Empty != o.Empty {
+		return false
+	}
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i1 := range v.Rows {
+		if !v.Rows[i1].wireEq(&o.Rows[i1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v twFeedState) deltaWire(w *zigui.WireWriter, prev *twFeedState) {
+	if v.Empty != prev.Empty {
+		if v.Empty == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Empty)
+		}
+	}
+	chg1 := len(v.Rows) != len(prev.Rows)
+	for i1 := 0; !chg1 && i1 < len(v.Rows); i1++ {
+		chg1 = !v.Rows[i1].wireEq(&prev.Rows[i1])
+	}
+	if chg1 {
+		if len(v.Rows) == 0 {
+			w.Clear(2)
+		} else {
+			w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v midiMonRow) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Ago)
+	h.Str(2, v.Src)
+	h.Str(3, v.Msg)
+}
+
+func (v midiMonRow) wireEq(o *midiMonRow) bool {
+	if v.Ago != o.Ago {
+		return false
+	}
+	if v.Src != o.Src {
+		return false
+	}
+	if v.Msg != o.Msg {
+		return false
+	}
+	return true
+}
+
+func (v midiMonRow) deltaWire(w *zigui.WireWriter, prev *midiMonRow) {
+	if v.Ago != prev.Ago {
+		if v.Ago == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Ago)
+		}
+	}
+	if v.Src != prev.Src {
+		if v.Src == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Src)
+		}
+	}
+	if v.Msg != prev.Msg {
+		if v.Msg == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Msg)
+		}
+	}
+}
+
+func (v midiMonLines) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Empty)
+	h.List(2, len(v.Rows))
+	for i := range v.Rows {
+		v.Rows[i].hashWire(h)
+	}
+}
+
+func (v midiMonLines) wireEq(o *midiMonLines) bool {
+	if v.Empty != o.Empty {
+		return false
+	}
+	if len(v.Rows) != len(o.Rows) {
+		return false
+	}
+	for i1 := range v.Rows {
+		if !v.Rows[i1].wireEq(&o.Rows[i1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v midiMonLines) deltaWire(w *zigui.WireWriter, prev *midiMonLines) {
+	if v.Empty != prev.Empty {
+		if v.Empty == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Empty)
+		}
+	}
+	chg1 := len(v.Rows) != len(prev.Rows)
+	for i1 := 0; !chg1 && i1 < len(v.Rows); i1++ {
+		chg1 = !v.Rows[i1].wireEq(&prev.Rows[i1])
+	}
+	if chg1 {
+		if len(v.Rows) == 0 {
+			w.Clear(2)
+		} else {
+			w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v midiPortStat) hashWire(h *zigui.WireHasher) {
+	h.Bool(1, v.HasRow)
+	h.Str(2, v.Variant)
+	h.Str(3, v.Label)
+	h.Str(4, v.LabelDL)
+	h.Str(5, v.Line)
+	h.Str(6, v.Hint)
+	h.Bool(7, v.HasAct)
+	h.Str(8, v.Act)
+	h.Str(9, v.ActMsg)
+}
+
+func (v midiPortStat) wireEq(o *midiPortStat) bool {
+	if v.HasRow != o.HasRow {
+		return false
+	}
+	if v.Variant != o.Variant {
+		return false
+	}
+	if v.Label != o.Label {
+		return false
+	}
+	if v.LabelDL != o.LabelDL {
+		return false
+	}
+	if v.Line != o.Line {
+		return false
+	}
+	if v.Hint != o.Hint {
+		return false
+	}
+	if v.HasAct != o.HasAct {
+		return false
+	}
+	if v.Act != o.Act {
+		return false
+	}
+	if v.ActMsg != o.ActMsg {
+		return false
+	}
+	return true
+}
+
+func (v midiPortStat) deltaWire(w *zigui.WireWriter, prev *midiPortStat) {
+	if v.HasRow != prev.HasRow {
+		if !v.HasRow {
+			w.Clear(1)
+		} else {
+			w.Bool(1, v.HasRow)
+		}
+	}
+	if v.Variant != prev.Variant {
+		if v.Variant == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Variant)
+		}
+	}
+	if v.Label != prev.Label {
+		if v.Label == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Label)
+		}
+	}
+	if v.LabelDL != prev.LabelDL {
+		if v.LabelDL == "" {
+			w.Clear(4)
+		} else {
+			w.Str(4, v.LabelDL)
+		}
+	}
+	if v.Line != prev.Line {
+		if v.Line == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.Line)
+		}
+	}
+	if v.Hint != prev.Hint {
+		if v.Hint == "" {
+			w.Clear(6)
+		} else {
+			w.Str(6, v.Hint)
+		}
+	}
+	if v.HasAct != prev.HasAct {
+		if !v.HasAct {
+			w.Clear(7)
+		} else {
+			w.Bool(7, v.HasAct)
+		}
+	}
+	if v.Act != prev.Act {
+		if v.Act == "" {
+			w.Clear(8)
+		} else {
+			w.Str(8, v.Act)
+		}
+	}
+	if v.ActMsg != prev.ActMsg {
+		if v.ActMsg == "" {
+			w.Clear(9)
+		} else {
+			w.Str(9, v.ActMsg)
+		}
+	}
+}
+
+func (v ceTbDropSt) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.Act)
+	h.Str(2, v.Lbl)
+	h.Str(3, v.When)
+}
+
+func (v ceTbDropSt) wireEq(o *ceTbDropSt) bool {
+	if v.Act != o.Act {
+		return false
+	}
+	if v.Lbl != o.Lbl {
+		return false
+	}
+	if v.When != o.When {
+		return false
+	}
+	return true
+}
+
+func (v ceTbDropSt) deltaWire(w *zigui.WireWriter, prev *ceTbDropSt) {
+	if v.Act != prev.Act {
+		if v.Act == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.Act)
+		}
+	}
+	if v.Lbl != prev.Lbl {
+		if v.Lbl == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Lbl)
+		}
+	}
+	if v.When != prev.When {
+		if v.When == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.When)
+		}
+	}
+}
+
+func (v ceTopbarSt) hashWire(h *zigui.WireHasher) {
+	h.Bool(1, v.Show)
+	h.Str(2, v.Eyebrow)
+	h.Str(3, v.Title)
+	h.Bool(4, v.HasRce)
+	h.Str(5, v.RceMeta)
+	h.Bool(6, v.Dirty)
+	h.Str(7, v.DirtyTip)
+	h.Str(8, v.Meta)
+	h.Str(9, v.Cursor)
+	h.Str(10, v.BarLbl)
+	h.Str(11, v.BarBeat)
+	h.Str(12, v.Jump)
+	h.List(13, len(v.Drops))
+	for i := range v.Drops {
+		v.Drops[i].hashWire(h)
+	}
+	h.Str(14, v.Census)
+	h.Bool(15, v.NoTag)
+	h.Str(16, v.NoTagTip)
+	h.Bool(17, v.Verified)
+	h.Bool(18, v.Verifiable)
+	h.Str(19, v.VerifyAct)
+	h.Str(20, v.VerifiedTip)
+	h.Str(21, v.VerifiedLbl)
+	h.Str(22, v.VerifyTip)
+	h.Str(23, v.VerifyLbl)
+	h.Str(24, v.Tip)
+	h.Opt(25, v.TipS != nil)
+	if v.TipS != nil {
+		v.TipS.hashWire(h)
+	}
+	h.Sub(26)
+	v.Close.hashWire(h)
+}
+
+func (v ceTopbarSt) wireEq(o *ceTopbarSt) bool {
+	if v.Show != o.Show {
+		return false
+	}
+	if v.Eyebrow != o.Eyebrow {
+		return false
+	}
+	if v.Title != o.Title {
+		return false
+	}
+	if v.HasRce != o.HasRce {
+		return false
+	}
+	if v.RceMeta != o.RceMeta {
+		return false
+	}
+	if v.Dirty != o.Dirty {
+		return false
+	}
+	if v.DirtyTip != o.DirtyTip {
+		return false
+	}
+	if v.Meta != o.Meta {
+		return false
+	}
+	if v.Cursor != o.Cursor {
+		return false
+	}
+	if v.BarLbl != o.BarLbl {
+		return false
+	}
+	if v.BarBeat != o.BarBeat {
+		return false
+	}
+	if v.Jump != o.Jump {
+		return false
+	}
+	if len(v.Drops) != len(o.Drops) {
+		return false
+	}
+	for i12 := range v.Drops {
+		if !v.Drops[i12].wireEq(&o.Drops[i12]) {
+			return false
+		}
+	}
+	if v.Census != o.Census {
+		return false
+	}
+	if v.NoTag != o.NoTag {
+		return false
+	}
+	if v.NoTagTip != o.NoTagTip {
+		return false
+	}
+	if v.Verified != o.Verified {
+		return false
+	}
+	if v.Verifiable != o.Verifiable {
+		return false
+	}
+	if v.VerifyAct != o.VerifyAct {
+		return false
+	}
+	if v.VerifiedTip != o.VerifiedTip {
+		return false
+	}
+	if v.VerifiedLbl != o.VerifiedLbl {
+		return false
+	}
+	if v.VerifyTip != o.VerifyTip {
+		return false
+	}
+	if v.VerifyLbl != o.VerifyLbl {
+		return false
+	}
+	if v.Tip != o.Tip {
+		return false
+	}
+	if (v.TipS == nil) != (o.TipS == nil) {
+		return false
+	}
+	if v.TipS != nil && !v.TipS.wireEq(o.TipS) {
+		return false
+	}
+	if !v.Close.wireEq(&o.Close) {
+		return false
+	}
+	return true
+}
+
+func (v ceTopbarSt) deltaWire(w *zigui.WireWriter, prev *ceTopbarSt) {
+	if v.Show != prev.Show {
+		if !v.Show {
+			w.Clear(1)
+		} else {
+			w.Bool(1, v.Show)
+		}
+	}
+	if v.Eyebrow != prev.Eyebrow {
+		if v.Eyebrow == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.Eyebrow)
+		}
+	}
+	if v.Title != prev.Title {
+		if v.Title == "" {
+			w.Clear(3)
+		} else {
+			w.Str(3, v.Title)
+		}
+	}
+	if v.HasRce != prev.HasRce {
+		if !v.HasRce {
+			w.Clear(4)
+		} else {
+			w.Bool(4, v.HasRce)
+		}
+	}
+	if v.RceMeta != prev.RceMeta {
+		if v.RceMeta == "" {
+			w.Clear(5)
+		} else {
+			w.Str(5, v.RceMeta)
+		}
+	}
+	if v.Dirty != prev.Dirty {
+		if !v.Dirty {
+			w.Clear(6)
+		} else {
+			w.Bool(6, v.Dirty)
+		}
+	}
+	if v.DirtyTip != prev.DirtyTip {
+		if v.DirtyTip == "" {
+			w.Clear(7)
+		} else {
+			w.Str(7, v.DirtyTip)
+		}
+	}
+	if v.Meta != prev.Meta {
+		if v.Meta == "" {
+			w.Clear(8)
+		} else {
+			w.Str(8, v.Meta)
+		}
+	}
+	if v.Cursor != prev.Cursor {
+		if v.Cursor == "" {
+			w.Clear(9)
+		} else {
+			w.Str(9, v.Cursor)
+		}
+	}
+	if v.BarLbl != prev.BarLbl {
+		if v.BarLbl == "" {
+			w.Clear(10)
+		} else {
+			w.Str(10, v.BarLbl)
+		}
+	}
+	if v.BarBeat != prev.BarBeat {
+		if v.BarBeat == "" {
+			w.Clear(11)
+		} else {
+			w.Str(11, v.BarBeat)
+		}
+	}
+	if v.Jump != prev.Jump {
+		if v.Jump == "" {
+			w.Clear(12)
+		} else {
+			w.Str(12, v.Jump)
+		}
+	}
+	chg12 := len(v.Drops) != len(prev.Drops)
+	for i12 := 0; !chg12 && i12 < len(v.Drops); i12++ {
+		chg12 = !v.Drops[i12].wireEq(&prev.Drops[i12])
+	}
+	if chg12 {
+		if len(v.Drops) == 0 {
+			w.Clear(13)
+		} else {
+			w.List(13, len(v.Drops), func(i int) { v.Drops[i].encodeWire(w) })
+		}
+	}
+	if v.Census != prev.Census {
+		if v.Census == "" {
+			w.Clear(14)
+		} else {
+			w.Str(14, v.Census)
+		}
+	}
+	if v.NoTag != prev.NoTag {
+		if !v.NoTag {
+			w.Clear(15)
+		} else {
+			w.Bool(15, v.NoTag)
+		}
+	}
+	if v.NoTagTip != prev.NoTagTip {
+		if v.NoTagTip == "" {
+			w.Clear(16)
+		} else {
+			w.Str(16, v.NoTagTip)
+		}
+	}
+	if v.Verified != prev.Verified {
+		if !v.Verified {
+			w.Clear(17)
+		} else {
+			w.Bool(17, v.Verified)
+		}
+	}
+	if v.Verifiable != prev.Verifiable {
+		if !v.Verifiable {
+			w.Clear(18)
+		} else {
+			w.Bool(18, v.Verifiable)
+		}
+	}
+	if v.VerifyAct != prev.VerifyAct {
+		if v.VerifyAct == "" {
+			w.Clear(19)
+		} else {
+			w.Str(19, v.VerifyAct)
+		}
+	}
+	if v.VerifiedTip != prev.VerifiedTip {
+		if v.VerifiedTip == "" {
+			w.Clear(20)
+		} else {
+			w.Str(20, v.VerifiedTip)
+		}
+	}
+	if v.VerifiedLbl != prev.VerifiedLbl {
+		if v.VerifiedLbl == "" {
+			w.Clear(21)
+		} else {
+			w.Str(21, v.VerifiedLbl)
+		}
+	}
+	if v.VerifyTip != prev.VerifyTip {
+		if v.VerifyTip == "" {
+			w.Clear(22)
+		} else {
+			w.Str(22, v.VerifyTip)
+		}
+	}
+	if v.VerifyLbl != prev.VerifyLbl {
+		if v.VerifyLbl == "" {
+			w.Clear(23)
+		} else {
+			w.Str(23, v.VerifyLbl)
+		}
+	}
+	if v.Tip != prev.Tip {
+		if v.Tip == "" {
+			w.Clear(24)
+		} else {
+			w.Str(24, v.Tip)
+		}
+	}
+	switch {
+	case v.TipS == nil:
+		if prev.TipS != nil {
+			w.Clear(25)
+		}
+	case prev.TipS == nil:
+		w.OptStruct(25, func() { v.TipS.encodeWire(w) })
+	case !v.TipS.wireEq(prev.TipS):
+		w.OptStruct(25, func() { v.TipS.deltaWire(w, prev.TipS) })
+	}
+	w.Struct(26, func() { v.Close.deltaWire(w, &prev.Close) })
+}
+
+func (v tickPrev) hashWire(h *zigui.WireHasher) {
+	h.Str(1, v.ID)
+	h.Uint(2, uint64(v.Hash))
+}
+
+func (v tickPrev) wireEq(o *tickPrev) bool {
+	if v.ID != o.ID {
+		return false
+	}
+	if v.Hash != o.Hash {
+		return false
+	}
+	return true
+}
+
+func (v tickPrev) deltaWire(w *zigui.WireWriter, prev *tickPrev) {
+	if v.ID != prev.ID {
+		if v.ID == "" {
+			w.Clear(1)
+		} else {
+			w.Str(1, v.ID)
+		}
+	}
+	if v.Hash != prev.Hash {
+		if v.Hash == 0 {
+			w.Clear(2)
+		} else {
+			w.Uint(2, uint64(v.Hash))
+		}
+	}
+}
+
+func (v liveTickSt) hashWire(h *zigui.WireHasher) {
+	h.Sub(1)
+	v.Live.hashWire(h)
+	h.Str(2, v.TC)
+	h.List(3, len(v.Prev))
+	for i := range v.Prev {
+		v.Prev[i].hashWire(h)
+	}
+}
+
+func (v liveTickSt) wireEq(o *liveTickSt) bool {
+	if !v.Live.wireEq(&o.Live) {
+		return false
+	}
+	if v.TC != o.TC {
+		return false
+	}
+	if len(v.Prev) != len(o.Prev) {
+		return false
+	}
+	for i2 := range v.Prev {
+		if !v.Prev[i2].wireEq(&o.Prev[i2]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v liveTickSt) deltaWire(w *zigui.WireWriter, prev *liveTickSt) {
+	w.Struct(1, func() { v.Live.deltaWire(w, &prev.Live) })
+	if v.TC != prev.TC {
+		if v.TC == "" {
+			w.Clear(2)
+		} else {
+			w.Str(2, v.TC)
+		}
+	}
+	chg2 := len(v.Prev) != len(prev.Prev)
+	for i2 := 0; !chg2 && i2 < len(v.Prev); i2++ {
+		chg2 = !v.Prev[i2].wireEq(&prev.Prev[i2])
+	}
+	if chg2 {
+		if len(v.Prev) == 0 {
+			w.Clear(3)
+		} else {
+			w.List(3, len(v.Prev), func(i int) { v.Prev[i].encodeWire(w) })
+		}
+	}
+}
+
+func (v logsTickSt) hashWire(h *zigui.WireHasher) {
+	h.Sub(1)
+	v.Lines.hashWire(h)
+	h.List(2, len(v.Prev))
+	for i := range v.Prev {
+		v.Prev[i].hashWire(h)
+	}
+}
+
+func (v logsTickSt) wireEq(o *logsTickSt) bool {
+	if !v.Lines.wireEq(&o.Lines) {
+		return false
+	}
+	if len(v.Prev) != len(o.Prev) {
+		return false
+	}
+	for i1 := range v.Prev {
+		if !v.Prev[i1].wireEq(&o.Prev[i1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v logsTickSt) deltaWire(w *zigui.WireWriter, prev *logsTickSt) {
+	w.Struct(1, func() { v.Lines.deltaWire(w, &prev.Lines) })
+	chg1 := len(v.Prev) != len(prev.Prev)
+	for i1 := 0; !chg1 && i1 < len(v.Prev); i1++ {
+		chg1 = !v.Prev[i1].wireEq(&prev.Prev[i1])
+	}
+	if chg1 {
+		if len(v.Prev) == 0 {
+			w.Clear(2)
+		} else {
+			w.List(2, len(v.Prev), func(i int) { v.Prev[i].encodeWire(w) })
+		}
+	}
+}
+
+// hashTwFeed fingerprints twFeedState for the slot guard (== the Zig hashTwFeed walk).
+func hashTwFeed(v twFeedState) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedTwFeed encodes twFeedState as an RZD1 SEED document (full state; re-seeds the slot).
+func seedTwFeed(v twFeedState, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgTwFeed, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashTwFeed(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaTwFeed encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaTwFeed(v, prev twFeedState, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgTwFeed, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashTwFeed(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
+}
+
+// hashMidiMonLines fingerprints midiMonLines for the slot guard (== the Zig hashMidiMonLines walk).
+func hashMidiMonLines(v midiMonLines) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedMidiMonLines encodes midiMonLines as an RZD1 SEED document (full state; re-seeds the slot).
+func seedMidiMonLines(v midiMonLines, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgMidiMonLines, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashMidiMonLines(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaMidiMonLines encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaMidiMonLines(v, prev midiMonLines, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgMidiMonLines, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashMidiMonLines(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
+}
+
+// hashMidiPortStat fingerprints midiPortStat for the slot guard (== the Zig hashMidiPortStat walk).
+func hashMidiPortStat(v midiPortStat) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedMidiPortStat encodes midiPortStat as an RZD1 SEED document (full state; re-seeds the slot).
+func seedMidiPortStat(v midiPortStat, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgMidiPortStat, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashMidiPortStat(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaMidiPortStat encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaMidiPortStat(v, prev midiPortStat, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgMidiPortStat, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashMidiPortStat(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
+}
+
+// hashCeTopbar fingerprints ceTopbarSt for the slot guard (== the Zig hashCeTopbar walk).
+func hashCeTopbar(v ceTopbarSt) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedCeTopbar encodes ceTopbarSt as an RZD1 SEED document (full state; re-seeds the slot).
+func seedCeTopbar(v ceTopbarSt, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgCeTopbar, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashCeTopbar(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaCeTopbar encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaCeTopbar(v, prev ceTopbarSt, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgCeTopbar, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashCeTopbar(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
+}
+
+// hashTkLive fingerprints liveTickSt for the slot guard (== the Zig hashTkLive walk).
+func hashTkLive(v liveTickSt) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedTkLive encodes liveTickSt as an RZD1 SEED document (full state; re-seeds the slot).
+func seedTkLive(v liveTickSt, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgTkLive, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashTkLive(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaTkLive encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaTkLive(v, prev liveTickSt, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgTkLive, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashTkLive(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
+}
+
+// hashTkLogs fingerprints logsTickSt for the slot guard (== the Zig hashTkLogs walk).
+func hashTkLogs(v logsTickSt) uint64 {
+	h := zigui.NewWireHasher()
+	v.hashWire(h)
+	s, _ := h.Sum()
+	return s
+}
+
+// seedTkLogs encodes logsTickSt as an RZD1 SEED document (full state; re-seeds the slot).
+func seedTkLogs(v logsTickSt, handle uint64, loc uint32) []byte {
+	w := zigui.NewDeltaWriter(wireMsgTkLogs, wireSchemaHash, zigui.DeltaKindSeed, handle, 0, hashTkLogs(v), loc)
+	v.encodeWire(w)
+	return w.FinishDelta()
+}
+
+// deltaTkLogs encodes what changed between prev and v as an RZD1 DELTA document. nil = the
+// encoder refused (over-size); an EMPTY body means nothing changed and the caller skips
+// the ABI call entirely.
+func deltaTkLogs(v, prev logsTickSt, handle, base uint64, loc uint32) ([]byte, bool) {
+	w := zigui.NewDeltaWriter(wireMsgTkLogs, wireSchemaHash, zigui.DeltaKindDelta, handle, base, hashTkLogs(v), loc)
+	v.deltaWire(w, &prev)
+	if w.Empty() {
+		return nil, false
+	}
+	return w.FinishDelta(), true
 }

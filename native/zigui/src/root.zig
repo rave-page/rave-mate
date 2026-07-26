@@ -1306,3 +1306,125 @@ test "phaseb-sched module" {
 }
 
 // --- end phaseb-sched ---
+// --- phaseb-retain ---
+
+// B7 increment (ii): the retained-doc delta channel. The stateless exports above are unchanged
+// and remain both the DEFAULT and the fallback; these `rz_ui_patch_*` exports are an opt-in tier
+// for high-cadence patch sites. Zig keeps the last-decoded state per slot, Go sends only the
+// changed field trees (RZD1), the merge + render happen here. State machine, slot table + cap
+// rationale: retain.zig. Doc format: internal/zigui/wire.go (phaseb-retain block).
+//
+// The two document kinds are mutually unparseable by construction (RZW1 vs RZD1 magic), so a
+// delta can never reach a stateless decoder that reads "absent" as "zero" instead of "keep".
+//
+// Every export takes a `status` out-param (retain.st_*) so Go can tell a cap breach from a
+// desync from a malformed document - a cap breach is the only one that changes behaviour
+// (three on one surface → that surface goes sticky-stateless for the session).
+
+const retain = @import("retain.zig");
+
+/// rz_ui_retain_new claims a slot for root message msg_id. 0 = slot table full → the caller
+/// stays on the stateless path (bounded by design; retain.max_slots).
+export fn rz_ui_retain_new(msg_id: u16) u64 {
+    return retain.retainNew(msg_id);
+}
+
+/// rz_ui_retain_free drops a slot's retained state and invalidates every handle naming it.
+export fn rz_ui_retain_free(h: u64) void {
+    retain.release(h);
+}
+
+/// rz_ui_retain_stats reports live/seeded slot counts + retained logical bytes (`ctl perf`).
+export fn rz_ui_retain_stats(n_live: *u32, n_seeded: *u32, n_bytes: *u64) void {
+    const s = retain.stats();
+    n_live.* = s.live;
+    n_seeded.* = s.seeded;
+    n_bytes.* = s.bytes;
+}
+
+/// htmlProducer adapts a plain renderer to retain.patch's producer shape (render the MERGED
+/// state into an owned buffer).
+fn htmlProducer(comptime StateT: type, comptime renderFn: fn (*html.Html, StateT) anyerror!void) fn (std.mem.Allocator, StateT) anyerror![]u8 {
+    return struct {
+        fn run(a: std.mem.Allocator, v: StateT) anyerror![]u8 {
+            var h = html.Html.init(a);
+            defer h.deinit();
+            try renderFn(&h, v);
+            return h.toOwnedSlice();
+        }
+    }.run;
+}
+
+/// patchWire is the one body every patch export shares. NULL + status 0 means "merged fine and
+/// rendered nothing" (the retained channel reports emptiness through the status, not through a
+/// NULL, so an empty fragment is not indistinguishable from a decline).
+fn patchWire(
+    comptime StateT: type,
+    comptime mergeFn: fn (*wire.Reader, *StateT) wire.Error!void,
+    comptime cloneFn: fn (std.mem.Allocator, StateT) wire.Error!StateT,
+    comptime hashFn: fn (*wire.Hasher, StateT) void,
+    comptime produceFn: fn (std.mem.Allocator, StateT) anyerror![]u8,
+    comptime msg_id: u16,
+    state: ?[*]const u8,
+    len: usize,
+    out_len: *usize,
+    status: *u8,
+) ?[*]const u8 {
+    out_len.* = 0;
+    const p = state orelse {
+        status.* = retain.st_malformed;
+        return null;
+    };
+    if (len == 0) {
+        status.* = retain.st_malformed;
+        return null;
+    }
+    const res = retain.patch(StateT, mergeFn, cloneFn, hashFn, produceFn, msg_id, wire_gen.schema_hash, alloc, p[0..len]);
+    status.* = res.status;
+    const out = res.out orelse return null;
+    if (out.len == 0) {
+        alloc.free(out);
+        return null;
+    }
+    out_len.* = out.len;
+    return out.ptr;
+}
+
+export fn rz_ui_patch_twitch_feed(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(twitch.Feed, wire_gen.mergeTwFeed, wire_gen.cloneTwFeed, wire_gen.hashTwFeed,
+        htmlProducer(twitch.Feed, twitch.renderFeed), wire_gen.msg_tw_feed, state, len, out_len, status);
+}
+
+export fn rz_ui_patch_midimon_rows(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(midimon.Lines, wire_gen.mergeMidiMonLines, wire_gen.cloneMidiMonLines, wire_gen.hashMidiMonLines,
+        htmlProducer(midimon.Lines, midimon.renderRows), wire_gen.msg_midi_mon_lines, state, len, out_len, status);
+}
+
+export fn rz_ui_patch_midictl_stat(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(midictl_ctls.PortStat, wire_gen.mergeMidiPortStat, wire_gen.cloneMidiPortStat, wire_gen.hashMidiPortStat,
+        htmlProducer(midictl_ctls.PortStat, midictl_ctls.renderPortStat), wire_gen.msg_midi_port_stat, state, len, out_len, status);
+}
+
+export fn rz_ui_patch_cueedit_topbar(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(cueedit.Topbar, wire_gen.mergeCeTopbar, wire_gen.cloneCeTopbar, wire_gen.hashCeTopbar,
+        htmlProducer(cueedit.Topbar, cueedit.renderTopbar), wire_gen.msg_ce_topbar, state, len, out_len, status);
+}
+
+// The two B3 scheduler surfaces: the producer is the tick scheduler, so what comes back is the
+// packed RZF1 changed-fragment list, not HTML. Retained + scheduled compose - the delta says what
+// changed in the STATE, the scheduler says which rendered fragments changed.
+export fn rz_ui_patch_tick_live(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(tick.LiveBatch, wire_gen.mergeTkLive, wire_gen.cloneTkLive, wire_gen.hashTkLive,
+        tick.runLive, wire_gen.msg_tk_live, state, len, out_len, status);
+}
+
+export fn rz_ui_patch_tick_logs(state: ?[*]const u8, len: usize, out_len: *usize, status: *u8) ?[*]const u8 {
+    return patchWire(tick.LogsBatch, wire_gen.mergeTkLogs, wire_gen.cloneTkLogs, wire_gen.hashTkLogs,
+        tick.runLogs, wire_gen.msg_tk_logs, state, len, out_len, status);
+}
+
+test "phaseb-retain module" {
+    _ = retain;
+}
+
+// --- end phaseb-retain ---

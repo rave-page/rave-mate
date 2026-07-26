@@ -69,6 +69,10 @@ type msg struct {
 	id   int
 	doc  string
 	fs   []field
+	// retain opts this ROOT into the retained-doc delta channel (B7 increment ii): wiregen also
+	// emits merge/clone/hash walkers for it and everything it nests (retain.go). Stateless stays
+	// the default and the fallback - flag a surface only when its bench row shows a win.
+	retain bool
 }
 
 func s(n int, g, z string) field { return field{num: n, goF: g, zigF: z, kind: kStr} }
@@ -927,7 +931,7 @@ var schema = []msg{
 		fs:  []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
 	},
 	{
-		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53,
+		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53, retain: true,
 		doc: "#twitch-feed inner fragment (patched on every chat/alert event)",
 		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
 	},
@@ -950,7 +954,7 @@ var schema = []msg{
 		fs: []field{s(1, "Ago", "ago"), s(2, "Src", "src"), s(3, "Msg", "msg")},
 	},
 	{
-		name: "MidiMonLines", goT: "midiMonLines", zigT: "midimon.Lines", id: 55,
+		name: "MidiMonLines", goT: "midiMonLines", zigT: "midimon.Lines", id: 55, retain: true,
 		doc: "#midi-monitor inner rows (~1 Hz patch target)",
 		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "MidiMonRow")},
 	},
@@ -971,7 +975,7 @@ var schema = []msg{
 		fs: []field{s(1, "Label", "label"), s(2, "URL", "url")},
 	},
 	{
-		name: "MidiPortStat", goT: "midiPortStat", zigT: "ctls.PortStat", id: 56,
+		name: "MidiPortStat", goT: "midiPortStat", zigT: "ctls.PortStat", id: 56, retain: true,
 		doc: "#midi-ctlstat-<i> inner status (~1 Hz patch target)",
 		fs:  []field{b(1, "HasRow", "hasRow"), s(2, "Variant", "variant"), s(3, "Label", "label"), s(4, "LabelDL", "labelDl"), s(5, "Line", "line"), s(6, "Hint", "hint"), b(7, "HasAct", "hasAct"), s(8, "Act", "act"), s(9, "ActMsg", "actMsg")},
 	},
@@ -1475,7 +1479,7 @@ var schema = []msg{
 		fs: []field{s(1, "Act", "act"), s(2, "Lbl", "lbl"), s(3, "When", "when")},
 	},
 	{
-		name: "CeTopbar", goT: "ceTopbarSt", zigT: "cueedit.Topbar", id: 93,
+		name: "CeTopbar", goT: "ceTopbarSt", zigT: "cueedit.Topbar", id: 93, retain: true,
 		doc: "#ce-topbar readout strip (re-rendered during drag)",
 		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), b(4, "HasRce", "hasRce"), s(5, "RceMeta", "rceMeta"), b(6, "Dirty", "dirty"), s(7, "DirtyTip", "dirtyTip"), s(8, "Meta", "meta"), s(9, "Cursor", "cursor"), s(10, "BarLbl", "barLbl"), s(11, "BarBeat", "barBeat"), s(12, "Jump", "jump"), li(13, "Drops", "drops", "CeTbDrop"), s(14, "Census", "census"), b(15, "NoTag", "noTag"), s(16, "NoTagTip", "noTagTip"), b(17, "Verified", "verified"), b(18, "Verifiable", "verifiable"), s(19, "VerifyAct", "verifyAct"), s(20, "VerifiedTip", "verifiedTip"), s(21, "VerifiedLbl", "verifiedLbl"), s(22, "VerifyTip", "verifyTip"), s(23, "VerifyLbl", "verifyLbl"), s(24, "Tip", "tip"), op(25, "TipS", "tipSt", "Tip"), st(26, "Close", "close", "UiBtn")},
 	},
@@ -1657,13 +1661,13 @@ var schema = []msg{
 		fs: []field{s(1, "ID", "id"), u(2, "Hash", "hash")},
 	},
 	{
-		name: "TkLive", goT: "liveTickSt", zigT: "tick.LiveBatch", id: 100,
+		name: "TkLive", goT: "liveTickSt", zigT: "tick.LiveBatch", id: 100, retain: true,
 		doc: "Live-tab tick surface (all ~1 Hz fragments in one call)",
 		fs: []field{st(1, "Live", "live", "LiveState"), s(2, "TC", "tc"),
 			li(3, "Prev", "prev", "TkPrev")},
 	},
 	{
-		name: "TkLogs", goT: "logsTickSt", zigT: "tick.LogsBatch", id: 101,
+		name: "TkLogs", goT: "logsTickSt", zigT: "tick.LogsBatch", id: 101, retain: true,
 		doc: "#log-view tick surface (one fragment, 400-line tail)",
 		fs:  []field{st(1, "Lines", "lines", "LogsLines"), li(2, "Prev", "prev", "TkPrev")},
 	},
@@ -1713,7 +1717,7 @@ var zigImports = [][2]string{
 func schemaHash() uint32 {
 	h := fnv.New32a()
 	for _, m := range schema {
-		fmtWrite(h, m.name, m.goT, m.zigT, itoa(m.id))
+		fmtWrite(h, m.name, m.goT, m.zigT, itoa(m.id), retainTag(m.retain))
 		for _, f := range m.fs {
 			fmtWrite(h, itoa(f.num), f.kind.String(), f.ref, f.goF, f.zigF)
 		}

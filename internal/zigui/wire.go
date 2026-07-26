@@ -57,6 +57,7 @@ type WireWriter struct {
 	intern map[string]uint32 // string → arena offset (dedup: log tails repeat src/level heavily)
 	cap    int               // this message's prealloc hint; also sizes the intern map
 	bad    bool              // over-size: Finish returns nil, caller falls back to v1
+	dh     *deltaHdr         // non-nil = RZD1 retained-channel document (phaseb-retain block)
 }
 
 // NewWireWriter starts a document for root message msgID under schema hash h. Both buffers are
@@ -278,3 +279,210 @@ func NoteWireFallback(name string) {
 	fbCounts[name]++
 	fbMu.Unlock()
 }
+
+// --- phaseb-retain (B7 increment ii: the retained-doc delta channel) ---
+
+// RZD1 is the SECOND document kind, and it is only ever read by the stateful rz_ui_patch_*
+// exports: Zig keeps the last-decoded state per slot, Go sends only the field trees that
+// changed, Zig merges + renders. Absent therefore means KEEP on this channel (it means "zero"
+// on RZW1), so the two kinds must never meet - a delta merged by a stateless decoder would
+// silently render the zero value for every unchanged field.
+//
+// They cannot meet: the magic differs ("RZD1" vs "RZW1") and both decoders check it before any
+// field is read, so an RZW1 document handed to a patch export and an RZD1 document handed to a
+// stateless export are BOTH refused (TestZigPatchDocKindsAreMutuallyUnparseable).
+//
+//	"RZD1"       4 B  magic
+//	msg_id       u16  root message (as RZW1)
+//	schema_hash  u32  as RZW1 - a stale lib is refused, not mis-merged
+//	arena_len    u32  strings arena length
+//	kind         u8   0 = seed (full state, re-seeds the slot), 1 = delta (merge)
+//	handle       u64  slot handle {index:32, gen:32} from rz_ui_retain_new
+//	base_hash    u64  delta: must equal the hash of the state the slot currently holds
+//	new_hash     u64  hash of the state this document produces; the slot verifies its OWN
+//	                  merge against it, so a Go/Zig codec divergence declines instead of drifting
+//	locale_gen   u32  i18n generation at send time; a locale switch bumps it → every slot
+//	                  seeded under the old one declines → full-doc reseed with the new strings
+//	arena        arena_len B
+//	body         field-tagged, 0-terminated (same body grammar as RZW1)
+const (
+	deltaMagic     = "RZD1"
+	deltaHeaderLen = 43
+	// DeltaKindSeed re-seeds a slot from a full state; DeltaKindDelta merges onto what it holds.
+	DeltaKindSeed  = 0
+	DeltaKindDelta = 1
+	// WireClearField resets a field to the value its ABSENCE would produce on the stateless
+	// channel ("" / false / 0 / zero struct / empty list / null). Absence means "keep" here, so
+	// a field falling back to its zero value needs an explicit tag. Reserved: wiregen rejects a
+	// schema field number >= WireClearField.
+	WireClearField = 1023
+)
+
+// deltaHdr is the RZD1-only part of the header (nil on an RZW1 writer).
+type deltaHdr struct {
+	kind             uint8
+	handle           uint64
+	baseHash         uint64
+	newHash          uint64
+	localeGen        uint32
+	suppressSizeHint bool // deltas are tiny; they must not poison the full document's prealloc hint
+}
+
+// NewDeltaWriter starts an RZD1 document. kind DeltaKindSeed carries the full state (encodeWire),
+// DeltaKindDelta only the changed field trees (deltaWire).
+func NewDeltaWriter(msgID uint16, h uint32, kind uint8, handle, baseHash, newHash uint64, localeGen uint32) *WireWriter {
+	c := wireHint(msgID)
+	if kind == DeltaKindDelta {
+		c = wireHintMin
+	}
+	w := &WireWriter{msgID: msgID, hash: h, cap: c, arena: make([]byte, 0, c), body: make([]byte, 0, c)}
+	w.dh = &deltaHdr{kind: kind, handle: handle, baseHash: baseHash, newHash: newHash,
+		localeGen: localeGen, suppressSizeHint: kind == DeltaKindDelta}
+	return w
+}
+
+// Clear marks field num as reset to its zero/absent value (see WireClearField). Repeated tags
+// are allowed - the merge decoder walks them in order like any other field.
+func (w *WireWriter) Clear(num int) {
+	w.tag(WireClearField, wireWTVarint)
+	w.uvarint(uint64(num))
+}
+
+// FinishDelta assembles an RZD1 document (nil = over-size, or the writer is not a delta writer).
+func (w *WireWriter) FinishDelta() []byte {
+	if w.dh == nil || w.bad || len(w.arena) > wireMaxPayload {
+		return nil
+	}
+	out := make([]byte, 0, deltaHeaderLen+len(w.arena)+len(w.body)+1)
+	out = append(out, deltaMagic...)
+	out = binary.LittleEndian.AppendUint16(out, w.msgID)
+	out = binary.LittleEndian.AppendUint32(out, w.hash)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(w.arena)))
+	out = append(out, w.dh.kind)
+	out = binary.LittleEndian.AppendUint64(out, w.dh.handle)
+	out = binary.LittleEndian.AppendUint64(out, w.dh.baseHash)
+	out = binary.LittleEndian.AppendUint64(out, w.dh.newHash)
+	out = binary.LittleEndian.AppendUint32(out, w.dh.localeGen)
+	out = append(out, w.arena...)
+	out = append(out, w.body...)
+	if !w.dh.suppressSizeHint {
+		noteWireSize(w.msgID, max(len(w.arena), len(w.body)))
+	}
+	return append(out, 0)
+}
+
+// Empty reports that nothing was written to the body - a delta with no changed field trees.
+// The caller skips the ABI call entirely (nothing to merge, nothing to re-render).
+func (w *WireWriter) Empty() bool { return len(w.body) == 0 }
+
+// WireHasher fingerprints a state so BOTH sides can agree on what a slot holds. It is fed by
+// GENERATED walkers (hashWire, one per message) that visit every field in schema order,
+// including zero values - "absent" is not representable here, so the two sides cannot disagree
+// about whether a field was sent.
+//
+// The mixer is 8 bytes per round on purpose: FNV-1a consumes ONE byte per round and cost ~50 µs
+// on the 400-line log tail (tick.zig's lesson), which is more than the render it guards. Wyhash
+// would do, but Go's stdlib has no fixed-seed Wyhash and a hand-port of its spec is a bigger
+// mirror than this: identical 20-line mixers on both sides, pinned by
+// TestZigPatchHashParity over the whole fixture corpus.
+type WireHasher struct {
+	h uint64
+	n uint64 // logical state size (string bytes + 8 per scalar): the per-slot cap is measured on it
+}
+
+const (
+	hashSeed  uint64 = 0xcbf29ce484222325
+	hashPrime uint64 = 0x9e3779b97f4a7c15
+)
+
+// NewWireHasher starts a state fingerprint.
+func NewWireHasher() *WireHasher { return &WireHasher{h: hashSeed} }
+
+func (h *WireHasher) mix(v uint64) {
+	h.h = (h.h ^ v) * hashPrime
+	h.h ^= h.h >> 31
+}
+
+// le8 reads 8 little-endian bytes out of a string WITHOUT converting to []byte (that conversion
+// allocates, and this runs over every string of every retained state).
+func le8(s string, i int) uint64 {
+	return uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24 |
+		uint64(s[i+4])<<32 | uint64(s[i+5])<<40 | uint64(s[i+6])<<48 | uint64(s[i+7])<<56
+}
+
+func (h *WireHasher) bytes(b string) {
+	i := 0
+	for ; i+8 <= len(b); i += 8 {
+		h.mix(le8(b, i))
+	}
+	var last uint64
+	for j := i; j < len(b); j++ {
+		last |= uint64(b[j]) << (8 * (j - i))
+	}
+	h.mix(last)
+	h.mix(uint64(len(b)))
+	h.n += uint64(len(b))
+}
+
+// Str feeds a string field.
+func (h *WireHasher) Str(num int, s string) {
+	h.mix(uint64(num)<<3 | wireWTString)
+	h.bytes(s)
+}
+
+// Bool feeds a bool field.
+func (h *WireHasher) Bool(num int, v bool) {
+	h.mix(uint64(num)<<3 | wireWTVarint)
+	if v {
+		h.mix(1)
+	} else {
+		h.mix(0)
+	}
+	h.n += 8
+}
+
+// Uint feeds an integer field.
+func (h *WireHasher) Uint(num int, v uint64) {
+	h.mix(uint64(num)<<3 | wireWTVarint)
+	h.mix(v)
+	h.n += 8
+}
+
+// Sub marks the start of a nested message (its fields follow).
+func (h *WireHasher) Sub(num int) {
+	h.mix(uint64(num)<<3 | wireWTStruct)
+	h.n += 8
+}
+
+// Opt marks an optional nested message: present (fields follow) or null.
+func (h *WireHasher) Opt(num int, present bool) {
+	h.mix(uint64(num)<<3 | wireWTStruct)
+	if present {
+		h.mix(1)
+	} else {
+		h.mix(0)
+	}
+	h.n += 8
+}
+
+// List marks a list field with n elements (element fields follow).
+func (h *WireHasher) List(num, n int) {
+	h.mix(uint64(num)<<3 | wireWTList)
+	h.mix(uint64(n))
+	h.n += 8
+}
+
+// StrList feeds a []string field.
+func (h *WireHasher) StrList(num int, ss []string) {
+	h.List(num, len(ss))
+	for _, s := range ss {
+		h.bytes(s)
+	}
+}
+
+// Sum returns the fingerprint and the logical state size it measured.
+func (h *WireHasher) Sum() (uint64, uint64) {
+	return h.h ^ (h.h >> 32), h.n
+}
+
+// --- end phaseb-retain ---
