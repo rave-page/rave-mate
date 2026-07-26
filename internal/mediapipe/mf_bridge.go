@@ -186,5 +186,5 @@ func (b *mfBridge) RequestKeyframe() {
 
 // PipeStats implements medialink.PipelineReporter.
 func (b *mfBridge) PipeStats() medialink.PipelineStats {
-	return medialink.PipelineStats{Encoder: "h264_mf_native", OutFPS: b.out.value()}
+	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value()}
 }
