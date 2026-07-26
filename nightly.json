@@ -1,13 +1,13 @@
 {
-  "version": "nightly-b8710a1",
-  "build": 158,
-  "commit": "b8710a1",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-158-20260726-b8710a1.exe",
-  "sha256": "f2acdc02517cc717bb9507fe034585a7f290628305d4429fe59a2b2616975513",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-158-20260726-b8710a1.exe",
-  "installer_sha256": "17fcb98810f390532cf224b10eea4a0cb432483928a8aeb5adad9ff5121d31e7",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-158-20260726-b8710a1",
-  "linux_sha256": "9c680d6b7fd90bbf8423565f3f3a9d3938be3dc4d30f39ed6f1876ef64cc66de",
+  "version": "nightly-1e804e0",
+  "build": 159,
+  "commit": "1e804e0",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-159-20260726-1e804e0.exe",
+  "sha256": "ddaf50958fa11e321570e4432de9ce358c3385a6897413c9035d918e8681625e",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-159-20260726-1e804e0.exe",
+  "installer_sha256": "2361e90d8f2d33d8f035ab23298d795b114c89bc0b2925c92e6aec4ff96e2718",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-159-20260726-1e804e0",
+  "linux_sha256": "27013928d1422d17d66ea41aefb6dfced9849051e92997d2217419947abcb247",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T12:15:19Z",
-  "notes": "Merge feature/zig-shell-b6: Zig PSH1 shell exe behind shellImpl seam (B6)"
+  "released": "2026-07-26T12:38:55Z",
+  "notes": "Merge fix/mfenc-4k-open-crash: adapter pick + cross-vendor D3D ban + VEH driver-fault guard"
 }
