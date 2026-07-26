@@ -287,6 +287,19 @@ func RenderLibSmartModalV2(state []byte) (string, bool)   { return "", false }
 func RenderLibRelocModalV2(state []byte) (string, bool)   { return "", false }
 func RenderLibRemoteV2(state []byte) (string, bool)       { return "", false }
 
+func RenderDlgChoiceV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgTxtExportV2(state []byte) (string, bool)    { return "", false }
+func RenderDlgExportPrevV2(state []byte) (string, bool)   { return "", false }
+func RenderDlgRenameV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgFixV2(state []byte) (string, bool)          { return "", false }
+func RenderDlgPresetV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgPatMgrV2(state []byte) (string, bool)       { return "", false }
+func RenderAutoEditorV2(state []byte) (string, bool)      { return "", false }
+func RenderAutoRunNowV2(state []byte) (string, bool)      { return "", false }
+func RenderAutoScheduleV2(state []byte) (string, bool)    { return "", false }
+func RenderPublishRemoteV2(state []byte) (string, bool)   { return "", false }
+func RenderSettingsUpdFlowV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

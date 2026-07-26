@@ -1200,6 +1200,57 @@ export fn rz_ui_render_libremote_v2(state: ?[*]const u8, len: usize, out_len: *u
     return renderWire(libremote.State, wire_gen.decodeLibRemote, libremote.render, wire_gen.msg_lib_remote, state, len, out_len);
 }
 
+// ── B7 fan-out: dialogs_a + automations dialogs + publish-remote + update-flow (102-113) ──
+// The LAST JSON bridges. 113 = #inst-update (patched through the whole self-update flow).
+
+export fn rz_ui_render_dlg_choice_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(componentsA.Choice, wire_gen.decodeDlgChoice, componentsA.choiceDialog, wire_gen.msg_dlg_choice, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_txtexport_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.TxtExport, wire_gen.decodeDlgTxtExport, dialogs_a.renderTxtExport, wire_gen.msg_dlg_txt_export, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_exportprev_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.ExportPrev, wire_gen.decodeDlgExportPrev, dialogs_a.renderExportPrev, wire_gen.msg_dlg_export_prev, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_rename_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Rename, wire_gen.decodeDlgRename, dialogs_a.renderRename, wire_gen.msg_dlg_rename, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_fix_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Fix, wire_gen.decodeDlgFix, dialogs_a.renderFix, wire_gen.msg_dlg_fix, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_preset_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Preset, wire_gen.decodeDlgPreset, dialogs_a.renderPreset, wire_gen.msg_dlg_preset, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_patmgr_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.PatMgr, wire_gen.decodeDlgPatMgr, dialogs_a.renderPatMgr, wire_gen.msg_dlg_pat_mgr, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.AeModal, wire_gen.decodeAutoEditor, dialogs_b.renderAeModal, wire_gen.msg_auto_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_runnow_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.ArModal, wire_gen.decodeAutoRunNow, dialogs_b.renderArModal, wire_gen.msg_auto_run_now, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_schedule_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.AsModal, wire_gen.decodeAutoSchedule, dialogs_b.renderAsModal, wire_gen.msg_auto_schedule, state, len, out_len);
+}
+
+export fn rz_ui_render_publish_remote_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.Remote, wire_gen.decodePublishRemote, publish.renderRemote, wire_gen.msg_publish_remote, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_updflow_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings_sub.UpdFlow, wire_gen.decodeUpdFlow, settings_sub.renderUpdFlow, wire_gen.msg_upd_flow, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

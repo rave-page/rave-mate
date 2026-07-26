@@ -71,6 +71,18 @@ func wireExportsB7() []wireExport {
 		{"lib_smartmodal_v2", zigui.RenderLibSmartModalV2},
 		{"lib_relocmodal_v2", zigui.RenderLibRelocModalV2},
 		{"libremote_v2", zigui.RenderLibRemoteV2},
+		{"dlg_choice_v2", zigui.RenderDlgChoiceV2},
+		{"dlg_txtexport_v2", zigui.RenderDlgTxtExportV2},
+		{"dlg_exportprev_v2", zigui.RenderDlgExportPrevV2},
+		{"dlg_rename_v2", zigui.RenderDlgRenameV2},
+		{"dlg_fix_v2", zigui.RenderDlgFixV2},
+		{"dlg_preset_v2", zigui.RenderDlgPresetV2},
+		{"dlg_patmgr_v2", zigui.RenderDlgPatMgrV2},
+		{"auto_editor_v2", zigui.RenderAutoEditorV2},
+		{"auto_runnow_v2", zigui.RenderAutoRunNowV2},
+		{"auto_schedule_v2", zigui.RenderAutoScheduleV2},
+		{"publish_remote_v2", zigui.RenderPublishRemoteV2},
+		{"settings_updflow_v2", zigui.RenderSettingsUpdFlowV2},
 	}
 }
 
@@ -203,6 +215,49 @@ func wireBasesB7() []wireBase {
 	}
 	for n, st := range libRemoteFixtures() {
 		out = append(out, wireBase{"lrm/" + n, wireLibRemote(st)})
+	}
+	for n, st := range dlgChoiceFixtures() {
+		out = append(out, wireBase{"dch/" + n, wireDlgChoice(st)})
+	}
+	for i, st := range dlgTxtFx() {
+		out = append(out, wireBase{fmt.Sprintf("dtx/%d", i), wireDlgTxtExport(st)})
+	}
+	for n, st := range dlgExportFixtures() {
+		out = append(out, wireBase{"dxp/" + n, wireDlgExportPrev(st)})
+	}
+	for n, st := range dlgRenameFixtures() {
+		out = append(out, wireBase{"drn/" + n, wireDlgRename(st)})
+	}
+	for n, st := range dlgFixFx() {
+		out = append(out, wireBase{"dfx/" + n, wireDlgFix(st)})
+	}
+	for n, st := range dlgPresetFx() {
+		out = append(out, wireBase{"dps/" + n, wireDlgPreset(st)})
+	}
+	for n, st := range dlgPatFx() {
+		out = append(out, wireBase{"dpm/" + n, wireDlgPatMgr(st)})
+	}
+	// aeModalFixtures needs testing.T (setup can Fatal) - seed the corpus with two hand states;
+	// the full fixture set still crosses in TestZigWireThreeWayAutomations.
+	for n, st := range map[string]aeModalSt{
+		"empty": {},
+		"mini": {Title: "Edit", SecMatch: "Match", SecActions: "Actions", NoSteps: true,
+			NoStepsMsg: "none", Save: "Save", Cancel: "Cancel",
+			Ident: []aeBlockSt{{Kind: aeBlkField, Field: newDlgField("Label", "act", "v", "text", "", "")}}},
+	} {
+		out = append(out, wireBase{"aem/" + n, wireAutoEditor(st)})
+	}
+	for n, st := range arModalFixtures() {
+		out = append(out, wireBase{"arm/" + n, wireAutoRunNow(st)})
+	}
+	for n, st := range asModalFixtures() {
+		out = append(out, wireBase{"asm/" + n, wireAutoSchedule(st)})
+	}
+	for n, st := range pubRemFixtures() {
+		out = append(out, wireBase{"prm/" + n, wirePublishRemote(st)})
+	}
+	for n, st := range updFlowFixtures() {
+		out = append(out, wireBase{"upf/" + n, wireUpdFlow(st)})
 	}
 	return out
 }
@@ -576,6 +631,144 @@ func BenchmarkWireBenchVRCGroups(b *testing.B) {
 	benchPair(b,
 		func() (string, bool) { return zigui.RenderVRCGroups(stateJSON(st)) },
 		func() (string, bool) { return zigui.RenderVRCGroupsV2(wireVrcg(st)) })
+}
+
+// TestZigWireThreeWayDialogsA: the seven dialogs_a modals over their full golden fixture sets.
+func TestZigWireThreeWayDialogsA(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	for name, st := range dlgChoiceFixtures() {
+		t.Run("choice/"+name, func(t *testing.T) {
+			threeWayFrag(t, "choice", dlgChoiceHTMLOf(st), stateJSON(st), wireDlgChoice(st),
+				zigui.RenderDlgChoice, zigui.RenderDlgChoiceV2)
+		})
+	}
+	for i, st := range dlgTxtFx() {
+		t.Run(fmt.Sprintf("txtExport/%d", i), func(t *testing.T) {
+			threeWayFrag(t, "txtExport", pubTxtDlgHTMLOf(st), stateJSON(st), wireDlgTxtExport(st),
+				zigui.RenderDlgTxtExport, zigui.RenderDlgTxtExportV2)
+		})
+	}
+	for name, st := range dlgExportFixtures() {
+		t.Run("exportPrev/"+name, func(t *testing.T) {
+			threeWayFrag(t, "exportPrev", pubExpDlgHTMLOf(st), stateJSON(st), wireDlgExportPrev(st),
+				zigui.RenderDlgExportPrev, zigui.RenderDlgExportPrevV2)
+		})
+	}
+	for name, st := range dlgRenameFixtures() {
+		t.Run("rename/"+name, func(t *testing.T) {
+			threeWayFrag(t, "rename", pubRenameDlgHTMLOf(st), stateJSON(st), wireDlgRename(st),
+				zigui.RenderDlgRename, zigui.RenderDlgRenameV2)
+		})
+	}
+	for name, st := range dlgFixFx() {
+		t.Run("fix/"+name, func(t *testing.T) {
+			threeWayFrag(t, "fix", pubFixDlgHTMLOf(st), stateJSON(st), wireDlgFix(st),
+				zigui.RenderDlgFix, zigui.RenderDlgFixV2)
+		})
+	}
+	for name, st := range dlgPresetFx() {
+		t.Run("preset/"+name, func(t *testing.T) {
+			threeWayFrag(t, "preset", mpPresetDlgHTMLOf(st), stateJSON(st), wireDlgPreset(st),
+				zigui.RenderDlgPreset, zigui.RenderDlgPresetV2)
+		})
+	}
+	for name, st := range dlgPatFx() {
+		t.Run("patMgr/"+name, func(t *testing.T) {
+			threeWayFrag(t, "patMgr", cePatMgrHTMLOf(st), stateJSON(st), wireDlgPatMgr(st),
+				zigui.RenderDlgPatMgr, zigui.RenderDlgPatMgrV2)
+		})
+	}
+	assertNoNewFallbacksIn(t, before,
+		"RenderDlgChoice", "RenderDlgChoiceV2", "RenderDlgTxtExport", "RenderDlgTxtExportV2",
+		"RenderDlgExportPrev", "RenderDlgExportPrevV2", "RenderDlgRename", "RenderDlgRenameV2",
+		"RenderDlgFix", "RenderDlgFixV2", "RenderDlgPreset", "RenderDlgPresetV2",
+		"RenderDlgPatMgr", "RenderDlgPatMgrV2")
+}
+
+// TestZigWireThreeWayAutoDialogs: editor + run-now + schedule dialogs, full fixture sets.
+// (TestZigWireThreeWayAutomations in zigui_wire_test.go covers the automations LIST view.)
+func TestZigWireThreeWayAutoDialogs(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	var wireB, jsonB int
+	for name, st := range aeModalFixtures(t) {
+		t.Run("ae/"+name, func(t *testing.T) {
+			doc, js := wireAutoEditor(st), stateJSON(st)
+			wireB += len(doc)
+			jsonB += len(js)
+			threeWayFrag(t, "aeModal", aeModalHTMLOf(st), js, doc,
+				zigui.RenderAutoEditor, zigui.RenderAutoEditorV2)
+		})
+	}
+	for name, st := range arModalFixtures() {
+		t.Run("ar/"+name, func(t *testing.T) {
+			threeWayFrag(t, "arModal", arModalHTMLOf(st), stateJSON(st), wireAutoRunNow(st),
+				zigui.RenderAutoRunNow, zigui.RenderAutoRunNowV2)
+		})
+	}
+	for name, st := range asModalFixtures() {
+		t.Run("as/"+name, func(t *testing.T) {
+			threeWayFrag(t, "asModal", asModalHTMLOf(st), stateJSON(st), wireAutoSchedule(st),
+				zigui.RenderAutoSchedule, zigui.RenderAutoScheduleV2)
+		})
+	}
+	t.Logf("aeModal: wire %d B vs json %d B (%.1f%%)", wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacksIn(t, before,
+		"RenderAutoEditor", "RenderAutoEditorV2", "RenderAutoRunNow", "RenderAutoRunNowV2",
+		"RenderAutoSchedule", "RenderAutoScheduleV2")
+}
+
+// TestZigWireThreeWayPubRemoteUpd: remote Publish view + #inst-update. UpdFlow's hidden states
+// render "" - both exports must decline in lockstep (exact-delta asserted).
+func TestZigWireThreeWayPubRemoteUpd(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	declines := map[string]int{}
+	for name, st := range pubRemFixtures() {
+		t.Run("rem/"+name, func(t *testing.T) {
+			threeWayFrag(t, "pubRemote", pubRemoteHTML(st), stateJSON(st), wirePublishRemote(st),
+				zigui.RenderPublishRemote, zigui.RenderPublishRemoteV2)
+		})
+	}
+	for name, st := range updFlowFixtures() {
+		t.Run("upd/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "updflow", updFlowHTMLOf(st), stateJSON(st), wireUpdFlow(st),
+				zigui.RenderSettingsUpdFlow, zigui.RenderSettingsUpdFlowV2,
+				declines, "RenderSettingsUpdFlow", "RenderSettingsUpdFlowV2")
+		})
+	}
+	assertExactFallbacksIn(t, before, declines,
+		"RenderPublishRemote", "RenderPublishRemoteV2",
+		"RenderSettingsUpdFlow", "RenderSettingsUpdFlowV2")
+}
+
+// BenchmarkWireBenchAutoSchedule: aeModalFixtures needs a live *testing.T (headless UI +
+// Cleanup), so the automations bench uses the schedule editor - same AeBlock kit, no t.
+func BenchmarkWireBenchAutoSchedule(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := asModalFixtures()["daily"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderAutoSchedule(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderAutoScheduleV2(wireAutoSchedule(st)) })
+}
+
+func BenchmarkWireBenchDlgPreset(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := dlgPresetFx()["video"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderDlgPreset(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderDlgPresetV2(wireDlgPreset(st)) })
 }
 
 func BenchmarkWireBenchMIDICtl(b *testing.B) {

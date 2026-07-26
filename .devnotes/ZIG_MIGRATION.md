@@ -380,9 +380,12 @@ Rules:
   + 9 ws modals) - -43% full / -28% status, documents 67.8% (long unrepeated prose). Fifth (i6):
   editor/cueedit/mirror/rce/lib-modals/remote (ids 86-99; first self-recursive message EdLayer,
   first root promotion LibGFLive) - editor -58% full at 28.0% doc ratio (best), #ce-topbar -55%
-  (the drag hot path), fuzz 1 521 095 cases. Registry: `zigui_wire_b7_test.go`.
-  Still JSON-bridged: dialogs_a(7), publish remote(1),
-  automations editor/runnow/schedules(3), update flow(1). Detail: ZIG_UI_GUIDE.md "Phase B - B7".
+  (the drag hot path). Seventh (i7): dialogs_a + automations dialogs + publish-remote +
+  update-flow (ids 102-113; UpdFlow promoted nested→root, AeBlock discriminated form-block kit) -
+  schedule editor -75% (123.0→31.1 µs, biggest win of the fan-out), preset editor -52%, aeModal
+  documents 49.2%, fuzz 1 957 775 cases. **B7 fan-out COMPLETE**: 347 messages, hash 0x51e1ae8b,
+  ZERO JSON-only bridges left - every v1 renderer survives only as the in-switch fallback + golden
+  gate. Registry: `zigui_wire_b7_test.go`. Detail: ZIG_UI_GUIDE.md "Phase B - B7".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

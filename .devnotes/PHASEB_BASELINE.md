@@ -230,6 +230,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | worlds `#world-st-<key>` frag | 1 564 | 1 128 | **-28%** | (per publish action) |
 | editor (full view) | 65 978 | 27 806 | **-58%** | 11 193 / 40 025 = 28.0% |
 | cue-edit `#ce-topbar` frag | 6 430 | 2 876 | **-55%** | (re-rendered during drag) |
+| schedule editor (asModal, "daily") | 122 965 | 31 066 | **-75%** | (AeBlock kit; biggest win of the fan-out) |
+| export preset editor (DlgPreset, "video") | 47 648 | 22 799 | **-52%** | aeModal set: 68 892 / 140 051 = 49.2% |
 
 ## Gaps / caveats
 

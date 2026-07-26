@@ -339,6 +339,18 @@ const uint8_t *rz_ui_render_libfix_gflive_v2(const uint8_t *state, size_t len, s
 const uint8_t *rz_ui_render_lib_smartmodal_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_lib_relocmodal_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_libremote_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_choice_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_txtexport_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_exportprev_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_rename_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_fix_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_preset_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_dlg_patmgr_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_runnow_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_auto_schedule_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_publish_remote_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_settings_updflow_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

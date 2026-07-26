@@ -1523,6 +1523,92 @@ func RenderLibRemoteV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: dialogs_a + automations dialogs + publish-remote + update-flow ──
+
+// RenderDlgChoiceV2 renders a choice dialog from an RZW1 document.
+func RenderDlgChoiceV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_choice_v2(p, l, n)
+	})
+}
+
+// RenderDlgTxtExportV2 renders the tracklist text-export dialog from an RZW1 document.
+func RenderDlgTxtExportV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_txtexport_v2(p, l, n)
+	})
+}
+
+// RenderDlgExportPrevV2 renders the tracklist-export preview from an RZW1 document.
+func RenderDlgExportPrevV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_exportprev_v2(p, l, n)
+	})
+}
+
+// RenderDlgRenameV2 renders the rename-set dialog from an RZW1 document.
+func RenderDlgRenameV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_rename_v2(p, l, n)
+	})
+}
+
+// RenderDlgFixV2 renders the time-fix preview dialog from an RZW1 document.
+func RenderDlgFixV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_fix_v2(p, l, n)
+	})
+}
+
+// RenderDlgPresetV2 renders the export preset editor from an RZW1 document.
+func RenderDlgPresetV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_preset_v2(p, l, n)
+	})
+}
+
+// RenderDlgPatMgrV2 renders the manage-patterns dialog from an RZW1 document.
+func RenderDlgPatMgrV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_patmgr_v2(p, l, n)
+	})
+}
+
+// RenderAutoEditorV2 renders the automation-editor dialog from an RZW1 document.
+func RenderAutoEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_editor_v2(p, l, n)
+	})
+}
+
+// RenderAutoRunNowV2 renders the run-now dialog from an RZW1 document.
+func RenderAutoRunNowV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_runnow_v2(p, l, n)
+	})
+}
+
+// RenderAutoScheduleV2 renders the schedule-editor dialog from an RZW1 document.
+func RenderAutoScheduleV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_schedule_v2(p, l, n)
+	})
+}
+
+// RenderPublishRemoteV2 renders the remote Publish view from an RZW1 document.
+func RenderPublishRemoteV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_remote_v2(p, l, n)
+	})
+}
+
+// RenderSettingsUpdFlowV2 renders the #inst-update region from an RZW1 document.
+func RenderSettingsUpdFlowV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_updflow_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

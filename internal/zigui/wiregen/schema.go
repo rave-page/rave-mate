@@ -409,8 +409,11 @@ var schema = []msg{
 		fs: []field{st(1, "St", "st", "UiStatus"), st(2, "Studio", "studio", "UiToggle"), s(3, "Tip", "tip"), b(4, "HasGate", "hasGate"), s(5, "GateTitle", "gateTitle"), st(6, "Gate", "gate", "BridgeGate"), op(7, "TipS", "tipSt", "Tip")},
 	},
 	{
-		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow",
-		fs: []field{s(1, "Kind", "kind"), s(2, "Tone", "tone"), s(3, "Text", "text"), b(4, "HasNotes", "hasNotes"), s(5, "Notes", "notes"), s(6, "Err", "err"), s(7, "Pct", "pct"), s(8, "Cap", "cap"), b(9, "HasBtn", "hasBtn"), st(10, "Btn", "btn", "UiBtn")},
+		// i7 promoted UpdFlow to a root (id 113): #inst-update patches standalone. Field
+		// numbers untouched, so embedded wire bytes are unchanged.
+		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow", id: 113,
+		doc: "#inst-update region (self-update check/apply flow)",
+		fs:  []field{s(1, "Kind", "kind"), s(2, "Tone", "tone"), s(3, "Text", "text"), b(4, "HasNotes", "hasNotes"), s(5, "Notes", "notes"), s(6, "Err", "err"), s(7, "Pct", "pct"), s(8, "Cap", "cap"), b(9, "HasBtn", "hasBtn"), st(10, "Btn", "btn", "UiBtn")},
 	},
 	{
 		name: "SetBlock", goT: "setBlock", zigT: "settings.Block",
@@ -1521,6 +1524,115 @@ var schema = []msg{
 		doc: "'Controlling [peer]' target switcher row",
 		fs:  []field{b(1, "Show", "show"), st(2, "Sel", "sel", "SelState")},
 	},
+	// dialogs_a + automations dialogs + publish-remote + update-flow (i7): the LAST JSON
+	// bridges. Roots 102-108 dialogs_a (7 modals), 109-111 automations editor/run-now/schedule,
+	// 112 remote Publish view, 113 #inst-update region. AeBlock is the discriminated form-block
+	// kit (kind names which fields are read - all cross the wire, zero-cost for absent ones);
+	// DlgField/ArFoot/AeStep ride under it. Shared messages (UiBtn/UiKV/UiField/UiToggle/
+	// LibPBField/LibSelTip/LibChip/LibHint/Loud/SelState/Tip/SsLabel) are reused, not re-keyed.
+	{
+		name: "DlgChoice", goT: "dlgChoiceSt", zigT: "c.Choice", id: 102,
+		doc: "generic choice dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Msg", "msg"), b(3, "MsgRaw", "msgRaw"), b(4, "HasMsg", "hasMsg"), li(5, "Btns", "btns", "UiBtn"), b(6, "InBody", "inBody")},
+	},
+	{
+		name: "DlgTxtExport", goT: "pubTxtDlgSt", zigT: "dialogs_a.TxtExport", id: 103,
+		doc: "tracklist text-export dialog",
+		fs:  []field{s(1, "Title", "title"), st(2, "Sel", "sel", "SelState"), st(3, "Tmpl", "tmpl", "UiField"), st(4, "Header", "header", "UiToggle"), s(5, "Place", "place"), s(6, "Content", "content"), s(7, "CopyLbl", "copyLbl"), s(8, "CloseLbl", "closeLbl")},
+	},
+	{
+		name: "DlgExportPrev", goT: "pubExpDlgSt", zigT: "dialogs_a.ExportPrev", id: 104,
+		doc: "tracklist-export preview (CSV/JSON; also the remote arm)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Note", "note"), s(3, "Content", "content"), s(4, "CopyLbl", "copyLbl"), s(5, "CloseLbl", "closeLbl")},
+	},
+	{
+		name: "DlgRename", goT: "pubRenameDlgSt", zigT: "dialogs_a.Rename", id: 105,
+		doc: "rename-set form dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "ID", "id"), s(3, "NameLbl", "nameLbl"), s(4, "NameDL", "nameDL"), s(5, "Cur", "cur"), s(6, "Submit", "submit")},
+	},
+	{
+		name: "PubFixRow", goT: "pubFixRowSt", zigT: "dialogs_a.FixRow",
+		fs: []field{s(1, "Num", "num"), s(2, "Off", "off"), s(3, "NewOff", "newOff"), b(4, "Removed", "removed"), s(5, "Label", "label")},
+	},
+	{
+		name: "DlgFix", goT: "pubFixDlgSt", zigT: "dialogs_a.Fix", id: 106,
+		doc: "capture-aligned time-fix preview",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), b(3, "HasOpener", "hasOpener"), st(4, "Opener", "opener", "SelState"), s(5, "SetStartLbl", "setStartLbl"), s(6, "StartT", "startT"), s(7, "NewT", "newT"), li(8, "Rows", "rows", "PubFixRow"), s(9, "RemovedTx", "removedTx"), s(10, "ApplyLbl", "applyLbl"), s(11, "ApplyAct", "applyAct"), s(12, "CancelLbl", "cancelLbl")},
+	},
+	{
+		name: "DlgPreset", goT: "mpPresetDlgSt", zigT: "dialogs_a.Preset", id: 107,
+		doc: "export preset editor",
+		fs:  []field{s(1, "Title", "title"), st(2, "IDField", "idField", "LibPBField"), st(3, "LabelField", "labelField", "LibPBField"), b(4, "HasSrc", "hasSrc"), s(5, "SrcHint", "srcHint"), st(6, "Container", "container", "LibSelTip"), b(7, "HasVideo", "hasVideo"), st(8, "VCodec", "vcodec", "LibSelTip"), b(9, "HasVEnc", "hasVEnc"), st(10, "Accel", "accel", "SelState"), st(11, "RateMode", "rateMode", "LibSelTip"), st(12, "RateField", "rateField", "LibPBField"), st(13, "Res", "res", "SelState"), st(14, "FPS", "fps", "LibPBField"), st(15, "ACodec", "acodec", "LibSelTip"), b(16, "HasLadder", "hasLadder"), b(17, "HasVBRTgl", "hasVbrTgl"), st(18, "VBR", "vbr", "UiToggle"), b(19, "HasVBRQ", "hasVbrq"), st(20, "VBRQ", "vbrq", "SelState"), b(21, "HasChips", "hasChips"), s(22, "BitrateLbl", "bitrateLbl"), li(23, "Chips", "chips", "LibChip"), s(24, "MaxHint", "maxHint"), b(25, "HasLossles", "hasLossless"), s(26, "LosslessTx", "losslessTx"), st(27, "Channels", "channels", "SelState"), st(28, "SampleRate", "samplerate", "SelState"), st(29, "Loud", "loud", "Loud"), li(30, "Warns", "warns", "LibHint"), li(31, "Foot", "foot", "UiBtn")},
+	},
+	{
+		name: "CePatRow", goT: "cePatRowSt", zigT: "dialogs_a.PatRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), s(3, "Meta", "meta"), b(4, "OwGated", "owGated"), s(5, "OwLbl", "owLbl"), s(6, "OwWhy", "owWhy"), s(7, "DelLbl", "delLbl")},
+	},
+	{
+		name: "DlgPatMgr", goT: "cePatMgrSt", zigT: "dialogs_a.PatMgr", id: 108,
+		doc: "manage-patterns dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "Gone", "gone"), s(3, "GoneTx", "goneTx"), b(4, "HasEmpty", "hasEmpty"), s(5, "EmptyTx", "emptyTx"), li(6, "Pats", "pats", "CePatRow"), s(7, "RenameLbl", "renameLbl"), s(8, "Note", "note")},
+	},
+	{
+		name: "DlgField", goT: "dlgFieldSt", zigT: "dialogs_b.DlgField",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Value", "value"), s(5, "Type", "inputType"), s(6, "PH", "ph"), s(7, "Tip", "tip"), op(8, "TipS", "tipSt", "Tip")},
+	},
+	{
+		name: "AeBlock", goT: "aeBlockSt", zigT: "dialogs_b.AeBlock",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Field", "field", "DlgField"), st(3, "Field2", "field2", "DlgField"), st(4, "Btn", "btn", "UiBtn"), st(5, "Toggle", "toggle", "UiToggle"), st(6, "Sel", "sel", "SelState"), st(7, "Sel2", "sel2", "SelState"), s(8, "LabelHTML", "labelHtml"), op(9, "Label", "labelSt", "SsLabel"), s(10, "Tone", "tone"), s(11, "Text", "text"), s(12, "Tip", "tip"), op(13, "TipS", "tipSt", "Tip"), st(14, "Loud", "loud", "Loud")},
+	},
+	{
+		name: "AeStep", goT: "aeStepSt", zigT: "dialogs_b.AeStep",
+		fs: []field{s(1, "Title", "title"), li(2, "Trail", "trail", "UiBtn"), s(3, "Desc", "desc"), li(4, "Blocks", "blocks", "AeBlock")},
+	},
+	{
+		name: "AutoEditor", goT: "aeModalSt", zigT: "dialogs_b.AeModal", id: 109,
+		doc: "automation-editor dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Ident", "ident", "AeBlock"), s(5, "SecMatch", "secMatch"), li(6, "Match", "match", "AeBlock"), s(7, "SecActions", "secActions"), b(8, "NoSteps", "noSteps"), s(9, "NoStepsMsg", "noStepsMsg"), li(10, "Steps", "steps", "AeStep"), li(11, "Add", "add", "UiBtn"), b(12, "HasVerdict", "hasVerdict"), s(13, "Verdict", "verdict"), s(14, "Save", "save"), s(15, "Cancel", "cancel")},
+	},
+	{
+		name: "ArFoot", goT: "arFootSt", zigT: "dialogs_b.ArFoot",
+		fs: []field{b(1, "Gated", "gated"), s(2, "Label", "label"), s(3, "Why", "why"), s(4, "Variant", "variant"), s(5, "Cancel", "cancel")},
+	},
+	{
+		name: "AutoRunNow", goT: "arModalSt", zigT: "dialogs_b.ArModal", id: 110,
+		doc: "automation run-now dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot")},
+	},
+	{
+		name: "AutoSchedule", goT: "asModalSt", zigT: "dialogs_b.AsModal", id: 111,
+		doc: "schedule-editor dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Head", "head", "AeBlock"), s(5, "SecTrigger", "secTrigger"), li(6, "Trigger", "trigger", "AeBlock"), s(7, "SecGates", "secGates"), li(8, "Gates", "gates", "AeBlock"), s(9, "Save", "save"), s(10, "Cancel", "cancel")},
+	},
+	{
+		name: "PubRemRow", goT: "pubRemRowSt", zigT: "publish.RemRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Sub", "sub"), b(4, "Sel", "sel")},
+	},
+	{
+		name: "PubRemList", goT: "pubRemListSt", zigT: "publish.RemList",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Count", "count"), s(3, "Note", "note"), li(4, "Rows", "rows", "PubRemRow")},
+	},
+	{
+		name: "PubRemTrack", goT: "pubRemTrackSt", zigT: "publish.RemTrack",
+		fs: []field{u(1, "Num", "num"), s(2, "Off", "off"), s(3, "Label", "label")},
+	},
+	{
+		name: "PubRemTl", goT: "pubRemTlSt", zigT: "publish.RemTl",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Hint", "hint"), s(3, "Note", "note"), li(4, "Rows", "rows", "PubRemTrack")},
+	},
+	{
+		name: "PubRemCaps", goT: "pubRemCapsSt", zigT: "publish.RemCaps",
+		fs: []field{s(1, "Hint", "hint"), s(2, "Note", "note"), sl(3, "Caps", "caps")},
+	},
+	{
+		name: "PubRemDetail", goT: "pubRemDetailSt", zigT: "publish.RemDetail",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "Sel", "sel"), s(3, "Hint", "hint"), s(4, "Name", "name"), s(5, "Meta", "meta"), li(6, "Actions", "actions", "UiBtn"), s(7, "Active", "active"), s(8, "CapsLbl", "capsLbl"), s(9, "TracksLbl", "tracksLbl"), st(10, "Tl", "tl", "PubRemTl"), st(11, "Caps", "caps", "PubRemCaps")},
+	},
+	{
+		name: "PublishRemote", goT: "pubRemSt", zigT: "publish.Remote", id: 112,
+		doc: "remote Publish view (peer sets + tracklist)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Switcher", "switcher"), s(4, "Hint", "hint"), st(5, "List", "list", "PubRemList"), st(6, "Detail", "detail", "PubRemDetail")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -1586,6 +1698,7 @@ var zigImports = [][2]string{
 	{"uimap", "midictl_uimap.zig"},
 	{"midimon", "midimon.zig"},
 	{"dialogs_b", "dialogs_b.zig"},
+	{"dialogs_a", "dialogs_a.zig"},
 	{"vrchat", "vrchat.zig"},
 	{"vrcgroups", "vrcgroups.zig"},
 	{"worlds", "worlds.zig"},

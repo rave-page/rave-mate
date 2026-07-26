@@ -225,7 +225,8 @@ func (u *UI) arModalHTML() string {
 func (u *UI) arModalHTMLLocked(s *arSt) string {
 	st := arModalState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderAutoRunNow(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAutoRunNowV2", wireAutoRunNow(st), zigui.RenderAutoRunNowV2,
+			zigui.RenderAutoRunNow, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
