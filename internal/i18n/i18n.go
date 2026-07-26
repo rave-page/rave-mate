@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 //go:embed locales/*.json
@@ -21,20 +22,44 @@ var localesFS embed.FS
 const defaultLocale = "en"
 
 var (
-	mu      sync.RWMutex
-	catalog = map[string]map[string]string{} // locale → flatKey → value
-	active  = defaultLocale
-	loaded  bool
+	mu       sync.RWMutex                     // guards catalog + active (WRITES: load, SetLocale)
+	catalog  = map[string]map[string]string{} // locale → flatKey → value
+	active   = defaultLocale
+	loadOnce sync.Once
 )
 
-// load parses every embedded locale once. Safe to call repeatedly.
-func load() {
+// Read fast path. A render pass resolves hundreds of keys (~400 in the settings state build alone)
+// and every one used to take mu.RLock; these three snapshots let lookup run lock-free. They are
+// published as ONE consistent set under mu by publish(), and a resolver reads them in any order:
+// the maps are immutable after load, so the worst a racing locale switch can do is resolve one
+// string under the outgoing locale - which is exactly what the RLock version did too, and what the
+// retained-doc locale generation (B7 ii) exists to catch.
+var (
+	fastCur  atomic.Pointer[map[string]string] // active locale's flat map (nil until load)
+	fastEn   atomic.Pointer[map[string]string] // en fallback
+	fastCode atomic.Pointer[string]            // active locale code
+)
+
+// publish refreshes the lock-free snapshots. Call with mu held.
+func publish() {
+	cur := catalog[active]
+	en := catalog[defaultLocale]
+	fastCur.Store(&cur)
+	fastEn.Store(&en)
+	code := active
+	fastCode.Store(&code)
+}
+
+// load parses every embedded locale once. Safe to call repeatedly - and it must be CHEAP to call
+// repeatedly: T/Tn call it on every lookup and a single render pass resolves hundreds of keys
+// (~400 in the settings state build alone). sync.Once settles to one atomic load; the mutex-guarded
+// bool it replaced took the EXCLUSIVE lock every call just to read a flag, which cost ~10 ns of a
+// 31 ns T() and made concurrent resolvers serialize on a writer that never writes.
+func load() { loadOnce.Do(loadCatalogs) }
+
+func loadCatalogs() {
 	mu.Lock()
 	defer mu.Unlock()
-	if loaded {
-		return
-	}
-	loaded = true
 	ents, _ := localesFS.ReadDir("locales")
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -51,6 +76,7 @@ func load() {
 		}
 		catalog[code] = flat
 	}
+	publish()
 }
 
 // parseCatalog decodes a locale JSON and flattens nested objects to dotted keys.
@@ -125,14 +151,17 @@ func SetLocale(tag string) string {
 		code = defaultLocale
 	}
 	active = code
+	publish()
 	return code
 }
 
-// Current returns the active locale code.
+// Current returns the active locale code (lock-free; Tn calls it per plural resolution).
 func Current() string {
-	mu.RLock()
-	defer mu.RUnlock()
-	return active
+	load()
+	if p := fastCode.Load(); p != nil {
+		return *p
+	}
+	return defaultLocale
 }
 
 // LocaleInfo is a selectable locale (code + human display name) for the language switcher.
@@ -166,20 +195,17 @@ func Available() []LocaleInfo {
 	return out
 }
 
-// lookup resolves key against active → en, returning ("", false) if neither has it.
+// lookup resolves key against active → en, returning ("", false) if neither has it. Lock-free:
+// it reads the immutable snapshots publish() installed (see the fast-path comment above).
 func lookup(key string) (string, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if m := catalog[active]; m != nil {
-		if v, ok := m[key]; ok {
+	if p := fastCur.Load(); p != nil && *p != nil {
+		if v, ok := (*p)[key]; ok {
 			return v, true
 		}
 	}
-	if active != defaultLocale {
-		if m := catalog[defaultLocale]; m != nil {
-			if v, ok := m[key]; ok {
-				return v, true
-			}
+	if p := fastEn.Load(); p != nil && *p != nil {
+		if v, ok := (*p)[key]; ok {
+			return v, true
 		}
 	}
 	return "", false

@@ -331,6 +331,69 @@ config — `lib-import-do:traktor` into the isolated config dir is part of the r
    most of the retained cost; a merge that defers the copy to the fields the delta leaves alone would
    move every row in this table.
 
+## Phase B7 (iii): i18n — what it costs, and what a catalog handshake would have bought
+
+Decision record: `.devnotes/B7_I18N_CATALOG_DESIGN.md`. Two measurements, one shipped fix.
+
+### 1. i18n share of a document (827 golden documents, generic RZW1 walk)
+
+Distinct arena strings per document, classified against the en catalog (3529 keys). Deduped arena
+bytes are the denominator — that is what a document pays.
+
+| | bytes | share |
+|---|--:|--:|
+| documents | 2 439 445 | |
+| strings arena | 2 100 564 | 86.1% of doc |
+| i18n exact values | 244 871 (10 341 strings) | |
+| + interpolated templates | 15 401 (575 strings) | |
+| **i18n total** | **260 272** | **12.4% of arena · 10.7% of doc · 25.8% of distinct strings** |
+
+Per family, the distribution is upside down for a hot path: settings **41.1%** and worlds modals
+**48.1%** (both rendered on demand) vs player **4.6%**, live cockpit **1.0%**, live tick **1.8%**.
+
+Method note: template matching needs guards or it lies. Requiring only "literal chunks in order"
+lets `"{a} · {b}"` match the player's 29 kB SVG and reports 78% instead of 4.6%. Anchor the leading
+literal at the start and the trailing one at the end, require a >= 6 B literal run and a bounded
+fill.
+
+### 2. What a byte cut is worth here — already answered by (ii)
+
+`#ce-topbar` retained deltas are **1.3% of the full document** (98.7% cut) for **+0.8% / -4.5%**
+dispatch. The seam is not byte-bound: encode is ~28% of dispatch (B-1: 44 µs of 158 µs on the log
+tail) and the arena is a part of that. A 10.7% document cut therefore lands at ~1-3% of dispatch —
+below the noise floor, before counting the reverse lookup the encoder would pay per string.
+
+### 3. i18n's real cost, and the fix (shipped)
+
+`internal/i18n` had NO benchmarks. Baseline + after, Ryzen 9 5950X, min of 3 × `-count=2/3`:
+
+| | before | after | Δ |
+|---|--:|--:|--:|
+| `T` (plain key) | 31.4 ns | 12.9 ns | **-59%** |
+| `lookup` alone | 21.4 ns | 9.9 ns | -54% |
+| `T`, 32 goroutines | 71.0 ns | 0.90 ns | **-99%** |
+| `Tn` | 192 ns | 161 ns | -16% |
+| `T` + `{interpolation}` | 163 ns | 144 ns | -12% |
+| 400-key state-build shape | 13.5 µs | 5.4 µs | **-57%** |
+| settings state build (seam) | ~100 µs | ~100 µs | ~7 µs, below noise |
+
+Causes: `load()` took the **exclusive** mutex on every `T`/`Tn` to read a bool (~10 ns of 31, and it
+serialized concurrent resolvers behind a writer that never writes), and `lookup` took `mu.RLock` per
+key although the catalogs are immutable after load. Fix: `sync.Once` + three atomic snapshots
+published together under `mu`.
+
+### Findings
+
+1. **The i18n win on this seam is a concurrency win, not a bytes win.** Per-call cost more than
+   halved and the 32-goroutine number went 71 → 0.9 ns, but the settings state build barely moved:
+   ~400 keys × 19 ns saved is ~7 µs of ~100 µs. Ticks, probes and the act worker all resolve strings
+   from different goroutines — that is where the writer lock was actually hurting.
+2. **A catalog handshake would optimize the documents that are not the problem.** 41-48% i18n share
+   exists only on on-demand surfaces; every ~1 Hz surface is 1-5% i18n.
+3. **A shrinking document does not make this seam faster.** (ii) proved it at 98.7%; (iii) would
+   have attempted it at 10.7%. Any future "make the documents smaller" proposal needs to clear this
+   bar first.
+
 ## Gaps / caveats
 
 - Fixtures for the 10 tagged tabs were NOT moved out of their `//go:build zigui` golden files -
