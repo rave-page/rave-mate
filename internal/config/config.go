@@ -14,6 +14,8 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
+	"testing"
 	"time"
 
 	"rave.page/mate/internal/cameraosc"
@@ -2412,6 +2414,14 @@ func Dir() (string, error) {
 		}
 		return v, nil
 	}
+	if testing.Testing() {
+		// Tests must NEVER touch the real per-user config dir. 2026-07-26 incident: webui
+		// test fixtures with a zero svc.Cfg exercised saveCfgBG, and every local
+		// `go test ./internal/webui` overwrote the developer's REAL config.json with zeros
+		// (the "settings wipe" bug). Any test not setting RAVE_MATE_CONFIG_DIR gets a
+		// per-process throwaway dir instead.
+		return testDir()
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -2421,6 +2431,20 @@ func Dir() (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+var (
+	testDirOnce sync.Once
+	testDirPath string
+	testDirErr  error
+)
+
+// testDir lazily creates one throwaway config dir per test process.
+func testDir() (string, error) {
+	testDirOnce.Do(func() {
+		testDirPath, testDirErr = os.MkdirTemp("", "rave-mate-test-cfg-")
+	})
+	return testDirPath, testDirErr
 }
 
 // DataPath joins name onto the app config dir.
