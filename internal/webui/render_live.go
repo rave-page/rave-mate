@@ -11,7 +11,6 @@ import (
 
 	"rave.page/mate/internal/audiorec"
 	"rave.page/mate/internal/i18n"
-	"rave.page/mate/internal/midi"
 	"rave.page/mate/internal/peerbridge"
 	"rave.page/mate/internal/session"
 	"rave.page/mate/internal/zigui"
@@ -817,15 +816,15 @@ func (u *UI) liveSignalsState() liveSignalsSt {
 	}
 	// ravemidi managed-controller bind health: an unbound input = the driver lost the
 	// hardware (another app grabbed it?) = EQ/filter silently dead. Say it HERE.
-	if midi.DriverInstalled() {
-		if sts, err := midi.QueryDriverInputs(); err == nil {
-			for _, dst := range sts {
-				v := i18n.T("live.signals.driverBound")
-				if !dst.Bound {
-					v = i18n.T("live.signals.driverUnbound", i18n.A{"retries": fmt.Sprint(dst.RetryCount)})
-				}
-				st.Rows = append(st.Rows, liveRow(dst.Name, v))
+	// Read from the cached probe snapshot - NEVER driver ioctls inline on the render
+	// goroutine (actWorker no-blocking rule; see midictl_probe.go).
+	if probe := u.midiCtlProbeSnapshot(); probe.drvInstalled {
+		for _, dst := range probe.drvInputs {
+			v := i18n.T("live.signals.driverBound")
+			if !dst.Bound {
+				v = i18n.T("live.signals.driverUnbound", i18n.A{"retries": fmt.Sprint(dst.RetryCount)})
 			}
+			st.Rows = append(st.Rows, liveRow(dst.Name, v))
 		}
 	}
 	if u.svc.MIDISource != nil {
