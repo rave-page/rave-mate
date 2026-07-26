@@ -55,10 +55,12 @@ type Options struct {
 	SameHost func(peer string) bool // §3 same-PC guard; nil = no guard
 
 	// Test seams (default: videoshare Spout backend).
-	ListSenders func() []string
-	SenderSize  func(name string) (w, h int, ok bool)
-	OpenSource  func(name string, w, h int) (medialink.Source, error)
-	OpenSink    func(name string, w, h int) (medialink.Sink, error)
+	ListSenders  func() []string
+	SenderSize   func(name string) (w, h int, ok bool)
+	OpenSource   func(name string, w, h int) (medialink.Source, error)
+	OpenSink     func(name string, w, h int) (medialink.Sink, error)
+	OpenReceiver func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
+	PutPix       func([]byte)                                                        // pooled-buffer recycler
 }
 
 // Receive is one requested receive route (UI listing + sink cleanup bookkeeping).
@@ -82,6 +84,7 @@ type Manager struct {
 	senderSize  func(string) (int, int, bool)
 	openSource  func(string, int, int) (medialink.Source, error)
 	openSink    func(string, int, int) (medialink.Sink, error)
+	hub         *captureHub // one capture per Spout source, fanned out to N routes
 
 	mu       sync.Mutex
 	shared   map[string]medialink.SourceDesc // sender name → advertised desc
@@ -96,6 +99,7 @@ func New(o Options) *Manager {
 		openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 	}
+	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
 	if m.listSenders == nil {
 		m.listSenders = videoshare.ListSenders
 	}
@@ -361,25 +365,24 @@ func encoderCodec(enc string) string {
 
 // ── videoshare-backed source/sink ─────────────────────────────────────────────
 
-// spoutSource adapts a FrameReceiver to a medialink Source. Frames carry a Release hook
-// (pooled capture buffers); the sender-side fps cap drops over-budget frames here, before
-// any encode/crypto cost.
+// spoutSource adapts a shared capture subscription to a medialink Source. Frames carry a Release
+// hook (refcounted pooled capture buffer); the per-route fps cap drops over-budget frames here,
+// before any encode/crypto cost - the readback itself is already capped inside the receiver
+// (videoshare.RecvOptions.MaxFPS), which is what actually bounds sender bandwidth.
 type spoutSource struct {
-	recv   videoshare.FrameReceiver
+	feed   captureFeed
 	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
 	last   time.Time
 }
 
 func (m *Manager) openSpoutSource(name string, _, _ int) (medialink.Source, error) {
 	fps := m.cfg().FPSCap()
-	// The cap goes INTO the receiver: an over-budget poll skips ReceiveImage entirely, so a 120 fps
-	// VJ source capped to 60 pays 60 GPU→CPU readbacks/s instead of 120. The gate below stays as the
-	// downstream guard (shared capture runs at the fastest route's rate; slower routes drop here).
-	recv, err := videoshare.NewFrameReceiverOpts(m.log, name, videoshare.RecvOptions{MaxFPS: float64(fps)})
+	// Shared capture: N routes on the same Spout sender fan out from ONE readback (see capture.go).
+	sub, err := m.hub.attach(name, float64(fps))
 	if err != nil {
 		return nil, err
 	}
-	s := &spoutSource{recv: recv}
+	s := &spoutSource{feed: sub}
 	if fps > 0 {
 		s.minGap = time.Duration(float64(time.Second) / float64(fps))
 	}
@@ -391,26 +394,26 @@ func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case img, ok := <-s.recv.Frames():
+		case f, ok := <-s.feed.frames():
 			if !ok {
-				return nil, io.EOF // receiver closed - route ends cleanly
+				return nil, io.EOF // capture ended - route ends cleanly
 			}
 			if s.minGap > 0 {
 				now := time.Now()
 				if now.Sub(s.last) < s.minGap {
-					videoshare.PutPix(img.Pix) // over the fps budget - recycle + wait for the next
+					f.ref.release() // over this route's fps budget - drop our reference
 					continue
 				}
 				s.last = now
 			}
-			pix := img.Pix
+			ref := f.ref
 			return &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA,
-				Payload: pix, Release: func() { videoshare.PutPix(pix) }}, nil
+				Payload: f.img.Pix, Release: ref.release}, nil
 		}
 	}
 }
 
-func (s *spoutSource) Close() error { s.recv.Close(); return nil }
+func (s *spoutSource) Close() error { s.feed.close(); return nil }
 
 // spoutSink presents decoded frames as a named local Spout sender. Write is called serially by the
 // route's jitter drain, so the diagnostic counters need no locking.
