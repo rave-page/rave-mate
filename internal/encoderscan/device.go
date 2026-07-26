@@ -32,6 +32,13 @@ func NormalizePolicy(p string) string {
 	}
 }
 
+// AdapterInfo is one enumerated GPU adapter.
+type AdapterInfo struct {
+	LUID        string  // "0xHIGH_0xLOW" lowercased - matches parseGPUEngineInstance's luid key
+	Name        string  // adapter description ("NVIDIA GeForce RTX 3060", "AMD Radeon ...")
+	VRAMTotalMB float64 // dedicated video memory MB (0 = unknown / software adapter)
+}
+
 // Adapters returns the machine's hardware GPU adapters in DXGI order. Empty off Windows or when
 // DXGI fails - callers then fall back to PolicyAuto (no device pinning).
 func Adapters() []AdapterInfo {

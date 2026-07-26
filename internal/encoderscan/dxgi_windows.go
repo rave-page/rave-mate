@@ -48,13 +48,6 @@ type dxgiAdapterDesc1 struct {
 	Flags uint32
 }
 
-// AdapterInfo is one enumerated GPU adapter.
-type AdapterInfo struct {
-	LUID        string  // "0xHIGH_0xLOW" lowercased - matches parseGPUEngineInstance's luid key
-	Name        string  // adapter description ("NVIDIA GeForce RTX 3060", "AMD Radeon ...")
-	VRAMTotalMB float64 // dedicated video memory MB (0 = unknown / software adapter)
-}
-
 // vtbl reads the i-th method pointer from a COM object's vtable (obj → *vtable → methods[i]).
 // Uses unsafe.Slice over the native vtable (no uintptr→pointer arithmetic - COM objects are native
 // allocations the Go GC never moves).

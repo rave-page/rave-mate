@@ -134,15 +134,21 @@ func TestProbeSingleFlightIsPerProbe(t *testing.T) {
 	for atomic.LoadInt32(&slow) == 0 { // wait for the slow probe to be in flight
 		time.Sleep(time.Millisecond)
 	}
-	for i := 0; i < 5; i++ { // five more demand kicks while it blocks
-		u.kickProbes()
-		time.Sleep(2 * time.Millisecond)
+	// Five more fast re-runs while slow blocks. Kick until each lands (a kick is a no-op while
+	// the previous fast goroutine still holds its slot, so fixed sleeps flake on loaded runners).
+	for target := int32(2); target <= 6; target++ {
+		deadline := time.Now().Add(10 * time.Second)
+		for atomic.LoadInt32(&fast) < target {
+			if time.Now().After(deadline) {
+				t.Fatalf("fast probe stuck at %d runs, want %d (blocked probe held it back?)",
+					atomic.LoadInt32(&fast), target)
+			}
+			u.kickProbes()
+			time.Sleep(time.Millisecond)
+		}
 	}
 	if got := atomic.LoadInt32(&slow); got != 1 {
 		t.Errorf("slow probe ran %d times, want 1 (its guard IS the rate limit)", got)
-	}
-	if got := atomic.LoadInt32(&fast); got < 5 {
-		t.Errorf("fast probe ran %d times, want >=5 (no TTL, no shared busy flag)", got)
 	}
 	close(release)
 	waitProbesIdle(t, u, 10*time.Second)
