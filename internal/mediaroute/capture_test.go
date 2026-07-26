@@ -3,6 +3,7 @@ package mediaroute
 import (
 	"context"
 	"image"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -416,4 +417,63 @@ func TestCaptureChurnNoDoubleRelease(t *testing.T) {
 		t.Fatalf("pool churn: given=%d freedOnce=%d missing=%d doubled=%d", given, freed, missing, doubled)
 	}
 	t.Logf("churn: %d buffers, all recycled exactly once", given)
+}
+
+// TestCapture4KSteadyStateNoAllocs is the OOM regression on the capture fan-out: drive N
+// synthetic 3840x2160 frames through hub → captureSub → spoutSource (what runSend consumes)
+// against the REAL videoshare pool and assert steady-state allocations near zero per frame.
+// A single missed frame buffer is 31.6 MiB - at 60 fps that is 2 GB/s of garbage, which is
+// what made the media child lose to its GOMEMLIMIT and die under the 2 GB job cap.
+func TestCapture4KSteadyStateNoAllocs(t *testing.T) {
+	const w, h = 3840, 2160
+	const size = w * h * 4
+	const frames = 120
+
+	recv := newFakeRecv()
+	hub := newCaptureHub(logbus.New(64), func(string, float64) (videoshare.FrameReceiver, error) {
+		return recv, nil
+	}, videoshare.PutPix) // the real pool, not the poison seam
+	sub, err := hub.attach("OBS", 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &spoutSource{feed: sub}
+	ctx := context.Background()
+
+	// The receiver hands over its readback buffer and takes a fresh pooled one; model that
+	// exactly, so the pool sees the production get/put pattern.
+	pump := func() {
+		b := videoshare.GetPixForTest(size)
+		recv.ch <- &image.NRGBA{Pix: b, Stride: w * 4, Rect: image.Rect(0, 0, w, h)}
+	}
+	pump() // prime
+	f, err := src.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Release()
+
+	var m0, m1 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+	for i := 0; i < frames; i++ {
+		pump()
+		f, err := src.Next(ctx)
+		if err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+		if len(f.Payload) != size {
+			t.Fatalf("frame %d payload %d bytes, want %d", i, len(f.Payload), size)
+		}
+		f.Release()
+	}
+	runtime.ReadMemStats(&m1)
+	perFrame := float64(m1.TotalAlloc-m0.TotalAlloc) / frames
+	if perFrame > 16*1024 { // bookkeeping only; a missed frame buffer is 31.6 MiB
+		t.Fatalf("capture path allocated %.0f B/frame over %d 4K frames, want ~0 (one frame is %d B)",
+			perFrame, frames, size)
+	}
+	live, idle, bufs := videoshare.PoolStats()
+	t.Logf("4K fan-out: %.0f B/frame over %d frames; pool live=%dMB idle=%dMB bufs=%d",
+		perFrame, frames, live>>20, idle>>20, bufs)
+	sub.close()
 }
