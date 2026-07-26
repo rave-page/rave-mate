@@ -284,6 +284,12 @@ func (u *UI) ssPick(id, val string) {
 	st, act := ssSts[id], ssActs[id]
 	if st != nil {
 		st.open = false
+		// Optimistic cur: the dispatched act persists exactly this value, but nothing
+		// re-renders surfaces like settings after applySet - without this the control
+		// keeps showing the OLD value until the next full tab render (user-visible
+		// "select doesn't change"). A full render re-derives cur from config, so a
+		// handler that rejects the value self-corrects there.
+		ssCurs[id] = val
 	}
 	ssMu.Unlock()
 	if st == nil { // unknown id - no state, no act, no DOM
@@ -292,9 +298,12 @@ func (u *UI) ssPick(id, val string) {
 	switch {
 	case act == "":
 	case strings.HasSuffix(act, ":"):
-		u.dispatch(actMsg{Act: act + val})
+		// onActMsg, not dispatch: dispatch reaches only registry handlers, but core
+		// acts (set:/toggle:) live in onActMsg's switch - dispatch silently dropped
+		// every plain settings select pick (persisted nothing, patched the old value).
+		u.onActMsg(actMsg{Act: act + val})
 	default:
-		u.dispatch(actMsg{Act: act, Val: val})
+		u.onActMsg(actMsg{Act: act, Val: val})
 	}
 	u.ssPatch(id)
 }
