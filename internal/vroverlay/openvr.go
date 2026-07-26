@@ -28,11 +28,13 @@ typedef intptr_t (*pfn_VR_InitInternal)(EVRInitError *, EVRApplicationType);
 typedef void (*pfn_VR_ShutdownInternal)(void);
 typedef intptr_t (*pfn_VR_GetGenericInterface)(const char *, EVRInitError *);
 typedef bool (*pfn_VR_IsRuntimeInstalled)(void);
+typedef bool (*pfn_VR_IsHmdPresent)(void);
 
 static pfn_VR_InitInternal        p_VR_InitInternal = NULL;
 static pfn_VR_ShutdownInternal    p_VR_ShutdownInternal = NULL;
 static pfn_VR_GetGenericInterface p_VR_GetGenericInterface = NULL;
 static pfn_VR_IsRuntimeInstalled  p_VR_IsRuntimeInstalled = NULL;
+static pfn_VR_IsHmdPresent        p_VR_IsHmdPresent = NULL;
 static int g_vr_loaded = 0;
 
 #ifdef _WIN32
@@ -55,10 +57,25 @@ static int mate_load_openvr(void) {
 	p_VR_ShutdownInternal = (pfn_VR_ShutdownInternal)vr_sym(h, "VR_ShutdownInternal");
 	p_VR_GetGenericInterface = (pfn_VR_GetGenericInterface)vr_sym(h, "VR_GetGenericInterface");
 	p_VR_IsRuntimeInstalled = (pfn_VR_IsRuntimeInstalled)vr_sym(h, "VR_IsRuntimeInstalled");
+	p_VR_IsHmdPresent = (pfn_VR_IsHmdPresent)vr_sym(h, "VR_IsHmdPresent"); // resolved separately: absence must fail CLOSED, not disable VR wholesale
 	if (!p_VR_InitInternal || !p_VR_ShutdownInternal || !p_VR_GetGenericInterface || !p_VR_IsRuntimeInstalled)
 		return 0;
 	g_vr_loaded = 1;
 	return 1;
+}
+
+// mate_hmd_present: 1 = an HMD is connected, 0 = none, -1 = can't tell (library/symbol absent).
+//
+// OpenVR launch contract - the reason this function exists and MUST be the only pre-session probe:
+//   VR_InitInternal(VRApplication_Overlay|Scene) LAUNCHES SteamVR through the runtime.
+//   VR_InitInternal(VRApplication_Background)    returns Init_NoServerForBackgroundApp, no launch.
+//   VR_IsRuntimeInstalled / VR_IsHmdPresent      NEVER launch - they only load vrclient and ask it.
+// So presence probing is done here, never with an Init attempt. Callers treat anything except 1 as
+// "no HMD" (fail closed): a headless box must never be poked into starting SteamVR.
+static int mate_hmd_present(void) {
+	if (!mate_load_openvr()) return 0;
+	if (!p_VR_IsHmdPresent) return -1;
+	return p_VR_IsHmdPresent() ? 1 : 0;
 }
 
 static struct VR_IVROverlay_FnTable      *g_ov = NULL;
@@ -87,6 +104,10 @@ static VRActionHandle_t    g_act_slot[8] = {0}; // /actions/main/in/slot1..8 (us
 static int mate_init(void) {
 	if (!mate_load_openvr()) return -3; // openvr_api library absent → VR unavailable (app unaffected)
 	if (!p_VR_IsRuntimeInstalled()) return -1;
+	// LAUNCH-CAPABLE from here down: VR_InitInternal(VRApplication_Overlay) starts SteamVR. Refuse
+	// on a headless box - a dev PC with SteamVR installed but no HMD got it launched + crash-looping
+	// this way. Hardware check first, always, no matter which caller/recovery path got here.
+	if (mate_hmd_present() != 1) return -4;
 	EVRInitError e = EVRInitError_VRInitError_None;
 	p_VR_InitInternal(&e, EVRApplicationType_VRApplication_Overlay);
 	if (e != EVRInitError_VRInitError_None) return (int)e;
@@ -687,6 +708,15 @@ func (r *openvrRuntime) RuntimeInstalled() bool {
 	return C.mate_runtime_installed() != 0
 }
 
+// HMDPresent reports whether a headset is connected. VR_IsHmdPresent only loads vrclient to ask the
+// runtime - it NEVER starts vrserver (unlike VR_Init(Overlay)), so it is safe to poll forever on a
+// headless box. Unknown (openvr_api or the symbol missing) counts as absent: fail closed.
+func (r *openvrRuntime) HMDPresent() bool {
+	ovrMu.Lock()
+	defer ovrMu.Unlock()
+	return C.mate_hmd_present() == 1
+}
+
 // PollQuit reports (+ acknowledges) a session-fatal SteamVR event: quit, driver quit/restart, HMD lost.
 func (r *openvrRuntime) PollQuit() QuitReason {
 	ovrMu.Lock()
@@ -717,9 +747,18 @@ func (r *openvrRuntime) RegisterApp(manifestPath, appKey string, autoLaunch bool
 	return nil
 }
 
+// Init opens an overlay-app session. This is the ONLY launch-capable OpenVR entry in the process
+// (mate_init → VR_InitInternal(VRApplication_Overlay), which starts SteamVR), so the no-launch
+// invariant is enforced HERE as well as at the manager's supervise-loop gate - any future caller,
+// retry or recovery path inherits it. Both guards are launch-incapable by construction: a Toolhelp
+// process walk and VR_IsHmdPresent (see mate_hmd_present for the OpenVR contract).
 func (r *openvrRuntime) Init() error {
 	ovrMu.Lock()
 	defer ovrMu.Unlock()
+	if !steamvrRunning() || C.mate_hmd_present() != 1 {
+		r.ok = false
+		return nil // SteamVR down or no headset - never poke the runtime into launching
+	}
 	if rc := C.mate_init(); rc != 0 {
 		r.ok = false
 		return nil // SteamVR not running / not installed - manager idles cleanly

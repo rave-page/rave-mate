@@ -85,6 +85,7 @@ type Runtime interface {
 	Shutdown()                                     // release the runtime
 
 	RuntimeInstalled() bool                                         // SteamVR installed (no session needed)
+	HMDPresent() bool                                               // a headset is connected (VR_IsHmdPresent - never launches SteamVR)
 	PollQuit() QuitReason                                           // session-fatal SteamVR event (quit / driver restart / HMD lost); QuitNone = healthy
 	RegisterApp(manifestPath, appKey string, autoLaunch bool) error // register .vrmanifest + auto-launch
 	PerfStats() (vrstats.PerfStats, bool)                           // compositor frame timing + HMD debug (false if unavailable)

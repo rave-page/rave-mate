@@ -35,6 +35,7 @@ func (f *fakeRT) Show(string, bool) error                { return nil }
 func (f *fakeRT) DestroyOverlay(string) error            { return nil }
 func (f *fakeRT) Shutdown()                              {}
 func (f *fakeRT) RuntimeInstalled() bool                 { return false }
+func (f *fakeRT) HMDPresent() bool                       { return true }
 func (f *fakeRT) PollQuit() QuitReason                   { return QuitNone }
 func (f *fakeRT) RegisterApp(string, string, bool) error { return nil }
 func (f *fakeRT) PerfStats() (vrstats.PerfStats, bool)   { return vrstats.PerfStats{}, false }

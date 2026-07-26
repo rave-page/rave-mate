@@ -64,13 +64,14 @@ func TestVRFeatureLogsFlowToDaemon(t *testing.T) {
 	}
 }
 
-// On a non-vr build (this test binary) the runtime is the stub: the manager reports VR/SteamVR
-// unavailable via a forwarded log and keeps supervising - no crash, and stop still exits 0.
+// On a non-vr build (this test binary) the runtime is the stub: the manager reports VR unavailable
+// via a forwarded log and keeps supervising - no crash, and stop still exits 0.
 func TestVRFeatureUnavailableGraceful(t *testing.T) {
 	h := newHarness(&vrFeature{})
 	h.send(t, frame{ID: "1", Method: methodInit, Params: json.RawMessage(vrInitParams)})
-	// Manager.Start logs an idle/waiting SteamVR line immediately (stub runtime never connects).
-	h.next(t, logFrameContains("SteamVR"))
+	// Manager.Start logs an idle line immediately. The stub reports no HMD (hard no-launch gate), so
+	// the reason is "non-vr build" here rather than "SteamVR not running".
+	h.next(t, logFrameContains("VR overlays idle"))
 	h.send(t, frame{ID: "9", Method: methodStop})
 	if fr := h.next(t, func(f frame) bool { return f.ID == "9" }); !fr.OK {
 		t.Fatalf("stop: %s", fr.Error)

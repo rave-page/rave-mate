@@ -47,6 +47,11 @@ type Manager struct {
 	rt     Runtime
 	beat   func() // liveness ping to the featurehost host (subprocess mode); may be nil
 
+	// Launch-gate probes (test seams; nil = production). Both MUST stay launch-incapable: HMD via
+	// VR_IsHmdPresent, server via a process walk - never via an Init attempt.
+	hmdProbe    func() bool
+	serverProbe func() bool
+
 	mu             sync.Mutex
 	chat           []twitch.Event
 	alerts         []twitch.Event
@@ -306,6 +311,53 @@ func (m *Manager) ActionBinding(action string) string {
 // reconnectWait is how long the supervise loop waits between SteamVR connect attempts.
 const reconnectWait = 5 * time.Second
 
+// hmdRecheckWait paces the no-HMD idle. A headless box re-checks once a minute instead of every 5s:
+// VR_IsHmdPresent loads vrclient each call, and plugging a headset in still arms VR within a minute.
+const hmdRecheckWait = 60 * time.Second
+
+// Idle reasons, logged once per CHANGE of reason (the loop re-evaluates every 5-60s forever).
+const (
+	idleNoHMD     = "no-hmd"
+	idleNoServer  = "no-steamvr"
+	idleNoSession = "no-session"
+)
+
+// hmdPresent / serverUp are the two launch-INCAPABLE probes that gate the supervise loop. Both have
+// a test seam (hmdProbe / serverProbe) so the gate is provable without a headset or SteamVR.
+func (m *Manager) hmdPresent() bool {
+	if m.hmdProbe != nil {
+		return m.hmdProbe()
+	}
+	return m.rt.HMDPresent()
+}
+
+func (m *Manager) serverUp() bool {
+	if m.serverProbe != nil {
+		return m.serverProbe()
+	}
+	return steamvrRunning()
+}
+
+// logIdle logs an idle reason once per reason change; returns the new last-logged reason.
+func (m *Manager) logIdle(prev, reason string) string {
+	if prev == reason {
+		return reason
+	}
+	switch reason {
+	case idleNoHMD:
+		if !BuiltWithVR() {
+			m.log.Info(logTag, "VR overlays idle - non-vr build (no OpenVR backend)", nil)
+			break
+		}
+		m.log.Info(logTag, "VR overlays idle - no HMD present (won't launch SteamVR; connect a headset and VR arms itself)", nil)
+	case idleNoServer:
+		m.log.Info(logTag, "VR overlays idle - SteamVR not running (won't launch it; start SteamVR to connect)", nil)
+	case idleNoSession:
+		m.log.Info(logTag, "VR overlays waiting for SteamVR (session not ready)", nil)
+	}
+	return reason
+}
+
 // Start is a supervise loop: wait for SteamVR → run while connected → on SteamVR quit (or error)
 // tear down cleanly and wait again. So enabling the module before SteamVR is up, SteamVR closing,
 // and SteamVR restarting are all handled without crashing or giving up. ctx cancel exits.
@@ -331,16 +383,30 @@ func (m *Manager) Start(ctx context.Context) error {
 			func() string { return m.cfg().ResolvedVMCAddr() },
 			func() bool { return m.cfg().VMCLive })
 	}
-	logged := false
+	lastIdle := ""
 	for ctx.Err() == nil {
 		m.doBeat()
-		// Never start SteamVR ourselves - only attach if the user already has it running. Otherwise
-		// VR_Init(Overlay) would relaunch SteamVR the moment the user closes it.
-		if !steamvrRunning() {
-			if !logged {
-				m.log.Info(logTag, "VR overlays idle - SteamVR not running (won't launch it; start SteamVR to connect)", nil)
-				logged = true
+		// ── Hard no-launch discipline. This loop head is the ONE choke point in front of the only
+		// launch-capable OpenVR call in the process (Runtime.Init → VR_InitInternal(Overlay), which
+		// starts SteamVR; VRApplication_Background would not, and VR_IsHmdPresent /
+		// VR_IsRuntimeInstalled / a process walk never do). Both gates below are launch-incapable by
+		// construction, and every recovery path (texture-fail streak, unresponsive session, GPU-reset
+		// reinit) *returns* out of runConnected into this head - so a recovery loop on a headless box
+		// can never escalate to anything launch-capable. Runtime.Init re-asserts both gates itself.
+		//
+		// P1 regression this closes: a dev box with SteamVR installed and NO headset had SteamVR
+		// launched (then crash-looping) ~20 min after the daemon relaunched - the process gate failed
+		// OPEN on a transient Toolhelp snapshot error, and nothing re-logged because the idle line had
+		// already been printed. Hardware awareness first, then "is it already running".
+		if !m.hmdPresent() {
+			lastIdle = m.logIdle(lastIdle, idleNoHMD)
+			if !sleepCtx(ctx, hmdRecheckWait) {
+				break
 			}
+			continue
+		}
+		if !m.serverUp() {
+			lastIdle = m.logIdle(lastIdle, idleNoServer)
 			if !sleepCtx(ctx, reconnectWait) {
 				break
 			}
@@ -348,16 +414,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		_ = m.rt.Init()
 		if !m.rt.Available() {
-			if !logged {
-				m.log.Info(logTag, "VR overlays waiting for SteamVR (start it, or it's a non-vr build)", nil)
-				logged = true
-			}
+			lastIdle = m.logIdle(lastIdle, idleNoSession)
 			if !sleepCtx(ctx, reconnectWait) {
 				break
 			}
 			continue
 		}
-		logged = false
+		lastIdle = ""
 		m.log.Info(logTag, "VR overlays connected", nil)
 		m.runConnected(ctx)
 		m.rt.Shutdown()

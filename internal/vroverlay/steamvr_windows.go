@@ -4,11 +4,14 @@ package vroverlay
 
 import (
 	"syscall"
+	"time"
 	"unsafe"
 )
 
-// We never start SteamVR ourselves: VR_Init(Overlay) would launch vrserver, so the reconnect loop
-// re-opened SteamVR the instant the user closed it. Gate Init on vrserver.exe actually running.
+// We never start SteamVR ourselves: VR_Init(VRApplication_Overlay) LAUNCHES it through the runtime
+// (only VRApplication_Background is non-launching; VR_IsHmdPresent / VR_IsRuntimeInstalled never
+// launch either). This process walk is the gate in front of that call - a pure Toolhelp snapshot,
+// zero OpenVR, so it is launch-incapable by construction.
 
 var (
 	svKernel32        = syscall.NewLazyDLL("kernel32.dll")
@@ -21,7 +24,15 @@ var (
 const (
 	svSnapProcess = 0x00000002
 	svMaxPath     = 260
+	// CreateToolhelp32Snapshot is documented to fail with ERROR_BAD_LENGTH while processes churn and
+	// to need a retry - the ONLY reason the old code failed open. Retry, then fail closed.
+	svSnapRetries   = 4
+	svSnapRetryWait = 25 * time.Millisecond
 )
+
+// svProcNames are the SteamVR processes that prove the runtime is already up: vrserver (the runtime
+// server) and vrmonitor (its status window, present through startup before vrserver binds).
+var svProcNames = [...]string{"vrserver.exe", "vrmonitor.exe"}
 
 type svProcessEntry32 struct {
 	dwSize              uint32
@@ -36,27 +47,48 @@ type svProcessEntry32 struct {
 	szExeFile           [svMaxPath]uint16
 }
 
-// steamvrRunning reports whether SteamVR's server process (vrserver.exe) is up. Walks the Toolhelp
-// process snapshot (stdlib syscall, no dep). Fails OPEN (true) if the snapshot can't be taken, so a
-// transient error doesn't permanently stop the overlay from connecting.
+// steamvrRunning reports whether SteamVR is already up (svProcNames in the Toolhelp process
+// snapshot; stdlib syscall, no dep).
+//
+// Fails CLOSED after svSnapRetries: this is the sole gate in front of the launch-capable
+// VR_Init(VRApplication_Overlay). It used to fail OPEN ("a transient error shouldn't stop the
+// overlay connecting") - one ERROR_BAD_LENGTH snapshot failure on a dev box with SteamVR installed
+// but NO headset was enough to launch SteamVR into a crash loop, silently (the supervise loop had
+// already logged its idle line, so the retry logged nothing). Asymmetric costs: a missed detection
+// delays connecting by one 5s tick, a false positive hijacks the user's machine. Fail closed.
 func steamvrRunning() bool {
+	for i := 0; i < svSnapRetries; i++ {
+		if up, ok := svSnapshotHasSteamVR(); ok {
+			return up
+		}
+		time.Sleep(svSnapRetryWait)
+	}
+	return false
+}
+
+// svSnapshotHasSteamVR walks one process snapshot. ok=false means the snapshot itself failed (the
+// caller retries); it NEVER reports "running" on failure.
+func svSnapshotHasSteamVR() (up, ok bool) {
 	snap, _, _ := svCreateSnapshot.Call(svSnapProcess, 0)
 	if snap == 0 || snap == ^uintptr(0) {
-		return true
+		return false, false
 	}
 	defer func() { _, _, _ = svCloseHandle.Call(snap) }()
 	var pe svProcessEntry32
 	pe.dwSize = uint32(unsafe.Sizeof(pe))
 	if r, _, _ := svProcess32FirstW.Call(snap, uintptr(unsafe.Pointer(&pe))); r == 0 {
-		return true
+		return false, false
 	}
 	for {
-		if syscall.UTF16ToString(pe.szExeFile[:]) == "vrserver.exe" {
-			return true
+		name := syscall.UTF16ToString(pe.szExeFile[:])
+		for _, want := range svProcNames {
+			if name == want {
+				return true, true
+			}
 		}
 		if r, _, _ := svProcess32NextW.Call(snap, uintptr(unsafe.Pointer(&pe))); r == 0 {
 			break
 		}
 	}
-	return false
+	return false, true
 }
