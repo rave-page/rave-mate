@@ -312,6 +312,17 @@ Rules:
   policies, all three shutdown paths BY EXECUTION, runtime-JS byte equality, media session end-to-end
   over the real handler, plus one opt-in REAL WINDOWED smoke (`RAVE_MATE_WEBVIEW_SMOKE=1`). Wire schema
   untouched (regen = 0 drifted; 177 messages, hash 0x70698930).
+  **Merge-time defect, FIXED:** `ctl screenshot`/`screenshot-all` returned solid-black PNGs for every tab
+  under `RAVE_MATE_SHELL=proc`. Root cause was NOT the process boundary: featurehost spawns children with
+  `sysexec.Hide` (SW_HIDE), Windows applies that to the process's first top-level window, so the child's
+  WebView2 window came up HIDDEN - invisible UI and nothing for PrintWindow to return. Fix: the child
+  reveals its window on ready (no focus steal; the daemon sends `show` on the first ready only, and
+  `StartHidden` now actually works under proc), and the capture moved INTO the child over a new DIRECT-lane
+  `screenshot`/`shotres` pair that carries a path + rect, never pixels (33-37 ms/capture vs the unchanged
+  300 ms per-tab settle). Measured 0.00% -> 97.89% non-black on the real app; `screenshot-all` 10 tabs /
+  0 errors. The gate that missed it was doubly weak - it skipped `sysexec.Hide` (so its child was never
+  hidden) and asserted only "non-empty PNG" (a black file passes); both are fixed and the gate is
+  falsified by execution.
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
