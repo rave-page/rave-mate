@@ -15,6 +15,7 @@ func Detect(obsEnc OBSEncoderFunc) Report {
 		GPU:           sampleGPU,
 		ParsecEncoder: ParsecEncoder,
 		AdapterNames:  adapterNames,
+		AdapterVRAM:   adapterVRAMFree,
 	})
 }
 

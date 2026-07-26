@@ -129,6 +129,9 @@ type Deps struct {
 	ParsecEncoder func() (family EncoderFamily, adapter string, ok bool)
 	// AdapterNames resolves adapter LUID key → human GPU name (DXGI on Windows). nil = no names.
 	AdapterNames func() map[string]string
+	// AdapterVRAM resolves adapter LUID key → free (budgeted) VRAM MB (DXGI QueryVideoMemoryInfo on
+	// Windows). nil / missing key = unknown → the planner skips that device's VRAM ceiling.
+	AdapterVRAM func() map[string]float64
 }
 
 // Consumer is a process observed (or configured) to use a video-encode engine - a workload
@@ -150,6 +153,7 @@ type Report struct {
 	ProtectedFamily  map[EncoderFamily]bool // families a critical consumer uses (fallback when adapter unknown)
 	AdapterEncPct    map[string]float64     // total VideoEncode util % per adapter (device-load ranking)
 	AdapterNames     map[string]string      // adapter LUID key → human GPU name (DXGI; empty if unresolved)
+	AdapterVRAMFree  map[string]float64     // adapter LUID key → free (budgeted) VRAM MB (missing = unknown)
 	Notes            []string               // human-readable detection notes
 }
 
@@ -203,6 +207,9 @@ func Scan(d Deps) Report {
 	}
 	if d.AdapterNames != nil {
 		r.AdapterNames = d.AdapterNames()
+	}
+	if d.AdapterVRAM != nil {
+		r.AdapterVRAMFree = d.AdapterVRAM()
 	}
 	byPID := map[int][]GPUSample{}
 	for i, s := range samples {
