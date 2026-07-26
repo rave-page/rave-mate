@@ -114,8 +114,10 @@ const (
 
 // tdrQuery matches OS-logged display-driver resets. Provider "Display" EventID 4101 is the
 // vendor-agnostic "driver stopped responding and has recovered" (the canonical TDR); the vendor
-// providers + IDs are belt-and-suspenders for cards that log under their own source.
-const tdrQuery = `*[System[Provider[@Name='Display' or @Name='nvlddmkm' or @Name='amdkmdag' or @Name='amdwddmg' or @Name='igfxn'] and (EventID=4101 or EventID=4098 or EventID=4099 or EventID=13 or EventID=14)]]`
+// providers + IDs are belt-and-suspenders for cards that log under their own source. TimeCreated
+// bounds the reverse scan to the last hour so a poll never walks the whole System log (the
+// unbounded query re-rendered every historical match on machines with a long TDR history).
+const tdrQuery = `*[System[Provider[@Name='Display' or @Name='nvlddmkm' or @Name='amdkmdag' or @Name='amdwddmg' or @Name='igfxn'] and (EventID=4101 or EventID=4098 or EventID=4099 or EventID=13 or EventID=14) and TimeCreated[timediff(@SystemTime) <= 3600000]]]`
 
 type evtRecord struct {
 	System struct {
@@ -128,6 +130,7 @@ type evtRecord struct {
 }
 
 // runTDR polls the System event log for new driver-reset records; each new one fires FaultTDR.
+// Fire/baseline decisions live in tdrTracker (pure, tested cross-platform).
 func runTDR(ctx context.Context, opt Options) {
 	if err := procEvtQuery.Find(); err != nil {
 		return // wevtapi unavailable (very old Windows) - hung-window detector still covers "stuck"
@@ -135,9 +138,8 @@ func runTDR(ctx context.Context, opt Options) {
 	chanPtr, _ := syscall.UTF16PtrFromString("System")
 	qPtr, _ := syscall.UTF16PtrFromString(tdrQuery)
 
-	var high uint64 // highest EventRecordID already seen; 0 until baselined
-	baselined := false
-	tick := time.NewTicker(opt.Poll)
+	var tr tdrTracker
+	tick := time.NewTicker(opt.TDRPoll)
 	defer tick.Stop()
 	for {
 		select {
@@ -145,25 +147,21 @@ func runTDR(ctx context.Context, opt Options) {
 			return
 		case <-tick.C:
 		}
-		newest, rec, ok := scanTDR(chanPtr, qPtr, high)
+		newest, rec, ok := scanTDR(chanPtr, qPtr)
 		if !ok {
 			continue
 		}
-		if !baselined {
-			high = newest // first pass: adopt the current tip, don't fire on pre-existing events
-			baselined = true
-			continue
-		}
-		if newest > high {
-			high = newest
+		if tr.observe(newest) {
 			opt.OnFault(Fault{Kind: FaultTDR, Detail: fmt.Sprintf("%s (event %d)", rec.System.Provider.Name, rec.System.EventID)})
 		}
 	}
 }
 
-// scanTDR queries newest-first and returns the newest matching record's id + the record itself,
-// scanning only entries newer than high. ok=false when the query can't run.
-func scanTDR(chanPtr, qPtr *uint16, high uint64) (newest uint64, first evtRecord, ok bool) {
+// scanTDR queries newest-first (time-bounded by tdrQuery) and returns the newest matching record's
+// id + the record itself; newest==0 when the window has no matches. Stops at the FIRST parsed
+// record - only the tip matters, and the old walk-until-seen loop degenerated into rendering every
+// match whenever the baseline was 0. ok=false when the query can't run.
+func scanTDR(chanPtr, qPtr *uint16) (newest uint64, first evtRecord, ok bool) {
 	h, _, _ := procEvtQuery.Call(0, uintptr(unsafe.Pointer(chanPtr)), uintptr(unsafe.Pointer(qPtr)),
 		evtQueryChannelPath|evtQueryReverseDirection|evtQueryTolerateQueryErrors)
 	if h == 0 {
@@ -184,17 +182,11 @@ func scanTDR(chanPtr, qPtr *uint16, high uint64) (newest uint64, first evtRecord
 		}
 		var rec evtRecord
 		if xml.Unmarshal([]byte(x), &rec) != nil {
-			continue
+			continue // tolerate one unparsable record; try the next
 		}
-		id := rec.System.EventRecordID
-		if newest == 0 { // newest-first: the first parsed record is the tip
-			newest, first = id, rec
-		}
-		if id <= high {
-			break // reached already-seen territory
-		}
+		return rec.System.EventRecordID, rec, true // newest-first: first parsed record is the tip
 	}
-	return newest, first, true
+	return 0, first, true // no matches in the window
 }
 
 // renderXML renders one event handle to its System XML (two-call size-then-fill).
