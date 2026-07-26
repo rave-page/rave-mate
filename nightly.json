@@ -1,13 +1,13 @@
 {
-  "version": "nightly-82a3543",
-  "build": 168,
-  "commit": "82a3543",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-168-20260726-82a3543.exe",
-  "sha256": "f86a7cd31a78f49af2e7a360e61352a6cc0c87c81bbab5bf36fcd05cfac71b8d",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-168-20260726-82a3543.exe",
-  "installer_sha256": "445cec7ec212b9a2c5612e4304ee991f7d1ff57061a93fc2b87d08a21d013bb6",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-168-20260726-82a3543",
-  "linux_sha256": "52790b3d93b87e99106861a1567515ba9ebd6565bd797e80c55eb954cb257e8d",
+  "version": "nightly-7ab3d3b",
+  "build": 171,
+  "commit": "7ab3d3b",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-171-20260726-7ab3d3b.exe",
+  "sha256": "add3f75887d488973e3362c49ca3f81a23ffc49fcd0f3166be3f07e398777182",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-171-20260726-7ab3d3b.exe",
+  "installer_sha256": "38eafb7bd93c1fe0bd49ede0dfe076c9043ba9c62b2b805d96372741dc43ae2f",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-171-20260726-7ab3d3b",
+  "linux_sha256": "ae79bab858ef19d6cce103cafc3fed10bd4e4cfc80953af71ceb3d8d17c5e55d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T20:36:19Z",
-  "notes": "Merge fix/mfenc-embed-child: encoder child embedded in main exe + advertisement gate"
+  "released": "2026-07-26T22:08:20Z",
+  "notes": "test(worker): accept handoff-wins outcome in timed-out-waiter race test"
 }
