@@ -25,6 +25,11 @@ const (
 	vrRingCap      = 50              // chat/alert replay ring (re-pushed on child restart)
 	vrObsFresh     = 6 * time.Second // obs-status replay freshness (matches Manager's window)
 	vrHeartbeat    = 45 * time.Second
+	// vr child restart budget: ~10 respawns without a 5-min-stable run = the GPU/driver is broken;
+	// stop feeding it fresh OpenVR sessions (each cold start uploads N 640×480 textures - amplifying
+	// a TDR loop). The 60s default stableAfter reset let a fault every ~70s respawn at 1s forever.
+	vrMaxAttempts = 10
+	vrStableAfter = 5 * time.Minute
 )
 
 // VROverlayDeps is everything the vr child needs from the daemon: config access, the mesh bus,
@@ -82,7 +87,9 @@ func NewVrOverlayProxy(log *logbus.Bus, deps VROverlayDeps) (*VrOverlayProxy, er
 		Name:             "vr",
 		Log:              log,
 		Init:             func() any { return vrInit{Config: deps.Cfg()} },
-		HeartbeatTimeout: vrHeartbeat, // a wedged cgo/OpenVR call stops beats → force-restart
+		HeartbeatTimeout: vrHeartbeat,   // a wedged cgo/OpenVR call stops beats → force-restart
+		MaxAttempts:      vrMaxAttempts, // GPU-fault loop: stop respawning into a broken driver
+		StableAfter:      vrStableAfter, // a TDR every ~70s must burn the budget, not reset it
 		OnReady:          p.onReady,
 		OnDown:           p.onDown,
 		OnEvent: map[string]func(json.RawMessage){

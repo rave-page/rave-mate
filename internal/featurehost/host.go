@@ -60,6 +60,15 @@ type Options struct {
 	// Icecast set-capture receiving+writing a live broadcast) always yields to the user's
 	// foreground app and any active encoder. Leave false for latency-sensitive children.
 	LowPriority bool
+	// MaxAttempts, if > 0, caps consecutive restart attempts without a stable run - once spent the
+	// supervisor gives up (loud log + toast; Stats keeps the error) instead of respawning forever
+	// (a child faulting every ~70s otherwise cycles at 1s for the whole session). Recover by
+	// toggling the feature off/on (Stop+Start) or restarting the app. 0 = unlimited.
+	MaxAttempts int
+	// StableAfter overrides the uptime that resets the attempt counter (0 = package default 60s).
+	// Lengthen for children whose known failure mode (GPU faults) recurs slower than the default,
+	// so periodic faults burn the MaxAttempts budget instead of resetting it.
+	StableAfter time.Duration
 }
 
 // Host supervises one feature child process: spawn → init handshake → event pump, with
@@ -349,6 +358,14 @@ func (h *Host) failPending() {
 
 // ── supervision ──────────────────────────────────────────────────────────────
 
+// stableWindow is the uptime that resets the attempt counter (per-host override, else default).
+func (h *Host) stableWindow() time.Duration {
+	if h.opt.StableAfter > 0 {
+		return h.opt.StableAfter
+	}
+	return stableAfter
+}
+
 func (h *Host) supervise(ctx context.Context) {
 	attempt := 0
 	for {
@@ -360,7 +377,7 @@ func (h *Host) supervise(ctx context.Context) {
 		if ctx.Err() != nil {
 			return // clean stop
 		}
-		if time.Since(startAt) >= stableAfter {
+		if time.Since(startAt) >= h.stableWindow() {
 			attempt = 0 // was healthy long enough - fresh backoff
 		}
 		delay := backoffSchedule[min(attempt, len(backoffSchedule)-1)]
@@ -373,17 +390,29 @@ func (h *Host) supervise(ctx context.Context) {
 		h.lastErr = msg
 		notify := h.notify
 		h.mu.Unlock()
+		attempt++
+		if h.opt.MaxAttempts > 0 && attempt >= h.opt.MaxAttempts {
+			// Restart budget spent without a stable run: give up instead of cycling forever.
+			gaveUp := msg + " - gave up after " + strconv.Itoa(attempt) + " attempts"
+			h.mu.Lock()
+			h.lastErr = gaveUp
+			h.mu.Unlock()
+			h.opt.Log.Error(h.src(), gaveUp+" (toggle the feature off/on or restart rave-mate to retry)", map[string]any{"attempts": attempt})
+			if notify != nil {
+				notify("Feature stopped", h.opt.Name+" kept crashing - auto-restart paused. Toggle the feature or restart rave-mate to retry.")
+			}
+			return
+		}
 		// First crash of a streak + every 5th at ERROR; the rest at Debug so a
 		// crash-loop doesn't flood the ring (restart count stays in Status()).
-		if attempt == 0 || attempt%5 == 0 {
-			h.opt.Log.Error(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt + 1})
+		if attempt == 1 || (attempt-1)%5 == 0 {
+			h.opt.Log.Error(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt})
 		} else {
-			h.opt.Log.Debug(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt + 1})
+			h.opt.Log.Debug(h.src(), msg+" - restarting", map[string]any{"delay": delay.String(), "attempt": attempt})
 		}
-		if notify != nil && (attempt == 0 || attempt%5 == 0) {
+		if notify != nil && (attempt == 1 || (attempt-1)%5 == 0) {
 			notify("Feature crashed", h.opt.Name+" restarting in "+delay.String()+" - other features unaffected")
 		}
-		attempt++
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
