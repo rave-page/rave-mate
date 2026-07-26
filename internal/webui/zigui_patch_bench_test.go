@@ -241,6 +241,63 @@ func BenchmarkPatchBenchTickLive(b *testing.B) {
 	benchPatchPair(b, tkLiveSurface(), a, z)
 }
 
+// BenchmarkPatchBenchTickLiveChurn is the LIVE app's real tick, measured: `ctl perf` on an
+// isolated instance reported the delta at 7.4 KB against an 11.0 KB full document for the SAME 82
+// tick states - 67%, not the 18% a hand-picked two-field step suggests. Nearly every card carries a
+// counter (uptime, signal rates, net/timecode graphs, perf), so nearly every list is replaced.
+// This arm reproduces that churn so the opt-in decision is made against the app, not a fixture.
+func BenchmarkPatchBenchTickLiveChurn(b *testing.B) {
+	benchSkipUnavailable(b)
+	a := tickBenchLive()
+	z := liveChurnStep(a)
+	fa, ok1 := zigui.TickLive(wireTkLive(a))
+	fz, ok2 := zigui.TickLive(wireTkLive(z))
+	if !ok1 || !ok2 {
+		b.Fatal("scheduler declined")
+	}
+	a.Prev, z.Prev = prevOf(fz), prevOf(fa)
+	benchPatchPair(b, tkLiveSurface(), a, z)
+}
+
+// shiftGraph mimics a graph gaining one sample: same length, different bytes.
+func shiftGraph(g string) string {
+	if g == "" {
+		return g
+	}
+	return g[len(g)/2:] + g[:len(g)/2]
+}
+
+// liveChurnStep advances every counter-bearing fragment by one second, the way the running app does.
+func liveChurnStep(a liveTickSt) liveTickSt {
+	z := a
+	z.TC = "01:23:46:03"
+	z.Live.Transport.TC = z.TC
+	z.Live.NP.Line2 = a.Live.NP.Line2 + " · 128.0 BPM"
+	bump := func(rows []liveKV, tag string) []liveKV {
+		out := append([]liveKV{}, rows...)
+		for i := range out {
+			out[i].V = out[i].V + tag
+		}
+		return out
+	}
+	z.Live.Status.Rows = bump(a.Live.Status.Rows, "+1s")
+	z.Live.Signals.Rows = bump(a.Live.Signals.Rows, "+1s")
+	// The graphs are PRE-RENDERED strings (rule 6: Go formats every number), so one new sample
+	// replaces the whole string - this is the single biggest reason the live delta is 67% and not 18%.
+	z.Live.Perf.CPUGraph = shiftGraph(a.Live.Perf.CPUGraph)
+	z.Live.Perf.RAMGraph = shiftGraph(a.Live.Perf.RAMGraph)
+	z.Live.Perf.Head = a.Live.Perf.Head + "+"
+	z.Live.Net.Graph = shiftGraph(a.Live.Net.Graph)
+	z.Live.Net.Legend = a.Live.Net.Legend + "+"
+	z.Live.Tim.Graph = shiftGraph(a.Live.Tim.Graph)
+	z.Live.Tim.Legend = a.Live.Tim.Legend + "+"
+	z.Live.Decks.Decks = append([]liveDeck{}, a.Live.Decks.Decks...)
+	for i := range z.Live.Decks.Decks {
+		z.Live.Decks.Decks[i].Meta = z.Live.Decks.Decks[i].Meta + " ·"
+	}
+	return z
+}
+
 func BenchmarkPatchBenchTickLogView(b *testing.B) {
 	benchSkipUnavailable(b)
 	a := logsTickSt{Lines: wireBenchTail()}

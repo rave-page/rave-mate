@@ -48,14 +48,16 @@ func (s PatchStatus) String() string {
 
 // PatchStat is one surface's patch-channel tally.
 type PatchStat struct {
-	Seeds     uint64 // full-doc reseeds (first send + every send after a decline)
-	Deltas    uint64 // delta documents accepted
-	Desync    uint64 // guard mismatches (each forces a reseed)
-	CapBreach uint64 // slot-table / per-slot-byte refusals
-	Malformed uint64 // documents refused before any state was touched
-	Errors    uint64 // merge/clone/render failures
-	Sticky    uint64 // 1 once the surface gave up on the channel for this session
-	DocBytes  uint64 // bytes actually sent over the channel (seeds + deltas)
+	Seeds      uint64 // full-doc reseeds (first send + every send after a decline)
+	Deltas     uint64 // delta documents accepted
+	Desync     uint64 // guard mismatches (each forces a reseed)
+	CapBreach  uint64 // slot-table / per-slot-byte refusals
+	Malformed  uint64 // documents refused before any state was touched
+	Errors     uint64 // merge/clone/render failures
+	Sticky     uint64 // 1 once the surface gave up on the channel for this session
+	SeedBytes  uint64 // bytes of full-state reseeds
+	DeltaBytes uint64 // bytes of deltas - SeedBytes/Seeds vs DeltaBytes/Deltas IS the live
+	// delta/full ratio, the one number that decides whether a surface belongs on this channel
 }
 
 var (
@@ -73,15 +75,14 @@ func NotePatch(name string, st PatchStatus, seed bool, bytes int) {
 		s = &PatchStat{}
 		pcCounts[name] = s
 	}
-	if bytes > 0 {
-		s.DocBytes += uint64(bytes)
-	}
 	switch st {
 	case PatchOK:
 		if seed {
 			s.Seeds++
+			s.SeedBytes += uint64(max(bytes, 0))
 		} else {
 			s.Deltas++
+			s.DeltaBytes += uint64(max(bytes, 0))
 		}
 	case PatchDesync:
 		s.Desync++

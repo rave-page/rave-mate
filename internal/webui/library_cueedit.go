@@ -2093,11 +2093,11 @@ func (u *UI) ceWaveHTML() string {
 func (u *UI) ceTopbarHTML() string {
 	st := u.ceTopbarState()
 	// --- phaseb-retain ---
-	// Retained-doc delta channel: a cue drag re-renders this strip per pointer move and changes
-	// three readout fields out of ~26, so the delta is 63 B against a 420 B document (1.3% of the
-	// 40-drop fixture's 4.7 kB). Bench: dispatch neutral to -10%, allocation -21% / -67.8%
-	// (PHASEB_BASELINE "Phase B7 (ii)"). A decline falls through to the stateless bridge below,
-	// which is unchanged.
+	// Retained-doc delta channel - the ONE surface of the five candidates whose bench justified it.
+	// A cue drag re-renders this strip per pointer move and moves exactly Cursor + BarBeat, so the
+	// delta is 63 B against a 420 B document (1.3% of the 40-drop fixture's 4.7 kB). Dispatch time is
+	// a wash; allocation is -21% / -67.8% (PHASEB_BASELINE "Phase B7 (ii)"). A decline falls through
+	// to the stateless bridge below, which is unchanged.
 	if h, ok := u.retained().ceTopbar.send(st); ok {
 		return h
 	}

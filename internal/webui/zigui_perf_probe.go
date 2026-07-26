@@ -60,7 +60,10 @@ func zigPatchProbe() string {
 	fmt.Fprintf(&b, "\nretained slots %d live · %d seeded · %s held", live, seeded, humanBytes(bytes))
 	for _, n := range names {
 		s := pc[n]
-		fmt.Fprintf(&b, "\n  %s %d seeds + %d deltas · %s sent", n, s.Seeds, s.Deltas, humanBytes(s.DocBytes))
+		fmt.Fprintf(&b, "\n  %s %d seeds (avg %s) + %d deltas (avg %s) = %s of a full doc",
+			n, s.Seeds, humanBytes(zpAvgU(s.SeedBytes, s.Seeds)),
+			s.Deltas, humanBytes(zpAvgU(s.DeltaBytes, s.Deltas)),
+			zpRatio(s.DeltaBytes, s.Deltas, s.SeedBytes, s.Seeds))
 		if d := s.Desync + s.CapBreach + s.Malformed + s.Errors; d > 0 {
 			fmt.Fprintf(&b, " · declines desync %d cap %d malformed %d err %d", s.Desync, s.CapBreach, s.Malformed, s.Errors)
 		}
@@ -69,6 +72,15 @@ func zigPatchProbe() string {
 		}
 	}
 	return b.String()
+}
+
+// zpRatio is the live delta/full ratio - avg delta bytes over avg seed bytes. Below ~20% the
+// surface belongs on the retained channel; at 100% it cannot win (PHASEB_BASELINE "Phase B7 (ii)").
+func zpRatio(dB, dN, sB, sN uint64) string {
+	if dN == 0 || sN == 0 || sB == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", 100*(float64(dB)/float64(dN))/(float64(sB)/float64(sN)))
 }
 
 // zpDur formats a cumulative duration at µs resolution (ns noise is meaningless over 1000s of renders).

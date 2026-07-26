@@ -177,37 +177,39 @@ func (c *patchChan[T, O]) state() patchState {
 
 // ── the UI's channels ──
 
-// retainedChans holds one channel per surface that is opted IN. Which surfaces those are was
-// decided by the per-surface bench (.devnotes/PHASEB_BASELINE.md "Phase B7 (ii)"), not by where
-// the design guessed it would pay - the design's provisional list was five surfaces and three of
-// them regress. The predictor turned out to be one ratio, delta bytes / full-document bytes:
+// retainedChans holds one channel per surface that is opted IN. Exactly ONE of the design's five
+// provisional candidates survived its bench (.devnotes/PHASEB_BASELINE.md "Phase B7 (ii)"), and the
+// predictor is one ratio - delta bytes / full-document bytes, measured against what the RUNNING app
+// patches, not a hand-picked fixture step:
 //
-//	#ce-topbar (drag)    14.3% (1.3% on the 40-drop fixture)  ENABLED
-//	Live tab tick        18.0%                                ENABLED
-//	#midi-ctlstat        58.1%   +15.5% dispatch  - 9 flat fields: clone + two fingerprint walks
-//	                             + the 43 B header cost more than the entire state
-//	#midi-monitor rows  103.4%   +17.7%  - a prepended row replaces the list WHOLESALE (v1 of the
-//	                             channel does not splice), and every row's "ago" text moves anyway
-//	#log-view tick      100.1%   +47.5%  - clones ~55 kB of strings and then replaces the list
-//	#twitch-feed        100.1%   +89.7%  - same, at 120 rows
+//	#ce-topbar (drag)    14.3%  ENABLED - a drag moves 3 readout fields of ~26 and nothing else
+//	Live tab tick        67%    +33.0%  - EVERY graph is a pre-rendered string that one new sample
+//	                            replaces whole, so most of the state churns per second. A two-field
+//	                            step scores -5.3% and would have shipped it; `ctl perf` on the live
+//	                            app (82 tick states, delta 7.4 KB vs full 11.0 KB) is what caught it
+//	#midi-ctlstat        58.1%  +11.9%  - 9 flat fields: clone + two fingerprint walks + the 43 B
+//	                            RZD1 header cost more than re-encoding the whole 101 B state
+//	#midi-monitor rows  103.4%  +19.0%  - a prepended row replaces the list WHOLESALE (v1 does not
+//	                            splice), and every row's "ago" text moves anyway
+//	#log-view tick      100.1%  +50.2%  - clones ~55 kB of strings, then replaces the list
+//	#twitch-feed        100.1%  +82.6%  - same, at 120 rows
 //
-// A delta that is >= 100% of the full document cannot win: the same bytes cross, plus a clone and
-// two fingerprint walks. Per-element list splicing is what would flip those three; later
-// increment, measured first. #midi-ctlstat loses for the opposite reason and no list work fixes it.
+// A delta at >= 100% of the full document cannot win: the same bytes cross, plus a clone of every
+// retained string and two fingerprint walks. The two things that would widen this list are
+// per-element list splicing and a merge that does not clone what the delta is about to overwrite;
+// both are later increments, measured first.
 //
-// The two enabled surfaces are the states that are mostly STATIC: a drag moves 3 readout fields of
-// ~26, and most of the Live cockpit is byte-identical second to second. Their dispatch-time win is
-// inside the 20% band this repo treats as noise (-0.6% to -10%, sign stable); what is deterministic
-// is allocation: 19 504 -> 6 440 B/op on the tick (-67.0%) and 30 432 -> 9 784 (-67.8%) on the big
-// topbar - the GC pressure the binary wire exists to remove. And the unchanged-state path, which is
-// the common one on both surfaces, is -80..-90% because nothing crosses the ABI at all.
+// #ce-topbar ships on the DETERMINISTIC half of its measurement: dispatch time is a wash (+0.8% on
+// the typical fixture, -4.5% on the 40-drop one - inside the 20% noise band), allocation is exact
+// and repeatable at 2 912 -> 2 296 B/op (-21.2%) and 30 432 -> 9 784 (-67.8%), which is the GC
+// pressure the binary wire exists to remove. Its drag behaviour also matches the bench pair exactly:
+// during a drag Cursor and BarBeat are the only fields that move.
 //
-// The three losers keep their exports + generated walkers: cross-feeding six surfaces is what makes
-// the mutual-unparseability, cross-feed and desync proofs strong, and the bench has to stay
-// re-runnable to justify this table. They are simply not wired at a call site.
+// The five surfaces that stayed stateless keep their exports + generated walkers: cross-feeding six
+// surfaces is what makes the mutual-unparseability, cross-feed and desync proofs strong, and the
+// bench has to stay re-runnable to justify this table. They are simply not wired at a call site.
 type retainedChans struct {
 	ceTopbar *patchChan[ceTopbarSt, string]
-	tickLive *patchChan[liveTickSt, []zigui.Frag]
 }
 
 // retained lazily builds this UI's channels. One set per UI instance - no globals, so a second
@@ -221,11 +223,6 @@ func (u *UI) retained() *retainedChans {
 				name: "PatchCueEditTopbar", msgID: wireMsgCeTopbar,
 				seed: seedCeTopbar, delta: deltaCeTopbar, hash: hashCeTopbar,
 				run: zigui.PatchCueEditTopbar,
-			},
-			tickLive: &patchChan[liveTickSt, []zigui.Frag]{
-				name: "PatchTickLive", msgID: wireMsgTkLive,
-				seed: seedTkLive, delta: deltaTkLive, hash: hashTkLive,
-				run: zigui.PatchTickLive,
 			},
 		}
 	}
@@ -241,5 +238,4 @@ func (u *UI) dropRetained() {
 		return
 	}
 	rc.ceTopbar.drop()
-	rc.tickLive.drop()
 }

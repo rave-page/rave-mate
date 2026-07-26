@@ -452,7 +452,8 @@ func TestZigPatchUnchangedStateSkipsTheABI(t *testing.T) {
 	}
 	assertBytesEqual(t, "unchanged", first, again)
 	after := zigui.PatchCounts()["TestPatchTwitchFeed"]
-	if after.Deltas != before.Deltas || after.Seeds != before.Seeds || after.DocBytes != before.DocBytes {
+	if after.Deltas != before.Deltas || after.Seeds != before.Seeds || after.DeltaBytes != before.DeltaBytes ||
+		after.SeedBytes != before.SeedBytes {
 		t.Fatalf("an unchanged state still crossed the ABI: %+v → %+v", before, after)
 	}
 }

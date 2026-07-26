@@ -1,7 +1,23 @@
 # B7 increment (ii): retained-doc delta channel — design (pre-code review gate)
 
-Status: DESIGN ONLY. No code until reviewed — this reverses the documented B3
-stateless-exports decision and the reversal must be scoped + guarded deliberately.
+Status: **SHIPPED** (this file is the pre-code design; the AS-BUILT record is
+ZIG_UI_GUIDE.md "Phase B — B7 (ii) retained-doc delta channel" + PHASEB_BASELINE.md
+"Phase B7 (ii)"). What the implementation changed against this document:
+
+- The provisional opt-in set in §6 was PROVISIONAL and mostly wrong. Per-surface benches
+  shipped exactly ONE surface enabled (`#ce-topbar`). The Live tick reads -5.3% on a
+  hand-picked step and **+33.0% on the churn the running app actually produces** (measured:
+  delta 7.4 kB vs full 11.0 kB over 82 live tick states) because its graphs are pre-rendered
+  strings that one sample replaces whole. twitch feed / midi monitor / midi ctlstat /
+  `#log-view` all regress too. Their exports + walkers stay for the gates + the bench.
+- "Absent = keep" needs a companion: a reserved **clear tag** (field 1023) for a field
+  falling back to its zero value. §4 did not name it.
+- The delta key is NOT the B-3 per-message hash. Both sides generate a **full-state
+  fingerprint walk** and Zig re-fingerprints what it merged against the value Go computed, so
+  a codec divergence declines instead of drifting. §3's baseHash is that value.
+- Cap breach is its own STATUS and its own counter with 3-strike sticky hysteresis (§1 only
+  said "decline"), and the merge clones into a scratch arena because retained strings must
+  outlive the document (§4's "no zero-init" understated it).
 
 ## What
 
