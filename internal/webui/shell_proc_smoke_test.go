@@ -46,6 +46,11 @@ func TestProcShellWindowedSmoke(t *testing.T) {
 	log := logbus.New(512)
 	shellLog = log
 	procVirtualChild = false // a REAL window in the child
+	// Isolated WebView2 profile: never share the user's real one (it is per-process locked, and a
+	// running rave-mate must not be disturbed). The daemon hands the child this path in init.
+	saveDir := webviewDataDir
+	webviewDataDir = t.TempDir()
+	t.Cleanup(func() { webviewDataDir = saveDir })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -113,13 +118,16 @@ func TestProcShellWindowedSmoke(t *testing.T) {
 	if !u.Click("Smoke Button") {
 		t.Fatal("Click missed")
 	}
-	select {
-	case p := <-acts:
-		if !strings.Contains(p, "smoke-click") {
-			t.Errorf("act payload = %q", p)
+	// Drain until the click's act shows up: Set above already produced a `set:smoke` change act, so
+	// the click is not necessarily the first payload in the channel.
+	clicked, wait := false, time.After(5*time.Second)
+	for !clicked {
+		select {
+		case p := <-acts:
+			clicked = strings.Contains(p, "smoke-click")
+		case <-wait:
+			t.Fatal("the page act never reached the daemon")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the page act never reached the daemon")
 	}
 	// An ordered-lane patch must land in the real DOM.
 	u.eval("window.__patch('out'," + jsQuote("PATCHED") + ")")

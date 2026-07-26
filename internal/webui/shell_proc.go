@@ -90,7 +90,6 @@ type procShell struct {
 	lastHTML string
 	hidden   bool
 
-	cancel   context.CancelFunc
 	doneOnce sync.Once
 	done     chan struct{} // closed when run() may return (window gone / terminate finished)
 	stopW    chan struct{} // closes the writer + watchdog
@@ -244,7 +243,6 @@ func (s *procShell) run(initialHTML string, startHidden bool) {
 	s.lastHTML, s.hidden = initialHTML, startHidden
 	s.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
 	go s.writer()
 	go s.wedgeWatch()
 	governor.OnChange(s.onGovernor)
@@ -286,7 +284,9 @@ func (s *procShell) hwnd() uintptr { return uintptr(s.hwndV.Load()) }
 // "Webview wedged" now means "child killed", never "daemon hangs" - run() returns either way, so
 // the daemon's normal shutdown (module stop, bbolt close, stream end) always executes.
 func (s *procShell) terminate() {
-	s.sendDirect(procEvQuit, procQuit{GraceMS: int(procQuitGrace / time.Millisecond)})
+	// The child's own hard-exit grace is deliberately SHORTER than the daemon's wait, so the inner
+	// backstop gets its chance before the outer one (kill) runs - backstops nest, they don't race.
+	s.sendDirect(procEvQuit, procQuit{GraceMS: int(procQuitGrace * 2 / 3 / time.Millisecond)})
 	go func() {
 		select {
 		case <-s.done:
