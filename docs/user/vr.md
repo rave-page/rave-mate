@@ -3,6 +3,12 @@
 Needs SteamVR (OpenVR) and a build with the `vr` feature (`openvr_api.dll` beside the exe -
 release builds ship it).
 
+**rave-mate never starts SteamVR.** With no headset connected, VR stays idle and logs
+`no HMD present` (re-checked once a minute) - so leaving VR overlays enabled on a machine that has
+SteamVR installed but no HMD costs nothing and can't pop SteamVR open. With a headset connected it
+still waits for SteamVR: start SteamVR and rave-mate attaches within ~5s. "Start automatically with
+SteamVR" is the reverse direction (SteamVR launching rave-mate) and is off by default.
+
 ## Headset overlays
 
 In-headset panels rendered by rave-mate: Twitch chat, alerts, now-playing, wrist quick-action

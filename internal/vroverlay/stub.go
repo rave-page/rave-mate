@@ -24,6 +24,7 @@ func (stubRuntime) Show(string, bool) error                { return nil }
 func (stubRuntime) DestroyOverlay(string) error            { return nil }
 func (stubRuntime) Shutdown()                              {}
 func (stubRuntime) RuntimeInstalled() bool                 { return false }
+func (stubRuntime) HMDPresent() bool                       { return false }
 func (stubRuntime) PollQuit() QuitReason                   { return QuitNone }
 func (stubRuntime) RegisterApp(string, string, bool) error { return nil }
 func (stubRuntime) PerfStats() (vrstats.PerfStats, bool)   { return vrstats.PerfStats{}, false }
