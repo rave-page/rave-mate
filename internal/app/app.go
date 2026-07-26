@@ -173,10 +173,13 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 	defer inst.close()
 
-	cfg, _ := config.Load()
+	cfg, cfgErr := config.Load()
 	i18n.SetLocale(cfg.Features.UI.Language) // webui i18n: persisted pref → OS locale → en
 	log := logbus.New(5000)
 	debuglog.Init(log) // persistent debug log + panic capture in the cwd (GUI build has no console)
+	if cfgErr != nil { // corrupt/unreadable config - recovered from .bak or reset; never silent
+		log.Error("config", "load", map[string]any{"error": cfgErr.Error()})
+	}
 	defer debuglog.Recover(log, "main", true)
 	if serviceMode {
 		debuglog.Go(log, "app", func() { stderrSink(log) })
