@@ -40,8 +40,44 @@ func gopFrames(fps float64) int {
 	return g
 }
 
-// encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv.
-func encodeArgs(spec medialink.EncodeSpec) []string {
+// scaleFilter builds the downscale chain for an explicit MaxHeight (outH = target height).
+//
+// Hardware encoder families with a stable GPU scaler get one: the CPU then only packs RGBA→NV12
+// and the resize runs on the silicon that is about to encode the frame anyway, instead of swscale
+// resizing 33 MB of RGBA per 4K frame on the cores OBS wants. scale_cuda (NVENC) and scale_qsv
+// (QSV) have been in ffmpeg since 4.x; AMF/D3D11 keep swscale because scale_amf / scale_d3d11 are
+// ffmpeg-7.1-era filters we cannot assume on a user's PATH ffmpeg. swscale is also the fallback
+// after a hw-filter failure (forceSW - see encoder.run's early-fail demotion).
+//
+// MERGE NOTE (device-selection work): the returned init flags claim -init_hw_device /
+// -filter_hw_device. When a preferred encoder DEVICE lands, fold the adapter into these same
+// strings ("cuda=rvcu:<idx>", "qsv=rvqsv,child_device=<...>") - do NOT emit a second
+// -init_hw_device / -filter_hw_device pair.
+func scaleFilter(encoder string, outH int, forceSW bool) (init []string, vf string) {
+	sw := fmt.Sprintf("scale=-2:%d", outH)
+	if forceSW {
+		return nil, sw
+	}
+	switch {
+	case strings.HasSuffix(encoder, "_nvenc"):
+		return []string{"-init_hw_device", "cuda=rvcu", "-filter_hw_device", "rvcu"},
+			fmt.Sprintf("format=nv12,hwupload_cuda,scale_cuda=-2:%d", outH)
+	case strings.HasSuffix(encoder, "_qsv"):
+		return []string{"-init_hw_device", "qsv=rvqsv", "-filter_hw_device", "rvqsv"},
+			fmt.Sprintf("format=nv12,hwupload=extra_hw_frames=16,scale_qsv=-2:%d", outH)
+	}
+	return nil, sw
+}
+
+// hwScaleFamily reports whether scaleFilter would use a GPU scaler for this encoder.
+func hwScaleFamily(encoder string) bool {
+	init, _ := scaleFilter(encoder, 1080, false)
+	return len(init) > 0
+}
+
+// encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv. forceSW pins the MaxHeight
+// downscale to CPU swscale (used after a GPU-scaler failure).
+func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 	fps := spec.FPS
 	if fps <= 0 {
 		fps = 30
@@ -58,15 +94,21 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 	if kbps <= 0 {
 		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
-	args := []string{
-		"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
+	var hwInit []string
+	vf := ""
+	if scaled {
+		hwInit, vf = scaleFilter(spec.Encoder, outH, forceSW)
+	}
+	args := []string{"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer"}
+	args = append(args, hwInit...) // global device flags belong before the input
+	args = append(args,
 		"-f", "rawvideo", "-pix_fmt", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"-framerate", trimFloat(fps),
 		"-i", "-", "-an",
-	}
-	if scaled {
-		args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", outH))
+	)
+	if vf != "" {
+		args = append(args, "-vf", vf)
 	}
 	g := strconv.Itoa(gopFrames(fps))
 	br := strconv.Itoa(kbps) + "k"

@@ -25,6 +25,7 @@ const (
 	encPTSQueueCap   = 64              // in-flight PTS map guard (child pipeline depth ≪ this)
 	encKeyRestartMin = 2 * time.Second // min gap between keyframe-forced restarts
 	encKeyFreshNs    = int64(500 * time.Millisecond)
+	encEarlyFailNs   = int64(3 * time.Second) // child dies without an AU within this → demote the hw scaler
 )
 
 type ptsEntry struct {
@@ -54,6 +55,8 @@ type encoder struct {
 
 	out     rate
 	dropped atomic.Uint64 // undersized/foreign input frames skipped
+	framed  atomic.Bool   // child emitted at least one AU (hw-scaler demotion probe)
+	swScale atomic.Bool   // MaxHeight downscale pinned to CPU swscale (GPU scaler failed here)
 }
 
 // newEncoder validates the spec and starts the supervision loop.
@@ -116,6 +119,12 @@ func (e *encoder) PipeStats() medialink.PipelineStats {
 	return medialink.PipelineStats{Encoder: e.spec.Encoder, OutFPS: e.out.value(), Restarts: restarts}
 }
 
+// hwScaling reports whether the current argv puts a GPU scaler in the filter chain.
+func (e *encoder) hwScaling() bool {
+	return !e.swScale.Load() && e.spec.MaxHeight > 0 && e.spec.Height > e.spec.MaxHeight &&
+		hwScaleFamily(e.spec.Encoder)
+}
+
 // run supervises the child: spawn → pipe → restart with capped backoff until ctx or source EOF.
 func (e *encoder) run(ctx context.Context) {
 	defer close(e.done)
@@ -133,6 +142,17 @@ func (e *encoder) run(ctx context.Context) {
 		e.mu.Lock()
 		e.restarts++
 		e.mu.Unlock()
+		// GPU-scaler demotion (mirrors the decoder's hwaccel tier demotion): a child that dies
+		// without ever emitting an AU while a hardware MaxHeight scaler was in the filter chain
+		// means this ffmpeg build / driver has no usable scale_cuda|scale_qsv. Pin swscale and
+		// retry at once - never loop forever on an argv the local ffmpeg rejects.
+		if err != nil && !e.framed.Load() && e.hwScaling() &&
+			time.Since(started) < time.Duration(encEarlyFailNs) {
+			e.swScale.Store(true)
+			e.log.Warn(source, "hardware downscaler unavailable - falling back to CPU swscale",
+				map[string]any{"encoder": e.spec.Encoder, "maxHeight": e.spec.MaxHeight, "error": err.Error()})
+			continue
+		}
 		if err != nil {
 			e.log.Warn(source, "encode child exited - restarting",
 				map[string]any{"encoder": e.spec.Encoder, "error": err.Error(), "backoff": backoff.String()})
@@ -158,7 +178,7 @@ func (e *encoder) runOnce(ctx context.Context) error {
 	e.ptsq = e.ptsq[:0]
 	e.mu.Unlock()
 
-	cmd := exec.CommandContext(rctx, e.ffmpeg, encodeArgs(e.spec)...)
+	cmd := exec.CommandContext(rctx, e.ffmpeg, encodeArgs(e.spec, e.swScale.Load())...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -245,6 +265,7 @@ func (e *encoder) feed(ctx context.Context, stdin io.WriteCloser) error {
 // readAUs splits the child's stdout into access units and emits them as frames.
 func (e *encoder) readAUs(ctx context.Context, stdout io.Reader) error {
 	emit := func(au []byte, info auInfo) {
+		e.framed.Store(true)
 		f := &medialink.Frame{Kind: medialink.KindVideo, Codec: e.spec.Codec, Payload: au}
 		if info.Keyframe {
 			f.Flags |= medialink.FlagKeyframe

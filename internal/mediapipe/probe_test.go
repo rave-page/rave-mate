@@ -117,7 +117,7 @@ func TestParseHWAccels(t *testing.T) {
 func TestEncodeArgsShapes(t *testing.T) {
 	spec := medialink.EncodeSpec{Encoder: "hevc_nvenc", Codec: medialink.CodecHEVC,
 		Width: 1920, Height: 1080, FPS: 60, BitrateKbps: 15000}
-	args := encodeArgs(spec)
+	args := encodeArgs(spec, false)
 	for _, want := range []string{"-f", "rawvideo", "-pix_fmt", "rgba", "1920x1080",
 		"hevc_nvenc", "-b:v", "15000k", "-g", "120", "-bf",
 		"dump_extra=freq=keyframe,hevc_metadata=aud=insert"} { // dump_extra first: AMF has no in-band VPS
@@ -137,7 +137,7 @@ func TestEncodeArgsShapes(t *testing.T) {
 	}
 	// MJPEG: no bsf, self-framing output.
 	jargs := encodeArgs(medialink.EncodeSpec{Encoder: "mjpeg", Codec: medialink.CodecJPEG,
-		Width: 640, Height: 480, FPS: 30})
+		Width: 640, Height: 480, FPS: 30}, false)
 	if contains(jargs, "-bsf:v") || !contains(jargs, "mjpeg") {
 		t.Fatalf("mjpeg args: %v", jargs)
 	}
