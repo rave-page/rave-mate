@@ -1,13 +1,13 @@
 {
-  "version": "nightly-1e804e0",
-  "build": 159,
-  "commit": "1e804e0",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-159-20260726-1e804e0.exe",
-  "sha256": "ddaf50958fa11e321570e4432de9ce358c3385a6897413c9035d918e8681625e",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-159-20260726-1e804e0.exe",
-  "installer_sha256": "2361e90d8f2d33d8f035ab23298d795b114c89bc0b2925c92e6aec4ff96e2718",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-159-20260726-1e804e0",
-  "linux_sha256": "27013928d1422d17d66ea41aefb6dfced9849051e92997d2217419947abcb247",
+  "version": "nightly-dfb06b2",
+  "build": 160,
+  "commit": "dfb06b2",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-160-20260726-dfb06b2.exe",
+  "sha256": "2ccbb5b2d76256c3c7ea22b4a85c32b73a672e2acea32451dedbca27bf961e41",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-160-20260726-dfb06b2.exe",
+  "installer_sha256": "df77728a92a0c5370bb6d2df477e836e47f1a64f17c9651ab3f0402f9aca7bfe",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-160-20260726-dfb06b2",
+  "linux_sha256": "f7703a5ffc7e1603b56d5c290876d239aa4b11363ae8c089a1590e9b199c83ea",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T12:38:55Z",
-  "notes": "Merge fix/mfenc-4k-open-crash: adapter pick + cross-vendor D3D ban + VEH driver-fault guard"
+  "released": "2026-07-26T13:02:20Z",
+  "notes": "Merge fix/zero-config-save: Save refuses zero Config + stack tripwire + Load quarantine/recovery"
 }
