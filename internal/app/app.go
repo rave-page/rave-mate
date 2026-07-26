@@ -375,11 +375,12 @@ func run(parent context.Context, serviceMode bool) error {
 	// MIDI LED-feedback play/pause: the ravemidi driver captures DJ-software LED writes; a
 	// paused deck flashes its play LED, a playing one holds it solid. Real-time per-deck
 	// play-state for a MIDI-only Serato rig (History lags + never records pause, Serato Remote
-	// is discontinued). In-proc + bounded (a ~350ms read of the driver trace ring, no media);
-	// gated on the kernel driver being installed (it's the only source of the feedback stream).
+	// is discontinued). In-proc + bounded (a ~1s read of the driver trace ring, no media);
+	// gated on the MIDI feature being ON *and* the kernel driver installed - driver presence
+	// alone must not spin a permanent ioctl poll when the user never enabled MIDI.
 	agg.AddSourceFn(func() session.Source {
 		return midifbsrc.New(log)
-	}, func() bool { return midi.DriverInstalled() })
+	}, func() bool { return cfg.Features.MIDI.Enabled && midi.DriverInstalled() })
 	// VirtualDJ: collection (database.xml) + live now-playing via Network Control (full metadata),
 	// our OS2L server (BPM/beat), and/or the tracklist file. In-proc; enable-gate drives lifecycle.
 	agg.AddSourceFn(func() session.Source {

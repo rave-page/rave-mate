@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	confidence = 0.85                   // authoritative for play/pause (Serato's own LED); metadata comes from elsewhere
-	pollEvery  = 350 * time.Millisecond // fast enough for sub-second play/pause; QUERY_TRACE is a cheap read
-	refreshTTL = 3 * time.Second        // re-assert a held state under FieldIsPlaying's 5s merge ttl so it stays authoritative
-	maxDeckCh  = 4                      // only decks A..D (MIDI ch 1..4); higher channels are non-deck LEDs (VU/fx) - ignore
+	confidence = 0.85            // authoritative for play/pause (Serato's own LED); metadata comes from elsewhere
+	pollEvery  = 1 * time.Second // each poll = QueryDriverInputs + per-port QUERY_TRACE ioctls; 1s keeps play/pause ~2s-fresh (flashStreak polls) without hammering the kernel surface
+	refreshTTL = 3 * time.Second // re-assert a held state under FieldIsPlaying's 5s merge ttl so it stays authoritative
+	maxDeckCh  = 4               // only decks A..D (MIDI ch 1..4); higher channels are non-deck LEDs (VU/fx) - ignore
 	// flashStreak: consecutive polls with NEW feedback that mark a SUSTAINED flash (=paused).
 	// One poll of activity (a transition twitch) isn't enough; two rules out one-shot events.
 	flashStreak = 2
