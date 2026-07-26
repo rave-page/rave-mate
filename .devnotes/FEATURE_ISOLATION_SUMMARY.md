@@ -19,6 +19,7 @@ External-input features run as supervised children - `rave-mate feature <name>`:
 | icecast | TCP listener :8000 + capture files | `IcecastProxy` (Snapshot/SubscribeCapture; libdb linking stays daemon-side) |
 | stream  | publisher + API calls + publish token | `StreamProxy` (Start/End/Status; lazy spawn on go-live) |
 | vr      | ALL OpenVR/cgo: init, overlays, textures, pointer, IVRInput, in-VR editor, motion | `VrOverlayProxy` (implements `vroverlay.Surface` - UI/keybinds/ctl vrinput unchanged) |
+| webview | the WebView2 window + its UI thread (phase B5; opt-in `RAVE_MATE_SHELL=proc`, default stays in-proc) | `procShell` (implements the webui `shell` seam; renderers untouched). Own message set: PSH1, spec'd in ZIG_UI_GUIDE.md "Phase B - B5 procShell protocol" - two lanes, in-band ack, HWND out for OS capture, pure view (no config, no db) |
 
 Wire: duplex newline-JSON over stdio (`frame`: method=request, event=unsolicited,
 else response). Child→parent events: `obs` (session.Observation), `log` (child logbus
