@@ -210,7 +210,8 @@ func (u *UI) renderMIDICtl() string {
 	}
 	st := u.midiCtlState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderMIDICtl(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMIDICtlV2", wireMidiCtl(st), zigui.RenderMIDICtlV2,
+			zigui.RenderMIDICtl, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -277,7 +278,8 @@ func midiActiveStateOf(active string) midiActiveState {
 func midiActiveRow(active string) string {
 	st := midiActiveStateOf(active)
 	if zigui.Available() {
-		if h, ok := zigui.RenderMIDIActive(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMIDIActiveV2", wireMidiActive(st), zigui.RenderMIDIActiveV2,
+			zigui.RenderMIDIActive, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

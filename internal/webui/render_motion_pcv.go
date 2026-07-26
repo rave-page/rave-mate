@@ -76,7 +76,8 @@ func moPCGpuHTMLOf(st moPCGpuSt) string {
 // renderPCViewerModal bridges the viewer shell to Zig.
 func renderPCViewerModal(st moPCViewSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPCViewer(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPCViewerV2", wirePCView(st), zigui.RenderPCViewerV2,
+			zigui.RenderPCViewer, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -86,7 +87,8 @@ func renderPCViewerModal(st moPCViewSt) string {
 // renderPCGpuModal bridges the GPU prompt to Zig.
 func renderPCGpuModal(st moPCGpuSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderPCGpu(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPCGpuV2", wirePCGpu(st), zigui.RenderPCGpuV2,
+			zigui.RenderPCGpu, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

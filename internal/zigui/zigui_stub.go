@@ -237,6 +237,13 @@ func RenderTwitchObsV2(state []byte) (string, bool)     { return "", false }
 func RenderTwitchPresetsV2(state []byte) (string, bool) { return "", false }
 func RenderTwitchFeedV2(state []byte) (string, bool)    { return "", false }
 
+func RenderMIDICtlV2(state []byte) (string, bool)     { return "", false }
+func RenderMIDIActiveV2(state []byte) (string, bool)  { return "", false }
+func RenderMIDICtlStatV2(state []byte) (string, bool) { return "", false }
+func RenderMIDIMonRowsV2(state []byte) (string, bool) { return "", false }
+func RenderPCViewerV2(state []byte) (string, bool)    { return "", false }
+func RenderPCGpuV2(state []byte) (string, bool)       { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

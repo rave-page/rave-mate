@@ -1138,6 +1138,7 @@ Migrated so far:
 |---|---|---|---|
 | overlays | 45-49 | full + `#ovl-appearance` + `#ovl-spout` + `#ovl-st-<kind>` + `#ovl-strip` | `UiStatus` doubles as the status fragment's ROOT message (id 48) - a nested message can also be a root (LogsLines precedent). A zero `uiStatus` renders "" and the exports decline empty output, so fragment gates skip the unavailable fixture (mirrors the golden suite). |
 | twitch | 50-53 | full + `#twitch-obs` + `#twitch-presets` + `#twitch-feed` | `#twitch-feed` is patched on EVERY chat/alert event - the hot path. Plain rows, nothing new in the codec. |
+| midi mixer + pcv | 54-59 | full tab + `#midi-active` + `#midi-monitor` rows + `#midi-ctlstat-<i>` + the two pcv modals | Largest schema batch of the fan-out (34 messages incl. the tip2 kOptPtr dual fields). `uimap.Trail`'s Zig field is the keyword `var` - the schema row carries `@"var"` verbatim. An all-zero `PortStat` renders "" and both exports decline it identically (empty-fragment arm from the golden suite). pcv modals decode into `dialogs_b` types. |
 
 Numbers: PHASEB_BASELINE.md "Phase B7 fan-out". Overlays: dispatch -44% full / -33% status
 frag, documents 42.1% of the JSON. Twitch: -63% full / -59% feed, documents 39.9%.

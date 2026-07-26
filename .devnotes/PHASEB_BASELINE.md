@@ -222,6 +222,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | overlays `#ovl-strip` frag | 1 451 | 1 018 | **-30%** | (in the set above) |
 | twitch (full tab) | 15 692 | 5 770 | **-63%** | 7 330 / 18 371 = 39.9% |
 | twitch `#twitch-feed` frag | 10 724 | 4 364 | **-59%** | (per chat/alert event, not a tick) |
+| midi mixer (full tab) | 114 862 | 55 026 | **-52%** | 28 553 / 65 572 = 43.5% |
+| midi `#midi-monitor` rows frag | 1 538 | 859 | **-44%** | (~1 Hz tick) |
 
 ## Gaps / caveats
 

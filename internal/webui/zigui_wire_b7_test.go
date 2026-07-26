@@ -3,6 +3,7 @@
 package webui
 
 import (
+	"fmt"
 	"testing"
 
 	"rave.page/mate/internal/zigui"
@@ -24,6 +25,12 @@ func wireExportsB7() []wireExport {
 		{"twitch_obs_v2", zigui.RenderTwitchObsV2},
 		{"twitch_presets_v2", zigui.RenderTwitchPresetsV2},
 		{"twitch_feed_v2", zigui.RenderTwitchFeedV2},
+		{"midictl_v2", zigui.RenderMIDICtlV2},
+		{"midictl_active_v2", zigui.RenderMIDIActiveV2},
+		{"midictl_stat_v2", zigui.RenderMIDICtlStatV2},
+		{"midimon_rows_v2", zigui.RenderMIDIMonRowsV2},
+		{"pc_viewer_v2", zigui.RenderPCViewerV2},
+		{"pc_gpu_v2", zigui.RenderPCGpuV2},
 	}
 }
 
@@ -43,6 +50,21 @@ func wireBasesB7() []wireBase {
 			wireBase{"tw/" + n + "/obs", wireTwObs(st.Obs)},
 			wireBase{"tw/" + n + "/presets", wireTwPresets(st.Presets)},
 			wireBase{"tw/" + n + "/feed", wireTwFeed(st.Feed)})
+	}
+	for n, st := range midiCtlFixtures() {
+		out = append(out,
+			wireBase{"midi/" + n, wireMidiCtl(st)},
+			wireBase{"midi/" + n + "/active", wireMidiActive(st.Port.Active)},
+			wireBase{"midi/" + n + "/mon", wireMidiMonLines(st.Mon.Lines)})
+		for i, bl := range st.Ctls.Blocks {
+			out = append(out, wireBase{fmt.Sprintf("midi/%s/stat%d", n, i), wireMidiPortStat(bl.Stat)})
+		}
+	}
+	for n, st := range moPCViewFixtures() {
+		out = append(out, wireBase{"pcv/" + n, wirePCView(st)})
+	}
+	for n, st := range moPCGpuFixtures() {
+		out = append(out, wireBase{"pcg/" + n, wirePCGpu(st)})
 	}
 	return out
 }
@@ -173,6 +195,103 @@ func BenchmarkWireBenchOverlaysStrip(b *testing.B) {
 	benchPair(b,
 		func() (string, bool) { return zigui.RenderOverlaysStrip(stateJSON(st)) },
 		func() (string, bool) { return zigui.RenderOverlaysStripV2(wireOvlStrip(st)) })
+}
+
+// TestZigWireThreeWayMIDICtl: the full MIDI Mixer tab + its three ~1 Hz patch targets
+// (#midi-active, #midi-monitor rows, #midi-ctlstat-<i>) over the whole golden fixture set.
+// An all-zero stat renders "" and the exports decline empty output (both v1 and v2 return
+// NULL) - mirrored from the golden suite's empty-fragment arm.
+func TestZigWireThreeWayMIDICtl(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := midiCtlFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireMidiCtl(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderMIDICtl(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderMIDICtlV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", midiCtlHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			threeWayFrag(t, "active", midiActiveRowHTML(st.Port.Active), stateJSON(st.Port.Active),
+				wireMidiActive(st.Port.Active), zigui.RenderMIDIActive, zigui.RenderMIDIActiveV2)
+			threeWayFrag(t, "mon", midiMonRowsHTML(st.Mon.Lines), stateJSON(st.Mon.Lines),
+				wireMidiMonLines(st.Mon.Lines), zigui.RenderMIDIMonRows, zigui.RenderMIDIMonRowsV2)
+			for i, bl := range st.Ctls.Blocks {
+				want := midiPortStatHTML(bl.Stat)
+				if want == "" {
+					// empty fragment: both exports must decline identically
+					if _, ok := zigui.RenderMIDICtlStatV2(wireMidiPortStat(bl.Stat)); ok {
+						t.Fatalf("stat %d: v2 rendered an empty fragment", i)
+					}
+					continue
+				}
+				threeWayFrag(t, fmt.Sprintf("stat%d", i), want, stateJSON(bl.Stat),
+					wireMidiPortStat(bl.Stat), zigui.RenderMIDICtlStat, zigui.RenderMIDICtlStatV2)
+			}
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacksIn(t, before,
+		"RenderMIDICtl", "RenderMIDICtlV2", "RenderMIDIActive", "RenderMIDIActiveV2",
+		"RenderMIDICtlStat", "RenderMIDICtlStatV2", "RenderMIDIMonRows", "RenderMIDIMonRowsV2")
+}
+
+// TestZigWireThreeWayPCV: the two point-cloud modals (dialogs_b renderers).
+func TestZigWireThreeWayPCV(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	for name, st := range moPCViewFixtures() {
+		t.Run("viewer/"+name, func(t *testing.T) {
+			threeWayFrag(t, "viewer", moPCViewerHTMLOf(st), stateJSON(st),
+				wirePCView(st), zigui.RenderPCViewer, zigui.RenderPCViewerV2)
+		})
+	}
+	for name, st := range moPCGpuFixtures() {
+		t.Run("gpu/"+name, func(t *testing.T) {
+			threeWayFrag(t, "gpu", moPCGpuHTMLOf(st), stateJSON(st),
+				wirePCGpu(st), zigui.RenderPCGpu, zigui.RenderPCGpuV2)
+		})
+	}
+	assertNoNewFallbacksIn(t, before,
+		"RenderPCViewer", "RenderPCViewerV2", "RenderPCGpu", "RenderPCGpuV2")
+}
+
+func BenchmarkWireBenchMIDICtl(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := midiCtlFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMIDICtl(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMIDICtlV2(wireMidiCtl(st)) })
+}
+
+func BenchmarkWireBenchMIDIMonRows(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := midiCtlFixtures()["populated"].Mon.Lines
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderMIDIMonRows(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderMIDIMonRowsV2(wireMidiMonLines(st)) })
 }
 
 func BenchmarkWireBenchTwitch(b *testing.B) {

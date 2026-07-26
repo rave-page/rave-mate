@@ -1193,6 +1193,50 @@ func RenderTwitchFeedV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: midi mixer + pcv modals ──
+
+// RenderMIDICtlV2 renders the full MIDI Mixer tab from an RZW1 document.
+func RenderMIDICtlV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_v2(p, l, n)
+	})
+}
+
+// RenderMIDIActiveV2 renders the #midi-active status line from an RZW1 document.
+func RenderMIDIActiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_active_v2(p, l, n)
+	})
+}
+
+// RenderMIDICtlStatV2 renders one #midi-ctlstat-<i> inner fragment from an RZW1 document.
+func RenderMIDICtlStatV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_stat_v2(p, l, n)
+	})
+}
+
+// RenderMIDIMonRowsV2 renders the #midi-monitor inner rows from an RZW1 document.
+func RenderMIDIMonRowsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midimon_rows_v2(p, l, n)
+	})
+}
+
+// RenderPCViewerV2 renders the point-cloud viewer modal from an RZW1 document.
+func RenderPCViewerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_viewer_v2(p, l, n)
+	})
+}
+
+// RenderPCGpuV2 renders the point-cloud GPU prompt modal from an RZW1 document.
+func RenderPCGpuV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_gpu_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

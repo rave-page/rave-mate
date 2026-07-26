@@ -1000,6 +1000,34 @@ export fn rz_ui_render_twitch_feed_v2(state: ?[*]const u8, len: usize, out_len: 
     return renderWire(twitch.Feed, wire_gen.decodeTwFeed, twitch.renderFeed, wire_gen.msg_tw_feed, state, len, out_len);
 }
 
+// ── B7 fan-out: midi mixer + pcv modals (root ids 54-59) ──
+// Full tab (57) + its three ~1 Hz patch targets: #midi-active (54), #midi-monitor rows (55),
+// #midi-ctlstat-<i> (56). The pcv modals (58/59) render in dialogs_b.
+
+export fn rz_ui_render_midictl_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl.State, wire_gen.decodeMidiCtl, midictl.render, wire_gen.msg_midi_ctl, state, len, out_len);
+}
+
+export fn rz_ui_render_midictl_active_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl.Active, wire_gen.decodeMidiActive, midictl.renderActive, wire_gen.msg_midi_active, state, len, out_len);
+}
+
+export fn rz_ui_render_midictl_stat_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl_ctls.PortStat, wire_gen.decodeMidiPortStat, midictl_ctls.renderPortStat, wire_gen.msg_midi_port_stat, state, len, out_len);
+}
+
+export fn rz_ui_render_midimon_rows_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midimon.Lines, wire_gen.decodeMidiMonLines, midimon.renderRows, wire_gen.msg_midi_mon_lines, state, len, out_len);
+}
+
+export fn rz_ui_render_pc_viewer_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PCViewer, wire_gen.decodePCView, dialogs_b.renderPCViewer, wire_gen.msg_p_c_view, state, len, out_len);
+}
+
+export fn rz_ui_render_pc_gpu_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PCGpu, wire_gen.decodePCGpu, dialogs_b.renderPCGpu, wire_gen.msg_p_c_gpu, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

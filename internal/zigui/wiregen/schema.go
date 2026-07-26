@@ -394,7 +394,7 @@ var schema = []msg{
 	{
 		name: "UiStatus", goT: "uiStatus", zigT: "c.Status", id: 48,
 		doc: "one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else",
-		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
+		fs:  []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
 	},
 	{
 		name: "BridgeSess", goT: "bridgeSessSt", zigT: "sub.BridgeSess",
@@ -861,7 +861,7 @@ var schema = []msg{
 	{
 		name: "OvlAppr", goT: "ovlApprState", zigT: "overlays.Appearance", id: 46,
 		doc: "#ovl-appearance fragment (re-patched by the fader-flag cache)",
-		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), li(3, "Btns", "btns", "UiBtn"), st(4, "Fader", "fader", "UiToggle"), s(5, "Note2", "note2")},
+		fs:  []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), li(3, "Btns", "btns", "UiBtn"), st(4, "Fader", "fader", "UiToggle"), s(5, "Note2", "note2")},
 	},
 	{
 		name: "OvlWeb", goT: "ovlWebState", zigT: "overlays.Web",
@@ -882,7 +882,7 @@ var schema = []msg{
 	{
 		name: "OvlSpout", goT: "ovlSpoutState", zigT: "overlays.Spout", id: 47,
 		doc: "#ovl-spout fragment (re-rendered on install completion)",
-		fs: []field{s(1, "Note", "note"), s(2, "StatusLine", "statusLine"), s(3, "InstallLbl", "installLbl"), b(4, "CanInstall", "canInstall"), s(5, "OpenSdk", "openSdk"), s(6, "SdkURL", "sdkUrl")},
+		fs:  []field{s(1, "Note", "note"), s(2, "StatusLine", "statusLine"), s(3, "InstallLbl", "installLbl"), b(4, "CanInstall", "canInstall"), s(5, "OpenSdk", "openSdk"), s(6, "SdkURL", "sdkUrl")},
 	},
 	{
 		name: "OvlVS", goT: "ovlVSState", zigT: "overlays.VideoShare",
@@ -891,12 +891,12 @@ var schema = []msg{
 	{
 		name: "OvlStrip", goT: "ovlStripState", zigT: "overlays.Strip", id: 49,
 		doc: "#ovl-strip fragment (outputs summary)",
-		fs: []field{s(1, "Parts", "parts"), s(2, "Hint", "hint"), s(3, "Right", "right")},
+		fs:  []field{s(1, "Parts", "parts"), s(2, "Hint", "hint"), s(3, "Right", "right")},
 	},
 	{
 		name: "OvlState", goT: "ovlState", zigT: "overlays.State", id: 45,
 		doc: "Overlays tab (full view)",
-		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
 	},
 	// twitch: full tab + #twitch-obs + #twitch-presets + #twitch-feed (the feed is patched on
 	// EVERY chat/alert event - the hot path this tab moves to the wire for).
@@ -915,22 +915,168 @@ var schema = []msg{
 	{
 		name: "TwObs", goT: "twObsState", zigT: "twitch.Obs", id: 51,
 		doc: "#twitch-obs fragment (viewer count + cockpit)",
-		fs: []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
+		fs:  []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
 	},
 	{
 		name: "TwPresets", goT: "twPresetsState", zigT: "twitch.Presets", id: 52,
 		doc: "#twitch-presets fragment (title-preset chip strip)",
-		fs: []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
+		fs:  []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
 	},
 	{
 		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53,
 		doc: "#twitch-feed inner fragment (patched on every chat/alert event)",
-		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
+		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
 	},
 	{
 		name: "TwState", goT: "twState", zigT: "twitch.State", id: 50,
 		doc: "Twitch tab (full view)",
-		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+	},
+	// midi mixer (i3): full tab (root 57) + the three live patch targets - #midi-active (54,
+	// ~1 Hz), #midi-monitor rows (55, ~1 Hz), #midi-ctlstat-<i> (56, ~1 Hz) - plus the two pcv
+	// modals (58/59, dialogs_b renderers). Tooltip/ss-label dual fields ride as kOptPtr like
+	// tip2's composition; LearnGrid.ChHdrs is the second []string on the wire.
+	{
+		name: "MidiActive", goT: "midiActiveState", zigT: "midictl.Active", id: 54,
+		doc: "#midi-active status line (~1 Hz patch target)",
+		fs:  []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "LabelDL", "labelDl"), s(4, "Line", "line")},
+	},
+	{
+		name: "MidiMonRow", goT: "midiMonRow", zigT: "midimon.Row",
+		fs: []field{s(1, "Ago", "ago"), s(2, "Src", "src"), s(3, "Msg", "msg")},
+	},
+	{
+		name: "MidiMonLines", goT: "midiMonLines", zigT: "midimon.Lines", id: 55,
+		doc: "#midi-monitor inner rows (~1 Hz patch target)",
+		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "MidiMonRow")},
+	},
+	{
+		name: "MidiMonState", goT: "midiMonState", zigT: "midimon.State",
+		fs: []field{s(1, "Card", "card"), s(2, "Badge", "badge"), s(3, "Sub", "sub"), st(4, "Lines", "lines", "MidiMonLines")},
+	},
+	{
+		name: "MidiTraceRow", goT: "midiTraceRow", zigT: "midimon.TraceRow",
+		fs: []field{s(1, "DT", "dt"), s(2, "Dir", "dir"), s(3, "Label", "label"), s(4, "Hex", "hex"), s(5, "Len", "len"), s(6, "Dec", "dec")},
+	},
+	{
+		name: "MidiTrace", goT: "midiTraceState", zigT: "midimon.Trace",
+		fs: []field{s(1, "Hdr", "hdr"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), s(4, "Empty", "empty"), li(5, "Rows", "rows", "MidiTraceRow"), s(6, "Refresh", "refresh"), s(7, "Close", "close")},
+	},
+	{
+		name: "MidiLink", goT: "midiLinkState", zigT: "ctls.Link",
+		fs: []field{s(1, "Label", "label"), s(2, "URL", "url")},
+	},
+	{
+		name: "MidiPortStat", goT: "midiPortStat", zigT: "ctls.PortStat", id: 56,
+		doc: "#midi-ctlstat-<i> inner status (~1 Hz patch target)",
+		fs:  []field{b(1, "HasRow", "hasRow"), s(2, "Variant", "variant"), s(3, "Label", "label"), s(4, "LabelDL", "labelDl"), s(5, "Line", "line"), s(6, "Hint", "hint"), b(7, "HasAct", "hasAct"), s(8, "Act", "act"), s(9, "ActMsg", "actMsg")},
+	},
+	{
+		name: "MidiChip", goT: "midiChipState", zigT: "ctls.Chip",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act"), b(3, "Active", "active")},
+	},
+	{
+		name: "MidiDrvThru", goT: "midiDrvThru", zigT: "ctls.DrvThru",
+		fs: []field{b(1, "Show", "show"), s(2, "UseInDJ", "useInDj"), s(3, "Port", "port"), s(4, "CloneLbl", "cloneLbl"), s(5, "CloneDL", "cloneDl"), s(6, "CloneAct", "cloneAct"), b(7, "CloneOn", "cloneOn"), s(8, "CloneNote", "cloneNote"), s(9, "DrvNote", "drvNote"), b(10, "HasState", "hasState"), s(11, "StVariant", "stVariant"), s(12, "StLabel", "stLabel"), s(13, "StLabelDL", "stLabelDl"), s(14, "StLine", "stLine"), s(15, "FilterLbl", "filterLbl"), s(16, "FilterTip", "filterTip"), op(17, "FilterTipS", "filterTipSt", "Tip"), li(18, "Chips", "chips", "MidiChip")},
+	},
+	{
+		name: "MidiWarn", goT: "midiWarnState", zigT: "ctls.Warn",
+		fs: []field{b(1, "Show", "show"), s(2, "Label", "label"), s(3, "LabelDL", "labelDl"), s(4, "Line", "line"), s(5, "Hint", "hint")},
+	},
+	{
+		name: "MidiLearnCell", goT: "midiLearnCell", zigT: "ctls.LearnCell",
+		fs: []field{s(1, "Act", "act"), s(2, "ClearAct", "clearAct"), s(3, "Tid", "tid"), b(4, "Set", "set"), s(5, "Readout", "readout")},
+	},
+	{
+		name: "MidiLearnRow", goT: "midiLearnRow", zigT: "ctls.LearnRow",
+		fs: []field{s(1, "Label", "label"), li(2, "Cells", "cells", "MidiLearnCell")},
+	},
+	{
+		name: "MidiLearnGrid", goT: "midiLearnGridState", zigT: "ctls.LearnGrid",
+		fs: []field{s(1, "Hdr", "hdr"), s(2, "HdrTip", "hdrTip"), op(3, "HdrTipS", "hdrTipSt", "Tip"), s(4, "Cols", "cols"), sl(5, "ChHdrs", "chHdrs"), li(6, "Rows", "rows", "MidiLearnRow"), s(7, "Learn", "learn"), s(8, "Relearn", "relearn"), s(9, "Clear", "clear")},
+	},
+	{
+		name: "MidiCtlBlock", goT: "midiCtlBlock", zigT: "ctls.Block",
+		fs: []field{s(1, "Tid", "tid"), s(2, "Title", "title"), s(3, "StatID", "statId"), st(4, "Port", "port", "SelState"), s(5, "PortLbl", "portLbl"), op(6, "PortLblS", "portLblSt", "SsLabel"), st(7, "Stat", "stat", "MidiPortStat"), s(8, "EnableLbl", "enableLbl"), s(9, "EnableDL", "enableDl"), s(10, "EnableAct", "enableAct"), b(11, "EnableOn", "enableOn"), st(12, "Thru", "thru", "SelState"), s(13, "ThruLbl", "thruLbl"), op(14, "ThruLblS", "thruLblSt", "SsLabel"), st(15, "DrvThru", "drvThru", "MidiDrvThru"), st(16, "Warn", "warn", "MidiWarn"), s(17, "Remove", "remove"), s(18, "RemoveAct", "removeAct"), st(19, "Grid", "grid", "MidiLearnGrid")},
+	},
+	{
+		name: "MidiCtls", goT: "midiCtlsState", zigT: "ctls.State",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "Intro", "intro"), s(5, "IntroTip", "introTip"), op(6, "IntroTipS", "introTipSt", "Tip"), s(7, "LinksLbl", "linksLbl"), li(8, "Links", "links", "MidiLink"), s(9, "Empty", "empty"), li(10, "Blocks", "blocks", "MidiCtlBlock"), s(11, "Add", "add")},
+	},
+	{
+		name: "MidiBridge", goT: "midiBridgeState", zigT: "ctls.Bridge",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "Intro", "intro"), s(5, "IntroTip", "introTip"), op(6, "IntroTipS", "introTipSt", "Tip"), s(7, "EnableLbl", "enableLbl"), s(8, "EnableDL", "enableDl"), s(9, "EnableAct", "enableAct"), b(10, "EnableOn", "enableOn"), s(11, "EnableTip", "enableTip"), op(12, "EnableTipS", "enableTipSt", "Tip"), st(13, "ToDJ", "toDj", "SelState"), s(14, "ToDJLbl", "toDjLbl"), op(15, "ToDJLblS", "toDjLblSt", "SsLabel"), st(16, "FromDJ", "fromDj", "SelState"), s(17, "FromDJLbl", "fromDjLbl"), op(18, "FromDJLblS", "fromDjLblSt", "SsLabel")},
+	},
+	{
+		name: "UmTrail", goT: "umTrail", zigT: "uimap.Trail",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Sel", "sel", "SelState"), s(3, "Label", "label"), s(4, "Var", "@\"var\""), s(5, "Act", "act")},
+	},
+	{
+		name: "UmRow", goT: "umRow", zigT: "uimap.Row",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Trail", "trail", "UmTrail")},
+	},
+	{
+		name: "UmProfileRow", goT: "umProfileRow", zigT: "uimap.Profile",
+		fs: []field{st(1, "Row", "row", "UmRow"), b(2, "HasBinds", "hasBinds"), s(3, "Empty", "empty"), li(4, "Binds", "binds", "UmRow")},
+	},
+	{
+		name: "UmState", goT: "umState", zigT: "uimap.State",
+		fs: []field{b(1, "Show", "show"), s(2, "Title", "title"), s(3, "TitleTip", "titleTip"), op(4, "TitleTipS", "titleTipSt", "Tip"), s(5, "Sub", "sub"), s(6, "EnableLbl", "enableLbl"), s(7, "EnableDL", "enableDl"), s(8, "EnableAct", "enableAct"), b(9, "EnableOn", "enableOn"), s(10, "EnableTip", "enableTip"), op(11, "EnableTipS", "enableTipSt", "Tip"), st(12, "Add", "add", "UmRow"), li(13, "Profiles", "profiles", "UmProfileRow"), s(14, "Note", "note")},
+	},
+	{
+		name: "MidiPortCard", goT: "midiPortCard", zigT: "midictl.PortCard",
+		fs: []field{s(1, "Card", "card"), s(2, "Sub", "sub"), st(3, "Port", "port", "SelState"), st(4, "Active", "active", "MidiActive"), s(5, "Panic", "panic")},
+	},
+	{
+		name: "MidiDrvInput", goT: "midiDrvInput", zigT: "midictl.DrvInput",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "NameDL", "nameDl"), s(4, "Line", "line"), s(5, "FbHint", "fbHint"), b(6, "HasBtns", "hasBtns"), s(7, "TraceLbl", "traceLbl"), s(8, "TraceAct", "traceAct"), b(9, "FbTest", "fbTest"), s(10, "FbTestLbl", "fbTestLbl"), s(11, "FbTestAct", "fbTestAct"), s(12, "FbTip", "fbTip"), op(13, "FbTipS", "fbTipSt", "Tip"), b(14, "FbRes", "fbRes"), s(15, "FbResVar", "fbResVar"), s(16, "FbResLbl", "fbResLbl"), s(17, "FbResDL", "fbResDl"), s(18, "FbResLine", "fbResLine")},
+	},
+	{
+		name: "MidiDrvManaged", goT: "midiDrvManaged", zigT: "midictl.DrvManaged",
+		fs: []field{s(1, "Hdr", "hdr"), s(2, "Sub", "sub"), s(3, "SyncErr", "syncErr"), b(4, "HasQueryErr", "hasQueryErr"), s(5, "QueryErr", "queryErr"), s(6, "NoneManaged", "noneManaged"), li(7, "Inputs", "inputs", "MidiDrvInput"), b(8, "ShowTrace", "showTrace"), st(9, "Trace", "trace", "MidiTrace"), s(10, "Reapply", "reapply"), s(11, "Reload", "reload")},
+	},
+	{
+		name: "MidiDrvCard", goT: "midiDrvCard", zigT: "midictl.DrvCard",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "BadgeVar", "badgeVar"), s(5, "Why", "why"), s(6, "StVariant", "stVariant"), s(7, "StLabel", "stLabel"), s(8, "StLabelDL", "stLabelDl"), s(9, "StLine", "stLine"), b(10, "Installed", "installed"), s(11, "TestSign", "testSign"), s(12, "Steps", "steps"), s(13, "Cmds", "cmds"), s(14, "SmartScreen", "smartScreen"), st(15, "Managed", "managed", "MidiDrvManaged"), s(16, "Docs", "docs"), s(17, "DocsURL", "docsUrl")},
+	},
+	{
+		name: "MidiKnob", goT: "midiKnobState", zigT: "midictl.Knob",
+		fs: []field{s(1, "DL", "dl"), s(2, "V", "v"), s(3, "Rot", "rot"), s(4, "Val", "val"), s(5, "Act", "act"), s(6, "Tid", "tid"), s(7, "Aria", "aria"), s(8, "Label", "label"), s(9, "CC", "cc"), s(10, "SweepAct", "sweepAct"), s(11, "SweepTitle", "sweepTitle"), s(12, "SweepAria", "sweepAria"), s(13, "SweepGlyph", "sweepGlyph")},
+	},
+	{
+		name: "MidiMom", goT: "midiMomState", zigT: "midictl.Mom",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Act", "act"), s(3, "Tid", "tid"), s(4, "DL", "dl"), s(5, "Aria", "aria"), s(6, "Label", "label"), s(7, "CC", "cc")},
+	},
+	{
+		name: "MidiStrip", goT: "midiStripState", zigT: "midictl.Strip",
+		fs: []field{s(1, "Head", "head"), li(2, "Knobs", "knobs", "MidiKnob"), li(3, "Faders", "faders", "MidiKnob"), li(4, "Btns", "btns", "MidiMom")},
+	},
+	{
+		name: "MidiRack", goT: "midiRackState", zigT: "midictl.Rack",
+		fs: []field{s(1, "Card", "card"), s(2, "StepLbl", "stepLbl"), s(3, "N", "n"), s(4, "Dec", "dec"), s(5, "Inc", "inc"), b(6, "MinusOff", "minusOff"), b(7, "PlusOff", "plusOff"), s(8, "Sub", "sub"), li(9, "Strips", "strips", "MidiStrip")},
+	},
+	{
+		name: "MidiSwRow", goT: "midiSwRow", zigT: "midictl.SwRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Badge", "badge"), s(3, "BadgeVar", "badgeVar"), s(4, "Note", "note")},
+	},
+	{
+		name: "MidiHelp", goT: "midiHelpState", zigT: "midictl.Help",
+		fs: []field{s(1, "Card", "card"), s(2, "Badge", "badge"), s(3, "Step1", "step1"), s(4, "Step2", "step2"), s(5, "Step3", "step3"), s(6, "Feedback", "feedback"), s(7, "Caveat", "caveat"), s(8, "Link", "link"), s(9, "SwHdr", "swHdr"), li(10, "Rows", "rows", "MidiSwRow")},
+	},
+	{
+		name: "MidiCtl", goT: "midiCtlState", zigT: "midictl.State", id: 57,
+		doc: "MIDI Mixer tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Ctls", "ctls", "MidiCtls"), st(4, "UIMap", "uimap", "UmState"), b(5, "ShowMon", "showMon"), st(6, "Mon", "mon", "MidiMonState"), st(7, "Port", "port", "MidiPortCard"), st(8, "Driver", "driver", "MidiDrvCard"), st(9, "Rack", "rack", "MidiRack"), st(10, "Bridge", "bridge", "MidiBridge"), st(11, "Help", "help", "MidiHelp")},
+	},
+	{
+		name: "PCView", goT: "moPCViewSt", zigT: "dialogs_b.PCViewer", id: 58,
+		doc: "point-cloud viewer modal shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "PlayLabel", "playLabel"), s(3, "MaxFrame", "maxFrame"), s(4, "Hint", "hint"), s(5, "Close", "close")},
+	},
+	{
+		name: "PCGpu", goT: "moPCGpuSt", zigT: "dialogs_b.PCGpu", id: 59,
+		doc: "point-cloud GPU prompt modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Msg", "msg"), b(3, "Enabled", "enabled"), s(4, "EnableLabel", "enableLabel"), s(5, "Close", "close")},
 	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
@@ -992,6 +1138,11 @@ var zigImports = [][2]string{
 	// --- phase B7 fan-out ---
 	{"overlays", "overlays.zig"},
 	{"twitch", "twitch.zig"},
+	{"midictl", "midictl.zig"},
+	{"ctls", "midictl_ctls.zig"},
+	{"uimap", "midictl_uimap.zig"},
+	{"midimon", "midimon.zig"},
+	{"dialogs_b", "dialogs_b.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

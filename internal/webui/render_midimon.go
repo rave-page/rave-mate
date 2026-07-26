@@ -101,7 +101,8 @@ func (u *UI) midiMonLinesState() midiMonLines {
 func (u *UI) midiMonitorInner() string {
 	st := u.midiMonLinesState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderMIDIMonRows(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMIDIMonRowsV2", wireMidiMonLines(st), zigui.RenderMIDIMonRowsV2,
+			zigui.RenderMIDIMonRows, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

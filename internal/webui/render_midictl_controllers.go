@@ -478,7 +478,8 @@ func (u *UI) midiPortStatState(c config.MIDIControllerMap, ctx midiCtlRenderCtx)
 func (u *UI) midiCtlPortStatusInner(c config.MIDIControllerMap, ctx midiCtlRenderCtx) string {
 	st := u.midiPortStatState(c, ctx)
 	if zigui.Available() {
-		if h, ok := zigui.RenderMIDICtlStat(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderMIDICtlStatV2", wireMidiPortStat(st), zigui.RenderMIDICtlStatV2,
+			zigui.RenderMIDICtlStat, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

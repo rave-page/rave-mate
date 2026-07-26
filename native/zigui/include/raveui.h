@@ -293,6 +293,12 @@ const uint8_t *rz_ui_render_twitch_v2(const uint8_t *state, size_t len, size_t *
 const uint8_t *rz_ui_render_twitch_obs_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_twitch_presets_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_twitch_feed_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midictl_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midictl_active_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midictl_stat_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_midimon_rows_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_viewer_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_pc_gpu_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

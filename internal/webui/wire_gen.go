@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x0f4dde8e
+	wireSchemaHash       uint32 = 0x3d09786b
 	wireMsgAgState       uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -55,6 +55,12 @@ const (
 	wireMsgTwObs         uint16 = 51  // #twitch-obs fragment (viewer count + cockpit)
 	wireMsgTwPresets     uint16 = 52  // #twitch-presets fragment (title-preset chip strip)
 	wireMsgTwFeed        uint16 = 53  // #twitch-feed inner fragment (patched on every chat/alert event)
+	wireMsgMidiActive    uint16 = 54  // #midi-active status line (~1 Hz patch target)
+	wireMsgMidiMonLines  uint16 = 55  // #midi-monitor inner rows (~1 Hz patch target)
+	wireMsgMidiPortStat  uint16 = 56  // #midi-ctlstat-<i> inner status (~1 Hz patch target)
+	wireMsgMidiCtl       uint16 = 57  // MIDI Mixer tab (full view)
+	wireMsgPCView        uint16 = 58  // point-cloud viewer modal shell
+	wireMsgPCGpu         uint16 = 59  // point-cloud GPU prompt modal
 	wireMsgTkLive        uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
 	wireMsgTkLogs        uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
 )
@@ -2014,6 +2020,404 @@ func (v twState) encodeWire(w *zigui.WireWriter) {
 	w.Str(14, v.SendLbl)
 }
 
+func (v midiActiveState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Variant)
+	w.Str(2, v.Label)
+	w.Str(3, v.LabelDL)
+	w.Str(4, v.Line)
+}
+
+func (v midiMonRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Ago)
+	w.Str(2, v.Src)
+	w.Str(3, v.Msg)
+}
+
+func (v midiMonLines) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Empty)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v midiMonState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Card)
+	w.Str(2, v.Badge)
+	w.Str(3, v.Sub)
+	w.Struct(4, func() { v.Lines.encodeWire(w) })
+}
+
+func (v midiTraceRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.DT)
+	w.Str(2, v.Dir)
+	w.Str(3, v.Label)
+	w.Str(4, v.Hex)
+	w.Str(5, v.Len)
+	w.Str(6, v.Dec)
+}
+
+func (v midiTraceState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Hdr)
+	w.Bool(2, v.HasErr)
+	w.Str(3, v.Err)
+	w.Str(4, v.Empty)
+	w.List(5, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(6, v.Refresh)
+	w.Str(7, v.Close)
+}
+
+func (v midiLinkState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.URL)
+}
+
+func (v midiPortStat) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.HasRow)
+	w.Str(2, v.Variant)
+	w.Str(3, v.Label)
+	w.Str(4, v.LabelDL)
+	w.Str(5, v.Line)
+	w.Str(6, v.Hint)
+	w.Bool(7, v.HasAct)
+	w.Str(8, v.Act)
+	w.Str(9, v.ActMsg)
+}
+
+func (v midiChipState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.Str(2, v.Act)
+	w.Bool(3, v.Active)
+}
+
+func (v midiDrvThru) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.UseInDJ)
+	w.Str(3, v.Port)
+	w.Str(4, v.CloneLbl)
+	w.Str(5, v.CloneDL)
+	w.Str(6, v.CloneAct)
+	w.Bool(7, v.CloneOn)
+	w.Str(8, v.CloneNote)
+	w.Str(9, v.DrvNote)
+	w.Bool(10, v.HasState)
+	w.Str(11, v.StVariant)
+	w.Str(12, v.StLabel)
+	w.Str(13, v.StLabelDL)
+	w.Str(14, v.StLine)
+	w.Str(15, v.FilterLbl)
+	w.Str(16, v.FilterTip)
+	if v.FilterTipS != nil {
+		w.OptStruct(17, func() { v.FilterTipS.encodeWire(w) })
+	}
+	w.List(18, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+}
+
+func (v midiWarnState) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Label)
+	w.Str(3, v.LabelDL)
+	w.Str(4, v.Line)
+	w.Str(5, v.Hint)
+}
+
+func (v midiLearnCell) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Act)
+	w.Str(2, v.ClearAct)
+	w.Str(3, v.Tid)
+	w.Bool(4, v.Set)
+	w.Str(5, v.Readout)
+}
+
+func (v midiLearnRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Label)
+	w.List(2, len(v.Cells), func(i int) { v.Cells[i].encodeWire(w) })
+}
+
+func (v midiLearnGridState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Hdr)
+	w.Str(2, v.HdrTip)
+	if v.HdrTipS != nil {
+		w.OptStruct(3, func() { v.HdrTipS.encodeWire(w) })
+	}
+	w.Str(4, v.Cols)
+	w.StrList(5, v.ChHdrs)
+	w.List(6, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+	w.Str(7, v.Learn)
+	w.Str(8, v.Relearn)
+	w.Str(9, v.Clear)
+}
+
+func (v midiCtlBlock) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Tid)
+	w.Str(2, v.Title)
+	w.Str(3, v.StatID)
+	w.Struct(4, func() { v.Port.encodeWire(w) })
+	w.Str(5, v.PortLbl)
+	if v.PortLblS != nil {
+		w.OptStruct(6, func() { v.PortLblS.encodeWire(w) })
+	}
+	w.Struct(7, func() { v.Stat.encodeWire(w) })
+	w.Str(8, v.EnableLbl)
+	w.Str(9, v.EnableDL)
+	w.Str(10, v.EnableAct)
+	w.Bool(11, v.EnableOn)
+	w.Struct(12, func() { v.Thru.encodeWire(w) })
+	w.Str(13, v.ThruLbl)
+	if v.ThruLblS != nil {
+		w.OptStruct(14, func() { v.ThruLblS.encodeWire(w) })
+	}
+	w.Struct(15, func() { v.DrvThru.encodeWire(w) })
+	w.Struct(16, func() { v.Warn.encodeWire(w) })
+	w.Str(17, v.Remove)
+	w.Str(18, v.RemoveAct)
+	w.Struct(19, func() { v.Grid.encodeWire(w) })
+}
+
+func (v midiCtlsState) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Card)
+	w.Str(3, v.Badge)
+	w.Str(4, v.Intro)
+	w.Str(5, v.IntroTip)
+	if v.IntroTipS != nil {
+		w.OptStruct(6, func() { v.IntroTipS.encodeWire(w) })
+	}
+	w.Str(7, v.LinksLbl)
+	w.List(8, len(v.Links), func(i int) { v.Links[i].encodeWire(w) })
+	w.Str(9, v.Empty)
+	w.List(10, len(v.Blocks), func(i int) { v.Blocks[i].encodeWire(w) })
+	w.Str(11, v.Add)
+}
+
+func (v midiBridgeState) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Card)
+	w.Str(3, v.Badge)
+	w.Str(4, v.Intro)
+	w.Str(5, v.IntroTip)
+	if v.IntroTipS != nil {
+		w.OptStruct(6, func() { v.IntroTipS.encodeWire(w) })
+	}
+	w.Str(7, v.EnableLbl)
+	w.Str(8, v.EnableDL)
+	w.Str(9, v.EnableAct)
+	w.Bool(10, v.EnableOn)
+	w.Str(11, v.EnableTip)
+	if v.EnableTipS != nil {
+		w.OptStruct(12, func() { v.EnableTipS.encodeWire(w) })
+	}
+	w.Struct(13, func() { v.ToDJ.encodeWire(w) })
+	w.Str(14, v.ToDJLbl)
+	if v.ToDJLblS != nil {
+		w.OptStruct(15, func() { v.ToDJLblS.encodeWire(w) })
+	}
+	w.Struct(16, func() { v.FromDJ.encodeWire(w) })
+	w.Str(17, v.FromDJLbl)
+	if v.FromDJLblS != nil {
+		w.OptStruct(18, func() { v.FromDJLblS.encodeWire(w) })
+	}
+}
+
+func (v umTrail) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Struct(2, func() { v.Sel.encodeWire(w) })
+	w.Str(3, v.Label)
+	w.Str(4, v.Var)
+	w.Str(5, v.Act)
+}
+
+func (v umRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.List(3, len(v.Trail), func(i int) { v.Trail[i].encodeWire(w) })
+}
+
+func (v umProfileRow) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Row.encodeWire(w) })
+	w.Bool(2, v.HasBinds)
+	w.Str(3, v.Empty)
+	w.List(4, len(v.Binds), func(i int) { v.Binds[i].encodeWire(w) })
+}
+
+func (v umState) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Title)
+	w.Str(3, v.TitleTip)
+	if v.TitleTipS != nil {
+		w.OptStruct(4, func() { v.TitleTipS.encodeWire(w) })
+	}
+	w.Str(5, v.Sub)
+	w.Str(6, v.EnableLbl)
+	w.Str(7, v.EnableDL)
+	w.Str(8, v.EnableAct)
+	w.Bool(9, v.EnableOn)
+	w.Str(10, v.EnableTip)
+	if v.EnableTipS != nil {
+		w.OptStruct(11, func() { v.EnableTipS.encodeWire(w) })
+	}
+	w.Struct(12, func() { v.Add.encodeWire(w) })
+	w.List(13, len(v.Profiles), func(i int) { v.Profiles[i].encodeWire(w) })
+	w.Str(14, v.Note)
+}
+
+func (v midiPortCard) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Card)
+	w.Str(2, v.Sub)
+	w.Struct(3, func() { v.Port.encodeWire(w) })
+	w.Struct(4, func() { v.Active.encodeWire(w) })
+	w.Str(5, v.Panic)
+}
+
+func (v midiDrvInput) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Variant)
+	w.Str(2, v.Name)
+	w.Str(3, v.NameDL)
+	w.Str(4, v.Line)
+	w.Str(5, v.FbHint)
+	w.Bool(6, v.HasBtns)
+	w.Str(7, v.TraceLbl)
+	w.Str(8, v.TraceAct)
+	w.Bool(9, v.FbTest)
+	w.Str(10, v.FbTestLbl)
+	w.Str(11, v.FbTestAct)
+	w.Str(12, v.FbTip)
+	if v.FbTipS != nil {
+		w.OptStruct(13, func() { v.FbTipS.encodeWire(w) })
+	}
+	w.Bool(14, v.FbRes)
+	w.Str(15, v.FbResVar)
+	w.Str(16, v.FbResLbl)
+	w.Str(17, v.FbResDL)
+	w.Str(18, v.FbResLine)
+}
+
+func (v midiDrvManaged) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Hdr)
+	w.Str(2, v.Sub)
+	w.Str(3, v.SyncErr)
+	w.Bool(4, v.HasQueryErr)
+	w.Str(5, v.QueryErr)
+	w.Str(6, v.NoneManaged)
+	w.List(7, len(v.Inputs), func(i int) { v.Inputs[i].encodeWire(w) })
+	w.Bool(8, v.ShowTrace)
+	w.Struct(9, func() { v.Trace.encodeWire(w) })
+	w.Str(10, v.Reapply)
+	w.Str(11, v.Reload)
+}
+
+func (v midiDrvCard) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.Card)
+	w.Str(3, v.Badge)
+	w.Str(4, v.BadgeVar)
+	w.Str(5, v.Why)
+	w.Str(6, v.StVariant)
+	w.Str(7, v.StLabel)
+	w.Str(8, v.StLabelDL)
+	w.Str(9, v.StLine)
+	w.Bool(10, v.Installed)
+	w.Str(11, v.TestSign)
+	w.Str(12, v.Steps)
+	w.Str(13, v.Cmds)
+	w.Str(14, v.SmartScreen)
+	w.Struct(15, func() { v.Managed.encodeWire(w) })
+	w.Str(16, v.Docs)
+	w.Str(17, v.DocsURL)
+}
+
+func (v midiKnobState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.DL)
+	w.Str(2, v.V)
+	w.Str(3, v.Rot)
+	w.Str(4, v.Val)
+	w.Str(5, v.Act)
+	w.Str(6, v.Tid)
+	w.Str(7, v.Aria)
+	w.Str(8, v.Label)
+	w.Str(9, v.CC)
+	w.Str(10, v.SweepAct)
+	w.Str(11, v.SweepTitle)
+	w.Str(12, v.SweepAria)
+	w.Str(13, v.SweepGlyph)
+}
+
+func (v midiMomState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Cls)
+	w.Str(2, v.Act)
+	w.Str(3, v.Tid)
+	w.Str(4, v.DL)
+	w.Str(5, v.Aria)
+	w.Str(6, v.Label)
+	w.Str(7, v.CC)
+}
+
+func (v midiStripState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Head)
+	w.List(2, len(v.Knobs), func(i int) { v.Knobs[i].encodeWire(w) })
+	w.List(3, len(v.Faders), func(i int) { v.Faders[i].encodeWire(w) })
+	w.List(4, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+}
+
+func (v midiRackState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Card)
+	w.Str(2, v.StepLbl)
+	w.Str(3, v.N)
+	w.Str(4, v.Dec)
+	w.Str(5, v.Inc)
+	w.Bool(6, v.MinusOff)
+	w.Bool(7, v.PlusOff)
+	w.Str(8, v.Sub)
+	w.List(9, len(v.Strips), func(i int) { v.Strips[i].encodeWire(w) })
+}
+
+func (v midiSwRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Str(2, v.Badge)
+	w.Str(3, v.BadgeVar)
+	w.Str(4, v.Note)
+}
+
+func (v midiHelpState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Card)
+	w.Str(2, v.Badge)
+	w.Str(3, v.Step1)
+	w.Str(4, v.Step2)
+	w.Str(5, v.Step3)
+	w.Str(6, v.Feedback)
+	w.Str(7, v.Caveat)
+	w.Str(8, v.Link)
+	w.Str(9, v.SwHdr)
+	w.List(10, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v midiCtlState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Struct(3, func() { v.Ctls.encodeWire(w) })
+	w.Struct(4, func() { v.UIMap.encodeWire(w) })
+	w.Bool(5, v.ShowMon)
+	w.Struct(6, func() { v.Mon.encodeWire(w) })
+	w.Struct(7, func() { v.Port.encodeWire(w) })
+	w.Struct(8, func() { v.Driver.encodeWire(w) })
+	w.Struct(9, func() { v.Rack.encodeWire(w) })
+	w.Struct(10, func() { v.Bridge.encodeWire(w) })
+	w.Struct(11, func() { v.Help.encodeWire(w) })
+}
+
+func (v moPCViewSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.PlayLabel)
+	w.Str(3, v.MaxFrame)
+	w.Str(4, v.Hint)
+	w.Str(5, v.Close)
+}
+
+func (v moPCGpuSt) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Msg)
+	w.Bool(3, v.Enabled)
+	w.Str(4, v.EnableLabel)
+	w.Str(5, v.Close)
+}
+
 func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Text)
 	if v.Tip != nil {
@@ -2362,6 +2766,48 @@ func wireTwPresets(v twPresetsState) []byte {
 // wireTwFeed encodes twFeedState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireTwFeed(v twFeedState) []byte {
 	w := zigui.NewWireWriter(wireMsgTwFeed, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMidiActive encodes midiActiveState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMidiActive(v midiActiveState) []byte {
+	w := zigui.NewWireWriter(wireMsgMidiActive, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMidiMonLines encodes midiMonLines as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMidiMonLines(v midiMonLines) []byte {
+	w := zigui.NewWireWriter(wireMsgMidiMonLines, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMidiPortStat encodes midiPortStat as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMidiPortStat(v midiPortStat) []byte {
+	w := zigui.NewWireWriter(wireMsgMidiPortStat, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireMidiCtl encodes midiCtlState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireMidiCtl(v midiCtlState) []byte {
+	w := zigui.NewWireWriter(wireMsgMidiCtl, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wirePCView encodes moPCViewSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wirePCView(v moPCViewSt) []byte {
+	w := zigui.NewWireWriter(wireMsgPCView, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wirePCGpu encodes moPCGpuSt as an RZW1 document (nil = over-size; caller falls back to v1).
+func wirePCGpu(v moPCGpuSt) []byte {
+	w := zigui.NewWireWriter(wireMsgPCGpu, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
