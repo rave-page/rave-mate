@@ -40,8 +40,10 @@ cd ../../../zigui
 "$ZIG" build -Drelease ${target:+-Dtarget=$target}
 cd zig-out/lib
 case "$target" in *windows*|"") if [ -f raveui.lib ]; then cp -f raveui.lib libraveui.a; fi ;; *) rm -f raveui.lib ;; esac
-ls -la
-echo "raveui built ($ver, ${target:-native})"
+ls -la ../bin 2>/dev/null || ls -la
+# zig-out/bin/rave-shell.exe (windows targets): B6 PSH1 window child, opt-in via
+# config features.ui.shellImpl="zig" (ship beside rave-mate.exe).
+echo "raveui + rave-shell built ($ver, ${target:-native})"
 
 # --- zigvr: VR-overlay raster lib (native/zigvr → libravevr.a, Go tag `zigvr`) ---
 cd ../../../zigvr
