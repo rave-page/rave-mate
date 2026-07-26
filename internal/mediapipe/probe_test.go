@@ -168,6 +168,15 @@ func contains(xs []string, want string) bool {
 // ProbeListing must stay test-encode-free (no NVENC session taken mid-stream) and must NOT poison
 // the validated cache - Cached() may only report a set that actually test-encoded.
 func TestProbeListingIsUnvalidatedAndDoesNotPoisonCache(t *testing.T) {
+	if vc, cached := Cached(); cached {
+		// Another test in this package already ran the full probe. Assert the documented preference
+		// (a validated result beats a listing) and stop - the caches are process-global.
+		c, ok := ProbeListing(context.Background(), nil)
+		if !ok || !c.Validated || !reflect.DeepEqual(c.Encoders, vc.Encoders) {
+			t.Errorf("with a validated probe cached, ProbeListing must return it verbatim: %+v", c)
+		}
+		return
+	}
 	c, ok := ProbeListing(context.Background(), nil)
 	if !ok {
 		t.Skip("ffmpeg unavailable")

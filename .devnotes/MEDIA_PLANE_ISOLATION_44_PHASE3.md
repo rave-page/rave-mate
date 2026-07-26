@@ -3,17 +3,23 @@
 Isolate medialink + mediaroute + webcam into ONE featurehost child (`rave-mate feature media`).
 Phases 1 (interface extraction) + 2 (mem-capped job) are committed. This is the cutover spec.
 
-**Status: BUILT + isolation-verified (commit 8379111).** `mediawire.go` + `feat_media.go` +
-`mediaproxy.go` + `SoftwareClock.MirrorNow` + app.go wiring all shipped, behind the
-`MediaLink.Subprocess` opt-IN flag (default OFF = in-proc, byte-identical). Enable via
-`config.json` → `features.mediaLink.subprocess: true` (or a future Settings toggle).
+**Status: BUILT + isolation-verified (commit 8379111); DEFAULT ON since 2026-07-26 (medialink QoS
+wave, WP-6).** `mediawire.go` + `feat_media.go` + `mediaproxy.go` + `SoftwareClock.MirrorNow` +
+app.go wiring all shipped. `MediaLink.Subprocess` is now a tri-state `*bool`: key absent = ON,
+explicit `false` = legacy in-proc escape hatch, explicit `true` = ON.
+
+Why the default moved before the cross-PC rig pass (deliberate, user-driven): the governor demotes
+the WHOLE daemon to below-normal while a stream is live, so an in-proc media plane is throttled
+exactly when a live route matters - the isolated child is not. The child also now carries
+`HeartbeatTimeout: 5s` (it beats from its 1 Hz telemetry loop) and a Go soft memory limit at 80% of
+its job-object RAM cap (pushed in via `mediaInit.MemLimitMB`). **The cross-PC verification below is
+still outstanding** - it is now a regression risk on the default path, not an opt-in path.
 
 Single-PC verified live: media child spawns (`feature:media`, listener `proc:media` = truly isolated);
 telemetry mirrors to the Peers-tab Media plane UI (clock quality, routes, webcam Instances); killing
 the child → host respawns it in ~1s with full state re-seeded from the Init snapshot; daemon + all
 other features survive; clean quit tears everything down (0 procs). NOT yet verified: actual cross-PC
-frame routing (StartReceive pulling frames) + caps propagation to a peer - needs the two-PC rig. Keep
-the default OFF until that passes; this is the subsystem that OOM'd a host and killed Parsec.
+frame routing (StartReceive pulling frames) + caps propagation to a peer - needs the two-PC rig. This is the subsystem that OOM'd a host and killed Parsec - the 2026-07-26 default flip means that rig pass is now a REGRESSION gate, and `subprocess: false` is the rollback.
 
 ## What crosses the boundary (only the Phase-1 interfaces)
 
@@ -84,9 +90,9 @@ connect (`secret` event, Secret set) and drop on disconnect (Secret nil). Re-pus
 `mediaInit.Secrets` every respawn (Host `Init` re-reads). Miss a re-push → child's AEAD socket silently
 fails to key that peer (routes advertise but never connect).
 
-## app.go swap (behind `MediaLink.InProc`, default in-proc)
+## app.go swap (behind `MediaLink.Subprocess`, now default ON)
 
-At ~556-605 / 736-739: if `!cfg.Features.MediaLink.InProc`, construct `mediaProxy`/`mediaRoutesProxy`/
+At ~556-605 / 736-739: if `cfg.Features.MediaLink.MediaSubprocess()`, construct `mediaProxy`/`mediaRoutesProxy`/
 `webcamProxy` instead of the in-proc managers; keep `mediaClock` + `tcPlane` daemon-side; wire the
 clock-offset mirror into `mediaClock`; hook `peerMgr` connect/disconnect → per-peer secret push; move
 `mediapipe.Factories` into the child. Update the `"peers"`+`"webcam"` module Start/Stop to drive
@@ -95,7 +101,6 @@ clock-offset mirror into `mediaClock`; hook `peerMgr` connect/disconnect → per
 
 ## Verify
 
-Build/vet/test. Then on the two-PC rig with `InProc=false`: media child spawns; kill it →
+Build/vet/test. Then on the two-PC rig (default config = isolated; `subprocess: false` for the in-proc comparison): media child spawns; kill it →
 respawns + re-pushes state; a peer sees this node's advert + CapCam; `StartReceive` pulls frames;
-SMPTE TC stays in the media-clock domain (check `ctl tc-status` offset tracks the child). Only flip
-the default to subprocess after that passes. NEVER drive a live route on the production machine mid-set.
+SMPTE TC stays in the media-clock domain (check `ctl tc-status` offset tracks the child). The default was flipped ahead of this pass (governor demotion made in-proc a liability), so these are regression checks on the shipping default; `subprocess: false` rolls back. NEVER drive a live route on the production machine mid-set.
