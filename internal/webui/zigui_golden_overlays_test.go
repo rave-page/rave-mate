@@ -38,7 +38,7 @@ func ovlFixtures() map[string]ovlState {
 				Note2: "Browser-owned keys survive.",
 			},
 			Web: ovlWebState{
-				Card:    ovlCardState{Title: "Browser overlay", StatusID: "ovl-st-web", Status: newStatus("muted", "Off", "")},
+				Card:    ovlCardState{Title: "Browser overlay", StatusID: "ovl-st-web", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-web", false)},
 				Port:    newField("Port", "set:overlay-port", "8787", "number"),
 				Btns:    []uiBtn{{Label: "Open overlay", Variant: "explore", Act: "open-url", Val: "http://127.0.0.1:8787/"}},
 				URL:     newKV("Overlay URL", "http://127.0.0.1:8787/"),
@@ -49,7 +49,7 @@ func ovlFixtures() map[string]ovlState {
 				Note2:   "Requires obs-websocket.",
 			},
 			Wave: ovlWaveState{
-				Card:      ovlCardState{Title: "Waveform", StatusID: "ovl-st-wave", Status: newStatus("muted", "Off", "")},
+				Card:      ovlCardState{Title: "Waveform", StatusID: "ovl-st-wave", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-wave", false)},
 				Note1:     "Scrolling waveform + EQ.",
 				Zoom:      sel("ovl-wf-zoom", "Zoom", "16 s", selRow{Val: "8", Label: "8 s"}, selRow{Val: "16", Label: "16 s", Cur: true}),
 				Playhead:  sel("ovl-wf-playhead", "Playhead", "Centre", selRow{Val: "0.5", Label: "Centre", Cur: true}),
@@ -60,23 +60,23 @@ func ovlFixtures() map[string]ovlState {
 				Note2:     "Colours accept CSS hex.",
 			},
 			Png: ovlDirState{
-				Card: ovlCardState{Title: "Deck PNGs", StatusID: "ovl-st-png", Status: newStatus("muted", "Off", "")},
+				Card: ovlCardState{Title: "Deck PNGs", StatusID: "ovl-st-png", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-png", false)},
 				Dir:  newField("Output folder", "ovl-png-dir", `C:\overlays`, "text"),
 				Open: uiBtn{Label: "Open folder", Variant: "outline", Act: "ovl-png-open"},
 				Note: "One PNG per deck.",
 			},
 			Obs: ovlNoteState{
-				Card: ovlCardState{Title: "OBS direct", StatusID: "ovl-st-obs", Status: newStatus("muted", "Off", "")},
+				Card: ovlCardState{Title: "OBS direct", StatusID: "ovl-st-obs", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-obs", false)},
 				Note: "Drives text sources over obs-websocket.",
 			},
 			VS: ovlVSState{
-				Card:  ovlCardState{Title: "Video share", StatusID: "ovl-st-vs", Status: newStatus("muted", "Off", "")},
+				Card:  ovlCardState{Title: "Video share", StatusID: "ovl-st-vs", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-vs", false)},
 				Note:  "Shares as rave.page A. No GPU backend.",
 				Scale: sel("ovl-vs-scale", "Render scale", "2× (720×240)", selRow{Val: "1", Label: "1× (360×120)"}, selRow{Val: "2", Label: "2× (720×240)", Cur: true}),
 				Note2: "Higher scale costs GPU.",
 			},
 			NP: ovlDirState{
-				Card: ovlCardState{Title: "Now-playing files", StatusID: "ovl-st-np", Status: newStatus("muted", "Off", "")},
+				Card: ovlCardState{Title: "Now-playing files", StatusID: "ovl-st-np", Status: newStatus("muted", "Off", ""), En: newToggle("Enabled", "ovl-en-np", false)},
 				Dir:  newField("Output folder", "ovl-np-dir", "/tmp/np", "text"),
 				Open: uiBtn{Label: "Open folder", Variant: "outline", Act: "ovl-np-open"},
 				Note: "now_playing.json + .txt.",
@@ -98,6 +98,12 @@ func ovlFixtures() map[string]ovlState {
 	populated := base()
 	populated.Appearance.Fader.On = true
 	populated.Web.Card.Status = newStatus("success", "Serving on 8787", "")
+	populated.Web.Card.En.On = true
+	populated.Wave.Card.En.On = true
+	populated.Png.Card.En.On = true
+	populated.Obs.Card.En.On = true
+	populated.VS.Card.En.On = true
+	populated.NP.Card.En.On = true
 	populated.Web.AutoAdd.On = true
 	populated.Web.Nest.On = true
 	populated.Wave.Card.Status = newStatus("success", "Rendering", "")
@@ -138,6 +144,7 @@ func ovlFixtures() map[string]ovlState {
 	escaping.Appearance.Note2 = `n&ote "2"`
 	escaping.Web.Card.Title = `W&eb"`
 	escaping.Web.Card.Status = uiStatus{Variant: "warning", Label: `S&t"<>'`, DL: `s&t"<>'`, Line: `l&ine"<>'`}
+	escaping.Web.Card.En = uiToggle{Label: `En&abled"<>'`, DL: `en&abled"<>'`, Act: `ovl-en-web&"`, On: true}
 	escaping.Web.Port = uiField{Label: `P&ort"<>'`, DL: `p&ort"<>'`, Act: `set:overlay-port&"`, Value: `8&7"<>'`, Type: "number"}
 	escaping.Web.URL = uiKV{Label: `U&RL"<>'`, DL: `u&rl"<>'`, Value: `http://x/?a&b="c"'`}
 	escaping.Web.Scene = uiField{Label: `Sc&ene"'`, DL: `sc&ene"'`, Act: "ovl-obsscene", Value: `r&ave "page"'`, Type: "text"}
@@ -181,6 +188,7 @@ func ovlFixtures() map[string]ovlState {
 		Rows: []selRow{{Val: "16", Label: "16 秒", Cur: true}}}
 	unicode.Wave.WaveOpac = newSlider("Прозрачность", "ovl-wf-waveopac", 0, 1, 0.05, 0.5, " ед")
 	unicode.Png.Dir = newField("Папка вывода", "ovl-png-dir", "C:\\Музыка\\оверлеи", "text")
+	unicode.Png.Card.En = newToggle("Увімкнено", "ovl-en-png", true)
 	unicode.Strip = ovlStripState{Parts: "Веб ✓ · PNG - · 中文 ✓", Hint: "подсказка 🎛️", Right: "OBS 接続済み"}
 
 	return map[string]ovlState{
