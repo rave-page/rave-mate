@@ -51,7 +51,9 @@ const IID_ICodecAPI = g(0x901db4c7, 0x31ce, 0x41a2, .{ 0x85, 0xdc, 0x8f, 0xa0, 0
 // NOTE last byte 0x7d: the hand-rolled 0x7b variant silently forces sync drive (E_NOINTERFACE).
 const IID_IMFMediaEventGenerator = g(0x2cd0bd52, 0xbcd5, 0x4b89, .{ 0xb6, 0x2c, 0xea, 0xdc, 0x0c, 0x03, 0x1e, 0x7d });
 const IID_ID3D10Multithread = g(0x9b7e4e00, 0x342c, 0x4106, .{ 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 });
-const IID_ID3D11Texture2D = g(0x6f15aaf2, 0xd208, 0x4e89, .{ 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c });
+pub const IID_ID3D11Texture2D = g(0x6f15aaf2, 0xd208, 0x4e89, .{ 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c });
+// IDXGIKeyedMutex: preferred cross-process sync on a shared texture when the sender exposes it.
+pub const IID_IDXGIKeyedMutex = g(0x9d8e1289, 0xd7b3, 0x465f, .{ 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d });
 const IID_IMF2DBuffer = g(0x7dc9d5f9, 0x9ed9, 0x44ec, .{ 0x9b, 0xbf, 0x06, 0x00, 0xbb, 0x58, 0x9f, 0xbb });
 const IID_ID3D11VideoDevice = g(0x10ec4d5b, 0x975a, 0x4689, .{ 0xb9, 0xe4, 0xd0, 0xaa, 0xc3, 0x0f, 0xe3, 0x33 });
 const IID_ID3D11VideoContext = g(0x61f21c45, 0x3c0e, 0x4a74, .{ 0x9c, 0xea, 0x67, 0x10, 0x0d, 0x9a, 0xd5, 0xe4 });
@@ -114,7 +116,7 @@ const DXGI_ADAPTER_DESC1 = extern struct {
     Flags: u32,
 };
 
-const D3D11_TEXTURE2D_DESC = extern struct {
+pub const D3D11_TEXTURE2D_DESC = extern struct {
     Width: u32,
     Height: u32,
     MipLevels: u32,
@@ -155,7 +157,7 @@ const D3D11_VIDEO_PROCESSOR_STREAM = extern struct {
     ppFutureSurfacesRight: ?*anyopaque = null,
 };
 
-const VPIV_DESC = extern struct { FourCC: u32, ViewDimension: u32, MipSlice: u32, ArraySlice: u32 };
+pub const VPIV_DESC = extern struct { FourCC: u32, ViewDimension: u32, MipSlice: u32, ArraySlice: u32 };
 const VPOV_DESC = extern struct { ViewDimension: u32, a: u32, b: u32, c: u32 };
 // D3D11_VIDEO_PROCESSOR_COLOR_SPACE bitfield word: bit2 = YCbCr_Matrix (1 = BT.709).
 const COLOR_SPACE = extern struct { bits: u32 };
@@ -187,7 +189,7 @@ pub fn release(p: anytype) void {
     _ = u.v.Release(u);
 }
 
-fn qi(p: anytype, iid: *const GUID, out: *?*anyopaque) HRESULT {
+pub fn qi(p: anytype, iid: *const GUID, out: *?*anyopaque) HRESULT {
     const u: *IUnk = @ptrCast(@alignCast(p));
     return u.v.QueryInterface(u, iid, out);
 }
@@ -318,6 +320,29 @@ pub const ID3D11Device = extern struct {
         _iunk: [3]VOP,
         _p3: [2]VOP, // CreateBuffer CreateTexture1D
         CreateTexture2D: *const fn (*anyopaque, *const D3D11_TEXTURE2D_DESC, ?*const anyopaque, *?*anyopaque) callconv(.winapi) HRESULT,
+        _p6: [22]VOP, // CreateTexture3D(6) .. CreateDeferredContext(27)
+        OpenSharedResource: *const fn (*anyopaque, *anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
+    },
+};
+
+// ID3D11Texture2D: IUnknown(3) + ID3D11DeviceChild(4) + ID3D11Resource(3) → GetDesc at 10.
+pub const ID3D11Texture2D = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
+        _res: [3]VOP, // GetType SetEvictionPriority GetEvictionPriority
+        GetDesc: *const fn (*anyopaque, *D3D11_TEXTURE2D_DESC) callconv(.winapi) void,
+    },
+};
+
+// IDXGIKeyedMutex: IUnknown(3) + IDXGIObject(4) + IDXGIDeviceSubObject(1) → AcquireSync at 8.
+pub const IDXGIKeyedMutex = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _obj: [4]VOP, // SetPrivateData SetPrivateDataInterface GetPrivateData GetParent
+        _sub: [1]VOP, // GetDevice
+        AcquireSync: *const fn (*anyopaque, u64, u32) callconv(.winapi) HRESULT,
+        ReleaseSync: *const fn (*anyopaque, u64) callconv(.winapi) HRESULT,
     },
 };
 
@@ -554,6 +579,7 @@ pub const Enc = struct {
     fps_d: i32,
     dur100: i64,
     bgra_in: bool = true,
+    zero_copy: bool = false, // pixels come from a foreign shared texture: no in_tex/in_view/swz
     enc_provides: bool = false,
     enc_out_size: u32 = 0,
     need_input: i32 = 0,
@@ -755,7 +781,10 @@ pub const Enc = struct {
         if (!bound) return e.setErr("MFTEnumEx(no usable hw encoder for this device)", E_FAIL);
     }
 
-    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32) OpenErr!*Enc {
+    /// open builds one encode pipeline. zerocopy = the pixels arrive as a foreign shared
+    /// texture (cap.zig owns the VP input view), so NO own input texture and no swizzle
+    /// scratch are created - that is where the 33 MB VRAM + the host frame plane go.
+    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool) OpenErr!*Enc {
         const e = gpa.create(Enc) catch return error.OpenFailed;
         e.* = .{
             .gpa = gpa,
@@ -766,6 +795,7 @@ pub const Enc = struct {
             .fps_n = fps_n,
             .fps_d = @max(fps_d, 1),
             .dur100 = @intFromFloat(10_000_000.0 * @as(f64, @floatFromInt(@max(fps_d, 1))) / @as(f64, @floatFromInt(fps_n))),
+            .zero_copy = zerocopy,
         };
         errdefer gpa.destroy(e);
         if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0) return e.setErr("args", E_FAIL);
@@ -878,7 +908,7 @@ pub const Enc = struct {
         e.vctx.v.VideoProcessorSetOutputColorSpace(@ptrCast(e.vctx), e.vproc, &cs);
         e.vctx.v.VideoProcessorSetStreamColorSpace(@ptrCast(e.vctx), e.vproc, 0, &cs);
 
-        trace("input texture + views + NV12 pool", .{});
+        trace("input texture + views + NV12 pool (zerocopy={})", .{e.zero_copy});
         var td = D3D11_TEXTURE2D_DESC{
             .Width = @intCast(in_w),
             .Height = @intCast(in_h),
@@ -892,18 +922,20 @@ pub const Enc = struct {
             .CPUAccessFlags = 0,
             .MiscFlags = 0,
         };
-        var tex: ?*anyopaque = null;
-        hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &tex);
-        if (failed(hr) or tex == null) return e.setErr("CreateTexture2D(in)", hr);
-        e.in_tex = tex.?;
-        if (e.bgra_in) {
-            e.swz = gpa.alloc(u8, @as(usize, @intCast(in_w)) * @as(usize, @intCast(in_h)) * 4) catch return e.setErr("swz alloc", E_FAIL);
+        if (!e.zero_copy) {
+            var tex: ?*anyopaque = null;
+            hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &tex);
+            if (failed(hr) or tex == null) return e.setErr("CreateTexture2D(in)", hr);
+            e.in_tex = tex.?;
+            if (e.bgra_in) {
+                e.swz = gpa.alloc(u8, @as(usize, @intCast(in_w)) * @as(usize, @intCast(in_h)) * 4) catch return e.setErr("swz alloc", E_FAIL);
+            }
+            const ivd = VPIV_DESC{ .FourCC = 0, .ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D, .MipSlice = 0, .ArraySlice = 0 };
+            var iv: ?*anyopaque = null;
+            hr = e.vdev.v.CreateVideoProcessorInputView(@ptrCast(e.vdev), e.in_tex, e.vpe, &ivd, &iv);
+            if (failed(hr) or iv == null) return e.setErr("CreateVideoProcessorInputView", hr);
+            e.in_view = iv.?;
         }
-        const ivd = VPIV_DESC{ .FourCC = 0, .ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D, .MipSlice = 0, .ArraySlice = 0 };
-        var iv: ?*anyopaque = null;
-        hr = e.vdev.v.CreateVideoProcessorInputView(@ptrCast(e.vdev), e.in_tex, e.vpe, &ivd, &iv);
-        if (failed(hr) or iv == null) return e.setErr("CreateVideoProcessorInputView", hr);
-        e.in_view = iv.?;
 
         var i: usize = 0;
         while (i < NVPOOL) : (i += 1) {
@@ -1053,12 +1085,12 @@ pub const Enc = struct {
         }
     }
 
-    /// feed uploads + converts + submits one RGBA frame (stride = in_w*4). Blocks until the
-    /// encoder accepts input (bounded). <0 = error.
-    pub fn feed(e: *Enc, rgba: [*]const u8, pts100: i64, sink: AuSink) i32 {
-        // In-flight cap: a pool sample must NOT be resubmitted while the encoder still
-        // queues it (async MFTs queue deeply; reuse corrupts the queue → E_UNEXPECTED
-        // storm + lost outputs). Also bounds latency: queue depth <= NVPOOL-1.
+    /// gateInput waits until the next NV12 pool slot is safe to reuse. Bounded; <0 = error.
+    /// In-flight cap: a pool sample must NOT be resubmitted while the encoder still queues it
+    /// (async MFTs queue deeply; reuse corrupts the queue → E_UNEXPECTED storm + lost
+    /// outputs). Also bounds latency: queue depth <= NVPOOL-1. Called BEFORE a zero-copy
+    /// session touches the sender's mutex - never wait on the encoder while holding it.
+    pub fn gateInput(e: *Enc, sink: AuSink) i32 {
         var gate_waited: u32 = 0;
         while (e.fed_n - e.out_n >= NVPOOL - 1) {
             if (e.pump(sink) < 0) return -5;
@@ -1067,15 +1099,13 @@ pub const Enc = struct {
             Sleep(1);
             gate_waited += 1;
         }
-        var rows: [*]const u8 = rgba;
-        if (e.bgra_in) {
-            const dst = e.swz.?;
-            swizzleTo(dst, rgba);
-            rows = dst.ptr;
-        }
-        const stride: u32 = @intCast(e.in_w * 4);
-        e.ctx.v.UpdateSubresource(@ptrCast(e.ctx), e.in_tex, 0, null, rows, stride, 0);
+        return 0;
+    }
 
+    /// bltView converts one VP input view into the next NV12 pool slot (CSC + scale, GPU only)
+    /// and returns that slot; <0 = Blt failed. The ONLY call a zero-copy session makes while
+    /// holding the sender's shared-texture mutex.
+    pub fn bltView(e: *Enc, in_view: *anyopaque) i32 {
         const slot = e.nv_idx;
         e.nv_idx = (e.nv_idx + 1) % NVPOOL;
         const stream = D3D11_VIDEO_PROCESSOR_STREAM{
@@ -1084,14 +1114,37 @@ pub const Enc = struct {
             .InputFrameOrField = 0,
             .PastFrames = 0,
             .FutureFrames = 0,
-            .pInputSurface = e.in_view,
+            .pInputSurface = in_view,
         };
-        var hr = e.vctx.v.VideoProcessorBlt(@ptrCast(e.vctx), e.vproc, e.nv_view[slot].?, 0, 1, &stream);
-        if (failed(hr)) return -4;
+        if (failed(e.vctx.v.VideoProcessorBlt(@ptrCast(e.vctx), e.vproc, e.nv_view[slot].?, 0, 1, &stream))) return -4;
+        return @intCast(slot);
+    }
+
+    /// feed uploads + converts + submits one RGBA frame (stride = in_w*4). Blocks until the
+    /// encoder accepts input (bounded). <0 = error.
+    pub fn feed(e: *Enc, rgba: [*]const u8, pts100: i64, sink: AuSink) i32 {
+        const g0 = e.gateInput(sink);
+        if (g0 < 0) return g0;
+        var rows: [*]const u8 = rgba;
+        if (e.bgra_in) {
+            const dst = e.swz.?;
+            swizzleTo(dst, rgba);
+            rows = dst.ptr;
+        }
+        const stride: u32 = @intCast(e.in_w * 4);
+        e.ctx.v.UpdateSubresource(@ptrCast(e.ctx), e.in_tex, 0, null, rows, stride, 0);
+        const slot = e.bltView(e.in_view);
+        if (slot < 0) return slot;
+        return e.submitSlot(@intCast(slot), pts100, sink);
+    }
+
+    /// submitSlot hands a converted NV12 pool slot to the encoder (bounded waits). <0 = error.
+    pub fn submitSlot(e: *Enc, slot: usize, pts100: i64, sink: AuSink) i32 {
         const nv12 = e.nv_sample[slot].?; // pool-owned: never released here
         _ = nv12.v.SetSampleTime(@ptrCast(nv12), pts100);
         _ = nv12.v.SetSampleDuration(@ptrCast(nv12), e.dur100);
 
+        var hr: HRESULT = 0;
         if (e.force_idr) {
             if (e.capi) |c| {
                 const v = VARIANT{ .vt = VT_UI4, .val = 1 };
@@ -1172,12 +1225,12 @@ pub const Enc = struct {
             if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
             if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
         }
-        release(@as(*IUnk, @ptrCast(@alignCast(e.in_view))));
+        if (!e.zero_copy) release(@as(*IUnk, @ptrCast(@alignCast(e.in_view))));
         release(@as(*IUnk, @ptrCast(@alignCast(e.vproc))));
         release(@as(*IUnk, @ptrCast(@alignCast(e.vpe))));
         release(e.vctx);
         release(e.vdev);
-        release(@as(*IUnk, @ptrCast(@alignCast(e.in_tex))));
+        if (!e.zero_copy) release(@as(*IUnk, @ptrCast(@alignCast(e.in_tex))));
         release(e.devmgr);
         release(e.ctx);
         release(e.dev);

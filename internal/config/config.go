@@ -396,7 +396,28 @@ type MediaLinkFeature struct {
 	// media a liability), explicit false = the legacy in-proc plane, explicit true = on. TCPlane +
 	// mediaClock stay daemon-side either way and mirror the child's clock.
 	Subprocess *bool `json:"subprocess,omitempty"`
+	// ZigCapture routes a Spout source's pixels to the native encoder child as a GPU
+	// SHARED-TEXTURE HANDLE instead of a host readback: no GPU→CPU copy, no pooled frame
+	// buffers, no SHM frame slot (66.4 → 4.0 MB of shared VA per 4K session). Tri-state,
+	// default OFF (nil = off) until the soak signs it off; the readback path stays as the
+	// fallback and the parity reference. Env RAVE_MATE_ZIGMEDIA_CAPTURE=1|0 overrides.
+	ZigCapture *bool `json:"zigCapture,omitempty"`
 }
+
+// ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
+// RAVE_MATE_ZIGMEDIA_CAPTURE wins (soak + tests), then the config key, else OFF.
+func (m MediaLinkFeature) ZeroCopyCapture() bool {
+	switch os.Getenv("RAVE_MATE_ZIGMEDIA_CAPTURE") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.ZigCapture != nil && *m.ZigCapture
+}
+
+// SetZeroCopyCapture sets the zero-copy capture opt-in EXPLICITLY (single write seam).
+func (m *MediaLinkFeature) SetZeroCopyCapture(on bool) { v := on; m.ZigCapture = &v }
 
 // MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
 // absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema

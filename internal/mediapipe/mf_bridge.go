@@ -10,6 +10,7 @@ package mediapipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -36,9 +37,16 @@ type mfBridge struct {
 	tcq     []medialink.Timecode // FIFO pts→TC carry (no B-frames: output order = input order)
 	lastKey int64
 
-	out     rate
-	dropped int
+	out        rate
+	dropped    int
+	zeroCopy   bool
+	downgrades int
 }
+
+// ZeroCopyCapture gates the zigmedia inc-1 path: a Spout source's pixels reach the encoder child
+// as a GPU shared-texture handle instead of a host readback. Package seam (same shape as
+// mfenc.Warnf) - the daemon and the media child both point it at their live config. Default OFF.
+var ZeroCopyCapture = func() bool { return false }
 
 // newMFBridge builds the native pipeline for spec; error = caller falls back to ffmpeg.
 func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec, src medialink.Source) (*mfBridge, error) {
@@ -68,20 +76,76 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 			luid = v
 		}
 	}
-	enc, err := mfenc.OpenProcSession(luid, spec.Width, spec.Height, outW, outH, fps, kbps, gopFrames(fps))
+	opts := mfenc.ProcOpts{LUID: luid, InW: spec.Width, InH: spec.Height, OutW: outW, OutH: outH,
+		FPS: fps, Kbps: kbps, Gop: gopFrames(fps)}
+	// Zero-copy request (zigmedia inc 1) needs ALL of: the flag, a source that really exposes a
+	// shared texture, a handle that matches the negotiated geometry, and a sender not already
+	// pinned to the readback path. Anything missing = today's frame path, byte for byte.
+	zc, downgrades := zeroCopyOpts(&opts, spec, src)
+	enc, err := mfenc.OpenProcSessionOpts(opts)
+	if err != nil && zc && errors.Is(err, mfenc.ErrZeroCopyRefused) {
+		// Same child, same geometry, reopened on the readback path. ONE warn per route so a rig
+		// that always downgrades is visible instead of silently slow.
+		log.Warn(source, "zero-copy capture refused - reopening this route on the readback path",
+			map[string]any{"err": err.Error(), "sender": opts.Spout.Name})
+		opts.Spout, zc = nil, false
+		downgrades++
+		enc, err = mfenc.OpenProcSessionOpts(opts)
+	}
 	if err != nil {
 		return nil, err
 	}
 	bctx, cancel := context.WithCancel(ctx)
 	b := &mfBridge{log: log, enc: enc, src: src, size: spec.Width * spec.Height * 4,
-		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{})}
+		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{}),
+		zeroCopy: zc, downgrades: downgrades}
 	log.Info(source, "native MF hardware encode (isolated encoder child)", map[string]any{
 		"encoder": enc.Name(), "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA(),
-		"device": spec.DeviceLUID})
-	go b.feed(bctx)
+		"device": spec.DeviceLUID, "capture": captureLabel(zc)})
+	// A zero-copy session's pixels never pass through here: no feed goroutine, so the source's
+	// capture is never attached and no readback is ever performed (mediaroute attaches lazily).
+	if !zc {
+		go b.feed(bctx)
+	}
 	go b.emit(bctx)
 	return b, nil
+}
+
+func captureLabel(zeroCopy bool) string {
+	if zeroCopy {
+		return "zerocopy"
+	}
+	return "readback"
+}
+
+// zeroCopyOpts fills opts.Spout when the whole gate holds; returns whether zero-copy was
+// requested and how many downgrade decisions were already taken (for route stats).
+func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink.Source) (bool, int) {
+	if !ZeroCopyCapture() {
+		return false, 0
+	}
+	zcs, ok := src.(medialink.ZeroCopySource)
+	if !ok {
+		return false, 0
+	}
+	h, _, w, hh, name, ok := zcs.SharedTexture()
+	if !ok || h == 0 {
+		return false, 0
+	}
+	if w != spec.Width || hh != spec.Height {
+		return false, 1 // sender moved between advert and open: the child would refuse anyway
+	}
+	if mfenc.ZeroCopyPinnedToReadback(name) {
+		return false, 1
+	}
+	// Re-read on every (re)open + on the 2 s health tick: a restarted sender must never be
+	// re-issued its dead handle (risk R1, the silently frozen picture).
+	opts.Spout = &mfenc.SpoutSource{Name: name, Resolve: func() (uint64, uint32, int, int, bool) {
+		hd, f, ww, hgt, _, ok := zcs.SharedTexture()
+		return hd, f, ww, hgt, ok
+	}}
+	return true, 0
 }
 
 // feed pumps raw frames into the encoder; source EOF drains + closes it.
@@ -173,6 +237,9 @@ func (b *mfBridge) Next(ctx context.Context) (*medialink.Frame, error) {
 // Close implements medialink.Source.
 func (b *mfBridge) Close() error {
 	b.cancel()
+	if b.zeroCopy {
+		b.enc.Close() // no feed goroutine owns the session on this path (its defer normally does)
+	}
 	return b.src.Close()
 }
 
@@ -193,5 +260,9 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 	st := b.enc.Stats()
 	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value(),
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
-		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct}
+		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
+		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
+		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
+		EncBusyMs:  st.EncBusyMs,
+		Downgrades: b.downgrades + st.Downgrades}
 }

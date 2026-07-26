@@ -50,6 +50,18 @@ type EncoderFactory func(ctx context.Context, spec EncodeSpec, src Source) (Sour
 // DecoderFactory wraps a Sink with a decode child (compressed in → raw frames out).
 type DecoderFactory func(ctx context.Context, spec DecodeSpec, sink Sink) (Sink, error)
 
+// ZeroCopySource is a raw-video Source whose pixels live in a GPU shared texture an encoder may
+// consume DIRECTLY - no host readback, no frame bytes on the Go heap. An encode engine that can
+// open such a texture (the native MF child, same adapter) asks once at open time and then never
+// calls Next; every other engine ignores this and takes the frame path. ok=false = no shared
+// texture (no backend, unknown sender, or a DX9/CPU-memoryshare sender): use Next.
+//
+// Implementations must NOT start a capture as a side effect of this call - the whole point is
+// that a zero-copy route never opens the readback.
+type ZeroCopySource interface {
+	SharedTexture() (handle uint64, dxgiFormat uint32, w, h int, name string, ok bool)
+}
+
 // PipelineStats is an encode/decode child's live telemetry (§7 route stats).
 type PipelineStats struct {
 	Encoder  string  // ffmpeg encoder/decoder in use
@@ -62,6 +74,18 @@ type PipelineStats struct {
 	LatP99Ms    float64
 	QueueDepth  int     // frames in flight inside the encoder
 	ChildCPUPct float64 // encoder child process CPU
+	// Zero-copy capture (zigmedia inc 1): the encoder child reads the sender's GPU shared
+	// texture itself, so no frame ever crosses the host. Zero on every other path.
+	ZeroCopy    bool    // the live session really is zero-copy (not downgraded)
+	CapFPS      float64 // shared textures captured per second inside the child
+	CapSkips    uint64  // pacing ticks skipped (previous encode still running)
+	MtxTimeouts uint64  // shared-texture mutex acquire timeouts (sender contention)
+	SrcErrors   uint64  // capture hard failures (CopyResource/acquire)
+	CapStaleMs  float64 // age of the last successful capture (frozen-sender oracle, R1)
+	EncBusyMs   float64 // mean child capture+encode ms/frame (the zero-copy saturation signal:
+	// the parent submits nothing, so submit→AU percentiles stay empty on this path)
+	Downgrades int // zero-copy → readback fallbacks on this route (a rig that always
+	// downgrades must be visible here, not silently slow)
 }
 
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.

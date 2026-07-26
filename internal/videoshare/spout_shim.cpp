@@ -2,6 +2,7 @@
 
 // Flat C wrappers over the Spout SDK (SpoutLibrary.h pulls in <windows.h>, <d3d11.h>,
 // <string>, <vector> - compiled by g++ via cgo). One SPOUTLIBRARY handle per deck/thread.
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -155,6 +156,33 @@ int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h) {
     DWORD fmt = 0;
     if (!s->GetSenderInfo(name, ww, hh, share, fmt)) return 0;
     if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) return 0; // torn info: "no size yet"
+    *w = ww;
+    *h = hh;
+    return 1;
+}
+
+// rave_spout_sender_share exports what GetSenderInfo already fetched and every other caller here
+// throws away: the DX11 shared-texture handle + its DXGI format. The zero-copy encode path
+// (zigmedia inc 1) passes these two scalars to the encoder child, which opens the texture on its
+// own device - no readback, no host frame buffer. Same DIM validation as the rest of the shim:
+// torn registry info must never reach a consumer that sizes anything from it.
+int rave_spout_sender_share(const char* name, unsigned long long* share, unsigned int* fmt,
+                            unsigned int* w, unsigned int* h) {
+    if (!name || !share || !fmt || !w || !h) return 0;
+    *share = 0;
+    *fmt = 0;
+    *w = 0;
+    *h = 0;
+    std::lock_guard<std::mutex> lk(registry_mu());
+    SPOUTHANDLE s = registry();
+    if (!s) return 0;
+    unsigned int ww = 0, hh = 0;
+    HANDLE sh = 0;
+    DWORD f = 0;
+    if (!s->GetSenderInfo(name, ww, hh, sh, f)) return 0;
+    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) return 0; // torn info: "nothing yet"
+    *share = (unsigned long long)(uintptr_t)sh;
+    *fmt = (unsigned int)f;
     *w = ww;
     *h = hh;
     return 1;

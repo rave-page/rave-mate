@@ -11,11 +11,18 @@ package mfenc
 // N consecutive fast-fails poisons the (adapter, geometry) tuple.
 //
 // Wire contract (must mirror native/zigenc/src/main.zig):
-//   control stdin JSON: open/close/bitrate/idr/quit; stdout events hello/opened/closed.
+//   control stdin JSON: open/close/bitrate/idr/quit; stdout events
+//   hello/opened/srcgone/closed.
 //   data per session: named shm "Local\rvmfenc-<pid>-<sid>" - 256 B header
-//   (8 frameSeq | 16 framePTS ns | 24 consSeq | 32 auWrite | 40 auRead | 48 auDropped |
-//   56 encBusyNs), RGBA frame slot, AU byte ring (u32 len | u32 flags | i64 pts | data,
-//   8-aligned; len 0xFFFFFFFF = wrap; tail<16 = implicit wrap). Events <shm>-f/-c/-a.
+//   (0 magic 'RMF2' | 4 ver | 8 frameSeq | 16 framePTS ns | 24 consSeq | 32 auWrite |
+//   40 auRead | 48 auDropped | 56 encBusyNs | 64 capFrames | 72 capSkips | 80 mtxTimeouts |
+//   88 srcErrors | 96 lastCapNs | 104 capFmt | 108 capFlags), RGBA frame slot, AU byte ring
+//   (u32 len | u32 flags | i64 pts | data, 8-aligned; len 0xFFFFFFFF = wrap; tail<16 =
+//   implicit wrap). Events <shm>-f/-c/-a.
+//
+// Zero-copy sessions (src:"spout", zigmedia inc 1) carry NO frame slot: the child opens the
+// sender's GPU shared texture itself, so the shm is header + AU ring only (66.4 → 4.0 MB per
+// 4K session) and Go moves scalars, never pixels. Requires child hello.ver >= 2.
 
 import (
 	"bufio"
@@ -53,6 +60,35 @@ const (
 	crashWindow    = 30 * time.Second
 	maxConsecFails = 3
 	latWindow      = 512
+
+	// Header v2 (additive; v1 used 0-63 only). Parent stamps magic+ver; the child refuses a
+	// zero-copy session on anything below ver 2, because that is the one layout where it would
+	// otherwise size the mapping from in_w*in_h*4 and map past the parent's smaller mapping.
+	shmMagic      = 0x32464D52 // 'RMF2'
+	shmVer        = 2
+	protoVerZeroC = 2 // minimum child hello.ver that may be asked for src:"spout"
+
+	// Zero-copy capture counters, child-written (design §3.2).
+	offCapFrames  = 64
+	offCapSkips   = 72
+	offMtxTimeout = 80
+	offSrcErrors  = 88
+	offLastCapNs  = 96
+	offCapFmt     = 104
+	offCapFlags   = 108
+
+	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
+	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
+	ringKBMin = 4 * 1024
+	ringKBMax = 16 * 1024
+
+	// R1 (stale share handle = silently frozen picture): a sender restart can leave
+	// OpenSharedResource succeeding on a DEAD texture whose content never changes, so the route
+	// looks healthy and ships a still frame. Oracle = the child's lastCapNs going stale plus a
+	// share-handle comparison on the registry rescan.
+	spoutWatchEvery  = 2 * time.Second
+	spoutStaleAfter  = 3 * time.Second
+	spoutMaxRecycles = 3 // then the sender is pinned to the readback path (§7.3)
 )
 
 // SessionInfo names a session for crash reports + the restart policy.
@@ -143,6 +179,10 @@ func createShm(name string, size int) (*shmRegion, error) {
 	// not GC-managed), converted ONCE at the syscall boundary; all field access derives
 	// from base via unsafe.Add.
 	r.base = *(*unsafe.Pointer)(unsafe.Pointer(&r.baseRaw)) //nolint:govet // OS mapping, not a Go pointer
+	// Stamp the header identity BEFORE the child can open it: a zero-copy session refuses to map
+	// anything until it reads magic + ver >= 2 (never guess a layout).
+	*(*uint32)(r.base) = shmMagic
+	*(*uint32)(unsafe.Add(r.base, 4)) = shmVer
 	for i, suffix := range []string{"-f", "-c", "-a"} {
 		e16, err := windows.UTF16PtrFromString(name + suffix)
 		if err != nil {
@@ -175,7 +215,18 @@ type openedEv struct {
 	Err  string `json:"err"`
 	Name string `json:"name"`
 	Bgra bool   `json:"bgra"`
+	// Zero-copy verdict + srcgone reason ride the same decoder (one line = one event).
+	Src    string `json:"src"`
+	Cap    string `json:"cap"`
+	ErrSrc string `json:"err_src"`
+	Reason string `json:"reason"`
+	Ver    uint32 `json:"ver"`
 }
+
+// ErrZeroCopyRefused is the open-side downgrade rung: the child could not consume the sender's
+// shared texture (foreign adapter, exotic/TYPELESS format, geometry moved under us). The caller
+// reopens the SAME session on the readback path - never a dead route.
+var ErrZeroCopyRefused = errors.New("mfenc: zero-copy source refused")
 
 type procChild struct {
 	luid int64
@@ -188,6 +239,8 @@ type procChild struct {
 	openWait   map[uint32]chan openedEv
 	closeWait  map[uint32]chan struct{}
 	dead       bool
+	protoVer   uint32        // child hello.ver (0 = not seen yet); >= 2 may be asked for zero-copy
+	helloCh    chan struct{} // closed when this incarnation's hello lands (re-armed per spawn)
 	stateCh    chan struct{} // closed+replaced on every liveness transition (spawn/death/loop)
 	spawnCount int
 	consecFail int
@@ -447,6 +500,27 @@ func (c *procChild) waitUsable(d time.Duration) error {
 	}
 }
 
+// waitProtoVer returns the child's protocol version, waiting up to d for its hello line. 0 = no
+// hello yet: the caller must NOT request zero-copy (the version gate is the only thing standing
+// between a v1 child and a mapping it would size wrong).
+func (c *procChild) waitProtoVer(d time.Duration) uint32 {
+	c.mu.Lock()
+	v, ch := c.protoVer, c.helloCh
+	c.mu.Unlock()
+	if v != 0 || ch == nil {
+		return v
+	}
+	tm := time.NewTimer(d)
+	defer tm.Stop()
+	select {
+	case <-ch:
+	case <-tm.C:
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.protoVer
+}
+
 // spawn launches the child (caller need not hold c.mu on first spawn; restarts hold it).
 func (c *procChild) spawn() error {
 	exe, err := encExePath()
@@ -480,6 +554,8 @@ func (c *procChild) spawn() error {
 	c.cmd = cmd
 	c.stdin = stdin
 	c.dead = false
+	c.protoVer = 0
+	c.helloCh = make(chan struct{})
 	c.signalState() // spawn/restart callers hold c.mu (first spawn: fresh struct, no waiters yet)
 	c.spawnCount++
 	c.lastSpawn = time.Now()
@@ -502,6 +578,15 @@ func (c *procChild) readEvents(r io.Reader) {
 			continue
 		}
 		switch ev.Ev {
+		case "hello":
+			c.mu.Lock()
+			c.protoVer = ev.Ver
+			ch := c.helloCh
+			c.helloCh = nil // one close per incarnation (spawn re-arms it)
+			c.mu.Unlock()
+			if ch != nil {
+				close(ch)
+			}
 		case "opened":
 			c.mu.Lock()
 			ch := c.openWait[ev.SID]
@@ -509,6 +594,13 @@ func (c *procChild) readEvents(r io.Reader) {
 			c.mu.Unlock()
 			if ch != nil {
 				ch <- ev
+			}
+		case "srcgone":
+			c.mu.Lock()
+			s := c.sessions[ev.SID]
+			c.mu.Unlock()
+			if s != nil {
+				s.onSrcGone(ev.Reason)
 			}
 		case "closed":
 			c.mu.Lock()
@@ -654,6 +746,15 @@ type openCmd struct {
 	FpsD int    `json:"fps_d"`
 	Kbps int    `json:"kbps"`
 	Gop  int    `json:"gop"`
+	// Zero-copy source (omitted entirely on a readback session: absent = v1 behaviour).
+	Src    string `json:"src,omitempty"`
+	Sh     uint64 `json:"sh,omitempty"`
+	SFmt   uint32 `json:"sfmt,omitempty"`
+	SName  string `json:"sname,omitempty"`
+	CapN   int    `json:"cap_n,omitempty"`
+	CapD   int    `json:"cap_d,omitempty"`
+	RingKB int    `json:"ring_kb,omitempty"`
+	PTS0   int64  `json:"pts0,omitempty"`
 }
 
 func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
@@ -662,8 +763,18 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 	c.openWait[s.sid] = ch
 	c.mu.Unlock()
 	fpsN, fpsD := fpsRational(s.fps)
-	err := c.send(openCmd{Op: "open", SID: s.sid, Shm: s.shm.name, InW: s.inW, InH: s.inH,
-		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop})
+	cmd := openCmd{Op: "open", SID: s.sid, Shm: s.shm.name, InW: s.inW, InH: s.inH,
+		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop}
+	if s.zeroCopy {
+		// Re-read the handle on every (re)open, including the post-crash re-place: a sender that
+		// restarted while the child was down must not be re-issued its dead texture (R1).
+		s.refreshHandle()
+		h, sfmt, name := s.spoutHandle()
+		cmd.Src, cmd.Sh, cmd.SFmt, cmd.SName = "spout", h, sfmt, name
+		cmd.CapN, cmd.CapD, cmd.RingKB = fpsN, fpsD, s.ringKB
+		cmd.PTS0 = time.Now().UnixNano()
+	}
+	err := c.send(cmd)
 	if err != nil {
 		return openedEv{}, err
 	}
@@ -710,6 +821,27 @@ type ProcSession struct {
 	ringSize             uint64
 	ringOff              uintptr
 
+	// Zero-copy capture (src:"spout"): Go moves SCALARS only - handle + format + name - and
+	// never a pixel. resolve re-reads them from the (cached) sender registry.
+	zeroCopy  bool
+	ringKB    int
+	resolve   func() (handle uint64, dxgiFormat uint32, w, h int, ok bool)
+	watchDone chan struct{}
+
+	zcMu       sync.Mutex
+	zcHandle   uint64
+	zcFmt      uint32
+	zcName     string
+	zcRecycles int   // reopen attempts spent on a stale/dead source (cap spoutMaxRecycles)
+	zcLastCap  int64 // last observed child lastCapNs (staleness oracle)
+	zcLastMove time.Time
+	// recycle is the srcgone/staleness ACTION seam (tests assert the oracle→action wiring
+	// without a live child).
+	recycle    func(reason string)
+	downgrades atomic.Int32
+	capRate    counterRate
+	busyRate   busyMean
+
 	name       string
 	bgra       bool
 	out        chan AU
@@ -732,12 +864,42 @@ type ProcSession struct {
 	received  uint64
 }
 
+// SpoutSource is a zero-copy capture source: the sender's GPU shared texture. Resolve re-reads
+// the handle + format from the sender registry (cached, no GL, no pixels) - it is called on every
+// (re)open so a restarted sender never gets its DEAD handle re-issued (R1).
+type SpoutSource struct {
+	Name    string
+	Resolve func() (handle uint64, dxgiFormat uint32, w, h int, ok bool)
+}
+
+// ProcOpts parametrizes one native encode session. Spout == nil = today's SHM frame ring,
+// byte-identical to the pre-zero-copy behaviour.
+type ProcOpts struct {
+	LUID                 int64
+	InW, InH, OutW, OutH int
+	FPS                  float64
+	Kbps, Gop            int
+	Spout                *SpoutSource
+}
+
 // OpenProcSession opens one native encode session on the (supervised, per-adapter) Zig
 // encoder child. Errors are CLEAN - the caller falls back to the ffmpeg engine.
 func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, gop int) (*ProcSession, error) {
+	return OpenProcSessionOpts(ProcOpts{LUID: luid, InW: inW, InH: inH, OutW: outW, OutH: outH,
+		FPS: fps, Kbps: kbps, Gop: gop})
+}
+
+// OpenProcSessionOpts is OpenProcSession with a zero-copy capture source. When o.Spout is set the
+// child reads the sender's shared texture itself: NO frame slot is allocated (SHM = header + AU
+// ring only) and the caller must never call Encode. A child that refuses the source returns
+// ErrZeroCopyRefused so the caller can reopen on the readback path (§7.3, never a dead route).
+func OpenProcSessionOpts(o ProcOpts) (*ProcSession, error) {
+	luid, inW, inH, outW, outH := o.LUID, o.InW, o.InH, o.OutW, o.OutH
+	kbps, gop := o.Kbps, o.Gop
 	if os.Getenv("RAVE_MATE_MFENC_OPEN_FAIL") != "" {
 		return nil, errors.New("mfenc: native open disabled (RAVE_MATE_MFENC_OPEN_FAIL)")
 	}
+	fps := o.FPS
 	if fps <= 0 {
 		fps = 30
 	}
@@ -750,10 +912,17 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 		return nil, errors.New("mfenc: poisoned tuple - " + reason + " - using ffmpeg")
 	}
 
+	zc := o.Spout != nil
 	frameBytes := inW * inH * 4
 	ringSize := 8 << 20
 	if frameBytes > ringSize {
 		ringSize = frameBytes
+	}
+	ringKB := 0
+	if zc {
+		frameBytes = 0 // no frame slot: 66.4 MB → 4.0 MB of shared VA per 4K session
+		ringKB = ringKBFor(kbps)
+		ringSize = ringKB * 1024
 	}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ { // one respawned-child retry (waitUsable spans the backoff)
@@ -765,6 +934,13 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 		// instead of burning both attempts in microseconds against a dead child.
 		if err := child.waitUsable(3 * time.Second); err != nil {
 			return nil, err
+		}
+		if zc {
+			// Version gate: a v1 child sizes its mapping from in_w*in_h*4 and would map past the
+			// end of our (much smaller) zero-copy mapping. Refuse cleanly instead.
+			if v := child.waitProtoVer(2 * time.Second); v < protoVerZeroC {
+				return nil, fmt.Errorf("%w: encoder child protocol v%d (need v%d)", ErrZeroCopyRefused, v, protoVerZeroC)
+			}
 		}
 		sid := sidSeq.Add(1)
 		shm, err := createShm(fmt.Sprintf(`Local\rvmfenc-%d-%d`, os.Getpid(), sid), shmHdrSize+frameBytes+ringSize)
@@ -780,6 +956,11 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 			done:     make(chan struct{}),
 			pumpDone: make(chan struct{}),
 			submitAt: map[int64]time.Time{},
+			zeroCopy: zc, ringKB: ringKB,
+		}
+		if zc {
+			s.zcName, s.resolve = o.Spout.Name, o.Spout.Resolve
+			s.recycle = s.recycleSpout
 		}
 		ev, err := child.openSession(s)
 		if err != nil {
@@ -789,6 +970,11 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 		}
 		if !ev.OK {
 			shm.close()
+			if zc && ev.Cap == "downgraded" {
+				// The encoder is fine, the SOURCE is not: hand the caller a typed refusal so it
+				// reopens on the readback path instead of dropping to ffmpeg.
+				return nil, fmt.Errorf("%w (%s)", ErrZeroCopyRefused, ev.ErrSrc)
+			}
 			return nil, errors.New("mfenc: native open failed: " + ev.Err) // clean refusal: no poison, no retry
 		}
 		s.name = ev.Name
@@ -797,10 +983,247 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 		child.sessions[sid] = s
 		child.mu.Unlock()
 		go s.pump()
+		if zc {
+			s.watchDone = make(chan struct{})
+			go s.watchSpout()
+		}
 		return s, nil
 	}
 	return nil, fmt.Errorf("mfenc: session open failed: %w", lastErr)
 }
+
+// ringKBFor sizes a zero-copy session's AU ring: half a second of bitstream, floor 4 MiB,
+// ceiling 16 MiB. Bitrate-derived, so it does NOT change when the sender resizes.
+func ringKBFor(kbps int) int {
+	kb := kbps / 16 // kbps/8 KB/s, halved = 0.5 s of bitstream
+	if kb < ringKBMin {
+		return ringKBMin
+	}
+	if kb > ringKBMax {
+		return ringKBMax
+	}
+	return kb
+}
+
+// ── zero-copy source health (R1: a stale share handle is a SILENTLY FROZEN picture) ──
+
+// spoutVerdict is what a zero-copy session should do about its capture source.
+type spoutVerdict int
+
+const (
+	spoutHealthy spoutVerdict = iota
+	spoutRecycleNow
+	spoutUnresolvable // sender gone from the registry: wait, do not churn reopens
+)
+
+// spoutProbe is one health sample: the registry answer plus the child's capture counters.
+type spoutProbe struct {
+	curHandle  uint64
+	newHandle  uint64
+	resolved   bool
+	capFrames  uint64
+	prevFrames uint64
+	lastCapNs  int64
+	nowNs      int64
+	staleNs    int64
+}
+
+// spoutCheck is the frozen-picture oracle, pure so it can be asserted without hardware.
+//
+// Two independent detectors, because the worst failure mode looks healthy from either side
+// alone: after a sender restart OpenSharedResource can still SUCCEED on a dead texture (frames
+// keep "arriving", content never changes), and a sender can also vanish while the handle value
+// happens to be reused. So: a CHANGED handle is always a recycle, and a capture clock that has
+// not moved for staleNs while no new frames were counted is also a recycle.
+func spoutCheck(p spoutProbe) (spoutVerdict, string) {
+	if !p.resolved {
+		return spoutUnresolvable, "sender not in the registry"
+	}
+	if p.newHandle != 0 && p.curHandle != 0 && p.newHandle != p.curHandle {
+		return spoutRecycleNow, "share handle changed (sender restarted)"
+	}
+	if p.staleNs > 0 && p.lastCapNs > 0 && p.capFrames == p.prevFrames && p.nowNs-p.lastCapNs > p.staleNs {
+		return spoutRecycleNow, "no capture progress (frozen source)"
+	}
+	return spoutHealthy, ""
+}
+
+// watchSpout runs the R1 oracle on the same 2 s cadence as the registry scan. Bounded work: one
+// cached registry lookup + four header reads per tick, no allocation.
+func (s *ProcSession) watchSpout() {
+	defer close(s.watchDone)
+	t := time.NewTicker(spoutWatchEvery)
+	defer t.Stop()
+	var prevFrames uint64
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-t.C:
+		}
+		if s.closed.Load() || s.recovering.Load() {
+			continue // a child restart is already re-placing us with a fresh handle
+		}
+		var newH uint64
+		ok := false
+		if s.resolve != nil {
+			newH, _, _, _, ok = s.resolve()
+		}
+		s.zcMu.Lock()
+		cur := s.zcHandle
+		s.zcMu.Unlock()
+		frames := atomic.LoadUint64(s.shm.u64(offCapFrames))
+		v, why := spoutCheck(spoutProbe{curHandle: cur, newHandle: newH, resolved: ok,
+			capFrames: frames, prevFrames: prevFrames,
+			lastCapNs: atomic.LoadInt64(s.shm.i64(offLastCapNs)), nowNs: childNowNs(),
+			staleNs: int64(spoutStaleAfter)})
+		prevFrames = frames
+		if v == spoutRecycleNow && s.recycle != nil {
+			s.recycle(why)
+		}
+	}
+}
+
+// QPC, same counter the child stamps lastCapNs with (system-wide, so the cross-process
+// comparison is apples to apples). x/sys/windows does not export these two.
+var (
+	modkernel32   = windows.NewLazySystemDLL("kernel32.dll")
+	procQPCounter = modkernel32.NewProc("QueryPerformanceCounter")
+	procQPCFreq   = modkernel32.NewProc("QueryPerformanceFrequency")
+	qpcFreqOnce   sync.Once
+	qpcFreqPerSec int64
+)
+
+// childNowNs is "now" on the child's capture clock (0 = unavailable → staleness check is skipped).
+func childNowNs() int64 {
+	qpcFreqOnce.Do(func() {
+		var f int64
+		if r, _, _ := procQPCFreq.Call(uintptr(unsafe.Pointer(&f))); r != 0 {
+			qpcFreqPerSec = f
+		}
+	})
+	if qpcFreqPerSec <= 0 {
+		return 0
+	}
+	var ctr int64
+	if r, _, _ := procQPCounter.Call(uintptr(unsafe.Pointer(&ctr))); r == 0 {
+		return 0
+	}
+	return int64((float64(ctr) / float64(qpcFreqPerSec)) * 1e9)
+}
+
+// onSrcGone handles the child's srcgone event: the capture source is unusable but the encoder is
+// intact, so the parent - not the child - decides. Same action as the staleness oracle.
+func (s *ProcSession) onSrcGone(reason string) {
+	if s.recycle != nil {
+		s.recycle("child reported srcgone: " + reason)
+	}
+}
+
+// recycleSpout closes + reopens the session with a FRESH handle. After spoutMaxRecycles failures
+// the sender is pinned to the readback path: the session fails cleanly (the route re-establishes
+// there) rather than shipping a frozen picture forever.
+func (s *ProcSession) recycleSpout(why string) {
+	if s.closed.Load() {
+		return
+	}
+	s.zcMu.Lock()
+	if time.Since(s.zcLastMove) < spoutWatchEvery {
+		s.zcMu.Unlock()
+		return // one recycle per tick, no matter how many detectors fired
+	}
+	s.zcLastMove = time.Now()
+	s.zcRecycles++
+	n := s.zcRecycles
+	s.zcMu.Unlock()
+	s.downgrades.Add(1)
+	if n > spoutMaxRecycles {
+		pinReadback(s.zcName)
+		Warnf("mfenc: zero-copy source %q unusable after %d reopen attempts (%s) - pinning this sender to the readback path",
+			s.zcName, spoutMaxRecycles, why)
+		s.fail("mfenc: zero-copy capture source gone - " + why)
+		// End the AU stream so the route does NOT sit silently on a frozen source: the caller
+		// sees EOF, the route re-establishes, and the pin above sends it down the readback path.
+		// Own goroutine: Close joins this watchdog, and we may BE it.
+		go s.Close()
+		return
+	}
+	Warnf("mfenc: zero-copy source %q recycling (%s), attempt %d/%d", s.zcName, why, n, spoutMaxRecycles)
+	// Drop frames while the source is swapped, exactly like a child restart: the route must not
+	// stall and must not see errors for the gap.
+	s.recovering.Store(true)
+	defer s.recovering.Store(false)
+	closedCh := make(chan struct{})
+	s.child.mu.Lock()
+	s.child.closeWait[s.sid] = closedCh
+	s.child.mu.Unlock()
+	if s.child.send(map[string]any{"op": "close", "sid": s.sid}) == nil {
+		select {
+		case <-closedCh:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	// openSession re-reads the handle (refreshHandle) before it sends, so the reopen is on the
+	// NEW texture by construction.
+	ev, err := s.child.openSession(s)
+	if err != nil || !ev.OK {
+		msg := "reopen refused"
+		if err != nil {
+			msg = err.Error()
+		} else if ev.ErrSrc != "" {
+			msg = ev.ErrSrc
+		}
+		Warnf("mfenc: zero-copy source %q reopen failed: %s", s.zcName, msg)
+		return // the next watch tick tries again (bounded by spoutMaxRecycles)
+	}
+	s.ForceKeyframe() // the receiver needs a fresh IDR after the gap
+}
+
+// ── readback pinning: senders whose zero-copy path proved unusable (§7.3 last rung) ──
+var (
+	pinMu    sync.Mutex
+	pinnedZC = map[string]bool{}
+)
+
+func pinReadback(name string) {
+	if name == "" {
+		return
+	}
+	pinMu.Lock()
+	pinnedZC[name] = true
+	pinMu.Unlock()
+}
+
+// ZeroCopyPinnedToReadback reports whether this sender is pinned to the readback path (a
+// zero-copy session on it failed repeatedly). Callers skip the zero-copy request entirely.
+func ZeroCopyPinnedToReadback(name string) bool {
+	pinMu.Lock()
+	defer pinMu.Unlock()
+	return pinnedZC[name]
+}
+
+// refreshHandle re-reads the sender's handle/format from the registry before an (re)open.
+func (s *ProcSession) refreshHandle() {
+	if s.resolve == nil {
+		return
+	}
+	h, f, _, _, ok := s.resolve()
+	if !ok {
+		return // keep the last known handle: the child refuses a dead one and we retry
+	}
+	s.zcMu.Lock()
+	s.zcHandle, s.zcFmt = h, f
+	s.zcMu.Unlock()
+}
+
+func (s *ProcSession) spoutHandle() (uint64, uint32, string) {
+	s.zcMu.Lock()
+	defer s.zcMu.Unlock()
+	return s.zcHandle, s.zcFmt, s.zcName
+}
+
+// IsZeroCopy reports whether this session consumes a GPU shared texture (no host frames).
+func (s *ProcSession) IsZeroCopy() bool { return s.zeroCopy }
 
 func (s *ProcSession) fail(msg string) {
 	s.failMu.Lock()
@@ -837,9 +1260,56 @@ func (s *ProcSession) SetBitrate(kbps int) {
 	}
 }
 
+// counterRate turns a monotone child-side counter into a per-second rate (anchor refreshed on
+// read, >= 500 ms apart - same shape as mediapipe's rate).
+type counterRate struct {
+	mu     sync.Mutex
+	anchor uint64
+	at     time.Time
+	fps    float64
+}
+
+func (r *counterRate) sample(n uint64, now time.Time) float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.at.IsZero() {
+		r.at, r.anchor = now, n
+		return 0
+	}
+	if d := now.Sub(r.at); d >= 500*time.Millisecond {
+		r.fps = float64(n-r.anchor) / d.Seconds()
+		r.at, r.anchor = now, n
+	}
+	return r.fps
+}
+
+// busyMean turns the child's cumulative encBusyNs + capFrames into a per-frame mean over the
+// interval between reads (a cumulative ratio would flatten a live saturation spike).
+type busyMean struct {
+	mu     sync.Mutex
+	ns     uint64
+	frames uint64
+	ms     float64
+}
+
+func (b *busyMean) mean(ns, frames uint64) float64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if frames > b.frames && ns >= b.ns {
+		b.ms = float64(ns-b.ns) / float64(frames-b.frames) / 1e6
+	}
+	b.ns, b.frames = ns, frames
+	return b.ms
+}
+
 // Encode submits one RGBA frame. During a child restart frames are DROPPED (nil error)
 // so the route survives the crash; a poisoned/dead session returns an error.
 func (s *ProcSession) Encode(rgba []byte, ptsNs int64) error {
+	if s.zeroCopy {
+		// There is no frame slot on this session; a host frame here means the caller mixed the
+		// two paths, which would write past the header into the AU ring.
+		return errors.New("mfenc: Encode on a zero-copy session (the child owns the source)")
+	}
 	if s.closed.Load() {
 		return errors.New("mfenc: session closed")
 	}
@@ -1003,6 +1473,23 @@ func (s *ProcSession) Stats() ProcStats {
 		st.LatP50Ms = tmp[n/2]
 		st.LatP99Ms = tmp[(n*99)/100]
 	}
+	if s.zeroCopy {
+		st.ZeroCopy = true
+		st.CapFrames = atomic.LoadUint64(s.shm.u64(offCapFrames))
+		st.CapSkips = atomic.LoadUint64(s.shm.u64(offCapSkips))
+		st.MtxTimeouts = atomic.LoadUint64(s.shm.u64(offMtxTimeout))
+		st.SrcErrors = atomic.LoadUint64(s.shm.u64(offSrcErrors))
+		st.CapFmt = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCapFmt)))
+		st.CapFlags = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCapFlags)))
+		st.Downgrades = int(s.downgrades.Load())
+		if last := atomic.LoadInt64(s.shm.i64(offLastCapNs)); last > 0 {
+			if now := childNowNs(); now > last {
+				st.CapStaleMs = float64(now-last) / 1e6
+			}
+		}
+		st.CapFPS = s.capRate.sample(st.CapFrames, time.Now())
+		st.EncBusyMs = s.busyRate.mean(atomic.LoadUint64(s.shm.u64(56)), st.CapFrames)
+	}
 	s.child.mu.Lock()
 	st.Restarts = s.child.restarts
 	s.child.mu.Unlock()
@@ -1054,6 +1541,9 @@ func (s *ProcSession) Close() {
 		}
 	}
 	close(s.done)
+	if s.watchDone != nil {
+		<-s.watchDone // the source watchdog reads the shm header: it must be gone before unmap
+	}
 	_ = windows.SetEvent(s.shm.evAU) // wake the pump for its final drain
 	// UNCONDITIONAL: the shm must never be unmapped while pump can still touch it. pump's
 	// exit is bounded by construction (waits <=200ms, ring drain finite, teardown delivery

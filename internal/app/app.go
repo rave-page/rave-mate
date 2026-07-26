@@ -674,6 +674,8 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaClock := medialink.NewSoftwareClock() // §2.3 tier-2 media clock (disciplined by sync probes)
 	encFac, decFac := mediapipe.Factories(log)
 	mediaLinkCfg := func() config.MediaLinkFeature { return cfg.Features.MediaLink }
+	// zigmedia inc 1: gate the zero-copy Spout->encoder capture path (default OFF).
+	mediapipe.ZeroCopyCapture = func() bool { return mediaLinkCfg().ZeroCopyCapture() }
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,

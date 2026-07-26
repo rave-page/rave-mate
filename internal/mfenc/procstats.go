@@ -10,4 +10,18 @@ type ProcStats struct {
 	ChildCPUPct float64 // encoder child process CPU (all sessions)
 	DroppedAUs  uint64  // ring-full drops (child side)
 	Restarts    int     // encoder child restarts observed by this session
+	// Zero-copy capture (src:"spout"): read straight out of the SHM header, so the frame path
+	// stays JSON-free. Zero on a readback session.
+	ZeroCopy    bool
+	CapFrames   uint64  // shared textures captured
+	CapFPS      float64 // derived from CapFrames
+	CapSkips    uint64  // pacing ticks skipped (previous encode still running)
+	MtxTimeouts uint64  // shared-texture mutex acquire timeouts (sender contention)
+	SrcErrors   uint64  // capture hard failures
+	CapStaleMs  float64 // age of the last successful capture (frozen-source oracle)
+	EncBusyMs   float64 // mean child capture+encode time per frame (the zero-copy path's
+	// saturation signal: the parent submits nothing, so submitAt/p99 stay empty here)
+	CapFmt     uint32 // DXGI format actually consumed
+	CapFlags   uint32 // bit0 zero-copy live, bit1 keyed mutex, bit2 named mutex, bit3 unsynchronized
+	Downgrades int    // zero-copy recycles/downgrades on this session
 }

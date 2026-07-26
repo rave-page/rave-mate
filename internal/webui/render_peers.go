@@ -991,9 +991,51 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.Restarts > 0 {
 			p += " · " + i18n.T("peers.restarts", i18n.A{"n": fmt.Sprint(s.Pipe.Restarts)})
 		}
+		// Latency / queue / child CPU were collected but never rendered - the route shipped
+		// blind on exactly the numbers that predict saturation.
+		if s.Pipe.LatP99Ms > 0 {
+			p += " · " + i18n.T("peers.pipeLatency", i18n.A{
+				"p50": fmt.Sprintf("%.1f", s.Pipe.LatP50Ms), "p99": fmt.Sprintf("%.1f", s.Pipe.LatP99Ms)})
+		}
+		if s.Pipe.QueueDepth != 0 {
+			p += " · " + i18n.T("peers.pipeQueue", i18n.A{"n": fmt.Sprint(s.Pipe.QueueDepth)})
+		}
+		if s.Pipe.ChildCPUPct > 0 {
+			p += " · " + i18n.T("peers.pipeChildCpu", i18n.A{"pct": fmt.Sprintf("%.0f", s.Pipe.ChildCPUPct)})
+		}
 		parts = append(parts, p)
+		if z := fmtCaptureLine(*s.Pipe); z != "" {
+			parts = append(parts, z)
+		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// fmtCaptureLine renders the zero-copy capture block ("" on a readback route with no downgrades).
+func fmtCaptureLine(p medialink.PipelineStats) string {
+	var out []string
+	if p.ZeroCopy {
+		out = append(out, i18n.T("peers.zeroCopyFps", i18n.A{"fps": fmt.Sprintf("%.1f", p.CapFPS)}))
+		if p.EncBusyMs > 0 {
+			out = append(out, i18n.T("peers.encBusy", i18n.A{"ms": fmt.Sprintf("%.1f", p.EncBusyMs)}))
+		}
+		if p.CapSkips > 0 {
+			out = append(out, i18n.T("peers.capSkips", i18n.A{"n": fmt.Sprint(p.CapSkips)}))
+		}
+		if p.MtxTimeouts > 0 {
+			out = append(out, i18n.T("peers.mtxTimeouts", i18n.A{"n": fmt.Sprint(p.MtxTimeouts)}))
+		}
+		if p.SrcErrors > 0 {
+			out = append(out, i18n.T("peers.srcErrors", i18n.A{"n": fmt.Sprint(p.SrcErrors)}))
+		}
+		if p.CapStaleMs > 0 {
+			out = append(out, i18n.T("peers.capStale", i18n.A{"ms": fmt.Sprintf("%.0f", p.CapStaleMs)}))
+		}
+	}
+	if p.Downgrades > 0 {
+		out = append(out, i18n.T("peers.downgrades", i18n.A{"n": fmt.Sprint(p.Downgrades)}))
+	}
+	return strings.Join(out, " · ")
 }
 
 func fmtClockLine(q medialink.ClockQuality) string {
