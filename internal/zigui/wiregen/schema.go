@@ -1252,6 +1252,125 @@ var schema = []msg{
 		doc: "delete-post confirm dialog",
 		fs:  []field{s(1, "Title", "title"), s(2, "Post", "post"), s(3, "Group", "group"), s(4, "Confirm", "confirm"), s(5, "Cancel", "cancel")},
 	},
+	// worlds family (i5): full tab (76) + the four live patch targets - #world-linkhint (72),
+	// #world-gh (73), #world-st-<key> (74), #world-unity-rows (75) - plus the nine ws modals
+	// (77-85; #world-fr-list / #world-grp-list / #world-role-list are async-patched inners).
+	// Prose fields are trusted Go-source literals rendered raw on BOTH sides; plain kStr here,
+	// raw semantics live in the renderers.
+	{
+		name: "WsHint", goT: "wsHintSt", zigT: "worlds.Hint", id: 72,
+		doc: "#world-linkhint chip",
+		fs:  []field{s(1, "Tone", "tone"), s(2, "Text", "text")},
+	},
+	{
+		name: "WsGitHub", goT: "wsGitHubSt", zigT: "worlds.GitHub", id: 73,
+		doc: "#world-gh link control",
+		fs:  []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "LinkedLabel", "linkedLabel"), s(4, "LinkedDL", "linkedDl"), s(5, "Login", "login"), s(6, "LinkedHelp", "linkedHelp"), s(7, "UnlinkLabel", "unlinkLabel"), s(8, "UnlinkedHelp", "unlinkedHelp"), s(9, "DeviceLabel", "deviceLabel"), s(10, "PatLabel", "patLabel")},
+	},
+	{
+		name: "WsStatus", goT: "wsStatusSt", zigT: "worlds.Status", id: 74,
+		doc: "one #world-st-<key> publish status",
+		fs:  []field{s(1, "Tone", "tone"), s(2, "Line", "line"), s(3, "URL", "url"), s(4, "CopyLabel", "copyLabel"), s(5, "OpenLabel", "openLabel"), s(6, "HTMLURL", "htmlUrl")},
+	},
+	{
+		name: "WsListRow", goT: "wsListRowSt", zigT: "worlds.ListRow",
+		fs: []field{s(1, "Key", "key"), s(2, "Name", "name"), s(3, "Entries", "entries"), s(4, "EditAct", "editAct"), s(5, "PubAct", "pubAct"), s(6, "DelAct", "delAct"), st(7, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsLists", goT: "wsListsSt", zigT: "worlds.Lists",
+		fs: []field{s(1, "Help", "help"), s(2, "Empty", "empty"), li(3, "Rows", "rows", "WsListRow"), s(4, "EditLabel", "editLabel"), s(5, "PubLabel", "pubLabel"), s(6, "DelLabel", "delLabel"), s(7, "AddPlaceholder", "addPlaceholder"), s(8, "AddLabel", "addLabel")},
+	},
+	{
+		name: "WsPosterRow", goT: "wsPosterRowSt", zigT: "worlds.PosterRow",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "EditAct", "editAct"), s(4, "DelAct", "delAct")},
+	},
+	{
+		name: "WsPosters", goT: "wsPostersSt", zigT: "worlds.Posters",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "AddLabel", "addLabel"), s(3, "PubLabel", "pubLabel"), s(4, "ToggleLabel", "toggleLabel"), s(5, "ToggleDL", "toggleDl"), b(6, "ToggleOn", "toggleOn"), s(7, "Help", "help"), s(8, "Empty", "empty"), li(9, "Rows", "rows", "WsPosterRow"), s(10, "EditLabel", "editLabel"), s(11, "DelLabel", "delLabel"), st(12, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsEvents", goT: "wsEventsSt", zigT: "worlds.Events",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "PubLabel", "pubLabel"), s(3, "ToggleLabel", "toggleLabel"), s(4, "ToggleDL", "toggleDl"), b(5, "ToggleOn", "toggleOn"), s(6, "Help", "help"), st(7, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsNowPlaying", goT: "wsNowPlayingSt", zigT: "worlds.NowPlaying",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "PubLabel", "pubLabel"), s(3, "ToggleLabel", "toggleLabel"), s(4, "ToggleDL", "toggleDl"), b(5, "ToggleOn", "toggleOn"), s(6, "LinkLabel", "linkLabel"), s(7, "LinkDL", "linkDl"), s(8, "Link", "link"), s(9, "ImgLabel", "imgLabel"), s(10, "ImgDL", "imgDl"), s(11, "Img", "img"), s(12, "ImgWarn", "imgWarn"), s(13, "Help", "help"), st(14, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsUnityRow", goT: "wsUnityRowSt", zigT: "worlds.UnityRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Dir", "dir"), s(3, "Act", "act")},
+	},
+	{
+		name: "WsUnity", goT: "wsUnitySt", zigT: "worlds.Unity", id: 75,
+		doc: "#world-unity-rows hand-off list",
+		fs:  []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "WriteLabel", "writeLabel"), li(4, "Rows", "rows", "WsUnityRow")},
+	},
+	{
+		name: "Worlds", goT: "worldsState", zigT: "worlds.State", id: 76,
+		doc: "Worlds tab (full view)",
+		fs:  []field{b(1, "Available", "available"), s(2, "Title", "title"), s(3, "Sub", "sub"), s(4, "Unavailable", "unavailable"), st(5, "LinkHint", "linkHint", "WsHint"), s(6, "SecGitHub", "secGitHub"), st(7, "GH", "gh", "WsGitHub"), s(8, "SecLists", "secLists"), st(9, "Lists", "lists", "WsLists"), s(10, "SecPosters", "secPosters"), st(11, "Posters", "posters", "WsPosters"), s(12, "SecEvents", "secEvents"), st(13, "Events", "events", "WsEvents"), s(14, "SecNP", "secNp"), st(15, "NP", "np", "WsNowPlaying"), s(16, "SecUnity", "secUnity"), s(17, "UnityHelp", "unityHelp"), st(18, "Unity", "unity", "WsUnity")},
+	},
+	{
+		name: "WsEntryRow", goT: "wsEntryRowSt", zigT: "dialogs_b.WsEntryRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act")},
+	},
+	{
+		name: "WsListEditor", goT: "wsListEditorSt", zigT: "dialogs_b.WsListEditor", id: 77,
+		doc: "permission-list entry editor dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Help", "help"), b(3, "Empty", "empty"), s(4, "EmptyMsg", "emptyMsg"), li(5, "Entries", "entries", "WsEntryRow"), s(6, "DelLabel", "delLabel"), s(7, "AddPh", "addPh"), s(8, "AddBtn", "addBtn"), s(9, "FriendBtn", "friendBtn"), s(10, "FriendAct", "friendAct"), s(11, "GroupBtn", "groupBtn"), s(12, "GroupAct", "groupAct")},
+	},
+	{
+		name: "WsPosterEditor", goT: "wsPosterEditorSt", zigT: "dialogs_b.WsPosterEditor", id: 78,
+		doc: "poster-slot editor form",
+		fs:  []field{s(1, "Title", "title"), s(2, "Idx", "idx"), s(3, "ImgLbl", "imgLbl"), s(4, "Img", "img"), s(5, "ImgPh", "imgPh"), s(6, "CapLbl", "capLbl"), s(7, "Caption", "caption"), s(8, "CapPh", "capPh"), s(9, "LinkLbl", "linkLbl"), s(10, "Link", "link"), s(11, "LinkPh", "linkPh"), b(12, "HasWarn", "hasWarn"), s(13, "Warn", "warn"), s(14, "Save", "save")},
+	},
+	{
+		name: "WsPickRow", goT: "wsPickRowSt", zigT: "dialogs_b.WsPickRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act")},
+	},
+	{
+		name: "WsFriendList", goT: "wsFriendListSt", zigT: "dialogs_b.WsFriendList", id: 79,
+		doc: "#world-fr-list inner (async friends load / filter)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), li(3, "Rows", "rows", "WsPickRow"), s(4, "AddLabel", "addLabel"), b(5, "HasMore", "hasMore"), s(6, "MoreMsg", "moreMsg"), b(7, "Empty", "empty"), s(8, "EmptyMsg", "emptyMsg")},
+	},
+	{
+		name: "WsFriendPicker", goT: "wsFriendPickerSt", zigT: "dialogs_b.WsFriendPicker", id: 80,
+		doc: "friend-picker dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "BackLbl", "backLbl"), s(4, "BackAct", "backAct"), st(5, "List", "list", "WsFriendList")},
+	},
+	{
+		name: "WsGroupRow", goT: "wsGroupRowSt", zigT: "dialogs_b.WsGroupRow",
+		fs: []field{s(1, "Label", "label"), s(2, "FavLabel", "favLabel"), s(3, "FavAct", "favAct"), s(4, "RolesAct", "rolesAct")},
+	},
+	{
+		name: "WsGroupSec", goT: "wsGroupSecSt", zigT: "dialogs_b.WsGroupSec",
+		fs: []field{s(1, "Caption", "caption"), li(2, "Rows", "rows", "WsGroupRow")},
+	},
+	{
+		name: "WsGroupList", goT: "wsGroupListSt", zigT: "dialogs_b.WsGroupList", id: 81,
+		doc: "#world-grp-list inner (own-groups load + group search)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), li(3, "Sections", "sections", "WsGroupSec"), s(4, "RolesLabel", "rolesLabel"), b(5, "Empty", "empty"), s(6, "EmptyMsg", "emptyMsg")},
+	},
+	{
+		name: "WsGroupPicker", goT: "wsGroupPickerSt", zigT: "dialogs_b.WsGroupPicker", id: 82,
+		doc: "group-picker dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "SearchBtn", "searchBtn"), s(4, "Help", "help"), s(5, "BackLbl", "backLbl"), s(6, "BackAct", "backAct"), st(7, "List", "list", "WsGroupList")},
+	},
+	{
+		name: "WsRoleList", goT: "wsRoleListSt", zigT: "dialogs_b.WsRoleList", id: 83,
+		doc: "#world-role-list inner (async roles load)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), s(3, "AllLabel", "allLabel"), s(4, "GrantLabel", "grantLabel"), li(5, "Rows", "rows", "WsPickRow")},
+	},
+	{
+		name: "WsRolePicker", goT: "wsRolePickerSt", zigT: "dialogs_b.WsRolePicker", id: 84,
+		doc: "role-grant dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "BackLbl", "backLbl"), s(3, "BackAct", "backAct"), st(4, "List", "list", "WsRoleList")},
+	},
+	{
+		name: "WsDevice", goT: "wsDeviceSt", zigT: "dialogs_b.WsDevice", id: 85,
+		doc: "GitHub device-code dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Help", "help"), s(3, "Code", "code"), s(4, "CopyLbl", "copyLbl"), s(5, "OpenLbl", "openLbl"), s(6, "URI", "uri")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -1319,6 +1438,7 @@ var zigImports = [][2]string{
 	{"dialogs_b", "dialogs_b.zig"},
 	{"vrchat", "vrchat.zig"},
 	{"vrcgroups", "vrcgroups.zig"},
+	{"worlds", "worlds.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

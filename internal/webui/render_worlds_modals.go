@@ -52,7 +52,8 @@ type wsListEditorSt struct {
 func (u *UI) wsListEditorHTML(l *config.PermList) string {
 	st := wsListEditorState(l)
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsListEditor(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsListEditorV2", wireWsListEditor(st), zigui.RenderWsListEditorV2,
+			zigui.RenderWsListEditor, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -141,7 +142,8 @@ type wsPosterEditorSt struct {
 func (u *UI) wsPosterEditorHTML(idx int, p config.WorldPoster) string {
 	st := wsPosterEditorState(idx, p)
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsPosterEditor(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsPosterEditorV2", wireWsPosterEditor(st), zigui.RenderWsPosterEditorV2,
+			zigui.RenderWsPosterEditor, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -225,7 +227,8 @@ func (u *UI) wsFriendPickerHTML(listID string) string {
 		List: wsFriendListState(),
 	}
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsFriendPicker(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsFriendPickerV2", wireWsFriendPicker(st), zigui.RenderWsFriendPickerV2,
+			zigui.RenderWsFriendPicker, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -245,7 +248,8 @@ func wsFriendPickerHTMLOf(st wsFriendPickerSt) string {
 func (u *UI) wsFriendListHTML() string {
 	st := wsFriendListState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsFriendList(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsFriendListV2", wireWsFriendList(st), zigui.RenderWsFriendListV2,
+			zigui.RenderWsFriendList, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -348,7 +352,8 @@ func (u *UI) wsGroupPickerHTML(listID string) string {
 		List: u.wsGroupListState(),
 	}
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsGroupPicker(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsGroupPickerV2", wireWsGroupPicker(st), zigui.RenderWsGroupPickerV2,
+			zigui.RenderWsGroupPicker, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -371,7 +376,8 @@ func wsGroupPickerHTMLOf(st wsGroupPickerSt) string {
 func (u *UI) wsGroupListHTML() string {
 	st := u.wsGroupListState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsGroupList(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsGroupListV2", wireWsGroupList(st), zigui.RenderWsGroupListV2,
+			zigui.RenderWsGroupList, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -500,7 +506,8 @@ func (u *UI) wsRolePickerHTML(groupName, listID string) string {
 		List: wsRoleListSt{Loading: true, LoadingMsg: "Loading roles…"},
 	}
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsRolePicker(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsRolePickerV2", wireWsRolePicker(st), zigui.RenderWsRolePickerV2,
+			zigui.RenderWsRolePicker, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -516,7 +523,8 @@ func wsRolePickerHTMLOf(st wsRolePickerSt) string {
 // wsRoleListHTML renders the loaded roles into grant rows (#world-role-list patch).
 func (u *UI) wsRoleListHTML(st wsRoleListSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsRoleList(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsRoleListV2", wireWsRoleList(st), zigui.RenderWsRoleListV2,
+			zigui.RenderWsRoleList, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -557,7 +565,8 @@ func (u *UI) wsDeviceHTML(code, uri string) string {
 		Code:  code, CopyLbl: "Copy code", OpenLbl: "Open activation page", URI: uri,
 	}
 	if zigui.Available() {
-		if h, ok := zigui.RenderWsDevice(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWsDeviceV2", wireWsDevice(st), zigui.RenderWsDeviceV2,
+			zigui.RenderWsDevice, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

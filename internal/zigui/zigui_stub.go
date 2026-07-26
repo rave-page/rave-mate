@@ -257,6 +257,21 @@ func RenderVgInviteModalV2(state []byte) (string, bool)   { return "", false }
 func RenderVgMemberConfirmV2(state []byte) (string, bool) { return "", false }
 func RenderVgPostConfirmV2(state []byte) (string, bool)   { return "", false }
 
+func RenderWorldsV2(state []byte) (string, bool)          { return "", false }
+func RenderWorldsLinkHintV2(state []byte) (string, bool)  { return "", false }
+func RenderWorldsGitHubV2(state []byte) (string, bool)    { return "", false }
+func RenderWorldsStatusV2(state []byte) (string, bool)    { return "", false }
+func RenderWorldsUnityRowsV2(state []byte) (string, bool) { return "", false }
+func RenderWsListEditorV2(state []byte) (string, bool)    { return "", false }
+func RenderWsPosterEditorV2(state []byte) (string, bool)  { return "", false }
+func RenderWsFriendPickerV2(state []byte) (string, bool)  { return "", false }
+func RenderWsFriendListV2(state []byte) (string, bool)    { return "", false }
+func RenderWsGroupPickerV2(state []byte) (string, bool)   { return "", false }
+func RenderWsGroupListV2(state []byte) (string, bool)     { return "", false }
+func RenderWsRolePickerV2(state []byte) (string, bool)    { return "", false }
+func RenderWsRoleListV2(state []byte) (string, bool)      { return "", false }
+func RenderWsDeviceV2(state []byte) (string, bool)        { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

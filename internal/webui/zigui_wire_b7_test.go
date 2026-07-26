@@ -43,6 +43,20 @@ func wireExportsB7() []wireExport {
 		{"vg_invitemodal_v2", zigui.RenderVgInviteModalV2},
 		{"vg_memberconfirm_v2", zigui.RenderVgMemberConfirmV2},
 		{"vg_postconfirm_v2", zigui.RenderVgPostConfirmV2},
+		{"worlds_v2", zigui.RenderWorldsV2},
+		{"worlds_linkhint_v2", zigui.RenderWorldsLinkHintV2},
+		{"worlds_github_v2", zigui.RenderWorldsGitHubV2},
+		{"worlds_status_v2", zigui.RenderWorldsStatusV2},
+		{"worlds_unityrows_v2", zigui.RenderWorldsUnityRowsV2},
+		{"ws_listeditor_v2", zigui.RenderWsListEditorV2},
+		{"ws_postereditor_v2", zigui.RenderWsPosterEditorV2},
+		{"ws_friendpicker_v2", zigui.RenderWsFriendPickerV2},
+		{"ws_friendlist_v2", zigui.RenderWsFriendListV2},
+		{"ws_grouppicker_v2", zigui.RenderWsGroupPickerV2},
+		{"ws_grouplist_v2", zigui.RenderWsGroupListV2},
+		{"ws_rolepicker_v2", zigui.RenderWsRolePickerV2},
+		{"ws_rolelist_v2", zigui.RenderWsRoleListV2},
+		{"ws_device_v2", zigui.RenderWsDeviceV2},
 	}
 }
 
@@ -104,6 +118,38 @@ func wireBasesB7() []wireBase {
 	}
 	for n, st := range vgPostConfirmFixtures() {
 		out = append(out, wireBase{"vgpc/" + n, wireVgPostConfirm(st)})
+	}
+	for n, st := range worldsFixtures() {
+		out = append(out,
+			wireBase{"ws/" + n, wireWorlds(st)},
+			wireBase{"ws/" + n + "/hint", wireWsHint(st.LinkHint)},
+			wireBase{"ws/" + n + "/gh", wireWsGitHub(st.GH)},
+			wireBase{"ws/" + n + "/status", wireWsStatus(st.Posters.Status)},
+			wireBase{"ws/" + n + "/unity", wireWsUnity(st.Unity)})
+	}
+	for n, st := range wsListEditorFixtures() {
+		out = append(out, wireBase{"wsle/" + n, wireWsListEditor(st)})
+	}
+	for n, st := range wsPosterEditorFixtures() {
+		out = append(out, wireBase{"wspe/" + n, wireWsPosterEditor(st)})
+	}
+	for n, st := range wsFriendListFixtures() {
+		out = append(out,
+			wireBase{"wsfl/" + n, wireWsFriendList(st)},
+			wireBase{"wsfp/" + n, wireWsFriendPicker(wsFriendPickerSt{Title: "Add friend", SearchPh: "filter friends…", BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st})})
+	}
+	for n, st := range wsGroupListFixtures() {
+		out = append(out,
+			wireBase{"wsgl/" + n, wireWsGroupList(st)},
+			wireBase{"wsgp/" + n, wireWsGroupPicker(wsGroupPickerSt{Title: "Add group role", SearchPh: "search all groups…", SearchBtn: "Search", Help: "h", BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st})})
+	}
+	for n, st := range wsRoleListFixtures() {
+		out = append(out,
+			wireBase{"wsrl/" + n, wireWsRoleList(st)},
+			wireBase{"wsrp/" + n, wireWsRolePicker(wsRolePickerSt{Title: "Roles of X", BackLbl: "Back to groups", BackAct: "world-groups:list-1", List: st})})
+	}
+	for n, st := range wsDeviceFixtures() {
+		out = append(out, wireBase{"wsdev/" + n, wireWsDevice(st)})
 	}
 	return out
 }
@@ -517,6 +563,148 @@ func BenchmarkWireBenchTwitchFeed(b *testing.B) {
 	benchPair(b,
 		func() (string, bool) { return zigui.RenderTwitchFeed(stateJSON(st)) },
 		func() (string, bool) { return zigui.RenderTwitchFeedV2(wireTwFeed(st)) })
+}
+
+// TestZigWireThreeWayWorlds: the full Worlds tab + its four live patch targets (#world-linkhint,
+// #world-gh, #world-st-<key>, #world-unity-rows) over the whole golden fixture set. Every status
+// site (posters/events/np + each list row) goes through the status export like the golden suite.
+func TestZigWireThreeWayWorlds(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := worldsFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireWorlds(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderWorlds(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderWorldsV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", worldsHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			threeWayFrag(t, "linkhint", wsHintHTML(st.LinkHint), stateJSON(st.LinkHint),
+				wireWsHint(st.LinkHint), zigui.RenderWorldsLinkHint, zigui.RenderWorldsLinkHintV2)
+			threeWayFrag(t, "github", wsGitHubHTML(st.GH), stateJSON(st.GH),
+				wireWsGitHub(st.GH), zigui.RenderWorldsGitHub, zigui.RenderWorldsGitHubV2)
+			threeWayFrag(t, "unityrows", wsUnityRowsHTML(st.Unity), stateJSON(st.Unity),
+				wireWsUnity(st.Unity), zigui.RenderWorldsUnityRows, zigui.RenderWorldsUnityRowsV2)
+			for i, s := range []wsStatusSt{st.Posters.Status, st.Events.Status, st.NP.Status} {
+				threeWayFrag(t, fmt.Sprintf("status%d", i), wsStatusHTML(s), stateJSON(s),
+					wireWsStatus(s), zigui.RenderWorldsStatus, zigui.RenderWorldsStatusV2)
+			}
+			for i, l := range st.Lists.Rows {
+				threeWayFrag(t, fmt.Sprintf("status:list%d", i), wsStatusHTML(l.Status), stateJSON(l.Status),
+					wireWsStatus(l.Status), zigui.RenderWorldsStatus, zigui.RenderWorldsStatusV2)
+			}
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacksIn(t, before,
+		"RenderWorlds", "RenderWorldsV2", "RenderWorldsLinkHint", "RenderWorldsLinkHintV2",
+		"RenderWorldsGitHub", "RenderWorldsGitHubV2", "RenderWorldsStatus", "RenderWorldsStatusV2",
+		"RenderWorldsUnityRows", "RenderWorldsUnityRowsV2")
+}
+
+// TestZigWireThreeWayWsDialogs: the nine worlds modals. The friend/group list "empty" fixtures
+// render "" (no loading, no rows, no empty flag) - both exports must decline identically and
+// the declines are asserted exactly (i4's exact-delta pattern). Picker shells are composed from
+// the list fixtures like the golden suite.
+func TestZigWireThreeWayWsDialogs(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	rec := map[string]int{}
+	for name, st := range wsListEditorFixtures() {
+		t.Run("listEditor/"+name, func(t *testing.T) {
+			threeWayFrag(t, "listEditor", wsListEditorHTMLOf(st), stateJSON(st),
+				wireWsListEditor(st), zigui.RenderWsListEditor, zigui.RenderWsListEditorV2)
+		})
+	}
+	for name, st := range wsPosterEditorFixtures() {
+		t.Run("posterEditor/"+name, func(t *testing.T) {
+			threeWayFrag(t, "posterEditor", wsPosterEditorHTMLOf(st), stateJSON(st),
+				wireWsPosterEditor(st), zigui.RenderWsPosterEditor, zigui.RenderWsPosterEditorV2)
+		})
+	}
+	for name, st := range wsFriendListFixtures() {
+		t.Run("friendList/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "friendList", wsFriendListHTMLOf(st), stateJSON(st),
+				wireWsFriendList(st), zigui.RenderWsFriendList, zigui.RenderWsFriendListV2,
+				rec, "RenderWsFriendList", "RenderWsFriendListV2")
+			p := wsFriendPickerSt{Title: "Add friend", SearchPh: "filter friends…",
+				BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st}
+			threeWayFrag(t, "friendPicker", wsFriendPickerHTMLOf(p), stateJSON(p),
+				wireWsFriendPicker(p), zigui.RenderWsFriendPicker, zigui.RenderWsFriendPickerV2)
+		})
+	}
+	for name, st := range wsGroupListFixtures() {
+		t.Run("groupList/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "groupList", wsGroupListHTMLOf(st), stateJSON(st),
+				wireWsGroupList(st), zigui.RenderWsGroupList, zigui.RenderWsGroupListV2,
+				rec, "RenderWsGroupList", "RenderWsGroupListV2")
+			p := wsGroupPickerSt{Title: "Add group role", SearchPh: "search all groups…", SearchBtn: "Search",
+				Help:    "Grant a whole group or a role. Member expansion only works where the member list is visible (public groups); private groups keep their last good expansion.",
+				BackLbl: "Back to list", BackAct: "world-list-edit:list-1", List: st}
+			threeWayFrag(t, "groupPicker", wsGroupPickerHTMLOf(p), stateJSON(p),
+				wireWsGroupPicker(p), zigui.RenderWsGroupPicker, zigui.RenderWsGroupPickerV2)
+		})
+	}
+	for name, st := range wsRoleListFixtures() {
+		t.Run("roleList/"+name, func(t *testing.T) {
+			threeWayFrag(t, "roleList", wsRoleListHTMLOf(st), stateJSON(st),
+				wireWsRoleList(st), zigui.RenderWsRoleList, zigui.RenderWsRoleListV2)
+			p := wsRolePickerSt{Title: `Roles of Crew & "B"`, BackLbl: "Back to groups",
+				BackAct: "world-groups:list-1", List: st}
+			threeWayFrag(t, "rolePicker", wsRolePickerHTMLOf(p), stateJSON(p),
+				wireWsRolePicker(p), zigui.RenderWsRolePicker, zigui.RenderWsRolePickerV2)
+		})
+	}
+	for name, st := range wsDeviceFixtures() {
+		t.Run("device/"+name, func(t *testing.T) {
+			threeWayFrag(t, "device", wsDeviceHTMLOf(st), stateJSON(st),
+				wireWsDevice(st), zigui.RenderWsDevice, zigui.RenderWsDeviceV2)
+		})
+	}
+	assertExactFallbacksIn(t, before, rec,
+		"RenderWsListEditor", "RenderWsListEditorV2", "RenderWsPosterEditor", "RenderWsPosterEditorV2",
+		"RenderWsFriendPicker", "RenderWsFriendPickerV2", "RenderWsFriendList", "RenderWsFriendListV2",
+		"RenderWsGroupPicker", "RenderWsGroupPickerV2", "RenderWsGroupList", "RenderWsGroupListV2",
+		"RenderWsRolePicker", "RenderWsRolePickerV2", "RenderWsRoleList", "RenderWsRoleListV2",
+		"RenderWsDevice", "RenderWsDeviceV2")
+}
+
+func BenchmarkWireBenchWorlds(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := worldsFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderWorlds(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderWorldsV2(wireWorlds(st)) })
+}
+
+func BenchmarkWireBenchWorldsStatus(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := worldsFixtures()["populated"].Posters.Status
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderWorldsStatus(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderWorldsStatusV2(wireWsStatus(st)) })
 }
 
 // threeWayFrag asserts one fragment renderer three ways: Go == v1(JSON) == v2(RZW1).

@@ -226,6 +226,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | midi `#midi-monitor` rows frag | 1 538 | 859 | **-44%** | (~1 Hz tick) |
 | vrchat (full tab) | 36 314 | 14 177 | **-61%** | 15 749 / 47 025 = 33.5% |
 | vrchat `#vrcg-body` groups frag | 21 734 | 9 327 | **-57%** | (workspace fixture) |
+| worlds (full tab) | 24 128 | 13 668 | **-43%** | 24 237 / 35 770 = 67.8% |
+| worlds `#world-st-<key>` frag | 1 564 | 1 128 | **-28%** | (per publish action) |
 
 ## Gaps / caveats
 

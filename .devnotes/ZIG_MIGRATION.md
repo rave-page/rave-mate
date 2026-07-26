@@ -376,8 +376,10 @@ Rules:
   -63% full / -59% feed, documents 39.9%. Third (i3): midi mixer + pcv modals (ids 54-59; three
   ~1 Hz patch targets) - -52% full / -44% monitor rows, documents 43.5%. Fourth (i4): vrchat
   family (ids 60-71; full tab + 4 fragments + #vrcg-body + 6 group modals) - -61% full / -57%
-  groups body, documents 33.5%, fuzz 789 495 cases. Registry: `zigui_wire_b7_test.go`.
-  Still JSON-bridged: worlds family(14), editor(2), dialogs_a(7),
+  groups body, documents 33.5%. Fifth (i5): worlds family (ids 72-85; full tab + 4 patch targets
+  + 9 ws modals) - -43% full / -28% status, documents 67.8% (long unrepeated prose), fuzz
+  1 117 315 cases. Registry: `zigui_wire_b7_test.go`.
+  Still JSON-bridged: editor(2), dialogs_a(7),
   library modals/cueedit/fixers/remote/mirror/remotecue(12), motion pcv(2), publish remote(1),
   automations editor/runnow/schedules(3), update flow(1). Detail: ZIG_UI_GUIDE.md "Phase B - B7".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks

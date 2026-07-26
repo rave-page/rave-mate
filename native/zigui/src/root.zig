@@ -1080,6 +1080,67 @@ export fn rz_ui_render_vg_postconfirm_v2(state: ?[*]const u8, len: usize, out_le
     return renderWire(dialogs_b.PostConfirm, wire_gen.decodeVgPostConfirm, dialogs_b.renderPostConfirm, wire_gen.msg_vg_post_confirm, state, len, out_len);
 }
 
+// ── B7 fan-out: worlds family (root ids 72-85) ──
+// Full tab (76) + four live patch targets: #world-linkhint (72), #world-gh (73),
+// #world-st-<key> (74), #world-unity-rows (75); nine ws modals (77-85) render in dialogs_b
+// (#world-fr-list / #world-grp-list / #world-role-list are async-patched inners).
+
+export fn rz_ui_render_worlds_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.State, wire_gen.decodeWorlds, worlds.render, wire_gen.msg_worlds, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_linkhint_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Hint, wire_gen.decodeWsHint, worlds.renderHint, wire_gen.msg_ws_hint, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_github_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.GitHub, wire_gen.decodeWsGitHub, worlds.renderGitHub, wire_gen.msg_ws_git_hub, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Status, wire_gen.decodeWsStatus, worlds.renderStatus, wire_gen.msg_ws_status, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_unityrows_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Unity, wire_gen.decodeWsUnity, worlds.renderUnityRows, wire_gen.msg_ws_unity, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_listeditor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsListEditor, wire_gen.decodeWsListEditor, dialogs_b.renderWsListEditor, wire_gen.msg_ws_list_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_postereditor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsPosterEditor, wire_gen.decodeWsPosterEditor, dialogs_b.renderWsPosterEditor, wire_gen.msg_ws_poster_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendpicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsFriendPicker, wire_gen.decodeWsFriendPicker, dialogs_b.renderWsFriendPicker, wire_gen.msg_ws_friend_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendlist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsFriendList, wire_gen.decodeWsFriendList, dialogs_b.renderWsFriendList, wire_gen.msg_ws_friend_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouppicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsGroupPicker, wire_gen.decodeWsGroupPicker, dialogs_b.renderWsGroupPicker, wire_gen.msg_ws_group_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouplist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsGroupList, wire_gen.decodeWsGroupList, dialogs_b.renderWsGroupList, wire_gen.msg_ws_group_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolepicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsRolePicker, wire_gen.decodeWsRolePicker, dialogs_b.renderWsRolePicker, wire_gen.msg_ws_role_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolelist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsRoleList, wire_gen.decodeWsRoleList, dialogs_b.renderWsRoleList, wire_gen.msg_ws_role_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_device_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsDevice, wire_gen.decodeWsDevice, dialogs_b.renderWsDevice, wire_gen.msg_ws_device, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

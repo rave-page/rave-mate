@@ -311,6 +311,20 @@ const uint8_t *rz_ui_render_vg_rolesmodal_v2(const uint8_t *state, size_t len, s
 const uint8_t *rz_ui_render_vg_invitemodal_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_memberconfirm_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_vg_postconfirm_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_linkhint_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_github_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_status_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_worlds_unityrows_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_listeditor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_postereditor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendpicker_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_friendlist_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouppicker_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_grouplist_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolepicker_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_rolelist_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_ws_device_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

@@ -32,8 +32,9 @@ const midimon = @import("midimon.zig");
 const dialogs_b = @import("dialogs_b.zig");
 const vrchat = @import("vrchat.zig");
 const vrcgroups = @import("vrcgroups.zig");
+const worlds = @import("worlds.zig");
 
-pub const schema_hash: u32 = 0xa89a82a8;
+pub const schema_hash: u32 = 0xae454231;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -99,6 +100,20 @@ pub const msg_vg_roles_modal: u16 = 68; // roles dialog shell (embeds #vrcg-role
 pub const msg_vg_invite_modal: u16 = 69; // invite dialog shell (embeds #vrcg-inv-list)
 pub const msg_vg_member_confirm: u16 = 70; // kick/ban confirm dialog
 pub const msg_vg_post_confirm: u16 = 71; // delete-post confirm dialog
+pub const msg_ws_hint: u16 = 72; // #world-linkhint chip
+pub const msg_ws_git_hub: u16 = 73; // #world-gh link control
+pub const msg_ws_status: u16 = 74; // one #world-st-<key> publish status
+pub const msg_ws_unity: u16 = 75; // #world-unity-rows hand-off list
+pub const msg_worlds: u16 = 76; // Worlds tab (full view)
+pub const msg_ws_list_editor: u16 = 77; // permission-list entry editor dialog
+pub const msg_ws_poster_editor: u16 = 78; // poster-slot editor form
+pub const msg_ws_friend_list: u16 = 79; // #world-fr-list inner (async friends load / filter)
+pub const msg_ws_friend_picker: u16 = 80; // friend-picker dialog shell
+pub const msg_ws_group_list: u16 = 81; // #world-grp-list inner (own-groups load + group search)
+pub const msg_ws_group_picker: u16 = 82; // group-picker dialog shell
+pub const msg_ws_role_list: u16 = 83; // #world-role-list inner (async roles load)
+pub const msg_ws_role_picker: u16 = 84; // role-grant dialog shell
+pub const msg_ws_device: u16 = 85; // GitHub device-code dialog
 pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
 pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
@@ -3542,6 +3557,328 @@ pub fn decodeVgPostConfirm(r: *wire.Reader, out: *dialogs_b.PostConfirm) wire.Er
     };
 }
 
+pub fn decodeWsHint(r: *wire.Reader, out: *worlds.Hint) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tone = try r.str(t),
+        2 => out.text = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsGitHub(r: *wire.Reader, out: *worlds.GitHub) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.mode = try r.str(t),
+        2 => out.msg = try r.str(t),
+        3 => out.linkedLabel = try r.str(t),
+        4 => out.linkedDl = try r.str(t),
+        5 => out.login = try r.str(t),
+        6 => out.linkedHelp = try r.str(t),
+        7 => out.unlinkLabel = try r.str(t),
+        8 => out.unlinkedHelp = try r.str(t),
+        9 => out.deviceLabel = try r.str(t),
+        10 => out.patLabel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsStatus(r: *wire.Reader, out: *worlds.Status) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.tone = try r.str(t),
+        2 => out.line = try r.str(t),
+        3 => out.url = try r.str(t),
+        4 => out.copyLabel = try r.str(t),
+        5 => out.openLabel = try r.str(t),
+        6 => out.htmlUrl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsListRow(r: *wire.Reader, out: *worlds.ListRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.key = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.entries = try r.str(t),
+        4 => out.editAct = try r.str(t),
+        5 => out.pubAct = try r.str(t),
+        6 => out.delAct = try r.str(t),
+        7 => out.status = try r.sub(worlds.Status, decodeWsStatus, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsLists(r: *wire.Reader, out: *worlds.Lists) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.help = try r.str(t),
+        2 => out.empty = try r.str(t),
+        3 => out.rows = try r.list(worlds.ListRow, decodeWsListRow, t),
+        4 => out.editLabel = try r.str(t),
+        5 => out.pubLabel = try r.str(t),
+        6 => out.delLabel = try r.str(t),
+        7 => out.addPlaceholder = try r.str(t),
+        8 => out.addLabel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsPosterRow(r: *wire.Reader, out: *worlds.PosterRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.editAct = try r.str(t),
+        4 => out.delAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsPosters(r: *wire.Reader, out: *worlds.Posters) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.addLabel = try r.str(t),
+        3 => out.pubLabel = try r.str(t),
+        4 => out.toggleLabel = try r.str(t),
+        5 => out.toggleDl = try r.str(t),
+        6 => out.toggleOn = try r.boolean(t),
+        7 => out.help = try r.str(t),
+        8 => out.empty = try r.str(t),
+        9 => out.rows = try r.list(worlds.PosterRow, decodeWsPosterRow, t),
+        10 => out.editLabel = try r.str(t),
+        11 => out.delLabel = try r.str(t),
+        12 => out.status = try r.sub(worlds.Status, decodeWsStatus, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsEvents(r: *wire.Reader, out: *worlds.Events) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.pubLabel = try r.str(t),
+        3 => out.toggleLabel = try r.str(t),
+        4 => out.toggleDl = try r.str(t),
+        5 => out.toggleOn = try r.boolean(t),
+        6 => out.help = try r.str(t),
+        7 => out.status = try r.sub(worlds.Status, decodeWsStatus, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsNowPlaying(r: *wire.Reader, out: *worlds.NowPlaying) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.cardTitle = try r.str(t),
+        2 => out.pubLabel = try r.str(t),
+        3 => out.toggleLabel = try r.str(t),
+        4 => out.toggleDl = try r.str(t),
+        5 => out.toggleOn = try r.boolean(t),
+        6 => out.linkLabel = try r.str(t),
+        7 => out.linkDl = try r.str(t),
+        8 => out.link = try r.str(t),
+        9 => out.imgLabel = try r.str(t),
+        10 => out.imgDl = try r.str(t),
+        11 => out.img = try r.str(t),
+        12 => out.imgWarn = try r.str(t),
+        13 => out.help = try r.str(t),
+        14 => out.status = try r.sub(worlds.Status, decodeWsStatus, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsUnityRow(r: *wire.Reader, out: *worlds.UnityRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.dir = try r.str(t),
+        3 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsUnity(r: *wire.Reader, out: *worlds.Unity) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.mode = try r.str(t),
+        2 => out.msg = try r.str(t),
+        3 => out.writeLabel = try r.str(t),
+        4 => out.rows = try r.list(worlds.UnityRow, decodeWsUnityRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWorlds(r: *wire.Reader, out: *worlds.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.available = try r.boolean(t),
+        2 => out.title = try r.str(t),
+        3 => out.sub = try r.str(t),
+        4 => out.unavailable = try r.str(t),
+        5 => out.linkHint = try r.sub(worlds.Hint, decodeWsHint, t),
+        6 => out.secGitHub = try r.str(t),
+        7 => out.gh = try r.sub(worlds.GitHub, decodeWsGitHub, t),
+        8 => out.secLists = try r.str(t),
+        9 => out.lists = try r.sub(worlds.Lists, decodeWsLists, t),
+        10 => out.secPosters = try r.str(t),
+        11 => out.posters = try r.sub(worlds.Posters, decodeWsPosters, t),
+        12 => out.secEvents = try r.str(t),
+        13 => out.events = try r.sub(worlds.Events, decodeWsEvents, t),
+        14 => out.secNp = try r.str(t),
+        15 => out.np = try r.sub(worlds.NowPlaying, decodeWsNowPlaying, t),
+        16 => out.secUnity = try r.str(t),
+        17 => out.unityHelp = try r.str(t),
+        18 => out.unity = try r.sub(worlds.Unity, decodeWsUnity, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsEntryRow(r: *wire.Reader, out: *dialogs_b.WsEntryRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsListEditor(r: *wire.Reader, out: *dialogs_b.WsListEditor) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.help = try r.str(t),
+        3 => out.empty = try r.boolean(t),
+        4 => out.emptyMsg = try r.str(t),
+        5 => out.entries = try r.list(dialogs_b.WsEntryRow, decodeWsEntryRow, t),
+        6 => out.delLabel = try r.str(t),
+        7 => out.addPh = try r.str(t),
+        8 => out.addBtn = try r.str(t),
+        9 => out.friendBtn = try r.str(t),
+        10 => out.friendAct = try r.str(t),
+        11 => out.groupBtn = try r.str(t),
+        12 => out.groupAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsPosterEditor(r: *wire.Reader, out: *dialogs_b.WsPosterEditor) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.idx = try r.str(t),
+        3 => out.imgLbl = try r.str(t),
+        4 => out.img = try r.str(t),
+        5 => out.imgPh = try r.str(t),
+        6 => out.capLbl = try r.str(t),
+        7 => out.caption = try r.str(t),
+        8 => out.capPh = try r.str(t),
+        9 => out.linkLbl = try r.str(t),
+        10 => out.link = try r.str(t),
+        11 => out.linkPh = try r.str(t),
+        12 => out.hasWarn = try r.boolean(t),
+        13 => out.warn = try r.str(t),
+        14 => out.save = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsPickRow(r: *wire.Reader, out: *dialogs_b.WsPickRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.act = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsFriendList(r: *wire.Reader, out: *dialogs_b.WsFriendList) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loading = try r.boolean(t),
+        2 => out.loadingMsg = try r.str(t),
+        3 => out.rows = try r.list(dialogs_b.WsPickRow, decodeWsPickRow, t),
+        4 => out.addLabel = try r.str(t),
+        5 => out.hasMore = try r.boolean(t),
+        6 => out.moreMsg = try r.str(t),
+        7 => out.empty = try r.boolean(t),
+        8 => out.emptyMsg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsFriendPicker(r: *wire.Reader, out: *dialogs_b.WsFriendPicker) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.searchPh = try r.str(t),
+        3 => out.backLbl = try r.str(t),
+        4 => out.backAct = try r.str(t),
+        5 => out.list = try r.sub(dialogs_b.WsFriendList, decodeWsFriendList, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsGroupRow(r: *wire.Reader, out: *dialogs_b.WsGroupRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.favLabel = try r.str(t),
+        3 => out.favAct = try r.str(t),
+        4 => out.rolesAct = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsGroupSec(r: *wire.Reader, out: *dialogs_b.WsGroupSec) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.caption = try r.str(t),
+        2 => out.rows = try r.list(dialogs_b.WsGroupRow, decodeWsGroupRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsGroupList(r: *wire.Reader, out: *dialogs_b.WsGroupList) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loading = try r.boolean(t),
+        2 => out.loadingMsg = try r.str(t),
+        3 => out.sections = try r.list(dialogs_b.WsGroupSec, decodeWsGroupSec, t),
+        4 => out.rolesLabel = try r.str(t),
+        5 => out.empty = try r.boolean(t),
+        6 => out.emptyMsg = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsGroupPicker(r: *wire.Reader, out: *dialogs_b.WsGroupPicker) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.searchPh = try r.str(t),
+        3 => out.searchBtn = try r.str(t),
+        4 => out.help = try r.str(t),
+        5 => out.backLbl = try r.str(t),
+        6 => out.backAct = try r.str(t),
+        7 => out.list = try r.sub(dialogs_b.WsGroupList, decodeWsGroupList, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsRoleList(r: *wire.Reader, out: *dialogs_b.WsRoleList) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.loading = try r.boolean(t),
+        2 => out.loadingMsg = try r.str(t),
+        3 => out.allLabel = try r.str(t),
+        4 => out.grantLabel = try r.str(t),
+        5 => out.rows = try r.list(dialogs_b.WsPickRow, decodeWsPickRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsRolePicker(r: *wire.Reader, out: *dialogs_b.WsRolePicker) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.backLbl = try r.str(t),
+        3 => out.backAct = try r.str(t),
+        4 => out.list = try r.sub(dialogs_b.WsRoleList, decodeWsRoleList, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeWsDevice(r: *wire.Reader, out: *dialogs_b.WsDevice) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.help = try r.str(t),
+        3 => out.code = try r.str(t),
+        4 => out.copyLbl = try r.str(t),
+        5 => out.openLbl = try r.str(t),
+        6 => out.uri = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.text = try r.str(t),
@@ -3640,6 +3977,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_vg_invite_modal);
     try std.testing.expect(msg_ag_state != msg_vg_member_confirm);
     try std.testing.expect(msg_ag_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_ag_state != msg_ws_hint);
+    try std.testing.expect(msg_ag_state != msg_ws_git_hub);
+    try std.testing.expect(msg_ag_state != msg_ws_status);
+    try std.testing.expect(msg_ag_state != msg_ws_unity);
+    try std.testing.expect(msg_ag_state != msg_worlds);
+    try std.testing.expect(msg_ag_state != msg_ws_list_editor);
+    try std.testing.expect(msg_ag_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_ag_state != msg_ws_friend_list);
+    try std.testing.expect(msg_ag_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_ag_state != msg_ws_group_list);
+    try std.testing.expect(msg_ag_state != msg_ws_group_picker);
+    try std.testing.expect(msg_ag_state != msg_ws_role_list);
+    try std.testing.expect(msg_ag_state != msg_ws_role_picker);
+    try std.testing.expect(msg_ag_state != msg_ws_device);
     try std.testing.expect(msg_ag_state != msg_tk_live);
     try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
@@ -3705,6 +4056,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_vg_invite_modal);
     try std.testing.expect(msg_logs_state != msg_vg_member_confirm);
     try std.testing.expect(msg_logs_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_logs_state != msg_ws_hint);
+    try std.testing.expect(msg_logs_state != msg_ws_git_hub);
+    try std.testing.expect(msg_logs_state != msg_ws_status);
+    try std.testing.expect(msg_logs_state != msg_ws_unity);
+    try std.testing.expect(msg_logs_state != msg_worlds);
+    try std.testing.expect(msg_logs_state != msg_ws_list_editor);
+    try std.testing.expect(msg_logs_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_logs_state != msg_ws_friend_list);
+    try std.testing.expect(msg_logs_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_logs_state != msg_ws_group_list);
+    try std.testing.expect(msg_logs_state != msg_ws_group_picker);
+    try std.testing.expect(msg_logs_state != msg_ws_role_list);
+    try std.testing.expect(msg_logs_state != msg_ws_role_picker);
+    try std.testing.expect(msg_logs_state != msg_ws_device);
     try std.testing.expect(msg_logs_state != msg_tk_live);
     try std.testing.expect(msg_logs_state != msg_tk_logs);
     try std.testing.expect(msg_logs_lines != msg_live_state);
@@ -3769,6 +4134,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_vg_invite_modal);
     try std.testing.expect(msg_logs_lines != msg_vg_member_confirm);
     try std.testing.expect(msg_logs_lines != msg_vg_post_confirm);
+    try std.testing.expect(msg_logs_lines != msg_ws_hint);
+    try std.testing.expect(msg_logs_lines != msg_ws_git_hub);
+    try std.testing.expect(msg_logs_lines != msg_ws_status);
+    try std.testing.expect(msg_logs_lines != msg_ws_unity);
+    try std.testing.expect(msg_logs_lines != msg_worlds);
+    try std.testing.expect(msg_logs_lines != msg_ws_list_editor);
+    try std.testing.expect(msg_logs_lines != msg_ws_poster_editor);
+    try std.testing.expect(msg_logs_lines != msg_ws_friend_list);
+    try std.testing.expect(msg_logs_lines != msg_ws_friend_picker);
+    try std.testing.expect(msg_logs_lines != msg_ws_group_list);
+    try std.testing.expect(msg_logs_lines != msg_ws_group_picker);
+    try std.testing.expect(msg_logs_lines != msg_ws_role_list);
+    try std.testing.expect(msg_logs_lines != msg_ws_role_picker);
+    try std.testing.expect(msg_logs_lines != msg_ws_device);
     try std.testing.expect(msg_logs_lines != msg_tk_live);
     try std.testing.expect(msg_logs_lines != msg_tk_logs);
     try std.testing.expect(msg_live_state != msg_live_transport);
@@ -3832,6 +4211,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_vg_invite_modal);
     try std.testing.expect(msg_live_state != msg_vg_member_confirm);
     try std.testing.expect(msg_live_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_state != msg_ws_hint);
+    try std.testing.expect(msg_live_state != msg_ws_git_hub);
+    try std.testing.expect(msg_live_state != msg_ws_status);
+    try std.testing.expect(msg_live_state != msg_ws_unity);
+    try std.testing.expect(msg_live_state != msg_worlds);
+    try std.testing.expect(msg_live_state != msg_ws_list_editor);
+    try std.testing.expect(msg_live_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_state != msg_ws_friend_list);
+    try std.testing.expect(msg_live_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_state != msg_ws_group_list);
+    try std.testing.expect(msg_live_state != msg_ws_group_picker);
+    try std.testing.expect(msg_live_state != msg_ws_role_list);
+    try std.testing.expect(msg_live_state != msg_ws_role_picker);
+    try std.testing.expect(msg_live_state != msg_ws_device);
     try std.testing.expect(msg_live_state != msg_tk_live);
     try std.testing.expect(msg_live_state != msg_tk_logs);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
@@ -3894,6 +4287,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_vg_invite_modal);
     try std.testing.expect(msg_live_transport != msg_vg_member_confirm);
     try std.testing.expect(msg_live_transport != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_transport != msg_ws_hint);
+    try std.testing.expect(msg_live_transport != msg_ws_git_hub);
+    try std.testing.expect(msg_live_transport != msg_ws_status);
+    try std.testing.expect(msg_live_transport != msg_ws_unity);
+    try std.testing.expect(msg_live_transport != msg_worlds);
+    try std.testing.expect(msg_live_transport != msg_ws_list_editor);
+    try std.testing.expect(msg_live_transport != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_transport != msg_ws_friend_list);
+    try std.testing.expect(msg_live_transport != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_transport != msg_ws_group_list);
+    try std.testing.expect(msg_live_transport != msg_ws_group_picker);
+    try std.testing.expect(msg_live_transport != msg_ws_role_list);
+    try std.testing.expect(msg_live_transport != msg_ws_role_picker);
+    try std.testing.expect(msg_live_transport != msg_ws_device);
     try std.testing.expect(msg_live_transport != msg_tk_live);
     try std.testing.expect(msg_live_transport != msg_tk_logs);
     try std.testing.expect(msg_live_n_p != msg_live_status);
@@ -3955,6 +4362,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_vg_invite_modal);
     try std.testing.expect(msg_live_n_p != msg_vg_member_confirm);
     try std.testing.expect(msg_live_n_p != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_n_p != msg_ws_hint);
+    try std.testing.expect(msg_live_n_p != msg_ws_git_hub);
+    try std.testing.expect(msg_live_n_p != msg_ws_status);
+    try std.testing.expect(msg_live_n_p != msg_ws_unity);
+    try std.testing.expect(msg_live_n_p != msg_worlds);
+    try std.testing.expect(msg_live_n_p != msg_ws_list_editor);
+    try std.testing.expect(msg_live_n_p != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_n_p != msg_ws_friend_list);
+    try std.testing.expect(msg_live_n_p != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_n_p != msg_ws_group_list);
+    try std.testing.expect(msg_live_n_p != msg_ws_group_picker);
+    try std.testing.expect(msg_live_n_p != msg_ws_role_list);
+    try std.testing.expect(msg_live_n_p != msg_ws_role_picker);
+    try std.testing.expect(msg_live_n_p != msg_ws_device);
     try std.testing.expect(msg_live_n_p != msg_tk_live);
     try std.testing.expect(msg_live_n_p != msg_tk_logs);
     try std.testing.expect(msg_live_status != msg_live_decks);
@@ -4015,6 +4436,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_vg_invite_modal);
     try std.testing.expect(msg_live_status != msg_vg_member_confirm);
     try std.testing.expect(msg_live_status != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_status != msg_ws_hint);
+    try std.testing.expect(msg_live_status != msg_ws_git_hub);
+    try std.testing.expect(msg_live_status != msg_ws_status);
+    try std.testing.expect(msg_live_status != msg_ws_unity);
+    try std.testing.expect(msg_live_status != msg_worlds);
+    try std.testing.expect(msg_live_status != msg_ws_list_editor);
+    try std.testing.expect(msg_live_status != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_status != msg_ws_friend_list);
+    try std.testing.expect(msg_live_status != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_status != msg_ws_group_list);
+    try std.testing.expect(msg_live_status != msg_ws_group_picker);
+    try std.testing.expect(msg_live_status != msg_ws_role_list);
+    try std.testing.expect(msg_live_status != msg_ws_role_picker);
+    try std.testing.expect(msg_live_status != msg_ws_device);
     try std.testing.expect(msg_live_status != msg_tk_live);
     try std.testing.expect(msg_live_status != msg_tk_logs);
     try std.testing.expect(msg_live_decks != msg_live_signals);
@@ -4074,6 +4509,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_vg_invite_modal);
     try std.testing.expect(msg_live_decks != msg_vg_member_confirm);
     try std.testing.expect(msg_live_decks != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_decks != msg_ws_hint);
+    try std.testing.expect(msg_live_decks != msg_ws_git_hub);
+    try std.testing.expect(msg_live_decks != msg_ws_status);
+    try std.testing.expect(msg_live_decks != msg_ws_unity);
+    try std.testing.expect(msg_live_decks != msg_worlds);
+    try std.testing.expect(msg_live_decks != msg_ws_list_editor);
+    try std.testing.expect(msg_live_decks != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_decks != msg_ws_friend_list);
+    try std.testing.expect(msg_live_decks != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_decks != msg_ws_group_list);
+    try std.testing.expect(msg_live_decks != msg_ws_group_picker);
+    try std.testing.expect(msg_live_decks != msg_ws_role_list);
+    try std.testing.expect(msg_live_decks != msg_ws_role_picker);
+    try std.testing.expect(msg_live_decks != msg_ws_device);
     try std.testing.expect(msg_live_decks != msg_tk_live);
     try std.testing.expect(msg_live_decks != msg_tk_logs);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
@@ -4132,6 +4581,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_vg_invite_modal);
     try std.testing.expect(msg_live_signals != msg_vg_member_confirm);
     try std.testing.expect(msg_live_signals != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_signals != msg_ws_hint);
+    try std.testing.expect(msg_live_signals != msg_ws_git_hub);
+    try std.testing.expect(msg_live_signals != msg_ws_status);
+    try std.testing.expect(msg_live_signals != msg_ws_unity);
+    try std.testing.expect(msg_live_signals != msg_worlds);
+    try std.testing.expect(msg_live_signals != msg_ws_list_editor);
+    try std.testing.expect(msg_live_signals != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_signals != msg_ws_friend_list);
+    try std.testing.expect(msg_live_signals != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_signals != msg_ws_group_list);
+    try std.testing.expect(msg_live_signals != msg_ws_group_picker);
+    try std.testing.expect(msg_live_signals != msg_ws_role_list);
+    try std.testing.expect(msg_live_signals != msg_ws_role_picker);
+    try std.testing.expect(msg_live_signals != msg_ws_device);
     try std.testing.expect(msg_live_signals != msg_tk_live);
     try std.testing.expect(msg_live_signals != msg_tk_logs);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
@@ -4189,6 +4652,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_vg_invite_modal);
     try std.testing.expect(msg_live_cockpit != msg_vg_member_confirm);
     try std.testing.expect(msg_live_cockpit != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_cockpit != msg_ws_hint);
+    try std.testing.expect(msg_live_cockpit != msg_ws_git_hub);
+    try std.testing.expect(msg_live_cockpit != msg_ws_status);
+    try std.testing.expect(msg_live_cockpit != msg_ws_unity);
+    try std.testing.expect(msg_live_cockpit != msg_worlds);
+    try std.testing.expect(msg_live_cockpit != msg_ws_list_editor);
+    try std.testing.expect(msg_live_cockpit != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_cockpit != msg_ws_friend_list);
+    try std.testing.expect(msg_live_cockpit != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_cockpit != msg_ws_group_list);
+    try std.testing.expect(msg_live_cockpit != msg_ws_group_picker);
+    try std.testing.expect(msg_live_cockpit != msg_ws_role_list);
+    try std.testing.expect(msg_live_cockpit != msg_ws_role_picker);
+    try std.testing.expect(msg_live_cockpit != msg_ws_device);
     try std.testing.expect(msg_live_cockpit != msg_tk_live);
     try std.testing.expect(msg_live_cockpit != msg_tk_logs);
     try std.testing.expect(msg_live_link != msg_live_graph);
@@ -4245,6 +4722,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_vg_invite_modal);
     try std.testing.expect(msg_live_link != msg_vg_member_confirm);
     try std.testing.expect(msg_live_link != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_link != msg_ws_hint);
+    try std.testing.expect(msg_live_link != msg_ws_git_hub);
+    try std.testing.expect(msg_live_link != msg_ws_status);
+    try std.testing.expect(msg_live_link != msg_ws_unity);
+    try std.testing.expect(msg_live_link != msg_worlds);
+    try std.testing.expect(msg_live_link != msg_ws_list_editor);
+    try std.testing.expect(msg_live_link != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_link != msg_ws_friend_list);
+    try std.testing.expect(msg_live_link != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_link != msg_ws_group_list);
+    try std.testing.expect(msg_live_link != msg_ws_group_picker);
+    try std.testing.expect(msg_live_link != msg_ws_role_list);
+    try std.testing.expect(msg_live_link != msg_ws_role_picker);
+    try std.testing.expect(msg_live_link != msg_ws_device);
     try std.testing.expect(msg_live_link != msg_tk_live);
     try std.testing.expect(msg_live_link != msg_tk_logs);
     try std.testing.expect(msg_live_graph != msg_live_perf);
@@ -4300,6 +4791,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_vg_invite_modal);
     try std.testing.expect(msg_live_graph != msg_vg_member_confirm);
     try std.testing.expect(msg_live_graph != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_graph != msg_ws_hint);
+    try std.testing.expect(msg_live_graph != msg_ws_git_hub);
+    try std.testing.expect(msg_live_graph != msg_ws_status);
+    try std.testing.expect(msg_live_graph != msg_ws_unity);
+    try std.testing.expect(msg_live_graph != msg_worlds);
+    try std.testing.expect(msg_live_graph != msg_ws_list_editor);
+    try std.testing.expect(msg_live_graph != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_graph != msg_ws_friend_list);
+    try std.testing.expect(msg_live_graph != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_graph != msg_ws_group_list);
+    try std.testing.expect(msg_live_graph != msg_ws_group_picker);
+    try std.testing.expect(msg_live_graph != msg_ws_role_list);
+    try std.testing.expect(msg_live_graph != msg_ws_role_picker);
+    try std.testing.expect(msg_live_graph != msg_ws_device);
     try std.testing.expect(msg_live_graph != msg_tk_live);
     try std.testing.expect(msg_live_graph != msg_tk_logs);
     try std.testing.expect(msg_live_perf != msg_live_strip);
@@ -4354,6 +4859,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_vg_invite_modal);
     try std.testing.expect(msg_live_perf != msg_vg_member_confirm);
     try std.testing.expect(msg_live_perf != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_perf != msg_ws_hint);
+    try std.testing.expect(msg_live_perf != msg_ws_git_hub);
+    try std.testing.expect(msg_live_perf != msg_ws_status);
+    try std.testing.expect(msg_live_perf != msg_ws_unity);
+    try std.testing.expect(msg_live_perf != msg_worlds);
+    try std.testing.expect(msg_live_perf != msg_ws_list_editor);
+    try std.testing.expect(msg_live_perf != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_perf != msg_ws_friend_list);
+    try std.testing.expect(msg_live_perf != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_perf != msg_ws_group_list);
+    try std.testing.expect(msg_live_perf != msg_ws_group_picker);
+    try std.testing.expect(msg_live_perf != msg_ws_role_list);
+    try std.testing.expect(msg_live_perf != msg_ws_role_picker);
+    try std.testing.expect(msg_live_perf != msg_ws_device);
     try std.testing.expect(msg_live_perf != msg_tk_live);
     try std.testing.expect(msg_live_perf != msg_tk_logs);
     try std.testing.expect(msg_live_strip != msg_mo_state);
@@ -4407,6 +4926,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_vg_invite_modal);
     try std.testing.expect(msg_live_strip != msg_vg_member_confirm);
     try std.testing.expect(msg_live_strip != msg_vg_post_confirm);
+    try std.testing.expect(msg_live_strip != msg_ws_hint);
+    try std.testing.expect(msg_live_strip != msg_ws_git_hub);
+    try std.testing.expect(msg_live_strip != msg_ws_status);
+    try std.testing.expect(msg_live_strip != msg_ws_unity);
+    try std.testing.expect(msg_live_strip != msg_worlds);
+    try std.testing.expect(msg_live_strip != msg_ws_list_editor);
+    try std.testing.expect(msg_live_strip != msg_ws_poster_editor);
+    try std.testing.expect(msg_live_strip != msg_ws_friend_list);
+    try std.testing.expect(msg_live_strip != msg_ws_friend_picker);
+    try std.testing.expect(msg_live_strip != msg_ws_group_list);
+    try std.testing.expect(msg_live_strip != msg_ws_group_picker);
+    try std.testing.expect(msg_live_strip != msg_ws_role_list);
+    try std.testing.expect(msg_live_strip != msg_ws_role_picker);
+    try std.testing.expect(msg_live_strip != msg_ws_device);
     try std.testing.expect(msg_live_strip != msg_tk_live);
     try std.testing.expect(msg_live_strip != msg_tk_logs);
     try std.testing.expect(msg_mo_state != msg_pub);
@@ -4459,6 +4992,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_vg_invite_modal);
     try std.testing.expect(msg_mo_state != msg_vg_member_confirm);
     try std.testing.expect(msg_mo_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_mo_state != msg_ws_hint);
+    try std.testing.expect(msg_mo_state != msg_ws_git_hub);
+    try std.testing.expect(msg_mo_state != msg_ws_status);
+    try std.testing.expect(msg_mo_state != msg_ws_unity);
+    try std.testing.expect(msg_mo_state != msg_worlds);
+    try std.testing.expect(msg_mo_state != msg_ws_list_editor);
+    try std.testing.expect(msg_mo_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_mo_state != msg_ws_friend_list);
+    try std.testing.expect(msg_mo_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_mo_state != msg_ws_group_list);
+    try std.testing.expect(msg_mo_state != msg_ws_group_picker);
+    try std.testing.expect(msg_mo_state != msg_ws_role_list);
+    try std.testing.expect(msg_mo_state != msg_ws_role_picker);
+    try std.testing.expect(msg_mo_state != msg_ws_device);
     try std.testing.expect(msg_mo_state != msg_tk_live);
     try std.testing.expect(msg_mo_state != msg_tk_logs);
     try std.testing.expect(msg_pub != msg_pub_hero);
@@ -4510,6 +5057,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_vg_invite_modal);
     try std.testing.expect(msg_pub != msg_vg_member_confirm);
     try std.testing.expect(msg_pub != msg_vg_post_confirm);
+    try std.testing.expect(msg_pub != msg_ws_hint);
+    try std.testing.expect(msg_pub != msg_ws_git_hub);
+    try std.testing.expect(msg_pub != msg_ws_status);
+    try std.testing.expect(msg_pub != msg_ws_unity);
+    try std.testing.expect(msg_pub != msg_worlds);
+    try std.testing.expect(msg_pub != msg_ws_list_editor);
+    try std.testing.expect(msg_pub != msg_ws_poster_editor);
+    try std.testing.expect(msg_pub != msg_ws_friend_list);
+    try std.testing.expect(msg_pub != msg_ws_friend_picker);
+    try std.testing.expect(msg_pub != msg_ws_group_list);
+    try std.testing.expect(msg_pub != msg_ws_group_picker);
+    try std.testing.expect(msg_pub != msg_ws_role_list);
+    try std.testing.expect(msg_pub != msg_ws_role_picker);
+    try std.testing.expect(msg_pub != msg_ws_device);
     try std.testing.expect(msg_pub != msg_tk_live);
     try std.testing.expect(msg_pub != msg_tk_logs);
     try std.testing.expect(msg_pub_hero != msg_set_state);
@@ -4560,6 +5121,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_vg_invite_modal);
     try std.testing.expect(msg_pub_hero != msg_vg_member_confirm);
     try std.testing.expect(msg_pub_hero != msg_vg_post_confirm);
+    try std.testing.expect(msg_pub_hero != msg_ws_hint);
+    try std.testing.expect(msg_pub_hero != msg_ws_git_hub);
+    try std.testing.expect(msg_pub_hero != msg_ws_status);
+    try std.testing.expect(msg_pub_hero != msg_ws_unity);
+    try std.testing.expect(msg_pub_hero != msg_worlds);
+    try std.testing.expect(msg_pub_hero != msg_ws_list_editor);
+    try std.testing.expect(msg_pub_hero != msg_ws_poster_editor);
+    try std.testing.expect(msg_pub_hero != msg_ws_friend_list);
+    try std.testing.expect(msg_pub_hero != msg_ws_friend_picker);
+    try std.testing.expect(msg_pub_hero != msg_ws_group_list);
+    try std.testing.expect(msg_pub_hero != msg_ws_group_picker);
+    try std.testing.expect(msg_pub_hero != msg_ws_role_list);
+    try std.testing.expect(msg_pub_hero != msg_ws_role_picker);
+    try std.testing.expect(msg_pub_hero != msg_ws_device);
     try std.testing.expect(msg_pub_hero != msg_tk_live);
     try std.testing.expect(msg_pub_hero != msg_tk_logs);
     try std.testing.expect(msg_set_state != msg_set_content);
@@ -4609,6 +5184,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_vg_invite_modal);
     try std.testing.expect(msg_set_state != msg_vg_member_confirm);
     try std.testing.expect(msg_set_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_set_state != msg_ws_hint);
+    try std.testing.expect(msg_set_state != msg_ws_git_hub);
+    try std.testing.expect(msg_set_state != msg_ws_status);
+    try std.testing.expect(msg_set_state != msg_ws_unity);
+    try std.testing.expect(msg_set_state != msg_worlds);
+    try std.testing.expect(msg_set_state != msg_ws_list_editor);
+    try std.testing.expect(msg_set_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_set_state != msg_ws_friend_list);
+    try std.testing.expect(msg_set_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_set_state != msg_ws_group_list);
+    try std.testing.expect(msg_set_state != msg_ws_group_picker);
+    try std.testing.expect(msg_set_state != msg_ws_role_list);
+    try std.testing.expect(msg_set_state != msg_ws_role_picker);
+    try std.testing.expect(msg_set_state != msg_ws_device);
     try std.testing.expect(msg_set_state != msg_tk_live);
     try std.testing.expect(msg_set_state != msg_tk_logs);
     try std.testing.expect(msg_set_content != msg_set_status);
@@ -4657,6 +5246,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_vg_invite_modal);
     try std.testing.expect(msg_set_content != msg_vg_member_confirm);
     try std.testing.expect(msg_set_content != msg_vg_post_confirm);
+    try std.testing.expect(msg_set_content != msg_ws_hint);
+    try std.testing.expect(msg_set_content != msg_ws_git_hub);
+    try std.testing.expect(msg_set_content != msg_ws_status);
+    try std.testing.expect(msg_set_content != msg_ws_unity);
+    try std.testing.expect(msg_set_content != msg_worlds);
+    try std.testing.expect(msg_set_content != msg_ws_list_editor);
+    try std.testing.expect(msg_set_content != msg_ws_poster_editor);
+    try std.testing.expect(msg_set_content != msg_ws_friend_list);
+    try std.testing.expect(msg_set_content != msg_ws_friend_picker);
+    try std.testing.expect(msg_set_content != msg_ws_group_list);
+    try std.testing.expect(msg_set_content != msg_ws_group_picker);
+    try std.testing.expect(msg_set_content != msg_ws_role_list);
+    try std.testing.expect(msg_set_content != msg_ws_role_picker);
+    try std.testing.expect(msg_set_content != msg_ws_device);
     try std.testing.expect(msg_set_content != msg_tk_live);
     try std.testing.expect(msg_set_content != msg_tk_logs);
     try std.testing.expect(msg_set_status != msg_lib_state);
@@ -4704,6 +5307,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_vg_invite_modal);
     try std.testing.expect(msg_set_status != msg_vg_member_confirm);
     try std.testing.expect(msg_set_status != msg_vg_post_confirm);
+    try std.testing.expect(msg_set_status != msg_ws_hint);
+    try std.testing.expect(msg_set_status != msg_ws_git_hub);
+    try std.testing.expect(msg_set_status != msg_ws_status);
+    try std.testing.expect(msg_set_status != msg_ws_unity);
+    try std.testing.expect(msg_set_status != msg_worlds);
+    try std.testing.expect(msg_set_status != msg_ws_list_editor);
+    try std.testing.expect(msg_set_status != msg_ws_poster_editor);
+    try std.testing.expect(msg_set_status != msg_ws_friend_list);
+    try std.testing.expect(msg_set_status != msg_ws_friend_picker);
+    try std.testing.expect(msg_set_status != msg_ws_group_list);
+    try std.testing.expect(msg_set_status != msg_ws_group_picker);
+    try std.testing.expect(msg_set_status != msg_ws_role_list);
+    try std.testing.expect(msg_set_status != msg_ws_role_picker);
+    try std.testing.expect(msg_set_status != msg_ws_device);
     try std.testing.expect(msg_set_status != msg_tk_live);
     try std.testing.expect(msg_set_status != msg_tk_logs);
     try std.testing.expect(msg_lib_state != msg_lib_body);
@@ -4750,6 +5367,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_vg_invite_modal);
     try std.testing.expect(msg_lib_state != msg_vg_member_confirm);
     try std.testing.expect(msg_lib_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_lib_state != msg_ws_hint);
+    try std.testing.expect(msg_lib_state != msg_ws_git_hub);
+    try std.testing.expect(msg_lib_state != msg_ws_status);
+    try std.testing.expect(msg_lib_state != msg_ws_unity);
+    try std.testing.expect(msg_lib_state != msg_worlds);
+    try std.testing.expect(msg_lib_state != msg_ws_list_editor);
+    try std.testing.expect(msg_lib_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_lib_state != msg_ws_friend_list);
+    try std.testing.expect(msg_lib_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_lib_state != msg_ws_group_list);
+    try std.testing.expect(msg_lib_state != msg_ws_group_picker);
+    try std.testing.expect(msg_lib_state != msg_ws_role_list);
+    try std.testing.expect(msg_lib_state != msg_ws_role_picker);
+    try std.testing.expect(msg_lib_state != msg_ws_device);
     try std.testing.expect(msg_lib_state != msg_tk_live);
     try std.testing.expect(msg_lib_state != msg_tk_logs);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
@@ -4795,6 +5426,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_vg_invite_modal);
     try std.testing.expect(msg_lib_body != msg_vg_member_confirm);
     try std.testing.expect(msg_lib_body != msg_vg_post_confirm);
+    try std.testing.expect(msg_lib_body != msg_ws_hint);
+    try std.testing.expect(msg_lib_body != msg_ws_git_hub);
+    try std.testing.expect(msg_lib_body != msg_ws_status);
+    try std.testing.expect(msg_lib_body != msg_ws_unity);
+    try std.testing.expect(msg_lib_body != msg_worlds);
+    try std.testing.expect(msg_lib_body != msg_ws_list_editor);
+    try std.testing.expect(msg_lib_body != msg_ws_poster_editor);
+    try std.testing.expect(msg_lib_body != msg_ws_friend_list);
+    try std.testing.expect(msg_lib_body != msg_ws_friend_picker);
+    try std.testing.expect(msg_lib_body != msg_ws_group_list);
+    try std.testing.expect(msg_lib_body != msg_ws_group_picker);
+    try std.testing.expect(msg_lib_body != msg_ws_role_list);
+    try std.testing.expect(msg_lib_body != msg_ws_role_picker);
+    try std.testing.expect(msg_lib_body != msg_ws_device);
     try std.testing.expect(msg_lib_body != msg_tk_live);
     try std.testing.expect(msg_lib_body != msg_tk_logs);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
@@ -4839,6 +5484,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_vg_invite_modal);
     try std.testing.expect(msg_lib_detail != msg_vg_member_confirm);
     try std.testing.expect(msg_lib_detail != msg_vg_post_confirm);
+    try std.testing.expect(msg_lib_detail != msg_ws_hint);
+    try std.testing.expect(msg_lib_detail != msg_ws_git_hub);
+    try std.testing.expect(msg_lib_detail != msg_ws_status);
+    try std.testing.expect(msg_lib_detail != msg_ws_unity);
+    try std.testing.expect(msg_lib_detail != msg_worlds);
+    try std.testing.expect(msg_lib_detail != msg_ws_list_editor);
+    try std.testing.expect(msg_lib_detail != msg_ws_poster_editor);
+    try std.testing.expect(msg_lib_detail != msg_ws_friend_list);
+    try std.testing.expect(msg_lib_detail != msg_ws_friend_picker);
+    try std.testing.expect(msg_lib_detail != msg_ws_group_list);
+    try std.testing.expect(msg_lib_detail != msg_ws_group_picker);
+    try std.testing.expect(msg_lib_detail != msg_ws_role_list);
+    try std.testing.expect(msg_lib_detail != msg_ws_role_picker);
+    try std.testing.expect(msg_lib_detail != msg_ws_device);
     try std.testing.expect(msg_lib_detail != msg_tk_live);
     try std.testing.expect(msg_lib_detail != msg_tk_logs);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
@@ -4882,6 +5541,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_vg_invite_modal);
     try std.testing.expect(msg_lib_queue != msg_vg_member_confirm);
     try std.testing.expect(msg_lib_queue != msg_vg_post_confirm);
+    try std.testing.expect(msg_lib_queue != msg_ws_hint);
+    try std.testing.expect(msg_lib_queue != msg_ws_git_hub);
+    try std.testing.expect(msg_lib_queue != msg_ws_status);
+    try std.testing.expect(msg_lib_queue != msg_ws_unity);
+    try std.testing.expect(msg_lib_queue != msg_worlds);
+    try std.testing.expect(msg_lib_queue != msg_ws_list_editor);
+    try std.testing.expect(msg_lib_queue != msg_ws_poster_editor);
+    try std.testing.expect(msg_lib_queue != msg_ws_friend_list);
+    try std.testing.expect(msg_lib_queue != msg_ws_friend_picker);
+    try std.testing.expect(msg_lib_queue != msg_ws_group_list);
+    try std.testing.expect(msg_lib_queue != msg_ws_group_picker);
+    try std.testing.expect(msg_lib_queue != msg_ws_role_list);
+    try std.testing.expect(msg_lib_queue != msg_ws_role_picker);
+    try std.testing.expect(msg_lib_queue != msg_ws_device);
     try std.testing.expect(msg_lib_queue != msg_tk_live);
     try std.testing.expect(msg_lib_queue != msg_tk_logs);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
@@ -4924,6 +5597,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_vg_invite_modal);
     try std.testing.expect(msg_lib_cue_cell != msg_vg_member_confirm);
     try std.testing.expect(msg_lib_cue_cell != msg_vg_post_confirm);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_hint);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_git_hub);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_status);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_unity);
+    try std.testing.expect(msg_lib_cue_cell != msg_worlds);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_list_editor);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_poster_editor);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_friend_list);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_friend_picker);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_group_list);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_group_picker);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_role_list);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_role_picker);
+    try std.testing.expect(msg_lib_cue_cell != msg_ws_device);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_live);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_logs);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
@@ -4965,6 +5652,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_full != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_full != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_full != msg_ws_hint);
+    try std.testing.expect(msg_mp_full != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_full != msg_ws_status);
+    try std.testing.expect(msg_mp_full != msg_ws_unity);
+    try std.testing.expect(msg_mp_full != msg_worlds);
+    try std.testing.expect(msg_mp_full != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_full != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_full != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_full != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_full != msg_ws_group_list);
+    try std.testing.expect(msg_mp_full != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_full != msg_ws_role_list);
+    try std.testing.expect(msg_mp_full != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_full != msg_ws_device);
     try std.testing.expect(msg_mp_full != msg_tk_live);
     try std.testing.expect(msg_mp_full != msg_tk_logs);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
@@ -5005,6 +5706,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_inner != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_inner != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_inner != msg_ws_hint);
+    try std.testing.expect(msg_mp_inner != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_inner != msg_ws_status);
+    try std.testing.expect(msg_mp_inner != msg_ws_unity);
+    try std.testing.expect(msg_mp_inner != msg_worlds);
+    try std.testing.expect(msg_mp_inner != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_inner != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_inner != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_inner != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_inner != msg_ws_group_list);
+    try std.testing.expect(msg_mp_inner != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_inner != msg_ws_role_list);
+    try std.testing.expect(msg_mp_inner != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_inner != msg_ws_device);
     try std.testing.expect(msg_mp_inner != msg_tk_live);
     try std.testing.expect(msg_mp_inner != msg_tk_logs);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
@@ -5044,6 +5759,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_vid != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_vid != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_vid != msg_ws_hint);
+    try std.testing.expect(msg_mp_vid != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_vid != msg_ws_status);
+    try std.testing.expect(msg_mp_vid != msg_ws_unity);
+    try std.testing.expect(msg_mp_vid != msg_worlds);
+    try std.testing.expect(msg_mp_vid != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_vid != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_vid != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_vid != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_vid != msg_ws_group_list);
+    try std.testing.expect(msg_mp_vid != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_vid != msg_ws_role_list);
+    try std.testing.expect(msg_mp_vid != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_vid != msg_ws_device);
     try std.testing.expect(msg_mp_vid != msg_tk_live);
     try std.testing.expect(msg_mp_vid != msg_tk_logs);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
@@ -5082,6 +5811,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_wave != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_wave != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_wave != msg_ws_hint);
+    try std.testing.expect(msg_mp_wave != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_wave != msg_ws_status);
+    try std.testing.expect(msg_mp_wave != msg_ws_unity);
+    try std.testing.expect(msg_mp_wave != msg_worlds);
+    try std.testing.expect(msg_mp_wave != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_wave != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_wave != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_wave != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_wave != msg_ws_group_list);
+    try std.testing.expect(msg_mp_wave != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_wave != msg_ws_role_list);
+    try std.testing.expect(msg_mp_wave != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_wave != msg_ws_device);
     try std.testing.expect(msg_mp_wave != msg_tk_live);
     try std.testing.expect(msg_mp_wave != msg_tk_logs);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
@@ -5119,6 +5862,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_tp != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_tp != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_tp != msg_ws_hint);
+    try std.testing.expect(msg_mp_tp != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_tp != msg_ws_status);
+    try std.testing.expect(msg_mp_tp != msg_ws_unity);
+    try std.testing.expect(msg_mp_tp != msg_worlds);
+    try std.testing.expect(msg_mp_tp != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_tp != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_tp != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_tp != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_tp != msg_ws_group_list);
+    try std.testing.expect(msg_mp_tp != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_tp != msg_ws_role_list);
+    try std.testing.expect(msg_mp_tp != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_tp != msg_ws_device);
     try std.testing.expect(msg_mp_tp != msg_tk_live);
     try std.testing.expect(msg_mp_tp != msg_tk_logs);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
@@ -5155,6 +5912,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_edit != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_edit != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_edit != msg_ws_hint);
+    try std.testing.expect(msg_mp_edit != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_edit != msg_ws_status);
+    try std.testing.expect(msg_mp_edit != msg_ws_unity);
+    try std.testing.expect(msg_mp_edit != msg_worlds);
+    try std.testing.expect(msg_mp_edit != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_edit != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_edit != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_edit != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_edit != msg_ws_group_list);
+    try std.testing.expect(msg_mp_edit != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_edit != msg_ws_role_list);
+    try std.testing.expect(msg_mp_edit != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_edit != msg_ws_device);
     try std.testing.expect(msg_mp_edit != msg_tk_live);
     try std.testing.expect(msg_mp_edit != msg_tk_logs);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
@@ -5190,6 +5961,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_export != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_export != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_export != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_export != msg_ws_hint);
+    try std.testing.expect(msg_mp_export != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_export != msg_ws_status);
+    try std.testing.expect(msg_mp_export != msg_ws_unity);
+    try std.testing.expect(msg_mp_export != msg_worlds);
+    try std.testing.expect(msg_mp_export != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_export != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_export != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_export != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_export != msg_ws_group_list);
+    try std.testing.expect(msg_mp_export != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_export != msg_ws_role_list);
+    try std.testing.expect(msg_mp_export != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_export != msg_ws_device);
     try std.testing.expect(msg_mp_export != msg_tk_live);
     try std.testing.expect(msg_mp_export != msg_tk_logs);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
@@ -5224,6 +6009,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_r_o != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_r_o != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_r_o != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_r_o != msg_ws_hint);
+    try std.testing.expect(msg_mp_r_o != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_r_o != msg_ws_status);
+    try std.testing.expect(msg_mp_r_o != msg_ws_unity);
+    try std.testing.expect(msg_mp_r_o != msg_worlds);
+    try std.testing.expect(msg_mp_r_o != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_r_o != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_r_o != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_r_o != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_r_o != msg_ws_group_list);
+    try std.testing.expect(msg_mp_r_o != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_r_o != msg_ws_role_list);
+    try std.testing.expect(msg_mp_r_o != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_r_o != msg_ws_device);
     try std.testing.expect(msg_mp_r_o != msg_tk_live);
     try std.testing.expect(msg_mp_r_o != msg_tk_logs);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
@@ -5257,6 +6056,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_hov != msg_vg_invite_modal);
     try std.testing.expect(msg_mp_hov != msg_vg_member_confirm);
     try std.testing.expect(msg_mp_hov != msg_vg_post_confirm);
+    try std.testing.expect(msg_mp_hov != msg_ws_hint);
+    try std.testing.expect(msg_mp_hov != msg_ws_git_hub);
+    try std.testing.expect(msg_mp_hov != msg_ws_status);
+    try std.testing.expect(msg_mp_hov != msg_ws_unity);
+    try std.testing.expect(msg_mp_hov != msg_worlds);
+    try std.testing.expect(msg_mp_hov != msg_ws_list_editor);
+    try std.testing.expect(msg_mp_hov != msg_ws_poster_editor);
+    try std.testing.expect(msg_mp_hov != msg_ws_friend_list);
+    try std.testing.expect(msg_mp_hov != msg_ws_friend_picker);
+    try std.testing.expect(msg_mp_hov != msg_ws_group_list);
+    try std.testing.expect(msg_mp_hov != msg_ws_group_picker);
+    try std.testing.expect(msg_mp_hov != msg_ws_role_list);
+    try std.testing.expect(msg_mp_hov != msg_ws_role_picker);
+    try std.testing.expect(msg_mp_hov != msg_ws_device);
     try std.testing.expect(msg_mp_hov != msg_tk_live);
     try std.testing.expect(msg_mp_hov != msg_tk_logs);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
@@ -5289,6 +6102,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_state != msg_vg_invite_modal);
     try std.testing.expect(msg_auto_state != msg_vg_member_confirm);
     try std.testing.expect(msg_auto_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_auto_state != msg_ws_hint);
+    try std.testing.expect(msg_auto_state != msg_ws_git_hub);
+    try std.testing.expect(msg_auto_state != msg_ws_status);
+    try std.testing.expect(msg_auto_state != msg_ws_unity);
+    try std.testing.expect(msg_auto_state != msg_worlds);
+    try std.testing.expect(msg_auto_state != msg_ws_list_editor);
+    try std.testing.expect(msg_auto_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_auto_state != msg_ws_friend_list);
+    try std.testing.expect(msg_auto_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_auto_state != msg_ws_group_list);
+    try std.testing.expect(msg_auto_state != msg_ws_group_picker);
+    try std.testing.expect(msg_auto_state != msg_ws_role_list);
+    try std.testing.expect(msg_auto_state != msg_ws_role_picker);
+    try std.testing.expect(msg_auto_state != msg_ws_device);
     try std.testing.expect(msg_auto_state != msg_tk_live);
     try std.testing.expect(msg_auto_state != msg_tk_logs);
     try std.testing.expect(msg_auto_body_state != msg_peers);
@@ -5320,6 +6147,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_body_state != msg_vg_invite_modal);
     try std.testing.expect(msg_auto_body_state != msg_vg_member_confirm);
     try std.testing.expect(msg_auto_body_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_auto_body_state != msg_ws_hint);
+    try std.testing.expect(msg_auto_body_state != msg_ws_git_hub);
+    try std.testing.expect(msg_auto_body_state != msg_ws_status);
+    try std.testing.expect(msg_auto_body_state != msg_ws_unity);
+    try std.testing.expect(msg_auto_body_state != msg_worlds);
+    try std.testing.expect(msg_auto_body_state != msg_ws_list_editor);
+    try std.testing.expect(msg_auto_body_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_auto_body_state != msg_ws_friend_list);
+    try std.testing.expect(msg_auto_body_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_auto_body_state != msg_ws_group_list);
+    try std.testing.expect(msg_auto_body_state != msg_ws_group_picker);
+    try std.testing.expect(msg_auto_body_state != msg_ws_role_list);
+    try std.testing.expect(msg_auto_body_state != msg_ws_role_picker);
+    try std.testing.expect(msg_auto_body_state != msg_ws_device);
     try std.testing.expect(msg_auto_body_state != msg_tk_live);
     try std.testing.expect(msg_auto_body_state != msg_tk_logs);
     try std.testing.expect(msg_peers != msg_peers_body);
@@ -5350,6 +6191,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers != msg_vg_invite_modal);
     try std.testing.expect(msg_peers != msg_vg_member_confirm);
     try std.testing.expect(msg_peers != msg_vg_post_confirm);
+    try std.testing.expect(msg_peers != msg_ws_hint);
+    try std.testing.expect(msg_peers != msg_ws_git_hub);
+    try std.testing.expect(msg_peers != msg_ws_status);
+    try std.testing.expect(msg_peers != msg_ws_unity);
+    try std.testing.expect(msg_peers != msg_worlds);
+    try std.testing.expect(msg_peers != msg_ws_list_editor);
+    try std.testing.expect(msg_peers != msg_ws_poster_editor);
+    try std.testing.expect(msg_peers != msg_ws_friend_list);
+    try std.testing.expect(msg_peers != msg_ws_friend_picker);
+    try std.testing.expect(msg_peers != msg_ws_group_list);
+    try std.testing.expect(msg_peers != msg_ws_group_picker);
+    try std.testing.expect(msg_peers != msg_ws_role_list);
+    try std.testing.expect(msg_peers != msg_ws_role_picker);
+    try std.testing.expect(msg_peers != msg_ws_device);
     try std.testing.expect(msg_peers != msg_tk_live);
     try std.testing.expect(msg_peers != msg_tk_logs);
     try std.testing.expect(msg_peers_body != msg_ovl_state);
@@ -5379,6 +6234,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers_body != msg_vg_invite_modal);
     try std.testing.expect(msg_peers_body != msg_vg_member_confirm);
     try std.testing.expect(msg_peers_body != msg_vg_post_confirm);
+    try std.testing.expect(msg_peers_body != msg_ws_hint);
+    try std.testing.expect(msg_peers_body != msg_ws_git_hub);
+    try std.testing.expect(msg_peers_body != msg_ws_status);
+    try std.testing.expect(msg_peers_body != msg_ws_unity);
+    try std.testing.expect(msg_peers_body != msg_worlds);
+    try std.testing.expect(msg_peers_body != msg_ws_list_editor);
+    try std.testing.expect(msg_peers_body != msg_ws_poster_editor);
+    try std.testing.expect(msg_peers_body != msg_ws_friend_list);
+    try std.testing.expect(msg_peers_body != msg_ws_friend_picker);
+    try std.testing.expect(msg_peers_body != msg_ws_group_list);
+    try std.testing.expect(msg_peers_body != msg_ws_group_picker);
+    try std.testing.expect(msg_peers_body != msg_ws_role_list);
+    try std.testing.expect(msg_peers_body != msg_ws_role_picker);
+    try std.testing.expect(msg_peers_body != msg_ws_device);
     try std.testing.expect(msg_peers_body != msg_tk_live);
     try std.testing.expect(msg_peers_body != msg_tk_logs);
     try std.testing.expect(msg_ovl_state != msg_ovl_appr);
@@ -5407,6 +6276,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_state != msg_vg_invite_modal);
     try std.testing.expect(msg_ovl_state != msg_vg_member_confirm);
     try std.testing.expect(msg_ovl_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_ovl_state != msg_ws_hint);
+    try std.testing.expect(msg_ovl_state != msg_ws_git_hub);
+    try std.testing.expect(msg_ovl_state != msg_ws_status);
+    try std.testing.expect(msg_ovl_state != msg_ws_unity);
+    try std.testing.expect(msg_ovl_state != msg_worlds);
+    try std.testing.expect(msg_ovl_state != msg_ws_list_editor);
+    try std.testing.expect(msg_ovl_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_ovl_state != msg_ws_friend_list);
+    try std.testing.expect(msg_ovl_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_ovl_state != msg_ws_group_list);
+    try std.testing.expect(msg_ovl_state != msg_ws_group_picker);
+    try std.testing.expect(msg_ovl_state != msg_ws_role_list);
+    try std.testing.expect(msg_ovl_state != msg_ws_role_picker);
+    try std.testing.expect(msg_ovl_state != msg_ws_device);
     try std.testing.expect(msg_ovl_state != msg_tk_live);
     try std.testing.expect(msg_ovl_state != msg_tk_logs);
     try std.testing.expect(msg_ovl_appr != msg_ovl_spout);
@@ -5434,6 +6317,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_appr != msg_vg_invite_modal);
     try std.testing.expect(msg_ovl_appr != msg_vg_member_confirm);
     try std.testing.expect(msg_ovl_appr != msg_vg_post_confirm);
+    try std.testing.expect(msg_ovl_appr != msg_ws_hint);
+    try std.testing.expect(msg_ovl_appr != msg_ws_git_hub);
+    try std.testing.expect(msg_ovl_appr != msg_ws_status);
+    try std.testing.expect(msg_ovl_appr != msg_ws_unity);
+    try std.testing.expect(msg_ovl_appr != msg_worlds);
+    try std.testing.expect(msg_ovl_appr != msg_ws_list_editor);
+    try std.testing.expect(msg_ovl_appr != msg_ws_poster_editor);
+    try std.testing.expect(msg_ovl_appr != msg_ws_friend_list);
+    try std.testing.expect(msg_ovl_appr != msg_ws_friend_picker);
+    try std.testing.expect(msg_ovl_appr != msg_ws_group_list);
+    try std.testing.expect(msg_ovl_appr != msg_ws_group_picker);
+    try std.testing.expect(msg_ovl_appr != msg_ws_role_list);
+    try std.testing.expect(msg_ovl_appr != msg_ws_role_picker);
+    try std.testing.expect(msg_ovl_appr != msg_ws_device);
     try std.testing.expect(msg_ovl_appr != msg_tk_live);
     try std.testing.expect(msg_ovl_appr != msg_tk_logs);
     try std.testing.expect(msg_ovl_spout != msg_ui_status);
@@ -5460,6 +6357,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_spout != msg_vg_invite_modal);
     try std.testing.expect(msg_ovl_spout != msg_vg_member_confirm);
     try std.testing.expect(msg_ovl_spout != msg_vg_post_confirm);
+    try std.testing.expect(msg_ovl_spout != msg_ws_hint);
+    try std.testing.expect(msg_ovl_spout != msg_ws_git_hub);
+    try std.testing.expect(msg_ovl_spout != msg_ws_status);
+    try std.testing.expect(msg_ovl_spout != msg_ws_unity);
+    try std.testing.expect(msg_ovl_spout != msg_worlds);
+    try std.testing.expect(msg_ovl_spout != msg_ws_list_editor);
+    try std.testing.expect(msg_ovl_spout != msg_ws_poster_editor);
+    try std.testing.expect(msg_ovl_spout != msg_ws_friend_list);
+    try std.testing.expect(msg_ovl_spout != msg_ws_friend_picker);
+    try std.testing.expect(msg_ovl_spout != msg_ws_group_list);
+    try std.testing.expect(msg_ovl_spout != msg_ws_group_picker);
+    try std.testing.expect(msg_ovl_spout != msg_ws_role_list);
+    try std.testing.expect(msg_ovl_spout != msg_ws_role_picker);
+    try std.testing.expect(msg_ovl_spout != msg_ws_device);
     try std.testing.expect(msg_ovl_spout != msg_tk_live);
     try std.testing.expect(msg_ovl_spout != msg_tk_logs);
     try std.testing.expect(msg_ui_status != msg_ovl_strip);
@@ -5485,6 +6396,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ui_status != msg_vg_invite_modal);
     try std.testing.expect(msg_ui_status != msg_vg_member_confirm);
     try std.testing.expect(msg_ui_status != msg_vg_post_confirm);
+    try std.testing.expect(msg_ui_status != msg_ws_hint);
+    try std.testing.expect(msg_ui_status != msg_ws_git_hub);
+    try std.testing.expect(msg_ui_status != msg_ws_status);
+    try std.testing.expect(msg_ui_status != msg_ws_unity);
+    try std.testing.expect(msg_ui_status != msg_worlds);
+    try std.testing.expect(msg_ui_status != msg_ws_list_editor);
+    try std.testing.expect(msg_ui_status != msg_ws_poster_editor);
+    try std.testing.expect(msg_ui_status != msg_ws_friend_list);
+    try std.testing.expect(msg_ui_status != msg_ws_friend_picker);
+    try std.testing.expect(msg_ui_status != msg_ws_group_list);
+    try std.testing.expect(msg_ui_status != msg_ws_group_picker);
+    try std.testing.expect(msg_ui_status != msg_ws_role_list);
+    try std.testing.expect(msg_ui_status != msg_ws_role_picker);
+    try std.testing.expect(msg_ui_status != msg_ws_device);
     try std.testing.expect(msg_ui_status != msg_tk_live);
     try std.testing.expect(msg_ui_status != msg_tk_logs);
     try std.testing.expect(msg_ovl_strip != msg_tw_state);
@@ -5509,6 +6434,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_strip != msg_vg_invite_modal);
     try std.testing.expect(msg_ovl_strip != msg_vg_member_confirm);
     try std.testing.expect(msg_ovl_strip != msg_vg_post_confirm);
+    try std.testing.expect(msg_ovl_strip != msg_ws_hint);
+    try std.testing.expect(msg_ovl_strip != msg_ws_git_hub);
+    try std.testing.expect(msg_ovl_strip != msg_ws_status);
+    try std.testing.expect(msg_ovl_strip != msg_ws_unity);
+    try std.testing.expect(msg_ovl_strip != msg_worlds);
+    try std.testing.expect(msg_ovl_strip != msg_ws_list_editor);
+    try std.testing.expect(msg_ovl_strip != msg_ws_poster_editor);
+    try std.testing.expect(msg_ovl_strip != msg_ws_friend_list);
+    try std.testing.expect(msg_ovl_strip != msg_ws_friend_picker);
+    try std.testing.expect(msg_ovl_strip != msg_ws_group_list);
+    try std.testing.expect(msg_ovl_strip != msg_ws_group_picker);
+    try std.testing.expect(msg_ovl_strip != msg_ws_role_list);
+    try std.testing.expect(msg_ovl_strip != msg_ws_role_picker);
+    try std.testing.expect(msg_ovl_strip != msg_ws_device);
     try std.testing.expect(msg_ovl_strip != msg_tk_live);
     try std.testing.expect(msg_ovl_strip != msg_tk_logs);
     try std.testing.expect(msg_tw_state != msg_tw_obs);
@@ -5532,6 +6471,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_state != msg_vg_invite_modal);
     try std.testing.expect(msg_tw_state != msg_vg_member_confirm);
     try std.testing.expect(msg_tw_state != msg_vg_post_confirm);
+    try std.testing.expect(msg_tw_state != msg_ws_hint);
+    try std.testing.expect(msg_tw_state != msg_ws_git_hub);
+    try std.testing.expect(msg_tw_state != msg_ws_status);
+    try std.testing.expect(msg_tw_state != msg_ws_unity);
+    try std.testing.expect(msg_tw_state != msg_worlds);
+    try std.testing.expect(msg_tw_state != msg_ws_list_editor);
+    try std.testing.expect(msg_tw_state != msg_ws_poster_editor);
+    try std.testing.expect(msg_tw_state != msg_ws_friend_list);
+    try std.testing.expect(msg_tw_state != msg_ws_friend_picker);
+    try std.testing.expect(msg_tw_state != msg_ws_group_list);
+    try std.testing.expect(msg_tw_state != msg_ws_group_picker);
+    try std.testing.expect(msg_tw_state != msg_ws_role_list);
+    try std.testing.expect(msg_tw_state != msg_ws_role_picker);
+    try std.testing.expect(msg_tw_state != msg_ws_device);
     try std.testing.expect(msg_tw_state != msg_tk_live);
     try std.testing.expect(msg_tw_state != msg_tk_logs);
     try std.testing.expect(msg_tw_obs != msg_tw_presets);
@@ -5554,6 +6507,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_obs != msg_vg_invite_modal);
     try std.testing.expect(msg_tw_obs != msg_vg_member_confirm);
     try std.testing.expect(msg_tw_obs != msg_vg_post_confirm);
+    try std.testing.expect(msg_tw_obs != msg_ws_hint);
+    try std.testing.expect(msg_tw_obs != msg_ws_git_hub);
+    try std.testing.expect(msg_tw_obs != msg_ws_status);
+    try std.testing.expect(msg_tw_obs != msg_ws_unity);
+    try std.testing.expect(msg_tw_obs != msg_worlds);
+    try std.testing.expect(msg_tw_obs != msg_ws_list_editor);
+    try std.testing.expect(msg_tw_obs != msg_ws_poster_editor);
+    try std.testing.expect(msg_tw_obs != msg_ws_friend_list);
+    try std.testing.expect(msg_tw_obs != msg_ws_friend_picker);
+    try std.testing.expect(msg_tw_obs != msg_ws_group_list);
+    try std.testing.expect(msg_tw_obs != msg_ws_group_picker);
+    try std.testing.expect(msg_tw_obs != msg_ws_role_list);
+    try std.testing.expect(msg_tw_obs != msg_ws_role_picker);
+    try std.testing.expect(msg_tw_obs != msg_ws_device);
     try std.testing.expect(msg_tw_obs != msg_tk_live);
     try std.testing.expect(msg_tw_obs != msg_tk_logs);
     try std.testing.expect(msg_tw_presets != msg_tw_feed);
@@ -5575,6 +6542,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_presets != msg_vg_invite_modal);
     try std.testing.expect(msg_tw_presets != msg_vg_member_confirm);
     try std.testing.expect(msg_tw_presets != msg_vg_post_confirm);
+    try std.testing.expect(msg_tw_presets != msg_ws_hint);
+    try std.testing.expect(msg_tw_presets != msg_ws_git_hub);
+    try std.testing.expect(msg_tw_presets != msg_ws_status);
+    try std.testing.expect(msg_tw_presets != msg_ws_unity);
+    try std.testing.expect(msg_tw_presets != msg_worlds);
+    try std.testing.expect(msg_tw_presets != msg_ws_list_editor);
+    try std.testing.expect(msg_tw_presets != msg_ws_poster_editor);
+    try std.testing.expect(msg_tw_presets != msg_ws_friend_list);
+    try std.testing.expect(msg_tw_presets != msg_ws_friend_picker);
+    try std.testing.expect(msg_tw_presets != msg_ws_group_list);
+    try std.testing.expect(msg_tw_presets != msg_ws_group_picker);
+    try std.testing.expect(msg_tw_presets != msg_ws_role_list);
+    try std.testing.expect(msg_tw_presets != msg_ws_role_picker);
+    try std.testing.expect(msg_tw_presets != msg_ws_device);
     try std.testing.expect(msg_tw_presets != msg_tk_live);
     try std.testing.expect(msg_tw_presets != msg_tk_logs);
     try std.testing.expect(msg_tw_feed != msg_midi_active);
@@ -5595,6 +6576,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_feed != msg_vg_invite_modal);
     try std.testing.expect(msg_tw_feed != msg_vg_member_confirm);
     try std.testing.expect(msg_tw_feed != msg_vg_post_confirm);
+    try std.testing.expect(msg_tw_feed != msg_ws_hint);
+    try std.testing.expect(msg_tw_feed != msg_ws_git_hub);
+    try std.testing.expect(msg_tw_feed != msg_ws_status);
+    try std.testing.expect(msg_tw_feed != msg_ws_unity);
+    try std.testing.expect(msg_tw_feed != msg_worlds);
+    try std.testing.expect(msg_tw_feed != msg_ws_list_editor);
+    try std.testing.expect(msg_tw_feed != msg_ws_poster_editor);
+    try std.testing.expect(msg_tw_feed != msg_ws_friend_list);
+    try std.testing.expect(msg_tw_feed != msg_ws_friend_picker);
+    try std.testing.expect(msg_tw_feed != msg_ws_group_list);
+    try std.testing.expect(msg_tw_feed != msg_ws_group_picker);
+    try std.testing.expect(msg_tw_feed != msg_ws_role_list);
+    try std.testing.expect(msg_tw_feed != msg_ws_role_picker);
+    try std.testing.expect(msg_tw_feed != msg_ws_device);
     try std.testing.expect(msg_tw_feed != msg_tk_live);
     try std.testing.expect(msg_tw_feed != msg_tk_logs);
     try std.testing.expect(msg_midi_active != msg_midi_mon_lines);
@@ -5614,6 +6609,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_active != msg_vg_invite_modal);
     try std.testing.expect(msg_midi_active != msg_vg_member_confirm);
     try std.testing.expect(msg_midi_active != msg_vg_post_confirm);
+    try std.testing.expect(msg_midi_active != msg_ws_hint);
+    try std.testing.expect(msg_midi_active != msg_ws_git_hub);
+    try std.testing.expect(msg_midi_active != msg_ws_status);
+    try std.testing.expect(msg_midi_active != msg_ws_unity);
+    try std.testing.expect(msg_midi_active != msg_worlds);
+    try std.testing.expect(msg_midi_active != msg_ws_list_editor);
+    try std.testing.expect(msg_midi_active != msg_ws_poster_editor);
+    try std.testing.expect(msg_midi_active != msg_ws_friend_list);
+    try std.testing.expect(msg_midi_active != msg_ws_friend_picker);
+    try std.testing.expect(msg_midi_active != msg_ws_group_list);
+    try std.testing.expect(msg_midi_active != msg_ws_group_picker);
+    try std.testing.expect(msg_midi_active != msg_ws_role_list);
+    try std.testing.expect(msg_midi_active != msg_ws_role_picker);
+    try std.testing.expect(msg_midi_active != msg_ws_device);
     try std.testing.expect(msg_midi_active != msg_tk_live);
     try std.testing.expect(msg_midi_active != msg_tk_logs);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_port_stat);
@@ -5632,6 +6641,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_mon_lines != msg_vg_invite_modal);
     try std.testing.expect(msg_midi_mon_lines != msg_vg_member_confirm);
     try std.testing.expect(msg_midi_mon_lines != msg_vg_post_confirm);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_hint);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_git_hub);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_status);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_unity);
+    try std.testing.expect(msg_midi_mon_lines != msg_worlds);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_list_editor);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_poster_editor);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_friend_list);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_friend_picker);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_group_list);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_group_picker);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_role_list);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_role_picker);
+    try std.testing.expect(msg_midi_mon_lines != msg_ws_device);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_live);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_logs);
     try std.testing.expect(msg_midi_port_stat != msg_midi_ctl);
@@ -5649,6 +6672,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_port_stat != msg_vg_invite_modal);
     try std.testing.expect(msg_midi_port_stat != msg_vg_member_confirm);
     try std.testing.expect(msg_midi_port_stat != msg_vg_post_confirm);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_hint);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_git_hub);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_status);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_unity);
+    try std.testing.expect(msg_midi_port_stat != msg_worlds);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_list_editor);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_poster_editor);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_friend_list);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_friend_picker);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_group_list);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_group_picker);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_role_list);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_role_picker);
+    try std.testing.expect(msg_midi_port_stat != msg_ws_device);
     try std.testing.expect(msg_midi_port_stat != msg_tk_live);
     try std.testing.expect(msg_midi_port_stat != msg_tk_logs);
     try std.testing.expect(msg_midi_ctl != msg_p_c_view);
@@ -5665,6 +6702,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_ctl != msg_vg_invite_modal);
     try std.testing.expect(msg_midi_ctl != msg_vg_member_confirm);
     try std.testing.expect(msg_midi_ctl != msg_vg_post_confirm);
+    try std.testing.expect(msg_midi_ctl != msg_ws_hint);
+    try std.testing.expect(msg_midi_ctl != msg_ws_git_hub);
+    try std.testing.expect(msg_midi_ctl != msg_ws_status);
+    try std.testing.expect(msg_midi_ctl != msg_ws_unity);
+    try std.testing.expect(msg_midi_ctl != msg_worlds);
+    try std.testing.expect(msg_midi_ctl != msg_ws_list_editor);
+    try std.testing.expect(msg_midi_ctl != msg_ws_poster_editor);
+    try std.testing.expect(msg_midi_ctl != msg_ws_friend_list);
+    try std.testing.expect(msg_midi_ctl != msg_ws_friend_picker);
+    try std.testing.expect(msg_midi_ctl != msg_ws_group_list);
+    try std.testing.expect(msg_midi_ctl != msg_ws_group_picker);
+    try std.testing.expect(msg_midi_ctl != msg_ws_role_list);
+    try std.testing.expect(msg_midi_ctl != msg_ws_role_picker);
+    try std.testing.expect(msg_midi_ctl != msg_ws_device);
     try std.testing.expect(msg_midi_ctl != msg_tk_live);
     try std.testing.expect(msg_midi_ctl != msg_tk_logs);
     try std.testing.expect(msg_p_c_view != msg_p_c_gpu);
@@ -5680,6 +6731,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_view != msg_vg_invite_modal);
     try std.testing.expect(msg_p_c_view != msg_vg_member_confirm);
     try std.testing.expect(msg_p_c_view != msg_vg_post_confirm);
+    try std.testing.expect(msg_p_c_view != msg_ws_hint);
+    try std.testing.expect(msg_p_c_view != msg_ws_git_hub);
+    try std.testing.expect(msg_p_c_view != msg_ws_status);
+    try std.testing.expect(msg_p_c_view != msg_ws_unity);
+    try std.testing.expect(msg_p_c_view != msg_worlds);
+    try std.testing.expect(msg_p_c_view != msg_ws_list_editor);
+    try std.testing.expect(msg_p_c_view != msg_ws_poster_editor);
+    try std.testing.expect(msg_p_c_view != msg_ws_friend_list);
+    try std.testing.expect(msg_p_c_view != msg_ws_friend_picker);
+    try std.testing.expect(msg_p_c_view != msg_ws_group_list);
+    try std.testing.expect(msg_p_c_view != msg_ws_group_picker);
+    try std.testing.expect(msg_p_c_view != msg_ws_role_list);
+    try std.testing.expect(msg_p_c_view != msg_ws_role_picker);
+    try std.testing.expect(msg_p_c_view != msg_ws_device);
     try std.testing.expect(msg_p_c_view != msg_tk_live);
     try std.testing.expect(msg_p_c_view != msg_tk_logs);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_status);
@@ -5694,6 +6759,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_gpu != msg_vg_invite_modal);
     try std.testing.expect(msg_p_c_gpu != msg_vg_member_confirm);
     try std.testing.expect(msg_p_c_gpu != msg_vg_post_confirm);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_hint);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_git_hub);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_status);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_unity);
+    try std.testing.expect(msg_p_c_gpu != msg_worlds);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_list_editor);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_poster_editor);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_friend_list);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_friend_picker);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_group_list);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_group_picker);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_role_list);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_role_picker);
+    try std.testing.expect(msg_p_c_gpu != msg_ws_device);
     try std.testing.expect(msg_p_c_gpu != msg_tk_live);
     try std.testing.expect(msg_p_c_gpu != msg_tk_logs);
     try std.testing.expect(msg_vrc_status != msg_vrc_editor);
@@ -5707,6 +6786,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_status != msg_vg_invite_modal);
     try std.testing.expect(msg_vrc_status != msg_vg_member_confirm);
     try std.testing.expect(msg_vrc_status != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_status != msg_ws_hint);
+    try std.testing.expect(msg_vrc_status != msg_ws_git_hub);
+    try std.testing.expect(msg_vrc_status != msg_ws_status);
+    try std.testing.expect(msg_vrc_status != msg_ws_unity);
+    try std.testing.expect(msg_vrc_status != msg_worlds);
+    try std.testing.expect(msg_vrc_status != msg_ws_list_editor);
+    try std.testing.expect(msg_vrc_status != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrc_status != msg_ws_friend_list);
+    try std.testing.expect(msg_vrc_status != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrc_status != msg_ws_group_list);
+    try std.testing.expect(msg_vrc_status != msg_ws_group_picker);
+    try std.testing.expect(msg_vrc_status != msg_ws_role_list);
+    try std.testing.expect(msg_vrc_status != msg_ws_role_picker);
+    try std.testing.expect(msg_vrc_status != msg_ws_device);
     try std.testing.expect(msg_vrc_status != msg_tk_live);
     try std.testing.expect(msg_vrc_status != msg_tk_logs);
     try std.testing.expect(msg_vrc_editor != msg_vrc_campaths);
@@ -5719,6 +6812,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_editor != msg_vg_invite_modal);
     try std.testing.expect(msg_vrc_editor != msg_vg_member_confirm);
     try std.testing.expect(msg_vrc_editor != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_editor != msg_ws_hint);
+    try std.testing.expect(msg_vrc_editor != msg_ws_git_hub);
+    try std.testing.expect(msg_vrc_editor != msg_ws_status);
+    try std.testing.expect(msg_vrc_editor != msg_ws_unity);
+    try std.testing.expect(msg_vrc_editor != msg_worlds);
+    try std.testing.expect(msg_vrc_editor != msg_ws_list_editor);
+    try std.testing.expect(msg_vrc_editor != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrc_editor != msg_ws_friend_list);
+    try std.testing.expect(msg_vrc_editor != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrc_editor != msg_ws_group_list);
+    try std.testing.expect(msg_vrc_editor != msg_ws_group_picker);
+    try std.testing.expect(msg_vrc_editor != msg_ws_role_list);
+    try std.testing.expect(msg_vrc_editor != msg_ws_role_picker);
+    try std.testing.expect(msg_vrc_editor != msg_ws_device);
     try std.testing.expect(msg_vrc_editor != msg_tk_live);
     try std.testing.expect(msg_vrc_editor != msg_tk_logs);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_photos);
@@ -5730,6 +6837,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_campaths != msg_vg_invite_modal);
     try std.testing.expect(msg_vrc_campaths != msg_vg_member_confirm);
     try std.testing.expect(msg_vrc_campaths != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_hint);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_git_hub);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_status);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_unity);
+    try std.testing.expect(msg_vrc_campaths != msg_worlds);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_list_editor);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_friend_list);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_group_list);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_group_picker);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_role_list);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_role_picker);
+    try std.testing.expect(msg_vrc_campaths != msg_ws_device);
     try std.testing.expect(msg_vrc_campaths != msg_tk_live);
     try std.testing.expect(msg_vrc_campaths != msg_tk_logs);
     try std.testing.expect(msg_vrc_photos != msg_vrc_tab);
@@ -5740,6 +6861,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_photos != msg_vg_invite_modal);
     try std.testing.expect(msg_vrc_photos != msg_vg_member_confirm);
     try std.testing.expect(msg_vrc_photos != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_photos != msg_ws_hint);
+    try std.testing.expect(msg_vrc_photos != msg_ws_git_hub);
+    try std.testing.expect(msg_vrc_photos != msg_ws_status);
+    try std.testing.expect(msg_vrc_photos != msg_ws_unity);
+    try std.testing.expect(msg_vrc_photos != msg_worlds);
+    try std.testing.expect(msg_vrc_photos != msg_ws_list_editor);
+    try std.testing.expect(msg_vrc_photos != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrc_photos != msg_ws_friend_list);
+    try std.testing.expect(msg_vrc_photos != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrc_photos != msg_ws_group_list);
+    try std.testing.expect(msg_vrc_photos != msg_ws_group_picker);
+    try std.testing.expect(msg_vrc_photos != msg_ws_role_list);
+    try std.testing.expect(msg_vrc_photos != msg_ws_role_picker);
+    try std.testing.expect(msg_vrc_photos != msg_ws_device);
     try std.testing.expect(msg_vrc_photos != msg_tk_live);
     try std.testing.expect(msg_vrc_photos != msg_tk_logs);
     try std.testing.expect(msg_vrc_tab != msg_vrcg);
@@ -5749,6 +6884,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_tab != msg_vg_invite_modal);
     try std.testing.expect(msg_vrc_tab != msg_vg_member_confirm);
     try std.testing.expect(msg_vrc_tab != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrc_tab != msg_ws_hint);
+    try std.testing.expect(msg_vrc_tab != msg_ws_git_hub);
+    try std.testing.expect(msg_vrc_tab != msg_ws_status);
+    try std.testing.expect(msg_vrc_tab != msg_ws_unity);
+    try std.testing.expect(msg_vrc_tab != msg_worlds);
+    try std.testing.expect(msg_vrc_tab != msg_ws_list_editor);
+    try std.testing.expect(msg_vrc_tab != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrc_tab != msg_ws_friend_list);
+    try std.testing.expect(msg_vrc_tab != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrc_tab != msg_ws_group_list);
+    try std.testing.expect(msg_vrc_tab != msg_ws_group_picker);
+    try std.testing.expect(msg_vrc_tab != msg_ws_role_list);
+    try std.testing.expect(msg_vrc_tab != msg_ws_role_picker);
+    try std.testing.expect(msg_vrc_tab != msg_ws_device);
     try std.testing.expect(msg_vrc_tab != msg_tk_live);
     try std.testing.expect(msg_vrc_tab != msg_tk_logs);
     try std.testing.expect(msg_vrcg != msg_vg_role_body);
@@ -5757,6 +6906,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrcg != msg_vg_invite_modal);
     try std.testing.expect(msg_vrcg != msg_vg_member_confirm);
     try std.testing.expect(msg_vrcg != msg_vg_post_confirm);
+    try std.testing.expect(msg_vrcg != msg_ws_hint);
+    try std.testing.expect(msg_vrcg != msg_ws_git_hub);
+    try std.testing.expect(msg_vrcg != msg_ws_status);
+    try std.testing.expect(msg_vrcg != msg_ws_unity);
+    try std.testing.expect(msg_vrcg != msg_worlds);
+    try std.testing.expect(msg_vrcg != msg_ws_list_editor);
+    try std.testing.expect(msg_vrcg != msg_ws_poster_editor);
+    try std.testing.expect(msg_vrcg != msg_ws_friend_list);
+    try std.testing.expect(msg_vrcg != msg_ws_friend_picker);
+    try std.testing.expect(msg_vrcg != msg_ws_group_list);
+    try std.testing.expect(msg_vrcg != msg_ws_group_picker);
+    try std.testing.expect(msg_vrcg != msg_ws_role_list);
+    try std.testing.expect(msg_vrcg != msg_ws_role_picker);
+    try std.testing.expect(msg_vrcg != msg_ws_device);
     try std.testing.expect(msg_vrcg != msg_tk_live);
     try std.testing.expect(msg_vrcg != msg_tk_logs);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_list);
@@ -5764,27 +6927,230 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_role_body != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_role_body != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_role_body != msg_ws_hint);
+    try std.testing.expect(msg_vg_role_body != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_role_body != msg_ws_status);
+    try std.testing.expect(msg_vg_role_body != msg_ws_unity);
+    try std.testing.expect(msg_vg_role_body != msg_worlds);
+    try std.testing.expect(msg_vg_role_body != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_role_body != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_role_body != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_role_body != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_role_body != msg_ws_group_list);
+    try std.testing.expect(msg_vg_role_body != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_role_body != msg_ws_role_list);
+    try std.testing.expect(msg_vg_role_body != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_role_body != msg_ws_device);
     try std.testing.expect(msg_vg_role_body != msg_tk_live);
     try std.testing.expect(msg_vg_role_body != msg_tk_logs);
     try std.testing.expect(msg_vg_invite_list != msg_vg_roles_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_invite_list != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_hint);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_status);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_unity);
+    try std.testing.expect(msg_vg_invite_list != msg_worlds);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_group_list);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_role_list);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_invite_list != msg_ws_device);
     try std.testing.expect(msg_vg_invite_list != msg_tk_live);
     try std.testing.expect(msg_vg_invite_list != msg_tk_logs);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_hint);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_status);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_unity);
+    try std.testing.expect(msg_vg_roles_modal != msg_worlds);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_group_list);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_role_list);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_roles_modal != msg_ws_device);
     try std.testing.expect(msg_vg_roles_modal != msg_tk_live);
     try std.testing.expect(msg_vg_roles_modal != msg_tk_logs);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_hint);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_status);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_unity);
+    try std.testing.expect(msg_vg_invite_modal != msg_worlds);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_group_list);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_role_list);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_invite_modal != msg_ws_device);
     try std.testing.expect(msg_vg_invite_modal != msg_tk_live);
     try std.testing.expect(msg_vg_invite_modal != msg_tk_logs);
     try std.testing.expect(msg_vg_member_confirm != msg_vg_post_confirm);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_hint);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_status);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_unity);
+    try std.testing.expect(msg_vg_member_confirm != msg_worlds);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_group_list);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_role_list);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_member_confirm != msg_ws_device);
     try std.testing.expect(msg_vg_member_confirm != msg_tk_live);
     try std.testing.expect(msg_vg_member_confirm != msg_tk_logs);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_hint);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_git_hub);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_status);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_unity);
+    try std.testing.expect(msg_vg_post_confirm != msg_worlds);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_list_editor);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_poster_editor);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_friend_list);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_friend_picker);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_group_list);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_group_picker);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_role_list);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_role_picker);
+    try std.testing.expect(msg_vg_post_confirm != msg_ws_device);
     try std.testing.expect(msg_vg_post_confirm != msg_tk_live);
     try std.testing.expect(msg_vg_post_confirm != msg_tk_logs);
+    try std.testing.expect(msg_ws_hint != msg_ws_git_hub);
+    try std.testing.expect(msg_ws_hint != msg_ws_status);
+    try std.testing.expect(msg_ws_hint != msg_ws_unity);
+    try std.testing.expect(msg_ws_hint != msg_worlds);
+    try std.testing.expect(msg_ws_hint != msg_ws_list_editor);
+    try std.testing.expect(msg_ws_hint != msg_ws_poster_editor);
+    try std.testing.expect(msg_ws_hint != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_hint != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_hint != msg_ws_group_list);
+    try std.testing.expect(msg_ws_hint != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_hint != msg_ws_role_list);
+    try std.testing.expect(msg_ws_hint != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_hint != msg_ws_device);
+    try std.testing.expect(msg_ws_hint != msg_tk_live);
+    try std.testing.expect(msg_ws_hint != msg_tk_logs);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_status);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_unity);
+    try std.testing.expect(msg_ws_git_hub != msg_worlds);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_list_editor);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_poster_editor);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_group_list);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_role_list);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_git_hub != msg_ws_device);
+    try std.testing.expect(msg_ws_git_hub != msg_tk_live);
+    try std.testing.expect(msg_ws_git_hub != msg_tk_logs);
+    try std.testing.expect(msg_ws_status != msg_ws_unity);
+    try std.testing.expect(msg_ws_status != msg_worlds);
+    try std.testing.expect(msg_ws_status != msg_ws_list_editor);
+    try std.testing.expect(msg_ws_status != msg_ws_poster_editor);
+    try std.testing.expect(msg_ws_status != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_status != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_status != msg_ws_group_list);
+    try std.testing.expect(msg_ws_status != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_status != msg_ws_role_list);
+    try std.testing.expect(msg_ws_status != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_status != msg_ws_device);
+    try std.testing.expect(msg_ws_status != msg_tk_live);
+    try std.testing.expect(msg_ws_status != msg_tk_logs);
+    try std.testing.expect(msg_ws_unity != msg_worlds);
+    try std.testing.expect(msg_ws_unity != msg_ws_list_editor);
+    try std.testing.expect(msg_ws_unity != msg_ws_poster_editor);
+    try std.testing.expect(msg_ws_unity != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_unity != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_unity != msg_ws_group_list);
+    try std.testing.expect(msg_ws_unity != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_unity != msg_ws_role_list);
+    try std.testing.expect(msg_ws_unity != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_unity != msg_ws_device);
+    try std.testing.expect(msg_ws_unity != msg_tk_live);
+    try std.testing.expect(msg_ws_unity != msg_tk_logs);
+    try std.testing.expect(msg_worlds != msg_ws_list_editor);
+    try std.testing.expect(msg_worlds != msg_ws_poster_editor);
+    try std.testing.expect(msg_worlds != msg_ws_friend_list);
+    try std.testing.expect(msg_worlds != msg_ws_friend_picker);
+    try std.testing.expect(msg_worlds != msg_ws_group_list);
+    try std.testing.expect(msg_worlds != msg_ws_group_picker);
+    try std.testing.expect(msg_worlds != msg_ws_role_list);
+    try std.testing.expect(msg_worlds != msg_ws_role_picker);
+    try std.testing.expect(msg_worlds != msg_ws_device);
+    try std.testing.expect(msg_worlds != msg_tk_live);
+    try std.testing.expect(msg_worlds != msg_tk_logs);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_poster_editor);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_group_list);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_role_list);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_list_editor != msg_ws_device);
+    try std.testing.expect(msg_ws_list_editor != msg_tk_live);
+    try std.testing.expect(msg_ws_list_editor != msg_tk_logs);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_list);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_group_list);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_role_list);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_poster_editor != msg_ws_device);
+    try std.testing.expect(msg_ws_poster_editor != msg_tk_live);
+    try std.testing.expect(msg_ws_poster_editor != msg_tk_logs);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_friend_picker);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_group_list);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_role_list);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_friend_list != msg_ws_device);
+    try std.testing.expect(msg_ws_friend_list != msg_tk_live);
+    try std.testing.expect(msg_ws_friend_list != msg_tk_logs);
+    try std.testing.expect(msg_ws_friend_picker != msg_ws_group_list);
+    try std.testing.expect(msg_ws_friend_picker != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_friend_picker != msg_ws_role_list);
+    try std.testing.expect(msg_ws_friend_picker != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_friend_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_friend_picker != msg_tk_live);
+    try std.testing.expect(msg_ws_friend_picker != msg_tk_logs);
+    try std.testing.expect(msg_ws_group_list != msg_ws_group_picker);
+    try std.testing.expect(msg_ws_group_list != msg_ws_role_list);
+    try std.testing.expect(msg_ws_group_list != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_group_list != msg_ws_device);
+    try std.testing.expect(msg_ws_group_list != msg_tk_live);
+    try std.testing.expect(msg_ws_group_list != msg_tk_logs);
+    try std.testing.expect(msg_ws_group_picker != msg_ws_role_list);
+    try std.testing.expect(msg_ws_group_picker != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_group_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_group_picker != msg_tk_live);
+    try std.testing.expect(msg_ws_group_picker != msg_tk_logs);
+    try std.testing.expect(msg_ws_role_list != msg_ws_role_picker);
+    try std.testing.expect(msg_ws_role_list != msg_ws_device);
+    try std.testing.expect(msg_ws_role_list != msg_tk_live);
+    try std.testing.expect(msg_ws_role_list != msg_tk_logs);
+    try std.testing.expect(msg_ws_role_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_role_picker != msg_tk_live);
+    try std.testing.expect(msg_ws_role_picker != msg_tk_logs);
+    try std.testing.expect(msg_ws_device != msg_tk_live);
+    try std.testing.expect(msg_ws_device != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

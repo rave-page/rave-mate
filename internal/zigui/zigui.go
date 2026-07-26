@@ -1323,6 +1323,106 @@ func RenderVgPostConfirmV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: worlds family ──
+
+// RenderWorldsV2 renders the full Worlds tab from an RZW1 document.
+func RenderWorldsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_v2(p, l, n)
+	})
+}
+
+// RenderWorldsLinkHintV2 renders the #world-linkhint chip from an RZW1 document.
+func RenderWorldsLinkHintV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_linkhint_v2(p, l, n)
+	})
+}
+
+// RenderWorldsGitHubV2 renders the #world-gh link control from an RZW1 document.
+func RenderWorldsGitHubV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_github_v2(p, l, n)
+	})
+}
+
+// RenderWorldsStatusV2 renders one #world-st-<key> publish status from an RZW1 document.
+func RenderWorldsStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_status_v2(p, l, n)
+	})
+}
+
+// RenderWorldsUnityRowsV2 renders the #world-unity-rows list from an RZW1 document.
+func RenderWorldsUnityRowsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_unityrows_v2(p, l, n)
+	})
+}
+
+// RenderWsListEditorV2 renders the permission-list editor dialog from an RZW1 document.
+func RenderWsListEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_listeditor_v2(p, l, n)
+	})
+}
+
+// RenderWsPosterEditorV2 renders the poster-slot editor form from an RZW1 document.
+func RenderWsPosterEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_postereditor_v2(p, l, n)
+	})
+}
+
+// RenderWsFriendPickerV2 renders the friend-picker dialog shell from an RZW1 document.
+func RenderWsFriendPickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendpicker_v2(p, l, n)
+	})
+}
+
+// RenderWsFriendListV2 renders the #world-fr-list inner from an RZW1 document.
+func RenderWsFriendListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendlist_v2(p, l, n)
+	})
+}
+
+// RenderWsGroupPickerV2 renders the group-picker dialog shell from an RZW1 document.
+func RenderWsGroupPickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouppicker_v2(p, l, n)
+	})
+}
+
+// RenderWsGroupListV2 renders the #world-grp-list inner from an RZW1 document.
+func RenderWsGroupListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouplist_v2(p, l, n)
+	})
+}
+
+// RenderWsRolePickerV2 renders the role-grant dialog shell from an RZW1 document.
+func RenderWsRolePickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolepicker_v2(p, l, n)
+	})
+}
+
+// RenderWsRoleListV2 renders the #world-role-list inner from an RZW1 document.
+func RenderWsRoleListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolelist_v2(p, l, n)
+	})
+}
+
+// RenderWsDeviceV2 renders the GitHub device-code dialog from an RZW1 document.
+func RenderWsDeviceV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_device_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 
