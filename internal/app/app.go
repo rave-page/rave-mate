@@ -1607,14 +1607,27 @@ func run(parent context.Context, serviceMode bool) error {
 		Stop:    webcamMgr.Stop,
 	})
 	// Media plane child (#44): one memory-capped subprocess hosts medialink + mediaroute + webcam
-	// (the default; explicit MediaLink.Subprocess=false opts out). Runs while EITHER peers or webcam is enabled (both live inside
-	// it). tcPlane + mediaClock stay daemon-side and mirror the child's clock.
+	// (the default; explicit MediaLink.Subprocess=false opts out). tcPlane + mediaClock stay
+	// daemon-side and mirror the child's clock. WP-7: spawn is DEMAND-gated - the child only runs
+	// while something can feed it (a CONNECTED peer for routes/advertise, or the webcam). Peers
+	// merely enabled with nobody connected no longer keeps a frame-plane child resident; the peer
+	// listener below spawns/stops it lazily (adverts self-heal every 5s, so a child that comes up
+	// moments after a connect still exchanges sources promptly).
 	if useMediaChild {
+		mediaPlaneNeeded := func() bool {
+			return mediaPlaneDemand(cfg.Features.Webcam.Enabled, cfg.Features.Peers.Enabled,
+				peersConnected(peerMgr))
+		}
 		mods.Add(&module.Service{
 			Name:    "mediaplane",
-			Enabled: func() bool { return cfg.Features.Peers.Enabled || cfg.Features.Webcam.Enabled },
+			Enabled: mediaPlaneNeeded,
 			Start:   func(c context.Context) error { return mediaCtl.Start(c) },
 			Stop:    mediaCtl.Stop,
+		})
+		// Off the peer-state callback: Stop blocks until the child is reaped (stopGrace), and
+		// SetEnabled re-reads demand at execution time so a flap converges on the latest state.
+		peerMgr.AddListener(nil, func() {
+			debuglog.Go(log, "medialink", func() { mods.SetEnabled("mediaplane", mediaPlaneNeeded()) })
 		})
 	}
 	// Timecode outputs: the module arms the feature (nothing runs until the user starts the
@@ -2187,6 +2200,23 @@ func defaultNodeNickname() string {
 // mediaChildMemMB caps the isolated media child's RAM (kill-on-close job) - generous for 4K decode
 // buffers but bounded so a route runaway can't starve the host (#44).
 const mediaChildMemMB = 2048
+
+// mediaPlaneDemand decides whether the media child should be running (WP-7 spawn gate):
+// the webcam needs it, or peer routes/advertise do - and those need an actual CONNECTED
+// peer, not just the peers feature flag. Pure so the gate is testable.
+func mediaPlaneDemand(webcamOn, peersOn, peerConnected bool) bool {
+	return webcamOn || (peersOn && peerConnected)
+}
+
+// peersConnected reports whether any paired peer link is currently up.
+func peersConnected(pm *peerlink.Manager) bool {
+	for _, c := range pm.Connections() {
+		if c.Status == peerlink.StatusConnected {
+			return true
+		}
+	}
+	return false
+}
 
 // connectedMediaSecrets snapshots every connected peer's media AEAD key, for the media child spawn +
 // per-peer refresh (the child dials its own AEAD socket keyed off these).

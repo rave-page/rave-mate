@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"rave.page/mate/internal/logbus"
@@ -45,8 +44,9 @@ type spoutSender struct {
 
 // deckWorker owns one Spout handle + GL context on a locked OS thread for one deck.
 type deckWorker struct {
-	frames chan *image.NRGBA // cap 1, newest-wins (slow frame never blocks the Sink)
-	done   chan struct{}
+	frames  chan *image.NRGBA // cap 1, newest-wins (slow frame never blocks the Sink)
+	done    chan struct{}
+	stopped chan struct{} // closed by the worker AFTER ReleaseSender+CloseOpenGL ran
 }
 
 // newSender builds the Spout backend. The GL context is created lazily per deck in the
@@ -80,7 +80,8 @@ func (s *spoutSender) Send(deck string, img *image.NRGBA) error {
 	s.mu.Lock()
 	w := s.workers[deck]
 	if w == nil {
-		w = &deckWorker{frames: make(chan *image.NRGBA, 1), done: make(chan struct{})}
+		w = &deckWorker{frames: make(chan *image.NRGBA, 1),
+			done: make(chan struct{}), stopped: make(chan struct{})}
 		s.workers[deck] = w
 		go s.run(deck, w)
 	}
@@ -101,7 +102,9 @@ func (s *spoutSender) Remove(deck string) error {
 	return nil
 }
 
-// Close tears down every worker and waits briefly for clean GL/sender release.
+// Close tears down every worker and joins them (bounded) so ReleaseSender + CloseOpenGL
+// provably ran - the old fixed sleep returned regardless, orphaning GL contexts + DXGI
+// shared handles when a worker sat in a blocking driver call.
 func (s *spoutSender) Close() {
 	s.mu.Lock()
 	ws := make([]*deckWorker, 0, len(s.workers))
@@ -110,11 +113,15 @@ func (s *spoutSender) Close() {
 	}
 	s.workers = map[string]*deckWorker{}
 	s.mu.Unlock()
+	stopped := make([]<-chan struct{}, 0, len(ws))
 	for _, w := range ws {
 		close(w.done)
+		stopped = append(stopped, w.stopped)
 	}
-	// Give workers a moment to ReleaseSender + CloseOpenGL on their own threads.
-	time.Sleep(150 * time.Millisecond)
+	if n := waitAll(stopped, closeJoin); n > 0 {
+		s.log.Error(source, "spout: sender workers stuck in a driver call at close - abandoning (GL context + DXGI handle may leak)",
+			map[string]any{"stuck": n})
+	}
 }
 
 // run is the per-deck worker: locks its OS thread, creates the Spout handle + GL context,
@@ -122,6 +129,7 @@ func (s *spoutSender) Close() {
 func (s *spoutSender) run(deck string, w *deckWorker) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	defer close(w.stopped) // AFTER the deferred release - Close's join proves teardown ran
 
 	name := SenderName(deck)
 	cname := C.CString(name)
@@ -199,9 +207,10 @@ func spoutFindSender(name string) bool {
 // frameSender publishes frames under one fixed Spout name from its own LockOSThread'd goroutine
 // (own SPOUTLIBRARY handle + GL context), mirroring deckWorker but for a single stream.
 type frameSender struct {
-	log    *logbus.Bus
-	frames chan *image.NRGBA // cap 1, newest-wins
-	done   chan struct{}
+	log     *logbus.Bus
+	frames  chan *image.NRGBA // cap 1, newest-wins
+	done    chan struct{}
+	stopped chan struct{} // closed by the worker AFTER ReleaseSender+CloseOpenGL ran
 }
 
 // newFrameSender opens a Spout sender named name. Errors if SpoutLibrary.dll is absent so the
@@ -211,21 +220,26 @@ func newFrameSender(log *logbus.Bus, name string) (FrameSender, error) {
 	if C.rave_spout_available() == 0 {
 		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
 	}
-	f := &frameSender{log: log, frames: make(chan *image.NRGBA, 1), done: make(chan struct{})}
+	f := &frameSender{log: log, frames: make(chan *image.NRGBA, 1),
+		done: make(chan struct{}), stopped: make(chan struct{})}
 	go f.run(name)
 	return f, nil
 }
 
 func (f *frameSender) Send(img *image.NRGBA) error { deliver(f.frames, img); return nil }
 
+// Close joins the worker (bounded) - see spoutSender.Close.
 func (f *frameSender) Close() {
 	close(f.done)
-	time.Sleep(150 * time.Millisecond) // let the worker ReleaseSender + CloseOpenGL on its thread
+	if waitAll([]<-chan struct{}{f.stopped}, closeJoin) > 0 {
+		f.log.Error(source, "spout: frame-sender worker stuck in a driver call at close - abandoning (GL context + DXGI handle may leak)", nil)
+	}
 }
 
 func (f *frameSender) run(name string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	defer close(f.stopped) // AFTER the deferred release - Close's join proves teardown ran
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 	h := C.rave_spout_create()

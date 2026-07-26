@@ -12,6 +12,7 @@ import (
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/sysexec"
 	"rave.page/mate/internal/webcam"
 )
 
@@ -55,6 +56,7 @@ func NewMediaHost(log *logbus.Bus, bus *eventbus.Bus, clock *medialink.SoftwareC
 		Name:       "media",
 		Log:        log,
 		MemLimitMB: deps.MemLimitMB,
+		CPUClass:   sysexec.JobMedia, // live media plane: bounded (70%), never the 10% batch bucket
 		// The child beats from its ~1 Hz telemetry loop (feat_media.Start). A media child that stops
 		// beating is WEDGED, not idle - a stuck cgo call (Spout/DirectShow) or a blocked frame path -
 		// and while it hangs it may still hold the camera + a capture pipeline. 5 s = 5 missed beats.

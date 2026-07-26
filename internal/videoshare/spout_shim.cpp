@@ -170,6 +170,11 @@ void rave_spout_set_receiver(void* h, const char* name) {
     ((SPOUTHANDLE)h)->SetReceiverName(name);
 }
 
+// rave_spout_recv: -1 receive failed, 0 no new frame, 1 new frame in pixels, 2 sender
+// (re)connected/resized (IsUpdated - real activity, one prompt resize pass), 3 pixels
+// absent/undersized with NO sender update (caller resizes quietly - reporting this as 2
+// used to re-arm the receiver's 250 Hz poll forever against a stale/0x0 sender). Codes
+// mirrored in recvpoll.go.
 int rave_spout_recv(void* h, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt) {
     if (!h || !w || !hgt) return -1;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
@@ -182,7 +187,7 @@ int rave_spout_recv(void* h, unsigned char* pixels, unsigned int cap, unsigned i
     *w = s->GetSenderWidth();
     *hgt = s->GetSenderHeight();
     if (s->IsUpdated()) return 2;
-    if (!dst || cap < (size_t)(*w) * (*hgt) * 4) return 2; // caller must (re)size
+    if (!dst || cap < (size_t)(*w) * (*hgt) * 4) return 3; // caller must (re)size
     return s->IsFrameNew() ? 1 : 0;
 }
 

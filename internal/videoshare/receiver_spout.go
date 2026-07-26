@@ -19,12 +19,10 @@ import (
 	"rave.page/mate/internal/logbus"
 )
 
+// Poll cadence constants live in recvpoll.go (untagged) with the state machine.
 const (
-	recvPollEvery = 4 * time.Millisecond  // ~250 Hz poll while frames flow; IsFrameNew gates actual work
-	recvPollIdle  = 50 * time.Millisecond // backed-off poll once the sender goes quiet (no frame for recvIdleAfter)
-	recvIdleAfter = 2 * time.Second       // quiet period before backing off (reconnect latency ≤ recvPollIdle)
-	recvNameCap   = 256
-	scanMaxN      = 64 // per-scan sender ceiling (bounded staging buffers; Spout registries are far smaller)
+	recvNameCap = 256
+	scanMaxN    = 64 // per-scan sender ceiling (bounded staging buffers; Spout registries are far smaller)
 )
 
 // scanSenders enumerates every registered sender name + its dimensions in ONE call on the
@@ -50,10 +48,11 @@ func scanSenders() []SenderInfo {
 
 // spoutReceiver polls one named sender on a locked OS thread.
 type spoutReceiver struct {
-	log    *logbus.Bus
-	frames chan *image.NRGBA
-	done   chan struct{}
-	gate   fpsGate // capture-rate cap, checked BEFORE the readback
+	log     *logbus.Bus
+	frames  chan *image.NRGBA
+	done    chan struct{}
+	stopped chan struct{} // closed by the worker AFTER ReleaseReceiver+CloseOpenGL ran
+	gate    fpsGate       // capture-rate cap, checked BEFORE the readback
 }
 
 func newFrameReceiver(log *logbus.Bus, name string, o RecvOptions) (FrameReceiver, error) {
@@ -61,7 +60,8 @@ func newFrameReceiver(log *logbus.Bus, name string, o RecvOptions) (FrameReceive
 	if C.rave_spout_available() == 0 {
 		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
 	}
-	r := &spoutReceiver{log: log, frames: make(chan *image.NRGBA, 1), done: make(chan struct{})}
+	r := &spoutReceiver{log: log, frames: make(chan *image.NRGBA, 1),
+		done: make(chan struct{}), stopped: make(chan struct{})}
 	r.gate.setFPS(o.MaxFPS)
 	go r.run(name)
 	return r, nil
@@ -72,15 +72,20 @@ func (r *spoutReceiver) Frames() <-chan *image.NRGBA { return r.frames }
 // SetMaxFPS implements FPSLimiter (live cap change; <= 0 = uncapped).
 func (r *spoutReceiver) SetMaxFPS(fps float64) { r.gate.setFPS(fps) }
 
+// Close joins the worker (bounded) so ReleaseReceiver + CloseOpenGL provably ran before
+// return - the old fixed sleep let route churn orphan GL contexts + DXGI shared handles.
 func (r *spoutReceiver) Close() {
 	close(r.done)
-	time.Sleep(150 * time.Millisecond) // let the worker ReleaseReceiver + CloseOpenGL on its thread
+	if waitAll([]<-chan struct{}{r.stopped}, closeJoin) > 0 {
+		r.log.Error(source, "spout: receiver worker stuck in a driver call at close - abandoning (GL context + DXGI handle may leak)", nil)
+	}
 }
 
 // run owns the handle + GL context and polls frames until Close.
 func (r *spoutReceiver) run(name string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	defer close(r.stopped) // AFTER the deferred release below - Close's join proves teardown ran
 	defer close(r.frames)
 
 	cname := C.CString(name)
@@ -96,10 +101,11 @@ func (r *spoutReceiver) run(name string) {
 
 	var buf []byte
 	var w, hgt C.uint
-	// Adaptive poll: 4ms while frames flow (latency), 50ms once the sender goes quiet -
-	// a 250 Hz busy-poll against an idle/closed sender is pure wakeup churn.
-	interval := recvPollEvery
-	lastFrame := time.Now()
+	// Poll discipline (interval backoff, FPS gate, resize/deliver decisions) lives in
+	// recvPoller (recvpoll.go) - the gate runs BEFORE ReceiveImage, connected or not, so
+	// an over-budget or stale poll never acquires the sender's shared-texture mutex.
+	p := newRecvPoller(&r.gate, time.Now())
+	interval := p.interval
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -108,23 +114,22 @@ func (r *spoutReceiver) run(name string) {
 			return
 		case <-t.C:
 		}
-		// FPS cap: skip the whole readback while over budget. Only once connected (len(buf) > 0) -
-		// (re)connect/resize detection stays at the fast poll rate so a route comes up promptly.
-		if len(buf) > 0 && !r.gate.allow(time.Now().UnixNano()) {
+		if !p.allow(time.Now()) {
 			continue
 		}
 		var px *C.uchar
 		if len(buf) > 0 {
 			px = (*C.uchar)(unsafe.Pointer(&buf[0]))
 		}
-		got := false
-		switch C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt) {
-		case 2: // (re)connected / resized: size the buffer, frame arrives on the next poll
-			if w > 0 && hgt > 0 {
-				buf = getPix(int(w) * int(hgt) * 4)
+		act := p.apply(int(C.rave_spout_recv(h, px, C.uint(len(buf)), &w, &hgt)),
+			int(w), int(hgt), len(buf), time.Now())
+		if act.resize { // (re)connect/resize: size the buffer, frame arrives on a later poll
+			if len(buf) > 0 {
+				PutPix(buf) // recycle the old size's buffer (leaked before)
 			}
-			got = true // activity - stay/return to the fast poll
-		case 1:
+			buf = getPix(int(w) * int(hgt) * 4)
+		}
+		if act.frame {
 			// zero-copy handoff: the readback buffer IS the delivered frame; the next
 			// readback targets a fresh pooled buffer (no full-frame memcpy - 2 GB/s at
 			// 4K60). Consumers release via Frame.Release → PutPix.
@@ -132,16 +137,9 @@ func (r *spoutReceiver) run(name string) {
 				Rect: image.Rect(0, 0, int(w), int(hgt))}
 			buf = getPix(len(buf))
 			r.deliver(img) // newest-wins, never blocks the poller
-			got = true
 		}
-		if got {
-			lastFrame = time.Now()
-			if interval != recvPollEvery {
-				interval = recvPollEvery
-				t.Reset(interval)
-			}
-		} else if interval != recvPollIdle && time.Since(lastFrame) > recvIdleAfter {
-			interval = recvPollIdle
+		if act.interval != interval {
+			interval = act.interval
 			t.Reset(interval)
 		}
 	}
