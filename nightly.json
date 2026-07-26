@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d5fcec9",
-  "build": 148,
-  "commit": "d5fcec9",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-148-20260725-d5fcec9.exe",
-  "sha256": "62a85e2b0d0ae43971ba47b9c5179f9354c86d71966e891c43bb3ec24f84145a",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-148-20260725-d5fcec9.exe",
-  "installer_sha256": "6f5259f553c5c1a2bfd58ea9ee91880322690b907db96339dc4f3639b5223aed",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-148-20260725-d5fcec9",
-  "linux_sha256": "d11a8961b1187c835e467999ea899f2a1366af4b760bff31918f092e9d54d516",
+  "version": "nightly-82de064",
+  "build": 149,
+  "commit": "82de064",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-149-20260726-82de064.exe",
+  "sha256": "867ce4d6b9621ce4300398f61fa4b84e4fc9febcbf5e723c147db9e5b7c62d45",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-149-20260726-82de064.exe",
+  "installer_sha256": "1bd5b58fc95ff3222421e57badd72650aabf7b1e97f4c000b165b151b1773ca9",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-149-20260726-82de064",
+  "linux_sha256": "d5243e0aea60207178fbaedd9a32390ecf9942aa8078c8096c061c20a6539c07",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-25T23:38:57Z",
-  "notes": "Merge feature/zig-phaseb-b4a-player: B4a one engine sample + mpResync retired"
+  "released": "2026-07-26T00:46:59Z",
+  "notes": "fix(webui): settings select picks now apply and display immediately"
 }
