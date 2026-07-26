@@ -33,10 +33,20 @@ so a tag is wired into CI only once its backend file lands.
   `<d3d11.h>` come from the mingw headers - no extra SDK.
 - **Build:** `CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ go build -tags spout …`
   Local Windows dev: `make build-spout`.
-- **RUNTIME (critical):** the exe **load-time-links** `SpoutLibrary.dll` (confirmed: `objdump -p`
-  lists `DLL Name: SpoutLibrary.dll`; running without it → `0xc0000135` STATUS_DLL_NOT_FOUND).
-  The DLL MUST sit next to `rave-mate.exe`. CI ships it: build artifact → both NSIS installers
-  (`-DSPOUT_DLL` / `-DMATE_DLL`) + the raw-exe feed (`deploy` copies `SpoutLibrary.dll`).
+- **RUNTIME:** `SpoutLibrary.dll` is resolved **at runtime** (`LoadLibrary` in `spout_shim.cpp`,
+  no `-lSpoutLibrary` in the cgo LDFLAGS), so a missing DLL disables only the Spout feature -
+  `rave_spout_available()` returns 0 and the sink/receiver report it. It is NOT load-time-linked
+  (that older behaviour crashed the whole exe with `0xc0000135` before `main`). The DLL still
+  belongs next to `rave-mate.exe` (or in the managed bin the Settings install button fills), and CI
+  ships it: build artifact → both NSIS installers (`-DSPOUT_DLL` / `-DMATE_DLL`) + the raw-exe feed
+  (`deploy` copies `SpoutLibrary.dll`).
+- **Registry queries** (`ListSenders` / `SenderSize` / the mediaroute share scan) go through ONE
+  process-wide Spout handle (`registry()` in the shim, mutex-guarded, no GL context) and one
+  `rave_spout_scan` call that returns names+dimensions together, cached for 1 s in `scan.go`.
+  Never build a handle per query: that churned 1+2N COM objects every 2 s scan.
+- **Receiver fps cap:** `videoshare.RecvOptions.MaxFPS` gates the poll loop BEFORE `ReceiveImage`,
+  so an over-budget frame costs a channel wakeup instead of a full GPU→CPU readback. Live-settable
+  via `videoshare.FPSLimiter` (shared capture runs at the fastest consumer's rate).
 - **Self-update caveat:** the in-app updater self-swaps only the exe. A pre-spout install updating
   to a spout exe needs the DLL already present beside it. Fresh installer installs are fine; the
   raw-exe feed carries the DLL. If updating a legacy install, deliver the first spout release via

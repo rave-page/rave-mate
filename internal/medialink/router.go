@@ -1283,11 +1283,7 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 			return err
 		}
 		rio.st.sent(f)
-		if rio.rebuf != nil {
-			rio.rebuf.add(f) // NACK retransmit window (§2.5) - retains Payload, no release
-		} else if f.Release != nil {
-			f.Release() // pooled capture buffer back to its pool
-		}
+		rio.retainOrRelease(f) // NACK window (§2.5) vs pooled capture buffer (see nack.go)
 	}
 }
 

@@ -383,7 +383,7 @@
       "title": "Signal sources & provenance"
     },
     "ml-fps": {
-      "body": "Caps how many frames per second leave this machine. VJ tools often render at 120+ fps - every frame above the cap is dropped BEFORE capture-copy, encode and encryption, so the cap directly bounds sender CPU. 60 covers every projector and stream; raise it only if you know the far end displays faster.",
+      "body": "Set this on the PC that SENDS the stream. Caps how many frames per second leave this machine. VJ tools often render at 120+ fps - over-budget frames are skipped inside the capture poll loop, BEFORE the GPU→CPU frame copy, so a 120 fps source capped to 60 pays 60 readbacks per second instead of 120. That copy is the single biggest memory-bandwidth cost on the sender (8 MB per 1080p frame, 33 MB per 4K frame), which is why the cap - not the codec - is the first lever when OBS or another encoder on the same machine starts stuttering. Encode and encryption are skipped for those frames too. 60 covers every projector and stream; raise it only if you know the far end displays faster. When several peers pull the SAME source, one capture is shared: it runs at the fastest route's rate and slower routes drop their extra frames without a second readback.",
       "title": "Sender frame-rate cap"
     },
     "ml-height": {

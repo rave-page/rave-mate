@@ -49,6 +49,10 @@ func (s *SpoutSource) Frames(ctx context.Context, emit func(Frame)) error {
 				return fmt.Errorf("mocapnode: spout sender %q closed", s.Sender)
 			}
 			f, n := frameFromNRGBA(img, &buf)
+			// The receiver hands over a POOLED readback buffer; frameFromNRGBA copied what it
+			// needs into our own RGB24 buffer, so give it straight back (without this the pool
+			// starves and every readback allocates a fresh full frame).
+			videoshare.PutPix(img.Pix)
 			if !n {
 				continue
 			}

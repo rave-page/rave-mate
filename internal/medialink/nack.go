@@ -11,6 +11,7 @@ import "sync"
 const (
 	rebufMaxFrames = 512      // default retransmit-buffer frame cap
 	rebufMaxBytes  = 16 << 20 // default retransmit-buffer payload cap
+	rebufCopyMax   = 1 << 20  // largest POOLED payload copied into the window (encoded-AU class)
 )
 
 // KeyframeSource is an optional Source extension: the route requests a fresh keyframe when the
@@ -52,6 +53,34 @@ func (b *retransmitBuf) add(f *Frame) {
 		b.frames = b.frames[1:]
 	}
 	b.mu.Unlock()
+}
+
+// retainOrRelease disposes of a frame the send loop just wrote: keep it in the retransmit window,
+// or hand its pooled buffer back. Keyed on OWNERSHIP, not codec tier:
+//
+//   - no window (nack unnegotiated): release.
+//   - not pooled (Release == nil): the encoder allocated this AU for us - retain as is, free.
+//   - pooled + compressed AU within rebufCopyMax: COPY the (small) AU into the window, then
+//     release the pooled buffer.
+//   - pooled raw pixels (or an oversized AU): exempt from the window - release now. Retaining one
+//     starves the capture pool, so every readback re-allocates 8 MB (1080p) / 33 MB (4K) - exactly
+//     the GC churn the pool removed - and buys nothing: raw frames are intra (the receiver resyncs
+//     on the very next frame) and ONE 4K frame would evict the entire 16 MB window anyway.
+func (rio *routeIO) retainOrRelease(f *Frame) {
+	switch {
+	case rio.rebuf == nil:
+	case f.Release == nil:
+		rio.rebuf.add(f)
+		return
+	case f.Codec.CompressedVideo() && len(f.Payload) <= rebufCopyMax:
+		cp := *f
+		cp.Payload = append([]byte(nil), f.Payload...)
+		cp.Release = nil
+		rio.rebuf.add(&cp)
+	}
+	if f.Release != nil {
+		f.Release()
+	}
 }
 
 // get returns the buffered frames of stream with seq in [from,to] (inclusive, wrap-aware), in

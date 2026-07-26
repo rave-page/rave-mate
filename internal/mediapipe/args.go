@@ -40,58 +40,115 @@ func gopFrames(fps float64) int {
 	return g
 }
 
-// hwFilterDevice is the name the d3d11va hardware context is registered under, so the encoder and
-// any hardware filter reference the same device.
-const hwFilterDevice = "ml"
+// hwDeviceD3D11 is the label the d3d11va hardware context is registered under when a pinned adapter
+// is the ONLY reason the child needs one (AMF / Media Foundation: no per-encoder device option).
+const hwDeviceD3D11 = "rvd3d"
 
-// hwDeviceArgs binds the child to a SPECIFIC GPU (WP-3), emitted before the input. Empty unless the
-// user actually pinned a device (EncodeSpec.Device ok) - the auto path stays byte-identical to the
-// pre-device-selection argv, so a build without d3d11va can only be affected by an explicit pin.
+// scaleFilter builds the downscale chain for an explicit MaxHeight (outH = target height).
 //
-// Windows D3D11 families (nvenc/qsv/amf/*_mf) get the general
-// `-init_hw_device d3d11va=ml:<idx> -filter_hw_device ml` pair: the documented ffmpeg way to bind a
-// Windows hardware context (and any hardware scaler) to one DXGI adapter ordinal. LUID keys only
-// ever come from DXGI, so this cannot fire off Windows. Non-D3D11 families get nothing here - see
-// deviceEncoderArgs for the per-family selectors that do the real work.
-func hwDeviceArgs(spec medialink.EncodeSpec) []string {
-	_, idx, ok := spec.Device()
-	if !ok || !d3d11Family(spec.Encoder) {
-		return nil
+// Hardware encoder families with a stable GPU scaler get one: the CPU then only packs RGBA→NV12
+// and the resize runs on the silicon that is about to encode the frame anyway, instead of swscale
+// resizing 33 MB of RGBA per 4K frame on the cores OBS wants. scale_cuda (NVENC) and scale_qsv
+// (QSV) have been in ffmpeg since 4.x; AMF/D3D11 keep swscale because scale_amf / scale_d3d11 are
+// ffmpeg-7.1-era filters we cannot assume on a user's PATH ffmpeg. swscale is also the fallback
+// after a hw-filter failure (forceSW - see encoder.run's early-fail demotion).
+//
+// The returned init flags claim the child's ONE -init_hw_device / -filter_hw_device pair. A pinned
+// encode device (WP-3) is folded INTO these same strings by planEncodeDevice - there is never a
+// second pair, and planEncodeDevice is the only place that decides which pair a child gets.
+func scaleFilter(encoder string, outH int, forceSW bool) (init []string, vf string) {
+	sw := fmt.Sprintf("scale=-2:%d", outH)
+	if forceSW {
+		return nil, sw
 	}
-	return []string{"-init_hw_device", fmt.Sprintf("d3d11va=%s:%d", hwFilterDevice, idx),
-		"-filter_hw_device", hwFilterDevice}
+	switch {
+	case strings.HasSuffix(encoder, "_nvenc"):
+		return []string{"-init_hw_device", "cuda=rvcu", "-filter_hw_device", "rvcu"},
+			fmt.Sprintf("format=nv12,hwupload_cuda,scale_cuda=-2:%d", outH)
+	case strings.HasSuffix(encoder, "_qsv"):
+		return []string{"-init_hw_device", "qsv=rvqsv", "-filter_hw_device", "rvqsv"},
+			fmt.Sprintf("format=nv12,hwupload=extra_hw_frames=16,scale_qsv=-2:%d", outH)
+	}
+	return nil, sw
 }
 
-// deviceEncoderArgs are the per-encoder device selectors (appended next to -c:v). NVENC takes a GPU
-// ordinal, QSV a child-device ordinal. AMF exposes no device option in ffmpeg and VA-API wants a DRM
-// render node rather than an ordinal, so both are steered only via the native engine (internal/mfenc
-// honours the adapter LUID directly) - documented in docs/dev/MF_NATIVE_ENCODE.md.
-func deviceEncoderArgs(spec medialink.EncodeSpec) []string {
-	_, idx, ok := spec.Device()
-	if !ok {
-		return nil
+// hwScaleFamily reports whether scaleFilter would use a GPU scaler for this encoder.
+func hwScaleFamily(encoder string) bool {
+	init, _ := scaleFilter(encoder, 1080, false)
+	return len(init) > 0
+}
+
+// encodeDevicePlan is the resolved hardware-context decision for ONE child: at most one
+// -init_hw_device/-filter_hw_device pair (ffmpeg allows several, but two devices for one frame path
+// is how you get a filter graph feeding an encoder on the wrong GPU), the -vf chain, and the
+// per-encoder device selector.
+type encodeDevicePlan struct {
+	init []string // -init_hw_device + -filter_hw_device pair (global: before -i)
+	vf   string   // -vf chain ("" = none)
+	sel  []string // per-encoder device option (after -c:v)
+}
+
+// planEncodeDevice composes the MaxHeight downscale chain (capture path, WP-5) with the pinned
+// encode device (WP-3). Precedence, so exactly one hardware context is ever created:
+//
+//  1. A GPU scaler is in use (nvenc/qsv, not demoted to swscale) → the pinned adapter is folded into
+//     THAT device spec ("cuda=rvcu:1", "qsv=rvqsv,child_device=1"). No per-encoder selector then: the
+//     encoder inherits the device from the hardware frames the filter hands it, and a second
+//     selector would fight the frames context.
+//  2. No GPU scaler, adapter pinned → the per-encoder option (-gpu for NVENC, -qsv_device for QSV),
+//     or a d3d11va context for AMF / *_mf, which expose no device option at all in ffmpeg.
+//  3. Nothing pinned → byte-identical argv to the auto path (no device flags anywhere), so a build
+//     without d3d11va/cuda can only ever be affected by an explicit pin.
+//
+// Caveat, deliberate: NVENC's -gpu and cuda= take a CUDA ordinal, which usually but not always
+// matches the DXGI ordinal we resolved. The native MF engine binds by LUID and has no such ambiguity
+// - it is the accurate path, and the default one for H.264.
+func planEncodeDevice(spec medialink.EncodeSpec, scaled, forceSW bool, outH int) encodeDevicePlan {
+	var p encodeDevicePlan
+	if scaled {
+		p.init, p.vf = scaleFilter(spec.Encoder, outH, forceSW)
+	}
+	_, idx, pinned := spec.Device()
+	if !pinned {
+		return p
+	}
+	if len(p.init) > 0 {
+		p.init = foldAdapter(p.init, idx)
+		return p
 	}
 	switch {
 	case strings.HasSuffix(spec.Encoder, "_nvenc"):
-		return []string{"-gpu", strconv.Itoa(idx)}
+		p.sel = []string{"-gpu", strconv.Itoa(idx)}
 	case strings.HasSuffix(spec.Encoder, "_qsv"):
-		return []string{"-qsv_device", strconv.Itoa(idx)}
+		p.sel = []string{"-qsv_device", strconv.Itoa(idx)}
+	case strings.HasSuffix(spec.Encoder, "_amf"), strings.HasSuffix(spec.Encoder, "_mf"):
+		p.init = []string{"-init_hw_device", fmt.Sprintf("d3d11va=%s:%d", hwDeviceD3D11, idx),
+			"-filter_hw_device", hwDeviceD3D11}
 	}
-	return nil
+	return p
 }
 
-// d3d11Family reports whether an encoder runs on a Windows D3D11-backed hardware family.
-func d3d11Family(enc string) bool {
-	for _, s := range []string{"_nvenc", "_qsv", "_amf", "_mf"} {
-		if strings.HasSuffix(enc, s) {
-			return true
+// foldAdapter rewrites a scaler's device spec to name the pinned adapter (cuda takes ":<ordinal>",
+// qsv a "child_device=<ordinal>" option). Unknown device types are left alone.
+func foldAdapter(init []string, idx int) []string {
+	out := append([]string(nil), init...)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] != "-init_hw_device" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(out[i+1], "cuda="):
+			out[i+1] += ":" + strconv.Itoa(idx)
+		case strings.HasPrefix(out[i+1], "qsv="):
+			out[i+1] += ",child_device=" + strconv.Itoa(idx)
 		}
 	}
-	return false
+	return out
 }
 
-// encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv.
-func encodeArgs(spec medialink.EncodeSpec) []string {
+// encodeArgs builds the raw-RGBA-stdin → bitstream-stdout child argv. forceSW pins the MaxHeight
+// downscale to CPU swscale (used after a GPU-scaler failure).
+func encodeArgs(spec medialink.EncodeSpec, forceSW bool) []string {
 	fps := spec.FPS
 	if fps <= 0 {
 		fps = 30
@@ -108,16 +165,17 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 	if kbps <= 0 {
 		kbps = defaultBitrateKbps(outW, outH, fps)
 	}
+	dev := planEncodeDevice(spec, scaled, forceSW, outH)
 	args := []string{"-hide_banner", "-loglevel", "error", "-fflags", "nobuffer"}
-	args = append(args, hwDeviceArgs(spec)...)
+	args = append(args, dev.init...) // the child's ONE hardware context - global, before the input
 	args = append(args,
 		"-f", "rawvideo", "-pix_fmt", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"-framerate", trimFloat(fps),
 		"-i", "-", "-an",
 	)
-	if scaled {
-		args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", outH))
+	if dev.vf != "" {
+		args = append(args, "-vf", dev.vf)
 	}
 	g := strconv.Itoa(gopFrames(fps))
 	br := strconv.Itoa(kbps) + "k"
@@ -157,7 +215,7 @@ func encodeArgs(spec medialink.EncodeSpec) []string {
 		args = append(args, "-c:v", spec.Encoder)
 		args = append(args, rc...)
 	}
-	args = append(args, deviceEncoderArgs(spec)...)
+	args = append(args, dev.sel...)
 	// Output framing: parameter sets repeated on every keyframe (dump_extra) so a decoder can
 	// (re)join mid-stream. Non-AMF also gets the {codec}_metadata filter for AUD insertion. AMF is
 	// EXCLUDED from that filter: its encoder emits an imperfect elementary stream (parameter sets

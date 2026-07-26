@@ -36,10 +36,15 @@ int rave_spout_find(const char* name);
 // gets. Returns 1 if a frame round-tripped. in/out are w*h*4 RGBA.
 int rave_spout_roundtrip(const unsigned char* in, unsigned char* out, unsigned int w, unsigned int h, int binvert);
 
-// Sender registry queries (throwaway handle, no GL): copy the idx-th sender name into out
-// (cap bytes, NUL-terminated; 1 on success) / a named sender's current dimensions.
+// Sender registry queries (shared process-wide handle, no GL): copy the idx-th sender name into
+// out (cap bytes, NUL-terminated; 1 on success) / a named sender's current dimensions.
 int rave_spout_sender_name(int idx, char* out, int cap);
 int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h);
+
+// One-shot registry scan: names = maxN slots of nameCap bytes (NUL-terminated), dims = 2 uints per
+// slot (w,h; 0 when the registry has no size). Returns the filled slot count, -1 without the DLL.
+// Replaces count + N name + N size calls (which each built and released a Spout object).
+int rave_spout_scan(char* names, int nameCap, int maxN, unsigned int* dims);
 
 // Receiver: bind h (from rave_spout_create, on its owning thread) to the named sender.
 void rave_spout_set_receiver(void* h, const char* name);

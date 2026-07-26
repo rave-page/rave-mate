@@ -24,36 +24,28 @@ const (
 	recvPollIdle  = 50 * time.Millisecond // backed-off poll once the sender goes quiet (no frame for recvIdleAfter)
 	recvIdleAfter = 2 * time.Second       // quiet period before backing off (reconnect latency ≤ recvPollIdle)
 	recvNameCap   = 256
+	scanMaxN      = 64 // per-scan sender ceiling (bounded staging buffers; Spout registries are far smaller)
 )
 
-// listSenders enumerates the registered Spout sender names (registry query, no GL).
-func listSenders() []string {
-	n := int(C.rave_spout_sender_count())
+// scanSenders enumerates every registered sender name + its dimensions in ONE call on the
+// process-wide registry handle (no COM object churn, no GL context). Cached by scan.go.
+func scanSenders() []SenderInfo {
+	names := make([]byte, recvNameCap*scanMaxN)
+	dims := make([]C.uint, 2*scanMaxN)
+	n := int(C.rave_spout_scan((*C.char)(unsafe.Pointer(&names[0])), C.int(recvNameCap),
+		C.int(scanMaxN), (*C.uint)(unsafe.Pointer(&dims[0]))))
 	if n <= 0 {
 		return nil
 	}
-	out := make([]string, 0, n)
-	buf := make([]byte, recvNameCap)
+	out := make([]SenderInfo, 0, n)
 	for i := 0; i < n; i++ {
-		if C.rave_spout_sender_name(C.int(i), (*C.char)(unsafe.Pointer(&buf[0])), recvNameCap) != 1 {
+		name := cstr(names[i*recvNameCap : (i+1)*recvNameCap])
+		if name == "" {
 			continue
 		}
-		if name := cstr(buf); name != "" {
-			out = append(out, name)
-		}
+		out = append(out, SenderInfo{Name: name, W: int(dims[i*2]), H: int(dims[i*2+1])})
 	}
 	return out
-}
-
-// senderSize queries a named sender's dimensions from the registry.
-func senderSize(name string) (int, int, bool) {
-	cn := C.CString(name)
-	defer C.free(unsafe.Pointer(cn))
-	var w, h C.uint
-	if C.rave_spout_sender_size(cn, &w, &h) != 1 {
-		return 0, 0, false
-	}
-	return int(w), int(h), true
 }
 
 // spoutReceiver polls one named sender on a locked OS thread.
@@ -61,19 +53,24 @@ type spoutReceiver struct {
 	log    *logbus.Bus
 	frames chan *image.NRGBA
 	done   chan struct{}
+	gate   fpsGate // capture-rate cap, checked BEFORE the readback
 }
 
-func newFrameReceiver(log *logbus.Bus, name string) (FrameReceiver, error) {
+func newFrameReceiver(log *logbus.Bus, name string, o RecvOptions) (FrameReceiver, error) {
 	preloadManagedDLL()
 	if C.rave_spout_available() == 0 {
 		return nil, fmt.Errorf("SpoutLibrary.dll not found - install it from Settings or place it beside the exe")
 	}
 	r := &spoutReceiver{log: log, frames: make(chan *image.NRGBA, 1), done: make(chan struct{})}
+	r.gate.setFPS(o.MaxFPS)
 	go r.run(name)
 	return r, nil
 }
 
 func (r *spoutReceiver) Frames() <-chan *image.NRGBA { return r.frames }
+
+// SetMaxFPS implements FPSLimiter (live cap change; <= 0 = uncapped).
+func (r *spoutReceiver) SetMaxFPS(fps float64) { r.gate.setFPS(fps) }
 
 func (r *spoutReceiver) Close() {
 	close(r.done)
@@ -110,6 +107,11 @@ func (r *spoutReceiver) run(name string) {
 		case <-r.done:
 			return
 		case <-t.C:
+		}
+		// FPS cap: skip the whole readback while over budget. Only once connected (len(buf) > 0) -
+		// (re)connect/resize detection stays at the fast poll rate so a route comes up promptly.
+		if len(buf) > 0 && !r.gate.allow(time.Now().UnixNano()) {
+			continue
 		}
 		var px *C.uchar
 		if len(buf) > 0 {
