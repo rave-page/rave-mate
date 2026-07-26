@@ -1,13 +1,13 @@
 {
-  "version": "nightly-9e6b2bb",
-  "build": 162,
-  "commit": "9e6b2bb",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-162-20260726-9e6b2bb.exe",
-  "sha256": "3b5aa0b997e9d90b3133d37695aeea4b7bc79d90280f495f0a21543ab6880fda",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-162-20260726-9e6b2bb.exe",
-  "installer_sha256": "9d6879b1dc1d8f1436f502e212f7c69c94285145f89adf4c0c21c6747f5ac379",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-162-20260726-9e6b2bb",
-  "linux_sha256": "c510a786a3613dca25fee6683418c9baab70686067e5358869d2325d1c9c732e",
+  "version": "nightly-10a5b32",
+  "build": 163,
+  "commit": "10a5b32",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-163-20260726-10a5b32.exe",
+  "sha256": "7c40c1e78f31391a4351e5cec5ee25ad75241429ab0749fba58b0b5dd3a148c2",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-163-20260726-10a5b32.exe",
+  "installer_sha256": "f61e28dfe458ab217520d18e3cbd4ff88d82c8bf898275215d8d06ddb1604b62",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-163-20260726-10a5b32",
+  "linux_sha256": "2810d143bcce9f7e95adc62bc554995d224ffeba50b91e3e70baba38b4a42c97",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-26T15:10:51Z",
-  "notes": "Merge fix/selfupdate-slow-download: stall-watchdog + Range-resume update downloads"
+  "released": "2026-07-26T17:45:06Z",
+  "notes": "fix(config): tests can never touch the real per-user config dir"
 }
