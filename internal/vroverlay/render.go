@@ -70,6 +70,11 @@ type Renderer struct {
 	// every render fully overwrites the buffer (bg fill first). Cap: canvasCacheMax.
 	canvas map[[2]int]*image.NRGBA
 
+	// tipLinesHi is the high-water wrapped-line count across ALL tooltip renders: tooltip textures
+	// pad to it (transparent, content centered) so height never changes hover-to-hover -
+	// SetOverlayRaw can't resize, so each change destroy+recreated the overlay at up to 90Hz.
+	tipLinesHi int
+
 	// zig dispatches the renders to the ravevr Zig raster lib when linked (-tags zigvr):
 	// Panel/RenderMenu/RenderStats plus the small editor textures (hover row, ghost,
 	// tooltip, wrist, strip(+hover), outline, path orbit). The direct Go path stays the
@@ -124,7 +129,8 @@ func NewRenderer(scale float64) (*Renderer, error) {
 		return nil, err
 	}
 	return &Renderer{name: nm, body: bd, lh: int(22 * scale), canvas: map[[2]int]*image.NRGBA{},
-		zig: zigvr.Available()}, nil
+		tipLinesHi: 3, // typical tooltips are 1-3 lines - they share one texture size from the start
+		zig:        zigvr.Available()}, nil
 }
 
 // scaleA returns c with its alpha scaled by f (0..1) - lets the panel/menu background fade
@@ -335,19 +341,32 @@ func (r *Renderer) RenderGhost(rows int) *image.NRGBA {
 const TooltipW = 380
 
 // RenderTooltip draws a truncated menu row's full text, word-wrapped, in a small brand-bordered
-// panel (shown beside the menu on laser hover).
+// panel (shown beside the menu on laser hover). Texture height pads to the renderer's high-water
+// line count (tipLinesHi) with the visible panel centered and the pad fully transparent: a constant
+// size across hovers means SetTexture never destroy+recreates the overlay (raw textures can't
+// resize), which was churning compositor textures at up to 90Hz while sweeping hover targets.
 func (r *Renderer) RenderTooltip(text string) *image.NRGBA {
 	const pad = 14
+	const bw = 3 // panel border width
 	lines := wrapText(r.body, text, TooltipW-2*pad)
 	if len(lines) == 0 {
 		lines = []string{text}
 	}
-	h := 2*pad + len(lines)*r.lh
-	img := image.NewNRGBA(image.Rect(0, 0, TooltipW, h))
+	if len(lines) > r.tipLinesHi {
+		r.tipLinesHi = len(lines) // height only grows, to the longest tooltip seen
+	}
+	h := 2*pad + len(lines)*r.lh      // visible panel
+	texH := 2*pad + r.tipLinesHi*r.lh // constant high-water canvas
+	y0 := (texH - h) / 2              // center: the quad anchor stays on the panel center
+	img := image.NewNRGBA(image.Rect(0, 0, TooltipW, texH))
 	r.paintInto(img, func(p *paint) {
-		p.fillSrc(0, 0, TooltipW, h, color.NRGBA{R: 10, G: 10, B: 14, A: 245})
-		p.border(3, colName)
-		y := pad + r.lh - 6
+		p.fillSrc(0, y0, TooltipW, h, color.NRGBA{R: 10, G: 10, B: 14, A: 245})
+		// Border strips around the visible panel only (p.border frames the whole canvas incl. pad).
+		p.set(0, y0, TooltipW, bw, colName)
+		p.set(0, y0+h-bw, TooltipW, bw, colName)
+		p.set(0, y0, bw, h, colName)
+		p.set(TooltipW-bw, y0, bw, h, colName)
+		y := y0 + pad + r.lh - 6
 		for _, ln := range lines {
 			p.text(r.body, ln, pad, y, colText)
 			y += r.lh

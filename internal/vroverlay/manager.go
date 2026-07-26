@@ -30,6 +30,11 @@ const (
 	ringCap  = 100
 	panelW   = 640
 	panelH   = 480
+	// tickCreateBudget staggers cold start: at most this many NEW overlays (create + first 640×480
+	// texture upload, ~1.2MB each) per 100ms tick. One tick creating+uploading everything at once
+	// spiked the compositor right as a session (or post-TDR reconnect) came up; the rest follow on
+	// the next ticks.
+	tickCreateBudget = 2
 )
 
 // Manager renders VR overlays from bus events. It subscribes to twitch.chat/event (local OR a
@@ -657,6 +662,7 @@ func (m *Manager) tick() {
 	}
 
 	wantKeys := map[string]bool{}
+	createsLeft := tickCreateBudget
 	for _, o := range feat.Overlays {
 		if !o.Enabled {
 			continue
@@ -664,6 +670,10 @@ func (m *Manager) tick() {
 		key := "page.rave.mate." + o.ID
 		wantKeys[key] = true
 		if !m.created[key] {
+			if createsLeft == 0 {
+				continue // cold-start pacing: this overlay is created on a following tick
+			}
+			createsLeft--
 			err := m.rt.EnsureOverlay(key, "rave-mate "+o.Type)
 			rtErr(err)
 			if err != nil {
