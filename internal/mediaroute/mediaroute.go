@@ -55,8 +55,11 @@ type Options struct {
 	SameHost func(peer string) bool // §3 same-PC guard; nil = no guard
 
 	// Test seams (default: videoshare Spout backend).
-	ListSenders  func() []string
-	SenderSize   func(name string) (w, h int, ok bool)
+	ListSenders func() []string
+	SenderSize  func(name string) (w, h int, ok bool)
+	// SenderShare resolves a sender's GPU shared-texture handle + DXGI format (zero-copy
+	// encode, zigmedia inc 1). Scalars only - no pixels, no capture opened.
+	SenderShare  func(name string) (handle uint64, dxgiFormat uint32, w, h int, ok bool)
 	OpenSource   func(name string, w, h int) (medialink.Source, error)
 	OpenSink     func(name string, w, h int) (medialink.Sink, error)
 	OpenReceiver func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
@@ -82,6 +85,7 @@ type Manager struct {
 
 	listSenders func() []string
 	senderSize  func(string) (int, int, bool)
+	senderShare func(string) (uint64, uint32, int, int, bool)
 	openSource  func(string, int, int) (medialink.Source, error)
 	openSink    func(string, int, int) (medialink.Sink, error)
 	hub         *captureHub // one capture per Spout source, fanned out to N routes
@@ -95,7 +99,7 @@ type Manager struct {
 func New(o Options) *Manager {
 	m := &Manager{
 		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost,
-		listSenders: o.ListSenders, senderSize: o.SenderSize,
+		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
 		openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 	}
@@ -105,6 +109,9 @@ func New(o Options) *Manager {
 	}
 	if m.senderSize == nil {
 		m.senderSize = videoshare.SenderSize
+	}
+	if m.senderShare == nil {
+		m.senderShare = videoshare.SenderShare
 	}
 	if m.openSource == nil {
 		m.openSource = m.openSpoutSource
@@ -369,32 +376,78 @@ func encoderCodec(enc string) string {
 // hook (refcounted pooled capture buffer); the per-route fps cap drops over-budget frames here,
 // before any encode/crypto cost - the readback itself is already capped inside the receiver
 // (videoshare.RecvOptions.MaxFPS), which is what actually bounds sender bandwidth.
+//
+// The capture attaches LAZILY, on the first Next. A zero-copy encode session (the native MF
+// child reading the sender's shared texture itself, medialink.ZeroCopySource) never calls Next,
+// and an eager attach would spin the GL context + readback + pooled buffers for a consumer that
+// does not exist - exactly the cost zigmedia inc 1 removes.
 type spoutSource struct {
-	feed   captureFeed
+	name    string
+	maxFPS  float64
+	attach  func(name string, maxFPS float64) (captureFeed, error)
+	shareOf func(name string) (uint64, uint32, int, int, bool)
+
 	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
 	last   time.Time
+
+	mu   sync.Mutex
+	feed captureFeed // nil until the first Next attaches (or a test injects one)
 }
 
 func (m *Manager) openSpoutSource(name string, _, _ int) (medialink.Source, error) {
 	fps := m.cfg().FPSCap()
-	// Shared capture: N routes on the same Spout sender fan out from ONE readback (see capture.go).
-	sub, err := m.hub.attach(name, float64(fps))
-	if err != nil {
-		return nil, err
+	s := &spoutSource{
+		name: name, maxFPS: float64(fps), shareOf: m.senderShare,
+		// Shared capture: N routes on one Spout sender fan out from ONE readback (capture.go).
+		attach: func(n string, f float64) (captureFeed, error) { return m.hub.attach(n, f) },
 	}
-	s := &spoutSource{feed: sub}
 	if fps > 0 {
 		s.minGap = time.Duration(float64(time.Second) / float64(fps))
 	}
 	return s, nil
 }
 
+// SharedTexture implements medialink.ZeroCopySource: the sender's DX11 shared-texture handle +
+// format, resolved from the (cached) registry scan. Pure lookup - it never opens a capture.
+func (s *spoutSource) SharedTexture() (uint64, uint32, int, int, string, bool) {
+	if s.shareOf == nil || s.name == "" {
+		return 0, 0, 0, 0, "", false
+	}
+	h, fmt, w, hh, ok := s.shareOf(s.name)
+	if !ok {
+		return 0, 0, 0, 0, "", false
+	}
+	return h, fmt, w, hh, s.name, true
+}
+
+// feedOrAttach returns this route's capture feed, opening the shared capture on first use.
+func (s *spoutSource) feedOrAttach() (captureFeed, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.feed != nil {
+		return s.feed, nil
+	}
+	if s.attach == nil {
+		return nil, errors.New("mediaroute: spout source has no capture backend")
+	}
+	f, err := s.attach(s.name, s.maxFPS)
+	if err != nil {
+		return nil, err
+	}
+	s.feed = f
+	return f, nil
+}
+
 func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
+	feed, err := s.feedOrAttach()
+	if err != nil {
+		return nil, err
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case f, ok := <-s.feed.frames():
+		case f, ok := <-feed.frames():
 			if !ok {
 				return nil, io.EOF // capture ended - route ends cleanly
 			}
@@ -413,7 +466,18 @@ func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
 	}
 }
 
-func (s *spoutSource) Close() error { s.feed.close(); return nil }
+// Close releases this route's capture subscription. A source that never attached (zero-copy
+// route) has nothing to close - the readback was never opened.
+func (s *spoutSource) Close() error {
+	s.mu.Lock()
+	f := s.feed
+	s.feed = nil
+	s.mu.Unlock()
+	if f != nil {
+		f.close()
+	}
+	return nil
+}
 
 // spoutSink presents decoded frames as a named local Spout sender. Write is called serially by the
 // route's jitter drain, so the diagnostic counters need no locking.
