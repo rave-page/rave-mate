@@ -3,6 +3,8 @@ package featurehost
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -58,6 +60,7 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	}
 	f.rt = rt
 	f.self = in.Self
+	setChildMemoryLimit(in.MemLimitMB, rt)
 	f.mediaCfg = in.MediaCfg
 	f.camCfg = in.CamCfg
 	f.seqByOrigin = map[string]uint64{}
@@ -286,4 +289,23 @@ func (s *mediaSecretStore) MediaSecret(node string) ([]byte, bool) {
 	defer s.mu.Unlock()
 	b, ok := s.m[node]
 	return b, ok
+}
+
+// childMemSoftPct is how much of the child's hard job-object RAM cap the Go soft limit sits at. The
+// job cap KILLS the process; GOMEMLIMIT only makes the GC work harder - so the soft limit must bite
+// first and give a frame-buffer runaway a chance to be collected instead of respawning the plane.
+const childMemSoftPct = 80
+
+// setChildMemoryLimit gives the media child its own Go soft memory limit, below the hard job-object
+// cap the parent applied (daemon precedent: app.setMemoryLimitGuard). capMB<=0 leaves the runtime
+// default; an explicit GOMEMLIMIT from the operator always wins.
+func setChildMemoryLimit(capMB int, rt *Runtime) {
+	if capMB <= 0 || os.Getenv("GOMEMLIMIT") != "" {
+		return
+	}
+	soft := int64(capMB) * childMemSoftPct / 100 * 1024 * 1024
+	debug.SetMemoryLimit(soft)
+	if rt != nil && rt.Log != nil {
+		rt.Log.Info("media", "child memory limit set", map[string]any{"softMb": soft >> 20, "hardCapMb": capMB})
+	}
 }
