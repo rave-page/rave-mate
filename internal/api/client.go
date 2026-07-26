@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -184,12 +185,30 @@ func bearer(token string) apiclient.RequestEditorFn {
 	}
 }
 
-// decode reads a 2xx JSON body into out; on non-2xx returns an error with a short snippet.
+// StatusError is a non-2xx API response; callers branch on Code (401 re-auth, 429 backoff).
+type StatusError struct {
+	Code int
+	Msg  string
+}
+
+func (e *StatusError) Error() string { return e.Msg }
+
+// StatusCode extracts the HTTP status from an api error chain; 0 = not a status error.
+func StatusCode(err error) int {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.Code
+	}
+	return 0
+}
+
+// decode reads a 2xx JSON body into out; on non-2xx returns a *StatusError with a short snippet.
 func decode(resp *http.Response, out any) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%s -> %d: %s", resp.Request.URL.Path, resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return &StatusError{Code: resp.StatusCode,
+			Msg: fmt.Sprintf("%s -> %d: %s", resp.Request.URL.Path, resp.StatusCode, strings.TrimSpace(string(snippet)))}
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil

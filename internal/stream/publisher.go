@@ -23,6 +23,19 @@ const (
 	flushInterval  = 500 * time.Millisecond
 	flushBatchSize = 50
 	heartbeatEvery = 30 * time.Second
+	// pendingMax caps the merged-update queue (each event is a small state map, ~1KB max ->
+	// ~0.5MB worst case). Policy: drop-OLDEST - desktop is source of truth, so the freshest
+	// state must survive a server-error backoff window.
+	pendingMax = 500
+)
+
+// Retry discipline (vars: shrunk in tests). A 401 means the publish token expired mid-set;
+// a 429 means we ARE the load - both were previously retried at flush cadence (2/s) for
+// the rest of the set (observed: 40min of self-inflicted 401/429 before a crash).
+var (
+	retryBackoffBase = time.Second
+	retryBackoffMax  = 2 * time.Minute
+	reacquireMin     = 30 * time.Second // min spacing between CreateStream re-acquire attempts
 )
 
 // Status is the observable publisher state (drives the UI).
@@ -62,13 +75,18 @@ type Publisher struct {
 	pubExp                             string
 	started                            string
 	title                              string
+	args                               StartArgs // kept for publish-token re-acquire (user token in memory only)
 	pending                            []api.IngestEvent
 	seq                                uint64
 	lastFlushAt, lastFlushErr, lastErr string
 	lastFlushOK                        bool
+	backoff                            time.Duration // current 429/re-acquire pause; 0 = none
+	retryAfter                         time.Time     // flush/heartbeat suppressed until then
+	lastReacq                          time.Time     // last CreateStream re-acquire attempt
 	cancel                             context.CancelFunc
 	wg                                 sync.WaitGroup
 	hbGate                             logbus.Gate // heartbeat-failure log gate (30s cadence)
+	flushGate                          logbus.Gate // ingest-failure log gate (2/s cadence)
 
 	statusMu   sync.Mutex
 	statusSubs map[int]chan Status
@@ -91,20 +109,7 @@ func (p *Publisher) Start(ctx context.Context, args StartArgs) (Status, error) {
 	}
 	p.mu.Unlock()
 
-	kind := args.Kind
-	if kind == "" {
-		kind = "dj_set"
-	}
-	src := args.Source
-	if src == "" {
-		src = "traktor_pro_4"
-	}
-	meta := map[string]any{"software": "traktor_pro_4"}
-	maps.Copy(meta, args.Metadata)
-
-	resp, err := p.api.CreateStream(ctx, args.UserToken, api.CreateStreamReq{
-		Title: args.Title, Kind: kind, Source: src, Metadata: meta,
-	})
+	resp, err := p.api.CreateStream(ctx, args.UserToken, createReq(args))
 	if err != nil {
 		p.mu.Lock()
 		p.lastErr = err.Error()
@@ -121,10 +126,12 @@ func (p *Publisher) Start(ctx context.Context, args StartArgs) (Status, error) {
 	p.pubExp = resp.PublishTokenExpiresAt
 	p.started = orNow(resp.StartedAt)
 	p.title = args.Title
+	p.args = args
 	p.pending = nil
 	p.seq = 0
 	p.lastFlushAt, p.lastFlushErr, p.lastErr = "", "", ""
 	p.lastFlushOK = true
+	p.backoff, p.retryAfter, p.lastReacq = 0, time.Time{}, time.Time{}
 	p.cancel = cancel
 	p.mu.Unlock()
 
@@ -180,6 +187,10 @@ func (p *Publisher) enqueue(u session.Update) {
 	p.mu.Lock()
 	p.seq++
 	ev := api.IngestEvent{Type: u.Type, Deck: deck, Channel: channel, State: u.State, Seq: p.seq}
+	if len(p.pending) >= pendingMax { // cap: drop-oldest (see pendingMax)
+		copy(p.pending, p.pending[1:])
+		p.pending = p.pending[:pendingMax-1]
+	}
 	p.pending = append(p.pending, ev)
 	overflow := len(p.pending) >= flushBatchSize
 	p.mu.Unlock()
@@ -191,7 +202,7 @@ func (p *Publisher) enqueue(u session.Update) {
 
 func (p *Publisher) flush(ctx context.Context) {
 	p.mu.Lock()
-	if !p.live || p.streamID == "" || len(p.pending) == 0 {
+	if !p.live || p.streamID == "" || len(p.pending) == 0 || time.Now().Before(p.retryAfter) {
 		p.mu.Unlock()
 		return
 	}
@@ -208,19 +219,25 @@ func (p *Publisher) flush(ctx context.Context) {
 		p.lastFlushOK = false
 		p.lastFlushErr = err.Error()
 		// Drop the failed batch (desktop is source of truth; next batch carries fresh state).
-	} else {
-		p.lastFlushOK = true
-		p.lastFlushErr = ""
+		p.mu.Unlock()
+		p.onPublishError(ctx, err, "ingest")
+		p.broadcast()
+		return
 	}
+	p.lastFlushOK = true
+	p.lastFlushErr = ""
+	p.backoff, p.retryAfter = 0, time.Time{}
 	p.mu.Unlock()
+	p.flushGate.Reset()
 	p.broadcast()
 }
 
 func (p *Publisher) heartbeat(ctx context.Context) {
 	p.mu.Lock()
 	id, token, live := p.streamID, p.pubToken, p.live
+	paused := time.Now().Before(p.retryAfter)
 	p.mu.Unlock()
-	if !live || id == "" {
+	if !live || id == "" || paused {
 		return
 	}
 	if err := p.api.Heartbeat(ctx, id, token); err != nil {
@@ -232,9 +249,106 @@ func (p *Publisher) heartbeat(ctx context.Context) {
 			}
 			p.log.Warn(source, "heartbeat failed", f)
 		}
+		p.onPublishError(ctx, err, "heartbeat")
 		return
 	}
 	p.hbGate.Reset()
+}
+
+// onPublishError applies the retry discipline after a failed publish-token call:
+// 401 = token expired mid-set → re-acquire via CreateStream; 429 (and any other
+// status/transport error) → exponential backoff so the flush/heartbeat tickers stop
+// re-hitting the server at full cadence. Success elsewhere clears the backoff.
+func (p *Publisher) onPublishError(ctx context.Context, err error, op string) {
+	code := api.StatusCode(err)
+	if code == 401 {
+		p.reacquire(ctx)
+		return
+	}
+	p.mu.Lock()
+	p.bumpBackoffLocked()
+	pause := p.backoff
+	p.mu.Unlock()
+	if n, ok := p.flushGate.Should(err.Error(), 5*time.Minute); ok {
+		f := map[string]any{"op": op, "error": err.Error(), "pause": pause.String()}
+		if code != 0 {
+			f["status"] = code
+		}
+		if n > 0 {
+			f["suppressed"] = n
+		}
+		p.log.Warn(source, "publish failed - backing off", f)
+	}
+}
+
+// bumpBackoffLocked doubles the retry pause (base→max cap) and arms retryAfter. mu held.
+func (p *Publisher) bumpBackoffLocked() {
+	if p.backoff == 0 {
+		p.backoff = retryBackoffBase
+	} else if p.backoff < retryBackoffMax {
+		p.backoff *= 2
+		if p.backoff > retryBackoffMax {
+			p.backoff = retryBackoffMax
+		}
+	}
+	p.retryAfter = time.Now().Add(p.backoff)
+}
+
+// reacquire re-runs CreateStream with the stored user token after a 401 (publish token
+// expired mid-set). The server auto-ends the prior active stream and mints a fresh
+// stream+token; we swap ids in place and keep publishing. Rate-limited to reacquireMin;
+// a failed attempt backs off like any publish error.
+func (p *Publisher) reacquire(ctx context.Context) {
+	p.mu.Lock()
+	if !p.live {
+		p.mu.Unlock()
+		return
+	}
+	if time.Since(p.lastReacq) < reacquireMin {
+		p.bumpBackoffLocked() // still 401ing right after a re-acquire: pause instead of hammering
+		p.mu.Unlock()
+		return
+	}
+	p.lastReacq = time.Now()
+	args := p.args
+	p.mu.Unlock()
+
+	resp, err := p.api.CreateStream(ctx, args.UserToken, createReq(args))
+	p.mu.Lock()
+	if err != nil {
+		p.lastErr = "publish token re-acquire failed: " + err.Error()
+		p.bumpBackoffLocked()
+		pause := p.backoff
+		p.mu.Unlock()
+		p.log.Warn(source, "publish token re-acquire failed", map[string]any{"error": err.Error(), "pause": pause.String()})
+		return
+	}
+	if !p.live { // ended while re-acquiring: end the fresh stream, don't adopt it
+		p.mu.Unlock()
+		_ = p.api.EndStream(ctx, resp.StreamID, resp.PublishToken)
+		return
+	}
+	old := p.streamID
+	p.streamID, p.pubToken, p.pubExp = resp.StreamID, resp.PublishToken, resp.PublishTokenExpiresAt
+	p.backoff, p.retryAfter = 0, time.Time{}
+	p.mu.Unlock()
+	p.log.Info(source, "publish token re-acquired", map[string]any{"oldStreamId": old, "streamId": resp.StreamID, "expires": resp.PublishTokenExpiresAt})
+	p.broadcast()
+}
+
+// createReq shapes the CreateStream request from args (shared by Start + reacquire).
+func createReq(args StartArgs) api.CreateStreamReq {
+	kind := args.Kind
+	if kind == "" {
+		kind = "dj_set"
+	}
+	src := args.Source
+	if src == "" {
+		src = "traktor_pro_4"
+	}
+	meta := map[string]any{"software": "traktor_pro_4"}
+	maps.Copy(meta, args.Metadata)
+	return api.CreateStreamReq{Title: args.Title, Kind: kind, Source: src, Metadata: meta}
 }
 
 // End stops publishing and ends the stream server-side (best effort).
@@ -261,8 +375,10 @@ func (p *Publisher) End(ctx context.Context) (Status, error) {
 	p.mu.Lock()
 	p.live = false
 	p.streamID, p.pubToken, p.pubExp, p.started, p.title = "", "", "", "", ""
+	p.args = StartArgs{} // user token leaves memory with the stream
 	p.pending = nil
 	p.seq = 0
+	p.backoff, p.retryAfter, p.lastReacq = 0, time.Time{}, time.Time{}
 	p.cancel = nil
 	p.mu.Unlock()
 
