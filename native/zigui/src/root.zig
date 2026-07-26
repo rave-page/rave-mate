@@ -1141,6 +1141,65 @@ export fn rz_ui_render_ws_device_v2(state: ?[*]const u8, len: usize, out_len: *u
     return renderWire(dialogs_b.WsDevice, wire_gen.decodeWsDevice, dialogs_b.renderWsDevice, wire_gen.msg_ws_device, state, len, out_len);
 }
 
+// ── B7 fan-out: editor / cue-edit / mirror / rce / library modals / remote switcher (86-99) ──
+// 93-95 re-render during cue drag - the hottest surfaces of this wave. 96 = #gf-live (~2 Hz).
+
+export fn rz_ui_render_libmirror_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.Mirror, wire_gen.decodeLibMirror, libviews.renderMirror, wire_gen.msg_lib_mirror, state, len, out_len);
+}
+
+export fn rz_ui_render_libmirror_banner_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.MirrorBanner, wire_gen.decodeLibMirrorBan, libviews.renderMirrorBanner, wire_gen.msg_lib_mirror_ban, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_info_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceInfo, wire_gen.decodeRceInfo, libviews.renderRceInfo, wire_gen.msg_rce_info, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceBody, wire_gen.decodeRceBody, libviews.renderRceBody, wire_gen.msg_rce_body, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_save_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceSave, wire_gen.decodeRceSave, libviews.renderRceSave, wire_gen.msg_rce_save, state, len, out_len);
+}
+
+export fn rz_ui_render_editor_preview_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor.Preview, wire_gen.decodeEdPreview, editor.renderPreview, wire_gen.msg_ed_preview, state, len, out_len);
+}
+
+export fn rz_ui_render_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor.State, wire_gen.decodeEdView, editor.render, wire_gen.msg_ed_view, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_topbar_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Topbar, wire_gen.decodeCeTopbar, cueedit.renderTopbar, wire_gen.msg_ce_topbar, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_wave_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Wave, wire_gen.decodeCeWave, cueedit.renderWave, wire_gen.msg_ce_wave, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_rail_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Rail, wire_gen.decodeCeRail, cueedit.renderRail, wire_gen.msg_ce_rail, state, len, out_len);
+}
+
+export fn rz_ui_render_libfix_gflive_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libfixers.GFLive, wire_gen.decodeLibGFLive, libfixers.renderGFLive, wire_gen.msg_lib_g_f_live, state, len, out_len);
+}
+
+export fn rz_ui_render_lib_smartmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.SmartModal, wire_gen.decodeLibSmartModal, libviews.renderSmartModal, wire_gen.msg_lib_smart_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_lib_relocmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RelocModal, wire_gen.decodeLibRelocModal, libviews.renderRelocModal, wire_gen.msg_lib_reloc_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_libremote_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libremote.State, wire_gen.decodeLibRemote, libremote.render, wire_gen.msg_lib_remote, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

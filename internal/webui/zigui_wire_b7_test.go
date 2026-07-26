@@ -57,6 +57,20 @@ func wireExportsB7() []wireExport {
 		{"ws_rolepicker_v2", zigui.RenderWsRolePickerV2},
 		{"ws_rolelist_v2", zigui.RenderWsRoleListV2},
 		{"ws_device_v2", zigui.RenderWsDeviceV2},
+		{"libmirror_v2", zigui.RenderLibMirrorV2},
+		{"libmirror_banner_v2", zigui.RenderLibMirrorBannerV2},
+		{"rce_info_v2", zigui.RenderRCEInfoV2},
+		{"rce_body_v2", zigui.RenderRCEBodyV2},
+		{"rce_save_v2", zigui.RenderRCESaveV2},
+		{"editor_preview_v2", zigui.RenderEditorPreviewV2},
+		{"editor_v2", zigui.RenderEditorV2},
+		{"cueedit_topbar_v2", zigui.RenderCueEditTopbarV2},
+		{"cueedit_wave_v2", zigui.RenderCueEditWaveV2},
+		{"cueedit_rail_v2", zigui.RenderCueEditRailV2},
+		{"libfix_gflive_v2", zigui.RenderLibFixGFLiveV2},
+		{"lib_smartmodal_v2", zigui.RenderLibSmartModalV2},
+		{"lib_relocmodal_v2", zigui.RenderLibRelocModalV2},
+		{"libremote_v2", zigui.RenderLibRemoteV2},
 	}
 }
 
@@ -150,6 +164,45 @@ func wireBasesB7() []wireBase {
 	}
 	for n, st := range wsDeviceFixtures() {
 		out = append(out, wireBase{"wsdev/" + n, wireWsDevice(st)})
+	}
+	for n, st := range libMirrorFixtures() {
+		out = append(out,
+			wireBase{"mir/" + n, wireLibMirror(st)},
+			wireBase{"mir/" + n + "/ban", wireLibMirrorBan(st.Banner)})
+	}
+	for n, st := range rceBodyFixtures() {
+		out = append(out, wireBase{"rceb/" + n, wireRceBody(st)})
+	}
+	for n, st := range rceInfoFixtures() {
+		out = append(out, wireBase{"rcei/" + n, wireRceInfo(st)})
+	}
+	for n, st := range rceSaveFixtures() {
+		out = append(out, wireBase{"rces/" + n, wireRceSave(st)})
+	}
+	for n, st := range edFixtures() {
+		out = append(out,
+			wireBase{"ed/" + n, wireEdView(st)},
+			wireBase{"ed/" + n + "/prev", wireEdPreview(st.Preview)})
+	}
+	for n, tb := range ceTopbarFixtures() {
+		out = append(out,
+			wireBase{"cetb/" + n, wireCeTopbar(tb)},
+			wireBase{"cew/" + n, wireCeWave(ceWaveSt{Topbar: tb, Player: ceWireBenchPlayer})})
+	}
+	for n, st := range ceRailFixtures() {
+		out = append(out, wireBase{"cer/" + n, wireCeRail(st)})
+	}
+	for n, st := range gfLiveWireFixtures() {
+		out = append(out, wireBase{"gfl/" + n, wireLibGFLive(st)})
+	}
+	for n, st := range libSmartModalFixtures() {
+		out = append(out, wireBase{"srm/" + n, wireLibSmartModal(st)})
+	}
+	for n, st := range libRelocModalFixtures() {
+		out = append(out, wireBase{"rlm/" + n, wireLibRelocModal(st)})
+	}
+	for n, st := range libRemoteFixtures() {
+		out = append(out, wireBase{"lrm/" + n, wireLibRemote(st)})
 	}
 	return out
 }
@@ -705,6 +758,157 @@ func BenchmarkWireBenchWorldsStatus(b *testing.B) {
 	benchPair(b,
 		func() (string, bool) { return zigui.RenderWorldsStatus(stateJSON(st)) },
 		func() (string, bool) { return zigui.RenderWorldsStatusV2(wireWsStatus(st)) })
+}
+
+// ceWireBenchPlayer is the raw player markup spliced into ceWaveSt (mirrors the golden suite).
+const ceWireBenchPlayer = `<div id=mp-library><div id=mp-library-ph style="left:12.50%"></div>` +
+	`<svg viewBox="0 0 1000 120"><path d="M0.00,60.00 L1.25,58.75"/></svg></div>`
+
+// gfLiveWireFixtures mirrors TestZigLibFixGFLiveGolden's inline fixture map.
+func gfLiveWireFixtures() map[string]libGFLiveSt {
+	return map[string]libGFLiveSt{
+		"zero":      {Pct: progressPct(0), Caption: "0 / 0  "},
+		"batch":     {Tiles: libGFTilesFixture(), Pct: progressPct(0.42), Caption: "230 / 548  ~4m12s left", Current: `C:\m\a.flac`},
+		"calibrate": {Pct: progressPct(0.5), Caption: "30 / 60", Current: "kick.wav"},
+		"clamped":   {Tiles: libGFTilesFixture(), Pct: progressPct(1.7), Caption: "", Current: ""},
+	}
+}
+
+// TestZigWireThreeWayLibViews: mirror body + banner, the three rce panes, the two library
+// modals and the target switcher. show=false panes render "" - both exports must decline
+// identically (exact-delta assertion, i4 pattern).
+func TestZigWireThreeWayLibViews(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	rec := map[string]int{}
+	for name, st := range libMirrorFixtures() {
+		t.Run("mir/"+name, func(t *testing.T) {
+			threeWayFrag(t, "mirror", libMirrorBodyHTML(st), stateJSON(st),
+				wireLibMirror(st), zigui.RenderLibMirror, zigui.RenderLibMirrorV2)
+			threeWayFrag(t, "banner", mirrorBannerHTMLOf(st.Banner), stateJSON(st.Banner),
+				wireLibMirrorBan(st.Banner), zigui.RenderLibMirrorBanner, zigui.RenderLibMirrorBannerV2)
+		})
+	}
+	for name, st := range rceBodyFixtures() {
+		t.Run("rceb/"+name, func(t *testing.T) {
+			threeWayFrag(t, "body", rceBodyHTML(st), stateJSON(st),
+				wireRceBody(st), zigui.RenderRCEBody, zigui.RenderRCEBodyV2)
+		})
+	}
+	for name, st := range rceInfoFixtures() {
+		t.Run("rcei/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "info", rceInfoHTMLOf(st), stateJSON(st), wireRceInfo(st),
+				zigui.RenderRCEInfo, zigui.RenderRCEInfoV2, rec, "RenderRCEInfo", "RenderRCEInfoV2")
+		})
+	}
+	for name, st := range rceSaveFixtures() {
+		t.Run("rces/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "save", rceSaveHTMLOf(st), stateJSON(st), wireRceSave(st),
+				zigui.RenderRCESave, zigui.RenderRCESaveV2, rec, "RenderRCESave", "RenderRCESaveV2")
+		})
+	}
+	for name, st := range libSmartModalFixtures() {
+		t.Run("srm/"+name, func(t *testing.T) {
+			threeWayFrag(t, "smart", libSmartModalHTMLOf(st), stateJSON(st),
+				wireLibSmartModal(st), zigui.RenderLibSmartModal, zigui.RenderLibSmartModalV2)
+		})
+	}
+	for name, st := range libRelocModalFixtures() {
+		t.Run("rlm/"+name, func(t *testing.T) {
+			threeWayFrag(t, "reloc", libRelocModalHTMLOf(st), stateJSON(st),
+				wireLibRelocModal(st), zigui.RenderLibRelocModal, zigui.RenderLibRelocModalV2)
+		})
+	}
+	for name, st := range libRemoteFixtures() {
+		t.Run("lrm/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "switcher", libRemoteHTML(st), stateJSON(st), wireLibRemote(st),
+				zigui.RenderLibRemote, zigui.RenderLibRemoteV2, rec, "RenderLibRemote", "RenderLibRemoteV2")
+		})
+	}
+	assertExactFallbacksIn(t, before, rec,
+		"RenderLibMirror", "RenderLibMirrorV2", "RenderLibMirrorBanner", "RenderLibMirrorBannerV2",
+		"RenderRCEBody", "RenderRCEBodyV2", "RenderRCEInfo", "RenderRCEInfoV2",
+		"RenderRCESave", "RenderRCESaveV2", "RenderLibSmartModal", "RenderLibSmartModalV2",
+		"RenderLibRelocModal", "RenderLibRelocModalV2", "RenderLibRemote", "RenderLibRemoteV2")
+}
+
+// TestZigWireThreeWayEditor: full Editor view + #ed-preview (recursive layer trees).
+func TestZigWireThreeWayEditor(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := edFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireEdView(st), stateJSON(st)
+			wireB += len(doc)
+			jsonB += len(js)
+			threeWayFrag(t, "full", editorHTML(st), js, doc, zigui.RenderEditor, zigui.RenderEditorV2)
+			threeWayFrag(t, "preview", edPreviewHTMLOf(st.Preview), stateJSON(st.Preview),
+				wireEdPreview(st.Preview), zigui.RenderEditorPreview, zigui.RenderEditorPreviewV2)
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacksIn(t, before,
+		"RenderEditor", "RenderEditorV2", "RenderEditorPreview", "RenderEditorPreviewV2")
+}
+
+// TestZigWireThreeWayCueEdit: topbar / wave strip / rail + the #gf-live fixer fragment.
+// Topbar and rail have show=false arms that render "" - exact-delta declines.
+func TestZigWireThreeWayCueEdit(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	rec := map[string]int{}
+	for name, tb := range ceTopbarFixtures() {
+		t.Run("tb/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "topbar", ceTopbarHTMLOf(tb), stateJSON(tb), wireCeTopbar(tb),
+				zigui.RenderCueEditTopbar, zigui.RenderCueEditTopbarV2, rec, "RenderCueEditTopbar", "RenderCueEditTopbarV2")
+			st := ceWaveSt{Topbar: tb, Player: ceWireBenchPlayer}
+			threeWayFrag(t, "wave", ceWaveHTMLOf(st), stateJSON(st),
+				wireCeWave(st), zigui.RenderCueEditWave, zigui.RenderCueEditWaveV2)
+		})
+	}
+	for name, st := range ceRailFixtures() {
+		t.Run("rail/"+name, func(t *testing.T) {
+			threeWayOrEmpty(t, "rail", ceRailHTMLOf(st), stateJSON(st), wireCeRail(st),
+				zigui.RenderCueEditRail, zigui.RenderCueEditRailV2, rec, "RenderCueEditRail", "RenderCueEditRailV2")
+		})
+	}
+	for name, st := range gfLiveWireFixtures() {
+		t.Run("gfl/"+name, func(t *testing.T) {
+			threeWayFrag(t, "gflive", libGFLiveHTML(st), stateJSON(st),
+				wireLibGFLive(st), zigui.RenderLibFixGFLive, zigui.RenderLibFixGFLiveV2)
+		})
+	}
+	assertExactFallbacksIn(t, before, rec,
+		"RenderCueEditTopbar", "RenderCueEditTopbarV2", "RenderCueEditWave", "RenderCueEditWaveV2",
+		"RenderCueEditRail", "RenderCueEditRailV2", "RenderLibFixGFLive", "RenderLibFixGFLiveV2")
+}
+
+func BenchmarkWireBenchCueEditTopbar(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	tb := ceTopbarFixtures()["verified"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderCueEditTopbar(stateJSON(tb)) },
+		func() (string, bool) { return zigui.RenderCueEditTopbarV2(wireCeTopbar(tb)) })
+}
+
+func BenchmarkWireBenchEditor(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := edFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderEditor(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderEditorV2(wireEdView(st)) })
 }
 
 // threeWayFrag asserts one fragment renderer three ways: Go == v1(JSON) == v2(RZW1).

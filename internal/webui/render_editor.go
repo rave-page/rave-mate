@@ -515,7 +515,8 @@ func edColorRowStateOf(label, act string, c visualeditor.RGBA) edColorRowState {
 func (u *UI) renderEditor() string {
 	st := u.editorState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderEditor(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderEditorV2", wireEdView(st), zigui.RenderEditorV2,
+			zigui.RenderEditor, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -526,7 +527,8 @@ func (u *UI) renderEditor() string {
 func (u *UI) edPreviewHTML() string {
 	st := u.edPreviewState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderEditorPreview(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderEditorPreviewV2", wireEdPreview(st), zigui.RenderEditorPreviewV2,
+			zigui.RenderEditorPreview, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

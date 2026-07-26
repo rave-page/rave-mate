@@ -171,7 +171,8 @@ func libGFLiveHTML(st libGFLiveSt) string {
 // gfLiveRender renders the #gf-live patch fragment (Zig when linked, Go otherwise).
 func gfLiveRender(st libGFLiveSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibFixGFLive(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibFixGFLiveV2", wireLibGFLive(st), zigui.RenderLibFixGFLiveV2,
+			zigui.RenderLibFixGFLive, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

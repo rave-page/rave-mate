@@ -1423,6 +1423,106 @@ func RenderWsDeviceV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: editor / cue-edit / mirror / rce / library modals / remote switcher ──
+
+// RenderLibMirrorV2 renders the remote-library mirror body from an RZW1 document.
+func RenderLibMirrorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror_v2(p, l, n)
+	})
+}
+
+// RenderLibMirrorBannerV2 renders the #rmirror-banner strip from an RZW1 document.
+func RenderLibMirrorBannerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror_banner_v2(p, l, n)
+	})
+}
+
+// RenderRCEInfoV2 renders the #rce-info left pane from an RZW1 document.
+func RenderRCEInfoV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_info_v2(p, l, n)
+	})
+}
+
+// RenderRCEBodyV2 renders the remote cue-edit #lib-body from an RZW1 document.
+func RenderRCEBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_body_v2(p, l, n)
+	})
+}
+
+// RenderRCESaveV2 renders the remote cue-edit save rail from an RZW1 document.
+func RenderRCESaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_save_v2(p, l, n)
+	})
+}
+
+// RenderEditorPreviewV2 renders the #ed-preview composite from an RZW1 document.
+func RenderEditorPreviewV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_preview_v2(p, l, n)
+	})
+}
+
+// RenderEditorV2 renders the full Editor view from an RZW1 document.
+func RenderEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_v2(p, l, n)
+	})
+}
+
+// RenderCueEditTopbarV2 renders the #ce-topbar strip from an RZW1 document.
+func RenderCueEditTopbarV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_topbar_v2(p, l, n)
+	})
+}
+
+// RenderCueEditWaveV2 renders the cue-edit wave strip from an RZW1 document.
+func RenderCueEditWaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_wave_v2(p, l, n)
+	})
+}
+
+// RenderCueEditRailV2 renders the cue-editor rail from an RZW1 document.
+func RenderCueEditRailV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_rail_v2(p, l, n)
+	})
+}
+
+// RenderLibFixGFLiveV2 renders the #gf-live fixer fragment from an RZW1 document.
+func RenderLibFixGFLiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_gflive_v2(p, l, n)
+	})
+}
+
+// RenderLibSmartModalV2 renders the smart-rules modal from an RZW1 document.
+func RenderLibSmartModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_smartmodal_v2(p, l, n)
+	})
+}
+
+// RenderLibRelocModalV2 renders the relocate-missing modal from an RZW1 document.
+func RenderLibRelocModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_relocmodal_v2(p, l, n)
+	})
+}
+
+// RenderLibRemoteV2 renders the target-switcher row from an RZW1 document.
+func RenderLibRemoteV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libremote_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

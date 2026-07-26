@@ -33,8 +33,12 @@ const dialogs_b = @import("dialogs_b.zig");
 const vrchat = @import("vrchat.zig");
 const vrcgroups = @import("vrcgroups.zig");
 const worlds = @import("worlds.zig");
+const editor = @import("editor.zig");
+const cueedit = @import("cueedit.zig");
+const libviews = @import("libviews.zig");
+const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xae454231;
+pub const schema_hash: u32 = 0xcf9490e2;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -114,6 +118,20 @@ pub const msg_ws_group_picker: u16 = 82; // group-picker dialog shell
 pub const msg_ws_role_list: u16 = 83; // #world-role-list inner (async roles load)
 pub const msg_ws_role_picker: u16 = 84; // role-grant dialog shell
 pub const msg_ws_device: u16 = 85; // GitHub device-code dialog
+pub const msg_lib_mirror: u16 = 86; // remote-library mirror body (#lib-body while a peer is targeted)
+pub const msg_lib_mirror_ban: u16 = 87; // #rmirror-banner status strip (patched on session-state moves)
+pub const msg_rce_info: u16 = 88; // #rce-info left pane (remote cue-edit)
+pub const msg_rce_body: u16 = 89; // #lib-body while remote-editing (wave strip + info + detail)
+pub const msg_rce_save: u16 = 90; // remote cue-edit save/write-back rail section
+pub const msg_ed_preview: u16 = 91; // #ed-preview live composite
+pub const msg_ed_view: u16 = 92; // Editor tab (full view)
+pub const msg_ce_topbar: u16 = 93; // #ce-topbar readout strip (re-rendered during drag)
+pub const msg_ce_wave: u16 = 94; // cue-edit full-width player strip
+pub const msg_ce_rail: u16 = 95; // cue-editor rail (#lib-detail inner in cue-edit mode)
+pub const msg_lib_g_f_live: u16 = 96; // #gf-live fixer progress fragment (~2 Hz)
+pub const msg_lib_smart_modal: u16 = 97; // smart-rules editor modal
+pub const msg_lib_reloc_modal: u16 = 98; // relocate-missing modal
+pub const msg_lib_remote: u16 = 99; // 'Controlling [peer]' target switcher row
 pub const msg_tk_live: u16 = 100; // Live-tab tick surface (all ~1 Hz fragments in one call)
 pub const msg_tk_logs: u16 = 101; // #log-view tick surface (one fragment, 400-line tail)
 
@@ -3879,6 +3897,486 @@ pub fn decodeWsDevice(r: *wire.Reader, out: *dialogs_b.WsDevice) wire.Error!void
     };
 }
 
+pub fn decodeLibMirrorBan(r: *wire.Reader, out: *libviews.MirrorBanner) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.status = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.tip = try r.str(t),
+        4 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        5 => out.hasNote = try r.boolean(t),
+        6 => out.note = try r.str(t),
+        7 => out.isErr = try r.boolean(t),
+        8 => out.err = try r.str(t),
+        9 => out.reconnect = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibMirror(r: *wire.Reader, out: *libviews.Mirror) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.noLink = try r.boolean(t),
+        2 => out.noLinkMsg = try r.str(t),
+        3 => out.banner = try r.sub(libviews.MirrorBanner, decodeLibMirrorBan, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeRceNav(r: *wire.Reader, out: *libviews.RceNav) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.act = try r.str(t),
+        3 => out.gated = try r.boolean(t),
+        4 => out.why = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeRceInfo(r: *wire.Reader, out: *libviews.RceInfo) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.eyebrow = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.path = try r.str(t),
+        5 => out.hasSet = try r.boolean(t),
+        6 => out.setLine = try r.str(t),
+        7 => out.prev = try r.sub(libviews.RceNav, decodeRceNav, t),
+        8 => out.next = try r.sub(libviews.RceNav, decodeRceNav, t),
+        9 => out.localNote = try r.str(t),
+        10 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        11 => out.back = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeRceBody(r: *wire.Reader, out: *libviews.RceBody) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.wave = try r.str(t),
+        2 => out.info = try r.sub(libviews.RceInfo, decodeRceInfo, t),
+        3 => out.detail = try r.sub(d.Detail, decodeLibDetail, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeRceWrite(r: *wire.Reader, out: *libviews.RceWrite) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.done = try r.boolean(t),
+        2 => out.text = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.gated = try r.boolean(t),
+        5 => out.why = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeRceSave(r: *wire.Reader, out: *libviews.RceSave) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.header = try r.str(t),
+        3 => out.moved = try r.boolean(t),
+        4 => out.movedText = try r.str(t),
+        5 => out.reloadLbl = try r.str(t),
+        6 => out.hasErr = try r.boolean(t),
+        7 => out.errText = try r.str(t),
+        8 => out.status = try r.str(t),
+        9 => out.statusText = try r.str(t),
+        10 => out.unsavedText = try r.str(t),
+        11 => out.saveLbl = try r.str(t),
+        12 => out.hasWrites = try r.boolean(t),
+        13 => out.writeHeader = try r.str(t),
+        14 => out.writes = try r.list(libviews.RceWrite, decodeRceWrite, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdGradStop(r: *wire.Reader, out: *editor.GradStop) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rgba = try r.str(t),
+        2 => out.pos = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdPaint(r: *wire.Reader, out: *editor.Paint) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.rgba = try r.str(t),
+        3 => out.angle = try r.str(t),
+        4 => out.stops = try r.list(editor.GradStop, decodeEdGradStop, t),
+        5 => out.urlq = try r.str(t),
+        6 => out.size = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdText(r: *wire.Reader, out: *editor.Text) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.content = try r.str(t),
+        2 => out.famq = try r.str(t),
+        3 => out.size = try r.str(t),
+        4 => out.lh = try r.str(t),
+        5 => out.alignment = try r.str(t),
+        6 => out.rgba = try r.str(t),
+        7 => out.ls = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdInner(r: *wire.Reader, out: *editor.Inner) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.kind = try r.str(t),
+        2 => out.text = try r.sub(editor.Text, decodeEdText, t),
+        3 => out.placeholder = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdLayer(r: *wire.Reader, out: *editor.Layer) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.group = try r.boolean(t),
+        2 => out.id = try r.str(t),
+        3 => out.sel = try r.boolean(t),
+        4 => out.blend = try r.str(t),
+        5 => out.opacity = try r.str(t),
+        6 => out.xform = try r.boolean(t),
+        7 => out.tx = try r.str(t),
+        8 => out.ty = try r.str(t),
+        9 => out.sx = try r.str(t),
+        10 => out.sy = try r.str(t),
+        11 => out.rot = try r.str(t),
+        12 => out.left = try r.str(t),
+        13 => out.top = try r.str(t),
+        14 => out.w = try r.str(t),
+        15 => out.h = try r.str(t),
+        16 => out.paint = try r.sub(editor.Paint, decodeEdPaint, t),
+        17 => out.inner = try r.sub(editor.Inner, decodeEdInner, t),
+        18 => out.children = try r.list(editor.Layer, decodeEdLayer, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdPreview(r: *wire.Reader, out: *editor.Preview) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.aw = try r.str(t),
+        2 => out.ah = try r.str(t),
+        3 => out.layers = try r.list(editor.Layer, decodeEdLayer, t),
+        4 => out.cap = try r.str(t),
+        5 => out.hint = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdRow(r: *wire.Reader, out: *editor.Row) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.id = try r.str(t),
+        2 => out.name = try r.str(t),
+        3 => out.depth = @intCast(try r.uint(t)),
+        4 => out.group = try r.boolean(t),
+        5 => out.sel = try r.boolean(t),
+        6 => out.visible = try r.boolean(t),
+        7 => out.locked = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdActions(r: *wire.Reader, out: *editor.Actions) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.up = try r.str(t),
+        2 => out.down = try r.str(t),
+        3 => out.group = try r.str(t),
+        4 => out.ungroup = try r.str(t),
+        5 => out.delete = try r.str(t),
+        6 => out.hasSel = try r.boolean(t),
+        7 => out.noSel = try r.str(t),
+        8 => out.opacity = try r.sub(c.Slider, decodeUiSlider, t),
+        9 => out.blend = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdLayers(r: *wire.Reader, out: *editor.Layers) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rows = try r.list(editor.Row, decodeEdRow, t),
+        2 => out.empty = try r.str(t),
+        3 => out.actions = try r.sub(editor.Actions, decodeEdActions, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdColorRow(r: *wire.Reader, out: *editor.ColorRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.rgba = try r.str(t),
+        2 => out.field = try r.sub(c.Field, decodeUiField, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdInspText(r: *wire.Reader, out: *editor.InspText) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.label = try r.str(t),
+        2 => out.content = try r.str(t),
+        3 => out.hint = try r.str(t),
+        4 => out.font = try r.sub(c.Select, decodeSelState, t),
+        5 => out.size = try r.sub(c.Field, decodeUiField, t),
+        6 => out.ls = try r.sub(c.Field, decodeUiField, t),
+        7 => out.lh = try r.sub(c.Field, decodeUiField, t),
+        8 => out.alignment = try r.sub(c.Select, decodeSelState, t),
+        9 => out.color = try r.sub(editor.ColorRow, decodeEdColorRow, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdInsp(r: *wire.Reader, out: *editor.Insp) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.hasSel = try r.boolean(t),
+        2 => out.empty = try r.str(t),
+        3 => out.name = try r.sub(c.Field, decodeUiField, t),
+        4 => out.x = try r.sub(c.Field, decodeUiField, t),
+        5 => out.y = try r.sub(c.Field, decodeUiField, t),
+        6 => out.showWh = try r.boolean(t),
+        7 => out.w = try r.sub(c.Field, decodeUiField, t),
+        8 => out.h = try r.sub(c.Field, decodeUiField, t),
+        9 => out.sx = try r.sub(c.Field, decodeUiField, t),
+        10 => out.sy = try r.sub(c.Field, decodeUiField, t),
+        11 => out.rot = try r.sub(c.Field, decodeUiField, t),
+        12 => out.kind = try r.str(t),
+        13 => out.text = try r.sub(editor.InspText, decodeEdInspText, t),
+        14 => out.fill = try r.sub(editor.ColorRow, decodeEdColorRow, t),
+        15 => out.angle = try r.sub(c.Field, decodeUiField, t),
+        16 => out.start = try r.sub(editor.ColorRow, decodeEdColorRow, t),
+        17 => out.end = try r.sub(editor.ColorRow, decodeEdColorRow, t),
+        18 => out.path = try r.sub(c.Field, decodeUiField, t),
+        19 => out.fit = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdView(r: *wire.Reader, out: *editor.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.disabled = try r.boolean(t),
+        4 => out.disabledSub = try r.str(t),
+        5 => out.disabledHint = try r.str(t),
+        6 => out.secPreview = try r.str(t),
+        7 => out.secLayers = try r.str(t),
+        8 => out.secInspector = try r.str(t),
+        9 => out.row1 = try r.list(c.Btn, decodeUiBtn, t),
+        10 => out.row2 = try r.list(c.Btn, decodeUiBtn, t),
+        11 => out.preview = try r.sub(editor.Preview, decodeEdPreview, t),
+        12 => out.layers = try r.sub(editor.Layers, decodeEdLayers, t),
+        13 => out.insp = try r.sub(editor.Insp, decodeEdInsp, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeTbDrop(r: *wire.Reader, out: *cueedit.TbDrop) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.act = try r.str(t),
+        2 => out.lbl = try r.str(t),
+        3 => out.when = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeTopbar(r: *wire.Reader, out: *cueedit.Topbar) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.eyebrow = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.hasRce = try r.boolean(t),
+        5 => out.rceMeta = try r.str(t),
+        6 => out.dirty = try r.boolean(t),
+        7 => out.dirtyTip = try r.str(t),
+        8 => out.meta = try r.str(t),
+        9 => out.cursor = try r.str(t),
+        10 => out.barLbl = try r.str(t),
+        11 => out.barBeat = try r.str(t),
+        12 => out.jump = try r.str(t),
+        13 => out.drops = try r.list(cueedit.TbDrop, decodeCeTbDrop, t),
+        14 => out.census = try r.str(t),
+        15 => out.noTag = try r.boolean(t),
+        16 => out.noTagTip = try r.str(t),
+        17 => out.verified = try r.boolean(t),
+        18 => out.verifiable = try r.boolean(t),
+        19 => out.verifyAct = try r.str(t),
+        20 => out.verifiedTip = try r.str(t),
+        21 => out.verifiedLbl = try r.str(t),
+        22 => out.verifyTip = try r.str(t),
+        23 => out.verifyLbl = try r.str(t),
+        24 => out.tip = try r.str(t),
+        25 => out.tipSt = try r.sub(c.Tip, decodeTip, t),
+        26 => out.close = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeWave(r: *wire.Reader, out: *cueedit.Wave) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.topbar = try r.sub(cueedit.Topbar, decodeCeTopbar, t),
+        2 => out.player = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeDefaults(r: *wire.Reader, out: *cueedit.Defaults) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.arrow = try r.str(t),
+        2 => out.title = try r.str(t),
+        3 => out.open = try r.boolean(t),
+        4 => out.pads = try r.sub(c.Select, decodeSelState, t),
+        5 => out.ow = try r.sub(c.Toggle, decodeUiToggle, t),
+        6 => out.split = try r.sub(c.Toggle, decodeUiToggle, t),
+        7 => out.hasPromote = try r.boolean(t),
+        8 => out.promote = try r.sub(c.Toggle, decodeUiToggle, t),
+        9 => out.hasGrid = try r.boolean(t),
+        10 => out.grid = try r.sub(c.Toggle, decodeUiToggle, t),
+        11 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeARow(r: *wire.Reader, out: *cueedit.ARow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.placed = try r.boolean(t),
+        2 => out.tag = try r.str(t),
+        3 => out.act = try r.str(t),
+        4 => out.when = try r.str(t),
+        5 => out.unplacedTip = try r.str(t),
+        6 => out.unplacedLbl = try r.str(t),
+        7 => out.hasSel = try r.boolean(t),
+        8 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeAssign(r: *wire.Reader, out: *cueedit.Assign) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.rows = try r.list(cueedit.ARow, decodeCeARow, t),
+        3 => out.showNoDrops = try r.boolean(t),
+        4 => out.noDropsHint = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeBatch(r: *wire.Reader, out: *cueedit.Batch) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.header = try r.str(t),
+        3 => out.applyHot = try r.sub(c.Btn, decodeUiBtn, t),
+        4 => out.applyMem = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.promoteSel = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.convertSel = try r.sub(c.Btn, decodeUiBtn, t),
+        7 => out.clearSel = try r.sub(c.Btn, decodeUiBtn, t),
+        8 => out.note = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeCeRail(r: *wire.Reader, out: *cueedit.Rail) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.eyebrow = try r.str(t),
+        3 => out.title = try r.str(t),
+        4 => out.mode = try r.sub(c.Select, decodeSelState, t),
+        5 => out.defaults = try r.sub(cueedit.Defaults, decodeCeDefaults, t),
+        6 => out.prepSel = try r.str(t),
+        7 => out.prepHint = try r.str(t),
+        8 => out.assign = try r.sub(cueedit.Assign, decodeCeAssign, t),
+        9 => out.addDrop = try r.sub(c.Btn, decodeUiBtn, t),
+        10 => out.delDrop = try r.sub(c.Btn, decodeUiBtn, t),
+        11 => out.hasSel = try r.boolean(t),
+        12 => out.selLbl = try r.str(t),
+        13 => out.patNamePh = try r.str(t),
+        14 => out.savePat = try r.sub(c.Btn, decodeUiBtn, t),
+        15 => out.hasDsel = try r.boolean(t),
+        16 => out.dselLbl = try r.str(t),
+        17 => out.showDelHint = try r.boolean(t),
+        18 => out.delHint = try r.str(t),
+        19 => out.hasPats = try r.boolean(t),
+        20 => out.manage = try r.sub(c.Btn, decodeUiBtn, t),
+        21 => out.hasDrops = try r.boolean(t),
+        22 => out.applyHot = try r.sub(c.Btn, decodeUiBtn, t),
+        23 => out.applyMem = try r.sub(c.Btn, decodeUiBtn, t),
+        24 => out.showOwNote = try r.boolean(t),
+        25 => out.owNote = try r.str(t),
+        26 => out.promoteAll = try r.sub(c.Btn, decodeUiBtn, t),
+        27 => out.convertAll = try r.sub(c.Btn, decodeUiBtn, t),
+        28 => out.clearOne = try r.sub(c.Btn, decodeUiBtn, t),
+        29 => out.hints = try r.list(k.Hint, decodeLibHint, t),
+        30 => out.batch = try r.sub(cueedit.Batch, decodeCeBatch, t),
+        31 => out.writeBack = try r.str(t),
+        32 => out.close = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibSmartModal(r: *wire.Reader, out: *libviews.SmartModal) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.desc = try r.str(t),
+        3 => out.name = try r.sub(c.PBField, decodeLibPBField, t),
+        4 => out.genresLbl = try r.str(t),
+        5 => out.genres = try r.list(k.Chip, decodeLibChip, t),
+        6 => out.feel = try r.sub(c.Select, decodeSelState, t),
+        7 => out.bpmMin = try r.sub(c.PBField, decodeLibPBField, t),
+        8 => out.bpmMax = try r.sub(c.PBField, decodeLibPBField, t),
+        9 => out.keyField = try r.sub(c.PBField, decodeLibPBField, t),
+        10 => out.rating = try r.sub(c.Select, decodeSelState, t),
+        11 => out.plays = try r.sub(c.PBField, decodeLibPBField, t),
+        12 => out.search = try r.sub(c.PBField, decodeLibPBField, t),
+        13 => out.compatLbl = try r.str(t),
+        14 => out.compat = try r.sub(c.Select, decodeSelState, t),
+        15 => out.hasDepth = try r.boolean(t),
+        16 => out.depth = try r.list(k.Chip, decodeLibChip, t),
+        17 => out.compatHint = try r.str(t),
+        18 => out.count = try r.str(t),
+        19 => out.confirm = try r.str(t),
+        20 => out.cancel = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibRelocRow(r: *wire.Reader, out: *libviews.RelocRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.act = try r.str(t),
+        2 => out.checked = try r.boolean(t),
+        3 => out.old = try r.str(t),
+        4 => out.newPath = try r.str(t),
+        5 => out.conf = try r.str(t),
+        6 => out.confVar = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibRelocModal(r: *wire.Reader, out: *libviews.RelocModal) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.desc = try r.str(t),
+        3 => out.missing = try r.str(t),
+        4 => out.root = try r.str(t),
+        5 => out.rootPh = try r.str(t),
+        6 => out.browseLbl = try r.str(t),
+        7 => out.findLbl = try r.str(t),
+        8 => out.hasMsg = try r.boolean(t),
+        9 => out.msg = try r.str(t),
+        10 => out.hasRows = try r.boolean(t),
+        11 => out.rows = try r.list(libviews.RelocRow, decodeLibRelocRow, t),
+        12 => out.hasMore = try r.boolean(t),
+        13 => out.more = try r.str(t),
+        14 => out.applyLbl = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeLibRemote(r: *wire.Reader, out: *libremote.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.sel = try r.sub(c.Select, decodeSelState, t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeSsLabel(r: *wire.Reader, out: *c.SsLabel) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.text = try r.str(t),
@@ -3991,6 +4489,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_ws_role_list);
     try std.testing.expect(msg_ag_state != msg_ws_role_picker);
     try std.testing.expect(msg_ag_state != msg_ws_device);
+    try std.testing.expect(msg_ag_state != msg_lib_mirror);
+    try std.testing.expect(msg_ag_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ag_state != msg_rce_info);
+    try std.testing.expect(msg_ag_state != msg_rce_body);
+    try std.testing.expect(msg_ag_state != msg_rce_save);
+    try std.testing.expect(msg_ag_state != msg_ed_preview);
+    try std.testing.expect(msg_ag_state != msg_ed_view);
+    try std.testing.expect(msg_ag_state != msg_ce_topbar);
+    try std.testing.expect(msg_ag_state != msg_ce_wave);
+    try std.testing.expect(msg_ag_state != msg_ce_rail);
+    try std.testing.expect(msg_ag_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_ag_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_ag_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ag_state != msg_lib_remote);
     try std.testing.expect(msg_ag_state != msg_tk_live);
     try std.testing.expect(msg_ag_state != msg_tk_logs);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
@@ -4070,6 +4582,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_ws_role_list);
     try std.testing.expect(msg_logs_state != msg_ws_role_picker);
     try std.testing.expect(msg_logs_state != msg_ws_device);
+    try std.testing.expect(msg_logs_state != msg_lib_mirror);
+    try std.testing.expect(msg_logs_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_logs_state != msg_rce_info);
+    try std.testing.expect(msg_logs_state != msg_rce_body);
+    try std.testing.expect(msg_logs_state != msg_rce_save);
+    try std.testing.expect(msg_logs_state != msg_ed_preview);
+    try std.testing.expect(msg_logs_state != msg_ed_view);
+    try std.testing.expect(msg_logs_state != msg_ce_topbar);
+    try std.testing.expect(msg_logs_state != msg_ce_wave);
+    try std.testing.expect(msg_logs_state != msg_ce_rail);
+    try std.testing.expect(msg_logs_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_logs_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_logs_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_logs_state != msg_lib_remote);
     try std.testing.expect(msg_logs_state != msg_tk_live);
     try std.testing.expect(msg_logs_state != msg_tk_logs);
     try std.testing.expect(msg_logs_lines != msg_live_state);
@@ -4148,6 +4674,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_ws_role_list);
     try std.testing.expect(msg_logs_lines != msg_ws_role_picker);
     try std.testing.expect(msg_logs_lines != msg_ws_device);
+    try std.testing.expect(msg_logs_lines != msg_lib_mirror);
+    try std.testing.expect(msg_logs_lines != msg_lib_mirror_ban);
+    try std.testing.expect(msg_logs_lines != msg_rce_info);
+    try std.testing.expect(msg_logs_lines != msg_rce_body);
+    try std.testing.expect(msg_logs_lines != msg_rce_save);
+    try std.testing.expect(msg_logs_lines != msg_ed_preview);
+    try std.testing.expect(msg_logs_lines != msg_ed_view);
+    try std.testing.expect(msg_logs_lines != msg_ce_topbar);
+    try std.testing.expect(msg_logs_lines != msg_ce_wave);
+    try std.testing.expect(msg_logs_lines != msg_ce_rail);
+    try std.testing.expect(msg_logs_lines != msg_lib_g_f_live);
+    try std.testing.expect(msg_logs_lines != msg_lib_smart_modal);
+    try std.testing.expect(msg_logs_lines != msg_lib_reloc_modal);
+    try std.testing.expect(msg_logs_lines != msg_lib_remote);
     try std.testing.expect(msg_logs_lines != msg_tk_live);
     try std.testing.expect(msg_logs_lines != msg_tk_logs);
     try std.testing.expect(msg_live_state != msg_live_transport);
@@ -4225,6 +4765,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_ws_role_list);
     try std.testing.expect(msg_live_state != msg_ws_role_picker);
     try std.testing.expect(msg_live_state != msg_ws_device);
+    try std.testing.expect(msg_live_state != msg_lib_mirror);
+    try std.testing.expect(msg_live_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_state != msg_rce_info);
+    try std.testing.expect(msg_live_state != msg_rce_body);
+    try std.testing.expect(msg_live_state != msg_rce_save);
+    try std.testing.expect(msg_live_state != msg_ed_preview);
+    try std.testing.expect(msg_live_state != msg_ed_view);
+    try std.testing.expect(msg_live_state != msg_ce_topbar);
+    try std.testing.expect(msg_live_state != msg_ce_wave);
+    try std.testing.expect(msg_live_state != msg_ce_rail);
+    try std.testing.expect(msg_live_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_state != msg_lib_remote);
     try std.testing.expect(msg_live_state != msg_tk_live);
     try std.testing.expect(msg_live_state != msg_tk_logs);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
@@ -4301,6 +4855,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_ws_role_list);
     try std.testing.expect(msg_live_transport != msg_ws_role_picker);
     try std.testing.expect(msg_live_transport != msg_ws_device);
+    try std.testing.expect(msg_live_transport != msg_lib_mirror);
+    try std.testing.expect(msg_live_transport != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_transport != msg_rce_info);
+    try std.testing.expect(msg_live_transport != msg_rce_body);
+    try std.testing.expect(msg_live_transport != msg_rce_save);
+    try std.testing.expect(msg_live_transport != msg_ed_preview);
+    try std.testing.expect(msg_live_transport != msg_ed_view);
+    try std.testing.expect(msg_live_transport != msg_ce_topbar);
+    try std.testing.expect(msg_live_transport != msg_ce_wave);
+    try std.testing.expect(msg_live_transport != msg_ce_rail);
+    try std.testing.expect(msg_live_transport != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_transport != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_transport != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_transport != msg_lib_remote);
     try std.testing.expect(msg_live_transport != msg_tk_live);
     try std.testing.expect(msg_live_transport != msg_tk_logs);
     try std.testing.expect(msg_live_n_p != msg_live_status);
@@ -4376,6 +4944,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_ws_role_list);
     try std.testing.expect(msg_live_n_p != msg_ws_role_picker);
     try std.testing.expect(msg_live_n_p != msg_ws_device);
+    try std.testing.expect(msg_live_n_p != msg_lib_mirror);
+    try std.testing.expect(msg_live_n_p != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_n_p != msg_rce_info);
+    try std.testing.expect(msg_live_n_p != msg_rce_body);
+    try std.testing.expect(msg_live_n_p != msg_rce_save);
+    try std.testing.expect(msg_live_n_p != msg_ed_preview);
+    try std.testing.expect(msg_live_n_p != msg_ed_view);
+    try std.testing.expect(msg_live_n_p != msg_ce_topbar);
+    try std.testing.expect(msg_live_n_p != msg_ce_wave);
+    try std.testing.expect(msg_live_n_p != msg_ce_rail);
+    try std.testing.expect(msg_live_n_p != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_n_p != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_n_p != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_n_p != msg_lib_remote);
     try std.testing.expect(msg_live_n_p != msg_tk_live);
     try std.testing.expect(msg_live_n_p != msg_tk_logs);
     try std.testing.expect(msg_live_status != msg_live_decks);
@@ -4450,6 +5032,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_ws_role_list);
     try std.testing.expect(msg_live_status != msg_ws_role_picker);
     try std.testing.expect(msg_live_status != msg_ws_device);
+    try std.testing.expect(msg_live_status != msg_lib_mirror);
+    try std.testing.expect(msg_live_status != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_status != msg_rce_info);
+    try std.testing.expect(msg_live_status != msg_rce_body);
+    try std.testing.expect(msg_live_status != msg_rce_save);
+    try std.testing.expect(msg_live_status != msg_ed_preview);
+    try std.testing.expect(msg_live_status != msg_ed_view);
+    try std.testing.expect(msg_live_status != msg_ce_topbar);
+    try std.testing.expect(msg_live_status != msg_ce_wave);
+    try std.testing.expect(msg_live_status != msg_ce_rail);
+    try std.testing.expect(msg_live_status != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_status != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_status != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_status != msg_lib_remote);
     try std.testing.expect(msg_live_status != msg_tk_live);
     try std.testing.expect(msg_live_status != msg_tk_logs);
     try std.testing.expect(msg_live_decks != msg_live_signals);
@@ -4523,6 +5119,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_ws_role_list);
     try std.testing.expect(msg_live_decks != msg_ws_role_picker);
     try std.testing.expect(msg_live_decks != msg_ws_device);
+    try std.testing.expect(msg_live_decks != msg_lib_mirror);
+    try std.testing.expect(msg_live_decks != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_decks != msg_rce_info);
+    try std.testing.expect(msg_live_decks != msg_rce_body);
+    try std.testing.expect(msg_live_decks != msg_rce_save);
+    try std.testing.expect(msg_live_decks != msg_ed_preview);
+    try std.testing.expect(msg_live_decks != msg_ed_view);
+    try std.testing.expect(msg_live_decks != msg_ce_topbar);
+    try std.testing.expect(msg_live_decks != msg_ce_wave);
+    try std.testing.expect(msg_live_decks != msg_ce_rail);
+    try std.testing.expect(msg_live_decks != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_decks != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_decks != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_decks != msg_lib_remote);
     try std.testing.expect(msg_live_decks != msg_tk_live);
     try std.testing.expect(msg_live_decks != msg_tk_logs);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
@@ -4595,6 +5205,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_ws_role_list);
     try std.testing.expect(msg_live_signals != msg_ws_role_picker);
     try std.testing.expect(msg_live_signals != msg_ws_device);
+    try std.testing.expect(msg_live_signals != msg_lib_mirror);
+    try std.testing.expect(msg_live_signals != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_signals != msg_rce_info);
+    try std.testing.expect(msg_live_signals != msg_rce_body);
+    try std.testing.expect(msg_live_signals != msg_rce_save);
+    try std.testing.expect(msg_live_signals != msg_ed_preview);
+    try std.testing.expect(msg_live_signals != msg_ed_view);
+    try std.testing.expect(msg_live_signals != msg_ce_topbar);
+    try std.testing.expect(msg_live_signals != msg_ce_wave);
+    try std.testing.expect(msg_live_signals != msg_ce_rail);
+    try std.testing.expect(msg_live_signals != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_signals != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_signals != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_signals != msg_lib_remote);
     try std.testing.expect(msg_live_signals != msg_tk_live);
     try std.testing.expect(msg_live_signals != msg_tk_logs);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
@@ -4666,6 +5290,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_ws_role_list);
     try std.testing.expect(msg_live_cockpit != msg_ws_role_picker);
     try std.testing.expect(msg_live_cockpit != msg_ws_device);
+    try std.testing.expect(msg_live_cockpit != msg_lib_mirror);
+    try std.testing.expect(msg_live_cockpit != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_cockpit != msg_rce_info);
+    try std.testing.expect(msg_live_cockpit != msg_rce_body);
+    try std.testing.expect(msg_live_cockpit != msg_rce_save);
+    try std.testing.expect(msg_live_cockpit != msg_ed_preview);
+    try std.testing.expect(msg_live_cockpit != msg_ed_view);
+    try std.testing.expect(msg_live_cockpit != msg_ce_topbar);
+    try std.testing.expect(msg_live_cockpit != msg_ce_wave);
+    try std.testing.expect(msg_live_cockpit != msg_ce_rail);
+    try std.testing.expect(msg_live_cockpit != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_cockpit != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_cockpit != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_cockpit != msg_lib_remote);
     try std.testing.expect(msg_live_cockpit != msg_tk_live);
     try std.testing.expect(msg_live_cockpit != msg_tk_logs);
     try std.testing.expect(msg_live_link != msg_live_graph);
@@ -4736,6 +5374,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_ws_role_list);
     try std.testing.expect(msg_live_link != msg_ws_role_picker);
     try std.testing.expect(msg_live_link != msg_ws_device);
+    try std.testing.expect(msg_live_link != msg_lib_mirror);
+    try std.testing.expect(msg_live_link != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_link != msg_rce_info);
+    try std.testing.expect(msg_live_link != msg_rce_body);
+    try std.testing.expect(msg_live_link != msg_rce_save);
+    try std.testing.expect(msg_live_link != msg_ed_preview);
+    try std.testing.expect(msg_live_link != msg_ed_view);
+    try std.testing.expect(msg_live_link != msg_ce_topbar);
+    try std.testing.expect(msg_live_link != msg_ce_wave);
+    try std.testing.expect(msg_live_link != msg_ce_rail);
+    try std.testing.expect(msg_live_link != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_link != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_link != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_link != msg_lib_remote);
     try std.testing.expect(msg_live_link != msg_tk_live);
     try std.testing.expect(msg_live_link != msg_tk_logs);
     try std.testing.expect(msg_live_graph != msg_live_perf);
@@ -4805,6 +5457,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_ws_role_list);
     try std.testing.expect(msg_live_graph != msg_ws_role_picker);
     try std.testing.expect(msg_live_graph != msg_ws_device);
+    try std.testing.expect(msg_live_graph != msg_lib_mirror);
+    try std.testing.expect(msg_live_graph != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_graph != msg_rce_info);
+    try std.testing.expect(msg_live_graph != msg_rce_body);
+    try std.testing.expect(msg_live_graph != msg_rce_save);
+    try std.testing.expect(msg_live_graph != msg_ed_preview);
+    try std.testing.expect(msg_live_graph != msg_ed_view);
+    try std.testing.expect(msg_live_graph != msg_ce_topbar);
+    try std.testing.expect(msg_live_graph != msg_ce_wave);
+    try std.testing.expect(msg_live_graph != msg_ce_rail);
+    try std.testing.expect(msg_live_graph != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_graph != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_graph != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_graph != msg_lib_remote);
     try std.testing.expect(msg_live_graph != msg_tk_live);
     try std.testing.expect(msg_live_graph != msg_tk_logs);
     try std.testing.expect(msg_live_perf != msg_live_strip);
@@ -4873,6 +5539,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_ws_role_list);
     try std.testing.expect(msg_live_perf != msg_ws_role_picker);
     try std.testing.expect(msg_live_perf != msg_ws_device);
+    try std.testing.expect(msg_live_perf != msg_lib_mirror);
+    try std.testing.expect(msg_live_perf != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_perf != msg_rce_info);
+    try std.testing.expect(msg_live_perf != msg_rce_body);
+    try std.testing.expect(msg_live_perf != msg_rce_save);
+    try std.testing.expect(msg_live_perf != msg_ed_preview);
+    try std.testing.expect(msg_live_perf != msg_ed_view);
+    try std.testing.expect(msg_live_perf != msg_ce_topbar);
+    try std.testing.expect(msg_live_perf != msg_ce_wave);
+    try std.testing.expect(msg_live_perf != msg_ce_rail);
+    try std.testing.expect(msg_live_perf != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_perf != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_perf != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_perf != msg_lib_remote);
     try std.testing.expect(msg_live_perf != msg_tk_live);
     try std.testing.expect(msg_live_perf != msg_tk_logs);
     try std.testing.expect(msg_live_strip != msg_mo_state);
@@ -4940,6 +5620,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_ws_role_list);
     try std.testing.expect(msg_live_strip != msg_ws_role_picker);
     try std.testing.expect(msg_live_strip != msg_ws_device);
+    try std.testing.expect(msg_live_strip != msg_lib_mirror);
+    try std.testing.expect(msg_live_strip != msg_lib_mirror_ban);
+    try std.testing.expect(msg_live_strip != msg_rce_info);
+    try std.testing.expect(msg_live_strip != msg_rce_body);
+    try std.testing.expect(msg_live_strip != msg_rce_save);
+    try std.testing.expect(msg_live_strip != msg_ed_preview);
+    try std.testing.expect(msg_live_strip != msg_ed_view);
+    try std.testing.expect(msg_live_strip != msg_ce_topbar);
+    try std.testing.expect(msg_live_strip != msg_ce_wave);
+    try std.testing.expect(msg_live_strip != msg_ce_rail);
+    try std.testing.expect(msg_live_strip != msg_lib_g_f_live);
+    try std.testing.expect(msg_live_strip != msg_lib_smart_modal);
+    try std.testing.expect(msg_live_strip != msg_lib_reloc_modal);
+    try std.testing.expect(msg_live_strip != msg_lib_remote);
     try std.testing.expect(msg_live_strip != msg_tk_live);
     try std.testing.expect(msg_live_strip != msg_tk_logs);
     try std.testing.expect(msg_mo_state != msg_pub);
@@ -5006,6 +5700,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_ws_role_list);
     try std.testing.expect(msg_mo_state != msg_ws_role_picker);
     try std.testing.expect(msg_mo_state != msg_ws_device);
+    try std.testing.expect(msg_mo_state != msg_lib_mirror);
+    try std.testing.expect(msg_mo_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mo_state != msg_rce_info);
+    try std.testing.expect(msg_mo_state != msg_rce_body);
+    try std.testing.expect(msg_mo_state != msg_rce_save);
+    try std.testing.expect(msg_mo_state != msg_ed_preview);
+    try std.testing.expect(msg_mo_state != msg_ed_view);
+    try std.testing.expect(msg_mo_state != msg_ce_topbar);
+    try std.testing.expect(msg_mo_state != msg_ce_wave);
+    try std.testing.expect(msg_mo_state != msg_ce_rail);
+    try std.testing.expect(msg_mo_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_mo_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_mo_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mo_state != msg_lib_remote);
     try std.testing.expect(msg_mo_state != msg_tk_live);
     try std.testing.expect(msg_mo_state != msg_tk_logs);
     try std.testing.expect(msg_pub != msg_pub_hero);
@@ -5071,6 +5779,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_ws_role_list);
     try std.testing.expect(msg_pub != msg_ws_role_picker);
     try std.testing.expect(msg_pub != msg_ws_device);
+    try std.testing.expect(msg_pub != msg_lib_mirror);
+    try std.testing.expect(msg_pub != msg_lib_mirror_ban);
+    try std.testing.expect(msg_pub != msg_rce_info);
+    try std.testing.expect(msg_pub != msg_rce_body);
+    try std.testing.expect(msg_pub != msg_rce_save);
+    try std.testing.expect(msg_pub != msg_ed_preview);
+    try std.testing.expect(msg_pub != msg_ed_view);
+    try std.testing.expect(msg_pub != msg_ce_topbar);
+    try std.testing.expect(msg_pub != msg_ce_wave);
+    try std.testing.expect(msg_pub != msg_ce_rail);
+    try std.testing.expect(msg_pub != msg_lib_g_f_live);
+    try std.testing.expect(msg_pub != msg_lib_smart_modal);
+    try std.testing.expect(msg_pub != msg_lib_reloc_modal);
+    try std.testing.expect(msg_pub != msg_lib_remote);
     try std.testing.expect(msg_pub != msg_tk_live);
     try std.testing.expect(msg_pub != msg_tk_logs);
     try std.testing.expect(msg_pub_hero != msg_set_state);
@@ -5135,6 +5857,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_ws_role_list);
     try std.testing.expect(msg_pub_hero != msg_ws_role_picker);
     try std.testing.expect(msg_pub_hero != msg_ws_device);
+    try std.testing.expect(msg_pub_hero != msg_lib_mirror);
+    try std.testing.expect(msg_pub_hero != msg_lib_mirror_ban);
+    try std.testing.expect(msg_pub_hero != msg_rce_info);
+    try std.testing.expect(msg_pub_hero != msg_rce_body);
+    try std.testing.expect(msg_pub_hero != msg_rce_save);
+    try std.testing.expect(msg_pub_hero != msg_ed_preview);
+    try std.testing.expect(msg_pub_hero != msg_ed_view);
+    try std.testing.expect(msg_pub_hero != msg_ce_topbar);
+    try std.testing.expect(msg_pub_hero != msg_ce_wave);
+    try std.testing.expect(msg_pub_hero != msg_ce_rail);
+    try std.testing.expect(msg_pub_hero != msg_lib_g_f_live);
+    try std.testing.expect(msg_pub_hero != msg_lib_smart_modal);
+    try std.testing.expect(msg_pub_hero != msg_lib_reloc_modal);
+    try std.testing.expect(msg_pub_hero != msg_lib_remote);
     try std.testing.expect(msg_pub_hero != msg_tk_live);
     try std.testing.expect(msg_pub_hero != msg_tk_logs);
     try std.testing.expect(msg_set_state != msg_set_content);
@@ -5198,6 +5934,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_ws_role_list);
     try std.testing.expect(msg_set_state != msg_ws_role_picker);
     try std.testing.expect(msg_set_state != msg_ws_device);
+    try std.testing.expect(msg_set_state != msg_lib_mirror);
+    try std.testing.expect(msg_set_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_set_state != msg_rce_info);
+    try std.testing.expect(msg_set_state != msg_rce_body);
+    try std.testing.expect(msg_set_state != msg_rce_save);
+    try std.testing.expect(msg_set_state != msg_ed_preview);
+    try std.testing.expect(msg_set_state != msg_ed_view);
+    try std.testing.expect(msg_set_state != msg_ce_topbar);
+    try std.testing.expect(msg_set_state != msg_ce_wave);
+    try std.testing.expect(msg_set_state != msg_ce_rail);
+    try std.testing.expect(msg_set_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_set_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_set_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_set_state != msg_lib_remote);
     try std.testing.expect(msg_set_state != msg_tk_live);
     try std.testing.expect(msg_set_state != msg_tk_logs);
     try std.testing.expect(msg_set_content != msg_set_status);
@@ -5260,6 +6010,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_ws_role_list);
     try std.testing.expect(msg_set_content != msg_ws_role_picker);
     try std.testing.expect(msg_set_content != msg_ws_device);
+    try std.testing.expect(msg_set_content != msg_lib_mirror);
+    try std.testing.expect(msg_set_content != msg_lib_mirror_ban);
+    try std.testing.expect(msg_set_content != msg_rce_info);
+    try std.testing.expect(msg_set_content != msg_rce_body);
+    try std.testing.expect(msg_set_content != msg_rce_save);
+    try std.testing.expect(msg_set_content != msg_ed_preview);
+    try std.testing.expect(msg_set_content != msg_ed_view);
+    try std.testing.expect(msg_set_content != msg_ce_topbar);
+    try std.testing.expect(msg_set_content != msg_ce_wave);
+    try std.testing.expect(msg_set_content != msg_ce_rail);
+    try std.testing.expect(msg_set_content != msg_lib_g_f_live);
+    try std.testing.expect(msg_set_content != msg_lib_smart_modal);
+    try std.testing.expect(msg_set_content != msg_lib_reloc_modal);
+    try std.testing.expect(msg_set_content != msg_lib_remote);
     try std.testing.expect(msg_set_content != msg_tk_live);
     try std.testing.expect(msg_set_content != msg_tk_logs);
     try std.testing.expect(msg_set_status != msg_lib_state);
@@ -5321,6 +6085,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_ws_role_list);
     try std.testing.expect(msg_set_status != msg_ws_role_picker);
     try std.testing.expect(msg_set_status != msg_ws_device);
+    try std.testing.expect(msg_set_status != msg_lib_mirror);
+    try std.testing.expect(msg_set_status != msg_lib_mirror_ban);
+    try std.testing.expect(msg_set_status != msg_rce_info);
+    try std.testing.expect(msg_set_status != msg_rce_body);
+    try std.testing.expect(msg_set_status != msg_rce_save);
+    try std.testing.expect(msg_set_status != msg_ed_preview);
+    try std.testing.expect(msg_set_status != msg_ed_view);
+    try std.testing.expect(msg_set_status != msg_ce_topbar);
+    try std.testing.expect(msg_set_status != msg_ce_wave);
+    try std.testing.expect(msg_set_status != msg_ce_rail);
+    try std.testing.expect(msg_set_status != msg_lib_g_f_live);
+    try std.testing.expect(msg_set_status != msg_lib_smart_modal);
+    try std.testing.expect(msg_set_status != msg_lib_reloc_modal);
+    try std.testing.expect(msg_set_status != msg_lib_remote);
     try std.testing.expect(msg_set_status != msg_tk_live);
     try std.testing.expect(msg_set_status != msg_tk_logs);
     try std.testing.expect(msg_lib_state != msg_lib_body);
@@ -5381,6 +6159,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_ws_role_list);
     try std.testing.expect(msg_lib_state != msg_ws_role_picker);
     try std.testing.expect(msg_lib_state != msg_ws_device);
+    try std.testing.expect(msg_lib_state != msg_lib_mirror);
+    try std.testing.expect(msg_lib_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_state != msg_rce_info);
+    try std.testing.expect(msg_lib_state != msg_rce_body);
+    try std.testing.expect(msg_lib_state != msg_rce_save);
+    try std.testing.expect(msg_lib_state != msg_ed_preview);
+    try std.testing.expect(msg_lib_state != msg_ed_view);
+    try std.testing.expect(msg_lib_state != msg_ce_topbar);
+    try std.testing.expect(msg_lib_state != msg_ce_wave);
+    try std.testing.expect(msg_lib_state != msg_ce_rail);
+    try std.testing.expect(msg_lib_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_state != msg_lib_remote);
     try std.testing.expect(msg_lib_state != msg_tk_live);
     try std.testing.expect(msg_lib_state != msg_tk_logs);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
@@ -5440,6 +6232,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_ws_role_list);
     try std.testing.expect(msg_lib_body != msg_ws_role_picker);
     try std.testing.expect(msg_lib_body != msg_ws_device);
+    try std.testing.expect(msg_lib_body != msg_lib_mirror);
+    try std.testing.expect(msg_lib_body != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_body != msg_rce_info);
+    try std.testing.expect(msg_lib_body != msg_rce_body);
+    try std.testing.expect(msg_lib_body != msg_rce_save);
+    try std.testing.expect(msg_lib_body != msg_ed_preview);
+    try std.testing.expect(msg_lib_body != msg_ed_view);
+    try std.testing.expect(msg_lib_body != msg_ce_topbar);
+    try std.testing.expect(msg_lib_body != msg_ce_wave);
+    try std.testing.expect(msg_lib_body != msg_ce_rail);
+    try std.testing.expect(msg_lib_body != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_body != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_body != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_body != msg_lib_remote);
     try std.testing.expect(msg_lib_body != msg_tk_live);
     try std.testing.expect(msg_lib_body != msg_tk_logs);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
@@ -5498,6 +6304,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_ws_role_list);
     try std.testing.expect(msg_lib_detail != msg_ws_role_picker);
     try std.testing.expect(msg_lib_detail != msg_ws_device);
+    try std.testing.expect(msg_lib_detail != msg_lib_mirror);
+    try std.testing.expect(msg_lib_detail != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_detail != msg_rce_info);
+    try std.testing.expect(msg_lib_detail != msg_rce_body);
+    try std.testing.expect(msg_lib_detail != msg_rce_save);
+    try std.testing.expect(msg_lib_detail != msg_ed_preview);
+    try std.testing.expect(msg_lib_detail != msg_ed_view);
+    try std.testing.expect(msg_lib_detail != msg_ce_topbar);
+    try std.testing.expect(msg_lib_detail != msg_ce_wave);
+    try std.testing.expect(msg_lib_detail != msg_ce_rail);
+    try std.testing.expect(msg_lib_detail != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_detail != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_detail != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_detail != msg_lib_remote);
     try std.testing.expect(msg_lib_detail != msg_tk_live);
     try std.testing.expect(msg_lib_detail != msg_tk_logs);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
@@ -5555,6 +6375,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_ws_role_list);
     try std.testing.expect(msg_lib_queue != msg_ws_role_picker);
     try std.testing.expect(msg_lib_queue != msg_ws_device);
+    try std.testing.expect(msg_lib_queue != msg_lib_mirror);
+    try std.testing.expect(msg_lib_queue != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_queue != msg_rce_info);
+    try std.testing.expect(msg_lib_queue != msg_rce_body);
+    try std.testing.expect(msg_lib_queue != msg_rce_save);
+    try std.testing.expect(msg_lib_queue != msg_ed_preview);
+    try std.testing.expect(msg_lib_queue != msg_ed_view);
+    try std.testing.expect(msg_lib_queue != msg_ce_topbar);
+    try std.testing.expect(msg_lib_queue != msg_ce_wave);
+    try std.testing.expect(msg_lib_queue != msg_ce_rail);
+    try std.testing.expect(msg_lib_queue != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_queue != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_queue != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_queue != msg_lib_remote);
     try std.testing.expect(msg_lib_queue != msg_tk_live);
     try std.testing.expect(msg_lib_queue != msg_tk_logs);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
@@ -5611,6 +6445,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_ws_role_list);
     try std.testing.expect(msg_lib_cue_cell != msg_ws_role_picker);
     try std.testing.expect(msg_lib_cue_cell != msg_ws_device);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_mirror);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_cue_cell != msg_rce_info);
+    try std.testing.expect(msg_lib_cue_cell != msg_rce_body);
+    try std.testing.expect(msg_lib_cue_cell != msg_rce_save);
+    try std.testing.expect(msg_lib_cue_cell != msg_ed_preview);
+    try std.testing.expect(msg_lib_cue_cell != msg_ed_view);
+    try std.testing.expect(msg_lib_cue_cell != msg_ce_topbar);
+    try std.testing.expect(msg_lib_cue_cell != msg_ce_wave);
+    try std.testing.expect(msg_lib_cue_cell != msg_ce_rail);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_cue_cell != msg_lib_remote);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_live);
     try std.testing.expect(msg_lib_cue_cell != msg_tk_logs);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
@@ -5666,6 +6514,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_ws_role_list);
     try std.testing.expect(msg_mp_full != msg_ws_role_picker);
     try std.testing.expect(msg_mp_full != msg_ws_device);
+    try std.testing.expect(msg_mp_full != msg_lib_mirror);
+    try std.testing.expect(msg_mp_full != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_full != msg_rce_info);
+    try std.testing.expect(msg_mp_full != msg_rce_body);
+    try std.testing.expect(msg_mp_full != msg_rce_save);
+    try std.testing.expect(msg_mp_full != msg_ed_preview);
+    try std.testing.expect(msg_mp_full != msg_ed_view);
+    try std.testing.expect(msg_mp_full != msg_ce_topbar);
+    try std.testing.expect(msg_mp_full != msg_ce_wave);
+    try std.testing.expect(msg_mp_full != msg_ce_rail);
+    try std.testing.expect(msg_mp_full != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_full != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_full != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_full != msg_lib_remote);
     try std.testing.expect(msg_mp_full != msg_tk_live);
     try std.testing.expect(msg_mp_full != msg_tk_logs);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
@@ -5720,6 +6582,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_ws_role_list);
     try std.testing.expect(msg_mp_inner != msg_ws_role_picker);
     try std.testing.expect(msg_mp_inner != msg_ws_device);
+    try std.testing.expect(msg_mp_inner != msg_lib_mirror);
+    try std.testing.expect(msg_mp_inner != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_inner != msg_rce_info);
+    try std.testing.expect(msg_mp_inner != msg_rce_body);
+    try std.testing.expect(msg_mp_inner != msg_rce_save);
+    try std.testing.expect(msg_mp_inner != msg_ed_preview);
+    try std.testing.expect(msg_mp_inner != msg_ed_view);
+    try std.testing.expect(msg_mp_inner != msg_ce_topbar);
+    try std.testing.expect(msg_mp_inner != msg_ce_wave);
+    try std.testing.expect(msg_mp_inner != msg_ce_rail);
+    try std.testing.expect(msg_mp_inner != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_inner != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_inner != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_inner != msg_lib_remote);
     try std.testing.expect(msg_mp_inner != msg_tk_live);
     try std.testing.expect(msg_mp_inner != msg_tk_logs);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
@@ -5773,6 +6649,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_ws_role_list);
     try std.testing.expect(msg_mp_vid != msg_ws_role_picker);
     try std.testing.expect(msg_mp_vid != msg_ws_device);
+    try std.testing.expect(msg_mp_vid != msg_lib_mirror);
+    try std.testing.expect(msg_mp_vid != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_vid != msg_rce_info);
+    try std.testing.expect(msg_mp_vid != msg_rce_body);
+    try std.testing.expect(msg_mp_vid != msg_rce_save);
+    try std.testing.expect(msg_mp_vid != msg_ed_preview);
+    try std.testing.expect(msg_mp_vid != msg_ed_view);
+    try std.testing.expect(msg_mp_vid != msg_ce_topbar);
+    try std.testing.expect(msg_mp_vid != msg_ce_wave);
+    try std.testing.expect(msg_mp_vid != msg_ce_rail);
+    try std.testing.expect(msg_mp_vid != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_vid != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_vid != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_vid != msg_lib_remote);
     try std.testing.expect(msg_mp_vid != msg_tk_live);
     try std.testing.expect(msg_mp_vid != msg_tk_logs);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
@@ -5825,6 +6715,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_ws_role_list);
     try std.testing.expect(msg_mp_wave != msg_ws_role_picker);
     try std.testing.expect(msg_mp_wave != msg_ws_device);
+    try std.testing.expect(msg_mp_wave != msg_lib_mirror);
+    try std.testing.expect(msg_mp_wave != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_wave != msg_rce_info);
+    try std.testing.expect(msg_mp_wave != msg_rce_body);
+    try std.testing.expect(msg_mp_wave != msg_rce_save);
+    try std.testing.expect(msg_mp_wave != msg_ed_preview);
+    try std.testing.expect(msg_mp_wave != msg_ed_view);
+    try std.testing.expect(msg_mp_wave != msg_ce_topbar);
+    try std.testing.expect(msg_mp_wave != msg_ce_wave);
+    try std.testing.expect(msg_mp_wave != msg_ce_rail);
+    try std.testing.expect(msg_mp_wave != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_wave != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_wave != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_wave != msg_lib_remote);
     try std.testing.expect(msg_mp_wave != msg_tk_live);
     try std.testing.expect(msg_mp_wave != msg_tk_logs);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
@@ -5876,6 +6780,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_ws_role_list);
     try std.testing.expect(msg_mp_tp != msg_ws_role_picker);
     try std.testing.expect(msg_mp_tp != msg_ws_device);
+    try std.testing.expect(msg_mp_tp != msg_lib_mirror);
+    try std.testing.expect(msg_mp_tp != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_tp != msg_rce_info);
+    try std.testing.expect(msg_mp_tp != msg_rce_body);
+    try std.testing.expect(msg_mp_tp != msg_rce_save);
+    try std.testing.expect(msg_mp_tp != msg_ed_preview);
+    try std.testing.expect(msg_mp_tp != msg_ed_view);
+    try std.testing.expect(msg_mp_tp != msg_ce_topbar);
+    try std.testing.expect(msg_mp_tp != msg_ce_wave);
+    try std.testing.expect(msg_mp_tp != msg_ce_rail);
+    try std.testing.expect(msg_mp_tp != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_tp != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_tp != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_tp != msg_lib_remote);
     try std.testing.expect(msg_mp_tp != msg_tk_live);
     try std.testing.expect(msg_mp_tp != msg_tk_logs);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
@@ -5926,6 +6844,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_ws_role_list);
     try std.testing.expect(msg_mp_edit != msg_ws_role_picker);
     try std.testing.expect(msg_mp_edit != msg_ws_device);
+    try std.testing.expect(msg_mp_edit != msg_lib_mirror);
+    try std.testing.expect(msg_mp_edit != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_edit != msg_rce_info);
+    try std.testing.expect(msg_mp_edit != msg_rce_body);
+    try std.testing.expect(msg_mp_edit != msg_rce_save);
+    try std.testing.expect(msg_mp_edit != msg_ed_preview);
+    try std.testing.expect(msg_mp_edit != msg_ed_view);
+    try std.testing.expect(msg_mp_edit != msg_ce_topbar);
+    try std.testing.expect(msg_mp_edit != msg_ce_wave);
+    try std.testing.expect(msg_mp_edit != msg_ce_rail);
+    try std.testing.expect(msg_mp_edit != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_edit != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_edit != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_edit != msg_lib_remote);
     try std.testing.expect(msg_mp_edit != msg_tk_live);
     try std.testing.expect(msg_mp_edit != msg_tk_logs);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
@@ -5975,6 +6907,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_export != msg_ws_role_list);
     try std.testing.expect(msg_mp_export != msg_ws_role_picker);
     try std.testing.expect(msg_mp_export != msg_ws_device);
+    try std.testing.expect(msg_mp_export != msg_lib_mirror);
+    try std.testing.expect(msg_mp_export != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_export != msg_rce_info);
+    try std.testing.expect(msg_mp_export != msg_rce_body);
+    try std.testing.expect(msg_mp_export != msg_rce_save);
+    try std.testing.expect(msg_mp_export != msg_ed_preview);
+    try std.testing.expect(msg_mp_export != msg_ed_view);
+    try std.testing.expect(msg_mp_export != msg_ce_topbar);
+    try std.testing.expect(msg_mp_export != msg_ce_wave);
+    try std.testing.expect(msg_mp_export != msg_ce_rail);
+    try std.testing.expect(msg_mp_export != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_export != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_export != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_export != msg_lib_remote);
     try std.testing.expect(msg_mp_export != msg_tk_live);
     try std.testing.expect(msg_mp_export != msg_tk_logs);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
@@ -6023,6 +6969,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_r_o != msg_ws_role_list);
     try std.testing.expect(msg_mp_r_o != msg_ws_role_picker);
     try std.testing.expect(msg_mp_r_o != msg_ws_device);
+    try std.testing.expect(msg_mp_r_o != msg_lib_mirror);
+    try std.testing.expect(msg_mp_r_o != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_r_o != msg_rce_info);
+    try std.testing.expect(msg_mp_r_o != msg_rce_body);
+    try std.testing.expect(msg_mp_r_o != msg_rce_save);
+    try std.testing.expect(msg_mp_r_o != msg_ed_preview);
+    try std.testing.expect(msg_mp_r_o != msg_ed_view);
+    try std.testing.expect(msg_mp_r_o != msg_ce_topbar);
+    try std.testing.expect(msg_mp_r_o != msg_ce_wave);
+    try std.testing.expect(msg_mp_r_o != msg_ce_rail);
+    try std.testing.expect(msg_mp_r_o != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_r_o != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_r_o != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_r_o != msg_lib_remote);
     try std.testing.expect(msg_mp_r_o != msg_tk_live);
     try std.testing.expect(msg_mp_r_o != msg_tk_logs);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
@@ -6070,6 +7030,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_hov != msg_ws_role_list);
     try std.testing.expect(msg_mp_hov != msg_ws_role_picker);
     try std.testing.expect(msg_mp_hov != msg_ws_device);
+    try std.testing.expect(msg_mp_hov != msg_lib_mirror);
+    try std.testing.expect(msg_mp_hov != msg_lib_mirror_ban);
+    try std.testing.expect(msg_mp_hov != msg_rce_info);
+    try std.testing.expect(msg_mp_hov != msg_rce_body);
+    try std.testing.expect(msg_mp_hov != msg_rce_save);
+    try std.testing.expect(msg_mp_hov != msg_ed_preview);
+    try std.testing.expect(msg_mp_hov != msg_ed_view);
+    try std.testing.expect(msg_mp_hov != msg_ce_topbar);
+    try std.testing.expect(msg_mp_hov != msg_ce_wave);
+    try std.testing.expect(msg_mp_hov != msg_ce_rail);
+    try std.testing.expect(msg_mp_hov != msg_lib_g_f_live);
+    try std.testing.expect(msg_mp_hov != msg_lib_smart_modal);
+    try std.testing.expect(msg_mp_hov != msg_lib_reloc_modal);
+    try std.testing.expect(msg_mp_hov != msg_lib_remote);
     try std.testing.expect(msg_mp_hov != msg_tk_live);
     try std.testing.expect(msg_mp_hov != msg_tk_logs);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
@@ -6116,6 +7090,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_state != msg_ws_role_list);
     try std.testing.expect(msg_auto_state != msg_ws_role_picker);
     try std.testing.expect(msg_auto_state != msg_ws_device);
+    try std.testing.expect(msg_auto_state != msg_lib_mirror);
+    try std.testing.expect(msg_auto_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_auto_state != msg_rce_info);
+    try std.testing.expect(msg_auto_state != msg_rce_body);
+    try std.testing.expect(msg_auto_state != msg_rce_save);
+    try std.testing.expect(msg_auto_state != msg_ed_preview);
+    try std.testing.expect(msg_auto_state != msg_ed_view);
+    try std.testing.expect(msg_auto_state != msg_ce_topbar);
+    try std.testing.expect(msg_auto_state != msg_ce_wave);
+    try std.testing.expect(msg_auto_state != msg_ce_rail);
+    try std.testing.expect(msg_auto_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_auto_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_auto_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_auto_state != msg_lib_remote);
     try std.testing.expect(msg_auto_state != msg_tk_live);
     try std.testing.expect(msg_auto_state != msg_tk_logs);
     try std.testing.expect(msg_auto_body_state != msg_peers);
@@ -6161,6 +7149,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_body_state != msg_ws_role_list);
     try std.testing.expect(msg_auto_body_state != msg_ws_role_picker);
     try std.testing.expect(msg_auto_body_state != msg_ws_device);
+    try std.testing.expect(msg_auto_body_state != msg_lib_mirror);
+    try std.testing.expect(msg_auto_body_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_auto_body_state != msg_rce_info);
+    try std.testing.expect(msg_auto_body_state != msg_rce_body);
+    try std.testing.expect(msg_auto_body_state != msg_rce_save);
+    try std.testing.expect(msg_auto_body_state != msg_ed_preview);
+    try std.testing.expect(msg_auto_body_state != msg_ed_view);
+    try std.testing.expect(msg_auto_body_state != msg_ce_topbar);
+    try std.testing.expect(msg_auto_body_state != msg_ce_wave);
+    try std.testing.expect(msg_auto_body_state != msg_ce_rail);
+    try std.testing.expect(msg_auto_body_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_auto_body_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_auto_body_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_auto_body_state != msg_lib_remote);
     try std.testing.expect(msg_auto_body_state != msg_tk_live);
     try std.testing.expect(msg_auto_body_state != msg_tk_logs);
     try std.testing.expect(msg_peers != msg_peers_body);
@@ -6205,6 +7207,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers != msg_ws_role_list);
     try std.testing.expect(msg_peers != msg_ws_role_picker);
     try std.testing.expect(msg_peers != msg_ws_device);
+    try std.testing.expect(msg_peers != msg_lib_mirror);
+    try std.testing.expect(msg_peers != msg_lib_mirror_ban);
+    try std.testing.expect(msg_peers != msg_rce_info);
+    try std.testing.expect(msg_peers != msg_rce_body);
+    try std.testing.expect(msg_peers != msg_rce_save);
+    try std.testing.expect(msg_peers != msg_ed_preview);
+    try std.testing.expect(msg_peers != msg_ed_view);
+    try std.testing.expect(msg_peers != msg_ce_topbar);
+    try std.testing.expect(msg_peers != msg_ce_wave);
+    try std.testing.expect(msg_peers != msg_ce_rail);
+    try std.testing.expect(msg_peers != msg_lib_g_f_live);
+    try std.testing.expect(msg_peers != msg_lib_smart_modal);
+    try std.testing.expect(msg_peers != msg_lib_reloc_modal);
+    try std.testing.expect(msg_peers != msg_lib_remote);
     try std.testing.expect(msg_peers != msg_tk_live);
     try std.testing.expect(msg_peers != msg_tk_logs);
     try std.testing.expect(msg_peers_body != msg_ovl_state);
@@ -6248,6 +7264,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers_body != msg_ws_role_list);
     try std.testing.expect(msg_peers_body != msg_ws_role_picker);
     try std.testing.expect(msg_peers_body != msg_ws_device);
+    try std.testing.expect(msg_peers_body != msg_lib_mirror);
+    try std.testing.expect(msg_peers_body != msg_lib_mirror_ban);
+    try std.testing.expect(msg_peers_body != msg_rce_info);
+    try std.testing.expect(msg_peers_body != msg_rce_body);
+    try std.testing.expect(msg_peers_body != msg_rce_save);
+    try std.testing.expect(msg_peers_body != msg_ed_preview);
+    try std.testing.expect(msg_peers_body != msg_ed_view);
+    try std.testing.expect(msg_peers_body != msg_ce_topbar);
+    try std.testing.expect(msg_peers_body != msg_ce_wave);
+    try std.testing.expect(msg_peers_body != msg_ce_rail);
+    try std.testing.expect(msg_peers_body != msg_lib_g_f_live);
+    try std.testing.expect(msg_peers_body != msg_lib_smart_modal);
+    try std.testing.expect(msg_peers_body != msg_lib_reloc_modal);
+    try std.testing.expect(msg_peers_body != msg_lib_remote);
     try std.testing.expect(msg_peers_body != msg_tk_live);
     try std.testing.expect(msg_peers_body != msg_tk_logs);
     try std.testing.expect(msg_ovl_state != msg_ovl_appr);
@@ -6290,6 +7320,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_state != msg_ws_role_list);
     try std.testing.expect(msg_ovl_state != msg_ws_role_picker);
     try std.testing.expect(msg_ovl_state != msg_ws_device);
+    try std.testing.expect(msg_ovl_state != msg_lib_mirror);
+    try std.testing.expect(msg_ovl_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ovl_state != msg_rce_info);
+    try std.testing.expect(msg_ovl_state != msg_rce_body);
+    try std.testing.expect(msg_ovl_state != msg_rce_save);
+    try std.testing.expect(msg_ovl_state != msg_ed_preview);
+    try std.testing.expect(msg_ovl_state != msg_ed_view);
+    try std.testing.expect(msg_ovl_state != msg_ce_topbar);
+    try std.testing.expect(msg_ovl_state != msg_ce_wave);
+    try std.testing.expect(msg_ovl_state != msg_ce_rail);
+    try std.testing.expect(msg_ovl_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_ovl_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_ovl_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ovl_state != msg_lib_remote);
     try std.testing.expect(msg_ovl_state != msg_tk_live);
     try std.testing.expect(msg_ovl_state != msg_tk_logs);
     try std.testing.expect(msg_ovl_appr != msg_ovl_spout);
@@ -6331,6 +7375,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_appr != msg_ws_role_list);
     try std.testing.expect(msg_ovl_appr != msg_ws_role_picker);
     try std.testing.expect(msg_ovl_appr != msg_ws_device);
+    try std.testing.expect(msg_ovl_appr != msg_lib_mirror);
+    try std.testing.expect(msg_ovl_appr != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ovl_appr != msg_rce_info);
+    try std.testing.expect(msg_ovl_appr != msg_rce_body);
+    try std.testing.expect(msg_ovl_appr != msg_rce_save);
+    try std.testing.expect(msg_ovl_appr != msg_ed_preview);
+    try std.testing.expect(msg_ovl_appr != msg_ed_view);
+    try std.testing.expect(msg_ovl_appr != msg_ce_topbar);
+    try std.testing.expect(msg_ovl_appr != msg_ce_wave);
+    try std.testing.expect(msg_ovl_appr != msg_ce_rail);
+    try std.testing.expect(msg_ovl_appr != msg_lib_g_f_live);
+    try std.testing.expect(msg_ovl_appr != msg_lib_smart_modal);
+    try std.testing.expect(msg_ovl_appr != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ovl_appr != msg_lib_remote);
     try std.testing.expect(msg_ovl_appr != msg_tk_live);
     try std.testing.expect(msg_ovl_appr != msg_tk_logs);
     try std.testing.expect(msg_ovl_spout != msg_ui_status);
@@ -6371,6 +7429,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_spout != msg_ws_role_list);
     try std.testing.expect(msg_ovl_spout != msg_ws_role_picker);
     try std.testing.expect(msg_ovl_spout != msg_ws_device);
+    try std.testing.expect(msg_ovl_spout != msg_lib_mirror);
+    try std.testing.expect(msg_ovl_spout != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ovl_spout != msg_rce_info);
+    try std.testing.expect(msg_ovl_spout != msg_rce_body);
+    try std.testing.expect(msg_ovl_spout != msg_rce_save);
+    try std.testing.expect(msg_ovl_spout != msg_ed_preview);
+    try std.testing.expect(msg_ovl_spout != msg_ed_view);
+    try std.testing.expect(msg_ovl_spout != msg_ce_topbar);
+    try std.testing.expect(msg_ovl_spout != msg_ce_wave);
+    try std.testing.expect(msg_ovl_spout != msg_ce_rail);
+    try std.testing.expect(msg_ovl_spout != msg_lib_g_f_live);
+    try std.testing.expect(msg_ovl_spout != msg_lib_smart_modal);
+    try std.testing.expect(msg_ovl_spout != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ovl_spout != msg_lib_remote);
     try std.testing.expect(msg_ovl_spout != msg_tk_live);
     try std.testing.expect(msg_ovl_spout != msg_tk_logs);
     try std.testing.expect(msg_ui_status != msg_ovl_strip);
@@ -6410,6 +7482,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ui_status != msg_ws_role_list);
     try std.testing.expect(msg_ui_status != msg_ws_role_picker);
     try std.testing.expect(msg_ui_status != msg_ws_device);
+    try std.testing.expect(msg_ui_status != msg_lib_mirror);
+    try std.testing.expect(msg_ui_status != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ui_status != msg_rce_info);
+    try std.testing.expect(msg_ui_status != msg_rce_body);
+    try std.testing.expect(msg_ui_status != msg_rce_save);
+    try std.testing.expect(msg_ui_status != msg_ed_preview);
+    try std.testing.expect(msg_ui_status != msg_ed_view);
+    try std.testing.expect(msg_ui_status != msg_ce_topbar);
+    try std.testing.expect(msg_ui_status != msg_ce_wave);
+    try std.testing.expect(msg_ui_status != msg_ce_rail);
+    try std.testing.expect(msg_ui_status != msg_lib_g_f_live);
+    try std.testing.expect(msg_ui_status != msg_lib_smart_modal);
+    try std.testing.expect(msg_ui_status != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ui_status != msg_lib_remote);
     try std.testing.expect(msg_ui_status != msg_tk_live);
     try std.testing.expect(msg_ui_status != msg_tk_logs);
     try std.testing.expect(msg_ovl_strip != msg_tw_state);
@@ -6448,6 +7534,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_strip != msg_ws_role_list);
     try std.testing.expect(msg_ovl_strip != msg_ws_role_picker);
     try std.testing.expect(msg_ovl_strip != msg_ws_device);
+    try std.testing.expect(msg_ovl_strip != msg_lib_mirror);
+    try std.testing.expect(msg_ovl_strip != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ovl_strip != msg_rce_info);
+    try std.testing.expect(msg_ovl_strip != msg_rce_body);
+    try std.testing.expect(msg_ovl_strip != msg_rce_save);
+    try std.testing.expect(msg_ovl_strip != msg_ed_preview);
+    try std.testing.expect(msg_ovl_strip != msg_ed_view);
+    try std.testing.expect(msg_ovl_strip != msg_ce_topbar);
+    try std.testing.expect(msg_ovl_strip != msg_ce_wave);
+    try std.testing.expect(msg_ovl_strip != msg_ce_rail);
+    try std.testing.expect(msg_ovl_strip != msg_lib_g_f_live);
+    try std.testing.expect(msg_ovl_strip != msg_lib_smart_modal);
+    try std.testing.expect(msg_ovl_strip != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ovl_strip != msg_lib_remote);
     try std.testing.expect(msg_ovl_strip != msg_tk_live);
     try std.testing.expect(msg_ovl_strip != msg_tk_logs);
     try std.testing.expect(msg_tw_state != msg_tw_obs);
@@ -6485,6 +7585,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_state != msg_ws_role_list);
     try std.testing.expect(msg_tw_state != msg_ws_role_picker);
     try std.testing.expect(msg_tw_state != msg_ws_device);
+    try std.testing.expect(msg_tw_state != msg_lib_mirror);
+    try std.testing.expect(msg_tw_state != msg_lib_mirror_ban);
+    try std.testing.expect(msg_tw_state != msg_rce_info);
+    try std.testing.expect(msg_tw_state != msg_rce_body);
+    try std.testing.expect(msg_tw_state != msg_rce_save);
+    try std.testing.expect(msg_tw_state != msg_ed_preview);
+    try std.testing.expect(msg_tw_state != msg_ed_view);
+    try std.testing.expect(msg_tw_state != msg_ce_topbar);
+    try std.testing.expect(msg_tw_state != msg_ce_wave);
+    try std.testing.expect(msg_tw_state != msg_ce_rail);
+    try std.testing.expect(msg_tw_state != msg_lib_g_f_live);
+    try std.testing.expect(msg_tw_state != msg_lib_smart_modal);
+    try std.testing.expect(msg_tw_state != msg_lib_reloc_modal);
+    try std.testing.expect(msg_tw_state != msg_lib_remote);
     try std.testing.expect(msg_tw_state != msg_tk_live);
     try std.testing.expect(msg_tw_state != msg_tk_logs);
     try std.testing.expect(msg_tw_obs != msg_tw_presets);
@@ -6521,6 +7635,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_obs != msg_ws_role_list);
     try std.testing.expect(msg_tw_obs != msg_ws_role_picker);
     try std.testing.expect(msg_tw_obs != msg_ws_device);
+    try std.testing.expect(msg_tw_obs != msg_lib_mirror);
+    try std.testing.expect(msg_tw_obs != msg_lib_mirror_ban);
+    try std.testing.expect(msg_tw_obs != msg_rce_info);
+    try std.testing.expect(msg_tw_obs != msg_rce_body);
+    try std.testing.expect(msg_tw_obs != msg_rce_save);
+    try std.testing.expect(msg_tw_obs != msg_ed_preview);
+    try std.testing.expect(msg_tw_obs != msg_ed_view);
+    try std.testing.expect(msg_tw_obs != msg_ce_topbar);
+    try std.testing.expect(msg_tw_obs != msg_ce_wave);
+    try std.testing.expect(msg_tw_obs != msg_ce_rail);
+    try std.testing.expect(msg_tw_obs != msg_lib_g_f_live);
+    try std.testing.expect(msg_tw_obs != msg_lib_smart_modal);
+    try std.testing.expect(msg_tw_obs != msg_lib_reloc_modal);
+    try std.testing.expect(msg_tw_obs != msg_lib_remote);
     try std.testing.expect(msg_tw_obs != msg_tk_live);
     try std.testing.expect(msg_tw_obs != msg_tk_logs);
     try std.testing.expect(msg_tw_presets != msg_tw_feed);
@@ -6556,6 +7684,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_presets != msg_ws_role_list);
     try std.testing.expect(msg_tw_presets != msg_ws_role_picker);
     try std.testing.expect(msg_tw_presets != msg_ws_device);
+    try std.testing.expect(msg_tw_presets != msg_lib_mirror);
+    try std.testing.expect(msg_tw_presets != msg_lib_mirror_ban);
+    try std.testing.expect(msg_tw_presets != msg_rce_info);
+    try std.testing.expect(msg_tw_presets != msg_rce_body);
+    try std.testing.expect(msg_tw_presets != msg_rce_save);
+    try std.testing.expect(msg_tw_presets != msg_ed_preview);
+    try std.testing.expect(msg_tw_presets != msg_ed_view);
+    try std.testing.expect(msg_tw_presets != msg_ce_topbar);
+    try std.testing.expect(msg_tw_presets != msg_ce_wave);
+    try std.testing.expect(msg_tw_presets != msg_ce_rail);
+    try std.testing.expect(msg_tw_presets != msg_lib_g_f_live);
+    try std.testing.expect(msg_tw_presets != msg_lib_smart_modal);
+    try std.testing.expect(msg_tw_presets != msg_lib_reloc_modal);
+    try std.testing.expect(msg_tw_presets != msg_lib_remote);
     try std.testing.expect(msg_tw_presets != msg_tk_live);
     try std.testing.expect(msg_tw_presets != msg_tk_logs);
     try std.testing.expect(msg_tw_feed != msg_midi_active);
@@ -6590,6 +7732,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_feed != msg_ws_role_list);
     try std.testing.expect(msg_tw_feed != msg_ws_role_picker);
     try std.testing.expect(msg_tw_feed != msg_ws_device);
+    try std.testing.expect(msg_tw_feed != msg_lib_mirror);
+    try std.testing.expect(msg_tw_feed != msg_lib_mirror_ban);
+    try std.testing.expect(msg_tw_feed != msg_rce_info);
+    try std.testing.expect(msg_tw_feed != msg_rce_body);
+    try std.testing.expect(msg_tw_feed != msg_rce_save);
+    try std.testing.expect(msg_tw_feed != msg_ed_preview);
+    try std.testing.expect(msg_tw_feed != msg_ed_view);
+    try std.testing.expect(msg_tw_feed != msg_ce_topbar);
+    try std.testing.expect(msg_tw_feed != msg_ce_wave);
+    try std.testing.expect(msg_tw_feed != msg_ce_rail);
+    try std.testing.expect(msg_tw_feed != msg_lib_g_f_live);
+    try std.testing.expect(msg_tw_feed != msg_lib_smart_modal);
+    try std.testing.expect(msg_tw_feed != msg_lib_reloc_modal);
+    try std.testing.expect(msg_tw_feed != msg_lib_remote);
     try std.testing.expect(msg_tw_feed != msg_tk_live);
     try std.testing.expect(msg_tw_feed != msg_tk_logs);
     try std.testing.expect(msg_midi_active != msg_midi_mon_lines);
@@ -6623,6 +7779,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_active != msg_ws_role_list);
     try std.testing.expect(msg_midi_active != msg_ws_role_picker);
     try std.testing.expect(msg_midi_active != msg_ws_device);
+    try std.testing.expect(msg_midi_active != msg_lib_mirror);
+    try std.testing.expect(msg_midi_active != msg_lib_mirror_ban);
+    try std.testing.expect(msg_midi_active != msg_rce_info);
+    try std.testing.expect(msg_midi_active != msg_rce_body);
+    try std.testing.expect(msg_midi_active != msg_rce_save);
+    try std.testing.expect(msg_midi_active != msg_ed_preview);
+    try std.testing.expect(msg_midi_active != msg_ed_view);
+    try std.testing.expect(msg_midi_active != msg_ce_topbar);
+    try std.testing.expect(msg_midi_active != msg_ce_wave);
+    try std.testing.expect(msg_midi_active != msg_ce_rail);
+    try std.testing.expect(msg_midi_active != msg_lib_g_f_live);
+    try std.testing.expect(msg_midi_active != msg_lib_smart_modal);
+    try std.testing.expect(msg_midi_active != msg_lib_reloc_modal);
+    try std.testing.expect(msg_midi_active != msg_lib_remote);
     try std.testing.expect(msg_midi_active != msg_tk_live);
     try std.testing.expect(msg_midi_active != msg_tk_logs);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_port_stat);
@@ -6655,6 +7825,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_mon_lines != msg_ws_role_list);
     try std.testing.expect(msg_midi_mon_lines != msg_ws_role_picker);
     try std.testing.expect(msg_midi_mon_lines != msg_ws_device);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_mirror);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_mirror_ban);
+    try std.testing.expect(msg_midi_mon_lines != msg_rce_info);
+    try std.testing.expect(msg_midi_mon_lines != msg_rce_body);
+    try std.testing.expect(msg_midi_mon_lines != msg_rce_save);
+    try std.testing.expect(msg_midi_mon_lines != msg_ed_preview);
+    try std.testing.expect(msg_midi_mon_lines != msg_ed_view);
+    try std.testing.expect(msg_midi_mon_lines != msg_ce_topbar);
+    try std.testing.expect(msg_midi_mon_lines != msg_ce_wave);
+    try std.testing.expect(msg_midi_mon_lines != msg_ce_rail);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_g_f_live);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_smart_modal);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_reloc_modal);
+    try std.testing.expect(msg_midi_mon_lines != msg_lib_remote);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_live);
     try std.testing.expect(msg_midi_mon_lines != msg_tk_logs);
     try std.testing.expect(msg_midi_port_stat != msg_midi_ctl);
@@ -6686,6 +7870,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_port_stat != msg_ws_role_list);
     try std.testing.expect(msg_midi_port_stat != msg_ws_role_picker);
     try std.testing.expect(msg_midi_port_stat != msg_ws_device);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_mirror);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_mirror_ban);
+    try std.testing.expect(msg_midi_port_stat != msg_rce_info);
+    try std.testing.expect(msg_midi_port_stat != msg_rce_body);
+    try std.testing.expect(msg_midi_port_stat != msg_rce_save);
+    try std.testing.expect(msg_midi_port_stat != msg_ed_preview);
+    try std.testing.expect(msg_midi_port_stat != msg_ed_view);
+    try std.testing.expect(msg_midi_port_stat != msg_ce_topbar);
+    try std.testing.expect(msg_midi_port_stat != msg_ce_wave);
+    try std.testing.expect(msg_midi_port_stat != msg_ce_rail);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_g_f_live);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_smart_modal);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_reloc_modal);
+    try std.testing.expect(msg_midi_port_stat != msg_lib_remote);
     try std.testing.expect(msg_midi_port_stat != msg_tk_live);
     try std.testing.expect(msg_midi_port_stat != msg_tk_logs);
     try std.testing.expect(msg_midi_ctl != msg_p_c_view);
@@ -6716,6 +7914,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_ctl != msg_ws_role_list);
     try std.testing.expect(msg_midi_ctl != msg_ws_role_picker);
     try std.testing.expect(msg_midi_ctl != msg_ws_device);
+    try std.testing.expect(msg_midi_ctl != msg_lib_mirror);
+    try std.testing.expect(msg_midi_ctl != msg_lib_mirror_ban);
+    try std.testing.expect(msg_midi_ctl != msg_rce_info);
+    try std.testing.expect(msg_midi_ctl != msg_rce_body);
+    try std.testing.expect(msg_midi_ctl != msg_rce_save);
+    try std.testing.expect(msg_midi_ctl != msg_ed_preview);
+    try std.testing.expect(msg_midi_ctl != msg_ed_view);
+    try std.testing.expect(msg_midi_ctl != msg_ce_topbar);
+    try std.testing.expect(msg_midi_ctl != msg_ce_wave);
+    try std.testing.expect(msg_midi_ctl != msg_ce_rail);
+    try std.testing.expect(msg_midi_ctl != msg_lib_g_f_live);
+    try std.testing.expect(msg_midi_ctl != msg_lib_smart_modal);
+    try std.testing.expect(msg_midi_ctl != msg_lib_reloc_modal);
+    try std.testing.expect(msg_midi_ctl != msg_lib_remote);
     try std.testing.expect(msg_midi_ctl != msg_tk_live);
     try std.testing.expect(msg_midi_ctl != msg_tk_logs);
     try std.testing.expect(msg_p_c_view != msg_p_c_gpu);
@@ -6745,6 +7957,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_view != msg_ws_role_list);
     try std.testing.expect(msg_p_c_view != msg_ws_role_picker);
     try std.testing.expect(msg_p_c_view != msg_ws_device);
+    try std.testing.expect(msg_p_c_view != msg_lib_mirror);
+    try std.testing.expect(msg_p_c_view != msg_lib_mirror_ban);
+    try std.testing.expect(msg_p_c_view != msg_rce_info);
+    try std.testing.expect(msg_p_c_view != msg_rce_body);
+    try std.testing.expect(msg_p_c_view != msg_rce_save);
+    try std.testing.expect(msg_p_c_view != msg_ed_preview);
+    try std.testing.expect(msg_p_c_view != msg_ed_view);
+    try std.testing.expect(msg_p_c_view != msg_ce_topbar);
+    try std.testing.expect(msg_p_c_view != msg_ce_wave);
+    try std.testing.expect(msg_p_c_view != msg_ce_rail);
+    try std.testing.expect(msg_p_c_view != msg_lib_g_f_live);
+    try std.testing.expect(msg_p_c_view != msg_lib_smart_modal);
+    try std.testing.expect(msg_p_c_view != msg_lib_reloc_modal);
+    try std.testing.expect(msg_p_c_view != msg_lib_remote);
     try std.testing.expect(msg_p_c_view != msg_tk_live);
     try std.testing.expect(msg_p_c_view != msg_tk_logs);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_status);
@@ -6773,6 +7999,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_gpu != msg_ws_role_list);
     try std.testing.expect(msg_p_c_gpu != msg_ws_role_picker);
     try std.testing.expect(msg_p_c_gpu != msg_ws_device);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_mirror);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_mirror_ban);
+    try std.testing.expect(msg_p_c_gpu != msg_rce_info);
+    try std.testing.expect(msg_p_c_gpu != msg_rce_body);
+    try std.testing.expect(msg_p_c_gpu != msg_rce_save);
+    try std.testing.expect(msg_p_c_gpu != msg_ed_preview);
+    try std.testing.expect(msg_p_c_gpu != msg_ed_view);
+    try std.testing.expect(msg_p_c_gpu != msg_ce_topbar);
+    try std.testing.expect(msg_p_c_gpu != msg_ce_wave);
+    try std.testing.expect(msg_p_c_gpu != msg_ce_rail);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_g_f_live);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_smart_modal);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_reloc_modal);
+    try std.testing.expect(msg_p_c_gpu != msg_lib_remote);
     try std.testing.expect(msg_p_c_gpu != msg_tk_live);
     try std.testing.expect(msg_p_c_gpu != msg_tk_logs);
     try std.testing.expect(msg_vrc_status != msg_vrc_editor);
@@ -6800,6 +8040,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_status != msg_ws_role_list);
     try std.testing.expect(msg_vrc_status != msg_ws_role_picker);
     try std.testing.expect(msg_vrc_status != msg_ws_device);
+    try std.testing.expect(msg_vrc_status != msg_lib_mirror);
+    try std.testing.expect(msg_vrc_status != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrc_status != msg_rce_info);
+    try std.testing.expect(msg_vrc_status != msg_rce_body);
+    try std.testing.expect(msg_vrc_status != msg_rce_save);
+    try std.testing.expect(msg_vrc_status != msg_ed_preview);
+    try std.testing.expect(msg_vrc_status != msg_ed_view);
+    try std.testing.expect(msg_vrc_status != msg_ce_topbar);
+    try std.testing.expect(msg_vrc_status != msg_ce_wave);
+    try std.testing.expect(msg_vrc_status != msg_ce_rail);
+    try std.testing.expect(msg_vrc_status != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrc_status != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrc_status != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrc_status != msg_lib_remote);
     try std.testing.expect(msg_vrc_status != msg_tk_live);
     try std.testing.expect(msg_vrc_status != msg_tk_logs);
     try std.testing.expect(msg_vrc_editor != msg_vrc_campaths);
@@ -6826,6 +8080,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_editor != msg_ws_role_list);
     try std.testing.expect(msg_vrc_editor != msg_ws_role_picker);
     try std.testing.expect(msg_vrc_editor != msg_ws_device);
+    try std.testing.expect(msg_vrc_editor != msg_lib_mirror);
+    try std.testing.expect(msg_vrc_editor != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrc_editor != msg_rce_info);
+    try std.testing.expect(msg_vrc_editor != msg_rce_body);
+    try std.testing.expect(msg_vrc_editor != msg_rce_save);
+    try std.testing.expect(msg_vrc_editor != msg_ed_preview);
+    try std.testing.expect(msg_vrc_editor != msg_ed_view);
+    try std.testing.expect(msg_vrc_editor != msg_ce_topbar);
+    try std.testing.expect(msg_vrc_editor != msg_ce_wave);
+    try std.testing.expect(msg_vrc_editor != msg_ce_rail);
+    try std.testing.expect(msg_vrc_editor != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrc_editor != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrc_editor != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrc_editor != msg_lib_remote);
     try std.testing.expect(msg_vrc_editor != msg_tk_live);
     try std.testing.expect(msg_vrc_editor != msg_tk_logs);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_photos);
@@ -6851,6 +8119,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_campaths != msg_ws_role_list);
     try std.testing.expect(msg_vrc_campaths != msg_ws_role_picker);
     try std.testing.expect(msg_vrc_campaths != msg_ws_device);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_mirror);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrc_campaths != msg_rce_info);
+    try std.testing.expect(msg_vrc_campaths != msg_rce_body);
+    try std.testing.expect(msg_vrc_campaths != msg_rce_save);
+    try std.testing.expect(msg_vrc_campaths != msg_ed_preview);
+    try std.testing.expect(msg_vrc_campaths != msg_ed_view);
+    try std.testing.expect(msg_vrc_campaths != msg_ce_topbar);
+    try std.testing.expect(msg_vrc_campaths != msg_ce_wave);
+    try std.testing.expect(msg_vrc_campaths != msg_ce_rail);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrc_campaths != msg_lib_remote);
     try std.testing.expect(msg_vrc_campaths != msg_tk_live);
     try std.testing.expect(msg_vrc_campaths != msg_tk_logs);
     try std.testing.expect(msg_vrc_photos != msg_vrc_tab);
@@ -6875,6 +8157,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_photos != msg_ws_role_list);
     try std.testing.expect(msg_vrc_photos != msg_ws_role_picker);
     try std.testing.expect(msg_vrc_photos != msg_ws_device);
+    try std.testing.expect(msg_vrc_photos != msg_lib_mirror);
+    try std.testing.expect(msg_vrc_photos != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrc_photos != msg_rce_info);
+    try std.testing.expect(msg_vrc_photos != msg_rce_body);
+    try std.testing.expect(msg_vrc_photos != msg_rce_save);
+    try std.testing.expect(msg_vrc_photos != msg_ed_preview);
+    try std.testing.expect(msg_vrc_photos != msg_ed_view);
+    try std.testing.expect(msg_vrc_photos != msg_ce_topbar);
+    try std.testing.expect(msg_vrc_photos != msg_ce_wave);
+    try std.testing.expect(msg_vrc_photos != msg_ce_rail);
+    try std.testing.expect(msg_vrc_photos != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrc_photos != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrc_photos != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrc_photos != msg_lib_remote);
     try std.testing.expect(msg_vrc_photos != msg_tk_live);
     try std.testing.expect(msg_vrc_photos != msg_tk_logs);
     try std.testing.expect(msg_vrc_tab != msg_vrcg);
@@ -6898,6 +8194,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_tab != msg_ws_role_list);
     try std.testing.expect(msg_vrc_tab != msg_ws_role_picker);
     try std.testing.expect(msg_vrc_tab != msg_ws_device);
+    try std.testing.expect(msg_vrc_tab != msg_lib_mirror);
+    try std.testing.expect(msg_vrc_tab != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrc_tab != msg_rce_info);
+    try std.testing.expect(msg_vrc_tab != msg_rce_body);
+    try std.testing.expect(msg_vrc_tab != msg_rce_save);
+    try std.testing.expect(msg_vrc_tab != msg_ed_preview);
+    try std.testing.expect(msg_vrc_tab != msg_ed_view);
+    try std.testing.expect(msg_vrc_tab != msg_ce_topbar);
+    try std.testing.expect(msg_vrc_tab != msg_ce_wave);
+    try std.testing.expect(msg_vrc_tab != msg_ce_rail);
+    try std.testing.expect(msg_vrc_tab != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrc_tab != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrc_tab != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrc_tab != msg_lib_remote);
     try std.testing.expect(msg_vrc_tab != msg_tk_live);
     try std.testing.expect(msg_vrc_tab != msg_tk_logs);
     try std.testing.expect(msg_vrcg != msg_vg_role_body);
@@ -6920,6 +8230,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrcg != msg_ws_role_list);
     try std.testing.expect(msg_vrcg != msg_ws_role_picker);
     try std.testing.expect(msg_vrcg != msg_ws_device);
+    try std.testing.expect(msg_vrcg != msg_lib_mirror);
+    try std.testing.expect(msg_vrcg != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vrcg != msg_rce_info);
+    try std.testing.expect(msg_vrcg != msg_rce_body);
+    try std.testing.expect(msg_vrcg != msg_rce_save);
+    try std.testing.expect(msg_vrcg != msg_ed_preview);
+    try std.testing.expect(msg_vrcg != msg_ed_view);
+    try std.testing.expect(msg_vrcg != msg_ce_topbar);
+    try std.testing.expect(msg_vrcg != msg_ce_wave);
+    try std.testing.expect(msg_vrcg != msg_ce_rail);
+    try std.testing.expect(msg_vrcg != msg_lib_g_f_live);
+    try std.testing.expect(msg_vrcg != msg_lib_smart_modal);
+    try std.testing.expect(msg_vrcg != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vrcg != msg_lib_remote);
     try std.testing.expect(msg_vrcg != msg_tk_live);
     try std.testing.expect(msg_vrcg != msg_tk_logs);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_list);
@@ -6941,6 +8265,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_role_body != msg_ws_role_list);
     try std.testing.expect(msg_vg_role_body != msg_ws_role_picker);
     try std.testing.expect(msg_vg_role_body != msg_ws_device);
+    try std.testing.expect(msg_vg_role_body != msg_lib_mirror);
+    try std.testing.expect(msg_vg_role_body != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_role_body != msg_rce_info);
+    try std.testing.expect(msg_vg_role_body != msg_rce_body);
+    try std.testing.expect(msg_vg_role_body != msg_rce_save);
+    try std.testing.expect(msg_vg_role_body != msg_ed_preview);
+    try std.testing.expect(msg_vg_role_body != msg_ed_view);
+    try std.testing.expect(msg_vg_role_body != msg_ce_topbar);
+    try std.testing.expect(msg_vg_role_body != msg_ce_wave);
+    try std.testing.expect(msg_vg_role_body != msg_ce_rail);
+    try std.testing.expect(msg_vg_role_body != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_role_body != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_role_body != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_role_body != msg_lib_remote);
     try std.testing.expect(msg_vg_role_body != msg_tk_live);
     try std.testing.expect(msg_vg_role_body != msg_tk_logs);
     try std.testing.expect(msg_vg_invite_list != msg_vg_roles_modal);
@@ -6961,6 +8299,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_list != msg_ws_role_list);
     try std.testing.expect(msg_vg_invite_list != msg_ws_role_picker);
     try std.testing.expect(msg_vg_invite_list != msg_ws_device);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_mirror);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_invite_list != msg_rce_info);
+    try std.testing.expect(msg_vg_invite_list != msg_rce_body);
+    try std.testing.expect(msg_vg_invite_list != msg_rce_save);
+    try std.testing.expect(msg_vg_invite_list != msg_ed_preview);
+    try std.testing.expect(msg_vg_invite_list != msg_ed_view);
+    try std.testing.expect(msg_vg_invite_list != msg_ce_topbar);
+    try std.testing.expect(msg_vg_invite_list != msg_ce_wave);
+    try std.testing.expect(msg_vg_invite_list != msg_ce_rail);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_invite_list != msg_lib_remote);
     try std.testing.expect(msg_vg_invite_list != msg_tk_live);
     try std.testing.expect(msg_vg_invite_list != msg_tk_logs);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_invite_modal);
@@ -6980,6 +8332,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_roles_modal != msg_ws_role_list);
     try std.testing.expect(msg_vg_roles_modal != msg_ws_role_picker);
     try std.testing.expect(msg_vg_roles_modal != msg_ws_device);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_mirror);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_roles_modal != msg_rce_info);
+    try std.testing.expect(msg_vg_roles_modal != msg_rce_body);
+    try std.testing.expect(msg_vg_roles_modal != msg_rce_save);
+    try std.testing.expect(msg_vg_roles_modal != msg_ed_preview);
+    try std.testing.expect(msg_vg_roles_modal != msg_ed_view);
+    try std.testing.expect(msg_vg_roles_modal != msg_ce_topbar);
+    try std.testing.expect(msg_vg_roles_modal != msg_ce_wave);
+    try std.testing.expect(msg_vg_roles_modal != msg_ce_rail);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_roles_modal != msg_lib_remote);
     try std.testing.expect(msg_vg_roles_modal != msg_tk_live);
     try std.testing.expect(msg_vg_roles_modal != msg_tk_logs);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_member_confirm);
@@ -6998,6 +8364,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_modal != msg_ws_role_list);
     try std.testing.expect(msg_vg_invite_modal != msg_ws_role_picker);
     try std.testing.expect(msg_vg_invite_modal != msg_ws_device);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_mirror);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_invite_modal != msg_rce_info);
+    try std.testing.expect(msg_vg_invite_modal != msg_rce_body);
+    try std.testing.expect(msg_vg_invite_modal != msg_rce_save);
+    try std.testing.expect(msg_vg_invite_modal != msg_ed_preview);
+    try std.testing.expect(msg_vg_invite_modal != msg_ed_view);
+    try std.testing.expect(msg_vg_invite_modal != msg_ce_topbar);
+    try std.testing.expect(msg_vg_invite_modal != msg_ce_wave);
+    try std.testing.expect(msg_vg_invite_modal != msg_ce_rail);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_invite_modal != msg_lib_remote);
     try std.testing.expect(msg_vg_invite_modal != msg_tk_live);
     try std.testing.expect(msg_vg_invite_modal != msg_tk_logs);
     try std.testing.expect(msg_vg_member_confirm != msg_vg_post_confirm);
@@ -7015,6 +8395,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_member_confirm != msg_ws_role_list);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_role_picker);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_device);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_mirror);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_member_confirm != msg_rce_info);
+    try std.testing.expect(msg_vg_member_confirm != msg_rce_body);
+    try std.testing.expect(msg_vg_member_confirm != msg_rce_save);
+    try std.testing.expect(msg_vg_member_confirm != msg_ed_preview);
+    try std.testing.expect(msg_vg_member_confirm != msg_ed_view);
+    try std.testing.expect(msg_vg_member_confirm != msg_ce_topbar);
+    try std.testing.expect(msg_vg_member_confirm != msg_ce_wave);
+    try std.testing.expect(msg_vg_member_confirm != msg_ce_rail);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_member_confirm != msg_lib_remote);
     try std.testing.expect(msg_vg_member_confirm != msg_tk_live);
     try std.testing.expect(msg_vg_member_confirm != msg_tk_logs);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_hint);
@@ -7031,6 +8425,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_post_confirm != msg_ws_role_list);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_role_picker);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_device);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_mirror);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_mirror_ban);
+    try std.testing.expect(msg_vg_post_confirm != msg_rce_info);
+    try std.testing.expect(msg_vg_post_confirm != msg_rce_body);
+    try std.testing.expect(msg_vg_post_confirm != msg_rce_save);
+    try std.testing.expect(msg_vg_post_confirm != msg_ed_preview);
+    try std.testing.expect(msg_vg_post_confirm != msg_ed_view);
+    try std.testing.expect(msg_vg_post_confirm != msg_ce_topbar);
+    try std.testing.expect(msg_vg_post_confirm != msg_ce_wave);
+    try std.testing.expect(msg_vg_post_confirm != msg_ce_rail);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_g_f_live);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_smart_modal);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_reloc_modal);
+    try std.testing.expect(msg_vg_post_confirm != msg_lib_remote);
     try std.testing.expect(msg_vg_post_confirm != msg_tk_live);
     try std.testing.expect(msg_vg_post_confirm != msg_tk_logs);
     try std.testing.expect(msg_ws_hint != msg_ws_git_hub);
@@ -7046,6 +8454,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_hint != msg_ws_role_list);
     try std.testing.expect(msg_ws_hint != msg_ws_role_picker);
     try std.testing.expect(msg_ws_hint != msg_ws_device);
+    try std.testing.expect(msg_ws_hint != msg_lib_mirror);
+    try std.testing.expect(msg_ws_hint != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_hint != msg_rce_info);
+    try std.testing.expect(msg_ws_hint != msg_rce_body);
+    try std.testing.expect(msg_ws_hint != msg_rce_save);
+    try std.testing.expect(msg_ws_hint != msg_ed_preview);
+    try std.testing.expect(msg_ws_hint != msg_ed_view);
+    try std.testing.expect(msg_ws_hint != msg_ce_topbar);
+    try std.testing.expect(msg_ws_hint != msg_ce_wave);
+    try std.testing.expect(msg_ws_hint != msg_ce_rail);
+    try std.testing.expect(msg_ws_hint != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_hint != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_hint != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_hint != msg_lib_remote);
     try std.testing.expect(msg_ws_hint != msg_tk_live);
     try std.testing.expect(msg_ws_hint != msg_tk_logs);
     try std.testing.expect(msg_ws_git_hub != msg_ws_status);
@@ -7060,6 +8482,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_git_hub != msg_ws_role_list);
     try std.testing.expect(msg_ws_git_hub != msg_ws_role_picker);
     try std.testing.expect(msg_ws_git_hub != msg_ws_device);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_mirror);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_git_hub != msg_rce_info);
+    try std.testing.expect(msg_ws_git_hub != msg_rce_body);
+    try std.testing.expect(msg_ws_git_hub != msg_rce_save);
+    try std.testing.expect(msg_ws_git_hub != msg_ed_preview);
+    try std.testing.expect(msg_ws_git_hub != msg_ed_view);
+    try std.testing.expect(msg_ws_git_hub != msg_ce_topbar);
+    try std.testing.expect(msg_ws_git_hub != msg_ce_wave);
+    try std.testing.expect(msg_ws_git_hub != msg_ce_rail);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_git_hub != msg_lib_remote);
     try std.testing.expect(msg_ws_git_hub != msg_tk_live);
     try std.testing.expect(msg_ws_git_hub != msg_tk_logs);
     try std.testing.expect(msg_ws_status != msg_ws_unity);
@@ -7073,6 +8509,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_status != msg_ws_role_list);
     try std.testing.expect(msg_ws_status != msg_ws_role_picker);
     try std.testing.expect(msg_ws_status != msg_ws_device);
+    try std.testing.expect(msg_ws_status != msg_lib_mirror);
+    try std.testing.expect(msg_ws_status != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_status != msg_rce_info);
+    try std.testing.expect(msg_ws_status != msg_rce_body);
+    try std.testing.expect(msg_ws_status != msg_rce_save);
+    try std.testing.expect(msg_ws_status != msg_ed_preview);
+    try std.testing.expect(msg_ws_status != msg_ed_view);
+    try std.testing.expect(msg_ws_status != msg_ce_topbar);
+    try std.testing.expect(msg_ws_status != msg_ce_wave);
+    try std.testing.expect(msg_ws_status != msg_ce_rail);
+    try std.testing.expect(msg_ws_status != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_status != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_status != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_status != msg_lib_remote);
     try std.testing.expect(msg_ws_status != msg_tk_live);
     try std.testing.expect(msg_ws_status != msg_tk_logs);
     try std.testing.expect(msg_ws_unity != msg_worlds);
@@ -7085,6 +8535,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_unity != msg_ws_role_list);
     try std.testing.expect(msg_ws_unity != msg_ws_role_picker);
     try std.testing.expect(msg_ws_unity != msg_ws_device);
+    try std.testing.expect(msg_ws_unity != msg_lib_mirror);
+    try std.testing.expect(msg_ws_unity != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_unity != msg_rce_info);
+    try std.testing.expect(msg_ws_unity != msg_rce_body);
+    try std.testing.expect(msg_ws_unity != msg_rce_save);
+    try std.testing.expect(msg_ws_unity != msg_ed_preview);
+    try std.testing.expect(msg_ws_unity != msg_ed_view);
+    try std.testing.expect(msg_ws_unity != msg_ce_topbar);
+    try std.testing.expect(msg_ws_unity != msg_ce_wave);
+    try std.testing.expect(msg_ws_unity != msg_ce_rail);
+    try std.testing.expect(msg_ws_unity != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_unity != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_unity != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_unity != msg_lib_remote);
     try std.testing.expect(msg_ws_unity != msg_tk_live);
     try std.testing.expect(msg_ws_unity != msg_tk_logs);
     try std.testing.expect(msg_worlds != msg_ws_list_editor);
@@ -7096,6 +8560,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_worlds != msg_ws_role_list);
     try std.testing.expect(msg_worlds != msg_ws_role_picker);
     try std.testing.expect(msg_worlds != msg_ws_device);
+    try std.testing.expect(msg_worlds != msg_lib_mirror);
+    try std.testing.expect(msg_worlds != msg_lib_mirror_ban);
+    try std.testing.expect(msg_worlds != msg_rce_info);
+    try std.testing.expect(msg_worlds != msg_rce_body);
+    try std.testing.expect(msg_worlds != msg_rce_save);
+    try std.testing.expect(msg_worlds != msg_ed_preview);
+    try std.testing.expect(msg_worlds != msg_ed_view);
+    try std.testing.expect(msg_worlds != msg_ce_topbar);
+    try std.testing.expect(msg_worlds != msg_ce_wave);
+    try std.testing.expect(msg_worlds != msg_ce_rail);
+    try std.testing.expect(msg_worlds != msg_lib_g_f_live);
+    try std.testing.expect(msg_worlds != msg_lib_smart_modal);
+    try std.testing.expect(msg_worlds != msg_lib_reloc_modal);
+    try std.testing.expect(msg_worlds != msg_lib_remote);
     try std.testing.expect(msg_worlds != msg_tk_live);
     try std.testing.expect(msg_worlds != msg_tk_logs);
     try std.testing.expect(msg_ws_list_editor != msg_ws_poster_editor);
@@ -7106,6 +8584,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_list_editor != msg_ws_role_list);
     try std.testing.expect(msg_ws_list_editor != msg_ws_role_picker);
     try std.testing.expect(msg_ws_list_editor != msg_ws_device);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_mirror);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_list_editor != msg_rce_info);
+    try std.testing.expect(msg_ws_list_editor != msg_rce_body);
+    try std.testing.expect(msg_ws_list_editor != msg_rce_save);
+    try std.testing.expect(msg_ws_list_editor != msg_ed_preview);
+    try std.testing.expect(msg_ws_list_editor != msg_ed_view);
+    try std.testing.expect(msg_ws_list_editor != msg_ce_topbar);
+    try std.testing.expect(msg_ws_list_editor != msg_ce_wave);
+    try std.testing.expect(msg_ws_list_editor != msg_ce_rail);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_list_editor != msg_lib_remote);
     try std.testing.expect(msg_ws_list_editor != msg_tk_live);
     try std.testing.expect(msg_ws_list_editor != msg_tk_logs);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_list);
@@ -7115,6 +8607,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_poster_editor != msg_ws_role_list);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_role_picker);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_device);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_mirror);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_poster_editor != msg_rce_info);
+    try std.testing.expect(msg_ws_poster_editor != msg_rce_body);
+    try std.testing.expect(msg_ws_poster_editor != msg_rce_save);
+    try std.testing.expect(msg_ws_poster_editor != msg_ed_preview);
+    try std.testing.expect(msg_ws_poster_editor != msg_ed_view);
+    try std.testing.expect(msg_ws_poster_editor != msg_ce_topbar);
+    try std.testing.expect(msg_ws_poster_editor != msg_ce_wave);
+    try std.testing.expect(msg_ws_poster_editor != msg_ce_rail);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_poster_editor != msg_lib_remote);
     try std.testing.expect(msg_ws_poster_editor != msg_tk_live);
     try std.testing.expect(msg_ws_poster_editor != msg_tk_logs);
     try std.testing.expect(msg_ws_friend_list != msg_ws_friend_picker);
@@ -7123,6 +8629,20 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_list != msg_ws_role_list);
     try std.testing.expect(msg_ws_friend_list != msg_ws_role_picker);
     try std.testing.expect(msg_ws_friend_list != msg_ws_device);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_mirror);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_friend_list != msg_rce_info);
+    try std.testing.expect(msg_ws_friend_list != msg_rce_body);
+    try std.testing.expect(msg_ws_friend_list != msg_rce_save);
+    try std.testing.expect(msg_ws_friend_list != msg_ed_preview);
+    try std.testing.expect(msg_ws_friend_list != msg_ed_view);
+    try std.testing.expect(msg_ws_friend_list != msg_ce_topbar);
+    try std.testing.expect(msg_ws_friend_list != msg_ce_wave);
+    try std.testing.expect(msg_ws_friend_list != msg_ce_rail);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_friend_list != msg_lib_remote);
     try std.testing.expect(msg_ws_friend_list != msg_tk_live);
     try std.testing.expect(msg_ws_friend_list != msg_tk_logs);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_group_list);
@@ -7130,27 +8650,230 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_picker != msg_ws_role_list);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_role_picker);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_mirror);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_friend_picker != msg_rce_info);
+    try std.testing.expect(msg_ws_friend_picker != msg_rce_body);
+    try std.testing.expect(msg_ws_friend_picker != msg_rce_save);
+    try std.testing.expect(msg_ws_friend_picker != msg_ed_preview);
+    try std.testing.expect(msg_ws_friend_picker != msg_ed_view);
+    try std.testing.expect(msg_ws_friend_picker != msg_ce_topbar);
+    try std.testing.expect(msg_ws_friend_picker != msg_ce_wave);
+    try std.testing.expect(msg_ws_friend_picker != msg_ce_rail);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_friend_picker != msg_lib_remote);
     try std.testing.expect(msg_ws_friend_picker != msg_tk_live);
     try std.testing.expect(msg_ws_friend_picker != msg_tk_logs);
     try std.testing.expect(msg_ws_group_list != msg_ws_group_picker);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_picker);
     try std.testing.expect(msg_ws_group_list != msg_ws_device);
+    try std.testing.expect(msg_ws_group_list != msg_lib_mirror);
+    try std.testing.expect(msg_ws_group_list != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_group_list != msg_rce_info);
+    try std.testing.expect(msg_ws_group_list != msg_rce_body);
+    try std.testing.expect(msg_ws_group_list != msg_rce_save);
+    try std.testing.expect(msg_ws_group_list != msg_ed_preview);
+    try std.testing.expect(msg_ws_group_list != msg_ed_view);
+    try std.testing.expect(msg_ws_group_list != msg_ce_topbar);
+    try std.testing.expect(msg_ws_group_list != msg_ce_wave);
+    try std.testing.expect(msg_ws_group_list != msg_ce_rail);
+    try std.testing.expect(msg_ws_group_list != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_group_list != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_group_list != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_group_list != msg_lib_remote);
     try std.testing.expect(msg_ws_group_list != msg_tk_live);
     try std.testing.expect(msg_ws_group_list != msg_tk_logs);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_picker);
     try std.testing.expect(msg_ws_group_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_mirror);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_group_picker != msg_rce_info);
+    try std.testing.expect(msg_ws_group_picker != msg_rce_body);
+    try std.testing.expect(msg_ws_group_picker != msg_rce_save);
+    try std.testing.expect(msg_ws_group_picker != msg_ed_preview);
+    try std.testing.expect(msg_ws_group_picker != msg_ed_view);
+    try std.testing.expect(msg_ws_group_picker != msg_ce_topbar);
+    try std.testing.expect(msg_ws_group_picker != msg_ce_wave);
+    try std.testing.expect(msg_ws_group_picker != msg_ce_rail);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_group_picker != msg_lib_remote);
     try std.testing.expect(msg_ws_group_picker != msg_tk_live);
     try std.testing.expect(msg_ws_group_picker != msg_tk_logs);
     try std.testing.expect(msg_ws_role_list != msg_ws_role_picker);
     try std.testing.expect(msg_ws_role_list != msg_ws_device);
+    try std.testing.expect(msg_ws_role_list != msg_lib_mirror);
+    try std.testing.expect(msg_ws_role_list != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_role_list != msg_rce_info);
+    try std.testing.expect(msg_ws_role_list != msg_rce_body);
+    try std.testing.expect(msg_ws_role_list != msg_rce_save);
+    try std.testing.expect(msg_ws_role_list != msg_ed_preview);
+    try std.testing.expect(msg_ws_role_list != msg_ed_view);
+    try std.testing.expect(msg_ws_role_list != msg_ce_topbar);
+    try std.testing.expect(msg_ws_role_list != msg_ce_wave);
+    try std.testing.expect(msg_ws_role_list != msg_ce_rail);
+    try std.testing.expect(msg_ws_role_list != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_role_list != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_role_list != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_role_list != msg_lib_remote);
     try std.testing.expect(msg_ws_role_list != msg_tk_live);
     try std.testing.expect(msg_ws_role_list != msg_tk_logs);
     try std.testing.expect(msg_ws_role_picker != msg_ws_device);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_mirror);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_role_picker != msg_rce_info);
+    try std.testing.expect(msg_ws_role_picker != msg_rce_body);
+    try std.testing.expect(msg_ws_role_picker != msg_rce_save);
+    try std.testing.expect(msg_ws_role_picker != msg_ed_preview);
+    try std.testing.expect(msg_ws_role_picker != msg_ed_view);
+    try std.testing.expect(msg_ws_role_picker != msg_ce_topbar);
+    try std.testing.expect(msg_ws_role_picker != msg_ce_wave);
+    try std.testing.expect(msg_ws_role_picker != msg_ce_rail);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_role_picker != msg_lib_remote);
     try std.testing.expect(msg_ws_role_picker != msg_tk_live);
     try std.testing.expect(msg_ws_role_picker != msg_tk_logs);
+    try std.testing.expect(msg_ws_device != msg_lib_mirror);
+    try std.testing.expect(msg_ws_device != msg_lib_mirror_ban);
+    try std.testing.expect(msg_ws_device != msg_rce_info);
+    try std.testing.expect(msg_ws_device != msg_rce_body);
+    try std.testing.expect(msg_ws_device != msg_rce_save);
+    try std.testing.expect(msg_ws_device != msg_ed_preview);
+    try std.testing.expect(msg_ws_device != msg_ed_view);
+    try std.testing.expect(msg_ws_device != msg_ce_topbar);
+    try std.testing.expect(msg_ws_device != msg_ce_wave);
+    try std.testing.expect(msg_ws_device != msg_ce_rail);
+    try std.testing.expect(msg_ws_device != msg_lib_g_f_live);
+    try std.testing.expect(msg_ws_device != msg_lib_smart_modal);
+    try std.testing.expect(msg_ws_device != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ws_device != msg_lib_remote);
     try std.testing.expect(msg_ws_device != msg_tk_live);
     try std.testing.expect(msg_ws_device != msg_tk_logs);
+    try std.testing.expect(msg_lib_mirror != msg_lib_mirror_ban);
+    try std.testing.expect(msg_lib_mirror != msg_rce_info);
+    try std.testing.expect(msg_lib_mirror != msg_rce_body);
+    try std.testing.expect(msg_lib_mirror != msg_rce_save);
+    try std.testing.expect(msg_lib_mirror != msg_ed_preview);
+    try std.testing.expect(msg_lib_mirror != msg_ed_view);
+    try std.testing.expect(msg_lib_mirror != msg_ce_topbar);
+    try std.testing.expect(msg_lib_mirror != msg_ce_wave);
+    try std.testing.expect(msg_lib_mirror != msg_ce_rail);
+    try std.testing.expect(msg_lib_mirror != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_mirror != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_mirror != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_mirror != msg_lib_remote);
+    try std.testing.expect(msg_lib_mirror != msg_tk_live);
+    try std.testing.expect(msg_lib_mirror != msg_tk_logs);
+    try std.testing.expect(msg_lib_mirror_ban != msg_rce_info);
+    try std.testing.expect(msg_lib_mirror_ban != msg_rce_body);
+    try std.testing.expect(msg_lib_mirror_ban != msg_rce_save);
+    try std.testing.expect(msg_lib_mirror_ban != msg_ed_preview);
+    try std.testing.expect(msg_lib_mirror_ban != msg_ed_view);
+    try std.testing.expect(msg_lib_mirror_ban != msg_ce_topbar);
+    try std.testing.expect(msg_lib_mirror_ban != msg_ce_wave);
+    try std.testing.expect(msg_lib_mirror_ban != msg_ce_rail);
+    try std.testing.expect(msg_lib_mirror_ban != msg_lib_g_f_live);
+    try std.testing.expect(msg_lib_mirror_ban != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_mirror_ban != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_mirror_ban != msg_lib_remote);
+    try std.testing.expect(msg_lib_mirror_ban != msg_tk_live);
+    try std.testing.expect(msg_lib_mirror_ban != msg_tk_logs);
+    try std.testing.expect(msg_rce_info != msg_rce_body);
+    try std.testing.expect(msg_rce_info != msg_rce_save);
+    try std.testing.expect(msg_rce_info != msg_ed_preview);
+    try std.testing.expect(msg_rce_info != msg_ed_view);
+    try std.testing.expect(msg_rce_info != msg_ce_topbar);
+    try std.testing.expect(msg_rce_info != msg_ce_wave);
+    try std.testing.expect(msg_rce_info != msg_ce_rail);
+    try std.testing.expect(msg_rce_info != msg_lib_g_f_live);
+    try std.testing.expect(msg_rce_info != msg_lib_smart_modal);
+    try std.testing.expect(msg_rce_info != msg_lib_reloc_modal);
+    try std.testing.expect(msg_rce_info != msg_lib_remote);
+    try std.testing.expect(msg_rce_info != msg_tk_live);
+    try std.testing.expect(msg_rce_info != msg_tk_logs);
+    try std.testing.expect(msg_rce_body != msg_rce_save);
+    try std.testing.expect(msg_rce_body != msg_ed_preview);
+    try std.testing.expect(msg_rce_body != msg_ed_view);
+    try std.testing.expect(msg_rce_body != msg_ce_topbar);
+    try std.testing.expect(msg_rce_body != msg_ce_wave);
+    try std.testing.expect(msg_rce_body != msg_ce_rail);
+    try std.testing.expect(msg_rce_body != msg_lib_g_f_live);
+    try std.testing.expect(msg_rce_body != msg_lib_smart_modal);
+    try std.testing.expect(msg_rce_body != msg_lib_reloc_modal);
+    try std.testing.expect(msg_rce_body != msg_lib_remote);
+    try std.testing.expect(msg_rce_body != msg_tk_live);
+    try std.testing.expect(msg_rce_body != msg_tk_logs);
+    try std.testing.expect(msg_rce_save != msg_ed_preview);
+    try std.testing.expect(msg_rce_save != msg_ed_view);
+    try std.testing.expect(msg_rce_save != msg_ce_topbar);
+    try std.testing.expect(msg_rce_save != msg_ce_wave);
+    try std.testing.expect(msg_rce_save != msg_ce_rail);
+    try std.testing.expect(msg_rce_save != msg_lib_g_f_live);
+    try std.testing.expect(msg_rce_save != msg_lib_smart_modal);
+    try std.testing.expect(msg_rce_save != msg_lib_reloc_modal);
+    try std.testing.expect(msg_rce_save != msg_lib_remote);
+    try std.testing.expect(msg_rce_save != msg_tk_live);
+    try std.testing.expect(msg_rce_save != msg_tk_logs);
+    try std.testing.expect(msg_ed_preview != msg_ed_view);
+    try std.testing.expect(msg_ed_preview != msg_ce_topbar);
+    try std.testing.expect(msg_ed_preview != msg_ce_wave);
+    try std.testing.expect(msg_ed_preview != msg_ce_rail);
+    try std.testing.expect(msg_ed_preview != msg_lib_g_f_live);
+    try std.testing.expect(msg_ed_preview != msg_lib_smart_modal);
+    try std.testing.expect(msg_ed_preview != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ed_preview != msg_lib_remote);
+    try std.testing.expect(msg_ed_preview != msg_tk_live);
+    try std.testing.expect(msg_ed_preview != msg_tk_logs);
+    try std.testing.expect(msg_ed_view != msg_ce_topbar);
+    try std.testing.expect(msg_ed_view != msg_ce_wave);
+    try std.testing.expect(msg_ed_view != msg_ce_rail);
+    try std.testing.expect(msg_ed_view != msg_lib_g_f_live);
+    try std.testing.expect(msg_ed_view != msg_lib_smart_modal);
+    try std.testing.expect(msg_ed_view != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ed_view != msg_lib_remote);
+    try std.testing.expect(msg_ed_view != msg_tk_live);
+    try std.testing.expect(msg_ed_view != msg_tk_logs);
+    try std.testing.expect(msg_ce_topbar != msg_ce_wave);
+    try std.testing.expect(msg_ce_topbar != msg_ce_rail);
+    try std.testing.expect(msg_ce_topbar != msg_lib_g_f_live);
+    try std.testing.expect(msg_ce_topbar != msg_lib_smart_modal);
+    try std.testing.expect(msg_ce_topbar != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ce_topbar != msg_lib_remote);
+    try std.testing.expect(msg_ce_topbar != msg_tk_live);
+    try std.testing.expect(msg_ce_topbar != msg_tk_logs);
+    try std.testing.expect(msg_ce_wave != msg_ce_rail);
+    try std.testing.expect(msg_ce_wave != msg_lib_g_f_live);
+    try std.testing.expect(msg_ce_wave != msg_lib_smart_modal);
+    try std.testing.expect(msg_ce_wave != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ce_wave != msg_lib_remote);
+    try std.testing.expect(msg_ce_wave != msg_tk_live);
+    try std.testing.expect(msg_ce_wave != msg_tk_logs);
+    try std.testing.expect(msg_ce_rail != msg_lib_g_f_live);
+    try std.testing.expect(msg_ce_rail != msg_lib_smart_modal);
+    try std.testing.expect(msg_ce_rail != msg_lib_reloc_modal);
+    try std.testing.expect(msg_ce_rail != msg_lib_remote);
+    try std.testing.expect(msg_ce_rail != msg_tk_live);
+    try std.testing.expect(msg_ce_rail != msg_tk_logs);
+    try std.testing.expect(msg_lib_g_f_live != msg_lib_smart_modal);
+    try std.testing.expect(msg_lib_g_f_live != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_g_f_live != msg_lib_remote);
+    try std.testing.expect(msg_lib_g_f_live != msg_tk_live);
+    try std.testing.expect(msg_lib_g_f_live != msg_tk_logs);
+    try std.testing.expect(msg_lib_smart_modal != msg_lib_reloc_modal);
+    try std.testing.expect(msg_lib_smart_modal != msg_lib_remote);
+    try std.testing.expect(msg_lib_smart_modal != msg_tk_live);
+    try std.testing.expect(msg_lib_smart_modal != msg_tk_logs);
+    try std.testing.expect(msg_lib_reloc_modal != msg_lib_remote);
+    try std.testing.expect(msg_lib_reloc_modal != msg_tk_live);
+    try std.testing.expect(msg_lib_reloc_modal != msg_tk_logs);
+    try std.testing.expect(msg_lib_remote != msg_tk_live);
+    try std.testing.expect(msg_lib_remote != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
 }

@@ -377,10 +377,11 @@ Rules:
   ~1 Hz patch targets) - -52% full / -44% monitor rows, documents 43.5%. Fourth (i4): vrchat
   family (ids 60-71; full tab + 4 fragments + #vrcg-body + 6 group modals) - -61% full / -57%
   groups body, documents 33.5%. Fifth (i5): worlds family (ids 72-85; full tab + 4 patch targets
-  + 9 ws modals) - -43% full / -28% status, documents 67.8% (long unrepeated prose), fuzz
-  1 117 315 cases. Registry: `zigui_wire_b7_test.go`.
-  Still JSON-bridged: editor(2), dialogs_a(7),
-  library modals/cueedit/fixers/remote/mirror/remotecue(12), motion pcv(2), publish remote(1),
+  + 9 ws modals) - -43% full / -28% status, documents 67.8% (long unrepeated prose). Fifth (i6):
+  editor/cueedit/mirror/rce/lib-modals/remote (ids 86-99; first self-recursive message EdLayer,
+  first root promotion LibGFLive) - editor -58% full at 28.0% doc ratio (best), #ce-topbar -55%
+  (the drag hot path), fuzz 1 521 095 cases. Registry: `zigui_wire_b7_test.go`.
+  Still JSON-bridged: dialogs_a(7), publish remote(1),
   automations editor/runnow/schedules(3), update flow(1). Detail: ZIG_UI_GUIDE.md "Phase B - B7".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).

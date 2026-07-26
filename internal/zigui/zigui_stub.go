@@ -272,6 +272,21 @@ func RenderWsRolePickerV2(state []byte) (string, bool)    { return "", false }
 func RenderWsRoleListV2(state []byte) (string, bool)      { return "", false }
 func RenderWsDeviceV2(state []byte) (string, bool)        { return "", false }
 
+func RenderLibMirrorV2(state []byte) (string, bool)       { return "", false }
+func RenderLibMirrorBannerV2(state []byte) (string, bool) { return "", false }
+func RenderRCEInfoV2(state []byte) (string, bool)         { return "", false }
+func RenderRCEBodyV2(state []byte) (string, bool)         { return "", false }
+func RenderRCESaveV2(state []byte) (string, bool)         { return "", false }
+func RenderEditorPreviewV2(state []byte) (string, bool)   { return "", false }
+func RenderEditorV2(state []byte) (string, bool)          { return "", false }
+func RenderCueEditTopbarV2(state []byte) (string, bool)   { return "", false }
+func RenderCueEditWaveV2(state []byte) (string, bool)     { return "", false }
+func RenderCueEditRailV2(state []byte) (string, bool)     { return "", false }
+func RenderLibFixGFLiveV2(state []byte) (string, bool)    { return "", false }
+func RenderLibSmartModalV2(state []byte) (string, bool)   { return "", false }
+func RenderLibRelocModalV2(state []byte) (string, bool)   { return "", false }
+func RenderLibRemoteV2(state []byte) (string, bool)       { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

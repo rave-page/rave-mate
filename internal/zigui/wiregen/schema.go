@@ -456,8 +456,9 @@ var schema = []msg{
 		fs: []field{s(1, "N", "n"), s(2, "Label", "label"), s(3, "Tone", "tone")},
 	},
 	{
-		name: "LibGFLive", goT: "libGFLiveSt", zigT: "f.GFLive",
-		fs: []field{li(1, "Tiles", "tiles", "LibGFTile"), s(2, "Pct", "pct"), s(3, "Caption", "caption"), s(4, "Current", "current")},
+		name: "LibGFLive", goT: "libGFLiveSt", zigT: "f.GFLive", id: 96,
+		doc: "#gf-live fixer progress fragment (~2 Hz)",
+		fs:  []field{li(1, "Tiles", "tiles", "LibGFTile"), s(2, "Pct", "pct"), s(3, "Caption", "caption"), s(4, "Current", "current")},
 	},
 	{
 		name: "LibHint", goT: "libHintSt", zigT: "k.Hint",
@@ -1371,6 +1372,155 @@ var schema = []msg{
 		doc: "GitHub device-code dialog",
 		fs:  []field{s(1, "Title", "title"), s(2, "Help", "help"), s(3, "Code", "code"), s(4, "CopyLbl", "copyLbl"), s(5, "OpenLbl", "openLbl"), s(6, "URI", "uri")},
 	},
+	// editor/cueedit/mirror/rce/library-modals/remote (i6): roots 86-99. 86/87 = remote-library
+	// mirror body + #rmirror-banner (patched per session-state move); 88-90 = remote cue-edit
+	// panes (#rce-info, #lib-body, save rail); 91/92 = #ed-preview + full Editor view; 93-95 =
+	// cue-editor #ce-topbar / wave strip / rail (re-rendered during drag - the hot path); 96 =
+	// #gf-live (existing message, promoted to root; ~2 Hz from the fixer run goroutine); 97/98 =
+	// smart-rules + relocate modals; 99 = the "Controlling [peer]" switcher. EdLayer is the
+	// schema's first self-recursive message (children) - decode depth is bounded by the
+	// document's byte length (every nesting level consumes a tag), fuzz leans on that.
+	{
+		name: "LibMirrorBan", goT: "libMirrorBanSt", zigT: "libviews.MirrorBanner", id: 87,
+		doc: "#rmirror-banner status strip (patched on session-state moves)",
+		fs:  []field{s(1, "Status", "status"), s(2, "Title", "title"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), b(5, "HasNote", "hasNote"), s(6, "Note", "note"), b(7, "IsErr", "isErr"), s(8, "Err", "err"), s(9, "Reconnect", "reconnect")},
+	},
+	{
+		name: "LibMirror", goT: "libMirrorSt", zigT: "libviews.Mirror", id: 86,
+		doc: "remote-library mirror body (#lib-body while a peer is targeted)",
+		fs:  []field{b(1, "NoLink", "noLink"), s(2, "NoLinkMsg", "noLinkMsg"), st(3, "Banner", "banner", "LibMirrorBan")},
+	},
+	{
+		name: "RceNav", goT: "rceNavSt", zigT: "libviews.RceNav",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act"), b(3, "Gated", "gated"), s(4, "Why", "why")},
+	},
+	{
+		name: "RceInfo", goT: "rceInfoSt", zigT: "libviews.RceInfo", id: 88,
+		doc: "#rce-info left pane (remote cue-edit)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), s(4, "Path", "path"), b(5, "HasSet", "hasSet"), s(6, "SetLine", "setLine"), st(7, "Prev", "prev", "RceNav"), st(8, "Next", "next", "RceNav"), s(9, "LocalNote", "localNote"), li(10, "Hints", "hints", "LibHint"), s(11, "Back", "back")},
+	},
+	{
+		name: "RceBody", goT: "rceBodySt", zigT: "libviews.RceBody", id: 89,
+		doc: "#lib-body while remote-editing (wave strip + info + detail)",
+		fs:  []field{s(1, "Wave", "wave"), st(2, "Info", "info", "RceInfo"), st(3, "Detail", "detail", "LibDetail")},
+	},
+	{
+		name: "RceWrite", goT: "rceWriteSt", zigT: "libviews.RceWrite",
+		fs: []field{b(1, "Done", "done"), s(2, "Text", "text"), s(3, "Act", "act"), b(4, "Gated", "gated"), s(5, "Why", "why")},
+	},
+	{
+		name: "RceSave", goT: "rceSaveSt", zigT: "libviews.RceSave", id: 90,
+		doc: "remote cue-edit save/write-back rail section",
+		fs:  []field{b(1, "Show", "show"), s(2, "Header", "header"), b(3, "Moved", "moved"), s(4, "MovedText", "movedText"), s(5, "ReloadLbl", "reloadLbl"), b(6, "HasErr", "hasErr"), s(7, "ErrText", "errText"), s(8, "Status", "status"), s(9, "StatusText", "statusText"), s(10, "UnsavedText", "unsavedText"), s(11, "SaveLbl", "saveLbl"), b(12, "HasWrites", "hasWrites"), s(13, "WriteHeader", "writeHeader"), li(14, "Writes", "writes", "RceWrite")},
+	},
+	{
+		name: "EdGradStop", goT: "edGradStop", zigT: "editor.GradStop",
+		fs: []field{s(1, "RGBA", "rgba"), s(2, "Pos", "pos")},
+	},
+	{
+		name: "EdPaint", goT: "edPaint", zigT: "editor.Paint",
+		fs: []field{s(1, "Kind", "kind"), s(2, "RGBA", "rgba"), s(3, "Angle", "angle"), li(4, "Stops", "stops", "EdGradStop"), s(5, "URLQ", "urlq"), s(6, "Size", "size")},
+	},
+	{
+		name: "EdText", goT: "edText", zigT: "editor.Text",
+		fs: []field{s(1, "Content", "content"), s(2, "FamQ", "famq"), s(3, "Size", "size"), s(4, "LH", "lh"), s(5, "Align", "alignment"), s(6, "RGBA", "rgba"), s(7, "LS", "ls")},
+	},
+	{
+		name: "EdInner", goT: "edInner", zigT: "editor.Inner",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Text", "text", "EdText"), s(3, "Placeholder", "placeholder")},
+	},
+	{
+		name: "EdLayer", goT: "edLayer", zigT: "editor.Layer",
+		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer")},
+	},
+	{
+		name: "EdPreview", goT: "edPreviewState", zigT: "editor.Preview", id: 91,
+		doc: "#ed-preview live composite",
+		fs:  []field{s(1, "AW", "aw"), s(2, "AH", "ah"), li(3, "Layers", "layers", "EdLayer"), s(4, "Cap", "cap"), s(5, "Hint", "hint")},
+	},
+	{
+		name: "EdRow", goT: "edRow", zigT: "editor.Row",
+		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), u(3, "Depth", "depth"), b(4, "Group", "group"), b(5, "Sel", "sel"), b(6, "Visible", "visible"), b(7, "Locked", "locked")},
+	},
+	{
+		name: "EdActions", goT: "edActionsState", zigT: "editor.Actions",
+		fs: []field{s(1, "Up", "up"), s(2, "Down", "down"), s(3, "Group", "group"), s(4, "Ungroup", "ungroup"), s(5, "Delete", "delete"), b(6, "HasSel", "hasSel"), s(7, "NoSel", "noSel"), st(8, "Opacity", "opacity", "UiSlider"), st(9, "Blend", "blend", "SelState")},
+	},
+	{
+		name: "EdLayers", goT: "edLayersState", zigT: "editor.Layers",
+		fs: []field{li(1, "Rows", "rows", "EdRow"), s(2, "Empty", "empty"), st(3, "Actions", "actions", "EdActions")},
+	},
+	{
+		name: "EdColorRow", goT: "edColorRowState", zigT: "editor.ColorRow",
+		fs: []field{s(1, "RGBA", "rgba"), st(2, "Field", "field", "UiField")},
+	},
+	{
+		name: "EdInspText", goT: "edInspTextState", zigT: "editor.InspText",
+		fs: []field{s(1, "Label", "label"), s(2, "Content", "content"), s(3, "Hint", "hint"), st(4, "Font", "font", "SelState"), st(5, "Size", "size", "UiField"), st(6, "LS", "ls", "UiField"), st(7, "LH", "lh", "UiField"), st(8, "Align", "alignment", "SelState"), st(9, "Color", "color", "EdColorRow")},
+	},
+	{
+		name: "EdInsp", goT: "edInspState", zigT: "editor.Insp",
+		fs: []field{b(1, "HasSel", "hasSel"), s(2, "Empty", "empty"), st(3, "Name", "name", "UiField"), st(4, "X", "x", "UiField"), st(5, "Y", "y", "UiField"), b(6, "ShowWH", "showWh"), st(7, "W", "w", "UiField"), st(8, "H", "h", "UiField"), st(9, "SX", "sx", "UiField"), st(10, "SY", "sy", "UiField"), st(11, "Rot", "rot", "UiField"), s(12, "Kind", "kind"), st(13, "Text", "text", "EdInspText"), st(14, "Fill", "fill", "EdColorRow"), st(15, "Angle", "angle", "UiField"), st(16, "Start", "start", "EdColorRow"), st(17, "End", "end", "EdColorRow"), st(18, "Path", "path", "UiField"), st(19, "Fit", "fit", "SelState")},
+	},
+	{
+		name: "EdView", goT: "edViewState", zigT: "editor.State", id: 92,
+		doc: "Editor tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Disabled", "disabled"), s(4, "DisabledSub", "disabledSub"), s(5, "DisabledHint", "disabledHint"), s(6, "SecPreview", "secPreview"), s(7, "SecLayers", "secLayers"), s(8, "SecInspector", "secInspector"), li(9, "Row1", "row1", "UiBtn"), li(10, "Row2", "row2", "UiBtn"), st(11, "Preview", "preview", "EdPreview"), st(12, "Layers", "layers", "EdLayers"), st(13, "Insp", "insp", "EdInsp")},
+	},
+	{
+		name: "CeTbDrop", goT: "ceTbDropSt", zigT: "cueedit.TbDrop",
+		fs: []field{s(1, "Act", "act"), s(2, "Lbl", "lbl"), s(3, "When", "when")},
+	},
+	{
+		name: "CeTopbar", goT: "ceTopbarSt", zigT: "cueedit.Topbar", id: 93,
+		doc: "#ce-topbar readout strip (re-rendered during drag)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), b(4, "HasRce", "hasRce"), s(5, "RceMeta", "rceMeta"), b(6, "Dirty", "dirty"), s(7, "DirtyTip", "dirtyTip"), s(8, "Meta", "meta"), s(9, "Cursor", "cursor"), s(10, "BarLbl", "barLbl"), s(11, "BarBeat", "barBeat"), s(12, "Jump", "jump"), li(13, "Drops", "drops", "CeTbDrop"), s(14, "Census", "census"), b(15, "NoTag", "noTag"), s(16, "NoTagTip", "noTagTip"), b(17, "Verified", "verified"), b(18, "Verifiable", "verifiable"), s(19, "VerifyAct", "verifyAct"), s(20, "VerifiedTip", "verifiedTip"), s(21, "VerifiedLbl", "verifiedLbl"), s(22, "VerifyTip", "verifyTip"), s(23, "VerifyLbl", "verifyLbl"), s(24, "Tip", "tip"), op(25, "TipS", "tipSt", "Tip"), st(26, "Close", "close", "UiBtn")},
+	},
+	{
+		name: "CeWave", goT: "ceWaveSt", zigT: "cueedit.Wave", id: 94,
+		doc: "cue-edit full-width player strip",
+		fs:  []field{st(1, "Topbar", "topbar", "CeTopbar"), s(2, "Player", "player")},
+	},
+	{
+		name: "CeDefaults", goT: "ceDefaultsSt", zigT: "cueedit.Defaults",
+		fs: []field{s(1, "Arrow", "arrow"), s(2, "Title", "title"), b(3, "Open", "open"), st(4, "Pads", "pads", "SelState"), st(5, "Ow", "ow", "UiToggle"), st(6, "Split", "split", "UiToggle"), b(7, "HasPromote", "hasPromote"), st(8, "Promote", "promote", "UiToggle"), b(9, "HasGrid", "hasGrid"), st(10, "Grid", "grid", "UiToggle"), s(11, "Note", "note")},
+	},
+	{
+		name: "CeARow", goT: "ceARowSt", zigT: "cueedit.ARow",
+		fs: []field{b(1, "Placed", "placed"), s(2, "Tag", "tag"), s(3, "Act", "act"), s(4, "When", "when"), s(5, "UnplacedTip", "unplacedTip"), s(6, "UnplacedLbl", "unplacedLbl"), b(7, "HasSel", "hasSel"), st(8, "Sel", "sel", "SelState")},
+	},
+	{
+		name: "CeAssign", goT: "ceAssignSt", zigT: "cueedit.Assign",
+		fs: []field{s(1, "Title", "title"), li(2, "Rows", "rows", "CeARow"), b(3, "ShowNoDrops", "showNoDrops"), s(4, "NoDropsHint", "noDropsHint")},
+	},
+	{
+		name: "CeBatch", goT: "ceBatchSt", zigT: "cueedit.Batch",
+		fs: []field{b(1, "Show", "show"), s(2, "Header", "header"), st(3, "ApplyHot", "applyHot", "UiBtn"), st(4, "ApplyMem", "applyMem", "UiBtn"), st(5, "PromoteSel", "promoteSel", "UiBtn"), st(6, "ConvertSel", "convertSel", "UiBtn"), st(7, "ClearSel", "clearSel", "UiBtn"), s(8, "Note", "note")},
+	},
+	{
+		name: "CeRail", goT: "ceRailSt", zigT: "cueedit.Rail", id: 95,
+		doc: "cue-editor rail (#lib-detail inner in cue-edit mode)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), st(4, "Mode", "mode", "SelState"), st(5, "Defaults", "defaults", "CeDefaults"), s(6, "PrepSel", "prepSel"), s(7, "PrepHint", "prepHint"), st(8, "Assign", "assign", "CeAssign"), st(9, "AddDrop", "addDrop", "UiBtn"), st(10, "DelDrop", "delDrop", "UiBtn"), b(11, "HasSel", "hasSel"), s(12, "SelLbl", "selLbl"), s(13, "PatNamePH", "patNamePh"), st(14, "SavePat", "savePat", "UiBtn"), b(15, "HasDSel", "hasDsel"), s(16, "DSelLbl", "dselLbl"), b(17, "ShowDelHint", "showDelHint"), s(18, "DelHint", "delHint"), b(19, "HasPats", "hasPats"), st(20, "Manage", "manage", "UiBtn"), b(21, "HasDrops", "hasDrops"), st(22, "ApplyHot", "applyHot", "UiBtn"), st(23, "ApplyMem", "applyMem", "UiBtn"), b(24, "ShowOwNote", "showOwNote"), s(25, "OwNote", "owNote"), st(26, "PromoteAll", "promoteAll", "UiBtn"), st(27, "ConvertAll", "convertAll", "UiBtn"), st(28, "ClearOne", "clearOne", "UiBtn"), li(29, "Hints", "hints", "LibHint"), st(30, "Batch", "batch", "CeBatch"), s(31, "WriteBack", "writeBack"), st(32, "Close", "close", "UiBtn")},
+	},
+	{
+		name: "LibSmartModal", goT: "libSmartModalSt", zigT: "libviews.SmartModal", id: 97,
+		doc: "smart-rules editor modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), st(3, "Name", "name", "LibPBField"), s(4, "GenresLbl", "genresLbl"), li(5, "Genres", "genres", "LibChip"), st(6, "Feel", "feel", "SelState"), st(7, "BPMMin", "bpmMin", "LibPBField"), st(8, "BPMMax", "bpmMax", "LibPBField"), st(9, "KeyField", "keyField", "LibPBField"), st(10, "Rating", "rating", "SelState"), st(11, "Plays", "plays", "LibPBField"), st(12, "Search", "search", "LibPBField"), s(13, "CompatLbl", "compatLbl"), st(14, "Compat", "compat", "SelState"), b(15, "HasDepth", "hasDepth"), li(16, "Depth", "depth", "LibChip"), s(17, "CompatHint", "compatHint"), s(18, "Count", "count"), s(19, "Confirm", "confirm"), s(20, "Cancel", "cancel")},
+	},
+	{
+		name: "LibRelocRow", goT: "libRelocRowSt", zigT: "libviews.RelocRow",
+		fs: []field{s(1, "Act", "act"), b(2, "Checked", "checked"), s(3, "Old", "old"), s(4, "New", "newPath"), s(5, "Conf", "conf"), s(6, "ConfVar", "confVar")},
+	},
+	{
+		name: "LibRelocModal", goT: "libRelocModalSt", zigT: "libviews.RelocModal", id: 98,
+		doc: "relocate-missing modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), s(3, "Missing", "missing"), s(4, "Root", "root"), s(5, "RootPH", "rootPh"), s(6, "BrowseLbl", "browseLbl"), s(7, "FindLbl", "findLbl"), b(8, "HasMsg", "hasMsg"), s(9, "Msg", "msg"), b(10, "HasRows", "hasRows"), li(11, "Rows", "rows", "LibRelocRow"), b(12, "HasMore", "hasMore"), s(13, "More", "more"), s(14, "ApplyLbl", "applyLbl")},
+	},
+	{
+		name: "LibRemote", goT: "libRemoteSt", zigT: "libremote.State", id: 99,
+		doc: "'Controlling [peer]' target switcher row",
+		fs:  []field{b(1, "Show", "show"), st(2, "Sel", "sel", "SelState")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -1439,6 +1589,10 @@ var zigImports = [][2]string{
 	{"vrchat", "vrchat.zig"},
 	{"vrcgroups", "vrcgroups.zig"},
 	{"worlds", "worlds.zig"},
+	{"editor", "editor.zig"},
+	{"cueedit", "cueedit.zig"},
+	{"libviews", "libviews.zig"},
+	{"libremote", "libremote.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

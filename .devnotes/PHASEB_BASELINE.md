@@ -228,6 +228,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | vrchat `#vrcg-body` groups frag | 21 734 | 9 327 | **-57%** | (workspace fixture) |
 | worlds (full tab) | 24 128 | 13 668 | **-43%** | 24 237 / 35 770 = 67.8% |
 | worlds `#world-st-<key>` frag | 1 564 | 1 128 | **-28%** | (per publish action) |
+| editor (full view) | 65 978 | 27 806 | **-58%** | 11 193 / 40 025 = 28.0% |
+| cue-edit `#ce-topbar` frag | 6 430 | 2 876 | **-55%** | (re-rendered during drag) |
 
 ## Gaps / caveats
 

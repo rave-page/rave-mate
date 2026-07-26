@@ -325,6 +325,20 @@ const uint8_t *rz_ui_render_ws_grouplist_v2(const uint8_t *state, size_t len, si
 const uint8_t *rz_ui_render_ws_rolepicker_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_ws_rolelist_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_ws_device_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libmirror_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libmirror_banner_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_rce_info_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_rce_body_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_rce_save_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_editor_preview_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_cueedit_topbar_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_cueedit_wave_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_cueedit_rail_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libfix_gflive_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_lib_smartmodal_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_lib_relocmodal_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_libremote_v2(const uint8_t *state, size_t len, size_t *out_len);
 /* --- end phaseb-wire --- */
 
 /* --- phaseb-sched --- */

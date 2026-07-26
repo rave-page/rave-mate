@@ -597,7 +597,8 @@ func ceRailHTMLOf(st ceRailSt) string {
 // ceTopbarRender renders the topbar via Zig when available.
 func ceTopbarRender(st ceTopbarSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderCueEditTopbar(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderCueEditTopbarV2", wireCeTopbar(st), zigui.RenderCueEditTopbarV2,
+			zigui.RenderCueEditTopbar, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -607,7 +608,8 @@ func ceTopbarRender(st ceTopbarSt) string {
 // ceWaveRender renders the full-width strip via Zig when available.
 func ceWaveRender(st ceWaveSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderCueEditWave(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderCueEditWaveV2", wireCeWave(st), zigui.RenderCueEditWaveV2,
+			zigui.RenderCueEditWave, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -617,7 +619,8 @@ func ceWaveRender(st ceWaveSt) string {
 // ceRailRender renders the editor rail via Zig when available.
 func ceRailRender(st ceRailSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderCueEditRail(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderCueEditRailV2", wireCeRail(st), zigui.RenderCueEditRailV2,
+			zigui.RenderCueEditRail, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
