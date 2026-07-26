@@ -378,28 +378,33 @@ type MediaLinkFeature struct {
 	MaxFPS      int    `json:"maxFps,omitempty"`      // sender-side video fps cap; 0 = 60, -1 = uncapped
 	MaxHeight   int    `json:"maxHeight,omitempty"`   // encode downscale policy: 0 = auto (native on hw, 1080p on sw x264), >0 = cap, -1 = never
 	// Encode-device preference (SENDER side). DevicePolicy "" = auto: no device flags, the encoder
-	// picks (adapter 0) - byte-identical to pre-v? behaviour. "pin" = always EncoderDevice.
+	// picks (adapter 0) - byte-identical to pre-WP-3 behaviour. "pin" = always EncoderDevice.
 	// "avoid-busiest" = the least video-encode-loaded adapter, skipping ones OBS/Parsec hold.
 	// EncoderDevice is a DXGI adapter LUID key ("0xHIGH_0xLOW", encoderscan.AdapterInfo.LUID).
-	// Encoder pins a concrete encoder name ("h264_mf" = the native pipe-free MF engine, "libx264", …);
-	// "" = negotiated (§3.2 matrix).
+	// Encoder pins a concrete encoder name (medialink.EncoderMFNative = the native pipe-free MF
+	// engine, "libx264", …); "" = negotiated (§3.2 matrix).
 	DevicePolicy  string `json:"devicePolicy,omitempty"`
 	EncoderDevice string `json:"encoderDevice,omitempty"`
 	Encoder       string `json:"encoder,omitempty"`
-	// Subprocess opts IN to running the media plane (medialink+mediaroute+webcam) as an isolated,
-	// memory-capped featurehost child (#44), so a media RAM/CPU runaway or cgo fault can't starve the
-	// host. Default (false) = in-proc, the current behaviour. Flip on after verifying cross-PC routing
-	// on a paired rig - TCPlane + mediaClock stay daemon-side and mirror the child's clock.
-	Subprocess bool `json:"subprocess,omitempty"`
+	// Subprocess runs the media plane (medialink+mediaroute+webcam) as an isolated, memory-capped
+	// featurehost child (#44) so a media RAM/CPU runaway or cgo fault can't starve the host - and so
+	// the governor's below-normal demotion of THIS process never throttles a live route.
+	// Tri-state: unset/nil = ON (the default since the whole-daemon priority demotion made in-proc
+	// media a liability), explicit false = the legacy in-proc plane, explicit true = on. TCPlane +
+	// mediaClock stay daemon-side either way and mirror the child's clock.
+	Subprocess *bool `json:"subprocess,omitempty"`
 }
 
-// MediaSubprocess reports whether the media plane should run in the isolated child (#44). Default is
-// in-proc; opt in via the Subprocess flag once routing is verified on a two-PC rig.
-func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess }
+// MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
+// absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema
+// persisted this field with omitempty on a plain bool, so a pre-flip config could only ever carry
+// `true` (opt-in) or no key at all - no user can be silently pinned to the old in-proc path.
+func (m MediaLinkFeature) MediaSubprocess() bool { return m.Subprocess == nil || *m.Subprocess }
 
-// SetSubprocess sets the isolation opt-in. The single write seam, so the field's representation can
-// change (e.g. to a tri-state pointer) without touching the settings UI.
-func (m *MediaLinkFeature) SetSubprocess(on bool) { m.Subprocess = on }
+// SetSubprocess sets the isolation opt-in EXPLICITLY (never leaves the tri-state unset, so an
+// opt-out survives a save). The single write seam, so the field's representation can change without
+// touching the settings UI.
+func (m *MediaLinkFeature) SetSubprocess(on bool) { v := on; m.Subprocess = &v }
 
 // DevicePref returns the sender-side encode-device preference verbatim (policy, adapter LUID key).
 // Normalization + resolution live in encoderscan.ResolveDevice - config stays dependency-free.

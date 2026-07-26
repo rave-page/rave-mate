@@ -55,13 +55,38 @@ func showWindow(h uintptr) {
 	_, _, _ = procSetForegroundWindow.Call(h)
 }
 
-// captureRegion PrintWindows the webview HWND into a DIB and PNG-encodes it. x/y/w/h in device px;
-// w<=0||h<=0 = full window. PW_RENDERFULLCONTENT is required for GPU/WebView2 surfaces.
-func (u *UI) captureRegion(path string, x, y, w, h int) error {
+// revealWindow makes h visible WITHOUT stealing focus.
+//
+// The B5 window child NEEDS this. featurehost spawns children with sysexec.Hide (STARTF_USESHOWWINDOW
+// + SW_HIDE) to stop a console window appearing, and Windows applies that show state to the process's
+// FIRST top-level window - so the child's WebView2 window is created hidden. Symptoms: no visible UI
+// under RAVE_MATE_SHELL=proc, and every capture solid black (a window that was never shown has
+// nothing to render). Verified: capturing the same window after a ShowWindow goes from 0.00% to
+// 97.89% non-black pixels.
+func revealWindow(h uintptr) {
+	if h == 0 {
+		return
+	}
+	const swShowNoActivate = 4
+	_, _, _ = procShowWindow.Call(h, swShowNoActivate)
+}
+
+// captureRegionLocal captures u's window from THIS process. The in-proc shell's path; under the B5
+// procShell the capture runs in the child instead (see screenshot.go).
+func (u *UI) captureRegionLocal(path string, x, y, w, h int) error {
 	if u.shell == nil {
 		return fmt.Errorf("no window")
 	}
-	hwnd := u.shell.hwnd()
+	return captureHWND(u.shell.hwnd(), path, x, y, w, h)
+}
+
+// captureHWND PrintWindows hwnd into a DIB and PNG-encodes it. x/y/w/h in device px; w<=0||h<=0 =
+// full window. PW_RENDERFULLCONTENT is required for GPU/WebView2 surfaces.
+//
+// The window must be SHOWN: PrintWindow returns whatever the window has rendered, and a window that
+// was never shown has rendered nothing - the capture comes back solid black. That was the B5
+// procShell defect (the child inherited SW_HIDE; see revealWindow below and screenshot.go).
+func captureHWND(hwnd uintptr, path string, x, y, w, h int) error {
 	if hwnd == 0 {
 		return fmt.Errorf("no window handle")
 	}

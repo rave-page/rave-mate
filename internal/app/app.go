@@ -671,12 +671,12 @@ func run(parent context.Context, serviceMode bool) error {
 		EncodePolicy:    mediaEncodePolicy(mediaLinkCfg),
 		EncodeDevice:    mediaEncodeDevice(log, mediaLinkCfg),
 	})
-	// #44: the media plane (medialink+mediaroute+webcam) can run isolated in a memory-capped
-	// featurehost child (MediaLink.Subprocess flag; default off = in-proc, unchanged). TCPlane +
+	// #44: the media plane (medialink+mediaroute+webcam) runs isolated in a memory-capped featurehost
+	// child by DEFAULT (MediaLink.Subprocess tri-state; explicit false = legacy in-proc). TCPlane +
 	// mediaClock stay daemon-side; the child mirrors the clock + bridges the negotiation bus.
 	// mediaCtl/mediaRoutesCtl/webcamCtl point at the child proxies or the in-proc managers, so the
 	// rest of app + UI is agnostic.
-	useMediaChild := cfg.Features.MediaLink.Subprocess
+	useMediaChild := cfg.Features.MediaLink.MediaSubprocess()
 	mediaChildFailed := false // config wanted the isolated child but it wouldn't spawn -> fail CLOSED
 	var mediaCapsMu sync.Mutex
 	var mediaEnc, mediaDec []string
@@ -723,22 +723,8 @@ func run(parent context.Context, serviceMode bool) error {
 	peerMgr.AddListener(nil, func() { mediaCtl.Advertise() }) // re-advertise media on peer connect/disconnect
 	// §3.2 codec probe (test encodes take seconds - off the startup path). SWOnly keeps only the
 	// software tiers advertised (diagnostic: forces tier 4 + the CPU warning on routes we source).
-	debuglog.Go(log, "mediapipe", func() {
-		caps, ok := mediapipe.Probe(ctx, log)
-		if !ok {
-			// No ffmpeg: the native MF hardware encoder can still SOURCE h264 routes
-			// (receiving still needs ffmpeg's decode child on the far end).
-			if mfenc.Available() {
-				log.Warn("mediapipe", "ffmpeg unavailable - sending via native MF encoder only, receiving disabled", nil)
-				mediaCapsMu.Lock()
-				mediaEnc, mediaDec = []string{medialink.EncoderMFNative}, nil
-				mediaCapsMu.Unlock()
-				mediaCtl.SetCodecCaps([]string{medialink.EncoderMFNative}, nil)
-				return
-			}
-			log.Warn("mediapipe", "ffmpeg unavailable - video routes stay raw/echo", nil)
-			return
-		}
+	// encFilter maps a raw probe result to the set we advertise.
+	encFilter := func(caps mediapipe.Caps) []string {
 		enc := caps.Encoders
 		if cfg.Features.MediaLink.SWOnly {
 			enc = nil
@@ -753,11 +739,22 @@ func run(parent context.Context, serviceMode bool) error {
 			// mediapipe.Factories is unambiguous.
 			enc = append(enc, medialink.EncoderMFNative)
 		}
+		return enc
+	}
+	var mfOnly []string // ffmpeg-less fallback: the native MF engine can still SOURCE h264
+	if mfenc.Available() && !cfg.Features.MediaLink.SWOnly {
+		mfOnly = []string{medialink.EncoderMFNative}
+	}
+	// mediaCaps gates the probe on the governor (no encode session stolen mid-stream) and runs the
+	// advertised list through the encode-headroom planner on every streaming edge. See mediacaps.go.
+	mediaCapsPlan := newMediaCaps(log, func(enc, dec []string) {
 		mediaCapsMu.Lock()
-		mediaEnc, mediaDec = enc, caps.Decoders
+		mediaEnc, mediaDec = enc, dec
 		mediaCapsMu.Unlock()
-		mediaCtl.SetCodecCaps(enc, caps.Decoders) // in-proc router OR pushed to the media child
+		mediaCtl.SetCodecCaps(enc, dec) // in-proc router OR pushed to the media child
 	})
+	governor.OnChange(func(governor.Signals) { debuglog.Go(log, "mediapipe", mediaCapsPlan.onGovernorChange) })
+	debuglog.Go(log, "mediapipe", func() { mediaCapsPlan.probeAndAdvertise(ctx, encFilter, mfOnly) })
 	// P4 route glue: Spout-sender sharing + receive routes (Peers tab). Same-PC routes are
 	// refused (§3 - never encode locally); detected via the peer's remote address.
 	mediaRoutes := mediaroute.New(mediaroute.Options{
@@ -986,6 +983,13 @@ func run(parent context.Context, serviceMode bool) error {
 	})
 	// Live-stats VR overlays (perf/network/timing kinds) read the always-on perf ring + net sampler.
 	vrOverlay.SetStatsProviders(perfMon.Snapshot, netSampler.Snapshot)
+	// Late-bind the encode planner's CPU-load input (perfmon is built after the media plane).
+	mediaCapsPlan.SetCPUSource(func() float64 {
+		if ss := perfMon.Snapshot(); len(ss) > 0 {
+			return ss[len(ss)-1].CPUPct
+		}
+		return 0
+	})
 	perfmon.RegisterProbe("vroverlay", vrSurf.PerfProbe)
 	perfmon.RegisterProbe("eventbus", bus.Stats)
 	perfmon.RegisterProbe("session.merger", merger.Stats)
@@ -1600,7 +1604,7 @@ func run(parent context.Context, serviceMode bool) error {
 		Stop:    webcamMgr.Stop,
 	})
 	// Media plane child (#44): one memory-capped subprocess hosts medialink + mediaroute + webcam
-	// when MediaLink.Subprocess is on. Runs while EITHER peers or webcam is enabled (both live inside
+	// (the default; explicit MediaLink.Subprocess=false opts out). Runs while EITHER peers or webcam is enabled (both live inside
 	// it). tcPlane + mediaClock stay daemon-side and mirror the child's clock.
 	if useMediaChild {
 		mods.Add(&module.Service{
@@ -1727,7 +1731,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 
 	if serviceMode {
-		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 		remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app/VR-View screenshot (VR works headless)
 		remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 		remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -1857,7 +1861,7 @@ func run(parent context.Context, serviceMode bool) error {
 		perfmon.RegisterProbe("recorder.reconcile", ar.Stats)
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
-	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -2423,6 +2427,7 @@ type appControl struct {
 	tc          *timecode.Service             // house timecode outputs (ctl tc-status/tc-start/tc-stop); may be nil
 	gpuRec      *gpuRecovery                  // GPU-fault recovery (ctl gpu-selftest); nil in service mode
 	media       *medialink.RouteManager       // media plane (ctl encoder-scan: probed encoders); may be nil
+	mediaCaps   *mediaCaps                    // encode-capability advertisement planner (ctl encoder-scan); may be nil
 	obs         *featurehost.ObsProxy         // OBS bridge (ctl encoder-scan: live stream/record active); may be nil
 	ableLink    *featurehost.AbletonLinkProxy // Ableton Link bridge (ctl ablelink-status/resync); may be nil
 	guardDisarm func()                        // guardian disarm for the hard-exit backstop (defers skip on os.Exit); may be nil
@@ -3271,34 +3276,53 @@ func (c *appControl) EncoderScan() string {
 			cpu = ss[len(ss)-1].CPUPct
 		}
 	}
-	// Build candidate devices from probed encoders. App-agnostic: HW-device LoadPct comes from the
-	// per-adapter VideoEncode util; CPU load from system CPU. TODO: bind each probed encoder to its
-	// real adapter LUID (until then HW LoadPct is the busiest adapter, a conservative proxy).
-	var busiestAdapter float64
-	for _, v := range rep.AdapterEncPct {
-		if v > busiestAdapter {
-			busiestAdapter = v
-		}
+	// Candidate devices come from what we ADVERTISE (the planner's own input), not from the in-proc
+	// router: with the media plane isolated in its child, that router holds no caps at all. Each
+	// encoder binds to its real adapter by vendor name (Devices), so LoadPct/VRAMFree are that
+	// device's live numbers; sessions stay unknown (vendor-SDK only).
+	var advertised []string
+	var live encoderscan.AdvertisePlan
+	if c.mediaCaps != nil {
+		advertised, _, live = c.mediaCaps.snapshot()
+	} else if c.media != nil {
+		advertised = c.media.Encoders()
 	}
-	var devices []encoderscan.Device
-	if c.media != nil {
-		for _, name := range c.media.Encoders() {
-			fam := encoderscan.FamilyFromOBSID(name)
-			d := encoderscan.Device{Family: fam, Encoder: name, VRAMFree: -1, Sessions: -1}
-			if fam == encoderscan.FamilyX264 {
-				d.IsCPU, d.LoadPct = true, cpu
-			} else {
-				d.LoadPct = busiestAdapter // conservative until per-encoder adapter binding lands
-			}
-			devices = append(devices, d)
-		}
-	}
+	devices := encoderscan.Devices(advertised, rep, cpu)
 	policy := encoderscan.ExhaustReduceQuality // TODO: drive from config once the exhaustion setting lands
-	plan := encoderscan.PlanEncode(devices, encoderscan.DefaultEncodeCost(), encoderscan.DefaultCeilings(), policy)
+	plan := live.Plan
+	if plan.Action == "" {
+		plan = encoderscan.PlanEncode(devices, encoderscan.DefaultEncodeCost(), encoderscan.DefaultCeilings(), policy)
+	}
 
 	var b strings.Builder
 	b.WriteString(rep.String())
-	fmt.Fprintf(&b, "cpu=%.0f%%  probed-encoders=%d  policy=%s\n", cpu, len(devices), policy)
+	fmt.Fprintf(&b, "cpu=%.0f%%  advertised-encoders=%d  policy=%s\n", cpu, len(devices), policy)
+	if len(advertised) > 0 {
+		fmt.Fprintf(&b, "advertised order: [%s]\n", strings.Join(advertised, " "))
+	}
+	if len(live.Withheld) > 0 {
+		fmt.Fprintf(&b, "withheld from peers: [%s]  (critical consumer holds that silicon)\n", strings.Join(live.Withheld, " "))
+	}
+	for _, d := range devices {
+		vram, sess := "vram=?", "sessions=?"
+		if d.VRAMFree >= 0 {
+			vram = fmt.Sprintf("vram-free=%.0fMB", d.VRAMFree)
+		}
+		if d.Sessions >= 0 {
+			sess = fmt.Sprintf("sessions-free=%d", d.Sessions)
+		}
+		dev := d.Key
+		if dev == "" {
+			dev = "device=?"
+			if d.IsCPU {
+				dev = "cpu"
+			}
+		}
+		fmt.Fprintf(&b, "  cand %-16s fam=%-7s %-24s load=%.0f%% %s %s\n", d.Encoder, d.Family, dev, d.LoadPct, vram, sess)
+	}
+	for _, n := range live.Notes {
+		b.WriteString("note: " + n + "\n")
+	}
 	// Encoder diagnostics (why the plan has what it has): working set + in-build-but-not-working
 	// (HW encoder present in the ffmpeg build yet failing to encode = driver/contention, vs absent
 	// = a software-only ffmpeg build). Read from the cached probe - never re-probes / never blocks.
@@ -3334,11 +3358,11 @@ func (c *appControl) EncoderScan() string {
 			fmt.Fprintf(&b, "hwaccels: [%s]\n", strings.Join(caps.HWAccels, " "))
 		}
 	} else {
-		b.WriteString("note: codec probe not complete yet (or ffmpeg unresolved) - encoder list may be partial; re-scan\n")
+		b.WriteString("note: no VALIDATED codec probe yet - test encodes are deferred while a stream is live (they take a real encode session); the advertised set above is the ffmpeg build listing\n")
 	}
 	fmt.Fprintf(&b, "plan: %s family=%s encoder=%s device=%s scale=%d%%  (%s)\n",
 		plan.Action, plan.Family, plan.Encoder, plan.Device, plan.ScalePct, plan.Reason)
-	b.WriteString("note: app-agnostic headroom planner; per-encoder→adapter binding + VRAM/session probes next\n")
+	b.WriteString("note: app-agnostic headroom planner; adapter binding is a vendor-name join (exact per-encoder LUID pinning pending), encode-session counts need a vendor SDK and stay unknown\n")
 	return b.String()
 }
 

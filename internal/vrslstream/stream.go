@@ -271,7 +271,7 @@ func (s *Streamer) runFFmpegOnce(ctx context.Context, ffmpeg string, cfg config.
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	sysexec.AssignToJob(cmd.Process, true) // app death reaps the tree too
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobMedia) // live stream: bounded, not batch-capped
 	s.mu.Lock()
 	s.srcUp = true
 	s.mu.Unlock()

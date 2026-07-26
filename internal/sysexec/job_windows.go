@@ -15,11 +15,14 @@ import (
 // an external taskkill. Every spawned child (worker or feature host) is assigned to it, so
 // subprocesses and their ffmpeg descendants can never be orphaned and left running after the
 // app is gone. This is the OS-level backstop that complements cooperative shutdown.
+//
+// There is one job per JobClass: same kill-on-close guarantee, different CPU discipline (see
+// JobClass). Handles are created lazily, once per class.
 var (
-	jobOnce   sync.Once
-	jobH      windows.Handle
-	bgJobOnce sync.Once
-	bgJobH    windows.Handle
+	jobs [jobClassCount]struct {
+		once sync.Once
+		h    windows.Handle
+	}
 
 	memJobOnce sync.Once
 	memJobH    windows.Handle
@@ -29,12 +32,47 @@ var (
 // locally so the build never depends on the constant's presence in x/sys/windows.
 const jobLimitProcessMemory = 0x00000100
 
-func ensureJob(background bool) {
-	once := &jobOnce
-	if background {
-		once = &bgJobOnce
+// JobClass is a child's CPU-scheduling contract - NOT its importance. Every class kills its
+// children when the app dies; they differ only in the job's aggregate CPU cap.
+type JobClass int
+
+const (
+	// JobRealtime: kill-on-close only, NO CPU cap. For children that must keep up with a live
+	// frame rate - a throttled realtime encoder does not save work, it makes the SENDER pay full
+	// capture+readback cost for frames the encoder never drains (the spout-share melt). Precedent:
+	// mediaplayer/player.go deliberately spawns realtime children uncapped.
+	JobRealtime JobClass = iota
+	// JobBatch: 10% aggregate hard CPU cap across the whole class. Deferrable sweeps only (codec
+	// probe test-encodes, gridfix analyze/train, the background worker pool) - work that may be
+	// starved indefinitely without breaking a live stream.
+	JobBatch
+	// JobMedia: 70% aggregate hard CPU cap. Live media capture/stream children (webcam, VR stream,
+	// mocap ingest): they must not sit in the 10% batch bucket - sharing it with a gridfix sweep
+	// throttles a live capture to a few percent of a core and it drops frames - but they stay
+	// bounded so a runaway ffmpeg can never take the whole machine.
+	JobMedia
+
+	jobClassCount = 3
+)
+
+// cpuRateFor is the job's aggregate hard CPU cap in hundredths of a percent (0 = uncapped).
+func cpuRateFor(c JobClass) uint32 {
+	switch c {
+	case JobBatch:
+		return 1000 // 10.00%
+	case JobMedia:
+		return 7000 // 70.00%
+	default:
+		return 0 // realtime: no cap
 	}
-	once.Do(func() {
+}
+
+func ensureJob(class JobClass) {
+	if class < 0 || int(class) >= jobClassCount {
+		class = JobRealtime
+	}
+	j := &jobs[class]
+	j.once.Do(func() {
 		h, err := windows.CreateJobObject(nil, nil)
 		if err != nil {
 			return
@@ -51,9 +89,8 @@ func ensureJob(background bool) {
 			_ = windows.CloseHandle(h)
 			return
 		}
-		if background {
-			// 1000 = 10.00% CPU hard cap for the whole job object.
-			cpu := jobCPUInfo{ControlFlags: jobCPUEnable | jobCPUHardCap, CpuRate: 1000}
+		if rate := cpuRateFor(class); rate > 0 {
+			cpu := jobCPUInfo{ControlFlags: jobCPUEnable | jobCPUHardCap, CpuRate: rate}
 			if _, err := windows.SetInformationJobObject(
 				h, windows.JobObjectCpuRateControlInformation,
 				uintptr(unsafe.Pointer(&cpu)), uint32(unsafe.Sizeof(cpu)),
@@ -61,10 +98,8 @@ func ensureJob(background bool) {
 				_ = windows.CloseHandle(h)
 				return
 			}
-			bgJobH = h
-			return
 		}
-		jobH = h
+		j.h = h
 	})
 }
 
@@ -121,29 +156,38 @@ func AssignToJobMem(p *os.Process, capMB int) {
 		AssignToJob(p, false) // cap setup failed - at least keep kill-on-close
 		return
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid))
-	if err != nil {
-		return
-	}
-	defer func() { _ = windows.CloseHandle(h) }()
-	_ = windows.AssignProcessToJobObject(memJobH, h)
+	assign(memJobH, p)
 }
 
 // AssignToJob places a freshly-started child process under the kill-on-close job. Best-effort:
-// on failure the cooperative shutdown + taskkill path still applies. background=true uses the
-// CPU-capped job for low-priority work.
+// on failure the cooperative shutdown + taskkill path still applies. background=true selects the
+// CPU-capped batch job (JobBatch); false selects the uncapped realtime job.
 func AssignToJob(p *os.Process, background bool) {
+	class := JobRealtime
+	if background {
+		class = JobBatch
+	}
+	AssignToJobClass(p, class)
+}
+
+// AssignToJobClass places a freshly-started child under the kill-on-close job for its class (see
+// JobClass for the CPU discipline each one carries). Best-effort - on failure the child still runs,
+// just outside the job.
+func AssignToJobClass(p *os.Process, class JobClass) {
 	if p == nil {
 		return
 	}
-	ensureJob(background)
-	hJob := jobH
-	if background {
-		hJob = bgJobH
+	ensureJob(class)
+	if class < 0 || int(class) >= jobClassCount {
+		class = JobRealtime
 	}
-	if hJob == 0 {
-		return
+	if h := jobs[class].h; h != 0 {
+		assign(h, p)
 	}
+}
+
+// assign opens the child with quota/terminate rights and puts it in hJob.
+func assign(hJob windows.Handle, p *os.Process) {
 	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid))
 	if err != nil {
 		return

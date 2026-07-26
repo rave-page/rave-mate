@@ -176,7 +176,11 @@ func (e *encoder) runOnce(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	sysexec.AssignToJob(cmd.Process, true) // app death reaps the tree too
+	// Realtime class: kill-on-close but NO CPU cap. This child has to drain a live frame rate;
+	// parking it in the 10% batch bucket does not save the machine work - the sender still pays
+	// full Spout readback + pipe writes for frames a starved encoder never consumes (that is the
+	// spout-share melt). Bounding cost belongs upstream (fps/pixel-rate gates), not here.
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobRealtime) // app death reaps the tree too
 
 	feedErr := make(chan error, 1)
 	go func() { feedErr <- e.feed(rctx, stdin) }()

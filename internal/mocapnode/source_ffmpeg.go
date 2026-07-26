@@ -198,7 +198,7 @@ func runFFmpegOnce(ctx context.Context, ffmpeg string, args []string, w, h int, 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	sysexec.AssignToJob(cmd.Process, true) // app death reaps the tree too
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobMedia) // live capture: bounded, not batch-capped
 
 	buf := make([]byte, w*h*4)
 	readErr := error(nil)

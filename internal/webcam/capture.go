@@ -158,7 +158,9 @@ func (c *capture) runOnce(ctx context.Context, ffmpeg string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	sysexec.AssignToJob(cmd.Process, true) // app death reaps the tree too
+	// Media class: a LIVE capture, so not the 10% batch bucket (it used to share that cap with
+	// gridfix/probe sweeps and got throttled into dropping frames), but still bounded (see JobMedia).
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobMedia) // app death reaps the tree too
 	c.mu.Lock()
 	c.srcUp = true
 	c.mu.Unlock()
