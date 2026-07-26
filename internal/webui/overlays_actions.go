@@ -17,9 +17,34 @@ import (
 // Overlays tab action handlers + live-status tick. All actions are namespaced ovl-* so they never
 // collide with other tabs. Config setters persist via saveCfg (which reconciles the session so the
 // overlay pipeline picks up changes live). Reused already-wired actions: open-url, copy,
-// set:overlay-port, toggle:<overlay feature> (Settings registry) - not re-registered here.
+// set:overlay-port - not re-registered here. Per-output enable switches = ovl-en-<kind>.
 
 func init() {
+	// Enable switches (ovl-en-<kind>): Fyne sessionToggle parity - set field, saveCfg
+	// (persist + Session.Reconcile starts/stops the output live), then patch the card
+	// status + summary strip immediately (don't wait for the ~1 Hz tick).
+	for _, e := range []struct {
+		kind  string
+		field func(f *config.Features) *bool
+	}{
+		{"web", func(f *config.Features) *bool { return &f.OverlayWeb.Enabled }},
+		{"wave", func(f *config.Features) *bool { return &f.OverlayWaveform.Enabled }},
+		{"png", func(f *config.Features) *bool { return &f.OverlayPNG.Enabled }},
+		{"obs", func(f *config.Features) *bool { return &f.OverlayOBS.Enabled }},
+		{"vs", func(f *config.Features) *bool { return &f.VideoShare.Enabled }},
+		{"np", func(f *config.Features) *bool { return &f.NowPlayingFile.Enabled }},
+	} {
+		onExact("ovl-en-"+e.kind, func(u *UI, m actMsg) {
+			if u.svc.Cfg == nil {
+				return
+			}
+			*e.field(&u.svc.Cfg.Features) = m.Val == "true"
+			u.saveCfg()
+			u.eval("window.__patch('ovl-st-" + e.kind + "'," + jsQuote(u.ovlStatusHTML(e.kind)) + ")")
+			u.eval("window.__patch('ovl-strip'," + jsQuote(u.ovlStripHTML()) + ")")
+		})
+	}
+
 	// Appearance: fade deck cards by fader - surgically written to overlay-style.json + pushed live.
 	onExact("ovl-fader", func(u *UI, m actMsg) {
 		path, _ := config.DataPath("overlay-style.json")

@@ -8,11 +8,13 @@ const Html = @import("html.zig").Html;
 const c = @import("components.zig");
 
 /// Card is one output card's header + optional live-status region (statusId is a
-/// trusted literal id, emitted raw like the Go renderer).
+/// trusted literal id, emitted raw like the Go renderer) + optional enable switch
+/// (en.act "" = no switch, e.g. appearance).
 pub const Card = struct {
     title: []const u8 = "",
     statusId: []const u8 = "",
     status: c.Status = .{},
+    en: c.Toggle = .{},
 };
 
 pub const Appearance = struct {
@@ -129,8 +131,9 @@ fn note(h: *Html, text: []const u8) !void {
     try h.raw("</p>");
 }
 
-/// cardOpen mirrors Go ovlCardHTML's prologue: rp-card head + the status region, which
-/// precedes the body. Go card() emits the head when title OR trailing is non-empty;
+/// cardOpen mirrors Go ovlCardHTML's prologue: rp-card head + the status region + the
+/// enable switch (outside the status div - the tick patch must never wipe it), which
+/// precede the body. Go card() emits the head when title OR trailing is non-empty;
 /// overlays never passes a trailing slot, so head = title non-empty.
 fn cardOpen(h: *Html, cd: Card) !void {
     try c.cardOpen(h, cd.title, cd.title.len != 0);
@@ -142,6 +145,7 @@ fn cardOpen(h: *Html, cd: Card) !void {
         try c.statusOf(h, cd.status);
         try h.raw("</div>");
     }
+    if (cd.en.act.len != 0) try c.toggleOf(h, cd.en);
 }
 
 /// renderAppearance mirrors Go ovlApprHTML (#ovl-appearance fragment).
@@ -281,6 +285,21 @@ test "spout not installable renders a plain disabled button" {
     try renderSpout(&h, .{ .installLbl = "In&stall", .canInstall = false, .openSdk = "SDK", .sdkUrl = "https://x/?a&b" });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<button class=\"rp-btn rp-btn--outline\" disabled>In&amp;stall</button>") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-val=\"https://x/?a&amp;b\"") != null);
+}
+
+test "card enable switch renders after the status region" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderNote(&h, .{ .card = .{
+        .title = "OBS",
+        .statusId = "ovl-st-obs",
+        .status = .{ .variant = "muted", .label = "off", .dl = "off" },
+        .en = .{ .label = "Enabled", .dl = "enabled", .act = "ovl-en-obs", .on = true },
+    }, .note = "n" });
+    const st = std.mem.indexOf(u8, h.b.items, "<div id=ovl-st-obs>").?;
+    const tg = std.mem.indexOf(u8, h.b.items, "data-act=\"ovl-en-obs\"").?;
+    try std.testing.expect(st < tg);
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, " checked") != null);
 }
 
 test "appearance card has no status region" {

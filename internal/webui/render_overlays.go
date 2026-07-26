@@ -17,11 +17,13 @@ import (
 // live-patched fragments (#ovl-strip, #ovl-appearance, #ovl-spout, #ovl-st-<kind>) each
 // get their own state + renderer + export.
 
-// ovlCardState is one output card's header + optional live-status region.
+// ovlCardState is one output card's header + optional live-status region + optional
+// enable switch (Fyne sessionToggle parity; zero Act = no switch, e.g. appearance).
 type ovlCardState struct {
 	Title    string   `json:"title"`
 	StatusID string   `json:"statusId"` // "" = no status region (trusted literal id)
 	Status   uiStatus `json:"status"`
+	En       uiToggle `json:"en"`
 }
 
 // ovlApprState is the appearance card (browser editor + fade-by-fader).
@@ -187,7 +189,7 @@ func (u *UI) ovlWebState(base string) ovlWebState {
 	f := &u.svc.Cfg.Features.OverlayWeb
 	src := &f.OBSSource
 	return ovlWebState{
-		Card: ovlCardState{Title: i18n.T("overlays.web.title"), StatusID: "ovl-st-web", Status: u.ovlStatus("web")},
+		Card: ovlCardState{Title: i18n.T("overlays.web.title"), StatusID: "ovl-st-web", Status: u.ovlStatus("web"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-web", f.Enabled)},
 		Port: newField(i18n.T("overlays.port"), "set:overlay-port", strconv.Itoa(f.ResolvedPort()), "number"),
 		Btns: []uiBtn{
 			{Label: i18n.T("overlays.openOverlay"), Variant: "explore", Act: "open-url", Val: base},
@@ -215,7 +217,7 @@ func (u *UI) ovlWaveState() ovlWaveState {
 		{"0.5", i18n.T("overlays.wf.playheadCenter")}, {"0.75", i18n.T("overlays.wf.playheadRightQuarter")},
 	}
 	return ovlWaveState{
-		Card:      ovlCardState{Title: i18n.T("overlays.wf.title"), StatusID: "ovl-st-wave", Status: u.ovlStatus("wave")},
+		Card:      ovlCardState{Title: i18n.T("overlays.wf.title"), StatusID: "ovl-st-wave", Status: u.ovlStatus("wave"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-wave", f.Enabled)},
 		Note1:     i18n.T("overlays.wf.note1"),
 		Zoom:      resolveSelectBox(i18n.T("overlays.wf.zoom"), "ovl-wf-zoom", zoomOpts, trimNum(f.ResolvedZoomSeconds())),
 		Playhead:  resolveSelectBox(i18n.T("overlays.wf.playhead"), "ovl-wf-playhead", playheadOpts, ovlPlayheadBucket(f.ResolvedPlayheadPct())),
@@ -231,7 +233,7 @@ func (u *UI) ovlWaveState() ovlWaveState {
 func (u *UI) ovlPngState() ovlDirState {
 	f := &u.svc.Cfg.Features.OverlayPNG
 	return ovlDirState{
-		Card: ovlCardState{Title: i18n.T("overlays.png.title"), StatusID: "ovl-st-png", Status: u.ovlStatus("png")},
+		Card: ovlCardState{Title: i18n.T("overlays.png.title"), StatusID: "ovl-st-png", Status: u.ovlStatus("png"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-png", f.Enabled)},
 		Dir:  newField(i18n.T("overlays.outputFolder"), "ovl-png-dir", f.Dir, "text"),
 		Open: uiBtn{Label: i18n.T("overlays.openFolder"), Variant: "outline", Act: "ovl-png-open"},
 		Note: i18n.T("overlays.png.note"),
@@ -240,8 +242,9 @@ func (u *UI) ovlPngState() ovlDirState {
 
 // ovlObsState: obs-websocket renderer - status-only card (no fields), mirrors Fyne.
 func (u *UI) ovlObsState() ovlNoteState {
+	f := &u.svc.Cfg.Features.OverlayOBS
 	return ovlNoteState{
-		Card: ovlCardState{Title: i18n.T("overlays.obs.title"), StatusID: "ovl-st-obs", Status: u.ovlStatus("obs")},
+		Card: ovlCardState{Title: i18n.T("overlays.obs.title"), StatusID: "ovl-st-obs", Status: u.ovlStatus("obs"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-obs", f.Enabled)},
 		Note: i18n.T("overlays.obs.note"),
 	}
 }
@@ -261,7 +264,7 @@ func (u *UI) ovlVSState() ovlVSState {
 		scaleOpts = append(scaleOpts, [2]string{o[0], i18n.T("overlays.vs.scaleOption", i18n.A{"mult": o[0], "res": o[1]})})
 	}
 	st := ovlVSState{
-		Card:  ovlCardState{Title: i18n.T("overlays.vs.title"), StatusID: "ovl-st-vs", Status: u.ovlStatus("vs")},
+		Card:  ovlCardState{Title: i18n.T("overlays.vs.title"), StatusID: "ovl-st-vs", Status: u.ovlStatus("vs"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-vs", f.Enabled)},
 		Note:  note,
 		Scale: resolveSelectBox(i18n.T("overlays.vs.renderScale"), "ovl-vs-scale", scaleOpts, strconv.Itoa(f.ResolvedRenderScale())),
 		Note2: i18n.T("overlays.vs.note2"),
@@ -277,7 +280,7 @@ func (u *UI) ovlVSState() ovlVSState {
 func (u *UI) ovlNPState() ovlDirState {
 	f := &u.svc.Cfg.Features.NowPlayingFile
 	return ovlDirState{
-		Card: ovlCardState{Title: i18n.T("overlays.np.title"), StatusID: "ovl-st-np", Status: u.ovlStatus("np")},
+		Card: ovlCardState{Title: i18n.T("overlays.np.title"), StatusID: "ovl-st-np", Status: u.ovlStatus("np"), En: newToggle(i18n.T("common.enabledCap"), "ovl-en-np", f.Enabled)},
 		Dir:  newField(i18n.T("overlays.outputFolder"), "ovl-np-dir", f.Dir, "text"),
 		Open: uiBtn{Label: i18n.T("overlays.openFolder"), Variant: "outline", Act: "ovl-np-open"},
 		Note: i18n.T("overlays.np.note"),
@@ -521,8 +524,12 @@ func ovlStripHTMLOf(st ovlStripState) string {
 // ovlNote is the muted per-card explanation paragraph.
 func ovlNote(text string) string { return `<p class=ovl-note>` + htmlEscape(text) + `</p>` }
 
-// ovlCardHTML wraps a card with an optional live-status region (stable id → patched by the tick).
+// ovlCardHTML wraps a card with an optional live-status region (stable id → patched by the
+// tick) + optional enable switch (outside the status div so the tick patch never wipes it).
 func ovlCardHTML(c ovlCardState, body string) string {
+	if c.En.Act != "" {
+		body = c.En.html() + body
+	}
 	if c.StatusID != "" {
 		body = `<div id=` + c.StatusID + `>` + c.Status.html() + `</div>` + body
 	}
