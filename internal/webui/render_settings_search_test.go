@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"rave.page/mate/internal/i18n"
 )
@@ -245,6 +246,11 @@ func TestSettingsSearchPaneMatchesLegacy(t *testing.T) {
 	fxs := setFixtures()
 	for _, name := range []string{"djsources", "account", "escaping", "unicode"} {
 		u := fxs[name].u
+		// Pin the async gridfix env probe settled: its gate note ("...then enable") landing
+		// between the legacy and pane measurements diverges them (raced on linux CI).
+		u.gfProbe.mu.Lock()
+		u.gfProbe.ready, u.gfProbe.at = true, time.Now()
+		u.gfProbe.mu.Unlock()
 		stats := u.settingsStatus()
 		for _, q := range []string{"port", "midi", "path", "enable", "e", "&", `a&b<"c">`, "midi port",
 			"port midi", "zzz-no-such-setting", "ffmpeg", "obs", "vrchat", "Résolume", "SPOUT", "0.0.0.0"} {
