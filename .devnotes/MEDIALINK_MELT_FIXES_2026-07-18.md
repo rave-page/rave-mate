@@ -144,3 +144,100 @@ codec) all live downstream of the single readback.
 Needs the 2-PC rig (cannot be unit-tested): real Spout readback rate at a cap, two peers on one
 source showing ONE poll loop, `scale_cuda`/`scale_qsv` acceptance by the installed ffmpeg (and the
 demotion warning when rejected), and the end-to-end sender-CPU/bandwidth delta while OBS streams.
+
+## 2026-07-26 - Engine + device wave (branch `feature/medialink-engine-select`, WP-1 + WP-3)
+
+Third wave, same incident. The user's words: "the encoding presets for the spout peer link share
+don't let me choose which device i prefer. make this performant, not kill my whole system".
+
+### WP-1: the pipe-free engine now WINS the negotiation
+
+Ranked culprit #1 was the default codec walk (AV1 → HEVC → H.264): any rig with `hevc_nvenc`
+negotiated HEVC, which bypasses `mfenc` and runs the ffmpeg child - raw RGBA over a 64 KB stdin
+pipe (497 MB/s at 1080p60, 1.99 GB/s at 4K60) plus a CPU swscale RGBA→NV12 plus a GPU re-upload.
+That memory traffic, not the codec, is what starved OBS.
+
+| Change | Detail |
+|---|---|
+| Native engine gets its OWN capability name | `medialink.EncoderMFNative` = `"h264_mf_native"`, advertised only when `mfenc.Available()`. ffmpeg's `h264_mf` stays a normal pipe-fed tier-3 candidate, so "is the engine pipe-free?" is answerable from the advertised list alone - no medialink→mfenc dependency |
+| Negotiation precedence | `Negotiate(enc, dec, NegotiateOpts)`: **pin** (`MediaLink.Encoder`) > **sender codec preference** (`MediaLink.PreferCodec` mirrored onto the send side) > **pipe-free preemption** > the §3.2 tier walk. `NegotiateCodec`/`NegotiateCodecFor` are thin wrappers - every existing caller and test is untouched |
+| Unsatisfiable pin/preference FALLS THROUGH | Never a refused route: a peer that cannot decode the preference still gets the best common tier. Refusing would drop to the raw-video guard, which is the melt |
+| Software gate still applies | A pinned/preferred `libx264` at 4K60 is still skipped (`swTier4MaxPixelRate`) - the pin cannot re-create the x264-pins-every-core failure |
+| Engine keying bug fixed | `mediapipe.Factories` keyed on `Codec == CodecH264`, so a negotiated `libx264` ran on MF **hardware** silicon while the Answer + route stats reported tier-4 software - and `SWOnly` ("force software encode") silently didn't. Now `encodeEngine(spec)` keys on the ENCODER NAME: only `EncoderMFNative` runs mfenc |
+| Native-open failure keeps the wire honest | The peer was answered H.264, so the fallback substitutes a *probed ffmpeg H.264* encoder (hw first, `libx264` last) instead of silently changing codec; a loud warn names the substitution |
+
+When h264/mfenc wins, in one line: **whenever this sender has a working native MF encoder and the
+requesting peer advertises `h264` decode** - unless the user pinned another encoder or preferred
+another codec that is satisfiable. What the peer sees: `Answer.Codec = h264` and
+`Answer.Caps.Encoders = ["h264_mf_native"]`; `EncoderTier` resolves that to tier 3 / hardware, so
+its route stats read hardware H.264, and its decode path is plain H.264 (unchanged).
+
+### WP-3: which GPU encodes
+
+Config (additive, zero value = exactly the old behaviour): `devicePolicy` (`auto` | `pin` |
+`avoid-busiest`), `encoderDevice` (DXGI adapter LUID key), `encoder` (hard encoder pin).
+
+- `encoderscan.Adapters()` exported; `ResolveDevice(policy, pin, adapters, report)` is pure and
+  degrades honestly - a pinned GPU that is gone returns "automatic" with a reason, NEVER a
+  different device; `avoid-busiest` skips adapters a critical consumer holds and takes the least
+  `AdapterEncPct`; a single-GPU box always resolves to automatic (nothing to choose).
+- `NewDeviceSelector` TTL-caches (5 s) and only samples PDH for `avoid-busiest`; `auto` costs
+  nothing. Called at route open, never on a UI lane.
+- `medialink.Options.EncodeDevice/EncodePolicy` are read per offer / route open, so a settings
+  change applies to the next route without a restart. `EncodeSpec.DeviceLUID/DeviceIndex` +
+  `Device()`, which reports "engine default" unless BOTH are resolved - every pre-existing spec
+  builder keeps emitting no device flags.
+- **mfenc is the accurate path**: `mf_enc_open`'s dead `codec` param became `adapterLuid` →
+  `D3D11CreateDevice(pAdapter, D3D_DRIVER_TYPE_UNKNOWN, …)`, plus vendor-first `MFTEnumEx`
+  candidate ordering with `SET_D3D_MANAGER` as the hard gate (an MFT that refuses this adapter's
+  device manager is skipped) instead of blind `acts[0]`. An unusable adapter degrades to the
+  default INSIDE the shim, so a device preference can never kill a route.
+- ffmpeg children: `planEncodeDevice` owns the child's SINGLE `-init_hw_device`/`-filter_hw_device`
+  pair. With the capture wave's GPU scaler active the adapter folds into that device spec
+  (`cuda=rvcu:1`, `qsv=rvqsv,child_device=2`); without it the per-encoder option does the work
+  (`-gpu` NVENC, `-qsv_device` QSV) and AMF/`*_mf` - which expose no device option in ffmpeg at
+  all - get a `d3d11va` context. Deliberate caveat: NVENC's ordinal is a CUDA ordinal, which
+  usually but not always equals the DXGI one; mfenc's LUID binding has no such ambiguity.
+
+### Settings UI + the split nobody documented
+
+MediaLink settings act on DIFFERENT PCs: `PreferCodec` + `BitrateKbps` are read where the route is
+REQUESTED (they travel in the Offer), everything else where it is SERVED. Setting the wrong one on
+the wrong box silently did nothing, and the card said nothing about it. The card is now a sender
+group (encode GPU, encode engine, fps cap, resolution cap, force-software) and a receiver group
+(codec, bitrate), each behind a note naming its PC, plus the media-plane isolation toggle. Every
+help body states its side. `PreferCodec` is ALSO mirrored onto the send side (`EncodePolicy`), so
+pinning h264 on the capturing PC steers what it negotiates - documented in `help.ml-accel`.
+
+The encode-GPU picker's options come from a new settings probe (`pkGPUEnc`): DXGI always (~1 ms),
+the PDH load / "who is on it" join only on a multi-adapter box. The render path reads the retained
+slot only - the actWorker never blocks. New help topics `ml-device`, `ml-engine`, `ml-isolation`
+(long, with authoritative links) in all 7 locales; `es/fr/ja/ru/uk` also gained the medialink
+labels they were missing.
+
+### Flagged, not fixed here
+
+- **Family classification vs. real silicon.** `EncoderMFNative` classifies as `FamilyMF`, so the
+  QoS wave's `PlanAdvertise` does NOT withhold it while OBS holds `FamilyNVENC` - yet mfenc may run
+  on that same NVIDIA silicon. Withholding it would be worse (the alternatives are the pipe or the
+  CPU), so the remedy is `avoid-busiest` / pin. A future pass could bind the native engine's family
+  to the adapter it actually opened - the shim knows the vendor.
+- `encoderscan.Devices()`'s vendor-name join is still per-encoder-FAMILY while the resolved
+  DeviceChoice is a global preference. They agree in practice but are two mechanisms.
+- With an UNVALIDATED (listing-only) advertisement the ffmpeg H.264 substitute may name an encoder
+  that fails at open; the route then dies as it did before. `mfenc.Available()` is a real probe, so
+  the preemption itself is never affected.
+
+### Needs the 2-PC rig (NOT verified here)
+
+- That H.264/mfenc actually wins on a live pair, that the peer's route stats read
+  `h264_mf_native` tier 3 hardware, and the sender-side CPU / memory-bandwidth delta versus the
+  old HEVC ffmpeg-child path while OBS streams.
+- Adapter pinning on real multi-GPU hardware: `D3D11CreateDevice` on adapter N, the vendor-first
+  MFT actually bound to that adapter (the "native MF hardware encode" log line carries `device`),
+  and the degrade path when the pinned adapter cannot host the pipeline.
+- `-gpu` / `-qsv_device` / `d3d11va=rvd3d:N` accepted by the installed ffmpeg, and whether NVENC's
+  CUDA ordinal matches the DXGI ordinal on a two-NVIDIA box.
+- `avoid-busiest` with a REAL live OBS stream: PDH populates `AdapterEncPct`, the route lands on
+  the other adapter, and the picker shows the load + holder.
+- The settings card at both window widths plus a locale sweep (the help bodies are long by design).
