@@ -127,7 +127,8 @@ jobs:
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
             go build -tags "spout vr abletonlink zigdsp zigui zigvr" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
-          cp internal/vroverlay/sdk/openvr_api.dll dist/    # runtime-loaded by the vr backend (vendored)
+          cp internal/vroverlay/sdk/openvr_api.dll dist/   # runtime-loaded by the vr backend (vendored)
+          cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child
           ls -la dist/
       - name: Authenticode-sign exe
         env:
@@ -164,6 +165,7 @@ jobs:
             -DOUT_FILE="$PWD/dist/rave-mate-setup.exe" \
             -DSPOUT_DLL="$PWD/dist/SpoutLibrary.dll" \
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
+            -DENC_EXE="$PWD/dist/rave-mate-enc.exe" \
             $ICONDEF \
             installer/rave-mate.nsi
       - name: Authenticode-sign installer + cleanup

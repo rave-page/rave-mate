@@ -52,3 +52,15 @@ cd zig-out/lib
 case "$target" in *windows*|"") if [ -f ravevr.lib ]; then cp -f ravevr.lib libravevr.a; fi ;; *) rm -f ravevr.lib ;; esac
 ls -la
 echo "ravevr built ($ver, ${target:-native})"
+
+# --- zigenc: per-adapter MF encoder child exe (native/zigenc → rave-mate-enc.exe) ---
+# Windows-only (Media Foundation); ship beside rave-mate.exe. Supervised by the media
+# child; a vendor-driver fault kills only this exe.
+case "$target" in
+  *windows*|"")
+    cd ../../../zigenc
+    "$ZIG" build -Drelease ${target:+-Dtarget=$target}
+    ls -la zig-out/bin
+    echo "rave-mate-enc built ($ver, ${target:-native})"
+    ;;
+esac

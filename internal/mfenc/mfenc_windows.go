@@ -66,7 +66,8 @@ type feedReq struct {
 }
 
 type ctrlReq struct {
-	kind int // 1=forceIDR 2=close
+	kind int // 1=forceIDR 2=close 3=setBitrate
+	arg  int // kind 3: kbps
 	done chan struct{}
 }
 
@@ -125,6 +126,19 @@ func (e *Encoder) Encode(rgba []byte, ptsNs int64) error {
 // ForceKeyframe requests an IDR on the next fed frame (live - no encoder restart).
 func (e *Encoder) ForceKeyframe() {
 	req := ctrlReq{kind: 1, done: make(chan struct{})}
+	select {
+	case e.ctrlCh <- req:
+		<-req.done
+	case <-e.done:
+	}
+}
+
+// SetBitrate live-retargets CBR mean bitrate (no reopen; best-effort - encoders vary).
+func (e *Encoder) SetBitrate(kbps int) {
+	if kbps <= 0 {
+		return
+	}
+	req := ctrlReq{kind: 3, arg: kbps, done: make(chan struct{})}
 	select {
 	case e.ctrlCh <- req:
 		<-req.done
@@ -214,6 +228,9 @@ func (e *Encoder) run(adapterLUID int64, inW, inH, outW, outH int, fps float64, 
 			switch req.kind {
 			case 1:
 				C.mf_enc_force_idr(h)
+				close(req.done)
+			case 3:
+				C.mf_enc_set_bitrate(h, C.int(req.arg))
 				close(req.done)
 			case 2:
 				C.mf_enc_drain(h)
