@@ -20,6 +20,10 @@
 #define LOCALE_NEUTRAL 0
 #endif
 
+// ntifs.h-only export; portcls TUs declare it themselves (PsGetCurrentProcessId pattern).
+extern "C" NTSYSCALLAPI NTSTATUS NTAPI
+ZwWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+
 #define RAVE_TAG RAVEMIDI_POOL_TAG
 #define M_SEC 10000000ull                 // 100ns units
 #define M_FRIENDLY_CCH 128
@@ -49,8 +53,9 @@ typedef struct _RAVE_MINPUT {
 static struct {
     BOOLEAN Started;
     BOOLEAN Dead;                         // set under Lock at Stop: Apply refuses
+    BOOLEAN DispatcherInit;               // Lock/Wake initialized (once per driver load, never cleared)
     PDEVICE_OBJECT Fdo;
-    KMUTEX Lock;                          // passive-level; guards In/Count/Grave
+    KMUTEX Lock;                          // passive-level; guards In/Count/Grave + Started/Dead verdicts
     KEVENT Wake;                          // auto-reset worker kick
     volatile LONG Stop;
     PVOID ThreadObj;
@@ -84,7 +89,11 @@ static SIZE_T MWcsLen(PCWSTR s)  // no CRT dep
 
 VOID RaveManagedKickFeedback()
 {
-    // <= DISPATCH (miniport render Write). Started implies Wake is initialized.
+    // <= DISPATCH (miniport render Write) — can NOT wait on the KMUTEX, so
+    // Started is peeked unlocked. Safe only because Wake is initialized once per
+    // driver load (DispatcherInit) and never re-initialized: the worst stale
+    // outcome is a spurious KeSetEvent across a STOP->START cycle, which the
+    // worker loop tolerates. Do not add locking here.
     if (g_M.Started) {
         KeSetEvent(&g_M.Wake, IO_NO_INCREMENT, FALSE);
     }
@@ -210,11 +219,15 @@ static VOID ReapGraveyard()
 VOID RaveManagedGraveOrphan(ULONG portId)
 {
     PAGED_CODE();
-    if (!g_M.Started) {
+    // Pre-init gate BEFORE the mutex (see RaveManagedApply): a ctl-device CLOSE
+    // can reach here before ManagedInit ever ran (StartDevice publishes the ctl
+    // device first) — also guards the Wake KeSetEvent below. Verdict under Lock;
+    // engine down = skip the park, the unload safety net frees the block.
+    if (!g_M.DispatcherInit) {
         return;
     }
     MLock();
-    if (!g_M.Dead && g_M.GraveCount < M_GRAVE_MAX) {
+    if (g_M.Started && !g_M.Dead && g_M.GraveCount < M_GRAVE_MAX) {
         g_M.Grave[g_M.GraveCount++] = portId;
     }
     MUnlock();
@@ -392,8 +405,10 @@ static VOID TryBindRender(RAVE_MINPUT* in)
             }
             if (NT_SUCCESS(RaveKsOpenRenderPin(sym, &in->RFilter, &in->RFilterFo,
                                                &in->RPin, &in->RPinFo))) {
-                // discard stale feedback queued while unbound, then arm the tees
-                UCHAR sink[RAVEMIDI_FEEDBACK_CHUNK];
+                // discard stale feedback queued while unbound, then arm the tees.
+                // Small sink on purpose (C6262 stack budget): FifoPop is a plain
+                // byte drain, the loop empties the ring regardless of chunk size.
+                UCHAR sink[64];
                 RAVE_PORT* srcs[RAVEMIDI_MAX_MIRROR_OUT + 1];
                 ULONG ns = FeedbackSrcs(in, srcs);
                 for (ULONG k = 0; k < ns; k++) {
@@ -423,6 +438,7 @@ typedef struct _FB_EMIT_CTX {
 // Framer emit: one message-aligned KS write per complete MIDI message.
 static VOID FbEmit(PVOID ctx, const UCHAR* msg, ULONG len)
 {
+    PAGED_CODE();  // in the PAGE seg; only called from DrainFeedback (PASSIVE)
     FB_EMIT_CTX* e = (FB_EMIT_CTX*)ctx;
     if (!e->Ok) {
         return;
@@ -574,28 +590,60 @@ static VOID ManagedInit(PDEVICE_OBJECT Fdo)
         return;
     }
     g_M.Fdo = Fdo;
-    KeInitializeMutex(&g_M.Lock, 0);
-    KeInitializeEvent(&g_M.Wake, SynchronizationEvent, FALSE);
+    // 0x139 CORRUPT_LIST_ENTRY fix (dump arg1=3, nt!KiProcessThreadWaitList): a
+    // stale consumer can sit in KeWaitForSingleObject(&g_M.Lock) across an entire
+    // STOP->START cycle (pnputil update while rave-mate polls the ctl device).
+    // Re-running KeInitializeMutex/KeInitializeEvent here wiped Header.
+    // WaitListHead under that live KWAIT_BLOCK; the severed entry blew up on a
+    // later wait-list unlink. Dispatcher objects are init-once per driver load
+    // (g_M is zeroed static data); ManagedInit resets only non-dispatcher state.
+    if (!g_M.DispatcherInit) {
+        KeInitializeMutex(&g_M.Lock, 0);
+        KeInitializeEvent(&g_M.Wake, SynchronizationEvent, FALSE);
+        g_M.DispatcherInit = TRUE;
+    }
     g_M.Stop = 0;
+    // Reset under Lock: a stale consumer inside the mutex must never interleave
+    // with the wipe (it re-checks Started/Dead under the mutex and backs out).
+    MLock();
     g_M.Dead = FALSE;
     g_M.Count = 0;
     g_M.GraveCount = 0;
     RtlZeroMemory(g_M.In, sizeof(g_M.In));
+    MUnlock();
     HANDLE th = nullptr;
     if (!NT_SUCCESS(PsCreateSystemThread(&th, THREAD_ALL_ACCESS, nullptr, nullptr, nullptr,
                                          MWorker, nullptr))) {
         return;  // engine stays off; legacy IOCTL paths unaffected
     }
-    ObReferenceObjectByHandle(th, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
-                              &g_M.ThreadObj, nullptr);
+    NTSTATUS st = ObReferenceObjectByHandle(th, THREAD_ALL_ACCESS, *PsThreadType, KernelMode,
+                                            &g_M.ThreadObj, nullptr);
+    if (!NT_SUCCESS(st)) {
+        // Unreferenced worker can't be joined at Stop — it would zombie on the
+        // g_M dispatcher objects forever. Order it out and join via the handle.
+        g_M.ThreadObj = nullptr;
+        InterlockedExchange(&g_M.Stop, 1);
+        KeSetEvent(&g_M.Wake, IO_NO_INCREMENT, FALSE);
+        if (NT_SUCCESS(ZwWaitForSingleObject(th, FALSE, nullptr))) {
+            g_M.Stop = 0;  // joined; next START may spin a fresh worker
+        }                  // else (can't happen on a valid kernel handle): leave
+                           // Stop set so the orphan exits — engine stays off
+        ZwClose(th);
+        return;
+    }
     ZwClose(th);
     // Interface arrivals wake the worker (INCLUDE_EXISTING fires immediately for
     // already-present devices). Best-effort: the retry tick covers failure.
-    IoRegisterPlugPlayNotification(EventCategoryDeviceInterfaceChange,
-                                   PNPNOTIFY_DEVICE_INTERFACE_INCLUDE_EXISTING_INTERFACES,
-                                   (PVOID)&KSCATEGORY_CAPTURE, Fdo->DriverObject,
-                                   MPnpNotify, nullptr, &g_M.Notify);
-    g_M.Started = TRUE;
+    st = IoRegisterPlugPlayNotification(EventCategoryDeviceInterfaceChange,
+                                        PNPNOTIFY_DEVICE_INTERFACE_INCLUDE_EXISTING_INTERFACES,
+                                        (PVOID)&KSCATEGORY_CAPTURE, Fdo->DriverObject,
+                                        MPnpNotify, nullptr, &g_M.Notify);
+    if (!NT_SUCCESS(st)) {
+        g_M.Notify = nullptr;  // Stop must not unregister a bogus handle
+    }
+    MLock();
+    g_M.Started = TRUE;  // publish under Lock — consumers verdict it under Lock
+    MUnlock();
 }
 
 VOID RaveManagedBoot(PDEVICE_OBJECT Fdo)
@@ -623,7 +671,12 @@ VOID RaveManagedStop()
     if (!g_M.Started) {
         return;
     }
+    // Flip the verdict under Lock FIRST: consumers re-check Started/Dead under
+    // the mutex, so past this block none can enter engine state mid-teardown.
+    MLock();
     g_M.Started = FALSE;
+    g_M.Dead = TRUE;  // Apply refuses until the next ManagedInit
+    MUnlock();
     if (g_M.Notify) {
         IoUnregisterPlugPlayNotificationEx(g_M.Notify);  // waits for in-flight callbacks
         g_M.Notify = nullptr;
@@ -636,7 +689,6 @@ VOID RaveManagedStop()
         g_M.ThreadObj = nullptr;
     }
     MLock();
-    g_M.Dead = TRUE;  // Apply refuses until the next ManagedInit
     for (ULONG i = 0; i < g_M.Count; i++) {
         TeardownInput(g_M.In[i]);
         g_M.In[i] = nullptr;
@@ -650,11 +702,23 @@ VOID RaveManagedStop()
 NTSTATUS RaveManagedApply(const RAVEMIDI_CONFIG* cfg)
 {
     PAGED_CODE();
-    if (!g_M.Started) {
+    // DispatcherInit gate BEFORE the mutex: StartDevice publishes g_Adapter (and
+    // the ctl device dispatches IOCTLs) before RaveManagedBoot runs — on a boot
+    // race / failed START this path is reachable with g_M.Lock still the zeroed
+    // static (never KeInitializeMutex'd); waiting on it is UB. The unlocked peek
+    // is sound: DispatcherInit is written exactly once, strictly AFTER
+    // KeInitializeMutex/KeInitializeEvent on the same thread (KeInitialize* are
+    // compiler barriers; x64 TSO orders the stores) and never reverts — TRUE
+    // guarantees an initialized Lock, a stale FALSE just yields a conservative
+    // NOT_READY.
+    if (!g_M.DispatcherInit) {
         return STATUS_DEVICE_NOT_READY;
     }
+    // Engine-lifetime verdict ONLY under Lock (unlocked peek raced Stop: TOCTOU
+    // window spanned the whole device restart). Lock itself is init-once — safe
+    // to wait on even while the engine is down.
     MLock();
-    if (g_M.Dead) {
+    if (!g_M.Started || g_M.Dead) {
         MUnlock();
         return STATUS_DEVICE_NOT_READY;
     }
@@ -710,10 +774,14 @@ NTSTATUS RaveManagedApply(const RAVEMIDI_CONFIG* cfg)
 NTSTATUS RaveManagedQuery(ULONG index, RAVEMIDI_INPUT_STATUS* out)
 {
     PAGED_CODE();
-    if (!g_M.Started) {
+    if (!g_M.DispatcherInit) {  // pre-init gate BEFORE the mutex (see RaveManagedApply)
         return STATUS_DEVICE_NOT_READY;
     }
     MLock();
+    if (!g_M.Started || g_M.Dead) {  // verdict under Lock (see RaveManagedApply)
+        MUnlock();
+        return STATUS_DEVICE_NOT_READY;
+    }
     if (index >= g_M.Count) {
         MUnlock();
         return STATUS_NO_MORE_ENTRIES;

@@ -315,9 +315,12 @@ static VOID StampFriendlyName(RAVE_ADAPTER* a, PCWSTR refString, PCWSTR name)
         }
         UNICODE_STRING symU;
         RtlInitUnicodeString(&symU, sym);
-        IoSetDeviceInterfacePropertyData(&symU, &DEVPKEY_DeviceInterface_FriendlyName,
+        st = IoSetDeviceInterfacePropertyData(&symU, &DEVPKEY_DeviceInterface_FriendlyName,
             LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING,
             nameBytes, (PVOID)name);
+        if (!NT_SUCCESS(st)) {
+            continue;  // best-effort (port works unnamed); other matches may still stamp
+        }
     }
     ExFreePool(list);
 }

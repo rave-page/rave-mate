@@ -57,7 +57,11 @@ VOID RaveFramerFeed(_Inout_ RAVE_FRAMER* f, _In_reads_bytes_(len) const UCHAR* b
                 SysFlush(f, emit, ctx);
                 f->InSysEx = FALSE;            // fall through to status handling
             } else {
-                f->Sys[f->SysHave++] = c;
+                // bound-guarded append (C6386): the invariant (every append path
+                // flushes at the cap) keeps SysHave < CHUNK, but make it provable
+                if (f->SysHave < RAVE_FRAMER_SYSEX_CHUNK) {
+                    f->Sys[f->SysHave++] = c;
+                }
                 if (f->SysHave >= RAVE_FRAMER_SYSEX_CHUNK) {
                     SysFlush(f, emit, ctx);    // mid-sysex chunk (multi-record legal)
                 }

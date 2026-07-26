@@ -260,7 +260,11 @@ NTSTATUS CreateRaveMiniport(PDEVICE_OBJECT Fdo, RAVE_PORT* ctx, PUNKNOWN* OutUnk
     NTSTATUS st = PcNewPort(&port, CLSID_PortMidi);
     if (NT_SUCCESS(st)) {
         // Virtual device: no start-IRP, no resources (sysvad's dynamic sideband
-        // endpoints init the same way).
+        // endpoints init the same way). C6387 FP: IPort::Init's SAL marks the
+        // resource list _In_, but PortMidi treats it as optional for dynamic
+        // subdevices — nullptr proven live across 5.0.0.x on hardware. The arg
+        // is a constant, so _Analysis_assume_ can't express this; suppress.
+#pragma warning(suppress: 6387)
         st = port->Init(Fdo, nullptr, PUNKNOWN(PMINIPORTMIDI(mp)), nullptr, nullptr);
     }
     if (NT_SUCCESS(st)) {
