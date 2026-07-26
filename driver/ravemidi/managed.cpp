@@ -219,9 +219,13 @@ static VOID ReapGraveyard()
 VOID RaveManagedGraveOrphan(ULONG portId)
 {
     PAGED_CODE();
-    // Reachable only after StartDevice (ctl-device CLOSE path), so DispatcherInit
-    // holds and the Lock wait is safe. Verdict under Lock (see RaveManagedApply);
+    // Pre-init gate BEFORE the mutex (see RaveManagedApply): a ctl-device CLOSE
+    // can reach here before ManagedInit ever ran (StartDevice publishes the ctl
+    // device first) — also guards the Wake KeSetEvent below. Verdict under Lock;
     // engine down = skip the park, the unload safety net frees the block.
+    if (!g_M.DispatcherInit) {
+        return;
+    }
     MLock();
     if (g_M.Started && !g_M.Dead && g_M.GraveCount < M_GRAVE_MAX) {
         g_M.Grave[g_M.GraveCount++] = portId;
@@ -698,6 +702,18 @@ VOID RaveManagedStop()
 NTSTATUS RaveManagedApply(const RAVEMIDI_CONFIG* cfg)
 {
     PAGED_CODE();
+    // DispatcherInit gate BEFORE the mutex: StartDevice publishes g_Adapter (and
+    // the ctl device dispatches IOCTLs) before RaveManagedBoot runs — on a boot
+    // race / failed START this path is reachable with g_M.Lock still the zeroed
+    // static (never KeInitializeMutex'd); waiting on it is UB. The unlocked peek
+    // is sound: DispatcherInit is written exactly once, strictly AFTER
+    // KeInitializeMutex/KeInitializeEvent on the same thread (KeInitialize* are
+    // compiler barriers; x64 TSO orders the stores) and never reverts — TRUE
+    // guarantees an initialized Lock, a stale FALSE just yields a conservative
+    // NOT_READY.
+    if (!g_M.DispatcherInit) {
+        return STATUS_DEVICE_NOT_READY;
+    }
     // Engine-lifetime verdict ONLY under Lock (unlocked peek raced Stop: TOCTOU
     // window spanned the whole device restart). Lock itself is init-once — safe
     // to wait on even while the engine is down.
@@ -758,6 +774,9 @@ NTSTATUS RaveManagedApply(const RAVEMIDI_CONFIG* cfg)
 NTSTATUS RaveManagedQuery(ULONG index, RAVEMIDI_INPUT_STATUS* out)
 {
     PAGED_CODE();
+    if (!g_M.DispatcherInit) {  // pre-init gate BEFORE the mutex (see RaveManagedApply)
+        return STATUS_DEVICE_NOT_READY;
+    }
     MLock();
     if (!g_M.Started || g_M.Dead) {  // verdict under Lock (see RaveManagedApply)
         MUnlock();

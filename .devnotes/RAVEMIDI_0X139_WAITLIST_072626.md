@@ -40,6 +40,20 @@ Fix (`managed.cpp`):
   Its unlocked `Started` peek + `KeSetEvent` is safe ONLY because the KEVENT is init-once now
   (event re-init was its hazard); worst case = spurious wake, worker tolerates. Documented in-code.
 
+### Review catch: pre-init MLock hole (fixed before merge)
+
+First cut of the fix made `Apply`/`Query`/`GraveOrphan` MLock unconditionally — but the OLD
+unlocked `Started` early-outs had been (accidentally) keeping those paths off `g_M.Lock` before
+`ManagedInit` ever ran. `RaveStartDevice` publishes `g_Adapter` + the ctl device BEFORE
+`RaveManagedBoot`, so SET/GET_CONFIG/QUERY_INPUT and handle-CLOSE→GraveOrphan can dispatch first
+(boot race / failed START) → `KeWaitForSingleObject` on the zeroed, never-initialized KMUTEX = UB
+(GraveOrphan's `KeSetEvent(&g_M.Wake)` equally pre-init-reachable). Fix: all three gate on
+`g_M.DispatcherInit` BEFORE MLock (`STATUS_DEVICE_NOT_READY` / plain return). Unlocked peek is
+sound: flag written once, strictly after `KeInitialize*` on the same thread (compiler barriers +
+x64 TSO store order), never reverts — TRUE ⇒ initialized Lock; stale FALSE ⇒ conservative
+NOT_READY. `KickFeedback` already safe (peeks `Started`, which only becomes TRUE inside
+`ManagedInit`); `Stop` gated by `Started`; MWorker/MTapDead/MPnpNotify exist only post-init.
+
 ## F2 (MEDIUM): ObReferenceObjectByHandle ignored → unjoinable zombie thread
 
 - `managed.cpp` MWorker create + `mirror.cpp` TapThread create ignored the ObRef status (C6031).
