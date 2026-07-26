@@ -60,3 +60,10 @@ upload disappear entirely; frames never leave the GPU until they're compressed b
 Pacing via the Spout frame-count semaphore. Caps note: a no-ffmpeg machine still
 can't ADVERTISE h264 (probe is ffmpeg-based, internal/mediapipe/probe.go) - wiring
 `mfenc.Available()` into the caps list is a 3-line follow-up in probe/app wiring.
+
+Phase B hooks that already exist (2026-07-25 capture pass): the readback is now rate-gated
+inside the poll loop (`videoshare.RecvOptions.MaxFPS`, live via `FPSLimiter`) and there is ONE
+capture per Spout sender fanned out to N routes (`mediaroute/capture.go`). A zero-copy source
+replaces the readback INSIDE that single capture - keep the same seam (one shared capture per
+sender name, refcounted, per-route fps applied downstream) so N routes still cost one GPU path.
+Zero-copy hard-depends on device selection: `OpenSharedResource` fails across adapters.
