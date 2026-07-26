@@ -114,7 +114,7 @@ func (m *Manager) renderStatsTexture(o config.VROverlay, key string, rtErr func(
 	}
 	img := m.rend.RenderStats(sv, panelW, panelH, bg)
 	m.editBorder(img, key)
-	err := m.rt.SetTexture(key, img)
+	err := m.setTex(key, img)
 	rtErr(err)
 	if err == nil {
 		m.sig[key] = s

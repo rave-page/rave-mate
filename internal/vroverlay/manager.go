@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/color"
 	"runtime"
 	"strings"
@@ -50,6 +51,8 @@ type Manager struct {
 	hidden         map[string]bool             // overlay id → user-toggled hidden
 	contentHidden  bool                        // global show/hide all content overlays (wrist short-click)
 	pendEditToggle bool                        // editor.toggle bind requested off-thread → consumed on the VR goroutine
+	pendReinit     bool                        // GPU-reset reinit requested off-thread → consumed on the VR goroutine
+	reinitDetail   string                      // cause for the reinit log (driver/event id)
 	rend           *Renderer
 	created        map[string]bool          // overlay key → EnsureOverlay done
 	sig            map[string]string        // overlay key → last-rendered content signature (skip re-upload)
@@ -167,6 +170,33 @@ func (m *Manager) takeEditToggle() bool {
 	m.pendEditToggle = false
 	m.mu.Unlock()
 	return p
+}
+
+// RequestReinit asks a connected session to tear down + re-Init in place - fired when the OS logs a
+// display-driver reset (TDR), so overlays rebuild on the recovered device instead of ticking against
+// stale state. Safe from any goroutine; a no-op while disconnected (fresh connects discard it).
+func (m *Manager) RequestReinit(detail string) {
+	m.mu.Lock()
+	m.pendReinit, m.reinitDetail = true, detail
+	m.mu.Unlock()
+}
+
+// takeReinit reads + clears a pending GPU-reset reinit request (called on the VR goroutine).
+func (m *Manager) takeReinit() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, d := m.pendReinit, m.reinitDetail
+	m.pendReinit, m.reinitDetail = false, ""
+	return d, p
+}
+
+// setTex uploads a texture via the runtime and feeds the outcome to the session health counter -
+// SetOverlayRaw failures were swallowed at every call site, so a post-TDR dead compositor ticked
+// forever (GPU_RESILIENCE_PLAN P0). Every SetTexture goes through here. VR-goroutine only.
+func (m *Manager) setTex(key string, img *image.NRGBA) error {
+	err := m.rt.SetTexture(key, img)
+	m.health.observeTex(err)
+	return err
 }
 
 // SetBindDispatcher wires the keybind dispatcher + a current-binds accessor so VR action slots
@@ -335,6 +365,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // runConnected ticks the overlays until ctx is cancelled or SteamVR signals quit.
 func (m *Manager) runConnected(ctx context.Context) {
+	m.takeReinit() // discard a reset that predates this session - it's already fresh
 	m.maybeRegisterApp()
 	m.initInput()
 	var unsub []func()
@@ -395,11 +426,19 @@ func (m *Manager) runConnected(ctx context.Context) {
 				m.log.Warn(logTag, "VR session ending - reconnecting", map[string]any{"reason": q.String()})
 				return
 			}
+			if d, ok := m.takeReinit(); ok { // OS logged a driver reset → rebuild the session in place
+				m.log.Warn(logTag, "VR session reinit requested (GPU reset) - reconnecting", map[string]any{"detail": d})
+				return
+			}
 			t0 := time.Now()
 			m.tick()
 			m.renderStat.observe(time.Since(t0))
 			if m.health.dead() { // runtime died without a Quit event (every call failing) → reconnect
 				m.log.Warn(logTag, "VR overlay session unresponsive - every runtime call failing; reconnecting", map[string]any{"failedTicks": m.health.consecFail})
+				return
+			}
+			if m.health.texDead() { // uploads persistently failing (post-TDR dead compositor) → reconnect
+				m.log.Warn(logTag, "VR texture uploads failing persistently - reconnecting", map[string]any{"consecFails": m.health.texFails})
 				return
 			}
 		}
@@ -671,7 +710,7 @@ func (m *Manager) tick() {
 				if m.sig[key] != s {
 					img := m.rend.Panel(lines, panelW, panelH, bg)
 					m.editBorder(img, key)
-					err := m.rt.SetTexture(key, img)
+					err := m.setTex(key, img)
 					rtErr(err)
 					if err == nil {
 						m.sig[key] = s

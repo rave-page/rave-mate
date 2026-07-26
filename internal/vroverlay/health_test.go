@@ -49,11 +49,42 @@ func TestVRHealthReset(t *testing.T) {
 	for range vrDeadBudget {
 		h.observe(1, 1)
 	}
-	if !h.dead() {
-		t.Fatal("precondition: should be dead")
+	for range vrTexFailBudget {
+		h.observeTex(errAny)
+	}
+	if !h.dead() || !h.texDead() {
+		t.Fatal("precondition: should be dead + texDead")
 	}
 	h.reset()
-	if h.dead() || h.consecFail != 0 {
-		t.Fatalf("reset failed: consecFail=%d dead=%v", h.consecFail, h.dead())
+	if h.dead() || h.consecFail != 0 || h.texDead() || h.texFails != 0 {
+		t.Fatalf("reset failed: consecFail=%d texFails=%d", h.consecFail, h.texFails)
+	}
+}
+
+var errAny = errTest("SetOverlayRaw err 23")
+
+type errTest string
+
+func (e errTest) Error() string { return string(e) }
+
+// texDead trips exactly at the budget; one success resets the streak.
+func TestVRHealthTexFailStreak(t *testing.T) {
+	var h vrHealth
+	for range vrTexFailBudget - 1 {
+		h.observeTex(errAny)
+	}
+	if h.texDead() {
+		t.Fatalf("tripped early at %d fails (budget %d)", h.texFails, vrTexFailBudget)
+	}
+	h.observeTex(nil) // a success resets
+	for range vrTexFailBudget - 1 {
+		h.observeTex(errAny)
+	}
+	if h.texDead() {
+		t.Fatalf("streak not reset by success (texFails=%d)", h.texFails)
+	}
+	h.observeTex(errAny)
+	if !h.texDead() {
+		t.Fatalf("did not trip at budget %d (texFails=%d)", vrTexFailBudget, h.texFails)
 	}
 }

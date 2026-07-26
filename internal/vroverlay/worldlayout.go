@@ -156,7 +156,7 @@ func (m *Manager) driveToast() {
 		m.toastEnsure = true
 	}
 	if m.toastSig != m.toastMsg {
-		if m.rt.SetTexture(toastKey, m.rend.RenderTooltip(m.toastMsg)) != nil {
+		if m.setTex(toastKey, m.rend.RenderTooltip(m.toastMsg)) != nil {
 			return
 		}
 		m.toastSig = m.toastMsg

@@ -1881,6 +1881,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// relaunch instead of leaving the app wedged (the in-daemon GL context can't recover in-proc).
 	// Windowed only - needs a window to assess responsiveness, and headless has no GL surface.
 	gpuRec := &gpuRecovery{log: log, notify: u.Notify, quit: cancel}
+	gpuRec.OnGPUReset(vrSurf.GPUReset) // TDR → in-place OpenVR session rebuild (vr child or in-proc)
 	ctl.gpuRec = gpuRec
 	gpuwatch.Start(ctx, gpuwatch.Options{Log: log, OnFault: gpuRec.onFault})
 	log.Info("gpuwatch", "GPU-fault watchdog armed (TDR + hung-window auto-recovery)", nil)

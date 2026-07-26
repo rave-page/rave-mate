@@ -186,7 +186,7 @@ func (e *editor) driveStrip(feat config.VROverlayFeature, hand Hand) {
 	}
 	btns := e.buildStrip(feat)
 	if sig := stripSignature(btns); e.stripSig != sig {
-		if err := e.m.rt.SetTexture(stripKey, e.m.rend.RenderStrip(btns)); err == nil {
+		if err := e.m.setTex(stripKey, e.m.rend.RenderStrip(btns)); err == nil {
 			e.stripSig = sig
 			e.stripShown = btns // click/hover map against what's displayed (menusnap discipline)
 			e.stripHlSig = ""   // cell count/size may have changed → re-place the highlight
@@ -239,7 +239,7 @@ func (e *editor) driveStripHover(hand Hand) {
 		if e.m.rt.EnsureOverlay(stripHlKey, "rave-mate strip hover") != nil {
 			return
 		}
-		_ = e.m.rt.SetTexture(stripHlKey, e.m.rend.RenderStripHover())
+		_ = e.m.setTex(stripHlKey, e.m.rend.RenderStripHover())
 		e.stripHlEnsured = true
 	}
 	tf := e.stripTransform(hand, n)

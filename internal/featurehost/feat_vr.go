@@ -265,6 +265,11 @@ func (f *vrFeature) HandleEvent(event string, data json.RawMessage) {
 		if json.Unmarshal(data, &e) == nil {
 			f.bus.inject(eventbus.Event{Topic: e.Topic, Origin: e.Origin, Local: e.Local, Data: e.Data})
 		}
+	case vrEvGpuReset:
+		var e vrGpuResetEvent
+		if json.Unmarshal(data, &e) == nil {
+			f.mgr.RequestReinit(e.Detail)
+		}
 	}
 }
 

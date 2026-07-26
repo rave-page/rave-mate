@@ -104,6 +104,13 @@ func NewVrOverlayProxy(log *logbus.Bus, deps VROverlayDeps) (*VrOverlayProxy, er
 // Host exposes the supervising host (SetNotifier, Stats).
 func (p *VrOverlayProxy) Host() *Host { return p.host }
 
+// GPUReset forwards an OS-logged display-driver reset (TDR) to the child so it rebuilds its OpenVR
+// session in place (the gpurecover.OnGPUReset consumer). Best-effort: a down child reinits on
+// respawn anyway.
+func (p *VrOverlayProxy) GPUReset(detail string) {
+	_ = p.send(vrEvGpuReset, vrGpuResetEvent{Detail: detail})
+}
+
 // Start begins supervising the child + the state pusher + the bus bridge. Idempotent per module
 // start; Stop reverses it.
 func (p *VrOverlayProxy) Start(ctx context.Context) error {

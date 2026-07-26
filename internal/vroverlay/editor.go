@@ -326,7 +326,7 @@ func (e *editor) uploadMenu(key, title string, items []MenuItem, bg float64, sig
 	texRows := max(len(items), e.menuRowsHi[key])
 	e.menuRowsHi[key] = texRows
 	img := e.m.rend.RenderMenu(title, items, bg, texRows)
-	if err := e.m.rt.SetTexture(key, img); err != nil {
+	if err := e.m.setTex(key, img); err != nil {
 		if time.Since(e.texFailAt) > 2*time.Second {
 			e.texFailAt = time.Now()
 			e.evt("menu texture upload FAILED %s rows=%d: %v", key, len(items), err)
@@ -454,7 +454,7 @@ func (e *editor) tick(feat config.VROverlayFeature) {
 		e.wristAttached = tracked
 	}
 	if !e.wristPainted || e.wristOn != e.on || e.wristHoverPainted != e.wristHover {
-		_ = e.m.rt.SetTexture(wristKey, e.m.rend.RenderWrist(e.on, e.wristHover))
+		_ = e.m.setTex(wristKey, e.m.rend.RenderWrist(e.on, e.wristHover))
 		e.wristOn, e.wristHoverPainted, e.wristPainted = e.on, e.wristHover, true
 	}
 	wristVis := e.wristGating(hand) || e.on
@@ -544,7 +544,7 @@ func (e *editor) tick(feat config.VROverlayFeature) {
 	// 5. SteamVR dashboard tab - same menu, fallback (not draggable; SteamVR positions it).
 	if ok, _ := e.ed.EnsureDashboard(dashKey, "rave-mate"); ok {
 		if !e.dashInit {
-			_ = e.m.rt.SetTexture(dashKey+".thumb", e.m.rend.RenderWrist(true, false))
+			_ = e.m.setTex(dashKey+".thumb", e.m.rend.RenderWrist(true, false))
 			e.dashInit = true
 		}
 		e.driveMenu(dashKey, "rave-mate (dashboard)", feat, hand, false)
@@ -607,7 +607,7 @@ func (e *editor) driveEditOutlines(feat config.VROverlayFeature) {
 			}
 			if e.ensureOutline(&e.selOutlineEnsured, selOutlineKey, col) {
 				if e.selOutlineCol != cstate {
-					_ = e.m.rt.SetTexture(selOutlineKey, e.m.rend.RenderOutline(col))
+					_ = e.m.setTex(selOutlineKey, e.m.rend.RenderOutline(col))
 					e.selOutlineCol = cstate
 				}
 				if grabbing { // ride the grab (config transform is stale while carried at full fps)
@@ -652,7 +652,7 @@ func (e *editor) ensureOutline(ensured *bool, key string, col color.Color) bool 
 	if e.m.rt.EnsureOverlay(key, "rave-mate outline") != nil {
 		return false
 	}
-	_ = e.m.rt.SetTexture(key, e.m.rend.RenderOutline(col))
+	_ = e.m.setTex(key, e.m.rend.RenderOutline(col))
 	*ensured = true
 	return true
 }
@@ -722,7 +722,7 @@ func (e *editor) tickShadow() {
 	// translucent and UI-less so it reads as a placeholder, not a second menu.
 	rows := e.shownMenu(menuKey).rows
 	if sig := fmt.Sprintf("ghost%d", rows); e.shadowSig != sig {
-		_ = e.m.rt.SetTexture(menuShadowKey, e.m.rend.RenderGhost(rows))
+		_ = e.m.setTex(menuShadowKey, e.m.rend.RenderGhost(rows))
 		e.shadowSig = sig
 	}
 	if tf := (Transform{Snap: HandFromString(e.pend.snap), X: e.pend.x, Y: e.pend.y, Z: e.pend.z, Yaw: e.pend.yaw, Pitch: e.pend.pitch, WidthM: w, Opacity: 0.5}); e.shadowTf.needsApply(tf, e.snapTracked(tf)) {
@@ -746,7 +746,7 @@ func (e *editor) tickHelp(feat config.VROverlayFeature, hand Hand) {
 		e.helpEnsured = true
 	}
 	if !e.helpPainted {
-		_ = e.m.rt.SetTexture(helpKey, e.m.rend.Panel(helpLines(feat), panelW, panelH, 0.92))
+		_ = e.m.setTex(helpKey, e.m.rend.Panel(helpLines(feat), panelW, panelH, 0.92))
 		e.helpPainted = true
 	}
 	// Float the help panel to the right of the menu (or beside the edit hand when menu is auto-placed).
@@ -878,7 +878,7 @@ func (e *editor) tickTooltip(feat config.VROverlayFeature, hand Hand) {
 		e.tipEnsured = true
 	}
 	if e.tipSig != full {
-		_ = e.m.rt.SetTexture(tipKey, e.m.rend.RenderTooltip(full))
+		_ = e.m.setTex(tipKey, e.m.rend.RenderTooltip(full))
 		e.tipSig = full
 	}
 	base := e.menuTransform(feat, hand) // beside the menu, nudged forward so it reads over the row

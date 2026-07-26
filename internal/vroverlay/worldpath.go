@@ -71,7 +71,7 @@ func (e *editor) driveWorldPath(feat config.VROverlayFeature, hand Hand) {
 	// Re-render only when the visible frame changes (orbit / zoom / playback head / play state).
 	sig := fmt.Sprintf("%.3f|%.3f|%.3f|%.3f|%v|%d", e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying, len(e.worldPathGeom.Pts))
 	if e.worldPathSig != sig {
-		_ = e.m.rt.SetTexture(worldPathKey, e.m.rend.RenderPathOrbit(e.worldPathGeom, e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying))
+		_ = e.m.setTex(worldPathKey, e.m.rend.RenderPathOrbit(e.worldPathGeom, e.worldPathYaw, e.worldPathPitch, e.worldPathZoom, e.worldPathT, e.worldPathPlaying))
 		e.worldPathSig = sig
 	}
 	// Place beside the menu (opposite the help panel), as a normal panel - never covers the menu.
