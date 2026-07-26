@@ -394,7 +394,7 @@ var schema = []msg{
 	{
 		name: "UiStatus", goT: "uiStatus", zigT: "c.Status", id: 48,
 		doc: "one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else",
-		fs: []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
+		fs:  []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "DL", "dl"), s(4, "Line", "line")},
 	},
 	{
 		name: "BridgeSess", goT: "bridgeSessSt", zigT: "sub.BridgeSess",
@@ -861,7 +861,7 @@ var schema = []msg{
 	{
 		name: "OvlAppr", goT: "ovlApprState", zigT: "overlays.Appearance", id: 46,
 		doc: "#ovl-appearance fragment (re-patched by the fader-flag cache)",
-		fs: []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), li(3, "Btns", "btns", "UiBtn"), st(4, "Fader", "fader", "UiToggle"), s(5, "Note2", "note2")},
+		fs:  []field{st(1, "Card", "card", "OvlCard"), s(2, "Note1", "note1"), li(3, "Btns", "btns", "UiBtn"), st(4, "Fader", "fader", "UiToggle"), s(5, "Note2", "note2")},
 	},
 	{
 		name: "OvlWeb", goT: "ovlWebState", zigT: "overlays.Web",
@@ -882,7 +882,7 @@ var schema = []msg{
 	{
 		name: "OvlSpout", goT: "ovlSpoutState", zigT: "overlays.Spout", id: 47,
 		doc: "#ovl-spout fragment (re-rendered on install completion)",
-		fs: []field{s(1, "Note", "note"), s(2, "StatusLine", "statusLine"), s(3, "InstallLbl", "installLbl"), b(4, "CanInstall", "canInstall"), s(5, "OpenSdk", "openSdk"), s(6, "SdkURL", "sdkUrl")},
+		fs:  []field{s(1, "Note", "note"), s(2, "StatusLine", "statusLine"), s(3, "InstallLbl", "installLbl"), b(4, "CanInstall", "canInstall"), s(5, "OpenSdk", "openSdk"), s(6, "SdkURL", "sdkUrl")},
 	},
 	{
 		name: "OvlVS", goT: "ovlVSState", zigT: "overlays.VideoShare",
@@ -891,12 +891,12 @@ var schema = []msg{
 	{
 		name: "OvlStrip", goT: "ovlStripState", zigT: "overlays.Strip", id: 49,
 		doc: "#ovl-strip fragment (outputs summary)",
-		fs: []field{s(1, "Parts", "parts"), s(2, "Hint", "hint"), s(3, "Right", "right")},
+		fs:  []field{s(1, "Parts", "parts"), s(2, "Hint", "hint"), s(3, "Right", "right")},
 	},
 	{
 		name: "OvlState", goT: "ovlState", zigT: "overlays.State", id: 45,
 		doc: "Overlays tab (full view)",
-		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
 	},
 	// twitch: full tab + #twitch-obs + #twitch-presets + #twitch-feed (the feed is patched on
 	// EVERY chat/alert event - the hot path this tab moves to the wire for).
@@ -915,22 +915,22 @@ var schema = []msg{
 	{
 		name: "TwObs", goT: "twObsState", zigT: "twitch.Obs", id: 51,
 		doc: "#twitch-obs fragment (viewer count + cockpit)",
-		fs: []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
+		fs:  []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
 	},
 	{
 		name: "TwPresets", goT: "twPresetsState", zigT: "twitch.Presets", id: 52,
 		doc: "#twitch-presets fragment (title-preset chip strip)",
-		fs: []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
+		fs:  []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
 	},
 	{
 		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53,
 		doc: "#twitch-feed inner fragment (patched on every chat/alert event)",
-		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
+		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
 	},
 	{
 		name: "TwState", goT: "twState", zigT: "twitch.State", id: 50,
 		doc: "Twitch tab (full view)",
-		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
 	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
