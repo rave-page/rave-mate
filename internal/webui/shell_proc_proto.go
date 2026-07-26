@@ -12,9 +12,10 @@ package webui
 //                        cache wipe). Ack is IN-BAND: the daemon appends __rave_evalResult to each
 //                        batch (ui.go dispatchEvals) and holds until it returns, so at most ONE
 //                        un-acked batch is in flight - the in-proc bound, unchanged.
-//   DIRECT  (xeval, act, resize, show, quit, streaming)  request/response or fire-and-forget, NEVER
-//                        queued behind the ordered lane (the writer drains it first) - ctl's
-//                        evalValue would otherwise deadlock behind a flooded batch stream.
+//   DIRECT  (xeval, act, resize, show, quit, streaming, screenshot)  request/response or
+//                        fire-and-forget, NEVER queued behind the ordered lane (the writer drains it
+//                        first) - ctl's evalValue would otherwise deadlock behind a flooded batch
+//                        stream.
 //
 // The round-trip id is carried INSIDE the script by the __rave_evalResult(id,…) call the daemon
 // wraps around it; the child never parses a script - it forwards every binding invocation verbatim
@@ -25,14 +26,15 @@ const procFeatureName = "webview"
 
 // Parent → child events.
 const (
-	procEvDoc    = "doc"       // ordered: load a full document (procDoc)
-	procEvEval   = "eval"      // ordered: run a batched page script (procEval)
-	procEvXEval  = "xeval"     // direct: run a ctl round-trip script (procXEval)
-	procEvAct    = "act"       // direct: replay a Go-originated act payload on the child's act worker
-	procEvResize = "resize"    // direct: resize the window viewport (procResize)
-	procEvShow   = "show"      // direct: raise + foreground the window
-	procEvQuit   = "quit"      // direct: close the window, then exit (procQuit)
-	procEvStream = "streaming" // direct: governor streaming signal (procStream)
+	procEvDoc    = "doc"        // ordered: load a full document (procDoc)
+	procEvEval   = "eval"       // ordered: run a batched page script (procEval)
+	procEvXEval  = "xeval"      // direct: run a ctl round-trip script (procXEval)
+	procEvAct    = "act"        // direct: replay a Go-originated act payload on the child's act worker
+	procEvResize = "resize"     // direct: resize the window viewport (procResize)
+	procEvShow   = "show"       // direct: raise + foreground the window
+	procEvQuit   = "quit"       // direct: close the window, then exit (procQuit)
+	procEvStream = "streaming"  // direct: governor streaming signal (procStream)
+	procEvShot   = "screenshot" // direct: capture the window to a path (procShot) → procEvShotRes
 )
 
 // Child → parent events.
@@ -42,6 +44,7 @@ const (
 	procEvAction  = "action"  // page act payload (window.rave) - drained off the child's UI thread
 	procEvWin     = "win"     // window state changed (procWin) → daemon governor + eval gate
 	procEvGone    = "gone"    // message loop returned / window destroyed
+	procEvShotRes = "shotres" // screenshot finished (procShotRes) - the PNG is on disk, not on the wire
 )
 
 // procInit is the featurehost init payload. Everything the child needs arrives here: it reads NO
@@ -105,6 +108,26 @@ type procQuit struct {
 
 type procStream struct {
 	On bool `json:"on"`
+}
+
+// procShot asks the child to capture ITS OWN window and write the PNG to Path. Only the request and
+// the rect cross the pipe - never pixels: a 1280x820 PNG is hundreds of KB, and base64 in a
+// newline-JSON frame would put that on the ordered stream's pipe for every ctl screenshot. The daemon
+// picks Path (it is the operator's ctl destination), so there is no temp file to hand back and clean
+// up either. Rect in device px; W<=0||H<=0 = the whole window.
+type procShot struct {
+	RID  string `json:"rid"`
+	Path string `json:"path"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	W    int    `json:"w"`
+	H    int    `json:"h"`
+}
+
+// procShotRes reports one capture's outcome. Err "" = the PNG is at the requested path.
+type procShotRes struct {
+	RID string `json:"rid"`
+	Err string `json:"err,omitempty"`
 }
 
 // procReady is emitted once per child session, after the window exists.

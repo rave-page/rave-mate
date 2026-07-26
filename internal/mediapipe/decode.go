@@ -162,7 +162,9 @@ func (d *decoder) spawnLocked() error {
 		cancel()
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	sysexec.AssignToJob(cmd.Process, true)
+	// Realtime class (see encode.go): a decode child that misses the incoming frame rate stalls the
+	// route and forces keyframe requests - a 10% CPU cap guarantees exactly that under load.
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobRealtime)
 	d.cmd, d.stdin, d.stop = cmd, stdin, cancel
 	d.started = time.Now()
 	d.framed.Store(false)

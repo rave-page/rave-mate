@@ -1,6 +1,7 @@
 package mediapipe
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -162,4 +163,39 @@ func contains(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// ProbeListing must stay test-encode-free (no NVENC session taken mid-stream) and must NOT poison
+// the validated cache - Cached() may only report a set that actually test-encoded.
+func TestProbeListingIsUnvalidatedAndDoesNotPoisonCache(t *testing.T) {
+	if vc, cached := Cached(); cached {
+		// Another test in this package already ran the full probe. Assert the documented preference
+		// (a validated result beats a listing) and stop - the caches are process-global.
+		c, ok := ProbeListing(context.Background(), nil)
+		if !ok || !c.Validated || !reflect.DeepEqual(c.Encoders, vc.Encoders) {
+			t.Errorf("with a validated probe cached, ProbeListing must return it verbatim: %+v", c)
+		}
+		return
+	}
+	c, ok := ProbeListing(context.Background(), nil)
+	if !ok {
+		t.Skip("ffmpeg unavailable")
+	}
+	if c.Validated {
+		t.Error("listing probe must report Validated=false")
+	}
+	if len(c.Encoders) == 0 || !reflect.DeepEqual(c.Encoders, c.InBuild) {
+		t.Errorf("listing Encoders must equal the in-build candidates, got %v / %v", c.Encoders, c.InBuild)
+	}
+	if len(c.Errors) != 0 {
+		t.Errorf("listing probe cannot know encode errors, got %v", c.Errors)
+	}
+	if _, cached := Cached(); cached {
+		t.Error("Cached() must stay empty after a listing-only probe (no test encodes ran)")
+	}
+	// second call is served from the listing cache
+	c2, _ := ProbeListing(context.Background(), nil)
+	if !reflect.DeepEqual(c.Encoders, c2.Encoders) {
+		t.Error("listing cache must be stable")
+	}
 }

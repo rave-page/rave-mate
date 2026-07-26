@@ -40,6 +40,9 @@ type mediaInit struct {
 	Encoders []string                `json:"encoders,omitempty"` // codec caps from the async probe
 	Decoders []string                `json:"decoders,omitempty"`
 	SyncPeer string                  `json:"syncPeer,omitempty"` // TC-elected clock master ("" = none)
+	// MemLimitMB is the child's job-object RAM cap (0 = uncapped). The child sets its own Go soft
+	// memory limit below it so the GC fights a frame-buffer runaway BEFORE the OS kills the process.
+	MemLimitMB int `json:"memLimitMb,omitempty"`
 }
 
 // peerSecret is one peer's media AEAD key. Secret==nil drops the peer (disconnect).
