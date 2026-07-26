@@ -426,7 +426,8 @@ func (u *UI) asModalHTML() string {
 func (u *UI) asModalHTMLLocked(s *asSt) string {
 	st := asModalState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderAutoSchedule(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAutoScheduleV2", wireAutoSchedule(st), zigui.RenderAutoScheduleV2,
+			zigui.RenderAutoSchedule, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

@@ -42,7 +42,8 @@ type dlgChoiceSt struct {
 // dlgChoiceHTML renders a choice dialog through Zig when available.
 func dlgChoiceHTML(st dlgChoiceSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgChoice(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgChoiceV2", wireDlgChoice(st), zigui.RenderDlgChoiceV2,
+			zigui.RenderDlgChoice, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -85,7 +86,8 @@ type pubTxtDlgSt struct {
 
 func pubTxtDlgHTML(st pubTxtDlgSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgTxtExport(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgTxtExportV2", wireDlgTxtExport(st), zigui.RenderDlgTxtExportV2,
+			zigui.RenderDlgTxtExport, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -135,7 +137,8 @@ func pubExportState(fmtKey, content string) pubExpDlgSt {
 
 func pubExpDlgHTML(st pubExpDlgSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgExportPrev(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgExportPrevV2", wireDlgExportPrev(st), zigui.RenderDlgExportPrevV2,
+			zigui.RenderDlgExportPrev, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -164,7 +167,8 @@ type pubRenameDlgSt struct {
 
 func pubRenameDlgHTML(st pubRenameDlgSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgRename(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgRenameV2", wireDlgRename(st), zigui.RenderDlgRenameV2,
+			zigui.RenderDlgRename, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -211,7 +215,8 @@ type pubFixDlgSt struct {
 
 func pubFixDlgHTML(st pubFixDlgSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgFix(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgFixV2", wireDlgFix(st), zigui.RenderDlgFixV2,
+			zigui.RenderDlgFix, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -287,7 +292,8 @@ type mpPresetDlgSt struct {
 
 func mpPresetDlgHTML(st mpPresetDlgSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgPreset(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgPresetV2", wireDlgPreset(st), zigui.RenderDlgPresetV2,
+			zigui.RenderDlgPreset, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -372,7 +378,8 @@ type cePatMgrSt struct {
 
 func cePatMgrHTML(st cePatMgrSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderDlgPatMgr(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderDlgPatMgrV2", wireDlgPatMgr(st), zigui.RenderDlgPatMgrV2,
+			zigui.RenderDlgPatMgr, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

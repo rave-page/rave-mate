@@ -202,7 +202,8 @@ func (u *UI) patchUpd(inner string) { u.eval("window.__patch('inst-update'," + j
 func (u *UI) updateFlowHTML() string {
 	st := u.updateFlowState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderSettingsUpdFlow(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderSettingsUpdFlowV2", wireUpdFlow(st), zigui.RenderSettingsUpdFlowV2,
+			zigui.RenderSettingsUpdFlow, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

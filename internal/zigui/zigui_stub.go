@@ -237,6 +237,69 @@ func RenderTwitchObsV2(state []byte) (string, bool)     { return "", false }
 func RenderTwitchPresetsV2(state []byte) (string, bool) { return "", false }
 func RenderTwitchFeedV2(state []byte) (string, bool)    { return "", false }
 
+func RenderMIDICtlV2(state []byte) (string, bool)     { return "", false }
+func RenderMIDIActiveV2(state []byte) (string, bool)  { return "", false }
+func RenderMIDICtlStatV2(state []byte) (string, bool) { return "", false }
+func RenderMIDIMonRowsV2(state []byte) (string, bool) { return "", false }
+func RenderPCViewerV2(state []byte) (string, bool)    { return "", false }
+func RenderPCGpuV2(state []byte) (string, bool)       { return "", false }
+
+func RenderVRChatV2(state []byte) (string, bool)          { return "", false }
+func RenderVRChatStatusV2(state []byte) (string, bool)    { return "", false }
+func RenderVRChatEditorV2(state []byte) (string, bool)    { return "", false }
+func RenderVRChatCampathsV2(state []byte) (string, bool)  { return "", false }
+func RenderVRChatPhotosV2(state []byte) (string, bool)    { return "", false }
+func RenderVRCGroupsV2(state []byte) (string, bool)       { return "", false }
+func RenderVgRoleBodyV2(state []byte) (string, bool)      { return "", false }
+func RenderVgInviteListV2(state []byte) (string, bool)    { return "", false }
+func RenderVgRolesModalV2(state []byte) (string, bool)    { return "", false }
+func RenderVgInviteModalV2(state []byte) (string, bool)   { return "", false }
+func RenderVgMemberConfirmV2(state []byte) (string, bool) { return "", false }
+func RenderVgPostConfirmV2(state []byte) (string, bool)   { return "", false }
+
+func RenderWorldsV2(state []byte) (string, bool)          { return "", false }
+func RenderWorldsLinkHintV2(state []byte) (string, bool)  { return "", false }
+func RenderWorldsGitHubV2(state []byte) (string, bool)    { return "", false }
+func RenderWorldsStatusV2(state []byte) (string, bool)    { return "", false }
+func RenderWorldsUnityRowsV2(state []byte) (string, bool) { return "", false }
+func RenderWsListEditorV2(state []byte) (string, bool)    { return "", false }
+func RenderWsPosterEditorV2(state []byte) (string, bool)  { return "", false }
+func RenderWsFriendPickerV2(state []byte) (string, bool)  { return "", false }
+func RenderWsFriendListV2(state []byte) (string, bool)    { return "", false }
+func RenderWsGroupPickerV2(state []byte) (string, bool)   { return "", false }
+func RenderWsGroupListV2(state []byte) (string, bool)     { return "", false }
+func RenderWsRolePickerV2(state []byte) (string, bool)    { return "", false }
+func RenderWsRoleListV2(state []byte) (string, bool)      { return "", false }
+func RenderWsDeviceV2(state []byte) (string, bool)        { return "", false }
+
+func RenderLibMirrorV2(state []byte) (string, bool)       { return "", false }
+func RenderLibMirrorBannerV2(state []byte) (string, bool) { return "", false }
+func RenderRCEInfoV2(state []byte) (string, bool)         { return "", false }
+func RenderRCEBodyV2(state []byte) (string, bool)         { return "", false }
+func RenderRCESaveV2(state []byte) (string, bool)         { return "", false }
+func RenderEditorPreviewV2(state []byte) (string, bool)   { return "", false }
+func RenderEditorV2(state []byte) (string, bool)          { return "", false }
+func RenderCueEditTopbarV2(state []byte) (string, bool)   { return "", false }
+func RenderCueEditWaveV2(state []byte) (string, bool)     { return "", false }
+func RenderCueEditRailV2(state []byte) (string, bool)     { return "", false }
+func RenderLibFixGFLiveV2(state []byte) (string, bool)    { return "", false }
+func RenderLibSmartModalV2(state []byte) (string, bool)   { return "", false }
+func RenderLibRelocModalV2(state []byte) (string, bool)   { return "", false }
+func RenderLibRemoteV2(state []byte) (string, bool)       { return "", false }
+
+func RenderDlgChoiceV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgTxtExportV2(state []byte) (string, bool)    { return "", false }
+func RenderDlgExportPrevV2(state []byte) (string, bool)   { return "", false }
+func RenderDlgRenameV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgFixV2(state []byte) (string, bool)          { return "", false }
+func RenderDlgPresetV2(state []byte) (string, bool)       { return "", false }
+func RenderDlgPatMgrV2(state []byte) (string, bool)       { return "", false }
+func RenderAutoEditorV2(state []byte) (string, bool)      { return "", false }
+func RenderAutoRunNowV2(state []byte) (string, bool)      { return "", false }
+func RenderAutoScheduleV2(state []byte) (string, bool)    { return "", false }
+func RenderPublishRemoteV2(state []byte) (string, bool)   { return "", false }
+func RenderSettingsUpdFlowV2(state []byte) (string, bool) { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

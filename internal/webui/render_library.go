@@ -1543,7 +1543,8 @@ type libSmartModalSt struct {
 func (u *UI) libSmartModalHTML(s *libSt) string {
 	st := u.libSmartModalState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibSmartModal(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibSmartModalV2", wireLibSmartModal(st), zigui.RenderLibSmartModalV2,
+			zigui.RenderLibSmartModal, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1716,7 +1717,8 @@ type libRelocModalSt struct {
 func (u *UI) libRelocModalHTML(s *libSt) string {
 	st := libRelocModalState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibRelocModal(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibRelocModalV2", wireLibRelocModal(st), zigui.RenderLibRelocModalV2,
+			zigui.RenderLibRelocModal, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

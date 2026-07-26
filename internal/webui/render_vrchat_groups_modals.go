@@ -50,7 +50,8 @@ type vgRoleBodySt struct {
 func (u *UI) vgRoleBodyHTML() string {
 	st := vgRoleBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgRoleBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgRoleBodyV2", wireVgRoleBody(st), zigui.RenderVgRoleBodyV2,
+			zigui.RenderVgRoleBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -135,7 +136,8 @@ type vgInviteListSt struct {
 func (u *UI) vgInviteListHTML() string {
 	st := vgInviteListState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgInviteList(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgInviteListV2", wireVgInviteList(st), zigui.RenderVgInviteListV2,
+			zigui.RenderVgInviteList, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -206,7 +208,8 @@ type vgRolesModalSt struct {
 func (u *UI) vgRolesModalHTML(title string) string {
 	st := vgRolesModalSt{Title: title, Body: vgRoleBodyState()}
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgRolesModal(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgRolesModalV2", wireVgRolesModal(st), zigui.RenderVgRolesModalV2,
+			zigui.RenderVgRolesModal, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -237,7 +240,8 @@ func (u *UI) vgInviteModalHTML(title string) string {
 		List: vgInviteListState(),
 	}
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgInviteModal(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgInviteModalV2", wireVgInviteModal(st), zigui.RenderVgInviteModalV2,
+			zigui.RenderVgInviteModal, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -270,7 +274,8 @@ type vgMemberConfirmSt struct {
 // vgMemberConfirmHTML builds the kick/ban confirm dialog.
 func (u *UI) vgMemberConfirmHTML(st vgMemberConfirmSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgMemberConfirm(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgMemberConfirmV2", wireVgMemberConfirm(st), zigui.RenderVgMemberConfirmV2,
+			zigui.RenderVgMemberConfirm, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -298,7 +303,8 @@ type vgPostConfirmSt struct {
 // vgPostConfirmHTML builds the delete-post confirm dialog.
 func (u *UI) vgPostConfirmHTML(st vgPostConfirmSt) string {
 	if zigui.Available() {
-		if h, ok := zigui.RenderVgPostConfirm(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVgPostConfirmV2", wireVgPostConfirm(st), zigui.RenderVgPostConfirmV2,
+			zigui.RenderVgPostConfirm, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

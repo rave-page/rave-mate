@@ -70,7 +70,8 @@ func (u *UI) remoteClient(nodeID string) *remotectl.Client {
 func (u *UI) targetSwitcherHTML(id, act string) string {
 	st := u.targetSwitcherState(id, act)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibRemote(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibRemoteV2", wireLibRemote(st), zigui.RenderLibRemoteV2,
+			zigui.RenderLibRemote, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

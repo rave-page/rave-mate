@@ -941,7 +941,8 @@ type rceSaveSt struct {
 func (u *UI) rceBody() string {
 	st := u.rceBodyState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderRCEBody(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderRCEBodyV2", wireRceBody(st), zigui.RenderRCEBodyV2,
+			zigui.RenderRCEBody, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -969,7 +970,8 @@ func rceBodyHTML(st rceBodySt) string {
 func (u *UI) rceInfoHTML() string {
 	st := u.rceInfoState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderRCEInfo(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderRCEInfoV2", wireRceInfo(st), zigui.RenderRCEInfoV2,
+			zigui.RenderRCEInfo, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -1070,7 +1072,8 @@ func rceNavBtn(n rceNavSt) string {
 func (u *UI) rceSaveHTML() string {
 	st := u.rceSaveState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderRCESave(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderRCESaveV2", wireRceSave(st), zigui.RenderRCESaveV2,
+			zigui.RenderRCESave, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

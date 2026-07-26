@@ -373,10 +373,19 @@ Rules:
   the remaining-tabs fan-out (the ~68 render surfaces B-2 left on the JSON bridge). First tab:
   overlays (ids 45-49, full + 4 fragments; UiStatus doubles as a root message) - dispatch -44%,
   documents 42.1% of the JSON. Second: twitch (ids 50-53; #twitch-feed = per chat/alert event) -
-  -63% full / -59% feed, documents 39.9%, fuzz 443 835 cases. Registry: `zigui_wire_b7_test.go`.
-  Still JSON-bridged: midi(4), vrchat family(22), worlds family(14), editor(2), dialogs_a(7),
-  library modals/cueedit/fixers/remote/mirror/remotecue(12), motion pcv(2), publish remote(1),
-  automations editor/runnow/schedules(3), update flow(1). Detail: ZIG_UI_GUIDE.md "Phase B - B7".
+  -63% full / -59% feed, documents 39.9%. Third (i3): midi mixer + pcv modals (ids 54-59; three
+  ~1 Hz patch targets) - -52% full / -44% monitor rows, documents 43.5%. Fourth (i4): vrchat
+  family (ids 60-71; full tab + 4 fragments + #vrcg-body + 6 group modals) - -61% full / -57%
+  groups body, documents 33.5%. Fifth (i5): worlds family (ids 72-85; full tab + 4 patch targets
+  + 9 ws modals) - -43% full / -28% status, documents 67.8% (long unrepeated prose). Fifth (i6):
+  editor/cueedit/mirror/rce/lib-modals/remote (ids 86-99; first self-recursive message EdLayer,
+  first root promotion LibGFLive) - editor -58% full at 28.0% doc ratio (best), #ce-topbar -55%
+  (the drag hot path). Seventh (i7): dialogs_a + automations dialogs + publish-remote +
+  update-flow (ids 102-113; UpdFlow promoted nested→root, AeBlock discriminated form-block kit) -
+  schedule editor -75% (123.0→31.1 µs, biggest win of the fan-out), preset editor -52%, aeModal
+  documents 49.2%, fuzz 1 957 775 cases. **B7 fan-out COMPLETE**: 347 messages, hash 0x51e1ae8b,
+  ZERO JSON-only bridges left - every v1 renderer survives only as the in-switch fallback + golden
+  gate. Registry: `zigui_wire_b7_test.go`. Detail: ZIG_UI_GUIDE.md "Phase B - B7".
 - **P6 phase B (B0 baseline MEASURED):** `.devnotes/PHASEB_BASELINE.md` - render benchmarks
   (Go vs Zig vs bridge, 10 tabs) + live counters (`zigui.PerfCounts()`, `ctl perf` `[zigui]`).
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of

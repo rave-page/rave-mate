@@ -97,7 +97,8 @@ type libMirrorBanSt struct {
 func (u *UI) libMirrorBody(target string) string {
 	st := u.libMirrorState(target)
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibMirror(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibMirrorV2", wireLibMirror(st), zigui.RenderLibMirrorV2,
+			zigui.RenderLibMirror, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -155,7 +156,8 @@ func libMirrorBodyHTML(st libMirrorSt) string {
 func (u *UI) mirrorBannerHTML() string {
 	st := u.mirrorBannerState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderLibMirrorBanner(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderLibMirrorBannerV2", wireLibMirrorBan(st), zigui.RenderLibMirrorBannerV2,
+			zigui.RenderLibMirrorBanner, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

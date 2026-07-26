@@ -1193,6 +1193,422 @@ func RenderTwitchFeedV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: midi mixer + pcv modals ──
+
+// RenderMIDICtlV2 renders the full MIDI Mixer tab from an RZW1 document.
+func RenderMIDICtlV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_v2(p, l, n)
+	})
+}
+
+// RenderMIDIActiveV2 renders the #midi-active status line from an RZW1 document.
+func RenderMIDIActiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_active_v2(p, l, n)
+	})
+}
+
+// RenderMIDICtlStatV2 renders one #midi-ctlstat-<i> inner fragment from an RZW1 document.
+func RenderMIDICtlStatV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midictl_stat_v2(p, l, n)
+	})
+}
+
+// RenderMIDIMonRowsV2 renders the #midi-monitor inner rows from an RZW1 document.
+func RenderMIDIMonRowsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_midimon_rows_v2(p, l, n)
+	})
+}
+
+// RenderPCViewerV2 renders the point-cloud viewer modal from an RZW1 document.
+func RenderPCViewerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_viewer_v2(p, l, n)
+	})
+}
+
+// RenderPCGpuV2 renders the point-cloud GPU prompt modal from an RZW1 document.
+func RenderPCGpuV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_pc_gpu_v2(p, l, n)
+	})
+}
+
+// ── B7 fan-out: vrchat family ──
+
+// RenderVRChatV2 renders the full VRChat tab from an RZW1 document.
+func RenderVRChatV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_v2(p, l, n)
+	})
+}
+
+// RenderVRChatStatusV2 renders the #vrc-status region from an RZW1 document.
+func RenderVRChatStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_status_v2(p, l, n)
+	})
+}
+
+// RenderVRChatEditorV2 renders the #vrc-editor fragment from an RZW1 document.
+func RenderVRChatEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_editor_v2(p, l, n)
+	})
+}
+
+// RenderVRChatCampathsV2 renders the #vrc-campaths fragment from an RZW1 document.
+func RenderVRChatCampathsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_campaths_v2(p, l, n)
+	})
+}
+
+// RenderVRChatPhotosV2 renders the #vrc-photos-body fragment from an RZW1 document.
+func RenderVRChatPhotosV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrchat_photos_v2(p, l, n)
+	})
+}
+
+// RenderVRCGroupsV2 renders the #vrcg-body Groups sub-tab from an RZW1 document.
+func RenderVRCGroupsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vrcgroups_v2(p, l, n)
+	})
+}
+
+// RenderVgRoleBodyV2 renders the #vrcg-role-body fragment from an RZW1 document.
+func RenderVgRoleBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolebody_v2(p, l, n)
+	})
+}
+
+// RenderVgInviteListV2 renders the #vrcg-inv-list fragment from an RZW1 document.
+func RenderVgInviteListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitelist_v2(p, l, n)
+	})
+}
+
+// RenderVgRolesModalV2 renders the roles dialog from an RZW1 document.
+func RenderVgRolesModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_rolesmodal_v2(p, l, n)
+	})
+}
+
+// RenderVgInviteModalV2 renders the invite dialog from an RZW1 document.
+func RenderVgInviteModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_invitemodal_v2(p, l, n)
+	})
+}
+
+// RenderVgMemberConfirmV2 renders the kick/ban confirm dialog from an RZW1 document.
+func RenderVgMemberConfirmV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_memberconfirm_v2(p, l, n)
+	})
+}
+
+// RenderVgPostConfirmV2 renders the delete-post confirm dialog from an RZW1 document.
+func RenderVgPostConfirmV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_vg_postconfirm_v2(p, l, n)
+	})
+}
+
+// ── B7 fan-out: worlds family ──
+
+// RenderWorldsV2 renders the full Worlds tab from an RZW1 document.
+func RenderWorldsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_v2(p, l, n)
+	})
+}
+
+// RenderWorldsLinkHintV2 renders the #world-linkhint chip from an RZW1 document.
+func RenderWorldsLinkHintV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_linkhint_v2(p, l, n)
+	})
+}
+
+// RenderWorldsGitHubV2 renders the #world-gh link control from an RZW1 document.
+func RenderWorldsGitHubV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_github_v2(p, l, n)
+	})
+}
+
+// RenderWorldsStatusV2 renders one #world-st-<key> publish status from an RZW1 document.
+func RenderWorldsStatusV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_status_v2(p, l, n)
+	})
+}
+
+// RenderWorldsUnityRowsV2 renders the #world-unity-rows list from an RZW1 document.
+func RenderWorldsUnityRowsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_worlds_unityrows_v2(p, l, n)
+	})
+}
+
+// RenderWsListEditorV2 renders the permission-list editor dialog from an RZW1 document.
+func RenderWsListEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_listeditor_v2(p, l, n)
+	})
+}
+
+// RenderWsPosterEditorV2 renders the poster-slot editor form from an RZW1 document.
+func RenderWsPosterEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_postereditor_v2(p, l, n)
+	})
+}
+
+// RenderWsFriendPickerV2 renders the friend-picker dialog shell from an RZW1 document.
+func RenderWsFriendPickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendpicker_v2(p, l, n)
+	})
+}
+
+// RenderWsFriendListV2 renders the #world-fr-list inner from an RZW1 document.
+func RenderWsFriendListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_friendlist_v2(p, l, n)
+	})
+}
+
+// RenderWsGroupPickerV2 renders the group-picker dialog shell from an RZW1 document.
+func RenderWsGroupPickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouppicker_v2(p, l, n)
+	})
+}
+
+// RenderWsGroupListV2 renders the #world-grp-list inner from an RZW1 document.
+func RenderWsGroupListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_grouplist_v2(p, l, n)
+	})
+}
+
+// RenderWsRolePickerV2 renders the role-grant dialog shell from an RZW1 document.
+func RenderWsRolePickerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolepicker_v2(p, l, n)
+	})
+}
+
+// RenderWsRoleListV2 renders the #world-role-list inner from an RZW1 document.
+func RenderWsRoleListV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_rolelist_v2(p, l, n)
+	})
+}
+
+// RenderWsDeviceV2 renders the GitHub device-code dialog from an RZW1 document.
+func RenderWsDeviceV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_ws_device_v2(p, l, n)
+	})
+}
+
+// ── B7 fan-out: editor / cue-edit / mirror / rce / library modals / remote switcher ──
+
+// RenderLibMirrorV2 renders the remote-library mirror body from an RZW1 document.
+func RenderLibMirrorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror_v2(p, l, n)
+	})
+}
+
+// RenderLibMirrorBannerV2 renders the #rmirror-banner strip from an RZW1 document.
+func RenderLibMirrorBannerV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libmirror_banner_v2(p, l, n)
+	})
+}
+
+// RenderRCEInfoV2 renders the #rce-info left pane from an RZW1 document.
+func RenderRCEInfoV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_info_v2(p, l, n)
+	})
+}
+
+// RenderRCEBodyV2 renders the remote cue-edit #lib-body from an RZW1 document.
+func RenderRCEBodyV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_body_v2(p, l, n)
+	})
+}
+
+// RenderRCESaveV2 renders the remote cue-edit save rail from an RZW1 document.
+func RenderRCESaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_rce_save_v2(p, l, n)
+	})
+}
+
+// RenderEditorPreviewV2 renders the #ed-preview composite from an RZW1 document.
+func RenderEditorPreviewV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_preview_v2(p, l, n)
+	})
+}
+
+// RenderEditorV2 renders the full Editor view from an RZW1 document.
+func RenderEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_v2(p, l, n)
+	})
+}
+
+// RenderCueEditTopbarV2 renders the #ce-topbar strip from an RZW1 document.
+func RenderCueEditTopbarV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_topbar_v2(p, l, n)
+	})
+}
+
+// RenderCueEditWaveV2 renders the cue-edit wave strip from an RZW1 document.
+func RenderCueEditWaveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_wave_v2(p, l, n)
+	})
+}
+
+// RenderCueEditRailV2 renders the cue-editor rail from an RZW1 document.
+func RenderCueEditRailV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_cueedit_rail_v2(p, l, n)
+	})
+}
+
+// RenderLibFixGFLiveV2 renders the #gf-live fixer fragment from an RZW1 document.
+func RenderLibFixGFLiveV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libfix_gflive_v2(p, l, n)
+	})
+}
+
+// RenderLibSmartModalV2 renders the smart-rules modal from an RZW1 document.
+func RenderLibSmartModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_smartmodal_v2(p, l, n)
+	})
+}
+
+// RenderLibRelocModalV2 renders the relocate-missing modal from an RZW1 document.
+func RenderLibRelocModalV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_lib_relocmodal_v2(p, l, n)
+	})
+}
+
+// RenderLibRemoteV2 renders the target-switcher row from an RZW1 document.
+func RenderLibRemoteV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_libremote_v2(p, l, n)
+	})
+}
+
+// ── B7 fan-out: dialogs_a + automations dialogs + publish-remote + update-flow ──
+
+// RenderDlgChoiceV2 renders a choice dialog from an RZW1 document.
+func RenderDlgChoiceV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_choice_v2(p, l, n)
+	})
+}
+
+// RenderDlgTxtExportV2 renders the tracklist text-export dialog from an RZW1 document.
+func RenderDlgTxtExportV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_txtexport_v2(p, l, n)
+	})
+}
+
+// RenderDlgExportPrevV2 renders the tracklist-export preview from an RZW1 document.
+func RenderDlgExportPrevV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_exportprev_v2(p, l, n)
+	})
+}
+
+// RenderDlgRenameV2 renders the rename-set dialog from an RZW1 document.
+func RenderDlgRenameV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_rename_v2(p, l, n)
+	})
+}
+
+// RenderDlgFixV2 renders the time-fix preview dialog from an RZW1 document.
+func RenderDlgFixV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_fix_v2(p, l, n)
+	})
+}
+
+// RenderDlgPresetV2 renders the export preset editor from an RZW1 document.
+func RenderDlgPresetV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_preset_v2(p, l, n)
+	})
+}
+
+// RenderDlgPatMgrV2 renders the manage-patterns dialog from an RZW1 document.
+func RenderDlgPatMgrV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_dlg_patmgr_v2(p, l, n)
+	})
+}
+
+// RenderAutoEditorV2 renders the automation-editor dialog from an RZW1 document.
+func RenderAutoEditorV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_editor_v2(p, l, n)
+	})
+}
+
+// RenderAutoRunNowV2 renders the run-now dialog from an RZW1 document.
+func RenderAutoRunNowV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_runnow_v2(p, l, n)
+	})
+}
+
+// RenderAutoScheduleV2 renders the schedule-editor dialog from an RZW1 document.
+func RenderAutoScheduleV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_auto_schedule_v2(p, l, n)
+	})
+}
+
+// RenderPublishRemoteV2 renders the remote Publish view from an RZW1 document.
+func RenderPublishRemoteV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_publish_remote_v2(p, l, n)
+	})
+}
+
+// RenderSettingsUpdFlowV2 renders the #inst-update region from an RZW1 document.
+func RenderSettingsUpdFlowV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_settings_updflow_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

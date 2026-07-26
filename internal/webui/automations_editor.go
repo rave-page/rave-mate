@@ -471,7 +471,8 @@ func (u *UI) aeModalHTML() string {
 func (u *UI) aeModalHTMLLocked(s *aeSt) string {
 	st := u.aeModalState(s)
 	if zigui.Available() {
-		if h, ok := zigui.RenderAutoEditor(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderAutoEditorV2", wireAutoEditor(st), zigui.RenderAutoEditorV2,
+			zigui.RenderAutoEditor, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

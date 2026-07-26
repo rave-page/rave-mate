@@ -190,7 +190,8 @@ type vrcTabSt struct {
 func (u *UI) renderVRChat() string {
 	st := u.vrchatState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRChat(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRChatV2", wireVrcTab(st), zigui.RenderVRChatV2,
+			zigui.RenderVRChat, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -200,7 +201,8 @@ func (u *UI) renderVRChat() string {
 func (u *UI) vrcStatusRegion() string {
 	st := u.vrcStatusState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRChatStatus(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRChatStatusV2", wireVrcStatus(st), zigui.RenderVRChatStatusV2,
+			zigui.RenderVRChatStatus, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -210,7 +212,8 @@ func (u *UI) vrcStatusRegion() string {
 func (u *UI) vrcEditorHTML() string {
 	st := u.vrcEditorState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRChatEditor(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRChatEditorV2", wireVrcEditor(st), zigui.RenderVRChatEditorV2,
+			zigui.RenderVRChatEditor, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -220,7 +223,8 @@ func (u *UI) vrcEditorHTML() string {
 func (u *UI) vrcCampathsBody() string {
 	st := u.vrcCampathsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRChatCampaths(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRChatCampathsV2", wireVrcCampaths(st), zigui.RenderVRChatCampathsV2,
+			zigui.RenderVRChatCampaths, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -230,7 +234,8 @@ func (u *UI) vrcCampathsBody() string {
 func (u *UI) photosBody() string {
 	st := u.vrcPhotosState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderVRChatPhotos(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderVRChatPhotosV2", wireVrcPhotos(st), zigui.RenderVRChatPhotosV2,
+			zigui.RenderVRChatPhotos, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

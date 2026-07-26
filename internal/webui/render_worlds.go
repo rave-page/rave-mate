@@ -182,7 +182,8 @@ type worldsState struct {
 func (u *UI) renderWorlds() string {
 	st := u.worldsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWorlds(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWorldsV2", wireWorlds(st), zigui.RenderWorldsV2,
+			zigui.RenderWorlds, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -193,7 +194,8 @@ func (u *UI) renderWorlds() string {
 func (u *UI) worldsLinkHintInner() string {
 	st := u.worldsLinkHintState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWorldsLinkHint(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWorldsLinkHintV2", wireWsHint(st), zigui.RenderWorldsLinkHintV2,
+			zigui.RenderWorldsLinkHint, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -204,7 +206,8 @@ func (u *UI) worldsLinkHintInner() string {
 func (u *UI) worldsGitHubInner() string {
 	st := u.worldsGitHubState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWorldsGitHub(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWorldsGitHubV2", wireWsGitHub(st), zigui.RenderWorldsGitHubV2,
+			zigui.RenderWorldsGitHub, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -215,7 +218,8 @@ func (u *UI) worldsGitHubInner() string {
 func (u *UI) wsStatusInner(key, gistID, file string) string {
 	st := u.wsStatusState(key, gistID, file)
 	if zigui.Available() {
-		if h, ok := zigui.RenderWorldsStatus(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWorldsStatusV2", wireWsStatus(st), zigui.RenderWorldsStatusV2,
+			zigui.RenderWorldsStatus, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -226,7 +230,8 @@ func (u *UI) wsStatusInner(key, gistID, file string) string {
 func (u *UI) worldsUnityRowsInner() string {
 	st := u.worldsUnityState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderWorldsUnityRows(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderWorldsUnityRowsV2", wireWsUnity(st), zigui.RenderWorldsUnityRowsV2,
+			zigui.RenderWorldsUnityRows, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

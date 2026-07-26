@@ -1000,6 +1000,257 @@ export fn rz_ui_render_twitch_feed_v2(state: ?[*]const u8, len: usize, out_len: 
     return renderWire(twitch.Feed, wire_gen.decodeTwFeed, twitch.renderFeed, wire_gen.msg_tw_feed, state, len, out_len);
 }
 
+// ── B7 fan-out: midi mixer + pcv modals (root ids 54-59) ──
+// Full tab (57) + its three ~1 Hz patch targets: #midi-active (54), #midi-monitor rows (55),
+// #midi-ctlstat-<i> (56). The pcv modals (58/59) render in dialogs_b.
+
+export fn rz_ui_render_midictl_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl.State, wire_gen.decodeMidiCtl, midictl.render, wire_gen.msg_midi_ctl, state, len, out_len);
+}
+
+export fn rz_ui_render_midictl_active_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl.Active, wire_gen.decodeMidiActive, midictl.renderActive, wire_gen.msg_midi_active, state, len, out_len);
+}
+
+export fn rz_ui_render_midictl_stat_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midictl_ctls.PortStat, wire_gen.decodeMidiPortStat, midictl_ctls.renderPortStat, wire_gen.msg_midi_port_stat, state, len, out_len);
+}
+
+export fn rz_ui_render_midimon_rows_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(midimon.Lines, wire_gen.decodeMidiMonLines, midimon.renderRows, wire_gen.msg_midi_mon_lines, state, len, out_len);
+}
+
+export fn rz_ui_render_pc_viewer_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PCViewer, wire_gen.decodePCView, dialogs_b.renderPCViewer, wire_gen.msg_p_c_view, state, len, out_len);
+}
+
+export fn rz_ui_render_pc_gpu_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PCGpu, wire_gen.decodePCGpu, dialogs_b.renderPCGpu, wire_gen.msg_p_c_gpu, state, len, out_len);
+}
+
+// ── B7 fan-out: vrchat family (root ids 60-71) ──
+// Full tab (64) + #vrc-status/#vrc-editor/#vrc-campaths/#vrc-photos-body (60-63), the Groups
+// sub-tab root #vrcg-body (65) and the six group modals (66-71, dialogs_b renderers).
+
+export fn rz_ui_render_vrchat_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.State, wire_gen.decodeVrcTab, vrchat.render, wire_gen.msg_vrc_tab, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Status, wire_gen.decodeVrcStatus, vrchat.renderStatus, wire_gen.msg_vrc_status, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Editor, wire_gen.decodeVrcEditor, vrchat.renderEditor, wire_gen.msg_vrc_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_campaths_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Campaths, wire_gen.decodeVrcCampaths, vrchat.renderCampaths, wire_gen.msg_vrc_campaths, state, len, out_len);
+}
+
+export fn rz_ui_render_vrchat_photos_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrchat.Photos, wire_gen.decodeVrcPhotos, vrchat.renderPhotos, wire_gen.msg_vrc_photos, state, len, out_len);
+}
+
+export fn rz_ui_render_vrcgroups_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(vrcgroups.State, wire_gen.decodeVrcg, vrcgroups.render, wire_gen.msg_vrcg, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolebody_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.RoleBody, wire_gen.decodeVgRoleBody, dialogs_b.renderRoleBody, wire_gen.msg_vg_role_body, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitelist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.InviteList, wire_gen.decodeVgInviteList, dialogs_b.renderInviteList, wire_gen.msg_vg_invite_list, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_rolesmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.RolesModal, wire_gen.decodeVgRolesModal, dialogs_b.renderRolesModal, wire_gen.msg_vg_roles_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_invitemodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.InviteModal, wire_gen.decodeVgInviteModal, dialogs_b.renderInviteModal, wire_gen.msg_vg_invite_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_memberconfirm_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.MemberConfirm, wire_gen.decodeVgMemberConfirm, dialogs_b.renderMemberConfirm, wire_gen.msg_vg_member_confirm, state, len, out_len);
+}
+
+export fn rz_ui_render_vg_postconfirm_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.PostConfirm, wire_gen.decodeVgPostConfirm, dialogs_b.renderPostConfirm, wire_gen.msg_vg_post_confirm, state, len, out_len);
+}
+
+// ── B7 fan-out: worlds family (root ids 72-85) ──
+// Full tab (76) + four live patch targets: #world-linkhint (72), #world-gh (73),
+// #world-st-<key> (74), #world-unity-rows (75); nine ws modals (77-85) render in dialogs_b
+// (#world-fr-list / #world-grp-list / #world-role-list are async-patched inners).
+
+export fn rz_ui_render_worlds_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.State, wire_gen.decodeWorlds, worlds.render, wire_gen.msg_worlds, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_linkhint_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Hint, wire_gen.decodeWsHint, worlds.renderHint, wire_gen.msg_ws_hint, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_github_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.GitHub, wire_gen.decodeWsGitHub, worlds.renderGitHub, wire_gen.msg_ws_git_hub, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_status_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Status, wire_gen.decodeWsStatus, worlds.renderStatus, wire_gen.msg_ws_status, state, len, out_len);
+}
+
+export fn rz_ui_render_worlds_unityrows_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(worlds.Unity, wire_gen.decodeWsUnity, worlds.renderUnityRows, wire_gen.msg_ws_unity, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_listeditor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsListEditor, wire_gen.decodeWsListEditor, dialogs_b.renderWsListEditor, wire_gen.msg_ws_list_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_postereditor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsPosterEditor, wire_gen.decodeWsPosterEditor, dialogs_b.renderWsPosterEditor, wire_gen.msg_ws_poster_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendpicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsFriendPicker, wire_gen.decodeWsFriendPicker, dialogs_b.renderWsFriendPicker, wire_gen.msg_ws_friend_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_friendlist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsFriendList, wire_gen.decodeWsFriendList, dialogs_b.renderWsFriendList, wire_gen.msg_ws_friend_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouppicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsGroupPicker, wire_gen.decodeWsGroupPicker, dialogs_b.renderWsGroupPicker, wire_gen.msg_ws_group_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_grouplist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsGroupList, wire_gen.decodeWsGroupList, dialogs_b.renderWsGroupList, wire_gen.msg_ws_group_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolepicker_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsRolePicker, wire_gen.decodeWsRolePicker, dialogs_b.renderWsRolePicker, wire_gen.msg_ws_role_picker, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_rolelist_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsRoleList, wire_gen.decodeWsRoleList, dialogs_b.renderWsRoleList, wire_gen.msg_ws_role_list, state, len, out_len);
+}
+
+export fn rz_ui_render_ws_device_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.WsDevice, wire_gen.decodeWsDevice, dialogs_b.renderWsDevice, wire_gen.msg_ws_device, state, len, out_len);
+}
+
+// ── B7 fan-out: editor / cue-edit / mirror / rce / library modals / remote switcher (86-99) ──
+// 93-95 re-render during cue drag - the hottest surfaces of this wave. 96 = #gf-live (~2 Hz).
+
+export fn rz_ui_render_libmirror_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.Mirror, wire_gen.decodeLibMirror, libviews.renderMirror, wire_gen.msg_lib_mirror, state, len, out_len);
+}
+
+export fn rz_ui_render_libmirror_banner_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.MirrorBanner, wire_gen.decodeLibMirrorBan, libviews.renderMirrorBanner, wire_gen.msg_lib_mirror_ban, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_info_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceInfo, wire_gen.decodeRceInfo, libviews.renderRceInfo, wire_gen.msg_rce_info, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_body_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceBody, wire_gen.decodeRceBody, libviews.renderRceBody, wire_gen.msg_rce_body, state, len, out_len);
+}
+
+export fn rz_ui_render_rce_save_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RceSave, wire_gen.decodeRceSave, libviews.renderRceSave, wire_gen.msg_rce_save, state, len, out_len);
+}
+
+export fn rz_ui_render_editor_preview_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor.Preview, wire_gen.decodeEdPreview, editor.renderPreview, wire_gen.msg_ed_preview, state, len, out_len);
+}
+
+export fn rz_ui_render_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor.State, wire_gen.decodeEdView, editor.render, wire_gen.msg_ed_view, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_topbar_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Topbar, wire_gen.decodeCeTopbar, cueedit.renderTopbar, wire_gen.msg_ce_topbar, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_wave_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Wave, wire_gen.decodeCeWave, cueedit.renderWave, wire_gen.msg_ce_wave, state, len, out_len);
+}
+
+export fn rz_ui_render_cueedit_rail_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(cueedit.Rail, wire_gen.decodeCeRail, cueedit.renderRail, wire_gen.msg_ce_rail, state, len, out_len);
+}
+
+export fn rz_ui_render_libfix_gflive_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libfixers.GFLive, wire_gen.decodeLibGFLive, libfixers.renderGFLive, wire_gen.msg_lib_g_f_live, state, len, out_len);
+}
+
+export fn rz_ui_render_lib_smartmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.SmartModal, wire_gen.decodeLibSmartModal, libviews.renderSmartModal, wire_gen.msg_lib_smart_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_lib_relocmodal_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libviews.RelocModal, wire_gen.decodeLibRelocModal, libviews.renderRelocModal, wire_gen.msg_lib_reloc_modal, state, len, out_len);
+}
+
+export fn rz_ui_render_libremote_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(libremote.State, wire_gen.decodeLibRemote, libremote.render, wire_gen.msg_lib_remote, state, len, out_len);
+}
+
+// ── B7 fan-out: dialogs_a + automations dialogs + publish-remote + update-flow (102-113) ──
+// The LAST JSON bridges. 113 = #inst-update (patched through the whole self-update flow).
+
+export fn rz_ui_render_dlg_choice_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(componentsA.Choice, wire_gen.decodeDlgChoice, componentsA.choiceDialog, wire_gen.msg_dlg_choice, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_txtexport_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.TxtExport, wire_gen.decodeDlgTxtExport, dialogs_a.renderTxtExport, wire_gen.msg_dlg_txt_export, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_exportprev_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.ExportPrev, wire_gen.decodeDlgExportPrev, dialogs_a.renderExportPrev, wire_gen.msg_dlg_export_prev, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_rename_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Rename, wire_gen.decodeDlgRename, dialogs_a.renderRename, wire_gen.msg_dlg_rename, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_fix_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Fix, wire_gen.decodeDlgFix, dialogs_a.renderFix, wire_gen.msg_dlg_fix, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_preset_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.Preset, wire_gen.decodeDlgPreset, dialogs_a.renderPreset, wire_gen.msg_dlg_preset, state, len, out_len);
+}
+
+export fn rz_ui_render_dlg_patmgr_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_a.PatMgr, wire_gen.decodeDlgPatMgr, dialogs_a.renderPatMgr, wire_gen.msg_dlg_pat_mgr, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.AeModal, wire_gen.decodeAutoEditor, dialogs_b.renderAeModal, wire_gen.msg_auto_editor, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_runnow_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.ArModal, wire_gen.decodeAutoRunNow, dialogs_b.renderArModal, wire_gen.msg_auto_run_now, state, len, out_len);
+}
+
+export fn rz_ui_render_auto_schedule_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(dialogs_b.AsModal, wire_gen.decodeAutoSchedule, dialogs_b.renderAsModal, wire_gen.msg_auto_schedule, state, len, out_len);
+}
+
+export fn rz_ui_render_publish_remote_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(publish.Remote, wire_gen.decodePublishRemote, publish.renderRemote, wire_gen.msg_publish_remote, state, len, out_len);
+}
+
+export fn rz_ui_render_settings_updflow_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(settings_sub.UpdFlow, wire_gen.decodeUpdFlow, settings_sub.renderUpdFlow, wire_gen.msg_upd_flow, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

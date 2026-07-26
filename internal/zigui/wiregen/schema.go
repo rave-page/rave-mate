@@ -409,8 +409,11 @@ var schema = []msg{
 		fs: []field{st(1, "St", "st", "UiStatus"), st(2, "Studio", "studio", "UiToggle"), s(3, "Tip", "tip"), b(4, "HasGate", "hasGate"), s(5, "GateTitle", "gateTitle"), st(6, "Gate", "gate", "BridgeGate"), op(7, "TipS", "tipSt", "Tip")},
 	},
 	{
-		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow",
-		fs: []field{s(1, "Kind", "kind"), s(2, "Tone", "tone"), s(3, "Text", "text"), b(4, "HasNotes", "hasNotes"), s(5, "Notes", "notes"), s(6, "Err", "err"), s(7, "Pct", "pct"), s(8, "Cap", "cap"), b(9, "HasBtn", "hasBtn"), st(10, "Btn", "btn", "UiBtn")},
+		// i7 promoted UpdFlow to a root (id 113): #inst-update patches standalone. Field
+		// numbers untouched, so embedded wire bytes are unchanged.
+		name: "UpdFlow", goT: "updFlowSt", zigT: "sub.UpdFlow", id: 113,
+		doc: "#inst-update region (self-update check/apply flow)",
+		fs:  []field{s(1, "Kind", "kind"), s(2, "Tone", "tone"), s(3, "Text", "text"), b(4, "HasNotes", "hasNotes"), s(5, "Notes", "notes"), s(6, "Err", "err"), s(7, "Pct", "pct"), s(8, "Cap", "cap"), b(9, "HasBtn", "hasBtn"), st(10, "Btn", "btn", "UiBtn")},
 	},
 	{
 		name: "SetBlock", goT: "setBlock", zigT: "settings.Block",
@@ -456,8 +459,9 @@ var schema = []msg{
 		fs: []field{s(1, "N", "n"), s(2, "Label", "label"), s(3, "Tone", "tone")},
 	},
 	{
-		name: "LibGFLive", goT: "libGFLiveSt", zigT: "f.GFLive",
-		fs: []field{li(1, "Tiles", "tiles", "LibGFTile"), s(2, "Pct", "pct"), s(3, "Caption", "caption"), s(4, "Current", "current")},
+		name: "LibGFLive", goT: "libGFLiveSt", zigT: "f.GFLive", id: 96,
+		doc: "#gf-live fixer progress fragment (~2 Hz)",
+		fs:  []field{li(1, "Tiles", "tiles", "LibGFTile"), s(2, "Pct", "pct"), s(3, "Caption", "caption"), s(4, "Current", "current")},
 	},
 	{
 		name: "LibHint", goT: "libHintSt", zigT: "k.Hint",
@@ -932,6 +936,703 @@ var schema = []msg{
 		doc: "Twitch tab (full view)",
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
 	},
+	// midi mixer (i3): full tab (root 57) + the three live patch targets - #midi-active (54,
+	// ~1 Hz), #midi-monitor rows (55, ~1 Hz), #midi-ctlstat-<i> (56, ~1 Hz) - plus the two pcv
+	// modals (58/59, dialogs_b renderers). Tooltip/ss-label dual fields ride as kOptPtr like
+	// tip2's composition; LearnGrid.ChHdrs is the second []string on the wire.
+	{
+		name: "MidiActive", goT: "midiActiveState", zigT: "midictl.Active", id: 54,
+		doc: "#midi-active status line (~1 Hz patch target)",
+		fs:  []field{s(1, "Variant", "variant"), s(2, "Label", "label"), s(3, "LabelDL", "labelDl"), s(4, "Line", "line")},
+	},
+	{
+		name: "MidiMonRow", goT: "midiMonRow", zigT: "midimon.Row",
+		fs: []field{s(1, "Ago", "ago"), s(2, "Src", "src"), s(3, "Msg", "msg")},
+	},
+	{
+		name: "MidiMonLines", goT: "midiMonLines", zigT: "midimon.Lines", id: 55,
+		doc: "#midi-monitor inner rows (~1 Hz patch target)",
+		fs:  []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "MidiMonRow")},
+	},
+	{
+		name: "MidiMonState", goT: "midiMonState", zigT: "midimon.State",
+		fs: []field{s(1, "Card", "card"), s(2, "Badge", "badge"), s(3, "Sub", "sub"), st(4, "Lines", "lines", "MidiMonLines")},
+	},
+	{
+		name: "MidiTraceRow", goT: "midiTraceRow", zigT: "midimon.TraceRow",
+		fs: []field{s(1, "DT", "dt"), s(2, "Dir", "dir"), s(3, "Label", "label"), s(4, "Hex", "hex"), s(5, "Len", "len"), s(6, "Dec", "dec")},
+	},
+	{
+		name: "MidiTrace", goT: "midiTraceState", zigT: "midimon.Trace",
+		fs: []field{s(1, "Hdr", "hdr"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), s(4, "Empty", "empty"), li(5, "Rows", "rows", "MidiTraceRow"), s(6, "Refresh", "refresh"), s(7, "Close", "close")},
+	},
+	{
+		name: "MidiLink", goT: "midiLinkState", zigT: "ctls.Link",
+		fs: []field{s(1, "Label", "label"), s(2, "URL", "url")},
+	},
+	{
+		name: "MidiPortStat", goT: "midiPortStat", zigT: "ctls.PortStat", id: 56,
+		doc: "#midi-ctlstat-<i> inner status (~1 Hz patch target)",
+		fs:  []field{b(1, "HasRow", "hasRow"), s(2, "Variant", "variant"), s(3, "Label", "label"), s(4, "LabelDL", "labelDl"), s(5, "Line", "line"), s(6, "Hint", "hint"), b(7, "HasAct", "hasAct"), s(8, "Act", "act"), s(9, "ActMsg", "actMsg")},
+	},
+	{
+		name: "MidiChip", goT: "midiChipState", zigT: "ctls.Chip",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act"), b(3, "Active", "active")},
+	},
+	{
+		name: "MidiDrvThru", goT: "midiDrvThru", zigT: "ctls.DrvThru",
+		fs: []field{b(1, "Show", "show"), s(2, "UseInDJ", "useInDj"), s(3, "Port", "port"), s(4, "CloneLbl", "cloneLbl"), s(5, "CloneDL", "cloneDl"), s(6, "CloneAct", "cloneAct"), b(7, "CloneOn", "cloneOn"), s(8, "CloneNote", "cloneNote"), s(9, "DrvNote", "drvNote"), b(10, "HasState", "hasState"), s(11, "StVariant", "stVariant"), s(12, "StLabel", "stLabel"), s(13, "StLabelDL", "stLabelDl"), s(14, "StLine", "stLine"), s(15, "FilterLbl", "filterLbl"), s(16, "FilterTip", "filterTip"), op(17, "FilterTipS", "filterTipSt", "Tip"), li(18, "Chips", "chips", "MidiChip")},
+	},
+	{
+		name: "MidiWarn", goT: "midiWarnState", zigT: "ctls.Warn",
+		fs: []field{b(1, "Show", "show"), s(2, "Label", "label"), s(3, "LabelDL", "labelDl"), s(4, "Line", "line"), s(5, "Hint", "hint")},
+	},
+	{
+		name: "MidiLearnCell", goT: "midiLearnCell", zigT: "ctls.LearnCell",
+		fs: []field{s(1, "Act", "act"), s(2, "ClearAct", "clearAct"), s(3, "Tid", "tid"), b(4, "Set", "set"), s(5, "Readout", "readout")},
+	},
+	{
+		name: "MidiLearnRow", goT: "midiLearnRow", zigT: "ctls.LearnRow",
+		fs: []field{s(1, "Label", "label"), li(2, "Cells", "cells", "MidiLearnCell")},
+	},
+	{
+		name: "MidiLearnGrid", goT: "midiLearnGridState", zigT: "ctls.LearnGrid",
+		fs: []field{s(1, "Hdr", "hdr"), s(2, "HdrTip", "hdrTip"), op(3, "HdrTipS", "hdrTipSt", "Tip"), s(4, "Cols", "cols"), sl(5, "ChHdrs", "chHdrs"), li(6, "Rows", "rows", "MidiLearnRow"), s(7, "Learn", "learn"), s(8, "Relearn", "relearn"), s(9, "Clear", "clear")},
+	},
+	{
+		name: "MidiCtlBlock", goT: "midiCtlBlock", zigT: "ctls.Block",
+		fs: []field{s(1, "Tid", "tid"), s(2, "Title", "title"), s(3, "StatID", "statId"), st(4, "Port", "port", "SelState"), s(5, "PortLbl", "portLbl"), op(6, "PortLblS", "portLblSt", "SsLabel"), st(7, "Stat", "stat", "MidiPortStat"), s(8, "EnableLbl", "enableLbl"), s(9, "EnableDL", "enableDl"), s(10, "EnableAct", "enableAct"), b(11, "EnableOn", "enableOn"), st(12, "Thru", "thru", "SelState"), s(13, "ThruLbl", "thruLbl"), op(14, "ThruLblS", "thruLblSt", "SsLabel"), st(15, "DrvThru", "drvThru", "MidiDrvThru"), st(16, "Warn", "warn", "MidiWarn"), s(17, "Remove", "remove"), s(18, "RemoveAct", "removeAct"), st(19, "Grid", "grid", "MidiLearnGrid")},
+	},
+	{
+		name: "MidiCtls", goT: "midiCtlsState", zigT: "ctls.State",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "Intro", "intro"), s(5, "IntroTip", "introTip"), op(6, "IntroTipS", "introTipSt", "Tip"), s(7, "LinksLbl", "linksLbl"), li(8, "Links", "links", "MidiLink"), s(9, "Empty", "empty"), li(10, "Blocks", "blocks", "MidiCtlBlock"), s(11, "Add", "add")},
+	},
+	{
+		name: "MidiBridge", goT: "midiBridgeState", zigT: "ctls.Bridge",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "Intro", "intro"), s(5, "IntroTip", "introTip"), op(6, "IntroTipS", "introTipSt", "Tip"), s(7, "EnableLbl", "enableLbl"), s(8, "EnableDL", "enableDl"), s(9, "EnableAct", "enableAct"), b(10, "EnableOn", "enableOn"), s(11, "EnableTip", "enableTip"), op(12, "EnableTipS", "enableTipSt", "Tip"), st(13, "ToDJ", "toDj", "SelState"), s(14, "ToDJLbl", "toDjLbl"), op(15, "ToDJLblS", "toDjLblSt", "SsLabel"), st(16, "FromDJ", "fromDj", "SelState"), s(17, "FromDJLbl", "fromDjLbl"), op(18, "FromDJLblS", "fromDjLblSt", "SsLabel")},
+	},
+	{
+		name: "UmTrail", goT: "umTrail", zigT: "uimap.Trail",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Sel", "sel", "SelState"), s(3, "Label", "label"), s(4, "Var", "@\"var\""), s(5, "Act", "act")},
+	},
+	{
+		name: "UmRow", goT: "umRow", zigT: "uimap.Row",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Trail", "trail", "UmTrail")},
+	},
+	{
+		name: "UmProfileRow", goT: "umProfileRow", zigT: "uimap.Profile",
+		fs: []field{st(1, "Row", "row", "UmRow"), b(2, "HasBinds", "hasBinds"), s(3, "Empty", "empty"), li(4, "Binds", "binds", "UmRow")},
+	},
+	{
+		name: "UmState", goT: "umState", zigT: "uimap.State",
+		fs: []field{b(1, "Show", "show"), s(2, "Title", "title"), s(3, "TitleTip", "titleTip"), op(4, "TitleTipS", "titleTipSt", "Tip"), s(5, "Sub", "sub"), s(6, "EnableLbl", "enableLbl"), s(7, "EnableDL", "enableDl"), s(8, "EnableAct", "enableAct"), b(9, "EnableOn", "enableOn"), s(10, "EnableTip", "enableTip"), op(11, "EnableTipS", "enableTipSt", "Tip"), st(12, "Add", "add", "UmRow"), li(13, "Profiles", "profiles", "UmProfileRow"), s(14, "Note", "note")},
+	},
+	{
+		name: "MidiPortCard", goT: "midiPortCard", zigT: "midictl.PortCard",
+		fs: []field{s(1, "Card", "card"), s(2, "Sub", "sub"), st(3, "Port", "port", "SelState"), st(4, "Active", "active", "MidiActive"), s(5, "Panic", "panic")},
+	},
+	{
+		name: "MidiDrvInput", goT: "midiDrvInput", zigT: "midictl.DrvInput",
+		fs: []field{s(1, "Variant", "variant"), s(2, "Name", "name"), s(3, "NameDL", "nameDl"), s(4, "Line", "line"), s(5, "FbHint", "fbHint"), b(6, "HasBtns", "hasBtns"), s(7, "TraceLbl", "traceLbl"), s(8, "TraceAct", "traceAct"), b(9, "FbTest", "fbTest"), s(10, "FbTestLbl", "fbTestLbl"), s(11, "FbTestAct", "fbTestAct"), s(12, "FbTip", "fbTip"), op(13, "FbTipS", "fbTipSt", "Tip"), b(14, "FbRes", "fbRes"), s(15, "FbResVar", "fbResVar"), s(16, "FbResLbl", "fbResLbl"), s(17, "FbResDL", "fbResDl"), s(18, "FbResLine", "fbResLine")},
+	},
+	{
+		name: "MidiDrvManaged", goT: "midiDrvManaged", zigT: "midictl.DrvManaged",
+		fs: []field{s(1, "Hdr", "hdr"), s(2, "Sub", "sub"), s(3, "SyncErr", "syncErr"), b(4, "HasQueryErr", "hasQueryErr"), s(5, "QueryErr", "queryErr"), s(6, "NoneManaged", "noneManaged"), li(7, "Inputs", "inputs", "MidiDrvInput"), b(8, "ShowTrace", "showTrace"), st(9, "Trace", "trace", "MidiTrace"), s(10, "Reapply", "reapply"), s(11, "Reload", "reload")},
+	},
+	{
+		name: "MidiDrvCard", goT: "midiDrvCard", zigT: "midictl.DrvCard",
+		fs: []field{b(1, "Show", "show"), s(2, "Card", "card"), s(3, "Badge", "badge"), s(4, "BadgeVar", "badgeVar"), s(5, "Why", "why"), s(6, "StVariant", "stVariant"), s(7, "StLabel", "stLabel"), s(8, "StLabelDL", "stLabelDl"), s(9, "StLine", "stLine"), b(10, "Installed", "installed"), s(11, "TestSign", "testSign"), s(12, "Steps", "steps"), s(13, "Cmds", "cmds"), s(14, "SmartScreen", "smartScreen"), st(15, "Managed", "managed", "MidiDrvManaged"), s(16, "Docs", "docs"), s(17, "DocsURL", "docsUrl")},
+	},
+	{
+		name: "MidiKnob", goT: "midiKnobState", zigT: "midictl.Knob",
+		fs: []field{s(1, "DL", "dl"), s(2, "V", "v"), s(3, "Rot", "rot"), s(4, "Val", "val"), s(5, "Act", "act"), s(6, "Tid", "tid"), s(7, "Aria", "aria"), s(8, "Label", "label"), s(9, "CC", "cc"), s(10, "SweepAct", "sweepAct"), s(11, "SweepTitle", "sweepTitle"), s(12, "SweepAria", "sweepAria"), s(13, "SweepGlyph", "sweepGlyph")},
+	},
+	{
+		name: "MidiMom", goT: "midiMomState", zigT: "midictl.Mom",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Act", "act"), s(3, "Tid", "tid"), s(4, "DL", "dl"), s(5, "Aria", "aria"), s(6, "Label", "label"), s(7, "CC", "cc")},
+	},
+	{
+		name: "MidiStrip", goT: "midiStripState", zigT: "midictl.Strip",
+		fs: []field{s(1, "Head", "head"), li(2, "Knobs", "knobs", "MidiKnob"), li(3, "Faders", "faders", "MidiKnob"), li(4, "Btns", "btns", "MidiMom")},
+	},
+	{
+		name: "MidiRack", goT: "midiRackState", zigT: "midictl.Rack",
+		fs: []field{s(1, "Card", "card"), s(2, "StepLbl", "stepLbl"), s(3, "N", "n"), s(4, "Dec", "dec"), s(5, "Inc", "inc"), b(6, "MinusOff", "minusOff"), b(7, "PlusOff", "plusOff"), s(8, "Sub", "sub"), li(9, "Strips", "strips", "MidiStrip")},
+	},
+	{
+		name: "MidiSwRow", goT: "midiSwRow", zigT: "midictl.SwRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Badge", "badge"), s(3, "BadgeVar", "badgeVar"), s(4, "Note", "note")},
+	},
+	{
+		name: "MidiHelp", goT: "midiHelpState", zigT: "midictl.Help",
+		fs: []field{s(1, "Card", "card"), s(2, "Badge", "badge"), s(3, "Step1", "step1"), s(4, "Step2", "step2"), s(5, "Step3", "step3"), s(6, "Feedback", "feedback"), s(7, "Caveat", "caveat"), s(8, "Link", "link"), s(9, "SwHdr", "swHdr"), li(10, "Rows", "rows", "MidiSwRow")},
+	},
+	{
+		name: "MidiCtl", goT: "midiCtlState", zigT: "midictl.State", id: 57,
+		doc: "MIDI Mixer tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), st(3, "Ctls", "ctls", "MidiCtls"), st(4, "UIMap", "uimap", "UmState"), b(5, "ShowMon", "showMon"), st(6, "Mon", "mon", "MidiMonState"), st(7, "Port", "port", "MidiPortCard"), st(8, "Driver", "driver", "MidiDrvCard"), st(9, "Rack", "rack", "MidiRack"), st(10, "Bridge", "bridge", "MidiBridge"), st(11, "Help", "help", "MidiHelp")},
+	},
+	{
+		name: "PCView", goT: "moPCViewSt", zigT: "dialogs_b.PCViewer", id: 58,
+		doc: "point-cloud viewer modal shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "PlayLabel", "playLabel"), s(3, "MaxFrame", "maxFrame"), s(4, "Hint", "hint"), s(5, "Close", "close")},
+	},
+	{
+		name: "PCGpu", goT: "moPCGpuSt", zigT: "dialogs_b.PCGpu", id: 59,
+		doc: "point-cloud GPU prompt modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Msg", "msg"), b(3, "Enabled", "enabled"), s(4, "EnableLabel", "enableLabel"), s(5, "Close", "close")},
+	},
+	// vrchat family (i4): full tab (64) + #vrc-status (60) + #vrc-editor (61) + #vrc-campaths
+	// (62) + #vrc-photos-body (63) + the Groups sub-tab root #vrcg-body (65) + the six group
+	// modals (66-71, dialogs_b renderers). Go int fields ride kUint (Zig i64, all non-negative);
+	// Campaths.SVG/PlayBtn + PhotoCell.TitleQ + InviteList.MoreMsg + MemberConfirm.Verb are
+	// pre-rendered/trusted - plain kStr, raw semantics live in the renderer. VgTab duplicates
+	// LogsTab's zig type (c.Tab) for the vgTabSt Go type - one message per Go type.
+	{
+		name: "VrcStatus", goT: "vrcStatusSt", zigT: "vrchat.Status", id: 60,
+		doc: "#vrc-status account status region",
+		fs:  []field{b(1, "Present", "present"), s(2, "Variant", "variant"), s(3, "Label", "label"), s(4, "DL", "dl"), s(5, "Line", "line")},
+	},
+	{
+		name: "VrcOpt", goT: "vrcOptSt", zigT: "vrchat.Opt",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label"), b(3, "Sel", "sel")},
+	},
+	{
+		name: "VrcPresetSel", goT: "vrcPresetSelSt", zigT: "vrchat.PresetSel",
+		fs: []field{s(1, "Act", "act"), s(2, "Placeholder", "placeholder"), sl(3, "Names", "names")},
+	},
+	{
+		name: "VrcEditor", goT: "vrcEditorSt", zigT: "vrchat.Editor", id: 61,
+		doc: "#vrc-editor status & bio editor",
+		fs:  []field{s(1, "StatusTitle", "statusTitle"), s(2, "StatusTip", "statusTip"), op(3, "StatusTipS", "statusTipSt", "Tip"), s(4, "PresenceLabel", "presenceLabel"), li(5, "Presence", "presence", "VrcOpt"), s(6, "StatusMsgLabel", "statusMsgLabel"), s(7, "DescCls", "descCls"), s(8, "DescCount", "descCount"), s(9, "DescVal", "descVal"), u(10, "MaxDesc", "maxDesc"), s(11, "SaveStatus", "saveStatus"), st(12, "StatusPreset", "statusPreset", "VrcPresetSel"), s(13, "PresetsLabel", "presetsLabel"), s(14, "BioTitle", "bioTitle"), s(15, "BioCls", "bioCls"), s(16, "BioCount", "bioCount"), s(17, "BioVal", "bioVal"), u(18, "MaxBio", "maxBio"), s(19, "SaveBio", "saveBio"), s(20, "BioHint", "bioHint"), s(21, "PreviewLabel", "previewLabel"), s(22, "Preview", "preview"), b(23, "HasPreview", "hasPreview"), st(24, "BioPreset", "bioPreset", "VrcPresetSel"), s(25, "VarsLabel", "varsLabel"), s(26, "RefreshLabel", "refreshLabel")},
+	},
+	{
+		name: "VrcFrameOpt", goT: "vrcFrameOptSt", zigT: "vrchat.FrameOpt",
+		fs: []field{u(1, "Frames", "frames"), u(2, "Grid", "grid"), u(3, "Res", "res"), b(4, "Sel", "sel")},
+	},
+	{
+		name: "VrcEmotes", goT: "vrcEmotesSt", zigT: "vrchat.Emotes",
+		fs: []field{s(1, "Hint", "hint"), s(2, "SourceLabel", "sourceLabel"), s(3, "NameLabel", "nameLabel"), s(4, "FramesLabel", "framesLabel"), s(5, "FPSLabel", "fpsLabel"), s(6, "TrimStart", "trimStart"), s(7, "TrimEnd", "trimEnd"), s(8, "OutDirLabel", "outDirLabel"), li(9, "FrameOpts", "frameOpts", "VrcFrameOpt"), s(10, "OutDir", "outDir"), s(11, "PingPong", "pingpong"), s(12, "Crop", "crop"), s(13, "Generate", "generate"), s(14, "OpenFolder", "openFolder"), s(15, "OpenUpload", "openUpload"), s(16, "UploadURL", "uploadUrl")},
+	},
+	{
+		name: "VrcPathItem", goT: "vrcPathItemSt", zigT: "vrchat.PathItem",
+		fs: []field{u(1, "Idx", "idx"), s(2, "Label", "label"), b(3, "Active", "active")},
+	},
+	{
+		name: "VrcCampaths", goT: "vrcCampathsSt", zigT: "vrchat.Campaths", id: 62,
+		doc: "#vrc-campaths camera-paths master/detail",
+		fs:  []field{s(1, "State", "state"), s(2, "Msg", "msg"), li(3, "Items", "items", "VrcPathItem"), s(4, "SVG", "svg"), s(5, "PlayBtn", "playBtn"), s(6, "Name", "name"), s(7, "Info", "info"), s(8, "Load", "load"), s(9, "Copy", "copy"), s(10, "CopyPath", "copyPath"), s(11, "Organize", "organize"), s(12, "Hint", "hint")},
+	},
+	{
+		name: "VrcPhotoGrp", goT: "vrcPhotoGrpSt", zigT: "vrchat.PhotoGrp",
+		fs: []field{s(1, "Label", "label"), u(2, "Count", "count"), b(3, "Active", "active")},
+	},
+	{
+		name: "VrcPhotoCell", goT: "vrcPhotoCellSt", zigT: "vrchat.PhotoCell",
+		fs: []field{s(1, "File", "file"), s(2, "TitleQ", "titleQ"), s(3, "Label", "label"), s(4, "Src", "src")},
+	},
+	{
+		name: "VrcPhotos", goT: "vrcPhotosSt", zigT: "vrchat.Photos", id: 63,
+		doc: "#vrc-photos-body screenshots browser",
+		fs:  []field{s(1, "State", "state"), s(2, "Msg", "msg"), li(3, "Groups", "groups", "VrcPhotoGrp"), li(4, "Cells", "cells", "VrcPhotoCell"), s(5, "Note", "note"), s(6, "OpenFolder", "openFolder"), s(7, "PhotosDir", "photosDir")},
+	},
+	{
+		name: "VgTab", goT: "vgTabSt", zigT: "c.Tab",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label")},
+	},
+	{
+		name: "VgBadge", goT: "vgBadgeSt", zigT: "vrcgroups.Badge",
+		fs: []field{s(1, "Text", "text"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "VgBtn", goT: "vgBtnSt", zigT: "vrcgroups.Btn",
+		fs: []field{s(1, "Label", "label"), s(2, "Variant", "variant"), s(3, "Act", "act")},
+	},
+	{
+		name: "VgKV", goT: "vgKVSt", zigT: "vrcgroups.KV",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Value", "value")},
+	},
+	{
+		name: "VgPager", goT: "vgPagerSt", zigT: "vrcgroups.Pager",
+		fs: []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "Label", "label"), s(4, "Act", "act")},
+	},
+	{
+		name: "VgPickerRow", goT: "vgPickerRowSt", zigT: "vrcgroups.PickerRow",
+		fs: []field{u(1, "Idx", "idx"), s(2, "Name", "name"), s(3, "Meta", "meta")},
+	},
+	{
+		name: "VgPicker", goT: "vgPickerSt", zigT: "vrcgroups.Picker",
+		fs: []field{s(1, "Title", "title"), s(2, "Refresh", "refresh"), s(3, "Filter", "filter"), s(4, "State", "state"), s(5, "Msg", "msg"), li(6, "Rows", "rows", "VgPickerRow")},
+	},
+	{
+		name: "VgRole", goT: "vgRoleSt", zigT: "vrcgroups.Role",
+		fs: []field{s(1, "Name", "name"), li(2, "Tags", "tags", "VgBadge"), s(3, "Order", "order"), s(4, "Desc", "desc"), s(5, "PermSum", "permSum"), sl(6, "Perms", "perms")},
+	},
+	{
+		name: "VgOverview", goT: "vgOverviewSt", zigT: "vrcgroups.Overview",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "Loading", "loading"), s(3, "LoadingMsg", "loadingMsg"), b(4, "Missing", "missing"), s(5, "MissingMsg", "missingMsg"), s(6, "AboutTitle", "aboutTitle"), s(7, "Desc", "desc"), li(8, "KVs", "kvs", "VgKV"), s(9, "RulesTitle", "rulesTitle"), s(10, "Rules", "rules"), s(11, "PermsTitle", "permsTitle"), s(12, "PermsMode", "permsMode"), s(13, "PermsMsg", "permsMsg"), li(14, "PermBadges", "permBadges", "VgBadge"), s(15, "RolesTitle", "rolesTitle"), s(16, "RolesEmpty", "rolesEmpty"), li(17, "Roles", "roles", "VgRole")},
+	},
+	{
+		name: "VgMemberRow", goT: "vgMemberRowSt", zigT: "vrcgroups.MemberRow",
+		fs: []field{s(1, "Name", "name"), li(2, "Tags", "tags", "VgBadge"), s(3, "Meta", "meta"), li(4, "Acts", "acts", "VgBtn")},
+	},
+	{
+		name: "VgMembers", goT: "vgMembersSt", zigT: "vrcgroups.Members",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "State", "state"), s(3, "Msg", "msg"), li(4, "Rows", "rows", "VgMemberRow"), st(5, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgUserRow", goT: "vgUserRowSt", zigT: "vrcgroups.UserRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Sub", "sub"), li(3, "Acts", "acts", "VgBtn")},
+	},
+	{
+		name: "VgUsers", goT: "vgUsersSt", zigT: "vrcgroups.Users",
+		fs: []field{s(1, "CardTitle", "cardTitle"), li(2, "Head", "head", "VgBtn"), s(3, "State", "state"), s(4, "Msg", "msg"), s(5, "Empty", "empty"), li(6, "Rows", "rows", "VgUserRow"), st(7, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgPostRow", goT: "vgPostRowSt", zigT: "vrcgroups.PostRow",
+		fs: []field{s(1, "Title", "title"), s(2, "Meta", "meta"), s(3, "Text", "text"), li(4, "Del", "del", "VgBtn")},
+	},
+	{
+		name: "VgPosts", goT: "vgPostsSt", zigT: "vrcgroups.Posts",
+		fs: []field{s(1, "AnnTitle", "annTitle"), s(2, "AnnTip", "annTip"), op(3, "AnnTipS", "annTipSt", "Tip"), b(4, "HasAnn", "hasAnn"), s(5, "AnnHead", "annHead"), s(6, "AnnWhen", "annWhen"), s(7, "AnnText", "annText"), b(8, "AnnEmpty", "annEmpty"), s(9, "AnnEmptyMsg", "annEmptyMsg"), b(10, "CanAnn", "canAnn"), s(11, "NewAnnTitle", "newAnnTitle"), s(12, "NewPostTitle", "newPostTitle"), s(13, "FTitle", "fTitle"), s(14, "FText", "fText"), s(15, "FImage", "fImage"), s(16, "FNotify", "fNotify"), s(17, "AnnSubmit", "annSubmit"), s(18, "AnnHint", "annHint"), s(19, "PostSubmit", "postSubmit"), s(20, "PostHint", "postHint"), s(21, "CardTitle", "cardTitle"), s(22, "State", "state"), s(23, "Msg", "msg"), s(24, "Empty", "empty"), li(25, "Rows", "rows", "VgPostRow"), st(26, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgAuditRow", goT: "vgAuditRowSt", zigT: "vrcgroups.AuditRow",
+		fs: []field{s(1, "When", "when"), s(2, "Event", "event"), s(3, "Actor", "actor"), s(4, "Desc", "desc"), s(5, "Raw", "raw")},
+	},
+	{
+		name: "VgAudit", goT: "vgAuditSt", zigT: "vrcgroups.Audit",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "NoPerm", "noPerm"), s(3, "NoPermMsg", "noPermMsg"), s(4, "State", "state"), s(5, "Msg", "msg"), s(6, "Empty", "empty"), s(7, "RawSummary", "rawSummary"), li(8, "Rows", "rows", "VgAuditRow"), st(9, "Pager", "pager", "VgPager")},
+	},
+	{
+		name: "VgWorkspace", goT: "vgWorkspaceSt", zigT: "vrcgroups.Workspace",
+		fs: []field{s(1, "Title", "title"), s(2, "Refresh", "refresh"), s(3, "Back", "back"), li(4, "Badges", "badges", "VgBadge"), s(5, "View", "view"), li(6, "Tabs", "tabs", "VgTab"), st(7, "Overview", "overview", "VgOverview"), st(8, "Members", "members", "VgMembers"), st(9, "Users", "users", "VgUsers"), st(10, "Posts", "posts", "VgPosts"), st(11, "Audit", "audit", "VgAudit")},
+	},
+	{
+		name: "Vrcg", goT: "vrcgState", zigT: "vrcgroups.State", id: 65,
+		doc: "#vrcg-body Groups sub-tab root",
+		fs:  []field{b(1, "Available", "available"), s(2, "Unavailable", "unavailable"), b(3, "SignedIn", "signedIn"), s(4, "SignInTitle", "signInTitle"), s(5, "SignInHint", "signInHint"), s(6, "Mode", "mode"), st(7, "Picker", "picker", "VgPicker"), st(8, "WS", "ws", "VgWorkspace")},
+	},
+	{
+		name: "VrcTab", goT: "vrcTabSt", zigT: "vrchat.State", id: 64,
+		doc: "VRChat tab (full view)",
+		fs:  []field{b(1, "Available", "available"), s(2, "Title", "title"), s(3, "Sub", "sub"), s(4, "Unavailable", "unavailable"), st(5, "Status", "status", "VrcStatus"), s(6, "SubActive", "subActive"), li(7, "SubTabs", "subTabs", "VgTab"), st(8, "Groups", "groups", "Vrcg"), b(9, "LoggedIn", "loggedIn"), s(10, "SecStatusBio", "secStatusBio"), s(11, "SignInHint", "signInHint"), st(12, "Editor", "editor", "VrcEditor"), s(13, "SecEmotes", "secEmotes"), st(14, "Emotes", "emotes", "VrcEmotes"), b(15, "HasTools", "hasTools"), s(16, "SecCamPaths", "secCamPaths"), st(17, "CamPaths", "camPaths", "VrcCampaths"), s(18, "SecPhotos", "secPhotos"), st(19, "Photos", "photos", "VrcPhotos")},
+	},
+	{
+		name: "VgRoleRow", goT: "vgRoleRowSt", zigT: "dialogs_b.RoleRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Desc", "desc"), s(3, "BtnLabel", "btnLabel"), s(4, "BtnVar", "btnVar"), s(5, "Act", "act")},
+	},
+	{
+		name: "VgRoleBody", goT: "vgRoleBodySt", zigT: "dialogs_b.RoleBody", id: 66,
+		doc: "#vrcg-role-body add/remove-role list",
+		fs:  []field{b(1, "HasHint", "hasHint"), s(2, "HintTone", "hintTone"), s(3, "HintText", "hintText"), li(4, "Rows", "rows", "VgRoleRow")},
+	},
+	{
+		name: "VgInviteRow", goT: "vgInviteRowSt", zigT: "dialogs_b.InviteRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Status", "status"), s(3, "Act", "act")},
+	},
+	{
+		name: "VgInviteList", goT: "vgInviteListSt", zigT: "dialogs_b.InviteList", id: 67,
+		doc: "#vrcg-inv-list filtered friends list",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), b(3, "Empty", "empty"), s(4, "EmptyMsg", "emptyMsg"), li(5, "Rows", "rows", "VgInviteRow"), b(6, "HasMore", "hasMore"), s(7, "MoreMsg", "moreMsg")},
+	},
+	{
+		name: "VgRolesModal", goT: "vgRolesModalSt", zigT: "dialogs_b.RolesModal", id: 68,
+		doc: "roles dialog shell (embeds #vrcg-role-body)",
+		fs:  []field{s(1, "Title", "title"), st(2, "Body", "body", "VgRoleBody")},
+	},
+	{
+		name: "VgInviteModal", goT: "vgInviteModalSt", zigT: "dialogs_b.InviteModal", id: 69,
+		doc: "invite dialog shell (embeds #vrcg-inv-list)",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "IDPh", "idPh"), s(4, "IDBtn", "idBtn"), st(5, "List", "list", "VgInviteList")},
+	},
+	{
+		name: "VgMemberConfirm", goT: "vgMemberConfirmSt", zigT: "dialogs_b.MemberConfirm", id: 70,
+		doc: "kick/ban confirm dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Verb", "verb"), s(3, "Name", "name"), s(4, "Group", "group"), s(5, "Note", "note"), s(6, "Act", "act"), s(7, "Cancel", "cancel")},
+	},
+	{
+		name: "VgPostConfirm", goT: "vgPostConfirmSt", zigT: "dialogs_b.PostConfirm", id: 71,
+		doc: "delete-post confirm dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Post", "post"), s(3, "Group", "group"), s(4, "Confirm", "confirm"), s(5, "Cancel", "cancel")},
+	},
+	// worlds family (i5): full tab (76) + the four live patch targets - #world-linkhint (72),
+	// #world-gh (73), #world-st-<key> (74), #world-unity-rows (75) - plus the nine ws modals
+	// (77-85; #world-fr-list / #world-grp-list / #world-role-list are async-patched inners).
+	// Prose fields are trusted Go-source literals rendered raw on BOTH sides; plain kStr here,
+	// raw semantics live in the renderers.
+	{
+		name: "WsHint", goT: "wsHintSt", zigT: "worlds.Hint", id: 72,
+		doc: "#world-linkhint chip",
+		fs:  []field{s(1, "Tone", "tone"), s(2, "Text", "text")},
+	},
+	{
+		name: "WsGitHub", goT: "wsGitHubSt", zigT: "worlds.GitHub", id: 73,
+		doc: "#world-gh link control",
+		fs:  []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "LinkedLabel", "linkedLabel"), s(4, "LinkedDL", "linkedDl"), s(5, "Login", "login"), s(6, "LinkedHelp", "linkedHelp"), s(7, "UnlinkLabel", "unlinkLabel"), s(8, "UnlinkedHelp", "unlinkedHelp"), s(9, "DeviceLabel", "deviceLabel"), s(10, "PatLabel", "patLabel")},
+	},
+	{
+		name: "WsStatus", goT: "wsStatusSt", zigT: "worlds.Status", id: 74,
+		doc: "one #world-st-<key> publish status",
+		fs:  []field{s(1, "Tone", "tone"), s(2, "Line", "line"), s(3, "URL", "url"), s(4, "CopyLabel", "copyLabel"), s(5, "OpenLabel", "openLabel"), s(6, "HTMLURL", "htmlUrl")},
+	},
+	{
+		name: "WsListRow", goT: "wsListRowSt", zigT: "worlds.ListRow",
+		fs: []field{s(1, "Key", "key"), s(2, "Name", "name"), s(3, "Entries", "entries"), s(4, "EditAct", "editAct"), s(5, "PubAct", "pubAct"), s(6, "DelAct", "delAct"), st(7, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsLists", goT: "wsListsSt", zigT: "worlds.Lists",
+		fs: []field{s(1, "Help", "help"), s(2, "Empty", "empty"), li(3, "Rows", "rows", "WsListRow"), s(4, "EditLabel", "editLabel"), s(5, "PubLabel", "pubLabel"), s(6, "DelLabel", "delLabel"), s(7, "AddPlaceholder", "addPlaceholder"), s(8, "AddLabel", "addLabel")},
+	},
+	{
+		name: "WsPosterRow", goT: "wsPosterRowSt", zigT: "worlds.PosterRow",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "EditAct", "editAct"), s(4, "DelAct", "delAct")},
+	},
+	{
+		name: "WsPosters", goT: "wsPostersSt", zigT: "worlds.Posters",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "AddLabel", "addLabel"), s(3, "PubLabel", "pubLabel"), s(4, "ToggleLabel", "toggleLabel"), s(5, "ToggleDL", "toggleDl"), b(6, "ToggleOn", "toggleOn"), s(7, "Help", "help"), s(8, "Empty", "empty"), li(9, "Rows", "rows", "WsPosterRow"), s(10, "EditLabel", "editLabel"), s(11, "DelLabel", "delLabel"), st(12, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsEvents", goT: "wsEventsSt", zigT: "worlds.Events",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "PubLabel", "pubLabel"), s(3, "ToggleLabel", "toggleLabel"), s(4, "ToggleDL", "toggleDl"), b(5, "ToggleOn", "toggleOn"), s(6, "Help", "help"), st(7, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsNowPlaying", goT: "wsNowPlayingSt", zigT: "worlds.NowPlaying",
+		fs: []field{s(1, "CardTitle", "cardTitle"), s(2, "PubLabel", "pubLabel"), s(3, "ToggleLabel", "toggleLabel"), s(4, "ToggleDL", "toggleDl"), b(5, "ToggleOn", "toggleOn"), s(6, "LinkLabel", "linkLabel"), s(7, "LinkDL", "linkDl"), s(8, "Link", "link"), s(9, "ImgLabel", "imgLabel"), s(10, "ImgDL", "imgDl"), s(11, "Img", "img"), s(12, "ImgWarn", "imgWarn"), s(13, "Help", "help"), st(14, "Status", "status", "WsStatus")},
+	},
+	{
+		name: "WsUnityRow", goT: "wsUnityRowSt", zigT: "worlds.UnityRow",
+		fs: []field{s(1, "Name", "name"), s(2, "Dir", "dir"), s(3, "Act", "act")},
+	},
+	{
+		name: "WsUnity", goT: "wsUnitySt", zigT: "worlds.Unity", id: 75,
+		doc: "#world-unity-rows hand-off list",
+		fs:  []field{s(1, "Mode", "mode"), s(2, "Msg", "msg"), s(3, "WriteLabel", "writeLabel"), li(4, "Rows", "rows", "WsUnityRow")},
+	},
+	{
+		name: "Worlds", goT: "worldsState", zigT: "worlds.State", id: 76,
+		doc: "Worlds tab (full view)",
+		fs:  []field{b(1, "Available", "available"), s(2, "Title", "title"), s(3, "Sub", "sub"), s(4, "Unavailable", "unavailable"), st(5, "LinkHint", "linkHint", "WsHint"), s(6, "SecGitHub", "secGitHub"), st(7, "GH", "gh", "WsGitHub"), s(8, "SecLists", "secLists"), st(9, "Lists", "lists", "WsLists"), s(10, "SecPosters", "secPosters"), st(11, "Posters", "posters", "WsPosters"), s(12, "SecEvents", "secEvents"), st(13, "Events", "events", "WsEvents"), s(14, "SecNP", "secNp"), st(15, "NP", "np", "WsNowPlaying"), s(16, "SecUnity", "secUnity"), s(17, "UnityHelp", "unityHelp"), st(18, "Unity", "unity", "WsUnity")},
+	},
+	{
+		name: "WsEntryRow", goT: "wsEntryRowSt", zigT: "dialogs_b.WsEntryRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act")},
+	},
+	{
+		name: "WsListEditor", goT: "wsListEditorSt", zigT: "dialogs_b.WsListEditor", id: 77,
+		doc: "permission-list entry editor dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Help", "help"), b(3, "Empty", "empty"), s(4, "EmptyMsg", "emptyMsg"), li(5, "Entries", "entries", "WsEntryRow"), s(6, "DelLabel", "delLabel"), s(7, "AddPh", "addPh"), s(8, "AddBtn", "addBtn"), s(9, "FriendBtn", "friendBtn"), s(10, "FriendAct", "friendAct"), s(11, "GroupBtn", "groupBtn"), s(12, "GroupAct", "groupAct")},
+	},
+	{
+		name: "WsPosterEditor", goT: "wsPosterEditorSt", zigT: "dialogs_b.WsPosterEditor", id: 78,
+		doc: "poster-slot editor form",
+		fs:  []field{s(1, "Title", "title"), s(2, "Idx", "idx"), s(3, "ImgLbl", "imgLbl"), s(4, "Img", "img"), s(5, "ImgPh", "imgPh"), s(6, "CapLbl", "capLbl"), s(7, "Caption", "caption"), s(8, "CapPh", "capPh"), s(9, "LinkLbl", "linkLbl"), s(10, "Link", "link"), s(11, "LinkPh", "linkPh"), b(12, "HasWarn", "hasWarn"), s(13, "Warn", "warn"), s(14, "Save", "save")},
+	},
+	{
+		name: "WsPickRow", goT: "wsPickRowSt", zigT: "dialogs_b.WsPickRow",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act")},
+	},
+	{
+		name: "WsFriendList", goT: "wsFriendListSt", zigT: "dialogs_b.WsFriendList", id: 79,
+		doc: "#world-fr-list inner (async friends load / filter)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), li(3, "Rows", "rows", "WsPickRow"), s(4, "AddLabel", "addLabel"), b(5, "HasMore", "hasMore"), s(6, "MoreMsg", "moreMsg"), b(7, "Empty", "empty"), s(8, "EmptyMsg", "emptyMsg")},
+	},
+	{
+		name: "WsFriendPicker", goT: "wsFriendPickerSt", zigT: "dialogs_b.WsFriendPicker", id: 80,
+		doc: "friend-picker dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "BackLbl", "backLbl"), s(4, "BackAct", "backAct"), st(5, "List", "list", "WsFriendList")},
+	},
+	{
+		name: "WsGroupRow", goT: "wsGroupRowSt", zigT: "dialogs_b.WsGroupRow",
+		fs: []field{s(1, "Label", "label"), s(2, "FavLabel", "favLabel"), s(3, "FavAct", "favAct"), s(4, "RolesAct", "rolesAct")},
+	},
+	{
+		name: "WsGroupSec", goT: "wsGroupSecSt", zigT: "dialogs_b.WsGroupSec",
+		fs: []field{s(1, "Caption", "caption"), li(2, "Rows", "rows", "WsGroupRow")},
+	},
+	{
+		name: "WsGroupList", goT: "wsGroupListSt", zigT: "dialogs_b.WsGroupList", id: 81,
+		doc: "#world-grp-list inner (own-groups load + group search)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), li(3, "Sections", "sections", "WsGroupSec"), s(4, "RolesLabel", "rolesLabel"), b(5, "Empty", "empty"), s(6, "EmptyMsg", "emptyMsg")},
+	},
+	{
+		name: "WsGroupPicker", goT: "wsGroupPickerSt", zigT: "dialogs_b.WsGroupPicker", id: 82,
+		doc: "group-picker dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "SearchPh", "searchPh"), s(3, "SearchBtn", "searchBtn"), s(4, "Help", "help"), s(5, "BackLbl", "backLbl"), s(6, "BackAct", "backAct"), st(7, "List", "list", "WsGroupList")},
+	},
+	{
+		name: "WsRoleList", goT: "wsRoleListSt", zigT: "dialogs_b.WsRoleList", id: 83,
+		doc: "#world-role-list inner (async roles load)",
+		fs:  []field{b(1, "Loading", "loading"), s(2, "LoadingMsg", "loadingMsg"), s(3, "AllLabel", "allLabel"), s(4, "GrantLabel", "grantLabel"), li(5, "Rows", "rows", "WsPickRow")},
+	},
+	{
+		name: "WsRolePicker", goT: "wsRolePickerSt", zigT: "dialogs_b.WsRolePicker", id: 84,
+		doc: "role-grant dialog shell",
+		fs:  []field{s(1, "Title", "title"), s(2, "BackLbl", "backLbl"), s(3, "BackAct", "backAct"), st(4, "List", "list", "WsRoleList")},
+	},
+	{
+		name: "WsDevice", goT: "wsDeviceSt", zigT: "dialogs_b.WsDevice", id: 85,
+		doc: "GitHub device-code dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Help", "help"), s(3, "Code", "code"), s(4, "CopyLbl", "copyLbl"), s(5, "OpenLbl", "openLbl"), s(6, "URI", "uri")},
+	},
+	// editor/cueedit/mirror/rce/library-modals/remote (i6): roots 86-99. 86/87 = remote-library
+	// mirror body + #rmirror-banner (patched per session-state move); 88-90 = remote cue-edit
+	// panes (#rce-info, #lib-body, save rail); 91/92 = #ed-preview + full Editor view; 93-95 =
+	// cue-editor #ce-topbar / wave strip / rail (re-rendered during drag - the hot path); 96 =
+	// #gf-live (existing message, promoted to root; ~2 Hz from the fixer run goroutine); 97/98 =
+	// smart-rules + relocate modals; 99 = the "Controlling [peer]" switcher. EdLayer is the
+	// schema's first self-recursive message (children) - decode depth is bounded by the
+	// document's byte length (every nesting level consumes a tag), fuzz leans on that.
+	{
+		name: "LibMirrorBan", goT: "libMirrorBanSt", zigT: "libviews.MirrorBanner", id: 87,
+		doc: "#rmirror-banner status strip (patched on session-state moves)",
+		fs:  []field{s(1, "Status", "status"), s(2, "Title", "title"), s(3, "Tip", "tip"), op(4, "TipS", "tipSt", "Tip"), b(5, "HasNote", "hasNote"), s(6, "Note", "note"), b(7, "IsErr", "isErr"), s(8, "Err", "err"), s(9, "Reconnect", "reconnect")},
+	},
+	{
+		name: "LibMirror", goT: "libMirrorSt", zigT: "libviews.Mirror", id: 86,
+		doc: "remote-library mirror body (#lib-body while a peer is targeted)",
+		fs:  []field{b(1, "NoLink", "noLink"), s(2, "NoLinkMsg", "noLinkMsg"), st(3, "Banner", "banner", "LibMirrorBan")},
+	},
+	{
+		name: "RceNav", goT: "rceNavSt", zigT: "libviews.RceNav",
+		fs: []field{s(1, "Label", "label"), s(2, "Act", "act"), b(3, "Gated", "gated"), s(4, "Why", "why")},
+	},
+	{
+		name: "RceInfo", goT: "rceInfoSt", zigT: "libviews.RceInfo", id: 88,
+		doc: "#rce-info left pane (remote cue-edit)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), s(4, "Path", "path"), b(5, "HasSet", "hasSet"), s(6, "SetLine", "setLine"), st(7, "Prev", "prev", "RceNav"), st(8, "Next", "next", "RceNav"), s(9, "LocalNote", "localNote"), li(10, "Hints", "hints", "LibHint"), s(11, "Back", "back")},
+	},
+	{
+		name: "RceBody", goT: "rceBodySt", zigT: "libviews.RceBody", id: 89,
+		doc: "#lib-body while remote-editing (wave strip + info + detail)",
+		fs:  []field{s(1, "Wave", "wave"), st(2, "Info", "info", "RceInfo"), st(3, "Detail", "detail", "LibDetail")},
+	},
+	{
+		name: "RceWrite", goT: "rceWriteSt", zigT: "libviews.RceWrite",
+		fs: []field{b(1, "Done", "done"), s(2, "Text", "text"), s(3, "Act", "act"), b(4, "Gated", "gated"), s(5, "Why", "why")},
+	},
+	{
+		name: "RceSave", goT: "rceSaveSt", zigT: "libviews.RceSave", id: 90,
+		doc: "remote cue-edit save/write-back rail section",
+		fs:  []field{b(1, "Show", "show"), s(2, "Header", "header"), b(3, "Moved", "moved"), s(4, "MovedText", "movedText"), s(5, "ReloadLbl", "reloadLbl"), b(6, "HasErr", "hasErr"), s(7, "ErrText", "errText"), s(8, "Status", "status"), s(9, "StatusText", "statusText"), s(10, "UnsavedText", "unsavedText"), s(11, "SaveLbl", "saveLbl"), b(12, "HasWrites", "hasWrites"), s(13, "WriteHeader", "writeHeader"), li(14, "Writes", "writes", "RceWrite")},
+	},
+	{
+		name: "EdGradStop", goT: "edGradStop", zigT: "editor.GradStop",
+		fs: []field{s(1, "RGBA", "rgba"), s(2, "Pos", "pos")},
+	},
+	{
+		name: "EdPaint", goT: "edPaint", zigT: "editor.Paint",
+		fs: []field{s(1, "Kind", "kind"), s(2, "RGBA", "rgba"), s(3, "Angle", "angle"), li(4, "Stops", "stops", "EdGradStop"), s(5, "URLQ", "urlq"), s(6, "Size", "size")},
+	},
+	{
+		name: "EdText", goT: "edText", zigT: "editor.Text",
+		fs: []field{s(1, "Content", "content"), s(2, "FamQ", "famq"), s(3, "Size", "size"), s(4, "LH", "lh"), s(5, "Align", "alignment"), s(6, "RGBA", "rgba"), s(7, "LS", "ls")},
+	},
+	{
+		name: "EdInner", goT: "edInner", zigT: "editor.Inner",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Text", "text", "EdText"), s(3, "Placeholder", "placeholder")},
+	},
+	{
+		name: "EdLayer", goT: "edLayer", zigT: "editor.Layer",
+		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer")},
+	},
+	{
+		name: "EdPreview", goT: "edPreviewState", zigT: "editor.Preview", id: 91,
+		doc: "#ed-preview live composite",
+		fs:  []field{s(1, "AW", "aw"), s(2, "AH", "ah"), li(3, "Layers", "layers", "EdLayer"), s(4, "Cap", "cap"), s(5, "Hint", "hint")},
+	},
+	{
+		name: "EdRow", goT: "edRow", zigT: "editor.Row",
+		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), u(3, "Depth", "depth"), b(4, "Group", "group"), b(5, "Sel", "sel"), b(6, "Visible", "visible"), b(7, "Locked", "locked")},
+	},
+	{
+		name: "EdActions", goT: "edActionsState", zigT: "editor.Actions",
+		fs: []field{s(1, "Up", "up"), s(2, "Down", "down"), s(3, "Group", "group"), s(4, "Ungroup", "ungroup"), s(5, "Delete", "delete"), b(6, "HasSel", "hasSel"), s(7, "NoSel", "noSel"), st(8, "Opacity", "opacity", "UiSlider"), st(9, "Blend", "blend", "SelState")},
+	},
+	{
+		name: "EdLayers", goT: "edLayersState", zigT: "editor.Layers",
+		fs: []field{li(1, "Rows", "rows", "EdRow"), s(2, "Empty", "empty"), st(3, "Actions", "actions", "EdActions")},
+	},
+	{
+		name: "EdColorRow", goT: "edColorRowState", zigT: "editor.ColorRow",
+		fs: []field{s(1, "RGBA", "rgba"), st(2, "Field", "field", "UiField")},
+	},
+	{
+		name: "EdInspText", goT: "edInspTextState", zigT: "editor.InspText",
+		fs: []field{s(1, "Label", "label"), s(2, "Content", "content"), s(3, "Hint", "hint"), st(4, "Font", "font", "SelState"), st(5, "Size", "size", "UiField"), st(6, "LS", "ls", "UiField"), st(7, "LH", "lh", "UiField"), st(8, "Align", "alignment", "SelState"), st(9, "Color", "color", "EdColorRow")},
+	},
+	{
+		name: "EdInsp", goT: "edInspState", zigT: "editor.Insp",
+		fs: []field{b(1, "HasSel", "hasSel"), s(2, "Empty", "empty"), st(3, "Name", "name", "UiField"), st(4, "X", "x", "UiField"), st(5, "Y", "y", "UiField"), b(6, "ShowWH", "showWh"), st(7, "W", "w", "UiField"), st(8, "H", "h", "UiField"), st(9, "SX", "sx", "UiField"), st(10, "SY", "sy", "UiField"), st(11, "Rot", "rot", "UiField"), s(12, "Kind", "kind"), st(13, "Text", "text", "EdInspText"), st(14, "Fill", "fill", "EdColorRow"), st(15, "Angle", "angle", "UiField"), st(16, "Start", "start", "EdColorRow"), st(17, "End", "end", "EdColorRow"), st(18, "Path", "path", "UiField"), st(19, "Fit", "fit", "SelState")},
+	},
+	{
+		name: "EdView", goT: "edViewState", zigT: "editor.State", id: 92,
+		doc: "Editor tab (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Disabled", "disabled"), s(4, "DisabledSub", "disabledSub"), s(5, "DisabledHint", "disabledHint"), s(6, "SecPreview", "secPreview"), s(7, "SecLayers", "secLayers"), s(8, "SecInspector", "secInspector"), li(9, "Row1", "row1", "UiBtn"), li(10, "Row2", "row2", "UiBtn"), st(11, "Preview", "preview", "EdPreview"), st(12, "Layers", "layers", "EdLayers"), st(13, "Insp", "insp", "EdInsp")},
+	},
+	{
+		name: "CeTbDrop", goT: "ceTbDropSt", zigT: "cueedit.TbDrop",
+		fs: []field{s(1, "Act", "act"), s(2, "Lbl", "lbl"), s(3, "When", "when")},
+	},
+	{
+		name: "CeTopbar", goT: "ceTopbarSt", zigT: "cueedit.Topbar", id: 93,
+		doc: "#ce-topbar readout strip (re-rendered during drag)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), b(4, "HasRce", "hasRce"), s(5, "RceMeta", "rceMeta"), b(6, "Dirty", "dirty"), s(7, "DirtyTip", "dirtyTip"), s(8, "Meta", "meta"), s(9, "Cursor", "cursor"), s(10, "BarLbl", "barLbl"), s(11, "BarBeat", "barBeat"), s(12, "Jump", "jump"), li(13, "Drops", "drops", "CeTbDrop"), s(14, "Census", "census"), b(15, "NoTag", "noTag"), s(16, "NoTagTip", "noTagTip"), b(17, "Verified", "verified"), b(18, "Verifiable", "verifiable"), s(19, "VerifyAct", "verifyAct"), s(20, "VerifiedTip", "verifiedTip"), s(21, "VerifiedLbl", "verifiedLbl"), s(22, "VerifyTip", "verifyTip"), s(23, "VerifyLbl", "verifyLbl"), s(24, "Tip", "tip"), op(25, "TipS", "tipSt", "Tip"), st(26, "Close", "close", "UiBtn")},
+	},
+	{
+		name: "CeWave", goT: "ceWaveSt", zigT: "cueedit.Wave", id: 94,
+		doc: "cue-edit full-width player strip",
+		fs:  []field{st(1, "Topbar", "topbar", "CeTopbar"), s(2, "Player", "player")},
+	},
+	{
+		name: "CeDefaults", goT: "ceDefaultsSt", zigT: "cueedit.Defaults",
+		fs: []field{s(1, "Arrow", "arrow"), s(2, "Title", "title"), b(3, "Open", "open"), st(4, "Pads", "pads", "SelState"), st(5, "Ow", "ow", "UiToggle"), st(6, "Split", "split", "UiToggle"), b(7, "HasPromote", "hasPromote"), st(8, "Promote", "promote", "UiToggle"), b(9, "HasGrid", "hasGrid"), st(10, "Grid", "grid", "UiToggle"), s(11, "Note", "note")},
+	},
+	{
+		name: "CeARow", goT: "ceARowSt", zigT: "cueedit.ARow",
+		fs: []field{b(1, "Placed", "placed"), s(2, "Tag", "tag"), s(3, "Act", "act"), s(4, "When", "when"), s(5, "UnplacedTip", "unplacedTip"), s(6, "UnplacedLbl", "unplacedLbl"), b(7, "HasSel", "hasSel"), st(8, "Sel", "sel", "SelState")},
+	},
+	{
+		name: "CeAssign", goT: "ceAssignSt", zigT: "cueedit.Assign",
+		fs: []field{s(1, "Title", "title"), li(2, "Rows", "rows", "CeARow"), b(3, "ShowNoDrops", "showNoDrops"), s(4, "NoDropsHint", "noDropsHint")},
+	},
+	{
+		name: "CeBatch", goT: "ceBatchSt", zigT: "cueedit.Batch",
+		fs: []field{b(1, "Show", "show"), s(2, "Header", "header"), st(3, "ApplyHot", "applyHot", "UiBtn"), st(4, "ApplyMem", "applyMem", "UiBtn"), st(5, "PromoteSel", "promoteSel", "UiBtn"), st(6, "ConvertSel", "convertSel", "UiBtn"), st(7, "ClearSel", "clearSel", "UiBtn"), s(8, "Note", "note")},
+	},
+	{
+		name: "CeRail", goT: "ceRailSt", zigT: "cueedit.Rail", id: 95,
+		doc: "cue-editor rail (#lib-detail inner in cue-edit mode)",
+		fs:  []field{b(1, "Show", "show"), s(2, "Eyebrow", "eyebrow"), s(3, "Title", "title"), st(4, "Mode", "mode", "SelState"), st(5, "Defaults", "defaults", "CeDefaults"), s(6, "PrepSel", "prepSel"), s(7, "PrepHint", "prepHint"), st(8, "Assign", "assign", "CeAssign"), st(9, "AddDrop", "addDrop", "UiBtn"), st(10, "DelDrop", "delDrop", "UiBtn"), b(11, "HasSel", "hasSel"), s(12, "SelLbl", "selLbl"), s(13, "PatNamePH", "patNamePh"), st(14, "SavePat", "savePat", "UiBtn"), b(15, "HasDSel", "hasDsel"), s(16, "DSelLbl", "dselLbl"), b(17, "ShowDelHint", "showDelHint"), s(18, "DelHint", "delHint"), b(19, "HasPats", "hasPats"), st(20, "Manage", "manage", "UiBtn"), b(21, "HasDrops", "hasDrops"), st(22, "ApplyHot", "applyHot", "UiBtn"), st(23, "ApplyMem", "applyMem", "UiBtn"), b(24, "ShowOwNote", "showOwNote"), s(25, "OwNote", "owNote"), st(26, "PromoteAll", "promoteAll", "UiBtn"), st(27, "ConvertAll", "convertAll", "UiBtn"), st(28, "ClearOne", "clearOne", "UiBtn"), li(29, "Hints", "hints", "LibHint"), st(30, "Batch", "batch", "CeBatch"), s(31, "WriteBack", "writeBack"), st(32, "Close", "close", "UiBtn")},
+	},
+	{
+		name: "LibSmartModal", goT: "libSmartModalSt", zigT: "libviews.SmartModal", id: 97,
+		doc: "smart-rules editor modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), st(3, "Name", "name", "LibPBField"), s(4, "GenresLbl", "genresLbl"), li(5, "Genres", "genres", "LibChip"), st(6, "Feel", "feel", "SelState"), st(7, "BPMMin", "bpmMin", "LibPBField"), st(8, "BPMMax", "bpmMax", "LibPBField"), st(9, "KeyField", "keyField", "LibPBField"), st(10, "Rating", "rating", "SelState"), st(11, "Plays", "plays", "LibPBField"), st(12, "Search", "search", "LibPBField"), s(13, "CompatLbl", "compatLbl"), st(14, "Compat", "compat", "SelState"), b(15, "HasDepth", "hasDepth"), li(16, "Depth", "depth", "LibChip"), s(17, "CompatHint", "compatHint"), s(18, "Count", "count"), s(19, "Confirm", "confirm"), s(20, "Cancel", "cancel")},
+	},
+	{
+		name: "LibRelocRow", goT: "libRelocRowSt", zigT: "libviews.RelocRow",
+		fs: []field{s(1, "Act", "act"), b(2, "Checked", "checked"), s(3, "Old", "old"), s(4, "New", "newPath"), s(5, "Conf", "conf"), s(6, "ConfVar", "confVar")},
+	},
+	{
+		name: "LibRelocModal", goT: "libRelocModalSt", zigT: "libviews.RelocModal", id: 98,
+		doc: "relocate-missing modal",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), s(3, "Missing", "missing"), s(4, "Root", "root"), s(5, "RootPH", "rootPh"), s(6, "BrowseLbl", "browseLbl"), s(7, "FindLbl", "findLbl"), b(8, "HasMsg", "hasMsg"), s(9, "Msg", "msg"), b(10, "HasRows", "hasRows"), li(11, "Rows", "rows", "LibRelocRow"), b(12, "HasMore", "hasMore"), s(13, "More", "more"), s(14, "ApplyLbl", "applyLbl")},
+	},
+	{
+		name: "LibRemote", goT: "libRemoteSt", zigT: "libremote.State", id: 99,
+		doc: "'Controlling [peer]' target switcher row",
+		fs:  []field{b(1, "Show", "show"), st(2, "Sel", "sel", "SelState")},
+	},
+	// dialogs_a + automations dialogs + publish-remote + update-flow (i7): the LAST JSON
+	// bridges. Roots 102-108 dialogs_a (7 modals), 109-111 automations editor/run-now/schedule,
+	// 112 remote Publish view, 113 #inst-update region. AeBlock is the discriminated form-block
+	// kit (kind names which fields are read - all cross the wire, zero-cost for absent ones);
+	// DlgField/ArFoot/AeStep ride under it. Shared messages (UiBtn/UiKV/UiField/UiToggle/
+	// LibPBField/LibSelTip/LibChip/LibHint/Loud/SelState/Tip/SsLabel) are reused, not re-keyed.
+	{
+		name: "DlgChoice", goT: "dlgChoiceSt", zigT: "c.Choice", id: 102,
+		doc: "generic choice dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "Msg", "msg"), b(3, "MsgRaw", "msgRaw"), b(4, "HasMsg", "hasMsg"), li(5, "Btns", "btns", "UiBtn"), b(6, "InBody", "inBody")},
+	},
+	{
+		name: "DlgTxtExport", goT: "pubTxtDlgSt", zigT: "dialogs_a.TxtExport", id: 103,
+		doc: "tracklist text-export dialog",
+		fs:  []field{s(1, "Title", "title"), st(2, "Sel", "sel", "SelState"), st(3, "Tmpl", "tmpl", "UiField"), st(4, "Header", "header", "UiToggle"), s(5, "Place", "place"), s(6, "Content", "content"), s(7, "CopyLbl", "copyLbl"), s(8, "CloseLbl", "closeLbl")},
+	},
+	{
+		name: "DlgExportPrev", goT: "pubExpDlgSt", zigT: "dialogs_a.ExportPrev", id: 104,
+		doc: "tracklist-export preview (CSV/JSON; also the remote arm)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Note", "note"), s(3, "Content", "content"), s(4, "CopyLbl", "copyLbl"), s(5, "CloseLbl", "closeLbl")},
+	},
+	{
+		name: "DlgRename", goT: "pubRenameDlgSt", zigT: "dialogs_a.Rename", id: 105,
+		doc: "rename-set form dialog",
+		fs:  []field{s(1, "Title", "title"), s(2, "ID", "id"), s(3, "NameLbl", "nameLbl"), s(4, "NameDL", "nameDL"), s(5, "Cur", "cur"), s(6, "Submit", "submit")},
+	},
+	{
+		name: "PubFixRow", goT: "pubFixRowSt", zigT: "dialogs_a.FixRow",
+		fs: []field{s(1, "Num", "num"), s(2, "Off", "off"), s(3, "NewOff", "newOff"), b(4, "Removed", "removed"), s(5, "Label", "label")},
+	},
+	{
+		name: "DlgFix", goT: "pubFixDlgSt", zigT: "dialogs_a.Fix", id: 106,
+		doc: "capture-aligned time-fix preview",
+		fs:  []field{s(1, "Title", "title"), s(2, "Desc", "desc"), b(3, "HasOpener", "hasOpener"), st(4, "Opener", "opener", "SelState"), s(5, "SetStartLbl", "setStartLbl"), s(6, "StartT", "startT"), s(7, "NewT", "newT"), li(8, "Rows", "rows", "PubFixRow"), s(9, "RemovedTx", "removedTx"), s(10, "ApplyLbl", "applyLbl"), s(11, "ApplyAct", "applyAct"), s(12, "CancelLbl", "cancelLbl")},
+	},
+	{
+		name: "DlgPreset", goT: "mpPresetDlgSt", zigT: "dialogs_a.Preset", id: 107,
+		doc: "export preset editor",
+		fs:  []field{s(1, "Title", "title"), st(2, "IDField", "idField", "LibPBField"), st(3, "LabelField", "labelField", "LibPBField"), b(4, "HasSrc", "hasSrc"), s(5, "SrcHint", "srcHint"), st(6, "Container", "container", "LibSelTip"), b(7, "HasVideo", "hasVideo"), st(8, "VCodec", "vcodec", "LibSelTip"), b(9, "HasVEnc", "hasVEnc"), st(10, "Accel", "accel", "SelState"), st(11, "RateMode", "rateMode", "LibSelTip"), st(12, "RateField", "rateField", "LibPBField"), st(13, "Res", "res", "SelState"), st(14, "FPS", "fps", "LibPBField"), st(15, "ACodec", "acodec", "LibSelTip"), b(16, "HasLadder", "hasLadder"), b(17, "HasVBRTgl", "hasVbrTgl"), st(18, "VBR", "vbr", "UiToggle"), b(19, "HasVBRQ", "hasVbrq"), st(20, "VBRQ", "vbrq", "SelState"), b(21, "HasChips", "hasChips"), s(22, "BitrateLbl", "bitrateLbl"), li(23, "Chips", "chips", "LibChip"), s(24, "MaxHint", "maxHint"), b(25, "HasLossles", "hasLossless"), s(26, "LosslessTx", "losslessTx"), st(27, "Channels", "channels", "SelState"), st(28, "SampleRate", "samplerate", "SelState"), st(29, "Loud", "loud", "Loud"), li(30, "Warns", "warns", "LibHint"), li(31, "Foot", "foot", "UiBtn")},
+	},
+	{
+		name: "CePatRow", goT: "cePatRowSt", zigT: "dialogs_a.PatRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), s(3, "Meta", "meta"), b(4, "OwGated", "owGated"), s(5, "OwLbl", "owLbl"), s(6, "OwWhy", "owWhy"), s(7, "DelLbl", "delLbl")},
+	},
+	{
+		name: "DlgPatMgr", goT: "cePatMgrSt", zigT: "dialogs_a.PatMgr", id: 108,
+		doc: "manage-patterns dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "Gone", "gone"), s(3, "GoneTx", "goneTx"), b(4, "HasEmpty", "hasEmpty"), s(5, "EmptyTx", "emptyTx"), li(6, "Pats", "pats", "CePatRow"), s(7, "RenameLbl", "renameLbl"), s(8, "Note", "note")},
+	},
+	{
+		name: "DlgField", goT: "dlgFieldSt", zigT: "dialogs_b.DlgField",
+		fs: []field{s(1, "Label", "label"), s(2, "DL", "dl"), s(3, "Act", "act"), s(4, "Value", "value"), s(5, "Type", "inputType"), s(6, "PH", "ph"), s(7, "Tip", "tip"), op(8, "TipS", "tipSt", "Tip")},
+	},
+	{
+		name: "AeBlock", goT: "aeBlockSt", zigT: "dialogs_b.AeBlock",
+		fs: []field{s(1, "Kind", "kind"), st(2, "Field", "field", "DlgField"), st(3, "Field2", "field2", "DlgField"), st(4, "Btn", "btn", "UiBtn"), st(5, "Toggle", "toggle", "UiToggle"), st(6, "Sel", "sel", "SelState"), st(7, "Sel2", "sel2", "SelState"), s(8, "LabelHTML", "labelHtml"), op(9, "Label", "labelSt", "SsLabel"), s(10, "Tone", "tone"), s(11, "Text", "text"), s(12, "Tip", "tip"), op(13, "TipS", "tipSt", "Tip"), st(14, "Loud", "loud", "Loud")},
+	},
+	{
+		name: "AeStep", goT: "aeStepSt", zigT: "dialogs_b.AeStep",
+		fs: []field{s(1, "Title", "title"), li(2, "Trail", "trail", "UiBtn"), s(3, "Desc", "desc"), li(4, "Blocks", "blocks", "AeBlock")},
+	},
+	{
+		name: "AutoEditor", goT: "aeModalSt", zigT: "dialogs_b.AeModal", id: 109,
+		doc: "automation-editor dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Ident", "ident", "AeBlock"), s(5, "SecMatch", "secMatch"), li(6, "Match", "match", "AeBlock"), s(7, "SecActions", "secActions"), b(8, "NoSteps", "noSteps"), s(9, "NoStepsMsg", "noStepsMsg"), li(10, "Steps", "steps", "AeStep"), li(11, "Add", "add", "UiBtn"), b(12, "HasVerdict", "hasVerdict"), s(13, "Verdict", "verdict"), s(14, "Save", "save"), s(15, "Cancel", "cancel")},
+	},
+	{
+		name: "ArFoot", goT: "arFootSt", zigT: "dialogs_b.ArFoot",
+		fs: []field{b(1, "Gated", "gated"), s(2, "Label", "label"), s(3, "Why", "why"), s(4, "Variant", "variant"), s(5, "Cancel", "cancel")},
+	},
+	{
+		name: "AutoRunNow", goT: "arModalSt", zigT: "dialogs_b.ArModal", id: 110,
+		doc: "automation run-now dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), st(4, "Auto", "auto", "UiKV"), st(5, "Watch", "watch", "UiKV"), st(6, "Chain", "chain", "UiKV"), s(7, "IgnoresMatch", "ignoresMatch"), st(8, "File", "file", "DlgField"), st(9, "Browse", "browse", "UiBtn"), b(10, "Erases", "erases"), s(11, "DeleteWarn", "deleteWarn"), s(12, "DeleteScope", "deleteScope"), s(13, "DeleteTip", "deleteTip"), op(14, "DeleteTipS", "deleteTipSt", "Tip"), st(15, "Ack", "ack", "UiToggle"), st(16, "Foot", "foot", "ArFoot")},
+	},
+	{
+		name: "AutoSchedule", goT: "asModalSt", zigT: "dialogs_b.AsModal", id: 111,
+		doc: "schedule-editor dialog",
+		fs:  []field{s(1, "Title", "title"), b(2, "HasErr", "hasErr"), s(3, "Err", "err"), li(4, "Head", "head", "AeBlock"), s(5, "SecTrigger", "secTrigger"), li(6, "Trigger", "trigger", "AeBlock"), s(7, "SecGates", "secGates"), li(8, "Gates", "gates", "AeBlock"), s(9, "Save", "save"), s(10, "Cancel", "cancel")},
+	},
+	{
+		name: "PubRemRow", goT: "pubRemRowSt", zigT: "publish.RemRow",
+		fs: []field{s(1, "ID", "id"), s(2, "Title", "title"), s(3, "Sub", "sub"), b(4, "Sel", "sel")},
+	},
+	{
+		name: "PubRemList", goT: "pubRemListSt", zigT: "publish.RemList",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Count", "count"), s(3, "Note", "note"), li(4, "Rows", "rows", "PubRemRow")},
+	},
+	{
+		name: "PubRemTrack", goT: "pubRemTrackSt", zigT: "publish.RemTrack",
+		fs: []field{u(1, "Num", "num"), s(2, "Off", "off"), s(3, "Label", "label")},
+	},
+	{
+		name: "PubRemTl", goT: "pubRemTlSt", zigT: "publish.RemTl",
+		fs: []field{s(1, "Empty", "empty"), s(2, "Hint", "hint"), s(3, "Note", "note"), li(4, "Rows", "rows", "PubRemTrack")},
+	},
+	{
+		name: "PubRemCaps", goT: "pubRemCapsSt", zigT: "publish.RemCaps",
+		fs: []field{s(1, "Hint", "hint"), s(2, "Note", "note"), sl(3, "Caps", "caps")},
+	},
+	{
+		name: "PubRemDetail", goT: "pubRemDetailSt", zigT: "publish.RemDetail",
+		fs: []field{s(1, "CardTitle", "cardTitle"), b(2, "Sel", "sel"), s(3, "Hint", "hint"), s(4, "Name", "name"), s(5, "Meta", "meta"), li(6, "Actions", "actions", "UiBtn"), s(7, "Active", "active"), s(8, "CapsLbl", "capsLbl"), s(9, "TracksLbl", "tracksLbl"), st(10, "Tl", "tl", "PubRemTl"), st(11, "Caps", "caps", "PubRemCaps")},
+	},
+	{
+		name: "PublishRemote", goT: "pubRemSt", zigT: "publish.Remote", id: 112,
+		doc: "remote Publish view (peer sets + tracklist)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), s(3, "Switcher", "switcher"), s(4, "Hint", "hint"), st(5, "List", "list", "PubRemList"), st(6, "Detail", "detail", "PubRemDetail")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -992,6 +1693,19 @@ var zigImports = [][2]string{
 	// --- phase B7 fan-out ---
 	{"overlays", "overlays.zig"},
 	{"twitch", "twitch.zig"},
+	{"midictl", "midictl.zig"},
+	{"ctls", "midictl_ctls.zig"},
+	{"uimap", "midictl_uimap.zig"},
+	{"midimon", "midimon.zig"},
+	{"dialogs_b", "dialogs_b.zig"},
+	{"dialogs_a", "dialogs_a.zig"},
+	{"vrchat", "vrchat.zig"},
+	{"vrcgroups", "vrcgroups.zig"},
+	{"worlds", "worlds.zig"},
+	{"editor", "editor.zig"},
+	{"cueedit", "cueedit.zig"},
+	{"libviews", "libviews.zig"},
+	{"libremote", "libremote.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

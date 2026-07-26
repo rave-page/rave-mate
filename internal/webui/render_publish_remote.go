@@ -355,7 +355,8 @@ func pubRemoteCapsForSet(all []libdb.SetRecording, id string) []libdb.SetRecordi
 func (u *UI) renderPublishRemote(target string) string {
 	st := u.pubRemoteState(target)
 	if zigui.Available() {
-		if h, ok := zigui.RenderPublishRemote(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderPublishRemoteV2", wirePublishRemote(st), zigui.RenderPublishRemoteV2,
+			zigui.RenderPublishRemote, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
