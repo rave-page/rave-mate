@@ -162,7 +162,7 @@ func testEncode(ctx context.Context, ffmpeg, name string) (bool, string) {
 	if err := cmd.Start(); err != nil {
 		return false, err.Error()
 	}
-	sysexec.AssignToJob(cmd.Process, true)
+	sysexec.AssignToJobClass(cmd.Process, sysexec.JobBatch) // deferrable diagnostic: stay CPU-capped
 	if err := cmd.Wait(); err != nil {
 		return false, bestErrLine(strings.TrimSpace(stderr.String()))
 	}
