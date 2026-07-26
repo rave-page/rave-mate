@@ -1163,6 +1163,36 @@ func RenderOverlaysStripV2(state []byte) (string, bool) {
 	})
 }
 
+// ── B7 fan-out: twitch ──
+
+// RenderTwitchV2 renders the full Twitch tab from an RZW1 document.
+func RenderTwitchV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_v2(p, l, n)
+	})
+}
+
+// RenderTwitchObsV2 renders the #twitch-obs fragment from an RZW1 document.
+func RenderTwitchObsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_obs_v2(p, l, n)
+	})
+}
+
+// RenderTwitchPresetsV2 renders the #twitch-presets fragment from an RZW1 document.
+func RenderTwitchPresetsV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_presets_v2(p, l, n)
+	})
+}
+
+// RenderTwitchFeedV2 renders the #twitch-feed fragment from an RZW1 document.
+func RenderTwitchFeedV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_twitch_feed_v2(p, l, n)
+	})
+}
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

@@ -898,6 +898,40 @@ var schema = []msg{
 		doc: "Overlays tab (full view)",
 		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), li(5, "TopBtns", "topBtns", "UiBtn"), st(6, "Appearance", "appearance", "OvlAppr"), st(7, "Web", "web", "OvlWeb"), st(8, "Wave", "wave", "OvlWave"), st(9, "Png", "png", "OvlDir"), st(10, "Obs", "obs", "OvlNote"), st(11, "VS", "vs", "OvlVS"), st(12, "NP", "np", "OvlDir"), st(13, "Strip", "strip", "OvlStrip")},
 	},
+	// twitch: full tab + #twitch-obs + #twitch-presets + #twitch-feed (the feed is patched on
+	// EVERY chat/alert event - the hot path this tab moves to the wire for).
+	{
+		name: "TwTag", goT: "twTag", zigT: "twitch.Tag",
+		fs: []field{s(1, "Text", "text"), s(2, "Variant", "variant")},
+	},
+	{
+		name: "TwRow", goT: "twRow", zigT: "twitch.Row",
+		fs: []field{s(1, "Kind", "kind"), s(2, "Date", "date"), s(3, "Name", "name"), s(4, "NameStyle", "nameStyle"), li(5, "Tags", "tags", "TwTag"), b(6, "Mod", "mod"), s(7, "ModVal", "modVal"), s(8, "ModTitle", "modTitle"), s(9, "Text", "text"), s(10, "Variant", "variant")},
+	},
+	{
+		name: "TwViewer", goT: "twViewerState", zigT: "twitch.Viewers",
+		fs: []field{s(1, "Cls", "cls"), s(2, "Text", "text")},
+	},
+	{
+		name: "TwObs", goT: "twObsState", zigT: "twitch.Obs", id: 51,
+		doc: "#twitch-obs fragment (viewer count + cockpit)",
+		fs: []field{st(1, "Viewers", "viewers", "TwViewer"), s(2, "Cockpit", "cockpit")},
+	},
+	{
+		name: "TwPresets", goT: "twPresetsState", zigT: "twitch.Presets", id: 52,
+		doc: "#twitch-presets fragment (title-preset chip strip)",
+		fs: []field{li(1, "Chips", "chips", "UiBtn"), s(2, "Empty", "empty"), s(3, "Manage", "manage"), s(4, "Add", "add")},
+	},
+	{
+		name: "TwFeed", goT: "twFeedState", zigT: "twitch.Feed", id: 53,
+		doc: "#twitch-feed inner fragment (patched on every chat/alert event)",
+		fs: []field{s(1, "Empty", "empty"), li(2, "Rows", "rows", "TwRow")},
+	},
+	{
+		name: "TwState", goT: "twState", zigT: "twitch.State", id: 50,
+		doc: "Twitch tab (full view)",
+		fs: []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Available", "available"), s(4, "Unavailable", "unavailable"), b(5, "ShowObs", "showObs"), s(6, "ObsTitle", "obsTitle"), st(7, "Obs", "obs", "TwObs"), b(8, "ShowPresets", "showPresets"), s(9, "PresetsTitle", "presetsTitle"), st(10, "Presets", "presets", "TwPresets"), st(11, "Feed", "feed", "TwFeed"), b(12, "ShowSend", "showSend"), s(13, "SendPH", "sendPh"), s(14, "SendLbl", "sendLbl")},
+	},
 	// --- merge composition: tip2 (B-1b shard 2) structured tooltip/label fields ---
 	// tip2 flipped the last tipTopic call sites, which added `*tipSt` / `*ssLabelSt` fields to
 	// states this block already froze. They are kOptPtr: nil means "no tooltip", and OptStruct
@@ -957,6 +991,7 @@ var zigImports = [][2]string{
 	{"tick", "tick.zig"},
 	// --- phase B7 fan-out ---
 	{"overlays", "overlays.zig"},
+	{"twitch", "twitch.zig"},
 }
 
 // schemaHash is FNV-1a over the canonical schema text. Both sides embed it; a mismatch means

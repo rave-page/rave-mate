@@ -1137,9 +1137,10 @@ Migrated so far:
 | view | root ids | exports | notes |
 |---|---|---|---|
 | overlays | 45-49 | full + `#ovl-appearance` + `#ovl-spout` + `#ovl-st-<kind>` + `#ovl-strip` | `UiStatus` doubles as the status fragment's ROOT message (id 48) - a nested message can also be a root (LogsLines precedent). A zero `uiStatus` renders "" and the exports decline empty output, so fragment gates skip the unavailable fixture (mirrors the golden suite). |
+| twitch | 50-53 | full + `#twitch-obs` + `#twitch-presets` + `#twitch-feed` | `#twitch-feed` is patched on EVERY chat/alert event - the hot path. Plain rows, nothing new in the codec. |
 
 Numbers: PHASEB_BASELINE.md "Phase B7 fan-out". Overlays: dispatch -44% full / -33% status
-frag, documents 42.1% of the JSON.
+frag, documents 42.1% of the JSON. Twitch: -63% full / -59% feed, documents 39.9%.
 
 ## Phase B — B0 baseline instrumentation (bench batch)
 

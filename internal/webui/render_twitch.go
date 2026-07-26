@@ -327,7 +327,8 @@ func twAlertRow(e twitch.Event) twRow {
 func (u *UI) renderTwitch() string {
 	st := u.twitchState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderTwitch(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderTwitchV2", wireTwState(st), zigui.RenderTwitchV2,
+			zigui.RenderTwitch, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -338,7 +339,8 @@ func (u *UI) renderTwitch() string {
 func (u *UI) twitchObsHTML() string {
 	st := u.twObsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderTwitchObs(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderTwitchObsV2", wireTwObs(st), zigui.RenderTwitchObsV2,
+			zigui.RenderTwitchObs, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -349,7 +351,8 @@ func (u *UI) twitchObsHTML() string {
 func (u *UI) twitchPresetsHTML() string {
 	st := u.twPresetsState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderTwitchPresets(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderTwitchPresetsV2", wireTwPresets(st), zigui.RenderTwitchPresetsV2,
+			zigui.RenderTwitchPresets, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}
@@ -360,7 +363,8 @@ func (u *UI) twitchPresetsHTML() string {
 func (u *UI) twitchFeedHTML() string {
 	st := u.twFeedState()
 	if zigui.Available() {
-		if h, ok := zigui.RenderTwitchFeed(stateJSON(st)); ok {
+		if h, ok := zigWire("RenderTwitchFeedV2", wireTwFeed(st), zigui.RenderTwitchFeedV2,
+			zigui.RenderTwitchFeed, func() []byte { return stateJSON(st) }); ok {
 			return h
 		}
 	}

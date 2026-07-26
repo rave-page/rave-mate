@@ -232,6 +232,11 @@ func RenderOverlaysSpoutV2(state []byte) (string, bool)      { return "", false 
 func RenderOverlaysStatusV2(state []byte) (string, bool)     { return "", false }
 func RenderOverlaysStripV2(state []byte) (string, bool)      { return "", false }
 
+func RenderTwitchV2(state []byte) (string, bool)        { return "", false }
+func RenderTwitchObsV2(state []byte) (string, bool)     { return "", false }
+func RenderTwitchPresetsV2(state []byte) (string, bool) { return "", false }
+func RenderTwitchFeedV2(state []byte) (string, bool)    { return "", false }
+
 // --- end phaseb-wire ---
 // --- phaseb-sched ---
 

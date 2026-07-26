@@ -981,6 +981,25 @@ export fn rz_ui_render_overlays_strip_v2(state: ?[*]const u8, len: usize, out_le
     return renderWire(overlays.Strip, wire_gen.decodeOvlStrip, overlays.renderStrip, wire_gen.msg_ovl_strip, state, len, out_len);
 }
 
+// ── B7 fan-out: twitch (root ids 50-53) ──
+// #twitch-feed is patched on EVERY chat/alert event - the hot path of this tab.
+
+export fn rz_ui_render_twitch_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(twitch.State, wire_gen.decodeTwState, twitch.render, wire_gen.msg_tw_state, state, len, out_len);
+}
+
+export fn rz_ui_render_twitch_obs_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(twitch.Obs, wire_gen.decodeTwObs, twitch.renderObs, wire_gen.msg_tw_obs, state, len, out_len);
+}
+
+export fn rz_ui_render_twitch_presets_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(twitch.Presets, wire_gen.decodeTwPresets, twitch.renderPresets, wire_gen.msg_tw_presets, state, len, out_len);
+}
+
+export fn rz_ui_render_twitch_feed_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(twitch.Feed, wire_gen.decodeTwFeed, twitch.renderFeed, wire_gen.msg_tw_feed, state, len, out_len);
+}
+
 test "wire modules" {
     _ = wire;
     _ = wire_gen;

@@ -20,6 +20,10 @@ func wireExportsB7() []wireExport {
 		{"overlays_spout_v2", zigui.RenderOverlaysSpoutV2},
 		{"overlays_status_v2", zigui.RenderOverlaysStatusV2},
 		{"overlays_strip_v2", zigui.RenderOverlaysStripV2},
+		{"twitch_v2", zigui.RenderTwitchV2},
+		{"twitch_obs_v2", zigui.RenderTwitchObsV2},
+		{"twitch_presets_v2", zigui.RenderTwitchPresetsV2},
+		{"twitch_feed_v2", zigui.RenderTwitchFeedV2},
 	}
 }
 
@@ -33,7 +37,61 @@ func wireBasesB7() []wireBase {
 			wireBase{"ovl/" + n + "/status", wireUiStatus(st.Web.Card.Status)},
 			wireBase{"ovl/" + n + "/strip", wireOvlStrip(st.Strip)})
 	}
+	for n, st := range twFixtures() {
+		out = append(out,
+			wireBase{"tw/" + n, wireTwState(st)},
+			wireBase{"tw/" + n + "/obs", wireTwObs(st.Obs)},
+			wireBase{"tw/" + n + "/presets", wireTwPresets(st.Presets)},
+			wireBase{"tw/" + n + "/feed", wireTwFeed(st.Feed)})
+	}
 	return out
+}
+
+// TestZigWireThreeWayTwitch: full tab + the three fragments over the whole twitch golden
+// fixture set. The feed is patched on every chat/alert event - the hot path.
+func TestZigWireThreeWayTwitch(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable / ABI mismatch — run `make zig` first")
+	}
+	before := zigui.FallbackCounts()
+	fx := twFixtures()
+	var wireB, jsonB int
+	for name, st := range fx {
+		t.Run(name, func(t *testing.T) {
+			doc, js := wireTwState(st), stateJSON(st)
+			if len(doc) == 0 {
+				t.Fatal("wire encode failed")
+			}
+			wireB += len(doc)
+			jsonB += len(js)
+
+			v1, ok := zigui.RenderTwitch(js)
+			if !ok {
+				t.Fatal("v1 full render failed")
+			}
+			v2, ok := zigui.RenderTwitchV2(doc)
+			if !ok {
+				t.Fatal("v2 full render failed")
+			}
+			assertBytesEqual(t, "full go==v1", twitchHTML(st), v1)
+			assertBytesEqual(t, "full v1==v2", v1, v2)
+
+			threeWayFrag(t, "feed", twFeedHTML(st.Feed), stateJSON(st.Feed),
+				wireTwFeed(st.Feed), zigui.RenderTwitchFeed, zigui.RenderTwitchFeedV2)
+			if st.ShowObs {
+				threeWayFrag(t, "obs", twObsHTML(st.Obs), stateJSON(st.Obs),
+					wireTwObs(st.Obs), zigui.RenderTwitchObs, zigui.RenderTwitchObsV2)
+			}
+			if st.ShowPresets {
+				threeWayFrag(t, "presets", twPresetsHTML(st.Presets), stateJSON(st.Presets),
+					wireTwPresets(st.Presets), zigui.RenderTwitchPresets, zigui.RenderTwitchPresetsV2)
+			}
+		})
+	}
+	t.Logf("%d fixtures: wire %d B vs json %d B (%.1f%%)", len(fx), wireB, jsonB, 100*float64(wireB)/float64(jsonB))
+	assertNoNewFallbacksIn(t, before,
+		"RenderTwitch", "RenderTwitchV2", "RenderTwitchObs", "RenderTwitchObsV2",
+		"RenderTwitchPresets", "RenderTwitchPresetsV2", "RenderTwitchFeed", "RenderTwitchFeedV2")
 }
 
 // TestZigWireThreeWayOverlays: full tab + the four live-patched fragments over the whole
@@ -115,6 +173,26 @@ func BenchmarkWireBenchOverlaysStrip(b *testing.B) {
 	benchPair(b,
 		func() (string, bool) { return zigui.RenderOverlaysStrip(stateJSON(st)) },
 		func() (string, bool) { return zigui.RenderOverlaysStripV2(wireOvlStrip(st)) })
+}
+
+func BenchmarkWireBenchTwitch(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := twFixtures()["populated"]
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderTwitch(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderTwitchV2(wireTwState(st)) })
+}
+
+func BenchmarkWireBenchTwitchFeed(b *testing.B) {
+	if !zigui.Available() {
+		b.Skip("zigui lib unavailable")
+	}
+	st := twFixtures()["populated"].Feed
+	benchPair(b,
+		func() (string, bool) { return zigui.RenderTwitchFeed(stateJSON(st)) },
+		func() (string, bool) { return zigui.RenderTwitchFeedV2(wireTwFeed(st)) })
 }
 
 // threeWayFrag asserts one fragment renderer three ways: Go == v1(JSON) == v2(RZW1).

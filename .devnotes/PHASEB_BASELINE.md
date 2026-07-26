@@ -220,6 +220,8 @@ Same method (min of 6, `-benchtime 200x`, fleet box - treat <20% as noise), bran
 | overlays (full tab) | 41 685 | 23 157 | **-44%** | 19 627 / 46 596 = 42.1% |
 | overlays `#ovl-st-<kind>` frag | 1 367 | 920 | **-33%** | (~60 B of state) |
 | overlays `#ovl-strip` frag | 1 451 | 1 018 | **-30%** | (in the set above) |
+| twitch (full tab) | 15 692 | 5 770 | **-63%** | 7 330 / 18 371 = 39.9% |
+| twitch `#twitch-feed` frag | 10 724 | 4 364 | **-59%** | (per chat/alert event, not a tick) |
 
 ## Gaps / caveats
 

@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash       uint32 = 0x7b8a2d59
+	wireSchemaHash       uint32 = 0x0f4dde8e
 	wireMsgAgState       uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState     uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines     uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -51,6 +51,10 @@ const (
 	wireMsgOvlSpout      uint16 = 47  // #ovl-spout fragment (re-rendered on install completion)
 	wireMsgUiStatus      uint16 = 48  // one #ovl-st-<kind> status fragment (patched on every overlays action); nested everywhere else
 	wireMsgOvlStrip      uint16 = 49  // #ovl-strip fragment (outputs summary)
+	wireMsgTwState       uint16 = 50  // Twitch tab (full view)
+	wireMsgTwObs         uint16 = 51  // #twitch-obs fragment (viewer count + cockpit)
+	wireMsgTwPresets     uint16 = 52  // #twitch-presets fragment (title-preset chip strip)
+	wireMsgTwFeed        uint16 = 53  // #twitch-feed inner fragment (patched on every chat/alert event)
 	wireMsgTkLive        uint16 = 100 // Live-tab tick surface (all ~1 Hz fragments in one call)
 	wireMsgTkLogs        uint16 = 101 // #log-view tick surface (one fragment, 400-line tail)
 )
@@ -1953,6 +1957,63 @@ func (v ovlState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(13, func() { v.Strip.encodeWire(w) })
 }
 
+func (v twTag) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Text)
+	w.Str(2, v.Variant)
+}
+
+func (v twRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Kind)
+	w.Str(2, v.Date)
+	w.Str(3, v.Name)
+	w.Str(4, v.NameStyle)
+	w.List(5, len(v.Tags), func(i int) { v.Tags[i].encodeWire(w) })
+	w.Bool(6, v.Mod)
+	w.Str(7, v.ModVal)
+	w.Str(8, v.ModTitle)
+	w.Str(9, v.Text)
+	w.Str(10, v.Variant)
+}
+
+func (v twViewerState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Cls)
+	w.Str(2, v.Text)
+}
+
+func (v twObsState) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Viewers.encodeWire(w) })
+	w.Str(2, v.Cockpit)
+}
+
+func (v twPresetsState) encodeWire(w *zigui.WireWriter) {
+	w.List(1, len(v.Chips), func(i int) { v.Chips[i].encodeWire(w) })
+	w.Str(2, v.Empty)
+	w.Str(3, v.Manage)
+	w.Str(4, v.Add)
+}
+
+func (v twFeedState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Empty)
+	w.List(2, len(v.Rows), func(i int) { v.Rows[i].encodeWire(w) })
+}
+
+func (v twState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.Bool(3, v.Available)
+	w.Str(4, v.Unavailable)
+	w.Bool(5, v.ShowObs)
+	w.Str(6, v.ObsTitle)
+	w.Struct(7, func() { v.Obs.encodeWire(w) })
+	w.Bool(8, v.ShowPresets)
+	w.Str(9, v.PresetsTitle)
+	w.Struct(10, func() { v.Presets.encodeWire(w) })
+	w.Struct(11, func() { v.Feed.encodeWire(w) })
+	w.Bool(12, v.ShowSend)
+	w.Str(13, v.SendPH)
+	w.Str(14, v.SendLbl)
+}
+
 func (v ssLabelSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Text)
 	if v.Tip != nil {
@@ -2273,6 +2334,34 @@ func wireUiStatus(v uiStatus) []byte {
 // wireOvlStrip encodes ovlStripState as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireOvlStrip(v ovlStripState) []byte {
 	w := zigui.NewWireWriter(wireMsgOvlStrip, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwState encodes twState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwState(v twState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwState, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwObs encodes twObsState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwObs(v twObsState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwObs, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwPresets encodes twPresetsState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwPresets(v twPresetsState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwPresets, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireTwFeed encodes twFeedState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireTwFeed(v twFeedState) []byte {
+	w := zigui.NewWireWriter(wireMsgTwFeed, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
