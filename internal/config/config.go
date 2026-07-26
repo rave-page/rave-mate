@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -2559,20 +2560,21 @@ func Load() (Config, error) {
 		// Save. Silently resetting to defaults (the old behavior) destroyed the
 		// user's settings for good the moment anything saved.
 		_ = os.Rename(path, path+fmt.Sprintf(".corrupt-%d", time.Now().Unix()))
-		if braw, berr := os.ReadFile(path + ".bak"); berr == nil {
-			bcfg := Default()
-			if json.Unmarshal(braw, &bcfg) == nil {
-				if bcfg.Version < configVersion {
-					migrate(&bcfg, braw)
-				}
-				bcfg.Features.MIDIController.normalize()
-				if bcfg.APIBaseURL == "" {
-					bcfg.APIBaseURL = resolveAPIBase()
-				}
-				return bcfg, fmt.Errorf("config was corrupt; recovered from .bak")
-			}
+		if bcfg, ok := loadBak(path); ok {
+			return bcfg, fmt.Errorf("config was corrupt; recovered from .bak")
 		}
 		return Default(), fmt.Errorf("config was corrupt and no usable .bak; reset to defaults")
+	}
+	if isZeroBugFile(cfg, raw) {
+		// 2026-07-26 zero-save bug artifact: a marshaled zero-value Config (version 0, every
+		// feature off, empty apiBaseUrl) - valid JSON, so it silently loaded and the daemon
+		// booted with everything disabled, then re-persisted the zeros. Treat like corruption:
+		// preserve the evidence, recover the last good config from .bak.
+		_ = os.Rename(path, path+fmt.Sprintf(".zero-%d", time.Now().Unix()))
+		if bcfg, ok := loadBak(path); ok {
+			return bcfg, fmt.Errorf("config was a zero-value artifact; recovered from .bak")
+		}
+		return Default(), fmt.Errorf("config was a zero-value artifact and no usable .bak; reset to defaults")
 	}
 	if cfg.Version < configVersion {
 		migrate(&cfg, raw)
@@ -2582,6 +2584,47 @@ func Load() (Config, error) {
 		cfg.APIBaseURL = resolveAPIBase()
 	}
 	return cfg, nil
+}
+
+// loadBak reads + migrates path+".bak"; ok=false when absent/unparseable/itself a zero artifact.
+func loadBak(path string) (Config, bool) {
+	braw, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		return Config{}, false
+	}
+	bcfg := Default()
+	if json.Unmarshal(braw, &bcfg) != nil || isZeroBugFile(bcfg, braw) {
+		return Config{}, false
+	}
+	if bcfg.Version < configVersion {
+		migrate(&bcfg, braw)
+	}
+	bcfg.Features.MIDIController.normalize()
+	if bcfg.APIBaseURL == "" {
+		bcfg.APIBaseURL = resolveAPIBase()
+	}
+	return bcfg, true
+}
+
+// isZeroBugFile detects the zero-save artifact: version 0 with an explicit modern "features"
+// object and an empty apiBaseUrl. A LEGIT pre-v1 legacy file also has version 0 but is flat
+// (traktorEnable/traktorLog/notifyEnable at top level, no "features" key) - those must keep
+// migrating, never be quarantined.
+func isZeroBugFile(cfg Config, raw []byte) bool {
+	if cfg.Version != 0 || cfg.APIBaseURL != "" {
+		return false
+	}
+	var probe struct {
+		Features      json.RawMessage `json:"features"`
+		TraktorEnable *bool           `json:"traktorEnable"`
+		TraktorLog    *bool           `json:"traktorLog"`
+		NotifyEnable  *bool           `json:"notifyEnable"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	legacy := probe.TraktorEnable != nil || probe.TraktorLog != nil || probe.NotifyEnable != nil
+	return len(probe.Features) > 0 && !legacy
 }
 
 // migrate upgrades a pre-v1 (flat) config to the feature schema. The old file had
@@ -2606,10 +2649,33 @@ func migrate(cfg *Config, raw []byte) {
 	cfg.Version = configVersion
 }
 
+// ErrZeroConfig is returned by Save when the receiver is a zero-value Config (Version 0):
+// every legitimate Config passed through Default()/Load(), which stamp Version=configVersion.
+// A zero save is ALWAYS a bug upstream - twice on 2026-07-26 a marshaled zero Config
+// clobbered the user's config.json (the writer held a never-Loaded Config value).
+var ErrZeroConfig = errors.New("refusing to save zero-value config (Version 0) - caller holds an unloaded Config")
+
+// zeroSaveTripwire preserves the refused writer's identity: full goroutine stack to
+// <configdir>/zero-config-save-<unix>.stack (best-effort). The zero-config writer has so far
+// evaded static identification - the next fire names it with file:line.
+func zeroSaveTripwire() {
+	dir, err := Dir()
+	if err != nil {
+		return
+	}
+	p := filepath.Join(dir, fmt.Sprintf("zero-config-save-%d.stack", time.Now().Unix()))
+	_ = os.WriteFile(p, debug.Stack(), 0o600)
+}
+
 // Save atomically + DURABLY writes config to disk. fsync before rename: without it a
 // hard crash can commit the rename while the data blocks are lost, leaving a zeroed
 // config (happened in production 2026-07-26). The previous config survives as .bak.
+// A zero-value receiver is refused (ErrZeroConfig) - see zeroSaveTripwire.
 func (c Config) Save() error {
+	if c.Version == 0 {
+		zeroSaveTripwire()
+		return ErrZeroConfig
+	}
 	path, err := DataPath(fileName)
 	if err != nil {
 		return err
