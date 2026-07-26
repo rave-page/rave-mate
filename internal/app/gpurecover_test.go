@@ -76,6 +76,21 @@ func TestGPURecoveryTDRNoRestart(t *testing.T) {
 	}
 }
 
+// The hard-exit backstop must disarm the guardian BEFORE exiting - os.Exit skips run()'s deferred
+// disarm, and an armed guardian would relaunch a second instance on top of gpurecover's own.
+func TestHardExitDisarmsGuardianFirst(t *testing.T) {
+	var order []string
+	rec := &gpuRecovery{
+		log:    logbus.New(16),
+		disarm: func() { order = append(order, "disarm") },
+		exit:   func(int) { order = append(order, "exit") },
+	}
+	rec.hardExitNow()
+	if len(order) != 2 || order[0] != "disarm" || order[1] != "exit" {
+		t.Fatalf("order = %v, want [disarm exit]", order)
+	}
+}
+
 // pruneHistory drops entries older than the window (so the budget resets after a healthy stretch).
 func TestPruneHistory(t *testing.T) {
 	now := time.Now()

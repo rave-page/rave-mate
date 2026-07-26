@@ -148,7 +148,8 @@ func run(parent context.Context, serviceMode bool) error {
 		// release the lock instead of deferring to it.
 		inst, primary = acquireWithRetry(15 * time.Second)
 	}
-	os.Unsetenv(selfupdate.AwaitRestartEnv) // don't leak the one-shot signal to feature subprocesses
+	os.Unsetenv(selfupdate.AwaitRestartEnv)           // don't leak the one-shot signal to feature subprocesses
+	bootCooldown := selfupdate.TakeRelaunchCooldown() // GPU-fault relaunch pacing (0 = normal boot)
 	if !primary {
 		if deepLink != "" {
 			if err := forward(deepLink); err != nil {
@@ -185,6 +186,11 @@ func run(parent context.Context, serviceMode bool) error {
 		debuglog.Go(log, "app", func() { stderrSink(log) })
 	}
 	log.Info("app", "starting", map[string]any{"mode": modeLabel(serviceMode), "api": cfg.APIBaseURL, "version": version.String()})
+
+	if bootCooldown > 0 { // relaunched after a GPU fault: let the driver settle before GL/VR init
+		log.Info("app", "GPU-fault relaunch cooldown - pacing boot", map[string]any{"wait": bootCooldown.String()})
+		time.Sleep(bootCooldown)
+	}
 
 	// Crash guardian: detached child that relaunches us if the process dies WITHOUT a clean
 	// shutdown (cgo/OpenVR hard fault - the in-process watchdog can't survive those). Disarmed
@@ -1880,7 +1886,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// GPU-fault watchdog: a display-driver TDR or a hung UI window auto-recovers via a clean
 	// relaunch instead of leaving the app wedged (the in-daemon GL context can't recover in-proc).
 	// Windowed only - needs a window to assess responsiveness, and headless has no GL surface.
-	gpuRec := &gpuRecovery{log: log, notify: u.Notify, quit: cancel}
+	gpuRec := &gpuRecovery{log: log, notify: u.Notify, quit: cancel, disarm: guardDisarm}
 	gpuRec.OnGPUReset(vrSurf.GPUReset) // TDR → in-place OpenVR session rebuild (vr child or in-proc)
 	ctl.gpuRec = gpuRec
 	gpuwatch.Start(ctx, gpuwatch.Options{Log: log, OnFault: gpuRec.onFault})
