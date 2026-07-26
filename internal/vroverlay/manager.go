@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -274,6 +275,11 @@ const reconnectWait = 5 * time.Second
 // tear down cleanly and wait again. So enabling the module before SteamVR is up, SteamVR closing,
 // and SteamVR restarting are all handled without crashing or giving up. ctx cancel exits.
 func (m *Manager) Start(ctx context.Context) error {
+	// Pin the VR goroutine to one OS thread for the process lifetime: every periodic OpenVR/cgo
+	// entry (render tick, 90Hz input pump, motion) runs here - same discipline as the other
+	// cgo/GPU surfaces (Spout sender, mfenc). Off-goroutine surfaces serialize via ovrMu.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	rend, err := NewRenderer(1)
 	if err != nil {
 		return err
