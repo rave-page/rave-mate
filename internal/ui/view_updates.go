@@ -84,8 +84,9 @@ func (u *UI) runInstall(rel *selfupdate.Release) {
 
 	go func() {
 		defer debuglog.Recover(u.svc.Log, "update-apply", false)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
+		// No deadline: a total-time cap killed slow-but-flowing downloads; selfupdate's stall
+		// watchdog + bounded retries end a dead transfer.
+		ctx := context.Background()
 		err := u.updater.Apply(ctx, rel, func(done, total int64) {
 			if total <= 0 {
 				return

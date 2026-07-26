@@ -15,14 +15,18 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -71,9 +75,24 @@ type Updater struct {
 	feedURL   string
 	feedHost  string // origin the download URL must stay within
 	current   int
-	pubKeyB64 string // base64 raw 32-byte Ed25519 key; "" disables signature enforcement
-	http      *http.Client
+	pubKeyB64 string       // base64 raw 32-byte Ed25519 key; "" disables signature enforcement
+	http      *http.Client // small feed fetches (manifest + .sig): total 30s cap is fine
+	dl        *http.Client // binary downloads: NO total cap - phase timeouts + stall watchdog
+	dlStall   time.Duration
+	dlRetries int
+	dlBackoff time.Duration
 }
+
+// Download tuning. A total-time cap (http.Client.Timeout / ctx deadline) killed slow-but-flowing
+// downloads ("context deadline exceeded ... while reading body"); instead, connect/TLS/header
+// phases get bounded timeouts and the body read is bounded only by a stall watchdog: abort when
+// ZERO bytes arrive for dlStall, reset on every read. Transient failures (stall, reset, 5xx)
+// retry with backoff, resuming via Range/If-Range from the persisted partial.
+const (
+	dlStallDefault   = 60 * time.Second
+	dlRetriesDefault = 5
+	dlBackoffDefault = 2 * time.Second // doubles per retry: 2s 4s 8s 16s 32s
+)
 
 // New builds an updater. feedURL is the per-branch feed (e.g. https://x.rave.page/app/app/);
 // current is this binary's build number; pubKeyB64 is the base64 Ed25519 manifest-signing
@@ -85,18 +104,34 @@ func New(feedURL string, current int, pubKeyB64 string) *Updater {
 	if pu, err := url.Parse(feedURL); err == nil {
 		feedHost = pu.Host
 	}
+	// Refuse redirects that leave the feed origin - a 30x must not be a way around the
+	// same-origin check on the download URL. (GitHub feeds get the CDN carve-out, see
+	// RedirectPolicy.)
+	redirect := RedirectPolicy(feedURL)
 	return &Updater{
 		feedURL:   feedURL,
 		feedHost:  feedHost,
 		current:   current,
 		pubKeyB64: pubKeyB64,
 		http: &http.Client{
-			Timeout: 30 * time.Second,
-			// Refuse redirects that leave the feed origin - a 30x must not be a way around the
-			// same-origin check on the download URL. (GitHub feeds get the CDN carve-out, see
-			// RedirectPolicy.)
-			CheckRedirect: RedirectPolicy(feedURL),
+			Timeout:       30 * time.Second,
+			CheckRedirect: redirect,
 		},
+		// Download client: no Client.Timeout (it spans the whole body read and killed slow
+		// connections). Connect/TLS/headers are individually bounded; the body read is guarded
+		// by the stall watchdog in fetchResumable.
+		dl: &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+			},
+			CheckRedirect: redirect,
+		},
+		dlStall:   dlStallDefault,
+		dlRetries: dlRetriesDefault,
+		dlBackoff: dlBackoffDefault,
 	}
 }
 
@@ -128,7 +163,7 @@ func RedirectPolicy(feedURL string) func(req *http.Request, via []*http.Request)
 	}
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return fmt.Errorf("too many redirects")
+			return &policyError{"too many redirects"}
 		}
 		if feedHost == "" || strings.EqualFold(req.URL.Host, feedHost) {
 			return nil
@@ -136,9 +171,15 @@ func RedirectPolicy(feedURL string) func(req *http.Request, via []*http.Request)
 		if githubFeedHost(feedHost) && githubCDNURL(req.URL) {
 			return nil
 		}
-		return fmt.Errorf("refusing cross-origin redirect to %s", req.URL.Host)
+		return &policyError{"refusing cross-origin redirect to " + req.URL.Host}
 	}
 }
+
+// policyError is a non-retryable client-side refusal (redirect policy) - retrying can never
+// change the verdict, so the download retry loop treats it as permanent.
+type policyError struct{ msg string }
+
+func (e *policyError) Error() string { return e.msg }
 
 // Enabled reports whether the updater has a feed to poll (false on a dev build).
 func (u *Updater) Enabled() bool { return u != nil && u.feedURL != "" }
@@ -430,7 +471,9 @@ func (u *Updater) download(ctx context.Context, rel *Release, dst string, onProg
 	return u.downloadURL(ctx, rel.URL, rel.SHA256, dst, onProgress)
 }
 
-// downloadURL streams rawURL to dst, verifying it matches sha (lowercase hex64).
+// downloadURL streams rawURL to dst (resumable, stall-guarded), verifying the FINAL assembled
+// file matches sha (lowercase hex64). A resumed assembly that fails verification (corrupted
+// partial, validator miss) is deleted and re-fetched from zero ONCE before giving up.
 func (u *Updater) downloadURL(ctx context.Context, rawURL, sha, dst string, onProgress func(done, total int64)) error {
 	want := strings.ToLower(strings.TrimSpace(sha))
 	if !isHex64(want) {
@@ -442,38 +485,196 @@ func (u *Updater) downloadURL(ctx context.Context, rawURL, sha, dst string, onPr
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
+	var hi int64 // progress high-water mark: a restart-from-zero must not walk the bar backwards
+	resumed, err := u.fetchResumable(ctx, dlURL, dst, onProgress, &hi)
 	if err != nil {
 		return err
+	}
+	got, err := fileSHA(dst)
+	if err != nil {
+		return err
+	}
+	if got == want {
+		return nil
+	}
+	if !resumed { // clean single-response download that still mismatches = bad payload
+		return fmt.Errorf("checksum mismatch: got %s want %s", got, want)
+	}
+	_ = os.Remove(dst)
+	if _, err := u.fetchResumable(ctx, dlURL, dst, onProgress, &hi); err != nil {
+		return err
+	}
+	if got, err = fileSHA(dst); err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("checksum mismatch after clean re-download: got %s want %s", got, want)
+	}
+	return nil
+}
+
+// dlState carries one assembly's position across retry attempts.
+type dlState struct {
+	offset    int64  // bytes of dst already downloaded + written
+	total     int64  // full payload size (0 = unknown)
+	validator string // ETag/Last-Modified from the first response; gates If-Range resume
+	resumed   bool   // any dst byte came from a Range (206) response
+}
+
+// errStalled marks a watchdog abort: the transfer produced zero bytes for dlStall.
+var errStalled = errors.New("transfer stalled")
+
+// fetchResumable downloads dlURL to dst with bounded retries. There is deliberately NO
+// total-time cap: a slow but flowing transfer runs to completion; only a full stall (zero
+// bytes for dlStall) aborts an attempt. Retries resume from the persisted partial via
+// Range/If-Range; a 200 on resume (Range unsupported or validator changed) restarts from
+// zero cleanly. Returns whether any byte of dst came from a resume.
+func (u *Updater) fetchResumable(ctx context.Context, dlURL, dst string, cb func(done, total int64), hi *int64) (bool, error) {
+	_ = os.Remove(dst)
+	st := &dlState{}
+	var lastErr error
+	for attempt := 0; attempt <= u.dlRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(u.dlBackoff << (attempt - 1)):
+			case <-ctx.Done():
+				return st.resumed, ctx.Err()
+			}
+		}
+		done, transient, err := u.attemptOnce(ctx, dlURL, dst, st, cb, hi)
+		if done {
+			return st.resumed, nil
+		}
+		if !transient {
+			return st.resumed, err
+		}
+		lastErr = err
+	}
+	at := "unknown progress"
+	if st.total > 0 {
+		at = fmt.Sprintf("%d%%", st.offset*100/st.total)
+	}
+	return st.resumed, fmt.Errorf("download gave up after %d retries at %s: %w", u.dlRetries, at, lastErr)
+}
+
+// attemptOnce performs one HTTP attempt: request (Range+If-Range when resuming), stream the
+// body to dst under the stall watchdog, advance st.offset by what landed. transient reports
+// whether the failure is retryable (stall, network hiccup, 5xx/408/429).
+func (u *Updater) attemptOnce(ctx context.Context, dlURL, dst string, st *dlState, cb func(done, total int64), hi *int64) (done, transient bool, err error) {
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var stalled atomic.Bool
+	wd := time.AfterFunc(u.dlStall, func() { stalled.Store(true); cancel() })
+	defer wd.Stop()
+	classify := func(e error) (bool, bool, error) {
+		var pe *policyError
+		switch {
+		case stalled.Load():
+			return false, true, fmt.Errorf("%w (no data for %s)", errStalled, u.dlStall)
+		case ctx.Err() != nil:
+			return false, false, ctx.Err() // caller cancelled/deadlined - not ours to retry
+		case errors.As(e, &pe):
+			return false, false, e // redirect-policy refusal - retrying can't change it
+		default:
+			return false, true, e // network hiccup (reset, unexpected EOF, ...)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(actx, http.MethodGet, dlURL, nil)
+	if err != nil {
+		return false, false, err
 	}
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Pragma", "no-cache")
-	resp, err := u.http.Do(req)
+	if st.offset > 0 && st.validator != "" {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", st.offset))
+		req.Header.Set("If-Range", st.validator)
+	}
+	resp, err := u.dl.Do(req)
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned %s", resp.Status)
+
+	switch {
+	case resp.StatusCode == http.StatusPartialContent:
+		start, tot, ok := parseContentRange(resp.Header.Get("Content-Range"))
+		if !ok || start != st.offset {
+			return false, true, fmt.Errorf("resume: server answered range %q for offset %d", resp.Header.Get("Content-Range"), st.offset)
+		}
+		if tot > 0 {
+			st.total = tot
+		}
+		st.resumed = true
+	case resp.StatusCode == http.StatusOK:
+		// Full body: fresh download, Range unsupported, or If-Range validator changed. Restart
+		// the assembly from zero - nothing of the old partial survives.
+		st.offset, st.resumed = 0, false
+		if resp.ContentLength > 0 {
+			st.total = resp.ContentLength
+		}
+	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests:
+		return false, true, fmt.Errorf("download returned %s", resp.Status)
+	default:
+		return false, false, fmt.Errorf("download returned %s", resp.Status)
+	}
+	if st.validator == "" {
+		if st.validator = resp.Header.Get("ETag"); st.validator == "" {
+			st.validator = resp.Header.Get("Last-Modified")
+		}
 	}
 
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	flags := os.O_CREATE | os.O_WRONLY
+	if st.offset == 0 {
+		flags |= os.O_TRUNC
+	} else {
+		flags |= os.O_APPEND
+	}
+	f, err := os.OpenFile(dst, flags, 0o755)
 	if err != nil {
-		return err
+		return false, false, err
 	}
-	h := sha256.New()
-	pr := &progressReader{r: resp.Body, total: resp.ContentLength, cb: onProgress}
-	if _, err := io.Copy(io.MultiWriter(f, h), pr); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("download: %w", err)
+	pr := &watchdogReader{r: resp.Body, wd: wd, stall: u.dlStall, base: st.offset, total: st.total, hi: hi, cb: cb}
+	n, cerr := io.Copy(f, pr)
+	st.offset += n
+	if clErr := f.Close(); cerr == nil {
+		cerr = clErr
 	}
-	if err := f.Close(); err != nil {
-		return err
+	if cerr != nil {
+		return classify(cerr)
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != want {
-		return fmt.Errorf("checksum mismatch: got %s want %s", got, want)
+	if st.total > 0 && st.offset < st.total {
+		return false, true, fmt.Errorf("short body: got %d of %d bytes", st.offset, st.total)
 	}
-	return nil
+	return true, false, nil
+}
+
+// parseContentRange parses "bytes <start>-<end>/<total|*>" → (start, total, ok); total 0 for "*".
+func parseContentRange(h string) (start, total int64, ok bool) {
+	rest, found := strings.CutPrefix(strings.TrimSpace(h), "bytes ")
+	if !found {
+		return 0, 0, false
+	}
+	rng, tot, found := strings.Cut(rest, "/")
+	if !found {
+		return 0, 0, false
+	}
+	startStr, _, found := strings.Cut(rng, "-")
+	if !found {
+		return 0, 0, false
+	}
+	s, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || s < 0 {
+		return 0, 0, false
+	}
+	if tot != "*" {
+		t, err := strconv.ParseInt(tot, 10, 64)
+		if err != nil || t < 0 {
+			return 0, 0, false
+		}
+		total = t
+	}
+	return s, total, true
 }
 
 // CleanupOld removes the .old/.new binaries left by a previous Apply. Call once at startup.
@@ -486,19 +687,31 @@ func CleanupOld() {
 	}
 }
 
-// progressReader reports cumulative read progress.
-type progressReader struct {
+// watchdogReader resets the stall watchdog on every chunk and reports monotonic progress:
+// base (resume offset) + bytes read, clamped to the shared high-water mark so a
+// restart-from-zero never walks the progress bar backwards.
+type watchdogReader struct {
 	r     io.Reader
-	total int64
+	wd    *time.Timer
+	stall time.Duration
+	base  int64
 	done  int64
+	total int64
+	hi    *int64
 	cb    func(done, total int64)
 }
 
-func (p *progressReader) Read(b []byte) (int, error) {
-	n, err := p.r.Read(b)
-	p.done += int64(n)
-	if p.cb != nil {
-		p.cb(p.done, p.total)
+func (w *watchdogReader) Read(b []byte) (int, error) {
+	n, err := w.r.Read(b)
+	if n > 0 {
+		w.wd.Reset(w.stall)
+		w.done += int64(n)
+		if w.cb != nil {
+			if d := w.base + w.done; d > *w.hi {
+				*w.hi = d
+			}
+			w.cb(*w.hi, w.total)
+		}
 	}
 	return n, err
 }

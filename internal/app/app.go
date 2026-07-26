@@ -2714,9 +2714,9 @@ func (c *appControl) SelfUpdate() string {
 	}
 	debuglog.Go(c.log, "update", func() {
 		defer c.updating.Store(false)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		rel, avail, err := u.Available(ctx)
+		cancel()
 		if err != nil {
 			c.log.Warn("update", "check failed", map[string]any{"error": err.Error()})
 			return
@@ -2724,7 +2724,9 @@ func (c *appControl) SelfUpdate() string {
 		if !avail {
 			return
 		}
-		if err := u.Apply(ctx, rel, nil); err != nil {
+		// Apply gets NO deadline: a total-time cap killed slow-but-flowing downloads;
+		// selfupdate's stall watchdog + bounded retries end a dead transfer.
+		if err := u.Apply(context.Background(), rel, nil); err != nil {
 			c.log.Warn("update", "apply failed", map[string]any{"error": err.Error()})
 			return
 		}
