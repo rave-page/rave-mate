@@ -14,7 +14,7 @@ Reference: `docs/dev/MF_NATIVE_ENCODE.md` (matrix, contract lessons, ledger, deg
 | Poison counter reset every route → safety net could never engage | Field log: `consecutive fails 1` on every route | **fixed**: (adapter, encoder) ledger, crash-to-crash |
 | Mid-route native failure ENDED the route (ffmpeg substitution existed only at open time) | Code read + the "black stream, healthy counters" field shape | **fixed**: in-place substitution |
 | `Stats()` read the shm mapping after `Close()` unmapped it | Reproduced as a 0xc0000005 in the mediapipe gate while adding a counter | **fixed** (my own regression, caught by the gate) |
-| Stale configured adapter LUID silently ran on another GPU | `device:0x…163a8` logged vs `0x…18ed4` enumerated | **fixed**: resolved LUID reported, warn once |
+| ~~Stale configured adapter LUID~~ **RETRACTED** - not stale at all | `requested=0x163a8` MATCHED `adapter=0x163a8` = a Radeon RX **7900 XTX** (discrete). The real bug was `ctl encoder-scan` never listing that adapter | **fixed elsewhere**: `internal/encoderscan` rendered its adapter line from PDH utilization counters, so an IDLE dGPU was invisible; now rendered from the DXGI enumeration |
 
 ### The drive-mode fix is NOT the AMD root cause - be precise about this
 
@@ -110,3 +110,60 @@ entered when `enc_provides` is false, so `outSize` is never used to size or inde
 - Intel rig for the matrix's third row.
 - `TestProcFourSessionsOneChild` is behind `RAVE_MATE_MFENC_SOAK=1` (four concurrent encodes
   saturate a laptop GPU); worth running on the AMD box deliberately.
+
+
+## OUTCOME: AMD field verify PASS (2026-07-27)
+
+Deployed to both PCs; the exact two-route repro (4K60 spout + concurrent 720p webcam) ran **60+ s
+with zero failures**, against 3/3 deaths in ~2.2 s with `0xc0000005` before. Telemetry named the
+active path: `device=child(shared=true)` on both sessions, `async_attr=true`, `poisoned:false`,
+`ledgerFails:0`, `degraded:""`, no child exit.
+
+The content oracle did its job: webcam ~3.2 kB/frame at 742-785 kbps vs the black spout route at
+**255 B/frame** - exactly the separation it exists to make.
+
+### Corrections I got wrong and am recording
+
+1. **There was no stale LUID.** I inherited "single AMD iGPU box" and propagated it. The box has a
+   discrete **Radeon RX 7900 XTX** and the configured LUID was correct all along. The anomaly was
+   `ctl encoder-scan` omitting that adapter - a scan-rendering bug, now fixed (below).
+2. **The async-drive fix was never the AMD root cause** (already recorded, restated because the
+   field data now confirms `async_attr=true`: AMD's MFT really is async, so the old QI-based
+   selection reached the same answer there).
+
+### Limitation: the two fixes are JOINTLY confirmed, not isolated
+
+Both landed together, and choosing the old per-session device needs `RAVE_MATE_MFENC_DEVICE=session`
+- a process launch with custom env on a machine with no toolchain and no remote-exec. So the
+combination is proven; neither the per-child device NOR the saturation-budget change is proven
+sufficient on its own. Isolating them needs an AMD box with a toolchain or a user-run launch with
+that env var. **Do not describe the shared-device change as independently proven.**
+
+### encoderscan: idle adapters were invisible (fixed here)
+
+`Report.String()` rendered its `adapters:` line from `AdapterEncPct`, which is keyed by **PDH
+`\GPU Engine` samples**. An idle discrete GPU has no engine instances, so it never appeared; the
+iGPU driving the display always did. `AdapterNames` (DXGI) had both the whole time.
+
+- adapters are now listed from the DXGI enumeration unioned with PDH, each row carrying its encoder
+  FAMILY and free VRAM, and idle adapters read `enc=? (idle: no GPU-Engine counters)` rather than
+  vanishing or faking a measured 0%;
+- two same-vendor GPUs make the encoder→adapter join ambiguous by design (`adapterForFamily`
+  refuses to guess), which rendered as a bare `device=?`. The scan now says so explicitly.
+- `enumAdapters` hardened: HRESULTs masked to 32 bits before comparison (the Win64 ABI leaves RAX's
+  upper half undefined, so a full-width compare can miss `DXGI_ERROR_NOT_FOUND`), a bad index is
+  SKIPPED instead of abandoning the walk (it used to truncate the list at the first odd adapter),
+  and the walk is bounded.
+- `TestReportListsIdleAdaptersFieldTopology` reproduces the SUS topology exactly and was **proven
+  non-vacuous**: restoring the old renderer makes it fail with "idle discrete GPU … missing".
+
+NOTE: `avoid-busiest` (`ResolveDevice` PolicyAvoid) iterates `Adapters()` (DXGI), so it did see
+both adapters - the coordinator's concern that it could only pick the iGPU appears not to hold for
+that code path specifically. The SCAN output was genuinely wrong, and that is what a human reads
+before pinning a device.
+
+### Still argued, never executed
+
+- **Intel/QSV**: no rig. Same code path as AMD/NVIDIA, nothing Intel-specific - but that is
+  reasoning.
+- **WARP rung** of the software tier: this box always has a hardware video device.

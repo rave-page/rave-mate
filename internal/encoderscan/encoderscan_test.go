@@ -1,6 +1,9 @@
 package encoderscan
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFamilyFromOBSID(t *testing.T) {
 	cases := map[string]EncoderFamily{
@@ -128,5 +131,57 @@ func TestScanIdleOBSNotCritical(t *testing.T) {
 	}
 	if len(r.Consumers) != 1 || r.Consumers[0].Critical {
 		t.Fatalf("idle OBS should be a non-critical consumer: %+v", r.Consumers)
+	}
+}
+
+// TestReportListsIdleAdaptersFieldTopology is the SUS regression: an iGPU driving the display
+// (busy, so PDH has GPU-Engine instances for it) plus an IDLE discrete GPU (no instances at all).
+// The report used to render its adapter line from AdapterEncPct - the PDH-derived map - so the
+// discrete card, i.e. THE GOOD ENCODER, never appeared at all. Verified in the field: a Radeon RX
+// 7900 XTX was invisible to `ctl encoder-scan` while the Ryzen iGPU always showed.
+func TestReportListsIdleAdaptersFieldTopology(t *testing.T) {
+	const igpu = "0x00000000_0x00018ed4"
+	const dgpu = "0x00000000_0x000163a8"
+	r := Report{
+		AdapterNames: map[string]string{
+			igpu: "AMD Radeon(TM) Graphics",
+			dgpu: "AMD Radeon RX 7900 XTX",
+		},
+		AdapterEncPct:    map[string]float64{igpu: 12}, // ONLY the busy iGPU was sampled
+		AdapterVRAMFree:  map[string]float64{dgpu: 20000},
+		ProtectedAdapter: map[string]bool{},
+		ProtectedFamily:  map[EncoderFamily]bool{},
+	}
+	out := r.String()
+	t.Logf("report:\n%s", out)
+	if !strings.Contains(out, dgpu) {
+		t.Fatalf("idle discrete GPU %s missing from the scan - a device policy reading this can only pick the wrong GPU:\n%s", dgpu, out)
+	}
+	if !strings.Contains(out, igpu) {
+		t.Errorf("busy iGPU %s missing:\n%s", igpu, out)
+	}
+	// The idle adapter must be distinguishable from a measured 0%.
+	if !strings.Contains(out, "enc=?") {
+		t.Errorf("idle adapter should read enc=? (no counters), not a measured value:\n%s", out)
+	}
+	// Encoder capability per adapter (what each one would encode ON) is the other half of the ask.
+	if !strings.Contains(out, string(FamilyAMF)) {
+		t.Errorf("adapter rows do not name the encoder family:\n%s", out)
+	}
+	// Two same-vendor GPUs: the encoder→adapter join cannot bind, and that must be stated.
+	if !strings.Contains(out, "ambiguous") {
+		t.Errorf("same-vendor ambiguity not reported - device rows would silently read 'device=?':\n%s", out)
+	}
+}
+
+// TestReportAdapterRowsSurviveMissingNames: PDH sampled an adapter DXGI did not enumerate. Never
+// hide it - an unexplained key beats a missing GPU.
+func TestReportAdapterRowsSurviveMissingNames(t *testing.T) {
+	r := Report{
+		AdapterNames:  map[string]string{},
+		AdapterEncPct: map[string]float64{"0x0_0x1": 7},
+	}
+	if out := r.String(); !strings.Contains(out, "0x0_0x1") {
+		t.Fatalf("sampled-but-unnamed adapter dropped:\n%s", out)
 	}
 }

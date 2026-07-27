@@ -69,19 +69,27 @@ func enumAdapters() ([]AdapterInfo, error) {
 	const enumAdapters1 = 12 // IDXGIFactory1::EnumAdapters1 vtable index
 	const getDesc1 = 10      // IDXGIAdapter1::GetDesc1 vtable index
 	var out []AdapterInfo
-	for i := 0; ; i++ {
+	// Cap the walk: the loop's only other exit is an HRESULT, and a driver that never returns
+	// NOT_FOUND must not spin forever.
+	for i := 0; i < 64; i++ {
 		var adapter unsafe.Pointer
-		r, _, _ := syscall.SyscallN(vtbl(factory, enumAdapters1), uintptr(factory), uintptr(i), uintptr(unsafe.Pointer(&adapter)))
-		if r == dxgiErrorNotFound || adapter == nil {
+		r64, _, _ := syscall.SyscallN(vtbl(factory, enumAdapters1), uintptr(factory), uintptr(i), uintptr(unsafe.Pointer(&adapter)))
+		// HRESULTs are 32-bit and the Win64 ABI leaves RAX's upper half undefined - comparing the
+		// full 64-bit return against 0x887A0002 can miss NOT_FOUND and turn the end of the walk
+		// into an "error".
+		r := uint32(r64)
+		if r == uint32(dxgiErrorNotFound) || adapter == nil {
 			break
 		}
 		if r != 0 {
-			return out, fmt.Errorf("EnumAdapters1(%d): 0x%x", i, r)
+			// SKIP this index, never abandon the walk: aborting here truncated the list at the
+			// first odd adapter and every GPU after it silently disappeared.
+			continue
 		}
 		var desc dxgiAdapterDesc1
 		dr, _, _ := syscall.SyscallN(vtbl(adapter, getDesc1), uintptr(adapter), uintptr(unsafe.Pointer(&desc)))
 		_, _, _ = syscall.SyscallN(vtbl(adapter, 2 /*Release*/), uintptr(adapter))
-		if dr != 0 {
+		if uint32(dr) != 0 {
 			continue
 		}
 		if desc.Flags&adapterFlagSoftware != 0 {

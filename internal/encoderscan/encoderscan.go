@@ -359,6 +359,73 @@ func (r Report) adapterLabel(luid string) string {
 	return luid
 }
 
+// adapterRows renders EVERY adapter the machine has, not just the ones PDH happened to sample.
+// Each row carries its encoder FAMILY (which silicon it would encode on) and free VRAM, because
+// "which adapters exist and what can each of them encode" is the question this scan is asked, and
+// answering it from utilization counters alone silently omits idle hardware.
+func (r Report) adapterRows() []string {
+	seen := map[string]bool{}
+	for luid := range r.AdapterNames {
+		seen[luid] = true
+	}
+	for luid := range r.AdapterEncPct {
+		seen[luid] = true // sampled but not enumerated (shouldn't happen; never hide it if it does)
+	}
+	rows := make([]string, 0, len(seen))
+	for luid := range seen {
+		row := r.adapterLabel(luid)
+		if fam := familyForAdapter(r.AdapterNames[luid]); fam != "" {
+			row += " " + string(fam)
+		}
+		// enc=? distinguishes "idle / no counters" from a measured 0%: an adapter with no PDH
+		// GPU-Engine instances is not the same as one measured at zero.
+		if pct, ok := r.AdapterEncPct[luid]; ok {
+			row += fmt.Sprintf(" enc=%.0f%%", pct)
+		} else {
+			row += " enc=? (idle: no GPU-Engine counters)"
+		}
+		if free, ok := r.AdapterVRAMFree[luid]; ok {
+			row += fmt.Sprintf(" vram-free=%.0fMB", free)
+		}
+		rows = append(rows, row)
+	}
+	sort.Strings(rows)
+	return rows
+}
+
+// ambiguousVendors names each encoder family that matches MORE THAN ONE adapter, i.e. where
+// adapterForFamily deliberately refuses to guess.
+func (r Report) ambiguousVendors() []string {
+	count := map[EncoderFamily]int{}
+	for _, name := range r.AdapterNames {
+		if fam := familyForAdapter(name); fam != "" {
+			count[fam]++
+		}
+	}
+	var out []string
+	for fam, n := range count {
+		if n > 1 {
+			out = append(out, fmt.Sprintf("%d %s adapters", n, fam))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// familyForAdapter maps a GPU description to the hardware encoder family it would use ("" =
+// unrecognised vendor). Same vendor table the advertisement join uses.
+func familyForAdapter(name string) EncoderFamily {
+	lc := strings.ToLower(name)
+	for fam, vendors := range familyVendors {
+		for _, v := range vendors {
+			if strings.Contains(lc, v) {
+				return fam
+			}
+		}
+	}
+	return ""
+}
+
 func (r Report) String() string {
 	var b strings.Builder
 	b.WriteString("encoder scan - workloads to avoid:\n")
@@ -389,13 +456,21 @@ func (r Report) String() string {
 		sort.Strings(as)
 		b.WriteString("protected adapters: " + strings.Join(as, ", ") + "\n")
 	}
-	if len(r.AdapterEncPct) > 0 {
-		var as []string
-		for a, pct := range r.AdapterEncPct {
-			as = append(as, fmt.Sprintf("%s enc=%.0f%%", r.adapterLabel(a), pct))
-		}
-		sort.Strings(as)
-		b.WriteString("adapters: " + strings.Join(as, " | ") + "\n")
+	// Adapters come from the DXGI ENUMERATION (AdapterNames), unioned with whatever PDH sampled.
+	// Rendering only AdapterEncPct hid every adapter with no live GPU-Engine counters: an IDLE
+	// discrete GPU has no engine instances at all, so a machine with an iGPU driving the display
+	// and a dGPU doing nothing listed only the iGPU - the good encoder was invisible, and any
+	// device policy reading this list could only ever pick the wrong GPU. Verified in the field:
+	// a Radeon RX 7900 XTX never appeared while the Ryzen iGPU always did.
+	if adapters := r.adapterRows(); len(adapters) > 0 {
+		b.WriteString("adapters: " + strings.Join(adapters, " | ") + "\n")
+	}
+	// Two GPUs of the SAME vendor cannot be told apart by the encoder-name→vendor join, so those
+	// devices render as "device=?" with a conservative load. Say so out loud: silently ambiguous
+	// device rows on a machine that HAS a good discrete GPU read as "no device info available".
+	if amb := r.ambiguousVendors(); len(amb) > 0 {
+		fmt.Fprintf(&b, "note: %s - encoder→adapter binding is ambiguous (same-vendor GPUs); "+
+			"pin the encode device explicitly to target one\n", strings.Join(amb, ", "))
 	}
 	if len(r.ProtectedFamily) > 0 {
 		var fs []string

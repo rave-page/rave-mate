@@ -192,14 +192,18 @@ refusal. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestM
 ## Vendor portability matrix
 
 The engine resolves every vendor-variable decision from the MFT's OWN attributes; nothing is
-assumed per vendor. Verified on this dev box (2× RTX 3060) unless noted.
+assumed per vendor.
 
-| Tier | Enumeration | Drive mode | Device manager | Input samples | Status |
-|---|---|---|---|---|---|
-| NVIDIA (`NVIDIA H.264 Encoder MFT`) | `HARDWARE`, vendor-tag pass first | `async` (from `MF_TRANSFORM_ASYNC`) | required | DXGI surface buffers over the NV12 pool | **verified live**: 1080p60, exact 4K60 tuple, 2 concurrent sessions, 4K60+720p concurrent |
-| AMD (`AMDh264Encoder`) | same | reported per open (`opened.drive`) | required | same | single session **verified in the field**; concurrent sessions **pending the AMD run** |
-| Intel (QSV MFT) | same | reported per open | required | same | **reasoned only** - no Intel rig here |
-| Software MF (`H264 Encoder MFT`) | `SYNCMFT\|ASYNCMFT\|LOCALMFT`, no vendor filter | `sync` (measured) | **never offered** | packed system-memory NV12 via a STAGING readback | **verified live** (forced with `RAVE_MATE_MFENC_SW=1`): single + 2 concurrent sessions, real bitstream |
+**VERIFIED BY EXECUTION: NVIDIA and AMD only.** Everything else in this table is argued from the
+API contract, not measured - treat it accordingly.
+
+| Tier | Drive mode | Device manager | Input samples | Status |
+|---|---|---|---|---|
+| NVIDIA (`NVIDIA H.264 Encoder MFT`) | `async` (measured, from `MF_TRANSFORM_ASYNC`) | required | DXGI surface buffers over the NV12 pool | **VERIFIED BY EXECUTION** (dev box, 2× RTX 3060): 1080p60, exact 4K60 tuple, 2 concurrent sessions, 4K60+720p concurrent, zero-copy live with decoded-bitstream picture check |
+| AMD (`AMDh264Encoder`, Radeon RX 7900 XTX) | `async` (measured: `async_attr=true`) | required | same | **VERIFIED BY EXECUTION** (field, 2026-07-27): the exact two-route repro - 4K60 spout + concurrent 720p webcam - ran 60+ s with zero failures, where it previously died in ~2.2 s with `0xc0000005` 3/3. `device=child(shared=true)` on both sessions |
+| Intel (QSV MFT) | reported per open, not assumed | required | same | **ARGUED ONLY** - no Intel rig. The code path is the same one AMD and NVIDIA take; nothing about it is Intel-specific, but that is reasoning, not evidence |
+| Software MF (`H264 Encoder MFT`) | `sync` (measured) | **never offered** | packed system-memory NV12 via a STAGING readback | **VERIFIED BY EXECUTION** (dev box, forced with `RAVE_MATE_MFENC_SW=1`): single + 2 concurrent sessions, real bitstream at 8.5 kB/frame |
+| WARP fallback (software tier with no hardware video device) | inherits the software tier | never offered | same | **ARGUED ONLY** - this box always has a hardware video device, so the rung has never executed |
 
 - The software tier is a FIRST-CLASS rung, not a footnote: it is what a box with no usable
   hardware MFT - or one whose hardware MFT the failure ledger poisoned - encodes on. It keeps the
@@ -228,9 +232,21 @@ Two independent causes were addressed, because the evidence does not yet separat
    to a Ryzen iGPU's VCN ceiling. The colliding timeout budgets turned that into a dead route;
    now it is counted drops.
 
-`TestProcFieldTupleTwoSessions` (4K60 + 720p concurrent) separates them: if it fails on AMD while
-`TestProcTwoSessionsOneChild` (720p + 480p) passes, the trigger is capacity; if both fail, it is
-multiplexing.
+**Field outcome (2026-07-27): FIXED.** The exact repro - 4K60 spout route plus a concurrent 720p
+webcam route on a Radeon RX 7900 XTX - ran 60+ seconds with zero failures, no child exit and no
+access violation, against 3/3 deaths in ~2.2 s before. Telemetry confirmed the active path:
+`device=child(shared=true)` on both sessions and `async_attr=true`.
+
+**The two fixes remain JOINTLY confirmed, not individually isolated.** Selecting the old
+per-session device needs `RAVE_MATE_MFENC_DEVICE=session`, i.e. a process launch with custom env on
+the target machine, and the AMD rig has no Go toolchain and no remote-exec - so
+`TestProcTwoSessionsPerSessionDevice` cannot run there. We know the combination works; we do NOT
+know whether the per-child device alone, or the saturation-budget change alone, would have been
+enough. Do not describe either one as independently proven. Isolating them needs an AMD box with a
+toolchain, or a user-run launch with that env var set.
+
+`TestProcFieldTupleTwoSessions` (4K60 + 720p concurrent) is the same repro as a gate, and passes on
+NVIDIA - where both device policies behave identically, so that box cannot distinguish them either.
 
 ## Crash attribution
 
@@ -487,7 +503,13 @@ mfenc: encoder child open trace (adapter 0x…):      ← the child's own stage 
 - `async_attr` is the RAW `MF_TRANSFORM_ASYNC` value; `drive` is what was derived from it. Both are
   printed so a reader never has to trust the derivation.
 - `device=child(shared=true)` names which device path a passing run actually exercised.
-- `adapter=` is RESOLVED, `requested=` is what config asked for - a stale LUID is visible.
+- `adapter=` is RESOLVED, `requested=` is what config asked for. A mismatch means the configured
+  LUID no longer exists (LUIDs do not survive a driver reset); a MATCH plus a surprising GPU name
+  means the config was right and something else was wrong. On the field box these matched
+  (`0x163a8` = a Radeon RX 7900 XTX): there was NO stale-LUID problem - the anomaly was
+  `ctl encoder-scan` omitting that adapter entirely, which was a bug in the scan's adapter
+  rendering, not in the encode path. See `internal/encoderscan` (adapters are now listed from the
+  DXGI enumeration, not from PDH utilization counters).
 
 Per route, every 10 s (`route encode telemetry`), the **content oracle**:
 
