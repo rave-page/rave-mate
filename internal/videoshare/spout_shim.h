@@ -59,6 +59,13 @@ int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h);
 int rave_spout_sender_share(const char* name, unsigned long long* share, unsigned int* fmt,
                            unsigned int* w, unsigned int* h);
 
+// rave_spout_sender_frame reads a sender's Spout FRAME COUNTER + fps without any OpenGL context,
+// receiver binding or pixel transfer: a metadata-only receiver (SetReceiverName + GetSenderFrame),
+// which is what zigmedia increment 3 needs to tell a NEW frame from a duplicate. Its own handle, so
+// setting a receiver name never disturbs the registry queries.
+// 1 = ok; 0 = no DLL / unknown sender. frame < 0 = the sender has frame counting disabled.
+int rave_spout_sender_frame(const char* name, long long* frame, double* fps);
+
 // One-shot registry scan: names = maxN slots of nameCap bytes (NUL-terminated), dims = 2 uints per
 // slot (w,h; 0 when the registry has no size). Returns the filled slot count, -1 without the DLL.
 // Replaces count + N name + N size calls (which each built and released a Spout object).

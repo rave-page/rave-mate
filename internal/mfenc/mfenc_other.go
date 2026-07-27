@@ -64,7 +64,12 @@ type ProcOpts struct {
 	FPS                  float64
 	Kbps, Gop            int
 	Spout                *SpoutSource
+	ZeroCopyAdapters     []int64
 }
+
+// AdapterAffinity / AdapterMoves: no adapters to resolve without the native path.
+func AdapterAffinity(string) (int64, bool) { return 0, false }
+func AdapterMoves() int                    { return 0 }
 
 // ErrZeroCopyRefused never fires here (no zero-copy path off Windows).
 var ErrZeroCopyRefused = errors.New("mfenc: zero-copy source refused")
@@ -78,7 +83,9 @@ func OpenProcSessionOpts(ProcOpts) (*ProcSession, error) { return nil, ErrUnsupp
 // ZeroCopyPinnedToReadback: nothing to pin without a zero-copy path.
 func ZeroCopyPinnedToReadback(string) bool { return false }
 
-func (s *ProcSession) IsZeroCopy() bool { return false }
+func (s *ProcSession) IsZeroCopy() bool   { return false }
+func (s *ProcSession) AdapterLUID() int64 { return 0 }
+func (s *ProcSession) AdapterMoved() bool { return false }
 
 func (s *ProcSession) Encode(_ []byte, _ int64) error { return ErrUnsupported }
 func (s *ProcSession) Output() <-chan AU              { return nil }

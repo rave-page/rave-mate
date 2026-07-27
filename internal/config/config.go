@@ -409,6 +409,13 @@ type MediaLinkFeature struct {
 	// path stays as the fallback and the parity reference.
 	// Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
 	ZigDecode *bool `json:"zigDecode,omitempty"`
+	// ZigAffinity lets a zero-copy session be RE-PLACED on the adapter that actually owns the
+	// sender's shared texture instead of downgrading to the readback path (risk R7: a sender
+	// produced by an app on another GPU is invisible to an encoder child pinned to this one).
+	// Only ever applies when the encode device is NOT pinned by policy - "never silently move
+	// adapters" - and every move logs. Tri-state, default OFF.
+	// Env RAVE_MATE_ZIGMEDIA_AFFINITY=1|0 overrides.
+	ZigAffinity *bool `json:"zigAffinity,omitempty"`
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
@@ -440,6 +447,21 @@ func (m MediaLinkFeature) ZeroCopyDecode() bool {
 
 // SetZeroCopyDecode sets the native-decode opt-in EXPLICITLY (single write seam).
 func (m *MediaLinkFeature) SetZeroCopyDecode(on bool) { v := on; m.ZigDecode = &v }
+
+// ZeroCopyAffinity reports whether a zero-copy session may be re-placed on the adapter that owns
+// the sender's texture. Env RAVE_MATE_ZIGMEDIA_AFFINITY wins, then the config key, else OFF.
+func (m MediaLinkFeature) ZeroCopyAffinity() bool {
+	switch os.Getenv("RAVE_MATE_ZIGMEDIA_AFFINITY") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.ZigAffinity != nil && *m.ZigAffinity
+}
+
+// SetZeroCopyAffinity sets the affinity opt-in EXPLICITLY (single write seam).
+func (m *MediaLinkFeature) SetZeroCopyAffinity(on bool) { v := on; m.ZigAffinity = &v }
 
 // MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
 // absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema

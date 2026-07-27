@@ -226,6 +226,35 @@ Measured on this dev box (NVIDIA), real sender in a second process:
 colour are gated by DECODING the bitstream (a red-top/blue-bottom probe), because the readback
 path flips on the CPU and a silently inverted zero-copy path passes every counter.
 
+### Adapter affinity (zigmedia increment 3, flag OFF by default)
+
+`OpenSharedResource` only works on the adapter that CREATED the texture, so a sender produced by
+an app on GPU B is invisible to an encoder child pinned to GPU A - the child refuses with
+`open_shared` and the route pays the full readback. Measured on the dev rig: with two adapters
+present, one accepts a sender the other refuses.
+
+Nothing in DXGI answers "which adapter owns this share handle", so resolution is a bounded PROBE:
+on a source-side refusal, try the other adapters once, first success wins, cache the answer per
+sender (the cached adapter is probed first next time, so a second route pays nothing).
+
+- **Gate:** `config.MediaLink.zigAffinity` / `RAVE_MATE_ZIGMEDIA_AFFINITY=1|0`, default OFF.
+- **Never silently move adapters** (R7): mediapipe offers candidates ONLY when the gate is on and
+  `EncodeSpec.Device()` resolves nothing. A pinned device - or one the governor chose via
+  `avoid-busiest` - is policy and outranks the optimisation. Every move logs once and renders as
+  "adapter re-placed" on the route panel (`PipelineStats.AdapterMoved`).
+- **Bounded:** one attempt per candidate; the NEGATIVE is cached so a hopeless sender sweeps once;
+  a non-source failure (poisoned tuple, crash-looping child) stops the loop instead of spawning a
+  child per adapter; a single-adapter host gets no candidates at all.
+
+Increment 3's other two items were measured and deliberately NOT built - see
+`.devnotes/ZIGMEDIA_INC3_STATUS.md`. In short: mutex contention with 4 sessions on one sender is
+zero at 720p60 AND 4K60 (the 4K cost is encoder saturation, which a shared capture copy does not
+address and which would re-add 33 MB VRAM per adapter+sender), and a duplicate frame on a static
+sender costs 49 bytes - 0.12% of a 20 Mbps route - while keeping the peer's jitter buffer fed.
+Frame-new gating is also not reachable: this SpoutLibrary pairing returns junk from
+`GetSenderFrame` through a metadata-only receiver (the same late-vtable skew already documented
+for `GetSenderWidth`/`GetSenderHeight`).
+
 Still open: 7-day soak before the flag defaults on, and the 2-PC pass (§13.1 of the design - the
 single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on a
 real rig).

@@ -104,6 +104,9 @@ type PipelineStats struct {
 	// the parent submits nothing, so submit→AU percentiles stay empty on this path)
 	Downgrades int // zero-copy → readback fallbacks on this route (a rig that always
 	// downgrades must be visible here, not silently slow)
+	// AdapterMoved: the sender's texture lives on a different GPU than the encode device asked
+	// for, and the session was re-placed there instead of downgrading (zigmedia inc 3, R7).
+	AdapterMoved bool
 	// Zero-copy DECODE (zigmedia inc 2): the decoder child renders straight into the local
 	// video-share sender's texture, so no decoded frame crosses a pipe or the Go heap. Zero on
 	// the ffmpeg decode path.

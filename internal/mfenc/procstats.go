@@ -21,7 +21,12 @@ type ProcStats struct {
 	CapStaleMs  float64 // age of the last successful capture (frozen-source oracle)
 	EncBusyMs   float64 // mean child capture+encode time per frame (the zero-copy path's
 	// saturation signal: the parent submits nothing, so submitAt/p99 stay empty here)
-	CapFmt     uint32 // DXGI format actually consumed
-	CapFlags   uint32 // bit0 zero-copy live, bit1 keyed mutex, bit2 named mutex, bit3 unsynchronized
-	Downgrades int    // zero-copy recycles/downgrades on this session
+	// AdapterMoved: this session's sender lives on a different GPU than the encode device asked
+	// for, and affinity resolution re-placed it there instead of downgrading to the readback path
+	// (zigmedia inc 3, risk R7). Visible so a rig whose device policy fights its sender layout is
+	// obvious rather than mysteriously slow.
+	AdapterMoved bool
+	CapFmt       uint32 // DXGI format actually consumed
+	CapFlags     uint32 // bit0 zero-copy live, bit1 keyed mutex, bit2 named mutex, bit3 unsynchronized
+	Downgrades   int    // zero-copy recycles/downgrades on this session
 }

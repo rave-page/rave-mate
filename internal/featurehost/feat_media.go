@@ -78,6 +78,8 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	mediapipe.ZeroCopyCapture = func() bool { return liveCfg().ZeroCopyCapture() }
 	// zigmedia inc 2: gate native GPU-resident decode+publish (default OFF).
 	mediapipe.ZeroCopyDecode = func() bool { return liveCfg().ZeroCopyDecode() }
+	// zigmedia inc 3: gate adapter-affinity re-placement of a zero-copy session (default OFF).
+	mediapipe.ZeroCopyAffinity = func() bool { return liveCfg().ZeroCopyAffinity() }
 	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
 		Self: in.Self, Bus: mediaBusAdapter{f.bus}, Secrets: f.secrets, Clock: f.clock,

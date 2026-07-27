@@ -52,6 +52,10 @@ type mfBridge struct {
 // mfenc.Warnf) - the daemon and the media child both point it at their live config. Default OFF.
 var ZeroCopyCapture = func() bool { return false }
 
+// ZeroCopyAffinity gates re-placing a zero-copy session on the adapter that owns the sender's
+// texture (zigmedia inc 3, risk R7). Package seam, default OFF.
+var ZeroCopyAffinity = func() bool { return false }
+
 // newMFBridge builds the native pipeline for spec; error = caller falls back to ffmpeg.
 func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec, src medialink.Source) (*mfBridge, error) {
 	if spec.Width <= 0 || spec.Height <= 0 || spec.Width > 16384 || spec.Height > 16384 {
@@ -149,7 +153,31 @@ func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink
 		hd, f, ww, hgt, _, ok := zcs.SharedTexture()
 		return hd, f, ww, hgt, ok
 	}}
+	opts.ZeroCopyAdapters = affinityCandidates(spec)
 	return true, 0
+}
+
+// affinityCandidates lists the adapters a zero-copy session may be re-placed on (R7). EMPTY unless
+// the gate is on AND the encode device is UNRESOLVED: a device the user pinned - or the governor
+// chose via avoid-busiest - is policy, and "never silently move adapters" means policy wins over
+// an optimisation. Absent candidates, mfenc keeps today's downgrade to the readback path.
+func affinityCandidates(spec medialink.EncodeSpec) []int64 {
+	if !ZeroCopyAffinity() {
+		return nil
+	}
+	if _, _, resolved := spec.Device(); resolved {
+		return nil
+	}
+	var out []int64
+	for _, a := range encoderscan.Adapters() {
+		if l, ok := encoderscan.LUIDInt64(a.LUID); ok {
+			out = append(out, l)
+		}
+	}
+	if len(out) < 2 {
+		return nil // nothing to move to
+	}
+	return out
 }
 
 // feed pumps raw frames into the encoder; source EOF drains + closes it.
@@ -267,7 +295,8 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
-		EncBusyMs:  st.EncBusyMs,
-		Downgrades: b.downgrades + st.Downgrades,
-		Dropped:    b.dropped.Load() + medialink.InnerDrops(b.src)}
+		AdapterMoved: st.AdapterMoved,
+		EncBusyMs:    st.EncBusyMs,
+		Downgrades:   b.downgrades + st.Downgrades,
+		Dropped:      b.dropped.Load() + medialink.InnerDrops(b.src)}
 }

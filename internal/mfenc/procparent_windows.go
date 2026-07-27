@@ -908,6 +908,10 @@ type ProcSession struct {
 	ringSize             uint64
 	ringOff              uintptr
 
+	// movedFrom is the adapter this session was ASKED for before affinity resolution re-placed it
+	// (0 = never moved). Diagnostic only.
+	movedFrom int64
+
 	// Zero-copy capture (src:"spout"): Go moves SCALARS only - handle + format + name - and
 	// never a pixel. resolve re-reads them from the (cached) sender registry.
 	zeroCopy  bool
@@ -967,6 +971,12 @@ type ProcOpts struct {
 	FPS                  float64
 	Kbps, Gop            int
 	Spout                *SpoutSource
+	// ZeroCopyAdapters lists adapter LUIDs this session MAY be re-placed on when LUID cannot open
+	// the sender's shared texture (cross-adapter sender, risk R7 - reproduced on the dev rig).
+	// EMPTY = never move, which is the default and what an explicitly pinned encode device gets:
+	// "never silently move adapters" is a hard rule, so a move requires the caller to opt in AND it
+	// always logs. Only consulted on a zero-copy session.
+	ZeroCopyAdapters []int64
 }
 
 // OpenProcSession opens one native encode session on the (supervised, per-adapter) Zig
@@ -981,6 +991,22 @@ func OpenProcSession(luid int64, inW, inH, outW, outH int, fps float64, kbps, go
 // ring only) and the caller must never call Encode. A child that refuses the source returns
 // ErrZeroCopyRefused so the caller can reopen on the readback path (§7.3, never a dead route).
 func OpenProcSessionOpts(o ProcOpts) (*ProcSession, error) {
+	s, err := openProcSessionOn(o)
+	if err == nil || o.Spout == nil || len(o.ZeroCopyAdapters) == 0 || !errors.Is(err, ErrZeroCopyRefused) {
+		return s, err
+	}
+	// The ENCODER opened fine on this adapter but the SOURCE did not: the sender's texture lives on
+	// another GPU. Probe the candidates once (bounded, cached per sender) instead of dropping the
+	// whole route to the readback path.
+	alt, _, aerr := replaceOnAffineAdapter(o, affinityCandidates(o.Spout.Name, o.LUID, o.ZeroCopyAdapters), openProcSessionOn)
+	if aerr == nil {
+		return alt, nil
+	}
+	return nil, err // report the ORIGINAL refusal: it names the rung the caller downgrades from
+}
+
+// openProcSessionOn opens the session on exactly o.LUID (no affinity resolution).
+func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 	luid, inW, inH, outW, outH := o.LUID, o.InW, o.InH, o.OutW, o.OutH
 	kbps, gop := o.Kbps, o.Gop
 	if os.Getenv("RAVE_MATE_MFENC_OPEN_FAIL") != "" {
@@ -1312,6 +1338,12 @@ func (s *ProcSession) spoutHandle() (uint64, uint32, string) {
 // IsZeroCopy reports whether this session consumes a GPU shared texture (no host frames).
 func (s *ProcSession) IsZeroCopy() bool { return s.zeroCopy }
 
+// AdapterLUID is the adapter this session actually runs on (after any affinity re-place).
+func (s *ProcSession) AdapterLUID() int64 { return s.child.luid }
+
+// AdapterMoved reports whether affinity resolution re-placed this session onto another adapter.
+func (s *ProcSession) AdapterMoved() bool { return s.movedFrom != 0 }
+
 func (s *ProcSession) fail(msg string) {
 	s.failMu.Lock()
 	if s.failErr == nil {
@@ -1569,6 +1601,7 @@ func (s *ProcSession) Stats() ProcStats {
 		st.CapFmt = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCapFmt)))
 		st.CapFlags = atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offCapFlags)))
 		st.Downgrades = int(s.downgrades.Load())
+		st.AdapterMoved = s.movedFrom != 0
 		if last := atomic.LoadInt64(s.shm.i64(offLastCapNs)); last > 0 {
 			if now := childNowNs(); now > last {
 				st.CapStaleMs = float64(now-last) / 1e6
