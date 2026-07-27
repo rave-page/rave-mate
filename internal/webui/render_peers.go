@@ -1048,11 +1048,62 @@ func fmtPipeLine(s medialink.RouteStat) string {
 			p += " · " + i18n.T("peers.pipeDropped", i18n.A{"n": fmt.Sprint(lost)})
 		}
 		parts = append(parts, p)
+		if c := fmtContentLine(*s.Pipe); c != "" {
+			parts = append(parts, c)
+		}
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
 			parts = append(parts, z)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// fmtContentLine renders the CONTENT oracle and the engine-health verdict - the two blocks that
+// were collected from the day the native engine landed and rendered nowhere, which is how a route
+// shipping black kept a healthy-looking panel for 12 minutes. Bytes-per-frame is the only number
+// here that can tell a live picture from a black or frozen one; DegradeReason is the only one that
+// can say the route is off its best path.
+func fmtContentLine(p medialink.PipelineStats) string {
+	var out []string
+	if p.AUCount > 0 && p.AUBytesPerFrame > 0 {
+		out = append(out, fmtBytesPerFrame(p.AUBytesPerFrame))
+		if p.NoPictureContent() {
+			out = append(out, i18n.T("peers.noPictureContent"))
+		}
+	}
+	if p.PubFrames > 0 {
+		out = append(out, i18n.T("peers.published", i18n.A{"n": fmt.Sprint(p.PubFrames)}))
+	} else if p.OutFPS > 0 && (p.ZeroDecode || p.HWAccel != "") {
+		// Frames ARE leaving the decoder and none reached the Spout sender: the "route up, frames
+		// received, no Spout source" failure, which the sink's Write answers `nil` to. Gated on
+		// OutFPS so a route that has merely not started yet says nothing.
+		out = append(out, i18n.T("peers.publishedNone"))
+	}
+	if p.BusyDrops > 0 {
+		out = append(out, i18n.T("peers.encoderSaturated", i18n.A{"n": fmt.Sprint(p.BusyDrops)}))
+	}
+	if p.EncFails > 0 {
+		out = append(out, i18n.T("peers.encodeFailures", i18n.A{"n": fmt.Sprint(p.EncFails)}))
+	}
+	if p.SoftwareEncode {
+		out = append(out, i18n.T("peers.softwareEncodeTier"))
+	}
+	if p.Poisoned {
+		out = append(out, i18n.T("peers.hardwarePoisoned"))
+	}
+	if p.DegradeReason != "" {
+		out = append(out, i18n.T("peers.degradedReason", i18n.A{"reason": p.DegradeReason}))
+	}
+	return strings.Join(out, " · ")
+}
+
+// fmtBytesPerFrame keeps the oracle readable at both ends of its range (255 B and 83 kB both
+// matter, and "0.0 kB/frame" would hide the interesting one).
+func fmtBytesPerFrame(v float64) string {
+	if v < 10240 {
+		return i18n.T("peers.contentBytesPerFrame", i18n.A{"v": fmt.Sprintf("%.0f", v)})
+	}
+	return i18n.T("peers.contentKbPerFrame", i18n.A{"v": fmt.Sprintf("%.1f", v/1024)})
 }
 
 // fmtCaptureLine renders the zero-copy capture block ("" on a readback route with no downgrades).

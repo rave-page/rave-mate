@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,23 +73,29 @@ type mfBridge struct {
 	degrade    string
 	subEncoder string
 
-	// Content oracle. Counted on EVERY AU (native and substituted), so the log stream carries
-	// bytes-per-frame and a measured bitrate. The rendered panel is not sufficient: its counters
-	// have been observed frozen for 25 minutes on a demonstrably live route, and "OutFPS looks
-	// fine" cannot tell a real picture from a black one anyway.
-	auBytes atomic.Uint64
-	auCount atomic.Uint64
+	// Content oracle. b.out counts bytes AND AUs on ONE sliding window (native and substituted),
+	// so bytes-per-frame is measured over a single span instead of two unrelated ones. The log
+	// stream carries it every routeTelemetryEvery and, since inc 5, so does the rendered panel:
+	// the panel's counters have been observed frozen for 25 minutes on a demonstrably live route,
+	// and "OutFPS looks fine" cannot tell a real picture from a black one either way.
+	noContentWarned atomic.Bool
 	// adapterName is the RESOLVED adapter description (a stale configured LUID names nothing).
 	adapterName string
 }
 
-// ZeroCopyCapture gates the zigmedia inc-1 path: a Spout source's pixels reach the encoder child
-// as a GPU shared-texture handle instead of a host readback. Package seam (same shape as
-// mfenc.Warnf) - the daemon and the media child both point it at their live config. Default OFF.
+// ZeroCopyCapture gates the zigmedia path: a Spout source's pixels reach the encoder child as a GPU
+// shared-texture handle instead of a host readback. Package seam (same shape as mfenc.Warnf).
+//
+// The PRODUCT default lives in config.MediaLinkFeature.ZeroCopyCapture and is ON since increment 5.
+// This fallback stays false because an UNWIRED process must not assume a capability it was never
+// told about; both production wiring sites point it at the live config unconditionally
+// (app.go and featurehost/feat_media.go). A third construction site must wire it too, or the
+// default silently does not apply there.
 var ZeroCopyCapture = func() bool { return false }
 
 // ZeroCopyAffinity gates re-placing a zero-copy session on the adapter that owns the sender's
-// texture (zigmedia inc 3, risk R7). Package seam, default OFF.
+// texture (zigmedia inc 3, risk R7). Package seam; the product default is OFF - the re-place is
+// live-verified only between two identical GPUs (see config.ZigAffinity).
 var ZeroCopyAffinity = func() bool { return false }
 
 // newMFBridge builds the native pipeline for spec; error = caller falls back to ffmpeg.
@@ -123,14 +130,25 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		FPS: fps, Kbps: kbps, Gop: gopFrames(fps)}
 	// Zero-copy request (zigmedia inc 1) needs ALL of: the flag, a source that really exposes a
 	// shared texture, a handle that matches the negotiated geometry, and a sender not already
-	// pinned to the readback path. Anything missing = today's frame path, byte for byte.
-	zc, downgrades := zeroCopyOpts(&opts, spec, src)
+	// pinned to the readback path. Anything missing = the readback frame path, byte for byte.
+	// Decided PER SOURCE (zcVerdict) - a webcam route and a Spout route in the same process take
+	// different paths, and neither is inferred from the flag alone.
+	v := zeroCopyOpts(&opts, spec, src)
+	zc, downgrades := v.request, 0
+	if !zc && v.applicable {
+		// A source that COULD have qualified did not: one WARN naming the reason, and counted, so a
+		// rig that always falls back is visible rather than silently slow. Not logged for a webcam:
+		// there the readback is the only path that ever existed, not a downgrade.
+		downgrades = 1
+		log.Warn(source, "this route is on the CPU readback path, not zero-copy capture",
+			map[string]any{"reason": v.reason, "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height)})
+	}
 	enc, err := mfenc.OpenProcSessionOpts(opts)
 	if err != nil && zc && errors.Is(err, mfenc.ErrZeroCopyRefused) {
 		// Same child, same geometry, reopened on the readback path. ONE warn per route so a rig
 		// that always downgrades is visible instead of silently slow.
 		log.Warn(source, "zero-copy capture refused - reopening this route on the readback path",
-			map[string]any{"err": err.Error(), "sender": opts.Spout.Name})
+			map[string]any{"err": err.Error(), "sender": opts.Spout.Name, "hint": affinityHint(err)})
 		opts.Spout, zc = nil, false
 		downgrades++
 		enc, err = mfenc.OpenProcSessionOpts(opts)
@@ -254,7 +272,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 		case <-t.C:
 		}
 		now := time.Now()
-		bytes, count := b.auBytes.Load(), b.auCount.Load()
+		bytes, count := b.out.totals()
 		dB, dN := bytes-prevBytes, count-prevCount
 		secs := now.Sub(prev).Seconds()
 		prevBytes, prevCount, prev = bytes, count, now
@@ -267,6 +285,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 		if secs > 0 {
 			kbps = float64(dB) * 8 / 1000 / secs
 		}
+		b.noteNoContent(dN, perFrame)
 		b.log.Info(source, "route encode telemetry", map[string]any{
 			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
 			"capture": captureLabel(b.zeroCopy), "device": st.DevPolicy,
@@ -285,6 +304,23 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 	}
 }
 
+// noteNoContent logs ONCE per route when the bitstream carries almost nothing while AUs keep
+// flowing. This is the field's black-route signature (255 B/frame at 4K30 on a 20 Mbps budget),
+// but the same reading is produced by a frozen source AND by a genuinely static one - so the
+// wording names all three and the route is NOT marked degraded on it. The rendered panel carries
+// the number itself; this is the nudge that reaches a log-only box.
+func (b *mfBridge) noteNoContent(aus, bytesPerFrame uint64) {
+	if aus == 0 || bytesPerFrame >= medialink.AUNoiseFloorBytes || b.noContentWarned.Load() {
+		return
+	}
+	if b.noContentWarned.Swap(true) {
+		return
+	}
+	b.log.Warn(source, "this route's bitstream carries almost no picture content - a black, frozen or completely static source all look like this",
+		map[string]any{"bytesPerFrame": bytesPerFrame, "aus": aus,
+			"capture": captureLabel(b.zeroCopy), "noiseFloor": medialink.AUNoiseFloorBytes})
+}
+
 // pumpSub forwards the substitute's frames onto this bridge's own channel, so consumers that
 // already hold this Source never learn the engine changed underneath them.
 func (b *mfBridge) pumpSub(sub *encoder) {
@@ -293,9 +329,7 @@ func (b *mfBridge) pumpSub(sub *encoder) {
 		if err != nil {
 			return
 		}
-		b.auBytes.Add(uint64(len(f.Payload)))
-		b.auCount.Add(1)
-		b.out.tick()
+		b.out.tickBytes(len(f.Payload))
 		select {
 		case b.frames <- f:
 		case <-b.ctx.Done():
@@ -304,25 +338,49 @@ func (b *mfBridge) pumpSub(sub *encoder) {
 	}
 }
 
-// zeroCopyOpts fills opts.Spout when the whole gate holds; returns whether zero-copy was
-// requested and how many downgrade decisions were already taken (for route stats).
-func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink.Source) (bool, int) {
-	if !ZeroCopyCapture() {
-		return false, 0
-	}
+// zcVerdict is ONE source's zero-copy decision, spelled out. It became worth naming when
+// zero-copy became the DEFAULT path (zigmedia inc 5): the interesting question flipped from "did
+// anybody ask for this" to "why did THIS source not get it", and a default that quietly puts a
+// whole rig back on the readback is exactly the failure the promotion gates exist to prevent.
+//
+// applicable separates the two kinds of "no", which must not be logged or counted the same way:
+//   - a webcam / DirectShow / non-Spout source has no GPU shared texture AT ALL, so the readback
+//     is not a downgrade, it is the only path that was ever possible. Silent, uncounted, correct.
+//   - a Spout source that COULD have qualified and did not (DX9 or CPU-memoryshare sender, a
+//     sender that resized between advert and open, a sender already pinned to the readback) is a
+//     real downgrade: one WARN naming the reason, and counted so `ctl perf` can show a rig that
+//     always downgrades instead of one that is mysteriously slow.
+type zcVerdict struct {
+	request    bool   // ask the child for src:"spout"
+	applicable bool   // this source type could ever have done zero-copy
+	reason     string // why not (empty when requested)
+}
+
+// zeroCopyOpts fills opts.Spout when the whole per-source gate holds and returns the verdict.
+// Decided PER SOURCE, at open, from the source's own answer - never assumed from the flag, the
+// route kind or the peer's advert.
+func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink.Source) zcVerdict {
 	zcs, ok := src.(medialink.ZeroCopySource)
 	if !ok {
-		return false, 0
+		// Not applicable, whatever the flag says: there is no texture to hand anyone.
+		return zcVerdict{reason: "source has no GPU shared texture (webcam / DirectShow / non-Spout)"}
+	}
+	if !ZeroCopyCapture() {
+		return zcVerdict{applicable: true, reason: "zero-copy capture disabled by config"}
 	}
 	h, _, w, hh, name, ok := zcs.SharedTexture()
 	if !ok || h == 0 {
-		return false, 0
+		// A DX9 or CPU/memoryshare Spout sender has no DX11 shared texture. Worth knowing that the
+		// readback cannot serve these EITHER (it needs the same handle) - so this is the one rung
+		// where neither path works and the route will fail somewhere else.
+		return zcVerdict{applicable: true, reason: "sender exposes no DX11 shared texture (DX9 or CPU/memory-share sender)"}
 	}
 	if w != spec.Width || hh != spec.Height {
-		return false, 1 // sender moved between advert and open: the child would refuse anyway
+		return zcVerdict{applicable: true, reason: fmt.Sprintf(
+			"sender is %dx%d but the route negotiated %dx%d (it resized between advert and open)", w, hh, spec.Width, spec.Height)}
 	}
 	if mfenc.ZeroCopyPinnedToReadback(name) {
-		return false, 1
+		return zcVerdict{applicable: true, reason: "this sender is pinned to the readback path (its zero-copy source failed repeatedly)"}
 	}
 	// Re-read on every (re)open + on the 2 s health tick: a restarted sender must never be
 	// re-issued its dead handle (risk R1, the silently frozen picture).
@@ -331,7 +389,26 @@ func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink
 		return hd, f, ww, hgt, ok
 	}}
 	opts.ZeroCopyAdapters = affinityCandidates(spec)
-	return true, 0
+	return zcVerdict{request: true, applicable: true}
+}
+
+// affinityHint turns the one refusal an operator can actually fix into an instruction. `open_shared`
+// on a multi-adapter host is risk R7 - the sender's texture lives on the other GPU - and
+// mediaLink.zigAffinity resolves it, but that key is default OFF because the re-place is only
+// live-verified between two identical GPUs. Without this hint, leaving it off is a silent miss on
+// exactly the rigs that need it.
+func affinityHint(err error) string {
+	if err == nil || !strings.Contains(err.Error(), "open_shared") {
+		return ""
+	}
+	if len(encoderscan.Adapters()) < 2 {
+		return ""
+	}
+	if ZeroCopyAffinity() {
+		return "adapter affinity is already enabled and still could not open the sender's texture"
+	}
+	return "this host has more than one GPU and the sender's texture is probably on the other one - " +
+		"set mediaLink.zigAffinity (or RAVE_MATE_ZIGMEDIA_AFFINITY=1) to re-place the session there"
 }
 
 // affinityCandidates lists the adapters a zero-copy session may be re-placed on (R7). EMPTY unless
@@ -409,8 +486,7 @@ func (b *mfBridge) feed(ctx context.Context) {
 func (b *mfBridge) emit(ctx context.Context) {
 	defer close(b.done)
 	for au := range b.enc.Output() {
-		b.auBytes.Add(uint64(len(au.Data)))
-		b.auCount.Add(1)
+		b.out.tickBytes(len(au.Data))
 		f := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecH264,
 			PTS: au.PTSNs, Payload: au.Data}
 		if au.Keyframe {
@@ -425,7 +501,6 @@ func (b *mfBridge) emit(ctx context.Context) {
 			b.tcq = b.tcq[1:]
 		}
 		b.mu.Unlock()
-		b.out.tick()
 		select {
 		case b.frames <- f:
 		case <-ctx.Done():
@@ -542,12 +617,17 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		st.OutFPS = b.out.value()
 		st.Downgrades += b.downgrades
 		st.RateCapped = medialink.InnerRateCapped(b.src)
+		// The content oracle follows the route, not the engine: a substituted route that ships
+		// black is the same incident as a native one that does.
+		st.AUBytes, st.AUCount = b.out.totals()
+		st.AUBytesPerFrame = b.out.perFrame()
 		return st
 	}
 	st := b.enc.Stats()
 	if r := st.DegradeReason; r != "" {
 		b.noteDegrade(r)
 	}
+	auBytes, auCount := b.out.totals()
 	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value(),
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
@@ -568,10 +648,14 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		SoftwareEncode: st.Software,
 		BusyDrops:      uint64(st.BusyDrops),
 		EncFails:       uint64(st.EncFails),
-		AUBytes:        b.auBytes.Load(),
-		AUCount:        b.auCount.Load(),
-		AdapterLUID:    st.AdapterLUID,
-		DevPolicy:      st.DevPolicy,
-		Poisoned:       st.Poisoned,
-		LedgerFails:    st.LedgerFails}
+		// The content oracle, cumulative AND windowed. Only the windowed figure can say whether the
+		// route is shipping a picture NOW; a lifetime average over a route that went black an hour
+		// ago still reads healthy.
+		AUBytes:         auBytes,
+		AUCount:         auCount,
+		AUBytesPerFrame: b.out.perFrame(),
+		AdapterLUID:     st.AdapterLUID,
+		DevPolicy:       st.DevPolicy,
+		Poisoned:        st.Poisoned,
+		LedgerFails:     st.LedgerFails}
 }

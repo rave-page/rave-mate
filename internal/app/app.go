@@ -674,11 +674,11 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaClock := medialink.NewSoftwareClock() // §2.3 tier-2 media clock (disciplined by sync probes)
 	encFac, decFac := mediapipe.Factories(log)
 	mediaLinkCfg := func() config.MediaLinkFeature { return cfg.Features.MediaLink }
-	// zigmedia inc 1: gate the zero-copy Spout->encoder capture path (default OFF).
+	// zigmedia: the zero-copy Spout->encoder capture path. DEFAULT ON since inc 5 (config decides).
 	mediapipe.ZeroCopyCapture = func() bool { return mediaLinkCfg().ZeroCopyCapture() }
-	// zigmedia inc 2: gate native GPU-resident decode+publish (default OFF).
+	// zigmedia inc 2: native GPU-resident decode+publish. Still default OFF - see config.ZigDecode.
 	mediapipe.ZeroCopyDecode = func() bool { return mediaLinkCfg().ZeroCopyDecode() }
-	// zigmedia inc 3: gate adapter-affinity re-placement of a zero-copy session (default OFF).
+	// zigmedia inc 3: adapter-affinity re-placement. Still default OFF - see config.ZigAffinity.
 	mediapipe.ZeroCopyAffinity = func() bool { return mediaLinkCfg().ZeroCopyAffinity() }
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,

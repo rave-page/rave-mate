@@ -27,6 +27,7 @@ import (
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/mfenc"
+	"rave.page/mate/internal/ratewin"
 )
 
 const source = "mediapipe"
@@ -84,6 +85,7 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		if ZeroCopyDecode() && mfenc.ChildAvailable() {
 			s, err := newMFDecoder(ctx, log, spec, sink)
 			if err == nil {
+				go decodeTelemetry(ctx, log, "native", spec, s)
 				return s, nil
 			}
 			if !mfDecWarned {
@@ -96,7 +98,9 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		if !ok {
 			return nil, fmt.Errorf("mediapipe: ffmpeg not found")
 		}
-		return newDecoder(ctx, log, ffmpeg, spec, sink), nil
+		d := newDecoder(ctx, log, ffmpeg, spec, sink)
+		go decodeTelemetry(ctx, log, "ffmpeg", spec, d)
+		return d, nil
 	}
 	return enc, dec
 }
@@ -185,28 +189,24 @@ func (w *ringWriter) String() string {
 	return string(w.buf)
 }
 
-// rate is a coarse frames/s estimator (anchor refreshed on read, ≥500 ms apart).
-type rate struct {
-	mu     sync.Mutex
-	n      uint64
-	anchor uint64
-	at     time.Time
-	fps    float64
-}
+// rate is a frames/s estimator over ratewin's producer-driven sliding window. It used to refresh
+// its anchor ON READ over a 500 ms span, which made OutFPS depend on who polled and how often -
+// the 10 s route-telemetry line reported whatever window an unrelated 1 Hz reader had just closed,
+// and 500 ms is short enough to land between keyframe clumps. See package ratewin.
+type rate struct{ w ratewin.Ring }
 
-func (r *rate) tick() { r.mu.Lock(); r.n++; r.mu.Unlock() }
+// tick counts one frame leaving the stage (called on the producing goroutine).
+func (r *rate) tick() { r.w.Add(0, 1, time.Now()) }
 
-func (r *rate) value() float64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := time.Now()
-	if r.at.IsZero() {
-		r.at, r.anchor = now, r.n
-		return 0
-	}
-	if d := now.Sub(r.at); d >= 500*time.Millisecond {
-		r.fps = float64(r.n-r.anchor) / d.Seconds()
-		r.at, r.anchor = now, r.n
-	}
-	return r.fps
-}
+// tickBytes counts one frame AND its payload, so bytes-per-frame comes from one span.
+func (r *rate) tickBytes(n int) { r.w.Add(uint64(n), 1, time.Now()) }
+
+// value is the windowed frames/s. Pure read: any number of pollers see the same measurement.
+func (r *rate) value() float64 { _, fps := r.w.Rate(time.Now()); return fps }
+
+// perFrame is the windowed bytes per frame - the CONTENT oracle. A live picture cannot be a few
+// hundred bytes per frame, and no fps/counter reading can tell a real picture from a black one.
+func (r *rate) perFrame() float64 { return r.w.PerEvent(time.Now()) }
+
+// totals returns the lifetime cumulative (bytes, frames).
+func (r *rate) totals() (bytes, frames uint64) { return r.w.Totals() }

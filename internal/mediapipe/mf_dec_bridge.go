@@ -137,11 +137,19 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 	if !m.dec.IsHardware() {
 		accel = "d3d11-dxva" // the MS D3D11-aware decoder MFT, still GPU-resident
 	}
+	// Published volume: on THIS path the child writes the destination texture, so DecFrames is the
+	// delivered count (the inner sink's Write is never called for this codec). Bytes are the
+	// destination geometry - the frames never exist as host bytes, which is the whole point.
+	pubF, pubB := medialink.InnerPublished(m.sink)
+	if st.DecFrames > 0 {
+		pubF, pubB = st.DecFrames, st.DecFrames*uint64(m.spec.Width*m.spec.Height*4)
+	}
 	return medialink.PipelineStats{
 		Encoder: "mf-native-decode", HWAccel: accel, OutFPS: st.DecFPS, Restarts: st.Restarts,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		Dropped:    m.dropped.Load() + st.DecDropped + st.InDropped + medialink.InnerDrops(m.sink),
 		RateCapped: medialink.InnerRateCapped(m.sink),
+		PubFrames:  pubF, PubBytes: pubB,
 		ZeroDecode: st.DecFlags&1 != 0, DecFPS: st.DecFPS, DecBusyMs: st.DecBusyMs,
 		InDropped: st.InDropped, DecDropped: st.DecDropped, DecErrors: st.DecErrors,
 		DecStaleMs: st.DecStaleMs, DecMtxTimeo: st.MtxTimeouts, Downgrades: st.Downgrades,

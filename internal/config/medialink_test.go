@@ -144,3 +144,106 @@ func TestMediaSubprocessRoundTrip(t *testing.T) {
 		t.Error("explicit false must survive the round-trip")
 	}
 }
+
+// ── zigmedia increment 5: zero-copy capture is the DEFAULT ──
+
+// TestZeroCopyCaptureDefaultsOn pins the flip and, more importantly, its MIGRATION semantics. The
+// key is omitempty on a *bool, so a config written before the flip carries either `true` (someone
+// opted in) or no key at all - nobody can be silently pinned to the readback by a stale config,
+// which is the same argument MediaSubprocess records for its own flip.
+func TestZeroCopyCaptureDefaultsOn(t *testing.T) {
+	t.Setenv("RAVE_MATE_ZIGMEDIA_CAPTURE", "")
+	var zero MediaLinkFeature
+	if !zero.ZeroCopyCapture() {
+		t.Error("a zero-valued MediaLinkFeature must default to zero-copy capture")
+	}
+	// A pre-flip config that never mentioned the key.
+	var old MediaLinkFeature
+	if err := json.Unmarshal([]byte(`{"shareVideo":true,"maxFps":60}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if old.ZigCapture != nil {
+		t.Fatalf("the absent key materialised as %v", *old.ZigCapture)
+	}
+	if !old.ZeroCopyCapture() {
+		t.Error("a config written before the flip must pick up the new default")
+	}
+	// An EXPLICIT opt-out must survive it - that is the whole point of the tri-state.
+	var off MediaLinkFeature
+	if err := json.Unmarshal([]byte(`{"zigCapture":false}`), &off); err != nil {
+		t.Fatal(err)
+	}
+	if off.ZeroCopyCapture() {
+		t.Error("an explicit zigCapture:false was overridden by the new default")
+	}
+	// The env override still wins both ways (soak + gates depend on it).
+	t.Setenv("RAVE_MATE_ZIGMEDIA_CAPTURE", "0")
+	if zero.ZeroCopyCapture() {
+		t.Error("RAVE_MATE_ZIGMEDIA_CAPTURE=0 did not turn the default off")
+	}
+	t.Setenv("RAVE_MATE_ZIGMEDIA_CAPTURE", "1")
+	if !off.ZeroCopyCapture() {
+		t.Error("RAVE_MATE_ZIGMEDIA_CAPTURE=1 did not override an explicit false")
+	}
+}
+
+// TestZeroCopyOptOutRoundTrips: SetZeroCopyCapture(false) must PERSIST, or the opt-out evaporates on
+// the next save and the user silently gets the default back. omitempty on a *bool keeps `false`
+// (the pointer is non-nil), which is exactly why the field is a pointer.
+func TestZeroCopyOptOutRoundTrips(t *testing.T) {
+	t.Setenv("RAVE_MATE_ZIGMEDIA_CAPTURE", "")
+	var f MediaLinkFeature
+	f.SetZeroCopyCapture(false)
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"zigCapture":false`) {
+		t.Fatalf("the opt-out was not persisted: %s", b)
+	}
+	var back MediaLinkFeature
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.ZeroCopyCapture() {
+		t.Error("the opt-out did not survive a save/load cycle")
+	}
+}
+
+// TestZeroCopyDecodeDefaultsOn: the receive side flipped too. Its justification is a MEASUREMENT
+// rather than a soak - on the field rig the ffmpeg frame path republished ~13.5 distinct frames/s at
+// 4K while the source encoded at 37, because the CPU SendImage upload of 33 MB/frame is the capacity
+// ceiling. Leaving the old default in place preserved a measured 3x frame loss, so "off" was not the
+// safe choice it looked like.
+func TestZeroCopyDecodeDefaultsOn(t *testing.T) {
+	t.Setenv("RAVE_MATE_ZIGMEDIA_DECODE", "")
+	var f MediaLinkFeature
+	if !f.ZeroCopyDecode() {
+		t.Error("native GPU-resident decode must default ON")
+	}
+	var off MediaLinkFeature
+	if err := json.Unmarshal([]byte(`{"zigDecode":false}`), &off); err != nil {
+		t.Fatal(err)
+	}
+	if off.ZeroCopyDecode() {
+		t.Error("an explicit zigDecode:false was overridden by the new default")
+	}
+	t.Setenv("RAVE_MATE_ZIGMEDIA_DECODE", "0")
+	if f.ZeroCopyDecode() {
+		t.Error("RAVE_MATE_ZIGMEDIA_DECODE=0 did not turn the default off - that is the escape hatch")
+	}
+}
+
+// TestAffinityStaysOff records the one deliberate ASYMMETRY of the increment-5 flip: capture and
+// decode are promoted, adapter-affinity is not, because its gate cannot be satisfied on the hardware
+// that verified the rest - the re-place is live-verified only between two IDENTICAL GPUs, so a
+// heterogeneous iGPU+dGPU rig (where the re-placed adapter may have a much worse encoder or none) is
+// unexercised. Leaving it off costs a VISIBLE downgrade to a working readback, not a ceiling.
+// A future agent flipping it should have to delete this test and say why.
+func TestAffinityStaysOff(t *testing.T) {
+	t.Setenv("RAVE_MATE_ZIGMEDIA_AFFINITY", "")
+	var f MediaLinkFeature
+	if f.ZeroCopyAffinity() {
+		t.Error("adapter affinity is default ON: the re-place is live-verified only between two IDENTICAL GPUs")
+	}
+}

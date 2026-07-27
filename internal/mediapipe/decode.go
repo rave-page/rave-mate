@@ -23,11 +23,35 @@ import (
 const (
 	decEarlyFailNs  = int64(3 * time.Second) // child dies unframed within this → demote tier
 	decRespawnDelay = time.Second            // min gap between respawns (frames drop meanwhile)
-	// decFreeRing bounds the recycled raw-frame buffers. Frames are written synchronously and
-	// recycled immediately, so 1 is the steady-state need; 4 covers a reader goroutine still
-	// draining an old child while a restarted one runs. Cap in BYTES = 4 × W·H·4 (32 MB at 1080p).
-	decFreeRing = 4
+	// decFreeRingMax is the DEPTH ceiling of the recycled raw-frame ring. Frames are written
+	// synchronously and recycled immediately, so 1 is the steady-state need; 4 covers a reader
+	// goroutine still draining an old child while a restarted one runs.
+	decFreeRingMax = 4
+	// decFreeRingBytes is the real bound: PARKED bytes, not frames. The old code fixed the depth at
+	// 4 and its comment claimed "32 MB at 1080p" - but a 1080p frame is 8.3 MB, so 4 of them are
+	// 33 MB and at 4K the same ring parks 132 MB per receive route, where the native decode path
+	// parks 4 MiB of AU ring. A frame-shaped cap on a geometry-dependent buffer is how a bound that
+	// reads correct scales 16x with the user's canvas.
+	decFreeRingBytes = 32 << 20
 )
+
+// decFreeRingDepth sizes the recycle ring so PARKED bytes stay under decFreeRingBytes whatever the
+// geometry: 4 at 720p, 3 at 1080p, 1 at 4K. Never 0 - getBuf allocates on an empty ring (fail open,
+// same policy as the capture pool's PoolMiss), so a shallow ring degrades the optimisation instead
+// of wedging a live route, and the LIVE frame each pump goroutine holds is unaffected either way.
+func decFreeRingDepth(frameBytes int) int {
+	if frameBytes <= 0 {
+		return decFreeRingMax
+	}
+	n := decFreeRingBytes / frameBytes
+	if n > decFreeRingMax {
+		n = decFreeRingMax
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
 
 // decoder implements medialink.Sink (+PipelineReporter) over the ffmpeg child.
 type decoder struct {
@@ -61,11 +85,12 @@ type decoder struct {
 func newDecoder(_ context.Context, log *logbus.Bus, ffmpeg string, spec medialink.DecodeSpec, sink medialink.Sink) *decoder {
 	caps, _ := Probe(context.Background(), log)
 	accels := append(append([]string{}, caps.HWAccels...), "") // "" = software floor
+	size := spec.Width * spec.Height * 4
 	return &decoder{
 		log: log, ffmpeg: ffmpeg, spec: spec, sink: sink,
-		size:   spec.Width * spec.Height * 4,
+		size:   size,
 		accels: accels,
-		free:   make(chan []byte, decFreeRing),
+		free:   make(chan []byte, decFreeRingDepth(size)),
 	}
 }
 
@@ -132,10 +157,12 @@ func (d *decoder) PipeStats() medialink.PipelineStats {
 	}
 	restarts := d.restarts
 	d.mu.Unlock()
+	pubF, pubB := medialink.InnerPublished(d.sink)
 	return medialink.PipelineStats{Encoder: "ffmpeg-decode", HWAccel: accel,
 		OutFPS: d.out.value(), Restarts: restarts,
 		Dropped:    d.dropped.Load() + medialink.InnerDrops(d.sink),
-		RateCapped: medialink.InnerRateCapped(d.sink)}
+		RateCapped: medialink.InnerRateCapped(d.sink),
+		PubFrames:  pubF, PubBytes: pubB}
 }
 
 // spawnLocked starts a child on the current tier. Caller holds mu.
@@ -293,4 +320,48 @@ func errStr(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// decodeTelemetry logs one line per interval naming WHICH receive path is serving this route and how
+// much it actually PUBLISHED. Symmetric with the send side's "route encode telemetry", and
+// load-bearing now that native decode is the default: a silent fallback to the ffmpeg frame path
+// would make "default on" unfalsifiable on a box with no toolchain and no remote-exec.
+//
+// publishedFps beside outFps is the whole point, and it is the before/after instrument for this
+// increment. On the field rig a 4K route's local republish delivered ~13.5 DISTINCT frames/s while
+// the source encoded at 37: the CPU SendImage upload of 33 MB/frame is the capacity ceiling. Both
+// paths report PubFrames through the same wrapper chain, so the two numbers are directly comparable
+// and the ceiling is visible without a probe tool.
+func decodeTelemetry(ctx context.Context, log *logbus.Bus, path string, spec medialink.DecodeSpec, r medialink.PipelineReporter) {
+	t := time.NewTicker(routeTelemetryEvery)
+	defer t.Stop()
+	var prevPub uint64
+	prev := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now()
+		st := r.PipeStats()
+		dPub := st.PubFrames - prevPub
+		secs := now.Sub(prev).Seconds()
+		prevPub, prev = st.PubFrames, now
+		pubFPS := 0.0
+		if secs > 0 {
+			pubFPS = float64(dPub) / secs
+		}
+		log.Info(source, "route decode telemetry", map[string]any{
+			"decode": path, "engine": st.Encoder, "hwaccel": st.HWAccel,
+			"in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
+			// The receive side's content oracle: frames that actually reached the local Spout sender,
+			// and the rate they reached it at. "Frames arrived" and "frames were published" are
+			// different questions, and the sink's Write cannot tell them apart - it returns nil either
+			// way, which is exactly why the volume has to be counted.
+			"published": st.PubFrames, "publishedFps": fmt.Sprintf("%.1f", pubFPS),
+			"outFps": fmt.Sprintf("%.1f", st.OutFPS), "gpuPublish": st.ZeroDecode,
+			"dropped": st.Dropped, "lost": st.RealDrops(), "ringDrops": st.InDropped,
+			"decErrors": st.DecErrors, "restarts": st.Restarts, "degraded": st.DegradeReason})
+	}
 }

@@ -3,6 +3,7 @@ package mediapipe
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"rave.page/mate/internal/encoderscan"
@@ -35,8 +36,14 @@ type plainSrc struct{}
 func (plainSrc) Next(context.Context) (*medialink.Frame, error) { return nil, io.EOF }
 func (plainSrc) Close() error                                   { return nil }
 
-// TestZeroCopyGate: every arm of the §7.2 gate. Anything short of ALL conditions holding must
-// leave opts.Spout nil, i.e. the route runs today's readback path byte for byte.
+// TestZeroCopyGate: every arm of the §7.2 gate, which is also zigmedia inc-5 promotion gate 1 (the
+// policy must be decided PER SOURCE and never assumed). Anything short of ALL conditions holding
+// must leave opts.Spout nil, i.e. the route runs the readback path byte for byte.
+//
+// `applicable` is the half that matters once zero-copy is the DEFAULT: it separates "this source
+// could never have done zero-copy" (a webcam - silent, uncounted, the readback is the only path
+// that ever existed) from "this source could have and did not" (one WARN + a counted downgrade, so
+// a rig that always falls back is visible instead of mysteriously slow).
 func TestZeroCopyGate(t *testing.T) {
 	orig := ZeroCopyCapture
 	defer func() { ZeroCopyCapture = orig }()
@@ -46,33 +53,42 @@ func TestZeroCopyGate(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		flag    bool
-		src     medialink.Source
-		wantZC  bool
-		wantDwn int
+		name      string
+		flag      bool
+		src       medialink.Source
+		wantZC    bool
+		wantAppl  bool
+		reasonHas string
 	}{
-		{"flag off: never requested", false, good(), false, 0},
-		{"no shared texture on the source type", true, plainSrc{}, false, 0},
-		{"source says no texture", true, &zcSrc{ok: false}, false, 0},
-		{"zero handle (DX9 / memoryshare sender)", true, &zcSrc{h: 0, fmt: 87, w: 1920, hh: 1080, name: "x", ok: true}, false, 0},
-		{"geometry moved under us", true, &zcSrc{h: 0x1234, fmt: 87, w: 1280, hh: 720, name: "x", ok: true}, false, 1},
-		{"all conditions hold", true, good(), true, 0},
+		{"flag off: never requested", false, good(), false, true, "disabled"},
+		{"webcam / DirectShow: not applicable at all", true, plainSrc{}, false, false, "no GPU shared texture"},
+		{"webcam with the flag OFF is still not applicable", false, plainSrc{}, false, false, "no GPU shared texture"},
+		{"source says no texture", true, &zcSrc{ok: false}, false, true, "no DX11 shared texture"},
+		{"zero handle (DX9 / memoryshare sender)", true, &zcSrc{h: 0, fmt: 87, w: 1920, hh: 1080, name: "x", ok: true}, false, true, "no DX11 shared texture"},
+		{"geometry moved under us", true, &zcSrc{h: 0x1234, fmt: 87, w: 1280, hh: 720, name: "x", ok: true}, false, true, "resized"},
+		{"all conditions hold", true, good(), true, true, ""},
 	}
 	for _, c := range cases {
 		ZeroCopyCapture = func() bool { return c.flag }
 		opts := mfenc.ProcOpts{}
-		zc, dwn := zeroCopyOpts(&opts, spec, c.src)
-		if zc != c.wantZC {
-			t.Errorf("%s: zeroCopy=%v want %v", c.name, zc, c.wantZC)
+		v := zeroCopyOpts(&opts, spec, c.src)
+		if v.request != c.wantZC {
+			t.Errorf("%s: request=%v want %v", c.name, v.request, c.wantZC)
 		}
-		if dwn != c.wantDwn {
-			t.Errorf("%s: downgrades=%d want %d", c.name, dwn, c.wantDwn)
+		if v.applicable != c.wantAppl {
+			t.Errorf("%s: applicable=%v want %v (this decides whether it is logged + counted as a downgrade)",
+				c.name, v.applicable, c.wantAppl)
+		}
+		if c.reasonHas != "" && !strings.Contains(v.reason, c.reasonHas) {
+			t.Errorf("%s: reason %q does not name %q", c.name, v.reason, c.reasonHas)
+		}
+		if c.wantZC && v.reason != "" {
+			t.Errorf("%s: a granted request carries reason %q", c.name, v.reason)
 		}
 		if (opts.Spout != nil) != c.wantZC {
 			t.Errorf("%s: opts.Spout set=%v want %v", c.name, opts.Spout != nil, c.wantZC)
 		}
-		if zc {
+		if v.request {
 			// The resolver must re-read the source, not cache the open-time scalars.
 			h, f, w, hh, ok := opts.Spout.Resolve()
 			if !ok || h != 0x1234 || f != 87 || w != 1920 || hh != 1080 {
@@ -85,6 +101,37 @@ func TestZeroCopyGate(t *testing.T) {
 	}
 }
 
+// TestZeroCopyPolicyIsPerSource is promotion gate 1 stated as one assertion: with the flag ON (the
+// inc-5 default), a Spout source and a webcam source resolved by the SAME process take different
+// paths. A policy derived from the flag, the config or the peer's advert instead of from the source
+// itself would give both the same answer - and handing a webcam route a zero-copy request is a
+// black route, because there is no texture behind it.
+func TestZeroCopyPolicyIsPerSource(t *testing.T) {
+	orig := ZeroCopyCapture
+	defer func() { ZeroCopyCapture = orig }()
+	ZeroCopyCapture = func() bool { return true }
+	spec := medialink.EncodeSpec{Width: 1920, Height: 1080}
+
+	var spoutOpts, camOpts mfenc.ProcOpts
+	spoutV := zeroCopyOpts(&spoutOpts, spec, &zcSrc{h: 0xdead, fmt: 87, w: 1920, hh: 1080, name: "OBS", ok: true})
+	camV := zeroCopyOpts(&camOpts, spec, plainSrc{})
+
+	if !spoutV.request || spoutOpts.Spout == nil {
+		t.Fatal("the Spout source was not granted zero-copy with the flag on")
+	}
+	if camV.request || camOpts.Spout != nil {
+		t.Fatal("the webcam source was handed a zero-copy request - there is no texture behind it")
+	}
+	if camV.applicable {
+		t.Error("a webcam route counts as a zero-copy DOWNGRADE - it would log a warning on every camera route")
+	}
+	// And the flag alone must not be able to explain the difference: same flag, same spec, same
+	// call, two answers.
+	if spoutV.request == camV.request {
+		t.Fatal("both sources got the same verdict: the policy is not per-source")
+	}
+}
+
 // TestZeroCopyGateNeverPulls: resolving the shared texture must never pull a frame - an eager
 // Next here would start the readback the increment exists to remove.
 func TestZeroCopyGateNeverPulls(t *testing.T) {
@@ -93,8 +140,8 @@ func TestZeroCopyGateNeverPulls(t *testing.T) {
 	ZeroCopyCapture = func() bool { return true }
 	src := &zcSrc{h: 0x99, fmt: 87, w: 640, hh: 480, name: "s", ok: true}
 	opts := mfenc.ProcOpts{}
-	if zc, _ := zeroCopyOpts(&opts, medialink.EncodeSpec{Width: 640, Height: 480}, src); !zc {
-		t.Fatal("gate refused a valid source")
+	if v := zeroCopyOpts(&opts, medialink.EncodeSpec{Width: 640, Height: 480}, src); !v.request {
+		t.Fatalf("gate refused a valid source: %s", v.reason)
 	}
 	_, _, _, _, _ = opts.Spout.Resolve()
 	if src.nextCall != 0 {

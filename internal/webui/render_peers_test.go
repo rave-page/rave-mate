@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/medialink"
 )
 
@@ -88,5 +89,48 @@ func TestFmtLatKeepsTheSign(t *testing.T) {
 	none := medialink.RouteStat{Direction: "recv", LatUnsynced: 12, LatencyP50Ns: 1_785_118_072_019_600_000}
 	if got := fmtLat(none, none.LatencyP50Ns); got == "" || strings.Contains(got, "ms") {
 		t.Errorf("off-clock rendered as a duration: %q", got)
+	}
+}
+
+// TestFmtContentLineRendersTheOracle is the webview half of zigmedia inc-5 promotion gate 2 (the
+// Fyne half is ui.TestFmtContentLineRendersTheOracle). The content oracle and DegradeReason were
+// collected since inc 1 and rendered in NEITHER panel, which is how a route shipping black kept
+// healthy-looking counters.
+func TestFmtContentLineRendersTheOracle(t *testing.T) {
+	i18n.SetLocale("en")
+	black := medialink.PipelineStats{OutFPS: 30, AUCount: 900, AUBytesPerFrame: 255}
+	line := fmtContentLine(black)
+	for _, want := range []string{"255 B/frame", "no picture content", "static"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("a 255 B/frame route does not render %q: %q", want, line)
+		}
+	}
+	live := medialink.PipelineStats{OutFPS: 30, AUCount: 900, AUBytesPerFrame: 83000}
+	if line := fmtContentLine(live); !strings.Contains(line, "81.1 kB/frame") ||
+		strings.Contains(line, "no picture content") {
+		t.Errorf("live 83 kB/frame content renders %q", line)
+	}
+	deg := medialink.PipelineStats{OutFPS: 30, DegradeReason: "hardware MFT poisoned",
+		SoftwareEncode: true, Poisoned: true, BusyDrops: 12, EncFails: 3}
+	line = fmtContentLine(deg)
+	for _, want := range []string{"degraded: hardware MFT poisoned", "software encode",
+		"hardware poisoned", "encoder saturated 12", "encode failures 3"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("degrade block missing %q: %q", want, line)
+		}
+	}
+	if fmtContentLine(medialink.PipelineStats{}) != "" {
+		t.Error("a stats block with nothing to say must render nothing")
+	}
+	// WIRING, not just formatting: the block must reach the line the panel actually shows.
+	wired := fmtPipeLine(medialink.RouteStat{Encoder: "h264_nvenc", Tier: 1, Pipe: &black})
+	if !strings.Contains(wired, "255 B/frame") || !strings.Contains(wired, "no picture content") {
+		t.Errorf("the content oracle does not reach the rendered pipe line: %q", wired)
+	}
+	if !strings.Contains(fmtContentLine(medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda"}), "published 0") {
+		t.Error("a decode route publishing nothing renders no warning")
+	}
+	if strings.Contains(fmtContentLine(medialink.PipelineStats{HWAccel: "cuda"}), "published") {
+		t.Error("a cold receive route was accused of publishing nothing")
 	}
 }
