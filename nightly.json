@@ -1,13 +1,13 @@
 {
-  "version": "nightly-f0be160",
-  "build": 181,
-  "commit": "f0be160",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-181-20260727-f0be160.exe",
-  "sha256": "21dbd63dcc1322b6ae55434d7205ea3142da1f9c0e6bd018ec6c324feba38ce8",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-181-20260727-f0be160.exe",
-  "installer_sha256": "537390810b351a1c1c0ff046cf8d743772928dc8d97d6c55feffc65171a50fcc",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-181-20260727-f0be160",
-  "linux_sha256": "6927e31c493b21c3d94778563c681a913ff9b4d9db21d2994138b89af0336b64",
+  "version": "nightly-2537d24",
+  "build": 183,
+  "commit": "2537d24",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-183-20260727-2537d24.exe",
+  "sha256": "b91637fdfca87394675c943e2b7fccc2773be4d8cff38e0d17574fff545ae0c4",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-183-20260727-2537d24.exe",
+  "installer_sha256": "79c8dba255c4856af73fafdef8f98156fba815d7f48426f030fc165850b77c79",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-183-20260727-2537d24",
+  "linux_sha256": "bc1e77c3f74cd71dda1b262c4342361fdb9e7c31b002979f43495ee5793eed13",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-27T04:00:07Z",
-  "notes": "Merge mfenc telemetry: make a PASSING AMD run legible"
+  "released": "2026-07-27T04:37:11Z",
+  "notes": "Merge mfenc follow-up: scan showed only the BUSY adapter; vendor matrix honesty"
 }
