@@ -261,7 +261,16 @@ fn renderRow(h: *Html, r: Row) !void {
     }
 }
 
+// renderMedia wraps the media plane in its own patch target (#peers-media): the route counters
+// must keep advancing while the general ~1 Hz tick is withheld by the activity governor, and that
+// exemption patches this fragment alone. Byte-identical to Go's peerMediaHTML.
 fn renderMedia(h: *Html, s: Media) !void {
+    try h.raw("<div id=peers-media>");
+    try renderMediaInner(h, s);
+    try h.raw("</div>");
+}
+
+fn renderMediaInner(h: *Html, s: Media) !void {
     try h.raw("<div class=\"rp-card\">");
     // Clock: active tier/lock/offset + per-peer sync estimates.
     try h.raw("<div class=media-clock>");
@@ -524,10 +533,12 @@ test "media plane: routes with pipeline line" {
         .{ .title = "← Studio · s2", .detail = "loss 3" },
     };
     try renderMedia(&h, .{ .show = true, .clockLine = "c", .routesHdr = "Routes: 2", .routes = &routes });
-    try std.testing.expectEqualStrings("<div class=\"rp-card\"><div class=media-clock>c</div>" ++
+    // The #peers-media wrapper is load-bearing: it is the patch target of the governor-exempt
+    // route-counter tick (webui livePush). Losing it silently re-freezes the panel while streaming.
+    try std.testing.expectEqualStrings("<div id=peers-media><div class=\"rp-card\"><div class=media-clock>c</div>" ++
         "<div class=media-sub>Routes: 2</div>" ++
         "<div class=media-route>→ Studio · s1</div><div class=media-sub>loss 0</div><div class=media-sub>nvenc tier 2</div>" ++
-        "<div class=media-route>← Studio · s2</div><div class=media-sub>loss 3</div></div>", h.b.items);
+        "<div class=media-route>← Studio · s2</div><div class=media-sub>loss 3</div></div></div>", h.b.items);
 }
 
 test "cam node: gated, empty, full" {

@@ -228,6 +228,27 @@ func (u *UI) peersBody() string {
 	return peersBodyHTML(st)
 }
 
+// peersMediaFrag renders the INTERIOR of #peers-media (the governor-exempt route-counter tick's
+// patch payload; see ui.go mediaRouteTick) and reports how many routes it describes. Same state
+// builder + same renderer as the body path, so the fragment can never drift from what a full
+// render would have produced. One Media.Stats() read per call.
+func (u *UI) peersMediaFrag() (html string, routes int) {
+	if u.svc.Media == nil {
+		return "", 0
+	}
+	byNode := map[string]peerlink.ConnInfo{}
+	for _, c := range u.peerConns() {
+		byNode[c.NodeID] = c
+	}
+	st := u.peerMediaState(func(id string) string {
+		if c, ok := byNode[id]; ok {
+			return peerName(c.Nickname, id)
+		}
+		return peerName("", id)
+	})
+	return peerMediaInnerHTML(st), len(st.Routes)
+}
+
 // ── state builders (impure: services, locks, i18n) ──
 
 func (u *UI) peersState() peersSt {
@@ -418,6 +439,9 @@ func (u *UI) peerRememberedState(byNode map[string]peerlink.ConnInfo) peerListSt
 		}
 	}
 	lst := peerListSt{Empty: i18n.T("peers.none")}
+	if u.svc.Peers == nil {
+		return lst // peerConns() already tolerates this; the remembered list must too
+	}
 	for _, p := range u.svc.Peers.Remembered() {
 		if online[p.NodeID] {
 			continue
@@ -776,7 +800,15 @@ func peerRowHTML(r peerRowSt) string {
 	return b.String()
 }
 
+// peerMediaHTML wraps the media plane in its own patch target. The route counters must keep
+// advancing while the general ~1 Hz tick is withheld (activity governor: a live stream or an
+// unfocused window), and #peers-media is what that exemption patches - one small fragment, never
+// the whole tab. Byte-identical to native/zigui/src/peers.zig renderMedia.
 func peerMediaHTML(st peerMediaSt) string {
+	return `<div id=peers-media>` + peerMediaInnerHTML(st) + `</div>`
+}
+
+func peerMediaInnerHTML(st peerMediaSt) string {
 	var b strings.Builder
 	b.WriteString(`<div class="rp-card">`)
 
@@ -971,7 +1003,10 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		parts = append(parts, p)
 	}
 	if s.RateBps > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f Mbps", s.RateBps/1e6))
+		// Wire fps alongside the bitrate: the encoder's "out N fps" below is a DIFFERENT counter,
+		// and a route whose encoder runs at 40 while the wire carries 4 is invisible without both.
+		parts = append(parts, fmt.Sprintf("%.1f Mbps", s.RateBps/1e6)+" · "+
+			i18n.T("peers.wireFps", i18n.A{"fps": fmt.Sprintf("%.1f", s.WireFPS)}))
 	}
 	if s.Keyframes > 0 {
 		parts = append(parts, fmt.Sprintf("kf %d", s.Keyframes))
@@ -1003,9 +1038,14 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.ChildCPUPct > 0 {
 			p += " · " + i18n.T("peers.pipeChildCpu", i18n.A{"pct": fmt.Sprintf("%.0f", s.Pipe.ChildCPUPct)})
 		}
-		// Stage drop counters were collected everywhere and rendered nowhere.
-		if s.Pipe.Dropped > 0 {
-			p += " · " + i18n.T("peers.pipeDropped", i18n.A{"n": fmt.Sprint(s.Pipe.Dropped)})
+		// Stage drop counters were collected everywhere and rendered nowhere - and then summed
+		// deliberate fps-cap throttling into the same number as real loss, so a healthy capped
+		// route read "dropped 41902 and climbing". Two counters, two labels.
+		if s.Pipe.RateCapped > 0 {
+			p += " · " + i18n.T("peers.pipeRateCapped", i18n.A{"n": fmt.Sprint(s.Pipe.RateCapped)})
+		}
+		if lost := s.Pipe.RealDrops(); lost > 0 {
+			p += " · " + i18n.T("peers.pipeDropped", i18n.A{"n": fmt.Sprint(lost)})
 		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
@@ -1124,8 +1164,8 @@ func fmtRouteStat(s medialink.RouteStat, resolve func(string) string) (title, de
 			"loss":      fmt.Sprint(s.LostEst),
 			"recovered": fmt.Sprint(s.Recovered),
 			"jitter":    fmtMsNs(s.JitterNs),
-			"p50":       fmtMsNs(float64(s.LatencyP50Ns)),
-			"p95":       fmtMsNs(float64(s.LatencyP95Ns)),
+			"p50":       fmtLat(s, s.LatencyP50Ns),
+			"p95":       fmtLat(s, s.LatencyP95Ns),
 			"nack":      fmt.Sprint(s.NACKsSent),
 		})
 		return title, detail
@@ -1152,6 +1192,19 @@ func fmtRate(r medialink.Rate) string {
 		return fmt.Sprintf("%.2fdf", float64(r.Nominal)*1000/1001)
 	}
 	return fmt.Sprintf("%d", r.Nominal)
+}
+
+// fmtLat renders one e2e latency percentile, or a reason when no PLAUSIBLE transit sample exists.
+// arrival−PTS is a duration only while the peer stamps PTS on our media clock; a foreign domain
+// used to print the raw epoch as a latency ("1785118072019.6 ms"). "off-clock" names the cause.
+func fmtLat(s medialink.RouteStat, ns int64) string {
+	if s.LatencySamples > 0 {
+		return fmtMsNs(float64(ns))
+	}
+	if s.LatUnsynced > 0 {
+		return i18n.T("peers.latencyOffClock")
+	}
+	return i18n.T("peers.latencyNA")
 }
 
 // fmtMsNs renders nanoseconds as adaptive milliseconds ("0.42 ms", "12.3 ms").

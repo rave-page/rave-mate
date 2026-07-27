@@ -151,7 +151,9 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		parts = append(parts, p)
 	}
 	if s.RateBps > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f Mbps", s.RateBps/1e6))
+		// Wire fps alongside the bitrate: the encoder's "out N fps" below is a DIFFERENT counter,
+		// and a route whose encoder runs at 40 while the wire carries 4 is invisible without both.
+		parts = append(parts, fmt.Sprintf("%.1f Mbps · wire %.1f fps", s.RateBps/1e6, s.WireFPS))
 	}
 	if s.Keyframes > 0 {
 		parts = append(parts, fmt.Sprintf("kf %d", s.Keyframes))
@@ -181,9 +183,14 @@ func fmtPipeLine(s medialink.RouteStat) string {
 			p += fmt.Sprintf(" · child cpu %.0f%%", s.Pipe.ChildCPUPct)
 		}
 		// Every stage counted its own drops and none of them reached a surface: a route that
-		// throws most frames away (dims mismatch, fps cap, no keyframe yet) looked healthy.
-		if s.Pipe.Dropped > 0 {
-			p += fmt.Sprintf(" · dropped %d", s.Pipe.Dropped)
+		// throws most frames away (dims mismatch, no keyframe yet) looked healthy. Deliberate
+		// fps-cap throttling is rendered SEPARATELY - summed in, a correctly capped route read
+		// "dropped 41902 and climbing", which is indistinguishable from catastrophic loss.
+		if s.Pipe.RateCapped > 0 {
+			p += fmt.Sprintf(" · rate-capped %d", s.Pipe.RateCapped)
+		}
+		if lost := s.Pipe.RealDrops(); lost > 0 {
+			p += fmt.Sprintf(" · dropped %d", lost)
 		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
@@ -296,7 +303,7 @@ func fmtRouteStat(s medialink.RouteStat, peerName func(string) string) (title, d
 	if s.Direction == "recv" {
 		detail = fmt.Sprintf("loss %d · recovered %d · jitter %s · latency %s/%s p50/p95 · nack %d",
 			s.LostEst, s.Recovered, fmtMs(s.JitterNs),
-			fmtMs(float64(s.LatencyP50Ns)), fmtMs(float64(s.LatencyP95Ns)), s.NACKsSent)
+			fmtLat(s, s.LatencyP50Ns), fmtLat(s, s.LatencyP95Ns), s.NACKsSent)
 		return title, detail
 	}
 	if r := s.Remote; r != nil { // sender: quality as the receiver reports it (RFC 3550 RR)
@@ -315,6 +322,19 @@ func fmtRate(r medialink.Rate) string {
 		return fmt.Sprintf("%.2fdf", float64(r.Nominal)*1000/1001)
 	}
 	return fmt.Sprintf("%d", r.Nominal)
+}
+
+// fmtLat renders one e2e latency percentile, or "n/a" when no PLAUSIBLE transit sample exists.
+// arrival−PTS is a duration only while the peer stamps PTS on our media clock; a foreign domain
+// used to print the raw epoch as a latency ("1785118072019.6 ms"). "off-clock" names the cause.
+func fmtLat(s medialink.RouteStat, ns int64) string {
+	if s.LatencySamples > 0 {
+		return fmtMs(float64(ns))
+	}
+	if s.LatUnsynced > 0 {
+		return "off-clock"
+	}
+	return "n/a"
 }
 
 // fmtMs renders nanoseconds as adaptive milliseconds ("0.42 ms", "12.3 ms").
