@@ -1,0 +1,220 @@
+# P0: CPU readback delivered black frames
+
+Branch `fix/spout-recv-black` off `development` @c3ed1f5. Fixed in `9cad3f9`.
+
+## Root cause
+
+The vendored `SpoutLibrary.h` and the shipped `SpoutLibrary.dll` are **different revisions of the
+COM-like interface**, and the mismatch is a **window**, not a uniform shift. Both come from the
+2.007.017 release zip, but from different subtrees (`include/SpoutLibrary/` vs `MT/bin/`), and their
+slot orders do not agree.
+
+Measured on this box with a canary buffer + ground-truth accessors on a live 3840×2160 sender:
+
+| header slot | method | result |
+|---|---|---|
+| 5 | `SendImage` | **aligns** - sending has always worked |
+| 12 | `GetHandle` | shifted → returns 0 where the registry has a real handle |
+| 19 | `ReceiveImage` | shifted → lands on `ReceiveTexture(GLuint,…)` |
+| 22 | `IsFrameNew` | shifted → lands on `IsConnected`: permanently "true" |
+| 24 | `GetSenderWidth` | shifted → returns `GetSenderName`'s **pointer** (1240326832) |
+| 25 | `GetSenderHeight` | shifted → returns the real **width** (3840) |
+| 26 | `GetSenderFormat` | shifted → returns the real **height** (2160) |
+| 111-114 | `GetSenderCount/GetSender/FindSenderName/GetSenderInfo` | **align** |
+
+`ReceiveImage` therefore executed `ReceiveTexture`, which takes a **GLuint texture id** where we
+pass a **pixel pointer**. It returns true, the (shifted) frame-new query returns true, and not one
+byte is written: a 33 MB canary survived **12/12 attempts, byte for byte**.
+
+That single fact explains every observation, including the ones that looked contradictory:
+
+- healthy counters + black pixels — the metadata came from methods that *do* respond, just not the
+  ones we thought we were calling;
+- `GetHandle` returning NULL while `GetSenderInfo` returns a working handle (inc 2 worked around
+  this without knowing why);
+- `GetSenderFrame` junk and `GetSenderFps` = the monitor's refresh rate (inc 3's M1, recorded then
+  as "late-vtable skew" — correct, but the cause was unknown);
+- **the pre-rework tree getting zero frames instead of black ones**: its first call passed NULL, so
+  `ReceiveTexture(0,…)` simply failed. Same bug, two shapes. "It worked before 9913de1" was never
+  true — the CPU readback has been broken for as long as this header/DLL pairing has been vendored.
+
+I own the worst part of this: in increment 2 I hit this exact symptom, wrote a positive control,
+watched it fail, and filed it as *"Spout's receive side cannot see a foreign-device write on this
+rig — not a usable oracle"*. The control was telling the truth; I mislabelled a product bug as an
+instrument bug. The instrument that would have settled it — a canary, distinguishing "copied zeros"
+from "never written" — took ten minutes to write once I stopped assuming.
+
+## The memory-share hypothesis: tested, and refuted by execution
+
+The proposed cause was a silent fallback to Spout's **CPU memory-share** mode in our windowless
+receivers, returning an empty shared-memory buffer (success + frame-new + right dims + zero pixels).
+It fits the field symptom exactly, so it was worth testing first. Three independent results rule it
+out:
+
+1. **The canary is the discriminator, and it says "never written".** A memory-share read of an empty
+   buffer *copies zeros* - it would destroy a canary. Filling the target with `0xA5` and receiving
+   leaves **33,177,600 bytes of canary intact, 12/12 attempts**. Nothing was written at all. "Copied
+   zeros" and "never written" are different bugs, and this is the second one.
+2. **Three consecutive accessors return each other's values.** `GetSenderWidth()` → a pointer,
+   `GetSenderHeight()` → the real **width** (3840), `GetSenderFormat()` → the real **height** (2160).
+   A share-mode fallback cannot produce a deterministic off-by-one across neighbouring methods; only
+   a slot misalignment can.
+3. **Controlled experiment - same process, same publisher, only the call changed.** The new D3D11
+   readback delivers `top(255,0,0) bottom(0,0,255) left(0,255,0)` from the *same windowless Go test
+   binary* that, moments earlier, got an untouched canary from `ReceiveImage`. My fix creates no
+   window and no GL context either. If windowless interop init were the cause, it would still be
+   black.
+
+**Trap worth naming:** the two readings that look like confirmation - `cpu=true`, `gldx=false` - come
+from `GetSenderCPU()`/`GetSenderGLDX()`, which sit in the same suspect region of the vtable (I proved
+misalignment at slots 12-26 and alignment at 111-114; these are at ~31-32, inside the unproven-but-
+suspect span). `cpu=true` is most likely `GetSenderTexture()` returning a non-null pointer read as a
+bool. So the evidence that appeared to support a memory-share fallback is exactly the evidence that
+cannot be trusted - which is the same trap that made me file this as an "instrument problem" in
+increment 2.
+
+**What the hypothesis got right:** "refuse loudly instead of shipping zeros" is now the behaviour. A
+genuine CPU/memory-share sender has no DX11 shared texture, so `GetSenderInfo` returns `share == 0`
+and the new path returns -1 (no frames, sender reported unusable) instead of delivering black. Same
+for torn registry geometry. Whatever the mode, zeros are never presented as a frame.
+
+**Strategic point, agreed:** the zero-copy DX path needs no GL context at all, and now neither does
+the CPU readback. Nothing on the receive side requires OpenGL any more.
+
+## Fix
+
+The receive path no longer calls into the misaligned window. The only Spout call left is
+`GetSenderInfo` (aligns, shared-memory read, already the basis of the zero-copy encode path);
+the readback is plain D3D11:
+
+```
+GetSenderInfo → share handle + dims + format
+OpenSharedResource → CopyResource into a STAGING texture → Map → row copy (BGRA→RGBA)
+```
+
+- One **bounded** acquire (3 ms) of the sender's named access mutex around **one** GPU copy — the
+  same discipline `cap.zig` uses, so we never serialise against the sending app's submissions.
+- A changed share handle / geometry re-opens and reports code 2, so a **re-created** sender can
+  never be read through its dead texture.
+- **Return codes are unchanged**, so `recvpoll.go`'s state machine, its geometry validation and the
+  bounded pixel pool from the OOM fix are untouched. That fix was correct and stays.
+- The swizzle is not new work: the old path asked `ReceiveImage` for `GL_RGBA` and the SDK did the
+  BGRA→RGBA conversion internally.
+- Side effect worth knowing: **receiving no longer needs an OpenGL context** (one of the design's
+  standing goals, §2 item 4).
+
+## Content gates (requirement 2)
+
+Every gate that existed was a metadata gate, which is exactly how this shipped. The new ones assert
+pixels:
+
+| gate | asserts |
+|---|---|
+| `TestRecvContentCarriesPixels` | red top / blue bottom / **green left column** → catches a vertical flip, a horizontal mirror and an R/B swizzle in one frame. Result: `top(255,0,0) bottom(0,0,255) left(0,255,0)` |
+| `TestRecvContentStaysNonZero` | 30 **consecutive** frames carry content (one lucky frame is not a pass). 30/30, 0 blank |
+| `TestSpout4KCaptureSoak` | now samples a mid-frame pixel: **469 frames, 0 blank, 58.6 fps**, pool flat at 31 MB live / 63 MB idle / 2 buffers. It previously counted frames happily straight through the outage |
+| `TestRecvDiag` | the canary instrument, opt-in (`RAVE_SPOUT_RECVDIAG=1`) |
+
+All live tests use **per-attempt unique sender names** — a reused name hands the reader the previous
+publisher's dead texture, which produces a blank frame with zero errors, i.e. it would mask the very
+bug under test (my own inc-4 finding).
+
+`TestRecvDiag` is opt-in because it deliberately calls the misaligned window and **access-violates**
+once a sender is live (0xc0000005, observed). The shipping code never made that call in that order,
+which is why the field symptom was black video and not a crash — the deployed peer is not at risk of
+an AV from this.
+
+## Answers to the open questions
+
+### 3. `drops 17294` — real, and not one of my counters
+
+The panel line is `buffer 1f · late 0.0% · drops 17294`, which is
+`JB.Depth / JB.LateRate / JB.PolicyDrops` — the **jitter buffer's** keyframe-policy + overflow
+drops. It is a pre-existing counter, **not** the `Pipe.Dropped` I surfaced in inc 2 (that renders
+separately as `dropped N`, and it is absent from the field line). **No counting bug, nothing to fix
+there.**
+
+They are **real drops, correctly counted** - no counting bug on my side.
+
+`17294 / 257 keyframes ≈ 67` frames discarded per keyframe, i.e. most of each GOP: the signature of
+the buffer repeatedly entering `waitKey` and dropping forward to the next resync point. Each entry
+needs a **seq gap** in the arriving stream, and `late 0.0%` rules out our own lateness.
+
+Your correlation with the peer's **encoder-child AV/respawn cycles** is the best available
+explanation and I agree with it: every respawn is a hole in the sequence, our jitter buffer waits for
+a keyframe and discards the remainder of that GOP. It also explains why the field line shows **no
+`restarts`** - that field is the *local* decode child's restart count, and the crashes are on the
+sending side. So: correctly counted, driven by a cause outside my surface (the other agent's encoder
+AV), and expected to fall to ~0 once that is fixed and the stream carries content.
+
+Verified rather than assumed: I traced `PolicyDrops` to `jitterBuffer.dropHead()` and its two
+callers (`overflowDrop`, and the `waitKey`/gap paths in `popLocked`), and confirmed the panel field
+is `JB.PolicyDrops` and not `Pipe.Dropped`. What I could **not** do from here is watch the live route
+to see the gaps directly, because the JB collects `Grows`/`Decays`/`Dups` and renders only
+`PolicyDrops` - the same collected-but-invisible blind spot. Rendering those three would make this
+diagnosable from the panel instead of by inference (follow-up 2).
+
+### 4. The already-deployed peer must update
+
+**Note:** SUS being a single-adapter AMD iGPU box that is *also* black confirms this is
+vendor- and adapter-independent, which matches a header/DLL slot mismatch (identical binary on both
+machines) and rules out cross-adapter as a factor. It does not change the fix or the verdict below.
+
+**The peer must update.** The break is in the CAPTURE side — the peer's `rave_spout_recv` reading
+OBS's sender — and it runs `nightly-2b5babf`, which predates this fix. Nothing on our receiving end
+can repair a stream that is black before it is encoded. Our side of the fix matters for the reverse
+direction (when this box captures a Spout source) and for any route that republishes.
+
+### 5. `RAVE_MATE_ZIGMEDIA_CAPTURE=1` on the sender — yes, it bypasses this, with caveats
+
+**Verdict: it does bypass the bug, and the evidence is direct.** The zero-copy capture path never
+calls `ReceiveImage`. It resolves the sender's share handle through `GetSenderInfo` (which aligns)
+and hands it to the encoder child, which reads the texture with its own D3D11 device. Evidence on
+this box: inc-1/3/4's live gates decode the probe pattern through that path, and your own texprobe
+read content from the live republished sender (`capFlags=0x5`, band means 77.7/79.6/81.7) while the
+CPU readback of the same sender was all zeros. Two readers, same texture, opposite results — that is
+the bug isolated to the one call, and the zero-copy path on the good side of it.
+
+Before flipping it on the user's second PC, four things must hold — and three are checkable from
+`ctl perf` in about a minute:
+
+1. **It must actually come up zero-copy.** If it downgrades, it falls back to the *broken* readback
+   and the picture is black again — silently. Require `zeroCopy=1` and `capFrames` rising.
+2. **Adapter affinity.** If OBS's sender lives on a different GPU than the encode device,
+   `OpenSharedResource` refuses and it downgrades (R7). That rig has two adapter LUIDs, so this is a
+   live possibility. `zigAffinity` fixes it but is also default-OFF, so it would need flipping too.
+3. **Spout sources only.** It does nothing for a webcam route (no shared texture).
+4. **`hello.ver >= 2`** — satisfied by nightly-2b5babf.
+
+So: a legitimate interim mitigation for a Spout route, **not** a blind flag flip — verify
+`zeroCopy=1` immediately after enabling, and treat a downgrade warning as "still black".
+
+## Gate results (verbatim)
+
+```
+gofmt -l .                                                              (clean)
+GOWORK=off go vet ./...                                                 (clean)
+GOWORK=off go vet -tags spout ./...                                     (clean)
+GOWORK=off go test ./...                                                all ok
+GOWORK=off go build -tags "spout vr zigdsp zigui zigvr encembed" ./...   OK
+bash scripts/build-zig.sh                  rave-mate-enc built + embed-staged (0.16.0)
+go test -tags spout ./internal/videoshare                               PASS
+  TestRecvContentCarriesPixels   top(255,0,0) bottom(0,0,255) left(0,255,0)
+  TestRecvContentStaysNonZero    30 frames with content, 0 blank
+  TestSpout4KCaptureSoak         469 frames in 8s (58.6 fps, 0 blank) peakLive=31MB
+go test -tags spout ./internal/mfenc -run 'TestZeroCopyLive|TestDecodeLive|TestFlipLive|TestInc3'  PASS
+```
+
+## Follow-ups (not done here)
+
+1. **Re-vendor a matching header.** The real defect is the vendoring: a header that does not match
+   the DLL. Fixing it would repair `GetHandle`, `GetSenderFrame`, `GetSenderWidth/Height/Format` and
+   re-open inc-3's frame-new gating. It needs a network fetch + a new SHA pin + the 7-day soak, so
+   it is a supply-chain change for a human to sign off — `SUPPLY_CHAIN.md`, not a quiet edit. Until
+   then the shim's rule is: **nothing past `SendImage` except the registry queries (111-114).**
+2. Render `JB.Grows/Decays/Dups` (collected, invisible) so question 3 is answerable from the panel.
+3. The SUS webcam route (`mfenc: encode timeout` + child `0xc0000005`) is **not** this bug: that
+   path carries real DirectShow pixels, so it never touches `rave_spout_recv`. It belongs to the
+   encoder-AV P0.
+4. `videoshare/sender_spout_test.go:29` still hard-fails without `SpoutLibrary.dll` where every
+   other Spout test skips cleanly (pre-existing, reproducible on `development`).
