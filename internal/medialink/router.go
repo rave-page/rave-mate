@@ -1258,10 +1258,18 @@ func (rm *RouteManager) runJitter(ctx context.Context, conn *Conn, jb *jitterBuf
 }
 
 // runSend stamps + writes source frames to the peer. Seq is per-stream monotonic (media stream
-// here; meta seq is owned by routeIO); PTS is filled from the media clock when the source left it
-// zero.
+// here; meta seq is owned by routeIO).
+//
+// PTS domain: the ROUTER owns it. A source that left PTS zero is stamped from the media clock; a
+// source that stamped its own (an encode child times AUs on the wall epoch - mediapipe/mfenc
+// pts0) is REBASED onto the media clock once, and the same shift rides every later frame so
+// inter-frame deltas - the jitter buffer's pacing input - survive intact. Without the rebase the
+// receiver's e2e latency is arrival(media clock, process-relative) − PTS(wall epoch), i.e. an
+// epoch timestamp rendered as a duration ("latency 1785118072019.6 ms" in the field).
 func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) error {
 	var seq uint32
+	var ptsShift int64
+	rebased := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1278,6 +1286,11 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 		seq++
 		if f.PTS == 0 {
 			f.PTS = rm.clock.Now()
+		} else {
+			if !rebased {
+				ptsShift, rebased = rm.clock.Now()-f.PTS, true
+			}
+			f.PTS += ptsShift
 		}
 		if err := rio.conn.WriteFrame(f); err != nil {
 			return err
