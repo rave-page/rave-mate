@@ -193,10 +193,13 @@ func TestRouteReportsFlow(t *testing.T) {
 
 	const n = 16
 	frames := make([]*Frame, n)
+	// PTS stamped on the WALL EPOCH - exactly what the encode children do (mediapipe feed /
+	// mfenc pts0) - while the media clock is process-relative. runSend must rebase it onto the
+	// media clock; unrebased, arrival − PTS is ≈ −1.8e18 ns and the panel renders a 2026 timestamp
+	// as "latency 1785118072019.6 ms". Inter-frame deltas (1 ns apart) survive the shift.
+	epoch := time.Now().UnixNano()
 	for i := range frames {
-		// PTS pre-stamped before the clock epoch: arrival (≥0 on the shared clock) is provably
-		// later → e2e latency > 0 deterministically, even at coarse monotonic granularity.
-		frames[i] = &Frame{Kind: KindAudio, Codec: CodecPCMS16, PTS: int64(i+1) - 1_000_000, Payload: []byte{byte(i)}}
+		frames[i] = &Frame{Kind: KindAudio, Codec: CodecPCMS16, PTS: epoch + int64(i), Payload: []byte{byte(i)}}
 	}
 	rmB.RegisterSource(SourceDesc{ID: "mic", Kind: KindAudio, Codec: CodecPCMS16},
 		func(context.Context, Offer) (Source, error) { return &sliceSource{frames: frames}, nil })
@@ -245,8 +248,16 @@ func TestRouteReportsFlow(t *testing.T) {
 		if s.Direction != "recv" {
 			continue
 		}
-		if s.LatencyMaxNs <= 0 {
-			t.Fatalf("latency not measured: %+v", s)
+		// Latency is MEASURED (samples in the window) and PLAUSIBLE - never a clock-domain
+		// difference smuggled in as a duration. On loopback the value itself is ~0.
+		if s.LatencySamples != n {
+			t.Fatalf("latency window holds %d/%d samples: %+v", s.LatencySamples, n, s)
+		}
+		if s.LatUnsynced != 0 {
+			t.Fatalf("%d transit samples rejected as off-clock on a SHARED clock: %+v", s.LatUnsynced, s)
+		}
+		if s.LatencyMaxNs > int64(time.Millisecond) {
+			t.Fatalf("loopback e2e latency %d ns is not a transport time: %+v", s.LatencyMaxNs, s)
 		}
 		if s.SeqGaps != 0 || s.LostEst != 0 {
 			t.Fatalf("unexpected loss on loopback TCP: %+v", s)

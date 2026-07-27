@@ -14,6 +14,29 @@ import (
 // latWindowSize bounds the rolling latency sample window (per route).
 const latWindowSize = 256
 
+// Rate window (bitrate + wire fps). PRODUCER-driven: closed on the route's own goroutine as
+// frames are counted, so the measured span is always the span the bytes were counted over.
+// Computing it inside snapshot() made the number depend on WHO read it and how often - with the
+// UI tick paused (activity governor) the next read divided the whole idle gap into "live
+// bitrate", and with two pollers at different phases a reader got a window it never measured.
+const rateWindow = time.Second
+
+// rateStale is how long after the last counted frame the rolling rate stops being reported. A
+// route that STOPPED must not keep showing the bitrate it had when it died - that is the same
+// "healthy counters over a dead stream" failure the content oracle exists to catch.
+const rateStale = 3 * time.Second
+
+// Plausibility bounds for e2e transit (arrival − PTS). A duration only exists when the sender
+// stamped PTS on the SAME media clock we read arrival from; a peer whose encode child stamps its
+// own wall epoch (mediapipe) yields an epoch-sized value, and feeding that to the window rendered
+// a TIMESTAMP as a latency (field: "latency 1785118072019.6 ms" = 2026-07-25 in ns). Out-of-range
+// samples are counted, never believed. Generous on both ends: a slewing clock can go slightly
+// negative and a saturated LAN route can genuinely sit seconds behind.
+const (
+	transitMinNs = int64(-2 * time.Second)
+	transitMaxNs = int64(60 * time.Second)
+)
+
 // latencyWindow is a fixed ring of e2e latency samples (ns) with percentile snapshots.
 type latencyWindow struct {
 	buf  [latWindowSize]int64
@@ -71,14 +94,22 @@ type routeStat struct {
 	stream    uint16 // negotiated media stream id
 	direction string // "send" | "recv"
 
-	mu          sync.Mutex
-	encoder     string // §3.2 negotiated encoder ("" = raw/echo route)
-	tier        int
-	software    bool
-	keyframes   uint64 // video keyframes seen (sent or received)
+	// now is the clock the rate window closes against (time.Now; a test seam).
+	now func() time.Time
+
+	mu        sync.Mutex
+	encoder   string // §3.2 negotiated encoder ("" = raw/echo route)
+	tier      int
+	software  bool
+	keyframes uint64 // video keyframes seen (sent or received)
+	// Rate window anchors (see rateWindow): closed by count(), read-only in snapshot().
 	rateAt      time.Time
 	rateBytes   uint64
+	rateFrames  uint64
 	rateBps     float64
+	rateFps     float64
+	lastCount   time.Time // wall time of the last counted frame (staleness oracle)
+	latBad      uint64    // transit samples outside the plausible range (foreign PTS domain)
 	frames      uint64
 	bytes       uint64
 	seqGaps     uint64
@@ -99,7 +130,28 @@ type routeStat struct {
 
 func newRouteStat(session, peer string, stream uint16, direction string) *routeStat {
 	return &routeStat{session: session, peer: peer, stream: stream, direction: direction,
-		streams: map[uint16]*streamRecv{}}
+		streams: map[uint16]*streamRecv{}, now: time.Now}
+}
+
+// count records one frame's payload and closes the rate window when it is due. Caller holds st.mu.
+// This is the ONLY writer of the rate anchors - snapshot() is a pure read (see rateWindow).
+func (st *routeStat) count(n int) {
+	st.frames++
+	st.bytes += uint64(n)
+	now := st.now()
+	st.lastCount = now
+	if st.rateAt.IsZero() {
+		st.rateAt, st.rateBytes, st.rateFrames = now, st.bytes, st.frames
+		return
+	}
+	d := now.Sub(st.rateAt)
+	if d < rateWindow {
+		return
+	}
+	secs := d.Seconds()
+	st.rateBps = float64(st.bytes-st.rateBytes) * 8 / secs
+	st.rateFps = float64(st.frames-st.rateFrames) / secs
+	st.rateAt, st.rateBytes, st.rateFrames = now, st.bytes, st.frames
 }
 
 // setCodec records the §3.2 negotiated encode choice (route-stat surface; both directions).
@@ -112,8 +164,7 @@ func (st *routeStat) setCodec(encoder string, tier int, software bool) {
 // sent counts an outbound frame (media or meta).
 func (st *routeStat) sent(f *Frame) {
 	st.mu.Lock()
-	st.frames++
-	st.bytes += uint64(len(f.Payload))
+	st.count(len(f.Payload))
 	if f.Stream != metaStream {
 		st.sentHighest, st.sentAny = f.Seq, true
 		if f.Kind == KindVideo && f.Keyframe() {
@@ -161,8 +212,7 @@ func (st *routeStat) recvStream(f *Frame) gapRange {
 // recvMeta counts an inbound stream-0 meta frame (seq-tracked, never jitter/latency material).
 func (st *routeStat) recvMeta(f *Frame) {
 	st.mu.Lock()
-	st.frames++
-	st.bytes += uint64(len(f.Payload))
+	st.count(len(f.Payload))
 	st.recvStream(f)
 	st.mu.Unlock()
 }
@@ -172,8 +222,7 @@ func (st *routeStat) recvMeta(f *Frame) {
 func (st *routeStat) recvMedia(f *Frame, arrivalNs int64) gapRange {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	st.frames++
-	st.bytes += uint64(len(f.Payload))
+	st.count(len(f.Payload))
 	if f.Kind == KindVideo && f.Keyframe() {
 		st.keyframes++
 	}
@@ -188,7 +237,14 @@ func (st *routeStat) recvMedia(f *Frame, arrivalNs int64) gapRange {
 		s.jitter += (float64(d) - s.jitter) / 16 // RFC 3550 §A.8, ns units (§2.1)
 	}
 	s.hasTransit, s.lastTransit = true, transit
-	st.lat.add(transit) // e2e = receiver mediaclock − PTS (§7; accuracy = clock-sync quality)
+	// e2e = receiver mediaclock − PTS (§7; accuracy = clock-sync quality). Jitter above is a
+	// DIFFERENCE of transits, so a constant clock-domain offset cancels there and it stays valid
+	// either way; the absolute latency does not. Reject the implausible instead of rendering it.
+	if transit >= transitMinNs && transit <= transitMaxNs {
+		st.lat.add(transit)
+	} else {
+		st.latBad++
+	}
 	return gap
 }
 
@@ -248,23 +304,20 @@ func (st *routeStat) receiverReport(wallNs, ptsNs int64) (Report, bool) {
 func (st *routeStat) snapshot() RouteStat {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	// Rolling media bitrate: refresh the anchor at most every 500 ms of wall time.
-	now := time.Now()
-	if st.rateAt.IsZero() {
-		st.rateAt, st.rateBytes = now, st.bytes
-	} else if d := now.Sub(st.rateAt); d >= 500*time.Millisecond {
-		st.rateBps = float64(st.bytes-st.rateBytes) * 8 / d.Seconds()
-		st.rateAt, st.rateBytes = now, st.bytes
-	}
 	out := RouteStat{
 		Session: st.session, Peer: st.peer, Stream: st.stream, Direction: st.direction,
 		Frames: st.frames, Bytes: st.bytes,
 		Encoder: st.encoder, Tier: st.tier, Software: st.software,
-		Keyframes: st.keyframes, RateBps: st.rateBps,
+		Keyframes: st.keyframes, RateBps: st.rateBps, WireFPS: st.rateFps,
 		SeqGaps: st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
-		RemoteAt: st.remoteAt,
+		LatUnsynced: st.latBad, RemoteAt: st.remoteAt,
+	}
+	// Stalled route: the last window's rate is not "live", it is the rate this route HAD when it
+	// stopped. Report nothing rather than a comforting number.
+	if st.lastCount.IsZero() || st.now().Sub(st.lastCount) > rateStale {
+		out.RateBps, out.WireFPS = 0, 0
 	}
 	if st.sentAny {
 		out.HighestSeq = st.sentHighest
@@ -273,6 +326,7 @@ func (st *routeStat) snapshot() RouteStat {
 		out.HighestSeq = s.highest
 		out.JitterNs = s.jitter
 	}
+	out.LatencySamples = st.lat.n
 	out.LatencyP50Ns, out.LatencyP95Ns, out.LatencyMaxNs = st.lat.percentiles()
 	if st.reportsRecv > 0 {
 		r := st.remote
@@ -296,7 +350,11 @@ type RouteStat struct {
 	Software bool // tier-4 software encode - surface the CPU warning
 
 	Keyframes uint64  // video keyframes (send: emitted; recv: seen)
-	RateBps   float64 // rolling media bitrate, bits/s
+	RateBps   float64 // rolling media bitrate, bits/s (0 = no frame within rateStale)
+	// WireFPS is frames/s ON THE ROUTE over the same window. It is NOT the encoder's OutFPS: a
+	// route whose encoder emits 40 fps while the wire carries 4 reads "healthy" on OutFPS alone,
+	// and separating the two is the only way to see that at a glance.
+	WireFPS float64
 
 	SeqGaps   uint64 // detected sequence discontinuities (recv side)
 	LostEst   uint64 // estimated missing frames (gap sizes − recovered)
@@ -313,10 +371,19 @@ type RouteStat struct {
 	JitterNs   float64 // RFC 3550 §A.8 interarrival jitter, ns (recv side)
 
 	// Rolling e2e latency (receiver mediaclock − PTS, ns) over the last window. Accuracy is the
-	// clock-sync quality (§2.3) - display alongside ClockQuality.
+	// clock-sync quality (§2.3) - display alongside ClockQuality. Meaningless unless
+	// LatencySamples > 0: renderers MUST check that before printing a duration (see
+	// LatUnsynced).
 	LatencyP50Ns int64
 	LatencyP95Ns int64
 	LatencyMaxNs int64
+
+	// LatencySamples is how many PLAUSIBLE transit samples the window holds; LatUnsynced counts
+	// the rejected ones - media frames whose PTS is not on our media clock (a peer whose encode
+	// child stamps its own epoch, or an unsynced clock domain). Non-zero LatUnsynced with zero
+	// samples means "this peer's PTS domain is foreign", not "latency is huge".
+	LatencySamples int
+	LatUnsynced    uint64
 
 	Remote   *Report // last report from the far end (nil = none yet)
 	RemoteAt time.Time

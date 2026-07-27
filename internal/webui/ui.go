@@ -558,26 +558,57 @@ func (u *UI) livePush() {
 		case <-u.stop:
 			return
 		case <-t.C:
-			// Skip the ~1 Hz DOM refresh whenever the window isn't being looked at (dragging,
-			// unfocused, minimized) or a stream is live - repainting rave-mate's own graphs then
-			// only competes with the encoder for CPU/GPU. governor.UIAnimAllowed covers all four.
-			if u.shell == nil || inSizeMove() {
-				continue
-			}
-			if !governor.UIAnimAllowed() {
-				// cue-edit exemption: the audition playhead must keep moving while
-				// streaming/unfocused (mpTick no-ops unless actually playing)
-				if u.activeTab() == "library" && u.ceActiveFor("library") {
-					mpTick(u, "library")
-				}
-				continue
-			}
-			if fn := liveTicks[u.activeTab()]; fn != nil {
-				fn(u)
-			}
-			u.logZigFallbacks() // debug tally of silent Zig→Go render fallbacks (≤1/min, on change)
+			u.livePushOnce()
 		}
 	}
+}
+
+// livePushOnce is one tick of livePush (own goroutine, never the actWorker). Split out so the
+// governor-gating decisions are drivable by a test - the route-counter exemption below is the
+// difference between a live instrument and a panel frozen for the whole stream.
+func (u *UI) livePushOnce() {
+	// Skip the ~1 Hz DOM refresh whenever the window isn't being looked at (dragging,
+	// unfocused, minimized) or a stream is live - repainting rave-mate's own graphs then
+	// only competes with the encoder for CPU/GPU. governor.UIAnimAllowed covers all four.
+	if u.shell == nil || inSizeMove() {
+		return
+	}
+	if !governor.UIAnimAllowed() {
+		// cue-edit exemption: the audition playhead must keep moving while
+		// streaming/unfocused (mpTick no-ops unless actually playing)
+		if u.activeTab() == "library" && u.ceActiveFor("library") {
+			mpTick(u, "library")
+		}
+		// Live-route exemption. The gate above is closed for the WHOLE of a stream (OBS running
+		// flips governor.Streaming) and for every second the operator spends in a terminal
+		// driving ctl - i.e. exactly when a media route's counters are the instrument being
+		// read. Frozen frames/bytes/drops on a demonstrably running route cost a wrong diagnosis
+		// (25 minutes of identical numbers on a live webcam route). This patches ONE fragment,
+		// #peers-media, only while a route exists and the Peers tab is the one on screen - not a
+		// tab repaint, and no cache is disabled.
+		u.mediaRouteTick()
+		return
+	}
+	if fn := liveTicks[u.activeTab()]; fn != nil {
+		fn(u)
+	}
+	u.logZigFallbacks() // debug tally of silent Zig→Go render fallbacks (≤1/min, on change)
+}
+
+// mediaRouteTick patches #peers-media when a media route is live and Peers is on screen. Cheap by
+// construction: Media.Stats() is a local read of the mirrored child telemetry, and tickPatch drops
+// the eval when the rendered fragment is byte-identical to the last push.
+func (u *UI) mediaRouteTick() {
+	if u.activeTab() != "peers" || u.svc.Media == nil {
+		return
+	}
+	frag, routes := u.peersMediaFrag()
+	if routes == 0 {
+		return // no live route: nothing to keep honest, and the gate stays closed as designed
+	}
+	var js strings.Builder
+	u.tickPatch(&js, "peers-media", frag)
+	u.flushTick(&js)
 }
 
 // ── modal slot ──

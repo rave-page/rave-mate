@@ -357,6 +357,16 @@ func TestSpoutSourceFPSGateReleases(t *testing.T) {
 		t.Fatal("Next returned an over-budget frame, want it dropped")
 	}
 	waitFor(t, "the dropped frame to return to the pool", pool.settled)
+	// That discard is the fps CAP doing its job. It must reach the reporter tagged as such: as a
+	// bare drop it is indistinguishable from real loss, and on a 60→40 fps route it accumulates
+	// forever ("dropped 41902 and climbing" on a perfectly healthy route).
+	ps := src.PipeStats()
+	if ps.RateCapped != 1 {
+		t.Fatalf("RateCapped = %d, want 1", ps.RateCapped)
+	}
+	if ps.RealDrops() != 0 {
+		t.Fatalf("RealDrops = %d, want 0 - nothing was lost, one frame was throttled", ps.RealDrops())
+	}
 	s.close()
 }
 

@@ -397,9 +397,12 @@ type spoutSource struct {
 	attach  func(name string, maxFPS float64) (captureFeed, error)
 	shareOf func(name string) (uint64, uint32, int, int, bool)
 
-	minGap  time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
-	last    time.Time
-	dropped atomic.Uint64 // fps-cap drops; surfaced via PipeStats (the encode wrapper sums it)
+	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
+	last   time.Time
+	// capped counts frames discarded BY THE FPS CAP - deliberate rate limiting, not loss. It
+	// rides PipelineStats.RateCapped so the panel can say so; folding it into Dropped alone made
+	// a healthy 60 fps source feeding a 40 fps route read "dropped 41902 and climbing".
+	capped atomic.Uint64
 
 	mu   sync.Mutex
 	feed captureFeed // nil until the first Next attaches (or a test injects one)
@@ -431,11 +434,12 @@ func (s *spoutSource) SharedTexture() (uint64, uint32, int, int, string, bool) {
 	return h, fmt, w, hh, s.name, true
 }
 
-// PipeStats implements medialink.PipelineReporter: the per-route fps-cap drops. The encode
-// wrapper sums this into its own Dropped, so the number reaches the route panel instead of dying
-// in a struct field nobody reads.
+// PipeStats implements medialink.PipelineReporter: the per-route fps-cap discards, reported BOTH
+// in the Dropped total (so the whole-chain number stays complete) and in RateCapped (so the panel
+// can separate deliberate throttling from real frame loss).
 func (s *spoutSource) PipeStats() medialink.PipelineStats {
-	return medialink.PipelineStats{Dropped: s.dropped.Load()}
+	n := s.capped.Load()
+	return medialink.PipelineStats{Dropped: n, RateCapped: n}
 }
 
 // feedOrAttach returns this route's capture feed, opening the shared capture on first use.
@@ -473,7 +477,7 @@ func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
 				now := time.Now()
 				if now.Sub(s.last) < s.minGap {
 					f.ref.release() // over this route's fps budget - drop our reference
-					s.dropped.Add(1)
+					s.capped.Add(1)
 					continue
 				}
 				s.last = now

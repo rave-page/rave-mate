@@ -81,11 +81,20 @@ type PipelineStats struct {
 	HWAccel  string  // decode side: active hwaccel ("" = software)
 	OutFPS   float64 // frames leaving the child per second
 	Restarts int     // supervised child restarts
-	// Dropped counts frames THIS element and everything it wraps threw away: undersized/foreign
-	// input, respawn-backoff gaps, waiting-for-keyframe, per-route fps-cap drops, sink dim
-	// mismatches. Each stage kept its own counter and none of them reached a log or the panel, so
-	// a route that silently drops most of its frames looked identical to a healthy one.
-	Dropped uint64
+	// Dropped is the TOTAL of everything this element and its wrapped stages threw away:
+	// undersized/foreign input, respawn-backoff gaps, waiting-for-keyframe, per-route fps-cap
+	// discards, sink dim mismatches. Each stage kept its own counter and none of them reached a
+	// log or the panel, so a route that silently drops most of its frames looked identical to a
+	// healthy one.
+	//
+	// RateCapped is the part of that total which is DELIBERATE rate limiting (the per-route
+	// MediaLink.MaxFPS cap discarding frames the shared capture delivered at a faster rate,
+	// mediaroute.spoutSource). Summing it into one "dropped" number made a healthy 60 fps source
+	// feeding a 40 fps route read `dropped 41902 and climbing` - catastrophic loss and
+	// correct-by-design throttling are the same number. Render/log them SEPARATELY; the real loss
+	// is RealDrops().
+	Dropped    uint64
+	RateCapped uint64
 	// Native-engine session telemetry (zero for ffmpeg children). Rising LatP99Ms is the
 	// Phase-2 load governor's early saturation signal.
 	LatP50Ms    float64 // submit→AU latency percentiles
@@ -153,12 +162,31 @@ type PipelineReporter interface {
 	PipeStats() PipelineStats
 }
 
+// RealDrops is Dropped minus the deliberate rate-limiting share: frames actually LOST. Saturating,
+// so a stage that reports RateCapped without folding it into Dropped can never underflow.
+func (p PipelineStats) RealDrops() uint64 {
+	if p.RateCapped >= p.Dropped {
+		return 0
+	}
+	return p.Dropped - p.RateCapped
+}
+
 // InnerDrops sums the Dropped counter of a wrapped Source/Sink, so the ONE reporter the router
 // asks (the outermost wrapper) accounts for the whole chain instead of the stage counters dying
 // where they were incremented. 0 when the inner stage reports nothing.
 func InnerDrops(inner any) uint64 {
 	if pr, ok := inner.(PipelineReporter); ok {
 		return pr.PipeStats().Dropped
+	}
+	return 0
+}
+
+// InnerRateCapped is InnerDrops for the rate-limited share: it must ride the same wrapper chain,
+// or the outermost reporter would total the fps-cap discards into Dropped and lose the ability to
+// say they were intentional.
+func InnerRateCapped(inner any) uint64 {
+	if pr, ok := inner.(PipelineReporter); ok {
+		return pr.PipeStats().RateCapped
 	}
 	return 0
 }

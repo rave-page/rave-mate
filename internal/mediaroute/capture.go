@@ -131,10 +131,13 @@ func (h *captureHub) attach(name string, maxFPS float64) (*captureSub, error) {
 	n := len(c.subs)
 	c.mu.Unlock()
 	c.rerate()
-	if n > 1 {
-		h.log.Info(source, "capture shared", map[string]any{"sender": name, "routes": n,
-			"captureFps": c.rate()})
-	}
+	// ALWAYS logged, not only for n>1: the capture runs at the FASTEST subscriber's rate and every
+	// slower route then discards the surplus itself (spoutSource.minGap → PipelineStats.RateCapped).
+	// Without this line the pairing "which route holds which cap" can only be inferred from the
+	// discard rate, which is exactly the guess that cost a diagnosis. routeFps = the caps of every
+	// live subscriber, this route's first.
+	h.log.Info(source, "capture shared", map[string]any{"sender": name, "routes": n,
+		"captureFps": c.rate(), "maxFps": maxFPS, "routeFps": c.rates()})
 	return s, nil
 }
 
@@ -150,6 +153,19 @@ func (c *capture) rate() float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return rateOf(c.subs)
+}
+
+// rates lists every live subscriber's fps cap, ascending (0 = uncapped). Diagnostics only: it is
+// what makes "this route is the one holding the capture at 60" readable in the log.
+func (c *capture) rates() []float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]float64, 0, len(c.subs))
+	for s := range c.subs {
+		out = append(out, s.maxFPS)
+	}
+	sort.Float64s(out)
+	return out
 }
 
 func rateOf(subs map[*captureSub]struct{}) float64 {

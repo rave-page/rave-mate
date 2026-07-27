@@ -3,6 +3,7 @@ package medialink
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 // TestJitterRFC3550A8 replays the §A.8 EWMA by hand: PTS spaced 10 ms, arrivals alternating
@@ -163,5 +164,84 @@ func TestApplyRemote(t *testing.T) {
 	}
 	if s.ReportsRecv != 1 || s.RemoteAt.IsZero() {
 		t.Fatalf("reportsRecv/remoteAt: %+v", s)
+	}
+}
+
+// TestRateWindowIsProducerDriven: the rolling bitrate/wire-fps must be closed by the FRAMES, not
+// by whoever polls Stats(). It used to be computed inside snapshot(), so the number was whatever
+// the last reader's phase happened to measure - and with the UI tick paused (activity governor,
+// the freeze this branch fixes) the first read after the pause divided the whole idle gap into
+// "live bitrate". Non-vacuity: on the old code this first snapshot() reports 0 (it only sets the
+// anchor), so the assertion below fails.
+func TestRateWindowIsProducerDriven(t *testing.T) {
+	st := newRouteStat("s", "p", 1, "send")
+	now := time.Unix(1000, 0)
+	st.now = func() time.Time { return now }
+
+	// 62 frames × 1000 B at 60 fps: the 62nd crosses the 1 s window boundary and closes it, with
+	// nobody having read anything.
+	for i := 0; i < 62; i++ {
+		st.sent(&Frame{Stream: 1, Kind: KindVideo, Payload: make([]byte, 1000)})
+		now = now.Add(time.Second / 60)
+	}
+	s := st.snapshot()
+	if s.RateBps < 470_000 || s.RateBps > 490_000 {
+		t.Fatalf("RateBps = %.0f, want ~480000 (60 × 1000 B × 8) measured without any prior read", s.RateBps)
+	}
+	if s.WireFPS < 55 || s.WireFPS > 65 {
+		t.Fatalf("WireFPS = %.1f, want ~60", s.WireFPS)
+	}
+
+	// snapshot() is a PURE read: polling again changes nothing.
+	if again := st.snapshot(); again.RateBps != s.RateBps || again.WireFPS != s.WireFPS {
+		t.Fatalf("reading the stats moved them: %.0f/%.1f → %.0f/%.1f",
+			s.RateBps, s.WireFPS, again.RateBps, again.WireFPS)
+	}
+
+	// Frames stop. The last window's rate is not "live" - a dead route must not keep advertising
+	// the bitrate it had when it died.
+	now = now.Add(rateStale + time.Second)
+	if dead := st.snapshot(); dead.RateBps != 0 || dead.WireFPS != 0 {
+		t.Fatalf("a stalled route still reports %.0f bps / %.1f fps", dead.RateBps, dead.WireFPS)
+	}
+}
+
+// TestForeignPTSDomainIsNotALatency: a peer stamping PTS on its own wall epoch while our media
+// clock is process-relative yields a transit of ~-1.8e18 ns. Rendering that printed a 2026
+// timestamp as a duration ("latency 1785118072019.6 ms"). Those samples must be counted and
+// discarded, never averaged into the window - while jitter, a DIFFERENCE of transits, survives.
+func TestForeignPTSDomainIsNotALatency(t *testing.T) {
+	st := newRouteStat("s", "p", 1, "recv")
+	epoch := time.Now().UnixNano() // the peer's domain
+	arrival := int64(90 * time.Second)
+	for i := 0; i < 8; i++ {
+		st.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: uint32(i),
+			PTS: epoch + int64(i)*16_000_000, Payload: []byte{1}},
+			arrival+int64(i)*16_100_000)
+	}
+	s := st.snapshot()
+	if s.LatencySamples != 0 {
+		t.Fatalf("an off-clock PTS was accepted as a latency sample (%d in the window)", s.LatencySamples)
+	}
+	if s.LatUnsynced != 8 {
+		t.Fatalf("LatUnsynced = %d, want 8 - the rejects must be visible, not silent", s.LatUnsynced)
+	}
+	if s.LatencyP50Ns != 0 || s.LatencyP95Ns != 0 {
+		t.Fatalf("percentiles carry an epoch: p50=%d p95=%d", s.LatencyP50Ns, s.LatencyP95Ns)
+	}
+	if s.JitterNs <= 0 {
+		t.Fatalf("jitter must survive a domain offset (it is a difference of transits): %v", s.JitterNs)
+	}
+
+	// The same route on a SHARED clock measures normally.
+	ok := newRouteStat("s", "p", 1, "recv")
+	for i := 0; i < 8; i++ {
+		pts := int64(i) * 16_000_000
+		ok.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: uint32(i), PTS: pts, Payload: []byte{1}},
+			pts+3_000_000)
+	}
+	s = ok.snapshot()
+	if s.LatencySamples != 8 || s.LatUnsynced != 0 || s.LatencyP50Ns != 3_000_000 {
+		t.Fatalf("shared-clock latency mis-measured: %+v", s)
 	}
 }

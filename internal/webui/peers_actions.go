@@ -126,6 +126,12 @@ func init() {
 	// ~1 Hz body refresh - skip while a peers-body select/input is focused (don't clobber an open
 	// dropdown or in-progress typing in the download-dir field).
 	onLiveTick("peers", func(u *UI) {
+		// This patch replaces #peers-media's subtree too, so the governor-exempt route tick's
+		// dedup entry no longer describes what it pushed - drop it (one re-emit, never a stale
+		// suppression). See ui.go mediaRouteTick.
+		u.fragMu.Lock()
+		delete(u.frags, "peers-media")
+		u.fragMu.Unlock()
 		u.eval("(function(){var el=document.activeElement,b=document.getElementById('peers-body');" +
 			"if(b&&el&&b.contains(el)&&/^(SELECT|INPUT)$/.test(el.tagName))return;" +
 			"window.__patch('peers-body'," + jsQuote(u.peersBody()) + ");})()")

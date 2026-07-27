@@ -68,13 +68,26 @@ func TestFmtRouteStat(t *testing.T) {
 	names := nameFixed(map[string]string{"p": "Stage-Left"})
 	recv := medialink.RouteStat{Session: "s", Peer: "p", Stream: 3, Direction: "recv",
 		Frames: 1200, Bytes: 4 << 20, LostEst: 2, Recovered: 5, NACKsSent: 4,
-		JitterNs: 420_000, LatencyP50Ns: 2_100_000, LatencyP95Ns: 4_300_000}
+		JitterNs: 420_000, LatencyP50Ns: 2_100_000, LatencyP95Ns: 4_300_000, LatencySamples: 64}
 	title, detail := fmtRouteStat(recv, names)
 	if title != "◂ receiving from Stage-Left - stream 3 · 1200 frames · 4.0 MB" {
 		t.Errorf("recv title: %q", title)
 	}
 	if detail != "loss 2 · recovered 5 · jitter 0.42 ms · latency 2.10 ms/4.30 ms p50/p95 · nack 4" {
 		t.Errorf("recv detail: %q", detail)
+	}
+
+	// No plausible sample = no duration. The percentiles are still SET (a foreign PTS domain
+	// leaves whatever the window last held); rendering them printed an epoch as a latency.
+	off := recv
+	off.LatencySamples, off.LatUnsynced = 0, 900
+	off.LatencyP50Ns, off.LatencyP95Ns = 1_785_118_072_019_600_000, 1_785_118_072_016_000_000
+	if _, d := fmtRouteStat(off, names); !strings.Contains(d, "latency off-clock/off-clock") {
+		t.Errorf("off-clock PTS rendered as a duration: %q", d)
+	}
+	off.LatUnsynced = 0 // nothing received yet
+	if _, d := fmtRouteStat(off, names); !strings.Contains(d, "latency n/a/n/a") {
+		t.Errorf("unmeasured latency rendered as a duration: %q", d)
 	}
 
 	send := medialink.RouteStat{Session: "s2", Peer: "p", Stream: 3, Direction: "send",
@@ -101,13 +114,26 @@ func TestFmtPipeLine(t *testing.T) {
 	if got := fmtPipeLine(medialink.RouteStat{}); got != "" {
 		t.Errorf("empty: %q", got)
 	}
-	s := medialink.RouteStat{Encoder: "hevc_nvenc", Tier: 2, RateBps: 14_200_000, Keyframes: 30,
-		JB:   &medialink.JitterStats{Depth: 2, LateRate: 0.013, PolicyDrops: 4},
-		Pipe: &medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda", Restarts: 1}}
+	s := medialink.RouteStat{Encoder: "hevc_nvenc", Tier: 2, RateBps: 14_200_000, WireFPS: 59.8,
+		Keyframes: 30,
+		JB:        &medialink.JitterStats{Depth: 2, LateRate: 0.013, PolicyDrops: 4},
+		Pipe:      &medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda", Restarts: 1}}
 	got := fmtPipeLine(s)
-	want := "hevc_nvenc tier 2 · 14.2 Mbps · kf 30 · buffer 2f · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1"
+	want := "hevc_nvenc tier 2 · 14.2 Mbps · wire 59.8 fps · kf 30 · buffer 2f · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1"
 	if got != want {
 		t.Errorf("pipe line:\n got %q\nwant %q", got, want)
+	}
+	// Deliberate fps-cap throttling and real loss are SEPARATE segments: a route capped from 60 to
+	// 40 fps must not read "dropped 41902" (the whole point of RateCapped).
+	capped := s
+	capped.Pipe = &medialink.PipelineStats{OutFPS: 40, Dropped: 41902, RateCapped: 41902}
+	if line := fmtPipeLine(capped); !strings.Contains(line, "rate-capped 41902") || strings.Contains(line, "dropped") {
+		t.Errorf("a purely rate-capped route must not report drops: %q", line)
+	}
+	mixed := s
+	mixed.Pipe = &medialink.PipelineStats{OutFPS: 40, Dropped: 41905, RateCapped: 41902}
+	if line := fmtPipeLine(mixed); !strings.Contains(line, "rate-capped 41902") || !strings.Contains(line, "dropped 3") {
+		t.Errorf("real loss must survive the split: %q", line)
 	}
 	// §3.2 software tier carries the CPU warning.
 	sw := fmtPipeLine(medialink.RouteStat{Encoder: "libx264", Tier: 4, Software: true})

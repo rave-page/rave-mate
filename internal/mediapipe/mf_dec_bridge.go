@@ -141,6 +141,7 @@ func (m *mfDecoder) PipeStats() medialink.PipelineStats {
 		Encoder: "mf-native-decode", HWAccel: accel, OutFPS: st.DecFPS, Restarts: st.Restarts,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		Dropped:    m.dropped.Load() + st.DecDropped + st.InDropped + medialink.InnerDrops(m.sink),
+		RateCapped: medialink.InnerRateCapped(m.sink),
 		ZeroDecode: st.DecFlags&1 != 0, DecFPS: st.DecFPS, DecBusyMs: st.DecBusyMs,
 		InDropped: st.InDropped, DecDropped: st.DecDropped, DecErrors: st.DecErrors,
 		DecStaleMs: st.DecStaleMs, DecMtxTimeo: st.MtxTimeouts, Downgrades: st.Downgrades,
