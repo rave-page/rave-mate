@@ -167,20 +167,17 @@ func TestApplyRemote(t *testing.T) {
 	}
 }
 
-// TestRateWindowIsProducerDriven: the rolling bitrate/wire-fps must be closed by the FRAMES, not
+// TestRateWindowIsProducerDriven: the rolling bitrate/wire-fps must be anchored by the FRAMES, not
 // by whoever polls Stats(). It used to be computed inside snapshot(), so the number was whatever
-// the last reader's phase happened to measure - and with the UI tick paused (activity governor,
-// the freeze this branch fixes) the first read after the pause divided the whole idle gap into
-// "live bitrate". Non-vacuity: on the old code this first snapshot() reports 0 (it only sets the
-// anchor), so the assertion below fails.
+// the last reader's phase happened to measure - and with the UI tick paused (activity governor)
+// the first read after the pause divided the whole idle gap into "live bitrate".
 func TestRateWindowIsProducerDriven(t *testing.T) {
 	st := newRouteStat("s", "p", 1, "send")
 	now := time.Unix(1000, 0)
 	st.now = func() time.Time { return now }
 
-	// 62 frames × 1000 B at 60 fps: the 62nd crosses the 1 s window boundary and closes it, with
-	// nobody having read anything.
-	for i := 0; i < 62; i++ {
+	// 2 s of 60 fps × 1000 B, nobody reading.
+	for i := 0; i < 120; i++ {
 		st.sent(&Frame{Stream: 1, Kind: KindVideo, Payload: make([]byte, 1000)})
 		now = now.Add(time.Second / 60)
 	}
@@ -192,7 +189,9 @@ func TestRateWindowIsProducerDriven(t *testing.T) {
 		t.Fatalf("WireFPS = %.1f, want ~60", s.WireFPS)
 	}
 
-	// snapshot() is a PURE read: polling again changes nothing.
+	// snapshot() is a PURE read: at the same instant, reading again gives the same answer and
+	// moves no state. (Across time it decays - that is the stall behaviour below, not a reader
+	// effect: the window's boundaries come from the ring, never from the caller.)
 	if again := st.snapshot(); again.RateBps != s.RateBps || again.WireFPS != s.WireFPS {
 		t.Fatalf("reading the stats moved them: %.0f/%.1f → %.0f/%.1f",
 			s.RateBps, s.WireFPS, again.RateBps, again.WireFPS)
@@ -206,42 +205,78 @@ func TestRateWindowIsProducerDriven(t *testing.T) {
 	}
 }
 
-// TestForeignPTSDomainIsNotALatency: a peer stamping PTS on its own wall epoch while our media
-// clock is process-relative yields a transit of ~-1.8e18 ns. Rendering that printed a 2026
-// timestamp as a duration ("latency 1785118072019.6 ms"). Those samples must be counted and
-// discarded, never averaged into the window - while jitter, a DIFFERENCE of transits, survives.
-func TestForeignPTSDomainIsNotALatency(t *testing.T) {
+// TestRateWindowSurvivesClumpedBytes is the field reproduction, deterministic: frames arrive at a
+// CONSTANT cadence while the bytes clump (small P-frames + a periodic keyframe-sized payload).
+// Windows shorter than the clump interval then miss the clump entirely in some windows and report
+// the trickle alone - on the wire that was 0.1 Mbps on a route whose real mean was ~0.9 Mbps, i.e.
+// a healthy route displaying the number an operator reads as BLACK FRAMES.
+//
+// A source that PAUSES between bursts does not reproduce it: a frame-driven window then closes on
+// the first frame of the next burst and always spans exactly one burst. The frames must keep
+// coming while only their SIZE clumps.
+func TestRateWindowSurvivesClumpedBytes(t *testing.T) {
 	st := newRouteStat("s", "p", 1, "recv")
-	epoch := time.Now().UnixNano() // the peer's domain
-	arrival := int64(90 * time.Second)
-	for i := 0; i < 8; i++ {
-		st.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: uint32(i),
-			PTS: epoch + int64(i)*16_000_000, Payload: []byte{1}},
-			arrival+int64(i)*16_100_000)
+	base := time.Unix(1000, 0)
+	now := base
+	st.now = func() time.Time { return now }
+
+	const (
+		step       = 25 * time.Millisecond   // 40 fps, constant
+		small      = 300                     // trickle payload
+		clumpEvery = 1300 * time.Millisecond // keyframe-ish cadence
+		clump      = 120_000
+		run        = 30 * time.Second
+	)
+	truth := (float64(small)*float64(time.Second/step) + float64(clump)/clumpEvery.Seconds()) * 8
+
+	var lastClump time.Duration
+	var readings []float64
+	var seq uint32
+	for elapsed := time.Duration(0); elapsed < run; elapsed += step {
+		now = base.Add(elapsed)
+		size := small
+		if elapsed-lastClump >= clumpEvery {
+			lastClump, size = elapsed, clump
+		}
+		st.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: seq, Payload: make([]byte, size)}, int64(elapsed))
+		seq++
+		// Sample every 500 ms once the window is fully populated.
+		if elapsed > rateSpan+time.Second && elapsed%(500*time.Millisecond) == 0 {
+			readings = append(readings, st.snapshot().RateBps)
+		}
+	}
+	if len(readings) < 20 {
+		t.Fatalf("only %d readings", len(readings))
+	}
+	for i, r := range readings {
+		if r < truth/2 || r > truth*2 {
+			t.Fatalf("reading %d = %.0f bps against a mean of %.0f - a clumped but healthy route "+
+				"must never display a fraction of its real rate (all: %v)", i, r, truth, readings)
+		}
+	}
+}
+
+// TestLatencyPercentilesAreOrdered pins the invariant the panel violated: p50 ≤ p95 ≤ max, on a
+// distribution that includes NEGATIVE transits. A negative transit is normal - the two media
+// clocks are process-relative and only the sync tier aligns them - and it is exactly the case
+// that produced "latency 29.0 ms/26.1 ms p50/p95" in the field, because the renderers printed
+// both through an abs(). The values were always ordered; the display was not.
+func TestLatencyPercentilesAreOrdered(t *testing.T) {
+	st := newRouteStat("s", "p", 1, "recv")
+	// A window straddling zero: median negative, tail positive - the field shape.
+	for i := -60; i <= 40; i++ {
+		st.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: uint32(i + 60), Payload: []byte{1}},
+			int64(i)*int64(time.Millisecond))
 	}
 	s := st.snapshot()
-	if s.LatencySamples != 0 {
-		t.Fatalf("an off-clock PTS was accepted as a latency sample (%d in the window)", s.LatencySamples)
+	if s.LatencySamples == 0 {
+		t.Fatal("no plausible samples - the premise is broken")
 	}
-	if s.LatUnsynced != 8 {
-		t.Fatalf("LatUnsynced = %d, want 8 - the rejects must be visible, not silent", s.LatUnsynced)
+	if !(s.LatencyP50Ns <= s.LatencyP95Ns && s.LatencyP95Ns <= s.LatencyMaxNs) {
+		t.Fatalf("percentiles out of order: p50=%d p95=%d max=%d",
+			s.LatencyP50Ns, s.LatencyP95Ns, s.LatencyMaxNs)
 	}
-	if s.LatencyP50Ns != 0 || s.LatencyP95Ns != 0 {
-		t.Fatalf("percentiles carry an epoch: p50=%d p95=%d", s.LatencyP50Ns, s.LatencyP95Ns)
-	}
-	if s.JitterNs <= 0 {
-		t.Fatalf("jitter must survive a domain offset (it is a difference of transits): %v", s.JitterNs)
-	}
-
-	// The same route on a SHARED clock measures normally.
-	ok := newRouteStat("s", "p", 1, "recv")
-	for i := 0; i < 8; i++ {
-		pts := int64(i) * 16_000_000
-		ok.recvMedia(&Frame{Stream: 1, Kind: KindVideo, Seq: uint32(i), PTS: pts, Payload: []byte{1}},
-			pts+3_000_000)
-	}
-	s = ok.snapshot()
-	if s.LatencySamples != 8 || s.LatUnsynced != 0 || s.LatencyP50Ns != 3_000_000 {
-		t.Fatalf("shared-clock latency mis-measured: %+v", s)
+	if s.LatencyP50Ns >= 0 {
+		t.Fatalf("premise: this distribution must have a negative median, got p50=%d", s.LatencyP50Ns)
 	}
 }

@@ -14,12 +14,36 @@ import (
 // latWindowSize bounds the rolling latency sample window (per route).
 const latWindowSize = 256
 
-// Rate window (bitrate + wire fps). PRODUCER-driven: closed on the route's own goroutine as
-// frames are counted, so the measured span is always the span the bytes were counted over.
-// Computing it inside snapshot() made the number depend on WHO read it and how often - with the
-// UI tick paused (activity governor) the next read divided the whole idle gap into "live
-// bitrate", and with two pollers at different phases a reader got a window it never measured.
-const rateWindow = time.Second
+// Rate window (bitrate + wire fps): a SLIDING window over cumulative counters, anchored by the
+// producer. Two failures shaped it.
+//
+// It must not be reader-driven. Computing it inside snapshot() made the number depend on WHO read
+// it and how often - with the UI tick paused (activity governor) the next read divided the whole
+// idle gap into "live bitrate". The ring below is appended only by count(), on the route's own
+// goroutine, so the window boundaries never move with a poller.
+//
+// And it must not be one second long. A single second on a bursty route reports whatever that
+// second happened to carry: in the field a healthy ~0.9 Mbps receive route displayed 0.1 Mbps in
+// five readings out of six with one 2.3 Mbps overshoot - and 0.1 Mbps is the reading that means
+// BLACK FRAMES to an operator, so a working route was showing the number for catastrophically
+// broken. Spanning several seconds and deriving both numerator and divisor from the SAME two
+// cumulative samples makes the display track Bytes/elapsed by construction.
+const (
+	rateSpan        = 4 * time.Second        // sliding window length
+	rateSampleEvery = 250 * time.Millisecond // ring granularity
+	rateMinSpan     = time.Second            // below this the estimate is noise - report nothing
+)
+
+// rateSlots caps the ring: rateSpan/rateSampleEvery + 2 samples (17 × 32 B ≈ 550 B per route).
+// Policy: drop-oldest - the window slides, it never accumulates.
+const rateSlots = int(rateSpan/rateSampleEvery) + 2
+
+// rateSample is one point of the sliding window: wall time + the cumulative counters at it.
+type rateSample struct {
+	t      time.Time
+	bytes  uint64
+	frames uint64
+}
 
 // rateStale is how long after the last counted frame the rolling rate stops being reported. A
 // route that STOPPED must not keep showing the bitrate it had when it died - that is the same
@@ -102,12 +126,9 @@ type routeStat struct {
 	tier      int
 	software  bool
 	keyframes uint64 // video keyframes seen (sent or received)
-	// Rate window anchors (see rateWindow): closed by count(), read-only in snapshot().
-	rateAt      time.Time
-	rateBytes   uint64
-	rateFrames  uint64
-	rateBps     float64
-	rateFps     float64
+	// rate is the sliding window's sample ring (see rateSpan): appended by count() only,
+	// evaluated - never mutated - by snapshot().
+	rate        []rateSample
 	lastCount   time.Time // wall time of the last counted frame (staleness oracle)
 	latBad      uint64    // transit samples outside the plausible range (foreign PTS domain)
 	frames      uint64
@@ -140,18 +161,36 @@ func (st *routeStat) count(n int) {
 	st.bytes += uint64(n)
 	now := st.now()
 	st.lastCount = now
-	if st.rateAt.IsZero() {
-		st.rateAt, st.rateBytes, st.rateFrames = now, st.bytes, st.frames
-		return
+	if k := len(st.rate); k == 0 || now.Sub(st.rate[k-1].t) >= rateSampleEvery {
+		if len(st.rate) == rateSlots { // drop-oldest; the ring never grows with traffic
+			copy(st.rate, st.rate[1:])
+			st.rate = st.rate[:rateSlots-1]
+		}
+		st.rate = append(st.rate, rateSample{t: now, bytes: st.bytes, frames: st.frames})
 	}
-	d := now.Sub(st.rateAt)
-	if d < rateWindow {
-		return
+	// Slide: keep exactly one sample older than the span so the window stays ≥ rateSpan wide
+	// until it has to shrink, never wider.
+	for len(st.rate) > 1 && now.Sub(st.rate[1].t) >= rateSpan {
+		copy(st.rate, st.rate[1:])
+		st.rate = st.rate[:len(st.rate)-1]
 	}
-	secs := d.Seconds()
-	st.rateBps = float64(st.bytes-st.rateBytes) * 8 / secs
-	st.rateFps = float64(st.frames-st.rateFrames) / secs
-	st.rateAt, st.rateBytes, st.rateFrames = now, st.bytes, st.frames
+}
+
+// rateOver evaluates the sliding window at now. Pure read: the numerator (cumulative bytes since
+// the oldest sample) and the divisor (now − that sample's time) are the same span by
+// construction, so this cannot disagree with Bytes/elapsed. Extending the divisor to `now` rather
+// than to the last counted frame also decays a stalling route instead of freezing its last value.
+// Caller holds st.mu.
+func (st *routeStat) rateOver(now time.Time) (bps, fps float64) {
+	if len(st.rate) == 0 {
+		return 0, 0
+	}
+	o := st.rate[0]
+	span := now.Sub(o.t).Seconds()
+	if span < rateMinSpan.Seconds() {
+		return 0, 0
+	}
+	return float64(st.bytes-o.bytes) * 8 / span, float64(st.frames-o.frames) / span
 }
 
 // setCodec records the §3.2 negotiated encode choice (route-stat surface; both directions).
@@ -308,15 +347,17 @@ func (st *routeStat) snapshot() RouteStat {
 		Session: st.session, Peer: st.peer, Stream: st.stream, Direction: st.direction,
 		Frames: st.frames, Bytes: st.bytes,
 		Encoder: st.encoder, Tier: st.tier, Software: st.software,
-		Keyframes: st.keyframes, RateBps: st.rateBps, WireFPS: st.rateFps,
-		SeqGaps: st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
+		Keyframes: st.keyframes,
+		SeqGaps:   st.seqGaps, LostEst: st.lostEst, Recovered: st.recovered,
 		NACKsSent: st.nacksSent, Retransmits: st.retransmits, PLIRequests: st.pliReqs,
 		ReportsSent: st.reportsSent, ReportsRecv: st.reportsRecv,
 		LatUnsynced: st.latBad, RemoteAt: st.remoteAt,
 	}
-	// Stalled route: the last window's rate is not "live", it is the rate this route HAD when it
-	// stopped. Report nothing rather than a comforting number.
-	if st.lastCount.IsZero() || st.now().Sub(st.lastCount) > rateStale {
+	now := st.now()
+	out.RateBps, out.WireFPS = st.rateOver(now)
+	// Stalled route: a decayed rate is still not "live". Report nothing rather than a comforting
+	// number once the route has been silent longer than rateStale.
+	if st.lastCount.IsZero() || now.Sub(st.lastCount) > rateStale {
 		out.RateBps, out.WireFPS = 0, 0
 	}
 	if st.sentAny {
