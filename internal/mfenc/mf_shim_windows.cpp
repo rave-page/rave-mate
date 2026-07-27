@@ -987,3 +987,111 @@ void mf_enc_close(mfenc* e) {
     if (e->comInit) CoUninitialize();
     free(e);
 }
+
+// ── gate-only shared-texture factory (zigmedia risks R3 + R4) ────────────────────────────────
+// See mf_shim.h for why this exists: the child's IDXGIKeyedMutex branch and its TYPELESS refusal
+// cannot be reached with any Spout sender, and the child takes its handle from a Go callback, so
+// the only instrument that executes them is a texture created here. Nothing in the product calls
+// this.
+struct mftex {
+    ID3D11Device* dev;
+    ID3D11DeviceContext* ctx;
+    ID3D11Texture2D* tex;
+    IDXGIKeyedMutex* km;
+};
+
+void* mf_testtex_create(int64_t adapterLuid, int w, int h, unsigned int fmt, int keyed,
+                        const uint8_t* pixels, unsigned long long* share, char* errbuf, int errcap) {
+    if (share) *share = 0;
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+        setErr(errbuf, errcap, "dims", E_INVALIDARG);
+        return NULL;
+    }
+    IDXGIAdapter1* ad = NULL;
+    UINT vid = 0;
+    findAdapter(adapterLuid, &ad, &vid);
+    if (!ad && adapterLuid == 0) pickDefaultAdapter(&ad, &vid);
+    mftex* t = (mftex*)calloc(1, sizeof(mftex));
+    if (!t) {
+        rel(ad);
+        setErr(errbuf, errcap, "calloc", E_OUTOFMEMORY);
+        return NULL;
+    }
+    HRESULT hr = D3D11CreateDevice(ad, ad ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
+                                   0, NULL, 0, D3D11_SDK_VERSION, &t->dev, NULL, &t->ctx);
+    rel(ad);
+    if (FAILED(hr) || !t->dev) {
+        setErr(errbuf, errcap, "D3D11CreateDevice", hr);
+        mf_testtex_release(t);
+        return NULL;
+    }
+    D3D11_TEXTURE2D_DESC td;
+    memset(&td, 0, sizeof(td));
+    td.Width = (UINT)w;
+    td.Height = (UINT)h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = (DXGI_FORMAT)fmt;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    // SHADER_RESOURCE | RENDER_TARGET is what Spout itself creates a sender texture with, and
+    // CreateVideoProcessorInputView refuses a texture without them (measured: `view_failed`).
+    // Matching Spout matters - the point of the gate is to differ from a real sender in exactly
+    // ONE property (the sync object, or the format), never in two.
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    td.MiscFlags = keyed ? D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX : D3D11_RESOURCE_MISC_SHARED;
+    hr = t->dev->CreateTexture2D(&td, NULL, &t->tex);
+    if (FAILED(hr) || !t->tex) { // exotic/TYPELESS formats refuse RENDER_TARGET; retry narrower
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        hr = t->dev->CreateTexture2D(&td, NULL, &t->tex);
+    }
+    if (FAILED(hr) || !t->tex) {
+        td.BindFlags = 0;
+        hr = t->dev->CreateTexture2D(&td, NULL, &t->tex);
+    }
+    if (FAILED(hr) || !t->tex) {
+        setErr(errbuf, errcap, "CreateTexture2D", hr);
+        mf_testtex_release(t);
+        return NULL;
+    }
+    IDXGIResource* res = NULL;
+    HANDLE sh = NULL;
+    if (SUCCEEDED(t->tex->QueryInterface(__uuidof(IDXGIResource), (void**)&res)) && res) {
+        hr = res->GetSharedHandle(&sh);
+        res->Release();
+    } else {
+        hr = E_NOINTERFACE;
+    }
+    if (FAILED(hr) || !sh) {
+        setErr(errbuf, errcap, "GetSharedHandle", hr);
+        mf_testtex_release(t);
+        return NULL;
+    }
+    if (keyed) {
+        // Held across the upload and RELEASED with key 0, which is the key a first-time consumer
+        // must acquire with. ReleaseSync also carries the implicit flush a named mutex does not.
+        if (SUCCEEDED(t->tex->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)&t->km)) && t->km) {
+            t->km->AcquireSync(0, 1000);
+        }
+    }
+    if (pixels) {
+        t->ctx->UpdateSubresource(t->tex, 0, NULL, pixels, (UINT)(w * 4), 0);
+    }
+    if (t->km) {
+        t->km->ReleaseSync(0);
+    } else {
+        t->ctx->Flush(); // no implicit flush without a keyed mutex: a foreign device would read stale
+    }
+    if (share) *share = (unsigned long long)(uintptr_t)sh;
+    return t;
+}
+
+void mf_testtex_release(void* h) {
+    mftex* t = (mftex*)h;
+    if (!t) return;
+    rel(t->km);
+    rel(t->tex);
+    rel(t->ctx);
+    rel(t->dev);
+    free(t);
+}

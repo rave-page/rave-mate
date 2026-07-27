@@ -179,8 +179,10 @@ func TestDecodeLiveSession(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond) // the child paces itself; give it room to drain
 	}
-	_ = d.Stats() // anchor the interval-derived rates, as the telemetry tick does
-	time.Sleep(700 * time.Millisecond)
+	// The interval-derived rates ride ratewin's sliding window: they need >= ratewin.MinSpan of
+	// OBSERVATION, not just two reads spaced by a fixed sleep.
+	_ = d.Stats() // plants the first window sample
+	time.Sleep(rateWindowSettle)
 	st := d.Stats()
 	t.Logf("decode live: decFrames=%d decFPS=%.1f busy=%.2fms inDropped=%d decDropped=%d "+
 		"errors=%d mtxTimeouts=%d staleMs=%.0f flags=%#x queueKiB=%d cpu=%.1f%%",

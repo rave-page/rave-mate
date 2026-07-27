@@ -16,7 +16,6 @@ package mfenc
 // silently inverted rows would look "fine" in every counter).
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"os"
@@ -25,7 +24,6 @@ import (
 	"time"
 
 	"rave.page/mate/internal/logbus"
-	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/videoshare"
 )
 
@@ -131,12 +129,10 @@ func TestZeroCopyLiveSession(t *testing.T) {
 		}
 		close(done)
 	}()
-	// The CHILD paces itself - we submit nothing. Two stats samples: the rate fields are
-	// interval-derived (a single read only sets the anchor), exactly as the telemetry tick does.
-	time.Sleep(700 * time.Millisecond)
-	_ = s.Stats()
-	time.Sleep(800 * time.Millisecond)
-	st := s.Stats()
+	// The CHILD paces itself - we submit nothing. The rate fields ride ratewin's sliding window, so
+	// they need >= ratewin.MinSpan of OBSERVATION, not just two reads (statsAfterRateWindow).
+	time.Sleep(500 * time.Millisecond)
+	st := statsAfterRateWindow(s)
 	s.Close()
 	select {
 	case <-done:
@@ -185,39 +181,10 @@ func TestZeroCopyLiveSession(t *testing.T) {
 	assertProbePattern(t, aus)
 }
 
-// assertProbePattern decodes the bitstream and asserts top half red / bottom half blue: the
-// non-vacuous orientation + swizzle check for the zero-copy path (R5). Skipped without ffmpeg.
+// assertProbePattern is the orientation + swizzle check for the zero-copy path (R5): top half red,
+// bottom half blue. The decode + band sampling itself lives in assertProbeBands
+// (zerocopy_risks_windows_test.go), which the risk gates share - one content instrument, not two.
 func assertProbePattern(t *testing.T, aus []AU) {
 	t.Helper()
-	ffmpeg, ok := mediatools.Resolve("ffmpeg")
-	if !ok {
-		t.Log("ffmpeg not found - orientation/colour NOT verified this run")
-		return
-	}
-	var in bytes.Buffer
-	for _, au := range aus {
-		in.Write(au.Data)
-	}
-	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "h264", "-i", "pipe:0",
-		"-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1")
-	cmd.Stdin = &in
-	out, err := cmd.Output()
-	if err != nil || len(out) < zcW*zcH*3 {
-		t.Fatalf("decode failed (%v), got %d bytes want %d", err, len(out), zcW*zcH*3)
-	}
-	at := func(x, y int) (byte, byte, byte) {
-		i := (y*zcW + x) * 3
-		return out[i], out[i+1], out[i+2]
-	}
-	// Sample well inside each band so chroma subsampling + a keyframe's quantisation cannot
-	// straddle the boundary.
-	tr, _, tb := at(zcW/2, zcH/8)
-	br, _, bb := at(zcW/2, zcH*7/8)
-	if tr < 128 || tb > 96 {
-		t.Fatalf("top band decoded as r=%d b=%d, want RED - rows or channels are swapped", tr, tb)
-	}
-	if bb < 128 || br > 96 {
-		t.Fatalf("bottom band decoded as r=%d b=%d, want BLUE - rows or channels are swapped", br, bb)
-	}
-	t.Logf("orientation + colour verified: top r=%d b=%d, bottom r=%d b=%d", tr, tb, br, bb)
+	assertProbeBands(t, aus, zcW, zcH, [3]byte{255, 0, 0}, [3]byte{0, 0, 255})
 }

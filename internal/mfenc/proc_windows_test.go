@@ -10,7 +10,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"rave.page/mate/internal/ratewin"
 )
+
+// rateWindowSettle is how long a session must be OBSERVED before its interval-derived stats
+// (CapFPS / DecFPS / EncBusyMs / DecBusyMs) report a number. They ride ratewin's sliding window,
+// which reports nothing below ratewin.MinSpan and takes its first sample on the first Stats() read
+// - so a test that primes and then reads 500 ms later correctly gets 0, where the old read-driven
+// 500 ms anchor would have handed back a number measured over whatever span the last reader left.
+const rateWindowSettle = ratewin.MinSpan + 500*time.Millisecond
+
+// statsAfterRateWindow primes the window, waits out rateWindowSettle, and returns the sample. Use
+// it wherever a gate asserts a RATE rather than a cumulative counter.
+func statsAfterRateWindow(s *ProcSession) ProcStats {
+	_ = s.Stats() // plants the first window sample; the value is meaningless by construction
+	time.Sleep(rateWindowSettle)
+	return s.Stats()
+}
 
 func requireEncExe(t *testing.T) {
 	t.Helper()

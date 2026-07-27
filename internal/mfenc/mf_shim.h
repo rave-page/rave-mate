@@ -58,6 +58,28 @@ void mf_enc_name(mfenc* e, char* out, int cap);
 // mf_swizzle_rgba_bgra converts n pixels RGBA->BGRA (exposed for the Go unit test).
 void mf_swizzle_rgba_bgra(uint8_t* dst, const uint8_t* src, int npx);
 
+// ── gate-only shared-texture factory (zigmedia risks R3 + R4) ────────────────────────────────
+//
+// Two capture branches in the encoder child have never executed on any rig available here:
+//   * the IDXGIKeyedMutex path (cap.zig capFlags bit1) - every Spout sender on every box tested
+//     exposes Spout's NAMED access mutex instead, so R3's "AcquireSync could hang the session
+//     thread" hazard has only ever been reasoned about;
+//   * the TYPELESS / exotic-format refusal (R4) - no sender here produces one.
+// No Spout sender can be made to produce either, and the child takes its handle from a Go
+// callback (SpoutSource.Resolve), so a texture WE create is the only instrument that reaches
+// those paths. Gate/diagnostic use only - nothing in the product calls this.
+//
+// mf_testtex_create makes a shared D3D11 texture on adapterLuid (0 = default) and returns its
+// legacy SHARED handle in *share. keyed != 0 → MISC_SHARED_KEYEDMUTEX, else MISC_SHARED.
+// pixels (may be NULL) must ALREADY be in fmt's byte order, w*h*4 bytes, and is uploaded under
+// the keyed mutex when there is one, then flushed - so a consumer on another device sees content
+// and the gate can assert PIXELS rather than "no error". NULL = failed, reason in errbuf.
+void* mf_testtex_create(int64_t adapterLuid, int w, int h, unsigned int fmt, int keyed,
+                        const uint8_t* pixels, unsigned long long* share, char* errbuf, int errcap);
+
+// mf_testtex_release frees the texture, its keyed mutex and the device that owns them.
+void mf_testtex_release(void* t);
+
 #ifdef __cplusplus
 }
 #endif
