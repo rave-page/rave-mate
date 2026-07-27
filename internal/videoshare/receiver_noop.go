@@ -4,6 +4,7 @@ package videoshare
 
 import (
 	"errors"
+	"image"
 
 	"rave.page/mate/internal/logbus"
 )
@@ -13,5 +14,10 @@ import (
 
 func scanSenders() []SenderInfo { return nil }
 func newFrameReceiver(*logbus.Bus, string, RecvOptions) (FrameReceiver, error) {
+	return nil, errors.New("no video-share backend compiled in (build -tags spout)")
+}
+
+// grabSenderFrame has no backend in the default build.
+func grabSenderFrame(string, int, int) (*image.NRGBA, error) {
 	return nil, errors.New("no video-share backend compiled in (build -tags spout)")
 }

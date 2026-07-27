@@ -41,6 +41,10 @@ const MF_MT_MPEG2_LEVEL = g(0x96f66574, 0x11c5, 0x4015, .{ 0x86, 0x66, 0xbf, 0xf
 const MF_SA_D3D11_AWARE = g(0x206b4fc8, 0xfcf9, 0x4c51, .{ 0xaf, 0xe3, 0x97, 0x64, 0x36, 0x9e, 0x33, 0xa0 });
 const MFT_FRIENDLY_NAME = g(0x314ffbae, 0x5b41, 0x4c95, .{ 0x9c, 0x19, 0x4e, 0x7d, 0x58, 0x6f, 0xac, 0xe3 });
 const MFT_CATEGORY_VIDEO_ENCODER = g(0xf79eac7d, 0xe545, 0x4387, .{ 0xbd, 0xee, 0xd6, 0x47, 0xd7, 0xbd, 0xe4, 0x2a });
+const MFT_CATEGORY_VIDEO_DECODER = g(0xd6c02d4b, 0x6833, 0x45b4, .{ 0x97, 0x1a, 0x05, 0xa4, 0xb0, 0x4b, 0xab, 0x91 });
+pub const MFVideoFormat_HEVC = g(0x43564548, 0x0000, 0x0010, .{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 });
+// IMFDXGIBuffer: how a D3D11-aware MFT's output sample exposes its ID3D11Texture2D + array slice.
+pub const IID_IMFDXGIBuffer = g(0xe7174cfa, 0x1c9e, 0x48b1, .{ 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 });
 const CODECAPI_AVEncCommonRateControlMode = g(0x1c0608e9, 0x370c, 0x4710, .{ 0x8a, 0x58, 0xcb, 0x61, 0x81, 0xc4, 0x24, 0x23 });
 const CODECAPI_AVEncCommonMeanBitRate = g(0xf7222374, 0x2144, 0x4815, .{ 0xb5, 0x50, 0xa3, 0x7f, 0x8e, 0x12, 0xee, 0x52 });
 const CODECAPI_AVEncMPVGOPSize = g(0x95f31b26, 0x95a4, 0x41aa, .{ 0x93, 0x03, 0x24, 0x6a, 0x7f, 0xc6, 0xee, 0xf1 });
@@ -96,6 +100,10 @@ const D3D11_BIND_RENDER_TARGET: u32 = 0x20;
 const D3D11_VPIV_DIMENSION_TEXTURE2D: u32 = 1;
 const D3D11_VPOV_DIMENSION_TEXTURE2D: u32 = 1;
 const D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT: u32 = 1;
+pub const VP_FORMAT_SUPPORT_OUTPUT: u32 = 2;
+pub const USAGE_STAGING: u32 = 3;
+pub const CPU_ACCESS_READ: u32 = 0x20000;
+pub const MAP_READ: u32 = 1;
 const DXGI_ADAPTER_FLAG_SOFTWARE: u32 = 2;
 const VT_UI4: u16 = 19;
 const VT_BOOL: u16 = 11;
@@ -131,6 +139,10 @@ pub const D3D11_TEXTURE2D_DESC = extern struct {
 };
 
 const DXGI_RATIONAL = extern struct { Numerator: u32, Denominator: u32 };
+
+pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+
+pub const MAPPED_SUBRESOURCE = extern struct { pData: ?[*]u8, RowPitch: u32, DepthPitch: u32 };
 
 const D3D11_VIDEO_PROCESSOR_CONTENT_DESC = extern struct {
     InputFrameFormat: u32,
@@ -272,6 +284,16 @@ pub const IMF2DBuffer = extern struct {
     },
 };
 
+// IMFDXGIBuffer: IUnknown(3) + GetResource(3) GetSubresourceIndex(4) GetUnknown SetUnknown.
+pub const IMFDXGIBuffer = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        GetResource: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
+        GetSubresourceIndex: *const fn (*anyopaque, *u32) callconv(.winapi) HRESULT,
+        // GetUnknown SetUnknown (unused)
+    },
+};
+
 pub const IMFTransform = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
@@ -350,8 +372,18 @@ pub const ID3D11DeviceContext = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
         _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
-        _p7: [41]VOP, // VSSetConstantBuffers(7) .. CopyResource(47)
+        _p7: [7]VOP, // VSSetConstantBuffers(7) .. Draw(13)
+        Map: *const fn (*anyopaque, *anyopaque, u32, u32, u32, *MAPPED_SUBRESOURCE) callconv(.winapi) HRESULT,
+        Unmap: *const fn (*anyopaque, *anyopaque, u32) callconv(.winapi) void,
+        _p16: [31]VOP, // PSSetConstantBuffers(16) .. CopySubresourceRegion(46)
+        CopyResource: *const fn (*anyopaque, *anyopaque, *anyopaque) callconv(.winapi) void,
         UpdateSubresource: *const fn (*anyopaque, *anyopaque, u32, ?*const anyopaque, *const anyopaque, u32, u32) callconv(.winapi) void,
+        _p49: [62]VOP, // CopyStructureCount(49) .. ClearState(110)
+        // Flush(111) is REQUIRED on the decode/publish path: a write into a texture ANOTHER PROCESS
+        // reads is only visible once the command list is submitted, and a named (CPU) access mutex
+        // carries no implicit flush the way IDXGIKeyedMutex.ReleaseSync does. Without it the
+        // receiver reads the pre-blit content - a blank picture with zero errors in every counter.
+        Flush: *const fn (*anyopaque) callconv(.winapi) void,
     },
 };
 
@@ -392,7 +424,13 @@ pub const ID3D11VideoContext = extern struct {
         VideoProcessorSetOutputColorSpace: *const fn (*anyopaque, *anyopaque, *const COLOR_SPACE) callconv(.winapi) void,
         _p16: [12]VOP, // SetOutputAlphaFillMode..GetOutputExtension(26) + SetStreamFrameFormat(27)
         VideoProcessorSetStreamColorSpace: *const fn (*anyopaque, *anyopaque, u32, *const COLOR_SPACE) callconv(.winapi) void,
-        _p29: [24]VOP, // SetStreamOutputRate(29)..GetStreamExtension(52)
+        _p29: [1]VOP, // SetStreamOutputRate(29)
+        // A hardware decoder's NV12 surface is often taller than the frame (16-row alignment:
+        // 1088 for 1080). Without an explicit source rect the VP samples the WHOLE surface and
+        // squashes those alignment rows into the output - so this slot is load-bearing on the
+        // decode path, and it splits the old _p29 pad 24 → 1 + 1 + 22.
+        VideoProcessorSetStreamSourceRect: *const fn (*anyopaque, *anyopaque, u32, i32, ?*const RECT) callconv(.winapi) void,
+        _p31: [22]VOP, // SetStreamDestRect(31)..GetStreamExtension(52)
         VideoProcessorBlt: *const fn (*anyopaque, *anyopaque, *anyopaque, u32, u32, *const D3D11_VIDEO_PROCESSOR_STREAM) callconv(.winapi) HRESULT,
     },
 };
@@ -602,7 +640,7 @@ pub const Enc = struct {
     }
 
     // findAdapter: LUID (high<<32|low) → adapter + vendor id; null = not found.
-    fn findAdapter(luid: i64, vendor: *u32) ?*IDXGIAdapter1 {
+    pub fn findAdapter(luid: i64, vendor: *u32) ?*IDXGIAdapter1 {
         vendor.* = 0;
         if (luid == 0) return null;
         var raw: ?*anyopaque = null;
@@ -628,7 +666,7 @@ pub const Enc = struct {
 
     // pickDefaultAdapter: luid==0 binds a DELIBERATE default - known encode vendor first,
     // then any non-software adapter - never blind adapter 0 (Parsec-class virtual displays).
-    fn pickDefaultAdapter(vendor: *u32) ?*IDXGIAdapter1 {
+    pub fn pickDefaultAdapter(vendor: *u32) ?*IDXGIAdapter1 {
         vendor.* = 0;
         var raw: ?*anyopaque = null;
         if (failed(CreateDXGIFactory1(&IID_IDXGIFactory1, &raw)) or raw == null) return null;
@@ -1253,3 +1291,92 @@ test "vendor mismatch" {
     try std.testing.expect(!vendorMismatch("Contoso HW Encoder", "NVIDIA"));
     try std.testing.expect(!vendorMismatch("AMD AMF Encoder", null));
 }
+
+/// api is the INTERNAL surface dec.zig needs. Zig has no friend visibility and a separate file
+/// cannot see this one's privates, so these are pure ALIASES - nothing here changes the encode
+/// path, and the block documents exactly how much of mf.zig the decode side couples to.
+pub const api = struct {
+    // flat imports
+    pub const startup = MFStartup;
+    pub const enumMFT = MFTEnumEx;
+    pub const createMediaType = MFCreateMediaType;
+    pub const createDeviceManager = MFCreateDXGIDeviceManager;
+    pub const createSample = MFCreateSample;
+    pub const createMemoryBuffer = MFCreateMemoryBuffer;
+    pub const createD3D11Device = D3D11CreateDevice;
+    pub const sleep = Sleep;
+    pub const coTaskMemFree = CoTaskMemFree;
+
+    // interfaces + structs not already public
+    pub const AttrVtbl_ = AttrVtbl;
+    pub const ContentDesc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC;
+    pub const Rational = DXGI_RATIONAL;
+    pub const VPStream = D3D11_VIDEO_PROCESSOR_STREAM;
+    pub const VPOVDesc = VPOV_DESC;
+    pub const ColorSpace = COLOR_SPACE;
+    pub const RegisterTypeInfo = MFT_REGISTER_TYPE_INFO;
+    pub const OutputStreamInfo = MFT_OUTPUT_STREAM_INFO;
+    pub const OutputDataBuffer = MFT_OUTPUT_DATA_BUFFER;
+
+    // helpers
+    pub const setU32 = attrSetU32;
+    pub const setU64 = attrSetU64;
+    pub const setGUID = attrSetGUID;
+    pub const getU32 = attrGetU32;
+    pub const getGUID = attrGetGUID;
+    pub const guidsEqual = guidEq;
+    pub const mediaType = mtVideo;
+    pub const traceStage = trace;
+
+    // GUIDs
+    pub const CAT_VIDEO_DECODER = MFT_CATEGORY_VIDEO_DECODER;
+    pub const MT_VIDEO = MFMediaType_Video;
+    pub const FMT_NV12 = MFVideoFormat_NV12;
+    pub const FMT_H264 = MFVideoFormat_H264;
+    pub const FMT_HEVC = MFVideoFormat_HEVC;
+    pub const A_MAJOR_TYPE = MF_MT_MAJOR_TYPE;
+    pub const A_SUBTYPE = MF_MT_SUBTYPE;
+    pub const A_FRAME_SIZE = MF_MT_FRAME_SIZE;
+    pub const A_FRAME_RATE = MF_MT_FRAME_RATE;
+    pub const A_D3D11_AWARE = MF_SA_D3D11_AWARE;
+    pub const A_ASYNC_UNLOCK = MF_TRANSFORM_ASYNC_UNLOCK;
+    pub const A_LOW_LATENCY = MF_LOW_LATENCY;
+    pub const A_FRIENDLY_NAME = MFT_FRIENDLY_NAME;
+    pub const IID_EVGEN = IID_IMFMediaEventGenerator;
+    pub const IID_MULTITHREAD = IID_ID3D10Multithread;
+    pub const IID_VIDEO_DEVICE = IID_ID3D11VideoDevice;
+    pub const IID_VIDEO_CONTEXT = IID_ID3D11VideoContext;
+    pub const IID_TRANSFORM = IID_IMFTransform;
+
+    // constants
+    pub const MF_VER = MF_VERSION;
+    pub const STARTUP_LITE = MFSTARTUP_LITE;
+    pub const ENUM_HARDWARE = MFT_ENUM_FLAG_HARDWARE;
+    pub const ENUM_SORTFILTER = MFT_ENUM_FLAG_SORTANDFILTER;
+    pub const MSG_SET_D3D_MANAGER = MFT_MESSAGE_SET_D3D_MANAGER;
+    pub const MSG_DRAIN = MFT_MESSAGE_COMMAND_DRAIN;
+    pub const MSG_BEGIN_STREAMING = MFT_MESSAGE_NOTIFY_BEGIN_STREAMING;
+    pub const MSG_END_OF_STREAM = MFT_MESSAGE_NOTIFY_END_OF_STREAM;
+    pub const MSG_START_OF_STREAM = MFT_MESSAGE_NOTIFY_START_OF_STREAM;
+    pub const OUT_PROVIDES_SAMPLES = MFT_OUTPUT_STREAM_PROVIDES_SAMPLES;
+    pub const OUT_CAN_PROVIDE_SAMPLES = MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES;
+    pub const EV_NEED_INPUT = METransformNeedInput;
+    pub const EV_HAVE_OUTPUT = METransformHaveOutput;
+    pub const EV_DRAIN_COMPLETE = METransformDrainComplete;
+    pub const EV_NO_WAIT = MF_EVENT_FLAG_NO_WAIT;
+    pub const E_STREAM_CHANGE = MF_E_TRANSFORM_STREAM_CHANGE;
+    pub const E_NEED_MORE_INPUT = MF_E_TRANSFORM_NEED_MORE_INPUT;
+    pub const E_NO_EVENTS = MF_E_NO_EVENTS_AVAILABLE;
+    pub const E_NOTACCEPTING = MF_E_NOTACCEPTING;
+    pub const E_HFAIL = E_FAIL;
+    pub const DRIVER_UNKNOWN = D3D_DRIVER_TYPE_UNKNOWN;
+    pub const DRIVER_HARDWARE = D3D_DRIVER_TYPE_HARDWARE;
+    pub const DEV_BGRA = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    pub const DEV_VIDEO = D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+    pub const SDK_VERSION = D3D11_SDK_VERSION;
+    pub const FMT_DXGI_NV12 = DXGI_FORMAT_NV12;
+    pub const VPIV_TEXTURE2D = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    pub const VPOV_TEXTURE2D = D3D11_VPOV_DIMENSION_TEXTURE2D;
+    pub const VP_SUPPORT_INPUT = D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT;
+    pub const feed_wait_ms = FEED_WAIT_MS;
+};

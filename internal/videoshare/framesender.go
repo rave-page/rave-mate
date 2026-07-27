@@ -11,7 +11,12 @@ import (
 // VRSL DMX grid ("rave-mate-vrsl"). The transport is chosen at build time; the default (no-tag)
 // build has no backend and NewFrameSender errors so callers fall back (e.g. to a PNG file).
 type FrameSender interface {
-	Send(img *image.NRGBA) error // owned by the caller after return
+	// Send publishes img. CONTRACT: img.Pix is the caller's again the moment Send returns, so an
+	// implementation MUST NOT retain it - a backend that uploads on its own thread has to wait for
+	// that read (internal/videoshare/handoff.go). mediaroute's receive sink passes mediapipe's
+	// decode buffer straight through and the decoder recycles it as soon as Write returns; an
+	// implementation that reads later ships torn frames.
+	Send(img *image.NRGBA) error
 	Close()
 }
 

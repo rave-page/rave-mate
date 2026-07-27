@@ -1003,6 +1003,10 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.ChildCPUPct > 0 {
 			p += " · " + i18n.T("peers.pipeChildCpu", i18n.A{"pct": fmt.Sprintf("%.0f", s.Pipe.ChildCPUPct)})
 		}
+		// Stage drop counters were collected everywhere and rendered nowhere.
+		if s.Pipe.Dropped > 0 {
+			p += " · " + i18n.T("peers.pipeDropped", i18n.A{"n": fmt.Sprint(s.Pipe.Dropped)})
+		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
 			parts = append(parts, z)
@@ -1030,6 +1034,24 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 		}
 		if p.CapStaleMs > 0 {
 			out = append(out, i18n.T("peers.capStale", i18n.A{"ms": fmt.Sprintf("%.0f", p.CapStaleMs)}))
+		}
+	}
+	if p.ZeroDecode {
+		out = append(out, i18n.T("peers.gpuDecodeFps", i18n.A{"fps": fmt.Sprintf("%.1f", p.DecFPS)}))
+		if p.DecBusyMs > 0 {
+			out = append(out, i18n.T("peers.decBusy", i18n.A{"ms": fmt.Sprintf("%.1f", p.DecBusyMs)}))
+		}
+		if p.InDropped > 0 {
+			out = append(out, i18n.T("peers.decRingDrops", i18n.A{"n": fmt.Sprint(p.InDropped)}))
+		}
+		if p.DecErrors > 0 {
+			out = append(out, i18n.T("peers.decPublishErrors", i18n.A{"n": fmt.Sprint(p.DecErrors)}))
+		}
+		if p.DecMtxTimeo > 0 {
+			out = append(out, i18n.T("peers.decMtxTimeouts", i18n.A{"n": fmt.Sprint(p.DecMtxTimeo)}))
+		}
+		if p.DecStaleMs > 0 {
+			out = append(out, i18n.T("peers.capStale", i18n.A{"ms": fmt.Sprintf("%.0f", p.DecStaleMs)}))
 		}
 	}
 	if p.Downgrades > 0 {

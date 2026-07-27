@@ -110,6 +110,28 @@ func TestRebufRetainsUnpooledAUs(t *testing.T) {
 	}
 }
 
+// TestRebufExemptsUnpooledRawFrames: an UNPOOLED raw producer (webcam framepipe allocates a fresh
+// buffer per frame, so Release == nil) must be exempt too. It was not: `case f.Release == nil`
+// retained the frame, and at 1080p a single 8 MB raw frame displaces half the 16 MB window - i.e.
+// the window degenerated into a 1-frame buffer that could retransmit nothing.
+func TestRebufExemptsUnpooledRawFrames(t *testing.T) {
+	rio := &routeIO{rebuf: newRetransmitBuf(0, 0)}
+	au := &Frame{Stream: 1, Kind: KindVideo, Codec: CodecH264, Seq: 1, Payload: []byte{1, 2, 3}}
+	rio.retainOrRelease(au) // a real AU is in the window first: the raw frame must not evict it
+	for seq := 2; seq < 6; seq++ {
+		rio.retainOrRelease(&Frame{Stream: 1, Kind: KindVideo, Codec: CodecNRGBA,
+			Seq: uint32(seq), Payload: make([]byte, 1<<20)}) // 1 MB raw, no Release
+	}
+	if rio.rebuf.bytes != len(au.Payload) {
+		t.Fatalf("window holds %d bytes, want only the %d-byte AU (raw frames must not enter)",
+			rio.rebuf.bytes, len(au.Payload))
+	}
+	got := rio.rebuf.get(1, 1, 5)
+	if len(got) != 1 || got[0] != au {
+		t.Fatalf("window holds %d frames, want just the retained AU", len(got))
+	}
+}
+
 // TestRebufOversizedPooledAUExempt: a pooled payload too big to copy is released, not retained.
 func TestRebufOversizedPooledAUExempt(t *testing.T) {
 	p := newTestPool(t)

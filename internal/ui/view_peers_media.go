@@ -180,6 +180,11 @@ func fmtPipeLine(s medialink.RouteStat) string {
 		if s.Pipe.ChildCPUPct > 0 {
 			p += fmt.Sprintf(" · child cpu %.0f%%", s.Pipe.ChildCPUPct)
 		}
+		// Every stage counted its own drops and none of them reached a surface: a route that
+		// throws most frames away (dims mismatch, fps cap, no keyframe yet) looked healthy.
+		if s.Pipe.Dropped > 0 {
+			p += fmt.Sprintf(" · dropped %d", s.Pipe.Dropped)
+		}
 		parts = append(parts, p)
 		if z := fmtCaptureLine(*s.Pipe); z != "" {
 			parts = append(parts, z)
@@ -208,6 +213,24 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 		}
 		if p.CapStaleMs > 0 {
 			out = append(out, fmt.Sprintf("stale %.0f ms", p.CapStaleMs))
+		}
+	}
+	if p.ZeroDecode {
+		out = append(out, fmt.Sprintf("gpu decode %.1f fps", p.DecFPS))
+		if p.DecBusyMs > 0 {
+			out = append(out, fmt.Sprintf("decode %.1f ms/frame", p.DecBusyMs))
+		}
+		if p.InDropped > 0 {
+			out = append(out, fmt.Sprintf("ring drops %d", p.InDropped))
+		}
+		if p.DecErrors > 0 {
+			out = append(out, fmt.Sprintf("publish errors %d", p.DecErrors))
+		}
+		if p.DecMtxTimeo > 0 {
+			out = append(out, fmt.Sprintf("dest mutex timeouts %d", p.DecMtxTimeo))
+		}
+		if p.DecStaleMs > 0 {
+			out = append(out, fmt.Sprintf("stale %.0f ms", p.DecStaleMs))
 		}
 	}
 	if p.Downgrades > 0 {

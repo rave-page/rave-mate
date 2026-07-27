@@ -221,6 +221,9 @@ type openedEv struct {
 	ErrSrc string `json:"err_src"`
 	Reason string `json:"reason"`
 	Ver    uint32 `json:"ver"`
+	// dir:"dec" (zigmedia inc 2): which direction the session got + why a destination was refused.
+	Dir    string `json:"dir"`
+	ErrDst string `json:"err_dst"`
 }
 
 // ErrZeroCopyRefused is the open-side downgrade rung: the child could not consume the sender's
@@ -236,6 +239,7 @@ type procChild struct {
 	stdin      io.WriteCloser
 	proc       windows.Handle // PROCESS_QUERY_LIMITED_INFORMATION for CPU sampling
 	sessions   map[uint32]*ProcSession
+	decs       map[uint32]*ProcDecSession // dir:"dec" sessions, same child, same supervisor
 	openWait   map[uint32]chan openedEv
 	closeWait  map[uint32]chan struct{}
 	dead       bool
@@ -448,7 +452,8 @@ func getChild(luid int64) (*procChild, error) {
 		}
 		return c, nil
 	}
-	c := &procChild{luid: luid, sessions: map[uint32]*ProcSession{}, openWait: map[uint32]chan openedEv{},
+	c := &procChild{luid: luid, sessions: map[uint32]*ProcSession{}, decs: map[uint32]*ProcDecSession{},
+		openWait:  map[uint32]chan openedEv{},
 		closeWait: map[uint32]chan struct{}{}, stateCh: make(chan struct{})}
 	if err := c.spawn(); err != nil {
 		return nil, err
@@ -602,6 +607,13 @@ func (c *procChild) readEvents(r io.Reader) {
 			if s != nil {
 				s.onSrcGone(ev.Reason)
 			}
+		case "dstgone":
+			c.mu.Lock()
+			d := c.decs[ev.SID]
+			c.mu.Unlock()
+			if d != nil {
+				d.onDstGone(ev.Reason)
+			}
 		case "closed":
 			c.mu.Lock()
 			ch := c.closeWait[ev.SID]
@@ -667,11 +679,19 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 		ch <- openedEv{SID: sid, OK: false, Err: "encoder child died during open"}
 	}
 	live := make([]*ProcSession, 0, len(c.sessions))
-	died := make([]SessionInfo, 0, len(c.sessions))
+	died := make([]SessionInfo, 0, len(c.sessions)+len(c.decs))
 	for _, s := range c.sessions {
 		s.recovering.Store(true) // drop frames until re-placed - the route must not stall
 		live = append(live, s)
 		died = append(died, SessionInfo{SID: s.sid, LUID: c.luid, InW: s.inW, InH: s.inH, OutW: s.outW, OutH: s.outH, FPS: s.fps})
+	}
+	// dir:"dec" sessions ride the same supervisor: without this a child crash recovers every send
+	// route and silently kills the receive ones.
+	liveDec := make([]*ProcDecSession, 0, len(c.decs))
+	for _, d := range c.decs {
+		d.recovering.Store(true) // drop AUs until re-placed
+		liveDec = append(liveDec, d)
+		died = append(died, SessionInfo{SID: d.sid, LUID: c.luid, InW: d.inW, InH: d.inH, OutW: d.outW, OutH: d.outH, FPS: d.fps})
 	}
 	if time.Since(c.lastSpawn) < crashWindow {
 		c.consecFail++
@@ -681,14 +701,17 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 	fails := c.consecFail
 	tail := string(c.stderrTail)
 	c.mu.Unlock()
-	if len(live) == 0 && err == nil {
+	if len(live) == 0 && len(liveDec) == 0 && err == nil {
 		return // clean exit with no sessions (quit)
 	}
 	Warnf("mfenc: encoder child (adapter %#x) exited: %v - %d session(s) affected, consecutive fails %d; stderr tail: %s",
-		uint64(c.luid), err, len(live), fails, tail)
+		uint64(c.luid), err, len(live)+len(liveDec), fails, tail)
 
-	dec := RestartPolicy(c.luid, fails, died)
-	if !dec.Retry {
+	verdict := RestartPolicy(c.luid, fails, died)
+	if !verdict.Retry {
+		for _, d := range liveDec {
+			d.fail("mfenc: encoder child crash limit reached")
+		}
 		for _, s := range live {
 			k := poisonKey(s)
 			poisonMu.Lock()
@@ -716,6 +739,9 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 		for _, s := range live {
 			s.fail("mfenc: encoder child respawn failed: " + err.Error())
 		}
+		for _, d := range liveDec {
+			d.fail("mfenc: encoder child respawn failed: " + err.Error())
+		}
 		return
 	}
 	c.restarts++
@@ -731,6 +757,21 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 		}
 		s.recovering.Store(false)
 		_ = c.send(map[string]any{"op": "idr", "sid": s.sid}) // receiver needs a fresh IDR
+	}
+	// Decode sessions: same re-place, plus a ring reset - whatever bitstream survived the crash is
+	// unusable to a fresh decoder without a keyframe, and the route's own PLI machinery asks the
+	// peer for one.
+	for _, d := range liveDec {
+		if d.closed.Load() {
+			continue
+		}
+		atomic.StoreUint64(d.shm.u64(offInRead), 0)
+		atomic.StoreUint64(d.shm.u64(offInWrite), 0)
+		if ev, err := c.openDecSession(d); err != nil || !ev.OK {
+			d.fail("mfenc: decode session reopen after crash failed")
+			continue
+		}
+		d.recovering.Store(false)
 	}
 }
 
@@ -755,6 +796,13 @@ type openCmd struct {
 	CapD   int    `json:"cap_d,omitempty"`
 	RingKB int    `json:"ring_kb,omitempty"`
 	PTS0   int64  `json:"pts0,omitempty"`
+	// dir:"dec" receive-side fields (omitted entirely on an encode session: absent = "enc").
+	Dir      string `json:"dir,omitempty"`
+	Codec    string `json:"codec,omitempty"`
+	DSh      uint64 `json:"dsh,omitempty"`
+	DFmt     uint32 `json:"dfmt,omitempty"`
+	DName    string `json:"dname,omitempty"`
+	InRingKB int    `json:"in_ring_kb,omitempty"`
 }
 
 func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
@@ -785,6 +833,45 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 		c.mu.Lock()
 		if ch2, ok := c.openWait[s.sid]; ok && ch2 == ch {
 			delete(c.openWait, s.sid) // prune our waiter (readEvents may have raced the delete)
+		}
+		c.mu.Unlock()
+		select {
+		case ev := <-ch: // late event landed between timeout and prune - use it
+			return ev, nil
+		default:
+		}
+		return openedEv{}, errors.New("open timeout")
+	}
+}
+
+// openDecSession sends a dir:"dec" open and waits for its verdict. The destination handle is
+// RE-READ on every (re)open, including the post-crash re-place: a sender re-created while the child
+// was down must never be handed its dead texture (the receive side's R1).
+func (c *procChild) openDecSession(d *ProcDecSession) (openedEv, error) {
+	ch := make(chan openedEv, 1)
+	c.mu.Lock()
+	c.openWait[d.sid] = ch
+	c.mu.Unlock()
+	fpsN, fpsD := fpsRational(d.fps)
+	d.refreshDest()
+	h, dfmt, name := d.destHandle()
+	codec := "h264"
+	if d.hevc {
+		codec = "hevc"
+	}
+	cmd := openCmd{Op: "open", SID: d.sid, Shm: d.shm.name, InW: d.inW, InH: d.inH,
+		OutW: d.outW, OutH: d.outH, FpsN: fpsN, FpsD: fpsD,
+		Dir: "dec", Codec: codec, DSh: h, DFmt: dfmt, DName: name, InRingKB: d.ringKB}
+	if err := c.send(cmd); err != nil {
+		return openedEv{}, err
+	}
+	select {
+	case ev := <-ch:
+		return ev, nil
+	case <-time.After(openWait):
+		c.mu.Lock()
+		if ch2, ok := c.openWait[d.sid]; ok && ch2 == ch {
+			delete(c.openWait, d.sid) // prune our waiter (readEvents may have raced the delete)
 		}
 		c.mu.Unlock()
 		select {

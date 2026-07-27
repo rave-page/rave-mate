@@ -23,6 +23,21 @@ void* rave_spout_create(void);
 int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
                     unsigned int w, unsigned int height, int flip);
 
+// rave_spout_open_sender initialises the named sender at the given geometry and returns its DX11
+// SHARED-TEXTURE handle in *share, so a foreign D3D11 device (the decoder child, zigmedia inc 2)
+// can render INTO it instead of pushing raw frames back through this process. fmt = DXGI format to
+// request (0 = Spout's default). Call on h's owning thread, before any rave_spout_send.
+//
+// SPOUTLIBRARY has no CreateSender: a sender's texture is allocated by the first send. So this
+// publishes ONE zeroed frame to force the allocation, then reads GetHandle(). That is one
+// w*h*4 write per ROUTE (reusing the pooled flip buffer, no malloc), not per frame.
+// The handle + the ACTUAL format come back out of the registry (GetSenderInfo), not GetHandle():
+// on the shipped SDK pairing GetHandle() is NULL for a sender created through SendImage.
+// 1 = ok and *share is non-zero; 0 = bad args; -1 = SendImage refused; -2 = no DX11 shared
+// texture (a CPU/memoryshare sender). Anything but 1 means "keep the frame path".
+int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
+                          unsigned int fmt, unsigned long long* share, unsigned int* out_fmt);
+
 // Release the sender, close its OpenGL context, free the handle. Call on the owning thread.
 void rave_spout_release(void* h);
 
@@ -30,11 +45,6 @@ void rave_spout_release(void* h);
 // No OpenGL context needed for the name registry.
 int rave_spout_sender_count(void);
 int rave_spout_find(const char* name);
-
-// Test-only orientation probe: send `in` to a throwaway sender (with the given bInvert), then
-// receive it back into `out` (no receiver flip). Lets a test see the orientation a receiver
-// gets. Returns 1 if a frame round-tripped. in/out are w*h*4 RGBA.
-int rave_spout_roundtrip(const unsigned char* in, unsigned char* out, unsigned int w, unsigned int h, int binvert);
 
 // Sender registry queries (shared process-wide handle, no GL): copy the idx-th sender name into
 // out (cap bytes, NUL-terminated; 1 on success) / a named sender's current dimensions.

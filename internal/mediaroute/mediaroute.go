@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/config"
@@ -59,11 +60,14 @@ type Options struct {
 	SenderSize  func(name string) (w, h int, ok bool)
 	// SenderShare resolves a sender's GPU shared-texture handle + DXGI format (zero-copy
 	// encode, zigmedia inc 1). Scalars only - no pixels, no capture opened.
-	SenderShare  func(name string) (handle uint64, dxgiFormat uint32, w, h int, ok bool)
-	OpenSource   func(name string, w, h int) (medialink.Source, error)
-	OpenSink     func(name string, w, h int) (medialink.Sink, error)
-	OpenReceiver func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
-	PutPix       func([]byte)                                                        // pooled-buffer recycler
+	SenderShare func(name string) (handle uint64, dxgiFormat uint32, w, h int, ok bool)
+	// NewSharedSender opens the receive-route's local sender EAGERLY and exposes its destination
+	// GPU texture, so the decoder child can render into it (zigmedia inc 2). nil = videoshare.
+	NewSharedSender func(name string, w, h int) (videoshare.SharedSender, error)
+	OpenSource      func(name string, w, h int) (medialink.Source, error)
+	OpenSink        func(name string, w, h int) (medialink.Sink, error)
+	OpenReceiver    func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
+	PutPix          func([]byte)                                                        // pooled-buffer recycler
 }
 
 // Receive is one requested receive route (UI listing + sink cleanup bookkeeping).
@@ -83,12 +87,13 @@ type Manager struct {
 	cfg      func() config.MediaLinkFeature
 	sameHost func(string) bool
 
-	listSenders func() []string
-	senderSize  func(string) (int, int, bool)
-	senderShare func(string) (uint64, uint32, int, int, bool)
-	openSource  func(string, int, int) (medialink.Source, error)
-	openSink    func(string, int, int) (medialink.Sink, error)
-	hub         *captureHub // one capture per Spout source, fanned out to N routes
+	listSenders  func() []string
+	senderSize   func(string) (int, int, bool)
+	senderShare  func(string) (uint64, uint32, int, int, bool)
+	newSharedSnd func(string, int, int) (videoshare.SharedSender, error)
+	openSource   func(string, int, int) (medialink.Source, error)
+	openSink     func(string, int, int) (medialink.Sink, error)
+	hub          *captureHub // one capture per Spout source, fanned out to N routes
 
 	mu       sync.Mutex
 	shared   map[string]medialink.SourceDesc // sender name → advertised desc
@@ -100,7 +105,7 @@ func New(o Options) *Manager {
 	m := &Manager{
 		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
-		openSource: o.OpenSource, openSink: o.OpenSink,
+		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 	}
 	m.hub = newCaptureHub(o.Log, o.OpenReceiver, o.PutPix)
@@ -112,6 +117,11 @@ func New(o Options) *Manager {
 	}
 	if m.senderShare == nil {
 		m.senderShare = videoshare.SenderShare
+	}
+	if m.newSharedSnd == nil {
+		m.newSharedSnd = func(n string, w, h int) (videoshare.SharedSender, error) {
+			return videoshare.NewSharedSender(o.Log, n, w, h)
+		}
 	}
 	if m.openSource == nil {
 		m.openSource = m.openSpoutSource
@@ -387,8 +397,9 @@ type spoutSource struct {
 	attach  func(name string, maxFPS float64) (captureFeed, error)
 	shareOf func(name string) (uint64, uint32, int, int, bool)
 
-	minGap time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
-	last   time.Time
+	minGap  time.Duration // MediaLink.MaxFPS cap (0 = uncapped)
+	last    time.Time
+	dropped atomic.Uint64 // fps-cap drops; surfaced via PipeStats (the encode wrapper sums it)
 
 	mu   sync.Mutex
 	feed captureFeed // nil until the first Next attaches (or a test injects one)
@@ -418,6 +429,13 @@ func (s *spoutSource) SharedTexture() (uint64, uint32, int, int, string, bool) {
 		return 0, 0, 0, 0, "", false
 	}
 	return h, fmt, w, hh, s.name, true
+}
+
+// PipeStats implements medialink.PipelineReporter: the per-route fps-cap drops. The encode
+// wrapper sums this into its own Dropped, so the number reaches the route panel instead of dying
+// in a struct field nobody reads.
+func (s *spoutSource) PipeStats() medialink.PipelineStats {
+	return medialink.PipelineStats{Dropped: s.dropped.Load()}
 }
 
 // feedOrAttach returns this route's capture feed, opening the shared capture on first use.
@@ -455,6 +473,7 @@ func (s *spoutSource) Next(ctx context.Context) (*medialink.Frame, error) {
 				now := time.Now()
 				if now.Sub(s.last) < s.minGap {
 					f.ref.release() // over this route's fps budget - drop our reference
+					s.dropped.Add(1)
 					continue
 				}
 				s.last = now
@@ -482,16 +501,39 @@ func (s *spoutSource) Close() error {
 // spoutSink presents decoded frames as a named local Spout sender. Write is called serially by the
 // route's jitter drain, so the diagnostic counters need no locking.
 type spoutSink struct {
-	log       *logbus.Bus
-	fs        videoshare.FrameSender
+	log *logbus.Bus
+	fs  videoshare.FrameSender
+	// shared is non-nil when the sender was opened eagerly with its destination GPU texture
+	// exposed (zigmedia inc 2). It IS fs - the same object - so a refused native decode session
+	// still publishes through Write without needing a second sender under this name.
+	shared    videoshare.SharedSender
 	name      string
 	w, h      int
-	sentOne   bool // logged the first delivered frame (sender is now visible)
-	dropped   int  // frames skipped for wrong kind/size (compressed passthrough, dims mismatch)
-	loggedBad bool // logged the first drop once (rate-limit)
+	sentOne   bool          // logged the first delivered frame (sender is now visible)
+	dropped   atomic.Uint64 // frames skipped for wrong kind/size (compressed passthrough, dims mismatch)
+	loggedBad bool          // logged the first drop once (rate-limit)
+}
+
+// PipeStats implements medialink.PipelineReporter: the decode wrapper sums these drops into the
+// route's Dropped, so "route up, frames arriving, no Spout sender" is visible as a number.
+func (s *spoutSink) PipeStats() medialink.PipelineStats {
+	return medialink.PipelineStats{Dropped: s.dropped.Load()}
 }
 
 func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
+	// Native decode wanted → open the sender EAGERLY so its destination texture exists before the
+	// decode engine is chosen (a decoder cannot create one). A failure here is not fatal: fall
+	// straight through to the lazy frame sender, i.e. today's path byte for byte.
+	if m.cfg().ZeroCopyDecode() && m.newSharedSnd != nil {
+		if ss, err := m.newSharedSnd(name, w, h); err == nil {
+			m.log.Info(source, "receive sink open (GPU destination texture)", map[string]any{
+				"sender": name, "w": w, "h": h, "fmt": ss.Format()})
+			return &spoutSink{log: m.log, fs: ss, shared: ss, name: name, w: w, h: h}, nil
+		} else {
+			m.log.Warn(source, "no GPU destination texture for this receive sink - using the frame path",
+				map[string]any{"sender": name, "err": err.Error()})
+		}
+	}
 	fs, err := videoshare.NewFrameSender(m.log, name)
 	if err != nil {
 		return nil, fmt.Errorf("mediaroute: video share unavailable: %w", err)
@@ -500,13 +542,26 @@ func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 	return &spoutSink{log: m.log, fs: fs, name: name, w: w, h: h}, nil
 }
 
+// SharedTexture implements medialink.ZeroCopySink: the local sender's destination texture. Pure
+// lookup of scalars resolved at open - it never touches a pixel and never creates anything.
+func (s *spoutSink) SharedTexture() (uint64, uint32, int, int, string, bool) {
+	if s.shared == nil {
+		return 0, 0, 0, 0, "", false
+	}
+	h := s.shared.Handle()
+	if h == 0 {
+		return 0, 0, 0, 0, "", false
+	}
+	return h, s.shared.Format(), s.w, s.h, s.name, true
+}
+
 func (s *spoutSink) Write(f *medialink.Frame) error {
 	want := s.w * s.h * 4
 	if f.Kind != medialink.KindVideo || len(f.Payload) < want {
 		// Undecoded/foreign frame - skip, never fatal. But a *sustained* stream of these means the
 		// Spout sender never materializes (it's created on the first real SendImage), so surface it
 		// once: this is the "route up, frames received, but no Spout source" failure.
-		s.dropped++
+		s.dropped.Add(1)
 		if !s.loggedBad {
 			s.loggedBad = true
 			s.log.Warn(source, "receive sink dropping frames - no Spout sender will appear", map[string]any{
@@ -522,7 +577,7 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 	if !s.sentOne {
 		s.sentOne = true
 		s.log.Info(source, "receive sink live - Spout sender publishing", map[string]any{
-			"sender": s.name, "w": s.w, "h": s.h, "droppedBefore": s.dropped})
+			"sender": s.name, "w": s.w, "h": s.h, "droppedBefore": s.dropped.Load()})
 	}
 	return nil
 }

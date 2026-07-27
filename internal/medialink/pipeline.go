@@ -62,12 +62,30 @@ type ZeroCopySource interface {
 	SharedTexture() (handle uint64, dxgiFormat uint32, w, h int, name string, ok bool)
 }
 
+// ZeroCopySink is the receive-side mirror of ZeroCopySource: a raw-video Sink whose DESTINATION
+// pixels live in a GPU shared texture a decoder may render into DIRECTLY - no raw frame down a
+// pipe, none on the Go heap. A decode engine that can drive such a texture (the native MF child,
+// zigmedia inc 2) asks once at open and then never calls Write for that codec; every other engine
+// ignores this and takes the frame path. ok=false = no shared texture (no backend, CPU/memoryshare
+// sender): use Write.
+//
+// The texture must ALREADY EXIST when this returns ok - a decoder cannot create it - and it must
+// stay valid until Close.
+type ZeroCopySink interface {
+	SharedTexture() (handle uint64, dxgiFormat uint32, w, h int, name string, ok bool)
+}
+
 // PipelineStats is an encode/decode child's live telemetry (§7 route stats).
 type PipelineStats struct {
 	Encoder  string  // ffmpeg encoder/decoder in use
 	HWAccel  string  // decode side: active hwaccel ("" = software)
 	OutFPS   float64 // frames leaving the child per second
 	Restarts int     // supervised child restarts
+	// Dropped counts frames THIS element and everything it wraps threw away: undersized/foreign
+	// input, respawn-backoff gaps, waiting-for-keyframe, per-route fps-cap drops, sink dim
+	// mismatches. Each stage kept its own counter and none of them reached a log or the panel, so
+	// a route that silently drops most of its frames looked identical to a healthy one.
+	Dropped uint64
 	// Native-engine session telemetry (zero for ffmpeg children). Rising LatP99Ms is the
 	// Phase-2 load governor's early saturation signal.
 	LatP50Ms    float64 // submit→AU latency percentiles
@@ -86,11 +104,32 @@ type PipelineStats struct {
 	// the parent submits nothing, so submit→AU percentiles stay empty on this path)
 	Downgrades int // zero-copy → readback fallbacks on this route (a rig that always
 	// downgrades must be visible here, not silently slow)
+	// Zero-copy DECODE (zigmedia inc 2): the decoder child renders straight into the local
+	// video-share sender's texture, so no decoded frame crosses a pipe or the Go heap. Zero on
+	// the ffmpeg decode path.
+	ZeroDecode  bool    // the live session really is publishing on the GPU
+	DecFPS      float64 // frames published into the destination texture per second
+	DecBusyMs   float64 // mean child decode+publish ms/frame
+	InDropped   uint64  // AUs the inbound ring could not take (ring full)
+	DecDropped  uint64  // AUs the child could not decode (oversized / awaiting a keyframe)
+	DecErrors   uint64  // publish hard failures (Blt / acquire)
+	DecStaleMs  float64 // age of the last publish (frozen-destination oracle)
+	DecMtxTimeo uint64  // destination-texture mutex acquire timeouts
 }
 
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.
 type PipelineReporter interface {
 	PipeStats() PipelineStats
+}
+
+// InnerDrops sums the Dropped counter of a wrapped Source/Sink, so the ONE reporter the router
+// asks (the outermost wrapper) accounts for the whole chain instead of the stage counters dying
+// where they were incremented. 0 when the inner stage reports nothing.
+func InnerDrops(inner any) uint64 {
+	if pr, ok := inner.(PipelineReporter); ok {
+		return pr.PipeStats().Dropped
+	}
+	return 0
 }
 
 // CompressedVideo reports whether c is an encoded video codec (vs raw pixels / audio).

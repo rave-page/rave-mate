@@ -8,11 +8,14 @@
 //!    "out_h":..,"fps_n":..,"fps_d":..,"kbps":..,"gop":..,
 //!    "src":"shm"|"spout","sh":<u64 share handle>,"sfmt":<DXGI fmt>,"sname":"<sender>",
 //!    "cap_n":..,"cap_d":..,"ring_kb":..,"pts0":<ns>}
+//!    "dir":"enc"|"dec","codec":"h264"|"hevc","dsh":<u64 dest share handle>,
+//!    "dfmt":<DXGI fmt>,"dname":"<dest sender>","in_ring_kb":..}
 //!   {"op":"close","sid":1} | {"op":"bitrate","sid":1,"kbps":..} | {"op":"idr","sid":1}
 //!   {"op":"quit"}
 //! stdout events: {"ev":"hello","ver":2,"luid":..} {"ev":"opened","sid":..,"ok":..,
 //!   "err":..,"name":..,"bgra":..,"src":..,"cap":"zerocopy"|"downgraded","err_src":..}
-//!   {"ev":"srcgone","sid":..,"reason":..} {"ev":"closed","sid":..}
+//!   {"ev":"srcgone","sid":..,"reason":..} {"ev":"dstgone","sid":..,"reason":..}
+//!   {"ev":"closed","sid":..}
 //!
 //! Data plane per session (named shared memory, parent creates, we open):
 //!   header 256 B: 0 magic 'RMF2' u32 | 4 ver u32 | 8 frameSeq u64 (parent) |
@@ -20,7 +23,14 @@
 //!     virtual offset) | 40 auRead u64 (parent) | 48 auDropped u64 | 56 encBusyNs u64 |
 //!     64 capFrames | 72 capSkips | 80 mtxTimeouts | 88 srcErrors | 96 lastCapNs i64 |
 //!     104 capFmt u32 | 108 capFlags u32   (64.. child-written zero-copy telemetry)
+//!     dir "dec" adds a second ring-counter block + decode telemetry:
+//!     128 inWrite u64 (PARENT) | 136 inRead u64 | 144 inDropped u64 (PARENT) |
+//!     152 decBusyNs | 160 decFrames | 168 decErrors | 176 lastPubNs i64 |
+//!     184 decFlags u32 | 192 decDropped u64 | 200 decMtxTimeouts u64
 //!   src "shm": frame slot @256 (in_w*in_h*4 RGBA), AU ring after it.
+//!   dir "dec": NO frame slot and no OUTBOUND ring - the INBOUND AU ring starts at 256 and the
+//!     mapping is 256 + in_ring_kb*1024. Same record layout, opposite direction: the parent
+//!     appends AUs + signals -f, the child consumes + signals -c. -a never fires.
 //!   src "spout": NO frame slot - the AU ring starts at 256 and the mapping is
 //!     256 + ring_kb*1024. Sizing MUST come from src + ring_kb, never from in_w*in_h*4,
 //!     which is why a spout session requires header ver >= 2 before it maps anything.
@@ -34,6 +44,7 @@
 const std = @import("std");
 const mf = @import("mf.zig");
 const cap = @import("cap.zig");
+const dec = @import("dec.zig");
 
 extern "kernel32" fn OpenFileMappingW(u32, i32, [*:0]const u16) callconv(.winapi) ?*anyopaque;
 extern "kernel32" fn MapViewOfFile(*anyopaque, u32, u32, u32, usize) callconv(.winapi) ?[*]u8;
@@ -140,6 +151,28 @@ const Hdr = struct {
     fn setCapFlags(h: Hdr, v: u32) void {
         @atomicStore(u32, @volatileCast(h.u32At(108)), v, .release);
     }
+    // dir:"dec" accessors. inWrite/inDropped are PARENT-written; everything else is ours.
+    fn inWrite(h: Hdr) u64 {
+        return @atomicLoad(u64, @volatileCast(h.u64At(off_in_write)), .acquire);
+    }
+    fn inRead(h: Hdr) u64 {
+        return @atomicLoad(u64, @volatileCast(h.u64At(off_in_read)), .acquire);
+    }
+    fn setInRead(h: Hdr, v: u64) void {
+        @atomicStore(u64, @volatileCast(h.u64At(off_in_read)), v, .release);
+    }
+    fn setU64At(h: Hdr, off: usize, v: u64) void {
+        @atomicStore(u64, @volatileCast(h.u64At(off)), v, .release);
+    }
+    fn addAt(h: Hdr, off: usize, v: u64) void {
+        _ = @atomicRmw(u64, @volatileCast(h.u64At(off)), .Add, v, .monotonic);
+    }
+    fn setI64At(h: Hdr, off: usize, v: i64) void {
+        @atomicStore(i64, @volatileCast(h.i64At(off)), v, .release);
+    }
+    fn setU32At(h: Hdr, off: usize, v: u32) void {
+        @atomicStore(u32, @volatileCast(h.u32At(off)), v, .release);
+    }
 };
 
 const off_cap_frames = 64;
@@ -147,9 +180,26 @@ const off_cap_skips = 72;
 const off_mtx_timeouts = 80;
 const off_src_errors = 88;
 
+// dir:"dec" block (design §10: the ring counters instantiated a second time, opposite direction).
+const off_in_write = 128;
+const off_in_read = 136;
+const off_dec_busy = 152;
+const off_dec_frames = 160;
+const off_dec_errors = 168;
+const off_last_pub_ns = 176;
+const off_dec_flags = 184;
+const off_dec_dropped = 192;
+const off_dec_mtx_timeouts = 200;
+
 // fault_after_frames > 0: crash the process after N encoded frames (test hook - proves
 // route continuity across an encoder-child death; parent injects on first spawn only).
 var fault_after_frames: u64 = 0;
+
+// probe_bands (RAVE_MATE_MFDEC_PROBE_BANDS=1): after the first published frame, read the
+// DESTINATION texture back on the GPU and print the top/bottom pixel. The orientation + channel
+// oracle for the decode path - Spout's receive side cannot see a texture written by a foreign
+// device (it never reports a new frame), so nothing outside this process can check the picture.
+var probe_bands: bool = false;
 
 const Session = struct {
     gpa: std.mem.Allocator,
@@ -177,6 +227,16 @@ const Session = struct {
     // zero-copy route's timebase is identical to the readback path's (the receiver's
     // jitter buffer + transit telemetry compare pts against the sender's clock)
     cap_open: ?cap.Cap = null,
+
+    // dir:"dec" - receive side (zigmedia inc 2). The child decodes the inbound AUs and renders
+    // them into the DESTINATION video-share sender's shared texture (dsh), which Go created.
+    dir_dec: bool = false,
+    codec_hevc: bool = false,
+    dsh: u64 = 0,
+    dfmt: u32 = 0,
+    dname: []u8 = &.{},
+    in_ring_kb: u32 = 0,
+    dec_open: ?*dec.Dec = null,
 
     // mailbox (stdin thread → session thread)
     mu: Lock = .{},
@@ -223,9 +283,14 @@ fn utf16Z(gpa: std.mem.Allocator, s: []const u8) ![:0]u16 {
 // child would map past the end of the parent's smaller mapping, hence the ver gate below.
 fn openShm(s: *Session) !void {
     const gpa = s.gpa;
-    const frame_bytes: u64 = if (s.src_spout) 0 else @as(u64, @intCast(s.in_w)) * @as(u64, @intCast(s.in_h)) * 4;
+    const frame_bytes: u64 = if (s.src_spout or s.dir_dec) 0 else @as(u64, @intCast(s.in_w)) * @as(u64, @intCast(s.in_h)) * 4;
     var ring: u64 = 8 << 20;
-    if (s.src_spout) {
+    if (s.dir_dec) {
+        // INBOUND ring only: sized from in_ring_kb, never from geometry (a stream resize costs no
+        // SHM realloc, exactly like the outbound side).
+        if (s.in_ring_kb < ring_kb_min or s.in_ring_kb > ring_kb_max) return error.RingSize;
+        ring = @as(u64, s.in_ring_kb) * 1024;
+    } else if (s.src_spout) {
         if (s.ring_kb < ring_kb_min or s.ring_kb > ring_kb_max) return error.RingSize;
         ring = @as(u64, s.ring_kb) * 1024;
     } else if (frame_bytes > ring) {
@@ -240,7 +305,7 @@ fn openShm(s: *Session) !void {
     const view = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, total) orelse return error.ShmMap;
     s.view = view;
     s.hdr = .{ .base = view };
-    if (s.src_spout and (s.hdr.magic() != hdr_magic or s.hdr.ver() < hdr_ver_zerocopy)) {
+    if ((s.src_spout or s.dir_dec) and (s.hdr.magic() != hdr_magic or s.hdr.ver() < hdr_ver_zerocopy)) {
         return error.HdrVersion; // parent did not stamp a v2 header: refuse, never guess a layout
     }
     s.frame = view + hdr_size;
@@ -326,10 +391,21 @@ const OpenedEv = struct {
     src: []const u8 = "shm",
     cap: []const u8 = "",
     err_src: []const u8 = "",
+    // dir:"dec" verdict rides the same event: dir + err_dst say which path the session got.
+    dir: []const u8 = "enc",
+    err_dst: []const u8 = "",
 };
 
 const SrcGoneEv = struct {
     ev: []const u8 = "srcgone",
+    sid: u32,
+    reason: []const u8,
+};
+
+// DstGoneEv: the DESTINATION texture became unusable (sender restarted/resized/gone) or the
+// decoder failed. Session + decoder stay alive and stop publishing; the PARENT decides.
+const DstGoneEv = struct {
+    ev: []const u8 = "dstgone",
     sid: u32,
     reason: []const u8,
 };
@@ -343,6 +419,10 @@ fn sessionMain(s: *Session) void {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = @errorName(e) });
         return;
     };
+    if (s.dir_dec) {
+        decSessionMain(s);
+        return;
+    }
     const enc = mf.Enc.open(s.gpa, s.luid, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.kbps, s.gop, s.src_spout) catch {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = mf.lastOpenErr() });
         return;
@@ -495,6 +575,105 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     }
 }
 
+// decSessionMain owns one DECODE pipeline: inbound AU ring -> decoder MFT -> VideoProcessorBlt into
+// the destination sender's shared texture. Nothing but scalars and compressed AUs crosses the
+// process boundary; a decoded frame never leaves the GPU.
+fn decSessionMain(s: *Session) void {
+    var reason: dec.Reason = .decoder_failed;
+    const d = dec.Dec.open(s.gpa, s.luid, s.codec_hevc, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.dsh, s.dname, s.ring_size, &reason) catch {
+        emit(OpenedEv{ .sid = s.sid, .ok = false, .err = "native decode refused", .dir = "dec", .cap = "downgraded", .err_dst = reason.text() });
+        return;
+    };
+    s.dec_open = d;
+    s.hdr.setU32At(off_dec_flags, d.flags);
+    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = d.name(), .dir = "dec", .cap = "zerocopy" });
+    decLoop(s, d);
+    const rc = d.drain();
+    std.debug.print("mfenc session {d} (decode): fed={d} published={d} drain_rc={d}\n", .{ s.sid, d.fed_n, d.pub_n, rc });
+    s.dec_open = null;
+    d.close();
+}
+
+// AuRec is one record read out of the inbound ring; data points INTO the ring and stays valid until
+// inRead is advanced past it (the parent never writes past write-read <= ring_size).
+const AuRec = struct { data: []const u8, pts_ns: i64, key: bool, rec: u64 };
+
+// ringTake reads the next inbound AU without consuming it. null = ring empty / nothing readable.
+fn ringTake(s: *Session) ?AuRec {
+    var hops: u32 = 0;
+    while (hops < 2) : (hops += 1) { // at most one wrap hop per call: the ring base always follows
+        const r = s.hdr.inRead();
+        const w = s.hdr.inWrite();
+        if (r >= w) return null;
+        const tail = s.ring_size - (r % s.ring_size);
+        if (tail < 16) { // implicit wrap: no record header fits in the tail
+            s.hdr.setInRead(r + tail);
+            continue;
+        }
+        const pos: usize = @intCast(r % s.ring_size);
+        const lp: *align(1) const u32 = @ptrCast(s.ring + pos);
+        const ln = lp.*;
+        if (ln == wrap_marker) {
+            s.hdr.setInRead(r + tail);
+            continue;
+        }
+        if (ln == 0 or @as(u64, ln) + 16 > tail) return null; // torn/corrupt: read nothing
+        const fp: *align(1) const u32 = @ptrCast(s.ring + pos + 4);
+        const pp: *align(1) const i64 = @ptrCast(s.ring + pos + 8);
+        return .{
+            .data = (s.ring + pos + 16)[0..ln],
+            .pts_ns = pp.*,
+            .key = fp.* & 1 != 0,
+            .rec = 16 + std.mem.alignForward(u64, ln, 8),
+        };
+    }
+    return null;
+}
+
+// dec_batch bounds the AUs consumed per wake so close/quit stay prompt. A decoder that cannot keep
+// up backpressures through the ring, which the PARENT bounds by dropping (inDropped) - never by
+// accumulating.
+const dec_batch = 8;
+
+fn decLoop(s: *Session, d: *dec.Dec) void {
+    var live = true; // false after dstgone: session + decoder stay up, publishing stops
+    while (true) {
+        _ = WaitForSingleObject(s.ev_frame, 20);
+        const m = drainMailbox(s);
+        if (m.closing) break;
+        if (!live) {
+            _ = d.pump(); // async MFT events still arrive; keep the tail draining
+            continue;
+        }
+        var n: u32 = 0;
+        while (n < dec_batch) : (n += 1) {
+            const rec = ringTake(s) orelse break;
+            const t0 = qpcNs();
+            const rc = d.feed(rec.data, @divTrunc(rec.pts_ns, 100));
+            // Advance ONLY after feed copied the AU out of the ring.
+            s.hdr.setInRead(s.hdr.inRead() + rec.rec);
+            _ = SetEvent(s.ev_cons);
+            s.hdr.addAt(off_dec_busy, qpcNs() - t0);
+            s.fed += 1;
+            if (rc < 0) {
+                s.hdr.addAt(off_dec_errors, 1);
+                live = false;
+                emit(DstGoneEv{ .sid = s.sid, .reason = d.reason.text() });
+                break;
+            }
+            if (rc > 0) s.hdr.addAt(off_dec_dropped, 1);
+            if (d.pub_n > s.aus_put) {
+                if (probe_bands and s.aus_put == 0) d.probeBands(); // one shot, first published frame
+                s.aus_put = d.pub_n;
+                s.hdr.setU64At(off_dec_frames, d.pub_n);
+                s.hdr.setI64At(off_last_pub_ns, @intCast(qpcNs()));
+            }
+            s.hdr.setU64At(off_dec_mtx_timeouts, d.mtx_timeouts);
+        }
+        if (n == 0) _ = d.pump();
+    }
+}
+
 fn teardownSession(s: *Session) void {
     closeShm(s); // pipeline is closed by now; the parent holds its own view of the mapping
     emit(struct { ev: []const u8 = "closed", sid: u32 }{ .sid = s.sid });
@@ -508,6 +687,7 @@ fn closeSession(s: *Session) void {
     if (s.thread) |t| t.join();
     s.gpa.free(s.shm_name);
     s.gpa.free(s.sname);
+    s.gpa.free(s.dname);
     s.gpa.destroy(s);
 }
 
@@ -532,6 +712,13 @@ const Cmd = struct {
     cap_d: i32 = 0,
     ring_kb: u32 = 0,
     pts0: i64 = 0,
+    // dir:"dec" receive-side fields (absent = an encode session, i.e. everything before inc 2).
+    dir: []const u8 = "enc",
+    codec: []const u8 = "h264",
+    dsh: u64 = 0,
+    dfmt: u32 = 0,
+    dname: []const u8 = "",
+    in_ring_kb: u32 = 0,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -556,11 +743,16 @@ pub fn main(init: std.process.Init) !void {
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_AFTER_FRAMES")) |v| {
         fault_after_frames = std.fmt.parseInt(u64, v, 10) catch 0;
     }
+    if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
+        probe_bands = std.mem.eql(u8, v, "1");
+    }
 
     _ = timeBeginPeriod(1); // media child: 1 ms scheduler quantum (Sleep(1) is ~15.6 ms without it)
-    // ver 2 = this child understands src:"spout" + header v2. A parent seeing ver 1 must never
-    // request zero-copy (a v1 child would size the mapping from in_w*in_h*4 and map past the end).
-    emit(struct { ev: []const u8 = "hello", ver: u32 = 2, luid: i64 }{ .luid = luid });
+    // ver 2 = src:"spout" + header v2; ver 3 = dir:"dec" (the inbound-ring layout). The version gate
+    // is the ONLY thing standing between an older child and a mapping it would size wrong: a v2
+    // child ignores an unknown "dir" and would open an ENCODE session sized from in_w*in_h*4, i.e.
+    // past the end of the parent's much smaller dec mapping.
+    emit(struct { ev: []const u8 = "hello", ver: u32 = 3, luid: i64 }{ .luid = luid });
 
     var sessions = std.AutoHashMap(u32, *Session).init(gpa);
     defer sessions.deinit();
@@ -601,6 +793,14 @@ pub fn main(init: std.process.Init) !void {
                 emit(OpenedEv{ .sid = cmd.sid, .ok = false, .err = "bad spout open args", .src = "spout", .cap = "downgraded", .err_src = "open_shared" });
                 continue;
             }
+            const dir_dec = std.mem.eql(u8, cmd.dir, "dec");
+            if (dir_dec and (cmd.dsh == 0 or cmd.dname.len == 0 or cmd.dname.len > 256 or
+                cmd.out_w <= 0 or cmd.out_h <= 0 or
+                cmd.in_ring_kb < ring_kb_min or cmd.in_ring_kb > ring_kb_max))
+            {
+                emit(OpenedEv{ .sid = cmd.sid, .ok = false, .err = "bad dec open args", .dir = "dec", .cap = "downgraded", .err_dst = "open_shared" });
+                continue;
+            }
             const s = try gpa.create(Session);
             s.* = .{
                 .gpa = gpa,
@@ -623,6 +823,12 @@ pub fn main(init: std.process.Init) !void {
                 .cap_d = cmd.cap_d,
                 .ring_kb = cmd.ring_kb,
                 .pts0 = cmd.pts0,
+                .dir_dec = dir_dec,
+                .codec_hevc = std.mem.eql(u8, cmd.codec, "hevc"),
+                .dsh = cmd.dsh,
+                .dfmt = cmd.dfmt,
+                .dname = try gpa.dupe(u8, cmd.dname),
+                .in_ring_kb = cmd.in_ring_kb,
             };
             s.thread = try std.Thread.spawn(.{}, sessionMain, .{s});
             try sessions.put(cmd.sid, s);
@@ -666,6 +872,7 @@ fn faultThread() void {
 test {
     _ = @import("mf.zig");
     _ = @import("cap.zig");
+    _ = @import("dec.zig");
 }
 
 test "spout ring bounds are the bitrate-derived window, geometry-independent" {

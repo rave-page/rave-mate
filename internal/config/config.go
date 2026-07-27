@@ -402,6 +402,13 @@ type MediaLinkFeature struct {
 	// default OFF (nil = off) until the soak signs it off; the readback path stays as the
 	// fallback and the parity reference. Env RAVE_MATE_ZIGMEDIA_CAPTURE=1|0 overrides.
 	ZigCapture *bool `json:"zigCapture,omitempty"`
+	// ZigDecode is ZigCapture's receive-side mirror: the native child decodes the incoming AUs
+	// and renders them straight into the local video-share sender's GPU texture, instead of
+	// ffmpeg pushing 33 MB raw frames per 4K frame back up a stdout pipe and Spout uploading them
+	// again. Tri-state, default OFF (nil = off) until the soak signs it off; the ffmpeg decode
+	// path stays as the fallback and the parity reference.
+	// Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
+	ZigDecode *bool `json:"zigDecode,omitempty"`
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
@@ -418,6 +425,21 @@ func (m MediaLinkFeature) ZeroCopyCapture() bool {
 
 // SetZeroCopyCapture sets the zero-copy capture opt-in EXPLICITLY (single write seam).
 func (m *MediaLinkFeature) SetZeroCopyCapture(on bool) { v := on; m.ZigCapture = &v }
+
+// ZeroCopyDecode reports whether native GPU-resident decode+publish is enabled. Env
+// RAVE_MATE_ZIGMEDIA_DECODE wins (soak + tests), then the config key, else OFF.
+func (m MediaLinkFeature) ZeroCopyDecode() bool {
+	switch os.Getenv("RAVE_MATE_ZIGMEDIA_DECODE") {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return m.ZigDecode != nil && *m.ZigDecode
+}
+
+// SetZeroCopyDecode sets the native-decode opt-in EXPLICITLY (single write seam).
+func (m *MediaLinkFeature) SetZeroCopyDecode(on bool) { v := on; m.ZigDecode = &v }
 
 // MediaSubprocess reports whether the media plane runs in the isolated child (#44). Default (key
 // absent) is TRUE; only an explicit false keeps the legacy in-proc plane. Note the old schema

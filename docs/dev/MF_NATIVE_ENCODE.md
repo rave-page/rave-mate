@@ -226,6 +226,71 @@ Measured on this dev box (NVIDIA), real sender in a second process:
 colour are gated by DECODING the bitstream (a red-top/blue-bottom probe), because the readback
 path flips on the CPU and a silently inverted zero-copy path passes every counter.
 
-Still open: 7-day soak before the flag defaults on, the 2-PC pass (§13.1 of the design - the
-single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on
-a real rig), and increment 2 (the receive side, `dir:"dec"`).
+Still open: 7-day soak before the flag defaults on, and the 2-PC pass (§13.1 of the design - the
+single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on a
+real rig).
+
+## Native decode (zigmedia increment 2, flag OFF by default)
+
+**Landed.** The receive side is the same child, opposite direction: compressed AUs ride an
+INBOUND shared-memory ring in, an MF decoder MFT decodes on the GPU, and the video processor
+blits each frame straight into the destination video-share sender's shared texture. That deletes
+the ffmpeg decode child's 33 MB-per-4K-frame stdout pipe AND the second upload Spout did on the
+way back out. Status + measurements: `.devnotes/ZIGMEDIA_INC2_STATUS.md`.
+
+```
+wire AU → jitterbuf (Go) → inbound AU ring (SHM) → SetEvent(-f)
+  ▼
+rave-mate-enc.exe session thread: decoder MFT (D3D11) → NV12 surface → acquire the sender's
+  mutex → VideoProcessorBlt into ITS shared texture → Flush → release → SetEvent(-c)
+  ▼
+external receivers (OBS/Resolume) copy the texture as usual
+```
+
+- **Gate:** `config.MediaLink.zigDecode` (tri-state, default OFF) or
+  `RAVE_MATE_ZIGMEDIA_DECODE=1|0`. Requested only for H.264/HEVC, when the sink implements
+  `medialink.ZeroCopySink` with a non-zero handle, the child answers `hello.ver >= 3`, and the
+  destination is not pinned to the frame path.
+- **Who owns the sender: GO.** A decoder cannot create one, so `mediaroute.openSpoutSink` opens
+  it EAGERLY and exposes the handle. `SPOUTLIBRARY` has no `CreateSender`, so the shim publishes
+  one zeroed frame to force the texture and reads the handle + real format back out of the
+  registry (`GetSenderInfo`). One `w*h*4` write per ROUTE, into the pooled flip buffer.
+- **Protocol:** `open` gains `dir`/`codec`/`dsh`/`dfmt`/`dname`/`in_ring_kb`; header 128..207 is
+  the ring-counter block a second time plus decode telemetry; new `dstgone` event. A `dec`
+  session's SHM is header + inbound ring ONLY, bitrate-derived like the outbound one.
+- **Fallback ladder:** open-side refusal → `ErrDecodeRefused` → the route runs the ffmpeg decode
+  child with one WARN; mid-route `dstgone`/staleness → reopen with a freshly resolved handle
+  (both ring heads reset - stale bitstream is useless to a fresh decoder), bounded at 3 attempts,
+  then the destination is pinned to the frame path.
+- **Frozen-destination oracle** (`decCheck`): a changed destination handle is always a recycle,
+  and "AUs arriving but nothing published for 3 s" is a recycle. An IDLE route (no AUs, nothing
+  published) is healthy - treating silence alone as a fault would churn reopens.
+- **Two load-bearing details.** A write into a texture another PROCESS reads needs an explicit
+  `Flush` before the mutex is released (a named CPU mutex carries none, unlike
+  `IDXGIKeyedMutex.ReleaseSync`) - without it the receiver reads pre-blit content, i.e. a blank
+  picture with zero errors in every counter. And `VideoProcessorSetStreamSourceRect` must be set:
+  a hardware decoder's NV12 surface is 16-row aligned (640x368 for 640x360) and the VP would
+  otherwise squash those rows into the output.
+- **`MF_SA_D3D11_AWARE` + MFT-provided samples are hard gates**: system-memory decoder output
+  would mean uploading NV12 by hand, which is the host frame plane this increment removes, so it
+  downgrades cleanly (`sw_decode_unsupported`).
+
+Measured on this dev box (NVIDIA), real Spout sender, real child, 640x360:
+
+| | value |
+|---|---|
+| decoder bound | "Microsoft H264 Video Decoder MFT" (D3D11-aware, sync) |
+| AUs in / frames published | 40 / 40 |
+| decode + publish cost | 0.8-1.0 ms per AU |
+| ring drops / decode errors / mutex timeouts | 0 / 0 / 0 |
+| `decFlags` | `0x5` = live + Spout's NAMED access mutex |
+| destination texture read-back | top r=255 b=0, bottom r=1 b=255 (correct rows + channels) |
+
+The picture is verified by a GPU read-back INSIDE the child (`RAVE_MATE_MFDEC_PROBE_BANDS=1`,
+off by default): Spout's own receive side reports success and returns all-zero pixels for a
+foreign-device write on this rig - and for an ordinary `SendImage` publish from another process
+too - so it is not a usable oracle here.
+
+Still open: OBS/Resolume verification of a natively decoded route (the design makes it a
+precondition for flipping the flag), the 7-day soak, a 4K60 receive soak, a real end-to-end
+route through `jitterbuf`, and HEVC.

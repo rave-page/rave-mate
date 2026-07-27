@@ -70,7 +70,22 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		}
 		return newEncoder(ctx, log, ffmpeg, spec, src)
 	}
+	var mfDecWarned bool
 	dec := func(ctx context.Context, spec medialink.DecodeSpec, sink medialink.Sink) (medialink.Sink, error) {
+		// Native GPU-resident decode first (zigmedia inc 2, flag-gated): it needs the child, a
+		// supported codec and a sink that exposes a GPU destination texture. Anything missing falls
+		// through to the ffmpeg child - byte-identical to the pre-inc-2 path.
+		if ZeroCopyDecode() && mfenc.ChildAvailable() {
+			s, err := newMFDecoder(ctx, log, spec, sink)
+			if err == nil {
+				return s, nil
+			}
+			if !mfDecWarned {
+				mfDecWarned = true
+				log.Warn(source, "native MF decode unavailable - using the ffmpeg decode child (raw stdout pipe: expect higher receiver load)",
+					map[string]any{"err": err.Error()})
+			}
+		}
 		ffmpeg, ok := mediatools.Resolve("ffmpeg")
 		if !ok {
 			return nil, fmt.Errorf("mediapipe: ffmpeg not found")
