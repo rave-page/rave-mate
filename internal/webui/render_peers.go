@@ -1197,8 +1197,17 @@ func fmtRate(r medialink.Rate) string {
 // fmtLat renders one e2e latency percentile, or a reason when no PLAUSIBLE transit sample exists.
 // arrival−PTS is a duration only while the peer stamps PTS on our media clock; a foreign domain
 // used to print the raw epoch as a latency ("1785118072019.6 ms"). "off-clock" names the cause.
+//
+// SIGN-PRESERVING, unlike fmtMsNs. percentiles() sorts ascending, so p50 ≤ p95 always holds on the
+// values; rendering both through an abs() printed "29.0 ms/26.1 ms p50/p95" - a median above the
+// 95th percentile - whenever p50 was negative. A negative transit is real and diagnostic: the two
+// media clocks share no epoch yet (see the clock line above), so the spread is meaningful and the
+// absolute value is not. Show it rather than hide it behind an abs().
 func fmtLat(s medialink.RouteStat, ns int64) string {
 	if s.LatencySamples > 0 {
+		if ns < 0 {
+			return "−" + fmtMsNs(float64(ns))
+		}
 		return fmtMsNs(float64(ns))
 	}
 	if s.LatUnsynced > 0 {

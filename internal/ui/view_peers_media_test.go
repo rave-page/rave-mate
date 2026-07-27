@@ -90,6 +90,16 @@ func TestFmtRouteStat(t *testing.T) {
 		t.Errorf("unmeasured latency rendered as a duration: %q", d)
 	}
 
+	// percentiles() sorts ascending, so p50 ≤ p95 ALWAYS holds on the values. Printing both
+	// through an abs() showed "29.0 ms/26.1 ms p50/p95" - a median above the 95th percentile -
+	// whenever the median transit was negative (unaligned media clocks). The sign must survive.
+	neg := recv
+	neg.LatencyP50Ns, neg.LatencyP95Ns = -29_000_000, 26_100_000
+	_, d := fmtRouteStat(neg, names)
+	if !strings.Contains(d, "latency −29.0 ms/26.1 ms p50/p95") {
+		t.Errorf("negative p50 lost its sign (p50 > p95 on screen): %q", d)
+	}
+
 	send := medialink.RouteStat{Session: "s2", Peer: "p", Stream: 3, Direction: "send",
 		Frames: 100, Bytes: 1024, Retransmits: 7, PLIRequests: 1,
 		Remote: &medialink.Report{Lost: 3, FractionLost: 0.0031, Jitter: 900_000}}
