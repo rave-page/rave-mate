@@ -5,6 +5,10 @@
 #          native/zigcore/zig-out/bin/rave-probe[.exe] (P4 probe worker exe,
 #          opt-in via config features.workers.probeExe).
 set -euo pipefail
+# Absolute repo root, resolved BEFORE the script starts cd-ing between native/*/zig-out/{lib,bin}.
+# Embed staging used a relative path and silently wrote native/internal/... from one of those
+# subdirs; the go:embed then failed in CI with "no matching files found". Count no more dots.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$(dirname "$0")/../native/zigcore"
 
 ZIG="${ZIG:-zig}"
@@ -48,8 +52,8 @@ ls -la ../bin 2>/dev/null || ls -la
 case "$target" in
   *windows*|"")
     if [ -f ../bin/rave-shell.exe ]; then
-      mkdir -p ../../../internal/webui/embedded
-      cp -f ../bin/rave-shell.exe ../../../internal/webui/embedded/rave-shell.exe
+      mkdir -p "$ROOT/internal/webui/embedded"
+      cp -f ../bin/rave-shell.exe "$ROOT/internal/webui/embedded/rave-shell.exe"
       echo "rave-shell embed-staged"
     else
       echo "WARNING: native/zigui/zig-out/bin/rave-shell.exe absent - builds will fall back to the in-process Go window" >&2
@@ -76,8 +80,8 @@ case "$target" in
     ls -la zig-out/bin
     # stage for go:embed (tag `encembed`): self-updated installs get the child from
     # INSIDE rave-mate.exe (the self-updater swaps only the main exe)
-    mkdir -p ../../internal/mfenc/embedded
-    cp -f zig-out/bin/rave-mate-enc.exe ../../internal/mfenc/embedded/rave-mate-enc.exe
+    mkdir -p "$ROOT/internal/mfenc/embedded"
+    cp -f zig-out/bin/rave-mate-enc.exe "$ROOT/internal/mfenc/embedded/rave-mate-enc.exe"
     echo "rave-mate-enc built + embed-staged ($ver, ${target:-native})"
     ;;
 esac
