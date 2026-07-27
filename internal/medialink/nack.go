@@ -21,6 +21,23 @@ type KeyframeSource interface {
 	RequestKeyframe()
 }
 
+// Zigmedia inc-5 re-evaluation of the raw-video carve-out (design §12.1 called it "the sharpest
+// finding in the inventory: an output-visible protocol feature switched off to relieve the
+// allocator", and deferred lifting it to this increment). VERDICT: it stays, because its real
+// justification was never the allocator.
+//
+//   - The feature the design worried was off is NOT off. Every COMPRESSED route - zero-copy or
+//     readback - hands its AUs here with Release == nil (the encoder child allocates each AU), so
+//     they are retained verbatim and are fully retransmittable. TestZeroCopyAUsEnterTheNACKWindow
+//     is the arm that pins it.
+//   - What is excluded is raw video only, and for two reasons that survive the allocator's removal:
+//     the window's cap is 16 MB, so ONE 4K frame evicts all of it (a 1-frame window retransmits
+//     nothing useful); and raw frames are intra, so the receiver resyncs on the very next frame -
+//     retransmitting a 33 MB stale frame over the wire is strictly worse than skipping it.
+//   - Inc 2 had already re-keyed the test from ownership (Release == nil) to RAW, which is what
+//     removed the actual bug: UNPOOLED raw producers were being retained, so every webcam frame
+//     displaced the whole window.
+//
 // retransmitBuf keeps recently sent media frames for NACK retransmit. FIFO, bounded by frame
 // count AND payload bytes (oldest evicted first). Safe for concurrent use.
 type retransmitBuf struct {
@@ -74,11 +91,15 @@ func rawExempt(f *Frame) bool {
 //
 //   - no window (nack unnegotiated): release.
 //   - raw video (rawExempt): never retained - see above.
-//   - not pooled (Release == nil): the encoder allocated this AU for us - retain as is, free.
+//   - not pooled (Release == nil): the encoder allocated this AU for us - retain as is, free. This
+//     is the path EVERY compressed route takes, zero-copy included.
 //   - pooled + compressed AU within rebufCopyMax: COPY the (small) AU into the window, then
 //     release the pooled buffer.
-//   - pooled oversized AU: exempt - release now (retaining starves the capture pool, so every
-//     readback re-allocates 8 MB (1080p) / 33 MB (4K) - the GC churn the pool removed).
+//   - pooled oversized AU (> 1 MiB): exempt - release now. A single AU that large is a whole
+//     intra picture on a starved link; copying it in would evict most of a 16 MB window to
+//     retransmit one frame the receiver can resync past. (The original rationale here was
+//     allocator relief - "retaining starves the capture pool"; inc 5 restates it on protocol
+//     grounds so a future agent does not delete the rung along with the pool.)
 func (rio *routeIO) retainOrRelease(f *Frame) {
 	switch {
 	case rio.rebuf == nil:

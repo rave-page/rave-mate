@@ -132,6 +132,48 @@ func TestRebufExemptsUnpooledRawFrames(t *testing.T) {
 	}
 }
 
+// TestZeroCopyAUsEnterTheNACKWindow is the zigmedia inc-5 arm for the raw-video carve-out. The
+// design (§12.1) flagged that carve-out as "an output-visible protocol feature switched off to
+// relieve the allocator" and deferred lifting it to inc 5. The re-evaluation's verdict is that the
+// feature was never off for the routes that matter, and this pins it: an encoder-child AU - the
+// ONLY frame shape a zero-copy route puts on the wire, Release == nil because the child allocates
+// it - must be retained verbatim and be retransmittable by seq.
+//
+// So the carve-out does not need lifting, and this test is what a future agent should break if they
+// think otherwise.
+func TestZeroCopyAUsEnterTheNACKWindow(t *testing.T) {
+	rio := &routeIO{rebuf: newRetransmitBuf(0, 0)}
+	var sent []*Frame
+	for seq := 1; seq <= 8; seq++ {
+		// A native/zero-copy route's AU: compressed, unpooled (procparent allocates per AU), and
+		// realistically sized for 1080p inter-frames.
+		f := &Frame{Stream: 7, Kind: KindVideo, Codec: CodecH264, Seq: uint32(seq),
+			Payload: make([]byte, 24<<10)}
+		sent = append(sent, f)
+		rio.retainOrRelease(f)
+	}
+	got := rio.rebuf.get(7, 3, 6)
+	if len(got) != 4 {
+		t.Fatalf("the window holds %d of the 4 requested AUs - a zero-copy route cannot answer a NACK", len(got))
+	}
+	for i, f := range got {
+		if f != sent[i+2] {
+			t.Fatalf("retransmit %d returned seq %d, want %d (payload identity must survive)",
+				i, f.Seq, sent[i+2].Seq)
+		}
+	}
+	if rio.rebuf.bytes != 8*(24<<10) {
+		t.Fatalf("window holds %d bytes, want the whole 8-AU burst", rio.rebuf.bytes)
+	}
+	// And the carve-out still bites for raw video on the SAME window: one 4K frame would evict all
+	// of it, and an intra frame needs no retransmit.
+	rio.retainOrRelease(&Frame{Stream: 7, Kind: KindVideo, Codec: CodecNRGBA, Seq: 99,
+		Payload: make([]byte, 33<<20)})
+	if got := rio.rebuf.get(7, 3, 6); len(got) != 4 {
+		t.Fatalf("a raw frame evicted the AU window down to %d entries", len(got))
+	}
+}
+
 // TestRebufOversizedPooledAUExempt: a pooled payload too big to copy is released, not retained.
 func TestRebufOversizedPooledAUExempt(t *testing.T) {
 	p := newTestPool(t)

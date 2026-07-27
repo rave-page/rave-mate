@@ -23,11 +23,35 @@ import (
 const (
 	decEarlyFailNs  = int64(3 * time.Second) // child dies unframed within this → demote tier
 	decRespawnDelay = time.Second            // min gap between respawns (frames drop meanwhile)
-	// decFreeRing bounds the recycled raw-frame buffers. Frames are written synchronously and
-	// recycled immediately, so 1 is the steady-state need; 4 covers a reader goroutine still
-	// draining an old child while a restarted one runs. Cap in BYTES = 4 × W·H·4 (32 MB at 1080p).
-	decFreeRing = 4
+	// decFreeRingMax is the DEPTH ceiling of the recycled raw-frame ring. Frames are written
+	// synchronously and recycled immediately, so 1 is the steady-state need; 4 covers a reader
+	// goroutine still draining an old child while a restarted one runs.
+	decFreeRingMax = 4
+	// decFreeRingBytes is the real bound: PARKED bytes, not frames. The old code fixed the depth at
+	// 4 and its comment claimed "32 MB at 1080p" - but a 1080p frame is 8.3 MB, so 4 of them are
+	// 33 MB and at 4K the same ring parks 132 MB per receive route, where the native decode path
+	// parks 4 MiB of AU ring. A frame-shaped cap on a geometry-dependent buffer is how a bound that
+	// reads correct scales 16x with the user's canvas.
+	decFreeRingBytes = 32 << 20
 )
+
+// decFreeRingDepth sizes the recycle ring so PARKED bytes stay under decFreeRingBytes whatever the
+// geometry: 4 at 720p, 3 at 1080p, 1 at 4K. Never 0 - getBuf allocates on an empty ring (fail open,
+// same policy as the capture pool's PoolMiss), so a shallow ring degrades the optimisation instead
+// of wedging a live route, and the LIVE frame each pump goroutine holds is unaffected either way.
+func decFreeRingDepth(frameBytes int) int {
+	if frameBytes <= 0 {
+		return decFreeRingMax
+	}
+	n := decFreeRingBytes / frameBytes
+	if n > decFreeRingMax {
+		n = decFreeRingMax
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
 
 // decoder implements medialink.Sink (+PipelineReporter) over the ffmpeg child.
 type decoder struct {
@@ -61,11 +85,12 @@ type decoder struct {
 func newDecoder(_ context.Context, log *logbus.Bus, ffmpeg string, spec medialink.DecodeSpec, sink medialink.Sink) *decoder {
 	caps, _ := Probe(context.Background(), log)
 	accels := append(append([]string{}, caps.HWAccels...), "") // "" = software floor
+	size := spec.Width * spec.Height * 4
 	return &decoder{
 		log: log, ffmpeg: ffmpeg, spec: spec, sink: sink,
-		size:   spec.Width * spec.Height * 4,
+		size:   size,
 		accels: accels,
-		free:   make(chan []byte, decFreeRing),
+		free:   make(chan []byte, decFreeRingDepth(size)),
 	}
 }
 
