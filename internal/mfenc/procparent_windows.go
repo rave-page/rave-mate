@@ -45,6 +45,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"rave.page/mate/internal/ratewin"
 	"rave.page/mate/internal/sysexec"
 )
 
@@ -1591,46 +1592,28 @@ func (s *ProcSession) SetBitrate(kbps int) {
 	}
 }
 
-// counterRate turns a monotone child-side counter into a per-second rate (anchor refreshed on
-// read, >= 500 ms apart - same shape as mediapipe's rate).
-type counterRate struct {
-	mu     sync.Mutex
-	anchor uint64
-	at     time.Time
-	fps    float64
-}
+// counterRate turns a monotone child-side counter (SHM header) into a per-second rate over
+// ratewin's sliding window. It used to refresh its anchor ON READ over a 500 ms span, so CapFPS
+// depended on the polling phase: Stats() is read by emitTelemetry (1 Hz), mediaroute.cleanup
+// (0.5 Hz), the route-telemetry line (0.1 Hz) and both panels, and whichever fired last truncated
+// the window for everyone else. See package ratewin.
+type counterRate struct{ w ratewin.Ring }
 
 func (r *counterRate) sample(n uint64, now time.Time) float64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.at.IsZero() {
-		r.at, r.anchor = now, n
-		return 0
-	}
-	if d := now.Sub(r.at); d >= 500*time.Millisecond {
-		r.fps = float64(n-r.anchor) / d.Seconds()
-		r.at, r.anchor = now, n
-	}
-	return r.fps
+	r.w.Observe(0, n, now)
+	_, fps := r.w.Rate(now)
+	return fps
 }
 
-// busyMean turns the child's cumulative encBusyNs + capFrames into a per-frame mean over the
-// interval between reads (a cumulative ratio would flatten a live saturation spike).
-type busyMean struct {
-	mu     sync.Mutex
-	ns     uint64
-	frames uint64
-	ms     float64
-}
+// busyMean turns the child's cumulative busy-ns + frame counter into a per-frame mean over the
+// SAME sliding window (a cumulative ratio would flatten a live saturation spike; the interval
+// between two arbitrary reads is not a span). Both terms come from one pair of endpoints.
+type busyMean struct{ w ratewin.Ring }
 
 func (b *busyMean) mean(ns, frames uint64) float64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if frames > b.frames && ns >= b.ns {
-		b.ms = float64(ns-b.ns) / float64(frames-b.frames) / 1e6
-	}
-	b.ns, b.frames = ns, frames
-	return b.ms
+	now := time.Now()
+	b.w.Observe(ns, frames, now)
+	return b.w.PerEvent(now) / 1e6 // ns per frame → ms
 }
 
 // Encode submits one RGBA frame. During a child restart frames are DROPPED (nil error)

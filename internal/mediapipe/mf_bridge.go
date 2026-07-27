@@ -72,12 +72,12 @@ type mfBridge struct {
 	degrade    string
 	subEncoder string
 
-	// Content oracle. Counted on EVERY AU (native and substituted), so the log stream carries
-	// bytes-per-frame and a measured bitrate. The rendered panel is not sufficient: its counters
-	// have been observed frozen for 25 minutes on a demonstrably live route, and "OutFPS looks
-	// fine" cannot tell a real picture from a black one anyway.
-	auBytes atomic.Uint64
-	auCount atomic.Uint64
+	// Content oracle. b.out counts bytes AND AUs on ONE sliding window (native and substituted),
+	// so bytes-per-frame is measured over a single span instead of two unrelated ones. The log
+	// stream carries it every routeTelemetryEvery and, since inc 5, so does the rendered panel:
+	// the panel's counters have been observed frozen for 25 minutes on a demonstrably live route,
+	// and "OutFPS looks fine" cannot tell a real picture from a black one either way.
+	noContentWarned atomic.Bool
 	// adapterName is the RESOLVED adapter description (a stale configured LUID names nothing).
 	adapterName string
 }
@@ -254,7 +254,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 		case <-t.C:
 		}
 		now := time.Now()
-		bytes, count := b.auBytes.Load(), b.auCount.Load()
+		bytes, count := b.out.totals()
 		dB, dN := bytes-prevBytes, count-prevCount
 		secs := now.Sub(prev).Seconds()
 		prevBytes, prevCount, prev = bytes, count, now
@@ -267,6 +267,7 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 		if secs > 0 {
 			kbps = float64(dB) * 8 / 1000 / secs
 		}
+		b.noteNoContent(dN, perFrame)
 		b.log.Info(source, "route encode telemetry", map[string]any{
 			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
 			"capture": captureLabel(b.zeroCopy), "device": st.DevPolicy,
@@ -285,6 +286,23 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 	}
 }
 
+// noteNoContent logs ONCE per route when the bitstream carries almost nothing while AUs keep
+// flowing. This is the field's black-route signature (255 B/frame at 4K30 on a 20 Mbps budget),
+// but the same reading is produced by a frozen source AND by a genuinely static one - so the
+// wording names all three and the route is NOT marked degraded on it. The rendered panel carries
+// the number itself; this is the nudge that reaches a log-only box.
+func (b *mfBridge) noteNoContent(aus, bytesPerFrame uint64) {
+	if aus == 0 || bytesPerFrame >= medialink.AUNoiseFloorBytes || b.noContentWarned.Load() {
+		return
+	}
+	if b.noContentWarned.Swap(true) {
+		return
+	}
+	b.log.Warn(source, "this route's bitstream carries almost no picture content - a black, frozen or completely static source all look like this",
+		map[string]any{"bytesPerFrame": bytesPerFrame, "aus": aus,
+			"capture": captureLabel(b.zeroCopy), "noiseFloor": medialink.AUNoiseFloorBytes})
+}
+
 // pumpSub forwards the substitute's frames onto this bridge's own channel, so consumers that
 // already hold this Source never learn the engine changed underneath them.
 func (b *mfBridge) pumpSub(sub *encoder) {
@@ -293,9 +311,7 @@ func (b *mfBridge) pumpSub(sub *encoder) {
 		if err != nil {
 			return
 		}
-		b.auBytes.Add(uint64(len(f.Payload)))
-		b.auCount.Add(1)
-		b.out.tick()
+		b.out.tickBytes(len(f.Payload))
 		select {
 		case b.frames <- f:
 		case <-b.ctx.Done():
@@ -409,8 +425,7 @@ func (b *mfBridge) feed(ctx context.Context) {
 func (b *mfBridge) emit(ctx context.Context) {
 	defer close(b.done)
 	for au := range b.enc.Output() {
-		b.auBytes.Add(uint64(len(au.Data)))
-		b.auCount.Add(1)
+		b.out.tickBytes(len(au.Data))
 		f := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecH264,
 			PTS: au.PTSNs, Payload: au.Data}
 		if au.Keyframe {
@@ -425,7 +440,6 @@ func (b *mfBridge) emit(ctx context.Context) {
 			b.tcq = b.tcq[1:]
 		}
 		b.mu.Unlock()
-		b.out.tick()
 		select {
 		case b.frames <- f:
 		case <-ctx.Done():
@@ -542,12 +556,17 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		st.OutFPS = b.out.value()
 		st.Downgrades += b.downgrades
 		st.RateCapped = medialink.InnerRateCapped(b.src)
+		// The content oracle follows the route, not the engine: a substituted route that ships
+		// black is the same incident as a native one that does.
+		st.AUBytes, st.AUCount = b.out.totals()
+		st.AUBytesPerFrame = b.out.perFrame()
 		return st
 	}
 	st := b.enc.Stats()
 	if r := st.DegradeReason; r != "" {
 		b.noteDegrade(r)
 	}
+	auBytes, auCount := b.out.totals()
 	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value(),
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
@@ -568,10 +587,14 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		SoftwareEncode: st.Software,
 		BusyDrops:      uint64(st.BusyDrops),
 		EncFails:       uint64(st.EncFails),
-		AUBytes:        b.auBytes.Load(),
-		AUCount:        b.auCount.Load(),
-		AdapterLUID:    st.AdapterLUID,
-		DevPolicy:      st.DevPolicy,
-		Poisoned:       st.Poisoned,
-		LedgerFails:    st.LedgerFails}
+		// The content oracle, cumulative AND windowed. Only the windowed figure can say whether the
+		// route is shipping a picture NOW; a lifetime average over a route that went black an hour
+		// ago still reads healthy.
+		AUBytes:         auBytes,
+		AUCount:         auCount,
+		AUBytesPerFrame: b.out.perFrame(),
+		AdapterLUID:     st.AdapterLUID,
+		DevPolicy:       st.DevPolicy,
+		Poisoned:        st.Poisoned,
+		LedgerFails:     st.LedgerFails}
 }

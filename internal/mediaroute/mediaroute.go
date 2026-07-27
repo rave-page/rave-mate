@@ -516,12 +516,21 @@ type spoutSink struct {
 	sentOne   bool          // logged the first delivered frame (sender is now visible)
 	dropped   atomic.Uint64 // frames skipped for wrong kind/size (compressed passthrough, dims mismatch)
 	loggedBad bool          // logged the first drop once (rate-limit)
+	// pubFrames/pubBytes are the volume Write actually PUBLISHED. Write returns nil for a frame it
+	// threw away - an error-shaped contract over a volume-shaped operation, which is exactly how a
+	// total failure hides: "no error" is indistinguishable from "nothing happened". Dropped cannot
+	// stand in for it either, because a sink that drops nothing and publishes nothing reports the
+	// same zero as a healthy idle one.
+	pubFrames atomic.Uint64
+	pubBytes  atomic.Uint64
 }
 
 // PipeStats implements medialink.PipelineReporter: the decode wrapper sums these drops into the
-// route's Dropped, so "route up, frames arriving, no Spout sender" is visible as a number.
+// route's Dropped and carries the published volume up, so "route up, frames arriving, no Spout
+// sender" is visible as a number instead of as a Write that answered nil.
 func (s *spoutSink) PipeStats() medialink.PipelineStats {
-	return medialink.PipelineStats{Dropped: s.dropped.Load()}
+	return medialink.PipelineStats{Dropped: s.dropped.Load(),
+		PubFrames: s.pubFrames.Load(), PubBytes: s.pubBytes.Load()}
 }
 
 func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
@@ -578,6 +587,8 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 		Rect: image.Rect(0, 0, s.w, s.h)}); err != nil {
 		return err
 	}
+	s.pubFrames.Add(1)
+	s.pubBytes.Add(uint64(want))
 	if !s.sentOne {
 		s.sentOne = true
 		s.log.Info(source, "receive sink live - Spout sender publishing", map[string]any{

@@ -146,8 +146,22 @@ type PipelineStats struct {
 	// AUBytes/AUCount are the CONTENT oracle: bytes of real bitstream and how many access units
 	// carried them. Bytes-per-frame is what separates a live picture from a black or frozen one,
 	// and counters like OutFPS cannot - a black route reported healthy on those for 12 minutes.
+	// They were collected from inc 1 and rendered NOWHERE until inc 5, which is how a black route
+	// kept a healthy-looking panel: the one number that could have told the truth never left the
+	// struct.
 	AUBytes uint64
 	AUCount uint64
+	// AUBytesPerFrame is the same oracle over a SLIDING WINDOW (ratewin), which is what the
+	// question actually needs: a lifetime average over a route that went black an hour ago still
+	// reads healthy. This is the number to render.
+	AUBytesPerFrame float64
+	// PubFrames/PubBytes are the receive side's mirror: raw frames actually PUBLISHED into the
+	// local video-share sender. The sink's Write is a volume-shaped operation behind an
+	// error-shaped contract - it returns nil for a frame it threw away - so "route up, frames
+	// arriving, nothing published" can only be seen as a volume. Dropped alone cannot say it: a
+	// sink that drops nothing and publishes nothing reports the same zero.
+	PubFrames uint64
+	PubBytes  uint64
 	// Adapter/Drive/DevPolicy identify the code path serving this route, so a passing run on a
 	// machine with no toolchain can still say WHICH path passed.
 	AdapterLUID int64
@@ -160,6 +174,24 @@ type PipelineStats struct {
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.
 type PipelineReporter interface {
 	PipeStats() PipelineStats
+}
+
+// AUNoiseFloorBytes separates "this bitstream carries a picture" from "this bitstream carries
+// nothing". MEASURED, not guessed: a static 720p sender encodes to 49 B/AU and moving content at
+// the same geometry to 184 (zigmedia inc-3 M3); the field's black 4K30 route sat at 255 B/frame on
+// a 20 Mbps budget where real content would be ~83,000, while a healthy webcam route carried 3,169.
+// So the useful threshold is not "thousands" - it is "sustained under ~1 kB/frame is not a picture".
+//
+// It deliberately does NOT mean "black". A frozen source, a black source and a genuinely static
+// one are indistinguishable in the bitstream (that is what an encoder is for) and all three are
+// worth telling the operator about, so the wording everywhere names all three and NOTHING marks
+// the route degraded on this alone.
+const AUNoiseFloorBytes = 1000
+
+// NoPictureContent reports whether the windowed bytes-per-frame is at the noise floor while AUs
+// are still flowing - the rendered half of the content oracle.
+func (p PipelineStats) NoPictureContent() bool {
+	return p.AUCount > 0 && p.AUBytesPerFrame > 0 && p.AUBytesPerFrame < AUNoiseFloorBytes
 }
 
 // RealDrops is Dropped minus the deliberate rate-limiting share: frames actually LOST. Saturating,
@@ -189,6 +221,17 @@ func InnerRateCapped(inner any) uint64 {
 		return pr.PipeStats().RateCapped
 	}
 	return 0
+}
+
+// InnerPublished rides the same chain for the receive side's DELIVERED volume. The publishing sink
+// is always the innermost stage (the decode wrapper owns it), so without this the one reporter the
+// router asks can never say whether anything reached the Spout sender.
+func InnerPublished(inner any) (frames, bytes uint64) {
+	if pr, ok := inner.(PipelineReporter); ok {
+		st := pr.PipeStats()
+		return st.PubFrames, st.PubBytes
+	}
+	return 0, 0
 }
 
 // CompressedVideo reports whether c is an encoded video codec (vs raw pixels / audio).

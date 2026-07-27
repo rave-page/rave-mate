@@ -127,9 +127,10 @@ func TestFmtPipeLine(t *testing.T) {
 	s := medialink.RouteStat{Encoder: "hevc_nvenc", Tier: 2, RateBps: 14_200_000, WireFPS: 59.8,
 		Keyframes: 30,
 		JB:        &medialink.JitterStats{Depth: 2, LateRate: 0.013, PolicyDrops: 4},
-		Pipe:      &medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda", Restarts: 1}}
+		Pipe: &medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda", Restarts: 1,
+			PubFrames: 3591, PubBytes: 3591 * 1920 * 1080 * 4}}
 	got := fmtPipeLine(s)
-	want := "hevc_nvenc tier 2 · 14.2 Mbps · wire 59.8 fps · kf 30 · buffer 2f · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1"
+	want := "hevc_nvenc tier 2 · 14.2 Mbps · wire 59.8 fps · kf 30 · buffer 2f · late 1.3% · drops 4 · out 59.8 fps · cuda · restarts 1 · published 3591"
 	if got != want {
 		t.Errorf("pipe line:\n got %q\nwant %q", got, want)
 	}
@@ -149,6 +150,61 @@ func TestFmtPipeLine(t *testing.T) {
 	sw := fmtPipeLine(medialink.RouteStat{Encoder: "libx264", Tier: 4, Software: true})
 	if !strings.Contains(sw, "software encode (high CPU)") {
 		t.Errorf("sw warning missing: %q", sw)
+	}
+}
+
+// TestFmtContentLineRendersTheOracle is the gate for zigmedia inc-5 promotion gate 2: the numbers
+// that separate a live picture from a black one, and the reason a route is off its best path, must
+// REACH THE PANEL. Every field asserted here was collected since inc 1 and rendered nowhere, which
+// is how a black route kept healthy-looking counters for 12 minutes.
+func TestFmtContentLineRendersTheOracle(t *testing.T) {
+	// The field's black 4K30 route: 255 B/frame on a budget where real content is ~83 kB.
+	black := medialink.PipelineStats{OutFPS: 30, AUCount: 900, AUBytesPerFrame: 255}
+	line := fmtContentLine(black)
+	for _, want := range []string{"255 B/frame", "no picture content"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("a 255 B/frame route does not render %q: %q", want, line)
+		}
+	}
+	// Real 4K content must NOT be accused of being black, and must read in kB.
+	live := medialink.PipelineStats{OutFPS: 30, AUCount: 900, AUBytesPerFrame: 83000}
+	line = fmtContentLine(live)
+	if !strings.Contains(line, "81.1 kB/frame") {
+		t.Errorf("live content renders %q", line)
+	}
+	if strings.Contains(line, "no picture content") {
+		t.Errorf("a live 83 kB/frame route was accused of carrying nothing: %q", line)
+	}
+	// A genuinely static sender sits at the noise floor too - the wording must not claim "black".
+	if !strings.Contains(fmtContentLine(black), "static") {
+		t.Error("the noise-floor wording must name the static case, not only black")
+	}
+	// Degrade visibility: the one field whose EMPTY value is the only healthy one.
+	deg := medialink.PipelineStats{OutFPS: 30, DegradeReason: "hardware MFT poisoned",
+		SoftwareEncode: true, Poisoned: true, BusyDrops: 12, EncFails: 3}
+	line = fmtContentLine(deg)
+	for _, want := range []string{"degraded: hardware MFT poisoned", "software encode",
+		"hardware poisoned", "encoder saturated 12", "encode failures 3"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("degrade block missing %q: %q", want, line)
+		}
+	}
+	if fmtContentLine(medialink.PipelineStats{}) != "" {
+		t.Error("a stats block with nothing to say must render nothing")
+	}
+	// WIRING, not just formatting: the block must reach the line the panel actually shows.
+	wired := fmtPipeLine(medialink.RouteStat{Encoder: "h264_nvenc", Tier: 1, Pipe: &black})
+	if !strings.Contains(wired, "255 B/frame") || !strings.Contains(wired, "no picture content") {
+		t.Errorf("the content oracle does not reach the rendered pipe line: %q", wired)
+	}
+	// "Route up, frames received, nothing published" - the failure spoutSink.Write answers nil to.
+	stuck := medialink.PipelineStats{OutFPS: 59.8, HWAccel: "cuda"}
+	if !strings.Contains(fmtContentLine(stuck), "published 0") {
+		t.Errorf("a decode route publishing nothing renders %q", fmtContentLine(stuck))
+	}
+	// ...but a route that has not started yet must stay quiet.
+	if strings.Contains(fmtContentLine(medialink.PipelineStats{HWAccel: "cuda"}), "published") {
+		t.Error("a cold receive route was accused of publishing nothing")
 	}
 }
 
