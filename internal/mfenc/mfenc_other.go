@@ -52,6 +52,9 @@ func (e *Encoder) Close()                         {}
 // Warnf is the supervisor warning seam (no-op off Windows).
 var Warnf = func(format string, args ...any) {}
 
+// Infof mirrors the windows/cgo supervisor's info seam (no child here, so nothing emits).
+var Infof = func(format string, args ...any) {}
+
 // ProcSession is unavailable on this platform (no Zig MF encoder child).
 type ProcSession struct{}
 

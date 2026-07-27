@@ -687,6 +687,24 @@ pub var sw_policy: SwPolicy = .auto;
 pub const DevicePolicy = enum { child, session };
 pub var device_policy: DevicePolicy = .child;
 
+/// policyNames renders the active policies for the hello event. The AMD box has no Go toolchain
+/// and no remote-exec, so which code path is running has to be legible in the LOG STREAM - a
+/// passing run that cannot name its own configuration proves nothing.
+pub fn devicePolicyName() []const u8 {
+    return switch (device_policy) {
+        .child => "child",
+        .session => "session",
+    };
+}
+
+pub fn swPolicyName() []const u8 {
+    return switch (sw_policy) {
+        .auto => "auto",
+        .off => "off",
+        .force => "force",
+    };
+}
+
 // Lock is a raw SRWLOCK: Zig 0.16 moved std's blocking Mutex onto the Io runtime, and this lock is
 // shared with COM/MFT worker threads (main.zig has the same shape for the same reason).
 extern "kernel32" fn AcquireSRWLockExclusive(*usize) callconv(.winapi) void;
@@ -824,6 +842,12 @@ pub const Enc = struct {
     /// isSoftware reports whether the software MF encoder tier is serving this session.
     pub fn isSoftware(e: *const Enc) bool {
         return e.sw;
+    }
+
+    /// devShared reports whether this session adopted the CHILD's shared device rather than
+    /// building its own. Reported per open so a passing run proves WHICH code path passed.
+    pub fn devShared(e: *const Enc) bool {
+        return !e.owns_device;
     }
 
     /// resolvedLUID is the adapter the pipeline ACTUALLY runs on (0 = WARP / no DXGI adapter).

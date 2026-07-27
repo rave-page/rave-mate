@@ -29,6 +29,10 @@ import (
 // emit/feed/Close publishes one), so it is a liveness floor, not a latency budget.
 const subWait = 2 * time.Second
 
+// routeTelemetryEvery paces the log-side content oracle. 10 s is frequent enough to catch a route
+// going black mid-run and cheap enough to leave on permanently (one log line per route).
+const routeTelemetryEvery = 10 * time.Second
+
 // mfBridge implements medialink.Source (+KeyframeSource, PipelineReporter) over an
 // mfenc encoder-child session.
 type mfBridge struct {
@@ -67,6 +71,15 @@ type mfBridge struct {
 	degradeMu  sync.Mutex
 	degrade    string
 	subEncoder string
+
+	// Content oracle. Counted on EVERY AU (native and substituted), so the log stream carries
+	// bytes-per-frame and a measured bitrate. The rendered panel is not sufficient: its counters
+	// have been observed frozen for 25 minutes on a demonstrably live route, and "OutFPS looks
+	// fine" cannot tell a real picture from a black one anyway.
+	auBytes atomic.Uint64
+	auCount atomic.Uint64
+	// adapterName is the RESOLVED adapter description (a stale configured LUID names nothing).
+	adapterName string
 }
 
 // ZeroCopyCapture gates the zigmedia inc-1 path: a Spout source's pixels reach the encoder child
@@ -130,6 +143,7 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{}),
 		zeroCopy: zc, downgrades: downgrades, spec: spec, subReady: make(chan struct{})}
 	b.ctx = bctx
+	b.adapterName = enc.Stats().AdapterName
 	if r := enc.DegradeReason(); r != "" {
 		b.noteDegrade(r) // opened already degraded (poisoned hardware → software tier)
 	}
@@ -138,7 +152,8 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA(),
 		// device = what was REQUESTED; adapter = what the child resolved (a stale LUID silently
 		// ran elsewhere). drive/tier make the vendor-portability verdict visible per route.
-		"device": spec.DeviceLUID, "adapter": fmt.Sprintf("%#x", uint64(enc.AdapterLUID())),
+		"device":  spec.DeviceLUID,
+		"adapter": fmt.Sprintf("%#x %s", uint64(enc.Stats().AdapterLUID), b.adapterName),
 		"capture": captureLabel(zc), "drive": enc.Drive(), "tier": tierLabel(enc.IsSoftware()),
 		"degraded": enc.DegradeReason()})
 	// A zero-copy session's pixels never pass through here: no feed goroutine, so the source's
@@ -147,6 +162,7 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		go b.feed(bctx)
 	}
 	go b.emit(bctx)
+	go b.routeTelemetry(bctx)
 	return b, nil
 }
 
@@ -223,6 +239,49 @@ func (b *mfBridge) substitute(reason string) {
 	})
 }
 
+// routeTelemetry logs one line per interval with the CONTENT oracle plus the identity of the code
+// path serving this route. This is the only diagnosis channel on a box with no Go toolchain and no
+// remote-exec, so it must be complete on a HEALTHY route, not only on failure.
+func (b *mfBridge) routeTelemetry(ctx context.Context) {
+	t := time.NewTicker(routeTelemetryEvery)
+	defer t.Stop()
+	var prevBytes, prevCount uint64
+	prev := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now()
+		bytes, count := b.auBytes.Load(), b.auCount.Load()
+		dB, dN := bytes-prevBytes, count-prevCount
+		secs := now.Sub(prev).Seconds()
+		prevBytes, prevCount, prev = bytes, count, now
+		st := b.PipeStats()
+		perFrame := uint64(0)
+		if dN > 0 {
+			perFrame = dB / dN
+		}
+		kbps := 0.0
+		if secs > 0 {
+			kbps = float64(dB) * 8 / 1000 / secs
+		}
+		b.log.Info(source, "route encode telemetry", map[string]any{
+			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
+			"capture": captureLabel(b.zeroCopy), "device": st.DevPolicy,
+			"adapter": fmt.Sprintf("%#x %s", uint64(st.AdapterLUID), b.adapterName),
+			// The content oracle: a live picture cannot be a few hundred bytes per frame.
+			"aus": dN, "bytesPerFrame": perFrame, "kbps": fmt.Sprintf("%.0f", kbps),
+			"fps": fmt.Sprintf("%.1f", st.OutFPS),
+			// Saturation is SEPARATE from failure - different incident, different response.
+			"busyDrops": st.BusyDrops, "encFails": st.EncFails, "dropped": st.Dropped,
+			"ledgerFails": st.LedgerFails, "poisoned": st.Poisoned,
+			"degraded": st.DegradeReason,
+		})
+	}
+}
+
 // pumpSub forwards the substitute's frames onto this bridge's own channel, so consumers that
 // already hold this Source never learn the engine changed underneath them.
 func (b *mfBridge) pumpSub(sub *encoder) {
@@ -231,6 +290,8 @@ func (b *mfBridge) pumpSub(sub *encoder) {
 		if err != nil {
 			return
 		}
+		b.auBytes.Add(uint64(len(f.Payload)))
+		b.auCount.Add(1)
 		b.out.tick()
 		select {
 		case b.frames <- f:
@@ -345,6 +406,8 @@ func (b *mfBridge) feed(ctx context.Context) {
 func (b *mfBridge) emit(ctx context.Context) {
 	defer close(b.done)
 	for au := range b.enc.Output() {
+		b.auBytes.Add(uint64(len(au.Data)))
+		b.auCount.Add(1)
 		f := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecH264,
 			PTS: au.PTSNs, Payload: au.Data}
 		if au.Keyframe {
@@ -495,5 +558,13 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		// Vendor-portability + degrade visibility (never a silent downgrade).
 		DegradeReason:  b.degradeReason(),
 		Drive:          st.Drive,
-		SoftwareEncode: st.Software}
+		SoftwareEncode: st.Software,
+		BusyDrops:      uint64(st.BusyDrops),
+		EncFails:       uint64(st.EncFails),
+		AUBytes:        b.auBytes.Load(),
+		AUCount:        b.auCount.Load(),
+		AdapterLUID:    st.AdapterLUID,
+		DevPolicy:      st.DevPolicy,
+		Poisoned:       st.Poisoned,
+		LedgerFails:    st.LedgerFails}
 }

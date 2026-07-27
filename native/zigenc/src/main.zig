@@ -425,6 +425,12 @@ const OpenedEv = struct {
     sw: bool = false,
     luid_res: i64 = 0,
     adapter: []const u8 = "",
+    // async_attr is the RAW MF_TRANSFORM_ASYNC value the drive mode was derived from, reported
+    // separately from `drive` so a log reader never has to trust the derivation.
+    async_attr: bool = false,
+    // dev_shared: this session adopted the child's shared device (device_policy == child) rather
+    // than building its own. Proves WHICH device path a passing run exercised.
+    dev_shared: bool = false,
 };
 
 // EncFailEv: a hard encode error mid-route, ATTRIBUTED (rc + the stage it died in). Before this
@@ -482,7 +488,7 @@ fn sessionMain(s: *Session) void {
             s.cap_open = c;
             s.hdr.setCapFmt(c.fmt);
             s.hdr.setCapFlags(c.flags);
-            emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .src = "spout", .cap = "zerocopy", .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName() });
+            emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .src = "spout", .cap = "zerocopy", .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName(), .async_attr = enc.isAsync(), .dev_shared = enc.devShared() });
             spoutLoop(s, enc, sink);
             const rc = enc.drain(sink);
             std.debug.print("mfenc session {d} (zerocopy): fed={d} put={d} drain_rc={d}\n", .{ s.sid, s.fed, s.aus_put, rc });
@@ -496,7 +502,7 @@ fn sessionMain(s: *Session) void {
             return;
         }
     }
-    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName() });
+    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName(), .async_attr = enc.isAsync(), .dev_shared = enc.devShared() });
 
     var last_seq: u64 = s.hdr.frameSeq(); // frames before (re)open are stale - skip
     var fed_frames: u64 = 0;
@@ -853,7 +859,14 @@ pub fn main(init: std.process.Init) !void {
     // is the ONLY thing standing between an older child and a mapping it would size wrong: a v2
     // child ignores an unknown "dir" and would open an ENCODE session sized from in_w*in_h*4, i.e.
     // past the end of the parent's much smaller dec mapping.
-    emit(struct { ev: []const u8 = "hello", ver: u32 = 3, luid: i64 }{ .luid = luid });
+    emit(struct {
+        ev: []const u8 = "hello",
+        ver: u32 = 3,
+        luid: i64,
+        // Active policies: the only channel that says WHICH code path this child is running.
+        dev: []const u8,
+        swpol: []const u8,
+    }{ .luid = luid, .dev = mf.devicePolicyName(), .swpol = mf.swPolicyName() });
 
     var sessions = std.AutoHashMap(u32, *Session).init(gpa);
     defer sessions.deinit();

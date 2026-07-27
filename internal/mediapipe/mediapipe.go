@@ -41,6 +41,12 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 	mfenc.Warnf = func(format string, args ...any) { // encoder-child crash/poison reports
 		log.Warn(source, fmt.Sprintf(format, args...), nil)
 	}
+	// Info, not Warn: the child's active policies + per-session open verdict + open-stage trace.
+	// These have to be readable on a HEALTHY run - on a rig with no Go toolchain and no
+	// remote-exec the log stream is the only diagnosis channel there is.
+	mfenc.Infof = func(format string, args ...any) {
+		log.Info(source, fmt.Sprintf(format, args...), nil)
+	}
 	var mfWarned bool
 	enc := func(ctx context.Context, spec medialink.EncodeSpec, src medialink.Source) (medialink.Source, error) {
 		if encodeEngine(spec) == engineMFNative {

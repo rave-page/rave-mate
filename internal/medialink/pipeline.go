@@ -129,6 +129,23 @@ type PipelineStats struct {
 	// SoftwareEncode: this route is on a SOFTWARE encoder tier (native MF software MFT, or a
 	// substituted libx264) rather than silicon.
 	SoftwareEncode bool
+	// BusyDrops and EncFails are SEPARATE on purpose: "encoder saturated but the route is
+	// healthy" and "the encoder is failing" are different incidents with different responses, and
+	// they are indistinguishable once summed into Dropped (which still counts both as a total).
+	BusyDrops uint64 // frames the encoder had no credit for in time - saturation
+	EncFails  uint64 // attributed hard encode failures reported by the encoder child
+	// AUBytes/AUCount are the CONTENT oracle: bytes of real bitstream and how many access units
+	// carried them. Bytes-per-frame is what separates a live picture from a black or frozen one,
+	// and counters like OutFPS cannot - a black route reported healthy on those for 12 minutes.
+	AUBytes uint64
+	AUCount uint64
+	// Adapter/Drive/DevPolicy identify the code path serving this route, so a passing run on a
+	// machine with no toolchain can still say WHICH path passed.
+	AdapterLUID int64
+	DevPolicy   string
+	// Poisoned + LedgerFails expose the crash-loop ledger for this route's (adapter, encoder).
+	Poisoned    bool
+	LedgerFails int
 }
 
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.

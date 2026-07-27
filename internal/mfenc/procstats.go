@@ -38,6 +38,18 @@ type ProcStats struct {
 	Software      bool
 	DegradeReason string
 	EncFails      uint32 // attributed mid-route encode failures reported by the child
+	// AsyncAttr is the RAW MF_TRANSFORM_ASYNC value Drive was derived from. DevShared/DevPolicy
+	// say which device path is in effect. All three exist so a rig with no toolchain and no
+	// remote-exec can prove from telemetry alone WHICH code path a passing run exercised.
+	AsyncAttr bool
+	DevShared bool
+	DevPolicy string
+	// Ledger view for this (adapter, encoder): streak length, and why it is poisoned if it is.
+	LedgerFails  int
+	Poisoned     bool
+	PoisonReason string
+	AdapterLUID  int64
+	AdapterName  string
 	// BusyDrops: frames the encoder had no credit for inside the child's per-frame budget. This
 	// is what encoder SATURATION looks like now - previously the same condition blocked long
 	// enough for the parent's deadline to end the route.
