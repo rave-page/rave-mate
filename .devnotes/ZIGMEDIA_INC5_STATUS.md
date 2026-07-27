@@ -84,6 +84,7 @@ reaches branches no Spout sender on any rig can produce. No Spout, no registry, 
 | **2-PC wire pass, flag ON** | **NOT DONE** | only the user can drive two machines |
 | **OBS restart / canvas resize** | **NOT DONE** | the R1 *mechanism* is now executed against a real texture swap; OBS specifically is not |
 | **4K60 receive soak** | **NOT DONE** | deliberately not run - see "GPU contention" below |
+| **flip orientation (all 4 modes)** | **executed, PASS** | `none`/`v`/`h`/`hv` exact, 3/3 runs, and the inc-4 retry loop never fires any more (see neighbour defect 1) |
 | **7-day soak** | **NOT DONE** | wall-clock |
 
 R1's non-vacuity is the finding worth keeping: with the changed-handle detector disabled, the same
@@ -270,8 +271,9 @@ zig build test        (native/zigui)                232/232 tests passed
 GOWORK=off go test -tags zigui ./internal/webui -run TestZig                     ok
 go test ./internal/mfenc -run TestZeroCopyRisk                 PASS (3/3 consecutive runs)
 go test -tags spout ./internal/videoshare                      PASS  (DLL staged - not a skip)
+go test -tags spout ./internal/mfenc -run 'TestFlipLiveOrientation'  PASS (3/3, 0 retries fired)
 go test -tags spout ./internal/mfenc
-  -run 'TestZeroCopyLiveSession|TestDecodeLive|TestZeroCopyRisk|TestInc3'        PASS
+  -run 'TestZeroCopyLiveSession|TestDecodeLive|TestZeroCopyRisk|TestInc3|TestFlipLive'   PASS
 ```
 
 The tagged Spout runs used a compiled test exe with `third_party/spout/bin/SpoutLibrary.dll` AND
