@@ -44,6 +44,20 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// waitIdle waits for key's in-flight guard to be released. Observing a save's OUTCOME is not
+// enough to sequence a second save: aeSave publishes errTx/id from inside the u.bg body, while
+// actEnd runs in that body's defer - so a test that only waits for the outcome can fire the next
+// aeSave while actStart still reports busy, and that save is DROPPED silently. No deadline can
+// fix that (the second save never runs at all), which is why widening this file's timeout didn't.
+func waitIdle(t *testing.T, u *UI, key string) {
+	t.Helper()
+	waitFor(t, "action "+key+" to release its in-flight guard", func() bool {
+		actBusyMu.Lock()
+		defer actBusyMu.Unlock()
+		return !actBusy[actKey{u, key}]
+	})
+}
+
 // TestAeSaveDoesNotResurrectDeletedAutomation is the reported bug: Save treats a non-empty id as an
 // update with no existence check, and Save is a blind Put - so an automation deleted under an open
 // editor comes back the moment the user hits Save.
@@ -85,6 +99,7 @@ func TestAeSaveDoesNotResurrectDeletedAutomation(t *testing.T) {
 	}
 
 	// Recovery: saving again creates it fresh, under a new id.
+	waitIdle(t, u, "auto-ed-save") // else actStart refuses and this Save never runs
 	u.aeSave(tok)
 	waitFor(t, "re-create", func() bool { return len(svc.List()) == 1 })
 	if got := svc.List()[0]; got.ID == saved.ID {
