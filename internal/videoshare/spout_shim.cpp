@@ -90,10 +90,49 @@ static bool grow_flip_buf(size_t need) {
     return true;
 }
 
-// rave_spout_send publishes one RGBA frame, applying a geometric flip first (flip bit0=horizontal,
-// bit1=vertical). bInvert is always false - the explicit flip fully controls orientation so the
-// user can pick the mode that lands upright in their receiver (RAVE_SPOUT_FLIP). deckcard.Render
-// produces top-row-first RGBA.
+// flip_rows copies src into dst applying the requested geometric flip.
+//
+// The vertical component is a WHOLE-ROW memcpy in reverse row order; only a horizontal mirror needs
+// to touch individual pixels, and that is a 32-bit-per-pixel loop the compiler keeps in registers.
+// The old code was one scalar memcpy(...,4) per PIXEL inside a doubly-nested loop - 8.3 M libc calls
+// per 4K frame, where a vertical-only flip now costs 2160 memcpys.
+void flip_rows(unsigned char* dst, const unsigned char* src,
+               unsigned int w, unsigned int height, bool flip_h, bool flip_v) {
+    const size_t stride = (size_t)w * 4;
+    for (unsigned int y = 0; y < height; y++) {
+        const unsigned int sy = flip_v ? (height - 1 - y) : y;
+        const unsigned char* in = src + (size_t)sy * stride;
+        unsigned char* out = dst + (size_t)y * stride;
+        if (!flip_h) {
+            memcpy(out, in, stride);
+            continue;
+        }
+        const uint32_t* ip = (const uint32_t*)in;
+        uint32_t* op = (uint32_t*)out;
+        for (unsigned int x = 0; x < w; x++) op[x] = ip[w - 1 - x];
+    }
+}
+
+// rave_spout_flip_rows is flip_rows behind the flat C API (test parity gate; see the header).
+void rave_spout_flip_rows(unsigned char* dst, const unsigned char* src,
+                          unsigned int w, unsigned int height, int flip) {
+    if (!dst || !src || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(height)) return;
+    flip_rows(dst, src, w, height, (flip & 1) != 0, (flip & 2) != 0);
+}
+
+// rave_spout_send publishes one RGBA frame with the configured geometric flip (bit0=horizontal,
+// bit1=vertical, RAVE_SPOUT_FLIP). flip == 0 (the default, measured upright on the dev rig) sends
+// the caller's buffer straight through with no host pass at all.
+//
+// bInvert is ALWAYS false, deliberately. Spout's own bInvert would do the vertical flip inside the
+// GL/DX interop copy (free, no host pass), and increment 4 MEASURED it working: with bInvert=true the
+// v mode decoded to exactly the same quadrants as this CPU path. It is still not used, because the
+// CPU transform can be proven byte-identical to its predecessor by a deterministic unit test
+// (TestFlipRowsMatchesTheOriginalPerPixelAlgorithm) whereas bInvert can only be checked on the live
+// rig - and this SpoutLibrary pairing has already produced skewed late-vtable behaviour in three
+// separate places. An upside-down output is user-visible breakage; 2.16 ms/frame at 4K is not.
+// If you do switch, TestFlipLiveOrientation is the gate that must stay green for all four modes.
+// deckcard.Render produces top-row-first RGBA.
 int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
                     unsigned int w, unsigned int height, int flip) {
     if (!h || !rgba || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(height)) return 0;
@@ -104,15 +143,8 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
     }
     const size_t need = (size_t)w * height * 4;
     if (!grow_flip_buf(need)) return 0;
-    unsigned char* t = flip_buf;
-    for (unsigned int y = 0; y < height; y++) {
-        unsigned int sy = (flip & 2) ? (height - 1 - y) : y;
-        for (unsigned int x = 0; x < w; x++) {
-            unsigned int sx = (flip & 1) ? (w - 1 - x) : x;
-            memcpy(t + ((size_t)y * w + x) * 4, rgba + ((size_t)sy * w + sx) * 4, 4);
-        }
-    }
-    return s->SendImage(t, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+    flip_rows(flip_buf, rgba, w, height, (flip & 1) != 0, (flip & 2) != 0);
+    return s->SendImage(flip_buf, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
 }
 
 // rave_spout_open_sender: force the sender's shared texture to exist, then hand its handle out.

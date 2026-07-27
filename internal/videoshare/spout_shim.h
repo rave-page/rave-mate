@@ -38,6 +38,13 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
 int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
                           unsigned int fmt, unsigned long long* share, unsigned int* out_fmt);
 
+// rave_spout_flip_rows applies the geometric flip (bit0=horizontal, bit1=vertical) from src into
+// dst, both w*h*4 RGBA. Exposed so the transform can be parity-tested against the original
+// per-pixel algorithm WITHOUT a GPU: it is pure pixel math, and a live Spout rig is the wrong
+// instrument for it.
+void rave_spout_flip_rows(unsigned char* dst, const unsigned char* src,
+                          unsigned int w, unsigned int height, int flip);
+
 // Release the sender, close its OpenGL context, free the handle. Call on the owning thread.
 void rave_spout_release(void* h);
 

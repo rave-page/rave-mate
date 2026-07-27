@@ -18,6 +18,13 @@ func TestFrameSize(t *testing.T) {
 	}
 }
 
+// readFrames adapts framePipe to the old test shape: fresh buffers, recycling counted so the
+// ownership contract (every non-emitted buffer comes back) can be asserted.
+func readFrames(r io.Reader, size int, emit func(buf []byte) bool) error {
+	return framePipe{size: size, alloc: func() []byte { return make([]byte, size) },
+		emit: emit, recycle: func([]byte) {}}.run(r)
+}
+
 // TestReadFrames verifies stride math: exact frame boundaries, fresh buffers, torn tail dropped.
 func TestReadFrames(t *testing.T) {
 	const w, h = 4, 2
@@ -75,5 +82,49 @@ func TestReadFramesError(t *testing.T) {
 	err := readFrames(r, size, func([]byte) bool { n++; return true })
 	if n != 1 || err == nil {
 		t.Fatalf("want 1 frame + error, got n=%d err=%v", n, err)
+	}
+}
+
+// TestFramePipeRecyclesUnemittedBuffers is the ownership contract: every buffer the pipe takes from
+// alloc is either EMITTED or handed to recycle. A buffer that is neither would leak - and with a
+// pooled allocator, leaking pins the pool's live ceiling until the process exits.
+func TestFramePipeRecyclesUnemittedBuffers(t *testing.T) {
+	const size = 8
+	cases := []struct {
+		name string
+		r    io.Reader
+	}{
+		{"clean EOF", bytes.NewReader(bytes.Repeat([]byte{1}, size*2))},
+		{"torn tail", bytes.NewReader(bytes.Repeat([]byte{1}, size*2+3))},
+		{"read error", io.MultiReader(bytes.NewReader(bytes.Repeat([]byte{1}, size)), iotest.ErrReader(io.ErrClosedPipe))},
+	}
+	for _, c := range cases {
+		allocated, emitted, recycled := 0, 0, 0
+		_ = framePipe{
+			size:    size,
+			alloc:   func() []byte { allocated++; return make([]byte, size) },
+			emit:    func([]byte) bool { emitted++; return true },
+			recycle: func([]byte) { recycled++ },
+		}.run(c.r)
+		if allocated != emitted+recycled {
+			t.Fatalf("%s: allocated %d but emitted %d + recycled %d - a buffer leaked",
+				c.name, allocated, emitted, recycled)
+		}
+	}
+}
+
+// TestFramePipeStopKeepsTheEmittedBuffer: when emit says stop it has ALREADY taken that buffer, so
+// the pipe must not also recycle it (a double return would hand one buffer to two writers).
+func TestFramePipeStopKeepsTheEmittedBuffer(t *testing.T) {
+	const size = 8
+	allocated, emitted, recycled := 0, 0, 0
+	_ = framePipe{
+		size:    size,
+		alloc:   func() []byte { allocated++; return make([]byte, size) },
+		emit:    func([]byte) bool { emitted++; return false },
+		recycle: func([]byte) { recycled++ },
+	}.run(bytes.NewReader(bytes.Repeat([]byte{1}, size*3)))
+	if allocated != 1 || emitted != 1 || recycled != 0 {
+		t.Fatalf("alloc=%d emit=%d recycle=%d, want 1/1/0", allocated, emitted, recycled)
 	}
 }

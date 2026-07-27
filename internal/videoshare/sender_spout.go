@@ -188,6 +188,10 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 
 // spoutSenderCount returns the number of registered Spout senders (-1 if unavailable).
 // Receiver-side registry query via a throwaway handle (no GL context needed). Test/diagnostic.
+// spoutFlip is the geometric flip requested for every frame (bit0=horizontal, bit1=vertical).
+// Cost note: flip 0 (the default) costs NO host pass; a vertical flip is whole-row memcpys and a
+// horizontal mirror a 32-bit-per-pixel row reverse. Spout's own bInvert would do the vertical flip
+// on the GPU but publishes a BLACK texture on this SDK pairing - see rave_spout_send.
 // spoutFlip is the geometric flip applied to every frame before Spout send (bit0=horizontal,
 // bit1=vertical), set once from RAVE_SPOUT_FLIP: none|h|v|hv (default h). Spout”s GL/DX path on
 // some GPUs mirrors/flips the shared texture vs the receiver; this lets the user land it upright

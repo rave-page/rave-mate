@@ -9,6 +9,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/videoshare"
 )
 
 // fakeRouter records medialink source registration (P4 network route).
@@ -42,10 +43,13 @@ func TestTapFanout(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Newest-wins: two frames without a read → the tap holds the second.
-	f1 := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: []byte{1}}
-	f2 := &medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: []byte{2}}
-	m.fanout(f1)
-	m.fanout(f2)
+	cf1 := testCapFrame(1)
+	cf2 := testCapFrame(2)
+	f2 := cf2.f
+	m.fanout(cf1)
+	cf1.release()
+	m.fanout(cf2)
+	cf2.release()
 	got, err := src.Next(context.Background())
 	if err != nil || got.Payload[0] != 2 {
 		t.Fatalf("newest-wins: %+v err=%v", got, err)
@@ -96,4 +100,56 @@ func TestRouterRegistrationLifecycle(t *testing.T) {
 	if _, still := fr.sources[camSourceID]; still {
 		t.Fatal("source must unregister on stop")
 	}
+}
+
+// testCapFrame builds a refcounted capFrame over an unpooled buffer (release just drops the ref).
+func testCapFrame(v byte) capFrame {
+	ref := videoshare.NewPixRef([]byte{v}, false, nil)
+	return capFrame{ref: ref, f: &medialink.Frame{Kind: medialink.KindVideo,
+		Codec: medialink.CodecNRGBA, Payload: ref.Pix(), Release: ref.Release}}
+}
+
+// TestTapFanoutRefcount: every frame handed to a tap holds a reference until the tap consumes or
+// drops it, and the buffer is released EXACTLY once overall.
+func TestTapFanoutRefcount(t *testing.T) {
+	m := New(logbus.New(16), nil, "n", "h", func() config.WebcamFeature { return config.WebcamFeature{} })
+	m.mu.Lock()
+	m.running = true
+	m.mu.Unlock()
+	src, err := m.openTap(context.Background(), medialink.Offer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf := testCapFrame(7)
+	m.fanout(cf)
+	if got := cf.ref.Refs(); got != 2 {
+		t.Fatalf("refs after fanout to 1 tap = %d, want 2 (ours + the tap's)", got)
+	}
+	cf.release() // the distributor's own reference
+	if got := cf.ref.Refs(); got != 1 {
+		t.Fatalf("refs = %d after the distributor released, want 1 (the tap still holds it)", got)
+	}
+	got, err := src.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseFrame(got) // stands in for medialink's send loop
+	if n := cf.ref.Refs(); n != 0 {
+		t.Fatalf("refs = %d after the tap consumed the frame, want 0", n)
+	}
+	// A frame displaced inside a tap must be released too, not forgotten.
+	a, b := testCapFrame(1), testCapFrame(2)
+	m.fanout(a)
+	a.release()
+	m.fanout(b)
+	b.release()
+	if n := a.ref.Refs(); n != 0 {
+		t.Fatalf("displaced frame refs = %d, want 0 (its buffer never came back)", n)
+	}
+	// Teardown with a frame still queued: closeTaps must release it.
+	m.closeTaps()
+	if n := b.ref.Refs(); n != 0 {
+		t.Fatalf("refs = %d after closeTaps, want 0 - a pending buffer was abandoned", n)
+	}
+	_ = src.Close()
 }

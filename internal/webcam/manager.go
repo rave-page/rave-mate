@@ -69,20 +69,21 @@ type Manager struct {
 
 	startMu sync.Mutex // serializes StartCamera/StopCamera (concurrent bus cmds must not leak a capture)
 
-	mu          sync.Mutex
-	ctx         context.Context
-	running     bool
-	cur         capDesc
-	stopCap     func()
-	capStat     func() capStats
-	localSender string // active local Spout sender name ("" = Spout unavailable; capture still runs)
-	devices     []DeviceInfo
-	props       []PropState
-	lastErr     string
-	remotes     map[string]remoteEntry
-	unsub       []func()
-	taps        map[uint64]chan *medialink.Frame // network-route fan-out (P4)
-	tapSeq      uint64
+	mu           sync.Mutex
+	ctx          context.Context
+	running      bool
+	cur          capDesc
+	stopCap      func()
+	capStat      func() capStats
+	refBugLogged bool   // one loud report per manager for a release-past-zero (must never happen)
+	localSender  string // active local Spout sender name ("" = Spout unavailable; capture still runs)
+	devices      []DeviceInfo
+	props        []PropState
+	lastErr      string
+	remotes      map[string]remoteEntry
+	unsub        []func()
+	taps         map[uint64]chan *medialink.Frame // network-route fan-out (P4)
+	tapSeq       uint64
 }
 
 // New builds the manager (does nothing until Start).
@@ -261,32 +262,48 @@ func (m *Manager) openTap(context.Context, medialink.Offer) (medialink.Source, e
 }
 
 // fanout hands a captured frame to every network tap, newest-wins. Each tap gets a shallow COPY
-// (payload shared read-only) - routes stamp Stream/Seq/PTS on their own copy.
-func (m *Manager) fanout(f *medialink.Frame) {
+// (payload + Release shared) - routes stamp Stream/Seq/PTS on their own copy.
+//
+// Refcount discipline: take the reference BEFORE queueing. Taking it after would let a fast tap
+// release the buffer to zero mid-fanout, and the pool would hand it to the next capture while the
+// remaining taps still point at it.
+func (m *Manager) fanout(cf capFrame) {
 	m.mu.Lock()
 	for _, ch := range m.taps {
-		cp := *f
-		select {
-		case ch <- &cp:
-		default:
-			select {
-			case <-ch:
-			default:
-			}
-			select {
-			case ch <- &cp:
-			default:
-			}
+		cp := *cf.f
+		cf.ref.Add(1)
+		if !offerFrame(ch, &cp) {
+			cf.ref.Release() // never queued (tap full and its pending frame was taken by someone else)
 		}
 	}
 	m.mu.Unlock()
+}
+
+// offerFrame queues f newest-wins, releasing whatever it displaces. false = f was not queued.
+func offerFrame(ch chan *medialink.Frame, f *medialink.Frame) bool {
+	select {
+	case ch <- f:
+		return true
+	default:
+	}
+	select {
+	case old := <-ch:
+		releaseFrame(old) // the frame this one replaces must give its buffer back
+	default:
+	}
+	select {
+	case ch <- f:
+		return true
+	default:
+		return false
+	}
 }
 
 // closeTaps ends every network tap (capture stopped) - routes see EOF and close cleanly.
 func (m *Manager) closeTaps() {
 	m.mu.Lock()
 	for id, ch := range m.taps {
-		close(ch)
+		drainTap(ch)
 		delete(m.taps, id)
 	}
 	m.mu.Unlock()
@@ -296,10 +313,19 @@ func (m *Manager) closeTaps() {
 func (m *Manager) removeTap(id uint64) {
 	m.mu.Lock()
 	if ch, ok := m.taps[id]; ok {
-		close(ch)
+		drainTap(ch)
 		delete(m.taps, id)
 	}
 	m.mu.Unlock()
+}
+
+// drainTap closes a tap and RELEASES whatever frame was still queued on it: a pending buffer
+// abandoned at teardown pins the pixel pool's live ceiling for the rest of the process.
+func drainTap(ch chan *medialink.Frame) {
+	close(ch)
+	for f := range ch {
+		releaseFrame(f)
+	}
 }
 
 // tapSource adapts a fan-out channel to a medialink Source.
@@ -360,19 +386,22 @@ func (m *Manager) openLocalRoute(ctx context.Context, desc capDesc) (func(), fun
 	debuglog.Go(m.log, source, func() {
 		defer m.closeTaps()
 		for {
-			f, err := cap.Next(pctx)
+			cf, err := cap.next(pctx)
 			if err != nil {
 				if pctx.Err() == nil && err != io.EOF {
 					m.log.Warn(source, "camera pump ended", map[string]any{"error": err.Error()})
 				}
 				return
 			}
+			// The local sink consumes the pixels SYNCHRONOUSLY (videoshare's hand-off waits for the
+			// backend read), so this one reference covers it.
 			if sink != nil {
-				if err := sink.Write(f); err != nil && pctx.Err() == nil {
+				if err := sink.Write(cf.f); err != nil && pctx.Err() == nil {
 					m.log.Warn(source, "camera sink write failed", map[string]any{"error": err.Error()})
 				}
 			}
-			m.fanout(f)
+			m.fanout(cf) // takes one reference per tap it queues
+			cf.release() // ...and this drops ours
 		}
 	})
 	stop := func() {
@@ -612,8 +641,16 @@ func (m *Manager) status() Status {
 	} else {
 		st.Sender = m.localSender // "" when Spout is unavailable (capture still runs for the route)
 		if m.capStat != nil {
-			if cs := m.capStat(); cs.LastErr != "" && st.Err == "" {
+			cs := m.capStat()
+			if cs.LastErr != "" && st.Err == "" {
 				st.Err = cs.LastErr
+			}
+			st.Frames, st.Dropped, st.PoolMiss = cs.Frames, cs.Dropped, cs.PoolMiss
+			if cs.RefBugs > 0 && !m.refBugLogged {
+				m.refBugLogged = true
+				// Must never happen: it means one pixel buffer had two owners.
+				m.log.Error(source, "capture buffer released past zero - a frame buffer had two owners",
+					map[string]any{"events": cs.RefBugs})
 			}
 		}
 	}

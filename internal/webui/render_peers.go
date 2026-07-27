@@ -1179,6 +1179,13 @@ func fmtCamStatus(st webcam.Status) string {
 	switch {
 	case st.Running:
 		s := i18n.T("peers.camLive", i18n.A{"mode": fmtCamMode(st.W, st.H, st.FPS)})
+		// Capture counters were collected and rendered nowhere until increment 4.
+		if st.Dropped > 0 {
+			s += " · " + i18n.T("peers.camDropped", i18n.A{"n": fmt.Sprint(st.Dropped)})
+		}
+		if st.PoolMiss > 0 {
+			s += " · " + i18n.T("peers.camPoolMiss", i18n.A{"n": fmt.Sprint(st.PoolMiss)})
+		}
 		if st.Err != "" {
 			s += " · " + st.Err
 		}

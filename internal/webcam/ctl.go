@@ -60,6 +60,12 @@ type Status struct {
 	Err     string       `json:"err,omitempty"`    // last error / disabled-reason string
 	Devices []DeviceInfo `json:"devices,omitempty"`
 	Props   []PropState  `json:"props,omitempty"` // for the active/configured device
+	// Capture counters while running. Collected since the camera shipped and rendered NOWHERE - the
+	// same blind spot the route panel had: a camera dropping most of its frames looked identical to
+	// a healthy one. PoolMiss > 0 means the pixel pool was at its ceiling and frames were allocated.
+	Frames   uint64 `json:"frames,omitempty"`
+	Dropped  uint64 `json:"dropped,omitempty"`
+	PoolMiss uint64 `json:"poolMiss,omitempty"`
 }
 
 // Cmd is a TopicCmd payload: an action targeted at one instance (Target = node id; "" = local).

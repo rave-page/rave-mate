@@ -56,9 +56,14 @@ func decPattern() *image.NRGBA {
 	return img
 }
 
+// bandSample is the grabber child's report. One tag per FIELD: declaring two fields on a line
+// gives them the SAME tag, so TopB/BottomB silently decoded from tr/br (caught by
+// `go vet -tags spout`, a lane the untagged sweep never compiles).
 type bandSample struct {
-	TopR, TopB       int `json:"tr"`
-	BottomR, BottomB int `json:"br"`
+	TopR    int `json:"tr"`
+	TopB    int `json:"tb"`
+	BottomR int `json:"br"`
+	BottomB int `json:"bb"`
 }
 
 // TestDecodeLiveGrabber is the child role: read the published texture back and report the bands.

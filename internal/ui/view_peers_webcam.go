@@ -324,6 +324,12 @@ func fmtCamStatus(st webcam.Status) string {
 	switch {
 	case st.Running:
 		s := "LIVE - " + fmtCamMode(st.W, st.H, st.FPS)
+		if st.Dropped > 0 {
+			s += fmt.Sprintf(" · dropped %d", st.Dropped)
+		}
+		if st.PoolMiss > 0 {
+			s += fmt.Sprintf(" · pool miss %d", st.PoolMiss)
+		}
 		if st.Err != "" {
 			s += " · " + st.Err
 		}
