@@ -196,6 +196,11 @@ func flipQuadrants(t *testing.T, ffmpeg, mode string, attempt int) (tl, tr, bl, 
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	// The registry entry appears on the publisher's FIRST SendImage, but a single GL/DX interop
+	// write is not yet visible to a foreign D3D11 device - it is not flushed until further GL work
+	// is submitted. Opening the capture the instant the name resolves therefore races the flush, and
+	// under GPU load the first captured frame is blank. Let the publisher get several frames out.
+	time.Sleep(400 * time.Millisecond)
 	s, err := OpenProcSessionOpts(ProcOpts{
 		LUID: 0, InW: flipW, InH: flipH, OutW: flipW, OutH: flipH, FPS: 30, Kbps: 6000, Gop: 30,
 		Spout: &SpoutSource{Name: name, Resolve: func() (uint64, uint32, int, int, bool) {
@@ -223,16 +228,22 @@ func flipQuadrants(t *testing.T, ffmpeg, mode string, attempt int) (tl, tr, bl, 
 	for _, au := range aus {
 		in.Write(au.Data)
 	}
+	// Decode the WHOLE capture and sample the LAST frame, not the first. The first frame is the one
+	// captured immediately after the session opened, i.e. the one that can still predate the
+	// publisher's flush; a frame from the end of a 900 ms capture cannot. This is the same discipline
+	// the R1 gate needed: never sample at the boundary you are racing.
 	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "h264", "-i", "pipe:0",
-		"-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1")
+		"-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1")
 	cmd.Stdin = &in
 	out, err := cmd.Output()
-	if err != nil || len(out) < flipW*flipH*3 {
-		t.Fatalf("decode failed (%v), %d bytes want %d", err, len(out), flipW*flipH*3)
+	frame := flipW * flipH * 3
+	if err != nil || len(out) < frame {
+		t.Fatalf("decode failed (%v), %d bytes want >= %d", err, len(out), frame)
 	}
+	last := out[(len(out)/frame-1)*frame:]
 	at := func(x, y int) string {
 		i := (y*flipW + x) * 3
-		return classify(int(out[i]), int(out[i+1]), int(out[i+2]))
+		return classify(int(last[i]), int(last[i+1]), int(last[i+2]))
 	}
 	// Sample well inside each quadrant: chroma subsampling smears the seams.
 	qx, qy := flipW/4, flipH/4

@@ -227,11 +227,16 @@ corrupted their verification too.
 
 ## Neighbour defects found, NOT fixed (reported)
 
-1. **`TestFlipLiveOrientation` is flaky under GPU load** and its retry budget is too small: with the
-   user's 4K route live, `h` failed 4/4 attempts with all-blank captures while `v` failed once and
-   passed on re-run with the exact expected pattern. Pre-existing (inc 4 documented the
-   stale-texture blank and added the retries); the retries are simply not enough under contention.
-   Given finding 2 above, the honest fix is a positive control per attempt, not more retries.
+1. ~~`TestFlipLiveOrientation` is flaky under GPU load~~ **FIXED here, and it was the same root
+   cause as the decode oracle.** Inc 4 diagnosed the blank captures as the R1 stale-texture symptom
+   and added a 4-attempt retry loop. They were not stale textures: the harness opened the capture
+   the instant `SenderShare` resolved - which happens on the publisher's FIRST `SendImage`, before
+   the GL/DX interop write is flushed to a foreign device - and then decoded the FIRST captured
+   frame, i.e. the one frame guaranteed to be racing the flush. Under GPU load the race is lost.
+   Fixed by letting the publisher get several frames out and sampling the LAST decoded frame instead
+   of the first: 3/3 runs, all four modes exact, and the retry loop now never fires. One mechanism,
+   misdiagnosed in three separate increments (inc 2 as "Spout cannot see foreign writes", inc 4 as
+   "stale sender texture", and it very nearly ate this increment's decode gate too).
 2. `native/zigenc/src/cap.zig:273` comments `86` as `B8G8R8A8_TYPELESS`. It is `90`; 86 is a
    different format. Both are outside the allowlist so the test still passes - the label is wrong,
    not the logic.
