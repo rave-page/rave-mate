@@ -274,8 +274,11 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 			// The content oracle: a live picture cannot be a few hundred bytes per frame.
 			"aus": dN, "bytesPerFrame": perFrame, "kbps": fmt.Sprintf("%.0f", kbps),
 			"fps": fmt.Sprintf("%.1f", st.OutFPS),
-			// Saturation is SEPARATE from failure - different incident, different response.
+			// Saturation is SEPARATE from failure is SEPARATE from deliberate rate limiting -
+			// three different incidents, three different responses, three numbers. "dropped"
+			// stays the TOTAL; rateCapped is the fps-cap share of it, lost is the remainder.
 			"busyDrops": st.BusyDrops, "encFails": st.EncFails, "dropped": st.Dropped,
+			"rateCapped": st.RateCapped, "lost": st.RealDrops(),
 			"ledgerFails": st.LedgerFails, "poisoned": st.Poisoned,
 			"degraded": st.DegradeReason,
 		})
@@ -538,6 +541,7 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		st.SoftwareEncode = st.Encoder == "libx264"
 		st.OutFPS = b.out.value()
 		st.Downgrades += b.downgrades
+		st.RateCapped = medialink.InnerRateCapped(b.src)
 		return st
 	}
 	st := b.enc.Stats()
@@ -554,7 +558,10 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		Downgrades:   b.downgrades + st.Downgrades,
 		// Saturation drops count as drops: a route shedding frames must never look identical to a
 		// healthy one (that equivalence is what let a black 4K route report healthy for 12 minutes).
-		Dropped: b.dropped.Load() + medialink.InnerDrops(b.src) + uint64(st.BusyDrops),
+		// The fps-cap share rides RateCapped as well, so "throttled by design" and "losing frames"
+		// stop being the same number.
+		Dropped:    b.dropped.Load() + medialink.InnerDrops(b.src) + uint64(st.BusyDrops),
+		RateCapped: medialink.InnerRateCapped(b.src),
 		// Vendor-portability + degrade visibility (never a silent downgrade).
 		DegradeReason:  b.degradeReason(),
 		Drive:          st.Drive,

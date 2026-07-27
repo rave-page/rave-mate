@@ -33,23 +33,37 @@ func TestSpoutSinkReportsDrops(t *testing.T) {
 	if got := s.PipeStats().Dropped; got != 2 {
 		t.Fatalf("sink reports %d drops, want 2", got)
 	}
+	// A sink drop is real LOSS: it must never be attributed to rate limiting.
+	if got := s.PipeStats().RateCapped; got != 0 {
+		t.Fatalf("sink reports %d rate-capped, want 0 - those frames were lost, not throttled", got)
+	}
 	if got := medialink.InnerDrops(s); got != 2 {
 		t.Fatalf("InnerDrops(sink) = %d, want 2 (the decode wrapper must see it)", got)
 	}
 	if got := medialink.InnerDrops(fs); got != 0 {
 		t.Fatalf("InnerDrops on a non-reporter = %d, want 0", got)
 	}
+	if got := medialink.InnerRateCapped(fs); got != 0 {
+		t.Fatalf("InnerRateCapped on a non-reporter = %d, want 0", got)
+	}
 }
 
-// TestSpoutSourceReportsFPSCapDrops: the per-route fps cap drops frames before encode; that count
-// is the difference between "the sender is slow" and "we are throwing its frames away".
+// TestSpoutSourceReportsFPSCapDrops: the per-route fps cap discards frames before encode. That is
+// DELIBERATE rate limiting, so it must arrive at the reporter tagged as such - summed into a bare
+// "dropped" it reads as catastrophic loss on a route that is behaving exactly as configured.
 func TestSpoutSourceReportsFPSCapDrops(t *testing.T) {
 	s := &spoutSource{name: "cam"}
 	if got := s.PipeStats().Dropped; got != 0 {
 		t.Fatalf("fresh source reports %d drops", got)
 	}
-	s.dropped.Add(3)
+	s.capped.Add(3)
 	if got := medialink.InnerDrops(s); got != 3 {
 		t.Fatalf("InnerDrops(source) = %d, want 3", got)
+	}
+	if got := medialink.InnerRateCapped(s); got != 3 {
+		t.Fatalf("InnerRateCapped(source) = %d, want 3 - the fps cap must be attributable", got)
+	}
+	if got := s.PipeStats().RealDrops(); got != 0 {
+		t.Fatalf("RealDrops = %d, want 0: every one of those frames was thrown away on purpose", got)
 	}
 }
