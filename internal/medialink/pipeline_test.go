@@ -234,3 +234,53 @@ func TestVideoRouteRawWithoutCaps(t *testing.T) {
 		t.Fatal("raw video route missing JB stats")
 	}
 }
+
+// TestNoPictureContentThreshold pins the content oracle's verdict against the MEASURED numbers it
+// was derived from, so a future tweak of AUNoiseFloorBytes has to argue with the field data:
+// zigmedia inc-3 M3 measured a STATIC 720p sender at 49 B/AU and moving content at 184; the field's
+// black 4K30 route sat at 255 B/frame where real content would be ~83,000; a healthy webcam route
+// carried 3,169.
+func TestNoPictureContentThreshold(t *testing.T) {
+	cases := []struct {
+		name      string
+		perFrame  float64
+		wantEmpty bool
+	}{
+		{"inc-3 M3 static 720p sender", 49, true},
+		{"inc-3 M3 moving 720p content", 184, true},
+		{"the field's black 4K30 route", 255, true},
+		{"a healthy webcam route", 3169, false},
+		{"real 4K30 content on a 20 Mbps budget", 83000, false},
+	}
+	for _, c := range cases {
+		p := PipelineStats{AUCount: 900, AUBytesPerFrame: c.perFrame}
+		if got := p.NoPictureContent(); got != c.wantEmpty {
+			t.Errorf("%s (%.0f B/frame): NoPictureContent=%v want %v", c.name, c.perFrame, got, c.wantEmpty)
+		}
+	}
+	// No AUs at all is not a verdict: a route that has not started must not be accused.
+	if (PipelineStats{AUBytesPerFrame: 100}).NoPictureContent() {
+		t.Error("a route with no AUs was judged")
+	}
+	// Nor is a window that reported nothing (the sliding window needs >= 1 s).
+	if (PipelineStats{AUCount: 900}).NoPictureContent() {
+		t.Error("an unmeasured window was judged")
+	}
+}
+
+// TestInnerPublishedRidesTheChain: the publishing sink is always the INNERMOST stage, so without
+// this the one reporter the router asks can never say whether anything reached the Spout sender -
+// which is the failure spoutSink.Write answers `nil` to.
+func TestInnerPublishedRidesTheChain(t *testing.T) {
+	f, b := InnerPublished(stubReporter{PipelineStats{PubFrames: 42, PubBytes: 4200}})
+	if f != 42 || b != 4200 {
+		t.Fatalf("InnerPublished = %d frames %d bytes", f, b)
+	}
+	if f, b := InnerPublished(struct{}{}); f != 0 || b != 0 {
+		t.Fatalf("a non-reporter yielded %d/%d", f, b)
+	}
+}
+
+type stubReporter struct{ st PipelineStats }
+
+func (s stubReporter) PipeStats() PipelineStats { return s.st }

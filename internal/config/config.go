@@ -398,16 +398,40 @@ type MediaLinkFeature struct {
 	Subprocess *bool `json:"subprocess,omitempty"`
 	// ZigCapture routes a Spout source's pixels to the native encoder child as a GPU
 	// SHARED-TEXTURE HANDLE instead of a host readback: no GPU→CPU copy, no pooled frame
-	// buffers, no SHM frame slot (66.4 → 4.0 MB of shared VA per 4K session). Tri-state,
-	// default OFF (nil = off) until the soak signs it off; the readback path stays as the
-	// fallback and the parity reference. Env RAVE_MATE_ZIGMEDIA_CAPTURE=1|0 overrides.
+	// buffers, no SHM frame slot (66.4 → 4.0 MB of shared VA per 4K session).
+	//
+	// Tri-state, DEFAULT ON since zigmedia increment 5 (nil = on); an explicit false keeps the
+	// readback, which stays as the fallback and as the parity oracle every zero-copy gate is
+	// measured against. Env RAVE_MATE_ZIGMEDIA_CAPTURE=1|0 overrides.
+	//
+	// Why the default flipped: the path is decided PER SOURCE (a webcam has no shared texture and
+	// silently keeps the readback), every rung of the fallback ladder carries real pixels and logs
+	// its reason once, and the previously-unexecuted capture branches - IDXGIKeyedMutex,
+	// TYPELESS/exotic formats, a restarted sender's changed handle - are now gated by execution on
+	// hardware with the decoded PICTURE asserted, not by "no error". The readback also spent the
+	// entire life of the vendored SpoutLibrary header/DLL pairing returning BLACK frames
+	// (ReceiveImage dispatched to ReceiveTexture), while this path reads real pixels through
+	// GetSenderInfo alone - the one SDK call proven to align.
+	//
+	// Still open at the flip, and the reason a 2-PC pass is still wanted: the wire has never been
+	// driven with this on, no 7-day soak has run, and the sender-PC pointer-lag question (§13.1)
+	// needs a real sending app. Containment: pacing never polls faster than the negotiated fps and
+	// mutex acquires are bounded 1..4 ms - and the readback path acquires the SAME named mutex at
+	// the shared capture's rate, so this path contends no harder than the one it replaces.
 	ZigCapture *bool `json:"zigCapture,omitempty"`
 	// ZigDecode is ZigCapture's receive-side mirror: the native child decodes the incoming AUs
 	// and renders them straight into the local video-share sender's GPU texture, instead of
 	// ffmpeg pushing 33 MB raw frames per 4K frame back up a stdout pipe and Spout uploading them
-	// again. Tri-state, default OFF (nil = off) until the soak signs it off; the ffmpeg decode
-	// path stays as the fallback and the parity reference.
-	// Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
+	// again. Tri-state, default OFF (nil = off); the ffmpeg decode path stays the default and the
+	// parity reference. Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
+	//
+	// Deliberately NOT flipped with ZigCapture in increment 5, and this is the list to close:
+	// no real end-to-end route (peer → jitterbuf → mfDecoder) has ever been driven - the live gate
+	// feeds ProcDecSession directly; no 4K60 receive soak; no HEVC bitstream has been decoded; no
+	// TRUE hardware decoder MFT exists on the rig that verified it (the MS D3D11-aware software MFT
+	// carries the passing run); and design §10's "live-verify against OBS's Spout input and
+	// Resolume" is discharged only as far as an INDEPENDENT PROCESS with its own D3D11 device
+	// reading the published texture correctly, which is the mechanism OBS uses but is not OBS.
 	ZigDecode *bool `json:"zigDecode,omitempty"`
 	// ZigAffinity lets a zero-copy session be RE-PLACED on the adapter that actually owns the
 	// sender's shared texture instead of downgrading to the readback path (risk R7: a sender
@@ -415,11 +439,23 @@ type MediaLinkFeature struct {
 	// Only ever applies when the encode device is NOT pinned by policy - "never silently move
 	// adapters" - and every move logs. Tri-state, default OFF.
 	// Env RAVE_MATE_ZIGMEDIA_AFFINITY=1|0 overrides.
+	//
+	// Deliberately NOT flipped with ZigCapture: the move is live-verified only between two
+	// IDENTICAL GPUs (2x RTX 3060, inc-3 M4), so a heterogeneous rig - iGPU + dGPU, where the
+	// re-placed adapter may have a much worse encoder or none - is unexercised, and the guard for
+	// that case is unit-tested rather than lived. Leaving it off costs a VISIBLE downgrade to a
+	// working readback (one warn, a counted downgrade, "downgrades N" on the route panel), which is
+	// the honest trade; the warn names this key so an operator on a multi-GPU box can turn it on.
 	ZigAffinity *bool `json:"zigAffinity,omitempty"`
 }
 
 // ZeroCopyCapture reports whether zero-copy Spout→encoder capture is enabled. Env
-// RAVE_MATE_ZIGMEDIA_CAPTURE wins (soak + tests), then the config key, else OFF.
+// RAVE_MATE_ZIGMEDIA_CAPTURE wins (soak + tests), then the config key, else ON (zigmedia inc 5).
+//
+// Only an EXPLICIT false opts out. The key is `omitempty` on a *bool, so a pre-flip config carries
+// either true (someone opted in) or nothing at all - the same reasoning MediaSubprocess records:
+// nobody can be silently pinned to the old path by a stale config, because the old path was never
+// persisted as a value.
 func (m MediaLinkFeature) ZeroCopyCapture() bool {
 	switch os.Getenv("RAVE_MATE_ZIGMEDIA_CAPTURE") {
 	case "1", "true":
@@ -427,7 +463,7 @@ func (m MediaLinkFeature) ZeroCopyCapture() bool {
 	case "0", "false":
 		return false
 	}
-	return m.ZigCapture != nil && *m.ZigCapture
+	return m.ZigCapture == nil || *m.ZigCapture
 }
 
 // SetZeroCopyCapture sets the zero-copy capture opt-in EXPLICITLY (single write seam).

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -82,13 +83,19 @@ type mfBridge struct {
 	adapterName string
 }
 
-// ZeroCopyCapture gates the zigmedia inc-1 path: a Spout source's pixels reach the encoder child
-// as a GPU shared-texture handle instead of a host readback. Package seam (same shape as
-// mfenc.Warnf) - the daemon and the media child both point it at their live config. Default OFF.
+// ZeroCopyCapture gates the zigmedia path: a Spout source's pixels reach the encoder child as a GPU
+// shared-texture handle instead of a host readback. Package seam (same shape as mfenc.Warnf).
+//
+// The PRODUCT default lives in config.MediaLinkFeature.ZeroCopyCapture and is ON since increment 5.
+// This fallback stays false because an UNWIRED process must not assume a capability it was never
+// told about; both production wiring sites point it at the live config unconditionally
+// (app.go and featurehost/feat_media.go). A third construction site must wire it too, or the
+// default silently does not apply there.
 var ZeroCopyCapture = func() bool { return false }
 
 // ZeroCopyAffinity gates re-placing a zero-copy session on the adapter that owns the sender's
-// texture (zigmedia inc 3, risk R7). Package seam, default OFF.
+// texture (zigmedia inc 3, risk R7). Package seam; the product default is OFF - the re-place is
+// live-verified only between two identical GPUs (see config.ZigAffinity).
 var ZeroCopyAffinity = func() bool { return false }
 
 // newMFBridge builds the native pipeline for spec; error = caller falls back to ffmpeg.
@@ -141,7 +148,7 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		// Same child, same geometry, reopened on the readback path. ONE warn per route so a rig
 		// that always downgrades is visible instead of silently slow.
 		log.Warn(source, "zero-copy capture refused - reopening this route on the readback path",
-			map[string]any{"err": err.Error(), "sender": opts.Spout.Name})
+			map[string]any{"err": err.Error(), "sender": opts.Spout.Name, "hint": affinityHint(err)})
 		opts.Spout, zc = nil, false
 		downgrades++
 		enc, err = mfenc.OpenProcSessionOpts(opts)
@@ -383,6 +390,25 @@ func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink
 	}}
 	opts.ZeroCopyAdapters = affinityCandidates(spec)
 	return zcVerdict{request: true, applicable: true}
+}
+
+// affinityHint turns the one refusal an operator can actually fix into an instruction. `open_shared`
+// on a multi-adapter host is risk R7 - the sender's texture lives on the other GPU - and
+// mediaLink.zigAffinity resolves it, but that key is default OFF because the re-place is only
+// live-verified between two identical GPUs. Without this hint, leaving it off is a silent miss on
+// exactly the rigs that need it.
+func affinityHint(err error) string {
+	if err == nil || !strings.Contains(err.Error(), "open_shared") {
+		return ""
+	}
+	if len(encoderscan.Adapters()) < 2 {
+		return ""
+	}
+	if ZeroCopyAffinity() {
+		return "adapter affinity is already enabled and still could not open the sender's texture"
+	}
+	return "this host has more than one GPU and the sender's texture is probably on the other one - " +
+		"set mediaLink.zigAffinity (or RAVE_MATE_ZIGMEDIA_AFFINITY=1) to re-place the session there"
 }
 
 // affinityCandidates lists the adapters a zero-copy session may be re-placed on (R7). EMPTY unless

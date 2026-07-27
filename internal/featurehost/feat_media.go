@@ -73,12 +73,12 @@ func (f *mediaFeature) Init(params json.RawMessage, rt *Runtime) error {
 	// Live media config (the daemon pushes updates into f.mediaCfg), so the sender-side codec
 	// preference / encoder pin / device policy behave the same in the isolated child as in-proc.
 	liveCfg := func() config.MediaLinkFeature { f.mu.Lock(); defer f.mu.Unlock(); return f.mediaCfg }
-	// zigmedia inc 1: gate the zero-copy Spout->encoder capture path (default OFF). Same live
-	// config as the daemon, so the isolated child behaves identically.
+	// zigmedia: the zero-copy Spout->encoder capture path, DEFAULT ON since inc 5. Same live config
+	// as the daemon, so the isolated child behaves identically.
 	mediapipe.ZeroCopyCapture = func() bool { return liveCfg().ZeroCopyCapture() }
-	// zigmedia inc 2: gate native GPU-resident decode+publish (default OFF).
+	// zigmedia inc 2: native GPU-resident decode+publish. Still default OFF - see config.ZigDecode.
 	mediapipe.ZeroCopyDecode = func() bool { return liveCfg().ZeroCopyDecode() }
-	// zigmedia inc 3: gate adapter-affinity re-placement of a zero-copy session (default OFF).
+	// zigmedia inc 3: adapter-affinity re-placement. Still default OFF - see config.ZigAffinity.
 	mediapipe.ZeroCopyAffinity = func() bool { return liveCfg().ZeroCopyAffinity() }
 	devSel := encoderscan.NewDeviceSelector(func() (string, string) { return liveCfg().DevicePref() }, nil)
 	f.router = medialink.New(medialink.Options{
