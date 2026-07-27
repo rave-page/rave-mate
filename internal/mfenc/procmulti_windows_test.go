@@ -30,12 +30,25 @@ type sessionRun struct {
 	drive    string
 	software bool
 	degrade  string
+	// The child's own verdict on why frames did not become AUs. Without these, "aus=0 err=nil"
+	// is unattributable - which is exactly how a zero-output software tier looked like slowness.
+	busyDrops uint32
+	encFails  uint32
+	queueDep  int
 }
 
 // runConcurrent opens n sessions on the SAME child, feeds each `frames` frames of distinct moving
 // content, and reports each one's bitstream. Sessions run in parallel goroutines, which is the
 // point: the field failure needs two live sessions at once, not two in sequence.
 func runConcurrent(t *testing.T, geoms [][2]int, frames int) []sessionRun {
+	return runConcurrentTier(t, geoms, frames, false)
+}
+
+// runConcurrentTier is runConcurrent with an explicit tier expectation. requireHW=true SKIPS (with
+// a reason) when external GPU load has pushed us onto the software tier: a hardware gate that
+// silently re-aims at software either fails on timing or asserts the wrong thing. Both are worse
+// than an honest skip.
+func runConcurrentTier(t *testing.T, geoms [][2]int, frames int, requireHW bool) []sessionRun {
 	t.Helper()
 	out := make([]sessionRun, len(geoms))
 	sessions := make([]*ProcSession, len(geoms))
@@ -56,6 +69,16 @@ func runConcurrent(t *testing.T, geoms [][2]int, frames int) []sessionRun {
 		out[i] = sessionRun{name: s.Name(), drive: s.Drive(), software: s.IsSoftware()}
 		t.Logf("session %d: %dx%d encoder=%q drive=%s software=%v degrade=%q",
 			i+1, w, h, s.Name(), s.Drive(), s.IsSoftware(), s.DegradeReason())
+		if requireHW && s.IsSoftware() {
+			for _, open := range sessions[:i+1] {
+				if open != nil {
+					open.Close()
+				}
+			}
+			t.Skipf("hardware H.264 MFT unavailable on this rig right now (something else holds the silicon) - "+
+				"session %d degraded to %q. This gate exercises the HARDWARE path; re-run on an idle rig. "+
+				"degrade=%q", i+1, s.Name(), s.DegradeReason())
+		}
 	}
 
 	collected := make([]chan sessionRun, len(sessions))
@@ -99,12 +122,20 @@ func runConcurrent(t *testing.T, geoms [][2]int, frames int) []sessionRun {
 	for i := range sessions {
 		out[i].encErr = <-fed[i]
 	}
-	time.Sleep(300 * time.Millisecond) // encoder tail
+	// Tier-aware tail. A fixed hardware-calibrated sleep is what turned a merely SLOW software
+	// tier into "produced zero AUs" on a loaded rig. Wait for output to actually arrive, with a
+	// generous ceiling, so an idle box stays fast and a busy one stays honest.
+	settleForTier(t, sessions, frames)
 	for i, s := range sessions {
 		out[i].degrade = s.DegradeReason()
 		if out[i].drive == "" {
 			out[i].drive = s.Drive()
 		}
+		// Sample the child's verdict BEFORE Close: busyDrops/encFails say whether frames were
+		// dropped for saturation, rejected outright, or accepted and swallowed. "aus=0 err=nil"
+		// with all three at zero is a DIFFERENT bug from "aus=0, busyDrops=45".
+		st := s.Stats()
+		out[i].busyDrops, out[i].encFails, out[i].queueDep = st.BusyDrops, st.EncFails, st.QueueDepth
 		s.Close()
 		r := <-collected[i]
 		out[i].aus, out[i].bytes, out[i].keyed = r.aus, r.bytes, r.keyed
@@ -135,12 +166,12 @@ func TestProcTwoSessionsOneChild(t *testing.T) {
 	requireEncExe(t)
 	// 720p + 480p: different geometry per session, so each session really needs its own video
 	// processor + NV12 pool while sharing the child's device.
-	runs := runConcurrent(t, [][2]int{{1280, 720}, {854, 480}}, 45)
+	runs := runConcurrentTier(t, [][2]int{{1280, 720}, {854, 480}}, 45, true)
 
 	alive, tail, fails := childAliveAfter(0)
 	for i, r := range runs {
-		t.Logf("session %d result: encoder=%q drive=%s sw=%v aus=%d bytes=%d keyframes=%d err=%v degrade=%q",
-			i+1, r.name, r.drive, r.software, r.aus, r.bytes, r.keyed, r.encErr, r.degrade)
+		t.Logf("session %d result: encoder=%q drive=%s sw=%v aus=%d bytes=%d keyframes=%d err=%v busyDrops=%d encFails=%d queueDepth=%d degrade=%q",
+			i+1, r.name, r.drive, r.software, r.aus, r.bytes, r.keyed, r.encErr, r.busyDrops, r.encFails, r.queueDep, r.degrade)
 	}
 	t.Logf("child alive=%v fails=%d", alive, fails)
 	for i, r := range runs {
@@ -148,7 +179,9 @@ func TestProcTwoSessionsOneChild(t *testing.T) {
 			t.Errorf("session %d: Encode failed with a sibling session live: %v (child stderr tail: %s)", i+1, r.encErr, tail)
 		}
 		if r.aus < 20 {
-			t.Errorf("session %d: aus=%d, want >=20 - a session starved while a sibling was live", i+1, r.aus)
+			t.Errorf("session %d (%s tier, %s drive): aus=%d bytes=%d busyDrops=%d encFails=%d queueDepth=%d - a session starved while a sibling was live. "+
+				"aus=0 with busyDrops=0 AND encFails=0 means frames were ACCEPTED and silently swallowed, which is a bug, not slowness.",
+				i+1, tierName(r.software), r.drive, r.aus, r.bytes, r.busyDrops, r.encFails, r.queueDep)
 		}
 		if r.keyed == 0 {
 			t.Errorf("session %d: no keyframe at all", i+1)
@@ -337,4 +370,35 @@ func resetChildren(t *testing.T) {
 		drop()
 		ResetPoison()
 	})
+}
+
+// settleForTier waits until every session has delivered output or a tier-appropriate budget
+// expires. The point is NOT to paper over slowness: the caller still asserts AU counts and
+// bytes-per-frame. It removes only the false negative where a correct-but-slow rung is judged by a
+// budget calibrated on hardware silicon.
+func settleForTier(t *testing.T, sessions []*ProcSession, frames int) {
+	t.Helper()
+	budget := 300 * time.Millisecond
+	for _, s := range sessions {
+		if s.IsSoftware() {
+			// Software H.264 at 720p runs ~10-40 ms/frame per session on a contended CPU, and the
+			// sessions share one device lock for their GPU readback.
+			budget = time.Duration(frames)*40*time.Millisecond + 2*time.Second
+			break
+		}
+	}
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		all := true
+		for _, s := range sessions {
+			if st := s.Stats(); st.QueueDepth > 0 {
+				all = false
+				break
+			}
+		}
+		if all {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

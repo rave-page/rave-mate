@@ -1256,33 +1256,10 @@ pub const Enc = struct {
     /// open builds one encode pipeline. zerocopy = the pixels arrive as a foreign shared
     /// texture (cap.zig owns the VP input view), so NO own input texture and no swizzle
     /// scratch are created - that is where the 33 MB VRAM + the host frame plane go.
-    /// sw_req = the PARENT asked for the software tier on this session (its per-(adapter,encoder)
-    /// failure ledger poisoned the hardware MFT here). Per-session, unlike the env policy: one
-    /// poisoned adapter must not force software onto every other route in the child.
-    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool, sw_req: bool) OpenErr!*Enc {
-        const e = gpa.create(Enc) catch return error.OpenFailed;
-        e.* = .{
-            .gpa = gpa,
-            .in_w = in_w,
-            .in_h = in_h,
-            .out_w = out_w,
-            .out_h = out_h,
-            .fps_n = fps_n,
-            .fps_d = @max(fps_d, 1),
-            .dur100 = @intFromFloat(10_000_000.0 * @as(f64, @floatFromInt(@max(fps_d, 1))) / @as(f64, @floatFromInt(fps_n))),
-            .zero_copy = zerocopy,
-        };
-        errdefer gpa.destroy(e);
-        if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0) return e.setErr("args", E_FAIL);
-        e.st(.mfstartup);
-        trace("MFStartup", .{});
-        var hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
-        if (failed(hr)) return e.setErr("MFStartup", hr);
-
-        const allow_sw = sw_policy != .off;
-        const force_sw = sw_policy == .force or (sw_req and allow_sw);
-        try e.acquireDevice(adapter_luid, allow_sw);
-        try e.createEnumerator();
+    // configureEncoder binds a tier and configures the MFT end to end (types, rate control,
+    // stream info, drive mode). Separated from open() so the SOFTWARE tier can be retried when a
+    // hardware MFT binds but cannot be configured - see the call site.
+    fn configureEncoder(e: *Enc, out_w: i32, out_h: i32, fps_n: i32, kbps_in: i32, gop: i32, allow_sw: bool, force_sw: bool) OpenErr!void {
         try e.bindEncoder(vendorTag(e.vendor), allow_sw, force_sw);
 
         // output type: H.264 CBR Main + EXPLICIT level (4K60 = 5.2)
@@ -1293,7 +1270,7 @@ pub const Enc = struct {
         attrSetU32(out_mt, &MF_MT_MPEG2_LEVEL, h264LevelFor(out_w, out_h, fps_n, e.fps_d));
         e.st(.set_output_type);
         trace("enc SetOutputType", .{});
-        hr = e.enc.v.SetOutputType(@ptrCast(e.enc), 0, out_mt, 0);
+        var hr = e.enc.v.SetOutputType(@ptrCast(e.enc), 0, out_mt, 0);
         release(out_mt);
         if (failed(hr)) return e.setErr("enc SetOutputType", hr);
 
@@ -1385,6 +1362,71 @@ pub const Enc = struct {
             e.enc_out_size,
             e.sw,
         });
+    }
+
+    // releaseEncoder undoes a partial encoder bind so another tier can be tried on the SAME
+    // device + video processor. Mirrors close()'s MFT half, minus the pool and the device.
+    fn releaseEncoder(e: *Enc) void {
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_FLUSH, 0);
+        if (!e.sw) _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_SET_D3D_MANAGER, 0);
+        if (e.capi) |c| {
+            release(c);
+            e.capi = null;
+        }
+        if (e.evgen) |ev| {
+            release(ev);
+            e.evgen = null;
+        }
+        release(e.enc);
+        if (e.act) |a| {
+            _ = a.v.ShutdownObject(@ptrCast(a));
+            release(a);
+            e.act = null;
+        }
+        e.is_async = false;
+        e.enc_provides = false;
+        e.enc_out_size = 0;
+        e.name_len = 0;
+    }
+
+    /// sw_req = the PARENT asked for the software tier on this session (its per-(adapter,encoder)
+    /// failure ledger poisoned the hardware MFT here). Per-session, unlike the env policy: one
+    /// poisoned adapter must not force software onto every other route in the child.
+    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool, sw_req: bool) OpenErr!*Enc {
+        const e = gpa.create(Enc) catch return error.OpenFailed;
+        e.* = .{
+            .gpa = gpa,
+            .in_w = in_w,
+            .in_h = in_h,
+            .out_w = out_w,
+            .out_h = out_h,
+            .fps_n = fps_n,
+            .fps_d = @max(fps_d, 1),
+            .dur100 = @intFromFloat(10_000_000.0 * @as(f64, @floatFromInt(@max(fps_d, 1))) / @as(f64, @floatFromInt(fps_n))),
+            .zero_copy = zerocopy,
+        };
+        errdefer gpa.destroy(e);
+        if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0) return e.setErr("args", E_FAIL);
+        e.st(.mfstartup);
+        trace("MFStartup", .{});
+        var hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+        if (failed(hr)) return e.setErr("MFStartup", hr);
+
+        const allow_sw = sw_policy != .off;
+        const force_sw = sw_policy == .force or (sw_req and allow_sw);
+        try e.acquireDevice(adapter_luid, allow_sw);
+        try e.createEnumerator();
+        // The whole encoder CONFIGURATION is retryable, not just the bind. A hardware MFT that
+        // BINDS and then refuses to configure (NVENC/AMF return MF_E_UNSUPPORTED_D3D_TYPE from
+        // SetOutputType once the silicon has no encode session left) used to fail the open
+        // outright - the software rung was only reachable when ENUMERATION found nothing, so a
+        // merely BUSY GPU took the whole route down with the last rung never tried.
+        e.configureEncoder(out_w, out_h, fps_n, kbps_in, gop, allow_sw, force_sw) catch |err| {
+            if (e.sw or force_sw or !allow_sw) return err; // already software: nothing left below
+            trace("hardware encoder bound but could not be configured ({s}) - retrying on the software tier", .{lastOpenErr()});
+            e.releaseEncoder();
+            try e.configureEncoder(out_w, out_h, fps_n, kbps_in, gop, true, true);
+        };
 
         // VP + textures
         e.st(.create_vp);

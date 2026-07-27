@@ -94,10 +94,13 @@ func TestProcSoftwareTierTwoSessions(t *testing.T) {
 		s.Close()
 	}
 	resetChildren(t)
-	runs := runConcurrent(t, [][2]int{{640, 360}, {320, 240}}, 30)
+	// EXACTLY the geometry + frame count that failed in the field merge run (720p + 480p, 45
+	// frames). Small geometries hid the defect: the software encoder's cost scales with pixels.
+	runs := runConcurrent(t, [][2]int{{1280, 720}, {854, 480}}, 45)
 	alive, tail, _ := childAliveAfter(0)
 	for i, r := range runs {
-		t.Logf("sw session %d: encoder=%q sw=%v drive=%s aus=%d bytes=%d err=%v", i+1, r.name, r.software, r.drive, r.aus, r.bytes, r.encErr)
+		t.Logf("sw session %d: encoder=%q sw=%v drive=%s aus=%d bytes=%d busyDrops=%d encFails=%d queueDepth=%d err=%v",
+			i+1, r.name, r.software, r.drive, r.aus, r.bytes, r.busyDrops, r.encFails, r.queueDep, r.encErr)
 		if r.encErr != nil {
 			t.Errorf("software tier session %d of 2: %v", i+1, r.encErr)
 		}
@@ -105,7 +108,9 @@ func TestProcSoftwareTierTwoSessions(t *testing.T) {
 			t.Errorf("software tier session %d reported hardware (%q)", i+1, r.name)
 		}
 		if r.aus < 10 {
-			t.Errorf("software tier session %d: aus=%d, want >=10", i+1, r.aus)
+			t.Errorf("software tier session %d: aus=%d bytes=%d busyDrops=%d encFails=%d - the LAST-RESORT rung produced (almost) nothing. "+
+				"With busyDrops=0 and encFails=0 the frames were accepted and swallowed silently, which leaves the degrade ladder nowhere to go.",
+				i+1, r.aus, r.bytes, r.busyDrops, r.encFails)
 		}
 	}
 	if !alive {

@@ -19,6 +19,32 @@ func requireEncExe(t *testing.T) {
 	}
 }
 
+// awaitAUs waits until n reaches want, or a TIER-AWARE budget expires. Fixed sleeps calibrated on
+// hardware silicon were what turned a correct-but-slow software tier into "no AU" on a rig whose
+// GPU was busy - three separate gates went red for that reason. Returns the observed count.
+func awaitAUs(s *ProcSession, n *int, want int, base time.Duration) int {
+	budget := base
+	if s.IsSoftware() {
+		budget = base*4 + 3*time.Second // software encode + a shared device lock for the readback
+	}
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if *n >= want {
+			return *n
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return *n
+}
+
+// tierOf labels a session's tier for a failure message.
+func tierOf(s *ProcSession) string {
+	if s.IsSoftware() {
+		return "software-mf (hardware MFT was unavailable - external GPU load?)"
+	}
+	return "hardware"
+}
+
 // drainSession collects AUs until the channel closes.
 func drainSession(s *ProcSession) (aus *int, done chan struct{}) {
 	n := new(int)
@@ -270,11 +296,12 @@ func TestProcOpenDuringRespawnBackoff(t *testing.T) {
 			t.Fatalf("B Encode %d: %v", i, err)
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
+	awaitAUs(b, nB, 5, 200*time.Millisecond)
+	tierB, stB := tierOf(b), b.Stats()
 	b.Close()
 	<-doneB
 	if *nB < 5 {
-		t.Fatalf("B aus=%d want >=5", *nB)
+		t.Fatalf("B aus=%d want >=5 on the %s tier (busyDrops=%d encFails=%d)", *nB, tierB, stB.BusyDrops, stB.EncFails)
 	}
 	a.Close()
 	<-doneA
@@ -298,11 +325,13 @@ func TestProcSessionOpenCloseCycles(t *testing.T) {
 		if err := s.Encode(frame, 0); err != nil {
 			t.Fatalf("cycle %d encode: %v", i, err)
 		}
-		time.Sleep(50 * time.Millisecond)
+		awaitAUs(s, n, 1, 50*time.Millisecond)
+		tier, st := tierOf(s), s.Stats()
 		s.Close()
 		<-done
 		if *n < 1 {
-			t.Fatalf("cycle %d: no AU", i)
+			t.Fatalf("cycle %d: no AU on the %s tier (busyDrops=%d encFails=%d) - a tier that accepts a frame and emits nothing without erroring is a bug, not slowness",
+				i, tier, st.BusyDrops, st.EncFails)
 		}
 	}
 }
