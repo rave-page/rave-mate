@@ -69,20 +69,21 @@ type Manager struct {
 
 	startMu sync.Mutex // serializes StartCamera/StopCamera (concurrent bus cmds must not leak a capture)
 
-	mu          sync.Mutex
-	ctx         context.Context
-	running     bool
-	cur         capDesc
-	stopCap     func()
-	capStat     func() capStats
-	localSender string // active local Spout sender name ("" = Spout unavailable; capture still runs)
-	devices     []DeviceInfo
-	props       []PropState
-	lastErr     string
-	remotes     map[string]remoteEntry
-	unsub       []func()
-	taps        map[uint64]chan *medialink.Frame // network-route fan-out (P4)
-	tapSeq      uint64
+	mu           sync.Mutex
+	ctx          context.Context
+	running      bool
+	cur          capDesc
+	stopCap      func()
+	capStat      func() capStats
+	refBugLogged bool   // one loud report per manager for a release-past-zero (must never happen)
+	localSender  string // active local Spout sender name ("" = Spout unavailable; capture still runs)
+	devices      []DeviceInfo
+	props        []PropState
+	lastErr      string
+	remotes      map[string]remoteEntry
+	unsub        []func()
+	taps         map[uint64]chan *medialink.Frame // network-route fan-out (P4)
+	tapSeq       uint64
 }
 
 // New builds the manager (does nothing until Start).
@@ -640,8 +641,16 @@ func (m *Manager) status() Status {
 	} else {
 		st.Sender = m.localSender // "" when Spout is unavailable (capture still runs for the route)
 		if m.capStat != nil {
-			if cs := m.capStat(); cs.LastErr != "" && st.Err == "" {
+			cs := m.capStat()
+			if cs.LastErr != "" && st.Err == "" {
 				st.Err = cs.LastErr
+			}
+			st.Frames, st.Dropped, st.PoolMiss = cs.Frames, cs.Dropped, cs.PoolMiss
+			if cs.RefBugs > 0 && !m.refBugLogged {
+				m.refBugLogged = true
+				// Must never happen: it means one pixel buffer had two owners.
+				m.log.Error(source, "capture buffer released past zero - a frame buffer had two owners",
+					map[string]any{"events": cs.RefBugs})
 			}
 		}
 	}

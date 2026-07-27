@@ -255,6 +255,35 @@ Frame-new gating is also not reachable: this SpoutLibrary pairing returns junk f
 `GetSenderFrame` through a metadata-only receiver (the same late-vtable skew already documented
 for `GetSenderWidth`/`GetSenderHeight`).
 
+### Produce paths (zigmedia increment 4)
+
+The produce side (webcam, deckcard, VRSL) publishes INTO Spout, so increment 1 already covers a
+route CONSUMING it. Increment 4 was about how those pixels get there, and it ends up being two
+defect fixes plus a measured refusal - details in `.devnotes/ZIGMEDIA_INC4_STATUS.md`.
+
+- **Capture buffers are pooled + refcounted.** `webcam/framepipe` allocated a fresh full frame per
+  capture (~250 MB/s of garbage at 1080p30). Buffers now come from videoshare's bounded pool via
+  `videoshare.PixRef`, because one frame fans out to the preview sink AND N taps that each drop
+  independently - the lifetime is a refcount, not a scope. At the pool ceiling the capture ALLOCATES
+  (counted as `PoolMiss`) rather than dropping every frame, so a leaked reference degrades the
+  optimisation instead of wedging a live camera.
+- **The send-path flip is row-wise.** `RAVE_SPOUT_FLIP != 0` was one 4-byte `memcpy` per PIXEL:
+  at 4K, vertical 11.33 → 2.16 ms/frame, horizontal 11.28 → 2.91 ms. `flip == 0` (default) costs no
+  host pass at all. Gated by a byte-for-byte comparison against the old algorithm
+  (`rave_spout_flip_rows`, 8 geometries × 4 modes) and, live, by `TestFlipLiveOrientation` - which is
+  also the first thing in this repo to establish what each `RAVE_SPOUT_FLIP` mode actually does.
+- **NOT built: a D3D11 publish path for the produce direction.** Two independent reasons. It is
+  unreachable as specified (SPOUTLIBRARY can only create a sender's texture via `SendImage`/
+  `SendTexture`, both of which need GL - which is why inc 2 publishes one zeroed frame to force the
+  texture), so GL cannot leave this path, only the per-frame upload could. And that upload is
+  already at hardware transfer speed: 0.70 ms at 720p, 0.98 ms at 1080p, 3.62 ms at 4K = 8.7 GB/s.
+  Replacing it with host→SHM + `UpdateSubresource` + `Blt` adds a host copy (~3.2 ms at 4K) or, with
+  the producer writing straight into SHM, ties - for the price of a third protocol direction.
+- **NOT done: the `rave-mate-media.exe` rename.** 59 references across 25 files including two CI
+  workflows and the NSIS installer, which cannot be verified from a dev box; zero functional gain.
+  If you pick it up: `encExePath()`'s beside-the-exe rung must accept BOTH names, or a self-updated
+  install (which replaces only `rave-mate.exe`) silently loses the native engine.
+
 Still open: 7-day soak before the flag defaults on, and the 2-PC pass (§13.1 of the design - the
 single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on a
 real rig).
