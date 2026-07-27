@@ -98,7 +98,7 @@ func TestSpout4KCaptureSoak(t *testing.T) {
 	}
 	defer rx.Close()
 
-	var got, peakLive, peakIdle int
+	var got, peakLive, peakIdle, blank int
 	done := time.After(time.Duration(secs) * time.Second)
 	report := time.NewTicker(5 * time.Second)
 	defer report.Stop()
@@ -111,6 +111,13 @@ func TestSpout4KCaptureSoak(t *testing.T) {
 			}
 			if n := len(f.Pix); n != 3840*2160*4 {
 				t.Fatalf("frame %d is %d bytes, want %d", got, n, 3840*2160*4)
+			}
+			// CONTENT check, not just framing: this soak counted frames happily for the whole time
+			// the receive path was delivering all-zero buffers (the black-frame P0). The publisher
+			// writes a gradient, so a mid-frame sample is non-zero on every real frame.
+			mid := (2160/2)*(3840*4) + (3840/2)*4
+			if f.Pix[mid] == 0 && f.Pix[mid+1] == 0 && f.Pix[mid+2] == 0 {
+				blank++
 			}
 			got++
 			time.Sleep(10 * time.Millisecond) // stand-in for the 4K encode submit
@@ -133,6 +140,10 @@ func TestSpout4KCaptureSoak(t *testing.T) {
 	if got == 0 {
 		t.Fatal("no frames received")
 	}
+	// A soak that counts blank frames is measuring plumbing, not video.
+	if blank*2 > got {
+		t.Fatalf("%d of %d frames were BLANK - the readback delivered no pixels", blank, got)
+	}
 	// The pool must PLATEAU: a few frames in flight, never a climb. Before the geometry
 	// guard this test's process reached 54 GB RSS and died.
 	if peakLive > poolMaxLiveBytes {
@@ -141,6 +152,6 @@ func TestSpout4KCaptureSoak(t *testing.T) {
 	if peakIdle > poolMaxIdleBytes {
 		t.Errorf("peak idle pool = %d B, over the cap %d", peakIdle, poolMaxIdleBytes)
 	}
-	t.Logf("soak: %d frames in %ds (%.1f fps) peakLive=%dMB peakIdle=%dMB",
-		got, secs, float64(got)/float64(secs), peakLive>>20, peakIdle>>20)
+	t.Logf("soak: %d frames in %ds (%.1f fps, %d blank) peakLive=%dMB peakIdle=%dMB",
+		got, secs, float64(got)/float64(secs), blank, peakLive>>20, peakIdle>>20)
 }

@@ -1,21 +1,21 @@
 package videoshare
 
-// frame.go - a sender's FRAME COUNTER, read metadata-only (zigmedia increment 3).
+// frame.go - a sender's frame counter: PERMANENTLY UNAVAILABLE on this SDK pairing.
 //
-// Spout bumps a sender's frame counter inside SendTexture/SendImage, so a counter that does not
-// move means the sender published nothing new. A zero-copy capture session paces BLIND (design §6)
-// and re-encodes whatever the texture currently holds, which on a static sender is a duplicate
-// frame; this is the cheap signal that tells the two apart. Reading it costs one shared-memory
-// read - no OpenGL context, no receiver binding, no pixel transfer - which is exactly why it does
-// not re-introduce the readback object the zero-copy path removed.
-
-// SenderFrame returns a sender's frame counter and its measured fps.
+// Increment 3 added this over SPOUTLIBRARY's GetSenderFrame and measured it returning constant junk
+// (a fixed negative number, with GetSenderFps reporting the MONITOR's refresh rate). The black-frame
+// P0 found the reason: the vendored SpoutLibrary.h and the shipped SpoutLibrary.dll disagree about
+// vtable slot order across a window covering the whole receiver block, so GetSenderFrame was never
+// actually being called. See .devnotes/SPOUT_RECV_BLACK_P0.md.
 //
-// ok=false = no backend / unknown sender. A frame counter < 0 means the SENDING app disabled frame
-// counting (Spout's SetFrameCount(false) / DisableFrameCount), i.e. the signal is unavailable and
-// every consumer must fail OPEN - treat every tick as new, never freeze a stream because a
-// counter is missing.
-func SenderFrame(name string) (frame int64, fps float64, ok bool) { return senderFrame(name) }
+// The implementation is gone rather than "fixed": nothing in that window can be trusted, and a
+// plausible-looking number is worse than no number. The declaration stays so callers compile and get
+// an honest "unavailable" instead of junk. Restoring it needs a header that MATCHES the DLL - a
+// supply-chain change (SUPPLY_CHAIN.md), not a code change.
 
-// FrameCountUsable reports whether a sender publishes a usable (non-negative, moving) counter.
+// SenderFrame reports a sender's frame counter. ok is ALWAYS false on this SDK pairing; consumers
+// must fail OPEN (treat every tick as new) rather than gate on a missing signal.
+func SenderFrame(string) (frame int64, fps float64, ok bool) { return 0, 0, false }
+
+// FrameCountUsable reports whether a sender publishes a usable (non-negative) counter.
 func FrameCountUsable(frame int64, ok bool) bool { return ok && frame >= 0 }

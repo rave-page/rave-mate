@@ -66,20 +66,16 @@ int rave_spout_sender_size(const char* name, unsigned int* w, unsigned int* h);
 int rave_spout_sender_share(const char* name, unsigned long long* share, unsigned int* fmt,
                            unsigned int* w, unsigned int* h);
 
-// rave_spout_sender_frame reads a sender's Spout FRAME COUNTER + fps without any OpenGL context,
-// receiver binding or pixel transfer: a metadata-only receiver (SetReceiverName + GetSenderFrame),
-// which is what zigmedia increment 3 needs to tell a NEW frame from a duplicate. Its own handle, so
-// setting a receiver name never disturbs the registry queries.
-// 1 = ok; 0 = no DLL / unknown sender. frame < 0 = the sender has frame counting disabled.
-int rave_spout_sender_frame(const char* name, long long* frame, double* fps);
-
 // One-shot registry scan: names = maxN slots of nameCap bytes (NUL-terminated), dims = 2 uints per
 // slot (w,h; 0 when the registry has no size). Returns the filled slot count, -1 without the DLL.
 // Replaces count + N name + N size calls (which each built and released a Spout object).
 int rave_spout_scan(char* names, int nameCap, int maxN, unsigned int* dims);
 
-// Receiver: bind h (from rave_spout_create, on its owning thread) to the named sender.
-void rave_spout_set_receiver(void* h, const char* name);
+// rave_spout_recv_create makes a RECEIVER context: a D3D11 device, no OpenGL, no window. The
+// receive path deliberately does NOT use SPOUTLIBRARY::ReceiveImage - see the long note in
+// spout_shim.cpp for the vtable-window mismatch that made it silently copy nothing.
+// NULL = no D3D11 device (caller reports the reason and stays idle).
+void* rave_spout_recv_create(void);
 
 // Poll one frame into pixels (cap bytes, RGBA). Returns:
 //   2 = sender (re)connected / dimensions changed - *w/*hgt set, pixels NOT written; resize + recall
@@ -90,7 +86,34 @@ void rave_spout_set_receiver(void* h, const char* name);
 // so the caller reallocates before the next call. cap is a defensive double-check.
 int rave_spout_recv(void* h, const char* name, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt);
 
-// Release the receiver binding + GL context + handle (owning thread).
+// rave_spout_sender_slots probes the SENDER-block vtable slots against ground truth (DIAGNOSTIC):
+// h must be a live sender of exactly w*h. Fills out[0..8] with IsInitialized, GetName (as a
+// truncated pointer value), GetWidth, GetHeight, GetFps, GetFrame, GetHandle, GetCPU, GetGLDX.
+// Used to locate where this header's slot order stops matching the shipped DLL's.
+void rave_spout_sender_slots(void* h, unsigned long long* out);
+
+// rave_spout_diag is one receive attempt's full observable state (DIAGNOSTIC).
+typedef struct {
+    int recv_ok;               // ReceiveImage return value
+    int updated;               // IsUpdated
+    int frame_new;             // IsFrameNew
+    int connected;             // IsConnected
+    unsigned int sw, sh;       // GetSenderWidth / GetSenderHeight
+    unsigned int sfmt;         // GetSenderFormat
+    int cpu;                   // GetSenderCPU  (sender is in CPU-share mode)
+    int gldx;                  // GetSenderGLDX (GL/DX interop available)
+    long long frame;           // GetSenderFrame
+    unsigned long long handle; // GetSenderHandle
+} rave_spout_diag;
+
+// rave_spout_recv_diag does ONE ReceiveImage and reports every flag the SDK exposes alongside it.
+// Exists because the receive path can report success + frame-new while never touching the caller's
+// buffer: the only way to tell "copied zeros" from "never written" is to canary the buffer and read
+// the flags from the same call. Test/diagnostic only.
+int rave_spout_recv_diag(void* h, const char* name, unsigned char* pixels, unsigned int cap,
+                         rave_spout_diag* out);
+
+// Release the receiver context (D3D11 device + opened textures + access mutex).
 void rave_spout_recv_release(void* h);
 
 #ifdef __cplusplus
