@@ -39,6 +39,32 @@ const (
 	decH      = 360
 )
 
+// decSenderName makes a PER-ATTEMPT unique sender name. A reused Spout sender name hands the next
+// reader the previous publisher's DEAD texture, which reads back blank with zero errors in every
+// counter - so a fixed name masks exactly the bug these gates test for (risk R1; the inc-4 bInvert
+// experiment "proved" a working code path publishes black twice before this was understood, and the
+// P0 receive-black work adopted per-attempt names for the same reason). These gates were still on a
+// fixed name, which is why their read-back oracle had been reported as "cannot see a picture".
+func decSenderName(suffix string) string {
+	return fmt.Sprintf("%s %s %d-%d", decSender, suffix, os.Getpid(), time.Now().UnixNano()%100000)
+}
+
+// publishRepeatedly publishes img the way a real sender does: continuously. ONE SendImage is not
+// visible to another process's D3D11 device (the GL/DX interop write is not flushed until further GL
+// work is submitted), which is the instrument bug that made increment 2 abandon its cross-process
+// read-back oracle and record the limitation as a product one.
+func publishRepeatedly(s interface {
+	Send(*image.NRGBA) error
+}, img *image.NRGBA) error {
+	for i := 0; i < 40; i++ {
+		if err := s.Send(img); err != nil {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
 // decPattern is the probe image: top half RED, bottom half BLUE, so a vertical flip and a
 // red/blue swizzle are both visible in ONE published frame.
 func decPattern() *image.NRGBA {
@@ -138,20 +164,27 @@ func TestDecodeLiveSession(t *testing.T) {
 
 	// 2. The DESTINATION sender: Go creates it (SPOUTLIBRARY has no CreateSender - one zeroed frame
 	//    forces the texture) and hands its handle to the child.
-	ss, err := videoshare.NewSharedSender(logbus.New(64), decSender, decW, decH)
+	sender := decSenderName("dest")
+	ss, err := videoshare.NewSharedSender(logbus.New(64), sender, decW, decH)
 	if err != nil {
 		t.Skipf("no GPU destination texture on this host: %v", err)
 	}
 	defer ss.Close()
-	t.Logf("destination sender %q: handle=%#x fmt=%d %dx%d", decSender, ss.Handle(), ss.Format(), decW, decH)
+	t.Logf("destination sender %q: handle=%#x fmt=%d %dx%d", sender, ss.Handle(), ss.Format(), decW, decH)
 
 	// 2b. POSITIVE CONTROL for the read-back oracle. Publish the probe through the ORDINARY frame
-	//     path and try to read it back: if that fails, the oracle cannot see a known-good picture,
-	//     so a black read-back later says nothing about the decode path and the band assertion must
-	//     not run. Validate the instrument before trusting it.
+	//     path and read it back: if that fails, the oracle cannot see a known-good picture, so a
+	//     black read-back later says nothing about the decode path and the band assertion must not
+	//     run. Validate the instrument before trusting it.
+	//
+	//     Publish CONTINUOUSLY, not once. A single SendImage is not visible to another process's
+	//     D3D11 device - the GL/DX interop write is not flushed until further GL work is submitted -
+	//     and a one-shot publish here is what made increment 2 record "Spout's own receive side
+	//     cannot see a foreign-device write on this rig" and abandon this gate. Every real sender
+	//     publishes continuously, so the product was never affected; only the instrument was.
 	oracleOK := false
-	if err := ss.Send(decPattern()); err == nil {
-		if b := grabBandsInChild(t); b != nil && b.TopR >= 128 && b.BottomB >= 128 {
+	if publishRepeatedly(ss, decPattern()) == nil {
+		if b := grabBandsNamed(t, sender); b != nil && b.TopR >= 128 && b.BottomB >= 128 {
 			oracleOK = true
 			t.Logf("read-back oracle validated on the frame path: top r=%d b=%d, bottom r=%d b=%d",
 				b.TopR, b.TopB, b.BottomR, b.BottomB)
@@ -163,7 +196,7 @@ func TestDecodeLiveSession(t *testing.T) {
 	// 3. The decode session.
 	d, err := OpenProcDecSession(ProcDecOpts{
 		LUID: 0, InW: decW, InH: decH, OutW: decW, OutH: decH, FPS: 30, KbpsHint: 4000,
-		Dest: &DecodeDest{Name: decSender, Resolve: func() (uint64, uint32, int, int, bool) {
+		Dest: &DecodeDest{Name: sender, Resolve: func() (uint64, uint32, int, int, bool) {
 			return ss.Handle(), ss.Format(), decW, decH, ss.Handle() != 0
 		}},
 	})
@@ -173,15 +206,16 @@ func TestDecodeLiveSession(t *testing.T) {
 	t.Logf("decoder: %q hardwareMFT=%v", d.Name(), d.IsHardware())
 
 	// 4. Feed the bitstream, keyframe first (a fresh decoder cannot use anything else).
+	// The interval-derived rates ride ratewin's sliding window, so the window must BRACKET the
+	// publishing: plant the first sample before the burst, read after >= ratewin.MinSpan. Priming
+	// after the burst would measure a window in which nothing happened - correctly reporting 0.
+	_ = d.Stats()
 	for i, au := range aus {
 		if err := d.Decode(au.Data, au.PTSNs, au.Keyframe); err != nil {
 			t.Fatalf("Decode %d: %v", i, err)
 		}
 		time.Sleep(5 * time.Millisecond) // the child paces itself; give it room to drain
 	}
-	// The interval-derived rates ride ratewin's sliding window: they need >= ratewin.MinSpan of
-	// OBSERVATION, not just two reads spaced by a fixed sleep.
-	_ = d.Stats() // plants the first window sample
 	time.Sleep(rateWindowSettle)
 	st := d.Stats()
 	t.Logf("decode live: decFrames=%d decFPS=%.1f busy=%.2fms inDropped=%d decDropped=%d "+
@@ -205,8 +239,10 @@ func TestDecodeLiveSession(t *testing.T) {
 	if st.DecBusyMs <= 0 || st.DecBusyMs > 50 {
 		t.Fatalf("decBusyMs=%.2f, want a plausible per-AU decode+publish cost", st.DecBusyMs)
 	}
-	if st.DecStaleMs > 1000 {
-		t.Fatalf("decStaleMs=%.0f right after publishing: the freshness oracle would false-positive", st.DecStaleMs)
+	// Freshness oracle: the last publish is rateWindowSettle old by the time we read (the rate
+	// window has to be given a span), so the bound is relative to that, not an absolute 1 s.
+	if maxStale := float64((rateWindowSettle + time.Second).Milliseconds()); st.DecStaleMs > maxStale {
+		t.Fatalf("decStaleMs=%.0f (> %.0f) after publishing: the freshness oracle would false-positive", st.DecStaleMs, maxStale)
 	}
 
 	// 5a. The child's own GPU read-back of the destination texture: row order + channel order.
@@ -219,7 +255,7 @@ func TestDecodeLiveSession(t *testing.T) {
 		d.Close()
 		return
 	}
-	bands := grabBandsInChild(t)
+	bands := grabBandsNamed(t, sender)
 	if bands == nil {
 		t.Fatal("the oracle saw the frame path but not the decode publish")
 	} else {
@@ -233,9 +269,6 @@ func TestDecodeLiveSession(t *testing.T) {
 	}
 	d.Close()
 }
-
-// grabBandsInChild re-execs this test binary in the grabber role and parses its report.
-func grabBandsInChild(t *testing.T) *bandSample { return grabBandsNamed(t, decSender) }
 
 // grabBandsNamed re-execs this test binary in the grabber role against name and parses its report.
 func grabBandsNamed(t *testing.T, name string) *bandSample {
@@ -306,27 +339,69 @@ func assertBitstreamBands(t *testing.T, aus []AU, w, h int) {
 	}
 }
 
-// TestDecodeLiveGrabOracle validates the READ-BACK ORACLE itself before it is trusted: create the
-// destination sender, publish nothing, and check the grabber sees the exact bytes the eager create
-// wrote. Without this, "published bands are black" cannot be told apart from "the grab is broken".
+// TestDecodeLiveGrabOracle validates the READ-BACK ORACLE itself before it is trusted, and - since
+// zigmedia inc 5 - DISCRIMINATES between the two things that can make it blank. Without both arms,
+// "published bands are black" cannot be told apart from "the grab is broken", which is the mistake
+// increment 2 made: it filed a real product bug as an instrument failure.
+//
+// Arm A publishes through a plain FrameSender, arm B through a SharedSender (the eagerly-created
+// destination the decoder child renders into). videoshare's own gates prove the readback delivers
+// real pixels for a sender published from ANOTHER process
+// (TestRecvContentCarriesPixels: top(255,0,0) bottom(0,0,255)), so if arm A is blank the asymmetry
+// is "publisher and reader are parent/child of each other"; if only arm B is blank it is
+// rave_spout_open_sender's texture that a foreign process cannot read.
 func TestDecodeLiveGrabOracle(t *testing.T) {
-	ss, err := videoshare.NewSharedSender(logbus.New(64), decSender+" oracle", decW, decH)
+	// Arm A: a PLAIN frame sender, the exact object videoshare's passing content gates use.
+	plainName := decSenderName("oracle-plain")
+	fs, err := videoshare.NewFrameSender(logbus.New(64), plainName)
+	if err != nil {
+		t.Skipf("no frame sender on this host: %v", err)
+	}
+	if err := publishRepeatedly(fs, decPattern()); err != nil {
+		fs.Close()
+		t.Fatalf("plain Send: %v", err)
+	}
+	plainBands := grabBandsNamed(t, plainName)
+	fs.Close()
+
+	// Arm B: the SharedSender the decode path actually publishes into.
+	name := decSenderName("oracle")
+	ss, err := videoshare.NewSharedSender(logbus.New(64), name, decW, decH)
 	if err != nil {
 		t.Skipf("no GPU destination texture on this host: %v", err)
 	}
 	defer ss.Close()
-	// Publish a known pattern through the ordinary frame path, then read it back.
-	if err := ss.Send(decPattern()); err != nil {
+	if err := publishRepeatedly(ss, decPattern()); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	bands := grabBandsNamed(t, decSender+" oracle")
-	if bands == nil {
-		t.Skip("read-back unavailable")
+	sharedBands := grabBandsNamed(t, name)
+
+	describe := func(b *bandSample) string {
+		if b == nil {
+			return "no frame read back"
+		}
+		return fmt.Sprintf("top r=%d b=%d bottom r=%d b=%d", b.TopR, b.TopB, b.BottomR, b.BottomB)
 	}
-	t.Logf("oracle bands: top r=%d b=%d, bottom r=%d b=%d", bands.TopR, bands.TopB, bands.BottomR, bands.BottomB)
-	if bands.TopR < 128 || bands.BottomB < 128 {
-		t.Fatalf("the read-back oracle cannot even see a frame-path publish (top r=%d, bottom b=%d) - it proves nothing about the decode path",
-			bands.TopR, bands.BottomB)
+	plainOK := plainBands != nil && plainBands.TopR >= 128 && plainBands.BottomB >= 128
+	sharedOK := sharedBands != nil && sharedBands.TopR >= 128 && sharedBands.BottomB >= 128
+	t.Logf("oracle arm A (FrameSender, same process as the reader's parent): %s -> ok=%v",
+		describe(plainBands), plainOK)
+	t.Logf("oracle arm B (SharedSender, the decode destination):            %s -> ok=%v",
+		describe(sharedBands), sharedOK)
+
+	switch {
+	case sharedOK:
+		return // the oracle works: the decode gate's band assertion is trustworthy
+	case !plainOK:
+		// Both blank while videoshare's cross-process gates pass: the limitation is the harness
+		// topology (a child reading a sender its own parent publishes), not the decode path.
+		t.Skipf("the read-back oracle is blank for a PLAIN sender too, while videoshare's " +
+			"cross-process content gates pass - a child cannot read a sender published by its own " +
+			"parent on this rig, so the published PICTURE cannot be verified from here")
+	default:
+		t.Fatalf("a plain sender reads back fine (%s) but the eagerly-created SharedSender does not (%s) "+
+			"- rave_spout_open_sender's texture is not what the registry advertises to other processes",
+			describe(plainBands), describe(sharedBands))
 	}
 }
 

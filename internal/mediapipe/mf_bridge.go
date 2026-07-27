@@ -123,8 +123,19 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 		FPS: fps, Kbps: kbps, Gop: gopFrames(fps)}
 	// Zero-copy request (zigmedia inc 1) needs ALL of: the flag, a source that really exposes a
 	// shared texture, a handle that matches the negotiated geometry, and a sender not already
-	// pinned to the readback path. Anything missing = today's frame path, byte for byte.
-	zc, downgrades := zeroCopyOpts(&opts, spec, src)
+	// pinned to the readback path. Anything missing = the readback frame path, byte for byte.
+	// Decided PER SOURCE (zcVerdict) - a webcam route and a Spout route in the same process take
+	// different paths, and neither is inferred from the flag alone.
+	v := zeroCopyOpts(&opts, spec, src)
+	zc, downgrades := v.request, 0
+	if !zc && v.applicable {
+		// A source that COULD have qualified did not: one WARN naming the reason, and counted, so a
+		// rig that always falls back is visible rather than silently slow. Not logged for a webcam:
+		// there the readback is the only path that ever existed, not a downgrade.
+		downgrades = 1
+		log.Warn(source, "this route is on the CPU readback path, not zero-copy capture",
+			map[string]any{"reason": v.reason, "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height)})
+	}
 	enc, err := mfenc.OpenProcSessionOpts(opts)
 	if err != nil && zc && errors.Is(err, mfenc.ErrZeroCopyRefused) {
 		// Same child, same geometry, reopened on the readback path. ONE warn per route so a rig
@@ -320,25 +331,49 @@ func (b *mfBridge) pumpSub(sub *encoder) {
 	}
 }
 
-// zeroCopyOpts fills opts.Spout when the whole gate holds; returns whether zero-copy was
-// requested and how many downgrade decisions were already taken (for route stats).
-func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink.Source) (bool, int) {
-	if !ZeroCopyCapture() {
-		return false, 0
-	}
+// zcVerdict is ONE source's zero-copy decision, spelled out. It became worth naming when
+// zero-copy became the DEFAULT path (zigmedia inc 5): the interesting question flipped from "did
+// anybody ask for this" to "why did THIS source not get it", and a default that quietly puts a
+// whole rig back on the readback is exactly the failure the promotion gates exist to prevent.
+//
+// applicable separates the two kinds of "no", which must not be logged or counted the same way:
+//   - a webcam / DirectShow / non-Spout source has no GPU shared texture AT ALL, so the readback
+//     is not a downgrade, it is the only path that was ever possible. Silent, uncounted, correct.
+//   - a Spout source that COULD have qualified and did not (DX9 or CPU-memoryshare sender, a
+//     sender that resized between advert and open, a sender already pinned to the readback) is a
+//     real downgrade: one WARN naming the reason, and counted so `ctl perf` can show a rig that
+//     always downgrades instead of one that is mysteriously slow.
+type zcVerdict struct {
+	request    bool   // ask the child for src:"spout"
+	applicable bool   // this source type could ever have done zero-copy
+	reason     string // why not (empty when requested)
+}
+
+// zeroCopyOpts fills opts.Spout when the whole per-source gate holds and returns the verdict.
+// Decided PER SOURCE, at open, from the source's own answer - never assumed from the flag, the
+// route kind or the peer's advert.
+func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink.Source) zcVerdict {
 	zcs, ok := src.(medialink.ZeroCopySource)
 	if !ok {
-		return false, 0
+		// Not applicable, whatever the flag says: there is no texture to hand anyone.
+		return zcVerdict{reason: "source has no GPU shared texture (webcam / DirectShow / non-Spout)"}
+	}
+	if !ZeroCopyCapture() {
+		return zcVerdict{applicable: true, reason: "zero-copy capture disabled by config"}
 	}
 	h, _, w, hh, name, ok := zcs.SharedTexture()
 	if !ok || h == 0 {
-		return false, 0
+		// A DX9 or CPU/memoryshare Spout sender has no DX11 shared texture. Worth knowing that the
+		// readback cannot serve these EITHER (it needs the same handle) - so this is the one rung
+		// where neither path works and the route will fail somewhere else.
+		return zcVerdict{applicable: true, reason: "sender exposes no DX11 shared texture (DX9 or CPU/memory-share sender)"}
 	}
 	if w != spec.Width || hh != spec.Height {
-		return false, 1 // sender moved between advert and open: the child would refuse anyway
+		return zcVerdict{applicable: true, reason: fmt.Sprintf(
+			"sender is %dx%d but the route negotiated %dx%d (it resized between advert and open)", w, hh, spec.Width, spec.Height)}
 	}
 	if mfenc.ZeroCopyPinnedToReadback(name) {
-		return false, 1
+		return zcVerdict{applicable: true, reason: "this sender is pinned to the readback path (its zero-copy source failed repeatedly)"}
 	}
 	// Re-read on every (re)open + on the 2 s health tick: a restarted sender must never be
 	// re-issued its dead handle (risk R1, the silently frozen picture).
@@ -347,7 +382,7 @@ func zeroCopyOpts(opts *mfenc.ProcOpts, spec medialink.EncodeSpec, src medialink
 		return hd, f, ww, hgt, ok
 	}}
 	opts.ZeroCopyAdapters = affinityCandidates(spec)
-	return true, 0
+	return zcVerdict{request: true, applicable: true}
 }
 
 // affinityCandidates lists the adapters a zero-copy session may be re-placed on (R7). EMPTY unless
