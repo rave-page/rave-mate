@@ -233,6 +233,9 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 			out = append(out, fmt.Sprintf("stale %.0f ms", p.DecStaleMs))
 		}
 	}
+	if p.AdapterMoved {
+		out = append(out, "adapter re-placed (sender on another GPU)")
+	}
 	if p.Downgrades > 0 {
 		out = append(out, fmt.Sprintf("downgrades %d", p.Downgrades))
 	}

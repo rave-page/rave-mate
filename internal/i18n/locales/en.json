@@ -2242,6 +2242,7 @@
   "peers": {
     "accept": "Accept",
     "acquiring": "acquiring",
+    "adapterMoved": "adapter re-placed (sender on another GPU)",
     "ask": "Ask",
     "auto": "auto",
     "autoMode": "Auto",

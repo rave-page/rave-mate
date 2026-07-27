@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mfenc"
 )
@@ -106,5 +107,51 @@ func TestZeroCopyGateNeverPulls(t *testing.T) {
 func TestCaptureLabel(t *testing.T) {
 	if captureLabel(true) != "zerocopy" || captureLabel(false) != "readback" {
 		t.Fatal("capture label wording changed")
+	}
+}
+
+// ── increment 3: adapter-affinity candidates (risk R7) ──
+
+func withAffinityGate(t *testing.T, on bool) {
+	t.Helper()
+	prev := ZeroCopyAffinity
+	ZeroCopyAffinity = func() bool { return on }
+	t.Cleanup(func() { ZeroCopyAffinity = prev })
+}
+
+// TestAffinityCandidatesNoneWhenGateOff: flag off = mfenc gets no candidates = today's downgrade.
+func TestAffinityCandidatesNoneWhenGateOff(t *testing.T) {
+	withAffinityGate(t, false)
+	if got := affinityCandidates(medialink.EncodeSpec{}); got != nil {
+		t.Fatalf("candidates with the gate OFF: %#x", got)
+	}
+}
+
+// TestAffinityCandidatesNoneWhenDevicePinned is R7's hard rule at the policy layer: a resolved
+// encode device is USER/GOVERNOR policy and must never be overridden by an optimisation.
+func TestAffinityCandidatesNoneWhenDevicePinned(t *testing.T) {
+	withAffinityGate(t, true)
+	spec := medialink.EncodeSpec{DeviceLUID: "0x00000000_0x00010540", DeviceIndex: 0}
+	if _, _, resolved := spec.Device(); !resolved {
+		t.Fatal("test setup: the spec should resolve a device")
+	}
+	if got := affinityCandidates(spec); got != nil {
+		t.Fatalf("candidates for a PINNED device: %#x - adapters must never move silently", got)
+	}
+}
+
+// TestAffinityCandidatesOnlyWithTwoAdapters: on a single-GPU box there is nothing to move to, so the
+// probe must not even be offered (it would cost a child spawn for nothing).
+func TestAffinityCandidatesOnlyWithTwoAdapters(t *testing.T) {
+	withAffinityGate(t, true)
+	got := affinityCandidates(medialink.EncodeSpec{})
+	if n := len(encoderscan.Adapters()); n < 2 {
+		if got != nil {
+			t.Fatalf("%d adapter(s) but candidates %#x", n, got)
+		}
+		t.Skipf("single-adapter host: the two-adapter arm needs a second GPU")
+	}
+	if len(got) < 2 {
+		t.Fatalf("with %d adapters the candidate list is %#x", len(encoderscan.Adapters()), got)
 	}
 }

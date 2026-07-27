@@ -1054,6 +1054,9 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 			out = append(out, i18n.T("peers.capStale", i18n.A{"ms": fmt.Sprintf("%.0f", p.DecStaleMs)}))
 		}
 	}
+	if p.AdapterMoved {
+		out = append(out, i18n.T("peers.adapterMoved"))
+	}
 	if p.Downgrades > 0 {
 		out = append(out, i18n.T("peers.downgrades", i18n.A{"n": fmt.Sprint(p.Downgrades)}))
 	}

@@ -373,3 +373,98 @@ func TestInc3MeasureCrossAdapter(t *testing.T) {
 	t.Log("M4 VERDICT: an adapter that REFUSES while another ACCEPTS is exactly R7 - the affinity " +
 		"re-place turns that refusal into a working zero-copy route instead of a readback downgrade.")
 }
+
+// TestInc3AffinityLiveReplace is the LIVE gate for item 3: open a zero-copy session pinned to the
+// adapter M4 proved REFUSES this sender, with the other adapter offered as a candidate, and assert
+// the session comes up zero-copy on the adapter that owns the texture instead of downgrading.
+//
+// The control arm is the same open WITHOUT candidates: it must still refuse, which is what proves
+// the re-place - not some incidental retry - is what made the difference.
+func TestInc3AffinityLiveReplace(t *testing.T) {
+	if !Available() {
+		t.Skip("no hardware H.264 MFT / D3D11 device")
+	}
+	requireEncExe(t)
+	ads := encoderscan.Adapters()
+	if len(ads) < 2 {
+		t.Skip("needs two adapters (R7 cannot be reproduced on one)")
+	}
+	var luids []int64
+	for _, a := range ads {
+		if l, ok := encoderscan.LUIDInt64(a.LUID); ok {
+			luids = append(luids, l)
+		}
+	}
+	if len(luids) < 2 {
+		t.Skip("could not parse two adapter LUIDs")
+	}
+	startPublisher(t, "moving")
+	spout := func() *SpoutSource {
+		return &SpoutSource{Name: m3Name("moving"), Resolve: func() (uint64, uint32, int, int, bool) {
+			return videoshare.SenderShare(m3Name("moving"))
+		}}
+	}
+
+	// Which adapter refuses this sender? (M4 says one does; find it rather than assuming an order.)
+	resetAffinity()
+	refusing, accepting := int64(0), int64(0)
+	for _, l := range luids {
+		s, err := OpenProcSessionOpts(ProcOpts{LUID: l, InW: m3W, InH: m3H, OutW: m3W, OutH: m3H,
+			FPS: 60, Kbps: 8000, Gop: 60, Spout: spout()})
+		if err != nil {
+			refusing = l
+			continue
+		}
+		accepting = l
+		s.Close()
+	}
+	if refusing == 0 || accepting == 0 {
+		t.Skipf("no cross-adapter refusal on this rig right now (refusing=%#x accepting=%#x)", refusing, accepting)
+	}
+	t.Logf("R7 live: adapter %#x refuses this sender, %#x accepts it", uint64(refusing), uint64(accepting))
+
+	// CONTROL: no candidates → the refusal stands (this is the pre-inc-3 behaviour).
+	resetAffinity()
+	if _, err := OpenProcSessionOpts(ProcOpts{LUID: refusing, InW: m3W, InH: m3H, OutW: m3W, OutH: m3H,
+		FPS: 60, Kbps: 8000, Gop: 60, Spout: spout()}); err == nil {
+		t.Fatal("control arm opened without candidates - the refusal is not reproducible, so the test proves nothing")
+	} else {
+		t.Logf("control (no candidates): %v", err)
+	}
+
+	// TREATMENT: offer both adapters → the session must be re-placed and come up zero-copy.
+	resetAffinity()
+	s, err := OpenProcSessionOpts(ProcOpts{LUID: refusing, InW: m3W, InH: m3H, OutW: m3W, OutH: m3H,
+		FPS: 60, Kbps: 8000, Gop: 60, Spout: spout(), ZeroCopyAdapters: luids})
+	if err != nil {
+		t.Fatalf("affinity re-place failed: %v", err)
+	}
+	go func() {
+		for range s.Output() {
+		}
+	}()
+	if !s.AdapterMoved() {
+		s.Close()
+		t.Fatal("session did not record a move")
+	}
+	if s.AdapterLUID() != accepting {
+		s.Close()
+		t.Fatalf("re-placed onto %#x, want the accepting adapter %#x", uint64(s.AdapterLUID()), uint64(accepting))
+	}
+	_ = s.Stats()
+	time.Sleep(900 * time.Millisecond)
+	st := s.Stats()
+	s.Close()
+	t.Logf("re-placed session: adapter %#x capFrames=%d capFPS=%.1f capFlags=%#x encBusy=%.2fms adapterMoved=%v moves=%d",
+		uint64(accepting), st.CapFrames, st.CapFPS, st.CapFlags, st.EncBusyMs, st.AdapterMoved, AdapterMoves())
+	if st.CapFlags&1 == 0 || st.CapFrames == 0 {
+		t.Fatalf("re-placed session is not capturing (capFlags=%#x capFrames=%d)", st.CapFlags, st.CapFrames)
+	}
+	if !st.AdapterMoved {
+		t.Fatal("ProcStats.AdapterMoved is false on a re-placed session - the panel would not show it")
+	}
+	if got, ok := AdapterAffinity(m3Name("moving")); !ok || got != accepting {
+		t.Fatalf("affinity cache = (%#x,%v), want the accepting adapter", uint64(got), ok)
+	}
+	resetAffinity()
+}
