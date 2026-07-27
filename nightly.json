@@ -1,13 +1,13 @@
 {
-  "version": "nightly-ed2f6de",
-  "build": 176,
-  "commit": "ed2f6de",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-176-20260727-ed2f6de.exe",
-  "sha256": "19b16aef493ca8200711dc950826f5496424a53c2a54e0ec103e3dc1c4834622",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-176-20260727-ed2f6de.exe",
-  "installer_sha256": "b2ee7721edac0a317366d5a62a33fc6f8fd6ac2bb85e22d5fd53ca8a684cf022",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-176-20260727-ed2f6de",
-  "linux_sha256": "1ea8c1dac23c4622835d9707c5de4c2aa2c4620e7b63351c4fefa62ec64f0eca",
+  "version": "nightly-2b5babf",
+  "build": 177,
+  "commit": "2b5babf",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-177-20260727-2b5babf.exe",
+  "sha256": "0fd1d95944b792d5d7a79de2e6e5dd74a72d6998c587392620195a0180966956",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-177-20260727-2b5babf.exe",
+  "installer_sha256": "05d1e2226fe8468be1c0880738d8648ffe820d49494a03d7ad27485dd4836e6b",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-177-20260727-2b5babf",
+  "linux_sha256": "5ff571e55e182916e30d785d28af052d02bea8d122c234b80bd01c2ed4584b51",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-27T00:55:14Z",
-  "notes": "Merge feat/zigmedia-inc2: GPU decode side + pixel-ownership handoff"
+  "released": "2026-07-27T01:23:41Z",
+  "notes": "Merge feat/zigmedia-inc3: adapter-affinity resolution (measured; 2 of 3 items refused)"
 }
