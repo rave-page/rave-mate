@@ -89,7 +89,12 @@ pub fn vpInputFormatOK(fmt: u32) bool {
 }
 
 /// Grab is one pacing tick's verdict.
-pub const Grab = enum { ok, timeout, dead };
+/// Grab is one pacing tick's verdict. `encfail` is deliberately NOT `dead`: an encoder wedge is
+/// not a source problem, and reporting it as `srcgone` made the parent burn its three source
+/// recycles and then PIN A HEALTHY SENDER to the readback path - i.e. an encoder bug was
+/// "fixed" by disabling zero-copy for that sender. With zero-copy the default path, that
+/// misattribution would silently demote every route on a rig with a wedged MFT.
+pub const Grab = enum { ok, timeout, dead, encfail, busy };
 
 /// Cap owns the opened shared texture + its VP input view + whatever sync the sender offers.
 /// No allocator use after open; no per-frame allocation at all.
@@ -104,6 +109,7 @@ pub const Cap = struct {
     has_view: bool = false, // c.view holds a real reference: close() must be safe on every
     // partial-open path, releasing exactly what was created
     reason: Reason = .open_shared, // last failure reason (valid when open/grab failed)
+    enc_rc: i32 = 0, // last encoder return code when feed returned .encfail (0 = none)
 
     /// open resolves the sender's texture and builds the VP input view over it. `want_w/h` are
     /// the session's negotiated input geometry: a sender that does not match is REFUSED (the
@@ -177,9 +183,12 @@ pub const Cap = struct {
     /// acquire, one GPU-queued Blt, release, then submit. `.timeout` = skip this tick,
     /// `.dead` = the source is unusable (the caller emits srcgone and stops capturing).
     pub fn feed(c: *Cap, e: *mf.Enc, pts100: i64, sink: mf.AuSink) Grab {
-        if (e.gateInput(sink) < 0) {
-            c.reason = .copy_failed;
-            return .dead;
+        c.enc_rc = 0;
+        const g = e.gateInput(sink); // the ENCODER could not free a slot: not the sender's fault
+        if (g == mf.RC_BUSY) return .busy; // saturated: skip this tick, never end the route
+        if (g < 0) {
+            c.enc_rc = g;
+            return .encfail;
         }
         switch (c.acquire()) {
             .ok => {},
@@ -188,16 +197,20 @@ pub const Cap = struct {
                 c.reason = .acquire_dead;
                 return .dead;
             },
+            // unreachable from acquire(); keeps the switch exhaustive
+            .encfail, .busy => return .encfail,
         }
         const slot = e.bltView(c.view);
         c.release();
         if (slot < 0) {
-            c.reason = .copy_failed;
+            c.reason = .copy_failed; // Blt over the SENDER's view: genuinely a source verdict
             return .dead;
         }
-        if (e.submitSlot(@intCast(slot), pts100, sink) < 0) {
-            c.reason = .copy_failed;
-            return .dead;
+        const rc = e.submitSlot(@intCast(slot), pts100, sink);
+        if (rc == mf.RC_BUSY) return .busy;
+        if (rc < 0) {
+            c.enc_rc = rc;
+            return .encfail;
         }
         return .ok;
     }

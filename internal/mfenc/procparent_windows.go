@@ -53,11 +53,18 @@ import (
 var Warnf = func(format string, args ...any) {}
 
 const (
-	shmHdrSize     = 256
-	wrapMarker     = 0xFFFFFFFF
-	openWait       = 8 * time.Second
-	encodeWait     = 2 * time.Second
-	crashWindow    = 30 * time.Second
+	shmHdrSize = 256
+	wrapMarker = 0xFFFFFFFF
+	openWait   = 8 * time.Second
+	// encodeWait MUST stay comfortably above the child's per-frame budget (SUBMIT_WAIT_MS = 250 ms
+	// in native/zigenc, twice per frame worst case). Both ends used to sit at 2 s, so the parent's
+	// deadline expired at the same instant the child's did and a merely SATURATED encoder ended the
+	// route with "mfenc: encode timeout" instead of dropping a frame. The child now always answers
+	// first; reaching this deadline means the child is genuinely wedged or gone.
+	encodeWait = 4 * time.Second
+	// maxConsecFails is the crash streak that poisons an (adapter, encoder) pair. The streak is
+	// measured CRASH TO CRASH in the ledger (procfail_windows.go); the old "within 30 s of the
+	// last spawn" window reset it on every route, so it never reached this number.
 	maxConsecFails = 3
 	latWindow      = 512
 
@@ -76,6 +83,16 @@ const (
 	offLastCapNs  = 96
 	offCapFmt     = 104
 	offCapFlags   = 108
+
+	// Crash attribution (child-written, read AFTER the child dies). A vendor AV happens inside a
+	// driver, often on its own worker thread: there is no usable stderr tail and no Go stack, which
+	// is why the field AMD 0xc0000005 was unattributed. The child latches the stage it is about to
+	// enter into shared memory, so the corpse leaves a breadcrumb behind. Mirrors native/zigenc
+	// off_stage/off_feed_rc/off_feed_fails.
+	offStage     = 112
+	offFeedRC    = 116
+	offFeedFails = 120
+	offBusyDrops = 124 // frames the encoder had no credit for in time (saturation, not breakage)
 
 	// AU ring for a zero-copy session: half a second of bitstream, floor 4 MiB, ceiling
 	// 16 MiB - GEOMETRY-INDEPENDENT, so a sender resize costs zero SHM realloc.
@@ -114,23 +131,9 @@ var RestartPolicy = func(luid int64, consecFails int, died []SessionInfo) Restar
 	return RestartDecision{Retry: true, LUID: luid}
 }
 
-// ── poison cache (per-process): (adapter, geometry) tuples that crashed the child
-// maxConsecFails times in a row. Routes on them go to the ffmpeg engine.
-var (
-	poisonMu sync.Mutex
-	poisoned = map[geomKey]string{}
-)
-
-type geomKey struct {
-	luid                 int64
-	inW, inH, outW, outH int
-	fpsN, fpsD           int
-}
-
-func poisonKey(s *ProcSession) geomKey {
-	fpsN, fpsD := fpsRational(s.fps)
-	return geomKey{s.child.luid, s.inW, s.inH, s.outW, s.outH, fpsN, fpsD}
-}
+// Crash-loop accounting lives in the (adapter, encoder) failure LEDGER - procfail_windows.go.
+// It replaced a per-(adapter, geometry) poison map keyed on the wrong thing and driven by a
+// counter that reset on every route (see that file's header for the three defects).
 
 // ── shm region ──
 
@@ -224,7 +227,31 @@ type openedEv struct {
 	// dir:"dec" (zigmedia inc 2): which direction the session got + why a destination was refused.
 	Dir    string `json:"dir"`
 	ErrDst string `json:"err_dst"`
+	// Vendor-portability verdict: the drive mode the MFT's own MF_TRANSFORM_ASYNC selected, the
+	// software-tier flag, and the adapter the child actually resolved.
+	Drive   string `json:"drive"`
+	SW      bool   `json:"sw"`
+	LUIDRes int64  `json:"luid_res"`
+	Adapter string `json:"adapter"`
+	// encfail: an ATTRIBUTED mid-route encode failure (rc + the stage it died in).
+	RC    int32  `json:"rc"`
+	Stage uint32 `json:"stage"`
+	Fails uint32 `json:"fails"`
 }
+
+// swEncoderKey is the ledger row for "the software tier on this adapter". The concrete MFT name
+// varies by Windows build, so the TIER is the unit of poisoning here, not the name.
+const swEncoderKey = "\x00software-mf-tier"
+
+// ledgerEncoder maps an opened event onto its ledger row: software sessions all share one row.
+func ledgerEncoder(ev openedEv) string {
+	if ev.SW {
+		return swEncoderKey
+	}
+	return ev.Name
+}
+
+var warnLUIDDriftOnce sync.Once
 
 // ErrZeroCopyRefused is the open-side downgrade rung: the child could not consume the sender's
 // shared texture (foreign adapter, exotic/TYPELESS format, geometry moved under us). The caller
@@ -247,8 +274,10 @@ type procChild struct {
 	helloCh    chan struct{} // closed when this incarnation's hello lands (re-armed per spawn)
 	stateCh    chan struct{} // closed+replaced on every liveness transition (spawn/death/loop)
 	spawnCount int
-	consecFail int
+	consecFail int // mirror of the ledger streak (waitUsable/isDeadLocked read it)
 	lastSpawn  time.Time
+	lastEnc    string // last MFT bound in this child: names the ledger row when a crash lands
+	// with no session left registered (teardown-time AV)
 	restarts   int
 	stderrTail []byte // bounded crash-forensics tail (stage traces name the faulting call)
 	// CPU sampling state
@@ -607,6 +636,15 @@ func (c *procChild) readEvents(r io.Reader) {
 			if s != nil {
 				s.onSrcGone(ev.Reason)
 			}
+		case "encfail":
+			// The ENCODER wedged, not the source. Before the child distinguished the two, this
+			// arrived as srcgone and burned the zero-copy recycle budget on a healthy sender.
+			c.mu.Lock()
+			s := c.sessions[ev.SID]
+			c.mu.Unlock()
+			if s != nil {
+				s.onEncFail(ev.RC, ev.Stage, ev.Fails)
+			}
 		case "dstgone":
 			c.mu.Lock()
 			d := c.decs[ev.SID]
@@ -680,10 +718,26 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 	}
 	live := make([]*ProcSession, 0, len(c.sessions))
 	died := make([]SessionInfo, 0, len(c.sessions)+len(c.decs))
+	// The child's last latched stage NAMES the faulting call. Read it while we still hold c.mu:
+	// Close() removes a session from this map BEFORE it unmaps the shm, so anything visible here
+	// is guaranteed still mapped (reading after the unlock would race that unmap).
+	var stage, encName string
 	for _, s := range c.sessions {
+		if st := stageName(atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offStage)))); st != "" && stage == "" {
+			stage = st
+			if rc := atomic.LoadInt32((*int32)(unsafe.Add(s.shm.base, offFeedRC))); rc != 0 {
+				stage += fmt.Sprintf(" (last feed rc %d)", rc)
+			}
+		}
+		if encName == "" {
+			encName = s.name
+		}
 		s.recovering.Store(true) // drop frames until re-placed - the route must not stall
 		live = append(live, s)
 		died = append(died, SessionInfo{SID: s.sid, LUID: c.luid, InW: s.inW, InH: s.inH, OutW: s.outW, OutH: s.outH, FPS: s.fps})
+	}
+	if encName == "" {
+		encName = c.lastEnc // crash during/after teardown: no live session to ask
 	}
 	// dir:"dec" sessions ride the same supervisor: without this a child crash recovers every send
 	// route and silently kills the receive ones.
@@ -693,34 +747,36 @@ func (c *procChild) wait(cmd *exec.Cmd) {
 		liveDec = append(liveDec, d)
 		died = append(died, SessionInfo{SID: d.sid, LUID: c.luid, InW: d.inW, InH: d.inH, OutW: d.outW, OutH: d.outH, FPS: d.fps})
 	}
-	if time.Since(c.lastSpawn) < crashWindow {
-		c.consecFail++
-	} else {
-		c.consecFail = 1
-	}
-	fails := c.consecFail
 	tail := string(c.stderrTail)
 	c.mu.Unlock()
 	if len(live) == 0 && len(liveDec) == 0 && err == nil {
 		return // clean exit with no sessions (quit)
 	}
-	Warnf("mfenc: encoder child (adapter %#x) exited: %v - %d session(s) affected, consecutive fails %d; stderr tail: %s",
-		uint64(c.luid), err, len(live)+len(liveDec), fails, tail)
+	// Count the crash against (adapter, encoder) in the LEDGER, not against a per-spawn counter,
+	// and do it whether or not a session happened to still be registered: an AV during teardown
+	// is the same broken driver. This is the line that makes the safety net able to engage at all.
+	fails, poisonedNow := NoteCrash(c.luid, encName, stage)
+	c.mu.Lock()
+	c.consecFail = fails // mirrored for waitUsable/isDeadLocked
+	c.mu.Unlock()
+	Warnf("mfenc: encoder child (adapter %#x, %s) exited: %v - %d session(s) affected, fails %d/%d in this streak%s; stderr tail: %s",
+		uint64(c.luid), encoderLabel(encName), err, len(live)+len(liveDec), fails, failLimit, stageSuffix(stage), tail)
 
 	verdict := RestartPolicy(c.luid, fails, died)
-	if !verdict.Retry {
+	if !verdict.Retry || poisonedNow {
+		reason, _ := PoisonedTuple(c.luid, encName)
+		if reason == "" {
+			reason = fmt.Sprintf("encoder child crash limit reached on adapter %#x", uint64(c.luid))
+		}
 		for _, d := range liveDec {
-			d.fail("mfenc: encoder child crash limit reached")
+			d.fail("mfenc: " + reason)
 		}
 		for _, s := range live {
-			k := poisonKey(s)
-			poisonMu.Lock()
-			poisoned[k] = fmt.Sprintf("encoder child crashed %d times (adapter %#x, %dx%d->%dx%d@%g)",
-				fails, uint64(c.luid), s.inW, s.inH, s.outW, s.outH, s.fps)
-			poisonMu.Unlock()
-			s.fail("mfenc: encoder child crash limit reached")
+			s.degradeTo(reason)
+			s.fail("mfenc: " + reason)
 		}
-		Warnf("mfenc: adapter %#x poisoned after %d consecutive crashes - affected geometries fall back to ffmpeg", uint64(c.luid), fails)
+		Warnf("mfenc: adapter %#x + %s poisoned after %d crashes - later routes take the software encode tier (or ffmpeg if that is poisoned too)%s",
+			uint64(c.luid), encoderLabel(encName), fails, stageSuffix(stage))
 		c.mu.Lock()
 		c.signalState() // wake waitUsable: crash-loop verdict is final for this child
 		c.mu.Unlock()
@@ -803,6 +859,9 @@ type openCmd struct {
 	DFmt     uint32 `json:"dfmt,omitempty"`
 	DName    string `json:"dname,omitempty"`
 	InRingKB int    `json:"in_ring_kb,omitempty"`
+	// SW: take the SOFTWARE encoder tier for this session (our ledger poisoned the hardware MFT
+	// on this adapter). Per-session, so one bad adapter never forces software on the others.
+	SW bool `json:"sw,omitempty"`
 }
 
 func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
@@ -812,7 +871,7 @@ func (c *procChild) openSession(s *ProcSession) (openedEv, error) {
 	c.mu.Unlock()
 	fpsN, fpsD := fpsRational(s.fps)
 	cmd := openCmd{Op: "open", SID: s.sid, Shm: s.shm.name, InW: s.inW, InH: s.inH,
-		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop}
+		OutW: s.outW, OutH: s.outH, FpsN: fpsN, FpsD: fpsD, Kbps: s.kbps, Gop: s.gop, SW: s.swTier}
 	if s.zeroCopy {
 		// Re-read the handle on every (re)open, including the post-crash re-place: a sender that
 		// restarted while the child was down must not be re-issued its dead texture (R1).
@@ -933,14 +992,33 @@ type ProcSession struct {
 	capRate    counterRate
 	busyRate   busyMean
 
-	name       string
-	bgra       bool
+	name  string
+	bgra  bool
+	drive string // "async"/"sync" as resolved from the MFT's MF_TRANSFORM_ASYNC attribute
+	// swTier: we ASKED for the software tier (poisoned hardware); swBound: we GOT it.
+	swTier  bool
+	swBound bool
+	// degrade names, in one human sentence, why this session is not on its best path. It reaches
+	// the route panel so a silently-degraded rig is visible instead of just slow.
+	degradeMu sync.Mutex
+	degrade   string
+	encFails  atomic.Uint32
+	healthy   atomic.Bool // an AU really came out (ledger proof-of-health)
+
 	out        chan AU
 	done       chan struct{}
 	pumpDone   chan struct{}
 	closed     atomic.Bool
 	recovering atomic.Bool   // child died; frames dropped until the session is re-placed
 	droppedAUs atomic.Uint64 // mirror of the shm counter (safe to read after Close)
+	busyDrops  atomic.Uint32 // ditto: saturation drops, mirrored by pump while the shm is live
+	// shmMu guards the MAPPING's lifetime against readers. Stats() is called from the route's
+	// telemetry goroutine and can land after Close() unmapped the view - reading the counters
+	// straight out of the mapping then faults on freed VA (0xc0000005 in Stats, seen in the
+	// mediapipe gate). Counters that must survive Close are mirrored into atomics above;
+	// everything still read from the mapping takes this lock.
+	shmMu   sync.RWMutex
+	shmGone bool // set under shmMu.Lock() just before the view is unmapped
 
 	failMu  sync.Mutex
 	failErr error
@@ -1016,13 +1094,19 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 	if fps <= 0 {
 		fps = 30
 	}
-	fpsN, fpsD := fpsRational(fps)
-	k := geomKey{luid, inW, inH, outW, outH, fpsN, fpsD}
-	poisonMu.Lock()
-	reason, bad := poisoned[k]
-	poisonMu.Unlock()
-	if bad {
-		return nil, errors.New("mfenc: poisoned tuple - " + reason + " - using ffmpeg")
+	// A poisoned (adapter, encoder) pair does NOT mean "no native video": it means "not THAT
+	// encoder". The session asks the child for the SOFTWARE tier instead, which keeps real pixels
+	// on the wire. Only when the software tier on this adapter is poisoned too do we refuse and
+	// let mediapipe substitute an ffmpeg encoder.
+	swTier := false
+	degrade := ""
+	if reason, bad := PoisonedOn(luid); bad {
+		if swReason, swBad := PoisonedTuple(luid, swEncoderKey); swBad {
+			return nil, errors.New("mfenc: no usable encoder on this adapter - " + reason + " / software tier: " + swReason + " - using ffmpeg")
+		}
+		swTier = true
+		degrade = "hardware encoder poisoned (" + reason + ") - encoding on the software MF tier"
+		Warnf("mfenc: %s", degrade)
 	}
 
 	zc := o.Spout != nil
@@ -1070,6 +1154,7 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 			pumpDone: make(chan struct{}),
 			submitAt: map[int64]time.Time{},
 			zeroCopy: zc, ringKB: ringKB,
+			swTier: swTier, degrade: degrade,
 		}
 		if zc {
 			s.zcName, s.resolve = o.Spout.Name, o.Spout.Resolve
@@ -1092,8 +1177,25 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 		}
 		s.name = ev.Name
 		s.bgra = ev.Bgra
+		s.drive = ev.Drive
+		s.swBound = ev.SW
+		if ev.SW && degrade == "" {
+			s.degrade = "no usable hardware H.264 MFT on this adapter - encoding on the software MF tier"
+			Warnf("mfenc: %s (%s)", s.degrade, ev.Name)
+		}
+		NoteEncoder(luid, ledgerEncoder(ev))
+		// A CONFIGURED adapter LUID that no longer resolves silently ran the pipeline on a
+		// different GPU while every log line named the requested one (LUIDs are not stable across
+		// reboots, driver resets, or a virtual display appearing). Say so, once per process.
+		if luid != 0 && ev.LUIDRes != 0 && ev.LUIDRes != luid {
+			warnLUIDDriftOnce.Do(func() {
+				Warnf("mfenc: requested encode adapter %#x is not present - the pipeline is on %#x (%s). Re-pick the encoder device in settings; a stored LUID does not survive a driver reset.",
+					uint64(luid), uint64(ev.LUIDRes), ev.Adapter)
+			})
+		}
 		child.mu.Lock()
 		child.sessions[sid] = s
+		child.lastEnc = ledgerEncoder(ev)
 		child.mu.Unlock()
 		go s.pump()
 		if zc {
@@ -1344,6 +1446,50 @@ func (s *ProcSession) AdapterLUID() int64 { return s.child.luid }
 // AdapterMoved reports whether affinity resolution re-placed this session onto another adapter.
 func (s *ProcSession) AdapterMoved() bool { return s.movedFrom != 0 }
 
+// degradeTo records why this session is off its best path (first reason wins - the root cause).
+func (s *ProcSession) degradeTo(reason string) {
+	s.degradeMu.Lock()
+	if s.degrade == "" {
+		s.degrade = reason
+	}
+	s.degradeMu.Unlock()
+}
+
+// DegradeReason is the one-sentence "why is this route not on its best path" for the panel.
+// "" = nothing to report.
+func (s *ProcSession) DegradeReason() string {
+	s.degradeMu.Lock()
+	defer s.degradeMu.Unlock()
+	return s.degrade
+}
+
+// Drive reports the resolved MFT drive mode ("async"/"sync"; "" = pre-fix child).
+func (s *ProcSession) Drive() string { return s.drive }
+
+// ledgerKey is this session's row in the (adapter, encoder) failure ledger.
+func (s *ProcSession) ledgerKey() string {
+	if s.swBound {
+		return swEncoderKey
+	}
+	return s.name
+}
+
+// IsSoftware reports whether the software MF encoder tier is serving this session.
+func (s *ProcSession) IsSoftware() bool { return s.swBound }
+
+// onEncFail records an ATTRIBUTED mid-route encode failure from the child.
+func (s *ProcSession) onEncFail(rc int32, stage uint32, fails uint32) {
+	s.encFails.Store(fails)
+	name := stageName(stage)
+	reason := fmt.Sprintf("encoder rejected frames (rc %d", rc)
+	if name != "" {
+		reason += ", stage: " + name
+	}
+	reason += ")"
+	s.degradeTo(reason)
+	Warnf("mfenc: session %d encode failure #%d - %s (encoder %s, drive %s)", s.sid, fails, reason, encoderLabel(s.name), s.drive)
+}
+
 func (s *ProcSession) fail(msg string) {
 	s.failMu.Lock()
 	if s.failErr == nil {
@@ -1357,6 +1503,12 @@ func (s *ProcSession) failed() error {
 	defer s.failMu.Unlock()
 	return s.failErr
 }
+
+// Failed reports a hard session failure (child crash limit, respawn failure). nil = fine.
+// Exported so the mediapipe bridge can tell "the AU stream ended because the route is closing"
+// apart from "the AU stream ended because the engine died" - the two used to be indistinguishable,
+// and the second one silently ended the route with a frozen picture.
+func (s *ProcSession) Failed() error { return s.failed() }
 
 // Name returns the encoder MFT friendly name.
 func (s *ProcSession) Name() string { return s.name }
@@ -1501,6 +1653,9 @@ func (s *ProcSession) pump() {
 		if !final {
 			_, _ = windows.WaitForSingleObject(s.shm.evAU, 200)
 		}
+		// Mirror the saturation counter while the mapping is guaranteed live (pump exits before
+		// Close unmaps). Stats() must never read the mapping for a value it may need afterwards.
+		s.busyDrops.Store(atomic.LoadUint32((*uint32)(unsafe.Add(s.shm.base, offBusyDrops))))
 		for {
 			r := atomic.LoadUint64(s.shm.u64(40))
 			w := atomic.LoadUint64(s.shm.u64(32))
@@ -1525,6 +1680,11 @@ func (s *ProcSession) pump() {
 			rec := 16 + ((uint64(ln) + 7) &^ 7)
 			atomic.StoreUint64(s.shm.u64(40), r+rec)
 			s.droppedAUs.Store(atomic.LoadUint64(s.shm.u64(48)))
+			// Proof of health for the ledger: this (adapter, encoder) really produced output, so
+			// a stale poison on it may eventually be forgiven. Time alone never forgives it.
+			if s.healthy.CompareAndSwap(false, true) {
+				NoteHealthy(s.child.luid, s.ledgerKey())
+			}
 			s.sampleLatency(pts)
 			au := AU{Data: data, PTSNs: pts, Keyframe: flags&1 != 0}
 			// Delivery policy: block (bounded) for a live consumer, but NEVER stall once
@@ -1586,13 +1746,18 @@ func (s *ProcSession) Stats() ProcStats {
 	}
 	depth := int(s.submitted) - int(s.received)
 	s.pmu.Unlock()
-	st := ProcStats{Name: s.name, QueueDepth: depth, DroppedAUs: s.droppedAUs.Load()}
+	st := ProcStats{Name: s.name, QueueDepth: depth, DroppedAUs: s.droppedAUs.Load(),
+		Drive: s.drive, Software: s.swBound, DegradeReason: s.DegradeReason(), EncFails: s.encFails.Load(),
+		BusyDrops: s.busyDrops.Load()}
 	if n > 0 {
 		sort.Float64s(tmp)
 		st.LatP50Ms = tmp[n/2]
 		st.LatP99Ms = tmp[(n*99)/100]
 	}
-	if s.zeroCopy {
+	// Everything below reads the MAPPING: hold shmMu so Close() cannot unmap underneath us.
+	s.shmMu.RLock()
+	defer s.shmMu.RUnlock()
+	if s.zeroCopy && !s.shmGone {
 		st.ZeroCopy = true
 		st.CapFrames = atomic.LoadUint64(s.shm.u64(offCapFrames))
 		st.CapSkips = atomic.LoadUint64(s.shm.u64(offCapSkips))
@@ -1669,5 +1834,10 @@ func (s *ProcSession) Close() {
 	// exit is bounded by construction (waits <=200ms, ring drain finite, teardown delivery
 	// never blocks), so this converges promptly; a timeout fallback here would be a UAF.
 	<-s.pumpDone
+	// Mark the mapping gone and unmap under the write lock: a Stats() call already inside the
+	// read lock finishes first, and any later one sees shmGone and touches nothing.
+	s.shmMu.Lock()
+	s.shmGone = true
 	s.shm.close()
+	s.shmMu.Unlock()
 }

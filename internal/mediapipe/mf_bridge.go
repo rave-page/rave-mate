@@ -20,8 +20,14 @@ import (
 	"rave.page/mate/internal/encoderscan"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/mediatools"
 	"rave.page/mate/internal/mfenc"
 )
+
+// subWait bounds how long Next() waits for a mid-route substitution verdict after the native AU
+// stream ends. Only reached when nothing published a verdict (belt and braces: every exit path in
+// emit/feed/Close publishes one), so it is a liveness floor, not a latency budget.
+const subWait = 2 * time.Second
 
 // mfBridge implements medialink.Source (+KeyframeSource, PipelineReporter) over an
 // mfenc encoder-child session.
@@ -31,6 +37,7 @@ type mfBridge struct {
 	src    medialink.Source
 	size   int
 	frames chan *medialink.Frame
+	ctx    context.Context // route ctx: the substitute encoder and its pump ride it
 	cancel context.CancelFunc
 	done   chan struct{}
 
@@ -45,6 +52,21 @@ type mfBridge struct {
 	dropped    atomic.Uint64
 	zeroCopy   bool
 	downgrades int
+
+	// ── mid-route substitution (never black-frame) ──
+	// A mid-route native failure used to END THE ROUTE: feed() logged "MF encode failed - route
+	// ends" and returned, the source closed, and the peer was left with a frozen picture while
+	// every counter still read healthy. The ffmpeg substitution only ever existed at OPEN time.
+	// sub is a supervised ffmpeg encoder built over the SAME inner source: once it is set, Next()
+	// and PipeStats() delegate to it, so real pixels keep flowing on the same route and the reason
+	// is visible in the panel. Guarded by subOnce - one substitution per route, never a flap.
+	spec       medialink.EncodeSpec
+	subOnce    sync.Once
+	sub        atomic.Pointer[encoder]
+	subReady   chan struct{} // closed when sub is live (or when substitution gave up)
+	degradeMu  sync.Mutex
+	degrade    string
+	subEncoder string
 }
 
 // ZeroCopyCapture gates the zigmedia inc-1 path: a Spout source's pixels reach the encoder child
@@ -106,11 +128,19 @@ func newMFBridge(ctx context.Context, log *logbus.Bus, spec medialink.EncodeSpec
 	bctx, cancel := context.WithCancel(ctx)
 	b := &mfBridge{log: log, enc: enc, src: src, size: spec.Width * spec.Height * 4,
 		frames: make(chan *medialink.Frame, encFramesBuf), cancel: cancel, done: make(chan struct{}),
-		zeroCopy: zc, downgrades: downgrades}
-	log.Info(source, "native MF hardware encode (isolated encoder child)", map[string]any{
+		zeroCopy: zc, downgrades: downgrades, spec: spec, subReady: make(chan struct{})}
+	b.ctx = bctx
+	if r := enc.DegradeReason(); r != "" {
+		b.noteDegrade(r) // opened already degraded (poisoned hardware → software tier)
+	}
+	log.Info(source, "native MF encode (isolated encoder child)", map[string]any{
 		"encoder": enc.Name(), "in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
 		"out": fmt.Sprintf("%dx%d", outW, outH), "kbps": kbps, "swizzle": enc.InputIsBGRA(),
-		"device": spec.DeviceLUID, "capture": captureLabel(zc)})
+		// device = what was REQUESTED; adapter = what the child resolved (a stale LUID silently
+		// ran elsewhere). drive/tier make the vendor-portability verdict visible per route.
+		"device": spec.DeviceLUID, "adapter": fmt.Sprintf("%#x", uint64(enc.AdapterLUID())),
+		"capture": captureLabel(zc), "drive": enc.Drive(), "tier": tierLabel(enc.IsSoftware()),
+		"degraded": enc.DegradeReason()})
 	// A zero-copy session's pixels never pass through here: no feed goroutine, so the source's
 	// capture is never attached and no readback is ever performed (mediaroute attaches lazily).
 	if !zc {
@@ -125,6 +155,89 @@ func captureLabel(zeroCopy bool) string {
 		return "zerocopy"
 	}
 	return "readback"
+}
+
+func tierLabel(software bool) string {
+	if software {
+		return "software-mf"
+	}
+	return "hardware"
+}
+
+// noteDegrade records why this route is off its best path (first reason wins = root cause).
+func (b *mfBridge) noteDegrade(reason string) {
+	b.degradeMu.Lock()
+	if b.degrade == "" {
+		b.degrade = reason
+	}
+	b.degradeMu.Unlock()
+}
+
+func (b *mfBridge) degradeReason() string {
+	b.degradeMu.Lock()
+	defer b.degradeMu.Unlock()
+	return b.degrade
+}
+
+// substitute swaps a supervised ffmpeg H.264 encoder in over the SAME inner source, in place, so
+// a mid-route native failure costs a hiccup instead of the route. It is the "degrade never
+// black-frames" guarantee: the peer was answered H.264, the substitute is H.264, and the route
+// object the caller holds does not change.
+//
+// Called at most once per route (subOnce): if the substitute itself dies, its own supervisor
+// restarts it - flapping back to a native engine that just failed would be a loop.
+func (b *mfBridge) substitute(reason string) {
+	b.subOnce.Do(func() {
+		defer close(b.subReady)
+		b.noteDegrade(reason)
+		name, ok := ffmpegH264Fallback()
+		if !ok {
+			b.log.Warn(source, "native MF encode failed mid-route and no ffmpeg H.264 encoder is probed - the route ends",
+				map[string]any{"reason": reason})
+			return
+		}
+		ffmpeg, ok := mediatools.Resolve("ffmpeg")
+		if !ok {
+			b.log.Warn(source, "native MF encode failed mid-route and ffmpeg is not installed - the route ends",
+				map[string]any{"reason": reason})
+			return
+		}
+		spec := b.spec
+		spec.Encoder = name
+		spec.Software = name == "libx264"
+		sub, err := newEncoder(b.ctx, b.log, ffmpeg, spec, b.src)
+		if err != nil {
+			b.log.Warn(source, "native MF encode failed mid-route and the ffmpeg substitute would not start - the route ends",
+				map[string]any{"reason": reason, "err": err.Error()})
+			return
+		}
+		b.degradeMu.Lock()
+		b.subEncoder = name
+		b.degradeMu.Unlock()
+		b.sub.Store(sub)
+		// ONE loud line: this is a real capability loss (pipe-fed, higher sender load, no live
+		// forced IDR), not a detail. The route panel carries the same reason.
+		b.log.Warn(source, "native MF encode failed mid-route - substituted an ffmpeg H.264 encoder on the same route (the stream keeps real pixels; expect higher sender load)",
+			map[string]any{"encoder": name, "reason": reason})
+		go b.pumpSub(sub)
+	})
+}
+
+// pumpSub forwards the substitute's frames onto this bridge's own channel, so consumers that
+// already hold this Source never learn the engine changed underneath them.
+func (b *mfBridge) pumpSub(sub *encoder) {
+	for {
+		f, err := sub.Next(b.ctx)
+		if err != nil {
+			return
+		}
+		b.out.tick()
+		select {
+		case b.frames <- f:
+		case <-b.ctx.Done():
+			return
+		}
+	}
 }
 
 // zeroCopyOpts fills opts.Spout when the whole gate holds; returns whether zero-copy was
@@ -184,6 +297,9 @@ func affinityCandidates(spec medialink.EncodeSpec) []int64 {
 func (b *mfBridge) feed(ctx context.Context) {
 	defer b.enc.Close() // drains; Output closes after tail AUs
 	for {
+		if b.sub.Load() != nil {
+			return // substituted: the ffmpeg encoder owns the inner source from here
+		}
 		f, err := b.src.Next(ctx)
 		if err != nil {
 			return // EOF / cancel - drain via defer
@@ -209,15 +325,23 @@ func (b *mfBridge) feed(ctx context.Context) {
 			f.Release() // Encode returns after the GPU upload copied the rows - buffer is free
 		}
 		if err != nil {
-			if ctx.Err() == nil {
-				b.log.Warn(source, "MF encode failed - route ends", map[string]any{"err": err.Error()})
+			if ctx.Err() != nil {
+				return // route teardown
 			}
+			// NOT the end of the route any more: keep the pixels, change the engine.
+			reason := err.Error()
+			if r := b.enc.DegradeReason(); r != "" {
+				reason = r // the child's attributed cause (stage/rc) beats "encode timeout"
+			}
+			b.substitute(reason)
 			return
 		}
 	}
 }
 
-// emit converts encoder AUs to medialink frames.
+// emit converts encoder AUs to medialink frames. When the native session dies without the feed
+// goroutine noticing - which is EVERY zero-copy route, where the child owns the source and there
+// is no feed goroutine at all - this is where the substitution is triggered.
 func (b *mfBridge) emit(ctx context.Context) {
 	defer close(b.done)
 	for au := range b.enc.Output() {
@@ -242,33 +366,82 @@ func (b *mfBridge) emit(ctx context.Context) {
 			return
 		}
 	}
+	// The native AU stream ended. If that was a FAILURE rather than teardown, substitute -
+	// otherwise a zero-copy route (no feed goroutine) would end here with a frozen picture and
+	// healthy-looking counters, which is precisely the failure shape this must never have.
+	if ctx.Err() != nil {
+		return
+	}
+	if err := b.enc.Failed(); err != nil || b.enc.DegradeReason() != "" {
+		reason := b.enc.DegradeReason()
+		if reason == "" {
+			reason = err.Error()
+		}
+		b.substitute(reason)
+		return
+	}
+	b.declineSubstitution() // clean end of stream: publish the verdict so Next never waits
 }
 
-// Next implements medialink.Source.
+// declineSubstitution publishes "no substitution" so Next() reports EOF immediately on a clean
+// teardown. The verdict is always published exactly once, by whichever path gets there first.
+func (b *mfBridge) declineSubstitution() {
+	b.subOnce.Do(func() { close(b.subReady) })
+}
+
+// Next implements medialink.Source. b.done fires when the NATIVE AU stream ends, which on a
+// substituted route is not the end of the source: wait for the substitution verdict before
+// reporting EOF, so a mid-route engine swap is invisible to the consumer.
 func (b *mfBridge) Next(ctx context.Context) (*medialink.Frame, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case f, ok := <-b.frames:
-		if !ok {
-			return nil, io.EOF
-		}
-		return f, nil
-	case <-b.done:
+	for {
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case f, ok := <-b.frames:
-			if ok {
+			if !ok {
+				return nil, io.EOF
+			}
+			return f, nil
+		case <-b.done:
+			select {
+			case f, ok := <-b.frames:
+				if ok {
+					return f, nil
+				}
+			default:
+			}
+			// Native stream over. A substitution may be starting: block on its verdict once.
+			select {
+			case <-b.subReady:
+				if b.sub.Load() == nil {
+					return nil, io.EOF // substitution declined/failed: the route really is over
+				}
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(subWait):
+				return nil, io.EOF // nobody is substituting: original behaviour
+			}
+			// Substituted: keep serving from b.frames (pumpSub feeds it).
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case f, ok := <-b.frames:
+				if !ok {
+					return nil, io.EOF
+				}
 				return f, nil
 			}
-		default:
 		}
-		return nil, io.EOF
 	}
 }
 
 // Close implements medialink.Source.
 func (b *mfBridge) Close() error {
 	b.cancel()
+	b.declineSubstitution() // never leave a Next() blocked on a verdict that will not come
+	if sub := b.sub.Load(); sub != nil {
+		return sub.Close() // the substitute owns the inner source (it closes it)
+	}
 	if b.zeroCopy {
 		b.enc.Close() // no feed goroutine owns the session on this path (its defer normally does)
 	}
@@ -278,6 +451,10 @@ func (b *mfBridge) Close() error {
 // RequestKeyframe implements medialink.KeyframeSource: a LIVE forced IDR (no child
 // restart, no stream hole) - rate-limited so PLI storms stay cheap anyway.
 func (b *mfBridge) RequestKeyframe() {
+	if sub := b.sub.Load(); sub != nil {
+		sub.RequestKeyframe() // substituted: PLI must still reach the engine that is running
+		return
+	}
 	b.mu.Lock()
 	fresh := time.Now().UnixNano()-b.lastKey < encKeyFreshNs
 	b.mu.Unlock()
@@ -289,7 +466,21 @@ func (b *mfBridge) RequestKeyframe() {
 // PipeStats implements medialink.PipelineReporter (per-session perf: p99 rise is the
 // Phase-2 governor's early saturation signal).
 func (b *mfBridge) PipeStats() medialink.PipelineStats {
+	// Substituted: report the engine that is ACTUALLY running plus why. Reporting the native
+	// engine here would be the same lie the old mid-route failure told - "healthy, native,
+	// hardware" over a stream that had stopped.
+	if sub := b.sub.Load(); sub != nil {
+		st := sub.PipeStats()
+		st.DegradeReason = b.degradeReason()
+		st.SoftwareEncode = st.Encoder == "libx264"
+		st.OutFPS = b.out.value()
+		st.Downgrades += b.downgrades
+		return st
+	}
 	st := b.enc.Stats()
+	if r := st.DegradeReason; r != "" {
+		b.noteDegrade(r)
+	}
 	return medialink.PipelineStats{Encoder: medialink.EncoderMFNative, OutFPS: b.out.value(),
 		Restarts: st.Restarts, LatP50Ms: st.LatP50Ms, LatP99Ms: st.LatP99Ms,
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
@@ -298,5 +489,11 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		AdapterMoved: st.AdapterMoved,
 		EncBusyMs:    st.EncBusyMs,
 		Downgrades:   b.downgrades + st.Downgrades,
-		Dropped:      b.dropped.Load() + medialink.InnerDrops(b.src)}
+		// Saturation drops count as drops: a route shedding frames must never look identical to a
+		// healthy one (that equivalence is what let a black 4K route report healthy for 12 minutes).
+		Dropped: b.dropped.Load() + medialink.InnerDrops(b.src) + uint64(st.BusyDrops),
+		// Vendor-portability + degrade visibility (never a silent downgrade).
+		DegradeReason:  b.degradeReason(),
+		Drive:          st.Drive,
+		SoftwareEncode: st.Software}
 }

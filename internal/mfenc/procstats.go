@@ -29,4 +29,17 @@ type ProcStats struct {
 	CapFmt       uint32 // DXGI format actually consumed
 	CapFlags     uint32 // bit0 zero-copy live, bit1 keyed mutex, bit2 named mutex, bit3 unsynchronized
 	Downgrades   int    // zero-copy recycles/downgrades on this session
+	// Vendor portability. Drive is the mode resolved from the MFT's own MF_TRANSFORM_ASYNC
+	// attribute ("async"/"sync"); Software = the software MF encoder tier is serving this
+	// session; DegradeReason is the one-sentence "why is this route not on its best path".
+	// EMPTY DegradeReason is the only healthy value - a degraded route that reports nothing is
+	// the failure shape this telemetry exists to kill.
+	Drive         string
+	Software      bool
+	DegradeReason string
+	EncFails      uint32 // attributed mid-route encode failures reported by the child
+	// BusyDrops: frames the encoder had no credit for inside the child's per-frame budget. This
+	// is what encoder SATURATION looks like now - previously the same condition blocked long
+	// enough for the parent's deadline to end the route.
+	BusyDrops uint32
 }
