@@ -1,10 +1,16 @@
 //go:build spout
 
-// Windows Spout2 receiver backend: one LockOSThread'd worker per receiver owning its own
-// SPOUTLIBRARY handle + GL context (ReceiveImage needs a current context, like SendImage).
+// Windows Spout2 receiver backend: one worker per receiver owning a D3D11 receiver context.
+//
+// It does NOT use SPOUTLIBRARY::ReceiveImage. That call sits in a range of the interface where the
+// vendored header and the shipped DLL disagree about slot order, so it dispatched to ReceiveTexture
+// and silently copied nothing while reporting success + frame-new - a black stream with healthy
+// counters. The shim reads the sender's shared texture with plain D3D11 instead (spout_shim.cpp
+// carries the evidence). Consequence worth knowing: receiving no longer needs an OpenGL context.
 package videoshare
 
 // #cgo CPPFLAGS: -I${SRCDIR}/../../third_party/spout/include
+// #cgo LDFLAGS: -ld3d11 -ldxguid
 // #include <stdlib.h>
 // #include "spout_shim.h"
 import "C"
@@ -90,14 +96,13 @@ func (r *spoutReceiver) run(name string) {
 
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
-	h := C.rave_spout_create()
+	h := C.rave_spout_recv_create()
 	if h == nil {
 		r.log.Warn(source, "spout: OpenGL context unavailable; receiver idle", map[string]any{"sender": name})
 		<-r.done
 		return
 	}
 	defer C.rave_spout_recv_release(h)
-	C.rave_spout_set_receiver(h, cname)
 
 	var buf []byte
 	var bw, bh int // geometry buf was sized for (a resize between poll passes must not tear Rect)
@@ -239,13 +244,12 @@ func grabSenderFrame(name string, w, h int) (*image.NRGBA, error) {
 		defer runtime.UnlockOSThread()
 		cn := C.CString(name)
 		defer C.free(unsafe.Pointer(cn))
-		hdl := C.rave_spout_create()
+		hdl := C.rave_spout_recv_create()
 		if hdl == nil {
 			ch <- res{err: fmt.Errorf("videoshare: no OpenGL context for a grab")}
 			return
 		}
 		defer C.rave_spout_recv_release(hdl)
-		C.rave_spout_set_receiver(hdl, cn)
 		pix := make([]byte, size)
 		var gw, gh C.uint
 		deadline := time.Now().Add(3 * time.Second)

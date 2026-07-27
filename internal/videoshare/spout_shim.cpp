@@ -208,33 +208,6 @@ int rave_spout_find(const char* name) {
     return s->FindSenderName(name) ? 1 : 0;
 }
 
-// framereader() is a SECOND process-wide handle used only for frame-count queries. Separate from
-// registry() because GetSenderFrame needs a receiver NAME set, and mutating that on the shared
-// registry handle would race every other query on it. No OpenGL context, no ReceiveImage, so no
-// readback and no GL thread ownership - this is the "metadata-only receiver" the design names.
-static std::mutex& framereader_mu(void) {
-    static std::mutex m;
-    return m;
-}
-
-static SPOUTHANDLE framereader(void) {
-    static SPOUTHANDLE s = make_spout(); // magic static: run-once, thread-safe
-    return s;
-}
-
-int rave_spout_sender_frame(const char* name, long long* frame, double* fps) {
-    if (!name || !frame) return 0;
-    *frame = -1;
-    if (fps) *fps = 0.0;
-    std::lock_guard<std::mutex> lk(framereader_mu());
-    SPOUTHANDLE s = framereader();
-    if (!s) return 0;
-    s->SetReceiverName(name);
-    *frame = (long long)s->GetSenderFrame();
-    if (fps) *fps = s->GetSenderFps();
-    return 1;
-}
-
 int rave_spout_sender_name(int idx, char* out, int cap) {
     if (!out || cap <= 0) return 0;
     std::lock_guard<std::mutex> lk(registry_mu());
@@ -314,9 +287,195 @@ int rave_spout_scan(char* names, int nameCap, int maxN, unsigned int* dims) {
     return out;
 }
 
-void rave_spout_set_receiver(void* h, const char* name) {
+// -- D3D11 receiver (replaces SPOUTLIBRARY::ReceiveImage) ------------------------------------
+//
+// WHY the readback is done here instead of by ReceiveImage:
+//
+// The vendored SpoutLibrary.h and the shipped SpoutLibrary.dll are DIFFERENT revisions of the
+// COM-like interface, and the mismatch is a WINDOW, not a uniform shift. Proven by execution on
+// 2.007.017 (canary + ground-truth probes, see recvdiag_spout_test.go):
+//
+//   SendImage        (hdr slot   5)  aligns   - sending has always worked
+//   GetHandle        (hdr slot  12)  SHIFTED  - returns 0 where the registry has a real handle
+//   ReceiveImage     (hdr slot  19)  SHIFTED  - lands on ReceiveTexture(GLuint,...), so the pixel
+//                                               POINTER is taken as a texture id: it returns true,
+//                                               reports frame-new, and never writes one byte
+//                                               (a 33 MB canary survived 12/12 attempts)
+//   IsFrameNew       (hdr slot  22)  SHIFTED  - lands on IsConnected: permanently "true"
+//   GetSenderWidth   (hdr slot  24)  SHIFTED  - returns GetSenderName's POINTER
+//   GetSenderHeight  (hdr slot  25)  SHIFTED  - returns the real WIDTH
+//   GetSenderFormat  (hdr slot  26)  SHIFTED  - returns the real HEIGHT
+//   GetSenderCount / GetSender / FindSenderName / GetSenderInfo (slots 111-114)  align
+//
+// That is why the receive path reported healthy metadata for so long while delivering black, and
+// why the PRE-rework code got no frames at all: its first call passed NULL, so ReceiveTexture(0,..)
+// simply failed. Both shapes are the same bug.
+//
+// So the only Spout call left on this path is GetSenderInfo - which aligns, is a shared-memory read
+// and already backs the zero-copy encode path. Everything else is plain D3D11: OpenSharedResource
+// -> CopyResource into a STAGING texture -> Map -> row copy. No OpenGL context, no GL thread
+// affinity, and no SDK ABI surface inside the window that broke.
+
+#define RAVE_ACQUIRE_MS 3 // bounded mutex wait: never spin on a sender's access mutex
+#define RAVE_FMT_BGRA 87  // DXGI_FORMAT_B8G8R8A8_UNORM - what Spout creates
+
+struct RaveRecv {
+    ID3D11Device* dev = nullptr;
+    ID3D11DeviceContext* ctx = nullptr;
+    ID3D11Texture2D* shared = nullptr; // the sender's texture, opened on our device
+    ID3D11Texture2D* stage = nullptr;  // CPU-readable copy target
+    HANDLE amutex = nullptr;           // "<name>_SpoutAccessMutex", the same guard the SDK uses
+    HANDLE share = nullptr;            // handle currently open (a sender restart changes it)
+    unsigned int w = 0, h = 0;
+    DWORD fmt = 0;
+    char name[256] = {0};
+};
+
+// recv_drop_texture releases the opened sender texture + staging pair (sender changed or closing).
+static void recv_drop_texture(RaveRecv* r) {
+    if (r->stage) { r->stage->Release(); r->stage = nullptr; }
+    if (r->shared) { r->shared->Release(); r->shared = nullptr; }
+    if (r->amutex) { CloseHandle(r->amutex); r->amutex = nullptr; }
+    r->share = nullptr;
+    r->w = 0;
+    r->h = 0;
+    r->fmt = 0;
+}
+
+// recv_open_texture opens the sender's shared texture plus a matching staging texture.
+static bool recv_open_texture(RaveRecv* r, const char* name, HANDLE share, unsigned int w,
+                              unsigned int h) {
+    recv_drop_texture(r);
+    // Legacy SHARED handle (Spout hands out D3D11_RESOURCE_MISC_SHARED, not an NT handle).
+    if (FAILED(r->dev->OpenSharedResource(share, IID_ID3D11Texture2D, (void**)&r->shared))) {
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC sd;
+    memset(&sd, 0, sizeof(sd));
+    r->shared->GetDesc(&sd);
+    if (sd.Width != w || sd.Height != h) return false; // registry and texture disagree: refuse
+    D3D11_TEXTURE2D_DESC td;
+    memset(&td, 0, sizeof(td));
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = sd.Format; // copy in the sender's own format; swizzle during the row copy
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (FAILED(r->dev->CreateTexture2D(&td, nullptr, &r->stage))) return false;
+    // Spout guards its texture with a NAMED mutex (name confirmed by execution in zigmedia inc 1).
+    char mname[320];
+    snprintf(mname, sizeof(mname), "%s_SpoutAccessMutex", name);
+    r->amutex = OpenMutexA(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE, mname);
+    r->share = share;
+    r->w = w;
+    r->h = h;
+    r->fmt = sd.Format;
+    snprintf(r->name, sizeof(r->name), "%s", name);
+    return true;
+}
+
+void* rave_spout_recv_create(void) {
+    RaveRecv* r = new RaveRecv();
+    // No GL, no swap chain, no window - just a device that can open the sender's texture.
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+                                   &r->dev, nullptr, &r->ctx);
+    if (FAILED(hr) || !r->dev || !r->ctx) {
+        if (r->ctx) r->ctx->Release();
+        if (r->dev) r->dev->Release();
+        delete r;
+        return nullptr;
+    }
+    return (void*)r;
+}
+
+void rave_spout_recv_release(void* h) {
     if (!h) return;
-    ((SPOUTHANDLE)h)->SetReceiverName(name);
+    RaveRecv* r = (RaveRecv*)h;
+    recv_drop_texture(r);
+    if (r->ctx) r->ctx->Release();
+    if (r->dev) r->dev->Release();
+    delete r;
+}
+
+// copy_rows moves mapped staging rows into the caller's tightly packed RGBA buffer, honouring
+// RowPitch and swizzling B<->R when the sender's texture is BGRA (which it normally is). The old
+// path asked ReceiveImage for GL_RGBA and the SDK did this conversion internally - same work.
+static void copy_rows(unsigned char* dst, const unsigned char* src, size_t pitch, unsigned int w,
+                      unsigned int h, bool swizzle) {
+    const size_t row = (size_t)w * 4;
+    for (unsigned int y = 0; y < h; y++) {
+        const unsigned char* in = src + (size_t)y * pitch;
+        unsigned char* out = dst + (size_t)y * row;
+        if (!swizzle) {
+            memcpy(out, in, row);
+            continue;
+        }
+        const uint32_t* ip = (const uint32_t*)in;
+        uint32_t* op = (uint32_t*)out;
+        for (unsigned int x = 0; x < w; x++) {
+            const uint32_t v = ip[x]; // memory order B,G,R,A
+            op[x] = (v & 0xFF00FF00u) | ((v & 0x00FF0000u) >> 16) | ((v & 0x000000FFu) << 16);
+        }
+    }
+}
+
+// rave_spout_recv copies the named sender's current texture content into pixels (RGBA).
+// Return codes are UNCHANGED from the SPOUTLIBRARY implementation, so recvpoll.go's state machine,
+// its geometry validation and the bounded pixel pool keep working exactly as before:
+//   -1 no sender / open or copy failed       2 sender (re)connected or resized: caller re-sizes
+//    0 connected, nothing copied             3 buffer absent/undersized: caller re-sizes quietly
+//    1 a frame was copied into pixels
+int rave_spout_recv(void* h, const char* name, unsigned char* pixels, unsigned int cap,
+                    unsigned int* w, unsigned int* hgt) {
+    if (!h || !name || !w || !hgt) return -1;
+    RaveRecv* r = (RaveRecv*)h;
+    *w = 0;
+    *hgt = 0;
+
+    unsigned int sw = 0, sh = 0;
+    HANDLE share = 0;
+    DWORD fmt = 0;
+    {
+        std::lock_guard<std::mutex> lk(registry_mu());
+        SPOUTHANDLE s = registry();
+        if (!s || !s->GetSenderInfo(name, sw, sh, share, fmt)) return -1;
+    }
+    // Torn registry info or a sender with no DX11 texture (DX9 / CPU memoryshare): nothing to read.
+    if (!RAVE_SPOUT_DIM_OK(sw) || !RAVE_SPOUT_DIM_OK(sh) || !share) return -1;
+    *w = sw;
+    *hgt = sh;
+
+    // (Re)open on first use, on a resize, or when the sender was RE-CREATED (a new share handle -
+    // reusing a dead texture is what makes a "healthy" route ship a frozen or blank picture).
+    if (!r->shared || r->share != share || r->w != sw || r->h != sh || strcmp(r->name, name) != 0) {
+        if (!recv_open_texture(r, name, share, sw, sh)) return -1;
+        return 2; // real sender activity: caller sizes its buffer, the frame comes next poll
+    }
+    if (!pixels || cap < (unsigned int)((size_t)sw * sh * 4)) return 3;
+
+    // ONE bounded acquire around ONE GPU copy: holding or hammering a sender's access mutex
+    // serialises against the sending app's and DWM's submissions (documented pointer-lag hazard).
+    bool held = false;
+    if (r->amutex) {
+        DWORD wr = WaitForSingleObject(r->amutex, RAVE_ACQUIRE_MS);
+        if (wr != WAIT_OBJECT_0 && wr != WAIT_ABANDONED) return 0; // busy: skip this tick
+        held = true;
+    }
+    r->ctx->CopyResource(r->stage, r->shared);
+    if (held) ReleaseMutex(r->amutex);
+
+    D3D11_MAPPED_SUBRESOURCE m;
+    memset(&m, 0, sizeof(m));
+    // Map(READ) on a staging texture waits for the copy to land - no explicit Flush needed.
+    if (FAILED(r->ctx->Map(r->stage, 0, D3D11_MAP_READ, 0, &m)) || !m.pData) return -1;
+    copy_rows(pixels, (const unsigned char*)m.pData, m.RowPitch, sw, sh, r->fmt == RAVE_FMT_BGRA);
+    r->ctx->Unmap(r->stage, 0);
+    return 1;
 }
 
 // rave_spout_recv: -1 receive failed, 0 no new frame, 1 new frame in pixels, 2 sender
@@ -324,56 +483,28 @@ void rave_spout_set_receiver(void* h, const char* name) {
 // absent/undersized with NO sender update (caller resizes quietly - reporting this as 2
 // used to re-arm the receiver's 250 Hz poll forever against a stale/0x0 sender). Codes
 // mirrored in recvpoll.go.
-// recv_dims resolves the named sender's current size. GetSenderInfo (a shared-memory registry
-// read, the same call rave_spout_scan uses successfully) rather than
-// GetSenderWidth/GetSenderHeight: those two vtable slots are SKEWED against the shipped
-// SpoutLibrary.dll on at least one 2.007.x pairing - GetSenderWidth() dispatched to
-// GetSenderName() and returned a truncated POINTER (139846784) while GetSenderHeight() returned
-// the real width. Sizing a buffer from that made the media child allocate 2 TB and die with
-// "runtime: cannot allocate memory". Falls back to the width/height slots (guarded) only when no
-// name is known.
-static bool recv_dims(SPOUTHANDLE s, const char* name, unsigned int* w, unsigned int* h) {
-    unsigned int ww = 0, hh = 0;
-    if (name && name[0]) {
-        HANDLE share = 0;
-        DWORD fmt = 0;
-        if (!s->GetSenderInfo(name, ww, hh, share, fmt)) { ww = 0; hh = 0; }
-    }
-    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) {
-        ww = s->GetSenderWidth();
-        hh = s->GetSenderHeight();
-    }
-    if (!RAVE_SPOUT_DIM_OK(ww) || !RAVE_SPOUT_DIM_OK(hh)) {
-        *w = 0;
-        *h = 0;
-        return false;
-    }
-    *w = ww;
-    *h = hh;
-    return true;
-}
-
-int rave_spout_recv(void* h, const char* name, unsigned char* pixels, unsigned int cap, unsigned int* w, unsigned int* hgt) {
-    if (!h || !w || !hgt) return -1;
+// rave_spout_recv_diag - see the header. Deliberately does NOT pre-size or early-return: it calls
+// ReceiveImage exactly once with whatever the caller passed, so the caller's canary tells us whether
+// the SDK wrote anything at all.
+int rave_spout_recv_diag(void* h, const char* name, unsigned char* pixels, unsigned int cap,
+                         rave_spout_diag* out) {
+    if (!h || !out) return 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
-    // Size FIRST, receive second. ReceiveImage is never called without a correctly sized
-    // buffer: the SDK's readback writes w*h*4 bytes, so an absent/undersized target is
-    // either an overrun or (observed) an access violation inside the DLL on the NEXT call.
-    // Dims come from the registry, which needs no connection - so the caller can allocate
-    // before the first receive instead of probing with a NULL buffer.
-    if (!recv_dims(s, name, w, hgt)) return 3; // no usable size yet: caller retries
-    if (!pixels || cap < (size_t)(*w) * (*hgt) * 4) return 3; // caller must (re)size
-    if (!s->ReceiveImage(pixels, 0x1908 /*GL_RGBA*/, false, 0)) return -1;
-    if (s->IsUpdated()) return 2; // resized under us: caller re-sizes, frame comes next poll
-    return s->IsFrameNew() ? 1 : 0;
-}
-
-void rave_spout_recv_release(void* h) {
-    if (!h) return;
-    SPOUTHANDLE s = (SPOUTHANDLE)h;
-    s->ReleaseReceiver();
-    s->CloseOpenGL();
-    s->Release();
+    memset(out, 0, sizeof(*out));
+    if (name && name[0]) s->SetReceiverName(name);
+    out->recv_ok = s->ReceiveImage(pixels, 0x1908 /*GL_RGBA*/, false, 0) ? 1 : 0;
+    out->updated = s->IsUpdated() ? 1 : 0;
+    out->frame_new = s->IsFrameNew() ? 1 : 0;
+    out->connected = s->IsConnected() ? 1 : 0;
+    out->sw = s->GetSenderWidth();
+    out->sh = s->GetSenderHeight();
+    out->sfmt = (unsigned int)s->GetSenderFormat();
+    out->cpu = s->GetSenderCPU() ? 1 : 0;
+    out->gldx = s->GetSenderGLDX() ? 1 : 0;
+    out->frame = (long long)s->GetSenderFrame();
+    out->handle = (unsigned long long)(uintptr_t)s->GetSenderHandle();
+    (void)cap;
+    return 1;
 }
 
 } // extern "C"
