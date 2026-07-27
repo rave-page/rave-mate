@@ -1,6 +1,6 @@
 # P0: CPU readback delivered black frames
 
-Branch `fix/spout-recv-black` off `development` @c3ed1f5. Fixed in `9cad3f9`.
+Branch `fix/spout-recv-black` off `development` @c3ed1f5. Fixed in `4628139`.
 
 ## Root cause
 
@@ -102,6 +102,38 @@ OpenSharedResource → CopyResource into a STAGING texture → Map → row copy 
   BGRA→RGBA conversion internally.
 - Side effect worth knowing: **receiving no longer needs an OpenGL context** (one of the design's
   standing goals, §2 item 4).
+
+## Where the readback can and cannot serve (input for the default flip)
+
+The directive asks which environments the readback cannot serve. The memory-share/interop hypothesis
+was refuted, so the answer is not "windowless processes" - it is a much shorter list, because the new
+path needs strictly LESS than the old one:
+
+**Needs:** `SpoutLibrary.dll` resolvable (registry queries only), a D3D11 hardware device, and a
+sender with a DX11 shared texture. **No OpenGL context, no window, no interop, no thread affinity** -
+so windowless children, services and headless sessions are fine, which is what the live gates here
+demonstrate (a windowless Go test binary reads 4K at 58.6 fps).
+
+**Genuinely unavailable (refuses loudly, returns no frames):**
+
+| environment | behaviour | note |
+|---|---|---|
+| CPU / memory-share sender (`share == 0`), DX9 sender | `-1`, no frames | **The zero-copy path cannot serve these either** - it needs the same handle. So this is not a case where the readback is a fallback for zero-copy; NEITHER path works, and that is worth knowing before the flip. |
+| No D3D11 hardware adapter (software-only / no GPU) | receiver open fails with a reason | The old GL path was equally dead here. |
+| Torn registry geometry | `-1` until coherent | Pre-existing OOM-fix behaviour, unchanged. |
+| Sender on another GPU | **now works** | See below - it would have been a new failure mode. |
+
+**One gap this directive made me close.** The old GL path let Spout's interop hide which adapter owned
+the sender's texture. A plain D3D11 device on the *default* adapter cannot open a texture created on
+another GPU, so on a multi-GPU box the fallback would have been dead for senders on the second
+adapter - silently, with the same "no frames" shape. `recv_rebind_adapter` now walks the DXGI adapters
+after a failed open, rebuilds the device on the one that can open the handle, and keeps it for the
+receiver's life (bounded: one device creation per adapter, only after a failure). This box has two
+adapter LUIDs, which is exactly the configuration that would have hit it.
+
+**Bottom line for the flip:** the readback is now a dependable parity oracle everywhere the zero-copy
+path can work, plus it needs no GL. The only senders it cannot serve are the ones zero-copy cannot
+serve either.
 
 ## Content gates (requirement 2)
 

@@ -10,7 +10,7 @@
 package videoshare
 
 // #cgo CPPFLAGS: -I${SRCDIR}/../../third_party/spout/include
-// #cgo LDFLAGS: -ld3d11 -ldxguid
+// #cgo LDFLAGS: -ld3d11 -ldxgi -ldxguid
 // #include <stdlib.h>
 // #include "spout_shim.h"
 import "C"

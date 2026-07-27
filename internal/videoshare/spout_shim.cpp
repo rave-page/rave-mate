@@ -7,6 +7,8 @@
 #include <cstring>
 #include <mutex>
 #include <windows.h>
+#include <dxgi.h>
+#include <dxgi1_2.h>
 #include "SpoutLibrary.h"
 #include "spout_shim.h"
 
@@ -342,13 +344,59 @@ static void recv_drop_texture(RaveRecv* r) {
     r->fmt = 0;
 }
 
+// recv_make_device creates a D3D11 device on a specific adapter (nullptr = the default one).
+static bool recv_make_device(RaveRecv* r, IDXGIAdapter1* ad) {
+    if (r->ctx) { r->ctx->Release(); r->ctx = nullptr; }
+    if (r->dev) { r->dev->Release(); r->dev = nullptr; }
+    return SUCCEEDED(D3D11CreateDevice(ad, ad ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE,
+                                       nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                       D3D11_SDK_VERSION, &r->dev, nullptr, &r->ctx)) &&
+           r->dev && r->ctx;
+}
+
+// recv_rebind_adapter walks the DXGI adapters and rebuilds the device on one that CAN open share.
+//
+// OpenSharedResource only works on the adapter that created the texture, and there is no API that
+// answers "which adapter owns this handle" (established in zigmedia inc 3). The old GL path hid this
+// inside Spout's interop; a plain D3D11 device on the DEFAULT adapter would simply fail to read a
+// sender produced on the other GPU - i.e. the fallback would be dead on multi-GPU boxes, which is
+// exactly what a fallback must never be. So: probe. Bounded - one device creation per adapter, only
+// after a failure, and the winning adapter is kept for the life of the receiver.
+static bool recv_rebind_adapter(RaveRecv* r, HANDLE share) {
+    IDXGIFactory1* fac = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_IDXGIFactory1, (void**)&fac)) || !fac) return false;
+    bool ok = false;
+    for (UINT i = 0; !ok; i++) {
+        IDXGIAdapter1* ad = nullptr;
+        if (fac->EnumAdapters1(i, &ad) != S_OK || !ad) break;
+        DXGI_ADAPTER_DESC1 d;
+        if (SUCCEEDED(ad->GetDesc1(&d)) && (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0 &&
+            recv_make_device(r, ad)) {
+            ID3D11Texture2D* probe = nullptr;
+            if (SUCCEEDED(r->dev->OpenSharedResource(share, IID_ID3D11Texture2D, (void**)&probe)) &&
+                probe) {
+                probe->Release();
+                ok = true;
+            }
+        }
+        ad->Release();
+    }
+    fac->Release();
+    if (!ok) recv_make_device(r, nullptr); // leave a usable default device behind
+    return ok;
+}
+
 // recv_open_texture opens the sender's shared texture plus a matching staging texture.
 static bool recv_open_texture(RaveRecv* r, const char* name, HANDLE share, unsigned int w,
                               unsigned int h) {
     recv_drop_texture(r);
     // Legacy SHARED handle (Spout hands out D3D11_RESOURCE_MISC_SHARED, not an NT handle).
     if (FAILED(r->dev->OpenSharedResource(share, IID_ID3D11Texture2D, (void**)&r->shared))) {
-        return false;
+        // Most likely the sender lives on another GPU: find the adapter that owns it.
+        if (!recv_rebind_adapter(r, share)) return false;
+        if (FAILED(r->dev->OpenSharedResource(share, IID_ID3D11Texture2D, (void**)&r->shared))) {
+            return false;
+        }
     }
     D3D11_TEXTURE2D_DESC sd;
     memset(&sd, 0, sizeof(sd));
@@ -380,13 +428,9 @@ static bool recv_open_texture(RaveRecv* r, const char* name, HANDLE share, unsig
 
 void* rave_spout_recv_create(void) {
     RaveRecv* r = new RaveRecv();
-    // No GL, no swap chain, no window - just a device that can open the sender's texture.
-    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-                                   &r->dev, nullptr, &r->ctx);
-    if (FAILED(hr) || !r->dev || !r->ctx) {
-        if (r->ctx) r->ctx->Release();
-        if (r->dev) r->dev->Release();
+    // No GL, no swap chain, no window - just a device that can open the sender's texture. The
+    // adapter is re-picked later if the sender turns out to live on another GPU.
+    if (!recv_make_device(r, nullptr)) {
         delete r;
         return nullptr;
     }
