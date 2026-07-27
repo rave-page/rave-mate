@@ -202,3 +202,80 @@ func cstr(b []byte) string {
 	}
 	return string(b)
 }
+
+// grabSenderFrame is a ONE-SHOT receive that ignores Spout's IsFrameNew hint and returns whatever
+// the sender's texture currently holds.
+//
+// Why it exists: a natively DECODED route (zigmedia inc 2) has its texture written by the encoder
+// child, and Spout bumps a sender's frame counter only inside SendTexture/SendImage - so
+// IsFrameNew() stays false while the CONTENT changes every frame. The polling receiver above gates
+// on that hint (correctly: it is what keeps an idle sender from costing 250 readbacks/s), which
+// makes it useless as an oracle for "is a picture actually being published". This is that oracle.
+//
+// MEASURED LIMITATION (this rig, 2026-07-27): even this helper reads all-zero pixels for a Spout
+// sender in ANOTHER process while ReceiveImage reports success (rc=1) - including for an ordinary
+// SendImage publish. So Spout's receive side is NOT a usable oracle here at all, and the decode
+// path's picture is verified by the child's own GPU read-back instead
+// (RAVE_MATE_MFDEC_PROBE_BANDS, native/zigenc/src/dec.zig probeBands). Kept because the live gate
+// uses it as a POSITIVE CONTROL: it only trusts a blank read-back once it has seen a non-blank one.
+//
+// Own thread + own GL context + own handle, released before returning. Not for the hot path.
+func grabSenderFrame(name string, w, h int) (*image.NRGBA, error) {
+	size, ok := FrameBytes(w, h)
+	if !ok {
+		return nil, fmt.Errorf("videoshare: bad grab size %dx%d", w, h)
+	}
+	preloadManagedDLL()
+	if C.rave_spout_available() == 0 {
+		return nil, errShareDims
+	}
+	type res struct {
+		img *image.NRGBA
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		cn := C.CString(name)
+		defer C.free(unsafe.Pointer(cn))
+		hdl := C.rave_spout_create()
+		if hdl == nil {
+			ch <- res{err: fmt.Errorf("videoshare: no OpenGL context for a grab")}
+			return
+		}
+		defer C.rave_spout_recv_release(hdl)
+		C.rave_spout_set_receiver(hdl, cn)
+		pix := make([]byte, size)
+		var gw, gh C.uint
+		deadline := time.Now().Add(3 * time.Second)
+		lastRC, polls := -99, 0
+		for time.Now().Before(deadline) {
+			rc := int(C.rave_spout_recv(hdl, cn, (*C.uchar)(unsafe.Pointer(&pix[0])),
+				C.uint(len(pix)), &gw, &gh))
+			lastRC, polls = rc, polls+1
+			// rc 0 = connected, "no NEW frame" - but ReceiveImage still copied the current texture,
+			// which is exactly the case this helper exists for. Keep polling only while the buffer is
+			// still blank (the sender's initial zeroed frame).
+			if (rc == 0 || rc == 1) && int(gw) == w && int(gh) == h && !allZero(pix) {
+				ch <- res{img: &image.NRGBA{Pix: pix, Stride: w * 4, Rect: image.Rect(0, 0, w, h)}}
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		ch <- res{err: fmt.Errorf("videoshare: sender %q published no non-blank frame within 3s (polls=%d lastRC=%d dims=%dx%d)",
+			name, polls, lastRC, int(gw), int(gh))}
+	}()
+	r := <-ch
+	return r.img, r.err
+}
+
+// allZero reports whether every byte is 0 (a freshly created, never-written sender texture).
+func allZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}

@@ -365,12 +365,26 @@ func (f *frameSender) eagerCreate(h unsafe.Pointer, cname *C.char) {
 		return // plain FrameSender: the sender materialises on the first Send, as before
 	}
 	var share C.ulonglong
-	if C.rave_spout_open_sender(h, cname, C.uint(f.openW), C.uint(f.openH), spoutSenderFmt, &share) == 0 || share == 0 {
-		f.openErr = "SendImage/GetHandle produced no shared texture"
+	var gotFmt C.uint
+	rc := C.rave_spout_open_sender(h, cname, C.uint(f.openW), C.uint(f.openH), spoutSenderFmt, &share, &gotFmt)
+	if rc != 1 || share == 0 {
+		switch rc {
+		case -1:
+			f.openErr = "SendImage refused (no GL/DX interop for this geometry)"
+		case -2:
+			f.openErr = "GetHandle returned no DX11 shared texture (CPU/memoryshare sender)"
+		default:
+			f.openErr = fmt.Sprintf("rave_spout_open_sender rc=%d share=%#x", int(rc), uint64(share))
+		}
 		return
 	}
 	f.share = uint64(share)
-	f.shareFmt = spoutSenderFmt
+	// The format Spout ACTUALLY created, not the one requested: the child validates it against the
+	// texture desc and refuses anything outside its allowlist, so guessing here would be a lie.
+	f.shareFmt = uint32(gotFmt)
+	if f.shareFmt == 0 {
+		f.shareFmt = spoutSenderFmt
+	}
 }
 
 // signalReady closes ready once (both the success and the failure paths run it).

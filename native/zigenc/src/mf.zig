@@ -101,6 +101,9 @@ const D3D11_VPIV_DIMENSION_TEXTURE2D: u32 = 1;
 const D3D11_VPOV_DIMENSION_TEXTURE2D: u32 = 1;
 const D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT: u32 = 1;
 pub const VP_FORMAT_SUPPORT_OUTPUT: u32 = 2;
+pub const USAGE_STAGING: u32 = 3;
+pub const CPU_ACCESS_READ: u32 = 0x20000;
+pub const MAP_READ: u32 = 1;
 const DXGI_ADAPTER_FLAG_SOFTWARE: u32 = 2;
 const VT_UI4: u16 = 19;
 const VT_BOOL: u16 = 11;
@@ -138,6 +141,8 @@ pub const D3D11_TEXTURE2D_DESC = extern struct {
 const DXGI_RATIONAL = extern struct { Numerator: u32, Denominator: u32 };
 
 pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+
+pub const MAPPED_SUBRESOURCE = extern struct { pData: ?[*]u8, RowPitch: u32, DepthPitch: u32 };
 
 const D3D11_VIDEO_PROCESSOR_CONTENT_DESC = extern struct {
     InputFrameFormat: u32,
@@ -367,8 +372,18 @@ pub const ID3D11DeviceContext = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
         _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
-        _p7: [41]VOP, // VSSetConstantBuffers(7) .. CopyResource(47)
+        _p7: [7]VOP, // VSSetConstantBuffers(7) .. Draw(13)
+        Map: *const fn (*anyopaque, *anyopaque, u32, u32, u32, *MAPPED_SUBRESOURCE) callconv(.winapi) HRESULT,
+        Unmap: *const fn (*anyopaque, *anyopaque, u32) callconv(.winapi) void,
+        _p16: [31]VOP, // PSSetConstantBuffers(16) .. CopySubresourceRegion(46)
+        CopyResource: *const fn (*anyopaque, *anyopaque, *anyopaque) callconv(.winapi) void,
         UpdateSubresource: *const fn (*anyopaque, *anyopaque, u32, ?*const anyopaque, *const anyopaque, u32, u32) callconv(.winapi) void,
+        _p49: [62]VOP, // CopyStructureCount(49) .. ClearState(110)
+        // Flush(111) is REQUIRED on the decode/publish path: a write into a texture ANOTHER PROCESS
+        // reads is only visible once the command list is submitted, and a named (CPU) access mutex
+        // carries no implicit flush the way IDXGIKeyedMutex.ReleaseSync does. Without it the
+        // receiver reads the pre-blit content - a blank picture with zero errors in every counter.
+        Flush: *const fn (*anyopaque) callconv(.winapi) void,
     },
 };
 

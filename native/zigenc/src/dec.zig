@@ -668,6 +668,12 @@ pub const Dec = struct {
         defer mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(tex))));
         var sub: u32 = 0;
         _ = dbuf.v.GetSubresourceIndex(@ptrCast(dbuf), &sub);
+        if (d.pub_n == 0) { // one-shot forensics: what the decoder actually handed us
+            const dt: *mf.ID3D11Texture2D = @ptrCast(@alignCast(tex));
+            var td: mf.D3D11_TEXTURE2D_DESC = undefined;
+            dt.v.GetDesc(@ptrCast(dt), &td);
+            api.traceStage("dec first surface: {d}x{d} fmt={d} arr={d} bind={x} misc={x} sub={d}", .{ td.Width, td.Height, td.Format, td.ArraySize, td.BindFlags, td.MiscFlags, sub });
+        }
 
         const in_view = d.inputView(tex, sub) orelse {
             d.reason = .view_failed;
@@ -690,6 +696,11 @@ pub const Dec = struct {
             .pInputSurface = in_view,
         };
         const ok = !mf.failed(d.vctx.v.VideoProcessorBlt(@ptrCast(d.vctx), d.vproc, d.dst_view, 0, 1, &stream));
+        // Submit before releasing: the receiver is another PROCESS, and a named access mutex has no
+        // implicit flush. Flush only submits the command list (it does not wait), so the mutex is
+        // still held for one queued Blt and nothing more - the same discipline Spout's own sender
+        // uses (CopyResource + Flush inside the lock).
+        if (ok) d.ctx.v.Flush(@ptrCast(d.ctx));
         d.release();
         if (!ok) {
             d.reason = .blt_failed;
@@ -753,6 +764,60 @@ pub const Dec = struct {
             waited += 1;
         }
         return if (d.drain_done) 0 else 1;
+    }
+
+    /// probeBands is the CORRECTNESS oracle for the published picture: copy the destination texture
+    /// to a staging texture, map it, and report the pixel at the top and bottom of the frame. Row
+    /// order and channel order are the two failure modes that look perfect in every counter, and
+    /// Spout's own receive path cannot see them here (it never reports a "new frame" for a texture
+    /// written by a foreign device, so a read-back through it is blank whatever we publish).
+    ///
+    /// Test-only, one shot, off unless RAVE_MATE_MFDEC_PROBE_BANDS=1. Allocates one staging
+    /// texture, releases it before returning, and never runs on the steady-state path.
+    pub fn probeBands(d: *Dec) void {
+        var td = mf.D3D11_TEXTURE2D_DESC{
+            .Width = @intCast(d.out_w),
+            .Height = @intCast(d.out_h),
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = d.dst_fmt,
+            .SampleCount = 1,
+            .SampleQuality = 0,
+            .Usage = mf.USAGE_STAGING,
+            .BindFlags = 0,
+            .CPUAccessFlags = mf.CPU_ACCESS_READ,
+            .MiscFlags = 0,
+        };
+        var stage: ?*anyopaque = null;
+        if (mf.failed(d.dev.v.CreateTexture2D(@ptrCast(d.dev), &td, null, &stage)) or stage == null) {
+            api.traceStage("dec probe: no staging texture", .{});
+            return;
+        }
+        defer mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(stage.?))));
+        switch (d.acquire()) {
+            .ok => {},
+            else => {
+                api.traceStage("dec probe: could not acquire the destination", .{});
+                return;
+            },
+        }
+        d.ctx.v.CopyResource(@ptrCast(d.ctx), stage.?, d.dst_tex);
+        d.ctx.v.Flush(@ptrCast(d.ctx));
+        d.release();
+        var m = mf.MAPPED_SUBRESOURCE{ .pData = null, .RowPitch = 0, .DepthPitch = 0 };
+        if (mf.failed(d.ctx.v.Map(@ptrCast(d.ctx), stage.?, 0, mf.MAP_READ, 0, &m)) or m.pData == null) {
+            api.traceStage("dec probe: map failed", .{});
+            return;
+        }
+        const base = m.pData.?;
+        const w: usize = @intCast(d.out_w);
+        const h: usize = @intCast(d.out_h);
+        // B8G8R8A8: byte order B,G,R,A. Sample well inside each band so chroma subsampling cannot
+        // straddle the boundary.
+        const top = base + (h / 8) * m.RowPitch + (w / 2) * 4;
+        const bot = base + (h * 7 / 8) * m.RowPitch + (w / 2) * 4;
+        api.traceStage("dec bands: top r={d} b={d} bottom r={d} b={d}", .{ top[2], top[0], bot[2], bot[0] });
+        d.ctx.v.Unmap(@ptrCast(d.ctx), stage.?, 0);
     }
 
     /// close releases everything, safe on every PARTIAL-open path (errdefer runs it).

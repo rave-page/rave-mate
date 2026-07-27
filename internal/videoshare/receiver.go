@@ -42,3 +42,9 @@ func NewFrameReceiver(log *logbus.Bus, name string) (FrameReceiver, error) {
 func NewFrameReceiverOpts(log *logbus.Bus, name string, o RecvOptions) (FrameReceiver, error) {
 	return newFrameReceiver(log, name, o)
 }
+
+// GrabSenderFrame returns the sender's CURRENT texture content, ignoring Spout's IsFrameNew hint.
+// One-shot, own GL context, ~ms cost - a diagnostic/verification oracle, never the hot path. Needed
+// because a natively decoded route's texture is written by the encoder child, which cannot bump
+// Spout's frame counter, so IsFrameNew stays false while the picture updates every frame.
+func GrabSenderFrame(name string, w, h int) (*image.NRGBA, error) { return grabSenderFrame(name, w, h) }

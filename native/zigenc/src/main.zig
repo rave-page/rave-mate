@@ -195,6 +195,12 @@ const off_dec_mtx_timeouts = 200;
 // route continuity across an encoder-child death; parent injects on first spawn only).
 var fault_after_frames: u64 = 0;
 
+// probe_bands (RAVE_MATE_MFDEC_PROBE_BANDS=1): after the first published frame, read the
+// DESTINATION texture back on the GPU and print the top/bottom pixel. The orientation + channel
+// oracle for the decode path - Spout's receive side cannot see a texture written by a foreign
+// device (it never reports a new frame), so nothing outside this process can check the picture.
+var probe_bands: bool = false;
+
 const Session = struct {
     gpa: std.mem.Allocator,
     sid: u32,
@@ -657,6 +663,7 @@ fn decLoop(s: *Session, d: *dec.Dec) void {
             }
             if (rc > 0) s.hdr.addAt(off_dec_dropped, 1);
             if (d.pub_n > s.aus_put) {
+                if (probe_bands and s.aus_put == 0) d.probeBands(); // one shot, first published frame
                 s.aus_put = d.pub_n;
                 s.hdr.setU64At(off_dec_frames, d.pub_n);
                 s.hdr.setI64At(off_last_pub_ns, @intCast(qpcNs()));
@@ -735,6 +742,9 @@ pub fn main(init: std.process.Init) !void {
     }
     if (init.environ_map.get("RAVE_MATE_MFENC_FAULT_AFTER_FRAMES")) |v| {
         fault_after_frames = std.fmt.parseInt(u64, v, 10) catch 0;
+    }
+    if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
+        probe_bands = std.mem.eql(u8, v, "1");
     }
 
     _ = timeBeginPeriod(1); // media child: 1 ms scheduler quantum (Sleep(1) is ~15.6 ms without it)

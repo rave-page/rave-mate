@@ -31,9 +31,12 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
 // SPOUTLIBRARY has no CreateSender: a sender's texture is allocated by the first send. So this
 // publishes ONE zeroed frame to force the allocation, then reads GetHandle(). That is one
 // w*h*4 write per ROUTE (reusing the pooled flip buffer, no malloc), not per frame.
-// 1 = ok and *share is non-zero; 0 = no sender / no DX11 shared texture (caller keeps the pipe).
+// The handle + the ACTUAL format come back out of the registry (GetSenderInfo), not GetHandle():
+// on the shipped SDK pairing GetHandle() is NULL for a sender created through SendImage.
+// 1 = ok and *share is non-zero; 0 = bad args; -1 = SendImage refused; -2 = no DX11 shared
+// texture (a CPU/memoryshare sender). Anything but 1 means "keep the frame path".
 int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
-                          unsigned int fmt, unsigned long long* share);
+                          unsigned int fmt, unsigned long long* share, unsigned int* out_fmt);
 
 // Release the sender, close its OpenGL context, free the handle. Call on the owning thread.
 void rave_spout_release(void* h);

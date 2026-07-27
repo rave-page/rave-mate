@@ -120,7 +120,7 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
 // something has been sent, hence the single zeroed frame. See the header for why there is no
 // CreateSender to call.
 int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned int hgt,
-                          unsigned int fmt, unsigned long long* share) {
+                          unsigned int fmt, unsigned long long* share, unsigned int* out_fmt) {
     if (!h || !name || !share || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(hgt)) return 0;
     *share = 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
@@ -129,10 +129,22 @@ int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned i
     const size_t need = (size_t)w * hgt * 4;
     if (!grow_flip_buf(need)) return 0;
     memset(flip_buf, 0, need);
-    if (!s->SendImage(flip_buf, w, hgt, 0x1908 /*GL_RGBA*/, false)) return 0;
-    HANDLE sh = s->GetHandle();
-    if (!sh) return 0; // CPU/memoryshare sender: no DX11 texture to render into
+    if (!s->SendImage(flip_buf, w, hgt, 0x1908 /*GL_RGBA*/, false)) return -1; // send refused
+    // Read the handle back out of the REGISTRY rather than from GetHandle(): on this SDK pairing
+    // GetHandle() returns NULL for a sender created through SendImage, while GetSenderInfo (the
+    // shared-memory read every other query here uses, and the one the zero-copy CAPTURE path is
+    // already proven against) reports the real dxShareHandle + format.
+    unsigned int rw = 0, rh = 0;
+    HANDLE sh = 0;
+    DWORD rf = 0;
+    {
+        std::lock_guard<std::mutex> lk(registry_mu());
+        SPOUTHANDLE reg = registry();
+        if (!reg || !reg->GetSenderInfo(name, rw, rh, sh, rf)) return -2;
+    }
+    if (!sh || rw != w || rh != hgt) return -2; // CPU/memoryshare sender, or torn/mismatched info
     *share = (unsigned long long)(uintptr_t)sh;
+    if (out_fmt) *out_fmt = (unsigned int)rf;
     return 1;
 }
 
