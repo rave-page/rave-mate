@@ -215,6 +215,24 @@ func fmtCaptureLine(p medialink.PipelineStats) string {
 			out = append(out, fmt.Sprintf("stale %.0f ms", p.CapStaleMs))
 		}
 	}
+	if p.ZeroDecode {
+		out = append(out, fmt.Sprintf("gpu decode %.1f fps", p.DecFPS))
+		if p.DecBusyMs > 0 {
+			out = append(out, fmt.Sprintf("decode %.1f ms/frame", p.DecBusyMs))
+		}
+		if p.InDropped > 0 {
+			out = append(out, fmt.Sprintf("ring drops %d", p.InDropped))
+		}
+		if p.DecErrors > 0 {
+			out = append(out, fmt.Sprintf("publish errors %d", p.DecErrors))
+		}
+		if p.DecMtxTimeo > 0 {
+			out = append(out, fmt.Sprintf("dest mutex timeouts %d", p.DecMtxTimeo))
+		}
+		if p.DecStaleMs > 0 {
+			out = append(out, fmt.Sprintf("stale %.0f ms", p.DecStaleMs))
+		}
+	}
 	if p.Downgrades > 0 {
 		out = append(out, fmt.Sprintf("downgrades %d", p.Downgrades))
 	}

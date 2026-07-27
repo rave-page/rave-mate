@@ -676,6 +676,8 @@ func run(parent context.Context, serviceMode bool) error {
 	mediaLinkCfg := func() config.MediaLinkFeature { return cfg.Features.MediaLink }
 	// zigmedia inc 1: gate the zero-copy Spout->encoder capture path (default OFF).
 	mediapipe.ZeroCopyCapture = func() bool { return mediaLinkCfg().ZeroCopyCapture() }
+	// zigmedia inc 2: gate native GPU-resident decode+publish (default OFF).
+	mediapipe.ZeroCopyDecode = func() bool { return mediaLinkCfg().ZeroCopyDecode() }
 	mediaRouter := medialink.New(medialink.Options{
 		Self: ident.NodeID, Bus: mediaBus{bus}, Secrets: peerMgr, Log: log, Clock: mediaClock,
 		Encoder: encFac, Decoder: decFac,
