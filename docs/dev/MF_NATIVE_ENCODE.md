@@ -46,9 +46,34 @@ NVIDIA RTX (dev box): 1080p sustained submit 335 fps, p50 5.4 ms / p99 22 ms sub
 4K60/50Mbps/gop120 (the field crash tuple) encodes through the child.
 
 Hard-won contract lessons (cost real debugging, keep them):
+- **Drive mode comes from `MF_TRANSFORM_ASYNC`, never from a successful
+  `QI(IMFMediaEventGenerator)`.** Sync MFTs expose that interface too; taking its event
+  generator and then waiting for `METransformNeedInput` blocks the whole per-frame budget
+  and the parent reports `encode timeout`. ffmpeg's `mf_unlock_async` reads the same
+  attribute for the same reason. The unlock is verified after setting it, not assumed.
 - `IID_IMFMediaEventGenerator` ends `…1e7d`. The hand-rolled `…1e7b` variant gets
   E_NOINTERFACE → silently forces sync drive of an async MFT → E_UNEXPECTED storms +
-  lost outputs. (Second time this exact typo bit this codebase.)
+  lost outputs. (Second time this exact typo bit this codebase.) Both this IID and
+  `MF_TRANSFORM_ASYNC` are now pinned against the SDK by a Zig test.
+- **ONE D3D11 device + `IMFDXGIDeviceManager` per CHILD, not per session.** The child is
+  already per-adapter. A device per session meant two device managers on one adapter in one
+  process, which no reference MF pipeline does (OBS, ffmpeg and the Media Engine all share
+  one per adapter) and which AMF-backed MFTs reject: on AMD a single session is clean and a
+  second one in the same child wedges it. Legal because the device carries
+  `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` + `SetMultithreadProtected(TRUE)`.
+- **The child's per-frame wait must be far below the parent's `encodeWait`.** Both sat at
+  2 s, so the parent's deadline expired at the same instant the child's did and a merely
+  SATURATED encoder ended the route. Now `SUBMIT_WAIT_MS` = 250 ms returning `RC_BUSY`
+  (counted as a drop, surfaced in `PipelineStats.Dropped`) against a 4 s parent deadline:
+  saturation sheds frames, it does not kill routes.
+- **NV12 pool textures are bound `RENDER_TARGET | SHADER_RESOURCE`.** AMD's and Intel's
+  encoder MFTs create an SRV over the input surface; NVENC consumes the texture directly,
+  so render-target-only worked here and only here. Falls back to render-target-only if a
+  driver refuses the pair.
+- **Teardown order is the documented one**: `FLUSH` → `NOTIFY_END_STREAMING` →
+  `SET_D3D_MANAGER(0)` → `Release(IMFTransform)` → `IMFActivate::ShutdownObject`. The old
+  short order dropped our last device references while the vendor MFT still held the device
+  manager.
 - NEVER resubmit a pool NV12 sample the encoder still queues: in-flight cap =
   NVPOOL-1 in feed (both Zig + C++ now). Reuse corrupts the MFT input queue.
 - The encoder child calls `timeBeginPeriod(1)` - without it Sleep(1) waits ~15.6 ms
@@ -164,12 +189,99 @@ retarget + forced IDR, exact 4K60 field tuple, mid-route child AV → restart �
 session resumes (route continuity proven by execution), startup crash-loop → clean
 refusal. `go test ./internal/mfenc/ ./internal/mediapipe/ -run 'TestEncode|TestMFBridge|TestProc'`.
 
+## Vendor portability matrix
+
+The engine resolves every vendor-variable decision from the MFT's OWN attributes; nothing is
+assumed per vendor. Verified on this dev box (2× RTX 3060) unless noted.
+
+| Tier | Enumeration | Drive mode | Device manager | Input samples | Status |
+|---|---|---|---|---|---|
+| NVIDIA (`NVIDIA H.264 Encoder MFT`) | `HARDWARE`, vendor-tag pass first | `async` (from `MF_TRANSFORM_ASYNC`) | required | DXGI surface buffers over the NV12 pool | **verified live**: 1080p60, exact 4K60 tuple, 2 concurrent sessions, 4K60+720p concurrent |
+| AMD (`AMDh264Encoder`) | same | reported per open (`opened.drive`) | required | same | single session **verified in the field**; concurrent sessions **pending the AMD run** |
+| Intel (QSV MFT) | same | reported per open | required | same | **reasoned only** - no Intel rig here |
+| Software MF (`H264 Encoder MFT`) | `SYNCMFT\|ASYNCMFT\|LOCALMFT`, no vendor filter | `sync` (measured) | **never offered** | packed system-memory NV12 via a STAGING readback | **verified live** (forced with `RAVE_MATE_MFENC_SW=1`): single + 2 concurrent sessions, real bitstream |
+
+- The software tier is a FIRST-CLASS rung, not a footnote: it is what a box with no usable
+  hardware MFT - or one whose hardware MFT the failure ledger poisoned - encodes on. It keeps the
+  D3D11 video processor for CSC + scale and falls back to a **WARP** device when no hardware
+  adapter can host a video device at all, so the rung survives a headless / virtual-display-only
+  rig. If even that fails, mediapipe substitutes an ffmpeg encoder.
+- The software tier is NOT added to the advertisement. `Available()`/`ChildAvailable()` still gate
+  on hardware, so a box with an ffmpeg hardware encoder but no hardware MFT keeps negotiating the
+  better engine. Software MF is a within-session last rung, chosen at open time.
+- Env knobs: `RAVE_MATE_MFENC_SW=0` hardware only (prove a hardware regression), `=1` software
+  only (test the rung on a box that has silicon); `RAVE_MATE_MFENC_DEVICE=session` restores the
+  per-session device for a live A/B of the concurrent-session theory.
+
+## Concurrent sessions (the AMD 0xc0000005)
+
+Field evidence, 3/3 correlated: a single AMD encode session is clean (real content, zero drops,
+no fault) and a SECOND session opened in the same child wedges it - no `METransformNeedInput`,
+the parent times out, the route ends and the child later takes an access violation. Every gate in
+this package was single-session, which is why NVIDIA never showed it.
+
+Two independent causes were addressed, because the evidence does not yet separate them:
+
+1. **Two device managers on one adapter** (see the contract lessons) - fixed by the per-child
+   device, A/B-able with `RAVE_MATE_MFENC_DEVICE`.
+2. **Encoder saturation** - the failing runs always had a 4K60 50 Mbps route live, which is close
+   to a Ryzen iGPU's VCN ceiling. The colliding timeout budgets turned that into a dead route;
+   now it is counted drops.
+
+`TestProcFieldTupleTwoSessions` (4K60 + 720p concurrent) separates them: if it fails on AMD while
+`TestProcTwoSessionsOneChild` (720p + 480p) passes, the trigger is capacity; if both fail, it is
+multiplexing.
+
+## Crash attribution
+
+A vendor AV happens inside a driver, often on its own worker thread: no Go stack, no reliable
+stderr tail. The child therefore latches the stage it is about to enter into a shared-memory word
+(`off_stage`, 112) with one relaxed store, so it is always on. The supervisor reads it after the
+exit code and names the faulting call in the crash warning (`stageName`, `procfail_windows.go`).
+The stage numbers are a cross-process contract, pinned by tests on BOTH sides. `feed()` errors are
+no longer discarded either - they surface as an `encfail` event carrying the return code and the
+stage, and on a zero-copy route they are reported as `encfail` rather than `srcgone` (which used
+to spend the source-recycle budget and then pin a healthy sender to the readback path).
+
+## Crash-loop safety net (the failure ledger)
+
+`procfail_windows.go`. Keyed on **(adapter, encoder)** - the thing that is actually broken - and
+the streak is measured **crash to crash**. The previous counter was measured from the child's last
+SPAWN, and the supervisor respawns immediately after every crash, so a human-paced route retry
+always reset it: the field log read `consecutive fails 1` on every route and poisoning could never
+fire. It also only wrote poison entries for sessions still registered at crash time, so a
+teardown-time AV poisoned nothing even at the limit. Both are fixed and covered by tests that fail
+against the old behaviour.
+
+Reset policy, explicit: a crash extends the streak inside `failWindow` (10 min) and starts a new
+one outside it; `maxConsecFails` (3) poisons; a poisoned tuple clears ONLY on proof of health (a
+session on it really delivered an AU) plus `forgetAfter` (30 min) of quiet - time alone never
+clears it, because that re-arms a crash loop on a timer. `ResetPoison()` is the user action.
+
+**A poisoned hardware tuple degrades to the software tier, not to no video.**
+
+## Degrade never black-frames
+
+A mid-route native failure used to END the route: the ffmpeg substitution only existed at OPEN
+time, so the peer was left with a frozen picture while every counter still read healthy. The
+bridge now substitutes a supervised ffmpeg H.264 encoder **in place** over the same inner source
+(`mfBridge.substitute`); `Next()`, `RequestKeyframe()` and `PipeStats()` delegate to it, so the
+consumer never learns the engine changed. This covers zero-copy routes too, where there is no feed
+goroutine and the failure only shows up as the AU stream ending.
+
+Every degrade carries a reason to the route panel: `PipelineStats.DegradeReason` (empty is the
+only healthy value) plus `Drive` and `SoftwareEncode`. Saturation drops land in
+`PipelineStats.Dropped`. Judging a route healthy by counters alone is exactly what hid the
+original defect, so the concurrent + software gates assert **bytes per frame**, not just survival.
+
 ## Fallback rules
 
 | Condition | Engine |
 |---|---|
 | Negotiated encoder == `medialink.EncoderMFNative` (only advertised when `Available()`) | mfenc (native) |
+| No usable hardware MFT, or its (adapter, encoder) tuple is poisoned | mfenc **software MF tier** (still the native engine) |
 | mfenc open/feed failure | ffmpeg child on a probed H.264 encoder (spec rewritten, warned) |
+| mfenc failure MID-ROUTE | ffmpeg H.264 substituted in place on the SAME route (never a dead route) |
 | Any other encoder name - incl. ffmpeg's own `h264_mf`, `h264_nvenc`, `libx264` | ffmpeg child |
 | HEVC / AV1 / MJPEG | ffmpeg child |
 | non-Windows / no cgo | ffmpeg child (stub `Available()=false`, name never advertised) |
