@@ -85,6 +85,7 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		if ZeroCopyDecode() && mfenc.ChildAvailable() {
 			s, err := newMFDecoder(ctx, log, spec, sink)
 			if err == nil {
+				go decodeTelemetry(ctx, log, "native", spec, s)
 				return s, nil
 			}
 			if !mfDecWarned {
@@ -97,7 +98,9 @@ func Factories(log *logbus.Bus) (medialink.EncoderFactory, medialink.DecoderFact
 		if !ok {
 			return nil, fmt.Errorf("mediapipe: ffmpeg not found")
 		}
-		return newDecoder(ctx, log, ffmpeg, spec, sink), nil
+		d := newDecoder(ctx, log, ffmpeg, spec, sink)
+		go decodeTelemetry(ctx, log, "ffmpeg", spec, d)
+		return d, nil
 	}
 	return enc, dec
 }

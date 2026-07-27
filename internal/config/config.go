@@ -422,16 +422,27 @@ type MediaLinkFeature struct {
 	// ZigDecode is ZigCapture's receive-side mirror: the native child decodes the incoming AUs
 	// and renders them straight into the local video-share sender's GPU texture, instead of
 	// ffmpeg pushing 33 MB raw frames per 4K frame back up a stdout pipe and Spout uploading them
-	// again. Tri-state, default OFF (nil = off); the ffmpeg decode path stays the default and the
-	// parity reference. Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
+	// again. Tri-state, DEFAULT ON since zigmedia increment 5 (nil = on); an explicit false keeps
+	// the ffmpeg decode path, which remains the fallback and the parity reference.
+	// Env RAVE_MATE_ZIGMEDIA_DECODE=1|0 overrides.
 	//
-	// Deliberately NOT flipped with ZigCapture in increment 5, and this is the list to close:
-	// no real end-to-end route (peer → jitterbuf → mfDecoder) has ever been driven - the live gate
-	// feeds ProcDecSession directly; no 4K60 receive soak; no HEVC bitstream has been decoded; no
-	// TRUE hardware decoder MFT exists on the rig that verified it (the MS D3D11-aware software MFT
-	// carries the passing run); and design §10's "live-verify against OBS's Spout input and
-	// Resolume" is discharged only as far as an INDEPENDENT PROCESS with its own D3D11 device
-	// reading the published texture correctly, which is the mechanism OBS uses but is not OBS.
+	// Why the default flipped, and why the OLD default was not a safe baseline: measured on the
+	// field rig, a 4K route's local republish delivers ~13.5 DISTINCT frames/s while the source
+	// encodes at 37 - the CPU SendImage upload of 33 MB/frame IS the ceiling. Leaving this off
+	// keeps a measured 3x frame loss on the receive side. The path that replaces it publishes
+	// straight into the destination texture with no host frame at all, and its picture is verified
+	// end to end (encode → AU → native decode → publish → read back from a SECOND process with its
+	// own D3D11 device: correct row AND channel order), which is design §10's stated pre-condition
+	// discharged at the independent-consumer level.
+	//
+	// Still open, and the reason the receive side wants a live pass: no real end-to-end route
+	// (peer → jitterbuf → mfDecoder) has been driven - the live gate feeds ProcDecSession directly;
+	// no 4K60 receive soak; no HEVC bitstream decoded; and no TRUE hardware decoder MFT exists on
+	// the rig that verified it (the MS D3D11-aware software MFT carries the passing run). Each of
+	// those failure shapes lands on a rung that keeps real pixels: an open-side refusal runs the
+	// ffmpeg decoder with one WARN, and a mid-route dstgone/staleness recycles, then pins the
+	// destination to the frame path. The route panel renders `published N` and bytes/frame, so a
+	// silent receive-side failure is not expressible.
 	ZigDecode *bool `json:"zigDecode,omitempty"`
 	// ZigAffinity lets a zero-copy session be RE-PLACED on the adapter that actually owns the
 	// sender's shared texture instead of downgrading to the readback path (risk R7: a sender
@@ -470,7 +481,8 @@ func (m MediaLinkFeature) ZeroCopyCapture() bool {
 func (m *MediaLinkFeature) SetZeroCopyCapture(on bool) { v := on; m.ZigCapture = &v }
 
 // ZeroCopyDecode reports whether native GPU-resident decode+publish is enabled. Env
-// RAVE_MATE_ZIGMEDIA_DECODE wins (soak + tests), then the config key, else OFF.
+// RAVE_MATE_ZIGMEDIA_DECODE wins (soak + tests), then the config key, else ON (zigmedia inc 5).
+// Only an EXPLICIT false opts out - same tri-state migration argument as ZeroCopyCapture.
 func (m MediaLinkFeature) ZeroCopyDecode() bool {
 	switch os.Getenv("RAVE_MATE_ZIGMEDIA_DECODE") {
 	case "1", "true":
@@ -478,7 +490,7 @@ func (m MediaLinkFeature) ZeroCopyDecode() bool {
 	case "0", "false":
 		return false
 	}
-	return m.ZigDecode != nil && *m.ZigDecode
+	return m.ZigDecode == nil || *m.ZigDecode
 }
 
 // SetZeroCopyDecode sets the native-decode opt-in EXPLICITLY (single write seam).

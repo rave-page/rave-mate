@@ -210,17 +210,39 @@ func TestZeroCopyOptOutRoundTrips(t *testing.T) {
 	}
 }
 
-// TestDecodeAndAffinityStayOff records the deliberate ASYMMETRY of the increment-5 flip: capture is
-// promoted, decode and adapter-affinity are not, because their gates cannot be satisfied on the
-// hardware that verified capture (see the field comments for the exact open items). A future agent
-// flipping them should have to delete this test and say why.
-func TestDecodeAndAffinityStayOff(t *testing.T) {
+// TestZeroCopyDecodeDefaultsOn: the receive side flipped too. Its justification is a MEASUREMENT
+// rather than a soak - on the field rig the ffmpeg frame path republished ~13.5 distinct frames/s at
+// 4K while the source encoded at 37, because the CPU SendImage upload of 33 MB/frame is the capacity
+// ceiling. Leaving the old default in place preserved a measured 3x frame loss, so "off" was not the
+// safe choice it looked like.
+func TestZeroCopyDecodeDefaultsOn(t *testing.T) {
 	t.Setenv("RAVE_MATE_ZIGMEDIA_DECODE", "")
+	var f MediaLinkFeature
+	if !f.ZeroCopyDecode() {
+		t.Error("native GPU-resident decode must default ON")
+	}
+	var off MediaLinkFeature
+	if err := json.Unmarshal([]byte(`{"zigDecode":false}`), &off); err != nil {
+		t.Fatal(err)
+	}
+	if off.ZeroCopyDecode() {
+		t.Error("an explicit zigDecode:false was overridden by the new default")
+	}
+	t.Setenv("RAVE_MATE_ZIGMEDIA_DECODE", "0")
+	if f.ZeroCopyDecode() {
+		t.Error("RAVE_MATE_ZIGMEDIA_DECODE=0 did not turn the default off - that is the escape hatch")
+	}
+}
+
+// TestAffinityStaysOff records the one deliberate ASYMMETRY of the increment-5 flip: capture and
+// decode are promoted, adapter-affinity is not, because its gate cannot be satisfied on the hardware
+// that verified the rest - the re-place is live-verified only between two IDENTICAL GPUs, so a
+// heterogeneous iGPU+dGPU rig (where the re-placed adapter may have a much worse encoder or none) is
+// unexercised. Leaving it off costs a VISIBLE downgrade to a working readback, not a ceiling.
+// A future agent flipping it should have to delete this test and say why.
+func TestAffinityStaysOff(t *testing.T) {
 	t.Setenv("RAVE_MATE_ZIGMEDIA_AFFINITY", "")
 	var f MediaLinkFeature
-	if f.ZeroCopyDecode() {
-		t.Error("native decode is default ON: no real end-to-end route, no 4K60 receive soak, no HEVC and no hardware decoder MFT have ever been exercised")
-	}
 	if f.ZeroCopyAffinity() {
 		t.Error("adapter affinity is default ON: the re-place is live-verified only between two IDENTICAL GPUs")
 	}

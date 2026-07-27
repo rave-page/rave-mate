@@ -303,7 +303,7 @@ original defect, so the concurrent + software gates assert **bytes per frame**, 
 | non-Windows / no cgo | ffmpeg child (stub `Available()=false`, name never advertised) |
 | `MediaLink.SWOnly` | native name filtered out of the advertisement → software tier really is software |
 
-## Zero-copy source (zigmedia increment 1, flag OFF by default)
+## Zero-copy source (zigmedia increment 1, **DEFAULT since increment 5**)
 
 **Landed.** A Spout sender IS a DX11 shared texture, so the child opens it on its own device
 and hands it to the video processor as the INPUT VIEW - the GPU→CPU readback, the pooled host
@@ -320,10 +320,25 @@ rave-mate-enc.exe session thread: pace(fps) → acquire mutex → VideoProcessor
 Go: pump AUs (~100 KB/frame) → wire crypto → socket
 ```
 
-- **Gate:** `config.MediaLink.zigCapture` (tri-state, default OFF) or
-  `RAVE_MATE_ZIGMEDIA_CAPTURE=1|0`. Requested only when the source implements
-  `medialink.ZeroCopySource` with a non-zero handle matching the negotiated geometry, the child
-  answers `hello.ver >= 2`, and the sender is not pinned to the readback path.
+- **Gate:** `config.MediaLink.zigCapture` (tri-state, **default ON** since increment 5; only an
+  explicit `false` opts out) or `RAVE_MATE_ZIGMEDIA_CAPTURE=1|0`. The decision is PER SOURCE
+  (`zcVerdict`): requested only when the source implements `medialink.ZeroCopySource` with a
+  non-zero handle matching the negotiated geometry, the child answers `hello.ver >= 2`, and the
+  sender is not pinned to the readback path. A source that CANNOT ever do zero-copy (webcam /
+  DirectShow / non-Spout - there is no texture) takes the readback silently and is not counted as a
+  downgrade; a source that COULD have qualified and did not gets one WARN naming the reason plus a
+  counted downgrade, so a rig that always falls back is visible rather than mysteriously slow.
+- **What promoted it** (`.devnotes/ZIGMEDIA_INC5_STATUS.md`): the fallback ladder carries real
+  pixels at every rung and logs once; the content oracle (bytes/frame) and `DegradeReason` now
+  reach BOTH route panels, so "healthy counters over a black stream" is a rendered number rather
+  than an unsayable state; and the branches that had never executed anywhere -
+  `IDXGIKeyedMutex` (R3), TYPELESS/exotic formats (R4), a restarted sender's changed handle (R1) -
+  are gated by execution on hardware with the decoded PICTURE asserted.
+- **Still open at the flip:** a 2-PC wire pass with the flag on, a 7-day soak, a restart/resize of
+  a real sending app (OBS), a heterogeneous multi-GPU rig, and the sender-PC pointer-lag question
+  (design §13.1 item 4). Containment: the child never polls faster than the negotiated fps, mutex
+  acquires are bounded 1..4 ms, and the READBACK path acquires the same named mutex at the shared
+  capture's rate - so this path contends no harder than the one it replaces.
 - **Protocol:** `open` gains `src`/`sh`/`sfmt`/`sname`/`cap_n`/`cap_d`/`ring_kb`/`pts0`; header
   v2 adds child-written capture counters at 64..111; new `srcgone` event. A `spout` session's
   SHM is header + AU ring ONLY (no frame slot) and the ring is bitrate-derived
@@ -354,7 +369,7 @@ Measured on this dev box (NVIDIA), real sender in a second process:
 colour are gated by DECODING the bitstream (a red-top/blue-bottom probe), because the readback
 path flips on the CPU and a silently inverted zero-copy path passes every counter.
 
-### Adapter affinity (zigmedia increment 3, flag OFF by default)
+### Adapter affinity (zigmedia increment 3, flag OFF by default - deliberately NOT promoted)
 
 `OpenSharedResource` only works on the adapter that CREATED the texture, so a sender produced by
 an app on GPU B is invisible to an encoder child pinned to GPU A - the child refuses with
@@ -365,7 +380,12 @@ Nothing in DXGI answers "which adapter owns this share handle", so resolution is
 on a source-side refusal, try the other adapters once, first success wins, cache the answer per
 sender (the cached adapter is probed first next time, so a second route pays nothing).
 
-- **Gate:** `config.MediaLink.zigAffinity` / `RAVE_MATE_ZIGMEDIA_AFFINITY=1|0`, default OFF.
+- **Gate:** `config.MediaLink.zigAffinity` / `RAVE_MATE_ZIGMEDIA_AFFINITY=1|0`, default OFF. It stayed
+  off through increment 5's flip: the re-place is live-verified only between two IDENTICAL GPUs
+  (2x RTX 3060), so a heterogeneous iGPU+dGPU rig - where the re-placed adapter may have a much
+  worse encoder or none - is unexercised. The cost of leaving it off is a VISIBLE downgrade to a
+  working readback, and the refusal WARN now names this key when the host has more than one GPU and
+  the refusal was `open_shared`, so it is a fixable message instead of a silent miss.
 - **Never silently move adapters** (R7): mediapipe offers candidates ONLY when the gate is on and
   `EncodeSpec.Device()` resolves nothing. A pinned device - or one the governor chose via
   `avoid-busiest` - is policy and outranks the optimisation. Every move logs once and renders as
@@ -412,11 +432,13 @@ defect fixes plus a measured refusal - details in `.devnotes/ZIGMEDIA_INC4_STATU
   If you pick it up: `encExePath()`'s beside-the-exe rung must accept BOTH names, or a self-updated
   install (which replaces only `rave-mate.exe`) silently loses the native engine.
 
-Still open: 7-day soak before the flag defaults on, and the 2-PC pass (§13.1 of the design - the
+Still open after the increment-5 flip: the 7-day soak and the 2-PC pass (§13.1 of the design - the
 single-box soak does not prove the wire, and the sender PC's pointer lag is only observable on a
-real rig).
+real rig with a real sending app). The flip did not wait on those because every rung of the ladder
+below carries real pixels and is now visible in the panel, and because the readback it replaces
+spent the whole life of the vendored SpoutLibrary pairing returning BLACK frames.
 
-## Native decode (zigmedia increment 2, flag OFF by default)
+## Native decode (zigmedia increment 2, **DEFAULT since increment 5**)
 
 **Landed.** The receive side is the same child, opposite direction: compressed AUs ride an
 INBOUND shared-memory ring in, an MF decoder MFT decodes on the GPU, and the video processor
@@ -433,10 +455,33 @@ rave-mate-enc.exe session thread: decoder MFT (D3D11) → NV12 surface → acqui
 external receivers (OBS/Resolume) copy the texture as usual
 ```
 
-- **Gate:** `config.MediaLink.zigDecode` (tri-state, default OFF) or
-  `RAVE_MATE_ZIGMEDIA_DECODE=1|0`. Requested only for H.264/HEVC, when the sink implements
-  `medialink.ZeroCopySink` with a non-zero handle, the child answers `hello.ver >= 3`, and the
-  destination is not pinned to the frame path.
+- **Gate:** `config.MediaLink.zigDecode` (tri-state, **default ON** since increment 5; only an
+  explicit `false` opts out) or `RAVE_MATE_ZIGMEDIA_DECODE=1|0`. Requested only for H.264/HEVC, when
+  the sink implements `medialink.ZeroCopySink` with a non-zero handle, the child answers
+  `hello.ver >= 3`, and the destination is not pinned to the frame path.
+- **What promoted it: a MEASUREMENT, not a soak.** On the field rig a 4K route's local republish
+  delivered **~13.5 distinct frames/s while the source encoded at 37** - the CPU `SendImage` upload
+  of 33 MB/frame is the capacity ceiling. Leaving this off preserved a measured 3x frame loss, so
+  "off" was not the safe default it looked like. Design §10's "live-verify against OBS's Spout input
+  and Resolume" is now discharged as far as an INDEPENDENT PROCESS with its own D3D11 device reading
+  the published texture with correct row and channel order - the mechanism OBS uses, but not OBS.
+- **Still open on the receive side:** no real end-to-end route (peer → jitterbuf → `mfDecoder`) has
+  been driven - the live gate feeds `ProcDecSession` directly; no 4K60 receive soak; no HEVC
+  bitstream decoded; and no TRUE hardware decoder MFT exists on the rig that verified it (the MS
+  D3D11-aware software MFT carries the passing run). Each of those lands on a rung that keeps real
+  pixels (open refusal → ffmpeg with one WARN; mid-route `dstgone`/staleness → recycle, then pin).
+- **Falsifiability, since it is now a default:** `route decode telemetry` logs once per 10 s with
+  `decode: native|ffmpeg`, `published`, `publishedFps` and `outFps`. Both paths report `PubFrames`
+  through the same wrapper chain, so `publishedFps` beside `outFps` shows the frame-path ceiling
+  directly - no probe tool needed, and a silent fallback cannot hide.
+- **Instrument note for whoever finishes it.** Increment 2 recorded that Spout's own receive side
+  "cannot see a foreign-device write on this rig" and abandoned the cross-process picture gate.
+  That was wrong twice over: the P0 vtable work explained the first half (`ReceiveImage` dispatched
+  to `ReceiveTexture`), and the second half was that the harness published ONCE. A single
+  `SendImage` is not visible to another process's D3D11 device - the GL/DX interop write is not
+  flushed until further GL work is submitted. Publishing continuously (as every real sender does)
+  makes the read-back oracle work, which is how the gate reads
+  `published bands: top r=255 b=0, bottom r=1 b=255` today. The product was never affected.
 - **Who owns the sender: GO.** A decoder cannot create one, so `mediaroute.openSpoutSink` opens
   it EAGERLY and exposes the handle. `SPOUTLIBRARY` has no `CreateSender`, so the shim publishes
   one zeroed frame to force the texture and reads the handle + real format back out of the

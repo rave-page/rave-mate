@@ -321,3 +321,47 @@ func errStr(err error) string {
 	}
 	return err.Error()
 }
+
+// decodeTelemetry logs one line per interval naming WHICH receive path is serving this route and how
+// much it actually PUBLISHED. Symmetric with the send side's "route encode telemetry", and
+// load-bearing now that native decode is the default: a silent fallback to the ffmpeg frame path
+// would make "default on" unfalsifiable on a box with no toolchain and no remote-exec.
+//
+// publishedFps beside outFps is the whole point, and it is the before/after instrument for this
+// increment. On the field rig a 4K route's local republish delivered ~13.5 DISTINCT frames/s while
+// the source encoded at 37: the CPU SendImage upload of 33 MB/frame is the capacity ceiling. Both
+// paths report PubFrames through the same wrapper chain, so the two numbers are directly comparable
+// and the ceiling is visible without a probe tool.
+func decodeTelemetry(ctx context.Context, log *logbus.Bus, path string, spec medialink.DecodeSpec, r medialink.PipelineReporter) {
+	t := time.NewTicker(routeTelemetryEvery)
+	defer t.Stop()
+	var prevPub uint64
+	prev := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now()
+		st := r.PipeStats()
+		dPub := st.PubFrames - prevPub
+		secs := now.Sub(prev).Seconds()
+		prevPub, prev = st.PubFrames, now
+		pubFPS := 0.0
+		if secs > 0 {
+			pubFPS = float64(dPub) / secs
+		}
+		log.Info(source, "route decode telemetry", map[string]any{
+			"decode": path, "engine": st.Encoder, "hwaccel": st.HWAccel,
+			"in": fmt.Sprintf("%dx%d", spec.Width, spec.Height),
+			// The receive side's content oracle: frames that actually reached the local Spout sender,
+			// and the rate they reached it at. "Frames arrived" and "frames were published" are
+			// different questions, and the sink's Write cannot tell them apart - it returns nil either
+			// way, which is exactly why the volume has to be counted.
+			"published": st.PubFrames, "publishedFps": fmt.Sprintf("%.1f", pubFPS),
+			"outFps": fmt.Sprintf("%.1f", st.OutFPS), "gpuPublish": st.ZeroDecode,
+			"dropped": st.Dropped, "lost": st.RealDrops(), "ringDrops": st.InDropped,
+			"decErrors": st.DecErrors, "restarts": st.Restarts, "degraded": st.DegradeReason})
+	}
+}
