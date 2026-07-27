@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"errors"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,17 +110,68 @@ func riskSession(t *testing.T, name string, resolve func() (uint64, uint32, int,
 	})
 }
 
-// collectAUs drains a session's output into a slice until the channel closes.
-func collectAUs(s *ProcSession) (*[]AU, chan struct{}) {
-	aus := &[]AU{}
-	done := make(chan struct{})
+// auSink drains a session's output. Locked, because the gates read len()/slices while the drain
+// goroutine appends - the first version of this raced, which is also how it produced a flaky verdict.
+type auSink struct {
+	mu   sync.Mutex
+	aus  []AU
+	done chan struct{}
+}
+
+func collectAUs(s *ProcSession) *auSink {
+	k := &auSink{done: make(chan struct{})}
 	go func() {
 		for au := range s.Output() {
-			*aus = append(*aus, au)
+			k.mu.Lock()
+			k.aus = append(k.aus, au)
+			k.mu.Unlock()
 		}
-		close(done)
+		close(k.done)
 	}()
-	return aus, done
+	return k
+}
+
+func (k *auSink) len() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.aus)
+}
+
+// from returns a copy of the AUs at or after i.
+func (k *auSink) from(i int) []AU {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if i > len(k.aus) {
+		i = len(k.aus)
+	}
+	return append([]AU(nil), k.aus[i:]...)
+}
+
+// fromKeyframe returns the AUs from the first KEYFRAME at or after i. A decoder handed a stream that
+// starts mid-GOP shows the PREVIOUS picture, so slicing by index alone made the R1 gate report the
+// old texture's colours whenever the slice straddled the recycle - a flaky verdict on the one
+// assertion that matters. The recycle forces an IDR, so the keyframe is the honest boundary.
+func (k *auSink) fromKeyframe(i int) []AU {
+	tail := k.from(i)
+	for n, au := range tail {
+		if au.Keyframe {
+			return tail[n:]
+		}
+	}
+	return nil
+}
+
+// awaitDowngrade waits for the session's recycle counter to move past base. Returns false on
+// timeout; polling Stats() is exactly what the telemetry tick does.
+func awaitDowngrade(s *ProcSession, base int, budget time.Duration) (int, bool) {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if n := s.Stats().Downgrades; n > base {
+			return n, true
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return s.Stats().Downgrades, false
 }
 
 // TestZeroCopyRiskKeyedMutex executes the IDXGIKeyedMutex branch (R3) for the first time on real
@@ -155,18 +207,19 @@ func TestZeroCopyRiskKeyedMutex(t *testing.T) {
 	if !s.IsZeroCopy() {
 		t.Fatal("session did not come up zero-copy")
 	}
-	aus, done := collectAUs(s)
+	sink := collectAUs(s)
 	time.Sleep(500 * time.Millisecond)
 	st := statsAfterRateWindow(s)
 	s.Close()
 	select {
-	case <-done:
+	case <-sink.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Output never closed")
 	}
+	aus := sink.from(0)
 
 	t.Logf("R3 keyed mutex: aus=%d capFrames=%d capFPS=%.1f skips=%d mtxTimeouts=%d srcErrors=%d "+
-		"encBusy=%.2fms capFmt=%d capFlags=%#x", len(*aus), st.CapFrames, st.CapFPS, st.CapSkips,
+		"encBusy=%.2fms capFmt=%d capFlags=%#x", len(aus), st.CapFrames, st.CapFPS, st.CapSkips,
 		st.MtxTimeouts, st.SrcErrors, st.EncBusyMs, st.CapFmt, st.CapFlags)
 
 	const flagKeyed, flagNamed = 1 << 1, 1 << 2
@@ -191,15 +244,15 @@ func TestZeroCopyRiskKeyedMutex(t *testing.T) {
 	if st.MtxTimeouts > st.CapFrames/4 {
 		t.Fatalf("mtxTimeouts=%d against capFrames=%d - the keyed acquire is live-locking", st.MtxTimeouts, st.CapFrames)
 	}
-	if len(*aus) < 20 {
+	if len(aus) < 20 {
 		s.child.mu.Lock()
 		tail := string(s.child.stderrTail)
 		s.child.mu.Unlock()
-		t.Fatalf("aus=%d want >= 20; child stderr: %s", len(*aus), tail)
+		t.Fatalf("aus=%d want >= 20; child stderr: %s", len(aus), tail)
 	}
 	// CONTENT, not "no error": a keyed-mutex path that acquired but blitted nothing would satisfy
 	// every counter above.
-	assertProbeBands(t, *aus, riskW, riskH, red, blue)
+	assertProbeBands(t, aus, riskW, riskH, red, blue)
 }
 
 // TestZeroCopyRiskFormatRefusal executes the format allowlist + CheckVideoProcessorFormat probe
@@ -293,43 +346,50 @@ func TestZeroCopyRiskChangedHandleRecycles(t *testing.T) {
 	if !s.IsZeroCopy() {
 		t.Fatal("session did not come up zero-copy")
 	}
-	aus, done := collectAUs(s)
+	sink := collectAUs(s)
 	time.Sleep(1200 * time.Millisecond)
 	before := s.Stats()
 	if before.CapFrames < 20 {
 		s.Close()
-		<-done
+		<-sink.done
 		t.Fatalf("capFrames=%d before the swap - the session was not capturing to begin with", before.CapFrames)
 	}
 	// The swap. From here the resolver answers with B's handle, which is what a re-created sender
 	// looks like to the 2 s registry tick.
-	swapAt := len(*aus)
 	live = texB
-	// Two watch ticks plus a reopen: the recycle closes and reopens the session inside the child.
-	time.Sleep(5500 * time.Millisecond)
+	// Wait for the RECYCLE EVENT, not for a fixed sleep: the oracle ticks every 2 s and the reopen
+	// takes as long as it takes. Then take the AU boundary from the forced IDR the reopen emits, so
+	// the decoded frame is guaranteed to come from the new texture instead of from wherever an index
+	// slice happened to land (which is how the first version of this gate flaked).
+	afterDown, ok := awaitDowngrade(s, before.Downgrades, 10*time.Second)
+	if !ok {
+		s.Close()
+		<-sink.done
+		t.Fatalf("downgrades stayed at %d: the changed handle was never detected (R1 - the route would ship a frozen picture)", afterDown)
+	}
+	boundary := sink.len()
+	time.Sleep(2 * time.Second) // gather post-recycle AUs
 	after := s.Stats()
-	tailAUs := append([]AU(nil), (*aus)[min(swapAt+2, len(*aus)):]...)
+	tailAUs := sink.fromKeyframe(boundary)
+	total := sink.len()
 	s.Close()
 	select {
-	case <-done:
+	case <-sink.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Output never closed")
 	}
 
-	t.Logf("R1 handle swap: capFrames %d→%d downgrades %d→%d aus=%d (swap at %d) srcErrors=%d",
-		before.CapFrames, after.CapFrames, before.Downgrades, after.Downgrades, len(*aus), swapAt, after.SrcErrors)
+	t.Logf("R1 handle swap: capFrames %d→%d downgrades %d→%d aus=%d (post-recycle keyframe tail %d) srcErrors=%d",
+		before.CapFrames, after.CapFrames, before.Downgrades, after.Downgrades, total, len(tailAUs), after.SrcErrors)
 
-	if after.Downgrades <= before.Downgrades {
-		t.Fatalf("downgrades %d→%d: the changed handle was never detected (R1 - the route would ship a frozen picture)",
-			before.Downgrades, after.Downgrades)
-	}
 	if after.CapFrames == 0 {
 		t.Fatal("capFrames reset to 0 and never recovered: the recycle killed the capture")
 	}
-	if len(tailAUs) < 20 {
-		t.Fatalf("only %d AUs after the swap - the route did not resume", len(tailAUs))
+	if len(tailAUs) < 10 {
+		t.Fatalf("only %d AUs from the first post-recycle keyframe - the route did not resume on the new texture", len(tailAUs))
 	}
-	// THE assertion: the picture followed the new texture. Decoding the tail must show B's bands.
+	// THE assertion: the picture followed the new texture. A session that "recovered" onto the dead
+	// texture A, or never recycled at all, decodes red/blue here and fails.
 	assertProbeBands(t, tailAUs, riskW, riskH, green, white)
 }
 
