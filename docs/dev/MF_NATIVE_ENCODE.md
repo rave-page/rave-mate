@@ -536,3 +536,40 @@ SUCCESSFUL open; `TestStatsSeparateSaturationFromFailure` and `TestStatsSurfaceP
 the rendered side. **Note:** the live spout gates SKIP unless `SpoutLibrary.dll` is reachable
 (beside the exe or in the managed bin dir under `RAVE_MATE_CONFIG_DIR`) - a "PASS" without it
 staged is a skip, not a verification.
+
+## The ladder must be retried per FAILURE, not per enumeration
+
+The software rung was originally reachable only when MFT *enumeration* found nothing. A hardware
+MFT that BINDS and then refuses to configure took the whole open down with the last rung never
+tried. Reproduced deterministically by exhausting the encoder's concurrent-session cap: with 11-12
+live 1080p60 sessions the next `SetOutputType` returns `MF_E_UNSUPPORTED_D3D_TYPE` (0xc00d6d76) on
+a bound NVENC MFT, and the route died outright.
+
+`configureEncoder` therefore covers the whole MFT setup (bind → output type → input type → ICodecAPI
+→ stream info → drive mode) and is RETRIED on the software tier when a hardware tier fails anywhere
+inside it. `releaseEncoder` undoes a partial bind (FLUSH, clear the device manager, release the MFT,
+ShutdownObject the activate) so the retry reuses the same device and video processor.
+
+Gate: `TestProcSoftwareLadderUnderHardwareExhaustion` holds hardware sessions until the silicon
+refuses, then requires REAL BITSTREAM from whatever tier the automatic ladder lands on. Measured:
+the 12th session degrades to `H264 Encoder MFT` and delivers 40 AUs at 8.1 kB/frame.
+
+## Gate hygiene: hardware gates are rig-state sensitive
+
+Hardware-MFT tests depend on what else holds the GPU, so the same commit can go green on an idle rig
+and red on a busy one. Two rules, both learned from a merge sweep that ran with two live routes:
+
+- **A gate that asserts the HARDWARE path SKIPS with a reason when the tier degraded**
+  (`runConcurrentTier(..., requireHW: true)`). A hardware gate that silently re-aims at software
+  either fails on timing or asserts the wrong thing; an honest skip beats both.
+- **No fixed, hardware-calibrated sleeps.** Software encode is an order of magnitude slower and the
+  sessions share one device lock for their GPU readback, so `time.Sleep(50ms)` after one frame
+  reported "no AU" for a rung that was merely slow. `awaitAUs`/`settleForTier` wait for output with
+  a tier-aware ceiling: fast on an idle rig, patient on a loaded one, and the assertion is unchanged.
+
+**Success returns need an output-volume assertion behind them, not just an error check.** Three
+separate components reported success while producing nothing in one night (a readback that wrote no
+bytes and returned true; a route with healthy counters carrying black; a software encoder emitting
+no AUs with `err=nil`). Every gate here asserts bytes-per-frame or AU counts, and every failure
+message names the tier plus `busyDrops`/`encFails` so "accepted and swallowed" is distinguishable
+from "saturated" and from "failed" in one read.

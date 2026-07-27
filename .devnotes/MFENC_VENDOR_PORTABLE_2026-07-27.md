@@ -167,3 +167,33 @@ before pinning a device.
 - **Intel/QSV**: no rig. Same code path as AMD/NVIDIA, nothing Intel-specific - but that is
   reasoning.
 - **WARP rung** of the software tier: this box always has a hardware video device.
+
+
+## Software-tier-under-load investigation (merge-sweep red)
+
+Coordinator's merge sweep ran with two live routes and produced three zero-AU failures, all on the
+software tier. Verdict, in order of what I could prove:
+
+**1. NOT a silent-swallow bug in the software tier.** It produces real bitstream:
+- forced, at the EXACT failing geometry (720p + 480p, 45 frames): 45/45 AUs both sessions,
+  33 kB/frame and 19 kB/frame, busyDrops=0 encFails=0;
+- via the AUTOMATIC ladder under hardware exhaustion: 40 AUs, 8.1 kB/frame;
+- the two other failing gates (`TestProcSessionOpenCloseCycles`, `TestProcOpenDuringRespawnBackoff`)
+  both PASS with `RAVE_MATE_MFENC_SW=1` on an idle rig.
+
+**2. It WAS the test window** - but the gates were wrong, not merely unlucky. They used fixed sleeps
+calibrated on hardware silicon (50 ms after one frame; 200 ms for 10 frames at 640x480). Software
+encode is ~10-40 ms/frame/session and the sessions serialise on the shared device lock for their GPU
+readback, so a correct-but-slow rung read as "no AU". Fixed with `awaitAUs`/`settleForTier`
+(tier-aware ceiling, still asserting the same counts) and `requireHW` skips-with-reason on gates
+that specifically exercise hardware.
+
+**3. Found a WORSE bug while reproducing.** The software rung was only reachable when MFT
+ENUMERATION found nothing. A hardware MFT that BOUND and then failed to configure killed the open
+with no tier left. Reproduced deterministically: 11-12 concurrent 1080p60 sessions exhaust NVENC and
+the next `SetOutputType` returns `MF_E_UNSUPPORTED_D3D_TYPE`; before the fix the route died, after it
+the session degrades to software and encodes. This is the one that mattered - on a busy rig it is a
+total route loss, and it is exactly the "degrade ladder has nowhere to go" shape.
+
+Software tier status is unchanged as **VERIFIED BY EXECUTION**, now including under hardware
+exhaustion and at the field geometry - but still only on this NVIDIA box.
