@@ -1,13 +1,13 @@
 {
-  "version": "nightly-c3ed1f5",
-  "build": 179,
-  "commit": "c3ed1f5",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-179-20260727-c3ed1f5.exe",
-  "sha256": "bafad97f00fc66350454e5ef47c193049938715ffda52bb146fe1438ffe3a5b6",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-179-20260727-c3ed1f5.exe",
-  "installer_sha256": "44ee9bea8c9eed8ec4b7cfa28621ed80a4f6bfd3a50455bfc3348574fa4ce254",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-179-20260727-c3ed1f5",
-  "linux_sha256": "31ac6cd952ba56504137571e243649673726f5f9b6d819723a2ccf10348c3ce3",
+  "version": "nightly-a906f61",
+  "build": 180,
+  "commit": "a906f61",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-180-20260727-a906f61.exe",
+  "sha256": "53f3201635197ce9f9e01589b457b543b4b9d16be32a3f471916e8ce61627f37",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-180-20260727-a906f61.exe",
+  "installer_sha256": "967f7fdbda3fb3d9c989caec086fc6cbd9d3bbb027941a3a80f00d83aeceb0fd",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-180-20260727-a906f61",
+  "linux_sha256": "366cd0cba2bec57433c6454866f7393644949ddcb491b71a497e4c1a739a0dfc",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-27T02:06:35Z",
-  "notes": "docs(devnotes): park spout pixel-content diagnostics used to isolate the black-frame P0"
+  "released": "2026-07-27T03:42:16Z",
+  "notes": "Merge fix/mfenc-vendor-portable: one D3D device per child + saturation != failure"
 }
