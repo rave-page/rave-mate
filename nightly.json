@@ -1,13 +1,13 @@
 {
-  "version": "nightly-5c43ec2",
-  "build": 184,
-  "commit": "5c43ec2",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-184-20260727-5c43ec2.exe",
-  "sha256": "468d8c71b0c61e41e82ffeeb82dc8231ca1c678d3632ab240dbd0a47c3c8868b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-184-20260727-5c43ec2.exe",
-  "installer_sha256": "89cc523758165698716fd315925b7b528cb8fcfa47d2ffe4c03173c063fee293",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-184-20260727-5c43ec2",
-  "linux_sha256": "658776d8def87ea278469657c7cdf9ce9250aea41f0d5c2bec8f34a721e0e46d",
+  "version": "nightly-32305d0",
+  "build": 185,
+  "commit": "32305d0",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-185-20260727-32305d0.exe",
+  "sha256": "972252450e8201d8f7db320dbafdf95fbbeb20982e9b746bbc69cc00c96d25a3",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-185-20260727-32305d0.exe",
+  "installer_sha256": "cae9bd4e246ed2d797e1e8e0564a57ffcfce55c9cbaff27837d9f76bb0a2410a",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-185-20260727-32305d0",
+  "linux_sha256": "9fe64ad2406f1442e469b41a4fb96b78d2fcdd20cb34db1709f4c19263bca406",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-27T04:55:09Z",
-  "notes": "Merge mfenc: software rung reachable when a hardware MFT fails to CONFIGURE"
+  "released": "2026-07-27T06:57:40Z",
+  "notes": "Merge fix/route-counters-honest: the panel lied in three ways at once"
 }
