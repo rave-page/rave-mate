@@ -4,7 +4,10 @@
 // cgo builds; everywhere else the ffmpeg child path is the sole encoder.
 package mfenc
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // ErrUnsupported marks the non-Windows / non-cgo stub.
 var ErrUnsupported = errors.New("mfenc: unsupported on this platform")
@@ -95,6 +98,30 @@ func (s *ProcSession) Close()                         {}
 func (s *ProcSession) Name() string                   { return "" }
 func (s *ProcSession) InputIsBGRA() bool              { return false }
 func (s *ProcSession) Stats() ProcStats               { return ProcStats{} }
+func (s *ProcSession) Failed() error                  { return ErrUnsupported }
+func (s *ProcSession) DegradeReason() string          { return "" }
+func (s *ProcSession) Drive() string                  { return "" }
+func (s *ProcSession) IsSoftware() bool               { return false }
+
+// Crash-loop ledger stubs (no encoder child on this platform, so nothing to poison).
+func NoteEncoder(int64, string)                   {}
+func NoteHealthy(int64, string)                   {}
+func NoteCrash(int64, string, string) (int, bool) { return 0, false }
+func PoisonedOn(int64) (string, bool)             { return "", false }
+func PoisonedTuple(int64, string) (string, bool)  { return "", false }
+func ResetPoison()                                {}
+func FailLedger() []FailReport                    { return nil }
+
+// FailReport mirrors the windows/cgo ledger row so callers compile everywhere.
+type FailReport struct {
+	LUID     int64
+	Encoder  string
+	Fails    int
+	Poisoned bool
+	Reason   string
+	Stage    string
+	LastAt   time.Time
+}
 
 // ── receive side (zigmedia inc 2) - stubs: no Media Foundation decoder here either ──
 

@@ -118,6 +118,17 @@ type PipelineStats struct {
 	DecErrors   uint64  // publish hard failures (Blt / acquire)
 	DecStaleMs  float64 // age of the last publish (frozen-destination oracle)
 	DecMtxTimeo uint64  // destination-texture mutex acquire timeouts
+	// DegradeReason is the one-sentence "why is this route not on its best path" - a poisoned
+	// hardware encoder, the software encode tier, a mid-route engine substitution. EMPTY is the
+	// only healthy value. A route that degraded silently while every counter read fine is the
+	// worst failure shape there is, so this is rendered wherever the engine name is.
+	DegradeReason string
+	// Drive is the encoder MFT's resolved drive mode ("async"/"sync") on the native engine, taken
+	// from the MFT's own MF_TRANSFORM_ASYNC attribute rather than assumed per vendor.
+	Drive string
+	// SoftwareEncode: this route is on a SOFTWARE encoder tier (native MF software MFT, or a
+	// substituted libx264) rather than silicon.
+	SoftwareEncode bool
 }
 
 // PipelineReporter is the optional stats surface of a factory-built Source/Sink.

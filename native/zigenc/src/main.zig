@@ -173,12 +173,32 @@ const Hdr = struct {
     fn setU32At(h: Hdr, off: usize, v: u32) void {
         @atomicStore(u32, @volatileCast(h.u32At(off)), v, .release);
     }
+    fn setI32At(h: Hdr, off: usize, v: i32) void {
+        @atomicStore(i32, @volatileCast(@as(*volatile i32, @ptrCast(@alignCast(h.base + off)))), v, .release);
+    }
+    // stageSlot is the raw word mf.Enc latches its current stage into (one relaxed store).
+    fn stageSlot(h: Hdr) *volatile u32 {
+        return h.u32At(off_stage);
+    }
 };
 
 const off_cap_frames = 64;
 const off_cap_skips = 72;
 const off_mtx_timeouts = 80;
 const off_src_errors = 88;
+
+// Crash attribution (112..123, previously unused): the LAST driver-touching call this session
+// entered, plus the last hard feed/submit return code. Child-written, parent-read AFTER the
+// process dies - a vendor AV inside a driver leaves no usable stderr tail, so the breadcrumb has
+// to live somewhere the corpse cannot take with it. Additive: an older child never writes here
+// and the parent reads 0 = "unknown".
+const off_stage = 112;
+const off_feed_rc = 116;
+const off_feed_fails = 120;
+// off_busy_drops: frames the encoder had no credit for inside SUBMIT_WAIT_MS. A saturated encoder
+// (4K60 plus a second session on one iGPU) now DROPS frames here instead of blocking long enough
+// for the parent's deadline to end the whole route.
+const off_busy_drops = 124;
 
 // dir:"dec" block (design §10: the ring counters instantiated a second time, opposite direction).
 const off_in_write = 128;
@@ -214,6 +234,9 @@ const Session = struct {
     kbps: i32,
     gop: i32,
     shm_name: []u8,
+    // sw_req: the parent's failure ledger poisoned the hardware MFT on this adapter, so this
+    // session takes the SOFTWARE tier rather than no video at all.
+    sw_req: bool = false,
 
     // Zero-copy capture source (src:"spout"); src_spout=false = v1 SHM frame ring.
     src_spout: bool = false,
@@ -394,6 +417,25 @@ const OpenedEv = struct {
     // dir:"dec" verdict rides the same event: dir + err_dst say which path the session got.
     dir: []const u8 = "enc",
     err_dst: []const u8 = "",
+    // Vendor-portability verdict (the AMD field crash): which drive mode the MFT's own
+    // MF_TRANSFORM_ASYNC attribute selected, whether the SOFTWARE tier is serving this session,
+    // and the adapter actually resolved (a stale configured LUID silently ran on a different GPU
+    // than every log line claimed).
+    drive: []const u8 = "",
+    sw: bool = false,
+    luid_res: i64 = 0,
+    adapter: []const u8 = "",
+};
+
+// EncFailEv: a hard encode error mid-route, ATTRIBUTED (rc + the stage it died in). Before this
+// the session ignored feed()'s return, so a wedged MFT burned FEED_WAIT_MS per frame forever and
+// the only symptom the parent saw was a timeout with no cause.
+const EncFailEv = struct {
+    ev: []const u8 = "encfail",
+    sid: u32,
+    rc: i32,
+    stage: u32,
+    fails: u32,
 };
 
 const SrcGoneEv = struct {
@@ -423,11 +465,13 @@ fn sessionMain(s: *Session) void {
         decSessionMain(s);
         return;
     }
-    const enc = mf.Enc.open(s.gpa, s.luid, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.kbps, s.gop, s.src_spout) catch {
+    const enc = mf.Enc.open(s.gpa, s.luid, s.in_w, s.in_h, s.out_w, s.out_h, s.fps_n, s.fps_d, s.kbps, s.gop, s.src_spout, s.sw_req) catch {
         emit(OpenedEv{ .sid = s.sid, .ok = false, .err = mf.lastOpenErr() });
         return;
     };
+    enc.bindStage(s.hdr.stageSlot()); // crash attribution from here on
     const sink = mf.AuSink{ .ctx = @ptrCast(s), .put = &sinkPut };
+    const drive: []const u8 = if (enc.isAsync()) "async" else "sync";
 
     if (s.src_spout) {
         // The capture source is opened AFTER the encoder: a refusal (foreign adapter, exotic
@@ -438,7 +482,7 @@ fn sessionMain(s: *Session) void {
             s.cap_open = c;
             s.hdr.setCapFmt(c.fmt);
             s.hdr.setCapFlags(c.flags);
-            emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .src = "spout", .cap = "zerocopy" });
+            emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .src = "spout", .cap = "zerocopy", .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName() });
             spoutLoop(s, enc, sink);
             const rc = enc.drain(sink);
             std.debug.print("mfenc session {d} (zerocopy): fed={d} put={d} drain_rc={d}\n", .{ s.sid, s.fed, s.aus_put, rc });
@@ -452,10 +496,12 @@ fn sessionMain(s: *Session) void {
             return;
         }
     }
-    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in });
+    emit(OpenedEv{ .sid = s.sid, .ok = true, .name = enc.name(), .bgra = enc.bgra_in, .drive = drive, .sw = enc.isSoftware(), .luid_res = enc.resolvedLUID(), .adapter = enc.adapterName() });
 
     var last_seq: u64 = s.hdr.frameSeq(); // frames before (re)open are stale - skip
     var fed_frames: u64 = 0;
+    var feed_fails: u32 = 0;
+    var busy_drops: u32 = 0;
     while (true) {
         _ = WaitForSingleObject(s.ev_frame, 20);
         var want_idr = false;
@@ -484,10 +530,31 @@ fn sessionMain(s: *Session) void {
             }
             const pts = s.hdr.framePTS();
             const t0 = qpcNs();
-            _ = enc.feed(s.frame, @divTrunc(pts, 100), sink);
+            const rc = enc.feed(s.frame, @divTrunc(pts, 100), sink);
             s.hdr.addBusy(qpcNs() - t0);
             s.hdr.setConsSeq(seq);
             _ = SetEvent(s.ev_cons);
+            // A hard feed error was IGNORED before: the loop re-entered feed and burned
+            // FEED_WAIT_MS per frame, so a wedged MFT presented to the parent as a stalled route
+            // with huge drop counts and no cause. Report it ATTRIBUTED (rc + stage) on the first
+            // failure and on every power-of-two thereafter, and let the PARENT decide the route's
+            // fate - the child never kills a session on its own.
+            if (rc == mf.RC_BUSY) {
+                // Saturation, not breakage: count the dropped frame and keep the route. consSeq is
+                // already advanced above, so the parent proceeds instead of hitting its deadline.
+                busy_drops += 1;
+                s.hdr.setU32At(off_busy_drops, busy_drops);
+            } else if (rc < 0) {
+                feed_fails += 1;
+                s.hdr.setI32At(off_feed_rc, rc);
+                s.hdr.setU32At(off_feed_fails, feed_fails);
+                if (feed_fails & (feed_fails - 1) == 0) {
+                    emit(EncFailEv{ .sid = s.sid, .rc = rc, .stage = @atomicLoad(u32, @volatileCast(s.hdr.stageSlot()), .monotonic), .fails = feed_fails });
+                }
+            } else if (feed_fails != 0) {
+                feed_fails = 0;
+                s.hdr.setU32At(off_feed_fails, 0);
+            }
         } else {
             _ = enc.pump(sink); // async events arrive without new frames too
         }
@@ -524,6 +591,7 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
     const qpc0 = qpcNs();
     var next = qpc0;
     var live = true; // false after srcgone: session + encoder stay alive, capture stops
+    var feed_fails: u32 = 0;
     while (true) {
         // Sleep only up to the next tick (1..20 ms) - prompt for close/idr/bitrate, and never
         // a hot spin. timeBeginPeriod(1) is already set, so Sleep granularity is ~1 ms.
@@ -558,12 +626,30 @@ fn spoutLoop(s: *Session, enc: *mf.Enc, sink: mf.AuSink) void {
                 s.hdr.setLastCapNs(@intCast(qpcNs()));
                 s.fed += 1;
                 s.hdr.addBusy(qpcNs() - t0);
+                if (feed_fails != 0) {
+                    feed_fails = 0;
+                    s.hdr.setU32At(off_feed_fails, 0);
+                }
             },
             .timeout => s.hdr.bumpAt(off_mtx_timeouts),
+            // Encoder saturated for this tick: a SKIP, which is exactly what capSkips means. Never
+            // a srcgone (that would recycle a perfectly healthy sender) and never a route end.
+            .busy => s.hdr.bumpAt(off_cap_skips),
             .dead => {
                 s.hdr.bumpAt(off_src_errors);
                 live = false;
                 emit(SrcGoneEv{ .sid = s.sid, .reason = c.reason.text() });
+            },
+            // ENCODER wedge, not a source problem: keep capturing (the encoder may recover on the
+            // next tick) and report it attributed. Reporting this as srcgone made the parent pin a
+            // healthy sender to the readback path - see Grab's doc comment.
+            .encfail => {
+                feed_fails += 1;
+                s.hdr.setI32At(off_feed_rc, c.enc_rc);
+                s.hdr.setU32At(off_feed_fails, feed_fails);
+                if (feed_fails & (feed_fails - 1) == 0) {
+                    emit(EncFailEv{ .sid = s.sid, .rc = c.enc_rc, .stage = @atomicLoad(u32, @volatileCast(s.hdr.stageSlot()), .monotonic), .fails = feed_fails });
+                }
             },
         }
         next += period;
@@ -719,6 +805,8 @@ const Cmd = struct {
     dfmt: u32 = 0,
     dname: []const u8 = "",
     in_ring_kb: u32 = 0,
+    // sw: take the SOFTWARE encoder tier for this session (parent's poison ledger).
+    sw: bool = false,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -745,6 +833,19 @@ pub fn main(init: std.process.Init) !void {
     }
     if (init.environ_map.get("RAVE_MATE_MFDEC_PROBE_BANDS")) |v| {
         probe_bands = std.mem.eql(u8, v, "1");
+    }
+    // Software MF encode tier gate. Default auto = hardware tiers first, software as the last
+    // rung; "0" = hardware only (prove a hardware regression); "1"/"force" = software only (the
+    // tier's own test hook, so it is verifiable on a box that HAS working silicon).
+    if (init.environ_map.get("RAVE_MATE_MFENC_SW")) |v| {
+        mf.sw_policy = if (std.mem.eql(u8, v, "0")) .off else if (v.len > 0) .force else .auto;
+    }
+    // Device sharing. Default = ONE device + device manager for the whole child (the child is
+    // already per-adapter, and two device managers on one adapter is the shape that wedges AMD's
+    // MFT the moment a second session opens). "session" restores the old per-session device so a
+    // live rig can A/B the two without another deploy.
+    if (init.environ_map.get("RAVE_MATE_MFENC_DEVICE")) |v| {
+        mf.device_policy = if (std.mem.eql(u8, v, "session")) .session else .child;
     }
 
     _ = timeBeginPeriod(1); // media child: 1 ms scheduler quantum (Sleep(1) is ~15.6 ms without it)
@@ -815,6 +916,7 @@ pub fn main(init: std.process.Init) !void {
                 .kbps = cmd.kbps,
                 .gop = cmd.gop,
                 .shm_name = try gpa.dupe(u8, cmd.shm),
+                .sw_req = cmd.sw,
                 .src_spout = spout,
                 .share = cmd.sh,
                 .sfmt = cmd.sfmt,
@@ -873,6 +975,17 @@ test {
     _ = @import("mf.zig");
     _ = @import("cap.zig");
     _ = @import("dec.zig");
+}
+
+// The crash-attribution block is read by the Go supervisor out of the SAME mapping after the
+// child has already died (procparent lastStage). Offsets must stay inside the 256 B header and
+// must not collide with the enc block (0..111) or the dec block (128..207).
+test "crash-attribution header slots stay in their gap" {
+    try std.testing.expectEqual(@as(usize, 112), off_stage);
+    try std.testing.expectEqual(@as(usize, 116), off_feed_rc);
+    try std.testing.expectEqual(@as(usize, 120), off_feed_fails);
+    try std.testing.expect(off_stage >= 112 and off_feed_fails + 4 <= off_in_write);
+    try std.testing.expect(off_feed_fails + 4 <= hdr_size);
 }
 
 test "spout ring bounds are the bitrate-derived window, geometry-independent" {

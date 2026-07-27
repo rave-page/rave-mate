@@ -23,6 +23,11 @@ fn g(d1: u32, d2: u16, d3: u16, d4: [8]u8) GUID {
 }
 
 // ── GUIDs (values identical to the C++ shim's TU-local DEFINE_GUIDs) ──
+// MF_TRANSFORM_ASYNC is the ONLY legal discriminator for drive mode. QI(IMFMediaEventGenerator)
+// is NOT: sync hardware MFTs expose that interface too and then never queue METransformNeedInput,
+// so an async drive waits FEED_WAIT_MS per frame and the parent reports "encode timeout" - the AMD
+// field failure. ffmpeg's mf_unlock_async reads this same attribute for the same reason.
+const MF_TRANSFORM_ASYNC = g(0xf81a699a, 0x649a, 0x497d, .{ 0x8c, 0x73, 0x29, 0xf8, 0xfe, 0xd6, 0xad, 0x7a });
 const MF_TRANSFORM_ASYNC_UNLOCK = g(0xe5666d6b, 0x3422, 0x4eb6, .{ 0xa4, 0x21, 0xda, 0x7d, 0xb1, 0xf8, 0xe2, 0x07 });
 const MF_LOW_LATENCY = g(0x9c27891a, 0xed7a, 0x40e1, .{ 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee });
 const MFSampleExtension_CleanPoint = g(0x9cdf01d8, 0xa0f0, 0x43ba, .{ 0xb0, 0x77, 0xea, 0xa0, 0x6c, 0xbd, 0x72, 0x8a });
@@ -73,11 +78,16 @@ const E_FAIL: HRESULT = @bitCast(@as(u32, 0x80004005));
 
 const MF_VERSION: u32 = 0x00020070;
 const MFSTARTUP_LITE: u32 = 1;
+const MFT_ENUM_FLAG_SYNCMFT: u32 = 0x1;
+const MFT_ENUM_FLAG_ASYNCMFT: u32 = 0x2;
 const MFT_ENUM_FLAG_HARDWARE: u32 = 0x4;
+const MFT_ENUM_FLAG_LOCALMFT: u32 = 0x10;
 const MFT_ENUM_FLAG_SORTANDFILTER: u32 = 0x40;
+const MFT_MESSAGE_COMMAND_FLUSH: u32 = 0;
 const MFT_MESSAGE_SET_D3D_MANAGER: u32 = 2;
 const MFT_MESSAGE_COMMAND_DRAIN: u32 = 1;
 const MFT_MESSAGE_NOTIFY_BEGIN_STREAMING: u32 = 0x10000000;
+const MFT_MESSAGE_NOTIFY_END_STREAMING: u32 = 0x10000001;
 const MFT_MESSAGE_NOTIFY_END_OF_STREAM: u32 = 0x10000002;
 const MFT_MESSAGE_NOTIFY_START_OF_STREAM: u32 = 0x10000003;
 const MFT_OUTPUT_STREAM_PROVIDES_SAMPLES: u32 = 0x100;
@@ -89,6 +99,8 @@ const MF_EVENT_FLAG_NO_WAIT: u32 = 1;
 
 const D3D_DRIVER_TYPE_UNKNOWN: u32 = 0;
 const D3D_DRIVER_TYPE_HARDWARE: u32 = 1;
+const D3D_DRIVER_TYPE_WARP: u32 = 5; // software rasterizer WITH a video processor: the sw tier's
+// CSC+scale still runs when no hardware adapter can host a video device at all.
 const D3D11_CREATE_DEVICE_BGRA_SUPPORT: u32 = 0x20;
 const D3D11_CREATE_DEVICE_VIDEO_SUPPORT: u32 = 0x800; // required for video MFTs (audit fix)
 const D3D11_SDK_VERSION: u32 = 7;
@@ -475,6 +487,68 @@ fn trace(comptime fmt: []const u8, args: anytype) void {
     std.debug.print("mfenc stage: " ++ fmt ++ "\n", args);
 }
 
+// ── crash attribution: the last driver-touching call, latched in shared memory ──
+//
+// Why not stderr: the AV happens INSIDE a vendor driver, often on its own worker thread, so
+// (a) a per-frame stderr line at 60 fps is unusable and its last write may still be buffered
+// when the process dies, and (b) the open-only stages that exist today stop at "open complete",
+// which is exactly why the field AV is unattributed. A single relaxed store into a shm word the
+// PARENT already maps survives the crash for free: the supervisor reads it after the exit code
+// and names the faulting call. Cost is one instruction per stage, so it is ALWAYS on - a
+// diagnostic that only works when someone remembered to set an env var is not a diagnostic.
+pub const Stage = enum(u32) {
+    idle = 0,
+    // open
+    mfstartup = 10,
+    pick_adapter = 11,
+    create_device = 12,
+    device_manager = 13,
+    enum_mft = 14,
+    activate_mft = 15,
+    set_d3d_manager = 16,
+    set_output_type = 17,
+    set_input_type = 18,
+    codec_api = 19,
+    stream_info = 20,
+    evgen_qi = 21,
+    create_vp = 22,
+    create_textures = 23,
+    begin_streaming = 24,
+    open_done = 25,
+    // feed / submit
+    gate_input = 40,
+    swizzle = 41,
+    update_subresource = 42,
+    vp_blt = 43,
+    sample_time = 44,
+    force_idr = 45,
+    wait_need_input = 46,
+    process_input = 47,
+    get_event = 48,
+    process_output = 49,
+    lock_output = 50,
+    sink_put = 51,
+    sw_readback_copy = 52,
+    sw_readback_map = 53,
+    set_bitrate = 54,
+    // drain / close
+    drain_msg = 60,
+    drain_pump = 61,
+    close_flush = 70,
+    close_end_streaming = 71,
+    close_clear_d3d_manager = 72,
+    close_release_mft = 73,
+    close_shutdown_activate = 74,
+    close_release_pool = 75,
+    close_release_vp = 76,
+    close_release_device = 77,
+    close_done = 78,
+};
+
+/// StageSink is the shm word the parent reads after a child death (main.zig points it at the
+/// session's header slot). null = no session shm (bench/tests): stages are then trace-only.
+pub const StageSink = ?*volatile u32;
+
 // ── helpers ──
 
 fn attrSetU32(p: anytype, key: *const GUID, val: u32) void {
@@ -570,7 +644,81 @@ fn h264LevelFor(w: i32, h: i32, fpsN: i32, fpsD: i32) u32 {
 }
 
 const NVPOOL = 8; // NV12 round-robin depth (encoder queue 2-4 deep; 8 = slack)
-const FEED_WAIT_MS = 2000;
+const FEED_WAIT_MS = 2000; // CLOSE-time budget only (drain): a tail may legitimately take a while
+
+// SUBMIT_WAIT_MS bounds a SINGLE frame's wait for encoder credit, and it is deliberately far below
+// the parent's encodeWait (4 s). Both used to be 2 s, so the parent's deadline expired at exactly
+// the moment the child's did: a saturated encoder - e.g. a 4K60 route plus a second session on one
+// iGPU - produced "mfenc: encode timeout" and the ROUTE ENDED, instead of dropping one frame and
+// carrying on. The child now gives up on the frame quickly, counts it, and lets the parent proceed;
+// saturation degrades to visible drops, which is a survivable failure, not a dead route.
+const SUBMIT_WAIT_MS = 250;
+
+/// RC_BUSY: the encoder had no credit for this frame inside SUBMIT_WAIT_MS. This is a DROP, not a
+/// failure - the caller counts it and moves on. Every other negative return is a real error.
+pub const RC_BUSY: i32 = -9;
+
+/// SwPolicy gates the software MF encoder tier (RAVE_MATE_MFENC_SW=0|1 in the child).
+/// auto = hardware tiers first, software as the last rung; off = hardware only (the pre-tier
+/// behaviour, kept so a rig can prove a hardware regression); force = software only (the tier's
+/// own test hook - it must be reachable on a box that HAS working silicon).
+pub const SwPolicy = enum { auto, off, force };
+pub var sw_policy: SwPolicy = .auto;
+
+/// DevicePolicy decides whether the D3D11 device + MF device manager are shared by every session
+/// in this child (`.child`, the default) or created per session (`.session`, the old behaviour).
+///
+/// WHY THIS EXISTS. Field evidence, 3/3: on AMD a SINGLE encode session is clean (real content,
+/// zero drops, no fault), but opening a SECOND session in the same child wedges it - no
+/// METransformNeedInput, the parent times out at 2.2 s, and the child later takes an access
+/// violation. The child is a PER-ADAPTER process, yet every session was building its own
+/// ID3D11Device + IMFDXGIDeviceManager, so two sessions meant two D3D11 devices and two device
+/// managers on ONE adapter in ONE process - each MFT sitting on its own vendor context. That is
+/// the pattern no reference MF pipeline uses (OBS, ffmpeg and the Media Engine all share one
+/// device manager per adapter) and the one AMD's AMF-backed MFT falls over on. NVIDIA tolerated
+/// it, which is why every dev-box gate passed: they are all single-session.
+///
+/// Sharing is legal because the device is created with D3D11_CREATE_DEVICE_VIDEO_SUPPORT and
+/// ID3D10Multithread::SetMultithreadProtected(TRUE), which is exactly what makes the device and
+/// its immediate/video context safe to drive from several session threads.
+///
+/// `RAVE_MATE_MFENC_DEVICE=session` restores the per-session device so one build can A/B the
+/// theory on a live AMD rig without another deploy cycle.
+pub const DevicePolicy = enum { child, session };
+pub var device_policy: DevicePolicy = .child;
+
+// Lock is a raw SRWLOCK: Zig 0.16 moved std's blocking Mutex onto the Io runtime, and this lock is
+// shared with COM/MFT worker threads (main.zig has the same shape for the same reason).
+extern "kernel32" fn AcquireSRWLockExclusive(*usize) callconv(.winapi) void;
+extern "kernel32" fn ReleaseSRWLockExclusive(*usize) callconv(.winapi) void;
+
+const Lock = struct {
+    srw: usize = 0,
+    fn lock(l: *Lock) void {
+        AcquireSRWLockExclusive(&l.srw);
+    }
+    fn unlock(l: *Lock) void {
+        ReleaseSRWLockExclusive(&l.srw);
+    }
+};
+
+// SharedDev is the child's ONE device + device manager (device_policy == .child). Refcounted:
+// the last session out tears it down, so an idle child holds no GPU device.
+const SharedDev = struct {
+    dev: *ID3D11Device,
+    ctx: *ID3D11DeviceContext,
+    vdev: *ID3D11VideoDevice,
+    vctx: *ID3D11VideoContext,
+    devmgr: *IMFDXGIDeviceManager,
+    vendor: u32,
+    res_luid: i64,
+    adapter_buf: [128]u8,
+    adapter_len: usize,
+    refs: u32,
+};
+
+var shared_lock: Lock = .{};
+var shared_dev: ?SharedDev = null;
 
 pub const AuSink = struct {
     ctx: *anyopaque,
@@ -606,8 +754,22 @@ pub const Enc = struct {
     nv_sample: [NVPOOL]?*IMFSample = @splat(null),
     nv_idx: usize = 0,
     enc: *IMFTransform = undefined,
+    // act is the ACTIVATE the bound MFT came from, kept alive so close() can ShutdownObject it:
+    // a hardware MFT created through IMFActivate is torn down by its activate, not by Release
+    // alone (vendor MFTs keep driver-side state alive otherwise).
+    act: ?*IMFActivate = null,
     evgen: ?*IMFMediaEventGenerator = null,
     capi: ?*ICodecAPI = null,
+    // is_async comes from MF_TRANSFORM_ASYNC, never from a successful QI: a sync MFT that also
+    // exposes IMFMediaEventGenerator must be driven SYNC or every submit burns FEED_WAIT_MS.
+    is_async: bool = false,
+    // sw = the software MF encoder tier: no device manager, system-memory NV12 input. The VP
+    // still does CSC + scale on whatever device we have (hardware or WARP).
+    sw: bool = false,
+    sw_stage_tex: ?*anyopaque = null, // STAGING NV12 for the GPU→host readback (sw tier only)
+    sw_sample: [NVPOOL]?*IMFSample = @splat(null), // system-memory NV12 samples (sw tier only)
+    sw_buf: [NVPOOL]?*IMFMediaBuffer = @splat(null),
+    stage_sink: StageSink = null,
     swz: ?[]u8 = null, // BGRA swizzle scratch when the VP rejects RGBA input
     in_w: i32,
     in_h: i32,
@@ -627,9 +789,66 @@ pub const Enc = struct {
     force_idr: bool = false,
     name_buf: [128]u8 = @splat(0),
     name_len: usize = 0,
+    // Resolved adapter, reported back to the parent. A CONFIGURED LUID that no longer exists
+    // (LUIDs are not stable across reboots / driver resets / a Parsec virtual display appearing)
+    // silently degraded to the default adapter before - so the log named an adapter the pipeline
+    // was not on. The parent now compares requested vs resolved and warns once.
+    res_luid: i64 = 0,
+    adapter_buf: [128]u8 = @splat(0),
+    adapter_len: usize = 0,
+    vendor: u32 = 0,
+    // owns_device: this Enc created the device/manager and must release them. false = the device
+    // is the child's shared singleton and close() only drops a reference.
+    owns_device: bool = true,
 
     pub fn name(e: *const Enc) []const u8 {
         return e.name_buf[0..e.name_len];
+    }
+
+    /// st latches the stage about to run. One relaxed store - safe to call on every frame.
+    pub fn st(e: *Enc, s: Stage) void {
+        if (e.stage_sink) |p| @atomicStore(u32, @volatileCast(p), @intFromEnum(s), .monotonic);
+    }
+
+    /// bindStage points the breadcrumb at the parent-mapped shm word (called right after open).
+    pub fn bindStage(e: *Enc, p: StageSink) void {
+        e.stage_sink = p;
+        e.st(.open_done);
+    }
+
+    /// isAsync reports the resolved drive mode (MF_TRANSFORM_ASYNC), for the opened event.
+    pub fn isAsync(e: *const Enc) bool {
+        return e.is_async;
+    }
+
+    /// isSoftware reports whether the software MF encoder tier is serving this session.
+    pub fn isSoftware(e: *const Enc) bool {
+        return e.sw;
+    }
+
+    /// resolvedLUID is the adapter the pipeline ACTUALLY runs on (0 = WARP / no DXGI adapter).
+    pub fn resolvedLUID(e: *const Enc) i64 {
+        return e.res_luid;
+    }
+
+    /// adapterName is the resolved adapter's DXGI description ("" = WARP / unknown).
+    pub fn adapterName(e: *const Enc) []const u8 {
+        return e.adapter_buf[0..e.adapter_len];
+    }
+
+    // noteAdapter records the resolved adapter identity for the opened event.
+    fn noteAdapter(e: *Enc, ad: ?*IDXGIAdapter1) void {
+        e.res_luid = 0;
+        e.adapter_len = 0;
+        const a = ad orelse return;
+        var d: DXGI_ADAPTER_DESC1 = undefined;
+        if (failed(a.v.GetDesc1(@ptrCast(a), &d))) return;
+        e.res_luid = (@as(i64, d.AdapterLuid.high) << 32) | @as(i64, @as(u32, @bitCast(d.AdapterLuid.low)));
+        for (d.Description) |c| {
+            if (c == 0 or e.adapter_len >= e.adapter_buf.len) break;
+            e.adapter_buf[e.adapter_len] = if (c < 128) @intCast(c) else '?';
+            e.adapter_len += 1;
+        }
     }
 
     fn setErr(e: *Enc, stage: []const u8, hr: HRESULT) OpenErr {
@@ -696,10 +915,21 @@ pub const Enc = struct {
     // geometry. The VP enumerator doubles as the video-capability gate BEFORE any MFT sees
     // the device manager.
     fn openDevice(e: *Enc, adapter: ?*IDXGIAdapter1) OpenErr!void {
-        trace("D3D11CreateDevice({s})", .{if (adapter != null) "pinned adapter" else "default"});
+        return e.openDeviceOn(adapter, false);
+    }
+
+    // openDeviceOn: warp=true creates the software rasterizer device (last rung of the software
+    // encode tier - a box with no usable hardware video device still gets CSC + scale).
+    // Leaves the PER-GEOMETRY VP enumerator to createEnumerator: the device is shareable across
+    // sessions, the enumerator is not (it is built from this session's content desc).
+    fn openDeviceOn(e: *Enc, adapter: ?*IDXGIAdapter1, warp: bool) OpenErr!void {
+        e.st(.create_device);
+        trace("D3D11CreateDevice({s})", .{if (warp) "WARP" else if (adapter != null) "pinned adapter" else "default"});
+        const driver: u32 = if (warp) D3D_DRIVER_TYPE_WARP else if (adapter != null) D3D_DRIVER_TYPE_UNKNOWN else D3D_DRIVER_TYPE_HARDWARE;
+        const ad: ?*IDXGIAdapter1 = if (warp) null else adapter; // WARP forbids an adapter pointer
         var dev: ?*ID3D11Device = null;
         var dctx: ?*ID3D11DeviceContext = null;
-        var hr = D3D11CreateDevice(@ptrCast(adapter), if (adapter != null) D3D_DRIVER_TYPE_UNKNOWN else D3D_DRIVER_TYPE_HARDWARE, null, D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT, null, 0, D3D11_SDK_VERSION, &dev, null, &dctx);
+        var hr = D3D11CreateDevice(@ptrCast(ad), driver, null, D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT, null, 0, D3D11_SDK_VERSION, &dev, null, &dctx);
         if (failed(hr) or dev == null or dctx == null) return e.setErr("D3D11CreateDevice", hr);
         e.dev = dev.?;
         e.ctx = dctx.?;
@@ -727,6 +957,31 @@ pub const Enc = struct {
             return e.setErr("QI ID3D11VideoContext", hr);
         }
         e.vctx = @ptrCast(@alignCast(vraw.?));
+        // Device manager here, not in open(): it belongs to the DEVICE, so a shared device carries
+        // exactly one manager. Two managers on one adapter is the shape AMD's MFT rejects.
+        e.st(.device_manager);
+        var token: u32 = 0;
+        var dm: ?*IMFDXGIDeviceManager = null;
+        hr = MFCreateDXGIDeviceManager(&token, &dm);
+        if (failed(hr) or dm == null) {
+            e.releaseVideoDevice();
+            e.releaseDevice();
+            return e.setErr("MFCreateDXGIDeviceManager", hr);
+        }
+        e.devmgr = dm.?;
+        hr = e.devmgr.v.ResetDevice(@ptrCast(e.devmgr), @ptrCast(e.dev), token);
+        if (failed(hr)) {
+            release(e.devmgr);
+            e.releaseVideoDevice();
+            e.releaseDevice();
+            return e.setErr("ResetDevice", hr);
+        }
+    }
+
+    // createEnumerator builds this session's PER-GEOMETRY video-processor enumerator. It doubles
+    // as the video-capability gate: an adapter that cannot host the route's geometry is rejected
+    // BEFORE any MFT is offered the device manager (4K60 crash-audit fix).
+    fn createEnumerator(e: *Enc) OpenErr!void {
         const cd = D3D11_VIDEO_PROCESSOR_CONTENT_DESC{
             .InputFrameFormat = 0, // progressive
             .InputFrameRate = .{ .Numerator = @intCast(e.fps_n), .Denominator = @intCast(e.fps_d) },
@@ -737,16 +992,17 @@ pub const Enc = struct {
             .OutputHeight = @intCast(e.out_h),
             .Usage = 0, // playback normal
         };
+        e.st(.create_vp);
         trace("CreateVideoProcessorEnumerator", .{});
         var vpe: ?*anyopaque = null;
-        hr = e.vdev.v.CreateVideoProcessorEnumerator(@ptrCast(e.vdev), &cd, &vpe);
-        if (failed(hr) or vpe == null) {
-            release(e.vctx);
-            release(e.vdev);
-            e.releaseDevice();
-            return e.setErr("CreateVideoProcessorEnumerator", hr);
-        }
+        const hr = e.vdev.v.CreateVideoProcessorEnumerator(@ptrCast(e.vdev), &cd, &vpe);
+        if (failed(hr) or vpe == null) return e.setErr("CreateVideoProcessorEnumerator", hr);
         e.vpe = vpe.?;
+    }
+
+    fn releaseVideoDevice(e: *Enc) void {
+        release(e.vctx);
+        release(e.vdev);
     }
 
     fn releaseDevice(e: *Enc) void {
@@ -754,75 +1010,232 @@ pub const Enc = struct {
         release(e.dev);
     }
 
-    // bindEncoder: vendor-first candidate order; MF_SA_D3D11_AWARE + SET_D3D_MANAGER as hard
-    // gates; cross-vendor manager handoff banned; rejected activations fully shut down.
-    fn bindEncoder(e: *Enc, device_tag: ?[]const u8) OpenErr!void {
-        trace("MFTEnumEx(bind + SET_D3D_MANAGER)", .{});
+    // acquireDevice fills in the device/context/video interfaces/device manager, either from the
+    // child-wide singleton (device_policy == .child) or freshly per session. Adapter resolution +
+    // the pinned→default→WARP degrade ladder live here so both policies get them identically.
+    fn acquireDevice(e: *Enc, adapter_luid: i64, allow_sw: bool) OpenErr!void {
+        if (device_policy == .child) {
+            shared_lock.lock();
+            defer shared_lock.unlock();
+            if (shared_dev) |*sd| {
+                // The child is per-adapter, so every session in it wants the same GPU. If a
+                // session ever asks for a DIFFERENT resolvable adapter, build it its own device
+                // instead of silently binding the wrong one: feeding an MFT textures from a
+                // foreign device is the access-violation class this whole child exists to contain.
+                if (adapter_luid != 0 and sd.res_luid != 0 and adapter_luid != sd.res_luid) {
+                    trace("device: session wants adapter 0x{x} but the shared device is on 0x{x} - own device for this session", .{ @as(u64, @bitCast(adapter_luid)), @as(u64, @bitCast(sd.res_luid)) });
+                    return e.createDevice(adapter_luid, allow_sw);
+                }
+                sd.refs += 1;
+                e.adoptShared(sd);
+                trace("device: reusing the child's shared D3D11 device (refs={d})", .{sd.refs});
+                return;
+            }
+            try e.createDevice(adapter_luid, allow_sw);
+            const sd = SharedDev{
+                .dev = e.dev,
+                .ctx = e.ctx,
+                .vdev = e.vdev,
+                .vctx = e.vctx,
+                .devmgr = e.devmgr,
+                .vendor = e.vendor,
+                .res_luid = e.res_luid,
+                .adapter_buf = e.adapter_buf,
+                .adapter_len = e.adapter_len,
+                .refs = 1,
+            };
+            shared_dev = sd;
+            e.owns_device = false; // the singleton owns it; close() drops a reference
+            return;
+        }
+        try e.createDevice(adapter_luid, allow_sw);
+    }
+
+    fn adoptShared(e: *Enc, sd: *const SharedDev) void {
+        e.dev = sd.dev;
+        e.ctx = sd.ctx;
+        e.vdev = sd.vdev;
+        e.vctx = sd.vctx;
+        e.devmgr = sd.devmgr;
+        e.vendor = sd.vendor;
+        e.res_luid = sd.res_luid;
+        e.adapter_buf = sd.adapter_buf;
+        e.adapter_len = sd.adapter_len;
+        e.owns_device = false;
+    }
+
+    // releaseSharedDevice drops one reference to the child's shared device; the last one out
+    // tears it down, so an idle child holds no GPU device.
+    fn releaseSharedDevice() void {
+        shared_lock.lock();
+        defer shared_lock.unlock();
+        const sd = if (shared_dev) |*p| p else return;
+        if (sd.refs > 1) {
+            sd.refs -= 1;
+            return;
+        }
+        release(sd.devmgr);
+        release(sd.vctx);
+        release(sd.vdev);
+        release(sd.ctx);
+        release(sd.dev);
+        shared_dev = null;
+    }
+
+    // createDevice runs the adapter ladder and builds a device this Enc owns.
+    fn createDevice(e: *Enc, adapter_luid: i64, allow_sw: bool) OpenErr!void {
+        e.st(.pick_adapter);
+        var vendor: u32 = 0;
+        var adapter = findAdapter(adapter_luid, &vendor);
+        const luid_resolved = adapter != null;
+        if (adapter == null) adapter = pickDefaultAdapter(&vendor);
+        if (adapter_luid != 0 and !luid_resolved) {
+            // A configured LUID that no longer exists. LUIDs are NOT stable across reboots,
+            // driver resets or a virtual display appearing, so a stale config silently ran the
+            // pipeline on a different adapter than every log line claimed.
+            trace("requested adapter luid 0x{x} not present - using the default adapter", .{@as(u64, @bitCast(adapter_luid))});
+        }
+        e.noteAdapter(adapter);
+        e.openDevice(adapter) catch {
+            if (adapter) |a| { // chosen adapter cannot host the pipeline: degrade to default
+                release(a);
+                adapter = null;
+                vendor = 0;
+                e.noteAdapter(null);
+                e.openDevice(null) catch {
+                    // No hardware adapter can host a video device (headless / virtual-display-only
+                    // rig). WARP still gives us the video processor, so the software encode tier
+                    // remains reachable - that is the rung that must never be missing.
+                    if (!allow_sw) return error.OpenFailed;
+                    trace("no hardware video device - falling back to WARP for CSC/scale", .{});
+                    try e.openDeviceOn(null, true);
+                };
+            } else return error.OpenFailed;
+        };
+        if (adapter) |a| release(a);
+        e.vendor = vendor;
+        e.owns_device = true;
+    }
+
+    // activateName reads an activate's MFT_FRIENDLY_NAME into buf as ASCII; returns the slice.
+    fn activateName(a: *IMFActivate, buf: []u8) []const u8 {
+        var wname: [128]u16 = @splat(0);
+        var len: usize = 0;
+        const av: *const AttrVtbl = @ptrCast(@alignCast(a.v));
+        if (failed(av.GetString(@ptrCast(a), &MFT_FRIENDLY_NAME, &wname, 127, null))) return buf[0..0];
+        for (wname) |c| {
+            if (c == 0 or len >= buf.len) break;
+            buf[len] = if (c < 128) @intCast(c) else '?';
+            len += 1;
+        }
+        return buf[0..len];
+    }
+
+    // resolveDrive fixes the drive mode from the MFT's OWN attributes and unlocks async mode.
+    // Returns false when the MFT must be rejected (async but refuses to unlock - there is no
+    // legal sync drive of an async MFT, and driving one sync is the documented E_UNEXPECTED
+    // storm). Also reads MF_SA_D3D11_AWARE, which the caller uses as the device-manager gate.
+    fn resolveDrive(e: *Enc, t: *IMFTransform, aware: *u32) bool {
+        aware.* = 0;
+        e.is_async = false;
+        var attrs: ?*IMFAttributes = null;
+        if (failed(t.v.GetAttributes(@ptrCast(t), &attrs)) or attrs == null) return true; // no store: sync
+        defer release(attrs.?);
+        aware.* = attrGetU32(attrs.?, &MF_SA_D3D11_AWARE) orelse 0;
+        attrSetU32(attrs.?, &MF_LOW_LATENCY, 1);
+        const async_flag = attrGetU32(attrs.?, &MF_TRANSFORM_ASYNC) orelse 0;
+        if (async_flag == 0) return true; // SYNC MFT: never unlock, never take an event generator
+        attrSetU32(attrs.?, &MF_TRANSFORM_ASYNC_UNLOCK, 1);
+        // Verify the unlock TOOK: an MFT that keeps ASYNC_UNLOCK at 0 rejects every ProcessInput
+        // with E_NOTACCEPTING forever, which used to present as a 2 s stall per frame.
+        if ((attrGetU32(attrs.?, &MF_TRANSFORM_ASYNC_UNLOCK) orelse 0) == 0) return false;
+        e.is_async = true;
+        return true;
+    }
+
+    // bindTier is one MFTEnumEx sweep. enum_flags picks the tier (hardware vs software); when
+    // want_d3d is false the MFT is bound WITHOUT a device manager (software tier: system-memory
+    // NV12 input), which is why MF_SA_D3D11_AWARE is only a gate on the hardware tiers.
+    fn bindTier(e: *Enc, enum_flags: u32, device_tag: ?[]const u8, want_d3d: bool) bool {
+        e.st(.enum_mft);
         const ti = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = MFVideoFormat_NV12 };
         const to = MFT_REGISTER_TYPE_INFO{ .major = MFMediaType_Video, .sub = MFVideoFormat_H264 };
         var acts: ?[*]*IMFActivate = null;
         var n: u32 = 0;
-        const hr = MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &ti, &to, &acts, &n);
-        if (failed(hr) or n == 0 or acts == null) return e.setErr("MFTEnumEx(no hw encoder)", E_FAIL);
+        if (failed(MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, enum_flags | MFT_ENUM_FLAG_SORTANDFILTER, &ti, &to, &acts, &n)) or n == 0 or acts == null) return false;
         const list = acts.?[0..n];
-        defer {
-            for (list) |a| release(a);
+        var bound: ?*IMFActivate = null;
+        defer { // every activate we did NOT bind is released; the bound one is kept for close()
+            for (list) |a| {
+                if (bound != a) release(a);
+            }
             CoTaskMemFree(@ptrCast(acts));
         }
-        var bound = false;
         var pass: u32 = 0;
-        while (pass < 2 and !bound) : (pass += 1) {
-            if (pass == 0 and device_tag == null) continue; // no hint: one unfiltered pass
+        while (pass < 2) : (pass += 1) {
+            if (pass == 0 and device_tag == null) continue; // no vendor hint: one unfiltered pass
             for (list) |a| {
-                if (bound) break;
-                var wname: [128]u16 = @splat(0);
                 var fname: [128]u8 = @splat(0);
-                var flen: usize = 0;
-                const av: *const AttrVtbl = @ptrCast(@alignCast(a.v));
-                if (!failed(av.GetString(@ptrCast(a), &MFT_FRIENDLY_NAME, &wname, 127, null))) {
-                    for (wname) |c| {
-                        if (c == 0 or flen >= fname.len) break;
-                        fname[flen] = if (c < 128) @intCast(c) else '?';
-                        flen += 1;
-                    }
-                }
-                const fn_name = fname[0..flen];
+                const fn_name = activateName(a, &fname);
                 if (pass == 0 and !containsNoCase(fn_name, device_tag.?)) continue;
-                if (vendorMismatch(fn_name, device_tag)) continue;
+                if (want_d3d and vendorMismatch(fn_name, device_tag)) continue;
+                e.st(.activate_mft);
                 var raw: ?*anyopaque = null;
                 if (failed(a.v.ActivateObject(@ptrCast(a), &IID_IMFTransform, &raw)) or raw == null) continue;
                 const t: *IMFTransform = @ptrCast(@alignCast(raw.?));
                 var aware: u32 = 0;
-                var attrs: ?*IMFAttributes = null;
-                if (!failed(t.v.GetAttributes(@ptrCast(t), &attrs)) and attrs != null) {
-                    aware = attrGetU32(attrs.?, &MF_SA_D3D11_AWARE) orelse 0;
-                    attrSetU32(attrs.?, &MF_TRANSFORM_ASYNC_UNLOCK, 1);
-                    attrSetU32(attrs.?, &MF_LOW_LATENCY, 1);
-                    release(attrs.?);
-                }
-                if (aware == 0) { // must publish MF_SA_D3D11_AWARE to take our device manager
+                const ok_drive = e.resolveDrive(t, &aware);
+                if (!ok_drive or (want_d3d and aware == 0)) {
                     release(t);
                     _ = a.v.ShutdownObject(@ptrCast(a));
                     continue;
                 }
-                if (failed(t.v.ProcessMessage(@ptrCast(t), MFT_MESSAGE_SET_D3D_MANAGER, @intFromPtr(e.devmgr)))) {
-                    release(t);
-                    _ = a.v.ShutdownObject(@ptrCast(a));
-                    continue;
+                if (want_d3d) {
+                    e.st(.set_d3d_manager);
+                    if (failed(t.v.ProcessMessage(@ptrCast(t), MFT_MESSAGE_SET_D3D_MANAGER, @intFromPtr(e.devmgr)))) {
+                        release(t);
+                        _ = a.v.ShutdownObject(@ptrCast(a));
+                        continue;
+                    }
                 }
                 e.enc = t;
-                @memcpy(e.name_buf[0..flen], fn_name);
-                e.name_len = flen;
-                bound = true;
+                e.act = a;
+                bound = a;
+                @memcpy(e.name_buf[0..fn_name.len], fn_name);
+                e.name_len = fn_name.len;
+                e.sw = !want_d3d;
+                trace("bound {s} drive={s} tier={s} aware={d}", .{ fn_name, if (e.is_async) "async" else "sync", if (want_d3d) "hw" else "sw", aware });
+                return true;
             }
         }
-        if (!bound) return e.setErr("MFTEnumEx(no usable hw encoder for this device)", E_FAIL);
+        return false;
+    }
+
+    // bindEncoder walks the vendor-portability ladder, best first, and NEVER assumes a drive
+    // mode (see resolveDrive). Rungs:
+    //   1. hardware MFT whose friendly name carries this adapter's vendor tag
+    //   2. any hardware MFT that accepts THIS device's manager (cross-vendor handoff still banned)
+    //   3. the software MF H.264 encoder - no device manager, system-memory NV12 in
+    // Rung 3 is a first-class tier, not a footnote: it is what a box with no usable hardware MFT
+    // (or a poisoned adapter) encodes on, and after the zero-copy flip the child is load-bearing
+    // for ALL capture, so "no hardware encoder" must not mean "no video".
+    fn bindEncoder(e: *Enc, device_tag: ?[]const u8, allow_sw: bool, force_sw: bool) OpenErr!void {
+        trace("MFTEnumEx(bind: hw tiers then sw)", .{});
+        if (!force_sw and e.bindTier(MFT_ENUM_FLAG_HARDWARE, device_tag, true)) return;
+        if (!allow_sw) return e.setErr("MFTEnumEx(no usable hw encoder for this device)", E_FAIL);
+        // ASYNCMFT|SYNCMFT|LOCALMFT without HARDWARE = the software encoders (Microsoft's H.264
+        // MFT and any locally registered one). No vendor filter: there is no adapter to match.
+        if (e.bindTier(MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_ASYNCMFT | MFT_ENUM_FLAG_LOCALMFT, null, false)) return;
+        return e.setErr("MFTEnumEx(no hw and no sw H.264 encoder)", E_FAIL);
     }
 
     /// open builds one encode pipeline. zerocopy = the pixels arrive as a foreign shared
     /// texture (cap.zig owns the VP input view), so NO own input texture and no swizzle
     /// scratch are created - that is where the 33 MB VRAM + the host frame plane go.
-    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool) OpenErr!*Enc {
+    /// sw_req = the PARENT asked for the software tier on this session (its per-(adapter,encoder)
+    /// failure ledger poisoned the hardware MFT here). Per-session, unlike the env policy: one
+    /// poisoned adapter must not force software onto every other route in the child.
+    pub fn open(gpa: std.mem.Allocator, adapter_luid: i64, in_w: i32, in_h: i32, out_w: i32, out_h: i32, fps_n: i32, fps_d: i32, kbps_in: i32, gop: i32, zerocopy: bool, sw_req: bool) OpenErr!*Enc {
         const e = gpa.create(Enc) catch return error.OpenFailed;
         e.* = .{
             .gpa = gpa,
@@ -837,33 +1250,16 @@ pub const Enc = struct {
         };
         errdefer gpa.destroy(e);
         if (in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0 or fps_n <= 0) return e.setErr("args", E_FAIL);
+        e.st(.mfstartup);
         trace("MFStartup", .{});
         var hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
         if (failed(hr)) return e.setErr("MFStartup", hr);
 
-        var vendor: u32 = 0;
-        var adapter = findAdapter(adapter_luid, &vendor);
-        if (adapter == null) adapter = pickDefaultAdapter(&vendor);
-        e.openDevice(adapter) catch {
-            if (adapter) |a| { // chosen adapter cannot host the pipeline: degrade to default
-                release(a);
-                adapter = null;
-                vendor = 0;
-                try e.openDevice(null);
-            } else return error.OpenFailed;
-        };
-        if (adapter) |a| release(a);
-
-        trace("MFCreateDXGIDeviceManager+ResetDevice", .{});
-        var token: u32 = 0;
-        var dm: ?*IMFDXGIDeviceManager = null;
-        hr = MFCreateDXGIDeviceManager(&token, &dm);
-        if (failed(hr) or dm == null) return e.setErr("MFCreateDXGIDeviceManager", hr);
-        e.devmgr = dm.?;
-        hr = e.devmgr.v.ResetDevice(@ptrCast(e.devmgr), @ptrCast(e.dev), token);
-        if (failed(hr)) return e.setErr("ResetDevice", hr);
-
-        try e.bindEncoder(vendorTag(vendor));
+        const allow_sw = sw_policy != .off;
+        const force_sw = sw_policy == .force or (sw_req and allow_sw);
+        try e.acquireDevice(adapter_luid, allow_sw);
+        try e.createEnumerator();
+        try e.bindEncoder(vendorTag(e.vendor), allow_sw, force_sw);
 
         // output type: H.264 CBR Main + EXPLICIT level (4K60 = 5.2)
         const out_mt = mtVideo(&MFVideoFormat_H264, out_w, out_h, fps_n, e.fps_d) orelse return e.setErr("mtVideo(out)", E_FAIL);
@@ -871,12 +1267,14 @@ pub const Enc = struct {
         attrSetU32(out_mt, &MF_MT_AVG_BITRATE, kbps * 1000);
         attrSetU32(out_mt, &MF_MT_MPEG2_PROFILE, 77); // Main
         attrSetU32(out_mt, &MF_MT_MPEG2_LEVEL, h264LevelFor(out_w, out_h, fps_n, e.fps_d));
+        e.st(.set_output_type);
         trace("enc SetOutputType", .{});
         hr = e.enc.v.SetOutputType(@ptrCast(e.enc), 0, out_mt, 0);
         release(out_mt);
         if (failed(hr)) return e.setErr("enc SetOutputType", hr);
 
         // input: the MFT's own NV12 candidate, geometry stamped
+        e.st(.set_input_type);
         trace("enc input type negotiation", .{});
         var in_mt: ?*IMFMediaType = null;
         var ti: u32 = 0;
@@ -900,6 +1298,7 @@ pub const Enc = struct {
         if (failed(hr)) return e.setErr("enc SetInputType", hr);
 
         // rate control / GOP / latency knobs (best-effort)
+        e.st(.codec_api);
         trace("ICodecAPI knobs", .{});
         var craw: ?*anyopaque = null;
         if (!failed(qi(e.enc, &IID_ICodecAPI, &craw)) and craw != null) {
@@ -917,21 +1316,54 @@ pub const Enc = struct {
             _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonLowLatency, &b);
         }
 
+        e.st(.stream_info);
         var osi = MFT_OUTPUT_STREAM_INFO{ .dwFlags = 0, .cbSize = 0, .cbAlignment = 0 };
         if (!failed(e.enc.v.GetOutputStreamInfo(@ptrCast(e.enc), 0, &osi))) {
             e.enc_provides = osi.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES) != 0;
             e.enc_out_size = osi.cbSize;
         }
 
-        // async (event-driven) when exposed; sync ProcessInput/Output fallback otherwise
-        var eraw: ?*anyopaque = null;
-        const qhr = qi(e.enc, &IID_IMFMediaEventGenerator, &eraw);
-        if (!failed(qhr) and eraw != null) {
-            e.evgen = @ptrCast(@alignCast(eraw.?));
+        // Event generator ONLY for an MFT that declared itself async (resolveDrive read
+        // MF_TRANSFORM_ASYNC). A sync MFT also answers this QI - taking its generator and then
+        // waiting for METransformNeedInput is the AMD field failure: every submit burned
+        // FEED_WAIT_MS and the parent reported "encode timeout" 2.2 s into the route.
+        e.st(.evgen_qi);
+        var qhr: HRESULT = 0;
+        if (!e.is_async) {
+            // DIAGNOSTIC, open-time only: does this SYNC MFT expose IMFMediaEventGenerator anyway?
+            // If it does, the old QI-based drive-mode discriminator would have driven it async and
+            // waited FEED_WAIT_MS per frame for METransformNeedInput events that never come - the
+            // exact AMD field failure, reproducible on any MFT that answers yes here.
+            var probe: ?*anyopaque = null;
+            const phr = qi(e.enc, &IID_IMFMediaEventGenerator, &probe);
+            if (!failed(phr) and probe != null) {
+                release(@as(*IUnk, @ptrCast(@alignCast(probe.?))));
+                trace("WARNING: sync MFT exposes IMFMediaEventGenerator - a QI-based drive-mode probe would hang here", .{});
+            }
+            qhr = phr;
         }
-        trace("async={} (qi hr=0x{x:0>8}) provides={} outSize={d}", .{ e.evgen != null, @as(u32, @bitCast(qhr)), e.enc_provides, e.enc_out_size });
+        if (e.is_async) {
+            var eraw: ?*anyopaque = null;
+            qhr = qi(e.enc, &IID_IMFMediaEventGenerator, &eraw);
+            if (!failed(qhr) and eraw != null) {
+                e.evgen = @ptrCast(@alignCast(eraw.?));
+            } else {
+                // Declared async but has no event generator: it cannot be driven either way.
+                return e.setErr("QI IMFMediaEventGenerator (MFT declared async)", qhr);
+            }
+        }
+        trace("drive={s} async_attr={} evgen={} (qi hr=0x{x:0>8}) provides={} outSize={d} sw={}", .{
+            if (e.evgen != null) "async" else "sync",
+            e.is_async,
+            e.evgen != null,
+            @as(u32, @bitCast(qhr)),
+            e.enc_provides,
+            e.enc_out_size,
+            e.sw,
+        });
 
         // VP + textures
+        e.st(.create_vp);
         trace("VP format check + CreateVideoProcessor", .{});
         var fmt_fl: u32 = 0;
         e.bgra_in = true;
@@ -946,7 +1378,8 @@ pub const Enc = struct {
         e.vctx.v.VideoProcessorSetOutputColorSpace(@ptrCast(e.vctx), e.vproc, &cs);
         e.vctx.v.VideoProcessorSetStreamColorSpace(@ptrCast(e.vctx), e.vproc, 0, &cs);
 
-        trace("input texture + views + NV12 pool (zerocopy={})", .{e.zero_copy});
+        e.st(.create_textures);
+        trace("input texture + views + NV12 pool (zerocopy={} sw={})", .{ e.zero_copy, e.sw });
         var td = D3D11_TEXTURE2D_DESC{
             .Width = @intCast(in_w),
             .Height = @intCast(in_h),
@@ -986,19 +1419,31 @@ pub const Enc = struct {
                 .SampleCount = 1,
                 .SampleQuality = 0,
                 .Usage = 0,
-                .BindFlags = D3D11_BIND_RENDER_TARGET,
+                // SHADER_RESOURCE alongside RENDER_TARGET: AMD's and Intel's encoder MFTs create
+                // an SRV over the input surface (they run a shader pass before submitting to the
+                // silicon), where NVENC consumes the texture directly. A render-target-only
+                // surface therefore worked on NVIDIA and is a driver-side view creation failure -
+                // in the worst case a fault - on the other two vendors.
+                .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
                 .CPUAccessFlags = 0,
                 .MiscFlags = 0,
             };
             var nt: ?*anyopaque = null;
             hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
-            if (failed(hr) or nt == null) return e.setErr("CreateTexture2D(nv12)", hr);
+            if (failed(hr) or nt == null) {
+                // Some drivers refuse NV12+SHADER_RESOURCE. Retry render-target-only rather than
+                // fail the route: the bind flag is a portability fix, not a requirement.
+                td.BindFlags = D3D11_BIND_RENDER_TARGET;
+                hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &nt);
+                if (failed(hr) or nt == null) return e.setErr("CreateTexture2D(nv12)", hr);
+            }
             e.nv_tex[i] = nt.?;
             const ovd = VPOV_DESC{ .ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D, .a = 0, .b = 0, .c = 0 };
             var ov: ?*anyopaque = null;
             hr = e.vdev.v.CreateVideoProcessorOutputView(@ptrCast(e.vdev), nt.?, e.vpe, &ovd, &ov);
             if (failed(hr) or ov == null) return e.setErr("CreateVideoProcessorOutputView", hr);
             e.nv_view[i] = ov.?;
+            if (e.sw) continue; // software tier: host samples below, no DXGI surface buffers
             var mb: ?*IMFMediaBuffer = null;
             hr = MFCreateDXGISurfaceBuffer(&IID_ID3D11Texture2D, nt.?, 0, 0, &mb);
             if (failed(hr) or mb == null) return e.setErr("MFCreateDXGISurfaceBuffer(nv12)", hr);
@@ -1021,12 +1466,97 @@ pub const Enc = struct {
             release(mb.?);
             e.nv_sample[i] = smp.?;
         }
+        if (e.sw) try e.openSoftwareInput();
 
+        e.st(.begin_streaming);
         trace("BEGIN_STREAMING/START_OF_STREAM", .{});
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+        e.st(.open_done);
         trace("open complete ({s})", .{e.name()});
         return e;
+    }
+
+    // swNV12Bytes is the packed NV12 payload for the output geometry (Y plane + interleaved UV).
+    fn swNV12Bytes(e: *const Enc) u32 {
+        const w: u32 = @intCast(e.out_w);
+        const h: u32 = @intCast(e.out_h);
+        return w * h + w * ((h + 1) / 2);
+    }
+
+    // openSoftwareInput builds the software tier's host input: ONE staging NV12 texture for the
+    // GPU→host readback plus a pool of packed system-memory NV12 samples. The VP still does CSC
+    // and scale on the GPU (or WARP), so this adds exactly one host copy over the hardware tier.
+    fn openSoftwareInput(e: *Enc) OpenErr!void {
+        const td = D3D11_TEXTURE2D_DESC{
+            .Width = @intCast(e.out_w),
+            .Height = @intCast(e.out_h),
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_NV12,
+            .SampleCount = 1,
+            .SampleQuality = 0,
+            .Usage = USAGE_STAGING,
+            .BindFlags = 0,
+            .CPUAccessFlags = CPU_ACCESS_READ,
+            .MiscFlags = 0,
+        };
+        var tex: ?*anyopaque = null;
+        const hr = e.dev.v.CreateTexture2D(@ptrCast(e.dev), &td, null, &tex);
+        if (failed(hr) or tex == null) return e.setErr("CreateTexture2D(nv12 staging)", hr);
+        e.sw_stage_tex = tex.?;
+        const need = e.swNV12Bytes();
+        for (0..NVPOOL) |i| {
+            var mb: ?*IMFMediaBuffer = null;
+            if (failed(MFCreateMemoryBuffer(need, &mb)) or mb == null) return e.setErr("MFCreateMemoryBuffer(nv12)", E_FAIL);
+            _ = mb.?.v.SetCurrentLength(@ptrCast(mb.?), need);
+            var smp: ?*IMFSample = null;
+            if (failed(MFCreateSample(&smp)) or smp == null) {
+                release(mb.?);
+                return e.setErr("MFCreateSample(sw nv12)", E_FAIL);
+            }
+            _ = smp.?.v.AddBuffer(@ptrCast(smp.?), mb.?);
+            e.sw_buf[i] = mb.?; // kept: Lock/Unlock per frame without a per-frame QI
+            e.sw_sample[i] = smp.?;
+        }
+        return;
+    }
+
+    // swReadback copies NV12 pool slot -> staging -> the slot's system-memory sample, honouring
+    // the mapped RowPitch (a staging NV12 surface is padded; assuming packed rows shears the
+    // picture and can read past the mapping on the last row).
+    fn swReadback(e: *Enc, slot: usize) i32 {
+        const stage = e.sw_stage_tex orelse return -8;
+        e.st(.sw_readback_copy);
+        e.ctx.v.CopyResource(@ptrCast(e.ctx), stage, e.nv_tex[slot].?);
+        e.st(.sw_readback_map);
+        var ms = MAPPED_SUBRESOURCE{ .pData = null, .RowPitch = 0, .DepthPitch = 0 };
+        if (failed(e.ctx.v.Map(@ptrCast(e.ctx), stage, 0, MAP_READ, 0, &ms)) or ms.pData == null) return -8;
+        defer e.ctx.v.Unmap(@ptrCast(e.ctx), stage, 0);
+        const mb = e.sw_buf[slot] orelse return -8;
+        var dst: ?[*]u8 = null;
+        var maxlen: u32 = 0;
+        if (failed(mb.v.Lock(@ptrCast(mb), &dst, &maxlen, null)) or dst == null) return -8;
+        defer _ = mb.v.Unlock(@ptrCast(mb));
+        const w: usize = @intCast(e.out_w);
+        const h: usize = @intCast(e.out_h);
+        const pitch: usize = ms.RowPitch;
+        const src = ms.pData.?;
+        const need = e.swNV12Bytes();
+        if (maxlen < need) return -8;
+        var o: usize = 0;
+        for (0..h) |row| { // Y plane
+            @memcpy(dst.?[o .. o + w], src[row * pitch ..][0..w]);
+            o += w;
+        }
+        const uv_rows = (h + 1) / 2;
+        const uv_base = h * pitch; // NV12: the UV plane starts one full Y plane in, same pitch
+        for (0..uv_rows) |row| {
+            @memcpy(dst.?[o .. o + w], src[uv_base + row * pitch ..][0..w]);
+            o += w;
+        }
+        _ = mb.v.SetCurrentLength(@ptrCast(mb), need);
+        return 0;
     }
 
     // harvestOutput pulls encoded AUs into the sink. Async MFTs: ONE ProcessOutput per
@@ -1050,6 +1580,7 @@ pub const Enc = struct {
                 ob.pSample = cpu_sample;
             }
             var status: u32 = 0;
+            e.st(.process_output);
             const hr = e.enc.v.ProcessOutput(@ptrCast(e.enc), 0, 1, &ob, &status);
             if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
                 var mt: ?*IMFMediaType = null;
@@ -1075,11 +1606,13 @@ pub const Enc = struct {
             var pts: i64 = 0;
             _ = s.v.GetSampleTime(@ptrCast(s), &pts);
             const clean = attrGetU32(s, &MFSampleExtension_CleanPoint) orelse 0;
+            e.st(.lock_output);
             var buf: ?*IMFMediaBuffer = null;
             if (!failed(s.v.ConvertToContiguousBuffer(@ptrCast(s), &buf)) and buf != null) {
                 var p: ?[*]u8 = null;
                 var len: u32 = 0;
                 if (!failed(buf.?.v.Lock(@ptrCast(buf.?), &p, null, &len)) and p != null and len > 0) {
+                    e.st(.sink_put);
                     sink.put(sink.ctx, p.?[0..len], pts, clean != 0);
                     _ = buf.?.v.Unlock(@ptrCast(buf.?));
                 }
@@ -1096,6 +1629,7 @@ pub const Enc = struct {
         const gen = e.evgen orelse return e.harvestOutput(sink); // sync MFT
         while (true) {
             var ev: ?*IMFMediaEvent = null;
+            e.st(.get_event);
             const hr = gen.v.GetEvent(@ptrCast(gen), MF_EVENT_FLAG_NO_WAIT, &ev);
             if (hr == MF_E_NO_EVENTS_AVAILABLE) return 0;
             if (failed(hr) or ev == null) return -1;
@@ -1129,11 +1663,12 @@ pub const Enc = struct {
     /// outputs). Also bounds latency: queue depth <= NVPOOL-1. Called BEFORE a zero-copy
     /// session touches the sender's mutex - never wait on the encoder while holding it.
     pub fn gateInput(e: *Enc, sink: AuSink) i32 {
+        e.st(.gate_input);
         var gate_waited: u32 = 0;
         while (e.fed_n - e.out_n >= NVPOOL - 1) {
             if (e.pump(sink) < 0) return -5;
             if (e.fed_n - e.out_n < NVPOOL - 1) break;
-            if (gate_waited >= FEED_WAIT_MS) return -6;
+            if (gate_waited >= SUBMIT_WAIT_MS) return -9; // busy: drop this frame
             Sleep(1);
             gate_waited += 1;
         }
@@ -1144,6 +1679,7 @@ pub const Enc = struct {
     /// and returns that slot; <0 = Blt failed. The ONLY call a zero-copy session makes while
     /// holding the sender's shared-texture mutex.
     pub fn bltView(e: *Enc, in_view: *anyopaque) i32 {
+        e.st(.vp_blt);
         const slot = e.nv_idx;
         e.nv_idx = (e.nv_idx + 1) % NVPOOL;
         const stream = D3D11_VIDEO_PROCESSOR_STREAM{
@@ -1165,11 +1701,13 @@ pub const Enc = struct {
         if (g0 < 0) return g0;
         var rows: [*]const u8 = rgba;
         if (e.bgra_in) {
+            e.st(.swizzle);
             const dst = e.swz.?;
             swizzleTo(dst, rgba);
             rows = dst.ptr;
         }
         const stride: u32 = @intCast(e.in_w * 4);
+        e.st(.update_subresource);
         e.ctx.v.UpdateSubresource(@ptrCast(e.ctx), e.in_tex, 0, null, rows, stride, 0);
         const slot = e.bltView(e.in_view);
         if (slot < 0) return slot;
@@ -1178,12 +1716,18 @@ pub const Enc = struct {
 
     /// submitSlot hands a converted NV12 pool slot to the encoder (bounded waits). <0 = error.
     pub fn submitSlot(e: *Enc, slot: usize, pts100: i64, sink: AuSink) i32 {
-        const nv12 = e.nv_sample[slot].?; // pool-owned: never released here
+        if (e.sw) { // software tier: the MFT needs the pixels in system memory
+            const rc = e.swReadback(slot);
+            if (rc < 0) return rc;
+        }
+        e.st(.sample_time);
+        const nv12 = (if (e.sw) e.sw_sample[slot] else e.nv_sample[slot]).?; // pool-owned
         _ = nv12.v.SetSampleTime(@ptrCast(nv12), pts100);
         _ = nv12.v.SetSampleDuration(@ptrCast(nv12), e.dur100);
 
         var hr: HRESULT = 0;
         if (e.force_idr) {
+            e.st(.force_idr);
             if (e.capi) |c| {
                 const v = VARIANT{ .vt = VT_UI4, .val = 1 };
                 _ = c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncVideoForceKeyFrame, &v);
@@ -1193,14 +1737,16 @@ pub const Enc = struct {
 
         if (e.evgen != null) {
             var waited: u32 = 0;
+            e.st(.wait_need_input);
             while (true) {
                 if (e.pump(sink) < 0) return -5;
                 if (e.need_input > 0) break;
-                if (waited >= FEED_WAIT_MS) return -6;
+                if (waited >= SUBMIT_WAIT_MS) return -9; // busy: no encoder credit in time
                 Sleep(1);
                 waited += 1;
             }
             e.need_input -= 1;
+            e.st(.process_input);
             hr = e.enc.v.ProcessInput(@ptrCast(e.enc), 0, nv12, 0);
             if (failed(hr)) return -7;
             e.fed_n += 1;
@@ -1209,10 +1755,11 @@ pub const Enc = struct {
         }
         var waited: u32 = 0;
         while (true) {
+            e.st(.process_input);
             hr = e.enc.v.ProcessInput(@ptrCast(e.enc), 0, nv12, 0);
             if (hr != MF_E_NOTACCEPTING) break;
             if (e.harvestOutput(sink) < 0) return -5;
-            if (waited >= FEED_WAIT_MS) return -6;
+            if (waited >= SUBMIT_WAIT_MS) return -9; // busy: MFT still NOTACCEPTING
             Sleep(1);
             waited += 1;
         }
@@ -1229,14 +1776,17 @@ pub const Enc = struct {
     /// setBitrate live-retargets CBR mean bitrate (no reopen).
     pub fn setBitrate(e: *Enc, kbps: u32) bool {
         const c = e.capi orelse return false;
+        e.st(.set_bitrate);
         const v = VARIANT{ .vt = VT_UI4, .val = @as(u64, kbps) * 1000 };
         return !failed(c.v.SetValue(@ptrCast(c), &CODECAPI_AVEncCommonMeanBitRate, &v));
     }
 
     /// drain flushes the encoder tail into the sink (bounded). Returns 0 done, 1 timeout, <0 error.
     pub fn drain(e: *Enc, sink: AuSink) i32 {
+        e.st(.drain_msg);
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
         _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_DRAIN, 0);
+        e.st(.drain_pump);
         if (e.evgen == null) {
             return e.harvestOutput(sink);
         }
@@ -1254,25 +1804,58 @@ pub const Enc = struct {
         return if (e.drain_done or e.fed_n == e.out_n) 0 else 1;
     }
 
+    // close follows the DOCUMENTED MFT teardown order. The old order (release the MFT, then the
+    // device manager, then the device) left the vendor MFT holding OUR device manager while we
+    // dropped our last references - the MFT's own worker threads then raced a dying device. AMD's
+    // and Intel's MFTs keep driver-side state alive across Release and are torn down by their
+    // ACTIVATE; NVIDIA's tolerated the short order, which is why this never showed up here.
+    //   FLUSH (drop queued samples) -> END_STREAMING -> SET_D3D_MANAGER(0) (MFT drops the
+    //   manager) -> Release MFT -> ShutdownObject the activate -> pool -> VP -> device.
     pub fn close(e: *Enc) void {
+        e.st(.close_flush);
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_COMMAND_FLUSH, 0);
+        e.st(.close_end_streaming);
+        _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+        if (!e.sw) { // the software tier never took a device manager
+            e.st(.close_clear_d3d_manager);
+            _ = e.enc.v.ProcessMessage(@ptrCast(e.enc), MFT_MESSAGE_SET_D3D_MANAGER, 0);
+        }
         if (e.capi) |c| release(c);
         if (e.evgen) |ev| release(ev);
+        e.st(.close_release_mft);
         release(e.enc);
+        if (e.act) |a| {
+            e.st(.close_shutdown_activate);
+            _ = a.v.ShutdownObject(@ptrCast(a));
+            release(a);
+            e.act = null;
+        }
+        e.st(.close_release_pool);
         for (0..NVPOOL) |i| {
             if (e.nv_sample[i]) |s| release(s);
+            if (e.sw_sample[i]) |s| release(s);
+            if (e.sw_buf[i]) |b| release(b);
             if (e.nv_view[i]) |v_| release(@as(*IUnk, @ptrCast(@alignCast(v_))));
             if (e.nv_tex[i]) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
         }
+        if (e.sw_stage_tex) |t| release(@as(*IUnk, @ptrCast(@alignCast(t))));
         if (!e.zero_copy) release(@as(*IUnk, @ptrCast(@alignCast(e.in_view))));
+        e.st(.close_release_vp);
         release(@as(*IUnk, @ptrCast(@alignCast(e.vproc))));
         release(@as(*IUnk, @ptrCast(@alignCast(e.vpe))));
-        release(e.vctx);
-        release(e.vdev);
         if (!e.zero_copy) release(@as(*IUnk, @ptrCast(@alignCast(e.in_tex))));
-        release(e.devmgr);
-        release(e.ctx);
-        release(e.dev);
+        e.st(.close_release_device);
+        // A shared device outlives this session: drop a reference, never Release it out from under
+        // the sibling sessions still encoding on it.
+        if (e.owns_device) {
+            release(e.devmgr);
+            e.releaseVideoDevice();
+            e.releaseDevice();
+        } else {
+            releaseSharedDevice();
+        }
         if (e.swz) |s| e.gpa.free(s);
+        e.st(.close_done);
         const gpa = e.gpa;
         gpa.destroy(e);
     }
@@ -1283,6 +1866,41 @@ test "h264 level table" {
     try std.testing.expectEqual(@as(u32, 51), h264LevelFor(3840, 2160, 30, 1));
     try std.testing.expectEqual(@as(u32, 42), h264LevelFor(1920, 1080, 60, 1));
     try std.testing.expectEqual(@as(u32, 31), h264LevelFor(1280, 720, 30, 1));
+}
+
+// The stage codes are a CROSS-PROCESS contract: the Go supervisor decodes them out of shared
+// memory after the child is already dead (internal/mfenc stageName). Renumbering one silently
+// mislabels a crash, so the load-bearing values are pinned here.
+test "stage codes are a stable cross-process contract" {
+    try std.testing.expectEqual(@as(u32, 0), @intFromEnum(Stage.idle));
+    try std.testing.expectEqual(@as(u32, 16), @intFromEnum(Stage.set_d3d_manager));
+    try std.testing.expectEqual(@as(u32, 25), @intFromEnum(Stage.open_done));
+    try std.testing.expectEqual(@as(u32, 46), @intFromEnum(Stage.wait_need_input));
+    try std.testing.expectEqual(@as(u32, 47), @intFromEnum(Stage.process_input));
+    try std.testing.expectEqual(@as(u32, 49), @intFromEnum(Stage.process_output));
+    try std.testing.expectEqual(@as(u32, 73), @intFromEnum(Stage.close_release_mft));
+    try std.testing.expectEqual(@as(u32, 78), @intFromEnum(Stage.close_done));
+}
+
+// The whole AMD field failure was a wrong drive-mode discriminator, and this codebase has already
+// shipped one hand-rolled-GUID typo in exactly this area (IMFMediaEventGenerator …1e7b vs …1e7d).
+// Pin both bytes against the SDK values so the next transcription error fails a test, not a rig.
+test "async drive GUIDs match the SDK" {
+    // MF_TRANSFORM_ASYNC {f81a699a-649a-497d-8c73-29f8fed6ad7a} (mftransform.h)
+    try std.testing.expectEqual(@as(u32, 0xf81a699a), MF_TRANSFORM_ASYNC.d1);
+    try std.testing.expectEqual(@as(u8, 0x7a), MF_TRANSFORM_ASYNC.d4[7]);
+    // MF_TRANSFORM_ASYNC_UNLOCK {e5666d6b-3422-4eb6-a421-da7db1f8e207}
+    try std.testing.expectEqual(@as(u32, 0xe5666d6b), MF_TRANSFORM_ASYNC_UNLOCK.d1);
+    // IMFMediaEventGenerator {2CD0BD52-BCD5-4B89-B62C-EADC0C031E7D} - last byte 0x7d, NOT 0x7b.
+    try std.testing.expectEqual(@as(u8, 0x7d), IID_IMFMediaEventGenerator.d4[7]);
+}
+
+test "software tier NV12 payload size covers odd heights" {
+    var e = Enc{ .gpa = std.testing.allocator, .in_w = 0, .in_h = 0, .out_w = 1280, .out_h = 720, .fps_n = 30, .fps_d = 1, .dur100 = 0 };
+    try std.testing.expectEqual(@as(u32, 1280 * 720 * 3 / 2), e.swNV12Bytes());
+    e.out_w = 640;
+    e.out_h = 361; // odd height: the UV plane rounds UP, else the last chroma row is truncated
+    try std.testing.expectEqual(@as(u32, 640 * 361 + 640 * 181), e.swNV12Bytes());
 }
 
 test "vendor mismatch" {
