@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"rave.page/mate/internal/medialink"
 )
 
 // progressBar must stay ONE markup source: the float entry point has to be exactly
@@ -67,5 +69,24 @@ func TestCamPropHTML(t *testing.T) {
 	}
 	if n := strings.Count(got, fmt.Sprintf("%d", 120)); n != 3 { // value=, data-value=, cam-prop-v
 		t.Fatalf("value appears %d times, want 3: %q", n, got)
+	}
+}
+
+// The webview renderer must not lose a negative latency's sign either: percentiles() is ordered,
+// so "29.0 ms/26.1 ms p50/p95" on screen could only ever come from an abs() over a negative
+// median. Both renderers share the failure and must share the fix.
+func TestFmtLatKeepsTheSign(t *testing.T) {
+	s := medialink.RouteStat{Direction: "recv", LatencySamples: 64,
+		LatencyP50Ns: -29_000_000, LatencyP95Ns: 26_100_000}
+	if got := fmtLat(s, s.LatencyP50Ns); got != "−29.0 ms" {
+		t.Errorf("p50 = %q, want a signed −29.0 ms", got)
+	}
+	if got := fmtLat(s, s.LatencyP95Ns); got != "26.1 ms" {
+		t.Errorf("p95 = %q", got)
+	}
+	// No plausible sample: a reason, never a number.
+	none := medialink.RouteStat{Direction: "recv", LatUnsynced: 12, LatencyP50Ns: 1_785_118_072_019_600_000}
+	if got := fmtLat(none, none.LatencyP50Ns); got == "" || strings.Contains(got, "ms") {
+		t.Errorf("off-clock rendered as a duration: %q", got)
 	}
 }
