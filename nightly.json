@@ -1,13 +1,13 @@
 {
-  "version": "nightly-2b5babf",
-  "build": 177,
-  "commit": "2b5babf",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-177-20260727-2b5babf.exe",
-  "sha256": "0fd1d95944b792d5d7a79de2e6e5dd74a72d6998c587392620195a0180966956",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-177-20260727-2b5babf.exe",
-  "installer_sha256": "05d1e2226fe8468be1c0880738d8648ffe820d49494a03d7ad27485dd4836e6b",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-177-20260727-2b5babf",
-  "linux_sha256": "5ff571e55e182916e30d785d28af052d02bea8d122c234b80bd01c2ed4584b51",
+  "version": "nightly-c3ed1f5",
+  "build": 179,
+  "commit": "c3ed1f5",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-179-20260727-c3ed1f5.exe",
+  "sha256": "bafad97f00fc66350454e5ef47c193049938715ffda52bb146fe1438ffe3a5b6",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-179-20260727-c3ed1f5.exe",
+  "installer_sha256": "44ee9bea8c9eed8ec4b7cfa28621ed80a4f6bfd3a50455bfc3348574fa4ce254",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-179-20260727-c3ed1f5",
+  "linux_sha256": "31ac6cd952ba56504137571e243649673726f5f9b6d819723a2ccf10348c3ce3",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-27T01:23:41Z",
-  "notes": "Merge feat/zigmedia-inc3: adapter-affinity resolution (measured; 2 of 3 items refused)"
+  "released": "2026-07-27T02:06:35Z",
+  "notes": "docs(devnotes): park spout pixel-content diagnostics used to isolate the black-frame P0"
 }
