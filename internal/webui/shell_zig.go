@@ -29,7 +29,15 @@ func zigShellExeName() string {
 }
 
 // resolveZigShellExe returns the rave-shell exe path when the Zig child is selected AND present;
-// "" otherwise (Go child). Search: $RAVE_MATE_SHELL_EXE, else rave-shell[.exe] beside the daemon.
+// "" otherwise (in-process Go window).
+//
+// Search order, most authoritative first:
+//  1. $RAVE_MATE_SHELL_EXE - explicit override for dev/test.
+//  2. the EMBEDDED child, extracted to the cache dir (shellembed builds). Ahead of the sidecar
+//     because it is the only copy guaranteed to match this exe: the self-updater replaces the exe
+//     and nothing else, so a sidecar left behind by an older installer can be stale.
+//  3. rave-shell[.exe] beside the daemon - installer-bundled, and the dev-tree path for builds
+//     without the embed.
 func resolveZigShellExe(cfg *config.Config, log *logbus.Bus) string {
 	if !zigShellWanted(cfg) {
 		return ""
@@ -37,8 +45,18 @@ func resolveZigShellExe(cfg *config.Config, log *logbus.Bus) string {
 	var cands []string
 	if p := os.Getenv(zigShellExeEnv); p != "" {
 		cands = append(cands, p)
-	} else if self, err := os.Executable(); err == nil {
-		cands = append(cands, filepath.Join(filepath.Dir(self), zigShellExeName()))
+	} else {
+		if p, err := stagedShellExe(); err != nil {
+			if log != nil {
+				log.Warn("webui", "could not extract the embedded zig shell - trying the sidecar copy",
+					map[string]any{"error": err.Error()})
+			}
+		} else if p != "" {
+			cands = append(cands, p)
+		}
+		if self, err := os.Executable(); err == nil {
+			cands = append(cands, filepath.Join(filepath.Dir(self), zigShellExeName()))
+		}
 	}
 	for _, p := range cands {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
@@ -49,8 +67,13 @@ func resolveZigShellExe(cfg *config.Config, log *logbus.Bus) string {
 		}
 	}
 	if log != nil {
-		log.Error("webui", "zig shell exe missing - falling back to the Go webview child", map[string]any{
-			"looked": cands, "hint": "build with scripts/build-zig.sh (native/zigui zig-out/bin/" + zigShellExeName() + ") or set " + zigShellExeEnv,
+		// The Zig child is the default window host, so its absence is a BUILD gap, not a user
+		// choice: a shipped Windows build carries the embed and can always stage it. Loud on
+		// purpose - the UI still works (in-process Go window), so nothing else would say so.
+		log.Error("webui", "zig shell exe missing - using the in-process Go window instead", map[string]any{
+			"looked": cands, "embedded": hasEmbeddedShell(),
+			"hint": "build with scripts/build-zig.sh (stages native/zigui zig-out/bin/" + zigShellExeName() +
+				" into internal/webui/embedded for -tags shellembed) or set " + zigShellExeEnv,
 		})
 	}
 	return ""

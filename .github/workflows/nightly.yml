@@ -1,6 +1,7 @@
 # Nightly / dev-channel builds. Every push to `development` (plus a daily schedule and
 # manual dispatch) cross-builds the full-feature Windows exe (-tags spout vr abletonlink
-# zigdsp zigui zigvr, mingw + pinned Zig - same recipe as the internal deploy pipeline),
+# zigdsp zigui zigvr encembed shellembed, mingw + pinned Zig - same recipe as the internal deploy
+# pipeline; the two embeds carry the encoder + window child inside the exe for self-update),
 # the Linux binary (zig tags too), and the NSIS installer, then rolls the single "nightly" prerelease with the complete self-update feed:
 # versioned + stable binaries, runtime DLLs, and latest.json (Ed25519-signed when the
 # signing key secret is provisioned). The binary's updater polls
@@ -125,10 +126,11 @@ jobs:
             -X rave.page/mate/internal/version.FeedURL=${FEED} \
             ${EXTRA_LDFLAGS}"
           GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CGO_ENABLED=1 \
-            go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
+            go build -tags "spout vr abletonlink zigdsp zigui zigvr encembed shellembed" -ldflags "$LDFLAGS" -o dist/rave-mate.exe ./cmd/rave-mate
           cp third_party/spout/bin/SpoutLibrary.dll dist/   # runtime-loaded by the spout backend
           cp internal/vroverlay/sdk/openvr_api.dll dist/   # runtime-loaded by the vr backend (vendored)
           cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child
+          cp native/zigui/zig-out/bin/rave-shell.exe dist/ # Zig window child - the DEFAULT UI host
           ls -la dist/
       - name: Authenticode-sign exe
         env:
@@ -166,6 +168,7 @@ jobs:
             -DSPOUT_DLL="$PWD/dist/SpoutLibrary.dll" \
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
             -DENC_EXE="$PWD/dist/rave-mate-enc.exe" \
+            -DSHELL_EXE="$PWD/dist/rave-shell.exe" \
             $ICONDEF \
             installer/rave-mate.nsi
       - name: Authenticode-sign installer + cleanup

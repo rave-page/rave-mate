@@ -2358,16 +2358,24 @@ type UIFeature struct {
 	// with a live NVENC/GPU encoder (OBS); explicit true re-enables GPU acceleration for a
 	// power user who prefers snappier UI over guaranteed non-interference. Safe-by-default is off.
 	WebviewGPU *bool `json:"webviewGpu,omitempty"`
-	// ShellImpl selects the PSH1 window-child exe under the B5 procShell (ZIG_MIGRATION B6):
-	// ""|"go" (default) = the Go child (`rave-mate feature webview`); "zig" = the Zig-owned
-	// rave-shell exe (also implies the proc shell). Missing/unbuildable exe falls back to the
-	// Go child with a loud log - never a broken UI. Additive (zero value = prior behavior).
+	// ShellImpl selects the window host (ZIG_MIGRATION B6). ""(DEFAULT)|"zig" = the Zig-owned
+	// rave-shell exe under the B5 proc shell; "go" pins the in-process Go WebView2 window.
+	// Default is zig because the rAF surfaces (graphs, the Ableton Link phrase bar) render and
+	// update correctly there - measured on the dev rig 2026-07-27, where the same surfaces stalled
+	// in the Go proc child. A missing rave-shell.exe degrades to the in-process Go window with a
+	// loud log, so an install that never received the exe still gets the previous behaviour.
 	ShellImpl string `json:"shellImpl,omitempty"`
 }
 
-// ZigShell reports the Zig window-child exe is selected (features.ui.shellImpl="zig").
+// ZigShell reports the Zig window-child exe is wanted. Empty/absent = yes (the default); only an
+// explicit "go"/"cgo" pins the in-process Go window. Resolution can still fall back when the exe
+// is absent - wanting it is not having it (see webui.resolveZigShellExe).
 func (u UIFeature) ZigShell() bool {
-	return strings.EqualFold(strings.TrimSpace(u.ShellImpl), "zig")
+	switch strings.ToLower(strings.TrimSpace(u.ShellImpl)) {
+	case "go", "cgo":
+		return false
+	}
+	return true
 }
 
 // AllowWebviewGPU resolves the escape hatch: false by default (software compositing = low-impact),
