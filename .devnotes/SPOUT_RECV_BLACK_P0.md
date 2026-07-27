@@ -158,33 +158,38 @@ an AV from this.
 
 ## Answers to the open questions
 
-### 3. `drops 17294` — real, and not one of my counters
+### 3. The drops are the per-route FPS CAP, working as designed
 
-The panel line is `buffer 1f · late 0.0% · drops 17294`, which is
-`JB.Depth / JB.LateRate / JB.PolicyDrops` — the **jitter buffer's** keyframe-policy + overflow
-drops. It is a pre-existing counter, **not** the `Pipe.Dropped` I surfaced in inc 2 (that renders
-separately as `dropped N`, and it is absent from the field line). **No counting bug, nothing to fix
-there.**
+Superseded twice - first by me (I guessed repeated keyframe resync), then by the encoder-crash
+reading. The f0be160 per-route telemetry settles it, and the mechanism is in the code:
 
-They are **real drops, correctly counted** - no counting bug on my side.
+`mediaroute`'s shared capture runs ONE readback per sender, fanned out to N routes, and its rate is
+`rateOf(subs)` = **the MAXIMUM cap of all attached routes** (`capture.go`, and 0 = uncapped wins).
+Each route then re-applies its OWN cap in `spoutSource.Next` via `minGap`, discarding over-budget
+frames "before any encode/crypto cost" - that is what the comment there has always said. So on a
+**two-route run** where the other route is uncapped or capped higher, the shared capture runs at the
+higher rate and the 4K route drops the difference.
 
-`17294 / 257 keyframes ≈ 67` frames discarded per keyframe, i.e. most of each GOP: the signature of
-the buffer repeatedly entering `waitKey` and dropping forward to the next resync point. Each entry
-needs a **seq gap** in the arriving stream, and `late 0.0%` rules out our own lateness.
+The field numbers are that identity, exactly: `fps 30.5-33.3` delivered `+ ~27/s dropped` ≈ 57-60 =
+one 60 fps source. Half arriving and half discarded is not a mode/handshake mismatch and not a
+fingerprint of the black pixels - it is a 60 fps capture feeding a 30 fps-capped route.
 
-Your correlation with the peer's **encoder-child AV/respawn cycles** is the best available
-explanation and I agree with it: every respawn is a hole in the sequence, our jitter buffer waits for
-a keyframe and discards the remainder of that GOP. It also explains why the field line shows **no
-`restarts`** - that field is the *local* decode child's restart count, and the crashes are on the
-sending side. So: correctly counted, driven by a cause outside my surface (the other agent's encoder
-AV), and expected to fall to ~0 once that is fixed and the stream carries content.
+Consistent with everything else reported: `busyDrops:0` (no saturation) and `encFails:0` (no encode
+errors) precisely because nothing is failing - the frames are refused upstream of the encoder, on
+purpose, by policy.
 
-Verified rather than assumed: I traced `PolicyDrops` to `jitterBuffer.dropHead()` and its two
-callers (`overflowDrop`, and the `waitKey`/gap paths in `popLocked`), and confirmed the panel field
-is `JB.PolicyDrops` and not `Pipe.Dropped`. What I could **not** do from here is watch the live route
-to see the gaps directly, because the JB collects `Grows`/`Decays`/`Dups` and renders only
-`PolicyDrops` - the same collected-but-invisible blind spot. Rendering those three would make this
-diagnosable from the panel instead of by inference (follow-up 2).
+Caveat: I cannot see the peer's config, so *which* route holds which cap is inferred. The mechanism
+is certain from the code; the specific pairing is not. `ctl` showing each route's `maxFps` alongside
+the shared `captureFps` (already logged once at attach as "capture shared") would confirm it in
+seconds.
+
+**My share of the confusion.** In increment 2 I wired `spoutSource`'s cap-drops into
+`PipelineStats.Dropped` via `InnerDrops`, which folds *intentional rate-limiting* into the same
+number as *real loss*. That is what makes a healthy capped route look like it is haemorrhaging
+frames, and it is why this got read as encoder crash-recovery. The fix is to count them apart -
+`RateCapped` next to `Dropped`, rendered as "rate-capped N" - but the one-line junction is
+`mediapipe/mf_bridge.go`'s `PipeStats`, inside the current fence, so I have not half-wired it.
+It is a small, self-contained change for whoever holds that file.
 
 ### 4. The already-deployed peer must update
 
@@ -220,6 +225,30 @@ Before flipping it on the user's second PC, four things must hold — and three 
 
 So: a legitimate interim mitigation for a Spout route, **not** a blind flag flip — verify
 `zeroCopy=1` immediately after enabling, and treat a downgrade warning as "still black".
+
+## Proving the fix live with `bytesPerFrame`
+
+`bytesPerFrame` is a good log-side oracle and it agrees with my measurements: the black 4K route's
+**255 bytes/frame** is the same "encoding nothing" class as increment 3's M3 numbers (a STATIC black
+720p sender encodes to **49 bytes/AU**; real moving content at the same geometry, 184). A frame with
+no content costs almost nothing to encode, whatever its resolution.
+
+Predictions after the peer updates, all falsifiable:
+
+- **`bytesPerFrame` jumps by two orders of magnitude, not one.** At 4K30 on the default 20 Mbps route
+  budget that is ~83,000 bytes/frame; even a heavily static OBS scene will sit in the tens of
+  thousands. The useful threshold is not "thousands" but **anything sustained above ~1,000 = real
+  content; ~255 is the noise floor**. (The webcam route's 3,169 is a smaller frame at a lower
+  budget - a fine sanity reference, not the target for 4K.)
+- **`kbps` rises from 62-68 to the negotiated budget.**
+- **`fps` and `dropped` should NOT change** - they are the FPS cap (question 3), not the bug. If
+  `bytesPerFrame` rises while `dropped` stays at ~27/s, that confirms both diagnoses at once. If
+  `dropped` also collapses, then something else was wrong too and I want to know.
+
+I cannot run that route from here, and the stage where I *can* measure is one earlier and stronger:
+`TestRecvContentCarriesPixels` asserts the exact pixel values (`top(255,0,0) bottom(0,0,255)
+left(0,255,0)`), which no bitrate proxy can be fooled about. An end-to-end AU measurement over the
+readback path would have to live in `internal/mfenc`, inside the fence.
 
 ## Gate results (verbatim)
 
