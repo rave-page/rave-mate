@@ -1,6 +1,9 @@
 package videoshare
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // pool.go - BOUNDED, size-keyed pixel-buffer recycling for the capture→encode hot path. A
 // 1080p60 route otherwise allocates ~500 MB/s of short-lived 8 MB frame copies (2 GB/s at
@@ -177,3 +180,55 @@ func PoolStats() (liveBytes, idleBytes, idleBuffers int) { return pixPool.stats(
 // GetPixForTest hands out a pooled buffer to other packages' allocation-regression tests
 // (the capture fan-out in internal/mediaroute models the receiver's get/put pattern).
 func GetPixForTest(n int) []byte { return getPix(n) }
+
+// TryGetPix is the bounded pool getter for a PRODUCER: ok=false at the live-bytes ceiling, which
+// means "drop this frame" (newest-wins) rather than growing the heap. A producer that cannot drop
+// must fall back to its own allocation instead of stalling - see PixRef.
+func TryGetPix(n int) ([]byte, bool) { return tryGetPix(n) }
+
+// PixRef is a pixel buffer shared by N consumers, returned to the pool EXACTLY once - by the last
+// one. Frames fan out to several consumers (a local preview sink plus N network taps) and every one
+// of them may be dropped independently, so the buffer's lifetime is a refcount, not a scope.
+//
+// pooled=false marks a buffer that did NOT come from the pool (the ceiling refused it): release
+// then just drops the last reference and lets the GC take it, so a producer never stalls and a
+// leaked reference degrades to plain allocation instead of wedging the capture.
+type PixRef struct {
+	n      atomic.Int32
+	pix    []byte
+	pooled bool
+	onBug  func(refs int32) // release-past-zero reporter (double release = two writers, one buffer)
+}
+
+// NewPixRef takes ownership of pix with a single reference.
+func NewPixRef(pix []byte, pooled bool, onBug func(refs int32)) *PixRef {
+	r := &PixRef{pix: pix, pooled: pooled, onBug: onBug}
+	r.n.Store(1)
+	return r
+}
+
+// Pix is the buffer. Valid only while the caller holds a reference.
+func (r *PixRef) Pix() []byte { return r.pix }
+
+// Pooled reports whether releasing this buffer returns it to the pool.
+func (r *PixRef) Pooled() bool { return r.pooled }
+
+// Add takes n more references. Callers MUST add before handing the buffer to another consumer, or a
+// fast consumer can release it to zero mid-fanout and the pool hands it to the next capture.
+func (r *PixRef) Add(n int32) { r.n.Add(n) }
+
+// Release drops one reference; the last one recycles. A release past zero is a bug (it would let
+// two consumers write one buffer) - reported, never acted on.
+func (r *PixRef) Release() {
+	switch left := r.n.Add(-1); {
+	case left == 0:
+		if r.pooled {
+			PutPix(r.pix)
+		}
+	case left < 0 && r.onBug != nil:
+		r.onBug(left)
+	}
+}
+
+// Refs is the live reference count (tests/diagnostics).
+func (r *PixRef) Refs() int32 { return r.n.Load() }

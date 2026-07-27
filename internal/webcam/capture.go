@@ -13,6 +13,7 @@ import (
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/sysexec"
+	"rave.page/mate/internal/videoshare"
 )
 
 // capture is one device's supervised ffmpeg rawvideo pipe, exposed as a medialink.Source
@@ -32,13 +33,15 @@ type capture struct {
 	log    *logbus.Bus
 	desc   capDesc
 	size   int // bytes per frame
-	frames chan *medialink.Frame
+	frames chan capFrame
 
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	dropped atomic.Uint64 // frames replaced while the consumer was behind (newest-wins)
-	sent    atomic.Uint64
+	dropped  atomic.Uint64 // frames replaced while the consumer was behind (newest-wins)
+	sent     atomic.Uint64
+	poolMiss atomic.Uint64 // frames that had to allocate: the pool was at its live ceiling
+	refBugs  atomic.Uint64 // buffer released past zero (a real bug - two writers, one buffer)
 
 	mu       sync.Mutex
 	srcUp    bool
@@ -52,6 +55,8 @@ type capStats struct {
 	Restarts int
 	Frames   uint64
 	Dropped  uint64
+	PoolMiss uint64 // frames allocated because the pixel pool was at its ceiling
+	RefBugs  uint64 // release-past-zero events (should always be 0)
 	LastErr  string
 }
 
@@ -64,38 +69,64 @@ func newCapture(ctx context.Context, log *logbus.Bus, ffmpeg string, desc capDes
 	cctx, cancel := context.WithCancel(ctx)
 	c := &capture{
 		log: log, desc: desc, size: size,
-		frames: make(chan *medialink.Frame, 1),
+		frames: make(chan capFrame, 1),
 		cancel: cancel, done: make(chan struct{}),
 	}
 	go c.run(cctx, ffmpeg)
 	return c, nil
 }
 
-// Next implements medialink.Source: the next captured frame, io.EOF once the capture is closed.
-func (c *capture) Next(ctx context.Context) (*medialink.Frame, error) {
+// next yields the next captured frame WITH its buffer reference, io.EOF once the capture is closed.
+// The caller holds exactly one reference and must Release it (after taking one per extra consumer).
+func (c *capture) next(ctx context.Context) (capFrame, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
-	case f, ok := <-c.frames:
+		return capFrame{}, ctx.Err()
+	case cf, ok := <-c.frames:
 		if !ok {
-			return nil, io.EOF
+			return capFrame{}, io.EOF
 		}
-		return f, nil
+		return cf, nil
 	}
 }
 
-// Close implements medialink.Source: stops the child + supervision (idempotent via cancel).
+// Close stops the child + supervision (idempotent via cancel) and returns any frame still pending
+// in the hand-off channel to the pool - a buffer abandoned on shutdown would pin the pool's live
+// ceiling for the life of the process.
 func (c *capture) Close() error {
 	c.cancel()
 	<-c.done
-	return nil
+	for {
+		select {
+		case cf, ok := <-c.frames:
+			if !ok {
+				return nil
+			}
+			cf.release()
+		default:
+			return nil
+		}
+	}
+}
+
+// drainForTest releases any frame still pending in the hand-off channel (Close's drain, without
+// the child-process teardown).
+func (c *capture) drainForTest() error {
+	for {
+		select {
+		case cf := <-c.frames:
+			cf.release()
+		default:
+			return nil
+		}
+	}
 }
 
 // stats snapshots the capture counters.
 func (c *capture) stats() capStats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return capStats{SrcUp: c.srcUp, Restarts: c.restarts,
+	return capStats{SrcUp: c.srcUp, Restarts: c.restarts, PoolMiss: c.poolMiss.Load(), RefBugs: c.refBugs.Load(),
 		Frames: c.sent.Load(), Dropped: c.dropped.Load(), LastErr: c.lastErr}
 }
 
@@ -166,10 +197,15 @@ func (c *capture) runOnce(ctx context.Context, ffmpeg string) error {
 	c.mu.Unlock()
 	c.setErr("")
 
-	rerr := readFrames(stdout, c.size, func(buf []byte) bool {
-		c.deliver(&medialink.Frame{Kind: medialink.KindVideo, Codec: medialink.CodecNRGBA, Payload: buf})
-		return ctx.Err() == nil
-	})
+	rerr := framePipe{
+		size:    c.size,
+		alloc:   c.allocFrame,
+		recycle: c.recycleFrame,
+		emit: func(buf []byte) bool {
+			c.deliver(buf)
+			return ctx.Err() == nil
+		},
+	}.run(stdout)
 	werr := cmd.Wait()
 	if rerr != nil && ctx.Err() == nil {
 		return fmt.Errorf("frame pipe: %w", rerr)
@@ -180,20 +216,76 @@ func (c *capture) runOnce(ctx context.Context, ffmpeg string) error {
 	return nil
 }
 
+// allocFrame takes the next frame buffer from the BOUNDED pixel pool, falling back to a plain
+// allocation when the pool is at its live-bytes ceiling.
+//
+// Policy: fail OPEN. The pool's own contract for a producer is "drop the frame at the ceiling", but
+// dropping every frame would kill a live camera preview, and a single leaked reference would pin the
+// ceiling forever. Allocating instead degrades to the pre-pool behaviour (counted as PoolMiss)
+// rather than wedging the capture - the ceiling still bounds how much is RECYCLED, which is what
+// bounds the churn.
+func (c *capture) allocFrame() []byte {
+	if b, ok := videoshare.TryGetPix(c.size); ok {
+		return b
+	}
+	c.poolMiss.Add(1)
+	return make([]byte, c.size)
+}
+
+// recycleFrame hands back a buffer that never became a frame (torn tail / read error).
+func (c *capture) recycleFrame(buf []byte) {
+	if len(buf) == c.size {
+		videoshare.PutPix(buf)
+	}
+}
+
+// capFrame is one captured frame plus the refcount that owns its pixel buffer. The frame's
+// Release IS the ref's, so a downstream consumer (medialink's send loop) releases it without
+// knowing anything about the pool.
+type capFrame struct {
+	f   *medialink.Frame
+	ref *videoshare.PixRef
+}
+
+func (cf capFrame) release() {
+	if cf.ref != nil {
+		cf.ref.Release()
+	}
+}
+
+// newFrame wraps a captured buffer in a refcounted frame. One reference belongs to the consumer of
+// c.frames (the distributor); it takes one more per network tap before fanning out.
+func (c *capture) newFrame(buf []byte) capFrame {
+	ref := videoshare.NewPixRef(buf, len(buf) == c.size, func(int32) { c.refBugs.Add(1) })
+	return capFrame{ref: ref, f: &medialink.Frame{Kind: medialink.KindVideo,
+		Codec: medialink.CodecNRGBA, Payload: ref.Pix(), Release: ref.Release}}
+}
+
 // deliver pushes a frame newest-wins: a pending stale frame is replaced, never blocking the pipe.
-func (c *capture) deliver(f *medialink.Frame) {
+// The displaced frame is RELEASED - dropping one used to be "forget it", which is only safe while
+// every buffer is garbage.
+func (c *capture) deliver(buf []byte) {
+	cf := c.newFrame(buf)
 	for {
 		select {
-		case c.frames <- f:
+		case c.frames <- cf:
 			c.sent.Add(1)
 			return
 		default:
 			select {
-			case <-c.frames: // drop the stale pending frame, retry
+			case old := <-c.frames: // drop the stale pending frame, retry
 				c.dropped.Add(1)
+				old.release()
 			default:
 			}
 		}
+	}
+}
+
+// releaseFrame drops one reference to a frame's buffer (no-op when it carries none).
+func releaseFrame(f *medialink.Frame) {
+	if f != nil && f.Release != nil {
+		f.Release()
 	}
 }
 
