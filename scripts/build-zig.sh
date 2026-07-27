@@ -41,8 +41,21 @@ cd ../../../zigui
 cd zig-out/lib
 case "$target" in *windows*|"") if [ -f raveui.lib ]; then cp -f raveui.lib libraveui.a; fi ;; *) rm -f raveui.lib ;; esac
 ls -la ../bin 2>/dev/null || ls -la
-# zig-out/bin/rave-shell.exe (windows targets): B6 PSH1 window child, opt-in via
-# config features.ui.shellImpl="zig" (ship beside rave-mate.exe).
+# zig-out/bin/rave-shell.exe (windows targets): B6 PSH1 window child and the DEFAULT window host
+# (features.ui.shellImpl=""|"zig"). Staged for go:embed (tag `shellembed`) for the same reason as the
+# encoder child: the self-updater swaps only the main exe and consumes no feed assets, so a
+# sidecar-only copy would reach fresh installer runs and nothing else.
+case "$target" in
+  *windows*|"")
+    if [ -f ../bin/rave-shell.exe ]; then
+      mkdir -p ../../../internal/webui/embedded
+      cp -f ../bin/rave-shell.exe ../../../internal/webui/embedded/rave-shell.exe
+      echo "rave-shell embed-staged"
+    else
+      echo "WARNING: native/zigui/zig-out/bin/rave-shell.exe absent - builds will fall back to the in-process Go window" >&2
+    fi
+    ;;
+esac
 echo "raveui + rave-shell built ($ver, ${target:-native})"
 
 # --- zigvr: VR-overlay raster lib (native/zigvr → libravevr.a, Go tag `zigvr`) ---

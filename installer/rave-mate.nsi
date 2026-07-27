@@ -1,6 +1,9 @@
 ; rave-mate Windows installer - per-user (no admin), user-selectable dir.
 ; Built on Linux CI via makensis. Defines from CI (all optional, defaulted below):
 ;   APP_VERSION APP_BUILD VERSION_4 SRC_EXE OUT_FILE [APP_ICON] [SPOUT_DLL] [OPENVR_DLL]
+;   [ENC_EXE] [SHELL_EXE]: sidecar exes bundled beside the main exe - the MF encoder child and the
+;   Zig window child. SHELL_EXE is the DEFAULT window host; omitting it ships an install that
+;   silently uses the in-process Go window instead.
 ; SPOUT_DLL / OPENVR_DLL (optional): paths to SpoutLibrary.dll / openvr_api.dll - bundled beside
 ; the exe. Both are runtime-loaded (LoadLibrary), so a missing DLL only disables that feature;
 ; we ship them so the feature works out of the box. Omit either to skip bundling it.
@@ -86,6 +89,11 @@ Section "Install"
   !ifdef ENC_EXE
     File "/oname=rave-mate-enc.exe" "${ENC_EXE}"    ; per-adapter MF encoder child (zigenc)
   !endif
+  !ifdef SHELL_EXE
+    ; Zig window child (zigui). The DEFAULT window host - it must land beside the exe, which is
+    ; where webui.resolveZigShellExe looks; absent, the app degrades to the in-process Go window.
+    File "/oname=rave-shell.exe" "${SHELL_EXE}"
+  !endif
 
   CreateShortCut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -110,6 +118,7 @@ Section "Uninstall"
   Delete "$INSTDIR\SpoutLibrary.dll"
   Delete "$INSTDIR\openvr_api.dll"
   Delete "$INSTDIR\rave-mate-enc.exe"
+  Delete "$INSTDIR\rave-shell.exe"
   Delete "$INSTDIR\uninstall.exe"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   RMDir  "$INSTDIR"

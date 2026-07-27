@@ -6,12 +6,16 @@ package webui
 //   proc            the same window in a supervised child  - shell_proc.go (phase B5)
 //   virtual         windowless, for remote-library mirrors - virtualshell.go (not selectable here)
 //
-// RAVE_MATE_SHELL=proc opts into the child. The DEFAULT STAYS cgo: flipping it is a later decision.
+// DEFAULT (2026-07-27): the ZIG child under the proc shell, whenever rave-shell.exe is present.
+// It is the only host where the rAF surfaces (graphs, Ableton Link phrase bar) were measured
+// rendering and updating correctly; the Go proc child stalled them on the dev rig. The ladder is
+// zig → cgo, deliberately: if rave-shell.exe is absent the host falls back to the IN-PROCESS Go
+// window (the previous default), never to the Go proc child.
 //
-// B6 child seam: under the proc shell the CHILD EXE is selectable too - "go" (default, `rave-mate
-// feature webview`) or "zig" (the rave-shell exe, zigui builds only; shell_zig.go). Selection:
-// config features.ui.shellImpl="zig" or RAVE_MATE_SHELL=zig (either also implies proc). zigShellExe
-// holds the resolved exe path; "" = Go child. The daemon-side PSH1 code is identical for both.
+// Opt-outs, both still honoured: config features.ui.shellImpl="go" or RAVE_MATE_SHELL=cgo pins the
+// in-process window; RAVE_MATE_SHELL=proc asks for the proc shell with the Go child (debugging).
+// zigShellExe holds the resolved exe path; "" = no Zig child. The daemon-side PSH1 code is
+// identical for every host, so the choice only changes who owns the window.
 
 import (
 	"os"
@@ -38,13 +42,20 @@ func shellKind() string {
 	return "cgo"
 }
 
-// zigShellWanted reports the Zig child was ASKED for (env or config) - resolution may still fall
-// back when the exe is absent.
+// zigShellWanted reports the Zig child was asked for - which is now the DEFAULT, so this answers
+// yes unless something explicitly pins another host. Resolution may still fall back when the exe is
+// absent (resolveZigShellExe), so "wanted" is not "used".
+//
+// A nil cfg means the caller has no config to consult (tests, early boot); it takes the default too,
+// because a default that only applies when a config object happens to exist is not a default.
 func zigShellWanted(cfg *config.Config) bool {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("RAVE_MATE_SHELL")), "zig") {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RAVE_MATE_SHELL"))) {
+	case "zig":
 		return true
+	case "cgo", "go", "proc": // explicit non-zig host, including "proc with the Go child"
+		return false
 	}
-	return cfg != nil && cfg.Features.UI.ZigShell()
+	return cfg == nil || cfg.Features.UI.ZigShell()
 }
 
 func newShell(title string, w, h int, onAction func(string), onReady func()) (shell, bool) {
