@@ -52,6 +52,12 @@ import (
 // mediapipe points it at the logbus.
 var Warnf = func(format string, args ...any) {}
 
+// Infof receives supervisor FACTS that are not problems: the child's active policies and its
+// open-stage trace. Separate from Warnf because these must be readable on a HEALTHY run - on a
+// rig with no Go toolchain and no remote-exec (the AMD box), the log stream is the only channel,
+// and a passing run that cannot name which code path passed proves nothing.
+var Infof = func(format string, args ...any) {}
+
 const (
 	shmHdrSize = 256
 	wrapMarker = 0xFFFFFFFF
@@ -233,6 +239,14 @@ type openedEv struct {
 	SW      bool   `json:"sw"`
 	LUIDRes int64  `json:"luid_res"`
 	Adapter string `json:"adapter"`
+	// AsyncAttr is the RAW MF_TRANSFORM_ASYNC value Drive was derived from (reported separately so
+	// a log reader never has to trust the derivation). DevShared: this session adopted the child's
+	// shared device. Both ride the SUCCESS path, not just crashes.
+	AsyncAttr bool `json:"async_attr"`
+	DevShared bool `json:"dev_shared"`
+	// hello only: the child's active policies.
+	DevPolicy string `json:"dev"`
+	SwPolicy  string `json:"swpol"`
 	// encfail: an ATTRIBUTED mid-route encode failure (rc + the stage it died in).
 	RC    int32  `json:"rc"`
 	Stage uint32 `json:"stage"`
@@ -280,6 +294,11 @@ type procChild struct {
 	// with no session left registered (teardown-time AV)
 	restarts   int
 	stderrTail []byte // bounded crash-forensics tail (stage traces name the faulting call)
+	// devPolicy/swPolicy come from hello; tracedOpen debounces the one-shot open-trace dump so a
+	// long-lived child logs it once per incarnation, not once per session.
+	devPolicy  string
+	swPolicy   string
+	tracedOpen bool
 	// CPU sampling state
 	lastCPU  time.Duration
 	lastWall time.Time
@@ -615,9 +634,13 @@ func (c *procChild) readEvents(r io.Reader) {
 		case "hello":
 			c.mu.Lock()
 			c.protoVer = ev.Ver
+			c.devPolicy, c.swPolicy = ev.DevPolicy, ev.SwPolicy
 			ch := c.helloCh
 			c.helloCh = nil // one close per incarnation (spawn re-arms it)
 			c.mu.Unlock()
+			// Once per child incarnation, on the HEALTHY path: which code path is running.
+			Infof("mfenc: encoder child up (adapter %#x) proto v%d device-policy=%s sw-policy=%s",
+				uint64(c.luid), ev.Ver, orUnknown(ev.DevPolicy), orUnknown(ev.SwPolicy))
 			if ch != nil {
 				close(ch)
 			}
@@ -998,6 +1021,15 @@ type ProcSession struct {
 	// swTier: we ASKED for the software tier (poisoned hardware); swBound: we GOT it.
 	swTier  bool
 	swBound bool
+	// asyncAttr is the raw MF_TRANSFORM_ASYNC the drive mode came from; devShared = this session
+	// adopted the child's shared device. Both are reported so a remote run can name its own path.
+	asyncAttr bool
+	devShared bool
+	// resLUID/adapterName are what the child RESOLVED, not what we asked for. The requested LUID
+	// is useless for identifying the GPU when it no longer exists (stale config): the rendered
+	// stats must show the adapter actually encoding.
+	resLUID     int64
+	adapterName string
 	// degrade names, in one human sentence, why this session is not on its best path. It reaches
 	// the route panel so a silently-degraded rig is visible instead of just slow.
 	degradeMu sync.Mutex
@@ -1179,6 +1211,9 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 		s.bgra = ev.Bgra
 		s.drive = ev.Drive
 		s.swBound = ev.SW
+		s.asyncAttr = ev.AsyncAttr
+		s.devShared = ev.DevShared
+		s.resLUID, s.adapterName = ev.LUIDRes, ev.Adapter
 		if ev.SW && degrade == "" {
 			s.degrade = "no usable hardware H.264 MFT on this adapter - encoding on the software MF tier"
 			Warnf("mfenc: %s (%s)", s.degrade, ev.Name)
@@ -1196,7 +1231,32 @@ func openProcSessionOn(o ProcOpts) (*ProcSession, error) {
 		child.mu.Lock()
 		child.sessions[sid] = s
 		child.lastEnc = ledgerEncoder(ev)
+		devPol, swPol := child.devPolicy, child.swPolicy
+		dumpTrace := !child.tracedOpen
+		child.tracedOpen = true
+		tail := string(child.stderrTail)
 		child.mu.Unlock()
+		// The vendor-portability verdict for this session, on the SUCCESS path. Everything a
+		// remote diagnosis needs is in this one line: which MFT, which drive mode and the RAW
+		// attribute it came from, which tier, which device path, and which adapter really.
+		fails, poisonReason := 0, ""
+		if rows := FailLedger(); len(rows) > 0 {
+			for _, r := range rows {
+				if r.LUID == luid && r.Encoder == ledgerEncoder(ev) {
+					fails, poisonReason = r.Fails, r.Reason
+				}
+			}
+		}
+		Infof("mfenc: session %d open: encoder=%q drive=%s async_attr=%v tier=%s device=%s(shared=%v) adapter=%#x %q requested=%#x ledger-fails=%d%s",
+			sid, ev.Name, orUnknown(ev.Drive), ev.AsyncAttr, tierName(ev.SW), orUnknown(devPol), ev.DevShared,
+			uint64(ev.LUIDRes), ev.Adapter, uint64(luid), fails, poisonSuffix(poisonReason))
+		_ = swPol
+		// Once per child incarnation, dump the child's own open-stage trace. It carries the
+		// per-MFT `bound … drive=… aware=…` line and the shared-device refcount, which previously
+		// only ever reached a log on a CRASH - so a passing run taught nobody anything.
+		if dumpTrace && tail != "" {
+			Infof("mfenc: encoder child open trace (adapter %#x):\n%s", uint64(luid), tail)
+		}
 		go s.pump()
 		if zc {
 			s.watchDone = make(chan struct{})
@@ -1748,7 +1808,22 @@ func (s *ProcSession) Stats() ProcStats {
 	s.pmu.Unlock()
 	st := ProcStats{Name: s.name, QueueDepth: depth, DroppedAUs: s.droppedAUs.Load(),
 		Drive: s.drive, Software: s.swBound, DegradeReason: s.DegradeReason(), EncFails: s.encFails.Load(),
-		BusyDrops: s.busyDrops.Load()}
+		BusyDrops: s.busyDrops.Load(), AsyncAttr: s.asyncAttr, DevShared: s.devShared,
+		AdapterLUID: s.resLUID, AdapterName: s.adapterName}
+	if st.AdapterLUID == 0 {
+		st.AdapterLUID = s.child.luid // pre-fix child sent no resolved LUID
+	}
+	s.child.mu.Lock()
+	st.DevPolicy = s.child.devPolicy
+	s.child.mu.Unlock()
+	if reason, bad := PoisonedTuple(s.child.luid, s.ledgerKey()); bad {
+		st.Poisoned, st.PoisonReason = true, reason
+	}
+	for _, r := range FailLedger() {
+		if r.LUID == s.child.luid && r.Encoder == s.ledgerKey() {
+			st.LedgerFails = r.Fails
+		}
+	}
 	if n > 0 {
 		sort.Float64s(tmp)
 		st.LatP50Ms = tmp[n/2]

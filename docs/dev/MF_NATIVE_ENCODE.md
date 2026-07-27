@@ -464,3 +464,53 @@ too - so it is not a usable oracle here.
 Still open: OBS/Resolume verification of a natively decoded route (the design makes it a
 precondition for flipping the flag), the 7-day soak, a 4K60 receive soak, a real end-to-end
 route through `jitterbuf`, and HEVC.
+
+## Remote diagnosis (no toolchain on the target rig)
+
+The AMD field box is a user's OBS machine: no repo, no Go toolchain, and the only access is the
+app's ctl socket, which has no remote-exec. **None of the gates in `internal/mfenc` can be run
+there.** So every fact needed to diagnose a run has to be in the LOG STREAM and the rendered stats,
+on the HEALTHY path - a passing run that cannot name its own configuration proves nothing.
+
+Emitted per encoder-child incarnation (`mfenc.Infof` → logbus `Info`):
+
+```
+mfenc: encoder child up (adapter 0x…) proto v3 device-policy=child sw-policy=auto
+mfenc: session 1 open: encoder="…" drive=async async_attr=true tier=hardware
+       device=child(shared=true) adapter=0x10540 "NVIDIA GeForce RTX 3060" requested=0x0
+       ledger-fails=0
+mfenc: encoder child open trace (adapter 0x…):      ← the child's own stage trace, ONCE per
+  mfenc stage: bound … drive=async tier=hw aware=1     incarnation. Previously this reached a
+  mfenc stage: drive=async async_attr=true evgen=true  log only on a CRASH.
+```
+
+- `async_attr` is the RAW `MF_TRANSFORM_ASYNC` value; `drive` is what was derived from it. Both are
+  printed so a reader never has to trust the derivation.
+- `device=child(shared=true)` names which device path a passing run actually exercised.
+- `adapter=` is RESOLVED, `requested=` is what config asked for - a stale LUID is visible.
+
+Per route, every 10 s (`route encode telemetry`), the **content oracle**:
+
+```
+engine=… tier=… drive=… capture=… device=… adapter=…
+aus=300 bytesPerFrame=35810 kbps=8594 fps=30.0
+busyDrops=0 encFails=0 dropped=0 ledgerFails=0 poisoned=false degraded=""
+```
+
+`bytesPerFrame` is the thing that separates a live picture from a black or frozen one; `OutFPS`
+cannot (a black 4K route reported healthy on frame counters for 12 minutes). This is logged rather
+than only rendered because the panel's counters have been observed frozen for 25 minutes on a
+demonstrably live route.
+
+`busyDrops` (saturation) and `encFails` (hard failures) are SEPARATE fields in `PipelineStats`:
+"saturated but healthy" and "failing" are different incidents needing different responses, and
+they are indistinguishable once summed into `Dropped` (which still carries both as a total).
+
+Ledger state (`ledgerFails`, `poisoned`, plus `PoisonReason` in `ProcStats`) rides the same
+channels, so a degrade is visible in live stats and not only in a log line that has scrolled away.
+
+Gates: `TestTelemetryNamesTheCodePathOnSuccess` asserts all of the above is emitted on a
+SUCCESSFUL open; `TestStatsSeparateSaturationFromFailure` and `TestStatsSurfacePoisonState` assert
+the rendered side. **Note:** the live spout gates SKIP unless `SpoutLibrary.dll` is reachable
+(beside the exe or in the managed bin dir under `RAVE_MATE_CONFIG_DIR`) - a "PASS" without it
+staged is a skip, not a verification.

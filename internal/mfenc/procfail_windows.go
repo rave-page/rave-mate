@@ -137,6 +137,30 @@ func encoderLabel(encoder string) string {
 	return encoder
 }
 
+// orUnknown keeps a log line unambiguous when an older child sent no value.
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
+// tierName labels the encode tier for a log line.
+func tierName(software bool) string {
+	if software {
+		return "software-mf"
+	}
+	return "hardware"
+}
+
+// poisonSuffix appends the ledger's poison reason when one exists.
+func poisonSuffix(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return " POISONED: " + reason
+}
+
 // stageSuffix renders the latched crash stage for a log line ("" when unknown).
 func stageSuffix(stage string) string {
 	if stage == "" {
