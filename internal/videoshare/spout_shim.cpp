@@ -176,6 +176,33 @@ int rave_spout_find(const char* name) {
     return s->FindSenderName(name) ? 1 : 0;
 }
 
+// framereader() is a SECOND process-wide handle used only for frame-count queries. Separate from
+// registry() because GetSenderFrame needs a receiver NAME set, and mutating that on the shared
+// registry handle would race every other query on it. No OpenGL context, no ReceiveImage, so no
+// readback and no GL thread ownership - this is the "metadata-only receiver" the design names.
+static std::mutex& framereader_mu(void) {
+    static std::mutex m;
+    return m;
+}
+
+static SPOUTHANDLE framereader(void) {
+    static SPOUTHANDLE s = make_spout(); // magic static: run-once, thread-safe
+    return s;
+}
+
+int rave_spout_sender_frame(const char* name, long long* frame, double* fps) {
+    if (!name || !frame) return 0;
+    *frame = -1;
+    if (fps) *fps = 0.0;
+    std::lock_guard<std::mutex> lk(framereader_mu());
+    SPOUTHANDLE s = framereader();
+    if (!s) return 0;
+    s->SetReceiverName(name);
+    *frame = (long long)s->GetSenderFrame();
+    if (fps) *fps = s->GetSenderFps();
+    return 1;
+}
+
 int rave_spout_sender_name(int idx, char* out, int cap) {
     if (!out || cap <= 0) return 0;
     std::lock_guard<std::mutex> lk(registry_mu());
