@@ -25,15 +25,26 @@ typedef SPOUTHANDLE(WINAPI* GetSpoutFn)(void);
 // killed the media child ("runtime: cannot allocate memory"). Never REPORT garbage dims either.
 #define RAVE_SPOUT_DIM_OK(d) ((d) > 0 && (d) <= 16384)
 
-// spout_factory resolves DLL!GetSpout once (C++11 magic statics → thread-safe, run-once).
-// Returns NULL if the DLL is absent or the export is missing.
+// spout_factory resolves DLL!GetSpout, caching ONLY SUCCESS. Returns NULL while the DLL is absent
+// or the export is missing, and retries on the next call.
+//
+// This used to be a C++11 magic static, which cached the FAILURE too - so the FIRST call in the
+// process decided for its whole life. The first caller is the 2 s sender scan (registry queries),
+// long before any route runs the Go-side absolute-path preload, so on a host where the bare
+// LoadLibraryA missed (a cwd without the DLL - see internal/appdir, #49) video share stayed
+// "unavailable" for the entire session even after the DLL became reachable. The observable symptom
+// was a receive that reported "receiving" while every sink open failed, on every source.
+// Retrying is cheap: a hit returns the cached pointer under an uncontended lock, and a miss only
+// costs one failed LoadLibraryA on a box that has no Spout at all.
 static GetSpoutFn spout_factory(void) {
-    static GetSpoutFn fn = []() -> GetSpoutFn {
-        HMODULE m = LoadLibraryA("SpoutLibrary.dll");
-        if (!m) return nullptr;
-        return (GetSpoutFn)GetProcAddress(m, "GetSpout");
-    }();
-    return fn;
+    static std::mutex m;
+    static GetSpoutFn cached = nullptr;
+    std::lock_guard<std::mutex> lk(m);
+    if (cached) return cached;
+    HMODULE mod = LoadLibraryA("SpoutLibrary.dll");
+    if (!mod) return nullptr;
+    cached = (GetSpoutFn)GetProcAddress(mod, "GetSpout");
+    return cached;
 }
 
 // make_spout calls the resolved factory (NULL if the DLL never loaded).
@@ -53,8 +64,12 @@ static std::mutex& registry_mu(void) {
     return m;
 }
 
+// registry lazily creates that handle, retrying while creation fails. Callers already hold
+// registry_mu, so the static needs no extra lock. Like spout_factory this must NOT cache a failure:
+// a magic static here froze "no Spout" for the process lifetime after one early miss.
 static SPOUTHANDLE registry(void) {
-    static SPOUTHANDLE s = make_spout(); // magic static: run-once, thread-safe
+    static SPOUTHANDLE s = nullptr;
+    if (!s) s = make_spout();
     return s;
 }
 

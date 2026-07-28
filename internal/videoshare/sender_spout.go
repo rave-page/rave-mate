@@ -66,9 +66,17 @@ func newSender(log *logbus.Bus) (Sender, error) {
 	return &spoutSender{log: log, workers: map[string]*deckWorker{}}, nil
 }
 
-// preloadManagedDLL loads a managed-bin SpoutLibrary.dll by ABSOLUTE path so the shim's
-// LoadLibrary("SpoutLibrary.dll") then resolves to the already-loaded module (the managed bin dir
-// isn't on the default DLL search path). No-op if it's absent or already beside the exe.
+// init preloads before ANY shim call can happen in this process. Ordering matters: the shim caches
+// a successful DLL resolution, and the first thing to ask is the 2 s sender scan - not a route - so
+// leaving the preload to the route entry points meant the scan raced ahead with only the default
+// search path (which, in a featurehost child running from a hardlink, does not include the install
+// dir - see internal/appdir, #49).
+func init() { preloadManagedDLL() }
+
+// preloadManagedDLL loads SpoutLibrary.dll by ABSOLUTE path - from the install dir or the managed
+// bin dir (spoutdll.Probe) - so the shim's LoadLibrary("SpoutLibrary.dll") then resolves to the
+// already-loaded module. Neither dir is reliably on the default DLL search path in a child process.
+// No-op when the DLL is nowhere to be found.
 func preloadManagedDLL() {
 	st := spoutdll.Probe()
 	if !st.Installed {
