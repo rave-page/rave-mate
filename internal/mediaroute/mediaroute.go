@@ -22,6 +22,7 @@ import (
 
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/debuglog"
+	"rave.page/mate/internal/framedebug"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/videoshare"
@@ -529,9 +530,15 @@ type spoutSink struct {
 // route's Dropped and carries the published volume up, so "route up, frames arriving, no Spout
 // sender" is visible as a number instead of as a Write that answered nil.
 func (s *spoutSink) PipeStats() medialink.PipelineStats {
+	fs := framedebug.For(s.stage()).Stats()
 	return medialink.PipelineStats{Dropped: s.dropped.Load(),
-		PubFrames: s.pubFrames.Load(), PubBytes: s.pubBytes.Load()}
+		PubFrames: s.pubFrames.Load(), PubBytes: s.pubBytes.Load(),
+		PubStalledMs: fs.StalledMs, PubChanges: fs.Changes, PubHash: fs.Hash}
 }
+
+// stage names this sink's framedebug recorder. Per-sender, so two routes publishing different
+// pictures cannot average each other's stall away.
+func (s *spoutSink) stage() string { return "out:" + s.name }
 
 func (m *Manager) openSpoutSink(name string, w, h int) (medialink.Sink, error) {
 	// Native decode wanted → open the sender EAGERLY so its destination texture exists before the
@@ -583,8 +590,10 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 		}
 		return nil
 	}
-	if err := s.fs.Send(&image.NRGBA{Pix: f.Payload, Stride: s.w * 4,
-		Rect: image.Rect(0, 0, s.w, s.h)}); err != nil {
+	img := &image.NRGBA{Pix: f.Payload, Stride: s.w * 4, Rect: image.Rect(0, 0, s.w, s.h)}
+	// Observe BEFORE Send: the payload is a pooled buffer the sink does not own past this call.
+	framedebug.For(s.stage()).Frame(img)
+	if err := s.fs.Send(img); err != nil {
 		return err
 	}
 	s.pubFrames.Add(1)

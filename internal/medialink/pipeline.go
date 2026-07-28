@@ -168,6 +168,18 @@ type PipelineStats struct {
 	// sink that drops nothing and publishes nothing reports the same zero.
 	PubFrames uint64
 	PubBytes  uint64
+	// PubStalledMs/PubChanges/PubHash are the receive side's CONTENT oracle: how long the
+	// published PICTURE has been identical, and how many times it actually changed. Every counter
+	// above is rate- or volume-shaped, and that is not enough - a 4K route republished ONE
+	// bit-identical frame for 48 minutes while fps 58.5, capStaleMs 16, dropped 0 and encFails 0
+	// all read healthy (#58). Volume cannot see it either: an encoded 4K frame stays 3-5 kB
+	// whether the picture moves or not, since keyframes alone account for that. A hash can.
+	// PubStalledMs is the age of the last CHANGE, not of the last frame - that distinction is the
+	// whole point, because a frozen source still delivers frames perfectly on time.
+	// -1 = nothing published yet.
+	PubStalledMs int64
+	PubChanges   uint64
+	PubHash      uint64
 	// Adapter/Drive/DevPolicy identify the code path serving this route, so a passing run on a
 	// machine with no toolchain can still say WHICH path passed.
 	AdapterLUID int64
@@ -238,6 +250,19 @@ func InnerPublished(inner any) (frames, bytes uint64) {
 		return st.PubFrames, st.PubBytes
 	}
 	return 0, 0
+}
+
+// InnerContent lifts the wrapped sink's CONTENT oracle (PubStalledMs/PubChanges/PubHash) up the
+// wrapper chain. Without this the stall dies at the innermost sink - the same way AUBytes was
+// collected and rendered nowhere while a black route reported healthy. stalledMs is -1 when the
+// inner sink has published nothing (or reports no stats), never 0: "fresh" and "never" must not
+// look alike.
+func InnerContent(inner any) (stalledMs int64, changes, hash uint64) {
+	if pr, ok := inner.(PipelineReporter); ok {
+		st := pr.PipeStats()
+		return st.PubStalledMs, st.PubChanges, st.PubHash
+	}
+	return -1, 0, 0
 }
 
 // CompressedVideo reports whether c is an encoded video codec (vs raw pixels / audio).

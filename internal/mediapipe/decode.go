@@ -158,11 +158,13 @@ func (d *decoder) PipeStats() medialink.PipelineStats {
 	restarts := d.restarts
 	d.mu.Unlock()
 	pubF, pubB := medialink.InnerPublished(d.sink)
+	pubStale, pubChg, pubHash := medialink.InnerContent(d.sink)
 	return medialink.PipelineStats{Encoder: "ffmpeg-decode", HWAccel: accel,
 		OutFPS: d.out.value(), Restarts: restarts,
 		Dropped:    d.dropped.Load() + medialink.InnerDrops(d.sink),
 		RateCapped: medialink.InnerRateCapped(d.sink),
-		PubFrames:  pubF, PubBytes: pubB}
+		PubFrames:  pubF, PubBytes: pubB,
+		PubStalledMs: pubStale, PubChanges: pubChg, PubHash: pubHash}
 }
 
 // spawnLocked starts a child on the current tier. Caller holds mu.
@@ -360,6 +362,10 @@ func decodeTelemetry(ctx context.Context, log *logbus.Bus, path string, spec med
 			// different questions, and the sink's Write cannot tell them apart - it returns nil either
 			// way, which is exactly why the volume has to be counted.
 			"published": st.PubFrames, "publishedFps": fmt.Sprintf("%.1f", pubFPS),
+			// ...and whether the published PICTURE is moving. publishedFps counts frames, so it
+			// reads 59 while the same bit-identical frame goes out forever (#58). pubStalledMs is
+			// the age of the last CHANGE; pubChanges is how many there have ever been.
+			"pubStalledMs": st.PubStalledMs, "pubChanges": st.PubChanges,
 			"outFps": fmt.Sprintf("%.1f", st.OutFPS), "gpuPublish": st.ZeroDecode,
 			"dropped": st.Dropped, "lost": st.RealDrops(), "ringDrops": st.InDropped,
 			"decErrors": st.DecErrors, "restarts": st.Restarts, "degraded": st.DegradeReason})

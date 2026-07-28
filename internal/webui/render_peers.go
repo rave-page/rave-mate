@@ -1063,6 +1063,11 @@ func fmtPipeLine(s medialink.RouteStat) string {
 // shipping black kept a healthy-looking panel for 12 minutes. Bytes-per-frame is the only number
 // here that can tell a live picture from a black or frozen one; DegradeReason is the only one that
 // can say the route is off its best path.
+// frozenPictureMs is how long an identical published picture must persist before the panel calls it
+// frozen. 2 s is already ~120 identical frames at 60 fps, well past any plausible pacing hiccup,
+// while still not flagging the brief still moments a legitimately static scene has.
+const frozenPictureMs = 2000
+
 func fmtContentLine(p medialink.PipelineStats) string {
 	var out []string
 	if p.AUCount > 0 && p.AUBytesPerFrame > 0 {
@@ -1078,6 +1083,14 @@ func fmtContentLine(p medialink.PipelineStats) string {
 		// received, no Spout source" failure, which the sink's Write answers `nil` to. Gated on
 		// OutFPS so a route that has merely not started yet says nothing.
 		out = append(out, i18n.T("peers.publishedNone"))
+	}
+	// The frozen-picture verdict. Published frames + fps both read healthy while one bit-identical
+	// frame goes out forever, so the ONLY number that can say it is the age of the last content
+	// change (#58). Threshold, not "> 0": a genuinely static source (an idle scene) is legitimate,
+	// and 2 s of no change at 60 fps is already 120 identical frames.
+	if p.PubFrames > 0 && p.PubStalledMs >= frozenPictureMs {
+		out = append(out, i18n.T("peers.pictureFrozen",
+			i18n.A{"secs": fmt.Sprintf("%.0f", float64(p.PubStalledMs)/1000)}))
 	}
 	if p.BusyDrops > 0 {
 		out = append(out, i18n.T("peers.encoderSaturated", i18n.A{"n": fmt.Sprint(p.BusyDrops)}))
