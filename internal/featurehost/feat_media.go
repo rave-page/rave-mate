@@ -199,6 +199,16 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return nil, f.cam.Command(req.Cmd)
+	case mFrameShot:
+		var req frameShotReq
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		shot, err := f.routes.FrameShot(req.Sender, req.N, req.IntervalMs, req.Scale, req.Crop)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(shot)
 	}
 	return nil, errUnknownMethod(method)
 }

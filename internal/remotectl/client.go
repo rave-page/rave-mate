@@ -6,6 +6,7 @@ import (
 
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/localmedia"
+	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/vrchat"
 )
@@ -231,6 +232,13 @@ func (c *Client) ScreenshotApp(ctx context.Context) ([]byte, error) {
 // ScreenshotVR captures the peer's SteamVR VR-View mirror (opt-in on the peer) and returns PNG bytes.
 func (c *Client) ScreenshotVR(ctx context.Context) ([]byte, error) {
 	return c.screenshot(ctx, MethodScreenshotVR)
+}
+
+// FrameShot samples a video-share sender's content on the peer. crop is a full-resolution x,y,w,h
+// (zero = whole frame) - reading small in-frame text needs real pixels, not a downsample.
+func (c *Client) FrameShot(ctx context.Context, sender string, n int, crop [4]int) (mediaroute.FrameShot, error) {
+	return Do[mediaroute.FrameShot](ctx, c.e, c.nodeID, MethodFrameShot,
+		FrameShotParams{Sender: sender, N: n, Crop: crop})
 }
 
 func (c *Client) screenshot(ctx context.Context, method string) ([]byte, error) {

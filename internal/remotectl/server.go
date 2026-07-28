@@ -21,6 +21,7 @@ import (
 	"rave.page/mate/internal/jobs"
 	"rave.page/mate/internal/libdb"
 	"rave.page/mate/internal/localmedia"
+	"rave.page/mate/internal/mediaroute"
 	"rave.page/mate/internal/musiclib"
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/tagsync"
@@ -651,6 +652,37 @@ type Screenshotter interface {
 // RegisterScreenshot exposes capturing the controlled machine's app window + SteamVR VR-View as a
 // base64 PNG over the peer link. The PNG is written to a temp file we read back (remotectl frames
 // are JSON, no binary channel); a large grab may exceed maxControlFrame and fail gracefully.
+// FrameShotParams asks the peer to sample one of ITS video-share senders.
+type FrameShotParams struct {
+	Sender string `json:"sender"`
+	N      int    `json:"n,omitempty"`
+	Crop   [4]int `json:"crop,omitempty"`
+}
+
+// FrameShotter is the controlled machine's frame-sampling surface (app.appControl over the media
+// route manager).
+type FrameShotter interface {
+	FrameShotSample(sender string, n int, crop [4]int) (mediaroute.FrameShot, error)
+}
+
+// RegisterFrameShot exposes origin-side frame sampling over the peer link (read-only: it grabs a
+// frame the peer is already publishing and never changes its state). The PNG rides back inside the
+// result, so no file lands on the peer's disk.
+func RegisterFrameShot(e *Endpoint, fs FrameShotter) {
+	if e == nil || fs == nil {
+		return
+	}
+	e.Register(MethodFrameShot, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p FrameShotParams
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, err
+			}
+		}
+		return fs.FrameShotSample(p.Sender, p.N, p.Crop)
+	})
+}
+
 func RegisterScreenshot(e *Endpoint, shot Screenshotter) {
 	if e == nil || shot == nil {
 		return

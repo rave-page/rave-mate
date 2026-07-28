@@ -232,13 +232,53 @@ func (r *Recorder) Shots() []Shot {
 	return append([]Shot(nil), r.shots...)
 }
 
+// EncodePNG renders a frame the same way a capture does and returns the PNG bytes, for callers that
+// ship it over a wire instead of to disk (a frame captured on a PEER machine).
+func EncodePNG(src *image.NRGBA, scale int, crop image.Rectangle) ([]byte, error) {
+	if src == nil {
+		return nil, fmt.Errorf("framedebug: no frame")
+	}
+	if scale <= 0 {
+		scale = defaultScale
+	}
+	out, err := render(src, scale, crop)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytesBuffer
+	if err := png.Encode(&buf, out); err != nil {
+		return nil, err
+	}
+	return buf.b, nil
+}
+
+// bytesBuffer is a minimal io.Writer sink - bytes.Buffer would pull the whole package in for one
+// append.
+type bytesBuffer struct{ b []byte }
+
+func (w *bytesBuffer) Write(p []byte) (int, error) { w.b = append(w.b, p...); return len(p), nil }
+
 // writePNG downsamples by scale, or takes a full-resolution crop when one is set.
 func writePNG(path string, src *image.NRGBA, scale int, crop image.Rectangle) error {
+	out, err := render(src, scale, crop)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, out)
+}
+
+// render downsamples by scale, or takes a full-resolution crop when one is set.
+func render(src *image.NRGBA, scale int, crop image.Rectangle) (*image.NRGBA, error) {
 	var out *image.NRGBA
 	if !crop.Empty() {
 		c := crop.Intersect(src.Rect)
 		if c.Empty() {
-			return fmt.Errorf("framedebug: crop %v outside frame %v", crop, src.Rect)
+			return nil, fmt.Errorf("framedebug: crop %v outside frame %v", crop, src.Rect)
 		}
 		out = image.NewNRGBA(image.Rect(0, 0, c.Dx(), c.Dy()))
 		for y := 0; y < c.Dy(); y++ {
@@ -267,10 +307,5 @@ func writePNG(path string, src *image.NRGBA, scale int, crop image.Rectangle) er
 	for i := 3; i < len(out.Pix); i += 4 {
 		out.Pix[i] = 255
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return png.Encode(f, out)
+	return out, nil
 }

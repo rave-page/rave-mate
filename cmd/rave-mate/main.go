@@ -822,6 +822,25 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
+	case "frame-shot", "remote-frame-shot": // sample a video-share sender's CONTENT + dump the frame
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl "+args[0]+
+				" <out.png> [grabs] [x,y,w,h] [@nodeID] <sender name...>\n"+
+				"  no sender name -> lists the candidates\n"+
+				"  crop is FULL resolution (x,y,w,h) - small in-frame text needs real pixels\n"+
+				"  verdict: N grabs / M changed. 0 changed = the SOURCE is frozen, not the link.")
+			return 2
+		}
+		wire := "FRAME-SHOT "
+		if args[0] == "remote-frame-shot" {
+			wire = "REMOTE-FRAME-SHOT "
+		}
+		resp, err := app.SendMulti(wire + strings.Join(args[1:], " "))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
 	case "self-update": // trigger the LOCAL instance's self-update+relaunch (socket cmd existed; CLI verb was missing)
 		resp, err := app.Send("SELF-UPDATE")
 		if err != nil {

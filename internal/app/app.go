@@ -1766,11 +1766,12 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 
 	if serviceMode {
-		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 		remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app/VR-View screenshot (VR works headless)
 		remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 		remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
 		remotectl.RegisterLogs(remoteCtl, ctl)        // peer-driven log tail (remote-logs)
+		remotectl.RegisterFrameShot(remoteCtl, ctl)   // peer-driven origin-side frame sampling (remote-frame-shot)
 		remotectl.RegisterEncoderScan(remoteCtl, ctl) // peer-driven encoder-utilization scan (remote-encoder-scan)
 		remotectl.RegisterPprof(remoteCtl, ctl)       // peer-driven pprof capture (remote-pprof-cpu/-heap, remote-goroutines)
 		remotectl.RegisterUpdater(remoteCtl, ctl)     // peer-driven self-update+relaunch (remote VR-PC update)
@@ -1896,11 +1897,12 @@ func run(parent context.Context, serviceMode bool) error {
 		perfmon.RegisterProbe("recorder.reconcile", ar.Stats)
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
-	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
 	remotectl.RegisterLogs(remoteCtl, ctl)        // peer-driven log tail (remote-logs)
+	remotectl.RegisterFrameShot(remoteCtl, ctl)   // peer-driven origin-side frame sampling (remote-frame-shot)
 	remotectl.RegisterEncoderScan(remoteCtl, ctl) // peer-driven encoder-utilization scan (remote-encoder-scan)
 	remotectl.RegisterPprof(remoteCtl, ctl)       // peer-driven pprof capture (remote-pprof-cpu/-heap, remote-goroutines)
 	remotectl.RegisterUpdater(remoteCtl, ctl)     // peer-driven self-update+relaunch (remote VR-PC update)
@@ -2481,6 +2483,7 @@ type appControl struct {
 	gpuRec      *gpuRecovery                  // GPU-fault recovery (ctl gpu-selftest); nil in service mode
 	media       *medialink.RouteManager       // media plane (ctl encoder-scan: probed encoders); may be nil
 	mediaCaps   *mediaCaps                    // encode-capability advertisement planner (ctl encoder-scan); may be nil
+	mediaRoutes mediaroute.ReceiveControl     // receive routes + frame shots (ctl frame-shot); may be nil
 	obs         *featurehost.ObsProxy         // OBS bridge (ctl encoder-scan: live stream/record active); may be nil
 	ableLink    *featurehost.AbletonLinkProxy // Ableton Link bridge (ctl ablelink-status/resync); may be nil
 	guardDisarm func()                        // guardian disarm for the hard-exit backstop (defers skip on os.Exit); may be nil

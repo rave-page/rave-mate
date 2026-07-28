@@ -11,6 +11,8 @@ type ReceiveControl interface {
 	Receives() []Receive
 	StartReceive(peer, sourceID string) (string, error)
 	StopReceive(session string)
+	// FrameShot samples a local sender's content: the origin-side "is this picture moving" oracle.
+	FrameShot(sender string, n, intervalMs, scale int, crop [4]int) (FrameShot, error)
 }
 
 var _ ReceiveControl = (*Manager)(nil)

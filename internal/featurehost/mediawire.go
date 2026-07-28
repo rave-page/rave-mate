@@ -119,7 +119,24 @@ const (
 	mStartReceive = "startReceive" // startReceiveReq → startReceiveResp
 	mStopReceive  = "stopReceive"  // stopReceiveReq → (ok)
 	mCommand      = "command"      // commandReq → (ok/err)
+	mFrameShot    = "frameShot"    // frameShotReq → FrameShotResult
 )
+
+// frameShotReq samples a LOCAL video-share sender's CURRENT content N times and reports whether it
+// changed, plus the last frame as a PNG. This is the origin-side oracle: it reads the sender's own
+// texture, so its verdict is independent of every stage downstream (encode/network/decode/republish)
+// - which is exactly what was missing when a frozen 4K route took hours to attribute.
+type frameShotReq struct {
+	Sender     string `json:"sender"`
+	N          int    `json:"n"`          // grabs (bounded child-side)
+	IntervalMs int    `json:"intervalMs"` // spacing between grabs
+	Scale      int    `json:"scale"`      // downsample divisor for the returned PNG (0 = default)
+	Crop       [4]int `json:"crop"`       // x,y,w,h full-resolution crop; zero = whole frame
+}
+
+// FrameShotResult is mediaroute's verdict, aliased so daemon-side callers (ctl, remotectl) name one
+// type and the wire shape cannot drift from the implementation.
+type FrameShotResult = mediaroute.FrameShot
 
 type startReceiveReq struct {
 	Peer     string `json:"peer"`

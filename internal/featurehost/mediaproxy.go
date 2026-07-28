@@ -256,6 +256,27 @@ func (p *MediaRoutesProxy) StartReceive(peer, sourceID string) (string, error) {
 	_ = json.Unmarshal(raw, &r)
 	return r.Session, nil
 }
+
+// FrameShot samples a local video-share sender's content in the media child (where the Spout cgo
+// lives) and returns the verdict plus the last frame as a PNG. Its own timeout: N grabs spaced
+// IntervalMs apart can legitimately outlast the default call budget, and a diagnostic that times
+// out mid-sample answers nothing.
+func (p *MediaRoutesProxy) FrameShot(sender string, n, intervalMs, scale int, crop [4]int) (FrameShotResult, error) {
+	req := frameShotReq{Sender: sender, N: n, IntervalMs: intervalMs, Scale: scale, Crop: crop}
+	budget := mediaroute.FrameShotBudget()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	raw, err := p.h.host.Call(ctx, mFrameShot, req)
+	if err != nil {
+		return FrameShotResult{}, err
+	}
+	var r FrameShotResult
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return FrameShotResult{}, err
+	}
+	return r, nil
+}
+
 func (p *MediaRoutesProxy) StopReceive(session string) {
 	ctx, cancel := p.h.callCtx()
 	defer cancel()

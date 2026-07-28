@@ -65,6 +65,11 @@ const (
 
 	// screenshot - capture the controlled machine's app window / SteamVR VR-View; PNG returned
 	// base64 in the JSON result (remotectl frames are JSON - no separate binary channel).
+	// media.frameShot - sample a LOCAL video-share sender's content ON THE PEER and return the
+	// verdict + the last frame. Read-only, and the point of it: the peer forms the "is this picture
+	// moving" judgement at the ORIGIN, so no physical access to the sending machine is needed.
+	MethodFrameShot = "media.frameShot"
+
 	MethodScreenshotApp = "screenshot.app"
 	MethodScreenshotVR  = "screenshot.vr"
 

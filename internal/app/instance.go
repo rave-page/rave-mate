@@ -35,28 +35,34 @@ type Control interface {
 	Quit()
 	SelectTab(name string) (bool, []string) // ok, available names
 	Status() string
-	Snapshot() string                                            // text tree of the rendered UI (empty in service mode)
-	Resize(w, h float32) bool                                    // set the window size (viewport); false in service mode
-	Scroll(y float32) bool                                       // scroll the main content pane to y px (webview only); false otherwise
-	Click(query string) bool                                     // tap a button/check/tab by label; false if no match / service mode
-	Act(act, val string) bool                                    // post a raw UI action through the page act pipeline (webview renderer only)
-	Tap(x, y float32) bool                                       // tap the topmost leaf at canvas coords; false if no hit / service mode
-	TapSecondary(x, y float32) bool                              // right-click: fire the deepest SecondaryTappable (context menus); false if no hit / service
-	Type(text string) bool                                       // append text to the focused Entry; false if no entry / service mode
-	Read(query string) (string, bool)                            // current value of a leaf matched by label; ("", false) on miss / service
-	Set(query, value string) bool                                // mutate Entry/Select/Check matched by label; false on miss / service
-	Screenshot(path string) bool                                 // capture the window to a PNG at path; false on failure / service mode
-	ScreenshotAll(dir string) string                             // sweep EVERY tab (+scroll positions) to PNGs + report.txt in dir; status line
-	ScreenshotRegion(path string, x, y, w, h float32) bool       // capture a sub-rect; false on failure / service
-	ScreenshotVR(path string) bool                               // capture the SteamVR VR-View mirror window to a PNG; false if opt-in off / not found / non-windows
-	GioSnapshot(windowID string) string                          // Gio surfaces: labeled-control tree of one window; "" lists open windows
-	GioTap(windowID, controlID string) string                    // Gio surfaces: queue a control activation; status line
-	ListPeers() string                                           // connected paired peers (nodeID/nick/status), one per line
-	RemoteScreenshot(nodeID, path string, vr bool) string        // screenshot a paired peer's app window (vr=VR-View) to a local PNG; status line
-	VRInputDiag() string                                         // this instance's SteamVR Input action/binding diagnostic
-	RemoteVRInputDiag(nodeID string) string                      // a paired peer's VR input/binding diagnostic (nodeID "" = first connected)
-	Perf() string                                                // this instance's perf-diagnosis report (perfmon rings + system + probes; samples ~1s)
-	EncoderScan() string                                         // encoder-contention scan + affinity plan preview (ctl encoder-scan; read-only)
+	Snapshot() string                                      // text tree of the rendered UI (empty in service mode)
+	Resize(w, h float32) bool                              // set the window size (viewport); false in service mode
+	Scroll(y float32) bool                                 // scroll the main content pane to y px (webview only); false otherwise
+	Click(query string) bool                               // tap a button/check/tab by label; false if no match / service mode
+	Act(act, val string) bool                              // post a raw UI action through the page act pipeline (webview renderer only)
+	Tap(x, y float32) bool                                 // tap the topmost leaf at canvas coords; false if no hit / service mode
+	TapSecondary(x, y float32) bool                        // right-click: fire the deepest SecondaryTappable (context menus); false if no hit / service
+	Type(text string) bool                                 // append text to the focused Entry; false if no entry / service mode
+	Read(query string) (string, bool)                      // current value of a leaf matched by label; ("", false) on miss / service
+	Set(query, value string) bool                          // mutate Entry/Select/Check matched by label; false on miss / service
+	Screenshot(path string) bool                           // capture the window to a PNG at path; false on failure / service mode
+	ScreenshotAll(dir string) string                       // sweep EVERY tab (+scroll positions) to PNGs + report.txt in dir; status line
+	ScreenshotRegion(path string, x, y, w, h float32) bool // capture a sub-rect; false on failure / service
+	ScreenshotVR(path string) bool                         // capture the SteamVR VR-View mirror window to a PNG; false if opt-in off / not found / non-windows
+	GioSnapshot(windowID string) string                    // Gio surfaces: labeled-control tree of one window; "" lists open windows
+	GioTap(windowID, controlID string) string              // Gio surfaces: queue a control activation; status line
+	ListPeers() string                                     // connected paired peers (nodeID/nick/status), one per line
+	RemoteScreenshot(nodeID, path string, vr bool) string  // screenshot a paired peer's app window (vr=VR-View) to a local PNG; status line
+	VRInputDiag() string                                   // this instance's SteamVR Input action/binding diagnostic
+	RemoteVRInputDiag(nodeID string) string                // a paired peer's VR input/binding diagnostic (nodeID "" = first connected)
+	Perf() string                                          // this instance's perf-diagnosis report (perfmon rings + system + probes; samples ~1s)
+	EncoderScan() string                                   // encoder-contention scan + affinity plan preview (ctl encoder-scan; read-only)
+	// FrameShot samples a local video-share sender's CONTENT and writes the last frame (ctl
+	// frame-shot). The origin-side "is this picture actually moving" oracle; read-only.
+	FrameShot(path, sender string, n int, crop [4]int) string
+	// RemoteFrameShot runs that sample on a PAIRED PEER and writes the PNG here - no physical access
+	// to the sending machine needed (ctl remote-frame-shot).
+	RemoteFrameShot(nodeID, path, sender string, n int, crop [4]int) string
 	RemotePerf(nodeID string) string                             // a paired peer's perf report (nodeID "" = first connected)
 	RemoteLogs(nodeID, filter string, max int) string            // a paired peer's recent log tail (nodeID "" = first connected; filter substring)
 	RemoteEncoderScan(nodeID string) string                      // a paired peer's encoder-utilization scan + plan (nodeID "" = first connected; read-only)
@@ -372,6 +378,17 @@ func handleConn(conn net.Conn, ctrl Control) {
 	case strings.HasPrefix(cmd, "REMOTE-SHOT "):
 		nodeID, path := parseRemoteShot(cmd[len("REMOTE-SHOT "):])
 		fmt.Fprintln(conn, ctrl.RemoteScreenshot(nodeID, path, false))
+	case strings.HasPrefix(cmd, "FRAME-SHOT "):
+		path, n, sender, crop := parseFrameShot(cmd[len("FRAME-SHOT "):])
+		fmt.Fprint(conn, ctrl.FrameShot(path, sender, n, crop))
+	case strings.HasPrefix(cmd, "REMOTE-FRAME-SHOT "):
+		path, n, sender, crop := parseFrameShot(cmd[len("REMOTE-FRAME-SHOT "):])
+		node := ""
+		// A leading "@node" targets a specific peer; without it the first connected peer is used.
+		if strings.HasPrefix(sender, "@") {
+			node, sender, _ = strings.Cut(strings.TrimPrefix(sender, "@"), " ")
+		}
+		fmt.Fprint(conn, ctrl.RemoteFrameShot(node, path, sender, n, crop))
 	case cmd == "VRINPUT":
 		fmt.Fprintln(conn, ctrl.VRInputDiag())
 	case strings.HasPrefix(cmd, "REMOTE-VRINPUT"):
@@ -579,4 +596,40 @@ func extractDeepLink(args []string) string {
 		}
 	}
 	return ""
+}
+
+// parseFrameShot reads "<path> <n> [x,y,w,h] <sender words...>". The sender comes LAST because Spout
+// names contain spaces ("rave-mate link Webcam HD Pro Webcam C920"), so it cannot be a middle field.
+// A bare "0,0,0,0" (or omission) means the whole frame.
+func parseFrameShot(arg string) (path string, n int, sender string, crop [4]int) {
+	f := strings.Fields(strings.TrimSpace(arg))
+	if len(f) == 0 {
+		return "", 0, "", crop
+	}
+	path = f[0]
+	rest := f[1:]
+	if len(rest) > 0 {
+		if v, err := strconv.Atoi(rest[0]); err == nil {
+			n = v
+			rest = rest[1:]
+		}
+	}
+	if len(rest) > 0 && strings.Count(rest[0], ",") == 3 {
+		parts := strings.Split(rest[0], ",")
+		ok := true
+		var c [4]int
+		for i, p := range parts {
+			v, err := strconv.Atoi(p)
+			if err != nil {
+				ok = false
+				break
+			}
+			c[i] = v
+		}
+		if ok {
+			crop = c
+			rest = rest[1:]
+		}
+	}
+	return path, n, strings.Join(rest, " "), crop
 }

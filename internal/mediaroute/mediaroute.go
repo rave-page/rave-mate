@@ -65,10 +65,12 @@ type Options struct {
 	// NewSharedSender opens the receive-route's local sender EAGERLY and exposes its destination
 	// GPU texture, so the decoder child can render into it (zigmedia inc 2). nil = videoshare.
 	NewSharedSender func(name string, w, h int) (videoshare.SharedSender, error)
-	OpenSource      func(name string, w, h int) (medialink.Source, error)
-	OpenSink        func(name string, w, h int) (medialink.Sink, error)
-	OpenReceiver    func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
-	PutPix          func([]byte)                                                        // pooled-buffer recycler
+	// GrabFrame reads a sender's CURRENT content once (diagnostic oracle, not a hot path).
+	GrabFrame    func(name string, w, h int) (*image.NRGBA, error)
+	OpenSource   func(name string, w, h int) (medialink.Source, error)
+	OpenSink     func(name string, w, h int) (medialink.Sink, error)
+	OpenReceiver func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
+	PutPix       func([]byte)                                                        // pooled-buffer recycler
 }
 
 // Receive is one requested receive route (UI listing + sink cleanup bookkeeping).
@@ -91,6 +93,7 @@ type Manager struct {
 	listSenders  func() []string
 	senderSize   func(string) (int, int, bool)
 	senderShare  func(string) (uint64, uint32, int, int, bool)
+	grabFrame    func(string, int, int) (*image.NRGBA, error)
 	newSharedSnd func(string, int, int) (videoshare.SharedSender, error)
 	openSource   func(string, int, int) (medialink.Source, error)
 	openSink     func(string, int, int) (medialink.Sink, error)
@@ -106,6 +109,7 @@ func New(o Options) *Manager {
 	m := &Manager{
 		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
+		grabFrame:    o.GrabFrame,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 	}
@@ -115,6 +119,9 @@ func New(o Options) *Manager {
 	}
 	if m.senderSize == nil {
 		m.senderSize = videoshare.SenderSize
+	}
+	if m.grabFrame == nil {
+		m.grabFrame = videoshare.GrabSenderFrame
 	}
 	if m.senderShare == nil {
 		m.senderShare = videoshare.SenderShare
