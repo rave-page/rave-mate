@@ -150,6 +150,12 @@ internal/
               net/http for the few ops we call. Never hand-edit.
   api/        Thin adapter over apiclient: redacted-logging Doer (never logs tokens),
               correctly-shaped bodies where the spec mis-types freeform fields.
+  appdir/     Resolves the INSTALL dir (where runtime sidecars live: SpoutLibrary.dll,
+              openvr_api.dll). Never use os.Executable() for that: sysexec.Named relaunches
+              every child from a per-role hardlink in the proc cache dir, so a child probing
+              "beside the exe" looks in a dir with no sidecars. The daemon Publish()es its exe
+              dir; children inherit it via env. Any NEW runtime-loaded sidecar must resolve
+              through appdir.SidecarPath + a preload by ABSOLUTE path (#49).
   auth/       Browser-deeplink login: registers ravepage://+rave:// schemes, opens
               {website}/desktop/bridge, exchanges the grant code (POST /auth/exchange),
               token store (DPAPI-sealed at rest). Legacy dymattic:// still accepted.

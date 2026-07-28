@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/appdir"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/shared/selfupdate"
 )
@@ -55,14 +56,15 @@ func Probe() Status {
 	return Status{}
 }
 
-// candidatePaths mirrors the loader's search order: beside the exe first (default LoadLibrary dir +
-// where the installer/updater drop it), then the managed bin dir.
+// candidatePaths mirrors the loader's search order: the app's install dir first (where the
+// installer/updater drop it), then the managed bin dir. appdir, not os.Executable(): a featurehost
+// child runs from a per-role HARDLINK in the proc cache dir, and EvalSymlinks does not resolve a
+// hardlink (it is not a symlink - it is a second name for the same inode), so the old code pointed
+// at the proc dir and never found the DLL the installer shipped. Same defect as #49 in spoutdll.
 func candidatePaths() []string {
 	var ps []string
-	if exe, err := os.Executable(); err == nil {
-		if exe, e := filepath.EvalSymlinks(exe); e == nil {
-			ps = append(ps, filepath.Join(filepath.Dir(exe), DLLName))
-		}
+	if p := appdir.SidecarPath(DLLName); p != "" {
+		ps = append(ps, p)
 	}
 	if d, err := Dir(); err == nil {
 		ps = append(ps, filepath.Join(d, DLLName))

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/appdir"
 	"rave.page/mate/internal/config"
 )
 
@@ -58,12 +59,14 @@ func Probe() Status {
 	return Status{}
 }
 
-// candidatePaths is the DLL search order the backend mirrors: beside the exe first (the installer
-// drops it there + it's the default LoadLibrary dir), then the managed bin dir (preloaded by path).
+// candidatePaths is the DLL search order the backend mirrors: the app's install dir first (the
+// installer drops it there), then the managed bin dir. Both are preloaded by ABSOLUTE path, which
+// is what makes this work in a featurehost child - appdir, not os.Executable(), because a child
+// runs from a per-role hardlink in the proc cache dir that holds no sidecars (see appdir docs).
 func candidatePaths() []string {
 	var ps []string
-	if exe, err := os.Executable(); err == nil {
-		ps = append(ps, filepath.Join(filepath.Dir(exe), DLLName))
+	if p := appdir.SidecarPath(DLLName); p != "" {
+		ps = append(ps, p)
 	}
 	if d, err := Dir(); err == nil {
 		ps = append(ps, filepath.Join(d, DLLName))

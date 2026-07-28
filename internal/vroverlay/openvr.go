@@ -637,6 +637,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"rave.page/mate/internal/vrdll"
 	"rave.page/mate/internal/vrmotion"
 	"rave.page/mate/internal/vrstats"
 )
@@ -691,6 +692,9 @@ func (r *openvrRuntime) st(key string) *ovlState {
 
 // NewRuntime returns the OpenVR backend on `vr` builds.
 func NewRuntime() Runtime {
+	// Before the first cgo call does LoadLibraryA(VRLIB_NAME): pull the DLL in by absolute path,
+	// since this runs in the vr featurehost child whose image lives in the proc cache dir (#49).
+	vrdll.Preload()
 	return &openvrRuntime{handles: map[string]C.ulonglong{}, rawSize: map[string][2]int{},
 		names: map[string]string{}, state: map[string]*ovlState{}, dash: map[string]bool{}, gen: map[string]int{}}
 }
