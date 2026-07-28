@@ -108,8 +108,14 @@ type PipelineStats struct {
 	CapSkips    uint64  // pacing ticks skipped (previous encode still running)
 	MtxTimeouts uint64  // shared-texture mutex acquire timeouts (sender contention)
 	SrcErrors   uint64  // capture hard failures (CopyResource/acquire)
-	CapStaleMs  float64 // age of the last successful capture (frozen-sender oracle, R1)
-	EncBusyMs   float64 // mean child capture+encode ms/frame (the zero-copy saturation signal:
+	// CapSync names which synchronisation the live capture actually got: "keyed", "named" or
+	// "unsync". Rendered because the branch decides correctness, not just contention - a real
+	// Spout sender is a LEGACY shared texture with no keyed mutex, so the field takes a different
+	// path than any synthetic keyed-mutex test, and not being able to see which one cost a whole
+	// round of "the source must be static" misdiagnosis.
+	CapSync    string
+	CapStaleMs float64 // age of the last successful capture (frozen-sender oracle, R1)
+	EncBusyMs  float64 // mean child capture+encode ms/frame (the zero-copy saturation signal:
 	// the parent submits nothing, so submit→AU percentiles stay empty on this path)
 	Downgrades int // zero-copy → readback fallbacks on this route (a rig that always
 	// downgrades must be visible here, not silently slow)

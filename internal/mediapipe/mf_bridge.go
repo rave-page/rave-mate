@@ -191,6 +191,20 @@ func captureLabel(zeroCopy bool) string {
 	return "readback"
 }
 
+// capSyncLabel names the capture's synchronisation from the child's CapFlags bits (bit1 keyed
+// mutex, bit2 named mutex, bit3 unsynchronised). "" when no zero-copy session is live.
+func capSyncLabel(flags uint32) string {
+	switch {
+	case flags&0x2 != 0:
+		return "keyed"
+	case flags&0x4 != 0:
+		return "named"
+	case flags&0x8 != 0:
+		return "unsync"
+	}
+	return ""
+}
+
 func tierLabel(software bool) string {
 	if software {
 		return "software-mf"
@@ -288,7 +302,10 @@ func (b *mfBridge) routeTelemetry(ctx context.Context) {
 		b.noteNoContent(dN, perFrame)
 		b.log.Info(source, "route encode telemetry", map[string]any{
 			"engine": st.Encoder, "tier": tierLabel(st.SoftwareEncode), "drive": st.Drive,
-			"capture": captureLabel(b.zeroCopy), "device": st.DevPolicy,
+			// capSync is not cosmetic: it decides whether the shared-texture read is coherent at
+			// all, and only the log makes the field's branch visible.
+			"capture": captureLabel(b.zeroCopy), "capSync": st.CapSync, "device": st.DevPolicy,
+			"mtxTimeouts": st.MtxTimeouts, "capStaleMs": fmt.Sprintf("%.0f", st.CapStaleMs),
 			"adapter": fmt.Sprintf("%#x %s", uint64(st.AdapterLUID), b.adapterName),
 			// The content oracle: a live picture cannot be a few hundred bytes per frame.
 			"aus": dN, "bytesPerFrame": perFrame, "kbps": fmt.Sprintf("%.0f", kbps),
@@ -633,6 +650,7 @@ func (b *mfBridge) PipeStats() medialink.PipelineStats {
 		QueueDepth: st.QueueDepth, ChildCPUPct: st.ChildCPUPct,
 		ZeroCopy: st.ZeroCopy, CapFPS: st.CapFPS, CapSkips: st.CapSkips,
 		MtxTimeouts: st.MtxTimeouts, SrcErrors: st.SrcErrors, CapStaleMs: st.CapStaleMs,
+		CapSync:      capSyncLabel(st.CapFlags),
 		AdapterMoved: st.AdapterMoved,
 		EncBusyMs:    st.EncBusyMs,
 		Downgrades:   b.downgrades + st.Downgrades,

@@ -201,6 +201,15 @@ pub const Cap = struct {
             .encfail, .busy => return .encfail,
         }
         const slot = e.bltView(c.view);
+        // Submit the Blt BEFORE giving the sender its texture back. VideoProcessorBlt only queues,
+        // so releasing here left the read unsubmitted: the sender could overwrite the texture
+        // before the GPU read it, and on the named-mutex path nothing ever made this device see
+        // the sender's writes - the keyed-mutex path only escaped that because ReleaseSync carries
+        // an implicit flush. Real Spout senders are LEGACY shared textures with no keyed mutex, so
+        // the field always took the unflushed path and shipped a frozen picture at a healthy 59 fps
+        // (bytesPerFrame ~1-5 kB at 4K, every counter green). Keyed mutex still flushes via
+        // ReleaseSync, so skip the redundant submit there.
+        if (c.kmutex == null) e.flushCtx();
         c.release();
         if (slot < 0) {
             c.reason = .copy_failed; // Blt over the SENDER's view: genuinely a source verdict

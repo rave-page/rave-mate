@@ -1760,6 +1760,18 @@ pub const Enc = struct {
         return @intCast(slot);
     }
 
+    /// flushCtx submits the queued GPU work. vctx is a QI of ctx (same device context), so this
+    /// submits a VideoProcessorBlt issued through the video interface.
+    ///
+    /// Load-bearing for reads of a FOREIGN process's shared texture: VideoProcessorBlt only
+    /// QUEUES, so without this the read of the sender's texture had not even been submitted when
+    /// the sender's mutex was released - the sender was free to overwrite mid-read, and nothing
+    /// forced this device to see the sender's writes at all. Spout's own DX11 receiver flushes
+    /// inside the lock for exactly this reason.
+    pub fn flushCtx(e: *Enc) void {
+        e.ctx.v.Flush(@ptrCast(e.ctx));
+    }
+
     /// feed uploads + converts + submits one RGBA frame (stride = in_w*4). Blocks until the
     /// encoder accepts input (bounded). <0 = error.
     pub fn feed(e: *Enc, rgba: [*]const u8, pts100: i64, sink: AuSink) i32 {
