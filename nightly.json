@@ -1,13 +1,13 @@
 {
-  "version": "nightly-7cd37ba",
-  "build": 194,
-  "commit": "7cd37ba",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-194-20260728-7cd37ba.exe",
-  "sha256": "f60ab3cdc3b0e93c18084bef77563ececcb8c95ed7ae247f30b85f5137b40969",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-194-20260728-7cd37ba.exe",
-  "installer_sha256": "138b27a53ea3344955b31e62aeb3c66fe8cae96a2b93a298a630e5b67f448605",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-194-20260728-7cd37ba",
-  "linux_sha256": "ad198a0288b8acacc94cd14066943a7667eee6f195bcd42aca66e27f7566ec72",
+  "version": "nightly-7ce0242",
+  "build": 196,
+  "commit": "7ce0242",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-196-20260728-7ce0242.exe",
+  "sha256": "b1805b688c09d8bb8563903c02e46bb7d6036e602a31ce731bad20ada556556c",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-196-20260728-7ce0242.exe",
+  "installer_sha256": "df0dfc05e05d492e576b3ee7341a5ae953b6b26ad395b289fe94e0fcbf949eac",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-196-20260728-7ce0242",
+  "linux_sha256": "7050ed516fab7933cf46a549614df9ebb60a1dcd9740ddbe2ea7cc6f83923c37",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-28T16:24:30Z",
-  "notes": "fix(spout): stop caching a FAILED DLL load - one early miss killed video share for the session"
+  "released": "2026-07-28T20:57:00Z",
+  "notes": "test(zigmedia): live motion gate - and a correction to 705a455's claim"
 }
