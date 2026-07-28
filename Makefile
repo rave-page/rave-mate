@@ -51,10 +51,12 @@ all: generate-api fmt vet test build
 generate-api:
 	cd tools/genapi && go run .
 
-# Recompile internal/ui/assets/icon.png into the committed Windows resource object so the
-# .exe shows the brand icon in taskbar/launcher/Explorer. Run only when the icon changes;
-# the .syso is checked in and auto-linked by `go build` (local + CI cross-build).
-# Output: cmd/rave-mate/rsrc_windows_amd64.syso.
+# Recompile internal/ui/assets/icon.png into the committed Windows icon artefacts so both exes
+# show the brand icon in taskbar/launcher/Explorer. Run only when the icon changes; both outputs
+# are checked in (the .syso is auto-linked by `go build`, the .ico by zig's resource compiler).
+# Outputs: cmd/rave-mate/rsrc_windows_amd64.syso        (rave-mate.exe)
+#          native/zigui/src/shell/rave-shell.ico        (rave-shell.exe - the window child owns
+#          its own copy: a window's icon comes from ITS process, not the daemon's)
 generate-icon:
 	cd tools/winicon && go run .
 

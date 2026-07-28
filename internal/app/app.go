@@ -187,6 +187,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 	log.Info("app", "starting", map[string]any{"mode": modeLabel(serviceMode), "api": cfg.APIBaseURL, "version": version.String()})
 	logZigPosture(log, cfg)
+	initAppIdentity(log) // before tray/window: taskbar identity must be claimed pre-first-window
 
 	if bootCooldown > 0 { // relaunched after a GPU fault: let the driver settle before GL/VR init
 		log.Info("app", "GPU-fault relaunch cooldown - pacing boot", map[string]any{"wait": bootCooldown.String()})

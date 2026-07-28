@@ -76,6 +76,10 @@ pub fn main(init: std.process.Init) !void {
         @compileError("rave-shell is Windows-only (WebView2)");
     }
     const gpa = init.gpa;
+    // Before any window: claim the app's taskbar identity, else Windows derives one from this
+    // exe's (hash-stamped) path and the window lands in its own taskbar button instead of the
+    // pinned rave-mate one.
+    winshell.setAppIdentity();
     var em = wire.Emitter.init(gpa);
     loopback.setAllocator(gpa);
 

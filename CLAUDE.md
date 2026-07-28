@@ -109,7 +109,12 @@ cmd/rave-mate/main.go      Entrypoint: SCM detection, `worker`/`install`/`uninst
                            `status` subcommands, flag parse, single-instance, app.Run
 cmd/rave-mate/rsrc_windows_amd64.syso  Committed Windows icon resource (RT_ICON/RT_GROUP_ICON).
                            Auto-linked by `go build` → exe shows the brand icon in
-                           taskbar/launcher/Explorer. Regen with `make generate-icon`.
+                           taskbar/launcher/Explorer. Regen with `make generate-icon`, which
+                           also writes native/zigui/src/shell/rave-shell.ico - the window child
+                           is a separate exe and a window's icon comes from ITS OWN process.
+                           Both exes also claim one AppUserModelID ("RavePage.RaveMate",
+                           internal/app/appid_windows.go + winshell.zig), else the Zig shell's
+                           window gets its own taskbar button instead of the pinned one.
 internal/
   config/     Versioned typed config. Every capability is an independent Feature
               (Traktor, StreamBridge, Transcode, StudioChannel, NML, MIDI, Recorder,
@@ -233,6 +238,7 @@ native/zigvr/ Zig VR-overlay raster executor (`rz_vr_*`, include/ravevr.h). Buil
               `make zig`. Blend math replicates Go image/draw exactly (parity-tested).
 tools/genapi/ Build-time only (own go.mod): fetches /openapi.json, generates apiclient.
 tools/winicon/ Build-time only (own go.mod, pure stdlib): icon.png → cmd/rave-mate .syso
+              + native/zigui/src/shell/rave-shell.ico (same 7 sizes, file vs resource form)
               (area-average resize → 7 PNG-in-ICO sizes → COFF .rsrc). No external dep.
 ```
 

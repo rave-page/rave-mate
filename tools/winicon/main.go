@@ -26,6 +26,7 @@ var sizes = []int{16, 24, 32, 48, 64, 128, 256}
 func main() {
 	in := flag.String("in", "../../internal/ui/assets/icon.png", "source PNG")
 	out := flag.String("out", "../../cmd/rave-mate/rsrc_windows_amd64.syso", "output .syso")
+	ico := flag.String("ico", "../../native/zigui/src/shell/rave-shell.ico", "output .ico (rave-shell.exe resource; empty = skip)")
 	flag.Parse()
 
 	srcBytes, err := os.ReadFile(*in)
@@ -51,6 +52,56 @@ func main() {
 		log.Fatalf("write %s: %v", *out, err)
 	}
 	log.Printf("wrote %s (%d icon sizes, %d bytes)", *out, len(sizes), len(obj))
+
+	// rave-shell.exe (the Zig window child) is a SEPARATE exe, so it needs its own copy of the
+	// icon: a window's taskbar/title-bar icon comes from ITS process, not from the daemon's.
+	// zig's resource compiler takes an .ico via a .rc, hence this second output from the one
+	// source PNG - a hand-made second icon would be a second brand truth.
+	if *ico != "" {
+		b := buildICO(pngs)
+		if err := os.WriteFile(*ico, b, 0o644); err != nil {
+			log.Fatalf("write %s: %v", *ico, err)
+		}
+		log.Printf("wrote %s (%d icon sizes, %d bytes)", *ico, len(sizes), len(b))
+	}
+}
+
+// buildICO lays out a standalone .ico: ICONDIR + ICONDIRENTRY[n] + the PNG blobs. Identical to
+// groupIconDir's entries except the trailing member is a 4-byte FILE OFFSET instead of the
+// 2-byte RT_ICON id - that one field is the whole difference between the file and resource forms.
+func buildICO(pngs [][]byte) []byte {
+	n := len(pngs)
+	hdr := 6 + 16*n
+	out := make([]byte, hdr, hdr+totalLen(pngs))
+	binary.LittleEndian.PutUint16(out[0:], 0) // reserved
+	binary.LittleEndian.PutUint16(out[2:], 1) // type: icon
+	binary.LittleEndian.PutUint16(out[4:], uint16(n))
+	off := hdr
+	for i, p := range pngs {
+		e := 6 + 16*i
+		s := sizes[i]
+		out[e+0] = byte(s & 0xFF)                    // width (0 == 256)
+		out[e+1] = byte(s & 0xFF)                    // height
+		out[e+2] = 0                                 // color count
+		out[e+3] = 0                                 // reserved
+		binary.LittleEndian.PutUint16(out[e+4:], 1)  // planes
+		binary.LittleEndian.PutUint16(out[e+6:], 32) // bit count
+		binary.LittleEndian.PutUint32(out[e+8:], uint32(len(p)))
+		binary.LittleEndian.PutUint32(out[e+12:], uint32(off))
+		off += len(p)
+	}
+	for _, p := range pngs {
+		out = append(out, p...)
+	}
+	return out
+}
+
+func totalLen(bs [][]byte) int {
+	n := 0
+	for _, b := range bs {
+		n += len(b)
+	}
+	return n
 }
 
 func encodePNG(img image.Image) ([]byte, error) {

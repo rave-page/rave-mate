@@ -37,6 +37,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
+        // Brand icon resource (id 1). Without it the window child has NO icon: the taskbar
+        // button, Alt-Tab and title bar all read the icon from the window's OWN process, and
+        // rave-mate.exe's .syso is invisible to this exe.
+        shell_mod.addWin32ResourceFile(.{ .file = b.path("src/shell/rave-shell.rc") });
         const shell_exe = b.addExecutable(.{
             .name = "rave-shell",
             .root_module = shell_mod,

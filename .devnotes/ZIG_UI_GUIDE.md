@@ -2028,7 +2028,40 @@ in `ready`, but only so ctl/diagnostics can name the window and so procShell can
 before there is one.
 
 Known limitation, unchanged from in-proc: a window hidden to tray has nothing to render, so a capture
-taken while it is hidden is black on BOTH shells. `ctl show` first.
+taken while it is hidden is black on BOTH shells. `ctl show` first. A MINIMIZED window is the same
+trap wearing a different hat: its rect is `160x28 @ -32000,-32000`, so the capture "succeeds" and
+returns a useless sliver instead of erroring (tracked as #55).
+
+### 5b. Branding — a separate exe owns nothing of the daemon's identity
+
+Shipped as a B6 defect: no icon in the taskbar, no icon in the title bar, and a SECOND taskbar
+button beside the user's pinned rave-mate. All three follow from one fact — **the window belongs to
+`rave-shell.exe`, and Windows reads a window's icon and app identity from the window's OWN
+process.** `rave-mate.exe`'s `.syso` and its pinned shortcut are invisible to the child. Three
+things a B6 child MUST therefore do for itself:
+
+| | mechanism | if omitted |
+|---|---|---|
+| Icon resource | own `.rc` → `addWin32ResourceFile` (id 1, same as `appIconResID`) | `LoadImageW` finds nothing |
+| Window icon | class `hIcon`/`hIconSm` **and** `WM_SETICON` | `WM_GETICON` answers 0 → stock/blank taskbar icon |
+| App identity | `SetCurrentProcessExplicitAppUserModelID` + the id on the window's property store | Windows derives an identity from the exe path |
+
+The derived-from-path default is worse here than it looks: the child is staged as
+`rave-shell-<embed-hash>.exe`, so the identity **changed on every update** and no pin could ever
+match it. One explicit `"RavePage.RaveMate"` shared by daemon, child and the Start Menu shortcut
+(`internal/app/appid_windows.go` stamps the `.lnk`) fixes grouping permanently.
+
+Verify by execution, not by reading — the process-level id is NOT readable from outside, so the
+window-level stamp is what makes the invariant checkable:
+
+```
+SHGetPropertyStoreForWindow(hwnd, IID_IPropertyStore) → GetValue(PKEY_AppUserModel_ID)
+  before: WM_GETICON small=0 big=0        AppUserModelID = <none: derived from exe path>
+  after:  WM_GETICON small=… big=…        AppUserModelID = RavePage.RaveMate
+```
+
+Explorer keeps its own copy of a pin, so an existing pinned button only merges after a one-time
+unpin/re-pin. Nothing writes to the user's `User Pinned\TaskBar` folder.
 
 ### 6. Shutdown — re-homed, never a daemon hang
 

@@ -1,0 +1,6 @@
+/* Brand icon for rave-shell.exe. A window's taskbar/title-bar icon comes from ITS OWN process,
+   so the window child needs its own copy of the resource - rave-mate.exe's .syso does nothing
+   for it. Id 1 == internal/webui appIconResID, so both window hosts load the icon identically.
+   rave-shell.ico is generated from internal/ui/assets/icon.png by tools/winicon
+   (`make generate-icon`) - never hand-edit it, or the brand forks. */
+1 ICON "rave-shell.ico"

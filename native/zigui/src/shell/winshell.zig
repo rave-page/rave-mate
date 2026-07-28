@@ -67,6 +67,9 @@ extern "user32" fn ReleaseDC(HWND, ?*anyopaque) callconv(.winapi) i32;
 extern "user32" fn PrintWindow(HWND, ?*anyopaque, u32) callconv(.winapi) i32;
 extern "user32" fn MoveWindow(HWND, i32, i32, i32, i32, i32) callconv(.winapi) i32;
 extern "user32" fn UpdateWindow(HWND) callconv(.winapi) i32;
+extern "user32" fn LoadImageW(?*anyopaque, usize, u32, i32, i32, u32) callconv(.winapi) ?*anyopaque;
+extern "user32" fn GetSystemMetrics(i32) callconv(.winapi) i32;
+extern "user32" fn SendMessageW(HWND, u32, usize, isize) callconv(.winapi) isize;
 
 extern "gdi32" fn CreateCompatibleDC(?*anyopaque) callconv(.winapi) ?*anyopaque;
 extern "gdi32" fn CreateCompatibleBitmap(?*anyopaque, i32, i32) callconv(.winapi) ?*anyopaque;
@@ -96,6 +99,33 @@ extern "advapi32" fn RegCloseKey(usize) callconv(.winapi) i32;
 extern "ole32" fn CoInitializeEx(?*anyopaque, u32) callconv(.winapi) i32;
 extern "ole32" fn CoTaskMemFree(?*anyopaque) callconv(.winapi) void;
 
+extern "shell32" fn SetCurrentProcessExplicitAppUserModelID([*:0]const u16) callconv(.winapi) i32;
+extern "shell32" fn SHGetPropertyStoreForWindow(HWND, *const GUID, *?*IPropertyStore) callconv(.winapi) i32;
+
+const GUID = extern struct { d1: u32, d2: u16, d3: u16, d4: [8]u8 };
+const PROPERTYKEY = extern struct { fmtid: GUID, pid: u32 };
+/// x64 PROPVARIANT: 8-byte header + 16-byte union. Only VT_LPWSTR is used, in the first word.
+const PROPVARIANT = extern struct { vt: u16, r1: u16 = 0, r2: u16 = 0, r3: u16 = 0, val: usize, pad: usize = 0 };
+
+const IPropertyStoreVtbl = extern struct {
+    QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) i32,
+    AddRef: *const fn (*anyopaque) callconv(.winapi) u32,
+    Release: *const fn (*anyopaque) callconv(.winapi) u32,
+    GetCount: *const fn (*anyopaque, *u32) callconv(.winapi) i32,
+    GetAt: *const fn (*anyopaque, u32, *PROPERTYKEY) callconv(.winapi) i32,
+    GetValue: *const fn (*anyopaque, *const PROPERTYKEY, *PROPVARIANT) callconv(.winapi) i32,
+    SetValue: *const fn (*anyopaque, *const PROPERTYKEY, *const PROPVARIANT) callconv(.winapi) i32,
+    Commit: *const fn (*anyopaque) callconv(.winapi) i32,
+};
+const IPropertyStore = extern struct { vtbl: *const IPropertyStoreVtbl };
+
+const iid_property_store: GUID = .{ .d1 = 0x886D8EEB, .d2 = 0x8CF2, .d3 = 0x4446, .d4 = .{ 0x8D, 0x02, 0xCD, 0xBA, 0x1D, 0xBD, 0xCF, 0x99 } };
+const pkey_app_user_model_id: PROPERTYKEY = .{ // System.AppUserModel.ID
+    .fmtid = .{ .d1 = 0x9F4C2855, .d2 = 0x9F79, .d3 = 0x4B39, .d4 = .{ 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3 } },
+    .pid = 5,
+};
+const vt_lpwstr: u16 = 31;
+
 const BitmapInfoHeader = extern struct {
     biSize: u32,
     biWidth: i32,
@@ -123,6 +153,57 @@ const wm_timer: u32 = 0x0113;
 const beat_timer_id: usize = 1;
 const below_normal_priority: u32 = 0x4000;
 const normal_priority: u32 = 0x20;
+
+// Brand icon (rave-shell.rc id 1 == internal/webui appIconResID).
+const app_icon_res_id: usize = 1;
+const image_icon: u32 = 1; // IMAGE_ICON
+const lr_defaultsize: u32 = 0x40; // LR_DEFAULTSIZE
+const sm_cxicon = 11;
+const sm_cyicon = 12;
+const sm_cxsmicon = 49;
+const sm_cysmicon = 50;
+const wm_seticon: u32 = 0x0080;
+const icon_small: usize = 0; // title bar
+const icon_big: usize = 1; // Alt-Tab / taskbar
+
+/// app_user_model_id is the taskbar + notification identity of the WHOLE app. It MUST match
+/// rave-mate.exe's (internal/app/appid_windows.go) and the AppID stamped on the Start Menu
+/// shortcut, or Windows counts this window as a different app than the pinned launcher and adds a
+/// SECOND taskbar button. Absent an explicit id Windows derives one from the exe path - and this
+/// exe is staged as rave-shell-<embed-hash>.exe, so the derived identity would change on EVERY
+/// update and no pin could ever match it.
+const app_user_model_id = std.unicode.utf8ToUtf16LeStringLiteral("RavePage.RaveMate");
+
+/// setAppIdentity pins this process's AppUserModelID. Must run before the first window exists.
+pub fn setAppIdentity() void {
+    _ = SetCurrentProcessExplicitAppUserModelID(app_user_model_id);
+}
+
+/// setWindowAppIdentity stamps the id on the WINDOW too. Belt and braces with real value: the
+/// window property beats the process default in the taskbar's lookup order, and unlike the
+/// process default it is READABLE from outside (SHGetPropertyStoreForWindow), so the grouping
+/// invariant can be verified instead of assumed. Needs COM on this thread - windowThread's
+/// CoInitializeEx has already run.
+fn setWindowAppIdentity(hwnd: HWND) void {
+    var store: ?*IPropertyStore = null;
+    if (SHGetPropertyStoreForWindow(hwnd, &iid_property_store, &store) < 0) return;
+    const s = store orelse return;
+    defer _ = s.vtbl.Release(@ptrCast(s));
+    const pv: PROPVARIANT = .{ .vt = vt_lpwstr, .val = @intFromPtr(app_user_model_id) };
+    if (s.vtbl.SetValue(@ptrCast(s), &pkey_app_user_model_id, &pv) >= 0) {
+        _ = s.vtbl.Commit(@ptrCast(s));
+    }
+}
+
+/// loadAppIcon loads the exe's embedded brand icon at the given SM_* metric size (windowicon_
+/// windows.go parity). Shared module resource - never destroyed, freed at process exit.
+fn loadAppIcon(hinst: ?*anyopaque, cx_metric: i32, cy_metric: i32) ?*anyopaque {
+    const cx = GetSystemMetrics(cx_metric);
+    const cy = GetSystemMetrics(cy_metric);
+    if (LoadImageW(hinst, app_icon_res_id, image_icon, cx, cy, 0)) |h| return h;
+    // Metric lookup failed - let the system pick the size.
+    return LoadImageW(hinst, app_icon_res_id, image_icon, 0, 0, lr_defaultsize);
+}
 
 // ── WebView2 COM surface (slot orders copied from the shipped mswebview2 WebView2.h) ──
 
@@ -435,19 +516,22 @@ fn windowThread(sh: *Shell) void {
     _ = SetProcessDpiAwarenessContext(-4); // PER_MONITOR_AWARE_V2
 
     const cls_name = std.unicode.utf8ToUtf16LeStringLiteral("rave_shell_window");
+    const hinst = GetModuleHandleW(null);
+    const icon_big_h = loadAppIcon(hinst, sm_cxicon, sm_cyicon);
+    const icon_small_h = loadAppIcon(hinst, sm_cxsmicon, sm_cysmicon);
     var wc: WNDCLASSEXW = .{
         .cbSize = @sizeOf(WNDCLASSEXW),
         .style = 0,
         .lpfnWndProc = wndProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
-        .hInstance = GetModuleHandleW(null),
-        .hIcon = null,
+        .hInstance = hinst,
+        .hIcon = icon_big_h,
         .hCursor = LoadCursorW(null, 32512), // IDC_ARROW
         .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = cls_name,
-        .hIconSm = null,
+        .hIconSm = icon_small_h,
     };
     _ = RegisterClassExW(&wc);
     const title16 = utf16z(sh.gpa, sh.title) orelse return;
@@ -462,6 +546,12 @@ fn windowThread(sh: *Shell) void {
         ExitProcess(1);
     }
     _ = ShowWindow(hwnd, sw_hide); // burn any STARTUPINFO first-show override deterministically
+    // Per-window icon as well as the class icon: the taskbar/Alt-Tab ask the WINDOW first
+    // (WM_GETICON), and a class icon alone leaves WM_GETICON answering 0 - which is exactly the
+    // "no rave-mate logo in the taskbar" this fixes. Matches shell_cgo.go's setWindowIcon call.
+    if (icon_small_h) |h| _ = SendMessageW(hwnd, wm_seticon, icon_small, @bitCast(@intFromPtr(h)));
+    if (icon_big_h) |h| _ = SendMessageW(hwnd, wm_seticon, icon_big, @bitCast(@intFromPtr(h)));
+    setWindowAppIdentity(hwnd); // group with the pinned rave-mate button, not a second one
     sh.hwnd.store(hwnd, .release);
     applyOuterSize(sh, hwnd, sh.init_w, sh.init_h);
 
