@@ -45,7 +45,22 @@ type Stats struct {
 	StalledMs int64 // since the content last changed (-1 = nothing observed yet)
 	Shots     int   // captures currently held
 	Armed     int   // captures still pending
+	// MovedFrac is the fraction of the picture that changed on the last frame that changed at all,
+	// and PeakFrac the largest ever seen. A boolean "it changed" is not enough: a desktop capture
+	// whose only live element is a clock changes constantly and still looks like a still image.
+	// Under staticFrac the picture is static-with-a-live-element, not moving footage.
+	MovedFrac float64
+	PeakFrac  float64
 }
+
+// StaticFrac is the ceiling under which a changing picture is still, for practical purposes, a
+// static image with a small live element (a clock, a VU meter, a timer). Measured: a frozen 4K
+// desktop capture with a ticking tray clock moved 0.5% of the picture; a live 720p webcam through
+// the same path moved 6.5%. The gap is an order of magnitude, so the threshold sits between them.
+const StaticFrac = 0.02
+
+// Static reports a picture that changes but does not really move.
+func (s Stats) Static() bool { return s.Frames > 0 && s.Changes > 0 && s.PeakFrac < StaticFrac }
 
 // Hash is a deterministic sparse content hash: same pixels -> same value, across processes and runs.
 // FNV-1a inlined over the sampled bytes (no allocation, no hash.Hash interface dispatch per frame).
@@ -55,6 +70,41 @@ func Hash(pix []byte) uint64 {
 		h = (h ^ uint64(pix[i])) * 1099511628211
 	}
 	return h
+}
+
+// Sample hashes and records the sampled bytes in one pass. dst is grown as needed and
+// returned, so a steady stream reuses the same backing array.
+func Sample(pix, dst []byte) ([]byte, uint64) {
+	n := (len(pix) + sampleStride - 1) / sampleStride
+	if cap(dst) < n {
+		dst = make([]byte, n)
+	}
+	dst = dst[:n]
+	h := uint64(14695981039346656037)
+	for i, j := 0, 0; i < len(pix); i, j = i+sampleStride, j+1 {
+		b := pix[i]
+		dst[j] = b
+		h = (h ^ uint64(b)) * 1099511628211
+	}
+	return dst, h
+}
+
+// DiffFrac is the fraction of sampled bytes that differ. This is the number a boolean "changed"
+// cannot give, and the difference is not academic: a 4K desktop capture whose ONLY moving element is
+// a clock reports "changed" on ~3 frames a second while looking, to a human and to Resolume, like a
+// still image. 0.5% moving and 6% moving are different findings and must not share a verdict.
+func DiffFrac(a, b []byte) float64 {
+	n := min(len(a), len(b))
+	if n == 0 {
+		return 0
+	}
+	diff := 0
+	for i := range n {
+		if a[i] != b[i] {
+			diff++
+		}
+	}
+	return float64(diff) / float64(n)
 }
 
 // Shot is one captured frame on disk.
@@ -83,6 +133,10 @@ type Recorder struct {
 	crop       image.Rectangle
 	seq        int
 	shots      []Shot
+	sample     []byte // sampled bytes of the last frame (magnitude needs the previous frame, not just its hash)
+	spare      []byte // the frame-before-last's buffer, recycled
+	movedFrac  float64
+	peakFrac   float64
 }
 
 var (
@@ -174,18 +228,23 @@ func (r *Recorder) Frame(img *image.NRGBA) {
 	if img == nil {
 		return
 	}
-	h := Hash(img.Pix)
 	now := time.Now()
 
 	r.mu.Lock()
+	next, h := Sample(img.Pix, r.scratch())
 	r.frames++
 	if !r.haveHash || h != r.hash {
 		if r.haveHash {
 			r.changes++
+			if f := DiffFrac(next, r.sample); f > 0 {
+				r.movedFrac = f
+				r.peakFrac = max(r.peakFrac, f)
+			}
 		}
 		r.haveHash = true
 		r.lastChange = now
 	}
+	r.spare, r.sample = r.sample, next
 	r.hash = h
 	r.w, r.h = img.Rect.Dx(), img.Rect.Dy()
 	shoot := r.armed > 0
@@ -218,7 +277,8 @@ func (r *Recorder) Stats() Stats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := Stats{Frames: r.frames, Changes: r.changes, Hash: r.hash, W: r.w, H: r.h,
-		StalledMs: -1, Shots: len(r.shots), Armed: r.armed}
+		StalledMs: -1, Shots: len(r.shots), Armed: r.armed,
+		MovedFrac: r.movedFrac, PeakFrac: r.peakFrac}
 	if r.haveHash {
 		s.StalledMs = time.Since(r.lastChange).Milliseconds()
 	}
@@ -308,4 +368,16 @@ func render(src *image.NRGBA, scale int, crop image.Rectangle) (*image.NRGBA, er
 		out.Pix[i] = 255
 	}
 	return out, nil
+}
+
+// scratch hands Frame a buffer to sample into without clobbering the previous frame's samples, which
+// the magnitude comparison still needs. Caller holds mu. Two buffers alternate, so a steady stream
+// allocates nothing after the first two frames.
+func (r *Recorder) scratch() []byte {
+	if cap(r.spare) == 0 {
+		return nil
+	}
+	out := r.spare
+	r.spare = r.sample
+	return out
 }

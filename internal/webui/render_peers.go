@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"rave.page/mate/internal/filexfer"
+	"rave.page/mate/internal/framedebug"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediaroute"
@@ -1088,9 +1089,16 @@ func fmtContentLine(p medialink.PipelineStats) string {
 	// frame goes out forever, so the ONLY number that can say it is the age of the last content
 	// change (#58). Threshold, not "> 0": a genuinely static source (an idle scene) is legitimate,
 	// and 2 s of no change at 60 fps is already 120 identical frames.
-	if p.PubFrames > 0 && p.PubStalledMs >= frozenPictureMs {
+	switch {
+	case p.PubFrames > 0 && p.PubStalledMs >= frozenPictureMs:
 		out = append(out, i18n.T("peers.pictureFrozen",
 			i18n.A{"secs": fmt.Sprintf("%.0f", float64(p.PubStalledMs)/1000)}))
+	case p.PubChanges > 0 && p.PubPeakFrac > 0 && p.PubPeakFrac < framedebug.StaticFrac:
+		// Changing but not MOVING. Reported separately because "frozen" would be wrong and silence
+		// would be worse: this is the shape of a desktop capture whose only live element is a clock,
+		// which reaches Resolume looking exactly like a still image.
+		out = append(out, i18n.T("peers.pictureStatic",
+			i18n.A{"pct": fmt.Sprintf("%.2f", p.PubPeakFrac*100)}))
 	}
 	if p.BusyDrops > 0 {
 		out = append(out, i18n.T("peers.encoderSaturated", i18n.A{"n": fmt.Sprint(p.BusyDrops)}))

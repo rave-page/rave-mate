@@ -540,7 +540,8 @@ func (s *spoutSink) PipeStats() medialink.PipelineStats {
 	fs := framedebug.For(s.stage()).Stats()
 	return medialink.PipelineStats{Dropped: s.dropped.Load(),
 		PubFrames: s.pubFrames.Load(), PubBytes: s.pubBytes.Load(),
-		PubStalledMs: fs.StalledMs, PubChanges: fs.Changes, PubHash: fs.Hash}
+		PubStalledMs: fs.StalledMs, PubChanges: fs.Changes, PubHash: fs.Hash,
+		PubPeakFrac: fs.PeakFrac}
 }
 
 // stage names this sink's framedebug recorder. Per-sender, so two routes publishing different

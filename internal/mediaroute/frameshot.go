@@ -25,9 +25,13 @@ type FrameShot struct {
 	Grabs   int      `json:"grabs"`
 	Changes int      `json:"changes"` // consecutive grabs whose content hash differed
 	Hashes  []uint64 `json:"hashes"`  // per-grab, so WHICH grabs differed survives the wire
-	PNG     []byte   `json:"png,omitempty"`
-	Senders []string `json:"senders,omitempty"` // candidates, when the name was empty/unknown
-	Err     string   `json:"err,omitempty"`
+	// PeakFrac is the largest fraction of the picture seen to change between consecutive grabs.
+	// "It changed" is not "it is moving": a desktop capture whose only live element is a clock
+	// changes constantly at ~0.5% of frame, and looks like a still image to a human and to Resolume.
+	PeakFrac float64  `json:"peakFrac,omitempty"`
+	PNG      []byte   `json:"png,omitempty"`
+	Senders  []string `json:"senders,omitempty"` // candidates, when the name was empty/unknown
+	Err      string   `json:"err,omitempty"`
 }
 
 // Frozen reports whether the sampled content never changed across a usable number of grabs. Two
@@ -45,8 +49,13 @@ func (f FrameShot) Verdict() string {
 		return fmt.Sprintf("FROZEN at the source - %d grabs, 0 changed", f.Grabs)
 	case f.Changes == 0:
 		return fmt.Sprintf("inconclusive - only %d grab(s), none changed", f.Grabs)
+	case f.PeakFrac > 0 && f.PeakFrac < framedebug.StaticFrac:
+		return fmt.Sprintf("STATIC SOURCE with a small live element - %d of %d grabs changed, "+
+			"peak %.2f%% of the frame (a clock or a timer moving on a still picture)",
+			f.Changes, f.Grabs, f.PeakFrac*100)
 	}
-	return fmt.Sprintf("LIVE - %d of %d grabs changed", f.Changes, f.Grabs)
+	return fmt.Sprintf("LIVE - %d of %d grabs changed, peak %.1f%% of the frame",
+		f.Changes, f.Grabs, f.PeakFrac*100)
 }
 
 // FrameShot samples a local video-share sender's CURRENT content and reports whether it changed.
@@ -84,6 +93,7 @@ func (m *Manager) FrameShot(sender string, n, intervalMs, scale int, crop [4]int
 	rec := framedebug.For("src:" + sender)
 	var last *image.NRGBA
 	var prevHash uint64
+	var prevSample, spare []byte // two buffers alternate: the magnitude needs the PREVIOUS samples
 	for i := range n {
 		if i > 0 {
 			time.Sleep(time.Duration(intervalMs) * time.Millisecond)
@@ -95,12 +105,13 @@ func (m *Manager) FrameShot(sender string, n, intervalMs, scale int, crop [4]int
 			}
 			continue
 		}
-		hash := framedebug.Hash(img.Pix)
+		sample, hash := framedebug.Sample(img.Pix, spare)
 		out.Hashes = append(out.Hashes, hash)
 		if out.Grabs > 0 && hash != prevHash {
 			out.Changes++
+			out.PeakFrac = max(out.PeakFrac, framedebug.DiffFrac(sample, prevSample))
 		}
-		prevHash = hash
+		spare, prevSample, prevHash = prevSample, sample, hash
 		out.Grabs++
 		rec.Frame(img) // feeds the same stall clock the route panel reads
 		last = img

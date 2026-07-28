@@ -158,13 +158,13 @@ func (d *decoder) PipeStats() medialink.PipelineStats {
 	restarts := d.restarts
 	d.mu.Unlock()
 	pubF, pubB := medialink.InnerPublished(d.sink)
-	pubStale, pubChg, pubHash := medialink.InnerContent(d.sink)
+	pubStale, pubChg, pubHash, pubPeak := medialink.InnerContent(d.sink)
 	return medialink.PipelineStats{Encoder: "ffmpeg-decode", HWAccel: accel,
 		OutFPS: d.out.value(), Restarts: restarts,
 		Dropped:    d.dropped.Load() + medialink.InnerDrops(d.sink),
 		RateCapped: medialink.InnerRateCapped(d.sink),
 		PubFrames:  pubF, PubBytes: pubB,
-		PubStalledMs: pubStale, PubChanges: pubChg, PubHash: pubHash}
+		PubStalledMs: pubStale, PubChanges: pubChg, PubHash: pubHash, PubPeakFrac: pubPeak}
 }
 
 // spawnLocked starts a child on the current tier. Caller holds mu.
@@ -366,7 +366,8 @@ func decodeTelemetry(ctx context.Context, log *logbus.Bus, path string, spec med
 			// reads 59 while the same bit-identical frame goes out forever (#58). pubStalledMs is
 			// the age of the last CHANGE; pubChanges is how many there have ever been.
 			"pubStalledMs": st.PubStalledMs, "pubChanges": st.PubChanges,
-			"outFps": fmt.Sprintf("%.1f", st.OutFPS), "gpuPublish": st.ZeroDecode,
+			"pubPeakMoved": fmt.Sprintf("%.3f%%", st.PubPeakFrac*100),
+			"outFps":       fmt.Sprintf("%.1f", st.OutFPS), "gpuPublish": st.ZeroDecode,
 			"dropped": st.Dropped, "lost": st.RealDrops(), "ringDrops": st.InDropped,
 			"decErrors": st.DecErrors, "restarts": st.Restarts, "degraded": st.DegradeReason})
 	}

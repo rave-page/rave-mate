@@ -180,6 +180,11 @@ type PipelineStats struct {
 	PubStalledMs int64
 	PubChanges   uint64
 	PubHash      uint64
+	// PubPeakFrac is the LARGEST fraction of the picture ever seen to change between frames on this
+	// route. Needed because "it changed" is not "it is moving": a 4K desktop capture whose only live
+	// element is a tray clock changes several times a second and still looks like a still image to a
+	// human and to Resolume. Measured 0.005 there, against 0.065 for a live webcam on the same path.
+	PubPeakFrac float64
 	// Adapter/Drive/DevPolicy identify the code path serving this route, so a passing run on a
 	// machine with no toolchain can still say WHICH path passed.
 	AdapterLUID int64
@@ -257,12 +262,12 @@ func InnerPublished(inner any) (frames, bytes uint64) {
 // collected and rendered nowhere while a black route reported healthy. stalledMs is -1 when the
 // inner sink has published nothing (or reports no stats), never 0: "fresh" and "never" must not
 // look alike.
-func InnerContent(inner any) (stalledMs int64, changes, hash uint64) {
+func InnerContent(inner any) (stalledMs int64, changes, hash uint64, peakFrac float64) {
 	if pr, ok := inner.(PipelineReporter); ok {
 		st := pr.PipeStats()
-		return st.PubStalledMs, st.PubChanges, st.PubHash
+		return st.PubStalledMs, st.PubChanges, st.PubHash, st.PubPeakFrac
 	}
-	return -1, 0, 0
+	return -1, 0, 0, 0
 }
 
 // CompressedVideo reports whether c is an encoded video codec (vs raw pixels / audio).

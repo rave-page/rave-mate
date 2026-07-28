@@ -591,7 +591,12 @@ rave-mate ctl remote-frame-shot out.png 8 [@node] "OBS_SUS_Spout"  # the PEER's 
 rave-mate ctl frame-shot        out.png 1 3400,2040,440,120 "…"    # FULL-RES crop
 ```
 
-Answers `N grabs / M changed`. **0 changed over >=3 grabs is FROZEN AT THE SOURCE** - a verdict
+Answers `N grabs / M changed` **plus the peak fraction of the frame that moved** - because "it
+changed" is not "it is moving". A 4K desktop capture whose only live element is a tray clock changes
+several times a second at ~0.5% of frame and looks like a still image to a human and to Resolume; a
+live 720p webcam on the same path moved 6.5%, and Resolume's own composition 50%. The verdict names
+all three states: FROZEN, STATIC SOURCE with a small live element (under `framedebug.StaticFrac`),
+or LIVE. **0 changed over >=3 grabs is FROZEN AT THE SOURCE** - a verdict
 formed upstream of encode, network, decode and republish, so none of them can confound it. The
 remote form runs on the peer and ships the PNG back: no physical access to the sending machine.
 

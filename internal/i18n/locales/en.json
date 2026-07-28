@@ -2257,6 +2257,7 @@
     "contentKbPerFrame": "{v} kB/frame",
     "noPictureContent": "no picture content (black, frozen or static)",
     "pictureFrozen": "picture frozen {secs}s - identical frames published, check the source",
+    "pictureStatic": "picture barely moving (peak {pct}% of frame) - static source with a small live element",
     "published": "published {n}",
     "publishedNone": "published 0 - nothing reached the Spout sender",
     "encoderSaturated": "encoder saturated {n}",

@@ -81,7 +81,7 @@ func TestInnerContentLiftsTheStallAndReportsUnknownAsNegative(t *testing.T) {
 	for range 5 {
 		_ = s.Write(rawFrame(w, h, 3))
 	}
-	stalled, changes, hash := medialink.InnerContent(s)
+	stalled, changes, hash, _ := medialink.InnerContent(s)
 	if stalled < 0 || hash == 0 {
 		t.Fatalf("InnerContent gave stalled=%d hash=%d, want a real reading", stalled, hash)
 	}
@@ -89,7 +89,7 @@ func TestInnerContentLiftsTheStallAndReportsUnknownAsNegative(t *testing.T) {
 		t.Fatalf("changes=%d, want 0", changes)
 	}
 	// A sink that reports nothing must read -1, never 0: "fresh" and "never published" must differ.
-	if got, _, _ := medialink.InnerContent(struct{}{}); got != -1 {
+	if got, _, _, _ := medialink.InnerContent(struct{}{}); got != -1 {
 		t.Fatalf("InnerContent(non-reporter) = %d, want -1", got)
 	}
 }

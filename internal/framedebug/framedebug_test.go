@@ -138,3 +138,49 @@ func TestSnapshotCoversRegisteredStages(t *testing.T) {
 		}
 	}
 }
+
+// The distinction the boolean hash could not make: a picture that CHANGES on nearly every frame but
+// only in a tiny region is a static source with a live element, not moving footage. This is the
+// field shape - a 4K desktop capture with a ticking tray clock read "changed" ~3x a second and still
+// looked like a still image in Resolume.
+func TestStaticSourceWithALiveElementIsNotCalledMoving(t *testing.T) {
+	r := For("test-clock")
+	img := solid(200, 100, 30, 30, 30)
+	r.Frame(img)
+	for i := range 10 {
+		// Perturb ONE sampled byte: the smallest possible "it changed".
+		img.Pix[0] = byte(100 + i)
+		r.Frame(img)
+	}
+	s := r.Stats()
+	if s.Changes < 5 {
+		t.Fatalf("changes=%d, want the tiny edits to register", s.Changes)
+	}
+	if s.StalledMs > 50 {
+		t.Fatalf("stalledMs=%d: a changing picture must not read as frozen", s.StalledMs)
+	}
+	if !s.Static() {
+		t.Fatalf("Static()=false at peak %.4f%%: a one-byte delta is not motion", s.PeakFrac*100)
+	}
+
+	// ...and wholesale motion must NOT be called static, or the verdict is useless.
+	m := For("test-motion")
+	for i := range 6 {
+		m.Frame(solid(200, 100, byte(i*40), byte(i*30), byte(i*20)))
+	}
+	if ms := m.Stats(); ms.Static() {
+		t.Fatalf("Static()=true for full-frame changes (peak %.2f%%)", ms.PeakFrac*100)
+	}
+}
+
+func TestDiffFracMeasuresProportion(t *testing.T) {
+	a := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	b := append([]byte(nil), a...)
+	if f := DiffFrac(a, b); f != 0 {
+		t.Fatalf("identical samples: %v, want 0", f)
+	}
+	b[0], b[1] = 99, 99
+	if f := DiffFrac(a, b); f != 0.2 {
+		t.Fatalf("2 of 10 differing: %v, want 0.2", f)
+	}
+}
