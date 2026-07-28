@@ -156,6 +156,18 @@ internal/
               "beside the exe" looks in a dir with no sidecars. The daemon Publish()es its exe
               dir; children inherit it via env. Any NEW runtime-loaded sidecar must resolve
               through appdir.SidecarPath + a preload by ABSOLUTE path (#49).
+  framedebug/ Per-stage CONTENT oracle for the media pipeline: a deterministic sparse hash
+              and the age of the last CHANGE (not of the last frame), plus on-demand PNG
+              capture. Every other counter is rate- or volume-shaped and CANNOT see a freeze:
+              a 4K route republished one bit-identical frame for 48 min with fps 58.5,
+              capStaleMs 16 and dropped 0 (#58), and an encoded 4K frame stays 3-5 kB whether
+              the picture moves or not. Wired into mediaroute's republish sink ->
+              PipelineStats.PubStalledMs -> "picture frozen Ns" on the route panel.
+              Origin-side sampling is mediaroute.Manager.FrameShot, reachable as
+              `ctl frame-shot` and `ctl remote-frame-shot` (the peer samples ITS OWN sender and
+              ships the PNG back, so the SENDING machine needs no physical access). Crop is
+              full-resolution on purpose: an OS clock inside a captured desktop is an in-band
+              timestamp, and a downsample destroys it.
   auth/       Browser-deeplink login: registers ravepage://+rave:// schemes, opens
               {website}/desktop/bridge, exchanges the grant code (POST /auth/exchange),
               token store (DPAPI-sealed at rest). Legacy dymattic:// still accepted.

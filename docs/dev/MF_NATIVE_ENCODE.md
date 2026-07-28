@@ -564,10 +564,50 @@ aus=300 bytesPerFrame=35810 kbps=8594 fps=30.0
 busyDrops=0 encFails=0 dropped=0 ledgerFails=0 poisoned=false degraded=""
 ```
 
-`bytesPerFrame` is the thing that separates a live picture from a black or frozen one; `OutFPS`
+`bytesPerFrame` is the thing that separates a live picture from a black one; `OutFPS`
 cannot (a black 4K route reported healthy on frame counters for 12 minutes). This is logged rather
 than only rendered because the panel's counters have been observed frozen for 25 minutes on a
 demonstrably live route.
+
+### bytesPerFrame cannot see a FROZEN picture - only a black one
+
+A 4K route republished ONE bit-identical frame for 48 minutes with `fps 58.5`, `capStaleMs 16`,
+`dropped 0`, `encFails 0`, published frames climbing - and `bytesPerFrame` sitting at a healthy
+3-5 kB, because periodic keyframes account for that on their own whether or not the picture moves.
+(A *moving* 720p synthetic source measured 184 B/AU, so byte volume does not even order correctly.)
+`capStaleMs`/`DecStaleMs` time OUR tick, not the content, and a frozen source still delivers frames
+perfectly on time. `spoutCheck`'s R1 fires on a CHANGED share handle or a stopped capture clock; the
+field had a stable handle and a healthy 59 fps.
+
+The oracle that works is a CONTENT HASH - `internal/framedebug`, reporting the age of the last
+CHANGE rather than of the last frame. Per route: `pubStalledMs` + `pubChanges` in
+`route decode telemetry`, and "picture frozen Ns" on the route panel past 2 s.
+
+To attribute a freeze to a STAGE, sample the sender's own texture:
+
+```
+rave-mate ctl frame-shot        out.png 8 "OBS_Spout"              # this machine
+rave-mate ctl remote-frame-shot out.png 8 [@node] "OBS_SUS_Spout"  # the PEER's own sender
+rave-mate ctl frame-shot        out.png 1 3400,2040,440,120 "…"    # FULL-RES crop
+```
+
+Answers `N grabs / M changed`. **0 changed over >=3 grabs is FROZEN AT THE SOURCE** - a verdict
+formed upstream of encode, network, decode and republish, so none of them can confound it. The
+remote form runs on the peer and ships the PNG back: no physical access to the sending machine.
+
+Two techniques that cracked the 48-minute case, worth reusing:
+
+- **An in-frame OS clock is an in-band timestamp.** Captured desktop content carries the sending
+  machine's tray clock; compare it to the peer's own log timestamps (`ctl remote-logs`). 11:05 in
+  the picture against 23:19 in the logs is proof the CONTENT is old, and it needs no measurement of
+  our own pipeline - which is why the crop is full-resolution, since a 4x downsample makes the clock
+  unreadable.
+- **Re-open, then re-read.** A frozen READ cannot survive a fresh open. If a brand-new route (new
+  encoder child, new D3D11 device, new `OpenSharedResource`, new VP view) still reads the same
+  content, the texture is stale, not the read.
+
+Beware the inverse trap: measuring the republished output and concluding "the source must be static"
+is circular, because that measurement sits downstream of the very capture under suspicion.
 
 `busyDrops` (saturation) and `encFails` (hard failures) are SEPARATE fields in `PipelineStats`:
 "saturated but healthy" and "failing" are different incidents needing different responses, and
