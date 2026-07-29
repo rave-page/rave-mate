@@ -256,7 +256,12 @@ func TestRouteReportsFlow(t *testing.T) {
 		if s.LatUnsynced != 0 {
 			t.Fatalf("%d transit samples rejected as off-clock on a SHARED clock: %+v", s.LatUnsynced, s)
 		}
-		if s.LatencyMaxNs > int64(time.Millisecond) {
+		// The guard is against a CLOCK-DOMAIN value being reported as a duration, which on a shared
+		// clock would be an epoch difference - seconds or worse, orders of magnitude past this bound.
+		// It is NOT a performance assertion: a 1 ms ceiling made this test fail on loaded CI runners
+		// where goroutine scheduling alone costs single-digit ms (observed 1.298 ms, #53/#57), and a
+		// flake that reddens unrelated pushes trains people to ignore the build.
+		if s.LatencyMaxNs > int64(100*time.Millisecond) {
 			t.Fatalf("loopback e2e latency %d ns is not a transport time: %+v", s.LatencyMaxNs, s)
 		}
 		if s.SeqGaps != 0 || s.LostEst != 0 {

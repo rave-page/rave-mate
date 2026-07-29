@@ -56,6 +56,7 @@ pub const Reason = enum {
     dim_mismatch,
     view_failed,
     copy_failed,
+    copy_tex_failed, // OUR copy destination could not be created - ours, not the source's
     acquire_dead,
 
     pub fn text(r: Reason) []const u8 {
@@ -65,6 +66,7 @@ pub const Reason = enum {
             .dim_mismatch => "dim_mismatch",
             .view_failed => "view_failed",
             .copy_failed => "copy_failed",
+            .copy_tex_failed => "copy_tex_failed",
             .acquire_dead => "acquire_dead",
         };
     }
@@ -100,7 +102,15 @@ pub const Grab = enum { ok, timeout, dead, encfail, busy };
 /// No allocator use after open; no per-frame allocation at all.
 pub const Cap = struct {
     tex: *anyopaque, // the SENDER's texture, opened on our device (we own this reference)
-    view: *anyopaque, // VP input view OVER that texture - there is no input texture of ours
+    /// our OWN texture, the CopyResource destination. Restores the lock invariant this file's
+    /// header states: the sender's mutex is held across ONE cheap GPU-queued copy and its submit,
+    /// never across the RGBA->NV12 colour conversion. Commit 705a455 had the CSC Blt (a full
+    /// per-pixel convert, and on some drivers a scale) inside the lock, where Spout's own reference
+    /// receiver holds it across a plain CopyResource + Flush; every extra microsecond in there
+    /// serialises against the SENDING app's and DWM's submissions, which is the documented cause of
+    /// pointer lag on the sender PC. Costs 33 MB VRAM per 4K session - deliberately paid.
+    copy_tex: *anyopaque,
+    view: *anyopaque, // VP input view over copy_tex (NOT over the sender's texture)
     share: u64, // the handle we opened (parent compares it on rescan: stale-handle oracle R1)
     fmt: u32 = 0, // DXGI format actually consumed
     flags: u32 = 0,
@@ -108,6 +118,7 @@ pub const Cap = struct {
     amutex: ?*anyopaque = null, // Spout's named access mutex (CPU mutex)
     has_view: bool = false, // c.view holds a real reference: close() must be safe on every
     // partial-open path, releasing exactly what was created
+    has_copy: bool = false, // same, for copy_tex
     reason: Reason = .open_shared, // last failure reason (valid when open/grab failed)
     enc_rc: i32 = 0, // last encoder return code when feed returned .encfail (0 = none)
 
@@ -133,7 +144,7 @@ pub const Cap = struct {
         if (mf.failed(dev.v.OpenSharedResource(@ptrCast(dev), @ptrFromInt(@as(usize, @intCast(share))), &mf.IID_ID3D11Texture2D, &raw)) or raw == null) {
             return error.CapOpenFailed;
         }
-        var c = Cap{ .tex = raw.?, .view = undefined, .share = share, .flags = flag_zerocopy };
+        var c = Cap{ .tex = raw.?, .copy_tex = undefined, .view = undefined, .share = share, .flags = flag_zerocopy };
         errdefer c.close();
 
         const tex: *mf.ID3D11Texture2D = @ptrCast(@alignCast(c.tex));
@@ -168,9 +179,36 @@ pub const Cap = struct {
             c.flags |= flag_unsynchronized;
         }
 
+        // Our own copy target, same geometry+format as the sender's, no sharing flags. The VP input
+        // view is built over THIS, so the conversion never reads the sender's texture and therefore
+        // never needs the sender's lock (see the copy_tex doc comment).
+        var cd = mf.D3D11_TEXTURE2D_DESC{
+            .Width = desc.Width,
+            .Height = desc.Height,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = desc.Format,
+            .SampleCount = 1,
+            .SampleQuality = 0,
+            .Usage = 0, // DEFAULT
+            // SHADER_RESOURCE|RENDER_TARGET is the combination this codebase already proves a
+            // VideoProcessor accepts as an INPUT view (mf.zig's own in_tex). SHADER_RESOURCE alone
+            // made CreateVideoProcessorInputView refuse the texture on this rig (view_failed).
+            .BindFlags = mf.bind_shader_resource | mf.bind_render_target,
+            .CPUAccessFlags = 0,
+            .MiscFlags = 0,
+        };
+        var ctex: ?*anyopaque = null;
+        if (mf.failed(dev.v.CreateTexture2D(@ptrCast(dev), &cd, null, &ctex)) or ctex == null) {
+            out.* = .copy_tex_failed;
+            return error.CapOpenFailed;
+        }
+        c.copy_tex = ctex.?;
+        c.has_copy = true;
+
         const ivd = mf.VPIV_DESC{ .FourCC = 0, .ViewDimension = 1, .MipSlice = 0, .ArraySlice = 0 };
         var iv: ?*anyopaque = null;
-        if (mf.failed(vdev.v.CreateVideoProcessorInputView(@ptrCast(vdev), c.tex, vpe, &ivd, &iv)) or iv == null) {
+        if (mf.failed(vdev.v.CreateVideoProcessorInputView(@ptrCast(vdev), c.copy_tex, vpe, &ivd, &iv)) or iv == null) {
             out.* = .view_failed;
             return error.CapOpenFailed;
         }
@@ -200,19 +238,25 @@ pub const Cap = struct {
             // unreachable from acquire(); keeps the switch exhaustive
             .encfail, .busy => return .encfail,
         }
-        const slot = e.bltView(c.view);
-        // Submit the Blt BEFORE giving the sender its texture back. VideoProcessorBlt only queues,
-        // so releasing here left the read unsubmitted: the sender could overwrite the texture
-        // before the GPU read it, and on the named-mutex path nothing ever made this device see
-        // the sender's writes - the keyed-mutex path only escaped that because ReleaseSync carries
-        // an implicit flush. Real Spout senders are LEGACY shared textures with no keyed mutex, so
-        // the field always took the unflushed path and shipped a frozen picture at a healthy 59 fps
-        // (bytesPerFrame ~1-5 kB at 4K, every counter green). Keyed mutex still flushes via
-        // ReleaseSync, so skip the redundant submit there.
+        // INSIDE the lock: one plain CopyResource, then submit it. Nothing else.
+        //
+        // The submit is load-bearing, not redundant: D3D11 only QUEUES, so releasing the mutex
+        // before flushing left the read of the sender's texture unsubmitted - the sender was free
+        // to overwrite it mid-read, and on the named-mutex path nothing ever made this device see
+        // the sender's writes at all (the keyed-mutex path escapes that only because ReleaseSync
+        // carries an implicit flush). What must NOT be in here is the RGBA->NV12 conversion: it is
+        // a full per-pixel pass, and holding a sender's mutex across it serialises the sending app
+        // and DWM behind us. Copy in, convert out - the same split Spout's reference receiver uses.
+        e.ctx.v.CopyResource(@ptrCast(e.ctx), c.copy_tex, c.tex);
         if (c.kmutex == null) e.flushCtx();
         c.release();
+
+        // OUTSIDE the lock: the colour conversion, reading OUR copy.
+        const slot = e.bltView(c.view);
         if (slot < 0) {
-            c.reason = .copy_failed; // Blt over the SENDER's view: genuinely a source verdict
+            // Over our own texture now, so a failure here is ours, not the source's - but the
+            // parent's only recovery is a reopen either way, and copy_failed is what it maps to.
+            c.reason = .copy_failed;
             return .dead;
         }
         const rc = e.submitSlot(@intCast(slot), pts100, sink);
@@ -256,6 +300,8 @@ pub const Cap = struct {
         c.amutex = null;
         if (c.has_view) mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(c.view))));
         c.has_view = false;
+        if (c.has_copy) mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(c.copy_tex))));
+        c.has_copy = false;
         mf.release(@as(*mf.IUnk, @ptrCast(@alignCast(c.tex))));
     }
 };
