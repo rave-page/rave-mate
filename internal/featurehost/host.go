@@ -568,8 +568,13 @@ func (h *Host) runOnce(ctx context.Context) error {
 		// One consolidated crash entry: latched fatal header + bounded stderr tail (the
 		// per-line stream above is ring-evicted by long goroutine dumps).
 		if hdr, tl := tail.snapshot(); hdr != "" || tl != "" {
-			h.opt.Log.Error(h.src(), "feature crash forensics", map[string]any{
-				"header": hdr, "stderr_tail": tl})
+			f := map[string]any{"header": hdr, "stderr_tail": tl}
+			// fatal_head carries the FAULTING goroutine; stderr_tail carries whichever goroutine the
+			// dump happened to end on. Without the head there is nothing to attribute a fault to.
+			if hd := tail.fatalHead(); hd != "" {
+				f["fatal_head"] = hd
+			}
+			h.opt.Log.Error(h.src(), "feature crash forensics", f)
 		}
 		if ps != nil {
 			return fmt.Errorf("feature exited with code %d", ps.ExitCode())

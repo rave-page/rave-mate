@@ -150,18 +150,45 @@ void rave_spout_flip_rows(unsigned char* dst, const unsigned char* src,
 // separate places. An upside-down output is user-visible breakage; 2.16 ms/frame at 4K is not.
 // If you do switch, TestFlipLiveOrientation is the gate that must stay green for all four modes.
 // deckcard.Render produces top-row-first RGBA.
+// registering_send reports whether this send will CREATE (or rename) the sender rather than just
+// update it - the only case in which SendImage mutates the shared sender list and therefore has to
+// be serialised against rave_spout_scan. Latched per thread for the same reason flip_buf is: one
+// SPOUTHANDLE per LockOSThread'd worker. Compared by NAME too, so a handle switched to a different
+// sender name re-registers under the lock instead of racing the scan.
+static thread_local char sent_name[256] = {0};
+static thread_local bool sent_once = false;
+
+static bool registering_send(const char* name) {
+    if (!sent_once || strncmp(sent_name, name, sizeof(sent_name) - 1) != 0) {
+        strncpy(sent_name, name, sizeof(sent_name) - 1);
+        sent_name[sizeof(sent_name) - 1] = 0;
+        sent_once = true;
+        return true;
+    }
+    return false;
+}
+
 int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
                     unsigned int w, unsigned int height, int flip) {
-    if (!h || !rgba || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(height)) return 0;
+    if (!h || !rgba || !name || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(height)) return 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
-    s->SetSenderName(name);
-    if (flip == 0) {
+    // There is no CreateSender to call (see rave_spout_open_sender): the FIRST SendImage for a name
+    // is what registers the sender, so only that one send may race the scan. Steady-state sends stay
+    // lock-free - taking registry_mu per frame would serialise a 4K60 GL upload against the 2 s scan.
+    const bool reg = registering_send(name);
+    if (flip != 0) {
+        const size_t need = (size_t)w * height * 4;
+        if (!grow_flip_buf(need)) return 0;
+        flip_rows(flip_buf, rgba, w, height, (flip & 1) != 0, (flip & 2) != 0);
+        rgba = flip_buf;
+    }
+    if (reg) {
+        std::lock_guard<std::mutex> lk(registry_mu());
+        s->SetSenderName(name);
         return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
     }
-    const size_t need = (size_t)w * height * 4;
-    if (!grow_flip_buf(need)) return 0;
-    flip_rows(flip_buf, rgba, w, height, (flip & 1) != 0, (flip & 2) != 0);
-    return s->SendImage(flip_buf, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+    s->SetSenderName(name);
+    return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
 }
 
 // rave_spout_open_sender: force the sender's shared texture to exist, then hand its handle out.
@@ -173,21 +200,25 @@ int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned i
     if (!h || !name || !share || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(hgt)) return 0;
     *share = 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
-    s->SetSenderName(name);
-    if (fmt != 0) s->SetSenderFormat((DWORD)fmt);
     const size_t need = (size_t)w * hgt * 4;
     if (!grow_flip_buf(need)) return 0;
     memset(flip_buf, 0, need);
-    if (!s->SendImage(flip_buf, w, hgt, 0x1908 /*GL_RGBA*/, false)) return -1; // send refused
-    // Read the handle back out of the REGISTRY rather than from GetHandle(): on this SDK pairing
-    // GetHandle() returns NULL for a sender created through SendImage, while GetSenderInfo (the
-    // shared-memory read every other query here uses, and the one the zero-copy CAPTURE path is
-    // already proven against) reports the real dxShareHandle + format.
     unsigned int rw = 0, rh = 0;
     HANDLE sh = 0;
     DWORD rf = 0;
+    // One critical section for the whole open: the priming SendImage CREATES the sender (registry
+    // mutation) and the readback reads that same list, so splitting them let a scan observe a
+    // half-registered sender. Bounded - one zeroed frame, once per sender open.
     {
         std::lock_guard<std::mutex> lk(registry_mu());
+        s->SetSenderName(name);
+        if (fmt != 0) s->SetSenderFormat((DWORD)fmt);
+        if (!s->SendImage(flip_buf, w, hgt, 0x1908 /*GL_RGBA*/, false)) return -1; // send refused
+        (void)registering_send(name); // this WAS the registering send; keep rave_spout_send lock-free
+        // Read the handle back out of the REGISTRY rather than from GetHandle(): on this SDK pairing
+        // GetHandle() returns NULL for a sender created through SendImage, while GetSenderInfo (the
+        // shared-memory read every other query here uses, and the one the zero-copy CAPTURE path is
+        // already proven against) reports the real dxShareHandle + format.
         SPOUTHANDLE reg = registry();
         if (!reg || !reg->GetSenderInfo(name, rw, rh, sh, rf)) return -2;
     }
@@ -205,7 +236,19 @@ void rave_spout_release(void* h) {
     }
     if (!h) return;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
-    s->ReleaseSender();
+    // ReleaseSender REMOVES this sender's entry from the process-global sender list in shared
+    // memory - the same list rave_spout_scan walks BY INDEX (GetSenderCount, then GetSender(i),
+    // then GetSenderInfo(name)). Unlocked, a scan that had already taken its count read a slot
+    // that release had just removed, inside the DLL: `fatal error: fault` in the media child,
+    // killing every live route (observed 2026-07-29 stopping one route while the 2 s mediaroute
+    // scan ran - so plain "Stop while the Peers tab is open" reaches it, not just a diagnostic).
+    // Every registry READER already holds registry_mu; the MUTATOR did not.
+    {
+        std::lock_guard<std::mutex> lk(registry_mu());
+        s->ReleaseSender();
+    }
+    // Outside the lock on purpose: neither touches the sender registry, and CloseOpenGL tears down
+    // a GL context (slow enough that holding registry_mu across it would stall every scan).
     s->CloseOpenGL();
     s->Release();
 }
