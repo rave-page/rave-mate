@@ -199,6 +199,16 @@ func (m *Manager) scan() {
 		if c := m.cfg().FPSCap(); c > 0 && float64(c) < fps {
 			fps = float64(c) // the sender-side cap is the real delivery rate - advertise it
 		}
+		// Spout carries no frame-rate metadata, so this number is an ASSUMPTION, and it is the one
+		// that decides how often we capture: a 30 fps canvas advertised at 60 is captured, converted
+		// and encoded twice per frame (measured on the 2-PC rig - a 30 fps source ran at wire 62 fps).
+		// Say so once per sender, with the lever, instead of letting it stay silent.
+		if fps > 30 {
+			m.log.Info(source, "sharing sender at an ASSUMED frame rate - Spout carries no fps metadata", map[string]any{
+				"sender": n, "assumedFPS": fps, "w": w, "h": h,
+				"hint": "if the source renders slower (a 30 fps OBS/Resolume canvas), set MediaLink " +
+					"frame-rate cap to match - otherwise every frame is captured and encoded twice"})
+		}
 		desc := medialink.SourceDesc{ID: "spout:" + n, Name: n, Kind: medialink.KindVideo,
 			Codec: medialink.CodecNRGBA, Width: w, Height: h, FPS: fps}
 		name := n
