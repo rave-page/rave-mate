@@ -168,6 +168,15 @@ internal/
               ships the PNG back, so the SENDING machine needs no physical access). Crop is
               full-resolution on purpose: an OS clock inside a captured desktop is an in-band
               timestamp, and a downsample destroys it.
+  testcard/   Deterministic diagnostic Spout source ("rave-mate testcard"): every frame carries
+              seq+timestamp+session in-picture (CRC16 cell grid on a relative lattice - survives
+              H.264 + scaling), so any CPU-pixel stage PROVES which frames were skipped (gaps),
+              repeated (freeze runs) or delayed (offset-free drift) - the questions framedebug's
+              hash cannot quantify. `ctl testcard start|stop|stats|reset` + `ctl remote-testcard`
+              (generator runs on the SENDING machine over the peer link). Bisect: route the card
+              DIRECTLY vs THROUGH OBS (stretched to canvas) and diff stats. Receive verify lives
+              in the CPU sink - disable zero-copy decode while verifying; media child is
+              demand-gated (connected peer or webcam on). See docs/dev/MF_NATIVE_ENCODE.md.
   auth/       Browser-deeplink login: registers ravepage://+rave:// schemes, opens
               {website}/desktop/bridge, exchanges the grant code (POST /auth/exchange),
               token store (DPAPI-sealed at rest). Legacy dymattic:// still accepted.

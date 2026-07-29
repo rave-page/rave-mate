@@ -614,6 +614,45 @@ Two techniques that cracked the 48-minute case, worth reusing:
 Beware the inverse trap: measuring the republished output and concluding "the source must be static"
 is circular, because that measurement sits downstream of the very capture under suspicion.
 
+## The testcard: deterministic loss attribution end to end
+
+Hashes say WHETHER the picture changed; the testcard (`internal/testcard`) says WHICH frames were
+skipped, repeated or delayed. Every frame the generator publishes carries its own identity IN THE
+PIXELS: seq + wall-ms timestamp + session id + target fps + a "generator overran" flag, packed as a
+16x7 grid of large black/white cells with a CRC16. Cells are placed on a relative 48x27 lattice and
+sampled at centers, so the grid survives H.264, video-range squeeze and OBS scaling the card to its
+canvas (roundtrip-tested through blur + range squeeze + rescale). Damage fails the CRC - a wrong
+seq is never returned as valid.
+
+```
+rave-mate ctl testcard start [WxH@fps]     # publishes Spout sender "rave-mate testcard" (default 1280x720@30)
+rave-mate ctl remote-testcard [@node] start  # start it on the SENDING machine over the peer link
+rave-mate ctl testcard stats               # generator ground truth + every verifier stage
+rave-mate ctl testcard reset|stop
+```
+
+Any stage with CPU pixels self-detects the card (6 samples on non-card frames, free) and tallies:
+exact **gaps** (skipped seqs), **dups** (freeze runs + worst length in frames), reorders, session
+restarts, delivered seq/s, and latency **drift** = lastDelta − minDelta, which is offset-free (raw
+deltas mix both machines' clocks). `frame-shot` on a card sender also decodes per-grab seqs:
+"seq 454→502 over 6/6 grabs, advancing 30.1 seq/s" is the origin-side answer to HOW a sender moves.
+
+The experiment the card exists for - **bisect the chain**:
+
+1. Route "rave-mate testcard" DIRECTLY over a media route → the receive sink stage
+   (`out:rave-mate link …`) verifies capture→encode→wire→decode→republish with no third parties.
+2. Add OBS in the middle (Spout2 Capture source, STRETCHED TO THE CANVAS - the decoder expects the
+   card to fill the frame) and route OBS's sender.
+3. Diff the two `testcard stats`. Direct clean + via-OBS frozen pins the loss to the OBS leg (their
+   composition, or our capture of THEIR sender - the NT-handle suspect); both frozen pins our chain.
+   Wire fps 60 with delivered seq/s near 0 = we are faithfully encoding a texture nobody writes.
+
+Caveats: the receive-side verifier lives in the CPU sink, which the GPU zero-copy decode path
+bypasses - disable zero-copy decode on the receiving side while verifying a route. The media child
+is demand-gated (a connected peer or the webcam feature); `testcard start` answers "feature not
+running" until one of those holds. Generator skips + the in-frame overran flag mean receiver gaps
+are the GENERATOR's fault - judge the pipeline only against frames the generator actually sent.
+
 `busyDrops` (saturation) and `encFails` (hard failures) are SEPARATE fields in `PipelineStats`:
 "saturated but healthy" and "failing" are different incidents needing different responses, and
 they are indistinguishable once summed into `Dropped` (which still carries both as a total).
