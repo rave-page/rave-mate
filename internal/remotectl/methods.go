@@ -70,6 +70,11 @@ const (
 	// moving" judgement at the ORIGIN, so no physical access to the sending machine is needed.
 	MethodFrameShot = "media.frameShot"
 
+	// media.testcard - drive the peer's deterministic diagnostic source (start/stop/stats/reset).
+	// start/stop DO mutate the peer (they open/close a Spout sender named "rave-mate testcard"),
+	// which is the point: the generator has to run on the SENDING machine of the chain under test.
+	MethodTestcard = "media.testcard"
+
 	MethodScreenshotApp = "screenshot.app"
 	MethodScreenshotVR  = "screenshot.vr"
 

@@ -283,6 +283,21 @@ func (p *MediaRoutesProxy) StopReceive(session string) {
 	_, _ = p.h.host.Call(ctx, mStopReceive, stopReceiveReq{Session: session})
 }
 
+// Testcard drives the deterministic diagnostic source in the media child (start/stop/stats/reset).
+func (p *MediaRoutesProxy) Testcard(op string, w, h, fps int) (TestcardResult, error) {
+	ctx, cancel := p.h.callCtx()
+	defer cancel()
+	raw, err := p.h.host.Call(ctx, mTestcard, testcardReq{Op: op, W: w, H: h, FPS: fps})
+	if err != nil {
+		return TestcardResult{}, err
+	}
+	var r TestcardResult
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return TestcardResult{}, err
+	}
+	return r, nil
+}
+
 var _ mediaroute.ReceiveControl = (*MediaRoutesProxy)(nil)
 
 // ── WebcamProxy: webcam.CamControl ──

@@ -209,6 +209,16 @@ func (f *mediaFeature) Handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return json.Marshal(shot)
+	case mTestcard:
+		var req testcardReq
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		rep, err := f.routes.Testcard(req.Op, req.W, req.H, req.FPS)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(rep)
 	}
 	return nil, errUnknownMethod(method)
 }

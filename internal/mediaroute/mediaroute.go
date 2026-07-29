@@ -25,6 +25,7 @@ import (
 	"rave.page/mate/internal/framedebug"
 	"rave.page/mate/internal/logbus"
 	"rave.page/mate/internal/medialink"
+	"rave.page/mate/internal/testcard"
 	"rave.page/mate/internal/videoshare"
 )
 
@@ -66,11 +67,13 @@ type Options struct {
 	// GPU texture, so the decoder child can render into it (zigmedia inc 2). nil = videoshare.
 	NewSharedSender func(name string, w, h int) (videoshare.SharedSender, error)
 	// GrabFrame reads a sender's CURRENT content once (diagnostic oracle, not a hot path).
-	GrabFrame    func(name string, w, h int) (*image.NRGBA, error)
-	OpenSource   func(name string, w, h int) (medialink.Source, error)
-	OpenSink     func(name string, w, h int) (medialink.Sink, error)
-	OpenReceiver func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
-	PutPix       func([]byte)                                                        // pooled-buffer recycler
+	GrabFrame func(name string, w, h int) (*image.NRGBA, error)
+	// NewFrameSender opens a plain named sender (testcard generator). nil = videoshare.
+	NewFrameSender func(name string) (videoshare.FrameSender, error)
+	OpenSource     func(name string, w, h int) (medialink.Source, error)
+	OpenSink       func(name string, w, h int) (medialink.Sink, error)
+	OpenReceiver   func(name string, maxFPS float64) (videoshare.FrameReceiver, error) // shared-capture backend
+	PutPix         func([]byte)                                                        // pooled-buffer recycler
 }
 
 // Receive is one requested receive route (UI listing + sink cleanup bookkeeping).
@@ -94,6 +97,7 @@ type Manager struct {
 	senderSize   func(string) (int, int, bool)
 	senderShare  func(string) (uint64, uint32, int, int, bool)
 	grabFrame    func(string, int, int) (*image.NRGBA, error)
+	newFrameSnd  func(string) (videoshare.FrameSender, error)
 	newSharedSnd func(string, int, int) (videoshare.SharedSender, error)
 	openSource   func(string, int, int) (medialink.Source, error)
 	openSink     func(string, int, int) (medialink.Sink, error)
@@ -102,6 +106,7 @@ type Manager struct {
 	mu       sync.Mutex
 	shared   map[string]medialink.SourceDesc // sender name → advertised desc
 	receives map[string]Receive              // session → state
+	tc       *testcard.Gen                   // running diagnostic generator (nil = off)
 }
 
 // New builds the manager (inert until Start).
@@ -109,7 +114,7 @@ func New(o Options) *Manager {
 	m := &Manager{
 		log: o.Log, router: o.Router, cfg: o.Cfg, sameHost: o.SameHost,
 		listSenders: o.ListSenders, senderSize: o.SenderSize, senderShare: o.SenderShare,
-		grabFrame:    o.GrabFrame,
+		grabFrame: o.GrabFrame, newFrameSnd: o.NewFrameSender,
 		newSharedSnd: o.NewSharedSender, openSource: o.OpenSource, openSink: o.OpenSink,
 		shared: map[string]medialink.SourceDesc{}, receives: map[string]Receive{},
 	}
@@ -129,6 +134,11 @@ func New(o Options) *Manager {
 	if m.newSharedSnd == nil {
 		m.newSharedSnd = func(n string, w, h int) (videoshare.SharedSender, error) {
 			return videoshare.NewSharedSender(o.Log, n, w, h)
+		}
+	}
+	if m.newFrameSnd == nil {
+		m.newFrameSnd = func(n string) (videoshare.FrameSender, error) {
+			return videoshare.NewFrameSender(o.Log, n)
 		}
 	}
 	if m.openSource == nil {
@@ -601,6 +611,9 @@ func (s *spoutSink) Write(f *medialink.Frame) error {
 	img := &image.NRGBA{Pix: f.Payload, Stride: s.w * 4, Rect: image.Rect(0, 0, s.w, s.h)}
 	// Observe BEFORE Send: the payload is a pooled buffer the sink does not own past this call.
 	framedebug.For(s.stage()).Frame(img)
+	// Testcard self-detects (6 samples on a non-card frame): when the diagnostic card is routed,
+	// this stage proves exactly which frames arrived, repeated or went missing.
+	testcard.Observe(s.stage(), img)
 	if err := s.fs.Send(img); err != nil {
 		return err
 	}

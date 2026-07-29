@@ -26,6 +26,7 @@ import (
 	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/tagsync"
 	"rave.page/mate/internal/tagwrite"
+	"rave.page/mate/internal/testcard"
 	"rave.page/mate/internal/vrchat"
 )
 
@@ -680,6 +681,37 @@ func RegisterFrameShot(e *Endpoint, fs FrameShotter) {
 			}
 		}
 		return fs.FrameShotSample(p.Sender, p.N, p.Crop)
+	})
+}
+
+// TestcardParams drives the peer's diagnostic source.
+type TestcardParams struct {
+	Op  string `json:"op"` // start|stop|stats|reset
+	W   int    `json:"w,omitempty"`
+	H   int    `json:"h,omitempty"`
+	FPS int    `json:"fps,omitempty"`
+}
+
+// TestcardController is the controlled machine's testcard surface (app.appControl over the media
+// route manager).
+type TestcardController interface {
+	TestcardOp(op string, w, h, fps int) (testcard.Report, error)
+}
+
+// RegisterTestcard exposes the diagnostic generator over the peer link. Only paired (SAS-verified)
+// peers reach this, and the blast radius is one diagnostic Spout sender.
+func RegisterTestcard(e *Endpoint, tc TestcardController) {
+	if e == nil || tc == nil {
+		return
+	}
+	e.Register(MethodTestcard, func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
+		var p TestcardParams
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, err
+			}
+		}
+		return tc.TestcardOp(p.Op, p.W, p.H, p.FPS)
 	})
 }
 

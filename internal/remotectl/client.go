@@ -7,6 +7,7 @@ import (
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/localmedia"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/testcard"
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/vrchat"
 )
@@ -239,6 +240,13 @@ func (c *Client) ScreenshotVR(ctx context.Context) ([]byte, error) {
 func (c *Client) FrameShot(ctx context.Context, sender string, n int, crop [4]int) (mediaroute.FrameShot, error) {
 	return Do[mediaroute.FrameShot](ctx, c.e, c.nodeID, MethodFrameShot,
 		FrameShotParams{Sender: sender, N: n, Crop: crop})
+}
+
+// Testcard drives the peer's diagnostic source: the generator runs where the SENDING side of the
+// chain under test lives, and this is how it gets started there without physical access.
+func (c *Client) Testcard(ctx context.Context, op string, w, h, fps int) (testcard.Report, error) {
+	return Do[testcard.Report](ctx, c.e, c.nodeID, MethodTestcard,
+		TestcardParams{Op: op, W: w, H: h, FPS: fps})
 }
 
 func (c *Client) screenshot(ctx context.Context, method string) ([]byte, error) {

@@ -24,6 +24,7 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/medialink"
 	"rave.page/mate/internal/mediaroute"
+	"rave.page/mate/internal/testcard"
 	"rave.page/mate/internal/webcam"
 )
 
@@ -120,6 +121,7 @@ const (
 	mStopReceive  = "stopReceive"  // stopReceiveReq → (ok)
 	mCommand      = "command"      // commandReq → (ok/err)
 	mFrameShot    = "frameShot"    // frameShotReq → FrameShotResult
+	mTestcard     = "testcard"     // testcardReq → TestcardResult
 )
 
 // frameShotReq samples a LOCAL video-share sender's CURRENT content N times and reports whether it
@@ -137,6 +139,17 @@ type frameShotReq struct {
 // FrameShotResult is mediaroute's verdict, aliased so daemon-side callers (ctl, remotectl) name one
 // type and the wire shape cannot drift from the implementation.
 type FrameShotResult = mediaroute.FrameShot
+
+// testcardReq drives the deterministic diagnostic source in the media child.
+type testcardReq struct {
+	Op  string `json:"op"` // start|stop|stats|reset
+	W   int    `json:"w,omitempty"`
+	H   int    `json:"h,omitempty"`
+	FPS int    `json:"fps,omitempty"`
+}
+
+// TestcardResult aliases testcard.Report for the same no-drift reason as FrameShotResult.
+type TestcardResult = testcard.Report
 
 type startReceiveReq struct {
 	Peer     string `json:"peer"`

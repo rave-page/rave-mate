@@ -429,6 +429,9 @@ func runCtl(args []string) int {
 			"                       dmx-status|stream-status|mocap-status|crew-status|perf|pprof-cpu [SECONDS]|pprof-heap|goroutines|\n"+
 			"                       tc-status|tc-start|tc-stop|ablelink-status|ablelink-resync|\n"+
 			"                       encoder-scan|remote-encoder-scan [NODEID]|\n"+
+			"                       frame-shot OUT.PNG [GRABS] [X,Y,W,H] SENDER...|remote-frame-shot OUT.PNG [GRABS] [X,Y,W,H] [@NODEID] SENDER...|\n"+
+			"                       testcard [start [WxH@fps]|stop|stats|reset]|remote-testcard [@NODEID] ...|\n"+
+			"                       remote-update [NODEID]|remote-logs [FILTER]|remote-ls PATH [NODEID]|self-update|\n"+
 			"                       remote-perf|remote-pprof-cpu [SECONDS] [NODEID]|remote-pprof-heap [NODEID]|remote-goroutines [NODEID]>")
 		return 2
 	}
@@ -836,6 +839,27 @@ func runCtl(args []string) int {
 			wire = "REMOTE-FRAME-SHOT "
 		}
 		resp, err := app.SendMulti(wire + strings.Join(args[1:], " "))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "testcard", "remote-testcard": // deterministic diagnostic Spout source + per-stage verdicts
+		if len(args) >= 2 && args[1] == "help" {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl "+args[0]+" [@nodeID] [start [WxH@fps] | stop | stats | reset]\n"+
+				"  start publishes Spout sender \"rave-mate testcard\" (default 1280x720@30); every frame\n"+
+				"  carries its own seq+timestamp+session in-picture, so any stage with CPU pixels PROVES\n"+
+				"  which frames were skipped (gaps), repeated (freezes) or delayed (drift).\n"+
+				"  Bisect a chain: route the card DIRECTLY over a media route, then THROUGH OBS\n"+
+				"  (Spout2 Capture source stretched to the canvas). Diff the two stats.\n"+
+				"  stats (default) prints generator ground truth + every verifier stage; reset clears tallies.")
+			return 2
+		}
+		wire := "TESTCARD"
+		if args[0] == "remote-testcard" {
+			wire = "REMOTE-TESTCARD"
+		}
+		resp, err := app.SendMulti(strings.TrimSpace(wire + " " + strings.Join(args[1:], " ")))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

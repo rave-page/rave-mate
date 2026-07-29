@@ -63,6 +63,11 @@ type Control interface {
 	// RemoteFrameShot runs that sample on a PAIRED PEER and writes the PNG here - no physical access
 	// to the sending machine needed (ctl remote-frame-shot).
 	RemoteFrameShot(nodeID, path, sender string, n int, crop [4]int) string
+	// Testcard drives the deterministic diagnostic Spout source (ctl testcard start|stop|stats|reset).
+	Testcard(args string) string
+	// RemoteTestcard drives a PAIRED PEER's diagnostic source - the generator runs on the SENDING
+	// machine of the chain under test (ctl remote-testcard).
+	RemoteTestcard(nodeID, args string) string
 	RemotePerf(nodeID string) string                             // a paired peer's perf report (nodeID "" = first connected)
 	RemoteLogs(nodeID, filter string, max int) string            // a paired peer's recent log tail (nodeID "" = first connected; filter substring)
 	RemoteEncoderScan(nodeID string) string                      // a paired peer's encoder-utilization scan + plan (nodeID "" = first connected; read-only)
@@ -389,6 +394,15 @@ func handleConn(conn net.Conn, ctrl Control) {
 			node, sender, _ = strings.Cut(strings.TrimPrefix(sender, "@"), " ")
 		}
 		fmt.Fprint(conn, ctrl.RemoteFrameShot(node, path, sender, n, crop))
+	case cmd == "TESTCARD" || strings.HasPrefix(cmd, "TESTCARD "):
+		fmt.Fprint(conn, ctrl.Testcard(strings.TrimPrefix(cmd, "TESTCARD")))
+	case cmd == "REMOTE-TESTCARD" || strings.HasPrefix(cmd, "REMOTE-TESTCARD "):
+		rest := strings.TrimSpace(strings.TrimPrefix(cmd, "REMOTE-TESTCARD"))
+		node := ""
+		if strings.HasPrefix(rest, "@") {
+			node, rest, _ = strings.Cut(strings.TrimPrefix(rest, "@"), " ")
+		}
+		fmt.Fprint(conn, ctrl.RemoteTestcard(node, rest))
 	case cmd == "VRINPUT":
 		fmt.Fprintln(conn, ctrl.VRInputDiag())
 	case strings.HasPrefix(cmd, "REMOTE-VRINPUT"):

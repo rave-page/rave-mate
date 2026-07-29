@@ -79,6 +79,9 @@ func renderFrameShot(shot mediaroute.FrameShot, path, nodeID string) string {
 		return b.String()
 	}
 	fmt.Fprintf(&b, "%s sender %q %dx%d\n%s\n", where, shot.Sender, shot.W, shot.H, shot.Verdict())
+	if cs := shot.CardSummary(); cs != "" {
+		fmt.Fprintln(&b, cs)
+	}
 	if len(shot.Hashes) > 0 {
 		fmt.Fprintf(&b, "hashes: ")
 		for i, h := range shot.Hashes {

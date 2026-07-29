@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"rave.page/mate/internal/framedebug"
+	"rave.page/mate/internal/testcard"
 )
 
 // Bounds on a frame shot. It runs where the live routes run, so a readback storm would compete with
@@ -32,6 +33,35 @@ type FrameShot struct {
 	PNG      []byte   `json:"png,omitempty"`
 	Senders  []string `json:"senders,omitempty"` // candidates, when the name was empty/unknown
 	Err      string   `json:"err,omitempty"`
+
+	// Card* present when the sampled sender carries the diagnostic testcard: per-grab decoded seqs
+	// prove HOW the sender advances (same seq every grab = frozen; ~interval*fps apart = clean),
+	// which the content hash alone cannot quantify.
+	CardSeqs    []int64 `json:"cardSeqs,omitempty"` // aligned with Hashes; -1 = grab not decodable
+	CardSession uint16  `json:"cardSession,omitempty"`
+	CardFPS     uint8   `json:"cardFPS,omitempty"`  // generator's declared target
+	CardRate    float64 `json:"cardRate,omitempty"` // measured seq advance per second across the sample
+}
+
+// CardSummary is the extra verdict line when the testcard was recognized ("" otherwise).
+func (f FrameShot) CardSummary() string {
+	var first, last int64 = -1, -1
+	decoded := 0
+	for _, s := range f.CardSeqs {
+		if s < 0 {
+			continue
+		}
+		if first < 0 {
+			first = s
+		}
+		last = s
+		decoded++
+	}
+	if decoded == 0 {
+		return ""
+	}
+	return fmt.Sprintf("testcard session %d: seq %d→%d over %d/%d grabs, advancing %.1f seq/s (generator target %d fps)",
+		f.CardSession, first, last, decoded, len(f.CardSeqs), f.CardRate, f.CardFPS)
 }
 
 // Frozen reports whether the sampled content never changed across a usable number of grabs. Two
@@ -94,6 +124,11 @@ func (m *Manager) FrameShot(sender string, n, intervalMs, scale int, crop [4]int
 	var last *image.NRGBA
 	var prevHash uint64
 	var prevSample, spare []byte // two buffers alternate: the magnitude needs the PREVIOUS samples
+	var cardFirst, cardLast struct {
+		seq int64
+		at  time.Time
+	}
+	cardFirst.seq, cardLast.seq = -1, -1
 	for i := range n {
 		if i > 0 {
 			time.Sleep(time.Duration(intervalMs) * time.Millisecond)
@@ -114,7 +149,22 @@ func (m *Manager) FrameShot(sender string, n, intervalMs, scale int, crop [4]int
 		spare, prevSample, prevHash = prevSample, sample, hash
 		out.Grabs++
 		rec.Frame(img) // feeds the same stall clock the route panel reads
+		if p, derr := testcard.Decode(img); derr == testcard.DecodeOK {
+			out.CardSeqs = append(out.CardSeqs, int64(p.Seq))
+			out.CardSession, out.CardFPS = p.Session, p.FPS
+			if cardFirst.seq < 0 {
+				cardFirst.seq, cardFirst.at = int64(p.Seq), time.Now()
+			}
+			cardLast.seq, cardLast.at = int64(p.Seq), time.Now()
+		} else {
+			out.CardSeqs = append(out.CardSeqs, -1)
+		}
 		last = img
+	}
+	if cardFirst.seq < 0 {
+		out.CardSeqs = nil // no grab carried the card: not a testcard sender, drop the noise
+	} else if el := cardLast.at.Sub(cardFirst.at).Seconds(); el > 0 {
+		out.CardRate = float64(cardLast.seq-cardFirst.seq) / el
 	}
 	if last != nil {
 		png, err := framedebug.EncodePNG(last, scale, cropRect(crop))
