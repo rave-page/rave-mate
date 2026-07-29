@@ -1,13 +1,13 @@
 {
-  "version": "nightly-0d9cf66",
-  "build": 202,
-  "commit": "0d9cf66",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-202-20260729-0d9cf66.exe",
-  "sha256": "cf96ee8443f13ef1dfc46546d150b150ba7eba47145c33a7a713848b19095517",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-202-20260729-0d9cf66.exe",
-  "installer_sha256": "c31253c25448aabf73b8591e9e27048bf72cb20e9d47899a703eee6c5f41dda4",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-202-20260729-0d9cf66",
-  "linux_sha256": "9ffd856a69ba3b1a54ac192f9fb739d0015968a5bac34d2aec228652e9d6cc2f",
+  "version": "nightly-18404f0",
+  "build": 203,
+  "commit": "18404f0",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-203-20260729-18404f0.exe",
+  "sha256": "e7c1a37edd70e8d1b27d4184b1eaa3341cbbc1de895a4697a487544ef29ccba0",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-203-20260729-18404f0.exe",
+  "installer_sha256": "1026b3d5e161d80d53137377e8c27bbe2e507da1aca2d13e1e724d62b603561c",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-203-20260729-18404f0",
+  "linux_sha256": "94402acae39faf8e978cd0478d320f8bfac04866e103248700cf7586d1c3d2f8",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-07-29T10:24:43Z",
-  "notes": "docs(testcard): bisection recipe + package-tree entry"
+  "released": "2026-07-29T11:43:23Z",
+  "notes": "fix(featurehost): keep the FAULTING goroutine in crash forensics, not the last one"
 }
