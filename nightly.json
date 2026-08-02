@@ -1,13 +1,13 @@
 {
   "version": "nightly-cb2feee",
-  "build": 208,
+  "build": 209,
   "commit": "cb2feee",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-208-20260801-cb2feee.exe",
-  "sha256": "adce5f00082ada42b29a8ecdf77835ce5d8e3f1588503f78ce65fcd3974c10bc",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-208-20260801-cb2feee.exe",
-  "installer_sha256": "d9cdb8a07c2b619a75eab954323aa7f6557220689d93c602ed2e67177045781e",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-208-20260801-cb2feee",
-  "linux_sha256": "fc782dff6b6c68ca5f8022ef22e30d217efba16ca9d535b1422b9a62381b1651",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-209-20260802-cb2feee.exe",
+  "sha256": "81969e627ffef70648968f6ed2aa0809561d8c7ba9a4582d4e76d0b241855c19",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-209-20260802-cb2feee.exe",
+  "installer_sha256": "c34aaf399f956ae3b7de42a540de42a4ea2c20b0d589a7e3114c984c0bf8164b",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-209-20260802-cb2feee",
+  "linux_sha256": "c1b37dc1a8f143dc45f4b77f6aeddc960e3f1a4829f1f7f8de293d97678939e6",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-01T07:32:51Z",
+  "released": "2026-08-02T07:36:48Z",
   "notes": "fix(mediaroute): say that the advertised 60 fps is an ASSUMPTION, not a measurement"
 }
