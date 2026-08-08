@@ -51,8 +51,9 @@ type Service struct {
 	dataDir string                // app data dir (default cam-path backup root)
 	evSrc   vrcphotos.EventSource // rave.page event lookup (photo organize key); may be nil
 
-	ctx          context.Context // set in Start; guards deferred auto-restore
-	lastInstance string          // last published instance id (telemetry de-dup)
+	ctx          context.Context      // set in Start; guards deferred auto-restore
+	lastInstance string               // last published instance id (telemetry de-dup)
+	exportSeen   map[string]time.Time // export backup seen-set (Start-goroutine only)
 
 	// Live-set state cached from the bus (drives auto-restore). Guarded by mu.
 	mu         sync.Mutex
@@ -240,8 +241,11 @@ func (s *Service) Start(ctx context.Context) error {
 	defer poll.Stop()
 	organize := time.NewTicker(30 * time.Second)
 	defer organize.Stop()
+	exports := time.NewTicker(5 * time.Second)
+	defer exports.Stop()
 
-	s.OrganizeNow() // catch up on launch
+	s.OrganizeNow()  // catch up on launch
+	s.sweepExports() // backfill export backups on launch (idempotent via the seen-set)
 	for {
 		select {
 		case <-ctx.Done():
@@ -250,7 +254,25 @@ func (s *Service) Start(ctx context.Context) error {
 			tailer.Poll()
 		case <-organize.C:
 			s.OrganizeNow()
+		case <-exports.C:
+			s.sweepExports()
 		}
+	}
+}
+
+// sweepExports backs up freshly-exported camera paths (backup-on-export: a VRChat crash
+// or overwrite right after a dolly export can't lose it). Seen-set lazily loaded once and
+// persisted on change; gated on the same AutoBackup toggle as import-time backup.
+func (s *Service) sweepExports() {
+	if !s.cfg().AutoBackupCamPaths {
+		return
+	}
+	dir := s.CamPathBackupDir()
+	if s.exportSeen == nil {
+		s.exportSeen = vrccampaths.LoadExportSeen(dir)
+	}
+	if _, changed := vrccampaths.SweepExports(s.CamPathsDir(), dir, s.tl, s.exportSeen, time.Now(), s.logf("campath")); changed {
+		vrccampaths.SaveExportSeen(dir, s.exportSeen)
 	}
 }
 

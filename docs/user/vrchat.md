@@ -20,7 +20,9 @@ server-side event features - strictly opt-in.
 - **Screenshot organizer**: sorts VRChat photos by world/event (uses the log-derived location
   timeline), with viewer.
 - **Camera paths**: auto-backup + restore of VRChat camera paths - survive crashes mid-set;
-  named per world.
+  named per world. Backup fires on import AND the moment VRChat exports a new dolly file
+  into `Documents\VRChat\CameraPaths` (backfills existing exports on first run). Runs on
+  the instance next to VRChat (OSC is loopback) - enable VRC tools on the VR PC.
 - **Location timeline**: parsed from the VRChat log; also drives per-world overlay layouts
   (auto-apply your layout when you enter a known world).
 
