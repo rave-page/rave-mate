@@ -139,7 +139,7 @@ Each mode remembers its own **defaults** (the collapsible section under the pick
 | **Split the pad budget evenly across drops** | with several drops, each drop keeps its nearest cues (remainder to earlier drops; spare capacity refills globally). Off = one global closest-to-a-drop ranking. |
 | **Overwrite existing cues when applying patterns** | pattern applies **replace** the mode's existing cues instead of adding around them (the apply buttons warn how many would be cleared). |
 | **Always promote memory cues to pads when writing to {app}** | the write-back promotes memory cues to free pads on the way out — the library keeps them as memory cues. |
-| **Anchor the beatgrid on the first hotcue** (Traktor only, on by default) | the write emits the earliest hotcue as Traktor's TYPE-4 grid cue — the beatgrid anchors on it and the pad still fires. Previous grid markers are replaced (one anchor, not two); a write with no hotcues leaves the existing grid untouched. |
+| **Anchor the beatgrid on the first hotcue** (Traktor only, on by default) | the write places Traktor's TYPE-4 grid cue on the **existing grid's beat nearest the earliest hotcue** — Traktor's native two-cue form (grid cue + plain pad cue side by side; Traktor never keeps a pad ON a grid cue). The grid's phase is preserved, so an off-grid hotcue never shifts the beatgrid. Tracks with several grid markers (flexible/manual grids) and writes with no hotcues leave the grid untouched. |
 
 ## Write cues to your DJ software
 
@@ -151,7 +151,8 @@ to DJ software** section detects installed libraries and shows one **Write cues 
 Scope: the checked collection rows (the mass-apply selection), or just the open track
 when nothing is checked. Only tracks with at least one musical cue are written; each
 write **replaces** that software's hotcues/memory cues/loops for those tracks with the
-cues shown in rave-mate. Beatgrids are never touched (that's the [beatgrid
+cues shown in rave-mate. On the way out, stacked duplicates (same kind within 5 ms)
+collapse to one cue and pads are numbered in track-time order — pad 1 = earliest cue. Beatgrids are never touched (that's the [beatgrid
 fixer](BEATGRID_FIXER.md)'s job), and drop markers are **not** exported — they only
 become cues via an applied pattern.
 

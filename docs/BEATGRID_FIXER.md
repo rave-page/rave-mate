@@ -69,6 +69,26 @@ correct grids by that bias.
 Re-calibrate after switching the active model — a fine-tuned checkpoint can shift the
 detector's phase. Analysis results are cached, so re-runs are quick.
 
+**Auto-bias (uncalibrated safety net).** Without a stored calibration, every run also
+measures its own systematic offset: the median detector-vs-grid offset across the run's
+tempo-agreeing tracks. When it looks like one systematic bias (≥10 samples, |median|
+≥6 ms, tightly clustered), the run re-plans with it subtracted — served from the
+detection cache, no re-analysis. A stored calibration always wins. Additionally, a fix
+that only snaps the BPM (173.999 → 174) **never moves the marker** — phase corrections
+require the measured offset to clear the correction threshold on its own.
+
+## Repairing an already-damaged collection
+
+`rave-mate repair-collection [-ref <backup.nml>] [-dry] [collection.nml]` undoes the
+damage classes older versions could leave in a Traktor collection: pad slots renumbered
+into track-time order, stacked duplicate cues dropped, padded TYPE-4 grid cues split
+into Traktor's native two-cue form, and — with `-ref` pointing at a pre-damage backup
+(rave-mate's `library-backups/`, or Traktor's own `collection.nml.bak.*`) — grid
+markers restored onto the backup's beat lattice. Only 3–60 ms same-BPM shifts restore;
+bigger moves count as deliberate manual regrids and stay. Token-surgical (cue colors
+and unknown fields survive), backup-first, idempotent, refuses while Traktor runs.
+`-dry` prints the report without writing.
+
 ## Training your own model (Settings → Beatgrid Model)
 
 Mark tracks whose grid you KNOW is right as **grid verified** (track detail button or
