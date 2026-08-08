@@ -163,7 +163,17 @@ type repairCue struct {
 }
 
 // repairEntry analyzes one buffered ENTRY and re-encodes it with the repairs applied.
+// Entries without a resolvable LOCATION (embedded remix-set/sample entries) pass through
+// untouched - their pad slots aren't track-time semantics.
 func repairEntry(enc *xml.Encoder, buf []xml.Token, opts RepairOptions, rep *RepairReport) error {
+	if entryLocPath(buf) == "" {
+		for _, tk := range buf {
+			if err := enc.EncodeToken(tk); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	var cues []repairCue
 	depth := 0
 	for i, tk := range buf {
