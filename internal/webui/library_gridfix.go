@@ -598,7 +598,7 @@ func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, 
 		}
 
 		var lastPatch, lastTip time.Time
-		results := batch.Run(ctx, bts, func(p gridfix.BatchProgress) {
+		results, autoBias := batch.RunAutoBias(ctx, bts, func(p gridfix.BatchProgress) {
 			g.mu.Lock()
 			g.prog = p
 			g.mu.Unlock()
@@ -621,6 +621,10 @@ func (u *UI) gfRunTracksHook(tracks []musiclib.Track, scope string, force bool, 
 					i18n.T("library.gf.trayLabel"), p.Done, p.Total, p.Fixed, p.OK))
 			}
 		})
+		if autoBias.Applied && u.log != nil {
+			u.log.Info("gridfix", fmt.Sprintf("auto-bias: %.1fms systematic detector offset measured over %d tracks - corrections re-planned",
+				autoBias.MedianMS, autoBias.Samples), nil)
+		}
 		g.mu.Lock()
 		g.results = results
 		cancelled := g.prog.Phase == gridfix.PhaseCancelled

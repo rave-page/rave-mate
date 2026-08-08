@@ -2,6 +2,7 @@ package gridfix
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"rave.page/mate/internal/musiclib"
@@ -148,7 +149,8 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 			}
 			in := PlanInput{OldBPM: t.OldBPM, BiasS: bias,
 				MinQuality: b.opts.MinQuality, ThresholdMS: b.opts.ThresholdMS,
-				RangeLo: t.RangeLo, RangeHi: t.RangeHi}
+				RangeLo: t.RangeLo, RangeHi: t.RangeHi,
+				PreservePhase: true} // BPM-only fixes never drag the marker phase
 			if t.OldStartMs != nil {
 				s := *t.OldStartMs / 1000.0
 				in.OldStartS = &s
@@ -188,4 +190,71 @@ func (b *Batch) Run(ctx context.Context, tracks []BatchTrack, onProgress func(Ba
 		emit()
 	}
 	return finish(PhaseDone)
+}
+
+// Auto-bias: a run measures its own systematic detector offset (median of the
+// per-track measured offsets where the fitted tempo agrees with the stored BPM).
+// Significant + concentrated → the whole run is re-planned with that bias
+// subtracted, exactly like a calibrate() pass - but from the run's own data, so
+// an uncalibrated install can't shift a library onto the detector's bias.
+const (
+	autoBiasMinN     = 10  // samples below this: not enough evidence
+	autoBiasMinMS    = 6.0 // |median| below this: not systematic, leave alone
+	autoBiasMaxMADMS = 8.0 // spread above this: offsets aren't one systematic bias
+)
+
+// AutoBias reports what RunAutoBias measured and whether it re-planned.
+type AutoBias struct {
+	Samples  int
+	MedianMS float64
+	MADMS    float64
+	Applied  bool
+}
+
+// RunAutoBias is Run plus per-run self-calibration. The second planning pass
+// replays detections from the cache (no re-analysis). Skipped when a measured
+// per-extension calibration exists (it wins), there is no cache, or the run's
+// offsets don't look like one systematic bias.
+func (b *Batch) RunAutoBias(ctx context.Context, tracks []BatchTrack, onProgress func(BatchProgress)) ([]TrackResult, AutoBias) {
+	results := b.Run(ctx, tracks, onProgress)
+	var ab AutoBias
+	if b.cache == nil || len(b.opts.Bias) > 0 || ctx.Err() != nil {
+		return results, ab
+	}
+	var offs []float64
+	for _, r := range results {
+		p := r.Plan
+		if r.Err != "" || (p.Status != StatusFix && p.Status != StatusOK) ||
+			p.Created || math.IsNaN(p.OffsetMS) || p.OldBPM <= 0 || p.NewBPM <= 0 {
+			continue
+		}
+		if math.Abs(p.NewBPM/p.OldBPM-1.0) > 0.005 { // tempo disagrees: phase offset meaningless
+			continue
+		}
+		offs = append(offs, p.OffsetMS)
+	}
+	ab.Samples = len(offs)
+	if ab.Samples < autoBiasMinN {
+		return results, ab
+	}
+	ab.MedianMS = median(offs)
+	dev := make([]float64, len(offs))
+	for i, o := range offs {
+		dev[i] = math.Abs(o - ab.MedianMS)
+	}
+	ab.MADMS = median(dev)
+	if math.Abs(ab.MedianMS) < autoBiasMinMS || ab.MADMS > autoBiasMaxMADMS {
+		return results, ab
+	}
+	// re-plan with the residual bias folded in; cache serves every detection
+	opts2 := b.opts
+	opts2.BiasS += ab.MedianMS / 1000.0
+	opts2.Force = false
+	b2 := &Batch{a: b.a, cache: b.cache, opts: opts2}
+	results2 := b2.Run(ctx, tracks, onProgress)
+	if ctx.Err() != nil {
+		return results, ab // cancelled mid-replan: first pass stands
+	}
+	ab.Applied = true
+	return results2, ab
 }

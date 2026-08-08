@@ -38,6 +38,12 @@ type PlanInput struct {
 	ThresholdMS float64  // ignore corrections smaller than this (Python default 12)
 	RangeLo     float64  // target tempo band (0 = none): fold prior + result into it
 	RangeHi     float64
+	// PreservePhase: a FIX whose measured offset is under ThresholdMS keeps the marker
+	// where it is (BPM-only rewrite). Without it a BPM snap drags the marker onto the
+	// detector's lattice even when the offset is sub-threshold - with an uncalibrated
+	// systematic detector bias (~12-16ms) that shifted whole libraries off-phase.
+	// Off = Python process_entry parity (golden tests).
+	PreservePhase bool
 }
 
 // PlanFix decides FIX/OK/SKIP for a fitted grid. fit must be the raw FitConstantGrid
@@ -95,9 +101,14 @@ func PlanFix(fit GridFit, downbeats []float64, in PlanInput) Plan {
 		// corrected offset: raw phase difference minus the calibrated bias
 		off := PhaseOffsetS(*in.OldStartS, fit) - in.BiasS
 		newStart := *in.OldStartS - off // snap marker onto nearest true gridline
-		if math.Abs(off)*1000 < in.ThresholdMS && !bpmChanged {
-			return Plan{Status: StatusOK, Detail: "grid already aligned",
-				OldBPM: in.OldBPM, NewBPM: newBPM, OffsetMS: off * 1000}
+		if math.Abs(off)*1000 < in.ThresholdMS {
+			if !bpmChanged {
+				return Plan{Status: StatusOK, Detail: "grid already aligned",
+					OldBPM: in.OldBPM, NewBPM: newBPM, OffsetMS: off * 1000}
+			}
+			if in.PreservePhase {
+				newStart = *in.OldStartS // BPM-only fix: marker stays, phase intact
+			}
 		}
 		return Plan{Status: StatusFix,
 			Detail: fmt.Sprintf("(grid coverage %.0f%%)%s", fit.Coverage*100, folded),

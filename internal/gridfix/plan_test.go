@@ -97,3 +97,41 @@ func (r planRec) OutMulti() bool { return len(r.In.CuesMS) > 1 }
 func itoa(i int) string {
 	return string(rune('0'+i/10)) + string(rune('0'+i%10))
 }
+
+// TestPlanFixPreservePhase: a BPM-only snap (sub-threshold offset) must not drag the
+// marker onto the detector lattice - that shifted whole libraries by the uncalibrated
+// detector bias. Python parity (PreservePhase=false) keeps the legacy move.
+func TestPlanFixPreservePhase(t *testing.T) {
+	fit := GridFit{Anchor: 0.25, Period: 0.5, Coverage: 0.97, Explained: 0.97, NBeats: 400, PhaseR: 0.99}
+	old := 0.258 // 8ms off the fitted lattice (under the 12ms threshold)
+	in := PlanInput{OldBPM: 119.999, OldStartS: &old, MinQuality: 0.85, ThresholdMS: 12}
+
+	p := PlanFix(fit, nil, in) // legacy: BPM snap forces a FIX that also moves the marker
+	if p.Status != StatusFix || math.Abs(p.NewStartS-0.25) > 1e-9 {
+		t.Fatalf("legacy: %+v want FIX moved to 0.25", p)
+	}
+	in.PreservePhase = true
+	p = PlanFix(fit, nil, in) // preserve: BPM still snaps, marker stays put
+	if p.Status != StatusFix || math.Abs(p.NewBPM-120) > 1e-9 || math.Abs(p.NewStartS-old) > 1e-9 {
+		t.Fatalf("preserve: %+v want FIX bpm=120 marker unmoved", p)
+	}
+	if math.Abs(p.OffsetMS-8) > 0.5 {
+		t.Fatalf("OffsetMS=%v want ~8 (measured, unapplied)", p.OffsetMS)
+	}
+
+	off := 0.29 // 40ms off: a real phase error moves in both modes
+	in.OldStartS = &off
+	for _, preserve := range []bool{false, true} {
+		in.PreservePhase = preserve
+		p = PlanFix(fit, nil, in)
+		if p.Status != StatusFix || math.Abs(p.NewStartS-0.25) > 1e-9 {
+			t.Fatalf("preserve=%v: %+v want FIX moved to 0.25", preserve, p)
+		}
+	}
+
+	aligned := 0.258
+	in = PlanInput{OldBPM: 120, OldStartS: &aligned, MinQuality: 0.85, ThresholdMS: 12, PreservePhase: true}
+	if p = PlanFix(fit, nil, in); p.Status != StatusOK {
+		t.Fatalf("aligned: %+v want OK", p)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -312,5 +313,56 @@ func TestBatchETAPositiveWhileAnalyzing(t *testing.T) {
 	}
 	if !sawETA {
 		t.Fatal("no mid-run progress had ETA > 0")
+	}
+}
+
+// TestBatchRunAutoBias: a run whose offsets are one systematic bias (all +14ms)
+// re-plans itself with the bias subtracted - markers stay put (FIX→OK) and the
+// second pass never re-analyzes.
+func TestBatchRunAutoBias(t *testing.T) {
+	dir := t.TempDir()
+	det := synthDet(400, 0.25, 0.5)
+	dets := map[string]*Detection{}
+	var tracks []BatchTrack
+	for i := 0; i < 12; i++ {
+		p := writeAudioStub(t, dir, fmt.Sprintf("b%d.mp3", i), "x")
+		dets[p] = det
+		tracks = append(tracks, BatchTrack{Path: p, Title: fmt.Sprintf("B%d", i), OldBPM: 120, OldStartMs: ptr(264)}) // all 14ms off
+	}
+	stub := &stubAnalyzer{det: dets}
+	cache, err := OpenDetectionCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewBatch(stub, cache, BatchOptions{})
+	results, ab := b.RunAutoBias(context.Background(), tracks, nil)
+	if !ab.Applied || ab.Samples != 12 || math.Abs(ab.MedianMS-14) > 0.5 || ab.MADMS > 0.5 {
+		t.Fatalf("auto-bias %+v want applied median~14", ab)
+	}
+	if stub.callCount() != 12 {
+		t.Fatalf("re-plan re-analyzed: calls=%d want 12", stub.callCount())
+	}
+	for _, r := range results {
+		if r.Plan.Status != StatusOK {
+			t.Fatalf("post-bias plan %+v want OK (marker stays)", r.Plan)
+		}
+	}
+
+	// spread-out offsets (not systematic): measured but NOT applied
+	dir2 := t.TempDir()
+	dets2 := map[string]*Detection{}
+	var tracks2 []BatchTrack
+	for i := 0; i < 12; i++ {
+		p := writeAudioStub(t, dir2, fmt.Sprintf("s%d.mp3", i), "x")
+		dets2[p] = det
+		tracks2 = append(tracks2, BatchTrack{Path: p, Title: fmt.Sprintf("S%d", i), OldBPM: 120, OldStartMs: ptr(250 + float64(i*4))})
+	}
+	cache2, err := OpenDetectionCache(dir2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ab2 := NewBatch(&stubAnalyzer{det: dets2}, cache2, BatchOptions{}).RunAutoBias(context.Background(), tracks2, nil)
+	if ab2.Applied {
+		t.Fatalf("scattered offsets applied a bias: %+v", ab2)
 	}
 }
