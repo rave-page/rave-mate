@@ -177,6 +177,54 @@ func CapPads(cues []musiclib.CuePoint, dropsMs []float64, sw string, max int, sp
 	return out, demoted
 }
 
+// DedupeCues collapses musical cues of the SAME kind sitting within epsMs of each other
+// (double-write damage: the same cue stacked on two pad slots). The keeper is the padded
+// one, else the named one, else the first. Different kinds at one position always coexist
+// (Traktor's grid-companion hotcue + a memory cue is a legitimate pair); grid/load/fade
+// cues are untouched. Returns the new list + how many were dropped.
+func DedupeCues(cues []musiclib.CuePoint, epsMs float64) ([]musiclib.CuePoint, int) {
+	drop := make([]bool, len(cues))
+	better := func(a, b musiclib.CuePoint) bool { // a beats b as the keeper
+		if (a.Hotcue >= 0) != (b.Hotcue >= 0) {
+			return a.Hotcue >= 0
+		}
+		if (a.Name != "") != (b.Name != "") {
+			return a.Name != ""
+		}
+		return false // tie: earlier index wins
+	}
+	n := 0
+	for i := range cues {
+		if drop[i] || !isMusical(cues[i].Kind) {
+			continue
+		}
+		for j := i + 1; j < len(cues); j++ {
+			if drop[j] || cues[j].Kind != cues[i].Kind || math.Abs(cues[j].StartMs-cues[i].StartMs) > epsMs {
+				continue
+			}
+			if cues[i].Kind == musiclib.CueLoop && math.Abs(cues[j].LenMs-cues[i].LenMs) > epsMs {
+				continue // different loop lengths = different loops
+			}
+			k := j // keep i, drop j - unless j is the better keeper
+			if better(cues[j], cues[i]) {
+				cues[i], cues[j] = cues[j], cues[i]
+			}
+			drop[k] = true
+			n++
+		}
+	}
+	if n == 0 {
+		return cues, 0
+	}
+	out := make([]musiclib.CuePoint, 0, len(cues)-n)
+	for i, c := range cues {
+		if !drop[i] {
+			out = append(out, c)
+		}
+	}
+	return out, n
+}
+
 // RenumberPadsByTime reassigns the in-scope pad slots (hotcues + padded loops) to
 // ascending track-time order: pad 0 = the earliest cue, matching left-to-right
 // top-to-bottom pad rows. max > 0 also demotes pads past the budget (hotcues become

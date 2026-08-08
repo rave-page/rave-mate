@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"io"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -39,12 +40,19 @@ type nmlTempo struct {
 	BPM string `xml:"BPM,attr"`
 }
 
+type nmlGrid struct {
+	BPM string `xml:"BPM,attr"`
+}
+
 type nmlCue struct {
-	Name   string `xml:"NAME,attr"`
-	Type   int    `xml:"TYPE,attr"`
-	Start  string `xml:"START,attr"`
-	Len    string `xml:"LEN,attr"`
-	Hotcue int    `xml:"HOTCUE,attr"`
+	Name       string   `xml:"NAME,attr"`
+	DisplOrder int      `xml:"DISPL_ORDER,attr"`
+	Type       int      `xml:"TYPE,attr"`
+	Start      string   `xml:"START,attr"`
+	Len        string   `xml:"LEN,attr"`
+	Repeats    int      `xml:"REPEATS,attr"`
+	Hotcue     int      `xml:"HOTCUE,attr"`
+	Grid       *nmlGrid `xml:"GRID,omitempty"` // TYPE-4 only: per-marker BPM
 }
 
 type nmlExportEntry struct {
@@ -112,23 +120,64 @@ func ExportTraktorNML(lib Library, w io.Writer) error {
 	return enc.Close()
 }
 
-// nmlCues converts portable cues + beatgrid into Traktor CUE_V2 nodes (grid markers become
-// TYPE-4 cues).
+// nmlCues converts portable cues + beatgrid into Traktor CUE_V2 nodes, ascending by
+// START (native file order). Beatgrid is the ONLY grid source: markers emit as TYPE-4
+// cues with their per-marker GRID BPM child (falling back to the track BPM), never on a
+// pad. Grid entries in t.Cues (Kind CueGrid, or the legacy padded Type-4 anchor) are
+// skipped / emitted as plain cues - re-emitting them alongside Beatgrid doubled every
+// grid marker per round-trip.
 func nmlCues(t Track) []nmlCue {
-	var out []nmlCue
+	out := make([]nmlCue, 0, len(t.Beatgrid)+len(t.Cues))
+	gridName := "AutoGrid"
+	if len(t.Beatgrid) > 1 {
+		gridName = "Beat Marker" // multi-segment (flexible/manual) markers
+	}
 	for _, g := range t.Beatgrid {
-		out = append(out, nmlCue{Name: "Beat Marker", Type: traktorCueType(CueGrid),
-			Start: strconv.FormatFloat(g.PositionMs, 'f', 6, 64), Len: "0", Hotcue: -1})
+		bpm := g.BPM
+		if bpm <= 0 {
+			bpm = t.BPM
+		}
+		c := nmlCue{Name: gridName, Type: traktorCueType(CueGrid),
+			Start: strconv.FormatFloat(g.PositionMs, 'f', 6, 64), Len: "0.000000",
+			Repeats: -1, Hotcue: -1}
+		if bpm > 0 {
+			c.Grid = &nmlGrid{BPM: strconv.FormatFloat(bpm, 'f', 6, 64)}
+		}
+		out = append(out, c)
 	}
 	for _, c := range t.Cues {
+		if c.Kind == CueGrid || c.Type == 4 {
+			continue // grid markers live in t.Beatgrid; padded Type-4 pads re-emit below
+		}
 		out = append(out, nmlCue{
-			Name:   c.Name,
-			Type:   traktorCueType(c.Kind),
-			Start:  strconv.FormatFloat(c.StartMs, 'f', 6, 64),
-			Len:    strconv.FormatFloat(c.LenMs, 'f', 6, 64),
-			Hotcue: c.Hotcue,
+			Name:    c.Name,
+			Type:    traktorCueType(c.Kind),
+			Start:   strconv.FormatFloat(c.StartMs, 'f', 6, 64),
+			Len:     strconv.FormatFloat(c.LenMs, 'f', 6, 64),
+			Repeats: -1,
+			Hotcue:  c.Hotcue,
 		})
 	}
+	// legacy padded Type-4 anchors (Kind CueHot): the pad survives as a plain cue at the
+	// same position - Traktor's native two-cue form (the grid marker above + this pad).
+	for _, c := range t.Cues {
+		if c.Kind != CueHot || c.Type != 4 || c.Hotcue < 0 {
+			continue
+		}
+		out = append(out, nmlCue{
+			Name:    c.Name,
+			Type:    traktorCueType(CueHot),
+			Start:   strconv.FormatFloat(c.StartMs, 'f', 6, 64),
+			Len:     "0.000000",
+			Repeats: -1,
+			Hotcue:  c.Hotcue,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, _ := strconv.ParseFloat(out[i].Start, 64)
+		b, _ := strconv.ParseFloat(out[j].Start, 64)
+		return a < b
+	})
 	return out
 }
 

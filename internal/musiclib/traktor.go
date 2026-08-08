@@ -93,6 +93,9 @@ type nmlEntry struct {
 		Start  float64 `xml:"START,attr"`
 		Len    float64 `xml:"LEN,attr"`
 		Hotcue int     `xml:"HOTCUE,attr"`
+		Grid   struct {
+			BPM float64 `xml:"BPM,attr"`
+		} `xml:"GRID"` // TYPE-4 only: per-marker BPM (flexible grids carry one per segment)
 	} `xml:"CUE_V2"`
 	// History/playlist refs (present in PLAYLIST entries, not collection tracks)
 	PrimaryKey struct {
@@ -140,7 +143,11 @@ func (e *nmlEntry) toTrack() Track {
 		kind := traktorCueKind(c.Type, c.Hotcue)
 		t.Cues = append(t.Cues, CuePoint{Name: c.Name, Kind: kind, Type: c.Type, StartMs: c.Start, LenMs: c.Len, Hotcue: c.Hotcue})
 		if c.Type == 4 { // every TYPE-4 anchors the grid, padded (kind CueHot) or not
-			t.Beatgrid = append(t.Beatgrid, GridMarker{PositionMs: c.Start, BPM: e.Tempo.BPM})
+			bpm := c.Grid.BPM // per-marker GRID child BPM - flexible grids differ per segment
+			if bpm <= 0 {
+				bpm = e.Tempo.BPM
+			}
+			t.Beatgrid = append(t.Beatgrid, GridMarker{PositionMs: c.Start, BPM: bpm})
 		}
 	}
 	return t

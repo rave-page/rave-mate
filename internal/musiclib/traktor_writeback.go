@@ -218,11 +218,22 @@ func entryLocPath(buf []xml.Token) string {
 	return ""
 }
 
-// emitMergedEntry re-encodes a buffered ENTRY, overriding INFO managed attrs from t and replacing
-// its TEMPO + CUE_V2 nodes with ones regenerated from t (cues/beatgrid). All other elements
-// (LOCATION, ALBUM, MUSICAL_KEY, LOUDNESS, STEMS, …) pass through unchanged.
+// emitMergedEntry re-encodes a buffered ENTRY, overriding INFO managed attrs from t. The
+// TEMPO BPM attr is rewritten IN PLACE (BPM_QUALITY etc. survive; element created only
+// when absent and t.BPM > 0). CUE_V2 nodes are replaced from t (cues/beatgrid via
+// nmlCues) only when t actually carries cue/grid data - a cue-less canonical track never
+// wipes an entry's grid. All other elements (LOCATION, ALBUM, MUSICAL_KEY, LOUDNESS,
+// STEMS, …) pass through unchanged.
 func emitMergedEntry(enc *xml.Encoder, buf []xml.Token, t Track) error {
-	skipDepth := 0 // >0 while inside a TEMPO/CUE_V2 subtree we're dropping
+	manageCues := len(t.Cues) > 0 || len(t.Beatgrid) > 0
+	hasTempo := false
+	for _, tk := range buf {
+		if se, ok := tk.(xml.StartElement); ok && se.Name.Local == "TEMPO" {
+			hasTempo = true
+			break
+		}
+	}
+	skipDepth := 0 // >0 while inside a dropped CUE_V2 subtree
 	for _, tk := range buf {
 		switch el := tk.(type) {
 		case xml.StartElement:
@@ -231,9 +242,15 @@ func emitMergedEntry(enc *xml.Encoder, buf []xml.Token, t Track) error {
 				continue
 			}
 			switch el.Name.Local {
-			case "TEMPO", "CUE_V2":
-				skipDepth = 1 // drop old grid/cues; regenerated below
-				continue
+			case "TEMPO":
+				if t.BPM > 0 {
+					el.Attr = setAttr(el.Attr, "BPM", f6(t.BPM))
+				}
+			case "CUE_V2":
+				if manageCues {
+					skipDepth = 1 // drop old cues/grid; regenerated below
+					continue
+				}
 			case "INFO":
 				el.Attr = overrideInfoAttrs(el.Attr, t)
 			}
@@ -246,8 +263,16 @@ func emitMergedEntry(enc *xml.Encoder, buf []xml.Token, t Track) error {
 				continue
 			}
 			if el.Name.Local == "ENTRY" {
-				if err := emitTempoAndCues(enc, t); err != nil {
-					return err
+				if !hasTempo && t.BPM > 0 {
+					if err := emitNewTempo(enc, t.BPM); err != nil {
+						return err
+					}
+					hasTempo = true
+				}
+				if manageCues {
+					if err := emitTrackCues(enc, t); err != nil {
+						return err
+					}
 				}
 			}
 			if err := enc.EncodeToken(el); err != nil {
@@ -264,18 +289,26 @@ func emitMergedEntry(enc *xml.Encoder, buf []xml.Token, t Track) error {
 	return nil
 }
 
-// emitTempoAndCues writes a fresh TEMPO (track BPM) + CUE_V2 set (beatgrid + cues) for t.
-func emitTempoAndCues(enc *xml.Encoder, t Track) error {
-	if t.BPM > 0 {
-		if err := emitElem(enc, "TEMPO", [][2]string{{"BPM", strconv.FormatFloat(t.BPM, 'f', 6, 64)}}); err != nil {
+// emitTrackCues writes t's CUE_V2 set (beatgrid + cues, native attr shape + GRID children).
+func emitTrackCues(enc *xml.Encoder, t Track) error {
+	for _, c := range nmlCues(t) {
+		se := startElem("CUE_V2", [][2]string{
+			{"NAME", c.Name}, {"DISPL_ORDER", "0"}, {"TYPE", strconv.Itoa(c.Type)},
+			{"START", c.Start}, {"LEN", c.Len}, {"REPEATS", "-1"}, {"HOTCUE", strconv.Itoa(c.Hotcue)},
+		})
+		if err := enc.EncodeToken(se); err != nil {
 			return err
 		}
-	}
-	for _, c := range nmlCues(t) {
-		if err := emitElem(enc, "CUE_V2", [][2]string{
-			{"NAME", c.Name}, {"TYPE", strconv.Itoa(c.Type)},
-			{"START", c.Start}, {"LEN", c.Len}, {"HOTCUE", strconv.Itoa(c.Hotcue)},
-		}); err != nil {
+		if c.Grid != nil {
+			g := startElem("GRID", [][2]string{{"BPM", c.Grid.BPM}})
+			if err := enc.EncodeToken(g); err != nil {
+				return err
+			}
+			if err := enc.EncodeToken(g.End()); err != nil {
+				return err
+			}
+		}
+		if err := enc.EncodeToken(se.End()); err != nil {
 			return err
 		}
 	}

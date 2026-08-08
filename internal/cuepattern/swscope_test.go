@@ -284,3 +284,43 @@ func TestWritePipelinePadsInTimeOrder(t *testing.T) {
 		t.Fatalf("padded cues = %d, want 8", slot)
 	}
 }
+
+// DedupeCues: the user's live damage - the same cue stacked on two pad slots
+// (slot 7 duplicating slot 3's position). Different kinds at one position coexist.
+func TestDedupeCues(t *testing.T) {
+	cues := []musiclib.CuePoint{
+		{Name: "Drop", Kind: musiclib.CueHot, StartMs: 66331, Hotcue: 3},
+		{Kind: musiclib.CueHot, StartMs: 131158, Hotcue: 4},
+		{Name: "n.n.", Kind: musiclib.CueHot, StartMs: 66331.4, Hotcue: 7}, // stacked dupe
+		{Kind: musiclib.CuePlain, StartMs: 66331, Hotcue: -1},              // companion memory cue: keep
+	}
+	out, n := DedupeCues(cues, 5)
+	if n != 1 || len(out) != 3 {
+		t.Fatalf("n=%d out=%+v", n, out)
+	}
+	if out[0].Name != "Drop" || out[0].Hotcue != 3 {
+		t.Errorf("wrong keeper: %+v", out[0])
+	}
+	for _, c := range out {
+		if c.Kind == musiclib.CuePlain && c.StartMs != 66331 {
+			t.Errorf("memory companion dropped: %+v", out)
+		}
+	}
+	// keeper preference: padded beats padless even when the padless one comes first
+	cues2 := []musiclib.CuePoint{
+		{Kind: musiclib.CuePlain, StartMs: 1000, Hotcue: -1},
+		{Name: "Named", Kind: musiclib.CuePlain, StartMs: 1002, Hotcue: -1},
+	}
+	out2, n2 := DedupeCues(cues2, 5)
+	if n2 != 1 || len(out2) != 1 || out2[0].Name != "Named" {
+		t.Fatalf("named keeper lost: %+v", out2)
+	}
+	// loops with different lengths are different loops
+	loops := []musiclib.CuePoint{
+		{Kind: musiclib.CueLoop, StartMs: 5000, LenMs: 4000, Hotcue: 0},
+		{Kind: musiclib.CueLoop, StartMs: 5000, LenMs: 8000, Hotcue: 1},
+	}
+	if _, n3 := DedupeCues(loops, 5); n3 != 0 {
+		t.Fatalf("distinct loops deduped")
+	}
+}

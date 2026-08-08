@@ -225,30 +225,48 @@ func TestVDJPadNumberRoundTrip(t *testing.T) {
 	}
 }
 
-// GridAnchor: the earliest hotcue becomes the single TYPE-4 grid cue (pad kept, GRID
-// child from the entry's TEMPO); pre-existing grid cues are dropped. No hotcues in the
-// update = old grid preserved.
+// anchorFixture: one entry, single AutoGrid at 100ms on a 120 BPM lattice (period 500ms).
+const anchorFixture = `<?xml version="1.0" encoding="UTF-8"?>
+<NML VERSION="20">
+  <HEAD COMPANY="native" PROGRAM="Traktor"></HEAD>
+  <COLLECTION ENTRIES="1">
+    <ENTRY TITLE="AnchorTrack" ARTIST="A">
+      <LOCATION DIR="/:Music/:" FILE="anchor.mp3" VOLUME="C:"></LOCATION>
+      <INFO GENRE="DnB" PLAYTIME="200"></INFO>
+      <TEMPO BPM="120.000000" BPM_QUALITY="100.000000"></TEMPO>
+      <CUE_V2 NAME="Cue A" DISPL_ORDER="0" TYPE="0" START="1234.5" LEN="0.000000" REPEATS="-1" HOTCUE="0"></CUE_V2>
+      <CUE_V2 NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="100.0" LEN="0.000000" REPEATS="-1" HOTCUE="-1"><GRID BPM="120.000000"></GRID></CUE_V2>
+    </ENTRY>
+  </COLLECTION>
+</NML>`
+
+// GridAnchor writes Traktor's native two-cue form: a TYPE-4 grid cue (HOTCUE=-1, GRID
+// child) on the EXISTING lattice's point nearest the earliest hotcue - the hotcue itself
+// stays a plain pad cue at its own position, so an off-grid cue never shifts the grid.
 func TestApplyCuesNMLGridAnchor(t *testing.T) {
-	path := writeFixture(t, gridFixture)
-	up := CueUpdate{Path: resolveLocation("C:", "/:Music/:", "a.mp3"), GridAnchor: true,
+	path := writeFixture(t, anchorFixture)
+	up := CueUpdate{Path: resolveLocation("C:", "/:Music/:", "anchor.mp3"), GridAnchor: true,
 		Cues: []CuePoint{
-			{Name: "Intro", Kind: CueHot, StartMs: 61250, Hotcue: 0},
-			{Name: "Drop", Kind: CueHot, StartMs: 90000, Hotcue: 1},
+			{Name: "Intro", Kind: CueHot, StartMs: 30110, Hotcue: 0}, // 10ms off the 100+k*500 lattice
+			{Name: "Drop", Kind: CueHot, StartMs: 90100, Hotcue: 1},
 		}}
 	if _, err := ApplyCuesNML(path, []CueUpdate{up}); err != nil {
 		t.Fatal(err)
 	}
 	s := readFileStr(t, path)
-	if !strings.Contains(s, `NAME="Intro" DISPL_ORDER="0" TYPE="4" START="61250.000000" LEN="0.000000" REPEATS="-1" HOTCUE="0"`) {
-		t.Errorf("anchor hotcue not written as TYPE-4:\n%s", s)
+	// grid cue re-anchored near the first hotcue, phase preserved (30100, not 30110), no pad
+	if !strings.Contains(s, `NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="30100.000000" LEN="0.000000" REPEATS="-1" HOTCUE="-1"`) {
+		t.Errorf("re-anchored grid cue wrong:\n%s", s)
 	}
-	if !strings.Contains(s, `<GRID BPM="127.500000">`) {
-		t.Error("anchor missing GRID child with the entry's TEMPO BPM")
+	if !strings.Contains(s, `<GRID BPM="120.000000">`) {
+		t.Error("anchor missing GRID child BPM")
 	}
-	for _, gone := range []string{`START="55.0"`, `START="30055.0"`} {
-		if strings.Contains(s, gone) {
-			t.Errorf("old grid cue survived: %s", gone)
-		}
+	// the hotcue stays a PLAIN pad cue at its own position - never a padded TYPE-4
+	if !strings.Contains(s, `NAME="Intro" DISPL_ORDER="0" TYPE="0" START="30110.000000" LEN="0.000000" REPEATS="-1" HOTCUE="0"`) {
+		t.Errorf("earliest hotcue not written as plain pad cue:\n%s", s)
+	}
+	if strings.Contains(s, `START="100.0"`) {
+		t.Error("old grid cue survived the re-anchor")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -260,36 +278,76 @@ func TestApplyCuesNMLGridAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := byPath[up.Path]
-	if len(got.Beatgrid) != 1 || got.Beatgrid[0].PositionMs != 61250 {
-		t.Errorf("beatgrid = %+v, want single anchor at 61250", got.Beatgrid)
+	if len(got.Beatgrid) != 1 || got.Beatgrid[0].PositionMs != 30100 {
+		t.Errorf("beatgrid = %+v, want single anchor at 30100", got.Beatgrid)
 	}
-	// round-trip: the TYPE-4 pad cue imports as a firing hotcue, not a bare grid marker
-	var anchor *CuePoint
-	for i, c := range got.Cues {
-		if c.StartMs == 61250 {
-			anchor = &got.Cues[i]
+	var pads int
+	for _, c := range got.Cues {
+		if c.Kind == CueHot && c.Hotcue >= 0 {
+			pads++
+			if c.Type == 4 {
+				t.Errorf("padded TYPE-4 written: %+v", c)
+			}
 		}
 	}
-	if anchor == nil || anchor.Kind != CueHot || anchor.Hotcue != 0 || anchor.Type != 4 {
-		t.Errorf("anchor round-trip = %+v, want CueHot pad 0 type 4", anchor)
-	}
-	// untouched neighbor keeps its grid
-	if c := byPath[resolveLocation("C:", "/:Music/:", "c.mp3")]; len(c.Beatgrid) != 1 {
-		t.Errorf("neighbor grid mutated: %+v", c.Beatgrid)
+	if pads != 2 {
+		t.Errorf("pads = %d, want 2", pads)
 	}
 
-	// no hotcues in the update → grid passthrough as before
-	path2 := writeFixture(t, gridFixture)
+	// no hotcues in the update → grid passthrough
+	path2 := writeFixture(t, anchorFixture)
 	up2 := CueUpdate{Path: up.Path, GridAnchor: true,
 		Cues: []CuePoint{{Kind: CuePlain, StartMs: 5000, Hotcue: -1}}}
 	if _, err := ApplyCuesNML(path2, []CueUpdate{up2}); err != nil {
 		t.Fatal(err)
 	}
-	s2 := readFileStr(t, path2)
+	if !strings.Contains(readFileStr(t, path2), `START="100.0"`) {
+		t.Error("memory-only update dropped the grid")
+	}
+}
+
+// Entries with several grid cues (flexible/manual grids) never re-anchor - the
+// markers pass through even with GridAnchor on.
+func TestApplyCuesNMLGridAnchorMultiGridProtected(t *testing.T) {
+	path := writeFixture(t, gridFixture) // a.mp3 carries TWO TYPE-4 markers
+	up := CueUpdate{Path: resolveLocation("C:", "/:Music/:", "a.mp3"), GridAnchor: true,
+		Cues: []CuePoint{{Name: "Intro", Kind: CueHot, StartMs: 61250, Hotcue: 0}}}
+	if _, err := ApplyCuesNML(path, []CueUpdate{up}); err != nil {
+		t.Fatal(err)
+	}
+	s := readFileStr(t, path)
 	for _, keep := range []string{`START="55.0"`, `START="30055.0"`} {
-		if !strings.Contains(s2, keep) {
-			t.Errorf("memory-only update dropped the grid: %s missing", keep)
+		if !strings.Contains(s, keep) {
+			t.Errorf("flexible grid marker dropped: %s missing", keep)
 		}
+	}
+	if !strings.Contains(s, `NAME="Intro" DISPL_ORDER="0" TYPE="0" START="61250.000000" LEN="0.000000" REPEATS="-1" HOTCUE="0"`) {
+		t.Error("hotcue not written on the protected entry")
+	}
+}
+
+// A passthrough grid cue always loses its pad: the old single-cue anchor form
+// (TYPE-4 with HOTCUE>=0, which Traktor never keeps) degrades cleanly into the
+// two-cue form on the next write, with the pad on the emitted plain cue.
+func TestApplyCuesNMLPaddedGridCueSplits(t *testing.T) {
+	fixture := strings.Replace(anchorFixture,
+		`NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="100.0" LEN="0.000000" REPEATS="-1" HOTCUE="-1"`,
+		`NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="100.0" LEN="0.000000" REPEATS="-1" HOTCUE="3"`, 1)
+	path := writeFixture(t, fixture)
+	up := CueUpdate{Path: resolveLocation("C:", "/:Music/:", "anchor.mp3"),
+		Cues: []CuePoint{ // renumbered set: the imported padded anchor is now slot 0
+			{Name: "AutoGrid", Kind: CueHot, Type: 4, StartMs: 100, Hotcue: 0},
+			{Name: "Drop", Kind: CueHot, StartMs: 60100, Hotcue: 1},
+		}}
+	if _, err := ApplyCuesNML(path, []CueUpdate{up}); err != nil {
+		t.Fatal(err)
+	}
+	s := readFileStr(t, path)
+	if !strings.Contains(s, `TYPE="4" START="100.0" LEN="0.000000" REPEATS="-1" HOTCUE="-1"`) {
+		t.Errorf("passthrough grid cue kept its pad:\n%s", s)
+	}
+	if !strings.Contains(s, `NAME="AutoGrid" DISPL_ORDER="0" TYPE="0" START="100.000000" LEN="0.000000" REPEATS="-1" HOTCUE="0"`) {
+		t.Errorf("split pad cue missing:\n%s", s)
 	}
 }
 

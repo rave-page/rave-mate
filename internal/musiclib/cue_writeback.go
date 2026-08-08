@@ -3,6 +3,8 @@ package musiclib
 import (
 	"encoding/xml"
 	"io"
+	"math"
+	"sort"
 	"strconv"
 )
 
@@ -26,9 +28,13 @@ type CueUpdate struct {
 	Path string
 	BPM  float64
 	Cues []CuePoint
-	// GridAnchor (Traktor only): write the earliest hotcue as the TYPE-4 grid cue -
-	// Traktor anchors the beatgrid on it and its pad still fires. Pre-existing grid
-	// cues are replaced (one anchor, not two). Off = grid cues pass through untouched.
+	// GridAnchor (Traktor only): move the grid cue next to the earliest hotcue -
+	// Traktor's native form is TWO cues (a TYPE-4 grid cue with HOTCUE=-1 plus a
+	// plain hotcue; Traktor never keeps a pad ON a TYPE-4). The grid cue lands on
+	// the point of the EXISTING grid's beat lattice nearest the hotcue, so the
+	// grid's phase is preserved even when the hotcue sits off-grid. Entries with
+	// multiple grid cues (flexible/manual grids) are never re-anchored. Off = grid
+	// cues pass through untouched.
 	GridAnchor bool
 }
 
@@ -122,24 +128,79 @@ func applyCuesNMLStream(src io.Reader, byPath map[string]*CueUpdate, dst io.Writ
 	return res, enc.Flush()
 }
 
-// emitCueUpdatedEntry re-encodes a buffered ENTRY with only its musical cues rewritten:
-// non-TYPE-4 CUE_V2 subtrees dropped, replacements emitted before </ENTRY>. Grid cues
-// (TYPE 4), TEMPO and all other elements pass through unchanged - unless up.GridAnchor
-// re-anchors the grid on the earliest hotcue, which drops the old TYPE-4 cues instead
-// (the new anchor replaces them; BPM from the entry's TEMPO, else up.BPM).
-func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error {
-	anchor := -1
-	var gridBPM float64
-	if up.GridAnchor {
-		if gridBPM = entryTempoBPM(buf); gridBPM <= 0 {
-			gridBPM = up.BPM
-		}
-		if gridBPM > 0 {
-			anchor = earliestHotcue(up.Cues)
+// nmlGridInfo is one existing TYPE-4 grid cue (position + its GRID child BPM).
+type nmlGridInfo struct {
+	StartMs float64
+	BPM     float64 // GRID child BPM (0 = absent)
+}
+
+// entryGridCues scans a buffered ENTRY for its TYPE-4 CUE_V2 markers.
+func entryGridCues(buf []xml.Token) []nmlGridInfo {
+	var out []nmlGridInfo
+	depth := 0 // >0 while inside a TYPE-4 subtree (to catch its GRID child)
+	for _, tk := range buf {
+		switch el := tk.(type) {
+		case xml.StartElement:
+			if depth > 0 {
+				if el.Name.Local == "GRID" && len(out) > 0 {
+					out[len(out)-1].BPM, _ = strconv.ParseFloat(attrVal(el.Attr, "BPM"), 64)
+				}
+				depth++
+				continue
+			}
+			if el.Name.Local == "CUE_V2" && attrVal(el.Attr, "TYPE") == "4" {
+				s, _ := strconv.ParseFloat(attrVal(el.Attr, "START"), 64)
+				out = append(out, nmlGridInfo{StartMs: s})
+				depth = 1
+			}
+		case xml.EndElement:
+			if depth > 0 {
+				depth--
+			}
 		}
 	}
-	dropGrid := anchor >= 0 // old grid cues are replaced by the new anchor
-	skip := 0               // >0 while inside a dropped CUE_V2 subtree
+	return out
+}
+
+// snapToLattice returns the point of the constant grid (anchored at start, bpm) nearest ms.
+func snapToLattice(ms, start, bpm float64) float64 {
+	if bpm <= 0 {
+		return ms
+	}
+	period := 60000.0 / bpm
+	return start + math.Round((ms-start)/period)*period
+}
+
+// emitCueUpdatedEntry re-encodes a buffered ENTRY with only its musical cues rewritten:
+// non-TYPE-4 CUE_V2 subtrees dropped, replacements emitted before </ENTRY>. Grid cues
+// (TYPE 4), TEMPO and all other elements pass through - though a passthrough grid cue
+// always loses its HOTCUE (pads live on the emitted musical cues; Traktor itself never
+// keeps a pad on a TYPE-4). With up.GridAnchor and exactly 0-1 existing grid cues, the
+// old grid cue is instead replaced by one on the existing lattice's point nearest the
+// earliest hotcue (phase preserved; grid BPM from the old GRID child, else TEMPO, else
+// up.BPM). Entries with several grid cues (flexible/manual grids) never re-anchor.
+func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error {
+	oldGrids := entryGridCues(buf)
+	anchorPos, gridBPM := -1.0, 0.0
+	if up.GridAnchor && len(oldGrids) <= 1 {
+		if len(oldGrids) == 1 {
+			gridBPM = oldGrids[0].BPM
+		}
+		if gridBPM <= 0 {
+			gridBPM = entryTempoBPM(buf)
+		}
+		if gridBPM <= 0 {
+			gridBPM = up.BPM
+		}
+		if i := earliestHotcue(up.Cues); i >= 0 && gridBPM > 0 {
+			anchorPos = up.Cues[i].StartMs
+			if len(oldGrids) == 1 {
+				anchorPos = snapToLattice(anchorPos, oldGrids[0].StartMs, gridBPM)
+			}
+		}
+	}
+	dropGrid := anchorPos >= 0 // old grid cue replaced by the re-anchored one
+	skip := 0                  // >0 while inside a dropped CUE_V2 subtree
 	for _, tk := range buf {
 		switch el := tk.(type) {
 		case xml.StartElement:
@@ -147,9 +208,13 @@ func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error 
 				skip++
 				continue
 			}
-			if el.Name.Local == "CUE_V2" && (dropGrid || attrVal(el.Attr, "TYPE") != "4") {
-				skip = 1
-				continue
+			if el.Name.Local == "CUE_V2" {
+				if dropGrid || attrVal(el.Attr, "TYPE") != "4" {
+					skip = 1
+					continue
+				}
+				// passthrough grid cue: the pad (if any) now lives on an emitted cue
+				el.Attr = setAttr(el.Attr, "HOTCUE", "-1")
 			}
 			if err := enc.EncodeToken(el); err != nil {
 				return err
@@ -160,7 +225,7 @@ func emitCueUpdatedEntry(enc *xml.Encoder, buf []xml.Token, up CueUpdate) error 
 				continue
 			}
 			if el.Name.Local == "ENTRY" {
-				if err := emitNMLCues(enc, up.Cues, anchor, gridBPM); err != nil {
+				if err := emitNMLCues(enc, up.Cues, anchorPos, gridBPM); err != nil {
 					return err
 				}
 			}
@@ -203,40 +268,50 @@ func earliestHotcue(cues []CuePoint) int {
 	return best
 }
 
-// emitNMLCues writes CUE_V2 elements for the non-grid cues (Traktor's unnamed cues are
-// "n.n."). cues[anchor] doubles as the beatgrid anchor: TYPE 4 with a <GRID BPM> child,
-// keeping its pad. With anchor < 0, TYPE-4 hotcues (imported grid anchors) are skipped -
-// their original element passes through upstream untouched.
-func emitNMLCues(enc *xml.Encoder, cues []CuePoint, anchor int, gridBPM float64) error {
-	for i, c := range cues {
+// emitNMLCues writes CUE_V2 elements for the non-grid cues in ascending START order
+// (Traktor's native file order; unnamed cues are "n.n."). anchorPos >= 0 also writes the
+// replacement TYPE-4 grid cue (HOTCUE=-1, GRID BPM child) - Traktor's native two-cue
+// form: the grid cue and the hotcue coexist at (nearly) the same position, the pad stays
+// on the plain hotcue. Kind decides each cue's TYPE, so an imported padded grid anchor
+// (Kind CueHot, Type 4) emits as a plain hotcue.
+func emitNMLCues(enc *xml.Encoder, cues []CuePoint, anchorPos, gridBPM float64) error {
+	out := make([]CuePoint, 0, len(cues)+1)
+	grid := -1
+	if anchorPos >= 0 && gridBPM > 0 {
+		out = append(out, CuePoint{Name: "AutoGrid", Kind: CueGrid, StartMs: anchorPos, Hotcue: -1})
+		grid = 0
+	}
+	for _, c := range cues {
 		if c.Kind == CueGrid {
-			continue
+			continue // grid cues pass through upstream (or the anchor above replaced them)
 		}
-		if anchor < 0 && c.Type == 4 {
-			continue // preserved via passthrough - re-emitting would duplicate it
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].StartMs < out[j].StartMs })
+	for i, c := range out {
+		if grid >= 0 && c.Kind == CueGrid {
+			grid = i // sorted position of the synthetic grid cue
 		}
+	}
+	for i, c := range out {
 		name := c.Name
 		if name == "" {
 			name = "n.n."
 		}
-		typ := traktorCueType(c.Kind)
-		if i == anchor {
-			typ = 4
-		}
 		se := startElem("CUE_V2", [][2]string{
-			{"NAME", name}, {"DISPL_ORDER", "0"}, {"TYPE", strconv.Itoa(typ)},
+			{"NAME", name}, {"DISPL_ORDER", "0"}, {"TYPE", strconv.Itoa(traktorCueType(c.Kind))},
 			{"START", f6(c.StartMs)}, {"LEN", f6(c.LenMs)}, {"REPEATS", "-1"},
 			{"HOTCUE", strconv.Itoa(c.Hotcue)},
 		})
 		if err := enc.EncodeToken(se); err != nil {
 			return err
 		}
-		if i == anchor {
-			g := startElem("GRID", [][2]string{{"BPM", f6(gridBPM)}})
-			if err := enc.EncodeToken(g); err != nil {
+		if i == grid {
+			gb := startElem("GRID", [][2]string{{"BPM", f6(gridBPM)}})
+			if err := enc.EncodeToken(gb); err != nil {
 				return err
 			}
-			if err := enc.EncodeToken(g.End()); err != nil {
+			if err := enc.EncodeToken(gb.End()); err != nil {
 				return err
 			}
 		}

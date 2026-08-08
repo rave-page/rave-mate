@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -24,6 +25,8 @@ import (
 	"time"
 
 	"rave.page/mate/internal/app"
+	"rave.page/mate/internal/config"
+	"rave.page/mate/internal/cuewriteback"
 	"rave.page/mate/internal/elevate"
 	"rave.page/mate/internal/featurehost"
 	"rave.page/mate/internal/guardian"
@@ -83,6 +86,8 @@ func main() {
 			os.Exit(runTraktorMap(args[1:]))
 		case "rbxscan":
 			os.Exit(runRbxScan(args[1:]))
+		case "repair-collection":
+			os.Exit(runRepairCollection(args[1:]))
 		case "version", "--version", "-v":
 			fmt.Println("rave-mate", version.String())
 			os.Exit(0)
@@ -97,6 +102,97 @@ func main() {
 		fmt.Fprintln(os.Stderr, "rave-mate:", err)
 		os.Exit(1)
 	}
+}
+
+// runRepairCollection repairs older rave-mate write damage in a Traktor collection.nml:
+// pad slots renumbered into track-time order, stacked duplicate cues dropped, padded
+// TYPE-4 anchors split into Traktor's native two-cue form, and (with -ref) phase-shifted
+// grid markers restored onto a pre-damage backup's lattice. Backup-first; refuses while
+// Traktor runs.
+func runRepairCollection(args []string) int {
+	fs := flag.NewFlagSet("repair-collection", flag.ExitOnError)
+	ref := fs.String("ref", "", "reference collection.nml (pre-damage backup) for grid-phase restore")
+	dry := fs.Bool("dry", false, "analyze and report only, write nothing")
+	_ = fs.Parse(args)
+	path := fs.Arg(0)
+	if path == "" {
+		installs, err := musiclib.DiscoverTraktor()
+		if err != nil || len(installs) == 0 {
+			fmt.Fprintln(os.Stderr, "no Traktor install found - pass the collection.nml path")
+			return 1
+		}
+		for _, in := range installs {
+			if in.Collection != "" {
+				path = in.Collection
+				break
+			}
+		}
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "no collection.nml found - pass the path")
+			return 1
+		}
+	}
+	fmt.Println("collection:", path)
+	opts := musiclib.RepairOptions{DryRun: *dry}
+	if *ref != "" {
+		f, err := os.Open(*ref)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ref:", err)
+			return 1
+		}
+		grids, gerr := musiclib.ParseCollectionGrids(bufio.NewReaderSize(f, 1<<20))
+		_ = f.Close()
+		if gerr != nil {
+			fmt.Fprintln(os.Stderr, "ref parse:", gerr)
+			return 1
+		}
+		opts.Ref = grids
+		fmt.Printf("reference: %s (%d single-grid entries)\n", *ref, len(grids))
+	}
+	if !*dry {
+		if cuewriteback.TraktorRunning() {
+			fmt.Fprintln(os.Stderr, "Traktor is running - close it first (it overwrites collection.nml from memory on save)")
+			return 1
+		}
+		backupRoot, err := config.DataPath("library-backups")
+		if err == nil {
+			err = cuewriteback.BackupFile(backupRoot, "traktor-repair", path)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "backup failed (refusing to write):", err)
+			return 1
+		}
+		fmt.Println("backed up to", backupRoot)
+	}
+	rep, err := musiclib.RepairCollectionFile(path, opts)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "repair:", err)
+		return 1
+	}
+	mode := "repaired"
+	if *dry {
+		mode = "would repair"
+	}
+	fmt.Printf("%d entries scanned; %s %d:\n", rep.Entries, mode, rep.Changed)
+	fmt.Printf("  pads renumbered into time order: %d entries\n", rep.PadsReordered)
+	fmt.Printf("  stacked duplicate cues dropped:  %d\n", rep.DupesRemoved)
+	fmt.Printf("  padded grid cues split:          %d\n", rep.PadsSplit)
+	fmt.Printf("  grid markers restored:           %d\n", rep.GridsRestored)
+	for _, d := range rep.Details {
+		fmt.Println("   ", d)
+	}
+	if len(rep.Details) == repairDetailCapNote(rep) {
+		fmt.Println("    … (detail list capped)")
+	}
+	return 0
+}
+
+// repairDetailCapNote reports the cap when details were truncated (matches musiclib's cap).
+func repairDetailCapNote(rep musiclib.RepairReport) int {
+	if rep.Changed > len(rep.Details) {
+		return len(rep.Details)
+	}
+	return -1
 }
 
 // runRbxScan hunts rekordbox.exe memory for pointer chains to a known loaded string (title/artist),

@@ -99,6 +99,7 @@ func ApplyCues(t Target, updates []musiclib.CueUpdate, backupRoot string) (music
 	var zero musiclib.WritebackResult
 	for i := range updates {
 		cues := cuepattern.FilterForSoftware(updates[i].Cues, t.Key)
+		cues, _ = cuepattern.DedupeCues(cues, 5) // stacked double-write dupes never reach a pad
 		cues, _ = cuepattern.RenumberPadsByTime(cues, "", 0)
 		updates[i].Cues = cues
 	}
