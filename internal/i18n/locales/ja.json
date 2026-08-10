@@ -754,6 +754,8 @@
       "refreshedToast": "{name} に {n} 曲を追加しました",
       "refreshAllToast": "{m} 件のフォルダープレイリストに {n} 曲を追加",
       "refreshNone": "フォルダーに新しいファイルはありません",
+      "refreshing": "フォルダープレイリストを更新中…",
+      "refreshBusy": "フォルダーの更新は既に実行中です",
       "noFolder": "更新元フォルダーがありません（空のプレイリスト・バインド解決不可）",
       "menu": {
         "cloud": "クラウド",
@@ -1018,7 +1020,8 @@
         "many": "{count} トラックをインポートしました（Serato）",
         "one": "{count} トラックをインポートしました（Serato）",
         "other": "{count} トラックをインポートしました（Serato）"
-      }
+      },
+      "staleRetired": "旧バージョンのDJライブラリインポートを削除しました（バージョンアップ）- 重複を整理"
     },
     "remote": {
       "up": "上へ",

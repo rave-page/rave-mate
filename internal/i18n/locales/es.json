@@ -754,6 +754,8 @@
       "refreshedToast": "{n} pistas nuevas añadidas a {name}",
       "refreshAllToast": "{n} pistas añadidas en {m} playlists de carpeta",
       "refreshNone": "No hay archivos nuevos en la carpeta",
+      "refreshing": "Actualizando listas de carpeta…",
+      "refreshBusy": "Ya hay una actualización de carpeta en curso",
       "noFolder": "sin carpeta desde la que actualizar (playlist vacía, vínculo no resoluble)",
       "menu": {
         "cloud": "Nube",
@@ -1018,7 +1020,8 @@
         "many": "Se importaron {count} pistas (Serato)",
         "one": "Se importó {count} pista (Serato)",
         "other": "Se importaron {count} pistas (Serato)"
-      }
+      },
+      "staleRetired": "Se eliminó una importación de biblioteca DJ obsoleta (actualización de versión): duplicados limpiados"
     },
     "remote": {
       "up": "Subir",

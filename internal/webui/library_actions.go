@@ -1091,6 +1091,16 @@ func (u *UI) libPersist(src musiclib.Source, tracks []musiclib.Track, pls []musi
 	if len(sessions) > 0 {
 		u.logErr("sessions", db.SyncSessions(sr.ID, sessions))
 	}
+	// A version upgrade moves the collection file → this import created a NEW source next
+	// to the old one; retire the superseded sibling or every track+playlist shows twice.
+	lines, err := db.RetireStaleAppSources()
+	u.logErr("retire sources", err)
+	for _, ln := range lines {
+		u.log.Info("webui", ln, nil)
+	}
+	if len(lines) > 0 {
+		u.toast(i18n.T("library.toast.staleRetired"))
+	}
 }
 
 func (u *UI) libReload() {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rave.page/mate/internal/cuepattern"
@@ -66,15 +67,16 @@ type UI struct {
 	ovlStyle   ovlStyleCache    // overlay-style.json fader flag (mtime-watched) - off the render goroutine
 	wuCache    worldsUnityCache // Worlds-tab Unity project inspects (fs stat sweep) - off the render goroutine
 
-	gf      gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
-	fi      fiState      // folder-import modal/run state (library_folderimport.go)
-	bpr     bprState     // BPM target-range rules + enforcement (library_bpmrange.go)
-	tf      tfState      // tag-fixer scan/apply state (library_tagfix.go)
-	re      reencSt      // batch re-encode modal state (library_reencode.go)
-	ae      aeSt         // automation create/edit form state (automations_editor.go)
-	as      asSt         // automation schedule form state (automations_schedules.go)
-	ar      arSt         // automation run-now modal state (automations_runnow.go)
-	gfTrain gfTrainState // model fine-tuning state (settings_gridfix_model.go)
+	gf        gfState      // beatgrid-fixer cockpit run state (library_gridfix.go)
+	fi        fiState      // folder-import modal/run state (library_folderimport.go)
+	plRefresh atomic.Bool  // folder-playlist refresh single-flight (library_plrefresh.go)
+	bpr       bprState     // BPM target-range rules + enforcement (library_bpmrange.go)
+	tf        tfState      // tag-fixer scan/apply state (library_tagfix.go)
+	re        reencSt      // batch re-encode modal state (library_reencode.go)
+	ae        aeSt         // automation create/edit form state (automations_editor.go)
+	as        asSt         // automation schedule form state (automations_schedules.go)
+	ar        arSt         // automation run-now modal state (automations_runnow.go)
+	gfTrain   gfTrainState // model fine-tuning state (settings_gridfix_model.go)
 
 	ceMu    sync.Mutex // guards ceState/ceStore/cePref lazy-init (library_cueedit.go)
 	ceState *ceSt

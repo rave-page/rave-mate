@@ -1120,6 +1120,8 @@
       "refreshedToast": "{n} new tracks added to {name}",
       "refreshAllToast": "{n} tracks added across {m} folder playlists",
       "refreshNone": "No new files in the folder",
+      "refreshing": "Refreshing folder playlists…",
+      "refreshBusy": "A folder refresh is already running",
       "noFolder": "no folder to refresh from (empty playlist, unresolvable binding)",
       "menu": {
         "cloud": "Cloud",
@@ -1384,7 +1386,8 @@
         "many": "Imported {count} tracks (Serato)",
         "one": "Imported {count} track (Serato)",
         "other": "Imported {count} tracks (Serato)"
-      }
+      },
+      "staleRetired": "Removed a superseded DJ-library import (version upgrade) - duplicates cleaned"
     },
     "remote": {
       "up": "Up",

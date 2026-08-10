@@ -339,7 +339,9 @@ func (d *DB) UpsertSource(s musiclib.Source, collectionMtime int64) (SourceRow, 
 func (d *DB) SourceByAppPath(app, path string) (SourceRow, error) {
 	var r SourceRow
 	err := d.db.QueryRow(
-		`SELECT id, app, version, path, COALESCE(collection_mtime,0) FROM sources WHERE app=? AND path=?`,
+		// COALESCE(version,''): EnsureSource-created rows (folder sources) have NULL version;
+		// a bare scan into string errored EVERY later lookup → folder refresh could never persist.
+		`SELECT id, app, COALESCE(version,''), path, COALESCE(collection_mtime,0) FROM sources WHERE app=? AND path=?`,
 		app, path).Scan(&r.ID, &r.App, &r.Version, &r.Path, &r.CollectionMtime)
 	if err == sql.ErrNoRows {
 		return SourceRow{}, nil
@@ -370,7 +372,7 @@ func (d *DB) EnsureSource(app, path string) (int64, error) {
 func (d *DB) FirstSource() (SourceRow, bool, error) {
 	var r SourceRow
 	err := d.db.QueryRow(
-		`SELECT id, app, version, path, COALESCE(collection_mtime,0)
+		`SELECT id, app, COALESCE(version,''), path, COALESCE(collection_mtime,0)
 		   FROM sources ORDER BY imported_at DESC LIMIT 1`).
 		Scan(&r.ID, &r.App, &r.Version, &r.Path, &r.CollectionMtime)
 	if err == sql.ErrNoRows {

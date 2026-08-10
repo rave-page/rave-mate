@@ -396,16 +396,22 @@ func (u *UI) fiPersistLoose(dir string, paths []string) int {
 		u.logErr("folder source", err)
 		return 0
 	}
+	// Probe BEFORE opening the write txn: probing N files takes seconds-to-minutes, and a
+	// txn held open that long starves every other DB writer (busy_timeout 5s).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracks := make([]musiclib.Track, 0, len(fresh))
+	for _, p := range fresh {
+		tracks = append(tracks, u.fiProbeOne(ctx, p))
+	}
 	sy, err := db.BeginTrackUpsert(srcID)
 	if err != nil {
 		u.logErr("begin upsert", err)
 		return 0
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	n := 0
-	for _, p := range fresh {
-		if e := sy.Add(u.fiProbeOne(ctx, p)); e != nil {
+	for _, t := range tracks {
+		if e := sy.Add(t); e != nil {
 			sy.Rollback()
 			u.logErr("track add", e)
 			return 0

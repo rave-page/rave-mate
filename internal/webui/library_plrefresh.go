@@ -107,6 +107,10 @@ func (u *UI) libRefreshFolderPlaylists(autoOnly bool) (added, lists int) {
 // libAutoRefreshFolders runs the auto-flagged sweep once per app run (kicked by the
 // first Library body render; background - a slow network folder must not block UI).
 func (u *UI) libAutoRefreshFolders() {
+	if !u.plRefresh.CompareAndSwap(false, true) {
+		return // a manual sweep is running; the auto pass re-arms next launch
+	}
+	defer u.plRefresh.Store(false)
 	added, lists := u.libRefreshFolderPlaylists(true)
 	if added > 0 {
 		u.toast(i18n.T("library.pl.refreshAllToast", i18n.A{"n": fmt.Sprint(added), "m": fmt.Sprint(lists)}))
@@ -114,10 +118,27 @@ func (u *UI) libAutoRefreshFolders() {
 	}
 }
 
+// plRefreshStart claims the refresh single-flight slot. A sweep probes + writes for
+// a while with no visible progress - users double-click, and overlapping sweeps race
+// (concurrent adds + duplicate probe storms, live incident 2026-08-10). One at a time,
+// with an immediate toast so the click visibly took.
+func (u *UI) plRefreshStart() bool {
+	if !u.plRefresh.CompareAndSwap(false, true) {
+		u.toast(i18n.T("library.pl.refreshBusy"))
+		return false
+	}
+	u.toast(i18n.T("library.pl.refreshing"))
+	return true
+}
+
 func init() {
 	onPrefix("lib-pl-refresh:", func(u *UI, m actMsg) {
 		id := int64(atoi(m.arg("lib-pl-refresh:")))
+		if !u.plRefreshStart() {
+			return
+		}
 		u.bg(func() { // os.ReadDir + DB write off the actWorker
+			defer u.plRefresh.Store(false)
 			n, name, err := u.libPlaylistRefreshFolder(id)
 			if u.stopped() {
 				return
@@ -134,7 +155,11 @@ func init() {
 		})
 	})
 	onExact("lib-pl-refresh-all", func(u *UI, _ actMsg) {
+		if !u.plRefreshStart() {
+			return
+		}
 		u.bg(func() { // sweeps every folder playlist (os.ReadDir + DB writes) off the actWorker
+			defer u.plRefresh.Store(false)
 			added, lists := u.libRefreshFolderPlaylists(false)
 			if u.stopped() {
 				return

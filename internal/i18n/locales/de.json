@@ -763,6 +763,8 @@
       "refreshedToast": "{n} neue Tracks zu {name} hinzugefügt",
       "refreshAllToast": "{n} Tracks über {m} Ordner-Playlists hinzugefügt",
       "refreshNone": "Keine neuen Dateien im Ordner",
+      "refreshing": "Ordner-Playlists werden aktualisiert…",
+      "refreshBusy": "Eine Ordner-Aktualisierung läuft bereits",
       "noFolder": "kein Ordner zum Auffrischen (leere Playlist, Bindung nicht auflösbar)",
       "menu": {
         "cloud": "Cloud",
@@ -1027,7 +1029,8 @@
         "many": "{count} Tracks importiert (Serato)",
         "one": "{count} Track importiert (Serato)",
         "other": "{count} Tracks importiert (Serato)"
-      }
+      },
+      "staleRetired": "Veralteten DJ-Bibliothek-Import entfernt (Versions-Upgrade) - Duplikate bereinigt"
     },
     "remote": {
       "up": "Nach oben",

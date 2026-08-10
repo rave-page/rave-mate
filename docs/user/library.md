@@ -46,7 +46,16 @@ DJ software never re-scans a "folder as playlist" - files added later stay missi
 Any file-backed playlist's **⋯ More** menu has **Refresh from folder** (uses the stored
 folder binding, or the members' dominant directory for Traktor imports) and an
 **Auto-refresh** toggle (applied once per app run). **Maintenance → Refresh folder
-playlists…** sweeps them all.
+playlists…** sweeps them all. One sweep runs at a time - a toast confirms the start,
+another click while it runs is a no-op.
+
+## DJ-software version upgrades
+
+A version upgrade (e.g. Traktor 4.2 → 4.5) moves the collection file, so the next
+import would land beside the old one and double every track + playlist. rave-mate
+retires the superseded import automatically - after each import and once at startup -
+whenever the new collection covers the old one's paths. A genuinely different library
+(another PC's collection) is never touched.
 
 ## Multi-select
 

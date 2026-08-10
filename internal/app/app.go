@@ -246,6 +246,17 @@ func run(parent context.Context, serviceMode bool) error {
 			lib = nil
 		}
 	}
+	// Startup heal: a DJ-software upgrade that ran before this build shipped left a
+	// superseded source doubling the library - retire it now (no-op on a clean DB).
+	if lib != nil {
+		lines, herr := lib.RetireStaleAppSources()
+		if herr != nil {
+			log.Warn("app", "stale-source heal failed", map[string]any{"error": herr.Error()})
+		}
+		for _, ln := range lines {
+			log.Info("app", ln, nil)
+		}
+	}
 
 	// Stable long-term node identity (Ed25519) for the LAN peer link - persisted in the
 	// store, sealed where the OS has a secret API. Ephemeral (non-persisted) if no store.

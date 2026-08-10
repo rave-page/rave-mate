@@ -754,6 +754,8 @@
       "refreshedToast": "{n} nouvelles pistes ajoutées à {name}",
       "refreshAllToast": "{n} pistes ajoutées sur {m} playlists-dossiers",
       "refreshNone": "Aucun nouveau fichier dans le dossier",
+      "refreshing": "Actualisation des playlists de dossier…",
+      "refreshBusy": "Une actualisation de dossier est déjà en cours",
       "noFolder": "aucun dossier à actualiser (playlist vide, liaison introuvable)",
       "menu": {
         "cloud": "Cloud",
@@ -1018,7 +1020,8 @@
         "many": "{count} pistes importées (Serato)",
         "one": "{count} piste importée (Serato)",
         "other": "{count} pistes importées (Serato)"
-      }
+      },
+      "staleRetired": "Import de bibliothèque DJ obsolète supprimé (mise à niveau de version) - doublons nettoyés"
     },
     "remote": {
       "up": "Remonter",
