@@ -21,8 +21,10 @@ waveform are prepared in the background from the moment the track loads, so they
 the card appears.
 
 Styling (colors, opacity, layout) lives in the overlay settings cards; overlays share the
-brand-token look by default. Per-VRChat-world overlay layouts can auto-apply when you travel
-(see the VRChat guide).
+brand-token look by default. The browser editor's **Card** group also has a **shadow**
+toggle - off removes the dark drop shadow behind each card (with opacity at 0 the card
+floats fully clean over bright video). Per-VRChat-world overlay layouts can auto-apply
+when you travel (see the VRChat guide).
 
 Overlay server settings apply automatically - a port or render-scale change restarts the
 affected output in place (no feature off/on), and the auto-managed OBS browser source

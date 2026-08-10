@@ -156,6 +156,7 @@
     <label><span>border col</span><input id="cbc" type="color"></label>
     <label><span>border w</span><input id="cbw" type="range" min="0" max="6" step="1"></label>
     <label><span>radius</span><input id="crad" type="range" min="0" max="32" step="1"></label>
+    <label title="Drop shadow behind the card. Off = no dark halo around the card - cleaner over bright video."><span>shadow</span><input id="csh" type="checkbox"></label>
     <label title="Fade each card out as its channel fader is pulled down (only when fader data is available - e.g. a controller). Off = cards stay full opacity."><span>fade by fader</span><input id="cfr" type="checkbox"></label>
     <label><span>accent</span><input id="ap" type="color"></label>
     <label><span>accent 2</span><input id="a2" type="color"></label>
@@ -508,9 +509,12 @@
     const rad=(cd.radius!=null?cd.radius:s.radius);
     if(rad!=null) root.setProperty("--radius", rad+"px");
     const bstyle=cd.border||"solid", bw=(cd.borderW!=null?cd.borderW:1), bc=cd.borderColor||"";
-    if(bstyle==="none"){ root.setProperty("--card-bd-w","0px"); root.setProperty("--card-glow","0 10px 30px rgba(0,0,0,.45)"); }
+    // card.shadow=false kills the dark drop. Emit a zero shadow, never "none": --card-glow is
+    // spliced into the onair box-shadow LIST, where `none` voids the whole declaration.
+    const drop=o=>cd.shadow===false?"0 0 0 0 transparent":"0 10px 30px rgba(0,0,0,"+o+")";
+    if(bstyle==="none"){ root.setProperty("--card-bd-w","0px"); root.setProperty("--card-glow",drop(".45")); }
     else { root.setProperty("--card-bd-w",bw+"px"); root.setProperty("--card-bd-style","solid"); if(bc) root.setProperty("--card-bd-c",bc);
-      root.setProperty("--card-glow", (bstyle==="glow"&&bc?("0 0 22px "+bc+","):"")+"0 10px 30px rgba(0,0,0,.5)"); }
+      root.setProperty("--card-glow", (bstyle==="glow"&&bc?("0 0 22px "+bc+","):"")+drop(".5")); }
     refreshCssCache();                            // accent colours changed → refresh the per-frame cache
     for(const ws of wstate.values()) ws._curveSig=null; // accent/EQ colours affect the curve → force redraw
     requestAnimationFrame(repositionAll); // card size changed -> re-anchor
@@ -865,6 +869,7 @@
     $("cbc").oninput=()=>setCard("borderColor",$("cbc").value);
     $("cbw").oninput=()=>setCard("borderW",parseInt($("cbw").value));
     $("crad").oninput=()=>setCard("radius",parseInt($("crad").value));
+    $("csh").onchange=()=>setCard("shadow",$("csh").checked);
     $("cfr").onchange=()=>{style.cardFaderReact=$("cfr").checked;applyStyle(style);saveStyle();};
     $("ap").oninput=()=>{style.accent=$("ap").value;applyStyle(style);saveStyle();};
     $("a2").oninput=()=>{style.accent2=$("a2").value;applyStyle(style);saveStyle();};
@@ -917,6 +922,7 @@
       $("sc").value=style.scale!=null?style.scale:1;
       $("ac").value=style.cardColor||"#16161a"; $("op").value=style.bgOpacity!=null?style.bgOpacity:0.82;
       const cd=style.card||{}; $("cbc").value=cd.borderColor||"#F70864"; $("cbw").value=cd.borderW!=null?cd.borderW:1; $("crad").value=cd.radius!=null?cd.radius:14;
+      $("csh").checked=cd.shadow!==false;
       $("cfr").checked=!!style.cardFaderReact;
       $("ap").value=style.accent||"#F70864"; $("a2").value=style.accent2||"#08F79B";
       $("zm").value=style.zoomSeconds>0?style.zoomSeconds:WAVE.zoomSeconds; $("ph").value=(style.playheadPct>0&&style.playheadPct<1)?style.playheadPct:WAVE.playheadPct;
