@@ -27,8 +27,9 @@
     opacity:0; transform:translateY(6px) scale(var(--scale)); transform-origin:top left; transition:opacity .2s ease, transform .2s ease;
   }
   .deck.show{opacity:1; transform:scale(var(--scale))}
-  /* on-air keeps the custom border colour, just adds an accent glow on top of the card's own shadow */
-  .deck.onair{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),0 0 26px color-mix(in srgb,var(--accent) 28%,transparent),var(--card-glow, 0 10px 30px rgba(0,0,0,.5))}
+  /* on-air keeps the custom border colour, just adds an accent glow on top of the card's own shadow.
+     The 26px outer glow rides --onair-glow so shadow-off suppresses it too (only the 1px ring stays). */
+  .deck.onair{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),var(--onair-glow, 0 0 26px color-mix(in srgb,var(--accent) 28%,transparent)),var(--card-glow, 0 10px 30px rgba(0,0,0,.5))}
   .deck.dragging{transition:none; cursor:grabbing}
   body.edit .deck{cursor:grab}
   /* edit-mode placeholder: a deck not currently playing, shown so its position can be set */
@@ -509,9 +510,11 @@
     const rad=(cd.radius!=null?cd.radius:s.radius);
     if(rad!=null) root.setProperty("--radius", rad+"px");
     const bstyle=cd.border||"solid", bw=(cd.borderW!=null?cd.borderW:1), bc=cd.borderColor||"";
-    // card.shadow=false kills the dark drop. Emit a zero shadow, never "none": --card-glow is
-    // spliced into the onair box-shadow LIST, where `none` voids the whole declaration.
+    // card.shadow=false kills the dark drop AND the onair outer glow (a light accent renders it
+    // as a white halo). Emit a zero shadow, never "none": both vars are spliced into the onair
+    // box-shadow LIST, where `none` voids the whole declaration. Only the 1px onair ring stays.
     const drop=o=>cd.shadow===false?"0 0 0 0 transparent":"0 10px 30px rgba(0,0,0,"+o+")";
+    if(cd.shadow===false) root.setProperty("--onair-glow","0 0 0 0 transparent"); else root.removeProperty("--onair-glow");
     if(bstyle==="none"){ root.setProperty("--card-bd-w","0px"); root.setProperty("--card-glow",drop(".45")); }
     else { root.setProperty("--card-bd-w",bw+"px"); root.setProperty("--card-bd-style","solid"); if(bc) root.setProperty("--card-bd-c",bc);
       root.setProperty("--card-glow", (bstyle==="glow"&&bc?("0 0 22px "+bc+","):"")+drop(".5")); }
