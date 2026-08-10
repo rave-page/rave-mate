@@ -682,7 +682,8 @@
     // Live style/layout push: a non-edit overlay (the OBS source) applies editor changes instantly,
     // with no manual source reload. The editor tab ignores echoes (it owns style while editing).
     if(!EDIT && styleLive){ const sj=JSON.stringify(styleLive); if(sj!==_liveStyleSig){ _liveStyleSig=sj;
-      style=styleLive; applyStyle(style); for(const ws of wstate.values()){ ws._curveSig=null; ws._imgSig=null; } } }
+      style=styleLive; applyStyle(Object.assign({},style,styleFromQuery())); // per-source query overrides survive live pushes
+      for(const ws of wstate.values()){ ws._curveSig=null; ws._imgSig=null; } } }
     if(!EDIT && layoutLive){ const lj=JSON.stringify(layoutLive); if(lj!==_liveLayoutSig){ _liveLayoutSig=lj;
       layout=layoutLive; for(const k in layout){ const p=layout[k]; if(p&&p.ax===undefined&&(p.x!==undefined||p.y!==undefined)) layout[k]={ax:"l",ox:p.x||0,ay:"t",oy:p.y||0}; } repositionAll(); } }
     const seen=new Set();
@@ -949,7 +950,9 @@
     try{ const og=JSON.parse(localStorage.getItem("ovlGradPresets")||"[]"), oc=JSON.parse(localStorage.getItem("ovlColorPresets")||"[]");
       let mig=false; if(og.length&&!PRESETS.grads.length){ PRESETS.grads=og; mig=true; } if(oc.length&&!PRESETS.colors.length){ PRESETS.colors=oc; mig=true; }
       if(mig) savePresets(); }catch(_){}
-    applyStyle(style); applyStyle(styleFromQuery());
+    // ONE merged apply: a second applyStyle(queryOverrides) ran with no .card and clobbered
+    // border/shadow back to defaults on every fresh load (the OBS source never saw shadow-off).
+    applyStyle(Object.assign({}, style, styleFromQuery()));
     if(window._syncControls) window._syncControls();
     if(window._reloadPresetsUI) window._reloadPresetsUI();
     if(EDIT){ for(const dk of new Set(["A","B","C","D",...Object.keys(layout)])){
