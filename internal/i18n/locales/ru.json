@@ -63,14 +63,17 @@
   "editor": {
     "align": "Выравнивание",
     "alignCenter": "по центру",
+    "alignHint": "Выравнивание по холсту · перетаскивание двигает, маркеры масштабируют/вращают · ⇧ = пропорции / 15° / ось · стрелки сдвигают (⇧ ×10)",
     "alignLeft": "по левому краю",
     "alignRight": "по правому краю",
     "angle": "Угол",
     "blend": "Смешивание",
+    "browse": "Обзор…",
     "canvasSize": "Холст {w}×{h}",
     "color": "Цвет",
     "disabledHint": "Медиаредактор выключен - включите его в Настройки ▸ Функции.",
     "docInfo": "Документ {w} × {h} · {count} слоёв",
+    "duplicate": "Дублировать",
     "empty": {
       "noTemplates": "Нет шаблонов."
     },
@@ -102,6 +105,8 @@
     },
     "letterSpacing": "Межбукв.",
     "lineHeight": "Интерлин.",
+    "modeImage": "Изображение",
+    "modeVideo": "Видео",
     "name": "Имя",
     "noLayerSelected": "Слой не выбран.",
     "noLayers": "Слоёв пока нет - добавьте один с панели инструментов.",
@@ -109,6 +114,16 @@
     "path": "Путь",
     "placeholderHint": "Плейсхолдеры вроде {track.title} заполняются вживую из того, что играет. Кликните по слою, чтобы выбрать его.",
     "placeholdersList": "Плейсхолдеры: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram вертикальный",
+      "igPost": "Пост Instagram",
+      "overlay": "Оверлей стрима",
+      "posterA3": "Постер A3 300dpi",
+      "posterA4": "Постер A4 300dpi",
+      "story": "Сторис / Reels",
+      "xHeader": "Шапка X",
+      "ytThumb": "Миниатюра YouTube"
+    },
     "redo": "Повторить",
     "rotation": "Поворот",
     "saveTemplate": "Сохранить как шаблон…",
@@ -139,6 +154,7 @@
     },
     "undo": "Отменить",
     "ungroup": "Разгруппировать",
+    "videoEmpty": "Видеорежим уже на подходе: монтаж, вертикальный рефрейм и эффекты.",
     "w": "Ш",
     "x": "X",
     "y": "Y"

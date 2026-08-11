@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xb5702f0a
+	wireSchemaHash         uint32 = 0x65abbca0
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -3230,6 +3230,12 @@ func (v edLayer) encodeWire(w *zigui.WireWriter) {
 	w.Struct(16, func() { v.Paint.encodeWire(w) })
 	w.Struct(17, func() { v.Inner.encodeWire(w) })
 	w.List(18, len(v.Children), func(i int) { v.Children[i].encodeWire(w) })
+	w.Bool(19, v.Handles)
+}
+
+func (v edGuideSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Vert)
+	w.Str(2, v.Pos)
 }
 
 func (v edPreviewState) encodeWire(w *zigui.WireWriter) {
@@ -3238,6 +3244,8 @@ func (v edPreviewState) encodeWire(w *zigui.WireWriter) {
 	w.List(3, len(v.Layers), func(i int) { v.Layers[i].encodeWire(w) })
 	w.Str(4, v.Cap)
 	w.Str(5, v.Hint)
+	w.Bool(6, v.Interactive)
+	w.List(7, len(v.Guides), func(i int) { v.Guides[i].encodeWire(w) })
 }
 
 func (v edRow) encodeWire(w *zigui.WireWriter) {
@@ -3305,6 +3313,13 @@ func (v edInspState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(17, func() { v.End.encodeWire(w) })
 	w.Struct(18, func() { v.Path.encodeWire(w) })
 	w.Struct(19, func() { v.Fit.encodeWire(w) })
+	w.Struct(20, func() { v.Browse.encodeWire(w) })
+}
+
+func (v edModeTab) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Val)
+	w.Str(2, v.Label)
+	w.Bool(3, v.Active)
 }
 
 func (v edViewState) encodeWire(w *zigui.WireWriter) {
@@ -3321,6 +3336,11 @@ func (v edViewState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(11, func() { v.Preview.encodeWire(w) })
 	w.Struct(12, func() { v.Layers.encodeWire(w) })
 	w.Struct(13, func() { v.Insp.encodeWire(w) })
+	w.List(14, len(v.Modes), func(i int) { v.Modes[i].encodeWire(w) })
+	w.Bool(15, v.VideoMode)
+	w.Str(16, v.VideoEmpty)
+	w.List(17, len(v.Row3), func(i int) { v.Row3[i].encodeWire(w) })
+	w.Str(18, v.AlignHint)
 }
 
 func (v ceTbDropSt) encodeWire(w *zigui.WireWriter) {

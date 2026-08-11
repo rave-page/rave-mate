@@ -1438,12 +1438,16 @@ var schema = []msg{
 	},
 	{
 		name: "EdLayer", goT: "edLayer", zigT: "editor.Layer",
-		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer")},
+		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer"), b(19, "Handles", "handles")},
+	},
+	{
+		name: "EdGuide", goT: "edGuideSt", zigT: "editor.Guide",
+		fs: []field{b(1, "Vert", "vert"), s(2, "Pos", "pos")},
 	},
 	{
 		name: "EdPreview", goT: "edPreviewState", zigT: "editor.Preview", id: 91,
 		doc: "#ed-preview live composite",
-		fs:  []field{s(1, "AW", "aw"), s(2, "AH", "ah"), li(3, "Layers", "layers", "EdLayer"), s(4, "Cap", "cap"), s(5, "Hint", "hint")},
+		fs:  []field{s(1, "AW", "aw"), s(2, "AH", "ah"), li(3, "Layers", "layers", "EdLayer"), s(4, "Cap", "cap"), s(5, "Hint", "hint"), b(6, "Interactive", "interactive"), li(7, "Guides", "guides", "EdGuide")},
 	},
 	{
 		name: "EdRow", goT: "edRow", zigT: "editor.Row",
@@ -1467,12 +1471,16 @@ var schema = []msg{
 	},
 	{
 		name: "EdInsp", goT: "edInspState", zigT: "editor.Insp",
-		fs: []field{b(1, "HasSel", "hasSel"), s(2, "Empty", "empty"), st(3, "Name", "name", "UiField"), st(4, "X", "x", "UiField"), st(5, "Y", "y", "UiField"), b(6, "ShowWH", "showWh"), st(7, "W", "w", "UiField"), st(8, "H", "h", "UiField"), st(9, "SX", "sx", "UiField"), st(10, "SY", "sy", "UiField"), st(11, "Rot", "rot", "UiField"), s(12, "Kind", "kind"), st(13, "Text", "text", "EdInspText"), st(14, "Fill", "fill", "EdColorRow"), st(15, "Angle", "angle", "UiField"), st(16, "Start", "start", "EdColorRow"), st(17, "End", "end", "EdColorRow"), st(18, "Path", "path", "UiField"), st(19, "Fit", "fit", "SelState")},
+		fs: []field{b(1, "HasSel", "hasSel"), s(2, "Empty", "empty"), st(3, "Name", "name", "UiField"), st(4, "X", "x", "UiField"), st(5, "Y", "y", "UiField"), b(6, "ShowWH", "showWh"), st(7, "W", "w", "UiField"), st(8, "H", "h", "UiField"), st(9, "SX", "sx", "UiField"), st(10, "SY", "sy", "UiField"), st(11, "Rot", "rot", "UiField"), s(12, "Kind", "kind"), st(13, "Text", "text", "EdInspText"), st(14, "Fill", "fill", "EdColorRow"), st(15, "Angle", "angle", "UiField"), st(16, "Start", "start", "EdColorRow"), st(17, "End", "end", "EdColorRow"), st(18, "Path", "path", "UiField"), st(19, "Fit", "fit", "SelState"), st(20, "Browse", "browse", "UiBtn")},
+	},
+	{
+		name: "EdModeTab", goT: "edModeTab", zigT: "editor.ModeTab",
+		fs: []field{s(1, "Val", "val"), s(2, "Label", "label"), b(3, "Active", "active")},
 	},
 	{
 		name: "EdView", goT: "edViewState", zigT: "editor.State", id: 92,
 		doc: "Editor tab (full view)",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Disabled", "disabled"), s(4, "DisabledSub", "disabledSub"), s(5, "DisabledHint", "disabledHint"), s(6, "SecPreview", "secPreview"), s(7, "SecLayers", "secLayers"), s(8, "SecInspector", "secInspector"), li(9, "Row1", "row1", "UiBtn"), li(10, "Row2", "row2", "UiBtn"), st(11, "Preview", "preview", "EdPreview"), st(12, "Layers", "layers", "EdLayers"), st(13, "Insp", "insp", "EdInsp")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Disabled", "disabled"), s(4, "DisabledSub", "disabledSub"), s(5, "DisabledHint", "disabledHint"), s(6, "SecPreview", "secPreview"), s(7, "SecLayers", "secLayers"), s(8, "SecInspector", "secInspector"), li(9, "Row1", "row1", "UiBtn"), li(10, "Row2", "row2", "UiBtn"), st(11, "Preview", "preview", "EdPreview"), st(12, "Layers", "layers", "EdLayers"), st(13, "Insp", "insp", "EdInsp"), li(14, "Modes", "modes", "EdModeTab"), b(15, "VideoMode", "videoMode"), s(16, "VideoEmpty", "videoEmpty"), li(17, "Row3", "row3", "UiBtn"), s(18, "AlignHint", "alignHint")},
 	},
 	{
 		name: "CeTbDrop", goT: "ceTbDropSt", zigT: "cueedit.TbDrop",

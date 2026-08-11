@@ -63,14 +63,17 @@
   "editor": {
     "align": "Ausrichten",
     "alignCenter": "zentriert",
+    "alignHint": "An Leinwand ausrichten · Ziehen bewegt, Griffe skalieren/rotieren · ⇧ = Seitenverhältnis / 15° / Achse · Pfeile verschieben (⇧ ×10)",
     "alignLeft": "links",
     "alignRight": "rechts",
     "angle": "Winkel",
     "blend": "Mischen",
+    "browse": "Durchsuchen…",
     "canvasSize": "Leinwand {w}×{h}",
     "color": "Farbe",
     "disabledHint": "Medien-Editor ist deaktiviert - aktiviere ihn in Einstellungen ▸ Funktionen.",
     "docInfo": "{w} × {h} Dokument · {count} Ebenen",
+    "duplicate": "Duplizieren",
     "empty": {
       "noTemplates": "Keine Vorlagen."
     },
@@ -102,6 +105,8 @@
     },
     "letterSpacing": "Zeichenabst.",
     "lineHeight": "Zeilenh.",
+    "modeImage": "Bild",
+    "modeVideo": "Video",
     "name": "Name",
     "noLayerSelected": "Keine Ebene ausgewählt.",
     "noLayers": "Noch keine Ebenen - füge eine über die Werkzeugleiste hinzu.",
@@ -109,6 +114,16 @@
     "path": "Pfad",
     "placeholderHint": "Platzhalter wie {track.title} werden live aus der Wiedergabe gefüllt. Klicke eine Ebene an, um sie auszuwählen.",
     "placeholdersList": "Platzhalter: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram Hochformat",
+      "igPost": "Instagram-Post",
+      "overlay": "Stream-Overlay",
+      "posterA3": "Poster A3 300dpi",
+      "posterA4": "Poster A4 300dpi",
+      "story": "Story / Reel",
+      "xHeader": "X-Header",
+      "ytThumb": "YouTube-Thumbnail"
+    },
     "redo": "Wiederholen",
     "rotation": "Drehung",
     "saveTemplate": "Als Vorlage speichern…",
@@ -139,6 +154,7 @@
     },
     "undo": "Rückgängig",
     "ungroup": "Gruppierung aufheben",
+    "videoEmpty": "Videomodus kommt gleich – Schnitt, Hochformat-Reframing & Effekte.",
     "w": "B",
     "x": "X",
     "y": "Y"

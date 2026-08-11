@@ -61,6 +61,7 @@ type edLayer struct {
 	Group   bool   `json:"group"`
 	ID      string `json:"id"`
 	Sel     bool   `json:"sel"`
+	Handles bool   `json:"handles"` // selected unlocked leaf: resize/rotate handles
 	Blend   string `json:"blend"`   // "" = normal → no declaration
 	Opacity string `json:"opacity"` // "" = 1 → no declaration
 
@@ -82,13 +83,21 @@ type edLayer struct {
 	Children []edLayer `json:"children"`
 }
 
+// edGuideSt is one active snap guide line (position in %).
+type edGuideSt struct {
+	Vert bool   `json:"vert"`
+	Pos  string `json:"pos"`
+}
+
 // edPreviewState is the #ed-preview fragment (live WYSIWYG composite + caption).
 type edPreviewState struct {
-	AW     string    `json:"aw"` // stage aspect-ratio numerator
-	AH     string    `json:"ah"`
-	Layers []edLayer `json:"layers"`
-	Cap    string    `json:"cap"`
-	Hint   string    `json:"hint"`
+	AW          string      `json:"aw"` // stage aspect-ratio numerator
+	AH          string      `json:"ah"`
+	Interactive bool        `json:"interactive"` // stage carries data-actpos + #ed-stage-body
+	Layers      []edLayer   `json:"layers"`
+	Guides      []edGuideSt `json:"guides"`
+	Cap         string      `json:"cap"`
+	Hint        string      `json:"hint"`
 }
 
 // edRow is one layers-panel row (flat, in document order; rendered top-first).
@@ -155,14 +164,22 @@ type edInspState struct {
 	SY     uiField `json:"sy"`
 	Rot    uiField `json:"rot"`
 
-	Kind  string          `json:"kind"` // ""|text|solid|gradient|image
-	Text  edInspTextState `json:"text"`
-	Fill  edColorRowState `json:"fill"`  // solid
-	Angle uiField         `json:"angle"` // gradient
-	Start edColorRowState `json:"start"`
-	End   edColorRowState `json:"end"`
-	Path  uiField         `json:"path"` // image
-	Fit   selState        `json:"fit"`
+	Kind   string          `json:"kind"` // ""|text|solid|gradient|image
+	Text   edInspTextState `json:"text"`
+	Fill   edColorRowState `json:"fill"`  // solid
+	Angle  uiField         `json:"angle"` // gradient
+	Start  edColorRowState `json:"start"`
+	End    edColorRowState `json:"end"`
+	Path   uiField         `json:"path"`   // image
+	Browse uiBtn           `json:"browse"` // image: native file picker
+	Fit    selState        `json:"fit"`
+}
+
+// edModeTab is one entry of the image/video mode switcher.
+type edModeTab struct {
+	Val    string `json:"val"`
+	Label  string `json:"label"`
+	Active bool   `json:"active"`
 }
 
 // edViewState is the resolved render state for the Editor view (JSON → Zig).
@@ -177,8 +194,14 @@ type edViewState struct {
 	SecLayers    string `json:"secLayers"`
 	SecInspector string `json:"secInspector"`
 
-	Row1 []uiBtn `json:"row1"` // toolbar: add + templates
-	Row2 []uiBtn `json:"row2"` // toolbar: undo/redo/save/export/canvas
+	Modes      []edModeTab `json:"modes"`      // image/video switcher
+	VideoMode  bool        `json:"videoMode"`  // render the video surface instead
+	VideoEmpty string      `json:"videoEmpty"` // P1 stub body (replaced by the video editor)
+
+	Row1      []uiBtn `json:"row1"`      // toolbar: add + templates
+	Row2      []uiBtn `json:"row2"`      // toolbar: undo/redo/dup/save/export/canvas
+	Row3      []uiBtn `json:"row3"`      // toolbar: canvas align
+	AlignHint string  `json:"alignHint"` // explains the align glyph row
 
 	Preview edPreviewState `json:"preview"`
 	Layers  edLayersState  `json:"layers"`
@@ -192,8 +215,8 @@ func edNilSel() selState { return selState{Rows: []selRow{}} }
 // emptyEdState zeroes the view with non-nil slices everywhere.
 func emptyEdState() edViewState {
 	return edViewState{
-		Row1: []uiBtn{}, Row2: []uiBtn{},
-		Preview: edPreviewState{Layers: []edLayer{}},
+		Modes: []edModeTab{}, Row1: []uiBtn{}, Row2: []uiBtn{}, Row3: []uiBtn{},
+		Preview: edPreviewState{Layers: []edLayer{}, Guides: []edGuideSt{}},
 		Layers:  edLayersState{Rows: []edRow{}, Actions: edActionsState{Blend: edNilSel()}},
 		Insp:    edInspState{Text: edInspTextState{Font: edNilSel(), Align: edNilSel()}, Fit: edNilSel()},
 	}
@@ -215,14 +238,38 @@ func (u *UI) editorState() edViewState {
 	defer editor.mu.Unlock()
 
 	st.Sub = i18n.T("editor.subtitle")
+	mode := edModeOr()
+	st.Modes = []edModeTab{
+		{Val: "image", Label: i18n.T("editor.modeImage"), Active: mode == "image"},
+		{Val: "video", Label: i18n.T("editor.modeVideo"), Active: mode == "video"},
+	}
+	if mode == "video" {
+		st.VideoMode = true
+		st.VideoEmpty = i18n.T("editor.videoEmpty")
+		return st
+	}
 	st.SecPreview = i18n.T("editor.sectionPreview")
 	st.SecLayers = i18n.T("editor.sectionLayers")
 	st.SecInspector = i18n.T("editor.sectionInspector")
 	st.Row1, st.Row2 = edToolbarState()
+	st.Row3 = edAlignRowState()
+	st.AlignHint = i18n.T("editor.alignHint")
 	st.Preview = u.edPreviewState()
 	st.Layers = u.edLayersState()
 	st.Insp = u.edInspState()
 	return st
+}
+
+// edAlignRowState resolves the canvas-align toolbar row.
+func edAlignRowState() []uiBtn {
+	return []uiBtn{
+		{Label: "⇤", Variant: "ghost", Act: "ed-align:l"},
+		{Label: "↔", Variant: "ghost", Act: "ed-align:ch"},
+		{Label: "⇥", Variant: "ghost", Act: "ed-align:r"},
+		{Label: "⤒", Variant: "ghost", Act: "ed-align:t"},
+		{Label: "↕", Variant: "ghost", Act: "ed-align:cv"},
+		{Label: "⤓", Variant: "ghost", Act: "ed-align:b"},
+	}
 }
 
 // edToolbarState resolves the two toolbar button rows.
@@ -244,6 +291,7 @@ func edToolbarState() (row1, row2 []uiBtn) {
 	row2 = []uiBtn{
 		{Label: "↶ " + i18n.T("editor.undo"), Variant: undo, Act: "ed-undo"},
 		{Label: "↷ " + i18n.T("editor.redo"), Variant: redo, Act: "ed-redo"},
+		{Label: "⧉ " + i18n.T("editor.duplicate"), Variant: "outline", Act: "ed-dup"},
 		{Label: i18n.T("editor.saveTemplate"), Variant: "outline", Act: "ed-save-tpl"},
 		{Label: i18n.T("editor.exportPng"), Variant: "go", Act: "ed-export"},
 		{Label: i18n.T("editor.canvasSize", i18n.A{"w": fmt.Sprint(editor.doc.W), "h": fmt.Sprint(editor.doc.H)}), Variant: "ghost", Act: "ed-canvas"},
@@ -263,10 +311,24 @@ func (u *UI) edPreviewState() edPreviewState {
 		cap += " " + i18n.T("editor.selectedInfo", i18n.A{"name": l.Name})
 	}
 	return edPreviewState{
-		AW: strconv.Itoa(aw), AH: strconv.Itoa(ah),
+		AW: strconv.Itoa(aw), AH: strconv.Itoa(ah), Interactive: true,
 		Layers: u.edLayerStates(d.Root.Children, d),
+		Guides: edGuideStates(editor.guides, d),
 		Cap:    cap, Hint: i18n.T("editor.placeholderHint"),
 	}
+}
+
+// edGuideStates resolves active snap guides to stage-% positions.
+func edGuideStates(gs []visualeditor.Guide, d *visualeditor.Document) []edGuideSt {
+	out := make([]edGuideSt, 0, len(gs))
+	for _, g := range gs {
+		base := d.H
+		if g.Vert {
+			base = d.W
+		}
+		out = append(out, edGuideSt{Vert: g.Vert, Pos: pct(g.Pos, base)})
+	}
+	return out
 }
 
 // edLayerStates resolves the visible layers of one level (invisible/transparent skipped,
@@ -290,6 +352,7 @@ func (u *UI) edLayerState(l *visualeditor.Layer, d *visualeditor.Document) edLay
 		ID: l.ID, Sel: l.ID == editor.selID, Group: l.IsGroup(),
 		Paint: edPaint{Stops: []edGradStop{}}, Children: []edLayer{},
 	}
+	st.Handles = st.Sel && !st.Group && !l.Locked
 	if bm := edBlendCSS(l.Blend); bm != "normal" {
 		st.Blend = bm
 	}
@@ -464,6 +527,7 @@ func (u *UI) edInspState() edInspState {
 		if l.Image != nil {
 			st.Kind = "image"
 			st.Path = newField(i18n.T("editor.path"), "ed-img:path", l.Image.Path, "text")
+			st.Browse = uiBtn{Label: i18n.T("editor.browse"), Variant: "outline", Act: "pick-file:ed-img:path"}
 			fit := string(l.Image.Fit)
 			if fit == "" {
 				fit = "cover"
@@ -543,6 +607,11 @@ func editorHTML(st edViewState) string {
 	}
 	var b strings.Builder
 	b.WriteString(panel(st.Title, st.Sub))
+	b.WriteString(edModesHTML(st.Modes))
+	if st.VideoMode {
+		b.WriteString(emptyState(st.VideoEmpty))
+		return b.String()
+	}
 	b.WriteString(`<div class=ed-toolbar>` + edToolbarHTML(st) + `</div>`)
 	b.WriteString(`<div class=ed-grid>`)
 	// left column: preview + caption
@@ -558,19 +627,61 @@ func editorHTML(st edViewState) string {
 	return b.String()
 }
 
-func edToolbarHTML(st edViewState) string { return uiBtnRow(st.Row1) + uiBtnRow(st.Row2) }
+func edToolbarHTML(st edViewState) string {
+	return uiBtnRow(st.Row1) + uiBtnRow(st.Row2) +
+		`<div class=ed-alignrow>` + uiBtnRow(st.Row3) + hint("info", st.AlignHint) + `</div>`
+}
+
+// edModesHTML renders the image/video mode switcher (subTabs markup).
+func edModesHTML(modes []edModeTab) string {
+	var b strings.Builder
+	b.WriteString(`<div class="subtabs ed-modes">`)
+	for _, m := range modes {
+		cls := "subtab"
+		if m.Active {
+			cls += " active"
+		}
+		b.WriteString(`<button class="` + cls + `" data-act="` + html.EscapeString("ed-mode:"+m.Val) +
+			`" data-val="` + html.EscapeString(m.Val) + `">` + html.EscapeString(m.Label) + `</button>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
 
 // ── preview (CSS composite) ──
 
 func edPreviewHTMLOf(st edPreviewState) string {
-	return edStageHTMLOf(st.AW, st.AH, st.Layers) +
+	return edStageHTMLOf(st.AW, st.AH, st.Layers, st.Interactive, st.Guides) +
 		`<div class=ed-cap>` + html.EscapeString(st.Cap) + `</div>` +
 		hint("info", st.Hint)
 }
 
 // edStageHTMLOf renders a fixed-aspect stage (docW×docH) with layers composited via CSS.
-func edStageHTMLOf(aw, ah string, layers []edLayer) string {
+// interactive adds the pointer transport + the patchable body wrapper (#ed-stage-body must
+// be an inner div: replacing the actpos element mid-drag kills the pointer capture).
+func edStageHTMLOf(aw, ah string, layers []edLayer, interactive bool, guides []edGuideSt) string {
+	if interactive {
+		return `<div class=ed-stage data-actpos=ed-stage style="aspect-ratio:` + aw + `/` + ah + `">` +
+			`<div id=ed-stage-body>` + edStageBodyHTML(layers, guides) + `</div></div>`
+	}
 	return `<div class=ed-stage style="aspect-ratio:` + aw + `/` + ah + `">` + edChildrenHTML(layers) + `</div>`
+}
+
+// edStageBodyHTML is the patch-per-drag-frame stage interior.
+func edStageBodyHTML(layers []edLayer, guides []edGuideSt) string {
+	return edChildrenHTML(layers) + edGuidesHTML(guides)
+}
+
+func edGuidesHTML(guides []edGuideSt) string {
+	var b strings.Builder
+	for _, g := range guides {
+		if g.Vert {
+			b.WriteString(`<div class="ed-guide ed-guide-v" style="left:` + g.Pos + `%"></div>`)
+		} else {
+			b.WriteString(`<div class="ed-guide ed-guide-h" style="top:` + g.Pos + `%"></div>`)
+		}
+	}
+	return b.String()
 }
 
 // edStageHTML renders an arbitrary layer list as a stage - the template-picker modal's
@@ -580,7 +691,7 @@ func (u *UI) edStageHTML(layers []*visualeditor.Layer, d *visualeditor.Document,
 	if aw <= 0 || ah <= 0 {
 		aw, ah = 16, 9
 	}
-	return edStageHTMLOf(strconv.Itoa(aw), strconv.Itoa(ah), u.edLayerStates(layers, d))
+	return edStageHTMLOf(strconv.Itoa(aw), strconv.Itoa(ah), u.edLayerStates(layers, d), false, nil)
 }
 
 func edChildrenHTML(layers []edLayer) string {
@@ -618,9 +729,20 @@ func edLayerDivHTML(l edLayer) string {
 		style += "transform:rotate(" + l.Rot + "deg);"
 	}
 	style += op + blend + edPaintHTML(l.Paint)
+	inner := edInnerHTML(l.Inner)
+	if l.Handles {
+		inner += edHandlesHTML
+	}
 	return `<div class="ed-layer` + selCls + `" style=` + attrQ(style) +
-		` data-act=` + attrQ("ed-select:"+l.ID) + ` data-val=` + attrQ(l.ID) + `>` + edInnerHTML(l.Inner) + `</div>`
+		` data-act=` + attrQ("ed-select:"+l.ID) + ` data-val=` + attrQ(l.ID) + `>` + inner + `</div>`
 }
+
+// edHandlesHTML are the selection's manipulation affordances (visual only - Go
+// hit-tests by stage fraction; the spans just show position + resize cursors).
+const edHandlesHTML = `<span class="ed-h ed-h-nw"></span><span class="ed-h ed-h-n"></span>` +
+	`<span class="ed-h ed-h-ne"></span><span class="ed-h ed-h-e"></span><span class="ed-h ed-h-se"></span>` +
+	`<span class="ed-h ed-h-s"></span><span class="ed-h ed-h-sw"></span><span class="ed-h ed-h-w"></span>` +
+	`<span class="ed-h ed-h-rot"></span>`
 
 func edPaintHTML(p edPaint) string {
 	switch p.Kind {
@@ -730,7 +852,7 @@ func edInspHTML(st edInspState) string {
 		b.WriteString(edColorRowHTML(st.Start))
 		b.WriteString(edColorRowHTML(st.End))
 	case "image":
-		b.WriteString(st.Path.html())
+		b.WriteString(`<div class=ed-pathrow>` + st.Path.html() + st.Browse.html() + `</div>`)
 		b.WriteString(selHTML(st.Fit))
 	}
 	b.WriteString(`</div>`)

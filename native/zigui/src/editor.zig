@@ -48,6 +48,7 @@ pub const Layer = struct {
     group: bool = false,
     id: []const u8 = "",
     sel: bool = false,
+    handles: bool = false, // selected unlocked leaf: resize/rotate handles
     blend: []const u8 = "", // "" = normal → no declaration
     opacity: []const u8 = "", // "" = 1 → no declaration
 
@@ -69,10 +70,18 @@ pub const Layer = struct {
     children: []const Layer = &.{},
 };
 
+/// Guide is one active snap guide line (position in %).
+pub const Guide = struct {
+    vert: bool = false,
+    pos: []const u8 = "",
+};
+
 pub const Preview = struct {
     aw: []const u8 = "",
     ah: []const u8 = "",
+    interactive: bool = false, // stage carries data-actpos + #ed-stage-body
     layers: []const Layer = &.{},
+    guides: []const Guide = &.{},
     cap: []const u8 = "",
     hint: []const u8 = "",
 };
@@ -142,7 +151,15 @@ pub const Insp = struct {
     start: ColorRow = .{},
     end: ColorRow = .{},
     path: c.Field = .{},
+    browse: c.Btn = .{}, // image: native file picker
     fit: c.Select = .{},
+};
+
+/// ModeTab is one entry of the image/video mode switcher.
+pub const ModeTab = struct {
+    val: []const u8 = "",
+    label: []const u8 = "",
+    active: bool = false,
 };
 
 pub const State = struct {
@@ -156,8 +173,14 @@ pub const State = struct {
     secLayers: []const u8 = "",
     secInspector: []const u8 = "",
 
+    modes: []const ModeTab = &.{},
+    videoMode: bool = false,
+    videoEmpty: []const u8 = "",
+
     row1: []const c.Btn = &.{},
     row2: []const c.Btn = &.{},
+    row3: []const c.Btn = &.{},
+    alignHint: []const u8 = "",
 
     preview: Preview = .{},
     layers: Layers = .{},
@@ -172,10 +195,18 @@ pub fn render(h: *Html, s: State) !void {
         return;
     }
     try c.panel(h, s.title, s.sub);
+    try renderModes(h, s.modes);
+    if (s.videoMode) {
+        try c.emptyState(h, s.videoEmpty);
+        return;
+    }
     try h.raw("<div class=ed-toolbar>");
     try c.btnRowOf(h, s.row1);
     try c.btnRowOf(h, s.row2);
-    try h.raw("</div><div class=ed-grid><div class=ed-col>");
+    try h.raw("<div class=ed-alignrow>");
+    try c.btnRowOf(h, s.row3);
+    try c.hint(h, "info", s.alignHint);
+    try h.raw("</div></div><div class=ed-grid><div class=ed-col>");
     try c.sectionOpen(h, s.secPreview);
     try h.raw("<div id=ed-preview>");
     try renderPreview(h, s.preview);
@@ -191,18 +222,61 @@ pub fn render(h: *Html, s: State) !void {
     try h.raw("</div></div>");
 }
 
+/// renderModes mirrors Go edModesHTML (subTabs markup + ed-modes class).
+fn renderModes(h: *Html, modes: []const ModeTab) !void {
+    try h.raw("<div class=\"subtabs ed-modes\">");
+    for (modes) |m| {
+        try h.raw("<button class=\"");
+        try h.raw(if (m.active) "subtab active" else "subtab");
+        try h.raw("\" data-act=\"ed-mode:");
+        try h.esc(m.val);
+        try h.raw("\" data-val=\"");
+        try h.esc(m.val);
+        try h.raw("\">");
+        try h.esc(m.label);
+        try h.raw("</button>");
+    }
+    try h.raw("</div>");
+}
+
 /// renderPreview mirrors Go edPreviewHTMLOf (#ed-preview fragment).
 pub fn renderPreview(h: *Html, s: Preview) !void {
-    try h.raw("<div class=ed-stage style=\"aspect-ratio:");
-    try h.raw(s.aw);
-    try h.raw("/");
-    try h.raw(s.ah);
-    try h.raw("\">");
-    try renderChildren(h, s.layers);
-    try h.raw("</div><div class=ed-cap>");
+    if (s.interactive) {
+        try h.raw("<div class=ed-stage data-actpos=ed-stage style=\"aspect-ratio:");
+        try h.raw(s.aw);
+        try h.raw("/");
+        try h.raw(s.ah);
+        try h.raw("\"><div id=ed-stage-body>");
+        try renderChildren(h, s.layers);
+        try renderGuides(h, s.guides);
+        try h.raw("</div></div>");
+    } else {
+        try h.raw("<div class=ed-stage style=\"aspect-ratio:");
+        try h.raw(s.aw);
+        try h.raw("/");
+        try h.raw(s.ah);
+        try h.raw("\">");
+        try renderChildren(h, s.layers);
+        try h.raw("</div>");
+    }
+    try h.raw("<div class=ed-cap>");
     try h.esc(s.cap);
     try h.raw("</div>");
     try c.hint(h, "info", s.hint);
+}
+
+fn renderGuides(h: *Html, guides: []const Guide) !void {
+    for (guides) |g| {
+        if (g.vert) {
+            try h.raw("<div class=\"ed-guide ed-guide-v\" style=\"left:");
+            try h.raw(g.pos);
+            try h.raw("%\"></div>");
+        } else {
+            try h.raw("<div class=\"ed-guide ed-guide-h\" style=\"top:");
+            try h.raw(g.pos);
+            try h.raw("%\"></div>");
+        }
+    }
 }
 
 fn renderChildren(h: *Html, layers: []const Layer) Err!void {
@@ -271,8 +345,15 @@ fn renderLayer(h: *Html, l: Layer) Err!void {
     try h.attrQ(l.id);
     try h.raw(">");
     try renderInner(h, l.inner);
+    if (l.handles) try h.raw(handlesHTML);
     try h.raw("</div>");
 }
+
+/// handlesHTML mirrors Go edHandlesHTML (visual-only manipulation affordances).
+const handlesHTML = "<span class=\"ed-h ed-h-nw\"></span><span class=\"ed-h ed-h-n\"></span>" ++
+    "<span class=\"ed-h ed-h-ne\"></span><span class=\"ed-h ed-h-e\"></span><span class=\"ed-h ed-h-se\"></span>" ++
+    "<span class=\"ed-h ed-h-s\"></span><span class=\"ed-h ed-h-sw\"></span><span class=\"ed-h ed-h-w\"></span>" ++
+    "<span class=\"ed-h ed-h-rot\"></span>";
 
 /// appendOpBlend appends the opacity then blend declarations (Go: op + blend).
 fn appendOpBlend(sb: *Html, l: Layer) Err!void {
@@ -430,7 +511,10 @@ fn renderInsp(h: *Html, s: Insp) !void {
         try renderColorRow(h, s.start);
         try renderColorRow(h, s.end);
     } else if (std.mem.eql(u8, s.kind, "image")) {
+        try h.raw("<div class=ed-pathrow>");
         try c.fieldOf(h, s.path);
+        try c.btnOf(h, s.browse);
+        try h.raw("</div>");
         try c.selectBox(h, s.fit);
     }
     try h.raw("</div>");

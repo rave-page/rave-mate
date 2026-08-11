@@ -63,14 +63,17 @@
   "editor": {
     "align": "Вирівнювання",
     "alignCenter": "по центру",
+    "alignHint": "Вирівнювання за полотном · перетягування рухає, маркери масштабують/обертають · ⇧ = пропорції / 15° / вісь · стрілки зсувають (⇧ ×10)",
     "alignLeft": "ліворуч",
     "alignRight": "праворуч",
     "angle": "Кут",
     "blend": "Змішування",
+    "browse": "Огляд…",
     "canvasSize": "Полотно {w}×{h}",
     "color": "Колір",
     "disabledHint": "Редактор медіа вимкнено - увімкніть його в Налаштування ▸ Функції.",
     "docInfo": "Документ {w} × {h} · {count} шарів",
+    "duplicate": "Дублювати",
     "empty": {
       "noTemplates": "Немає шаблонів."
     },
@@ -102,6 +105,8 @@
     },
     "letterSpacing": "Міжлітерний",
     "lineHeight": "Висота рядка",
+    "modeImage": "Зображення",
+    "modeVideo": "Відео",
     "name": "Назва",
     "noLayerSelected": "Шар не вибрано.",
     "noLayers": "Шарів ще немає - додайте один з панелі інструментів.",
@@ -109,6 +114,16 @@
     "path": "Шлях",
     "placeholderHint": "Плейсхолдери на кшталт {track.title} заповнюються наживо з того, що грає. Клацніть шар, щоб вибрати його.",
     "placeholdersList": "Плейсхолдери: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram вертикальний",
+      "igPost": "Пост Instagram",
+      "overlay": "Оверлей стриму",
+      "posterA3": "Постер A3 300dpi",
+      "posterA4": "Постер A4 300dpi",
+      "story": "Сторіз / Reels",
+      "xHeader": "Шапка X",
+      "ytThumb": "Мініатюра YouTube"
+    },
     "redo": "Повторити",
     "rotation": "Обертання",
     "saveTemplate": "Зберегти як шаблон…",
@@ -139,6 +154,7 @@
     },
     "undo": "Скасувати",
     "ungroup": "Розгрупувати",
+    "videoEmpty": "Відеорежим уже поруч: монтаж, вертикальний рефрейм та ефекти.",
     "w": "Ш",
     "x": "X",
     "y": "Y"

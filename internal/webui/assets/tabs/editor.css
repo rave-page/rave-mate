@@ -222,3 +222,97 @@
     max-width: 100%;
   }
 }
+
+/* ── mode switcher ── */
+.ed-modes {
+  margin-bottom: 0.6rem;
+}
+
+/* ── direct manipulation ── */
+.ed-stage[data-actpos] {
+  touch-action: none; /* pointer transport owns drags */
+}
+#ed-stage-body {
+  width: 100%;
+  height: 100%;
+}
+.ed-layer.ed-sel {
+  cursor: move;
+}
+/* handles: sized/offset in cqw to track the Go hit zones (fractions of doc width) */
+.ed-h {
+  position: absolute;
+  width: max(8px, 1.2cqw);
+  height: max(8px, 1.2cqw);
+  border-radius: 50%;
+  background: var(--rp-base, #f70864);
+  border: 1px solid #fff;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.ed-h-nw { left: 0; top: 0; cursor: nwse-resize; }
+.ed-h-n  { left: 50%; top: 0; cursor: ns-resize; }
+.ed-h-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.ed-h-e  { left: 100%; top: 50%; cursor: ew-resize; }
+.ed-h-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.ed-h-s  { left: 50%; top: 100%; cursor: ns-resize; }
+.ed-h-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.ed-h-w  { left: 0; top: 50%; cursor: ew-resize; }
+.ed-h-rot {
+  left: 50%;
+  top: -3cqw; /* mirrors edRotOffFrac (0.03 doc-W) */
+  background: var(--rp-mint, #08f79b);
+  cursor: grab;
+}
+.ed-guide {
+  position: absolute;
+  pointer-events: none;
+  background: var(--rp-mint, #08f79b);
+  opacity: 0.9;
+}
+.ed-guide-v { top: 0; bottom: 0; width: 1px; }
+.ed-guide-h { left: 0; right: 0; height: 1px; }
+
+/* ── align toolbar row ── */
+.ed-alignrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ed-alignrow .rp-btn {
+  min-width: 2.2rem;
+}
+
+/* ── inspector path row ── */
+.ed-pathrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.ed-pathrow .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── canvas preset grid (modal) ── */
+.ed-preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.ed-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+.ed-preset-name {
+  font-size: 0.85rem;
+}
+.ed-preset-dim {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  color: var(--rp-muted, #a6abb6);
+}

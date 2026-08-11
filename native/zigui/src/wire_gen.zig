@@ -39,7 +39,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xb5702f0a;
+pub const schema_hash: u32 = 0x65abbca0;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4063,6 +4063,15 @@ pub fn decodeEdLayer(r: *wire.Reader, out: *editor.Layer) wire.Error!void {
         16 => out.paint = try r.sub(editor.Paint, decodeEdPaint, t),
         17 => out.inner = try r.sub(editor.Inner, decodeEdInner, t),
         18 => out.children = try r.list(editor.Layer, decodeEdLayer, t),
+        19 => out.handles = try r.boolean(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdGuide(r: *wire.Reader, out: *editor.Guide) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.vert = try r.boolean(t),
+        2 => out.pos = try r.str(t),
         else => try r.skip(t),
     };
 }
@@ -4074,6 +4083,8 @@ pub fn decodeEdPreview(r: *wire.Reader, out: *editor.Preview) wire.Error!void {
         3 => out.layers = try r.list(editor.Layer, decodeEdLayer, t),
         4 => out.cap = try r.str(t),
         5 => out.hint = try r.str(t),
+        6 => out.interactive = try r.boolean(t),
+        7 => out.guides = try r.list(editor.Guide, decodeEdGuide, t),
         else => try r.skip(t),
     };
 }
@@ -4159,6 +4170,16 @@ pub fn decodeEdInsp(r: *wire.Reader, out: *editor.Insp) wire.Error!void {
         17 => out.end = try r.sub(editor.ColorRow, decodeEdColorRow, t),
         18 => out.path = try r.sub(c.Field, decodeUiField, t),
         19 => out.fit = try r.sub(c.Select, decodeSelState, t),
+        20 => out.browse = try r.sub(c.Btn, decodeUiBtn, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdModeTab(r: *wire.Reader, out: *editor.ModeTab) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.val = try r.str(t),
+        2 => out.label = try r.str(t),
+        3 => out.active = try r.boolean(t),
         else => try r.skip(t),
     };
 }
@@ -4178,6 +4199,11 @@ pub fn decodeEdView(r: *wire.Reader, out: *editor.State) wire.Error!void {
         11 => out.preview = try r.sub(editor.Preview, decodeEdPreview, t),
         12 => out.layers = try r.sub(editor.Layers, decodeEdLayers, t),
         13 => out.insp = try r.sub(editor.Insp, decodeEdInsp, t),
+        14 => out.modes = try r.list(editor.ModeTab, decodeEdModeTab, t),
+        15 => out.videoMode = try r.boolean(t),
+        16 => out.videoEmpty = try r.str(t),
+        17 => out.row3 = try r.list(c.Btn, decodeUiBtn, t),
+        18 => out.alignHint = try r.str(t),
         else => try r.skip(t),
     };
 }

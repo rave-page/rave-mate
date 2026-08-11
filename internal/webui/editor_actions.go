@@ -28,10 +28,29 @@ type edState struct {
 	store *visualeditor.TemplateStore
 	doc   *visualeditor.Document
 
+	mode       string // "" | "image" (default) | "video"
 	selID      string
 	undo, redo [][]byte
 	lastSnap   time.Time
 	lastSig    string
+
+	drag   edDrag
+	guides []visualeditor.Guide
+}
+
+// edModeOr returns the active editor mode ("image" default). Caller holds editor.mu.
+func edModeOr() string {
+	if editor.mode == "video" {
+		return "video"
+	}
+	return "image"
+}
+
+// edModeSafe is edModeOr for callers NOT holding editor.mu (keyScope).
+func edModeSafe() string {
+	editor.mu.Lock()
+	defer editor.mu.Unlock()
+	return edModeOr()
 }
 
 var (
@@ -215,11 +234,24 @@ func init() {
 	onExact("ed-save-tpl-do", func(u *UI, m actMsg) { u.edSaveTemplate(parseForm(m.Form)["name"]) })
 	onExact("ed-canvas", func(u *UI, m actMsg) { u.edOpenCanvas() })
 	onExact("ed-canvas-do", func(u *UI, m actMsg) { u.edSetCanvas(parseForm(m.Form)) })
+	onPrefix("ed-canvas-preset:", func(u *UI, m actMsg) { u.edCanvasPreset(m.arg("ed-canvas-preset:")) })
 	onExact("ed-export", func(u *UI, m actMsg) { u.edExport() })
+	onPrefix("ed-mode:", func(u *UI, m actMsg) {
+		u.edEdit(func() {
+			if v := m.arg("ed-mode:"); v == "image" || v == "video" {
+				editor.mode = v
+			}
+		})
+	})
 
 	onLiveTick("editor", func(u *UI) {
 		edEnsure()
 		editor.mu.Lock()
+		// a live repaint replaces the stage element - never mid-drag (pointer capture)
+		if editor.drag.active || edModeOr() != "image" {
+			editor.mu.Unlock()
+			return
+		}
 		sig := u.edProviderSig()
 		if sig == editor.lastSig {
 			editor.mu.Unlock()
@@ -602,16 +634,57 @@ func (u *UI) edSaveTemplate(name string) {
 
 // ── canvas size ──
 
+// edCanvasPresets are the quick canvas sizes (label key under editor.preset.*).
+var edCanvasPresets = []struct {
+	Key  string
+	W, H int
+}{
+	{"ytThumb", 1280, 720},
+	{"igPost", 1080, 1080},
+	{"igPortrait", 1080, 1350},
+	{"story", 1080, 1920},
+	{"xHeader", 1500, 500},
+	{"posterA4", 2480, 3508},
+	{"posterA3", 3508, 4961},
+	{"overlay", 1920, 1080},
+}
+
 func (u *UI) edOpenCanvas() {
 	edEnsure()
 	editor.mu.Lock()
 	w, h := editor.doc.W, editor.doc.H
 	editor.mu.Unlock()
-	body := `<form data-act=ed-canvas-do><div class=ed-row2>` +
+	var pb strings.Builder
+	pb.WriteString(`<div class=ed-preset-grid>`)
+	for _, p := range edCanvasPresets {
+		dim := strconv.Itoa(p.W) + `×` + strconv.Itoa(p.H)
+		pb.WriteString(`<button class="rp-btn rp-btn--outline ed-preset" data-act=` +
+			attrQ("ed-canvas-preset:"+strconv.Itoa(p.W)+"x"+strconv.Itoa(p.H)) + `>` +
+			`<span class=ed-preset-name>` + htmlEscape(i18n.T("editor.preset."+p.Key)) + `</span>` +
+			`<span class=ed-preset-dim>` + dim + `</span></button>`)
+	}
+	pb.WriteString(`</div>`)
+	body := pb.String() + `<form data-act=ed-canvas-do><div class=ed-row2>` +
 		`<label class=field><span class=field-label>` + i18n.T("editor.label.width") + `</span><input class=field-input type=number name=w value="` + strconv.Itoa(w) + `"></label>` +
 		`<label class=field><span class=field-label>` + i18n.T("editor.label.height") + `</span><input class=field-input type=number name=h value="` + strconv.Itoa(h) + `"></label>` +
 		`</div><button class="rp-btn rp-btn--primary" type=submit>` + i18n.T("editor.label.apply") + `</button></form>`
 	u.openModal(modal(i18n.T("editor.label.canvasSizeTitle"), body, `<span></span>`))
+}
+
+// edCanvasPreset applies a "WxH" canvas preset from the modal.
+func (u *UI) edCanvasPreset(arg string) {
+	ws, hs, ok := strings.Cut(arg, "x")
+	w, err1 := strconv.Atoi(ws)
+	h, err2 := strconv.Atoi(hs)
+	if !ok || err1 != nil || err2 != nil || w < 1 || h < 1 {
+		return
+	}
+	u.edEdit(func() {
+		editor.snapshot(true)
+		editor.doc.W, editor.doc.H = w, h
+		editor.autosave()
+	})
+	u.closeModal()
 }
 
 func (u *UI) edSetCanvas(form map[string]string) {

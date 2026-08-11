@@ -63,14 +63,17 @@
   "editor": {
     "align": "Aligner",
     "alignCenter": "centre",
+    "alignHint": "Aligner sur le canevas · glisser pour déplacer, poignées pour redimensionner/pivoter · ⇧ = ratio / 15° / axe · flèches pour décaler (⇧ ×10)",
     "alignLeft": "gauche",
     "alignRight": "droite",
     "angle": "Angle",
     "blend": "Fusion",
+    "browse": "Parcourir…",
     "canvasSize": "Canevas {w}×{h}",
     "color": "Couleur",
     "disabledHint": "L'éditeur média est désactivé - activez-le dans Réglages ▸ Fonctions.",
     "docInfo": "Document {w} × {h} · {count} calques",
+    "duplicate": "Dupliquer",
     "empty": {
       "noTemplates": "Aucun modèle."
     },
@@ -102,6 +105,8 @@
     },
     "letterSpacing": "Interlettr.",
     "lineHeight": "Interligne",
+    "modeImage": "Image",
+    "modeVideo": "Vidéo",
     "name": "Nom",
     "noLayerSelected": "Aucun calque sélectionné.",
     "noLayers": "Aucun calque - ajoutez-en un depuis la barre d'outils.",
@@ -109,6 +114,16 @@
     "path": "Chemin",
     "placeholderHint": "Les variables comme {track.title} se remplissent en direct depuis la lecture. Cliquez un calque pour le sélectionner.",
     "placeholdersList": "Variables : {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram portrait",
+      "igPost": "Post Instagram",
+      "overlay": "Overlay de stream",
+      "posterA3": "Affiche A3 300dpi",
+      "posterA4": "Affiche A4 300dpi",
+      "story": "Story / Reel",
+      "xHeader": "Bannière X",
+      "ytThumb": "Miniature YouTube"
+    },
     "redo": "Rétablir",
     "rotation": "Rotation",
     "saveTemplate": "Enregistrer comme modèle…",
@@ -139,6 +154,7 @@
     },
     "undo": "Annuler",
     "ungroup": "Dégrouper",
+    "videoEmpty": "Le mode vidéo arrive : découpe, recadrage vertical et effets.",
     "w": "L",
     "x": "X",
     "y": "Y"

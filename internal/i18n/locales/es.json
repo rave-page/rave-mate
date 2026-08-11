@@ -63,14 +63,17 @@
   "editor": {
     "align": "Alinear",
     "alignCenter": "centro",
+    "alignHint": "Alinear al lienzo · arrastra para mover, tiradores escalan/rotan · ⇧ = proporción / 15° / eje · flechas mueven (⇧ ×10)",
     "alignLeft": "izquierda",
     "alignRight": "derecha",
     "angle": "Ángulo",
     "blend": "Fusión",
+    "browse": "Examinar…",
     "canvasSize": "Lienzo {w}×{h}",
     "color": "Color",
     "disabledHint": "El Editor de medios está desactivado - actívalo en Ajustes ▸ Funciones.",
     "docInfo": "Documento {w} × {h} · {count} capas",
+    "duplicate": "Duplicar",
     "empty": {
       "noTemplates": "Sin plantillas."
     },
@@ -102,6 +105,8 @@
     },
     "letterSpacing": "Interletra",
     "lineHeight": "Interlínea",
+    "modeImage": "Imagen",
+    "modeVideo": "Vídeo",
     "name": "Nombre",
     "noLayerSelected": "Ninguna capa seleccionada.",
     "noLayers": "Aún no hay capas - añade una desde la barra de herramientas.",
@@ -109,6 +114,16 @@
     "path": "Ruta",
     "placeholderHint": "Marcadores como {track.title} se rellenan en vivo con lo que suena. Haz clic en una capa para seleccionarla.",
     "placeholdersList": "Marcadores: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram vertical",
+      "igPost": "Publicación de Instagram",
+      "overlay": "Overlay de stream",
+      "posterA3": "Póster A3 300dpi",
+      "posterA4": "Póster A4 300dpi",
+      "story": "Story / Reel",
+      "xHeader": "Cabecera de X",
+      "ytThumb": "Miniatura de YouTube"
+    },
     "redo": "Rehacer",
     "rotation": "Rotación",
     "saveTemplate": "Guardar como plantilla…",
@@ -139,6 +154,7 @@
     },
     "undo": "Deshacer",
     "ungroup": "Desagrupar",
+    "videoEmpty": "El modo vídeo llega enseguida: corte, reencuadre vertical y efectos.",
     "w": "An",
     "x": "X",
     "y": "Y"

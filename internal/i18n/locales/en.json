@@ -222,14 +222,17 @@
   "editor": {
     "align": "Align",
     "alignCenter": "center",
+    "alignHint": "Align to canvas · drag to move, handles resize/rotate · ⇧ = aspect lock / 15° / axis · arrows nudge (⇧ ×10)",
     "alignLeft": "left",
     "alignRight": "right",
     "angle": "Angle",
     "blend": "Blend",
+    "browse": "Browse…",
     "canvasSize": "Canvas {w}×{h}",
     "color": "Color",
     "disabledHint": "Media Editor is disabled - enable it in Settings ▸ Features.",
     "docInfo": "{w} × {h} document · {count} layers",
+    "duplicate": "Duplicate",
     "empty": {
       "noTemplates": "No templates."
     },
@@ -261,6 +264,8 @@
     },
     "letterSpacing": "Letter sp.",
     "lineHeight": "Line ht.",
+    "modeImage": "Image",
+    "modeVideo": "Video",
     "name": "Name",
     "noLayerSelected": "No layer selected.",
     "noLayers": "No layers yet - add one from the toolbar.",
@@ -268,6 +273,16 @@
     "path": "Path",
     "placeholderHint": "Placeholders like {track.title} fill live from what's playing. Click a layer to select it.",
     "placeholdersList": "Placeholders: {track.title} {track.artist} {track.bpm} {track.key} {time} {date}",
+    "preset": {
+      "igPortrait": "Instagram portrait",
+      "igPost": "Instagram post",
+      "overlay": "Stream overlay",
+      "posterA3": "Poster A3 300dpi",
+      "posterA4": "Poster A4 300dpi",
+      "story": "Story / Reel",
+      "xHeader": "X header",
+      "ytThumb": "YouTube thumbnail"
+    },
     "redo": "Redo",
     "rotation": "Rotation",
     "saveTemplate": "Save as template…",
@@ -298,6 +313,7 @@
     },
     "undo": "Undo",
     "ungroup": "Ungroup",
+    "videoEmpty": "Video mode is coming right up - cut, vertical reframe & effects.",
     "w": "W",
     "x": "X",
     "y": "Y"

@@ -39,6 +39,10 @@ func edFixtures() map[string]edViewState {
 	labels := func(st *edViewState) {
 		st.Title, st.Sub = "Editor", "Compose overlays"
 		st.SecPreview, st.SecLayers, st.SecInspector = "Preview", "Layers", "Inspector"
+		st.Modes = []edModeTab{
+			{Val: "image", Label: "Image", Active: true},
+			{Val: "video", Label: "Video"},
+		}
 		st.Row1 = []uiBtn{
 			{Label: "+ Text", Variant: "primary", Act: "ed-add:text"},
 			{Label: "+ Image", Variant: "outline", Act: "ed-add:image"},
@@ -49,16 +53,27 @@ func edFixtures() map[string]edViewState {
 		st.Row2 = []uiBtn{
 			{Label: "↶ Undo", Variant: "ghost", Act: "ed-undo"},
 			{Label: "↷ Redo", Variant: "ghost", Act: "ed-redo"},
+			{Label: "⧉ Duplicate", Variant: "outline", Act: "ed-dup"},
 			{Label: "Save as template", Variant: "outline", Act: "ed-save-tpl"},
 			{Label: "Export PNG", Variant: "go", Act: "ed-export"},
 			{Label: "Canvas 1920×1080", Variant: "ghost", Act: "ed-canvas"},
 		}
+		st.Row3 = []uiBtn{
+			{Label: "⇤", Variant: "ghost", Act: "ed-align:l"},
+			{Label: "↔", Variant: "ghost", Act: "ed-align:ch"},
+			{Label: "⇥", Variant: "ghost", Act: "ed-align:r"},
+			{Label: "⤒", Variant: "ghost", Act: "ed-align:t"},
+			{Label: "↕", Variant: "ghost", Act: "ed-align:cv"},
+			{Label: "⤓", Variant: "ghost", Act: "ed-align:b"},
+		}
+		st.AlignHint = "Align to canvas · drag to move"
 	}
 
 	base := func() edViewState {
 		st := emptyEdState()
 		labels(&st)
-		st.Preview = edPreviewState{AW: "1920", AH: "1080", Layers: []edLayer{},
+		st.Preview = edPreviewState{AW: "1920", AH: "1080", Interactive: true,
+			Layers: []edLayer{}, Guides: []edGuideSt{},
 			Cap: "1920×1080, 0 layers", Hint: "Placeholders fill from now-playing"}
 		st.Layers = edLayersState{Rows: []edRow{}, Empty: "No layers yet",
 			Actions: edActionsState{Up: "↑", Down: "↓", Group: "Group", Ungroup: "Ungroup",
@@ -77,6 +92,7 @@ func edFixtures() map[string]edViewState {
 	// nested groups + one leaf per paint kind + text and image-placeholder inners
 	populated := base()
 	txt := edLeaf("t1", true)
+	txt.Handles = true
 	txt.Blend, txt.Opacity, txt.Rot = "screen", "0.75", "12.5"
 	txt.Inner = edInner{Kind: "text", Text: edText{Content: "{artist} - {title}",
 		FamQ: `"Orbitron"`, Size: "3.125", LH: "1.2", Align: "center",
@@ -96,6 +112,7 @@ func edFixtures() map[string]edViewState {
 	outer := edLayer{Group: true, ID: "grp-out", Sel: false, Blend: "multiply",
 		Paint: edPaint{Stops: []edGradStop{}}, Children: []edLayer{inner, imgPH}}
 	populated.Preview.Layers = []edLayer{txt, solid, outer}
+	populated.Preview.Guides = []edGuideSt{{Vert: true, Pos: "50"}, {Vert: false, Pos: "33.333"}}
 	populated.Preview.Cap = "1920×1080, 5 layers — selected: Title text"
 	populated.Layers.Rows = []edRow{
 		{ID: "t1", Name: "Title text", Depth: 0, Sel: true, Visible: true},
@@ -167,17 +184,30 @@ func edFixtures() map[string]edViewState {
 		Rot:    edFld("Rotation", "rotation", "ed-prop:rot", "0", "number"),
 		Kind:   "image",
 		Path:   edFld("Path", "path", "ed-img:path", `C:\art\cover.png`, "text"),
+		Browse: uiBtn{Label: "Browse…", Variant: "outline", Act: "pick-file:ed-img:path"},
 		Fit:    edSel("ed-img-fit", "Fit", "Contain", selRow{Val: "contain", Label: "Contain", Cur: true}),
 		Text:   edInspTextState{Font: edNilSel(), Align: edNilSel()},
 	}
 
+	// video-mode stub branch (modes bar + empty state, no toolbar/grid)
+	video := base()
+	video.Modes = []edModeTab{
+		{Val: "image", Label: "Image"},
+		{Val: "video", Label: "Video", Active: true},
+	}
+	video.VideoMode = true
+	video.VideoEmpty = "Video mode is coming right up"
+
 	escaping := base()
 	escaping.Title = `Edi&tor <"live">`
 	escaping.Sub = `a&b<c>"d"'e'`
+	escaping.Modes = []edModeTab{{Val: "image", Label: `I&m"age<>'`, Active: true}, {Val: "video", Label: `V&id"eo`}}
+	escaping.AlignHint = `a&lign"<>'`
 	escaping.SecPreview, escaping.SecLayers, escaping.SecInspector = `P&rev"`, `L&ayers<>'`, `I&nsp"`
 	escaping.Row1 = []uiBtn{{Label: `+ T&ext "x"'<>`, Variant: "primary", Act: `ed-add:text&"`}}
 	escaping.Row2 = []uiBtn{{Label: `Canvas 1&920"×"1080`, Variant: "ghost", Act: "ed-canvas"}}
 	escTxt := edLeaf(`l:1"x'<&>`, true)
+	escTxt.Handles = true
 	escTxt.Inner = edInner{Kind: "text", Text: edText{Content: `msg &<>"' end`,
 		FamQ: `"O&rbitron"`, Size: "3", LH: "1.2", Align: "left", RGBA: "rgba(1,2,3,1)", LS: "0"}}
 	escImg := edLeaf(`i&"'<>`, false)
@@ -261,6 +291,7 @@ func edFixtures() map[string]edViewState {
 		"populated": populated,
 		"gradient":  gradient,
 		"image":     image,
+		"video":     video,
 		"escaping":  escaping,
 		"long":      long,
 		"unicode":   unicode,

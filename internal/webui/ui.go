@@ -486,14 +486,18 @@ func (u *UI) patchMain() {
 
 // keyScope names the active editing-key surface ("" = none; see shell.go keydown).
 func (u *UI) keyScope() string {
-	if u.activeTab() != "library" {
-		return ""
-	}
-	if u.ceActiveFor("library") {
-		return "cueedit"
-	}
-	if u.libSectionOr() == "collection" {
-		return "library"
+	switch u.activeTab() {
+	case "library":
+		if u.ceActiveFor("library") {
+			return "cueedit"
+		}
+		if u.libSectionOr() == "collection" {
+			return "library"
+		}
+	case "editor":
+		if u.svc.Cfg != nil && u.svc.Cfg.Features.MediaEditor.Enabled && edModeSafe() == "image" {
+			return "ed"
+		}
 	}
 	return ""
 }
