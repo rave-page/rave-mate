@@ -89,6 +89,8 @@ pub const State = struct {
     zoom: c.Slider = .{},
 
     player: []const u8 = "", // RAW mp markup
+    playerCls: []const u8 = "", // " edv-reframe"/" edv-reframe-fit" = live reframe preview
+    playerVars: []const u8 = "", // CSS vars driving the preview crop
     noMedia: []const u8 = "",
     editHint: []const u8 = "",
 
@@ -220,7 +222,14 @@ pub fn render(h: *Html, s: State) !void {
     // timeline pane
     try h.raw("<div class=\"edv-pane edv-pane-tl\">");
     if (s.player.len != 0) {
-        try h.raw("<div class=edv-player>");
+        try h.raw("<div class=\"edv-player");
+        try h.raw(s.playerCls);
+        try h.raw("\"");
+        if (s.playerVars.len != 0) {
+            try h.raw(" style=");
+            try h.attrQ(s.playerVars);
+        }
+        try h.raw(">");
         try h.raw(s.player);
         try h.raw("</div>");
         try c.hint(h, "info", s.editHint);

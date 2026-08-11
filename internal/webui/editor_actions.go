@@ -261,7 +261,8 @@ func init() {
 		editor.mu.Lock()
 		if edModeOr() == "video" {
 			editor.mu.Unlock()
-			mpTick(u, "editor") // unified player clock/playhead (publish parity)
+			mpTick(u, "editor")   // unified player clock/playhead (publish parity)
+			u.edvSyncPlayerVars() // reframe preview follows keyframed pan during playback
 			return
 		}
 		// a live repaint replaces the stage element - never mid-drag (pointer capture)

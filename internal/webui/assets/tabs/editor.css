@@ -322,6 +322,38 @@
 .edv-player {
   margin: 0.6rem 0;
 }
+/* Live reframe preview: the timeline <video> shows the selected aspect/zoom/pan
+   slice (crop layout) or the original inside the target frame (fit layout).
+   Pure CSS over the mp markup - vars set by the editor renderer + live evals. */
+.edv-player.edv-reframe .mp-videobox {
+  aspect-ratio: var(--edv-ar);
+  overflow: hidden;
+  position: relative;
+  max-height: 340px;
+  margin: 0 auto;
+  display: block;
+}
+.edv-player.edv-reframe .mp-video {
+  position: absolute;
+  width: calc(var(--edv-vs) * 100%);
+  max-width: none;
+  max-height: none;
+  height: auto;
+  left: calc(var(--edv-vx) * -1%);
+  top: calc(var(--edv-vy) * -1%);
+}
+.edv-player.edv-reframe-fit .mp-videobox {
+  aspect-ratio: var(--edv-ar);
+  max-height: 340px;
+  margin: 0 auto;
+  display: block;
+}
+.edv-player.edv-reframe-fit .mp-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
 .edv-fbox {
   position: relative;
   width: 100%;

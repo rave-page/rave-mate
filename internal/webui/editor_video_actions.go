@@ -472,6 +472,32 @@ func edvKfUpsert(p *videoedit.Project, t, x, y float64) {
 func (u *UI) edvPatchFrame() {
 	st := u.edvFrameState()
 	u.eval("window.__patch('edv-fovl'," + jsQuote(edvFrameOvlHTML(st)) + ")")
+	u.edvSyncPlayerVars()
+}
+
+// edvSyncPlayerVars pushes the live reframe-preview class + vars at the
+// timeline player (drag / zoom / playback follow) without a full patch.
+func (u *UI) edvSyncPlayerVars() {
+	srcW, srcH, _ := u.edvSrcDims()
+	editor.mu.Lock()
+	edvEnsure()
+	v := &editor.video
+	proj := v.proj
+	if proj.Source == "" || !edvIsVideo(proj.Source) {
+		editor.mu.Unlock()
+		return
+	}
+	if v.panDrag { // live drag position wins over keyframes
+		proj.Pan, proj.Pan2 = v.panLive, v.panLive2-0.5
+		proj.PanKF = nil
+	}
+	editor.mu.Unlock()
+	if srcW <= 0 || srcH <= 0 {
+		return
+	}
+	cls, vars := u.edvPlayerReframe(proj, srcW, srcH)
+	u.eval("(function(){var p=document.querySelector('.edv-pane-tl .edv-player');if(!p)return;" +
+		"p.className='edv-player" + cls + "';p.style.cssText=" + jsQuote(vars) + ";})()")
 }
 
 // edvSetZoom clamps + persists the crop zoom. fromWheel patches the overlay +

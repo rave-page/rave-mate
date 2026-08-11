@@ -106,9 +106,11 @@ type edvViewState struct {
 	HasBlur bool     `json:"hasBlur"` // fit layout: show bg blur slider
 	Blur    uiSlider `json:"blur"`
 
-	Player   string `json:"player"` // RAW mp component markup ("" = none)
-	NoMedia  string `json:"noMedia"`
-	EditHint string `json:"editHint"`
+	Player     string `json:"player"`     // RAW mp component markup ("" = none)
+	PlayerCls  string `json:"playerCls"`  // " edv-reframe"/" edv-reframe-fit" = live reframe preview
+	PlayerVars string `json:"playerVars"` // CSS vars driving the preview crop
+	NoMedia    string `json:"noMedia"`
+	EditHint   string `json:"editHint"`
 
 	SecReframe string     `json:"secReframe"`
 	ShowRef    bool       `json:"showRef"` // video source only
@@ -245,9 +247,38 @@ func (u *UI) editorVideoState() edvViewState {
 
 	if st.ShowRef {
 		u.edvFxState(&st)
+		st.PlayerCls, st.PlayerVars = u.edvPlayerReframe(proj, srcW, srcH)
 	}
 	st.Export = u.edvExportState()
 	return st
+}
+
+// edvPlayerReframe resolves the timeline player's live reframe-preview class +
+// CSS vars ("" = raw playback). Crop layout shows the selected slice; fit shows
+// the original inside the target frame.
+func (u *UI) edvPlayerReframe(proj videoedit.Project, srcW, srcH int) (cls, vars string) {
+	a := videoedit.AspectByKey(proj.Aspect)
+	cw, ch, axis := videoedit.CropSizeZoom(srcW, srcH, a, proj.Zoom)
+	if cw <= 0 || (cw >= srcW-1 && ch >= srcH-1) {
+		return "", ""
+	}
+	if proj.Layout == "fit" {
+		aw, ah := a.W, a.H
+		if aw <= 0 {
+			aw, ah = cw, ch
+		}
+		return " edv-reframe-fit", fmt.Sprintf("--edv-ar:%d/%d", aw, ah)
+	}
+	t := u.edvPlayhead()
+	pos, pos2 := proj.PanAt(t), proj.Pan2At(t)
+	posX, posY := pos, pos2
+	if axis == "y" {
+		posX, posY = pos2, pos
+	}
+	x := float64(srcW-cw) * posX
+	y := float64(srcH-ch) * posY
+	return " edv-reframe", fmt.Sprintf("--edv-ar:%d/%d;--edv-vs:%s;--edv-vx:%s;--edv-vy:%s",
+		cw, ch, trimNum(float64(srcW)/float64(cw)), trimPct(x/float64(cw)*100), trimPct(y/float64(ch)*100))
 }
 
 // edvFxState fills the effect-chain section of the view.
@@ -563,7 +594,11 @@ func editorVideoHTML(st edvViewState) string {
 	// ── timeline pane ──
 	b.WriteString(`<div class="edv-pane edv-pane-tl">`)
 	if st.Player != "" {
-		b.WriteString(`<div class=edv-player>` + st.Player + `</div>`)
+		b.WriteString(`<div class="edv-player` + st.PlayerCls + `"`)
+		if st.PlayerVars != "" {
+			b.WriteString(` style=` + attrQ(st.PlayerVars))
+		}
+		b.WriteString(`>` + st.Player + `</div>`)
 		b.WriteString(hint("info", st.EditHint))
 	} else if st.HasSrc {
 		b.WriteString(emptyState(st.NoMedia))
