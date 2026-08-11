@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -478,7 +479,7 @@ func (u *UI) edvPatchFrame() {
 // (replacing the input mid-drag would break the slider).
 func (u *UI) edvSetZoom(z float64, fromWheel bool) {
 	u.edvMut(func(v *edvSt) {
-		v.proj.Zoom = z
+		v.proj.Zoom = math.Round(z*100) / 100 // 2 decimals: clean label, stable steps
 		v.proj.Normalize()
 	})
 	u.edvPatchFrame()
