@@ -10,6 +10,7 @@
 //! (message on stderr).
 const std = @import("std");
 const frei0r = @import("frei0r.zig");
+const isf = @import("isf.zig");
 const chain = @import("chain.zig");
 
 const usage =
@@ -75,6 +76,19 @@ const ListEntry = struct {
     params: []ListParam,
 };
 
+fn isfTypeName(k: isf.ParamKind) []const u8 {
+    return switch (k) {
+        .float => "double", // UI renders doubles as 0..1 sliders - same as frei0r
+        .boolean => "bool",
+        .color => "color",
+        .point2d => "position",
+    };
+}
+
+fn isIsfExt(name: []const u8) bool {
+    return std.ascii.endsWithIgnoreCase(name, ".fs") or std.ascii.endsWithIgnoreCase(name, ".isf");
+}
+
 fn paramTypeName(t: frei0r.ParamType) []const u8 {
     return switch (t) {
         .boolean => "bool",
@@ -107,28 +121,53 @@ fn list(gpa: std.mem.Allocator, io: std.Io, dirs: []const u8) u8 {
         var dit = dir.iterate();
         while (dit.next(io) catch null) |ent| {
             if (ent.kind != .file) continue;
-            if (!std.ascii.endsWithIgnoreCase(ent.name, pluginExt())) continue;
             const full = std.fs.path.join(arena, &.{ dirpath, ent.name }) catch continue;
-            var p = frei0r.open(gpa, full) catch |err| {
-                std.debug.print("rave-mate-vfx: skip {s}: {s}\n", .{ full, @errorName(err) });
-                continue;
-            };
-            defer p.close(gpa);
-            var params = arena.alloc(ListParam, p.params.len) catch continue;
-            for (p.params, 0..) |pr, i| {
-                params[i] = .{
-                    .name = arena.dupe(u8, pr.name) catch continue,
-                    .type = paramTypeName(pr.typ),
-                    .def = pr.def,
+            if (std.ascii.endsWithIgnoreCase(ent.name, pluginExt())) {
+                var p = frei0r.open(gpa, full) catch |err| {
+                    std.debug.print("rave-mate-vfx: skip {s}: {s}\n", .{ full, @errorName(err) });
+                    continue;
                 };
+                defer p.close(gpa);
+                var params = arena.alloc(ListParam, p.params.len) catch continue;
+                for (p.params, 0..) |pr, i| {
+                    params[i] = .{
+                        .name = arena.dupe(u8, pr.name) catch continue,
+                        .type = paramTypeName(pr.typ),
+                        .def = pr.def,
+                    };
+                }
+                entries.append(arena, .{
+                    .ref = full,
+                    .name = arena.dupe(u8, p.name) catch continue,
+                    .author = arena.dupe(u8, p.author) catch continue,
+                    .desc = arena.dupe(u8, p.desc) catch continue,
+                    .params = params,
+                }) catch continue;
+            } else if (isIsfExt(ent.name)) {
+                const src = std.Io.Dir.cwd().readFileAlloc(io, full, arena, .limited(chain.max_shader_bytes)) catch continue;
+                var doc = isf.parse(gpa, src) catch |err| {
+                    std.debug.print("rave-mate-vfx: skip {s}: {s}\n", .{ full, @errorName(err) });
+                    continue;
+                };
+                defer doc.deinit(gpa);
+                var params = arena.alloc(ListParam, doc.params.len) catch continue;
+                for (doc.params, 0..) |pr, i| {
+                    params[i] = .{
+                        .name = arena.dupe(u8, pr.name) catch continue,
+                        .type = isfTypeName(pr.kind),
+                        .def = .{ pr.def[0], pr.def[1], pr.def[2] },
+                    };
+                }
+                const stem = ent.name[0 .. ent.name.len - (std.fs.path.extension(ent.name)).len];
+                entries.append(arena, .{
+                    .kind = "isf",
+                    .ref = full,
+                    .name = arena.dupe(u8, stem) catch continue,
+                    .author = arena.dupe(u8, doc.credit) catch continue,
+                    .desc = arena.dupe(u8, doc.desc) catch continue,
+                    .params = params,
+                }) catch continue;
             }
-            entries.append(arena, .{
-                .ref = full,
-                .name = arena.dupe(u8, p.name) catch continue,
-                .author = arena.dupe(u8, p.author) catch continue,
-                .desc = arena.dupe(u8, p.desc) catch continue,
-                .params = params,
-            }) catch continue;
         }
     }
 
@@ -197,10 +236,11 @@ fn pipe(gpa: std.mem.Allocator, io: std.Io, spec_path: []const u8) u8 {
 
 fn loadChain(gpa: std.mem.Allocator, arena: std.mem.Allocator, io: std.Io, spec_path: []const u8) !chain.Chain {
     const bytes = try std.Io.Dir.cwd().readFileAlloc(io, spec_path, arena, .limited(chain.max_spec_bytes));
-    return chain.Chain.load(gpa, arena, bytes);
+    return chain.Chain.load(gpa, arena, io, bytes);
 }
 
 test {
     _ = frei0r;
+    _ = isf;
     _ = chain;
 }

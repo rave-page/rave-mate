@@ -6,6 +6,7 @@ package vfx
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,16 +72,37 @@ type Plugin struct {
 	Params []Param `json:"params"`
 }
 
-// PluginDirs returns (and creates) the per-user effect plugin dirs.
+//go:embed isfseed/*.fs
+var isfSeed embed.FS
+
+// PluginDirs returns (and creates) the per-user effect plugin dirs; the ISF dir
+// is seeded once with the bundled MIT starter shaders (existing files never
+// overwritten - users may edit or delete them).
 func PluginDirs(configDir string) []string {
-	dirs := []string{
-		filepath.Join(configDir, "vfx", "frei0r"),
-		filepath.Join(configDir, "vfx", "isf"),
+	frei0rDir := filepath.Join(configDir, "vfx", "frei0r")
+	isfDir := filepath.Join(configDir, "vfx", "isf")
+	_ = os.MkdirAll(frei0rDir, 0o755)
+	if err := os.MkdirAll(isfDir, 0o755); err == nil {
+		seedISF(isfDir)
 	}
-	for _, d := range dirs {
-		_ = os.MkdirAll(d, 0o755)
+	return []string{frei0rDir, isfDir}
+}
+
+// seedISF writes each bundled shader if absent.
+func seedISF(dir string) {
+	entries, err := isfSeed.ReadDir("isfseed")
+	if err != nil {
+		return
 	}
-	return dirs
+	for _, e := range entries {
+		dst := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if data, err := isfSeed.ReadFile("isfseed/" + e.Name()); err == nil {
+			_ = os.WriteFile(dst, data, 0o644)
+		}
+	}
 }
 
 // List runs `--list` discovery over dirs.
