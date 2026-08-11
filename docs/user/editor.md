@@ -44,9 +44,14 @@ workflow is the same as the Publish tab, so nothing new to learn:
 3. **Reframe** (video sources): choose a target aspect - 9:16 vertical
    (Reel/Story/TikTok), 4:5 portrait, 1:1 square, 16:9 wide - then drag the
    bright window on the preview frame to choose the visible slice.
+   **Zoom** punches in tighter than the aspect window: scroll the mouse wheel
+   over the preview frame or use the *Zoom* slider (1-4×) in the inspector.
+   Zoomed, the window pans on BOTH axes (it also works with *keep aspect* -
+   a straight punch-in without reframing).
    **Keyframes** animate the pan: press *Use playhead frame* to grab a frame at
    the playhead, *+ Keyframe at playhead* to pin the window there, and the pan
-   glides between pins in the export (chips jump to / delete each keyframe).
+   (both axes) glides between pins in the export (chips jump to / delete each
+   keyframe).
 4. **Layout**: *Zoom-fill* crops to the frame; *Original inside + filled
    background* keeps the whole picture at its native aspect, centered, and
    fills the rest with a zoomed copy (the pan window picks the slice) - the

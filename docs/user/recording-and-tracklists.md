@@ -46,7 +46,10 @@ A crash mid-set can't lose the capture anymore. On the next start rave-mate:
 ## Post-set reconcile
 
 When Traktor writes its history NML (on close), rave-mate auto-reconciles it against captures/
-recordings - no manual step.
+recordings - no manual step. Two buttons on each finished set re-run it by hand:
+**Match history** matches within the recording's own time window; **Match full session**
+extends through the history session's end - use it when rave-mate died mid-set and the
+tracklist stops at the crash while your DJ software's history has the whole set.
 
 ## Works-together marks from the tracklist
 
