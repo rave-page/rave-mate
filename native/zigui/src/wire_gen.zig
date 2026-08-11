@@ -35,11 +35,12 @@ const vrchat = @import("vrchat.zig");
 const vrcgroups = @import("vrcgroups.zig");
 const worlds = @import("worlds.zig");
 const editor = @import("editor.zig");
+const editor_video = @import("editor_video.zig");
 const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x65abbca0;
+pub const schema_hash: u32 = 0x530603ee;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -147,6 +148,7 @@ pub const msg_auto_run_now: u16 = 110; // automation run-now dialog
 pub const msg_auto_schedule: u16 = 111; // schedule-editor dialog
 pub const msg_publish_remote: u16 = 112; // remote Publish view (peer sets + tracklist)
 pub const msg_upd_flow: u16 = 113; // #inst-update region (self-update check/apply flow)
+pub const msg_edv_view: u16 = 114; // Editor tab video mode (full view)
 
 pub fn decodeAgApp(r: *wire.Reader, out: *appgroups.App) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
@@ -4208,6 +4210,84 @@ pub fn decodeEdView(r: *wire.Reader, out: *editor.State) wire.Error!void {
     };
 }
 
+pub fn decodeEdvKfRow(r: *wire.Reader, out: *editor_video.KfRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.time = try r.str(t),
+        2 => out.pos = try r.str(t),
+        3 => out.goAct = try r.str(t),
+        4 => out.delAct = try r.str(t),
+        5 => out.delLb = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdvFrame(r: *wire.Reader, out: *editor_video.Frame) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.aw = try r.str(t),
+        3 => out.ah = try r.str(t),
+        4 => out.imgUrl = try r.str(t),
+        5 => out.busy = try r.str(t),
+        6 => out.hasCrop = try r.boolean(t),
+        7 => out.vertAxis = try r.boolean(t),
+        8 => out.cropL = try r.str(t),
+        9 => out.cropT = try r.str(t),
+        10 => out.cropW = try r.str(t),
+        11 => out.cropH = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdvExport(r: *wire.Reader, out: *editor_video.Export) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.preset = try r.sub(c.Select, decodeSelState, t),
+        2 => out.out = try r.sub(c.Field, decodeUiField, t),
+        3 => out.outBrowse = try r.sub(c.Btn, decodeUiBtn, t),
+        4 => out.@"export" = try r.sub(c.Btn, decodeUiBtn, t),
+        5 => out.running = try r.boolean(t),
+        6 => out.pct = try r.str(t),
+        7 => out.stage = try r.str(t),
+        8 => out.cancel = try r.sub(c.Btn, decodeUiBtn, t),
+        9 => out.hasResult = try r.boolean(t),
+        10 => out.result = try r.str(t),
+        11 => out.hasErr = try r.boolean(t),
+        12 => out.err = try r.str(t),
+        13 => out.trimInfo = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.title = try r.str(t),
+        2 => out.sub = try r.str(t),
+        3 => out.modes = try r.list(editor.ModeTab, decodeEdModeTab, t),
+        4 => out.secSource = try r.str(t),
+        5 => out.browse = try r.sub(c.Btn, decodeUiBtn, t),
+        6 => out.caps = try r.sub(c.Select, decodeSelState, t),
+        7 => out.hasSrc = try r.boolean(t),
+        8 => out.srcName = try r.str(t),
+        9 => out.srcInfo = try r.str(t),
+        10 => out.noSrc = try r.str(t),
+        11 => out.player = try r.str(t),
+        12 => out.noMedia = try r.str(t),
+        13 => out.editHint = try r.str(t),
+        14 => out.secReframe = try r.str(t),
+        15 => out.showRef = try r.boolean(t),
+        16 => out.aspect = try r.sub(c.Select, decodeSelState, t),
+        17 => out.frame = try r.sub(editor_video.Frame, decodeEdvFrame, t),
+        18 => out.frameBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        19 => out.kfAdd = try r.sub(c.Btn, decodeUiBtn, t),
+        20 => out.kfClear = try r.sub(c.Btn, decodeUiBtn, t),
+        21 => out.hasKfs = try r.boolean(t),
+        22 => out.kfs = try r.list(editor_video.KfRow, decodeEdvKfRow, t),
+        23 => out.refHint = try r.str(t),
+        24 => out.secExport = try r.str(t),
+        25 => out.@"export" = try r.sub(editor_video.Export, decodeEdvExport, t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeCeTbDrop(r: *wire.Reader, out: *cueedit.TbDrop) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.act = try r.str(t),
@@ -6252,6 +6332,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ag_state != msg_auto_schedule);
     try std.testing.expect(msg_ag_state != msg_publish_remote);
     try std.testing.expect(msg_ag_state != msg_upd_flow);
+    try std.testing.expect(msg_ag_state != msg_edv_view);
     try std.testing.expect(msg_logs_state != msg_logs_lines);
     try std.testing.expect(msg_logs_state != msg_live_state);
     try std.testing.expect(msg_logs_state != msg_live_transport);
@@ -6357,6 +6438,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_state != msg_auto_schedule);
     try std.testing.expect(msg_logs_state != msg_publish_remote);
     try std.testing.expect(msg_logs_state != msg_upd_flow);
+    try std.testing.expect(msg_logs_state != msg_edv_view);
     try std.testing.expect(msg_logs_lines != msg_live_state);
     try std.testing.expect(msg_logs_lines != msg_live_transport);
     try std.testing.expect(msg_logs_lines != msg_live_n_p);
@@ -6461,6 +6543,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_logs_lines != msg_auto_schedule);
     try std.testing.expect(msg_logs_lines != msg_publish_remote);
     try std.testing.expect(msg_logs_lines != msg_upd_flow);
+    try std.testing.expect(msg_logs_lines != msg_edv_view);
     try std.testing.expect(msg_live_state != msg_live_transport);
     try std.testing.expect(msg_live_state != msg_live_n_p);
     try std.testing.expect(msg_live_state != msg_live_status);
@@ -6564,6 +6647,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_state != msg_auto_schedule);
     try std.testing.expect(msg_live_state != msg_publish_remote);
     try std.testing.expect(msg_live_state != msg_upd_flow);
+    try std.testing.expect(msg_live_state != msg_edv_view);
     try std.testing.expect(msg_live_transport != msg_live_n_p);
     try std.testing.expect(msg_live_transport != msg_live_status);
     try std.testing.expect(msg_live_transport != msg_live_decks);
@@ -6666,6 +6750,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_transport != msg_auto_schedule);
     try std.testing.expect(msg_live_transport != msg_publish_remote);
     try std.testing.expect(msg_live_transport != msg_upd_flow);
+    try std.testing.expect(msg_live_transport != msg_edv_view);
     try std.testing.expect(msg_live_n_p != msg_live_status);
     try std.testing.expect(msg_live_n_p != msg_live_decks);
     try std.testing.expect(msg_live_n_p != msg_live_signals);
@@ -6767,6 +6852,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_n_p != msg_auto_schedule);
     try std.testing.expect(msg_live_n_p != msg_publish_remote);
     try std.testing.expect(msg_live_n_p != msg_upd_flow);
+    try std.testing.expect(msg_live_n_p != msg_edv_view);
     try std.testing.expect(msg_live_status != msg_live_decks);
     try std.testing.expect(msg_live_status != msg_live_signals);
     try std.testing.expect(msg_live_status != msg_live_cockpit);
@@ -6867,6 +6953,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_status != msg_auto_schedule);
     try std.testing.expect(msg_live_status != msg_publish_remote);
     try std.testing.expect(msg_live_status != msg_upd_flow);
+    try std.testing.expect(msg_live_status != msg_edv_view);
     try std.testing.expect(msg_live_decks != msg_live_signals);
     try std.testing.expect(msg_live_decks != msg_live_cockpit);
     try std.testing.expect(msg_live_decks != msg_live_link);
@@ -6966,6 +7053,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_decks != msg_auto_schedule);
     try std.testing.expect(msg_live_decks != msg_publish_remote);
     try std.testing.expect(msg_live_decks != msg_upd_flow);
+    try std.testing.expect(msg_live_decks != msg_edv_view);
     try std.testing.expect(msg_live_signals != msg_live_cockpit);
     try std.testing.expect(msg_live_signals != msg_live_link);
     try std.testing.expect(msg_live_signals != msg_live_graph);
@@ -7064,6 +7152,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_signals != msg_auto_schedule);
     try std.testing.expect(msg_live_signals != msg_publish_remote);
     try std.testing.expect(msg_live_signals != msg_upd_flow);
+    try std.testing.expect(msg_live_signals != msg_edv_view);
     try std.testing.expect(msg_live_cockpit != msg_live_link);
     try std.testing.expect(msg_live_cockpit != msg_live_graph);
     try std.testing.expect(msg_live_cockpit != msg_live_perf);
@@ -7161,6 +7250,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_cockpit != msg_auto_schedule);
     try std.testing.expect(msg_live_cockpit != msg_publish_remote);
     try std.testing.expect(msg_live_cockpit != msg_upd_flow);
+    try std.testing.expect(msg_live_cockpit != msg_edv_view);
     try std.testing.expect(msg_live_link != msg_live_graph);
     try std.testing.expect(msg_live_link != msg_live_perf);
     try std.testing.expect(msg_live_link != msg_live_strip);
@@ -7257,6 +7347,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_link != msg_auto_schedule);
     try std.testing.expect(msg_live_link != msg_publish_remote);
     try std.testing.expect(msg_live_link != msg_upd_flow);
+    try std.testing.expect(msg_live_link != msg_edv_view);
     try std.testing.expect(msg_live_graph != msg_live_perf);
     try std.testing.expect(msg_live_graph != msg_live_strip);
     try std.testing.expect(msg_live_graph != msg_mo_state);
@@ -7352,6 +7443,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_graph != msg_auto_schedule);
     try std.testing.expect(msg_live_graph != msg_publish_remote);
     try std.testing.expect(msg_live_graph != msg_upd_flow);
+    try std.testing.expect(msg_live_graph != msg_edv_view);
     try std.testing.expect(msg_live_perf != msg_live_strip);
     try std.testing.expect(msg_live_perf != msg_mo_state);
     try std.testing.expect(msg_live_perf != msg_pub);
@@ -7446,6 +7538,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_perf != msg_auto_schedule);
     try std.testing.expect(msg_live_perf != msg_publish_remote);
     try std.testing.expect(msg_live_perf != msg_upd_flow);
+    try std.testing.expect(msg_live_perf != msg_edv_view);
     try std.testing.expect(msg_live_strip != msg_mo_state);
     try std.testing.expect(msg_live_strip != msg_pub);
     try std.testing.expect(msg_live_strip != msg_pub_hero);
@@ -7539,6 +7632,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_live_strip != msg_auto_schedule);
     try std.testing.expect(msg_live_strip != msg_publish_remote);
     try std.testing.expect(msg_live_strip != msg_upd_flow);
+    try std.testing.expect(msg_live_strip != msg_edv_view);
     try std.testing.expect(msg_mo_state != msg_pub);
     try std.testing.expect(msg_mo_state != msg_pub_hero);
     try std.testing.expect(msg_mo_state != msg_set_state);
@@ -7631,6 +7725,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mo_state != msg_auto_schedule);
     try std.testing.expect(msg_mo_state != msg_publish_remote);
     try std.testing.expect(msg_mo_state != msg_upd_flow);
+    try std.testing.expect(msg_mo_state != msg_edv_view);
     try std.testing.expect(msg_pub != msg_pub_hero);
     try std.testing.expect(msg_pub != msg_set_state);
     try std.testing.expect(msg_pub != msg_set_content);
@@ -7722,6 +7817,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub != msg_auto_schedule);
     try std.testing.expect(msg_pub != msg_publish_remote);
     try std.testing.expect(msg_pub != msg_upd_flow);
+    try std.testing.expect(msg_pub != msg_edv_view);
     try std.testing.expect(msg_pub_hero != msg_set_state);
     try std.testing.expect(msg_pub_hero != msg_set_content);
     try std.testing.expect(msg_pub_hero != msg_set_status);
@@ -7812,6 +7908,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_pub_hero != msg_auto_schedule);
     try std.testing.expect(msg_pub_hero != msg_publish_remote);
     try std.testing.expect(msg_pub_hero != msg_upd_flow);
+    try std.testing.expect(msg_pub_hero != msg_edv_view);
     try std.testing.expect(msg_set_state != msg_set_content);
     try std.testing.expect(msg_set_state != msg_set_status);
     try std.testing.expect(msg_set_state != msg_lib_state);
@@ -7901,6 +7998,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_state != msg_auto_schedule);
     try std.testing.expect(msg_set_state != msg_publish_remote);
     try std.testing.expect(msg_set_state != msg_upd_flow);
+    try std.testing.expect(msg_set_state != msg_edv_view);
     try std.testing.expect(msg_set_content != msg_set_status);
     try std.testing.expect(msg_set_content != msg_lib_state);
     try std.testing.expect(msg_set_content != msg_lib_body);
@@ -7989,6 +8087,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_content != msg_auto_schedule);
     try std.testing.expect(msg_set_content != msg_publish_remote);
     try std.testing.expect(msg_set_content != msg_upd_flow);
+    try std.testing.expect(msg_set_content != msg_edv_view);
     try std.testing.expect(msg_set_status != msg_lib_state);
     try std.testing.expect(msg_set_status != msg_lib_body);
     try std.testing.expect(msg_set_status != msg_lib_detail);
@@ -8076,6 +8175,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_set_status != msg_auto_schedule);
     try std.testing.expect(msg_set_status != msg_publish_remote);
     try std.testing.expect(msg_set_status != msg_upd_flow);
+    try std.testing.expect(msg_set_status != msg_edv_view);
     try std.testing.expect(msg_lib_state != msg_lib_body);
     try std.testing.expect(msg_lib_state != msg_lib_detail);
     try std.testing.expect(msg_lib_state != msg_lib_queue);
@@ -8162,6 +8262,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_state != msg_auto_schedule);
     try std.testing.expect(msg_lib_state != msg_publish_remote);
     try std.testing.expect(msg_lib_state != msg_upd_flow);
+    try std.testing.expect(msg_lib_state != msg_edv_view);
     try std.testing.expect(msg_lib_body != msg_lib_detail);
     try std.testing.expect(msg_lib_body != msg_lib_queue);
     try std.testing.expect(msg_lib_body != msg_lib_cue_cell);
@@ -8247,6 +8348,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_body != msg_auto_schedule);
     try std.testing.expect(msg_lib_body != msg_publish_remote);
     try std.testing.expect(msg_lib_body != msg_upd_flow);
+    try std.testing.expect(msg_lib_body != msg_edv_view);
     try std.testing.expect(msg_lib_detail != msg_lib_queue);
     try std.testing.expect(msg_lib_detail != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_detail != msg_mp_full);
@@ -8331,6 +8433,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_detail != msg_auto_schedule);
     try std.testing.expect(msg_lib_detail != msg_publish_remote);
     try std.testing.expect(msg_lib_detail != msg_upd_flow);
+    try std.testing.expect(msg_lib_detail != msg_edv_view);
     try std.testing.expect(msg_lib_queue != msg_lib_cue_cell);
     try std.testing.expect(msg_lib_queue != msg_mp_full);
     try std.testing.expect(msg_lib_queue != msg_mp_inner);
@@ -8414,6 +8517,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_queue != msg_auto_schedule);
     try std.testing.expect(msg_lib_queue != msg_publish_remote);
     try std.testing.expect(msg_lib_queue != msg_upd_flow);
+    try std.testing.expect(msg_lib_queue != msg_edv_view);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_full);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_inner);
     try std.testing.expect(msg_lib_cue_cell != msg_mp_vid);
@@ -8496,6 +8600,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_cue_cell != msg_auto_schedule);
     try std.testing.expect(msg_lib_cue_cell != msg_publish_remote);
     try std.testing.expect(msg_lib_cue_cell != msg_upd_flow);
+    try std.testing.expect(msg_lib_cue_cell != msg_edv_view);
     try std.testing.expect(msg_mp_full != msg_mp_inner);
     try std.testing.expect(msg_mp_full != msg_mp_vid);
     try std.testing.expect(msg_mp_full != msg_mp_wave);
@@ -8577,6 +8682,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_full != msg_auto_schedule);
     try std.testing.expect(msg_mp_full != msg_publish_remote);
     try std.testing.expect(msg_mp_full != msg_upd_flow);
+    try std.testing.expect(msg_mp_full != msg_edv_view);
     try std.testing.expect(msg_mp_inner != msg_mp_vid);
     try std.testing.expect(msg_mp_inner != msg_mp_wave);
     try std.testing.expect(msg_mp_inner != msg_mp_tp);
@@ -8657,6 +8763,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_inner != msg_auto_schedule);
     try std.testing.expect(msg_mp_inner != msg_publish_remote);
     try std.testing.expect(msg_mp_inner != msg_upd_flow);
+    try std.testing.expect(msg_mp_inner != msg_edv_view);
     try std.testing.expect(msg_mp_vid != msg_mp_wave);
     try std.testing.expect(msg_mp_vid != msg_mp_tp);
     try std.testing.expect(msg_mp_vid != msg_mp_edit);
@@ -8736,6 +8843,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_vid != msg_auto_schedule);
     try std.testing.expect(msg_mp_vid != msg_publish_remote);
     try std.testing.expect(msg_mp_vid != msg_upd_flow);
+    try std.testing.expect(msg_mp_vid != msg_edv_view);
     try std.testing.expect(msg_mp_wave != msg_mp_tp);
     try std.testing.expect(msg_mp_wave != msg_mp_edit);
     try std.testing.expect(msg_mp_wave != msg_mp_export);
@@ -8814,6 +8922,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_wave != msg_auto_schedule);
     try std.testing.expect(msg_mp_wave != msg_publish_remote);
     try std.testing.expect(msg_mp_wave != msg_upd_flow);
+    try std.testing.expect(msg_mp_wave != msg_edv_view);
     try std.testing.expect(msg_mp_tp != msg_mp_edit);
     try std.testing.expect(msg_mp_tp != msg_mp_export);
     try std.testing.expect(msg_mp_tp != msg_mp_r_o);
@@ -8891,6 +9000,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_tp != msg_auto_schedule);
     try std.testing.expect(msg_mp_tp != msg_publish_remote);
     try std.testing.expect(msg_mp_tp != msg_upd_flow);
+    try std.testing.expect(msg_mp_tp != msg_edv_view);
     try std.testing.expect(msg_mp_edit != msg_mp_export);
     try std.testing.expect(msg_mp_edit != msg_mp_r_o);
     try std.testing.expect(msg_mp_edit != msg_mp_hov);
@@ -8967,6 +9077,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_edit != msg_auto_schedule);
     try std.testing.expect(msg_mp_edit != msg_publish_remote);
     try std.testing.expect(msg_mp_edit != msg_upd_flow);
+    try std.testing.expect(msg_mp_edit != msg_edv_view);
     try std.testing.expect(msg_mp_export != msg_mp_r_o);
     try std.testing.expect(msg_mp_export != msg_mp_hov);
     try std.testing.expect(msg_mp_export != msg_auto_state);
@@ -9042,6 +9153,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_export != msg_auto_schedule);
     try std.testing.expect(msg_mp_export != msg_publish_remote);
     try std.testing.expect(msg_mp_export != msg_upd_flow);
+    try std.testing.expect(msg_mp_export != msg_edv_view);
     try std.testing.expect(msg_mp_r_o != msg_mp_hov);
     try std.testing.expect(msg_mp_r_o != msg_auto_state);
     try std.testing.expect(msg_mp_r_o != msg_auto_body_state);
@@ -9116,6 +9228,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_r_o != msg_auto_schedule);
     try std.testing.expect(msg_mp_r_o != msg_publish_remote);
     try std.testing.expect(msg_mp_r_o != msg_upd_flow);
+    try std.testing.expect(msg_mp_r_o != msg_edv_view);
     try std.testing.expect(msg_mp_hov != msg_auto_state);
     try std.testing.expect(msg_mp_hov != msg_auto_body_state);
     try std.testing.expect(msg_mp_hov != msg_peers);
@@ -9189,6 +9302,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_mp_hov != msg_auto_schedule);
     try std.testing.expect(msg_mp_hov != msg_publish_remote);
     try std.testing.expect(msg_mp_hov != msg_upd_flow);
+    try std.testing.expect(msg_mp_hov != msg_edv_view);
     try std.testing.expect(msg_auto_state != msg_auto_body_state);
     try std.testing.expect(msg_auto_state != msg_peers);
     try std.testing.expect(msg_auto_state != msg_peers_body);
@@ -9261,6 +9375,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_state != msg_auto_schedule);
     try std.testing.expect(msg_auto_state != msg_publish_remote);
     try std.testing.expect(msg_auto_state != msg_upd_flow);
+    try std.testing.expect(msg_auto_state != msg_edv_view);
     try std.testing.expect(msg_auto_body_state != msg_peers);
     try std.testing.expect(msg_auto_body_state != msg_peers_body);
     try std.testing.expect(msg_auto_body_state != msg_ovl_state);
@@ -9332,6 +9447,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_auto_body_state != msg_auto_schedule);
     try std.testing.expect(msg_auto_body_state != msg_publish_remote);
     try std.testing.expect(msg_auto_body_state != msg_upd_flow);
+    try std.testing.expect(msg_auto_body_state != msg_edv_view);
     try std.testing.expect(msg_peers != msg_peers_body);
     try std.testing.expect(msg_peers != msg_ovl_state);
     try std.testing.expect(msg_peers != msg_ovl_appr);
@@ -9402,6 +9518,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers != msg_auto_schedule);
     try std.testing.expect(msg_peers != msg_publish_remote);
     try std.testing.expect(msg_peers != msg_upd_flow);
+    try std.testing.expect(msg_peers != msg_edv_view);
     try std.testing.expect(msg_peers_body != msg_ovl_state);
     try std.testing.expect(msg_peers_body != msg_ovl_appr);
     try std.testing.expect(msg_peers_body != msg_ovl_spout);
@@ -9471,6 +9588,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_peers_body != msg_auto_schedule);
     try std.testing.expect(msg_peers_body != msg_publish_remote);
     try std.testing.expect(msg_peers_body != msg_upd_flow);
+    try std.testing.expect(msg_peers_body != msg_edv_view);
     try std.testing.expect(msg_ovl_state != msg_ovl_appr);
     try std.testing.expect(msg_ovl_state != msg_ovl_spout);
     try std.testing.expect(msg_ovl_state != msg_ui_status);
@@ -9539,6 +9657,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_state != msg_auto_schedule);
     try std.testing.expect(msg_ovl_state != msg_publish_remote);
     try std.testing.expect(msg_ovl_state != msg_upd_flow);
+    try std.testing.expect(msg_ovl_state != msg_edv_view);
     try std.testing.expect(msg_ovl_appr != msg_ovl_spout);
     try std.testing.expect(msg_ovl_appr != msg_ui_status);
     try std.testing.expect(msg_ovl_appr != msg_ovl_strip);
@@ -9606,6 +9725,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_appr != msg_auto_schedule);
     try std.testing.expect(msg_ovl_appr != msg_publish_remote);
     try std.testing.expect(msg_ovl_appr != msg_upd_flow);
+    try std.testing.expect(msg_ovl_appr != msg_edv_view);
     try std.testing.expect(msg_ovl_spout != msg_ui_status);
     try std.testing.expect(msg_ovl_spout != msg_ovl_strip);
     try std.testing.expect(msg_ovl_spout != msg_tw_state);
@@ -9672,6 +9792,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_spout != msg_auto_schedule);
     try std.testing.expect(msg_ovl_spout != msg_publish_remote);
     try std.testing.expect(msg_ovl_spout != msg_upd_flow);
+    try std.testing.expect(msg_ovl_spout != msg_edv_view);
     try std.testing.expect(msg_ui_status != msg_ovl_strip);
     try std.testing.expect(msg_ui_status != msg_tw_state);
     try std.testing.expect(msg_ui_status != msg_tw_obs);
@@ -9737,6 +9858,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ui_status != msg_auto_schedule);
     try std.testing.expect(msg_ui_status != msg_publish_remote);
     try std.testing.expect(msg_ui_status != msg_upd_flow);
+    try std.testing.expect(msg_ui_status != msg_edv_view);
     try std.testing.expect(msg_ovl_strip != msg_tw_state);
     try std.testing.expect(msg_ovl_strip != msg_tw_obs);
     try std.testing.expect(msg_ovl_strip != msg_tw_presets);
@@ -9801,6 +9923,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ovl_strip != msg_auto_schedule);
     try std.testing.expect(msg_ovl_strip != msg_publish_remote);
     try std.testing.expect(msg_ovl_strip != msg_upd_flow);
+    try std.testing.expect(msg_ovl_strip != msg_edv_view);
     try std.testing.expect(msg_tw_state != msg_tw_obs);
     try std.testing.expect(msg_tw_state != msg_tw_presets);
     try std.testing.expect(msg_tw_state != msg_tw_feed);
@@ -9864,6 +9987,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_state != msg_auto_schedule);
     try std.testing.expect(msg_tw_state != msg_publish_remote);
     try std.testing.expect(msg_tw_state != msg_upd_flow);
+    try std.testing.expect(msg_tw_state != msg_edv_view);
     try std.testing.expect(msg_tw_obs != msg_tw_presets);
     try std.testing.expect(msg_tw_obs != msg_tw_feed);
     try std.testing.expect(msg_tw_obs != msg_midi_active);
@@ -9926,6 +10050,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_obs != msg_auto_schedule);
     try std.testing.expect(msg_tw_obs != msg_publish_remote);
     try std.testing.expect(msg_tw_obs != msg_upd_flow);
+    try std.testing.expect(msg_tw_obs != msg_edv_view);
     try std.testing.expect(msg_tw_presets != msg_tw_feed);
     try std.testing.expect(msg_tw_presets != msg_midi_active);
     try std.testing.expect(msg_tw_presets != msg_midi_mon_lines);
@@ -9987,6 +10112,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_presets != msg_auto_schedule);
     try std.testing.expect(msg_tw_presets != msg_publish_remote);
     try std.testing.expect(msg_tw_presets != msg_upd_flow);
+    try std.testing.expect(msg_tw_presets != msg_edv_view);
     try std.testing.expect(msg_tw_feed != msg_midi_active);
     try std.testing.expect(msg_tw_feed != msg_midi_mon_lines);
     try std.testing.expect(msg_tw_feed != msg_midi_port_stat);
@@ -10047,6 +10173,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tw_feed != msg_auto_schedule);
     try std.testing.expect(msg_tw_feed != msg_publish_remote);
     try std.testing.expect(msg_tw_feed != msg_upd_flow);
+    try std.testing.expect(msg_tw_feed != msg_edv_view);
     try std.testing.expect(msg_midi_active != msg_midi_mon_lines);
     try std.testing.expect(msg_midi_active != msg_midi_port_stat);
     try std.testing.expect(msg_midi_active != msg_midi_ctl);
@@ -10106,6 +10233,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_active != msg_auto_schedule);
     try std.testing.expect(msg_midi_active != msg_publish_remote);
     try std.testing.expect(msg_midi_active != msg_upd_flow);
+    try std.testing.expect(msg_midi_active != msg_edv_view);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_port_stat);
     try std.testing.expect(msg_midi_mon_lines != msg_midi_ctl);
     try std.testing.expect(msg_midi_mon_lines != msg_p_c_view);
@@ -10164,6 +10292,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_mon_lines != msg_auto_schedule);
     try std.testing.expect(msg_midi_mon_lines != msg_publish_remote);
     try std.testing.expect(msg_midi_mon_lines != msg_upd_flow);
+    try std.testing.expect(msg_midi_mon_lines != msg_edv_view);
     try std.testing.expect(msg_midi_port_stat != msg_midi_ctl);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_view);
     try std.testing.expect(msg_midi_port_stat != msg_p_c_gpu);
@@ -10221,6 +10350,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_port_stat != msg_auto_schedule);
     try std.testing.expect(msg_midi_port_stat != msg_publish_remote);
     try std.testing.expect(msg_midi_port_stat != msg_upd_flow);
+    try std.testing.expect(msg_midi_port_stat != msg_edv_view);
     try std.testing.expect(msg_midi_ctl != msg_p_c_view);
     try std.testing.expect(msg_midi_ctl != msg_p_c_gpu);
     try std.testing.expect(msg_midi_ctl != msg_vrc_status);
@@ -10277,6 +10407,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_midi_ctl != msg_auto_schedule);
     try std.testing.expect(msg_midi_ctl != msg_publish_remote);
     try std.testing.expect(msg_midi_ctl != msg_upd_flow);
+    try std.testing.expect(msg_midi_ctl != msg_edv_view);
     try std.testing.expect(msg_p_c_view != msg_p_c_gpu);
     try std.testing.expect(msg_p_c_view != msg_vrc_status);
     try std.testing.expect(msg_p_c_view != msg_vrc_editor);
@@ -10332,6 +10463,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_view != msg_auto_schedule);
     try std.testing.expect(msg_p_c_view != msg_publish_remote);
     try std.testing.expect(msg_p_c_view != msg_upd_flow);
+    try std.testing.expect(msg_p_c_view != msg_edv_view);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_status);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_editor);
     try std.testing.expect(msg_p_c_gpu != msg_vrc_campaths);
@@ -10386,6 +10518,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_p_c_gpu != msg_auto_schedule);
     try std.testing.expect(msg_p_c_gpu != msg_publish_remote);
     try std.testing.expect(msg_p_c_gpu != msg_upd_flow);
+    try std.testing.expect(msg_p_c_gpu != msg_edv_view);
     try std.testing.expect(msg_vrc_status != msg_vrc_editor);
     try std.testing.expect(msg_vrc_status != msg_vrc_campaths);
     try std.testing.expect(msg_vrc_status != msg_vrc_photos);
@@ -10439,6 +10572,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_status != msg_auto_schedule);
     try std.testing.expect(msg_vrc_status != msg_publish_remote);
     try std.testing.expect(msg_vrc_status != msg_upd_flow);
+    try std.testing.expect(msg_vrc_status != msg_edv_view);
     try std.testing.expect(msg_vrc_editor != msg_vrc_campaths);
     try std.testing.expect(msg_vrc_editor != msg_vrc_photos);
     try std.testing.expect(msg_vrc_editor != msg_vrc_tab);
@@ -10491,6 +10625,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_editor != msg_auto_schedule);
     try std.testing.expect(msg_vrc_editor != msg_publish_remote);
     try std.testing.expect(msg_vrc_editor != msg_upd_flow);
+    try std.testing.expect(msg_vrc_editor != msg_edv_view);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_photos);
     try std.testing.expect(msg_vrc_campaths != msg_vrc_tab);
     try std.testing.expect(msg_vrc_campaths != msg_vrcg);
@@ -10542,6 +10677,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_campaths != msg_auto_schedule);
     try std.testing.expect(msg_vrc_campaths != msg_publish_remote);
     try std.testing.expect(msg_vrc_campaths != msg_upd_flow);
+    try std.testing.expect(msg_vrc_campaths != msg_edv_view);
     try std.testing.expect(msg_vrc_photos != msg_vrc_tab);
     try std.testing.expect(msg_vrc_photos != msg_vrcg);
     try std.testing.expect(msg_vrc_photos != msg_vg_role_body);
@@ -10592,6 +10728,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_photos != msg_auto_schedule);
     try std.testing.expect(msg_vrc_photos != msg_publish_remote);
     try std.testing.expect(msg_vrc_photos != msg_upd_flow);
+    try std.testing.expect(msg_vrc_photos != msg_edv_view);
     try std.testing.expect(msg_vrc_tab != msg_vrcg);
     try std.testing.expect(msg_vrc_tab != msg_vg_role_body);
     try std.testing.expect(msg_vrc_tab != msg_vg_invite_list);
@@ -10641,6 +10778,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrc_tab != msg_auto_schedule);
     try std.testing.expect(msg_vrc_tab != msg_publish_remote);
     try std.testing.expect(msg_vrc_tab != msg_upd_flow);
+    try std.testing.expect(msg_vrc_tab != msg_edv_view);
     try std.testing.expect(msg_vrcg != msg_vg_role_body);
     try std.testing.expect(msg_vrcg != msg_vg_invite_list);
     try std.testing.expect(msg_vrcg != msg_vg_roles_modal);
@@ -10689,6 +10827,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vrcg != msg_auto_schedule);
     try std.testing.expect(msg_vrcg != msg_publish_remote);
     try std.testing.expect(msg_vrcg != msg_upd_flow);
+    try std.testing.expect(msg_vrcg != msg_edv_view);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_list);
     try std.testing.expect(msg_vg_role_body != msg_vg_roles_modal);
     try std.testing.expect(msg_vg_role_body != msg_vg_invite_modal);
@@ -10736,6 +10875,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_role_body != msg_auto_schedule);
     try std.testing.expect(msg_vg_role_body != msg_publish_remote);
     try std.testing.expect(msg_vg_role_body != msg_upd_flow);
+    try std.testing.expect(msg_vg_role_body != msg_edv_view);
     try std.testing.expect(msg_vg_invite_list != msg_vg_roles_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_invite_list != msg_vg_member_confirm);
@@ -10782,6 +10922,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_list != msg_auto_schedule);
     try std.testing.expect(msg_vg_invite_list != msg_publish_remote);
     try std.testing.expect(msg_vg_invite_list != msg_upd_flow);
+    try std.testing.expect(msg_vg_invite_list != msg_edv_view);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_invite_modal);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_roles_modal != msg_vg_post_confirm);
@@ -10827,6 +10968,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_roles_modal != msg_auto_schedule);
     try std.testing.expect(msg_vg_roles_modal != msg_publish_remote);
     try std.testing.expect(msg_vg_roles_modal != msg_upd_flow);
+    try std.testing.expect(msg_vg_roles_modal != msg_edv_view);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_member_confirm);
     try std.testing.expect(msg_vg_invite_modal != msg_vg_post_confirm);
     try std.testing.expect(msg_vg_invite_modal != msg_ws_hint);
@@ -10871,6 +11013,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_invite_modal != msg_auto_schedule);
     try std.testing.expect(msg_vg_invite_modal != msg_publish_remote);
     try std.testing.expect(msg_vg_invite_modal != msg_upd_flow);
+    try std.testing.expect(msg_vg_invite_modal != msg_edv_view);
     try std.testing.expect(msg_vg_member_confirm != msg_vg_post_confirm);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_hint);
     try std.testing.expect(msg_vg_member_confirm != msg_ws_git_hub);
@@ -10914,6 +11057,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_member_confirm != msg_auto_schedule);
     try std.testing.expect(msg_vg_member_confirm != msg_publish_remote);
     try std.testing.expect(msg_vg_member_confirm != msg_upd_flow);
+    try std.testing.expect(msg_vg_member_confirm != msg_edv_view);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_hint);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_git_hub);
     try std.testing.expect(msg_vg_post_confirm != msg_ws_status);
@@ -10956,6 +11100,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_vg_post_confirm != msg_auto_schedule);
     try std.testing.expect(msg_vg_post_confirm != msg_publish_remote);
     try std.testing.expect(msg_vg_post_confirm != msg_upd_flow);
+    try std.testing.expect(msg_vg_post_confirm != msg_edv_view);
     try std.testing.expect(msg_ws_hint != msg_ws_git_hub);
     try std.testing.expect(msg_ws_hint != msg_ws_status);
     try std.testing.expect(msg_ws_hint != msg_ws_unity);
@@ -10997,6 +11142,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_hint != msg_auto_schedule);
     try std.testing.expect(msg_ws_hint != msg_publish_remote);
     try std.testing.expect(msg_ws_hint != msg_upd_flow);
+    try std.testing.expect(msg_ws_hint != msg_edv_view);
     try std.testing.expect(msg_ws_git_hub != msg_ws_status);
     try std.testing.expect(msg_ws_git_hub != msg_ws_unity);
     try std.testing.expect(msg_ws_git_hub != msg_worlds);
@@ -11037,6 +11183,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_git_hub != msg_auto_schedule);
     try std.testing.expect(msg_ws_git_hub != msg_publish_remote);
     try std.testing.expect(msg_ws_git_hub != msg_upd_flow);
+    try std.testing.expect(msg_ws_git_hub != msg_edv_view);
     try std.testing.expect(msg_ws_status != msg_ws_unity);
     try std.testing.expect(msg_ws_status != msg_worlds);
     try std.testing.expect(msg_ws_status != msg_ws_list_editor);
@@ -11076,6 +11223,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_status != msg_auto_schedule);
     try std.testing.expect(msg_ws_status != msg_publish_remote);
     try std.testing.expect(msg_ws_status != msg_upd_flow);
+    try std.testing.expect(msg_ws_status != msg_edv_view);
     try std.testing.expect(msg_ws_unity != msg_worlds);
     try std.testing.expect(msg_ws_unity != msg_ws_list_editor);
     try std.testing.expect(msg_ws_unity != msg_ws_poster_editor);
@@ -11114,6 +11262,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_unity != msg_auto_schedule);
     try std.testing.expect(msg_ws_unity != msg_publish_remote);
     try std.testing.expect(msg_ws_unity != msg_upd_flow);
+    try std.testing.expect(msg_ws_unity != msg_edv_view);
     try std.testing.expect(msg_worlds != msg_ws_list_editor);
     try std.testing.expect(msg_worlds != msg_ws_poster_editor);
     try std.testing.expect(msg_worlds != msg_ws_friend_list);
@@ -11151,6 +11300,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_worlds != msg_auto_schedule);
     try std.testing.expect(msg_worlds != msg_publish_remote);
     try std.testing.expect(msg_worlds != msg_upd_flow);
+    try std.testing.expect(msg_worlds != msg_edv_view);
     try std.testing.expect(msg_ws_list_editor != msg_ws_poster_editor);
     try std.testing.expect(msg_ws_list_editor != msg_ws_friend_list);
     try std.testing.expect(msg_ws_list_editor != msg_ws_friend_picker);
@@ -11187,6 +11337,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_list_editor != msg_auto_schedule);
     try std.testing.expect(msg_ws_list_editor != msg_publish_remote);
     try std.testing.expect(msg_ws_list_editor != msg_upd_flow);
+    try std.testing.expect(msg_ws_list_editor != msg_edv_view);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_list);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_friend_picker);
     try std.testing.expect(msg_ws_poster_editor != msg_ws_group_list);
@@ -11222,6 +11373,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_poster_editor != msg_auto_schedule);
     try std.testing.expect(msg_ws_poster_editor != msg_publish_remote);
     try std.testing.expect(msg_ws_poster_editor != msg_upd_flow);
+    try std.testing.expect(msg_ws_poster_editor != msg_edv_view);
     try std.testing.expect(msg_ws_friend_list != msg_ws_friend_picker);
     try std.testing.expect(msg_ws_friend_list != msg_ws_group_list);
     try std.testing.expect(msg_ws_friend_list != msg_ws_group_picker);
@@ -11256,6 +11408,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_list != msg_auto_schedule);
     try std.testing.expect(msg_ws_friend_list != msg_publish_remote);
     try std.testing.expect(msg_ws_friend_list != msg_upd_flow);
+    try std.testing.expect(msg_ws_friend_list != msg_edv_view);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_group_list);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_group_picker);
     try std.testing.expect(msg_ws_friend_picker != msg_ws_role_list);
@@ -11289,6 +11442,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_friend_picker != msg_auto_schedule);
     try std.testing.expect(msg_ws_friend_picker != msg_publish_remote);
     try std.testing.expect(msg_ws_friend_picker != msg_upd_flow);
+    try std.testing.expect(msg_ws_friend_picker != msg_edv_view);
     try std.testing.expect(msg_ws_group_list != msg_ws_group_picker);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_list != msg_ws_role_picker);
@@ -11321,6 +11475,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_group_list != msg_auto_schedule);
     try std.testing.expect(msg_ws_group_list != msg_publish_remote);
     try std.testing.expect(msg_ws_group_list != msg_upd_flow);
+    try std.testing.expect(msg_ws_group_list != msg_edv_view);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_list);
     try std.testing.expect(msg_ws_group_picker != msg_ws_role_picker);
     try std.testing.expect(msg_ws_group_picker != msg_ws_device);
@@ -11352,6 +11507,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_group_picker != msg_auto_schedule);
     try std.testing.expect(msg_ws_group_picker != msg_publish_remote);
     try std.testing.expect(msg_ws_group_picker != msg_upd_flow);
+    try std.testing.expect(msg_ws_group_picker != msg_edv_view);
     try std.testing.expect(msg_ws_role_list != msg_ws_role_picker);
     try std.testing.expect(msg_ws_role_list != msg_ws_device);
     try std.testing.expect(msg_ws_role_list != msg_lib_mirror);
@@ -11382,6 +11538,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_role_list != msg_auto_schedule);
     try std.testing.expect(msg_ws_role_list != msg_publish_remote);
     try std.testing.expect(msg_ws_role_list != msg_upd_flow);
+    try std.testing.expect(msg_ws_role_list != msg_edv_view);
     try std.testing.expect(msg_ws_role_picker != msg_ws_device);
     try std.testing.expect(msg_ws_role_picker != msg_lib_mirror);
     try std.testing.expect(msg_ws_role_picker != msg_lib_mirror_ban);
@@ -11411,6 +11568,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_role_picker != msg_auto_schedule);
     try std.testing.expect(msg_ws_role_picker != msg_publish_remote);
     try std.testing.expect(msg_ws_role_picker != msg_upd_flow);
+    try std.testing.expect(msg_ws_role_picker != msg_edv_view);
     try std.testing.expect(msg_ws_device != msg_lib_mirror);
     try std.testing.expect(msg_ws_device != msg_lib_mirror_ban);
     try std.testing.expect(msg_ws_device != msg_rce_info);
@@ -11439,6 +11597,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ws_device != msg_auto_schedule);
     try std.testing.expect(msg_ws_device != msg_publish_remote);
     try std.testing.expect(msg_ws_device != msg_upd_flow);
+    try std.testing.expect(msg_ws_device != msg_edv_view);
     try std.testing.expect(msg_lib_mirror != msg_lib_mirror_ban);
     try std.testing.expect(msg_lib_mirror != msg_rce_info);
     try std.testing.expect(msg_lib_mirror != msg_rce_body);
@@ -11466,6 +11625,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_mirror != msg_auto_schedule);
     try std.testing.expect(msg_lib_mirror != msg_publish_remote);
     try std.testing.expect(msg_lib_mirror != msg_upd_flow);
+    try std.testing.expect(msg_lib_mirror != msg_edv_view);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_info);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_body);
     try std.testing.expect(msg_lib_mirror_ban != msg_rce_save);
@@ -11492,6 +11652,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_mirror_ban != msg_auto_schedule);
     try std.testing.expect(msg_lib_mirror_ban != msg_publish_remote);
     try std.testing.expect(msg_lib_mirror_ban != msg_upd_flow);
+    try std.testing.expect(msg_lib_mirror_ban != msg_edv_view);
     try std.testing.expect(msg_rce_info != msg_rce_body);
     try std.testing.expect(msg_rce_info != msg_rce_save);
     try std.testing.expect(msg_rce_info != msg_ed_preview);
@@ -11517,6 +11678,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_info != msg_auto_schedule);
     try std.testing.expect(msg_rce_info != msg_publish_remote);
     try std.testing.expect(msg_rce_info != msg_upd_flow);
+    try std.testing.expect(msg_rce_info != msg_edv_view);
     try std.testing.expect(msg_rce_body != msg_rce_save);
     try std.testing.expect(msg_rce_body != msg_ed_preview);
     try std.testing.expect(msg_rce_body != msg_ed_view);
@@ -11541,6 +11703,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_body != msg_auto_schedule);
     try std.testing.expect(msg_rce_body != msg_publish_remote);
     try std.testing.expect(msg_rce_body != msg_upd_flow);
+    try std.testing.expect(msg_rce_body != msg_edv_view);
     try std.testing.expect(msg_rce_save != msg_ed_preview);
     try std.testing.expect(msg_rce_save != msg_ed_view);
     try std.testing.expect(msg_rce_save != msg_ce_topbar);
@@ -11564,6 +11727,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_rce_save != msg_auto_schedule);
     try std.testing.expect(msg_rce_save != msg_publish_remote);
     try std.testing.expect(msg_rce_save != msg_upd_flow);
+    try std.testing.expect(msg_rce_save != msg_edv_view);
     try std.testing.expect(msg_ed_preview != msg_ed_view);
     try std.testing.expect(msg_ed_preview != msg_ce_topbar);
     try std.testing.expect(msg_ed_preview != msg_ce_wave);
@@ -11586,6 +11750,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ed_preview != msg_auto_schedule);
     try std.testing.expect(msg_ed_preview != msg_publish_remote);
     try std.testing.expect(msg_ed_preview != msg_upd_flow);
+    try std.testing.expect(msg_ed_preview != msg_edv_view);
     try std.testing.expect(msg_ed_view != msg_ce_topbar);
     try std.testing.expect(msg_ed_view != msg_ce_wave);
     try std.testing.expect(msg_ed_view != msg_ce_rail);
@@ -11607,6 +11772,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ed_view != msg_auto_schedule);
     try std.testing.expect(msg_ed_view != msg_publish_remote);
     try std.testing.expect(msg_ed_view != msg_upd_flow);
+    try std.testing.expect(msg_ed_view != msg_edv_view);
     try std.testing.expect(msg_ce_topbar != msg_ce_wave);
     try std.testing.expect(msg_ce_topbar != msg_ce_rail);
     try std.testing.expect(msg_ce_topbar != msg_lib_g_f_live);
@@ -11627,6 +11793,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_topbar != msg_auto_schedule);
     try std.testing.expect(msg_ce_topbar != msg_publish_remote);
     try std.testing.expect(msg_ce_topbar != msg_upd_flow);
+    try std.testing.expect(msg_ce_topbar != msg_edv_view);
     try std.testing.expect(msg_ce_wave != msg_ce_rail);
     try std.testing.expect(msg_ce_wave != msg_lib_g_f_live);
     try std.testing.expect(msg_ce_wave != msg_lib_smart_modal);
@@ -11646,6 +11813,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_wave != msg_auto_schedule);
     try std.testing.expect(msg_ce_wave != msg_publish_remote);
     try std.testing.expect(msg_ce_wave != msg_upd_flow);
+    try std.testing.expect(msg_ce_wave != msg_edv_view);
     try std.testing.expect(msg_ce_rail != msg_lib_g_f_live);
     try std.testing.expect(msg_ce_rail != msg_lib_smart_modal);
     try std.testing.expect(msg_ce_rail != msg_lib_reloc_modal);
@@ -11664,6 +11832,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_ce_rail != msg_auto_schedule);
     try std.testing.expect(msg_ce_rail != msg_publish_remote);
     try std.testing.expect(msg_ce_rail != msg_upd_flow);
+    try std.testing.expect(msg_ce_rail != msg_edv_view);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_smart_modal);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_reloc_modal);
     try std.testing.expect(msg_lib_g_f_live != msg_lib_remote);
@@ -11681,6 +11850,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_g_f_live != msg_auto_schedule);
     try std.testing.expect(msg_lib_g_f_live != msg_publish_remote);
     try std.testing.expect(msg_lib_g_f_live != msg_upd_flow);
+    try std.testing.expect(msg_lib_g_f_live != msg_edv_view);
     try std.testing.expect(msg_lib_smart_modal != msg_lib_reloc_modal);
     try std.testing.expect(msg_lib_smart_modal != msg_lib_remote);
     try std.testing.expect(msg_lib_smart_modal != msg_tk_live);
@@ -11697,6 +11867,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_smart_modal != msg_auto_schedule);
     try std.testing.expect(msg_lib_smart_modal != msg_publish_remote);
     try std.testing.expect(msg_lib_smart_modal != msg_upd_flow);
+    try std.testing.expect(msg_lib_smart_modal != msg_edv_view);
     try std.testing.expect(msg_lib_reloc_modal != msg_lib_remote);
     try std.testing.expect(msg_lib_reloc_modal != msg_tk_live);
     try std.testing.expect(msg_lib_reloc_modal != msg_tk_logs);
@@ -11712,6 +11883,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_reloc_modal != msg_auto_schedule);
     try std.testing.expect(msg_lib_reloc_modal != msg_publish_remote);
     try std.testing.expect(msg_lib_reloc_modal != msg_upd_flow);
+    try std.testing.expect(msg_lib_reloc_modal != msg_edv_view);
     try std.testing.expect(msg_lib_remote != msg_tk_live);
     try std.testing.expect(msg_lib_remote != msg_tk_logs);
     try std.testing.expect(msg_lib_remote != msg_dlg_choice);
@@ -11726,6 +11898,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_lib_remote != msg_auto_schedule);
     try std.testing.expect(msg_lib_remote != msg_publish_remote);
     try std.testing.expect(msg_lib_remote != msg_upd_flow);
+    try std.testing.expect(msg_lib_remote != msg_edv_view);
     try std.testing.expect(msg_tk_live != msg_tk_logs);
     try std.testing.expect(msg_tk_live != msg_dlg_choice);
     try std.testing.expect(msg_tk_live != msg_dlg_txt_export);
@@ -11739,6 +11912,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tk_live != msg_auto_schedule);
     try std.testing.expect(msg_tk_live != msg_publish_remote);
     try std.testing.expect(msg_tk_live != msg_upd_flow);
+    try std.testing.expect(msg_tk_live != msg_edv_view);
     try std.testing.expect(msg_tk_logs != msg_dlg_choice);
     try std.testing.expect(msg_tk_logs != msg_dlg_txt_export);
     try std.testing.expect(msg_tk_logs != msg_dlg_export_prev);
@@ -11751,6 +11925,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_tk_logs != msg_auto_schedule);
     try std.testing.expect(msg_tk_logs != msg_publish_remote);
     try std.testing.expect(msg_tk_logs != msg_upd_flow);
+    try std.testing.expect(msg_tk_logs != msg_edv_view);
     try std.testing.expect(msg_dlg_choice != msg_dlg_txt_export);
     try std.testing.expect(msg_dlg_choice != msg_dlg_export_prev);
     try std.testing.expect(msg_dlg_choice != msg_dlg_rename);
@@ -11762,6 +11937,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_choice != msg_auto_schedule);
     try std.testing.expect(msg_dlg_choice != msg_publish_remote);
     try std.testing.expect(msg_dlg_choice != msg_upd_flow);
+    try std.testing.expect(msg_dlg_choice != msg_edv_view);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_export_prev);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_rename);
     try std.testing.expect(msg_dlg_txt_export != msg_dlg_fix);
@@ -11772,6 +11948,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_txt_export != msg_auto_schedule);
     try std.testing.expect(msg_dlg_txt_export != msg_publish_remote);
     try std.testing.expect(msg_dlg_txt_export != msg_upd_flow);
+    try std.testing.expect(msg_dlg_txt_export != msg_edv_view);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_rename);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_fix);
     try std.testing.expect(msg_dlg_export_prev != msg_dlg_preset);
@@ -11781,6 +11958,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_export_prev != msg_auto_schedule);
     try std.testing.expect(msg_dlg_export_prev != msg_publish_remote);
     try std.testing.expect(msg_dlg_export_prev != msg_upd_flow);
+    try std.testing.expect(msg_dlg_export_prev != msg_edv_view);
     try std.testing.expect(msg_dlg_rename != msg_dlg_fix);
     try std.testing.expect(msg_dlg_rename != msg_dlg_preset);
     try std.testing.expect(msg_dlg_rename != msg_dlg_pat_mgr);
@@ -11789,6 +11967,7 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_rename != msg_auto_schedule);
     try std.testing.expect(msg_dlg_rename != msg_publish_remote);
     try std.testing.expect(msg_dlg_rename != msg_upd_flow);
+    try std.testing.expect(msg_dlg_rename != msg_edv_view);
     try std.testing.expect(msg_dlg_fix != msg_dlg_preset);
     try std.testing.expect(msg_dlg_fix != msg_dlg_pat_mgr);
     try std.testing.expect(msg_dlg_fix != msg_auto_editor);
@@ -11796,25 +11975,33 @@ test "schema ids are distinct" {
     try std.testing.expect(msg_dlg_fix != msg_auto_schedule);
     try std.testing.expect(msg_dlg_fix != msg_publish_remote);
     try std.testing.expect(msg_dlg_fix != msg_upd_flow);
+    try std.testing.expect(msg_dlg_fix != msg_edv_view);
     try std.testing.expect(msg_dlg_preset != msg_dlg_pat_mgr);
     try std.testing.expect(msg_dlg_preset != msg_auto_editor);
     try std.testing.expect(msg_dlg_preset != msg_auto_run_now);
     try std.testing.expect(msg_dlg_preset != msg_auto_schedule);
     try std.testing.expect(msg_dlg_preset != msg_publish_remote);
     try std.testing.expect(msg_dlg_preset != msg_upd_flow);
+    try std.testing.expect(msg_dlg_preset != msg_edv_view);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_editor);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_run_now);
     try std.testing.expect(msg_dlg_pat_mgr != msg_auto_schedule);
     try std.testing.expect(msg_dlg_pat_mgr != msg_publish_remote);
     try std.testing.expect(msg_dlg_pat_mgr != msg_upd_flow);
+    try std.testing.expect(msg_dlg_pat_mgr != msg_edv_view);
     try std.testing.expect(msg_auto_editor != msg_auto_run_now);
     try std.testing.expect(msg_auto_editor != msg_auto_schedule);
     try std.testing.expect(msg_auto_editor != msg_publish_remote);
     try std.testing.expect(msg_auto_editor != msg_upd_flow);
+    try std.testing.expect(msg_auto_editor != msg_edv_view);
     try std.testing.expect(msg_auto_run_now != msg_auto_schedule);
     try std.testing.expect(msg_auto_run_now != msg_publish_remote);
     try std.testing.expect(msg_auto_run_now != msg_upd_flow);
+    try std.testing.expect(msg_auto_run_now != msg_edv_view);
     try std.testing.expect(msg_auto_schedule != msg_publish_remote);
     try std.testing.expect(msg_auto_schedule != msg_upd_flow);
+    try std.testing.expect(msg_auto_schedule != msg_edv_view);
     try std.testing.expect(msg_publish_remote != msg_upd_flow);
+    try std.testing.expect(msg_publish_remote != msg_edv_view);
+    try std.testing.expect(msg_upd_flow != msg_edv_view);
 }

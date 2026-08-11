@@ -577,6 +577,11 @@ func edColorRowStateOf(label, act string, c visualeditor.RGBA) edColorRowState {
 // with mix-blend-mode + transforms, placeholders filled from now-playing). Doc + templates are
 // shared on disk with the Fyne editor (same visualeditor engine + data dir).
 func (u *UI) renderEditor() string {
+	if u.svc.Cfg == nil || u.svc.Cfg.Features.MediaEditor.Enabled {
+		if edModeSafe() == "video" {
+			return u.renderEditorVideo()
+		}
+	}
 	st := u.editorState()
 	if zigui.Available() {
 		if h, ok := zigWire("RenderEditorV2", wireEdView(st), zigui.RenderEditorV2,

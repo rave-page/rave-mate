@@ -295,6 +295,117 @@
   min-width: 0;
 }
 
+/* ── video mode ── */
+.edv-src {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.edv-srcname {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.edv-srcinfo {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--rp-muted, #a6abb6);
+}
+.edv-player {
+  margin: 0.6rem 0;
+}
+.edv-fbox {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  margin: 0.5rem auto;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #14161a;
+  touch-action: none;
+  cursor: grab;
+}
+.edv-fbox:active {
+  cursor: grabbing;
+}
+.edv-fimg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.edv-fbusy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  inset: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--rp-muted, #a6abb6);
+}
+.edv-shade {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.62);
+  pointer-events: none;
+}
+.edv-crop {
+  position: absolute;
+  border: 2px solid var(--rp-mint, #08f79b);
+  border-radius: 4px;
+  box-shadow: 0 0 14px rgba(8, 247, 155, 0.35);
+  pointer-events: none;
+}
+.edv-kfs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.edv-kf {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.edv-kf-go,
+.edv-kf-del {
+  border: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--rp-fg, #fafafa);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+.edv-kf-del {
+  color: var(--rp-hot, #ff3e8a);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
+.edv-kf-go:hover,
+.edv-kf-del:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.edv-outrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.edv-outrow .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.edv-triminfo {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--rp-muted, #a6abb6);
+  margin: 0.35rem 0;
+}
+
 /* ── canvas preset grid (modal) ── */
 .ed-preset-grid {
   display: grid;

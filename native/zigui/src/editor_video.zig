@@ -1,0 +1,248 @@
+//! Editor video-mode renderer — byte-exact port of
+//! internal/webui/render_editor_video.go (editorVideoHTML + the #edv-frame and
+//! #edv-export fragments). The mp component markup arrives RAW in state.player
+//! (player.go owns that surface and its own golden gate). Golden gate:
+//! internal/webui/zigui_golden_editor_video_test.go.
+
+const std = @import("std");
+const Html = @import("html.zig").Html;
+const c = @import("components.zig");
+const editor = @import("editor.zig");
+
+pub const KfRow = struct {
+    time: []const u8 = "",
+    pos: []const u8 = "",
+    goAct: []const u8 = "",
+    delAct: []const u8 = "",
+    delLb: []const u8 = "",
+};
+
+pub const Frame = struct {
+    show: bool = false,
+    aw: []const u8 = "",
+    ah: []const u8 = "",
+    imgUrl: []const u8 = "",
+    busy: []const u8 = "",
+    hasCrop: bool = false,
+    vertAxis: bool = false,
+    cropL: []const u8 = "",
+    cropT: []const u8 = "",
+    cropW: []const u8 = "",
+    cropH: []const u8 = "",
+};
+
+pub const Export = struct {
+    preset: c.Select = .{},
+    out: c.Field = .{},
+    outBrowse: c.Btn = .{},
+    @"export": c.Btn = .{},
+    running: bool = false,
+    pct: []const u8 = "",
+    stage: []const u8 = "",
+    cancel: c.Btn = .{},
+    hasResult: bool = false,
+    result: []const u8 = "",
+    hasErr: bool = false,
+    err: []const u8 = "",
+    trimInfo: []const u8 = "",
+};
+
+pub const State = struct {
+    title: []const u8 = "",
+    sub: []const u8 = "",
+    modes: []const editor.ModeTab = &.{},
+
+    secSource: []const u8 = "",
+    browse: c.Btn = .{},
+    caps: c.Select = .{},
+    hasSrc: bool = false,
+    srcName: []const u8 = "",
+    srcInfo: []const u8 = "",
+    noSrc: []const u8 = "",
+
+    player: []const u8 = "", // RAW mp markup
+    noMedia: []const u8 = "",
+    editHint: []const u8 = "",
+
+    secReframe: []const u8 = "",
+    showRef: bool = false,
+    aspect: c.Select = .{},
+    frame: Frame = .{},
+    frameBtn: c.Btn = .{},
+    kfAdd: c.Btn = .{},
+    kfClear: c.Btn = .{},
+    hasKfs: bool = false,
+    kfs: []const KfRow = &.{},
+    refHint: []const u8 = "",
+
+    secExport: []const u8 = "",
+    @"export": Export = .{},
+};
+
+/// render mirrors Go editorVideoHTML.
+pub fn render(h: *Html, s: State) !void {
+    try c.panel(h, s.title, s.sub);
+    try editor.renderModes(h, s.modes);
+
+    // source row
+    try c.sectionOpen(h, s.secSource);
+    try h.raw("<div class=edv-src>");
+    try c.btnOf(h, s.browse);
+    try c.selectBox(h, s.caps);
+    if (s.hasSrc) {
+        try h.raw("<span class=edv-srcname>");
+        try h.esc(s.srcName);
+        try h.raw("</span>");
+        if (s.srcInfo.len != 0) {
+            try h.raw("<span class=edv-srcinfo>");
+            try h.esc(s.srcInfo);
+            try h.raw("</span>");
+        }
+    } else {
+        try c.hint(h, "info", s.noSrc);
+    }
+    try h.raw("</div>");
+    try c.sectionClose(h);
+
+    if (s.player.len != 0) {
+        try h.raw("<div class=edv-player>");
+        try h.raw(s.player);
+        try h.raw("</div>");
+        try c.hint(h, "info", s.editHint);
+    } else if (s.hasSrc) {
+        try c.emptyState(h, s.noMedia);
+    }
+
+    if (s.showRef) {
+        try c.sectionOpen(h, s.secReframe);
+        try c.selectBox(h, s.aspect);
+        try h.raw("<div id=edv-frame>");
+        try renderFrame(h, s.frame);
+        try h.raw("</div>");
+        try c.btnRowOpen(h);
+        try c.btnOf(h, s.frameBtn);
+        try c.btnOf(h, s.kfAdd);
+        try c.btnOf(h, s.kfClear);
+        try c.btnRowClose(h);
+        if (s.hasKfs) {
+            try h.raw("<div class=edv-kfs>");
+            for (s.kfs) |k| {
+                try h.raw("<span class=edv-kf><button class=edv-kf-go data-act=");
+                try h.attrQ(k.goAct);
+                try h.raw(">");
+                try h.esc(k.time);
+                try h.raw(" · ");
+                try h.raw(k.pos);
+                try h.raw("%</button><button class=edv-kf-del data-act=");
+                try h.attrQ(k.delAct);
+                try h.raw(">");
+                try h.esc(k.delLb);
+                try h.raw("</button></span>");
+            }
+            try h.raw("</div>");
+        }
+        try c.hint(h, "info", s.refHint);
+        try c.sectionClose(h);
+    }
+
+    try c.sectionOpen(h, s.secExport);
+    try h.raw("<div id=edv-export>");
+    try renderExport(h, s.@"export");
+    try h.raw("</div>");
+    try c.sectionClose(h);
+}
+
+/// renderFrame mirrors Go edvFrameHTML (#edv-frame fragment).
+pub fn renderFrame(h: *Html, s: Frame) !void {
+    if (!s.show) return;
+    try h.raw("<div class=edv-fbox data-actpos=edv-pan style=\"aspect-ratio:");
+    try h.raw(s.aw);
+    try h.raw("/");
+    try h.raw(s.ah);
+    try h.raw("\">");
+    if (s.imgUrl.len != 0) {
+        try h.raw("<img class=edv-fimg src=");
+        try h.attrQ(s.imgUrl);
+        try h.raw(" alt=\"\">");
+    } else {
+        try h.raw("<span class=edv-fbusy>");
+        try h.esc(s.busy);
+        try h.raw("</span>");
+    }
+    if (s.hasCrop) {
+        if (s.vertAxis) {
+            try h.raw("<div class=edv-shade style=\"left:0;right:0;top:0;height:");
+            try h.raw(s.cropT);
+            try h.raw("%\"></div><div class=edv-shade style=\"left:0;right:0;top:calc(");
+            try h.raw(s.cropT);
+            try h.raw("% + ");
+            try h.raw(s.cropH);
+            try h.raw("%);bottom:0\"></div>");
+        } else {
+            try h.raw("<div class=edv-shade style=\"top:0;bottom:0;left:0;width:");
+            try h.raw(s.cropL);
+            try h.raw("%\"></div><div class=edv-shade style=\"top:0;bottom:0;left:calc(");
+            try h.raw(s.cropL);
+            try h.raw("% + ");
+            try h.raw(s.cropW);
+            try h.raw("%);right:0\"></div>");
+        }
+        try h.raw("<div class=edv-crop style=\"left:");
+        try h.raw(s.cropL);
+        try h.raw("%;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;width:");
+        try h.raw(s.cropW);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div>");
+    }
+    try h.raw("</div>");
+}
+
+/// renderExport mirrors Go edvExportHTML (#edv-export fragment).
+pub fn renderExport(h: *Html, s: Export) !void {
+    try c.selectBox(h, s.preset);
+    try h.raw("<div class=edv-outrow>");
+    try c.fieldOf(h, s.out);
+    try c.btnOf(h, s.outBrowse);
+    try h.raw("</div>");
+    if (s.trimInfo.len != 0) {
+        try h.raw("<div class=edv-triminfo>");
+        try h.esc(s.trimInfo);
+        try h.raw("</div>");
+    }
+    if (s.running) {
+        try c.progressBar(h, s.pct, s.stage);
+        try c.btnRowOpen(h);
+        try c.btnOf(h, s.cancel);
+        try c.btnRowClose(h);
+    } else {
+        try c.btnRowOpen(h);
+        try c.btnOf(h, s.@"export");
+        try c.btnRowClose(h);
+    }
+    if (s.hasResult) {
+        try c.hint(h, "ok", s.result);
+    }
+    if (s.hasErr) {
+        try c.hint(h, "bad", s.err);
+    }
+}
+
+test "frame with horizontal crop renders shades left+right of the window" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderFrame(&h, .{ .show = true, .aw = "1920", .ah = "1080", .imgUrl = "http://127.0.0.1:1/img/x",
+        .hasCrop = true, .cropL = "34.219", .cropT = "0", .cropW = "31.563", .cropH = "100" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-actpos=edv-pan") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "left:calc(34.219% + 31.563%);right:0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=edv-crop style=\"left:34.219%;top:0%;width:31.563%;height:100%\">") != null);
+}
+
+test "hidden frame renders nothing" {
+    var h = Html.init(std.testing.allocator);
+    defer h.deinit();
+    try renderFrame(&h, .{});
+    try std.testing.expectEqualStrings("", h.b.items);
+}

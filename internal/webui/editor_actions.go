@@ -36,6 +36,8 @@ type edState struct {
 
 	drag   edDrag
 	guides []visualeditor.Guide
+
+	video edvSt // video-mode state (editor_video_actions.go)
 }
 
 // edModeOr returns the active editor mode ("image" default). Caller holds editor.mu.
@@ -247,8 +249,13 @@ func init() {
 	onLiveTick("editor", func(u *UI) {
 		edEnsure()
 		editor.mu.Lock()
+		if edModeOr() == "video" {
+			editor.mu.Unlock()
+			mpTick(u, "editor") // unified player clock/playhead (publish parity)
+			return
+		}
 		// a live repaint replaces the stage element - never mid-drag (pointer capture)
-		if editor.drag.active || edModeOr() != "image" {
+		if editor.drag.active {
 			editor.mu.Unlock()
 			return
 		}

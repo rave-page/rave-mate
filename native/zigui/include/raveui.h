@@ -95,6 +95,7 @@ const uint8_t *rz_ui_render_twitch_feed(const uint8_t *state_json, size_t len, s
 const uint8_t *rz_ui_render_editor(const uint8_t *state_json, size_t len, size_t *out_len);
 /* #ed-preview inner HTML (~1 Hz placeholder-refresh patch target). */
 const uint8_t *rz_ui_render_editor_preview(const uint8_t *state_json, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_editor_video(const uint8_t *state_json, size_t len, size_t *out_len);
 
 /* --- peers --- */
 const uint8_t *rz_ui_render_peers(const uint8_t *state_json, size_t len, size_t *out_len);
@@ -332,6 +333,7 @@ const uint8_t *rz_ui_render_rce_body_v2(const uint8_t *state, size_t len, size_t
 const uint8_t *rz_ui_render_rce_save_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_editor_preview_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_editor_video_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_topbar_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_wave_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_rail_v2(const uint8_t *state, size_t len, size_t *out_len);

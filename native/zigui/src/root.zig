@@ -288,11 +288,18 @@ export fn rz_ui_render_editor_preview(state_json: ?[*]const u8, len: usize, out_
     return renderJSON(editor.Preview, editor.renderPreview, state_json, len, out_len);
 }
 
+const editor_video = @import("editor_video.zig");
+
+export fn rz_ui_render_editor_video(state_json: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderJSON(editor_video.State, editor_video.render, state_json, len, out_len);
+}
+
 test "media tab modules" {
     _ = automations;
     _ = overlays;
     _ = twitch;
     _ = editor;
+    _ = editor_video;
 }
 
 // --- peers ---
@@ -1170,6 +1177,10 @@ export fn rz_ui_render_editor_preview_v2(state: ?[*]const u8, len: usize, out_le
 
 export fn rz_ui_render_editor_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
     return renderWire(editor.State, wire_gen.decodeEdView, editor.render, wire_gen.msg_ed_view, state, len, out_len);
+}
+
+export fn rz_ui_render_editor_video_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor_video.State, wire_gen.decodeEdvView, editor_video.render, wire_gen.msg_edv_view, state, len, out_len);
 }
 
 export fn rz_ui_render_cueedit_topbar_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {

@@ -167,6 +167,10 @@ type Job struct {
 	// pass-1 measurement (PlanGain). nil = no gain filter. Args never invents
 	// dynamics processing on its own.
 	GainDB *float64
+
+	// VF is a raw video-filter prefix (e.g. a videoedit crop expr) inserted
+	// BEFORE the preset's deinterlace→scale chain. Caller-built; never escaped.
+	VF string `json:"vf,omitempty"`
 }
 
 // videoEncoder returns the concrete ffmpeg video encoder for the preset: an explicit
@@ -237,15 +241,19 @@ func (j Job) videoArgs() []string {
 	if p.FPS > 0 {
 		a = append(a, "-r", ftoa(p.FPS))
 	}
-	if vf := videoFilters(p); vf != "" {
+	if vf := videoFilters(p, j.VF); vf != "" {
 		a = append(a, "-vf", vf)
 	}
 	return a
 }
 
-// videoFilters builds the -vf chain (deinterlace → scale).
-func videoFilters(p Preset) string {
+// videoFilters builds the -vf chain (job prefix → deinterlace → scale). The
+// prefix runs FIRST so a crop feeds the scale (flipbook-proven ordering).
+func videoFilters(p Preset, prefix string) string {
 	var parts []string
+	if prefix != "" {
+		parts = append(parts, prefix)
+	}
 	if p.Deinterlace {
 		parts = append(parts, "bwdif")
 	}

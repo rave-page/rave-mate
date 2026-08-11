@@ -35,7 +35,7 @@ type FlatBox struct {
 
 // Guide is one active snap line (doc px).
 type Guide struct {
-	Vert bool    // vertical line at X=Pos (else horizontal at Y=Pos)
+	Vert bool // vertical line at X=Pos (else horizontal at Y=Pos)
 	Pos  float64
 }
 

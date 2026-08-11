@@ -223,7 +223,8 @@ pub fn render(h: *Html, s: State) !void {
 }
 
 /// renderModes mirrors Go edModesHTML (subTabs markup + ed-modes class).
-fn renderModes(h: *Html, modes: []const ModeTab) !void {
+/// Shared with editor_video.zig - both modes render the same switcher.
+pub fn renderModes(h: *Html, modes: []const ModeTab) !void {
     try h.raw("<div class=\"subtabs ed-modes\">");
     for (modes) |m| {
         try h.raw("<button class=\"");

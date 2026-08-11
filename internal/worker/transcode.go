@@ -30,7 +30,58 @@ func transcodeHandlers() map[string]Handler {
 		"transcode.loudtl":     tcLoudTimeline,
 		"transcode.run":        tcRun,
 		"transcode.gendivider": tcGenDivider,
+		"transcode.frame":      tcFrame,
 	}
+}
+
+type tcFrameIn struct {
+	Input  string  `json:"input"`
+	T      float64 `json:"t"`      // seconds into the source
+	Output string  `json:"output"` // .png/.jpg target
+	MaxW   int     `json:"maxW"`   // 0 = source width
+	VF     string  `json:"vf,omitempty"`
+}
+
+// tcFrame extracts one frame at T (fast input seek) - the video editor's
+// reframe/effect preview. Output is a NEW file, overwritten per refresh.
+func tcFrame(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
+	var in tcFrameIn
+	if err := json.Unmarshal(params, &in); err != nil || in.Input == "" || in.Output == "" {
+		return nil, fmt.Errorf("missing input/output")
+	}
+	bin, err := ffmpegBin()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(in.Output), 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir output: %w", err)
+	}
+	a := []string{"-hide_banner", "-nostats", "-y"}
+	if in.T > 0 {
+		a = append(a, "-ss", fmt.Sprintf("%.3f", in.T))
+	}
+	a = append(a, "-i", in.Input, "-frames:v", "1")
+	vf := in.VF
+	if in.MaxW > 0 {
+		scale := fmt.Sprintf("scale='min(%d,iw)':-2", in.MaxW)
+		if vf != "" {
+			vf += "," + scale
+		} else {
+			vf = scale
+		}
+	}
+	if vf != "" {
+		a = append(a, "-vf", vf)
+	}
+	a = append(a, in.Output)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, a...)
+	prepareCmd(cmd)
+	if out, rerr := cmd.CombinedOutput(); rerr != nil {
+		return nil, fmt.Errorf("ffmpeg frame: %v: %s", rerr, lastLine(string(out)))
+	}
+	return json.Marshal(map[string]any{"ok": true, "output": in.Output})
 }
 
 type tcGenDividerIn struct {
@@ -114,6 +165,8 @@ type tcRunIn struct {
 	// input+trim window - the measure pass is skipped (a 1h set decodes for minutes; the UI
 	// caches the result per (path, mtime, trim) so only the FIRST export ever pays it).
 	Measured *transcode.Measurement `json:"measured,omitempty"`
+	// VF is a raw video-filter prefix (videoedit crop/pan) run before the preset chain.
+	VF string `json:"vf,omitempty"`
 }
 
 // tcRun executes one transcode to completion, emitting "progress" events (percent +
@@ -153,7 +206,7 @@ func tcRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	if err := os.MkdirAll(filepath.Dir(in.Output), 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir output: %w", err)
 	}
-	job := transcode.Job{Input: in.Input, Output: in.Output, Preset: preset, TrimStart: in.TrimStart, TrimEnd: in.TrimEnd}
+	job := transcode.Job{Input: in.Input, Output: in.Output, Preset: preset, TrimStart: in.TrimStart, TrimEnd: in.TrimEnd, VF: in.VF}
 
 	// Stage events + a shared 0-100 progress scale (measure pass folds into 0-tcMeasurePct,
 	// the encode into the rest) so the UI shows what is happening from the first second - a

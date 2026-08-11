@@ -1483,6 +1483,23 @@ var schema = []msg{
 		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), b(3, "Disabled", "disabled"), s(4, "DisabledSub", "disabledSub"), s(5, "DisabledHint", "disabledHint"), s(6, "SecPreview", "secPreview"), s(7, "SecLayers", "secLayers"), s(8, "SecInspector", "secInspector"), li(9, "Row1", "row1", "UiBtn"), li(10, "Row2", "row2", "UiBtn"), st(11, "Preview", "preview", "EdPreview"), st(12, "Layers", "layers", "EdLayers"), st(13, "Insp", "insp", "EdInsp"), li(14, "Modes", "modes", "EdModeTab"), b(15, "VideoMode", "videoMode"), s(16, "VideoEmpty", "videoEmpty"), li(17, "Row3", "row3", "UiBtn"), s(18, "AlignHint", "alignHint")},
 	},
 	{
+		name: "EdvKfRow", goT: "edvKfRow", zigT: "editor_video.KfRow",
+		fs: []field{s(1, "Time", "time"), s(2, "Pos", "pos"), s(3, "Go", "goAct"), s(4, "Del", "delAct"), s(5, "DelLb", "delLb")},
+	},
+	{
+		name: "EdvFrame", goT: "edvFrameSt", zigT: "editor_video.Frame",
+		fs: []field{b(1, "Show", "show"), s(2, "AW", "aw"), s(3, "AH", "ah"), s(4, "ImgURL", "imgUrl"), s(5, "Busy", "busy"), b(6, "HasCrop", "hasCrop"), b(7, "Vert", "vertAxis"), s(8, "CropL", "cropL"), s(9, "CropT", "cropT"), s(10, "CropW", "cropW"), s(11, "CropH", "cropH")},
+	},
+	{
+		name: "EdvExport", goT: "edvExportSt", zigT: "editor_video.Export",
+		fs: []field{st(1, "Preset", "preset", "SelState"), st(2, "Out", "out", "UiField"), st(3, "OutBrowse", "outBrowse", "UiBtn"), st(4, "Export", `@"export"`, "UiBtn"), b(5, "Running", "running"), s(6, "Pct", "pct"), s(7, "Stage", "stage"), st(8, "Cancel", "cancel", "UiBtn"), b(9, "HasResult", "hasResult"), s(10, "Result", "result"), b(11, "HasErr", "hasErr"), s(12, "Err", "err"), s(13, "TrimInfo", "trimInfo")},
+	},
+	{
+		name: "EdvView", goT: "edvViewState", zigT: "editor_video.State", id: 114,
+		doc: "Editor tab video mode (full view)",
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Modes", "modes", "EdModeTab"), s(4, "SecSource", "secSource"), st(5, "Browse", "browse", "UiBtn"), st(6, "Caps", "caps", "SelState"), b(7, "HasSrc", "hasSrc"), s(8, "SrcName", "srcName"), s(9, "SrcInfo", "srcInfo"), s(10, "NoSrc", "noSrc"), s(11, "Player", "player"), s(12, "NoMedia", "noMedia"), s(13, "EditHint", "editHint"), s(14, "SecReframe", "secReframe"), b(15, "ShowRef", "showRef"), st(16, "Aspect", "aspect", "SelState"), st(17, "Frame", "frame", "EdvFrame"), st(18, "FrameBtn", "frameBtn", "UiBtn"), st(19, "KfAdd", "kfAdd", "UiBtn"), st(20, "KfClear", "kfClear", "UiBtn"), b(21, "HasKfs", "hasKfs"), li(22, "Kfs", "kfs", "EdvKfRow"), s(23, "RefHint", "refHint"), s(24, "SecExport", "secExport"), st(25, "Export", `@"export"`, "EdvExport")},
+	},
+	{
 		name: "CeTbDrop", goT: "ceTbDropSt", zigT: "cueedit.TbDrop",
 		fs: []field{s(1, "Act", "act"), s(2, "Lbl", "lbl"), s(3, "When", "when")},
 	},
@@ -1715,6 +1732,7 @@ var zigImports = [][2]string{
 	{"vrcgroups", "vrcgroups.zig"},
 	{"worlds", "worlds.zig"},
 	{"editor", "editor.zig"},
+	{"editor_video", "editor_video.zig"},
 	{"cueedit", "cueedit.zig"},
 	{"libviews", "libviews.zig"},
 	{"libremote", "libremote.zig"},

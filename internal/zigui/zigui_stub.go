@@ -59,6 +59,7 @@ func RenderTwitchPresets(stateJSON []byte) (string, bool)      { return "", fals
 func RenderTwitchFeed(stateJSON []byte) (string, bool)         { return "", false }
 func RenderEditor(stateJSON []byte) (string, bool)             { return "", false }
 func RenderEditorPreview(stateJSON []byte) (string, bool)      { return "", false }
+func RenderEditorVideo(stateJSON []byte) (string, bool)        { return "", false }
 
 // --- peers ---
 
@@ -279,6 +280,7 @@ func RenderRCEBodyV2(state []byte) (string, bool)         { return "", false }
 func RenderRCESaveV2(state []byte) (string, bool)         { return "", false }
 func RenderEditorPreviewV2(state []byte) (string, bool)   { return "", false }
 func RenderEditorV2(state []byte) (string, bool)          { return "", false }
+func RenderEditorVideoV2(state []byte) (string, bool)     { return "", false }
 func RenderCueEditTopbarV2(state []byte) (string, bool)   { return "", false }
 func RenderCueEditWaveV2(state []byte) (string, bool)     { return "", false }
 func RenderCueEditRailV2(state []byte) (string, bool)     { return "", false }

@@ -326,6 +326,13 @@ func RenderEditor(stateJSON []byte) (string, bool) {
 	})
 }
 
+// RenderEditorVideo renders the Editor tab's video mode.
+func RenderEditorVideo(stateJSON []byte) (string, bool) {
+	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_video(p, l, n)
+	})
+}
+
 // RenderEditorPreview renders the #ed-preview inner fragment (tick patch).
 func RenderEditorPreview(stateJSON []byte) (string, bool) {
 	return render(stateJSON, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
@@ -1471,6 +1478,13 @@ func RenderEditorPreviewV2(state []byte) (string, bool) {
 func RenderEditorV2(state []byte) (string, bool) {
 	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
 		return C.rz_ui_render_editor_v2(p, l, n)
+	})
+}
+
+// RenderEditorVideoV2 renders the Editor video mode from an RZW1 document.
+func RenderEditorVideoV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_video_v2(p, l, n)
 	})
 }
 

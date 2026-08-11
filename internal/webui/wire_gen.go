@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x65abbca0
+	wireSchemaHash         uint32 = 0x530603ee
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -115,6 +115,7 @@ const (
 	wireMsgAutoSchedule    uint16 = 111 // schedule-editor dialog
 	wireMsgPublishRemote   uint16 = 112 // remote Publish view (peer sets + tracklist)
 	wireMsgUpdFlow         uint16 = 113 // #inst-update region (self-update check/apply flow)
+	wireMsgEdvView         uint16 = 114 // Editor tab video mode (full view)
 )
 
 func (v agApp) encodeWire(w *zigui.WireWriter) {
@@ -3343,6 +3344,72 @@ func (v edViewState) encodeWire(w *zigui.WireWriter) {
 	w.Str(18, v.AlignHint)
 }
 
+func (v edvKfRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Time)
+	w.Str(2, v.Pos)
+	w.Str(3, v.Go)
+	w.Str(4, v.Del)
+	w.Str(5, v.DelLb)
+}
+
+func (v edvFrameSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.AW)
+	w.Str(3, v.AH)
+	w.Str(4, v.ImgURL)
+	w.Str(5, v.Busy)
+	w.Bool(6, v.HasCrop)
+	w.Bool(7, v.Vert)
+	w.Str(8, v.CropL)
+	w.Str(9, v.CropT)
+	w.Str(10, v.CropW)
+	w.Str(11, v.CropH)
+}
+
+func (v edvExportSt) encodeWire(w *zigui.WireWriter) {
+	w.Struct(1, func() { v.Preset.encodeWire(w) })
+	w.Struct(2, func() { v.Out.encodeWire(w) })
+	w.Struct(3, func() { v.OutBrowse.encodeWire(w) })
+	w.Struct(4, func() { v.Export.encodeWire(w) })
+	w.Bool(5, v.Running)
+	w.Str(6, v.Pct)
+	w.Str(7, v.Stage)
+	w.Struct(8, func() { v.Cancel.encodeWire(w) })
+	w.Bool(9, v.HasResult)
+	w.Str(10, v.Result)
+	w.Bool(11, v.HasErr)
+	w.Str(12, v.Err)
+	w.Str(13, v.TrimInfo)
+}
+
+func (v edvViewState) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Title)
+	w.Str(2, v.Sub)
+	w.List(3, len(v.Modes), func(i int) { v.Modes[i].encodeWire(w) })
+	w.Str(4, v.SecSource)
+	w.Struct(5, func() { v.Browse.encodeWire(w) })
+	w.Struct(6, func() { v.Caps.encodeWire(w) })
+	w.Bool(7, v.HasSrc)
+	w.Str(8, v.SrcName)
+	w.Str(9, v.SrcInfo)
+	w.Str(10, v.NoSrc)
+	w.Str(11, v.Player)
+	w.Str(12, v.NoMedia)
+	w.Str(13, v.EditHint)
+	w.Str(14, v.SecReframe)
+	w.Bool(15, v.ShowRef)
+	w.Struct(16, func() { v.Aspect.encodeWire(w) })
+	w.Struct(17, func() { v.Frame.encodeWire(w) })
+	w.Struct(18, func() { v.FrameBtn.encodeWire(w) })
+	w.Struct(19, func() { v.KfAdd.encodeWire(w) })
+	w.Struct(20, func() { v.KfClear.encodeWire(w) })
+	w.Bool(21, v.HasKfs)
+	w.List(22, len(v.Kfs), func(i int) { v.Kfs[i].encodeWire(w) })
+	w.Str(23, v.RefHint)
+	w.Str(24, v.SecExport)
+	w.Struct(25, func() { v.Export.encodeWire(w) })
+}
+
 func (v ceTbDropSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Act)
 	w.Str(2, v.Lbl)
@@ -4557,6 +4624,13 @@ func wirePublishRemote(v pubRemSt) []byte {
 // wireUpdFlow encodes updFlowSt as an RZW1 document (nil = over-size; caller falls back to v1).
 func wireUpdFlow(v updFlowSt) []byte {
 	w := zigui.NewWireWriter(wireMsgUpdFlow, wireSchemaHash)
+	v.encodeWire(w)
+	return w.Finish()
+}
+
+// wireEdvView encodes edvViewState as an RZW1 document (nil = over-size; caller falls back to v1).
+func wireEdvView(v edvViewState) []byte {
+	w := zigui.NewWireWriter(wireMsgEdvView, wireSchemaHash)
 	v.encodeWire(w)
 	return w.Finish()
 }
