@@ -1,5 +1,11 @@
 # Editor two-mode redesign (2026-08-11)
 
+**Status (2026-08-11): SHIPPED** - P1 image mode 1714b06, P2 video mode c24e364,
+P3 frei0r child 833866e + vfx worker b976419 + chain UI 2df1a9a, P4 ISF host b5f4ebc.
+All zigui goldens green; i18n ×7; user doc docs/user/editor.md. Open follow-ups:
+zigcore geometry kernel + builtin templates (task #19), ISF color/position UI
+controls, multi-pass ISF.
+
 User ask: split Editor tab into **Image** (thumbnails/posters; PS/GIMP-style layer editing,
 presets, visual move/scale/align) and **Video** (cut + export vertical "Hochformat" clips from
 wide captures, linked to Publish features; open-standard effects: ISF/GLSL + frei0r).

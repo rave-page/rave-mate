@@ -39,7 +39,7 @@ Resolume, or VRChat tooling can consume without capture overhead. Needs a `spout
 
 ## Visual editor & media editor
 
-- **Editor tab**: poster/thumbnail composer for event artwork (layers, blend modes, text).
+- **Editor tab**: two modes - image (thumbnails/posters) and video (cut/reframe/effects/export). See [Editor](editor.md).
 - **Visual editor**: layer-based live visual compositing (see in-app help; evolving surface).
 
 ## Caveats

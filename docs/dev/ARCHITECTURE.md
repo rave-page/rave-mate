@@ -25,6 +25,11 @@ OS / devices ──► feature modules ◄────────┘
 - `featurehost` / `worker` / `sysexec` - subprocess isolation (newline-JSON stdio, supervised
   restart, kill-on-close job objects on Windows). `sysexec` also owns process priority
   (`LowPriority`=idle, `BelowNormalPriority`, `SetSelfBelowNormal`).
+- `transcode` / `videoedit` / `vfx` - export plane: ffmpeg preset/arg builders incl. the split
+  decode|fx|encode raw-RGBA pipeline; `videoedit` = editor video-mode project (aspect crop,
+  pan keyframes); `vfx` locates + drives `rave-mate-vfx` (native/zigvfx, no-cgo Zig child)
+  hosting open-standard effects - frei0r plugins (dyn-loaded) and single-pass ISF/GLSL shaders
+  (offscreen WGL). Own `vfx` worker type: a plugin/GL fault kills only that child.
 - `governor` - **activity governor**: the good-neighbour brain. Single source of truth for
   "is now a bad time to spend CPU/GPU on non-essential work". Reacts to window focus/minimize/
   size-move (fed from the webui window subclass) and to a live OBS stream (fed from `app`'s
