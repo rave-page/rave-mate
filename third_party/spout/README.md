@@ -20,10 +20,11 @@ CGO_ENABLED=1 go build -tags spout ./cmd/rave-mate
 
 Upstream: https://github.com/leadedge/Spout2 (BSD-2-Clause). Pinned 2.007.017.
 
-## Patched SpoutLibrary.dll (committed)
+## Patched SpoutLibrary.dll rebuild (parked)
 
-`bin/SpoutLibrary.dll` is committed - it is NOT the official release binary. The official one
-`__fastfail`s its host process when GL/DX interop creation fails (`LinkGLDXtextures` error path
-overflows a `char[128]`). Committed DLL = pinned source tag + `patches/` + MSVC `/MT` build via
-`pwsh rave-mate/scripts/build-spout-dll.ps1` (writes DLL + PDB + the `.patched` SHA marker the
-fetch scripts honour). See `SUPPLY_CHAIN.md`.
+The official DLL `__fastfail`s its host process when GL/DX interop creation fails
+(`LinkGLDXtextures` overflows a `char[128]`). `pwsh rave-mate/scripts/build-spout-dll.ps1`
+rebuilds it from the pinned source tag + `patches/` with the overflow fixed (MSVC `/MT` + PDB +
+a `.patched` SHA marker the fetch scripts honour). PARKED, not shipped: the rebuilt DLL's sender
+init hangs the media featurehost child (the source tag differs from the official binary's actual
+build tree). Shipped protection = the shim's interop pre-flight. See `SUPPLY_CHAIN.md`.
