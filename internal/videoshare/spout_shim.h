@@ -14,9 +14,18 @@ extern "C" {
 int rave_spout_available(void);
 
 // Create a Spout handle with its own OpenGL context for the CALLING thread.
-// Returns NULL if CreateOpenGL fails (e.g. no GPU/headless). Must be called on the
-// goroutine (LockOSThread'd) that will own all subsequent rave_spout_send calls.
+// Returns NULL if CreateOpenGL fails (e.g. no GPU/headless) OR the GL/DX interop pre-flight
+// fails - a failing wglDXOpenDeviceNV is FATAL inside SpoutLibrary.dll (its error formatting
+// overflows a char[128] into a CRT __fastfail; killed the daemon 2026-08-04/-10), so the shim
+// probes the same call survivably first and refuses the handle. Must be called on the goroutine
+// (LockOSThread'd) that will own all subsequent rave_spout_send calls.
+// RAVE_SPOUT_FORCE_NO_INTEROP=1 forces the probe to fail (degrade-path test).
 void* rave_spout_create(void);
+
+// Why the last rave_spout_create on THIS thread returned NULL: the Win32/HRESULT error of the
+// failed interop probe, or 0 when it did not fail for interop reasons (success / no DLL / no GL
+// context). Read right after a NULL create, same goroutine.
+unsigned int rave_spout_last_interop_error(void);
 
 // Publish one upright RGBA frame to the named sender via the handle h.
 // pixels = tightly packed RGBA (w*h*4), GL_RGBA byte order. Returns 1 on success, 0 on failure.

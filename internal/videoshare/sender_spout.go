@@ -159,8 +159,13 @@ func (s *spoutSender) run(deck string, w *deckWorker) {
 
 	h := C.rave_spout_create()
 	if h == nil {
-		s.log.Warn(source, "spout: OpenGL context unavailable; deck idle",
-			map[string]any{"deck": deck, "sender": name})
+		if ierr := uint32(C.rave_spout_last_interop_error()); ierr != 0 {
+			s.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - deck sender idle (entering SpoutLibrary would be fatal; it retries on the next track cycle, a reboot usually clears the driver state)",
+				map[string]any{"deck": deck, "sender": name, "winErr": ierr})
+		} else {
+			s.log.Warn(source, "spout: OpenGL context unavailable; deck idle",
+				map[string]any{"deck": deck, "sender": name})
+		}
 		// Drain frames until torn down so Send never blocks on a dead worker. Ack each one
 		// immediately (unread) - a discarded frame must still release its producer.
 		for {
@@ -338,8 +343,14 @@ func (f *frameSender) run(name string) {
 	defer C.free(unsafe.Pointer(cname))
 	h := C.rave_spout_create()
 	if h == nil {
-		f.log.Warn(source, "spout: OpenGL context unavailable; frame sender idle", map[string]any{"sender": name})
-		f.openErr = "no OpenGL context"
+		if ierr := uint32(C.rave_spout_last_interop_error()); ierr != 0 {
+			f.log.Warn(source, "spout: GPU driver refused OpenGL/DirectX interop - frame sender idle (entering SpoutLibrary would be fatal)",
+				map[string]any{"sender": name, "winErr": ierr})
+			f.openErr = fmt.Sprintf("GL/DX interop unavailable (Win32 error %d)", ierr)
+		} else {
+			f.log.Warn(source, "spout: OpenGL context unavailable; frame sender idle", map[string]any{"sender": name})
+			f.openErr = "no OpenGL context"
+		}
 		f.signalReady()
 		for {
 			select {

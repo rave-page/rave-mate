@@ -73,6 +73,78 @@ static SPOUTHANDLE registry(void) {
     return s;
 }
 
+// -- GL/DX interop pre-flight -----------------------------------------------------------------
+//
+// A failing wglDXOpenDeviceNV is FATAL inside the shipped SpoutLibrary.dll: its
+// LinkGLDXtextures error path sprintf_s's ~103 chars into a char[128] and then strcat_s's a
+// ~34-char explanation on top - the static CRT's parameter validation __fastfail's (int 29h,
+// FAST_FAIL_INVALID_ARG), which no SEH/VEH in this process can catch. Killed the whole daemon
+// three times (2026-08-04 x2, 2026-08-10; identical dumps at GetSpout+0x2743c, Win32 error 50
+// ERROR_NOT_SUPPORTED mid-message on the stack). So: run the SAME driver call ourselves, with
+// survivable error handling, and refuse to enter the DLL's interop-creation path when it would
+// fail. Best-effort - a driver that flips between the probe and Spout's own link still dies -
+// but the observed mode (persistent system-wide interop refusal) is fully covered.
+typedef HANDLE(WINAPI* PFNWGLDXOPENDEVICENV)(void* dxDevice);
+typedef BOOL(WINAPI* PFNWGLDXCLOSEDEVICENV)(HANDLE hDevice);
+typedef PROC(WINAPI* PFNWGLGETPROCADDRESSFN)(LPCSTR);
+
+// interop_probe: needs a CURRENT GL context on the calling thread (wglGetProcAddress contract) -
+// callers sit right after CreateOpenGL or inside a send, where Spout's context is current.
+// 1 = interop works. 0 = it does not; *err = Win32/HRESULT reason (never 0).
+// RAVE_SPOUT_FORCE_NO_INTEROP=1 forces failure (degrade-path test, interop_gate_spout_test.go).
+static int interop_probe(unsigned int* err) {
+    *err = 0;
+    // Win32 read, NOT getenv: MinGW's CRT snapshots environ at startup, so a Go os.Setenv
+    // (t.Setenv in the degrade test) would be invisible to getenv.
+    char force[2] = {0};
+    if (GetEnvironmentVariableA("RAVE_SPOUT_FORCE_NO_INTEROP", force, sizeof(force)) > 0 &&
+        force[0] == '1') {
+        *err = ERROR_NOT_SUPPORTED;
+        return 0;
+    }
+    HMODULE gl = GetModuleHandleA("opengl32.dll");
+    PFNWGLGETPROCADDRESSFN gpa =
+        gl ? (PFNWGLGETPROCADDRESSFN)GetProcAddress(gl, "wglGetProcAddress") : nullptr;
+    PFNWGLDXOPENDEVICENV openNV =
+        gpa ? (PFNWGLDXOPENDEVICENV)gpa("wglDXOpenDeviceNV") : nullptr;
+    PFNWGLDXCLOSEDEVICENV closeNV =
+        gpa ? (PFNWGLDXCLOSEDEVICENV)gpa("wglDXCloseDeviceNV") : nullptr;
+    if (!openNV || !closeNV) {
+        // WGL_NV_DX_interop absent: a software (GDI Generic) context, or no NVIDIA/AMD interop.
+        *err = ERROR_NOT_SUPPORTED;
+        return 0;
+    }
+    // Same device shape Spout opens interop against (hardware + BGRA), so the probe answer is
+    // representative. One create per worker start / relink - not per frame.
+    ID3D11Device* dev = nullptr;
+    ID3D11DeviceContext* ctx = nullptr;
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                   D3D11_SDK_VERSION, &dev, nullptr, &ctx);
+    if (FAILED(hr) || !dev) {
+        *err = (unsigned int)hr ? (unsigned int)hr : ERROR_NOT_SUPPORTED;
+        return 0;
+    }
+    SetLastError(0);
+    HANDLE idev = openNV(dev);
+    if (!idev) {
+        DWORD e = GetLastError();
+        *err = e ? (unsigned int)e : ERROR_NOT_SUPPORTED;
+        if (ctx) ctx->Release();
+        dev->Release();
+        return 0;
+    }
+    closeNV(idev);
+    if (ctx) ctx->Release();
+    dev->Release();
+    return 1;
+}
+
+// create_interop_err: why the last rave_spout_create on THIS thread returned NULL. 0 = it did not
+// fail for interop reasons (success, or no DLL / no GL context). Thread-local like every other
+// per-handle latch here: one SPOUTHANDLE per LockOSThread'd worker.
+static thread_local unsigned int create_interop_err = 0;
+
 extern "C" {
 
 // rave_spout_available reports whether SpoutLibrary.dll loaded + exports GetSpout (1) or not (0).
@@ -80,6 +152,7 @@ extern "C" {
 int rave_spout_available(void) { return spout_factory() ? 1 : 0; }
 
 void* rave_spout_create(void) {
+    create_interop_err = 0;
     SPOUTHANDLE s = make_spout();
     if (!s) return 0;
     // CreateOpenGL makes a context current on THIS thread; SendImage needs it.
@@ -87,8 +160,19 @@ void* rave_spout_create(void) {
         s->Release();
         return 0;
     }
+    // Refuse the handle when GL/DX interop is unavailable: the first SendImage would walk the
+    // DLL's fatal LinkGLDXtextures error path (see interop_probe). Callers idle instead.
+    unsigned int ierr = 0;
+    if (!interop_probe(&ierr)) {
+        create_interop_err = ierr;
+        s->CloseOpenGL();
+        s->Release();
+        return 0;
+    }
     return (void*)s;
 }
+
+unsigned int rave_spout_last_interop_error(void) { return create_interop_err; }
 
 // flip_buf is the flip staging buffer, POOLED per sender thread (one SPOUTHANDLE per
 // LockOSThread'd worker, so thread_local is per handle and needs no lock). It used to be a
@@ -157,6 +241,9 @@ void rave_spout_flip_rows(unsigned char* dst, const unsigned char* src,
 // sender name re-registers under the lock instead of racing the scan.
 static thread_local char sent_name[256] = {0};
 static thread_local bool sent_once = false;
+// Last successfully sent geometry: a SIZE change makes SendImage re-link the GL/DX interop, the
+// other way (besides registration) into the DLL's fatal error path - re-probe before allowing it.
+static thread_local unsigned int sent_w = 0, sent_h = 0;
 
 static bool registering_send(const char* name) {
     if (!sent_once || strncmp(sent_name, name, sizeof(sent_name) - 1) != 0) {
@@ -175,20 +262,36 @@ int rave_spout_send(void* h, const char* name, const unsigned char* rgba,
     // There is no CreateSender to call (see rave_spout_open_sender): the FIRST SendImage for a name
     // is what registers the sender, so only that one send may race the scan. Steady-state sends stay
     // lock-free - taking registry_mu per frame would serialise a 4K60 GL upload against the 2 s scan.
+    const bool was_named = sent_once;
     const bool reg = registering_send(name);
+    // This send will (re)create the sender's GL/DX interop when it re-registers under a NEW name or
+    // the geometry changed - both long after rave_spout_create's probe. The first-ever registration
+    // is NOT re-probed: create probed on this same thread moments earlier.
+    const bool relink = (reg && was_named) || (!reg && sent_w != 0 && (w != sent_w || height != sent_h));
+    if (relink) {
+        unsigned int ierr = 0;
+        if (!interop_probe(&ierr)) return 0; // refused: frozen card beats a dead process
+    }
     if (flip != 0) {
         const size_t need = (size_t)w * height * 4;
         if (!grow_flip_buf(need)) return 0;
         flip_rows(flip_buf, rgba, w, height, (flip & 1) != 0, (flip & 2) != 0);
         rgba = flip_buf;
     }
+    int rc;
     if (reg) {
         std::lock_guard<std::mutex> lk(registry_mu());
         s->SetSenderName(name);
-        return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+        rc = s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+    } else {
+        s->SetSenderName(name);
+        rc = s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
     }
-    s->SetSenderName(name);
-    return s->SendImage(rgba, w, height, 0x1908 /*GL_RGBA*/, false) ? 1 : 0;
+    if (rc) {
+        sent_w = w;
+        sent_h = height;
+    }
+    return rc;
 }
 
 // rave_spout_open_sender: force the sender's shared texture to exist, then hand its handle out.
@@ -200,6 +303,12 @@ int rave_spout_open_sender(void* h, const char* name, unsigned int w, unsigned i
     if (!h || !name || !share || !RAVE_SPOUT_DIM_OK(w) || !RAVE_SPOUT_DIM_OK(hgt)) return 0;
     *share = 0;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
+    // A handle that already sent under another name/geometry re-links interop here - re-probe
+    // (fatal-on-failure inside the DLL, see interop_probe). Fresh handles were probed at create.
+    if (sent_once) {
+        unsigned int ierr = 0;
+        if (!interop_probe(&ierr)) return -1; // maps to eagerCreate's "SendImage refused"
+    }
     const size_t need = (size_t)w * hgt * 4;
     if (!grow_flip_buf(need)) return 0;
     memset(flip_buf, 0, need);
@@ -234,6 +343,13 @@ void rave_spout_release(void* h) {
         flip_buf = nullptr;
         flip_cap = 0;
     }
+    // Reset the per-thread send latches: Go reuses OS threads, so a FUTURE worker on this thread
+    // re-registering the SAME sender name would otherwise skip the registration lock (racing the
+    // scan) and the relink probe.
+    sent_once = false;
+    sent_name[0] = 0;
+    sent_w = 0;
+    sent_h = 0;
     if (!h) return;
     SPOUTHANDLE s = (SPOUTHANDLE)h;
     // ReleaseSender REMOVES this sender's entry from the process-global sender list in shared

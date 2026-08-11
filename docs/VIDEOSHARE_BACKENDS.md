@@ -40,6 +40,14 @@ so a tag is wired into CI only once its backend file lands.
   belongs next to `rave-mate.exe` (or in the managed bin the Settings install button fills), and CI
   ships it: build artifact → both NSIS installers (`-DSPOUT_DLL` / `-DMATE_DLL`) + the raw-exe feed
   (`deploy` copies `SpoutLibrary.dll`).
+- **GL/DX interop pre-flight:** a failing `wglDXOpenDeviceNV` is FATAL inside the shipped
+  `SpoutLibrary.dll` - its `LinkGLDXtextures` error formatting overflows a `char[128]` into a
+  static-CRT `__fastfail` (`int 29h`, uncatchable; killed the daemon 2026-08-04 ×2 + 2026-08-10,
+  identical dumps at `GetSpout+0x2743c`, Win32 error 50). `interop_probe` in `spout_shim.cpp`
+  runs the same driver call survivably at handle create + before any interop re-link (sender
+  rename / size change) and refuses the path instead - workers idle + log
+  `winErr` (deck retries next track cycle). Degrade path proven by
+  `interop_gate_spout_test.go` via `RAVE_SPOUT_FORCE_NO_INTEROP=1`.
 - **Registry queries** (`ListSenders` / `SenderSize` / the mediaroute share scan) go through ONE
   process-wide Spout handle (`registry()` in the shim, mutex-guarded, no GL context) and one
   `rave_spout_scan` call that returns names+dimensions together, cached for 1 s in `scan.go`.
