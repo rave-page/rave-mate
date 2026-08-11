@@ -23,6 +23,11 @@ thumbnail in two minutes":
   rotates (Shift snaps to 15°). While dragging, the canvas snaps to the canvas
   edges/center and to other layers' edges/centers - mint guide lines show the
   active snap.
+- **Multi-select**: Shift-click (stage or layer rows) adds/removes layers; the
+  newest is the primary (solid outline + handles), others show a dashed
+  outline. Dragging moves the whole selection; Delete / Duplicate / arrow-nudge
+  / Group apply to all of it. With 2+ selected, the align row aligns the layers
+  to each other (their common bounding box); with one, to the canvas.
 - **Align row**: one-click align left/center/right/top/middle/bottom against the
   canvas.
 - **Keyboard**: arrows nudge 1 px (Shift = 10 px), `Del` deletes,
