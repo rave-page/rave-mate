@@ -61,3 +61,16 @@ spoutGL::LinkGLDXtextures : wglDXOpenDeviceNV(0x0001760) no Interop device - err
   (suspected driver-degradation trigger).
 - Resolume-side note: after such an event Resolume wedges as a zombie → "another instance is
   already running" on relaunch; kill `Arena.exe` first.
+
+## Addendum 2026-08-11: DLL rebuild PARKED
+
+Rebuilt SpoutLibrary.dll from the 2.007.017 SOURCE tag (+ buffer patch, MSVC /MT + PDB,
+`scripts/build-spout-dll.ps1`). Live suite green in plain processes, BUT the media featurehost
+child heartbeat-dies within 5s of its first sender create with the rebuilt DLL. A/B on the rig:
+official DLL + interop pre-flight = testcard 29.3fps, healthy; rebuilt DLL = hang, 100% repro;
+`RAVE_SPOUT_FORCE_NO_INTEROP=1` (skips probe body + send) = healthy → probe innocent, rebuilt
+DLL's sender-init at fault. Conclusion: the source tag ≠ the official binary's build tree (same
+version string, different internals - matches the vtable-window discovery). SHIPPED protection =
+shim pre-flight only; rebuild tooling + patch + fetch-marker guard committed for later adoption
+(needs the child-hang root cause first). Official DLL restored beside the exe; patched build +
+PDB kept in the install dir as `SpoutLibrary.dll.patchedbuild` + `SpoutLibrary.pdb`.
