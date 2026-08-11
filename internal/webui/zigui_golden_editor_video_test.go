@@ -81,6 +81,10 @@ func edvFixtures() map[string]edvViewState {
 		}, Params: []edvFxParam{
 			{Slider: newSlider("blur", "edv-fx-p:0:blur", 0, 1, 0.01, 0.5, "")},
 			{IsBool: true, Toggle: newToggle("invert", "edv-fx-p:0:invert", true)},
+			{IsColor: true, Swatch: "rgb(255,77,153)",
+				Field: newField("tint", "edv-fx-c:0:tint", "#ff4d99", "text")},
+			{Slider: newSlider("center X", "edv-fx-p:0:center.x", 0, 1, 0.01, 0.5, "")},
+			{Slider: newSlider("center Y", "edv-fx-p:0:center.y", 0, 1, 0.01, 0.25, "")},
 		}},
 		{Name: "old_glow.dll", Missing: true, MissLb: "missing", Off: true, Btns: []uiBtn{
 			{Label: "⏻", Variant: "ghost", Act: "edv-fx-tog:1"},

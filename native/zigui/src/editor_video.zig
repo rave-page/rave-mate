@@ -32,8 +32,11 @@ pub const Frame = struct {
 
 pub const FxParam = struct {
     isBool: bool = false,
+    isColor: bool = false,
     slider: c.Slider = .{},
     toggle: c.Toggle = .{},
+    swatch: []const u8 = "", // color: css rgb() of the current value
+    field: c.Field = .{}, // color: hex input
 };
 
 pub const FxRow = struct {
@@ -259,7 +262,15 @@ pub fn renderFxRow(h: *Html, r: FxRow) !void {
     try c.btnRowOf(h, r.btns);
     try h.raw("</div>");
     for (r.params) |p| {
-        if (p.isBool) {
+        if (p.isColor) {
+            try h.raw("<div class=edv-fx-color><span class=edv-fx-swatch style=");
+            var buf: [64]u8 = undefined;
+            const style = std.fmt.bufPrint(&buf, "background:{s}", .{p.swatch}) catch "background:";
+            try h.attrQ(style);
+            try h.raw("></span>");
+            try c.fieldOf(h, p.field);
+            try h.raw("</div>");
+        } else if (p.isBool) {
             try c.toggleOf(h, p.toggle);
         } else {
             try c.slider(h, p.slider);

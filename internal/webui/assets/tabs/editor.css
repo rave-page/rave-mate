@@ -573,6 +573,21 @@
   font-size: 0.85rem;
   line-height: 1;
 }
+.edv-fx-color {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.edv-fx-color .field {
+  flex: 1;
+}
+.edv-fx-swatch {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
 .edv-fxprev-box {
   position: relative;
   width: 100%;

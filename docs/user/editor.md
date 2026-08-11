@@ -83,8 +83,8 @@ Effects use two open standards, so packs made for other VJ/video tools work here
   shaders with a JSON header, the format used by VDMX, CoGe and Videosync.
   `.fs` files go into `<config>\vfx\isf\`. rave-mate ships a small MIT starter
   set (brightness/contrast/saturation, vignette, posterize, pixelate,
-  scanlines, chroma-shift); single-pass shaders are supported, multi-pass and
-  audio-reactive inputs are not (yet).
+  scanlines, chroma-shift, tint, spotlight); single-pass shaders are supported,
+  multi-pass and audio-reactive inputs are not (yet).
 
 `<config>` is rave-mate's config folder (Settings shows the exact path; on
 Windows it is `%AppData%\rave-mate`). The Effects section lists everything
@@ -101,6 +101,6 @@ just fails with the plugin's error message.
 
 - Reframe/effects need a probed video source - if the aspect select is missing,
   the file is audio-only or still probing (wait a second).
-- ISF colors/positions currently apply shader defaults in the UI; float and
-  bool parameters are fully editable.
+- Color parameters edit as a swatch + hex field, positions as normalized X/Y
+  sliders (an ISF color's alpha keeps its shader default).
 - Keyframe times are source seconds - retrimming does not move keyframes.

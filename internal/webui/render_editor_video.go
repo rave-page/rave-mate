@@ -44,10 +44,14 @@ type edvFrameSt struct {
 }
 
 // edvFxParam is one plugin-parameter control (frei0r doubles are 0..1 by spec).
+// Colors render as swatch + hex field; positions as two 0..1 sliders.
 type edvFxParam struct {
-	IsBool bool     `json:"isBool"`
-	Slider uiSlider `json:"slider"`
-	Toggle uiToggle `json:"toggle"`
+	IsBool  bool     `json:"isBool"`
+	IsColor bool     `json:"isColor"`
+	Slider  uiSlider `json:"slider"`
+	Toggle  uiToggle `json:"toggle"`
+	Swatch  string   `json:"swatch"` // color: css rgb() of the current value
+	Field   uiField  `json:"field"`  // color: hex input
 }
 
 // edvFxRow is one effect-chain entry.
@@ -346,8 +350,23 @@ func (u *UI) edvFxState(st *edvViewState) {
 				case "bool":
 					row.Params = append(row.Params,
 						edvFxParam{IsBool: true, Toggle: newToggle(prm.Name, act, val >= 0.5)})
+				case "color": // dotted channel overrides else listing default (ISF alpha stays shader-side)
+					r := edvFxCh(e.Params, prm.Name, "r", prm.Def[0])
+					g := edvFxCh(e.Params, prm.Name, "g", prm.Def[1])
+					bl := edvFxCh(e.Params, prm.Name, "b", prm.Def[2])
+					hex := fmt.Sprintf("#%02x%02x%02x", int(r*255+0.5), int(g*255+0.5), int(bl*255+0.5))
+					fld := newField(prm.Name, "edv-fx-c:"+is+":"+prm.Name, hex, "text")
+					fld.PH = "#rrggbb"
+					row.Params = append(row.Params, edvFxParam{
+						IsColor: true,
+						Swatch:  fmt.Sprintf("rgb(%d,%d,%d)", int(r*255+0.5), int(g*255+0.5), int(bl*255+0.5)),
+						Field:   fld,
+					})
+				case "position": // normalized 0..1 per frei0r spec / ISF norm coords
+					row.Params = append(row.Params,
+						edvFxParam{Slider: newSlider(prm.Name+" X", act+".x", 0, 1, 0.01, edvFxCh(e.Params, prm.Name, "x", prm.Def[0]), "")},
+						edvFxParam{Slider: newSlider(prm.Name+" Y", act+".y", 0, 1, 0.01, edvFxCh(e.Params, prm.Name, "y", prm.Def[1]), "")})
 				}
-				// color/position params keep plugin defaults (no control yet)
 			}
 		}
 		st.FxRows = append(st.FxRows, row)
@@ -624,9 +643,13 @@ func edvFxRowHTML(r edvFxRow) string {
 	b.WriteString(uiBtnRow(r.Btns))
 	b.WriteString(`</div>`)
 	for _, p := range r.Params {
-		if p.IsBool {
+		switch {
+		case p.IsColor:
+			b.WriteString(`<div class=edv-fx-color><span class=edv-fx-swatch style=` +
+				attrQ("background:"+p.Swatch) + `></span>` + p.Field.html() + `</div>`)
+		case p.IsBool:
 			b.WriteString(p.Toggle.html())
-		} else {
+		default:
 			b.WriteString(p.Slider.html())
 		}
 	}

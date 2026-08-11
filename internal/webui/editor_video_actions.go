@@ -145,6 +145,7 @@ func init() {
 	onPrefix("edv-fx-dn:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-dn:"), "dn") })
 	onPrefix("edv-fx-tog:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-tog:"), "tog") })
 	onPrefix("edv-fx-p:", func(u *UI, m actMsg) { u.edvFxParamSet(m.arg("edv-fx-p:"), m.Val) })
+	onPrefix("edv-fx-c:", func(u *UI, m actMsg) { u.edvFxColorSet(m.arg("edv-fx-c:"), m.Val) })
 	onExact("edv-fx-prev", func(u *UI, m actMsg) { u.edvFxPrevRender() })
 	onExact("edv-export", func(u *UI, m actMsg) { u.edvExport() })
 	onExact("edv-excancel", func(u *UI, m actMsg) {
@@ -695,6 +696,43 @@ func (u *UI) edvFxParamSet(arg, val string) {
 		}
 		e.Params[name] = clamp01(f)
 	})
+}
+
+// edvFxCh resolves a dotted channel value (override else listing default).
+func edvFxCh(params map[string]float64, name, comp string, def float64) float64 {
+	if v, ok := params[name+"."+comp]; ok {
+		return v
+	}
+	return def
+}
+
+// edvFxColorSet applies a hex color to a color param's r/g/b channels.
+func (u *UI) edvFxColorSet(arg, val string) {
+	idxStr, name, ok := strings.Cut(arg, ":")
+	if !ok || name == "" {
+		return
+	}
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		return
+	}
+	c, ok := edParseHex(val)
+	if !ok {
+		return
+	}
+	u.edvMut(func(v *edvSt) {
+		if idx < 0 || idx >= len(v.proj.Effects) {
+			return
+		}
+		e := &v.proj.Effects[idx]
+		if e.Params == nil {
+			e.Params = map[string]float64{}
+		}
+		e.Params[name+".r"] = float64(c.R) / 255
+		e.Params[name+".g"] = float64(c.G) / 255
+		e.Params[name+".b"] = float64(c.B) / 255
+	})
+	u.patchMain() // refresh the swatch
 }
 
 // edvResolveFx maps enabled chain entries to loaded plugins (base-name match;
