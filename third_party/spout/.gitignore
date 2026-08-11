@@ -1,5 +1,12 @@
-# The Spout2 SDK is fetched + SHA-verified by scripts/fetch-spout.ps1 (see SUPPLY_CHAIN.md),
-# never committed. Keep only this file + the README.
+# The Spout2 SDK is fetched + SHA-verified by scripts/fetch-spout.ps1 (see SUPPLY_CHAIN.md).
+# EXCEPTION: the PATCHED SpoutLibrary.dll IS committed (with its .patched SHA marker + the
+# source patch) - the official binary fatally __fastfail's on GL/DX interop failure; the
+# committed one is built by scripts/build-spout-dll.ps1 and the fetch scripts keep it.
 *
 !.gitignore
 !README.md
+!patches/
+!patches/**
+!bin/
+!bin/SpoutLibrary.dll
+!bin/SpoutLibrary.dll.patched

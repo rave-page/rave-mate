@@ -31,7 +31,13 @@ Expand-Archive $zip -DestinationPath $tmp
 $libs = Join-Path $tmp "Spout-SDK-binaries/Libs_$($version.Replace('.','-'))"
 
 Copy-Item "$libs/include/SpoutLibrary/SpoutLibrary.h" "$vd/include/" -Force
-Copy-Item "$libs/MT/bin/SpoutLibrary.dll"             "$vd/bin/"     -Force
+# A committed PATCHED DLL (fatal LinkGLDXtextures error path fixed - see patches/ +
+# scripts/build-spout-dll.ps1) outranks the official binary; the .patched marker carries its SHA-256.
+if (Test-Path "$vd/bin/SpoutLibrary.dll.patched") {
+  Write-Host "Patched SpoutLibrary.dll present (marker found) - keeping it, official DLL skipped."
+} else {
+  Copy-Item "$libs/MT/bin/SpoutLibrary.dll" "$vd/bin/" -Force
+}
 
 Push-Location "$vd/lib"
 try {

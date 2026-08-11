@@ -49,7 +49,14 @@ unzip -q -o "$zip" -d "$tmp/extract"
 libs="$tmp/extract/Spout-SDK-binaries/Libs_${version//./-}"
 
 cp -f "$libs/include/SpoutLibrary/SpoutLibrary.h" "$vd/include/"
-cp -f "$libs/MT/bin/SpoutLibrary.dll"             "$vd/bin/"
+# A committed PATCHED DLL (fatal LinkGLDXtextures error path fixed - see patches/ +
+# scripts/build-spout-dll.ps1) outranks the official binary. The .patched marker carries its
+# SHA-256; never clobber it with the release DLL.
+if [ -f "$vd/bin/SpoutLibrary.dll.patched" ]; then
+  echo "Patched SpoutLibrary.dll present (marker found) - keeping it, official DLL skipped."
+else
+  cp -f "$libs/MT/bin/SpoutLibrary.dll" "$vd/bin/"
+fi
 
 # Resolve gendef + dlltool: prefer the mingw-cross-prefixed variants, fall back to unprefixed.
 prefix="${MINGW_PREFIX:-x86_64-w64-mingw32}"

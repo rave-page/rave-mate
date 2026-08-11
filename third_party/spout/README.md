@@ -19,3 +19,11 @@ CGO_ENABLED=1 go build -tags spout ./cmd/rave-mate
 ```
 
 Upstream: https://github.com/leadedge/Spout2 (BSD-2-Clause). Pinned 2.007.017.
+
+## Patched SpoutLibrary.dll (committed)
+
+`bin/SpoutLibrary.dll` is committed - it is NOT the official release binary. The official one
+`__fastfail`s its host process when GL/DX interop creation fails (`LinkGLDXtextures` error path
+overflows a `char[128]`). Committed DLL = pinned source tag + `patches/` + MSVC `/MT` build via
+`pwsh rave-mate/scripts/build-spout-dll.ps1` (writes DLL + PDB + the `.patched` SHA marker the
+fetch scripts honour). See `SUPPLY_CHAIN.md`.
