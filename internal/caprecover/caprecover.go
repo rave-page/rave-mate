@@ -11,6 +11,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -189,9 +190,12 @@ func captureName(name string) bool {
 	return captureExt(name) && captureNameRe.MatchString(strings.TrimSuffix(name, filepath.Ext(name)))
 }
 
-// normPath folds a path for identity comparison (Windows: case + separator insensitive).
+// normPath folds a path for identity comparison: case + separator insensitive on every OS
+// (rows written on Windows mix `\`/`/` and drive-letter case; keys never touch the fs -
+// the map value keeps a concrete spelling). filepath.ToSlash is a no-op off Windows, so
+// fold `\` explicitly.
 func normPath(p string) string {
-	return strings.ToLower(filepath.Clean(filepath.ToSlash(p)))
+	return strings.ToLower(path.Clean(strings.ReplaceAll(p, `\`, "/")))
 }
 
 // probeDuration returns the media duration in seconds via ffprobe; 0 = unknown, -1 = no ffprobe.

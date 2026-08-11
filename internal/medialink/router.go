@@ -1285,7 +1285,11 @@ func (rm *RouteManager) runSend(ctx context.Context, rio *routeIO, src Source) e
 		f.Seq = seq
 		seq++
 		if f.PTS == 0 {
-			f.PTS = rm.clock.Now()
+			// Clamp ≥1: Windows interrupt-time granularity (~0.5ms) can hold Now() at 0 for
+			// the first frames after clock start, and PTS==0 is the unstamped sentinel.
+			if f.PTS = rm.clock.Now(); f.PTS == 0 {
+				f.PTS = 1
+			}
 		} else {
 			if !rebased {
 				ptsShift, rebased = rm.clock.Now()-f.PTS, true
