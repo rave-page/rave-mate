@@ -10,6 +10,7 @@ const convert = @import("convert.zig");
 const wave = @import("wave.zig");
 const pcmdec = @import("pcmdec.zig");
 const pixel = @import("pixel.zig");
+const edgeo = @import("edgeo.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -180,6 +181,44 @@ export fn rz_fill_cells(pix: [*]u8, stride: usize, w: usize, h: usize, cells: [*
     pixel.fillCells(pix[0 .. (h - 1) * stride + w * 4], stride, w, h, cells[0 .. n_cells * 4]);
 }
 
+// ── editor geometry kernel — flat-box direct-manipulation math ───────────────
+// boxes = n*7 f64 {x,y,w,h,sx,sy,rot} (visualeditor.FlatBox sans Locked).
+// Bit-exact with internal/visualeditor/geometry.go (the golden reference).
+
+/// Topmost box containing (px,py), or -1. Port of visualeditor.HitTest.
+export fn rz_ed_hit_test(boxes: [*]const f64, n: usize, px: f64, py: f64) i32 {
+    return edgeo.hitTest(@as([*]const edgeo.Box, @ptrCast(boxes))[0..n], px, py);
+}
+
+/// Handle within tol of (px,py) on box (7 f64): 0 none, 1..8 NW..W, 9 rotate
+/// (rot_off doc px above the top edge). Port of HandleAt.
+export fn rz_ed_handle_at(box: [*]const f64, px: f64, py: f64, tol: f64, rot_off: f64) i32 {
+    return edgeo.handleAt(@as(*const edgeo.Box, @ptrCast(box)).*, px, py, tol, rot_off);
+}
+
+/// Snap a proposed move: io_delta = {dx,dy} adjusted in place; guides = up to
+/// 2×{vert(0/1),pos}; returns guide count (X first). Port of SnapMove.
+export fn rz_ed_snap_move(boxes: [*]const f64, n: usize, move_idx: usize, thresh: f64, doc_w: f64, doc_h: f64, io_delta: [*]f64, guides: [*]f64) u32 {
+    return edgeo.snapMove(@as([*]const edgeo.Box, @ptrCast(boxes))[0..n], move_idx, &io_delta[0], &io_delta[1], thresh, doc_w, doc_h, @as(*[4]f64, @ptrCast(guides)));
+}
+
+/// New {w,h,x,y} for dragging handle to (px,py); uniform != 0 locks aspect.
+/// out = 4 f64. Port of ResizeBox.
+export fn rz_ed_resize_box(box: [*]const f64, handle: i32, px: f64, py: f64, uniform: u32, out: [*]f64) void {
+    edgeo.resizeBox(@as(*const edgeo.Box, @ptrCast(box)).*, handle, px, py, uniform != 0, @as(*[4]f64, @ptrCast(out)));
+}
+
+/// Doc-space angle (deg) from box center to the point. Port of AngleAt.
+export fn rz_ed_angle_at(box: [*]const f64, px: f64, py: f64) f64 {
+    return edgeo.angleAt(@as(*const edgeo.Box, @ptrCast(box)).*, px, py);
+}
+
+/// Rotation for a rotate-drag (snap != 0 = 15° steps), normalized (-180,180].
+/// Port of RotateFrom.
+export fn rz_ed_rotate_from(orig_rot: f64, down_angle: f64, now_angle: f64, snap: u32) f64 {
+    return edgeo.rotateFrom(orig_rot, down_angle, now_angle, snap != 0);
+}
+
 test {
     std.testing.refAllDecls(@This());
     _ = resample;
@@ -189,4 +228,5 @@ test {
     _ = wave;
     _ = pcmdec;
     _ = pixel;
+    _ = edgeo;
 }

@@ -90,6 +90,21 @@ void rz_px_label(const uint8_t *pix, size_t stride, size_t w, size_t h, size_t b
 void rz_fill_cells(uint8_t *pix, size_t stride, size_t w, size_t h,
                    const int32_t *cells, size_t n_cells);
 
+/* Editor geometry kernel — flat boxes = n*7 f64 {x,y,w,h,sx,sy,rot}. Bit-exact
+ * ports of internal/visualeditor/geometry.go (the golden reference). Handle
+ * ints: 0 none, 1..8 NW,N,NE,E,SE,S,SW,W, 9 rotate. */
+int32_t rz_ed_hit_test(const double *boxes, size_t n, double px, double py);
+int32_t rz_ed_handle_at(const double *box, double px, double py, double tol, double rot_off);
+/* io_delta = {dx,dy} adjusted in place; guides = up to 2×{vert(0/1),pos};
+ * returns guide count (X guide first). */
+uint32_t rz_ed_snap_move(const double *boxes, size_t n, size_t move_idx, double thresh,
+                         double doc_w, double doc_h, double *io_delta, double *guides);
+/* out = {new_w, new_h, new_x, new_y}; uniform != 0 locks aspect. */
+void rz_ed_resize_box(const double *box, int32_t handle, double px, double py,
+                      uint32_t uniform, double *out);
+double rz_ed_angle_at(const double *box, double px, double py);
+double rz_ed_rotate_from(double orig_rot, double down_angle, double now_angle, uint32_t snap);
+
 #ifdef __cplusplus
 }
 #endif

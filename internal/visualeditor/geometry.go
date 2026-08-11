@@ -5,8 +5,10 @@ import "math"
 // Direct-manipulation geometry: hit-testing, resize/rotate handles and snap
 // resolution over the SAME affine model the compositor renders with
 // (scale → rotate about the box center; see affine()). All coordinates are doc
-// px. This Go path is the reference; the zigcore edgeo kernel (zigdsp tag)
-// must match it bit-for-bit on the flat-box form.
+// px. The exported entry points dispatch to the zigcore edgeo kernel when
+// linked (geometry_zig.go, tag zigdsp); the *Go bodies here are the fallback +
+// golden reference the kernel must match bit-for-bit on the flat-box form
+// (parity gate: geometry_zig_parity_test.go).
 
 // Handle identifies a manipulation handle on a selected leaf.
 type Handle int
@@ -121,6 +123,13 @@ func (b FlatBox) Bounds() (minX, minY, maxX, maxY float64) {
 
 // HitTest returns the topmost box index containing the point, or -1.
 func HitTest(boxes []FlatBox, px, py float64) int {
+	if zigGeo() {
+		return zigHitTest(boxes, px, py)
+	}
+	return hitTestGo(boxes, px, py)
+}
+
+func hitTestGo(boxes []FlatBox, px, py float64) int {
 	for i := len(boxes) - 1; i >= 0; i-- {
 		if boxes[i].Contains(px, py) {
 			return i
@@ -141,6 +150,13 @@ func (b FlatBox) handleContentPts() [8][2]float64 {
 // handle floats rotOff doc px above the top-edge midpoint. Handles win over
 // body containment - call before HitTest.
 func HandleAt(b FlatBox, px, py, tol, rotOff float64) Handle {
+	if zigGeo() {
+		return zigHandleAt(b, px, py, tol, rotOff)
+	}
+	return handleAtGo(b, px, py, tol, rotOff)
+}
+
+func handleAtGo(b FlatBox, px, py, tol, rotOff float64) Handle {
 	best, bestD := HandleNone, tol*tol
 	for i, p := range b.handleContentPts() {
 		x, y := b.Map(p[0], p[1])
@@ -176,6 +192,13 @@ func snapAxis(lo, mid, hi float64, cands []float64, thresh float64) (adj, line f
 // to the canvas thirds-free lines (edges + center) and to other unlocked boxes'
 // edges/centers within thresh. Returns the adjusted delta + active guides.
 func SnapMove(boxes []FlatBox, moveIdx int, dx, dy, thresh float64, docW, docH float64) (float64, float64, []Guide) {
+	if zigGeo() {
+		return zigSnapMove(boxes, moveIdx, dx, dy, thresh, docW, docH)
+	}
+	return snapMoveGo(boxes, moveIdx, dx, dy, thresh, docW, docH)
+}
+
+func snapMoveGo(boxes []FlatBox, moveIdx int, dx, dy, thresh float64, docW, docH float64) (float64, float64, []Guide) {
 	if moveIdx < 0 || moveIdx >= len(boxes) {
 		return dx, dy, nil
 	}
@@ -212,6 +235,13 @@ const minSizePx = 8
 // (px,py), keeping the opposite edge/corner anchored in doc space. uniform
 // locks the aspect ratio (corner handles). Scale/rotation are unchanged.
 func ResizeBox(b FlatBox, hd Handle, px, py float64, uniform bool) (nw, nh, nx, ny float64) {
+	if zigGeo() {
+		return zigResizeBox(b, hd, px, py, uniform)
+	}
+	return resizeBoxGo(b, hd, px, py, uniform)
+}
+
+func resizeBoxGo(b FlatBox, hd Handle, px, py float64, uniform bool) (nw, nh, nx, ny float64) {
 	cx, cy, ok := b.InvMap(px, py)
 	if !ok {
 		return b.W, b.H, b.X, b.Y
@@ -281,12 +311,26 @@ func ResizeBox(b FlatBox, hd Handle, px, py float64, uniform bool) (nw, nh, nx, 
 
 // AngleAt returns the doc-space angle (deg) from the box center to the point.
 func AngleAt(b FlatBox, px, py float64) float64 {
+	if zigGeo() {
+		return zigAngleAt(b, px, py)
+	}
+	return angleAtGo(b, px, py)
+}
+
+func angleAtGo(b FlatBox, px, py float64) float64 {
 	return math.Atan2(py-(b.Y+b.H/2), px-(b.X+b.W/2)) * 180 / math.Pi
 }
 
 // RotateFrom returns the rotation for a rotate-drag: orig rotation plus the
 // angular delta since the drag started; snap rounds to 15° steps.
 func RotateFrom(origRot, downAngle, nowAngle float64, snap bool) float64 {
+	if zigGeo() {
+		return zigRotateFrom(origRot, downAngle, nowAngle, snap)
+	}
+	return rotateFromGo(origRot, downAngle, nowAngle, snap)
+}
+
+func rotateFromGo(origRot, downAngle, nowAngle float64, snap bool) float64 {
 	r := origRot + nowAngle - downAngle
 	if snap {
 		r = math.Round(r/15) * 15

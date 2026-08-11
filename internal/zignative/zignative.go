@@ -312,6 +312,74 @@ func FillCells(pix []byte, stride, w, h int, cells []int32) bool {
 	return true
 }
 
+// ── editor geometry kernel (edgeo) — flat boxes = n*7 f64 {x,y,w,h,sx,sy,rot} ──
+
+// EdHitTest returns the topmost box index containing (px,py), or -1.
+// Bit-exact with visualeditor.HitTest.
+func EdHitTest(boxes []float64, px, py float64) int {
+	if len(boxes) < 7 {
+		return -1
+	}
+	return int(C.rz_ed_hit_test((*C.double)(unsafe.Pointer(&boxes[0])), C.size_t(len(boxes)/7),
+		C.double(px), C.double(py)))
+}
+
+// EdHandleAt returns the Handle int (0 none, 1..8 NW..W, 9 rotate) within tol
+// of the point on one box (7 f64). Bit-exact with visualeditor.HandleAt.
+func EdHandleAt(box []float64, px, py, tol, rotOff float64) int {
+	if len(box) < 7 {
+		return 0
+	}
+	return int(C.rz_ed_handle_at((*C.double)(unsafe.Pointer(&box[0])),
+		C.double(px), C.double(py), C.double(tol), C.double(rotOff)))
+}
+
+// EdSnapMove adjusts a proposed move delta against canvas + other boxes;
+// guides = n×{vert(0/1),pos}. Bit-exact with visualeditor.SnapMove.
+func EdSnapMove(boxes []float64, moveIdx int, dx, dy, thresh, docW, docH float64) (ndx, ndy float64, guides [4]float64, n int) {
+	if len(boxes) < 7 || moveIdx < 0 || moveIdx >= len(boxes)/7 {
+		return dx, dy, guides, 0
+	}
+	delta := [2]float64{dx, dy}
+	n = int(C.rz_ed_snap_move((*C.double)(unsafe.Pointer(&boxes[0])), C.size_t(len(boxes)/7),
+		C.size_t(moveIdx), C.double(thresh), C.double(docW), C.double(docH),
+		(*C.double)(unsafe.Pointer(&delta[0])), (*C.double)(unsafe.Pointer(&guides[0]))))
+	return delta[0], delta[1], guides, n
+}
+
+// EdResizeBox returns new {w,h,x,y} for dragging handle to (px,py) with the
+// opposite edge/corner anchored. Bit-exact with visualeditor.ResizeBox.
+func EdResizeBox(box []float64, handle int, px, py float64, uniform bool) (nw, nh, nx, ny float64) {
+	if len(box) < 7 {
+		return 0, 0, 0, 0
+	}
+	var out [4]float64
+	uni := C.uint32_t(0)
+	if uniform {
+		uni = 1
+	}
+	C.rz_ed_resize_box((*C.double)(unsafe.Pointer(&box[0])), C.int32_t(handle),
+		C.double(px), C.double(py), uni, (*C.double)(unsafe.Pointer(&out[0])))
+	return out[0], out[1], out[2], out[3]
+}
+
+// EdAngleAt returns the doc-space angle (deg) from the box center to the point.
+func EdAngleAt(box []float64, px, py float64) float64 {
+	if len(box) < 7 {
+		return 0
+	}
+	return float64(C.rz_ed_angle_at((*C.double)(unsafe.Pointer(&box[0])), C.double(px), C.double(py)))
+}
+
+// EdRotateFrom returns the rotation for a rotate-drag (snap = 15° steps).
+func EdRotateFrom(origRot, downAngle, nowAngle float64, snap bool) float64 {
+	s := C.uint32_t(0)
+	if snap {
+		s = 1
+	}
+	return float64(C.rz_ed_rotate_from(C.double(origRot), C.double(downAngle), C.double(nowAngle), s))
+}
+
 // ApplyGain scales buf in place.
 func ApplyGain(buf []float32, gain float32) {
 	if len(buf) == 0 {

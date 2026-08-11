@@ -27,6 +27,19 @@ func WaveEnv(peaks []byte, dur, imgPps float64, out []float64) {}
 func PCMToF32(src []byte, frames, ch, blockAlign, bits int, isFloat, bigEndian bool, out []float32) {
 }
 func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool { return false }
+
+func EdHitTest(boxes []float64, px, py float64) int               { return -1 }
+func EdHandleAt(box []float64, px, py, tol, rotOff float64) int   { return 0 }
+func EdAngleAt(box []float64, px, py float64) float64             { return 0 }
+func EdRotateFrom(origRot, downAngle, nowAngle float64, snap bool) float64 {
+	return 0
+}
+func EdSnapMove(boxes []float64, moveIdx int, dx, dy, thresh, docW, docH float64) (float64, float64, [4]float64, int) {
+	return dx, dy, [4]float64{}, 0
+}
+func EdResizeBox(box []float64, handle int, px, py float64, uniform bool) (float64, float64, float64, float64) {
+	return 0, 0, 0, 0
+}
 func PxLabel(pix []byte, stride, w, h, bpp int, bgra bool, targets []byte, tol int, labels []byte) bool {
 	return false
 }
