@@ -2688,6 +2688,13 @@ func listAvatarsIn(dir string) []AvatarEntry {
 // Load reads + migrates config from disk, falling back to Default for a missing/invalid
 // file. Always returns a usable Config; err is non-nil only on unexpected IO failure.
 func Load() (Config, error) {
+	cfg, err := load()
+	// merge the durable preset mirror - restores user presets a config cycle lost
+	cfg.Features.Transcode.Presets = mergePresets(loadPresetsFile(), cfg.Features.Transcode.Presets)
+	return cfg, err
+}
+
+func load() (Config, error) {
 	path, err := DataPath(fileName)
 	if err != nil {
 		return Default(), err
@@ -2848,5 +2855,9 @@ func (c Config) Save() error {
 		_ = os.Remove(path + ".bak")
 		_ = os.Rename(path, path+".bak")
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	rotateBackup(raw) // timestamped history - one bad cycle can't kill every copy
+	return nil
 }

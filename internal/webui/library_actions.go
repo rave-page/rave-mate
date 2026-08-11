@@ -776,16 +776,32 @@ func (u *UI) libPresetSaveDraft(newID, label string) {
 
 func (u *UI) libUpsertPreset(p transcode.Preset) {
 	ps := u.svc.Cfg.Features.Transcode.Presets
+	upserted := false
 	for i := range ps {
 		if ps[i].ID == p.ID {
 			ps[i] = p
-			u.svc.Cfg.Features.Transcode.Presets = ps
-			u.saveCfg()
-			return
+			upserted = true
+			break
 		}
 	}
-	u.svc.Cfg.Features.Transcode.Presets = append(ps, p)
+	if !upserted {
+		ps = append(ps, p)
+	}
+	u.svc.Cfg.Features.Transcode.Presets = ps
 	u.saveCfg()
+	u.persistPresets()
+}
+
+// persistPresets mirrors the custom presets to the durable presets file - the
+// config field alone died once (2026-08-11).
+func (u *UI) persistPresets() {
+	ps := u.svc.Cfg.Features.Transcode.Presets
+	if err := config.SavePresetsFile(ps); err != nil {
+		u.log.Error("webui", "preset mirror save failed: "+err.Error(), nil)
+		u.toast(i18n.T("library.toast.saveFailed") + err.Error())
+		return
+	}
+	u.log.Info("webui", fmt.Sprintf("custom presets persisted (%d)", len(ps)), nil)
 }
 
 func (u *UI) libPresetDup(id string) {
@@ -813,6 +829,7 @@ func (u *UI) libPresetDel(id string) {
 	}
 	u.svc.Cfg.Features.Transcode.Presets = out
 	u.saveCfg()
+	u.persistPresets()
 	u.toast(i18n.T("library.toast.presetDeleted"))
 	u.patchMain()
 }

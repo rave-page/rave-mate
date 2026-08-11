@@ -2296,7 +2296,12 @@ func (u *UI) authLogin() {
 // saveCfg persists config + reconciles the session (mirrors the Fyne u.saveCfg).
 func (u *UI) saveCfg() {
 	if u.svc.Cfg != nil {
-		_ = u.svc.Cfg.Save()
+		// never swallow: a silent failure means the change dies with the process
+		// (2026-08-11: user presets lost exactly this way)
+		if err := u.svc.Cfg.Save(); err != nil {
+			u.log.Error("webui", "config save failed: "+err.Error(), nil)
+			u.toast(i18n.T("library.toast.saveFailed") + err.Error())
+		}
 	}
 	if u.svc.Session != nil {
 		u.svc.Session.Reconcile()
