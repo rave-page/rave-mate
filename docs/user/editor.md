@@ -45,7 +45,9 @@ workflow is the same as the Publish tab, so nothing new to learn:
 1. **Source**: *Change source…* opens a picker with your recent recordings
    (video/audio) plus Browse for any file.
 2. **Cut**: trim IN/OUT on the embedded player - waveform, zoom and silence
-   detection behave exactly like Publish.
+   detection behave exactly like Publish. The player's video shows the
+   **selected reframe live**: crop layout plays the chosen aspect/zoom/pan
+   slice, fit layout plays the original inside the target frame.
 3. **Reframe** (video sources): choose a target aspect - 9:16 vertical
    (Reel/Story/TikTok), 4:5 portrait, 1:1 square, 16:9 wide - then drag the
    bright window on the preview frame to choose the visible slice.
