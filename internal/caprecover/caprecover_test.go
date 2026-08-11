@@ -75,7 +75,7 @@ func TestSweepSkipsFreshAndTrackedAndStubs(t *testing.T) {
 	dir := t.TempDir()
 
 	// Tracked file: row exists (case-different path must still count as tracked on Windows).
-	tracked := oldFile(t, dir, "tracked.mp4", make([]byte, minBytes+1))
+	tracked := oldFile(t, dir, "2026-08-01 20-00-00.mp4", make([]byte, minBytes+1))
 	if err := lib.SaveSetRecording(libdb.SetRecording{
 		ID: "obs-1", Path: tracked, Kind: libdb.SetKindOBS,
 		StartedAt: time.Now().Add(-3 * time.Hour), EndedAt: time.Now().Add(-2 * time.Hour), Bytes: 1,
@@ -83,13 +83,15 @@ func TestSweepSkipsFreshAndTrackedAndStubs(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	// Fresh file (mtime now): may still be written.
-	if err := os.WriteFile(filepath.Join(dir, "fresh.mp4"), make([]byte, minBytes+1), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "2026-08-02 20-00-00.mp4"), make([]byte, minBytes+1), 0o644); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	// Stub (< minBytes).
-	oldFile(t, dir, "stub.flac", []byte("tiny"))
-	// Wrong extension.
+	oldFile(t, dir, "2026-08-03 20-00-00.flac", []byte("tiny"))
+	// Wrong extension / user-made cut / free-named export: not capture outputs.
 	oldFile(t, dir, "notes.txt", make([]byte, minBytes+1))
+	oldFile(t, dir, "2026-08-04 20-00-00-cut.mp4", make([]byte, minBytes+1))
+	oldFile(t, dir, "My Set Export.flac", make([]byte, minBytes+1))
 
 	_ = Sweep(context.Background(), logbus.New(64), lib, []string{dir})
 	rows, _ := lib.ListSetRecordings(20)
@@ -111,7 +113,7 @@ func TestSweepRecoversUntrackedFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// Real 2s FLAC via ffmpeg so the probe returns a genuine duration.
-	p := filepath.Join(dir, "set.flac")
+	p := filepath.Join(dir, "2026-08-05 21-30-00.flac")
 	ff, _ := mediatools.Resolve("ffmpeg")
 	if out, err := execCommand(ff, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
 		"-c:a", "flac", "-y", p); err != nil {
@@ -153,6 +155,22 @@ func TestSweepRecoversUntrackedFile(t *testing.T) {
 func TestNormPathFoldsCaseAndSlashes(t *testing.T) {
 	if normPath(`E:\Media\Rec\a.FLAC`) != normPath(`e:/media/rec/A.flac`) {
 		t.Fatal("normPath must fold case + separators")
+	}
+}
+
+func TestCaptureNameConvention(t *testing.T) {
+	yes := []string{"2026-08-10 22-00-42.flac", "2026-08-10 22-00-41.mp4", "2026-01-01 00-00-00.MKV"}
+	no := []string{"2026-08-10 22-00-42-cut.flac", "UMC_Rock_x_DnB-cut.flac", "My Set.mp4",
+		"2026-08-10 22-00-42.txt", "2026-08-10.flac", "2026-08-10 22-00-42.flac.orig"}
+	for _, n := range yes {
+		if !captureName(n) {
+			t.Fatalf("captureName(%q) = false, want true", n)
+		}
+	}
+	for _, n := range no {
+		if captureName(n) {
+			t.Fatalf("captureName(%q) = true, want false", n)
+		}
 	}
 }
 

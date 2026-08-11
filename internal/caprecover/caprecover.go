@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,11 @@ const (
 var videoExts = map[string]bool{".mp4": true, ".mkv": true, ".mov": true}
 var audioExts = map[string]bool{".flac": true, ".wav": true, ".mp3": true, ".m4a": true}
 
+// captureNameRe: exactly the timestamped basename OBS (default) and audiorec write. The dirs
+// also hold user-made cuts/exports ("… 23-00-16-cut.mp4", "MySet.flac") - registering those as
+// recovered captures pollutes the Unlinked list, so discovery is opt-in by naming convention.
+var captureNameRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$`)
+
 // Sweep backfills crash-open rows (ended_at from the file's mtime) and registers untracked
 // capture files as unlinked set recordings. extraDirs joins the parent dirs of existing rows
 // (the native capture dir, whose first capture may predate any row). Returns rows changed;
@@ -52,16 +58,16 @@ func Sweep(ctx context.Context, log *logbus.Bus, lib *libdb.DB, extraDirs []stri
 		return 0
 	}
 	known := map[string]bool{}
-	dirs := map[string]bool{}
+	dirs := map[string]string{} // normPath key → one concrete spelling (rows may mix separators)
 	for _, r := range rows {
 		known[normPath(r.Path)] = true
 		if d := filepath.Dir(r.Path); d != "." && d != "" {
-			dirs[d] = true
+			dirs[normPath(d)] = d
 		}
 	}
 	for _, d := range extraDirs {
 		if strings.TrimSpace(d) != "" {
-			dirs[d] = true
+			dirs[normPath(d)] = d
 		}
 	}
 
@@ -98,13 +104,13 @@ func Sweep(ctx context.Context, log *logbus.Bus, lib *libdb.DB, extraDirs []stri
 		size int64
 	}
 	var cands []cand
-	for d := range dirs {
+	for _, d := range dirs {
 		ents, err := os.ReadDir(d)
 		if err != nil {
 			continue
 		}
 		for _, e := range ents {
-			if e.IsDir() || !captureExt(e.Name()) {
+			if e.IsDir() || !captureName(e.Name()) {
 				continue
 			}
 			p := filepath.Join(d, e.Name())
@@ -173,6 +179,12 @@ func Sweep(ctx context.Context, log *logbus.Bus, lib *libdb.DB, extraDirs []stri
 func captureExt(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
 	return videoExts[ext] || audioExts[ext]
+}
+
+// captureName reports whether name looks like a capture output (timestamp basename + capture
+// extension) rather than a user-made cut/export sharing the dir.
+func captureName(name string) bool {
+	return captureExt(name) && captureNameRe.MatchString(strings.TrimSuffix(name, filepath.Ext(name)))
 }
 
 // normPath folds a path for identity comparison (Windows: case + separator insensitive).
