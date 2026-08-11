@@ -290,6 +290,7 @@ pub fn renderFrame(h: *Html, s: Frame) !void {
         try h.esc(s.busy);
         try h.raw("</span>");
     }
+    try h.raw("<div id=edv-fovl>");
     if (s.hasCrop) {
         if (s.vertAxis) {
             try h.raw("<div class=edv-shade style=\"left:0;right:0;top:0;height:");
@@ -318,7 +319,7 @@ pub fn renderFrame(h: *Html, s: Frame) !void {
         try h.raw(s.cropH);
         try h.raw("%\"></div>");
     }
-    try h.raw("</div>");
+    try h.raw("</div></div>");
 }
 
 /// renderExport mirrors Go edvExportHTML (#edv-export fragment).
@@ -354,8 +355,7 @@ pub fn renderExport(h: *Html, s: Export) !void {
 test "frame with horizontal crop renders shades left+right of the window" {
     var h = Html.init(std.testing.allocator);
     defer h.deinit();
-    try renderFrame(&h, .{ .show = true, .aw = "1920", .ah = "1080", .imgUrl = "http://127.0.0.1:1/img/x",
-        .hasCrop = true, .cropL = "34.219", .cropT = "0", .cropW = "31.563", .cropH = "100" });
+    try renderFrame(&h, .{ .show = true, .aw = "1920", .ah = "1080", .imgUrl = "http://127.0.0.1:1/img/x", .hasCrop = true, .cropL = "34.219", .cropT = "0", .cropW = "31.563", .cropH = "100" });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "data-actpos=edv-pan") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "left:calc(34.219% + 31.563%);right:0") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=edv-crop style=\"left:34.219%;top:0%;width:31.563%;height:100%\">") != null);

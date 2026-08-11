@@ -348,6 +348,11 @@
   letter-spacing: 0.06em;
   color: var(--rp-muted, #a6abb6);
 }
+#edv-fovl {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
 .edv-shade {
   position: absolute;
   background: rgba(0, 0, 0, 0.62);

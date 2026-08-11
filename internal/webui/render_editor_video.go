@@ -606,7 +606,9 @@ func edvFxPrevHTML(st edvFxPrevSt) string {
 	return b.String()
 }
 
-// edvFrameHTML renders the reframe box (the #edv-frame fragment).
+// edvFrameHTML renders the reframe box (the #edv-frame fragment). The crop
+// overlay nests in #edv-fovl so drags patch ONLY the overlay - replacing the
+// actpos element itself would drop the pointer capture (shell.go __pcur).
 func edvFrameHTML(st edvFrameSt) string {
 	if !st.Show {
 		return ""
@@ -618,17 +620,25 @@ func edvFrameHTML(st edvFrameSt) string {
 	} else {
 		b.WriteString(`<span class=edv-fbusy>` + html.EscapeString(st.Busy) + `</span>`)
 	}
-	if st.HasCrop {
-		if st.Vert {
-			b.WriteString(`<div class=edv-shade style="left:0;right:0;top:0;height:` + st.CropT + `%"></div>`)
-			b.WriteString(`<div class=edv-shade style="left:0;right:0;top:calc(` + st.CropT + `% + ` + st.CropH + `%);bottom:0"></div>`)
-		} else {
-			b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:0;width:` + st.CropL + `%"></div>`)
-			b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0"></div>`)
-		}
-		b.WriteString(`<div class=edv-crop style="left:` + st.CropL + `%;top:` + st.CropT + `%;width:` + st.CropW + `%;height:` + st.CropH + `%"></div>`)
-	}
+	b.WriteString(`<div id=edv-fovl>` + edvFrameOvlHTML(st) + `</div>`)
 	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// edvFrameOvlHTML renders the shades + crop rect (the #edv-fovl fragment).
+func edvFrameOvlHTML(st edvFrameSt) string {
+	if !st.HasCrop {
+		return ""
+	}
+	var b strings.Builder
+	if st.Vert {
+		b.WriteString(`<div class=edv-shade style="left:0;right:0;top:0;height:` + st.CropT + `%"></div>`)
+		b.WriteString(`<div class=edv-shade style="left:0;right:0;top:calc(` + st.CropT + `% + ` + st.CropH + `%);bottom:0"></div>`)
+	} else {
+		b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:0;width:` + st.CropL + `%"></div>`)
+		b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0"></div>`)
+	}
+	b.WriteString(`<div class=edv-crop style="left:` + st.CropL + `%;top:` + st.CropT + `%;width:` + st.CropW + `%;height:` + st.CropH + `%"></div>`)
 	return b.String()
 }
 

@@ -430,10 +430,11 @@ func edvKfUpsert(p *videoedit.Project, t, x float64) {
 	p.Normalize()
 }
 
-// edvPatchFrame re-renders only the reframe box (60 Hz drag path).
+// edvPatchFrame re-renders only the crop overlay (60 Hz drag path) - patching
+// #edv-frame itself would replace the actpos element and drop the capture.
 func (u *UI) edvPatchFrame() {
 	st := u.edvFrameState()
-	u.eval("window.__patch('edv-frame'," + jsQuote(edvFrameHTML(st)) + ")")
+	u.eval("window.__patch('edv-fovl'," + jsQuote(edvFrameOvlHTML(st)) + ")")
 }
 
 // ── keyframes ──
