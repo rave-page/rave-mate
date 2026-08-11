@@ -435,6 +435,7 @@ func (u *UI) pubActionsState(r recorder.Recording) []uiBtn {
 	if !r.EndedAt.IsZero() {
 		btns = append(btns,
 			uiBtn{Label: i18n.T("publish.matchHistory"), Variant: "secondary", Act: "pub-match:" + r.ID},
+			uiBtn{Label: i18n.T("publish.matchHistoryFull"), Variant: "ghost", Act: "pub-match-full:" + r.ID},
 			uiBtn{Label: i18n.T("publish.delete"), Variant: "destructive", Act: "pub-del:" + r.ID})
 	}
 	return btns

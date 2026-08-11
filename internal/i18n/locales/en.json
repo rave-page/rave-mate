@@ -2619,6 +2619,7 @@
     "liveSet": "Live set",
     "looseDesc": "Captured media that overlaps no recorded set.",
     "matchHistory": "Match history",
+    "matchHistoryFull": "Match full session",
     "matched": "matched ✓",
     "noCaptures": "No captured media linked. Broadcast to the set-capture receiver or record in OBS while a set runs.",
     "noRecordings": "No recordings yet",

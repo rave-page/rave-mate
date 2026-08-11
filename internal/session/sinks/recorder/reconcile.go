@@ -37,6 +37,17 @@ func (r *Recorder) ReconcileWithHistory(recID, historyDir string, resolve Histor
 	return r.ReconcileWithSessions(recID, sessions, resolve)
 }
 
+// ReconcileWithHistoryFull is ReconcileWithHistory extended to the matched
+// session's end: reconstructs the whole set when the recorder died mid-set -
+// the live EndedAt only bounds what the recorder saw, the history is complete.
+func (r *Recorder) ReconcileWithHistoryFull(recID, historyDir string, resolve HistoryResolver) (*Recording, error) {
+	sessions, err := musiclib.LoadSessions(historyDir)
+	if err != nil {
+		return nil, fmt.Errorf("load Traktor history: %w", err)
+	}
+	return r.reconcileWithSessions(recID, sessions, resolve, true)
+}
+
 // ReconcileWithSessions is ReconcileWithHistory over pre-loaded sessions, so a sweep over
 // many recordings loads (and the AutoReconciler's cache parses) the history dir once.
 //
@@ -46,6 +57,10 @@ func (r *Recorder) ReconcileWithHistory(recID, historyDir string, resolve Histor
 // sweep re-takes storeMu per id, so a rename interleaves between recordings rather than waiting out
 // the whole sweep. Lock order storeMu → r.mu → r.pmu (r.Get takes r.mu + r.pmu, both inner).
 func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Session, resolve HistoryResolver) (*Recording, error) {
+	return r.reconcileWithSessions(recID, sessions, resolve, false)
+}
+
+func (r *Recorder) reconcileWithSessions(recID string, sessions []musiclib.Session, resolve HistoryResolver, full bool) (*Recording, error) {
 	r.storeMu.Lock()
 	defer r.storeMu.Unlock()
 	// Read AFTER draining: autoFinalizeLocked queues its snapshot and marks the id pending-reconcile
@@ -60,7 +75,11 @@ func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Sessi
 	if rec.EndedAt.IsZero() {
 		return nil, fmt.Errorf("recording still in progress - stop it first")
 	}
-	m, ok := reconcile.MatchSession(rec.StartedAt, rec.EndedAt, sessions)
+	match := reconcile.MatchSession
+	if full {
+		match = reconcile.MatchSessionFull
+	}
+	m, ok := match(rec.StartedAt, rec.EndedAt, sessions)
 	if !ok {
 		return nil, fmt.Errorf("no Traktor history session overlaps this recording's time window")
 	}
@@ -100,7 +119,14 @@ func (r *Recorder) ReconcileWithSessions(recID string, sessions []musiclib.Sessi
 		}
 	}
 	if len(tracks) > 0 {
-		tracks[len(tracks)-1].EndedAt = rec.EndedAt
+		end := rec.EndedAt
+		last := len(tracks) - 1
+		// full mode reaches past the recorder's end - close the final track from
+		// its own history play duration instead of clamping it before it started
+		if e := m.Tracks[last].StartedAt.Add(time.Duration(m.Tracks[last].DurationSec * float64(time.Second))); full && e.After(end) {
+			end = e
+		}
+		tracks[last].EndedAt = end
 	}
 
 	rec.Tracks = tracks

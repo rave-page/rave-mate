@@ -2122,6 +2122,7 @@
     "liveSet": "Set en vivo",
     "looseDesc": "Medios capturados que no se solapan con ningún set grabado.",
     "matchHistory": "Emparejar historial",
+    "matchHistoryFull": "Emparejar sesión completa",
     "matched": "emparejado ✓",
     "noCaptures": "No hay medios capturados vinculados. Emite al receptor de captura de set o graba en OBS mientras corre un set.",
     "noRecordings": "Aún no hay grabaciones",

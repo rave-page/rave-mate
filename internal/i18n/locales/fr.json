@@ -2122,6 +2122,7 @@
     "liveSet": "Set live",
     "looseDesc": "Média capturé qui ne chevauche aucun set enregistré.",
     "matchHistory": "Faire correspondre l'historique",
+    "matchHistoryFull": "Faire correspondre toute la session",
     "matched": "correspondance ✓",
     "noCaptures": "Aucun média capturé lié. Diffusez vers le récepteur de capture de set ou enregistrez dans OBS pendant un set.",
     "noRecordings": "Aucun enregistrement",

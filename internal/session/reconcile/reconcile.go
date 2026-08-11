@@ -77,6 +77,31 @@ func MatchSession(recStart, recEnd time.Time, sessions []musiclib.Session) (Matc
 	return best, true
 }
 
+// MatchSessionFull picks the session by the real recording window (best overlap),
+// then maps its plays from the window start through the SESSION's end - the
+// crash-truncated case: the recorder's EndedAt only bounds the audio it saw, the
+// history is the complete record of the set.
+func MatchSessionFull(recStart, recEnd time.Time, sessions []musiclib.Session) (Match, bool) {
+	base, ok := MatchSession(recStart, recEnd, sessions)
+	if !ok {
+		return Match{}, false
+	}
+	for _, s := range sessions {
+		if s.Name != base.SessionName {
+			continue
+		}
+		if _, span1, ok := sessionSpan(s); ok {
+			m := buildMatch(s, recStart, span1)
+			m.Overlap = base.Overlap
+			if len(m.Tracks) > 0 {
+				return m, true
+			}
+		}
+		break
+	}
+	return base, true
+}
+
 // sessionSpan returns the wall-clock span of a session's timestamped plays (ok=false if none
 // carry a usable StartedAt).
 func sessionSpan(s musiclib.Session) (time.Time, time.Time, bool) {

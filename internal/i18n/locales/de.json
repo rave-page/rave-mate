@@ -2216,6 +2216,7 @@
     "liveSet": "Live-Set",
     "looseDesc": "Mitgeschnittene Medien, die sich mit keinem aufgezeichneten Set überschneiden.",
     "matchHistory": "Verlauf abgleichen",
+    "matchHistoryFull": "Ganze Session abgleichen",
     "matched": "abgeglichen ✓",
     "noCaptures": "Keine mitgeschnittenen Medien verknüpft. Broadcaste an den Set-Capture-Empfänger oder nimm in OBS auf, während ein Set läuft.",
     "noRecordings": "Noch keine Aufnahmen",

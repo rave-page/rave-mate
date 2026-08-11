@@ -124,8 +124,10 @@ func init() {
 			u.pubRemoteMatch(m.arg("pub-match:"))
 			return
 		}
-		u.pubMatch(m.arg("pub-match:"))
+		u.pubMatch(m.arg("pub-match:"), false)
 	})
+	// full-session variant: crash-truncated set - take the history through its end
+	onPrefix("pub-match-full:", func(u *UI, m actMsg) { u.pubMatch(m.arg("pub-match-full:"), true) })
 	onPrefix("pub-del:", func(u *UI, m actMsg) {
 		if u.libRemoteTarget() != "" {
 			u.pubRemoteDelOpen(m.arg("pub-del:"))
@@ -265,7 +267,7 @@ func pubExportModal(fmtKey, content string) string {
 	return pubExpDlgHTML(pubExportState(fmtKey, content))
 }
 
-func (u *UI) pubMatch(id string) {
+func (u *UI) pubMatch(id string, full bool) {
 	if u.svc.Recorder == nil {
 		return
 	}
@@ -278,7 +280,11 @@ func (u *UI) pubMatch(id string) {
 			return
 		}
 		u.toast("Matching to Traktor history…")
-		rec, err := u.svc.Recorder.ReconcileWithHistory(id, histDir, u.pubHistoryResolver())
+		match := u.svc.Recorder.ReconcileWithHistory
+		if full {
+			match = u.svc.Recorder.ReconcileWithHistoryFull
+		}
+		rec, err := match(id, histDir, u.pubHistoryResolver())
 		if err != nil {
 			u.logErr("reconcile", err)
 			u.toast("Match failed: " + err.Error())

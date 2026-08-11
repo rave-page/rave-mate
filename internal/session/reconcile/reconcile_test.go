@@ -78,3 +78,36 @@ func TestMatchSession_openEndedUsesSessionEnd(t *testing.T) {
 		t.Fatalf("open-ended match failed: ok=%v tracks=%d", ok, len(m.Tracks))
 	}
 }
+
+// TestMatchSessionFull_extendsPastCrashEnd: the crash case - the recorder died
+// at 22:20 but the DJ played on; full mode reconstructs the whole session.
+func TestMatchSessionFull_extendsPastCrashEnd(t *testing.T) {
+	rec0, rec1 := at(22, 0), at(22, 20) // EndedAt = crash point
+	s := sess("night",
+		play("a.flac", 0, at(22, 1), 300),
+		play("b.flac", 1, at(22, 10), 300),
+		play("c.flac", 0, at(22, 40), 300), // after the crash
+		play("d.flac", 1, at(22, 50), 300),
+	)
+	if m, _ := MatchSession(rec0, rec1, []musiclib.Session{s}); len(m.Tracks) != 2 {
+		t.Fatalf("window match got %d tracks, want 2", len(m.Tracks))
+	}
+	m, ok := MatchSessionFull(rec0, rec1, []musiclib.Session{s})
+	if !ok {
+		t.Fatal("expected a full match")
+	}
+	if len(m.Tracks) != 4 {
+		t.Fatalf("full match got %d tracks, want 4", len(m.Tracks))
+	}
+	if m.Tracks[3].Path != "d.flac" || m.Tracks[3].Offset != 50*time.Minute {
+		t.Errorf("track3 = %+v, want d.flac at 50m", m.Tracks[3])
+	}
+}
+
+// TestMatchSessionFull_noOverlapStillFails: full mode never invents a match.
+func TestMatchSessionFull_noOverlapStillFails(t *testing.T) {
+	far := sess("yesterday", play("x.flac", 0, at(3, 0), 300))
+	if _, ok := MatchSessionFull(at(22, 0), at(23, 0), []musiclib.Session{far}); ok {
+		t.Error("disjoint session must not match in full mode either")
+	}
+}
