@@ -102,27 +102,22 @@ func TestHostCloseTearsDown(t *testing.T) {
 	h.mu.Unlock()
 	cls, _ := ruiEncode(ruiMsg{T: ruiKindClose, SID: "s2"})
 	h.onInbound("peerB", cls)
+	// closeHost removes the map entry BEFORE Stop()+release - poll all three under one deadline.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		h.mu.Lock()
 		gone := h.host["peerB"] == nil
 		h.mu.Unlock()
-		if gone {
+		libStMu.Lock()
+		_, leaked := libSts[hu]
+		libStMu.Unlock()
+		if gone && hu.stopped() && !leaked {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("session not removed on close")
+			t.Fatalf("teardown incomplete: gone=%v stopped=%v leaked=%v", gone, hu.stopped(), leaked)
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-	if !hu.stopped() {
-		t.Fatal("headless UI still running after close")
-	}
-	libStMu.Lock()
-	_, leaked := libSts[hu]
-	libStMu.Unlock()
-	if leaked {
-		t.Fatal("per-UI state leaked after close")
 	}
 }
 
