@@ -1020,7 +1020,18 @@ func (u *UI) libHistoryState(s *libSt) libHistSt {
 		Desc:    i18n.T("library.hist.desc"), Empty: i18n.T("library.hist.empty"),
 		IsEmpty: len(s.summaries) == 0,
 	}
+	// a selected session collapses the list to itself + a back row - the played
+	// table renders right below instead of hiding under dozens of session rows
+	selected := len(s.played) > 0 && s.selSess >= 0 && s.selSess < len(s.summaries)
+	if selected {
+		st.Sessions = append(st.Sessions, libSessSt{
+			Idx: "-1", Date: i18n.T("library.hist.back", i18n.A{"n": fmt.Sprint(len(s.summaries))}),
+		})
+	}
 	for i, sm := range s.summaries {
+		if selected && i != s.selSess {
+			continue
+		}
 		sub := i18n.Tn("track", sm.TrackCount) + " · " + fmtDurCoarse(sm.TotalDurationSec)
 		if i < len(s.histApps) && s.histApps[i] != "" {
 			sub = s.histApps[i] + " · " + sub

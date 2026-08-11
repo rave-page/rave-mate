@@ -649,6 +649,7 @@
       "vbitrate": "Le débit vidéo cible {target} kbps dépasse la source {source} kbps."
     },
     "hist": {
+      "back": "← Tous les sets ({n})",
       "desc": "Vos sets DJ sur Traktor + Rekordbox, du plus récent au plus ancien.",
       "empty": "Aucun historique chargé",
       "load": "Charger l'historique DJ"

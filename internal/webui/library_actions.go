@@ -2053,7 +2053,13 @@ func (u *UI) libHistLoad() {
 func (u *UI) libOpenSession(idx int) {
 	s := u.lib()
 	s.mu.Lock()
-	if idx < 0 || idx >= len(s.sessions) {
+	if idx < 0 { // back row: deselect → full sessions list again
+		s.played, s.selSess = nil, -1
+		s.mu.Unlock()
+		u.libPatchBody()
+		return
+	}
+	if idx >= len(s.sessions) {
 		s.mu.Unlock()
 		return
 	}

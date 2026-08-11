@@ -658,6 +658,7 @@
       "vbitrate": "Ziel-Videobitrate {target} kbps ist höher als Quelle {source} kbps."
     },
     "hist": {
+      "back": "← Alle Sets ({n})",
       "desc": "Deine DJ-Sets aus Traktor + Rekordbox, neueste zuerst.",
       "empty": "Kein Verlauf geladen",
       "load": "DJ-Verlauf laden"

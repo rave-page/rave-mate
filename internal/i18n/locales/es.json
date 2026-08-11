@@ -649,6 +649,7 @@
       "vbitrate": "El bitrate de vídeo objetivo {target} kbps es mayor que el del origen {source} kbps."
     },
     "hist": {
+      "back": "← Todos los sets ({n})",
       "desc": "Tus sets de DJ en Traktor + Rekordbox, más recientes primero.",
       "empty": "No hay historial cargado",
       "load": "Cargar historial de DJ"

@@ -1015,6 +1015,7 @@
       "vbitrate": "Target video bitrate {target} kbps is higher than source {source} kbps."
     },
     "hist": {
+      "back": "← All sets ({n})",
       "desc": "Your DJ sets across Traktor + Rekordbox, newest first.",
       "empty": "No history loaded",
       "load": "Load DJ history"

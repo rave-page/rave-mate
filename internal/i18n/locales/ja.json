@@ -649,6 +649,7 @@
       "vbitrate": "目標ビデオビットレート {target} kbps はソースの {source} kbps より高くなっています。"
     },
     "hist": {
+      "back": "← すべてのセット（{n}）",
       "desc": "Traktor + Rekordbox の DJ セット履歴を新しい順に表示。",
       "empty": "履歴が読み込まれていません",
       "load": "DJ 履歴を読み込む"
