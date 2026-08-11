@@ -27,10 +27,11 @@ import (
 const source = "caprecover"
 
 const (
-	settleAge      = 2 * time.Minute // younger files may still be written - next sweep gets them
-	maxPerSweep    = 20              // newest-first cap per sweep (dropped rest is logged)
-	minBytes       = 1 << 20         // ignore stubs
-	maxRepairBytes = 8 << 30         // FLAC re-encode above this would run for ages - log a hint instead
+	settleAge      = 2 * time.Minute     // younger files may still be written - next sweep gets them
+	maxAge         = 45 * 24 * time.Hour // older untracked files are archive, not crash fallout
+	maxPerSweep    = 20                  // newest-first cap per sweep (dropped rest is logged)
+	minBytes       = 1 << 20             // ignore stubs
+	maxRepairBytes = 8 << 30             // FLAC re-encode above this would run for ages - log a hint instead
 	probeTimeout   = 30 * time.Second
 	repairTimeout  = 30 * time.Minute
 )
@@ -118,7 +119,8 @@ func Sweep(ctx context.Context, log *logbus.Bus, lib *libdb.DB, extraDirs []stri
 				continue
 			}
 			fi, err := e.Info()
-			if err != nil || fi.Size() < minBytes || now.Sub(fi.ModTime()) < settleAge {
+			if err != nil || fi.Size() < minBytes || now.Sub(fi.ModTime()) < settleAge ||
+				now.Sub(fi.ModTime()) > maxAge {
 				continue
 			}
 			cands = append(cands, cand{p, fi.ModTime(), fi.Size()})
