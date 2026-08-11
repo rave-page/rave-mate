@@ -15,6 +15,7 @@ var registry = map[string]map[string]Handler{
 	"fingerprint": fingerprintHandlers(),
 	"transcode":   transcodeHandlers(),
 	"render":      renderHandlers(),
+	"vfx":         vfxHandlers(),
 }
 
 // KnownType reports whether type has registered handlers (used by the supervisor to
