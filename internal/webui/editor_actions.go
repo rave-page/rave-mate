@@ -28,8 +28,9 @@ type edState struct {
 	store *visualeditor.TemplateStore
 	doc   *visualeditor.Document
 
-	mode       string // "" | "image" (default) | "video"
-	selID      string
+	mode       string          // "" | "image" (default) | "video"
+	selID      string          // primary selection (inspector, handles)
+	selMore    map[string]bool // secondary selections (shift-click; outline only)
 	undo, redo [][]byte
 	lastSnap   time.Time
 	lastSig    string
@@ -187,7 +188,13 @@ func (u *UI) edEdit(fn func()) {
 func init() {
 	onPrefix("ed-add:", func(u *UI, m actMsg) { u.edAdd(m.arg("ed-add:")) })
 	onPrefix("ed-select:", func(u *UI, m actMsg) {
-		u.edEdit(func() { editor.selID = m.arg("ed-select:") })
+		u.edEdit(func() {
+			if m.shift() {
+				edSelToggle(m.arg("ed-select:"))
+				return
+			}
+			editor.selID, editor.selMore = m.arg("ed-select:"), nil
+		})
 	})
 	onPrefix("ed-vis:", func(u *UI, m actMsg) {
 		u.edEdit(func() {
@@ -321,18 +328,106 @@ func (u *UI) edReorder(dir int) {
 	})
 }
 
+// edSelIDs returns every selected layer id still present, in document order
+// (primary + secondary). Caller holds editor.mu.
+func edSelIDs() []string {
+	sel := map[string]bool{}
+	if editor.selID != "" {
+		sel[editor.selID] = true
+	}
+	for id, on := range editor.selMore {
+		if on {
+			sel[id] = true
+		}
+	}
+	var out []string
+	var walk func(ls []*visualeditor.Layer)
+	walk = func(ls []*visualeditor.Layer) {
+		for _, l := range ls {
+			if l == nil {
+				continue
+			}
+			if sel[l.ID] {
+				out = append(out, l.ID)
+			}
+			if l.IsGroup() {
+				walk(l.Children)
+			}
+		}
+	}
+	walk(editor.doc.Root.Children)
+	return out
+}
+
+// edSelHas reports id is part of the selection (primary or secondary).
+func edSelHas(id string) bool { return id != "" && (editor.selID == id || editor.selMore[id]) }
+
+// edSelToggle adds/removes id from the selection (shift-click). A newly added
+// layer becomes the primary; removing the primary promotes a remaining member.
+func edSelToggle(id string) {
+	if editor.selMore == nil {
+		editor.selMore = map[string]bool{}
+	}
+	switch {
+	case editor.selID == id:
+		editor.selID = ""
+		for _, mid := range edSelIDs() {
+			editor.selID = mid
+			delete(editor.selMore, mid)
+			break
+		}
+	case editor.selMore[id]:
+		delete(editor.selMore, id)
+	case editor.selID == "":
+		editor.selID = id
+	default:
+		editor.selMore[editor.selID] = true
+		editor.selID = id
+		delete(editor.selMore, id)
+	}
+}
+
+// edGroup wraps the selected layers that share the primary's parent into a new
+// group at the first member's z-position.
 func (u *UI) edGroup() {
 	u.edEdit(func() {
-		l, parent := editor.doc.Find(editor.selID)
-		if l == nil || parent == nil {
+		ids := edSelIDs()
+		if len(ids) == 0 {
 			return
 		}
+		_, parent := editor.doc.Find(editor.selID)
+		if parent == nil {
+			return
+		}
+		members := map[string]bool{}
+		for _, id := range ids {
+			if _, p := editor.doc.Find(id); p == parent {
+				members[id] = true
+			}
+		}
 		editor.snapshot(true)
-		idx := edIndexOf(parent.Children, l.ID)
 		g := visualeditor.NewGroup("Group")
-		g.Children = []*visualeditor.Layer{l}
-		parent.Children[idx] = g
-		editor.selID = g.ID
+		var kept []*visualeditor.Layer
+		insert := -1
+		for _, c := range parent.Children {
+			if members[c.ID] {
+				if insert < 0 {
+					insert = len(kept)
+				}
+				g.Children = append(g.Children, c)
+				continue
+			}
+			kept = append(kept, c)
+		}
+		if len(g.Children) == 0 {
+			return
+		}
+		out := make([]*visualeditor.Layer, 0, len(kept)+1)
+		out = append(out, kept[:insert]...)
+		out = append(out, g)
+		out = append(out, kept[insert:]...)
+		parent.Children = out
+		editor.selID, editor.selMore = g.ID, nil
 		editor.autosave()
 	})
 }
@@ -350,20 +445,24 @@ func (u *UI) edUngroup() {
 		merged = append(merged, l.Children...)
 		merged = append(merged, parent.Children[idx+1:]...)
 		parent.Children = merged
-		editor.selID = ""
+		editor.selID, editor.selMore = "", nil
 		editor.autosave()
 	})
 }
 
 func (u *UI) edDelete() {
 	u.edEdit(func() {
-		l, parent := editor.doc.Find(editor.selID)
-		if l == nil || parent == nil {
+		ids := edSelIDs()
+		if len(ids) == 0 {
 			return
 		}
 		editor.snapshot(true)
-		parent.Children = edRemoveLayer(parent.Children, l.ID)
-		editor.selID = ""
+		for _, id := range ids {
+			if _, parent := editor.doc.Find(id); parent != nil {
+				parent.Children = edRemoveLayer(parent.Children, id)
+			}
+		}
+		editor.selID, editor.selMore = "", nil
 		editor.autosave()
 	})
 }

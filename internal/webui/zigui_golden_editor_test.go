@@ -109,14 +109,15 @@ func edFixtures() map[string]edViewState {
 	inner := edLayer{Group: true, ID: "grp-in", Xform: true, Tx: "5", Ty: "-2.5",
 		Sx: "1.5", Sy: "0.5", Rot: "45", Opacity: "0.9",
 		Paint: edPaint{Stops: []edGradStop{}}, Children: []edLayer{grad, img}}
-	outer := edLayer{Group: true, ID: "grp-out", Sel: false, Blend: "multiply",
+	outer := edLayer{Group: true, ID: "grp-out", Sel: false, Msel: true, Blend: "multiply",
 		Paint: edPaint{Stops: []edGradStop{}}, Children: []edLayer{inner, imgPH}}
+	solid.Msel = true // secondary selection: ed-msel outline, no handles
 	populated.Preview.Layers = []edLayer{txt, solid, outer}
 	populated.Preview.Guides = []edGuideSt{{Vert: true, Pos: "50"}, {Vert: false, Pos: "33.333"}}
 	populated.Preview.Cap = "1920×1080, 5 layers — selected: Title text"
 	populated.Layers.Rows = []edRow{
 		{ID: "t1", Name: "Title text", Depth: 0, Sel: true, Visible: true},
-		{ID: "s1", Name: "Backdrop", Depth: 0, Visible: true, Locked: true},
+		{ID: "s1", Name: "Backdrop", Depth: 0, Msel: true, Visible: true, Locked: true},
 		{ID: "grp-out", Name: "Art group", Depth: 0, Group: true, Visible: true},
 		{ID: "grp-in", Name: "Inner", Depth: 1, Group: true, Visible: true},
 		{ID: "g1", Name: "Gradient", Depth: 2},

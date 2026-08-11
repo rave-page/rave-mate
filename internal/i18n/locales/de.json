@@ -63,7 +63,7 @@
   "editor": {
     "align": "Ausrichten",
     "alignCenter": "zentriert",
-    "alignHint": "An Leinwand ausrichten · Ziehen bewegt, Griffe skalieren/rotieren · ⇧ = Seitenverhältnis / 15° / Achse · Pfeile verschieben (⇧ ×10)",
+    "alignHint": "An Leinwand ausrichten · Ziehen bewegt, Griffe skalieren/rotieren · ⇧ = Seitenverhältnis / 15° / Achse · Pfeile verschieben (⇧ ×10) · ⇧-Klick = Mehrfachauswahl",
     "alignLeft": "links",
     "alignRight": "rechts",
     "angle": "Winkel",

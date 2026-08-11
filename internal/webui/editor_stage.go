@@ -33,8 +33,12 @@ type edDrag struct {
 	downPY  float64
 	downAng float64 // rotate: pointer angle at down
 	shift   bool
-	boxes   []visualeditor.FlatBox // down-time snapshot (snap candidates)
+	boxes   []visualeditor.FlatBox // down-time snapshot (snap candidates, selection excluded)
 	moveIdx int
+
+	origs         map[string][2]float64 // multi-move: selected id → orig Transform.X/Y
+	pendingRemove string                // shift-click on a member: remove at up if not moved
+	collapse      bool                  // plain click on a member: collapse to it at up if not moved
 }
 
 func init() {
@@ -116,22 +120,58 @@ func (u *UI) edStageDown(fx, fy float64, mods string) {
 
 	idx := visualeditor.HitTest(boxes, px, py)
 	if idx < 0 {
-		changed := editor.selID != ""
-		editor.selID = ""
+		changed := editor.selID != "" || len(editor.selMore) > 0
+		editor.selID, editor.selMore = "", nil
 		editor.mu.Unlock()
 		if changed {
 			u.patchMain()
 		}
 		return
 	}
-	editor.selID = ids[idx]
+	id := ids[idx]
+	pendingRemove, collapse := "", false
+	switch {
+	case shift && edSelHas(id):
+		pendingRemove = id // remove on up unless the group gets dragged
+	case shift:
+		edSelToggle(id) // add + becomes primary
+	case edSelHas(id):
+		// plain down on a member: promote to primary, keep the group for the
+		// drag; a plain CLICK (no move) collapses the selection to it at up
+		if id != editor.selID {
+			editor.selMore[editor.selID] = true
+			delete(editor.selMore, id)
+			editor.selID = id
+		}
+		collapse = len(editor.selMore) > 0
+	default:
+		editor.selID, editor.selMore = id, nil
+	}
 	if !boxes[idx].Locked {
 		editor.snapshot(true)
+		// snap candidates: everything OUTSIDE the moving selection + the primary
+		// box appended last (a co-moving layer must not act as a snap line)
+		selSet := map[string]bool{}
+		origs := map[string][2]float64{}
+		for _, sid := range edSelIDs() {
+			selSet[sid] = true
+			if sl, _ := d.Find(sid); sl != nil {
+				origs[sid] = [2]float64{sl.Transform.X, sl.Transform.Y}
+			}
+		}
+		cands := make([]visualeditor.FlatBox, 0, len(boxes))
+		for i, b := range boxes {
+			if !selSet[ids[i]] {
+				cands = append(cands, b)
+			}
+		}
+		cands = append(cands, boxes[idx])
 		editor.drag = edDrag{
-			active: true, handle: visualeditor.HandleNone, id: ids[idx],
+			active: true, handle: visualeditor.HandleNone, id: id,
 			orig: boxes[idx], origRot: boxes[idx].Rot,
 			downPX: px, downPY: py, shift: shift,
-			boxes: boxes, moveIdx: idx,
+			boxes: cands, moveIdx: len(cands) - 1,
+			origs: origs, pendingRemove: pendingRemove, collapse: collapse,
 		}
 	}
 	editor.mu.Unlock()
@@ -156,7 +196,7 @@ func (u *UI) edStageMove(fx, fy float64) {
 	}
 	px, py := fx*float64(d.W), fy*float64(d.H)
 	switch dr.handle {
-	case visualeditor.HandleNone: // move
+	case visualeditor.HandleNone: // move (the whole selection)
 		dx, dy := px-dr.downPX, py-dr.downPY
 		if dr.shift { // constrain to dominant axis
 			if absF(dx) >= absF(dy) {
@@ -167,8 +207,12 @@ func (u *UI) edStageMove(fx, fy float64) {
 		}
 		thresh := edSnapFrac * float64(d.W)
 		ndx, ndy, guides := visualeditor.SnapMove(dr.boxes, dr.moveIdx, dx, dy, thresh, float64(d.W), float64(d.H))
-		l.Transform.X = dr.orig.X + ndx
-		l.Transform.Y = dr.orig.Y + ndy
+		for id, o := range dr.origs {
+			if ml, _ := d.Find(id); ml != nil && !ml.Locked {
+				ml.Transform.X = o[0] + ndx
+				ml.Transform.Y = o[1] + ndy
+			}
+		}
 		editor.guides = guides
 	case visualeditor.HandleRotate:
 		ang := visualeditor.AngleAt(dr.orig, px, py)
@@ -191,11 +235,15 @@ func (u *UI) edStageUp() {
 		editor.mu.Unlock()
 		return
 	}
-	moved := editor.drag.moved
+	dr := editor.drag
 	editor.drag = edDrag{}
 	editor.guides = nil
-	if moved {
+	if dr.moved {
 		editor.autosave()
+	} else if dr.pendingRemove != "" { // shift-click on a member: deselect it
+		edSelToggle(dr.pendingRemove)
+	} else if dr.collapse { // plain click on a member: collapse to it
+		editor.selID, editor.selMore = dr.id, nil
 	}
 	editor.mu.Unlock()
 	u.patchMain() // full refresh: inspector numbers + layers panel + handles
@@ -211,53 +259,104 @@ func (u *UI) edPatchStageBody() {
 
 // ── align / duplicate / keyboard ──
 
-// edAlign aligns the selected leaf's transformed bounds to the canvas.
+// edAlign aligns the selection: a single leaf against the canvas, 2+ selected
+// leaves mutually against the selection's bounding box (Photoshop-style).
 // which ∈ l|ch|r|t|cv|b (left, center-h, right, top, center-v, bottom).
 func (u *UI) edAlign(which string) {
 	u.edEdit(func() {
-		l := editor.sel()
-		if l == nil || l.IsGroup() || l.Locked {
+		type item struct {
+			l                      *visualeditor.Layer
+			minX, minY, maxX, maxY float64
+		}
+		var items []item
+		for _, id := range edSelIDs() {
+			l, _ := editor.doc.Find(id)
+			if l == nil || l.IsGroup() || l.Locked {
+				continue
+			}
+			b := edFlatBoxOf(l)
+			minX, minY, maxX, maxY := b.Bounds()
+			items = append(items, item{l, minX, minY, maxX, maxY})
+		}
+		if len(items) == 0 {
 			return
 		}
-		b := edFlatBoxOf(l)
-		minX, minY, maxX, maxY := b.Bounds()
-		w, h := float64(editor.doc.W), float64(editor.doc.H)
+		refMinX, refMinY := 0.0, 0.0
+		refMaxX, refMaxY := float64(editor.doc.W), float64(editor.doc.H)
+		if len(items) > 1 { // mutual: the selection AABB is the reference
+			refMinX, refMinY = items[0].minX, items[0].minY
+			refMaxX, refMaxY = items[0].maxX, items[0].maxY
+			for _, it := range items[1:] {
+				refMinX, refMaxX = minF(refMinX, it.minX), maxF(refMaxX, it.maxX)
+				refMinY, refMaxY = minF(refMinY, it.minY), maxF(refMaxY, it.maxY)
+			}
+		}
 		editor.snapshot(true)
-		switch which {
-		case "l":
-			l.Transform.X -= minX
-		case "ch":
-			l.Transform.X += w/2 - (minX+maxX)/2
-		case "r":
-			l.Transform.X += w - maxX
-		case "t":
-			l.Transform.Y -= minY
-		case "cv":
-			l.Transform.Y += h/2 - (minY+maxY)/2
-		case "b":
-			l.Transform.Y += h - maxY
-		default:
-			return
+		for _, it := range items {
+			switch which {
+			case "l":
+				it.l.Transform.X += refMinX - it.minX
+			case "ch":
+				it.l.Transform.X += (refMinX+refMaxX)/2 - (it.minX+it.maxX)/2
+			case "r":
+				it.l.Transform.X += refMaxX - it.maxX
+			case "t":
+				it.l.Transform.Y += refMinY - it.minY
+			case "cv":
+				it.l.Transform.Y += (refMinY+refMaxY)/2 - (it.minY+it.maxY)/2
+			case "b":
+				it.l.Transform.Y += refMaxY - it.maxY
+			default:
+				return
+			}
 		}
 		editor.autosave()
 	})
 }
 
+func minF(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxF(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (u *UI) edDuplicate() {
 	u.edEdit(func() {
-		l, parent := editor.doc.Find(editor.selID)
-		if l == nil || parent == nil {
+		ids := edSelIDs()
+		if len(ids) == 0 {
 			return
 		}
 		editor.snapshot(true)
-		cl := l.Clone()
-		cl.Name = l.Name + " copy"
-		cl.Transform.X += 16
-		cl.Transform.Y += 16
-		idx := edIndexOf(parent.Children, l.ID)
-		parent.Children = append(parent.Children[:idx+1],
-			append([]*visualeditor.Layer{cl}, parent.Children[idx+1:]...)...)
-		editor.selID = cl.ID
+		editor.selID, editor.selMore = "", nil
+		for _, id := range ids {
+			l, parent := editor.doc.Find(id)
+			if l == nil || parent == nil {
+				continue
+			}
+			cl := l.Clone()
+			cl.Name = l.Name + " copy"
+			cl.Transform.X += 16
+			cl.Transform.Y += 16
+			idx := edIndexOf(parent.Children, l.ID)
+			parent.Children = append(parent.Children[:idx+1],
+				append([]*visualeditor.Layer{cl}, parent.Children[idx+1:]...)...)
+			if editor.selID == "" { // the copies become the selection
+				editor.selID = cl.ID
+				continue
+			}
+			if editor.selMore == nil {
+				editor.selMore = map[string]bool{}
+			}
+			editor.selMore[cl.ID] = true
+		}
 		editor.autosave()
 	})
 }
@@ -291,14 +390,22 @@ func (u *UI) edKey(val string) {
 		return
 	}
 	u.edEdit(func() {
-		l := editor.sel()
-		if l == nil || l.Locked {
-			return
+		moved := false
+		for _, id := range edSelIDs() {
+			l, _ := editor.doc.Find(id)
+			if l == nil || l.Locked {
+				continue
+			}
+			if !moved {
+				editor.snapshot(false) // coalesces key repeats into one undo step
+				moved = true
+			}
+			l.Transform.X += dx
+			l.Transform.Y += dy
 		}
-		editor.snapshot(false) // coalesces key repeats into one undo step
-		l.Transform.X += dx
-		l.Transform.Y += dy
-		editor.autosave()
+		if moved {
+			editor.autosave()
+		}
 	})
 }
 

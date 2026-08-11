@@ -61,6 +61,7 @@ type edLayer struct {
 	Group   bool   `json:"group"`
 	ID      string `json:"id"`
 	Sel     bool   `json:"sel"`
+	Msel    bool   `json:"msel"`    // secondary selection (outline, no handles)
 	Handles bool   `json:"handles"` // selected unlocked leaf: resize/rotate handles
 	Blend   string `json:"blend"`   // "" = normal → no declaration
 	Opacity string `json:"opacity"` // "" = 1 → no declaration
@@ -107,6 +108,7 @@ type edRow struct {
 	Depth   int    `json:"depth"`
 	Group   bool   `json:"group"`
 	Sel     bool   `json:"sel"`
+	Msel    bool   `json:"msel"` // secondary selection
 	Visible bool   `json:"visible"`
 	Locked  bool   `json:"locked"`
 }
@@ -350,6 +352,7 @@ func (u *UI) edLayerStates(layers []*visualeditor.Layer, d *visualeditor.Documen
 func (u *UI) edLayerState(l *visualeditor.Layer, d *visualeditor.Document) edLayer {
 	st := edLayer{
 		ID: l.ID, Sel: l.ID == editor.selID, Group: l.IsGroup(),
+		Msel:  l.ID != editor.selID && editor.selMore[l.ID],
 		Paint: edPaint{Stops: []edGradStop{}}, Children: []edLayer{},
 	}
 	st.Handles = st.Sel && !st.Group && !l.Locked
@@ -459,7 +462,8 @@ func (u *UI) edLayersState() edLayersState {
 func edRowStates(layers []*visualeditor.Layer, depth int, out []edRow) []edRow {
 	for _, l := range layers {
 		out = append(out, edRow{ID: l.ID, Name: l.Name, Depth: depth, Group: l.IsGroup(),
-			Sel: l.ID == editor.selID, Visible: l.Visible, Locked: l.Locked})
+			Sel: l.ID == editor.selID, Msel: l.ID != editor.selID && editor.selMore[l.ID],
+			Visible: l.Visible, Locked: l.Locked})
 		if l.IsGroup() {
 			out = edRowStates(l.Children, depth+1, out)
 		}
@@ -719,6 +723,8 @@ func edLayerDivHTML(l edLayer) string {
 	selCls := ""
 	if l.Sel {
 		selCls = " ed-sel"
+	} else if l.Msel {
+		selCls = " ed-msel"
 	}
 	if l.Group {
 		xf := "transform:none;"
@@ -811,6 +817,8 @@ func edLayerRowHTML(r edRow) string {
 	nameCls := "ed-lr-name"
 	if r.Sel {
 		nameCls += " ed-lr-sel"
+	} else if r.Msel {
+		nameCls += " ed-lr-msel"
 	}
 	name := `<button class=` + attrQ(nameCls) + ` data-act=` + attrQ("ed-select:"+r.ID) + ` data-val=` + attrQ(r.ID) + `>` +
 		html.EscapeString(prefix) + html.EscapeString(r.Name) + `</button>`

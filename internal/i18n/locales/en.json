@@ -222,7 +222,7 @@
   "editor": {
     "align": "Align",
     "alignCenter": "center",
-    "alignHint": "Align to canvas · drag to move, handles resize/rotate · ⇧ = aspect lock / 15° / axis · arrows nudge (⇧ ×10)",
+    "alignHint": "Align to canvas · drag to move, handles resize/rotate · ⇧ = aspect lock / 15° / axis · arrows nudge (⇧ ×10) · ⇧-click = multi-select",
     "alignLeft": "left",
     "alignRight": "right",
     "angle": "Angle",

@@ -63,7 +63,7 @@
   "editor": {
     "align": "Aligner",
     "alignCenter": "centre",
-    "alignHint": "Aligner sur le canevas · glisser pour déplacer, poignées pour redimensionner/pivoter · ⇧ = ratio / 15° / axe · flèches pour décaler (⇧ ×10)",
+    "alignHint": "Aligner sur le canevas · glisser pour déplacer, poignées pour redimensionner/pivoter · ⇧ = ratio / 15° / axe · flèches pour décaler (⇧ ×10) · ⇧-clic = sélection multiple",
     "alignLeft": "gauche",
     "alignRight": "droite",
     "angle": "Angle",

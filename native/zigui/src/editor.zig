@@ -48,6 +48,7 @@ pub const Layer = struct {
     group: bool = false,
     id: []const u8 = "",
     sel: bool = false,
+    msel: bool = false, // secondary selection (outline, no handles)
     handles: bool = false, // selected unlocked leaf: resize/rotate handles
     blend: []const u8 = "", // "" = normal → no declaration
     opacity: []const u8 = "", // "" = 1 → no declaration
@@ -92,6 +93,7 @@ pub const Row = struct {
     depth: u32 = 0,
     group: bool = false,
     sel: bool = false,
+    msel: bool = false, // secondary selection
     visible: bool = false,
     locked: bool = false,
 };
@@ -310,7 +312,7 @@ fn renderLayer(h: *Html, l: Layer) Err!void {
         }
         try appendOpBlend(&sb, l);
         try h.raw("<div class=\"ed-group");
-        if (l.sel) try h.raw(" ed-sel");
+        if (l.sel) try h.raw(" ed-sel") else if (l.msel) try h.raw(" ed-msel");
         try h.raw("\" style=");
         try h.attrQ(sb.b.items);
         try h.raw(">");
@@ -337,7 +339,7 @@ fn renderLayer(h: *Html, l: Layer) Err!void {
     try appendPaint(&sb, l.paint);
 
     try h.raw("<div class=\"ed-layer");
-    if (l.sel) try h.raw(" ed-sel");
+    if (l.sel) try h.raw(" ed-sel") else if (l.msel) try h.raw(" ed-msel");
     try h.raw("\" style=");
     try h.attrQ(sb.b.items);
     try h.raw(" data-act=\"ed-select:");
@@ -445,7 +447,7 @@ fn renderLayers(h: *Html, s: Layers) !void {
 
 fn renderRow(h: *Html, r: Row) !void {
     try h.raw("<div class=ed-layer-row><button class=");
-    try h.attrQ(if (r.sel) "ed-lr-name ed-lr-sel" else "ed-lr-name");
+    try h.attrQ(if (r.sel) "ed-lr-name ed-lr-sel" else if (r.msel) "ed-lr-name ed-lr-msel" else "ed-lr-name");
     try h.raw(" data-act=\"ed-select:");
     try h.esc(r.id);
     try h.raw("\" data-val=");

@@ -63,7 +63,7 @@
   "editor": {
     "align": "Alinear",
     "alignCenter": "centro",
-    "alignHint": "Alinear al lienzo · arrastra para mover, tiradores escalan/rotan · ⇧ = proporción / 15° / eje · flechas mueven (⇧ ×10)",
+    "alignHint": "Alinear al lienzo · arrastra para mover, tiradores escalan/rotan · ⇧ = proporción / 15° / eje · flechas mueven (⇧ ×10) · ⇧-clic = selección múltiple",
     "alignLeft": "izquierda",
     "alignRight": "derecha",
     "angle": "Ángulo",

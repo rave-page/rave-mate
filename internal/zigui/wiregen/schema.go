@@ -1438,7 +1438,7 @@ var schema = []msg{
 	},
 	{
 		name: "EdLayer", goT: "edLayer", zigT: "editor.Layer",
-		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer"), b(19, "Handles", "handles")},
+		fs: []field{b(1, "Group", "group"), s(2, "ID", "id"), b(3, "Sel", "sel"), s(4, "Blend", "blend"), s(5, "Opacity", "opacity"), b(6, "Xform", "xform"), s(7, "Tx", "tx"), s(8, "Ty", "ty"), s(9, "Sx", "sx"), s(10, "Sy", "sy"), s(11, "Rot", "rot"), s(12, "Left", "left"), s(13, "Top", "top"), s(14, "W", "w"), s(15, "H", "h"), st(16, "Paint", "paint", "EdPaint"), st(17, "Inner", "inner", "EdInner"), li(18, "Children", "children", "EdLayer"), b(19, "Handles", "handles"), b(20, "Msel", "msel")},
 	},
 	{
 		name: "EdGuide", goT: "edGuideSt", zigT: "editor.Guide",
@@ -1451,7 +1451,7 @@ var schema = []msg{
 	},
 	{
 		name: "EdRow", goT: "edRow", zigT: "editor.Row",
-		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), u(3, "Depth", "depth"), b(4, "Group", "group"), b(5, "Sel", "sel"), b(6, "Visible", "visible"), b(7, "Locked", "locked")},
+		fs: []field{s(1, "ID", "id"), s(2, "Name", "name"), u(3, "Depth", "depth"), b(4, "Group", "group"), b(5, "Sel", "sel"), b(6, "Visible", "visible"), b(7, "Locked", "locked"), b(8, "Msel", "msel")},
 	},
 	{
 		name: "EdActions", goT: "edActionsState", zigT: "editor.Actions",

@@ -54,6 +54,13 @@
   outline: 2px solid var(--rp-base, #f70864);
   outline-offset: -1px;
 }
+.ed-msel {
+  outline: 2px dashed var(--rp-hot, #ff3e8a);
+  outline-offset: -1px;
+}
+.ed-lr-msel {
+  color: var(--rp-hot, #ff3e8a);
+}
 .ed-txt {
   display: block;
   width: 100%;

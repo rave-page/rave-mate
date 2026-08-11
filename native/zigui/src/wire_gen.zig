@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x2c91d2c8;
+pub const schema_hash: u32 = 0xc80903bc;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4066,6 +4066,7 @@ pub fn decodeEdLayer(r: *wire.Reader, out: *editor.Layer) wire.Error!void {
         17 => out.inner = try r.sub(editor.Inner, decodeEdInner, t),
         18 => out.children = try r.list(editor.Layer, decodeEdLayer, t),
         19 => out.handles = try r.boolean(t),
+        20 => out.msel = try r.boolean(t),
         else => try r.skip(t),
     };
 }
@@ -4100,6 +4101,7 @@ pub fn decodeEdRow(r: *wire.Reader, out: *editor.Row) wire.Error!void {
         5 => out.sel = try r.boolean(t),
         6 => out.visible = try r.boolean(t),
         7 => out.locked = try r.boolean(t),
+        8 => out.msel = try r.boolean(t),
         else => try r.skip(t),
     };
 }
