@@ -106,8 +106,10 @@ func edvFixtures() map[string]edvViewState {
 		selRow{Val: "fit", Label: "Original inside", Cur: true})
 	tall.HasBlur = true
 	tall.Blur = newSlider("Background blur", "edv-bgblur", 0, 1, 0.01, 0.35, "")
+	tall.HasZoom = true
+	tall.Zoom = newSlider("Zoom", "edv-zoomset", 1, 4, 0.05, 1.6, "")
 	tall.Frame = edvFrameSt{Show: true, AW: "1080", AH: "1920", Busy: "Extracting frame…",
-		HasCrop: true, Vert: true, CropL: "0", CropT: "34.219", CropW: "100", CropH: "31.563"}
+		HasCrop: true, CropL: "0", CropT: "34.219", CropW: "100", CropH: "31.563"}
 	tall.FrameBtn = uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"}
 	tall.KfAdd = uiBtn{Label: "+ Keyframe", Variant: "secondary", Act: "edv-kf-add"}
 	tall.KfClear = uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"}

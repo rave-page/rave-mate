@@ -373,7 +373,8 @@
         "probing": "Still probing the source - try again in a second.",
         "sourceMissing": "File not found."
       },
-      "useFrame": "Use playhead frame"
+      "useFrame": "Use playhead frame",
+      "zoomLabel": "Zoom"
     },
     "videoEmpty": "Video mode is coming right up - cut, vertical reframe & effects.",
     "w": "W",

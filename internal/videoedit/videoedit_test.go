@@ -126,3 +126,58 @@ func absDiff(a, b float64) float64 {
 	}
 	return b - a
 }
+
+func TestCropSizeZoom(t *testing.T) {
+	a916 := AspectByKey("9x16")
+	// zoom 1 == CropSize
+	cw, ch, axis := CropSizeZoom(3840, 2160, a916, 1)
+	if cw != 1214 || ch != 2160 || axis != "x" {
+		t.Fatalf("zoom1 = %d,%d,%s", cw, ch, axis)
+	}
+	// zoom 2 halves both axes (even-rounded), slack opens on y too
+	cw2, ch2, _ := CropSizeZoom(3840, 2160, a916, 2)
+	if cw2 != 606 || ch2 != 1080 {
+		t.Fatalf("zoom2 = %d,%d", cw2, ch2)
+	}
+	// orig aspect: zoom pans within the source frame
+	cwo, cho, axo := CropSizeZoom(1920, 1080, AspectByKey("orig"), 2)
+	if cwo != 960 || cho != 540 || axo != "" {
+		t.Fatalf("orig zoom2 = %d,%d,%q", cwo, cho, axo)
+	}
+	// clamped above ZoomMax
+	cw8, _, _ := CropSizeZoom(3840, 2160, a916, 8)
+	cw4, _, _ := CropSizeZoom(3840, 2160, a916, 4)
+	if cw8 != cw4 {
+		t.Fatalf("zoom clamp: %d != %d", cw8, cw4)
+	}
+}
+
+func TestCropFilterZoomBothAxes(t *testing.T) {
+	p := Project{Aspect: "9x16", Zoom: 2, Pan: 0, Pan2: 0.5} // left edge, bottom
+	p.Normalize()
+	got := p.CropFilter(3840, 2160, 0)
+	want := "crop=606:1080:0:1080"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	// keyframed: both axes animate
+	p.PanKF = []PanKey{{T: 0, X: 0, Y: -0.5}, {T: 10, X: 1, Y: 0.5}}
+	p.Normalize()
+	got = p.CropFilter(3840, 2160, 0)
+	if !strings.Contains(got, "if(lt(t,") {
+		t.Fatalf("keyframed expr missing lerp: %q", got)
+	}
+}
+
+func TestPan2At(t *testing.T) {
+	p := Project{Pan2: -0.5}
+	p.Normalize()
+	if v := p.Pan2At(3); v != 0 {
+		t.Fatalf("static Pan2At = %v", v)
+	}
+	p.PanKF = []PanKey{{T: 0, Y: -0.5}, {T: 10, Y: 0.5}}
+	p.Normalize()
+	if v := p.Pan2At(5); v != 0.5 {
+		t.Fatalf("lerped Pan2At(5) = %v, want 0.5", v)
+	}
+}

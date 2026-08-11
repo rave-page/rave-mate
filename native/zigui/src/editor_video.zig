@@ -24,7 +24,6 @@ pub const Frame = struct {
     imgUrl: []const u8 = "",
     busy: []const u8 = "",
     hasCrop: bool = false,
-    vertAxis: bool = false,
     cropL: []const u8 = "",
     cropT: []const u8 = "",
     cropW: []const u8 = "",
@@ -86,6 +85,8 @@ pub const State = struct {
     layout: c.Select = .{},
     hasBlur: bool = false,
     blur: c.Slider = .{},
+    hasZoom: bool = false,
+    zoom: c.Slider = .{},
 
     player: []const u8 = "", // RAW mp markup
     noMedia: []const u8 = "",
@@ -184,6 +185,11 @@ pub fn render(h: *Html, s: State) !void {
     try c.btnRowClose(h);
     if (s.showRef) {
         try c.selectBox(h, s.aspect);
+        if (s.hasZoom) {
+            try h.raw("<div id=edv-zoomrow>");
+            try c.slider(h, s.zoom);
+            try h.raw("</div>");
+        }
         try c.selectBox(h, s.layout);
         if (s.hasBlur) {
             try c.slider(h, s.blur);
@@ -276,7 +282,7 @@ pub fn renderFxPrev(h: *Html, s: FxPrev) !void {
 /// renderFrame mirrors Go edvFrameHTML (#edv-frame fragment).
 pub fn renderFrame(h: *Html, s: Frame) !void {
     if (!s.show) return;
-    try h.raw("<div class=edv-fbox data-actpos=edv-pan style=\"aspect-ratio:");
+    try h.raw("<div class=edv-fbox data-actpos=edv-pan data-actwheel=edv-zoom style=\"aspect-ratio:");
     try h.raw(s.aw);
     try h.raw("/");
     try h.raw(s.ah);
@@ -292,23 +298,29 @@ pub fn renderFrame(h: *Html, s: Frame) !void {
     }
     try h.raw("<div id=edv-fovl>");
     if (s.hasCrop) {
-        if (s.vertAxis) {
-            try h.raw("<div class=edv-shade style=\"left:0;right:0;top:0;height:");
-            try h.raw(s.cropT);
-            try h.raw("%\"></div><div class=edv-shade style=\"left:0;right:0;top:calc(");
-            try h.raw(s.cropT);
-            try h.raw("% + ");
-            try h.raw(s.cropH);
-            try h.raw("%);bottom:0\"></div>");
-        } else {
-            try h.raw("<div class=edv-shade style=\"top:0;bottom:0;left:0;width:");
-            try h.raw(s.cropL);
-            try h.raw("%\"></div><div class=edv-shade style=\"top:0;bottom:0;left:calc(");
-            try h.raw(s.cropL);
-            try h.raw("% + ");
-            try h.raw(s.cropW);
-            try h.raw("%);right:0\"></div>");
-        }
+        // four shades frame the window on every side (zoom slack on both axes)
+        try h.raw("<div class=edv-shade style=\"left:0;right:0;top:0;height:");
+        try h.raw(s.cropT);
+        try h.raw("%\"></div><div class=edv-shade style=\"left:0;right:0;top:calc(");
+        try h.raw(s.cropT);
+        try h.raw("% + ");
+        try h.raw(s.cropH);
+        try h.raw("%);bottom:0\"></div>");
+        try h.raw("<div class=edv-shade style=\"left:0;width:");
+        try h.raw(s.cropL);
+        try h.raw("%;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div><div class=edv-shade style=\"left:calc(");
+        try h.raw(s.cropL);
+        try h.raw("% + ");
+        try h.raw(s.cropW);
+        try h.raw("%);right:0;top:");
+        try h.raw(s.cropT);
+        try h.raw("%;height:");
+        try h.raw(s.cropH);
+        try h.raw("%\"></div>");
         try h.raw("<div class=edv-crop style=\"left:");
         try h.raw(s.cropL);
         try h.raw("%;top:");

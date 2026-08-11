@@ -214,7 +214,8 @@
         "probing": "Aún analizando la fuente: inténtalo en un segundo.",
         "sourceMissing": "Archivo no encontrado."
       },
-      "useFrame": "Usar fotograma actual"
+      "useFrame": "Usar fotograma actual",
+      "zoomLabel": "Zoom"
     },
     "videoEmpty": "El modo vídeo llega enseguida: corte, reencuadre vertical y efectos.",
     "w": "An",

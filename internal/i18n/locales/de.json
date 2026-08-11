@@ -214,7 +214,8 @@
         "probing": "Quelle wird noch analysiert – gleich erneut versuchen.",
         "sourceMissing": "Datei nicht gefunden."
       },
-      "useFrame": "Playhead-Frame verwenden"
+      "useFrame": "Playhead-Frame verwenden",
+      "zoomLabel": "Zoom"
     },
     "videoEmpty": "Videomodus kommt gleich – Schnitt, Hochformat-Reframing & Effekte.",
     "w": "B",

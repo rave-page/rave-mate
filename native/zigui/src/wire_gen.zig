@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x71dc14b4;
+pub const schema_hash: u32 = 0x2c91d2c8;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4229,7 +4229,6 @@ pub fn decodeEdvFrame(r: *wire.Reader, out: *editor_video.Frame) wire.Error!void
         4 => out.imgUrl = try r.str(t),
         5 => out.busy = try r.str(t),
         6 => out.hasCrop = try r.boolean(t),
-        7 => out.vertAxis = try r.boolean(t),
         8 => out.cropL = try r.str(t),
         9 => out.cropT = try r.str(t),
         10 => out.cropW = try r.str(t),
@@ -4327,6 +4326,8 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         36 => out.layout = try r.sub(c.Select, decodeSelState, t),
         37 => out.hasBlur = try r.boolean(t),
         38 => out.blur = try r.sub(c.Slider, decodeUiSlider, t),
+        39 => out.hasZoom = try r.boolean(t),
+        40 => out.zoom = try r.sub(c.Slider, decodeUiSlider, t),
         else => try r.skip(t),
     };
 }

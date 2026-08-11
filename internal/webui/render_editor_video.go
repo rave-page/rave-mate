@@ -33,11 +33,10 @@ type edvFrameSt struct {
 	Show    bool   `json:"show"` // video source + probed dims
 	AW      string `json:"aw"`   // source aspect
 	AH      string `json:"ah"`
-	ImgURL  string `json:"imgUrl"`   // "" = extracting placeholder
-	Busy    string `json:"busy"`     // placeholder text when no image yet
-	HasCrop bool   `json:"hasCrop"`  // aspect != orig: shades + window
-	Vert    bool   `json:"vertAxis"` // free axis is y (shades top/bottom)
-	// crop window + shades in % of the frame box
+	ImgURL  string `json:"imgUrl"`  // "" = extracting placeholder
+	Busy    string `json:"busy"`    // placeholder text when no image yet
+	HasCrop bool   `json:"hasCrop"` // pan/zoom slack exists: shades + window
+	// crop window + shades in % of the frame box (4 shades frame every side)
 	CropL string `json:"cropL"`
 	CropT string `json:"cropT"`
 	CropW string `json:"cropW"`
@@ -114,6 +113,8 @@ type edvViewState struct {
 	SecReframe string     `json:"secReframe"`
 	ShowRef    bool       `json:"showRef"` // video source only
 	Aspect     selState   `json:"aspect"`
+	HasZoom    bool       `json:"hasZoom"`
+	Zoom       uiSlider   `json:"zoom"` // crop zoom 1..4 (#edv-zoomrow)
 	Frame      edvFrameSt `json:"frame"`
 	FrameBtn   uiBtn      `json:"frameBtn"`
 	KfAdd      uiBtn      `json:"kfAdd"`
@@ -215,6 +216,12 @@ func (u *UI) editorVideoState() edvViewState {
 			aspOpts = append(aspOpts, [2]string{a.Key, i18n.T("editor.video.aspect." + a.Key)})
 		}
 		st.Aspect = resolveSelectBox(i18n.T("editor.video.aspectLabel"), "edv-aspect", aspOpts, proj.Aspect)
+		st.HasZoom = true
+		zoom := proj.Zoom
+		if zoom < 1 {
+			zoom = 1
+		}
+		st.Zoom = newSlider(i18n.T("editor.video.zoomLabel"), "edv-zoomset", 1, 4, 0.05, zoom, "")
 		st.Layout = resolveSelectBox(i18n.T("editor.video.layoutLabel"), "edv-layout", [][2]string{
 			{"crop", i18n.T("editor.video.layout.crop")},
 			{"fit", i18n.T("editor.video.layout.fit")},
@@ -334,8 +341,8 @@ func (u *UI) edvFxPrevState() edvFxPrevSt {
 	if srcW <= 0 || srcH <= 0 {
 		return st
 	}
-	cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect))
-	if axis == "" {
+	cw, ch, _ := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom)
+	if cw == 0 {
 		cw, ch = srcW, srcH
 	}
 	st.AW, st.AH = strconv.Itoa(cw), strconv.Itoa(ch)
@@ -360,7 +367,7 @@ func (u *UI) edvFrameState() edvFrameSt {
 	v := &editor.video
 	proj := v.proj
 	framePath, frameBusy := v.framePath, v.frameBusy
-	panDrag, panLive := v.panDrag, v.panLive
+	panDrag, panLive, panLive2 := v.panDrag, v.panLive, v.panLive2
 	editor.mu.Unlock()
 
 	st := edvFrameSt{}
@@ -378,27 +385,26 @@ func (u *UI) edvFrameState() edvFrameSt {
 	}
 
 	a := videoedit.AspectByKey(proj.Aspect)
-	cw, ch, axis := videoedit.CropSize(srcW, srcH, a)
-	if axis == "" {
+	cw, ch, axis := videoedit.CropSizeZoom(srcW, srcH, a, proj.Zoom)
+	if cw == 0 || (srcW-cw < 2 && srcH-ch < 2) {
 		return st
 	}
-	pos := proj.Pan
-	if len(proj.PanKF) > 0 {
-		pos = proj.PanKF[0].X // static preview: first key (drag shows live)
+	pos, pos2 := clamp01(proj.Pan), clamp01(0.5+proj.Pan2)
+	if len(proj.PanKF) > 0 { // static preview: first key (drag shows live)
+		pos, pos2 = proj.PanKF[0].X, clamp01(0.5+proj.PanKF[0].Y)
 	}
 	if panDrag {
-		pos = panLive
+		pos, pos2 = panLive, panLive2
+	}
+	posX, posY := pos, pos2
+	if axis == "y" {
+		posX, posY = pos2, pos
 	}
 	st.HasCrop = true
-	st.Vert = axis == "y"
 	wPct := float64(cw) / float64(srcW) * 100
 	hPct := float64(ch) / float64(srcH) * 100
-	var lPct, tPct float64
-	if axis == "x" {
-		lPct = float64(srcW-cw) / float64(srcW) * 100 * pos
-	} else {
-		tPct = float64(srcH-ch) / float64(srcH) * 100 * pos
-	}
+	lPct := float64(srcW-cw) / float64(srcW) * 100 * posX
+	tPct := float64(srcH-ch) / float64(srcH) * 100 * posY
 	st.CropL, st.CropT = trimPct(lPct), trimPct(tPct)
 	st.CropW, st.CropH = trimPct(wPct), trimPct(hPct)
 	return st
@@ -450,7 +456,7 @@ func (u *UI) edvExportState() edvExportSt {
 			parts = append(parts, i18n.T("editor.video.cutFrom", i18n.A{"in": edvFmtTime(in)}))
 		}
 	}
-	if cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect)); axis != "" {
+	if cw, ch, _ := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom); cw > 0 && (cw < srcW || ch < srcH) {
 		parts = append(parts, fmt.Sprintf("crop %d×%d", cw, ch))
 	}
 	st.TrimInfo = strings.Join(parts, " · ")
@@ -530,6 +536,9 @@ func editorVideoHTML(st edvViewState) string {
 	b.WriteString(btnRow(st.SrcBtn.html()))
 	if st.ShowRef {
 		b.WriteString(selHTML(st.Aspect))
+		if st.HasZoom {
+			b.WriteString(`<div id=edv-zoomrow>` + st.Zoom.html() + `</div>`)
+		}
 		b.WriteString(selHTML(st.Layout))
 		if st.HasBlur {
 			b.WriteString(st.Blur.html())
@@ -614,7 +623,7 @@ func edvFrameHTML(st edvFrameSt) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`<div class=edv-fbox data-actpos=edv-pan style="aspect-ratio:` + st.AW + `/` + st.AH + `">`)
+	b.WriteString(`<div class=edv-fbox data-actpos=edv-pan data-actwheel=edv-zoom style="aspect-ratio:` + st.AW + `/` + st.AH + `">`)
 	if st.ImgURL != "" {
 		b.WriteString(`<img class=edv-fimg src=` + attrQ(st.ImgURL) + ` alt="">`)
 	} else {
@@ -626,18 +635,16 @@ func edvFrameHTML(st edvFrameSt) string {
 }
 
 // edvFrameOvlHTML renders the shades + crop rect (the #edv-fovl fragment).
+// Four shades frame the window on every side - with zoom both axes have slack.
 func edvFrameOvlHTML(st edvFrameSt) string {
 	if !st.HasCrop {
 		return ""
 	}
 	var b strings.Builder
-	if st.Vert {
-		b.WriteString(`<div class=edv-shade style="left:0;right:0;top:0;height:` + st.CropT + `%"></div>`)
-		b.WriteString(`<div class=edv-shade style="left:0;right:0;top:calc(` + st.CropT + `% + ` + st.CropH + `%);bottom:0"></div>`)
-	} else {
-		b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:0;width:` + st.CropL + `%"></div>`)
-		b.WriteString(`<div class=edv-shade style="top:0;bottom:0;left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0"></div>`)
-	}
+	b.WriteString(`<div class=edv-shade style="left:0;right:0;top:0;height:` + st.CropT + `%"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:0;right:0;top:calc(` + st.CropT + `% + ` + st.CropH + `%);bottom:0"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:0;width:` + st.CropL + `%;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
+	b.WriteString(`<div class=edv-shade style="left:calc(` + st.CropL + `% + ` + st.CropW + `%);right:0;top:` + st.CropT + `%;height:` + st.CropH + `%"></div>`)
 	b.WriteString(`<div class=edv-crop style="left:` + st.CropL + `%;top:` + st.CropT + `%;width:` + st.CropW + `%;height:` + st.CropH + `%"></div>`)
 	return b.String()
 }

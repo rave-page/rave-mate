@@ -34,8 +34,9 @@ type edvSt struct {
 	frameBusy bool
 	frameGen  int // drops stale async extract results
 
-	panDrag bool
-	panLive float64 // live window position while dragging
+	panDrag  bool
+	panLive  float64 // live free-axis window position while dragging
+	panLive2 float64 // live cross-axis position (0..1; 0.5 = centered)
 
 	rebound bool // one-shot: mp re-bind of the persisted source after restart
 
@@ -94,6 +95,32 @@ func init() {
 			return
 		}
 		u.edvMut(func(v *edvSt) { v.proj.BGBlur = clamp01(f) })
+	})
+	onExact("edv-zoomset", func(u *UI, m actMsg) { // inspector slider (self-labeled)
+		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
+		if err != nil {
+			return
+		}
+		u.edvSetZoom(f, false)
+	})
+	onExact("edv-zoom", func(u *UI, m actMsg) { // wheel over the preview frame
+		dir, _, ok := strings.Cut(m.Val, ":")
+		if !ok {
+			return
+		}
+		editor.mu.Lock()
+		edvEnsure()
+		z := editor.video.proj.Zoom
+		editor.mu.Unlock()
+		if z <= 0 {
+			z = 1
+		}
+		if dir == "in" {
+			z *= 1.15
+		} else {
+			z /= 1.15
+		}
+		u.edvSetZoom(z, true)
 	})
 	onExact("edv-pan", func(u *UI, m actMsg) { u.edvPan(m.Val) })
 	onExact("edv-frame", func(u *UI, m actMsg) { u.edvFrameAtPlayhead() })
@@ -379,24 +406,32 @@ func (u *UI) edvPan(val string) {
 	edvEnsure()
 	v := &editor.video
 	a := videoedit.AspectByKey(v.proj.Aspect)
-	cw, ch, axis := videoedit.CropSize(srcW, srcH, a)
-	if axis == "" {
+	cw, ch, axis := videoedit.CropSizeZoom(srcW, srcH, a, v.proj.Zoom)
+	if cw == 0 || (srcW-cw < 2 && srcH-ch < 2) {
 		editor.mu.Unlock()
 		return
 	}
-	// pointer position → window CENTER → normalized free-axis position
-	var pos float64
-	if axis == "x" {
-		half := float64(cw) / float64(srcW) / 2
-		pos = (fx - half) / (1 - 2*half)
-	} else {
-		half := float64(ch) / float64(srcH) / 2
-		pos = (fy - half) / (1 - 2*half)
+	// pointer position → window CENTER → normalized per-axis position (an axis
+	// without slack pins to center)
+	posOf := func(f float64, c, s int) float64 {
+		if s-c <= 0 {
+			return 0.5
+		}
+		half := float64(c) / float64(s) / 2
+		return clamp01((f - half) / (1 - 2*half))
 	}
-	pos = clamp01(pos)
+	posX, posY := posOf(fx, cw, srcW), posOf(fy, ch, srcH)
+	prim := axis
+	if prim == "" {
+		prim = "x"
+	}
+	pos, pos2 := posX, posY
+	if prim == "y" {
+		pos, pos2 = posY, posX
+	}
 	switch phase {
 	case "down", "move":
-		v.panDrag, v.panLive = true, pos
+		v.panDrag, v.panLive, v.panLive2 = true, pos, pos2
 		editor.mu.Unlock()
 		u.edvPatchFrame()
 	case "up":
@@ -406,9 +441,9 @@ func (u *UI) edvPan(val string) {
 		}
 		v.panDrag = false
 		if len(v.proj.PanKF) == 0 {
-			v.proj.Pan = pos
+			v.proj.Pan, v.proj.Pan2 = pos, pos2-0.5
 		} else {
-			edvKfUpsert(&v.proj, v.frameT, pos)
+			edvKfUpsert(&v.proj, v.frameT, pos, pos2-0.5)
 		}
 		edvSave()
 		editor.mu.Unlock()
@@ -419,14 +454,15 @@ func (u *UI) edvPan(val string) {
 }
 
 // edvKfUpsert replaces a keyframe within 0.25s of t, else inserts one.
-func edvKfUpsert(p *videoedit.Project, t, x float64) {
+// y is the cross-axis center offset (-0.5..0.5).
+func edvKfUpsert(p *videoedit.Project, t, x, y float64) {
 	for i := range p.PanKF {
 		if absF(p.PanKF[i].T-t) < 0.25 {
-			p.PanKF[i].X = x
+			p.PanKF[i].X, p.PanKF[i].Y = x, y
 			return
 		}
 	}
-	p.PanKF = append(p.PanKF, videoedit.PanKey{T: t, X: x})
+	p.PanKF = append(p.PanKF, videoedit.PanKey{T: t, X: x, Y: y})
 	p.Normalize()
 }
 
@@ -437,17 +473,41 @@ func (u *UI) edvPatchFrame() {
 	u.eval("window.__patch('edv-fovl'," + jsQuote(edvFrameOvlHTML(st)) + ")")
 }
 
+// edvSetZoom clamps + persists the crop zoom. fromWheel patches the overlay +
+// the inspector slider row; the slider's own events patch only the overlay
+// (replacing the input mid-drag would break the slider).
+func (u *UI) edvSetZoom(z float64, fromWheel bool) {
+	u.edvMut(func(v *edvSt) {
+		v.proj.Zoom = z
+		v.proj.Normalize()
+	})
+	u.edvPatchFrame()
+	if fromWheel {
+		u.edvPatchZoomRow()
+	}
+}
+
+// edvPatchZoomRow refreshes the inspector zoom slider (wheel path).
+func (u *UI) edvPatchZoomRow() {
+	editor.mu.Lock()
+	edvEnsure()
+	z := editor.video.proj.Zoom
+	editor.mu.Unlock()
+	sl := newSlider(i18n.T("editor.video.zoomLabel"), "edv-zoomset", 1, 4, 0.05, z, "")
+	u.eval("window.__patch('edv-zoomrow'," + jsQuote(sl.html()) + ")")
+}
+
 // ── keyframes ──
 
 func (u *UI) edvKfAdd() {
 	t := u.edvPlayhead()
 	u.edvFrame(t)
 	u.edvMut(func(v *edvSt) {
-		pos := v.proj.Pan
-		if len(v.proj.PanKF) > 0 {
-			pos = v.panLive
+		pos, pos2 := v.proj.PanAt(t), v.proj.Pan2At(t)
+		if v.panDrag {
+			pos, pos2 = v.panLive, v.panLive2
 		}
-		edvKfUpsert(&v.proj, t, pos)
+		edvKfUpsert(&v.proj, t, pos, pos2-0.5)
 	})
 	u.patchMain()
 }
@@ -669,20 +729,21 @@ func (u *UI) edvFxPrevRender() {
 		return
 	}
 	fx := edvResolveFx(proj.Effects, plugins)
-	cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect))
-	fit := proj.Layout == "fit" && axis != ""
+	cw, ch, axis := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom)
+	hasCrop := cw > 0 && (cw < srcW || ch < srcH)
+	fit := proj.Layout == "fit" && hasCrop
 	if len(fx) == 0 && !fit {
 		return
 	}
 	vf := ""
-	if axis != "" {
-		pos := proj.PanAt(frameT)
-		x, y := 0, 0
-		if axis == "x" {
-			x = int(float64(srcW-cw)*pos + 0.5)
-		} else {
-			y = int(float64(srcH-ch)*pos + 0.5)
+	if hasCrop {
+		pos, pos2 := proj.PanAt(frameT), proj.Pan2At(frameT)
+		posX, posY := pos, pos2
+		if axis == "y" {
+			posX, posY = pos2, pos
 		}
+		x := int(float64(srcW-cw)*posX + 0.5)
+		y := int(float64(srcH-ch)*posY + 0.5)
 		vf = fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, x, y)
 	} else {
 		cw, ch = srcW, srcH
@@ -798,7 +859,7 @@ func (u *UI) edvExport() {
 		out = edvOutDefault(src, ep.Key)
 	}
 	fx := edvResolveFx(v.proj.Effects, v.fxPlugins)
-	aspect, layout, bgBlur := v.proj.Aspect, v.proj.Layout, v.proj.BGBlur
+	aspect, layout, bgBlur, zoom := v.proj.Aspect, v.proj.Layout, v.proj.BGBlur, v.proj.Zoom
 	v.export = edvExport{running: true, stage: "prepare"}
 	editor.mu.Unlock()
 
@@ -807,12 +868,13 @@ func (u *UI) edvExport() {
 		"trimStart": trimS, "trimEnd": trimE, "vf": crop,
 	}
 	typ, method := "transcode", "transcode.run"
-	_, _, cropAxis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(aspect))
-	fit := layout == "fit" && cropAxis != "" // fit needs a real reframe to fill
+	cwz, chz, _ := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(aspect), zoom)
+	hasCrop := cwz > 0 && (cwz < srcW || chz < srcH)
+	fit := layout == "fit" && hasCrop // fit needs a real reframe to fill
 	if (len(fx) > 0 || fit) && edvIsVideo(src) {
 		// route through the effects pipeline: chain runs at the export target size
-		cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(aspect))
-		if axis == "" {
+		cw, ch := cwz, chz
+		if cw == 0 {
 			cw, ch = srcW&^1, srcH&^1
 		}
 		tw, th := preset.Width, preset.Height

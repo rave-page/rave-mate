@@ -44,10 +44,19 @@ func AspectByKey(key string) Aspect {
 
 // PanKey is one crop-window keyframe: T = source-media seconds, X = normalized
 // window position along the free axis (0 = left/top edge, 1 = right/bottom).
+// Y is the cross-axis offset from center (-0.5..0.5, 0 = centered) - only
+// meaningful when Zoom > 1 opens slack on the second axis.
 type PanKey struct {
 	T float64 `json:"t"`
 	X float64 `json:"x"`
+	Y float64 `json:"y,omitempty"`
 }
+
+// Zoom bounds: 1 = the maximal aspect window, 4 = tightest punch-in.
+const (
+	ZoomMin = 1.0
+	ZoomMax = 4.0
+)
 
 // EffectInst is one entry of the effect chain (hosted by the vfx worker).
 type EffectInst struct {
@@ -65,6 +74,8 @@ type Project struct {
 	Layout    string       `json:"layout,omitempty"` // crop = zoom-fill (default); fit = original inside + styled background fill
 	BGBlur    float64      `json:"bgBlur"`           // fit layout: background gaussian blur 0..1 (0 = sharp)
 	Pan       float64      `json:"pan"`              // static window position (used without keyframes)
+	Pan2      float64      `json:"pan2,omitempty"`   // static cross-axis offset from center, -0.5..0.5 (zoomed)
+	Zoom      float64      `json:"zoom,omitempty"`   // crop zoom ≥1 (0/absent = 1 = maximal window)
 	PanKF     []PanKey     `json:"panKf,omitempty"`
 	Effects   []EffectInst `json:"effects,omitempty"`
 	PresetKey string       `json:"presetKey,omitempty"` // ExportPresets key
@@ -84,11 +95,19 @@ func (p *Project) Normalize() {
 	if p.Pan < 0 || p.Pan > 1 {
 		p.Pan = 0.5
 	}
+	p.Pan2 = clampOff(p.Pan2)
+	if p.Zoom < ZoomMin { // also folds absent (0) to 1
+		p.Zoom = ZoomMin
+	}
+	if p.Zoom > ZoomMax {
+		p.Zoom = ZoomMax
+	}
 	if p.PresetKey == "" {
 		p.PresetKey = "reel"
 	}
 	for i := range p.PanKF {
 		p.PanKF[i].X = clamp01(p.PanKF[i].X)
+		p.PanKF[i].Y = clampOff(p.PanKF[i].Y)
 		if p.PanKF[i].T < 0 {
 			p.PanKF[i].T = 0
 		}
@@ -136,6 +155,42 @@ func CropSize(srcW, srcH int, a Aspect) (cw, ch int, freeAxis string) {
 	return cw, ch, freeAxis
 }
 
+// CropSizeZoom is CropSize shrunk by zoom (≥1) on both axes - zoom > 1 opens
+// pan slack on the second axis too. Unlike CropSize it also handles the
+// "orig"/matching-aspect case (zoom pans within the source aspect); freeAxis
+// stays the aspect-mismatch axis ("" when none).
+func CropSizeZoom(srcW, srcH int, a Aspect, zoom float64) (cw, ch int, freeAxis string) {
+	if zoom < ZoomMin {
+		zoom = ZoomMin
+	}
+	if zoom > ZoomMax {
+		zoom = ZoomMax
+	}
+	var bw, bh int
+	var axis string
+	if a.W > 0 && a.H > 0 {
+		bw, bh, axis = CropSize(srcW, srcH, a)
+		if bw == 0 {
+			return 0, 0, ""
+		}
+	} else {
+		if srcW < 2 || srcH < 2 {
+			return 0, 0, ""
+		}
+		bw, bh = srcW-srcW%2, srcH-srcH%2
+	}
+	if zoom > 1 {
+		bw = int(float64(bw) / zoom)
+		bh = int(float64(bh) / zoom)
+		bw -= bw % 2
+		bh -= bh % 2
+		if bw < 2 || bh < 2 {
+			return 0, 0, ""
+		}
+	}
+	return bw, bh, axis
+}
+
 // PanAt evaluates the window position at source time t: static pan without
 // keyframes, clamped piecewise-linear between them (numeric twin of panExpr).
 func (p Project) PanAt(t float64) float64 {
@@ -157,6 +212,23 @@ func (p Project) PanAt(t float64) float64 {
 		}
 	}
 	return clamp01(keys[len(keys)-1].X)
+}
+
+// crossKeys maps keyframes onto the cross axis (position = 0.5 + Y offset).
+func crossKeys(keys []PanKey) []PanKey {
+	out := make([]PanKey, len(keys))
+	for i, k := range keys {
+		out[i] = PanKey{T: k.T, X: clamp01(0.5 + k.Y)}
+	}
+	return out
+}
+
+// Pan2At evaluates the cross-axis window position (0..1, 0.5 = centered) at t.
+func (p Project) Pan2At(t float64) float64 {
+	if len(p.PanKF) == 0 {
+		return clamp01(0.5 + p.Pan2)
+	}
+	return Project{Pan: clamp01(0.5 + p.Pan2), PanKF: crossKeys(p.PanKF)}.PanAt(t)
 }
 
 // panExpr builds the crop-offset ffmpeg expression along the free axis.
@@ -189,22 +261,39 @@ func panExpr(maxOff float64, static float64, keys []PanKey) string {
 // before -i resets t to 0). "" = no reframe needed/possible.
 func (p Project) CropFilter(srcW, srcH int, trimStart float64) string {
 	a := AspectByKey(p.Aspect)
-	cw, ch, axis := CropSize(srcW, srcH, a)
-	if cw == 0 || axis == "" {
-		if cw != 0 && (cw != srcW || ch != srcH) { // odd-dim trim only
+	cw, ch, axis := CropSizeZoom(srcW, srcH, a, p.Zoom)
+	if cw == 0 {
+		return ""
+	}
+	slackX, slackY := srcW-cw, srcH-ch
+	if slackX <= 0 && slackY <= 0 {
+		if cw != srcW || ch != srcH { // odd-dim trim only
 			return fmt.Sprintf("crop=%d:%d:0:0", cw, ch)
 		}
 		return ""
 	}
 	keys := make([]PanKey, 0, len(p.PanKF))
 	for _, k := range p.PanKF {
-		keys = append(keys, PanKey{T: math.Max(k.T-trimStart, 0), X: k.X})
+		keys = append(keys, PanKey{T: math.Max(k.T-trimStart, 0), X: k.X, Y: k.Y})
 	}
-	x, y := "0", "0"
-	if axis == "x" {
-		x = panExpr(float64(srcW-cw), p.Pan, keys)
+	// primary axis follows Pan/X keys; the cross axis (zoom slack) Pan2/Y keys
+	prim := axis
+	if prim == "" {
+		prim = "x"
+	}
+	axisExpr := func(slack float64, static float64, ks []PanKey) string {
+		if slack <= 0 {
+			return "0"
+		}
+		return panExpr(slack, static, ks)
+	}
+	var x, y string
+	if prim == "x" {
+		x = axisExpr(float64(slackX), p.Pan, keys)
+		y = axisExpr(float64(slackY), clamp01(0.5+p.Pan2), crossKeys(keys))
 	} else {
-		y = panExpr(float64(srcH-ch), p.Pan, keys)
+		y = axisExpr(float64(slackY), p.Pan, keys)
+		x = axisExpr(float64(slackX), clamp01(0.5+p.Pan2), crossKeys(keys))
 	}
 	return fmt.Sprintf("crop=%d:%d:%s:%s", cw, ch, quoteExpr(x), quoteExpr(y))
 }
@@ -268,6 +357,17 @@ func clamp01(f float64) float64 {
 	}
 	if f > 1 {
 		return 1
+	}
+	return f
+}
+
+// clampOff clamps a cross-axis center offset to [-0.5, 0.5].
+func clampOff(f float64) float64 {
+	if f < -0.5 {
+		return -0.5
+	}
+	if f > 0.5 {
+		return 0.5
 	}
 	return f
 }

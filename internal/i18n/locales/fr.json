@@ -214,7 +214,8 @@
         "probing": "Analyse de la source en cours – réessayez dans une seconde.",
         "sourceMissing": "Fichier introuvable."
       },
-      "useFrame": "Utiliser l'image du curseur"
+      "useFrame": "Utiliser l'image du curseur",
+      "zoomLabel": "Zoom"
     },
     "videoEmpty": "Le mode vidéo arrive : découpe, recadrage vertical et effets.",
     "w": "L",
