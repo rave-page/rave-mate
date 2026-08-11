@@ -1495,9 +1495,21 @@ var schema = []msg{
 		fs: []field{st(1, "Preset", "preset", "SelState"), st(2, "Out", "out", "UiField"), st(3, "OutBrowse", "outBrowse", "UiBtn"), st(4, "Export", `@"export"`, "UiBtn"), b(5, "Running", "running"), s(6, "Pct", "pct"), s(7, "Stage", "stage"), st(8, "Cancel", "cancel", "UiBtn"), b(9, "HasResult", "hasResult"), s(10, "Result", "result"), b(11, "HasErr", "hasErr"), s(12, "Err", "err"), s(13, "TrimInfo", "trimInfo")},
 	},
 	{
+		name: "EdvFxParam", goT: "edvFxParam", zigT: "editor_video.FxParam",
+		fs: []field{b(1, "IsBool", "isBool"), st(2, "Slider", "slider", "UiSlider"), st(3, "Toggle", "toggle", "UiToggle")},
+	},
+	{
+		name: "EdvFxRow", goT: "edvFxRow", zigT: "editor_video.FxRow",
+		fs: []field{s(1, "Name", "name"), b(2, "Missing", "missing"), s(3, "MissLb", "missLb"), b(4, "Off", "off"), li(5, "Btns", "btns", "UiBtn"), li(6, "Params", "params", "EdvFxParam")},
+	},
+	{
+		name: "EdvFxPrev", goT: "edvFxPrevSt", zigT: "editor_video.FxPrev",
+		fs: []field{b(1, "Show", "show"), s(2, "ImgURL", "imgUrl"), s(3, "Busy", "busy"), s(4, "AW", "aw"), s(5, "AH", "ah")},
+	},
+	{
 		name: "EdvView", goT: "edvViewState", zigT: "editor_video.State", id: 114,
 		doc: "Editor tab video mode (full view)",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Modes", "modes", "EdModeTab"), s(4, "SecSource", "secSource"), st(5, "Browse", "browse", "UiBtn"), st(6, "Caps", "caps", "SelState"), b(7, "HasSrc", "hasSrc"), s(8, "SrcName", "srcName"), s(9, "SrcInfo", "srcInfo"), s(10, "NoSrc", "noSrc"), s(11, "Player", "player"), s(12, "NoMedia", "noMedia"), s(13, "EditHint", "editHint"), s(14, "SecReframe", "secReframe"), b(15, "ShowRef", "showRef"), st(16, "Aspect", "aspect", "SelState"), st(17, "Frame", "frame", "EdvFrame"), st(18, "FrameBtn", "frameBtn", "UiBtn"), st(19, "KfAdd", "kfAdd", "UiBtn"), st(20, "KfClear", "kfClear", "UiBtn"), b(21, "HasKfs", "hasKfs"), li(22, "Kfs", "kfs", "EdvKfRow"), s(23, "RefHint", "refHint"), s(24, "SecExport", "secExport"), st(25, "Export", `@"export"`, "EdvExport")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Modes", "modes", "EdModeTab"), s(4, "SecSource", "secSource"), st(5, "Browse", "browse", "UiBtn"), st(6, "Caps", "caps", "SelState"), b(7, "HasSrc", "hasSrc"), s(8, "SrcName", "srcName"), s(9, "SrcInfo", "srcInfo"), s(10, "NoSrc", "noSrc"), s(11, "Player", "player"), s(12, "NoMedia", "noMedia"), s(13, "EditHint", "editHint"), s(14, "SecReframe", "secReframe"), b(15, "ShowRef", "showRef"), st(16, "Aspect", "aspect", "SelState"), st(17, "Frame", "frame", "EdvFrame"), st(18, "FrameBtn", "frameBtn", "UiBtn"), st(19, "KfAdd", "kfAdd", "UiBtn"), st(20, "KfClear", "kfClear", "UiBtn"), b(21, "HasKfs", "hasKfs"), li(22, "Kfs", "kfs", "EdvKfRow"), s(23, "RefHint", "refHint"), s(24, "SecExport", "secExport"), st(25, "Export", `@"export"`, "EdvExport"), s(26, "SecFx", "secFx"), b(27, "ShowFx", "showFx"), st(28, "FxAdd", "fxAdd", "SelState"), s(29, "FxNone", "fxNone"), li(30, "FxRows", "fxRows", "EdvFxRow"), st(31, "FxPrev", "fxPrev", "EdvFxPrev"), st(32, "FxPrevBtn", "fxPrevBtn", "UiBtn"), s(33, "FxHint", "fxHint")},
 	},
 	{
 		name: "CeTbDrop", goT: "ceTbDropSt", zigT: "cueedit.TbDrop",

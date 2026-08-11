@@ -99,3 +99,30 @@ func TestExportPreset(t *testing.T) {
 		t.Fatal("fallback must be reel")
 	}
 }
+
+func TestPanAt(t *testing.T) {
+	static := Project{Pan: 0.3}
+	if got := static.PanAt(5); got != 0.3 {
+		t.Errorf("static PanAt = %v", got)
+	}
+	p := Project{PanKF: []PanKey{{T: 10, X: 0.2}, {T: 20, X: 0.8}}}
+	cases := []struct{ t, want float64 }{
+		{0, 0.2}, {10, 0.2}, {15, 0.5}, {20, 0.8}, {99, 0.8},
+	}
+	for _, c := range cases {
+		if got := p.PanAt(c.t); absDiff(got, c.want) > 1e-9 {
+			t.Errorf("PanAt(%v) = %v, want %v", c.t, got, c.want)
+		}
+	}
+	dup := Project{PanKF: []PanKey{{T: 5, X: 0.1}, {T: 5, X: 0.9}}}
+	if got := dup.PanAt(5); got != 0.9 {
+		t.Errorf("dup-time PanAt = %v, want 0.9", got)
+	}
+}
+
+func absDiff(a, b float64) float64 {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}

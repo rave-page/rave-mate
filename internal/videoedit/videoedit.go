@@ -130,6 +130,29 @@ func CropSize(srcW, srcH int, a Aspect) (cw, ch int, freeAxis string) {
 	return cw, ch, freeAxis
 }
 
+// PanAt evaluates the window position at source time t: static pan without
+// keyframes, clamped piecewise-linear between them (numeric twin of panExpr).
+func (p Project) PanAt(t float64) float64 {
+	keys := p.PanKF
+	if len(keys) == 0 {
+		return clamp01(p.Pan)
+	}
+	if t < keys[0].T {
+		return clamp01(keys[0].X)
+	}
+	for i := 0; i+1 < len(keys); i++ {
+		a, b := keys[i], keys[i+1]
+		if t < b.T {
+			if b.T <= a.T {
+				return clamp01(b.X)
+			}
+			f := (t - a.T) / (b.T - a.T)
+			return clamp01(a.X + (b.X-a.X)*f)
+		}
+	}
+	return clamp01(keys[len(keys)-1].X)
+}
+
 // panExpr builds the crop-offset ffmpeg expression along the free axis.
 // maxOff is the pan range in px; keys are output-timebase (t already shifted by
 // the trim start). Static pan (0/1 keys) yields a plain number.

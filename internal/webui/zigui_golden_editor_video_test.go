@@ -66,6 +66,31 @@ func edvFixtures() map[string]edvViewState {
 	}
 	full.Export = export()
 	full.Export.TrimInfo = "cut 1:20.0–4:56.0 · crop 606×1080"
+	full.ShowFx = true
+	full.SecFx = "Effects"
+	full.FxAdd = edSel("edv-fx-add", "Add effect…", "",
+		selRow{Val: "0", Label: "Glow"}, selRow{Val: "1", Label: "Vignette"})
+	full.FxRows = []edvFxRow{
+		{Name: "Glow", Btns: []uiBtn{
+			{Label: "⏻", Variant: "secondary", Act: "edv-fx-tog:0"},
+			{Label: "↑", Variant: "ghost", Act: "edv-fx-up:0"},
+			{Label: "↓", Variant: "ghost", Act: "edv-fx-dn:0"},
+			{Label: "✕", Variant: "warn", Act: "edv-fx-del:0"},
+		}, Params: []edvFxParam{
+			{Slider: newSlider("blur", "edv-fx-p:0:blur", 0, 1, 0.01, 0.5, "")},
+			{IsBool: true, Toggle: newToggle("invert", "edv-fx-p:0:invert", true)},
+		}},
+		{Name: "old_glow.dll", Missing: true, MissLb: "missing", Off: true, Btns: []uiBtn{
+			{Label: "⏻", Variant: "ghost", Act: "edv-fx-tog:1"},
+			{Label: "↑", Variant: "ghost", Act: "edv-fx-up:1"},
+			{Label: "↓", Variant: "ghost", Act: "edv-fx-dn:1"},
+			{Label: "✕", Variant: "warn", Act: "edv-fx-del:1"},
+		}, Params: []edvFxParam{}},
+	}
+	full.FxPrev = edvFxPrevSt{Show: true, ImgURL: "http://127.0.0.1:47621/img/s2/tok",
+		AW: "606", AH: "1080"}
+	full.FxPrevBtn = uiBtn{Label: "Preview effects on frame", Variant: "outline", Act: "edv-fx-prev"}
+	full.FxHint = "frei0r plugins from C:\\cfg\\vfx\\frei0r."
 
 	// vertical free axis (tall source → wide target) + busy frame + running export
 	tall := emptyEdvState()
@@ -82,6 +107,13 @@ func edvFixtures() map[string]edvViewState {
 	tall.KfClear = uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"}
 	tall.Export = export()
 	tall.Export.Running, tall.Export.Pct, tall.Export.Stage = true, "42.5%", "encode"
+	tall.ShowFx = true
+	tall.SecFx = "Effects"
+	tall.FxAdd = edSel("edv-fx-add", "Add effect…", "")
+	tall.FxNone = "No effect plugins found."
+	tall.FxPrev = edvFxPrevSt{Show: true, Busy: "Extracting frame…", AW: "1080", AH: "608"}
+	tall.FxPrevBtn = uiBtn{Label: "Preview", Variant: "outline", Act: "edv-fx-prev"}
+	tall.FxHint = "hint"
 
 	// error + result branches, no reframe (audio source)
 	audio := emptyEdvState()
@@ -111,6 +143,21 @@ func edvFixtures() map[string]edvViewState {
 	escaping.HasKfs = true
 	escaping.Kfs = []edvKfRow{{Time: `1:0"0.0`, Pos: "50", Go: `edv-kf-go:0&"`, Del: `edv-kf-del:0'`, DelLb: `✕&"`}}
 	escaping.RefHint = `r&ef"<>'`
+	escaping.ShowFx = true
+	escaping.SecFx = `F&x"`
+	escaping.FxAdd = edSel("edv-fx-add", `A&dd"`, "")
+	escaping.FxNone = `n&one"<>'`
+	escaping.FxRows = []edvFxRow{
+		{Name: `G&low "<x>"`, Missing: true, MissLb: `m&iss"`, Btns: []uiBtn{
+			{Label: `⏻&"`, Variant: "secondary", Act: `edv-fx-tog:0&"`},
+		}, Params: []edvFxParam{
+			{Slider: newSlider(`b&lur"`, `edv-fx-p:0:b&lur"`, 0, 1, 0.01, 0.25, "")},
+			{IsBool: true, Toggle: newToggle(`i&nv"`, `edv-fx-p:0:i&nv"`, false)},
+		}},
+	}
+	escaping.FxPrev = edvFxPrevSt{Show: true, Busy: `b&usy2"<>'`, AW: "10", AH: "20"}
+	escaping.FxPrevBtn = uiBtn{Label: `P&rev"`, Variant: "outline", Act: "edv-fx-prev"}
+	escaping.FxHint = `h&x"<>'`
 	escaping.Export = export()
 	escaping.Export.TrimInfo = `cut 0:01.0–0:02.0 · crop 2×2 &"<>'`
 	escaping.Export.HasErr, escaping.Export.Err = true, `e&rr "<x>"'`

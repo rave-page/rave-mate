@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x530603ee;
+pub const schema_hash: u32 = 0xe5954bea;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4257,6 +4257,38 @@ pub fn decodeEdvExport(r: *wire.Reader, out: *editor_video.Export) wire.Error!vo
     };
 }
 
+pub fn decodeEdvFxParam(r: *wire.Reader, out: *editor_video.FxParam) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.isBool = try r.boolean(t),
+        2 => out.slider = try r.sub(c.Slider, decodeUiSlider, t),
+        3 => out.toggle = try r.sub(c.Toggle, decodeUiToggle, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdvFxRow(r: *wire.Reader, out: *editor_video.FxRow) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.name = try r.str(t),
+        2 => out.missing = try r.boolean(t),
+        3 => out.missLb = try r.str(t),
+        4 => out.off = try r.boolean(t),
+        5 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
+        6 => out.params = try r.list(editor_video.FxParam, decodeEdvFxParam, t),
+        else => try r.skip(t),
+    };
+}
+
+pub fn decodeEdvFxPrev(r: *wire.Reader, out: *editor_video.FxPrev) wire.Error!void {
+    while (try r.next()) |t| switch (t.field) {
+        1 => out.show = try r.boolean(t),
+        2 => out.imgUrl = try r.str(t),
+        3 => out.busy = try r.str(t),
+        4 => out.aw = try r.str(t),
+        5 => out.ah = try r.str(t),
+        else => try r.skip(t),
+    };
+}
+
 pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.title = try r.str(t),
@@ -4284,6 +4316,14 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         23 => out.refHint = try r.str(t),
         24 => out.secExport = try r.str(t),
         25 => out.@"export" = try r.sub(editor_video.Export, decodeEdvExport, t),
+        26 => out.secFx = try r.str(t),
+        27 => out.showFx = try r.boolean(t),
+        28 => out.fxAdd = try r.sub(c.Select, decodeSelState, t),
+        29 => out.fxNone = try r.str(t),
+        30 => out.fxRows = try r.list(editor_video.FxRow, decodeEdvFxRow, t),
+        31 => out.fxPrev = try r.sub(editor_video.FxPrev, decodeEdvFxPrev, t),
+        32 => out.fxPrevBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        33 => out.fxHint = try r.str(t),
         else => try r.skip(t),
     };
 }

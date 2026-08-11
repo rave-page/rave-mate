@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/jobs"
+	"rave.page/mate/internal/vfx"
 	"rave.page/mate/internal/videoedit"
 )
 
@@ -34,6 +36,13 @@ type edvSt struct {
 
 	panDrag bool
 	panLive float64 // live window position while dragging
+
+	fxPlugins  []vfx.Plugin // discovered effect plugins (scan once per session)
+	fxScanned  bool
+	fxScanning bool
+	fxPrev     string // fx preview PNG ("" = never rendered)
+	fxPrevBusy bool
+	fxPrevGen  int
 
 	export edvExport
 }
@@ -84,6 +93,13 @@ func init() {
 	onExact("edv-out", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.OutPath = strings.TrimSpace(m.Val) })
 	})
+	onExact("edv-fx-add", func(u *UI, m actMsg) { u.edvFxAdd(m.Val) })
+	onPrefix("edv-fx-del:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-del:"), "del") })
+	onPrefix("edv-fx-up:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-up:"), "up") })
+	onPrefix("edv-fx-dn:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-dn:"), "dn") })
+	onPrefix("edv-fx-tog:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-tog:"), "tog") })
+	onPrefix("edv-fx-p:", func(u *UI, m actMsg) { u.edvFxParamSet(m.arg("edv-fx-p:"), m.Val) })
+	onExact("edv-fx-prev", func(u *UI, m actMsg) { u.edvFxPrevRender() })
 	onExact("edv-export", func(u *UI, m actMsg) { u.edvExport() })
 	onExact("edv-excancel", func(u *UI, m actMsg) {
 		editor.mu.Lock()
@@ -393,6 +409,257 @@ func (u *UI) edvKfGo(idxStr string) {
 	u.edvFrame(t)
 }
 
+// ── effect chain (frei0r/ISF via the vfx worker) ──
+
+// edvFxScan discovers plugins once per session (kicked from the state builder).
+func (u *UI) edvFxScan() {
+	if u.svc.Workers == nil {
+		return
+	}
+	edEnsure()
+	editor.mu.Lock()
+	edvEnsure()
+	if editor.video.fxScanned || editor.video.fxScanning {
+		editor.mu.Unlock()
+		return
+	}
+	editor.video.fxScanning = true
+	editor.mu.Unlock()
+	u.bg(func() {
+		var plugins []vfx.Plugin
+		if d, err := config.Dir(); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			raw, err := u.svc.Workers.RunStream(ctx, "vfx", "vfx.list",
+				map[string]any{"dirs": vfx.PluginDirs(d)}, nil)
+			if err != nil {
+				u.logErr("vfx list", err)
+			} else {
+				var out struct {
+					Plugins []vfx.Plugin `json:"plugins"`
+				}
+				if json.Unmarshal(raw, &out) == nil {
+					plugins = out.Plugins
+				}
+			}
+		}
+		editor.mu.Lock()
+		editor.video.fxScanning, editor.video.fxScanned = false, true
+		editor.video.fxPlugins = plugins
+		editor.mu.Unlock()
+		if len(plugins) > 0 {
+			u.patchMain()
+		}
+	})
+}
+
+// edvFxAdd appends a discovered plugin (by index in fxPlugins) to the chain.
+func (u *UI) edvFxAdd(idxStr string) {
+	idx, err := strconv.Atoi(strings.TrimSpace(idxStr))
+	if err != nil {
+		return
+	}
+	u.edvMut(func(v *edvSt) {
+		if idx < 0 || idx >= len(v.fxPlugins) {
+			return
+		}
+		p := v.fxPlugins[idx]
+		v.proj.Effects = append(v.proj.Effects, videoedit.EffectInst{
+			Kind: p.Kind, Ref: filepath.Base(p.Ref),
+		})
+	})
+	u.patchMain()
+}
+
+// edvFxEdit handles del/up/dn/tog on a chain row.
+func (u *UI) edvFxEdit(idxStr, op string) {
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		return
+	}
+	u.edvMut(func(v *edvSt) {
+		fx := v.proj.Effects
+		if idx < 0 || idx >= len(fx) {
+			return
+		}
+		switch op {
+		case "del":
+			v.proj.Effects = append(fx[:idx], fx[idx+1:]...)
+		case "up":
+			if idx > 0 {
+				fx[idx-1], fx[idx] = fx[idx], fx[idx-1]
+			}
+		case "dn":
+			if idx+1 < len(fx) {
+				fx[idx+1], fx[idx] = fx[idx], fx[idx+1]
+			}
+		case "tog":
+			fx[idx].Off = !fx[idx].Off
+		}
+	})
+	u.patchMain()
+}
+
+// edvFxParamSet stores a param value; arg is "<idx>:<name>", val a number or
+// a switch's "true"/"false".
+func (u *UI) edvFxParamSet(arg, val string) {
+	idxStr, name, ok := strings.Cut(arg, ":")
+	if !ok || name == "" {
+		return
+	}
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		return
+	}
+	var f float64
+	switch strings.TrimSpace(val) {
+	case "true":
+		f = 1
+	case "false":
+		f = 0
+	default:
+		f, err = strconv.ParseFloat(strings.TrimSpace(val), 64)
+		if err != nil {
+			return
+		}
+	}
+	u.edvMut(func(v *edvSt) {
+		if idx < 0 || idx >= len(v.proj.Effects) {
+			return
+		}
+		e := &v.proj.Effects[idx]
+		if e.Params == nil {
+			e.Params = map[string]float64{}
+		}
+		e.Params[name] = clamp01(f)
+	})
+}
+
+// edvResolveFx maps enabled chain entries to loaded plugins (base-name match;
+// missing/disabled entries drop out).
+func edvResolveFx(effects []videoedit.EffectInst, plugins []vfx.Plugin) []vfx.Fx {
+	var out []vfx.Fx
+	for _, e := range effects {
+		if e.Off {
+			continue
+		}
+		for i := range plugins {
+			if filepath.Base(plugins[i].Ref) == e.Ref {
+				out = append(out, vfx.Fx{Kind: e.Kind, Ref: plugins[i].Ref, Params: e.Params})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// edvFitDims scales w×h down to maxW, keeping ratio, forced even.
+func edvFitDims(w, h, maxW int) (int, int) {
+	if w > maxW {
+		h = h * maxW / w
+		w = maxW
+	}
+	w, h = w&^1, h&^1
+	if w < 2 {
+		w = 2
+	}
+	if h < 2 {
+		h = 2
+	}
+	return w, h
+}
+
+// edvFxPrevRender runs the current preview frame through the chain (cropped at
+// the frame's time, so the result matches the export).
+func (u *UI) edvFxPrevRender() {
+	srcW, srcH, _ := u.edvSrcDims()
+	t := u.mpSnap("editor")
+
+	editor.mu.Lock()
+	edvEnsure()
+	v := &editor.video
+	src, frameT, proj, plugins := v.proj.Source, v.frameT, v.proj, v.fxPlugins
+	busy := v.fxPrevBusy
+	editor.mu.Unlock()
+	if src == "" || !edvIsVideo(src) || srcW <= 0 || busy {
+		return
+	}
+	fx := edvResolveFx(proj.Effects, plugins)
+	if len(fx) == 0 {
+		return
+	}
+	cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect))
+	vf := ""
+	if axis != "" {
+		pos := proj.PanAt(frameT)
+		x, y := 0, 0
+		if axis == "x" {
+			x = int(float64(srcW-cw)*pos + 0.5)
+		} else {
+			y = int(float64(srcH-ch)*pos + 0.5)
+		}
+		vf = fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, x, y)
+	} else {
+		cw, ch = srcW, srcH
+	}
+	pw, ph := edvFitDims(cw, ch, 480)
+	fxT := frameT - t.inSec
+	if fxT < 0 {
+		fxT = 0
+	}
+	chain := vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx}
+	dir := edDataDir("videoeditor")
+	if dir == "" {
+		return
+	}
+	chainRaw, _ := json.Marshal(chain)
+	key := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s|%.2f|%s", src, frameT, chainRaw)))
+	out := filepath.Join(dir, fmt.Sprintf("fxprev-%08x.png", key))
+
+	editor.mu.Lock()
+	v.fxPrevBusy = true
+	v.fxPrevGen++
+	gen := v.fxPrevGen
+	editor.mu.Unlock()
+	u.edvPatchFxPrev()
+
+	u.bg(func() {
+		var err error
+		if _, statErr := os.Stat(out); statErr != nil { // cached render wins
+			if u.svc.Workers == nil {
+				err = errors.New("worker pool unavailable")
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+				defer cancel()
+				_, err = u.svc.Workers.RunStream(ctx, "vfx", "vfx.preview", map[string]any{
+					"input": src, "t": frameT, "fxT": fxT, "vf": vf,
+					"chain": chain, "output": out,
+				}, nil)
+			}
+		}
+		editor.mu.Lock()
+		if editor.video.fxPrevGen == gen {
+			editor.video.fxPrevBusy = false
+			if err == nil {
+				editor.video.fxPrev = out
+			}
+		}
+		editor.mu.Unlock()
+		if err != nil {
+			u.logErr("vfx preview", err)
+			u.edvPatchFxPrev()
+			return
+		}
+		u.patchMain()
+	})
+}
+
+// edvPatchFxPrev re-renders only the fx preview box.
+func (u *UI) edvPatchFxPrev() {
+	st := u.edvFxPrevState()
+	u.eval("window.__patch('edv-fxprev'," + jsQuote(edvFxPrevHTML(st)) + ")")
+}
+
 // ── export ──
 
 // edvOutDefault derives the default export path beside the source. The suffix
@@ -441,6 +708,8 @@ func (u *UI) edvExport() {
 	if out == "" {
 		out = edvOutDefault(src, ep.Key)
 	}
+	fx := edvResolveFx(v.proj.Effects, v.fxPlugins)
+	aspect := v.proj.Aspect
 	v.export = edvExport{running: true, stage: "prepare"}
 	editor.mu.Unlock()
 
@@ -448,11 +717,29 @@ func (u *UI) edvExport() {
 		"input": src, "output": out, "preset": preset,
 		"trimStart": trimS, "trimEnd": trimE, "vf": crop,
 	}
+	typ, method := "transcode", "transcode.run"
+	if len(fx) > 0 && edvIsVideo(src) {
+		// route through the effects pipeline: chain runs at the export target size
+		cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(aspect))
+		if axis == "" {
+			cw, ch = srcW&^1, srcH&^1
+		}
+		tw, th := preset.Width, preset.Height
+		if tw <= 0 || th <= 0 {
+			tw, th = cw, ch
+		}
+		fps := 30.0
+		if len(t.media) > 0 && t.media[0].src != nil && t.media[0].src.FPS > 0 {
+			fps = t.media[0].src.FPS
+		}
+		params["chain"] = vfx.Chain{W: tw, H: th, FPS: fps, Fx: fx}
+		typ, method = "vfx", "vfx.run"
+	}
 	u.patchMain()
-	u.bg(func() { u.edvRunExport(out, params) })
+	u.bg(func() { u.edvRunExport(out, typ, method, params) })
 }
 
-func (u *UI) edvRunExport(out string, params map[string]any) {
+func (u *UI) edvRunExport(out, typ, method string, params map[string]any) {
 	upd := func(fn func(*edvExport)) {
 		editor.mu.Lock()
 		fn(&editor.video.export)
@@ -477,7 +764,7 @@ func (u *UI) edvRunExport(out string, params map[string]any) {
 			}
 		}
 	}
-	err := u.edvDispatch(params, onEvent)
+	err := u.edvDispatch(typ, method, params, onEvent)
 	editor.mu.Lock()
 	e := &editor.video.export
 	e.running, e.cancel = false, nil
@@ -496,10 +783,10 @@ func (u *UI) edvRunExport(out string, params map[string]any) {
 	u.patchMain()
 }
 
-// edvDispatch runs the transcode via the shared hub (queue visibility) or the
-// raw worker pool - mirror of mpExportOne without the mp coupling.
-func (u *UI) edvDispatch(params map[string]any, onProgress func(string, json.RawMessage)) error {
-	if u.svc.Hub != nil {
+// edvDispatch runs the export via the shared hub (queue visibility; plain
+// transcodes only - the hub is bound to transcode.run) or the raw worker pool.
+func (u *UI) edvDispatch(typ, method string, params map[string]any, onProgress func(string, json.RawMessage)) error {
+	if u.svc.Hub != nil && typ == "transcode" && method == "transcode.run" {
 		done := make(chan error, 1)
 		jid := fmt.Sprintf("edvcut-%d", time.Now().UnixNano())
 		u.svc.Hub.Start(jid, params, onProgress, func(r jobs.EndResult) {
@@ -525,7 +812,7 @@ func (u *UI) edvDispatch(params map[string]any, onProgress func(string, json.Raw
 	editor.mu.Lock()
 	editor.video.export.cancel = cancel
 	editor.mu.Unlock()
-	_, err := u.svc.Workers.RunStream(ctx, "transcode", "transcode.run", params, onProgress)
+	_, err := u.svc.Workers.RunStream(ctx, typ, method, params, onProgress)
 	if ctx.Err() != nil {
 		return errors.New("canceled")
 	}

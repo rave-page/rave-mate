@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0x530603ee
+	wireSchemaHash         uint32 = 0xe5954bea
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -3382,6 +3382,29 @@ func (v edvExportSt) encodeWire(w *zigui.WireWriter) {
 	w.Str(13, v.TrimInfo)
 }
 
+func (v edvFxParam) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.IsBool)
+	w.Struct(2, func() { v.Slider.encodeWire(w) })
+	w.Struct(3, func() { v.Toggle.encodeWire(w) })
+}
+
+func (v edvFxRow) encodeWire(w *zigui.WireWriter) {
+	w.Str(1, v.Name)
+	w.Bool(2, v.Missing)
+	w.Str(3, v.MissLb)
+	w.Bool(4, v.Off)
+	w.List(5, len(v.Btns), func(i int) { v.Btns[i].encodeWire(w) })
+	w.List(6, len(v.Params), func(i int) { v.Params[i].encodeWire(w) })
+}
+
+func (v edvFxPrevSt) encodeWire(w *zigui.WireWriter) {
+	w.Bool(1, v.Show)
+	w.Str(2, v.ImgURL)
+	w.Str(3, v.Busy)
+	w.Str(4, v.AW)
+	w.Str(5, v.AH)
+}
+
 func (v edvViewState) encodeWire(w *zigui.WireWriter) {
 	w.Str(1, v.Title)
 	w.Str(2, v.Sub)
@@ -3408,6 +3431,14 @@ func (v edvViewState) encodeWire(w *zigui.WireWriter) {
 	w.Str(23, v.RefHint)
 	w.Str(24, v.SecExport)
 	w.Struct(25, func() { v.Export.encodeWire(w) })
+	w.Str(26, v.SecFx)
+	w.Bool(27, v.ShowFx)
+	w.Struct(28, func() { v.FxAdd.encodeWire(w) })
+	w.Str(29, v.FxNone)
+	w.List(30, len(v.FxRows), func(i int) { v.FxRows[i].encodeWire(w) })
+	w.Struct(31, func() { v.FxPrev.encodeWire(w) })
+	w.Struct(32, func() { v.FxPrevBtn.encodeWire(w) })
+	w.Str(33, v.FxHint)
 }
 
 func (v ceTbDropSt) encodeWire(w *zigui.WireWriter) {

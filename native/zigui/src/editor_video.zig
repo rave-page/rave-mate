@@ -31,6 +31,29 @@ pub const Frame = struct {
     cropH: []const u8 = "",
 };
 
+pub const FxParam = struct {
+    isBool: bool = false,
+    slider: c.Slider = .{},
+    toggle: c.Toggle = .{},
+};
+
+pub const FxRow = struct {
+    name: []const u8 = "",
+    missing: bool = false,
+    missLb: []const u8 = "",
+    off: bool = false,
+    btns: []const c.Btn = &.{},
+    params: []const FxParam = &.{},
+};
+
+pub const FxPrev = struct {
+    show: bool = false,
+    imgUrl: []const u8 = "",
+    busy: []const u8 = "",
+    aw: []const u8 = "",
+    ah: []const u8 = "",
+};
+
 pub const Export = struct {
     preset: c.Select = .{},
     out: c.Field = .{},
@@ -74,6 +97,15 @@ pub const State = struct {
     hasKfs: bool = false,
     kfs: []const KfRow = &.{},
     refHint: []const u8 = "",
+
+    secFx: []const u8 = "",
+    showFx: bool = false,
+    fxAdd: c.Select = .{},
+    fxNone: []const u8 = "",
+    fxRows: []const FxRow = &.{},
+    fxPrev: FxPrev = .{},
+    fxPrevBtn: c.Btn = .{},
+    fxHint: []const u8 = "",
 
     secExport: []const u8 = "",
     @"export": Export = .{},
@@ -145,11 +177,77 @@ pub fn render(h: *Html, s: State) !void {
         try c.sectionClose(h);
     }
 
+    if (s.showFx) {
+        try c.sectionOpen(h, s.secFx);
+        try c.selectBox(h, s.fxAdd);
+        if (s.fxNone.len != 0) {
+            try c.hint(h, "info", s.fxNone);
+        }
+        for (s.fxRows) |r| {
+            try renderFxRow(h, r);
+        }
+        try h.raw("<div id=edv-fxprev>");
+        try renderFxPrev(h, s.fxPrev);
+        try h.raw("</div>");
+        try c.btnRowOpen(h);
+        try c.btnOf(h, s.fxPrevBtn);
+        try c.btnRowClose(h);
+        try c.hint(h, "info", s.fxHint);
+        try c.sectionClose(h);
+    }
+
     try c.sectionOpen(h, s.secExport);
     try h.raw("<div id=edv-export>");
     try renderExport(h, s.@"export");
     try h.raw("</div>");
     try c.sectionClose(h);
+}
+
+/// renderFxRow mirrors Go edvFxRowHTML.
+pub fn renderFxRow(h: *Html, r: FxRow) !void {
+    if (r.off) {
+        try h.raw("<div class=\"edv-fx edv-fx-off\">");
+    } else {
+        try h.raw("<div class=edv-fx>");
+    }
+    try h.raw("<div class=edv-fx-head><span class=edv-fx-name>");
+    try h.esc(r.name);
+    try h.raw("</span>");
+    if (r.missing) {
+        try h.raw("<span class=edv-fx-miss>");
+        try h.esc(r.missLb);
+        try h.raw("</span>");
+    }
+    try c.btnRowOf(h, r.btns);
+    try h.raw("</div>");
+    for (r.params) |p| {
+        if (p.isBool) {
+            try c.toggleOf(h, p.toggle);
+        } else {
+            try c.slider(h, p.slider);
+        }
+    }
+    try h.raw("</div>");
+}
+
+/// renderFxPrev mirrors Go edvFxPrevHTML (#edv-fxprev fragment).
+pub fn renderFxPrev(h: *Html, s: FxPrev) !void {
+    if (!s.show) return;
+    try h.raw("<div class=edv-fxprev-box style=\"aspect-ratio:");
+    try h.raw(s.aw);
+    try h.raw("/");
+    try h.raw(s.ah);
+    try h.raw("\">");
+    if (s.imgUrl.len != 0) {
+        try h.raw("<img class=edv-fimg src=");
+        try h.attrQ(s.imgUrl);
+        try h.raw(" alt=\"\">");
+    } else {
+        try h.raw("<span class=edv-fbusy>");
+        try h.esc(s.busy);
+        try h.raw("</span>");
+    }
+    try h.raw("</div>");
 }
 
 /// renderFrame mirrors Go edvFrameHTML (#edv-frame fragment).

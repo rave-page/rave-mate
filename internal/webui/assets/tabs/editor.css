@@ -406,6 +406,53 @@
   margin: 0.35rem 0;
 }
 
+/* ── effect chain ── */
+.edv-fx {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.edv-fx-off {
+  opacity: 0.55;
+}
+.edv-fx-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.edv-fx-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.edv-fx-miss {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--rp-amber, #ffb547);
+}
+.edv-fx-head .rp-btn {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.edv-fxprev-box {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  margin: 0.5rem auto;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #14161a;
+}
+
 /* ── canvas preset grid (modal) ── */
 .ed-preset-grid {
   display: grid;
