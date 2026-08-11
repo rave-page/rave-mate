@@ -135,20 +135,27 @@ const (
 )
 
 var (
-	white = color.NRGBA{R: 0xfa, G: 0xfa, B: 0xfa, A: 0xff}
-	muted = color.NRGBA{R: 0xa6, G: 0xab, B: 0xb6, A: 0xff}
-	brand = color.NRGBA{R: 0xF7, G: 0x08, B: 0x64, A: 0xff}
-	scrim = color.NRGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xc8}
+	white  = color.NRGBA{R: 0xfa, G: 0xfa, B: 0xfa, A: 0xff}
+	muted  = color.NRGBA{R: 0xa6, G: 0xab, B: 0xb6, A: 0xff}
+	brand  = color.NRGBA{R: 0xF7, G: 0x08, B: 0x64, A: 0xff}
+	scrim  = color.NRGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xc8}
+	dark   = color.NRGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xff}
+	violet = color.NRGBA{R: 0x2b, G: 0x10, B: 0x45, A: 0xff} // deep brand-violet
 )
 
 // BuiltinTemplates returns the shipped text-layout presets (fresh instances each call).
 func BuiltinTemplates() []Template {
 	return []Template{
 		lowerThird(), centeredTitle(), cornerCaption(), tickerBar(),
+		thumbnailBase(), storyTeaser(),
 	}
 }
 
-func mark(t Template) Template { t.Builtin = true; t.W, t.H = presetW, presetH; return t }
+func mark(t Template) Template { return markAt(t, presetW, presetH) }
+
+// markAt stamps builtin + the authoring canvas (full-canvas presets ship at
+// their target size, matching the canvas-dialog presets).
+func markAt(t Template, w, h int) Template { t.Builtin = true; t.W, t.H = w, h; return t }
 
 // lowerThird: scrim bar bottom-left with a brand accent, title + subtitle placeholders.
 func lowerThird() Template {
@@ -186,6 +193,48 @@ func cornerCaption() Template {
 		txt,
 	}
 	return mark(Template{Name: "Corner caption", Layer: g})
+}
+
+// thumbnailBase: full-canvas 1280×720 YouTube-thumbnail starter - gradient bg,
+// corner chip, big title block bottom-left with a brand accent.
+func thumbnailBase() Template {
+	g := NewGroup("Thumbnail base")
+	stops := []GradientStop{
+		{Pos: 0, Color: FromNRGBA(dark)},
+		{Pos: 1, Color: FromNRGBA(violet)},
+	}
+	g.Children = []*Layer{
+		NewGradient("Background", 0, 0, 1280, 720, 35, stops),
+		NewSolid("Chip", 64, 56, 250, 60, scrim),
+		NewText("Chip label", 88, 70, 210, 36, "LIVE SET", "Orbitron", 26, brand),
+		NewSolid("Accent", 64, 452, 10, 150, brand),
+		NewText("Title", 96, 448, 1120, 100, "{track.title}", "Orbitron Bold", 72, white),
+		NewText("Artist", 96, 566, 1120, 56, "{track.artist}", "Orbitron", 38, muted),
+	}
+	return markAt(Template{Name: "Thumbnail base", Layer: g}, 1280, 720)
+}
+
+// storyTeaser: full-canvas 1080×1920 Reel/Story cover - vertical gradient,
+// centered chip + title + artist block, brand rule.
+func storyTeaser() Template {
+	g := NewGroup("Story teaser")
+	stops := []GradientStop{
+		{Pos: 0, Color: FromNRGBA(dark)},
+		{Pos: 1, Color: FromNRGBA(violet)},
+	}
+	chipTxt := NewText("Chip label", 400, 716, 280, 44, "LIVE SET", "Orbitron Bold", 30, white)
+	chipTxt.Text.Align = AlignCenter
+	title := NewText("Title", 90, 850, 900, 240, "{track.title}", "Orbitron Bold", 84, white)
+	title.Text.Align = AlignCenter
+	artist := NewText("Artist", 90, 1110, 900, 70, "{track.artist}", "Orbitron", 44, muted)
+	artist.Text.Align = AlignCenter
+	g.Children = []*Layer{
+		NewGradient("Background", 0, 0, 1080, 1920, 90, stops),
+		NewSolid("Chip", 400, 700, 280, 72, brand),
+		chipTxt, title, artist,
+		NewSolid("Rule", 480, 1240, 120, 6, brand),
+	}
+	return markAt(Template{Name: "Story teaser", Layer: g}, 1080, 1920)
 }
 
 // tickerBar: full-width bottom bar with a gradient + running caption.

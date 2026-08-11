@@ -391,6 +391,15 @@ Rules:
   Headline: the phase-A bridge costs **1.2-2.9× pure Go** per full-tab render, and only ~21% of
   that is the Go marshal - 75-80% is the Zig-side `std.json` parse (6.9 ns per state byte, 5×
   Go's marshal slope). A binary wire must kill the PARSE, not just the marshal.
+- **Editor geometry kernel (edgeo, SHIPPED):** the image-mode direct-manipulation math
+  (`internal/visualeditor/geometry.go` hit-test / handles / snap / resize / rotate) ported to
+  `native/zigcore/src/edgeo.zig` on the flat-box form (`rz_ed_*`, 7-f64 rows). Exported Go entry
+  points dispatch to the kernel when linked; Go bodies stay fallback + golden reference.
+  **Bit-for-bit** parity incl. trig: sin/cos/atan2 are ports of Go's Cephes implementations
+  (decimal literals govern - the hex comments in Go's sin.go are stale; amd64 Go has no arch
+  trig, s390x only). Valid below the trig-reduce threshold (1<<29 rad - unreachable for editor
+  docs; beyond it falls to @sin/@cos). Gate: `geometry_zig_parity_test.go` (3000-iter fuzz over
+  all six entry points, Float64bits equality, degenerate-det + tiny-scale paths pinned).
 
 ## CI
 

@@ -14,6 +14,10 @@ thumbnail in two minutes":
 - **Canvas presets** (canvas dialog): YouTube thumbnail 1280×720, Instagram post
   1080×1080 / portrait 1080×1350, Story/Reel 1080×1920, X header 1500×500,
   A4/A3 poster (300 dpi), stream overlay 1920×1080 - or any custom size.
+- **Insert template**: ready-made presets - lower third, centered title, corner
+  caption, ticker bar, plus two full-canvas starters sized like their canvas
+  presets: *Thumbnail base* (1280×720) and *Story teaser* (1080×1920). Your own
+  saved components appear alongside.
 - **Direct manipulation**: click a layer to select it, drag to move, corner/edge
   handles to resize (Shift keeps the aspect), the mint handle above the box
   rotates (Shift snaps to 15°). While dragging, the canvas snaps to the canvas

@@ -11,7 +11,7 @@ func TestBuiltinTemplatesRenderable(t *testing.T) {
 		if tpl.Layer == nil || tpl.Layer.Kind != KindGroup {
 			t.Fatalf("template %q not a group", tpl.Name)
 		}
-		if !tpl.Builtin || tpl.W != presetW || tpl.H != presetH {
+		if !tpl.Builtin || tpl.W <= 0 || tpl.H <= 0 {
 			t.Fatalf("template %q missing builtin/canvas stamp", tpl.Name)
 		}
 		d := NewDocument(tpl.W, tpl.H)

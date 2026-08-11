@@ -6,8 +6,10 @@ P5/P6 NLE layout + sources modal + fit background-fill 1ef9169 (user-requested
 mid-epic: DaVinci-style original-inside + styled zoom-fill bg, blur slider; encode-side
 overlay composite so the fg never re-styles). All zigui goldens green; i18n ×7;
 docs/user/editor.md + wiki Editor page. Verified live on the installed build incl. a
-real 36.5s 4K→Reel export with effects. Open follow-ups: zigcore geometry kernel +
-builtin templates (task #19), ISF color/position UI controls, multi-pass ISF.
+real 36.5s 4K→Reel export with effects. Zigcore edgeo geometry kernel + builtin
+Thumbnail base / Story teaser presets SHIPPED (bit-exact flat-box port incl. Cephes
+trig; 3000-iter fuzz parity gate). Open follow-ups: ISF color/position UI controls,
+multi-pass ISF.
 
 User ask: split Editor tab into **Image** (thumbnails/posters; PS/GIMP-style layer editing,
 presets, visual move/scale/align) and **Video** (cut + export vertical "Hochformat" clips from
