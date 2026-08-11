@@ -28,9 +28,9 @@ func PCMToF32(src []byte, frames, ch, blockAlign, bits int, isFloat, bigEndian b
 }
 func RGBAToRGB24(src []byte, stride, w, h int, dst []byte) bool { return false }
 
-func EdHitTest(boxes []float64, px, py float64) int               { return -1 }
-func EdHandleAt(box []float64, px, py, tol, rotOff float64) int   { return 0 }
-func EdAngleAt(box []float64, px, py float64) float64             { return 0 }
+func EdHitTest(boxes []float64, px, py float64) int             { return -1 }
+func EdHandleAt(box []float64, px, py, tol, rotOff float64) int { return 0 }
+func EdAngleAt(box []float64, px, py float64) float64           { return 0 }
 func EdRotateFrom(origRot, downAngle, nowAngle float64, snap bool) float64 {
 	return 0
 }
