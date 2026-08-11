@@ -1,13 +1,13 @@
 {
   "version": "nightly-7a067d1",
-  "build": 224,
+  "build": 225,
   "commit": "7a067d1",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-224-20260811-7a067d1.exe",
-  "sha256": "7a1f4c7fd620f3a775ffb6731a9f6ffedcc2a59ab9b61f369a9ed5291e1af7d7",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-224-20260811-7a067d1.exe",
-  "installer_sha256": "77874731a24c75180e7b299cbedeecbaf90f1eceb62d83b4e8c24309cffc23fd",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-224-20260811-7a067d1",
-  "linux_sha256": "889645e961e12da399a9547f31144e5fbc85007b51370429f5d30fcb62a65603",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-225-20260811-7a067d1.exe",
+  "sha256": "0b010be4608faf9603a98dd731f5fcf343813d09e8785022771dfee67c9e79dc",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-225-20260811-7a067d1.exe",
+  "installer_sha256": "810cfd3b85183aae3db00ede6eed12eb7c2472568bb1b8c6a7c6ef348ecc52fa",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-225-20260811-7a067d1",
+  "linux_sha256": "37c5d4b6efb578b0f837a1cd51f26b09e2a3e4f6893978fb638a1e67ecd9cb5c",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-11T00:42:37Z",
+  "released": "2026-08-11T05:55:34Z",
   "notes": "fix(videoshare): GL/DX interop pre-flight - stop SpoutLibrary fastfail killing the daemon"
 }
