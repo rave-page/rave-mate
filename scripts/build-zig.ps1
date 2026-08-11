@@ -23,3 +23,8 @@ Set-Location (Join-Path $PSScriptRoot "..\native\zigvr")
 & $zig.Source build -Drelease -Dtarget=x86_64-windows-gnu
 Copy-Item -Force zig-out\lib\ravevr.lib zig-out\lib\libravevr.a
 Write-Host "ravevr built ($(& $zig.Source version))"
+
+# rave-mate-vfx effects child exe (native/zigvfx: frei0r host, ISF next; no cgo)
+Set-Location (Join-Path $PSScriptRoot "..\native\zigvfx")
+& $zig.Source build -Drelease -Dtarget=x86_64-windows-gnu
+Write-Host "rave-mate-vfx built ($(& $zig.Source version))"

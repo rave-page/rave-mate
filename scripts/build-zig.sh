@@ -85,3 +85,11 @@ case "$target" in
     echo "rave-mate-enc built + embed-staged ($ver, ${target:-native})"
     ;;
 esac
+
+# --- zigvfx: open-standard video effects child exe (native/zigvfx → rave-mate-vfx) ---
+# frei0r host (ISF next); cross-platform, no cgo. Ship beside rave-mate.exe; the Go
+# `vfx` worker spawns it - a plugin crash kills only this exe.
+cd "$ROOT/native/zigvfx"
+"$ZIG" build -Drelease ${target:+-Dtarget=$target}
+ls -la zig-out/bin
+echo "rave-mate-vfx built ($ver, ${target:-native})"
