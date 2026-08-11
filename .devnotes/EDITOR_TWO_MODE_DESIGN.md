@@ -1,10 +1,13 @@
 # Editor two-mode redesign (2026-08-11)
 
 **Status (2026-08-11): SHIPPED** - P1 image mode 1714b06, P2 video mode c24e364,
-P3 frei0r child 833866e + vfx worker b976419 + chain UI 2df1a9a, P4 ISF host b5f4ebc.
-All zigui goldens green; i18n ×7; user doc docs/user/editor.md. Open follow-ups:
-zigcore geometry kernel + builtin templates (task #19), ISF color/position UI
-controls, multi-pass ISF.
+P3 frei0r child 833866e + vfx worker b976419 + chain UI 2df1a9a, P4 ISF host b5f4ebc,
+P5/P6 NLE layout + sources modal + fit background-fill 1ef9169 (user-requested
+mid-epic: DaVinci-style original-inside + styled zoom-fill bg, blur slider; encode-side
+overlay composite so the fg never re-styles). All zigui goldens green; i18n ×7;
+docs/user/editor.md + wiki Editor page. Verified live on the installed build incl. a
+real 36.5s 4K→Reel export with effects. Open follow-ups: zigcore geometry kernel +
+builtin templates (task #19), ISF color/position UI controls, multi-pass ISF.
 
 User ask: split Editor tab into **Image** (thumbnails/posters; PS/GIMP-style layer editing,
 presets, visual move/scale/align) and **Video** (cut + export vertical "Hochformat" clips from
