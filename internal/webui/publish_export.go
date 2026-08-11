@@ -227,6 +227,7 @@ func (u *UI) pubFixTimesOpen(id string) {
 	u.bg(func() {
 		rec, ok := u.svc.Recorder.Get(id)
 		if !ok || rec.EndedAt.IsZero() {
+			u.toast(i18n.T("publish.fix.notReady")) // silent return here read as "silence detect does nothing"
 			return
 		}
 		lead := 0.0

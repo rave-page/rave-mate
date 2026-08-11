@@ -31,6 +31,7 @@ import (
 	"rave.page/mate/internal/authz"
 	"rave.page/mate/internal/automation"
 	"rave.page/mate/internal/bridge"
+	"rave.page/mate/internal/caprecover"
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/crewlink"
 	"rave.page/mate/internal/debuglog"
@@ -577,6 +578,7 @@ func run(parent context.Context, serviceMode bool) error {
 	// tracklist. OBS state comes from the subprocess bridge mirror.
 	audioRec := audiorec.New(log, func() config.AudioRecordFeature { return cfg.Features.AudioRecord },
 		rec, lib, func() bool { return obsW.Status().Recording })
+	audioRec.ReapOrphan() // a crash's capture ffmpeg must die before any new capture (or it records forever)
 	// Play-layer backend sync (PLAY_LAYER_INTEGRATION_BRIEF): identifies captured played
 	// tracks against the canonical corpus + publishes recorded sets. Owner-scoped - uses the
 	// current access token (rave-mate's own session or one adopted from a co-located rave-app).
@@ -594,7 +596,8 @@ func run(parent context.Context, serviceMode bool) error {
 	// the tracklist recorded over the same span; re-links orphans when recordings finalize.
 	// On set finish: fingerprint linked audio + sync the set-log to the play layer.
 	debuglog.Go(log, "setcapture-link", func() {
-		linkCaptures(ctx, icecastRcv, obsW, rec, lib, setFp, syncer, fpEnabled, log)
+		linkCaptures(ctx, icecastRcv, obsW, rec, lib, setFp, syncer, fpEnabled,
+			[]string{cfg.Features.AudioRecord.ResolvedDir()}, log)
 	})
 	// Activity governor: makes rave-mate a good neighbour by default. Detect a live OBS stream on
 	// this machine and pause non-essential heavy work (fingerprinting/indexing) while it runs -
@@ -1866,6 +1869,35 @@ func run(parent context.Context, serviceMode bool) error {
 	studioSrv.SetPicker(u)     // native file dialogs for the web client (windowed mode only)
 	mods.SetNotifier(u.Notify) // surface live module failures as desktop toasts
 	fileXfer.SetNotify(u.Notify)
+	// After a crash, OBS may still be recording the dead session's set. Surface it ONCE when
+	// OBS connects - never auto-stop (the user may be recording on purpose); the Publish tab
+	// badge shows the running duration and OBS itself stops it in one click.
+	debuglog.Go(log, "obs-stale-rec", func() {
+		launch := time.Now()
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		deadline := time.After(3 * time.Minute)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-deadline:
+				return
+			case <-t.C:
+				st := obsW.Status()
+				if !st.Connected {
+					continue
+				}
+				if st.Recording && !st.RecStartedAt.IsZero() && st.RecStartedAt.Before(launch.Add(-30*time.Second)) {
+					dur := time.Since(st.RecStartedAt).Truncate(time.Minute)
+					u.Notify("OBS is still recording",
+						fmt.Sprintf("A recording running for %s predates this session (likely from a crashed set). Stop it in OBS when you're done - it will be linked to its set here.", dur))
+					log.Warn("setcapture", "OBS recording predates this session", map[string]any{"since": st.RecStartedAt.Format(time.RFC3339)})
+				}
+				return // connected → decided once, stale or not
+			}
+		}
+	})
 	// Feature-subprocess crash toasts.
 	trk.Host().SetNotifier(u.Notify)
 	midiSrc.Host().SetNotifier(u.Notify)
@@ -2007,7 +2039,7 @@ func midiControllerInits(cs []config.MIDIControllerMap) []featurehost.MidiContro
 // finalizes re-links orphaned captures (e.g. capture outlived the set, or app closed
 // mid-link). Runs until ctx done; idle-cheap. lib may be nil. Both proxies are subprocess
 // hosts - events arrive over IPC; linking stays daemon-side (libdb is single-writer).
-func linkCaptures(ctx context.Context, rcv *featurehost.IcecastProxy, obsW *featurehost.ObsProxy, rec *recorder.Recorder, lib *libdb.DB, setFp *setfp.Fingerprinter, syncer *playsync.Syncer, fpEnabled func() bool, log *logbus.Bus) {
+func linkCaptures(ctx context.Context, rcv *featurehost.IcecastProxy, obsW *featurehost.ObsProxy, rec *recorder.Recorder, lib *libdb.DB, setFp *setfp.Fingerprinter, syncer *playsync.Syncer, fpEnabled func() bool, capDirs []string, log *logbus.Bus) {
 	iceCh, iceUnsub := rcv.SubscribeCapture()
 	defer iceUnsub()
 	obsCh, obsUnsub := obsW.SubscribeRecordings()
@@ -2040,6 +2072,15 @@ func linkCaptures(ctx context.Context, rcv *featurehost.IcecastProxy, obsW *feat
 		}
 	}
 	relink() // orphans from a previous run
+
+	// Crash recovery: capture files a dead session never persisted (an OBS recording whose
+	// finish event was never observed, a killed native capture) get probed, header-repaired
+	// where needed, registered unlinked, then linked. Slow work - off this event loop.
+	debuglog.Go(log, "caprecover", func() {
+		if n := caprecover.Sweep(ctx, log, lib, capDirs); n > 0 {
+			relink()
+		}
+	})
 
 	active := rec.Active()
 	wasActive := active != nil

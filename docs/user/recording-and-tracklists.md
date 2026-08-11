@@ -30,6 +30,19 @@ With `fpcalc` (Chromaprint) installed, each track's span in a captured set is fi
 the backbone for later re-identification and library reconciliation. Optional; heavy work runs
 in worker subprocesses.
 
+## Crash recovery
+
+A crash mid-set can't lose the capture anymore. On the next start rave-mate:
+
+- kills a capture ffmpeg the dead session left running (it would otherwise record silence
+  into the set file indefinitely),
+- scans the capture folders for finished files no set knows about (an OBS recording whose
+  finish it missed, a killed native capture), repairs an unfinalized FLAC header when needed
+  (lossless; the original stays beside as `.orig`), registers them and links each to the set
+  recorded over the same span,
+- warns once if OBS is STILL recording from before the crash - stop it in OBS when the set
+  is over and the file links up like any other.
+
 ## Post-set reconcile
 
 When Traktor writes its history NML (on close), rave-mate auto-reconciles it against captures/

@@ -2623,7 +2623,8 @@
       "failed": "Fix failed: ",
       "opener": "Opens the recording",
       "removedRow": "removed - ended before the recording",
-      "descFader": "Reconstructed from the recorded fader history: audio in {file} starts after {lead} of silence; each track starts at its deck's first fader-up. Tracks that never went on air during the capture are removed."
+      "descFader": "Reconstructed from the recorded fader history: audio in {file} starts after {lead} of silence; each track starts at its deck's first fader-up. Tracks that never went on air during the capture are removed.",
+      "notReady": "Set isn't finalized yet - it must have an end before times can align."
     },
     "textExport": {
       "title": "Export - text",

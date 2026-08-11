@@ -184,6 +184,11 @@ func (r *Recorder) start(auto bool) error {
 		cancel()
 		return fmt.Errorf("audiorec: start ffmpeg: %w", err)
 	}
+	// Kill-on-close job + pidfile: a daemon crash must not leave the capture ffmpeg running
+	// (one recorded 12h of silence into a set file, 2026-08-10). The job dies with us; the
+	// pidfile lets the NEXT session reap a survivor (job assignment is best-effort).
+	sysexec.AssignToJob(cmd.Process, false)
+	writePidFile(cmd.Process.Pid, outPath, started)
 	a := &capture{
 		path: outPath, device: device, format: format, startedAt: started, auto: auto,
 		cmd: cmd, stdin: stdin, stderr: ring, cancel: cancel, done: make(chan struct{}),
@@ -251,6 +256,7 @@ func (r *Recorder) stop() error {
 // finalize stats the file, writes a .cue + tags from the tracklist, and registers the capture
 // in libdb. All steps are best-effort (logged, never fatal).
 func (r *Recorder) finalize(a *capture) {
+	removePidFile()
 	ended := time.Now()
 	var bytes int64
 	if fi, err := os.Stat(a.path); err == nil {
