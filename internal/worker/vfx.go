@@ -51,12 +51,14 @@ func vfxList(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 }
 
 type vfxPreviewIn struct {
-	Input  string    `json:"input"`
-	T      float64   `json:"t"`   // source-time seconds of the frame
-	FxT    float64   `json:"fxT"` // effect-time seconds (clip time, trim already subtracted)
-	VF     string    `json:"vf,omitempty"`
-	Chain  vfx.Chain `json:"chain"`
-	Output string    `json:"output"` // .png target
+	Input      string    `json:"input"`
+	T          float64   `json:"t"`   // source-time seconds of the frame
+	FxT        float64   `json:"fxT"` // effect-time seconds (clip time, trim already subtracted)
+	VF         string    `json:"vf,omitempty"`
+	DecodePost string    `json:"decodePost,omitempty"` // post-scale filter (fit bg blur)
+	Fit        bool      `json:"fit,omitempty"`        // overlay the clean source frame centered on the chained bg
+	Chain      vfx.Chain `json:"chain"`
+	Output     string    `json:"output"` // .png target
 }
 
 // vfxPreview extracts one frame at T, runs it through the chain, encodes a PNG.
@@ -96,6 +98,9 @@ func vfxPreview(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 	if in.VF != "" {
 		vf = in.VF + "," + vf
 	}
+	if in.DecodePost != "" {
+		vf += "," + in.DecodePost
+	}
 	rawIn := filepath.Join(tmp, "in.raw")
 	a := []string{"-hide_banner", "-nostats", "-y"}
 	if in.T > 0 {
@@ -113,6 +118,29 @@ func vfxPreview(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 		return nil, fmt.Errorf("vfx chain: %w", err)
 	}
 
+	if in.Fit {
+		// clean source frame, fit inside the target, overlaid centered on the bg
+		fg := filepath.Join(tmp, "fg.png")
+		fa := []string{"-hide_banner", "-nostats", "-y"}
+		if in.T > 0 {
+			fa = append(fa, "-ss", fmt.Sprintf("%.3f", in.T))
+		}
+		fa = append(fa, "-i", in.Input, "-frames:v", "1",
+			"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", in.Chain.W, in.Chain.H), fg)
+		if err := runQuiet(ctx, bin, fa...); err != nil {
+			return nil, fmt.Errorf("fg extract: %w", err)
+		}
+		if err := runQuiet(ctx, bin, "-hide_banner", "-nostats", "-y",
+			"-f", "rawvideo", "-pix_fmt", "rgba",
+			"-video_size", fmt.Sprintf("%dx%d", in.Chain.W, in.Chain.H),
+			"-i", rawOut, "-i", fg,
+			"-filter_complex", "[0:v][1:v]overlay=(W-w)/2:(H-h)/2",
+			"-frames:v", "1", in.Output); err != nil {
+			return nil, fmt.Errorf("compose: %w", err)
+		}
+		return json.RawMessage(`{"ok":true}`), nil
+	}
+
 	if err := runQuiet(ctx, bin, "-hide_banner", "-nostats", "-y",
 		"-f", "rawvideo", "-pix_fmt", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", in.Chain.W, in.Chain.H),
@@ -123,14 +151,16 @@ func vfxPreview(params json.RawMessage, _ EmitFunc) (json.RawMessage, error) {
 }
 
 type vfxRunIn struct {
-	Input     string            `json:"input"`
-	Output    string            `json:"output"`
-	Preset    *transcode.Preset `json:"preset,omitempty"`
-	PresetID  string            `json:"presetId,omitempty"`
-	TrimStart float64           `json:"trimStart,omitempty"`
-	TrimEnd   float64           `json:"trimEnd,omitempty"`
-	VF        string            `json:"vf,omitempty"`
-	Chain     vfx.Chain         `json:"chain"`
+	Input      string            `json:"input"`
+	Output     string            `json:"output"`
+	Preset     *transcode.Preset `json:"preset,omitempty"`
+	PresetID   string            `json:"presetId,omitempty"`
+	TrimStart  float64           `json:"trimStart,omitempty"`
+	TrimEnd    float64           `json:"trimEnd,omitempty"`
+	VF         string            `json:"vf,omitempty"`
+	DecodePost string            `json:"decodePost,omitempty"` // post-scale filter on the piped stream (fit bg blur)
+	Fit        bool              `json:"fit,omitempty"`        // overlay the clean source centered at encode time
+	Chain      vfx.Chain         `json:"chain"`
 }
 
 // vfxRun exports through the effect chain: decode | chain | encode, three
@@ -203,9 +233,13 @@ func vfxRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 
-	dec := exec.CommandContext(ctx, bin, job.DecodeRawArgs(in.Chain.W, in.Chain.H, in.Chain.FPS)...)
+	dec := exec.CommandContext(ctx, bin, job.DecodeRawArgsPost(in.Chain.W, in.Chain.H, in.Chain.FPS, in.DecodePost)...)
 	fx := exec.CommandContext(ctx, exe, "--pipe", chainPath)
-	enc := exec.CommandContext(ctx, bin, job.EncodeRawArgs(in.Chain.W, in.Chain.H, in.Chain.FPS)...)
+	encArgs := job.EncodeRawArgs(in.Chain.W, in.Chain.H, in.Chain.FPS)
+	if in.Fit {
+		encArgs = job.EncodeRawOverlayArgs(in.Chain.W, in.Chain.H, in.Chain.FPS)
+	}
+	enc := exec.CommandContext(ctx, bin, encArgs...)
 	for _, c := range []*exec.Cmd{dec, fx, enc} {
 		sysexec.Hide(c) // children inherit this worker's kill-on-close job object
 	}

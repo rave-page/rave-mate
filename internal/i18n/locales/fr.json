@@ -164,6 +164,8 @@
         "orig": "Original"
       },
       "aspectLabel": "Format",
+      "bgBlur": "Flou d'arrière-plan",
+      "changeSource": "Changer de source…",
       "clearKeyframes": "Effacer les images clés",
       "cutFrom": "coupe depuis {in}",
       "cutInfo": "coupe {in}–{out}",
@@ -178,11 +180,18 @@
       "fxMissing": "manquant",
       "fxNoPlugins": "Aucun plugin d'effet trouvé. Déposez des .dll frei0r dans {dir} puis rouvrez cet onglet.",
       "fxPreview": "Prévisualiser les effets sur l'image",
+      "layout": {
+        "crop": "Remplir par zoom (recadrer au cadre)",
+        "fit": "Original au centre + fond rempli"
+      },
+      "layoutLabel": "Disposition",
       "noFrame": "Pas encore d'aperçu – appuyez sur Utiliser l'image du curseur.",
       "noMedia": "Chargement du média…",
       "noSource": "Choisissez un enregistrement ou parcourez un fichier vidéo/audio.",
       "outAuto": "auto : à côté de la source",
       "outPath": "Fichier de sortie",
+      "paneInspector": "Inspecteur",
+      "panePreview": "Aperçu",
       "preset": {
         "land": "Paysage 1080p",
         "port45": "Instagram 4:5 1080×1350",
@@ -196,6 +205,8 @@
       "sectionFx": "Effets",
       "sectionReframe": "Recadrage",
       "sectionSource": "Source",
+      "srcAudio": "audio",
+      "srcVideo": "vidéo",
       "subtitle": "Coupez, recadrez et exportez des clips – rognez comme dans Publier, puis passez en vertical",
       "toast": {
         "exportFailed": "Échec de l'export : ",

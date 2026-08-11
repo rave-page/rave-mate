@@ -323,6 +323,8 @@
         "orig": "Original"
       },
       "aspectLabel": "Aspect",
+      "bgBlur": "Background blur",
+      "changeSource": "Change source…",
       "clearKeyframes": "Clear keyframes",
       "cutFrom": "cut from {in}",
       "cutInfo": "cut {in}–{out}",
@@ -337,11 +339,18 @@
       "fxMissing": "missing",
       "fxNoPlugins": "No effect plugins found. Drop frei0r plugin .dll files into {dir} and reopen this tab.",
       "fxPreview": "Preview effects on frame",
+      "layout": {
+        "crop": "Zoom-fill (crop to frame)",
+        "fit": "Original inside + filled background"
+      },
+      "layoutLabel": "Layout",
       "noFrame": "No preview frame yet - press Use playhead frame.",
       "noMedia": "Loading media…",
       "noSource": "Pick a recording or browse for a video/audio file.",
       "outAuto": "auto: next to the source",
       "outPath": "Output file",
+      "paneInspector": "Inspector",
+      "panePreview": "Preview",
       "preset": {
         "land": "Landscape 1080p",
         "port45": "Instagram 4:5 1080×1350",
@@ -355,6 +364,8 @@
       "sectionFx": "Effects",
       "sectionReframe": "Reframe",
       "sectionSource": "Source",
+      "srcAudio": "audio",
+      "srcVideo": "video",
       "subtitle": "Cut, reframe & export clips - trim like Publish, then go vertical",
       "toast": {
         "exportFailed": "Export failed: ",

@@ -164,6 +164,8 @@
         "orig": "Original"
       },
       "aspectLabel": "Aspecto",
+      "bgBlur": "Desenfoque de fondo",
+      "changeSource": "Cambiar fuente…",
       "clearKeyframes": "Borrar keyframes",
       "cutFrom": "corte desde {in}",
       "cutInfo": "corte {in}–{out}",
@@ -178,11 +180,18 @@
       "fxMissing": "falta",
       "fxNoPlugins": "No se encontraron plugins de efectos. Copia archivos .dll de frei0r en {dir} y reabre esta pestaña.",
       "fxPreview": "Previsualizar efectos en el fotograma",
+      "layout": {
+        "crop": "Rellenar con zoom (recortar al marco)",
+        "fit": "Original dentro + fondo relleno"
+      },
+      "layoutLabel": "Disposición",
       "noFrame": "Aún no hay fotograma: pulsa Usar fotograma actual.",
       "noMedia": "Cargando medios…",
       "noSource": "Elige una grabación o busca un archivo de vídeo/audio.",
       "outAuto": "auto: junto a la fuente",
       "outPath": "Archivo de salida",
+      "paneInspector": "Inspector",
+      "panePreview": "Vista previa",
       "preset": {
         "land": "Horizontal 1080p",
         "port45": "Instagram 4:5 1080×1350",
@@ -196,6 +205,8 @@
       "sectionFx": "Efectos",
       "sectionReframe": "Reencuadre",
       "sectionSource": "Fuente",
+      "srcAudio": "audio",
+      "srcVideo": "vídeo",
       "subtitle": "Corta, reencuadra y exporta clips: recorta como en Publicar y pasa a vertical",
       "toast": {
         "exportFailed": "Error al exportar: ",

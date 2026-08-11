@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 
+	"rave.page/mate/internal/appdir"
 	"rave.page/mate/internal/sysexec"
 )
 
@@ -29,14 +30,15 @@ func exeFile() string {
 	return ExeName
 }
 
-// ExePath locates the child: RAVE_MATE_VFX_EXE override, else beside our exe
-// (install layout), else the in-repo zig-out (dev/test runs).
+// ExePath locates the child: RAVE_MATE_VFX_EXE override, else the install dir
+// (appdir - NOT os.Executable(): workers relaunch from per-role hardlinks in the
+// proc cache dir, which has no sidecars, see #49), else the in-repo zig-out
+// (dev/test runs).
 func ExePath() (string, error) {
 	if p := os.Getenv("RAVE_MATE_VFX_EXE"); p != "" {
 		return p, nil
 	}
-	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), exeFile())
+	if p := appdir.SidecarPath(exeFile()); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}

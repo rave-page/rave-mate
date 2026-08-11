@@ -164,6 +164,8 @@
         "orig": "Original"
       },
       "aspectLabel": "Seitenverhältnis",
+      "bgBlur": "Hintergrund-Unschärfe",
+      "changeSource": "Quelle wechseln…",
       "clearKeyframes": "Keyframes löschen",
       "cutFrom": "Schnitt ab {in}",
       "cutInfo": "Schnitt {in}–{out}",
@@ -178,11 +180,18 @@
       "fxMissing": "fehlt",
       "fxNoPlugins": "Keine Effekt-Plugins gefunden. frei0r-Plugin-.dll-Dateien nach {dir} legen und den Tab neu öffnen.",
       "fxPreview": "Effekte auf Frame testen",
+      "layout": {
+        "crop": "Formatfüllend (auf Rahmen zuschneiden)",
+        "fit": "Original innen + gefüllter Hintergrund"
+      },
+      "layoutLabel": "Layout",
       "noFrame": "Noch kein Vorschau-Frame – Playhead-Frame verwenden drücken.",
       "noMedia": "Medien werden geladen…",
       "noSource": "Aufnahme wählen oder Video-/Audiodatei suchen.",
       "outAuto": "auto: neben der Quelle",
       "outPath": "Ausgabedatei",
+      "paneInspector": "Inspektor",
+      "panePreview": "Vorschau",
       "preset": {
         "land": "Querformat 1080p",
         "port45": "Instagram 4:5 1080×1350",
@@ -196,6 +205,8 @@
       "sectionFx": "Effekte",
       "sectionReframe": "Reframe",
       "sectionSource": "Quelle",
+      "srcAudio": "audio",
+      "srcVideo": "video",
       "subtitle": "Clips schneiden, reframen & exportieren – trimmen wie in Publish, dann Hochformat",
       "toast": {
         "exportFailed": "Export fehlgeschlagen: ",

@@ -10,6 +10,12 @@ import "fmt"
 // DecodeRawArgs builds the decode half: VF (crop) → scale to w×h, constant fps,
 // RGBA rawvideo on stdout, audio dropped.
 func (j Job) DecodeRawArgs(w, h int, fps float64) []string {
+	return j.DecodeRawArgsPost(w, h, fps, "")
+}
+
+// DecodeRawArgsPost is DecodeRawArgs with a post-scale filter suffix (e.g. the
+// fit layout's background blur - after the downscale, where it is cheap).
+func (j Job) DecodeRawArgsPost(w, h int, fps float64, post string) []string {
 	a := []string{"-hide_banner", "-nostats", "-y"}
 	if j.TrimStart > 0 {
 		a = append(a, "-ss", ftoa(j.TrimStart))
@@ -22,6 +28,9 @@ func (j Job) DecodeRawArgs(w, h int, fps float64) []string {
 	if j.VF != "" {
 		vf = j.VF + "," + vf
 	}
+	if post != "" {
+		vf += "," + post
+	}
 	return append(a, "-vf", vf, "-r", ftoa(fps), "-an", "-f", "rawvideo", "-pix_fmt", "rgba", "-")
 }
 
@@ -29,6 +38,18 @@ func (j Job) DecodeRawArgs(w, h int, fps float64) []string {
 // audio from j.Input (same trim window), preset video/audio args (scaling and VF are
 // decode-side, so the preset's geometry is suppressed here).
 func (j Job) EncodeRawArgs(w, h int, fps float64) []string {
+	return j.encodeRawArgs(w, h, fps, false)
+}
+
+// EncodeRawOverlayArgs is the fit-layout encode half: the piped raw stream is the
+// styled BACKGROUND; the untouched source (input 1, same trim) is scaled to fit
+// inside w×h and overlaid centered - the foreground never passes through the
+// effect chain.
+func (j Job) EncodeRawOverlayArgs(w, h int, fps float64) []string {
+	return j.encodeRawArgs(w, h, fps, true)
+}
+
+func (j Job) encodeRawArgs(w, h int, fps float64, overlay bool) []string {
 	a := []string{"-hide_banner", "-nostats", "-y",
 		"-f", "rawvideo", "-pix_fmt", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", w, h),
@@ -40,7 +61,13 @@ func (j Job) EncodeRawArgs(w, h int, fps float64) []string {
 	if j.TrimEnd > j.TrimStart {
 		a = append(a, "-t", ftoa(j.TrimEnd-j.TrimStart))
 	}
-	a = append(a, "-map", "0:v:0", "-map", "1:a:0?")
+	if overlay {
+		fc := fmt.Sprintf("[1:v]fps=%s,scale=%d:%d:force_original_aspect_ratio=decrease[fg];"+
+			"[0:v][fg]overlay=(W-w)/2:(H-h)/2[vout]", ftoa(fps), w, h)
+		a = append(a, "-filter_complex", fc, "-map", "[vout]", "-map", "1:a:0?")
+	} else {
+		a = append(a, "-map", "0:v:0", "-map", "1:a:0?")
+	}
 
 	jv := j
 	jv.VF = ""

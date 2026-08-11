@@ -56,3 +56,35 @@ func TestEncodeRawArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeRawArgsPost(t *testing.T) {
+	j := Job{Input: "in.mp4", VF: "crop=1214:2160:1300:0"}
+	got := j.DecodeRawArgsPost(1080, 1920, 30, "gblur=sigma=20")
+	want := "crop=1214:2160:1300:0,scale=1080:1920,gblur=sigma=20"
+	found := false
+	for i, a := range got {
+		if a == "-vf" && got[i+1] == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("vf chain missing: %q", got)
+	}
+}
+
+func TestEncodeRawOverlayArgs(t *testing.T) {
+	p := Preset{Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", CRF: 18}
+	j := Job{Input: "in.mp4", Output: "out.mp4", Preset: p, TrimStart: 2, TrimEnd: 8}
+	got := j.EncodeRawOverlayArgs(1080, 1920, 30)
+	joined := "\x00" + strings.Join(got, "\x00") + "\x00"
+	wantFC := "[1:v]fps=30.000,scale=1080:1920:force_original_aspect_ratio=decrease[fg];" +
+		"[0:v][fg]overlay=(W-w)/2:(H-h)/2[vout]"
+	for _, frag := range []string{"-filter_complex\x00" + wantFC, "-map\x00[vout]", "-map\x001:a:0?"} {
+		if !strings.Contains(joined, frag) {
+			t.Errorf("missing %q in %q", frag, got)
+		}
+	}
+	if strings.Contains(joined, "-map\x000:v:0") {
+		t.Errorf("overlay args must not map the raw stream directly: %q", got)
+	}
+}

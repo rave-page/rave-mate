@@ -242,6 +242,9 @@ func init() {
 		u.edEdit(func() {
 			if v := m.arg("ed-mode:"); v == "image" || v == "video" {
 				editor.mode = v
+				if v == "video" {
+					editor.video.fxScanned = false // pick up freshly dropped plugins
+				}
 			}
 		})
 	})

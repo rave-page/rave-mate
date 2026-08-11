@@ -37,6 +37,8 @@ type edvSt struct {
 	panDrag bool
 	panLive float64 // live window position while dragging
 
+	rebound bool // one-shot: mp re-bind of the persisted source after restart
+
 	fxPlugins  []vfx.Plugin // discovered effect plugins (scan once per session)
 	fxScanned  bool
 	fxScanning bool
@@ -67,15 +69,31 @@ func edvIsVideo(path string) bool {
 }
 
 func init() {
-	onExact("edv-src", func(u *UI, m actMsg) { u.edvLoad(m.Val) }) // pick-file target
+	onExact("edv-src", func(u *UI, m actMsg) { // pick-file target
+		u.closeModal()
+		u.edvLoad(m.Val)
+	})
+	onExact("edv-src-open", func(u *UI, m actMsg) { u.edvOpenSources() })
 	onPrefix("edv-cap:", func(u *UI, m actMsg) {
 		if s, ok := u.pubCapByID(m.arg("edv-cap:")); ok {
+			u.closeModal()
 			u.edvLoad(s.Path)
 		}
 	})
 	onExact("edv-aspect", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Aspect = m.Val; v.proj.Normalize() })
 		u.patchMain()
+	})
+	onExact("edv-layout", func(u *UI, m actMsg) {
+		u.edvMut(func(v *edvSt) { v.proj.Layout = m.Val; v.proj.Normalize() })
+		u.patchMain()
+	})
+	onExact("edv-bgblur", func(u *UI, m actMsg) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
+		if err != nil {
+			return
+		}
+		u.edvMut(func(v *edvSt) { v.proj.BGBlur = clamp01(f) })
 	})
 	onExact("edv-pan", func(u *UI, m actMsg) { u.edvPan(m.Val) })
 	onExact("edv-frame", func(u *UI, m actMsg) { u.edvFrameAtPlayhead() })
@@ -191,6 +209,62 @@ func (u *UI) edvLoad(path string) {
 		u.edvFrame(0)
 	}
 	u.patchMain()
+}
+
+// edvRebind re-binds the persisted project source into the mp component once
+// per session (after a restart the project remembers the source but the player
+// starts empty).
+func (u *UI) edvRebind() {
+	editor.mu.Lock()
+	edvEnsure()
+	src := editor.video.proj.Source
+	done := editor.video.rebound
+	editor.video.rebound = true
+	editor.mu.Unlock()
+	if done || src == "" || len(u.mpSnap("editor").media) > 0 {
+		return
+	}
+	if _, err := os.Stat(src); err != nil {
+		return
+	}
+	u.bg(func() { u.edvLoad(src) })
+}
+
+// edvOpenSources shows the source-picker modal: browse + recent captures.
+func (u *UI) edvOpenSources() {
+	editor.mu.Lock()
+	edvEnsure()
+	cur := editor.video.proj.Source
+	editor.mu.Unlock()
+
+	var b strings.Builder
+	b.WriteString(btnRow(uiBtn{Label: i18n.T("editor.browse"), Variant: "outline", Act: "pick-file:edv-src"}.html()))
+	b.WriteString(`<div class=edv-srclist>`)
+	if caps, loaded := u.pubCapList(); !loaded {
+		b.WriteString(hint("info", i18n.T("editor.video.noMedia")))
+	} else if len(caps) > 0 {
+		n := len(caps)
+		if n > 40 {
+			n = 40
+		}
+		for _, s := range caps[:n] {
+			meta := i18n.T("editor.video.srcAudio")
+			if edvIsVideo(s.Path) {
+				meta = i18n.T("editor.video.srcVideo")
+			}
+			cls := "edv-srcrow"
+			if s.Path == cur {
+				cls = "edv-srcrow edv-srcrow-sel"
+			}
+			b.WriteString(`<button class="` + cls + `" data-act=` + attrQ("edv-cap:"+s.ID) + `>` +
+				`<span class=edv-srcrow-name>` + htmlEscape(filepath.Base(s.Path)) + `</span>` +
+				`<span class=edv-srcrow-meta>` + htmlEscape(meta) + `</span></button>`)
+		}
+	} else {
+		b.WriteString(hint("info", i18n.T("editor.video.noSource")))
+	}
+	b.WriteString(`</div>`)
+	u.openModal(modal(i18n.T("editor.video.sectionSource"), b.String(), `<span></span>`))
 }
 
 // edvSrcDims returns the probed source dimensions from the mp instance (0,0
@@ -553,6 +627,15 @@ func edvResolveFx(effects []videoedit.EffectInst, plugins []vfx.Plugin) []vfx.Fx
 	return out
 }
 
+// edvBlurFilter maps the 0..1 background-blur knob to a gblur filter ("" = off).
+func edvBlurFilter(v float64) string {
+	sigma := clamp01(v) * 40
+	if sigma < 0.5 {
+		return ""
+	}
+	return fmt.Sprintf("gblur=sigma=%.1f", sigma)
+}
+
 // edvFitDims scales w×h down to maxW, keeping ratio, forced even.
 func edvFitDims(w, h, maxW int) (int, int) {
 	if w > maxW {
@@ -585,10 +668,11 @@ func (u *UI) edvFxPrevRender() {
 		return
 	}
 	fx := edvResolveFx(proj.Effects, plugins)
-	if len(fx) == 0 {
+	cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect))
+	fit := proj.Layout == "fit" && axis != ""
+	if len(fx) == 0 && !fit {
 		return
 	}
-	cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(proj.Aspect))
 	vf := ""
 	if axis != "" {
 		pos := proj.PanAt(frameT)
@@ -608,12 +692,16 @@ func (u *UI) edvFxPrevRender() {
 		fxT = 0
 	}
 	chain := vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx}
+	post := ""
+	if fit {
+		post = edvBlurFilter(proj.BGBlur)
+	}
 	dir := edDataDir("videoeditor")
 	if dir == "" {
 		return
 	}
 	chainRaw, _ := json.Marshal(chain)
-	key := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s|%.2f|%s", src, frameT, chainRaw)))
+	key := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s|%.2f|%s|%v|%s", src, frameT, chainRaw, fit, post)))
 	out := filepath.Join(dir, fmt.Sprintf("fxprev-%08x.png", key))
 
 	editor.mu.Lock()
@@ -633,7 +721,7 @@ func (u *UI) edvFxPrevRender() {
 				defer cancel()
 				_, err = u.svc.Workers.RunStream(ctx, "vfx", "vfx.preview", map[string]any{
 					"input": src, "t": frameT, "fxT": fxT, "vf": vf,
-					"chain": chain, "output": out,
+					"chain": chain, "output": out, "fit": fit, "decodePost": post,
 				}, nil)
 			}
 		}
@@ -709,7 +797,7 @@ func (u *UI) edvExport() {
 		out = edvOutDefault(src, ep.Key)
 	}
 	fx := edvResolveFx(v.proj.Effects, v.fxPlugins)
-	aspect := v.proj.Aspect
+	aspect, layout, bgBlur := v.proj.Aspect, v.proj.Layout, v.proj.BGBlur
 	v.export = edvExport{running: true, stage: "prepare"}
 	editor.mu.Unlock()
 
@@ -718,7 +806,9 @@ func (u *UI) edvExport() {
 		"trimStart": trimS, "trimEnd": trimE, "vf": crop,
 	}
 	typ, method := "transcode", "transcode.run"
-	if len(fx) > 0 && edvIsVideo(src) {
+	_, _, cropAxis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(aspect))
+	fit := layout == "fit" && cropAxis != "" // fit needs a real reframe to fill
+	if (len(fx) > 0 || fit) && edvIsVideo(src) {
 		// route through the effects pipeline: chain runs at the export target size
 		cw, ch, axis := videoedit.CropSize(srcW, srcH, videoedit.AspectByKey(aspect))
 		if axis == "" {
@@ -733,6 +823,12 @@ func (u *UI) edvExport() {
 			fps = t.media[0].src.FPS
 		}
 		params["chain"] = vfx.Chain{W: tw, H: th, FPS: fps, Fx: fx}
+		if fit {
+			params["fit"] = true
+			if post := edvBlurFilter(bgBlur); post != "" {
+				params["decodePost"] = post
+			}
+		}
 		typ, method = "vfx", "vfx.run"
 	}
 	u.patchMain()

@@ -75,13 +75,17 @@ pub const State = struct {
     sub: []const u8 = "",
     modes: []const editor.ModeTab = &.{},
 
-    secSource: []const u8 = "",
-    browse: c.Btn = .{},
-    caps: c.Select = .{},
+    srcBtn: c.Btn = .{},
     hasSrc: bool = false,
     srcName: []const u8 = "",
     srcInfo: []const u8 = "",
     noSrc: []const u8 = "",
+
+    viewTitle: []const u8 = "",
+    inspTitle: []const u8 = "",
+    layout: c.Select = .{},
+    hasBlur: bool = false,
+    blur: c.Slider = .{},
 
     player: []const u8 = "", // RAW mp markup
     noMedia: []const u8 = "",
@@ -111,43 +115,17 @@ pub const State = struct {
     @"export": Export = .{},
 };
 
-/// render mirrors Go editorVideoHTML.
+/// render mirrors Go editorVideoHTML (NLE panes: sources/viewer/inspector/timeline).
 pub fn render(h: *Html, s: State) !void {
     try c.panel(h, s.title, s.sub);
     try editor.renderModes(h, s.modes);
+    try h.raw("<div class=edv-nle>");
 
-    // source row
-    try c.sectionOpen(h, s.secSource);
-    try h.raw("<div class=edv-src>");
-    try c.btnOf(h, s.browse);
-    try c.selectBox(h, s.caps);
-    if (s.hasSrc) {
-        try h.raw("<span class=edv-srcname>");
-        try h.esc(s.srcName);
-        try h.raw("</span>");
-        if (s.srcInfo.len != 0) {
-            try h.raw("<span class=edv-srcinfo>");
-            try h.esc(s.srcInfo);
-            try h.raw("</span>");
-        }
-    } else {
-        try c.hint(h, "info", s.noSrc);
-    }
+    // viewer pane
+    try h.raw("<div class=\"edv-pane edv-pane-view\"><div class=edv-pane-title>");
+    try h.esc(s.viewTitle);
     try h.raw("</div>");
-    try c.sectionClose(h);
-
-    if (s.player.len != 0) {
-        try h.raw("<div class=edv-player>");
-        try h.raw(s.player);
-        try h.raw("</div>");
-        try c.hint(h, "info", s.editHint);
-    } else if (s.hasSrc) {
-        try c.emptyState(h, s.noMedia);
-    }
-
     if (s.showRef) {
-        try c.sectionOpen(h, s.secReframe);
-        try c.selectBox(h, s.aspect);
         try h.raw("<div id=edv-frame>");
         try renderFrame(h, s.frame);
         try h.raw("</div>");
@@ -174,11 +152,47 @@ pub fn render(h: *Html, s: State) !void {
             try h.raw("</div>");
         }
         try c.hint(h, "info", s.refHint);
-        try c.sectionClose(h);
+        try h.raw("<div id=edv-fxprev>");
+        try renderFxPrev(h, s.fxPrev);
+        try h.raw("</div>");
+    } else if (s.hasSrc) {
+        try c.emptyState(h, s.noMedia);
+    } else {
+        try c.emptyState(h, s.noSrc);
     }
+    try h.raw("</div>");
 
+    // inspector pane
+    try h.raw("<div class=\"edv-pane edv-pane-insp\"><div class=edv-pane-title>");
+    try h.esc(s.inspTitle);
+    try h.raw("</div>");
+    if (s.hasSrc) {
+        try h.raw("<div class=edv-src><span class=edv-srcname>");
+        try h.esc(s.srcName);
+        try h.raw("</span>");
+        if (s.srcInfo.len != 0) {
+            try h.raw("<span class=edv-srcinfo>");
+            try h.esc(s.srcInfo);
+            try h.raw("</span>");
+        }
+        try h.raw("</div>");
+    } else {
+        try c.hint(h, "info", s.noSrc);
+    }
+    try c.btnRowOpen(h);
+    try c.btnOf(h, s.srcBtn);
+    try c.btnRowClose(h);
+    if (s.showRef) {
+        try c.selectBox(h, s.aspect);
+        try c.selectBox(h, s.layout);
+        if (s.hasBlur) {
+            try c.slider(h, s.blur);
+        }
+    }
     if (s.showFx) {
-        try c.sectionOpen(h, s.secFx);
+        try h.raw("<div class=edv-insp-sec>");
+        try h.esc(s.secFx);
+        try h.raw("</div>");
         try c.selectBox(h, s.fxAdd);
         if (s.fxNone.len != 0) {
             try c.hint(h, "info", s.fxNone);
@@ -186,21 +200,30 @@ pub fn render(h: *Html, s: State) !void {
         for (s.fxRows) |r| {
             try renderFxRow(h, r);
         }
-        try h.raw("<div id=edv-fxprev>");
-        try renderFxPrev(h, s.fxPrev);
-        try h.raw("</div>");
         try c.btnRowOpen(h);
         try c.btnOf(h, s.fxPrevBtn);
         try c.btnRowClose(h);
         try c.hint(h, "info", s.fxHint);
-        try c.sectionClose(h);
     }
-
-    try c.sectionOpen(h, s.secExport);
-    try h.raw("<div id=edv-export>");
+    try h.raw("<div class=edv-insp-sec>");
+    try h.esc(s.secExport);
+    try h.raw("</div><div id=edv-export>");
     try renderExport(h, s.@"export");
+    try h.raw("</div></div>");
+
+    // timeline pane
+    try h.raw("<div class=\"edv-pane edv-pane-tl\">");
+    if (s.player.len != 0) {
+        try h.raw("<div class=edv-player>");
+        try h.raw(s.player);
+        try h.raw("</div>");
+        try c.hint(h, "info", s.editHint);
+    } else if (s.hasSrc) {
+        try c.emptyState(h, s.noMedia);
+    }
     try h.raw("</div>");
-    try c.sectionClose(h);
+
+    try h.raw("</div>");
 }
 
 /// renderFxRow mirrors Go edvFxRowHTML.

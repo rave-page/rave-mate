@@ -28,11 +28,13 @@ thumbnail in two minutes":
 
 ## Video mode
 
-Built for "wide capture in, phone-format clip out" - the cut workflow is the
-same as the Publish tab, so nothing new to learn:
+Built for "wide capture in, phone-format clip out", laid out like an NLE: a
+big **Preview** viewer, an **Inspector** column on the right (source, aspect,
+layout, effects, export), and the trim **timeline** across the bottom - the cut
+workflow is the same as the Publish tab, so nothing new to learn:
 
-1. **Source**: pick a recent capture from the list or browse for any
-   video/audio file.
+1. **Source**: *Change source…* opens a picker with your recent recordings
+   (video/audio) plus Browse for any file.
 2. **Cut**: trim IN/OUT on the embedded player - waveform, zoom and silence
    detection behave exactly like Publish.
 3. **Reframe** (video sources): choose a target aspect - 9:16 vertical
@@ -41,13 +43,18 @@ same as the Publish tab, so nothing new to learn:
    **Keyframes** animate the pan: press *Use playhead frame* to grab a frame at
    the playhead, *+ Keyframe at playhead* to pin the window there, and the pan
    glides between pins in the export (chips jump to / delete each keyframe).
-4. **Effects**: an open-standard effect chain, applied between reframe and
+4. **Layout**: *Zoom-fill* crops to the frame; *Original inside + filled
+   background* keeps the whole picture at its native aspect, centered, and
+   fills the rest with a zoomed copy (the pan window picks the slice) - the
+   classic Reel look. A **Background blur** slider softens the fill, and the
+   effect chain styles only the background; the foreground stays clean.
+5. **Effects**: an open-standard effect chain, applied between reframe and
    encode (see below).
-5. **Export**: pick a target (Reel/Story/TikTok 1080×1920, Instagram 4:5,
+6. **Export**: pick a target (Reel/Story/TikTok 1080×1920, Instagram 4:5,
    square, landscape 1080p, keep source size), optionally set the output file
    (auto: next to the source), press *Export video*. Progress and cancel work
-   like every other export; effect chains route through the effects engine
-   automatically.
+   like every other export; effect chains and the filled-background layout
+   route through the effects engine automatically.
 
 ## Effects (frei0r + ISF)
 

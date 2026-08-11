@@ -406,6 +406,93 @@
   margin: 0.35rem 0;
 }
 
+/* ── video mode: NLE pane grid ── */
+.edv-nle {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 360px);
+  grid-template-areas:
+    "view insp"
+    "tl tl";
+  gap: 0.75rem;
+  align-items: start;
+}
+.edv-pane {
+  min-width: 0;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+.edv-pane-view { grid-area: view; }
+.edv-pane-insp { grid-area: insp; }
+.edv-pane-tl { grid-area: tl; }
+.edv-pane-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rp-muted, #a6abb6);
+  margin-bottom: 0.5rem;
+}
+.edv-insp-sec {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rp-muted, #a6abb6);
+  margin: 0.75rem 0 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.edv-srcrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 2px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--rp-fg, #fafafa);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+.edv-srcrow:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.edv-srcrow-sel {
+  border-color: var(--rp-base, #f70864);
+  background: rgba(247, 8, 100, 0.12);
+}
+.edv-srcrow-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edv-srcrow-meta {
+  flex: 0 0 auto;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rp-muted, #a6abb6);
+}
+.edv-srclist {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+@media (max-width: 1100px) {
+  .edv-nle {
+    grid-template-columns: 1fr;
+    grid-template-areas: "view" "insp" "tl";
+  }
+}
+
 /* ── effect chain ── */
 .edv-fx {
   margin: 0.5rem 0;

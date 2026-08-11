@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xe5954bea;
+pub const schema_hash: u32 = 0x71dc14b4;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4294,9 +4294,7 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         1 => out.title = try r.str(t),
         2 => out.sub = try r.str(t),
         3 => out.modes = try r.list(editor.ModeTab, decodeEdModeTab, t),
-        4 => out.secSource = try r.str(t),
-        5 => out.browse = try r.sub(c.Btn, decodeUiBtn, t),
-        6 => out.caps = try r.sub(c.Select, decodeSelState, t),
+        5 => out.srcBtn = try r.sub(c.Btn, decodeUiBtn, t),
         7 => out.hasSrc = try r.boolean(t),
         8 => out.srcName = try r.str(t),
         9 => out.srcInfo = try r.str(t),
@@ -4324,6 +4322,11 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         31 => out.fxPrev = try r.sub(editor_video.FxPrev, decodeEdvFxPrev, t),
         32 => out.fxPrevBtn = try r.sub(c.Btn, decodeUiBtn, t),
         33 => out.fxHint = try r.str(t),
+        34 => out.viewTitle = try r.str(t),
+        35 => out.inspTitle = try r.str(t),
+        36 => out.layout = try r.sub(c.Select, decodeSelState, t),
+        37 => out.hasBlur = try r.boolean(t),
+        38 => out.blur = try r.sub(c.Slider, decodeUiSlider, t),
         else => try r.skip(t),
     };
 }

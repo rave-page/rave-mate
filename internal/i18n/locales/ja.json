@@ -164,6 +164,8 @@
         "orig": "オリジナル"
       },
       "aspectLabel": "アスペクト",
+      "bgBlur": "背景ぼかし",
+      "changeSource": "ソースを変更…",
       "clearKeyframes": "キーフレームを消去",
       "cutFrom": "{in} からカット",
       "cutInfo": "カット {in}–{out}",
@@ -178,11 +180,18 @@
       "fxMissing": "見つかりません",
       "fxNoPlugins": "エフェクトプラグインが見つかりません。frei0r プラグインの .dll を {dir} に置いてタブを開き直してください。",
       "fxPreview": "フレームでエフェクトをプレビュー",
+      "layout": {
+        "crop": "ズームフィル（フレームに合わせて切り抜き）",
+        "fit": "オリジナルを中央に + 背景フィル"
+      },
+      "layoutLabel": "レイアウト",
       "noFrame": "プレビューフレームがありません – 「再生位置のフレームを使用」を押してください。",
       "noMedia": "メディアを読み込み中…",
       "noSource": "録画を選ぶか、動画/音声ファイルを参照してください。",
       "outAuto": "自動: ソースの隣",
       "outPath": "出力ファイル",
+      "paneInspector": "インスペクター",
+      "panePreview": "プレビュー",
       "preset": {
         "land": "横型 1080p",
         "port45": "Instagram 4:5 1080×1350",
@@ -196,6 +205,8 @@
       "sectionFx": "エフェクト",
       "sectionReframe": "リフレーム",
       "sectionSource": "ソース",
+      "srcAudio": "音声",
+      "srcVideo": "動画",
       "subtitle": "クリップのカット・リフレーム・書き出し – Publishと同じトリムで縦型に",
       "toast": {
         "exportFailed": "書き出しに失敗: ",

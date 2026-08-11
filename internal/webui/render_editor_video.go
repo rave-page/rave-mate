@@ -87,19 +87,25 @@ type edvExportSt struct {
 	TrimInfo  string   `json:"trimInfo"` // "cut 1:20–4:56 · crop 606×1080"
 }
 
-// edvViewState is the video-mode view (JSON/wire → Zig).
+// edvViewState is the video-mode view (JSON/wire → Zig). NLE-style panes:
+// viewer center, inspector right, timeline bottom (sources live in a modal).
 type edvViewState struct {
 	Title string      `json:"title"`
 	Sub   string      `json:"sub"`
 	Modes []edModeTab `json:"modes"`
 
-	SecSource string   `json:"secSource"`
-	Browse    uiBtn    `json:"browse"`
-	Caps      selState `json:"caps"`
-	HasSrc    bool     `json:"hasSrc"`
-	SrcName   string   `json:"srcName"`
-	SrcInfo   string   `json:"srcInfo"` // "1920×1080 · 58:12"
-	NoSrc     string   `json:"noSrc"`
+	SrcBtn  uiBtn  `json:"srcBtn"` // opens the sources modal
+	HasSrc  bool   `json:"hasSrc"`
+	SrcName string `json:"srcName"`
+	SrcInfo string `json:"srcInfo"` // "1920×1080 · 58:12"
+	NoSrc   string `json:"noSrc"`
+
+	ViewTitle string `json:"viewTitle"` // preview pane title
+	InspTitle string `json:"inspTitle"` // inspector pane title
+
+	Layout  selState `json:"layout"`  // crop | fit
+	HasBlur bool     `json:"hasBlur"` // fit layout: show bg blur slider
+	Blur    uiSlider `json:"blur"`
 
 	Player   string `json:"player"` // RAW mp component markup ("" = none)
 	NoMedia  string `json:"noMedia"`
@@ -132,7 +138,7 @@ type edvViewState struct {
 func emptyEdvState() edvViewState {
 	return edvViewState{
 		Modes:  []edModeTab{},
-		Caps:   selState{Rows: []selRow{}},
+		Layout: selState{Rows: []selRow{}},
 		Kfs:    []edvKfRow{},
 		FxAdd:  selState{Rows: []selRow{}},
 		FxRows: []edvFxRow{},
@@ -164,8 +170,7 @@ func (u *UI) editorVideoState() edvViewState {
 		{Val: "image", Label: i18n.T("editor.modeImage")},
 		{Val: "video", Label: i18n.T("editor.modeVideo"), Active: true},
 	}
-	st.SecSource = i18n.T("editor.video.sectionSource")
-	st.Browse = uiBtn{Label: i18n.T("editor.browse"), Variant: "outline", Act: "pick-file:edv-src"}
+	st.SrcBtn = uiBtn{Label: i18n.T("editor.video.changeSource"), Variant: "outline", Act: "edv-src-open"}
 	st.NoSrc = i18n.T("editor.video.noSource")
 	st.NoMedia = i18n.T("editor.video.noMedia")
 	st.EditHint = i18n.T("editor.video.editHint")
@@ -173,18 +178,9 @@ func (u *UI) editorVideoState() edvViewState {
 	st.RefHint = i18n.T("editor.video.reframeHint")
 	st.SecExport = i18n.T("editor.video.sectionExport")
 
-	// recent captures → source quick-pick
-	capOpts := [][2]string{}
-	if caps, _ := u.pubCapList(); len(caps) > 0 {
-		n := len(caps)
-		if n > 20 {
-			n = 20
-		}
-		for _, s := range caps[:n] {
-			capOpts = append(capOpts, [2]string{s.ID, filepath.Base(s.Path)})
-		}
-	}
-	st.Caps = resolveSelectBox(i18n.T("editor.video.fromCapture"), "edv-cap:", capOpts, "")
+	st.ViewTitle = i18n.T("editor.video.panePreview")
+	st.InspTitle = i18n.T("editor.video.paneInspector")
+	u.pubCapList() // prime the recent-captures cache so the sources modal opens filled
 
 	srcW, srcH, dur := u.edvSrcDims()
 
@@ -195,6 +191,7 @@ func (u *UI) editorVideoState() edvViewState {
 	editor.mu.Unlock()
 
 	if proj.Source != "" {
+		u.edvRebind() // restart: player re-binds the remembered source (one-shot)
 		st.HasSrc = true
 		st.SrcName = filepath.Base(proj.Source)
 		if srcW > 0 && srcH > 0 {
@@ -218,6 +215,14 @@ func (u *UI) editorVideoState() edvViewState {
 			aspOpts = append(aspOpts, [2]string{a.Key, i18n.T("editor.video.aspect." + a.Key)})
 		}
 		st.Aspect = resolveSelectBox(i18n.T("editor.video.aspectLabel"), "edv-aspect", aspOpts, proj.Aspect)
+		st.Layout = resolveSelectBox(i18n.T("editor.video.layoutLabel"), "edv-layout", [][2]string{
+			{"crop", i18n.T("editor.video.layout.crop")},
+			{"fit", i18n.T("editor.video.layout.fit")},
+		}, proj.Layout)
+		if proj.Layout == "fit" {
+			st.HasBlur = true
+			st.Blur = newSlider(i18n.T("editor.video.bgBlur"), "edv-bgblur", 0, 1, 0.01, proj.BGBlur, "")
+		}
 		st.Frame = u.edvFrameState()
 		st.FrameBtn = uiBtn{Label: i18n.T("editor.video.useFrame"), Variant: "outline", Act: "edv-frame"}
 		st.KfAdd = uiBtn{Label: i18n.T("editor.video.addKeyframe"), Variant: "secondary", Act: "edv-kf-add"}
@@ -252,10 +257,14 @@ func (u *UI) edvFxState(st *edvViewState) {
 	for i := range plugins {
 		addOpts = append(addOpts, [2]string{strconv.Itoa(i), plugins[i].Name})
 	}
+	dir := ""
+	if d, err := config.Dir(); err == nil {
+		dir = filepath.Join(d, "vfx", "frei0r")
+	}
 	st.FxAdd = resolveSelectBox(i18n.T("editor.video.fxAdd"), "edv-fx-add", addOpts, "")
 	switch {
 	case len(plugins) == 0:
-		st.FxNone = i18n.T("editor.video.fxNoPlugins")
+		st.FxNone = i18n.T("editor.video.fxNoPlugins", i18n.A{"dir": dir})
 	case len(effects) == 0:
 		st.FxNone = i18n.T("editor.video.fxEmpty")
 	}
@@ -307,10 +316,6 @@ func (u *UI) edvFxState(st *edvViewState) {
 	}
 	st.FxPrev = u.edvFxPrevState()
 	st.FxPrevBtn = uiBtn{Label: i18n.T("editor.video.fxPreview"), Variant: "outline", Act: "edv-fx-prev"}
-	dir := ""
-	if d, err := config.Dir(); err == nil {
-		dir = filepath.Join(d, "vfx", "frei0r")
-	}
 	st.FxHint = i18n.T("editor.video.fxHint", i18n.A{"dir": dir})
 }
 
@@ -484,65 +489,79 @@ func editorVideoHTML(st edvViewState) string {
 	var b strings.Builder
 	b.WriteString(panel(st.Title, st.Sub))
 	b.WriteString(edModesHTML(st.Modes))
+	b.WriteString(`<div class=edv-nle>`)
 
-	// source row
-	var src strings.Builder
-	src.WriteString(`<div class=edv-src>`)
-	src.WriteString(st.Browse.html())
-	src.WriteString(selHTML(st.Caps))
-	if st.HasSrc {
-		src.WriteString(`<span class=edv-srcname>` + html.EscapeString(st.SrcName) + `</span>`)
-		if st.SrcInfo != "" {
-			src.WriteString(`<span class=edv-srcinfo>` + html.EscapeString(st.SrcInfo) + `</span>`)
+	// ── viewer pane ──
+	b.WriteString(`<div class="edv-pane edv-pane-view"><div class=edv-pane-title>` +
+		html.EscapeString(st.ViewTitle) + `</div>`)
+	if st.ShowRef {
+		b.WriteString(`<div id=edv-frame>` + edvFrameHTML(st.Frame) + `</div>`)
+		b.WriteString(btnRow(st.FrameBtn.html(), st.KfAdd.html(), st.KfClear.html()))
+		if st.HasKfs {
+			b.WriteString(`<div class=edv-kfs>`)
+			for _, k := range st.Kfs {
+				b.WriteString(`<span class=edv-kf><button class=edv-kf-go data-act=` + attrQ(k.Go) + `>` +
+					html.EscapeString(k.Time) + ` · ` + k.Pos + `%</button>` +
+					`<button class=edv-kf-del data-act=` + attrQ(k.Del) + `>` + html.EscapeString(k.DelLb) + `</button></span>`)
+			}
+			b.WriteString(`</div>`)
 		}
+		b.WriteString(hint("info", st.RefHint))
+		b.WriteString(`<div id=edv-fxprev>` + edvFxPrevHTML(st.FxPrev) + `</div>`)
+	} else if st.HasSrc {
+		b.WriteString(emptyState(st.NoMedia))
 	} else {
-		src.WriteString(hint("info", st.NoSrc))
+		b.WriteString(emptyState(st.NoSrc))
 	}
-	src.WriteString(`</div>`)
-	b.WriteString(section(st.SecSource, src.String()))
+	b.WriteString(`</div>`)
 
-	// embedded player/editor
+	// ── inspector pane ──
+	b.WriteString(`<div class="edv-pane edv-pane-insp"><div class=edv-pane-title>` +
+		html.EscapeString(st.InspTitle) + `</div>`)
+	if st.HasSrc {
+		b.WriteString(`<div class=edv-src><span class=edv-srcname>` + html.EscapeString(st.SrcName) + `</span>`)
+		if st.SrcInfo != "" {
+			b.WriteString(`<span class=edv-srcinfo>` + html.EscapeString(st.SrcInfo) + `</span>`)
+		}
+		b.WriteString(`</div>`)
+	} else {
+		b.WriteString(hint("info", st.NoSrc))
+	}
+	b.WriteString(btnRow(st.SrcBtn.html()))
+	if st.ShowRef {
+		b.WriteString(selHTML(st.Aspect))
+		b.WriteString(selHTML(st.Layout))
+		if st.HasBlur {
+			b.WriteString(st.Blur.html())
+		}
+	}
+	if st.ShowFx {
+		b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecFx) + `</div>`)
+		b.WriteString(selHTML(st.FxAdd))
+		if st.FxNone != "" {
+			b.WriteString(hint("info", st.FxNone))
+		}
+		for _, r := range st.FxRows {
+			b.WriteString(edvFxRowHTML(r))
+		}
+		b.WriteString(btnRow(st.FxPrevBtn.html()))
+		b.WriteString(hint("info", st.FxHint))
+	}
+	b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecExport) + `</div>`)
+	b.WriteString(`<div id=edv-export>` + edvExportHTML(st.Export) + `</div>`)
+	b.WriteString(`</div>`)
+
+	// ── timeline pane ──
+	b.WriteString(`<div class="edv-pane edv-pane-tl">`)
 	if st.Player != "" {
 		b.WriteString(`<div class=edv-player>` + st.Player + `</div>`)
 		b.WriteString(hint("info", st.EditHint))
 	} else if st.HasSrc {
 		b.WriteString(emptyState(st.NoMedia))
 	}
+	b.WriteString(`</div>`)
 
-	if st.ShowRef {
-		var rf strings.Builder
-		rf.WriteString(selHTML(st.Aspect))
-		rf.WriteString(`<div id=edv-frame>` + edvFrameHTML(st.Frame) + `</div>`)
-		rf.WriteString(btnRow(st.FrameBtn.html(), st.KfAdd.html(), st.KfClear.html()))
-		if st.HasKfs {
-			rf.WriteString(`<div class=edv-kfs>`)
-			for _, k := range st.Kfs {
-				rf.WriteString(`<span class=edv-kf><button class=edv-kf-go data-act=` + attrQ(k.Go) + `>` +
-					html.EscapeString(k.Time) + ` · ` + k.Pos + `%</button>` +
-					`<button class=edv-kf-del data-act=` + attrQ(k.Del) + `>` + html.EscapeString(k.DelLb) + `</button></span>`)
-			}
-			rf.WriteString(`</div>`)
-		}
-		rf.WriteString(hint("info", st.RefHint))
-		b.WriteString(section(st.SecReframe, rf.String()))
-	}
-
-	if st.ShowFx {
-		var fb strings.Builder
-		fb.WriteString(selHTML(st.FxAdd))
-		if st.FxNone != "" {
-			fb.WriteString(hint("info", st.FxNone))
-		}
-		for _, r := range st.FxRows {
-			fb.WriteString(edvFxRowHTML(r))
-		}
-		fb.WriteString(`<div id=edv-fxprev>` + edvFxPrevHTML(st.FxPrev) + `</div>`)
-		fb.WriteString(btnRow(st.FxPrevBtn.html()))
-		fb.WriteString(hint("info", st.FxHint))
-		b.WriteString(section(st.SecFx, fb.String()))
-	}
-
-	b.WriteString(section(st.SecExport, `<div id=edv-export>`+edvExportHTML(st.Export)+`</div>`))
+	b.WriteString(`</div>`)
 	return b.String()
 }
 

@@ -21,9 +21,9 @@ func edvFixtures() map[string]edvViewState {
 	labels := func(st *edvViewState) {
 		st.Title, st.Sub = "Editor", "Cut, reframe & export"
 		st.Modes = modes
-		st.SecSource, st.SecReframe, st.SecExport = "Source", "Reframe", "Export"
-		st.Browse = uiBtn{Label: "Browse…", Variant: "outline", Act: "pick-file:edv-src"}
-		st.Caps = edSel("edv-cap-", "From capture…", "")
+		st.SecReframe, st.SecExport = "Reframe", "Export"
+		st.ViewTitle, st.InspTitle = "Preview", "Inspector"
+		st.SrcBtn = uiBtn{Label: "Change source…", Variant: "outline", Act: "edv-src-open"}
 		st.NoSrc = "Pick a recording."
 		st.NoMedia = "Loading media…"
 		st.EditHint = "Trim works like Publish."
@@ -53,6 +53,8 @@ func edvFixtures() map[string]edvViewState {
 	full.ShowRef = true
 	full.Aspect = edSel("edv-aspect", "Aspect", "9:16 vertical",
 		selRow{Val: "orig", Label: "Original"}, selRow{Val: "9x16", Label: "9:16 vertical", Cur: true})
+	full.Layout = edSel("edv-layout", "Layout", "Zoom-fill",
+		selRow{Val: "crop", Label: "Zoom-fill", Cur: true}, selRow{Val: "fit", Label: "Original inside"})
 	full.Frame = edvFrameSt{Show: true, AW: "1920", AH: "1080",
 		ImgURL: "http://127.0.0.1:47621/img/s1/tok", HasCrop: true,
 		CropL: "34.219", CropT: "0", CropW: "31.563", CropH: "100"}
@@ -100,6 +102,10 @@ func edvFixtures() map[string]edvViewState {
 	tall.ShowRef = true
 	tall.Aspect = edSel("edv-aspect", "Aspect", "16:9 wide",
 		selRow{Val: "16x9", Label: "16:9 wide", Cur: true})
+	tall.Layout = edSel("edv-layout", "Layout", "Original inside",
+		selRow{Val: "fit", Label: "Original inside", Cur: true})
+	tall.HasBlur = true
+	tall.Blur = newSlider("Background blur", "edv-bgblur", 0, 1, 0.01, 0.35, "")
 	tall.Frame = edvFrameSt{Show: true, AW: "1080", AH: "1920", Busy: "Extracting frame…",
 		HasCrop: true, Vert: true, CropL: "0", CropT: "34.219", CropW: "100", CropH: "31.563"}
 	tall.FrameBtn = uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"}
@@ -131,11 +137,16 @@ func edvFixtures() map[string]edvViewState {
 	escaping.HasSrc = true
 	escaping.SrcName = `a&b "<x>".mp4`
 	escaping.SrcInfo = `19&20×10"80`
+	escaping.ViewTitle, escaping.InspTitle = `V&iew"`, `I&nsp"`
+	escaping.SrcBtn = uiBtn{Label: `S&rc"`, Variant: "outline", Act: `edv-src-open&"`}
 	escaping.Player = `<div>R</div>`
 	escaping.NoSrc = `n&o"<>'`
 	escaping.EditHint = `h&int"<>'`
 	escaping.ShowRef = true
 	escaping.Aspect = edSel("edv-aspect", `A&sp"`, `O&rig'`, selRow{Val: "orig", Label: `O&rig'`, Cur: true})
+	escaping.Layout = edSel("edv-layout", `L&ay"`, `C&rop'`, selRow{Val: "crop", Label: `C&rop'`, Cur: true})
+	escaping.HasBlur = true
+	escaping.Blur = newSlider(`B&lur"`, `edv-bgblur&"`, 0, 1, 0.01, 0.5, "")
 	escaping.Frame = edvFrameSt{Show: true, AW: "1920", AH: "1080", Busy: `b&usy"<>'`}
 	escaping.FrameBtn = uiBtn{Label: `F&rame"`, Variant: "outline", Act: `edv-frame&"`}
 	escaping.KfAdd = uiBtn{Label: "K", Variant: "secondary", Act: "edv-kf-add"}

@@ -62,6 +62,8 @@ type Project struct {
 	Schema    int          `json:"schema"`
 	Source    string       `json:"source,omitempty"`
 	Aspect    string       `json:"aspect,omitempty"` // Aspects key; ""/orig = no reframe
+	Layout    string       `json:"layout,omitempty"` // crop = zoom-fill (default); fit = original inside + styled background fill
+	BGBlur    float64      `json:"bgBlur"`           // fit layout: background gaussian blur 0..1 (0 = sharp)
 	Pan       float64      `json:"pan"`              // static window position (used without keyframes)
 	PanKF     []PanKey     `json:"panKf,omitempty"`
 	Effects   []EffectInst `json:"effects,omitempty"`
@@ -75,6 +77,10 @@ func (p *Project) Normalize() {
 	if p.Aspect == "" {
 		p.Aspect = "orig"
 	}
+	if p.Layout != "fit" {
+		p.Layout = "crop"
+	}
+	p.BGBlur = clamp01(p.BGBlur)
 	if p.Pan < 0 || p.Pan > 1 {
 		p.Pan = 0.5
 	}
