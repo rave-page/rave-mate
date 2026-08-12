@@ -208,6 +208,8 @@
       },
       "presetLabel": "ターゲット",
       "reframeHint": "明るいウィンドウをドラッグして表示範囲を選択。キーフレームでパンをアニメーションできます。",
+      "reframeOpen": "リフレームとズーム…",
+      "reframeTitle": "リフレームとズーム範囲",
       "sectionExport": "書き出し",
       "sectionFx": "エフェクト",
       "sectionReframe": "リフレーム",

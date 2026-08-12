@@ -100,13 +100,7 @@ pub const State = struct {
     secReframe: []const u8 = "",
     showRef: bool = false,
     aspect: c.Select = .{},
-    frame: Frame = .{},
-    frameBtn: c.Btn = .{},
-    kfAdd: c.Btn = .{},
-    kfClear: c.Btn = .{},
-    hasKfs: bool = false,
-    kfs: []const KfRow = &.{},
-    refHint: []const u8 = "",
+    reframeBtn: c.Btn = .{}, // opens the reframe/area-select modal
 
     secFx: []const u8 = "",
     showFx: bool = false,
@@ -122,46 +116,41 @@ pub const State = struct {
     @"export": Export = .{},
 };
 
-/// render mirrors Go editorVideoHTML (NLE panes: sources/viewer/inspector/timeline).
+/// Reframe is the reframe/area-select modal body state.
+pub const Reframe = struct {
+    title: []const u8 = "",
+    frame: Frame = .{},
+    frameBtn: c.Btn = .{},
+    kfAdd: c.Btn = .{},
+    kfClear: c.Btn = .{},
+    hasKfs: bool = false,
+    kfs: []const KfRow = &.{},
+    refHint: []const u8 = "",
+};
+
+/// render mirrors Go editorVideoHTML (viewer = the one player preview; inspector
+/// body in #edv-insp so non-media edits never rebuild the playing <video>).
 pub fn render(h: *Html, s: State) !void {
     try c.panel(h, s.title, s.sub);
     try editor.renderModes(h, s.modes);
     try h.raw("<div class=edv-nle>");
 
-    // viewer pane
+    // viewer pane: the mp player is THE preview
     try h.raw("<div class=\"edv-pane edv-pane-view\"><div class=edv-pane-title>");
     try h.esc(s.viewTitle);
     try h.raw("</div>");
-    if (s.showRef) {
-        try h.raw("<div id=edv-frame>");
-        try renderFrame(h, s.frame);
-        try h.raw("</div>");
-        try c.btnRowOpen(h);
-        try c.btnOf(h, s.frameBtn);
-        try c.btnOf(h, s.kfAdd);
-        try c.btnOf(h, s.kfClear);
-        try c.btnRowClose(h);
-        if (s.hasKfs) {
-            try h.raw("<div class=edv-kfs>");
-            for (s.kfs) |k| {
-                try h.raw("<span class=edv-kf><button class=edv-kf-go data-act=");
-                try h.attrQ(k.goAct);
-                try h.raw(">");
-                try h.esc(k.time);
-                try h.raw(" · ");
-                try h.raw(k.pos);
-                try h.raw("%</button><button class=edv-kf-del data-act=");
-                try h.attrQ(k.delAct);
-                try h.raw(">");
-                try h.esc(k.delLb);
-                try h.raw("</button></span>");
-            }
-            try h.raw("</div>");
+    if (s.player.len != 0) {
+        try h.raw("<div class=\"edv-player");
+        try h.raw(s.playerCls);
+        try h.raw("\"");
+        if (s.playerVars.len != 0) {
+            try h.raw(" style=");
+            try h.attrQ(s.playerVars);
         }
-        try c.hint(h, "info", s.refHint);
-        try h.raw("<div id=edv-fxprev>");
-        try renderFxPrev(h, s.fxPrev);
+        try h.raw(">");
+        try h.raw(s.player);
         try h.raw("</div>");
+        try c.hint(h, "info", s.editHint);
     } else if (s.hasSrc) {
         try c.emptyState(h, s.noMedia);
     } else {
@@ -172,7 +161,15 @@ pub fn render(h: *Html, s: State) !void {
     // inspector pane
     try h.raw("<div class=\"edv-pane edv-pane-insp\"><div class=edv-pane-title>");
     try h.esc(s.inspTitle);
+    try h.raw("</div><div id=edv-insp>");
+    try renderInsp(h, s);
+    try h.raw("</div></div>");
+
     try h.raw("</div>");
+}
+
+/// renderInsp mirrors Go editorVideoInspHTML (#edv-insp inner).
+pub fn renderInsp(h: *Html, s: State) !void {
     if (s.hasSrc) {
         try h.raw("<div class=edv-src><span class=edv-srcname>");
         try h.esc(s.srcName);
@@ -190,6 +187,9 @@ pub fn render(h: *Html, s: State) !void {
     try c.btnOf(h, s.srcBtn);
     try c.btnRowClose(h);
     if (s.showRef) {
+        try h.raw("<div class=edv-insp-sec>");
+        try h.esc(s.secReframe);
+        try h.raw("</div>");
         try c.selectBox(h, s.aspect);
         if (s.hasZoom) {
             try h.raw("<div id=edv-zoomrow>");
@@ -200,6 +200,9 @@ pub fn render(h: *Html, s: State) !void {
         if (s.hasBlur) {
             try c.slider(h, s.blur);
         }
+        try c.btnRowOpen(h);
+        try c.btnOf(h, s.reframeBtn);
+        try c.btnRowClose(h);
     }
     if (s.showFx) {
         try h.raw("<div class=edv-insp-sec>");
@@ -215,6 +218,9 @@ pub fn render(h: *Html, s: State) !void {
         try c.btnRowOpen(h);
         try c.btnOf(h, s.fxPrevBtn);
         try c.btnRowClose(h);
+        try h.raw("<div id=edv-fxprev>");
+        try renderFxPrev(h, s.fxPrev);
+        try h.raw("</div>");
         try c.hint(h, "info", s.fxHint);
         if (s.fxSrc.len != 0) {
             try c.btnRowOpen(h);
@@ -226,28 +232,43 @@ pub fn render(h: *Html, s: State) !void {
     try h.esc(s.secExport);
     try h.raw("</div><div id=edv-export>");
     try renderExport(h, s.@"export");
-    try h.raw("</div></div>");
+    try h.raw("</div>");
+}
 
-    // timeline pane
-    try h.raw("<div class=\"edv-pane edv-pane-tl\">");
-    if (s.player.len != 0) {
-        try h.raw("<div class=\"edv-player");
-        try h.raw(s.playerCls);
-        try h.raw("\"");
-        if (s.playerVars.len != 0) {
-            try h.raw(" style=");
-            try h.attrQ(s.playerVars);
+/// renderReframe mirrors Go edvReframeHTML (reframe modal body).
+pub fn renderReframe(h: *Html, s: Reframe) !void {
+    try h.raw("<div id=edv-frame>");
+    try renderFrame(h, s.frame);
+    try h.raw("</div><div id=edv-kfbox>");
+    try renderKfBox(h, s);
+    try h.raw("</div>");
+    try c.hint(h, "info", s.refHint);
+}
+
+/// renderKfBox mirrors Go edvKfBoxHTML (#edv-kfbox inner).
+pub fn renderKfBox(h: *Html, s: Reframe) !void {
+    try c.btnRowOpen(h);
+    try c.btnOf(h, s.frameBtn);
+    try c.btnOf(h, s.kfAdd);
+    try c.btnOf(h, s.kfClear);
+    try c.btnRowClose(h);
+    if (s.hasKfs) {
+        try h.raw("<div class=edv-kfs>");
+        for (s.kfs) |k| {
+            try h.raw("<span class=edv-kf><button class=edv-kf-go data-act=");
+            try h.attrQ(k.goAct);
+            try h.raw(">");
+            try h.esc(k.time);
+            try h.raw(" · ");
+            try h.raw(k.pos);
+            try h.raw("%</button><button class=edv-kf-del data-act=");
+            try h.attrQ(k.delAct);
+            try h.raw(">");
+            try h.esc(k.delLb);
+            try h.raw("</button></span>");
         }
-        try h.raw(">");
-        try h.raw(s.player);
         try h.raw("</div>");
-        try c.hint(h, "info", s.editHint);
-    } else if (s.hasSrc) {
-        try c.emptyState(h, s.noMedia);
     }
-    try h.raw("</div>");
-
-    try h.raw("</div>");
 }
 
 /// renderFxRow mirrors Go edvFxRowHTML.

@@ -208,6 +208,8 @@
       },
       "presetLabel": "Ziel",
       "reframeHint": "Helles Fenster ziehen, um den sichtbaren Ausschnitt zu wählen. Keyframes animieren den Schwenk zwischen Positionen.",
+      "reframeOpen": "Ausschnitt & Zoom wählen…",
+      "reframeTitle": "Ausschnitt & Zoom",
       "sectionExport": "Export",
       "sectionFx": "Effekte",
       "sectionReframe": "Reframe",

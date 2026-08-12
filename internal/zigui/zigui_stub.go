@@ -281,6 +281,10 @@ func RenderRCESaveV2(state []byte) (string, bool)         { return "", false }
 func RenderEditorPreviewV2(state []byte) (string, bool)   { return "", false }
 func RenderEditorV2(state []byte) (string, bool)          { return "", false }
 func RenderEditorVideoV2(state []byte) (string, bool)     { return "", false }
+func RenderEditorVideoInspV2(state []byte) (string, bool) { return "", false }
+func RenderEdvReframeV2(state []byte) (string, bool)      { return "", false }
+func RenderEdvKfBoxV2(state []byte) (string, bool)        { return "", false }
+func RenderEdvFrameV2(state []byte) (string, bool)        { return "", false }
 func RenderCueEditTopbarV2(state []byte) (string, bool)   { return "", false }
 func RenderCueEditWaveV2(state []byte) (string, bool)     { return "", false }
 func RenderCueEditRailV2(state []byte) (string, bool)     { return "", false }

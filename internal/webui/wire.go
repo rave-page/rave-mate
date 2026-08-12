@@ -14,6 +14,9 @@ import "rave.page/mate/internal/zigui"
 // zigWire renders through the binary export, falling back to the JSON export. ok=false means
 // both Zig paths declined - the caller renders in Go. js is a thunk so the JSON state is only
 // marshalled when the binary path actually failed.
+// wireNoV1 is the v1 slot for wire-only fragments (no legacy JSON renderer).
+func wireNoV1([]byte) (string, bool) { return "", false }
+
 func zigWire(name string, doc []byte, v2 func([]byte) (string, bool), v1 func([]byte) (string, bool), js func() []byte) (string, bool) {
 	if len(doc) == 0 {
 		zigui.NoteWireFallback(name) // encoder refused (over-size) - never reached the ABI

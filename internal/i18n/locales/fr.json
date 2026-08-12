@@ -208,6 +208,8 @@
       },
       "presetLabel": "Cible",
       "reframeHint": "Faites glisser la fenêtre claire pour choisir la zone visible. Les images clés animent le panoramique.",
+      "reframeOpen": "Fenêtre de cadrage et zoom…",
+      "reframeTitle": "Cadrage et zoom",
       "sectionExport": "Export",
       "sectionFx": "Effets",
       "sectionReframe": "Recadrage",

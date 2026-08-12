@@ -27,7 +27,6 @@ func edvFixtures() map[string]edvViewState {
 		st.NoSrc = "Pick a recording."
 		st.NoMedia = "Loading media…"
 		st.EditHint = "Trim works like Publish."
-		st.RefHint = "Drag the bright window."
 	}
 	export := func() edvExportSt {
 		return edvExportSt{
@@ -55,17 +54,7 @@ func edvFixtures() map[string]edvViewState {
 		selRow{Val: "orig", Label: "Original"}, selRow{Val: "9x16", Label: "9:16 vertical", Cur: true})
 	full.Layout = edSel("edv-layout", "Layout", "Zoom-fill",
 		selRow{Val: "crop", Label: "Zoom-fill", Cur: true}, selRow{Val: "fit", Label: "Original inside"})
-	full.Frame = edvFrameSt{Show: true, AW: "1920", AH: "1080",
-		ImgURL: "http://127.0.0.1:47621/img/s1/tok", HasCrop: true,
-		CropL: "34.219", CropT: "0", CropW: "31.563", CropH: "100"}
-	full.FrameBtn = uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"}
-	full.KfAdd = uiBtn{Label: "+ Keyframe", Variant: "secondary", Act: "edv-kf-add"}
-	full.KfClear = uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"}
-	full.HasKfs = true
-	full.Kfs = []edvKfRow{
-		{Time: "1:23.5", Pos: "25", Go: "edv-kf-go:0", Del: "edv-kf-del:0", DelLb: "✕"},
-		{Time: "4:56.0", Pos: "80", Go: "edv-kf-go:1", Del: "edv-kf-del:1", DelLb: "✕"},
-	}
+	full.ReframeBtn = uiBtn{Label: "Reframe & zoom window…", Variant: "secondary", Act: "edv-reframe-open"}
 	full.Export = export()
 	full.Export.TrimInfo = "cut 1:20.0–4:56.0 · crop 606×1080"
 	full.ShowFx = true
@@ -117,11 +106,7 @@ func edvFixtures() map[string]edvViewState {
 	tall.Blur = newSlider("Background blur", "edv-bgblur", 0, 1, 0.01, 0.35, "")
 	tall.HasZoom = true
 	tall.Zoom = newSlider("Zoom", "edv-zoomset", 1, 4, 0.05, 1.6, "")
-	tall.Frame = edvFrameSt{Show: true, AW: "1080", AH: "1920", Busy: "Extracting frame…",
-		HasCrop: true, CropL: "0", CropT: "34.219", CropW: "100", CropH: "31.563"}
-	tall.FrameBtn = uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"}
-	tall.KfAdd = uiBtn{Label: "+ Keyframe", Variant: "secondary", Act: "edv-kf-add"}
-	tall.KfClear = uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"}
+	tall.ReframeBtn = uiBtn{Label: "Reframe & zoom window…", Variant: "secondary", Act: "edv-reframe-open"}
 	tall.Export = export()
 	tall.Export.Running, tall.Export.Pct, tall.Export.Stage = true, "42.5%", "encode"
 	tall.ShowFx = true
@@ -158,13 +143,7 @@ func edvFixtures() map[string]edvViewState {
 	escaping.Layout = edSel("edv-layout", `L&ay"`, `C&rop'`, selRow{Val: "crop", Label: `C&rop'`, Cur: true})
 	escaping.HasBlur = true
 	escaping.Blur = newSlider(`B&lur"`, `edv-bgblur&"`, 0, 1, 0.01, 0.5, "")
-	escaping.Frame = edvFrameSt{Show: true, AW: "1920", AH: "1080", Busy: `b&usy"<>'`}
-	escaping.FrameBtn = uiBtn{Label: `F&rame"`, Variant: "outline", Act: `edv-frame&"`}
-	escaping.KfAdd = uiBtn{Label: "K", Variant: "secondary", Act: "edv-kf-add"}
-	escaping.KfClear = uiBtn{Label: "C", Variant: "ghost", Act: "edv-kf-clear"}
-	escaping.HasKfs = true
-	escaping.Kfs = []edvKfRow{{Time: `1:0"0.0`, Pos: "50", Go: `edv-kf-go:0&"`, Del: `edv-kf-del:0'`, DelLb: `✕&"`}}
-	escaping.RefHint = `r&ef"<>'`
+	escaping.ReframeBtn = uiBtn{Label: `R&ef"`, Variant: "secondary", Act: `edv-reframe-open&"`}
 	escaping.ShowFx = true
 	escaping.SecFx = `F&x"`
 	escaping.FxAdd = edSel("edv-fx-add", `A&dd"`, "")
@@ -238,6 +217,100 @@ func TestZigEditorVideoWire(t *testing.T) {
 				t.Fatal("v2 render failed")
 			}
 			assertBytesEqual(t, "v2", editorVideoHTML(st), zig)
+		})
+	}
+}
+
+// TestZigEditorVideoInspWire: the #edv-insp fragment renderer (same EdvView doc).
+func TestZigEditorVideoInspWire(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable")
+	}
+	for name, st := range edvFixtures() {
+		t.Run(name, func(t *testing.T) {
+			doc := wireEdvView(st)
+			if doc == nil {
+				t.Skip("over-size doc falls back to v1 by design")
+			}
+			zig, ok := zigui.RenderEditorVideoInspV2(doc)
+			if !ok {
+				t.Fatal("insp render failed")
+			}
+			assertBytesEqual(t, "insp", editorVideoInspHTML(st), zig)
+		})
+	}
+}
+
+func edvReframeFixtures() map[string]edvReframeSt {
+	plain := edvReframeSt{
+		Title: "Reframe & zoom area",
+		Frame: edvFrameSt{Show: true, AW: "1920", AH: "1080",
+			ImgURL: "http://127.0.0.1:47621/img/s1/tok", HasCrop: true,
+			CropL: "34.219", CropT: "0", CropW: "31.563", CropH: "100"},
+		FrameBtn: uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"},
+		KfAdd:    uiBtn{Label: "+ Keyframe", Variant: "secondary", Act: "edv-kf-add"},
+		KfClear:  uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"},
+		HasKfs:   true,
+		Kfs: []edvKfRow{
+			{Time: "1:23.5", Pos: "25", Go: "edv-kf-go:0", Del: "edv-kf-del:0", DelLb: "✕"},
+			{Time: "4:56.0", Pos: "80", Go: "edv-kf-go:1", Del: "edv-kf-del:1", DelLb: "✕"},
+		},
+		RefHint: "Drag the bright window.",
+	}
+	busy := edvReframeSt{
+		Title:    "Reframe",
+		Frame:    edvFrameSt{Show: true, AW: "1080", AH: "1920", Busy: "Extracting frame…"},
+		FrameBtn: uiBtn{Label: "Use playhead frame", Variant: "outline", Act: "edv-frame"},
+		KfAdd:    uiBtn{Label: "+ Keyframe", Variant: "secondary", Act: "edv-kf-add"},
+		KfClear:  uiBtn{Label: "Clear keyframes", Variant: "ghost", Act: "edv-kf-clear"},
+		Kfs:      []edvKfRow{},
+		RefHint:  "hint",
+	}
+	escaping := edvReframeSt{
+		Title:    `R&ef "<t>"`,
+		Frame:    edvFrameSt{Show: true, AW: "1920", AH: "1080", Busy: `b&usy"<>'`},
+		FrameBtn: uiBtn{Label: `F&rame"`, Variant: "outline", Act: `edv-frame&"`},
+		KfAdd:    uiBtn{Label: "K", Variant: "secondary", Act: "edv-kf-add"},
+		KfClear:  uiBtn{Label: "C", Variant: "ghost", Act: "edv-kf-clear"},
+		HasKfs:   true,
+		Kfs:      []edvKfRow{{Time: `1:0"0.0`, Pos: "50", Go: `edv-kf-go:0&"`, Del: `edv-kf-del:0'`, DelLb: `✕&"`}},
+		RefHint:  `r&ef"<>'`,
+	}
+	return map[string]edvReframeSt{"plain": plain, "busy": busy, "escaping": escaping}
+}
+
+// TestZigEdvReframeWire: reframe modal body + kf box + frame fragments.
+func TestZigEdvReframeWire(t *testing.T) {
+	if !zigui.Available() {
+		t.Skip("zigui lib unavailable")
+	}
+	for name, st := range edvReframeFixtures() {
+		t.Run(name, func(t *testing.T) {
+			doc := wireEdvReframe(st)
+			if doc == nil {
+				t.Fatal("wire marshal failed")
+			}
+			zig, ok := zigui.RenderEdvReframeV2(doc)
+			if !ok {
+				t.Fatal("reframe render failed")
+			}
+			assertBytesEqual(t, "reframe", edvReframeHTML(st), zig)
+
+			zig, ok = zigui.RenderEdvKfBoxV2(doc)
+			if !ok {
+				t.Fatal("kfbox render failed")
+			}
+			assertBytesEqual(t, "kfbox", edvKfBoxHTML(st), zig)
+
+			fdoc := wireEdvFrame(st.Frame)
+			if fdoc == nil {
+				t.Fatal("frame marshal failed")
+			}
+			zig, ok = zigui.RenderEdvFrameV2(fdoc)
+			if !ok {
+				t.Fatal("frame render failed")
+			}
+			assertBytesEqual(t, "frame", edvFrameHTML(st.Frame), zig)
 		})
 	}
 }

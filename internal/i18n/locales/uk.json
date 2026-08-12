@@ -208,6 +208,8 @@
       },
       "presetLabel": "Ціль",
       "reframeHint": "Перетягніть яскраве вікно, щоб обрати видиму область. Ключові кадри анімують панораму.",
+      "reframeOpen": "Вікно кадра та зум…",
+      "reframeTitle": "Кадр та зум",
       "sectionExport": "Експорт",
       "sectionFx": "Ефекти",
       "sectionReframe": "Рефрейм",

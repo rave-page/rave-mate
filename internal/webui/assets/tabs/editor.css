@@ -322,14 +322,18 @@
 .edv-player {
   margin: 0.6rem 0;
 }
-/* Live reframe preview: the timeline <video> shows the selected aspect/zoom/pan
+/* Viewer pane: the player video is THE preview - let it breathe. */
+.edv-pane-view .mp-videobox {
+  max-height: 52vh;
+}
+/* Live reframe preview: the player <video> shows the selected aspect/zoom/pan
    slice (crop layout) or the original inside the target frame (fit layout).
    Pure CSS over the mp markup - vars set by the editor renderer + live evals. */
 .edv-player.edv-reframe .mp-videobox {
   aspect-ratio: var(--edv-ar);
   overflow: hidden;
   position: relative;
-  max-height: 340px;
+  max-height: 52vh;
   margin: 0 auto;
   display: block;
 }
@@ -344,7 +348,7 @@
 }
 .edv-player.edv-reframe-fit .mp-videobox {
   aspect-ratio: var(--edv-ar);
-  max-height: 340px;
+  max-height: 52vh;
   margin: 0 auto;
   display: block;
 }
@@ -450,13 +454,11 @@
   margin: 0.35rem 0;
 }
 
-/* ── video mode: NLE pane grid ── */
+/* ── video mode: NLE pane grid (viewer+timeline = the mp player; inspector right) ── */
 .edv-nle {
   display: grid;
   grid-template-columns: 1fr minmax(280px, 360px);
-  grid-template-areas:
-    "view insp"
-    "tl tl";
+  grid-template-areas: "view insp";
   gap: 0.75rem;
   align-items: start;
 }
@@ -469,7 +471,6 @@
 }
 .edv-pane-view { grid-area: view; }
 .edv-pane-insp { grid-area: insp; }
-.edv-pane-tl { grid-area: tl; }
 .edv-pane-title {
   font-family: "JetBrains Mono", monospace;
   font-size: 0.7rem;
@@ -533,7 +534,7 @@
 @media (max-width: 1100px) {
   .edv-nle {
     grid-template-columns: 1fr;
-    grid-template-areas: "view" "insp" "tl";
+    grid-template-areas: "view" "insp";
   }
 }
 

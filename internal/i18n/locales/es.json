@@ -208,6 +208,8 @@
       },
       "presetLabel": "Destino",
       "reframeHint": "Arrastra la ventana brillante para elegir la parte visible. Los keyframes animan el paneo entre posiciones.",
+      "reframeOpen": "Ventana de encuadre y zoom…",
+      "reframeTitle": "Encuadre y zoom",
       "sectionExport": "Exportar",
       "sectionFx": "Efectos",
       "sectionReframe": "Reencuadre",

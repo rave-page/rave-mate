@@ -367,6 +367,8 @@
       },
       "presetLabel": "Target",
       "reframeHint": "Drag the bright window to choose the visible slice. Keyframes animate the pan between positions.",
+      "reframeOpen": "Reframe & zoom window…",
+      "reframeTitle": "Reframe & zoom area",
       "sectionExport": "Export",
       "sectionFx": "Effects",
       "sectionReframe": "Reframe",

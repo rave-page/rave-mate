@@ -334,6 +334,10 @@ const uint8_t *rz_ui_render_rce_save_v2(const uint8_t *state, size_t len, size_t
 const uint8_t *rz_ui_render_editor_preview_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_editor_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_editor_video_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_editor_video_insp_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_edv_reframe_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_edv_kfbox_v2(const uint8_t *state, size_t len, size_t *out_len);
+const uint8_t *rz_ui_render_edv_frame_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_topbar_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_wave_v2(const uint8_t *state, size_t len, size_t *out_len);
 const uint8_t *rz_ui_render_cueedit_rail_v2(const uint8_t *state, size_t len, size_t *out_len);

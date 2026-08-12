@@ -117,18 +117,12 @@ type edvViewState struct {
 	NoMedia    string `json:"noMedia"`
 	EditHint   string `json:"editHint"`
 
-	SecReframe string     `json:"secReframe"`
-	ShowRef    bool       `json:"showRef"` // video source only
-	Aspect     selState   `json:"aspect"`
-	HasZoom    bool       `json:"hasZoom"`
-	Zoom       uiSlider   `json:"zoom"` // crop zoom 1..4 (#edv-zoomrow)
-	Frame      edvFrameSt `json:"frame"`
-	FrameBtn   uiBtn      `json:"frameBtn"`
-	KfAdd      uiBtn      `json:"kfAdd"`
-	KfClear    uiBtn      `json:"kfClear"`
-	HasKfs     bool       `json:"hasKfs"`
-	Kfs        []edvKfRow `json:"kfs"`
-	RefHint    string     `json:"refHint"`
+	SecReframe string   `json:"secReframe"`
+	ShowRef    bool     `json:"showRef"` // video source only
+	Aspect     selState `json:"aspect"`
+	HasZoom    bool     `json:"hasZoom"`
+	Zoom       uiSlider `json:"zoom"`       // crop zoom 1..4 (#edv-zoomrow)
+	ReframeBtn uiBtn    `json:"reframeBtn"` // opens the reframe/area-select modal
 
 	SecFx     string      `json:"secFx"`
 	ShowFx    bool        `json:"showFx"` // video source only
@@ -144,11 +138,22 @@ type edvViewState struct {
 	Export    edvExportSt `json:"export"`
 }
 
+// edvReframeSt is the reframe/area-select modal body (JSON/wire → Zig).
+type edvReframeSt struct {
+	Title    string     `json:"title"`
+	Frame    edvFrameSt `json:"frame"`
+	FrameBtn uiBtn      `json:"frameBtn"`
+	KfAdd    uiBtn      `json:"kfAdd"`
+	KfClear  uiBtn      `json:"kfClear"`
+	HasKfs   bool       `json:"hasKfs"`
+	Kfs      []edvKfRow `json:"kfs"`
+	RefHint  string     `json:"refHint"`
+}
+
 func emptyEdvState() edvViewState {
 	return edvViewState{
 		Modes:  []edModeTab{},
 		Layout: selState{Rows: []selRow{}},
-		Kfs:    []edvKfRow{},
 		FxAdd:  selState{Rows: []selRow{}},
 		FxRows: []edvFxRow{},
 		FxSrc:  []uiBtn{},
@@ -185,7 +190,6 @@ func (u *UI) editorVideoState() edvViewState {
 	st.NoMedia = i18n.T("editor.video.noMedia")
 	st.EditHint = i18n.T("editor.video.editHint")
 	st.SecReframe = i18n.T("editor.video.sectionReframe")
-	st.RefHint = i18n.T("editor.video.reframeHint")
 	st.SecExport = i18n.T("editor.video.sectionExport")
 
 	st.ViewTitle = i18n.T("editor.video.panePreview")
@@ -239,17 +243,7 @@ func (u *UI) editorVideoState() edvViewState {
 			st.HasBlur = true
 			st.Blur = newSlider(i18n.T("editor.video.bgBlur"), "edv-bgblur", 0, 1, 0.01, proj.BGBlur, "")
 		}
-		st.Frame = u.edvFrameState()
-		st.FrameBtn = uiBtn{Label: i18n.T("editor.video.useFrame"), Variant: "outline", Act: "edv-frame"}
-		st.KfAdd = uiBtn{Label: i18n.T("editor.video.addKeyframe"), Variant: "secondary", Act: "edv-kf-add"}
-		st.KfClear = uiBtn{Label: i18n.T("editor.video.clearKeyframes"), Variant: "ghost", Act: "edv-kf-clear"}
-		st.HasKfs = len(proj.PanKF) > 0
-		for i, k := range proj.PanKF {
-			st.Kfs = append(st.Kfs, edvKfRow{
-				Time: edvFmtTime(k.T), Pos: trimNum(float64(int(k.X*100 + 0.5))),
-				Go: "edv-kf-go:" + strconv.Itoa(i), Del: "edv-kf-del:" + strconv.Itoa(i), DelLb: "✕",
-			})
-		}
+		st.ReframeBtn = uiBtn{Label: i18n.T("editor.video.reframeOpen"), Variant: "secondary", Act: "edv-reframe-open"}
 	}
 
 	if st.ShowRef {
@@ -257,6 +251,31 @@ func (u *UI) editorVideoState() edvViewState {
 		st.PlayerCls, st.PlayerVars = u.edvPlayerReframe(proj, srcW, srcH)
 	}
 	st.Export = u.edvExportState()
+	return st
+}
+
+// edvReframeState resolves the reframe-modal body state.
+func (u *UI) edvReframeState() edvReframeSt {
+	editor.mu.Lock()
+	edvEnsure()
+	proj := editor.video.proj
+	editor.mu.Unlock()
+	st := edvReframeSt{
+		Title:    i18n.T("editor.video.reframeTitle"),
+		Frame:    u.edvFrameState(),
+		FrameBtn: uiBtn{Label: i18n.T("editor.video.useFrame"), Variant: "outline", Act: "edv-frame"},
+		KfAdd:    uiBtn{Label: i18n.T("editor.video.addKeyframe"), Variant: "secondary", Act: "edv-kf-add"},
+		KfClear:  uiBtn{Label: i18n.T("editor.video.clearKeyframes"), Variant: "ghost", Act: "edv-kf-clear"},
+		HasKfs:   len(proj.PanKF) > 0,
+		Kfs:      []edvKfRow{},
+		RefHint:  i18n.T("editor.video.reframeHint"),
+	}
+	for i, k := range proj.PanKF {
+		st.Kfs = append(st.Kfs, edvKfRow{
+			Time: edvFmtTime(k.T), Pos: trimNum(float64(int(k.X*100 + 0.5))),
+			Go: "edv-kf-go:" + strconv.Itoa(i), Del: "edv-kf-del:" + strconv.Itoa(i), DelLb: "✕",
+		})
+	}
 	return st
 }
 
@@ -598,6 +617,51 @@ func (u *UI) renderEditorVideo() string {
 	return editorVideoHTML(st)
 }
 
+// renderEditorVideoInsp renders the inspector fragment (#edv-insp inner).
+func (u *UI) renderEditorVideoInsp() string {
+	st := u.editorVideoState()
+	if zigui.Available() {
+		if h, ok := zigWire("RenderEditorVideoInspV2", wireEdvView(st), zigui.RenderEditorVideoInspV2,
+			wireNoV1, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return editorVideoInspHTML(st)
+}
+
+// edvReframeBodyHTML renders the reframe-modal body.
+func (u *UI) edvReframeBodyHTML(st edvReframeSt) string {
+	if zigui.Available() {
+		if h, ok := zigWire("RenderEdvReframeV2", wireEdvReframe(st), zigui.RenderEdvReframeV2,
+			wireNoV1, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return edvReframeHTML(st)
+}
+
+// edvFrameFragHTML renders the frame block fragment (#edv-frame inner).
+func (u *UI) edvFrameFragHTML(st edvFrameSt) string {
+	if zigui.Available() {
+		if h, ok := zigWire("RenderEdvFrameV2", wireEdvFrame(st), zigui.RenderEdvFrameV2,
+			wireNoV1, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return edvFrameHTML(st)
+}
+
+// edvKfBoxFragHTML renders the keyframe box fragment (#edv-kfbox inner).
+func (u *UI) edvKfBoxFragHTML(st edvReframeSt) string {
+	if zigui.Available() {
+		if h, ok := zigWire("RenderEdvKfBoxV2", wireEdvReframe(st), zigui.RenderEdvKfBoxV2,
+			wireNoV1, func() []byte { return stateJSON(st) }); ok {
+			return h
+		}
+	}
+	return edvKfBoxHTML(st)
+}
+
 // ── pure Go renderers (golden reference; byte-identical to Zig) ──
 
 func editorVideoHTML(st edvViewState) string {
@@ -606,23 +670,17 @@ func editorVideoHTML(st edvViewState) string {
 	b.WriteString(edModesHTML(st.Modes))
 	b.WriteString(`<div class=edv-nle>`)
 
-	// ── viewer pane ──
+	// ── viewer pane: THE one preview - the mp player (video + wave + transport).
+	// Inspector edits patch #edv-insp only, so the playing <video> is never rebuilt.
 	b.WriteString(`<div class="edv-pane edv-pane-view"><div class=edv-pane-title>` +
 		html.EscapeString(st.ViewTitle) + `</div>`)
-	if st.ShowRef {
-		b.WriteString(`<div id=edv-frame>` + edvFrameHTML(st.Frame) + `</div>`)
-		b.WriteString(btnRow(st.FrameBtn.html(), st.KfAdd.html(), st.KfClear.html()))
-		if st.HasKfs {
-			b.WriteString(`<div class=edv-kfs>`)
-			for _, k := range st.Kfs {
-				b.WriteString(`<span class=edv-kf><button class=edv-kf-go data-act=` + attrQ(k.Go) + `>` +
-					html.EscapeString(k.Time) + ` · ` + k.Pos + `%</button>` +
-					`<button class=edv-kf-del data-act=` + attrQ(k.Del) + `>` + html.EscapeString(k.DelLb) + `</button></span>`)
-			}
-			b.WriteString(`</div>`)
+	if st.Player != "" {
+		b.WriteString(`<div class="edv-player` + st.PlayerCls + `"`)
+		if st.PlayerVars != "" {
+			b.WriteString(` style=` + attrQ(st.PlayerVars))
 		}
-		b.WriteString(hint("info", st.RefHint))
-		b.WriteString(`<div id=edv-fxprev>` + edvFxPrevHTML(st.FxPrev) + `</div>`)
+		b.WriteString(`>` + st.Player + `</div>`)
+		b.WriteString(hint("info", st.EditHint))
 	} else if st.HasSrc {
 		b.WriteString(emptyState(st.NoMedia))
 	} else {
@@ -630,9 +688,19 @@ func editorVideoHTML(st edvViewState) string {
 	}
 	b.WriteString(`</div>`)
 
-	// ── inspector pane ──
+	// ── inspector pane (#edv-insp = the patch target for every non-media edit) ──
 	b.WriteString(`<div class="edv-pane edv-pane-insp"><div class=edv-pane-title>` +
 		html.EscapeString(st.InspTitle) + `</div>`)
+	b.WriteString(`<div id=edv-insp>` + editorVideoInspHTML(st) + `</div>`)
+	b.WriteString(`</div>`)
+
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+// editorVideoInspHTML renders the inspector body (#edv-insp inner).
+func editorVideoInspHTML(st edvViewState) string {
+	var b strings.Builder
 	if st.HasSrc {
 		b.WriteString(`<div class=edv-src><span class=edv-srcname>` + html.EscapeString(st.SrcName) + `</span>`)
 		if st.SrcInfo != "" {
@@ -644,6 +712,7 @@ func editorVideoHTML(st edvViewState) string {
 	}
 	b.WriteString(btnRow(st.SrcBtn.html()))
 	if st.ShowRef {
+		b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecReframe) + `</div>`)
 		b.WriteString(selHTML(st.Aspect))
 		if st.HasZoom {
 			b.WriteString(`<div id=edv-zoomrow>` + st.Zoom.html() + `</div>`)
@@ -652,6 +721,7 @@ func editorVideoHTML(st edvViewState) string {
 		if st.HasBlur {
 			b.WriteString(st.Blur.html())
 		}
+		b.WriteString(btnRow(st.ReframeBtn.html()))
 	}
 	if st.ShowFx {
 		b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecFx) + `</div>`)
@@ -663,6 +733,7 @@ func editorVideoHTML(st edvViewState) string {
 			b.WriteString(edvFxRowHTML(r))
 		}
 		b.WriteString(btnRow(st.FxPrevBtn.html()))
+		b.WriteString(`<div id=edv-fxprev>` + edvFxPrevHTML(st.FxPrev) + `</div>`)
 		b.WriteString(hint("info", st.FxHint))
 		if len(st.FxSrc) > 0 {
 			var sb strings.Builder
@@ -674,23 +745,31 @@ func editorVideoHTML(st edvViewState) string {
 	}
 	b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecExport) + `</div>`)
 	b.WriteString(`<div id=edv-export>` + edvExportHTML(st.Export) + `</div>`)
-	b.WriteString(`</div>`)
+	return b.String()
+}
 
-	// ── timeline pane ──
-	b.WriteString(`<div class="edv-pane edv-pane-tl">`)
-	if st.Player != "" {
-		b.WriteString(`<div class="edv-player` + st.PlayerCls + `"`)
-		if st.PlayerVars != "" {
-			b.WriteString(` style=` + attrQ(st.PlayerVars))
+// edvReframeHTML renders the reframe modal body (frame + keyframe controls).
+func edvReframeHTML(st edvReframeSt) string {
+	var b strings.Builder
+	b.WriteString(`<div id=edv-frame>` + edvFrameHTML(st.Frame) + `</div>`)
+	b.WriteString(`<div id=edv-kfbox>` + edvKfBoxHTML(st) + `</div>`)
+	b.WriteString(hint("info", st.RefHint))
+	return b.String()
+}
+
+// edvKfBoxHTML renders the keyframe button row + chips (#edv-kfbox inner).
+func edvKfBoxHTML(st edvReframeSt) string {
+	var b strings.Builder
+	b.WriteString(btnRow(st.FrameBtn.html(), st.KfAdd.html(), st.KfClear.html()))
+	if st.HasKfs {
+		b.WriteString(`<div class=edv-kfs>`)
+		for _, k := range st.Kfs {
+			b.WriteString(`<span class=edv-kf><button class=edv-kf-go data-act=` + attrQ(k.Go) + `>` +
+				html.EscapeString(k.Time) + ` · ` + k.Pos + `%</button>` +
+				`<button class=edv-kf-del data-act=` + attrQ(k.Del) + `>` + html.EscapeString(k.DelLb) + `</button></span>`)
 		}
-		b.WriteString(`>` + st.Player + `</div>`)
-		b.WriteString(hint("info", st.EditHint))
-	} else if st.HasSrc {
-		b.WriteString(emptyState(st.NoMedia))
+		b.WriteString(`</div>`)
 	}
-	b.WriteString(`</div>`)
-
-	b.WriteString(`</div>`)
 	return b.String()
 }
 

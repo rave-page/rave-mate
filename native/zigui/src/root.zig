@@ -1183,6 +1183,22 @@ export fn rz_ui_render_editor_video_v2(state: ?[*]const u8, len: usize, out_len:
     return renderWire(editor_video.State, wire_gen.decodeEdvView, editor_video.render, wire_gen.msg_edv_view, state, len, out_len);
 }
 
+export fn rz_ui_render_editor_video_insp_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor_video.State, wire_gen.decodeEdvView, editor_video.renderInsp, wire_gen.msg_edv_view, state, len, out_len);
+}
+
+export fn rz_ui_render_edv_reframe_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor_video.Reframe, wire_gen.decodeEdvReframe, editor_video.renderReframe, wire_gen.msg_edv_reframe, state, len, out_len);
+}
+
+export fn rz_ui_render_edv_kfbox_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor_video.Reframe, wire_gen.decodeEdvReframe, editor_video.renderKfBox, wire_gen.msg_edv_reframe, state, len, out_len);
+}
+
+export fn rz_ui_render_edv_frame_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
+    return renderWire(editor_video.Frame, wire_gen.decodeEdvFrame, editor_video.renderFrame, wire_gen.msg_edv_frame, state, len, out_len);
+}
+
 export fn rz_ui_render_cueedit_topbar_v2(state: ?[*]const u8, len: usize, out_len: *usize) ?[*]const u8 {
     return renderWire(cueedit.Topbar, wire_gen.decodeCeTopbar, cueedit.renderTopbar, wire_gen.msg_ce_topbar, state, len, out_len);
 }

@@ -1488,6 +1488,34 @@ func RenderEditorVideoV2(state []byte) (string, bool) {
 	})
 }
 
+// RenderEditorVideoInspV2 renders the editor-video inspector fragment (#edv-insp).
+func RenderEditorVideoInspV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_editor_video_insp_v2(p, l, n)
+	})
+}
+
+// RenderEdvReframeV2 renders the editor-video reframe modal body.
+func RenderEdvReframeV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_edv_reframe_v2(p, l, n)
+	})
+}
+
+// RenderEdvKfBoxV2 renders the reframe modal's keyframe box (#edv-kfbox).
+func RenderEdvKfBoxV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_edv_kfbox_v2(p, l, n)
+	})
+}
+
+// RenderEdvFrameV2 renders the reframe modal's frame block (#edv-frame).
+func RenderEdvFrameV2(state []byte) (string, bool) {
+	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {
+		return C.rz_ui_render_edv_frame_v2(p, l, n)
+	})
+}
+
 // RenderCueEditTopbarV2 renders the #ce-topbar strip from an RZW1 document.
 func RenderCueEditTopbarV2(state []byte) (string, bool) {
 	return render(state, func(p *C.uint8_t, l C.size_t, n *C.size_t) *C.uint8_t {

@@ -88,14 +88,17 @@ func init() {
 	})
 	onExact("edv-aspect", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Aspect = m.Val; v.proj.Normalize() })
-		u.patchMain()
+		u.edvPatchInsp()
+		u.edvSyncPlayerVars()
 		u.edvFxPrevKick()
 	})
 	onExact("edv-layout", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Layout = m.Val; v.proj.Normalize() })
-		u.patchMain()
+		u.edvPatchInsp()
+		u.edvSyncPlayerVars()
 		u.edvFxPrevKick()
 	})
+	onExact("edv-reframe-open", func(u *UI, m actMsg) { u.edvOpenReframe() })
 	onExact("edv-bgblur", func(u *UI, m actMsg) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
 		if err != nil {
@@ -137,11 +140,12 @@ func init() {
 	onPrefix("edv-kf-go:", func(u *UI, m actMsg) { u.edvKfGo(m.arg("edv-kf-go:")) })
 	onExact("edv-kf-clear", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.PanKF = nil })
-		u.patchMain()
+		u.edvPatchKfBox()
+		u.edvPatchFrame()
 	})
 	onExact("edv-preset", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.PresetKey = m.Val; v.proj.Normalize() })
-		u.patchMain()
+		u.edvPatchInsp()
 	})
 	onExact("edv-out", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.OutPath = strings.TrimSpace(m.Val) })
@@ -305,7 +309,11 @@ func (u *UI) edvBindMarks(path string) {
 		t.media[0].startedAt = s.StartedAt
 	})
 	if !stale {
-		u.patchMain()
+		// markers live in the mp component - patch its fragments; a full patch
+		// would rebuild the <video> seconds after load (MSE re-init churn)
+		t := u.mpSnap("editor")
+		u.mpPatchWave(t)
+		u.mpPatchTransport(t)
 	}
 }
 
@@ -435,7 +443,7 @@ func (u *UI) edvFrame(t float64) {
 			u.logErr("videoedit frame", err)
 			return
 		}
-		u.patchMain()
+		u.edvPatchModalFrame()
 		u.edvFxPrevKick() // preview follows the new frame
 	})
 }
@@ -519,7 +527,8 @@ func (u *UI) edvPan(val string) {
 		}
 		edvSave()
 		editor.mu.Unlock()
-		u.patchMain()
+		u.edvPatchKfBox()
+		u.edvPatchFrame()
 		u.edvFxPrevKick()
 	default:
 		editor.mu.Unlock()
@@ -547,6 +556,30 @@ func (u *UI) edvPatchFrame() {
 	u.edvSyncPlayerVars()
 }
 
+// edvPatchInsp re-renders the inspector fragment only - the player <video> in the
+// viewer pane is never touched (a rebuilt element kills playback + MSE state).
+func (u *UI) edvPatchInsp() {
+	u.eval("window.__patch('edv-insp'," + jsQuote(u.renderEditorVideoInsp()) + ")")
+}
+
+// edvPatchModalFrame re-renders the reframe modal's frame block (busy → image).
+func (u *UI) edvPatchModalFrame() {
+	u.eval("window.__patch('edv-frame'," + jsQuote(u.edvFrameFragHTML(u.edvFrameState())) + ")")
+	u.edvSyncPlayerVars()
+}
+
+// edvPatchKfBox re-renders the reframe modal's keyframe row + chips.
+func (u *UI) edvPatchKfBox() {
+	u.eval("window.__patch('edv-kfbox'," + jsQuote(u.edvKfBoxFragHTML(u.edvReframeState())) + ")")
+}
+
+// edvOpenReframe opens the reframe/area-select modal, grabbing a playhead frame.
+func (u *UI) edvOpenReframe() {
+	u.edvFrameAtPlayhead()
+	st := u.edvReframeState()
+	u.openModal(modal(st.Title, u.edvReframeBodyHTML(st), ""))
+}
+
 // edvSyncPlayerVars pushes the live reframe-preview class + vars at the
 // timeline player (drag / zoom / playback follow) without a full patch.
 func (u *UI) edvSyncPlayerVars() {
@@ -568,7 +601,7 @@ func (u *UI) edvSyncPlayerVars() {
 		return
 	}
 	cls, vars := u.edvPlayerReframe(proj, srcW, srcH)
-	u.eval("(function(){var p=document.querySelector('.edv-pane-tl .edv-player');if(!p)return;" +
+	u.eval("(function(){var p=document.querySelector('.edv-pane-view .edv-player');if(!p)return;" +
 		"p.className='edv-player" + cls + "';p.style.cssText=" + jsQuote(vars) + ";})()")
 }
 
@@ -609,7 +642,7 @@ func (u *UI) edvKfAdd() {
 		}
 		edvKfUpsert(&v.proj, t, pos, pos2-0.5)
 	})
-	u.patchMain()
+	u.edvPatchKfBox()
 }
 
 func (u *UI) edvKfDel(idxStr string) {
@@ -622,7 +655,8 @@ func (u *UI) edvKfDel(idxStr string) {
 			v.proj.PanKF = append(v.proj.PanKF[:idx], v.proj.PanKF[idx+1:]...)
 		}
 	})
-	u.patchMain()
+	u.edvPatchKfBox()
+	u.edvPatchFrame()
 }
 
 func (u *UI) edvKfGo(idxStr string) {
@@ -683,7 +717,7 @@ func (u *UI) edvFxScan() {
 		editor.video.fxPlugins = plugins
 		editor.mu.Unlock()
 		if len(plugins) > 0 {
-			u.patchMain()
+			u.edvPatchInsp()
 		}
 	})
 }
@@ -708,7 +742,7 @@ func (u *UI) edvFetchPack() {
 		return
 	}
 	u.toast(i18n.T("editor.video.toast.packStart"))
-	u.patchMain()
+	u.edvPatchInsp()
 	u.bg(func() {
 		d, err := config.Dir()
 		var n int
@@ -732,7 +766,7 @@ func (u *UI) edvFetchPack() {
 		} else {
 			u.toast(i18n.T("editor.video.toast.packDone", i18n.A{"n": strconv.Itoa(n)}))
 		}
-		u.patchMain()
+		u.edvPatchInsp()
 	})
 }
 
@@ -751,7 +785,7 @@ func (u *UI) edvFxAdd(idxStr string) {
 			Kind: p.Kind, Ref: filepath.Base(p.Ref),
 		})
 	})
-	u.patchMain()
+	u.edvPatchInsp()
 	u.edvFxPrevKick()
 }
 
@@ -781,7 +815,7 @@ func (u *UI) edvFxEdit(idxStr, op string) {
 			fx[idx].Off = !fx[idx].Off
 		}
 	})
-	u.patchMain()
+	u.edvPatchInsp()
 	u.edvFxPrevKick()
 }
 
@@ -855,7 +889,7 @@ func (u *UI) edvFxColorSet(arg, val string) {
 		e.Params[name+".g"] = float64(c.G) / 255
 		e.Params[name+".b"] = float64(c.B) / 255
 	})
-	u.patchMain() // refresh the swatch
+	u.edvPatchInsp() // refresh the swatch
 	u.edvFxPrevKick()
 }
 
@@ -1114,7 +1148,7 @@ func (u *UI) edvExport() {
 		}
 		typ, method = "vfx", "vfx.run"
 	}
-	u.patchMain()
+	u.edvPatchInsp()
 	u.bg(func() { u.edvRunExport(out, typ, method, params) })
 }
 
@@ -1159,7 +1193,7 @@ func (u *UI) edvRunExport(out, typ, method string, params map[string]any) {
 	} else {
 		u.toast(i18n.T("editor.video.toast.exported", i18n.A{"path": out}))
 	}
-	u.patchMain()
+	u.edvPatchInsp()
 }
 
 // edvDispatch runs the export via the shared hub (queue visibility; plain

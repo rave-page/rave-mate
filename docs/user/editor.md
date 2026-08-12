@@ -37,10 +37,11 @@ thumbnail in two minutes":
 
 ## Video mode
 
-Built for "wide capture in, phone-format clip out", laid out like an NLE: a
-big **Preview** viewer, an **Inspector** column on the right (source, aspect,
-layout, effects, export), and the trim **timeline** across the bottom - the cut
-workflow is the same as the Publish tab, so nothing new to learn:
+Built for "wide capture in, phone-format clip out", laid out like an NLE:
+**one Preview player** (the video plays your cut with the selected reframe
+live, waveform + transport underneath) and an **Inspector** column on the
+right (source, reframe, effects, export) - the cut workflow is the same as
+the Publish tab, so nothing new to learn:
 
 1. **Source**: *Change source…* opens a picker with your recent recordings
    (video/audio) plus Browse for any file.
@@ -58,16 +59,16 @@ workflow is the same as the Publish tab, so nothing new to learn:
    cut exactly on the track change. Hunting the best part of a set for a Reel:
    jump to the track, snap IN, snap OUT, export.
 3. **Reframe** (video sources): choose a target aspect - 9:16 vertical
-   (Reel/Story/TikTok), 4:5 portrait, 1:1 square, 16:9 wide - then drag the
-   bright window on the preview frame to choose the visible slice.
+   (Reel/Story/TikTok), 4:5 portrait, 1:1 square, 16:9 wide. The area select
+   lives in its own dialog: press *Reframe & zoom window…*, then drag the
+   bright window on the playhead frame to choose the visible slice.
    **Zoom** punches in tighter than the aspect window: scroll the mouse wheel
-   over the preview frame or use the *Zoom* slider (1-4×) in the inspector.
-   Zoomed, the window pans on BOTH axes (it also works with *keep aspect* -
-   a straight punch-in without reframing).
-   **Keyframes** animate the pan: press *Use playhead frame* to grab a frame at
-   the playhead, *+ Keyframe at playhead* to pin the window there, and the pan
-   (both axes) glides between pins in the export (chips jump to / delete each
-   keyframe).
+   over the frame or use the *Zoom* slider (1-4×) in the inspector. Zoomed,
+   the window pans on BOTH axes (it also works with *keep aspect* - a
+   straight punch-in without reframing).
+   **Keyframes** animate the pan: *Use playhead frame* grabs a fresh frame,
+   *+ Keyframe at playhead* pins the window there, and the pan (both axes)
+   glides between pins in the export (chips jump to / delete each keyframe).
 4. **Layout**: *Zoom-fill* crops to the frame; *Original inside + filled
    background* keeps the whole picture at its native aspect, centered, and
    fills the rest with a zoomed copy (the pan window picks the slice) - the
