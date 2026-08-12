@@ -70,6 +70,8 @@ const ListParam = struct {
 };
 const ListEntry = struct {
     kind: []const u8 = "frei0r",
+    type: []const u8 = "filter", // filter | generator (no inputImage)
+    categories: []const u8 = "",
     ref: []const u8,
     name: []const u8,
     author: []const u8,
@@ -162,6 +164,8 @@ fn list(gpa: std.mem.Allocator, io: std.Io, dirs: []const u8) u8 {
                 const stem = ent.name[0 .. ent.name.len - (std.fs.path.extension(ent.name)).len];
                 entries.append(arena, .{
                     .kind = "isf",
+                    .type = if (doc.has_input) "filter" else "generator",
+                    .categories = arena.dupe(u8, doc.categories) catch continue,
                     .ref = full,
                     .name = arena.dupe(u8, stem) catch continue,
                     .author = arena.dupe(u8, doc.credit) catch continue,

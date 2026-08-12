@@ -120,7 +120,7 @@ func ssResolve(id string) selState {
 	}
 	f := strings.ToLower(strings.TrimSpace(s.Filter))
 	for _, o := range list {
-		if f != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val), f) {
+		if f != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val+" "+o.Badge), f) {
 			continue
 		}
 		s.Rows = append(s.Rows, selRow{Val: o.Val, Label: o.Label, Sub: o.Sub, Badge: o.Badge, Cur: o.Val == cur})
@@ -322,7 +322,7 @@ func (u *UI) ssFirst(id string) {
 		return
 	}
 	for _, o := range opts() {
-		if filter != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val), filter) {
+		if filter != "" && !strings.Contains(strings.ToLower(o.Label+" "+o.Sub+" "+o.Val+" "+o.Badge), filter) {
 			continue
 		}
 		u.ssPick(id, o.Val)

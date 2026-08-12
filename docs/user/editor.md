@@ -100,9 +100,15 @@ Effects use two open standards, so packs made for other VJ/video tools work here
 
 `<config>` is rave-mate's config folder (Settings shows the exact path; on
 Windows it is `%AppData%\rave-mate`). The Effects section lists everything
-found, *Add effect…* appends to the chain, each entry has enable/reorder/remove
-buttons and 0-1 sliders/switches for its parameters. *Preview effects on frame*
-renders the current preview frame through the chain - cropped exactly like the
+found. *Add effect…* is a searchable picker: type to filter by name,
+description, category, standard (`frei0r` / `ISF`) or `generator`; rows are
+grouped by standard and show each effect's categories plus a badge -
+generators (source shaders that draw their own content, replacing the frame)
+are marked `ISF · generator`. Each chain entry has enable/reorder/remove
+buttons and 0-1 sliders/switches for its parameters. The preview frame
+re-renders **automatically** (debounced) whenever you add/remove/toggle an
+effect, move a parameter, or change aspect/zoom/layout/pan - *Preview effects
+on frame* still forces a render on demand. Both are cropped exactly like the
 export will be.
 
 **Getting more effects** - the buttons under the Effects section:

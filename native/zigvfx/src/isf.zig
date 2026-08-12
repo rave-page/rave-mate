@@ -36,6 +36,8 @@ pub const max_targets = 8; // sampler units 1..8 (0 = inputImage)
 pub const Doc = struct {
     desc: []const u8,
     credit: []const u8,
+    categories: []const u8, // CATEGORIES joined ", " ("" = none)
+    has_input: bool, // inputImage declared - filter; else generator
     params: []Param,
     passes: []Pass, // empty = implicit single output pass
     body: []const u8, // GLSL after the header comment
@@ -51,6 +53,7 @@ pub const Doc = struct {
         gpa.free(d.passes);
         gpa.free(d.desc);
         gpa.free(d.credit);
+        gpa.free(d.categories);
         gpa.free(d.body);
     }
 };
@@ -178,6 +181,7 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) ParseError!Doc {
         for (params.items) |p| gpa.free(p.name);
         params.deinit(gpa);
     }
+    var has_input = false;
     for (hdr.INPUTS) |in| {
         if (in.NAME.len == 0) continue;
         // audio-reactive shaders can never render here (no audio source) - reject at
@@ -185,7 +189,10 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) ParseError!Doc {
         if (std.mem.eql(u8, in.TYPE, "audio") or std.mem.eql(u8, in.TYPE, "audioFFT")) return error.Unsupported;
         // a secondary image input never gets bound - the shader would sample junk
         if (std.mem.eql(u8, in.TYPE, "image") and !std.mem.eql(u8, in.NAME, "inputImage")) return error.Unsupported;
-        if (std.mem.eql(u8, in.TYPE, "image")) continue; // inputImage - implicit
+        if (std.mem.eql(u8, in.TYPE, "image")) {
+            has_input = true;
+            continue; // inputImage - implicit
+        }
         const kind: ParamKind = if (std.mem.eql(u8, in.TYPE, "float"))
             .float
         else if (std.mem.eql(u8, in.TYPE, "bool"))
@@ -208,9 +215,19 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) ParseError!Doc {
         try params.append(gpa, .{ .name = try gpa.dupe(u8, in.NAME), .kind = kind, .def = def });
     }
 
+    var cats: std.ArrayList(u8) = .empty;
+    errdefer cats.deinit(gpa);
+    for (hdr.CATEGORIES, 0..) |cat, i| {
+        if (cat.len == 0) continue;
+        if (i > 0 and cats.items.len > 0) try cats.appendSlice(gpa, ", ");
+        try cats.appendSlice(gpa, cat);
+    }
+
     return .{
         .desc = try gpa.dupe(u8, hdr.DESCRIPTION),
         .credit = try gpa.dupe(u8, hdr.CREDIT),
+        .categories = try cats.toOwnedSlice(gpa),
+        .has_input = has_input,
         .params = try params.toOwnedSlice(gpa),
         .passes = try passes.toOwnedSlice(gpa),
         .body = try gpa.dupe(u8, src[open + close + 2 ..]),
@@ -958,6 +975,7 @@ test "parse header + params" {
         \\/*{
         \\  "DESCRIPTION": "test shader",
         \\  "CREDIT": "rave-mate",
+        \\  "CATEGORIES": ["Stylize", "Color Effect"],
         \\  "INPUTS": [
         \\    {"NAME":"inputImage","TYPE":"image"},
         \\    {"NAME":"amount","TYPE":"float","DEFAULT":0.5},
@@ -971,6 +989,8 @@ test "parse header + params" {
     var doc = try parse(std.testing.allocator, src);
     defer doc.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("test shader", doc.desc);
+    try std.testing.expectEqualStrings("Stylize, Color Effect", doc.categories);
+    try std.testing.expect(doc.has_input);
     try std.testing.expectEqual(@as(usize, 4), doc.params.len);
     try std.testing.expectEqualStrings("amount", doc.params[0].name);
     try std.testing.expectEqual(ParamKind.float, doc.params[0].kind);
@@ -1013,6 +1033,16 @@ test "parse multipass header" {
     try std.testing.expectEqualStrings("240", doc.passes[1].h_expr);
     try std.testing.expectEqualStrings("", doc.passes[2].target);
     try std.testing.expectEqualStrings("", doc.passes[2].w_expr);
+}
+
+test "parse generator (no inputImage)" {
+    var doc = try parse(std.testing.allocator,
+        \\/*{"INPUTS":[{"NAME":"speed","TYPE":"float","DEFAULT":0.5}]}*/
+        \\void main(){ gl_FragColor = vec4(speed); }
+    );
+    defer doc.deinit(std.testing.allocator);
+    try std.testing.expect(!doc.has_input);
+    try std.testing.expectEqualStrings("", doc.categories);
 }
 
 test "evalDim expressions" {

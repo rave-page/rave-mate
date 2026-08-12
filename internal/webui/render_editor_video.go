@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -297,15 +298,11 @@ func (u *UI) edvFxState(st *edvViewState) {
 
 	st.ShowFx = true
 	st.SecFx = i18n.T("editor.video.sectionFx")
-	addOpts := make([][2]string, 0, len(plugins))
-	for i := range plugins {
-		addOpts = append(addOpts, [2]string{strconv.Itoa(i), plugins[i].Name})
-	}
 	dir := ""
 	if d, err := config.Dir(); err == nil {
 		dir = filepath.Join(d, "vfx", "frei0r")
 	}
-	st.FxAdd = resolveSelectBox(i18n.T("editor.video.fxAdd"), "edv-fx-add", addOpts, "")
+	st.FxAdd = edvFxAddSel(plugins)
 	switch {
 	case len(plugins) == 0:
 		st.FxNone = i18n.T("editor.video.fxNoPlugins", i18n.A{"dir": dir})
@@ -386,6 +383,52 @@ func (u *UI) edvFxState(st *edvViewState) {
 		{Label: i18n.T("editor.video.fxDirIsf"), Variant: "ghost", Act: "edv-fx-dir:isf"},
 		{Label: i18n.T("editor.video.fxDirF0r"), Variant: "ghost", Act: "edv-fx-dir:frei0r"},
 	}
+}
+
+// edvFxAddSel builds the effect picker: filterable rich rows sorted by standard
+// (frei0r, ISF) then name; badge = standard (+ "generator" for source shaders),
+// sub = ISF categories else description - all filter-matchable. Val stays the
+// fxPlugins index.
+func edvFxAddSel(plugins []vfx.Plugin) selState {
+	idx := make([]int, len(plugins))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		pa, pb := &plugins[idx[a]], &plugins[idx[b]]
+		if pa.Kind != pb.Kind {
+			return pa.Kind < pb.Kind // frei0r before isf
+		}
+		return strings.ToLower(pa.Name) < strings.ToLower(pb.Name)
+	})
+	gen := i18n.T("editor.video.fxGen")
+	opts := make([]ssOpt, 0, len(plugins))
+	for _, i := range idx {
+		p := &plugins[i]
+		badge := p.Kind
+		if p.Kind == "isf" {
+			badge = "ISF"
+		}
+		if p.PlugType == "generator" {
+			badge += " · " + gen
+		}
+		sub := p.Categories
+		if sub == "" {
+			sub = p.Desc
+		}
+		if len(sub) > 90 {
+			r := []rune(sub)
+			if len(r) > 90 {
+				r = r[:90]
+			}
+			sub = string(r) + "…"
+		}
+		opts = append(opts, ssOpt{Val: strconv.Itoa(i), Label: p.Name, Sub: sub, Badge: badge})
+	}
+	optsCopy := opts
+	s := resolveSmartSelect("edv-fx-add", "edv-fx-add", "", func() []ssOpt { return optsCopy })
+	s.Label = i18n.T("editor.video.fxAdd")
+	return s
 }
 
 // edvFxPrevState resolves the fx preview box (also the #edv-fxprev fragment).

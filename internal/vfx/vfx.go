@@ -66,12 +66,14 @@ type Param struct {
 
 // Plugin is one discovered effect.
 type Plugin struct {
-	Kind   string  `json:"kind"` // frei0r|isf
-	Ref    string  `json:"ref"`  // absolute plugin path
-	Name   string  `json:"name"`
-	Author string  `json:"author"`
-	Desc   string  `json:"desc"`
-	Params []Param `json:"params"`
+	Kind       string  `json:"kind"`       // frei0r|isf
+	PlugType   string  `json:"type"`       // filter|generator
+	Categories string  `json:"categories"` // ISF CATEGORIES joined ", " ("" = none)
+	Ref        string  `json:"ref"`        // absolute plugin path
+	Name       string  `json:"name"`
+	Author     string  `json:"author"`
+	Desc       string  `json:"desc"`
+	Params     []Param `json:"params"`
 }
 
 //go:embed isfseed/*.fs
