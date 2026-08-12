@@ -1,13 +1,13 @@
 {
-  "version": "nightly-cfb1c4f",
-  "build": 241,
-  "commit": "cfb1c4f",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-241-20260812-cfb1c4f.exe",
-  "sha256": "35f49b7f29854244cdf2a6d939f4024cdc9cb62f76f1e22d529973747d0adb02",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-241-20260812-cfb1c4f.exe",
-  "installer_sha256": "4d18be6aab0ec36a0c18f574dab943afdc78b0c0161df026b2033459dbe97ee0",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-241-20260812-cfb1c4f",
-  "linux_sha256": "ab8d1434c1aa1f18313ae6df3600e97a28c30b4cf7816161b4124860e0065db6",
+  "version": "nightly-7f6c2cc",
+  "build": 242,
+  "commit": "7f6c2cc",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-242-20260812-7f6c2cc.exe",
+  "sha256": "73300b2e767a65917033e6222ff19974036d5d0cf59856c17bf02d09d54560ec",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-242-20260812-7f6c2cc.exe",
+  "installer_sha256": "42f411bbebeeeda80573442ef7d0c66cd555f4a9416a0de910a0cdf0b7079423",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-242-20260812-7f6c2cc",
+  "linux_sha256": "472fcbf9f4f0e038d7a026d7d85c7fef74b20e006b228a8b6b53bc6827728916",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-12T06:17:00Z",
-  "notes": "feat(editor): color + position effect-param controls"
+  "released": "2026-08-12T08:15:02Z",
+  "notes": "feat(vfx): multi-pass ISF shaders - PASSES targets, persistent feedback, dim exprs"
 }
