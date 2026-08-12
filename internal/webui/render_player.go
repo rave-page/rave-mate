@@ -79,8 +79,8 @@ type mpVidSt struct {
 	URL      string `json:"url"`
 	MSE      string `json:"mse"` // "" = plain src; else data-mse index URL
 	Muted    bool   `json:"muted"`
-	Ev       string `json:"ev"`      // element→Go transport mirror handler
-	OnMeta   string `json:"onmeta"`  // Ev + volume/first-frame nudge
+	Ev       string `json:"ev"`     // element→Go transport mirror handler
+	OnMeta   string `json:"onmeta"` // Ev + volume/first-frame nudge
 	OnErr    string `json:"onerr"`
 	DataIn   string `json:"dataIn"`  // trim IN local secs ("" = omit; drives loop-from-IN)
 	DataOut  string `json:"dataOut"` // trim OUT local secs ("" = none; element stops there)
