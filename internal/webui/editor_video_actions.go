@@ -862,7 +862,7 @@ func (u *UI) edvFxColorSet(arg, val string) {
 // edvResolveFx maps enabled chain entries to loaded plugins (base-name match;
 // missing/disabled entries drop out).
 func edvResolveFx(effects []videoedit.EffectInst, plugins []vfx.Plugin) []vfx.Fx {
-	var out []vfx.Fx
+	out := []vfx.Fx{} // never nil: a nil slice marshals "fx":null, which the vfx child rejects (BadSpec)
 	for _, e := range effects {
 		if e.Off {
 			continue
@@ -1016,7 +1016,8 @@ func (u *UI) edvFxPrevRender() {
 			u.edvPatchFxPrev()
 			return
 		}
-		u.patchMain()
+		// targeted patch only: patchMain would rebuild the player <video> (MSE re-init churn)
+		u.edvPatchFxPrev()
 		if stale && !u.stopped() {
 			u.edvFxPrevKick()
 		}

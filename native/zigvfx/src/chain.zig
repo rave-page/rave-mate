@@ -17,7 +17,7 @@ pub const Spec = struct {
     w: u32 = 0,
     h: u32 = 0,
     fps: f64 = 30,
-    fx: []FxSpec = &.{},
+    fx: ?[]FxSpec = null, // optional: a Go nil slice marshals "fx":null - treat as empty
 };
 
 pub const max_dim = 8192;
@@ -57,6 +57,7 @@ pub const Chain = struct {
     // load opens every plugin/shader in the spec and applies static params.
     pub fn load(gpa: std.mem.Allocator, arena: std.mem.Allocator, io: std.Io, bytes: []const u8) LoadError!Chain {
         const spec = try parseSpec(arena, bytes);
+        const fx_list: []FxSpec = spec.fx orelse &.{};
         var stages: std.ArrayList(Stage) = .empty;
         var gl: ?*isf.Host = null;
         errdefer {
@@ -65,7 +66,7 @@ pub const Chain = struct {
             closeGl(gpa, gl);
         }
         var keybuf: [256]u8 = undefined;
-        for (spec.fx) |fx| {
+        for (fx_list) |fx| {
             if (std.mem.eql(u8, fx.kind, "frei0r")) {
                 const p = try gpa.create(frei0r.Plugin);
                 errdefer gpa.destroy(p);
@@ -172,15 +173,21 @@ test "parseSpec validates" {
 
     const ok = try parseSpec(a, "{\"w\":1080,\"h\":1920,\"fps\":29.97,\"fx\":[]}");
     try std.testing.expectEqual(@as(u32, 1080), ok.w);
-    try std.testing.expectEqual(@as(usize, 0), ok.fx.len);
+    try std.testing.expectEqual(@as(usize, 0), ok.fx.?.len);
+
+    // Go nil slice → "fx":null (and an absent fx) both mean an empty chain
+    const nul = try parseSpec(a, "{\"w\":8,\"h\":8,\"fps\":30,\"fx\":null}");
+    try std.testing.expectEqual(@as(?[]FxSpec, null), nul.fx);
+    const abs = try parseSpec(a, "{\"w\":8,\"h\":8,\"fps\":30}");
+    try std.testing.expectEqual(@as(?[]FxSpec, null), abs.fx);
 
     const fx = try parseSpec(a,
         \\{"w":8,"h":8,"fx":[{"kind":"frei0r","ref":"x.dll","params":{"amount":0.25,"col.r":1}}]}
     );
     try std.testing.expectEqual(@as(f64, 30), fx.fps); // default
-    try std.testing.expectEqual(@as(usize, 1), fx.fx.len);
-    try std.testing.expectEqual(@as(f64, 0.25), fx.fx[0].params.map.get("amount").?);
-    try std.testing.expectEqual(@as(f64, 1), fx.fx[0].params.map.get("col.r").?);
+    try std.testing.expectEqual(@as(usize, 1), fx.fx.?.len);
+    try std.testing.expectEqual(@as(f64, 0.25), fx.fx.?[0].params.map.get("amount").?);
+    try std.testing.expectEqual(@as(f64, 1), fx.fx.?[0].params.map.get("col.r").?);
 
     try std.testing.expectError(error.BadSpec, parseSpec(a, "{\"w\":0,\"h\":9}"));
     try std.testing.expectError(error.BadSpec, parseSpec(a, "{\"w\":9000,\"h\":9,\"fps\":30}"));
