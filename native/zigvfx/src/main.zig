@@ -1,5 +1,6 @@
-//! rave-mate-vfx - open-standard video effects child (Zig, no cgo). frei0r now, ISF (P4)
-//! next. Spawned by the Go `vfx` worker; a plugin crash kills only THIS process.
+//! rave-mate-vfx - open-standard video effects child (Zig, no cgo): frei0r plugins
+//! + ISF shaders (single- and multi-pass). Spawned by the Go `vfx` worker; a
+//! plugin crash kills only THIS process.
 //!
 //! Modes:
 //!   --list <dir>[;<dir>...]            plugin discovery -> {"plugins":[...]} on stdout

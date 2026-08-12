@@ -8,8 +8,9 @@ overlay composite so the fg never re-styles). All zigui goldens green; i18n ×7;
 docs/user/editor.md + wiki Editor page. Verified live on the installed build incl. a
 real 36.5s 4K→Reel export with effects. Zigcore edgeo geometry kernel + builtin
 Thumbnail base / Story teaser presets SHIPPED (bit-exact flat-box port incl. Cephes
-trig; 3000-iter fuzz parity gate). Open follow-ups: ISF color/position UI controls,
-multi-pass ISF.
+trig; 3000-iter fuzz parity gate). ISF color/position UI controls SHIPPED (swatch+hex,
+X/Y sliders, tint/spotlight seeds). Multi-pass ISF SHIPPED (PASSES targets, persistent
+feedback, dim exprs; bloom/trails seeds). No open follow-ups.
 
 User ask: split Editor tab into **Image** (thumbnails/posters; PS/GIMP-style layer editing,
 presets, visual move/scale/align) and **Video** (cut + export vertical "Hochformat" clips from
@@ -82,9 +83,11 @@ Around the mp component:
 Inside:
 - **frei0r** host: `std.DynLib` + f0r_init/get_plugin_info/get_param_info/construct/update.
   RGBA8 frame-in/out, params float/bool/color/position. Discovery: `<configDir>/vfx/frei0r/`.
-- **ISF** host: parse `/*{json}*/` header (INPUTS float/bool/color/point2D + inputImage,
-  single-pass subset), GLSL prelude (IMG_NORM_PIXEL etc.), offscreen WGL context + FBO,
-  readback. `<configDir>/vfx/isf/` + bundled self-written starter set (MIT). OpenFX non-goal.
+- **ISF** host: parse `/*{json}*/` header (INPUTS float/bool/color/point2D + inputImage;
+  PASSES multi-pass: named double-buffered targets, PERSISTENT feedback, WIDTH/HEIGHT
+  $-exprs, FLOAT w/ RGBA8 fallback, PASSINDEX/FRAMEINDEX), GLSL prelude (IMG_NORM_PIXEL
+  etc.), offscreen WGL context + FBO, readback. `<configDir>/vfx/isf/` + bundled
+  self-written starter set (MIT). OpenFX non-goal.
 Go side: worker type `vfx` (own pool — GL/plugin crash can't hit transcode) is a thin
 orchestrator: `vfx.list`, `vfx.preview` (frame at t → chain → PNG), `vfx.run` (spawn ffmpeg
 decode → zigvfx --pipe → ffmpeg encode, `-ss` audio from source, progress by frame count).

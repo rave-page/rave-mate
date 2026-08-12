@@ -264,7 +264,8 @@ native/zigenc/ Zig per-adapter MF H.264 encoder child exe (rave-mate-enc.exe, no
 native/zigvr/ Zig VR-overlay raster executor (`rz_vr_*`, include/ravevr.h). Built by
               `make zig`. Blend math replicates Go image/draw exactly (parity-tested).
 native/zigvfx/ Zig effects child exe (rave-mate-vfx, no cgo): open-standard video FX -
-              frei0r plugin host (dyn-load) + single-pass ISF/GLSL shaders (offscreen
+              frei0r plugin host (dyn-load) + ISF/GLSL shaders, single- and multi-pass
+              (PASSES targets, persistent feedback buffers, $WIDTH/$HEIGHT exprs, offscreen
               WGL). --list/--frame/--pipe over files/stdio; spawned by the `vfx` worker
               (internal/vfx locator + internal/worker/vfx.go pipeline). A plugin/GL
               fault kills only this exe. Starter ISF set seeded from internal/vfx/isfseed.

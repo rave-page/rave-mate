@@ -83,8 +83,12 @@ Effects use two open standards, so packs made for other VJ/video tools work here
   shaders with a JSON header, the format used by VDMX, CoGe and Videosync.
   `.fs` files go into `<config>\vfx\isf\`. rave-mate ships a small MIT starter
   set (brightness/contrast/saturation, vignette, posterize, pixelate,
-  scanlines, chroma-shift, tint, spotlight); single-pass shaders are supported,
-  multi-pass and audio-reactive inputs are not (yet).
+  scanlines, chroma-shift, tint, spotlight, bloom, trails). Single- and
+  multi-pass shaders are supported - `PASSES` with named targets,
+  `PERSISTENT` feedback buffers (motion trails accumulate across frames
+  during export/preview playback), `WIDTH`/`HEIGHT` expressions like
+  `$WIDTH/2.0`, `FLOAT` buffers, and the `PASSINDEX`/`FRAMEINDEX` uniforms.
+  Audio-reactive and `IMPORTED` inputs are not supported (yet).
 
 `<config>` is rave-mate's config folder (Settings shows the exact path; on
 Windows it is `%AppData%\rave-mate`). The Effects section lists everything

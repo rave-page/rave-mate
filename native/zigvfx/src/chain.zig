@@ -140,7 +140,7 @@ pub const Chain = struct {
         for (c.stages) |*st| {
             switch (st.*) {
                 .f0r => |*f| f.inst.apply(t, cur, alt),
-                .shader => |*s| s.apply(t, cur, alt),
+                .shader => |*s| s.apply(t, frame_idx, cur, alt),
             }
             const tmp = cur;
             cur = alt;
