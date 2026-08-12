@@ -222,7 +222,13 @@ const runtimeJS = `(function(){
         var own='';
         for(var j=0;j<c.childNodes.length;j++){ if(c.childNodes[j].nodeType===3){ own+=c.childNodes[j].textContent; } }
         own=own.replace(/\s+/g,' ').trim();
+        // overflow flag: deliberate clipping (overflow hidden/clip, e.g. text-overflow
+        // ellipsis) is styling, not a layout break - only visible/auto/scroll bleeds count
         var over=(c.scrollWidth>c.clientWidth+2)||(c.scrollHeight>c.clientHeight+2);
+        if(over){ var cs=getComputedStyle(c);
+          var hx=cs.overflowX==='hidden'||cs.overflowX==='clip', hy=cs.overflowY==='hidden'||cs.overflowY==='clip';
+          over=((c.scrollWidth>c.clientWidth+2)&&!hx)||((c.scrollHeight>c.clientHeight+2)&&!hy);
+        }
         var act=c.hasAttribute('data-act');
         var interactive=tag==='button'||tag==='a'||tag==='input'||tag==='select'||tag==='textarea'||act;
         var kept=own||role||interactive;
