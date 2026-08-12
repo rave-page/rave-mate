@@ -67,7 +67,7 @@ type Param struct {
 // Plugin is one discovered effect.
 type Plugin struct {
 	Kind       string  `json:"kind"`       // frei0r|isf
-	PlugType   string  `json:"type"`       // filter|generator
+	PlugType   string  `json:"type"`       // filter|generator|mixer
 	Categories string  `json:"categories"` // ISF CATEGORIES joined ", " ("" = none)
 	Ref        string  `json:"ref"`        // absolute plugin path
 	Name       string  `json:"name"`

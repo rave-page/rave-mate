@@ -181,6 +181,7 @@
       "fxGen": "Generator",
       "fxHint": "Offene Effekt-Standards: frei0r-Plugins (https://frei0r.dyne.org) aus {dir}. Die Kette greift zwischen Schnitt/Reframe und Encoding – Exporte laufen automatisch durch die Effekt-Pipeline.",
       "fxMissing": "fehlt",
+      "fxMix": "Mixer",
       "fxNoPlugins": "Keine Effekt-Plugins gefunden. frei0r-Plugin-.dll-Dateien nach {dir} legen und den Tab neu öffnen.",
       "fxPack": "Vidvox-Paket laden (MIT)",
       "fxPackBusy": "Paket wird geladen…",

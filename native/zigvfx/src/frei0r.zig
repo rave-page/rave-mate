@@ -1,7 +1,8 @@
 //! frei0r plugin host (std.DynLib, no cgo). Spec: https://frei0r.dyne.org C ABI v1.x.
-//! Filters only (sources/mixers rejected); color models RGBA8888/PACKED32 direct,
-//! BGRA8888 via R/B byte swap. frei0r wants mult-of-8 frame dims - Instance pads
-//! (edge-replicate) and crops so callers keep exact sizes.
+//! All plugin types: filters, sources (chain generators - input ignored) and
+//! mixer2/mixer3 (f0r_update2; the chain feeds base+top). Color models
+//! RGBA8888/PACKED32 direct, BGRA8888 via R/B byte swap. frei0r wants mult-of-8
+//! frame dims - Instance pads (edge-replicate) and crops so callers keep exact sizes.
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -69,7 +70,8 @@ pub const Param = struct {
 const ConstructFn = *const fn (c_uint, c_uint) callconv(.c) ?*anyopaque;
 const DestructFn = *const fn (?*anyopaque) callconv(.c) void;
 const ParamFn = *const fn (?*anyopaque, ?*anyopaque, c_int) callconv(.c) void;
-const UpdateFn = *const fn (?*anyopaque, f64, [*]const u32, [*]u32) callconv(.c) void;
+const UpdateFn = *const fn (?*anyopaque, f64, ?[*]const u32, [*]u32) callconv(.c) void;
+const Update2Fn = *const fn (?*anyopaque, f64, ?[*]const u32, ?[*]const u32, ?[*]const u32, [*]u32) callconv(.c) void;
 
 pub const OpenError = error{ NotFrei0r, NotFilter, BadColorModel, InitFailed, OutOfMemory };
 
@@ -78,13 +80,15 @@ pub const Plugin = struct {
     name: []const u8,
     author: []const u8,
     desc: []const u8,
+    plug_type: c_int, // 0 filter, 1 source, 2 mixer2, 3 mixer3
     color_model: c_int,
     params: []Param,
     construct: ConstructFn,
     destruct: DestructFn,
     set_param: ParamFn,
     get_param: ParamFn,
-    update: UpdateFn,
+    update: ?UpdateFn, // required for filter/source; mixers may export only f0r_update2
+    update2: ?Update2Fn,
     deinit_fn: ?*const fn () callconv(.c) void,
 
     pub fn close(p: *Plugin, gpa: std.mem.Allocator) void {
@@ -102,8 +106,8 @@ fn dupZ(gpa: std.mem.Allocator, s: ?[*:0]const u8) ![]const u8 {
     return gpa.dupe(u8, if (s) |z| std.mem.span(z) else "");
 }
 
-// open loads + f0r_init()s a filter plugin and reads its param table (defaults via a
-// throwaway 16x16 instance). Caller owns the Plugin; close() releases everything.
+// open loads + f0r_init()s a plugin (any type) and reads its param table (defaults via
+// a throwaway 16x16 instance). Caller owns the Plugin; close() releases everything.
 pub fn open(gpa: std.mem.Allocator, path: []const u8) OpenError!Plugin {
     var lib = Lib.open(path) catch return error.NotFrei0r;
     errdefer lib.close();
@@ -115,14 +119,17 @@ pub fn open(gpa: std.mem.Allocator, path: []const u8) OpenError!Plugin {
     const destruct = lib.lookup(DestructFn, "f0r_destruct") orelse return error.NotFrei0r;
     const set_param = lib.lookup(ParamFn, "f0r_set_param_value") orelse return error.NotFrei0r;
     const get_param = lib.lookup(ParamFn, "f0r_get_param_value") orelse return error.NotFrei0r;
-    const update = lib.lookup(UpdateFn, "f0r_update") orelse return error.NotFrei0r;
+    const update = lib.lookup(UpdateFn, "f0r_update");
+    const update2 = lib.lookup(Update2Fn, "f0r_update2");
     const deinit_fn = lib.lookup(*const fn () callconv(.c) void, "f0r_deinit");
 
     if (init_fn() < 0) return error.InitFailed; // ffmpeg convention: negative = failure
 
     var info: RawInfo = std.mem.zeroes(RawInfo);
     get_info(&info);
-    if (info.plugin_type != 0) return error.NotFilter;
+    if (info.plugin_type < 0 or info.plugin_type > 3) return error.NotFilter;
+    if (info.plugin_type < 2 and update == null) return error.NotFrei0r; // filter/source need f0r_update
+    if (info.plugin_type >= 2 and update2 == null) return error.NotFilter; // mixer needs f0r_update2
     if (info.color_model < 0 or info.color_model > 2) return error.BadColorModel;
 
     const n: usize = if (info.num_params > 0) @intCast(info.num_params) else 0;
@@ -172,6 +179,7 @@ pub fn open(gpa: std.mem.Allocator, path: []const u8) OpenError!Plugin {
         .name = try dupZ(gpa, info.name),
         .author = try dupZ(gpa, info.author),
         .desc = try dupZ(gpa, info.explanation),
+        .plug_type = info.plugin_type,
         .color_model = info.color_model,
         .params = params,
         .construct = construct,
@@ -179,6 +187,7 @@ pub fn open(gpa: std.mem.Allocator, path: []const u8) OpenError!Plugin {
         .set_param = set_param,
         .get_param = get_param,
         .update = update,
+        .update2 = update2,
         .deinit_fn = deinit_fn,
     };
 }
@@ -198,6 +207,7 @@ pub const Instance = struct {
     staged: bool, // pad or byte-swap forces staging buffers
     swap_rb: bool, // BGRA8888 plugin fed RGBA frames
     pin: []u32,
+    pin2: []u32, // staged mixer top-layer input ([] unless staged mixer)
     pout: []u32,
 
     pub fn create(gpa: std.mem.Allocator, p: *Plugin, w: u32, h: u32) !Instance {
@@ -209,8 +219,10 @@ pub const Instance = struct {
         errdefer p.destruct(inst);
         const pin: []u32 = if (staged) try gpa.alloc(u32, pw * ph) else &.{};
         errdefer if (staged) gpa.free(pin);
+        const pin2: []u32 = if (staged and p.plug_type >= 2) try gpa.alloc(u32, pw * ph) else &.{};
+        errdefer if (pin2.len != 0) gpa.free(pin2);
         const pout: []u32 = if (staged) try gpa.alloc(u32, pw * ph) else &.{};
-        return .{ .plugin = p, .inst = inst, .w = w, .h = h, .pw = pw, .ph = ph, .staged = staged, .swap_rb = swap, .pin = pin, .pout = pout };
+        return .{ .plugin = p, .inst = inst, .w = w, .h = h, .pw = pw, .ph = ph, .staged = staged, .swap_rb = swap, .pin = pin, .pin2 = pin2, .pout = pout };
     }
 
     pub fn destroy(i: *Instance, gpa: std.mem.Allocator) void {
@@ -219,6 +231,7 @@ pub const Instance = struct {
             gpa.free(i.pin);
             gpa.free(i.pout);
         }
+        if (i.pin2.len != 0) gpa.free(i.pin2);
     }
 
     // setParams pushes spec values by param name; dotted sub-keys address components
@@ -272,14 +285,46 @@ pub const Instance = struct {
         return spec.map.get(key);
     }
 
-    // apply runs one frame; src/dst are w*h RGBA and must not alias.
+    // apply runs one filter frame; src/dst are w*h RGBA and must not alias.
     pub fn apply(i: *Instance, time: f64, src: []const u32, dst: []u32) void {
+        const up = i.plugin.update.?; // open() guarantees for filter/source
         if (!i.staged) {
-            i.plugin.update(i.inst, time, src.ptr, dst.ptr);
+            up(i.inst, time, src.ptr, dst.ptr);
             return;
         }
         stageIn(i.pin, src, i.w, i.h, i.pw, i.ph, i.swap_rb);
-        i.plugin.update(i.inst, time, i.pin.ptr, i.pout.ptr);
+        up(i.inst, time, i.pin.ptr, i.pout.ptr);
+        stageOut(i.pout, dst, i.w, i.h, i.pw, i.swap_rb);
+    }
+
+    // applySource renders a source plugin into dst (spec: input ignored, pass null).
+    pub fn applySource(i: *Instance, time: f64, dst: []u32) void {
+        const up = i.plugin.update.?; // open() guarantees for filter/source
+        if (!i.staged) {
+            up(i.inst, time, null, dst.ptr);
+            return;
+        }
+        up(i.inst, time, null, i.pout.ptr);
+        stageOut(i.pout, dst, i.w, i.h, i.pw, i.swap_rb);
+    }
+
+    // applyMix runs a mixer: in1 = base (untouched source frame), in2 = top (chain so
+    // far); mixer3's in3 gets top again. Inputs/dst are w*h RGBA; dst must not alias.
+    pub fn applyMix(i: *Instance, time: f64, base: []const u32, top: []const u32, dst: []u32) void {
+        const up2 = i.plugin.update2 orelse { // unreachable: open() rejects mixers w/o update2
+            @memcpy(dst, top);
+            return;
+        };
+        const third = i.plugin.plug_type == 3;
+        if (!i.staged) {
+            const in3: ?[*]const u32 = if (third) top.ptr else null;
+            up2(i.inst, time, base.ptr, top.ptr, in3, dst.ptr);
+            return;
+        }
+        stageIn(i.pin, base, i.w, i.h, i.pw, i.ph, i.swap_rb);
+        stageIn(i.pin2, top, i.w, i.h, i.pw, i.ph, i.swap_rb);
+        const in3: ?[*]const u32 = if (third) i.pin2.ptr else null;
+        up2(i.inst, time, i.pin.ptr, i.pin2.ptr, in3, i.pout.ptr);
         stageOut(i.pout, dst, i.w, i.h, i.pw, i.swap_rb);
     }
 };

@@ -340,6 +340,7 @@
       "fxGen": "generator",
       "fxHint": "Open-standard effects: frei0r (https://frei0r.dyne.org) plugins from {dir}. The chain is applied between cut/reframe and encoding - exports route through the effects pipeline automatically.",
       "fxMissing": "missing",
+      "fxMix": "mixer",
       "fxNoPlugins": "No effect plugins found. Drop frei0r plugin .dll files into {dir} and reopen this tab.",
       "fxPack": "Get Vidvox pack (MIT)",
       "fxPackBusy": "Downloading pack…",

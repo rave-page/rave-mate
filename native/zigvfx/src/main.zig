@@ -70,7 +70,7 @@ const ListParam = struct {
 };
 const ListEntry = struct {
     kind: []const u8 = "frei0r",
-    type: []const u8 = "filter", // filter | generator (no inputImage)
+    type: []const u8 = "filter", // filter | generator (source / no inputImage) | mixer
     categories: []const u8 = "",
     ref: []const u8,
     name: []const u8,
@@ -99,6 +99,14 @@ fn paramTypeName(t: frei0r.ParamType) []const u8 {
         .color => "color",
         .position => "position",
         .string, _ => "string",
+    };
+}
+
+fn f0rTypeName(t: c_int) []const u8 {
+    return switch (t) {
+        1 => "generator", // frei0r "source"
+        2, 3 => "mixer",
+        else => "filter",
     };
 }
 
@@ -140,6 +148,7 @@ fn list(gpa: std.mem.Allocator, io: std.Io, dirs: []const u8) u8 {
                     };
                 }
                 entries.append(arena, .{
+                    .type = f0rTypeName(p.plug_type),
                     .ref = full,
                     .name = arena.dupe(u8, p.name) catch continue,
                     .author = arena.dupe(u8, p.author) catch continue,

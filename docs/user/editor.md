@@ -86,7 +86,10 @@ Effects use two open standards, so packs made for other VJ/video tools work here
   plugin API used by Kdenlive, Shotcut, MLT and many VJ tools. **The Windows
   install ships ~155 frei0r plugins out of the box** (built from the pinned
   official source, GPL-2+, license + source pointer beside the DLLs in the
-  install folder). Extra plugins drop into `<config>\vfx\frei0r\`.
+  install folder). All three plugin types run in the chain: filters,
+  sources (badged `generator` - they replace the frame with their own
+  content, e.g. Plasma, Ising0r, test patterns) and mixers (badged `mixer`).
+  Extra plugins drop into `<config>\vfx\frei0r\`.
 - **ISF** (<https://isf.video>) - Interactive Shader Format: GLSL fragment
   shaders with a JSON header, the format used by VDMX, CoGe and Videosync.
   `.fs` files go into `<config>\vfx\isf\`. rave-mate ships a small MIT starter
@@ -101,10 +104,14 @@ Effects use two open standards, so packs made for other VJ/video tools work here
 `<config>` is rave-mate's config folder (Settings shows the exact path; on
 Windows it is `%AppData%\rave-mate`). The Effects section lists everything
 found. *Add effect…* is a searchable picker: type to filter by name,
-description, category, standard (`frei0r` / `ISF`) or `generator`; rows are
-grouped by standard and show each effect's categories plus a badge -
-generators (source shaders that draw their own content, replacing the frame)
-are marked `ISF · generator`. Each chain entry has enable/reorder/remove
+description, category, standard (`frei0r` / `ISF`), `generator` or `mixer`;
+rows are grouped by standard and show each effect's categories plus a badge
+(`frei0r · generator`, `frei0r · mixer`, `ISF · generator`). Generators
+replace the frame with their own content. **Mixers blend the untouched
+source frame (base) with the chain output so far (top)**: a generator or a
+blur before `screen` / `multiply` / `overlay` composites over the original
+video; a mixer first in the chain blends the frame with itself (`multiply`
+darkens, `screen` lifts). Each chain entry has enable/reorder/remove
 buttons and 0-1 sliders/switches for its parameters. The preview frame
 re-renders **automatically** (debounced) whenever you add/remove/toggle an
 effect, move a parameter, or change aspect/zoom/layout/pan - *Preview effects

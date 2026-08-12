@@ -402,6 +402,7 @@ func edvFxAddSel(plugins []vfx.Plugin) selState {
 		return strings.ToLower(pa.Name) < strings.ToLower(pb.Name)
 	})
 	gen := i18n.T("editor.video.fxGen")
+	mix := i18n.T("editor.video.fxMix")
 	opts := make([]ssOpt, 0, len(plugins))
 	for _, i := range idx {
 		p := &plugins[i]
@@ -409,8 +410,11 @@ func edvFxAddSel(plugins []vfx.Plugin) selState {
 		if p.Kind == "isf" {
 			badge = "ISF"
 		}
-		if p.PlugType == "generator" {
+		switch p.PlugType {
+		case "generator":
 			badge += " · " + gen
+		case "mixer":
+			badge += " · " + mix
 		}
 		sub := p.Categories
 		if sub == "" {

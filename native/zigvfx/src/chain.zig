@@ -49,6 +49,7 @@ pub const Chain = struct {
     fps: f64,
     stages: []Stage,
     scratch: []u32, // ping-pong partner of the caller's frame buffer
+    orig: []u32, // untouched input frame = mixer base layer ([] when no mixer stage)
     gl: ?*isf.Host, // lazy - created for the first shader stage
 
     pub const LoadError = error{ BadSpec, IsfNotSupported, UnknownKind, PluginFailed, OutOfMemory };
@@ -92,6 +93,12 @@ pub const Chain = struct {
         }
         const scratch = try gpa.alloc(u32, @as(usize, spec.w) * spec.h);
         errdefer gpa.free(scratch);
+        var need_orig = false;
+        for (stages.items) |*st| {
+            if (st.* == .f0r and st.f0r.plugin.plug_type >= 2) need_orig = true;
+        }
+        const orig: []u32 = if (need_orig) try gpa.alloc(u32, @as(usize, spec.w) * spec.h) else &.{};
+        errdefer if (need_orig) gpa.free(orig);
         return .{
             .gpa = gpa,
             .w = spec.w,
@@ -99,6 +106,7 @@ pub const Chain = struct {
             .fps = spec.fps,
             .stages = try stages.toOwnedSlice(gpa),
             .scratch = scratch,
+            .orig = orig,
             .gl = gl,
         };
     }
@@ -125,6 +133,7 @@ pub const Chain = struct {
         for (c.stages) |*st| closeStage(c.gpa, st);
         c.gpa.free(c.stages);
         c.gpa.free(c.scratch);
+        if (c.orig.len != 0) c.gpa.free(c.orig);
         closeGl(c.gpa, c.gl);
     }
 
@@ -133,13 +142,19 @@ pub const Chain = struct {
     }
 
     // apply runs all stages over frame (in place; scratch ping-pongs internally).
+    // Sources replace the frame; mixers blend orig (base) with the chain so far (top).
     pub fn apply(c: *Chain, frame_idx: u64, frame: []u32) void {
         const t = @as(f64, @floatFromInt(frame_idx)) / c.fps;
+        if (c.orig.len != 0) @memcpy(c.orig, frame);
         var cur = frame;
         var alt = c.scratch;
         for (c.stages) |*st| {
             switch (st.*) {
-                .f0r => |*f| f.inst.apply(t, cur, alt),
+                .f0r => |*f| switch (f.plugin.plug_type) {
+                    1 => f.inst.applySource(t, alt),
+                    2, 3 => f.inst.applyMix(t, c.orig, cur, alt),
+                    else => f.inst.apply(t, cur, alt),
+                },
                 .shader => |*s| s.apply(t, frame_idx, cur, alt),
             }
             const tmp = cur;
