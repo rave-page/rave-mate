@@ -928,6 +928,40 @@ func trackInCapture(tr recorder.Track, capStart, capEnd time.Time) bool {
 	return true
 }
 
+// capTrackMeta derives track markers + auto-trim hints for one capture window from the
+// recording's confirmed plays, anchored to the capture's start (axis 0). Only tracks whose
+// play-span intersects the window belong in the media - the recording can start well after
+// the set (DJ armed OBS late). A track that ended before the capture started isn't in the
+// media; the one still playing when it started maps to 0. lastFader = last fader-down (the
+// true set end), only when it lands inside this capture. Absent values are -1.
+func capTrackMeta(r recorder.Recording, capStart, capEnd time.Time) (marks []mpMark, first, lastEnd, lastFader float64) {
+	first, lastEnd, lastFader = -1, -1, -1
+	if len(r.Tracks) == 0 || capStart.IsZero() {
+		return
+	}
+	var le time.Time
+	for _, tr := range r.Tracks {
+		if !trackInCapture(tr, capStart, capEnd) {
+			continue
+		}
+		if tr.EndedAt.After(le) {
+			le = tr.EndedAt
+		}
+		off := math.Max(tr.StartedAt.Sub(capStart).Seconds(), 0)
+		if first < 0 || off < first {
+			first = off
+		}
+		marks = append(marks, mpMark{off, orTrackLine(pubTrackLine(tr))})
+	}
+	if !le.IsZero() {
+		lastEnd = math.Max(le.Sub(capStart).Seconds(), 0)
+	}
+	if !r.LastFaderAt.IsZero() && r.LastFaderAt.After(capStart) {
+		lastFader = r.LastFaderAt.Sub(capStart).Seconds()
+	}
+	return
+}
+
 // mpLoadCaptures resets + binds captures; markers/auto-trim hints come from the recording,
 // anchored to the PRIMARY capture's start (axis 0).
 func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.SetRecording) {
@@ -943,34 +977,7 @@ func (u *UI) mpLoadCaptures(host string, r recorder.Recording, aud, vid *libdb.S
 		name = filepath.Base(primary.Path)
 	}
 
-	first, lastEnd, lastFader := -1.0, -1.0, -1.0
-	var marks []mpMark
-	if len(r.Tracks) > 0 && !primary.StartedAt.IsZero() {
-		// Only tracks whose play-span intersects the capture window belong in this media - the
-		// recording can start well after the set (DJ armed OBS late). A track that ended before
-		// the capture started isn't in the media; the one still playing when it started maps to 0.
-		var le time.Time
-		for _, tr := range r.Tracks {
-			if !trackInCapture(tr, primary.StartedAt, primary.EndedAt) {
-				continue
-			}
-			if tr.EndedAt.After(le) {
-				le = tr.EndedAt
-			}
-			off := math.Max(tr.StartedAt.Sub(primary.StartedAt).Seconds(), 0)
-			if first < 0 || off < first {
-				first = off
-			}
-			marks = append(marks, mpMark{off, orTrackLine(pubTrackLine(tr))})
-		}
-		if !le.IsZero() {
-			lastEnd = math.Max(le.Sub(primary.StartedAt).Seconds(), 0)
-		}
-		// last fader-down = the true set end; only when it lands inside this capture
-		if !r.LastFaderAt.IsZero() && r.LastFaderAt.After(primary.StartedAt) {
-			lastFader = r.LastFaderAt.Sub(primary.StartedAt).Seconds()
-		}
-	}
+	marks, first, lastEnd, lastFader := capTrackMeta(r, primary.StartedAt, primary.EndedAt)
 
 	// size from the libdb row (s.Bytes) - no os.Stat here (mpLoadCaptures runs on the render
 	// goroutine via mpEnsureSet). An in-progress capture has Bytes 0 until it ends; the size row

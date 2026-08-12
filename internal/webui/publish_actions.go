@@ -424,6 +424,25 @@ func (u *UI) pubCapByID(id string) (libdb.SetRecording, bool) {
 	return libdb.SetRecording{}, false
 }
 
+// capByPath resolves a media path to its set-recording row + parent recording (zero
+// Recording when the row has none). loaded=false while the capture cache is still cold.
+func (u *UI) capByPath(path string) (s libdb.SetRecording, r recorder.Recording, ok, loaded bool) {
+	all, loaded := u.pubCapList()
+	for i := range all {
+		if all[i].Path != path && !strings.EqualFold(filepath.Clean(all[i].Path), filepath.Clean(path)) {
+			continue
+		}
+		s, ok = all[i], true
+		if u.svc.Recorder != nil && s.RecordingID != "" {
+			if rr, rok := u.svc.Recorder.Get(s.RecordingID); rok {
+				r = rr
+			}
+		}
+		return s, r, ok, loaded
+	}
+	return libdb.SetRecording{}, recorder.Recording{}, false, loaded
+}
+
 // pubHistoryDir resolves the Traktor History folder (config override, else newest install).
 func (u *UI) pubHistoryDir() string {
 	if u.svc.Cfg != nil && u.svc.Cfg.Features.NML.HistoryDir != "" {

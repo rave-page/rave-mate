@@ -16,6 +16,8 @@ import (
 	"rave.page/mate/internal/config"
 	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/jobs"
+	"rave.page/mate/internal/libdb"
+	"rave.page/mate/internal/session/sinks/recorder"
 	"rave.page/mate/internal/vfx"
 	"rave.page/mate/internal/videoedit"
 )
@@ -234,10 +236,49 @@ func (u *UI) edvLoad(path string) {
 		t.pinned, t.edit = true, true
 	})
 	u.mpKickAnalyses("editor")
+	u.bg(func() { u.edvBindMarks(path) })
 	if kind == "video" {
 		u.edvFrame(0)
 	}
 	u.patchMain()
+}
+
+// edvBindMarks surfaces a source's set tracklist in the editor player when the path
+// is a known capture: track markers (jump-to-track + wave ticks) and the snap-IN/OUT
+// auto-trim hints - cuts land on track boundaries. Off-thread: the capture cache may
+// still be cold (Publish tab never opened this session); poll it briefly, then bail.
+func (u *UI) edvBindMarks(path string) {
+	var s libdb.SetRecording
+	var r recorder.Recording
+	for tries := 0; ; tries++ {
+		var ok, loaded bool
+		s, r, ok, loaded = u.capByPath(path)
+		if ok {
+			break
+		}
+		if loaded || tries >= 40 || u.stopped() {
+			return // not a capture (or cache never warmed) - plain source, no markers
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	marks, first, lastEnd, lastFader := capTrackMeta(r, s.StartedAt, s.EndedAt)
+	if len(marks) == 0 {
+		return
+	}
+	stale := false
+	u.mpMut("editor", func(t *mpSt) {
+		if len(t.media) == 0 || t.media[0].path != path {
+			stale = true // source changed while we resolved
+			return
+		}
+		t.recID = s.RecordingID
+		t.markers = marks
+		t.firstTrackSec, t.lastTrackEndSec, t.lastFaderSec = first, lastEnd, lastFader
+		t.media[0].startedAt = s.StartedAt
+	})
+	if !stale {
+		u.patchMain()
+	}
 }
 
 // edvRebind re-binds the persisted project source into the mp component once

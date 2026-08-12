@@ -48,6 +48,12 @@ workflow is the same as the Publish tab, so nothing new to learn:
    detection behave exactly like Publish. The player's video shows the
    **selected reframe live**: crop layout plays the chosen aspect/zoom/pan
    slice, fit layout plays the original inside the target frame.
+   **Tracklist navigation**: when the source is one of your set captures, the
+   player carries the set's track markers - ⏮/⏭ step between tracks, the
+   *Jump to track* menu seeks straight to any track, the waveform shows a tick
+   per track start, and *Auto-trim → Snap IN/OUT to track boundary* lands the
+   cut exactly on the track change. Hunting the best part of a set for a Reel:
+   jump to the track, snap IN, snap OUT, export.
 3. **Reframe** (video sources): choose a target aspect - 9:16 vertical
    (Reel/Story/TikTok), 4:5 portrait, 1:1 square, 16:9 wide - then drag the
    bright window on the preview frame to choose the visible slice.
