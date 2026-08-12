@@ -539,6 +539,14 @@
 }
 
 /* ── effect chain ── */
+/* Fixed-height scroll box: editing a long chain/param list must never push the
+   preview player out of view. */
+.edv-fx-list {
+  max-height: 38vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
 .edv-fx {
   margin: 0.5rem 0;
   padding: 0.5rem 0.6rem;

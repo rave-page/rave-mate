@@ -65,15 +65,6 @@ type edvFxRow struct {
 	Params  []edvFxParam `json:"params"`
 }
 
-// edvFxPrevSt is the #edv-fxprev box.
-type edvFxPrevSt struct {
-	Show   bool   `json:"show"`
-	ImgURL string `json:"imgUrl"`
-	Busy   string `json:"busy"`
-	AW     string `json:"aw"`
-	AH     string `json:"ah"`
-}
-
 // edvExportSt is the #edv-export block.
 type edvExportSt struct {
 	Preset    selState `json:"preset"`
@@ -124,15 +115,14 @@ type edvViewState struct {
 	Zoom       uiSlider `json:"zoom"`       // crop zoom 1..4 (#edv-zoomrow)
 	ReframeBtn uiBtn    `json:"reframeBtn"` // opens the reframe/area-select modal
 
-	SecFx     string      `json:"secFx"`
-	ShowFx    bool        `json:"showFx"` // video source only
-	FxAdd     selState    `json:"fxAdd"`
-	FxNone    string      `json:"fxNone"` // no-plugins / empty-chain hint
-	FxRows    []edvFxRow  `json:"fxRows"`
-	FxPrev    edvFxPrevSt `json:"fxPrev"`
-	FxPrevBtn uiBtn       `json:"fxPrevBtn"`
-	FxHint    string      `json:"fxHint"`
-	FxSrc     []uiBtn     `json:"fxSrc"` // shader/plugin discovery: folders, sites, pack fetch
+	SecFx   string     `json:"secFx"`
+	ShowFx  bool       `json:"showFx"` // video source only
+	FxAdd   selState   `json:"fxAdd"`
+	FxNone  string     `json:"fxNone"` // no-plugins / empty-chain hint
+	FxRows  []edvFxRow `json:"fxRows"`
+	PrevRes selState   `json:"prevRes"` // realtime preview render-height cap
+	FxHint  string     `json:"fxHint"`
+	FxSrc   []uiBtn    `json:"fxSrc"` // shader/plugin discovery: folders, sites, pack fetch
 
 	SecExport string      `json:"secExport"`
 	Export    edvExportSt `json:"export"`
@@ -248,7 +238,9 @@ func (u *UI) editorVideoState() edvViewState {
 
 	if st.ShowRef {
 		u.edvFxState(&st)
-		st.PlayerCls, st.PlayerVars = u.edvPlayerReframe(proj, srcW, srcH)
+		if u.mpSnap("editor").vid.strURL == "" { // stream mode: the pipeline carries the reframe
+			st.PlayerCls, st.PlayerVars = u.edvPlayerReframe(proj, srcW, srcH)
+		}
 	}
 	st.Export = u.edvExportState()
 	return st
@@ -389,8 +381,15 @@ func (u *UI) edvFxState(st *edvViewState) {
 		}
 		st.FxRows = append(st.FxRows, row)
 	}
-	st.FxPrev = u.edvFxPrevState()
-	st.FxPrevBtn = uiBtn{Label: i18n.T("editor.video.fxPreview"), Variant: "outline", Act: "edv-fx-prev"}
+	editor.mu.Lock()
+	prevH := editor.video.prevH
+	editor.mu.Unlock()
+	if prevH <= 0 {
+		prevH = edvPrevDefaultH
+	}
+	st.PrevRes = resolveSelectBox(i18n.T("editor.video.prevResLabel"), "edv-prevres", [][2]string{
+		{"1080", "1080p"}, {"720", "720p"}, {"540", "540p"}, {"360", "360p"}, {"240", "240p"},
+	}, strconv.Itoa(prevH))
 	st.FxHint = i18n.T("editor.video.fxHint", i18n.A{"dir": dir})
 	packLbl := i18n.T("editor.video.fxPack")
 	if edvPackBusy() {
@@ -452,38 +451,6 @@ func edvFxAddSel(plugins []vfx.Plugin) selState {
 	s := resolveSmartSelect("edv-fx-add", "edv-fx-add", "", func() []ssOpt { return optsCopy })
 	s.Label = i18n.T("editor.video.fxAdd")
 	return s
-}
-
-// edvFxPrevState resolves the fx preview box (also the #edv-fxprev fragment).
-func (u *UI) edvFxPrevState() edvFxPrevSt {
-	srcW, srcH, _ := u.edvSrcDims()
-
-	editor.mu.Lock()
-	edvEnsure()
-	v := &editor.video
-	proj := v.proj
-	prev, busy := v.fxPrev, v.fxPrevBusy
-	editor.mu.Unlock()
-
-	st := edvFxPrevSt{}
-	if srcW <= 0 || srcH <= 0 {
-		return st
-	}
-	cw, ch, _ := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom)
-	if cw == 0 {
-		cw, ch = srcW, srcH
-	}
-	st.AW, st.AH = strconv.Itoa(cw), strconv.Itoa(ch)
-	if busy {
-		st.Show = true
-		st.Busy = i18n.T("editor.video.extracting")
-		return st
-	}
-	if prev != "" {
-		st.Show = true
-		st.ImgURL = u.imgURL(prev, 480)
-	}
-	return st
 }
 
 // edvFrameState resolves the reframe box (also the #edv-frame drag fragment).
@@ -729,11 +696,12 @@ func editorVideoInspHTML(st edvViewState) string {
 		if st.FxNone != "" {
 			b.WriteString(hint("info", st.FxNone))
 		}
+		b.WriteString(`<div class=edv-fx-list>`)
 		for _, r := range st.FxRows {
 			b.WriteString(edvFxRowHTML(r))
 		}
-		b.WriteString(btnRow(st.FxPrevBtn.html()))
-		b.WriteString(`<div id=edv-fxprev>` + edvFxPrevHTML(st.FxPrev) + `</div>`)
+		b.WriteString(`</div>`)
+		b.WriteString(selHTML(st.PrevRes))
 		b.WriteString(hint("info", st.FxHint))
 		if len(st.FxSrc) > 0 {
 			var sb strings.Builder
@@ -797,22 +765,6 @@ func edvFxRowHTML(r edvFxRow) string {
 		default:
 			b.WriteString(p.Slider.html())
 		}
-	}
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
-// edvFxPrevHTML renders the fx preview box (the #edv-fxprev fragment).
-func edvFxPrevHTML(st edvFxPrevSt) string {
-	if !st.Show {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(`<div class=edv-fxprev-box style="aspect-ratio:` + st.AW + `/` + st.AH + `">`)
-	if st.ImgURL != "" {
-		b.WriteString(`<img class=edv-fimg src=` + attrQ(st.ImgURL) + ` alt="">`)
-	} else {
-		b.WriteString(`<span class=edv-fbusy>` + html.EscapeString(st.Busy) + `</span>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()

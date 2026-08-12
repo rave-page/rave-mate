@@ -70,6 +70,9 @@ pub const Vid = struct {
     onerr: []const u8 = "",
     dataIn: []const u8 = "", // trim IN local secs ("" = omit)
     dataOut: []const u8 = "", // trim OUT local secs ("" = none)
+    stream: []const u8 = "", // live /ms/ feed URL (realtime fx preview)
+    streamMi: []const u8 = "",
+    streamAu: bool = false,
 };
 
 /// Wave is the #mp-<host>-wave inner.
@@ -355,7 +358,13 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     try h.raw("<div class=mp-videobox><video id=");
     try attrComposite(h, "mp-vid-", s.host);
     try h.raw(" class=mp-video");
-    if (s.mse.len != 0) {
+    if (s.stream.len != 0) {
+        try h.raw(" data-msestream=");
+        try h.attrQ(s.stream);
+        try h.raw(" data-msestream-mime=");
+        try h.attrQ(s.streamMi);
+        if (s.streamAu) try h.raw(" autoplay");
+    } else if (s.mse.len != 0) {
         try h.raw(" data-mse=");
         try h.attrQ(s.mse);
         try h.raw(" data-mse-src=");
@@ -691,6 +700,9 @@ test "video element: MSE variant replaces plain src" {
     try renderVid(&h, .{ .host = "e", .kind = "video", .url = "u", .dataIn = "1.000", .dataOut = "5.500", .ev = "e()" });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, " data-in=\"1.000\" data-out=\"5.500\" ontimeupdate=") != null);
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, " onseeked=\"e()\"") != null);
+    h.b.clearRetainingCapacity();
+    try renderVid(&h, .{ .host = "e", .kind = "video", .url = "u", .stream = "http://s/ms/t", .streamMi = "video/mp4", .streamAu = true });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, " data-msestream=\"http://s/ms/t\" data-msestream-mime=\"video/mp4\" autoplay preload=none") != null);
     h.b.clearRetainingCapacity();
     try renderVid(&h, .{ .kind = "" });
     try std.testing.expectEqualStrings("", h.b.items);

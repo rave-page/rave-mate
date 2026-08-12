@@ -48,14 +48,6 @@ pub const FxRow = struct {
     params: []const FxParam = &.{},
 };
 
-pub const FxPrev = struct {
-    show: bool = false,
-    imgUrl: []const u8 = "",
-    busy: []const u8 = "",
-    aw: []const u8 = "",
-    ah: []const u8 = "",
-};
-
 pub const Export = struct {
     preset: c.Select = .{},
     out: c.Field = .{},
@@ -107,8 +99,7 @@ pub const State = struct {
     fxAdd: c.Select = .{},
     fxNone: []const u8 = "",
     fxRows: []const FxRow = &.{},
-    fxPrev: FxPrev = .{},
-    fxPrevBtn: c.Btn = .{},
+    prevRes: c.Select = .{}, // realtime preview render-height cap
     fxHint: []const u8 = "",
     fxSrc: []const c.Btn = &.{},
 
@@ -212,15 +203,12 @@ pub fn renderInsp(h: *Html, s: State) !void {
         if (s.fxNone.len != 0) {
             try c.hint(h, "info", s.fxNone);
         }
+        try h.raw("<div class=edv-fx-list>");
         for (s.fxRows) |r| {
             try renderFxRow(h, r);
         }
-        try c.btnRowOpen(h);
-        try c.btnOf(h, s.fxPrevBtn);
-        try c.btnRowClose(h);
-        try h.raw("<div id=edv-fxprev>");
-        try renderFxPrev(h, s.fxPrev);
         try h.raw("</div>");
+        try c.selectBox(h, s.prevRes);
         try c.hint(h, "info", s.fxHint);
         if (s.fxSrc.len != 0) {
             try c.btnRowOpen(h);
@@ -302,26 +290,6 @@ pub fn renderFxRow(h: *Html, r: FxRow) !void {
         } else {
             try c.slider(h, p.slider);
         }
-    }
-    try h.raw("</div>");
-}
-
-/// renderFxPrev mirrors Go edvFxPrevHTML (#edv-fxprev fragment).
-pub fn renderFxPrev(h: *Html, s: FxPrev) !void {
-    if (!s.show) return;
-    try h.raw("<div class=edv-fxprev-box style=\"aspect-ratio:");
-    try h.raw(s.aw);
-    try h.raw("/");
-    try h.raw(s.ah);
-    try h.raw("\">");
-    if (s.imgUrl.len != 0) {
-        try h.raw("<img class=edv-fimg src=");
-        try h.attrQ(s.imgUrl);
-        try h.raw(" alt=\"\">");
-    } else {
-        try h.raw("<span class=edv-fbusy>");
-        try h.esc(s.busy);
-        try h.raw("</span>");
     }
     try h.raw("</div>");
 }

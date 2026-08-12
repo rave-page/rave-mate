@@ -179,7 +179,19 @@ type mpVid struct {
 	paused   bool
 	started  bool   // element has reported at least one event
 	err      string // decode/load failure (degrade honestly, no external window)
+
+	// realtime preview stream (editor host): element plays a live /ms/ feed whose
+	// clock starts at strT0 source-seconds; cur stays ABSOLUTE (t0 + element time).
+	strURL  string
+	strMime string
+	strT0   float64
+	strAuto bool // element autoplays when the fresh feed opens
 }
+
+// mpStreamCtl is the host hook driving a realtime preview pipeline ("seek"/"play"/
+// "stop"/"pause", t = absolute source seconds). Returns true when the hook handled
+// the verb (transport skips its default element eval). Set by the editor.
+var mpStreamCtl func(u *UI, host, verb string, t float64) bool
 
 // mpLoud mirrors the transcode.loudtl worker JSON (was libLoud).
 type mpLoud struct {
@@ -633,15 +645,25 @@ func (u *UI) mpPlayToggle(host string) {
 	tr := u.mpEng(&t)
 	if tr.loaded {
 		if m.kind == "video" {
-			// Resume must survive a rebuilt element (patch replaced it → currentTime lost) and an
-			// autoplay-policy rejection (retry muted, never swallow into a dead transport). At/past
-			// the OUT marker, play loops from IN.
-			u.mpVidEval(host, fmt.Sprintf(
-				"if(v.paused){var i=parseFloat(v.dataset.in||'0'),o=parseFloat(v.dataset.out||'-1');"+
-					"if(o>0&&v.currentTime>=o-0.05){try{v.currentTime=i}catch(e){}}"+
-					"else if(%.3f>0.05&&Math.abs(v.currentTime-%.3f)>1.0){try{v.currentTime=%.3f}catch(e){}}"+
-					"v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}"+
-					"else{v.pause()}", tr.cur, tr.cur, tr.cur))
+			switch {
+			case t.vid.strURL != "" && tr.paused && mpStreamCtl != nil && mpStreamCtl(u, host, "play", tr.cur):
+				// stream host restarted/owns the resume - element autoplays on the fresh feed
+			case t.vid.strURL != "":
+				u.mpVidEval(host, "if(v.paused){v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}else{v.pause()}")
+				if !tr.paused && mpStreamCtl != nil {
+					mpStreamCtl(u, host, "pause", tr.cur) // idle-reap bookkeeping
+				}
+			default:
+				// Resume must survive a rebuilt element (patch replaced it → currentTime lost) and an
+				// autoplay-policy rejection (retry muted, never swallow into a dead transport). At/past
+				// the OUT marker, play loops from IN.
+				u.mpVidEval(host, fmt.Sprintf(
+					"if(v.paused){var i=parseFloat(v.dataset.in||'0'),o=parseFloat(v.dataset.out||'-1');"+
+						"if(o>0&&v.currentTime>=o-0.05){try{v.currentTime=i}catch(e){}}"+
+						"else if(%.3f>0.05&&Math.abs(v.currentTime-%.3f)>1.0){try{v.currentTime=%.3f}catch(e){}}"+
+						"v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}"+
+						"else{v.pause()}", tr.cur, tr.cur, tr.cur))
+			}
 			u.mpMut(host, func(v *mpSt) { v.vid.paused = !v.vid.paused }) // optimistic; vtick reconciles
 		} else {
 			opt := "pause" // optimistic flip; blocking toggle RPC off the act worker
@@ -717,8 +739,12 @@ func (u *UI) mpStop(host string) {
 	}
 	inLocal := clampF(t.inSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 	if m.kind == "video" {
-		u.mpVidEval(host, fmt.Sprintf("v.pause();try{v.currentTime=%.3f}catch(e){}", inLocal))
-		u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, inLocal })
+		if t.vid.strURL != "" && mpStreamCtl != nil && mpStreamCtl(u, host, "stop", inLocal) {
+			// stream host respawned paused at IN
+		} else {
+			u.mpVidEval(host, fmt.Sprintf("v.pause();try{v.currentTime=%.3f}catch(e){}", inLocal))
+			u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, inLocal })
+		}
 	} else if pl := u.player(); pl != nil {
 		u.mpAudCall(host, "stop", func() { pl.Stop() }) // optimistic idle; async halt
 		u.mpMut(host, func(v *mpSt) { v.cursorSec = v.inSec })
@@ -737,7 +763,11 @@ func (u *UI) mpSeekAxis(host string, axisSec float64) {
 	}
 	local := clampF(axisSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 	if m.kind == "video" {
-		u.mpVidEval(host, fmt.Sprintf("v.currentTime=%.3f;", local))
+		if t.vid.strURL != "" && mpStreamCtl != nil && mpStreamCtl(u, host, "seek", local) {
+			// stream host respawns the pipeline at the target
+		} else {
+			u.mpVidEval(host, fmt.Sprintf("v.currentTime=%.3f;", local))
+		}
 		u.mpMut(host, func(v *mpSt) { v.vid.cur = local })
 		u.mpPatchWave(u.mpSnap(host))
 		return
@@ -1629,6 +1659,10 @@ func mpTick(u *UI, host string) {
 			// rebuilt element or a rejected play() otherwise leaves a phantom moving playhead
 			u.mpVidEval(host, "window.rave(JSON.stringify({act:'mp-vtick:"+host+
 				"',val:v.currentTime+'|'+(v.duration||0)+'|'+(v.paused?'1':'0')}))")
+			// live-feed clock ≠ source clock, so the element can't enforce the OUT marker
+			if t.vid.strURL != "" && t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
+				u.mpVidEval(host, "if(!v.paused){v.pause()}")
+			}
 		} else if t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
 			// audio OUT-marker stop (video stops element-side via data-out)
 			u.mpAudCall(host, "pause", func() {
@@ -1960,6 +1994,16 @@ func init() {
 
 	// embedded <video> transport mirror (element events → Go)
 	onPrefix("mp-vtick:", func(u *UI, m actMsg) { u.mpVidTick(m.arg("mp-vtick:"), m.Val) })
+	onPrefix("mp-vstall:", func(u *UI, m actMsg) {
+		// live-feed stall: producer ended and playback drained - respawn there
+		host := m.arg("mp-vstall:")
+		t := u.mpSnap(host)
+		if t.vid.strURL == "" || mpStreamCtl == nil {
+			return
+		}
+		cur, _ := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
+		mpStreamCtl(u, host, "seek", t.vid.strT0+cur)
+	})
 	onPrefix("mp-verr:", func(u *UI, m actMsg) {
 		t := u.mpMut(m.arg("mp-verr:"), func(v *mpSt) {
 			v.vid.err = i18n.T("player.label.cantDecode")
@@ -2437,7 +2481,13 @@ func (u *UI) mpVidTick(host, val string) {
 	flip := false
 	t := u.mpMut(host, func(v *mpSt) {
 		flip = v.vid.paused != paused || !v.vid.started
-		v.vid = mpVid{cur: cur, dur: dur, paused: paused, started: true}
+		str := v.vid // stream binding survives element event churn
+		if str.strURL != "" {
+			cur += str.strT0 // live feed clock → absolute source seconds
+			dur = 0          // a growing feed's duration is meaningless for the axis
+		}
+		v.vid = mpVid{cur: cur, dur: dur, paused: paused, started: true,
+			strURL: str.strURL, strMime: str.strMime, strT0: str.strT0, strAuto: str.strAuto}
 		// late-bind the video duration from the element when peaks couldn't provide one
 		for i := range v.media {
 			if v.media[i].kind == "video" && dur > v.media[i].dur+1 {

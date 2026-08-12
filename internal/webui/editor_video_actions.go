@@ -46,11 +46,16 @@ type edvSt struct {
 	fxPlugins  []vfx.Plugin // discovered effect plugins (scan once per session)
 	fxScanned  bool
 	fxScanning bool
-	packBusy   bool   // Vidvox ISF pack download in flight
-	fxPrev     string // fx preview PNG ("" = never rendered)
-	fxPrevBusy bool
-	fxPrevGen  int
-	fxPrevWant int // live-preview debounce: bumped per change, render fires when it settles
+	packBusy   bool // Vidvox ISF pack download in flight
+
+	// realtime preview pipeline (editor_video_stream.go)
+	prevGen     int                // generation: bump = supersede the running feed
+	prevCancel  context.CancelFunc // kills the vfx.stream worker (job object reaps ffmpeg×2+vfx)
+	prevRelease func()             // drops the /ms/ token
+	prevPath    string             // growing fMP4 file
+	prevWant    int                // restart debounce counter
+	prevPaused  time.Time          // element paused since (idle reap); zero = playing
+	prevH       int                // preview render height cap (0 = default 540)
 
 	export edvExport
 }
@@ -90,13 +95,13 @@ func init() {
 		u.edvMut(func(v *edvSt) { v.proj.Aspect = m.Val; v.proj.Normalize() })
 		u.edvPatchInsp()
 		u.edvSyncPlayerVars()
-		u.edvFxPrevKick()
+		u.edvPrevKick()
 	})
 	onExact("edv-layout", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Layout = m.Val; v.proj.Normalize() })
 		u.edvPatchInsp()
 		u.edvSyncPlayerVars()
-		u.edvFxPrevKick()
+		u.edvPrevKick()
 	})
 	onExact("edv-reframe-open", func(u *UI, m actMsg) { u.edvOpenReframe() })
 	onExact("edv-bgblur", func(u *UI, m actMsg) {
@@ -105,7 +110,7 @@ func init() {
 			return
 		}
 		u.edvMut(func(v *edvSt) { v.proj.BGBlur = clamp01(f) })
-		u.edvFxPrevKick()
+		u.edvPrevKick()
 	})
 	onExact("edv-zoomset", func(u *UI, m actMsg) { // inspector slider (self-labeled)
 		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
@@ -157,7 +162,6 @@ func init() {
 	onPrefix("edv-fx-tog:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-tog:"), "tog") })
 	onPrefix("edv-fx-p:", func(u *UI, m actMsg) { u.edvFxParamSet(m.arg("edv-fx-p:"), m.Val) })
 	onPrefix("edv-fx-c:", func(u *UI, m actMsg) { u.edvFxColorSet(m.arg("edv-fx-c:"), m.Val) })
-	onExact("edv-fx-prev", func(u *UI, m actMsg) { u.edvFxPrevRender() })
 	onPrefix("edv-fx-www:", func(u *UI, m actMsg) {
 		switch m.arg("edv-fx-www:") {
 		case "isf":
@@ -444,7 +448,7 @@ func (u *UI) edvFrame(t float64) {
 			return
 		}
 		u.edvPatchModalFrame()
-		u.edvFxPrevKick() // preview follows the new frame
+		u.edvPrevKick() // preview follows the new frame
 	})
 }
 
@@ -529,7 +533,7 @@ func (u *UI) edvPan(val string) {
 		editor.mu.Unlock()
 		u.edvPatchKfBox()
 		u.edvPatchFrame()
-		u.edvFxPrevKick()
+		u.edvPrevKick()
 	default:
 		editor.mu.Unlock()
 	}
@@ -583,6 +587,12 @@ func (u *UI) edvOpenReframe() {
 // edvSyncPlayerVars pushes the live reframe-preview class + vars at the
 // timeline player (drag / zoom / playback follow) without a full patch.
 func (u *UI) edvSyncPlayerVars() {
+	if u.mpSnap("editor").vid.strURL != "" {
+		// realtime pipeline carries the reframe - CSS crop would double-apply
+		u.eval("(function(){var p=document.querySelector('.edv-pane-view .edv-player');if(!p)return;" +
+			"p.className='edv-player';p.style.cssText='';})()")
+		return
+	}
 	srcW, srcH, _ := u.edvSrcDims()
 	editor.mu.Lock()
 	edvEnsure()
@@ -617,7 +627,7 @@ func (u *UI) edvSetZoom(z float64, fromWheel bool) {
 	if fromWheel {
 		u.edvPatchZoomRow()
 	}
-	u.edvFxPrevKick()
+	u.edvPrevKick()
 }
 
 // edvPatchZoomRow refreshes the inspector zoom slider (wheel path).
@@ -786,7 +796,7 @@ func (u *UI) edvFxAdd(idxStr string) {
 		})
 	})
 	u.edvPatchInsp()
-	u.edvFxPrevKick()
+	u.edvPrevKick()
 }
 
 // edvFxEdit handles del/up/dn/tog on a chain row.
@@ -816,7 +826,7 @@ func (u *UI) edvFxEdit(idxStr, op string) {
 		}
 	})
 	u.edvPatchInsp()
-	u.edvFxPrevKick()
+	u.edvPrevKick()
 }
 
 // edvFxParamSet stores a param value; arg is "<idx>:<name>", val a number or
@@ -852,7 +862,7 @@ func (u *UI) edvFxParamSet(arg, val string) {
 		}
 		e.Params[name] = clamp01(f)
 	})
-	u.edvFxPrevKick()
+	u.edvPrevKick()
 }
 
 // edvFxCh resolves a dotted channel value (override else listing default).
@@ -890,7 +900,7 @@ func (u *UI) edvFxColorSet(arg, val string) {
 		e.Params[name+".b"] = float64(c.B) / 255
 	})
 	u.edvPatchInsp() // refresh the swatch
-	u.edvFxPrevKick()
+	u.edvPrevKick()
 }
 
 // edvResolveFx maps enabled chain entries to loaded plugins (base-name match;
@@ -918,150 +928,6 @@ func edvBlurFilter(v float64) string {
 		return ""
 	}
 	return fmt.Sprintf("gblur=sigma=%.1f", sigma)
-}
-
-// edvFitDims scales w×h down to maxW, keeping ratio, forced even.
-func edvFitDims(w, h, maxW int) (int, int) {
-	if w > maxW {
-		h = h * maxW / w
-		w = maxW
-	}
-	w, h = w&^1, h&^1
-	if w < 2 {
-		w = 2
-	}
-	if h < 2 {
-		h = 2
-	}
-	return w, h
-}
-
-// edvFxPrevKick live-updates the fx preview: debounced (a slider drag fires many
-// acts - render once it settles), dropped when a newer change or an in-flight
-// render exists (completion re-kicks if the state moved meanwhile).
-func (u *UI) edvFxPrevKick() {
-	editor.mu.Lock()
-	edvEnsure()
-	editor.video.fxPrevWant++
-	want := editor.video.fxPrevWant
-	editor.mu.Unlock()
-	u.bg(func() {
-		time.Sleep(450 * time.Millisecond)
-		if u.stopped() {
-			return
-		}
-		editor.mu.Lock()
-		cur, busy := editor.video.fxPrevWant, editor.video.fxPrevBusy
-		editor.mu.Unlock()
-		if cur != want || busy {
-			return
-		}
-		u.edvFxPrevRender()
-	})
-}
-
-// edvFxPrevRender runs the current preview frame through the chain (cropped at
-// the frame's time, so the result matches the export).
-func (u *UI) edvFxPrevRender() {
-	srcW, srcH, _ := u.edvSrcDims()
-	t := u.mpSnap("editor")
-
-	editor.mu.Lock()
-	edvEnsure()
-	v := &editor.video
-	src, frameT, proj, plugins := v.proj.Source, v.frameT, v.proj, v.fxPlugins
-	busy := v.fxPrevBusy
-	editor.mu.Unlock()
-	if src == "" || !edvIsVideo(src) || srcW <= 0 || busy {
-		return
-	}
-	fx := edvResolveFx(proj.Effects, plugins)
-	cw, ch, axis := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom)
-	hasCrop := cw > 0 && (cw < srcW || ch < srcH)
-	fit := proj.Layout == "fit" && hasCrop
-	if len(fx) == 0 && !fit {
-		return
-	}
-	vf := ""
-	if hasCrop {
-		pos, pos2 := proj.PanAt(frameT), proj.Pan2At(frameT)
-		posX, posY := pos, pos2
-		if axis == "y" {
-			posX, posY = pos2, pos
-		}
-		x := int(float64(srcW-cw)*posX + 0.5)
-		y := int(float64(srcH-ch)*posY + 0.5)
-		vf = fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, x, y)
-	} else {
-		cw, ch = srcW, srcH
-	}
-	pw, ph := edvFitDims(cw, ch, 480)
-	fxT := frameT - t.inSec
-	if fxT < 0 {
-		fxT = 0
-	}
-	chain := vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx}
-	post := ""
-	if fit {
-		post = edvBlurFilter(proj.BGBlur)
-	}
-	dir := edDataDir("videoeditor")
-	if dir == "" {
-		return
-	}
-	chainRaw, _ := json.Marshal(chain)
-	key := crc32.ChecksumIEEE([]byte(fmt.Sprintf("%s|%.2f|%s|%v|%s", src, frameT, chainRaw, fit, post)))
-	out := filepath.Join(dir, fmt.Sprintf("fxprev-%08x.png", key))
-
-	editor.mu.Lock()
-	v.fxPrevBusy = true
-	v.fxPrevGen++
-	gen := v.fxPrevGen
-	wantStart := v.fxPrevWant
-	editor.mu.Unlock()
-	u.edvPatchFxPrev()
-
-	u.bg(func() {
-		var err error
-		if _, statErr := os.Stat(out); statErr != nil { // cached render wins
-			if u.svc.Workers == nil {
-				err = errors.New("worker pool unavailable")
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-				defer cancel()
-				_, err = u.svc.Workers.RunStream(ctx, "vfx", "vfx.preview", map[string]any{
-					"input": src, "t": frameT, "fxT": fxT, "vf": vf,
-					"chain": chain, "output": out, "fit": fit, "decodePost": post,
-				}, nil)
-			}
-		}
-		editor.mu.Lock()
-		stale := false
-		if editor.video.fxPrevGen == gen {
-			editor.video.fxPrevBusy = false
-			if err == nil {
-				editor.video.fxPrev = out
-			}
-			stale = editor.video.fxPrevWant != wantStart // changed mid-render
-		}
-		editor.mu.Unlock()
-		if err != nil {
-			u.logErr("vfx preview", err)
-			u.edvPatchFxPrev()
-			return
-		}
-		// targeted patch only: patchMain would rebuild the player <video> (MSE re-init churn)
-		u.edvPatchFxPrev()
-		if stale && !u.stopped() {
-			u.edvFxPrevKick()
-		}
-	})
-}
-
-// edvPatchFxPrev re-renders only the fx preview box.
-func (u *UI) edvPatchFxPrev() {
-	st := u.edvFxPrevState()
-	u.eval("window.__patch('edv-fxprev'," + jsQuote(edvFxPrevHTML(st)) + ")")
 }
 
 // ── export ──

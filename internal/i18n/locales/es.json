@@ -207,6 +207,7 @@
         "src": "Mantener tamaño original"
       },
       "presetLabel": "Destino",
+      "prevResLabel": "Calidad de vista previa",
       "reframeHint": "Arrastra la ventana brillante para elegir la parte visible. Los keyframes animan el paneo entre posiciones.",
       "reframeOpen": "Ventana de encuadre y zoom…",
       "reframeTitle": "Encuadre y zoom",
@@ -223,6 +224,7 @@
         "packDone": "{n} shaders instalados",
         "packFail": "Error al descargar el pack - ver Logs",
         "packStart": "Descargando el pack ISF de Vidvox…",
+        "prevSlow": "El stream de vista previa tarda en arrancar; revisa Logs.",
         "probing": "Aún analizando la fuente: inténtalo en un segundo.",
         "sourceMissing": "Archivo no encontrado."
       },

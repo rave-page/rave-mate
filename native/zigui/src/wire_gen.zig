@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xa1b1c38d;
+pub const schema_hash: u32 = 0xd8963728;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -1878,6 +1878,9 @@ pub fn decodeMpVid(r: *wire.Reader, out: *player.Vid) wire.Error!void {
         11 => out.onerr = try r.str(t),
         12 => out.dataIn = try r.str(t),
         13 => out.dataOut = try r.str(t),
+        14 => out.stream = try r.str(t),
+        15 => out.streamMi = try r.str(t),
+        16 => out.streamAu = try r.boolean(t),
         else => try r.skip(t),
     };
 }
@@ -4286,17 +4289,6 @@ pub fn decodeEdvFxRow(r: *wire.Reader, out: *editor_video.FxRow) wire.Error!void
     };
 }
 
-pub fn decodeEdvFxPrev(r: *wire.Reader, out: *editor_video.FxPrev) wire.Error!void {
-    while (try r.next()) |t| switch (t.field) {
-        1 => out.show = try r.boolean(t),
-        2 => out.imgUrl = try r.str(t),
-        3 => out.busy = try r.str(t),
-        4 => out.aw = try r.str(t),
-        5 => out.ah = try r.str(t),
-        else => try r.skip(t),
-    };
-}
-
 pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void {
     while (try r.next()) |t| switch (t.field) {
         1 => out.title = try r.str(t),
@@ -4320,8 +4312,6 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         28 => out.fxAdd = try r.sub(c.Select, decodeSelState, t),
         29 => out.fxNone = try r.str(t),
         30 => out.fxRows = try r.list(editor_video.FxRow, decodeEdvFxRow, t),
-        31 => out.fxPrev = try r.sub(editor_video.FxPrev, decodeEdvFxPrev, t),
-        32 => out.fxPrevBtn = try r.sub(c.Btn, decodeUiBtn, t),
         33 => out.fxHint = try r.str(t),
         34 => out.viewTitle = try r.str(t),
         35 => out.inspTitle = try r.str(t),
@@ -4334,6 +4324,7 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         42 => out.playerVars = try r.str(t),
         43 => out.fxSrc = try r.list(c.Btn, decodeUiBtn, t),
         44 => out.reframeBtn = try r.sub(c.Btn, decodeUiBtn, t),
+        45 => out.prevRes = try r.sub(c.Select, decodeSelState, t),
         else => try r.skip(t),
     };
 }

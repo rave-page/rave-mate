@@ -207,6 +207,7 @@
         "src": "Garder la taille source"
       },
       "presetLabel": "Cible",
+      "prevResLabel": "Qualité de l'aperçu",
       "reframeHint": "Faites glisser la fenêtre claire pour choisir la zone visible. Les images clés animent le panoramique.",
       "reframeOpen": "Fenêtre de cadrage et zoom…",
       "reframeTitle": "Cadrage et zoom",
@@ -223,6 +224,7 @@
         "packDone": "{n} shaders installés",
         "packFail": "Échec du téléchargement du pack - voir Logs",
         "packStart": "Téléchargement du pack ISF Vidvox…",
+        "prevSlow": "Le flux d'aperçu tarde à démarrer - voir l'onglet Logs.",
         "probing": "Analyse de la source en cours – réessayez dans une seconde.",
         "sourceMissing": "Fichier introuvable."
       },

@@ -184,7 +184,8 @@ const runtimeJS = `(function(){
   });
   window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html;
     if(html.indexOf('ss-panel')>=0) __ssplace();
-    if(html.indexOf('data-mse')>=0) __mseScan(); } };
+    if(html.indexOf('data-msestream')>=0) __mstScan();
+    else if(html.indexOf('data-mse')>=0) __mseScan(); } };
   window.__toast = function(msg){
     var t=document.getElementById('__toasts');
     if(!t){ t=document.createElement('div'); t.id='__toasts';
@@ -828,5 +829,72 @@ const runtimeJS = `(function(){
     st.next=__mseTarget(st, v.currentTime);
     __msePump(v);
   }
+  // ── live-stream feeder (video[data-msestream]) — the editor's realtime fx preview ──
+  // The daemon's /ms/ endpoint tails a GROWING fragmented MP4 produced by the vfx.stream
+  // pipeline; this runtime appends the chunked body sequentially into MediaSource. Seek =
+  // Go respawns the pipeline and re-patches the element with a new stream URL. Queue is
+  // BOUNDED (stop pulling past 32 MiB unappended; resume under 8 MiB - drop policy is
+  // backpressure, the on-disk file keeps everything). Buffer trims 30 s behind playback.
+  function __mstScan(){
+    var vids=document.querySelectorAll('video[data-msestream]');
+    for(var i=0;i<vids.length;i++){ if(!vids[i].__mst) __mstInit(vids[i]); }
+  }
+  function __mstInit(v){
+    var st={dead:0,q:[],bytes:0,url:v.getAttribute('data-msestream')}; v.__mst=st;
+    if(!window.MediaSource){ __mseDbg('mst: no MediaSource'); return; }
+    var mime=v.getAttribute('data-msestream-mime')||'video/mp4';
+    if(!MediaSource.isTypeSupported(mime)){ __mseDbg('mst: unsupported '+mime); return; }
+    var ms=new MediaSource(); st.ms=ms;
+    st.pull=function(){
+      if(st.pulling||st.dead||!st.rd) return; st.pulling=1;
+      st.rd.read().then(function(res){ st.pulling=0;
+        if(st.dead) return;
+        if(res.done){ st.eof=1; __mstPump(v); return; }
+        st.q.push(res.value); st.bytes+=res.value.byteLength;
+        __mstPump(v);
+        if(st.bytes<32*1024*1024) st.pull();
+      }).catch(function(e){ st.pulling=0; if(!st.dead){ st.eof=1; __mseDbg('mst: read '+(e&&e.message||'')); } });
+    };
+    ms.addEventListener('sourceopen',function(){
+      if(st.sb||st.dead) return;
+      URL.revokeObjectURL(v.__mstURL);
+      try{ st.sb=ms.addSourceBuffer(mime); }catch(e){ __mseDbg('mst: addSourceBuffer'); return; }
+      st.sb.addEventListener('updateend',function(){ __mstPump(v); });
+      st.sb.addEventListener('error',function(){ __mseDbg('mst: sb error'); });
+      st.ab=new AbortController();
+      fetch(st.url,{signal:st.ab.signal}).then(function(r){
+        if(!r.ok||!r.body) throw new Error('stream '+r.status);
+        st.rd=r.body.getReader(); st.pull();
+      }).catch(function(e){ if(!st.dead) __mseDbg('mst: fetch '+(e&&e.message||'')); });
+    });
+    v.addEventListener('waiting',function(){
+      // producer ended and playback caught up → ask Go to respawn the pipeline here
+      if(st.eof&&!st.dead){ var host=v.id.replace('mp-vid-','');
+        send({act:'mp-vstall:'+host, val:''+v.currentTime}); }
+    });
+    v.__mstURL=URL.createObjectURL(ms);
+    v.src=v.__mstURL;
+  }
+  function __mstPump(v){
+    var st=v.__mst; if(!st||st.dead||!st.sb) return;
+    if(!v.isConnected){ st.dead=1; if(st.ab){ try{st.ab.abort();}catch(e){} } return; }
+    var sb=st.sb; if(sb.updating) return;
+    try{
+      if(v.buffered.length&&v.currentTime-v.buffered.start(0)>60){ sb.remove(0,v.currentTime-30); return; }
+    }catch(e){}
+    if(!st.q.length){
+      if(st.eof&&!st.pulling&&st.ms.readyState==='open'){ try{ st.ms.endOfStream(); }catch(e){} }
+      return;
+    }
+    var chunk=st.q.shift(); st.bytes-=chunk.byteLength;
+    try{ sb.appendBuffer(chunk); }
+    catch(e){
+      st.q.unshift(chunk); st.bytes+=chunk.byteLength;
+      if(e&&e.name==='QuotaExceededError'){ try{ sb.remove(0,Math.max(0.1,v.currentTime-10)); }catch(e2){} }
+      else { st.dead=1; __mseDbg('mst: append '+(e&&e.name||'')); return; }
+    }
+    if(st.bytes<8*1024*1024) st.pull();
+  }
   __mseScan();
+  __mstScan();
 })();`

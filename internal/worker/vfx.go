@@ -28,6 +28,7 @@ func vfxHandlers() map[string]Handler {
 		"vfx.list":    vfxList,
 		"vfx.preview": vfxPreview,
 		"vfx.run":     vfxRun,
+		"vfx.stream":  vfxStream,
 	}
 }
 
@@ -331,6 +332,142 @@ func vfxRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 		frames = pumped / frameBytes
 	}
 	raw, err := json.Marshal(map[string]any{"output": in.Output, "frames": frames})
+	return raw, err
+}
+
+type vfxStreamIn struct {
+	Input      string    `json:"input"`
+	Output     string    `json:"output"` // growing fragmented-MP4 target
+	T          float64   `json:"t"`      // source-time start (seek)
+	VF         string    `json:"vf,omitempty"`
+	DecodePost string    `json:"decodePost,omitempty"`
+	Fit        bool      `json:"fit,omitempty"`
+	Chain      vfx.Chain `json:"chain"`
+}
+
+// vfxStream is vfxRun shaped for the realtime editor preview: decode paced at
+// native rate (-re), low-latency fMP4 appended to Output while the daemon's
+// HTTP tail serves it. Runs until source EOF or job cancel (the caller's ctx
+// cancel kills this worker child; the kill-on-close job object reaps the three
+// pipeline children). Progress = stream seconds ("t", ~1 Hz).
+func vfxStream(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
+	var in vfxStreamIn
+	if err := json.Unmarshal(params, &in); err != nil || in.Input == "" || in.Output == "" {
+		return nil, fmt.Errorf("missing input/output")
+	}
+	if in.Chain.W <= 0 || in.Chain.H <= 0 {
+		return nil, fmt.Errorf("missing chain dims")
+	}
+	if in.Chain.FPS <= 0 {
+		in.Chain.FPS = 30
+	}
+	bin, err := ffmpegBin()
+	if err != nil {
+		return nil, err
+	}
+	exe, err := vfx.ExePath()
+	if err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp("", "rvfx-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	chainPath, err := in.Chain.WriteFile(tmp)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(in.Output), 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir output: %w", err)
+	}
+
+	job := transcode.Job{Input: in.Input, Output: in.Output, TrimStart: in.T, VF: in.VF}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
+	defer cancel()
+
+	dec := exec.CommandContext(ctx, bin, job.DecodeRawArgsRT(in.Chain.W, in.Chain.H, in.Chain.FPS, in.DecodePost)...)
+	fx := exec.CommandContext(ctx, exe, "--pipe", chainPath)
+	enc := exec.CommandContext(ctx, bin, job.EncodeStreamArgs(in.Chain.W, in.Chain.H, in.Chain.FPS, in.Fit)...)
+	for _, c := range []*exec.Cmd{dec, fx, enc} {
+		sysexec.Hide(c) // children inherit this worker's kill-on-close job object
+	}
+	decErr := tailBuf(&dec.Stderr)
+	fxErr := tailBuf(&fx.Stderr)
+	encErr := tailBuf(&enc.Stderr)
+
+	fx.Stdin, err = dec.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	fxOut, err := fx.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	encIn, err := enc.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := enc.Start(); err != nil {
+		return nil, fmt.Errorf("start encoder: %w", err)
+	}
+	if err := fx.Start(); err != nil {
+		_ = enc.Process.Kill()
+		_, _ = enc.Process.Wait()
+		return nil, fmt.Errorf("start vfx: %w", err)
+	}
+	if err := dec.Start(); err != nil {
+		_ = fx.Process.Kill()
+		_ = enc.Process.Kill()
+		_, _ = fx.Process.Wait()
+		_, _ = enc.Process.Wait()
+		return nil, fmt.Errorf("start decoder: %w", err)
+	}
+
+	// pump chain→encoder; emit the stream clock ~1 Hz
+	frameBytes := int64(in.Chain.W) * int64(in.Chain.H) * 4
+	var pumped int64
+	lastT := -1.0
+	buf := make([]byte, 1<<20)
+	var pumpErr error
+	for {
+		n, rerr := fxOut.Read(buf)
+		if n > 0 {
+			if _, werr := encIn.Write(buf[:n]); werr != nil {
+				pumpErr = fmt.Errorf("encoder pipe: %w", werr)
+				break
+			}
+			pumped += int64(n)
+			if t := float64(pumped/frameBytes) / in.Chain.FPS; t-lastT >= 1 {
+				lastT = t
+				emit("t", map[string]any{"sec": t})
+			}
+		}
+		if rerr != nil {
+			if rerr != io.EOF {
+				pumpErr = rerr
+			}
+			break
+		}
+	}
+	_ = encIn.Close()
+	decWait := dec.Wait()
+	fxWait := fx.Wait()
+	encWait := enc.Wait()
+	if encWait != nil || fxWait != nil || decWait != nil || pumpErr != nil {
+		switch {
+		case encWait != nil:
+			return nil, fmt.Errorf("encode: %v (%s)", encWait, encErr())
+		case fxWait != nil:
+			return nil, fmt.Errorf("vfx: %v (%s)", fxWait, fxErr())
+		case decWait != nil:
+			return nil, fmt.Errorf("decode: %v (%s)", decWait, decErr())
+		default:
+			return nil, pumpErr
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"output": in.Output, "sec": lastT})
 	return raw, err
 }
 

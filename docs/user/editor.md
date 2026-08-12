@@ -116,11 +116,8 @@ source frame (base) with the chain output so far (top)**: a generator or a
 blur before `screen` / `multiply` / `overlay` composites over the original
 video; a mixer first in the chain blends the frame with itself (`multiply`
 darkens, `screen` lifts). Each chain entry has enable/reorder/remove
-buttons and 0-1 sliders/switches for its parameters. The preview frame
-re-renders **automatically** (debounced) whenever you add/remove/toggle an
-effect, move a parameter, or change aspect/zoom/layout/pan - *Preview effects
-on frame* still forces a render on demand. Both are cropped exactly like the
-export will be.
+buttons and 0-1 sliders/switches for its parameters; the chain list is a
+fixed-height scroll box, so the preview stays visible while you tweak.
 
 **Getting more effects** - the buttons under the Effects section:
 
@@ -134,6 +131,16 @@ export will be.
 - *ISF folder* / *frei0r folder* open the plugin folders in your file manager
   for drop-in installs (the standard frei0r set is already bundled with the
   Windows install; these folders are for extras).
+
+**The main preview plays the finished result in realtime** (DaVinci-style):
+with any effect active - or the filled-background layout - the player switches
+to a live render pipeline, so seek/play/pause preview the fx'd, reframed clip
+exactly as the export will look, sound included. Every add/remove/toggle,
+parameter move and reframe change re-renders the stream at the playhead
+(debounced). **Preview quality** caps the realtime render height (1080p-240p,
+default 540p) - drop it if preview playback stutters on a weaker machine; the
+export always renders at full target resolution. With an empty chain on the
+zoom-fill layout the player plays the source directly (instant, no pipeline).
 
 Effects run in a separate helper process (`rave-mate-vfx`): a crashing plugin
 or shader can never take down rave-mate or a running export queue - the export

@@ -263,6 +263,7 @@ func init() {
 			editor.mu.Unlock()
 			mpTick(u, "editor")   // unified player clock/playhead (publish parity)
 			u.edvSyncPlayerVars() // reframe preview follows keyframed pan during playback
+			u.edvPrevReap()       // long-paused realtime pipeline → cancel (buffer keeps the frame)
 			return
 		}
 		// a live repaint replaces the stage element - never mid-drag (pointer capture)

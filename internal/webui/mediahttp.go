@@ -11,6 +11,7 @@ import (
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"  // JPEG encode + decode
 	_ "image/png" // register PNG decoder (VRChat screenshots)
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -74,11 +75,26 @@ type mpMediaSrv struct {
 	imgOrder      []string          // FIFO eviction of img tokens
 	imgCache      map[string][]byte // token → encoded JPEG bytes
 	imgCacheOrder []string          // FIFO eviction of cached bytes
+
+	streams     map[string]*mpStream // token → live growing-file feed (/ms/; editor realtime preview)
+	streamOrder []string             // FIFO eviction past mpStreamMaxTokens
+}
+
+// mpStreamMaxTokens bounds the live-stream registry (one active + a few draining).
+const mpStreamMaxTokens = 8
+
+// mpStream is one live growing-file feed: the vfx.stream pipeline appends fMP4 to
+// path; serveStream tails it. done closes when the pipeline ends (drain to EOF and
+// stop); dropping the token from the registry ends the handler on its next poll.
+type mpStream struct {
+	path string
+	done chan struct{}
 }
 
 var mpMediaFS = &mpMediaSrv{
 	tokens: map[string]string{}, owner: map[string]*UI{}, byPath: map[string]string{},
 	imgTokens: map[string]imgReq{}, imgByKey: map[string]string{}, imgKeyByTok: map[string]string{}, imgCache: map[string][]byte{},
+	streams: map[string]*mpStream{},
 }
 
 // randToken returns an unguessable 128-bit hex token ("" on RNG failure).
@@ -207,6 +223,35 @@ func (u *UI) mpIndexURL(path string) string {
 		return ""
 	}
 	return strings.Replace(mediaURL, "/m/", "/mi/", 1)
+}
+
+// mpStreamURL registers a live growing-file stream and returns its /ms/ URL plus a
+// release func (drops the token; active handlers end on their next poll). done must
+// close when the producing pipeline exits.
+func (u *UI) mpStreamURL(path string, done chan struct{}) (string, func()) {
+	s := mpMediaFS
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.ensureListenLocked(u) {
+		return "", func() {}
+	}
+	tok := randToken()
+	if tok == "" {
+		return "", func() {}
+	}
+	s.streams[tok] = &mpStream{path: path, done: done}
+	s.streamOrder = append(s.streamOrder, tok)
+	for len(s.streamOrder) > mpStreamMaxTokens { // bounded: drop the oldest feed
+		old := s.streamOrder[0]
+		s.streamOrder = s.streamOrder[1:]
+		delete(s.streams, old)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/ms/%s%s", s.port, s.sessPrefixLocked(), tok)
+	return url, func() {
+		s.mu.Lock()
+		delete(s.streams, tok)
+		s.mu.Unlock()
+	}
 }
 
 // evictMediaLocked drops one token: the oldest minted by u, else the global oldest. Caller
@@ -356,6 +401,10 @@ func (s *mpMediaSrv) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveIndex(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/ms/") { // live growing-file feed (realtime preview)
+		s.serveStream(w, r)
+		return
+	}
 	tok, sok := s.routeToken(r.URL.Path, "/m/")
 	if !sok {
 		http.NotFound(w, r)
@@ -433,6 +482,68 @@ func (s *mpMediaSrv) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store") // mtime-keyed server-side; tiny payload
 	_, _ = w.Write(data)
+}
+
+// serveStream tails a live growing file: send what exists, poll for growth, finish
+// when the producer is done AND the tail is drained (or the token got dropped /
+// client went away). Chunked (no Content-Length) - the JS __mst runtime appends
+// sequentially into MSE.
+func (s *mpMediaSrv) serveStream(w http.ResponseWriter, r *http.Request) {
+	tok, sok := s.routeToken(r.URL.Path, "/ms/")
+	if !sok {
+		http.NotFound(w, r)
+		return
+	}
+	s.mu.Lock()
+	st := s.streams[tok]
+	s.mu.Unlock()
+	if st == nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(st.path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "no-store")
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 256<<10)
+	draining := false
+	for {
+		n, rerr := f.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if rerr != nil {
+			if rerr != io.EOF {
+				return
+			}
+			if draining {
+				return // producer done and tail drained
+			}
+			s.mu.Lock()
+			gone := s.streams[tok] != st
+			s.mu.Unlock()
+			if gone {
+				return // superseded feed
+			}
+			select {
+			case <-st.done:
+				draining = true // one more read pass for the final bytes
+			case <-r.Context().Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 }
 
 // serveImg serves a token's resized JPEG (decode+resize once, then cache the bytes).

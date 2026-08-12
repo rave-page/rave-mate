@@ -672,7 +672,7 @@ var schema = []msg{
 	{
 		name: "MpVid", goT: "mpVidSt", zigT: "player.Vid", id: 34,
 		doc: "#mp-vid",
-		fs:  []field{s(1, "Host", "host"), s(2, "Kind", "kind"), s(3, "ErrText", "errText"), st(4, "OpenExt", "openExt", "UiBtn"), s(5, "NoStream", "noStream"), s(6, "URL", "url"), s(7, "MSE", "mse"), b(8, "Muted", "muted"), s(9, "Ev", "ev"), s(10, "OnMeta", "onmeta"), s(11, "OnErr", "onerr"), s(12, "DataIn", "dataIn"), s(13, "DataOut", "dataOut")},
+		fs:  []field{s(1, "Host", "host"), s(2, "Kind", "kind"), s(3, "ErrText", "errText"), st(4, "OpenExt", "openExt", "UiBtn"), s(5, "NoStream", "noStream"), s(6, "URL", "url"), s(7, "MSE", "mse"), b(8, "Muted", "muted"), s(9, "Ev", "ev"), s(10, "OnMeta", "onmeta"), s(11, "OnErr", "onerr"), s(12, "DataIn", "dataIn"), s(13, "DataOut", "dataOut"), s(14, "Stream", "stream"), s(15, "StreamMi", "streamMi"), b(16, "StreamAu", "streamAu")},
 	},
 	{
 		name: "MpKVRow", goT: "mpKVRow", zigT: "player.KVRow",
@@ -1504,13 +1504,9 @@ var schema = []msg{
 		fs: []field{s(1, "Name", "name"), b(2, "Missing", "missing"), s(3, "MissLb", "missLb"), b(4, "Off", "off"), li(5, "Btns", "btns", "UiBtn"), li(6, "Params", "params", "EdvFxParam")},
 	},
 	{
-		name: "EdvFxPrev", goT: "edvFxPrevSt", zigT: "editor_video.FxPrev",
-		fs: []field{b(1, "Show", "show"), s(2, "ImgURL", "imgUrl"), s(3, "Busy", "busy"), s(4, "AW", "aw"), s(5, "AH", "ah")},
-	},
-	{
 		name: "EdvView", goT: "edvViewState", zigT: "editor_video.State", id: 114,
 		doc: "Editor tab video mode (full view)",
-		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Modes", "modes", "EdModeTab"), st(5, "SrcBtn", "srcBtn", "UiBtn"), b(7, "HasSrc", "hasSrc"), s(8, "SrcName", "srcName"), s(9, "SrcInfo", "srcInfo"), s(10, "NoSrc", "noSrc"), s(11, "Player", "player"), s(12, "NoMedia", "noMedia"), s(13, "EditHint", "editHint"), s(14, "SecReframe", "secReframe"), b(15, "ShowRef", "showRef"), st(16, "Aspect", "aspect", "SelState"), s(24, "SecExport", "secExport"), st(25, "Export", `@"export"`, "EdvExport"), s(26, "SecFx", "secFx"), b(27, "ShowFx", "showFx"), st(28, "FxAdd", "fxAdd", "SelState"), s(29, "FxNone", "fxNone"), li(30, "FxRows", "fxRows", "EdvFxRow"), st(31, "FxPrev", "fxPrev", "EdvFxPrev"), st(32, "FxPrevBtn", "fxPrevBtn", "UiBtn"), s(33, "FxHint", "fxHint"), s(34, "ViewTitle", "viewTitle"), s(35, "InspTitle", "inspTitle"), st(36, "Layout", "layout", "SelState"), b(37, "HasBlur", "hasBlur"), st(38, "Blur", "blur", "UiSlider"), b(39, "HasZoom", "hasZoom"), st(40, "Zoom", "zoom", "UiSlider"), s(41, "PlayerCls", "playerCls"), s(42, "PlayerVars", "playerVars"), li(43, "FxSrc", "fxSrc", "UiBtn"), st(44, "ReframeBtn", "reframeBtn", "UiBtn")},
+		fs:  []field{s(1, "Title", "title"), s(2, "Sub", "sub"), li(3, "Modes", "modes", "EdModeTab"), st(5, "SrcBtn", "srcBtn", "UiBtn"), b(7, "HasSrc", "hasSrc"), s(8, "SrcName", "srcName"), s(9, "SrcInfo", "srcInfo"), s(10, "NoSrc", "noSrc"), s(11, "Player", "player"), s(12, "NoMedia", "noMedia"), s(13, "EditHint", "editHint"), s(14, "SecReframe", "secReframe"), b(15, "ShowRef", "showRef"), st(16, "Aspect", "aspect", "SelState"), s(24, "SecExport", "secExport"), st(25, "Export", `@"export"`, "EdvExport"), s(26, "SecFx", "secFx"), b(27, "ShowFx", "showFx"), st(28, "FxAdd", "fxAdd", "SelState"), s(29, "FxNone", "fxNone"), li(30, "FxRows", "fxRows", "EdvFxRow"), s(33, "FxHint", "fxHint"), s(34, "ViewTitle", "viewTitle"), s(35, "InspTitle", "inspTitle"), st(36, "Layout", "layout", "SelState"), b(37, "HasBlur", "hasBlur"), st(38, "Blur", "blur", "UiSlider"), b(39, "HasZoom", "hasZoom"), st(40, "Zoom", "zoom", "UiSlider"), s(41, "PlayerCls", "playerCls"), s(42, "PlayerVars", "playerVars"), li(43, "FxSrc", "fxSrc", "UiBtn"), st(44, "ReframeBtn", "reframeBtn", "UiBtn"), st(45, "PrevRes", "prevRes", "SelState")},
 	},
 	{
 		name: "EdvReframe", goT: "edvReframeSt", zigT: "editor_video.Reframe", id: 115,

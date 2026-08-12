@@ -366,6 +366,7 @@
         "src": "Keep source size"
       },
       "presetLabel": "Target",
+      "prevResLabel": "Preview quality",
       "reframeHint": "Drag the bright window to choose the visible slice. Keyframes animate the pan between positions.",
       "reframeOpen": "Reframe & zoom window…",
       "reframeTitle": "Reframe & zoom area",
@@ -382,6 +383,7 @@
         "packDone": "{n} shaders installed",
         "packFail": "Pack download failed - see Logs",
         "packStart": "Downloading the Vidvox ISF pack…",
+        "prevSlow": "Preview stream is slow to start - check the Logs tab.",
         "probing": "Still probing the source - try again in a second.",
         "sourceMissing": "File not found."
       },

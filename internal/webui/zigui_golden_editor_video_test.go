@@ -82,9 +82,8 @@ func edvFixtures() map[string]edvViewState {
 			{Label: "✕", Variant: "warn", Act: "edv-fx-del:1"},
 		}, Params: []edvFxParam{}},
 	}
-	full.FxPrev = edvFxPrevSt{Show: true, ImgURL: "http://127.0.0.1:47621/img/s2/tok",
-		AW: "606", AH: "1080"}
-	full.FxPrevBtn = uiBtn{Label: "Preview effects on frame", Variant: "outline", Act: "edv-fx-prev"}
+	full.PrevRes = edSel("edv-prevres", "Preview quality", "540p",
+		selRow{Val: "1080", Label: "1080p"}, selRow{Val: "540", Label: "540p", Cur: true})
 	full.FxHint = "frei0r plugins from C:\\cfg\\vfx\\frei0r."
 	full.FxSrc = []uiBtn{
 		{Label: "ISF library ↗", Variant: "ghost", Act: "edv-fx-www:isf"},
@@ -113,8 +112,8 @@ func edvFixtures() map[string]edvViewState {
 	tall.SecFx = "Effects"
 	tall.FxAdd = edSel("edv-fx-add", "Add effect…", "")
 	tall.FxNone = "No effect plugins found."
-	tall.FxPrev = edvFxPrevSt{Show: true, Busy: "Extracting frame…", AW: "1080", AH: "608"}
-	tall.FxPrevBtn = uiBtn{Label: "Preview", Variant: "outline", Act: "edv-fx-prev"}
+	tall.PrevRes = edSel("edv-prevres", "Preview quality", "240p",
+		selRow{Val: "240", Label: "240p", Cur: true})
 	tall.FxHint = "hint"
 
 	// error + result branches, no reframe (audio source)
@@ -156,8 +155,7 @@ func edvFixtures() map[string]edvViewState {
 			{IsBool: true, Toggle: newToggle(`i&nv"`, `edv-fx-p:0:i&nv"`, false)},
 		}},
 	}
-	escaping.FxPrev = edvFxPrevSt{Show: true, Busy: `b&usy2"<>'`, AW: "10", AH: "20"}
-	escaping.FxPrevBtn = uiBtn{Label: `P&rev"`, Variant: "outline", Act: "edv-fx-prev"}
+	escaping.PrevRes = edSel("edv-prevres", `P&rev"`, `5&40"`, selRow{Val: "540", Label: `5&40"`, Cur: true})
 	escaping.FxHint = `h&x"<>'`
 	escaping.Export = export()
 	escaping.Export.TrimInfo = `cut 0:01.0–0:02.0 · crop 2×2 &"<>'`

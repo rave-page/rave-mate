@@ -82,8 +82,11 @@ type mpVidSt struct {
 	Ev       string `json:"ev"`     // element→Go transport mirror handler
 	OnMeta   string `json:"onmeta"` // Ev + volume/first-frame nudge
 	OnErr    string `json:"onerr"`
-	DataIn   string `json:"dataIn"`  // trim IN local secs ("" = omit; drives loop-from-IN)
-	DataOut  string `json:"dataOut"` // trim OUT local secs ("" = none; element stops there)
+	DataIn   string `json:"dataIn"`   // trim IN local secs ("" = omit; drives loop-from-IN)
+	DataOut  string `json:"dataOut"`  // trim OUT local secs ("" = none; element stops there)
+	Stream   string `json:"stream"`   // live /ms/ feed URL (realtime fx preview; replaces src/MSE)
+	StreamMi string `json:"streamMi"` // MSE mime for the feed
+	StreamAu bool   `json:"streamAu"` // autoplay the fresh feed
 }
 
 // mpWaveSt is the #mp-<host>-wave inner: the RAW Go-computed SVG plus the chip overlay
@@ -325,9 +328,14 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 		`if(String(s)!==this.dataset.s||p!==this.dataset.p){this.dataset.s=String(s);this.dataset.p=p;` +
 		`window.rave(JSON.stringify({act:'mp-vtick:` + t.host + `',val:this.currentTime+'|'+(this.duration||0)+'|'+p}))}`
 	st.OnErr = `window.rave(JSON.stringify({act:'mp-verr:` + t.host + `',val:''}))`
-	if t.dual() && t.active == 0 { // audio recording is the source - video is a silent preview
+	if t.vid.strURL != "" { // realtime preview: element plays the live feed (clock = strT0-relative)
+		st.Stream, st.StreamMi, st.StreamAu = t.vid.strURL, t.vid.strMime, t.vid.strAuto
+	}
+	switch {
+	case t.dual() && t.active == 0: // audio recording is the source - video is a silent preview
 		st.Muted = true
-	} else { // active engine: trim window rides as data attrs (element-side OUT stop, loop-from-IN)
+	case st.Stream != "": // live feed clock ≠ source clock - Go enforces the OUT marker instead
+	default: // active engine: trim window rides as data attrs (element-side OUT stop, loop-from-IN)
 		st.DataIn = fmt.Sprintf("%.3f", clampF(t.inSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0)))
 		if t.outSec > 0 {
 			st.DataOut = fmt.Sprintf("%.3f", clampF(t.outSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0)))
@@ -919,6 +927,12 @@ func mpVidHTMLOf(st mpVidSt) string {
 	src := ` src=` + attrQ(st.URL)
 	if st.MSE != "" {
 		src = ` data-mse=` + attrQ(st.MSE) + ` data-mse-src=` + attrQ(st.URL)
+	}
+	if st.Stream != "" { // live realtime-preview feed (shell.go __mst runtime)
+		src = ` data-msestream=` + attrQ(st.Stream) + ` data-msestream-mime=` + attrQ(st.StreamMi)
+		if st.StreamAu {
+			src += ` autoplay`
+		}
 	}
 	muted := ""
 	if st.Muted {

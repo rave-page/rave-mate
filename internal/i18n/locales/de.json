@@ -207,6 +207,7 @@
         "src": "Quellgröße behalten"
       },
       "presetLabel": "Ziel",
+      "prevResLabel": "Vorschau-Qualität",
       "reframeHint": "Helles Fenster ziehen, um den sichtbaren Ausschnitt zu wählen. Keyframes animieren den Schwenk zwischen Positionen.",
       "reframeOpen": "Ausschnitt & Zoom wählen…",
       "reframeTitle": "Ausschnitt & Zoom",
@@ -223,6 +224,7 @@
         "packDone": "{n} Shader installiert",
         "packFail": "Paket-Download fehlgeschlagen - siehe Logs",
         "packStart": "Vidvox-ISF-Paket wird heruntergeladen…",
+        "prevSlow": "Vorschau-Stream startet langsam - siehe Logs-Tab.",
         "probing": "Quelle wird noch analysiert – gleich erneut versuchen.",
         "sourceMissing": "Datei nicht gefunden."
       },
