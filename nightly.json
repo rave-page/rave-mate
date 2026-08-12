@@ -1,13 +1,13 @@
 {
-  "version": "nightly-8be2ab3",
-  "build": 249,
-  "commit": "8be2ab3",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-249-20260812-8be2ab3.exe",
-  "sha256": "4bdc26b378eafc22a7aa54ae502a617bbea310fe6abc8fc15b15165319ca98d3",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-249-20260812-8be2ab3.exe",
-  "installer_sha256": "caad737753843badece0f8318325d919e61519ea535f2817dcb92e9134fbee5f",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-249-20260812-8be2ab3",
-  "linux_sha256": "a0addab0002dc20b2e2c0dc69e882880248ebb089ad8ee50c31e944e279fae79",
+  "version": "nightly-d2bc292",
+  "build": 250,
+  "commit": "d2bc292",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-250-20260812-d2bc292.exe",
+  "sha256": "c72d794e0c676c0139e8c560c1cb984ecf8b978e23198705981aa6ed325ec742",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-250-20260812-d2bc292.exe",
+  "installer_sha256": "e482b04bc3c014e24e81439b1ebd6741eec8096475e7e129bbb61fb2b3d2929d",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-250-20260812-d2bc292",
+  "linux_sha256": "ca6a46ed12a4fe593b55733ecb0acc09b70bbb87812b2a837ba5236ebd00fde8",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-12T13:35:53Z",
-  "notes": "fix(vfx): empty chain marshals fx:null - accept it; stop fx-preview rebuilding the player"
+  "released": "2026-08-12T13:53:12Z",
+  "notes": "style: gofmt render_player.go"
 }
