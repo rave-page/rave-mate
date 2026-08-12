@@ -46,6 +46,7 @@ type edvSt struct {
 	fxPlugins  []vfx.Plugin // discovered effect plugins (scan once per session)
 	fxScanned  bool
 	fxScanning bool
+	packBusy   bool   // Vidvox ISF pack download in flight
 	fxPrev     string // fx preview PNG ("" = never rendered)
 	fxPrevBusy bool
 	fxPrevGen  int
@@ -149,6 +150,29 @@ func init() {
 	onPrefix("edv-fx-p:", func(u *UI, m actMsg) { u.edvFxParamSet(m.arg("edv-fx-p:"), m.Val) })
 	onPrefix("edv-fx-c:", func(u *UI, m actMsg) { u.edvFxColorSet(m.arg("edv-fx-c:"), m.Val) })
 	onExact("edv-fx-prev", func(u *UI, m actMsg) { u.edvFxPrevRender() })
+	onPrefix("edv-fx-www:", func(u *UI, m actMsg) {
+		switch m.arg("edv-fx-www:") {
+		case "isf":
+			_ = openURL("https://editor.isf.video/shaders")
+		case "frei0r":
+			_ = openURL("https://frei0r.dyne.org")
+		}
+	})
+	onPrefix("edv-fx-dir:", func(u *UI, m actMsg) {
+		d, err := config.Dir()
+		if err != nil {
+			return
+		}
+		switch m.arg("edv-fx-dir:") {
+		case "isf":
+			_ = openURL(vfx.ISFDir(d))
+		case "frei0r":
+			p := filepath.Join(d, "vfx", "frei0r")
+			_ = os.MkdirAll(p, 0o755)
+			_ = openURL(p)
+		}
+	})
+	onExact("edv-fx-getpack", func(u *UI, m actMsg) { u.edvFetchPack() })
 	onExact("edv-export", func(u *UI, m actMsg) { u.edvExport() })
 	onExact("edv-excancel", func(u *UI, m actMsg) {
 		editor.mu.Lock()
@@ -654,6 +678,54 @@ func (u *UI) edvFxScan() {
 		if len(plugins) > 0 {
 			u.patchMain()
 		}
+	})
+}
+
+// edvPackBusy reports whether the Vidvox pack download is running.
+func edvPackBusy() bool {
+	editor.mu.Lock()
+	defer editor.mu.Unlock()
+	edvEnsure()
+	return editor.video.packBusy
+}
+
+// edvFetchPack downloads the MIT-licensed Vidvox ISF pack (200+ shaders) into
+// <config>/vfx/isf/vidvox and rescans the plugin list. One run at a time.
+func (u *UI) edvFetchPack() {
+	editor.mu.Lock()
+	edvEnsure()
+	busy := editor.video.packBusy
+	editor.video.packBusy = true
+	editor.mu.Unlock()
+	if busy {
+		return
+	}
+	u.toast(i18n.T("editor.video.toast.packStart"))
+	u.patchMain()
+	u.bg(func() {
+		d, err := config.Dir()
+		var n int
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			n, err = vfx.FetchVidvoxPack(ctx, vfx.ISFDir(d))
+		}
+		editor.mu.Lock()
+		editor.video.packBusy = false
+		if err == nil {
+			editor.video.fxScanned = false // picks up the new pack dir on re-render
+		}
+		editor.mu.Unlock()
+		if u.stopped() {
+			return
+		}
+		if err != nil {
+			u.log.Error("editor", "isf pack download failed", map[string]any{"err": err.Error()})
+			u.toast(i18n.T("editor.video.toast.packFail"))
+		} else {
+			u.toast(i18n.T("editor.video.toast.packDone", i18n.A{"n": strconv.Itoa(n)}))
+		}
+		u.patchMain()
 	})
 }
 

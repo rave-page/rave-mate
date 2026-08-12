@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xf67d6488;
+pub const schema_hash: u32 = 0xe39f4587;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4335,6 +4335,7 @@ pub fn decodeEdvView(r: *wire.Reader, out: *editor_video.State) wire.Error!void 
         40 => out.zoom = try r.sub(c.Slider, decodeUiSlider, t),
         41 => out.playerCls = try r.str(t),
         42 => out.playerVars = try r.str(t),
+        43 => out.fxSrc = try r.list(c.Btn, decodeUiBtn, t),
         else => try r.skip(t),
     };
 }

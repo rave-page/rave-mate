@@ -175,11 +175,16 @@
       "extracting": "フレームを抽出中…",
       "fromCapture": "録画から…",
       "fxAdd": "エフェクトを追加…",
+      "fxDirF0r": "frei0rフォルダー",
+      "fxDirIsf": "ISFフォルダー",
       "fxEmpty": "エフェクトはまだありません。上から選択してください。チェーンはエンコード前に上から順に適用されます。",
       "fxHint": "オープン標準エフェクト: {dir} の frei0r プラグイン（https://frei0r.dyne.org）。チェーンはカット/リフレームとエンコードの間に適用され、書き出しは自動的にエフェクトパイプラインを通ります。",
       "fxMissing": "見つかりません",
       "fxNoPlugins": "エフェクトプラグインが見つかりません。frei0r プラグインの .dll を {dir} に置いてタブを開き直してください。",
+      "fxPack": "Vidvoxパックを取得 (MIT)",
+      "fxPackBusy": "パックをダウンロード中…",
       "fxPreview": "フレームでエフェクトをプレビュー",
+      "fxWwwIsf": "ISFライブラリ ↗",
       "layout": {
         "crop": "ズームフィル（フレームに合わせて切り抜き）",
         "fit": "オリジナルを中央に + 背景フィル"
@@ -211,6 +216,9 @@
       "toast": {
         "exportFailed": "書き出しに失敗: ",
         "exported": "書き出し完了: {path}",
+        "packDone": "{n}個のシェーダーをインストールしました",
+        "packFail": "パックのダウンロードに失敗しました - ログを確認",
+        "packStart": "Vidvox ISFパックをダウンロード中…",
         "probing": "ソースを解析中です – もう一度お試しください。",
         "sourceMissing": "ファイルが見つかりません。"
       },

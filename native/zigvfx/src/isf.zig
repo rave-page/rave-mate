@@ -180,6 +180,11 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) ParseError!Doc {
     }
     for (hdr.INPUTS) |in| {
         if (in.NAME.len == 0) continue;
+        // audio-reactive shaders can never render here (no audio source) - reject at
+        // parse so --list skips them instead of failing at chain load
+        if (std.mem.eql(u8, in.TYPE, "audio") or std.mem.eql(u8, in.TYPE, "audioFFT")) return error.Unsupported;
+        // a secondary image input never gets bound - the shader would sample junk
+        if (std.mem.eql(u8, in.TYPE, "image") and !std.mem.eql(u8, in.NAME, "inputImage")) return error.Unsupported;
         if (std.mem.eql(u8, in.TYPE, "image")) continue; // inputImage - implicit
         const kind: ParamKind = if (std.mem.eql(u8, in.TYPE, "float"))
             .float

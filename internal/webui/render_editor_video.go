@@ -137,6 +137,7 @@ type edvViewState struct {
 	FxPrev    edvFxPrevSt `json:"fxPrev"`
 	FxPrevBtn uiBtn       `json:"fxPrevBtn"`
 	FxHint    string      `json:"fxHint"`
+	FxSrc     []uiBtn     `json:"fxSrc"` // shader/plugin discovery: folders, sites, pack fetch
 
 	SecExport string      `json:"secExport"`
 	Export    edvExportSt `json:"export"`
@@ -149,6 +150,7 @@ func emptyEdvState() edvViewState {
 		Kfs:    []edvKfRow{},
 		FxAdd:  selState{Rows: []selRow{}},
 		FxRows: []edvFxRow{},
+		FxSrc:  []uiBtn{},
 		Export: edvExportSt{
 			Preset: selState{Rows: []selRow{}},
 		},
@@ -374,6 +376,16 @@ func (u *UI) edvFxState(st *edvViewState) {
 	st.FxPrev = u.edvFxPrevState()
 	st.FxPrevBtn = uiBtn{Label: i18n.T("editor.video.fxPreview"), Variant: "outline", Act: "edv-fx-prev"}
 	st.FxHint = i18n.T("editor.video.fxHint", i18n.A{"dir": dir})
+	packLbl := i18n.T("editor.video.fxPack")
+	if edvPackBusy() {
+		packLbl = i18n.T("editor.video.fxPackBusy")
+	}
+	st.FxSrc = []uiBtn{
+		{Label: i18n.T("editor.video.fxWwwIsf"), Variant: "ghost", Act: "edv-fx-www:isf"},
+		{Label: packLbl, Variant: "outline", Act: "edv-fx-getpack"},
+		{Label: i18n.T("editor.video.fxDirIsf"), Variant: "ghost", Act: "edv-fx-dir:isf"},
+		{Label: i18n.T("editor.video.fxDirF0r"), Variant: "ghost", Act: "edv-fx-dir:frei0r"},
+	}
 }
 
 // edvFxPrevState resolves the fx preview box (also the #edv-fxprev fragment).
@@ -605,6 +617,13 @@ func editorVideoHTML(st edvViewState) string {
 		}
 		b.WriteString(btnRow(st.FxPrevBtn.html()))
 		b.WriteString(hint("info", st.FxHint))
+		if len(st.FxSrc) > 0 {
+			var sb strings.Builder
+			for _, btn := range st.FxSrc {
+				sb.WriteString(btn.html())
+			}
+			b.WriteString(btnRow(sb.String()))
+		}
 	}
 	b.WriteString(`<div class=edv-insp-sec>` + html.EscapeString(st.SecExport) + `</div>`)
 	b.WriteString(`<div id=edv-export>` + edvExportHTML(st.Export) + `</div>`)

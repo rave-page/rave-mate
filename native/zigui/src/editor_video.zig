@@ -116,6 +116,7 @@ pub const State = struct {
     fxPrev: FxPrev = .{},
     fxPrevBtn: c.Btn = .{},
     fxHint: []const u8 = "",
+    fxSrc: []const c.Btn = &.{},
 
     secExport: []const u8 = "",
     @"export": Export = .{},
@@ -215,6 +216,11 @@ pub fn render(h: *Html, s: State) !void {
         try c.btnOf(h, s.fxPrevBtn);
         try c.btnRowClose(h);
         try c.hint(h, "info", s.fxHint);
+        if (s.fxSrc.len != 0) {
+            try c.btnRowOpen(h);
+            for (s.fxSrc) |sb| try c.btnOf(h, sb);
+            try c.btnRowClose(h);
+        }
     }
     try h.raw("<div class=edv-insp-sec>");
     try h.esc(s.secExport);

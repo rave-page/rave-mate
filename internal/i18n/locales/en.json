@@ -334,11 +334,16 @@
       "extracting": "Extracting frame…",
       "fromCapture": "From capture…",
       "fxAdd": "Add effect…",
+      "fxDirF0r": "frei0r folder",
+      "fxDirIsf": "ISF folder",
       "fxEmpty": "No effects yet - pick one above. The chain runs top to bottom before encoding.",
       "fxHint": "Open-standard effects: frei0r (https://frei0r.dyne.org) plugins from {dir}. The chain is applied between cut/reframe and encoding - exports route through the effects pipeline automatically.",
       "fxMissing": "missing",
       "fxNoPlugins": "No effect plugins found. Drop frei0r plugin .dll files into {dir} and reopen this tab.",
+      "fxPack": "Get Vidvox pack (MIT)",
+      "fxPackBusy": "Downloading pack…",
       "fxPreview": "Preview effects on frame",
+      "fxWwwIsf": "ISF library ↗",
       "layout": {
         "crop": "Zoom-fill (crop to frame)",
         "fit": "Original inside + filled background"
@@ -370,6 +375,9 @@
       "toast": {
         "exportFailed": "Export failed: ",
         "exported": "Exported: {path}",
+        "packDone": "{n} shaders installed",
+        "packFail": "Pack download failed - see Logs",
+        "packStart": "Downloading the Vidvox ISF pack…",
         "probing": "Still probing the source - try again in a second.",
         "sourceMissing": "File not found."
       },

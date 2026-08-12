@@ -175,11 +175,16 @@
       "extracting": "Frame wird extrahiert…",
       "fromCapture": "Aus Aufnahme…",
       "fxAdd": "Effekt hinzufügen…",
+      "fxDirF0r": "frei0r-Ordner",
+      "fxDirIsf": "ISF-Ordner",
       "fxEmpty": "Noch keine Effekte – oben einen wählen. Die Kette läuft von oben nach unten vor dem Encoden.",
       "fxHint": "Offene Effekt-Standards: frei0r-Plugins (https://frei0r.dyne.org) aus {dir}. Die Kette greift zwischen Schnitt/Reframe und Encoding – Exporte laufen automatisch durch die Effekt-Pipeline.",
       "fxMissing": "fehlt",
       "fxNoPlugins": "Keine Effekt-Plugins gefunden. frei0r-Plugin-.dll-Dateien nach {dir} legen und den Tab neu öffnen.",
+      "fxPack": "Vidvox-Paket laden (MIT)",
+      "fxPackBusy": "Paket wird geladen…",
       "fxPreview": "Effekte auf Frame testen",
+      "fxWwwIsf": "ISF-Bibliothek ↗",
       "layout": {
         "crop": "Formatfüllend (auf Rahmen zuschneiden)",
         "fit": "Original innen + gefüllter Hintergrund"
@@ -211,6 +216,9 @@
       "toast": {
         "exportFailed": "Export fehlgeschlagen: ",
         "exported": "Exportiert: {path}",
+        "packDone": "{n} Shader installiert",
+        "packFail": "Paket-Download fehlgeschlagen - siehe Logs",
+        "packStart": "Vidvox-ISF-Paket wird heruntergeladen…",
         "probing": "Quelle wird noch analysiert – gleich erneut versuchen.",
         "sourceMissing": "Datei nicht gefunden."
       },

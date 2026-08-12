@@ -79,7 +79,8 @@ var isfSeed embed.FS
 
 // PluginDirs returns (and creates) the per-user effect plugin dirs; the ISF dir
 // is seeded once with the bundled MIT starter shaders (existing files never
-// overwritten - users may edit or delete them).
+// overwritten - users may edit or delete them). The fetched Vidvox pack subdir
+// joins the scan when present (--list doesn't recurse).
 func PluginDirs(configDir string) []string {
 	frei0rDir := filepath.Join(configDir, "vfx", "frei0r")
 	isfDir := filepath.Join(configDir, "vfx", "isf")
@@ -87,7 +88,18 @@ func PluginDirs(configDir string) []string {
 	if err := os.MkdirAll(isfDir, 0o755); err == nil {
 		seedISF(isfDir)
 	}
-	return []string{frei0rDir, isfDir}
+	dirs := []string{frei0rDir, isfDir}
+	if st, err := os.Stat(filepath.Join(isfDir, PackDirName)); err == nil && st.IsDir() {
+		dirs = append(dirs, filepath.Join(isfDir, PackDirName))
+	}
+	return dirs
+}
+
+// ISFDir returns the per-user ISF shader dir (created).
+func ISFDir(configDir string) string {
+	d := filepath.Join(configDir, "vfx", "isf")
+	_ = os.MkdirAll(d, 0o755)
+	return d
 }
 
 // seedISF writes each bundled shader if absent.

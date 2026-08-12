@@ -7,7 +7,7 @@ import "rave.page/mate/internal/zigui"
 // RZW1 state-wire encoders (the binary v2 path; the JSON v1 path stays for fallback).
 // Field numbers + hash come from internal/zigui/wiregen/schema.go - regenerate, never edit.
 const (
-	wireSchemaHash         uint32 = 0xf67d6488
+	wireSchemaHash         uint32 = 0xe39f4587
 	wireMsgAgState         uint16 = 1   // App Groups tab (full view + the #appgroups-body fragment share this state)
 	wireMsgLogsState       uint16 = 2   // Logs tab (full view)
 	wireMsgLogsLines       uint16 = 3   // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -3450,6 +3450,7 @@ func (v edvViewState) encodeWire(w *zigui.WireWriter) {
 	w.Struct(40, func() { v.Zoom.encodeWire(w) })
 	w.Str(41, v.PlayerCls)
 	w.Str(42, v.PlayerVars)
+	w.List(43, len(v.FxSrc), func(i int) { v.FxSrc[i].encodeWire(w) })
 }
 
 func (v ceTbDropSt) encodeWire(w *zigui.WireWriter) {

@@ -103,6 +103,19 @@ buttons and 0-1 sliders/switches for its parameters. *Preview effects on frame*
 renders the current preview frame through the chain - cropped exactly like the
 export will be.
 
+**Getting more effects** - the buttons under the Effects section:
+
+- *ISF library ↗* opens <https://editor.isf.video/shaders> - thousands of
+  community ISF shaders; download a `.fs` and drop it in the ISF folder.
+- *Get Vidvox pack (MIT)* downloads the official
+  [Vidvox ISF-Files](https://github.com/Vidvox/ISF-Files) collection (200+
+  MIT-licensed generators and filters, license file included) into
+  `<config>\vfx\isf\vidvox\` and rescans - one click, no manual steps.
+  Audio-reactive shaders from the pack are skipped (no audio input here).
+- *ISF folder* / *frei0r folder* open the plugin folders in your file manager
+  for drop-in installs. frei0r plugin binaries ship with Kdenlive/Shotcut
+  installs or can be built from <https://frei0r.dyne.org>.
+
 Effects run in a separate helper process (`rave-mate-vfx`): a crashing plugin
 or shader can never take down rave-mate or a running export queue - the export
 just fails with the plugin's error message.

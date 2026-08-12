@@ -97,6 +97,11 @@ func edvFixtures() map[string]edvViewState {
 		AW: "606", AH: "1080"}
 	full.FxPrevBtn = uiBtn{Label: "Preview effects on frame", Variant: "outline", Act: "edv-fx-prev"}
 	full.FxHint = "frei0r plugins from C:\\cfg\\vfx\\frei0r."
+	full.FxSrc = []uiBtn{
+		{Label: "ISF library ↗", Variant: "ghost", Act: "edv-fx-www:isf"},
+		{Label: "Get Vidvox pack (MIT)", Variant: "outline", Act: "edv-fx-getpack"},
+		{Label: "ISF folder", Variant: "ghost", Act: "edv-fx-dir:isf"},
+	}
 
 	// vertical free axis (tall source → wide target) + busy frame + running export
 	tall := emptyEdvState()

@@ -175,11 +175,16 @@
       "extracting": "Extraction de l'image…",
       "fromCapture": "Depuis un enregistrement…",
       "fxAdd": "Ajouter un effet…",
+      "fxDirF0r": "Dossier frei0r",
+      "fxDirIsf": "Dossier ISF",
       "fxEmpty": "Aucun effet pour l'instant – choisissez-en un ci-dessus. La chaîne s'applique de haut en bas avant l'encodage.",
       "fxHint": "Effets aux standards ouverts : plugins frei0r (https://frei0r.dyne.org) depuis {dir}. La chaîne s'applique entre coupe/recadrage et encodage – l'export passe automatiquement par la chaîne d'effets.",
       "fxMissing": "manquant",
       "fxNoPlugins": "Aucun plugin d'effet trouvé. Déposez des .dll frei0r dans {dir} puis rouvrez cet onglet.",
+      "fxPack": "Télécharger le pack Vidvox (MIT)",
+      "fxPackBusy": "Téléchargement du pack…",
       "fxPreview": "Prévisualiser les effets sur l'image",
+      "fxWwwIsf": "Bibliothèque ISF ↗",
       "layout": {
         "crop": "Remplir par zoom (recadrer au cadre)",
         "fit": "Original au centre + fond rempli"
@@ -211,6 +216,9 @@
       "toast": {
         "exportFailed": "Échec de l'export : ",
         "exported": "Exporté : {path}",
+        "packDone": "{n} shaders installés",
+        "packFail": "Échec du téléchargement du pack - voir Logs",
+        "packStart": "Téléchargement du pack ISF Vidvox…",
         "probing": "Analyse de la source en cours – réessayez dans une seconde.",
         "sourceMissing": "Fichier introuvable."
       },
