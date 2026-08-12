@@ -672,7 +672,7 @@ var schema = []msg{
 	{
 		name: "MpVid", goT: "mpVidSt", zigT: "player.Vid", id: 34,
 		doc: "#mp-vid",
-		fs:  []field{s(1, "Host", "host"), s(2, "Kind", "kind"), s(3, "ErrText", "errText"), st(4, "OpenExt", "openExt", "UiBtn"), s(5, "NoStream", "noStream"), s(6, "URL", "url"), s(7, "MSE", "mse"), b(8, "Muted", "muted"), s(9, "Ev", "ev"), s(10, "OnMeta", "onmeta"), s(11, "OnErr", "onerr")},
+		fs:  []field{s(1, "Host", "host"), s(2, "Kind", "kind"), s(3, "ErrText", "errText"), st(4, "OpenExt", "openExt", "UiBtn"), s(5, "NoStream", "noStream"), s(6, "URL", "url"), s(7, "MSE", "mse"), b(8, "Muted", "muted"), s(9, "Ev", "ev"), s(10, "OnMeta", "onmeta"), s(11, "OnErr", "onerr"), s(12, "DataIn", "dataIn"), s(13, "DataOut", "dataOut")},
 	},
 	{
 		name: "MpKVRow", goT: "mpKVRow", zigT: "player.KVRow",

@@ -633,20 +633,36 @@ func (u *UI) mpPlayToggle(host string) {
 	tr := u.mpEng(&t)
 	if tr.loaded {
 		if m.kind == "video" {
-			u.mpVidEval(host, "if(v.paused){v.play().catch(function(){})}else{v.pause()}")
+			// Resume must survive a rebuilt element (patch replaced it → currentTime lost) and an
+			// autoplay-policy rejection (retry muted, never swallow into a dead transport). At/past
+			// the OUT marker, play loops from IN.
+			u.mpVidEval(host, fmt.Sprintf(
+				"if(v.paused){var i=parseFloat(v.dataset.in||'0'),o=parseFloat(v.dataset.out||'-1');"+
+					"if(o>0&&v.currentTime>=o-0.05){try{v.currentTime=i}catch(e){}}"+
+					"else if(%.3f>0.05&&Math.abs(v.currentTime-%.3f)>1.0){try{v.currentTime=%.3f}catch(e){}}"+
+					"v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}"+
+					"else{v.pause()}", tr.cur, tr.cur, tr.cur))
 			u.mpMut(host, func(v *mpSt) { v.vid.paused = !v.vid.paused }) // optimistic; vtick reconciles
 		} else {
 			opt := "pause" // optimistic flip; blocking toggle RPC off the act worker
 			if tr.paused {
 				opt = "play"
 			}
+			// resume at/past the OUT marker loops from IN (mirrors the video element path)
+			loopIn := tr.paused && t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec-0.5
+			inLocal := clampF(t.inSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 			u.mpAudCall(host, opt, func() {
 				if pl := u.player(); pl != nil {
+					if loopIn {
+						pl.SeekExplicit(inLocal)
+					}
 					pl.TogglePause()
 				}
 			})
 		}
-		u.mpPatchTransport(u.mpSnap(host))
+		t = u.mpSnap(host)
+		u.mpPatchTransport(t)
+		u.mpPushRealtime(t) // freeze/launch the rAF playhead NOW, not at the next 1 Hz tick
 		return
 	}
 	u.mpStartPlayback(host, *m, -1)
@@ -663,8 +679,14 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 		}
 		js += "v.play().catch(function(){v.muted=true;v.play().catch(function(){})});"
 		u.mpVidEval(host, js)
-		u.mpMut(host, func(v *mpSt) { v.vid.started, v.vid.paused = true, false })
-		u.mpPatchTransport(u.mpSnap(host))
+		t := u.mpMut(host, func(v *mpSt) {
+			v.vid.started, v.vid.paused = true, false
+			if seekTo > 0 {
+				v.vid.cur = seekTo
+			}
+		})
+		u.mpPatchTransport(t)
+		u.mpPushRealtime(t)
 		return
 	}
 	pl := u.player()
@@ -686,17 +708,20 @@ func (u *UI) mpStartPlayback(host string, m mpMedia, seekTo float64) {
 	})
 }
 
+// mpStop halts playback and parks the playhead at the trim IN marker (0 when unset).
 func (u *UI) mpStop(host string) {
 	t := u.mpSnap(host)
 	m := t.activeMedia()
 	if m == nil {
 		return
 	}
+	inLocal := clampF(t.inSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
 	if m.kind == "video" {
-		u.mpVidEval(host, "v.pause();v.currentTime=0;")
-		u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, 0 })
+		u.mpVidEval(host, fmt.Sprintf("v.pause();try{v.currentTime=%.3f}catch(e){}", inLocal))
+		u.mpMut(host, func(v *mpSt) { v.vid.paused, v.vid.cur = true, inLocal })
 	} else if pl := u.player(); pl != nil {
 		u.mpAudCall(host, "stop", func() { pl.Stop() }) // optimistic idle; async halt
+		u.mpMut(host, func(v *mpSt) { v.cursorSec = v.inSec })
 	}
 	t = u.mpSnap(host)
 	u.mpPatchTransport(t)
@@ -1541,6 +1566,30 @@ func (u *UI) mpApplyTrim(host string, fn func(*mpSt)) {
 	u.mpPatchEdit(t)
 	u.mpKickMeasure(host)
 	u.mpSyncMonitor(host)
+	u.mpSyncVidTrim(t)
+}
+
+// mpSyncVidTrim mirrors the trim window onto the video element's data-in/data-out
+// (element-side OUT stop + loop-from-IN) without replacing the element mid-play.
+func (u *UI) mpSyncVidTrim(t mpSt) {
+	vi := -1
+	for i := range t.media {
+		if t.media[i].kind == "video" {
+			vi = i
+			break
+		}
+	}
+	if vi < 0 || (t.dual() && t.active == 0) { // dual slave preview: audio engine owns the trim
+		return
+	}
+	in := clampF(t.inSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0))
+	js := fmt.Sprintf("v.dataset.in='%.3f';", in)
+	if t.outSec > 0 {
+		js += fmt.Sprintf("v.dataset.out='%.3f';", clampF(t.outSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0)))
+	} else {
+		js += "delete v.dataset.out;"
+	}
+	u.mpVidEval(t.host, js)
 }
 
 // mpTick keeps clock/playhead/transport fresh while this host's tab shows (1 Hz).
@@ -1574,6 +1623,20 @@ func mpTick(u *UI, host string) {
 		u.mpPatchWave(t)
 		if !mpIsSet(t.hovT) {
 			u.mpPatchHov(t)
+		}
+		if m.kind == "video" {
+			// self-heal: force an unthrottled element report while the mirror says playing - a
+			// rebuilt element or a rejected play() otherwise leaves a phantom moving playhead
+			u.mpVidEval(host, "window.rave(JSON.stringify({act:'mp-vtick:"+host+
+				"',val:v.currentTime+'|'+(v.duration||0)+'|'+(v.paused?'1':'0')}))")
+		} else if t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
+			// audio OUT-marker stop (video stops element-side via data-out)
+			u.mpAudCall(host, "pause", func() {
+				if pl := u.player(); pl != nil {
+					pl.TogglePause()
+				}
+			})
+			u.mpPatchTransport(u.mpSnap(host))
 		}
 		// dual + audio as source: slave the muted video preview to the aligned playhead
 		if t.dual() && t.active == 0 {
@@ -2050,6 +2113,7 @@ func (u *UI) mpHandle(host, which, val string) {
 		u.mpPatchEdit(t)
 		u.mpKickMeasure(host) // drag settled - refresh the plan's exact-measure lookup
 		u.mpSyncMonitor(host)
+		u.mpSyncVidTrim(t)
 	}
 }
 
@@ -2329,45 +2393,39 @@ func mpNextMark(marks []mpMark, cur float64) float64 {
 	return -1
 }
 
-// mpPreview plays from the trim IN point (start playback first if idle).
+// mpPreview (⇤ IN) moves the playhead to the trim IN marker. Seek only - play/pause
+// state is preserved (playing keeps playing from IN; paused just moves the playhead).
 func (u *UI) mpPreview(host string) {
-	t := u.mpSnap(host)
-	m := t.activeMedia()
-	if m == nil {
-		return
-	}
-	local := clampF(t.inSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
-	if tr := u.mpEng(&t); tr.loaded {
-		u.mpSeekAxis(host, t.inSec)
-		if m.kind == "video" && tr.paused {
-			u.mpVidEval(host, "v.play().catch(function(){})")
-			u.mpMut(host, func(v *mpSt) { v.vid.paused = false })
-		}
-		return
-	}
-	u.mpStartPlayback(host, *m, local)
+	u.mpJump(host, u.mpSnap(host).inSec)
 }
 
-// mpJump seeks the active engine to an axis offset, starting playback first if idle.
+// mpJump seeks the active engine to an axis offset, preserving play state. Idle video
+// primes the element paused at the target (frame visible, transport live); idle audio
+// starts playback there (a stopped audio engine has no paused-preview state).
 func (u *UI) mpJump(host string, axisSec float64) {
 	t := u.mpSnap(host)
 	m := t.activeMedia()
 	if m == nil {
 		return
 	}
-	if tr := u.mpEng(&t); tr.loaded {
+	if u.mpEng(&t).loaded {
 		u.mpSeekAxis(host, axisSec)
-		if m.kind == "video" && tr.paused {
-			u.mpVidEval(host, "v.play().catch(function(){})")
-			u.mpMut(host, func(v *mpSt) { v.vid.paused = false })
-		}
 		return
 	}
 	local := clampF(axisSec-t.mediaStart(t.active), 0, math.Max(m.dur, 0))
+	if m.kind == "video" {
+		u.mpVidEval(host, fmt.Sprintf("v.preload='auto';try{v.currentTime=%.3f}catch(e){}", local))
+		t = u.mpMut(host, func(v *mpSt) { v.vid.started, v.vid.paused, v.vid.cur = true, true, local })
+		u.mpPatchTransport(t)
+		u.mpPatchWave(t)
+		return
+	}
 	u.mpStartPlayback(host, *m, local)
 }
 
-// mpVidTick applies a <video> element event ("cur|dur|paused01") to the mirror.
+// mpVidTick applies a <video> element event ("cur|dur|paused01") to the mirror. A
+// play-state flip repaints transport + wave (button glyph, rAF rate); position-only
+// ticks re-sync the rAF interpolator so pause/seek desyncs can't survive a second.
 func (u *UI) mpVidTick(host, val string) {
 	parts := strings.Split(val, "|")
 	if len(parts) != 3 {
@@ -2376,7 +2434,9 @@ func (u *UI) mpVidTick(host, val string) {
 	cur, _ := strconv.ParseFloat(parts[0], 64)
 	dur, _ := strconv.ParseFloat(parts[1], 64)
 	paused := parts[2] == "1"
+	flip := false
 	t := u.mpMut(host, func(v *mpSt) {
+		flip = v.vid.paused != paused || !v.vid.started
 		v.vid = mpVid{cur: cur, dur: dur, paused: paused, started: true}
 		// late-bind the video duration from the element when peaks couldn't provide one
 		for i := range v.media {
@@ -2387,6 +2447,12 @@ func (u *UI) mpVidTick(host, val string) {
 	})
 	if m := t.activeMedia(); m != nil && m.kind == "video" {
 		u.mpPatchTime(t)
+		if flip {
+			u.mpPatchTransport(t)
+			u.mpPatchWave(t)
+		} else {
+			u.mpPushRealtime(t)
+		}
 	}
 }
 

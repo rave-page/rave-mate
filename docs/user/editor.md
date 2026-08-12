@@ -48,6 +48,9 @@ workflow is the same as the Publish tab, so nothing new to learn:
    detection behave exactly like Publish. The player's video shows the
    **selected reframe live**: crop layout plays the chosen aspect/zoom/pan
    slice, fit layout plays the original inside the target frame.
+   **Transport**: playback stops at the OUT marker (press play there to loop
+   from IN), *Stop* parks the playhead at IN, and *⇤ IN* moves the playhead
+   to IN without touching play/pause.
    **Tracklist navigation**: when the source is one of your set captures, the
    player carries the set's track markers - ⏮/⏭ step between tracks, the
    *Jump to track* menu seeks straight to any track, the waveform shows a tick

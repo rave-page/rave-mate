@@ -79,9 +79,11 @@ type mpVidSt struct {
 	URL      string `json:"url"`
 	MSE      string `json:"mse"` // "" = plain src; else data-mse index URL
 	Muted    bool   `json:"muted"`
-	Ev       string `json:"ev"`     // element→Go transport mirror handler
-	OnMeta   string `json:"onmeta"` // Ev + volume/first-frame nudge
+	Ev       string `json:"ev"`      // element→Go transport mirror handler
+	OnMeta   string `json:"onmeta"`  // Ev + volume/first-frame nudge
 	OnErr    string `json:"onerr"`
+	DataIn   string `json:"dataIn"`  // trim IN local secs ("" = omit; drives loop-from-IN)
+	DataOut  string `json:"dataOut"` // trim OUT local secs ("" = none; element stops there)
 }
 
 // mpWaveSt is the #mp-<host>-wave inner: the RAW Go-computed SVG plus the chip overlay
@@ -315,13 +317,21 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 		return st
 	}
 	st.Kind, st.URL = "video", url
-	// element events → Go transport mirror (throttled to 1 Hz / state flips)
-	st.Ev = `var s=Math.floor(this.currentTime);var p=this.paused?'1':'0';` +
+	// element events → Go transport mirror (throttled to 1 Hz / state flips). The OUT-marker
+	// stop runs element-side first (sub-frame latency; the pause flip then rides the send).
+	st.Ev = `var o=parseFloat(this.dataset.out||'-1');` +
+		`if(o>0&&!this.paused&&this.currentTime>=o){this.pause();try{this.currentTime=o}catch(e){}}` +
+		`var s=Math.floor(this.currentTime);var p=this.paused?'1':'0';` +
 		`if(String(s)!==this.dataset.s||p!==this.dataset.p){this.dataset.s=String(s);this.dataset.p=p;` +
 		`window.rave(JSON.stringify({act:'mp-vtick:` + t.host + `',val:this.currentTime+'|'+(this.duration||0)+'|'+p}))}`
 	st.OnErr = `window.rave(JSON.stringify({act:'mp-verr:` + t.host + `',val:''}))`
 	if t.dual() && t.active == 0 { // audio recording is the source - video is a silent preview
 		st.Muted = true
+	} else { // active engine: trim window rides as data attrs (element-side OUT stop, loop-from-IN)
+		st.DataIn = fmt.Sprintf("%.3f", clampF(t.inSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0)))
+		if t.outSec > 0 {
+			st.DataOut = fmt.Sprintf("%.3f", clampF(t.outSec-t.mediaStart(vi), 0, math.Max(t.media[vi].dur, 0)))
+		}
 	}
 	// Source strategy: a fragmented MP4 (OBS recording) streams via MSE (data-mse; shell.go
 	// __mse feeds init + only the fragments around the playhead using the mp4frag index) -
@@ -500,7 +510,7 @@ func (u *UI) mpTpState(t mpSt) mpTpSt {
 	st.Stop = uiBtn{Label: "⏹", Variant: "outline", Act: "mp-stop:" + host}
 	if t.edit {
 		st.HasPreview = true
-		st.Preview = uiBtn{Label: "▶ " + i18n.T("player.inPreview"), Variant: "secondary", Act: "mp-preview:" + host}
+		st.Preview = uiBtn{Label: "⇤ " + i18n.T("player.inPreview"), Variant: "secondary", Act: "mp-preview:" + host}
 	}
 
 	// track navigation: prev / current-track select / next
@@ -914,11 +924,18 @@ func mpVidHTMLOf(st mpVidSt) string {
 	if st.Muted {
 		muted = " muted"
 	}
+	trim := ""
+	if st.DataIn != "" {
+		trim = ` data-in=` + attrQ(st.DataIn)
+	}
+	if st.DataOut != "" {
+		trim += ` data-out=` + attrQ(st.DataOut)
+	}
 	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+st.Host) + ` class=mp-video` + src +
-		` preload=none playsinline` + muted +
+		` preload=none playsinline` + muted + trim +
 		` ontimeupdate=` + attrQ(st.Ev) + ` onplay=` + attrQ(st.Ev) + ` onpause=` + attrQ(st.Ev) +
-		` onended=` + attrQ(st.Ev) + ` onloadedmetadata=` + attrQ(st.OnMeta) + ` onerror=` + attrQ(st.OnErr) +
-		`></video></div>`
+		` onseeked=` + attrQ(st.Ev) + ` onended=` + attrQ(st.Ev) + ` onloadedmetadata=` + attrQ(st.OnMeta) +
+		` onerror=` + attrQ(st.OnErr) + `></video></div>`
 }
 
 func mpWaveHTMLOf(st mpWaveSt) string {

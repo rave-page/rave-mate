@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0xe39f4587;
+pub const schema_hash: u32 = 0x798acdd4;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -1874,6 +1874,8 @@ pub fn decodeMpVid(r: *wire.Reader, out: *player.Vid) wire.Error!void {
         9 => out.ev = try r.str(t),
         10 => out.onmeta = try r.str(t),
         11 => out.onerr = try r.str(t),
+        12 => out.dataIn = try r.str(t),
+        13 => out.dataOut = try r.str(t),
         else => try r.skip(t),
     };
 }
