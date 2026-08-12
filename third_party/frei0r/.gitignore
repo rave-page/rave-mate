@@ -1,0 +1,5 @@
+# frei0r plugin DLLs are BUILT from the pinned source tag by scripts/build-frei0r.sh
+# (official win64 binaries link debug CRT - unusable; see SUPPLY_CHAIN.md). Nothing
+# here is committed; CI builds fresh, local builds cache in bin/.
+*
+!.gitignore

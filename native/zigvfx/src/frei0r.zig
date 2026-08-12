@@ -158,6 +158,11 @@ pub fn open(gpa: std.mem.Allocator, path: []const u8) OpenError!Plugin {
             },
             .string, _ => {},
         };
+        // some plugins report NaN/Inf defaults (Defish0r "Non-Linear scale") - JSON has no
+        // NaN and Go rejects the whole listing; clamp to a sane 0..1 default
+        for (&def) |*dv| {
+            if (!std.math.isFinite(dv.*)) dv.* = 0;
+        }
         params[i] = .{ .name = try dupZ(gpa, pi.name), .typ = typ, .def = def };
         got = i + 1;
     }

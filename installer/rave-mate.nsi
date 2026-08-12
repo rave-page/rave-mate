@@ -94,6 +94,13 @@ Section "Install"
     ; where webui.resolveZigShellExe looks; absent, the app degrades to the in-process Go window.
     File "/oname=rave-shell.exe" "${SHELL_EXE}"
   !endif
+  !ifdef FREI0R_DIR
+    ; bundled frei0r plugin DLLs (GPL-2+, built from pinned source - scripts/build-frei0r.sh;
+    ; COPYING + SOURCE.txt ride along). vfx.PluginDirs scans $INSTDIR\frei0r at runtime.
+    SetOutPath "$INSTDIR\frei0r"
+    File /r "${FREI0R_DIR}\*"
+    SetOutPath "$INSTDIR"
+  !endif
 
   CreateShortCut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -119,6 +126,7 @@ Section "Uninstall"
   Delete "$INSTDIR\openvr_api.dll"
   Delete "$INSTDIR\rave-mate-enc.exe"
   Delete "$INSTDIR\rave-shell.exe"
+  RMDir /r "$INSTDIR\frei0r"
   Delete "$INSTDIR\uninstall.exe"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   RMDir  "$INSTDIR"

@@ -50,7 +50,7 @@ jobs:
       - name: mingw toolchain + NSIS
         run: |
           sudo apt-get update || sudo apt-get update || true # third-party repo flake (packages.microsoft.com) must not fail the job; ubuntu archive lists still land
-          sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick osslsigncode
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64 g++-mingw-w64-x86-64 mingw-w64-tools curl unzip nsis imagemagick osslsigncode cmake ninja-build
       - name: Case-sensitivity shims (camelCase Windows-SDK headers)
         run: |
           for inc in /usr/x86_64-w64-mingw32/include /usr/share/mingw-w64/include; do
@@ -66,6 +66,8 @@ jobs:
         run: MINGW_PREFIX=x86_64-w64-mingw32 bash scripts/fetch-spout.sh
       - name: Fetch Ableton Link SDK (SHA-pinned)
         run: MINGW_PREFIX=x86_64-w64-mingw32 bash scripts/fetch-link.sh
+      - name: Build frei0r plugins (SHA-pinned source; official win64 bins link debug CRT)
+        run: MINGW_PREFIX=x86_64-w64-mingw32 bash scripts/build-frei0r.sh
       - name: vrdll lockstep check
         run: |
           want=$(sed -n 's/.*dllSHA = "\([0-9a-f]\{64\}\)".*/\1/p' internal/vrdll/vrdll.go)
@@ -129,6 +131,7 @@ jobs:
           cp third_party/spout/bin/SpoutLibrary.dll dist/
           cp internal/vroverlay/sdk/openvr_api.dll dist/
           cp native/zigenc/zig-out/bin/rave-mate-enc.exe dist/ # per-adapter MF encoder child
+          cp -r third_party/frei0r/bin dist/frei0r             # bundled frei0r plugins (+COPYING/SOURCE)
       - name: Authenticode-sign exe
         env:
           CODE_SIGN_PFX_B64: ${{ secrets.CODE_SIGN_PFX_B64 }}
@@ -162,6 +165,7 @@ jobs:
             -DSPOUT_DLL="$PWD/dist/SpoutLibrary.dll" \
             -DOPENVR_DLL="$PWD/dist/openvr_api.dll" \
             -DENC_EXE="$PWD/dist/rave-mate-enc.exe" \
+            -DFREI0R_DIR="$PWD/dist/frei0r" \
             $ICONDEF \
             installer/rave-mate.nsi
       - name: Authenticode-sign installer + cleanup

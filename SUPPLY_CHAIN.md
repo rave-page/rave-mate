@@ -72,6 +72,7 @@ backends (PipeWire `-tags pipewire`, Syphon `-tags syphon`) are not yet implemen
 |---|---|---|
 | Spout2 `2.007.017` (`SpoutLibrary`, MT/static-CRT) | GitHub release `leadedge/Spout2 2.007.017`, asset `Spout-SDK-binaries_2-007-017_1.zip` (BSD-2-Clause) | hard-pinned `sha256:695F20E3505FA0DA51B2EB959AF359F5D9E2C914BB9676E9118D19F6A5424BF4`. |
 | Spout2 `2.007.017` **source** (patched `SpoutLibrary.dll` rebuild) | GitHub tag archive `leadedge/Spout2` `2.007.017.zip` (BSD-2-Clause) | hard-pinned `sha256:1CC0C958EE14AF614744AC40C054C2FD7DF17F8C5B94EB8ECFEACB37F5B06460` in `scripts/build-spout-dll.ps1`. |
+| frei0r `3.2.3` **source** (video-effect plugin DLLs, bundled `<install>/frei0r`) | GitHub tag archive `dyne/frei0r v3.2.3` (GPL-2.0-or-later; COPYING + SOURCE.txt ship beside the DLLs) | hard-pinned `sha256:898F80E5FDAE6108A2D9B2317649AF576A4B5E636C73429EE11B64397A596E12` in `scripts/build-frei0r.sh`. Built from source with MinGW + static libgcc/libstdc++ (OpenCV/Cairo/gavl/facedetect plugins excluded) because the official win64 release binaries link **debug** CRT DLLs (`VCRUNTIME140D`/`ucrtbased` - non-redistributable, VS-only). Runtime-loaded by the `rave-mate-vfx` child, never linked. |
 
 **Patched-DLL rebuild (available, NOT shipped):** the official binary crashes its host process
 when `wglDXOpenDeviceNV` fails (`LinkGLDXtextures` overflows a `char[128]` into a static-CRT

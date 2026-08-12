@@ -83,8 +83,10 @@ workflow is the same as the Publish tab, so nothing new to learn:
 Effects use two open standards, so packs made for other VJ/video tools work here:
 
 - **frei0r** (<https://frei0r.dyne.org>) - the minimalist cross-app video
-  plugin API used by Kdenlive, Shotcut, MLT and many VJ tools. Drop plugin
-  `.dll` files into `<config>\vfx\frei0r\`.
+  plugin API used by Kdenlive, Shotcut, MLT and many VJ tools. **The Windows
+  install ships ~155 frei0r plugins out of the box** (built from the pinned
+  official source, GPL-2+, license + source pointer beside the DLLs in the
+  install folder). Extra plugins drop into `<config>\vfx\frei0r\`.
 - **ISF** (<https://isf.video>) - Interactive Shader Format: GLSL fragment
   shaders with a JSON header, the format used by VDMX, CoGe and Videosync.
   `.fs` files go into `<config>\vfx\isf\`. rave-mate ships a small MIT starter
@@ -113,8 +115,8 @@ export will be.
   `<config>\vfx\isf\vidvox\` and rescans - one click, no manual steps.
   Audio-reactive shaders from the pack are skipped (no audio input here).
 - *ISF folder* / *frei0r folder* open the plugin folders in your file manager
-  for drop-in installs. frei0r plugin binaries ship with Kdenlive/Shotcut
-  installs or can be built from <https://frei0r.dyne.org>.
+  for drop-in installs (the standard frei0r set is already bundled with the
+  Windows install; these folders are for extras).
 
 Effects run in a separate helper process (`rave-mate-vfx`): a crashing plugin
 or shader can never take down rave-mate or a running export queue - the export

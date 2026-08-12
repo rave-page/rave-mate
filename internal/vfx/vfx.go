@@ -92,6 +92,13 @@ func PluginDirs(configDir string) []string {
 	if st, err := os.Stat(filepath.Join(isfDir, PackDirName)); err == nil && st.IsDir() {
 		dirs = append(dirs, filepath.Join(isfDir, PackDirName))
 	}
+	// bundled frei0r plugins ship in <install>/frei0r (built by scripts/build-frei0r.sh,
+	// packaged by the installer); user drop-ins in the config dir take the same scan
+	if p := appdir.SidecarPath("frei0r"); p != "" {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			dirs = append(dirs, p)
+		}
+	}
 	return dirs
 }
 
