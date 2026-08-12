@@ -74,7 +74,8 @@ FREI0R_VERSION="$version" cmake -S "$src" -B "$tmp/build" -G "$gen" \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
   -DWITHOUT_OPENCV=ON -DWITHOUT_CAIRO=ON -DWITHOUT_GAVL=ON -DWITHOUT_FACERECOGNITION=ON \
   "-DCMAKE_SHARED_LINKER_FLAGS=-static-libgcc -static-libstdc++ -static" \
-  "-DCMAKE_MODULE_LINKER_FLAGS=-static-libgcc -static-libstdc++ -static"
+  "-DCMAKE_MODULE_LINKER_FLAGS=-static-libgcc -static-libstdc++ -static" \
+  ${cross_args[@]+"${cross_args[@]}"}
 cmake --build "$tmp/build" --parallel
 
 mkdir -p "$vd/bin"
