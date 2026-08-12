@@ -50,6 +50,7 @@ type edvSt struct {
 	fxPrev     string // fx preview PNG ("" = never rendered)
 	fxPrevBusy bool
 	fxPrevGen  int
+	fxPrevWant int // live-preview debounce: bumped per change, render fires when it settles
 
 	export edvExport
 }
@@ -88,10 +89,12 @@ func init() {
 	onExact("edv-aspect", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Aspect = m.Val; v.proj.Normalize() })
 		u.patchMain()
+		u.edvFxPrevKick()
 	})
 	onExact("edv-layout", func(u *UI, m actMsg) {
 		u.edvMut(func(v *edvSt) { v.proj.Layout = m.Val; v.proj.Normalize() })
 		u.patchMain()
+		u.edvFxPrevKick()
 	})
 	onExact("edv-bgblur", func(u *UI, m actMsg) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
@@ -99,6 +102,7 @@ func init() {
 			return
 		}
 		u.edvMut(func(v *edvSt) { v.proj.BGBlur = clamp01(f) })
+		u.edvFxPrevKick()
 	})
 	onExact("edv-zoomset", func(u *UI, m actMsg) { // inspector slider (self-labeled)
 		f, err := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
@@ -432,6 +436,7 @@ func (u *UI) edvFrame(t float64) {
 			return
 		}
 		u.patchMain()
+		u.edvFxPrevKick() // preview follows the new frame
 	})
 }
 
@@ -515,6 +520,7 @@ func (u *UI) edvPan(val string) {
 		edvSave()
 		editor.mu.Unlock()
 		u.patchMain()
+		u.edvFxPrevKick()
 	default:
 		editor.mu.Unlock()
 	}
@@ -578,6 +584,7 @@ func (u *UI) edvSetZoom(z float64, fromWheel bool) {
 	if fromWheel {
 		u.edvPatchZoomRow()
 	}
+	u.edvFxPrevKick()
 }
 
 // edvPatchZoomRow refreshes the inspector zoom slider (wheel path).
@@ -745,6 +752,7 @@ func (u *UI) edvFxAdd(idxStr string) {
 		})
 	})
 	u.patchMain()
+	u.edvFxPrevKick()
 }
 
 // edvFxEdit handles del/up/dn/tog on a chain row.
@@ -774,6 +782,7 @@ func (u *UI) edvFxEdit(idxStr, op string) {
 		}
 	})
 	u.patchMain()
+	u.edvFxPrevKick()
 }
 
 // edvFxParamSet stores a param value; arg is "<idx>:<name>", val a number or
@@ -809,6 +818,7 @@ func (u *UI) edvFxParamSet(arg, val string) {
 		}
 		e.Params[name] = clamp01(f)
 	})
+	u.edvFxPrevKick()
 }
 
 // edvFxCh resolves a dotted channel value (override else listing default).
@@ -846,6 +856,7 @@ func (u *UI) edvFxColorSet(arg, val string) {
 		e.Params[name+".b"] = float64(c.B) / 255
 	})
 	u.patchMain() // refresh the swatch
+	u.edvFxPrevKick()
 }
 
 // edvResolveFx maps enabled chain entries to loaded plugins (base-name match;
@@ -889,6 +900,30 @@ func edvFitDims(w, h, maxW int) (int, int) {
 		h = 2
 	}
 	return w, h
+}
+
+// edvFxPrevKick live-updates the fx preview: debounced (a slider drag fires many
+// acts - render once it settles), dropped when a newer change or an in-flight
+// render exists (completion re-kicks if the state moved meanwhile).
+func (u *UI) edvFxPrevKick() {
+	editor.mu.Lock()
+	edvEnsure()
+	editor.video.fxPrevWant++
+	want := editor.video.fxPrevWant
+	editor.mu.Unlock()
+	u.bg(func() {
+		time.Sleep(450 * time.Millisecond)
+		if u.stopped() {
+			return
+		}
+		editor.mu.Lock()
+		cur, busy := editor.video.fxPrevWant, editor.video.fxPrevBusy
+		editor.mu.Unlock()
+		if cur != want || busy {
+			return
+		}
+		u.edvFxPrevRender()
+	})
 }
 
 // edvFxPrevRender runs the current preview frame through the chain (cropped at
@@ -948,6 +983,7 @@ func (u *UI) edvFxPrevRender() {
 	v.fxPrevBusy = true
 	v.fxPrevGen++
 	gen := v.fxPrevGen
+	wantStart := v.fxPrevWant
 	editor.mu.Unlock()
 	u.edvPatchFxPrev()
 
@@ -966,11 +1002,13 @@ func (u *UI) edvFxPrevRender() {
 			}
 		}
 		editor.mu.Lock()
+		stale := false
 		if editor.video.fxPrevGen == gen {
 			editor.video.fxPrevBusy = false
 			if err == nil {
 				editor.video.fxPrev = out
 			}
+			stale = editor.video.fxPrevWant != wantStart // changed mid-render
 		}
 		editor.mu.Unlock()
 		if err != nil {
@@ -979,6 +1017,9 @@ func (u *UI) edvFxPrevRender() {
 			return
 		}
 		u.patchMain()
+		if stale && !u.stopped() {
+			u.edvFxPrevKick()
+		}
 	})
 }
 
