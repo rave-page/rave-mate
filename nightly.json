@@ -1,13 +1,13 @@
 {
-  "version": "nightly-14d12ba",
-  "build": 243,
-  "commit": "14d12ba",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-243-20260812-14d12ba.exe",
-  "sha256": "1fb2801af1b5b4ee2d6cc861c5301d02111928ad0b5fe9b0fbcc65a9fc317cfc",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-243-20260812-14d12ba.exe",
-  "installer_sha256": "adbed7d676f4ba17669bd657a8fbfee61654fed312f24fc084cfbb7abd0ee275",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-243-20260812-14d12ba",
-  "linux_sha256": "7d00cc6617595b0cbeb12b5d5c1fbc700d699350a5e45985d50bd747eb5f4f7d",
+  "version": "nightly-9f4fb72",
+  "build": 244,
+  "commit": "9f4fb72",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-244-20260812-9f4fb72.exe",
+  "sha256": "b1055221fb863cea06068445851449655d5f219b5862c85d90995add366aeaf8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-244-20260812-9f4fb72.exe",
+  "installer_sha256": "22a5500d8744644f4613c7de12c389c0e0c4289b3fd13a9f33b713dadf0d505a",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-244-20260812-9f4fb72",
+  "linux_sha256": "c5bc5f67ce94c1a0cf8105138c93abd8b501f9577e3140792f0ae655a801e37d",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-12T08:28:56Z",
-  "notes": "feat(editor): set tracklist in the video-editor player - jump-to-track + boundary snap"
+  "released": "2026-08-12T09:10:02Z",
+  "notes": "feat(editor): effect discovery - ISF library links, plugin folders, one-click Vidvox pack"
 }
