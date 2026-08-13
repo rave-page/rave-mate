@@ -22,6 +22,25 @@ lives in `SDL_WEBVIEW_SURFACE_DESIGN.md` §1 directive #2 + §4.3.
 The inversion is smaller than it looks: rendering already crossed. What is left is *who resolves
 state* and *who owns the transport*.
 
+## Scope, measured (2026-08-13)
+
+| Body | Lines | Note |
+|---|---|---|
+| `internal/webui/render_*.go` | ~27.0k | state builders + Go renderers (renderers are the deletable half) |
+| `native/zigui/src/*.zig` (views) | ~29.9k | already renders the migrated surfaces |
+| `runtimeJS` block in `shell.go` | ~0.93k | step 2, moves whole |
+| `internal/webui/*_actions.go` | ~15.3k | step 5, splits - most of it mutates app state and STAYS Go |
+
+Biggest Go-side view modules, Go lines vs their Zig counterpart (0 = no Zig side yet):
+`settings` 2464/509 · `library` 2255/163 · `library_state` 1647/0 · `peers` 1391/645 ·
+`player` 1266/772 · `publish` 1183/608 · `live` 1166/528 · `vrchat_groups` 1060/0 ·
+`editor` 1021/631 · `editor_video` 856/405 · `motion` 805/335 · `midictl_controllers` 706/0 ·
+`library_cueedit` 628/0 · `worlds_modals` 582/0 · `publish_remote` 527/0
+
+Read that as the work list, not a ranking: the modules with a `0` never got a Zig side and are
+where "Zig-first" bites immediately; the rest need their STATE BUILDER moved, then their Go
+renderer deleted.
+
 ## Sequence (each step ships + soaks on its own)
 
 1. **Surfaces are born Zig-owned.** Everything in the SDL/DComp plan (P1→P6) is written in the
