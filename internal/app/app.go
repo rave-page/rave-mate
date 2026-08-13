@@ -289,6 +289,14 @@ func run(parent context.Context, serviceMode bool) error {
 		if cfg.Features.Transcode.Enabled {
 			workers.Configure("transcode", cfg.Features.Transcode.MaxConcurrent)
 		}
+		// vfx runs LONG-LIVED jobs (the editor's realtime preview runs until EOF or cancel), and the
+		// preview is deliberately make-before-break: the fresh feed has to come up while the old one
+		// still plays. At the default cap of one process that second job waits for a worker that only
+		// frees when the first is retired - which only happens once the second is live. Found by
+		// execution: a waveform seek froze the playhead for good, with exactly one vfx.stream in the
+		// log. 6 covers old+new picture, old+new clock and a concurrent plugin scan; idle children are
+		// reaped, so the ceiling costs nothing when the editor is closed.
+		workers.Configure("vfx", 6)
 		// Opt-in external probe worker (Zig rave-probe, ZIG_MIGRATION P4). Missing exe →
 		// keep the builtin so a stale config can't break analysis.
 		if exe := cfg.Features.Workers.ProbeExe; exe != "" {

@@ -199,6 +199,14 @@ type mpVid struct {
 // the verb (transport skips its default element eval). Set by the editor.
 var mpStreamCtl func(u *UI, host, verb string, t float64) bool
 
+// mpVidSurface, when set, tells the renderer this host's picture comes from a NATIVE render
+// surface: it returns the [data-surface] id and the picture's CSS aspect-ratio ("" = the normal
+// <video> picture). It is a property of the VIEW, not of the feed - the hole has to exist BEFORE a
+// producer starts, or the producer has no rect to render at and the surface never binds (found by
+// execution: the first build declared the hole only once the feed bound, and every producer timed
+// out waiting for a consumer that was waiting for it).
+var mpVidSurface func(u *UI, host string) (string, string)
+
 // mpTrimSnap, when set, is called before every trim edit so a host can checkpoint
 // its undo history (the trim lives in mpSt, outside the host's own state).
 var mpTrimSnap func(u *UI, host string)

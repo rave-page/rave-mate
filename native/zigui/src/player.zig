@@ -76,6 +76,8 @@ pub const Vid = struct {
     streamLp: bool = false, // feed is the whole IN→OUT span: loop it natively
     grip: []const u8 = "", // "" = none; else the bottom-edge resize drag act
     boxH: []const u8 = "", // "" = CSS default; else the drag-set box height in px
+    surf: []const u8 = "", // "" = none; else the [data-surface] id carrying the picture (P4)
+    surfAR: []const u8 = "", // CSS aspect-ratio of that picture ("1080/1920")
 };
 
 /// Wave is the #mp-<host>-wave inner.
@@ -358,7 +360,9 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     }
     if (!std.mem.eql(u8, s.kind, "video")) return;
 
-    try h.raw("<div class=mp-videobox");
+    // surf != "" = P4 native render surface: the element is the AUDIO clock, the picture is a
+    // DComp visual under the page. Everything else about the element is unchanged.
+    try h.raw(if (s.surf.len != 0) "<div class=\"mp-videobox mp-videobox--surf\"" else "<div class=mp-videobox");
     if (s.boxH.len != 0) {
         try h.raw(" style=\"height:");
         try h.esc(s.boxH);
@@ -366,7 +370,7 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     }
     try h.raw("><video id=");
     try attrComposite(h, "mp-vid-", s.host);
-    try h.raw(" class=mp-video");
+    try h.raw(if (s.surf.len != 0) " class=\"mp-video mp-video--surf\"" else " class=mp-video");
     if (s.stream.len != 0) {
         try h.raw(" data-msestream=");
         try h.attrQ(s.stream);
@@ -408,6 +412,17 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     try h.raw(" onerror=");
     try h.attrQ(s.onerr);
     try h.raw("></video>");
+    // The hole is CSS-fitted to the picture's aspect, so the rect the child reports IS the picture
+    // rect - which is what keeps the present a 1:1 copy with no scaler on either side.
+    if (s.surf.len != 0) {
+        try h.raw("<div class=mp-surface data-surface=");
+        try h.attrQ(s.surf);
+        try h.raw(" data-surface-color=000000 data-surface-clock=");
+        try attrComposite(h, "mp-vid-", s.host);
+        try h.raw(" style=\"aspect-ratio:");
+        try h.esc(s.surfAR);
+        try h.raw("\"></div>");
+    }
     if (s.grip.len != 0) {
         try h.raw("<div class=mp-vgrip data-actsize=");
         try h.attrQ(s.grip);

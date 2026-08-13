@@ -1838,6 +1838,11 @@ type Toggle struct {
 type EditorFeature struct {
 	PreviewViewH int `json:"previewViewH,omitempty"` // video preview box height cap in px (drag grip); 0 = CSS default
 	PreviewH     int `json:"previewH,omitempty"`     // realtime fx render height cap (quality selector); 0 = 540
+	// PreviewSurface routes the realtime fx preview to the NATIVE render surface in the shell child
+	// (SDL_WEBVIEW_SURFACE_DESIGN P4) instead of the x264→fMP4→MSE feed. Opt-in and unsoaked: OFF
+	// leaves edvPrevStart on the MSE path verbatim, which stays the shipped default and the
+	// permanent fallback (§5). Needs features.ui.shellHosting = visual (the default).
+	PreviewSurface bool `json:"previewSurface,omitempty"`
 }
 
 // StreamBridgeFeature gates the live set → rave.page now-playing broadcast. Publishing is automatic,

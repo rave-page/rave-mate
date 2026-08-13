@@ -49,13 +49,27 @@
     };
   }
 
+  // clockRunning: a surface is slaved to a PLAYING element, so the clock has to keep flowing. The
+  // reporter is otherwise purely event-driven (mutation/resize/scroll), and a playing video mutates
+  // nothing - P3's finding #1 in its other form: a clock sampled only when the DOM changes freezes
+  // the picture just as surely as a rect-driven present did.
+  var clockRunning = false;
+
   function report() {
-    var dpr = window.devicePixelRatio || 1, list = [], dropped = 0;
+    var dpr = window.devicePixelRatio || 1, list = [], dropped = 0, content = 0;
+    clockRunning = false;
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (!el.isConnected) continue;
       if (list.length >= CAP) { dropped++; continue; } // drop-NEWEST: DOM order = oldest first
       var r = clip(el), cs = getComputedStyle(el), io = seen.get(el);
+      if (el.id !== '__sfbg') content++;
+      // Presentation clock (P4): the element named by data-surface-clock is the master, and the
+      // child presents the frame whose PTS matches it. currentTime changes every frame while it
+      // plays, so the identical-consecutive drop below turns into "report at rAF while playing,
+      // never while paused" - which is exactly the cadence the present pump wants.
+      var ck = el.getAttribute('data-surface-clock'), cel = ck ? document.getElementById(ck) : null;
+      if (cel && !cel.paused) clockRunning = true;
       list.push({
         id: el.getAttribute('data-surface') || '',
         // Device px: the DComp visual tree and put_Bounds both live in raw window-client pixels.
@@ -66,9 +80,12 @@
         fw: Math.round(r.fw * dpr), fh: Math.round(r.fh * dpr),
         vis: r.w > 0.5 && r.h > 0.5 && cs.visibility !== 'hidden' && cs.display !== 'none' && io !== false,
         dpr: dpr,
-        c: el.getAttribute('data-surface-color') || ''
+        c: el.getAttribute('data-surface-color') || '',
+        clk: cel ? cel.currentTime : -1,
+        clkp: cel ? !!cel.paused : false
       });
     }
+    canvas(content > 0);
     var s = JSON.stringify(list) + '|' + dropped;
     if (s === last) return;
     last = s;
@@ -85,6 +102,12 @@
     raf = 0;
     if (needScan) { needScan = false; rescan(); }
     report();
+    // Keep the clock flowing while something plays - but on a TIMER, not rAF. A 60 Hz report stream
+    // starves WM_TIMER (a low-priority message), and the present pump lives on that timer: measured,
+    // the surface presented 12 fps of a 30 fps producer until this was throttled. The child
+    // interpolates between reports, so 10 Hz is plenty; it stops the frame a surface pauses, which
+    // is what freezes the picture with the playhead.
+    if (clockRunning) setTimeout(function () { schedule(false); }, 100);
   }
   function schedule(withScan) {
     if (withScan) needScan = true;
@@ -114,35 +137,29 @@
   window.addEventListener('load', function () { schedule(true); });
   schedule(true);
 
-  // ── ctl surface-test (P2 verification only) ──────────────────────────────────────────────
-  // Injects a hole into the live page from the CHILD, so the surface path can be exercised with no
-  // Go render change at all. The page paints an opaque body background, so the hole also needs the
-  // canvas transparent - and then the app's own background has to come from somewhere: a full-
-  // viewport surface carrying body's colour, which is exactly the arrangement a shipped surface
-  // build would use anyway (webview transparent, chrome composited).
+  // ── canvas transparency ──────────────────────────────────────────────────────────────────
+  // P2 finding #2, now automatic: put_DefaultBackgroundColor(A=0) makes the WEBVIEW transparent,
+  // but body's own background still paints over every hole. So the moment a content surface exists
+  // the app's background has to move OFF the canvas - html/body go transparent and a full-viewport
+  // [data-surface] carries body's colour instead. Reverted when the last content surface goes, so a
+  // build with no surfaces (and every screenshot of one) is byte-identical to before.
   function hex(c) {
     var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
     if (!m) return '0a0a0a';
     return ((+m[1] << 16) | (+m[2] << 8) | +m[3]).toString(16).padStart(6, '0');
   }
   var bgcol = '';
-  window.__sfTest = function (on) {
-    var bg = document.getElementById('__sfbg'), hole = document.getElementById('__sfhole'),
-      st = document.getElementById('__sfstyle');
+  function canvas(on) {
+    var bg = document.getElementById('__sfbg'), st = document.getElementById('__sfstyle');
     if (!on) {
       if (bg) bg.remove();
-      if (hole) hole.remove();
       if (st) st.remove();
-      schedule(true);
       return;
     }
-    if (hole) return;
-    // Sample body's colour BEFORE the override lands, and remember it - a second run reads the
-    // already-transparent canvas and would repaint the app in the fallback grey.
+    if (!document.body) return;
+    // Sample body's colour BEFORE the override lands and remember it - reading the already
+    // transparent canvas later would repaint the app in the fallback grey.
     if (!bgcol) bgcol = hex(getComputedStyle(document.body).backgroundColor);
-    // Create-if-missing, not create-always: a tab switch patches #main and takes the hole with it
-    // (that IS the close path), while #__sfbg is a body child and survives. Turning the test back
-    // on must not leave a second one behind.
     if (!st) {
       st = document.createElement('style');
       st.id = '__sfstyle';
@@ -150,8 +167,6 @@
       document.head.appendChild(st);
     }
     if (!bg) {
-      // The canvas is transparent while the test runs, so body's own colour has to come from a
-      // native surface - which is also how a shipped surface build would paint app chrome.
       bg = document.createElement('div');
       bg.id = '__sfbg';
       bg.setAttribute('data-surface', '__sfbg');
@@ -159,6 +174,20 @@
       bg.style.cssText = 'position:fixed;inset:0;z-index:-1;background:transparent;pointer-events:none';
       document.body.insertBefore(bg, document.body.firstChild);
     }
+  }
+
+  // ── ctl surface-test (P2 verification only) ──────────────────────────────────────────────
+  // Injects a hole into the live page from the CHILD, so the surface path can be exercised with no
+  // Go render change at all. The canvas arrangement it needs is the shipped one above, driven by
+  // the hole simply existing.
+  window.__sfTest = function (on) {
+    var hole = document.getElementById('__sfhole');
+    if (!on) {
+      if (hole) hole.remove();
+      schedule(true);
+      return;
+    }
+    if (hole) return;
     var main = document.getElementById('main') || document.body;
     hole = document.createElement('div');
     hole.id = '__sfhole';

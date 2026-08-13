@@ -102,6 +102,69 @@ func (j Job) EncodeStreamArgs(w, h int, fps float64, overlay bool) []string {
 		j.Output)
 }
 
+// StreamAudioMime is the MSE codec string EncodeAudioStreamArgs produces (AAC-LC, no video track).
+const StreamAudioMime = `audio/mp4; codecs="mp4a.40.2"`
+
+// EncodeAudioStreamArgs is the SURFACE-path clock leg: audio only, same trim window, same growing
+// fragmented MP4 the /ms/ tail + __mst runtime already feed. The picture never reaches an encoder
+// on that path (it goes decode → fx → shared texture), so this stream carries nothing but the
+// clock the surface presents against. silent = the source has no audio track: mux a silent one
+// instead, because a fragmented MP4 with zero streams is not a clock, it is a parse error.
+func (j Job) EncodeAudioStreamArgs(silent bool) []string {
+	a := []string{"-hide_banner", "-nostats", "-y", "-re"}
+	if silent {
+		a = append(a, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo")
+		if d := j.TrimEnd - j.TrimStart; d > 0 {
+			a = append(a, "-t", ftoa(d))
+		}
+	} else {
+		if j.TrimStart > 0 {
+			a = append(a, "-ss", ftoa(j.TrimStart))
+		}
+		a = append(a, "-i", j.Input)
+		if j.TrimEnd > j.TrimStart {
+			a = append(a, "-t", ftoa(j.TrimEnd-j.TrimStart))
+		}
+		a = append(a, "-map", "0:a:0")
+	}
+	// frag_duration, NOT frag_keyframe: with no video track there are no keyframes to cut on, so
+	// frag_keyframe buffers the whole stream and the growing file stays a 28-byte ftyp until EOF.
+	// Found by execution - the element sat at 0:01 forever waiting for an init segment.
+	return append(a, "-vn", "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+		"-f", "mp4", "-movflags", "+empty_moov+default_base_moof", "-frag_duration", "500000", j.Output)
+}
+
+// PresentRawArgs is the surface path's last video stage: the fx'd RGBA stream (cw×ch, the
+// render-quality cap's size) on stdin, scaled to the surface's own rect (ow×oh) and - for the fit
+// layout - the CLEAN source overlaid centred at full rect size, because the foreground must never
+// pass through the effect chain. Same composition EncodeRawOverlayArgs does, minus the encoder.
+//
+// The scale is what keeps the PREVIEW QUALITY selector meaningful on a surface: the chain runs at
+// its capped size (measured: 540p renders 1.85x faster than the 734p element rect, which is the
+// difference between the picture keeping up with the audio clock and lagging it by 25 s), while the
+// present stays a 1:1 copy of a picture that already matches the surface.
+func (j Job) PresentRawArgs(cw, ch, ow, oh int, fps float64, fit bool) []string {
+	a := []string{"-hide_banner", "-nostats", "-y",
+		"-f", "rawvideo", "-pix_fmt", "rgba",
+		"-video_size", fmt.Sprintf("%dx%d", cw, ch),
+		"-framerate", ftoa(fps), "-i", "pipe:0"}
+	if !fit {
+		return append(a, "-vf", fmt.Sprintf("scale=%d:%d", ow, oh), "-an",
+			"-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1")
+	}
+	if j.TrimStart > 0 {
+		a = append(a, "-ss", ftoa(j.TrimStart))
+	}
+	a = append(a, "-i", j.Input)
+	if j.TrimEnd > j.TrimStart {
+		a = append(a, "-t", ftoa(j.TrimEnd-j.TrimStart))
+	}
+	fc := fmt.Sprintf("[0:v]scale=%d:%d[bg];[1:v]fps=%s,scale=%d:%d:force_original_aspect_ratio=decrease[fg];"+
+		"[bg][fg]overlay=(W-w)/2:(H-h)/2[vout]", ow, oh, ftoa(fps), ow, oh)
+	return append(a, "-filter_complex", fc, "-map", "[vout]", "-an",
+		"-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1")
+}
+
 func (j Job) encodeRawArgs(w, h int, fps float64, overlay bool) []string {
 	a := []string{"-hide_banner", "-nostats", "-y",
 		"-f", "rawvideo", "-pix_fmt", "rgba",

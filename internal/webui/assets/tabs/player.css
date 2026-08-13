@@ -9,6 +9,17 @@
 .mp-videobox { border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: #000;
   display: flex; justify-content: center; position: relative; }
 .mp-video { display: block; width: 100%; max-height: 300px; border-radius: 9px; background: #000; }
+/* P4 native render surface: the <video> is the AUDIO clock (no video track), the picture is a
+   DComp visual UNDER the page. Everything above the hole must be transparent down to the canvas -
+   the shell child's surfaces.js takes html/body, this takes the box. .mp-surface is CSS-fitted to
+   the picture's aspect so the rect the child reports IS the picture rect (1:1, no scaler). */
+.mp-videobox--surf { background: transparent; align-items: stretch; }
+.mp-video--surf { position: absolute; inset: 0; width: 100%; height: 100%; background: transparent;
+  opacity: 0; pointer-events: none; }
+/* height drives the width through aspect-ratio: an auto/auto box with only a ratio has NO intrinsic
+   size and measures 0x0, which the child reads as "hidden" and never opens (found by execution). */
+.mp-surface { display: block; height: 100%; width: auto; max-width: 100%; margin: auto;
+  background: transparent; pointer-events: none; }
 /* bottom-edge resize grip (hosts that opt in via mpVidGrip) */
 .mp-vgrip { position: absolute; left: 0; right: 0; bottom: -3px; height: 12px; cursor: ns-resize;
   touch-action: none; z-index: 2; }

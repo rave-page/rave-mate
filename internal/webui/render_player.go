@@ -90,6 +90,8 @@ type mpVidSt struct {
 	StreamLp bool   `json:"streamLp"` // feed is the whole IN→OUT span: loop it natively
 	Grip     string `json:"grip"`     // "" = none; else the act a bottom-edge resize drag reports to
 	BoxH     string `json:"boxH"`     // "" = CSS default; else the drag-set box height in px
+	Surf     string `json:"surf"`     // "" = none; else the [data-surface] id carrying the picture
+	SurfAR   string `json:"surfAR"`   // CSS aspect-ratio of that picture ("1080/1920")
 }
 
 // mpWaveSt is the #mp-<host>-wave inner: the RAW Go-computed SVG plus the chip overlay
@@ -325,6 +327,9 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 	st.Kind, st.URL = "video", url
 	if mpVidGrip != nil { // host opt-in: resizable preview box (editor)
 		st.Grip, st.BoxH = mpVidGrip(u, t.host)
+	}
+	if mpVidSurface != nil { // host opt-in: the picture is a native render surface, not this element
+		st.Surf, st.SurfAR = mpVidSurface(u, t.host)
 	}
 	// element events → Go transport mirror (throttled to 1 Hz / state flips). The OUT-marker
 	// stop runs element-side first (sub-frame latency; the pause flip then rides the send).
@@ -960,6 +965,11 @@ func mpVidHTMLOf(st mpVidSt) string {
 		trim += ` data-out=` + attrQ(st.DataOut)
 	}
 	box := `<div class=mp-videobox`
+	cls := `mp-video`
+	if st.Surf != "" { // P4: the element is the audio clock, the picture is the native surface
+		box = `<div class="mp-videobox mp-videobox--surf"`
+		cls = `"mp-video mp-video--surf"`
+	}
 	if st.BoxH != "" { // drag-set height: inline so it outranks the per-view CSS caps
 		box += ` style=` + attrQ("height:"+st.BoxH+"px;max-height:none")
 	}
@@ -967,7 +977,14 @@ func mpVidHTMLOf(st mpVidSt) string {
 	if st.Grip != "" { // bottom-edge resize handle (shell.go [data-actsize] drag)
 		grip = `<div class=mp-vgrip data-actsize=` + attrQ(st.Grip) + `></div>`
 	}
-	return box + `><video id=` + attrQ("mp-vid-"+st.Host) + ` class=mp-video` + src +
+	// The hole: CSS-fitted to the picture's aspect, so the rect the child reports IS the picture
+	// rect and the present stays a 1:1 copy. data-surface-color=000000 = the letterbox behind it.
+	if st.Surf != "" {
+		grip = `<div class=mp-surface data-surface=` + attrQ(st.Surf) +
+			` data-surface-color=000000 data-surface-clock=` + attrQ("mp-vid-"+st.Host) +
+			` style=` + attrQ("aspect-ratio:"+st.SurfAR) + `></div>` + grip
+	}
+	return box + `><video id=` + attrQ("mp-vid-"+st.Host) + ` class=` + cls + src +
 		` preload=none playsinline` + muted + trim +
 		` ontimeupdate=` + attrQ(st.Ev) + ` onplay=` + attrQ(st.Ev) + ` onpause=` + attrQ(st.Ev) +
 		` onseeked=` + attrQ(st.Ev) + ` onended=` + attrQ(st.Ev) + ` onloadedmetadata=` + attrQ(st.OnMeta) +

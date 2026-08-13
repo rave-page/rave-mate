@@ -29,6 +29,8 @@ func vfxHandlers() map[string]Handler {
 		"vfx.preview": vfxPreview,
 		"vfx.run":     vfxRun,
 		"vfx.stream":  vfxStream,
+		"vfx.surface": vfxSurface, // P4 surface path: picture → shared texture, no encoder
+		"vfx.audio":   vfxAudio,   // …and its clock, an audio-only /ms/ feed
 	}
 }
 

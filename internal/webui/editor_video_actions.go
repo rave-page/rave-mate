@@ -57,6 +57,9 @@ type edvSt struct {
 	prevPaused   time.Time          // element paused since (idle reap); zero = playing
 	prevH        int                // preview render height cap (0 = default 540)
 	prevStarting bool               // a start is in flight: its feed isn't live yet (suppress stall respawns)
+	prevSurf     context.CancelFunc // P4 surface path: kills the picture producer (BREAK-before-make)
+	prevSurfOn   bool               // the running feed is the surface path (audio-only clock stream)
+	surfFail     bool               // no consumer ever attached: this session stays on MSE (§5 fallback)
 
 	// undo/redo history (editor_video_undo.go): project + trim, newest last
 	undo   []edvSnap

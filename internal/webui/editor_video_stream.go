@@ -10,6 +10,7 @@ package webui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -111,6 +112,16 @@ func init() {
 		u.svc.Cfg.Features.Editor.PreviewViewH = h
 		u.saveCfgBG("edv-vsize", nil, nil)
 	})
+	mpVidSurface = func(u *UI, host string) (string, string) {
+		if host != "editor" || !u.edvSurfaceOn() || !u.edvPrevNeeded() {
+			return "", ""
+		}
+		pw, ph := u.edvPrevDims()
+		if pw <= 0 || ph <= 0 {
+			return "", ""
+		}
+		return edvSurfaceID, fmt.Sprintf("%d/%d", pw, ph)
+	}
 	mpVidGrip = func(u *UI, host string) (string, string) {
 		if host != "editor" {
 			return "", ""
@@ -161,6 +172,25 @@ func (u *UI) edvPrevNeeded() bool {
 	return len(edvResolveFx(proj.Effects, plugins)) > 0
 }
 
+// edvPrevDims is the preview picture's size: the reframed crop fitted under the render-height cap.
+// Only its RATIO matters on the surface path (the hole is CSS-fitted to it and the producer renders
+// at whatever rect that resolves to); the pipeline path renders at exactly these pixels.
+func (u *UI) edvPrevDims() (int, int) {
+	srcW, srcH, _ := u.edvSrcDims()
+	if srcW <= 0 {
+		return 0, 0
+	}
+	editor.mu.Lock()
+	edvEnsure()
+	proj := editor.video.proj
+	editor.mu.Unlock()
+	cw, ch, _ := videoedit.CropSizeZoom(srcW, srcH, videoedit.AspectByKey(proj.Aspect), proj.Zoom)
+	if cw <= 0 || ch <= 0 {
+		cw, ch = srcW, srcH
+	}
+	return edvFitDimsH(cw, ch, u.edvPrevH())
+}
+
 // edvPrevKick debounces a pipeline (re)start after chain/reframe edits; when the
 // pipeline is no longer needed it falls back to the direct element.
 func (u *UI) edvPrevKick() {
@@ -195,9 +225,30 @@ func (u *UI) edvPrevKick() {
 	})
 }
 
+// edvSurfaceID is the [data-surface] the editor preview declares. One id, one producer: the
+// picture is BREAK-before-make because two producers cannot share a surface's kernel objects.
+const edvSurfaceID = "editor-preview"
+
+// edvSurfaceOn reports whether this preview start goes to the native render surface
+// (SDL_WEBVIEW_SURFACE_DESIGN P4). Every "no" answer here leaves edvPrevStart on the MSE path
+// verbatim: opt-in flag off, composition hosting off, not the real window child (a headless mirror
+// has no compositor), or a previous start proved no consumer ever attached (§5 fallback).
+func (u *UI) edvSurfaceOn() bool {
+	if u.svc.Cfg == nil || !u.svc.Cfg.Features.Editor.PreviewSurface || !u.svc.Cfg.Features.UI.VisualShellHosting() {
+		return false
+	}
+	if _, isProc := u.shell.(*procShell); !isProc {
+		return false
+	}
+	editor.mu.Lock()
+	defer editor.mu.Unlock()
+	return !editor.video.surfFail
+}
+
 // edvPrevStart (re)spawns the realtime pipeline at source-second t. autoplay
 // starts the fresh element as soon as the feed opens.
 func (u *UI) edvPrevStart(t float64, autoplay bool) {
+	t0 := time.Now() // click→pixel stopwatch: both paths log the same interval (P4 deliverable)
 	srcW, srcH, _ := u.edvSrcDims()
 	prevH := u.edvPrevH()
 	editor.mu.Lock()
@@ -232,6 +283,7 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	if dir == "" {
 		return
 	}
+	surf := u.edvSurfaceOn()
 
 	// Make-before-break: the running pipeline + /ms/ stream stay ALIVE until the
 	// fresh feed is ready and the element re-sourced (or this start dies). Killing
@@ -241,7 +293,17 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	gen := v.prevGen
 	oldCancel, oldRelease, oldPath := v.prevCancel, v.prevRelease, v.prevPath
 	v.prevCancel, v.prevRelease = nil, nil
+	// The PICTURE producer is retired here, not at the handover: one surface id, one set of kernel
+	// objects, so a second producer would collide on the ring generation instead of overlapping.
+	// The audio half below keeps the make-before-break handover the element's transport depends on.
+	oldSurf := v.prevSurf
+	v.prevSurf = nil
 	path := filepath.Join(dir, fmt.Sprintf("prev-%d.mp4", gen))
+	// A generation counter restarts at 1 every launch, so the first start of a session can find LAST
+	// session's prev-1.mp4 still on disk - and mp4frag.Parse then succeeds instantly on a file the
+	// pipeline has not written yet, binding the element to stale content (measured: "picture on
+	// screen in 9 ms", playing the previous session's cut).
+	_ = os.Remove(path)
 	v.prevPath = path
 	v.prevStarting = true
 	v.prevPaused = time.Time{}
@@ -250,7 +312,17 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	v.prevCancel = cancel
+	surfCtx, surfCancel := context.WithCancel(context.Background())
+	if surf {
+		v.prevSurf = surfCancel
+	} else {
+		surfCancel()
+	}
+	v.prevSurfOn = surf
 	editor.mu.Unlock()
+	if oldSurf != nil {
+		oldSurf()
+	}
 	// The old feed keeps playing until the new one is live (make-before-break), so its ticks are
 	// stale from here on: hold the requested position until the fresh feed binds.
 	u.mpMut("editor", func(m *mpSt) { m.vid.strPend = true })
@@ -288,20 +360,77 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 			span = s
 		}
 	}
+	if surf {
+		// No bounded-span native loop on the surface path: ffmpeg's -stream_loop and a bounded input
+		// duration are mutually exclusive (verified by execution - `-ss X -t D -stream_loop -1` plays
+		// the span ONCE), so the producer cannot wrap at OUT. A looping audio clock over a picture
+		// that stopped at OUT is worse than the long-cut behaviour, which is what this falls back to:
+		// the element pauses at OUT and Play restarts from IN.
+		span = 0
+	}
 
 	done := make(chan struct{})
-	params := map[string]any{
-		"input": proj.Source, "output": path, "t": t, "d": span, "vf": vf,
-		"fit": fit, "decodePost": post,
-		"chain": vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx},
-	}
-	u.bg(func() { // the pipeline itself
-		_, err := u.svc.Workers.RunStream(ctx, "vfx", "vfx.stream", params, nil)
-		close(done)
-		if err != nil && ctx.Err() == nil {
-			u.logErr("vfx preview stream", err)
+	chain := vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx}
+	if surf {
+		// Picture: decode → chain → (fit overlay) → shared texture. No encoder, no MSE.
+		u.bg(func() {
+			shown := false
+			onEv := func(ev string, data json.RawMessage) { // first PRESENTED frame = picture on screen
+				if shown || ev != "stats" || !strings.Contains(string(data), `"presentSeq"`) {
+					return
+				}
+				var d struct {
+					Pub struct {
+						PresentSeq uint64 `json:"presentSeq"`
+					} `json:"pub"`
+				}
+				if json.Unmarshal(data, &d) != nil || d.Pub.PresentSeq == 0 {
+					return
+				}
+				shown = true
+				u.log.Info("editor", fmt.Sprintf("preview picture on screen in %d ms (surface)",
+					time.Since(t0).Milliseconds()), nil)
+			}
+			raw, err := u.svc.Workers.RunStream(surfCtx, "vfx", "vfx.surface", map[string]any{
+				"input": proj.Source, "surface": edvSurfaceID, "t": t, "vf": vf,
+				"fit": fit, "decodePost": post, "chain": chain,
+			}, onEv)
+			if surfCtx.Err() != nil {
+				return
+			}
+			if err != nil {
+				u.edvSurfaceFail(err, t, autoplay)
+				return
+			}
+			// A settled rect change ends the job (the chain is sized at load): respawn where we are.
+			if strings.Contains(string(raw), `"resize":true`) {
+				u.edvPrevRespawn(gen)
+			}
+		})
+		// Clock: audio-only fragmented MP4 through the SAME /ms/ tail + __mst runtime, so every
+		// transport verb (play/pause/seek/stall/reap/strPend) is untouched by this phase.
+		u.bg(func() {
+			_, err := u.svc.Workers.RunStream(ctx, "vfx", "vfx.audio", map[string]any{
+				"input": proj.Source, "output": path, "t": t, "d": span,
+			}, nil)
+			close(done)
+			if err != nil && ctx.Err() == nil {
+				u.logErr("vfx preview clock", err)
+			}
+		})
+	} else {
+		params := map[string]any{
+			"input": proj.Source, "output": path, "t": t, "d": span, "vf": vf,
+			"fit": fit, "decodePost": post, "chain": chain,
 		}
-	})
+		u.bg(func() { // the pipeline itself
+			_, err := u.svc.Workers.RunStream(ctx, "vfx", "vfx.stream", params, nil)
+			close(done)
+			if err != nil && ctx.Err() == nil {
+				u.logErr("vfx preview stream", err)
+			}
+		})
+	}
 	u.bg(func() { // wait for the init segment + first fragment, then re-source the element
 		defer unstart()
 		for { // no give-up: a heavy chain renders slower than realtime - WAIT, never cancel
@@ -329,12 +458,20 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		editor.mu.Lock()
 		editor.video.prevRelease = release
 		editor.mu.Unlock()
+		mime := transcode.StreamMime
+		if surf { // audio-only feed: the picture is on the native surface, the element is the clock
+			mime = transcode.StreamAudioMime
+		}
 		st := u.mpMut("editor", func(v *mpSt) {
-			v.vid.strURL, v.vid.strMime, v.vid.strT0, v.vid.strAuto = url, transcode.StreamMime, t, autoplay
+			v.vid.strURL, v.vid.strMime, v.vid.strT0, v.vid.strAuto = url, mime, t, autoplay
 			v.vid.strLoop = span > 0
 			v.vid.strPend = false // fresh feed IS the clock now
 			v.vid.cur, v.vid.paused, v.vid.started = t, !autoplay, true
 		})
+		if !surf { // surface path logs the same interval from its first PRESENTED frame instead
+			u.log.Info("editor", fmt.Sprintf("preview picture on screen in %d ms (mse)",
+				time.Since(t0).Milliseconds()), nil)
+		}
 		u.mpPatchVideo(st)
 		u.mpPatchTransport(st)
 		u.mpPushRealtime(st)
@@ -363,6 +500,11 @@ func (u *UI) edvPrevStop() {
 	editor.mu.Lock()
 	v := &editor.video
 	v.prevGen++
+	if v.prevSurf != nil {
+		v.prevSurf()
+		v.prevSurf = nil
+	}
+	v.prevSurfOn = false
 	if v.prevCancel != nil {
 		v.prevCancel()
 		v.prevCancel = nil
@@ -378,7 +520,7 @@ func (u *UI) edvPrevStop() {
 	mp := u.mpMut("editor", func(v *mpSt) {
 		wasStream = v.vid.strURL != ""
 		cur := v.vid.cur
-		v.vid = mpVid{cur: cur, paused: true, started: v.vid.started} // strPend clears with it
+		v.vid = mpVid{cur: cur, paused: true, started: v.vid.started} // strPend + strSurf clear with it
 	})
 	if wasStream {
 		u.mpPatchVideo(mp)
@@ -396,12 +538,47 @@ func (u *UI) edvPrevStop() {
 func (u *UI) edvPrevReap() {
 	editor.mu.Lock()
 	v := &editor.video
-	idle := v.prevCancel != nil && !v.prevPaused.IsZero() && time.Since(v.prevPaused) > 30*time.Second
+	idle := (v.prevCancel != nil || v.prevSurf != nil) && !v.prevPaused.IsZero() && time.Since(v.prevPaused) > 30*time.Second
 	if idle {
-		v.prevCancel()
-		v.prevCancel = nil
+		if v.prevCancel != nil {
+			v.prevCancel()
+			v.prevCancel = nil
+		}
+		if v.prevSurf != nil { // the picture producer dies with the clock; the last frame stays up
+			v.prevSurf()
+			v.prevSurf = nil
+		}
 	}
 	editor.mu.Unlock()
+}
+
+// edvSurfaceFail retires the surface path for this session and re-starts on MSE. §5 makes the
+// fallback mandatory and AUTOMATIC: composition hosting can fail on a user's rig (R5), and a
+// preview that silently shows nothing is the one outcome that must not ship.
+func (u *UI) edvSurfaceFail(err error, t float64, autoplay bool) {
+	editor.mu.Lock()
+	first := !editor.video.surfFail
+	editor.video.surfFail = true
+	editor.mu.Unlock()
+	if !first {
+		return
+	}
+	u.logErr("editor preview surface unavailable - falling back to the MSE feed", err)
+	u.bg(func() { u.edvPrevStart(t, autoplay) })
+}
+
+// edvPrevRespawn restarts the preview where it is now, if gen is still the live one. The surface
+// producer ends its job on a settled rect change (a chain is sized at load), and this is the seam
+// that rebuilds it - the same one a param edit uses.
+func (u *UI) edvPrevRespawn(gen int) {
+	editor.mu.Lock()
+	stale := editor.video.prevGen != gen
+	editor.mu.Unlock()
+	if stale || u.stopped() {
+		return
+	}
+	mp := u.mpSnap("editor")
+	u.edvPrevStart(u.edvPlayhead(), mp.vid.started && !mp.vid.paused)
 }
 
 // edvFitDimsH scales w×h down to maxH high, keeping ratio, forced even.

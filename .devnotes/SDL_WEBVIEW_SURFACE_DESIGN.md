@@ -537,6 +537,133 @@ branches on the flag.
 record it here; flag off → `edvPrevStart` byte-identical behaviour; seek / param edit / stall /
 pause-reap all still correct; `ctl frame-shot` on the producer.
 
+#### P4 audio + clock decision (closes §9 Q5 + Q6, taken before the build)
+
+Both gaps have one answer: **the audio element is the master clock, the surface presents against it.**
+
+- **Video** stops being encoded at all on the surface path: `ffmpeg decode → chain → shared texture`.
+  No x264, no fMP4, no MSE for the picture. That deletes an encode + a mux + a demux + a decode.
+- **Audio** keeps a stream, but an **audio-only** one: same ffmpeg, `-vn -c:a aac -b:a 128k`, one tiny
+  growing fMP4 through the existing `/ms/` tail-follow into the SAME `<video>` element (the `__mst`
+  runtime does not care that there is no video track).
+- **That element's `currentTime` is the presentation clock.** The child presents the frame whose PTS
+  is due and HOLDS the rest, so A/V sync is structural rather than best-effort, and the clock lives
+  in the child - which directive #2 requires anyway.
+- Transport (play/pause/seek/loop) still acts on the element, so `__vplay`/`__vpause`/`__vrate`,
+  `strPend`, the stall respawn and the pause reap carry over unchanged.
+
+Rejected: wall-clock frame timestamps (drift the moment a heavy chain falls behind - the normal
+case); `internal/audio` as the clock (puts it daemon-side and crosses to the child every frame,
+the hop §4.4 refuses for rects); no audio at all (a regression the owner explicitly values).
+
+Consequences honoured: frames carry a **source PTS**, not "latest wins"; seek/loop reset both halves;
+the ring stays bounded in frames AND bytes with a stated drop policy.
+
+#### P4 result (2026-08-13) — built and driven on this rig; **works, not yet trustworthy enough to default on**
+
+**Shape.** `features.editor.previewSurface` (bool, default OFF; also needs `features.ui.shellHosting`
+= visual and the real window child - a headless mirror has no compositor). OFF ⇒ `edvPrevStart` is the
+old code path verbatim, proven by a `screenshot-all` sweep that is identical to the baseline.
+ON ⇒ **two** worker jobs instead of one, because the halves have opposite lifetimes:
+
+- `vfx.surface`: ffmpeg decode `-re` → `rave-mate-vfx --pipe` → ffmpeg present stage → `surfacepub`
+  (shared D3D11 texture). **BREAK-before-make**: one surface id owns one set of kernel objects, so the
+  old picture is retired before the new one is built.
+- `vfx.audio`: audio-only growing fMP4 → the existing `/ms/` tail → `__mst` → the same `<video>`.
+  **MAKE-before-break**, i.e. the element handover (`strPend`, stall, seek) is untouched by this phase.
+
+The publisher is the Go worker, **not** `rave-mate-vfx --present` as the phase text says. Reason found
+by execution: the `fit` layout composites the CLEAN source over the fx'd background AFTER the chain, so
+an ffmpeg stage has to sit between chain and publish; putting the publisher in the vfx child would need
+a second IPC channel into it, or the foreground would have to run through the effects (a different
+picture). Same stage carries the render-quality upscale. P5 (zero-copy) has to move both into the child.
+
+**Geometry.** The `[data-surface]` hole is declared by the VIEW (`mpVidSurface` hook), not by the feed -
+it must exist before a producer starts or the producer waits for a rect that waits for the producer.
+It is CSS-fitted to the picture aspect, so the reported rect IS the picture rect and the present is a
+1:1 `CopySubresourceRegion`. Measured: `producer attached gen 1 410x734 ring 2 (2351 KiB shared)`.
+
+**Measured, click→pixel** (daemon log, one stopwatch started at `edvPrevStart` entry - the act-worker
+hop before it is shared by both paths; MSE stops at the element re-source, surface at the producer's
+first PRESENTED frame, i.e. the consumer's `presentSeq` leaving 0):
+
+| path | click→pixel |
+|---|---|
+| MSE (`vfx.stream` → x264 → fMP4 → `/ms/` → MSE) | **3634 ms** |
+| surface (decode → chain → shared texture) | **2140 / 2149 / 2152 / 2186 / 2816 / 1888 ms** |
+
+Both are dominated by ffmpeg + chain spawn; the surface saves the encoder's start-up and the MSE
+init-segment wait, ~1.5 s on this project (3840x2160 source, 5 effects, 540p render, fit layout).
+
+**Verified on the surface path:** picture on the native visual with the full fx chain and the correct
+fit composition (screenshotted); `internal/framedebug`'s oracle CHANGED on every sample, moved 68-73 %;
+A/V within ~0.2 s during steady playback (`lastPtsMs 16433` against an element at ~16.2 s); pause froze
+the picture (bit-identical region) and the playhead together; Stop parked at IN (0:00); a waveform
+click seeked on the FIRST click and held (24:55, then resumed from there); the §5 automatic fallback
+fired for real (`no consumer attached` → `falling back to the MSE feed` → MSE picture up).
+**Verified on the MSE path (flag off):** all of the above plus the seamless IN→OUT loop
+(6:05→6:20→6:06→6:19→6:06, no stall at the wrap) and an fx toggle mid-playback.
+
+**Not good enough yet - the three reasons this stays OFF:**
+
+1. **The audio clock rebinds in ~15-20 s after a respawn** (seek / fx toggle), against ~2-3 s for the
+   MSE feed. `mp4frag.Parse` walks the WHOLE growing file and only succeeds when its end happens to
+   land on a complete box, so a `-re`-paced audio-only file wins that race late. Until it binds the
+   element still plays the OLD feed while the new picture is already up. Suspected one-line fix (drop
+   `-re` from the audio leg, or parse only the head) - NOT applied, because it was found with no
+   budget left to build, deploy and re-verify it, and an unverified fix here is worse than none.
+2. **The surface presents ~15 fps of a 30 fps producer** (`presented 206 / lastSeq 412`, exactly half,
+   every non-presented frame released unread by the drop-oldest rule). The present pump is a
+   `WM_TIMER`, which is a low-priority message; measured with the window unfocused, so the activity
+   governor is also in frame. The picture moves and stays in sync, but it is half the cadence MSE gets.
+3. **No seamless IN→OUT loop.** ffmpeg's `-stream_loop` and a bounded input duration are mutually
+   exclusive - verified by execution: `-stream_loop -1 -ss X -t D -i src` plays the span ONCE, while
+   `-stream_loop -1 -ss X -i src` loops [X, EOF] and re-seeks to X on every iteration (that half works).
+   With no way to wrap the producer at OUT, the surface path sets `span = 0` and falls back to the
+   long-cut behaviour (element pauses at OUT, Play restarts from IN). Designed fix: ping-pong decoders.
+
+**Found by execution (things the design and the tree got wrong):**
+
+1. **The `vfx` worker pool was capped at ONE process, and make-before-break needs two.** A waveform
+   seek froze the playhead for good - the second `vfx.stream` waited for a worker that only frees when
+   the first is retired, which only happens once the second is live. Pre-existing on the MSE path, not
+   caused by this phase; fixed with `workers.Configure("vfx", 6)`.
+2. **An audio-only fMP4 never fragments with `+frag_keyframe`** - no video track, no keyframes, so
+   ffmpeg buffers to EOF and the "growing" file stays a 28-byte `ftyp`. Needs `-frag_duration`.
+3. **A CSS box with only `aspect-ratio` and auto/auto sizing measures 0x0**, which the child correctly
+   reads as hidden and never opens. The hole needs a definite axis (`height:100%`).
+4. **The presentation clock cannot be sampled event-driven.** `surfaces.js` is mutation/resize/scroll
+   driven and a playing video mutates nothing, so the clock froze and the gate held every frame: P3's
+   finding #1 in a new costume. The reporter now self-schedules while a clock element plays - on a
+   100 ms timer, not rAF, because a 60 Hz report stream starves the `WM_TIMER` the present pump rides.
+5. **A clock-slaved consumer turns the producer's drop policy into a bug.** With `acquireMs = 4` the
+   producer dropped every frame it could not place immediately: 2100 frames read, 6 published, a
+   picture that moved 3 times in 157 s. The wait is now 250 ms - backpressure that stalls the pipe back
+   to ffmpeg, which is the pacing the clock wants; the ring is still 2 frames.
+6. **A producer RESTART lands on the section a live consumer still holds open**, so the ring generation
+   must carry on rather than restart at 0 (`CreateSharedHandle` refuses a name the consumer has open).
+   `surfacepub.Open` now seeds the generation from the block and `SetGeometry` skips names in use.
+7. **`prev-<gen>.mp4` restarts at gen 1 every launch**, so the first start of a session could parse
+   LAST session's file and bind the element to stale content ("picture on screen in 9 ms", playing the
+   previous cut). Pre-existing; the target is now removed before the pipeline starts.
+8. **The surface must ignore the render-quality cap or honour it explicitly.** Rendering the chain at
+   the element's own pixels (734p) instead of the capped size (540p) cost 1.85x and dropped the picture
+   25 s behind the audio clock. The present stage now scales, so PREVIEW QUALITY still means something.
+9. **§4.3's transparency note applies to the shipped path too.** The canvas arrangement P2 found is now
+   automatic: any content surface makes `html,body` transparent and paints the app's background from a
+   full-viewport surface. `screenshot-all` is 14 tabs / 0 errors / 0 ⚠OVERFLOW either way.
+
+**Gates:** `GOWORK=off go build ./... && go vet ./... && go test ./...` clean; `scripts/build-zig.ps1`
+4 built lines; `GOWORK=off go test -tags zigui ./internal/webui -run TestZig` ok; deployed exe logs
+`visual hosting ACTIVE (DirectComposition)`; `ctl screenshot-all` 14 tabs / 0 errors / 0 ⚠OVERFLOW;
+`ctl quit` leaves no process.
+
+**Not verified:** audio AUDIBILITY (no way to listen from here - what is proven is that the element is
+bound to the audio-only feed and its clock advances at 1x, `dur:Infinity`, `paused:0`); the IN→OUT loop
+on the surface path (it does not exist, see above); an fx toggle mid-playback on the surface path (the
+respawn's clock had not rebound inside the observation window - see limitation 1); long-run RSS;
+non-96-dpi (R8 still open from P1).
+
 ### P5 — Zero-copy
 Drop `glReadPixels`: WGL↔D3D interop, or move the ISF backend to an ANGLE/D3D11 context so the FBO
 target **is** the shared texture.

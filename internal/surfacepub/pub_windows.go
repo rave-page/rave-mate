@@ -55,9 +55,13 @@ const fileMapAllAccess = 0xF001F
 // "you do not own the mutex". Treating it as ownership is how a torn frame gets published.
 const waitTimeout = 0x102
 
-// acquireMs bounds the producer's wait for a free slot. Short on purpose: a compositor that is busy
-// must cost this frame, not the render loop's cadence.
-const acquireMs = 4
+// acquireMs bounds the producer's wait for a free slot. This is BACKPRESSURE, not a drop timer: a
+// clock-slaved consumer (P4) deliberately leaves a frame in the ring until its PTS is due, and a
+// producer that answered that by dropping would lose every frame in between - measured, once: 2100
+// frames read, 6 published, a picture that moved 3 times in 157 s. Blocking here stalls the pipe all
+// the way back to ffmpeg, which is exactly the pacing wanted. The bound still exists so a consumer
+// that vanishes mid-frame costs a stall, not a wedge.
+const acquireMs = 250
 
 type guid struct {
 	Data1 uint32
@@ -192,12 +196,19 @@ func Open(id string) (*Pub, error) {
 	}
 	p := &Pub{id: id, hmap: h, view: ptrOf(addr)}
 	c := p.ctl()
+	// A RESTART lands on the section a live consumer is still holding open - it keeps the mapping
+	// alive, and with it every ring texture of the previous generation. So the generation must carry
+	// ON, not restart at 0: CreateSharedHandle refuses a name the consumer still has open, and a
+	// consumer that saw the counter go backwards would keep blitting a dead producer's textures.
+	// (A fresh section is zero-filled by the OS, so this reads 0 there, which is what it must.)
+	if atomic.LoadUint32(c.u32(offMagic)) == ctlMagic && atomic.LoadUint32(c.u32(offVersion)) == ctlVersion {
+		p.gen = atomic.LoadUint32(c.u32(offGen))
+	}
 	*c.u32(offMagic) = ctlMagic
 	*c.u32(offVersion) = ctlVersion
 	*c.u32(offSlots) = Slots
 	*c.u32(offFmt) = dxgiFormatB8G8R8A8Unorm
 	*c.u32(offPID) = uint32(syscall.Getpid())
-	atomic.StoreUint32(c.u32(offGen), 0)
 	return p, nil
 }
 
@@ -238,8 +249,22 @@ func (p *Pub) SetGeometry(w, h int) error {
 		}
 	}
 	p.releaseRing()
-	gen := p.gen + 1
+	// A generation whose names still exist (a killed predecessor's textures, kept alive by the
+	// consumer's open handles) is skipped rather than failed: the counter is a name, not a version.
+	for try := 0; ; try++ {
+		err := p.buildRing(w, h, p.gen+1)
+		if err == nil {
+			return nil
+		}
+		p.releaseRing()
+		p.gen++
+		if try >= 7 {
+			return err
+		}
+	}
+}
 
+func (p *Pub) buildRing(w, h int, gen uint32) error {
 	desc := texDesc{
 		Width: uint32(w), Height: uint32(h), MipLevels: 1, ArraySize: 1,
 		Format: dxgiFormatB8G8R8A8Unorm, SampleCount: 1, SampleQuality: 0,

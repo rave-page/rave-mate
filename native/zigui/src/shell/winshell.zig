@@ -1334,6 +1334,11 @@ const SurfRep = struct {
     vis: bool = false,
     dpr: f64 = 1,
     c: []const u8 = "", // data-surface-color, "" = derive from the id hash
+    /// clk = the [data-surface-clock] element's currentTime in seconds (< 0 = no clock element).
+    /// P4: the surface presents the frame whose PTS matches this, so A/V sync is structural rather
+    /// than best-effort. clkp = that element is paused, i.e. the clock is FROZEN, not merely stale.
+    clk: f64 = -1,
+    clkp: bool = false,
 };
 const SurfWire = struct { v: []const SurfRep = &.{}, d: u32 = 0 };
 
@@ -1357,6 +1362,8 @@ fn applySurfaces(sh: *Shell, arena: std.mem.Allocator, text: []const u8) void {
             .vis = r.vis,
             .dpr = @floatCast(r.dpr),
             .color = parseHexColor(r.c),
+            .clk_ms = if (r.clk < 0) null else @intFromFloat(r.clk * 1000.0),
+            .clk_running = !r.clkp,
         };
         n += 1;
     }

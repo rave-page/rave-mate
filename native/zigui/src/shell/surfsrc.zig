@@ -143,6 +143,11 @@ pub const Source = struct {
     }
 };
 
+/// clock_slack_ms: how far ahead of the clock a frame may be and still be presented. One 30 fps
+/// frame plus rounding - tighter costs a held frame on every timebase rounding difference, looser
+/// lets a fast producer visibly lead the audio.
+const clock_slack_ms: i64 = 40;
+
 const attach_retry_ms: i64 = 500;
 /// acquire_ms bounds a keyed-mutex wait on the WINDOW thread. It has to be small: this runs in the
 /// message pump, and a producer stuck mid-write must cost a dropped frame, never a frozen UI.
@@ -248,7 +253,14 @@ pub const Frame = struct {
 
 /// begin picks the newest ready frame, drops every older ready one (drop-oldest), and leaves that
 /// slot's keyed mutex HELD. The caller must call end() with the same Frame.
-pub fn begin(s: *Source, gpa: std.mem.Allocator, id: []const u8, dev1: ?*anyopaque) ?Frame {
+///
+/// clock_ms (P4) is the surface's presentation clock in the producer's own PTS timebase - the audio
+/// element's currentTime. A frame whose PTS is in the FUTURE of that clock is NOT taken: it stays
+/// in the ring, the producer finds no free slot and blocks, and the whole pipeline ends up paced by
+/// the clock instead of by wall time. That is what makes A/V sync structural, and what makes a
+/// paused element freeze the picture instead of letting the producer run away from it. null =
+/// free-run (no clock declared), i.e. P3's behaviour verbatim.
+pub fn begin(s: *Source, gpa: std.mem.Allocator, id: []const u8, dev1: ?*anyopaque, clock_ms: ?i64) ?Frame {
     if (!sync(s, gpa, id, dev1)) return null;
     const view = s.view orelse return null;
     if (ld64(view, off_write_seq) == s.last_seq) return null; // nothing new; keep the last picture
@@ -264,6 +276,14 @@ pub fn begin(s: *Source, gpa: std.mem.Allocator, id: []const u8, dev1: ?*anyopaq
         }
     }
     const pick = best orelse return null;
+
+    // Clock gate BEFORE any mutex work: a frame from the future is left exactly where it is, so the
+    // producer's next Send finds no slot and blocks. Reading the PTS off the control page is safe
+    // without the mutex - it is published (release) after the pixels and before write_seq.
+    if (clock_ms) |now| {
+        const pts_ms = @divTrunc(@as(i64, @bitCast(ld64(view, off_slot0 + pick * slot_stride + 8))), 1_000_000);
+        if (pts_ms > now + clock_slack_ms) return null;
+    }
 
     // Drop-oldest: any OTHER slot still holding a frame we are about to skip is released unread, or
     // it starves the producer (its AcquireSync(0) would time out on that slot forever).

@@ -37,6 +37,7 @@ const HR = i32;
 const GUID = extern struct { d1: u32, d2: u16, d3: u16, d4: [8]u8 };
 const VOP = *const fn () callconv(.winapi) HR; // opaque slot filler
 
+extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
 extern "kernel32" fn LoadLibraryW([*:0]const u16) callconv(.winapi) ?*anyopaque;
 extern "kernel32" fn GetProcAddress(?*anyopaque, [*:0]const u8) callconv(.winapi) ?*anyopaque;
 
@@ -167,6 +168,12 @@ pub const Report = struct {
     dpr: f32,
     /// color is 0xRRGGBB from `data-surface-color`, or null = derive one from the id hash.
     color: ?u32,
+    /// clk_ms = the presentation clock this surface is slaved to (`data-surface-clock` element's
+    /// currentTime, ms), null = free-run. clk_running = that element is playing; false means the
+    /// clock is FROZEN at clk_ms, which is what makes a pause freeze the picture rather than let
+    /// the producer run away.
+    clk_ms: ?i64 = null,
+    clk_running: bool = false,
 };
 
 const Surface = struct {
@@ -188,7 +195,23 @@ const Surface = struct {
     seen: bool = false,
     /// src is the producer attachment. Zero value = no producer; the surface stays a solid colour.
     src: surfsrc.Source = .{},
+    /// Presentation clock (P4). clk_ms is the page element's currentTime at clk_at (GetTickCount64);
+    /// while clk_running the child interpolates between reports, so the 8 ms pump has a smooth clock
+    /// even though the reporter only speaks when something changed.
+    clk_ms: i64 = 0,
+    clk_at: i64 = 0,
+    clk_running: bool = false,
+    has_clock: bool = false,
+
+    /// clockMs is the surface's presentation clock NOW, interpolated since the last report. null =
+    /// free-run (no clock element declared), which is the P3 testcard's behaviour unchanged.
+    fn clockMs(s: *const Surface) ?i64 {
+        if (!s.has_clock) return null;
+        if (!s.clk_running) return s.clk_ms; // paused: frozen, NOT stale - do not drift forward
+        return s.clk_ms + (@as(i64, @intCast(GetTickCount64())) - s.clk_at);
+    }
 };
+
 
 pub const Registry = struct {
     gpa: std.mem.Allocator,
@@ -324,6 +347,12 @@ pub const Registry = struct {
 
     fn place(r: *Registry, s: *Surface, rep: Report) void {
         const v: *Vis = @ptrCast(@alignCast(s.visual));
+        if (rep.clk_ms) |ms| {
+            s.clk_ms = ms;
+            s.clk_at = @intCast(GetTickCount64());
+            s.clk_running = rep.clk_running;
+            s.has_clock = true;
+        } else s.has_clock = false;
         s.fx = @intFromFloat(@round(rep.fx));
         s.fy = @intFromFloat(@round(rep.fy));
         s.fw = @intFromFloat(@max(0, @round(rep.fw)));
@@ -441,7 +470,7 @@ pub const Registry = struct {
             // a surface that has a swapchain but has never been positioned is skipped, not guessed.
             if (!s.shown or s.swap == null or r.dev1 == null) continue;
             if (!std.math.isFinite(s.x) or !std.math.isFinite(s.y)) continue;
-            const f = surfsrc.begin(&s.src, r.gpa, s.id, r.dev1) orelse continue;
+            const f = surfsrc.begin(&s.src, r.gpa, s.id, r.dev1, s.clockMs()) orelse continue;
             surfsrc.end(&s.src, f, r.blit(s, f));
         }
         return live;
