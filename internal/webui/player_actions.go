@@ -194,6 +194,10 @@ type mpVid struct {
 // the verb (transport skips its default element eval). Set by the editor.
 var mpStreamCtl func(u *UI, host, verb string, t float64) bool
 
+// mpTrimSnap, when set, is called before every trim edit so a host can checkpoint
+// its undo history (the trim lives in mpSt, outside the host's own state).
+var mpTrimSnap func(u *UI, host string)
+
 // mpVidGrip lets a host make its video box vertically resizable: returns the drag act
 // and the persisted height cap in px ("" = CSS default). Registered by the editor.
 var mpVidGrip func(u *UI, host string) (grip, maxH string)
@@ -1593,6 +1597,9 @@ func (u *UI) mpPushRealtime(t mpSt) {
 // mpApplyTrim mutates + repaints wave/edit (the common non-drag update path). The trim
 // window feeds the loudness plan, so the exact-measure lookup + monitor gain re-sync ride here.
 func (u *UI) mpApplyTrim(host string, fn func(*mpSt)) {
+	if mpTrimSnap != nil {
+		mpTrimSnap(u, host) // undo checkpoint BEFORE the edit (editor tab)
+	}
 	t := u.mpMut(host, fn)
 	if len(t.media) == 0 {
 		return

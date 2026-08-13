@@ -230,12 +230,16 @@
       "toast": {
         "exportFailed": "Error al exportar: ",
         "exported": "Exportado: {path}",
+        "noRedo": "Nada que rehacer",
+        "noUndo": "Nada que deshacer",
         "packDone": "{n} shaders instalados",
         "packFail": "Error al descargar el pack - ver Logs",
         "packStart": "Descargando el pack ISF de Vidvox…",
         "prevSlow": "El stream de vista previa tarda en arrancar; revisa Logs.",
         "probing": "Aún analizando la fuente: inténtalo en un segundo.",
-        "sourceMissing": "Archivo no encontrado."
+        "redone": "Rehecho",
+        "sourceMissing": "Archivo no encontrado.",
+        "undone": "Deshecho"
       },
       "useFrame": "Usar fotograma actual",
       "zoomLabel": "Zoom"

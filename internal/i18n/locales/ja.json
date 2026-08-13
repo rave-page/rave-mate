@@ -230,12 +230,16 @@
       "toast": {
         "exportFailed": "書き出しに失敗: ",
         "exported": "書き出し完了: {path}",
+        "noRedo": "やり直す操作はありません",
+        "noUndo": "元に戻す操作はありません",
         "packDone": "{n}個のシェーダーをインストールしました",
         "packFail": "パックのダウンロードに失敗しました - ログを確認",
         "packStart": "Vidvox ISFパックをダウンロード中…",
         "prevSlow": "プレビューの開始が遅いです。Logsタブを確認してください。",
         "probing": "ソースを解析中です – もう一度お試しください。",
-        "sourceMissing": "ファイルが見つかりません。"
+        "redone": "やり直しました",
+        "sourceMissing": "ファイルが見つかりません。",
+        "undone": "元に戻しました"
       },
       "useFrame": "再生位置のフレームを使用",
       "zoomLabel": "ズーム"

@@ -230,12 +230,16 @@
       "toast": {
         "exportFailed": "Échec de l'export : ",
         "exported": "Exporté : {path}",
+        "noRedo": "Rien à rétablir",
+        "noUndo": "Rien à annuler",
         "packDone": "{n} shaders installés",
         "packFail": "Échec du téléchargement du pack - voir Logs",
         "packStart": "Téléchargement du pack ISF Vidvox…",
         "prevSlow": "Le flux d'aperçu tarde à démarrer - voir l'onglet Logs.",
         "probing": "Analyse de la source en cours – réessayez dans une seconde.",
-        "sourceMissing": "Fichier introuvable."
+        "redone": "Rétabli",
+        "sourceMissing": "Fichier introuvable.",
+        "undone": "Annulé"
       },
       "useFrame": "Utiliser l'image du curseur",
       "zoomLabel": "Zoom"

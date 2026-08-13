@@ -58,6 +58,11 @@ type edvSt struct {
 	prevH        int                // preview render height cap (0 = default 540)
 	prevStarting bool               // a start is in flight: its feed isn't live yet (suppress stall respawns)
 
+	// undo/redo history (editor_video_undo.go): project + trim, newest last
+	undo   []edvSnap
+	redo   []edvSnap
+	undoAt time.Time // last checkpoint (gesture coalescing)
+
 	export edvExport
 }
 
@@ -230,9 +235,11 @@ func edvSave() {
 	}
 }
 
-// edvMut mutates video state under the lock + persists the project.
+// edvMut mutates video state under the lock + persists the project. Every call is
+// an undo checkpoint (bursts coalesce - see edvSnapshot).
 func (u *UI) edvMut(fn func(*edvSt)) {
 	edEnsure()
+	u.edvSnapshot()
 	editor.mu.Lock()
 	edvEnsure()
 	fn(&editor.video)

@@ -68,6 +68,33 @@ type EffectInst struct {
 	Mix    *float64           `json:"mix,omitempty"`   // stage opacity 0..1; nil = 1 (fully applied)
 }
 
+// Clone deep-copies a project: undo snapshots must not alias the live keyframe /
+// effect slices or a param map (an in-place param edit would rewrite history).
+func (p Project) Clone() Project {
+	out := p
+	if p.PanKF != nil {
+		out.PanKF = append([]PanKey(nil), p.PanKF...)
+	}
+	if p.Effects != nil {
+		out.Effects = make([]EffectInst, len(p.Effects))
+		for i, e := range p.Effects {
+			c := e
+			if e.Params != nil {
+				c.Params = make(map[string]float64, len(e.Params))
+				for k, v := range e.Params {
+					c.Params[k] = v
+				}
+			}
+			if e.Mix != nil {
+				m := *e.Mix
+				c.Mix = &m
+			}
+			out.Effects[i] = c
+		}
+	}
+	return out
+}
+
 // MixOr resolves the stage opacity (nil = fully applied), clamped to 0..1.
 func (e EffectInst) MixOr() float64 {
 	if e.Mix == nil {

@@ -389,12 +389,16 @@
       "toast": {
         "exportFailed": "Export failed: ",
         "exported": "Exported: {path}",
+        "noRedo": "Nothing to redo",
+        "noUndo": "Nothing to undo",
         "packDone": "{n} shaders installed",
         "packFail": "Pack download failed - see Logs",
         "packStart": "Downloading the Vidvox ISF pack…",
         "prevSlow": "Preview stream is slow to start - check the Logs tab.",
         "probing": "Still probing the source - try again in a second.",
-        "sourceMissing": "File not found."
+        "redone": "Redone",
+        "sourceMissing": "File not found.",
+        "undone": "Undone"
       },
       "useFrame": "Use playhead frame",
       "zoomLabel": "Zoom"

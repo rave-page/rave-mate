@@ -230,12 +230,16 @@
       "toast": {
         "exportFailed": "Export fehlgeschlagen: ",
         "exported": "Exportiert: {path}",
+        "noRedo": "Nichts wiederherzustellen",
+        "noUndo": "Nichts rückgängig zu machen",
         "packDone": "{n} Shader installiert",
         "packFail": "Paket-Download fehlgeschlagen - siehe Logs",
         "packStart": "Vidvox-ISF-Paket wird heruntergeladen…",
         "prevSlow": "Vorschau-Stream startet langsam - siehe Logs-Tab.",
         "probing": "Quelle wird noch analysiert – gleich erneut versuchen.",
-        "sourceMissing": "Datei nicht gefunden."
+        "redone": "Wiederhergestellt",
+        "sourceMissing": "Datei nicht gefunden.",
+        "undone": "Rückgängig gemacht"
       },
       "useFrame": "Playhead-Frame verwenden",
       "zoomLabel": "Zoom"

@@ -128,6 +128,17 @@ const runtimeJS = `(function(){
     e.preventDefault(); e.stopPropagation();
     if(v.paused) __vplay(host); else __vpause(host, false);
   }, true);
+  // Editor video mode: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo. Gated on the video
+  // inspector being mounted, so image mode keeps its own Ctrl+Z (keyscope path).
+  document.addEventListener('keydown', function(e){
+    if(!(e.ctrlKey||e.metaKey) || e.altKey) return;
+    var k=(e.key||'').toLowerCase(); if(k!=='z'&&k!=='y') return;
+    if(!document.getElementById('edv-insp')) return;
+    var a=document.activeElement;
+    if(a&&a.matches&&a.matches('input,textarea,[contenteditable]')) return;
+    e.preventDefault(); if(e.repeat) return;
+    send({act:(k==='y'||e.shiftKey)?'edv-redo':'edv-undo'});
+  }, true);
   // Space = play / pause-and-return-to-where-play-started. Enter = pause here.
   document.addEventListener('keydown', function(e){
     if(e.ctrlKey||e.metaKey||e.altKey) return;

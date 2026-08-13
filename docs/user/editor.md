@@ -61,6 +61,10 @@ the Publish tab, so nothing new to learn:
    re-render at the wrap. Longer cuts play through and stop at OUT.
    **Preview size**: drag the bottom edge of the picture to resize it - handy
    on a big screen. The size is remembered.
+   **Undo** - `Ctrl+Z` steps back through everything the tab owns: trim IN/OUT
+   moves, reframe/zoom/pan/keyframes, layout, and every effect edit (add, remove,
+   reorder, enable, parameter, blend, opacity). `Ctrl+Shift+Z` (or `Ctrl+Y`)
+   redoes. One gesture = one step; a slider drag doesn't become 40 of them.
    **Tracklist navigation**: when the source is one of your set captures, the
    player carries the set's track markers - ⏮/⏭ step between tracks, the
    *Jump to track* menu seeks straight to any track, the waveform shows a tick
