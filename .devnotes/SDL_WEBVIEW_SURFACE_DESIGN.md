@@ -220,7 +220,8 @@ rule puts it: a supervised worker child (`u.svc.Workers.RunStream`), started/sto
 code that does it today (`edvPrevStart`/`edvPrevStop`).
 
 **Handle exchange (preferred): out-of-band, no daemon hop.** The producer publishes its shared
-texture under a named convention (`Globalave-surface-<id>` + a keyed mutex - the pattern
+texture under a named convention (`Global
+ave-surface-<id>` + a keyed mutex - the pattern
 `native/zigenc/src/mf.zig` already uses for Spout-class sharing); the child opens it by name when
 the surface appears. Fallback if naming proves unworkable: a PSH1 `surface {op:"attach", id,
 handle}` message - the ONLY case where the daemon touches a surface, and only as a courier.
@@ -315,6 +316,56 @@ an input.
 the web layer, (b) the DComp visual? Record the answer in this file.
 **Gate:** all of the above, or → stop, stay MSE.
 
+#### P0 result (2026-08-13) — **GATE PASSED, proceed to P1**
+
+Ran on this machine, Windows 11 26200, Evergreen WebView2 **151.0.4129.78**, D3D11 hardware
+device, 96 dpi. Throwaway Zig exe (window + DComp tree + magenta composition swapchain +
+`CreateCoreWebView2CompositionController` + scripted `SendMouseInput` + capture probes). Every
+COM HRESULT below was **0x00000000**.
+
+| Goal | Result | Evidence |
+|---|---|---|
+| Composition controller + `put_RootVisualTarget` | PASS | both S_OK; page renders inside our visual |
+| `put_DefaultBackgroundColor` A=0 → hole | PASS | S_OK; magenta visible through the transparent pane |
+| HTML draws OVER the surface | PASS | z-9999 tooltip covers magenta; a 50%-alpha div **blends** with it |
+| Hit-testing over the hole | PASS | right-click + 341px drag both targeted `#hole`, not the surface |
+| `SendMouseInput` click / wheel / right-click / drag | PASS | page echoed every one back over the binding |
+| Cursor via `add_CursorChanged`/`get_SystemCursorId` | PASS | 32513 (IDC_IBEAM) over the text input, 32512 elsewhere |
+| Keyboard (NOT forwarded by us) | PASS | real `SendInput` typed `RAVE` into the input — §3.2 confirmed |
+| **`PrintWindow(PW_RENDERFULLCONTENT)`** | **PASS** | captures **web layer AND DComp visual**, pixel-identical to the on-screen grab (53.8% magenta both) |
+| …with the window fully **occluded** (`HWND_BOTTOM`) | **PASS** | screen grab 0% magenta (really covered), PrintWindow still 53.8% — `screenshot-all` is safe |
+| `--disable-gpu --disable-gpu-compositing` | **COMPATIBLE** | identical pass + identical pixels; verified the flags reached the browser (`--use-gl=disabled` on the gpu-process, `--disable-gpu-compositing` on the renderer) |
+
+Negative controls: `PrintWindow(flags=0)` → blank white; `BitBlt` from `GetDC(hwnd)` → 100% white.
+`PW_RENDERFULLCONTENT` is **mandatory** — which is already what `captureHWND` uses.
+
+**Risks closed:** R1 (PrintWindow) — dead, no composite rework needed, **P6 loses its reason to
+exist**. R2 (GPU compositing) — dead, the good-neighbour `--disable-gpu*` default can stay; no
+cost to a live encode to measure. §9 Q1 and Q2 answered.
+
+**Three gotchas found by execution — anyone writing P1/P2 must honour them:**
+
+1. **`AddVisual` insertAbove is INVERTED when `referenceVisual` is NULL.** MS docs, Remarks:
+   *"If insertAbove is TRUE, the new child visual is above no sibling, therefore it is rendered
+   below all of its siblings."* So the surface layer is added with **TRUE** and the webview visual
+   with **FALSE**. Getting this backwards paints magenta over the whole window and looks exactly
+   like "the web layer never rendered".
+2. **MSVC reverses same-name virtual overload groups in the vtable.** `IDCompositionVisual`'s
+   `SetOffsetX(float)` is at slot **4**, `SetOffsetX(IDCompositionAnimation*)` at slot 3 (probed:
+   slot3(NULL)=0x80070057, slot4(NULL)=S_OK). Same for `SetOffsetY` (5/6), `SetTransform` (7/8),
+   `SetClip` (13/14) — declaration order does NOT hold. `SetContent`(15) / `AddVisual`(16) sit
+   after every overload group, so they are safe either way. dcomp.h has no C vtbl to copy.
+3. **`put_Bounds` reaches the renderer asynchronously.** `get_Bounds` read back correct
+   immediately, but the page's first layout still used a stale viewport (1281px vs the 1084px
+   bounds) and a `resize` event followed. §4.4's rect reporter must therefore be
+   ResizeObserver/`resize`-driven, never a one-shot measurement at document-ready.
+
+Untested here, still open for P1: non-96-dpi rasterization scale (R8), multi-monitor moves, UIA
+accessibility (§9 Q3), long-run stability.
+
+Spike lived in the agent scratchpad (`…/scratchpad/p0-dcomp/`), NOT in this repo — throwaway by
+design, per the phase definition.
+
 ### P1 — Visual hosting behind a flag, zero surfaces
 `features.ui.shellHosting = "windowed"|"visual"` (default `windowed`). `winshell.zig` gains the
 composition path alongside the existing one; identical UI, identical everything.
@@ -352,9 +403,12 @@ target **is** the shared texture.
 **Verify:** framedebug unchanged; measured CPU drop; readback path stays as the fallback (repo's
 existing zero-copy-default discipline: readback = fallback, not deleted).
 
-### P6 — ctl screenshot composite, then more surfaces
-Child-side composite: `ICoreWebView2::CapturePreview` for the web layer + producer `FrameShot` for
-the surface rect (both primitives already exist — the vtable slot is at `winshell.zig:290`, the
+### P6 — ~~ctl screenshot composite~~ (VOIDED by P0), then more surfaces
+**The composite is not needed: P0 proved `PrintWindow(PW_RENDERFULLCONTENT)` already captures both
+layers, even while occluded.** Keep the rest of the phase (more surfaces); build the composite only
+if a future WebView2/OS build regresses that. Original plan, retained for that case:
+child-side composite via `ICoreWebView2::CapturePreview` for the web layer + producer `FrameShot`
+for the surface rect (both primitives already exist — the vtable slot is at `winshell.zig:290`, the
 frame-shot pattern in `internal/framedebug`). Then waveforms, then visualisers.
 **Verify:** goldens regenerate cleanly; `screenshot-all` sweep matches the P1 baseline outside the
 surface rect.
