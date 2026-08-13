@@ -16,7 +16,17 @@ Write-Host "ravezig + rave-probe built ($(& $zig.Source version))"
 Set-Location (Join-Path $PSScriptRoot "..\native\zigui")
 & $zig.Source build -Drelease -Dtarget=x86_64-windows-gnu
 Copy-Item -Force zig-out\lib\raveui.lib zig-out\lib\libraveui.a
-Write-Host "raveui built ($(& $zig.Source version))"
+# Stage the PSH1 window child for go:embed (tag shellembed), exactly as build-zig.sh does. Without
+# this the exe keeps embedding a STALE rave-shell.exe and every zigui shell change silently no-ops.
+$shell = "zig-out\bin\rave-shell.exe"
+if (Test-Path $shell) {
+  $dst = Join-Path $PSScriptRoot "..\internal\webui\embedded"
+  New-Item -ItemType Directory -Force -Path $dst | Out-Null
+  Copy-Item -Force $shell (Join-Path $dst "rave-shell.exe")
+} else {
+  Write-Warning "native/zigui/zig-out/bin/rave-shell.exe absent - builds fall back to the in-process Go window"
+}
+Write-Host "raveui + rave-shell built ($(& $zig.Source version))"
 
 # ravevr VR-overlay raster lib (native/zigvr, tag zigvr)
 Set-Location (Join-Path $PSScriptRoot "..\native\zigvr")

@@ -375,6 +375,33 @@ read/set/snapshot` parity across tabs; drag + resize + maximize + DPI change; mo
 tooltip pin, splitter drag, mouse-back/forward (X1/X2); IME/non-ASCII typing.
 **This is the soak phase.** Do not stack P2 on an unsoaked P1.
 
+#### P1 result (2026-08-13) — built, both modes verified on this rig, soak pending
+
+`features.ui.shellHosting = "windowed"(default) | "visual"` (`internal/config`, threaded to the child
+via `procInit.shellHosting` like `AllowGPU`). `winshell.zig` gains the composition path: DComp
+device (NULL DXGI device first, D3D11 only if refused) → target(hwnd, topmost) → root → webview
+visual; `ICoreWebView2Environment3::CreateCoreWebView2CompositionController` on the TOP-LEVEL hwnd
+(no widget child in this mode); `put_RootVisualTarget` + Commit; `WM_MOUSE*`/wheel/X-button/leave →
+`SendMouseInput` with `SetCapture` on drags + `TrackMouseEvent` for LEAVE; cursor via
+`add_CursorChanged` → `SetCursor` (in the handler AND on `WM_SETCURSOR`, HTCLIENT only);
+`put_RasterizationScale` at bring-up + `WM_DPICHANGED`. Any failure → windowed + a WARN.
+
+Verified by execution: `screenshot-all` 14 tabs / 0 errors / 0 ⚠OVERFLOW in BOTH modes, identical
+reports; ctl click/type/read/set/snapshot parity (identical line counts + snapshot hashes);
+real Win32 input under visual hosting — hover opens a `.tt` card, click switches tabs, wheel scrolls
+the right way, right-click opens the track sheet over a blurred backdrop, a scrollbar-thumb drag
+scrolls (capture path), IDC_IBEAM over an input / IDC_ARROW elsewhere; resize + maximize reflow;
+`PrintWindow` captures the composition-hosted page (P0 held); `ctl quit` clean, no lingering child.
+Fallback PROVEN by forcing the `Environment3` QI to fail: WARN logged, windowed UI came up intact.
+
+Still open: **rasterization scale has no visible effect yet.** `put_RasterizationScale(1.5)` returns
+S_OK and reads back 1.5, but the page's CSS viewport did not change (forced-scale probe at 96 dpi
+with `--disable-gpu*`), and this rig has ONE 96-dpi monitor, so `WM_DPICHANGED`, multi-monitor moves
+and mixed-DPI hit-testing are UNVERIFIED — R8 stays open and must be closed on a scaled display.
+IME/non-ASCII typing not exercised either. `scripts/build-zig.ps1` did not stage
+`internal/webui/embedded/rave-shell.exe` (only the .sh twin did), so every Windows-built exe shipped
+a STALE window child - fixed in that script; without it this phase silently no-ops.
+
 ### P2 — Surface manager + solid-colour test surface
 Go `internal/webui/surface.go` + `data-surface` in the component layer + PSH1 `surface` events;
 Zig `native/zigui/src/shell/surfaces.zig`; runtime-JS rect reporter (`{m:'s'}`).

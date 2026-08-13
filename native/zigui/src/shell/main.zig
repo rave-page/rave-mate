@@ -43,6 +43,7 @@ const ProcInit = struct {
     h: i64 = 820,
     startHidden: bool = false,
     allowGpu: bool = false,
+    shellHosting: []const u8 = "", // ""/"windowed" | "visual" (DirectComposition visual hosting)
     dataDir: []const u8 = "",
     runtimeJs: []const u8 = "",
     initialHtml: []const u8 = "",
@@ -183,6 +184,7 @@ fn handleInit(c: *Child, arena: std.mem.Allocator, fr: Frame) !void {
         .init_h = @intCast(@max(1, ini.h)),
         .start_hidden = ini.startHidden,
         .allow_gpu = ini.allowGpu,
+        .visual_hosting = std.mem.eql(u8, ini.shellHosting, "visual"),
         .data_dir = try c.gpa.dupe(u8, ini.dataDir),
         .boot_js = try std.mem.concat(c.gpa, u8, &.{ binding_shim, ini.runtimeJs }),
         .initial_html = try c.gpa.dupe(u8, ini.initialHtml),

@@ -11,6 +11,11 @@ import (
 // GPU encoder (OBS/NVENC). Read by the cgo shell when creating the WebView2 environment.
 var webviewAllowGPU bool
 
+// webviewShellHosting mirrors config UIFeature.ShellHosting, set once in New beside webviewAllowGPU.
+// "" = windowed (the default, today's behaviour); "visual" asks the Zig child for DirectComposition
+// visual hosting. Only the Zig shell reads it - the cgo/Go window hosts are windowed-only.
+var webviewShellHosting string
+
 // shell is the native webview window host. The cgo build provides a real WebView2/WebKit window;
 // the nocgo build returns unavailable so the daemon falls back to Fyne. Go owns all rendering -
 // the shell only loads a document, patches the DOM (eval), and forwards page events (onAction).

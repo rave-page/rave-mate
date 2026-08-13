@@ -150,7 +150,7 @@ func (s *procShell) initParams() any {
 	origin, _ := mpMediaFS.originAndSession()
 	return procInit{
 		Title: s.title, W: s.w, H: s.h, StartHidden: hidden,
-		AllowGPU: webviewAllowGPU, DataDir: dataDir,
+		AllowGPU: webviewAllowGPU, DataDir: dataDir, ShellHosting: webviewShellHosting,
 		RuntimeJS:   runtimeJS,
 		InitialHTML: html,
 		MediaOrigin: origin, MediaSession: sess,

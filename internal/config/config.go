@@ -2373,6 +2373,19 @@ type UIFeature struct {
 	// in the Go proc child. A missing rave-shell.exe degrades to the in-process Go window with a
 	// loud log, so an install that never received the exe still gets the previous behaviour.
 	ShellImpl string `json:"shellImpl,omitempty"`
+	// ShellHosting selects how the Zig shell hosts WebView2 (SDL_WEBVIEW_SURFACE_DESIGN P1).
+	// ""|"windowed" (DEFAULT) = CreateCoreWebView2Controller on a child HWND, today's behaviour;
+	// "visual" = CreateCoreWebView2CompositionController into a DirectComposition visual tree, the
+	// prerequisite for native render surfaces UNDER the page. Visual hosting makes the shell forward
+	// all spatial input itself, so it stays opt-in until soaked; any failure in its bring-up falls
+	// back to windowed at runtime. Ignored by the Go/cgo window hosts.
+	ShellHosting string `json:"shellHosting,omitempty"`
+}
+
+// VisualShellHosting reports composition (DirectComposition) hosting was asked for. Anything but an
+// explicit "visual" = windowed, so an unset/garbage value keeps the shipped behaviour.
+func (u UIFeature) VisualShellHosting() bool {
+	return strings.EqualFold(strings.TrimSpace(u.ShellHosting), "visual")
 }
 
 // ZigShell reports the Zig window-child exe is wanted. Empty/absent = yes (the default); only an

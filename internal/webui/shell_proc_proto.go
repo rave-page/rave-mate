@@ -56,6 +56,10 @@ type procInit struct {
 	StartHidden bool   `json:"startHidden"`
 	AllowGPU    bool   `json:"allowGpu"` // false = WebView2 GPU compositing off (good-neighbour default)
 	DataDir     string `json:"dataDir"`  // resolved WebView2 profile dir (the child must not read config)
+	// ShellHosting is the WebView2 hosting mode the Zig child should use: ""/"windowed" (default,
+	// a child HWND) or "visual" (DirectComposition visual hosting). The child falls back to
+	// windowed by itself if composition bring-up fails, so this is a request, not a guarantee.
+	ShellHosting string `json:"shellHosting,omitempty"`
 	// RuntimeJS is the transport+introspection runtime injected at document start. It travels on the
 	// wire (not read from the child's own binary) because it is byte-contracted with Go-generated SVG
 	// ids and data-mse attributes - B6's Zig child gets the same bytes the daemon rendered against.

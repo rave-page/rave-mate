@@ -56,6 +56,7 @@ func (f *webviewFeature) Init(params json.RawMessage, rt *featurehost.Runtime) e
 	webviewInitJS = f.ini.RuntimeJS
 	webviewDataDir = f.ini.DataDir
 	webviewAllowGPU = f.ini.AllowGPU
+	webviewShellHosting = f.ini.ShellHosting // Go child is windowed-only; kept for parity/diagnostics
 	governor.SetStreaming(f.ini.Streaming)
 	// Bindings deliver page results to the DAEMON, not this process's waiter map. The reserved beat
 	// id is consumed here: it originates on the window's UI thread, so it is the liveness proof.

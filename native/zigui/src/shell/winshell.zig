@@ -28,6 +28,8 @@ const MSG = extern struct {
     pt: POINT,
 };
 
+const TRACKMOUSEEVENT = extern struct { cbSize: u32, dwFlags: u32, hwndTrack: HWND, dwHoverTime: u32 };
+
 const WNDCLASSEXW = extern struct {
     cbSize: u32,
     style: u32,
@@ -70,6 +72,11 @@ extern "user32" fn UpdateWindow(HWND) callconv(.winapi) i32;
 extern "user32" fn LoadImageW(?*anyopaque, usize, u32, i32, i32, u32) callconv(.winapi) ?*anyopaque;
 extern "user32" fn GetSystemMetrics(i32) callconv(.winapi) i32;
 extern "user32" fn SendMessageW(HWND, u32, usize, isize) callconv(.winapi) isize;
+extern "user32" fn ScreenToClient(HWND, *POINT) callconv(.winapi) i32;
+extern "user32" fn SetCapture(HWND) callconv(.winapi) HWND;
+extern "user32" fn ReleaseCapture() callconv(.winapi) i32;
+extern "user32" fn TrackMouseEvent(*TRACKMOUSEEVENT) callconv(.winapi) i32;
+extern "user32" fn SetCursor(?*anyopaque) callconv(.winapi) ?*anyopaque;
 
 extern "gdi32" fn CreateCompatibleDC(?*anyopaque) callconv(.winapi) ?*anyopaque;
 extern "gdi32" fn CreateCompatibleBitmap(?*anyopaque, i32, i32) callconv(.winapi) ?*anyopaque;
@@ -325,6 +332,148 @@ const MsgArgsVtbl = extern struct {
 };
 const MsgArgs = extern struct { vtbl: *const MsgArgsVtbl };
 
+// ── DirectComposition visual hosting (SDL_WEBVIEW_SURFACE_DESIGN §3.2, P1) ──
+// Opt-in via features.ui.shellHosting="visual". WebView2 then renders into OUR DComp visual instead
+// of a child HWND, which is what lets a future native surface sit UNDER the page (P2+). Price, per
+// the MS docs: the app forwards every SPATIAL input itself and owns the cursor. Keyboard/IME still
+// flow through the parent HWND. Every vtable below carries its inheritance chain; slots come from
+// dcomp.h (Windows Kits 10.0.26100) + the shipped mswebview2 WebView2.h, and were proven by the P0
+// spike - not guessed.
+
+const IUnknownVtbl = extern struct {
+    QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HResult,
+    AddRef: *const fn (*anyopaque) callconv(.winapi) u32,
+    Release: *const fn (*anyopaque) callconv(.winapi) u32,
+};
+const IUnknownObj = extern struct { v: *const IUnknownVtbl };
+const VOP = *const fn () callconv(.winapi) HResult; // opaque slot filler
+
+fn comQI(obj: *anyopaque, iid: *const GUID) ?*anyopaque {
+    const u: *IUnknownObj = @ptrCast(@alignCast(obj));
+    var out: ?*anyopaque = null;
+    if (u.v.QueryInterface(obj, iid, &out) < 0) return null;
+    return out;
+}
+
+fn comRelease(obj: ?*anyopaque) void {
+    const o = obj orelse return;
+    const u: *IUnknownObj = @ptrCast(@alignCast(o));
+    _ = u.v.Release(o);
+}
+
+const iid_dcomposition_device: GUID = .{ .d1 = 0xC37EA93A, .d2 = 0xE7AA, .d3 = 0x450D, .d4 = .{ 0xB1, 0x6F, 0x97, 0x46, 0xCB, 0x04, 0x07, 0xF3 } };
+const iid_dxgi_device: GUID = .{ .d1 = 0x54EC77FA, .d2 = 0x1377, .d3 = 0x44E6, .d4 = .{ 0x8C, 0x32, 0x88, 0xFD, 0x5F, 0x44, 0xC8, 0x4C } };
+const iid_environment3: GUID = .{ .d1 = 0x80A22AE3, .d2 = 0xBE7C, .d3 = 0x4CE2, .d4 = .{ 0xAF, 0xE1, 0x5A, 0x50, 0x05, 0x6C, 0xDE, 0xEB } };
+const iid_controller: GUID = .{ .d1 = 0x4D00C0D1, .d2 = 0x9434, .d3 = 0x4EB6, .d4 = .{ 0x80, 0x78, 0x86, 0x97, 0xA5, 0x60, 0x33, 0x4F } };
+const iid_controller2: GUID = .{ .d1 = 0xC979903E, .d2 = 0xD4CA, .d3 = 0x4228, .d4 = .{ 0x92, 0xEB, 0x47, 0xEE, 0x3F, 0xA9, 0x6E, 0xAB } };
+const iid_controller3: GUID = .{ .d1 = 0xF9614724, .d2 = 0x5D2B, .d3 = 0x41DC, .d4 = .{ 0xAE, 0xF7, 0x73, 0xD6, 0x2B, 0x51, 0x54, 0x3B } };
+
+// IDCompositionDevice : IUnknown (dcomp.h)
+//   3 Commit | 4 WaitForCommitCompletion | 5 GetFrameStatistics | 6 CreateTargetForHwnd
+//   7 CreateVisual | 8 CreateSurface | 9 CreateVirtualSurface | 10 CreateSurfaceFromHandle …
+const IDCompositionDevice = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        Commit: *const fn (*anyopaque) callconv(.winapi) HResult,
+        _p4: [2]VOP, // WaitForCommitCompletion GetFrameStatistics
+        CreateTargetForHwnd: *const fn (*anyopaque, HWND, i32, *?*IDCompositionTarget) callconv(.winapi) HResult,
+        CreateVisual: *const fn (*anyopaque, *?*IDCompositionVisual) callconv(.winapi) HResult,
+    },
+};
+
+// IDCompositionTarget : IUnknown (dcomp.h) — 3 SetRoot
+const IDCompositionTarget = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        SetRoot: *const fn (*anyopaque, ?*IDCompositionVisual) callconv(.winapi) HResult,
+    },
+};
+
+// IDCompositionVisual : IUnknown (dcomp.h)
+//   3,4 SetOffsetX(2 overloads) | 5,6 SetOffsetY(2) | 7,8 SetTransform(2) | 9 SetTransformParent
+//   10 SetEffect | 11 SetBitmapInterpolationMode | 12 SetBorderMode | 13,14 SetClip(2)
+//   15 SetContent | 16 AddVisual | 17 RemoveVisual | 18 RemoveAllVisuals | 19 SetCompositeMode
+// GOTCHA (P0, by execution): MSVC REVERSES same-name overload groups in the vtable, so
+// SetOffsetX(float) is slot 4, not 3 (slot3(NULL)=E_INVALIDARG, slot4(NULL)=S_OK). Same for
+// SetOffsetY(5/6), SetTransform(7/8), SetClip(13/14). SetContent/AddVisual sit AFTER every overload
+// group, so their indices are unambiguous - which is why P1 only declares those two.
+const IDCompositionVisual = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _p3: [12]VOP, // SetOffsetX(2) SetOffsetY(2) SetTransform(2) SetTransformParent SetEffect
+        //               SetBitmapInterpolationMode SetBorderMode SetClip(2)
+        SetContent: *const fn (*anyopaque, ?*anyopaque) callconv(.winapi) HResult,
+        AddVisual: *const fn (*anyopaque, *IDCompositionVisual, i32, ?*IDCompositionVisual) callconv(.winapi) HResult,
+    },
+};
+
+// IDXGIDevice : IDXGIObject : IUnknown (dxgi.h) — only QI'd, never called.
+// ICoreWebView2Environment3 : …Environment2 : …Environment : IUnknown (WebView2.h)
+//   3 CreateCoreWebView2Controller | 4 CreateWebResourceResponse | 5 get_BrowserVersionString
+//   6,7 add/remove_NewBrowserVersionAvailable | 8 CreateWebResourceRequest
+//   9 CreateCoreWebView2CompositionController | 10 CreateCoreWebView2PointerInfo
+const Environment3 = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _p3: [6]VOP, // CreateCoreWebView2Controller … CreateWebResourceRequest
+        CreateCoreWebView2CompositionController: *const fn (*anyopaque, HWND, *anyopaque) callconv(.winapi) HResult,
+    },
+};
+
+// ICoreWebView2CompositionController : IUnknown (WebView2.h)
+//   3 get_RootVisualTarget | 4 put_RootVisualTarget | 5 SendMouseInput | 6 SendPointerInput
+//   7 get_Cursor | 8 get_SystemCursorId | 9 add_CursorChanged | 10 remove_CursorChanged
+const CompController = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _get_RootVisualTarget: VOP,
+        put_RootVisualTarget: *const fn (*anyopaque, ?*anyopaque) callconv(.winapi) HResult,
+        SendMouseInput: *const fn (*anyopaque, u32, u32, u32, POINT) callconv(.winapi) HResult,
+        _SendPointerInput: VOP,
+        get_Cursor: *const fn (*anyopaque, *?*anyopaque) callconv(.winapi) HResult,
+        get_SystemCursorId: *const fn (*anyopaque, *u32) callconv(.winapi) HResult,
+        add_CursorChanged: *const fn (*anyopaque, *anyopaque, *EventRegistrationToken) callconv(.winapi) HResult,
+    },
+};
+
+// ICoreWebView2Controller3 : …Controller2 : …Controller : IUnknown (WebView2.h)
+//   3..25 = ICoreWebView2Controller (see ControllerVtbl) | 26,27 get/put_DefaultBackgroundColor
+//   28 get_RasterizationScale | 29 put_RasterizationScale | 30,31 get/put_ShouldDetectMonitorScale…
+const Controller3 = extern struct {
+    v: *const extern struct {
+        _iunk: [3]VOP,
+        _p3: [25]VOP, // get_IsVisible … put_DefaultBackgroundColor
+        get_RasterizationScale: *const fn (*anyopaque, *f64) callconv(.winapi) HResult,
+        put_RasterizationScale: *const fn (*anyopaque, f64) callconv(.winapi) HResult,
+    },
+};
+
+// COREWEBVIEW2_MOUSE_EVENT_KIND values ARE the WM_* constants (WebView2.h), so a forwarded message
+// needs no translation table - only coordinate + wheel-delta shaping (forwardMouse).
+const wm_mousemove: u32 = 0x0200;
+const wm_lbuttondown: u32 = 0x0201;
+const wm_lbuttonup: u32 = 0x0202;
+const wm_lbuttondblclk: u32 = 0x0203;
+const wm_rbuttondown: u32 = 0x0204;
+const wm_rbuttonup: u32 = 0x0205;
+const wm_rbuttondblclk: u32 = 0x0206;
+const wm_mbuttondown: u32 = 0x0207;
+const wm_mbuttonup: u32 = 0x0208;
+const wm_mbuttondblclk: u32 = 0x0209;
+const wm_mousewheel: u32 = 0x020A;
+const wm_xbuttondown: u32 = 0x020B;
+const wm_xbuttonup: u32 = 0x020C;
+const wm_xbuttondblclk: u32 = 0x020D;
+const wm_mousehwheel: u32 = 0x020E;
+const wm_mouseleave: u32 = 0x02A3;
+const wm_setcursor: u32 = 0x0020;
+const wm_dpichanged: u32 = 0x02E0;
+const tme_leave: u32 = 0x0002;
+const ht_client: u32 = 1;
+
+const DCompositionCreateDeviceFn = *const fn (?*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HResult;
+const D3D11CreateDeviceFn = *const fn (?*anyopaque, u32, ?*anyopaque, u32, ?[*]const u32, u32, u32, *?*anyopaque, ?*u32, ?*?*anyopaque) callconv(.winapi) HResult;
+
 // ── handler objects we implement (static lifetime; QI hands back self) ──
 
 const HandlerVtbl = extern struct {
@@ -357,6 +506,10 @@ pub const Shell = struct {
     init_h: i32,
     start_hidden: bool,
     allow_gpu: bool,
+    /// visual_hosting: composition hosting was ASKED for. Cleared the moment any step of the
+    /// bring-up fails, which is also the switch every input/bounds path reads - so a failed
+    /// composition attempt leaves a plain windowed shell, never half of each.
+    visual_hosting: bool,
     data_dir: []u8,
     boot_js: []u8, // shim + runtimeJS (document-start injection)
     initial_html: []u8,
@@ -366,6 +519,18 @@ pub const Shell = struct {
     controller: ?*Controller = null,
     webview: ?*WebView = null,
     web_ready: std.atomic.Value(bool) = .init(false),
+
+    // visual hosting state (window thread only)
+    env: ?*Environment = null, // kept so a failed composition can still create a windowed controller
+    comp: ?*CompController = null,
+    dcomp: ?*IDCompositionDevice = null,
+    dcomp_target: ?*IDCompositionTarget = null,
+    dcomp_root: ?*IDCompositionVisual = null,
+    dcomp_web: ?*IDCompositionVisual = null,
+    dxgi_dev: ?*anyopaque = null, // only when DComp refused a NULL device
+    cursor: ?*anyopaque = null, // last cursor from CursorChanged (the page's, applied by us)
+    mouse_tracked: bool = false, // WM_MOUSELEAVE armed
+    buttons_down: u32 = 0, // held-button bitmask; drives SetCapture/ReleaseCapture on drags
 
     focused: bool = false,
     minimized: bool = false,
@@ -559,23 +724,21 @@ fn windowThread(sh: *Shell) void {
     // Not cosmetic: with GPU compositing OFF, PrintWindow of a top-level hosting the controller
     // DIRECTLY captures white while the on-screen window is fine - parenting the controller to a
     // widget child is the arrangement the Go child's captures work under (proven by probe).
-    const widget_cls = std.unicode.utf8ToUtf16LeStringLiteral("rave_shell_widget");
     var wcw: WNDCLASSEXW = wc;
     wcw.lpfnWndProc = widgetProc;
     wcw.lpszClassName = widget_cls;
-    _ = RegisterClassExW(&wcw);
-    var cr: RECT = undefined;
-    _ = GetClientRect(hwnd, &cr);
-    const ws_child: u32 = 0x40000000;
-    const ws_ex_controlparent: u32 = 0x00010000;
-    const widget = CreateWindowExW(ws_ex_controlparent, widget_cls, std.unicode.utf8ToUtf16LeStringLiteral(""), ws_child, 0, 0, cr.right, cr.bottom, hwnd, null, wc.hInstance, null);
-    if (widget == 0) {
+    _ = RegisterClassExW(&wcw); // registered in BOTH modes: the visual path may still fall back
+    // Visual hosting has no widget child at all - WebView2 renders into a DComp visual and every
+    // mouse message lands on the top-level wndproc, which is what forwards it.
+    if (sh.visual_hosting and !buildVisualTree(sh, hwnd)) {
+        wire.errLine("rave-shell: DirectComposition bring-up failed - falling back to windowed hosting");
+        sh.visual_hosting = false;
+    }
+    if (!sh.visual_hosting and createWidgetWindow(sh, hwnd) == 0) {
         wire.errLine("rave-shell: widget CreateWindowExW failed");
         sh.em.event("gone", wire.Empty{});
         ExitProcess(1);
     }
-    _ = ShowWindow(widget, sw_show);
-    sh.widget.store(widget, .release);
 
     // GPU compositing off by default (good-neighbour; shell_cgo.go parity) - the loader reads
     // this env var when options are default.
@@ -616,6 +779,92 @@ fn applyOuterSize(sh: *Shell, hwnd: HWND, w: i32, h: i32) void {
     _ = SetWindowPos(hwnd, 0, 0, 0, r.right - r.left, r.bottom - r.top, 0x0002 | 0x0004 | 0x0010); // NOMOVE|NOZORDER|NOACTIVATE
 }
 
+const widget_cls = std.unicode.utf8ToUtf16LeStringLiteral("rave_shell_widget");
+
+/// createWidgetWindow makes the WS_CHILD host the WINDOWED controller parents to. Split out of
+/// windowThread because the visual path only needs it when it falls back mid-bring-up.
+fn createWidgetWindow(sh: *Shell, hwnd: HWND) HWND {
+    var cr: RECT = undefined;
+    _ = GetClientRect(hwnd, &cr);
+    const ws_child: u32 = 0x40000000;
+    const ws_ex_controlparent: u32 = 0x00010000;
+    const widget = CreateWindowExW(ws_ex_controlparent, widget_cls, std.unicode.utf8ToUtf16LeStringLiteral(""), ws_child, 0, 0, cr.right, cr.bottom, hwnd, null, GetModuleHandleW(null), null);
+    if (widget == 0) return 0;
+    _ = ShowWindow(widget, sw_show);
+    sh.widget.store(widget, .release);
+    return widget;
+}
+
+/// buildVisualTree stands up DComp: device → target(hwnd, topmost) → root → webview visual.
+/// §4.2's tree with its surface layer empty - P1 hosts the page and nothing else. false = this
+/// machine cannot composite; the caller goes windowed.
+fn buildVisualTree(sh: *Shell, hwnd: HWND) bool {
+    const lib = LoadLibraryW(std.unicode.utf8ToUtf16LeStringLiteral("dcomp.dll")) orelse return false;
+    const proc = GetProcAddress(lib, "DCompositionCreateDevice") orelse return false;
+    const create: DCompositionCreateDeviceFn = @ptrCast(@alignCast(proc));
+
+    var dev: ?*anyopaque = null;
+    // NULL DXGI device first: with zero surfaces the shell has no reason to hold a D3D11 device
+    // (and the GPU-fault blast radius of R7 shrinks with it). Only if the OS refuses do we make one.
+    if (create(null, &iid_dcomposition_device, &dev) < 0 or dev == null) {
+        sh.dxgi_dev = createDxgiDevice();
+        if (sh.dxgi_dev == null) return false;
+        if (create(sh.dxgi_dev, &iid_dcomposition_device, &dev) < 0 or dev == null) return false;
+    }
+    const dc: *IDCompositionDevice = @ptrCast(@alignCast(dev.?));
+    sh.dcomp = dc;
+
+    var target: ?*IDCompositionTarget = null;
+    if (dc.v.CreateTargetForHwnd(dev.?, hwnd, 1, &target) < 0 or target == null) return false; // topmost=TRUE
+    sh.dcomp_target = target;
+    inline for (.{ &sh.dcomp_root, &sh.dcomp_web }) |slot| {
+        var v: ?*IDCompositionVisual = null;
+        if (dc.v.CreateVisual(dev.?, &v) < 0 or v == null) return false;
+        slot.* = v;
+    }
+    const root = sh.dcomp_root.?;
+    // GOTCHA (MS docs, AddVisual Remarks, confirmed by P0): with referenceVisual = NULL the
+    // insertAbove flag is INVERTED - "if insertAbove is TRUE, the new child visual is above no
+    // sibling, therefore it is rendered BELOW all of its siblings". FALSE = on top, which is where
+    // the page belongs (P2's surface layer goes in with TRUE, underneath it).
+    if (root.v.AddVisual(@ptrCast(root), sh.dcomp_web.?, 0, null) < 0) return false;
+    if (target.?.v.SetRoot(@ptrCast(target.?), root) < 0) return false;
+    _ = dc.v.Commit(dev.?);
+    return true;
+}
+
+/// createDxgiDevice returns an IDXGIDevice from a D3D11 device (hardware, else WARP), or null.
+fn createDxgiDevice() ?*anyopaque {
+    const lib = LoadLibraryW(std.unicode.utf8ToUtf16LeStringLiteral("d3d11.dll")) orelse return null;
+    const proc = GetProcAddress(lib, "D3D11CreateDevice") orelse return null;
+    const create: D3D11CreateDeviceFn = @ptrCast(@alignCast(proc));
+    var d3d: ?*anyopaque = null;
+    // driver type 1 = HARDWARE, 5 = WARP; flag 0x20 = BGRA_SUPPORT; 7 = D3D11_SDK_VERSION
+    if (create(null, 1, null, 0x20, null, 0, 7, &d3d, null, null) < 0 or d3d == null) {
+        if (create(null, 5, null, 0x20, null, 0, 7, &d3d, null, null) < 0 or d3d == null) return null;
+    }
+    const dxgi = comQI(d3d.?, &iid_dxgi_device);
+    comRelease(d3d); // the DXGI interface keeps the same object alive
+    return dxgi;
+}
+
+/// releaseVisualTree unwinds the composition state (§4.6 quit row). Safe to call twice and safe
+/// when nothing was ever built.
+fn releaseVisualTree(sh: *Shell) void {
+    if (sh.dcomp_target) |t| _ = t.v.SetRoot(@ptrCast(t), null);
+    if (sh.dcomp) |dc| _ = dc.v.Commit(@ptrCast(dc));
+    comRelease(sh.dcomp_web);
+    comRelease(sh.dcomp_root);
+    comRelease(sh.dcomp_target);
+    comRelease(sh.dcomp);
+    comRelease(sh.dxgi_dev);
+    sh.dcomp_web = null;
+    sh.dcomp_root = null;
+    sh.dcomp_target = null;
+    sh.dcomp = null;
+    sh.dxgi_dev = null;
+}
+
 fn mkdirAll(gpa: std.mem.Allocator, path: []const u8) void {
     if (path.len == 0) return;
     var i: usize = 0;
@@ -640,6 +889,10 @@ var script_handler_vtbl: HandlerVtbl = .{ .QueryInterface = hQI, .AddRef = hAddR
 var script_handler: Handler = .{ .vtbl = &script_handler_vtbl };
 var msg_handler_vtbl: HandlerVtbl = .{ .QueryInterface = hQI, .AddRef = hAddRef, .Release = hRelease, .Invoke = msgInvoke };
 var msg_handler: Handler = .{ .vtbl = &msg_handler_vtbl };
+var comp_handler_vtbl: HandlerVtbl = .{ .QueryInterface = hQI, .AddRef = hAddRef, .Release = hRelease, .Invoke = compInvoke };
+var comp_handler: Handler = .{ .vtbl = &comp_handler_vtbl };
+var cursor_handler_vtbl: HandlerVtbl = .{ .QueryInterface = hQI, .AddRef = hAddRef, .Release = hRelease, .Invoke = cursorInvoke };
+var cursor_handler: Handler = .{ .vtbl = &cursor_handler_vtbl };
 
 const CreateEnvFn = *const fn (?[*:0]const u16, ?[*:0]const u16, ?*anyopaque, *Handler) callconv(.winapi) HResult;
 const CreateEnvInternalFn = *const fn (bool, i32, ?[*:0]const u16, ?*anyopaque, *Handler) callconv(.winapi) HResult;
@@ -712,8 +965,137 @@ fn envInvoke(_: *anyopaque, hr_or_env: usize, env_ptr: usize) callconv(.winapi) 
         ExitProcess(1);
     }
     const env: *Environment = @ptrFromInt(env_ptr);
+    _ = env.vtbl.AddRef(@ptrCast(env));
+    sh.env = env; // the windowed fallback re-enters through this same environment
+    if (sh.visual_hosting and startComposition(sh, env)) return 0;
     _ = env.vtbl.CreateCoreWebView2Controller(@ptrCast(env), sh.widget.load(.acquire), @ptrCast(&ctrl_handler));
     return 0;
+}
+
+/// startComposition asks for a composition controller. false = this runtime cannot do visual
+/// hosting AND the windowed prerequisites are back in place, so the caller just proceeds windowed.
+fn startComposition(sh: *Shell, env: *Environment) bool {
+    const e3any = comQI(@ptrCast(env), &iid_environment3) orelse {
+        prepareWindowedFallback(sh, "rave-shell: WebView2 runtime has no ICoreWebView2Environment3 - windowed hosting");
+        return false;
+    };
+    defer comRelease(e3any);
+    const e3: *Environment3 = @ptrCast(@alignCast(e3any));
+    // Parent HWND is the TOP-LEVEL window: it is what keyboard/IME/accessibility ride on, and in
+    // visual hosting no child window is created for the content.
+    if (e3.v.CreateCoreWebView2CompositionController(e3any, sh.hwnd.load(.acquire), @ptrCast(&comp_handler)) < 0) {
+        prepareWindowedFallback(sh, "rave-shell: CreateCoreWebView2CompositionController failed - windowed hosting");
+        return false;
+    }
+    return true;
+}
+
+/// prepareWindowedFallback drops every trace of the composition attempt and guarantees the widget
+/// the windowed controller needs. A broken flag must never leave the user with no UI.
+fn prepareWindowedFallback(sh: *Shell, msg: []const u8) void {
+    wire.errLine(msg);
+    sh.visual_hosting = false;
+    abandonComposition(sh);
+    releaseVisualTree(sh);
+    const hwnd = sh.hwnd.load(.acquire);
+    if (sh.widget.load(.acquire) == 0 and createWidgetWindow(sh, hwnd) == 0) {
+        wire.errLine("rave-shell: widget CreateWindowExW failed on fallback");
+        sh.em.event("gone", wire.Empty{});
+        ExitProcess(1);
+    }
+}
+
+/// fallbackWindowed is prepareWindowedFallback plus the retry, for failures that land AFTER the
+/// composition controller was requested (its completion handler is the only caller).
+fn fallbackWindowed(sh: *Shell, msg: []const u8) void {
+    prepareWindowedFallback(sh, msg);
+    const env = sh.env orelse {
+        wire.errLine("rave-shell: no environment to fall back with");
+        sh.em.event("gone", wire.Empty{});
+        ExitProcess(1);
+    };
+    _ = env.vtbl.CreateCoreWebView2Controller(@ptrCast(env), sh.widget.load(.acquire), @ptrCast(&ctrl_handler));
+}
+
+fn abandonComposition(sh: *Shell) void {
+    if (sh.controller) |c| {
+        _ = c.vtbl.Close(@ptrCast(c));
+        comRelease(@ptrCast(c));
+        sh.controller = null;
+    }
+    comRelease(@ptrCast(sh.comp));
+    sh.comp = null;
+    sh.cursor = null;
+}
+
+/// compInvoke: the composition controller is up. Bind it to our visual, then take the SAME
+/// controller-side path the windowed host uses (bounds, focus, settings, boot script).
+fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult {
+    const sh = g orelse return 0;
+    const hr: HResult = @bitCast(@as(u32, @truncate(hr_or)));
+    if (hr < 0 or ptr == 0) {
+        fallbackWindowed(sh, "rave-shell: composition controller creation failed - windowed hosting");
+        return 0;
+    }
+    const any: *anyopaque = @ptrFromInt(ptr);
+    const comp: *CompController = @ptrCast(@alignCast(any));
+    const unk: *IUnknownObj = @ptrCast(@alignCast(any));
+    _ = unk.v.AddRef(any);
+    sh.comp = comp;
+
+    const webvis = sh.dcomp_web orelse {
+        fallbackWindowed(sh, "rave-shell: no composition visual - windowed hosting");
+        return 0;
+    };
+    // "WebView will connect its visual tree to the provided visual before returning from the
+    // property setter. The app needs to commit on its device." (MS, ICoreWebView2CompositionController)
+    if (comp.v.put_RootVisualTarget(any, @ptrCast(webvis)) < 0) {
+        fallbackWindowed(sh, "rave-shell: put_RootVisualTarget failed - windowed hosting");
+        return 0;
+    }
+    if (sh.dcomp) |dc| _ = dc.v.Commit(@ptrCast(dc));
+
+    // Sizing/visibility/focus still come from ICoreWebView2Controller (§3.2), which the composition
+    // controller QIs to; Controller2 is the same object one interface up and answers the same slots.
+    const ctrl_any = comQI(any, &iid_controller) orelse comQI(any, &iid_controller2) orelse {
+        fallbackWindowed(sh, "rave-shell: composition controller has no ICoreWebView2Controller - windowed hosting");
+        return 0;
+    };
+    sh.controller = @ptrCast(@alignCast(ctrl_any));
+
+    var tok: EventRegistrationToken = .{ .value = 0 };
+    _ = comp.v.add_CursorChanged(any, @ptrCast(&cursor_handler), &tok); // the cursor is the app's now
+    applyRasterizationScale(sh);
+    return setupWebView(sh);
+}
+
+/// cursorInvoke mirrors the page's cursor onto the window. SetCursor here (not only on
+/// WM_SETCURSOR) is load-bearing: while a drag holds the capture Windows sends no WM_SETCURSOR at
+/// all, so this is the only place a mid-drag cursor change can land.
+fn cursorInvoke(_: *anyopaque, _: usize, _: usize) callconv(.winapi) HResult {
+    const sh = g orelse return 0;
+    const comp = sh.comp orelse return 0;
+    var cur: ?*anyopaque = null;
+    if (comp.v.get_Cursor(@ptrCast(comp), &cur) < 0) return 0;
+    sh.cursor = cur;
+    _ = SetCursor(cur);
+    return 0;
+}
+
+/// applyRasterizationScale keeps text crisp under visual hosting: WebView2 does not learn the
+/// window's DPI by itself here, so the scale is ours to set at bring-up and on every WM_DPICHANGED.
+/// Bounds stay RAW PIXELS (default BoundsMode), so only rasterization + the page's CSS viewport move.
+fn applyRasterizationScale(sh: *Shell) void {
+    const ctrl = sh.controller orelse return;
+    const c3any = comQI(@ptrCast(ctrl), &iid_controller3) orelse {
+        wire.errLine("rave-shell: no ICoreWebView2Controller3 - rasterization scale left at its default");
+        return;
+    };
+    defer comRelease(c3any);
+    const c3: *Controller3 = @ptrCast(@alignCast(c3any));
+    const dpi = GetDpiForWindow(sh.hwnd.load(.acquire));
+    const scale: f64 = if (dpi == 0) 1.0 else @as(f64, @floatFromInt(dpi)) / 96.0;
+    _ = c3.v.put_RasterizationScale(c3any, scale);
 }
 
 fn ctrlInvoke(_: *anyopaque, hr_or: usize, ctrl_ptr: usize) callconv(.winapi) HResult {
@@ -727,6 +1109,12 @@ fn ctrlInvoke(_: *anyopaque, hr_or: usize, ctrl_ptr: usize) callconv(.winapi) HR
     const ctrl: *Controller = @ptrFromInt(ctrl_ptr);
     _ = ctrl.vtbl.AddRef(@ptrCast(ctrl));
     sh.controller = ctrl;
+    return setupWebView(sh);
+}
+
+/// setupWebView is everything past "we have a controller" - identical for both hosting modes.
+fn setupWebView(sh: *Shell) HResult {
+    const ctrl = sh.controller orelse return 0;
     var wv: ?*WebView = null;
     _ = ctrl.vtbl.get_CoreWebView2(@ptrCast(ctrl), &wv);
     const webview = wv orelse {
@@ -804,12 +1192,18 @@ fn resizeWidget(sh: *Shell, main: HWND) void {
     boundsToClient(sh);
 }
 
+/// boundsToClient fits the controller to its host area: the widget child when windowed, the
+/// top-level client rect when visual (there is no widget then).
+/// GOTCHA (P0): put_Bounds reaches the renderer ASYNCHRONOUSLY - get_Bounds reads back the new rect
+/// immediately while the page's next layout can still use the old viewport, with a `resize` event
+/// behind it. Never derive page geometry from a read right after this call.
 fn boundsToClient(sh: *Shell) void {
     const ctrl = sh.controller orelse return;
-    const widget = sh.widget.load(.acquire);
-    if (widget == 0) return;
+    var host = sh.widget.load(.acquire);
+    if (sh.visual_hosting) host = sh.hwnd.load(.acquire);
+    if (host == 0) return;
     var r: RECT = undefined;
-    if (GetClientRect(widget, &r) == 0) return;
+    if (GetClientRect(host, &r) == 0) return;
     _ = ctrl.vtbl.put_Bounds(@ptrCast(ctrl), r);
     _ = ctrl.vtbl.put_IsVisible(@ptrCast(ctrl), 1);
 }
@@ -872,9 +1266,105 @@ fn widgetProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isiz
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+fn lpPoint(lp: isize) POINT {
+    const v: u32 = @truncate(@as(usize, @bitCast(lp)));
+    return .{
+        .x = @as(i16, @bitCast(@as(u16, @truncate(v)))),
+        .y = @as(i16, @bitCast(@as(u16, @truncate(v >> 16)))),
+    };
+}
+
+/// forwardMouse translates one mouse message into SendMouseInput. VISUAL HOSTING ONLY: WebView2 has
+/// no HWND here, so per MS "the app is responsible for forwarding this spatial input … and any
+/// necessary transformation of input positions into the WebView2's coordinate space" - bounds start
+/// at the client origin, so client coords go straight through. null = not a mouse message.
+fn forwardMouse(sh: *Shell, hwnd: HWND, msg: u32, wp: usize, lp: isize) ?isize {
+    const comp = sh.comp orelse return null;
+    var keys: u32 = 0;
+    var data: u32 = 0;
+    var pt: POINT = .{ .x = 0, .y = 0 };
+    switch (msg) {
+        wm_mousemove,
+        wm_lbuttondown,
+        wm_lbuttonup,
+        wm_lbuttondblclk,
+        wm_rbuttondown,
+        wm_rbuttonup,
+        wm_rbuttondblclk,
+        wm_mbuttondown,
+        wm_mbuttonup,
+        wm_mbuttondblclk,
+        => {
+            keys = @truncate(wp & 0xffff);
+            pt = lpPoint(lp);
+        },
+        wm_xbuttondown, wm_xbuttonup, wm_xbuttondblclk => {
+            keys = @truncate(wp & 0xffff);
+            data = @truncate((wp >> 16) & 0xffff); // XBUTTON1 / XBUTTON2 (mouse back/forward)
+            pt = lpPoint(lp);
+        },
+        wm_mousewheel, wm_mousehwheel => {
+            keys = @truncate(wp & 0xffff);
+            // The delta is a SIGNED short in the HIWORD; sign-extend to 32 bits so mouseData reads
+            // the same whether the runtime takes it as a short or an int (a raw HIWORD would scroll
+            // backwards and enormously under the int reading).
+            const delta: i32 = @as(i16, @bitCast(@as(u16, @truncate(wp >> 16))));
+            data = @bitCast(delta);
+            pt = lpPoint(lp);
+            _ = ScreenToClient(hwnd, &pt); // wheel messages carry SCREEN coords, unlike the rest
+        },
+        wm_mouseleave => sh.mouse_tracked = false, // point is ignored for LEAVE
+        else => return null,
+    }
+    switch (msg) {
+        wm_lbuttondown, wm_lbuttondblclk, wm_rbuttondown, wm_rbuttondblclk, wm_mbuttondown, wm_mbuttondblclk, wm_xbuttondown, wm_xbuttondblclk => {
+            // A drag that leaves the window must keep reaching the page (splitters, sliders, the
+            // resize grip): hold the capture while any button is down, release on the last up.
+            if (sh.buttons_down == 0) _ = SetCapture(hwnd);
+            sh.buttons_down += 1;
+        },
+        wm_lbuttonup, wm_rbuttonup, wm_mbuttonup, wm_xbuttonup => {
+            if (sh.buttons_down > 0) sh.buttons_down -= 1;
+            if (sh.buttons_down == 0) _ = ReleaseCapture();
+        },
+        wm_mousemove => {
+            if (!sh.mouse_tracked) {
+                var t: TRACKMOUSEEVENT = .{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = tme_leave, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                sh.mouse_tracked = TrackMouseEvent(&t) != 0; // arms exactly one WM_MOUSELEAVE
+            }
+        },
+        else => {},
+    }
+    _ = comp.v.SendMouseInput(@ptrCast(comp), msg, keys, data, pt);
+    // MS: an app that handles the X-button messages returns TRUE; everything else returns 0.
+    return switch (msg) {
+        wm_xbuttondown, wm_xbuttonup, wm_xbuttondblclk => 1,
+        else => 0,
+    };
+}
+
 fn wndProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isize {
     const sh = g orelse return DefWindowProcW(hwnd, msg, wp, lp);
+    if (sh.visual_hosting) {
+        if (forwardMouse(sh, hwnd, msg, wp, lp)) |r| return r;
+    }
     switch (msg) {
+        wm_setcursor => {
+            // Only the CLIENT area is the page's to style - handing the resize borders our cursor
+            // would cost the window its resize affordances. LOWORD(lParam) is the hit-test code.
+            if (sh.visual_hosting and (@as(u32, @truncate(@as(usize, @bitCast(lp)))) & 0xffff) == ht_client) {
+                if (sh.cursor) |c| {
+                    _ = SetCursor(c);
+                    return 1;
+                }
+            }
+        },
+        wm_dpichanged => {
+            // Visual hosting does not track DPI on its own; without this the page rasterizes at the
+            // old scale (blurry text) after a move to a differently-scaled monitor. Window geometry
+            // is left to DefWindowProc, exactly as in windowed mode.
+            if (sh.visual_hosting) applyRasterizationScale(sh);
+        },
         wm_app_frame => {
             const boxed: *UiMsg = @ptrFromInt(@as(usize, @bitCast(lp)));
             defer sh.gpa.destroy(boxed);
@@ -923,6 +1413,7 @@ fn wndProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isize {
             emitWin(sh);
         },
         wm_capturechanged => {
+            sh.buttons_down = 0; // capture lost without an up: forget the drag, don't wedge SetCapture
             if (sh.size_move) { // capture loss ends any drag - don't wait for a maybe-missing EXIT
                 sh.size_move = false;
                 emitWin(sh);
@@ -962,6 +1453,7 @@ fn wndProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isize {
             return 0;
         },
         wm_destroy => {
+            releaseVisualTree(sh); // §4.6: visuals → target → device, before the loop unwinds
             PostQuitMessage(0);
             return 0;
         },

@@ -152,6 +152,9 @@ func New(svc ui.Services) *UI {
 		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1)}
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
+		if svc.Cfg.Features.UI.VisualShellHosting() {
+			webviewShellHosting = "visual"
+		}
 	}
 	shellLog = svc.Log                                 // procShell + its featurehost Host log here (set before construction)
 	zigShellExe = resolveZigShellExe(svc.Cfg, svc.Log) // B6: "" = Go child (set before newShell)
