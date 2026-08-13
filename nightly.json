@@ -1,13 +1,13 @@
 {
-  "version": "nightly-d7734a6",
-  "build": 268,
-  "commit": "d7734a6",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-268-20260813-d7734a6.exe",
-  "sha256": "4c9140f2cfe7f3edbf2a61b4773c167af8d7e6744433992092fa0ae3775b5c7f",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-268-20260813-d7734a6.exe",
-  "installer_sha256": "24bbddb4de3d69c477aa8140adfface9af9d5307421e45269686dc21405c0da6",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-268-20260813-d7734a6",
-  "linux_sha256": "5d35ae0def7d8a8d4cdd1455bec108e01b4d8b8e6f89253d7c3cf8fec38c1c8c",
+  "version": "nightly-ee5235c",
+  "build": 269,
+  "commit": "ee5235c",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-269-20260813-ee5235c.exe",
+  "sha256": "d4fb87dd3c4f28207c49f9c8fabcec257f773280fcf27d9207d99f058eae7db8",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-269-20260813-ee5235c.exe",
+  "installer_sha256": "e6054363a3b7e3a465cd9eccd0ef0e0354b65270b96dc875905be84655efd396",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-269-20260813-ee5235c",
+  "linux_sha256": "73c38f70a6326472a7917ab55eb8018cfa8d5bfda03313161c1491adc747ecc2",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-13T14:28:44Z",
-  "notes": "feat(shell): P2 - surface manager in the Zig child + ctl can finally drive pointers"
+  "released": "2026-08-13T15:59:57Z",
+  "notes": "feat(surface): P3 - shared-texture frame ingest, proven with the testcard"
 }
