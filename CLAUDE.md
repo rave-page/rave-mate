@@ -46,6 +46,16 @@ Minimize tokens. Drop filler ("simply", "just", "in order to", "make sure that")
   ctl parity (snapshot/click/tap/type/read/set/screenshot) is preserved against the DOM.
   The Gio player (`internal/giokit`, `player_gio.go`) is untouched by this migration.
   Brand identity for the Fyne path still lives in `internal/ui/theme.go`.
+  **Superseded in direction by the Zig-owns-GUI rule below**: "Go renders every view" describes
+  today's tree, not the target. Ownership is inverting - see `.devnotes/UI_OWNERSHIP_ZIG.md`.
+- **Zig owns the GUI (HARD REQUIREMENT, owner directive 2026-08-13).** Frontend/GUI/presentation
+  is Zig (C/C++ where a library demands it); Go keeps computational + service logic (workers,
+  media producers, protocols, storage, state). New UI work is written Zig-first in
+  `native/zigui/`; the Go renderers in `internal/webui/render_*.go` stay ONLY as the byte-exact
+  golden reference for the migration gate and retire once a surface reaches parity - do not add
+  new view logic that has no Zig side. Anything with a rect, a visual, a frame or a pixel in it
+  (render surfaces, the visual tree, presenters, hit geometry) lives in the shell child, never in
+  the daemon. See `.devnotes/SDL_WEBVIEW_SURFACE_DESIGN.md` §1 directive #2.
 - **Supply chain: 7-day soak.** Never `go get pkg@latest`. Pin exact versions ≥7
   days old. See `SUPPLY_CHAIN.md`. Prefer the **stdlib** - every new direct dep needs
   a justification row in that file.

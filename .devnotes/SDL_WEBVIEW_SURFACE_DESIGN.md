@@ -24,6 +24,22 @@ input itself, `--disable-gpu-compositing` (today's good-neighbour default) proba
 If the P0 spike says input parity or `PrintWindow` can't be recovered → **stay on MSE**. MSE is not
 deleted by any phase here.
 
+**Owner directive (2026-08-13):** SDL3 not being the Windows presenter is accepted. Pick the most
+performant, most direct path per platform for demanding realtime 2D/3D — the requirement is that
+the SYSTEM works cross-platform, not that one library does. So: one `Surface` seam in Go, one
+per-platform presenter behind it (win = D3D11 + DComp; mac = WKWebView + CAMetalLayer sublayer;
+linux = WebKitGTK + GL/Wayland subsurface — both [UNVERIFIED], designed for, not built yet). SDL3
+stays in scope where it is genuinely the best tool (input/HID, device enumeration, and SDL_GPU as
+the *renderer* feeding our own presenter) rather than as the window/present layer.
+
+**Owner directive #2 (2026-08-13, HARD REQUIREMENT): Zig owns the GUI.** The surface seam - and
+the frontend/GUI layer generally - lives in Zig (with C/C++ where a library demands it). Go keeps
+computational/service logic: workers, media producers, protocols, storage, state. Concretely for
+this design: there is NO `internal/webui/surface.go` owning surfaces. The registry, lifetime,
+visual tree, rect tracking and presenter are all `native/zigui/src/shell/`. Go never holds a
+surface object, never learns a rect, and does not command open/close - the child derives that from
+the DOM it is already hosting.
+
 ---
 
 ## 2. Ground truth (read, not assumed)
@@ -180,32 +196,34 @@ IDCompositionTarget(hwnd, topmost=TRUE)
 Everything in the page composites over every surface. Tooltips, modals, smart-select, the resize
 grip: unchanged, no special-casing.
 
-### 4.3 Declaring a surface from Go
+### 4.3 Declaring a surface — data in the DOM, owned by the child
 
-Render state, not imperative calls — same shape as `data-mse` / `data-msestream` today.
-
-```go
-// internal/webui/surface.go
-type surfaceSpec struct {
-    ID   string // stable dom id + visual key, e.g. "editor-preview"
-    Kind string // "vfx" | "wave" | "vis"
-    W, H int    // producer render size (NOT the DOM rect)
-}
-```
-
-Component emits the hole (`internal/webui/components.go` neighbourhood):
+Per directive #2 the child OWNS surfaces. Go's only involvement is that its render state already
+emits the hole element, exactly like `data-mse` / `data-msestream` today:
 
 ```html
 <div id="surf-editor-preview" data-surface="editor-preview" data-surface-kind="vfx"
-     style="background:transparent"></div>
+     data-surface-w="1080" data-surface-h="1920" style="background:transparent"></div>
 ```
 
-Daemon side:
-- `patchMain` / `mpPatchVideo` decide a surface exists → send PSH1 `surface {op:"open", id, kind, w, h}`
-  on the **direct** lane, and start the producer via the existing `u.svc.Workers.RunStream` path.
-- Surface gone from render state → `surface {op:"close", id}` + cancel the producer ctx. Exactly
-  where `edvPrevStop` lives today (`editor_video_stream.go:334`).
-- Daemon **never** sends a rect. It does not know one.
+`native/zigui/src/shell/surfaces.zig` owns everything else:
+- **Discovery**: the runtime scans `[data-surface]` on load and after every `__patch` (the
+  `__mstScan` hook shape, `shell.go:187`) and reports the CURRENT set to the child. Appearance =
+  open, disappearance = close. No open/close command crosses from the daemon.
+- **Registry**: id → {visual, content, rect, dpr, visible, producer handle}. Capped (8).
+- **Visual tree + presenter**: created, transformed and destroyed here. Windows = D3D11 + DComp.
+- **Lifetime**: tab switch, modal, `__patch` that drops the element, window close - all resolve to
+  "the element is gone" and the child tears the visual down. Nothing to leak daemon-side.
+
+Go's remaining job is the *producer*, which is computational and stays where the repo's isolation
+rule puts it: a supervised worker child (`u.svc.Workers.RunStream`), started/stopped by the same
+code that does it today (`edvPrevStart`/`edvPrevStop`).
+
+**Handle exchange (preferred): out-of-band, no daemon hop.** The producer publishes its shared
+texture under a named convention (`Globalave-surface-<id>` + a keyed mutex - the pattern
+`native/zigenc/src/mf.zig` already uses for Spout-class sharing); the child opens it by name when
+the surface appears. Fallback if naming proves unworkable: a PSH1 `surface {op:"attach", id,
+handle}` message - the ONLY case where the daemon touches a surface, and only as a courier.
 
 ### 4.4 Rect / visibility / z sync — page → child, direct
 
@@ -217,10 +235,10 @@ New runtime-JS block in `shell.go` (transport only, no business logic — house 
 - Payload → binding shim, **new message kind** `{m:'s', v:[{id,x,y,w,h,vis,dpr}]}`, handled in
   `winshell.zig msgInvoke` and posted to the UI thread as a new `UiMsg.surface` variant.
 
-Why not via the daemon: a rect is pure view geometry. Routing it through `onAction` → act worker →
-eval queue would put it behind the **size-move hold** (`ui.go:918`) and the ordered lane's
-coalescing — the surface would lag the DOM by frames during exactly the drag/scroll where it must
-not. This split matches the existing contract (Go owns state, the child owns view transport).
+Why never via the daemon: a rect is pure view geometry, and per directive #2 view geometry is not
+Go's to hold. Routing it through `onAction` → act worker → eval queue would also put it behind the
+**size-move hold** (`ui.go:918`) and the ordered lane's coalescing — the surface would lag the DOM
+by frames during exactly the drag/scroll where it must not.
 
 Bounds: report array capped at 8 surfaces, drop-newest past that; report rate rAF-capped; identical
 consecutive rect = not sent.
