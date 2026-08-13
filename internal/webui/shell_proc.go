@@ -312,6 +312,12 @@ func (s *procShell) post(payload string) bool {
 	return s.sendDirect(procEvAct, procAct{Payload: payload})
 }
 
+// surfaceTest asks the child to open/close its own native-surface test hole (ctl surface-test).
+// Direct lane; the daemon learns nothing back - the surface lives and dies in the child.
+func (s *procShell) surfaceTest(on bool) bool {
+	return s.sendDirect(procEvSurfaceTest, procSurfaceTest{On: on})
+}
+
 // hwnd reports the child window's native handle. It is NOT a capture path (a foreign PrintWindow
 // renders black - see screenshot.go); it exists so ctl/diagnostics can name and find the window.
 func (s *procShell) hwnd() uintptr { return uintptr(s.hwndV.Load()) }

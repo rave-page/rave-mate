@@ -59,7 +59,15 @@ const ProcInit = struct {
 const binding_shim =
     "(function(){var pm=function(o){try{window.chrome.webview.postMessage(JSON.stringify(o))}catch(e){}};" ++
     "window.rave=function(p){pm({m:'a',p:''+p})};" ++
-    "window.__rave_evalResult=function(i,r){pm({m:'r',i:''+i,r:(r===void 0||r===null)?'':''+r})};})();\n";
+    "window.__rave_evalResult=function(i,r){pm({m:'r',i:''+i,r:(r===void 0||r===null)?'':''+r})};" ++
+    "window.__ravesurf=function(v,d){pm({m:'s',v:v,d:d})};})();\n";
+
+/// surfaces_js is the CHILD's own runtime (SDL_WEBVIEW_SURFACE_DESIGN §4.4): it discovers
+/// [data-surface] elements and reports their rects straight to the window over the binding. It is
+/// appended AFTER the daemon's runtimeJS on purpose - it wraps window.__patch, which that runtime
+/// defines. Per UI_OWNERSHIP_ZIG step 1, view transport for surfaces is born Zig-owned; the daemon
+/// never sees a rect.
+const surfaces_js = @embedFile("surfaces.js");
 
 const Child = struct {
     gpa: std.mem.Allocator,
@@ -186,7 +194,7 @@ fn handleInit(c: *Child, arena: std.mem.Allocator, fr: Frame) !void {
         .allow_gpu = ini.allowGpu,
         .visual_hosting = std.mem.eql(u8, ini.shellHosting, "visual"),
         .data_dir = try c.gpa.dupe(u8, ini.dataDir),
-        .boot_js = try std.mem.concat(c.gpa, u8, &.{ binding_shim, ini.runtimeJs }),
+        .boot_js = try std.mem.concat(c.gpa, u8, &.{ binding_shim, ini.runtimeJs, "\n", surfaces_js }),
         .initial_html = try c.gpa.dupe(u8, ini.initialHtml),
     };
     sh.streaming.store(ini.streaming, .seq_cst);
@@ -239,6 +247,11 @@ fn handleEvent(c: *Child, arena: std.mem.Allocator, event: []const u8, data: std
         } else {
             c.em.event("shotres", .{ .rid = d.rid, .err = "no window handle" });
         }
+    } else if (std.mem.eql(u8, event, "surfacetest")) {
+        // P2 verification hook: pure command plumbing on the Go side (one bool), all view logic here.
+        const D = struct { on: bool = false };
+        const d = parse(D, arena, data) orelse return;
+        if (c.sh) |sh| winshell.surfaceTest(sh, d.on);
     } else if (std.mem.eql(u8, event, "quit")) {
         const D = struct { graceMs: i64 = 0 };
         const d = parse(D, arena, data) orelse return;

@@ -12,6 +12,7 @@ const std = @import("std");
 const wire = @import("wire.zig");
 const sync = @import("sync.zig");
 const png = @import("png.zig");
+const sf = @import("surfaces.zig");
 
 // ── Win32 ────────────────────────────────────────────────────────────────────
 
@@ -436,13 +437,18 @@ const CompController = extern struct {
     },
 };
 
+/// COREWEBVIEW2_COLOR - 4 bytes, passed BY VALUE (one register under the Win64 ABI).
+const WebColor = extern struct { A: u8, R: u8, G: u8, B: u8 };
+
 // ICoreWebView2Controller3 : …Controller2 : …Controller : IUnknown (WebView2.h)
 //   3..25 = ICoreWebView2Controller (see ControllerVtbl) | 26,27 get/put_DefaultBackgroundColor
 //   28 get_RasterizationScale | 29 put_RasterizationScale | 30,31 get/put_ShouldDetectMonitorScale…
 const Controller3 = extern struct {
     v: *const extern struct {
         _iunk: [3]VOP,
-        _p3: [25]VOP, // get_IsVisible … put_DefaultBackgroundColor
+        _p3: [23]VOP, // get_IsVisible … get_CoreWebView2 (ICoreWebView2Controller)
+        _get_DefaultBackgroundColor: VOP,
+        put_DefaultBackgroundColor: *const fn (*anyopaque, WebColor) callconv(.winapi) HResult,
         get_RasterizationScale: *const fn (*anyopaque, *f64) callconv(.winapi) HResult,
         put_RasterizationScale: *const fn (*anyopaque, f64) callconv(.winapi) HResult,
     },
@@ -528,6 +534,8 @@ pub const Shell = struct {
     dcomp_target: ?*IDCompositionTarget = null,
     dcomp_root: ?*IDCompositionVisual = null,
     dcomp_web: ?*IDCompositionVisual = null,
+    dcomp_surf: ?*IDCompositionVisual = null, // §4.2 surfaceLayer, z BELOW dcomp_web
+    surfaces: ?*sf.Registry = null, // page-declared native surfaces (window thread only)
     dxgi_dev: ?*anyopaque = null, // only when DComp refused a NULL device
     cursor: ?*anyopaque = null, // last cursor from CursorChanged (the page's, applied by us)
     mouse_tracked: bool = false, // WM_MOUSELEAVE armed
@@ -627,6 +635,15 @@ fn actWorker(sh: *Shell) void {
         sh.em.event("action", .{ .payload = p });
         sh.gpa.free(p);
     }
+}
+
+/// surfaceTest toggles the child's own P2 test hole (ctl surface-test). The daemon carries a bool
+/// and nothing else - the element, its colour and its lifetime are all the child's, exactly like a
+/// real surface. Runs through the normal eval path so it lands on the UI thread.
+pub fn surfaceTest(sh: *Shell, on: bool) void {
+    const js = if (on) "window.__sfTest&&window.__sfTest(1);" else "window.__sfTest&&window.__sfTest(0);";
+    const copy = sh.gpa.dupe(u8, js) catch return;
+    postUi(sh, .{ .eval_js = copy });
 }
 
 /// setStreaming applies the governor's downstream signal (below-normal parity with the Go child).
@@ -740,6 +757,16 @@ fn windowThread(sh: *Shell) void {
         ExitProcess(1);
     }
 
+    // Transparent web background = the hole every native surface shows through (§3.2). Set via the
+    // ENV VAR, not put_DefaultBackgroundColor, because the property setter has a documented
+    // white-flicker at startup; the explicit put still runs later as the belt-and-braces proof.
+    // Invisible while the page paints an opaque body - which is every view today.
+    if (sh.visual_hosting) {
+        const bgname = std.unicode.utf8ToUtf16LeStringLiteral("WEBVIEW2_DEFAULT_BACKGROUND_COLOR");
+        if (GetEnvironmentVariableW(bgname, null, 0) == 0) {
+            _ = SetEnvironmentVariableW(bgname, std.unicode.utf8ToUtf16LeStringLiteral("00000000")); // AARRGGBB
+        }
+    }
     // GPU compositing off by default (good-neighbour; shell_cgo.go parity) - the loader reads
     // this env var when options are default.
     if (!sh.allow_gpu) {
@@ -795,9 +822,9 @@ fn createWidgetWindow(sh: *Shell, hwnd: HWND) HWND {
     return widget;
 }
 
-/// buildVisualTree stands up DComp: device → target(hwnd, topmost) → root → webview visual.
-/// §4.2's tree with its surface layer empty - P1 hosts the page and nothing else. false = this
-/// machine cannot composite; the caller goes windowed.
+/// buildVisualTree stands up DComp: device → target(hwnd, topmost) → root → {surface layer, webview
+/// visual}. §4.2's tree in full; the surface layer starts empty and fills from the DOM (surfaces.zig).
+/// false = this machine cannot composite; the caller goes windowed.
 fn buildVisualTree(sh: *Shell, hwnd: HWND) bool {
     const lib = LoadLibraryW(std.unicode.utf8ToUtf16LeStringLiteral("dcomp.dll")) orelse return false;
     const proc = GetProcAddress(lib, "DCompositionCreateDevice") orelse return false;
@@ -817,7 +844,7 @@ fn buildVisualTree(sh: *Shell, hwnd: HWND) bool {
     var target: ?*IDCompositionTarget = null;
     if (dc.v.CreateTargetForHwnd(dev.?, hwnd, 1, &target) < 0 or target == null) return false; // topmost=TRUE
     sh.dcomp_target = target;
-    inline for (.{ &sh.dcomp_root, &sh.dcomp_web }) |slot| {
+    inline for (.{ &sh.dcomp_root, &sh.dcomp_web, &sh.dcomp_surf }) |slot| {
         var v: ?*IDCompositionVisual = null;
         if (dc.v.CreateVisual(dev.?, &v) < 0 or v == null) return false;
         slot.* = v;
@@ -826,10 +853,15 @@ fn buildVisualTree(sh: *Shell, hwnd: HWND) bool {
     // GOTCHA (MS docs, AddVisual Remarks, confirmed by P0): with referenceVisual = NULL the
     // insertAbove flag is INVERTED - "if insertAbove is TRUE, the new child visual is above no
     // sibling, therefore it is rendered BELOW all of its siblings". FALSE = on top, which is where
-    // the page belongs (P2's surface layer goes in with TRUE, underneath it).
+    // the page belongs; the surface layer goes in with TRUE, underneath it.
     if (root.v.AddVisual(@ptrCast(root), sh.dcomp_web.?, 0, null) < 0) return false;
+    if (root.v.AddVisual(@ptrCast(root), sh.dcomp_surf.?, 1, null) < 0) return false;
     if (target.?.v.SetRoot(@ptrCast(target.?), root) < 0) return false;
     _ = dc.v.Commit(dev.?);
+
+    const reg = sh.gpa.create(sf.Registry) catch return false;
+    reg.* = sf.Registry.init(sh.gpa, @ptrCast(dc), @ptrCast(sh.dcomp_surf.?));
+    sh.surfaces = reg;
     return true;
 }
 
@@ -851,13 +883,20 @@ fn createDxgiDevice() ?*anyopaque {
 /// releaseVisualTree unwinds the composition state (§4.6 quit row). Safe to call twice and safe
 /// when nothing was ever built.
 fn releaseVisualTree(sh: *Shell) void {
+    if (sh.surfaces) |reg| { // surfaces first: their visuals are children of the layer below
+        reg.deinit();
+        sh.gpa.destroy(reg);
+        sh.surfaces = null;
+    }
     if (sh.dcomp_target) |t| _ = t.v.SetRoot(@ptrCast(t), null);
     if (sh.dcomp) |dc| _ = dc.v.Commit(@ptrCast(dc));
+    comRelease(sh.dcomp_surf);
     comRelease(sh.dcomp_web);
     comRelease(sh.dcomp_root);
     comRelease(sh.dcomp_target);
     comRelease(sh.dcomp);
     comRelease(sh.dxgi_dev);
+    sh.dcomp_surf = null;
     sh.dcomp_web = null;
     sh.dcomp_root = null;
     sh.dcomp_target = null;
@@ -1052,6 +1091,7 @@ fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult
     var tok: EventRegistrationToken = .{ .value = 0 };
     _ = comp.v.add_CursorChanged(any, @ptrCast(&cursor_handler), &tok); // the cursor is the app's now
     applyRasterizationScale(sh);
+    applyTransparentBackground(sh);
     // Say which host is live. Silence is how the stale-child bug hid for weeks; both modes announce.
     wire.errLine("rave-shell: visual hosting ACTIVE (DirectComposition)");
     return setupWebView(sh);
@@ -1084,6 +1124,20 @@ fn applyRasterizationScale(sh: *Shell) void {
     const dpi = GetDpiForWindow(sh.hwnd.load(.acquire));
     const scale: f64 = if (dpi == 0) 1.0 else @as(f64, @floatFromInt(dpi)) / 96.0;
     _ = c3.v.put_RasterizationScale(c3any, scale);
+}
+
+/// applyTransparentBackground states the hole contract explicitly: A=0 means "render hosting app
+/// content as the background" (ICoreWebView2Controller2), i.e. our surface layer shows through
+/// wherever the page is transparent. Alpha must be 0 or 255 - anything else is E_INVALIDARG, which
+/// would also be the first sign the 4-byte-struct-by-value ABI is wrong, so a failure is LOUD.
+fn applyTransparentBackground(sh: *Shell) void {
+    const ctrl = sh.controller orelse return;
+    const c3any = comQI(@ptrCast(ctrl), &iid_controller3) orelse return; // already warned above
+    defer comRelease(c3any);
+    const c3: *Controller3 = @ptrCast(@alignCast(c3any));
+    if (c3.v.put_DefaultBackgroundColor(c3any, .{ .A = 0, .R = 0, .G = 0, .B = 0 }) < 0) {
+        wire.errLine("rave-shell: put_DefaultBackgroundColor(A=0) FAILED - native surfaces cannot show through the page");
+    }
 }
 
 fn ctrlInvoke(_: *anyopaque, hr_or: usize, ctrl_ptr: usize) callconv(.winapi) HResult {
@@ -1227,8 +1281,56 @@ fn msgInvoke(_: *anyopaque, _: usize, args_ptr: usize) callconv(.winapi) HResult
         } else {
             sh.em.event("evalres", .{ .id = b.i, .result = b.r });
         }
+    } else if (std.mem.eql(u8, b.m, "s")) {
+        applySurfaces(sh, arena_state.allocator(), text);
     }
     return 0;
+}
+
+// ── page → surface registry (§4.4) ──
+// WebMessageReceived is delivered ON the window's UI thread, so the report is applied inline: no
+// PostMessage hop, no queue, no extra frame of lag between the DOM's rect and the visual's. That
+// matters - R4 kills the whole design if the surface lags the page during a scroll or a drag.
+
+const SurfRep = struct {
+    id: []const u8 = "",
+    x: f64 = 0,
+    y: f64 = 0,
+    w: f64 = 0,
+    h: f64 = 0,
+    vis: bool = false,
+    dpr: f64 = 1,
+    c: []const u8 = "", // data-surface-color, "" = derive from the id hash
+};
+const SurfWire = struct { v: []const SurfRep = &.{}, d: u32 = 0 };
+
+fn applySurfaces(sh: *Shell, arena: std.mem.Allocator, text: []const u8) void {
+    const reg = sh.surfaces orelse return; // windowed hosting has no visual tree to put them in
+    const m = std.json.parseFromSliceLeaky(SurfWire, arena, text, .{ .ignore_unknown_fields = true }) catch return;
+    var buf: [sf.cap]sf.Report = undefined;
+    var n: usize = 0;
+    for (m.v) |r| {
+        if (n >= buf.len) break; // the reporter caps at the same number; m.d carries the overflow
+        buf[n] = .{
+            .id = r.id,
+            .x = @floatCast(r.x),
+            .y = @floatCast(r.y),
+            .w = @floatCast(r.w),
+            .h = @floatCast(r.h),
+            .vis = r.vis,
+            .dpr = @floatCast(r.dpr),
+            .color = parseHexColor(r.c),
+        };
+        n += 1;
+    }
+    reg.apply(buf[0..n], m.d);
+}
+
+/// parseHexColor reads "rrggbb" / "#rrggbb"; anything else = null (id-hash colour).
+fn parseHexColor(s: []const u8) ?u32 {
+    const t = if (s.len > 0 and s[0] == '#') s[1..] else s;
+    if (t.len != 6) return null;
+    return std.fmt.parseInt(u32, t, 16) catch null;
 }
 
 // ── wndproc (sizemove_windows.go behavior parity) ──

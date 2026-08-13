@@ -110,6 +110,16 @@ func (u *UI) Tap(x, y float32) bool {
 	return u.evalBool(fmt.Sprintf("return window.__tap(%g,%g)", x, y))
 }
 
+// Drag plays a real pointer gesture from (x,y) to (x2,y2) on the [data-actpos] surface under the
+// start point - the only way ctl can reach waveform seek/pan, trim handles or the resize grip
+// (Tap's synthetic click never fires pointer events). Equal points = a click.
+func (u *UI) Drag(x, y, x2, y2 float32) bool {
+	if u.shell == nil {
+		return false
+	}
+	return u.evalBool(fmt.Sprintf("return window.__drag(%g,%g,%g,%g)", x, y, x2, y2))
+}
+
 // TapSecondary right-clicks at (x,y): fires the context menu for the [data-ctx] element there.
 func (u *UI) TapSecondary(x, y float32) bool {
 	if u.shell == nil {
@@ -172,6 +182,23 @@ func (u *UI) Scroll(y float32) bool {
 	}
 	u.eval(fmt.Sprintf("var m=document.getElementById('main');if(m){m.scrollTop=%.0f}", y))
 	return true
+}
+
+// SurfaceTest toggles the window child's native-surface test hole (ctl surface-test) - the P2
+// verification hook for SDL_WEBVIEW_SURFACE_DESIGN. Only the proc shell hosting the Zig child can
+// composite, so it is resolved by type assertion and every other host answers "unsupported".
+func (u *UI) SurfaceTest(on bool) string {
+	st, ok := u.shell.(interface{ surfaceTest(on bool) bool })
+	if !ok {
+		return "unsupported (needs the zig window child under visual hosting)"
+	}
+	if !st.surfaceTest(on) {
+		return "failed (window child lane full or gone)"
+	}
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // Screenshot captures the whole window to a PNG (OS window capture off the native HWND).

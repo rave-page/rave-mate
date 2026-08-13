@@ -517,8 +517,9 @@ func remotePprofArgs(args []string, name string) (path string, seconds int, node
 func runCtl(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: rave-mate ctl <status|snapshot|logs|show|tab NAME|quit|\n"+
-			"                       resize WxH|click LABEL|act ACT [VAL]|tap X Y|type TEXT|read LABEL|\n"+
+			"                       resize WxH|click LABEL|act ACT [VAL]|tap X Y|drag X Y [X2 Y2]|type TEXT|read LABEL|\n"+
 			"                       set LABEL VALUE|screenshot PATH|screenshot-all DIR|screenshot-region PATH X Y W H|screenshot-vr PATH|\n"+
+			"                       surface-test on|off|\n"+
 			"                       gio-snapshot [WINDOWID]|gio-tap WINDOWID CONTROLID|\n"+
 			"                       sync-library|library-sync-status|sync-media [BUDGET]|media-sync-status|\n"+
 			"                       sync-playlists|playlist-sync-status|cleanup-missing [dry]|\n"+
@@ -792,6 +793,21 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
+	case "drag": // real pointer gesture: reaches [data-actpos] surfaces that tap's click() cannot
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl drag <x> <y> [<x2> <y2>]")
+			return 2
+		}
+		dargs := args[1] + " " + args[2]
+		if len(args) >= 5 {
+			dargs += " " + args[3] + " " + args[4]
+		}
+		resp, err := app.Send("DRAG " + dargs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println(resp)
 	case "tap":
 		if len(args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl tap <x> <y>")
@@ -855,6 +871,22 @@ func runCtl(args []string) int {
 			return 2
 		}
 		resp, err := app.Send("SCREENSHOT " + args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ctl:", err)
+			return 1
+		}
+		fmt.Println(resp)
+	case "surface-test": // P2 verification: open/close the window child's native render surface
+		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl surface-test on|off\n"+
+				"  Injects a [data-surface] hole into the live page FROM THE WINDOW CHILD and opens a\n"+
+				"  DirectComposition visual under it (solid colour, no producer). Proves the hole, the\n"+
+				"  z-order (page content, modals and smart-select panels still draw ON TOP) and the rect\n"+
+				"  tracking on scroll/resize. Needs the zig window child under visual hosting\n"+
+				"  (features.ui.shellHosting=\"visual\", the default). Leave it OFF when you are done.")
+			return 2
+		}
+		resp, err := app.Send("SURFACE-TEST " + args[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

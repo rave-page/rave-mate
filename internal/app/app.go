@@ -2668,6 +2668,21 @@ func (c *appControl) Tap(x, y float32) bool {
 	return c.ui.Tap(x, y)
 }
 
+// Drag plays a real pointer gesture (down→move→up) so ctl can reach [data-actpos] surfaces.
+func (c *appControl) Drag(x, y, x2, y2 float32) bool {
+	if c.ui == nil {
+		return false
+	}
+	type dragger interface {
+		Drag(x, y, x2, y2 float32) bool
+	}
+	d, ok := c.ui.(dragger)
+	if !ok {
+		return false
+	}
+	return d.Drag(x, y, x2, y2)
+}
+
 func (c *appControl) TapSecondary(x, y float32) bool {
 	if c.ui == nil {
 		return false
@@ -2701,6 +2716,17 @@ func (c *appControl) Set(query, value string) bool {
 func (c *appControl) Scroll(y float32) bool {
 	s, ok := c.ui.(interface{ Scroll(y float32) bool })
 	return ok && s.Scroll(y)
+}
+
+// SurfaceTest toggles the window child's native render-surface test hole (ctl surface-test).
+// Webview renderer only - resolved by type assertion, same as Scroll, so the frontend seam stays
+// untouched. Pure command plumbing: the daemon holds no surface and learns no rect.
+func (c *appControl) SurfaceTest(on bool) string {
+	s, ok := c.ui.(interface{ SurfaceTest(on bool) string })
+	if !ok {
+		return "unsupported (webview renderer only)"
+	}
+	return s.SurfaceTest(on)
 }
 
 func (c *appControl) Screenshot(path string) bool {

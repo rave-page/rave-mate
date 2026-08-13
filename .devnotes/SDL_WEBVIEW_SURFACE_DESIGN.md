@@ -403,12 +403,52 @@ IME/non-ASCII typing not exercised either. `scripts/build-zig.ps1` did not stage
 a STALE window child - fixed in that script; without it this phase silently no-ops.
 
 ### P2 — Surface manager + solid-colour test surface
-Go `internal/webui/surface.go` + `data-surface` in the component layer + PSH1 `surface` events;
-Zig `native/zigui/src/shell/surfaces.zig`; runtime-JS rect reporter (`{m:'s'}`).
-Content = a solid colour picked in the child. No producer, no frames.
-**Verify:** `ctl` opens a test card on Live; `ctl screenshot` shows the colour under the hole;
-scroll a long pane → surface tracks with no visible lag; resize the window; open a modal over it;
-switch tab → visual gone; `ctl quit` → clean exit, no leaked visual.
+Zig `native/zigui/src/shell/surfaces.zig` + the child's own rect reporter (`{m:'s'}`). NO
+`internal/webui/surface.go` and no `surface` open/close events - per §1 directive #2 and §4.3 the
+child derives the set from the DOM. Content = a solid colour picked in the child. No producer, no
+frames.
+**Verify:** `ctl` opens a test hole; `ctl screenshot` shows the colour under it; scroll a long pane
+→ surface tracks with no visible lag; resize the window; open a modal over it; switch tab → visual
+gone; `ctl quit` → clean exit, no leaked visual.
+
+#### P2 result (2026-08-13) — built and verified on this rig
+
+`native/zigui/src/shell/surfaces.zig` (registry: id → visual + composition swapchain + rect + colour,
+cap 8 drop-newest, lazy D3D11, one `Commit` per batch) + `surfaces.js` (`@embedFile`d into `boot_js`
+AFTER the daemon's runtimeJS; MutationObserver + ResizeObserver + IntersectionObserver + scroll/
+resize, rAF-coalesced, identical-consecutive dropped, `__patch` wrapped the `__mstScan` way).
+`winshell.zig` gains the §4.2 surface layer (`AddVisual(TRUE, NULL)` = below the webview visual),
+`WEBVIEW2_DEFAULT_BACKGROUND_COLOR=00000000` + `put_DefaultBackgroundColor(A=0)`, and applies the
+report INLINE in `msgInvoke` - WebMessageReceived already lands on the window's UI thread, so a
+PostMessage hop would have cost a frame in exactly the drag/scroll where R4 says it must not.
+Go carries one bool (`ctl surface-test on|off` → PSH1 `surfacetest`) and nothing else, ever.
+
+Seen by execution (`ctl screenshot`, eyeballed): solid colour fills the hole exactly to its dashed
+border; page text inside the hole draws OVER it; `.ss-panel` flipped up over it and a modal (plus
+its dimming backdrop, which BLENDS with the surface) draw over it; scrolling Library and Logs
+clips the visual precisely at the pane edge with no seam even when the screenshot is taken with no
+settle delay; resize + maximize track; tab switch removes the element and the visual with it;
+`screenshot-all` = 14 tabs / 0 errors / 0 ⚠OVERFLOW, and with the test off the UI is
+pixel-identical to the pre-change baseline; `ctl quit` leaves no rave-shell/rave-mate process.
+
+**Found by execution:**
+
+1. **`DXGI_ALPHA_MODE_PREMULTIPLIED` is 1, not 2** (2 is STRAIGHT, which a composition swapchain
+   rejects with E_INVALIDARG). Every COM failure path here now logs its HRESULT for that reason.
+2. **A page-declared surface cannot show through an opaque page.** `put_DefaultBackgroundColor(A=0)`
+   only makes the WEBVIEW transparent; `body`'s own background still paints over the hole. So a
+   surface build has to move the app's background off the canvas - the test does it the way a
+   shipped build would: `html,body{background:transparent}` plus a full-viewport `[data-surface]`
+   carrying body's colour. §4.3's HTML example (`style="background:transparent"` on the hole alone)
+   is NOT sufficient and should be read as necessary-but-not-enough.
+3. **`IDCompositionVisual::SetClip` is avoided entirely.** dcomp.h does not state unambiguously
+   whether its rect is parent- or local-space, so the reporter intersects the element rect with
+   every scrolling ancestor and the child sizes the swapchain to the VISIBLE rect. Fine for a solid
+   colour; P3 must revisit it, because a real frame producer cannot have its picture squashed by a
+   partially scrolled-out element.
+
+Not exercised: the cap-8 drop path (never had 9 surfaces), non-96-dpi (R8 still open from P1), and
+a real mouse-wheel scroll (ctl drives `scrollTop`, which fires the same `scroll` event).
 
 ### P3 — Frame ingest via shared texture, testcard producer
 Lift D3D11/DXGI decls out of `native/zigenc/src/mf.zig` into a shared Zig module. Producer =

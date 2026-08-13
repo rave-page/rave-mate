@@ -449,6 +449,21 @@ const runtimeJS = `(function(){
     // synthetic click() never focuses - focus editable targets so a following ctl type works
     if(el.matches && el.matches('input,textarea')) el.focus();
     return true; } return false; };
+  // __drag(x,y,x2,y2) plays a REAL pointer gesture: down at (x,y), optional move, up at (x2,y2).
+  // ctl's __tap is a synthetic el.click(), which never produces pointer events - so every
+  // [data-actpos] surface (waveform seek/pan, trim handles, the editor's reframe box, the preview
+  // resize grip) was unreachable from ctl and could only be verified by hand. This closes that.
+  window.__drag = function(x,y,x2,y2){
+    var el=document.elementFromPoint(x,y); if(!el) return false;
+    if(!(el.closest && el.closest('[data-actpos]'))) return false;
+    var mk=function(t,px,py){ return new PointerEvent(t,{clientX:px,clientY:py,bubbles:true,
+      cancelable:true,button:0,buttons:1,pointerId:7,pointerType:'mouse',isPrimary:true}); };
+    el.dispatchEvent(mk('pointerdown',x,y));
+    if(x2!==x || y2!==y){ document.dispatchEvent(mk('pointermove',x2,y2)); }
+    document.dispatchEvent(new PointerEvent('pointerup',{clientX:x2,clientY:y2,bubbles:true,
+      cancelable:true,button:0,buttons:0,pointerId:7,pointerType:'mouse',isPrimary:true}));
+    return true;
+  };
   // right-click context menu: an element with [data-ctx] forwards its act on contextmenu (Go opens
   // the menu modal). __ctx(x,y) is the ctl equivalent (TapSecondary) for verification.
   document.addEventListener('contextmenu', function(e){

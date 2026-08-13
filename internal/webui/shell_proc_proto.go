@@ -35,6 +35,10 @@ const (
 	procEvQuit   = "quit"       // direct: close the window, then exit (procQuit)
 	procEvStream = "streaming"  // direct: governor streaming signal (procStream)
 	procEvShot   = "screenshot" // direct: capture the window to a path (procShot) → procEvShotRes
+	// procEvSurfaceTest toggles the CHILD's native-surface test hole (ctl surface-test). Pure
+	// command plumbing: one bool crosses, and nothing else ever does - the element, its rect, its
+	// colour and its lifetime are the child's (SDL_WEBVIEW_SURFACE_DESIGN §1 directive #2, §4.3).
+	procEvSurfaceTest = "surfacetest" // direct
 )
 
 // Child → parent events.
@@ -111,6 +115,11 @@ type procQuit struct {
 }
 
 type procStream struct {
+	On bool `json:"on"`
+}
+
+// procSurfaceTest is the whole surface-test wire: a bool. No id, no rect, no colour.
+type procSurfaceTest struct {
 	On bool `json:"on"`
 }
 

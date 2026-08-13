@@ -41,10 +41,12 @@ type Control interface {
 	Click(query string) bool                               // tap a button/check/tab by label; false if no match / service mode
 	Act(act, val string) bool                              // post a raw UI action through the page act pipeline (webview renderer only)
 	Tap(x, y float32) bool                                 // tap the topmost leaf at canvas coords; false if no hit / service mode
+	Drag(x, y, x2, y2 float32) bool                        // real pointer gesture (down→move→up) on the [data-actpos] surface at (x,y)
 	TapSecondary(x, y float32) bool                        // right-click: fire the deepest SecondaryTappable (context menus); false if no hit / service
 	Type(text string) bool                                 // append text to the focused Entry; false if no entry / service mode
 	Read(query string) (string, bool)                      // current value of a leaf matched by label; ("", false) on miss / service
 	Set(query, value string) bool                          // mutate Entry/Select/Check matched by label; false on miss / service
+	SurfaceTest(on bool) string                            // toggle the window child's native-surface test hole (ctl surface-test); status line
 	Screenshot(path string) bool                           // capture the window to a PNG at path; false on failure / service mode
 	ScreenshotAll(dir string) string                       // sweep EVERY tab (+scroll positions) to PNGs + report.txt in dir; status line
 	ScreenshotRegion(path string, x, y, w, h float32) bool // capture a sub-rect; false on failure / service
@@ -225,6 +227,20 @@ func handleConn(conn net.Conn, ctrl Control) {
 		} else {
 			fmt.Fprintln(conn, "no hit")
 		}
+	case strings.HasPrefix(cmd, "DRAG "):
+		var x, y, x2, y2 float32
+		n, err := fmt.Sscanf(strings.TrimSpace(cmd[len("DRAG "):]), "%f %f %f %f", &x, &y, &x2, &y2)
+		if err != nil && n == 2 { // two args = a click at that point
+			x2, y2 = x, y
+		} else if n < 2 {
+			fmt.Fprintln(conn, "usage: drag X Y [X2 Y2]")
+			return
+		}
+		if ctrl.Drag(x, y, x2, y2) {
+			fmt.Fprintln(conn, "ok")
+		} else {
+			fmt.Fprintln(conn, "no hit")
+		}
 	case strings.HasPrefix(cmd, "TAP "):
 		var x, y float32
 		if _, err := fmt.Sscanf(strings.TrimSpace(cmd[len("TAP "):]), "%f %f", &x, &y); err == nil && ctrl.Tap(x, y) {
@@ -256,6 +272,8 @@ func handleConn(conn net.Conn, ctrl Control) {
 		} else {
 			fmt.Fprintln(conn, "no match")
 		}
+	case strings.HasPrefix(cmd, "SURFACE-TEST "):
+		fmt.Fprintln(conn, ctrl.SurfaceTest(strings.EqualFold(strings.TrimSpace(cmd[len("SURFACE-TEST "):]), "on")))
 	case strings.HasPrefix(cmd, "SCREENSHOT-ALL "):
 		fmt.Fprintln(conn, ctrl.ScreenshotAll(strings.TrimSpace(cmd[len("SCREENSHOT-ALL "):])))
 	case strings.HasPrefix(cmd, "SCREENSHOT-REGION "):
