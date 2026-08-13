@@ -73,6 +73,8 @@ pub const Vid = struct {
     stream: []const u8 = "", // live /ms/ feed URL (realtime fx preview)
     streamMi: []const u8 = "",
     streamAu: bool = false,
+    grip: []const u8 = "", // "" = none; else the bottom-edge resize drag act
+    maxH: []const u8 = "", // "" = CSS default; else px height cap for the box
 };
 
 /// Wave is the #mp-<host>-wave inner.
@@ -355,7 +357,13 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     }
     if (!std.mem.eql(u8, s.kind, "video")) return;
 
-    try h.raw("<div class=mp-videobox><video id=");
+    try h.raw("<div class=mp-videobox");
+    if (s.maxH.len != 0) {
+        try h.raw(" style=\"max-height:");
+        try h.esc(s.maxH);
+        try h.raw("px\"");
+    }
+    try h.raw("><video id=");
     try attrComposite(h, "mp-vid-", s.host);
     try h.raw(" class=mp-video");
     if (s.stream.len != 0) {
@@ -397,7 +405,13 @@ pub fn renderVid(h: *Html, s: Vid) !void {
     try h.attrQ(s.onmeta);
     try h.raw(" onerror=");
     try h.attrQ(s.onerr);
-    try h.raw("></video></div>");
+    try h.raw("></video>");
+    if (s.grip.len != 0) {
+        try h.raw("<div class=mp-vgrip data-actsize=");
+        try h.attrQ(s.grip);
+        try h.raw("></div>");
+    }
+    try h.raw("</div>");
 }
 
 /// renderWave mirrors Go mpWaveHTMLOf.
@@ -703,6 +717,10 @@ test "video element: MSE variant replaces plain src" {
     h.b.clearRetainingCapacity();
     try renderVid(&h, .{ .host = "e", .kind = "video", .url = "u", .stream = "http://s/ms/t", .streamMi = "video/mp4", .streamAu = true });
     try std.testing.expect(std.mem.indexOf(u8, h.b.items, " data-msestream=\"http://s/ms/t\" data-msestream-mime=\"video/mp4\" autoplay preload=none") != null);
+    h.b.clearRetainingCapacity();
+    try renderVid(&h, .{ .host = "editor", .kind = "video", .url = "u", .grip = "edv-vsize", .maxH = "620" });
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "<div class=mp-videobox style=\"max-height:620px\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, h.b.items, "</video><div class=mp-vgrip data-actsize=\"edv-vsize\"></div></div>") != null);
     h.b.clearRetainingCapacity();
     try renderVid(&h, .{ .kind = "" });
     try std.testing.expectEqualStrings("", h.b.items);

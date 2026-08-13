@@ -49,13 +49,14 @@ type edvSt struct {
 	packBusy   bool // Vidvox ISF pack download in flight
 
 	// realtime preview pipeline (editor_video_stream.go)
-	prevGen     int                // generation: bump = supersede the running feed
-	prevCancel  context.CancelFunc // kills the vfx.stream worker (job object reaps ffmpeg×2+vfx)
-	prevRelease func()             // drops the /ms/ token
-	prevPath    string             // growing fMP4 file
-	prevWant    int                // restart debounce counter
-	prevPaused  time.Time          // element paused since (idle reap); zero = playing
-	prevH       int                // preview render height cap (0 = default 540)
+	prevGen      int                // generation: bump = supersede the running feed
+	prevCancel   context.CancelFunc // kills the vfx.stream worker (job object reaps ffmpeg×2+vfx)
+	prevRelease  func()             // drops the /ms/ token
+	prevPath     string             // growing fMP4 file
+	prevWant     int                // restart debounce counter
+	prevPaused   time.Time          // element paused since (idle reap); zero = playing
+	prevH        int                // preview render height cap (0 = default 540)
+	prevStarting bool               // a start is in flight: its feed isn't live yet (suppress stall respawns)
 
 	export edvExport
 }

@@ -87,6 +87,8 @@ type mpVidSt struct {
 	Stream   string `json:"stream"`   // live /ms/ feed URL (realtime fx preview; replaces src/MSE)
 	StreamMi string `json:"streamMi"` // MSE mime for the feed
 	StreamAu bool   `json:"streamAu"` // autoplay the fresh feed
+	Grip     string `json:"grip"`     // "" = none; else the act a bottom-edge resize drag reports to
+	MaxH     string `json:"maxH"`     // "" = CSS default; else px cap for the video box (drag-set)
 }
 
 // mpWaveSt is the #mp-<host>-wave inner: the RAW Go-computed SVG plus the chip overlay
@@ -320,14 +322,21 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 		return st
 	}
 	st.Kind, st.URL = "video", url
+	if mpVidGrip != nil { // host opt-in: resizable preview box (editor)
+		st.Grip, st.MaxH = mpVidGrip(u, t.host)
+	}
 	// element events → Go transport mirror (throttled to 1 Hz / state flips). The OUT-marker
 	// stop runs element-side first (sub-frame latency; the pause flip then rides the send).
-	st.Ev = `var o=parseFloat(this.dataset.out||'-1');` +
+	// isConnected guard: a patched-out element fires a dying pause/timeupdate on DOM removal -
+	// without the guard that stale event clobbers the fresh element's mirror after every
+	// stream-preview respawn (transport desync).
+	st.Ev = `if(!this.isConnected){return}` +
+		`var o=parseFloat(this.dataset.out||'-1');` +
 		`if(o>0&&!this.paused&&this.currentTime>=o){this.pause();try{this.currentTime=o}catch(e){}}` +
 		`var s=Math.floor(this.currentTime);var p=this.paused?'1':'0';` +
 		`if(String(s)!==this.dataset.s||p!==this.dataset.p){this.dataset.s=String(s);this.dataset.p=p;` +
 		`window.rave(JSON.stringify({act:'mp-vtick:` + t.host + `',val:this.currentTime+'|'+(this.duration||0)+'|'+p}))}`
-	st.OnErr = `window.rave(JSON.stringify({act:'mp-verr:` + t.host + `',val:''}))`
+	st.OnErr = `if(!this.isConnected){return}window.rave(JSON.stringify({act:'mp-verr:` + t.host + `',val:''}))`
 	if t.vid.strURL != "" { // realtime preview: element plays the live feed (clock = strT0-relative)
 		st.Stream, st.StreamMi, st.StreamAu = t.vid.strURL, t.vid.strMime, t.vid.strAuto
 	}
@@ -945,11 +954,19 @@ func mpVidHTMLOf(st mpVidSt) string {
 	if st.DataOut != "" {
 		trim += ` data-out=` + attrQ(st.DataOut)
 	}
-	return `<div class=mp-videobox><video id=` + attrQ("mp-vid-"+st.Host) + ` class=mp-video` + src +
+	box := `<div class=mp-videobox`
+	if st.MaxH != "" { // drag-set height cap: inline so it outranks the per-view CSS max-heights
+		box += ` style=` + attrQ("max-height:"+st.MaxH+"px")
+	}
+	grip := ""
+	if st.Grip != "" { // bottom-edge resize handle (shell.go [data-actsize] drag)
+		grip = `<div class=mp-vgrip data-actsize=` + attrQ(st.Grip) + `></div>`
+	}
+	return box + `><video id=` + attrQ("mp-vid-"+st.Host) + ` class=mp-video` + src +
 		` preload=none playsinline` + muted + trim +
 		` ontimeupdate=` + attrQ(st.Ev) + ` onplay=` + attrQ(st.Ev) + ` onpause=` + attrQ(st.Ev) +
 		` onseeked=` + attrQ(st.Ev) + ` onended=` + attrQ(st.Ev) + ` onloadedmetadata=` + attrQ(st.OnMeta) +
-		` onerror=` + attrQ(st.OnErr) + `></video></div>`
+		` onerror=` + attrQ(st.OnErr) + `></video>` + grip + `</div>`
 }
 
 func mpWaveHTMLOf(st mpWaveSt) string {

@@ -182,7 +182,20 @@ const runtimeJS = `(function(){
     var d={}; new FormData(f).forEach(function(v,k){ d[k]=v; });
     send({act: f.getAttribute('data-act'), form: JSON.stringify(d), id: __elId(f)});
   });
-  window.__patch = function(id, html){ var n=document.getElementById(id); if(n){ n.innerHTML = html;
+  // Scroll survival: innerHTML drops every descendant, so a patched list snaps to the top
+  // (fx chain re-render on a toggle). Remember scrollTop per id before the swap, restore
+  // after - id is the only stable handle across a full re-render.
+  function __scrollSave(n){ var m={}, els=n.querySelectorAll('[id]');
+    for(var i=0;i<els.length;i++){ var e=els[i]; if(e.scrollTop>0) m[e.getAttribute('id')]=e.scrollTop; }
+    if(n.scrollTop>0) m['\x00self']=n.scrollTop;
+    return m; }
+  function __scrollLoad(n,m){ for(var k in m){
+      if(k==='\x00self'){ n.scrollTop=m[k]; continue; }
+      var e=document.getElementById(k); if(e) e.scrollTop=m[k]; } }
+  window.__patch = function(id, html){ var n=document.getElementById(id); if(n){
+    var sc=__scrollSave(n);
+    n.innerHTML = html;
+    __scrollLoad(n, sc);
     if(html.indexOf('ss-panel')>=0) __ssplace();
     if(html.indexOf('data-msestream')>=0) __mstScan();
     else if(html.indexOf('data-mse')>=0) __mseScan(); } };
@@ -434,6 +447,27 @@ const runtimeJS = `(function(){
     var to=e.relatedTarget; if(to && el.contains(to)) return;
     send({act: el.getAttribute('data-acthover'), val: 'off'});
   }, true);
+  // vertical-resize grip: dragging [data-actsize] retunes its box's height cap LIVE (inline
+  // max-height, no round-trip - the video keeps playing), and reports the final px to Go on
+  // release so it persists. Go never re-renders on this: patching would rebuild the <video>.
+  var __szBox=null, __szBase=0, __szY=0, __szAct='', __szH=0;
+  document.addEventListener('pointerdown', function(e){
+    var el=e.target.closest && e.target.closest('[data-actsize]'); if(!el) return;
+    var box=el.parentElement; if(!box) return;
+    __szBox=box; __szAct=el.getAttribute('data-actsize');
+    __szBase=box.getBoundingClientRect().height; __szY=e.clientY; __szH=0;
+    try{ el.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault();
+  });
+  document.addEventListener('pointermove', function(e){
+    if(!__szBox) return;
+    __szH=Math.round(Math.min(Math.max(140, __szBase+(e.clientY-__szY)), window.innerHeight*0.94));
+    __szBox.style.maxHeight=__szH+'px';
+  });
+  document.addEventListener('pointerup', function(){
+    if(!__szBox) return; __szBox=null;
+    if(__szH>0) send({act: __szAct, val: ''+__szH});
+  });
   // ── tooltip (.tt, tooltip.go) + waveform-chip (.wchip, library.css) card layer ──
   // .tt cards PORTAL: while shown they re-parent into one fixed body-level layer
   // (#__ttlayer, above modals) so no ancestor overflow container or stacking context
@@ -869,7 +903,8 @@ const runtimeJS = `(function(){
     });
     v.addEventListener('waiting',function(){
       // producer ended and playback caught up → ask Go to respawn the pipeline here
-      if(st.eof&&!st.dead){ var host=v.id.replace('mp-vid-','');
+      // (never from a patched-out element - its stall is the handover, not a real drain)
+      if(st.eof&&!st.dead&&v.isConnected){ var host=v.id.replace('mp-vid-','');
         send({act:'mp-vstall:'+host, val:''+v.currentTime}); }
     });
     v.__mstURL=URL.createObjectURL(ms);

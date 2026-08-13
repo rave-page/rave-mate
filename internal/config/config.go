@@ -163,6 +163,7 @@ type Features struct {
 	OBS           OBSFeature          `json:"obs"`           // OBS obs-websocket control + settings validation
 	Library       Toggle              `json:"library"`       // native file browser + media metadata viewer
 	MediaEditor   Toggle              `json:"mediaEditor"`   // poster/thumbnail composer
+	Editor        EditorFeature       `json:"editor"`        // editor-tab view prefs (preview size + realtime render quality)
 	Player        PlayerFeature       `json:"player"`        // in-app video player (mpv engine; window-embed)
 	Fingerprint   Toggle              `json:"fingerprint"`   // Chromaprint fingerprinting (needs fpcalc)
 	VRChat        VRChatFeature       `json:"vrchat"`        // client-side VRChat API bridge
@@ -1830,6 +1831,13 @@ func (v VRChatFeature) ResolvedFlipbookDir() string {
 // Toggle is a feature with no config beyond on/off.
 type Toggle struct {
 	Enabled bool `json:"enabled"`
+}
+
+// EditorFeature holds editor-tab view preferences (no on/off - the tab is always
+// available). Zero values fall back to the renderer defaults.
+type EditorFeature struct {
+	PreviewViewH int `json:"previewViewH,omitempty"` // video preview box height cap in px (drag grip); 0 = CSS default
+	PreviewH     int `json:"previewH,omitempty"`     // realtime fx render height cap (quality selector); 0 = 540
 }
 
 // StreamBridgeFeature gates the live set → rave.page now-playing broadcast. Publishing is automatic,

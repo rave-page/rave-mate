@@ -7,8 +7,14 @@
 
 /* embedded video (loopback Range stream) */
 .mp-videobox { border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: #000;
-  display: flex; justify-content: center; }
+  display: flex; justify-content: center; position: relative; }
 .mp-video { display: block; width: 100%; max-height: 300px; border-radius: 9px; background: #000; }
+/* bottom-edge resize grip (hosts that opt in via mpVidGrip) */
+.mp-vgrip { position: absolute; left: 0; right: 0; bottom: -3px; height: 12px; cursor: ns-resize;
+  touch-action: none; z-index: 2; }
+.mp-vgrip::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
+  width: 46px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.25); transition: background .12s; }
+.mp-vgrip:hover::after { background: var(--rp-brand-mint, #08F79B); }
 .mp-viderr { display: flex; flex-direction: column; gap: 6px; }
 
 .mp-wavebox { position: relative; border: 1px solid rgba(255,255,255,.1); border-radius: 10px;

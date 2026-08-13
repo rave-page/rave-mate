@@ -105,6 +105,16 @@ func mpFixtures() map[string]mpSt {
 	t7.vid = mpVid{err: `NotSupportedError: "codec"`}
 	out["videoErr"] = t7
 
+	// editor host: realtime-preview feed + the resizable box (grip act + px cap)
+	te := base("editor")
+	te.media = []mpMedia{vid(600)}
+	te.name = "editor preview"
+	te.inSec, te.outSec = 4, 90
+	te.vid = mpVid{cur: 30, dur: 600, started: true,
+		strURL: "http://127.0.0.1:1/ms/s1/t1", strMime: `video/mp4; codecs="avc1.64002a,mp4a.40.2"`,
+		strT0: 30, strAuto: true}
+	out["videoEditorStream"] = te
+
 	dual := func(align mpAlignSt) mpSt {
 		t := base("publish")
 		ma, mv := aud(600), vid(590)

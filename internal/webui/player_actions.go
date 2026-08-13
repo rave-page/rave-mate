@@ -193,6 +193,10 @@ type mpVid struct {
 // the verb (transport skips its default element eval). Set by the editor.
 var mpStreamCtl func(u *UI, host, verb string, t float64) bool
 
+// mpVidGrip lets a host make its video box vertically resizable: returns the drag act
+// and the persisted height cap in px ("" = CSS default). Registered by the editor.
+var mpVidGrip func(u *UI, host string) (grip, maxH string)
+
 // mpLoud mirrors the transcode.loudtl worker JSON (was libLoud).
 type mpLoud struct {
 	I    float64   `json:"i"`
@@ -2002,7 +2006,7 @@ func init() {
 			return
 		}
 		cur, _ := strconv.ParseFloat(strings.TrimSpace(m.Val), 64)
-		mpStreamCtl(u, host, "seek", t.vid.strT0+cur)
+		mpStreamCtl(u, host, "stall", t.vid.strT0+cur)
 	})
 	onPrefix("mp-verr:", func(u *UI, m actMsg) {
 		t := u.mpMut(m.arg("mp-verr:"), func(v *mpSt) {

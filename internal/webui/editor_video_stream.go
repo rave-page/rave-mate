@@ -15,9 +15,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"rave.page/mate/internal/i18n"
 	"rave.page/mate/internal/mp4frag"
 	"rave.page/mate/internal/transcode"
 	"rave.page/mate/internal/vfx"
@@ -37,6 +37,21 @@ func init() {
 		case "seek":
 			if !u.edvPrevNeeded() {
 				return false // direct element handles it
+			}
+			u.edvPrevStart(t, !u.mpSnap("editor").vid.paused)
+			return true
+		case "stall":
+			// live feed drained. During a handover that's expected (the old feed was
+			// retired) - the fresh feed re-sources the element shortly; respawning here
+			// would supersede the in-flight start and storm the pipeline.
+			editor.mu.Lock()
+			starting := editor.video.prevStarting
+			editor.mu.Unlock()
+			if starting {
+				return true
+			}
+			if !u.edvPrevNeeded() {
+				return false
 			}
 			u.edvPrevStart(t, !u.mpSnap("editor").vid.paused)
 			return true
@@ -73,9 +88,51 @@ func init() {
 			return
 		}
 		u.edvMut(func(v *edvSt) { v.prevH = h })
+		if u.svc.Cfg != nil {
+			u.svc.Cfg.Features.Editor.PreviewH = h
+			u.saveCfgBG("edv-prevres", nil, nil)
+		}
 		u.edvPatchInsp()
 		u.edvPrevKick()
 	})
+	// preview box resized by its bottom-edge grip: the drag already applied the height
+	// client-side, so Go only persists it (a re-render would rebuild the playing <video>).
+	onExact("edv-vsize", func(u *UI, m actMsg) {
+		h, err := strconv.Atoi(strings.TrimSpace(m.Val))
+		if err != nil || h < 120 || u.svc.Cfg == nil {
+			return
+		}
+		u.svc.Cfg.Features.Editor.PreviewViewH = h
+		u.saveCfgBG("edv-vsize", nil, nil)
+	})
+	mpVidGrip = func(u *UI, host string) (string, string) {
+		if host != "editor" {
+			return "", ""
+		}
+		h := 0
+		if u.svc.Cfg != nil {
+			h = u.svc.Cfg.Features.Editor.PreviewViewH
+		}
+		if h <= 0 {
+			return "edv-vsize", ""
+		}
+		return "edv-vsize", strconv.Itoa(h)
+	}
+}
+
+// edvPrevH resolves the realtime render-height cap: session override, else the
+// persisted preference, else the default.
+func (u *UI) edvPrevH() int {
+	editor.mu.Lock()
+	h := editor.video.prevH
+	editor.mu.Unlock()
+	if h <= 0 && u.svc.Cfg != nil {
+		h = u.svc.Cfg.Features.Editor.PreviewH
+	}
+	if h <= 0 {
+		h = edvPrevDefaultH
+	}
+	return h
 }
 
 // edvPrevNeeded reports whether the preview needs the pipeline: any enabled
@@ -134,18 +191,15 @@ func (u *UI) edvPrevKick() {
 // starts the fresh element as soon as the feed opens.
 func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	srcW, srcH, _ := u.edvSrcDims()
+	prevH := u.edvPrevH()
 	editor.mu.Lock()
 	edvEnsure()
 	v := &editor.video
 	proj := v.proj
 	plugins := v.fxPlugins
-	prevH := v.prevH
 	editor.mu.Unlock()
 	if proj.Source == "" || !edvIsVideo(proj.Source) || srcW <= 0 || u.svc.Workers == nil {
 		return
-	}
-	if prevH <= 0 {
-		prevH = edvPrevDefaultH
 	}
 	if t < 0 {
 		t = 0
@@ -171,19 +225,17 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		return
 	}
 
+	// Make-before-break: the running pipeline + /ms/ stream stay ALIVE until the
+	// fresh feed is ready and the element re-sourced (or this start dies). Killing
+	// them up front drains the playing element mid-edit → stall → respawn storm.
 	editor.mu.Lock()
 	v.prevGen++
 	gen := v.prevGen
-	if v.prevCancel != nil {
-		v.prevCancel()
-		v.prevCancel = nil
-	}
-	if v.prevRelease != nil {
-		v.prevRelease()
-		v.prevRelease = nil
-	}
+	oldCancel, oldRelease, oldPath := v.prevCancel, v.prevRelease, v.prevPath
+	v.prevCancel, v.prevRelease = nil, nil
 	path := filepath.Join(dir, fmt.Sprintf("prev-%d.mp4", gen))
 	v.prevPath = path
+	v.prevStarting = true
 	v.prevPaused = time.Time{}
 	if !autoplay {
 		v.prevPaused = time.Now()
@@ -191,6 +243,25 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	v.prevCancel = cancel
 	editor.mu.Unlock()
+
+	var retireOnce sync.Once
+	retire := func() { // exactly-once teardown of the superseded feed
+		retireOnce.Do(func() {
+			if oldCancel != nil {
+				oldCancel()
+			}
+			if oldRelease != nil {
+				oldRelease()
+			}
+		})
+	}
+	unstart := func() { // this start is settled; a newer gen owns the flag past us
+		editor.mu.Lock()
+		if editor.video.prevGen == gen {
+			editor.video.prevStarting = false
+		}
+		editor.mu.Unlock()
+	}
 
 	done := make(chan struct{})
 	params := map[string]any{
@@ -206,24 +277,14 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		}
 	})
 	u.bg(func() { // wait for the init segment + first fragment, then re-source the element
-		if old, err := filepath.Glob(filepath.Join(dir, "prev-*.mp4")); err == nil {
-			for _, p := range old { // locked files (draining handlers) skip silently; next start retries
-				if p != path {
-					_ = os.Remove(p)
-				}
-			}
-		}
-		deadline := time.Now().Add(12 * time.Second)
-		for {
+		defer unstart()
+		for { // no give-up: a heavy chain renders slower than realtime - WAIT, never cancel
 			if u.stopped() || ctx.Err() != nil {
+				retire() // this start died; the old feed goes with it
 				return
 			}
 			if _, err := mp4frag.Parse(path); err == nil {
 				break
-			}
-			if time.Now().After(deadline) {
-				u.toast(i18n.T("editor.video.toast.prevSlow"))
-				return
 			}
 			time.Sleep(150 * time.Millisecond)
 		}
@@ -231,10 +292,12 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		stale := editor.video.prevGen != gen
 		editor.mu.Unlock()
 		if stale {
+			retire()
 			return
 		}
 		url, release := u.mpStreamURL(path, done)
 		if url == "" {
+			retire()
 			return
 		}
 		editor.mu.Lock()
@@ -247,6 +310,23 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		u.mpPatchVideo(mp)
 		u.mpPatchTransport(mp)
 		u.mpPushRealtime(mp)
+		retire()      // fresh feed is live - now drop the superseded pipeline + its token
+		u.bg(func() { // sweep retired segment files once their handlers have drained
+			time.Sleep(3 * time.Second)
+			if oldPath != "" && oldPath != path {
+				_ = os.Remove(oldPath)
+			}
+			if olds, err := filepath.Glob(filepath.Join(dir, "prev-*.mp4")); err == nil {
+				for _, p := range olds {
+					editor.mu.Lock()
+					cur := editor.video.prevPath
+					editor.mu.Unlock()
+					if p != cur {
+						_ = os.Remove(p) // locked (draining) files skip silently; next sweep retries
+					}
+				}
+			}
+		})
 	})
 }
 

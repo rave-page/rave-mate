@@ -203,7 +203,7 @@ pub fn renderInsp(h: *Html, s: State) !void {
         if (s.fxNone.len != 0) {
             try c.hint(h, "info", s.fxNone);
         }
-        try h.raw("<div class=edv-fx-list>");
+        try h.raw("<div id=edv-fxlist class=edv-fx-list>");
         for (s.fxRows) |r| {
             try renderFxRow(h, r);
         }

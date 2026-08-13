@@ -381,12 +381,7 @@ func (u *UI) edvFxState(st *edvViewState) {
 		}
 		st.FxRows = append(st.FxRows, row)
 	}
-	editor.mu.Lock()
-	prevH := editor.video.prevH
-	editor.mu.Unlock()
-	if prevH <= 0 {
-		prevH = edvPrevDefaultH
-	}
+	prevH := u.edvPrevH()
 	st.PrevRes = resolveSelectBox(i18n.T("editor.video.prevResLabel"), "edv-prevres", [][2]string{
 		{"1080", "1080p"}, {"720", "720p"}, {"540", "540p"}, {"360", "360p"}, {"240", "240p"},
 	}, strconv.Itoa(prevH))
@@ -696,7 +691,7 @@ func editorVideoInspHTML(st edvViewState) string {
 		if st.FxNone != "" {
 			b.WriteString(hint("info", st.FxNone))
 		}
-		b.WriteString(`<div class=edv-fx-list>`)
+		b.WriteString(`<div id=edv-fxlist class=edv-fx-list>`)
 		for _, r := range st.FxRows {
 			b.WriteString(edvFxRowHTML(r))
 		}
