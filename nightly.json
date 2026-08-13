@@ -1,13 +1,13 @@
 {
-  "version": "nightly-e5dad9b",
-  "build": 265,
-  "commit": "e5dad9b",
-  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-265-20260813-e5dad9b.exe",
-  "sha256": "441402d3a3a3e9e2145a6bc7368557daef822e9df75ba23941e55ce76f02937b",
-  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-265-20260813-e5dad9b.exe",
-  "installer_sha256": "471ef2b9e51258f2d27285ca0f1f6d6069aa070ff8232982580794b163410777",
-  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-265-20260813-e5dad9b",
-  "linux_sha256": "fb096d3d016129ae36ed321b78da8b3edbaa45da6a505a2aad5189fea180aef0",
+  "version": "nightly-b1577d1",
+  "build": 266,
+  "commit": "b1577d1",
+  "url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-266-20260813-b1577d1.exe",
+  "sha256": "49748e770196a38cdd888e8dba32d2b852606ee105f952f081920bdf8e91f5f9",
+  "installer_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-setup-266-20260813-b1577d1.exe",
+  "installer_sha256": "665ca7f865f5b028b524db302e304634415711de169021fb6002ec6d6b51c793",
+  "linux_url": "https://github.com/rave-page/rave-mate/releases/download/nightly/rave-mate-linux-266-20260813-b1577d1",
+  "linux_sha256": "2b9f460fef1a5438e3198724d39cfb9004e4df5dee5a4876a62bc155cf472674",
   "assets": [
     {
       "name": "openvr_api.dll",
@@ -20,6 +20,6 @@
       "sha256": "81bc61c29872cbaa6ce7442c9b2a94765f31eb6563a526587fa158ada4748546"
     }
   ],
-  "released": "2026-08-13T13:21:59Z",
-  "notes": "feat(shell): P1 - WebView2 visual hosting behind features.ui.shellHosting"
+  "released": "2026-08-13T13:31:46Z",
+  "notes": "feat(shell): visual hosting is the DEFAULT, and it fails loud instead of falling back"
 }
