@@ -45,6 +45,9 @@ pub const FxRow = struct {
     missLb: []const u8 = "",
     off: bool = false,
     btns: []const c.Btn = &.{},
+    hasComp: bool = false, // compositing row (blend mode + opacity)
+    blend: c.Select = .{},
+    mix: c.Slider = .{},
     params: []const FxParam = &.{},
 };
 
@@ -276,6 +279,12 @@ pub fn renderFxRow(h: *Html, r: FxRow) !void {
     }
     try c.btnRowOf(h, r.btns);
     try h.raw("</div>");
+    if (r.hasComp) {
+        try h.raw("<div class=edv-fx-comp>");
+        try c.selectBox(h, r.blend);
+        try c.slider(h, r.mix);
+        try h.raw("</div>");
+    }
     for (r.params) |p| {
         if (p.isColor) {
             try h.raw("<div class=edv-fx-color><span class=edv-fx-swatch style=");

@@ -67,14 +67,19 @@ func edvFixtures() map[string]edvViewState {
 			{Label: "↑", Variant: "ghost", Act: "edv-fx-up:0"},
 			{Label: "↓", Variant: "ghost", Act: "edv-fx-dn:0"},
 			{Label: "✕", Variant: "warn", Act: "edv-fx-del:0"},
-		}, Params: []edvFxParam{
-			{Slider: newSlider("blur", "edv-fx-p:0:blur", 0, 1, 0.01, 0.5, "")},
-			{IsBool: true, Toggle: newToggle("invert", "edv-fx-p:0:invert", true)},
-			{IsColor: true, Swatch: "rgb(255,77,153)",
-				Field: newField("tint", "edv-fx-c:0:tint", "#ff4d99", "text")},
-			{Slider: newSlider("center X", "edv-fx-p:0:center.x", 0, 1, 0.01, 0.5, "")},
-			{Slider: newSlider("center Y", "edv-fx-p:0:center.y", 0, 1, 0.01, 0.25, "")},
-		}},
+		}, HasComp: true,
+			Blend: edSel("edv-fx-bl:0", "Blend", "Screen",
+				selRow{Val: "normal", Label: "Normal (replace)"},
+				selRow{Val: "screen", Label: "Screen", Cur: true}),
+			Mix: newSlider("Opacity", "edv-fx-mix:0", 0, 1, 0.01, 0.65, ""),
+			Params: []edvFxParam{
+				{Slider: newSlider("blur", "edv-fx-p:0:blur", 0, 1, 0.01, 0.5, "")},
+				{IsBool: true, Toggle: newToggle("invert", "edv-fx-p:0:invert", true)},
+				{IsColor: true, Swatch: "rgb(255,77,153)",
+					Field: newField("tint", "edv-fx-c:0:tint", "#ff4d99", "text")},
+				{Slider: newSlider("center X", "edv-fx-p:0:center.x", 0, 1, 0.01, 0.5, "")},
+				{Slider: newSlider("center Y", "edv-fx-p:0:center.y", 0, 1, 0.01, 0.25, "")},
+			}},
 		{Name: "old_glow.dll", Missing: true, MissLb: "missing", Off: true, Btns: []uiBtn{
 			{Label: "⏻", Variant: "ghost", Act: "edv-fx-tog:1"},
 			{Label: "↑", Variant: "ghost", Act: "edv-fx-up:1"},
@@ -150,10 +155,14 @@ func edvFixtures() map[string]edvViewState {
 	escaping.FxRows = []edvFxRow{
 		{Name: `G&low "<x>"`, Missing: true, MissLb: `m&iss"`, Btns: []uiBtn{
 			{Label: `⏻&"`, Variant: "secondary", Act: `edv-fx-tog:0&"`},
-		}, Params: []edvFxParam{
-			{Slider: newSlider(`b&lur"`, `edv-fx-p:0:b&lur"`, 0, 1, 0.01, 0.25, "")},
-			{IsBool: true, Toggle: newToggle(`i&nv"`, `edv-fx-p:0:i&nv"`, false)},
-		}},
+		}, HasComp: true,
+			Blend: edSel(`edv-fx-bl:0&"`, `B&lend"`, `S&creen"`,
+				selRow{Val: `screen&"`, Label: `S&creen"`, Cur: true}),
+			Mix: newSlider(`O&pacity"`, `edv-fx-mix:0&"`, 0, 1, 0.01, 0.5, ""),
+			Params: []edvFxParam{
+				{Slider: newSlider(`b&lur"`, `edv-fx-p:0:b&lur"`, 0, 1, 0.01, 0.25, "")},
+				{IsBool: true, Toggle: newToggle(`i&nv"`, `edv-fx-p:0:i&nv"`, false)},
+			}},
 	}
 	escaping.PrevRes = edSel("edv-prevres", `P&rev"`, `5&40"`, selRow{Val: "540", Label: `5&40"`, Cur: true})
 	escaping.FxHint = `h&x"<>'`

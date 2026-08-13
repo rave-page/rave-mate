@@ -1501,7 +1501,7 @@ var schema = []msg{
 	},
 	{
 		name: "EdvFxRow", goT: "edvFxRow", zigT: "editor_video.FxRow",
-		fs: []field{s(1, "Name", "name"), b(2, "Missing", "missing"), s(3, "MissLb", "missLb"), b(4, "Off", "off"), li(5, "Btns", "btns", "UiBtn"), li(6, "Params", "params", "EdvFxParam")},
+		fs: []field{s(1, "Name", "name"), b(2, "Missing", "missing"), s(3, "MissLb", "missLb"), b(4, "Off", "off"), li(5, "Btns", "btns", "UiBtn"), li(6, "Params", "params", "EdvFxParam"), b(7, "HasComp", "hasComp"), st(8, "Blend", "blend", "SelState"), st(9, "Mix", "mix", "UiSlider")},
 	},
 	{
 		name: "EdvView", goT: "edvViewState", zigT: "editor_video.State", id: 114,

@@ -128,6 +128,13 @@ darkens, `screen` lifts). Each chain entry has enable/reorder/remove
 buttons and 0-1 sliders/switches for its parameters; the chain list is a
 fixed-height scroll box, so the preview stays visible while you tweak.
 
+**Blend & opacity per effect** - every enabled chain entry has a **Blend** mode
+(Normal/Screen/Add/Multiply/Overlay/Lighten/Darken/Difference) and an
+**Opacity** slider that composite that stage's output back over the picture it
+was handed. This is what makes generators usable: drop a plasma or light-graffiti
+generator in, set *Screen* at 40%, and it lights the video instead of replacing
+it. Normal at full opacity = the old replace behaviour (and costs nothing).
+
 **Getting more effects** - the buttons under the Effects section:
 
 - *ISF library ↗* opens <https://editor.isf.video/shaders> - thousands of

@@ -156,6 +156,8 @@ type Fx struct {
 	Kind   string             `json:"kind"`
 	Ref    string             `json:"ref"`
 	Params map[string]float64 `json:"params,omitempty"`
+	Blend  string             `json:"blend,omitempty"` // composite of this stage over its input ("" = replace)
+	Mix    float64            `json:"mix,omitempty"`   // stage opacity 0..1 (0 with no blend = default 1)
 }
 
 // Chain is the spec consumed by --frame/--pipe.

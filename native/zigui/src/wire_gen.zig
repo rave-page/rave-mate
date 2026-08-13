@@ -40,7 +40,7 @@ const cueedit = @import("cueedit.zig");
 const libviews = @import("libviews.zig");
 const libremote = @import("libremote.zig");
 
-pub const schema_hash: u32 = 0x9853ed1d;
+pub const schema_hash: u32 = 0x388c4105;
 pub const msg_ag_state: u16 = 1; // App Groups tab (full view + the #appgroups-body fragment share this state)
 pub const msg_logs_state: u16 = 2; // Logs tab (full view)
 pub const msg_logs_lines: u16 = 3; // #log-view inner fragment (filter change + ~1 Hz tick)
@@ -4288,6 +4288,9 @@ pub fn decodeEdvFxRow(r: *wire.Reader, out: *editor_video.FxRow) wire.Error!void
         4 => out.off = try r.boolean(t),
         5 => out.btns = try r.list(c.Btn, decodeUiBtn, t),
         6 => out.params = try r.list(editor_video.FxParam, decodeEdvFxParam, t),
+        7 => out.hasComp = try r.boolean(t),
+        8 => out.blend = try r.sub(c.Select, decodeSelState, t),
+        9 => out.mix = try r.sub(c.Slider, decodeUiSlider, t),
         else => try r.skip(t),
     };
 }

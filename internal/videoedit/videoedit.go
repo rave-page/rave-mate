@@ -64,6 +64,22 @@ type EffectInst struct {
 	Ref    string             `json:"ref"`  // plugin/shader file base name
 	Off    bool               `json:"off,omitempty"`
 	Params map[string]float64 `json:"params,omitempty"`
+	Blend  string             `json:"blend,omitempty"` // blend mode over the stage input ("" = normal/replace)
+	Mix    *float64           `json:"mix,omitempty"`   // stage opacity 0..1; nil = 1 (fully applied)
+}
+
+// MixOr resolves the stage opacity (nil = fully applied), clamped to 0..1.
+func (e EffectInst) MixOr() float64 {
+	if e.Mix == nil {
+		return 1
+	}
+	if *e.Mix < 0 {
+		return 0
+	}
+	if *e.Mix > 1 {
+		return 1
+	}
+	return *e.Mix
 }
 
 // Project is the persisted video-mode state.

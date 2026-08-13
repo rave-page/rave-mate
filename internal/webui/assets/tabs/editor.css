@@ -642,3 +642,13 @@
   font-size: 0.7rem;
   color: var(--rp-muted, #a6abb6);
 }
+
+/* per-effect compositing: how the stage lands on the picture it was handed */
+.edv-fx-comp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.35rem 0 0.15rem;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+  margin-bottom: 0.35rem;
+}

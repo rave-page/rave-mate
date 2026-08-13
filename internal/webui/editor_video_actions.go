@@ -163,6 +163,8 @@ func init() {
 	onPrefix("edv-fx-tog:", func(u *UI, m actMsg) { u.edvFxEdit(m.arg("edv-fx-tog:"), "tog") })
 	onPrefix("edv-fx-p:", func(u *UI, m actMsg) { u.edvFxParamSet(m.arg("edv-fx-p:"), m.Val) })
 	onPrefix("edv-fx-c:", func(u *UI, m actMsg) { u.edvFxColorSet(m.arg("edv-fx-c:"), m.Val) })
+	onPrefix("edv-fx-bl:", func(u *UI, m actMsg) { u.edvFxComp(m.arg("edv-fx-bl:"), m.Val, true) })
+	onPrefix("edv-fx-mix:", func(u *UI, m actMsg) { u.edvFxComp(m.arg("edv-fx-mix:"), m.Val, false) })
 	onPrefix("edv-fx-www:", func(u *UI, m actMsg) {
 		switch m.arg("edv-fx-www:") {
 		case "isf":
@@ -866,6 +868,39 @@ func (u *UI) edvFxParamSet(arg, val string) {
 	u.edvPrevKick()
 }
 
+// edvFxComp sets a stage's blend mode (isMode) or opacity. Only the preview is
+// kicked for opacity - the row markup doesn't change, and re-patching the inspector
+// mid-drag would fight the slider.
+func (u *UI) edvFxComp(idxStr, val string, isMode bool) {
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		return
+	}
+	var mix float64
+	if !isMode {
+		if mix, err = strconv.ParseFloat(strings.TrimSpace(val), 64); err != nil {
+			return
+		}
+		mix = clamp01(mix)
+	}
+	u.edvMut(func(v *edvSt) {
+		if idx < 0 || idx >= len(v.proj.Effects) {
+			return
+		}
+		e := &v.proj.Effects[idx]
+		if isMode {
+			e.Blend = edvBlendKey(val)
+			return
+		}
+		m := mix
+		e.Mix = &m
+	})
+	if isMode {
+		u.edvPatchInsp()
+	}
+	u.edvPrevKick()
+}
+
 // edvFxCh resolves a dotted channel value (override else listing default).
 func edvFxCh(params map[string]float64, name, comp string, def float64) float64 {
 	if v, ok := params[name+"."+comp]; ok {
@@ -914,7 +949,8 @@ func edvResolveFx(effects []videoedit.EffectInst, plugins []vfx.Plugin) []vfx.Fx
 		}
 		for i := range plugins {
 			if filepath.Base(plugins[i].Ref) == e.Ref {
-				out = append(out, vfx.Fx{Kind: e.Kind, Ref: plugins[i].Ref, Params: e.Params})
+				out = append(out, vfx.Fx{Kind: e.Kind, Ref: plugins[i].Ref, Params: e.Params,
+					Blend: e.Blend, Mix: e.MixOr()})
 				break
 			}
 		}

@@ -61,7 +61,10 @@ type edvFxRow struct {
 	Missing bool         `json:"missing"` // plugin file not found in the vfx dirs
 	MissLb  string       `json:"missLb"`
 	Off     bool         `json:"off"`
-	Btns    []uiBtn      `json:"btns"` // tog/up/dn/del
+	Btns    []uiBtn      `json:"btns"`    // tog/up/dn/del
+	HasComp bool         `json:"hasComp"` // compositing row (blend mode + opacity)
+	Blend   selState     `json:"blend"`
+	Mix     uiSlider     `json:"mix"`
 	Params  []edvFxParam `json:"params"`
 }
 
@@ -347,6 +350,11 @@ func (u *UI) edvFxState(st *edvViewState) {
 			{Label: "✕", Variant: "warn", Act: "edv-fx-del:" + is},
 		}
 		if pl != nil && !e.Off {
+			// compositing: how this stage lands on the picture it was handed. Generators
+			// stop being all-or-nothing - screen/add them over the video at any opacity.
+			row.HasComp = true
+			row.Blend = resolveSelectBox(i18n.T("editor.video.fxBlend"), "edv-fx-bl:"+is, edvBlendOpts(), edvBlendKey(e.Blend))
+			row.Mix = newSlider(i18n.T("editor.video.fxMix"), "edv-fx-mix:"+is, 0, 1, 0.01, e.MixOr(), "")
 			for _, prm := range pl.Params {
 				act := "edv-fx-p:" + is + ":" + prm.Name
 				val, ok := e.Params[prm.Name]
@@ -396,6 +404,28 @@ func (u *UI) edvFxState(st *edvViewState) {
 		{Label: i18n.T("editor.video.fxDirIsf"), Variant: "ghost", Act: "edv-fx-dir:isf"},
 		{Label: i18n.T("editor.video.fxDirF0r"), Variant: "ghost", Act: "edv-fx-dir:frei0r"},
 	}
+}
+
+// edvBlendModes are the per-stage compositing modes (mirrored in zigvfx chain.zig Blend.Mode).
+var edvBlendModes = []string{"normal", "screen", "add", "multiply", "overlay", "lighten", "darken", "difference"}
+
+// edvBlendKey normalizes a stored mode ("" / unknown = normal).
+func edvBlendKey(v string) string {
+	for _, m := range edvBlendModes {
+		if v == m {
+			return m
+		}
+	}
+	return "normal"
+}
+
+// edvBlendOpts labels the modes (i18n key per mode).
+func edvBlendOpts() [][2]string {
+	out := make([][2]string, 0, len(edvBlendModes))
+	for _, m := range edvBlendModes {
+		out = append(out, [2]string{m, i18n.T("editor.video.blend." + m)})
+	}
+	return out
 }
 
 // edvFxAddSel builds the effect picker: filterable rich rows sorted by standard
@@ -750,6 +780,9 @@ func edvFxRowHTML(r edvFxRow) string {
 	}
 	b.WriteString(uiBtnRow(r.Btns))
 	b.WriteString(`</div>`)
+	if r.HasComp {
+		b.WriteString(`<div class=edv-fx-comp>` + selHTML(r.Blend) + r.Mix.html() + `</div>`)
+	}
 	for _, p := range r.Params {
 		switch {
 		case p.IsColor:
