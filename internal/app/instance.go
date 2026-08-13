@@ -46,7 +46,7 @@ type Control interface {
 	Type(text string) bool                                 // append text to the focused Entry; false if no entry / service mode
 	Read(query string) (string, bool)                      // current value of a leaf matched by label; ("", false) on miss / service
 	Set(query, value string) bool                          // mutate Entry/Select/Check matched by label; false on miss / service
-	SurfaceTest(on bool) string                            // toggle the window child's native-surface test hole (ctl surface-test); status line
+	SurfaceTest(args string) string                        // drive the window child's native render surface (ctl surface-test on|off|card|stats|reset); status line
 	Screenshot(path string) bool                           // capture the window to a PNG at path; false on failure / service mode
 	ScreenshotAll(dir string) string                       // sweep EVERY tab (+scroll positions) to PNGs + report.txt in dir; status line
 	ScreenshotRegion(path string, x, y, w, h float32) bool // capture a sub-rect; false on failure / service
@@ -273,7 +273,7 @@ func handleConn(conn net.Conn, ctrl Control) {
 			fmt.Fprintln(conn, "no match")
 		}
 	case strings.HasPrefix(cmd, "SURFACE-TEST "):
-		fmt.Fprintln(conn, ctrl.SurfaceTest(strings.EqualFold(strings.TrimSpace(cmd[len("SURFACE-TEST "):]), "on")))
+		fmt.Fprintln(conn, ctrl.SurfaceTest(strings.TrimSpace(cmd[len("SURFACE-TEST "):])))
 	case strings.HasPrefix(cmd, "SCREENSHOT-ALL "):
 		fmt.Fprintln(conn, ctrl.ScreenshotAll(strings.TrimSpace(cmd[len("SCREENSHOT-ALL "):])))
 	case strings.HasPrefix(cmd, "SCREENSHOT-REGION "):

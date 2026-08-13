@@ -19,9 +19,13 @@
   var last = '';           // last payload, for the identical-consecutive drop
   var raf = 0, needScan = true;
 
-  // clip intersects the element rect with every scrolling ancestor and the viewport. The reported
-  // rect is what is actually VISIBLE, which lets the child size content to it and skip
-  // IDCompositionVisual::SetClip (see surfaces.zig resize()).
+  // clip intersects the element rect with every scrolling ancestor and the viewport, and returns
+  // BOTH rects: the visible one (the child sizes its swapchain to it, which is how
+  // IDCompositionVisual::SetClip stays unused) and the FULL one.
+  //
+  // Both are load-bearing since P3. A producer's picture belongs to the full rect; the visible rect
+  // only says how much of it survives the scroll. Reporting the visible rect alone - P2's state -
+  // means a half-scrolled element squashes the picture into the strip that is left.
   function clip(el) {
     var r = el.getBoundingClientRect();
     var L = r.left, T = r.top, R = r.right, B = r.bottom;
@@ -39,7 +43,10 @@
     if (T < 0) T = 0;
     if (R > window.innerWidth) R = window.innerWidth;
     if (B > window.innerHeight) B = window.innerHeight;
-    return { x: L, y: T, w: Math.max(0, R - L), h: Math.max(0, B - T) };
+    return {
+      x: L, y: T, w: Math.max(0, R - L), h: Math.max(0, B - T),
+      fx: r.left, fy: r.top, fw: r.width, fh: r.height
+    };
   }
 
   function report() {
@@ -54,6 +61,9 @@
         // Device px: the DComp visual tree and put_Bounds both live in raw window-client pixels.
         x: Math.round(r.x * dpr), y: Math.round(r.y * dpr),
         w: Math.round(r.w * dpr), h: Math.round(r.h * dpr),
+        // Full (unclipped) rect: may be negative or past the viewport, which is the point.
+        fx: Math.round(r.fx * dpr), fy: Math.round(r.fy * dpr),
+        fw: Math.round(r.fw * dpr), fh: Math.round(r.fh * dpr),
         vis: r.w > 0.5 && r.h > 0.5 && cs.visibility !== 'hidden' && cs.display !== 'none' && io !== false,
         dpr: dpr,
         c: el.getAttribute('data-surface-color') || ''

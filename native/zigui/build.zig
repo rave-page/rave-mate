@@ -41,6 +41,15 @@ pub fn build(b: *std.Build) void {
         // button, Alt-Tab and title bar all read the icon from the window's OWN process, and
         // rave-mate.exe's .syso is invisible to this exe.
         shell_mod.addWin32ResourceFile(.{ .file = b.path("src/shell/rave-shell.rc") });
+        // Shared D3D11/DXGI declarations (native/zigd3d) - the SAME module native/zigenc imports.
+        // Native render surfaces consume a producer's shared texture through these (P3); a second
+        // hand-written binding is what SDL_WEBVIEW_SURFACE_DESIGN §3.3 forbids. b.path() cannot
+        // leave the package root, hence the absolute build-root join.
+        shell_mod.addImport("d3d11", b.createModule(.{
+            .root_source_file = .{ .cwd_relative = b.pathJoin(&.{ b.build_root.path.?, "..", "zigd3d", "src", "d3d11.zig" }) },
+            .target = target,
+            .optimize = optimize,
+        }));
         const shell_exe = b.addExecutable(.{
             .name = "rave-shell",
             .root_module = shell_mod,

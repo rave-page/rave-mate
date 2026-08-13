@@ -1780,7 +1780,7 @@ func run(parent context.Context, serviceMode bool) error {
 	}
 
 	if serviceMode {
-		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+		ctl := &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
 		remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app/VR-View screenshot (VR works headless)
 		remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 		remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -1941,7 +1941,7 @@ func run(parent context.Context, serviceMode bool) error {
 		perfmon.RegisterProbe("recorder.reconcile", ar.Stats)
 		debuglog.Go(log, "auto-reconcile", func() { ar.Start(ctx) })
 	}
-	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, quit: cancel}
+	ctl = &appControl{log: log, auth: authMgr, cfg: &cfg, mods: mods, ui: u, vrStats: vrPerf, vrOverlay: vrSurf, perfMon: perfMon, peerMgr: peerMgr, remoteCtl: remoteCtl, rec: rec, lib: lib, syncer: syncer, appGroups: appGroups, dmxR: dmxRouter, vrslStream: vrslStream, mocap: mocapSvc, crew: crewSvc, tc: tcSvc, obsControl: obsControl, media: mediaRouter, mediaCaps: mediaCapsPlan, mediaRoutes: mediaRoutesCtl, obs: obsW, ableLink: linkW, guardDisarm: guardDisarm, workers: workers, quit: cancel}
 	remotectl.RegisterScreenshot(remoteCtl, ctl)  // peer-driven app-window + VR-View screenshot
 	remotectl.RegisterVRDiag(remoteCtl, ctl)      // peer-driven VR input/binding diagnostics
 	remotectl.RegisterPerf(remoteCtl, ctl)        // peer-driven perf diagnosis (remote-perf)
@@ -2541,6 +2541,8 @@ type appControl struct {
 	obs         *featurehost.ObsProxy         // OBS bridge (ctl encoder-scan: live stream/record active); may be nil
 	ableLink    *featurehost.AbletonLinkProxy // Ableton Link bridge (ctl ablelink-status/resync); may be nil
 	guardDisarm func()                        // guardian disarm for the hard-exit backstop (defers skip on os.Exit); may be nil
+	workers     *worker.Supervisor            // subprocess job system (ctl surface-test card producer); may be nil
+	surfProd    surfaceProducer               // the P3 native-surface producer child's lifecycle + last counters
 	quit        context.CancelFunc
 	updating    atomic.Bool    // guards a self-update in flight (ctl SELF-UPDATE is fire-and-forget)
 	libSync     libSyncState   // in-flight/last library metadata sync (ctl SYNC-LIBRARY is async)
@@ -2716,17 +2718,6 @@ func (c *appControl) Set(query, value string) bool {
 func (c *appControl) Scroll(y float32) bool {
 	s, ok := c.ui.(interface{ Scroll(y float32) bool })
 	return ok && s.Scroll(y)
-}
-
-// SurfaceTest toggles the window child's native render-surface test hole (ctl surface-test).
-// Webview renderer only - resolved by type assertion, same as Scroll, so the frontend seam stays
-// untouched. Pure command plumbing: the daemon holds no surface and learns no rect.
-func (c *appControl) SurfaceTest(on bool) string {
-	s, ok := c.ui.(interface{ SurfaceTest(on bool) string })
-	if !ok {
-		return "unsupported (webview renderer only)"
-	}
-	return s.SurfaceTest(on)
 }
 
 func (c *appControl) Screenshot(path string) bool {

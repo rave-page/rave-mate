@@ -184,7 +184,22 @@ func (u *UI) Scroll(y float32) bool {
 	return true
 }
 
-// SurfaceTest toggles the window child's native-surface test hole (ctl surface-test) - the P2
+// SurfaceShot captures ONLY the rect of the surface that is presenting a producer's frames, so the
+// content oracle (internal/framedebug + internal/testcard) judges the picture that actually reached
+// the compositor rather than the whole window around it.
+//
+// The rect is resolved IN THE CHILD (w = -1 is the sentinel): the daemon asks for the surface by
+// intent and never learns its geometry, which is the point of directive #2. Proc shell only -
+// nothing else has a composited surface to crop to.
+func (u *UI) SurfaceShot(path string) error {
+	ps, ok := u.shell.(*procShell)
+	if !ok {
+		return fmt.Errorf("surface shot needs the zig window child (proc shell)")
+	}
+	return ps.captureRegion(path, 0, 0, -1, 0)
+}
+
+// SurfaceTest toggles the window child's native-surface test hole (ctl surface-test) - the
 // verification hook for SDL_WEBVIEW_SURFACE_DESIGN. Only the proc shell hosting the Zig child can
 // composite, so it is resolved by type assertion and every other host answers "unsupported".
 func (u *UI) SurfaceTest(on bool) string {

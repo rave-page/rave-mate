@@ -60,6 +60,8 @@ extern "user32" fn DispatchMessageW(*const MSG) callconv(.winapi) isize;
 extern "user32" fn SetWindowPos(HWND, HWND, i32, i32, i32, i32, u32) callconv(.winapi) i32;
 extern "user32" fn GetWindowRect(HWND, *RECT) callconv(.winapi) i32;
 extern "user32" fn GetClientRect(HWND, *RECT) callconv(.winapi) i32;
+extern "user32" fn ClientToScreen(HWND, *POINT) callconv(.winapi) i32;
+extern "user32" fn KillTimer(HWND, usize) callconv(.winapi) i32;
 extern "user32" fn GetDpiForWindow(HWND) callconv(.winapi) u32;
 extern "user32" fn AdjustWindowRectExForDpi(*RECT, u32, i32, u32, u32) callconv(.winapi) i32;
 extern "user32" fn SetProcessDpiAwarenessContext(isize) callconv(.winapi) i32;
@@ -159,6 +161,12 @@ const sw_show = 5;
 const wm_app_frame: u32 = 0x8000 + 1; // WM_APP+1: one boxed UiMsg in lParam
 const wm_timer: u32 = 0x0113;
 const beat_timer_id: usize = 1;
+/// surf_timer_id drives the native-surface present pump (P3). Armed only while surfaces exist,
+/// because a timer that never stops is a wakeup the activity governor has to pay for. 8 ms asks
+/// for ~120 Hz and the OS coalesces it to the system tick (~64 Hz here) - comfortably above the
+/// 30 fps a producer defaults to, and the present itself is one GPU copy.
+const surf_timer_id: usize = 2;
+const surf_pump_ms: u32 = 8;
 const below_normal_priority: u32 = 0x4000;
 const normal_priority: u32 = 0x20;
 
@@ -539,6 +547,7 @@ pub const Shell = struct {
     dxgi_dev: ?*anyopaque = null, // only when DComp refused a NULL device
     cursor: ?*anyopaque = null, // last cursor from CursorChanged (the page's, applied by us)
     mouse_tracked: bool = false, // WM_MOUSELEAVE armed
+    surf_pump: bool = false, // the P3 present timer is running
     buttons_down: u32 = 0, // held-button bitmask; drives SetCapture/ReleaseCapture on drags
 
     focused: bool = false,
@@ -576,6 +585,10 @@ const UiMsg = union(enum) {
     eval_js: []u8,
     resize: struct { w: i32, h: i32 },
     show,
+    /// surface_shot resolves "the surface that is showing producer frames" to a rect ON THE WINDOW
+    /// THREAD (the registry is window-thread-owned) and then captures it. The daemon asks for the
+    /// picture without ever naming its geometry - directive #2 stays intact.
+    surface_shot: struct { rid: []u8, path: []u8 },
     quit,
 };
 
@@ -601,6 +614,10 @@ pub fn postUi(sh: *Shell, m: UiMsg) void {
 fn freeUiMsg(sh: *Shell, m: UiMsg) void {
     switch (m) {
         .doc, .eval_js => |s| sh.gpa.free(s),
+        .surface_shot => |v| {
+            sh.gpa.free(v.rid);
+            sh.gpa.free(v.path);
+        },
         else => {},
     }
 }
@@ -637,13 +654,25 @@ fn actWorker(sh: *Shell) void {
     }
 }
 
-/// surfaceTest toggles the child's own P2 test hole (ctl surface-test). The daemon carries a bool
-/// and nothing else - the element, its colour and its lifetime are all the child's, exactly like a
-/// real surface. Runs through the normal eval path so it lands on the UI thread.
+/// surfaceTest toggles the child's own test hole (ctl surface-test). The daemon carries a bool and
+/// nothing else - the element, its colour and its lifetime are all the child's, exactly like a real
+/// surface. Whether that surface then shows a solid colour or a PRODUCER'S FRAMES is not part of
+/// this command either: the child discovers producers by name (surfsrc.zig). Runs through the normal
+/// eval path so it lands on the UI thread.
 pub fn surfaceTest(sh: *Shell, on: bool) void {
     const js = if (on) "window.__sfTest&&window.__sfTest(1);" else "window.__sfTest&&window.__sfTest(0);";
     const copy = sh.gpa.dupe(u8, js) catch return;
     postUi(sh, .{ .eval_js = copy });
+}
+
+/// surfaceShot captures ONLY the rect of the surface currently presenting producer frames.
+pub fn surfaceShot(sh: *Shell, rid: []const u8, path: []const u8) void {
+    const rid_c = sh.gpa.dupe(u8, rid) catch return;
+    const path_c = sh.gpa.dupe(u8, path) catch {
+        sh.gpa.free(rid_c);
+        return;
+    };
+    postUi(sh, .{ .surface_shot = .{ .rid = rid_c, .path = path_c } });
 }
 
 /// setStreaming applies the governor's downstream signal (below-normal parity with the Go child).
@@ -1298,6 +1327,10 @@ const SurfRep = struct {
     y: f64 = 0,
     w: f64 = 0,
     h: f64 = 0,
+    fx: f64 = 0, // the element's FULL rect - a producer's picture is pinned to it and cropped to x/y/w/h
+    fy: f64 = 0,
+    fw: f64 = 0,
+    fh: f64 = 0,
     vis: bool = false,
     dpr: f64 = 1,
     c: []const u8 = "", // data-surface-color, "" = derive from the id hash
@@ -1317,6 +1350,10 @@ fn applySurfaces(sh: *Shell, arena: std.mem.Allocator, text: []const u8) void {
             .y = @floatCast(r.y),
             .w = @floatCast(r.w),
             .h = @floatCast(r.h),
+            .fx = @floatCast(r.fx),
+            .fy = @floatCast(r.fy),
+            .fw = @floatCast(r.fw),
+            .fh = @floatCast(r.fh),
             .vis = r.vis,
             .dpr = @floatCast(r.dpr),
             .color = parseHexColor(r.c),
@@ -1324,6 +1361,21 @@ fn applySurfaces(sh: *Shell, arena: std.mem.Allocator, text: []const u8) void {
         n += 1;
     }
     reg.apply(buf[0..n], m.d);
+    armSurfacePump(sh, reg.pump());
+}
+
+/// armSurfacePump starts/stops the present timer with the registry's population. A shell hosting no
+/// surface must not tick at all.
+fn armSurfacePump(sh: *Shell, live: u32) void {
+    const hwnd = sh.hwnd.load(.acquire);
+    if (hwnd == 0) return;
+    if (live > 0 and !sh.surf_pump) {
+        _ = SetTimer(hwnd, surf_timer_id, surf_pump_ms, null);
+        sh.surf_pump = true;
+    } else if (live == 0 and sh.surf_pump) {
+        _ = KillTimer(hwnd, surf_timer_id);
+        sh.surf_pump = false;
+    }
 }
 
 /// parseHexColor reads "rrggbb" / "#rrggbb"; anything else = null (id-hash colour).
@@ -1472,11 +1524,24 @@ fn wndProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isize {
                     _ = ShowWindow(hwnd, sw_show);
                     _ = SetForegroundWindow(hwnd);
                 },
+                .surface_shot => |v| {
+                    defer sh.gpa.free(v.rid);
+                    defer sh.gpa.free(v.path);
+                    surfaceShotHere(sh, hwnd, v.rid, v.path);
+                },
                 .quit => _ = DestroyWindow(hwnd),
             }
             return 0;
         },
         wm_timer => {
+            if (wp == surf_timer_id) {
+                if (sh.surfaces) |reg| {
+                    armSurfacePump(sh, reg.pump());
+                } else {
+                    armSurfacePump(sh, 0);
+                }
+                return 0;
+            }
             if (wp == beat_timer_id) {
                 // Dispatched on the UI thread; the page routes it back via the binding shim, so a
                 // wedged webview stops beating and the daemon Host restarts the child.
@@ -1550,6 +1615,27 @@ fn wndProc(hwnd: HWND, msg: u32, wp: usize, lp: isize) callconv(.winapi) isize {
         else => {},
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+/// surfaceShotHere resolves the producing surface's CLIENT rect to WINDOW coordinates (captureHWND
+/// crops against GetWindowRect, which includes the frame) and captures just that. Also dumps the
+/// per-source counters, so the daemon's log carries the child's own view of the transport next to
+/// the PNG the content oracle is about to judge.
+fn surfaceShotHere(sh: *Shell, hwnd: HWND, rid: []const u8, path: []const u8) void {
+    const reg = sh.surfaces orelse {
+        sh.em.event("shotres", .{ .rid = rid, .err = "no surface registry (windowed hosting)" });
+        return;
+    };
+    reg.logSources();
+    const r = reg.producerRect() orelse {
+        sh.em.event("shotres", .{ .rid = rid, .err = "no surface is presenting producer frames" });
+        return;
+    };
+    var org: POINT = .{ .x = 0, .y = 0 };
+    _ = ClientToScreen(hwnd, &org);
+    var wr: RECT = undefined;
+    _ = GetWindowRect(hwnd, &wr);
+    capture(sh, rid, path, r.x + (org.x - wr.left), r.y + (org.y - wr.top), r.w, r.h);
 }
 
 // ── child-side screenshot (PSH1 §5: path + rect cross the pipe, never pixels) ──

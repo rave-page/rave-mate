@@ -457,6 +457,79 @@ Lift D3D11/DXGI decls out of `native/zigenc/src/mf.zig` into a shared Zig module
 4K-frozen-picture lesson: fps 58.5 with one bit-identical frame for 48 min); testcard's own
 gap/freeze/drift stats clean over 10 min; RSS flat; bounded-queue caps asserted by a test.
 
+#### P3 result (2026-08-13) — built and verified on this rig
+
+**Shared module.** `native/zigd3d/src/d3d11.zig` now owns every D3D11/DXGI declaration in the repo:
+lifted out of `native/zigenc/src/mf.zig`, which re-exports them so `cap.zig`/`dec.zig`/`main.zig`
+still say `mf.X` and nothing there changed. Both `native/zigenc/build.zig` and `native/zigui/build.zig`
+import it as the module `d3d11` (`b.path()` cannot leave a package root - the sibling is addressed off
+`b.build_root.path`). It carries types/consts/IIDs/helpers only, **no `extern "d3d11"` imports**: zigenc
+links those at build time, the shell resolves them through LoadLibrary, and putting them in the shared
+module would force `rave-shell.exe` to import d3d11.dll at load. A test pins the audited slot numbers
+by `@offsetOf`, because a pad edit that shifts a slot is invisible at compile time.
+
+**Transport.** Producer → surface is a named shared D3D11 texture ring with keyed mutexes, no daemon
+in the path: `Local\rave-surface-<id>-ctl` (4 KiB control page) plus `Local\rave-surface-<id>-g<gen>-s<i>`
+textures, created with `SHARED_KEYEDMUTEX|SHARED_NTHANDLE` + `IDXGIResource1::CreateSharedHandle(name)`
+and opened with `ID3D11Device1::OpenSharedResourceByName`. **`Local\`, not the design's `Global\`:**
+naming a global kernel object needs SeCreateGlobalPrivilege (admin); both processes are the same user
+and session, so §4.5's example name should be read as `Local\`. Generation is IN the texture name -
+`CreateSharedHandle` refuses a name the consumer still has open, so a resize publishes a new generation
+instead. Ring = **2 frames / w·h·4·2 bytes** (7.0 MiB at 1002x508), capped at 32 MiB by
+`surfacepub.ValidGeometry`; producer drops its newest frame when no slot comes back, consumer takes the
+newest ready slot and releases older ones unread (drop-oldest). Every frame carries `{seq, ptsNs}` in the
+control block - not "latest wins".
+
+**Geometry is negotiated, and that closes P2's finding.** The consumer writes the surface's FULL rect
+into the control block and the producer renders exactly that, so the present is a 1:1
+`CopySubresourceRegion` - no scaler on either side. `SetClip` is still not used and does not need to be:
+`surfsrc.planBlit` pins the picture to the full rect and copies only the part inside the visible rect.
+Proven by execution: scrolled 260 px, the sampled surface went 1002x508 → **1002x272 with the 7-segment
+digits, hue band and sweep bar at IDENTICAL pixel size** and the card's top half simply absent. A squash
+would have kept all of it (and would still have decoded - the card's lattice is relative).
+
+**Producer.** `rave-mate worker surface` (`surface.card`), a supervised child: GPU work out of the daemon
+per the isolation rule, killed by cancelling its job. `ctl surface-test card` starts it, `off` stops it.
+
+**Measured, 12 min continuous at 1002x508@30 (`ctl surface-test stats` every 20 s, 34 samples):**
+
+| | |
+|---|---|
+| producer | 21 882 frames, **0 skips**, worst render+send 3 ms |
+| transport | published 21 882, presented 21 882, **producer-dropped 0, consumer-dropped 0** |
+| screen decode | 34/34 samples decoded, 0 CRC fails, 0 reorders, 0 restarts |
+| freeze oracle | **dups 0** - the screen advanced between every pair of samples |
+| framedebug | 35 samples / 34 changed, moved **6.4 %** (peak 8.9 %) - 3x above `StaticFrac` |
+| latency | render → on screen → captured: 42-92 ms, **drift +11 ms** |
+
+Extended to 19 m 32 s / 35 074 frames with the same zeros. RSS, from a settled baseline: shell child
+private bytes **114.7 MB, flat to the 0.1 MB for 5.5 min under load**; producer 124-125.7 MB (Go GC
+sawtooth, no trend). An earlier apparent 0.9 MB/min climb was page/webview warm-up - it is present with
+the surface OFF too, and disappears once the page settles.
+
+**Gates:** `GOWORK=off go build ./... && go vet ./... && go test ./...` clean; `scripts/build-zig.ps1`
+4 built lines; `GOWORK=off go test -tags zigui ./internal/webui -run TestZig` ok; deployed exe logs
+`visual hosting ACTIVE (DirectComposition)`; `ctl screenshot-all` 14 tabs / 0 errors / 0 OVERFLOW;
+`ctl quit` leaves no process.
+
+**Found by execution:**
+
+1. **A rect-report-driven present is a frozen picture.** `surfaces.js` drops identical consecutive
+   reports (P2, correctly), so a still page emits nothing - presenting off that stream shows exactly one
+   frame for ever, which is #58 rebuilt on purpose. The present runs on its own window timer
+   (`surf_timer_id`, 8 ms), armed only while surfaces exist.
+2. **A producer proving its OWN frames change proves nothing.** The oracle has to see what the compositor
+   put on screen, so `ctl surface-test stats` has the CHILD crop its own window to the presenting surface
+   (`procShot.W == -1`) and decodes the testcard out of that PNG. The rect never reaches the daemon -
+   directive #2 holds - and the crop makes the card fill the sampled frame, which `testcard.Decode`
+   requires.
+3. **`ctl surface-test` needed `app.SendMulti`.** `app.Send` truncates at the first newline and every
+   interesting line of the report is after it.
+
+Not exercised: non-96-dpi (R8 still open from P1), multi-monitor, producer CRASH mid-stream (the
+last-frame-then-hide grace in §4.6 is written but unproven), and the 32 MiB ring cap on a real 4K surface
+(asserted by test, never hit live).
+
 ### P4 — Wire zigvfx, editor preview on the flag
 `rave-mate-vfx --present` (keeps `glReadPixels`, uploads to the shared texture). `edvPrevStart`
 branches on the flag.

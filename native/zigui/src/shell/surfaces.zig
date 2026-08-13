@@ -5,16 +5,19 @@
 //! disappearance = close. The daemon never learns a rect and never commands open/close - there is
 //! deliberately no internal/webui/surface.go.
 //!
-//! P2 content is a solid colour picked HERE (id hash, or `data-surface-color`) on a composition
-//! swapchain - enough to prove the hole, the z-order and the geometry. No producer, no frames: the
-//! shared-texture ingest is P3.
+//! Content is either a solid colour picked HERE (id hash, or `data-surface-color`) - P2, enough to
+//! prove the hole, the z-order and the geometry - or, once a producer publishes a shared D3D11
+//! texture under the surface's name, that producer's FRAMES (P3, surfsrc.zig). A surface flips
+//! between the two on its own: the producer's kernel objects existing IS the bind.
 //!
 //! Bounded: cap 8 surfaces, drop-newest past it, every drop logged. One swapchain per surface, 2
-//! buffers, recreated only when the integer size changes.
+//! buffers, recreated only when the integer size changes. The frame ring is the producer's and is
+//! bounded there (surfsrc.max_slots frames = 2 * w*h*4 bytes; drop-oldest on this side).
 //!
-//! COM decls are LOCAL on purpose: this module talks to the device + parent visual through
-//! *anyopaque, so it shares no type with winshell.zig and neither file can drift the other's
-//! vtable. Slots come from dcomp.h / dxgi1_2.h / d3d11.h (Windows Kits 10.0.26100).
+//! DComp + DXGI-swapchain decls are LOCAL on purpose: this module talks to the device + parent
+//! visual through *anyopaque, so it shares no type with winshell.zig and neither file can drift the
+//! other's vtable. Slots come from dcomp.h / dxgi1_2.h (Windows Kits 10.0.26100). The D3D11 half is
+//! the SHARED module (native/zigd3d) that zigenc also uses - one binding, not two.
 //!
 //! GOTCHA (P0, by execution): MSVC REVERSES same-name virtual overload groups in the vtable, so
 //! IDCompositionVisual::SetOffsetX(float) is slot 4 (not 3), SetOffsetY(float) 6, SetTransform 8,
@@ -22,7 +25,9 @@
 //! below have unique method names, so their declaration order holds.
 
 const std = @import("std");
+const d3d = @import("d3d11");
 const wire = @import("wire.zig");
+const surfsrc = @import("surfsrc.zig");
 
 /// cap bounds the registry: 8 live surfaces, drop-NEWEST past that (§4.4). The reporter caps the
 /// wire array at the same number, so a drop here means the page declared more than the reporter did.
@@ -101,26 +106,7 @@ const Swap = extern struct {
     },
 };
 
-// ID3D11Device : IUnknown — 3 CreateBuffer | 4..6 CreateTexture1D/2D/3D | 7 CreateShaderResourceView
-//   8 CreateUnorderedAccessView | 9 CreateRenderTargetView
-const D3D = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _p3: [6]VOP, // 3..8
-        CreateRenderTargetView: *const fn (*anyopaque, *anyopaque, ?*anyopaque, *?*anyopaque) callconv(.winapi) HR,
-    },
-};
-
-// ID3D11DeviceContext : ID3D11DeviceChild : IUnknown — 3..6 DeviceChild, 7..49 the state/draw
-// calls, 50 ClearRenderTargetView (returns void).
-const Ctx = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _p3: [47]VOP, // 3..49
-        ClearRenderTargetView: *const fn (*anyopaque, *anyopaque, *const [4]f32) callconv(.winapi) void,
-    },
-};
-
+// ID3D11Device / ID3D11DeviceContext / ID3D11Texture2D come from the SHARED module (`d3d`).
 /// DXGI_SWAP_CHAIN_DESC1 (48 bytes, all 32-bit fields incl. the inlined DXGI_SAMPLE_DESC).
 const SwapDesc = extern struct {
     Width: u32,
@@ -169,6 +155,14 @@ pub const Report = struct {
     y: f32,
     w: f32,
     h: f32,
+    /// fx/fy/fw/fh = the element's FULL rect, unclipped. x/y/w/h above are what survived every
+    /// scrolling ancestor. P2 only had the clipped one and sized content to it, which squashes a
+    /// real picture; a producer frame is pinned to the FULL rect and CROPPED to the visible one
+    /// (surfsrc.planBlit).
+    fx: f32,
+    fy: f32,
+    fw: f32,
+    fh: f32,
     vis: bool,
     dpr: f32,
     /// color is 0xRRGGBB from `data-surface-color`, or null = derive one from the id hash.
@@ -183,9 +177,17 @@ const Surface = struct {
     h: u32 = 0,
     x: f32 = std.math.nan(f32),
     y: f32 = std.math.nan(f32),
+    /// full rect (client device px), unclipped - what a producer renders to and what a frame is
+    /// positioned against.
+    fx: i64 = 0,
+    fy: i64 = 0,
+    fw: i64 = 0,
+    fh: i64 = 0,
     shown: bool = false,
     color: u32,
     seen: bool = false,
+    /// src is the producer attachment. Zero value = no producer; the surface stays a solid colour.
+    src: surfsrc.Source = .{},
 };
 
 pub const Registry = struct {
@@ -198,6 +200,8 @@ pub const Registry = struct {
     d3d: ?*anyopaque = null,
     ctx: ?*anyopaque = null,
     factory: ?*anyopaque = null,
+    /// dev1 = the same device QI'd to ID3D11Device1, which is where OpenSharedResourceByName lives.
+    dev1: ?*anyopaque = null,
     gpu_dead: bool = false, // one bring-up failure is enough; don't retry every frame
     dropped_logged: bool = false,
 
@@ -300,6 +304,7 @@ pub const Registry = struct {
     /// actually destroys it. Releasing first and detaching after is the only order that cannot
     /// leave a ghost visual painting after the element is gone.
     fn close(r: *Registry, s: *Surface) void {
+        surfsrc.close(&s.src); // producer objects first: they outlive the visual otherwise
         const v: *Vis = @ptrCast(@alignCast(s.visual));
         _ = v.v.SetContent(s.visual, null);
         comRelease(s.swap);
@@ -319,6 +324,10 @@ pub const Registry = struct {
 
     fn place(r: *Registry, s: *Surface, rep: Report) void {
         const v: *Vis = @ptrCast(@alignCast(s.visual));
+        s.fx = @intFromFloat(@round(rep.fx));
+        s.fy = @intFromFloat(@round(rep.fy));
+        s.fw = @intFromFloat(@max(0, @round(rep.fw)));
+        s.fh = @intFromFloat(@max(0, @round(rep.fh)));
         const want_w: u32 = @intFromFloat(@max(0, @round(rep.w)));
         const want_h: u32 = @intFromFloat(@max(0, @round(rep.h)));
         const show = rep.vis and want_w > 0 and want_h > 0;
@@ -385,23 +394,111 @@ pub const Registry = struct {
             return;
         }
         defer comRelease(tex);
-        const dev: *D3D = @ptrCast(@alignCast(r.d3d.?));
+        r.clearTo(tex.?, s.color);
+        _ = sc.v.Present(s.swap.?, 0, 0); // flushes the immediate context
+    }
+
+    /// clearTo fills one texture with a solid colour: a producerless surface's whole content, and
+    /// the letterbox behind a picture that does not fill its element.
+    fn clearTo(r: *Registry, tex: *anyopaque, color: u32) void {
+        const dev: *d3d.ID3D11Device = @ptrCast(@alignCast(r.d3d.?));
         var rtv: ?*anyopaque = null;
-        const hrv = dev.v.CreateRenderTargetView(r.d3d.?, tex.?, null, &rtv);
+        const hrv = dev.v.CreateRenderTargetView(r.d3d.?, tex, null, &rtv);
         if (hrv < 0 or rtv == null) {
             errHR("surface CreateRenderTargetView failed", hrv);
             return;
         }
         defer comRelease(rtv);
         const c: [4]f32 = .{
-            @as(f32, @floatFromInt((s.color >> 16) & 0xff)) / 255.0,
-            @as(f32, @floatFromInt((s.color >> 8) & 0xff)) / 255.0,
-            @as(f32, @floatFromInt(s.color & 0xff)) / 255.0,
+            @as(f32, @floatFromInt((color >> 16) & 0xff)) / 255.0,
+            @as(f32, @floatFromInt((color >> 8) & 0xff)) / 255.0,
+            @as(f32, @floatFromInt(color & 0xff)) / 255.0,
             1.0,
         };
-        const ctx: *Ctx = @ptrCast(@alignCast(r.ctx.?));
+        const ctx: *d3d.ID3D11DeviceContext = @ptrCast(@alignCast(r.ctx.?));
         ctx.v.ClearRenderTargetView(r.ctx.?, rtv.?, &c);
-        _ = sc.v.Present(s.swap.?, 0, 0); // flushes the immediate context
+    }
+
+    // -- P3: producer frames ---------------------------------------------------------------------
+    // The pump runs off a window timer, NOT off the page's rect reports: surfaces.js drops identical
+    // consecutive reports, so a still page emits nothing and a report-driven present would show
+    // exactly one frame for ever. That is the failure this repo already paid for once (#58: "fps
+    // 58.5" over one bit-identical picture) - the present cadence has to be the producer's, not the
+    // DOM's.
+
+    /// pump probes for producers, tells them the size to render, and presents at most one new frame
+    /// per surface per tick. Returns the number of live surfaces (0 = the caller may stop ticking).
+    pub fn pump(r: *Registry) u32 {
+        var live: u32 = 0;
+        for (&r.items) |*slot| {
+            if (slot.* == null) continue;
+            const s = &slot.*.?;
+            live += 1;
+            surfsrc.probe(&s.src, r.gpa, s.id);
+            if (s.src.view == null) continue;
+            surfsrc.wants(&s.src, @intCast(@max(0, s.fw)), @intCast(@max(0, s.fh)));
+            // x/y start as NaN and only become real in place(); @intFromFloat(NaN) is undefined, so
+            // a surface that has a swapchain but has never been positioned is skipped, not guessed.
+            if (!s.shown or s.swap == null or r.dev1 == null) continue;
+            if (!std.math.isFinite(s.x) or !std.math.isFinite(s.y)) continue;
+            const f = surfsrc.begin(&s.src, r.gpa, s.id, r.dev1) orelse continue;
+            surfsrc.end(&s.src, f, r.blit(s, f));
+        }
+        return live;
+    }
+
+    /// blit copies the producer's frame into the surface's back buffer and presents it. 1:1 pixels -
+    /// there is no scaler in this path on purpose: the producer renders at the full rect it was
+    /// asked for, and anything scrolled out is simply not copied.
+    fn blit(r: *Registry, s: *Surface, f: surfsrc.Frame) bool {
+        const plan = surfsrc.planBlit(f.w, f.h, s.fx, s.fy, s.fw, s.fh, @intFromFloat(s.x), @intFromFloat(s.y), s.w, s.h) orelse return false;
+        const sc: *Swap = @ptrCast(@alignCast(s.swap.?));
+        var back: ?*anyopaque = null;
+        const hrb = sc.v.GetBuffer(s.swap.?, 0, &iid_texture2d, &back);
+        if (hrb < 0 or back == null) {
+            errHR("surface GetBuffer failed", hrb);
+            return false;
+        }
+        defer comRelease(back);
+        // FLIP_SEQUENTIAL hands back an UNDEFINED buffer, so anything the picture does not cover has
+        // to be repainted every frame, not once.
+        if (!plan.covers) r.clearTo(back.?, s.color);
+        const box: d3d.BOX = .{ .left = plan.sx, .top = plan.sy, .front = 0, .right = plan.sx + plan.sw, .bottom = plan.sy + plan.sh, .back = 1 };
+        const ctx: *d3d.ID3D11DeviceContext = @ptrCast(@alignCast(r.ctx.?));
+        ctx.v.CopySubresourceRegion(r.ctx.?, back.?, 0, plan.dx, plan.dy, 0, f.tex, 0, &box);
+        _ = sc.v.Present(s.swap.?, 0, 0);
+        return true;
+    }
+
+    /// producerRect reports the visible rect of the first surface actually presenting a producer's
+    /// frames, in CLIENT device px. It exists so `ctl surface-test stats` can screenshot exactly the
+    /// picture and decode the testcard out of it - the rect never crosses to the daemon, only the
+    /// cropped PNG does (directive #2 holds: Go still learns no geometry).
+    pub fn producerRect(r: *Registry) ?struct { x: i32, y: i32, w: i32, h: i32 } {
+        for (&r.items) |*slot| {
+            if (slot.* == null) continue;
+            const s = &slot.*.?;
+            if (!s.src.attached() or !s.shown or s.w == 0 or s.h == 0) continue;
+            if (!std.math.isFinite(s.x) or !std.math.isFinite(s.y)) continue;
+            return .{ .x = @intFromFloat(s.x), .y = @intFromFloat(s.y), .w = @intCast(s.w), .h = @intCast(s.h) };
+        }
+        return null;
+    }
+
+    /// logSources prints one line per attached producer. The child has no request/response lane of
+    /// its own and does not need one: these land in the daemon log like every other child line.
+    pub fn logSources(r: *Registry) void {
+        for (&r.items) |*slot| {
+            if (slot.* == null) continue;
+            const s = &slot.*.?;
+            if (s.src.view == null) continue;
+            const st = s.src.stats();
+            var buf: [256]u8 = undefined;
+            const m = std.fmt.bufPrint(&buf, "rave-shell: surface {s} src gen {d} {d}x{d} presented {d} dropped {d} lastSeq {d} lastPtsMs {d} staleMs {d} visible {d}x{d}", .{
+                s.id, st.gen, st.w, st.h, st.presented, st.dropped, st.last_seq, @divTrunc(st.last_pts_ns, 1_000_000), st.stale_ms, s.w, s.h,
+            }) catch continue;
+            wire.errLine(m);
+        }
     }
 
     fn newSwapchain(r: *Registry, w: u32, h: u32) ?*anyopaque {
@@ -463,9 +560,15 @@ pub const Registry = struct {
             comRelease(dev);
             return false;
         }
+        // ID3D11Device1 carries OpenSharedResourceByName, the named-shared-resource half. Absent =
+        // no producer ingest; solid-colour surfaces still work, so this is a WARN, not a failure.
+        var dev1: ?*anyopaque = null;
+        if (d3d.failed(d3d.qi(dev.?, &d3d.IID_ID3D11Device1, &dev1))) dev1 = null;
+        if (dev1 == null) wire.errLine("rave-shell: no ID3D11Device1 - surfaces cannot ingest producer frames");
         r.d3d = dev;
         r.ctx = ctx;
         r.factory = fac;
+        r.dev1 = dev1;
         r.gpu_dead = false;
         wire.errLine("rave-shell: surface presenter ready (D3D11 + composition swapchains)");
         return true;
@@ -480,6 +583,7 @@ pub const Registry = struct {
     pub fn deinit(r: *Registry) void {
         for (&r.items) |*slot| {
             if (slot.*) |*s| {
+                surfsrc.close(&s.src);
                 const v: *Vis = @ptrCast(@alignCast(s.visual));
                 _ = v.v.SetContent(s.visual, null);
                 comRelease(s.swap);
@@ -490,9 +594,11 @@ pub const Registry = struct {
         }
         const parent: *Vis = @ptrCast(@alignCast(r.layer));
         _ = parent.v.RemoveAllVisuals(r.layer);
+        comRelease(r.dev1);
         comRelease(r.factory);
         comRelease(r.ctx);
         comRelease(r.d3d);
+        r.dev1 = null;
         r.factory = null;
         r.ctx = null;
         r.d3d = null;

@@ -16,6 +16,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Shared D3D11/DXGI declarations (native/zigd3d) - the SAME module native/zigui's shell child
+    // imports for render surfaces. b.path() cannot leave the package root, so the sibling package is
+    // addressed off the absolute build root.
+    mod.addImport("d3d11", b.createModule(.{
+        .root_source_file = .{ .cwd_relative = b.pathJoin(&.{ b.build_root.path.?, "..", "zigd3d", "src", "d3d11.zig" }) },
+        .target = target,
+        .optimize = optimize,
+    }));
     mod.linkSystemLibrary("mfplat", .{});
     mod.linkSystemLibrary("d3d11", .{});
     mod.linkSystemLibrary("dxgi", .{});

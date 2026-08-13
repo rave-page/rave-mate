@@ -519,7 +519,7 @@ func runCtl(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: rave-mate ctl <status|snapshot|logs|show|tab NAME|quit|\n"+
 			"                       resize WxH|click LABEL|act ACT [VAL]|tap X Y|drag X Y [X2 Y2]|type TEXT|read LABEL|\n"+
 			"                       set LABEL VALUE|screenshot PATH|screenshot-all DIR|screenshot-region PATH X Y W H|screenshot-vr PATH|\n"+
-			"                       surface-test on|off|\n"+
+			"                       surface-test [on|off|card [WxH@fps]|stats|reset]|\n"+
 			"                       gio-snapshot [WINDOWID]|gio-tap WINDOWID CONTROLID|\n"+
 			"                       sync-library|library-sync-status|sync-media [BUDGET]|media-sync-status|\n"+
 			"                       sync-playlists|playlist-sync-status|cleanup-missing [dry]|\n"+
@@ -876,17 +876,39 @@ func runCtl(args []string) int {
 			return 1
 		}
 		fmt.Println(resp)
-	case "surface-test": // P2 verification: open/close the window child's native render surface
-		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
-			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl surface-test on|off\n"+
-				"  Injects a [data-surface] hole into the live page FROM THE WINDOW CHILD and opens a\n"+
-				"  DirectComposition visual under it (solid colour, no producer). Proves the hole, the\n"+
-				"  z-order (page content, modals and smart-select panels still draw ON TOP) and the rect\n"+
-				"  tracking on scroll/resize. Needs the zig window child under visual hosting\n"+
-				"  (features.ui.shellHosting=\"visual\", the default). Leave it OFF when you are done.")
+	case "surface-test": // native render surface: the hole (P2) and the frame producer (P3)
+		sub := "stats"
+		if len(args) > 1 {
+			sub = args[1]
+		}
+		switch sub {
+		case "on", "off", "card", "stats", "reset":
+		default:
+			fmt.Fprintln(os.Stderr, "usage: rave-mate ctl surface-test [on|off|card [WxH@fps]|stats|reset]\n"+
+				"  on    Injects a [data-surface] hole into the live page FROM THE WINDOW CHILD and opens a\n"+
+				"        DirectComposition visual under it (solid colour). Proves the hole, the z-order (page\n"+
+				"        content, modals and smart-select panels still draw ON TOP) and the rect tracking on\n"+
+				"        scroll/resize.\n"+
+				"  card  Also starts the P3 PRODUCER: a supervised `rave-mate worker surface` child renders\n"+
+				"        internal/testcard into a shared D3D11 texture ring (keyed mutex, named after the\n"+
+				"        surface id) and the window child presents it. No editor, no encode, no MSE. The\n"+
+				"        producer renders at the size the SURFACE asks for, so the present is a 1:1 crop:\n"+
+				"        scroll the surface half out of view and the picture is CROPPED, not squashed.\n"+
+				"        WxH@fps only bounds the fallback used until the surface reports its rect.\n"+
+				"  stats Samples what is ACTUALLY ON SCREEN - the child crops its own window to the surface -\n"+
+				"        and judges it with internal/framedebug (did the picture MOVE) plus the testcard\n"+
+				"        in-picture sequence (WHICH frame, how old, what froze). Rate counters answer neither;\n"+
+				"        a 4K route once republished one identical frame for 48 min at \"fps 58.5\". Call it\n"+
+				"        repeatedly - each call is one sample.\n"+
+				"  reset Clears the sampler tallies (leaves the producer running).\n"+
+				"  off   Removes the hole and stops the producer.\n"+
+				"  Needs the zig window child under visual hosting (features.ui.shellHosting=\"visual\", the\n"+
+				"  default). Leave it OFF when you are done.")
 			return 2
 		}
-		resp, err := app.Send("SURFACE-TEST " + args[1])
+		// SendMulti, not Send: `stats` answers with the producer, the transport and BOTH oracles -
+		// Send truncates at the first newline and the interesting lines are all after it.
+		resp, err := app.SendMulti(strings.TrimSpace("SURFACE-TEST " + strings.Join(args[1:], " ")))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ctl:", err)
 			return 1

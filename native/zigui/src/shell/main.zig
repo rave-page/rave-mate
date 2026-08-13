@@ -243,7 +243,14 @@ fn handleEvent(c: *Child, arena: std.mem.Allocator, event: []const u8, data: std
         const D = struct { rid: []const u8 = "", path: []const u8 = "", x: i64 = 0, y: i64 = 0, w: i64 = 0, h: i64 = 0 };
         const d = parse(D, arena, data) orelse return;
         if (c.sh) |sh| {
-            winshell.capture(sh, d.rid, d.path, @intCast(d.x), @intCast(d.y), @intCast(d.w), @intCast(d.h));
+            // w = -1 is "crop to the native surface that is presenting producer frames" (P3). The
+            // rect is the CHILD's to know, so the daemon asks for the picture by intent, not by
+            // geometry - which is also why it is a sentinel here and not a rect on the wire.
+            if (d.w == -1) {
+                winshell.surfaceShot(sh, d.rid, d.path);
+            } else {
+                winshell.capture(sh, d.rid, d.path, @intCast(d.x), @intCast(d.y), @intCast(d.w), @intCast(d.h));
+            }
         } else {
             c.em.event("shotres", .{ .rid = d.rid, .err = "no window handle" });
         }

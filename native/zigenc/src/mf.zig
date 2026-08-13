@@ -8,19 +8,18 @@
 //! methods it skips so the counting is reviewable.
 
 const std = @import("std");
+/// d3d = native/zigd3d/src/d3d11.zig. This file used to own the D3D11/DXGI declarations; the shell
+/// child's native render surfaces need the same ones, so they live in one shared module and this is
+/// the re-export face of it. Call sites (cap.zig, dec.zig, main.zig) keep saying `mf.X`.
+const d3d = @import("d3d11");
 
-pub const HRESULT = i32;
-const VOP = *const anyopaque;
+pub const HRESULT = d3d.HRESULT;
+const VOP = d3d.VOP;
 
-pub fn failed(hr: HRESULT) bool {
-    return hr < 0;
-}
+pub const failed = d3d.failed;
 
-pub const GUID = extern struct { d1: u32, d2: u16, d3: u16, d4: [8]u8 };
-
-fn g(d1: u32, d2: u16, d3: u16, d4: [8]u8) GUID {
-    return .{ .d1 = d1, .d2 = d2, .d3 = d3, .d4 = d4 };
-}
+pub const GUID = d3d.GUID;
+const g = d3d.g;
 
 // ── GUIDs (values identical to the C++ shim's TU-local DEFINE_GUIDs) ──
 // MF_TRANSFORM_ASYNC is the ONLY legal discriminator for drive mode. QI(IMFMediaEventGenerator)
@@ -59,22 +58,21 @@ const CODECAPI_AVEncVideoForceKeyFrame = g(0x398c1b98, 0x8353, 0x475a, .{ 0x9e, 
 const IID_ICodecAPI = g(0x901db4c7, 0x31ce, 0x41a2, .{ 0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda });
 // NOTE last byte 0x7d: the hand-rolled 0x7b variant silently forces sync drive (E_NOINTERFACE).
 const IID_IMFMediaEventGenerator = g(0x2cd0bd52, 0xbcd5, 0x4b89, .{ 0xb6, 0x2c, 0xea, 0xdc, 0x0c, 0x03, 0x1e, 0x7d });
-const IID_ID3D10Multithread = g(0x9b7e4e00, 0x342c, 0x4106, .{ 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 });
-pub const IID_ID3D11Texture2D = g(0x6f15aaf2, 0xd208, 0x4e89, .{ 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c });
-// IDXGIKeyedMutex: preferred cross-process sync on a shared texture when the sender exposes it.
-pub const IID_IDXGIKeyedMutex = g(0x9d8e1289, 0xd7b3, 0x465f, .{ 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d });
+const IID_ID3D10Multithread = d3d.IID_ID3D10Multithread;
+pub const IID_ID3D11Texture2D = d3d.IID_ID3D11Texture2D;
+pub const IID_IDXGIKeyedMutex = d3d.IID_IDXGIKeyedMutex;
 const IID_IMF2DBuffer = g(0x7dc9d5f9, 0x9ed9, 0x44ec, .{ 0x9b, 0xbf, 0x06, 0x00, 0xbb, 0x58, 0x9f, 0xbb });
-const IID_ID3D11VideoDevice = g(0x10ec4d5b, 0x975a, 0x4689, .{ 0xb9, 0xe4, 0xd0, 0xaa, 0xc3, 0x0f, 0xe3, 0x33 });
-const IID_ID3D11VideoContext = g(0x61f21c45, 0x3c0e, 0x4a74, .{ 0x9c, 0xea, 0x67, 0x10, 0x0d, 0x9a, 0xd5, 0xe4 });
+const IID_ID3D11VideoDevice = d3d.IID_ID3D11VideoDevice;
+const IID_ID3D11VideoContext = d3d.IID_ID3D11VideoContext;
 const IID_IMFTransform = g(0xbf94c121, 0x5b05, 0x4e6f, .{ 0x80, 0x00, 0xba, 0x59, 0x89, 0x61, 0x41, 0x4d });
-const IID_IDXGIFactory1 = g(0x770aae78, 0xf26f, 0x4dba, .{ 0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87 });
+const IID_IDXGIFactory1 = d3d.IID_IDXGIFactory1;
 
 // ── HRESULT / enum constants ──
 const MF_E_TRANSFORM_STREAM_CHANGE: HRESULT = @bitCast(@as(u32, 0xC00D6D61));
 const MF_E_TRANSFORM_NEED_MORE_INPUT: HRESULT = @bitCast(@as(u32, 0xC00D6D72));
 const MF_E_NO_EVENTS_AVAILABLE: HRESULT = @bitCast(@as(u32, 0xC00D3E80));
 const MF_E_NOTACCEPTING: HRESULT = @bitCast(@as(u32, 0xC00D36B5));
-const E_FAIL: HRESULT = @bitCast(@as(u32, 0x80004005));
+const E_FAIL = d3d.E_FAIL;
 
 const MF_VERSION: u32 = 0x00020070;
 const MFSTARTUP_LITE: u32 = 1;
@@ -97,96 +95,42 @@ const METransformHaveOutput: u32 = 602;
 const METransformDrainComplete: u32 = 611;
 const MF_EVENT_FLAG_NO_WAIT: u32 = 1;
 
-const D3D_DRIVER_TYPE_UNKNOWN: u32 = 0;
-const D3D_DRIVER_TYPE_HARDWARE: u32 = 1;
-const D3D_DRIVER_TYPE_WARP: u32 = 5; // software rasterizer WITH a video processor: the sw tier's
-// CSC+scale still runs when no hardware adapter can host a video device at all.
-const D3D11_CREATE_DEVICE_BGRA_SUPPORT: u32 = 0x20;
-const D3D11_CREATE_DEVICE_VIDEO_SUPPORT: u32 = 0x800; // required for video MFTs (audit fix)
-const D3D11_SDK_VERSION: u32 = 7;
-const DXGI_FORMAT_R8G8B8A8_UNORM: u32 = 28;
-const DXGI_FORMAT_B8G8R8A8_UNORM: u32 = 87;
-const DXGI_FORMAT_NV12: u32 = 103;
-pub const bind_shader_resource: u32 = 8;
-const D3D11_BIND_SHADER_RESOURCE: u32 = bind_shader_resource;
-pub const bind_render_target: u32 = 0x20;
-const D3D11_BIND_RENDER_TARGET: u32 = bind_render_target;
-const D3D11_VPIV_DIMENSION_TEXTURE2D: u32 = 1;
-const D3D11_VPOV_DIMENSION_TEXTURE2D: u32 = 1;
-const D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT: u32 = 1;
-pub const VP_FORMAT_SUPPORT_OUTPUT: u32 = 2;
-pub const USAGE_STAGING: u32 = 3;
-pub const CPU_ACCESS_READ: u32 = 0x20000;
-pub const MAP_READ: u32 = 1;
-const DXGI_ADAPTER_FLAG_SOFTWARE: u32 = 2;
+const D3D_DRIVER_TYPE_UNKNOWN = d3d.D3D_DRIVER_TYPE_UNKNOWN;
+const D3D_DRIVER_TYPE_HARDWARE = d3d.D3D_DRIVER_TYPE_HARDWARE;
+const D3D_DRIVER_TYPE_WARP = d3d.D3D_DRIVER_TYPE_WARP;
+const D3D11_CREATE_DEVICE_BGRA_SUPPORT = d3d.D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+const D3D11_CREATE_DEVICE_VIDEO_SUPPORT = d3d.D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+const D3D11_SDK_VERSION = d3d.D3D11_SDK_VERSION;
+const DXGI_FORMAT_R8G8B8A8_UNORM = d3d.DXGI_FORMAT_R8G8B8A8_UNORM;
+const DXGI_FORMAT_B8G8R8A8_UNORM = d3d.DXGI_FORMAT_B8G8R8A8_UNORM;
+const DXGI_FORMAT_NV12 = d3d.DXGI_FORMAT_NV12;
+pub const bind_shader_resource = d3d.bind_shader_resource;
+const D3D11_BIND_SHADER_RESOURCE = d3d.D3D11_BIND_SHADER_RESOURCE;
+pub const bind_render_target = d3d.bind_render_target;
+const D3D11_BIND_RENDER_TARGET = d3d.D3D11_BIND_RENDER_TARGET;
+const D3D11_VPIV_DIMENSION_TEXTURE2D = d3d.D3D11_VPIV_DIMENSION_TEXTURE2D;
+const D3D11_VPOV_DIMENSION_TEXTURE2D = d3d.D3D11_VPOV_DIMENSION_TEXTURE2D;
+const D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT = d3d.D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT;
+pub const VP_FORMAT_SUPPORT_OUTPUT = d3d.VP_FORMAT_SUPPORT_OUTPUT;
+pub const USAGE_STAGING = d3d.USAGE_STAGING;
+pub const CPU_ACCESS_READ = d3d.CPU_ACCESS_READ;
+pub const MAP_READ = d3d.MAP_READ;
+const DXGI_ADAPTER_FLAG_SOFTWARE = d3d.DXGI_ADAPTER_FLAG_SOFTWARE;
 const VT_UI4: u16 = 19;
 const VT_BOOL: u16 = 11;
 
-// ── structs (MS x64 layout) ──
-pub const LUID = extern struct { low: u32, high: i32 };
-
-const DXGI_ADAPTER_DESC1 = extern struct {
-    Description: [128]u16,
-    VendorId: u32,
-    DeviceId: u32,
-    SubSysId: u32,
-    Revision: u32,
-    DedicatedVideoMemory: usize,
-    DedicatedSystemMemory: usize,
-    SharedSystemMemory: usize,
-    AdapterLuid: LUID,
-    Flags: u32,
-};
-
-pub const D3D11_TEXTURE2D_DESC = extern struct {
-    Width: u32,
-    Height: u32,
-    MipLevels: u32,
-    ArraySize: u32,
-    Format: u32,
-    SampleCount: u32,
-    SampleQuality: u32,
-    Usage: u32,
-    BindFlags: u32,
-    CPUAccessFlags: u32,
-    MiscFlags: u32,
-};
-
-const DXGI_RATIONAL = extern struct { Numerator: u32, Denominator: u32 };
-
-pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
-
-pub const MAPPED_SUBRESOURCE = extern struct { pData: ?[*]u8, RowPitch: u32, DepthPitch: u32 };
-
-const D3D11_VIDEO_PROCESSOR_CONTENT_DESC = extern struct {
-    InputFrameFormat: u32,
-    InputFrameRate: DXGI_RATIONAL,
-    InputWidth: u32,
-    InputHeight: u32,
-    OutputFrameRate: DXGI_RATIONAL,
-    OutputWidth: u32,
-    OutputHeight: u32,
-    Usage: u32,
-};
-
-const D3D11_VIDEO_PROCESSOR_STREAM = extern struct {
-    Enable: i32,
-    OutputIndex: u32,
-    InputFrameOrField: u32,
-    PastFrames: u32,
-    FutureFrames: u32,
-    ppPastSurfaces: ?*anyopaque = null,
-    pInputSurface: ?*anyopaque = null,
-    ppFutureSurfaces: ?*anyopaque = null,
-    ppPastSurfacesRight: ?*anyopaque = null,
-    pInputSurfaceRight: ?*anyopaque = null,
-    ppFutureSurfacesRight: ?*anyopaque = null,
-};
-
-pub const VPIV_DESC = extern struct { FourCC: u32, ViewDimension: u32, MipSlice: u32, ArraySlice: u32 };
-const VPOV_DESC = extern struct { ViewDimension: u32, a: u32, b: u32, c: u32 };
-// D3D11_VIDEO_PROCESSOR_COLOR_SPACE bitfield word: bit2 = YCbCr_Matrix (1 = BT.709).
-const COLOR_SPACE = extern struct { bits: u32 };
+// ── structs (MS x64 layout; shared - see native/zigd3d/src/d3d11.zig) ──
+pub const LUID = d3d.LUID;
+const DXGI_ADAPTER_DESC1 = d3d.DXGI_ADAPTER_DESC1;
+pub const D3D11_TEXTURE2D_DESC = d3d.D3D11_TEXTURE2D_DESC;
+const DXGI_RATIONAL = d3d.DXGI_RATIONAL;
+pub const RECT = d3d.RECT;
+pub const MAPPED_SUBRESOURCE = d3d.MAPPED_SUBRESOURCE;
+const D3D11_VIDEO_PROCESSOR_CONTENT_DESC = d3d.D3D11_VIDEO_PROCESSOR_CONTENT_DESC;
+const D3D11_VIDEO_PROCESSOR_STREAM = d3d.D3D11_VIDEO_PROCESSOR_STREAM;
+pub const VPIV_DESC = d3d.VPIV_DESC;
+const VPOV_DESC = d3d.VPOV_DESC;
+const COLOR_SPACE = d3d.COLOR_SPACE;
 
 const MFT_REGISTER_TYPE_INFO = extern struct { major: GUID, sub: GUID };
 const MFT_OUTPUT_STREAM_INFO = extern struct { dwFlags: u32, cbSize: u32, cbAlignment: u32 };
@@ -202,23 +146,9 @@ const VARIANT = extern struct { vt: u16, w1: u16 = 0, w2: u16 = 0, w3: u16 = 0, 
 
 // ── COM interfaces (self as *anyopaque; pads name the IDL methods they skip) ──
 
-pub const IUnk = extern struct {
-    v: *const extern struct {
-        QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
-        AddRef: *const fn (*anyopaque) callconv(.winapi) u32,
-        Release: *const fn (*anyopaque) callconv(.winapi) u32,
-    },
-};
-
-pub fn release(p: anytype) void {
-    const u: *IUnk = @ptrCast(@alignCast(p));
-    _ = u.v.Release(u);
-}
-
-pub fn qi(p: anytype, iid: *const GUID, out: *?*anyopaque) HRESULT {
-    const u: *IUnk = @ptrCast(@alignCast(p));
-    return u.v.QueryInterface(u, iid, out);
-}
+pub const IUnk = d3d.IUnk;
+pub const release = d3d.release;
+pub const qi = d3d.qi;
 
 // IMFAttributes prefix (33 slots incl. IUnknown) shared by media types/samples/activates/events.
 const AttrVtbl = extern struct {
@@ -351,121 +281,18 @@ pub const ICodecAPI = extern struct {
     },
 };
 
-pub const ID3D11Device = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _p3: [2]VOP, // CreateBuffer CreateTexture1D
-        CreateTexture2D: *const fn (*anyopaque, *const D3D11_TEXTURE2D_DESC, ?*const anyopaque, *?*anyopaque) callconv(.winapi) HRESULT,
-        _p6: [22]VOP, // CreateTexture3D(6) .. CreateDeferredContext(27)
-        OpenSharedResource: *const fn (*anyopaque, *anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
-    },
-};
-
-// ID3D11Texture2D: IUnknown(3) + ID3D11DeviceChild(4) + ID3D11Resource(3) → GetDesc at 10.
-pub const ID3D11Texture2D = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
-        _res: [3]VOP, // GetType SetEvictionPriority GetEvictionPriority
-        GetDesc: *const fn (*anyopaque, *D3D11_TEXTURE2D_DESC) callconv(.winapi) void,
-    },
-};
-
-// IDXGIKeyedMutex: IUnknown(3) + IDXGIObject(4) + IDXGIDeviceSubObject(1) → AcquireSync at 8.
-pub const IDXGIKeyedMutex = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _obj: [4]VOP, // SetPrivateData SetPrivateDataInterface GetPrivateData GetParent
-        _sub: [1]VOP, // GetDevice
-        AcquireSync: *const fn (*anyopaque, u64, u32) callconv(.winapi) HRESULT,
-        ReleaseSync: *const fn (*anyopaque, u64) callconv(.winapi) HRESULT,
-    },
-};
-
-pub const ID3D11DeviceContext = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _child: [4]VOP, // GetDevice GetPrivateData SetPrivateData SetPrivateDataInterface
-        _p7: [7]VOP, // VSSetConstantBuffers(7) .. Draw(13)
-        Map: *const fn (*anyopaque, *anyopaque, u32, u32, u32, *MAPPED_SUBRESOURCE) callconv(.winapi) HRESULT,
-        Unmap: *const fn (*anyopaque, *anyopaque, u32) callconv(.winapi) void,
-        _p16: [31]VOP, // PSSetConstantBuffers(16) .. CopySubresourceRegion(46)
-        CopyResource: *const fn (*anyopaque, *anyopaque, *anyopaque) callconv(.winapi) void,
-        UpdateSubresource: *const fn (*anyopaque, *anyopaque, u32, ?*const anyopaque, *const anyopaque, u32, u32) callconv(.winapi) void,
-        _p49: [62]VOP, // CopyStructureCount(49) .. ClearState(110)
-        // Flush(111) is REQUIRED on the decode/publish path: a write into a texture ANOTHER PROCESS
-        // reads is only visible once the command list is submitted, and a named (CPU) access mutex
-        // carries no implicit flush the way IDXGIKeyedMutex.ReleaseSync does. Without it the
-        // receiver reads the pre-blit content - a blank picture with zero errors in every counter.
-        Flush: *const fn (*anyopaque) callconv(.winapi) void,
-    },
-};
-
-pub const ID3D10Multithread = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _p: [2]VOP, // Enter Leave
-        SetMultithreadProtected: *const fn (*anyopaque, i32) callconv(.winapi) i32,
-    },
-};
-
-pub const ID3D11VideoDevice = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _p3: [1]VOP, // CreateVideoDecoder
-        CreateVideoProcessor: *const fn (*anyopaque, *anyopaque, u32, *?*anyopaque) callconv(.winapi) HRESULT,
-        _p5: [3]VOP, // CreateAuthenticatedChannel CreateCryptoSession CreateVideoDecoderOutputView
-        CreateVideoProcessorInputView: *const fn (*anyopaque, *anyopaque, *anyopaque, *const VPIV_DESC, *?*anyopaque) callconv(.winapi) HRESULT,
-        CreateVideoProcessorOutputView: *const fn (*anyopaque, *anyopaque, *anyopaque, *const VPOV_DESC, *?*anyopaque) callconv(.winapi) HRESULT,
-        CreateVideoProcessorEnumerator: *const fn (*anyopaque, *const D3D11_VIDEO_PROCESSOR_CONTENT_DESC, *?*anyopaque) callconv(.winapi) HRESULT,
-    },
-};
-
-pub const ID3D11VideoProcessorEnumerator = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _child: [4]VOP,
-        _p7: [1]VOP, // GetVideoProcessorContentDesc
-        CheckVideoProcessorFormat: *const fn (*anyopaque, u32, *u32) callconv(.winapi) HRESULT,
-    },
-};
-
-pub const ID3D11VideoContext = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _child: [4]VOP,
-        _p7: [8]VOP, // GetDecoderBuffer ReleaseDecoderBuffer DecoderBeginFrame DecoderEndFrame SubmitDecoderBuffers DecoderExtension VideoProcessorSetOutputTargetRect VideoProcessorSetOutputBackgroundColor
-        VideoProcessorSetOutputColorSpace: *const fn (*anyopaque, *anyopaque, *const COLOR_SPACE) callconv(.winapi) void,
-        _p16: [12]VOP, // SetOutputAlphaFillMode..GetOutputExtension(26) + SetStreamFrameFormat(27)
-        VideoProcessorSetStreamColorSpace: *const fn (*anyopaque, *anyopaque, u32, *const COLOR_SPACE) callconv(.winapi) void,
-        _p29: [1]VOP, // SetStreamOutputRate(29)
-        // A hardware decoder's NV12 surface is often taller than the frame (16-row alignment:
-        // 1088 for 1080). Without an explicit source rect the VP samples the WHOLE surface and
-        // squashes those alignment rows into the output - so this slot is load-bearing on the
-        // decode path, and it splits the old _p29 pad 24 → 1 + 1 + 22.
-        VideoProcessorSetStreamSourceRect: *const fn (*anyopaque, *anyopaque, u32, i32, ?*const RECT) callconv(.winapi) void,
-        _p31: [22]VOP, // SetStreamDestRect(31)..GetStreamExtension(52)
-        VideoProcessorBlt: *const fn (*anyopaque, *anyopaque, *anyopaque, u32, u32, *const D3D11_VIDEO_PROCESSOR_STREAM) callconv(.winapi) HRESULT,
-    },
-};
-
-pub const IDXGIFactory1 = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _obj: [4]VOP, // SetPrivateData SetPrivateDataInterface GetPrivateData GetParent
-        _fac: [5]VOP, // EnumAdapters MakeWindowAssociation GetWindowAssociation CreateSwapChain CreateSoftwareAdapter
-        EnumAdapters1: *const fn (*anyopaque, u32, *?*IDXGIAdapter1) callconv(.winapi) HRESULT,
-    },
-};
-
-pub const IDXGIAdapter1 = extern struct {
-    v: *const extern struct {
-        _iunk: [3]VOP,
-        _obj: [4]VOP,
-        _p7: [3]VOP, // EnumOutputs GetDesc CheckInterfaceSupport
-        GetDesc1: *const fn (*anyopaque, *DXGI_ADAPTER_DESC1) callconv(.winapi) HRESULT,
-    },
-};
+// D3D11/DXGI interfaces: shared, one copy, native/zigd3d/src/d3d11.zig. Everything above this line
+// is Media-Foundation-only and stays here.
+pub const ID3D11Device = d3d.ID3D11Device;
+pub const ID3D11Texture2D = d3d.ID3D11Texture2D;
+pub const IDXGIKeyedMutex = d3d.IDXGIKeyedMutex;
+pub const ID3D11DeviceContext = d3d.ID3D11DeviceContext;
+pub const ID3D10Multithread = d3d.ID3D10Multithread;
+pub const ID3D11VideoDevice = d3d.ID3D11VideoDevice;
+pub const ID3D11VideoProcessorEnumerator = d3d.ID3D11VideoProcessorEnumerator;
+pub const ID3D11VideoContext = d3d.ID3D11VideoContext;
+pub const IDXGIFactory1 = d3d.IDXGIFactory1;
+pub const IDXGIAdapter1 = d3d.IDXGIAdapter1;
 
 // ── flat imports ──
 extern "mfplat" fn MFStartup(u32, u32) callconv(.winapi) HRESULT;
