@@ -186,6 +186,7 @@ type mpVid struct {
 	strMime string
 	strT0   float64
 	strAuto bool // element autoplays when the fresh feed opens
+	strLoop bool // feed is the whole bounded IN→OUT span: element loops it natively
 }
 
 // mpStreamCtl is the host hook driving a realtime preview pipeline ("seek"/"play"/
@@ -1663,8 +1664,9 @@ func mpTick(u *UI, host string) {
 			// rebuilt element or a rejected play() otherwise leaves a phantom moving playhead
 			u.mpVidEval(host, "window.rave(JSON.stringify({act:'mp-vtick:"+host+
 				"',val:v.currentTime+'|'+(v.duration||0)+'|'+(v.paused?'1':'0')}))")
-			// live-feed clock ≠ source clock, so the element can't enforce the OUT marker
-			if t.vid.strURL != "" && t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
+			// live-feed clock ≠ source clock, so the element can't enforce the OUT marker.
+			// A loop feed carries the whole IN→OUT span and wraps itself - hands off.
+			if t.vid.strURL != "" && !t.vid.strLoop && t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
 				u.mpVidEval(host, "if(!v.paused){v.pause()}")
 			}
 		} else if t.outSec > 0 && tr.cur+t.mediaStart(t.active) >= t.outSec {
@@ -2496,7 +2498,8 @@ func (u *UI) mpVidTick(host, val string) {
 			dur = 0          // a growing feed's duration is meaningless for the axis
 		}
 		v.vid = mpVid{cur: cur, dur: dur, paused: paused, started: true,
-			strURL: str.strURL, strMime: str.strMime, strT0: str.strT0, strAuto: str.strAuto}
+			strURL: str.strURL, strMime: str.strMime, strT0: str.strT0, strAuto: str.strAuto,
+			strLoop: str.strLoop}
 		// late-bind the video duration from the element when peaks couldn't provide one
 		for i := range v.media {
 			if v.media[i].kind == "video" && dur > v.media[i].dur+1 {

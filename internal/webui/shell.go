@@ -925,7 +925,9 @@ const runtimeJS = `(function(){
     for(var i=0;i<vids.length;i++){ if(!vids[i].__mst) __mstInit(vids[i]); }
   }
   function __mstInit(v){
-    var st={dead:0,q:[],bytes:0,url:v.getAttribute('data-msestream')}; v.__mst=st;
+    var st={dead:0,q:[],bytes:0,url:v.getAttribute('data-msestream'),
+            loop:v.getAttribute('data-msestream-loop')==='1'}; v.__mst=st;
+    if(st.loop) v.loop=true;   // whole IN→OUT span in one feed: element loops it, gapless
     if(!window.MediaSource){ __mseDbg('mst: no MediaSource'); return; }
     var mime=v.getAttribute('data-msestream-mime')||'video/mp4';
     if(!MediaSource.isTypeSupported(mime)){ __mseDbg('mst: unsupported '+mime); return; }
@@ -952,10 +954,14 @@ const runtimeJS = `(function(){
         st.rd=r.body.getReader(); st.pull();
       }).catch(function(e){ if(!st.dead) __mseDbg('mst: fetch '+(e&&e.message||'')); });
     });
+    v.addEventListener('playing',function(){ __vrate(v.id.replace('mp-vid-',''),true); });
     v.addEventListener('waiting',function(){
+      // underrun (render slower than realtime): freeze the interpolated playhead with
+      // the picture - it resumes on 'playing'. Playback is never cancelled, only late.
+      __vrate(v.id.replace('mp-vid-',''),false);
       // producer ended and playback caught up → ask Go to respawn the pipeline here
       // (never from a patched-out element - its stall is the handover, not a real drain)
-      if(st.eof&&!st.dead&&v.isConnected){ var host=v.id.replace('mp-vid-','');
+      if(st.eof&&!st.dead&&!st.loop&&v.isConnected){ var host=v.id.replace('mp-vid-','');
         send({act:'mp-vstall:'+host, val:''+v.currentTime}); }
     });
     v.__mstURL=URL.createObjectURL(ms);
@@ -965,8 +971,8 @@ const runtimeJS = `(function(){
     var st=v.__mst; if(!st||st.dead||!st.sb) return;
     if(!v.isConnected){ st.dead=1; if(st.ab){ try{st.ab.abort();}catch(e){} } return; }
     var sb=st.sb; if(sb.updating) return;
-    try{
-      if(v.buffered.length&&v.currentTime-v.buffered.start(0)>60){ sb.remove(0,v.currentTime-30); return; }
+    try{  // a loop segment must stay whole - trimming behind the playhead breaks the wrap
+      if(!st.loop&&v.buffered.length&&v.currentTime-v.buffered.start(0)>60){ sb.remove(0,v.currentTime-30); return; }
     }catch(e){}
     if(!st.q.length){
       if(st.eof&&!st.pulling&&st.ms.readyState==='open'){ try{ st.ms.endOfStream(); }catch(e){} }

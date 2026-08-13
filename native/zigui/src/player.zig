@@ -73,6 +73,7 @@ pub const Vid = struct {
     stream: []const u8 = "", // live /ms/ feed URL (realtime fx preview)
     streamMi: []const u8 = "",
     streamAu: bool = false,
+    streamLp: bool = false, // feed is the whole IN→OUT span: loop it natively
     grip: []const u8 = "", // "" = none; else the bottom-edge resize drag act
     boxH: []const u8 = "", // "" = CSS default; else the drag-set box height in px
 };
@@ -371,6 +372,7 @@ pub fn renderVid(h: *Html, s: Vid) !void {
         try h.attrQ(s.stream);
         try h.raw(" data-msestream-mime=");
         try h.attrQ(s.streamMi);
+        if (s.streamLp) try h.raw(" data-msestream-loop=1");
         if (s.streamAu) try h.raw(" autoplay");
     } else if (s.mse.len != 0) {
         try h.raw(" data-mse=");

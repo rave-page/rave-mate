@@ -49,9 +49,18 @@ the Publish tab, so nothing new to learn:
    detection behave exactly like Publish. The player's video shows the
    **selected reframe live**: crop layout plays the chosen aspect/zoom/pan
    slice, fit layout plays the original inside the target frame.
-   **Transport**: playback stops at the OUT marker (press play there to loop
-   from IN), *Stop* parks the playhead at IN, and *⇤ IN* moves the playhead
-   to IN without touching play/pause.
+   **Transport**: play/pause/stop act instantly - the picture and the playhead
+   move in the same frame. *Stop* parks the playhead at IN, *⇤ IN* moves the
+   playhead to IN without touching play/pause, and playback stops at the OUT
+   marker (press play there to loop from IN).
+   **Keys**: `Space` plays; pressing it again pauses AND returns the playhead
+   to where playback started. `Enter` pauses and leaves the playhead where it
+   is. (Both only while no text field has focus.)
+   **Looping**: with IN/OUT set up to 3 minutes apart, pressing *Stop* then
+   play renders that cut once and loops it **seamlessly** - no gap, no
+   re-render at the wrap. Longer cuts play through and stop at OUT.
+   **Preview size**: drag the bottom edge of the picture to resize it - handy
+   on a big screen. The size is remembered.
    **Tracklist navigation**: when the source is one of your set captures, the
    player carries the set's track markers - ⏮/⏭ step between tracks, the
    *Jump to track* menu seeks straight to any track, the waveform shows a tick
@@ -139,8 +148,11 @@ exactly as the export will look, sound included. Every add/remove/toggle,
 parameter move and reframe change re-renders the stream at the playhead
 (debounced). **Preview quality** caps the realtime render height (1080p-240p,
 default 540p) - drop it if preview playback stutters on a weaker machine; the
-export always renders at full target resolution. With an empty chain on the
-zoom-fill layout the player plays the source directly (instant, no pipeline).
+setting is remembered, and the export always renders at full target resolution.
+If a heavy chain renders slower than realtime the picture waits for it and
+continues - playback is never cancelled, and the playhead waits with it. With
+an empty chain on the zoom-fill layout the player plays the source directly
+(instant, no pipeline).
 
 Effects run in a separate helper process (`rave-mate-vfx`): a crashing plugin
 or shader can never take down rave-mate or a running export queue - the export

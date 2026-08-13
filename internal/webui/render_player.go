@@ -87,6 +87,7 @@ type mpVidSt struct {
 	Stream   string `json:"stream"`   // live /ms/ feed URL (realtime fx preview; replaces src/MSE)
 	StreamMi string `json:"streamMi"` // MSE mime for the feed
 	StreamAu bool   `json:"streamAu"` // autoplay the fresh feed
+	StreamLp bool   `json:"streamLp"` // feed is the whole IN→OUT span: loop it natively
 	Grip     string `json:"grip"`     // "" = none; else the act a bottom-edge resize drag reports to
 	BoxH     string `json:"boxH"`     // "" = CSS default; else the drag-set box height in px
 }
@@ -339,6 +340,7 @@ func (u *UI) mpVidState(t mpSt) mpVidSt {
 	st.OnErr = `if(!this.isConnected){return}window.rave(JSON.stringify({act:'mp-verr:` + t.host + `',val:''}))`
 	if t.vid.strURL != "" { // realtime preview: element plays the live feed (clock = strT0-relative)
 		st.Stream, st.StreamMi, st.StreamAu = t.vid.strURL, t.vid.strMime, t.vid.strAuto
+		st.StreamLp = t.vid.strLoop
 	}
 	switch {
 	case t.dual() && t.active == 0: // audio recording is the source - video is a silent preview
@@ -939,6 +941,9 @@ func mpVidHTMLOf(st mpVidSt) string {
 	}
 	if st.Stream != "" { // live realtime-preview feed (shell.go __mst runtime)
 		src = ` data-msestream=` + attrQ(st.Stream) + ` data-msestream-mime=` + attrQ(st.StreamMi)
+		if st.StreamLp {
+			src += ` data-msestream-loop=1`
+		}
 		if st.StreamAu {
 			src += ` autoplay`
 		}

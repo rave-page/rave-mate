@@ -337,8 +337,9 @@ func vfxRun(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 
 type vfxStreamIn struct {
 	Input      string    `json:"input"`
-	Output     string    `json:"output"` // growing fragmented-MP4 target
-	T          float64   `json:"t"`      // source-time start (seek)
+	Output     string    `json:"output"`      // growing fragmented-MP4 target
+	T          float64   `json:"t"`           // source-time start (seek)
+	D          float64   `json:"d,omitempty"` // span in seconds (0 = open-ended to EOF)
 	VF         string    `json:"vf,omitempty"`
 	DecodePost string    `json:"decodePost,omitempty"`
 	Fit        bool      `json:"fit,omitempty"`
@@ -383,11 +384,19 @@ func vfxStream(params json.RawMessage, emit EmitFunc) (json.RawMessage, error) {
 	}
 
 	job := transcode.Job{Input: in.Input, Output: in.Output, TrimStart: in.T, VF: in.VF}
+	// A bounded span (loop preview) renders flat out: it must be COMPLETE before
+	// playback reaches its end, else the loop can't be seamless. Open-ended feeds
+	// stay -re paced so they don't race through the rest of a 60-min source.
+	decArgs := job.DecodeRawArgsRT(in.Chain.W, in.Chain.H, in.Chain.FPS, in.DecodePost)
+	if in.D > 0 {
+		job.TrimEnd = in.T + in.D
+		decArgs = job.DecodeRawArgsPost(in.Chain.W, in.Chain.H, in.Chain.FPS, in.DecodePost)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
 	defer cancel()
 
-	dec := exec.CommandContext(ctx, bin, job.DecodeRawArgsRT(in.Chain.W, in.Chain.H, in.Chain.FPS, in.DecodePost)...)
+	dec := exec.CommandContext(ctx, bin, decArgs...)
 	fx := exec.CommandContext(ctx, exe, "--pipe", chainPath)
 	enc := exec.CommandContext(ctx, bin, job.EncodeStreamArgs(in.Chain.W, in.Chain.H, in.Chain.FPS, in.Fit)...)
 	for _, c := range []*exec.Cmd{dec, fx, enc} {

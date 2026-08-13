@@ -11,6 +11,7 @@ package webui
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,6 +28,11 @@ import (
 // edvPrevDefaultH is the default preview render-height cap (the quality selector
 // trades sharpness for realtime headroom on weaker machines).
 const edvPrevDefaultH = 540
+
+// edvLoopMaxSec caps the IN→OUT span the preview renders as ONE bounded segment the
+// element then loops natively (seamless, no respawn). Longer cuts keep the open-ended
+// feed: the whole span has to stay in the MSE buffer for the loop to be gapless.
+const edvLoopMaxSec = 180
 
 func init() {
 	mpStreamCtl = func(u *UI, host, verb string, t float64) bool {
@@ -182,6 +188,8 @@ func (u *UI) edvPrevKick() {
 		at := mp.vid.cur
 		if mp.vid.strURL == "" { // entering stream mode: keep the direct element's position
 			at = u.edvPlayhead()
+		} else if mp.vid.strLoop { // stay a loop: re-render the whole span from IN
+			at = mp.inSec
 		}
 		u.edvPrevStart(at, mp.vid.started && !mp.vid.paused)
 	})
@@ -263,9 +271,20 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		editor.mu.Unlock()
 	}
 
+	// Loop segment: starting AT the IN marker with a short enough cut renders exactly
+	// [IN,OUT] once; the element then loops that fully-buffered segment natively -
+	// seamless, no respawn at the loop point, no pipeline running forever.
+	mp := u.mpSnap("editor")
+	span := 0.0
+	if mp.outSec > mp.inSec && math.Abs(t-mp.inSec) < 0.25 {
+		if s := mp.outSec - mp.inSec; s <= edvLoopMaxSec {
+			span = s
+		}
+	}
+
 	done := make(chan struct{})
 	params := map[string]any{
-		"input": proj.Source, "output": path, "t": t, "vf": vf,
+		"input": proj.Source, "output": path, "t": t, "d": span, "vf": vf,
 		"fit": fit, "decodePost": post,
 		"chain": vfx.Chain{W: pw, H: ph, FPS: 30, Fx: fx},
 	}
@@ -303,13 +322,14 @@ func (u *UI) edvPrevStart(t float64, autoplay bool) {
 		editor.mu.Lock()
 		editor.video.prevRelease = release
 		editor.mu.Unlock()
-		mp := u.mpMut("editor", func(v *mpSt) {
+		st := u.mpMut("editor", func(v *mpSt) {
 			v.vid.strURL, v.vid.strMime, v.vid.strT0, v.vid.strAuto = url, transcode.StreamMime, t, autoplay
+			v.vid.strLoop = span > 0
 			v.vid.cur, v.vid.paused, v.vid.started = t, !autoplay, true
 		})
-		u.mpPatchVideo(mp)
-		u.mpPatchTransport(mp)
-		u.mpPushRealtime(mp)
+		u.mpPatchVideo(st)
+		u.mpPatchTransport(st)
+		u.mpPushRealtime(st)
 		retire()      // fresh feed is live - now drop the superseded pipeline + its token
 		u.bg(func() { // sweep retired segment files once their handlers have drained
 			time.Sleep(3 * time.Second)
