@@ -506,7 +506,8 @@ pub const Shell = struct {
     init_h: i32,
     start_hidden: bool,
     allow_gpu: bool,
-    /// visual_hosting: composition hosting was ASKED for. Cleared the moment any step of the
+    /// visual_hosting: composition hosting is in force. Never cleared at runtime - a failure is
+    /// fatal (visualFatal), not a downgrade. Historically this was cleared the moment any step of the
     /// bring-up fails, which is also the switch every input/bounds path reads - so a failed
     /// composition attempt leaves a plain windowed shell, never half of each.
     visual_hosting: bool,
@@ -731,8 +732,7 @@ fn windowThread(sh: *Shell) void {
     // Visual hosting has no widget child at all - WebView2 renders into a DComp visual and every
     // mouse message lands on the top-level wndproc, which is what forwards it.
     if (sh.visual_hosting and !buildVisualTree(sh, hwnd)) {
-        wire.errLine("rave-shell: DirectComposition bring-up failed - falling back to windowed hosting");
-        sh.visual_hosting = false;
+        visualFatal(sh, "rave-shell: DirectComposition bring-up failed");
     }
     if (!sh.visual_hosting and createWidgetWindow(sh, hwnd) == 0) {
         wire.errLine("rave-shell: widget CreateWindowExW failed");
@@ -968,53 +968,39 @@ fn envInvoke(_: *anyopaque, hr_or_env: usize, env_ptr: usize) callconv(.winapi) 
     _ = env.vtbl.AddRef(@ptrCast(env));
     sh.env = env; // the windowed fallback re-enters through this same environment
     if (sh.visual_hosting and startComposition(sh, env)) return 0;
+    wire.errLine("rave-shell: windowed hosting (explicit opt-out via features.ui.shellHosting)");
     _ = env.vtbl.CreateCoreWebView2Controller(@ptrCast(env), sh.widget.load(.acquire), @ptrCast(&ctrl_handler));
     return 0;
 }
 
-/// startComposition asks for a composition controller. false = this runtime cannot do visual
-/// hosting AND the windowed prerequisites are back in place, so the caller just proceeds windowed.
+/// startComposition asks for a composition controller. It either succeeds or the process dies -
+/// see visualFatal. Returns true so the caller can keep reading as a guard.
 fn startComposition(sh: *Shell, env: *Environment) bool {
     const e3any = comQI(@ptrCast(env), &iid_environment3) orelse {
-        prepareWindowedFallback(sh, "rave-shell: WebView2 runtime has no ICoreWebView2Environment3 - windowed hosting");
-        return false;
+        visualFatal(sh, "rave-shell: WebView2 runtime has no ICoreWebView2Environment3");
     };
     defer comRelease(e3any);
     const e3: *Environment3 = @ptrCast(@alignCast(e3any));
     // Parent HWND is the TOP-LEVEL window: it is what keyboard/IME/accessibility ride on, and in
     // visual hosting no child window is created for the content.
     if (e3.v.CreateCoreWebView2CompositionController(e3any, sh.hwnd.load(.acquire), @ptrCast(&comp_handler)) < 0) {
-        prepareWindowedFallback(sh, "rave-shell: CreateCoreWebView2CompositionController failed - windowed hosting");
-        return false;
+        visualFatal(sh, "rave-shell: CreateCoreWebView2CompositionController failed");
     }
     return true;
 }
 
-/// prepareWindowedFallback drops every trace of the composition attempt and guarantees the widget
-/// the windowed controller needs. A broken flag must never leave the user with no UI.
-fn prepareWindowedFallback(sh: *Shell, msg: []const u8) void {
+/// visualFatal kills the process on any composition-hosting failure. Owner directive: NO silent
+/// fallback. A failsafe that quietly drops to windowed hosting hides the breakage for weeks (the
+/// stale embedded rave-shell.exe did exactly that), so visual hosting fails LOUD and the operator
+/// either fixes it or opts out explicitly with features.ui.shellHosting = "windowed".
+fn visualFatal(sh: *Shell, msg: []const u8) noreturn {
     wire.errLine(msg);
-    sh.visual_hosting = false;
+    wire.errLine("rave-shell: FATAL - visual hosting was requested and could not be established. " ++
+        "Set features.ui.shellHosting = \"windowed\" to opt out deliberately.");
     abandonComposition(sh);
     releaseVisualTree(sh);
-    const hwnd = sh.hwnd.load(.acquire);
-    if (sh.widget.load(.acquire) == 0 and createWidgetWindow(sh, hwnd) == 0) {
-        wire.errLine("rave-shell: widget CreateWindowExW failed on fallback");
-        sh.em.event("gone", wire.Empty{});
-        ExitProcess(1);
-    }
-}
-
-/// fallbackWindowed is prepareWindowedFallback plus the retry, for failures that land AFTER the
-/// composition controller was requested (its completion handler is the only caller).
-fn fallbackWindowed(sh: *Shell, msg: []const u8) void {
-    prepareWindowedFallback(sh, msg);
-    const env = sh.env orelse {
-        wire.errLine("rave-shell: no environment to fall back with");
-        sh.em.event("gone", wire.Empty{});
-        ExitProcess(1);
-    };
-    _ = env.vtbl.CreateCoreWebView2Controller(@ptrCast(env), sh.widget.load(.acquire), @ptrCast(&ctrl_handler));
+    sh.em.event("gone", wire.Empty{});
+    ExitProcess(2);
 }
 
 fn abandonComposition(sh: *Shell) void {
@@ -1034,7 +1020,7 @@ fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult
     const sh = g orelse return 0;
     const hr: HResult = @bitCast(@as(u32, @truncate(hr_or)));
     if (hr < 0 or ptr == 0) {
-        fallbackWindowed(sh, "rave-shell: composition controller creation failed - windowed hosting");
+        visualFatal(sh, "rave-shell: composition controller creation failed");
         return 0;
     }
     const any: *anyopaque = @ptrFromInt(ptr);
@@ -1044,13 +1030,13 @@ fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult
     sh.comp = comp;
 
     const webvis = sh.dcomp_web orelse {
-        fallbackWindowed(sh, "rave-shell: no composition visual - windowed hosting");
+        visualFatal(sh, "rave-shell: no composition visual");
         return 0;
     };
     // "WebView will connect its visual tree to the provided visual before returning from the
     // property setter. The app needs to commit on its device." (MS, ICoreWebView2CompositionController)
     if (comp.v.put_RootVisualTarget(any, @ptrCast(webvis)) < 0) {
-        fallbackWindowed(sh, "rave-shell: put_RootVisualTarget failed - windowed hosting");
+        visualFatal(sh, "rave-shell: put_RootVisualTarget failed");
         return 0;
     }
     if (sh.dcomp) |dc| _ = dc.v.Commit(@ptrCast(dc));
@@ -1058,7 +1044,7 @@ fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult
     // Sizing/visibility/focus still come from ICoreWebView2Controller (§3.2), which the composition
     // controller QIs to; Controller2 is the same object one interface up and answers the same slots.
     const ctrl_any = comQI(any, &iid_controller) orelse comQI(any, &iid_controller2) orelse {
-        fallbackWindowed(sh, "rave-shell: composition controller has no ICoreWebView2Controller - windowed hosting");
+        visualFatal(sh, "rave-shell: composition controller has no ICoreWebView2Controller");
         return 0;
     };
     sh.controller = @ptrCast(@alignCast(ctrl_any));
@@ -1066,6 +1052,8 @@ fn compInvoke(_: *anyopaque, hr_or: usize, ptr: usize) callconv(.winapi) HResult
     var tok: EventRegistrationToken = .{ .value = 0 };
     _ = comp.v.add_CursorChanged(any, @ptrCast(&cursor_handler), &tok); // the cursor is the app's now
     applyRasterizationScale(sh);
+    // Say which host is live. Silence is how the stale-child bug hid for weeks; both modes announce.
+    wire.errLine("rave-shell: visual hosting ACTIVE (DirectComposition)");
     return setupWebView(sh);
 }
 

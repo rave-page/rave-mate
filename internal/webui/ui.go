@@ -152,7 +152,8 @@ func New(svc ui.Services) *UI {
 		logBus: "app", logLevel: "all", logAutoscroll: true, evalKick: make(chan struct{}, 1)}
 	if svc.Cfg != nil {
 		webviewAllowGPU = svc.Cfg.Features.UI.AllowWebviewGPU()
-		if svc.Cfg.Features.UI.VisualShellHosting() {
+		webviewShellHosting = "windowed"
+		if svc.Cfg.Features.UI.VisualShellHosting() { // default; only an explicit "windowed" opts out
 			webviewShellHosting = "visual"
 		}
 	}

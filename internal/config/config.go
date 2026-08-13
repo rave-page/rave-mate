@@ -2374,18 +2374,18 @@ type UIFeature struct {
 	// loud log, so an install that never received the exe still gets the previous behaviour.
 	ShellImpl string `json:"shellImpl,omitempty"`
 	// ShellHosting selects how the Zig shell hosts WebView2 (SDL_WEBVIEW_SURFACE_DESIGN P1).
-	// ""|"windowed" (DEFAULT) = CreateCoreWebView2Controller on a child HWND, today's behaviour;
-	// "visual" = CreateCoreWebView2CompositionController into a DirectComposition visual tree, the
-	// prerequisite for native render surfaces UNDER the page. Visual hosting makes the shell forward
-	// all spatial input itself, so it stays opt-in until soaked; any failure in its bring-up falls
-	// back to windowed at runtime. Ignored by the Go/cgo window hosts.
+	// ""|"visual" (DEFAULT) = CreateCoreWebView2CompositionController into a DirectComposition
+	// visual tree - the hosting native render surfaces need, and the shell forwards all spatial
+	// input itself. "windowed" = the legacy CreateCoreWebView2Controller child HWND, an EXPLICIT
+	// opt-out only. There is deliberately no automatic downgrade: a failed visual bring-up kills
+	// the shell child loudly rather than hiding behind a failsafe for months.
 	ShellHosting string `json:"shellHosting,omitempty"`
 }
 
-// VisualShellHosting reports composition (DirectComposition) hosting was asked for. Anything but an
-// explicit "visual" = windowed, so an unset/garbage value keeps the shipped behaviour.
+// VisualShellHosting reports composition (DirectComposition) hosting. Default ON - only an explicit
+// "windowed" opts out, so a typo'd value fails loud in the shell instead of silently degrading.
 func (u UIFeature) VisualShellHosting() bool {
-	return strings.EqualFold(strings.TrimSpace(u.ShellHosting), "visual")
+	return !strings.EqualFold(strings.TrimSpace(u.ShellHosting), "windowed")
 }
 
 // ZigShell reports the Zig window-child exe is wanted. Empty/absent = yes (the default); only an
