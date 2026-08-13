@@ -17,6 +17,11 @@ const (
 	syncMaxAge     = 60 * time.Second // samples older than this age out
 	syncLockMin    = 3                // qualifying samples needed to declare lock
 	syncStaleAfter = 30 * time.Second // freshest sample older than this → lock lost (holdover)
+	// Floor under the disqualification baseline. The 2×-min rule assumes the minimum is a real
+	// network floor; on loopback / same-host peers it can be sub-microsecond scheduling noise,
+	// and then EVERY other sample reads as "queueing-delayed" and the clock never locks (a CI
+	// runner reproduced exactly that). Below this, jitter - not the path - dominates.
+	syncMinRTTFloor = 250 * time.Microsecond
 )
 
 type offsetSample struct {
@@ -86,6 +91,9 @@ func (e *OffsetEstimator) Estimate(now time.Time) (SyncEstimate, bool) {
 		if s.rtt < minRTT {
 			minRTT = s.rtt
 		}
+	}
+	if minRTT < int64(syncMinRTTFloor) {
+		minRTT = int64(syncMinRTTFloor)
 	}
 	var (
 		best               offsetSample

@@ -43,6 +43,33 @@ func TestOffsetEstimatorFilter(t *testing.T) {
 	}
 }
 
+// TestOffsetEstimatorSubMicroFloor: on a loopback/same-host peer the min RTT is scheduling
+// noise, not a path floor. Without syncMinRTTFloor a 300ns minimum disqualifies every other
+// sample as "queueing-delayed" and the clock never locks (observed as a CI flake in
+// crewlink's TestClockRestampUnderSkew).
+func TestOffsetEstimatorSubMicroFloor(t *testing.T) {
+	var e OffsetEstimator
+	now := time.Now()
+	e.Add(100_000, 300, now)     // 300ns "min"
+	e.Add(101_000, 40_000, now)  // 40µs - 100× the min, still far under the floor
+	e.Add(102_000, 120_000, now) // 120µs
+	est, ok := e.Estimate(now)
+	if !ok {
+		t.Fatal("estimate missing")
+	}
+	if !est.Locked {
+		t.Fatalf("sub-floor jitter must not disqualify: %+v", est)
+	}
+	// Above the floor the 2×-min rule still bites.
+	var e2 OffsetEstimator
+	e2.Add(100_000, 1_000_000, now)
+	e2.Add(101_000, 5_000_000, now)
+	e2.Add(102_000, 6_000_000, now)
+	if est2, _ := e2.Estimate(now); est2.Locked {
+		t.Fatalf("queueing-delayed samples must still be disqualified: %+v", est2)
+	}
+}
+
 // TestOffsetEstimatorAging: samples beyond syncMaxAge fall out; stale lock degrades to holdover.
 func TestOffsetEstimatorAging(t *testing.T) {
 	var e OffsetEstimator
