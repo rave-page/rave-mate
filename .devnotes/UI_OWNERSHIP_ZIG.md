@@ -49,6 +49,20 @@ renderer deleted.
 2. **Runtime JS moves to Zig.** `shell.go`'s `runtimeJS` const → `native/zigui/src/shell/runtime/`
    (one file per block: transport, patch, rt, mse/mst, surfaces, ctl introspection). Go stops
    emitting view transport. Gate: `ctl snapshot/click/type/read/set` parity + the screenshot sweep.
+
+   Mechanics, traced (do not re-derive):
+   - Today the DAEMON owns the bytes and ships them: `shell_proc.go:154` puts `runtimeJS` in the
+     PSH1 init → child `shell_proc_child.go:52` refuses to start without it → `webviewInitJS`
+     (`shell_select.go:68`) → Zig `boot_js` = binding shim + those bytes →
+     `AddScriptToExecuteOnDocumentCreated` (`winshell.zig:754`). The comments there deliberately
+     forbid a local copy, because today Go is the source of truth.
+   - After the move that inverts: the runtime files are `@embedFile`d by BOTH Zig artifacts (the
+     `rave-shell.exe` child and `libraveui.a`), the child stops reading `ini.RuntimeJS`, and the
+     Zig lib EXPORTS the bytes (`rz_ui_runtime_js`) for the two Go consumers that genuinely need
+     them: the in-proc cgo shell path (`newNativeShell`) and the mirrored library page
+     (`library_mirror.go:296`).
+   - The existing byte-contract test (`shell_proc_test.go:429`) flips meaning rather than dying:
+     it asserts Go's view of the runtime == the Zig export, so drift still cannot happen silently.
 3. **State resolution moves per view, newest-first.** For each view: port its `*State()` builder
    into its `.zig` module, feed it the raw data over the wire instead of a resolved view struct,
    delete the Go renderer + its golden test once byte-parity is proven against the previous build's
